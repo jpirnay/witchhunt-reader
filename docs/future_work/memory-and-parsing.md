@@ -16,6 +16,18 @@ The rules and measurements these items refer to are in [Memory Allocation Strate
 
 **Next step.** Add a fixture with a nested table to `test/epubs` (a `make_test_*.py` generator, like the others) whose golden shows the inner words, then route `depth > 1` text into the degraded outer table's paragraph stream and walk through each `depth` branch.
 
+## Class and id selectors ignore case
+
+**Open.** `CssParser` lowercases both sides of every class and id lookup: selector keys through `normalizedInto()` when a stylesheet is parsed, class attributes in `forEachNormalizedClassToken()`, and ids in `resolveStyle()` and `backgroundImageFor()`. A rule therefore reaches any element whose class or id differs only in case. XHTML class and id names are case-sensitive, and Kindle, ADE and Readest match them that way.
+
+**Why it matters.** It styles text the book did not style. In *The Anarchy* the paragraph rule `.Dial` (display:block, 0.75em, a hanging indent) also lands on `<span class="dial">`, the speaker name in each dialogue line: the names print at about 56 % size and, since #393 made a `display:block` span open a block, on a line of their own. A survey of 109 books found three that collide (`Dial`/`dial`, `TOC`/`toc`) and none that matches a rule only through the lowercasing.
+
+**Where.** `lib/Epub/Epub/css/CssParser.cpp` (the functions above). `CssGapsIdSelector.CaseNormalized` in `test/css_gaps` pins it for ids today.
+
+**Tried.** PR #394 (branch `fix/css-class-case-sensitive`), stacked on #393 and not merged: only the tag part of a selector is lowercased, the name after `.` or `#` stays as written in the rule cache, the background-picture side file and the lookups; `CaseNormalized` and the `HERO` probe in `test/epub_css/CssParserCacheTest.cpp` become case-sensitive pins; `CSS_CACHE_VERSION` 21 → 22 and `SECTION_FILE_VERSION` 79 → 80.
+
+**Next step.** Rebase the branch onto master. `CSS_CACHE_VERSION` is still 21 there, but `SECTION_FILE_VERSION` is 81, so the section bump becomes 81 → 82. Re-run the corpus comparison, then merge.
+
 ## No hint when a chapter was simplified
 
 **Open.** When a fixed capacity changes what a chapter shows (footnotes per page, anchors per chapter, page elements, nesting depth), `ChapterHtmlSlimParser::noteCapOverflow` logs it and the section stores `kStatusSimplified`. The reader only logs "cached simplified" on a cache hit (`EpubReaderActivity`, section load); the reader sees less than the book contains and is not told.

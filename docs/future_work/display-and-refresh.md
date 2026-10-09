@@ -11,7 +11,8 @@ framebuffer holds, and where each controller keeps its previous frame).
 `Ssd1677Driver::cleanupGrayscaleBuffers()` restore controller RAM to the B/W page and report a clean
 sync, while the glass still holds grey at every AA edge. UC8253 had the same gap and it caused the X3
 sleep-cover ghost; it now tracks the state as `_grayOnGlass`. UC8179 and UC8279 X4 track it as
-`_redriveAfterGray`.
+`_redriveAfterGray`. SSD1677 tracks it after a factory (absolute) pass only: `displayGray()` sets
+`_needsGrayClear`, which promotes the next FAST; the external-LUT (overlay) pass sets nothing.
 
 **Why it matters.** A differential push after an AA page gives those grey pixels the gentle
 white-to-white cell. On UC8253 that left the page's text outline on the sleep cover.
@@ -42,8 +43,9 @@ the observed symptom, so none has device evidence yet.
 **Lesson.** The first fix was chosen from a story, not from a test that separates causes, and it
 changed nothing. Re-audit each defect against its own trigger before re-landing it.
 
-**Where the written fixes are.** Only as unreachable commits: firmware `c17d939ab`, SDK `96f031d` (D1)
-and `08222e1` (D5). No branch holds them, so `git gc` will eventually drop them.
+**Where the written fixes are.** Only as unreachable commits: firmware `c17d939ab` (a docs commit;
+the fixes are its ancestors `a6276195f` D2, `1989118a6` D5, `195bcd5d4` D3 and `d2ddab827` D4), SDK
+`96f031d` (D1) and `08222e1` (D5). No branch holds them, so `git gc` will eventually drop them.
 
 **Next.** Tag the commits if the code is wanted; otherwise rewrite from the descriptions below.
 
@@ -67,9 +69,10 @@ available. Reverted with the rest.
 
 **Open.** `ActivityManager::goToSleep()` replaces the activity and pumps `loop()` without the
 `syncWriteBufferFromDisplayed()` + `prepareFramebufferForCapture()` pair that
-`dispatchLightPanelGesture()` and the screenshot path in `main.cpp` run.
-`SleepActivity::renderOverlaySleepScreen()` and `renderLastScreenSleepScreen()` then draw onto whatever
-the write buffer holds.
+`dispatchLightPanelGesture()` runs. `SleepActivity::renderOverlaySleepScreen()` and
+`renderLastScreenSleepScreen()` then draw onto whatever the write buffer holds. From an EPUB, the
+replace runs `EpubReaderActivity::onExit()`, which calls `restoreCurrentPageToBufferIfPreRendered()`,
+so there only the sync half is missing.
 
 **Narrowed.** With AA on it is correct: every completed or aborted AA pass ends in
 `cleanupGrayscaleWithPreviousBuffer()`, which copies the displayed frame into the write buffer (X3,
@@ -113,9 +116,17 @@ Re-land only if one exists.
 ## Framebuffer contract: one routine and one hook
 
 **Open.** The rule "before drawing on top of the panel, the write buffer must hold what the panel
-shows" lives at each call site as its own `syncWriteBufferFromDisplayed()` +
-`prepareFramebufferForCapture()` pair (`ActivityManager::dispatchLightPanelGesture()`, the screenshot
-path, and every `overlayDisplayedFrame` popup).
+shows" lives at each call site, and each does it differently:
+- `ActivityManager::dispatchLightPanelGesture()` runs `syncWriteBufferFromDisplayed()` and then
+  `prepareFramebufferForCapture()`. Its comment says the screenshot path does the same; it does not.
+- The POWER+DOWN screenshot path in `main.cpp` runs only `prepareFramebufferForCapture()`, so
+  outside the reader's pre-render case it saves whatever the write buffer holds (see D2). The serial
+  `CMD:SCREENSHOT` path runs neither.
+- The `overlayDisplayedFrame` popups (`BaseTheme::drawPopup()`, `drawBusyIndicator()`,
+  `LyraTheme::drawPopup()`) run only the sync, as do the screens that call
+  `syncWriteBufferFromDisplayed()` themselves (Home, the file browser, book info, the sleep cover,
+  the font selector, the frontlight panel, dictionary word select, the reader shell, and the forced
+  refresh in `main.cpp`).
 
 **Agreed design, not scheduled.**
 1. `Activity::ensureWriteBufferShowsPanel()` plus an `ActivityManager` delegate: run the two steps in
@@ -152,10 +163,12 @@ and UC8279 X4 set `_needFullClear`, UC8279d sets `_forceFullSyncNext`, SSD1677 l
 2. what the secondary holds: the panel, an unproven seed (after a return or realloc), lent
    (`_secondaryLent`, private) or released;
 3. whether the glass carries grey the B/W baseline does not describe: per driver and private
-   (`_grayOnGlass`, `_redriveAfterGray`), absent on UC8279d and SSD1677.
+   (`_grayOnGlass`, `_redriveAfterGray`, SSD1677's `_needsGrayClear` after an absolute pass only),
+   absent on UC8279d.
 
-**Why it matters.** `ActivityManager::showBusyIndicator()` skips whenever the secondary is away, because
-`hasSecondaryBuffer()` cannot tell a borrow from a release. A consumer about to push a differential after
+**Why it matters.** `ActivityManager::showBusyIndicator()` skips whenever the secondary is away (unless
+something earlier in the tick already prepared the write buffer), because `hasSecondaryBuffer()` cannot
+tell a borrow from a release. A consumer about to push a differential after
 a grey page (sleep cover, Home after the reader, a T5S3 FAST) cannot ask about state 3.
 
 **Not a design yet.** States 1 and 2 are host-side and cheap. State 3 decides the refresh mode and
@@ -275,18 +288,20 @@ orientations.
 
 **Open.** `CrossPointSettings::fastAntiAliasing` (offered on every non-SSD1677 panel, see
 `hasSelectableGrayscaleLut()`) reaches `FreeInkDisplay::setFastGrayscaleLut()`, which only stores the
-flag. No driver reads it: `Uc8253X3Driver` carries a single `gc` nudge bank, and
-`HalDisplay::displayGrayBuffer()` passes no LUT. The comment above the setting in `SettingsList.h`
-still promises a choice between ~2.4 s and ~130 ms.
+flag. No driver reads it: `Uc8253X3Driver` carries a `gc` nudge bank and a `directGray` bank (for
+`GrayscaleMode::Direct`), neither chosen by the flag, and `HalDisplay::displayGrayBuffer()` passes no
+LUT. The comment above the setting in `SettingsList.h` still promises a choice between ~2.4 s and
+~130 ms, and so do the comments at `CrossPointSettings::fastAntiAliasing` ("2.2 s/page"),
+`GfxRenderer::setFastGrayscaleLut()` and `HalDisplay::setFastGrayscaleLut()` (53- against 7-frame LUT).
 
 **Next.** Either give the X3 driver a second grayscale bank selected by the flag, or remove the setting
-and its comment.
+and those comments.
 
 ## X3 and the pre-render heap floor
 
 **Likely resolved: confirm, then delete this item.** On 2026-09-23 Background A (next-page
 pre-render) did not run on the X3 (UC8253, AA on, 17 turns). Free heap after each AA pass was
-~42.9 KB, and every page logged `PreRender skipped: free < floor=45056`.
+~42.9 KB, and every page logged `PreRender skipped: free=… < floor=45056`.
 `PRE_RENDER_MIN_FREE_HEAP_BYTES` (44 KB) was derived on 2026-08-02 (commit `6f097ad77`), when the X3
 entered the pass at 53-55 KB free.
 
@@ -299,16 +314,22 @@ pre-rendered. What brought the retained baseline back down was not identified.
 **Ruled out.** Lowering the floor. It is derived from what the pass consumes (~23 KB transient), and
 the pass must stay clear of the reserve the sliced section build needs.
 
-**Next.** Watch `Reader mem[prerender_begin]` and `PreRender skipped: free < floor` across a few
-books and a longer session. If no page skips for the floor, delete this item. If it recurs, find
+**Next.** Watch `Reader mem[prerender_begin]` and `PreRender skipped: free=… < floor=…` (a debug
+line in `renderPreRenderPass()`) across a few books and a longer session. The re-arm in
+`stepBackgroundSectionBuild()` checks the floor too but logs only through
+`HEAP_GATE("preRenderArm", …)`, which is compiled out unless `HEAP_GATE_TRACE=1`; build with it, or a
+re-arm the floor refuses goes unseen. If no page skips for the floor, delete this item. If it recurs, find
 what grew: bisect from `6f097ad77` on one book, using the `Reader mem[...] ... allocBytes=` line in
 `EpubReaderActivity` as the metric.
 
 ## Pre-render before the deferred AA pass
 
-**Open.** `EpubReaderActivity::serviceBackgroundWork()` runs the deferred AA pass first and re-arms
-Background A only after it, because the planes and a pre-rendered page compete for heap. A quick turn
-inside the AA window pays a full render. Measured on a T5S3 on 2026-08-17, when it still deferred AA:
+**Open.** `EpubReaderActivity::serviceBackgroundWork()` runs the deferred AA pass first. Background A
+is armed by `renderContents()`, but on a deferred-AA panel its pass is held back while the AA is owed
+(`PreRender deferred: AA owed` in `render()`) and re-requested when the AA has run. The AA's cleanup
+(`cleanupGrayscaleWithPreviousBuffer()`) copies the current page back over the write buffer, which
+would wipe a pre-rendered next page, and a render requested while AA is owed makes
+`aaPreemptedByNavigation()` abort the AA. A quick turn inside the AA window pays a full render. Measured on a T5S3 on 2026-08-17, when it still deferred AA:
 AA ~605 ms (planes 80 + gray 473 + restore 52), pre-render ~53 ms; 2 of 6 quick turns found a
 pre-rendered page.
 
@@ -323,10 +344,11 @@ heap check and a device test, not an inference from one log.
 ## Pre-render across a chapter boundary
 
 **Open.** Background A never crosses a section. `EpubReaderActivity::renderPreRenderPass()` skips when
-`nextPage >= availablePages`. All four arming sites require `currentPage + 1 < pageCount`:
-`renderContents()`, `renderBufferDisplayPass()`, the re-arm in `stepBackgroundSectionBuild()`, and the
-image lane's re-arm in `warmPageForImageLane()`. So the first page of every chapter renders fresh,
-including a chapter-opening illustration.
+`nextPage >= availablePages`. All four arming sites need a next page in the current section:
+`renderContents()`, `renderBufferDisplayPass()` and the re-arm in `stepBackgroundSectionBuild()` test
+`currentPage + 1 < pageCount`, and the image lane's re-arm in `warmPageForImageLane()` (#406) arms
+only for page `currentPage + 1` of the current spine. So the first page of every chapter renders
+fresh, including a chapter-opening illustration.
 
 **Why it matters.** X4, 2026-10-08, turn into a chapter whose first page has a cached image:
 
