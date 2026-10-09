@@ -166,7 +166,8 @@ class Epub {
   // `scratch`: as for loadForCover(). The OPF inflate ring is up to 32 KB of contiguous memory, which
   // a screen holding both framebuffers may not have -- seen as "Failed to init inflate reader" on an
   // X3 with 39 KB contiguous and a 350 KB OPF.
-  bool loadForMetadata(BuildArena* scratch = nullptr);
+  // useBookBin = false skips book.bin and always parses the OPF: book.bin keeps no primary author.
+  bool loadForMetadata(BuildArena* scratch = nullptr, bool useBookBin = true);
 
   // True when opening the book will trigger the (multi-second) first-open index
   // build inside load(): the spine/TOC cache (book.bin) or the compiled CSS rules
@@ -182,11 +183,6 @@ class Epub {
   // load(true, ...), for metadata, and must not re-index on the way.
   void setLostTocRetryEnabled(bool enabled) { lostTocRetryEnabled_ = enabled; }
 
-  // Path of the Calibre-style metadata sidecar for a book ("/Books/x.epub" ->
-  // "/Books/x.opf"), or "" when there is none. Mirrors
-  // ReaderActivity::sidecarCoverPath, and the same rule applies: a file beside
-  // the book wins over what is embedded in it.
-  static std::string metadataSidecarPath(const std::string& bookPath);
   // Sidecars above this are treated as not-a-metadata-file and ignored. A
   // Calibre metadata OPF is a couple of KB; the cap stops a stray large file
   // sharing the book's basename from being read into the heap.
@@ -208,6 +204,8 @@ class Epub {
   const std::string& getPath() const;
   const std::string& getTitle() const;
   const std::string& getAuthor() const;
+  const std::string& getPrimaryAuthor() const;
+  const std::string& getAuthorSort() const;
   const std::string& getLanguage() const;
   const std::string& getSeries() const;
   const std::string& getSeriesIndex() const;

@@ -1,10 +1,12 @@
-// Metadata Editor - edits a book's title, author, language, series, series
-// index and description, and saves them to a "book.opf" sidecar.
+// Metadata Editor - edits a book's title, author (and how it sorts), language,
+// series, series index and description, and saves them to a "book.opf" sidecar.
 //
-// It never rewrites the EPUB. The firmware prefers a sidecar over the metadata
+// It never rewrites the book. The firmware prefers a sidecar over the metadata
 // embedded in the book (docs/sidecar-files.md), so writing one is enough to
-// change what the reader displays - without a multi-megabyte round trip, without
+// change what the device displays - without a multi-megabyte round trip, without
 // any risk of corrupting the book, and reversible by deleting one small file.
+// That holds for every format the reader opens: an EPUB, an XTC, and TXT and
+// Markdown books, which have no metadata of their own and get it only this way.
 //
 // An existing sidecar is edited in place as XML rather than regenerated, so
 // everything this editor does not manage - publisher, identifiers, dates, the
@@ -12,18 +14,28 @@
 // sidecar at all is a fresh minimal one created.
 //
 // Reading order matches the firmware's: an existing book.opf wins; otherwise
-// the book's own OPF is read via JSZip, which costs a full download.
+// an EPUB's own OPF is read via JSZip, which costs a full download. Other
+// formats start from an empty form: an XTC's header is binary and not read
+// here, and TXT/Markdown carry nothing.
 //
 // Everything is inside this closure: plugins share the page's global scope.
 CrossPoint.registerPlugin((container, api) => {
   const DC_NS = 'http://purl.org/dc/elements/1.1/';
   const OPF_NS = 'http://www.idpf.org/2007/opf';
 
+  // The formats the reader opens. Must stay in step with the firmware's
+  // FsHelpers::hasEpubExtension / hasXtcExtension / hasTxtExtension /
+  // hasMarkdownExtension: /api/files reports isEpub and nothing more.
+  const BOOK_EXTS = ['.epub', '.xtc', '.xtch', '.txt', '.md'];
+
   // name -> how it is stored in an OPF. "dc" elements carry their value as text;
-  // "meta" fields are Calibre's <meta name=... content=.../> form.
+  // "meta" fields are Calibre's <meta name=... content=.../> form; "fileAs" is
+  // the opf:file-as attribute of the author's dc:creator, which the Library
+  // orders authors by. It must come after the author: it lives on that element.
   const FIELDS = [
     { key: 'title', label: 'Title', kind: 'dc', tag: 'title' },
     { key: 'author', label: 'Author', kind: 'dc', tag: 'creator' },
+    { key: 'authorSort', label: 'Sort author as', kind: 'fileAs', hint: 'e.g. Le Guin, Ursula K. - empty sorts by the last word' },
     { key: 'language', label: 'Language', kind: 'dc', tag: 'language', hint: 'e.g. en, de' },
     { key: 'series', label: 'Series', kind: 'meta', metaName: 'calibre:series' },
     { key: 'seriesIndex', label: 'Series index', kind: 'meta', metaName: 'calibre:series_index' },
@@ -57,7 +69,7 @@ CrossPoint.registerPlugin((container, api) => {
       status('Listing ' + dir + '...');
       const entries = await getJson('/api/files?path=' + encodeURIComponent(dir));
       const names = new Set(entries.filter((e) => !e.isDirectory).map((e) => e.name));
-      books = entries.filter((e) => !e.isDirectory && e.isEpub)
+      books = entries.filter((e) => !e.isDirectory && isBook(e.name))
         .map((e) => ({ name: e.name, base: stripExt(e.name), hasSidecar: names.has(stripExt(e.name) + '.opf') }));
       renderList();
       status(books.length + ' book(s)');
@@ -67,7 +79,7 @@ CrossPoint.registerPlugin((container, api) => {
   };
 
   function renderList() {
-    if (!books.length) { el('#me-list').innerHTML = '<p>No EPUBs directly in this folder.</p>'; return; }
+    if (!books.length) { el('#me-list').innerHTML = '<p>No books directly in this folder.</p>'; return; }
     let html = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">' +
       '<tr><th align="left">Book</th><th align="left">Sidecar</th><th></th></tr>';
     books.forEach((b, i) => {
@@ -92,9 +104,11 @@ CrossPoint.registerPlugin((container, api) => {
         status('Reading ' + book.base + '.opf...');
         sourceDoc = xml(await getText(dl(join(dir, book.base + '.opf'))));
         values = readFrom(sourceDoc);
-      } else {
+      } else if (hasExt(book.name, '.epub')) {
         status('No sidecar - downloading ' + book.name + ' to read its metadata...');
         values = readFrom(xml(await opfFromEpub(join(dir, book.name))));
+      } else {
+        values = {};
       }
     } catch (e) {
       el('#me-form').innerHTML = '<p class="plugin-error">Could not read metadata: ' + esc(msg(e)) + '</p>';
@@ -107,6 +121,12 @@ CrossPoint.registerPlugin((container, api) => {
 
   function renderForm(book, values) {
     let html = '<h3>' + esc(book.name) + '</h3>';
+    if (!book.hasSidecar && !hasExt(book.name, '.epub')) {
+      html += '<p style="opacity:.8">' + (hasExt(book.name, '.xtc') || hasExt(book.name, '.xtch')
+        ? 'No sidecar yet. Until you save one, the device shows the title and author from the XTC file itself.'
+        : 'No sidecar yet. A text book carries no metadata of its own, so the device shows its filename until you save one.') +
+        '</p>';
+    }
     for (const f of FIELDS) {
       const v = esc(values[f.key] || '');
       html += '<p><label style="display:block"><strong>' + esc(f.label) + '</strong>' +
@@ -122,7 +142,24 @@ CrossPoint.registerPlugin((container, api) => {
     el('#me-form').innerHTML = html;
     el('#me-cancel').onclick = () => { el('#me-form').textContent = ''; editing = null; };
     el('#me-save').onclick = save;
+    keepSortNameWithAuthor(values);
     renderCover(book, values);
+  }
+
+  // The sort name files the author it was written for. Renaming the author
+  // while leaving it would shelve the new name under the old one ("Neil Gaiman"
+  // under "Pratchett, Terry"), so until the sort field is edited by hand it
+  // follows the author: kept for the loaded name, cleared for any other.
+  function keepSortNameWithAuthor(values) {
+    const authorIn = el('#me-f-author');
+    const sortIn = el('#me-f-authorSort');
+    const loadedAuthor = (values.author || '').trim();
+    const loadedSort = values.authorSort || '';
+    let sortEdited = false;
+    sortIn.oninput = () => { sortEdited = true; };
+    authorIn.oninput = () => {
+      if (!sortEdited) sortIn.value = authorIn.value.trim() === loadedAuthor ? loadedSort : '';
+    };
   }
 
   // --- cover sidecar --------------------------------------------------------
@@ -423,6 +460,8 @@ CrossPoint.registerPlugin((container, api) => {
       if (f.kind === 'dc') {
         const n = dcElement(doc, f.tag);
         out[f.key] = n ? (n.textContent || '').trim() : '';
+      } else if (f.kind === 'fileAs') {
+        out[f.key] = readFileAs(doc);
       } else {
         const n = metaElement(doc, f.metaName);
         out[f.key] = n ? (n.getAttribute('content') || '').trim() : '';
@@ -435,6 +474,10 @@ CrossPoint.registerPlugin((container, api) => {
     const metadata = metadataElement(doc);
     for (const f of FIELDS) {
       const value = values[f.key];
+      if (f.kind === 'fileAs') {
+        writeFileAs(doc, value);
+        continue;
+      }
       if (f.kind === 'dc') {
         let n = dcElement(doc, f.tag);
         if (!value) { if (n && n.parentNode) n.parentNode.removeChild(n); continue; }
@@ -479,6 +522,44 @@ CrossPoint.registerPlugin((container, api) => {
 
   function metaElement(doc, name) {
     return Array.from(doc.getElementsByTagName('meta')).find((m) => m.getAttribute('name') === name) || null;
+  }
+
+  // EPUB 3 states a creator's filing name in <meta refines="#id" property="file-as">.
+  function fileAsRefinements(doc, creator) {
+    const id = creator.getAttribute('id');
+    if (!id) return [];
+    return Array.from(doc.getElementsByTagName('meta'))
+      .filter((m) => m.getAttribute('refines') === '#' + id && m.getAttribute('property') === 'file-as');
+  }
+
+  // The author's filing name: opf:file-as on its dc:creator (EPUB 2, Calibre),
+  // or the EPUB 3 refinement, which the firmware lets win when both are there.
+  function readFileAs(doc) {
+    const creator = dcElement(doc, 'creator');
+    if (!creator) return '';
+    const refined = fileAsRefinements(doc, creator)[0];
+    if (refined) return (refined.getAttribute('content') || refined.textContent || '').trim();
+    return (creator.getAttributeNS(OPF_NS, 'file-as') || creator.getAttribute('opf:file-as') || '').trim();
+  }
+
+  // Written as opf:file-as on the author's dc:creator, the form Calibre uses.
+  // Any EPUB 3 refinement of it goes, so there is one source of truth; with no
+  // author there is nothing to file.
+  function writeFileAs(doc, value) {
+    const creator = dcElement(doc, 'creator');
+    if (!creator) return;
+    fileAsRefinements(doc, creator).forEach((m) => m.parentNode && m.parentNode.removeChild(m));
+    creator.removeAttributeNS(OPF_NS, 'file-as');
+    creator.removeAttribute('opf:file-as');
+    if (!value) return;
+    // The firmware reads the attribute by its literal name, "opf:file-as". A
+    // document that never declared the prefix (EPUB 3 style) would otherwise be
+    // serialized with a generated one ("ns1:file-as") that it does not know.
+    const metadata = metadataElement(doc);
+    if (metadata.lookupNamespaceURI('opf') !== OPF_NS) {
+      metadata.setAttributeNS('http://www.w3.org/2000/xmlns/', 'xmlns:opf', OPF_NS);
+    }
+    creator.setAttributeNS(OPF_NS, 'opf:file-as', value);
   }
 
   function freshDoc() {
@@ -535,6 +616,8 @@ CrossPoint.registerPlugin((container, api) => {
   function dl(p) { return '/download?path=' + encodeURIComponent(p); }
   function join(d, name) { return (d === '/' ? '' : d) + '/' + name; }
   function stripExt(n) { const d = n.lastIndexOf('.'); return d > 0 ? n.slice(0, d) : n; }
+  function hasExt(n, ext) { return n.toLowerCase().endsWith(ext); }
+  function isBook(n) { return BOOK_EXTS.some((ext) => hasExt(n, ext)); }
   function msg(e) { return (e && e.message) || String(e); }
 
   function normalize(p) {

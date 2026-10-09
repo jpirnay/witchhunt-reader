@@ -175,4 +175,27 @@ TEST_F(MetadataSidecarFixture, ReadsTheShapeTheMetadataEditorWrites) {
   EXPECT_EQ(epub.getDescription(), "Edited description text.");
 }
 
+// The Library groups books by their primary author and files them by its opf:file-as. Both come
+// from the sidecar when it names an author.
+TEST_F(MetadataSidecarFixture, SidecarSuppliesThePrimaryAuthorAndItsFileAs) {
+  writeSidecar(sidecarXml("Sidecar Title", "Sidecar Author"));
+  Epub epub(bookPath.string(), cacheDir);
+  ASSERT_TRUE(epub.load(true));
+  EXPECT_EQ(epub.getPrimaryAuthor(), "Sidecar Author");
+  EXPECT_EQ(epub.getAuthorSort(), "Sorted, Name");
+}
+
+// book.bin keeps no primary author, so the details lookup loads past it. A book that has been
+// opened (book.bin written) must still come back with its author.
+TEST_F(MetadataSidecarFixture, AMetadataLoadPastBookBinFindsThePrimaryAuthor) {
+  {
+    Epub opened(bookPath.string(), cacheDir);
+    ASSERT_TRUE(opened.load(true));  // writes book.bin, as opening the book does
+  }
+  Epub epub(bookPath.string(), cacheDir);
+  ASSERT_TRUE(epub.loadForMetadata(nullptr, /*useBookBin=*/false));
+  EXPECT_EQ(epub.getAuthor(), "Test Suite");
+  EXPECT_EQ(epub.getPrimaryAuthor(), "Test Suite");
+}
+
 }  // namespace

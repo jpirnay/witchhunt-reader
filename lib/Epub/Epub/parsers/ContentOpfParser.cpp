@@ -244,7 +244,75 @@ std::string trim(const std::string& in) {
   }
   return in.substr(start, end - start);
 }
+
+// Appends no further than `cap` bytes in total: a creator field is a name, not a document.
+void appendCapped(std::string& out, const char* s, const size_t len, const size_t cap) {
+  if (out.size() >= cap) return;
+  out.append(s, std::min(len, cap - out.size()));
+}
+
+// The MARC relator code for an author. Lowercase by definition, but generators are not always careful.
+bool isAutCode(const std::string& role) {
+  const std::string r = trim(role);
+  return r.size() == 3 && std::tolower(static_cast<unsigned char>(r[0])) == 'a' &&
+         std::tolower(static_cast<unsigned char>(r[1])) == 'u' && std::tolower(static_cast<unsigned char>(r[2])) == 't';
+}
+
+// No role at all means the creator is the author.
+bool isAuthorRole(const std::string& role) { return trim(role).empty() || isAutCode(role); }
 }  // namespace
+
+ContentOpfParser::Creator* ContentOpfParser::beginCreator(const char** atts) {
+  if (creatorCount_ >= MAX_CREATORS) return nullptr;
+  if (!creators_) {
+    creators_ = makeUniqueNoThrow<Creator[]>(MAX_CREATORS);
+    // Out of memory: the display author still works, there is just no primary author.
+    if (!creators_) return nullptr;
+  }
+  Creator& creator = creators_[creatorCount_++];
+  for (int i = 0; atts[i]; i += 2) {
+    const char* value = atts[i + 1];
+    if (strcmp(atts[i], "id") == 0) {
+      appendCapped(creator.id, value, strlen(value), MAX_CREATOR_FIELD);
+    } else if (strcmp(atts[i], "opf:role") == 0) {
+      appendCapped(creator.role, value, strlen(value), MAX_CREATOR_FIELD);
+    } else if (strcmp(atts[i], "opf:file-as") == 0) {
+      appendCapped(creator.fileAs, value, strlen(value), MAX_CREATOR_FIELD);
+    }
+  }
+  return &creator;
+}
+
+// The field a <meta refines="#id" property="..."> sets, or null when `id` is not a creator's, the
+// property is not one this parser keeps, or the refinement must not change it.
+std::string* ContentOpfParser::creatorField(const char* id, const char* property) {
+  const bool role = strcmp(property, "role") == 0;
+  if (!role && strcmp(property, "file-as") != 0) return nullptr;
+  for (uint8_t i = 0; i < creatorCount_; ++i) {
+    Creator& creator = creators_[i];
+    if (creator.id.empty() || creator.id != id) continue;
+    if (!role) return &creator.fileAs;
+    // EPUB 3 lets a creator hold several roles, and being credited as author is what counts: once a
+    // creator has "aut", a further role (an author who also illustrated) must not take it away.
+    return isAutCode(creator.role) ? nullptr : &creator.role;
+  }
+  return nullptr;
+}
+
+void ContentOpfParser::pickPrimaryAuthor() {
+  for (uint8_t i = 0; i < creatorCount_; ++i) {
+    Creator& creator = creators_[i];
+    if (creator.name.empty() || !isAuthorRole(creator.role)) continue;
+    primaryAuthor = std::move(creator.name);
+    authorSort = trim(creator.fileAs);
+    break;
+  }
+  // The table has served its purpose. A first open carries this parser on through the manifest and
+  // spine, where a large book needs every byte of heap, so nothing of it stays.
+  creators_.reset();
+  creatorCount_ = 0;
+  std::string().swap(creatorText_);
+}
 
 bool ContentOpfParser::setup() {
   if (!saxParser_.init(this, startElement, endElement, characterData)) {
@@ -399,6 +467,8 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
 
   if (self->state == IN_METADATA && strcmp(name, "dc:creator") == 0) {
     self->state = IN_BOOK_AUTHOR;
+    self->creatorText_.clear();
+    self->currentCreator_ = self->beginCreator(atts);
     return;
   }
 
@@ -491,6 +561,7 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
     const char* metaName = nullptr;
     const char* metaContent = nullptr;
     const char* metaProperty = nullptr;
+    const char* metaRefines = nullptr;
 
     for (int i = 0; atts[i]; i += 2) {
       if (strcmp(atts[i], "name") == 0) {
@@ -499,6 +570,24 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
         metaContent = atts[i + 1];
       } else if (strcmp(atts[i], "property") == 0) {
         metaProperty = atts[i + 1];
+      } else if (strcmp(atts[i], "refines") == 0) {
+        metaRefines = atts[i + 1];
+      }
+    }
+
+    // EPUB 3 creator refinements: <meta refines="#c1" property="role">aut</meta> and
+    // property="file-as". Only for an id that names a creator; a refinement of anything else (a
+    // collection's group-position, a title's file-as) falls through to the handling below.
+    if (metaProperty && metaRefines && metaRefines[0] == '#') {
+      if (std::string* field = self->creatorField(metaRefines + 1, metaProperty)) {
+        field->clear();
+        if (metaContent) {
+          appendCapped(*field, metaContent, strlen(metaContent), MAX_CREATOR_FIELD);
+        } else {
+          self->refineTarget_ = field;
+          self->state = IN_CREATOR_REFINE;
+        }
+        return;
       }
     }
 
@@ -693,10 +782,12 @@ void ContentOpfParser::characterData(void* userData, const char* s, const int le
   }
 
   if (self->state == IN_BOOK_AUTHOR) {
-    if (!self->author.empty()) {
-      self->author.append(", ");  // Add separator for multiple authors
-    }
-    self->author.append(s, len);
+    appendCapped(self->creatorText_, s, static_cast<size_t>(len), MAX_CREATOR_FIELD);
+    return;
+  }
+
+  if (self->state == IN_CREATOR_REFINE) {
+    if (self->refineTarget_) appendCapped(*self->refineTarget_, s, static_cast<size_t>(len), MAX_CREATOR_FIELD);
     return;
   }
 
@@ -764,6 +855,22 @@ void ContentOpfParser::endElement(void* userData, const char* name) {
   }
 
   if (self->state == IN_BOOK_AUTHOR && strcmp(name, "dc:creator") == 0) {
+    // Joined here, once per creator, so a name that arrived in pieces is still one name.
+    std::string text = trim(self->creatorText_);
+    self->creatorText_.clear();
+    if (!text.empty()) {
+      if (!self->author.empty()) self->author.append(", ");
+      self->author.append(text);
+    }
+    if (self->currentCreator_) self->currentCreator_->name = std::move(text);
+    self->currentCreator_ = nullptr;
+    self->state = IN_METADATA;
+    return;
+  }
+
+  if (self->state == IN_CREATOR_REFINE && isMetaTag(name)) {
+    if (self->refineTarget_) *self->refineTarget_ = trim(*self->refineTarget_);
+    self->refineTarget_ = nullptr;
     self->state = IN_METADATA;
     return;
   }
@@ -792,6 +899,7 @@ void ContentOpfParser::endElement(void* userData, const char* name) {
   }
 
   if (self->state == IN_METADATA && isMetadataTag(name)) {
+    self->pickPrimaryAuthor();
     self->state = IN_PACKAGE;
     return;
   }

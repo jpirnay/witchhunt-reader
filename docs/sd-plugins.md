@@ -186,7 +186,7 @@ are never compiled, so they cost no flash.
 | `hello-plugin` | settings | Minimal reference and smoke test - renders a card and lists `/` |
 | `find-duplicates` | files | Reports files sharing an exact size. Report only: never writes, and never downloads a book |
 | `organize-by-author` | files | Sorts loose EPUBs into `<Author>/` folders. Preview first, moves only on Apply, carries sidecars along |
-| `metadata-editor` | files | Edits title, author, language, series, series index and description into a `book.opf` sidecar, and manages the cover sidecar (local file, clipboard paste, or a search of Open Library / Goodreads / Google Books). Never rewrites the book |
+| `metadata-editor` | files | Edits title, author and how it sorts (`opf:file-as`), language, series, series index and description into a `book.opf` sidecar, for every book format the reader opens (EPUB, XTC, TXT, Markdown), and manages the cover sidecar (local file, clipboard paste, or a search of Open Library / Goodreads / Google Books). Never rewrites the book |
 
 ### Cover sources, and why they differ
 

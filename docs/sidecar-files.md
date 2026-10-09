@@ -44,7 +44,8 @@ Fields taken from the sidecar, when non-empty:
 | Field | Source in the OPF |
 |---|---|
 | title | `<dc:title>` |
-| author | `<dc:creator>` |
+| author | `<dc:creator>` (every creator, joined for display) |
+| primary author and its filing name | the first `<dc:creator>` with `opf:role="aut"` or no role, and its `opf:file-as` (EPUB 3: `<meta refines="#id" property="role">` / `property="file-as"`) |
 | language | `<dc:language>` |
 | series | `<meta name="calibre:series">` or `belongs-to-collection` |
 | series index | `<meta name="calibre:series_index">` or `group-position` |
@@ -68,6 +69,13 @@ A minimal sidecar:
   </metadata>
 </package>
 ```
+
+### Books other than EPUB
+
+TXT, Markdown and XTC books take their title, author and series from a metadata sidecar too, in
+the book lists (Browse Files' Details and Covers views). Without a sidecar, an XTC book is labelled
+from its own header, and a TXT or Markdown book, which carries no metadata, by its filename. The
+reader itself still shows the book's own title.
 
 ### Rules
 

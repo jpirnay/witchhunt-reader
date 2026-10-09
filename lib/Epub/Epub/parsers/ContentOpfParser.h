@@ -27,6 +27,7 @@ class ContentOpfParser final : public Print {
     IN_BOOK_DESCRIPTION,
     IN_BOOK_SERIES,
     IN_BOOK_SERIES_INDEX,
+    IN_CREATOR_REFINE,
     IN_MANIFEST,
     IN_SPINE,
     IN_GUIDE,
@@ -110,6 +111,30 @@ class ContentOpfParser final : public Print {
 
   static constexpr uint16_t LARGE_SPINE_THRESHOLD = 400;
 
+  // One dc:creator as the <metadata> block describes it. Kept only until the block ends, to pick
+  // the primary author then: EPUB 3 states a creator's role and filing name in <meta refines="#id">
+  // elements that come after it.
+  struct Creator {
+    std::string id;
+    std::string name;
+    std::string role;
+    std::string fileAs;
+  };
+  // The first few creators are enough: books credit their authors first. Allocated from the heap,
+  // and only once a dc:creator appears, because the parser itself lives on the caller's stack.
+  static constexpr uint8_t MAX_CREATORS = 4;
+  // Longest creator name, id, role or filing name kept.
+  static constexpr size_t MAX_CREATOR_FIELD = 256;
+  std::unique_ptr<Creator[]> creators_;
+  uint8_t creatorCount_ = 0;
+  Creator* currentCreator_ = nullptr;    // the dc:creator being read; null past MAX_CREATORS or on OOM
+  std::string creatorText_;              // its text, gathered across however many pieces it arrives in
+  std::string* refineTarget_ = nullptr;  // the creator field a <meta refines> element's text fills
+
+  Creator* beginCreator(const char** atts);
+  std::string* creatorField(const char* id, const char* property);
+  void pickPrimaryAuthor();
+
   // FNV-1a hash function
   static uint32_t fnvHash(const std::string& s) {
     uint32_t hash = 2166136261u;
@@ -145,7 +170,13 @@ class ContentOpfParser final : public Print {
   } stats;
 
   std::string title;
+  // Every dc:creator's text, joined with ", ": what the book shows as its author.
   std::string author;
+  // The first dc:creator credited as the book's author (role "aut", or no role at all), and how it
+  // files (opf:file-as, or EPUB 3 <meta refines property="file-as">). For grouping and ordering by
+  // author; `author` stays the display line. Empty when no creator qualifies.
+  std::string primaryAuthor;
+  std::string authorSort;
   std::string language;
   std::string description;
   std::string series;
