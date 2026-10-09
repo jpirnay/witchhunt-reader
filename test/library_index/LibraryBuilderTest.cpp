@@ -202,6 +202,29 @@ TEST_F(LibraryBuilderTest, AuthorsArePublishedAsTheyAreResolved) {
   EXPECT_GE(publishes, 4) << "the first publish, then one per resolved book";
 }
 
+// The header's "Indexing n/m" during a build: m stays the number of books the build set out to
+// resolve, and n climbs to it.
+TEST_F(LibraryBuilderTest, TheResolveCountClimbsToAFixedTotal) {
+  file("Books/a.epub");
+  file("Books/b.epub");
+  file("Books/c.epub");
+  auto often = config();
+  often.republishEvery = 1;
+  LibraryBuilder builder(std::move(often));
+  BuildArena framebuffer(48000);
+  std::vector<std::pair<int, int>> seen;
+  for (int i = 0; i < 1000 && !builder.finished(); ++i) {
+    builder.step(&framebuffer);
+    if (builder.phase() == LibraryBuilder::Phase::Resolve) seen.emplace_back(builder.resolved(), builder.toResolve());
+  }
+  ASSERT_FALSE(seen.empty());
+  for (const auto& [done, total] : seen) {
+    EXPECT_EQ(total, 3);
+    EXPECT_LE(done, total);
+  }
+  EXPECT_EQ(builder.resolved(), 3);
+}
+
 TEST_F(LibraryBuilderTest, TheWalkYieldsBetweenSteps) {
   for (int i = 0; i < 100; ++i) file("Books/b" + std::to_string(i) + ".txt");
   int walkSteps = 0;

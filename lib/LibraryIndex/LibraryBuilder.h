@@ -55,6 +55,9 @@ class LibraryBuilder {
   uint16_t booksFound() const { return found_; }
   uint16_t pending() const { return pending_; }
   uint16_t resolved() const { return resolved_; }
+  // The books this build set out to resolve, fixed at the join: what resolved() counts towards.
+  // (pending() is what is left, and goes down as resolved() goes up.)
+  uint16_t toResolve() const { return toResolve_; }
 
  private:
   static constexpr size_t MAX_DEPTH = 8;
@@ -104,6 +107,7 @@ class LibraryBuilder {
   uint16_t found_ = 0;
   uint16_t pending_ = 0;
   uint16_t resolved_ = 0;
+  uint16_t toResolve_ = 0;
   uint16_t cursor_ = 0;
   uint16_t sincePublish_ = 0;
   char name_[500] = {};

@@ -95,6 +95,11 @@ class ButtonNavigator final {
   [[nodiscard]] int nextIndex(int currentIndex) const;
   [[nodiscard]] int previousIndex(int currentIndex) const;
   void setSelectablePredicate(std::function<bool(int)> selectablePredicate, int totalItems);
+  // Takes every press logged so far on these buttons as seen, without acting on it: for a list whose
+  // rows were just replaced, which those presses were not aimed at. A press the navigator never got
+  // to -- made while the list was empty, or while the screen read the keys itself -- would otherwise
+  // step the new rows as soon as the navigator next looks.
+  void resync(const Buttons& next, const Buttons& previous);
   void clearSelectablePredicate();
 
   [[nodiscard]] static int nextPageIndex(int currentIndex, int totalItems, int itemsPerPage);

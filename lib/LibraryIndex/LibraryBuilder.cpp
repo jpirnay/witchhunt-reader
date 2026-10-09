@@ -201,6 +201,7 @@ void LibraryBuilder::join(BuildArena& arena) {
   LibraryJoin::Result result;
   if (!LibraryJoin::join(in, arena, result)) return fail("join");
   pending_ = result.pending;
+  toResolve_ = result.pending;
   buildGen_ = result.buildGen;
   phase_ = Phase::Publish;
 }

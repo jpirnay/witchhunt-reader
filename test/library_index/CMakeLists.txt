@@ -3,14 +3,17 @@ add_executable(LibraryIndexTest
   LibraryPublishTest.cpp
   LibraryJoinTest.cpp
   LibraryBuilderTest.cpp
+  LibraryOrderTest.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryBlob.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryBuilder.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryIndexReader.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryJoin.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryKeys.cpp
+  ${REPO_ROOT}/lib/LibraryIndex/LibraryOrder.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryPublish.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
+  ${REPO_ROOT}/lib/FsHelpers/NaturalSort.cpp
 )
 
 target_include_directories(LibraryIndexTest PRIVATE
@@ -22,6 +25,7 @@ target_include_directories(LibraryIndexTest PRIVATE
   ${REPO_ROOT}/lib/Utf8
   ${REPO_ROOT}/lib/Serialization
   ${REPO_ROOT}/lib/Logging
+  ${REPO_ROOT}/lib/FsHelpers
 )
 
 target_link_libraries(LibraryIndexTest PRIVATE

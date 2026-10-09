@@ -85,6 +85,7 @@ FileBrowserActivity::FileBrowserActivity(GfxRenderer& renderer, MappedInputManag
       coverLoader(std::make_unique<CoverThumbLoader>()) {
   model.setPath(std::move(initialPath));
   booksPath = model.path();  // the Books tab's folder, whichever tab opens first
+  model.setScratchSource(&FileBrowserActivity::orderScratch, this);
 }
 
 FileBrowserActivity::~FileBrowserActivity() = default;
@@ -93,6 +94,7 @@ FileBrowserActivity::~FileBrowserActivity() = default;
 std::string getFileName(std::string filename);
 
 void FileBrowserActivity::onEnter() {
+  lendForAuthorOrder(model.getMode() == Mode::Authors);
   loadRows();
   if (authorToOpen) {
     model.openAuthorByHash(authorToOpenHash);
@@ -641,7 +643,8 @@ bool FileBrowserActivity::handleCustomInput() {
     const bool vertical = MappedInputManager::isDirection(ev.button, Direction::Up) ||
                           MappedInputManager::isDirection(ev.button, Direction::Down);
     if (libraryTabs() && vertical && ev.type == ButtonEventManager::PressType::Long) {
-      if (!coversView()) nav.selected = stepOrigin;
+      // Put back the row this very press stepped on its way down -- not one an older press stepped.
+      if (!coversView() && stepAtMs >= ev.pressMs) nav.selected = stepOrigin;
       tabHold = true;
       const int direction = MappedInputManager::isDirection(ev.button, Direction::Down) ? 1 : -1;
       showLibraryTab(libraryTabStep(currentTab(), direction));
@@ -805,7 +808,10 @@ void FileBrowserActivity::navigateButtons() {
         ButtonNavigator::getStepNextButtons(), nav.selected, listCount(), [&changed] { changed = true; }, pageSize);
     buttonNavigator.onPreviousList(
         ButtonNavigator::getStepPreviousButtons(), nav.selected, listCount(), [&changed] { changed = true; }, pageSize);
-    if (changed) stepOrigin = previous;
+    if (changed) {
+      stepOrigin = previous;
+      stepAtMs = millis();
+    }
     // The grid shows whichever page holds the selection; only the list keeps a viewport to follow.
     if (changed && !coversView()) {
       if (std::abs(nav.selected - previous) > 2) {
@@ -821,13 +827,23 @@ void FileBrowserActivity::navigateButtons() {
 void FileBrowserActivity::activateSelected(const bool longPress) {
   if (model.entryCount() == 0 || nav.selected < 0 || nav.selected >= listCount()) return;
 
-  const std::string entry = model.entryName(static_cast<size_t>(nav.selected));
+  // The row's name and path in one go, under the render lock: the render task reads the same open
+  // index or folder file, and two reads interleaved with its own could pair a name with another
+  // row's path.
+  std::string entry;
+  std::string fullPath;
+  {
+    RenderLock lock(*this);
+    entry = model.entryName(static_cast<size_t>(nav.selected));
+    fullPath = model.entryFullPath(static_cast<size_t>(nav.selected));
+  }
   if (entry.empty()) return;
   const bool isDirectory = entry.back() == '/';
   if (isDirectory) {
     if (longPress) return;
     if (model.atAuthorList()) {  // an author, not a folder: its books
       mappedInput.flushTouchEvents();
+      lendForAuthorOrder(true);
       {
         RenderLock lock(*this);
         model.openAuthor(static_cast<size_t>(nav.selected));
@@ -863,7 +879,6 @@ void FileBrowserActivity::activateSelected(const bool longPress) {
     return;
   }
 
-  std::string fullPath = model.entryFullPath(static_cast<size_t>(nav.selected));
   if (longPress && KOREADER_STORE.hasCredentials() && FsHelpers::hasEpubExtension(fullPath)) {
     auto& sync = APP_STATE.koReaderSyncSession;
     sync.autoPullEpubPath = fullPath;
@@ -884,6 +899,8 @@ void FileBrowserActivity::resetNavigation(const int selected) {
   app.clearTapFlash();
   const int last = listCount() > 0 ? listCount() - 1 : 0;
   nav.reset(std::max(0, std::min(last, selected)));
+  // Presses not yet acted on were aimed at the rows this replaced.
+  buttonNavigator.resync(ButtonNavigator::getStepNextButtons(), ButtonNavigator::getStepPreviousButtons());
 }
 
 // Rows one Left/Right press moves. drawList reports what the last render fit — which for wrapped
@@ -1077,8 +1094,8 @@ void FileBrowserActivity::drawChrome() {
   std::string status;
   if (indexing && (mode == Mode::Added || mode == Mode::Authors)) {
     status = tr(STR_INDEXING);
-    const uint16_t pending = indexPending;
-    if (pending > 0) status += " " + std::to_string(indexResolved.load()) + "/" + std::to_string(pending);
+    const uint16_t total = indexTotal;
+    if (total > 0) status += " " + std::to_string(indexResolved.load()) + "/" + std::to_string(total);
   }
   GUI.drawHeader(renderer, UITheme::getHeaderRect(renderer), folderName.c_str(),
                  status.empty() ? nullptr : status.c_str());
@@ -1148,14 +1165,20 @@ void FileBrowserActivity::openContextMenu() {
     return;
   }
 
-  const std::string entry = model.entryName(static_cast<size_t>(nav.selected));
+  // Name and path together, under the render lock (see activateSelected): Remove deletes this path
+  // while its confirmation names this entry.
+  std::string entry;
+  std::string fullPath;
+  {
+    RenderLock lock(*this);
+    entry = model.entryName(static_cast<size_t>(nav.selected));
+    fullPath = model.entryFullPath(static_cast<size_t>(nav.selected));
+  }
   if (entry.empty() || entry.back() == '/') {
     // An author is not a folder: no Open or Remove of one named after it.
     showBrowserOptionsMenu(model.atAuthorList() ? std::string{} : entry);
     return;
   }
-
-  const std::string fullPath = model.entryFullPath(static_cast<size_t>(nav.selected));
 
   startActivityForResult(std::make_unique<FileContextMenuActivity>(
                              renderer, mappedInput, fullPath, model.getSortMode(), model.getSortDirection(),
@@ -1375,8 +1398,13 @@ void FileBrowserActivity::startSearch(const bool everywhere) {
 // A card-wide search tells you where a book is; this is how you go and stand there.
 void FileBrowserActivity::goToResultFolder() {
   if (!model.listsPaths() || nav.selected < 0) return;
-  const std::string folder = model.resultFolder(static_cast<size_t>(nav.selected));
-  const std::string full = model.entryFullPath(static_cast<size_t>(nav.selected));
+  std::string folder;
+  std::string full;
+  {
+    RenderLock lock(*this);  // see activateSelected
+    folder = model.resultFolder(static_cast<size_t>(nav.selected));
+    full = model.entryFullPath(static_cast<size_t>(nav.selected));
+  }
   if (folder.empty()) return;
   const size_t slash = full.rfind('/');
   // Recent, New and an author's books are not folders: the Books tab opens the folder, the book
@@ -1679,8 +1707,12 @@ void FileBrowserActivity::doSetAsSleepCover(const std::string& fullPath) {
     requestUpdate();
   } else {
     // JPG/PNG: must render to framebuffer — open the image viewer so the user can use its Set Sleep button.
-    activityManager.replaceWithReader(std::string(fullPath),
-                                      returnHint(model.entryName(static_cast<size_t>(nav.selected))));
+    std::string entry;
+    {
+      RenderLock lock(*this);  // see activateSelected
+      entry = model.entryName(static_cast<size_t>(nav.selected));
+    }
+    activityManager.replaceWithReader(std::string(fullPath), returnHint(std::move(entry)));
   }
 }
 
@@ -1721,6 +1753,7 @@ void FileBrowserActivity::doRemove(const std::string& fullPath, const std::strin
                              if (deleted) {
                                LOG_DBG("FBR", "Deleted successfully");
                                bookRows.clear();
+                               lendForAuthorOrder(model.getMode() == Mode::Authors);
                                model.load();
                                resetNavigation(nav.selected);
                                startLibraryBuildIfStale();  // New and Authors catch up with the card
@@ -1749,7 +1782,7 @@ void FileBrowserActivity::startLibraryBuildIfStale() {
   libraryBuilder = makeUniqueNoThrow<LibraryBuilder>(std::move(config));
   libraryBuildGeneration = Storage.contentGeneration();
   indexResolved = 0;
-  indexPending = 0;
+  indexTotal = 0;
   indexing = libraryBuilder != nullptr;
 }
 
@@ -1762,23 +1795,37 @@ bool FileBrowserActivity::stepLibraryBuild() {
   if (renderer.isComposingFrame() || mappedInput.hasPendingInput()) return true;
   if (libraryBuilder->needsArena()) {
     coverLoader->reset();
-    if (!lendForBackgroundWork()) return true;
+    if (!lendForBackgroundWork()) {
+      // No framebuffer to lend -- a reader that could not take its own back leaves none -- and the
+      // build cannot go on without one. Abandoned rather than waited on for the rest of the visit:
+      // not marked built, so the next visit tries again.
+      LOG_ERR("FBR", "Library build abandoned: no framebuffer to lend");
+      libraryBuilder.reset();
+      indexing = false;
+      requestUpdate();
+      return false;
+    }
   }
+  RowKey keep;
   if (libraryBuilder->nextStepPublishes()) {
     RenderLock lock(*this);
+    keep = selectedRowKey();  // while the index it is read from is still open
     model.releaseIndex();
   }
   HalPowerManager::Lock fullSpeed;
   const LibraryBuilder::Phase phase = libraryBuilder->step(coverScratch.get());
   if (phase == LibraryBuilder::Phase::Resolve) {
     indexResolved = libraryBuilder->resolved();
-    indexPending = libraryBuilder->pending();
+    indexTotal = libraryBuilder->toResolve();
   }
   const bool reload = libraryBuilder->takePublished() || phase == LibraryBuilder::Phase::Failed;
   if (reload) {
     RenderLock lock(*this);
+    // A step that failed before any publish released nothing: the index is still open to read from.
+    if (!keep.isAuthor && keep.name.empty()) keep = selectedRowKey();
     model.load();
-    resetNavigation(std::min(nav.selected.load(), std::max(0, listCount() - 1)));
+    const int found = rowOf(keep);
+    resetNavigation(found >= 0 ? found : std::min(nav.selected.load(), std::max(0, listCount() - 1)));
   }
   const bool finished = libraryBuilder->finished();
   if (finished) {
@@ -1838,6 +1885,7 @@ void FileBrowserActivity::showLibraryTab(const LibraryTab tab) {
     authorToOpenHash = model.openAuthorKey();
   }
   mappedInput.flushTouchEvents();  // contacts still queued were aimed at the tab being left
+  lendForAuthorOrder(tab == LibraryTab::Authors);
   {
     RenderLock lock(*this);
     model.setMode(modeFor(tab));
@@ -1865,4 +1913,49 @@ void FileBrowserActivity::composeLibraryTabBar(UiScreen& screen) {
   // Never focused: the browser keeps its own keys, and a long Up/Down or a tap is how a tab changes.
   const auto props = ListTabBar::props(screen, tabs, LIBRARY_TAB_COUNT, ACTION_USER, /*barFocused=*/false);
   fui::tabBar(screen.frame(), screen.takeTop(ListTabBar::HEIGHT), props);
+}
+
+FileBrowserActivity::RowKey FileBrowserActivity::selectedRowKey() {
+  RowKey key;
+  const int row = nav.selected;
+  if (row < 0 || row >= listCount()) return key;
+  if (model.atAuthorList()) {
+    uint16_t books = 0;
+    key.isAuthor = model.authorAt(static_cast<size_t>(row), books, key.author);
+  } else {
+    key.name = model.entryName(static_cast<size_t>(row));
+  }
+  return key;
+}
+
+// The row `key` is on now, or -1.
+int FileBrowserActivity::rowOf(const RowKey& key) {
+  if (key.isAuthor && model.atAuthorList()) {
+    uint16_t books = 0;
+    uint32_t hash = 0;
+    for (int row = 0; row < listCount(); ++row) {
+      if (model.authorAt(static_cast<size_t>(row), books, hash) && hash == key.author) return row;
+    }
+    return -1;
+  }
+  if (key.isAuthor || key.name.empty()) return -1;
+  const size_t row = model.findEntry(key.name);
+  return row < model.entryCount() ? static_cast<int>(row) : -1;
+}
+
+BuildArena* FileBrowserActivity::orderScratch(void* user) {
+  auto* self = static_cast<FileBrowserActivity*>(user);
+  // Never lends here -- the model may be asked under the render lock, which lending takes -- so it is
+  // lent beforehand (lendForAuthorOrder) or by the build. A cover in progress holds blocks of it.
+  if (self->lentRegion == nullptr || !self->coverScratch) return nullptr;
+  self->coverLoader->reset();
+  return self->coverScratch.get();
+}
+
+// Lends the framebuffer before an author's books may be listed, so they can be put in order: outside
+// the render lock, which lending takes. `authors` is whether the list about to load is Authors.
+void FileBrowserActivity::lendForAuthorOrder(const bool authors) {
+  if (!authors || renderer.isComposingFrame()) return;
+  coverLoader->reset();
+  lendForBackgroundWork();
 }

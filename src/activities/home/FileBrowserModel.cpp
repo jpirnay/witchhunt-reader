@@ -5,6 +5,7 @@
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <I18n.h>
+#include <LibraryOrder.h>
 #include <Logging.h>
 
 #include <algorithm>
@@ -709,39 +710,28 @@ std::string FileBrowserModel::authorBookName(const size_t index) {
 }
 
 // An author's books by series, then series index, then title, as the book lists show them; books in
-// no series after the series. Past MAX_ORDERED books the index's order stands: the details reads
-// would take seconds.
+// no series after the series. Sorted in the lent framebuffer (LibraryOrder), never on the heap. Without
+// it, or past MAX_ORDERED books -- the details reads would take seconds -- the index's order stands.
 void FileBrowserModel::orderAuthorBooks() {
   constexpr size_t MAX_ORDERED = 200;
-  if (authorBooks.size() < 2 || authorBooks.size() > MAX_ORDERED) return;
-  struct Key {
-    std::string series;
-    float index;
-    std::string title;
-    uint16_t record;
-  };
-  std::vector<Key> keys;
-  keys.reserve(authorBooks.size());
-  library::BookRecord record{};
+  if (authorBooks.size() < 2 || authorBooks.size() > MAX_ORDERED || scratchSource == nullptr) return;
+  BuildArena* scratch = scratchSource(scratchUser);
+  if (scratch == nullptr) return;
+  LibraryOrder::sortBySeries(authorBooks.data(), authorBooks.size(), *scratch, &FileBrowserModel::bookKey, this);
+}
+
+// What one of the open author's books sorts by: its details, and its filename when it has no title.
+bool FileBrowserModel::bookKey(void* self, const uint16_t record, LibraryOrder::BookKey& key) {
+  auto& model = *static_cast<FileBrowserModel*>(self);
+  library::BookRecord book{};
   std::string path;
-  for (const uint16_t r : authorBooks) {
-    Key key{{}, 0.0f, {}, r};
-    if (bookIndex.book(r, record) && bookIndex.blobString(record.pathOff, path)) {
-      BookDetails details;
-      if (BookDetailsLookup::cached(path, 0, details)) {
-        key.series = std::move(details.series);
-        key.index = strtof(details.seriesIndex.c_str(), nullptr);
-        key.title = std::move(details.title);
-      }
-      if (key.title.empty()) key.title = path.substr(path.rfind('/') + 1);
-    }
-    keys.push_back(std::move(key));
+  if (!model.bookIndex.book(record, book) || !model.bookIndex.blobString(book.pathOff, path)) return false;
+  BookDetails details;
+  if (BookDetailsLookup::cached(path, 0, details)) {
+    key.series = std::move(details.series);
+    key.seriesIndex = std::move(details.seriesIndex);
+    key.title = std::move(details.title);
   }
-  std::sort(keys.begin(), keys.end(), [](const Key& a, const Key& b) {
-    if (a.series.empty() != b.series.empty()) return !a.series.empty();
-    if (a.series != b.series) return FsHelpers::naturalCompare(a.series.c_str(), b.series.c_str()) < 0;
-    if (a.index != b.index) return a.index < b.index;
-    return FsHelpers::naturalCompare(a.title.c_str(), b.title.c_str()) < 0;
-  });
-  for (size_t i = 0; i < keys.size(); ++i) authorBooks[i] = keys[i].record;
+  if (key.title.empty()) key.title = path.substr(path.rfind('/') + 1);
+  return true;
 }

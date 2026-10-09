@@ -23,6 +23,11 @@
 // directory, in what order", and leaves what a row MEANS to the activity. That is also why the
 // path is set rather than walked -- computing the parent or a child path is navigation, and
 // navigation stays with the screen.
+class BuildArena;
+namespace LibraryOrder {
+struct BookKey;
+}
+
 class FileBrowserModel {
  public:
   // Books = the books the reader can open, and nothing else: images and the sidecars beside a
@@ -148,6 +153,13 @@ class FileBrowserModel {
   // A row of the author list: its books, and its author hash (library::AUTHOR_UNKNOWN and
   // AUTHOR_PENDING gather books with no author and books not indexed yet).
   bool authorAt(size_t row, uint16_t& books, uint32_t& hash);
+  // Where an author's books are put in order: the screen's lent framebuffer, if it holds it at that
+  // moment (nullptr when not, and the books keep the index's order). Asked on the loop task only.
+  using ScratchSource = BuildArena* (*)(void* user);
+  void setScratchSource(const ScratchSource source, void* user) {
+    scratchSource = source;
+    scratchUser = user;
+  }
   // The book index New and Authors read. Let go before the builder replaces it; load() reopens it.
   void releaseIndex();
   [[nodiscard]] const LibraryIndexReader& index() const { return bookIndex; }
@@ -226,6 +238,9 @@ class FileBrowserModel {
   void loadAdded();
   void loadAuthors();
   void orderAuthorBooks();
+  static bool bookKey(void* self, uint16_t record, LibraryOrder::BookKey& key);
+  ScratchSource scratchSource = nullptr;
+  void* scratchUser = nullptr;
   std::string authorRowName(size_t row);
   std::string authorBookName(size_t index);
 

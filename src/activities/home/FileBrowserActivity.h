@@ -105,7 +105,19 @@ class FileBrowserActivity final : public UiListActivity {
   // the loop task owns the builder.
   std::atomic<bool> indexing{false};
   std::atomic<uint16_t> indexResolved{0};
-  std::atomic<uint16_t> indexPending{0};
+  std::atomic<uint16_t> indexTotal{0};
+  // The row a reload should find again -- an author by hash, a book by name -- rather than its
+  // number: a republish reorders the authors as they are resolved.
+  struct RowKey {
+    bool isAuthor = false;
+    uint32_t author = 0;
+    std::string name;
+  };
+  RowKey selectedRowKey();
+  int rowOf(const RowKey& key);
+  // The lent framebuffer, for putting an author's books in order (FileBrowserModel::ScratchSource).
+  static BuildArena* orderScratch(void* user);
+  void lendForAuthorOrder(bool authors);
 
   // The Library: Books, Recent, New and Authors as tabs of one screen. Each tab is left where it
   // was: its row, Books its folder, Authors the author open in it.
@@ -124,6 +136,7 @@ class FileBrowserActivity final : public UiListActivity {
   // row it left, put back first. The key still held must not reach the navigator, whose 1.5 s hold
   // jumps to the list's end: tabHold, until it is let go.
   int stepOrigin = 0;
+  unsigned long stepAtMs = 0;  // when that step was taken: it belongs to a press begun before it
   bool tabHold = false;
 
   [[nodiscard]] int listPageSize() const;

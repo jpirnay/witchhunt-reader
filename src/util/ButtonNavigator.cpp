@@ -295,6 +295,13 @@ void ButtonNavigator::onListPageNav(const Buttons& buttons, const bool forward, 
 // list — either way a press on any of them is a press for this navigator. A pair of taps split
 // across two DIFFERENT buttons of the set is not read as a double-tap, which is the intended
 // reading: those are two separate gestures.
+void ButtonNavigator::resync(const Buttons& next, const Buttons& previous) {
+  lastNextPressCount = latestPressLog(next).count;
+  lastPreviousPressCount = latestPressLog(previous).count;
+  lastNextPressMs = 0;
+  lastPreviousPressMs = 0;
+}
+
 ButtonEventManager::PressLog ButtonNavigator::latestPressLog(const Buttons& buttons) {
   ButtonEventManager::PressLog merged;
   uint16_t total = 0;
