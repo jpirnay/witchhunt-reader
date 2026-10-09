@@ -70,7 +70,8 @@ Reserved `authorHash` values:
 - `0`: no author. Grouped under "Unknown author", sorted last.
 - `0xFFFFFFFF`: not yet resolved. Grouped under "Not yet indexed (n)", after Unknown.
 
-Cap: **4,000 books**. Beyond that the walk stops, the partial flag is set, and the Authors tab
+Cap: **2,000 books** ⚑ (lowered from 4,000 while planning, user decision 2026-10-09: publish then sorts the whole
+author table in one pass through the lent framebuffer). Beyond that the walk stops, the partial flag is set, and the Authors tab
 shows "Library too large" (New still works over the books indexed).
 
 ### 3.3 Identity, added order, sidecar signature
@@ -127,7 +128,7 @@ resolve, or one sort phase. It lives only while a build runs. The lent framebuff
      - **Pass A** puts its `.opf`/`.OPF` sidecars into a fixed table of 128 × {stem hash, signature}, about 1 KB ⚑. Overflow marks that folder's books `SIG_UNKNOWN`.
      - **Pass B** stages each book as `{identity, date, sidecarSig, pathOff}` plus its path, in stage files on SD.
 2. **Join.**
-   - Load the staged identities (8 B each) into the lent framebuffer and sort them. At 4,000 books that is 32 KB.
+   - Load the staged books (16 B each) into the lent framebuffer and sort them by identity. At 2,000 books that is 32 KB.
    - Merge them in one sequential pass against the previous index's records, which are already in identity order:
      - **Identity and `sidecarSig` both match:** carry `authorHash` and `firstSeen`.
      - **Identity matches, signature differs:** keep `firstSeen`; set `authorHash` to "not yet resolved".
@@ -135,7 +136,7 @@ resolve, or one sort phase. It lives only while a build runs. The lent framebuff
    - Write the new records in identity order.
 3. **Publish.**
    - Rebuild the author table. Names and sort keys come from the previous index's table by hash, and from the resolve phase for new authors.
-   - Sort the authors by key, and the (author, record) pairs, in the lent framebuffer. At 4,000 books the pairs take 16 KB.
+   - Sort the authors by an 8-byte key prefix (equal prefixes ordered by their full keys) and place every book in its author's slot, in the lent framebuffer: at most ~22 B per book, 44 KB at 2,000.
    - Compute New. Write the file to a temp name and rename it.
    - **New is usable from here on.**
 4. **Resolve.**
@@ -146,7 +147,7 @@ resolve, or one sort phase. It lives only while a build runs. The lent framebuff
    - Phase 3 runs again after every 100 resolved books ⚑ and at the end, merging that stage file in, so Authors fills in progressively.
    - **Interrupted resolves lose nothing:** every result is in `details.bin`, so the next build picks them up with one small read each.
 
-**Refresh library** (Options, on the New and Authors tabs) runs the same pipeline without carrying anything over. Every book is resolved again through `details.bin`'s content stamps. This covers the one known gap: a sidecar edit that keeps the same length, written while the clock was unset.
+**Refresh library** (Options, on the New and Authors tabs) runs the same pipeline without carrying any author over ⚑ (each book keeps its `firstSeen`, so New does not reshuffle). Every book is resolved again through `details.bin`'s content stamps. This covers the one known gap: a sidecar edit that keeps the same length, written while the clock was unset.
 
 ### 3.6 When it rebuilds
 
@@ -166,8 +167,8 @@ screen and the footer shows "Indexing %d/%d".
 | Index while browsing | One open file and the header; rows are read a window at a time | < 200 B resident |
 | An opened author | Record indices in display order | 2 B × that author's books |
 | Walk | Explicit stack of ≤ 8 open directories with their paths; sidecar table | ~1.5 KB heap |
-| Join sort | Lent framebuffer | 8 B × books (32 KB at the cap) |
-| Publish sorts | Lent framebuffer | 4 B × books + ~20 B × authors |
+| Join sort | Lent framebuffer | 16 B × books (32 KB at the cap) |
+| Publish sorts | Lent framebuffer | ≤ 22 B × books (44 KB at the cap) |
 | OPF parse inflate ring | Lent framebuffer (as today) | ≤ 32 KB |
 | Stage files | SD | ~16 B × books + paths |
 
