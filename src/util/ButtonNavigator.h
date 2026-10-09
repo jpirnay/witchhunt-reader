@@ -6,10 +6,27 @@
 
 #include "ButtonEventManager.h"
 #include "MappedInputManager.h"
+#include "util/FunctionRef.h"
+#include "util/InlineList.h"
 
 class ButtonNavigator final {
-  using Callback = std::function<void()>;
-  using Buttons = std::vector<MappedInputManager::Button>;
+  // Inspired by crosspoint-reader PRs #3698 ("perf: remove ButtonNavigator allocation churn") and
+  // #3848 ("perf: avoid list navigation callback allocations"), Sung-jin Brian Hong / @serialx.
+  // Theirs: the diagnosis. Their fix made the buttons a static initializer_list and trimmed
+  // call-site captures to fit std::function's buffer. Here the buttons resolve through the live
+  // orientation and cannot be static, so they live in an InlineList; and the callbacks are
+  // FunctionRefs, which never allocate whatever they capture.
+  //
+  // Every list screen calls in here on every loop pass, pressed or not, so nothing on these paths
+  // may touch the heap. Callbacks run before the call returns and are never kept, so they are
+  // FunctionRefs: on the C3 a std::function keeps only 8 bytes inline, and the page jump's
+  // captures went to the heap every pass.
+  using Callback = FunctionRef<void()>;
+  // The most buttons one role holds: getNextButtons()/getPreviousButtons(), a step button and a
+  // page button. The sets are resolved afresh each pass, so they live inline rather than in a
+  // std::vector; a longer set fails to compile until this is raised.
+  static constexpr std::size_t maxButtonsPerRole = 2;
+  using Buttons = InlineList<MappedInputManager::Button, maxButtonsPerRole>;
   using Direction = MappedInputManager::Direction;
 
   const uint16_t continuousStartMs;
@@ -38,10 +55,10 @@ class ButtonNavigator final {
 
   [[nodiscard]] bool shouldNavigateContinuously() const;
   void onListNav(const Buttons& buttons, bool forward, int& selectedIndex, int totalItems, int pageSize,
-                 uint32_t& lastPressMs, uint16_t& lastSeenPressCount, bool& longPressFired, const Callback& onChange);
+                 uint32_t& lastPressMs, uint16_t& lastSeenPressCount, bool& longPressFired, Callback onChange);
   [[nodiscard]] static ButtonEventManager::PressLog latestPressLog(const Buttons& buttons);
   void onListPageNav(const Buttons& buttons, bool forward, int& selectedIndex, int totalItems, int pageSize,
-                     const Callback& onChange);
+                     Callback onChange);
   [[nodiscard]] static int effectivePageSize(int pageSize) { return pageSize > 0 ? pageSize : defaultListPageSize; }
 
  public:
@@ -50,21 +67,21 @@ class ButtonNavigator final {
 
   static void setMappedInputManager(const MappedInputManager& mappedInputManager) { mappedInput = &mappedInputManager; }
 
-  void onNext(const Callback& callback);
-  void onPrevious(const Callback& callback);
-  void onPressAndContinuous(const Buttons& buttons, const Callback& callback);
+  void onNext(Callback callback);
+  void onPrevious(Callback callback);
+  void onPressAndContinuous(const Buttons& buttons, Callback callback);
 
-  void onNextPress(const Callback& callback);
-  void onPreviousPress(const Callback& callback);
-  void onPress(const Buttons& buttons, const Callback& callback);
+  void onNextPress(Callback callback);
+  void onPreviousPress(Callback callback);
+  void onPress(const Buttons& buttons, Callback callback);
 
-  void onNextRelease(const Callback& callback);
-  void onPreviousRelease(const Callback& callback);
-  void onRelease(const Buttons& buttons, const Callback& callback);
+  void onNextRelease(Callback callback);
+  void onPreviousRelease(Callback callback);
+  void onRelease(const Buttons& buttons, Callback callback);
 
-  void onNextContinuous(const Callback& callback);
-  void onPreviousContinuous(const Callback& callback);
-  void onContinuous(const Buttons& buttons, const Callback& callback);
+  void onNextContinuous(Callback callback);
+  void onPreviousContinuous(Callback callback);
+  void onContinuous(const Buttons& buttons, Callback callback);
 
   [[nodiscard]] static int nextIndex(int currentIndex, int totalItems);
   [[nodiscard]] static int previousIndex(int currentIndex, int totalItems);
@@ -96,16 +113,14 @@ class ButtonNavigator final {
   // back to defaultListPageSize, and a list shorter than a page pages by a single item — that
   // holds for the double-tap jump too, so on a one-screen list every tap is a step and taps that
   // land inside the double-click window cannot throw the selection to the far end.
-  void onNextList(int& selectedIndex, int totalItems, const Callback& onChange, int pageSize = 0);
-  void onPreviousList(int& selectedIndex, int totalItems, const Callback& onChange, int pageSize = 0);
+  void onNextList(int& selectedIndex, int totalItems, Callback onChange, int pageSize = 0);
+  void onPreviousList(int& selectedIndex, int totalItems, Callback onChange, int pageSize = 0);
 
   // Same, for lists whose Left/Right carry their own actions (the file browser's Options, the
   // starred-pages rename/delete): only the given buttons step, and paging is reachable by
   // double-clicking them.
-  void onNextList(const Buttons& buttons, int& selectedIndex, int totalItems, const Callback& onChange,
-                  int pageSize = 0);
-  void onPreviousList(const Buttons& buttons, int& selectedIndex, int totalItems, const Callback& onChange,
-                      int pageSize = 0);
+  void onNextList(const Buttons& buttons, int& selectedIndex, int totalItems, Callback onChange, int pageSize = 0);
+  void onPreviousList(const Buttons& buttons, int& selectedIndex, int totalItems, Callback onChange, int pageSize = 0);
 
   // Same again, for a selection that lives in freeink::ui::ListNav.
   //
@@ -114,23 +129,23 @@ class ButtonNavigator final {
   // converts to int but cannot bind to the int& these take, and the fix at each call site would be
   // the same three lines -- load, navigate, store. It is written once here instead, so a list that
   // keeps its selection in the nav reads exactly like one that keeps its own int.
-  void onNextList(std::atomic<int>& selectedIndex, int totalItems, const Callback& onChange, int pageSize = 0) {
+  void onNextList(std::atomic<int>& selectedIndex, int totalItems, Callback onChange, int pageSize = 0) {
     int index = selectedIndex.load();
     onNextList(index, totalItems, onChange, pageSize);
     selectedIndex.store(index);
   }
-  void onPreviousList(std::atomic<int>& selectedIndex, int totalItems, const Callback& onChange, int pageSize = 0) {
+  void onPreviousList(std::atomic<int>& selectedIndex, int totalItems, Callback onChange, int pageSize = 0) {
     int index = selectedIndex.load();
     onPreviousList(index, totalItems, onChange, pageSize);
     selectedIndex.store(index);
   }
-  void onNextList(const Buttons& buttons, std::atomic<int>& selectedIndex, int totalItems, const Callback& onChange,
+  void onNextList(const Buttons& buttons, std::atomic<int>& selectedIndex, int totalItems, Callback onChange,
                   int pageSize = 0) {
     int index = selectedIndex.load();
     onNextList(buttons, index, totalItems, onChange, pageSize);
     selectedIndex.store(index);
   }
-  void onPreviousList(const Buttons& buttons, std::atomic<int>& selectedIndex, int totalItems, const Callback& onChange,
+  void onPreviousList(const Buttons& buttons, std::atomic<int>& selectedIndex, int totalItems, Callback onChange,
                       int pageSize = 0) {
     int index = selectedIndex.load();
     onPreviousList(buttons, index, totalItems, onChange, pageSize);
@@ -140,7 +155,8 @@ class ButtonNavigator final {
   // Resolved through MappedInputManager::buttonFor on every call, so a list navigates by what the
   // reader sees rather than by which edge of the panel a button happens to sit on: in landscape
   // the front strip stands vertically and steps, while the side buttons lie across the bottom (or
-  // top) and page. Cheap enough to re-resolve per tick — a switch on the current orientation.
+  // top) and page. Cheap enough to re-resolve per tick — a switch on the current orientation, into
+  // a list returned by value with no heap behind it.
   [[nodiscard]] static Buttons getNextButtons() {
     return {MappedInputManager::buttonFor(Direction::Down), MappedInputManager::buttonFor(Direction::Right)};
   }

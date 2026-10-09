@@ -6,34 +6,34 @@
 
 const MappedInputManager* ButtonNavigator::mappedInput = nullptr;
 
-void ButtonNavigator::onNext(const Callback& callback) {
+void ButtonNavigator::onNext(Callback callback) {
   onNextPress(callback);
   onNextContinuous(callback);
 }
 
-void ButtonNavigator::onPrevious(const Callback& callback) {
+void ButtonNavigator::onPrevious(Callback callback) {
   onPreviousPress(callback);
   onPreviousContinuous(callback);
 }
 
-void ButtonNavigator::onPressAndContinuous(const Buttons& buttons, const Callback& callback) {
+void ButtonNavigator::onPressAndContinuous(const Buttons& buttons, Callback callback) {
   onPress(buttons, callback);
   onContinuous(buttons, callback);
 }
 
-void ButtonNavigator::onNextPress(const Callback& callback) { onPress(getNextButtons(), callback); }
+void ButtonNavigator::onNextPress(Callback callback) { onPress(getNextButtons(), callback); }
 
-void ButtonNavigator::onPreviousPress(const Callback& callback) { onPress(getPreviousButtons(), callback); }
+void ButtonNavigator::onPreviousPress(Callback callback) { onPress(getPreviousButtons(), callback); }
 
-void ButtonNavigator::onNextRelease(const Callback& callback) { onRelease(getNextButtons(), callback); }
+void ButtonNavigator::onNextRelease(Callback callback) { onRelease(getNextButtons(), callback); }
 
-void ButtonNavigator::onPreviousRelease(const Callback& callback) { onRelease(getPreviousButtons(), callback); }
+void ButtonNavigator::onPreviousRelease(Callback callback) { onRelease(getPreviousButtons(), callback); }
 
-void ButtonNavigator::onNextContinuous(const Callback& callback) { onContinuous(getNextButtons(), callback); }
+void ButtonNavigator::onNextContinuous(Callback callback) { onContinuous(getNextButtons(), callback); }
 
-void ButtonNavigator::onPreviousContinuous(const Callback& callback) { onContinuous(getPreviousButtons(), callback); }
+void ButtonNavigator::onPreviousContinuous(Callback callback) { onContinuous(getPreviousButtons(), callback); }
 
-void ButtonNavigator::onPress(const Buttons& buttons, const Callback& callback) {
+void ButtonNavigator::onPress(const Buttons& buttons, Callback callback) {
   const bool wasPressed = std::any_of(buttons.begin(), buttons.end(), [](const MappedInputManager::Button button) {
     return mappedInput != nullptr && mappedInput->wasPressed(button);
   });
@@ -43,7 +43,7 @@ void ButtonNavigator::onPress(const Buttons& buttons, const Callback& callback) 
   }
 }
 
-void ButtonNavigator::onRelease(const Buttons& buttons, const Callback& callback) {
+void ButtonNavigator::onRelease(const Buttons& buttons, Callback callback) {
   // The double-click FSM in ButtonEventManager delays Short events by DOUBLE_WINDOW_MS
   // (300ms) when a double-press action is configured for that button, so the configured
   // Short and Double actions can be disambiguated. In a reader activity that gating must
@@ -80,7 +80,7 @@ void ButtonNavigator::onRelease(const Buttons& buttons, const Callback& callback
   }
 }
 
-void ButtonNavigator::onContinuous(const Buttons& buttons, const Callback& callback) {
+void ButtonNavigator::onContinuous(const Buttons& buttons, Callback callback) {
   const bool isPressed = std::any_of(buttons.begin(), buttons.end(), [this](const MappedInputManager::Button button) {
     return mappedInput != nullptr && mappedInput->isPressed(button) && shouldNavigateContinuously();
   });
@@ -232,28 +232,26 @@ int ButtonNavigator::previousPageIndex(const int currentIndex, const int totalIt
   return lastPageIndex * itemsPerPage;
 }
 
-void ButtonNavigator::onNextList(int& selectedIndex, const int totalItems, const Callback& onChange,
-                                 const int pageSize) {
+void ButtonNavigator::onNextList(int& selectedIndex, const int totalItems, Callback onChange, const int pageSize) {
   onListNav(getStepNextButtons(), true, selectedIndex, totalItems, pageSize, lastNextPressMs, lastNextPressCount,
             longPressNextFired, onChange);
   onListPageNav(getPageNextButtons(), true, selectedIndex, totalItems, pageSize, onChange);
 }
 
-void ButtonNavigator::onNextList(const Buttons& buttons, int& selectedIndex, const int totalItems,
-                                 const Callback& onChange, const int pageSize) {
+void ButtonNavigator::onNextList(const Buttons& buttons, int& selectedIndex, const int totalItems, Callback onChange,
+                                 const int pageSize) {
   onListNav(buttons, true, selectedIndex, totalItems, pageSize, lastNextPressMs, lastNextPressCount, longPressNextFired,
             onChange);
 }
 
-void ButtonNavigator::onPreviousList(int& selectedIndex, const int totalItems, const Callback& onChange,
-                                     const int pageSize) {
+void ButtonNavigator::onPreviousList(int& selectedIndex, const int totalItems, Callback onChange, const int pageSize) {
   onListNav(getStepPreviousButtons(), false, selectedIndex, totalItems, pageSize, lastPreviousPressMs,
             lastPreviousPressCount, longPressPreviousFired, onChange);
   onListPageNav(getPagePreviousButtons(), false, selectedIndex, totalItems, pageSize, onChange);
 }
 
 void ButtonNavigator::onPreviousList(const Buttons& buttons, int& selectedIndex, const int totalItems,
-                                     const Callback& onChange, const int pageSize) {
+                                     Callback onChange, const int pageSize) {
   onListNav(buttons, false, selectedIndex, totalItems, pageSize, lastPreviousPressMs, lastPreviousPressCount,
             longPressPreviousFired, onChange);
 }
@@ -262,7 +260,7 @@ void ButtonNavigator::onPreviousList(const Buttons& buttons, int& selectedIndex,
 // press-type machinery below — a page jump wants to repeat while held, and there is nothing left
 // for a double-click or a long press to mean that a repeat does not already cover.
 void ButtonNavigator::onListPageNav(const Buttons& buttons, const bool forward, int& selectedIndex,
-                                    const int totalItems, const int pageSize, const Callback& onChange) {
+                                    const int totalItems, const int pageSize, Callback onChange) {
   if (!mappedInput || totalItems <= 0) return;
 
   const int page = effectivePageSize(pageSize);
@@ -286,6 +284,8 @@ void ButtonNavigator::onListPageNav(const Buttons& buttons, const bool forward, 
     onChange();
   };
 
+  // `jump` holds six references (24 bytes). Wrapped in a std::function, it went to the heap on
+  // every loop pass of a list that pages on Left/Right, pressed or not; a Callback only points at it.
   onPressAndContinuous(buttons, jump);
 }
 
@@ -311,7 +311,7 @@ ButtonEventManager::PressLog ButtonNavigator::latestPressLog(const Buttons& butt
 
 void ButtonNavigator::onListNav(const Buttons& buttons, const bool forward, int& selectedIndex, const int totalItems,
                                 const int pageSize, uint32_t& lastPressMs, uint16_t& lastSeenPressCount,
-                                bool& longPressFired, const Callback& onChange) {
+                                bool& longPressFired, Callback onChange) {
   if (!mappedInput || totalItems <= 0) return;
 
   const bool anyHeld = std::any_of(buttons.begin(), buttons.end(),
