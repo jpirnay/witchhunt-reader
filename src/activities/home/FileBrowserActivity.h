@@ -19,6 +19,7 @@
 
 // CoverThumbLoader.h needs ReaderActivity.h, which includes this file: hence a pointer to it.
 class CoverThumbLoader;
+class LibraryBuilder;
 
 class FileBrowserActivity final : public UiListActivity {
  public:
@@ -92,6 +93,13 @@ class FileBrowserActivity final : public UiListActivity {
   void generateCovers();
   bool lendForBackgroundWork();
   void returnLentBuffer(bool callerHoldsRenderLock);
+
+  // The book index build that New and Authors run when the index is stale (LibraryFreshness). It
+  // gets the lent framebuffer after the title parses and before the covers.
+  std::unique_ptr<LibraryBuilder> libraryBuilder;
+  uint32_t libraryBuildGeneration = 0;
+  void startLibraryBuildIfStale();
+  bool stepLibraryBuild();
 
   [[nodiscard]] int listPageSize() const;
   [[nodiscard]] bool listPages() const;

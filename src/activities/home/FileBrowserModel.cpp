@@ -4,14 +4,17 @@
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
+#include <I18n.h>
 #include <Logging.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 
+#include "BookDetails.h"
 #include "FolderCountMemo.h"
 #include "RecentBooksStore.h"
 
@@ -52,6 +55,14 @@ void FileBrowserModel::load() {
   fileDateTimes.clear();
   if (mode == Mode::Recents) {
     loadRecents();
+    return;
+  }
+  if (mode == Mode::Added) {
+    loadAdded();
+    return;
+  }
+  if (mode == Mode::Authors) {
+    loadAuthors();
     return;
   }
 
@@ -272,6 +283,7 @@ void FileBrowserModel::openIndexIfLarge() {
 size_t FileBrowserModel::unfilteredEntryCount() const { return fileIndex ? fileIndex->totalCount() : files.size(); }
 
 size_t FileBrowserModel::entryCount() const {
+  if (mode == Mode::Authors) return atAuthorList() ? bookIndex.header().authorCount : authorBooks.size();
   if (listsPaths()) return deepResults.size();
   return isFiltered() ? matches.size() : unfilteredEntryCount();
 }
@@ -286,6 +298,7 @@ bool FileBrowserModel::indexEntryAt(const size_t displayIndex, FileIndex::Entry&
 // directory. For the in-RAM backend `files` already stores this form; for the SD
 // index we reconstruct it from the Entry. Out-of-range / index-read failure → "".
 std::string FileBrowserModel::entryName(const size_t displayIndex) {
+  if (mode == Mode::Authors) return atAuthorList() ? authorRowName(displayIndex) : authorBookName(displayIndex);
   if (listsPaths()) {
     return displayIndex < deepResults.size() ? deepResults[displayIndex] : "";
   }
@@ -308,6 +321,12 @@ std::string FileBrowserModel::backendEntryName(const size_t displayIndex) {
 }
 
 size_t FileBrowserModel::findEntry(const std::string& name) {
+  if (mode == Mode::Authors) {
+    const size_t count = entryCount();
+    for (size_t i = 0; i < count; i++)
+      if (entryName(i) == name) return i;
+    return count;
+  }
   if (listsPaths()) {
     for (size_t i = 0; i < deepResults.size(); i++)
       if (deepResults[i] == name) return i;
@@ -386,8 +405,8 @@ uint32_t FileBrowserModel::entrySize(const size_t displayIndex) {
 }
 
 std::string FileBrowserModel::resultFolder(const size_t displayIndex) {
-  if (!listsPaths() || displayIndex >= deepResults.size()) return "";
-  const std::string& rel = deepResults[displayIndex];
+  if (!listsPaths() || displayIndex >= entryCount()) return "";
+  const std::string rel = entryName(displayIndex);
   const size_t slash = rel.rfind('/');
   if (slash == std::string::npos) return deepRoot;  // it sat in the search root
   std::string folder = deepRoot;
@@ -456,7 +475,7 @@ void FileBrowserModel::searchEverywhere(const std::string& query) {
 }
 
 void FileBrowserModel::resort() {
-  if (fileIndex || mode == Mode::Recents) return;  // ordered at build time / by recency
+  if (fileIndex || listsPaths() || mode == Mode::Authors) return;  // ordered at build time / by the index
   // Whatever happens below renumbers the rows, so the match list is rebuilt at the end.
   // Create index array to preserve metadata array alignment
   std::vector<size_t> indices(files.size());
@@ -576,6 +595,142 @@ void FileBrowserModel::clear() {
   matches.clear();
   matches.shrink_to_fit();
   clearDeepSearch();
+  bookIndex.close();
+  openAuthorRow = -1;
+  authorBooks.clear();
+  authorBooks.shrink_to_fit();
   if (fileIndex) fileIndex->close();
   fileIndex = nullptr;
+}
+
+bool FileBrowserModel::isBookName(const char* name) { return isReadableBook(std::string_view{name}); }
+
+void FileBrowserModel::releaseIndex() { bookIndex.close(); }
+
+// The index's newest books, as paths from the root like Recents' rows. A book gone since the index
+// was built is left out.
+void FileBrowserModel::loadAdded() {
+  clearDeepSearch();
+  deepRoot = "/";
+  if (!bookIndex.isOpen() && !bookIndex.open(library::INDEX_PATH)) return;
+  std::string path;
+  library::BookRecord record{};
+  for (uint16_t rank = 0; rank < bookIndex.header().newCount; ++rank) {
+    uint16_t index = 0;
+    if (!bookIndex.newBook(rank, index) || !bookIndex.book(index, record) || !bookIndex.blobString(record.pathOff, path)) {
+      continue;
+    }
+    if (path.size() > 1 && path.front() == '/' && Storage.exists(path.c_str())) deepResults.push_back(path.substr(1));
+  }
+}
+
+// The author list, or -- when an author was open -- that author's books again, found by hash: a
+// rebuilt index may have moved its row.
+void FileBrowserModel::loadAuthors() {
+  clearDeepSearch();
+  deepRoot = "/";
+  if (!bookIndex.isOpen()) bookIndex.open(library::INDEX_PATH);
+  if (openAuthorRow < 0) return;
+  openAuthorRow = -1;
+  authorBooks.clear();
+  library::AuthorRecord author{};
+  for (uint16_t row = 0; row < bookIndex.header().authorCount; ++row) {
+    if (bookIndex.author(row, author) && author.hash == openAuthorHash) {
+      openAuthor(row);
+      return;
+    }
+  }
+}
+
+bool FileBrowserModel::openAuthor(const size_t row) {
+  library::AuthorRecord author{};
+  if (!atAuthorList() || row > UINT16_MAX || !bookIndex.author(static_cast<uint16_t>(row), author)) return false;
+  authorBooks.clear();
+  authorBooks.reserve(author.count);
+  for (uint32_t slot = author.firstBook; slot < uint32_t{author.firstBook} + author.count; ++slot) {
+    uint16_t record = 0;
+    if (bookIndex.authorBook(slot, record)) authorBooks.push_back(record);
+  }
+  openAuthorRow = static_cast<int>(row);
+  openAuthorHash = author.hash;
+  deepRoot = "/";
+  orderAuthorBooks();
+  return true;
+}
+
+size_t FileBrowserModel::closeAuthor() {
+  const int row = openAuthorRow;
+  openAuthorRow = -1;
+  authorBooks.clear();
+  authorBooks.shrink_to_fit();
+  return row < 0 ? 0 : static_cast<size_t>(row);
+}
+
+bool FileBrowserModel::authorAt(const size_t row, uint16_t& books, uint32_t& hash) {
+  library::AuthorRecord author{};
+  if (row > UINT16_MAX || !bookIndex.author(static_cast<uint16_t>(row), author)) return false;
+  books = author.count;
+  hash = author.hash;
+  return true;
+}
+
+// An author row, marked as a folder: opening it lists the author's books.
+std::string FileBrowserModel::authorRowName(const size_t row) {
+  library::AuthorRecord author{};
+  std::string name;
+  if (row > UINT16_MAX || !bookIndex.author(static_cast<uint16_t>(row), author)) return "";
+  if (author.hash == library::AUTHOR_PENDING) {
+    name = tr(STR_NOT_YET_INDEXED);
+  } else if (author.hash == library::AUTHOR_UNKNOWN || !bookIndex.authorName(author, name) || name.empty()) {
+    name = tr(STR_UNKNOWN_AUTHOR);
+  }
+  return name + '/';
+}
+
+std::string FileBrowserModel::authorBookName(const size_t index) {
+  library::BookRecord record{};
+  std::string path;
+  if (index >= authorBooks.size() || !bookIndex.book(authorBooks[index], record) ||
+      !bookIndex.blobString(record.pathOff, path) || path.size() < 2) {
+    return "";
+  }
+  return path.substr(1);
+}
+
+// An author's books by series, then series index, then title, as the book lists show them; books in
+// no series after the series. Past MAX_ORDERED books the index's order stands: the details reads
+// would take seconds.
+void FileBrowserModel::orderAuthorBooks() {
+  constexpr size_t MAX_ORDERED = 200;
+  if (authorBooks.size() < 2 || authorBooks.size() > MAX_ORDERED) return;
+  struct Key {
+    std::string series;
+    float index;
+    std::string title;
+    uint16_t record;
+  };
+  std::vector<Key> keys;
+  keys.reserve(authorBooks.size());
+  library::BookRecord record{};
+  std::string path;
+  for (const uint16_t r : authorBooks) {
+    Key key{{}, 0.0f, {}, r};
+    if (bookIndex.book(r, record) && bookIndex.blobString(record.pathOff, path)) {
+      BookDetails details;
+      if (BookDetailsLookup::cached(path, 0, details)) {
+        key.series = std::move(details.series);
+        key.index = strtof(details.seriesIndex.c_str(), nullptr);
+        key.title = std::move(details.title);
+      }
+      if (key.title.empty()) key.title = path.substr(path.rfind('/') + 1);
+    }
+    keys.push_back(std::move(key));
+  }
+  std::sort(keys.begin(), keys.end(), [](const Key& a, const Key& b) {
+    if (a.series.empty() != b.series.empty()) return !a.series.empty();
+    if (a.series != b.series) return FsHelpers::naturalCompare(a.series.c_str(), b.series.c_str()) < 0;
+    if (a.index != b.index) return a.index < b.index;
+    return FsHelpers::naturalCompare(a.title.c_str(), b.title.c_str()) < 0;
+  });
+  for (size_t i = 0; i < keys.size(); ++i) authorBooks[i] = keys[i].record;
 }

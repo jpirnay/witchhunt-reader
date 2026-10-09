@@ -9,6 +9,7 @@
 #include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <LibraryBuilder.h>
 #include <Memory.h>
 #include <SidecarFiles.h>
 #include <Txt.h>
@@ -29,12 +30,14 @@
 #include "../util/BmpViewerActivity.h"
 #include "../util/ConfirmationActivity.h"
 #include "../util/KeyboardEntryActivity.h"
+#include "BookDetails.h"
 #include "BookInfoActivity.h"
 #include "CoverThumbLoader.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "FileContextMenuActivity.h"
 #include "KOReaderCredentialStore.h"
+#include "LibraryFreshness.h"
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
 #include "components/BookProgressPresentation.h"
@@ -43,6 +46,22 @@
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
+
+namespace {
+// The builder's resolver: the author the book lists already show, from details.bin when it is there
+// and from the book (and its sidecar) when not. False -- try again next build -- when that parse
+// could not run just now.
+bool resolveAuthor(void*, const std::string& path, const uint32_t size, LibraryBuilder::Author& out,
+                   BuildArena* scratch) {
+  BookDetails details;
+  if (!BookDetailsLookup::cached(path, size, details) && !BookDetailsLookup::parse(path, size, details, scratch)) {
+    return false;
+  }
+  out.name = std::move(details.primaryAuthor);
+  out.fileAs = std::move(details.authorSort);
+  return true;
+}
+}  // namespace
 
 FileBrowserActivity::FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                          std::string initialPath, std::string focusName, const Mode mode)
@@ -70,6 +89,7 @@ void FileBrowserActivity::onEnter() {
   }
   model.load();
   recents.reset();
+  startLibraryBuildIfStale();
   int selectedIndex = 0;
 
   if (!focusName.empty()) {
@@ -93,6 +113,7 @@ void FileBrowserActivity::onEnter() {
 
 void FileBrowserActivity::onExit() {
   UiListActivity::onExit();
+  libraryBuilder.reset();  // abandoned: the next visit walks again; details.bin keeps the resolves
   model.clear();
   bookRows.release();
   // ActivityManager::exitActivity holds the render lock around onExit().
@@ -122,6 +143,7 @@ void FileBrowserActivity::loop() {
     if (bookRows.resolveOne(renderer, coverScratch.get())) requestUpdate();
     return;
   }
+  if (stepLibraryBuild()) return;
   generateCovers();
 }
 
@@ -1578,4 +1600,45 @@ void FileBrowserActivity::doRemove(const std::string& fullPath, const std::strin
 
 int FileBrowserActivity::listCount() const {
   return static_cast<int>(std::min(model.entryCount(), static_cast<size_t>(std::numeric_limits<uint16_t>::max())));
+}
+
+void FileBrowserActivity::startLibraryBuildIfStale() {
+  if (model.getMode() != Mode::Added && model.getMode() != Mode::Authors) return;
+  if (libraryBuilder || !LibraryFreshness::stale(model.index())) return;
+  LibraryBuilder::Config config;
+  config.showHidden = SETTINGS.showHiddenFiles;
+  config.isBook = &FileBrowserModel::isBookName;
+  config.resolve = &resolveAuthor;
+  libraryBuilder = makeUniqueNoThrow<LibraryBuilder>(std::move(config));
+  libraryBuildGeneration = Storage.contentGeneration();
+}
+
+// One step of the index build, when there is one and nothing more urgent: true while it runs, so the
+// covers wait. The builder resets the lent framebuffer at each step, so the cover loader -- its
+// other user -- is stopped first; and the model's index is let go before a publish replaces it.
+bool FileBrowserActivity::stepLibraryBuild() {
+  if (!libraryBuilder) return false;
+  if (renderer.isComposingFrame() || mappedInput.hasPendingInput()) return true;
+  if (libraryBuilder->needsArena()) {
+    coverLoader->reset();
+    if (!lendForBackgroundWork()) return true;
+  }
+  if (libraryBuilder->nextStepPublishes()) {
+    RenderLock lock(*this);
+    model.releaseIndex();
+  }
+  HalPowerManager::Lock fullSpeed;
+  const LibraryBuilder::Phase phase = libraryBuilder->step(coverScratch.get());
+  const bool reload = libraryBuilder->takePublished() || phase == LibraryBuilder::Phase::Failed;
+  if (reload) {
+    RenderLock lock(*this);
+    model.load();
+    resetNavigation(std::min(nav.selected.load(), std::max(0, listCount() - 1)));
+  }
+  if (libraryBuilder->finished()) {
+    if (phase == LibraryBuilder::Phase::Done) LibraryFreshness::built(libraryBuildGeneration);
+    libraryBuilder.reset();
+  }
+  if (reload) requestUpdate();
+  return true;
 }
