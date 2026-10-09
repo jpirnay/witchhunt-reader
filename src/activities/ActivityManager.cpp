@@ -10,6 +10,7 @@
 #include <esp_system.h>
 
 #include <algorithm>
+#include <cstdlib>
 
 #include "CrossPointState.h"
 #include "OpdsServerStore.h"
@@ -488,14 +489,14 @@ void ActivityManager::goToKOReaderSettings() {
   replaceActivity(std::make_unique<KOReaderSettingsActivity>(renderer, mappedInput));
 }
 
-void ActivityManager::goToFileBrowser(std::string path, std::string focusName) {
-  replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path), std::move(focusName)));
-}
-
-// Recent Books is Browse Files over the recent-books list: the same views, keys and Options.
-void ActivityManager::goToRecentBooks(std::string focusName) {
-  replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, "/", std::move(focusName),
-                                                        FileBrowserActivity::Mode::Recents));
+// The Library is the file browser in one of its four tab modes; every tab has the same views, keys
+// and Options.
+void ActivityManager::goToLibrary(const LibraryTab tab, std::string path, std::string focusName,
+                                  const std::optional<uint32_t> author) {
+  auto library = std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path), std::move(focusName),
+                                                       FileBrowserActivity::modeFor(tab));
+  if (author) library->openAuthorOnEnter(*author);
+  replaceActivity(std::move(library));
 }
 
 void ActivityManager::goToGlobalBookmarks() { goToGlobalBookmarks({}); }
@@ -579,16 +580,19 @@ void ActivityManager::returnFromChild() {
   hasReturnHint = false;
 
   switch (hint.target) {
-    case ReturnTo::FileBrowser:
-      goToFileBrowser(std::move(hint.path), std::move(hint.selectName));
+    case ReturnTo::Library: {
+      std::optional<uint32_t> author;
+      if (!hint.selectionContext.empty()) {
+        author = static_cast<uint32_t>(std::strtoul(hint.selectionContext.c_str(), nullptr, 10));
+      }
+      goToLibrary(libraryTabFrom(static_cast<uint8_t>(hint.selectIndex)), std::move(hint.path),
+                  std::move(hint.selectName), author);
       break;
+    }
     case ReturnTo::AllFiles:
       replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(hint.path),
                                                             std::move(hint.selectName),
                                                             FileBrowserActivity::Mode::AllFiles));
-      break;
-    case ReturnTo::RecentBooks:
-      goToRecentBooks(std::move(hint.selectName));
       break;
     case ReturnTo::GlobalBookmarks:
       goToGlobalBookmarks(std::move(hint));
@@ -624,7 +628,7 @@ void ActivityManager::goToHomeMore() { replaceActivity(std::make_unique<HomeMore
 void ActivityManager::goToHomeMenuAction(const HomeMenuAction action) {
   switch (action) {
     case HomeMenuAction::Library:
-      goToFileBrowser();
+      goToLibrary(libraryTabFrom(APP_STATE.libraryTab));
       break;
     case HomeMenuAction::ReadingStats:
       goToReadingStats();

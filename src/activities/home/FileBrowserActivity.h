@@ -13,6 +13,7 @@
 #include "../UiListActivity.h"
 #include "BookRowResolver.h"
 #include "FileBrowserModel.h"
+#include "LibraryTab.h"
 #include "RecentBooksStore.h"
 #include "components/CoverGridLayout.h"
 #include "components/themes/BaseTheme.h"
@@ -100,6 +101,30 @@ class FileBrowserActivity final : public UiListActivity {
   uint32_t libraryBuildGeneration = 0;
   void startLibraryBuildIfStale();
   bool stepLibraryBuild();
+  // What the header and an empty New or Authors say while a build runs. The render task reads them;
+  // the loop task owns the builder.
+  std::atomic<bool> indexing{false};
+  std::atomic<uint16_t> indexResolved{0};
+  std::atomic<uint16_t> indexPending{0};
+
+  // The Library: Books, Recent, New and Authors as tabs of one screen. Each tab is left where it
+  // was: its row, Books its folder, Authors the author open in it.
+  [[nodiscard]] bool libraryTabs() const;
+  [[nodiscard]] LibraryTab currentTab() const;
+  void showLibraryTab(LibraryTab tab);
+  void composeLibraryTabBar(UiScreen& screen);
+  static void tabActionTrampoline(const freeink::ui::ActionEvent& event, void* user);
+  void loadRows();
+  [[nodiscard]] ReturnHint returnHint(std::string selectName) const;
+  std::array<int, LIBRARY_TAB_COUNT> tabRows{};
+  std::string booksPath = "/";
+  bool authorToOpen = false;
+  uint32_t authorToOpenHash = 0;
+  // A long Up/Down switches tab. In a list the press stepped a row on its way down: stepOrigin is the
+  // row it left, put back first. The key still held must not reach the navigator, whose 1.5 s hold
+  // jumps to the list's end: tabHold, until it is let go.
+  int stepOrigin = 0;
+  bool tabHold = false;
 
   [[nodiscard]] int listPageSize() const;
   [[nodiscard]] bool listPages() const;
@@ -129,6 +154,14 @@ class FileBrowserActivity final : public UiListActivity {
   void loop() override;
   // The borrowed framebuffer goes back before any other screen opens on top of this one.
   void startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler) override;
+
+  // The mode a Library tab lists.
+  static Mode modeFor(LibraryTab tab);
+  // Authors: the author to open on entering, by hash (a return from one of its books).
+  void openAuthorOnEnter(const uint32_t hash) {
+    authorToOpen = true;
+    authorToOpenHash = hash;
+  }
 
  private:
   int listCount() const override;
