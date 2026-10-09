@@ -69,6 +69,16 @@ freeAll()
 
 `freeStyleMiniData` deliberately does **not** reset `reportedMissCount` — that counter accumulates across all paragraphs of a section and is only cleared by `freeStyleAll` at section boundary. This lets the renderer log a single summary of SD misses at the end of a chapter.
 
+Every `delete[]` above goes through `freeArray`, which does nothing in arena mode (next section).
+
+## Arena mode (`useArena`)
+
+`SdCardFont::useArena(BuildArena*)`, called before `load` or `loadFromMmap`, makes every array the font allocates come from the caller's arena instead of the heap (`allocArray` / `freeArray` / `makeScratch`). Arena arrays are never freed one at a time; the caller rewinds the arena after the font is destroyed. The prewarm's bitmap retry sizes itself from the arena's free room (`maxAllocatable`) instead of the heap's largest block. Without an arena every call is the plain heap call.
+
+One exception: the glyph-miss ring's bitmaps (`OverflowEntry::bitmap`) stay on the heap even in arena mode, because the ring frees one slot at a time, which a bump arena cannot.
+
+Only the font selector's previews use it: `FontSelectionActivity::loadPreviewFont` passes a block of the lent secondary framebuffer through `SdCardFontSystem::ensureLoadedForPreview` and `SdCardFontManager::loadFamily`, and rewinds the block after unloading the font. If the font does not load into the arena, it is loaded again on the heap. The reader never uses an arena.
+
 ## Metadata unload/reload
 
 Font metadata (interval tables, kern/lig tables) can be temporarily released between chapters to make room for `createSectionFile`. This is controlled by `SdCardFontManager` calling `unloadMetadata()` / `reloadMetadata()` around each section build.
@@ -105,12 +115,33 @@ Building the full kern matrix per page from the compact kern class tables is exp
 
 The resulting `miniKernMatrix` is `numLeft × numRight` `int8_t` values in compact row-major order, indexed by the mini left/right class remapping tables. Typical size for a page: 10–20 left classes × 10–20 right classes = 100–400 bytes.
 
+A `.cpfont` is a user-supplied file, so the build guards against two malformed cases:
+
+- A class ID above the class count in the style's header counts as unkerned. Every step that reads the class tables goes through the same range-checked lookup, so they agree on which codepoints carry a class. The check sits on the lookup rather than at load time because the class tables can point straight into the read-only flash mapping.
+- `numLeft`, `numRight` and their loop counters are `uint16_t`, so a page that uses all 255 classes terminates.
+
 ## SdCardFontManager: selecting the load path
 
-`SdCardFontManager` decides whether to load a requested `(familyName, pointSize)` from flash or SD:
+`SdCardFontManager::loadFamily` loads one file of a family, the one closest to the requested size (`SdCardFontFamilyInfo::pickClosestSize`, ties to the smaller), and decides whether to read it from flash or SD:
 
-1. Check `FlashFontPartition::hasEntry(family, size)`.
-2. If yes: call `FlashFontPartition::mmap(...)`, call `font.loadFromMmap(ptr, sz, sdPath)`, call `FlashFontPartition::unmap()`.
-3. If no: call `font.load(sdPath)` (SD-based read).
+1. Unmap any previous mapping, then check `FlashFontPartition::hasEntry(family, size)`.
+2. On a miss with `FlashCachePolicy::ReadWrite` (the reader), write the family into the partition first (`writeFamily`). With `FlashCachePolicy::ReadOnly` (the font preview), skip the write.
+3. If the entry is now in the partition: `FlashFontPartition::mmap(...)`, then `font.loadFromMmap(ptr, sz, sdPath)`. If that fails, unmap.
+4. Otherwise, or if the mapped load failed: `font.load(sdPath)` (SD-based read).
 
-After either path, the font is in the same usable state from the caller's perspective. The mmap handle is released immediately after `loadFromMmap` — the font does not hold a persistent mmap handle.
+After either path, the font is in the same usable state from the caller's perspective. A mapped font reads through the mapping for as long as it is loaded, so the mapping stays active until the next `loadFamily` or `unloadAll` (see [Flash Font Partition](./flash-font-partition.md#lifetime-and-mmap-validity)).
+
+## Reader sizes and size aliases
+
+Reader sizes are stored as point sizes: `CrossPointSettings::fontPointSize`, `txtFontPointSize` and a book's `fontSizeOverride` (the JSON keys are still `fontSize`, `txtFontSize` and `fontSizeOverride`). Files stamped before `FIRST_POINT_SIZE_VERSION` stored a `FONT_SIZE` enum value instead; `fontPointSizeFromStored` converts those on load. That is why the `FONT_SIZE` values are frozen: a new rung goes on top of `FONT_SIZE_RUNGS`, never in the middle.
+
+`ReaderSizeList` (`src/ReaderFontSizes.h`) holds the sizes one family offers:
+
+- a built-in family: the ladder, `FONT_SIZE_RUNGS` (10–26 pt);
+- an SD family: every size it ships a file for, then the ladder sizes above its largest file. A ladder size below the largest file is never offered, because it would be drawn by shrinking a bigger face.
+
+A stored size need not be one the active family offers, so everything that shows, steps or draws it goes through `ReaderSizeList::snap` (the nearest offered size, ties to the smaller). The stored value is never rewritten, so switching back to the family it was chosen under brings it back. The settings rows read the list when asked (`SettingInfo::withDynamicOptions`), so it follows a family chosen in the same submenu.
+
+An SD size that has a file loads that file unscaled. A ladder size above the largest file is an alias (`SdCardFontManager::ensureSizeAlias`): a second font ID bound to the loaded face with a base scale of target / loaded (`GfxRenderer::insertScaledFont`). One alias exists at a time. `SdCardFontManager::getFontId` returns the face, the alias or 0, never a nearby size.
+
+The font selector caches each rendered preview strip on the SD card (`FontPreviewCache`), keyed by the point size drawn, not by the file it was drawn from.

@@ -278,6 +278,10 @@ File uploaded successfully: mybook.epub
 - Existing files with the same name are replaced
 - Uses a 4KB buffer for efficient SD card writes
 - The book's layout cache is cleared on success, so an overwritten book is re-indexed
+- Pressing **Back** on the device cancels the upload. The server checks for it on every
+  received chunk (`CrossPointWebServer::setUploadCancelCheck()`), closes the connection,
+  deletes the partial file and leaves File Transfer. The client sees the connection drop,
+  with no response.
 
 ---
 
@@ -431,11 +435,15 @@ The 500 body lists each failure as `<path> (<reason>)`, where the reason is one 
 
 Every path a request names is checked segment by segment, before the card is touched,
 by the file endpoints above, `/upload`, the WebSocket upload, the plugin write
-endpoints and WebDAV:
+endpoints and WebDAV (except `PROPFIND`; see [WebDAV](#webdav)). The rules are in
+`ProtectedPaths` (`lib/FsHelpers/ProtectedPaths.h`); `isProtectedWebPath()`
+(`src/network/WebPathGuard.cpp`) applies them with the on-card alias lookup described below.
 
 - The credential stores (`/.crosspoint/wifi.json`, `opds.json`, `koreader.json`)
-  are never reachable. Their passwords are obfuscated with a key derived from the
-  device's MAC address, which any client on the network can see.
+  are never reachable, and neither is a file whose path starts with one of them, such as
+  a temporary or backup copy beside it. Their passwords are obfuscated with a key derived
+  from the device's MAC address, which any client on the network can see. With **Show
+  Hidden Files** on, the listing of `/.crosspoint` still shows them, but opening one is refused.
 - `System Volume Information` and `XTCache` are never reachable, at any depth.
 - A segment starting with `.` is refused at any depth, unless **Show Hidden Files**
   is on. Then dot folders can be listed and walked through, so caches under
@@ -457,7 +465,9 @@ The Settings page edits the same settings as the on-device Settings screens.
 
 ### GET `/api/settings` - List Settings
 
-Returns a streamed JSON array with one object per setting.
+Returns a streamed JSON array with one object per setting. The rows are visited one at a
+time (`forEachSetting()`) and only the ones this board offers are listed: a setting for
+hardware the board lacks, such as a front light or a touch panel, is left out.
 
 ```bash
 curl http://crosspoint.local/api/settings
@@ -466,9 +476,12 @@ curl http://crosspoint.local/api/settings
 **Response (200 OK)**, abridged and with illustrative values:
 ```json
 [
-  {"key": "fontFamily", "name": "Font", "category": "Reader", "subcategory": "", "submenu": "",
-   "type": "enum", "value": 0, "options": ["Bookerly", "Noto Serif"]},
-  {"key": "sleepTimeoutMinutes", "name": "Time to sleep", "category": "Display", "subcategory": "",
+  {"key": "fontFamily", "name": "EPUB Font Family", "category": "Reader", "subcategory": "Reader Font",
+   "submenu": "Reader Font", "type": "enum", "value": 0, "options": ["Bookerly", "Noto Sans"]},
+  {"key": "fontSize", "name": "EPUB Font Size", "category": "Reader", "subcategory": "",
+   "submenu": "Reader Font", "type": "enum", "value": 1,
+   "options": ["10pt", "12pt", "14pt", "16pt", "18pt", "20pt", "22pt", "24pt", "26pt"]},
+  {"key": "sleepTimeoutMinutes", "name": "Time to Sleep", "category": "Display", "subcategory": "",
    "submenu": "", "type": "value", "value": 10, "min": 0, "max": 60, "step": 1}
 ]
 ```
@@ -479,16 +492,27 @@ curl http://crosspoint.local/api/settings
 | `name`, `category`, `subcategory`, `submenu` | string | Labels in the device language; the last two may be empty |
 | `type`                     | string | `toggle`, `enum`, `value` or `string`                             |
 | `value`                    | number or string | Current value. Toggles are `0` or `1`; enums are an index into `options` |
-| `options`                  | array  | `enum` only: option labels. For the font rows this includes the families found on the SD card |
+| `options`                  | array  | `enum` only: option labels. For `fontFamily` and `txtFontFamily` this includes the families found on the SD card |
 | `min`, `max`, `step`       | number | `value` only: allowed range                                       |
 | `obfuscated`, `isSet`      | bool   | `string` only, for credentials: `value` is always `""`; `isSet` says whether one is stored |
 
 Actions without a key are not listed.
 
+`fontSize` and `txtFontSize` list the sizes the selected family offers, read when the
+request is served (`SettingInfo::withDynamicOptions`). Their `value` is the position of the
+stored size in that list, or of the closest one when the family does not offer it. The
+settings file stores the point size itself under the same keys; only this API deals in
+positions.
+
 ### POST `/api/settings` - Change Settings
 
-Applies the keys present in a JSON body and saves. Unknown keys and out-of-range
-values are skipped silently.
+Applies the keys present in a JSON body and saves. Unknown keys, keys for settings this
+board does not offer, and out-of-range values are skipped silently.
+
+`fontFamily` and `txtFontFamily` are applied after every other key. A `fontSize` or
+`txtFontSize` in the same body is therefore read against the sizes of the family that was
+selected before the request, which is the list the page was showing. After saving a family
+change the Settings page fetches `/api/settings` again, because the size lists follow the family.
 
 ```bash
 curl -X POST -H "Content-Type: application/json" \
@@ -589,8 +613,12 @@ Notes:
 - `download` with `all` installs every family that is missing or has an update; with `family`, that one.
   The files of a batch share one TLS connection.
 - `upload` takes the family name from the query string, because multipart fields are not
-  available until the file has arrived. The file must end in `.cpfont`, carry no path separators, and start
-  with the `CPFONT\0\0` magic; otherwise the partial file is deleted.
+  available until the file has arrived. The family name must be valid, and the file must end in `.cpfont`,
+  carry no path separators or `..`, and start with the `CPFONT\0\0` magic. A request refused on its names
+  (or because the family folder cannot be created) writes nothing and leaves the installed fonts alone; a file
+  that fails the magic check, or whose transfer breaks off, is deleted.
+- Pressing **Back** on the device cancels an `upload` as it does for [`/upload`](#post-upload---upload-file):
+  the connection is closed and the partial file deleted.
 
 **Errors:**
 
@@ -730,9 +758,10 @@ curl -X POST "http://crosspoint.local/api/fetch?plugin=my-plugin&url=https%3A%2F
 # -> {"ok":true,"dest":"/Books/book.epub"}
 ```
 
-Same allowlist and no-redirect rules as `/api/relay`. `dest` must pass the same
-check `/upload` applies: inside the card, no `..`, and not a hidden or protected
-item. The book's layout cache is invalidated on success.
+Same allowlist and no-redirect rules as `/api/relay`. `dest` is normalised, so `..`
+cannot climb above the card root, must name a file (not `/` and no trailing `/`), and is
+judged as an item under [Protected paths](#protected-paths), as `/upload` judges its target
+(`pluginWriteTarget()`). The book's layout cache is invalidated on success.
 
 | Status | Cause                                          |
 | ------ | ---------------------------------------------- |
@@ -784,7 +813,7 @@ Content-Type is derived from the extension (`.js`, `.css`, `.html`, `.json`,
 
 | Status | Body                | Cause                                                   |
 | ------ | ------------------- | ------------------------------------------------------- |
-| 400    | `Bad plugin path`   | `name` or `file` empty or containing `/`, `\`, or `..`   |
+| 400    | `Bad plugin path`   | `name` or `file` empty, containing `/` or `\`, or exactly `.` or `..` |
 | 404    | `Plugin not found`  | No such folder in any plugins root                      |
 | 404    | `File not found`    | No such file in that folder, or it is a directory       |
 
@@ -802,7 +831,7 @@ curl -X PROPFIND -H "Depth: 1" http://crosspoint.local/Books/
 | Method           | Behaviour                                                                                  |
 | ---------------- | ------------------------------------------------------------------------------------------ |
 | `OPTIONS`        | Returns `DAV: 1` and the `Allow` list                                                      |
-| `PROPFIND`       | Lists a file or folder. `Depth` 0 or 1 (anything else counts as 1). `207` multistatus; `404` if absent |
+| `PROPFIND`       | Lists a file or folder. `Depth` 0 or 1 (anything else counts as 1). Children whose names start with `.`, and the system folders, are left out. `207` multistatus; `404` if absent |
 | `GET`, `HEAD`    | Streams a file. A folder answers `405`                                                     |
 | `PUT`            | Writes `<name>.davtmp`, then renames it over the target, so a failed upload keeps the old file. The parent folder must exist. `201` new, `204` replaced |
 | `DELETE`         | Removes a file or an **empty** folder (`409` otherwise). `204`. A deleted book's layout cache is cleared; sidecars are not removed |
@@ -811,9 +840,17 @@ curl -X PROPFIND -H "Depth: 1" http://crosspoint.local/Books/
 | `COPY`           | As `MOVE`, but files only: copying a folder answers `403`                                  |
 | `LOCK`, `UNLOCK` | Dummy: returns a fixed token so clients that insist on locking keep working. Nothing is locked |
 
-A path with a hidden segment (starting with `.`) or inside `System Volume Information`
-or `XTCache` answers `403`, at any depth, including spellings the SD library maps onto
-one (see [Protected paths](#protected-paths)). The root cannot be deleted or moved.
+For `GET`, `HEAD`, `PUT`, `DELETE` and `MKCOL`, and for both ends of `MOVE` and `COPY`, a
+path with a hidden segment (starting with `.`) or inside `System Volume Information` or
+`XTCache` answers `403`, at any depth, including spellings the SD library maps onto one
+(see [Protected paths](#protected-paths)). WebDAV refuses dot segments whatever **Show
+Hidden Files** says (`WebDAVHandler::isProtectedPath()`). `PROPFIND` does not judge the path
+it is asked about: pointed at a protected folder, it lists that folder's entries (names and
+sizes, not contents), leaving out only the dot-named and system ones. The root cannot be
+deleted or moved.
+
+Pressing **Back** on the device does not interrupt a `PUT`: the body is read whole inside one
+request, and File Transfer is left once it has arrived.
 
 ---
 
@@ -860,7 +897,8 @@ Server -> "DONE"
 | `ERROR:Cannot write to a protected location` | Folder or target is a [protected path](#protected-paths) |
 | `ERROR:Upload already in progress` | A second START arrived while an upload was active |
 | `ERROR:No upload in progress`     | Binary data received without START |
-| `ERROR:Write failed - disk full?` | SD card write error                |
+| `ERROR:Upload overflow`           | More data arrived than the size in START; the partial file is deleted |
+| `ERROR:Write failed - disk full?` | SD card write error; the partial file is deleted |
 
 **Example with `websocat`:**
 ```bash
@@ -874,6 +912,7 @@ START:mybook.epub:1234567:/Books
 
 **Notes:**
 - Progress updates are sent every 64KB or at completion
+- A START with size `0` creates an empty file and answers `DONE` at once, without `READY`
 - Disconnection during upload will delete the incomplete file
 - Existing files with the same name will be overwritten
 

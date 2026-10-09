@@ -26,7 +26,7 @@ Spine items before the first TOC entry (cover pages) and after the last (appendi
 
 `hasReliableToc()` answers whether the TOC has enough spine coverage (>=25% of spines referenced) to drive chapter UX, with short-circuits for `tocCount <= 0` and the "large book with one TOC entry" pathology.
 
-The result is computed once during `buildBookBin` (folded into the existing `spineIndex->tocIndex` scan, so no extra disk pass) and persisted as a single byte in book.bin's header A. `Epub::hasReliableToc()` reads `BookMetadataCache::isTocReliable()` and caches the bool in `tocReliabilityState`.
+The result is computed once during `buildBookBin` (folded into the existing `spineIndex->tocIndex` scan, so no extra disk pass) and persisted as a single byte in book.bin's header A. `Epub::hasReliableToc()` reads `BookMetadataCache::isTocReliable()` and caches the answer in `tocReliability` (a `TocReliability`: Unknown, Reliable or Unreliable).
 
 This matters because the check used to recompute the answer on demand by calling `getTocEntry(i)` for every TOC entry, which does two SD-card seeks per call. On a 2858-entry web-novel TOC that was ~5700 seeks (~7 seconds) added to first-page latency. `BOOK_CACHE_VERSION` was bumped for this layout change; an older cache is rebuilt on next open.
 
@@ -194,7 +194,7 @@ Written once per book at index time; consumed once per section build. Format:
 
 ### Section parse path
 
-When `Section::createSectionFile` runs for a chapter, it streams `pagelist.bin`, filters to entries whose `href` matches the current spine item, and passes the resulting `(anchor → label)` pairs to `ChapterHtmlSlimParser::setExternalPageBreakAnchors`. During parsing, an element whose `id=` matches a known external anchor is treated as if it carried an inline `doc-pagebreak` marker — the existing `recordPageBreakLabel()` path is reused. The NCX/nav/page-map "start of file" entries (empty anchor) emit their label on the very first element of the chapter.
+When a section build sets up its parser (`Section::runBuildSetup`), it streams `pagelist.bin`, filters to entries whose `href` matches the current spine item, and hands each matching `(anchor → label)` pair straight to the parser (`ChapterHtmlSlimParser::beginExternalPageBreakAnchors`, one `addExternalPageBreakAnchor` per entry, `endExternalPageBreakAnchors`), with no intermediate container. During parsing, an element whose `id=` matches a known external anchor is treated as if it carried an inline `doc-pagebreak` marker — the existing `recordPageBreakLabel()` path is reused. The NCX/nav/page-map "start of file" entries (empty anchor) emit their label on the very first element of the chapter.
 
 ### Section cache storage
 

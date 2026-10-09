@@ -48,6 +48,12 @@ Rules:
   T5S3 (PCF8563 family), which use different registers, so `HalClock` dispatches on `rtcType()`.
   The fuel gauge is the same: BQ27220 on the X3 and T5S3, CW2017 on the X4 Pro, dispatched by the
   SDK's `BatteryMonitor` on the profile's gauge type.
+- A profile can carry data a chip forgets. The BQ27220 keeps Design Capacity in RAM, and a gauge
+  that lost power comes back at TI's 3000 mAh default and learns a full-charge capacity against it.
+  `HalPowerManager::serviceGaugeCapacityLoad()`, called once per loop pass from `main.cpp`, drives
+  the SDK's load (`BatteryMonitor::loadDesignCapacity()`) one short step at a time over about 8 s,
+  holding `HalI2cBus::Lock` for each step. The SDK writes only when the gauge needs it. Only the X3
+  profiles set `designCapacityMah` (650 mAh), so every other board returns on the first call.
 - On the ADC-ladder boards (X3, X4) the `InputPins` fields hold ladder indices, not GPIO
   numbers. A test that reads them as pins, for presence or against a GPIO number, answers a
   different question there. Check `inputStyle()` first; `upKeyIsBootStrap()` shows the pattern.
@@ -240,6 +246,11 @@ chosen; without it a UC81xx unit is sent SSD1677 command streams and shows no im
   charged against the C3, which has the fullest image.
 - Bump the SDK submodule in its own commit, with its own `default` build. After an SDK pull,
   restart any build in progress; it would mix old and new headers.
+- `BoardProfile` is initialised positionally. The fork's own field, `panelFadesInSunlight`, is kept
+  last, so a field upstream appends goes before it and the profiles that set it need a placeholder
+  for the new field. Without one, the X3/X4 `true` brace-elides into the new field with no
+  diagnostic. `static_assert`s after the Xteink profiles in `BoardConfig.h` fail the build on that
+  drift; keep them when merging upstream.
 - On a new board, make serial logging work first. Without a log every other fault is guesswork.
   The earliest boot lines are printed before the USB serial port comes back after a reset, so a
   capture over the device's own USB misses them; use a UART adapter for those.

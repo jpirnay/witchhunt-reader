@@ -255,10 +255,14 @@ There are three ways to get framebuffer memory back. Prefer the first.
 
 The third way, releasing **both** buffers, is only for sessions that end in a reboot (Scenario 2).
 
-Borrowers today: Home cover loading, File Browser titles and covers, first-open indexing in
-`ReaderActivity`, the reader's Background-B and Background-C builds, and the image-header walk.
-Releasers: `trimMemoryForNetworkSession()` (network sessions, which reboot), `SerialTransferActivity`
-under low heap, `SleepActivity` (cover and custom screens), and the reader's blocking section build.
+Borrowers today: Home cover loading, the Library's titles, covers and book-index build
+(`FileBrowserActivity`), the font selector's previews (`FontSelectionActivity`), first-open indexing
+in `ReaderActivity`, the reader's Background-B and Background-C builds, the blocking build when it can
+lend, the reader's image warm and image lane, and the image-header walk. Releasers:
+`trimMemoryForNetworkSession()` (network sessions, which reboot), `SerialTransferActivity` under low
+heap, `SleepActivity` (cover and custom screens), and the reader's blocking section build when nothing
+can be lent or a Background-C build failed. The full list, with the reasons, is in
+[memory-allocation-strategy.md](memory-allocation-strategy.md) §9.1.
 
 ### Scenario 1 — a temporary lend while the screen stays live
 
@@ -305,7 +309,8 @@ renderer.reallocSecondaryBuffer();           // skip when the session reboots
 renderer.setSingleBufferFastDiff(false);
 ```
 
-**Pattern 1b — borrow as an arena** (`HomeActivity`, `FileBrowserActivity`, `ReaderActivity`):
+**Pattern 1b — borrow as an arena** (`HomeActivity`, `FileBrowserActivity`, `FontSelectionActivity`,
+`ReaderActivity`):
 
 ```cpp
 renderer.syncWriteBufferFromDisplayed();     // only if you will draw over the current screen

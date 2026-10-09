@@ -56,8 +56,54 @@ callback behaviour, not just the logging.
   file below it; and `settings.h` re-defines `RSA_LOW_MEM` after `user_settings.h` is included, so
   the undef must target `WOLFSSL_LOW_MEMORY` and sit at the *end* of `user_settings.h`.
   Measured cost of enabling: **+100,254 bytes of flash** (93.8% → 95.3%), essentially all in
-  `sp_c32.c.o` (37,752 → 138,490 B). `WOLFSSL_RSA_PUBLIC_ONLY` would claw some back but does not
-  compile in wolfSSL 5.7.2 (`implicit declaration of sp_3072_norm_56`).
+  `sp_c32.c.o` (37,752 → 138,490 B). The tables stay off.
+- **`WOLFSSL_RSA_PUBLIC_ONLY` links only together with `WOLFSSL_NO_CLIENT_AUTH`.** The client
+  verifies RSA and RSA-PSS signatures but never signs with an RSA key; the one RSA signer left in a
+  client build is client-certificate authentication. With both defines (`scripts/patch_wolfssl.py`)
+  the RSA private paths compile out, about 21 KB of flash. A server that asks for a client
+  certificate still gets the empty Certificate message.
+- **GitHub's chain needs `WOLFSSL_SP_4096`.** raw, objects and release-assets.githubusercontent.com
+  send Let's Encrypt YR1 ← ISRG Root YR, cross-signed by ISRG Root X1, which is RSA-4096. Without
+  `WOLFSSL_SP_4096` a 4096-bit key goes through the generic `sp_int` path, and on an X3
+  `ConfirmSignature` failed with -155 at depth 2 while `openssl verify` accepted the same chain
+  against our roots. Why is not established: wolfSSL also reports an allocation failure inside the
+  signature math as -155, so the verify-failure log prints the depth and the heap.
+- **Every connection runs a full handshake.** TLS 1.3 session resumption was built to spare the X3
+  a second RSA-4096 chain check, then dropped once downloads were chunked (below): a build without
+  it passed the same device test. wolfSSL's session cache is compiled out (`NO_SESSION_CACHE`).
+
+### Downloads
+
+- **GitHub sends 16 KB TLS records, and the X3 cannot hold one with Wi-Fi up.** wolfSSL reads each
+  record into one heap block of the record's length, 17,408 B on the C3 for a full record. GitHub
+  ignores `max_fragment_length` (the client asks for 2 KB records anyway, for servers that honour
+  it) and sizes records dynamically, so they grow to 16 KB once a connection has carried some data.
+- **A Range request bounds the record.** The server cannot send more than the range asked for, so
+  an https download comes in HTTP Range chunks (`lib/SecureNet`: `HttpRange`, `RangeDownload`)
+  whenever the largest free block is under `http_range::STREAM_MIN_LARGEST_BLOCK` (40 KB), which in
+  practice means the C3 boards. The X4 Pro and T5S3 stream whole responses.
+  - Chunks come from `CHUNK_LADDER` (6, 4, 3, 2, 1 KB), sized from the largest free block before
+    each request, over one kept-alive connection. 6 KB is the start because the first 8 KB request
+    of every download failed on the X3.
+  - A read that runs out of memory reconnects and keeps that chunk size out of reach for the rest
+    of the session (`ChunkSession::ceiling`).
+  - A server that ignores Range (answers 200) is streamed from then on, one whole-file attempt per
+    file, restarting from byte 0.
+    A file whose size changes between chunks fails rather than being spliced. An expired redirect
+    target (GitHub's presigned release-asset URL) sends the next chunk back through the original URL.
+  - Retry budget: `MAX_RECONNECTS_BASE` (20) reconnects per file plus one per 64 KB, and a run of
+    stalls longer than `MAX_STALLED_RETRIES` ends the download.
+- **The firmware update uses the same path** (`HttpDownloader::fetchVerifiedRestartable`), so a
+  6 MB image arrives in about a thousand ranges. A Range-ignoring server restarts the OTA partition
+  (`esp_ota_abort`, `esp_ota_begin`). The image is hashed with wolfCrypt SHA-256 as it is written
+  and compared with the release asset's `digest` before `esp_ota_end()`; a mismatch is
+  `CHECKSUM_ERROR` and never becomes the boot target. A release without a digest is checked by size
+  alone.
+- **Downloads need memory freed first.** The font and firmware screens call
+  `releaseMemoryForDownload()` before Wi-Fi comes up and again before the transfer. On top of the
+  network trim (secondary framebuffer, glyph caches) it unloads a loaded SD font and the global
+  bookmark index, and drops the settings lists of the screens buried below
+  (`ActivityManager::releaseBuriedActivityState`).
 
 ### WiFi
 

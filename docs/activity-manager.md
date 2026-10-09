@@ -157,7 +157,7 @@ finish();
 Replace destroys the parent, but Back should still return to where the user came from. `ActivityManager` keeps one `ReturnHint` for that:
 
 ```cpp
-enum class ReturnTo : uint8_t { Home, FileBrowser, AllFiles, RecentBooks, GlobalBookmarks };
+enum class ReturnTo : uint8_t { Home, Library, AllFiles, GlobalBookmarks };
 
 struct ReturnHint {
   ReturnTo target = ReturnTo::Home;
@@ -171,18 +171,21 @@ struct ReturnHint {
 
 A parent records a hint before a forward flow. When the launched activity, or anything it chains to, exits with an empty stack, `returnFromChild()` consumes the hint and routes to the right parent, restoring its selection. With no hint it calls `goHome()`.
 
+`ReturnTo::Library` routes through `goToLibrary()`: `selectIndex` carries the Library tab, `path` the Books tab's folder, and `selectionContext` the hash of the author open on the Authors tab, if any. `ReturnTo::AllFiles` reopens the file browser in its All Files mode.
+
 There are two ways to set a hint.
 
 1. The dedicated wrappers `replaceWithReader(path, hint)` and `replaceWithFileBrowser(path, hint, focusName)`, which record the hint and replace in one call:
 
    ```cpp
-   // FileBrowserActivity, opening a book
+   // HomeActivity, opening a recent book
    ReturnHint hint;
-   hint.target     = ReturnTo::FileBrowser;
-   hint.path       = basepath;   // directory to restore
-   hint.selectName = entry;      // file to re-focus
-   activityManager.replaceWithReader(fullPath, std::move(hint));
+   hint.target     = ReturnTo::Home;
+   hint.selectName = path;   // book to re-focus in the recents strip
+   activityManager.replaceWithReader(path, std::move(hint));
    ```
+
+   `FileBrowserActivity` builds its hint in `returnHint()`, so closing a book comes back to the Library tab, folder or author, and row it was opened from.
 
 2. `setReturnHint()` followed by any plain `goTo*()`:
 
@@ -228,16 +231,20 @@ One FreeRTOS mutex (`renderingMutex`, private to `ActivityManager`) protects sta
 ```cpp
 class RenderLock {
  public:
-  explicit RenderLock();                         // acquire the global mutex
-  explicit RenderLock(Activity&);                // same; parameter unused
-  explicit RenderLock(ExclusiveActivityAccess);  // mutex AND no render pass in flight
-  ~RenderLock();                                 // releases if still held
-  void unlock();                                 // early release
+  enum class Mode { Blocking, Try };
+  explicit RenderLock(Mode mode = Mode::Blocking);  // acquire the global mutex
+  explicit RenderLock(Activity&);                   // same; parameter unused
+  explicit RenderLock(ExclusiveActivityAccess);     // mutex AND no render pass in flight
+  ~RenderLock();                                    // releases if still held
+  bool ownsLock() const;                            // false after a failed Try
+  void unlock();                                    // early release
   static bool peek();
 };
 ```
 
 Activities use the plain constructor. `ExclusiveActivityAccess` is for the manager's own transitions: the render task drops the mutex mid-pass and keeps using the activity, so code that destroys the current activity must wait for the pass to end, not just for the mutex.
+
+`Mode::Try` takes the mutex only if it is free at that instant and never waits. Check `ownsLock()` before touching guarded state. It is for loop-task code that reads render-owned state but would rather skip a tick than stall input behind a render pass, such as the reader's `skipLoopDelay()`, `preventAutoSleep()` and `shouldSkipPeriodicUpdate()` hooks. It answers "is the mutex free", not "is a pass in flight": a Try can succeed while the render task has dropped the mutex mid-pass.
 
 ```cpp
 // In loop(): guard state that render() reads

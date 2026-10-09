@@ -224,7 +224,7 @@ cannot drift apart.
 - `BUTTON_ACTION` is positional. `SettingsList` builds each option list by position (index *i* is
   value *i*), and stored settings hold the value. Board-gated actions (the light block, then the
   warm/cool pair, a strict subset of it) stay at the end of the enum in narrowing order, so
-  dropping them on a board without the hardware renumbers nothing. `buildSettingsList()` asserts
+  dropping them on a board without the hardware renumbers nothing. `buildSettings()` asserts
   the list length against `BUTTON_ACTION_COUNT`, because the failure is a silent shift of every
   stored mapping, not a crash.
 - A new unconditional action goes above the gated block, which shifts the gated values by one.

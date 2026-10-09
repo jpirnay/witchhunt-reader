@@ -30,7 +30,7 @@ This document show most common issues and possible solutions while using the dev
 **Solutions:**
 
 1. Move closer to the WiFi router
-2. Check signal strength on the device (should be at least `||` or better)
+2. Check the signal strength on the device's File Transfer screen: it should show at least two of the four bars (**Weak**) or better
 3. Avoid interference from other devices
 4. Try a different WiFi network if available
 
@@ -40,10 +40,11 @@ This document show most common issues and possible solutions while using the dev
 
 **Solutions:**
 
-1. Ensure the file is a valid `.epub` file
-2. Check that the SD card has enough free space
-3. Try uploading a smaller file first to test
-4. Refresh the browser page and try again
+1. "Cannot write to a protected location" means the file name starts with `.`, or the target folder is a system folder or a hidden one (hidden folders are writable only while **Show Hidden Files** is on). Rename the file or pick another folder
+2. Ensure the file is a valid `.epub` file
+3. Check that the SD card has enough free space
+4. Try uploading a smaller file first to test
+5. Refresh the browser page and try again
 
 ### Saved Password Not Working
 
@@ -51,7 +52,9 @@ This document show most common issues and possible solutions while using the dev
 
 **Solutions:**
 
-1. When connection fails, you'll be prompted to "Forget Network"
-2. Select **Yes** to remove the saved password
+1. When a saved network fails to connect, dismiss the error (Back or Confirm) to open **Network Options** (Cancel, Reset info, Forget)
+2. Select **Forget** to remove the saved password. **Reset info** only clears the cached IP and DNS details and keeps the password
 3. Reconnect and enter the password again
 4. Choose to save the new password
+
+You can open the same prompt from the network list: highlight a network with a saved password and press Left.
