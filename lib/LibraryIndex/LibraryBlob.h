@@ -14,4 +14,8 @@ bool writeExact(HalFile& file, const void* data, size_t len);
 bool readBlobString(HalFile& file, std::string& out);
 bool writeBlobString(HalFile& file, const std::string& s);
 
+// One entry of a build's names file: the author's hash, whether its key came from a file-as, its
+// display name and sort key. The one place that format is written.
+bool appendNameEntry(HalFile& names, uint32_t hash, bool fromFileAs, const std::string& name, const std::string& key);
+
 }  // namespace library

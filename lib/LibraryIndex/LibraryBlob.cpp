@@ -23,4 +23,11 @@ bool writeBlobString(HalFile& file, const std::string& s) {
   return writeExact(file, &len, sizeof(len)) && writeExact(file, s.data(), s.size());
 }
 
+bool appendNameEntry(HalFile& names, const uint32_t hash, const bool fromFileAs, const std::string& name,
+                     const std::string& key) {
+  const uint8_t flags = fromFileAs ? 1 : 0;
+  return writeExact(names, &hash, sizeof(hash)) && writeExact(names, &flags, sizeof(flags)) &&
+         writeBlobString(names, name) && writeBlobString(names, key);
+}
+
 }  // namespace library

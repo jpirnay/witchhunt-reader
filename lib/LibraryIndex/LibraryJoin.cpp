@@ -37,12 +37,8 @@ bool carryNames(LibraryIndexReader& previous, const bool carry, const std::strin
     // it outrank the real name when that arrives.
     if (name.empty()) continue;
     // The index keeps no flag: a key that is not what the name alone gives came from a file-as.
-    const uint8_t flags = key != LibraryKeys::authorSortKey(name, "") ? 1 : 0;
-    if (!library::writeExact(names, &author.hash, sizeof(author.hash)) ||
-        !library::writeExact(names, &flags, sizeof(flags)) || !library::writeBlobString(names, name) ||
-        !library::writeBlobString(names, key)) {
-      return false;
-    }
+    const bool fromFileAs = key != LibraryKeys::authorSortKey(name, "");
+    if (!library::appendNameEntry(names, author.hash, fromFileAs, name, key)) return false;
   }
   return true;
 }
