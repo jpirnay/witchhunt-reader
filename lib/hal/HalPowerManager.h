@@ -24,6 +24,8 @@ class HalPowerManager {
   mutable int _batteryCachedPercent = 0;         // Last read battery percentage — X3: 0-100, X4: 0-1000 (scaled)
   mutable bool _batterySeeded = false;           // True once the smoothing filter has a first real sample (X4)
   mutable unsigned long _batteryLastPollMs = 0;  // Timestamp of last battery read in milliseconds
+  bool _gaugeCapacityPending = true;             // serviceGaugeCapacityLoad() has steps left
+  unsigned long _gaugeCapacityStartMs = 0;       // first serviceGaugeCapacityLoad() call; 0 = not yet
 
   enum LockMode { None, NormalSpeed };
   std::atomic<LockMode> currentLockMode{None};
@@ -165,6 +167,12 @@ class HalPowerManager {
 
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;
+
+  // Loads the board profile's cell capacity into a BQ27220 that has lost it (X3:
+  // 650 mAh against TI's 3000 mAh power-on default). One short step per call over
+  // ~8 s; call once per loop pass from the loop task. A no-op after the first call
+  // on every board whose profile sets no design capacity.
+  void serviceGaugeCapacityLoad();
 
   // RAII helper class to manage power saving locks
   // Usage: create an instance of Lock in a scope to disable power saving, for example when running a task that needs
