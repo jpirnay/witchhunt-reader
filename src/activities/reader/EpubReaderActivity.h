@@ -19,6 +19,7 @@
 #include "BookmarkStore.h"
 #include "ChapterPageSpan.h"
 #include "CrossPointState.h"
+#include "EpubLinkBackStack.h"
 #include "EpubProgressRecord.h"
 #include "EpubReaderMenuActivity.h"
 #include "KOReaderAutoSync.h"
@@ -710,16 +711,21 @@ class EpubReaderActivity final : public Activity {
   // and for the far more common case of a book whose <p>s are not direct children of <body>
   // (`<body><div><p>`, what Calibre emits), where no page has an anchorable paragraph at all and
   // getParagraphIndexForPage answers nullopt for every one of them.
-  struct SavedPosition {
-    int spineIndex = 0;
-    int pageNumber = 0;
-    int pageCount = 0;
-    uint16_t paragraphIndex = 0;
-    bool hasParagraph = false;
-  };
-  static constexpr int MAX_FOOTNOTE_DEPTH = 3;
+  using SavedPosition = EpubLinkBackStack::Entry;
+  static constexpr int MAX_FOOTNOTE_DEPTH = EpubLinkBackStack::kMaxDepth;
   SavedPosition savedPositions[MAX_FOOTNOTE_DEPTH] = {};
   int footnoteDepth = 0;
+  // How many of those entries were pushed in this reader session (EpubLinkBackStack::push). A stack
+  // loaded from linkstack.bin leaves it at 0: Back uses footnoteDepth, but the KOSync push on sleep
+  // is skipped only for a link followed this session, as it was before the stack was persisted.
+  int sessionLinkDepth_ = 0;
+  // True while linkstack.bin exists and holds exactly the stack above. The first push or pop after
+  // that deletes the file, and the reader's exit writes the stack only while this is false -- so the
+  // file is written when the stack changed, never per page turn, and never disagrees with memory.
+  // An unclean shutdown (crash, flat battery) can therefore lose a stack but never bring back one
+  // the reader had already returned from, which would be worse than none: Back would jump from
+  // wherever they had read on to an origin they had already left behind.
+  bool linkStackOnDisk_ = false;
 
   // --- render() pass dispatch (see RenderPass) ---
   // Opportunistically restore the secondary display buffer if a prior OOM degraded it.
@@ -1080,6 +1086,12 @@ class EpubReaderActivity final : public Activity {
   // way back.
   void navigateToHref(const std::string& href, bool savePosition = false);
   void restoreSavedPosition();
+  // Persistence of savedPositions, in linkstack.bin beside progress.bin (EpubLinkBackStack).
+  // Loaded on open; written on exit (and before a heap-recovery reboot, which skips onExit) when
+  // it changed; deleted at the first change after it was loaded. See linkStackOnDisk_.
+  void loadLinkBackStack();
+  void saveLinkBackStack();
+  void noteLinkBackStackChanged();
 
   // Find the internal links of `page` among the words it draws and publish a tap target for each.
   // Values are indices into currentPageFootnotes, which must already hold this page's links.

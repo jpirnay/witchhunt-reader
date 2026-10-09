@@ -414,7 +414,10 @@ void EpubReaderActivity::maybeAutoPushOnSleep() {
   if (!activityManager.inSleepTransition() || !KOReaderAutoSync::sleepPushEnabled() || !AUTOSYNC_STATE.isPending()) {
     return;
   }
-  if (footnoteDepth > 0) {
+  // A link followed in THIS session, not the persisted Back stack (footnoteDepth): a stack loaded
+  // from linkstack.bin would otherwise skip the push on every sleep until the reader pressed Back,
+  // and every link pushes, contents links included.
+  if (sessionLinkDepth_ > 0) {
     LOG_DBG("AutoSync", "Footnote open at sleep; push deferred to the next boundary");
     return;
   }
