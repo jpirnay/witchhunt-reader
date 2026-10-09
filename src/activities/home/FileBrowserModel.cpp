@@ -617,7 +617,8 @@ void FileBrowserModel::loadAdded() {
   library::BookRecord record{};
   for (uint16_t rank = 0; rank < bookIndex.header().newCount; ++rank) {
     uint16_t index = 0;
-    if (!bookIndex.newBook(rank, index) || !bookIndex.book(index, record) || !bookIndex.blobString(record.pathOff, path)) {
+    if (!bookIndex.newBook(rank, index) || !bookIndex.book(index, record) ||
+        !bookIndex.blobString(record.pathOff, path)) {
       continue;
     }
     if (path.size() > 1 && path.front() == '/' && Storage.exists(path.c_str())) deepResults.push_back(path.substr(1));
