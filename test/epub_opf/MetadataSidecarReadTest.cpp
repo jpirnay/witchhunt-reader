@@ -56,6 +56,26 @@ TEST_F(MetadataSidecarReadTest, ReadsTheSidecarOfABookThatIsNotAnEpub) {
   EXPECT_EQ(out.seriesIndex, "1");
 }
 
+// Contract with plugins/metadata-editor, which now edits sidecars for every book format: the document
+// its freshDoc() + writeInto() produce, with the "Sort author as" field filled, must give the Library
+// its primary author and filing name. The editor runs in a browser and cannot be tested here, so this
+// pins the shape the two sides agree on.
+TEST_F(MetadataSidecarReadTest, ReadsTheShapeTheMetadataEditorWritesWithASortName) {
+  writeSidecar(
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+      "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"uuid_id\">\n"
+      "  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:opf=\"http://www.idpf.org/2007/opf\">"
+      "<dc:title>The Dispossessed</dc:title>"
+      "<dc:creator opf:file-as=\"Le Guin, Ursula K.\">Ursula K. Le Guin</dc:creator>"
+      "</metadata>\n"
+      "</package>\n");
+  MetadataSidecarFields out;
+  ASSERT_TRUE(MetadataSidecar::read(book_, out));
+  EXPECT_EQ(out.title, "The Dispossessed");
+  EXPECT_EQ(out.primaryAuthor, "Ursula K. Le Guin");
+  EXPECT_EQ(out.authorSort, "Le Guin, Ursula K.");
+}
+
 TEST_F(MetadataSidecarReadTest, NoSidecarIsNoAnswer) {
   MetadataSidecarFields out;
   EXPECT_FALSE(MetadataSidecar::read(book_, out));
