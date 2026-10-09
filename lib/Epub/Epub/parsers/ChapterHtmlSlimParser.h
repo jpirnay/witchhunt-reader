@@ -641,6 +641,10 @@ class ChapterHtmlSlimParser final : public Print {
   bool heapAllowsTableRowLayout() const;
   bool flushPartWordBuffer();
   void makePages();
+  // Puts currentTextBlock's top spacing on the current page, once per logical paragraph. Both
+  // places that lay the block out call it first: makePages() and the long-block split in
+  // flushPartWordBuffer(). Returns false, with layoutFailed set, when no page could be allocated.
+  bool applyBlockTopSpacing();
   // Called at </tr>: lay the pending row out, pack it into the fragment, and free its cells.
   // Degrades the row to paragraphs if it cannot be a grid row. No-op for an empty row.
   void commitPendingRow();

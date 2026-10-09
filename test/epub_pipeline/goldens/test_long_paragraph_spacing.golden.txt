@@ -1,0 +1,990 @@
+BOOK title=Long Paragraph Spacing lang=en spine=7 toc=0 reliableToc=0
+SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=12 footnotes=0
+  LINE y=18 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=Case1L
+   W x=71 s=0 z=100 t=the
+   W x=115 s=0 z=100 t=harbour
+   W x=197 s=0 z=100 t=lay
+   W x=239 s=0 z=100 t=quiet
+   W x=295 s=0 z=100 t=under
+   W x=355 s=0 z=100 t=a
+   W x=380 s=0 z=100 t=low
+   W x=420 s=0 z=100 t=grey
+  LINE y=42 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=sky
+   W x=35 s=0 z=100 t=while
+   W x=87 s=0 z=100 t=the
+   W x=128 s=0 z=100 t=boats
+   W x=187 s=0 z=100 t=rocked
+   W x=249 s=0 z=100 t=at
+   W x=281 s=0 z=100 t=their
+   W x=336 s=0 z=100 t=moorings
+   W x=425 s=0 z=100 t=and
+  LINE y=66 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=gulls
+   W x=57 s=0 z=100 t=wheeled
+   W x=127 s=0 z=100 t=over
+   W x=176 s=0 z=100 t=the
+   W x=215 s=0 z=100 t=fish
+   W x=260 s=0 z=100 t=market
+   W x=325 s=0 z=100 t=calling
+   W x=398 s=0 z=100 t=to
+   W x=428 s=0 z=100 t=one
+  LINE y=90 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=85 s=0 z=100 t=across
+   W x=153 s=0 z=100 t=the
+   W x=195 s=0 z=100 t=wet
+   W x=231 s=0 z=100 t=stones
+   W x=302 s=0 z=100 t=of
+   W x=335 s=0 z=100 t=the
+   W x=377 s=0 z=100 t=quay
+   W x=426 s=0 z=100 t=the
+  LINE y=114 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=harbour
+   W x=80 s=0 z=100 t=lay
+   W x=120 s=0 z=100 t=quiet
+   W x=174 s=0 z=100 t=under
+   W x=232 s=0 z=100 t=a
+   W x=255 s=0 z=100 t=low
+   W x=293 s=0 z=100 t=grey
+   W x=340 s=0 z=100 t=sky
+   W x=376 s=0 z=100 t=while
+   W x=429 s=0 z=100 t=the
+  LINE y=138 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=boats
+   W x=59 s=0 z=100 t=rocked
+   W x=121 s=0 z=100 t=at
+   W x=153 s=0 z=100 t=their
+   W x=208 s=0 z=100 t=moorings
+   W x=297 s=0 z=100 t=and
+   W x=338 s=0 z=100 t=gulls
+   W x=397 s=0 z=100 t=wheeled
+  LINE y=162 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=over
+   W x=55 s=0 z=100 t=the
+   W x=100 s=0 z=100 t=fish
+   W x=151 s=0 z=100 t=market
+   W x=222 s=0 z=100 t=calling
+   W x=301 s=0 z=100 t=to
+   W x=337 s=0 z=100 t=one
+   W x=383 s=0 z=100 t=another
+  LINE y=186 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=across
+   W x=64 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=wet
+   W x=134 s=0 z=100 t=stones
+   W x=201 s=0 z=100 t=of
+   W x=230 s=0 z=100 t=the
+   W x=268 s=0 z=100 t=quay
+   W x=313 s=0 z=100 t=the
+   W x=351 s=0 z=100 t=harbour
+   W x=427 s=0 z=100 t=lay
+  LINE y=210 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=quiet
+   W x=53 s=0 z=100 t=under
+   W x=110 s=0 z=100 t=a
+   W x=132 s=0 z=100 t=low
+   W x=169 s=0 z=100 t=grey
+   W x=215 s=0 z=100 t=sky
+   W x=250 s=0 z=100 t=while
+   W x=302 s=0 z=100 t=the
+   W x=343 s=0 z=100 t=boats
+   W x=402 s=0 z=100 t=rocked
+  LINE y=234 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=at
+   W x=29 s=0 z=100 t=their
+   W x=81 s=0 z=100 t=moorings
+   W x=167 s=0 z=100 t=and
+   W x=205 s=0 z=100 t=gulls
+   W x=261 s=0 z=100 t=wheeled
+   W x=330 s=0 z=100 t=over
+   W x=378 s=0 z=100 t=the
+   W x=416 s=0 z=100 t=fish
+  LINE y=258 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=market
+   W x=70 s=0 z=100 t=calling
+   W x=148 s=0 z=100 t=to
+   W x=183 s=0 z=100 t=one
+   W x=228 s=0 z=100 t=another
+   W x=315 s=0 z=100 t=across
+   W x=385 s=0 z=100 t=the
+   W x=429 s=0 z=100 t=wet
+  LINE y=282 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=stones
+   W x=66 s=0 z=100 t=of
+   W x=94 s=0 z=100 t=the
+   W x=131 s=0 z=100 t=quay
+   W x=175 s=0 z=100 t=the.
+SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=17 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=2.
+   W x=23 s=0 z=100 t=BR
+   W x=49 s=0 z=100 t=SHORT:
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Before
+   W x=63 s=0 z=100 t=the
+   W x=100 s=0 z=100 t=break.
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Case2S
+   W x=65 s=0 z=100 t=is
+   W x=86 s=0 z=100 t=a
+   W x=104 s=0 z=100 t=short
+   W x=161 s=0 z=100 t=paragraph.
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=2.
+   W x=23 s=0 z=100 t=BR
+   W x=49 s=0 z=100 t=LONG:
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Before
+   W x=63 s=0 z=100 t=the
+   W x=100 s=0 z=100 t=break.
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=Case2L
+   W x=72 s=0 z=100 t=the
+   W x=116 s=0 z=100 t=harbour
+   W x=198 s=0 z=100 t=lay
+   W x=240 s=0 z=100 t=quiet
+   W x=296 s=0 z=100 t=under
+   W x=356 s=0 z=100 t=a
+   W x=381 s=0 z=100 t=low
+   W x=421 s=0 z=100 t=grey
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=sky
+   W x=35 s=0 z=100 t=while
+   W x=87 s=0 z=100 t=the
+   W x=128 s=0 z=100 t=boats
+   W x=187 s=0 z=100 t=rocked
+   W x=249 s=0 z=100 t=at
+   W x=281 s=0 z=100 t=their
+   W x=336 s=0 z=100 t=moorings
+   W x=425 s=0 z=100 t=and
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=gulls
+   W x=57 s=0 z=100 t=wheeled
+   W x=127 s=0 z=100 t=over
+   W x=176 s=0 z=100 t=the
+   W x=215 s=0 z=100 t=fish
+   W x=260 s=0 z=100 t=market
+   W x=325 s=0 z=100 t=calling
+   W x=398 s=0 z=100 t=to
+   W x=428 s=0 z=100 t=one
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=85 s=0 z=100 t=across
+   W x=153 s=0 z=100 t=the
+   W x=195 s=0 z=100 t=wet
+   W x=231 s=0 z=100 t=stones
+   W x=302 s=0 z=100 t=of
+   W x=335 s=0 z=100 t=the
+   W x=377 s=0 z=100 t=quay
+   W x=426 s=0 z=100 t=the
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=harbour
+   W x=80 s=0 z=100 t=lay
+   W x=120 s=0 z=100 t=quiet
+   W x=174 s=0 z=100 t=under
+   W x=232 s=0 z=100 t=a
+   W x=255 s=0 z=100 t=low
+   W x=293 s=0 z=100 t=grey
+   W x=340 s=0 z=100 t=sky
+   W x=376 s=0 z=100 t=while
+   W x=429 s=0 z=100 t=the
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=boats
+   W x=59 s=0 z=100 t=rocked
+   W x=121 s=0 z=100 t=at
+   W x=153 s=0 z=100 t=their
+   W x=208 s=0 z=100 t=moorings
+   W x=297 s=0 z=100 t=and
+   W x=338 s=0 z=100 t=gulls
+   W x=397 s=0 z=100 t=wheeled
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=over
+   W x=55 s=0 z=100 t=the
+   W x=100 s=0 z=100 t=fish
+   W x=151 s=0 z=100 t=market
+   W x=222 s=0 z=100 t=calling
+   W x=301 s=0 z=100 t=to
+   W x=337 s=0 z=100 t=one
+   W x=383 s=0 z=100 t=another
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=across
+   W x=64 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=wet
+   W x=134 s=0 z=100 t=stones
+   W x=201 s=0 z=100 t=of
+   W x=230 s=0 z=100 t=the
+   W x=268 s=0 z=100 t=quay
+   W x=313 s=0 z=100 t=the
+   W x=351 s=0 z=100 t=harbour
+   W x=427 s=0 z=100 t=lay
+  LINE y=360 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=quiet
+   W x=53 s=0 z=100 t=under
+   W x=110 s=0 z=100 t=a
+   W x=132 s=0 z=100 t=low
+   W x=169 s=0 z=100 t=grey
+   W x=215 s=0 z=100 t=sky
+   W x=250 s=0 z=100 t=while
+   W x=302 s=0 z=100 t=the
+   W x=343 s=0 z=100 t=boats
+   W x=402 s=0 z=100 t=rocked
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=at
+   W x=29 s=0 z=100 t=their
+   W x=81 s=0 z=100 t=moorings
+   W x=167 s=0 z=100 t=and
+   W x=205 s=0 z=100 t=gulls
+   W x=261 s=0 z=100 t=wheeled
+   W x=330 s=0 z=100 t=over
+   W x=378 s=0 z=100 t=the
+   W x=416 s=0 z=100 t=fish
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=market
+   W x=70 s=0 z=100 t=calling
+   W x=148 s=0 z=100 t=to
+   W x=183 s=0 z=100 t=one
+   W x=228 s=0 z=100 t=another
+   W x=315 s=0 z=100 t=across
+   W x=385 s=0 z=100 t=the
+   W x=429 s=0 z=100 t=wet
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=stones
+   W x=66 s=0 z=100 t=of
+   W x=94 s=0 z=100 t=the
+   W x=131 s=0 z=100 t=quay
+   W x=175 s=0 z=100 t=the.
+SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=15 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=3.
+   W x=24 s=0 z=100 t=MARGIN
+   W x=78 s=0 z=100 t=SHORT:
+  LINE y=42 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Case3S
+   W x=66 s=0 z=100 t=is
+   W x=87 s=0 z=100 t=a
+   W x=105 s=0 z=100 t=short
+   W x=162 s=0 z=100 t=paragraph.
+  LINE y=66 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=3.
+   W x=24 s=0 z=100 t=MARGIN
+   W x=78 s=0 z=100 t=LONG:
+  LINE y=108 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=Case3L
+   W x=73 s=0 z=100 t=the
+   W x=117 s=0 z=100 t=harbour
+   W x=199 s=0 z=100 t=lay
+   W x=241 s=0 z=100 t=quiet
+   W x=297 s=0 z=100 t=under
+   W x=357 s=0 z=100 t=a
+   W x=382 s=0 z=100 t=low
+   W x=422 s=0 z=100 t=grey
+  LINE y=132 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=sky
+   W x=35 s=0 z=100 t=while
+   W x=87 s=0 z=100 t=the
+   W x=128 s=0 z=100 t=boats
+   W x=187 s=0 z=100 t=rocked
+   W x=249 s=0 z=100 t=at
+   W x=281 s=0 z=100 t=their
+   W x=336 s=0 z=100 t=moorings
+   W x=425 s=0 z=100 t=and
+  LINE y=156 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=gulls
+   W x=57 s=0 z=100 t=wheeled
+   W x=127 s=0 z=100 t=over
+   W x=176 s=0 z=100 t=the
+   W x=215 s=0 z=100 t=fish
+   W x=260 s=0 z=100 t=market
+   W x=325 s=0 z=100 t=calling
+   W x=398 s=0 z=100 t=to
+   W x=428 s=0 z=100 t=one
+  LINE y=180 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=85 s=0 z=100 t=across
+   W x=153 s=0 z=100 t=the
+   W x=195 s=0 z=100 t=wet
+   W x=231 s=0 z=100 t=stones
+   W x=302 s=0 z=100 t=of
+   W x=335 s=0 z=100 t=the
+   W x=377 s=0 z=100 t=quay
+   W x=426 s=0 z=100 t=the
+  LINE y=204 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=harbour
+   W x=80 s=0 z=100 t=lay
+   W x=120 s=0 z=100 t=quiet
+   W x=174 s=0 z=100 t=under
+   W x=232 s=0 z=100 t=a
+   W x=255 s=0 z=100 t=low
+   W x=293 s=0 z=100 t=grey
+   W x=340 s=0 z=100 t=sky
+   W x=376 s=0 z=100 t=while
+   W x=429 s=0 z=100 t=the
+  LINE y=228 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=boats
+   W x=59 s=0 z=100 t=rocked
+   W x=121 s=0 z=100 t=at
+   W x=153 s=0 z=100 t=their
+   W x=208 s=0 z=100 t=moorings
+   W x=297 s=0 z=100 t=and
+   W x=338 s=0 z=100 t=gulls
+   W x=397 s=0 z=100 t=wheeled
+  LINE y=252 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=over
+   W x=55 s=0 z=100 t=the
+   W x=100 s=0 z=100 t=fish
+   W x=151 s=0 z=100 t=market
+   W x=222 s=0 z=100 t=calling
+   W x=301 s=0 z=100 t=to
+   W x=337 s=0 z=100 t=one
+   W x=383 s=0 z=100 t=another
+  LINE y=276 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=across
+   W x=64 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=wet
+   W x=134 s=0 z=100 t=stones
+   W x=201 s=0 z=100 t=of
+   W x=230 s=0 z=100 t=the
+   W x=268 s=0 z=100 t=quay
+   W x=313 s=0 z=100 t=the
+   W x=351 s=0 z=100 t=harbour
+   W x=427 s=0 z=100 t=lay
+  LINE y=300 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=quiet
+   W x=53 s=0 z=100 t=under
+   W x=110 s=0 z=100 t=a
+   W x=132 s=0 z=100 t=low
+   W x=169 s=0 z=100 t=grey
+   W x=215 s=0 z=100 t=sky
+   W x=250 s=0 z=100 t=while
+   W x=302 s=0 z=100 t=the
+   W x=343 s=0 z=100 t=boats
+   W x=402 s=0 z=100 t=rocked
+  LINE y=324 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=at
+   W x=29 s=0 z=100 t=their
+   W x=81 s=0 z=100 t=moorings
+   W x=167 s=0 z=100 t=and
+   W x=205 s=0 z=100 t=gulls
+   W x=261 s=0 z=100 t=wheeled
+   W x=330 s=0 z=100 t=over
+   W x=378 s=0 z=100 t=the
+   W x=416 s=0 z=100 t=fish
+  LINE y=348 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=market
+   W x=70 s=0 z=100 t=calling
+   W x=148 s=0 z=100 t=to
+   W x=183 s=0 z=100 t=one
+   W x=228 s=0 z=100 t=another
+   W x=315 s=0 z=100 t=across
+   W x=385 s=0 z=100 t=the
+   W x=429 s=0 z=100 t=wet
+  LINE y=372 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=stones
+   W x=66 s=0 z=100 t=of
+   W x=94 s=0 z=100 t=the
+   W x=131 s=0 z=100 t=quay
+   W x=175 s=0 z=100 t=the.
+SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=17 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=4.
+   W x=25 s=0 z=100 t=COLLAPSE
+   W x=114 s=0 z=100 t=SHORT:
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Margin
+   W x=60 s=0 z=100 t=bottom
+   W x=126 s=0 z=100 t=above.
+  LINE y=66 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Case4S
+   W x=67 s=0 z=100 t=is
+   W x=88 s=0 z=100 t=a
+   W x=106 s=0 z=100 t=short
+   W x=163 s=0 z=100 t=paragraph.
+  LINE y=90 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=4.
+   W x=25 s=0 z=100 t=COLLAPSE
+   W x=114 s=0 z=100 t=LONG:
+  LINE y=114 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=Margin
+   W x=60 s=0 z=100 t=bottom
+   W x=126 s=0 z=100 t=above.
+  LINE y=156 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=Case4L
+   W x=74 s=0 z=100 t=the
+   W x=118 s=0 z=100 t=harbour
+   W x=200 s=0 z=100 t=lay
+   W x=242 s=0 z=100 t=quiet
+   W x=298 s=0 z=100 t=under
+   W x=358 s=0 z=100 t=a
+   W x=383 s=0 z=100 t=low
+   W x=423 s=0 z=100 t=grey
+  LINE y=180 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=sky
+   W x=35 s=0 z=100 t=while
+   W x=87 s=0 z=100 t=the
+   W x=128 s=0 z=100 t=boats
+   W x=187 s=0 z=100 t=rocked
+   W x=249 s=0 z=100 t=at
+   W x=281 s=0 z=100 t=their
+   W x=336 s=0 z=100 t=moorings
+   W x=425 s=0 z=100 t=and
+  LINE y=204 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=gulls
+   W x=57 s=0 z=100 t=wheeled
+   W x=127 s=0 z=100 t=over
+   W x=176 s=0 z=100 t=the
+   W x=215 s=0 z=100 t=fish
+   W x=260 s=0 z=100 t=market
+   W x=325 s=0 z=100 t=calling
+   W x=398 s=0 z=100 t=to
+   W x=428 s=0 z=100 t=one
+  LINE y=228 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=85 s=0 z=100 t=across
+   W x=153 s=0 z=100 t=the
+   W x=195 s=0 z=100 t=wet
+   W x=231 s=0 z=100 t=stones
+   W x=302 s=0 z=100 t=of
+   W x=335 s=0 z=100 t=the
+   W x=377 s=0 z=100 t=quay
+   W x=426 s=0 z=100 t=the
+  LINE y=252 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=harbour
+   W x=80 s=0 z=100 t=lay
+   W x=120 s=0 z=100 t=quiet
+   W x=174 s=0 z=100 t=under
+   W x=232 s=0 z=100 t=a
+   W x=255 s=0 z=100 t=low
+   W x=293 s=0 z=100 t=grey
+   W x=340 s=0 z=100 t=sky
+   W x=376 s=0 z=100 t=while
+   W x=429 s=0 z=100 t=the
+  LINE y=276 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=boats
+   W x=59 s=0 z=100 t=rocked
+   W x=121 s=0 z=100 t=at
+   W x=153 s=0 z=100 t=their
+   W x=208 s=0 z=100 t=moorings
+   W x=297 s=0 z=100 t=and
+   W x=338 s=0 z=100 t=gulls
+   W x=397 s=0 z=100 t=wheeled
+  LINE y=300 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=over
+   W x=55 s=0 z=100 t=the
+   W x=100 s=0 z=100 t=fish
+   W x=151 s=0 z=100 t=market
+   W x=222 s=0 z=100 t=calling
+   W x=301 s=0 z=100 t=to
+   W x=337 s=0 z=100 t=one
+   W x=383 s=0 z=100 t=another
+  LINE y=324 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=across
+   W x=64 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=wet
+   W x=134 s=0 z=100 t=stones
+   W x=201 s=0 z=100 t=of
+   W x=230 s=0 z=100 t=the
+   W x=268 s=0 z=100 t=quay
+   W x=313 s=0 z=100 t=the
+   W x=351 s=0 z=100 t=harbour
+   W x=427 s=0 z=100 t=lay
+  LINE y=348 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=quiet
+   W x=53 s=0 z=100 t=under
+   W x=110 s=0 z=100 t=a
+   W x=132 s=0 z=100 t=low
+   W x=169 s=0 z=100 t=grey
+   W x=215 s=0 z=100 t=sky
+   W x=250 s=0 z=100 t=while
+   W x=302 s=0 z=100 t=the
+   W x=343 s=0 z=100 t=boats
+   W x=402 s=0 z=100 t=rocked
+  LINE y=372 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=at
+   W x=29 s=0 z=100 t=their
+   W x=81 s=0 z=100 t=moorings
+   W x=167 s=0 z=100 t=and
+   W x=205 s=0 z=100 t=gulls
+   W x=261 s=0 z=100 t=wheeled
+   W x=330 s=0 z=100 t=over
+   W x=378 s=0 z=100 t=the
+   W x=416 s=0 z=100 t=fish
+  LINE y=396 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=market
+   W x=70 s=0 z=100 t=calling
+   W x=148 s=0 z=100 t=to
+   W x=183 s=0 z=100 t=one
+   W x=228 s=0 z=100 t=another
+   W x=315 s=0 z=100 t=across
+   W x=385 s=0 z=100 t=the
+   W x=429 s=0 z=100 t=wet
+  LINE y=420 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=stones
+   W x=66 s=0 z=100 t=of
+   W x=94 s=0 z=100 t=the
+   W x=131 s=0 z=100 t=quay
+   W x=175 s=0 z=100 t=the.
+SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=15 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=5.
+   W x=26 s=0 z=100 t=PADDING
+   W x=94 s=0 z=100 t=SHORT:
+  LINE y=33 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Case5S
+   W x=68 s=0 z=100 t=is
+   W x=89 s=0 z=100 t=a
+   W x=107 s=0 z=100 t=short
+   W x=164 s=0 z=100 t=paragraph.
+  LINE y=57 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=5.
+   W x=26 s=0 z=100 t=PADDING
+   W x=94 s=0 z=100 t=LONG:
+  LINE y=90 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=Case5L
+   W x=75 s=0 z=100 t=the
+   W x=119 s=0 z=100 t=harbour
+   W x=201 s=0 z=100 t=lay
+   W x=243 s=0 z=100 t=quiet
+   W x=299 s=0 z=100 t=under
+   W x=359 s=0 z=100 t=a
+   W x=384 s=0 z=100 t=low
+   W x=424 s=0 z=100 t=grey
+  LINE y=114 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=sky
+   W x=35 s=0 z=100 t=while
+   W x=87 s=0 z=100 t=the
+   W x=128 s=0 z=100 t=boats
+   W x=187 s=0 z=100 t=rocked
+   W x=249 s=0 z=100 t=at
+   W x=281 s=0 z=100 t=their
+   W x=336 s=0 z=100 t=moorings
+   W x=425 s=0 z=100 t=and
+  LINE y=138 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=gulls
+   W x=57 s=0 z=100 t=wheeled
+   W x=127 s=0 z=100 t=over
+   W x=176 s=0 z=100 t=the
+   W x=215 s=0 z=100 t=fish
+   W x=260 s=0 z=100 t=market
+   W x=325 s=0 z=100 t=calling
+   W x=398 s=0 z=100 t=to
+   W x=428 s=0 z=100 t=one
+  LINE y=162 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=85 s=0 z=100 t=across
+   W x=153 s=0 z=100 t=the
+   W x=195 s=0 z=100 t=wet
+   W x=231 s=0 z=100 t=stones
+   W x=302 s=0 z=100 t=of
+   W x=335 s=0 z=100 t=the
+   W x=377 s=0 z=100 t=quay
+   W x=426 s=0 z=100 t=the
+  LINE y=186 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=harbour
+   W x=80 s=0 z=100 t=lay
+   W x=120 s=0 z=100 t=quiet
+   W x=174 s=0 z=100 t=under
+   W x=232 s=0 z=100 t=a
+   W x=255 s=0 z=100 t=low
+   W x=293 s=0 z=100 t=grey
+   W x=340 s=0 z=100 t=sky
+   W x=376 s=0 z=100 t=while
+   W x=429 s=0 z=100 t=the
+  LINE y=210 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=boats
+   W x=59 s=0 z=100 t=rocked
+   W x=121 s=0 z=100 t=at
+   W x=153 s=0 z=100 t=their
+   W x=208 s=0 z=100 t=moorings
+   W x=297 s=0 z=100 t=and
+   W x=338 s=0 z=100 t=gulls
+   W x=397 s=0 z=100 t=wheeled
+  LINE y=234 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=over
+   W x=55 s=0 z=100 t=the
+   W x=100 s=0 z=100 t=fish
+   W x=151 s=0 z=100 t=market
+   W x=222 s=0 z=100 t=calling
+   W x=301 s=0 z=100 t=to
+   W x=337 s=0 z=100 t=one
+   W x=383 s=0 z=100 t=another
+  LINE y=258 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=across
+   W x=64 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=wet
+   W x=134 s=0 z=100 t=stones
+   W x=201 s=0 z=100 t=of
+   W x=230 s=0 z=100 t=the
+   W x=268 s=0 z=100 t=quay
+   W x=313 s=0 z=100 t=the
+   W x=351 s=0 z=100 t=harbour
+   W x=427 s=0 z=100 t=lay
+  LINE y=282 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=quiet
+   W x=53 s=0 z=100 t=under
+   W x=110 s=0 z=100 t=a
+   W x=132 s=0 z=100 t=low
+   W x=169 s=0 z=100 t=grey
+   W x=215 s=0 z=100 t=sky
+   W x=250 s=0 z=100 t=while
+   W x=302 s=0 z=100 t=the
+   W x=343 s=0 z=100 t=boats
+   W x=402 s=0 z=100 t=rocked
+  LINE y=306 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=at
+   W x=29 s=0 z=100 t=their
+   W x=81 s=0 z=100 t=moorings
+   W x=167 s=0 z=100 t=and
+   W x=205 s=0 z=100 t=gulls
+   W x=261 s=0 z=100 t=wheeled
+   W x=330 s=0 z=100 t=over
+   W x=378 s=0 z=100 t=the
+   W x=416 s=0 z=100 t=fish
+  LINE y=330 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=market
+   W x=70 s=0 z=100 t=calling
+   W x=148 s=0 z=100 t=to
+   W x=183 s=0 z=100 t=one
+   W x=228 s=0 z=100 t=another
+   W x=315 s=0 z=100 t=across
+   W x=385 s=0 z=100 t=the
+   W x=429 s=0 z=100 t=wet
+  LINE y=354 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=stones
+   W x=66 s=0 z=100 t=of
+   W x=94 s=0 z=100 t=the
+   W x=131 s=0 z=100 t=quay
+   W x=175 s=0 z=100 t=the.
+SPINE 5 href=OEBPS/chapter6.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=15 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=6.
+   W x=27 s=0 z=100 t=SPACER
+   W x=95 s=0 z=100 t=SHORT:
+  LINE y=42 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Case6S
+   W x=69 s=0 z=100 t=is
+   W x=90 s=0 z=100 t=a
+   W x=108 s=0 z=100 t=short
+   W x=165 s=0 z=100 t=paragraph.
+  LINE y=66 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=6.
+   W x=27 s=0 z=100 t=SPACER
+   W x=95 s=0 z=100 t=LONG:
+  LINE y=108 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=Case6L
+   W x=75 s=0 z=100 t=the
+   W x=118 s=0 z=100 t=harbour
+   W x=199 s=0 z=100 t=lay
+   W x=240 s=0 z=100 t=quiet
+   W x=295 s=0 z=100 t=under
+   W x=354 s=0 z=100 t=a
+   W x=378 s=0 z=100 t=low
+   W x=417 s=0 z=100 t=grey
+  LINE y=132 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=sky
+   W x=35 s=0 z=100 t=while
+   W x=87 s=0 z=100 t=the
+   W x=128 s=0 z=100 t=boats
+   W x=187 s=0 z=100 t=rocked
+   W x=249 s=0 z=100 t=at
+   W x=281 s=0 z=100 t=their
+   W x=336 s=0 z=100 t=moorings
+   W x=425 s=0 z=100 t=and
+  LINE y=156 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=gulls
+   W x=57 s=0 z=100 t=wheeled
+   W x=127 s=0 z=100 t=over
+   W x=176 s=0 z=100 t=the
+   W x=215 s=0 z=100 t=fish
+   W x=260 s=0 z=100 t=market
+   W x=325 s=0 z=100 t=calling
+   W x=398 s=0 z=100 t=to
+   W x=428 s=0 z=100 t=one
+  LINE y=180 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=another
+   W x=85 s=0 z=100 t=across
+   W x=153 s=0 z=100 t=the
+   W x=195 s=0 z=100 t=wet
+   W x=231 s=0 z=100 t=stones
+   W x=302 s=0 z=100 t=of
+   W x=335 s=0 z=100 t=the
+   W x=377 s=0 z=100 t=quay
+   W x=426 s=0 z=100 t=the
+  LINE y=204 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=harbour
+   W x=80 s=0 z=100 t=lay
+   W x=120 s=0 z=100 t=quiet
+   W x=174 s=0 z=100 t=under
+   W x=232 s=0 z=100 t=a
+   W x=255 s=0 z=100 t=low
+   W x=293 s=0 z=100 t=grey
+   W x=340 s=0 z=100 t=sky
+   W x=376 s=0 z=100 t=while
+   W x=429 s=0 z=100 t=the
+  LINE y=228 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=boats
+   W x=59 s=0 z=100 t=rocked
+   W x=121 s=0 z=100 t=at
+   W x=153 s=0 z=100 t=their
+   W x=208 s=0 z=100 t=moorings
+   W x=297 s=0 z=100 t=and
+   W x=338 s=0 z=100 t=gulls
+   W x=397 s=0 z=100 t=wheeled
+  LINE y=252 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=over
+   W x=55 s=0 z=100 t=the
+   W x=100 s=0 z=100 t=fish
+   W x=151 s=0 z=100 t=market
+   W x=222 s=0 z=100 t=calling
+   W x=301 s=0 z=100 t=to
+   W x=337 s=0 z=100 t=one
+   W x=383 s=0 z=100 t=another
+  LINE y=276 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=across
+   W x=64 s=0 z=100 t=the
+   W x=102 s=0 z=100 t=wet
+   W x=134 s=0 z=100 t=stones
+   W x=201 s=0 z=100 t=of
+   W x=230 s=0 z=100 t=the
+   W x=268 s=0 z=100 t=quay
+   W x=313 s=0 z=100 t=the
+   W x=351 s=0 z=100 t=harbour
+   W x=427 s=0 z=100 t=lay
+  LINE y=300 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=quiet
+   W x=53 s=0 z=100 t=under
+   W x=110 s=0 z=100 t=a
+   W x=132 s=0 z=100 t=low
+   W x=169 s=0 z=100 t=grey
+   W x=215 s=0 z=100 t=sky
+   W x=250 s=0 z=100 t=while
+   W x=302 s=0 z=100 t=the
+   W x=343 s=0 z=100 t=boats
+   W x=402 s=0 z=100 t=rocked
+  LINE y=324 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=at
+   W x=29 s=0 z=100 t=their
+   W x=81 s=0 z=100 t=moorings
+   W x=167 s=0 z=100 t=and
+   W x=205 s=0 z=100 t=gulls
+   W x=261 s=0 z=100 t=wheeled
+   W x=330 s=0 z=100 t=over
+   W x=378 s=0 z=100 t=the
+   W x=416 s=0 z=100 t=fish
+  LINE y=348 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=market
+   W x=70 s=0 z=100 t=calling
+   W x=148 s=0 z=100 t=to
+   W x=183 s=0 z=100 t=one
+   W x=228 s=0 z=100 t=another
+   W x=315 s=0 z=100 t=across
+   W x=385 s=0 z=100 t=the
+   W x=429 s=0 z=100 t=wet
+  LINE y=372 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=stones
+   W x=66 s=0 z=100 t=of
+   W x=94 s=0 z=100 t=the
+   W x=131 s=0 z=100 t=quay
+   W x=175 s=0 z=100 t=the.
+SPINE 6 href=OEBPS/chapter7.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=25 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=7.
+   W x=28 s=0 z=100 t=FLOAT
+   W x=74 s=0 z=100 t=LONG:
+  IMG y=42 x=0 w=100 h=490 src=<cache>/epub_<hash>/img_1d4d5ffb3eb10210.png
+  LINE y=42 x=104 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=Case7L
+   W x=78 s=0 z=100 t=the
+   W x=123 s=0 z=100 t=harbour
+   W x=206 s=0 z=100 t=lay
+   W x=249 s=0 z=100 t=quiet
+   W x=306 s=0 z=100 t=under
+  LINE y=66 x=104 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=a
+   W x=23 s=0 z=100 t=low
+   W x=61 s=0 z=100 t=grey
+   W x=108 s=0 z=100 t=sky
+   W x=144 s=0 z=100 t=while
+   W x=197 s=0 z=100 t=the
+   W x=239 s=0 z=100 t=boats
+   W x=299 s=0 z=100 t=rocked
+  LINE y=90 x=104 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=at
+   W x=35 s=0 z=100 t=their
+   W x=93 s=0 z=100 t=moorings
+   W x=185 s=0 z=100 t=and
+   W x=229 s=0 z=100 t=gulls
+   W x=291 s=0 z=100 t=wheeled
+  LINE y=114 x=104 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=over
+   W x=52 s=0 z=100 t=the
+   W x=94 s=0 z=100 t=fish
+   W x=142 s=0 z=100 t=market
+   W x=210 s=0 z=100 t=calling
+   W x=286 s=0 z=100 t=to
+   W x=319 s=0 z=100 t=one
+  LINE y=138 x=104 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=another
+   W x=83 s=0 z=100 t=across
+   W x=149 s=0 z=100 t=the
+   W x=189 s=0 z=100 t=wet
+   W x=223 s=0 z=100 t=stones
+   W x=292 s=0 z=100 t=of
+   W x=323 s=0 z=100 t=the
+  LINE y=162 x=104 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=quay
+   W x=46 s=0 z=100 t=the
+   W x=85 s=0 z=100 t=harbour
+   W x=162 s=0 z=100 t=lay
+   W x=199 s=0 z=100 t=quiet
+   W x=250 s=0 z=100 t=under
+   W x=305 s=0 z=100 t=a
+   W x=325 s=0 z=100 t=low
+  LINE y=186 x=104 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=grey
+   W x=43 s=0 z=100 t=sky
+   W x=75 s=0 z=100 t=while
+   W x=124 s=0 z=100 t=the
+   W x=162 s=0 z=100 t=boats
+   W x=218 s=0 z=100 t=rocked
+   W x=277 s=0 z=100 t=at
+   W x=306 s=0 z=100 t=their
+  LINE y=210 x=104 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=moorings
+   W x=91 s=0 z=100 t=and
+   W x=134 s=0 z=100 t=gulls
+   W x=195 s=0 z=100 t=wheeled
+   W x=269 s=0 z=100 t=over
+   W x=322 s=0 z=100 t=the
+  LINE y=234 x=104 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=fish
+   W x=50 s=0 z=100 t=market
+   W x=120 s=0 z=100 t=calling
+   W x=198 s=0 z=100 t=to
+   W x=233 s=0 z=100 t=one
+   W x=278 s=0 z=100 t=another
+  LINE y=258 x=104 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=across
+   W x=65 s=0 z=100 t=the
+   W x=104 s=0 z=100 t=wet
+   W x=137 s=0 z=100 t=stones
+   W x=205 s=0 z=100 t=of
+   W x=235 s=0 z=100 t=the
+   W x=274 s=0 z=100 t=quay
+   W x=320 s=0 z=100 t=the
+  LINE y=282 x=104 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=harbour
+   W x=78 s=0 z=100 t=lay
+   W x=116 s=0 z=100 t=quiet
+   W x=168 s=0 z=100 t=under
+   W x=224 s=0 z=100 t=a
+   W x=245 s=0 z=100 t=low
+   W x=281 s=0 z=100 t=grey
+   W x=326 s=0 z=100 t=sky
+  LINE y=306 x=104 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=while
+   W x=48 s=0 z=100 t=the
+   W x=85 s=0 z=100 t=boats
+   W x=140 s=0 z=100 t=rocked
+   W x=198 s=0 z=100 t=at
+   W x=226 s=0 z=100 t=their
+   W x=277 s=0 z=100 t=moorings
+  LINE y=330 x=104 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=and
+   W x=39 s=0 z=100 t=gulls
+   W x=96 s=0 z=100 t=wheeled
+   W x=166 s=0 z=100 t=over
+   W x=215 s=0 z=100 t=the
+   W x=254 s=0 z=100 t=fish
+   W x=299 s=0 z=100 t=market
+  LINE y=354 x=104 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=calling
+   W x=73 s=0 z=100 t=to
+   W x=103 s=0 z=100 t=one
+   W x=143 s=0 z=100 t=another
+   W x=225 s=0 z=100 t=across
+   W x=290 s=0 z=100 t=the
+   W x=329 s=0 z=100 t=wet
+  LINE y=378 x=104 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=stones
+   W x=66 s=0 z=100 t=of
+   W x=94 s=0 z=100 t=the
+   W x=131 s=0 z=100 t=quay
+   W x=175 s=0 z=100 t=the.
+  LINE y=402 x=104 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=Case7After
+   W x=105 s=0 z=100 t=the
+   W x=144 s=0 z=100 t=harbour
+   W x=221 s=0 z=100 t=lay
+   W x=258 s=0 z=100 t=quiet
+   W x=309 s=0 z=100 t=under
+  LINE y=426 x=104 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=a
+   W x=19 s=0 z=100 t=low
+   W x=53 s=0 z=100 t=grey
+   W x=96 s=0 z=100 t=sky
+   W x=128 s=0 z=100 t=while
+   W x=177 s=0 z=100 t=the
+   W x=215 s=0 z=100 t=boats
+   W x=271 s=0 z=100 t=rocked
+   W x=330 s=0 z=100 t=at
+  LINE y=450 x=104 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=their
+   W x=54 s=0 z=100 t=moorings
+   W x=142 s=0 z=100 t=and
+   W x=182 s=0 z=100 t=gulls
+   W x=240 s=0 z=100 t=wheeled
+   W x=311 s=0 z=100 t=over
+  LINE y=474 x=104 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=the
+   W x=37 s=0 z=100 t=fish
+   W x=80 s=0 z=100 t=market
+   W x=143 s=0 z=100 t=calling
+   W x=214 s=0 z=100 t=to
+   W x=242 s=0 z=100 t=one
+   W x=280 s=0 z=100 t=another
+  LINE y=498 x=104 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=across
+   W x=65 s=0 z=100 t=the
+   W x=104 s=0 z=100 t=wet
+   W x=137 s=0 z=100 t=stones
+   W x=205 s=0 z=100 t=of
+   W x=235 s=0 z=100 t=the
+   W x=274 s=0 z=100 t=quay
+   W x=320 s=0 z=100 t=the
+  LINE y=522 x=104 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=harbour
+   W x=78 s=0 z=100 t=lay
+   W x=116 s=0 z=100 t=quiet
+   W x=168 s=0 z=100 t=under
+   W x=224 s=0 z=100 t=a
+   W x=245 s=0 z=100 t=low
+   W x=281 s=0 z=100 t=grey
+   W x=326 s=0 z=100 t=sky
+  LINE y=546 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=while
+   W x=49 s=0 z=100 t=the
+   W x=87 s=0 z=100 t=boats
+   W x=143 s=0 z=100 t=rocked
+   W x=202 s=0 z=100 t=at
+   W x=231 s=0 z=100 t=their
+   W x=283 s=0 z=100 t=moorings
+   W x=369 s=0 z=100 t=and
+   W x=407 s=0 z=100 t=gulls
+  LINE y=570 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=wheeled
+   W x=68 s=0 z=100 t=over
+   W x=115 s=0 z=100 t=the
+   W x=152 s=0 z=100 t=fish
+   W x=195 s=0 z=100 t=market
+   W x=258 s=0 z=100 t=calling
+   W x=329 s=0 z=100 t=to
+   W x=357 s=0 z=100 t=one.
