@@ -18,6 +18,8 @@
 #include "TouchGestures.h"
 #include "TouchUi.h"
 #include "WifiCredentialStore.h"
+#include "activities/home/HomeMenu.h"
+#include "activities/home/LibraryTab.h"
 #include "util/UrlUtils.h"
 
 namespace {
@@ -37,6 +39,9 @@ bool JsonSettingsIO::saveState(const CrossPointState& s, const char* path) {
   doc["readerActivityLoadCount"] = s.readerActivityLoadCount;
   doc["lastSleepFromReader"] = s.lastSleepFromReader;
   doc["recentBooksView"] = s.recentBooksView;
+  doc["libraryTab"] = s.libraryTab;
+  doc["addedBooksView"] = s.addedBooksView;
+  doc["authorsView"] = s.authorsView;
   doc["showBootScreen"] = s.showBootScreen;
   // Information about a pending KOReader sync session
   JsonObject sync = doc["koReaderSyncSession"].to<JsonObject>();
@@ -108,6 +113,15 @@ bool JsonSettingsIO::loadState(CrossPointState& s, const char* json) {
                                                                    : CrossPointSettings::BROWSER_VIEW_DETAILS;
   s.recentBooksView = doc["recentBooksView"] | fallbackView;
   if (s.recentBooksView >= CrossPointSettings::FILE_BROWSER_VIEW_COUNT) s.recentBooksView = fallbackView;
+  s.libraryTab = static_cast<uint8_t>(libraryTabFrom(doc["libraryTab"] | uint8_t{0}));
+  s.addedBooksView = doc["addedBooksView"] | uint8_t{CrossPointSettings::BROWSER_VIEW_COVERS};
+  if (s.addedBooksView >= CrossPointSettings::FILE_BROWSER_VIEW_COUNT) {
+    s.addedBooksView = CrossPointSettings::BROWSER_VIEW_COVERS;
+  }
+  s.authorsView = doc["authorsView"] | uint8_t{CrossPointSettings::BROWSER_VIEW_DETAILS};
+  if (s.authorsView >= CrossPointSettings::FILE_BROWSER_VIEW_COUNT) {
+    s.authorsView = CrossPointSettings::BROWSER_VIEW_DETAILS;
+  }
   s.showBootScreen = doc["showBootScreen"] | true;
   JsonObject sync = doc["koReaderSyncSession"].as<JsonObject>();
   s.koReaderSyncSession.active = sync["active"] | false;
@@ -331,6 +345,13 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
       s.*field = v;
     }
   });
+
+  // Browse Files and Recent Books had a home entry each before they became the Library's tabs. The
+  // Library shows where either did; the old keys go with the next save.
+  if (doc["showLibraryOnHome"].isNull()) {
+    s.showLibraryOnHome =
+        libraryOnHomeFromLegacy(doc["showBrowseFilesOnHome"] | uint8_t{1}, doc["showRecentBooksOnHome"] | uint8_t{1});
+  }
 
   // Front button remap — managed by RemapFrontButtons sub-activity, not in SettingsList.
   using S = CrossPointSettings;

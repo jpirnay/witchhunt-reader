@@ -728,8 +728,7 @@ class CrossPointSettings {
   // Which entries sit on the home screen (1) rather than behind its "More" entry (0). An entry
   // with nothing behind it (no bookmarks, no OPDS server, weather off) shows in neither place.
   // Settings has no switch: it is where these are turned back on. See HomeMenu.cpp.
-  uint8_t showBrowseFilesOnHome = 1;
-  uint8_t showRecentBooksOnHome = 1;
+  uint8_t showLibraryOnHome = 1;
   // On by default, because a screen nobody can find is a screen nobody reads.
   uint8_t showReadingStatsOnHome = 1;
   uint8_t showBookmarksOnHome = 1;

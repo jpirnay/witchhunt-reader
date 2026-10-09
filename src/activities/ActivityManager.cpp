@@ -623,11 +623,8 @@ void ActivityManager::goToHomeMore() { replaceActivity(std::make_unique<HomeMore
 
 void ActivityManager::goToHomeMenuAction(const HomeMenuAction action) {
   switch (action) {
-    case HomeMenuAction::FileBrowser:
+    case HomeMenuAction::Library:
       goToFileBrowser();
-      break;
-    case HomeMenuAction::Recents:
-      goToRecentBooks();
       break;
     case HomeMenuAction::ReadingStats:
       goToReadingStats();
