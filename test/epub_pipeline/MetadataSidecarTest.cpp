@@ -175,7 +175,6 @@ TEST_F(MetadataSidecarFixture, ReadsTheShapeTheMetadataEditorWrites) {
   EXPECT_EQ(epub.getDescription(), "Edited description text.");
 }
 
-
 // The Library groups books by their primary author and files them by its opf:file-as. Both come
 // from the sidecar when it names an author.
 TEST_F(MetadataSidecarFixture, SidecarSuppliesThePrimaryAuthorAndItsFileAs) {

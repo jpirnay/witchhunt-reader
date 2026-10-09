@@ -25,9 +25,7 @@ class MetadataSidecarReadTest : public ::testing::Test {
   }
   void TearDown() override { fs::remove_all(dir_); }
 
-  void writeSidecar(const std::string& xml) const {
-    std::ofstream(dir_ / "Some Book.opf", std::ios::binary) << xml;
-  }
+  void writeSidecar(const std::string& xml) const { std::ofstream(dir_ / "Some Book.opf", std::ios::binary) << xml; }
 
   fs::path dir_;
   std::string book_;

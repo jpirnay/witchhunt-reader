@@ -97,7 +97,6 @@ TEST_F(BookDetailsCacheTest, AnotherFormatVersionIsNotAnswered) {
   EXPECT_FALSE(BookDetailsCache::read(path_, 1, 0, out));
 }
 
-
 // A version 1 record has no primary author. Answering from it would group the book under "Unknown
 // author" for good, so it is parsed again instead.
 TEST_F(BookDetailsCacheTest, AVersionOneRecordIsNotAnswered) {
