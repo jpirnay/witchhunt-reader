@@ -81,7 +81,8 @@ constexpr uint32_t MAX_STRING_LENGTH = 4096;
     return false;
   }
   s.resize(len);
-  file.read(reinterpret_cast<uint8_t*>(&s[0]), len);
+  // A short read is a truncated file: answering with half a string would pass it off as whole.
+  if (len > 0 && static_cast<size_t>(file.read(reinterpret_cast<uint8_t*>(&s[0]), len)) != len) return false;
   return true;
 }
 }  // namespace serialization
