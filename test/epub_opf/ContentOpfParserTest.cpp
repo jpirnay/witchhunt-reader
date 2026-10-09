@@ -144,6 +144,7 @@ TEST(ContentOpfParser, ExtractsMetadataManifestAndGuideFields) {
 
   EXPECT_EQ(parser.title, "Main Title");
   EXPECT_EQ(parser.author, "Author One, Author Two");
+  EXPECT_EQ(parser.primaryAuthor, "Author One");
   EXPECT_EQ(parser.language, "en");
   EXPECT_EQ(parser.description, "Hello World");
   EXPECT_EQ(parser.series, "Series Name");
@@ -473,4 +474,154 @@ TEST(ContentOpfParser, DisablesHashTrustedIndexOnDuplicateIdsAndStillResolves) {
   ASSERT_EQ(capturedSpineHrefs.size(), 2u);
   EXPECT_EQ(capturedSpineHrefs[0], "book/OEBPS/text/ch5.xhtml");  // first occurrence wins
   EXPECT_EQ(capturedSpineHrefs[1], "book/OEBPS/text/ch419.xhtml");
+}
+
+namespace {
+
+// What the creator handling produced for one <metadata> block.
+struct CreatorResult {
+  bool parsed = false;
+  std::string author;
+  std::string primaryAuthor;
+  std::string authorSort;
+  std::string series;
+  std::string seriesIndex;
+};
+
+// Parses an OPF whose <metadata> holds `metadata`, fed `chunk` bytes per write() (0 = all at once),
+// so a test can make the parser receive one creator's text in many pieces.
+CreatorResult parseCreators(const std::string& metadata, const size_t chunk = 0) {
+  CreatorResult result;
+  const std::string cacheDir = makeTempDir();
+  if (cacheDir.empty()) return result;
+  TempDirGuard dirGuard(cacheDir);
+  const std::string base = "/book/OEBPS/";
+  const std::string xml =
+      "<?xml version='1.0' encoding='utf-8'?>"
+      "<package xmlns:opf='http://www.idpf.org/2007/opf' xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+      "<metadata>" +
+      metadata +
+      "</metadata>"
+      "<manifest><item id='ncx' href='toc.ncx' media-type='application/x-dtbncx+xml'/></manifest>"
+      "<spine/>"
+      "</package>";
+  ContentOpfParser parser(cacheDir, base, xml.size(), nullptr);
+  if (!parser.setup()) return result;
+  const auto* data = reinterpret_cast<const uint8_t*>(xml.data());
+  const size_t step = chunk == 0 ? xml.size() : chunk;
+  for (size_t at = 0; at < xml.size(); at += step) {
+    const size_t n = std::min(step, xml.size() - at);
+    if (parser.write(data + at, n) != n) return result;
+  }
+  result.parsed = true;
+  result.author = parser.author;
+  result.primaryAuthor = parser.primaryAuthor;
+  result.authorSort = parser.authorSort;
+  result.series = parser.series;
+  result.seriesIndex = parser.seriesIndex;
+  return result;
+}
+
+}  // namespace
+
+// The display line lists every creator; the Library groups by the first one credited as author.
+TEST(ContentOpfParserCreators, JoinsEveryCreatorAndPicksTheFirstAuthorAsPrimary) {
+  const auto r = parseCreators(
+      "<dc:creator opf:role='trl'>Anthea Bell</dc:creator>"
+      "<dc:creator opf:role='aut' opf:file-as='Pratchett, Terry'>Terry Pratchett</dc:creator>"
+      "<dc:creator opf:role='aut'>Neil Gaiman</dc:creator>");
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.author, "Anthea Bell, Terry Pratchett, Neil Gaiman");
+  EXPECT_EQ(r.primaryAuthor, "Terry Pratchett");
+  EXPECT_EQ(r.authorSort, "Pratchett, Terry");
+}
+
+TEST(ContentOpfParserCreators, ACreatorWithNoRoleIsAnAuthor) {
+  const auto r = parseCreators("<dc:creator>\n  Ursula K. Le Guin \n</dc:creator>");
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.author, "Ursula K. Le Guin");
+  EXPECT_EQ(r.primaryAuthor, "Ursula K. Le Guin");
+  EXPECT_EQ(r.authorSort, "");
+}
+
+TEST(ContentOpfParserCreators, TheRoleCodeIsMatchedWhateverItsCase) {
+  const auto r =
+      parseCreators("<dc:creator opf:role='edt'>Ed Itor</dc:creator><dc:creator opf:role='AUT'>Au Thor</dc:creator>");
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.primaryAuthor, "Au Thor");
+}
+
+TEST(ContentOpfParserCreators, NoCreatorCreditedAsAuthorLeavesNoPrimaryAuthor) {
+  const auto r = parseCreators("<dc:creator opf:role='edt'>Ed Itor</dc:creator>");
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.author, "Ed Itor");
+  EXPECT_EQ(r.primaryAuthor, "");
+  EXPECT_EQ(r.authorSort, "");
+}
+
+// EPUB 3 states a creator's role and filing name in <meta refines="#id">, after the creator.
+TEST(ContentOpfParserCreators, Epub3RefinementsGiveRoleAndFileAs) {
+  const auto r = parseCreators(
+      "<dc:creator id='ill'>Pauline Baynes</dc:creator>"
+      "<dc:creator id='c2'>Ursula K. Le Guin</dc:creator>"
+      "<meta refines='#ill' property='role' scheme='marc:relators'>ill</meta>"
+      "<meta refines='#c2' property='role' scheme='marc:relators'>aut</meta>"
+      "<meta refines='#c2' property='file-as'> Le Guin, Ursula K. </meta>");
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.author, "Pauline Baynes, Ursula K. Le Guin");
+  EXPECT_EQ(r.primaryAuthor, "Ursula K. Le Guin");
+  EXPECT_EQ(r.authorSort, "Le Guin, Ursula K.");
+}
+
+// Review focus 5: a refinement of something that is not a creator is not ours to take.
+TEST(ContentOpfParserCreators, RefinementsOfOtherThingsLeaveCreatorsAlone) {
+  const auto r = parseCreators(
+      "<dc:title id='t'>Tehanu</dc:title>"
+      "<dc:creator id='c1'>Ursula K. Le Guin</dc:creator>"
+      "<meta refines='#t' property='file-as'>Tehanu, The Last Book</meta>"
+      "<meta refines='#nobody' property='role'>edt</meta>"
+      "<meta property='belongs-to-collection' id='coll'>Earthsea</meta>"
+      "<meta refines='#coll' property='group-position'>4</meta>");
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.primaryAuthor, "Ursula K. Le Guin");
+  EXPECT_EQ(r.authorSort, "");
+  EXPECT_EQ(r.series, "Earthsea");
+  EXPECT_EQ(r.seriesIndex, "4");
+}
+
+// One creator's text may reach the parser in several pieces (a write boundary, an entity). The
+// separator belongs between creators, never inside one.
+TEST(ContentOpfParserCreators, ACreatorFedOneByteAtATimeStaysOneName) {
+  const auto r = parseCreators("<dc:creator>Laurel &amp; Hardy</dc:creator><dc:creator>Second</dc:creator>", 1);
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.author, "Laurel & Hardy, Second");
+  EXPECT_EQ(r.primaryAuthor, "Laurel & Hardy");
+}
+
+// Review focus 1: a creator written surname-first is still one creator.
+TEST(ContentOpfParserCreators, ASurnameFirstCreatorStaysOneName) {
+  const auto r = parseCreators("<dc:creator>Le Guin, Ursula K.</dc:creator>");
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.author, "Le Guin, Ursula K.");
+  EXPECT_EQ(r.primaryAuthor, "Le Guin, Ursula K.");
+}
+
+// Review focus 2: only the first MAX_CREATORS (4) are candidates for primary author, but the
+// display line keeps them all.
+TEST(ContentOpfParserCreators, ManyCreatorsAllReachTheDisplayLine) {
+  const auto r = parseCreators(
+      "<dc:creator opf:role='ill'>I1</dc:creator><dc:creator opf:role='ill'>I2</dc:creator>"
+      "<dc:creator opf:role='ill'>I3</dc:creator><dc:creator opf:role='ill'>I4</dc:creator>"
+      "<dc:creator opf:role='aut'>A5</dc:creator><dc:creator>A6</dc:creator>");
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.author, "I1, I2, I3, I4, A5, A6");
+  EXPECT_EQ(r.primaryAuthor, "");
+}
+
+// Review focus 3: an empty creator adds nothing, not even a separator.
+TEST(ContentOpfParserCreators, AWhitespaceOnlyCreatorIsSkipped) {
+  const auto r = parseCreators("<dc:creator> </dc:creator><dc:creator>Real Name</dc:creator>");
+  ASSERT_TRUE(r.parsed);
+  EXPECT_EQ(r.author, "Real Name");
+  EXPECT_EQ(r.primaryAuthor, "Real Name");
 }
