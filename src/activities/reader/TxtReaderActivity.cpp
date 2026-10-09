@@ -709,9 +709,17 @@ void TxtReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION a
           static_cast<uint8_t>((SETTINGS.orientation + 1) % CrossPointSettings::ORIENTATION_COUNT);
       SETTINGS.orientation = nextOrientation;
       SETTINGS.saveToFile();
-      ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
-      initialized = false;
-      initializeReader();
+      {
+        // This runs on the loop task, while the render task reads the renderer's orientation
+        // and pageOffsets on every pass. Rebuilding the index here, unlocked, cleared and
+        // refilled the vector under a render that was indexing it. The lock covers the two
+        // writes; the rebuild itself is left to render(), which runs initializeReader() under
+        // the lock it already holds whenever `initialized` is false -- so the slow part does
+        // not hold up this task, and nothing reads a half-built index.
+        RenderLock lock(*this);
+        ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
+        initialized = false;
+      }
       requestUpdate();
       break;
     }

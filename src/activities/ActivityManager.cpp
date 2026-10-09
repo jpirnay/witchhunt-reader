@@ -1143,9 +1143,10 @@ bool ActivityManager::isUpdateSuperseded() const {
 
 // RenderLock
 
-RenderLock::RenderLock() {
-  xSemaphoreTake(activityManager.renderingMutex, portMAX_DELAY);
-  isLocked = true;
+RenderLock::RenderLock(const Mode mode) {
+  // A zero timeout makes the take a pure attempt. portMAX_DELAY blocks until it succeeds (the
+  // kernel is built with INCLUDE_vTaskSuspend), so Blocking always ends up locked.
+  isLocked = xSemaphoreTake(activityManager.renderingMutex, mode == Mode::Try ? 0 : portMAX_DELAY) == pdTRUE;
 }
 
 RenderLock::RenderLock([[maybe_unused]] Activity&) {

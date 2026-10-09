@@ -6214,7 +6214,61 @@ void EpubReaderActivity::renderBackgroundDebugOverlay() const {
 #endif
 }
 
+// main.cpp polls skipLoopDelay() and preventAutoSleep() on the loop task, outside
+// activityManager.loop() and with no render lock held. `section` belongs to whichever task holds
+// the lock, and the render task replaces it: renderNormalPass's page-load recovery resets it, and
+// buildSection assigns it. An unlocked `section->hasActiveBuild()` could therefore read a Section
+// the render task had just freed. Diagnosis by Sung-jin Brian Hong in crosspoint-reader PR #3652,
+// which fixed it there by reading the hint under a try-lock in main.cpp.
+//
+// Try, never block: a blocking lock would stall the loop, and with it input, behind a whole
+// render pass. While a pass holds the lock the hints keep their last locked reading, because
+// neither fixed answer is safe:
+//  - preventAutoSleep() true counts every render pass as user activity, and the status-bar clock
+//    renders once a minute, so the sleep timeout would never run out.
+//  - skipLoopDelay() true would busy-yield through every render, build or no build. False would
+//    sleep 10 ms per tick through renders during a build. That is upstream's scheduling change in
+//    the same PR, and it needs its own device measurement here.
+// The last reading is what the unlocked read used to return, minus the freed-Section case. It is
+// stale for at most one locked stretch of a pass (renderContents drops the lock before its
+// waveform wait), and staleness costs no build progress: the slices need this same lock, so none
+// could run in that stretch anyway. The one long stretch is a Blocking (fallback) build, which runs
+// whole inside a single pass while the hints still say "no current-section build". So that build
+// no longer holds off auto-sleep, which matters only if it outlasts the sleep timeout (1 minute at
+// the lowest setting). And the loop no longer busy-yields against it, unless Background-B was
+// building when the pass began.
+void EpubReaderActivity::refreshLoopHints() {
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock()) {
+    return;
+  }
+  loopHintCurrentBuild_ = section && section->hasActiveBuild();
+  loopHintBackgroundBuild_ = backgroundBuildState_ == BackgroundBuildState::Building;
+}
+
+bool EpubReaderActivity::preventAutoSleep() {
+  refreshLoopHints();
+  return loopHintCurrentBuild_;
+}
+
+bool EpubReaderActivity::skipLoopDelay() {
+  refreshLoopHints();
+  return loopHintCurrentBuild_ || loopHintBackgroundBuild_;
+}
+
 bool EpubReaderActivity::shouldSkipPeriodicUpdate() const {
+  // Polled once a minute by ActivityManager::loop() on the loop task with no lock held, so it
+  // had the same unlocked read of `section` as the hints above (and raced render() on
+  // statusRefreshDeferred_). A pass holding the lock means "cannot tell": request the update. At
+  // worst that is one redundant status-bar refresh, where skipping could leave the clock a minute
+  // behind if the pass in flight drew its status bar before the minute turned. It does not take
+  // B's borrow from a live build either: the pass in flight already returned it on entry
+  // (recoverSecondaryBufferIfNeeded), unless build-through keeps it, and then the extra render
+  // keeps it too.
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock()) {
+    return false;
+  }
   // Background-B holds the secondary buffer: any render takes it back, and taking it back
   // discards B's live build (endBackgroundBorrow). A clock-minute or battery tick would do that
   // once a minute, and a build takes ~7-15 s of slices -- so a status refresh waits for B to hand

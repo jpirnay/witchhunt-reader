@@ -527,6 +527,12 @@ class EpubReaderActivity final : public Activity {
   // Set between suspendBackgroundWork() and resumeBackgroundWork(): no look-ahead
   // build is probed, armed or stepped, and no page is pre-rendered.
   bool backgroundWorkSuspended_ = false;
+  // The build state behind skipLoopDelay() / preventAutoSleep(), as last read under the render
+  // lock. Loop task only: main.cpp polls both hooks from there, and refreshLoopHints() is their
+  // only writer.
+  bool loopHintCurrentBuild_ = false;     // section && section->hasActiveBuild()
+  bool loopHintBackgroundBuild_ = false;  // backgroundBuildState_ == Building
+  void refreshLoopHints();
   // --- Background C (incremental build of the CURRENT section while the reader watches) ---
   // When the spine the user just entered has no cache, buildSection() starts an in-place
   // incremental build owned by `section` and hands the slicing to stepCurrentSectionBuild()
@@ -665,7 +671,7 @@ class EpubReaderActivity final : public Activity {
   bool autoSyncReaderIsQuiet() const;
   void maybeAutoPullOnWake();
   bool pollAutoSyncPull();
-  void evaluateAutoSyncPull();
+  bool evaluateAutoSyncPull();
   bool handOffToInteractiveSync();
   void silentUploadCurrentPosition();
   void silentApplyRemote(const KOReaderProgress& remote);
@@ -1128,7 +1134,8 @@ class EpubReaderActivity final : public Activity {
   // DISP log now says so out loud.
   void startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler) override;
   bool isReaderActivity() const override { return true; }
-  bool preventAutoSleep() override { return section && section->hasActiveBuild(); }
+  // Polled by main.cpp's loop without the render lock; see refreshLoopHints().
+  bool preventAutoSleep() override;
   // Auto page turn is reading with no hands on the device: no input arrives, so without this the
   // sleep timeout fires mid-book (issue #293). keepAwake(), not preventAutoSleep(): the pages turn
   // every 5-60 s and the loop should still light-sleep between them.
@@ -1141,10 +1148,9 @@ class EpubReaderActivity final : public Activity {
   // 40 ms slice was followed by a 50 ms idle delay at 10 MHz. Declaring the work makes the loop
   // stop calling this state idle at all: slices run back to back, the build finishes sooner, and
   // Background-B hands the borrowed framebuffer back that much earlier. Same failure and same
-  // remedy as HomeActivity's cover decoding (see its skipLoopDelay).
-  bool skipLoopDelay() override {
-    return (section && section->hasActiveBuild()) || backgroundBuildState_ == BackgroundBuildState::Building;
-  }
+  // remedy as HomeActivity's cover decoding (see its skipLoopDelay). Polled by main.cpp's loop
+  // without the render lock; see refreshLoopHints().
+  bool skipLoopDelay() override;
   // A pending pre-render leaves the *next* page in the frame buffer; redraw the current page
   // so a screenshot (or any raw frame-buffer capture) matches what the user sees.
   void prepareFramebufferForCapture() override { restoreCurrentPageToBufferIfPreRendered(); }
