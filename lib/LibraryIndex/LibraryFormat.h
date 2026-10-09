@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // The book index the Library's New and Authors tabs read, and the working files a build assembles
-// it from. Design: docs/superpowers/specs/2026-10-09-library-view-design.md, section 3.
+// it from. Design: docs/design/library-index.md; the layout: docs/file-formats.md, `library.bin`.
 namespace library {
 
 constexpr char MAGIC[4] = {'W', 'L', 'I', 'B'};

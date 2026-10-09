@@ -1,5 +1,5 @@
 // Join merges a new walk with the previous index: books it knows keep their author and when they
-// were first seen; books it does not are new (spec §3.5, phase 2).
+// were first seen; books it does not are new (docs/design/library-index.md, "Building": Join).
 
 #include <LibraryJoin.h>
 
@@ -148,7 +148,6 @@ TEST_F(LibraryJoinTest, TwoCopiesOfABookBothKeepItsAuthor) {
   EXPECT_EQ(joined().size(), 2u);
 }
 
-// Review focus 3.
 TEST_F(LibraryJoinTest, AnEmptyCardJoinsToNothing) {
   const auto result = join({});
   EXPECT_EQ(result.pending, 0);
@@ -156,7 +155,7 @@ TEST_F(LibraryJoinTest, AnEmptyCardJoinsToNothing) {
   EXPECT_TRUE(publishJoined(result));
 }
 
-// Plan 2a review I1: a nameless author must not be carried. Its blank entry would be taken for a
+// A nameless author must not be carried. Its blank entry would be taken for a
 // file-as one and beat the real name for good, through every build and every Refresh.
 TEST_F(LibraryJoinTest, ANamelessAuthorIsNotCarriedSoItsNameCanArriveLater) {
   ASSERT_TRUE(publish({book("/Ghost.epub", "Ghost Writer")}));  // resolved, its name never recorded
@@ -168,7 +167,7 @@ TEST_F(LibraryJoinTest, ANamelessAuthorIsNotCarriedSoItsNameCanArriveLater) {
   EXPECT_EQ(authorNames(index), (std::vector<std::string>{"Ghost Writer"}));
 }
 
-// Plan 2a review I2: Refresh library carries no author, names included, so a corrected file-as
+// Refresh library carries no author, names included, so a corrected file-as
 // takes effect.
 TEST_F(LibraryJoinTest, ResolveAllCarriesNoNamesSoACorrectedFileAsTakesEffect) {
   addName("Ursula K. Le Guin", "Le Guin, Ursula K.");
@@ -191,7 +190,7 @@ TEST_F(LibraryJoinTest, ResolveAllCarriesNoNamesSoACorrectedFileAsTakesEffect) {
   EXPECT_EQ(filing, "LeGuin, Ursula");
 }
 
-// Plan 2a review I3: a read error in the previous index fails the join. Taking it for the end of the
+// A read error in the previous index fails the join. Taking it for the end of the
 // index would make every later book new: New flooded, and their firstSeen lost at the next publish.
 TEST_F(LibraryJoinTest, AReadErrorInThePreviousIndexFailsTheJoin) {
   ASSERT_TRUE(publish({book("/a.epub", ""), book("/b.epub", "")}));

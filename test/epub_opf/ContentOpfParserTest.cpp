@@ -575,7 +575,7 @@ TEST(ContentOpfParserCreators, Epub3RefinementsGiveRoleAndFileAs) {
   EXPECT_EQ(r.authorSort, "Le Guin, Ursula K.");
 }
 
-// Review focus 5: a refinement of something that is not a creator is not ours to take.
+// A refinement of something that is not a creator is not ours to take.
 TEST(ContentOpfParserCreators, RefinementsOfOtherThingsLeaveCreatorsAlone) {
   const auto r = parseCreators(
       "<dc:title id='t'>Tehanu</dc:title>"
@@ -600,7 +600,7 @@ TEST(ContentOpfParserCreators, ACreatorFedOneByteAtATimeStaysOneName) {
   EXPECT_EQ(r.primaryAuthor, "Laurel & Hardy");
 }
 
-// Review focus 1: a creator written surname-first is still one creator.
+// A creator written surname-first is still one creator.
 TEST(ContentOpfParserCreators, ASurnameFirstCreatorStaysOneName) {
   const auto r = parseCreators("<dc:creator>Le Guin, Ursula K.</dc:creator>");
   ASSERT_TRUE(r.parsed);
@@ -608,7 +608,7 @@ TEST(ContentOpfParserCreators, ASurnameFirstCreatorStaysOneName) {
   EXPECT_EQ(r.primaryAuthor, "Le Guin, Ursula K.");
 }
 
-// Review focus 2: only the first MAX_CREATORS (4) are candidates for primary author, but the
+// Only the first MAX_CREATORS (4) are candidates for primary author, but the
 // display line keeps them all.
 TEST(ContentOpfParserCreators, ManyCreatorsAllReachTheDisplayLine) {
   const auto r = parseCreators(
@@ -662,7 +662,7 @@ TEST(ContentOpfParserCreators, TheCreatorTableIsFreedWhenMetadataCloses) {
   ASSERT_EQ(parser.write(reinterpret_cast<const uint8_t*>(rest.data()), rest.size()), rest.size());
 }
 
-// Review focus 3: an empty creator adds nothing, not even a separator.
+// An empty creator adds nothing, not even a separator.
 TEST(ContentOpfParserCreators, AWhitespaceOnlyCreatorIsSkipped) {
   const auto r = parseCreators("<dc:creator> </dc:creator><dc:creator>Real Name</dc:creator>");
   ASSERT_TRUE(r.parsed);

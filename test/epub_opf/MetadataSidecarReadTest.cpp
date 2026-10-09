@@ -83,7 +83,7 @@ TEST_F(MetadataSidecarReadTest, NoSidecarIsNone) {
   EXPECT_EQ(MetadataSidecar::read(book_, out), MetadataSidecar::Result::None);
 }
 
-// Review focus 4: these leave the book titled by its filename.
+// These leave the book titled by its filename.
 TEST_F(MetadataSidecarReadTest, AnEmptySidecarIsIgnored) {
   writeSidecar("");
   MetadataSidecarFields out;

@@ -184,3 +184,29 @@ Selection rules (see `docs/epub-toc-navigation.md`):
 - The NCX `<pageList>` writer runs only if the nav writer produced nothing.
 - The EPUB 2.01 `page-map.xml` writer runs only if `pagelist.bin` doesn't already exist on disk.
 - Inline `doc-pagebreak` markers in XHTML are matched at chapter parse time and don't need the cache file; they coexist with whichever source above won.
+
+## `library.bin`
+
+`/.crosspoint/library/library.bin`: the book index the Library's New and Authors tabs read, built by
+`LibraryBuilder` and read by `LibraryIndexReader` (`lib/LibraryIndex/`). The structs are in
+`LibraryFormat.h`; the design is in [design/library-index.md](design/library-index.md). Written under a
+temporary name and renamed into place. Little-endian, packed. A wrong magic or version, or sections
+that do not fit the file, make it invalid, and a build replaces it.
+
+| Section | Layout |
+|---|---|
+| Header, 44 B | magic `WLIB`; `u8` version (2); `u8` flags (bit 0: partial, the card held more than 2,000 books); `u8` acceptRules (the *Show Hidden Files* setting the walk used); `u8` reserved; `u32` buildGen; `u16` bookCount, authorCount, newCount; `u16` reserved; `u32` offsets of the five sections below; `u32` blob length |
+| Records | bookCount × 24 B, **in identity order**: `u32` identity, authorHash, date (FAT `date << 16 \| time`), pathOff, sidecarSig, firstSeen |
+| New | newCount (≤ 10) × `u16` record index, newest first |
+| Authors | authorCount × 12 B, **in sort-key order**: `u32` hash, nameOff; `u16` firstBook, count |
+| Author books | bookCount × `u16` record index; an author's books are the slots `[firstBook, firstBook + count)` |
+| Blob | Strings, each a `u16` length then that many bytes: book paths; for each author its name as the books spell it, then its filing name ("Pratchett, Terry") |
+
+Reserved author hashes: `0`, no author ("Unknown author"); `0xFFFFFFFF`, not known yet ("Not yet
+indexed"). Reserved sidecar signatures: `0`, no sidecar; `0xFFFFFFFF`, a sidecar the walk could not
+pair with its book. Version 1 stored an author's folded sort key where version 2 stores its filing name.
+
+A build's working files sit beside it and are removed when the build finishes: `stage.bin` (16 B per
+book: identity, date, sidecarSig, pathOff), `paths.bin` (the paths), `records.bin` (the joined records)
+and `names.bin` (per author: `u32` hash, `u8` flags with bit 0 set when the filing name came from a
+file-as, then the name and filing name as blob strings).

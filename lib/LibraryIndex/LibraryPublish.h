@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <string>
 
-// Assembles the book index from a build's working files (spec section 3.5, phase 3).
+// Assembles the book index from a build's working files (docs/design/library-index.md, "Building": Publish).
 namespace LibraryPublish {
 
 struct Input {

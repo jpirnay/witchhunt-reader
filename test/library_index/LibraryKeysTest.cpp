@@ -1,4 +1,5 @@
-// How the book index tells books and authors apart, and the order authors file in (spec §3.3, §3.4).
+// How the book index tells books and authors apart, and the order authors file in
+// (docs/design/library-index.md, "Identity, first seen and the New order" and "Authors").
 
 #include <LibraryFormat.h>
 #include <LibraryKeys.h>

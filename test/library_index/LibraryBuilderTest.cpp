@@ -1,5 +1,6 @@
-// The builder walks a card, joins, publishes and resolves a step at a time (spec §3.5). These tests
-// run it over a real directory tree through the stdio storage shim.
+// The builder walks a card, joins, publishes and resolves a step at a time
+// (docs/design/library-index.md, "Building"). These tests run it over a real directory tree through
+// the stdio storage shim.
 
 #include <BuildArena.h>
 #include <LibraryBuilder.h>
@@ -163,7 +164,6 @@ TEST_F(LibraryBuilderTest, HiddenFoldersAreListedOnlyWhenShownAndTheCacheNever) 
   EXPECT_EQ(index.header().acceptRules, 1);
 }
 
-// Review focus 3.
 TEST_F(LibraryBuilderTest, ABookThatCannotBeReadNowStaysPendingAndIsAskedAgain) {
   file("Books/Mort.epub");
   catalog_.unreadable.insert("Mort.epub");
@@ -177,7 +177,6 @@ TEST_F(LibraryBuilderTest, ABookThatCannotBeReadNowStaysPendingAndIsAskedAgain) 
   EXPECT_EQ(authorNames(), (std::vector<std::string>{"Terry Pratchett x1"}));
 }
 
-// Review focus 4.
 TEST_F(LibraryBuilderTest, TheCapStopsTheWalkAndMarksTheIndexPartial) {
   file("Books/a.epub");
   file("Books/b.epub");
@@ -257,7 +256,6 @@ TEST_F(LibraryBuilderTest, NewListsTheBooksAddedSinceTheLastBuild) {
   EXPECT_EQ(path.substr(path.rfind('/') + 1), "Fresh.epub");
 }
 
-// Review focus 1.
 TEST_F(LibraryBuilderTest, ABookGoneBeforeItsResolveStaysPending) {
   file("Books/Mort.epub");
   LibraryBuilder builder(config());
@@ -270,7 +268,6 @@ TEST_F(LibraryBuilderTest, ABookGoneBeforeItsResolveStaysPending) {
   EXPECT_EQ(builder.phase(), LibraryBuilder::Phase::Done);
 }
 
-// Review focus 2.
 TEST_F(LibraryBuilderTest, AFolderWithTooManySidecarsMarksTheUnpairedBooksUnknown) {
   for (int i = 0; i < 130; ++i) file("Books/s" + std::to_string(i) + ".opf", 10);
   file("Books/zz.epub");  // its sidecar would sort after the 128 the table keeps

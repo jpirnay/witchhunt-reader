@@ -1,5 +1,5 @@
 // Publish assembles the book index from a build's working files; the reader serves it to the
-// screens (spec §3.2, §3.5 phase 3).
+// screens (docs/file-formats.md, `library.bin`).
 
 #include <filesystem>
 #include <fstream>
@@ -96,7 +96,7 @@ TEST_F(LibraryPublishTest, AuthorsSharingTheKeyPrefixAreInFullKeyOrder) {
   EXPECT_EQ(authorNames(index), (std::vector<std::string>{"Anne Pratchett", "Terry Pratchett"}));
 }
 
-// Review focus 5: a tie run longer than MAX_TIE_RUN keeps hash order, but nothing is lost.
+// A tie run longer than MAX_TIE_RUN keeps hash order, but nothing is lost.
 TEST_F(LibraryPublishTest, AVeryLongTieRunStillPublishesEveryAuthor) {
   std::vector<library::BookRecord> books;
   for (int i = 0; i < 40; ++i) {
@@ -134,7 +134,7 @@ TEST_F(LibraryPublishTest, TheIndexKeepsEachAuthorsFilingName) {
   EXPECT_EQ(filing, "Pratchett, Terry");
 }
 
-// Spec §3.4: if any of the author's books supplies a file-as, that is the key.
+// If any of the author's books supplies a file-as, that is the author's filing name.
 TEST_F(LibraryPublishTest, AFileAsEntryBeatsAnEarlierPlainOne) {
   addName("Ursula K. Le Guin");                        // a book without file-as: "guin ursula k le"
   addName("Ursula K. Le Guin", "Le Guin, Ursula K.");  // a later book with one
@@ -149,7 +149,7 @@ TEST_F(LibraryPublishTest, AFileAsEntryBeatsAnEarlierPlainOne) {
   EXPECT_EQ(filing, "Le Guin, Ursula K.");
 }
 
-// Review focus 1: power lost while the builder appended a name.
+// Power lost while the builder appended a name.
 TEST_F(LibraryPublishTest, ANamesFileCutShortStillPublishes) {
   addName("Terry Pratchett");
   {
@@ -169,7 +169,7 @@ TEST_F(LibraryPublishTest, ANamesFileCutShortStillPublishes) {
   EXPECT_NE(std::find(names.begin(), names.end(), "Terry Pratchett"), names.end());
 }
 
-// Review focus 2: a resolved author whose name never reached the names file.
+// A resolved author whose name never reached the names file.
 TEST_F(LibraryPublishTest, AnAuthorWithNoNameEntryPublishesNameless) {
   ASSERT_TRUE(publish({book("/a.epub", "Ghost Writer")}));
   LibraryIndexReader index;
@@ -183,7 +183,6 @@ TEST_F(LibraryPublishTest, AnAuthorWithNoNameEntryPublishesNameless) {
   EXPECT_EQ(booksOf(index, 0), (std::vector<std::string>{"/a.epub"}));
 }
 
-// Review focus 3.
 TEST_F(LibraryPublishTest, AnEmptyCardPublishesAnEmptyIndex) {
   ASSERT_TRUE(publish({}));
   LibraryIndexReader index;
@@ -193,7 +192,6 @@ TEST_F(LibraryPublishTest, AnEmptyCardPublishesAnEmptyIndex) {
   EXPECT_EQ(index.header().newCount, 0);
 }
 
-// Review focus 4.
 TEST_F(LibraryPublishTest, ALongNonAsciiPathRoundTrips) {
   std::string path =
       "/B\xC3\xBC"

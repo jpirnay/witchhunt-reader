@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <string>
 
-// Merges a new walk with the previous index (spec section 3.5, phase 2).
+// Merges a new walk with the previous index (docs/design/library-index.md, "Building": Join).
 namespace LibraryJoin {
 
 struct Input {

@@ -9,9 +9,9 @@
 
 #include "LibraryFormat.h"
 
-// Builds the book index a step at a time (spec section 3.5): walks the card, joins what it found
-// with the previous index, publishes, then resolves the books whose author is not known yet,
-// publishing again every so often so the Authors tab fills in as it goes.
+// Builds the book index a step at a time (docs/design/library-index.md, "Building"): walks the card,
+// joins what it found with the previous index, publishes, then resolves the books whose author is not
+// known yet, publishing again every so often so the Authors tab fills in as it goes.
 //
 // A step is one bounded piece of work, so the screen hosting it stays responsive: a few dozen
 // directory entries, the join, a publish, or one book's author. Every phase but the walk needs the
