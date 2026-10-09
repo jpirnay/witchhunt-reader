@@ -49,6 +49,11 @@ class CrossPointWebServerActivity final : public Activity {
   // Performance monitoring
   unsigned long lastHandleClientTime = 0;
 
+  // Set by the upload cancel check when Back is seen while an HTTP upload holds handleClient().
+  // A flag rather than leaving it to the Back checks in loop(): the press the check saw may sit in
+  // this tick's snapshot, which loop()'s own update() overwrites before it looks.
+  bool leaveRequested = false;
+
   // Set after the first render completes and frame buffers are released.
   // Subsequent render() calls return immediately — no display operations
   // are possible after releaseFrameBuffers().

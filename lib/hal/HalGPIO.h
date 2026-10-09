@@ -373,6 +373,10 @@ class HalGPIO {
   // Safe to call from any context (e.g. mid-stall inside loop()); does not
   // consume the edge — update() will still see it on the next main-loop tick.
   bool hasPendingInput() const;
+  // hasPendingInput() for one raw button, under the same contract: any context, non-consuming.
+  // For a caller stuck inside a long blocking call that must react to one specific button
+  // without draining the rest away from the loop (File Transfer's upload cancel).
+  bool hasPendingPress(uint8_t buttonIndex) const;
 
   // Pop the oldest queued button edge (FIFO). Returns false when the queue is
   // empty. Drained by ButtonEventManager to drive its press-type FSM.

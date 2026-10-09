@@ -165,6 +165,10 @@ bool MappedInputManager::wasReleased(const Button button) const { return mapButt
 
 bool MappedInputManager::isPressed(const Button button) const { return mapButton(button, &HalGPIO::isPressed); }
 
+bool MappedInputManager::hasPendingPress(const Button button) const {
+  return mapButton(button, &HalGPIO::hasPendingPress);
+}
+
 bool MappedInputManager::wasAnyPressed() const { return gpio.wasAnyPressed(); }
 
 bool MappedInputManager::wasAnyReleased() const { return gpio.wasAnyReleased(); }

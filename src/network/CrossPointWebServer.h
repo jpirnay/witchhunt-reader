@@ -5,6 +5,7 @@
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -70,6 +71,13 @@ class CrossPointWebServer {
 
   WsUploadStatus getWsUploadStatus() const;
 
+  // A multipart HTTP upload (/upload, /api/fonts/upload) is read whole inside ONE handleClient()
+  // call, so the caller's loop is blind until it ends. This is polled on each received chunk
+  // instead; returning true drops the client, and the upload's ABORTED path deletes the partial
+  // file. Runs on the task that calls handleClient(). WebSocket uploads return between frames and
+  // do not use it.
+  void setUploadCancelCheck(std::function<bool()> check) { uploadCancelCheck = std::move(check); }
+
   // Get the port number
   uint16_t getPort() const { return port; }
 
@@ -82,6 +90,8 @@ class CrossPointWebServer {
   uint16_t wsPort = 81;  // WebSocket port
   NetworkUDP udp;
   bool udpActive = false;
+  std::function<bool()> uploadCancelCheck;
+  bool dropUploadIfCancelled() const;
 
   // WebSocket upload state
   void onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
