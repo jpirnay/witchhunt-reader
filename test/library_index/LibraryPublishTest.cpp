@@ -224,4 +224,28 @@ TEST_F(LibraryPublishTest, TheReaderRejectsATruncatedOrForeignFile) {
   EXPECT_FALSE(index.open(at("missing.bin")));
 }
 
+// The cap (user decision 2026-10-09) rests on publish fitting the X4's 48,000-byte framebuffer even
+// when every book has its own author. Measured at 44,164 bytes; a guard against that growing into
+// the margin unnoticed.
+TEST_F(LibraryPublishTest, TwoThousandBooksByTwoThousandAuthorsFitTheFramebuffer) {
+  std::vector<library::BookRecord> books;
+  for (int i = 0; i < library::MAX_BOOKS; ++i) {
+    const std::string name = "Author " + std::to_string(i);
+    addName(name);
+    books.push_back(book("/b" + std::to_string(i) + ".epub", name));
+  }
+  BuildArena framebuffer(48000);
+  ASSERT_TRUE(publish(books, 1, &framebuffer));
+  EXPECT_LE(framebuffer.highWater(), 45000u);
+  LibraryIndexReader index;
+  ASSERT_TRUE(index.open(at("library.bin")));
+  EXPECT_EQ(index.header().authorCount, library::MAX_BOOKS);
+}
+
+TEST_F(LibraryPublishTest, MoreBooksThanTheCapAreRefused) {
+  std::vector<library::BookRecord> books;
+  for (int i = 0; i <= library::MAX_BOOKS; ++i) books.push_back(book("/b" + std::to_string(i) + ".epub", ""));
+  EXPECT_FALSE(publish(books));
+}
+
 }  // namespace

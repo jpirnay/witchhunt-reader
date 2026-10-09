@@ -156,4 +156,76 @@ TEST_F(LibraryJoinTest, AnEmptyCardJoinsToNothing) {
   EXPECT_TRUE(publishJoined(result));
 }
 
+// Plan 2a review I1: a nameless author must not be carried. Its blank entry would be taken for a
+// file-as one and beat the real name for good, through every build and every Refresh.
+TEST_F(LibraryJoinTest, ANamelessAuthorIsNotCarriedSoItsNameCanArriveLater) {
+  ASSERT_TRUE(publish({book("/Ghost.epub", "Ghost Writer")}));  // resolved, its name never recorded
+  const auto result = join({staged("/Ghost.epub")});
+  addName("Ghost Writer");  // recorded by this build
+  ASSERT_TRUE(publishJoined(result));
+  LibraryIndexReader index;
+  ASSERT_TRUE(index.open(at("library.bin")));
+  EXPECT_EQ(authorNames(index), (std::vector<std::string>{"Ghost Writer"}));
+}
+
+// Plan 2a review I2: Refresh library carries no author, names included, so a corrected file-as
+// takes effect.
+TEST_F(LibraryJoinTest, ResolveAllCarriesNoNamesSoACorrectedFileAsTakesEffect) {
+  addName("Ursula K. Le Guin", "Le Guin, Ursula K.");
+  ASSERT_TRUE(publish({book("/Tehanu.epub", "Ursula K. Le Guin")}));
+  const auto result = join({staged("/Tehanu.epub")}, true);
+  // What the builder's resolve does next: record the author anew and patch the book's record.
+  addName("Ursula K. Le Guin", "LeGuin, Ursula");
+  auto records = joined();
+  ASSERT_EQ(records.size(), 1u);
+  records[0].authorHash = LibraryKeys::authorHash("Ursula K. Le Guin");
+  writeAll(at("records.bin"), records);
+  ASSERT_TRUE(publishJoined(result));
+  LibraryIndexReader index;
+  ASSERT_TRUE(index.open(at("library.bin")));
+  library::AuthorRecord author{};
+  std::string name;
+  std::string key;
+  ASSERT_TRUE(index.author(0, author));
+  ASSERT_TRUE(index.authorName(author, name, &key));
+  EXPECT_EQ(key, "leguin ursula");
+}
+
+// Plan 2a review I3: a read error in the previous index fails the join. Taking it for the end of the
+// index would make every later book new: New flooded, and their firstSeen lost at the next publish.
+TEST_F(LibraryJoinTest, AReadErrorInThePreviousIndexFailsTheJoin) {
+  ASSERT_TRUE(publish({book("/a.epub", ""), book("/b.epub", "")}));
+  writeAll(at("stage.bin"), std::vector<library::StagedBook>{staged("/a.epub"), staged("/b.epub")});
+  LibraryJoin::Input in;
+  in.stagePath = at("stage.bin");
+  in.stageCount = 2;
+  in.previousPath = at("library.bin");
+  in.recordsPath = at("records.bin");
+  in.namesPath = at("names.bin");
+  BuildArena framebuffer(48000);
+  LibraryJoin::Result result;
+  HalFile::failOneReadFrom = static_cast<long>(sizeof(library::Header) + sizeof(library::BookRecord));
+  const bool joinedOk = LibraryJoin::join(in, framebuffer, result);
+  HalFile::failOneReadFrom = -1;
+  EXPECT_FALSE(joinedOk);
+}
+
+// The cap (user decision 2026-10-09): a full card's join fits the X4's 48,000-byte framebuffer.
+TEST_F(LibraryJoinTest, AJoinAtTheCapFitsTheFramebuffer) {
+  std::vector<library::StagedBook> books;
+  for (int i = 0; i < library::MAX_BOOKS; ++i) books.push_back(staged("/b" + std::to_string(i) + ".epub"));
+  writeAll(at("stage.bin"), books);
+  LibraryJoin::Input in;
+  in.stagePath = at("stage.bin");
+  in.stageCount = library::MAX_BOOKS;
+  in.previousPath = at("library.bin");
+  in.recordsPath = at("records.bin");
+  in.namesPath = at("names.bin");
+  BuildArena framebuffer(48000);
+  LibraryJoin::Result result;
+  ASSERT_TRUE(LibraryJoin::join(in, framebuffer, result));
+  EXPECT_EQ(result.pending, library::MAX_BOOKS);
+  EXPECT_LE(framebuffer.highWater(), 32000u);
+}
+
 }  // namespace

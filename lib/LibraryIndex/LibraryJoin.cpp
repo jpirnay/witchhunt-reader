@@ -21,17 +21,21 @@ bool readStage(const std::string& path, library::StagedBook* staged, const uint1
 }
 
 // The previous index's named authors, in the names-file format, so publish finds their names without
-// resolving any of their books again.
-bool carryNames(LibraryIndexReader& previous, const bool hasPrevious, const std::string& namesPath) {
+// resolving any of their books again. None at all for Refresh library, which carries no author: a
+// carried key would outrank the file-as the refresh is there to pick up.
+bool carryNames(LibraryIndexReader& previous, const bool carry, const std::string& namesPath) {
   HalFile names;
   if (!Storage.openFileForWrite("LIB", namesPath, names)) return false;
-  if (!hasPrevious) return true;
+  if (!carry) return true;
   library::AuthorRecord author{};
   std::string name;
   std::string key;
   for (uint16_t i = 0; i < previous.header().authorCount; ++i) {
     if (!previous.author(i, author) || !previous.authorName(author, name, &key)) return false;
     if (author.hash == library::AUTHOR_UNKNOWN || author.hash == library::AUTHOR_PENDING) continue;
+    // A resolved author whose name never reached the names file: carrying the blank entry would make
+    // it outrank the real name when that arrives.
+    if (name.empty()) continue;
     // The index keeps no flag: a key that is not what the name alone gives came from a file-as.
     const uint8_t flags = key != LibraryKeys::authorSortKey(name, "") ? 1 : 0;
     if (!library::writeExact(names, &author.hash, sizeof(author.hash)) ||
@@ -65,7 +69,6 @@ bool join(const Input& in, BuildArena& arena, Result& out) {
   LibraryIndexReader previous;
   const bool hasPrevious = previous.open(in.previousPath);
   const uint32_t previousGen = hasPrevious ? previous.header().buildGen : 0;
-  if (!carryNames(previous, hasPrevious, in.namesPath)) return false;
 
   HalFile records;
   if (!Storage.openFileForWrite("LIB", in.recordsPath, records)) return false;
@@ -73,13 +76,17 @@ bool join(const Input& in, BuildArena& arena, Result& out) {
   const uint16_t previousCount = hasPrevious ? previous.header().bookCount : 0;
   uint16_t at = 0;
   library::BookRecord known{};
-  bool haveKnown = previousCount > 0 && previous.book(0, known);
+  // A record that cannot be read fails the join: taking it for the end of the index would make every
+  // later book new, flooding New and losing their firstSeen at the next publish.
+  if (previousCount > 0 && !previous.book(0, known)) return false;
+  bool haveKnown = previousCount > 0;
   bool anyNew = false;
   for (uint16_t i = 0; i < count; ++i) {
     const library::StagedBook& book = staged[i];
     while (haveKnown && known.identity < book.identity) {
       ++at;
-      haveKnown = at < previousCount && previous.book(at, known);
+      haveKnown = at < previousCount;
+      if (haveKnown && !previous.book(at, known)) return false;
     }
     library::BookRecord record{book.identity, library::AUTHOR_PENDING, book.date,
                                book.pathOff,  book.sidecarSig,         newGen};
@@ -94,7 +101,7 @@ bool join(const Input& in, BuildArena& arena, Result& out) {
     if (!library::writeExact(records, &record, sizeof(record))) return false;
   }
   out.buildGen = (anyNew || !hasPrevious) ? newGen : previousGen;
-  return true;
+  return carryNames(previous, hasPrevious && !in.resolveAll, in.namesPath);
 }
 
 }  // namespace LibraryJoin
