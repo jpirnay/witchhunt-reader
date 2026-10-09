@@ -73,7 +73,7 @@ A minimal sidecar:
 ### Books other than EPUB
 
 TXT, Markdown and XTC books take their title, author and series from a metadata sidecar too, in
-the book lists (Browse Files' Details and Covers views). Without a sidecar, an XTC book is labelled
+the book lists (the Library's Details and Covers views). Without a sidecar, an XTC book is labelled
 from its own header, and a TXT or Markdown book, which carries no metadata, by its filename. The
 reader itself still shows the book's own title.
 
@@ -122,7 +122,7 @@ Who does this today:
 - **Move to `/COMPLETED`** (the optional finished-book action) moves the book
   and every sidecar, resolving name collisions for each
   (`moveSidecarFilesToCompleted`).
-- **Move to folder / Remove in Browse Files.** That browser lists books only,
+- **Move to folder / Remove in the Library.** Its tabs list books only,
   so a sidecar is never a row of its own there. Moving a book takes its
   sidecars along, and the move is refused if one of them would land on an
   existing file (`SidecarFiles::anyTargetTaken` / `moveAll`). Removing a book
@@ -146,7 +146,7 @@ also drifted: the move path derived its base name without checking for a path
 separator, so a book with no extension inside a dotted folder (`/My.Books/untitled`)
 took the dot from the folder.
 
-Deleting a book on the device (Browse Files, Remove) removes its sidecars too
+Deleting a book on the device (the Library, Remove) removes its sidecars too
 (`SidecarFiles::removeAll`). Deleting in All Files removes only the file
 selected. Deleting through the web File Manager (`POST /delete`) or WebDAV
 removes the book and its layout cache only; its sidecars stay behind as harmless
