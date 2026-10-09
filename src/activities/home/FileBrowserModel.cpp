@@ -30,6 +30,17 @@ namespace {
 std::string emptyFolderParent;
 bool folderHasBooks(const char* name);
 
+// Turns the check on for one load() of a Books folder.
+struct EmptyFolderCheck {
+  explicit EmptyFolderCheck(const std::string& folder) {
+    emptyFolderParent = folder;
+    if (emptyFolderParent.empty() || emptyFolderParent.back() != '/') emptyFolderParent += '/';
+  }
+  ~EmptyFolderCheck() { emptyFolderParent.clear(); }
+  EmptyFolderCheck(const EmptyFolderCheck&) = delete;
+  EmptyFolderCheck& operator=(const EmptyFolderCheck&) = delete;
+};
+
 // The part of the filter that does not depend on what the browser is picking: a hidden entry and
 // the FAT volume-information folder are never listed, whatever the mode.
 bool isListableName(const char* name) {
@@ -179,17 +190,6 @@ bool folderHasBooks(const char* name) {
   };
   return FolderSearch::anyBelow(emptyFolderParent + name, rules);
 }
-
-// Turns that check on for one load() of a Books folder.
-struct EmptyFolderCheck {
-  explicit EmptyFolderCheck(const std::string& folder) {
-    emptyFolderParent = folder;
-    if (emptyFolderParent.empty() || emptyFolderParent.back() != '/') emptyFolderParent += '/';
-  }
-  ~EmptyFolderCheck() { emptyFolderParent.clear(); }
-  EmptyFolderCheck(const EmptyFolderCheck&) = delete;
-  EmptyFolderCheck& operator=(const EmptyFolderCheck&) = delete;
-};
 
 }  // namespace
 
