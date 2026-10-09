@@ -264,7 +264,7 @@ void FileBrowserActivity::drawCoverCell(const int index, const int x, const int 
                                         const bool selected) {
   const int tw = cells.cellWidth;
   const int th = cells.cellHeight;
-  if (selected) renderer.fillRect(x, y, tw, th + CoverGridLayout::kLabelHeight + 3);
+  if (selected) renderer.fillRect(x, y, tw, th + cells.labelHeight + 3);
   const int cardH = th - 2;
   const int cardW = std::min(tw - 2, cardH * 2 / 3);
   const Rect card{x + (tw - cardW) / 2, y + 1, cardW, cardH};
@@ -274,6 +274,7 @@ void FileBrowserActivity::drawCoverCell(const int index, const int x, const int 
   const std::string path = model.entryFullPath(static_cast<size_t>(index));
   std::string title;
   std::string subtitle;
+  std::string thirdLine;
   if (entry.back() == '/') {
     title = utf8NfcNorm(entry.substr(0, entry.size() - 1));
     // An author is drawn as a folder of its books, counted by the index rather than by a walk.
@@ -289,7 +290,13 @@ void FileBrowserActivity::drawCoverCell(const int index, const int x, const int 
   } else {
     const BookRowResolver::Row& row = bookRows.row(path, model.entrySize(static_cast<size_t>(index)));
     title = row.title.empty() ? rowName(entry) : row.title;
-    subtitle = row.subtitle;
+    // Where the grid has room for a third label line, the author and the series take one each.
+    if (cells.labelLines >= 3 && !row.author.empty() && !row.series.empty()) {
+      subtitle = row.author;
+      thirdLine = row.series;
+    } else {
+      subtitle = row.subtitle;
+    }
     const int percent = row.percent;  // copied before anything else can reuse the row's slot
     Rect cover = card;
     const CoverThumb thumb = drawCoverThumb(path, x, y, tw, th, cover);
@@ -306,8 +313,12 @@ void FileBrowserActivity::drawCoverCell(const int index, const int x, const int 
   renderer.drawText(SMALL_FONT_ID, x + 2, labelY,
                     renderer.truncatedText(SMALL_FONT_ID, title.c_str(), cells.labelWidth).c_str(), black);
   if (!subtitle.empty()) {
-    renderer.drawText(SMALL_FONT_ID, x + 2, labelY + 17,
+    renderer.drawText(SMALL_FONT_ID, x + 2, labelY + CoverGridLayout::kLabelLineHeight,
                       renderer.truncatedText(SMALL_FONT_ID, subtitle.c_str(), cells.labelWidth).c_str(), black);
+  }
+  if (!thirdLine.empty()) {
+    renderer.drawText(SMALL_FONT_ID, x + 2, labelY + 2 * CoverGridLayout::kLabelLineHeight,
+                      renderer.truncatedText(SMALL_FONT_ID, thirdLine.c_str(), cells.labelWidth).c_str(), black);
   }
 }
 

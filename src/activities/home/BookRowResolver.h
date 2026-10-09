@@ -33,6 +33,8 @@ class BookRowResolver {
     uint32_t size = 0;
     std::string title;       // "" = the screen keeps the filename
     std::string subtitle;    // "Author · Series #3", or whichever part the book has
+    std::string author;      // the subtitle's two parts, for a cover grid with a line for each
+    std::string series;      // "Series #3"
     std::string value;       // "42%", Finished, or ""
     int8_t percent = -1;     // -1 unread / unknown, else 0..100
     int16_t bookCount = -1;  // a folder's books, all levels down; -1 not counted yet

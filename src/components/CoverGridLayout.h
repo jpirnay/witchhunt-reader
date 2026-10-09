@@ -17,9 +17,11 @@
 // Pure arithmetic: no renderer, no theme, no storage, so it is exercised on the host.
 namespace CoverGridLayout {
 
-// Visual constants of the grid itself. The label block holds two small-font lines (title, author).
+// Visual constants of the grid itself. The label block holds two small-font lines (title, then
+// author and series), and a third where the panel has the height to spare (Layout::labelLines).
 inline constexpr int kMargin = 10;
 inline constexpr int kLabelHeight = 36;
+inline constexpr int kLabelLineHeight = 17;  // one more small-font line
 inline constexpr int kMinCellHeight = 96;
 
 // The full-size grid thumbnail's box. The cover is FITTED inside it (kThumbCrop false), whole: a
@@ -52,7 +54,9 @@ struct Layout {
   int rows = 1;         // rows per page
   int cellWidth = 0;    // cover box width, 1 px frame included
   int cellHeight = 0;   // cover box height, 1 px frame included
-  int rowStride = 0;    // cellHeight + label block + margin
+  int rowStride = 0;    // cellHeight + label block + margin, and an equal share of the spare height
+  int labelLines = 2;   // 3 where each row's share of the spare height holds another line
+  int labelHeight = 0;  // the label block: kLabelHeight, plus kLabelLineHeight for a third line
   int labelWidth = 0;   // text width available under a cover
   int thumbWidth = 0;   // the stored thumbnail's box: what the cover is fitted into, drawn 1:1
   int thumbHeight = 0;  //   (the cell less its frame, no wider than the full-size thumbnail)

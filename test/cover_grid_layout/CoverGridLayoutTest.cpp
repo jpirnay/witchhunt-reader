@@ -25,9 +25,12 @@ constexpr Theme kLyra{5, 84, 16, 40, 30};  // the default theme, and the one wit
 // button hints by a body line (+5).
 constexpr Theme kLyraLarge{5, 91, 16, 45, 30};
 
-CoverGridLayout::Input portrait(int panelW, int panelH, const Theme& t, bool isX3) {
+// The Library's tab bar (ListTabBar::HEIGHT), between the header and the grid.
+constexpr int kTabBar = 54;
+
+CoverGridLayout::Input portrait(int panelW, int panelH, const Theme& t, bool isX3, int tabBar = 0) {
   const int contentWidth = panelW - (isX3 ? 2 * t.sideHints : t.sideHints);
-  const int contentTop = t.topPadding + t.header + t.spacing;
+  const int contentTop = t.topPadding + t.header + t.spacing + tabBar;
   const int contentHeight = (panelH - t.buttonHints) - contentTop - t.spacing;
   return {contentWidth, contentHeight, 12, kMaxCell, kMaxCellWidth};
 }
@@ -127,6 +130,47 @@ TEST(CoverGridLayout, EveryPageFitsTheContentArea) {
   }
 }
 
+// The height a page leaves below its last row goes to the rows equally, and where each row's share
+// is a label line, the label takes a third line: on the X4's Classic theme under the tab bar, 48 px
+// spare, 24 a row.
+TEST(CoverGridLayout, SpareHeightGoesToTheRowsAndMakesRoomForAThirdLabelLine) {
+  const auto in = portrait(480, 800, kClassic, /*isX3=*/false, kTabBar);
+  const auto l = CoverGridLayout::compute(in);
+  const int usable = in.contentHeight - in.bottomReserve;
+  EXPECT_EQ(l.rows, 2);
+  EXPECT_EQ(l.cellHeight, kMaxCell);  // the covers are the same size: only the rows spread
+  EXPECT_EQ(l.labelLines, 3);
+  EXPECT_EQ(l.labelHeight, CoverGridLayout::kLabelHeight + CoverGridLayout::kLabelLineHeight);
+  EXPECT_EQ(l.rowStride, usable / l.rows);
+  EXPECT_LE(l.cellHeight + l.labelHeight + CoverGridLayout::kMargin, l.rowStride);
+}
+
+// Less than a line to spare per row -- Lyra's taller header under the tab bar leaves none -- keeps
+// two label lines, as before.
+TEST(CoverGridLayout, WithoutALineToSpareTheLabelKeepsTwoLines) {
+  const auto in = portrait(480, 800, kLyra, /*isX3=*/false, kTabBar);
+  const auto l = CoverGridLayout::compute(in);
+  EXPECT_EQ(l.labelLines, 2);
+  EXPECT_EQ(l.labelHeight, CoverGridLayout::kLabelHeight);
+  EXPECT_EQ(l.rowStride, (in.contentHeight - in.bottomReserve) / l.rows);
+}
+
+// Every device and theme: what the label takes plus the cover always fits the row it is in.
+TEST(CoverGridLayout, TheLabelAlwaysFitsItsRow) {
+  for (const auto& theme : {kClassic, kLyra, kLyraLarge}) {
+    for (const int bar : {0, kTabBar}) {
+      for (const auto& in : {portrait(480, 800, theme, false, bar), portrait(528, 792, theme, true, bar),
+                             portrait(540, 960, theme, false, bar)}) {
+        const auto l = CoverGridLayout::compute(in);
+        EXPECT_GE(l.labelLines, 2);
+        EXPECT_LE(l.labelLines, 3);
+        EXPECT_LE(l.cellHeight + l.labelHeight + CoverGridLayout::kMargin, l.rowStride);
+        EXPECT_LE(l.rows * l.rowStride, in.contentHeight - in.bottomReserve);
+      }
+    }
+  }
+}
+
 TEST(CoverGridLayout, HigherResolutionPanelGetsMoreCellsNotBiggerOnes) {
   // A 1072x1448 300 dpi panel: nothing changes but the numbers handed in.
   const auto l = CoverGridLayout::compute(portrait(1072, 1448, kLyra, /*isX3=*/false));
@@ -185,7 +229,7 @@ CoverGridLayout::Layout x4Grid() { return CoverGridLayout::compute(portrait(480,
 // Centre of the cell at (row, col) on the current page, in the frame hitTest expects.
 void cellCentre(const CoverGridLayout::Layout& l, int row, int col, int& x, int& y) {
   x = kOriginX + CoverGridLayout::kMargin + col * (l.cellWidth + CoverGridLayout::kMargin) + l.cellWidth / 2;
-  y = kOriginY + row * l.rowStride + (l.cellHeight + CoverGridLayout::kLabelHeight) / 2;
+  y = kOriginY + row * l.rowStride + (l.cellHeight + l.labelHeight) / 2;
 }
 
 }  // namespace
@@ -235,7 +279,7 @@ TEST(CoverGridLayoutHitTest, TheRowGutterBelowTheLabelIsAMiss) {
   int x = 0;
   int y = 0;
   cellCentre(l, 0, 0, x, y);
-  const int cellBottom = kOriginY + l.cellHeight + CoverGridLayout::kLabelHeight;
+  const int cellBottom = kOriginY + l.cellHeight + l.labelHeight;
   EXPECT_EQ(0, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, x, cellBottom - 1));
   EXPECT_EQ(-1, CoverGridLayout::hitTest(l, kOriginX, kOriginY, 0, count, x, cellBottom));
 }
