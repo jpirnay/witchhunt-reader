@@ -138,8 +138,8 @@ class HalFile : public Print {
       if (!entry.isDir) {
         std::error_code sizeError;
         entry.size = static_cast<uint64_t>(std::filesystem::file_size(e.path(), sizeError));
-        fatStamp(e.path(), entry.fatDate, entry.fatTime);
       }
+      fatStamp(e.path(), entry.fatDate, entry.fatTime);  // a folder's entry carries a date too
       entries_.push_back(std::move(entry));
     }
     std::sort(entries_.begin(), entries_.end(), [](const DirEntry& a, const DirEntry& b) { return a.name < b.name; });

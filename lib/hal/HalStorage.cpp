@@ -147,6 +147,9 @@ class HalStorage::StorageLock {
 bool HalStorage::beginUsbDrive() {
 #if FREEINK_CAP_USB_MSC
   StorageLock lock;
+  // Recorded while the card is still the firmware's to write: the host may change anything, and the
+  // power may go before the session ends.
+  noteContentChange(nullptr);
   auto* const blockDevice = SDCard.detachFilesystemForRawAccess();
   if (!blockDevice) {
     LOG_ERR("USB", "USB Drive needs a mounted SD card");
@@ -249,6 +252,10 @@ bool isCachePath(const char* path) {
   return strncmp(path, kCacheRoot, kLength) == 0 && (path[kLength] == '\0' || path[kLength] == '/');
 }
 
+// Left by the first change after HalStorage::markContentSeen(); inside the cache folder, so writing it
+// is not itself a change.
+constexpr char kChangeMarker[] = "/.crosspoint/content-changed";
+
 bool opensForWriting(const oflag_t oflag) {
   return (oflag & O_ACCMODE) != O_RDONLY || (oflag & (O_CREAT | O_TRUNC | O_APPEND)) != 0;
 }
@@ -260,6 +267,34 @@ bool opensForWriting(const oflag_t oflag) {
 void HalStorage::noteContentChange(const char* path) {
   if (path != nullptr && isCachePath(path)) return;
   contentGeneration_.fetch_add(1, std::memory_order_relaxed);
+  persistChangeMarker();
+}
+
+// The first change after the mark leaves the marker; later ones find it there. StorageLock is
+// recursive, so this is safe from inside the operations that note a change.
+void HalStorage::persistChangeMarker() {
+  StorageLock lock;
+  if (changeMarker_ == 1) return;
+  FsFile marker = SDCard.open(kChangeMarker, O_WRONLY | O_CREAT);
+  if (!marker) return;  // tried again at the next change
+  marker.close();
+  changeMarker_ = 1;
+}
+
+bool HalStorage::contentChangedSinceMark() {
+  StorageLock lock;
+  if (changeMarker_ < 0) changeMarker_ = SDCard.exists(kChangeMarker) ? 1 : 0;
+  return changeMarker_ == 1;
+}
+
+// A change bumps the generation first and leaves the marker under the lock after, so whichever way
+// it falls against this, it is kept: before the comparison, the generation differs and the marker
+// stays; after it, the change waits for the lock and leaves the marker again.
+void HalStorage::markContentSeen(const uint32_t generation) {
+  StorageLock lock;
+  if (contentGeneration_.load(std::memory_order_relaxed) != generation) return;
+  SDCard.remove(kChangeMarker);
+  changeMarker_ = 0;
 }
 
 std::vector<String> HalStorage::listFiles(const char* path, int maxFiles) {

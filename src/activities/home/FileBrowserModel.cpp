@@ -19,6 +19,7 @@
 #include "BookDetails.h"
 #include "FolderCountMemo.h"
 #include "FolderSearch.h"
+#include "LibraryFreshness.h"
 #include "RecentBooksStore.h"
 
 namespace {
@@ -29,6 +30,29 @@ namespace {
 // when folders are not being checked.
 std::string emptyFolderParent;
 bool folderHasBooks(const char* name);
+
+// The later of an entry's modified and created dates, packed as FAT (date << 16) | time: the date the
+// book index records.
+uint32_t latestDate(HalFile& entry) {
+  uint16_t date = 0;
+  uint16_t time = 0;
+  uint32_t latest = 0;
+  if (entry.getModifyDateTime(&date, &time)) latest = (uint32_t{date} << 16) | time;
+  if (entry.getCreateDateTime(&date, &time)) latest = std::max(latest, (uint32_t{date} << 16) | time);
+  return latest;
+}
+
+// Folders below the root the index's walk descends to (LibraryBuilder::MAX_DEPTH): deeper books are
+// not indexed, so a listing there says nothing about the index.
+constexpr int INDEXED_DEPTH = 8;
+
+int depthOf(const std::string& path) {
+  int depth = 0;
+  for (size_t i = 0; i < path.size(); ++i) {
+    if (path[i] != '/' && (i == 0 || path[i - 1] == '/')) ++depth;
+  }
+  return depth;
+}
 
 // Turns the check on for one load() of a Books folder.
 struct EmptyFolderCheck {
@@ -99,6 +123,9 @@ void FileBrowserModel::load() {
 
   root.rewindDirectory();
 
+  // A book or folder listed here that is newer than everything the book index knows was put on the
+  // card where the firmware did not see it (LibraryFreshness::checkListedEntry).
+  const bool checkForUnseen = mode == Mode::Books && depthOf(basepath) <= INDEXED_DEPTH;
   char name[500];
   for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
     file.getName(name, sizeof(name));
@@ -107,6 +134,7 @@ void FileBrowserModel::load() {
       file.close();
       continue;
     }
+    if (checkForUnseen) LibraryFreshness::checkListedEntry(latestDate(file));
 
     if (isDir) {
       files.emplace_back(std::string(name) + "/");
@@ -662,15 +690,16 @@ void FileBrowserModel::loadAdded() {
   clearDeepSearch();
   deepRoot = "/";
   if (!bookIndex.isOpen() && !bookIndex.open(library::INDEX_PATH)) return;
-  std::string path;
+  std::string bookPath;
   library::BookRecord record{};
   for (uint16_t rank = 0; rank < bookIndex.header().newCount; ++rank) {
-    uint16_t index = 0;
-    if (!bookIndex.newBook(rank, index) || !bookIndex.book(index, record) ||
-        !bookIndex.blobString(record.pathOff, path)) {
+    uint16_t recordIndex = 0;
+    if (!bookIndex.newBook(rank, recordIndex) || !bookIndex.book(recordIndex, record) ||
+        !bookIndex.blobString(record.pathOff, bookPath)) {
       continue;
     }
-    if (path.size() > 1 && path.front() == '/' && Storage.exists(path.c_str())) deepResults.push_back(path.substr(1));
+    if (bookPath.size() > 1 && bookPath.front() == '/' && Storage.exists(bookPath.c_str()))
+      deepResults.push_back(bookPath.substr(1));
   }
 }
 
@@ -757,14 +786,14 @@ std::string FileBrowserModel::authorRowName(const size_t row) {
   return name + '/';
 }
 
-std::string FileBrowserModel::authorBookName(const size_t index) {
+std::string FileBrowserModel::authorBookName(const size_t row) {
   library::BookRecord record{};
-  std::string path;
-  if (index >= authorBooks.size() || !bookIndex.book(authorBooks[index], record) ||
-      !bookIndex.blobString(record.pathOff, path) || path.size() < 2) {
+  std::string bookPath;
+  if (row >= authorBooks.size() || !bookIndex.book(authorBooks[row], record) ||
+      !bookIndex.blobString(record.pathOff, bookPath) || bookPath.size() < 2) {
     return "";
   }
-  return path.substr(1);
+  return bookPath.substr(1);
 }
 
 // An author's books by series, then series index, then title, as the book lists show them; books in
@@ -782,14 +811,14 @@ void FileBrowserModel::orderAuthorBooks() {
 bool FileBrowserModel::bookKey(void* self, const uint16_t record, LibraryOrder::BookKey& key) {
   auto& model = *static_cast<FileBrowserModel*>(self);
   library::BookRecord book{};
-  std::string path;
-  if (!model.bookIndex.book(record, book) || !model.bookIndex.blobString(book.pathOff, path)) return false;
+  std::string bookPath;
+  if (!model.bookIndex.book(record, book) || !model.bookIndex.blobString(book.pathOff, bookPath)) return false;
   BookDetails details;
-  if (BookDetailsLookup::cached(path, 0, details)) {
+  if (BookDetailsLookup::cached(bookPath, 0, details)) {
     key.series = std::move(details.series);
     key.seriesIndex = std::move(details.seriesIndex);
     key.title = std::move(details.title);
   }
-  if (key.title.empty()) key.title = path.substr(path.rfind('/') + 1);
+  if (key.title.empty()) key.title = bookPath.substr(bookPath.rfind('/') + 1);
   return true;
 }

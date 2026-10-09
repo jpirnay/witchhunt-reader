@@ -242,7 +242,7 @@ class FileBrowserModel {
   ScratchSource scratchSource = nullptr;
   void* scratchUser = nullptr;
   std::string authorRowName(size_t row);
-  std::string authorBookName(size_t index);
+  std::string authorBookName(size_t row);
 
   LibraryIndexReader bookIndex;
   int openAuthorRow = -1;

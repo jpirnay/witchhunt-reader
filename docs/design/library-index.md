@@ -87,12 +87,31 @@ the walk needs the lent secondary framebuffer, one phase at a time. Working file
 
 ## When it rebuilds
 
-`LibraryFreshness::stale` -- checked on entering New or Authors, never on Books or Recent -- holds
-when the index is missing or invalid, no build has finished since boot (a card edited elsewhere while
-the device was off or asleep is invisible otherwise), `HalStorage::contentGeneration()` changed since
-the last build started, or the index was built under the other *Show Hidden Files* setting. While a
-build runs the previous index stays on screen and the header says *Indexing*, then *Indexing n/m*
-while authors are read.
+The index lives on the card it describes, so it is kept across boots and wakes -- a different card
+brings its own -- and built again only for a reason (`LibraryStaleness::rebuildNeeded`, checked by
+`LibraryFreshness::stale` on entering New or Authors, never on Books or Recent):
+
+- **No valid index**: missing, another format version, or sections that do not fit the file.
+- **The other *Show Hidden Files* setting**: it lists other books (`acceptRules` in the header).
+- **The card changed since the last finished build**, in this boot or an earlier one. Every change the
+  firmware makes outside its cache folder goes through `HalStorage::noteContentChange`: web and WebDAV
+  uploads, deletes and renames, Calibre wireless, OPDS downloads, the metadata editor's sidecars,
+  Move, Remove and New folder on the device, finished books moved to `/COMPLETED`, and a USB Drive
+  session (recorded at its start, while the card is still the firmware's to write: the host may change
+  anything and the power may go first). The first such change after the mark leaves a marker file,
+  `/.crosspoint/content-changed`; a build that finishes with no change since it started removes it
+  (`HalStorage::markContentSeen`). The servers end with a restart, which the marker survives.
+- **A change the firmware did not see**: a card edited in a computer's card reader. When the Books tab
+  lists a book or folder dated later than the header's `newestDate` -- the newest book or folder the
+  walk saw -- it is not in the index, and is counted as a change (`LibraryFreshness::checkListedEntry`,
+  `HalStorage::noteFoundChange`). Folders count too, so a folder made on the device after its books is
+  no false alarm. Not checked below the walk's depth, nor against a partial index. A copy that keeps an
+  old date, or a book removed where the firmware did not see it, is not caught this way: New drops a
+  missing book on load, and **Refresh library** (Options on New and Authors) builds the index again,
+  resolving every author anew.
+
+While a build runs the previous index stays on screen and the header says *Indexing*, then *Indexing
+n/m* while authors are read.
 
 ## Memory
 

@@ -1508,6 +1508,10 @@ void FileBrowserActivity::handleContextMenuAction(int action, const std::string&
   using Action = FileContextMenuActivity::Action;
   const Action actionEnum = static_cast<Action>(action);
 
+  if (actionEnum == Action::RefreshLibrary) {
+    refreshLibrary();
+    return;
+  }
   if (actionEnum == Action::Search) {
     startSearch(/*everywhere=*/false);
     return;
@@ -1797,7 +1801,21 @@ int FileBrowserActivity::listCount() const {
 void FileBrowserActivity::startLibraryBuildIfStale() {
   if (model.getMode() != Mode::Added && model.getMode() != Mode::Authors) return;
   if (libraryBuilder || !LibraryFreshness::stale(model.index())) return;
+  startLibraryBuild(/*resolveAll=*/false);
+}
+
+// Options > Refresh library, on New and Authors: the index built again whatever the change marker
+// says, every author looked up anew (each book keeps when it was first seen) -- for a card changed
+// where the firmware did not see it.
+void FileBrowserActivity::refreshLibrary() {
+  libraryBuilder.reset();  // a build in progress starts over
+  startLibraryBuild(/*resolveAll=*/true);
+  requestUpdate();
+}
+
+void FileBrowserActivity::startLibraryBuild(const bool resolveAll) {
   LibraryBuilder::Config config;
+  config.resolveAll = resolveAll;
   config.showHidden = SETTINGS.showHiddenFiles;
   config.isBook = &FileBrowserModel::isBookName;
   config.resolve = &resolveAuthor;
@@ -1847,7 +1865,9 @@ bool FileBrowserActivity::stepLibraryBuild() {
     indexResolved = libraryBuilder->resolved();
     indexTotal = libraryBuilder->toResolve();
   }
-  const bool reload = libraryBuilder->takePublished() || phase == LibraryBuilder::Phase::Failed;
+  const bool published = libraryBuilder->takePublished();
+  if (published) LibraryFreshness::published();
+  const bool reload = published || phase == LibraryBuilder::Phase::Failed;
   if (reload && phase != LibraryBuilder::Phase::Failed) {
     LOG_INF("LIB", "published at %lu ms: %u books, authors resolved %u/%u", elapsed,
             static_cast<unsigned>(libraryBuilder->booksFound()), static_cast<unsigned>(libraryBuilder->resolved()),

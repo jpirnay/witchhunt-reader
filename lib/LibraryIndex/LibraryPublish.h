@@ -16,6 +16,7 @@ struct Input {
   uint32_t buildGen = 0;
   uint8_t acceptRules = 0;
   bool partial = false;
+  uint32_t newestFolderDate = 0;  // the walk's newest folder; the header's newestDate counts it too
 };
 
 // Writes the index to outPath + ".tmp" and renames it into place. The author table is sorted in

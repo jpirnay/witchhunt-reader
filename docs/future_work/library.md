@@ -18,17 +18,25 @@ hundred never-opened EPUBs (~300 ms of OPF parse each) is unknown.
   light-sleeps about 50 ms between build steps. If the first build is slow, hold the loop awake while
   New or Authors builds.
 
-## Refresh library and "Library too large"
+## "Library too large"
 
-`LibraryBuilder::Config::resolveAll` (Refresh library: resolve every author again, keeping each book's
-`firstSeen`) and the index's partial flag (`library::FLAG_PARTIAL`, more than 2,000 books) are built
-and tested, but nothing on screen uses them.
+The index's partial flag (`library::FLAG_PARTIAL`, more than 2,000 books) is set and tested, but nothing
+on screen uses it: past 2,000 books, the books the walk did not reach never appear in New, and nothing
+says so.
 
-- Why: Refresh is the remedy for the one change the sidecar signature misses -- a sidecar edit that
-  keeps its size, written while the clock was unset. Past 2,000 books, the books the walk did not reach
-  never appear in New and nothing says so.
-- Next step: an Options entry on New and Authors that starts a build with `resolveAll`; a notice on
-  Authors when the header is partial. Strings for both ("Refresh library", "Library too large").
+- Next step: a notice on Authors when the header is partial ("Library too large").
+
+## Changes made in a computer's card reader
+
+The index is kept across boots and rebuilt for a reason (design record, "When it rebuilds"). A card
+edited in a computer is noticed only when the Books tab lists a book or folder dated after the index's
+`newestDate`. A copy that keeps its old date (macOS Finder keeps both dates on FAT), a removal, or a
+change in a folder nobody opens goes unnoticed until Refresh library.
+
+- Where: `LibraryFreshness::checkListedEntry`, `FileBrowserModel::load`.
+- Ideas: compare each listed book's identity with the index (records are in identity order, so a
+  binary search) for folders under a size limit; or let the folder's own SD index signature
+  (`FileIndex`) vote.
 
 ## Build failures are silent
 

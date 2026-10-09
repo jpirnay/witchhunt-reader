@@ -170,6 +170,7 @@ void LibraryBuilder::walkStep() {
       continue;
     }
     if (isDir) {
+      newestFolderDate_ = std::max(newestFolderDate_, packDate(entry));
       if (levels_.size() > MAX_DEPTH) continue;
       std::string child = childPath(level.path, name_);
       HalFile sub = Storage.open(child.c_str());
@@ -215,6 +216,7 @@ void LibraryBuilder::publish(BuildArena& arena) {
   in.buildGen = buildGen_;
   in.acceptRules = config_.showHidden ? 1 : 0;
   in.partial = partial_;
+  in.newestFolderDate = newestFolderDate_;
   if (!LibraryPublish::publish(in, arena, config_.indexPath)) return fail("publish");
   published_ = true;
   sincePublish_ = 0;

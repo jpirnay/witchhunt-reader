@@ -101,6 +101,8 @@ class FileBrowserActivity final : public UiListActivity {
   uint32_t libraryBuildGeneration = 0;
   unsigned long libraryBuildStartMs = 0;  // for the build's log lines
   void startLibraryBuildIfStale();
+  void startLibraryBuild(bool resolveAll);
+  void refreshLibrary();
   bool stepLibraryBuild();
   // What the header and an empty New or Authors say while a build runs. The render task reads them;
   // the loop task owns the builder.

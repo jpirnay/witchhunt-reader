@@ -7,7 +7,7 @@
 namespace library {
 
 constexpr char MAGIC[4] = {'W', 'L', 'I', 'B'};
-constexpr uint8_t VERSION = 2;  // 2: an author's filing name ("Pratchett, Terry"), not its folded key
+constexpr uint8_t VERSION = 3;  // 2: authors' filing names; 3: the newest book date in the header
 
 // Books beyond this are left out and the index is marked partial: publish sorts the whole author
 // table in one pass through the lent framebuffer, which this many books fit.
@@ -48,6 +48,9 @@ struct Header {
   uint32_t authorBooksOff;
   uint32_t blobOff;
   uint32_t blobLen;
+  // The newest `date` among the books (0 for none): a book or folder the Books tab lists with a later
+  // date is not in the index, so the card changed where the firmware did not see it.
+  uint32_t newestDate;
 };
 
 // One book, in identity order. pathOff is into the blob.
@@ -79,7 +82,7 @@ struct StagedBook {
 };
 #pragma pack(pop)
 
-static_assert(sizeof(Header) == 44, "header layout");
+static_assert(sizeof(Header) == 48, "header layout");
 static_assert(sizeof(BookRecord) == 24, "book record layout");
 static_assert(sizeof(AuthorRecord) == 12, "author record layout");
 static_assert(sizeof(StagedBook) == 16, "staged book layout");

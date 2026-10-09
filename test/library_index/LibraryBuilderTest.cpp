@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -222,6 +223,22 @@ TEST_F(LibraryBuilderTest, TheResolveCountClimbsToAFixedTotal) {
     EXPECT_LE(done, total);
   }
   EXPECT_EQ(builder.resolved(), 3);
+}
+
+// The index's newest date counts folders as well as books: a folder made after the last book (on the
+// device, say) is known to the index, so the Books tab does not take it for a change it never saw.
+TEST_F(LibraryBuilderTest, TheNewestDateCountsFoldersToo) {
+  file("Books/Mort.epub");
+  // The book a day older than the folder made now (a folder's time cannot be set on every host).
+  const fs::path book = fs::path(card_) / "Books/Mort.epub";
+  fs::last_write_time(book, fs::last_write_time(book) - std::chrono::hours(24));
+  fs::create_directories(fs::path(card_) / "Later");
+  ASSERT_EQ(build(config()), LibraryBuilder::Phase::Done);
+  LibraryIndexReader index;
+  ASSERT_TRUE(index.open(indexPath()));
+  library::BookRecord mort{};
+  ASSERT_TRUE(index.book(0, mort));
+  EXPECT_GT(index.header().newestDate, mort.date);
 }
 
 TEST_F(LibraryBuilderTest, TheWalkYieldsBetweenSteps) {

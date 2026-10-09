@@ -74,6 +74,22 @@ TEST_F(LibraryPublishTest, NewIsByFirstSeenThenDate) {
   EXPECT_EQ(order, (std::vector<std::string>{"/latest.epub", "/later.epub", "/old.epub"}));
 }
 
+// The newest file date among the indexed books: a book or folder listed with a later date is not in
+// the index, which tells the Books tab the card changed where the firmware did not see it.
+TEST_F(LibraryPublishTest, TheHeaderKeepsTheNewestBookDate) {
+  ASSERT_TRUE(publish({book("/a.epub", "", 900), book("/b.epub", "", 4200), book("/c.epub", "", 100)}));
+  LibraryIndexReader index;
+  ASSERT_TRUE(index.open(at("library.bin")));
+  EXPECT_EQ(index.header().newestDate, 4200u);
+}
+
+TEST_F(LibraryPublishTest, AnEmptyIndexHasNoNewestDate) {
+  ASSERT_TRUE(publish({}));
+  LibraryIndexReader index;
+  ASSERT_TRUE(index.open(at("library.bin")));
+  EXPECT_EQ(index.header().newestDate, 0u);
+}
+
 TEST_F(LibraryPublishTest, NewStopsAtTen) {
   std::vector<library::BookRecord> books;
   for (int i = 0; i < 15; ++i) books.push_back(book("/b" + std::to_string(i) + ".epub", "", static_cast<uint32_t>(i)));

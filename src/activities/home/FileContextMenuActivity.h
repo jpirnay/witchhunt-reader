@@ -38,6 +38,7 @@ class FileContextMenuActivity final : public MenuListActivity {
     ClearSearch,
     GoToFolder,
     RemoveFromRecents,
+    RefreshLibrary,
   };
 
   // The list the menu was opened on. Recents and Index (the Library's New and Authors) have a fixed

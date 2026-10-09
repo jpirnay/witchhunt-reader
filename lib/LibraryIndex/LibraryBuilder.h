@@ -107,6 +107,7 @@ class LibraryBuilder {
   uint16_t found_ = 0;
   uint16_t pending_ = 0;
   uint16_t resolved_ = 0;
+  uint32_t newestFolderDate_ = 0;  // the newest folder the walk listed, for the index's newestDate
   uint16_t toResolve_ = 0;
   uint16_t cursor_ = 0;
   uint16_t sincePublish_ = 0;

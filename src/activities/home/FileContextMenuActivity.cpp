@@ -88,7 +88,13 @@ void FileContextMenuActivity::buildMenuItems() {
   // folder you are standing in rather than to any row: making one, and (for a directory)
   // deleting the one selected.
   if (isBrowserMode) {
-    if (fixedOrder) return;  // nothing in the list is selected: there is nothing else to offer
+    if (fixedOrder) {  // nothing in the list is selected: only what belongs to the list itself
+      if (source == ListSource::Index) {
+        menuItems.push_back(SettingInfo::Separator(StrId::STR_TOOL_UTILITIES));
+        menuItems.push_back(SettingInfo::Action(StrId::STR_REFRESH_LIBRARY, SettingAction::None));
+      }
+      return;
+    }
     menuItems.push_back(SettingInfo::Separator(StrId::STR_TOOL_UTILITIES));
     // Search narrows the folder you are standing in, so it sits with the folder actions rather
     // than the row actions. Clearing only appears when there is something to clear.
@@ -158,6 +164,10 @@ void FileContextMenuActivity::buildMenuItems() {
       }
     }
     if (offerGoToFolder) menuItems.push_back(SettingInfo::Action(StrId::STR_GO_TO_FOLDER, SettingAction::None));
+    // New and Authors: build the index again, for what was changed where the firmware did not see it.
+    if (source == ListSource::Index) {
+      menuItems.push_back(SettingInfo::Action(StrId::STR_REFRESH_LIBRARY, SettingAction::None));
+    }
     return;
   }
 
@@ -229,6 +239,8 @@ void FileContextMenuActivity::onActionSelected(int index) {
     action = Action::Remove;
   } else if (nameId == StrId::STR_REMOVE_FROM_RECENTS) {
     action = Action::RemoveFromRecents;
+  } else if (nameId == StrId::STR_REFRESH_LIBRARY) {
+    action = Action::RefreshLibrary;
   }
 
   if (action == Action::None) return;

@@ -49,6 +49,7 @@ struct Newest {
   };
   Entry entries[library::NEW_COUNT];
   uint16_t size = 0;
+  uint32_t newestDate = 0;  // over every book offered, not only the ten kept
 
   static bool newer(const Entry& a, const Entry& b) {
     if (a.firstSeen != b.firstSeen) return a.firstSeen > b.firstSeen;
@@ -58,6 +59,7 @@ struct Newest {
 
   void offer(const uint16_t index, const library::BookRecord& record) {
     const Entry entry{index, record.firstSeen, record.date, record.identity};
+    newestDate = std::max(newestDate, record.date);
     if (size == library::NEW_COUNT && !newer(entry, entries[size - 1])) return;
     uint16_t at = size < library::NEW_COUNT ? size++ : static_cast<uint16_t>(size - 1);
     while (at > 0 && newer(entry, entries[at - 1])) {
@@ -250,6 +252,7 @@ bool writeIndex(const LibraryPublish::Input& in, const std::string& tmpPath, con
   header.bookCount = in.bookCount;
   header.authorCount = t.authors;
   header.newCount = newest.size;
+  header.newestDate = std::max(newest.newestDate, in.newestFolderDate);
   header.recordsOff = sizeof(library::Header);
   header.newOff = header.recordsOff + in.bookCount * static_cast<uint32_t>(sizeof(library::BookRecord));
   header.authorsOff = header.newOff + newest.size * static_cast<uint32_t>(sizeof(uint16_t));

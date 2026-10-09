@@ -195,7 +195,7 @@ that do not fit the file, make it invalid, and a build replaces it.
 
 | Section | Layout |
 |---|---|
-| Header, 44 B | magic `WLIB`; `u8` version (2); `u8` flags (bit 0: partial, the card held more than 2,000 books); `u8` acceptRules (the *Show Hidden Files* setting the walk used); `u8` reserved; `u32` buildGen; `u16` bookCount, authorCount, newCount; `u16` reserved; `u32` offsets of the five sections below; `u32` blob length |
+| Header, 48 B | magic `WLIB`; `u8` version (3); `u8` flags (bit 0: partial, the card held more than 2,000 books); `u8` acceptRules (the *Show Hidden Files* setting the walk used); `u8` reserved; `u32` buildGen; `u16` bookCount, authorCount, newCount; `u16` reserved; `u32` offsets of the five sections below; `u32` blob length; `u32` newestDate, the newest date among the books and the folders the walk listed (0 for none) |
 | Records | bookCount × 24 B, **in identity order**: `u32` identity, authorHash, date (FAT `date << 16 \| time`), pathOff, sidecarSig, firstSeen |
 | New | newCount (≤ 10) × `u16` record index, newest first |
 | Authors | authorCount × 12 B, **in sort-key order**: `u32` hash, nameOff; `u16` firstBook, count |
@@ -204,7 +204,8 @@ that do not fit the file, make it invalid, and a build replaces it.
 
 Reserved author hashes: `0`, no author ("Unknown author"); `0xFFFFFFFF`, not known yet ("Not yet
 indexed"). Reserved sidecar signatures: `0`, no sidecar; `0xFFFFFFFF`, a sidecar the walk could not
-pair with its book. Version 1 stored an author's folded sort key where version 2 stores its filing name.
+pair with its book. Version 1 stored an author's folded sort key where version 2 stores its filing name; version 3 adds
+`newestDate`.
 
 A build's working files sit beside it and are removed when the build finishes: `stage.bin` (16 B per
 book: identity, date, sidecarSig, pathOff), `paths.bin` (the paths), `records.bin` (the joined records)
