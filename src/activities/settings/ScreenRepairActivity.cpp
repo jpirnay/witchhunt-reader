@@ -5,42 +5,27 @@
 #include <Logging.h>
 
 #include "MappedInputManager.h"
-#include "components/ConfirmDialog.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-
-namespace fui = freeink::ui;
-
-namespace {
-constexpr fui::ActionId ACTION_CANCEL = 1;
-constexpr fui::ActionId ACTION_START = 2;
-}  // namespace
 
 void ScreenRepairActivity::onEnter() {
   Activity::onEnter();
   state = WARNING;
-  resetUi();
-  app.on(ACTION_CANCEL, &ScreenRepairActivity::onCancelEvent, this);
-  app.on(ACTION_START, &ScreenRepairActivity::onStartEvent, this);
-  app.setScreen(&ScreenRepairActivity::warningScreen, this);
-  requestUpdate();
+  ConfirmationActivity::Question question;
+  question.headline = tr(STR_SCREEN_REPAIR);
+  question.message = tr(STR_SCREEN_REPAIR_BODY);
+  question.acceptLabel = StrId::STR_START;
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, std::move(question)),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled) {
+                             finish();
+                             return;
+                           }
+                           startRepair();
+                         });
 }
 
-void ScreenRepairActivity::onExit() {
-  closeRouting();
-  Activity::onExit();
-}
-
-void ScreenRepairActivity::onCancelEvent(const fui::ActionEvent&, void* user) {
-  static_cast<ScreenRepairActivity*>(user)->finish();
-}
-
-void ScreenRepairActivity::onStartEvent(const fui::ActionEvent&, void* user) {
-  static_cast<ScreenRepairActivity*>(user)->startRepair();
-}
-
-// The one place the confirmation turns into work, so the key press and the touch target cannot
-// drift apart.
 void ScreenRepairActivity::startRepair() {
   {
     RenderLock lock(*this);
@@ -52,37 +37,7 @@ void ScreenRepairActivity::startRepair() {
   runRepairCycle();
 }
 
-void ScreenRepairActivity::warningScreen(UiScreen& screen, void* user) {
-  static_cast<ScreenRepairActivity*>(user)->buildWarningScreen(screen);
-}
-
-void ScreenRepairActivity::buildWarningScreen(UiScreen& screen) {
-  ConfirmDialog::Spec spec;
-  spec.message = tr(STR_SCREEN_REPAIR_BODY);
-  spec.cancelLabel = tr(STR_CANCEL);
-  spec.acceptLabel = tr(STR_START);
-  spec.cancelAction = ACTION_CANCEL;
-  spec.acceptAction = ACTION_START;
-  ConfirmDialog::draw(screen, spec);
-}
-
 void ScreenRepairActivity::loop() {
-  if (state == WARNING) {
-    // Touch first: a tap answered by a dialog button must not also reach the key tests below.
-    const auto touch = routeTouch(mappedInput);
-    if (touch.routed) {
-      if (app.invalidated()) requestUpdate();
-      if (touch) return;  // a handler ran
-    }
-    if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      startRepair();
-    }
-    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      finish();
-    }
-    return;
-  }
-
   if (state == DONE && mappedInput.wasPressed(MappedInputManager::Button::Back)) {
     finish();
   }
@@ -122,6 +77,9 @@ void ScreenRepairActivity::runRepairCycle() {
 }
 
 void ScreenRepairActivity::render(RenderLock&&) {
+  // Nothing of our own while asking: the question is the ConfirmationActivity above.
+  if (state == WARNING) return;
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
 
@@ -130,16 +88,6 @@ void ScreenRepairActivity::render(RenderLock&&) {
                  tr(STR_SCREEN_REPAIR));
 
   const int midY = contentRect.y + contentRect.height / 2;
-
-  if (state == WARNING) {
-    renderUi();
-    // Still drawn alongside the dialog's own buttons: this labels the PHYSICAL keys, and on a
-    // board with no digitiser it is the only affordance there is.
-    const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_START), "", "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    renderer.displayBuffer();
-    return;
-  }
 
   if (state == REPAIRING) {
     renderer.drawCenteredText(UI_10_FONT_ID, midY, tr(STR_SCREEN_REPAIR_RUNNING));

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "activities/Activity.h"
-#include "components/UiAppHost.h"
 
 // Drives the panel through a conditioning cycle to clear accumulated ghosting.
 //
@@ -21,16 +20,14 @@
 // drives it to white rather more, and clears again. The asymmetry is theirs and is kept: white
 // is the rest state, so ending there leaves the least charge behind.
 //
-// The WARNING state asks a yes/no question, so it draws the shared ConfirmDialog (see
-// components/ConfirmDialog.h) instead of hand-placed centred text plus a hint strip. REPAIRING and
-// DONE have nothing to answer and are unchanged.
-class ScreenRepairActivity final : public Activity, private UiAppHost {
+// WARNING asks whether to start through a ConfirmationActivity pushed above this one, like every
+// other question. REPAIRING and DONE have nothing to answer.
+class ScreenRepairActivity final : public Activity {
  public:
   explicit ScreenRepairActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("ScreenRepair", renderer, mappedInput), UiAppHost(renderer) {}
+      : Activity("ScreenRepair", renderer, mappedInput) {}
 
   void onEnter() override;
-  void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
   // The cycle is a long run of blocking panel pushes; don't let the loop drop into power saving
@@ -48,10 +45,5 @@ class ScreenRepairActivity final : public Activity, private UiAppHost {
   static constexpr int kTrailingWhite = 3;
 
   void runRepairCycle();
-
-  static void warningScreen(UiScreen& screen, void* user);
-  static void onCancelEvent(const freeink::ui::ActionEvent& event, void* user);
-  static void onStartEvent(const freeink::ui::ActionEvent& event, void* user);
-  void buildWarningScreen(UiScreen& screen);
   void startRepair();
 };

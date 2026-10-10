@@ -75,6 +75,25 @@ FileContextMenuActivity::ListSource listSourceFor(const FileBrowserModel::Mode m
       return FileContextMenuActivity::ListSource::Folder;
   }
 }
+
+// Whether a folder holds anything at all, hidden entries included: removing it takes all of that,
+// so the question has to say so.
+bool folderHasEntries(const std::string& path) {
+  auto dir = Storage.open(path.c_str());
+  if (!dir || !dir.isDirectory()) return false;
+  dir.rewindDirectory();
+  char name[8];  // only "." and ".." matter; a longer name may come back cut short and still counts
+  bool any = false;
+  while (!any) {
+    auto entry = dir.openNextFile();
+    if (!entry) break;
+    entry.getName(name, sizeof(name));
+    entry.close();
+    any = strcmp(name, ".") != 0 && strcmp(name, "..") != 0;
+  }
+  dir.close();
+  return any;
+}
 }  // namespace
 
 FileBrowserActivity::FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -1344,18 +1363,18 @@ void FileBrowserActivity::removeFromRecents(const std::string& bookPath) {
     const size_t slash = bookPath.rfind('/');
     title = getFileName(slash == std::string::npos ? bookPath : bookPath.substr(slash + 1));
   }
-  const std::string heading = std::string(tr(STR_REMOVE_FROM_RECENTS)) + "?";
-  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, title),
-                         [this, bookPath](const ActivityResult& res) {
-                           if (!res.isCancelled) {
-                             RECENT_BOOKS.removeBook(bookPath);
-                             RenderLock lock(*this);
-                             bookRows.clear();
-                             model.load();
-                             resetNavigation(nav.selected);
-                           }
-                           requestUpdate();
-                         });
+  startActivityForResult(
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_REMOVE_FROM_RECENTS_QUESTION), title),
+      [this, bookPath](const ActivityResult& res) {
+        if (!res.isCancelled) {
+          RECENT_BOOKS.removeBook(bookPath);
+          RenderLock lock(*this);
+          bookRows.clear();
+          model.load();
+          resetNavigation(nav.selected);
+        }
+        requestUpdate();
+      });
 }
 
 // The views are for books: the Library's tabs list them; the other browsers list files.
@@ -1743,16 +1762,16 @@ void FileBrowserActivity::doSetAsSleepCover(const std::string& fullPath) {
 }
 
 void FileBrowserActivity::doDeleteCache(const std::string& fullPath, const std::string& entry) {
-  startActivityForResult(std::make_unique<ConfirmationActivity>(
-                             renderer, mappedInput, tr(STR_DELETE_CACHE) + std::string("?"), utf8NfcNorm(entry)),
-                         [this, fullPath](const ActivityResult& res) {
-                           if (!res.isCancelled) {
-                             clearFileMetadata(fullPath);
-                             bookRows.clear();  // its progress went with the cache
-                             LOG_INF("FBR", "Cache deleted for: %s", fullPath.c_str());
-                           }
-                           requestUpdate();
-                         });
+  startActivityForResult(
+      std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_CACHE_QUESTION), utf8NfcNorm(entry)),
+      [this, fullPath](const ActivityResult& res) {
+        if (!res.isCancelled) {
+          clearFileMetadata(fullPath);
+          bookRows.clear();  // its progress went with the cache
+          LOG_INF("FBR", "Cache deleted for: %s", fullPath.c_str());
+        }
+        requestUpdate();
+      });
 }
 
 // As with a move: deleting a book from the book browser deletes the sidecars that browser never
@@ -1761,8 +1780,9 @@ void FileBrowserActivity::doRemove(const std::string& fullPath, const std::strin
   // A book's sidecars go with it from the Library's lists; All files removes the one file it shows.
   const Mode mode = model.getMode();
   const bool withSidecars = !isDirectory && (mode == Mode::Books || mode == Mode::Added || mode == Mode::Authors);
-  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput,
-                                                                tr(STR_DELETE) + std::string("? "), utf8NfcNorm(entry)),
+  const char* question =
+      isDirectory && folderHasEntries(fullPath) ? tr(STR_DELETE_FOLDER_QUESTION) : tr(STR_DELETE_QUESTION);
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, question, utf8NfcNorm(entry)),
                          [this, fullPath, isDirectory, withSidecars](const ActivityResult& res) {
                            if (!res.isCancelled) {
                              LOG_DBG("FBR", "Attempting to delete: %s", fullPath.c_str());

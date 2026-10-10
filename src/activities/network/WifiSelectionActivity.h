@@ -29,7 +29,7 @@ enum class WifiSelectionState {
   PASSWORD_ENTRY,     // Entering password for selected network
   CONNECTING,         // Attempting to connect
   CONNECTED,          // Successfully connected
-  SAVE_PROMPT,        // Asking user if they want to save the password
+  SAVE_PROMPT,        // Asking whether to save the password (a ConfirmationActivity above)
   CONNECTION_FAILED,  // Connection failed
   FORGET_PROMPT,      // Asking user if they want to forget the network
   CAPTIVE_PORTAL      // Connected but network requires web-based login
@@ -83,8 +83,7 @@ class WifiSelectionActivity final : public Activity {
   size_t autoCycleCandidateIndex = 0;
   bool autoCycleAfterScan = false;  // Scan was triggered to build cycle candidates
 
-  // Save/forget prompt selection (0 = Yes, 1 = No)
-  int savePromptSelection = 0;
+  // Forget prompt selection (0 = Cancel, 1 = Reset info, 2 = Forget)
   int forgetPromptSelection = 0;
 
   // Connection timeouts
@@ -111,7 +110,6 @@ class WifiSelectionActivity final : public Activity {
   void renderPasswordEntry() const;
   void renderConnecting() const;
   void renderConnected() const;
-  void renderSavePrompt() const;
   void renderConnectionFailed() const;
   void renderForgetPrompt() const;
   void renderCaptivePortal() const;
@@ -144,6 +142,7 @@ class WifiSelectionActivity final : public Activity {
 
   std::string captivePortalUrl;
 
+  void askToSavePassword();
   void onComplete(bool connected);
 
  public:

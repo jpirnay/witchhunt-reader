@@ -208,6 +208,7 @@ class KOReaderSyncActivity final : public Activity {
   // Remember a successful upload as our last push (or forget an older one it replaced).
   void saveOwnLastPush() const;
   // performUpload, reconnecting first when the radio was dropped for the remote mapping.
+  void askToUpload();
   void uploadLocalProgress();
   void onReconnectForUpload(bool success);
 };

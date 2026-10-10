@@ -23,6 +23,7 @@
 #include "SilentRestart.h"
 #include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/ListTouchBand.h"
 #include "fontIds.h"
@@ -374,13 +375,12 @@ void KOReaderSyncActivity::performFetchAndCompare() {
     }
 
     // Keep session open so an immediate upload can reuse the same connection.
-    // No remote progress - offer to upload
     {
       RenderLock lock(*this);
       state = NO_REMOTE_PROGRESS;
       hasRemoteProgress = false;
     }
-    requestUpdate(true);
+    askToUpload();
     return;
   }
 
@@ -866,6 +866,9 @@ void KOReaderSyncActivity::resumeReader(const KOReaderSyncOutcomeState outcome, 
 }
 
 void KOReaderSyncActivity::render(RenderLock&&) {
+  // Nothing of our own while asking: the question is the ConfirmationActivity above.
+  if (state == NO_REMOTE_PROGRESS) return;
+
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
 
   renderer.clearScreen();
@@ -958,16 +961,6 @@ void KOReaderSyncActivity::render(RenderLock&&) {
 
     // Bottom button hints
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    renderer.displayBuffer();
-    return;
-  }
-
-  if (state == NO_REMOTE_PROGRESS) {
-    renderer.drawCenteredText(UI_10_FONT_ID, 280, tr(STR_NO_REMOTE_MSG), true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, 320, tr(STR_UPLOAD_PROMPT));
-
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_UPLOAD), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer();
     return;
@@ -1168,6 +1161,29 @@ void KOReaderSyncActivity::saveOwnLastPush() const {
   f.close();
 }
 
+// The server has nothing for this book: offer to put our position there. The session is still
+// open, so an upload reuses the same connection.
+void KOReaderSyncActivity::askToUpload() {
+  ConfirmationActivity::Question question;
+  question.headline = tr(STR_NO_REMOTE_MSG);
+  question.message = tr(STR_UPLOAD_PROMPT);
+  question.acceptLabel = StrId::STR_UPLOAD;
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, std::move(question)),
+                         [this](const ActivityResult& result) {
+                           if (result.isCancelled) {
+                             closeCancelled();
+                             return;
+                           }
+                           if (documentHash.empty()) {
+                             // Must go through the effective method, not the configured one: a book
+                             // the server holds under the other device's id has to keep uploading
+                             // there.
+                             documentHash = hashForMethod(effectiveMatchMethod);
+                           }
+                           uploadLocalProgress();
+                         });
+}
+
 void KOReaderSyncActivity::uploadLocalProgress() {
   if (!radioDroppedForMapping) {
     performUpload();
@@ -1329,23 +1345,6 @@ void KOReaderSyncActivity::loop() {
         // Upload local progress
         uploadLocalProgress();
       }
-    }
-
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-      closeCancelled();
-    }
-    return;
-  }
-
-  if (state == NO_REMOTE_PROGRESS) {
-    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      // Calculate hash if not done yet
-      if (documentHash.empty()) {
-        // Must go through the effective method, not the configured one: a book the server
-        // holds under the other device's id has to keep uploading there.
-        documentHash = hashForMethod(effectiveMatchMethod);
-      }
-      uploadLocalProgress();
     }
 
     if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
