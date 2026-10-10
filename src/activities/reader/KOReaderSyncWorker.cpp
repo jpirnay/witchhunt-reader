@@ -95,12 +95,10 @@ bool connectToSavedNetwork(const unsigned long timeoutMs) {
   return true;
 }
 
-bool radioStillOursToTearDown() {
-  return WiFi.getMode() == WIFI_MODE_STA && !activityManager.currentActivityUsesWifi();
-}
+bool radioStillOursToTearDown() { return WiFi.getMode() == WIFI_MODE_STA && !activityManager.wifiActivityOnStack(); }
 
 void runJob(KOReaderSyncJob& job) {
-  if (activityManager.currentActivityUsesWifi()) {
+  if (activityManager.wifiActivityOnStack()) {
     LOG_DBG("KOSyncWorker", "A network activity owns the radio. Skipping this job");
     job.result = KOReaderSyncClient::NETWORK_ERROR;
     return;

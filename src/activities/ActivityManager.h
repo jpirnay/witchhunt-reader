@@ -208,7 +208,8 @@ class ActivityManager {
   // the caller's own children included, pop as usual. Returns how many dropped something.
   int releaseBuriedActivityState();
 
-  bool currentActivityUsesWifi() const { return activityUsesWifi.load(std::memory_order_relaxed); }
+  // An activity on the stack, current or buried under a child, holds the radio.
+  bool wifiActivityOnStack() const { return activityUsesWifi.load(std::memory_order_relaxed); }
 
   bool inSleepTransition() const { return sleepTransition; }
 
