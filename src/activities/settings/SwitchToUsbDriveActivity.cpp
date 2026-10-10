@@ -19,8 +19,11 @@ void SwitchToUsbDriveActivity::onEnter() {
     return;
   }
 
-  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_SWITCH_TO_USB_DRIVE),
-                                                                tr(STR_USB_DRIVE_CONFIRM_BODY)),
+  ConfirmationActivity::Question question;
+  question.headline = tr(STR_SWITCH_TO_USB_DRIVE);
+  question.message = tr(STR_USB_DRIVE_CONFIRM_BODY);
+  question.acceptLabel = StrId::STR_RESTART;
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, std::move(question)),
                          [this, app1](const ActivityResult& result) {
                            if (result.isCancelled) {
                              finish();

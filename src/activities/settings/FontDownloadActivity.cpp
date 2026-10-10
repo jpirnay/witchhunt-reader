@@ -660,9 +660,8 @@ bool FontDownloadActivity::backPressedDuringTransfer() {
 
 void FontDownloadActivity::promptDeleteFamily(int familyIndex) {
   if (familyIndex < 0 || familyIndex >= static_cast<int>(families_.count())) return;
-  const std::string heading = tr(STR_DELETE) + std::string("?");
   const std::string body = families_.name(familyIndex);
-  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, body),
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_DELETE_QUESTION), body),
                          [this, familyIndex](const ActivityResult& result) {
                            if (result.isCancelled) return;
                            deleteFamilyAtIndex(familyIndex);
