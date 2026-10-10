@@ -2,6 +2,8 @@
 
 #include <I18n.h>
 
+#include <utility>
+
 #include "../../components/ConfirmDialog.h"
 #include "../../components/UITheme.h"
 #include "HalDisplay.h"
@@ -16,7 +18,10 @@ constexpr fui::ActionId ACTION_CONFIRM = 2;
 
 ConfirmationActivity::ConfirmationActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                            const std::string& heading, const std::string& body)
-    : Activity("Confirmation", renderer, mappedInput), UiAppHost(renderer), heading(heading), body(body) {}
+    : ConfirmationActivity(renderer, mappedInput, Question{"", heading, body}) {}
+
+ConfirmationActivity::ConfirmationActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, Question question)
+    : Activity("Confirmation", renderer, mappedInput), UiAppHost(renderer), question(std::move(question)) {}
 
 void ConfirmationActivity::onEnter() {
   Activity::onEnter();
@@ -55,12 +60,16 @@ void ConfirmationActivity::dialogScreen(UiScreen& screen, void* user) {
 
 void ConfirmationActivity::buildDialogScreen(UiScreen& screen) {
   ConfirmDialog::Spec spec;
-  spec.headline = heading.empty() ? nullptr : heading.c_str();
-  spec.message = body.empty() ? nullptr : body.c_str();
-  spec.cancelLabel = tr(STR_CANCEL);
-  spec.acceptLabel = tr(STR_CONFIRM);
+  spec.title = question.title.empty() ? nullptr : question.title.c_str();
+  spec.headline = question.headline.empty() ? nullptr : question.headline.c_str();
+  spec.message = question.message.empty() ? nullptr : question.message.c_str();
+  spec.cancelLabel = I18N.get(question.cancelLabel);
+  spec.acceptLabel = I18N.get(question.acceptLabel);
   spec.cancelAction = ACTION_CANCEL;
   spec.acceptAction = ACTION_CONFIRM;
+  spec.titleMaxLines = question.titleMaxLines;
+  spec.headlineMaxLines = question.headlineMaxLines;
+  spec.messageMaxLines = question.messageMaxLines;
   ConfirmDialog::draw(screen, spec);
 }
 
@@ -71,7 +80,7 @@ void ConfirmationActivity::render(RenderLock&& lock) {
 
   // Still drawn, and not redundant: this is how the PHYSICAL buttons are labelled, and on a board
   // with no digitiser it is the only affordance there is.
-  const auto labels = mappedInput.mapLabels("", "", I18N.get(StrId::STR_CANCEL), I18N.get(StrId::STR_CONFIRM));
+  const auto labels = mappedInput.mapLabels("", "", I18N.get(question.cancelLabel), I18N.get(question.acceptLabel));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   renderer.displayBuffer(HalDisplay::RefreshMode::FAST_REFRESH);
@@ -97,6 +106,13 @@ void ConfirmationActivity::loop() {
   if (touch.routed) {
     if (app.invalidated()) requestUpdate();
     if (touch) return;  // a handler ran; it has already called finish()
+  }
+
+  // Back leaves every screen, so it leaves this one too, as Cancel. Tested before the answer keys: if
+  // a remap ever put Back on the accepting key, the press must not be taken as a yes.
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
+    finishWith(true);
+    return;
   }
 
   // Cancel and Confirm are not travel across a screen, so they do not follow the logical
