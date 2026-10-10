@@ -124,4 +124,50 @@ TEST_F(TextNodeRules, ABareBrParsesLikeTheLayoutParser) {
   EXPECT_EQ(push("<p>one<br>two</p>", 3), kP + "p[1]/text()[2].0");
   EXPECT_EQ(pull("<p>one<br>two</p>", kP + "p[1]/text()[2].0"), 3u);
 }
+
+// Calibre output from some Kindle/MOBI sources keeps every paragraph in <div><span>, with only an
+// empty <p id="filepos..."> per chapter (crosspoint-reader issue #3665). A push that counts only
+// text inside <p>/<li> names that empty p[1], and KOReader opens the chapter's first page. Ours
+// names whatever element holds the text; these pin that shape.
+//
+// Ported from crosspoint-reader PR #3923 ("fix(KOSync): resolve upload XPaths for text outside
+// <p>/<li>", Brendan LeFebvre / @brendanlefebvre). The fixture markup and the text points are
+// theirs; the offsets are recomputed for our rule, which counts no whitespace:
+//   "3" 0 | "She drove" 1-8 | "back to D.C." 9-18 | U+201C 19-21, "Who?" 22-25, U+201D 26-28 | 29
+const std::string kKindleDivSpan =
+    "\n<p id=\"filepos1\" class=\"calibre1\"></p>\n"
+    "<div class=\"calibre8\"><span class=\"calibre9\">3</span></div><div class=\"calibre10\"> </div>\n"
+    "<div class=\"calibre12\"><span class=\"calibre6\"><span class=\"bold\">She drove</span> back to "
+    "D.C.</span></div>\n"
+    "<div class=\"calibre19\"><span class=\"calibre6\">\xE2\x80\x9CWho?\xE2\x80\x9D</span></div>\n";
+
+// div[2] holds only a space, which is not a text node (R1), so "She drove" is in div[3]. The
+// space before "back" follows an inline sibling and stays (R3), so "to" is codepoint 6.
+TEST_F(TextNodeRules, KindleDivSpanTextPushesAsTextPointsInsideTheDivs) {
+  EXPECT_EQ(push(kKindleDivSpan, 0), kP + "div[1]/span[1]/text()[1].0");
+  EXPECT_EQ(push(kKindleDivSpan, 1), kP + "div[3]/span[1]/span[1]/text()[1].0");
+  EXPECT_EQ(push(kKindleDivSpan, 13), kP + "div[3]/span[1]/text()[1].6");
+  EXPECT_EQ(push(kKindleDivSpan, 19), kP + "div[4]/span[1]/text()[1].0");
+}
+
+TEST_F(TextNodeRules, KindleDivSpanTextPointsPullBackToTheSameText) {
+  EXPECT_EQ(pull(kKindleDivSpan, kP + "div[1]/span[1]/text()[1].0"), 0u);
+  EXPECT_EQ(pull(kKindleDivSpan, kP + "div[3]/span[1]/span[1]/text()[1].0"), 1u);
+  EXPECT_EQ(pull(kKindleDivSpan, kP + "div[3]/span[1]/text()[1].6"), 13u);
+  EXPECT_EQ(pull(kKindleDivSpan, kP + "div[4]/span[1]/text()[1].0"), 19u);
+}
+
+// The chapter's total names the end of the last text, not the trailing newline after it.
+TEST_F(TextNodeRules, KindleDivSpanEndNamesTheEndOfTheLastText) {
+  EXPECT_EQ(push(kKindleDivSpan, 29), kP + "div[4]/span[1]/text()[1].6");
+}
+
+// Text with no paragraph around it at all: straight in a div, or in the body. syntheticBook writes
+// "<body>\n", so the body's text node is "\nHello world": the newline is not whitespace-only, so it
+// stays, as one space (R2), and "w" is codepoint 7 (upstream's fixture had no newline: .6).
+TEST_F(TextNodeRules, TextOutsideAnyParagraphIsATextPoint) {
+  EXPECT_EQ(push("<div>not a paragraph or list item</div>", 0), kP + "div[1]/text()[1].0");
+  EXPECT_EQ(push("Hello world", 5), kP + "text()[1].7");
+  EXPECT_EQ(pull("Hello world", kP + "text()[1].7"), 5u);
+}
 }  // namespace
