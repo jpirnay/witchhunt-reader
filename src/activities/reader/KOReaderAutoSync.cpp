@@ -12,6 +12,7 @@
 
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
+#include "KOReaderSyncMetadata.h"
 #include "KOReaderSyncWorker.h"
 
 AutoSyncState AutoSyncState::instance;
@@ -28,11 +29,6 @@ constexpr uint32_t BG_SESSION_MIN_FREE_INTERNAL_BYTES =
 // request draws one chunk. Measured 14kb at its worst on a x4 pro.
 constexpr uint32_t BG_SESSION_MIN_CONTIG_INTERNAL_BYTES = 24 * 1024;
 
-std::string basenameOf(const std::string& path) {
-  const size_t slash = path.find_last_of('/');
-  return slash == std::string::npos ? path : path.substr(slash + 1);
-}
-
 KOReaderSyncJob buildSilentPushJob(const std::string& epubPath, const KOReaderPosition& localKoPos, const int spine,
                                    const int page, const std::string& title, const std::string& authors) {
   KOReaderSyncJob job;
@@ -44,11 +40,7 @@ KOReaderSyncJob buildSilentPushJob(const std::string& epubPath, const KOReaderPo
   job.progress.progress = localKoPos.xpath;
   job.progress.percentage = localKoPos.percentage;
   if (KOREADER_STORE.getSendMetadata()) {
-    KOReaderMetadata meta;
-    meta.filename = basenameOf(epubPath);
-    meta.title = title;
-    meta.authors = authors;
-    job.progress.metadata = std::move(meta);
+    job.progress.metadata = KOReaderSyncMetadata::forBook(epubPath, title, authors);
   }
   return job;
 }

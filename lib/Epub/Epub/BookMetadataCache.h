@@ -28,6 +28,8 @@ class BookMetadataCache {
     // to get them.
     std::string primaryAuthor;
     std::string authorSort;
+    std::string isbn;
+    std::string asin;
   };
 
   struct SpineEntry {

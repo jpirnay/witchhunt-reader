@@ -245,6 +245,27 @@ std::string trim(const std::string& in) {
   return in.substr(start, end - start);
 }
 
+// Whether `s` holds `lowerWord` at `at`, whatever its case.
+bool hasWordAt(const std::string& s, const size_t at, const char* lowerWord) {
+  const size_t n = strlen(lowerWord);
+  if (s.size() < at + n) return false;
+  for (size_t i = 0; i < n; ++i) {
+    if (static_cast<char>(tolower(static_cast<unsigned char>(s[at + i]))) != lowerWord[i]) return false;
+  }
+  return true;
+}
+
+// Drops a "urn:<word>:" or "<word>" prefix, and the colons and spaces after it, from an identifier's
+// value ("urn:isbn:978...", "ISBN: 978..."). True when there was one.
+bool dropIdentifierPrefix(std::string& value, const char* word) {
+  size_t at = hasWordAt(value, 0, "urn:") ? 4 : 0;
+  if (!hasWordAt(value, at, word)) return false;
+  at += strlen(word);
+  while (at < value.size() && (value[at] == ':' || value[at] == ' ')) ++at;
+  value.erase(0, at);
+  return true;
+}
+
 // Appends no further than `cap` bytes in total: a creator field is a name, not a document.
 void appendCapped(std::string& out, const char* s, const size_t len, const size_t cap) {
   if (out.size() >= cap) return;
@@ -297,6 +318,23 @@ std::string* ContentOpfParser::creatorField(const char* id, const char* property
     return isAutCode(creator.role) ? nullptr : &creator.role;
   }
   return nullptr;
+}
+
+// Which dc:identifier is an ISBN and which an ASIN follows crosspoint-reader PR #3804 ("feat(kosync):
+// add server profiles and extended metadata", Jadehawk / @jadehawk): the scheme names it (Calibre
+// writes ISBN, and MOBI-ASIN or AMAZON), or the value's own "isbn"/"asin" prefix does. The first of
+// each is kept.
+void ContentOpfParser::recordIdentifier() {
+  if (identifierTooLong_) return;
+  std::string value = trim(identifierText_);
+  const bool isbnPrefix = dropIdentifierPrefix(value, "isbn");
+  const bool asinPrefix = !isbnPrefix && dropIdentifierPrefix(value, "asin");
+  if (value.empty()) return;
+  if (identifierScheme_ == IdentifierScheme::Isbn || isbnPrefix) {
+    if (isbn.empty()) isbn = std::move(value);
+  } else if (identifierScheme_ == IdentifierScheme::Asin || asinPrefix) {
+    if (asin.empty()) asin = std::move(value);
+  }
 }
 
 void ContentOpfParser::pickPrimaryAuthor() {
@@ -474,6 +512,24 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
 
   if (self->state == IN_METADATA && strcmp(name, "dc:language") == 0) {
     self->state = IN_BOOK_LANGUAGE;
+    return;
+  }
+
+  if (self->state == IN_METADATA && strcmp(name, "dc:identifier") == 0) {
+    self->state = IN_BOOK_IDENTIFIER;
+    self->identifierText_.clear();
+    self->identifierTooLong_ = false;
+    self->identifierScheme_ = IdentifierScheme::Other;
+    for (int i = 0; atts[i]; i += 2) {
+      if (strcmp(atts[i], "opf:scheme") != 0 && strcmp(atts[i], "scheme") != 0) continue;
+      std::string scheme = atts[i + 1];
+      for (char& c : scheme) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+      if (scheme.find("isbn") != std::string::npos) {
+        self->identifierScheme_ = IdentifierScheme::Isbn;
+      } else if (scheme.find("asin") != std::string::npos || scheme == "amazon") {
+        self->identifierScheme_ = IdentifierScheme::Asin;
+      }
+    }
     return;
   }
 
@@ -796,6 +852,15 @@ void ContentOpfParser::characterData(void* userData, const char* s, const int le
     return;
   }
 
+  if (self->state == IN_BOOK_IDENTIFIER) {
+    if (self->identifierText_.size() + static_cast<size_t>(len) > MAX_IDENTIFIER) {
+      self->identifierTooLong_ = true;
+    } else if (!self->identifierTooLong_) {
+      self->identifierText_.append(s, len);
+    }
+    return;
+  }
+
   if (self->state == IN_BOOK_DESCRIPTION) {
     if (self->description.size() < MAX_DESCRIPTION_LENGTH) {
       const size_t remaining = MAX_DESCRIPTION_LENGTH - self->description.size();
@@ -876,6 +941,14 @@ void ContentOpfParser::endElement(void* userData, const char* name) {
   }
 
   if (self->state == IN_BOOK_LANGUAGE && strcmp(name, "dc:language") == 0) {
+    self->state = IN_METADATA;
+    return;
+  }
+
+  if (self->state == IN_BOOK_IDENTIFIER && strcmp(name, "dc:identifier") == 0) {
+    self->recordIdentifier();
+    self->identifierText_.clear();
+    self->identifierText_.shrink_to_fit();
     self->state = IN_METADATA;
     return;
   }

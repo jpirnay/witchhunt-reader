@@ -44,6 +44,8 @@ Result read(const std::string& bookPath, MetadataSidecarFields& out) {
   out.series = std::move(parser.series);
   out.seriesIndex = std::move(parser.seriesIndex);
   out.description = std::move(parser.description);
+  out.isbn = std::move(parser.isbn);
+  out.asin = std::move(parser.asin);
   return Result::Read;
 }
 

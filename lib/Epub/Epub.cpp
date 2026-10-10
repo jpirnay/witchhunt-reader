@@ -155,6 +155,8 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, OpfCac
   bookMetadata.description = opfParser.description;
   bookMetadata.primaryAuthor = opfParser.primaryAuthor;
   bookMetadata.authorSort = opfParser.authorSort;
+  bookMetadata.isbn = opfParser.isbn;
+  bookMetadata.asin = opfParser.asin;
 
   // Guide-based cover fallback: if no cover found via metadata/properties,
   // or if the manifest-declared cover path is invalid, try extracting the image
@@ -902,6 +904,8 @@ void Epub::applyMetadataSidecar() const {
   if (!sidecar.series.empty()) md.series = sidecar.series;
   if (!sidecar.seriesIndex.empty()) md.seriesIndex = sidecar.seriesIndex;
   if (!sidecar.description.empty()) md.description = sidecar.description;
+  if (!sidecar.isbn.empty()) md.isbn = sidecar.isbn;
+  if (!sidecar.asin.empty()) md.asin = sidecar.asin;
   LOG_DBG("EBP", "Applied metadata sidecar for %s", filepath.c_str());
 }
 
@@ -1147,6 +1151,22 @@ const std::string& Epub::getPrimaryAuthor() const {
     return blank;
   }
   return bookMetadataCache->coreMetadata.primaryAuthor;
+}
+
+const std::string& Epub::getIsbn() const {
+  static std::string blank;
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return blank;
+  }
+  return bookMetadataCache->coreMetadata.isbn;
+}
+
+const std::string& Epub::getAsin() const {
+  static std::string blank;
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {
+    return blank;
+  }
+  return bookMetadataCache->coreMetadata.asin;
 }
 
 const std::string& Epub::getAuthorSort() const {

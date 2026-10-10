@@ -15,6 +15,8 @@ struct MetadataSidecarFields {
   std::string series;
   std::string seriesIndex;
   std::string description;
+  std::string isbn;
+  std::string asin;
 };
 
 namespace MetadataSidecar {

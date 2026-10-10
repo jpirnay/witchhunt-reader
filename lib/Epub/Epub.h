@@ -210,6 +210,10 @@ class Epub {
   const std::string& getSeries() const;
   const std::string& getSeriesIndex() const;
   const std::string& getDescription() const;
+  // ISBN and Amazon ASIN, like the primary author not kept in book.bin: set by a fresh OPF parse
+  // (loadForMetadata past book.bin) and by the metadata sidecar. Empty when the book gives none.
+  const std::string& getIsbn() const;
+  const std::string& getAsin() const;
   std::string getCoverBmpPath(bool cropped = false) const;
   std::string getCoverImageCachePath() const;
   // Returns the raw ZIP entry path for the cover image (empty if none).

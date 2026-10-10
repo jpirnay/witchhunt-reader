@@ -20,6 +20,9 @@ struct BookDetails {
   std::string authorSort;     // its opf:file-as ("Le Guin, Ursula K."); "" when the book gives none
   std::string series;
   std::string seriesIndex;
+  // The book's ISBN and Amazon ASIN, for KOReader sync's metadata; empty when it gives none.
+  std::string isbn;
+  std::string asin;
 };
 
 namespace BookDetailsCache {

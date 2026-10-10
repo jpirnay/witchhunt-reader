@@ -557,6 +557,10 @@ On the **X4 Pro** and the **LilyGo T5 S3**, sync can also run in the background.
 
 A background sync leaves WiFi on if the screen you are using needs it. The X3 and X4 do not have enough memory to sync in the background, so they offer **On Closing a Book** only.
 
+##### Sending the book's details
+
+**Send Document Metadata** (off by default) adds the book's details to every position it sends: its file name, title and authors, and, when the book gives them, its ISBN, Amazon ASIN, series and number in the series. A self-hosted server can use them to recognise the book; KOReader's own server ignores them. The ISBN, ASIN and series come from the Library's record of the book, so a book that has never been shown in the Library sends only its file name, title and authors. A book's `.opf` metadata file overrides them as it does its title.
+
 ### 3.8 Sleep Screen
 
 The **Sleep Screen** setting controls what is displayed when the device goes to sleep:
