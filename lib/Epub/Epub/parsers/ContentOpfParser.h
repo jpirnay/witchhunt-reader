@@ -27,6 +27,7 @@ class ContentOpfParser final : public Print {
     IN_BOOK_DESCRIPTION,
     IN_BOOK_SERIES,
     IN_BOOK_SERIES_INDEX,
+    IN_BOOK_IDENTIFIER,
     IN_CREATOR_REFINE,
     IN_MANIFEST,
     IN_SPINE,
@@ -135,6 +136,15 @@ class ContentOpfParser final : public Print {
   std::string* creatorField(const char* id, const char* property);
   void pickPrimaryAuthor();
 
+  // The dc:identifier being read: what its scheme attribute says it is, and its text. Longer than
+  // any ISBN or ASIN can be means it is neither, and a cut-off one would be a wrong one.
+  enum class IdentifierScheme : uint8_t { Other, Isbn, Asin };
+  static constexpr size_t MAX_IDENTIFIER = 64;
+  IdentifierScheme identifierScheme_ = IdentifierScheme::Other;
+  std::string identifierText_;
+  bool identifierTooLong_ = false;
+  void recordIdentifier();
+
   // FNV-1a hash function
   static uint32_t fnvHash(const std::string& s) {
     uint32_t hash = 2166136261u;
@@ -181,6 +191,10 @@ class ContentOpfParser final : public Print {
   std::string description;
   std::string series;
   std::string seriesIndex;
+  // The first dc:identifier that is an ISBN, and the first that is an Amazon ASIN, without their
+  // "urn:isbn:" / "isbn:" prefixes. For KOReader sync's metadata; empty when the book gives none.
+  std::string isbn;
+  std::string asin;
   std::string tocNcxPath;
   std::string tocNavPath;   // EPUB 3 nav document path
   std::string pageMapPath;  // EPUB 2.01 page-map.xml document path

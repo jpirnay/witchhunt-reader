@@ -29,6 +29,8 @@ bool applySidecar(const std::string& bookPath, BookDetails& out) {
   MetadataSidecar::overlayPrimaryAuthor(sidecar, out.primaryAuthor, out.authorSort);
   if (!sidecar.series.empty()) out.series = sidecar.series;
   if (!sidecar.seriesIndex.empty()) out.seriesIndex = sidecar.seriesIndex;
+  if (!sidecar.isbn.empty()) out.isbn = sidecar.isbn;
+  if (!sidecar.asin.empty()) out.asin = sidecar.asin;
   return true;
 }
 
@@ -66,6 +68,8 @@ bool parse(const std::string& bookPath, const uint32_t bookSize, BookDetails& ou
     out.authorSort = epub.getAuthorSort();
     out.series = epub.getSeries();
     out.seriesIndex = epub.getSeriesIndex();
+    out.isbn = epub.getIsbn();
+    out.asin = epub.getAsin();
     epub.setupCacheDir();
   } else if (FsHelpers::hasXtcExtension(bookPath)) {
     Xtc xtc(bookPath, "/.crosspoint");

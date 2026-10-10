@@ -63,6 +63,10 @@ Everything since 2.37. Your books have one Library screen, with tabs for Recent,
 - **On/off settings on Customise Status Bar and the finished-book screen are switches** instead of "Show"/"Hide" and "On"/"Off" words.
 - **A weather city search with no matches now says so** instead of returning to the settings without a word.
 
+### KOReader sync
+
+- **Send Document Metadata also sends the book's ISBN, Amazon ASIN, series and number in the series**, when the book gives them, beside its file name, title and authors, for self-hosted servers that use them. They go under the same names crosspoint-reader uses (`isbn`, `asin`, `series`, `series_index`). The setting is still off by default, and KOReader's own server ignores the extra details.
+
 ### Updates
 
 - **Check for Updates shows what a new release brings.** Before you choose **Update**, the dialog now shows the release's title and the first few lines of its release notes under the version numbers, instead of the version numbers alone.

@@ -12,7 +12,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <memory>
@@ -635,6 +637,16 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
     meta["filename"] = progress.metadata->filename;
     meta["title"] = progress.metadata->title;
     meta["authors"] = progress.metadata->authors;
+    if (!progress.metadata->isbn.empty()) meta["isbn"] = progress.metadata->isbn;
+    if (!progress.metadata->asin.empty()) meta["asin"] = progress.metadata->asin;
+    if (!progress.metadata->series.empty()) meta["series"] = progress.metadata->series;
+    // A number; an index that is not one is left out rather than sent as text.
+    const std::string& index = progress.metadata->seriesIndex;
+    char* end = nullptr;
+    const float number = index.empty() ? 0.0f : std::strtof(index.c_str(), &end);
+    if (end != nullptr && end != index.c_str() && *end == '\0' && std::isfinite(number)) {
+      meta["series_index"] = number;
+    }
   }
 
   std::string body;

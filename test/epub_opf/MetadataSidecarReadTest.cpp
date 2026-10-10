@@ -43,6 +43,8 @@ const char* kCalibreSidecar =
     "    <dc:creator opf:file-as=\"Le Guin, Ursula K.\" opf:role=\"aut\">Ursula K. Le Guin</dc:creator>\n"
     "    <meta name=\"calibre:series\" content=\"Earthsea\"/>\n"
     "    <meta name=\"calibre:series_index\" content=\"1\"/>\n"
+    "    <dc:identifier opf:scheme=\"ISBN\">9780547773742</dc:identifier>\n"
+    "    <dc:identifier opf:scheme=\"MOBI-ASIN\">B008H8SP6Q</dc:identifier>\n"
     "  </metadata>\n"
     "</package>\n";
 
@@ -56,6 +58,8 @@ TEST_F(MetadataSidecarReadTest, ReadsTheSidecarOfABookThatIsNotAnEpub) {
   EXPECT_EQ(out.authorSort, "Le Guin, Ursula K.");
   EXPECT_EQ(out.series, "Earthsea");
   EXPECT_EQ(out.seriesIndex, "1");
+  EXPECT_EQ(out.isbn, "9780547773742");
+  EXPECT_EQ(out.asin, "B008H8SP6Q");
 }
 
 // Contract with plugins/metadata-editor, which now edits sidecars for every book format: the document

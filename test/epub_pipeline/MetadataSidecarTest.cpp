@@ -198,4 +198,19 @@ TEST_F(MetadataSidecarFixture, AMetadataLoadPastBookBinFindsThePrimaryAuthor) {
   EXPECT_EQ(epub.getPrimaryAuthor(), "Test Suite");
 }
 
+// KOReader sync sends a book's ISBN and ASIN from details.bin, which the details lookup fills from a
+// metadata load past book.bin. A sidecar's identifiers win, as its other fields do.
+TEST_F(MetadataSidecarFixture, AMetadataLoadPastBookBinFindsTheSidecarsIdentifiers) {
+  std::string xml = sidecarXml("Sidecar Title", "Sidecar Author");
+  const std::string identifiers =
+      "    <dc:identifier opf:scheme=\"ISBN\">9780547773742</dc:identifier>\n"
+      "    <dc:identifier opf:scheme=\"MOBI-ASIN\">B008H8SP6Q</dc:identifier>\n";
+  xml.insert(xml.find("  </metadata>"), identifiers);
+  writeSidecar(xml);
+  Epub epub(bookPath.string(), cacheDir);
+  ASSERT_TRUE(epub.loadForMetadata(nullptr, /*useBookBin=*/false));
+  EXPECT_EQ(epub.getIsbn(), "9780547773742");
+  EXPECT_EQ(epub.getAsin(), "B008H8SP6Q");
+}
+
 }  // namespace

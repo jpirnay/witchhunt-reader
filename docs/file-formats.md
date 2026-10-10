@@ -45,7 +45,7 @@ bookmarks included, and `fontprev/` (`ClearCacheActivity`).
 |---|---|---|---|
 | `progress.bin` | all | none (told apart by length) | Where the book was left: [below](#progressbin) |
 | `bookmarks.bin` | all | `BookmarkStore::FILE_VERSION` (2) | `u8` version, `u16` count, then per bookmark `u16` spine, `u16` page, `u16` name length, the name. Version 1 (no names) still reads |
-| `details.bin` | all | `BookDetailsCache` `VERSION` (2) | What the Library's lists show: [below](#detailsbin) |
+| `details.bin` | all | `BookDetailsCache` `VERSION` (3) | What the Library's lists show: [below](#detailsbin) |
 | `thumb_*.bmp` | all | in the name | Cover thumbnails: [below](#cover-thumbnails) |
 | `cover.bmp` | all | none | The sleep screen's cover (`cover_crop.bmp` for an EPUB's cropped one) |
 | `book.bin` | EPUB | `BOOK_CACHE_VERSION` (11) | Metadata, spine and TOC: [below](#bookbin) |
@@ -365,7 +365,7 @@ The file is exactly `47 + xpathLen` bytes; anything else reads as no cached push
 What the Library's book lists show for a book (`BookDetailsCache` in `src/activities/home/BookDetailsCache.cpp`, `BookDetails.h`), in the book's cache directory whatever its format:
 
 ```text
-u8  version             BookDetailsCache VERSION (2)
+u8  version             BookDetailsCache VERSION (3)
 u32 bookSize            the book's size when recorded
 u32 sidecarStamp        SidecarFiles::metadataStamp of its .opf sidecar; 0: none
 String title
@@ -374,9 +374,11 @@ String series
 String seriesIndex
 String primaryAuthor    the first creator credited as author: what the Authors tab groups by
 String authorSort       its opf:file-as; empty when the book gives none
+String isbn             the first dc:identifier that is an ISBN, without its prefix; may be empty
+String asin             the first that is an Amazon ASIN; may be empty
 ```
 
-A file of another version, or recorded for another book size or sidecar stamp, is ignored and the book read again (`BookDetailsLookup::parse`): an EPUB's OPF (never `book.bin`, which keeps no primary author), an XTC's header, and for every format the `.opf` sidecar over it. An EPUB whose parse failed is not recorded. Version 2 added `primaryAuthor` and `authorSort`.
+A file of another version, or recorded for another book size or sidecar stamp, is ignored and the book read again (`BookDetailsLookup::parse`): an EPUB's OPF (never `book.bin`, which keeps no primary author), an XTC's header, and for every format the `.opf` sidecar over it. An EPUB whose parse failed is not recorded. Version 2 added `primaryAuthor` and `authorSort`; version 3 `isbn` and `asin`, which KOReader sync sends with **Send Document Metadata** (`KOReaderSyncMetadata::forBook`).
 
 ## Cover thumbnails
 

@@ -18,6 +18,7 @@
 #include "KOReaderAutoSync.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
+#include "KOReaderSyncMetadata.h"
 #include "KOReaderSyncWorker.h"
 #include "MappedInputManager.h"
 #include "SilentRestart.h"
@@ -1227,12 +1228,7 @@ bool KOReaderSyncActivity::computeLocalProgressAndChapter() {
                           : (std::string(tr(STR_SECTION_PREFIX)) + std::to_string(currentSpineIndex + 1));
 
   if (KOREADER_STORE.getSendMetadata()) {
-    const size_t slash = epubPath.rfind('/');
-    KOReaderMetadata meta;
-    meta.filename = (slash != std::string::npos) ? epubPath.substr(slash + 1) : epubPath;
-    meta.title = epub->getTitle();
-    meta.authors = epub->getAuthor();
-    localDocumentMetadata = std::move(meta);
+    localDocumentMetadata = KOReaderSyncMetadata::forBook(epubPath, epub->getTitle(), epub->getAuthor());
   } else {
     localDocumentMetadata.reset();
   }

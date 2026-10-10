@@ -53,6 +53,7 @@ Fields taken from the sidecar, when non-empty:
 | series | `<meta name="calibre:series">` or `belongs-to-collection` |
 | series index | `<meta name="calibre:series_index">` or `group-position` |
 | description | `<dc:description>` |
+| ISBN, ASIN | the first `<dc:identifier>` of each kind: `opf:scheme` naming it (`ISBN`; `MOBI-ASIN` or `AMAZON`), or a `urn:isbn:` / `isbn:` (`asin`) prefix on the value |
 
 The bundled `metadata-editor` plugin writes these from the web UI, so you do not
 have to hand-edit XML — see [sd-plugins.md](sd-plugins.md). It edits an existing
