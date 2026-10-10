@@ -32,8 +32,8 @@ class OtaUpdateActivity : public Activity, private UiAppHost {
 
   void onWifiSelectionComplete(bool success);
 
-  // Version lines for the confirmation dialog. Members, not locals: OptionDialogProps stores a
-  // pointer and the draw happens after the screen fn returns.
+  // Version lines and release-notes excerpt for the confirmation dialog. Members, not locals:
+  // OptionDialogProps stores a pointer and the draw happens after the screen fn returns.
   std::string updateDialogBody;
 
   static void confirmScreen(UiScreen& screen, void* user);

@@ -51,6 +51,8 @@ struct WifiPowerSaveGuard {
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   updateAvailable = false;
   latestVersion.clear();
+  releaseName.clear();
+  releaseNotes.clear();
   otaUrl.clear();
   otaSize = 0;
   otaHasSha256 = false;
@@ -94,16 +96,23 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
             return false;
           }
           releaseParser.feed(reinterpret_cast<const char*>(data), len);
-          // For OTA metadata we only need tag_name and the asset fields.
-          // Stop early once both are found to avoid fragile tail reads.
-          if (releaseParser.foundTag() && releaseParser.foundFirmware()) {
+          // We need tag_name, the asset fields and the start of the notes, which
+          // follow the assets. Stop once all are found to avoid fragile tail reads.
+          if (releaseParser.foundTag() && releaseParser.foundFirmware() && releaseParser.foundNotes()) {
             return false;
           }
           return true;
         },
         true);
 
-    if (!ok) {
+    // The notes are only shown, so a stream that fails between the asset and the
+    // notes still delivered the update; it is not retried for them.
+    const bool haveUpdate = releaseParser.foundTag() && releaseParser.foundFirmware();
+    if (!ok && haveUpdate) {
+      LOG_INF("OTA", "Release metadata stream ended before the notes; going on without them");
+    }
+
+    if (!ok && !haveUpdate) {
       if (bytesSeen > releaseMetadataMaxBytes) {
         LOG_ERR("OTA", "Release metadata too large after %zu bytes", bytesSeen);
         return METADATA_TOO_LARGE_ERROR;
@@ -128,6 +137,8 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
     }
 
     latestVersion = releaseParser.getTagName();
+    releaseName = releaseParser.getReleaseName();
+    releaseNotes = releaseParser.getReleaseNotes();
     otaUrl = releaseParser.getFirmwareUrl();
     otaSize = releaseParser.getFirmwareSize();
     totalSize = otaSize;

@@ -11,6 +11,10 @@
 class OtaUpdater {
   bool updateAvailable = false;
   std::string latestVersion;
+  // The release's title and the opening lines of its notes, for the confirmation dialog. Either
+  // may be empty. Under 330 B together, held until the update or Back reboots.
+  std::string releaseName;
+  std::string releaseNotes;
   std::string otaUrl;
   size_t otaSize = 0;
   // The asset's SHA-256 from the release metadata (GitHub's "digest"), checked against the image
@@ -63,6 +67,8 @@ class OtaUpdater {
   OtaUpdater() = default;
   bool isUpdateNewer() const;
   const std::string& getLatestVersion() const;
+  const std::string& getReleaseName() const { return releaseName; }
+  const std::string& getReleaseNotes() const { return releaseNotes; }
   OtaUpdaterError checkForUpdate();
   OtaUpdaterError beginInstallUpdate();
   OtaUpdaterError performInstallUpdateStep();

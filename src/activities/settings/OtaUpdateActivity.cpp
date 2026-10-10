@@ -79,15 +79,30 @@ void OtaUpdateActivity::confirmScreen(UiScreen& screen, void* user) {
 }
 
 void OtaUpdateActivity::buildConfirmScreen(UiScreen& screen) {
-  // Two lines in one slot: FUI's layoutText() breaks on \n explicitly
-  // (FreeInkUICore.h), so the current and new versions each get their own line without
-  // needing a second text slot.
+  // Several lines in one slot: FUI's layoutText() breaks on \n explicitly and keeps a blank
+  // line (FreeInkUICore.h), so the two versions and, below a gap, the opening lines of the
+  // release notes each start their own line without needing more text slots.
   updateDialogBody = std::string(tr(STR_CURRENT_VERSION)) + CROSSPOINT_VERSION + "\n" +
                      std::string(tr(STR_NEW_VERSION)) + updater.getLatestVersion();
+  if (!updater.getReleaseNotes().empty()) {
+    updateDialogBody += "\n\n" + updater.getReleaseNotes();
+  }
 
   ConfirmDialog::Spec spec;
-  spec.headline = tr(STR_NEW_UPDATE);
+  // With a release title, that is the headline and "New update" its caption; without one, the
+  // dialog reads as it always has.
+  const std::string& releaseName = updater.getReleaseName();
+  if (releaseName.empty()) {
+    spec.headline = tr(STR_NEW_UPDATE);
+  } else {
+    spec.title = tr(STR_NEW_UPDATE);
+    spec.headline = releaseName.c_str();
+    spec.headlineMaxLines = 2;
+  }
   spec.message = updateDialogBody.c_str();
+  // Two version lines, the gap, and up to five lines of notes; ConfirmDialog takes lines back
+  // if the panel would not fit the screen.
+  spec.messageMaxLines = 8;
   spec.cancelLabel = tr(STR_CANCEL);
   spec.acceptLabel = tr(STR_UPDATE);
   spec.cancelAction = ACTION_CANCEL;
