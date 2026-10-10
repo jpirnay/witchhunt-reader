@@ -24,7 +24,8 @@ pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 pio run
 ```
 
-CI enforces formatting, static analysis, and build checks.
+CI enforces formatting, static analysis, a build for each board (`default`, `x4pro`, `lilygo_t5s3`) and the host tests.
+If your change touches code the host tests cover, run them locally too; see [Testing and Debugging](./testing-debugging.md#host-tests).
 Use clang-format 21+ locally to match CI.
 If `clang-format` is missing or too old locally, see [Getting Started](./getting-started.md).
 If your change affects release automation, also dry-run the release workflows locally with `act` before opening the PR. See [Testing and Debugging](./testing-debugging.md#test-release-workflows-locally-with-act).

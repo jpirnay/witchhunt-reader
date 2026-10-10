@@ -168,6 +168,8 @@ Arena instances:
 | Pre-reboot warm scratch | lent region when idle, else heap | `WARM_PASS_SCRATCH_BYTES` (about 40 KB) on the heap | one pass | `Section::warmAllImageCaches` |
 | Image-header walk | lent framebuffer | the framebuffer size | one walk | `resolvePendingImageHeadersFromFramebuffer` |
 | Cover and indexing passes | lent framebuffer | the framebuffer size | the pass | `HomeActivity`, `FileBrowserActivity::lendForBackgroundWork`, `ReaderActivity` |
+| Library index build | lent framebuffer | the framebuffer size | one build step | `LibraryBuilder::step` (join, publish, author lookup), `LibraryOrder::sortBySeries` |
+| Font selector previews | lent framebuffer | the framebuffer size | one preview font | `FontSelectionActivity::lendPreviewArena`, `SdCardFont::useArena` |
 
 In the lent region the CSS ruleset is resident in the arena (`CssParser::setIndexArena`), the SAX
 state is taken there (`ChapterHtmlSlimParser::setBuildArena`), and the ZIP ring shares the main
@@ -455,7 +457,11 @@ Borrow (the lent region becomes an arena):
 - The per-page image warm in `renderContents`, the image lane (`warmPageForImageLane`) and the
   image-header walk, §9.3.
 - First-open indexing (`ReaderActivity`), Home's cover pass and frame cache (`HomeActivity`), and
-  the file browser's cover work (`FileBrowserActivity::lendForBackgroundWork`).
+  the Library's title parses and cover work (`FileBrowserActivity::lendForBackgroundWork`).
+- The Library's book-index build (`LibraryBuilder`): every phase but the card walk works in the lent
+  region and resets it at each step (`LibraryJoin`, `LibraryPublish`, the author lookups), and an
+  author's books are sorted there (`LibraryOrder::sortBySeries`). With nothing to lend, the build is
+  abandoned for that visit and tried again on the next.
 - The font selector's previews (`FontSelectionActivity::lendPreviewArena`): each uncached preview
   loads its SD font into the lent region (`SdCardFont::useArena`), one block per font, rewound
   after the font is unloaded. With nothing to lend, previews load on the heap.

@@ -37,7 +37,8 @@ via a KOReader contributor mapping spine items to DocFragment numbers.
 
 Implemented in `ProgressMapper::toKOReader`.
 
-1. Compute overall `percentage` from chapter/page as before.
+1. Compute overall `percentage` from chapter/page (`Epub::calculateProgress`, with intra-spine
+   progress `page / (pageCount - 1)`).
 2. Take the page's content offset from the section cache (`Section::getVisibleTextOffsetForPage`:
    where the page's first text starts, in visible bytes, in the chapter's text) and name that text with
    `ChapterXPathIndexer::findXPathForVisibleOffset`: one streamed pass over the spine XHTML (a second, inclusive pass only when the page starts at the chapter's total, to name the end of the last text),
@@ -78,13 +79,17 @@ Implemented in `ProgressMapper::toCrossPoint`.
 4. Extract paragraph index from XPath via `ChapterXPathIndexer::tryExtractParagraphIndexFromXPath`
    (e.g. `/body/DocFragment[7]/body/p[685]/text().96` -> `paragraphIndex = 685`).
 5. Convert resolved intra-spine progress to page estimate.
-6. If XPath path is invalid/unresolvable, fallback to percentage-based chapter/page estimation.
-   A chapter-start XPath (no `p`/`li` predicate, ending in `.0`) pins the first page instead.
+6. If the XPath does not resolve but names a spine, keep that spine and take the page from the
+   percentage within it; a chapter-start XPath (no `p`/`li` predicate, ending in `.0`) pins the
+   first page instead. Without a usable `DocFragment`, estimate spine and page from the percentage.
 
-When a paragraph index is available, `EpubReaderActivity` refines the page estimate using
-the section cache's per-page paragraph LUT (`Section::getPageForParagraphIndex`). This finds
-the first page whose recorded paragraph index is >= the target, giving a more accurate
-landing position than byte-offset-based estimation alone.
+The reader lands through the most precise anchor the result carries (`NavigationTarget`): the
+content offset (`Section::getPageForVisibleTextOffset`), else a list item
+(`Section::getPageForListItemIndex`, for an XPath ending in `/li[N]`), else a paragraph, else the
+page estimate. For a paragraph index, `EpubReaderActivity` refines the page estimate using the
+section cache's per-page paragraph LUT (`Section::getPageForParagraphIndex`). This finds the first
+page whose recorded paragraph index is >= the target, giving a more accurate landing position than
+byte-offset-based estimation alone.
 
 ## ChapterXPathIndexer Design
 
@@ -136,17 +141,16 @@ read from koreader/crengine `lvtinydom.cpp` and `lvxml.cpp`) that both mappers s
 
 ## Device evidence
 
-Three probes pushed under the 5b rules to a live KOReader (2026-10-06, account on
-`kosync.rustysoft.de`):
+Three probes pushed under these rules to a live KOReader (through `kosync.rustysoft.de`):
 
 - R2, from KOReader's own upload `/body/DocFragment[3]/body/p[31]/text()[1].851`: our collapsed
   codepoint count lands on a word boundary, the raw count lands mid-word.
-- R1, `/body/DocFragment[7]/body/p[40]/text()[1].55` landed on "mighty Job!"; the numbering before 5b
-  named a text node that does not exist, a null XPointer, which KOReader opens at the book's first page.
+- R1, `/body/DocFragment[7]/body/p[40]/text()[1].55` landed on "mighty Job!"; numbering that ignores rule R1
+  names a text node that does not exist, a null XPointer, which KOReader opens at the book's first page.
 - Deep points, the Chapter 40 probe `/body/DocFragment[10]/body/p[18]/i[1]/text()[1].39`: a text point
   inside an inline element landed on the page holding its target. crengine returns a null XPointer
-  (page 0) on any unresolved step, so the whole path resolved. The 1.43 failure was the counting
-  bug 5b fixed, and `kTextPointsInsideInlineElements` is on.
+  (page 0) on any unresolved step, so the whole path resolved. This is why
+  `kTextPointsInsideInlineElements` is on.
 
 ## Memory / Safety Constraints (ESP32-C3)
 
@@ -183,7 +187,7 @@ mapping failed:
   and any other record from its XPath string.
 - **The wake pull** maps after the background worker has already turned the radio off.
 
-Device runs on the X3 (2026-10) established the rule behind this ordering. Mapping a 174 KB chapter
+Device runs on the X3 established the rule behind this ordering. Mapping a 174 KB chapter
 after WiFi came up, with the full parser state, drove Min Free down to about 10.9 KB, against about
 19 KB for the old temp-file path. Mapping the push position before WiFi, and pulls and compares after
 `HalClock::wifiOff`, keeps the mapper out of the WiFi peak. Each stage logs a `[KOSync] Sync mem[...]`
@@ -195,13 +199,19 @@ line (`after_local_mapping`, `after_wifi_down_before_remote_mapping`, `after_rem
 The section cache stores a per-page paragraph index LUT built during page layout
 (`ChapterHtmlSlimParser`). Each entry records the 1-based `<p>` sibling index
 (direct children of `<body>`, matching XPath convention) at the time each page was completed.
+The same entry holds the page's content offset and the running `<li>` count: per page, a `u32`
+visible-text offset, a `u16` paragraph index and a `u16` list-item index.
 
-This enables two lookups without reparsing:
+This enables these lookups without reparsing:
 
 - **XPath → page** (`Section::getPageForParagraphIndex`): finds the first page where the
   recorded paragraph index >= target. Used when applying remote KOReader progress.
 - **Page → paragraph** (`Section::getParagraphIndexForPage`): returns the paragraph index for
   a given page. Used by the sync comparison; not used for upload (the content offset is).
+- **List item → page** (`Section::getPageForListItemIndex`), for an XPath ending in `/li[N]`.
+- **Page ↔ content offset** (`Section::getVisibleTextOffsetForPage`, `getVisibleTextOffsetAfterPage`,
+  `getPageForVisibleTextOffset`): what a push names, a pull lands on, and the comparison's page
+  window.
 
 The paragraph counter in `ChapterHtmlSlimParser` counts **all** `<p>` elements at body-child
 level, including `display:none` elements. This matches `ChapterXPathIndexer` and crengine's
@@ -224,10 +234,11 @@ standard XPath same-name sibling counting.
 `ProgressMapper` logs the reverse mapping at **INF**, so it appears in release-build logs:
 
 ```
-[ProgressMapper] KOReader -> CrossPoint: 26.72% at /body/DocFragment[13]/... -> spine=12, page=0/40 (xpath, exact=yes)
+[ProgressMapper] KOReader -> CrossPoint: 26.72% at /body/DocFragment[13]/... -> spine=12, page=0/40 off=0/1 (xpath, exact=yes)
 ```
 
-The source in parentheses is one of:
+`off=` is the resolved content offset and whether the result carries it (`1` only for a text point
+matched to the codepoint). The source in parentheses is one of:
 
 - `xpath`: the XPath resolved and was used as is
 - `xpath+percentage`: an inexact XPath match was replaced by the percentage
@@ -238,5 +249,13 @@ The source in parentheses is one of:
 It also logs exactness (`exact=yes/no`) for XPath matches. Note that `exact=yes` is only set for
 a full path match with correct indices; index-insensitive and ancestor matches always log `exact=no`.
 
-Host coverage: `test/epub_pipeline/ProgressMapperTest.cpp` builds a two-chapter book and maps
-XPath/percentage pairs through `ProgressMapper::toCrossPoint`.
+Host coverage, in `test/epub_pipeline/`:
+
+- `ProgressMapperTest.cpp` builds a three-chapter book (the third malformed, so the resolver fails
+  as it does when the inflate cannot be allocated) and maps XPath/percentage pairs through
+  `ProgressMapper::toCrossPoint`.
+- `ProgressMapperRoundTripTest.cpp` pushes every page of every corpus chapter, pulls it back and
+  snaps it as the reader does; it must land on the page it left.
+- `TextNodeRulesTest.cpp` (crengine's text-node rules), `XPathExtractionTest.cpp` (the string side:
+  spine, paragraph, normalisation), `StreamedParseTest.cpp` (the streamed parse) and
+  `VisibleTextOffsetLutTest.cpp` (the content-offset LUT).

@@ -19,7 +19,9 @@ Why it matters: idle light sleep is the main idle-power saving, and a dark front
 guard. Light sleep stops the LEDC clock, so only a lit PWM light flickers.
 
 Where: `HalPowerManager::lightSleep()`, `HalFrontlight`, `[x4pro_board]` in `platformio.ini`, and
-the SDK's `FrontlightManager` (`FREEINK_FRONTLIGHT_LS`, `park()`, `releaseOnWake()`).
+the SDK's `FrontlightManager` (`FREEINK_FRONTLIGHT_LS`, `park()`, `releaseOnWake()`). The comment
+beside the `lightSleep()` fallback in `main.cpp`'s idle loop lists the reasons it declines without
+the frontlight.
 
 Ruled out: porting upstream's exclusion as the design. crosspoint-reader
 [PR #3032](https://github.com/crosspoint-reader/crosspoint-reader/pull/3032), with
@@ -36,25 +38,28 @@ untested on the T5S3.
 
 ## Board-name checks still to convert
 
-Open: about 35 call sites still ask `deviceIsX3()`, `deviceIsX4()` or `renderer.isX3()`. On any
-S3 board `deviceIsX3()` is false by construction, so each silently takes the X4 branch. They fall
-into four groups:
+Open: 38 call sites still ask `deviceIsX3()` or `renderer.isX3()` (`deviceIsX4()` has no caller
+left). On any S3 board `deviceIsX3()` is false by construction, so each silently takes the X4
+branch. They fall into four groups:
 
 - Identity, to keep: X3/X4 detection and `selectDevice()` in `HalGPIO::begin()`,
   `HalDisplay::begin()`'s `setDisplayX3()`, X3 USB polling and wake handling in `HalGPIO`, the
   GPIO13 battery latch.
 - Layout keyed on the board name: side-hint insets in `UITheme.cpp`, the side-button hints in
   `BaseTheme` and `LyraTheme`, `KeyboardEntryActivity`'s content rect.
-- Panel questions spelled `!renderer.isX3()`: the `syncRedRamFromFrameBuffer()` call sites, the
-  reader's in-place build and transition paths, `EpubReaderActivity::usesDeferredAa()`, and the
-  refresh log lines in `HalDisplay`. These belong with the PanelSel split in
+- Panel questions, spelled `renderer.isX3()` in the firmware and `deviceIsX3()` inside
+  `HalDisplay`: the `syncRedRamFromFrameBuffer()` call sites, the reader's in-place build and
+  transition paths (`chooseSectionBuildMode()` among them), `EpubReaderActivity::usesDeferredAa()`,
+  the FAST check in `HalDisplay::displayBuffer()`, and the refresh log lines in `HalDisplay`. These
+  belong with the PanelSel split in
   [Display and refresh](display-and-refresh.md#split-panelsel-from-the-baseline-model).
 - `deviceIsX3() && needsHalfRefresh` in `SettingsActivity` and `SettingsSubmenuActivity`.
 
-Tried: `panelNeedsHalfRefreshSettle()` was written for the two settings sites and not applied. It
-is not behaviour-preserving on the UC8279 X3 variant, where the old code settles and the predicate
-does not. That is probably the correct behaviour (the settle is a UC8253 property), but it changes
-a shipped board.
+Tried: `HalCapabilities::panelNeedsHalfRefreshSettle()` (true on UC8253) already gates the settle
+inside `HalDisplay` (`requestResync()`, `displayBuffer()`, `refreshDisplay()`), but was not applied
+to the two settings sites. There it is not behaviour-preserving on the UC8279 X3 variant, where the
+old code settles and the predicate does not. That is probably the correct behaviour (the settle is a
+UC8253 property), but it changes a shipped board.
 
 Next: convert the settings pair with a UC8279 X3 on the bench and check for ghosting. Then the
 layout group: one capability per question (where the side hints sit is a button-topology
@@ -78,8 +83,9 @@ the clamp only if mounts or reads fail.
 
 Open: `-DBUTTON_TRACE=1` is commented out in `[lilygo_board]`, but its code remains in
 `HalGPIO::sampleOnce()` (raw button, Home key and touch-release lines), `GestureEventManager`,
-`TouchGestures.h` and `ActivityManager.cpp`. The `platformio.ini` comment still says to drop it
-once the board's input is settled.
+`TouchGestures.h` and `ActivityManager.cpp`, and its touch-edge state (`touchTraceWasHeld_`,
+`touchTraceDownNx_` and friends) sits unguarded in `HalGPIO.h`. The `platformio.ini` comment still
+says to drop it once the board's input is settled.
 
 Why it matters: it is either a maintained diagnostic or dead code in the input path, and today it
 is described as neither.
@@ -87,7 +93,8 @@ is described as neither.
 Next: decide. To keep it, reword the `platformio.ini` comment the way the `LGFX_EPD_PUSH_TRACE`
 comment beside it is worded and check that a trace build compiles;
 [Touch Architecture](../contributing/touch-architecture.md#debugging-touch) already describes the
-output. To drop it, delete the trace blocks in those four files in one commit.
+output. To drop it, delete the trace blocks in those four files and the state in `HalGPIO.h` in
+one commit.
 
 ## FREEINK_X4PRO_FAST_DU_SHORTCUT
 
@@ -158,8 +165,8 @@ ergonomic, and the swipe now accepts either direction.
 
 Next: carry the remaining count across the spine (for example, resolve a page offset once the new
 section has loaded), or declare the stop intended and say so in
-[Touch Gestures](../touch-gestures.md). Check the TXT, Markdown and XTC readers' `BTN_PAGE_*_10`
-handlers for the same behaviour.
+[Touch Gestures](../touch-gestures.md). Only the EPUB reader stops: the TXT, Markdown, XTC and line
+readers' `BTN_PAGE_*_10` handlers move a whole-document page index by ten and clamp.
 
 ## No tappable scroll bar on lists
 
@@ -167,14 +174,14 @@ Open: no list has a tap target on its scroll indicator. Paging by tapping beside
 (`ListScrollBar`, `ActivityManager::dispatchScrollBarTap()`) was removed when the lists moved to
 FreeInkUI (cabc632e0, 2026-09-14). FreeInkUI's `list()` registers only rows as hit targets, and the
 lists `BaseTheme` still draws show overflow arrows (`drawListOverflowArrows()`) with no target. Paging
-by touch is a vertical swipe or a hint box. [Touch Gestures](../touch-gestures.md) still describes
-tapping the scroll bar.
+by touch is a vertical swipe or a hint box; neither [Touch Gestures](../touch-gestures.md) nor the
+user guide offers a scroll-bar tap.
 
 Why it matters: the T5S3 has no Up key, and a scroll-bar tap was the most direct way back up a long
 list.
 
 Next: decide whether to add a scroll-track interaction to FreeInkUI's list (an SDK change that would
-cover every FreeInkUI list) or remove the claim from [Touch Gestures](../touch-gestures.md).
+cover every FreeInkUI list).
 
 ## Long-press discoverability
 
@@ -183,9 +190,12 @@ the only way to hold Back, Confirm, Left or Right on the touch boards
 (`ActivityManager::dispatchHintStripTap()`), and some actions exist only as a hold, for example
 long Back to go Home from a list screen (`UiListActivity`).
 
-Partly done: `FileBrowserActivity` names its hold action on the hint box
-(`STR_LIST_PAGE_NEXT_OR_OPTIONS`, "» / Options"), and the gesture overview marks taps and holds for
-the reader zones.
+Partly done: `FileBrowserActivity` names most of its hold actions in the "short / long" form:
+"» / Options" (`STR_LIST_PAGE_NEXT_OR_OPTIONS`) where Options is the hold of Right, "Right / Options"
+in the cover grid, and in the Library "Up / Tab" / "Down / Tab" on the side hints
+(`STR_DIR_UP_OR_TAB`, `STR_DIR_DOWN_OR_TAB`). The gesture overview marks taps and holds for the
+reader zones. The browser still has two unnamed holds: long Back goes Home from a Books folder or an
+opened author (the box says Back), and long Confirm on an EPUB opens it with a KOReader pull when
+credentials are set (the box says Open).
 
-Next: pick one labelling convention for hold actions on hint boxes (the browser's
-"short / long" form) and apply it wherever a screen has a hold-only action.
+Next: apply the browser's "short / long" form wherever a screen has a hold-only action.

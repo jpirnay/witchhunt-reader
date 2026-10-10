@@ -20,7 +20,9 @@ Flashing is done from the browser — no toolchain or driver install needed. Use
 - Speed - rendering should be *fast*
 - CSS layout - a lot of effort have gone into rendering 
 - Memory - where others fail Witch Reader still works
-- Proper KOReader Snychronisation
+- Proper KOReader Synchronisation - a synced position lands on the exact page, in both directions
+- A Library with Books, Recent, New and Authors tabs, each shown as filenames, details (title, author, series, progress) or a grid of covers
+- SD-card fonts in every size they were built at, plus enlarged large-print sizes up to 26 pt
 - Additional sleep screens support (information overlay, transparent pictures over current reader screen)
 - Clock-Support for all supported devices
 - Weather information panel

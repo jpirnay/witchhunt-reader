@@ -30,9 +30,10 @@ cd test/build
 cmake --build . -j 8
 ctest -j 8 --output-on-failure
 ctest -R EpubPipeline          # one suite by name
+cmake --build . --target LibraryIndexTest && ./library_index/LibraryIndexTest   # build and run one executable
 ```
 
-GoogleTest is fetched on the first configure. `test/README` has the per-suite commands and the offline KOReader sync checks, which the host toolchain cannot build.
+A suite lives in its own directory under `test/` and is registered by an `add_subdirectory()` line in `test/CMakeLists.txt`; a new suite needs both. GoogleTest is fetched on the first configure. `test/README` has the offline KOReader sync checks, which the host toolchain cannot build.
 
 **On Windows**, build and run from Git Bash with the MSYS2 UCRT64 toolchain (`C:\msys64\ucrt64\bin`) on `PATH`, not from PowerShell: the compiler there depends on DLLs from that directory and fails silently without them. The test executables link their C++ runtime statically, so they run whatever else is on `PATH`. One tool does not build on Windows: `epub_build_inventory` needs `dlfcn.h` and `execinfo.h`. Pass `-k 0` to Ninja so the rest of the suite builds anyway:
 
@@ -77,7 +78,7 @@ $B/epub_pipeline/epub_build_inventory book.epub /tmp/cache-c /tmp/inventory --ar
 python3 test/epub_pipeline/inventory_report.py $B/epub_pipeline/epub_build_inventory /tmp/inventory/spine_3.txt > report.md
 ```
 
-**On a device**, flash `env:default` and read the `[MEM]`, `Reader mem[...]`, `FBUF` and `createSectionFile ... arena:` lines from the serial log. For a deeper trace, define a local env in `platformio.local.ini`, which is git-ignored and loaded through `extra_configs`. Name the build in `CROSSPOINT_VERSION`, which only `env:default` gets automatically and which the boot log echoes:
+**On a device**, flash `env:default` and read the `[MEM]`, `Reader mem[...]`, `FBUF` and `createSectionFile ... arena:` lines from the serial log. For a deeper trace, define a local env in `platformio.local.ini`, which is git-ignored and loaded through `extra_configs`. Name the build in `CROSSPOINT_VERSION`, which the boot log echoes; `scripts/git_branch.py` supplies it only for `env:default` and the `*_gh_release_rc` envs, so any other env sets it itself:
 
 ```ini
 [env:memtrace]
@@ -99,6 +100,18 @@ Flash firmware:
 ```sh
 pio run --target upload
 ```
+
+To write an image that is already built without PlatformIO re-scanning the project first, use `bin/flash` (bash, including Git Bash) or `bin\flash.ps1` (PowerShell). Both call esptool on `.pio/build/<env>/` directly, warn when sources are newer than the image, and keep retrying until the device appears, so you can start the script and then wake the device:
+
+```sh
+./bin/flash                     # env "default"
+./bin/flash -e x4pro -p COM6    # another env, a named port (or set FLASH_PORT)
+./bin/flash -a                  # app image only; bootloader and partition table untouched
+./bin/flash -f saved.bin        # flash this app image instead of the env's firmware.bin
+./bin/flash -n                  # print the esptool command and exit
+```
+
+With `-f`, the bootloader and partition table still come from the env's build directory; if it has none, the script writes the app alone and says so. `-w SECONDS` sets how long it waits for the device (0 fails at once). Like a PlatformIO upload, the scripts leave the NVS partition, and with it the settings, alone.
 
 Open serial monitor:
 
@@ -135,7 +148,7 @@ Local runs are useful for validating:
 
 - workflow wiring and job conditions
 - PlatformIO release builds
-- release-notes generation via `scripts/generate_release_notes.py`
+- release-notes generation via `scripts/generate_release_notes.py` (`release_candidate.yml`)
 
 Local `act` runs do **not** publish GitHub releases or upload release assets.
 Those steps are skipped when `ACT=true`, so final release publication still

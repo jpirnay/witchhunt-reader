@@ -12,8 +12,9 @@ hundred never-opened EPUBs (~300 ms of OPF parse each) is unknown.
 
 - Where: the `[LIB]` log lines from `FileBrowserActivity::stepLibraryBuild` (start, walk, each publish,
   done with heap); `scripts/script_profile_mem.sh` for the heap.
-- Measure: the first build, the walk after a reboot with nothing to parse, a rebuild with no changes,
-  and publish time at 2,000 authors.
+- Measure: the first build; a rebuild after a change that adds no book (walk, join and publish, nothing
+  to parse); Refresh library, which looks up every author again (from `details.bin` where it is
+  cached); and publish time at 2,000 authors.
 - Also check: the screen has no `skipLoopDelay()`, so once input has been idle a second the main loop
   light-sleeps about 50 ms between build steps. If the first build is slow, hold the loop awake while
   New or Authors builds.
@@ -40,11 +41,26 @@ change in a folder nobody opens goes unnoticed until Refresh library.
 
 ## Build failures are silent
 
-A build that fails (a write error, out of memory, no framebuffer to lend) logs and is tried again on
-the next New or Authors visit, without telling the reader.
+A build that fails (a write error, out of memory, no framebuffer to lend) logs, without telling the
+reader; it runs again on a later New or Authors visit while a reason to build holds (next item).
 
 - Where: `FileBrowserActivity::stepLibraryBuild`.
 - Next step: show a message once per boot when a build fails.
+
+## An interrupted build resumes only after a card change
+
+A build that stops early -- the screen left (opening a book is enough), a failure, no framebuffer to
+lend -- runs again on the next New or Authors visit only if `LibraryFreshness::stale` still finds a
+reason. A build started for a missing index, the other hidden-files setting or Refresh library leaves
+none once it has published: the index is valid, matches the setting, and there is no change marker. The
+authors it had not looked up yet stay under *Not yet indexed* until the card changes. On a first build
+of a large card, leaving before the last author is read leaves Authors that way.
+
+- Where: `FileBrowserActivity::onExit` (its comment says the next visit walks again),
+  `stepLibraryBuild`, `LibraryFreshness::stale`, `LibraryStaleness::Facts`.
+- Next step: make unresolved authors a reason to build. Pending authors file last, so the index's
+  last author record having `library::AUTHOR_PENDING` says so in one read; add a
+  `LibraryStalenessTest` case for it.
 
 ## New's covers wait for every author
 
@@ -63,8 +79,9 @@ not depend on authors.
   (`FileBrowserModel::orderAuthorBooks`). Cheap fallback: order by `pathOff`, which groups by folder.
 - **Remove inside an opened author** deletes the book, but its row stays until the rebuild the removal
   starts finishes (`FileBrowserModel::openAuthor` does not check each book exists). Mark as read's
-  move to `/COMPLETED` does not start that rebuild at all (`FileBrowserActivity::doMarkAsRead`, the
-  Stay branch).
+  move to `/COMPLETED` marks the card changed, so the next visit to New or Authors rebuilds, but the
+  Stay branch of `FileBrowserActivity::doMarkAsRead` starts no build: the opened author keeps the
+  book's old path until then.
 - **Move to folder and New folder** are not offered on New and Authors: `moveToFolder` appends the
   row's entry, which is a path on those lists. Offer them once it appends the file's name.
 - **A corrupt author record**: `FileBrowserModel::openAuthor` reserves `author.count` slots unchecked;

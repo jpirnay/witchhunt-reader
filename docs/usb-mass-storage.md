@@ -115,7 +115,11 @@ Two properties are load-bearing:
 rewritten anything on the card, so every cache the firmware holds — FAT state,
 covers, section caches, the open book's progress — is suspect. There is no honest
 way to resume, and constructing the next activity would read a filesystem that is
-not mounted. `Activity::requiresExclusiveStorageLoop()` is what enforces this:
+not mounted. For the same reason `beginUsbDrive()` records a content change
+(`HalStorage::noteContentChange`) before it detaches the volume, while the card is
+still the firmware's to write. The marker it leaves
+(`/.crosspoint/content-changed`) makes the Library rebuild its book index on the
+next visit to New or Authors, even if the power goes before the session ends. `Activity::requiresExclusiveStorageLoop()` is what enforces this:
 while it is true, `ActivityManager::loop()` skips pending-action processing and
 the clock tick, and `loop()` in `main.cpp` skips sleep, screenshots, shortcuts and
 navigation.

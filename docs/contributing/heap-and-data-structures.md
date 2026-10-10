@@ -31,6 +31,11 @@ Short-lived allocations repeated inside a long pass (per image, per line, per pa
 - Never grow a vector inside a render or per-element callback.
 - A growth that cannot allocate calls `abort()`. Where a vector can grow on a tight heap, check for the block first (see `ParsedText::addWord`).
 
+Code that runs on every loop pass must not allocate at all, pressed or not. Two helpers in `src/util/` cover the usual offenders, and `ButtonNavigator` uses both:
+
+- `InlineList<T, Capacity>` instead of returning a short `std::vector`: an inline array plus a count, returned by value. An initialiser longer than the capacity does not compile.
+- `FunctionRef<Sig>` instead of a `std::function` parameter for a callback that runs before the call returns: an object pointer plus a call thunk. On the C3 a `std::function` keeps only 8 bytes inline, so a lambda with three captures already goes to the heap. Never store a `FunctionRef`; a stored callback stays a `std::function`.
+
 ## The ZIP central directory — why no `unordered_map`
 
 Early versions of `ZipFile` had `unordered_map<string, FileStatSlim> fileStatSlimCache` populated by `loadAllFileStatSlims()`. For a 3000-entry EPUB this consumed ~200 KB:

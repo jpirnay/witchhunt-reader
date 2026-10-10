@@ -135,6 +135,12 @@ Click **File Manager** to access file management features.
 - **All Other Files** are not highlighted and indicated with a 📄 icon
 - Click on a folder name to navigate into it
 - Use the breadcrumb navigation at the top to go back to parent folders
+- Files and folders whose names start with `.` are hidden unless **Show Hidden Files** is on
+  in the device settings. Even then, a file or folder whose own name starts with `.` cannot be
+  downloaded, renamed, moved or deleted from here; only what is inside such a folder can.
+- The files holding saved WiFi, OPDS and KOReader passwords, and the `System Volume Information`
+  and `XTCache` folders, are never served. See
+  [Protected paths](./webserver-endpoints.md#protected-paths).
 
 <img src="./images/wifi/webserver_files.png" width="600">
 
@@ -185,9 +191,10 @@ This is useful for organizing your library by genre, author, series or file type
 ### Settings
 
 The Settings page lists the same settings as the Settings screens on the device, grouped by
-category. Change a value and save. Two cards at the end manage the **Wi-Fi Networks** and **OPDS
-Servers** the device remembers. Saved passwords are never shown back; leave the password field
-empty when editing to keep the stored one. See
+category. Change a value and save. The font size lists show the sizes the selected font family
+offers, so after you change a family and save, the page reloads them. Two cards at the end manage
+the **Wi-Fi Networks** and **OPDS Servers** the device remembers. Saved passwords are never shown
+back; leave the password field empty when editing to keep the stored one. See
 [Web Settings](../USER_GUIDE.md#376-web-settings-wifi--opds) in the User Guide.
 
 ### Reading Stats
@@ -258,9 +265,14 @@ When you are finished:
 1. Press the **Back** button on your CrossPoint Reader
 2. The web server will automatically stop
 3. WiFi will disconnect to conserve battery
-4. You'll return to the previous screen
+4. The device restarts quietly and opens the Home screen
 
-Your uploaded files will be immediately available in the file browser!
+**Back** also works while an upload is still running, from the File Manager or the Font Manager:
+the upload is abandoned, so send that file again later. A file being copied over WebDAV finishes
+arriving before the device leaves.
+
+Your uploaded books show up in the Library's **Books** tab straight away. **New** and **Authors**
+pick them up the next time you open one of those tabs, when the Library rebuilds its index.
 
 ---
 

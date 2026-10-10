@@ -2,7 +2,7 @@
 
 Status: open items as of 2026-10-07. Collected from the list-input harmonization design (now `docs/design/list-input-harmonization.md`).
 
-The scheme (design section 1) is live on the `MenuListActivity` / `UiListActivity` / `TabbedUiListActivity` families, the OPDS catalog and format picker and `OpdsSettingsActivity`. The items below are what is left. Each must end flash-negative (the C3 partition is about 95 % full) or name what it buys instead.
+The scheme (design section 1) is live on the `MenuListActivity` / `UiListActivity` / `TabbedUiListActivity` families (except the file browser, below) and the OPDS catalog and format picker. The items below are what is left. Each must end flash-negative (the C3 partition is about 95 % full) or name what it buys instead.
 
 ## Screens with declared pairs still on their own input
 
@@ -10,9 +10,9 @@ Starred pages, Global bookmarks and the Wi-Fi network list still use `ButtonNavi
 
 - Where: `src/activities/reader/StarredPagesActivity.cpp`, `src/activities/home/GlobalBookmarksActivity.cpp`, `src/activities/network/WifiSelectionActivity.cpp`.
 - Target mapping: Bookmarks and Starred pages Rename / Delete; Wi-Fi Options (saved network) / Rescan. Rows move onto `fui::list`.
-- The file browser list views and folder picker (`FileBrowserActivity`, derived from `UiListActivity`) run their own event loop and call `ButtonNavigator::onNextList`. Target: list views none / Options with long Confirm for the KOReader pull; folder picker New folder / Move here, through a declaration.
+- The file browser list views and folder picker (`FileBrowserActivity`, derived from `UiListActivity`) override `navigateButtons()` and `handleCustomInput()` with their own event loop and call `ButtonNavigator::onNextList`. Target: list views none / Options with long Confirm for the KOReader pull; folder picker New folder / Move here, through a declaration. In the Library the declaration is `tabbed`: long Up/Down already switch tabs there, and the tab bar has no focus position until the browser is on the controller (`library.md`, "Tabs on button-only boards").
 - Home's list layout (`HomeActivity`) uses `ButtonNavigator::nextIndex` directly. Target: buttons through `ListController`; rows stay theme-drawn.
-- Next step: one PR for the three declared-pair screens, one for the file browser, one for Home. Each updates its USER_GUIDE section (3.1, 3.3, 3.4).
+- Next step: one PR for the three declared-pair screens, one for the file browser, one for Home. Each updates the USER_GUIDE sections of the screens it changes: Home Screen; Library Screen and Recent, New and Authors; and the swipe row in 5.2, which still says a swipe does nothing on Bookmarks, Starred pages and Wi-Fi networks.
 
 ## The custom painters
 
@@ -27,7 +27,7 @@ The EPUB and XTC chapter lists and the Markdown TOC (`EpubReaderChapterSelection
 - Delete `BaseTheme::drawList` and `LyraTheme::drawList` (and the `std::function` row thunks) after the last caller above moves. `ListTouchBand` stays while the Home carousel records a band.
 - Delete `ButtonNavigator`'s list functions (`onNextList` / `onPreviousList`, `onListNav`, `onListPageNav`, the double-tap log). `onPressAndContinuous` and friends stay for the slider, keyboard and frontlight panel.
 - Delete the injected-button fallback in `ActivityManager::dispatchListSwipe` once every list screen overrides `Activity::pageList` through its controller.
-- Docs: add a developer page for the scheme and how to declare a list (none exists yet), remove stale rows in `docs/touch-gestures.md`, and do a final pass on USER_GUIDE 5.2 and 5.7. USER_GUIDE already has "Moving through lists".
+- Docs: add a developer page for the scheme and how to declare a list (`docs/contributing/architecture.md` only names the bases), check the "Swipe up / down over a list: Page the list" row in `docs/touch-gestures.md` (true only once every list pages on a swipe), and do a final pass on USER_GUIDE 5.2 and 5.7. USER_GUIDE already has "Moving through lists".
 
 ## Open questions
 

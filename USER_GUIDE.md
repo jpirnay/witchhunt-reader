@@ -156,7 +156,7 @@ Under each book's cover is a line of its reading history, such as *Read 3h 18m o
 
 **Choosing what is on the Home screen:** **Settings → Display → Home screen** has one switch each for Library, Reading stats, Bookmarks, OPDS browser, File transfer and Weather. Everything is on by default. Anything you switch off moves behind a **More** row above Settings, so it is still one step away. More only appears when something has been moved there. Settings itself cannot be switched off, because it is where you undo the choice.
 
-**Correcting a book's title or author:** a metadata file next to an EPUB with the same name (`Some Book.opf` beside `Some Book.epub`) takes precedence over the details inside the book. The metadata editor plugin in the web interface writes one for you. The Home screen and the Library's Recent tab notice when that file is added, changed or removed, over USB or from the plugin, and show the new details without the book having to be opened first.
+**Correcting a book's title or author:** a metadata file next to a book with the same name (`Some Book.opf` beside `Some Book.epub`) takes precedence over the details inside the book. It works for every format the reader opens: EPUB, XTC, and TXT and Markdown, which have no details of their own. The metadata editor plugin in the web interface writes one for you, including the name the author is sorted under in the Library's **Authors** tab (**Sort author as**). When that file is added, changed or removed, over USB or from the plugin, the Library's Details and Covers views show the new details without the book having to be opened first, and so does the Home screen for an EPUB.
 
 ### 3.2 Reading Mode
 
@@ -177,11 +177,12 @@ Hold **Up** or **Down** to go to the previous or next tab (their button hints re
 
 The Books tab is a full-featured browser for your books and the folders they are in. A folder with no book anywhere in it is not listed, so folders left behind by a sync or holding only covers do not get in the way; **All Files** still shows them, and so does the folder picker of **Move to folder**. A folder made with **New Folder** here opens straight away. It lists the books the reader can open (EPUB, XTC/XTCH, TXT and Markdown) and nothing else: a cover image or `.opf` file saved beside a book (see [sidecar files](docs/sidecar-files.md)) is not listed on its own, so a book downloaded from an OPDS catalogue shows up once. Images and every other file are in **Settings → System → Tools → All Files**.
 
-* **Navigate List:** Use **Left** (or **Volume Up**), or **Right** (or **Volume Down**) to move the selection cursor up and down through folders and books. Long-pressing these buttons scrolls a full page at a time.
-* **Open Selection:** Press **Confirm** to open a folder or read a selected book.
+* **Navigate List:** **Up** and **Down** move the selection one row; tap either twice quickly to jump a screenful. In a folder longer than one screen, **Left** and **Right** page back and forward a screenful at a time (their hints read **« Page** and **» / Options**). The Covers view moves differently; see [Book view](#book-view).
+* **Open Selection:** Press **Confirm** to open a folder or read a selected book. If KOReader sync is set up, a long **Confirm** on an EPUB fetches your progress from the server before the book opens.
 * **Options menu:** Hold **Right** (the page-forward button) to open the menu for the selected item. In a folder short enough to fit on one screen, a short press of Right opens it too. On a device without a Confirm key, such as the X4 Pro, **Confirm** opens the menu instead, and a tap on a row opens the item. The button hints always show which button does what.
-  * For a book: **Open**, **Mark as read**, **Info**, **Delete Book Cache**, **Remove**, **Move to folder**, **New Folder**, **Search** and **Search all folders**.
-  * For a folder: **Open**, the sort and visibility options, **Search**, **Search all folders**, **New Folder** and **Remove**, which deletes the folder and everything in it.
+  * The menu starts with the display options: **Sort By**, **Sort Direction**, **Show Hidden Files**, **Show File Extensions** and **Book view**.
+  * For a book: **Open**, **Fetch Progress & Open** (an EPUB, when KOReader sync is set up), **Mark as read**, **Info** and **Delete Book Cache** (not for TXT and Markdown), **Remove**, **Move to folder**, **New Folder**, **Search** and **Search all folders**.
+  * For a folder: **Open**, the display options, **Search**, **Search all folders**, **New Folder** and **Remove**, which deletes the folder and everything in it.
 
 #### Book view
 
@@ -220,25 +221,27 @@ Folders with many entries are handled via an SD-card-backed index so memory use 
 
 ### 3.4 Recent, New and Authors
 
-The other three tabs list books from wherever they are on the card, with the same three views as the Books tab: **Covers**, **Details** and **Filenames**, chosen in the options menu under **Book view**. Each tab remembers its own choice. The keys are the Books tab's too: in Covers, **Up**/**Down** move a row and **Left**/**Right** one book, wrapping round at the ends; hold **Right** for the options menu. Selecting a book opens it at the last read position, and a long **Confirm** on an EPUB fetches your KOReader progress first. Closing the book brings you back to the tab, and the row, you opened it from.
+The other three tabs list books from wherever they are on the card, with the same three views as the Books tab: **Covers**, **Details** and **Filenames**, chosen in the options menu under **Book view**. Each tab remembers its own choice. The keys are the Books tab's too: in Covers, **Up**/**Down** move a row and **Left**/**Right** one book, wrapping round at the ends; hold **Right** for the options menu. Selecting a book opens it at the last read position, and if KOReader sync is set up, a long **Confirm** on an EPUB fetches your progress first. Closing the book brings you back to the tab, and the row, you opened it from. Recent and New start in Covers, Authors in Details.
 
-* **Recent** lists the books you opened last, newest first, as covers unless you choose otherwise. **Remove from recents** in its options menu takes a book off the list; it stays on the card.
-* **New** lists the ten books added to the card most recently, newest first, as covers unless you choose otherwise. A book only moved to another folder does not count as new.
+* **Recent** lists the books you opened last, newest first. **Remove from recents** in its options menu takes a book off the list; it stays on the card.
+* **New** lists the ten books added to the card most recently, newest first. A book only moved to another folder does not count as new.
 * **Authors** lists the authors of the books on the card surname first, as "Pratchett, Terry", each with the number of books by them. Open an author to see their books, by series and then title, under the author's name as the books spell it; **Back** returns to the authors. A book that names no author is under **Unknown author**.
 
 New and Authors come from an index of the books on the card, kept on the card in `/.crosspoint/library/`. It is kept from one session to the next, and brought up to date when you open either tab after the card has changed: a book added or removed on the device, through the web interface, Calibre or an OPDS catalogue, or over USB. Books copied onto the card in a computer's card reader are noticed when the Books tab shows one of them or the folder they are in; anything it misses, **Refresh library** in the options menu of New or Authors picks up. While the index is brought up to date the header shows **Indexing**, the tab keeps showing what it had, and the lists fill in as it goes. A book that has never been opened has to be read once for its author, so the first time takes a while on a large card; books not read yet are under **Not yet indexed** until then. The author is the one an `.opf` metadata file beside the book names, if there is one, and that file's sort name ("file-as", such as "Pratchett, Terry") is how the author is listed. Without one, the last word of the name comes first. Up to 2,000 books are indexed.
 
-The options menu on these tabs has what you can do with the selected book: open it, mark it as read, show its details, delete its cache, **Remove** (Recent: **Remove from recents**), and **Go to folder**, which opens the Books tab in the folder the book is in, with the book selected. On New and Authors it also has **Refresh library**, which builds the index again and reads every author anew. Sorting and searching are on the Books tab only.
+The options menu on these tabs has what you can do with the selected book: open it, mark it as read, show its details, delete its cache, **Remove** (Recent: **Remove from recents**), and **Go to folder**, which opens the Books tab in the folder the book is in, with the book selected. On New and Authors it also has **Refresh library**, which builds the index again and reads every author anew. Its display options are **Show File Extensions** and **Book view**: sorting, hidden files and searching are on the Books tab only.
 
 ### 3.5 Book Info Screen
 
-The Book Info screen shows full metadata for a book: cover image, title, author, description (paged if long), and reading statistics. It is accessible from the context menu in Browse Files or from the reader menu while reading.
+The Book Info screen shows full metadata for a book: cover image, title, author, description (paged if long), and reading statistics. Open it with **Info** in the Library's options menu, or from the reader menu while reading.
 
 ### 3.6 File Transfer Screen
 
 The File Transfer screen allows you to upload new e-books to the device. When you enter the screen, you'll be prompted with a WiFi selection dialog and then your X4 will start hosting a web server.
 
 See the [webserver docs](./docs/webserver.md) for more information on how to connect to the web server and upload files.
+
+The web server has no password, so it keeps away from what it should not touch: the files holding your saved Wi-Fi, OPDS and KOReader passwords can never be downloaded or changed, and folders whose names start with a dot, such as the reader's own `/.crosspoint`, can be opened only when **Show Hidden Files** is on. **Back** leaves the screen even while the web page is uploading a book or a font; the upload is cancelled.
 
 > [!TIP]
 > Advanced users can also manage files programmatically or via the command line using `curl`. See the [webserver docs](./docs/webserver.md) for details.
@@ -314,8 +317,8 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
   - "Inverted" - Inverted black & white
   - "Adaptive" - Stretches the picture between its own darkest and lightest points
   - "Equalize" - Spreads the tones by how much of the picture carries them; stronger than Adaptive, and the better choice for a mostly dark cover with a small bright title
-- **Sleep Screen Overlay**: Tint overlay applied on top of the sleep image (useful for dimming a cover or overlay image):
-  - "Off" (default), "White", "Gray", "Black"
+- **Sleep Screen Info Overlay**: When the device sleeps from a book, a band along the bottom of the sleep image with the book's title, author and progress (chapter, page and percentage, counted as the status bar counted them when you closed the book):
+  - "Off" (default), or the band's colour: "White", "Gray", "Black"
 - **Sleep Image Pick Mode**: How to cycle through images in the Custom sleep screen:
   - "Random" (default) - Pick a random image each time
   - "Sequential" - Cycle through images in order
@@ -394,9 +397,10 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
   - Once two or more layouts are on, the keyboard shows a globe key that switches to the next one.
   - One Latin layout always stays on, because web addresses and passwords need one; its row then reads "Default" and cannot be switched off.
   - On the keyboard, hold **Confirm** on a key (or long-press it on a touch screen) for its alternate letter, such as an accented one or Ukrainian ґ and the extra Kazakh letters, or for the other case. Holding **Confirm** on Delete clears the whole text. Shift applies to the next letter only, and `-`, `=`, `.` and `,` are on the symbols page (**?123**).
-- **Show Hidden Files**: Show files and folders whose names start with `.`. "ON" / "OFF"
-- **Show File Extensions**: Show file extensions in the file browser. "ON" / "OFF"
-- **Book view**: How the Library's [Books](#33-library-screen) tab shows books. "Filenames" / "Details" / "Covers"
+- **File Visibility** (submenu):
+  - **Show Hidden Files**: Show files and folders whose names start with `.`, in the Library's Books tab, All Files and the web interface's file manager. "ON" / "OFF"
+  - **Show File Extensions**: Show file extensions in the Library and All Files. "ON" / "OFF"
+  - **Book view**: How the Library's [Books](#33-library-screen) tab shows books. "Filenames" / "Details" / "Covers"
 
 **Network**:
 - **WiFi Networks**: Add, remove, and connect to WiFi networks. If WiFi was switched on here, leaving the screen restarts the device quickly and returns to Settings. That frees the memory WiFi used; every screen that uses WiFi does the same.
@@ -413,7 +417,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
   - **Detect Timezone**: Auto-detect timezone via IP geolocation (requires WiFi).
   - **Sync Time**: Sync the clock via NTP (requires WiFi). Afterwards the device restarts quickly and returns to Clock Settings, like every other screen that uses WiFi.
 - **Weather Settings**: Configure the Open-Meteo weather panel shown on the Home Screen. **Location** searches for a city: pick one of the matches with **Confirm**, or press **Back** to keep the current location. A search with no matches says so instead of returning silently.
-- **All Files**: Browse every file on the SD card, not just books: images, cover and `.opf` files, firmware images and anything else. It works like the Library's [Books](#33-library-screen) tab: **Confirm** opens a book or image, and on any other file it opens the menu, where you can **Move to folder** or **Remove** it. Images offer **Set as sleep screen**. Moving or removing a book here moves or removes that file only, not the cover and `.opf` beside it. **Back** at the top folder returns to Settings.
+- **All Files**: Browse every file on the SD card, not just books: images, cover and `.opf` files, firmware images and anything else. It works like the Library's [Books](#33-library-screen) tab: **Confirm** opens a book or image, and on any other file it opens the menu, where you can **Move to folder** or **Remove** it. Images offer **Set Sleep**, which makes the image your sleep screen. Moving or removing a book here moves or removes that file only, not the cover and `.opf` beside it. **Back** at the top folder returns to Settings.
 
 **System**:
 - **Clear Reading Cache**: Clear the internal SD card cache.
@@ -524,9 +528,12 @@ docker compose up -d
 
 ##### Using sync while reading
 
-Press **Confirm** to open the reader menu, then select **Sync Progress**:
-- **Apply Remote** — jump to the progress stored on the server.
-- **Upload Local** — push the current position to the server.
+Press **Confirm** to open the reader menu and go to its **Sync** tab:
+- **Pull progress from other devices** — jump to the position stored on the server.
+- **Push progress from this device** — send the current position to the server.
+- **Compare progress with other devices** — show which side is further on and let you choose. A long **Confirm** while reading does the same.
+
+A synced position lands on the exact page, in both directions, when the page starts in text, and which side is further is decided by chapter and paragraph rather than by percentage. To fetch your progress before a book opens, hold **Confirm** on it in the Library, or choose **Fetch Progress & Open** in its options menu.
 
 ##### Automatic sync
 
@@ -559,7 +566,7 @@ The **Sleep Screen** setting controls what is displayed when the device goes to 
 
 The **Sleep Image Pick Mode** setting controls whether custom images are chosen **randomly** or **sequentially**.
 
-An optional **tint overlay** (Off / White / Gray / Black) can be applied on top of the sleep image to dim or tint it.
+When the device goes to sleep from a book, **Sleep Screen Info Overlay** can add a band along the bottom of the sleep image with the book's title, author and progress, in white, grey or black.
 
 #### Cover settings
 
@@ -573,7 +580,9 @@ When using **Cover** or **Cover + Custom**, two additional settings apply:
 To use custom sleep images, set the sleep screen mode to **Custom** or **Cover + Custom**, then place images on the SD card:
 
 - **Multiple Images (recommended):** Create a `.sleep` directory in the root of the SD card and place any number of `.bmp` or `.png` images inside. (A directory named `sleep` is also accepted as a fallback.)
-- **Single Image:** Place a file named `sleep.bmp` in the root directory. Used as fallback if no valid images are found in the `.sleep`/`sleep` directory.
+- **Single Image:** Place a file named `sleep.bmp` or `sleep.png` in the root directory. While it is there, it is shown instead of the images in the `.sleep`/`sleep` directory.
+
+If the picked image cannot be shown, for example a damaged PNG, the next one in the folder is tried, up to three in all, before the default sleep screen is shown.
 
 > [!TIP]
 > For best results:
@@ -604,9 +613,9 @@ This feature can be disabled in the **[Controls Settings](#373-controls)** to he
 
 
 ### System Navigation
-* **Return to Home:** Press the **Back** button to close the book and return to the **[Home](#31-home-screen)** screen.
-* **Return to the Library:** Press and hold the **Back** button to close the book and return to the **[Library](#33-library-screen)**'s Books tab, in the book's folder.
-* **Reader Menu:** Press **Confirm** to open the reader menu, which includes: **[Table of Contents](#6-chapter-selection-screen)**, bookmarks, sync progress, reading statistics, quick per-book overrides (font, images, hyphenation, bionic reading…), take screenshot, and more. Its entries are grouped into tabs. While the tab bar is selected, **Confirm** moves to the next tab, and its button hint names that tab. **Hold Up / Down** to switch tabs: each opens where you left it. **Hold Back** to close the book and return Home, as **Go Home** does; changes made in the menu are kept.
+* **Leave the book:** Press **Back** to close the book and return to where you opened it: the **[Home](#31-home-screen)** screen, or the **[Library](#33-library-screen)** at the tab, the folder or author, and the row you opened it from. Holding **Back** does the same, unless you give the long press an action of its own under **[Controls](#373-controls)**.
+* **Back after a link:** After you follow a link in the book, such as a footnote, **Back** first returns to the page you followed it from, step by step for the last three links. These steps are kept when the device sleeps or you close the book there.
+* **Reader Menu:** Press **Confirm** to open the reader menu, which includes: **[Table of Contents](#6-chapter-selection-screen)**, bookmarks, sync progress, reading statistics, quick per-book overrides (font, images, hyphenation, bionic reading…), take screenshot, and more. Its entries are grouped into tabs. While the tab bar is selected, **Confirm** moves to the next tab, and its button hint names that tab. **Hold Up / Down** to switch tabs: each opens where you left it. **Hold Back** to close the book as **Go Home** does; changes made in the menu are kept.
 * **Your place is kept by paragraph as well as by page.** If a book is laid out differently the next time you open it, for example after you changed the font size from outside the book or after a firmware update re-indexed it, it opens at the paragraph you were reading rather than at a page number scaled to the new length.
 
 ### Supported Languages
@@ -669,8 +678,9 @@ costs one more tap instead of an action to undo, and on e-paper the highlight mo
 the only feedback there is. If you would rather a row opened on the first tap, set
 **Settings → Controls → Tap Action** to *Activate immediately*.
 
-**Tabs are a single tap.** Tapping Display / Reader / Controls / System in Settings, or
-Navigation / Settings / Sync / Tools in the reader menu, switches category immediately —
+**Tabs are a single tap.** Tapping Display / Reader / Controls / System in Settings,
+Navigation / Settings / Sync / Tools in the reader menu, or Books / Recent / New / Authors in
+the Library, switches category immediately —
 you can already see which tab you are choosing, so there is nothing to confirm.
 
 **The button hints are tappable.** The labelled boxes along the bottom edge, and the side
@@ -682,16 +692,13 @@ you have configured. *Holding* a hint is the same as holding that button.
 | Tap a row, cover, folder or button hint | Select it; tap again to open it |
 | Hold a button hint | The same as holding that button |
 | Swipe up / down over a list | Page the list (on Bookmarks, Starred pages and Wi-Fi networks, a swipe does nothing for now) |
-| **Tap the scroll bar** above / below the thumb | Page back / forward |
 | Swipe **right from the left edge** | Back |
 | Swipe **down from the top edge** | Reading light panel |
 | **Hold the top-left corner** | Toggle the reading light — the same as in a book |
 
-The scroll-bar strip is wider than the thin bar you can see, so you do not have to hit it
-precisely. Tapping the thumb itself does nothing.
-
 > The LilyGo T5 S3 has a **Down** key but no **Up** key, so paging a list *backward* has no
-> physical button there — the scroll bar and the swipe are how you do it. They work on the
+> physical button there — a swipe is how you do it, or, on the lists that follow
+> [Moving through lists](#moving-through-lists), holding the **«** hint box. Swipes work on the
 > X4 Pro as well, which has both keys.
 
 ### 5.3 The reading page: taps and holds

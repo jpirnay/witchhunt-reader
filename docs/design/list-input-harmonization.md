@@ -182,16 +182,22 @@ touch: dispatchListTap ─▶ selectListRow ─▶ ListController::tapRow
        dispatchListSwipe ─▶ pageList     ─▶ ListController::page
 ```
 
-**`ListGrammar`** (`src/util/ListGrammar.{h,cpp}`) — pure logic, no Arduino, no hardware.
+**`ListGrammar`** (`src/util/ListGrammar.{h,cpp}`) — pure logic, no Arduino, no hardware. It reads
+a `Shape` (the declaration reduced to what the rules use) and an `Availability` (whether each declared
+action applies to the selected row), which the controller derives from the declaration and the host.
 
-- `ListCommand commandFor(Button, PressType, const ListDeclaration&, const ListState&)` returns
-  one of: `StepPrev`, `StepNext`, `PagePrev`, `PageNext`, `First`, `Last`, `TabPrev`, `TabNext`,
-  `Activate`, `ActivateLong`, `Back`, `Home`, `LeftAction`, `RightAction`, `None`.
-- `ListLabels labelsFor(const ListDeclaration&, const ListState&)` returns the six labels.
-- Index arithmetic: `stepIndex`, `pageIndex` (clamping; relative to the drawn window, R3), `firstSelectable`,
-  `lastSelectable`, all taking an optional selectable predicate. Replaces the list half of
+- `Result commandFor(Key, Press, const Shape&, const Availability&)` returns a `Command` —
+  `StepPrev`, `StepNext`, `PagePrev`, `PageNext`, `First`, `Last`, `TabPrev`, `TabNext`,
+  `Activate`, `ActivateLong`, `Back`, `Home`, `LeftAction`, `RightAction` or `None` — and how many
+  times to apply it (a `Double` on the default pair is two steps).
+- `Labels labelsFor(const Shape&, const Availability&)` says what each front Left/Right box shows
+  after its page glyph (`FrontLabel`: the step label, the declared action, or the glyph alone). The
+  controller composes the six labels from it.
+- Row arithmetic over `Rows` (row count, the drawn window, lead positions such as a tab bar, an
+  optional selectable predicate): `step`, `page` (the row to select and the new top, R3), `first`,
+  `last`, `fitsOnePage`, and `completesDoubleTap` (R5a). Replaces the list half of
   `ButtonNavigator`'s static helpers.
-- Both outputs derive from the one declaration; host tests pin them together.
+- Both outputs derive from the one shape; host tests pin them together.
 
 **`ListDeclaration`** — what a screen states once, as a `static constexpr` value:
 
@@ -228,8 +234,8 @@ not a base class.
   list screen. Walks the pending events, maps each through `ListGrammar`, applies movement, runs
   callbacks, and stops at the first event the screen acts on, leaving later presses for the next
   tick. Every state of a list screen must therefore read events, never levels. Matches Up/Down and
-  discards their PageBack/PageForward alias events. Events the grammar does not use go to an
-  optional `onOtherEvent` callback (Footnotes uses Power to select).
+  discards their PageBack/PageForward alias events. Events the grammar does not use go to the
+  host's `onListOtherEvent` (meant for Power on Footnotes, once that screen moves).
 - Hold-repeat for Left/Right paging after a Long, while `isPressed` stays true.
 - `page(int dir)` for swipes, `tapRow(int row)` for row taps (wraps `ListRowTap`).
 - `drawHints(renderer, backLabel, confirmLabel)` composes the labels into stack buffers per call
@@ -239,14 +245,21 @@ not a base class.
   `ListNav::top`). The loop task never writes render-owned `ListNav` fields otherwise.
 - Under 100 bytes per instance.
 
-**Base classes.** `UiListActivity`, `MenuListActivity` and `TabbedUiListActivity` each hold a
-`ListController`; their own `navigateButtons` / `handleButtons` go. Subclasses that customised
-input (the file browser) express it as a declaration instead.
+**Base classes.** `UiListActivity` holds one `ListController` and hosts it through a private
+adapter (`ControllerHost`) over position hooks (`positionCount`, `selectPosition`,
+`activatePosition`, `backFromPosition`, `homeFromList`, `switchTab`, …); a subclass passes its
+`ListDeclaration` to the constructor. `MenuListActivity` and `TabbedUiListActivity` derive from it
+and inherit the controller; `TabbedUiListActivity` declares `tabbed` and makes its tab bar
+position 0, a lead position above the rows. `UiListActivity::navigateButtons()` is one call to the
+controller. The file browser still overrides it with its own `ButtonNavigator` loop; moving it onto
+a declaration is open (`docs/future_work/list-input-harmonization.md`).
 
-**Touch hooks.** `ListController` backs `Activity::selectListRow` and `Activity::pageList` for
-the screen that owns it. Once every list screen overrides `pageList`, the injected-button
-fallback in `dispatchListSwipe` is deleted. `UiListActivity`'s own swipe handling stops
-scrolling the viewport and pages the selection, like every other list.
+**Touch hooks.** On a screen that draws its own rows (the OPDS catalog and format picker),
+`ListController` backs `Activity::selectListRow` (`tapRow`) and `Activity::pageList` (`page`).
+`UiListActivity` takes row taps through FreeInkUI's row action and `ListRowTap`, and sends a swipe
+to `ListController::page` from its own loop, so it pages the selection like every other list
+instead of scrolling the viewport. Once every list screen pages through its controller, the
+injected-button fallback in `dispatchListSwipe` is deleted.
 
 **`ButtonNavigator`.** Its list functions (`onNextList` / `onPreviousList`, `onListNav`,
 `onListPageNav`, the press-log double-tap logic) are deleted once the last list has moved.
@@ -294,16 +307,16 @@ render-published atomic, never a loop-task measurement — see `listWindow()` in
 
 | Screen | Left / Right short | Long Confirm | Notes |
 |---|---|---|---|
-| `MenuListActivity` family: file context menu, Home "More", settings submenus, clock, quick overrides, KOReader settings, weather menu and city results | default | — | |
+| `MenuListActivity` family: file context menu, Home "More", settings submenus, clock, quick overrides, KOReader settings, weather menu | default | — | |
 | Pickers: Enum, Font, Dictionary, Keyboard layouts, Language | default | — | |
 | Settings, reader menu | default | — | `tabbed` |
-| OPDS server list, OPDS settings, network mode, status bar, reading-stats book list, font download, finished book | default | — | |
-| Chapter / TOC lists (EPUB, Markdown, XTC), footnotes, KOReader sync result | default | — | footnotes: Power via `onOtherEvent` |
+| OPDS server list, OPDS settings, network mode, status bar, reading-stats book list, font download, finished book, weather city results | default | — | |
+| Chapter / TOC lists (EPUB, Markdown, XTC), footnotes, KOReader sync result | default | — | footnotes: Power via `onListOtherEvent` |
 | OPDS format picker | default | — | |
 | **OPDS catalog** | Search (feed has a search link) / Info (book selected) | — | closes #374; gains paging |
 | **Bookmarks, Starred pages** | Rename / Delete | — | |
 | **Wi-Fi networks** | Options (saved network; opens the forget prompt) / Rescan | — | |
-| **File browser**, list views | none / Options | KOReader pull, then open (Books mode) | Back: parent folder; cover grid out of scope |
+| **File browser**, list views | none / Options | KOReader pull, then open (Books mode) | Back: parent folder; in the Library `tabbed` (long Up/Down already switch tabs); cover grid out of scope |
 | **File browser**, folder picker | New folder / Move here | — | |
 | Home, list layout | default | — | buttons only; rows stay drawn by the theme (§2b) |
 
@@ -328,8 +341,9 @@ Not lists, so outside this design:
   several pages, selectable predicate with headers at the ends) → expected command **and**
   expected labels. Index arithmetic: wrap on step, clamp on page, paging by the drawn window, first/last
   selectable.
-- **Host:** R6 — the double-wait decision, extracted into a pure function if
-  `ButtonEventManager` cannot run in the host suite.
+- **Host:** R6 — the double-wait decision is the pure `doubleActionNeedsWait`
+  (`src/util/DoubleActionWait.h`, `test/double_action_wait/`), since `ButtonEventManager` does not
+  run in the host suite.
 - **Device:** a checklist per screen touched. X3 / X4: short and long on all six buttons,
   hold-repeat paging. T5S3 / X4 Pro: hint-box tap and long tap, side boxes, swipe, row tap. Lists
   opened from the reader (chapter list, reader menu, quick overrides) in portrait and both landscapes.
