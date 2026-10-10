@@ -6,16 +6,14 @@
 
 // One two-answer dialog, themed once, for every screen that asks a yes/no question.
 //
-// Four screens ask one: ConfirmationActivity (the standalone prompt), and an in-place WARNING /
-// WAITING_CONFIRMATION state inside ClearCacheActivity, ScreenRepairActivity and
-// OtaUpdateActivity. Those three cannot push the standalone prompt -- the question is one state of
-// their own machine, and each wants its own accept label ("Clear", "Start", "Update") rather than
-// a generic Confirm.
+// ConfirmationActivity draws it, and every question goes through that activity -- including the
+// ones that are one step of a screen's own work (Check for Updates, Clear Cache), which push it and
+// act on the result. So the keys, the hints and the touch targets are the same on every question.
 //
-// So the composition lives here instead of four times over. What is shared is the part worth
-// sharing: Screen::dialog() passes OptionDialogProps straight through WITHOUT substituting text
-// styles, so every caller would otherwise have to remember that an unset TextStyle measures
-// against font slot 0 and theme all five slots by hand.
+// Kept apart from the activity because it is the part with a trap in it: Screen::dialog() passes
+// OptionDialogProps straight through WITHOUT substituting text styles, so a caller would otherwise
+// have to remember that an unset TextStyle measures against font slot 0 and theme all five slots
+// by hand.
 namespace ConfirmDialog {
 
 // optionDialog's three text slots, top to bottom. Any may be null.
