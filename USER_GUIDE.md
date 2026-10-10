@@ -121,6 +121,14 @@ to hold it. A held **«** or **»** box pages once rather than over and over, so
 a long list quickly. Lists that work this way always show the side boxes **Up** and **Down**, so the
 T5 S3, which has no Up key, can always move up.
 
+### Questions
+
+When the reader asks before doing something (removing a book, clearing the cache, installing an
+update, saving a Wi-Fi password), the question has two buttons: the answer that leaves things as
+they are (**Cancel** or **No**) first, and the one that goes ahead (**Update**, **Clear**, **Yes**...)
+second. Press the front button whose hint names your answer, or tap the answer on a touch screen.
+**Back** always answers **Cancel**; on the X4 Pro and the T5 S3, so does holding the Home key.
+
 ### Taking a Screenshot
 When the Power Button and Volume Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`.
 
