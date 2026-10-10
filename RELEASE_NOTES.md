@@ -63,6 +63,10 @@ Everything since 2.37. Your books have one Library screen, with tabs for Recent,
 - **On/off settings on Customise Status Bar and the finished-book screen are switches** instead of "Show"/"Hide" and "On"/"Off" words.
 - **A weather city search with no matches now says so** instead of returning to the settings without a word.
 
+### Updates
+
+- **Check for Updates shows what a new release brings.** Before you choose **Update**, the dialog now shows the release's title and the first few lines of its release notes under the version numbers, instead of the version numbers alone.
+
 ### Reader menu
 
 - **Sync tab: Compare is a visible entry.** Next to Pull and Push, the Sync tab now offers "Compare progress with other devices", the same compare-then-choose flow a long Confirm press starts in the reader.
@@ -82,6 +86,9 @@ Everything since 2.37. Your books have one Library screen, with tabs for Recent,
 - **Fix: anyone on the network could download your saved Wi-Fi passwords while File Transfer was running.** The web interface checked only the last part of a file's path, so the files in `/.crosspoint` holding the Wi-Fi, OPDS and KOReader passwords could be fetched by name, and the plugins' write requests could overwrite anything in that folder. Every part of a path is now checked. The three password files, and anything in the card's system folders, can never be downloaded or changed. Folders whose names start with a dot, such as `/.crosspoint`, can be opened only when **Show Hidden Files** is on, as the file list already showed them, and a folder or file whose own name starts with a dot can never be downloaded, overwritten, renamed, moved or deleted. Over WebDAV, nothing inside a dot folder can be downloaded or changed, whatever that setting.
 - **Back leaves File Transfer during a slow upload.** A font upload, or a book the Files page sent the slower way (its fallback when the quick connection fails), kept the screen from responding to Back until the upload finished, which on a slow connection could take minutes. Back now cancels such an upload and deletes the part that arrived.
 - **Fix: a refused font upload deleted the font installed before it.** An upload rejected at the start, for a bad file or family name, removed the file of the previous upload.
+### Languages
+
+- **The Library is translated.** Its tabs, views, book counts and menu entries, the **Compare progress** entry, the TXT/MD font settings and the slider hint now appear in every language the reader offers, instead of in English. In Belarusian, Dutch, French, German, Italian, Polish, Portuguese, Russian, Slovenian, Spanish, Swedish and Ukrainian the menus are fully translated again.
 
 ### Fixes
 

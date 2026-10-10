@@ -1,6 +1,8 @@
 add_executable(ReleaseJsonParserTest
   ReleaseJsonParserTest.cpp
+  ReleaseNotesExcerptTest.cpp
   ${REPO_ROOT}/lib/JsonParser/ReleaseJsonParser.cpp
+  ${REPO_ROOT}/lib/JsonParser/ReleaseNotesExcerpt.cpp
   ${REPO_ROOT}/lib/JsonParser/StreamingJsonParser.cpp
 )
 
