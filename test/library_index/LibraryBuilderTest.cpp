@@ -155,14 +155,36 @@ TEST_F(LibraryBuilderTest, HiddenFoldersAreListedOnlyWhenShownAndTheCacheNever) 
   LibraryIndexReader index;
   ASSERT_TRUE(index.open(indexPath()));
   EXPECT_EQ(index.header().bookCount, 1);
-  EXPECT_EQ(index.header().acceptRules, 0);
+  EXPECT_EQ(index.header().acceptRules, library::acceptRules(false));
   index.close();
   auto shown = config();
   shown.showHidden = true;
   ASSERT_EQ(build(shown), LibraryBuilder::Phase::Done);
   ASSERT_TRUE(index.open(indexPath()));
   EXPECT_EQ(index.header().bookCount, 2);
-  EXPECT_EQ(index.header().acceptRules, 1);
+  EXPECT_EQ(index.header().acceptRules, library::acceptRules(true));
+}
+
+TEST_F(LibraryBuilderTest, FoldersThatHoldNoBooksAreLeftOutAtAnyDepthEvenWhenHiddenFilesAreShown) {
+  file("Books/Mort.epub");
+  file(".crosspoint/notes.txt");
+  file("Books/.CrossPoint/Copy.epub");
+  file("XTCache/Cached.xtc");
+  file("Books/xtcache/Old.epub");
+  file("System Volume Information/Indexer.txt");
+  auto shown = config();
+  shown.showHidden = true;
+  ASSERT_EQ(build(shown), LibraryBuilder::Phase::Done);
+  LibraryIndexReader index;
+  ASSERT_TRUE(index.open(indexPath()));
+  EXPECT_EQ(index.header().bookCount, 1);
+}
+
+TEST(LibraryAcceptRules, TheHiddenSettingAndTheRuleRevisionBothChangeTheRecordedValue) {
+  EXPECT_NE(library::acceptRules(false), library::acceptRules(true));
+  // Revision 0 recorded the setting alone: an index from then is rebuilt.
+  EXPECT_NE(library::acceptRules(false), 0);
+  EXPECT_NE(library::acceptRules(true), 1);
 }
 
 TEST_F(LibraryBuilderTest, ABookThatCannotBeReadNowStaysPendingAndIsAskedAgain) {
