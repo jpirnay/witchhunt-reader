@@ -79,7 +79,7 @@ class LibraryBuilder {
   std::string work(const char* name) const;
   bool startWalk();
   void walkStep();
-  bool listable(const char* name, bool atRoot) const;
+  bool listable(const char* name) const;
   void noteSidecar(Level& level, HalFile& entry);
   uint32_t sidecarFor(const Level& level) const;
   bool stageBook(const Level& level, HalFile& entry);

@@ -94,6 +94,13 @@ inline bool isSystemName(const std::string_view name) {
 // the system folders. What the listing hides and what the item rule above refuses.
 inline bool isProtectedName(const std::string_view name) { return isDotName(name) || isSystemName(name); }
 
+// Never where books are kept: the firmware's own folder (its caches, settings and the credential
+// stores) and the system folders. The book listings and the library index leave them out even with
+// hidden files shown, at any depth -- a cache's copies and leftovers are not the reader's books.
+inline bool holdsNoBooks(const std::string_view name) {
+  return isSystemName(name) || equalsIgnoreCase(name, ".crosspoint");
+}
+
 // Shaped like a generated 8.3 alias: a '~' followed by a digit, in a name that fits
 // 8.3. Only a filter for which segments are worth resolving on the card -- a real file
 // may be named like this, and resolution is what tells the two apart.

@@ -68,8 +68,10 @@ the walk needs the lent secondary framebuffer, one phase at a time. Working file
 `/.crosspoint/library/` beside the index.
 
 1. **Walk.** Depth first, at most 8 levels, by the Books tab's rules (books only; hidden entries only
-   when shown; never `/.crosspoint`). Each folder is listed twice: first its `.opf` sidecars into a
-   table of 128 per folder, then its books, staged with identity, date, sidecar signature and path.
+   when shown; never `.crosspoint`, `System Volume Information` or `XTCache`, at any depth and
+   whatever the hidden setting: `ProtectedPaths::holdsNoBooks`). Each folder is listed twice: first
+   its `.opf` sidecars into a table of 128 per folder, then its books, staged with identity, date,
+   sidecar signature and path.
    At most 2,000 books (`library::MAX_BOOKS`); past that the index is marked partial.
 2. **Join** (`LibraryJoin`). The staged books are sorted by identity in the framebuffer (16 B each) and
    merged in one pass with the previous index, which is in identity order: same identity and
@@ -93,7 +95,8 @@ brings its own -- and built again only for a reason (`LibraryStaleness::rebuildN
 `LibraryFreshness::stale` on entering New or Authors, never on Books or Recent):
 
 - **No valid index**: missing, another format version, or sections that do not fit the file.
-- **The other *Show Hidden Files* setting**: it lists other books (`acceptRules` in the header).
+- **The other *Show Hidden Files* setting, or other walk rules**: either lists other books
+  (`acceptRules` in the header: the setting plus a revision of what the walk always leaves out).
 - **The card changed since the last finished build**, in this boot or an earlier one. Every change the
   firmware makes outside its cache folder goes through `HalStorage::noteContentChange`: web and WebDAV
   uploads, deletes and renames, Calibre wireless, OPDS downloads, the metadata editor's sidecars,

@@ -398,7 +398,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
   - One Latin layout always stays on, because web addresses and passwords need one; its row then reads "Default" and cannot be switched off.
   - On the keyboard, hold **Confirm** on a key (or long-press it on a touch screen) for its alternate letter, such as an accented one or Ukrainian ґ and the extra Kazakh letters, or for the other case. Holding **Confirm** on Delete clears the whole text. Shift applies to the next letter only, and `-`, `=`, `.` and `,` are on the symbols page (**?123**).
 - **File Visibility** (submenu):
-  - **Show Hidden Files**: Show files and folders whose names start with `.`, in the Library's Books tab, All Files and the web interface's file manager. "ON" / "OFF"
+  - **Show Hidden Files**: Show files and folders whose names start with `.`, in the Library's Books tab, All Files and the web interface's file manager. The Library never lists the reader's own `.crosspoint` folder or the card's system folders. "ON" / "OFF"
   - **Show File Extensions**: Show file extensions in the Library and All Files. "ON" / "OFF"
   - **Book view**: How the Library's [Books](#33-library-screen) tab shows books. "Filenames" / "Details" / "Covers"
 

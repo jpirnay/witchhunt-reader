@@ -7,6 +7,7 @@
 #include <I18n.h>
 #include <LibraryOrder.h>
 #include <Logging.h>
+#include <ProtectedPaths.h>
 
 #include <algorithm>
 #include <cctype>
@@ -71,6 +72,11 @@ bool isListableName(const char* name) {
   if (!SETTINGS.showHiddenFiles && name[0] == '.') return false;
   return strcmp(name, "System Volume Information") != 0;
 }
+
+// What the book listings add: the firmware's own folder and the system folders hold no books, so
+// they stay out even with hidden files shown, as they do in the library index. All files still
+// lists .crosspoint then.
+bool isBookListableName(const char* name) { return isListableName(name) && !ProtectedPaths::holdsNoBooks(name); }
 
 // The books the reader can open. Images are not books: the viewer opens them, but in the book
 // browser they are mostly covers saved beside the book they belong to, listed a second time.
@@ -162,7 +168,7 @@ void FileBrowserModel::load() {
 }
 
 bool FileBrowserModel::acceptForBooks(const char* name, const bool isDir) {
-  if (!isListableName(name)) return false;
+  if (!isBookListableName(name)) return false;
   // Every folder is worth descending into -- but a Books folder being listed leaves out the ones with
   // no book below them. The SD index applies this to its staleness scan too, so a folder that gains
   // a book changes the index's signature and comes back.
@@ -193,7 +199,7 @@ void rememberCount(const std::string& folder, const int books, const uint32_t st
 }
 
 // What a count depends on besides the folder: what is on the card, and whether hidden entries
-// are counted (isListableName).
+// are counted (isBookListableName).
 uint32_t countStamp() { return (Storage.contentGeneration() << 1) | (SETTINGS.showHiddenFiles ? 1u : 0u); }
 
 }  // namespace
@@ -208,7 +214,7 @@ namespace {
 // the card changes. A press gives up, and the folder is listed.
 bool folderHasBooks(const char* name) {
   FolderSearch::Rules rules;
-  rules.listable = &isListableName;
+  rules.listable = &isBookListableName;
   rules.wanted = &FileBrowserModel::isBookName;
   rules.known = [](void*, const std::string& path) { return rememberedCount(path, countStamp()); };
   rules.foundNone = [](void*, const std::string& path) { rememberCount(path, 0, countStamp()); };
@@ -274,7 +280,7 @@ int FileBrowserModel::countBooksBelow(const std::string& dirPath) {
     entry.getName(name, sizeof(name));
     const bool isDir = entry.isDirectory();
     entry.close();
-    if (!isListableName(name)) continue;
+    if (!isBookListableName(name)) continue;
     if (!isDir) {
       if (isReadableBook(std::string_view{name})) {
         ++level.books;
@@ -532,7 +538,7 @@ void FileBrowserModel::searchEverywhere(const std::string& query) {
       if (child.empty() || child.back() != '/') child += '/';
       child += name;
       if (isDir) {
-        pending.push_back(std::move(child));
+        if (acceptEntry(name, true)) pending.push_back(std::move(child));
         continue;
       }
       if (!acceptEntry(name, false)) continue;

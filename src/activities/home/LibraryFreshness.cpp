@@ -16,7 +16,8 @@ namespace LibraryFreshness {
 bool stale(const LibraryIndexReader& index) {
   LibraryStaleness::Facts facts;
   facts.indexValid = index.isOpen();
-  facts.sameHiddenRule = facts.indexValid && index.header().acceptRules == (SETTINGS.showHiddenFiles ? 1 : 0);
+  facts.sameHiddenRule =
+      facts.indexValid && index.header().acceptRules == library::acceptRules(SETTINGS.showHiddenFiles);
   facts.cardChanged = Storage.contentChangedSinceMark();
   return LibraryStaleness::rebuildNeeded(facts);
 }

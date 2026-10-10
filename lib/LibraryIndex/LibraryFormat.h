@@ -26,6 +26,15 @@ constexpr uint8_t FLAG_PARTIAL = 0x01;
 // Longest blob string: a path, an author's name or filing name.
 constexpr uint16_t MAX_STRING = 1024;
 
+// The header's acceptRules: bit 0 is the Show Hidden Files setting the walk used, the bits above it
+// the revision of what the walk always leaves out. Either changing lists other books, so an index
+// recorded under another value is rebuilt. Revision 1: ProtectedPaths::holdsNoBooks at any depth
+// (revision 0 skipped only the root's .crosspoint and System Volume Information).
+constexpr uint8_t ACCEPT_RULES_REVISION = 1;
+constexpr uint8_t acceptRules(const bool showHidden) {
+  return static_cast<uint8_t>((ACCEPT_RULES_REVISION << 1) | (showHidden ? 1 : 0));
+}
+
 // Where the index and a build's working files live on the card.
 constexpr const char* DIR = "/.crosspoint/library";
 constexpr const char* INDEX_PATH = "/.crosspoint/library/library.bin";
@@ -35,7 +44,7 @@ struct Header {
   char magic[4];
   uint8_t version;
   uint8_t flags;
-  uint8_t acceptRules;  // the walk's showHiddenFiles: another setting lists other books
+  uint8_t acceptRules;  // acceptRules() of the walk: another value lists other books
   uint8_t reserved;
   uint32_t buildGen;
   uint16_t bookCount;

@@ -1,6 +1,7 @@
 #include "LibraryBuilder.h"
 
 #include <Logging.h>
+#include <ProtectedPaths.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -108,12 +109,9 @@ bool LibraryBuilder::startWalk() {
   return true;
 }
 
-bool LibraryBuilder::listable(const char* name, const bool atRoot) const {
-  if (name[0] == '.') {
-    if (!config_.showHidden) return false;
-    if (atRoot && std::strcmp(name, ".crosspoint") == 0) return false;  // the firmware's own cache
-  }
-  return std::strcmp(name, "System Volume Information") != 0;
+bool LibraryBuilder::listable(const char* name) const {
+  if (name[0] == '.' && !config_.showHidden) return false;
+  return !ProtectedPaths::holdsNoBooks(name);
 }
 
 void LibraryBuilder::noteSidecar(Level& level, HalFile& entry) {
@@ -164,7 +162,7 @@ void LibraryBuilder::walkStep() {
     }
     entry.getName(name_, sizeof(name_));
     const bool isDir = entry.isDirectory();
-    if (!listable(name_, levels_.size() == 1)) continue;
+    if (!listable(name_)) continue;
     if (!level.booksPass) {
       if (!isDir && isMetadataSidecar(name_)) noteSidecar(level, entry);
       continue;
@@ -214,7 +212,7 @@ void LibraryBuilder::publish(BuildArena& arena) {
   in.namesPath = work("names.bin");
   in.bookCount = found_;
   in.buildGen = buildGen_;
-  in.acceptRules = config_.showHidden ? 1 : 0;
+  in.acceptRules = library::acceptRules(config_.showHidden);
   in.partial = partial_;
   in.newestFolderDate = newestFolderDate_;
   if (!LibraryPublish::publish(in, arena, config_.indexPath)) return fail("publish");
