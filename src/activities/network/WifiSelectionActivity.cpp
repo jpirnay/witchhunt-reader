@@ -23,6 +23,7 @@
 #include "MappedInputManager.h"
 #include "WifiCredentialStore.h"
 #include "activities/NetworkMemoryTrim.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -137,7 +138,6 @@ void WifiSelectionActivity::onEnter() {
   connectionError.clear();
   enteredPassword.clear();
   usedSavedPassword = false;
-  savePromptSelection = 0;
   forgetPromptSelection = 0;
   autoConnecting = false;
   autoCycleCandidates.clear();
@@ -756,10 +756,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
         return;
       }
 
-      // We entered a new password, ask if user wants to save it
-      state = WifiSelectionState::SAVE_PROMPT;
-      savePromptSelection = 0;  // Default to "Yes"
-      requestUpdate();
+      askToSavePassword();
     } else {
       // Using saved password or open network - complete immediately
       LOG_DBG("WIFI",
@@ -878,35 +875,6 @@ void WifiSelectionActivity::loop() {
     return;
   }
 
-  // Handle save prompt state
-  if (state == WifiSelectionState::SAVE_PROMPT) {
-    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up) ||
-        mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left)) {
-      if (savePromptSelection > 0) {
-        savePromptSelection--;
-        requestUpdate();
-      }
-    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down) ||
-               mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right)) {
-      if (savePromptSelection < 1) {
-        savePromptSelection++;
-        requestUpdate();
-      }
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      if (savePromptSelection == 0) {
-        // User chose "Yes" - save the password
-        RenderLock lock(*this);
-        WIFI_STORE.addCredential(selectedSSID, enteredPassword);
-      }
-      // Complete - parent will start web server
-      onComplete(true);
-    } else if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      // Skip saving, complete anyway
-      onComplete(true);
-    }
-    return;
-  }
-
   // Handle forget prompt state (connection failed with saved credentials)
   if (state == WifiSelectionState::FORGET_PROMPT) {
     if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up) ||
@@ -954,9 +922,7 @@ void WifiSelectionActivity::loop() {
     if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
       // User says they've completed browser auth - proceed as connected
       if (!usedSavedPassword && !enteredPassword.empty()) {
-        state = WifiSelectionState::SAVE_PROMPT;
-        savePromptSelection = 0;
-        requestUpdate();
+        askToSavePassword();
       } else {
         onComplete(true);
       }
@@ -1055,9 +1021,10 @@ std::string WifiSelectionActivity::getSignalStrengthIndicator(const int32_t rssi
 }
 
 void WifiSelectionActivity::render(RenderLock&&) {
-  // Don't render if we're in a keyboard-entry state - we're just transitioning
-  // from the keyboard subactivity back to the main activity
-  if (state == WifiSelectionState::PASSWORD_ENTRY || state == WifiSelectionState::HIDDEN_SSID_ENTRY) {
+  // Don't render while a child has the screen: the keyboard (we're just transitioning back from it)
+  // or the save-password question.
+  if (state == WifiSelectionState::PASSWORD_ENTRY || state == WifiSelectionState::HIDDEN_SSID_ENTRY ||
+      state == WifiSelectionState::SAVE_PROMPT) {
     return;
   }
 
@@ -1095,9 +1062,6 @@ void WifiSelectionActivity::render(RenderLock&&) {
       break;
     case WifiSelectionState::CONNECTED:
       renderConnected();
-      break;
-    case WifiSelectionState::SAVE_PROMPT:
-      renderSavePrompt();
       break;
     case WifiSelectionState::CONNECTION_FAILED:
       renderConnectionFailed();
@@ -1227,54 +1191,6 @@ void WifiSelectionActivity::renderConnected() const {
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
-void WifiSelectionActivity::renderSavePrompt() const {
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
-  const auto height = renderer.getLineHeight(UI_10_FONT_ID);
-  const auto top = (pageHeight - height * 3) / 2;
-
-  renderer.drawCenteredText(UI_12_FONT_ID, top - 40, tr(STR_CONNECTED), true, EpdFontFamily::BOLD);
-
-  std::string ssidInfo = std::string(tr(STR_NETWORK_PREFIX)) + selectedSSID;
-  if (ssidInfo.length() > 28) {
-    ssidInfo.replace(25, ssidInfo.length() - 25, "...");
-  }
-  renderer.drawCenteredText(UI_10_FONT_ID, top, ssidInfo.c_str());
-
-  renderer.drawCenteredText(UI_10_FONT_ID, top + 40, tr(STR_SAVE_PASSWORD));
-
-  // Draw Yes/No buttons
-  const int buttonY = top + 80;
-  constexpr int buttonWidth = 60;
-  constexpr int buttonSpacing = 30;
-  constexpr int totalWidth = buttonWidth * 2 + buttonSpacing;
-  const int startX = (pageWidth - totalWidth) / 2;
-
-  // Draw "Yes" button
-  if (savePromptSelection == 0) {
-    std::string text = "[" + std::string(tr(STR_YES)) + "]";
-    renderer.drawText(UI_10_FONT_ID, startX, buttonY, text.c_str());
-  } else {
-    renderer.drawText(UI_10_FONT_ID, startX + 4, buttonY, tr(STR_YES));
-  }
-
-  // Draw "No" button
-  if (savePromptSelection == 1) {
-    std::string text = "[" + std::string(tr(STR_NO)) + "]";
-    renderer.drawText(UI_10_FONT_ID, startX + buttonWidth + buttonSpacing, buttonY, text.c_str());
-  } else {
-    renderer.drawText(UI_10_FONT_ID, startX + buttonWidth + buttonSpacing + 4, buttonY, tr(STR_NO));
-  }
-
-  // Use centralized button hints
-  // Either axis moves the selection here, so label the front strip with whichever pair it carries.
-  const auto labels = mappedInput
-                          .mapHints(tr(STR_CANCEL), tr(STR_SELECT), tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT), tr(STR_DIR_UP),
-                                    tr(STR_DIR_DOWN))
-                          .front;
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-}
-
 void WifiSelectionActivity::renderConnectionFailed() const {
   const auto pageHeight = renderer.getScreenHeight();
   const auto height = renderer.getLineHeight(UI_10_FONT_ID);
@@ -1387,6 +1303,26 @@ void WifiSelectionActivity::renderCaptivePortal() const {
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_CAPTIVE_PORTAL_DONE), "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
+// A network the reader just typed a password for: ask whether to keep it. Either answer finishes
+// the selection connected; Back answers No.
+void WifiSelectionActivity::askToSavePassword() {
+  state = WifiSelectionState::SAVE_PROMPT;
+  ConfirmationActivity::Question question;
+  question.title = tr(STR_CONNECTED);
+  question.headline = tr(STR_SAVE_PASSWORD);
+  question.message = std::string(tr(STR_NETWORK_PREFIX)) + selectedSSID;
+  question.cancelLabel = StrId::STR_NO;
+  question.acceptLabel = StrId::STR_YES;
+  startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, std::move(question)),
+                         [this](const ActivityResult& result) {
+                           if (!result.isCancelled) {
+                             RenderLock lock(*this);
+                             WIFI_STORE.addCredential(selectedSSID, enteredPassword);
+                           }
+                           onComplete(true);
+                         });
 }
 
 void WifiSelectionActivity::onComplete(const bool connected) {
