@@ -13,6 +13,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | [library.md](library.md) | Library: measuring a large card, "Library too large", card-reader changes, silent build failures, interrupted builds, New's covers, author lists, sidecar case, tabs on button-only boards, tests |
 | [list-input-harmonization.md](list-input-harmonization.md) | Screens not yet on ListController, and the cleanup after them |
 | [memory-and-parsing.md](memory-and-parsing.md) | Nested-table text, case-blind class and id selectors, the simplified-chapter hint, the image lane and Background-B, heap transients, preempted decodes |
+| [web-ui.md](web-ui.md) | The web interface once its pages live on the SD card: bugs to fix first, a Plugins page, the built-in metadata editor, EPUB optimizer ports, in-browser TTF conversion, a dictionary installer |
 
 Design records for shipped features, cited from code, are in [../design/](../design/); reference
 documentation is in [../contributing/](../contributing/) and the other files under `docs/`.
