@@ -149,6 +149,19 @@ an image picker. CrossInk and upstream have since added more, all in the browser
 | Keep the cover in colour, resized only | CrossInk `preserveColor` | ~25 | Low |
 | Rename upload to "Title - Author"; remember upload options | upstream #2534 / CrossInk | ~350 | Medium; needs the overwrite policy (section 0) |
 
+**Extract a book's embedded fonts for the TTF converter (section 4).** When the optimizer finds
+fonts in the EPUB (`application/font-sfnt`, `font/ttf`, `font/otf`, `.ttf/.otf/.woff`), it lists
+them by family and style, read from each font's `name` table. The user can pass a family straight
+to the converter, so a book's own typeface becomes a `.cpfont` family on the card, and the
+optimizer can then strip the fonts from the book without losing the look.
+
+- Obfuscated fonts have to be decoded first, using the book's `META-INF/encryption.xml`:
+  - the IDPF algorithm XORs the first 1040 bytes with the SHA-1 of the book's unique identifier;
+  - the Adobe algorithm XORs the first 1024 bytes with the UUID's bytes.
+- Fonts a book only references are not there to extract.
+- An embedded font is licensed with that book. The page should say the conversion is for reading
+  on your own device.
+
 **A caveat:** an optimized book is a different file, so KOReader's document hash, the partial MD5
 of the file, differs from an unmodified copy on another device. That is as true of today's
 optimizer.
@@ -228,6 +241,15 @@ starting point.
 - **Upstream's `.ttf` upload rendered on the device:** it needs the on-device TrueType engine,
   which is S3 and PSRAM only.
 - **A web view of the Library index:** large, and it duplicates the device.
+
+## Decisions (2026-10-11)
+
+| Question | Decision |
+|---|---|
+| Upload clash | The File Manager asks Replace / Keep both / Skip per clash, with "apply to all". `/upload` itself keeps overwriting, so the Calibre plugin and scripts that re-send a book to update it are unaffected. |
+| Plugin home | Plugins installed through the Plugins page go to `/.crosspoint/plugins`, written only through its own endpoints. Plugins already copied to `/plugins` keep working and are listed. |
+| Catalog | `plugins/catalog.json` in this repository. The page fetches it and the plugin files from `raw.githubusercontent.com`, which allows cross-origin reads, and stores them through the device. Nothing is downloaded by the device; this needs a browser with internet. |
+| Scope now | Steps 1, 2 and 5 below. Steps 3 and 4 later, with font extraction in step 3 feeding step 4. |
 
 ## Suggested order
 
