@@ -1,6 +1,9 @@
 # On-device TTF fonts with a persistent glyph store: design
 
-Status: design approved in conversation on 2026-10-13. This file is the written spec for review.
+Status: design approved in conversation on 2026-10-13. A step-back review replaced the earlier
+`SdCardFont`-based integration with the direct integration in section 3. This file is the written
+spec for review.
+
 It is working material. When the work merges, lasting parts move to reference docs, open items move
 to `docs/future_work/`, and this file is deleted (see the docs layout convention).
 
@@ -12,7 +15,7 @@ reading). The same code runs on S3 boards.
 
 Success means:
 
-- Once a glyph is cached, a page turn with a TTF font is as fast as with a flash-mapped `.cpfont`.
+- Once a glyph is stored, a page turn with a TTF font is as fast as with a flash-mapped `.cpfont`.
 - Rendered glyphs survive power cycles, so a new session does not render them again.
 - Heap use is no worse than today's SD-font path.
 - Latin families and CJK fonts both work. CJK fonts are 5-20 MB per weight.
@@ -35,119 +38,113 @@ numbers come from step 0.
 | Render lazily and persist the result | Chosen over converting the whole font once at import, which would mean a long wait for CJK. |
 | Glyph store in the `spiffs` partition (raw flash, memory-mapped) | Fast random reads with no heap; it survives power-off; it is already used for the `.cpfont` cache. |
 | Wipe the store on family change | One family at a time, as with `.cpfont` today. |
-| Integration in stages: a `GlyphSource` interface under `SdCardFont` | `SdCardFont`'s page machinery is exactly what a TTF needs. Only the data source differs. |
-| Native ladder rungs for headings | Sharp headings are a main benefit of TTF. Rungs are the absolute `FONT_SIZE_RUNGS` (at most 9), so the store holds a bounded set of sizes, and changing the body size reuses them. |
-| Slim per-size faces | `SdCardFont` is 2,448 B per instance on RV32 (measured). Splitting it into family state plus one face per size, with each style's page state allocated on first use, costs about 0.6-1 KB per rung in use instead of 2.4 KB. |
-| Write glyphs to the store during page warm-up | It is simpler than deferring the writes, which would need 10-15 KB of heap to hold new bitmaps. The next page is pre-rendered in the background, so the cost is mostly hidden. |
+| **Direct integration through the glyph-miss hook**, not through `SdCardFont` | `SdCardFont`'s per-page machinery works around SD reads: per-page lookup tables, a bitmap arena with a retry ladder, metrics-only layout, a per-page kern matrix, a heap miss ring. The mapped store makes all of it unnecessary, because a lookup returns a pointer into flash. Reusing that machinery would have meant two large refactors of a 2,000-line class on the page-turn path. |
+| Render a glyph at its first lookup, in layout or in a draw | New glyphs are rendered during section builds, which already run in the background or behind the "Indexing" popup. Page turns then rarely render anything. There is no metrics-only mode to maintain. |
+| Native ladder rungs, created lazily | Sharp headings are a main benefit of TTF. Rungs are the absolute `FONT_SIZE_RUNGS` (at most 9), so the store holds a bounded set of sizes. A rung costs about 0.5 KB of RAM. |
+| A resident scratch block of about 8 KB per loaded family | Section builds already borrow the lent framebuffer. The loop task that runs background builds has an 8 KB stack, while `ftgrays` in its stock form needs a 4,400 B frame. |
 
 ## 3. Architecture
 
 ```
-SdCardFont (family: page engine; its API toward the dependents is unchanged)
-   │ owns one or more
-   ├─ FontFace (one per size: 4 EpdFont + per-style stub; page state allocated per style on first use)
-   │ owns one
-   ▼
-GlyphSource ── CpFontSource    today's .cpfont reading code, moved, behaviour identical
-            └─ TtfSource       new
-                 ├─ FontBytes        reads font bytes: mapped flash, or SD through a page cache
-                 ├─ TtfRasterizer    integer TrueType loader + standalone ftgrays
-                 ├─ FlashGlyphStore  (lib/hal) write-once index + append-only log in `spiffs`
-                 └─ Gpos / Gsub      kerning and ligature lookups (no FreeType)
+GfxRenderer ── fontMap ── EpdFontFamily ── EpdFont ── EpdFontData (one per size and style)
+                                                         │ provider (new)
+                                                         ▼
+                                   GlyphProvider ── SdCardFont (existing contexts, unchanged behaviour)
+                                                 └─ TtfFont (new, one per loaded TTF family)
+                                                      ├─ FontBytes        reads font bytes: mapped flash, or SD through a page cache
+                                                      ├─ TtfRasterizer    integer TrueType loader + standalone ftgrays
+                                                      ├─ FlashGlyphStore  (lib/hal) write-once index + append-only log in `spiffs`
+                                                      └─ Gpos / Gsub      kerning and ligature lookups (no FreeType)
 ```
 
-The code that depends on `SdCardFont` today keeps talking to `SdCardFont` and to the `EpdFont*`
-addresses it hands out:
+### 3.1 `GlyphProvider` (replaces `glyphMissHandler` and `glyphMissCtx` in `EpdFontData`)
 
-- GfxRenderer and FontCacheManager;
-- SdCardFontManager;
-- FontSelectionActivity and DictionaryDefinitionActivity;
-- EpdFont and EpdFontData, through the miss-handler context.
-`SdCardFont` keeps everything per page:
-
-- prewarm into the mini `EpdFontData` tables;
-- the 512-glyph accumulation limit;
-- the `PREWARM_ARENA_TOO_LARGE` retry ladder;
-- the 8-slot miss ring;
-- the per-page kern matrix layout;
-- `clearCache` and `clearAccumulation`.
-
-### 3.0 Family and faces
-
-Today one `SdCardFont` is one size, with fixed `PerStyle` state for all four styles: 2,448 B per
-instance on RV32. The state splits two ways.
-
-**Family-level (one per `SdCardFont`):**
-
-- the `GlyphSource`;
-- the 8-slot miss ring and its contexts;
-- the file path;
-- the "already reported missing" log, now keyed by face, style and codepoint and shared by the faces;
-- stats;
-- the `useArena` hook.
-
-**`FontFace` (one per size):**
-
-- the size (points and pixels-per-em) and its store size index;
-- the font ID;
-- four `EpdFont` objects, whose addresses never move;
-- for each present style, the stub `EpdFontData` carrying that style's metrics and the miss handler;
-- for each style, the page state (mini intervals, glyphs, bitmap base, mini kern, mode). It is
-  allocated the first time that style is prewarmed at that size and freed by `clearCache`.
-
-A `.cpfont` family has exactly one face, so its behaviour is unchanged; the scaled alias stays an
-alias, not a face. A TTF family has a body face plus one face per ladder rung it has used (5.5).
-
-### 3.1 `GlyphSource` (lib/EpdFont/GlyphSource.h)
-
-The interface works on whole pages, not single glyphs. That keeps virtual calls out of the inner loops
-and lets `CpFontSource` keep its current code paths unchanged. Below is a sketch of the contract; the
-implementation plan fixes the exact signatures.
-
-The calls that depend on size also take the face (its size index and pixels-per-em); they are left
-out of the sketch below. `CpFontSource` has one size and rejects any other.
+Today `EpdFontData` carries a miss callback plus a `void*` context. `GfxRenderer::getGlyphBitmap`
+treats any non-null context as an `SdCardFont` (`SdCardFont::fromMissCtx`) to recognise its ring
+glyphs, so a second provider would be misread. Those two fields are replaced by one interface pointer:
 
 ```cpp
-class GlyphSource {
+class GlyphProvider {
  public:
-  struct StyleMetrics { uint8_t advanceY; int16_t ascender; int16_t descender; bool is2Bit; };
-  virtual ~GlyphSource() = default;
-
-  virtual bool hasStyle(uint8_t style) const = 0;
-  virtual StyleMetrics metrics(uint8_t style) const = 0;
-  virtual uint32_t contentHash() const = 0;  // feeds computeFontId -> section cache keys
-
-  // Metrics for a sorted, de-duplicated codepoint list. found[i] == false: not in the font.
-  virtual int resolve(uint8_t style, const uint32_t* cps, uint16_t n, EpdGlyph* out, bool* found) = 0;
-
-  // Make the bitmaps of `n` resolved records drawable. Returns the base pointer that
-  // EpdGlyph::dataOffset is relative to: either a mapped region (no copy) or `arena` after
-  // filling it (dataOffset rewritten). Reports "arena too large" so the page engine can retry.
-  virtual BitmapResult bitmaps(uint8_t style, const uint32_t* cps, EpdGlyph* recs, uint16_t n,
-                               BitmapArena& arena) = 0;
-
-  virtual bool buildPageKern(uint8_t style, const uint32_t* cps, uint16_t n, PageKern& out) = 0;
-  virtual const EpdLigaturePair* ligatures(uint8_t style, uint8_t& count) = 0;
-
-  // A glyph the page prewarm did not cover. bitmap points into a mapping or the miss ring.
-  virtual bool missGlyph(uint8_t style, uint32_t cp, EpdGlyph& out, const uint8_t*& bitmap) = 0;
-
-  virtual void dropMetadata() {}
-  virtual bool restoreMetadata() { return true; }
+  // A glyph the font's own tables do not have (all of them, for a TTF font).
+  // The record lives at least until the next call on this provider.
+  virtual const EpdGlyph* missGlyph(uint32_t codepoint) = 0;
+  // Non-null when the record's bitmap is not at EpdFontData::bitmap + dataOffset (ring glyphs).
+  virtual const uint8_t* bitmapOverride(const EpdGlyph* glyph) { return nullptr; }
+  // 4.4 fixed-point pixels, like the kern tables. Asked only when the font has no kern tables.
+  virtual int8_t kerning(uint32_t leftCp, uint32_t rightCp) { return 0; }
+  virtual ~GlyphProvider() = default;
 };
 ```
 
-The helper types:
+- **`EpdFont::findGlyph`** calls `provider->missGlyph` where it called the callback.
+- **`EpdFont::getKerning`** asks the provider when no kern tables are set.
+- **`GfxRenderer::getGlyphBitmap`** asks `provider->bitmapOverride` instead of the cast.
+- **`SdCardFont`** implements the interface with the per-style contexts it already has. Its ring
+  glyphs return their heap bitmap from `bitmapOverride`; its behaviour does not change.
+- **Built-in fonts** leave the pointer null, so the generated font headers keep their initialisers.
 
-- `BitmapArena` wraps the page engine's existing per-page bitmap allocation, either the heap or a
-  `BuildArena` set with `useArena`.
-- `BitmapResult` holds the base pointer, or "arena too large" together with the measured bytes per
-  glyph.
-- `PageKern` holds the mini kern class tables and matrix the page engine already builds.
+### 3.2 `TtfFont` (lib/EpdFont/ttf/)
 
-`CpFontSource` keeps two things exactly as they are: the existing split between mmap and SD (glyph
-records read from SD, bitmaps from the mapping or into the arena), and the sharing of identical
-interval tables between styles.
+`TtfFont` is one object per loaded TTF family, and it implements `GlyphProvider`. It owns:
+
+- `FontBytes`, the rasterizer, the scratch block, the store handle, and the ligature tables;
+- **a face per size**. A face is just registration data: one `EpdFontData` per present style, and four
+  `EpdFont` objects for the `EpdFontFamily` registered in `fontMap`.
+
+Each face's `EpdFontData` holds:
+
+- no intervals and no glyph table, so every lookup goes to the provider;
+- `bitmap` = the mapped log base;
+- `advanceY`, `ascender` and `descender` from that style's `hhea` at that size;
+- `is2Bit = true`;
+- the style's ligature table;
+- `provider` = a small per-(face, style) adapter that forwards to the `TtfFont` with its size and
+  style.
+
+A face costs about 0.5 KB: four `EpdFont`, four 116 B `EpdFontData`, and the adapters.
+
+**A glyph lookup.** `missGlyph(cp)` turns the code point into a store key (code point, style, the
+face's size index) and probes the mapped index.
+
+- **Hit:** it returns a pointer to the `EpdGlyph` inside the log record, in flash. Its `dataOffset`
+  is relative to the log base, so the renderer's normal bitmap path reads the bitmap in place, with no
+  copy and no heap.
+- **Miss:** it renders the glyph, stores it (4.5), and returns the stored record.
+- **Ring mode:** used when the store is full, after a write error, or in previews (6, 7.6). The glyph
+  is rendered into an 8-slot heap ring instead, and `bitmapOverride` returns the ring bitmap.
+
+`TtfFont` is not registered in `sdCardFonts_` or `sdCardFontAliases_`. Those maps drive `SdCardFont`'s
+own maintenance loops: metadata drop and restore, cache clear, prewarm, stats. So
+`GfxRenderer::ensureFontReady` and `FontCacheManager::prewarmCache` treat a TTF font like a built-in
+one. Their built-in path returns at once for a font with no compressed groups
+(`FontDecompressor::prewarmCache`). Neither needs a change.
+
+### 3.3 `GfxRenderer`: one lookup helper and a resolver
+
+`GfxRenderer` looks fonts up with direct `fontMap.find` calls at more than 8 sites. Some draw paths
+record text during the scan pass before any lookup; some measure paths look up first and return 0 on
+a miss. A rung that does not exist yet would therefore be silently skipped by some paths. So:
+
+- **One private lookup helper** replaces the direct calls.
+- **On a miss, the helper calls an optional resolver** installed by `SdCardFontManager`, then retries.
+  The resolver creates the face for a dormant TTF rung (5.5) and registers it in `fontMap`.
+- `fontMap` becomes `mutable`, the same compromise `sdCardFonts_` already makes.
+
+With no resolver installed, or for an ID the resolver does not know, the behaviour is today's.
+
+### 3.4 Concurrency
+
+Layout runs on the loop task (background section builds) and drawing runs on the render task.
+Both hold `RenderLock` around their work, and `SdCardFont`'s unprotected per-page state already
+relies on that.
+
+`TtfFont` relies on the same contract. Its miss path, kerning pair cache, scratch block, ring and SD
+page cache are touched only under `RenderLock`. A debug-build assert on the miss path checks that the
+calling task holds the rendering mutex.
+
+Store hits read immutable flash. The write order (record first, slot last) means a probe never sees a
+slot whose record is incomplete.
 
 ## 4. The glyph store (`FlashGlyphStore`, lib/hal)
 
@@ -170,8 +167,8 @@ log              append-only glyph records, erased at install
 
 **Region sizes come from the mapping budget, not from the partition size.** The C3 has 128 MMU pages
 of 64 KB shared by the app's code, its rodata and every mapping. About 31 are free at runtime, a
-figure step 0 measures with `spi_flash_mmap_get_free_pages`. While a font is loaded, the index and the
-log stay mapped, so bitmaps are read in place.
+figure step 0 measures with `spi_flash_mmap_get_free_pages`. The index and the log stay mapped while
+the font is loaded, so glyph records and bitmaps are read in place.
 
 Rule at install:
 
@@ -182,9 +179,9 @@ log pages = free pages − (largest style, or the copied tables) − index pages
 The largest style is ≤10 pages in flash mode; the copied tables are about 7 pages for CJK in SD mode.
 Examples at 31 free pages:
 
-| Mode | Mapped while reading | Index | Log (roughly) |
+| Mode | Also mapped | Index | Log (roughly) |
 |---|---|---|---|
-| Flash (Latin family) | the style being warmed, one at a time | 64 KB (8,192 slots) | 18 pages ≈ 1.1 MB ≈ 11,000 glyphs at ~100 B |
+| Flash (Latin family) | the style being rendered, one at a time | 64 KB (8,192 slots) | 18 pages ≈ 1.1 MB ≈ 11,000 glyphs at ~100 B |
 | SD (CJK, large families) | the copied tables | 256 KB (32,768 slots) | 18 pages ≈ 1.1 MB ≈ 4,500 glyphs at ~250 B |
 
 The geometry is fixed at install from the budget measured then. If a later firmware update shrinks the
@@ -207,36 +204,39 @@ budget so that a mapping fails, the store reinstalls with smaller regions (6.2).
 
 - `key = cp (bits 0-20) | style << 21 | sizeIndex << 23`. Bits 27-31 are zero, so a key can never equal
   the erased value 0xFFFFFFFF.
-- `logOffset = 0xFFFFFFFE` means "the font has no glyph for this codepoint". Such slots have no log
-  record, and the font is not asked again.
+- `logOffset = 0xFFFFFFFE` means "the font has no glyph for this codepoint", or it can never load
+  (6.1). Such slots have no log record, and the font is not asked again.
 - Slot position: `(key * 2654435761) >> (32 - log2(slots))`, then linear probing up to 32 slots. A
   longer chain counts as full (4.6).
 
 ### 4.4 Log record
 
 ```
-[u32 key][EpdGlyph, 16 B][2-bit bitmap, MSB-first stream][u32 commit = CRC-32/IEEE (esp_rom_crc32_le) over the preceding bytes]
-padded to 4 bytes
+[u32 key][EpdGlyph, 16 B][2-bit bitmap, MSB-first stream], padded to 4 bytes
 ```
 
-`EpdGlyph.dataOffset` is relative to the start of the log, so `bitmaps()` returns the log's base
-pointer. The bitmap format matches `.cpfont` exactly: 4 pixels per byte, 3 = full ink.
+- **`EpdGlyph` sits at offset 4 of a 4-byte-aligned record,** so a pointer to it is a valid
+  `const EpdGlyph*`, read from flash.
+- **`dataOffset`** is relative to the log base.
+- **The bitmap format matches `.cpfont` exactly:** 4 pixels per byte, 3 = full ink.
+- **`dataLength` is capped at 8 KB.** A larger glyph cannot be stored, and the cap also bounds the
+  recovery scan.
 
 ### 4.5 Writing, and surviving a power cut
 
 NOR flash bits can only change from 1 to 0 without an erase, so:
 
-1. program the record's key and `EpdGlyph`;
-2. program the bitmap;
-3. program the commit word;
-4. program the index slot (8 bytes).
+1. program the record (key, `EpdGlyph`, bitmap);
+2. program the index slot (8 bytes).
 
-- **Reads trust a slot only if** the record at `logOffset` has the same key and a valid commit. A
-  record left behind by a power cut is never referenced, so it only wastes space.
+- **Reads trust a slot only if** the record at `logOffset` lies inside the log, has the same key, and
+  has `dataLength` ≤ 8 KB. A record left behind by a power cut is never referenced, so it only wastes
+  space.
 - **At load the log is scanned record by record** to find where writing resumes. This takes a few
   thousand hops through mapped flash, well under 100 ms; checkpoints are deferred (section 11).
-- **A header cut short cannot cause a double write.** Whatever length it holds, the next offset lands
-  in erased space after it, so no byte is ever programmed twice.
+  - The scan stops at an erased key.
+  - A header with an impossible length (over 8 KB, or past the log's end) is a torn write. Writing
+    resumes at the next 4 KB boundary that is fully erased, so no byte is ever programmed twice.
 - **A slot cut short is skipped.** Insertion carries on probing past it.
 - **ESP-IDF keeps the mapped view current.** It invalidates the mapped cache lines after every write
   (`spi_flash_check_and_flush_cache` in `memspi_host_driver.c`), so a record can be read back
@@ -252,10 +252,10 @@ The store counts as full when any of these holds:
 - the index is more than 70% loaded, or a probe chain passes 32 slots;
 - all 16 size entries are taken.
 
-It then sets the wipe-pending word. Until the next book open, pages fall back to the arena path
-(7.3): glyphs are still drawn but not stored. At the next book open, the index and the log are erased
-behind a "Preparing font" popup. That is about 1.2-1.4 MB of erase, roughly 3-8 s depending on the
-chip.
+It then sets the wipe-pending word, and `TtfFont` switches to ring mode (3.2): glyphs are still drawn
+but not stored. **The wipe itself runs only at a point where no `EpdGlyph` pointer into the log can be
+live: at book open, or before a section build starts.** It erases the index and the log behind a
+"Preparing font" popup. That is about 1.2-1.4 MB of erase, roughly 3-8 s depending on the chip.
 
 ### 4.7 Wear
 
@@ -271,24 +271,22 @@ and about 45 ms per 4 KB sector erased, from typical datasheets; step 0 measures
 ### 5.1 `FontBytes`
 
 `FontBytes` is the engine's only way to read a font. It offers `u8/u16/u32(offset)` and
-`read(offset, len, dst)`, and every access is bounds-checked: an out-of-range read returns 0 and sets
-an error flag, so a broken font produces missing glyphs, never a crash.
-
-Two error flags are kept apart, because 6.1 treats them differently:
+`read(offset, len, dst)`, and every access is bounds-checked. Two error flags are kept apart, because
+6.1 treats them differently:
 
 - **out of range:** the font itself is broken, which is permanent;
 - **I/O error:** an SD read failed, which is transient.
+
+Modes:
 
 - **Flash mode:** a pointer and a length into the style's mapping.
 - **SD mode:** offsets inside a copied table are read from the mapping. Everything else (the glyph
   outlines) comes from an open `HalFile` through an LRU page cache of 8 × 512 B. That 4 KB of heap is
   held while the font is loaded, in SD mode only.
-- **Misses are rendered in glyph-ID order,** so outline reads from SD are mostly sequential.
 
 ### 5.2 `TtfRasterizer`
 
-`render(FontBytes&, glyphId, pxPerEm26_6, Scratch&) -> 8-bit coverage + metrics`. The coverage is then
-packed to 2-bit with the PC converter's thresholds: nibble ≥12 → 3, ≥8 → 2, ≥4 → 1.
+`render(FontBytes&, glyphId, pxPerEm26_6, Scratch&) -> 2-bit bitmap + metrics`.
 
 - **Integer TrueType loader:**
   - cmap formats 4 and 12; loca, both short and long; simple glyphs;
@@ -303,46 +301,48 @@ packed to 2-bit with the PC converter's thresholds: nibble ≥12 → 3, ≥8 →
   - It is vendored under `lib/EpdFont/ttf/third_party/freetype/`, with `FTL.TXT` and a PATCHES note.
   - Shims: `FALL_THROUGH`, `FT_BEGIN_HEADER`, `FT_STATIC_BYTE_CAST`.
   - `ft_grays_raster` is renamed so it cannot clash with the SDK's FreeType.
-  - The 4 KB cell pool moves off the stack into the scratch block. Unpatched, `gray_convert_glyph` has
-    a 4,400 B frame.
+  - Patched to take its cell pool from the scratch block instead of the stack. Unpatched,
+    `gray_convert_glyph` has a 4,400 B frame.
+  - It renders through the direct span callback (`FT_RASTER_FLAG_DIRECT`). Spans are packed straight
+    into the 2-bit output with the PC converter's thresholds (coverage nibble ≥12 → 3, ≥8 → 2, ≥4 → 1),
+    so there is no 8-bit coverage buffer.
 - **Sizes match the PC converter:**
   - pixels per em = pt × 150 / 72;
   - advances in 12.4 fixed point from the unscaled `hmtx` value;
   - ascender, descender and line height from `hhea`, rounded like `fontconvert_sdcard.py`.
 
   So a TTF at 14 pt lays out like a `.cpfont` at 14 pt.
-- **Limits:** buffers are sized from `maxp` (maxPoints, maxContours), with hard caps of 1,024 points
-  and 256 contours. The largest glyph measured is 852 points, in DejaVu Sans.
 
-### 5.3 Scratch memory (class C, phase-scoped)
+### 5.3 Scratch memory (resident while a TTF family is loaded)
 
-During prewarm, rendering borrows the lent framebuffer through the same scoped-arena pattern the image
-decoder uses. When nothing is lent, it falls back to an owned 16 KB heap block, freed when the prewarm
-ends. The scratch holds:
+One block, allocated at family load and freed at unload. Its size is computed from the font, with no
+allocation per glyph:
 
-- the cell pool, 4 KB;
-- the outline points, 9 B per point;
-- the coverage buffer: at most 70×70 px at the largest reader size, 4.9 KB.
+- **cell pool:** 2 KB. A smaller pool only makes `ftgrays` work in more bands; the output is the same;
+- **outline points:** 9 B per point, sized from `maxp` (the larger of maxPoints and
+  maxCompositePoints), capped at 512 points (4.6 KB);
+- **contours:** 2 B each, from `maxp`, capped at 256;
+- **2-bit output:** sized from the head bbox at the largest rung, capped at 4 KB.
 
-There is no allocation per glyph. A glyph that does not fit the owned block (more than about 700
-points) is a transient failure (6.1).
+That comes to about 4-8 KB for text fonts. The block is not borrowed from the lent framebuffer,
+because section builds already use that region for their build arena. A glyph with more points than
+the cap can never load (6.1); text glyphs stay well under it.
 
 ### 5.4 Kerning and ligatures
 
 - **Code:** `Gpos.{h,cpp}` and `Gsub.{h,cpp}` are copied from FreeInkFont at a pinned SDK commit, with
   attribution. They need no FreeType, and `Gpos.cpp` handles Extension (type 9) lookups, which
   Bookerly uses for all of its kerning.
-- **Kerning:**
-  - `buildPageKern` looks pairs up in the GPOS table in place: the style's mapping in flash mode, the
-    copied table in SD mode.
-  - It only queries codepoints listed in a kern lookup's coverage, and fills the same mini class tables
-    and matrix the page engine already builds.
-  - Kerning stays 0 during layout, as it is today for every SD font.
+- **Kerning:** `TtfFont::kerning(l, r)` looks the pair up in the mapped GPOS (the style's TTF in flash
+  mode, the copied table in SD mode). It returns 4.4 fixed-point pixels at the face's size, clamped to
+  int8 like the `.cpfont` matrix.
+  - A direct-mapped pair cache (256 entries, 2 KB) sits in front of it.
+  - Layout and draw use the same values, as built-in fonts do. SD fonts today kern only when drawing.
 - **Ligatures:**
   - fi, fl, ff, ffi and ffl are resolved once at load through GSUB and become an `EpdLigaturePair`
-    table on the heap (a few dozen bytes).
+    table per style. It is shared by all of that style's faces and is a few dozen bytes.
   - A ligature glyph with no codepoint of its own gets the private-use key `U+F0000 + glyphId`, which
-    `TtfSource` maps back to the glyph ID.
+    `TtfFont` maps back to the glyph ID.
 
 ### 5.5 Sizes: the body face and the ladder rungs
 
@@ -355,26 +355,20 @@ points) is a transient failure (6.1).
 
   This is the same shape as the built-in ladders, so `FontSizeLadder::resolve` and its 3% dead zone
   are unchanged. A rung equal to the body size is the body face.
-- **Dormant until needed.** At family load, `SdCardFontManager` keeps a dormant table (font ID →
-  rung point size). Nothing is allocated and nothing is entered in `fontMap`.
-- **Becoming a real face.** `GfxRenderer`'s direct `fontMap.find` calls (more than 8 sites) are replaced
-  by one private lookup helper. On a miss, it calls an optional resolver installed by
-  `SdCardFontManager`. The resolver turns the dormant rung into a real face:
-  - it creates the `FontFace` and its per-style stubs;
-  - it registers the face in `fontMap` and in the SD font maps;
-  - the lookup then retries.
-
-  `fontMap` becomes `mutable`, the same compromise `sdCardFonts_` already makes. This covers layout,
-  scan passes and draws, including pages laid out in an earlier session.
-- **Lifetime.** Faces live until the family is unloaded or the book closes. There is no eviction in
-  v1: at most 9 rungs, typically 2-4 per book.
-- **Store use.** Each face has its own store size index. Rung sizes are absolute, so a body-size
-  change adds at most one new entry (the new body size, if it is not a rung). The 16 entries cover all
-  rungs plus several body sizes.
+- **Dormant until needed.** At family load, `SdCardFontManager` keeps a dormant table (font ID → rung
+  point size). Nothing is allocated and nothing is entered in `fontMap`. The lookup helper's resolver
+  (3.3) creates the face on first use. That covers layout, scan passes and draws, including pages laid
+  out in an earlier session.
+- **Lifetime.** Faces live until the family is unloaded. There is no eviction in v1: at most 9 rungs,
+  about 0.5 KB each.
+- **Store use.** Each face has its own size index. Rung sizes are absolute, so a body-size change adds
+  at most one new entry (the new body size, if it is not a rung). The 16 entries cover all rungs plus
+  several body sizes.
 
 ### 5.6 Not supported in the first version
 
 - compound glyphs positioned by point matching: the glyph is logged and drawn as missing;
+- glyphs with more than 512 points;
 - font collections (`.ttc`);
 - variable fonts beyond their default instance: they register as Regular, and missing styles fall back
   as an incomplete `.cpfont` family does;
@@ -390,101 +384,109 @@ See section 11 for the full deferred list.
 |---|---|
 | The font has no glyph for the codepoint | A slot with the "missing" marker; the replacement glyph is drawn as today. |
 | A permanent load failure (point matching, over the cap, an out-of-range read in the outline) | A slot with the "missing" marker; logged once. |
-| A transient failure (no scratch memory, an SD I/O error) | Drawn as missing on this page, **not** marked, retried on the next page. |
+| A transient failure (an SD I/O error) | Drawn as missing this time, **not** marked, retried at the next lookup. |
 
 ### 6.2 Store and mapping failures
 
 | Situation | Behaviour |
 |---|---|
-| A flash write fails | Set wipe pending, use the arena path for the page, log it. |
-| The index or log cannot be mapped | Reinstall with smaller regions. If that also fails, no glyphs are stored this session (arena path); log it. |
+| A flash write fails | Set wipe pending, switch to ring mode, log it. |
+| The index or log cannot be mapped | Reinstall with smaller regions. If that also fails, use ring mode for the session; log it. |
 | The TTF file was changed or removed | The identity check at load reinstalls, or the family drops out of the registry and the reader falls back as it does today. |
 
 ### 6.3 Budgets
 
 - **Resident heap per loaded TTF family:**
+  - scratch, 4-8 KB;
+  - the kerning pair cache, 2 KB;
   - the SD page cache, 4 KB, in SD mode only;
-  - the ligature table, a few dozen bytes;
-  - the per-page structures `SdCardFont` already allocates;
-  - per rung face in use: four `EpdFont` and the stubs of the present styles (about 0.5 KB), plus page
-    state for each style used at that size. That is about 0.6-1 KB per rung, typically 1.3-4 KB per
-    book.
+  - the ligature tables, a few dozen bytes;
+  - about 0.5 KB per face in use: the body face plus typically 2-4 rungs.
 
-  Every table is mapped, not copied.
+  Every font table and every stored bitmap is mapped, not copied, and there is no per-page arena. That
+  comes to about 7-15 KB, against roughly 9-14 KB for an SD `.cpfont` (about 6 KB of kern classes plus
+  a 3-8 KB arena per page).
+- **Ring mode only:** the 8-slot heap ring, allocated when entering ring mode and freed at the wipe or
+  at unload.
 - **Flash for the code:** about 20-25 KB. The engine is 6.4 KB and `Gpos`/`Gsub` about 4 KB; the rest is
-  the source, the store, `FontBytes` and the registry. Measured in the build and quoted in the PR.
+  `TtfFont`, the store, `FontBytes`, the provider and lookup changes, and the registry. Measured in the
+  build and quoted in the PR.
 
 ## 7. Data flow
 
 ### 7.1 Discovery and install
 
 1. `SdCardFontRegistry` also scans `.ttf` files. Each file's family comes from the `name` table (ID 16,
-   or ID 1 if there is no 16), and its style from `head.macStyle` (bold and italic bits). A TTF family
-   offers every reader size natively, so the alias path (`ensureSizeAlias`) is not used for it.
-2. `SdCardFontManager::loadFamily` creates a `TtfSource`, which computes the family identity.
+   or ID 1 if there is no 16), and its style from `head.macStyle` (bold and italic bits). A registry
+   entry records its kind, TTF or `.cpfont`.
+2. For a TTF family, `SdCardFontManager::loadFamily` creates a `TtfFont` instead of an `SdCardFont`.
+   `TtfFont` computes the family identity.
 3. If the store header matches, the store is reused. Otherwise the family is installed behind a
    "Preparing font…" popup:
    - flash mode: erase, then copy every style. About 1.8 MB, roughly 10 s;
    - SD mode: erase, then copy the tables. About 3-5 s for CJK.
-4. The index, the log and (in SD mode) the tables are mapped, and the log is scanned to find where
-   writing resumes.
+4. The index, the log and (in SD mode) the tables are mapped, the log is scanned to find where writing
+   resumes, and the scratch block is allocated.
+5. The body face is registered in `fontMap`, the rungs are recorded as dormant, and the resolver is
+   installed.
 
-### 7.2 Layout: section build (`ensureFontReady` → prewarm with metrics only)
+### 7.2 Layout and drawing
 
-- A codepoint found in the store returns its record.
-- One that is not gets metrics **without rendering**: the glyph ID from cmap, the advance from hmtx,
-  and the ink box from the glyph header. Nothing is written during layout.
-- `dropMetadata` and `restoreMetadata` do nothing.
+There is no separate prewarm; both layout and drawing go through `EpdFont`. A glyph lookup:
 
-### 7.3 Page warm-up (`FontCacheManager::prewarmCache` → full prewarm, one style at a time)
+1. probes the store and returns the record pointer on a hit;
+2. on a miss, renders the glyph, writes it through to the log and the index (4.5), and returns the
+   stored record.
 
-1. Store hits return records whose bitmaps point into the mapped log, with no copy.
-2. Misses are collected and sorted by glyph ID. The style is mapped (flash mode) and scratch is
-   borrowed.
-3. Each miss is rendered, packed to 2-bit and written through to the log and the index (4.5). It then
-   draws from the log like a hit.
-4. **Arena path** (wipe pending, or a write failed): every bitmap on that page, both from the log and
-   newly rendered, is copied into the per-page arena. The existing allocation and retry ladder handle
-   it, as for an SD `.cpfont`.
+- **Most rendering happens during section builds,** so page turns mostly hit the store.
+- **Kerning comes from the provider,** both in layout and when drawing (5.4).
+- **`ensureFontReady` and `FontCacheManager::prewarmCache`** see a non-`SdCardFont` font with no
+  compressed groups and do nothing (3.2).
 
-### 7.4 Draw-time misses
+### 7.3 Ring mode
 
-`missGlyph` takes the same route (a store hit, or render and write) and returns a pointer into the log.
-The heap miss ring is used only on the arena path.
+Ring mode applies when wipe is pending, after a write error, or for previews. It is the same flow,
+except that a glyph that is not stored is rendered into the 8-slot heap ring and is not written. Glyphs
+already in the store are still read from it.
 
-### 7.5 Size and family changes
+### 7.4 Size and family changes
 
 - A new body size gets a new body face and, unless it is a rung, the next size-table entry. Its glyphs
   build up alongside the others.
 - Rung faces do not change, because rungs are absolute point sizes.
 - A new family means a reinstall.
-- `contentHash()` is the family identity, so changing the TTF files gives new font IDs and the
+- The family identity feeds `computeFontId`, so changing the TTF files gives new font IDs and the
   sections are laid out again.
+
+### 7.5 Wipe
+
+The wipe runs when wipe is pending, at book open or before a section build starts, when no record
+pointer into the log can be live (4.6).
 
 ### 7.6 Previews (font selector)
 
-A TTF family that is not installed is previewed straight from the SD card. It is read through the page
-cache and rendered into the existing preview arena (the lent framebuffer). **Nothing is written to the
-store,** so a preview never wipes the installed family; `.cpfont` previews follow the same rule with
-`FlashCachePolicy::ReadOnly`. The rendered previews are cached as `.fpv` files, as today.
+A TTF family that is not installed is previewed through a temporary `TtfFont` in ring mode, reading
+from the SD card. **Nothing is written to the store,** so a preview never wipes the installed family;
+`.cpfont` previews follow the same rule with `FlashCachePolicy::ReadOnly`. A preview sentence has about
+18 distinct glyphs, more than the ring's 8 slots, so some are rendered again across the measure, wrap
+and draw passes. At about 1 ms per glyph that is acceptable; step 0 confirms it. The rendered previews
+are cached as `.fpv` files, keyed by the family identity.
 
 ## 8. Delivery stages
 
 | Stage | Content | Merges? |
 |---|---|---|
 | **Step 0** | Throwaway device benchmark on the X3 (section 9.1). | No |
-| **Stage 1a** | Extract `CpFontSource` behind `GlyphSource`. A pure refactor with identical behaviour. | Own PR |
-| **Stage 1b** | Split `SdCardFont` into family state and `FontFace` (3.0), with one face for `.cpfont`. Identical behaviour; the per-instance size should drop. | Own PR |
-| **Stage 2-prep** | `GfxRenderer`: one private font-lookup helper in place of the direct `fontMap.find` calls, plus the optional resolver hook (5.5). Mechanical, with no behaviour change. | Own PR |
+| **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR per change |
 | **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR |
-| **Stage 2b** | `TtfRasterizer`: integer loader, vendored `ftgrays`, and the regression test against FreeType. | Own PR |
-| **Stage 2c** | `FontBytes`, `TtfSource`, `Gpos`/`Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR |
+| **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR |
+| **Stage 2c** | `FontBytes`, `TtfFont`, `Gpos`/`Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR |
 | **Stage 2d** | User-guide section on TTF fonts; FreeType credit (required by the FTL licence). | With 2c or own PR |
 
 Each stage builds on the previous one. Stacked PRs are retargeted to master as their base merges.
 
 **Planning.** Each stage gets its own implementation plan, written when the previous stage's results
-are in. Step 0 and Stage 1a come first and have no dependency on each other. Stage 2's plans use step
+are in. Step 0 and Stage 1 come first and have no dependency on each other. Stage 2's plans use step
 0's numbers.
 
 ## 9. Testing
@@ -495,24 +497,27 @@ Measure:
 
 - µs per glyph for a Latin font from mapped flash, and a CJK font with its tables mapped and outlines
   read from SD;
-- the scratch peak and the stack high-water mark;
+- a store hit as a hash probe through mapped flash, against today's mini-table lookup;
+- a GPOS kerning lookup, with and without the pair cache;
+- the stack high-water mark of the loop task and the render task while rendering;
 - flash program time per stored record, and the erase time for 64 KB and 1 MB;
 - free mapping pages at runtime.
 
 Gates:
 
-- **If a glyph costs more than about 2 ms all-in** (render plus write), revisit writing during warm-up
-  (2, 7.3) before Stage 2c.
+- **If a glyph costs more than about 2 ms all-in** (render plus write), or **a CJK first chapter would
+  add more than about 10 s to its build,** pull the deferred metrics-only layout mode (section 11) into
+  Stage 2c.
 - **If fewer than about 25 mapping pages are free,** shrink the store regions in 4.1.
 
-### 9.2 Stage 1a, Stage 1b and Stage 2-prep
+### 9.2 Stage 1
 
-These stages must not change behaviour, and each is held to the same checks:
+Stage 1 must not change behaviour:
 
 - All existing host tests pass, and page-dump goldens are byte-identical.
-- A device smoke test with a `.cpfont` family: page turns, chapter builds, previews, and the
-  dictionary view. The heap low-water mark (`logStats`) does not get worse.
-- Stage 1b also quotes `sizeof(SdCardFont)` before and after, measured on RV32.
+- A device smoke test with a `.cpfont` family and with a built-in family: page turns, chapter builds,
+  previews, the dictionary view, and ring glyphs (force a prewarm miss). The heap low-water mark
+  (`logStats`) does not get worse.
 
 ### 9.3 Stage 2: host tests
 
@@ -523,9 +528,10 @@ These stages must not change behaviour, and each is held to the same checks:
   limit.
 - **The integer loader against FreeType unhinted** (the host build has FreeType through FreeInkFont),
   over every glyph of the bundled TTF sources: no load failures, ≤5 box differences per font, and ≤3% of
-  pixels different at 2-bit. These are today's prototype numbers kept as a regression gate.
-- **`TtfSource` cold against warm:** the same layout metrics and the same page dumps with and without a
-  populated store.
+  pixels different at 2-bit. These are today's prototype numbers kept as a regression gate. Span
+  packing must match packing the bitmap afterwards.
+- **`TtfFont` cold against warm:** the same layout metrics and the same page dumps with an empty store
+  and with a populated one. Ring mode must give the same dumps as stored mode.
 - **`FontBytes`:** bounds checks, SD page-cache eviction, and routing between copied tables and SD.
 - **Corrupted fonts** under AddressSanitizer and UBSan: truncated files and randomly mutated tables. No
   crash and no read out of bounds.
@@ -533,11 +539,12 @@ These stages must not change behaviour, and each is held to the same checks:
 ### 9.4 Stage 2: device (X3 and X4)
 
 - a Latin family in flash mode and a CJK font in SD mode;
-- headings render from rung faces (the logs show the rung becoming a face), including on pages laid
-  out in an earlier session;
+- headings render from rung faces, including on pages laid out in an earlier session;
 - after a reboot nothing is rendered again (the logs show store hits);
-- a family switch wipes the store, and the store-full path works;
-- first-page latency, and the heap low-water mark against the `.cpfont` baseline;
+- a family switch wipes the store, the store-full path enters ring mode and wipes at the next book
+  open;
+- first-page latency, first-chapter build time, and the heap low-water mark against the `.cpfont`
+  baseline;
 - a preview never touches the store.
 
 ## 10. Prototype
@@ -549,18 +556,22 @@ behaviour as its test gate.
 ## 11. Deferred (pick up after the first version)
 
 1. Compound glyphs positioned by point matching (ARGS_ARE_XY_VALUES clear).
-2. Font collections (`.ttc`).
-3. Variable fonts beyond the default instance (real bold from the `wght` axis).
-4. Hinting: glyphs are unhinted, so stem weight at small sizes can vary (compare issue #149). A light
+2. Glyphs with more than 512 points (scratch cap).
+3. Font collections (`.ttc`).
+4. Variable fonts beyond the default instance (real bold from the `wght` axis).
+5. Hinting: glyphs are unhinted, so stem weight at small sizes can vary (compare issue #149). A light
    integer stem darkening or x-height snap could follow.
-5. FreeType's 4×4 oversampling of overlapping outlines. The cause of the 2-3% difference at 2-bit;
+6. FreeType's 4×4 oversampling of overlapping outlines. The cause of the 2-3% difference at 2-bit;
    revisit only if artefacts show on the panel.
-6. Ligatures beyond fi/fl/ff/ffi/ffl, and other GSUB features.
-7. Native rendering at exact CSS sizes beyond the ladder rungs, and evicting rung faces before the
-   book closes (v1 keeps them).
-8. Several families in the store, for example archiving a family's store to SD on switch.
-9. Smarter handling of a full store (generations, LRU) instead of a wipe.
-10. Checkpoints for finding the log's write position, if the scan measures slow.
+7. Ligatures beyond fi/fl/ff/ffi/ffl, and other GSUB features.
+8. Native rendering at exact CSS sizes beyond the ladder rungs, and evicting faces before the family
+   unloads.
+9. Several families in the store, for example archiving a family's store to SD on switch.
+10. Smarter handling of a full store (generations, LRU) instead of a wipe.
+11. Checkpoints for finding the log's write position, if the scan measures slow.
+12. A metrics-only layout mode, so a CJK first chapter build need not render every new glyph (step 0
+    gate).
+13. Batch rendering of a page's misses in glyph-ID order, for SD read locality in SD mode.
 
 ## 12. Side findings (separate from this work)
 
@@ -571,6 +582,7 @@ behaviour as its test gate.
   `prewarmStyle` mmap comment says bitmaps are not in the mapping. Both are wrong.
 - **Performance:** a full prewarm reads glyph records from SD even for mmap fonts, and `onGlyphMiss` has
   no mmap branch.
+- **SD fonts kern only when drawing,** so layout widths and drawn widths differ by the kerning.
 - **SDK:**
   - The `TtfFont.cpp` comment says stb allocates nothing; in fact it allocates a 56 KB block per glyph
     on RV32 and drops edges silently when that fails.
