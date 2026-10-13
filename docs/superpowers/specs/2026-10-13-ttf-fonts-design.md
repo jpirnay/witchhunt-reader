@@ -16,6 +16,8 @@ Success means:
 - Rendered glyphs survive power cycles, so a new session does not render them again.
 - Heap use is no worse than today's SD-font path.
 - Latin families and CJK fonts both work. CJK fonts are 5-20 MB per weight.
+- Headings and other CSS sizes snap to the reader's size ladder (10-26 pt, `FONT_SIZE_RUNGS`) and
+  render natively at that rung, as built-in fonts do. Only the small remainder is resampled.
 
 Out of scope, by decision: OTF/CFF outlines and any other format. The aim is TTF, done properly and fast.
 
@@ -34,12 +36,16 @@ numbers come from step 0.
 | Glyph store in the `spiffs` partition (raw flash, memory-mapped) | Fast random reads with no heap; it survives power-off; it is already used for the `.cpfont` cache. |
 | Wipe the store on family change | One family at a time, as with `.cpfont` today. |
 | Integration in stages: a `GlyphSource` interface under `SdCardFont` | `SdCardFont`'s page machinery is exactly what a TTF needs. Only the data source differs. |
+| Native ladder rungs for headings | Sharp headings are a main benefit of TTF. Rungs are the absolute `FONT_SIZE_RUNGS` (at most 9), so the store holds a bounded set of sizes, and changing the body size reuses them. |
+| Slim per-size faces | `SdCardFont` is 2,448 B per instance on RV32 (measured). Splitting it into family state plus one face per size, with each style's page state allocated on first use, costs about 0.6-1 KB per rung in use instead of 2.4 KB. |
 | Write glyphs to the store during page warm-up | It is simpler than deferring the writes, which would need 10-15 KB of heap to hold new bitmaps. The next page is pre-rendered in the background, so the cost is mostly hidden. |
 
 ## 3. Architecture
 
 ```
-SdCardFont (page engine; its API toward the eight dependents is unchanged)
+SdCardFont (family: page engine; its API toward the dependents is unchanged)
+   │ owns one or more
+   ├─ FontFace (one per size: 4 EpdFont + per-style stub; page state allocated per style on first use)
    │ owns one
    ▼
 GlyphSource ── CpFontSource    today's .cpfont reading code, moved, behaviour identical
@@ -66,11 +72,40 @@ addresses it hands out:
 - the per-page kern matrix layout;
 - `clearCache` and `clearAccumulation`.
 
+### 3.0 Family and faces
+
+Today one `SdCardFont` is one size, with fixed `PerStyle` state for all four styles: 2,448 B per
+instance on RV32. The state splits two ways.
+
+**Family-level (one per `SdCardFont`):**
+
+- the `GlyphSource`;
+- the 8-slot miss ring and its contexts;
+- the file path;
+- the "already reported missing" log, now keyed by face, style and codepoint and shared by the faces;
+- stats;
+- the `useArena` hook.
+
+**`FontFace` (one per size):**
+
+- the size (points and pixels-per-em) and its store size index;
+- the font ID;
+- four `EpdFont` objects, whose addresses never move;
+- for each present style, the stub `EpdFontData` carrying that style's metrics and the miss handler;
+- for each style, the page state (mini intervals, glyphs, bitmap base, mini kern, mode). It is
+  allocated the first time that style is prewarmed at that size and freed by `clearCache`.
+
+A `.cpfont` family has exactly one face, so its behaviour is unchanged; the scaled alias stays an
+alias, not a face. A TTF family has a body face plus one face per ladder rung it has used (5.5).
+
 ### 3.1 `GlyphSource` (lib/EpdFont/GlyphSource.h)
 
 The interface works on whole pages, not single glyphs. That keeps virtual calls out of the inner loops
 and lets `CpFontSource` keep its current code paths unchanged. Below is a sketch of the contract; the
 implementation plan fixes the exact signatures.
+
+The calls that depend on size also take the face (its size index and pixels-per-em); they are left
+out of the sketch below. `CpFontSource` has one size and rejects any other.
 
 ```cpp
 class GlyphSource {
@@ -309,7 +344,35 @@ points) is a transient failure (6.1).
   - A ligature glyph with no codepoint of its own gets the private-use key `U+F0000 + glyphId`, which
     `TtfSource` maps back to the glyph ID.
 
-### 5.5 Not supported in the first version
+### 5.5 Sizes: the body face and the ladder rungs
+
+- **The body face** is the reader size the user has chosen, at any point size the settings allow,
+  rendered natively. A TTF family never uses the scaled alias (`ensureSizeAlias`).
+- **Rungs.** `buildReaderFontSizeLadder` gets a TTF branch. For a TTF body font it adds one rung per
+  `FONT_SIZE_RUNGS` entry:
+  - font ID `computeFontId(identity, family, rungPt)`;
+  - `sizePct = rungPt * 100 / bodyPt`.
+
+  This is the same shape as the built-in ladders, so `FontSizeLadder::resolve` and its 3% dead zone
+  are unchanged. A rung equal to the body size is the body face.
+- **Dormant until needed.** At family load, `SdCardFontManager` keeps a dormant table (font ID →
+  rung point size). Nothing is allocated and nothing is entered in `fontMap`.
+- **Becoming a real face.** `GfxRenderer`'s direct `fontMap.find` calls (more than 8 sites) are replaced
+  by one private lookup helper. On a miss, it calls an optional resolver installed by
+  `SdCardFontManager`. The resolver turns the dormant rung into a real face:
+  - it creates the `FontFace` and its per-style stubs;
+  - it registers the face in `fontMap` and in the SD font maps;
+  - the lookup then retries.
+
+  `fontMap` becomes `mutable`, the same compromise `sdCardFonts_` already makes. This covers layout,
+  scan passes and draws, including pages laid out in an earlier session.
+- **Lifetime.** Faces live until the family is unloaded or the book closes. There is no eviction in
+  v1: at most 9 rungs, typically 2-4 per book.
+- **Store use.** Each face has its own store size index. Rung sizes are absolute, so a body-size
+  change adds at most one new entry (the new body size, if it is not a rung). The 16 entries cover all
+  rungs plus several body sizes.
+
+### 5.6 Not supported in the first version
 
 - compound glyphs positioned by point matching: the glyph is logged and drawn as missing;
 - font collections (`.ttc`);
@@ -342,7 +405,10 @@ See section 11 for the full deferred list.
 - **Resident heap per loaded TTF family:**
   - the SD page cache, 4 KB, in SD mode only;
   - the ligature table, a few dozen bytes;
-  - the per-page structures `SdCardFont` already allocates.
+  - the per-page structures `SdCardFont` already allocates;
+  - per rung face in use: four `EpdFont` and the stubs of the present styles (about 0.5 KB), plus page
+    state for each style used at that size. That is about 0.6-1 KB per rung, typically 1.3-4 KB per
+    book.
 
   Every table is mapped, not copied.
 - **Flash for the code:** about 20-25 KB. The engine is 6.4 KB and `Gpos`/`Gsub` about 4 KB; the rest is
@@ -388,7 +454,9 @@ The heap miss ring is used only on the arena path.
 
 ### 7.5 Size and family changes
 
-- A new size takes the next size-table entry, and its glyphs build up alongside the others.
+- A new body size gets a new body face and, unless it is a rung, the next size-table entry. Its glyphs
+  build up alongside the others.
+- Rung faces do not change, because rungs are absolute point sizes.
 - A new family means a reinstall.
 - `contentHash()` is the family identity, so changing the TTF files gives new font IDs and the
   sections are laid out again.
@@ -405,16 +473,18 @@ store,** so a preview never wipes the installed family; `.cpfont` previews follo
 | Stage | Content | Merges? |
 |---|---|---|
 | **Step 0** | Throwaway device benchmark on the X3 (section 9.1). | No |
-| **Stage 1** | Extract `CpFontSource` behind `GlyphSource`. A pure refactor with identical behaviour. | Own PR |
+| **Stage 1a** | Extract `CpFontSource` behind `GlyphSource`. A pure refactor with identical behaviour. | Own PR |
+| **Stage 1b** | Split `SdCardFont` into family state and `FontFace` (3.0), with one face for `.cpfont`. Identical behaviour; the per-instance size should drop. | Own PR |
+| **Stage 2-prep** | `GfxRenderer`: one private font-lookup helper in place of the direct `fontMap.find` calls, plus the optional resolver hook (5.5). Mechanical, with no behaviour change. | Own PR |
 | **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR |
 | **Stage 2b** | `TtfRasterizer`: integer loader, vendored `ftgrays`, and the regression test against FreeType. | Own PR |
-| **Stage 2c** | `FontBytes`, `TtfSource`, `Gpos`/`Gsub`, registry and manager wiring, previews. | Own PR |
+| **Stage 2c** | `FontBytes`, `TtfSource`, `Gpos`/`Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR |
 | **Stage 2d** | User-guide section on TTF fonts; FreeType credit (required by the FTL licence). | With 2c or own PR |
 
 Each stage builds on the previous one. Stacked PRs are retargeted to master as their base merges.
 
 **Planning.** Each stage gets its own implementation plan, written when the previous stage's results
-are in. Step 0 and Stage 1 come first and have no dependency on each other. Stage 2's plans use step
+are in. Step 0 and Stage 1a come first and have no dependency on each other. Stage 2's plans use step
 0's numbers.
 
 ## 9. Testing
@@ -435,11 +505,14 @@ Gates:
   (2, 7.3) before Stage 2c.
 - **If fewer than about 25 mapping pages are free,** shrink the store regions in 4.1.
 
-### 9.2 Stage 1
+### 9.2 Stage 1a, Stage 1b and Stage 2-prep
+
+These stages must not change behaviour, and each is held to the same checks:
 
 - All existing host tests pass, and page-dump goldens are byte-identical.
 - A device smoke test with a `.cpfont` family: page turns, chapter builds, previews, and the
-  dictionary view. The heap low-water mark (`logStats`) does not move.
+  dictionary view. The heap low-water mark (`logStats`) does not get worse.
+- Stage 1b also quotes `sizeof(SdCardFont)` before and after, measured on RV32.
 
 ### 9.3 Stage 2: host tests
 
@@ -460,6 +533,8 @@ Gates:
 ### 9.4 Stage 2: device (X3 and X4)
 
 - a Latin family in flash mode and a CJK font in SD mode;
+- headings render from rung faces (the logs show the rung becoming a face), including on pages laid
+  out in an earlier session;
 - after a reboot nothing is rendered again (the logs show store hits);
 - a family switch wipes the store, and the store-full path works;
 - first-page latency, and the heap low-water mark against the `.cpfont` baseline;
@@ -481,7 +556,8 @@ behaviour as its test gate.
 5. FreeType's 4×4 oversampling of overlapping outlines. The cause of the 2-3% difference at 2-bit;
    revisit only if artefacts show on the panel.
 6. Ligatures beyond fi/fl/ff/ffi/ffl, and other GSUB features.
-7. Heading sizes rendered natively instead of through the scaled-glyph path.
+7. Native rendering at exact CSS sizes beyond the ladder rungs, and evicting rung faces before the
+   book closes (v1 keeps them).
 8. Several families in the store, for example archiving a family's store to SD on switch.
 9. Smarter handling of a full store (generations, LRU) instead of a wipe.
 10. Checkpoints for finding the log's write position, if the scan measures slow.
