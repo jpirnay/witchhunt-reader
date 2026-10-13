@@ -143,8 +143,12 @@ record text during the scan pass before any lookup; some measure paths look up f
 a miss. A rung that does not exist yet would therefore be silently skipped by some paths. So:
 
 - **One private lookup helper** replaces the direct calls.
-- **On a miss, the helper calls an optional resolver** installed by `SdCardFontManager`, then retries.
-  The resolver creates the face for a dormant TTF rung (5.5) and registers it in `fontMap`.
+- **On a miss, the helper calls an optional resolver** installed by `SdCardFontManager`. The resolver
+  creates the face for a dormant TTF rung (5.5) and RETURNS the family; the helper registers it in
+  `fontMap` (a plain emplace, not `insertFont()`). The resolver must not register it itself, and must
+  not look fonts up through the renderer, which would recurse. (As built in Stage 1:
+  `lib/GfxRenderer/FontLookup.h`, `GfxRenderer::setFontResolver`.)
+- **A declined ID is asked again on every lookup**, so declining must be cheap.
 - `fontMap` becomes `mutable`, the same compromise `sdCardFonts_` already makes.
 
 With no resolver installed, or for an ID the resolver does not know, the behaviour is today's.
@@ -396,8 +400,14 @@ the cap can never load (6.1); text glyphs stay well under it.
   are unchanged. A rung equal to the body size is the body face.
 - **Dormant until needed.** At family load, `SdCardFontManager` keeps a dormant table (font ID → rung
   point size). Nothing is allocated and nothing is entered in `fontMap`. The lookup helper's resolver
-  (3.3) creates the face on first use. That covers layout, scan passes and draws, including pages laid
-  out in an earlier session.
+  (3.3) creates the face on first use. That covers every lookup inside `GfxRenderer`: layout, scan
+  passes and draws, including pages laid out in an earlier session. It does NOT cover code that reads
+  `fontMap` directly: `FontCacheManager::prewarmCache` (its own `fontMap_` reference), FreeInkUI
+  (`getFontMap().find`) and `SdCardFontManager`. A cached page drawn in a fresh session therefore
+  reaches `prewarmCache` while its rung is still dormant, so the TTF branch of `prewarmCache` must
+  resolve through `TtfFont`'s dormant table, not `fontMap_`; otherwise that page loses the batched
+  prefetch and renders its glyphs one at a time (correct output, but about 4.76 against 0.73 ms per CJK
+  glyph in SD mode).
 - **Lifetime.** Faces live until the family is unloaded. There is no eviction in v1: at most 9 rungs,
   about 0.5 KB each.
 - **Store use.** Each face has its own size index. Rung sizes are absolute, so a body-size change adds
@@ -517,7 +527,7 @@ are cached as `.fpv` files, keyed by the family identity.
 | Stage | Content | Merges? | Status (2026-10-13) |
 |---|---|---|---|
 | **Step 0** | Throwaway device benchmark on the X3 (section 9.1). | No | Done; Appendix A |
-| **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR (the plan's Task 5) | In progress |
+| **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR (the plan's Task 5) | Built and reviewed; device checks in progress |
 | **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR | Not planned |
 | **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR | Not planned |
 | **Stage 2c** | `FontBytes`, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR | Not planned |
@@ -539,6 +549,31 @@ are in. Step 0 and Stage 1 come first and have no dependency on each other. Stag
 
 The CJK font used for measuring (Microsoft YaHei) is a Windows system font: use it locally only, and
 never commit it or data generated from it.
+
+### 8.1 Carried into Stage 2 from the Stage 1 review
+
+The Stage 1 final review (2026-10-13) found nothing to fix in Stage 1 itself. These points bind the
+Stage 2 plans:
+
+- **Resolver writes and concurrency (2c).** Once a resolver is installed, any lookup can insert into
+  `fontMap`. On the S3 the loop and render tasks run in parallel, so an unlocked reader would race an
+  insert that rebalances the map. Either assert `RenderLock` in the resolve branch (as 3.4 does for the
+  miss path) or create rung faces at a safe point.
+- **The resolve path allocates in the middle of a draw** (a map node of about 40 B plus a face of about
+  0.5 KB), and `std::map::emplace` aborts on OOM because the firmware has no exceptions. Prefer creating
+  rung faces during section builds or at family load; if they are created lazily, create them with
+  `nothrow` allocation before the emplace.
+- **`prewarmCache` and the dormant table:** see 5.5.
+- **`TtfFont::ownsBitmap` should be O(1)**, an address-range check against its ring, because every draw
+  from the store pays that call.
+- **Record lifetime.** `GlyphProvider::missGlyph` promises a record only until the next miss on ANY
+  provider of the same font (SdCardFont's styles share one ring; `TtfFont`'s per-face adapters over one
+  ring will too). `EpdGlyphRef` copies the metrics by value, so layout may hold any number of refs; only
+  `sdRecord` (bitmap offset and ownership identity) ages, and draws consume it straight after the lookup.
+  Rename `sdRecord` in 2c, since it will carry flash-store records too.
+- **Optional:** a `prefetch(text)` virtual on `GlyphProvider` (no-op by default) would let
+  `ensureFontReady` and `prewarmCache` reach `TtfFont` through `family->getData(style)->provider`,
+  without a font-ID-to-TtfFont registry.
 
 ## 9. Testing
 
