@@ -33,6 +33,7 @@
 #include "ttf/gen/bookerly.h"
 #include "ttf/gen/cjk_subset.h"
 #include "ttf/gen/notosans.h"
+#include "ttf/fastkern.h"
 #include "ttf/ittf.h"
 
 // Every timed loop folds its work into this, and it is printed once at the end, so -O2 cannot
@@ -170,6 +171,27 @@ static void benchKerning(const char* name, const uint8_t* d, uint32_t len) {
   logSerial.printf("  kerning %-8s: %lld ns/pair (GPOS %u B), %u of %u pairs non-zero\n", name,
                 (long long)(us * 1000 / (int64_t)(kN * kN)), (unsigned)gposLen, (unsigned)nonzero,
                 (unsigned)(kN * kN));
+
+  const int64_t i0 = nowUs();
+  fastkern::FastKern fk;
+  fk.init(d + gpos, gposLen);
+  const int64_t i1 = nowUs();
+  uint32_t mismatches = 0;
+  for (size_t a = 0; a < kN; ++a) {
+    for (size_t b = 0; b < kN; ++b) {
+      const int32_t v = fk.pair(gids[a], gids[b]);
+      sink += static_cast<uint32_t>(v);
+      mismatches += v != freeink::font::gpos::PairKernAdjustment(d + gpos, gposLen, gids[a], gids[b]);
+    }
+  }
+  const int64_t f0 = nowUs();
+  for (size_t a = 0; a < kN; ++a) {
+    for (size_t b = 0; b < kN; ++b) sink += static_cast<uint32_t>(fk.pair(gids[a], gids[b]));
+  }
+  const int64_t fus = nowUs() - f0;
+  logSerial.printf("  kerning %-8s fast: %lld ns/pair (%u subtables, init %lld us), %u mismatches vs Gpos.cpp\n", name,
+                   (long long)(fus * 1000 / (int64_t)(kN * kN)), (unsigned)fk.subtables.size(), (long long)(i1 - i0),
+                   (unsigned)mismatches);
 }
 
 // ---- flash: erase, program, index probe ------------------------------------------------------
@@ -535,7 +557,7 @@ static void bringUpSd() {
 }
 
 // The largest regular file in `dir` and its immediate subdirectories, written into `path`.
-static uint32_t largestFileIn(const char* dir, char* path, size_t pathLen) {
+static uint32_t largestFileIn(const char* dir, char* path, size_t pathLen, int depth = 0) {
   uint32_t best = 0;
   HalFile d = Storage.open(dir);
   if (!d || !d.isDirectory()) return 0;
@@ -543,11 +565,11 @@ static uint32_t largestFileIn(const char* dir, char* path, size_t pathLen) {
   for (HalFile e = d.openNextFile(); e; e = d.openNextFile()) {
     e.getName(name, sizeof name);
     char child[160];
-    snprintf(child, sizeof child, "%s/%s", dir, name);
+    snprintf(child, sizeof child, dir[strlen(dir) - 1] == '/' ? "%s%s" : "%s/%s", dir, name);
     if (e.isDirectory()) {
       e.close();
       char sub[160];
-      const uint32_t s = largestFileIn(child, sub, sizeof sub);
+      const uint32_t s = depth < 2 ? largestFileIn(child, sub, sizeof sub, depth + 1) : 0;
       if (s > best) {
         best = s;
         snprintf(path, pathLen, "%s", sub);
@@ -572,8 +594,8 @@ static void benchSd() {
   HalFile f = Storage.open(path);
   if (!f || f.fileSize() < 1024 * 1024) {
     if (f) f.close();
-    if (largestFileIn("/fonts", path, sizeof path) < 64 * 1024) {
-      logSerial.println("  SD 512 B read: SKIPPED (no /bench/cjk.ttf and no file over 64 KB in /fonts)");
+    if (largestFileIn("/", path, sizeof path) < 64 * 1024) {
+      logSerial.println("  SD 512 B read: SKIPPED (no /bench/cjk.ttf and no file over 64 KB on the card)");
       return;
     }
     f = Storage.open(path);
