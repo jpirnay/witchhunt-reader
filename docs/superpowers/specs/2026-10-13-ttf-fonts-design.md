@@ -69,8 +69,10 @@ class GlyphProvider {
   // A glyph the font's own tables do not have (all of them, for a TTF font).
   // The record lives at least until the next call on this provider.
   virtual const EpdGlyph* missGlyph(uint32_t codepoint) = 0;
-  // Non-null when the record's bitmap is not at EpdFontData::bitmap + dataOffset (ring glyphs).
-  virtual const uint8_t* bitmapOverride(const EpdGlyph* glyph) { return nullptr; }
+  // True when the provider keeps this record's bitmap itself (ring glyphs); `bitmap` then gets it,
+  // which is nullptr for a glyph with no pixels. False: the bitmap is at EpdFontData::bitmap +
+  // dataOffset. A plain pointer return could not tell "mine, no pixels" from "not mine".
+  virtual bool ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const { return false; }
   // 4.4 fixed-point pixels, like the kern tables. Asked only when the font has no kern tables.
   virtual int8_t kerning(uint32_t leftCp, uint32_t rightCp) { return 0; }
   virtual ~GlyphProvider() = default;
@@ -79,9 +81,9 @@ class GlyphProvider {
 
 - **`EpdFont::findGlyph`** calls `provider->missGlyph` where it called the callback.
 - **`EpdFont::getKerning`** asks the provider when no kern tables are set.
-- **`GfxRenderer::getGlyphBitmap`** asks `provider->bitmapOverride` instead of the cast.
+- **`GfxRenderer::getGlyphBitmap`** asks `provider->ownsBitmap` instead of the cast.
 - **`SdCardFont`** implements the interface with the per-style contexts it already has. Its ring
-  glyphs return their heap bitmap from `bitmapOverride`; its behaviour does not change.
+  glyphs report their heap bitmap through `ownsBitmap`; its behaviour does not change.
 - **Built-in fonts** leave the pointer null, so the generated font headers keep their initialisers.
 
 ### 3.2 `TtfFont` (lib/EpdFont/ttf/)
@@ -112,7 +114,7 @@ face's size index) and probes the mapped index.
   copy and no heap.
 - **Miss:** it renders the glyph, stores it (4.5), and returns the stored record.
 - **Ring mode:** used when the store is full, after a write error, or in previews (6, 7.6). The glyph
-  is rendered into an 8-slot heap ring instead, and `bitmapOverride` returns the ring bitmap.
+  is rendered into an 8-slot heap ring instead, and `ownsBitmap` reports the ring bitmap.
 
 `TtfFont` is not registered in `sdCardFonts_` or `sdCardFontAliases_`. Those maps drive `SdCardFont`'s
 own maintenance loops: metadata drop and restore, cache clear, prewarm, stats. So
