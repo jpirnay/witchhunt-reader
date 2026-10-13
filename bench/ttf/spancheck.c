@@ -39,6 +39,17 @@ int main(int argc, char** argv) {
     memset(packed, 0, (size_t)(n + 3) / 4);
     for (int p = 0; p < n; ++p) packed[p >> 2] |= (uint8_t)(q2(a.pixels[p]) << (6 - 2 * (p & 3)));
     if (memcmp(packed, span, (size_t)(n + 3) / 4) != 0) mismatched++;
+    /* The pool size only changes how many bands ftgrays splits a glyph into: same bytes. */
+    static uint8_t other[512 * 512 / 4];
+    for (int kb = 4; kb <= 8; kb *= 2) {
+      ITtfBitmap c;
+      ittf_select_pool(kb);
+      if (ittf_render_2bit(&f, g, px << 6, &o, other, sizeof other, &c) < 0 || c.width != b.width ||
+          c.height != b.height || memcmp(other, span, (size_t)(n + 3) / 4) != 0) {
+        mismatched++;
+      }
+      ittf_select_pool(2);
+    }
   }
   printf("%s @%d: %ld glyphs compared, %ld mismatched\n", argv[1], px, glyphs, mismatched);
   return mismatched ? 1 : 0;

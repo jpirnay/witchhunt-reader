@@ -104,7 +104,10 @@
 
   /* The size in bytes of the render pool used by the scan-line converter  */
   /* to do all of its work.                                                */
-#define FT_RENDER_POOL_SIZE  2048L
+#ifndef ITTF_POOL_SIZE
+#define ITTF_POOL_SIZE  2048L
+#endif
+#define FT_RENDER_POOL_SIZE  ITTF_POOL_SIZE
 
 
   /* Auxiliary macros for token concatenation. */
@@ -476,7 +479,7 @@ typedef ptrdiff_t  FT_PtrDist;
    * only makes the rasterizer subdivide into more bands; output is identical.
    */
 #undef  FT_RENDER_POOL_SIZE
-#define FT_RENDER_POOL_SIZE  2048L
+#define FT_RENDER_POOL_SIZE  ITTF_POOL_SIZE
 
   /* maximum number of gray cells in the buffer */
 #if FT_RENDER_POOL_SIZE > 2048

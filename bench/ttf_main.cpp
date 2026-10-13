@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "ttf/gen/bookerly.h"
+#include "ttf/gen/cjk_extents.h"
 #include "ttf/gen/cjk_subset.h"
 #include "ttf/gen/notosans.h"
 #include "ttf/fastkern.h"
@@ -120,16 +121,64 @@ static void benchRender() {
       {"NotoSans", kNotoSans, kNotoSansLen, g_latin, g_latinCount},
       {"CJK", kCjkSubset, kCjkSubsetLen, g_cjk, g_cjkCount},
   };
-  const unsigned stackBefore = static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr));
-  for (const Case& c : cases) {
-    for (const int px : {29, 54}) {  // 14 pt and 26 pt at 150 DPI
-      const RenderResult r = timeRender(c.data, c.len, px, c.cps, c.n);
-      logSerial.printf("  render %-8s %2d px/em: cold %6u ns/glyph, warm %6u ns/glyph (%u glyphs, max %u B)\n", c.name,
-                    px, (unsigned)r.coldNs, (unsigned)r.warmNs, (unsigned)r.rendered, (unsigned)r.maxBytes);
+  // The cell pool sits on the stack in these builds, so each pool's stack is the high-water drop it
+  // causes; reported as 16384 - free (the loop task's stack is 16 KB), not as a difference.
+  for (const int kb : {2, 4, 8}) {
+    ittf_select_pool(kb);
+    for (const Case& c : cases) {
+      for (const int px : {29, 54}) {  // 14 pt and 26 pt at 150 DPI
+        const RenderResult r = timeRender(c.data, c.len, px, c.cps, c.n);
+        logSerial.printf("  render %dk pool %-8s %2d px/em: cold %7u ns/glyph, warm %7u ns/glyph (%u glyphs, max %u B)\n",
+                         kb, c.name, px, (unsigned)r.coldNs, (unsigned)r.warmNs, (unsigned)r.rendered,
+                         (unsigned)r.maxBytes);
+      }
+    }
+    logSerial.printf("  render %dk pool: loop-task stack used at its deepest so far %u B of 16384\n", kb,
+                     16384u - static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+  }
+  ittf_select_pool(2);
+}
+
+// Render with the flash cache emptied before every glyph: 32 KB of another font is read first (the
+// C3's flash cache is 16 KB, shared by code and data), so the glyph's outline AND the render code
+// come from flash, as they do when a section build meets a new glyph between parser and layout code.
+// Only the render itself is timed.
+static void benchRenderThrashed() {
+  struct Case {
+    const char* name;
+    const uint8_t* data;
+    uint32_t len;
+    const uint32_t* cps;
+    uint32_t n;
+  };
+  const Case cases[] = {
+      {"Bookerly", kBookerly, kBookerlyLen, g_latin, g_latinCount},
+      {"CJK", kCjkSubset, kCjkSubsetLen, g_cjk, g_cjkCount},
+  };
+  for (const int kb : {2, 4, 8}) {
+    ittf_select_pool(kb);
+    for (const Case& c : cases) {
+      if (ittf_init(&g_font, c.data, c.len) != 0) continue;
+      uint64_t totalUs = 0;
+      uint32_t count = 0;
+      for (uint32_t i = 0; i < c.n; ++i) {
+        const uint32_t g = ittf_glyph(&g_font, c.cps[i]);
+        if (!g) continue;
+        for (uint32_t k = 0; k < 32 * 1024; k += 32) sink += kNotoSans[(i * 4096 + k) % kNotoSansLen];
+        ITtfBitmap bm;
+        const int64_t t0 = nowUs();
+        const int rc = ittf_render_2bit(&g_font, g, 29 << 6, &g_outline, g_out, sizeof g_out, &bm);
+        totalUs += static_cast<uint64_t>(nowUs() - t0);
+        if (rc >= 0) {
+          sink += static_cast<uint32_t>(bm.width);
+          ++count;
+        }
+      }
+      logSerial.printf("  render %dk pool %-8s 29 px/em, cache emptied before each glyph: %7u ns/glyph (%u glyphs)\n",
+                       kb, c.name, (unsigned)(totalUs * 1000 / (count ? count : 1)), (unsigned)count);
     }
   }
-  const unsigned stackAfter = static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr));
-  logSerial.printf("  loop-task stack high-water: %u B free before rendering, %u B after\n", stackBefore, stackAfter);
+  ittf_select_pool(2);
 }
 
 // ---- kerning --------------------------------------------------------------------------------
@@ -507,6 +556,7 @@ static void pageTtf(const char* name, const uint8_t* data, uint32_t len) {
   }
   const int32_t asc = (g_font.ascender * kPpem14pt / g_font.upem + 32) >> 6;
   const int32_t lineH = ((g_font.ascender - g_font.descender) * kPpem14pt / g_font.upem + 63) >> 6;
+  uint64_t fbHash[2] = {};
   for (int run = 0; run < 2; ++run) {
     memset(g_fb, 0, sizeof g_fb);
     ColdCounters counters;
@@ -529,7 +579,12 @@ static void pageTtf(const char* name, const uint8_t* data, uint32_t len) {
                   name, run == 0 ? "first contact" : "warm store   ", (long long)(t1 - t0),
                   (long long)counters.renderUs, (long long)counters.writeUs, (unsigned)counters.rendered,
                   (unsigned)store.logEnd);
+    uint64_t h = 1469598103934665603ull;  // the two runs must draw the very same pixels
+    for (const uint8_t byte : g_fb) h = (h ^ byte) * 1099511628211ull;
+    fbHash[run] = h;
   }
+  logSerial.printf("  page TTF %-8s: first-contact and warm-store pages %s\n", name,
+                   fbHash[0] == fbHash[1] ? "draw identical pixels" : "DIFFER");
   storeClose(store);
 }
 
@@ -770,69 +825,64 @@ static void bringUpSd() {
   logSerial.printf("  SD card: %s\n", g_sdReady ? "mounted" : "NOT mounted");
 }
 
-// The largest regular file in `dir` and its immediate subdirectories, written into `path`.
-static uint32_t largestFileIn(const char* dir, char* path, size_t pathLen, int depth = 0) {
-  uint32_t best = 0;
-  HalFile d = Storage.open(dir);
-  if (!d || !d.isDirectory()) return 0;
-  char name[96];
-  for (HalFile e = d.openNextFile(); e; e = d.openNextFile()) {
-    e.getName(name, sizeof name);
-    char child[160];
-    snprintf(child, sizeof child, dir[strlen(dir) - 1] == '/' ? "%s%s" : "%s/%s", dir, name);
-    if (e.isDirectory()) {
-      e.close();
-      char sub[160];
-      const uint32_t s = depth < 2 ? largestFileIn(child, sub, sizeof sub, depth + 1) : 0;
-      if (s > best) {
-        best = s;
-        snprintf(path, pathLen, "%s", sub);
-      }
-      continue;
-    }
-    const uint32_t s = static_cast<uint32_t>(e.fileSize());
-    if (s > best) {
-      best = s;
-      snprintf(path, pathLen, "%s", child);
-    }
-  }
-  return best;
-}
-
+// The full CJK font (the source of the embedded subset) must be on the card as /bench/cjk.ttf;
+// without it this prints SKIPPED, never a number from some other file. Random-read cost depends on
+// the FILE SIZE (SdFat walks the cluster chain on a backward seek), so only the real font counts.
+//   * 512 B at random and at sorted offsets, as before;
+//   * each sampled glyph's whole glyf record (offset/length from make_cjk_extents.py, mean 666 B,
+//     2.3 sectors) in TEXT order (a fixed shuffle: a page meets characters in no file order) and in
+//     FILE order (what batching a page's misses by glyph ID would give).
 static void benchSd() {
   if (!g_sdReady) {
-    logSerial.println("  SD 512 B read: SKIPPED (no card)");
+    logSerial.println("  SD read: SKIPPED (no card)");
     return;
   }
-  char path[160] = "/bench/cjk.ttf";
+  const char* path = "/bench/cjk.ttf";
   HalFile f = Storage.open(path);
-  if (!f || f.fileSize() < 1024 * 1024) {
-    if (f) f.close();
-    if (largestFileIn("/", path, sizeof path) < 64 * 1024) {
-      logSerial.println("  SD 512 B read: SKIPPED (no /bench/cjk.ttf and no file over 64 KB on the card)");
-      return;
-    }
-    f = Storage.open(path);
-  }
   if (!f) {
-    logSerial.printf("  SD 512 B read: SKIPPED (cannot open %s)\n", path);
+    logSerial.println("  SD read: SKIPPED (/bench/cjk.ttf is not on the card)");
     return;
   }
   const uint32_t size = static_cast<uint32_t>(f.fileSize());
+  logSerial.printf("  SD file %s: %u B\n", path, (unsigned)size);
   constexpr int kReads = 500;
   static uint32_t offsets[kReads];
   uint32_t seed = 4242;
   for (int i = 0; i < kReads; ++i) offsets[i] = (lcg(seed) % (size - 512)) & ~511u;
-  static uint8_t buf[512];
+  static uint8_t buf[4096];
   for (int sorted = 0; sorted < 2; ++sorted) {
     if (sorted) std::sort(offsets, offsets + kReads);
     const int64_t t0 = nowUs();
     for (int i = 0; i < kReads; ++i) {
       f.seekSet(offsets[i]);
-      sink += static_cast<uint32_t>(f.read(buf, sizeof buf)) + buf[7];
+      sink += static_cast<uint32_t>(f.read(buf, 512)) + buf[7];
     }
-    logSerial.printf("  SD 512 B read, %s offsets: %lld us each (%s, %u B)\n", sorted ? "sorted" : "random",
-                  (long long)((nowUs() - t0) / kReads), path, (unsigned)size);
+    logSerial.printf("  SD 512 B read, %s offsets: %lld us each\n", sorted ? "sorted" : "random",
+                     (long long)((nowUs() - t0) / kReads));
+  }
+
+  static uint16_t order[kCjkExtentCount];
+  for (uint32_t i = 0; i < kCjkExtentCount; ++i) order[i] = static_cast<uint16_t>(i);
+  uint32_t shuffleSeed = 777;
+  for (uint32_t i = kCjkExtentCount - 1; i > 0; --i) std::swap(order[i], order[lcg(shuffleSeed) % (i + 1)]);
+  for (int fileOrder = 0; fileOrder < 2; ++fileOrder) {
+    if (fileOrder) {
+      std::sort(order, order + kCjkExtentCount,
+                [](uint16_t a, uint16_t b) { return kCjkExtents[a].offset < kCjkExtents[b].offset; });
+    }
+    uint32_t bytes = 0, shortReads = 0;
+    const int64_t t0 = nowUs();
+    for (uint32_t i = 0; i < kCjkExtentCount; ++i) {
+      const CjkExtent& e = kCjkExtents[order[i]];
+      f.seekSet(e.offset);
+      const int got = f.read(buf, e.length);
+      shortReads += got != static_cast<int>(e.length);
+      bytes += static_cast<uint32_t>(got > 0 ? got : 0);
+      sink += buf[0];
+    }
+    logSerial.printf("  SD glyph read, %s order: %lld us per glyph (%u glyphs, %u B, %u short reads)\n",
+                     fileOrder ? "file" : "text", (long long)((nowUs() - t0) / kCjkExtentCount),
+                     (unsigned)kCjkExtentCount, (unsigned)bytes, (unsigned)shortReads);
   }
   f.close();
 }
@@ -849,6 +899,7 @@ void setup() {
   buildCodepointSets();
   logSerial.println("[render]");
   benchRender();
+  benchRenderThrashed();
   logSerial.println("[kerning]");
   benchKerning("Bookerly", kBookerly, kBookerlyLen);
   benchKerning("NotoSans", kNotoSans, kNotoSansLen);

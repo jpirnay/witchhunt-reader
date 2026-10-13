@@ -46,6 +46,9 @@ int ittf_render(const ITtf* f, uint32_t g, int32_t ppem26_6, ITtfOutline* o, uin
 int ittf_render_2bit(const ITtf* f, uint32_t g, int32_t ppem26_6, ITtfOutline* o, uint8_t* out2, uint32_t cap,
                      ITtfBitmap* bm);
 
+/* Picks the ftgrays build with a 2, 4 or 8 KB cell pool (the pool lives on the stack). */
+void ittf_select_pool(int kb);
+
 #ifdef __cplusplus
 }
 #endif

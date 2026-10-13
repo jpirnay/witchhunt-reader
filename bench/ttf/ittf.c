@@ -165,6 +165,16 @@ int ittf_advance26_6(const ITtf* f, uint32_t g, int32_t ppem26_6) {
 
 static void* s_raster;
 
+/* The 2 KB build is ftgrays_build.c (ft_grays_raster); 4 and 8 KB come from ftgrays_build_4k/8k.c. */
+extern const FT_Raster_Funcs ittf_grays_raster_4k;
+extern const FT_Raster_Funcs ittf_grays_raster_8k;
+static const FT_Raster_Funcs* s_funcs = &ft_grays_raster;
+
+void ittf_select_pool(int kb) {
+  s_funcs = kb >= 8 ? &ittf_grays_raster_8k : kb >= 4 ? &ittf_grays_raster_4k : &ft_grays_raster;
+  s_raster = NULL;
+}
+
 /* Span sink for FT_RASTER_FLAG_DIRECT: packs coverage straight into the device's 2-bit,
  * MSB-first, row-continuous stream with the PC converter's thresholds. y is bottom-up. */
 typedef struct { uint8_t* out; int w, h; } SpanSink;
@@ -199,7 +209,7 @@ int ittf_render_2bit(const ITtf* f, uint32_t g, int32_t ppem26_6, ITtfOutline* o
   ol.n_contours = (short)o->numContours; ol.n_points = (short)o->numPoints;
   ol.points = o->vec; ol.tags = (char*)o->tags; ol.contours = o->contours; ol.flags = FT_OUTLINE_NONE;
   SpanSink sink = {out2, bm->width, bm->height};
-  if (!s_raster) ft_grays_raster.raster_new(NULL, (FT_Raster*)&s_raster);
+  if (!s_raster) s_funcs->raster_new(NULL, (FT_Raster*)&s_raster);
   FT_Raster_Params params;
   memset(&params, 0, sizeof params);
   params.source = &ol;
@@ -208,7 +218,7 @@ int ittf_render_2bit(const ITtf* f, uint32_t g, int32_t ppem26_6, ITtfOutline* o
   params.user = &sink;
   params.clip_box.xMin = 0; params.clip_box.yMin = 0;
   params.clip_box.xMax = bm->width; params.clip_box.yMax = bm->height;
-  if (ft_grays_raster.raster_render((FT_Raster)s_raster, &params)) return -1;
+  if (s_funcs->raster_render((FT_Raster)s_raster, &params)) return -1;
   bm->pixels = out2;
   return 1;
 }
@@ -266,11 +276,11 @@ int ittf_render(const ITtf* f, uint32_t g, int32_t ppem26_6, ITtfOutline* o, uin
   bm.rows = (unsigned)h; bm.width = (unsigned)w; bm.pitch = w; bm.buffer = buf;
   bm.num_grays = 256; bm.pixel_mode = FT_PIXEL_MODE_GRAY;
   memset(buf, 0, (size_t)w * h);
-  if (!s_raster) ft_grays_raster.raster_new(NULL, (FT_Raster*)&s_raster);
+  if (!s_raster) s_funcs->raster_new(NULL, (FT_Raster*)&s_raster);
   FT_Raster_Params params;
   memset(&params, 0, sizeof params);
   params.target = &bm; params.source = &ol; params.flags = FT_RASTER_FLAG_AA;
-  if (ft_grays_raster.raster_render((FT_Raster)s_raster, &params)) return -1;
+  if (s_funcs->raster_render((FT_Raster)s_raster, &params)) return -1;
   out->pixels = buf; out->width = w; out->height = h;
   out->left = xMin >> 6; out->top = yMax >> 6;
   return 0;
