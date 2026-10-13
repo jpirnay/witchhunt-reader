@@ -1,8 +1,14 @@
 # On-device TTF fonts with a persistent glyph store: design
 
-Status: design approved in conversation on 2026-10-13. A step-back review replaced the earlier
-`SdCardFont`-based integration with the direct integration in section 3. This file is the written
-spec for review.
+Status (2026-10-13): approved. A step-back review replaced the earlier `SdCardFont`-based integration
+with the direct integration in section 3.
+
+- **Step 0 (device benchmark): done.** Its numbers are in Appendix A; the decisions they drove are in
+  section 2.
+- **Stage 1: in progress** on branch `refactor/glyph-provider`, following
+  `docs/superpowers/plans/2026-10-13-ttf-stage1-glyph-provider.md`.
+- **Stage 2: not planned yet.** The next step is the Stage 2a plan.
+- **Where everything lives:** section 8, "Branches and files".
 
 It is working material. When the work merges, lasting parts move to reference docs, open items move
 to `docs/future_work/`, and this file is deleted (see the docs layout convention).
@@ -508,14 +514,14 @@ are cached as `.fpv` files, keyed by the family identity.
 
 ## 8. Delivery stages
 
-| Stage | Content | Merges? |
-|---|---|---|
-| **Step 0** | Throwaway device benchmark on the X3 (section 9.1). | No |
-| **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR per change |
-| **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR |
-| **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR |
-| **Stage 2c** | `FontBytes`, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR |
-| **Stage 2d** | User-guide section on TTF fonts; FreeType credit (required by the FTL licence). | With 2c or own PR |
+| Stage | Content | Merges? | Status (2026-10-13) |
+|---|---|---|---|
+| **Step 0** | Throwaway device benchmark on the X3 (section 9.1). | No | Done; Appendix A |
+| **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR (the plan's Task 5) | In progress |
+| **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR | Not planned |
+| **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR | Not planned |
+| **Stage 2c** | `FontBytes`, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR | Not planned |
+| **Stage 2d** | User-guide section on TTF fonts; FreeType credit (required by the FTL licence). | With 2c or own PR | Not planned |
 
 Each stage builds on the previous one. Stacked PRs are retargeted to master as their base merges.
 
@@ -523,12 +529,22 @@ Each stage builds on the previous one. Stacked PRs are retargeted to master as t
 are in. Step 0 and Stage 1 come first and have no dependency on each other. Stage 2's plans use step
 0's numbers.
 
+**Branches and files** (all local as of 2026-10-13; none is pushed):
+
+| Branch | What it holds | Fate |
+| --- | --- | --- |
+| `docs/ttf-fonts-design` | This spec, the step 0 plan and the Stage 1 plan. | Working material: merges with or before the code, then is folded away (docs layout convention). |
+| `bench/ttf-step0` | The step 0 bench, `bench/ttf/` and `bench/ttf_main.cpp`, with a README on regenerating its data, running it and rebuilding its host checks. It also holds the prototype: the integer loader (`ittf.c`), the standalone `ftgrays` builds, the pre-resolved GPOS reader (`fastkern.h`) and the kerning options (`kernopts.h`). | Never merges. Stage 2b and 2c start from its prototype code; delete the branch once Stage 2 no longer needs to re-measure. |
+| `refactor/glyph-provider` | Stage 1. | One PR to master. |
+
+The CJK font used for measuring (Microsoft YaHei) is a Windows system font: use it locally only, and
+never commit it or data generated from it.
+
 ## 9. Testing
 
 ### 9.1 Step 0: device benchmark (throwaway, X3), DONE 2026-10-13
 
-Its results are recorded with the step 0 plan (ledger) and in the project memory; the decisions they
-drove are in section 2. Gate verdicts:
+Its numbers are in Appendix A; the decisions they drove are in section 2. Gate verdicts:
 - **Latin all-in:** about 1.3 ms per new glyph, with the cache emptied and the writes measured in place:
   PASS.
 - **CJK all-in:** 2.5-2.9 ms per new glyph with file-order reads: over 2 ms, so REVISIT. The first-chapter
@@ -592,9 +608,11 @@ Stage 1 must not change behaviour:
 
 ## 10. Prototype
 
-`ittf.c` (the integer loader) and its benchmarks live in the session scratchpad, not in the repo. They
-are throwaway code; Stage 2b reimplements the loader on top of `FontBytes`, keeping the measured
-behaviour as its test gate.
+The prototype is on branch `bench/ttf-step0` under `bench/ttf/` (see its README): `ittf.c` (the integer
+loader), the standalone `ftgrays` builds, `fastkern.h` (the pre-resolved GPOS reader) and host checks.
+`bench/ttf/host/fullcmp.cpp` is the comparison against FreeType that produced the accuracy figures in
+section 2. All of it is throwaway code: Stage 2b reimplements the loader on top of `FontBytes`, keeping
+the measured behaviour as its test gate.
 
 ## 11. Deferred (pick up after the first version)
 
@@ -631,3 +649,82 @@ behaviour as its test gate.
   - The `TtfFont.cpp` comment says stb allocates nothing; in fact it allocates a 56 KB block per glyph
     on RV32 and drops edges silently when that fails.
   - stb's GPOS kerning skips Extension (type 9) lookups.
+
+## Appendix A. Step 0 measurements (X3, 160 MHz, 2026-10-13)
+
+Measured with the `bench_ttf` sketch on branch `bench/ttf-step0` (`bench/ttf/README.md` says how to
+re-run it). Three runs agreed within 1%. Renderer: the integer loader plus standalone `ftgrays`,
+rendering through the span callback straight to 2-bit.
+
+**Render, µs per glyph** (29 px/em = 14 pt / 54 px/em = 26 pt). The cold pass, which keeps the render
+code cached, is about equal to the warm one. The last row empties the 16 KB flash cache before each
+glyph.
+
+| Font | 2 KB pool | 4 KB pool | 8 KB pool |
+| --- | --- | --- | --- |
+| Bookerly | 469 / 769 | 429 / 691 | 424 / 628 |
+| Noto Sans | 369 / 643 | 335 / 559 | 335 / 512 |
+| CJK (Microsoft YaHei subset) | 1,327 / 2,297 | 1,185 / 1,896 | 833 / 1,713 |
+| Flash cache emptied, 29 px, Bookerly / CJK | 738 / 1,585 | 696 / 1,442 | 690 / 1,087 |
+
+- The output is byte-identical across pool sizes (host span check).
+- An emptied flash cache adds about 0.25-0.27 ms per glyph.
+- Stack used while rendering with the pool on the stack: 4,064 / 6,128 / 10,224 B for the 2 / 4 / 8 KB
+  pool. The loop task's stack is 16 KB (FreeInkUI's `getArduinoLoopTaskStackSize`). Production puts the
+  pool in the scratch block (5.3).
+
+**Flash (`spiffs` partition):**
+- Erase: 64 KB of written flash 138 ms; 1 MB of mostly blank flash 1.08-1.58 s; a full wipe of a written
+  1.2-1.4 MB store about 2.6-3.1 s.
+- Program: a 100 B record 297 µs, a 252 B record 601 µs, an 8 B index slot 124 µs.
+- Each `esp_partition_write` call has a fixed cost: writing a record's header and bitmap in one call saves
+  about 120 µs per glyph.
+
+**Store hit:** 1.5 µs per hash probe through mapped flash, against 1.08 µs for a built-in
+`glyph_lookup`.
+
+**Mapping budget:** the reader image leaves **32** free MMU pages (a device boot probe; the 6.27 MB image
+uses 96 of 128). The largest mapping of the `spiffs` partition is 32 pages (2 MB). An estimate from the
+ELF must take the union of the IROM and DROM page indices, because both buses index the same table;
+summing the segments over-counts.
+
+**One page** (1,199 characters, 42 distinct; no kerning on any path):
+
+| Font | built-in `.cpfont` | TTF, first contact | TTF, warm store |
+| --- | --- | --- | --- |
+| Bookerly | 41.9 ms (16.3 prewarm + 25.6 draw) | 66.8 ms (18.3 render + 25.5 writes) | **21.2 ms** |
+| Noto Sans | 34.7 ms | 58.3 ms | **18.4 ms** |
+
+A warm store is about twice as fast as a built-in font, because nothing is decompressed. On first contact
+the flash writes cost more than the rendering.
+
+**Kerning, µs per pair** (Bookerly). "Page" is a real page with 736 kernable pairs; "chapter" is 30,000
+characters of Moby-Dick with 19,379 pairs. Times include about 0.15-0.19 µs of loop overhead. Every
+option returned exactly what the reference reader returns.
+
+| Option | Page | Chapter | Cost |
+| --- | --- | --- | --- |
+| FreeInkFont `Gpos.cpp` | 137 | 136 | none |
+| Pre-resolved GPOS reader (`fastkern.h`) | 37.8 | 37.7 | none |
+| Reader + per-left-glyph subtable mask + RAM pair cache | 5.4 cold, 1.4 again | 2.0 (83% hits) | 5 KB RAM, cold every session |
+| Class tables compiled at install, read from flash | 3.2 | 3.0 | 1.37 s compile + 0.28 s write, 71 KB flash and a 114 KB transient heap peak, per style |
+| **Pairs stored lazily in the flash store (chosen)** | 58.7 first, 0.9 warm | 5.5 first, **0.45 warm** | 229 slot writes for the first page, 397 more over the chapter |
+
+Noto Sans: `Gpos.cpp` 90 µs, the reader 23.0 µs, compiled tables 2.4-2.6 µs, the RAM cache 2.0 µs over
+the chapter, the lazy store 0.45 µs warm.
+
+**SD card** (the full 19.7 MB YaHei font as `/bench/cjk.ttf`):
+- A random 512 B read costs 4.5 ms; a sorted one 0.35 ms. A backward seek makes SdFat walk the FAT chain
+  from the start of the file, so the cost grows with the file size (21.5 ms in a 167 MB file).
+- Reading whole glyph records (666 B, 2.3 sectors on average): **4.76 ms per glyph in text order, 0.73 ms
+  in file order.**
+
+**Gates** (9.1), from the cache-emptied render figures and the measured writes (about 0.61 ms per Latin
+glyph, 0.73 ms per CJK glyph):
+- Latin all-in: 0.70 ms render (4 KB pool) + 0.61 ms writes = **1.3 ms**: PASS.
+- CJK all-in: 1.44 ms render (4 KB pool) + 0.73 ms SD read in file order + 0.73 ms writes = **2.9 ms**
+  (2.5 ms with the 8 KB pool): REVISIT. In text order it is 6.9 ms.
+- CJK first chapter, assuming 1,500 new glyphs: 4.3 s (4 KB pool) or 3.8 s (8 KB pool) in file order:
+  PASS. In text order about 10.4 s: FAIL. The remedy taken is batching misses in glyph-ID order (3.2,
+  5.1), not the metrics-only layout mode.
+- Free mapping pages: 32: PASS.

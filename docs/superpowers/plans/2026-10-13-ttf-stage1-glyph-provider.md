@@ -1,11 +1,16 @@
 # TTF Stage 1: GlyphProvider and a single font lookup. Implementation plan
 
+> **Status (2026-10-13):** Tasks 1 and 2 are done on `refactor/glyph-provider` (commits `217bc90b9`,
+> `e94a4dd47`; local, not pushed), each reviewed with no open findings. Task 3 is in progress; Tasks 4
+> and 5 are open. Three corrections found while executing are folded into the text below and marked
+> *(corrected)*.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Prepare the font path for TTF fonts without changing any behaviour:
 
 - replace `EpdFontData`'s untyped glyph-miss callback with a `GlyphProvider` interface;
-- route `GfxRenderer`'s 16 font lookups through one helper that can ask a resolver for an ID it does
+- route `GfxRenderer`'s 13 font lookups through one helper that can ask a resolver for an ID it does
   not know.
 
 **Architecture:**
@@ -22,7 +27,7 @@
   `SdCardFont`.
 - **The old two fields are removed last.**
 - **The font lookup** is a header-only template (`lib/GfxRenderer/FontLookup.h`) so it can be tested
-  on the host. `GfxRenderer` uses it at all 16 sites through a private `findFontFamily()`.
+  on the host. `GfxRenderer` uses it at all 13 sites through a private `findFontFamily()`.
 
 **Tech Stack:** C++20 (host tests, gtest via CMake), gnu++2a firmware (PlatformIO, ESP32-C3/S3),
 clang-format 21.1.8.
@@ -89,14 +94,14 @@ clang-format 21.1.8.
     - `virtual int8_t kerning(uint32_t leftCp, uint32_t rightCp);` (default 0)
   - the field `GlyphProvider* EpdFontData::provider`, the last member.
 
-- [ ] **Step 1: Create the branch**
+- [x] **Step 1: Create the branch**
 
 ```bash
 cd /c/_development/witchhunt-reader
 git switch master && git pull --ff-only && git switch -c refactor/glyph-provider
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `test/glyph_provider/CMakeLists.txt`:
 
@@ -267,7 +272,7 @@ TEST(GlyphProvider, AFontWithoutAProviderBehavesAsBefore) {
 }
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 Run:
 
@@ -279,7 +284,7 @@ cmake -S test -B build/test && cmake --build build/test --target GlyphProviderTe
 
 Expected: a compile error, `GlyphProvider.h: No such file or directory`.
 
-- [ ] **Step 4: Create `lib/EpdFont/GlyphProvider.h`**
+- [x] **Step 4: Create `lib/EpdFont/GlyphProvider.h`**
 
 ```cpp
 #pragma once
@@ -320,7 +325,7 @@ class GlyphProvider {
 };
 ```
 
-- [ ] **Step 5: Add the field to `EpdFontData`**
+- [x] **Step 5: Add the field to `EpdFontData`**
 
 In `lib/EpdFont/EpdFontData.h`:
 
@@ -334,7 +339,7 @@ In `lib/EpdFont/EpdFontData.h`:
   GlyphProvider* provider;
 ```
 
-- [ ] **Step 6: Make `EpdFont` ask the provider**
+- [x] **Step 6: Make `EpdFont` ask the provider**
 
 In `lib/EpdFont/EpdFont.cpp`, `EpdFont::findGlyph`. Replace the early return
 
@@ -397,7 +402,7 @@ with
   }
 ```
 
-- [ ] **Step 7: Run the new tests to verify they pass**
+- [x] **Step 7: Run the new tests to verify they pass**
 
 ```bash
 cmake --build build/test --target GlyphProviderTest && build/test/glyph_provider/GlyphProviderTest
@@ -405,7 +410,7 @@ cmake --build build/test --target GlyphProviderTest && build/test/glyph_provider
 
 Expected: `[  PASSED  ] 6 tests.`
 
-- [ ] **Step 8: Run the existing font suites to confirm nothing moved**
+- [x] **Step 8: Run the existing font suites to confirm nothing moved**
 
 ```bash
 cmake --build build/test -j 8 -- -k 0
@@ -414,7 +419,7 @@ ctest --test-dir build/test -R "SdFont|DifferentialRounding|GlyphFallback|FontSi
 
 Expected: all of them pass.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add lib/EpdFont/GlyphProvider.h lib/EpdFont/EpdFontData.h lib/EpdFont/EpdFont.cpp test/glyph_provider test/CMakeLists.txt
@@ -444,7 +449,7 @@ git commit -m "EpdFont: add GlyphProvider and consult it for misses and table-le
 - Produces: `SdCardFont::StyleProvider`, private, implementing `missGlyph` and `ownsBitmap`. After
   this task `SdCardFont` sets only `provider`, and `GfxRenderer` reads only `provider`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `test/sd_font_arena/SdFontArenaTest.cpp`, change the body of
 `GlyphMissesServeFromTheHeapWithTheArenaFull` so that it goes through the provider. Replace
@@ -515,16 +520,17 @@ TEST(SdFontArena, ZeroSizeRingGlyphIsOwnedWithNoBitmap) {
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 ```bash
 cmake --build build/test --target SdFontArenaTest && build/test/sd_font_arena/SdFontArenaTest
 ```
 
-Expected: the three provider tests FAIL on their `ASSERT_NE(nullptr, ...provider)` line, because
-`SdCardFont` still sets only the old fields.
+Expected: a compile error in `SdFontArenaTest.cpp`, an invalid use of the incomplete type
+`GlyphProvider`. `SdCardFont.h` does not include `GlyphProvider.h` yet, so the tests cannot call the
+provider. *(Corrected: the plan first expected a runtime failure on the provider assertion.)*
 
-- [ ] **Step 3: Give `SdCardFont` a `StyleProvider`**
+- [x] **Step 3: Give `SdCardFont` a `StyleProvider`**
 
 In `lib/EpdFont/SdCardFont.h`, add `#include "GlyphProvider.h"` next to the other local includes.
 
@@ -603,7 +609,7 @@ void SdCardFont::applyGlyphMissCallback(uint8_t styleIdx) {
 - Delete the definition
   `SdCardFont* SdCardFont::fromMissCtx(void* ctx) { return static_cast<OverflowContext*>(ctx)->self; }`.
 
-- [ ] **Step 4: Make the renderer ask the provider**
+- [x] **Step 4: Make the renderer ask the provider**
 
 In `lib/GfxRenderer/GfxRenderer.cpp`, `GfxRenderer::getGlyphBitmap`, replace
 
@@ -640,7 +646,7 @@ with
 
 Add `#include <GlyphProvider.h>` beside the other EpdFont includes at the top of `GfxRenderer.cpp`.
 
-- [ ] **Step 5: Run the SD font suites to verify they pass**
+- [x] **Step 5: Run the SD font suites to verify they pass**
 
 ```bash
 cmake --build build/test -j 8 -- -k 0
@@ -649,7 +655,7 @@ ctest --test-dir build/test -R "SdFont|GlyphProvider|DifferentialRounding" --out
 
 Expected: all pass, including `ProviderOwnsOnlyRingBitmaps` and `ZeroSizeRingGlyphIsOwnedWithNoBitmap`.
 
-- [ ] **Step 6: Build the firmware**
+- [x] **Step 6: Build the firmware**
 
 This is the only compile check for `GfxRenderer.cpp`. A cold build takes more than 10 minutes, so run
 it in the background:
@@ -661,7 +667,7 @@ export PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 
 Expected: `[SUCCESS]`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add lib/EpdFont/SdCardFont.h lib/EpdFont/SdCardFont.cpp lib/GfxRenderer/GfxRenderer.cpp test/sd_font_arena/SdFontArenaTest.cpp
@@ -689,7 +695,10 @@ would have been misread as."
 - Consumes: Tasks 1 and 2 (nothing sets or reads the old fields any more).
 - Produces: an `EpdFontData` whose last member is `GlyphProvider* provider`.
 
-- [ ] **Step 1: Make the test fixture use the new field, so the build fails until the fields go**
+- [ ] **Step 1: Make the test fixture use the new field**
+
+This step does not fail the build: C++20 designated initialisers may skip members. The gate for this
+task is Step 3's grep plus the whole suite. *(Corrected.)*
 
 In `test/differential_rounding/DifferentialRoundingTest.cpp`, replace the two lines
 
@@ -779,7 +788,7 @@ ctest --test-dir build/test -j 8 --output-on-failure
 
 Expected: everything passes except tests that are `NOT_BUILT` only because of
 `epub_build_inventory` (known Windows `<dlfcn.h>` failure). The test count is 1,715 plus the 8 added
-in Tasks 1-2.
+in Tasks 1-2 on the master of 2026-10-08; it moves with master.
 
 - [ ] **Step 5: Build both firmware boards**
 
@@ -810,7 +819,7 @@ git commit -m "EpdFont: remove the glyphMissHandler callback in favour of GlyphP
 - Modify: `lib/GfxRenderer/GfxRenderer.h`:
   - `fontMap` becomes `mutable`;
   - add the `fontResolver_` member, `setFontResolver()` and the private `findFontFamily()`.
-- Modify: `lib/GfxRenderer/GfxRenderer.cpp`: all 16 `fontMap.find(fontId)` sites.
+- Modify: `lib/GfxRenderer/GfxRenderer.cpp`: all 13 `fontMap.find(fontId)` sites *(corrected: the plan first said 16)*.
 
 **Interfaces:**
 - Produces:
@@ -1003,7 +1012,7 @@ In `lib/GfxRenderer/GfxRenderer.h`:
   }
 ```
 
-In `lib/GfxRenderer/GfxRenderer.cpp`, convert all 16 sites. Every site has the same shape and uses the
+In `lib/GfxRenderer/GfxRenderer.cpp`, convert all 13 sites. Every site has the same shape and uses the
 iterator only as `fontIt->second`. Write this script with the Write tool as
 `/c/tmp/stage1_fontlookup.py` (not as a heredoc, which mangles backslashes), then run it:
 
@@ -1017,8 +1026,8 @@ path = pathlib.Path("lib/GfxRenderer/GfxRenderer.cpp")
 src = path.read_text(encoding="utf-8")
 find_line = "const auto fontIt = fontMap.find(fontId);"
 sites = src.count(find_line)
-if sites != 16:
-    sys.exit(f"expected 16 fontMap.find sites, found {sites}")
+if sites != 13:
+    sys.exit(f"expected 13 fontMap.find sites, found {sites}")
 src = src.replace(find_line, "const EpdFontFamily* const family = findFontFamily(fontId);")
 src = src.replace("fontIt == fontMap.end()", "!family")
 src = src.replace("fontIt->second.", "family->")         # member calls
@@ -1038,7 +1047,7 @@ grep -n "fontMap.find\|fontIt" lib/GfxRenderer/GfxRenderer.cpp
 git diff --stat lib/GfxRenderer/GfxRenderer.cpp
 ```
 
-Expected: `converted 16 sites`, no grep output, and a diff of 32-48 changed lines.
+Expected: `converted 13 sites`, no grep output, and a diff of about 26-39 changed lines.
 
 - [ ] **Step 6: Build both firmware boards**
 
@@ -1179,7 +1188,7 @@ Stage 1 of on-device TTF fonts (design: docs/superpowers/specs/2026-10-13-ttf-fo
 
 - `GlyphProvider` replaces `EpdFontData::glyphMissHandler` + `glyphMissCtx`. `SdCardFont` implements it per style; `GfxRenderer::getGlyphBitmap` asks `ownsBitmap()` instead of casting the context to `SdCardFont`.
 - `EpdFont::getKerning` asks the provider only when a font has no kern tables.
-- `GfxRenderer`'s 16 font lookups go through one helper that can ask an optional resolver for an unknown ID (unused until TTF ladder rungs land).
+- `GfxRenderer`'s 13 font lookups go through one helper that can ask an optional resolver for an unknown ID (unused until TTF ladder rungs land).
 
 Tests: new GlyphProviderTest (6), FontLookupTest (5), two SdFontArena cases; full host suite <N>/<N>. Builds: default, x4pro. bench_font glyph_lookup/kerning within <x>% of master. Device smoke on X3: built-in and SD fonts, previews, dictionary, UI.
 EOF

@@ -1,5 +1,10 @@
 # TTF Step 0: device benchmark (throwaway). Implementation plan
 
+> **Status: done, 2026-10-13.** The numbers are in the spec's Appendix A. The bench is on branch
+> `bench/ttf-step0`; `bench/ttf/README.md` there says how to regenerate its data and re-run it. The
+> later runs added pool sizes, a cache-emptied render, a page comparison, the kerning options and SD
+> reads of real CJK glyph records beyond what the tasks below describe.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Measure on the X3 the costs the TTF design's gates depend on (spec 9.1), and record them so
@@ -87,7 +92,7 @@ gates), 4.1 (mapping budget), 5.2 and 5.3 (engine and scratch), on branch `docs/
   and `int ittf_render_2bit(const ITtf*, uint32_t glyph, int32_t ppem26_6, ITtfOutline*, uint8_t* out, uint32_t cap, ITtfBitmap*)`.
   `ittf_render_2bit` returns 1 when it rendered, 0 for an empty glyph, and <0 on error.
 
-- [ ] **Step 1: Create the branch and copy FreeType's rasterizer**
+- [x] **Step 1: Create the branch and copy FreeType's rasterizer**
 
 ```bash
 cd /c/_development/witchhunt-reader
@@ -102,7 +107,7 @@ grep -n "^#define FT_RENDER_POOL_SIZE" bench/ttf/ftgrays.c
 
 Expected: two lines, both `2048L` (lines 107 and 479).
 
-- [ ] **Step 2: Create the standalone shims**
+- [x] **Step 2: Create the standalone shims**
 
 `bench/ttf/ftstandalone.h`:
 
@@ -135,9 +140,9 @@ Expected: two lines, both `2048L` (lines 107 and 479).
 #include "ftgrays.c"
 ```
 
-- [ ] **Step 3: Create `bench/ttf/ittf.h` and `bench/ttf/ittf.c` from Appendix A, verbatim**
+- [x] **Step 3: Create `bench/ttf/ittf.h` and `bench/ttf/ittf.c` from Appendix A, verbatim**
 
-- [ ] **Step 4: Write the host check `bench/ttf/spancheck.c`**
+- [x] **Step 4: Write the host check `bench/ttf/spancheck.c`**
 
 It checks that the span path (what the device runs) gives exactly the bitmap path's pixels, packed
 with the PC converter's thresholds:
@@ -190,7 +195,7 @@ int main(int argc, char** argv) {
 }
 ```
 
-- [ ] **Step 5: Run the host check**
+- [x] **Step 5: Run the host check**
 
 ```bash
 export PATH=/c/msys64/ucrt64/bin:$PATH
@@ -205,7 +210,7 @@ Expected: six lines, each ending in `0 mismatched`. The glyph counts are 1677 fo
 Noto Sans and 2817 for Inter. Any mismatch means the copy or the pool patch went wrong; fix that
 before going on.
 
-- [ ] **Step 6: Commit (local branch only)**
+- [x] **Step 6: Commit (local branch only)**
 
 ```bash
 git add bench/ttf
@@ -228,13 +233,13 @@ git commit -m "bench(ttf step 0): integer TrueType loader + standalone ftgrays, 
 - Produces: the serial report that Tasks 4 and 5 read. Its line prefixes are `render`, `kerning`,
   `erase`, `program`, `index probe`, `free MMU pages`, `SD 512 B read`, and `loop-task stack`.
 
-- [ ] **Step 1: USER ACTION. Provide a CJK TrueType font**
+- [x] **Step 1: USER ACTION. Provide a CJK TrueType font**
 
 Ask the user for a CJK font with **TrueType outlines** (a `glyf` table) and its local path, for example
 LXGW WenKai Regular. Also ask them to copy the same file to the SD card as `/bench/cjk.ttf`. The card
 must stay in the X3.
 
-- [ ] **Step 2: Create the generators and the embedded fonts**
+- [x] **Step 2: Create the generators and the embedded fonts**
 
 `bench/ttf/bin2h.py`:
 
@@ -304,7 +309,7 @@ python bench/ttf/bin2h.py /c/tmp/cjk-subset.ttf bench/ttf/gen/cjk_subset.h kCjkS
 Expected: three `bytes` lines (Bookerly 450048, Noto Sans 629024, the subset under 1 MB), and a subset
 line reporting at least 500 of 510 sampled Han codepoints present.
 
-- [ ] **Step 3: Create `bench/ttf_main.cpp`**
+- [x] **Step 3: Create `bench/ttf_main.cpp`**
 
 ```cpp
 // THROWAWAY: TTF step 0 benchmark. Never merged. Spec: docs/superpowers/specs/2026-10-13-ttf-fonts-design.md
@@ -642,7 +647,7 @@ void loop() {
 }
 ```
 
-- [ ] **Step 4: Add the env**
+- [x] **Step 4: Add the env**
 
 In `platformio.ini`, after the `[env:bench_font]` block:
 
@@ -660,7 +665,7 @@ build_flags =
   -I$PROJECT_DIR/freeink-sdk/libs/font/FreeInkFont/include
 ```
 
-- [ ] **Step 5: Build it**
+- [x] **Step 5: Build it**
 
 ```bash
 export PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 PYTHONIOENCODING=utf-8
@@ -672,7 +677,7 @@ absolute path `-IC:/_development/witchhunt-reader/freeink-sdk/libs/font/FreeInkF
 If the `.c` files do not see `STANDALONE_`, check that `ittf.c` includes `ittf.h`, and therefore
 `ftstandalone.h`, before `ftgrays.h`. It does in Appendix A.
 
-- [ ] **Step 6: Commit (local branch only; `bench/ttf/gen/` is ignored)**
+- [x] **Step 6: Commit (local branch only; `bench/ttf/gen/` is ignored)**
 
 ```bash
 git add bench/ttf_main.cpp bench/ttf/bin2h.py bench/ttf/make_cjk_subset.py bench/ttf/gen/.gitignore platformio.ini
@@ -690,7 +695,7 @@ git commit -m "bench(ttf step 0): device sketch and env"
 - Produces: free MMU pages for the reader image, and for the bench image (which Task 4 checks against
   the device).
 
-- [ ] **Step 1: Create `bench/ttf/mmu_budget.py`**
+- [x] **Step 1: Create `bench/ttf/mmu_budget.py`**
 
 ```python
 """THROWAWAY (TTF step 0): MMU pages an app image maps on the ESP32-C3.
@@ -716,7 +721,7 @@ for line in out.splitlines():
 print(f"{elf}: {pages} pages mapped by the image, {128 - pages} free for runtime mappings")
 ```
 
-- [ ] **Step 2: Build the reader image and run the budget on both images**
+- [x] **Step 2: Build the reader image and run the budget on both images**
 
 ```bash
 export PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 PYTHONIOENCODING=utf-8
@@ -730,7 +735,7 @@ Expected: two segment lines per image and a final line each. For the reader imag
 mapped and about 31 free (docs/contributing/flash-font-partition.md), which still includes the language
 pack's page. Keep both files for Task 5.
 
-- [ ] **Step 3: Commit (local branch only)**
+- [x] **Step 3: Commit (local branch only)**
 
 ```bash
 git add bench/ttf/mmu_budget.py
@@ -743,13 +748,13 @@ git commit -m "bench(ttf step 0): MMU budget from the ELF"
 
 **Files:** none; output goes to `/c/tmp/`.
 
-- [ ] **Step 1: USER ACTION. Confirm before flashing**
+- [x] **Step 1: USER ACTION. Confirm before flashing**
 
 Tell the user that this flashes the benchmark over the reader and erases the flash font cache, and
 that Step 4 restores the reader. Ask them to connect the X3 with the SD card from Task 2 inserted. Wait
 for a yes.
 
-- [ ] **Step 2: Flash and capture**
+- [x] **Step 2: Flash and capture**
 
 Write the capture script with the Write tool as `/c/tmp/capture.py`. DTR and RTS are held low before
 `open()`, because toggling them after `open()` resets the C3.
@@ -794,7 +799,7 @@ Expected: the file ends with `=== done ===` and contains:
 - the `SD card` line and 2 `SD 512 B read` lines (or `SKIPPED`);
 - the `loop-task stack` line.
 
-- [ ] **Step 3: Check the run is usable**
+- [x] **Step 3: Check the run is usable**
 
 ```bash
 grep -c "render " /c/tmp/bench_ttf_run1.txt
@@ -813,7 +818,7 @@ Expected:
 Run the sketch a second time (reset the device with the capture running, saving to
 `/c/tmp/bench_ttf_run2.txt`), and check that the warm render figures agree within 5%.
 
-- [ ] **Step 4: Restore the reader firmware**
+- [x] **Step 4: Restore the reader firmware**
 
 ```bash
 "$HOME/.platformio/penv/Scripts/pio.exe" run -e default -t upload
@@ -831,9 +836,10 @@ partition, as it does after any family change. Confirm that the book reads norma
 - Modify: `C:\Users\jens\.claude\projects\c---development-witchhunt-reader\memory\MEMORY.md` (one index
   line)
 
-Per the docs layout convention, measurement journals do not go in `docs/`.
+Per the docs layout convention, measurement journals do not go in `docs/`. (For the handover the
+figures were later copied into the spec's Appendix A, as the evidence its decisions rest on.)
 
-- [ ] **Step 1: Compute the all-in figures from run 1**
+- [x] **Step 1: Compute the all-in figures from run 1**
 
 From `/c/tmp/bench_ttf_run1.txt`:
 
@@ -853,13 +859,13 @@ From `/c/tmp/bench_ttf_run1.txt`:
   (`glyph_lookup`, the measured figure in the `EpdGlyphRef` note in `lib/EpdFont/EpdFontData.h`). A
   probe within about 2× of it needs no further work.
 
-- [ ] **Step 2: Apply the gates (spec 9.1)**
+- [x] **Step 2: Apply the gates (spec 9.1)**
 
 - Latin or CJK all-in **> 2 ms** → REVISIT: metrics-only layout into Stage 2c. Otherwise PASS.
 - CJK first chapter **> 10 s** → REVISIT: metrics-only layout into Stage 2c. Otherwise PASS.
 - Free mapping pages **< 25** → REVISIT: shrink the store regions in spec 4.1. Otherwise PASS.
 
-- [ ] **Step 3: Record the results in memory**
+- [x] **Step 3: Record the results in memory**
 
 Write `ttf-step0-results.md` with frontmatter (`name: ttf-step0-results`, a one-line `description`,
 `metadata.type: project`). The body holds:
@@ -875,7 +881,7 @@ Write `ttf-step0-results.md` with frontmatter (`name: ttf-step0-results`, a one-
 Add one line to `MEMORY.md`:
 `- [TTF step 0 results](ttf-step0-results.md) — device costs + gate verdicts for the TTF design`.
 
-- [ ] **Step 4: Report to the user**
+- [x] **Step 4: Report to the user**
 
 A short summary:
 
