@@ -21,6 +21,7 @@
 #include <Logging.h>  // redirects Serial to a deliberately undefined proxy; this sketch prints through logSerial
 #include <builtinFonts/bookerly_14_regular.h>
 #include <builtinFonts/notosans_14_regular.h>
+#include <esp_heap_caps.h>
 #include <esp_partition.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -29,11 +30,15 @@
 
 #include <algorithm>
 #include <cstring>
+#include <new>
+#include <vector>
 
 #include "ttf/gen/bookerly.h"
 #include "ttf/gen/cjk_subset.h"
 #include "ttf/gen/notosans.h"
 #include "ttf/fastkern.h"
+#include "ttf/gen/chapter.h"
+#include "ttf/kernopts.h"
 #include "ttf/ittf.h"
 
 // Every timed loop folds its work into this, and it is printed once at the end, so -O2 cannot
@@ -540,6 +545,215 @@ static void benchPage() {
   pageTtf("NotoSans", kNotoSans, kNotoSansLen);
 }
 
+// ---- kerning options, measured on real text ---------------------------------------------------
+//
+// The adjacent pairs of the page above and of 30,000 characters of Moby-Dick (pairs with a space,
+// or outside the kerning repertoire, are skipped). The texts are pre-decoded into indices into a
+// small table of their distinct codepoints, so every option pays the same tiny loop overhead.
+
+struct KernText {
+  uint32_t cps[256];
+  uint16_t gids[256];
+  bool kernable[256];
+  uint32_t count = 0;
+};
+static KernText g_kt;
+static uint8_t g_pageSyms[sizeof(kPage)];
+static uint32_t g_pageLen = 0;
+static uint8_t g_chapterSyms[sizeof(kChapter)];
+static uint32_t g_chapterLen = 0;
+
+static uint32_t utf8Next(const char*& p) {
+  const auto c = static_cast<unsigned char>(*p++);
+  if (c < 0x80) return c;
+  int extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : 1;
+  uint32_t cp = c & (0x3F >> extra);
+  while (extra-- && (static_cast<unsigned char>(*p) & 0xC0) == 0x80) cp = (cp << 6) | (static_cast<unsigned char>(*p++) & 0x3F);
+  return cp;
+}
+
+static uint8_t symFor(uint32_t cp) {
+  for (uint32_t i = 0; i < g_kt.count; ++i)
+    if (g_kt.cps[i] == cp) return static_cast<uint8_t>(i);
+  if (g_kt.count == 255) return 255;
+  g_kt.cps[g_kt.count] = cp;
+  return static_cast<uint8_t>(g_kt.count++);
+}
+
+static void decodeText(const char* text, uint8_t* out, uint32_t& len) {
+  len = 0;
+  for (const char* p = text; *p;) out[len++] = symFor(utf8Next(p));
+}
+
+template <typename F>
+static int64_t timePairs(const uint8_t* syms, uint32_t len, F&& kern, uint32_t* pairsOut) {
+  uint32_t pairs = 0;
+  const int64_t t0 = nowUs();
+  for (uint32_t i = 0; i + 1 < len; ++i) {
+    const uint8_t a = syms[i], b = syms[i + 1];
+    if (!g_kt.kernable[a] || !g_kt.kernable[b]) continue;
+    sink += static_cast<uint32_t>(kern(a, b));
+    ++pairs;
+  }
+  if (pairsOut) *pairsOut = pairs;
+  return nowUs() - t0;
+}
+
+constexpr uint32_t kKernBlobOffset = 0xA0000;  // 128 KB region inside the erased first 1 MB
+constexpr uint32_t kPairIndexOffset = 0xC0000;  // 64 KB: 8192 slots {u32 lcp<<16|rcp, u32 value}
+constexpr uint32_t kPairSlots = 8192;
+
+static void benchKernOptions(const char* name, const uint8_t* d, uint32_t len) {
+  uint32_t gposLen = 0;
+  const uint32_t gpos = findTable(d, len, "GPOS", &gposLen);
+  if (!gpos || ittf_init(&g_font, d, len) != 0) {
+    logSerial.printf("  kern %-8s: no GPOS or init failed\n", name);
+    return;
+  }
+  for (uint32_t i = 0; i < g_kt.count; ++i) {
+    g_kt.gids[i] = static_cast<uint16_t>(ittf_glyph(&g_font, g_kt.cps[i]));
+    g_kt.kernable[i] = g_kt.cps[i] != ' ' && g_kt.gids[i] != 0 && kernopts::inRepertoire(g_kt.cps[i]);
+  }
+  fastkern::FastKern fk;
+  fk.init(d + gpos, gposLen);
+  uint32_t pagePairs = 0, chapterPairs = 0;
+  const int64_t overheadPage = timePairs(g_pageSyms, g_pageLen, [](uint8_t, uint8_t) { return 0; }, &pagePairs);
+  const int64_t overheadChapter = timePairs(g_chapterSyms, g_chapterLen, [](uint8_t, uint8_t) { return 0; }, &chapterPairs);
+  logSerial.printf("  kern %-8s: page %u pairs, chapter %u pairs (loop overhead %lld / %lld us)\n", name,
+                   (unsigned)pagePairs, (unsigned)chapterPairs, (long long)overheadPage, (long long)overheadChapter);
+  auto report = [&](const char* option, int64_t pageUs, int64_t chapterUs) {
+    logSerial.printf("  kern %-8s %-26s page %7lld us (%5lld ns/pair)   chapter %8lld us (%5lld ns/pair)\n", name,
+                     option, (long long)pageUs, (long long)(pageUs * 1000 / (pagePairs ? pagePairs : 1)),
+                     (long long)chapterUs, (long long)(chapterUs * 1000 / (chapterPairs ? chapterPairs : 1)));
+  };
+
+  // Baselines: the SDK reader, and the pre-resolved reader with no cache.
+  auto gposcpp = [&](uint8_t a, uint8_t b) {
+    return freeink::font::gpos::PairKernAdjustment(d + gpos, gposLen, g_kt.gids[a], g_kt.gids[b]);
+  };
+  report("Gpos.cpp", timePairs(g_pageSyms, g_pageLen, gposcpp, nullptr),
+         timePairs(g_chapterSyms, g_chapterLen, gposcpp, nullptr));
+  auto fast = [&](uint8_t a, uint8_t b) { return fk.pair(g_kt.gids[a], g_kt.gids[b]); };
+  report("fast reader, no cache", timePairs(g_pageSyms, g_pageLen, fast, nullptr),
+         timePairs(g_chapterSyms, g_chapterLen, fast, nullptr));
+
+  // Option 2: runtime reader + subtable mask + pair cache.
+  {
+    // 5 KB, one per font (it holds a reference to this call's reader); bench only, freed below.
+    kernopts::CachedKern* cached = new (std::nothrow) kernopts::CachedKern(fk);
+    if (cached) {
+      auto c = [&](uint8_t a, uint8_t b) { return cached->pair(g_kt.gids[a], g_kt.gids[b]); };
+      const int64_t pageCold = timePairs(g_pageSyms, g_pageLen, c, nullptr);
+      const int64_t pageWarm = timePairs(g_pageSyms, g_pageLen, c, nullptr);
+      cached->reset();
+      const int64_t chapter = timePairs(g_chapterSyms, g_chapterLen, c, nullptr);
+      report("cached (cold page/chapter)", pageCold, chapter);
+      logSerial.printf("  kern %-8s cached: page again %lld us; chapter hit rate %u%% (%u hits, %u misses); RAM %u B\n",
+                       name, (long long)pageWarm,
+                       (unsigned)(100ull * cached->hits / ((cached->hits + cached->misses) ? (cached->hits + cached->misses) : 1)),
+                       (unsigned)cached->hits, (unsigned)cached->misses, (unsigned)kernopts::CachedKern::ramBytes());
+      delete cached;
+    }
+  }
+
+  const esp_partition_t* p = spiffsPartition();
+  if (!p) return;
+
+  // Option 1: compile at install, look up in the tables read in place from flash.
+  {
+    const int64_t r0 = nowUs();
+    std::vector<uint16_t> cps, gids;
+    cps.reserve(1400);
+    gids.reserve(1400);
+    for (uint32_t cp = 0x20; cp <= 0xFB06; ++cp) {
+      if (!kernopts::inRepertoire(cp)) continue;
+      const uint32_t g = ittf_glyph(&g_font, cp);
+      if (g) {
+        cps.push_back(static_cast<uint16_t>(cp));
+        gids.push_back(static_cast<uint16_t>(g));
+      }
+    }
+    const int64_t r1 = nowUs();
+    const uint32_t heapBefore = esp_get_free_heap_size();
+    const uint32_t largestBefore = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    kernopts::CompileStats cs;
+    std::vector<uint8_t> blob = kernopts::compileKern(fk, cps, gids, cs);
+    const int64_t r2 = nowUs();
+    const uint32_t minHeap = esp_get_minimum_free_heap_size();
+    esp_partition_erase_range(p, kKernBlobOffset, 0x20000);
+    esp_partition_write(p, kKernBlobOffset, blob.data(), (blob.size() + 3) & ~size_t(3));
+    const int64_t r3 = nowUs();
+    logSerial.printf("  kern %-8s compile: repertoire %u glyphs in %lld us; compile %lld us (%u x %u classes, %u rows); "
+                     "write %u B to flash %lld us; heap free %u (largest %u) before, %u minimum ever\n",
+                     name, (unsigned)cs.glyphs, (long long)(r1 - r0), (long long)(r2 - r1), (unsigned)cs.leftClasses,
+                     (unsigned)cs.rightClasses, (unsigned)cs.rowsBuilt, (unsigned)cs.blobBytes, (long long)(r3 - r2),
+                     (unsigned)heapBefore, (unsigned)largestBefore, (unsigned)minHeap);
+    blob.clear();
+    blob.shrink_to_fit();
+    const void* mapped = nullptr;
+    esp_partition_mmap_handle_t h;
+    if (esp_partition_mmap(p, kKernBlobOffset, 0x20000, ESP_PARTITION_MMAP_DATA, &mapped, &h) == ESP_OK) {
+      const kernopts::CompiledKern ck(static_cast<const uint8_t*>(mapped));
+      auto c = [&](uint8_t a, uint8_t b) { return ck.pair(g_kt.cps[a], g_kt.cps[b]); };
+      report("compiled tables (flash)", timePairs(g_pageSyms, g_pageLen, c, nullptr),
+             timePairs(g_chapterSyms, g_chapterLen, c, nullptr));
+      uint32_t mismatches = 0;
+      for (uint32_t i = 0; i + 1 < g_chapterLen; ++i) {
+        const uint8_t a = g_chapterSyms[i], b = g_chapterSyms[i + 1];
+        if (g_kt.kernable[a] && g_kt.kernable[b]) mismatches += ck.pair(g_kt.cps[a], g_kt.cps[b]) != fast(a, b);
+      }
+      logSerial.printf("  kern %-8s compiled: %u mismatches vs the reference reader over the chapter\n", name,
+                       (unsigned)mismatches);
+      esp_partition_munmap(h);
+    }
+  }
+
+  // Option 3: pairs stored lazily in the flash store's index (value in the slot's second word).
+  {
+    esp_partition_erase_range(p, kPairIndexOffset, 0x10000);
+    const void* mapped = nullptr;
+    esp_partition_mmap_handle_t h;
+    if (esp_partition_mmap(p, kPairIndexOffset, 0x10000, ESP_PARTITION_MMAP_DATA, &mapped, &h) != ESP_OK) return;
+    const uint32_t* slots = static_cast<const uint32_t*>(mapped);
+    uint32_t writes = 0;
+    auto lazy = [&](uint8_t a, uint8_t b) -> int32_t {
+      const uint32_t key = (g_kt.cps[a] << 16) | (g_kt.cps[b] & 0xFFFF);
+      uint32_t slot = (key * 2654435761u) >> (32 - 13);
+      for (;;) {
+        const uint32_t k = slots[slot * 2];
+        if (k == key) return static_cast<int16_t>(slots[slot * 2 + 1]);
+        if (k == 0xFFFFFFFFu) break;
+        slot = (slot + 1) & (kPairSlots - 1);
+      }
+      const int32_t v = fk.pair(g_kt.gids[a], g_kt.gids[b]);
+      const uint32_t entry[2] = {key, static_cast<uint16_t>(v)};
+      esp_partition_write(p, kPairIndexOffset + slot * 8, entry, sizeof entry);
+      ++writes;
+      return v;
+    };
+    const int64_t pageFirst = timePairs(g_pageSyms, g_pageLen, lazy, nullptr);
+    const uint32_t pageWrites = writes;
+    const int64_t pageAgain = timePairs(g_pageSyms, g_pageLen, lazy, nullptr);
+    const int64_t chapterFirst = timePairs(g_chapterSyms, g_chapterLen, lazy, nullptr);
+    const uint32_t chapterWrites = writes - pageWrites;
+    const int64_t chapterAgain = timePairs(g_chapterSyms, g_chapterLen, lazy, nullptr);
+    report("lazy store, first contact", pageFirst, chapterFirst);
+    report("lazy store, warm", pageAgain, chapterAgain);
+    logSerial.printf("  kern %-8s lazy store: %u slot writes for the page, %u more for the chapter\n", name,
+                     (unsigned)pageWrites, (unsigned)chapterWrites);
+    esp_partition_munmap(h);
+  }
+}
+
+static void benchKerning2() {
+  decodeText(kPage, g_pageSyms, g_pageLen);
+  decodeText(kChapter, g_chapterSyms, g_chapterLen);
+  logSerial.printf("  texts: page %u codepoints, chapter %u codepoints, %u distinct\n", (unsigned)g_pageLen,
+                   (unsigned)g_chapterLen, (unsigned)g_kt.count);
+  benchKernOptions("Bookerly", kBookerly, kBookerlyLen);
+  benchKernOptions("NotoSans", kNotoSans, kNotoSansLen);
+}
+
 // ---- SD -------------------------------------------------------------------------------------
 
 static bool g_sdReady = false;
@@ -642,6 +856,8 @@ void setup() {
   benchFlash();
   logSerial.println("[page]");
   benchPage();
+  logSerial.println("[kerning options]");
+  benchKerning2();
   logSerial.println("[sd]");
   bringUpSd();
   benchSd();
