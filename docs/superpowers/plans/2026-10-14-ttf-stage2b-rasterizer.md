@@ -73,11 +73,19 @@ These decisions refine the spec; Task 9 writes them into it.
    prototype's state, and 28-61 glyphs per Bookerly or Ubuntu face differed from FreeType by one pixel.
    With them, every glyph without overlap flags is byte-identical to FreeType at 8, 14 and 40 pt, and the
    output no longer depends on the width of `long`, so host and device agree. On the C3 it adds `__divdi3`
-   (at most two per line segment) and `__ashldi3`: integer, but not free. Measured on the X3 with the bench
-   of Task 8 while writing this plan:
-   - all 1,867 Bookerly glyphs at 14 pt (29 px), 4 KB pool: 460 µs per glyph on average. Step 0 measured
-     429 µs on a sample of text glyphs.
-   - The output hash equals the host's.
+   (at most two per line segment) and `__ashldi3`: integer, but not free. **Decided by the user on
+   2026-10-14, after an A/B on the X3 with the bench of Task 8:**
+
+   | Render per glyph | 64-bit (kept) | 32-bit | Cost |
+   | --- | --- | --- | --- |
+   | 14 pt, the 95 ASCII glyphs | 363 µs | 313 µs | +16% |
+   | 14 pt, all 1,867 Bookerly glyphs | 461 µs | 396 µs | +16% |
+   | 40 pt, all glyphs | 1,198 µs | 1,050 µs | +14% |
+
+   On the panel the 32-bit path's one-level, one-pixel differences are not visible; what it gives up is
+   testability. Its device hash (`b5645a52`) differs from the host's (`de1aeea7`), so neither the exact
+   FreeType gate nor the host/device check would hold. The cost is about 2 ms on a page's first contact.
+   Spec: the section 2 decisions table and Appendix A, "Stage 2b engine".
 5. **FreeType's exact scaling and phantom point.** Points are scaled with `FT_MulFix` by `FT_DivFix`'s
    scale, not by `v * ppem / upem`. Each outline is shifted by `xMin - lsb` (from the top glyph, or from a
    component flagged `USE_MY_METRICS`), as FreeType places glyphs. Together these remove the prototype's

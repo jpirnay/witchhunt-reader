@@ -42,6 +42,7 @@ numbers come from step 0.
 | No FreeType | 98 KB of flash, or 149 KB with the auto-hinter, against about 280 KB of headroom. |
 | No stb_truetype, libschrift or bb_truetype | **stb:** a 56,004 B allocation per glyph on RV32 (`stbtt__hheap_alloc`), and edges are dropped silently when it fails. Its float maths is emulated. **libschrift:** a 262,880 B stack frame in `render_outline`, and `double` maths throughout. **bb_truetype:** 1-bit output, no bounds checks, kerning that does not compile. |
 | Engine: our own integer TrueType loader plus FreeType's `ftgrays.c` built standalone | 6.4 KB of flash and **no soft-float routine linked**. Across 12,868 glyphs (all of Bookerly, Noto Sans, Inter and DejaVu Sans at 14 pt), compared with FreeType unhinted: no load failures, no cmap or advance differences, 5 box differences, and the 2-bit output differs on 2.1-2.8% of pixels. Host speed 4-9 us/glyph; FreeType took 6-40. |
+| `ftgrays` takes FreeType's 64-bit path (`FT_INT64` defined in the standalone build); decided 2026-10-14 | Output byte-identical to FreeType for every glyph without overlap flags, and the same on host and device. The 32-bit path is 16% faster per glyph (363 against 313 µs for text glyphs at 14 pt on the X3), but it differs from FreeType by one gray level on one pixel in 2-3% of glyphs and depends on the width of `long`. Appendix A, "Stage 2b engine". |
 | Render lazily and persist the result | Chosen over converting the whole font once at import, which would mean a long wait for CJK. |
 | Glyph store in the `spiffs` partition (raw flash, memory-mapped) | Fast random reads with no heap; it survives power-off; it is already used for the `.cpfont` cache. |
 | Wipe the store on family change | One family at a time, as with `.cpfont` today. |
@@ -394,6 +395,12 @@ Modes:
   - `ft_grays_raster` is renamed so it cannot clash with the SDK's FreeType.
   - Patched to take its cell pool from the scratch block instead of the stack. Unpatched,
     `gray_convert_glyph` has a 4,400 B frame.
+  - **Decided 2026-10-14 (user): it defines FreeType's 64-bit types (`FT_INT64`).** A standalone build
+    otherwise takes an older line renderer and conic flattening than every full FreeType build. That costs
+    one-pixel differences from FreeType and makes the output depend on the width of `long`, so host and
+    device disagree. The 64-bit path is about 16% slower per glyph (Appendix A, "Stage 2b engine"), about
+    2 ms on a page's first contact. It is kept for output identical to FreeType and an exact host/device
+    check.
   - It renders through the direct span callback (`FT_RASTER_FLAG_DIRECT`). Spans are packed straight
     into the 2-bit output with the PC converter's thresholds (coverage nibble ≥12 → 3, ≥8 → 2, ≥4 → 1),
     so there is no 8-bit coverage buffer.
@@ -854,3 +861,69 @@ glyph, 0.73 ms per CJK glyph):
   PASS. In text order about 10.4 s: FAIL. The remedy taken is batching misses in glyph-ID order (3.2,
   5.1), not the metrics-only layout mode.
 - Free mapping pages: 32: PASS.
+
+### Stage 2b engine (X3, 160 MHz, 2026-10-14)
+
+Measured while writing the Stage 2b plan, with the production engine (integer loader, vendored `ftgrays`)
+built from the plan's code. Device: `bench_ttf_raster` (`bench/ttf_raster_main.cpp`), Bookerly Regular
+embedded in the image and read through the flash cache.
+
+**Against FreeType 2.13.3, unhinted (host, every glyph index of all 12 bundled TTFs at 8, 14 and 40 pt):**
+- 0 load failures, 0 advance differences, 0 box differences.
+- Every glyph without overlap flags is byte-identical to FreeType.
+- Glyphs flagged `OVERLAP_SIMPLE` or `OVERLAP_COMPOUND` (Inter, Noto Sans), which FreeType renders 4x4
+  oversampled: 0.24-1.30% of pixels differ (spec gate: 3%).
+- The only glyph too large for an `EpdGlyph` is Ubuntu's wordmark (U+F200) at 40 pt, 288 px wide.
+
+**Device bench, all 1,867 Bookerly glyphs:**
+
+| Size, pool | avg µs | max µs |
+| --- | --- | --- |
+| 14 pt (29 px), 2 KB | 512 | 2,548 |
+| 14 pt (29 px), 4 KB | 460 | 2,452 |
+| 14 pt (29 px), 8 KB | 454 | 1,170 |
+| 40 pt (83 px), 4 KB | 1,198 | 5,786 |
+| 40 pt (83 px), 8 KB | 1,080 | 4,192 |
+| 14 pt, the 95 printable ASCII glyphs, 4 KB | 363 | |
+
+- The output hash equals the host's (`de1aeea7`), and it is the same with every pool size.
+- Scratch block 9,964 B, given back in full by `release()`.
+- Rendering takes the loop task's stack 80 B below its earlier low: the pool is off the stack.
+- Engine code linked into the bench: about 9.2 KB (step 0's prototype: 6.4 KB).
+
+**Decision gate: the 64-bit `ftgrays` path (`FT_INT64`), kept (user, 2026-10-14).** The same bench without
+the patch:
+
+| Render per glyph | 64-bit (kept) | 32-bit | Cost |
+| --- | --- | --- | --- |
+| 14 pt, ASCII glyphs | 363 µs | 313 µs | +16% |
+| 14 pt, all glyphs, 4 KB pool | 461 µs | 396 µs | +16% |
+| 14 pt, all glyphs, 8 KB pool | 454 µs | 391 µs | +16% |
+| 40 pt, all glyphs, 4 KB pool | 1,198 µs | 1,050 µs | +14% |
+
+- **Quality.** Without the patch, 24-61 glyphs per Bookerly or Ubuntu face differ from FreeType at 8-14 pt,
+  and about 290 at 40 pt. Each differs by one gray level on a single pixel, which is not visible on the
+  panel. Neither result is wrong: the 64-bit path is FreeType's current curve flattening, the 32-bit
+  path its older one.
+- **Testability, the deciding factor.** The 32-bit path's output depends on the width of `long`. The X3 and
+  Windows give one result, CI's Linux another; the device hash was `b5645a52` against the host's
+  `de1aeea7`. Without the patch, the FreeType gate would need a tolerance and the host/device check could
+  not exist.
+- **Cost on a page:** about 2 ms on a page's first contact (42 new glyphs x 50 µs), nothing once stored.
+
+**One page with the new engine** (step 0's page: 1,199 characters, 42 distinct glyphs, Bookerly, no
+kerning). The TTF columns are estimated from the measurements above. Render: 42 x 363 µs. Writes: 42 x 340 µs
+batched (the Stage 2a self-test). Drawing: as step 0.
+
+| | Built-in `.cpfont` | TTF, first contact | TTF, warm store |
+| --- | --- | --- | --- |
+| Step 0 (prototype, measured) | 41.9 ms (16.3 decompress + 25.6 draw) | 66.8 ms (18.3 render + 25.5 writes + about 23 draw) | 21.2 ms |
+| Stage 2b engine (estimated) | 41.9 ms | about 52 ms (15 render + 14 writes + 23 draw) | about 21 ms |
+
+- First contact happens once per glyph, size and family, ever: the store survives reboots, and reopening it
+  costs about 30 ms at family load. New glyphs are mostly rendered during section builds, so the cost shows
+  as indexing time rather than as page-turn latency.
+- Kerning is extra:
+  - warm, about 0.3-0.7 ms per page (0.45-0.9 µs per pair);
+  - on the very first page, about 43 ms (58.7 µs per pair), averaging 5.5 µs per pair over a chapter;
+  - the pair pre-check obligation in 8.1 targets that first-contact cost.
