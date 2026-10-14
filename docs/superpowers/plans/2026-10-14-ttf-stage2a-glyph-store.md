@@ -1,5 +1,18 @@
 # TTF Stage 2a: the flash glyph store. Implementation plan
 
+> **Status (2026-10-14): paused after Task 3 of 8.**
+> - **Done on `feat/ttf-glyph-store`** (pushed, no PR yet), one commit per task: `d40fd9625` (Task 1),
+>   `cc8939782` (Task 2), `e21e2d8fb` (Task 3). GlyphStoreTest is 41/41 with 0 warnings.
+> - **Resume** at Task 4 with BASE = `e21e2d8fb`. Tasks 4-8 are unchanged below.
+> - **Verified before execution:** every code block below was extracted, compiled with the suite's flags
+>   and run. All 70 tests pass. Breaking the recovery scan on purpose (Task 6 Step 3) fails 5 of them.
+> - **Execution notes:**
+>   - Where a task first lists a new `.cpp` in CMake, the RED is CMake's "Cannot find source file", not a
+>     compiler error. The cause is the same.
+>   - Run the full host suite and the firmware builds only in Tasks 7-8.
+> - **After Task 8, the user asked for a full audit sweep** (flaws, inconsistencies,
+>   improvement/simplification potential) before merge.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build `FlashGlyphStore`, the persistent store of rendered TTF glyphs in the `spiffs` partition,
@@ -154,14 +167,14 @@ The spec now says:
   - `dead()`, `steps()`, `violations()`, `programCalls()`, `eraseCalls()`, `sectorErases(uint32_t)`,
     `totalSectorErases()`, `mappings()`, `raw()`
 
-- [ ] **Step 1: Create the branch**
+- [x] **Step 1: Create the branch**
 
 ```bash
 cd /c/_development/witchhunt-reader
 git switch master && git pull --ff-only && git switch -c feat/ttf-glyph-store
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `test/glyph_store/CMakeLists.txt`:
 
@@ -337,7 +350,7 @@ TEST(SimNorFlash, PowerCycleDropsMappings) {
 }
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 ```bash
 cd /c/_development/witchhunt-reader
@@ -347,7 +360,7 @@ cmake -S test -B build/test && cmake --build build/test --target GlyphStoreTest
 
 Expected: a compile error, `SimNorFlash.h: No such file or directory`.
 
-- [ ] **Step 4: Create `lib/hal/NorFlash.h`**
+- [x] **Step 4: Create `lib/hal/NorFlash.h`**
 
 ```cpp
 #pragma once
@@ -385,7 +398,7 @@ class NorFlash {
 };
 ```
 
-- [ ] **Step 5: Create `test/glyph_store/SimNorFlash.h`**
+- [x] **Step 5: Create `test/glyph_store/SimNorFlash.h`**
 
 ```cpp
 #pragma once
@@ -542,7 +555,7 @@ class SimNorFlash final : public NorFlash {
 };
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 ```bash
 cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/GlyphStoreTest
@@ -550,7 +563,7 @@ cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/Glyph
 
 Expected: `[  PASSED  ] 13 tests.`
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add lib/hal/NorFlash.h test/glyph_store test/CMakeLists.txt
@@ -581,7 +594,7 @@ git commit -m "hal: NorFlash interface; host tests get a simulated NOR chip with
     `Layout`
   - `bool planLayout(const PlanInput&, Layout&)`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `test/glyph_store/CMakeLists.txt`, change the source list and the include list to:
 
@@ -728,7 +741,7 @@ TEST(GlyphStorePlan, BadInputIsRefused) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cmake -S test -B build/test && cmake --build build/test --target GlyphStoreTest
@@ -736,7 +749,7 @@ cmake -S test -B build/test && cmake --build build/test --target GlyphStoreTest
 
 Expected: a compile error, `GlyphStoreFormat.h: No such file or directory`.
 
-- [ ] **Step 3: Create `lib/EpdFont/ttf/GlyphStoreFormat.h`**
+- [x] **Step 3: Create `lib/EpdFont/ttf/GlyphStoreFormat.h`**
 
 ```cpp
 #pragma once
@@ -908,7 +921,7 @@ bool planLayout(const PlanInput& in, Layout& out);
 }  // namespace glyphstore
 ```
 
-- [ ] **Step 4: Create `lib/EpdFont/ttf/GlyphStoreFormat.cpp`**
+- [x] **Step 4: Create `lib/EpdFont/ttf/GlyphStoreFormat.cpp`**
 
 ```cpp
 #include "GlyphStoreFormat.h"
@@ -977,7 +990,7 @@ bool planLayout(const PlanInput& in, Layout& out) {
 }  // namespace glyphstore
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```bash
 cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/GlyphStoreTest
@@ -985,7 +998,7 @@ cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/Glyph
 
 Expected: `[  PASSED  ] 24 tests.` (13 from Task 1, 11 new)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add lib/EpdFont/ttf/GlyphStoreFormat.h lib/EpdFont/ttf/GlyphStoreFormat.cpp test/glyph_store
@@ -1024,7 +1037,7 @@ git commit -m "ttf: glyph store format and layout planner (index sized to the lo
   `writeRawRecord()`, `recordSize()`, and the fixture `StoreTest`, which asserts no NOR violations in
   `TearDown`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `test/glyph_store/CMakeLists.txt`, replace the source and include lists with:
 
@@ -1405,7 +1418,7 @@ TEST(GlyphStoreRecoveryEdge, GarbageAtTheVeryEndLeavesTheLogFull) {
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 ```bash
 cmake -S test -B build/test && cmake --build build/test --target GlyphStoreTest
@@ -1413,7 +1426,7 @@ cmake -S test -B build/test && cmake --build build/test --target GlyphStoreTest
 
 Expected: a compile error, `FlashGlyphStore.h: No such file or directory`.
 
-- [ ] **Step 3: Create `lib/EpdFont/ttf/FlashGlyphStore.h`**
+- [x] **Step 3: Create `lib/EpdFont/ttf/FlashGlyphStore.h`**
 
 ```cpp
 #pragma once
@@ -1575,7 +1588,7 @@ class FlashGlyphStore {
 };
 ```
 
-- [ ] **Step 4: Create `lib/EpdFont/ttf/FlashGlyphStore.cpp`**
+- [x] **Step 4: Create `lib/EpdFont/ttf/FlashGlyphStore.cpp`**
 
 ```cpp
 #include "FlashGlyphStore.h"
@@ -1881,7 +1894,7 @@ bool FlashGlyphStore::isBlank(const uint32_t sector) {
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```bash
 cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/GlyphStoreTest
@@ -1889,7 +1902,7 @@ cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/Glyph
 
 Expected: `[  PASSED  ] 41 tests.` (24 earlier, 11 install, 6 recovery)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add lib/EpdFont/ttf/FlashGlyphStore.h lib/EpdFont/ttf/FlashGlyphStore.cpp test/glyph_store
