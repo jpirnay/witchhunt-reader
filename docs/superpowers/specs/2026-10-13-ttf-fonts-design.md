@@ -7,8 +7,8 @@ with the direct integration in section 3.
   section 2.
 - **Stage 1: done, in review as PR #468** (branch `refactor/glyph-provider`, plan
   `docs/superpowers/plans/2026-10-13-ttf-stage1-glyph-provider.md`).
-- **Stage 2a: built and audited** (glyph store on `feat/ttf-glyph-store`; three audits, fix pass done).
-  Stages 2b-2d are not planned yet.
+- **Stage 2a: merged** (PR #469: the glyph store, audited). Stage 2b (rasterizer) is next; 2c-2d are not
+  planned yet.
 - **Where everything lives:** section 8, "Branches and files".
 
 It is working material. When the work merges, lasting parts move to reference docs, open items move
@@ -589,7 +589,7 @@ are cached as `.fpv` files, keyed by the family identity.
 |---|---|---|---|
 | **Step 0** | Throwaway device benchmark on the X3 (section 9.1). | No | Done; Appendix A |
 | **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR (the plan's Task 5) | PR #468 |
-| **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR | Built, audited, audit fixes in, on `feat/ttf-glyph-store` (plan `docs/superpowers/plans/2026-10-14-ttf-stage2a-glyph-store.md`) |
+| **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR | Merged (PR #469) |
 | **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR | Not planned |
 | **Stage 2c** | `FontBytes`, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR | Not planned |
 | **Stage 2d** | User-guide section on TTF fonts; FreeType credit (required by the FTL licence). | With 2c or own PR | Not planned |
