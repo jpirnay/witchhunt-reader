@@ -5,8 +5,8 @@ with the direct integration in section 3.
 
 - **Step 0 (device benchmark): done.** Its numbers are in Appendix A; the decisions they drove are in
   section 2.
-- **Stage 1: in progress** on branch `refactor/glyph-provider`, following
-  `docs/superpowers/plans/2026-10-13-ttf-stage1-glyph-provider.md`.
+- **Stage 1: done, in review as PR #468** (branch `refactor/glyph-provider`, plan
+  `docs/superpowers/plans/2026-10-13-ttf-stage1-glyph-provider.md`).
 - **Stage 2: not planned yet.** The next step is the Stage 2a plan.
 - **Where everything lives:** section 8, "Branches and files".
 
@@ -527,7 +527,7 @@ are cached as `.fpv` files, keyed by the family identity.
 | Stage | Content | Merges? | Status (2026-10-13) |
 |---|---|---|---|
 | **Step 0** | Throwaway device benchmark on the X3 (section 9.1). | No | Done; Appendix A |
-| **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR (the plan's Task 5) | Built and reviewed; device checks in progress |
+| **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR (the plan's Task 5) | PR #468 |
 | **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR | Not planned |
 | **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR | Not planned |
 | **Stage 2c** | `FontBytes`, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR | Not planned |
@@ -539,13 +539,13 @@ Each stage builds on the previous one. Stacked PRs are retargeted to master as t
 are in. Step 0 and Stage 1 come first and have no dependency on each other. Stage 2's plans use step
 0's numbers.
 
-**Branches and files** (all local as of 2026-10-13; none is pushed):
+**Branches and files** (all pushed to origin, 2026-10-14):
 
 | Branch | What it holds | Fate |
 | --- | --- | --- |
 | `docs/ttf-fonts-design` | This spec, the step 0 plan and the Stage 1 plan. | Working material: merges with or before the code, then is folded away (docs layout convention). |
 | `bench/ttf-step0` | The step 0 bench, `bench/ttf/` and `bench/ttf_main.cpp`, with a README on regenerating its data, running it and rebuilding its host checks. It also holds the prototype: the integer loader (`ittf.c`), the standalone `ftgrays` builds, the pre-resolved GPOS reader (`fastkern.h`) and the kerning options (`kernopts.h`). | Never merges. Stage 2b and 2c start from its prototype code; delete the branch once Stage 2 no longer needs to re-measure. |
-| `refactor/glyph-provider` | Stage 1. | One PR to master. |
+| `refactor/glyph-provider` | Stage 1. | PR #468 to master. |
 
 The CJK font used for measuring (Microsoft YaHei) is a Windows system font: use it locally only, and
 never commit it or data generated from it.

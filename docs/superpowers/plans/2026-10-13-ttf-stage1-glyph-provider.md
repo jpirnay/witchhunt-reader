@@ -1,9 +1,10 @@
 # TTF Stage 1: GlyphProvider and a single font lookup. Implementation plan
 
-> **Status (2026-10-13):** Tasks 1 and 2 are done on `refactor/glyph-provider` (commits `217bc90b9`,
-> `e94a4dd47`; local, not pushed), each reviewed with no open findings. Task 3 is in progress; Tasks 4
-> and 5 are open. Three corrections found while executing are folded into the text below and marked
-> *(corrected)*.
+> **Status (2026-10-14): done.** All five tasks are complete on `refactor/glyph-provider`, which is open as
+> PR #468. The commits are `217bc90b9`, `e94a4dd47`, `c50dd4b38`, `a3eb0f4ad`, and `d7d5091f0` (comments and
+> clang-format). Results: host suite 1,956/1,956; `default` and `x4pro` build; C3 flash −134 B; `bench_font`
+> within 0.6% of master; X3 smoke test clean. Three corrections found while executing are folded into
+> the text below and marked *(corrected)*.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -695,7 +696,7 @@ would have been misread as."
 - Consumes: Tasks 1 and 2 (nothing sets or reads the old fields any more).
 - Produces: an `EpdFontData` whose last member is `GlyphProvider* provider`.
 
-- [ ] **Step 1: Make the test fixture use the new field**
+- [x] **Step 1: Make the test fixture use the new field**
 
 This step does not fail the build: C++20 designated initialisers may skip members. The gate for this
 task is Step 3's grep plus the whole suite. *(Corrected.)*
@@ -713,7 +714,7 @@ with
   .provider          = nullptr,
 ```
 
-- [ ] **Step 2: Remove the fields and the legacy branch**
+- [x] **Step 2: Remove the fields and the legacy branch**
 
 In `lib/EpdFont/EpdFontData.h`, delete this block, which sits right above `provider`:
 
@@ -771,7 +772,7 @@ In `lib/EpdFont/SdCardFont.h`:
 - `// Shared on-demand overflow buffer (ring buffer of glyphs loaded via glyphMissHandler)` becomes
   `// Shared on-demand overflow buffer (ring of glyphs loaded by StyleProvider::missGlyph)`.
 
-- [ ] **Step 3: Prove nothing refers to the old hook**
+- [x] **Step 3: Prove nothing refers to the old hook**
 
 ```bash
 grep -rn "glyphMissHandler\|glyphMissCtx\|fromMissCtx\|OverflowContext" lib src test bench freeink-sdk --include=*.h --include=*.cpp --include=*.c
@@ -779,7 +780,7 @@ grep -rn "glyphMissHandler\|glyphMissCtx\|fromMissCtx\|OverflowContext" lib src 
 
 Expected: no output.
 
-- [ ] **Step 4: Run the whole host suite**
+- [x] **Step 4: Run the whole host suite**
 
 ```bash
 cmake --build build/test -j 8 -- -k 0
@@ -790,7 +791,7 @@ Expected: everything passes except tests that are `NOT_BUILT` only because of
 `epub_build_inventory` (known Windows `<dlfcn.h>` failure). The test count is 1,715 plus the 8 added
 in Tasks 1-2 on the master of 2026-10-08; it moves with master.
 
-- [ ] **Step 5: Build both firmware boards**
+- [x] **Step 5: Build both firmware boards**
 
 ```bash
 export PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 PYTHONIOENCODING=utf-8
@@ -801,7 +802,7 @@ export PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 Expected: `[SUCCESS]` for both. (Run them one after the other, never in parallel; see the
 PlatformIO build-dir note in the toolchain constraint.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add lib/EpdFont/EpdFontData.h lib/EpdFont/EpdFont.cpp lib/EpdFont/SdCardFont.h test/differential_rounding/DifferentialRoundingTest.cpp
@@ -830,7 +831,7 @@ git commit -m "EpdFont: remove the glyphMissHandler callback in favour of GlyphP
 
   Stage 2c installs the resolver; nothing installs one in this stage.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `test/font_lookup/CMakeLists.txt`:
 
@@ -933,7 +934,7 @@ TEST(FontLookup, DeclinedIdIsNotRegistered) {
 }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 ```bash
 cmake -S test -B build/test && cmake --build build/test --target FontLookupTest
@@ -941,7 +942,7 @@ cmake -S test -B build/test && cmake --build build/test --target FontLookupTest
 
 Expected: a compile error, `FontLookup.h: No such file or directory`.
 
-- [ ] **Step 3: Create `lib/GfxRenderer/FontLookup.h`**
+- [x] **Step 3: Create `lib/GfxRenderer/FontLookup.h`**
 
 ```cpp
 #pragma once
@@ -971,7 +972,7 @@ const Family* findOrResolveFont(std::map<int, Family>& fonts, const int fontId, 
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 cmake --build build/test --target FontLookupTest && build/test/font_lookup/FontLookupTest
@@ -979,7 +980,7 @@ cmake --build build/test --target FontLookupTest && build/test/font_lookup/FontL
 
 Expected: `[  PASSED  ] 5 tests.`
 
-- [ ] **Step 5: Route `GfxRenderer` through it**
+- [x] **Step 5: Route `GfxRenderer` through it**
 
 In `lib/GfxRenderer/GfxRenderer.h`:
 
@@ -1049,7 +1050,7 @@ git diff --stat lib/GfxRenderer/GfxRenderer.cpp
 
 Expected: `converted 13 sites`, no grep output, and a diff of about 26-39 changed lines.
 
-- [ ] **Step 6: Build both firmware boards**
+- [x] **Step 6: Build both firmware boards**
 
 ```bash
 export PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 PYTHONIOENCODING=utf-8
@@ -1059,7 +1060,7 @@ export PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 
 Expected: `[SUCCESS]` for both.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add lib/GfxRenderer/FontLookup.h lib/GfxRenderer/GfxRenderer.h lib/GfxRenderer/GfxRenderer.cpp test/font_lookup test/CMakeLists.txt
@@ -1073,7 +1074,7 @@ git commit -m "GfxRenderer: one font lookup with an optional resolver for unknow
 **Files:**
 - No source changes, unless a check fails.
 
-- [ ] **Step 1: Whole host suite**
+- [x] **Step 1: Whole host suite**
 
 ```bash
 cmake --build build/test -j 8 -- -k 0
@@ -1083,14 +1084,14 @@ ctest --test-dir build/test -j 8 --output-on-failure 2>&1 | tail -5
 Expected: 100% of built tests pass (the `epub_build_inventory`-only `NOT_BUILT` entries are the known
 Windows exception). Note the total for the PR description.
 
-- [ ] **Step 2: Flash and size**
+- [x] **Step 2: Flash and size**
 
 Record the `Flash:` and `RAM:` lines from `/c/tmp/stage1-task4-default.log`. Compare them with the
 same lines from a `default` build of `master`, or with the 2026-10-10 master baseline (6,271,873 B
 flash, 54,616 B static RAM). Expected: within a few hundred bytes. The change removes one pointer from
 every `EpdFontData` and adds vtables for two small classes. Put both numbers in the PR description.
 
-- [ ] **Step 3: Glyph-path micro-benchmark (needs the X3 on COM6)**
+- [x] **Step 3: Glyph-path micro-benchmark (needs the X3 on COM6)**
 
 USER ACTION: connect the X3. The bench replaces the reader firmware until Step 5 reflashes it.
 
@@ -1144,7 +1145,7 @@ tables, so it never reaches the provider. If a kerning line regresses by more th
 `hasKernTables` computation in `getKerning` is the suspect; revert it to the two original early
 returns with the provider call added to each.
 
-- [ ] **Step 4: Device smoke test on the reader firmware (X3)**
+- [x] **Step 4: Device smoke test on the reader firmware (X3)**
 
 ```bash
 "$HOME/.platformio/penv/Scripts/pio.exe" run -e default -t upload
@@ -1163,7 +1164,7 @@ USER ACTION, on the device:
 Expected: no blank, boxed or garbled glyphs, and no reboot. In the serial log, `[SDCF] Overflow:` lines
 may appear during previews as before, and there are no new `LOG_ERR` lines.
 
-- [ ] **Step 5: Format, push, open the PR**
+- [x] **Step 5: Format, push, open the PR**
 
 CI formats with clang-format 21.1.8. Install it once, if `/c/tmp/cf21/bin/clang-format-21.exe` does
 not exist yet:
