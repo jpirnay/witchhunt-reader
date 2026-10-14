@@ -3543,7 +3543,7 @@ Expected: `format clean`; the only build failure is `epub_build_inventory` (`<dl
 
 ```bash
 git push -u origin feat/ttf-glyph-store
-gh pr create --base master --head feat/ttf-glyph-store --title "TTF Stage 2a: FlashGlyphStore, a write-once glyph store in flash" --body-file /c/tmp/stage2a-pr-body.md
+gh pr create --base master --head feat/ttf-glyph-store --title "feat: (ttf) FlashGlyphStore, a write-once glyph store in flash (TTF Stage 2a)" --body-file /c/tmp/stage2a-pr-body.md
 ```
 
 Write `/c/tmp/stage2a-pr-body.md` first, with the Write tool:
