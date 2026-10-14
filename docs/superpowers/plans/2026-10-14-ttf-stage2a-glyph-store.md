@@ -1,17 +1,19 @@
 # TTF Stage 2a: the flash glyph store. Implementation plan
 
-> **Status (2026-10-14): paused after Task 3 of 8.**
-> - **Done on `feat/ttf-glyph-store`** (pushed, no PR yet), one commit per task: `d40fd9625` (Task 1),
->   `cc8939782` (Task 2), `e21e2d8fb` (Task 3). GlyphStoreTest is 41/41 with 0 warnings.
-> - **Resume** at Task 4 with BASE = `e21e2d8fb`. Tasks 4-8 are unchanged below.
-> - **Verified before execution:** every code block below was extracted, compiled with the suite's flags
->   and run. All 70 tests pass. Breaking the recovery scan on purpose (Task 6 Step 3) fails 5 of them.
-> - **Execution notes:**
->   - Where a task first lists a new `.cpp` in CMake, the RED is CMake's "Cannot find source file", not a
->     compiler error. The cause is the same.
->   - Run the full host suite and the firmware builds only in Tasks 7-8.
-> - **After Task 8, the user asked for a full audit sweep** (flaws, inconsistencies,
->   improvement/simplification potential) before merge.
+> **Status (2026-10-14): Tasks 1-8 done, then a three-lane audit and its fix pass** on
+> `feat/ttf-glyph-store`.
+> - **Audit results:** 3 Critical, about 15 Important. All fixed, each with a test that failed first. Key
+>   fixes were mutation-checked.
+> - **The store's code no longer matches the task code below in these places:**
+>   - the iterating log scan;
+>   - `kNoGlyph = 0`, with slots holding `dataOffset`;
+>   - the state sector, 32 size entries and the size-claim guard;
+>   - `sizeIndex(ppem, &index)`;
+>   - `Lookup {NotStored, NoGlyph, Found}` and `markNoGlyph`;
+>   - a probe cap of 128;
+>   - aligned loads;
+>   - the two-way `.cpfont` interlock and the PSRAM bounce buffer.
+> - **The spec's section 4 describes the result.** Read it, not the tasks, for the current design.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -1926,7 +1928,7 @@ git commit -m "ttf: FlashGlyphStore install, open and power-cut recovery scan"
   - `storedIntact(const FlashGlyphStore&, uint32_t key, uint8_t w, uint8_t h)`
   - `absentOrIntact(...)`, with the same parameters
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add these three functions to `test/glyph_store/GlyphStoreTestUtil.h`, just above the comment
 `/// Every store test runs on its own simulated chip`:
@@ -2203,7 +2205,7 @@ TEST_F(GlyphStoreGlyphs, ReinstallingErasesOnlySectorsThatHoldData) {
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 ```bash
 cmake -S test -B build/test && cmake --build build/test --target GlyphStoreTest
@@ -2212,7 +2214,7 @@ cmake -S test -B build/test && cmake --build build/test --target GlyphStoreTest
 Expected: link errors, undefined references to `GlyphBatch::add`, `FlashGlyphStore::commit`,
 `FlashGlyphStore::find` and `FlashGlyphStore::markMissing`.
 
-- [ ] **Step 3: Implement them**
+- [x] **Step 3: Implement them**
 
 Append to `lib/EpdFont/ttf/FlashGlyphStore.cpp`:
 
@@ -2369,7 +2371,7 @@ void FlashGlyphStore::setWipePending() {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/GlyphStoreTest
@@ -2377,7 +2379,7 @@ cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/Glyph
 
 Expected: `[  PASSED  ] 57 tests.` (41 earlier, 16 new)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/EpdFont/ttf/FlashGlyphStore.cpp test/glyph_store
@@ -2398,7 +2400,7 @@ git commit -m "ttf: glyph store commits batches in one write; lookups, missing g
 - Consumes: Tasks 3 and 4, including `setWipePending()`, `insert()` and `eraseWritten()`.
 - Produces: working `sizeIndex`, `findPair`, `storePair` and `wipe`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `test/glyph_store/GlyphStoreSizesPairsWipeTest.cpp`:
 
@@ -2570,7 +2572,7 @@ TEST_F(GlyphStoreWipe, WipingAnEmptyStoreErasesOnlyTheHeader) {
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 ```bash
 cmake -S test -B build/test && cmake --build build/test --target GlyphStoreTest
@@ -2579,7 +2581,7 @@ cmake -S test -B build/test && cmake --build build/test --target GlyphStoreTest
 Expected: link errors, undefined references to `FlashGlyphStore::sizeIndex`, `findPair`, `storePair` and
 `wipe`.
 
-- [ ] **Step 3: Implement them**
+- [x] **Step 3: Implement them**
 
 Append to `lib/EpdFont/ttf/FlashGlyphStore.cpp`:
 
@@ -2683,7 +2685,7 @@ bool FlashGlyphStore::wipe() {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/GlyphStoreTest
@@ -2691,7 +2693,7 @@ cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/Glyph
 
 Expected: `[  PASSED  ] 68 tests.` (57 earlier, 11 new)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/EpdFont/ttf/FlashGlyphStore.cpp test/glyph_store
@@ -2716,7 +2718,7 @@ git commit -m "ttf: glyph store size table, kerning pairs and wipe (erasing only
 This task tests behaviour that Tasks 3-5 built, so a sweep that passes at once is expected. Step 3 proves
 the sweep can fail, by breaking the store on purpose.
 
-- [ ] **Step 1: Write the sweeps**
+- [x] **Step 1: Write the sweeps**
 
 Create `test/glyph_store/GlyphStorePowerCutTest.cpp`:
 
@@ -2923,7 +2925,7 @@ TEST(GlyphStorePowerCut, EveryCutDuringAWipeIsRecoverable) {
 }
 ```
 
-- [ ] **Step 2: Run the sweeps**
+- [x] **Step 2: Run the sweeps**
 
 ```bash
 cmake -S test -B build/test && cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/GlyphStoreTest --gtest_filter='GlyphStorePowerCut.*'
@@ -2931,7 +2933,7 @@ cmake -S test -B build/test && cmake --build build/test --target GlyphStoreTest 
 
 Expected: `[  PASSED  ] 2 tests.` A few thousand reboots in all; it should take seconds, not minutes.
 
-- [ ] **Step 3: Prove the sweep bites**
+- [x] **Step 3: Prove the sweep bites**
 
 Break recovery on purpose: in `FlashGlyphStore::scanLog()` add `return offset;` as the first statement after
 the `while` loop, so the check of the bytes after the last record is skipped. Then run:
@@ -2951,7 +2953,7 @@ cmake --build build/test --target GlyphStoreTest && build/test/glyph_store/Glyph
 
 Expected: `[  PASSED  ] 70 tests.` Write the failing output of the broken run into your report.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add test/glyph_store
@@ -2973,7 +2975,7 @@ git commit -m "test: glyph store power-cut sweeps over every write step of a ses
 
 No host test can reach ESP-IDF. The checks are the firmware builds plus Task 8's run on the device.
 
-- [ ] **Step 1: Create `lib/hal/EspNorFlash.h`**
+- [x] **Step 1: Create `lib/hal/EspNorFlash.h`**
 
 ```cpp
 #pragma once
@@ -3021,7 +3023,7 @@ class EspNorFlash final : public NorFlash {
 };
 ```
 
-- [ ] **Step 2: Create `lib/hal/EspNorFlash.cpp`**
+- [x] **Step 2: Create `lib/hal/EspNorFlash.cpp`**
 
 ```cpp
 #include "EspNorFlash.h"
@@ -3118,7 +3120,7 @@ uint32_t EspNorFlash::freeMapPages() const {
 }
 ```
 
-- [ ] **Step 3: Build both firmware boards**
+- [x] **Step 3: Build both firmware boards**
 
 Run each in the background and wait for it to finish. Run them one after the other, never in parallel:
 
@@ -3138,7 +3140,7 @@ Expected:
 If a link fails with "file format not recognized" or truncated objects, delete only the zero-byte `.o`
 files under that env's `.pio/build/<env>`, then rebuild. Never run `pio run -t clean`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add lib/hal/EspNorFlash.h lib/hal/EspNorFlash.cpp
@@ -3156,7 +3158,7 @@ git commit -m "hal: EspNorFlash, the glyph store's NorFlash over the spiffs font
 **Interfaces:**
 - Consumes: everything above.
 
-- [ ] **Step 1: Write the device self-test**
+- [x] **Step 1: Write the device self-test**
 
 Create `bench/glyph_store_main.cpp`:
 
@@ -3420,7 +3422,7 @@ export PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 
 Expected: `[SUCCESS]`.
 
-- [ ] **Step 2: Run it on the X3**
+- [x] **Step 2: Run it on the X3**
 
 USER ACTION: confirm that erasing the `.cpfont` flash cache is fine. The reader copies a family back from
 the SD card the next time it needs one. The X3 must be on COM6, with no serial monitor holding the port.
@@ -3508,7 +3510,7 @@ Record every `BENCH` line for the PR. Plausible ranges from step 0 (Appendix A):
 
 A value far outside these ranges is a finding to report, not to tune away.
 
-- [ ] **Step 3: Restore the reader firmware**
+- [x] **Step 3: Restore the reader firmware**
 
 ```bash
 "$HOME/.platformio/penv/Scripts/pio.exe" run -e default -t upload --upload-port COM6 > /c/tmp/stage2a-restore.log 2>&1; grep -a "\[SUCCESS\]\|FAILED" /c/tmp/stage2a-restore.log | tail -1
@@ -3516,7 +3518,7 @@ A value far outside these ranges is a finding to report, not to tune away.
 
 Expected: `[SUCCESS]`. USER ACTION: check that the reader boots and opens a book.
 
-- [ ] **Step 4: Format, full host suite, commit**
+- [x] **Step 4: Format, full host suite, commit**
 
 CI formats with clang-format **21.1.8**. If `/c/tmp/cf21/bin/clang-format-21.exe` does not exist yet, install it:
 
@@ -3539,7 +3541,7 @@ git commit -am "bench: glyph store device self-test (env bench_glyph_store); cla
 
 Expected: `format clean`; the only build failure is `epub_build_inventory` (`<dlfcn.h>`); `100% tests passed`.
 
-- [ ] **Step 5: Push and open the PR**
+- [x] **Step 5: Push and open the PR**
 
 ```bash
 git push -u origin feat/ttf-glyph-store

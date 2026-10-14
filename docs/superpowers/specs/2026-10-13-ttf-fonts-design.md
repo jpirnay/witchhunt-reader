@@ -7,8 +7,8 @@ with the direct integration in section 3.
   section 2.
 - **Stage 1: done, in review as PR #468** (branch `refactor/glyph-provider`, plan
   `docs/superpowers/plans/2026-10-13-ttf-stage1-glyph-provider.md`).
-- **Stage 2a: in progress** (glyph store; Tasks 1-3 of 8 done on `feat/ttf-glyph-store`). Stages 2b-2d are
-  not planned yet.
+- **Stage 2a: built and audited** (glyph store on `feat/ttf-glyph-store`; three audits, fix pass done).
+  Stages 2b-2d are not planned yet.
 - **Where everything lives:** section 8, "Branches and files".
 
 It is working material. When the work merges, lasting parts move to reference docs, open items move
@@ -183,7 +183,8 @@ family (`FlashGlyphStore`, magic `CPTT`). `SdCardFontManager` decides which one 
 below `FlashFontPartition::fontUsableSize()`; the last 64 KB is the language slot and is never touched.
 
 ```
-sector 0 (4 KB)  header (4.2); the size table at 0x400 and the wipe word at 0x480
+sector 0 (4 KB)  header (4.2), written once per install
+sector 1 (4 KB)  state sector: the size table (32 entries) and the wipe word; a wipe erases it last
                  (the rest of the first 64 KB page stays unused, so every region below starts on a page)
 style data       flash mode: each style's whole TTF, every style 64 KB-aligned so it maps alone
                  SD mode: every table except glyf, per style (cmap loca hmtx head hhea maxp GPOS GSUB)
@@ -224,34 +225,47 @@ Examples from the planner at 32 free pages (step 0 measured 32):
 The geometry is fixed at install from the budget measured then. If a later firmware update shrinks the
 budget so that a mapping fails, the store reinstalls with smaller regions (6.2).
 
-### 4.2 Header (sector 0, written at install; some fields are write-once afterwards)
+**The partition has one owner at a time.** `EspNorFlash` refuses writes while a `.cpfont` is mapped or
+being written, and `FlashFontPartition` refuses to write or map while the glyph store holds a mapping.
+Stage 2c closes the TTF store before it loads a `.cpfont` family.
+
+### 4.2 Header (sector 0, written once per install) and the state sector (sector 1)
 
 - magic `CPTT` and a format version;
 - mode (flash or SD) and the style count;
 - **family identity**: FNV-1a over each style file's name, byte size and FAT modification time, plus a
   render-version byte covering the engine, the 150 DPI sizing and the quantization thresholds;
-- geometry: index offset, slot count, log offset, log size;
-- per style: in flash mode, the TTF's offset and size; in SD mode, the SD path hash, the file size, and
-  a table map (tag, offset in the file, offset in the partition, length) for each copied table;
-- **size table**: 16 write-once entries of 8 bytes (pixels-per-em in 26.6, a flags byte). An erased
-  entry is unused;
-- **wipe-pending word**: write-once, from 0xFFFFFFFF to 0;
+- geometry: mode, style count, index offset and slots, pair index offset and slots, log offset and
+  size;
+- per style: the style block's offset and size; in SD mode also the SD path hash, the file size, and a
+  table map (tag, offset in the file, offset in the style block, length; at most 8 tables, each inside
+  its block) for each copied table;
 - **a check**: FNV-1a over the header, written with it, so a header torn by a power cut reads as
   "not installed" and the family is installed again.
 
-A size-table entry is `{u32 ppem 26.6, u8 flags, 3 pad bytes}` and counts as used once its pad reads
-zero. The pad is written last, so an entry cut short is neither free nor used, and is never written
-again.
+The state sector holds what changes after the install, so a wipe never rewrites the header:
 
-### 4.3 Index slot: `{u32 key, u32 logOffset}`
+- **size table**: 32 write-once entries `{u32 ppem 26.6, u32 claimed}`. An entry is in use once
+  `claimed` reads 0. The ppem goes first and `claimed` last, so an entry cut short is neither free nor
+  in use, and is never written again. 32 entries cover the 9 ladder rungs plus body sizes;
+- **wipe-pending word**: write-once, from 0xFFFFFFFF to 0. Anything but erased reads as pending.
 
-- `key = cp (bits 0-20) | style << 21 | sizeIndex << 23`. Bits 27-31 are zero, so a key can never equal
-  the erased value 0xFFFFFFFF.
-- `logOffset = 0xFFFFFFFE` means "the font has no glyph for this codepoint", or it can never load
-  (6.1). Such slots have no log record, and the font is not asked again.
+**Size indices and wipes.** A wipe empties the size table. A commit refuses keys whose size index was not
+claimed since the last wipe (`Commit::Refused`), and `generation()` changes with every wipe, so a face
+that holds a size index claims it again when the generation moved.
+
+### 4.3 Index slot: `{u32 key, u32 value}`
+
+- `key = cp (bits 0-20) | style << 21 | sizeIndex << 23` (5 bits). Bits 28-31 are zero, so a key can
+  never equal the erased value 0xFFFFFFFF.
+- `value` is the record's `dataOffset` (its log offset + 20, never 0), or **0 = "the font has no glyph
+  for this codepoint"**, or it can never load (6.1). Such slots have no log record, and the font is not
+  asked again. A power cut can only leave extra 1 bits, so a torn slot never reads as 0; an earlier
+  marker of 0xFFFFFFFE could be produced by a cut (audit, 2026-10-14).
 - Slot position: `(uint64(key * 2654435761) * slots) >> 32`, which equals
   `(key * 2654435761) >> (32 - log2(slots))` for a power of two and allows any whole number of index
-  pages; then linear probing up to 32 slots. A longer chain counts as full (4.6).
+  pages; then linear probing up to 128 slots (every table has at least 128). A longer chain counts as
+  full (4.6). A cap of 32 declared the index full at 49-67 % load in simulation.
 - A slot is free only when both words read erased. A slot cut short (some bits programmed) is skipped by
   inserts and does not end a probe.
 - **Pair slots** (the separate 64 KB pair index, 8,192 slots) are `{u32 leftCp << 16 | rightCp,
@@ -260,6 +274,7 @@ again.
     per face at lookup.
   - A probe matches key and style.
   - Only BMP pairs are stored. Rarer pairs are resolved by the GPOS reader every time.
+  - The pair index takes pairs up to 70 % of its slots; then pairs are no longer stored (never a wipe).
 
 ### 4.4 Log record
 
@@ -283,18 +298,20 @@ NOR flash bits can only change from 1 to 0 without an erase, so:
    about 100 µs on top of its bytes (Appendix A), and each flash page is then programmed once;
 2. program one index slot (8 bytes) per record.
 
-- **Reads trust a slot only if** the record at `logOffset` lies inside the log, has the same key, and
-  has `dataLength` ≤ 8 KB. A record left behind by a power cut is never referenced, so it only wastes
+- **Reads trust a slot only if** the record at `value − 20` lies inside the written log, has the same key,
+  and is plausible (below). A record left behind by a power cut is never referenced, so it only wastes
   space.
 - **At load the log is scanned record by record** to find where writing resumes. This takes a few
   thousand hops through mapped flash, well under 100 ms; checkpoints are deferred (section 11).
-  - The scan stops at an erased key, or at a record that is not plausible: a key with bits 27-31 set,
+  - The walk stops at an erased key, or at a record that is not plausible: a key with bits 28-31 set,
     a `dataLength` that is not `glyphDataBytes(width, height, 2-bit)` or is over 8 KB, a `dataOffset`
     that is not the record's offset + 20, or a record past the log's end.
   - Whatever stopped it, a cut write can have left programmed bytes after that point, even behind a key
-    that still reads erased. A torn write spans at most one record (8,212 B), so the scan checks that
-    far and resumes past the last programmed byte at the next 4 KB boundary. No byte is ever
-    programmed twice.
+    that still reads erased. A torn write spans at most one record (8,212 B), so the scan looks that far.
+    If it finds programmed bytes, it carries on at the first sector boundary past the stop that starts a
+    plausible record (where a later session resumed), or else past those bytes at the next boundary,
+    and walks again. A scan that only resumed once stopped at the same torn record on every later boot
+    and wrote over what later sessions had stored (audit, 2026-10-14). No byte is ever programmed twice.
 - **A slot cut short is skipped.** Insertion carries on probing past it.
 - **ESP-IDF keeps the mapped view current.** It invalidates the mapped cache lines after every write
   (`spi_flash_check_and_flush_cache` in `memspi_host_driver.c`), so a record can be read back
@@ -307,16 +324,23 @@ NOR flash bits can only change from 1 to 0 without an erase, so:
 The store counts as full when any of these holds:
 
 - the log is more than 95% used;
-- the index is more than 70% loaded, or a probe chain passes 32 slots;
-- all 16 size entries are taken.
+- the index is more than 70% loaded, or a probe chain passes 128 slots;
+- all 32 size entries are taken and another size is asked for.
 
 A full pair index only stops storing pairs (they come from the GPOS reader every time); it never causes
 a wipe.
 
 It then sets the wipe-pending word, and `TtfFont` switches to ring mode (3.2): glyphs are still drawn
-but not stored. **The wipe itself runs only at a point where no `EpdGlyph` pointer into the log can be
-live: at book open, or before a section build starts.** It erases the index and the log behind a
-"Preparing font" popup. That is about 1.2-1.4 MB of erase, roughly 3-8 s depending on the chip.
+but not stored. **The wipe itself runs only at a point where no `EpdGlyph` pointer into the log and no
+size index can be in use: at book open, or before a section build starts.** Behind a "Preparing font"
+popup it:
+
+1. records wipe pending in flash and reads it back, if it was not pending already;
+2. erases the index, the pair index and the log, only sectors that hold data;
+3. erases the state sector last, which clears the size table and the wipe word together.
+
+A cut anywhere leaves wipe pending, and the next wipe finishes the job; the header is never touched. A
+full Latin store erases about 1.1 MB (2.2-2.7 s on the X3), a full CJK store about 1.3 MB.
 
 ### 4.7 Wear
 
@@ -565,7 +589,7 @@ are cached as `.fpv` files, keyed by the family identity.
 |---|---|---|---|
 | **Step 0** | Throwaway device benchmark on the X3 (section 9.1). | No | Done; Appendix A |
 | **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR (the plan's Task 5) | PR #468 |
-| **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR | In progress: Tasks 1-3 of 8 on `feat/ttf-glyph-store` (plan `docs/superpowers/plans/2026-10-14-ttf-stage2a-glyph-store.md`) |
+| **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR | Built, audited, audit fixes in, on `feat/ttf-glyph-store` (plan `docs/superpowers/plans/2026-10-14-ttf-stage2a-glyph-store.md`) |
 | **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR | Not planned |
 | **Stage 2c** | `FontBytes`, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR | Not planned |
 | **Stage 2d** | User-guide section on TTF fonts; FreeType credit (required by the FTL licence). | With 2c or own PR | Not planned |
@@ -608,6 +632,25 @@ Stage 2 plans:
   ring will too). `EpdGlyphRef` copies the metrics by value, so layout may hold any number of refs; only
   `sdRecord` (bitmap offset and ownership identity) ages, and draws consume it straight after the lookup.
   Rename `sdRecord` in 2c, since it will carry flash-store records too.
+- **From the Stage 2a audit (2026-10-14), for 2c:**
+  - **Kerning pairs:** look up whether the left glyph is in any pre-resolved PairPos coverage before
+    asking GPOS or storing a pair (about 1 µs). Storing every pair, zeros included, fills the CJK pair
+    index in the first chapter (about 0.7 s of slot writes) and is the larger share of a first Latin
+    page's flash writes.
+  - **Batches:** use the scratch block's output region as the `GlyphBatch` buffer and render straight
+    into `add()`'s pointer (it starts as 0xFF, solid ink, so every byte must be written); commit when
+    `add()` returns null and at the end of each prefetch; prefetch per paragraph or page rather than per
+    run. On PSRAM boards keep batch buffers in internal RAM (`EspNorFlash` bounces external sources
+    through 512 B, at one write call per 512 B).
+  - **Styles:** group a page's misses by style; in flash mode each `mapStyle` switch remaps about 8
+    pages. Consider mapping one style's tables at a time in SD mode too: a 2-style CJK family gets a
+    14-page log instead of 21.
+  - **Size indices:** re-claim a face's index when `generation()` changed; a wipe voids every index.
+  - **Lifetimes:** `find()` pointers, `logBase()` and `mapStyle()` pointers die at `close()`, `open()`,
+    `beginInstall()` and `wipe()`; in flash mode `mapStyle()` for another style unmaps the previous one.
+  - **Planner input:** derive the expected record size from the body pixels-per-em at install (records
+    grow with its square); for CJK at 12-14 pt that is 10-20 % more glyphs before a wipe.
+  - **Partition ownership:** close the TTF store before loading a `.cpfont` family (4.1).
 - **Optional:** a `prefetch(text)` virtual on `GlyphProvider` (no-op by default) would let
   `ensureFontReady` and `prewarmCache` reach `TtfFont` through `family->getData(style)->provider`,
   without a font-ID-to-TtfFont registry.
@@ -687,6 +730,17 @@ section 2. All of it is throwaway code: Stage 2b reimplements the loader on top 
 the measured behaviour as its test gate.
 
 ## 11. Deferred (pick up after the first version)
+
+Glyph store minors from the Stage 2a audit (2026-10-14), each a speed or tidiness gain, none a defect:
+
+- Erase a whole 64 KB block when at least 3 of its sectors hold data; a wipe's partial-block tail is
+  now erased sector by sector (−0.2 to −0.85 s per CJK wipe; measure the sector erase time first).
+- Take `usedSlots` from the log scan instead of reading the whole index at open (−11 to −14 ms per
+  family load for Latin).
+- Read 1 KB at a time in install's blank check (−0.3 to −0.45 s per install).
+- An `enum class` for the store mode; tests including `ttf/...` like firmware code; avoid holding the
+  648 B header for the whole install.
+
 
 1. Compound glyphs positioned by point matching (ARGS_ARE_XY_VALUES clear).
 2. Glyphs with more than 512 points (scratch cap).
