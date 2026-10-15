@@ -109,7 +109,8 @@ Each face's `EpdFontData` holds:
 
 - no intervals and no glyph table, so every lookup goes to the provider;
 - `bitmap` = the mapped log base;
-- `advanceY`, `ascender` and `descender` from that style's `hhea` at that size;
+- `advanceY`, `ascender` and `descender` from that style's face metrics at that size (`hhea`, or OS/2's typo
+  metrics when the font sets USE_TYPO_METRICS, as FreeType chooses them; `ttf::lineMetrics`);
 - `is2Bit = true`;
 - the style's ligature table;
 - `provider` = a small per-(face, style) adapter that forwards to the `TtfFont` with its size and
@@ -359,6 +360,9 @@ and about 45 ms per 4 KB sector erased, from typical datasheets; step 0 measures
 
 ### 5.1 `FontBytes`
 
+**As built (Stage 2b, `lib/EpdFont/ttf/FontBytes.h`):** the flash mode, a pointer and a length, with the
+reads inline and both flags. Stage 2c adds the SD mode behind the same calls.
+
 `FontBytes` is the engine's only way to read a font. It offers `u8/u16/u32(offset)` and
 `read(offset, len, dst)`, and every access is bounds-checked. Two error flags are kept apart, because
 6.1 treats them differently:
@@ -386,9 +390,16 @@ Modes:
   - hmtx advances, and hhea ascender/descender.
   - Font units are scaled to 26.6 with integer multiply and divide. No floating point is allowed
     anywhere.
-  - A build check enforces this. It reads the "archive member included to satisfy reference" section
-    of `firmware.map` and fails if any `lib/EpdFont/ttf` object pulls in a libgcc soft-float member
-    (`*sf*.o` or `*df*.o`).
+  - A build check enforces this: `scripts/check_no_float.py` runs after every link and fails it when an
+    object under `EpdFont/ttf/` has an undefined soft-float or libm symbol (`nm -u`). It reads the
+    objects, not `firmware.map`: the map credits each libgcc member only to the first object that pulled
+    it in, and SdFat and the battery monitor already pull in the double routines.
+  - **As built (Stage 2b):** `ttf::Rasterizer` owns the scratch block (5.3). `load()` reads and scales an
+    outline and reports the `EpdGlyph` metrics; `rasterize(dst)` draws it anywhere, so 2c can render
+    straight into `GlyphBatch::add()`'s pointer; `render()` does both into the output region. Scaling is
+    FreeType's (`FT_MulFix` by `FT_DivFix`'s scale, transform before offset), and each outline is moved
+    by the phantom point `xMin - lsb` of the top glyph or of a `USE_MY_METRICS` component. Advances are
+    computed in 64 bits; a glyph whose advance, size or position does not fit `EpdGlyph` is Unsupported.
 - **`ftgrays.c`** (FreeType 2.13.3, the version the SDK vendors) is built with `STANDALONE_`:
   - It is vendored under `lib/EpdFont/ttf/third_party/freetype/`, with `FTL.TXT` and a PATCHES note.
   - Shims: `FALL_THROUGH`, `FT_BEGIN_HEADER`, `FT_STATIC_BYTE_CAST`.
@@ -407,9 +418,11 @@ Modes:
 - **Sizes match the PC converter:**
   - pixels per em = pt × 150 / 72;
   - advances in 12.4 fixed point from the unscaled `hmtx` value;
-  - ascender, descender and line height from `hhea`, rounded like `fontconvert_sdcard.py`.
+  - ascender, descender and line height from FreeType's face metrics (`hhea`, or OS/2's typo metrics when
+    the font asks), rounded like `fontconvert_sdcard.py`.
 
-  So a TTF at 14 pt lays out like a `.cpfont` at 14 pt.
+  So a TTF at 14 pt lays out like a `.cpfont` at 14 pt. Only the layout matches: the converter
+  auto-hints its bitmaps, so a TTF's glyph boxes and pixels match FreeType unhinted, not the `.cpfont`.
 
 ### 5.3 Scratch memory (resident while a TTF family is loaded)
 
@@ -421,7 +434,10 @@ allocation per glyph:
 - **outline points:** 9 B per point, sized from `maxp` (the larger of maxPoints and
   maxCompositePoints), capped at 512 points (4.6 KB);
 - **contours:** 2 B each, from `maxp`, capped at 256;
-- **2-bit output:** sized from the head bbox at the largest rung, capped at 4 KB.
+- **2-bit output:** sized from the head bbox at the largest rung, capped at 4 KB. As built, never smaller
+  than the em square (FreeType does not trust head's box either), and the plan records that largest size
+  (`ScratchPlan::maxPpem26_6`): a glyph too big for the region at a larger size is Transient, the plan's
+  fault, while one too big at a planned size is Unsupported.
 
 That comes to about 6-10 KB for text fonts and about 14 KB for a CJK family. The block is not borrowed from the lent framebuffer,
 because section builds already use that region for their build arena. A glyph with more points than
@@ -489,6 +505,11 @@ the cap can never load (6.1); text glyphs stay well under it.
 - font collections (`.ttc`);
 - variable fonts beyond their default instance: they register as Regular, and missing styles fall back
   as an incomplete `.cpfont` family does;
+- Apple's scaled component offsets (`SCALED_COMPONENT_OFFSET` with a transform and a non-zero offset):
+  Unsupported, like point matching;
+- embedded bitmap strikes: glyphs always come from the outlines;
+- FreeType's "tricky" fonts, whose glyphs are assembled by bytecode (for example DFKai-SB): they would
+  render garbled, so the registry should refuse them (8.1);
 - hinting.
 
 See section 11 for the full deferred list.
@@ -500,8 +521,8 @@ See section 11 for the full deferred list.
 | Situation | Behaviour |
 |---|---|
 | The font has no glyph for the codepoint | A slot with the "missing" marker; the replacement glyph is drawn as today. |
-| A permanent load failure (point matching, over the cap, an out-of-range read in the outline) | A slot with the "missing" marker; logged once. |
-| A transient failure (an SD I/O error) | Drawn as missing this time, **not** marked, retried at the next lookup. |
+| A permanent load failure (`Unsupported` or `Malformed`: point matching, over a cap, an out-of-range read in the outline, an advance or position `EpdGlyph` cannot hold) | A slot with the "missing" marker; logged once. |
+| A transient failure (`Transient`: an SD I/O error, no scratch block, or a size above the one the scratch block was planned for) | Drawn as missing this time, **not** marked, retried at the next lookup. |
 
 ### 6.2 Store and mapping failures
 
@@ -597,8 +618,8 @@ are cached as `.fpv` files, keyed by the family identity.
 | **Step 0** | Throwaway device benchmark on the X3 (section 9.1). | No | Done; Appendix A |
 | **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR (the plan's Task 5) | PR #468 |
 | **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR | Merged (PR #469) |
-| **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR | Planned: `plans/2026-10-14-ttf-stage2b-rasterizer.md` |
-| **Stage 2c** | `FontBytes`, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR | Not planned |
+| **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR | PR #470 (built and reviewed 2026-10-15; plan `plans/2026-10-14-ttf-stage2b-rasterizer.md`) |
+| **Stage 2c** | `FontBytes`' SD mode, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR | Not planned |
 | **Stage 2d** | User-guide section on TTF fonts; FreeType credit (required by the FTL licence). | With 2c or own PR | Not planned |
 
 Each stage builds on the previous one. Stacked PRs are retargeted to master as their base merges.
@@ -658,6 +679,25 @@ Stage 2 plans:
   - **Planner input:** derive the expected record size from the body pixels-per-em at install (records
     grow with its square); for CJK at 12-14 pt that is 10-20 % more glyphs before a wipe.
   - **Partition ownership:** close the TTF store before loading a `.cpfont` family (4.1).
+- **From the Stage 2b review (2026-10-15), for 2c:**
+  - **Field widths:** `EpdGlyphRef` narrows a provider glyph's left and top to `int8_t`, and
+    `EpdFontData::advanceY` is `uint8_t`. Cap the rung sizes so they fit, or widen `EpdGlyphRef`; refuse a
+    face whose `lineMetrics().advanceY` is over 255.
+  - **Batch records:** a `GlyphBatch` record takes `align4(20 + dataLength)` bytes, but the output region
+    is sized for the bitmap alone; as the batch buffer, it must leave room for the record header.
+  - **`add()` then `rasterize()`:** a staged record cannot be taken back, and `rasterize()` can still fail
+    (an ftgrays overflow). Decide what fills that slot. `render()` writes `output()`, so it must not be used
+    while the output region is the batch buffer.
+  - **SD errors:** `glyphIndex()` returns 0 on an SD read error too; check `ioError()` before marking a
+    codepoint missing. Bound format-4 cmap reads by `cmapEnd` before the SD mode, or a broken cmap reads
+    stray SD sectors.
+  - **Default-ignorable codepoints:** advance 0 and no ink, as the converter does.
+  - **Time:** a hostile glyph (512 points of full-width zig-zag conics) can take about 0.5-0.7 s on the X3
+    (estimate). Prefetch yields between glyphs.
+  - **One render at a time:** `ftgrays`' standalone raster object is a static. Assert `RenderLock` around
+    every `Rasterizer` call (debug builds); overlapping renders could overflow a pool.
+  - **Tricky fonts:** the registry refuses FreeType's bytecode-assembled "tricky" fonts (5.6).
+  - **S3:** a scratch block over 4 KB lands in PSRAM unless allocated internal.
 - **Optional:** a `prefetch(text)` virtual on `GlyphProvider` (no-op by default) would let
   `ensureFontReady` and `prewarmCache` reach `TtfFont` through `family->getData(style)->provider`,
   without a font-ID-to-TtfFont registry.
@@ -711,6 +751,17 @@ Stage 1 must not change behaviour:
   over every glyph of the bundled TTF sources: no load failures, ≤5 box differences per font, and ≤3% of
   pixels different at 2-bit. These are today's prototype numbers kept as a regression gate. Span
   packing must match packing the bitmap afterwards.
+  **As built (Stage 2b, `test/ttf_rasterizer/`), much stricter:**
+  - every glyph index of all 12 bundled TTFs at 8, 14 and 40 pt: no load failures, no advance or box
+    differences, and every bitmap byte-identical to FreeType's (the reference clears the OVERLAP flag);
+  - the cmap identical up to U+2FFFF, and the line metrics equal to the converter's at six sizes;
+  - synthetic compounds (rotated, scaled, mirrored, `USE_MY_METRICS`, nested) byte-identical too;
+  - against FreeType's oversampled rendering of overlap-flagged glyphs: 0.77-0.85% of pixels at 14 pt
+    (≤3%);
+  - damaged fonts: damage aimed at what a render reads (the glyph's record, its `loca` and `hmtx` entries,
+    `maxp`, `head`), the scratch block planned from the damaged face, and an assertion that the damage
+    reaches the loader; ASan and UBSan on CI's Linux GCC, UBSan in trap mode with MinGW;
+  - a host/device hash: the X3 bench (`env:bench_ttf_raster`) draws exactly what the host checked.
 - **`TtfFont` cold against warm:** the same layout metrics and the same page dumps with an empty store
   and with a populated one. Ring mode must give the same dumps as stored mode.
 - **`FontBytes`:** bounds checks, SD page-cache eviction, and routing between copied tables and SD.
@@ -765,6 +816,23 @@ Glyph store minors from the Stage 2a audit (2026-10-14), each a speed or tidines
 11. Checkpoints for finding the log's write position, if the scan measures slow.
 12. A metrics-only layout mode, so a CJK first chapter build need not render every new glyph (step 0
     gate).
+13. Apple's scaled component offsets, and embedded bitmap strikes (5.6).
+14. FreeType's leniency with broken tables, where the engine fails the glyph or the face instead: a short
+    OS/2 table (FreeType bounds it by the file), `loca` entries out of order or past `glyf` (FreeType
+    loads, empties or truncates them), a zero-contour glyph's box, cmap subtables FreeType's validator
+    would drop, overlapping format-4 segments, and a `maxp` that understates the points.
+
+Rasterizer minors from the Stage 2b review (2026-10-15), none a defect:
+
+- `scripts/check_no_float.py`: also match `long double`, half-precision, complex and `powi` helpers and
+  `l`-suffixed libm; fail loudly when an EpdFont build has no TTF objects; name its blind spots (the S3's
+  FPU, inline headers used outside `ttf/`); replace only the `gcc` suffix of `$CC`.
+- A `kMinPoolBytes` constant for the 2 KB pool minimum; `advance12_4` taking the scale `load()` already
+  has.
+- CMake: a clear error when the SDK submodule is missing; FreeType's include dir private to
+  `FreeTypeReference.cpp`.
+- The README's vendored-components list should name `ftgrays` (with the 2d credit); the bench should check
+  every `allocate()`; `vendor_ftgrays.py` could read FreeType's version instead of hard-coding it.
 
 ## 12. Side findings (separate from this work)
 
@@ -890,6 +958,7 @@ embedded in the image and read through the flash cache.
 - Scratch block 9,964 B, given back in full by `release()`.
 - Rendering takes the loop task's stack 80 B below its earlier low: the pool is off the stack.
 - Engine code linked into the bench: about 9.2 KB (step 0's prototype: 6.4 KB).
+- The review fixes (PR #470) do not change Bookerly's output: the host's golden hash still matches.
 
 **Decision gate: the 64-bit `ftgrays` path (`FT_INT64`), kept (user, 2026-10-14).** The same bench without
 the patch:

@@ -1,5 +1,21 @@
 # TTF Stage 2b: the rasterizer. Implementation plan
 
+> **Status (2026-10-15): done, PR #470.** Tasks 1-8 executed inline on `feat/ttf-rasterizer`, each
+> matching its stated test counts; then a three-lane review (memory safety, FreeType fidelity,
+> build/integration): no Critical, eight findings fixed test-first, 21 minors deferred to spec section 11
+> and Stage 2c obligations written into spec 8.1.
+> - **The code differs from the task code below in these places:**
+>   - `advance12_4` returns `uint32_t`, computed with `mulDivWide`; `load()` refuses advances over 0xFFFF;
+>   - `left` and `top` are checked against `int16` on both sides;
+>   - `ScratchPlan::maxPpem26_6`; the output region is never smaller than the em square; a glyph too big
+>     for the region above the planned size is Transient;
+>   - `FreeTypeReference::glyph(index, oversampleOverlaps)`: the gate compares every glyph byte for byte,
+>     and `OversampledOverlapsStayWithinThreePercent` keeps the 3% figure;
+>   - new tests `TtfVsFreeTypeSynthetic.CompoundsMatchFreeTypeBitForBit` and
+>     `TtfCorruptFont.DamagedGlyphsFailTheGlyphNotTheDevice`; `readFont` returns an exact-size buffer;
+>   - `PATCHES.md` lists the 64-bit types patch (six patches).
+> - **Test totals:** TtfRasterizerTest 113, full host suite 2,158.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the TTF engine's rasterizer: a bounds-checked font reader (`FontBytes`), a face parser
