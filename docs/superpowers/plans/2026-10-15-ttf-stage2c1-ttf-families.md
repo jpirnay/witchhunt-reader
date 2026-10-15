@@ -3,16 +3,18 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A folder of `.ttf` files on the SD card becomes a reader font family. The device draws it at the reader's
-body size from the glyph store: each glyph is rendered on first use, stored in flash, and read from there on every
-later page and boot.
+body size, 8 to 26 pt, from the glyph store: each glyph is rendered on first use, stored in flash, and read from there
+on every later page and boot.
 
 **Architecture:**
 
-- **Stage 2c is split into four plans,** each shipping working software:
+- **Stage 2c is split into four plans,** each shipping working software (the order of the middle two as proposed
+  after the measurement below):
   - **2c-1 (this plan):** TTF families at the body size, in flash mode (every style's whole TTF copied into the
     partition);
-  - **2c-2:** kerning (the pre-resolved GPOS reader and the pair index) and ligatures (GSUB);
-  - **2c-3:** the size-ladder rungs (dormant faces, the resolver, the TTF ladder branch) and font previews;
+  - **2c-2:** native sizes: headings and CSS sizes drawn from the outlines at their own pixel size (dormant faces,
+    the resolver, the TTF ladder branch), and font previews;
+  - **2c-3:** kerning (the pre-resolved GPOS reader and the pair index) and ligatures (GSUB);
   - **2c-4:** SD mode (FontBytes' page cache, copied tables, the 8 KB pool), for CJK fonts too large for flash.
 - **`GlyphProvider::prefetch(text)`** (no-op by default) and **`EpdFontFamily::prefetch(text, styleMask)`** let
   `GfxRenderer::ensureFontReady` (before layout measures a run) and `FontCacheManager::prewarmCache` (before a page
@@ -26,8 +28,8 @@ later page and boot.
   - the body face: four `EpdFontData` with no tables, each answering through a per-style `GlyphProvider` adapter;
   - an 8-slot heap ring for glyphs drawn without being stored (store full, write failed, oversized).
 - **The registry** turns a directory of `.ttf` files into a family (`SdCardFontFamilyInfo::ttf`); **the manager**
-  loads it through `EspNorFlash` + `TtfFont` and registers the body face; **`SdCardFontSystem`** offers the full
-  reader ladder for it and changes its size without a reload.
+  loads it through `EspNorFlash` + `TtfFont` and registers the body face; **`SdCardFontSystem`** offers it every
+  size from 8 pt (`ReaderSizeList::native()`) and changes its size without a reload.
 
 **Tech Stack:** C++20 host tests (gtest via CMake, UCRT64 gcc; ASan and UBSan where they link); firmware gnu++2a
 (PlatformIO, ESP32-C3/S3); clang-format 21.1.8.
@@ -54,8 +56,9 @@ on the X3 yet (Task 8).
 - **No floating point** in `lib/EpdFont/ttf` (`scripts/check_no_float.py` runs after every firmware link).
 - **Includes:** code outside `lib/EpdFont/ttf` includes its headers as `<ttf/TtfFont.h>` (the firmware's include
   path has `lib/EpdFont`, not `lib/EpdFont/ttf`).
-- **Sizes:** reader sizes are 10-26 pt (`CrossPointSettings::FONT_SIZE_RUNGS`); `TtfFont::kMaxPointSize` is 26 and
-  a `static_assert` in `SdCardFontSystem.cpp` keeps them in step.
+- **Sizes:** the reader ladder is 10-26 pt (`CrossPointSettings::FONT_SIZE_RUNGS`); a TTF family also offers 8 pt
+  (`ReaderSizeList::native()`, `kNativeSmallestPoints = 8`), on every board. `TtfFont::kMaxPointSize` is 26 and a
+  `static_assert` in `SdCardFontSystem.cpp` keeps it in step with the ladder.
 - **Host test commands** (Git Bash, from the worktree root):
   `export PATH=/c/msys64/ucrt64/bin:$PATH` once; configure with
   `cmake -S test -B build/test -G "MinGW Makefiles" -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=/c/_development/witchhunt-reader/build/test/_deps/googletest-src`
@@ -94,7 +97,7 @@ Task 8 (step numbers there):
 | `lib/EpdFont/ttf/TtfFont.{h,cpp}` | 4, 5 | the family: install, body face, glyph lookups, ring, wipe; prefetch |
 | `lib/EpdFont/SdCardFontRegistry.{h,cpp}` | 6 | TTF directories become families |
 | `lib/EpdFont/SdCardFontManager.{h,cpp}` | 7 | load, size change, wipe, unload of a TTF family |
-| `src/SdCardFontSystem.cpp`, `src/activities/RenderLock.h`, `ActivityManager.cpp` | 7 | size list, reader-entry paths, app hooks |
+| `src/SdCardFontSystem.cpp`, `src/ReaderFontSizes.h`, `src/activities/RenderLock.h`, `ActivityManager.cpp` | 7 | sizes from 8 pt, reader-entry paths, app hooks |
 | `lib/GfxRenderer/GfxRenderer.cpp`, `FontCacheManager.cpp` | 7 | the two prefetch call sites |
 | `test/ttf_font/*` | 3-6 | new test target `TtfFontTest` |
 
@@ -104,6 +107,10 @@ Task 8 (step numbers there):
   name-table family (7.1) is not used: the directory name is what the font list shows today, and it needs no
   `name` table parsing. A directory with any `.cpfont` file stays a `.cpfont` family.
 - **Style from `head.macStyle`;** the first file of each style, by name, serves it; a regular style is required.
+- **TTF families start at 8 pt** on every board (8, then the 10-26 pt ladder). Points convert at the converter's
+  150 dpi everywhere, so 8 pt is about 17 px per em on each panel and looks smaller the denser the panel. Built-in
+  families keep 10-26 pt (they have no 8 pt face, and a resampled 10 pt face would lose its anti-aliasing: see
+  Measured); `.cpfont` families keep the sizes they ship.
 - **A staged batch record can be taken back** (`GlyphBatch::dropLast()`): when `rasterize()` fails after `add()`,
   nothing fills the slot (spec 8.1, "add then rasterize").
 - **The output region holds a whole record:** its size grows by the 20-byte record header plus alignment (capped
@@ -117,8 +124,53 @@ Task 8 (step numbers there):
   bitmap; layout prefetches the regular style only (it passes no style).
 - **The wipe runs at family load and at book open** (the explicit-family `ensureLoaded`, with the "Loading font"
   popup); not before a section build (deferred).
-- **Deferred to later 2c plans:** kerning and ligatures (2c-2); rungs, resolver, previews (2c-3); SD mode, the
-  tricky-font check, the record-size planner input, S3 internal-RAM scratch (2c-4).
+- **Deferred to later 2c plans:** native sizes, the resolver, previews (2c-2); kerning and ligatures (2c-3); SD
+  mode, the tricky-font check, the record-size planner input, S3 internal-RAM scratch (2c-4).
+
+## Measured: native sizes against resampled ones (X3, 2026-10-15)
+
+**The question:** a size the family has no face for (a heading, a CSS font-size) is resampled today from the body
+face (`renderCharAtScale` and its 80-entry mask cache). Is drawing it natively, rendered once, stored, then read
+back, faster as well as sharper?
+
+**The bench** (throwaway, `bench/ttf_scale_main.cpp` in the prototype tree, env `bench_ttf_scale`): one page of prose,
+417 glyphs (30 distinct), drawn through `GfxRenderer` into the framebuffer from Bookerly Regular with a 14 pt body.
+Each target size is drawn resampled from the 14 pt face and drawn natively. Times per page; "AA" is the BW pass plus
+the two grey passes of an anti-aliased page:
+
+| Target (scale) | Resampled BW warm | Native BW warm | Resampled AA warm | Native AA warm | First page BW: resampled / native |
+| --- | --- | --- | --- | --- | --- |
+| 8 pt (0.57) | 15.6 ms | 15.0 ms | 46.2 ms | 43.5 ms | 16.7 / 30.3 ms |
+| 12 pt (0.86) | 17.8 ms | 20.3 ms | 53.0 ms | 58.7 ms | 19.7 / 39.7 ms |
+| 16 pt (1.14) | 20.2 ms | 24.7 ms | 162.9 ms | 71.0 ms | 50.3 / 48.6 ms |
+| 20 pt (1.43) | 22.1 ms | 28.1 ms | 274.1 ms | 80.4 ms | 67.7 / 57.7 ms |
+| 26 pt (1.86) | 150.8 ms | 34.0 ms | 449.0 ms | 97.1 ms | 150.9 / 74.4 ms |
+| 14 pt body | | 22.8 ms | | 65.7 ms | 45.7 ms (native, with its renders) |
+
+A native first page includes rendering and storing each glyph: 0.50 ms per glyph at 8 pt up to 1.34 ms at 26 pt,
+paid once per glyph and size for as long as the store holds it, across pages and boots.
+
+**Findings:**
+- **Enlarged sizes: native is faster, even on the first page.** It is equal at 16 pt, 15% faster at 20 pt and 2x
+  faster at 26 pt on first contact. Once stored, on an anti-aliased page, it is 2.3x faster at 16 pt, 3.4x at 20 pt
+  and 4.6x at 26 pt. An AA page resamples each glyph up to three times (the BW, LSB and MSB masks), which overflows
+  the 80-entry mask cache, so resampled text is resampled again on every page.
+  - In BW mode a small enlargement (16-20 pt) is about 20% cheaper resampled once cached: a 1-bit mask blit against
+    a 2-bit glyph.
+  - At 26 pt the masks outgrow the 3.5 KB arena, and resampling is 4.4x slower than native.
+- **Reduced sizes are equally fast either way once warm.** Resampling is nearest-neighbour and cached, but it drops
+  the anti-aliasing. Native costs 0.5-0.65 ms per glyph once.
+- **Quality:** a native glyph is the outline drawn at that size, as FreeType draws it; a resampled one is the 14 pt
+  bitmap enlarged or thinned.
+
+**Consequences:**
+- **Draw a TTF family's non-body sizes natively** (proposed as plan 2c-2, ahead of kerning). It differs from spec 5.5
+  in one point: each size is drawn at its own pixel size, pixels per em rounded to whole pixels. The leftover
+  residual (under 1.5% from 16 pt up) then falls inside the ladder's 3% dead zone and nothing is resampled. The
+  spec's nearest 2 pt rung plus a residual of a few percent would still go through the resampler and its cache.
+  The store's 32-entry size table becomes that design's budget: a book uses its body size plus a handful of CSS
+  sizes, and a full table means a wipe at the next book open.
+- **This plan is unchanged by it.** Its TTF families resample non-body text exactly as `.cpfont` families do today.
 
 ---
 
@@ -1460,6 +1512,14 @@ TEST_F(TtfFontTest, EachBodySizeHasItsOwnGlyphs) {
   EXPECT_EQ(2u, font->renders());
 }
 
+TEST_F(TtfFontTest, TheSmallestReaderSizeIsDrawnNatively) {
+  const auto font = open(kIdentityA, 8);
+  ASSERT_NE(nullptr, font);
+  for (const uint32_t cp : {uint32_t{'a'}, uint32_t{'W'}, uint32_t{0xE9}}) {
+    expectDrawnAs(reference(files[kRegular].bytes, cp, 8), *font, kRegular, font->glyph(kRegular, cp));
+  }
+}
+
 TEST_F(TtfFontTest, TheLineMetricsAreTheFacesAtTheBodySize) {
   const auto font = open();
   ASSERT_NE(nullptr, font);
@@ -2149,7 +2209,7 @@ bool TtfFont::wipeIfPending(const std::function<void()>& onBusy) {
 - [ ] **Step 4: Run the tests to see them pass**
 
 Run: `cmake -S test -B build/test && cmake --build build/test --target TtfFontTest -j 8 && ./build/test/ttf_font/TtfFontTest.exe --gtest_brief=1`
-Expected: `[  PASSED  ] 40 tests.` The full-store test fills a 4-page log at 26 pt and takes about a second.
+Expected: `[  PASSED  ] 41 tests.` The full-store test fills a 4-page log at 26 pt and takes about a second.
 
 - [ ] **Step 5: Commit**
 
@@ -2449,7 +2509,7 @@ bool TtfFont::wipeIfPending(const std::function<void()>& onBusy) {
 - [ ] **Step 4: Run the tests to see them pass**
 
 Run: `cmake --build build/test --target TtfFontTest -j 8 && ./build/test/ttf_font/TtfFontTest.exe --gtest_brief=1`
-Expected: `[  PASSED  ] 47 tests.`
+Expected: `[  PASSED  ] 48 tests.`
 
 - [ ] **Step 5: Commit**
 
@@ -2793,7 +2853,7 @@ with:
 - [ ] **Step 4: Run the tests to see them pass**
 
 Run: `cmake -S test -B build/test && cmake --build build/test --target TtfFontTest -j 8 && ./build/test/ttf_font/TtfFontTest.exe --gtest_brief=1`
-Expected: `[  PASSED  ] 49 tests.`
+Expected: `[  PASSED  ] 50 tests.`
 
 - [ ] **Step 5: Commit**
 
@@ -2805,17 +2865,21 @@ git commit -m "feat(fonts): a directory of .ttf files is a TTF family"
 ### Task 7: Wire TTF families into the reader
 
 The manager loads a TTF family through `EspNorFlash` and `TtfFont` and registers its body face. The font system
-offers the full reader ladder for it and changes its size without a reload. The renderer's two prewarm points call
+offers it every reader size from 8 pt (`ReaderSizeList::native()`: 8, then the 10-26 pt ladder, on every board) and
+changes its size without a reload. The renderer's two prewarm points call
 `EpdFontFamily::prefetch`. The app installs `TtfFont`'s hooks: the render-lock check and a yield that sleeps one
 tick every 200 ms.
 
-No host test builds `GfxRenderer`, `FontCacheManager`, the manager or the font system (they need the device's
-HAL), so this task's checks are the firmware builds and the host suite; Task 8 runs it on the X3.
+Only the size list has host tests. No host test builds `GfxRenderer`, `FontCacheManager`, the manager or the font
+system (they need the device's HAL), so the rest of this task is checked by the firmware builds and the host suite;
+Task 8 runs it on the X3.
 
 **Files:**
 - Modify: `lib/EpdFont/SdCardFontManager.h`, `lib/EpdFont/SdCardFontManager.cpp`
-- Modify: `src/SdCardFontSystem.cpp`, `src/activities/RenderLock.h`, `src/activities/ActivityManager.cpp`
+- Modify: `src/SdCardFontSystem.cpp`, `src/ReaderFontSizes.h`, `src/activities/RenderLock.h`,
+  `src/activities/ActivityManager.cpp`
 - Modify: `lib/GfxRenderer/GfxRenderer.cpp`, `lib/GfxRenderer/FontCacheManager.cpp`
+- Test: `test/reader_font_sizes/ReaderFontSizesTest.cpp`
 
 **Interfaces:**
 - Consumes: `TtfFont` (Tasks 4-5), `ttf::familyIdentity`, `ttf::identityHash`, `ttf::fileSource` (Task 3),
@@ -2824,9 +2888,68 @@ HAL), so this task's checks are the firmware builds and the host suite; Task 8 r
   - `bool SdCardFontManager::setTtfBodySize(GfxRenderer&, uint8_t pointSize)`,
     `void SdCardFontManager::wipeTtfIfPending(const std::function<void()>& onBusy)`,
     `bool SdCardFontManager::ttfLoaded() const`;
-  - `static bool RenderLock::heldByCurrentTask()`.
+  - `static bool RenderLock::heldByCurrentTask()`;
+  - `static ReaderSizeList ReaderSizeList::native()` and `ReaderSizeList::kNativeSmallestPoints = 8`.
 
-- [ ] **Step 1: The manager**
+- [ ] **Step 1: Write the failing size-list tests**
+
+Append to `test/reader_font_sizes/ReaderFontSizesTest.cpp`:
+
+<!-- plan-append: test/reader_font_sizes/ReaderFontSizesTest.cpp -->
+```cpp
+TEST(ReaderSizeListNative, OffersEightPointBelowTheLadder) {
+  const ReaderSizeList sizes = ReaderSizeList::native();
+  ASSERT_EQ(CrossPointSettings::FONT_SIZE_RUNG_COUNT + 1, sizes.count);
+  EXPECT_EQ(8, sizes.points[0]);
+  for (int i = 0; i < CrossPointSettings::FONT_SIZE_RUNG_COUNT; ++i) {
+    EXPECT_EQ(CrossPointSettings::FONT_SIZE_RUNGS[i].points, sizes.points[i + 1]);
+  }
+}
+
+TEST(ReaderSizeListNative, TheSmallSizesSnapAndStepToEight) {
+  const ReaderSizeList sizes = ReaderSizeList::native();
+  EXPECT_EQ(8, sizes.snap(9));  // a tie goes to the smaller size
+  EXPECT_EQ(8, sizes.snap(1));
+  EXPECT_EQ(8, sizes.step(10, -1));
+  EXPECT_EQ(26, sizes.next(24));
+  EXPECT_EQ(8, sizes.next(26));  // the size button wraps to the new smallest
+}
+
+TEST(ReaderSizeListNative, BuiltInFamiliesStillStartAtTheLadder) { EXPECT_EQ(10, ReaderSizeList::builtin().snap(8)); }
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `cmake --build build/test --target ReaderFontSizesTest -j 8 && ./build/test/reader_font_sizes/ReaderFontSizesTest.exe --gtest_brief=1`
+Expected: compile errors, `'native' is not a member of 'ReaderSizeList'`.
+
+- [ ] **Step 3: The size list**
+
+In `src/ReaderFontSizes.h`, before `forFamily()`:
+
+<!-- plan-edit: src/ReaderFontSizes.h -->
+```cpp
+  /// What an SD family offers: every size it ships a file for, then the ladder sizes above its
+```
+with:
+
+```cpp
+  /// The smallest size a natively drawn family offers. Points convert to pixels at the converter's 150 dpi on
+  /// every board, so 8 pt is about 17 px per em on all of them; the denser the panel, the smaller it looks.
+  static constexpr uint8_t kNativeSmallestPoints = 8;
+
+  /// What a TrueType family offers: its glyphs are drawn from the outlines at any size, so the ladder plus the
+  /// sizes below it, in the ladder's 2 pt steps, down to kNativeSmallestPoints.
+  static ReaderSizeList native() {
+    ReaderSizeList list = builtin();
+    for (uint8_t pt = kNativeSmallestPoints; pt < list.points[0]; pt += 2) list.insert(pt);
+    return list;
+  }
+
+  /// What an SD family offers: every size it ships a file for, then the ladder sizes above its
+```
+
+- [ ] **Step 4: The manager**
 
 In `lib/EpdFont/SdCardFontManager.h`:
 
@@ -3149,7 +3272,7 @@ int SdCardFontManager::getFontId(const std::string& familyName, const uint8_t po
   if (ttf_) return familyName == loadedFamilyName_ && pointSize == loadedPointSize_ ? ttfFontId_ : 0;
 ```
 
-- [ ] **Step 2: The render-lock check**
+- [ ] **Step 5: The render-lock check**
 
 In `src/activities/RenderLock.h`:
 
@@ -3181,7 +3304,7 @@ bool RenderLock::heldByCurrentTask() {
 }
 ```
 
-- [ ] **Step 3: The font system**
+- [ ] **Step 6: The font system**
 
 In `src/SdCardFontSystem.cpp`, the includes, the size check and the yield hook:
 
@@ -3227,7 +3350,7 @@ void ttfYield() {
 }  // namespace
 ```
 
-A TTF family offers every reader size:
+A TTF family offers every size from 8 pt:
 
 <!-- plan-edit: src/SdCardFontSystem.cpp -->
 ```cpp
@@ -3238,7 +3361,7 @@ with:
 
 ```cpp
     if (family.name != familyName) continue;
-    if (family.ttf) return ReaderSizeList::builtin();  // drawn natively at every reader size
+    if (family.ttf) return ReaderSizeList::native();  // drawn natively at every size
     uint8_t sizes[ReaderSizeList::kCapacity];
 ```
 
@@ -3308,7 +3431,7 @@ with:
     const auto* best = family->pickClosestSize(targetPt);
 ```
 
-- [ ] **Step 4: The two prefetch call sites**
+- [ ] **Step 7: The two prefetch call sites**
 
 In `lib/GfxRenderer/GfxRenderer.cpp`, `ensureFontReady()` (layout, before it measures a run):
 
@@ -3346,11 +3469,16 @@ with:
   if (!fontDecompressor_ || family == fontMap_.end()) return;
 ```
 
-- [ ] **Step 5: Build the firmware**
+- [ ] **Step 8: Run the size-list tests to see them pass**
+
+Run: `cmake --build build/test --target ReaderFontSizesTest -j 8 && ./build/test/reader_font_sizes/ReaderFontSizesTest.exe --gtest_brief=1`
+Expected: `[  PASSED  ] 22 tests.`
+
+- [ ] **Step 9: Build the firmware**
 
 Run: `"$HOME/.platformio/penv/Scripts/pio.exe" run -e default 2>&1 | grep -E "error|check_no_float|RAM:|Flash:"`
 Expected: no errors; `check_no_float: 7 TTF engine objects, no floating point`; RAM 54,808 B (+56 B static);
-flash +30,000 B over Task 6's build, because the glyph store, the engine and `TtfFont` are linked for the first time.
+flash +30,032 B over the base, because the glyph store, the engine and `TtfFont` are linked for the first time.
 The prototype measured: engine 9.7 KB, `TtfFont` 5.7 KB, store 5.3 KB, `EspNorFlash` 1.0 KB, family helpers
 0.9 KB, manager and registry about 2 KB (`riscv32-esp-elf-nm --size-sort -S -C .pio/build/default/firmware.elf`).
 Quote the measured numbers in the PR.
@@ -3358,18 +3486,20 @@ Quote the measured numbers in the PR.
 Run: `"$HOME/.platformio/penv/Scripts/pio.exe" run -e x4pro 2>&1 | grep -E "error|check_no_float|RAM:|Flash:"`
 Expected: no errors (the S3 build; `EspNorFlash` bounces PSRAM sources there).
 
-- [ ] **Step 6: Format and run the host suite**
+- [ ] **Step 10: Format and run the host suite**
 
 Run: `/c/tmp/cf21/bin/clang-format-21.exe --dry-run -Werror $(git diff --name-only origin/feat/ttf-rasterizer -- '*.h' '*.cpp')`
 Expected: no output.
 
 Run: `cmake --build build/test -j 8 -- -k > /tmp/build.log 2>&1; (cd build/test && ctest -j 8 | tail -3)`
-Expected: `100% tests passed` (2,158 before this plan, plus 2 store, 3 provider and 49 `TtfFontTest` tests).
+Expected: `100% tests passed out of 2216` (2,158 before this plan, plus 2 store, 3 provider, 50 `TtfFontTest` and
+3 size-list tests).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add lib/EpdFont/SdCardFontManager.h lib/EpdFont/SdCardFontManager.cpp src/SdCardFontSystem.cpp \
+        src/ReaderFontSizes.h test/reader_font_sizes/ReaderFontSizesTest.cpp \
         src/activities/RenderLock.h src/activities/ActivityManager.cpp \
         lib/GfxRenderer/GfxRenderer.cpp lib/GfxRenderer/FontCacheManager.cpp
 git commit -m "feat(fonts): TTF families load, draw and change size in the reader"
@@ -3420,8 +3550,10 @@ Expected: headings draw (the body face, scaled); no missing glyphs in ordinary t
 
 - [ ] **Step 5: Size change (Review Focus 2)**
 
-Ask the user to change the font size from the reader menu (for example 14 → 18 pt).
-Expected: `now at 18 pt`, pages laid out again, no popup and no `family installed`.
+Ask the user to change the font size from the reader menu (for example 14 → 18 pt), then step down to the smallest
+size.
+Expected: `now at 18 pt`, pages laid out again, no popup and no `family installed`; the smallest size offered is
+8 pt, and it is drawn sharp (native, not resampled).
 
 - [ ] **Step 6: The next boot**
 
