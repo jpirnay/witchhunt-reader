@@ -1,5 +1,19 @@
 # TTF Stage 2c-1: TrueType families in the reader. Implementation plan
 
+> **Status (2026-10-15): done, branch `feat/ttf-families`.** Tasks 1-7 executed inline, each matching its stated
+> test counts; then a three-lane review (memory and lifetimes, store and flash, integration): no Critical, four
+> findings fixed test-first, 26 minors deferred (listed in the PR). Task 8 ran on the X3; results in spec
+> Appendix A, "Stage 2c-1".
+> - **The code differs from the task code below in these places:**
+>   - `TtfFont::load()` reinstalls once when a style no longer maps (`openStyles()`, `StylesResult`);
+>   - `ttf::probeFile()` and `FileProbe` (weight from `OS/2.usWeightClass`, variable fonts spotted by `fvar`);
+>     `assignStyles()` takes probes and prefers static files at the weight nearest 400 or 700;
+>   - `ttf::fitsFlashMode()` and `SdCardFontRegistry::setTtfFits()`: a family too large for flash mode is not
+>     listed;
+>   - `SdCardFontFamilyInfo::ttf()` is derived from the files instead of a field (512 B of permanent heap).
+> - **Test totals:** TtfFontTest 58, ReaderFontSizesTest 22, GlyphStoreTest 91, GlyphProviderTest 9; host suite
+>   2,224.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A folder of `.ttf` files on the SD card becomes a reader font family. The device draws it at the reader's

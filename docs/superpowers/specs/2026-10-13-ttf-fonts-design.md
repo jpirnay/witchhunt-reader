@@ -568,6 +568,20 @@ See section 11 for the full deferred list.
 5. The body face is registered in `fontMap`, the rungs are recorded as dormant, and the resolver is
    installed.
 
+**As built in 2c-1 (2026-10-15):**
+- **A family is a directory** of `.ttf` files under a fonts root, as `.cpfont` families are; the `name` table is
+  not read. A directory with any `.cpfont` file stays a `.cpfont` family.
+- **Style** from `head.macStyle`; each style takes, of its files, a static one before a variable one, then the
+  `OS/2.usWeightClass` nearest 400 (regular, italic) or 700 (bold styles), then the first by name. A regular
+  style is required.
+- **Too large for flash mode:** such a family is not listed at all until SD mode (2c-4); the check is
+  `glyphstore::planLayout` against the font area and the mapping budget at discovery.
+- **Sizes:** a TTF family offers 8 pt and the 10-26 pt ladder (`ReaderSizeList::native()`), drawn natively; a
+  size change registers a new font ID without a reload.
+- **The wipe** runs at family load and at book open (the explicit-family `ensureLoaded`), behind the "Loading
+  font" popup; not before a section build.
+- **A style that no longer maps** after a firmware update (the budget shrank) reinstalls the family once.
+
 ### 7.2 Layout and drawing
 
 Layout and drawing both go through `EpdFont`. Before a text run is measured (`ensureFontReady`) and
@@ -619,7 +633,7 @@ are cached as `.fpv` files, keyed by the family identity.
 | **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR (the plan's Task 5) | PR #468 |
 | **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR | Merged (PR #469) |
 | **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR | PR #470 (built and reviewed 2026-10-15; plan `plans/2026-10-14-ttf-stage2b-rasterizer.md`) |
-| **Stage 2c** | `FontBytes`' SD mode, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. | Own PR | Not planned |
+| **Stage 2c** | `FontBytes`' SD mode, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. Split into four plans: **2c-1** TTF families at the body size, flash mode; **2c-2** native sizes (headings, CSS sizes, drop caps at their own pixel size) and previews; **2c-3** kerning and ligatures; **2c-4** SD mode. | Own PR each | 2c-1 built, reviewed and X3-validated 2026-10-15 (branch `feat/ttf-families`; plan `plans/2026-10-15-ttf-stage2c1-ttf-families.md`); 2c-2 next |
 | **Stage 2d** | User-guide section on TTF fonts; FreeType credit (required by the FTL licence). | With 2c or own PR | Not planned |
 
 Each stage builds on the previous one. Stacked PRs are retargeted to master as their base merges.
@@ -701,6 +715,22 @@ Stage 2 plans:
 - **Optional:** a `prefetch(text)` virtual on `GlyphProvider` (no-op by default) would let
   `ensureFontReady` and `prewarmCache` reach `TtfFont` through `family->getData(style)->provider`,
   without a font-ID-to-TtfFont registry.
+- **Done in 2c-1 (2026-10-15):** `GlyphProvider::prefetch` (through `EpdFontFamily::prefetch`); field widths
+  (sizes up to 26 pt, `advanceY` over 255 refused, glyphs whose left or top do not fit `int8` marked missing);
+  batch records (the output region grows by the record header); add-then-rasterize (`GlyphBatch::dropLast()`);
+  `ioError()` checked before marking a codepoint missing; default-ignorable codepoints (no advance, no ink);
+  yields between glyphs and install chunks (a tick every 200 ms); the RenderLock check (logged once, not
+  asserted); O(1) `ownsBitmap`; the ring's record lifetime; size indices re-claimed after a wipe; partition
+  ownership (the `.cpfont` mapping released before the store opens, the store closed at unload); one style mapped
+  at a time.
+- **Still open, by plan:** kerning pairs and the coverage pre-check (2c-3); the resolver, its concurrency and
+  allocation, `prewarmCache` through the dormant table (2c-2); `cmapEnd`-bounded format-4 reads, the SD-mode
+  record-size planner input, grouping a page's misses by style, tricky fonts and the S3's internal-RAM scratch
+  (2c-4); the `sdRecord` rename.
+- **For 2c-2, from the 2c-1 device run:** a drop cap is drawn at about 4x the body size (a 16 pt body gives
+  about 133 px per em). That is above the 26 pt the scratch block is planned for, near the 4 KB output region, and
+  at 6x it passes `EpdGlyphRef`'s `int8` top. Native sizes need a larger planned maximum, and a resampled fallback
+  above what the region and `EpdGlyphRef` hold.
 
 ## 9. Testing
 
@@ -1040,3 +1070,24 @@ batched (the Stage 2a self-test). Drawing: as step 0.
   - warm, about 0.3-0.7 ms per page (0.45-0.9 µs per pair);
   - on the very first page, about 43 ms (58.7 µs per pair), averaging 5.5 µs per pair over a chapter;
   - the pair pre-check obligation in 8.1 targets that first-contact cost.
+
+### Stage 2c-1 (X3, 2026-10-15)
+
+Firmware `d663f7c69` (`feat/ttf-families`), Bookerly's four TTF files (450 KB each) in
+`/.crosspoint/fonts/BookerlyTTF/`, a 16 pt body.
+
+- **Discovery:** probing a four-file family took about 19 ms at boot.
+- **Install:** 8.7 s behind the popup on a blank font area, about 13 s when a `.cpfont` cache had to be erased
+  first. Log 1,245,184 B, 24,576 index slots; scratch block 9,032 B.
+- **Pages:** pre-rendering a page from the store took 44-53 ms, against 67-97 ms for the built-in Bookerly on the
+  same chapter (16 pt, 42 pages) and 57-61 ms for a `.cpfont` (Bitter). A pre-render cost about 3.6 KB of heap,
+  against 3.6-9.9 KB for the built-in and 7.6-7.8 KB for the `.cpfont`.
+- **Size changes:** 16 → 8 → 12 → 16 pt each re-laid out the chapter without a reload; with every glyph rendered
+  for the first time that took 2.4 s at 8 pt and 2.6 s at 12 pt.
+- **Next boot:** the store reopened with 342 glyphs; the session logged "0 glyphs rendered, 15,276 read from the
+  store".
+- **Stack:** no "Render task stack LOW" (under 1,536 B) through cold chapter builds; no RenderLock warning.
+- **Flash and RAM:** +31,180 B of app flash (96.2%), +56 B of static RAM; the engine 9.7 KB, `TtfFont` 5.7 KB,
+  the store 5.3 KB, `EspNorFlash` 1.0 KB.
+- **Native against resampled sizes:** see the 2c-1 plan's "Measured" section: on anti-aliased pages a native size
+  is 2.3-4.6x faster than resampling the body face, which led to 2c-2.
