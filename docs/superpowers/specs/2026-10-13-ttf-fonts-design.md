@@ -834,6 +834,34 @@ Rasterizer minors from the Stage 2b review (2026-10-15), none a defect:
 - The README's vendored-components list should name `ftgrays` (with the 2d credit); the bench should check
   every `allocate()`; `vendor_ftgrays.py` could read FreeType's version instead of hard-coding it.
 
+Follow-ups the user asked to keep (2026-10-15), both new features that TTF support makes possible. The reader
+does neither today: `CssParser` skips `@font-face` and never reads `font-family`, and a section is laid out
+with one font ID (per-word data carries only the style bits).
+
+- **A book's embedded fonts, used as that book's font.**
+  - **What it would take:**
+    - find the fonts in the OPF manifest (`font/ttf`, `application/font-sfnt`, `application/vnd.ms-opentype`,
+      ...) and in `@font-face`;
+    - undo the font obfuscation many EPUBs use: the IDPF algorithm XORs the first 1,040 bytes with the SHA-1 of
+      the unique identifier, and Adobe's the first 1,024 with the UUID;
+    - extract the files to a per-book directory on the card and load them as a TTF family through the existing
+      per-book font override (`sdFontFamilyOverride`).
+  - **Limits:**
+    - many embedded fonts are CFF (`.otf`), which the engine refuses (5.6), so those books keep the reader's
+      font;
+    - embedded fonts are usually subsets, so they install in a second or two;
+    - switching between two such books reinstalls the store each time, because it holds one family (4.1).
+  - **An option to ignore embedded fonts is needed** either way.
+- **More than one font family in a book** (a sans heading, a monospace code block).
+  - **Layout:** it needs `font-family` resolved per element and a family carried per word or per block. That
+    changes the section file, so `SECTION_FILE_VERSION` is bumped.
+  - **The store:** it holds one family. A glyph key has no room for a family (code point 21 bits, style 2, size
+    index 5; bits 28-31 must stay zero), so two families would need a new key layout or a second store, and
+    each family's style blocks cost mapping pages. That is far easier in SD mode (2c-4), where only the
+    copied tables are mapped.
+  - **Smallest useful step:** map the generic families (`serif`, `sans-serif`, `monospace`) onto the built-in
+    families and keep one TTF family, the book's or the reader's.
+
 ## 12. Side findings (separate from this work)
 
 - **Possible null dereference (unverified, code reading only).** For a `.cpfont` loaded from SD (not
