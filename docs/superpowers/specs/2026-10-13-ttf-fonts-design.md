@@ -850,6 +850,22 @@ Rasterizer minors from the Stage 2b review (2026-10-15), none a defect:
   - The `TtfFont.cpp` comment says stb allocates nothing; in fact it allocates a 56 KB block per glyph
     on RV32 and drops edges silently when that fails.
   - stb's GPOS kerning skips Extension (type 9) lookups.
+- **The scaled-glyph mask cache overflows on anti-aliased pages** (X3 bench, 2026-10-15; table in the 2c-1
+  plan's "Measured" section). A resampled glyph needs up to three masks (BW, LSB, MSB), so a page with 30
+  distinct glyphs needs 90 entries against `SCALED_GLYPH_MAX_ENTRIES` = 80. The cache resets wholesale and
+  every page resamples again: a 14 → 20 pt page took 274 ms resampled against 80 ms native. This hits
+  built-in sizes 22-26 pt (resampled from the 20 pt face), `.cpfont` alias sizes and CSS-scaled body text
+  today, not only TTF.
+- **Follow-up, at the user's request (2026-10-15): drop the largest pre-rendered built-in size and resample
+  it too.**
+  - The 20 pt faces are Bookerly 262 KB plus Noto Sans 243 KB: 505 KB of app flash, which is at 96.2%.
+    Without them 20-26 pt would be resampled from 18 pt (453 KB, kept), at scales of 1.11 to 1.44.
+  - Before deciding, size the mask cache for AA pages (at least three entries per distinct glyph, and an
+    arena for 26 pt masks). Then measure page turns at 20-26 pt from 18 pt against today's 20 pt masters,
+    and compare the quality on the X3 and X4.
+  - The cost sits on body text: at those sizes every glyph of the page is resampled, about 1 ms each at
+    24-26 pt (`SCALED_GLYPH_ARENA_BYTES_SYNTH`).
+  - The home for this is `docs/future_work/font-flash.md` once it is decided.
 
 ## Appendix A. Step 0 measurements (X3, 160 MHz, 2026-10-13)
 
