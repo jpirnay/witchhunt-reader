@@ -344,6 +344,14 @@ popup it:
 A cut anywhere leaves wipe pending, and the next wipe finishes the job; the header is never touched. A
 full Latin store erases about 1.1 MB (2.2-2.7 s on the X3), a full CJK store about 1.3 MB.
 
+**As built in 2c-2 (2026-10-15):**
+- **A full size table stops only new sizes.** It makes the wipe pending, but the sizes already claimed go on storing;
+  only the size the table refused is drawn from the ring until the wipe. `FlashGlyphStore::writesStopped()` covers
+  every other reason (the log or the index filled, a write failed, a store opened with the wipe pending), and those
+  still stop all writes.
+- **Taking the last free entry makes the wipe pending too,** so the next book open empties the table before a new
+  body size needs an entry.
+
 ### 4.7 Wear
 
 Sectors are erased only at install (family change), on a wipe, or on a reinstall after an update,
@@ -355,6 +363,9 @@ sector, so even one family change a day lasts centuries. The partition is separa
 partitions, so firmware updates do not wear it. Write time is the real cost: while flash is being
 programmed, the CPU cannot fetch code, so it stalls. That is about 0.7 ms per 256-byte page programmed
 and about 45 ms per 4 KB sector erased, from typical datasheets; step 0 measures the real chip.
+
+With native sizes (2c-2) a book claims its handful of sizes, so the 32 entries fill every few books and wipes come
+more often. Each still erases only the sectors that hold data.
 
 ## 5. Font source and engine
 
@@ -498,6 +509,24 @@ the cap can never load (6.1); text glyphs stay well under it.
   at most one new entry (the new body size, if it is not a rung). The 16 entries cover all rungs plus
   several body sizes.
 
+**As built in 2c-2 (2026-10-15)** (plan `plans/2026-10-15-ttf-stage2c2-native-sizes.md`):
+- **Whole-pixel sizes instead of rungs.** A size is drawn at `round(bodyPx * pct / 100)` px, so the leftover scale
+  stays inside the ladder's 3% dead zone and nothing is resampled. The nearest 2 pt rung would leave several percent
+  to resample.
+- **No dormant table:** a size's font ID is `base | px`, in a window of 256 IDs derived from the family identity.
+  `FontSizeLadder::setNative()` makes the IDs; the resolver decodes them and makes the face on the first lookup.
+- **10 px up to the family's ceiling.** The ceiling is 120 px, less where the tallest glyph (`head.yMax`) or the
+  furthest left (`head.xMin`) would leave `EpdGlyphRef`'s `int8` (Bookerly 119 px). Above it, the largest face is
+  drawn scaled.
+- **At most 16 sizes, dropped at book open, at a body size change and at unload.** When all 16 are held, or memory
+  is short, the nearest size held stands in. It is registered scaled to the requested size (`ResolvedFont`, a base
+  scale, as for `insertScaledFont`), so a page laid out with the ID in another session keeps its measurements.
+- **No auxiliary-face budget** in `ChapterHtmlSlimParser` for a native ladder, and a drop cap resolves its own size.
+  `SECTION_FILE_VERSION` 82.
+- **The prewarm** looks fonts up through the renderer, so it reaches sizes not looked up yet; there is no dormant
+  table to consult.
+- **Inline sizes stay scaled:** a word whose own size differs from its block's is the block's face scaled.
+
 ### 5.6 Not supported in the first version
 
 - compound glyphs positioned by point matching: the glyph is logged and drawn as missing;
@@ -539,7 +568,9 @@ See section 11 for the full deferred list.
   - the GPOS reader's subtable list, about 100-200 B per style;
   - the SD page cache, 4 KB, in SD mode only;
   - the ligature tables, a few dozen bytes;
-  - about 0.5 KB per face in use: the body face plus typically 2-4 rungs.
+  - about 0.5 KB per face in use (540 B measured on the X3): the body face plus a book's native sizes, at most 16
+    (2c-2);
+  - the ring's bitmaps, at most 8 KB (2c-2).
 
   Every font table and every stored bitmap is mapped, not copied, and there is no per-page arena. That
   comes to about 7-14 KB for a Latin family (about 19 KB for CJK in SD mode), against roughly 9-14 KB for an SD `.cpfont` (about 6 KB of kern classes plus
@@ -602,6 +633,10 @@ Ring mode applies when wipe is pending, after a write error, or for previews. It
 except that a glyph that is not stored is rendered into the 8-slot heap ring and is not written. Glyphs
 already in the store are still read from it.
 
+As built in 2c-2: a size the full table refused is drawn through the ring while the family's other sizes keep
+storing. The ring keeps within 8 KB by freeing its oldest slots first (a record is promised only until the next
+miss), and it is freed with the native sizes.
+
 ### 7.4 Size and family changes
 
 - A new body size gets a new body face and, unless it is a rung, the next size-table entry. Its glyphs
@@ -633,7 +668,7 @@ are cached as `.fpv` files, keyed by the family identity.
 | **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR (the plan's Task 5) | PR #468 |
 | **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR | Merged (PR #469) |
 | **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR | PR #470 (built and reviewed 2026-10-15; plan `plans/2026-10-14-ttf-stage2b-rasterizer.md`) |
-| **Stage 2c** | `FontBytes`' SD mode, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. Split into four plans: **2c-1** TTF families at the body size, flash mode; **2c-2** native sizes (headings, CSS sizes, drop caps at their own pixel size) and previews; **2c-3** kerning and ligatures; **2c-4** SD mode. | Own PR each | 2c-1 built, reviewed and X3-validated 2026-10-15 (branch `feat/ttf-families`; plan `plans/2026-10-15-ttf-stage2c1-ttf-families.md`); 2c-2 next |
+| **Stage 2c** | `FontBytes`' SD mode, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. Split into four plans: **2c-1** TTF families at the body size, flash mode; **2c-2** native sizes (headings, CSS sizes, drop caps at their own pixel size); **2c-3** kerning and ligatures; **2c-4** SD mode, and previews (a family that is not installed is read from the SD card). | Own PR each | 2c-1 merged (PR #472); 2c-2 built, reviewed and X3-validated 2026-10-15 (branch `feat/ttf-native-sizes`; plan `plans/2026-10-15-ttf-stage2c2-native-sizes.md`); 2c-3 next |
 | **Stage 2d** | User-guide section on TTF fonts; FreeType credit (required by the FTL licence). | With 2c or own PR | Not planned |
 
 Each stage builds on the previous one. Stacked PRs are retargeted to master as their base merges.
@@ -723,11 +758,16 @@ Stage 2 plans:
   asserted); O(1) `ownsBitmap`; the ring's record lifetime; size indices re-claimed after a wipe; partition
   ownership (the `.cpfont` mapping released before the store opens, the store closed at unload); one style mapped
   at a time.
-- **Still open, by plan:** kerning pairs and the coverage pre-check (2c-3); the resolver, its concurrency and
-  allocation, `prewarmCache` through the dormant table (2c-2); `cmapEnd`-bounded format-4 reads, the SD-mode
+- **Done in 2c-2 (2026-10-15):**
+  - **The resolver:** a size is made on its first lookup, under `RenderLock` (checked when a size is made), with
+    `makeUniqueNoThrow`. When no size can be made, a scaled stand-in serves. Only the `fontMap` node (about 48 B)
+    is not nothrow.
+  - **The prewarm** goes through the renderer's lookup, not a dormant table.
+  - **The drop cap:** native up to the family's ceiling, scaled above it (5.5).
+- **Still open, by plan:** kerning pairs and the coverage pre-check (2c-3); `cmapEnd`-bounded format-4 reads, the SD-mode
   record-size planner input, grouping a page's misses by style, tricky fonts and the S3's internal-RAM scratch
   (2c-4); the `sdRecord` rename.
-- **For 2c-2, from the 2c-1 device run:** a drop cap is drawn at about 4x the body size (a 16 pt body gives
+- **For 2c-2, from the 2c-1 device run (done in 2c-2):** a drop cap is drawn at about 4x the body size (a 16 pt body gives
   about 133 px per em). That is above the 26 pt the scratch block is planned for, near the 4 KB output region, and
   at 6x it passes `EpdGlyphRef`'s `int8` top. Native sizes need a larger planned maximum, and a resampled fallback
   above what the region and `EpdGlyphRef` hold.
@@ -891,6 +931,22 @@ with one font ID (per-word data carries only the style bits).
     copied tables are mapped.
   - **Smallest useful step:** map the generic families (`serif`, `sans-serif`, `monospace`) onto the built-in
     families and keep one TTF family, the book's or the reader's.
+- **From 2c-2 (2026-10-15):**
+  - **Inline sizes:** a `<small>` or `<sup>` inside a paragraph is still the block's face scaled. Native per-word
+    sizes need a font ID per word in the section format.
+  - **Wide glyphs at the largest sizes:** a glyph wider than the 4 KB output region (ligature code points, DŽ) is
+    drawn as missing. Revisit with GSUB ligatures (2c-3).
+  - **Layout prefetches the regular style only,** so a bold native heading also renders its regular glyphs, unused.
+    Pass the styles the text needs.
+  - **The review's deferred minors:**
+    - `checkLock` does not cover the resolver's stand-in insert;
+    - no host test of the manager's drop and unload order;
+    - a refused size claim is cached even after a transient read error;
+    - the full-table branch ignores a failed wipe-word write;
+    - no power-cut sweep covers "wipe pending but still writing";
+    - the ID window could move between sessions if a registered ID falls in it (about 2^-23);
+    - faces under about 17 px resample a residual under half a pixel;
+    - stale comments.
 
 ## 12. Side findings (separate from this work)
 
@@ -1091,3 +1147,23 @@ Firmware `d663f7c69` (`feat/ttf-families`), Bookerly's four TTF files (450 KB ea
   the store 5.3 KB, `EspNorFlash` 1.0 KB.
 - **Native against resampled sizes:** see the 2c-1 plan's "Measured" section: on anti-aliased pages a native size
   is 2.3-4.6x faster than resampling the body face, which led to 2c-2.
+
+### Stage 2c-2 (X3, 2026-10-15)
+
+Branch `feat/ttf-native-sizes` after the review fixes (`e10513e79`), Bookerly's four TTF files, a 14 pt body.
+
+- **Memory:**
+  - scratch block 10,135 B, 1,103 B more than 2c-1's 9,032 B (the output region reaches its 4 KB cap from 64 px);
+  - 540 B per native size;
+  - app flash +3,310 B over master (96.3%), static RAM +16 B.
+- **The drop cap:** placed natively (`scale=1.00`, a 71x77 zone); on the device it is as sharp as the body text.
+- **A book with 20 sizes** (paragraphs at 50-300% of the body, h1-h3, a 3-line drop cap):
+  - 16 sizes were held, and the rest were drawn by the nearest size held, scaled: 76 and 82 px in the first
+    session, 23 and 38 px after a restart that resumed on the last page;
+  - the cached layout drew correctly both times, paging forward and back.
+- **Heap while reading:** 41-45 KB free with an ordinary book, 34-37 KB with the 20-size book (16 sizes, about
+  8.6 KB, plus the ring). A screenshot's 48 KB screen copy failed at that level.
+- **The store:**
+  - a first session rendered 208 glyphs and read 244,359 from the store;
+  - after these sessions the log was at 145 KB of 1.2 MB;
+  - the size table did not fill.

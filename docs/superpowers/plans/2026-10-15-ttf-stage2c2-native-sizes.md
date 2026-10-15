@@ -1,5 +1,22 @@
 # TTF Stage 2c-2: native sizes. Implementation plan
 
+> **Status (2026-10-15): done, branch `feat/ttf-native-sizes`.**
+> - **Tasks 1-7** executed inline, each matching its stated test counts. The host suite was 2,255 rather than 2,246,
+>   because master gained PR #473's 9 tests.
+> - **Three-lane review** (memory and lifetimes; store and glyph paths; layout and integration): no Critical, five
+>   Important, all fixed test-first:
+>   - a stand-in face is scaled to the size it stands in for, so cached layouts stay valid (`ResolvedFont`,
+>     `resolvedBaseScale`);
+>   - a per-family ceiling (`TtfFont::maxNativePx()`, Bookerly 119 px) keeps every glyph's top inside `int8`;
+>   - the ring keeps within 8 KB and is freed with the sizes;
+>   - taking the last size entry makes the wipe pending;
+>   - the ladder clamps a size as a float.
+> - **After the fixes:** host suite 2,261.
+> - **Task 8** ran on the X3; the results are in spec Appendix A, "Stage 2c-2".
+> - **Measured:** the scratch block grows by 1.1 KB, not the 2.6 KB estimated below, and a size costs 540 B.
+> - **Where the code differs from the task code below:** where those fixes went (`FontLookup.h`, `GfxRenderer.h`,
+>   `TtfFont`, `FlashGlyphStore::sizeIndex`, `FontSizeLadder::resolveNative`).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A TTF family draws headings, CSS font sizes and drop caps from its outlines at their own pixel size,
