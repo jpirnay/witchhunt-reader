@@ -1,6 +1,6 @@
 # CJK layout: line breaking, justification and ruby: design
 
-Status (2026-10-16): written for review.
+Status (2026-10-16): approved; the plan for A1 (section 4) is written.
 
 It is working material. When the work merges, lasting parts move to reference docs, open items move to
 `docs/future_work/`, and this file is deleted (see the docs layout convention).
@@ -71,17 +71,22 @@ These are candidates for `docs/future_work/` once the work lands.
 
 | PR | Content | Section version |
 |---|---|---|
-| **A: CJK line breaking** | Sections 5 and 6. It lands in steps; the first changes nothing (5.2) | 84 (master is at 83) |
-| **B: Ruby** | Section 7 | 85 (format change) |
+| **A1: Token boundaries** | 5.2, with no behaviour change; golden variants with hyphenation and bionic reading on | none (master is at 83) |
+| **A2: CJK line breaking** | 5.1, 5.3-5.6 and the rule checker (9.1) | 84 |
+| **A3: CJK justification** | Section 6 | 85 |
+| **B: Ruby** | Section 7 | 86 (format change) |
+
+PR A of the first draft is split in three, each with its own plan; A1's is
+`docs/superpowers/plans/2026-10-16-cjk-a1-token-boundaries.md`.
 
 Each port commit cites the upstream PR and commit, with a `Co-authored-by` trailer where the code is mainly
 theirs (the porting convention):
 - Justin Mitchell (#2288);
 - Phạm Bình An (#2652, #2665, #2781, #3102);
-- Uri Tauber (#2768);
+- Uri Tauber (#2768, #2892);
 - Sung-jin Brian Hong (#3700).
 
-## 5. PR A: breaking and tokens
+## 5. PRs A1 and A2: tokens and breaking
 
 ### 5.1 Character classes (`lib/Utf8`, header-only)
 
@@ -95,8 +100,9 @@ theirs (the porting convention):
 ### 5.2 Token boundaries
 
 - Today a token boundary is either a word gap or "continues" (glued, unbreakable).
-- A second per-token flag, `noSpaceBefore`, adds the zero-width breakable gap that CJK needs. The three kinds,
-  as upstream's `TokenBoundary.h` defines them minus the dash state:
+- A second per-token flag, `noSpaceBefore`, adds the zero-width breakable gap that CJK needs. `ParsedText` keeps
+  both flags in one `TokenBoundary::Boundary` per token, which replaces `wordContinues`; upstream keeps two bit
+  vectors. The three kinds, as upstream's `TokenBoundary.h` defines them minus the dash state:
 
 | Kind | Width | Line break allowed | Justifiable |
 |---|---|---|---|
@@ -113,8 +119,10 @@ theirs (the porting convention):
     pre-pass and the gap cache), `computeSingleLineBreakNoHyphen` (page-bottom retry), and the two hyphenated
     greedy breakers.
   - **Cosmetic:** the cosmetic joins (`ensureFontReady`, `buildLinePreview`).
-- **This lands first, with no behaviour change:** every existing golden stays byte-identical. A debug check
-  asserts that the per-word lists keep equal lengths, because one missed site misaligns them silently.
+- **This lands first (A1), with no behaviour change:** every golden stays byte-identical. One struct per token
+  adds no list that could fall out of step, and renaming the old list made the compiler find every site, so there
+  is no length check. The default goldens run with hyphenation and bionic reading off and reach one breaker of
+  four; A1 first adds golden variants with each on, generated from master's code.
 - **Tests:** upstream's `TokenBoundaryTest` (7 tests) ports as-is.
 
 ### 5.3 CJK tokens and kinsoku (`ParsedText::addWord`)
@@ -166,7 +174,7 @@ theirs (the porting convention):
 - **Tests:** upstream's 6 `KoreanLineBreaking` and 3 `KoreanLayout` tests port with edits (our `ParsedText`
   constructor and callback, and our stub widths of 10 px per glyph and 5 px per space).
 
-## 6. PR A: justification, squeeze and grid
+## 6. PR A3: justification, squeeze and grid
 
 ### 6.1 Justification (`extractLine`)
 
@@ -290,7 +298,8 @@ It runs on:
   - a Chinese classic (Project Gutenberg or Wikisource);
   - a Korean text.
 
-The page dump (`dumpPage`) is extended to print the boundary kind and the ruby groups, so the goldens see them.
+The page dump (`dumpPage`) already prints each word's x position, which shows a zero-width CJK gap; `TextBlock`
+does not keep the boundary kind after layout. PR B extends the dump to print the ruby groups.
 Upstream's tests port as listed in 5.2 and 5.6.
 
 ### 9.2 Device (X3)
@@ -309,8 +318,8 @@ Upstream's tests port as listed in 5.2 and 5.6.
 
 ## 10. Risks
 
-1. **A missed per-word site** misaligns the lists silently. Mitigation: the no-change first step and the debug
-   length check (5.2).
+1. **A missed per-word site** misaligns the lists silently. Mitigation: one struct per token (no new list), the
+   no-change first step, and golden variants that reach all four breakers (5.2).
 2. **A breaker that still measures a space** where layout now has a zero gap makes lines overflow or come out
    short. Mitigation: every gap site is listed (5.2), and the rule checker measures every line.
 3. **The C3 heap with CJK token counts.** Mitigation: the ~32-codepoint flush; measured on the device (section 8).
