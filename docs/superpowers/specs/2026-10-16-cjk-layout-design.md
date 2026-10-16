@@ -297,8 +297,11 @@ Upstream's tests port as listed in 5.2 and 5.6.
 
 - **Fonts:** Noto Sans CJK SC (Chinese/Japanese) and Noto Sans CJK KR (Korean), built locally as `.cpfont` with
   our converter. They are not shipped; `sd-fonts.yaml` keeps them commented out.
-- **The user's part:** open each book and take screenshots of a few pages; Claude reviews them (line edges,
-  punctuation widths, ruby placement, grid alignment).
+- **Screenshots:** Claude captures them over the serial port (`CMD:SCREENSHOT`, `src/main.cpp`) and reviews them
+  (line edges, punctuation widths, ruby placement, grid alignment). The user only opens the books and turns pages.
+  - **A prerequisite, as its own small PR:** the serial command sends the write buffer, which may already hold the
+    reader's pre-rendered next page. It must take the render lock and call
+    `activityManager.prepareFramebufferForCapture()` first, as the POWER+DOWN screenshot does.
 - **Also checked:** the heap and timing figures in section 8, and that the KOSync position of a ruby book
   matches KOReader's.
 - **Optionally,** a native reader looks at a few screenshots before release, for example the upstream
