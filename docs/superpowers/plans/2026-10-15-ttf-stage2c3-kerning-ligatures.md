@@ -1,5 +1,26 @@
 # TTF Stage 2c-3: kerning and ligatures. Implementation plan
 
+> **Status (2026-10-16): done.**
+> - **SDK PR #7** merged into `witchhunt` as `e140f74`. **App branch:** `feat/ttf-kerning`, pin bumped.
+> - **How it ran:** subagent-driven, with a review per task, a whole-branch review and one fix wave.
+> - **Counts after the review fixes:**
+>   - SDK `run_gpos` 45 checks (two hostile-table checks added);
+>   - app `TtfFontTest` 93;
+>   - host suite 2,281 before the final fix wave.
+> - **Where the code differs from the task code below:**
+>   - **`Gpos.cpp`:** out-of-range feature indices count against the walk budget, and the LangSys loop checks
+>     the budget.
+>   - **SDK docs:** `KernTable.h`, `Gpos.h` and the README say where the readers differ from `FT_Get_Kerning` and
+>     from a shaper.
+>   - **`TtfOpenType`:** at most 256 subtables per style (was 1,024); a ligature glyph must be `< numGlyphs`.
+>   - **`TtfFont`:**
+>     - a per-style bit set remembers left codepoints below U+0250 that kern with nothing;
+>     - `kRenderVersion` 2, so stores built by 2c-2 are rebuilt;
+>     - one line re-wrapped by clang-format.
+>   - **More tests:** the subtable cap, truncated and broken layout tables, kerning next to a ligature, and the
+>     uncovered-left memo.
+> - **On the X3:** the results are in spec Appendix A, "Stage 2c-3". The deferred items are in spec section 11.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A TTF family kerns its text and draws its fi, fl, ff, ffi and ffl ligatures, as the font's own layout tables

@@ -482,6 +482,36 @@ the cap can never load (6.1); text glyphs stay well under it.
   - A ligature glyph with no codepoint of its own gets the private-use key `U+F0000 + glyphId`, which
     `TtfFont` maps back to the glyph ID.
 
+**As built in 2c-3 (2026-10-16).** Where it differs from the above:
+
+- **One set of readers, the SDK's.** FreeInkOpenType (freeink-sdk PR #7, merged as `e140f74`) builds `Gpos`,
+  `Gsub` and a new `KernTable` from FreeInkFont's sources, without FreeType. FreeInkFont's `FtFont` uses the same
+  code. The app keeps only glue (`lib/EpdFont/ttf/TtfOpenType`). Nothing is copied.
+  - **GPOS:** the union of every script's DefaultLangSys `kern` lookups (required feature included), not
+    `latn`/`DFLT` alone. The lookups apply in LookupList order: the first matching subtable counts within a
+    lookup, and the lookups add up. That is a shaper's result when a font points every script at the same lookups,
+    as most do. A font that splits its kern lookups by script gets their union.
+  - **Resolved once:** a style resolves its PairPos subtables into byte offsets, at most 256 of them (the most
+    found in about 30 real fonts is 76), and asks the resolved overload per pair. A per-call walk stops at 4,096
+    steps, a resolve at 65,536, and out-of-range feature indices count against the budget.
+  - **The legacy `kern` table** (version 0, horizontal format 0) kerns a font whose GPOS has no kern subtables. It
+    matches `FT_Get_Kerning` on sorted subtables, but it skips cross-stream subtables, which FreeType adds in.
+  - **GSUB** keeps FreeInkFont's policy (`latn`, else `DFLT`), now on the shared view.
+- **Ligatures are keyed by U+FB00-FB04,** not `U+F0000 + glyphId`: `EpdFont::getLigature` takes BMP pairs, and
+  ffi/ffl chain through ff, as `EpdFont` applies ligatures two at a time. `glyphFor()` maps those codepoints to the
+  glyphs GSUB names, whatever the cmap says. A ligature glyph outside the font (`>= numGlyphs`) is dropped, so the
+  text draws as separate letters.
+- **Kerning:**
+  - **Scaling:** a stored pair is scaled to 4.4 pixels at the size's own ppem, rounded half away from zero and
+    clamped to `int8`. That caps kerning at ±7.94 px: at a 120 px native size, -120 units (-14.4 px) clamps to -8.
+  - **Pairs that kern nothing** are not stored. A 74 B bit set per style remembers left codepoints below U+0250
+    that kern with nothing (space and digits in Bookerly), so each is asked once per family load. It is not a
+    pair cache.
+- **Versions:**
+  - `kRenderVersion` 2: a store from 2c-2 could hold the cmap's glyph, or a no-glyph marker, for U+FB00-FB04, so
+    every family reinstalls once.
+  - `SECTION_FILE_VERSION` 83.
+
 ### 5.5 Sizes: the body face and the ladder rungs
 
 - **The body face** is the reader size the user has chosen, at any point size the settings allow,
@@ -668,7 +698,7 @@ are cached as `.fpv` files, keyed by the family identity.
 | **Stage 1** | Two changes, neither altering behaviour: (a) `GlyphProvider` in place of `glyphMissHandler` and its context; `SdCardFont` implements it and `getGlyphBitmap` loses the cast. (b) `GfxRenderer`'s single font-lookup helper plus the optional resolver hook. | One PR (the plan's Task 5) | PR #468 |
 | **Stage 2a** | `FlashGlyphStore` and its host tests (simulated NOR flash, power-cut injection). | Own PR | Merged (PR #469) |
 | **Stage 2b** | `TtfRasterizer`: integer loader, vendored and patched `ftgrays`, span packing to 2-bit, and the regression test against FreeType. | Own PR | PR #470 (built and reviewed 2026-10-15; plan `plans/2026-10-14-ttf-stage2b-rasterizer.md`) |
-| **Stage 2c** | `FontBytes`' SD mode, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. Split into four plans: **2c-1** TTF families at the body size, flash mode; **2c-2** native sizes (headings, CSS sizes, drop caps at their own pixel size); **2c-3** kerning and ligatures; **2c-4** SD mode, and previews (a family that is not installed is read from the SD card). | Own PR each | 2c-1 merged (PR #472); 2c-2 built, reviewed and X3-validated 2026-10-15 (branch `feat/ttf-native-sizes`; plan `plans/2026-10-15-ttf-stage2c2-native-sizes.md`); 2c-3 next |
+| **Stage 2c** | `FontBytes`' SD mode, `TtfFont` (with `prefetch` and its two hooks), the pre-resolved GPOS reader and the kerning pair index, `Gsub`, registry and manager wiring, dormant rungs and the TTF ladder branch, previews. Split into four plans: **2c-1** TTF families at the body size, flash mode; **2c-2** native sizes (headings, CSS sizes, drop caps at their own pixel size); **2c-3** kerning and ligatures; **2c-4** SD mode, and previews (a family that is not installed is read from the SD card). | Own PR each | 2c-1 merged (PR #472); 2c-2 merged (PR #474); 2c-3 built, reviewed and X3-validated 2026-10-16 (SDK PR #7 merged; app branch `feat/ttf-kerning`; plan `plans/2026-10-15-ttf-stage2c3-kerning-ligatures.md`); 2c-4 next |
 | **Stage 2d** | User-guide section on TTF fonts; FreeType credit (required by the FTL licence). | With 2c or own PR | Not planned |
 
 Each stage builds on the previous one. Stacked PRs are retargeted to master as their base merges.
@@ -764,8 +794,9 @@ Stage 2 plans:
     is not nothrow.
   - **The prewarm** goes through the renderer's lookup, not a dormant table.
   - **The drop cap:** native up to the family's ceiling, scaled above it (5.5).
-- **Still open, by plan:** kerning pairs and the coverage pre-check (2c-3); `cmapEnd`-bounded format-4 reads, the SD-mode
-  record-size planner input, grouping a page's misses by style, tricky fonts and the S3's internal-RAM scratch
+- **Done in 2c-3 (2026-10-16):** kerning pairs in the store's pair index (font units, codepoint keys) and the
+  coverage pre-check: a pair whose left glyph kerns with nothing is never stored (5.4).
+- **Still open, by plan:** `cmapEnd`-bounded format-4 reads, the SD-mode record-size planner input, grouping a page's misses by style, tricky fonts and the S3's internal-RAM scratch
   (2c-4); the `sdRecord` rename.
 - **For 2c-2, from the 2c-1 device run (done in 2c-2):** a drop cap is drawn at about 4x the body size (a 16 pt body gives
   about 133 px per em). That is above the 26 pt the scratch block is planned for, near the 4 KB output region, and
@@ -947,6 +978,30 @@ with one font ID (per-word data carries only the style bits).
     - the ID window could move between sessions if a registered ID falls in it (about 2^-23);
     - faces under about 17 px resample a residual under half a pixel;
     - stale comments.
+- **From 2c-3 (2026-10-16):**
+  - **Ligature glyphs are checked against `numGlyphs` only.** A ligature glyph the rasterizer cannot draw (a
+    point-matched composite, Apple scaled offsets) makes every fi draw as missing. None of about 30 fonts checked
+    has one. Fix: test-load each style's ligature glyphs at family load and drop the pairs that fail.
+  - **A font whose GPOS kerns only another script** (Leelawadee: `thai` only) loses its legacy table's Latin
+    kerning. Fix: when GPOS reports a left glyph uncovered, ask the legacy table.
+  - **The union of scripts** differs from a shaper for fonts that split kern lookups by script (one Calibri pair).
+  - **Wide glyphs at the largest sizes** (from 2c-2) still apply to ligature glyphs.
+  - **`SECTION_FILE_VERSION` 83 is redundant for TTF families** (their font ID changes with `kRenderVersion`).
+    It was kept, so every book is laid out once more after the update, built-in fonts included.
+  - **`FontBytes::data()` for SD mode (2c-4):** the glue adds file offsets to it, so it must stay null unless the
+    whole file is addressable at it.
+  - **Small costs:** a 64-bit division per stored pair (`int32` suffices); the `checkLock` message says "glyph
+    rendered" for a kerning miss.
+  - **`KernTable`:** stops at a subtable whose pair count overruns the table (FreeType clamps and carries on),
+    continues past a subtable shorter than 14 bytes (FreeType stops), keeps 16 subtables (FreeType 32).
+  - **`kMaxRanges` (8,192)** also caps format-1 Coverage and ClassDef, which are not range lists: glyphs past entry
+    8,192 of a huge font lose kerning and ligatures. Unchanged from before.
+  - **Test gaps:** SDK: a required feature index, the kern format byte, the 16-subtable cap, version 0, a
+    `hasKern` assert on the fixture; app: the legacy fallback when GPOS is present, `checkLock` on a kerning miss,
+    positive rounding.
+  - **Doc and style nits:** `KernTable.h` "any subtable" means any counted subtable, and one of its sentences is a
+    fragment; `OpenType.h`'s header names two users, now three; `run.sh` keeps a stale "GSUB feature branch"
+    comment; the SDK's `GposKerningTest.cpp` has a few clang-format deviations.
 
 ## 12. Side findings (separate from this work)
 
@@ -958,6 +1013,9 @@ with one font ID (per-word data carries only the style bits).
 - **Performance:** a full prewarm reads glyph records from SD even for mmap fonts, and `onGlyphMiss` has
   no mmap branch.
 - **SD fonts kern only when drawing,** so layout widths and drawn widths differ by the kerning.
+- **The end-of-book screen cannot make the cover thumbnail while a TTF family is loaded** (2c-3 X3 run): the JPEG
+  decoder needs 40,960 B and found 39,684, because the family's 10 KB scratch is still resident. The thumbnail is
+  marked transient and made later. 2c-3 adds about 0.7 KB per family; it failed under 2c-2 too.
 - **The loop task's stack is 16 KB, not 8 KB.** FreeInkUI overrides `getArduinoLoopTaskStackSize`.
   The comment in `src/main.cpp` above the loop-task high-water log still says 8 KB.
 - **SDK:**
@@ -1167,3 +1225,24 @@ Branch `feat/ttf-native-sizes` after the review fixes (`e10513e79`), Bookerly's 
   - a first session rendered 208 glyphs and read 244,359 from the store;
   - after these sessions the log was at 145 KB of 1.2 MB;
   - the size table did not fill.
+
+### Stage 2c-3 (X3, 2026-10-16)
+
+Branch `feat/ttf-kerning` at the SDK pin `e140f74`, Bookerly's four TTF files, 14 and 16 pt.
+
+- **Install:** the render version bump reinstalled the family once (4 styles, a 1,245,184 B log). At load:
+  `regular style: 12 kern subtables, 5 ligatures`. Scratch is unchanged at 10,135 B.
+- **What the user saw:** capital pairs (AV, To, Ty, We) tighter, fi and fl drawn as one glyph, bold and italic
+  words in running text correct.
+- **Pages:**
+  - pre-render 47-61 ms a page (2c-1: 44-53 ms);
+  - pages served from the store, revisited: 50-61 ms;
+  - a first page after a chapter is laid out: 2.1-3.1 s;
+  - other full renders 510-690 ms, the display included.
+- **Kerning pairs worked out from the font, per session:**
+  - 817 for a first chapter at 16 pt;
+  - 684 for 20 pages at 14 pt, two new chapters included;
+  - 30 for a session of bold and italic pages;
+  - 3 when revisiting stored pages.
+- **No** RenderLock violations, crashes or stack warnings.
+- **Flash:** default image 6,316,919 B (96.4%), x4pro 94.6%.
