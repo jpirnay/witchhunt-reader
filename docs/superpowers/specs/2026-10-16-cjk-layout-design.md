@@ -152,15 +152,22 @@ theirs (the porting convention):
 
 - **Chunk continuity:** after the forced `MAX_WORD_SIZE` flush, the next chunk continues the word (glued). That
   applies on both paths, including the ASCII fast path (upstream #2652).
-- **Shorter CJK runs:** a CJK run is flushed every ~32 codepoints, with continuity kept.
+- **Shorter CJK runs:** a CJK run is flushed every ~32 tokens, with continuity kept. A run of non-CJK characters
+  inside it (digits, Latin) counts as one token, so dense dates stay inside the bound.
   - Without this, a 200-byte flush adds up to ~66 tokens on top of the 96-token paragraph split.
   - The word lists would then double to 256 entries, a ~6 KB contiguous block on the C3.
 - **Table budget:** the row budget is charged per token added, not per flush. CJK would otherwise undercount it
   about tenfold.
+  - A CJK word that would cross the budget degrades the row before it is added.
+  - Otherwise a cell just over 256 characters doubles its word lists to 512 entries before the check sees it.
 - **Newlines between CJK characters:** a segment break (newline plus surrounding whitespace) between two
-  characters of the Han/kana/CJK-punctuation class is removed, not turned into a space (CSS Text 3). The parser
-  sees the newline raw in `consumeText`'s whitespace branch, before it collapses whitespace (the XML tokenizer
-  does not), and the next character decides.
+  characters of the Han/kana/CJK-punctuation class is removed, not turned into a space (CSS Text 3).
+  - **Where the parser sees it:** the newline raw, in `consumeText`'s whitespace branch, before it collapses
+    whitespace (the XML tokenizer does not).
+  - **Where it decides:** when the next word is flushed, from the whole word's first codepoint. A SAX text chunk
+    can end inside a codepoint, so a decision per byte would see half a character.
+  - **Scope:** the rule holds only inside inline formatting. The start or end of any other element (a block, a
+    list item, `dt`/`dd`, `figure`, `br`) resets it, so the newline there stays a space, as on master.
 
 ### 5.6 Korean
 
@@ -351,6 +358,10 @@ Upstream's tests port as listed in 5.2 and 5.6.
   - halfwidth ｡｣､･;
   - 々 〻 ゝゞ ヽヾ ・ 〜 ゠ ‼ ‽ ⁇⁈⁉ ゛゜ ﾞﾟ 〼;
   - ‥ ․.
+- Added in the A2 review:
+  - the ideographic space U+3000 (UAX #14 class BA: the break comes after it, so `！　` never leaves the space at
+    the start of the next line, where it would read as a paragraph indent);
+  - the middle dot U+00B7, as in transliterated names (列夫·托尔斯泰), beside ・ U+30FB.
 
   A run of … or —— never splits.
 
@@ -358,8 +369,12 @@ Upstream's tests port as listed in 5.2 and 5.6.
 - From upstream: `( [ {`, « ‘ “, 〈《「『【〔〖〘〚, （［｛.
 - Added from crengine (class OP): 〝 ｟ ｢ „ ‚.
 
-**Still allowed at line start:** small kana (ぁぃぅぇぉっゃゅょゎ ァィゥェォッャュョヮヵヶ) and ー, and a break
-after the ideographic space U+3000. KOReader's default does the same; strict JIS rules are out of scope.
+**Neither at line start nor at line end** (added in the A2 review): the ambiguous quotes `"` U+0022, `'` U+0027,
+＂ U+FF02 and ＇ U+FF07. Each may open or close a quotation, so the text never breaks on either side of one (UAX #14
+LB19, class QU). Project Gutenberg's Chinese texts use the ASCII `"` as their quotation mark.
+
+**Still allowed at line start:** small kana (ぁぃぅぇぉっゃゅょゎ ァィゥェォッャュョヮヵヶ) and ー. KOReader's
+default does the same; strict JIS rules are out of scope.
 
 ### A.2 Squeeze classes (crengine `getCJKCharType`, `textlang.h#L32-L166`)
 
