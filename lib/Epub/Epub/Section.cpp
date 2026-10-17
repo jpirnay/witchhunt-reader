@@ -31,7 +31,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 86;  // v86: a <span id> is in the anchor map
+constexpr uint8_t SECTION_FILE_VERSION = 87;  // v87: small caps shrink ł ń ž ÿ, Greek and
+                                              // Cyrillic, and no longer Ł Ń Ž; v86 pages
+                                              // measured such words the other way round
+                                              // v86: a <span id> is in the anchor map
                                               // v85: an <img> whose href has no extension is
                                               // laid out as the image its bytes are; v84 pages
                                               // hold its alt text
