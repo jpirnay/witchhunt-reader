@@ -248,8 +248,10 @@ class ChapterHtmlSlimParser final : public Print {
     bool hasMarginLeft = false;
     int16_t marginLeftPx = 0;  // margin-left in pixels, for span-level poem indents
     // Inline font-size as a percent of the PARENT element's size (em semantics).
-    // Nested entries compose multiplicatively in updateEffectiveInlineStyle().
+    // Nested entries compose multiplicatively in updateEffectiveInlineStyle(); one with
+    // fontSizeFromRoot (rem, px, pt) is a percent of the BODY size instead and does not.
     bool hasFontSize = false;
+    bool fontSizeFromRoot = false;
     uint8_t fontSizePct = 100;
   };
   std::vector<StyleStackEntry> inlineStyleStack;
