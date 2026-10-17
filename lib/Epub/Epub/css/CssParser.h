@@ -31,7 +31,10 @@ class BuildArena;  // lib/Memory — optional backing store for the disk index (
  *   - Descendant/child selectors
  *   - Pseudo-classes and pseudo-elements
  *   - Media queries (content is skipped)
- *   - @import, @font-face, etc.
+ *   - @import and the other at-rules
+ *
+ * @font-face rules are not styles: they are collected into a side file next to the rule cache
+ * (fontFaces / loadFontFaces), for the book's embedded fonts.
  */
 class CssParser {
  public:
@@ -93,7 +96,10 @@ class CssParser {
   //      a book whose picture is a CSS background (Alice's rabbit hole) kept showing none.
   // v21: `display` keeps Inline apart from Block (#388). A v20 cache stored display:inline as
   //      Block, which would now lay those spans out as blocks.
-  static constexpr uint8_t CSS_CACHE_VERSION = 21;
+  // v22: `font-family` is parsed and persisted (its first family, hashed; see fontFamilyHash), and
+  //      @font-face rules are recorded in a side file (see loadFontFaces). A v21 compile never
+  //      looked at either, so a book's embedded fonts would stay unknown.
+  static constexpr uint8_t CSS_CACHE_VERSION = 22;
   // Bytes before the sorted offset index: version(1) + ruleCount(2) + totalSelectorCandidates(4)
   // + unsupportedSelectorSkips(4) + flags(1).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 12;
@@ -275,7 +281,33 @@ class CssParser {
   [[nodiscard]] const std::string* backgroundImageFor(const std::string& tagName, const std::string& classAttr,
                                                       const std::string& idAttr = {}) const;
 
+  // A book's embedded fonts: one @font-face rule each, in source order, recorded while the sheets
+  // are compiled (at most MAX_FONT_FACES) and kept in a side file next to the rule cache, absent
+  // when the book declares none.
+  struct FontFace {
+    uint32_t family = 0;    // fontFamilyHash() of the declared name
+    uint16_t weight = 400;  // font-weight: 100-900, normal 400, bold 700
+    bool italic = false;    // font-style other than normal
+    std::string name;       // the declared family name as written, unquoted
+    // The src url() the reader can best use, joined to its sheet's directory: an EPUB path, not
+    // yet normalised or unescaped. TrueType first, then OpenType, then anything else; never
+    // WOFF2, SVG, EOT, a data: URI or a remote font.
+    std::string href;
+  };
+  static constexpr size_t MAX_FONT_FACES = 32;
+  // A family name's identity, as font-family and @font-face compare names: case-insensitive, runs
+  // of whitespace as one space, quotes removed. Never 0, which CssStyle::fontFamily keeps for the
+  // reader's font.
+  [[nodiscard]] static uint32_t fontFamilyHash(std::string_view name);
+  // The faces recorded for the book whose cache is at `cachePath`. False when there are none or
+  // the side file cannot be read.
+  static bool loadFontFaces(const std::string& cachePath, std::vector<FontFace>& out);
+
  private:
+  std::vector<FontFace> fontFaces_;
+  void parseFontFace(std::string_view declarations);
+  void saveFontFaces() const;
+
   // See backgroundImageFor. An empty path records an explicit `none`, which cancels an earlier
   // rule's picture for the same selector.
   struct BackgroundImageRule {
