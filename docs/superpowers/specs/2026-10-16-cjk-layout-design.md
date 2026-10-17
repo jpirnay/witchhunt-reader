@@ -1,6 +1,6 @@
 # CJK layout: line breaking, justification and ruby: design
 
-Status (2026-10-16): approved; the plan for A1 (section 4) is written.
+Status (2026-10-17): approved. A1 is merged (PR #481); the plan for A2 is written (section 4).
 
 It is working material. When the work merges, lasting parts move to reference docs, open items move to
 `docs/future_work/`, and this file is deleted (see the docs layout convention).
@@ -76,8 +76,9 @@ These are candidates for `docs/future_work/` once the work lands.
 | **A3: CJK justification** | Section 6 | 85 |
 | **B: Ruby** | Section 7 | 86 (format change) |
 
-PR A of the first draft is split in three, each with its own plan; A1's is
-`docs/superpowers/plans/2026-10-16-cjk-a1-token-boundaries.md`.
+PR A of the first draft is split in three, each with its own plan: A1's is
+`docs/superpowers/plans/2026-10-16-cjk-a1-token-boundaries.md`, A2's
+`docs/superpowers/plans/2026-10-17-cjk-a2-line-breaking.md`.
 
 Each port commit cites the upstream PR and commit, with a `Co-authored-by` trailer where the code is mainly
 theirs (the porting convention):
@@ -157,9 +158,9 @@ theirs (the porting convention):
 - **Table budget:** the row budget is charged per token added, not per flush. CJK would otherwise undercount it
   about tenfold.
 - **Newlines between CJK characters:** a segment break (newline plus surrounding whitespace) between two
-  characters of the Han/kana/CJK-punctuation class is removed, not turned into a space (CSS Text 3). The plan
-  first confirms where the parser still sees the newline; whitespace is collapsed in our parser, not by the XML
-  tokenizer.
+  characters of the Han/kana/CJK-punctuation class is removed, not turned into a space (CSS Text 3). The parser
+  sees the newline raw in `consumeText`'s whitespace branch, before it collapses whitespace (the XML tokenizer
+  does not), and the next character decides.
 
 ### 5.6 Korean
 
@@ -266,6 +267,9 @@ theirs (the porting convention):
 
 - **Tokens:** a CJK page holds several hundred one-to-three-character tokens. Each fits `std::string`'s inline
   buffer, and the ~32-codepoint flush (5.5) keeps the word lists at their 128-entry steady state.
+  - Measured on the host (A2): the Japanese, Chinese and Korean excerpts peak at 24.8 KB in an arena build
+    (a Latin book: 26.5 KB) and 45.9-56.1 KB on the heap (Latin books: 42.8-62.9 KB).
+  - Without the flush, the Japanese excerpt peaks 7 KB higher.
 - **Squeeze:** about 121 bytes of tables in flash, with no heap.
 - **Ruby:** a `std::string` per group, only on ruby lines.
 - **On the device, measure:**
@@ -279,7 +283,8 @@ The maintainer does not read CJK, so pass or fail must not rest on reading the p
 
 ### 9.1 Host rule checker
 
-A test target lays out books through the host pipeline (`epub_pipeline`) and asserts on every line:
+A test target lays out books through the host pipeline (`epub_pipeline`) and asserts on every line. Each PR
+adds its rules: A2 the line edges, A3 justification, squeeze and grid, B ruby.
 - **Line edges:**
   - no line starts with a no-line-start character, and none ends with a no-line-end character (A.1);
   - no hyphen is drawn in CJK text;
@@ -291,12 +296,13 @@ A test target lays out books through the host pipeline (`epub_pipeline`) and ass
 - **Ruby:** every ruby group keeps its base glued, and the overhangs stay inside the margins.
 
 It runs on:
-- **a generated fixture EPUB** (`make_test_cjk.py`) with each case: kinsoku pairs, runs of punctuation,
-  newlines in the source, Korean words, mono- and group-ruby, `<rp>`, ruby at line edges, and a table cell;
+- **a generated fixture EPUB** (`make_test_cjk_line_breaking.py`) with each case: kinsoku pairs, runs of
+  punctuation, newlines in the source, Korean words, a table cell; PR B adds mono- and group-ruby, `<rp>` and ruby at
+  line edges;
 - **real public-domain books, checked in as small excerpts:**
-  - a Japanese novel from Aozora Bunko (ruby-rich);
-  - a Chinese classic (Project Gutenberg or Wikisource);
-  - a Korean text.
+  - a Japanese novel from Aozora Bunko, ruby-rich: Natsume Soseki, *Wagahai wa neko de aru*;
+  - a Chinese classic from Project Gutenberg, kept hard-wrapped: Cao Xueqin, *Hong Lou Meng*;
+  - a Korean text from Wikisource: Hyeon Jin-geon, *Unsu joeun nal*.
 
 The page dump (`dumpPage`) already prints each word's x position, which shows a zero-width CJK gap; `TextBlock`
 does not keep the boundary kind after layout. PR B extends the dump to print the ruby groups.
