@@ -71,10 +71,10 @@ These are candidates for `docs/future_work/` once the work lands.
 
 | PR | Content | Section version |
 |---|---|---|
-| **A1: Token boundaries** | 5.2, with no behaviour change; golden variants with hyphenation and bionic reading on | none (master is at 83) |
-| **A2: CJK line breaking** | 5.1, 5.3-5.6 and the rule checker (9.1) | 84 |
-| **A3: CJK justification** | Section 6 | 85 |
-| **B: Ruby** | Section 7 | 86 (format change) |
+| **A1: Token boundaries** (merged, PR #481) | 5.2, with no behaviour change; golden variants with hyphenation and bionic reading on | none |
+| **A2: CJK line breaking** | 5.1, 5.3-5.6 and the rule checker (9.1) | 87 (master is at 86) |
+| **A3: CJK justification** | Section 6 | the next one |
+| **B: Ruby** | Section 7 | the next one (format change) |
 
 PR A of the first draft is split in three, each with its own plan: A1's is
 `docs/superpowers/plans/2026-10-16-cjk-a1-token-boundaries.md`, A2's
@@ -267,8 +267,8 @@ theirs (the porting convention):
 
 - **Tokens:** a CJK page holds several hundred one-to-three-character tokens. Each fits `std::string`'s inline
   buffer, and the ~32-codepoint flush (5.5) keeps the word lists at their 128-entry steady state.
-  - Measured on the host (A2): the Japanese, Chinese and Korean excerpts peak at 24.8 KB in an arena build
-    (a Latin book: 26.5 KB) and 45.9-56.1 KB on the heap (Latin books: 42.8-62.9 KB).
+  - Measured on the host (A2): the Japanese, Chinese and Korean excerpts peak at about 25 KB in an arena build
+    (a Latin book: 26.5 KB) and 47-57 KB on the heap (Latin books: 42.8-62.9 KB).
   - Without the flush, the Japanese excerpt peaks 7 KB higher.
 - **Squeeze:** about 121 bytes of tables in flash, with no heap.
 - **Ruby:** a `std::string` per group, only on ruby lines.

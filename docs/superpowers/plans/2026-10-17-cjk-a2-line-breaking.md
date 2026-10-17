@@ -37,7 +37,7 @@ a space every 66 characters.
     CJK text, and no space between two Han, kana or CJK-punctuation characters;
   - the books are a fixture with one case per rule, and three public-domain excerpts in Japanese, Chinese and Korean;
   - they get goldens and heap-peak baselines;
-  - `SECTION_FILE_VERSION` goes to 84.
+  - `SECTION_FILE_VERSION` goes to 87.
 
 **Tech Stack:** C++20 host tests (gtest via CMake, UCRT64 gcc); firmware gnu++2a (PlatformIO, ESP32-C3/S3);
 clang-format 21.1.8; Python 3 for the EPUB generators.
@@ -47,23 +47,26 @@ clang-format 21.1.8; Python 3 for the EPUB generators.
 Appendix A.1. A1 (PR #481, merged) built section 5.2. This plan departs from the spec in the points under "Decisions"
 below.
 
-**Pre-validated:** every task's code was built and tested in a prototype (`C:/tmp/wt-cjk-proto2`). The plan was
-then replayed task by task on a fresh tree at `origin/master` (`7084c65ea`):
+**Pre-validated:** every task's code was built and tested in a prototype (`C:/tmp/wt-cjk-proto2`), first on
+`7084c65ea` and then rebased onto `origin/master` `236e25389`; the plan was replayed task by task on a fresh tree at
+each. On `236e25389`:
 - each "see it fail" step fails as stated. Task 1's stops at CMake's configure; Task 2's in both targets; Task 3's
   with exactly the 8 named failures; Task 4's with 6; Task 5's with 7;
 - each count matches;
 - every file the plan writes is identical to the prototype: 31 files, the generated EPUBs compared by content;
 - the heap gate passes on all 20 entries;
-- the whole host suite passes (2,415 tests; 2,312 on master).
+- the whole host suite runs 2,591 tests (2,488 on master), and only the two Windows-only failures named under
+  Global Constraints fail, as they do on master.
 
-The firmware was built for both boards from the prototype (`default`: RAM 16.7%, flash 96.6%, 3.4 KB more than A1;
-`x4pro`: RAM 30.8%, flash 94.8%), with no warning from the files the plan touches. Task 6 is the device run.
+The firmware was built for both boards from the prototype on `7084c65ea` (`default`: RAM 16.7%, flash 96.6%, 3.4 KB
+more than A1; `x4pro`: RAM 30.8%, flash 94.8%), with no warning from the files the plan touches. Task 5 builds it
+again on the new base, and Task 6 is the device run.
 
 ## Global Constraints
 
-- **Branch:** `feat/cjk-line-breaking` from `origin/master` (`7084c65ea`, A1 merged), in the worktree
+- **Branch:** `feat/cjk-line-breaking` from `origin/master` (`236e25389`: A1 and the 2026-10-17 ports merged), in the worktree
   `/c/tmp/wt-cjk-a2`. The PR targets `master`, titled `feat: (Epub) CJK line breaking with kinsoku`.
-- **Section cache:** `SECTION_FILE_VERSION` 84 (master is at 83); Task 5 bumps it.
+- **Section cache:** `SECTION_FILE_VERSION` 87 (master is at 86); Task 5 bumps it.
 - **No Latin layout change:** every existing golden stays byte-identical. A Latin word over 200 bytes would now stay
   glued across the parser's forced flush; no corpus book has one.
 - **No dash state:** upstream's dash split (PR #3883) is not ported (spec section 3). A glued boundary becomes a CJK
@@ -84,10 +87,16 @@ The firmware was built for both boards from the prototype (`default`: RAM 16.7%,
   trademarks). The generator names each source.
 - **App host test commands** (Git Bash, from the worktree root): `export PATH=/c/msys64/ucrt64/bin:$PATH` once, then
   configure with
-  `cmake -S test -B build/test -G "MinGW Makefiles" -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=/c/_development/witchhunt-reader/build/test/_deps/googletest-src`.
+  `cmake -S test -B build/test -G "MinGW Makefiles" -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=/c/_development/witchhunt-reader/build/test/_deps/googletest-src -DFETCHCONTENT_SOURCE_DIR_SDFAT=/c/tmp/SdFat-2.3.1`.
+  CMake's own download of SdFat 2.3.1 (for `test/sdfat_alloc`) fails on this machine: its curl cannot read the MSYS2
+  CA bundle. `/c/tmp/SdFat-2.3.1` is the release tarball, extracted, with the SHA256 the test pins.
   The steps below write `cmake -S test -B build/test` for short. The full suite needs
   `cmake --build build/test -j 8 -- -k` to get past `epub_build_inventory`, which does not build on Windows
   (`dlfcn.h: No such file or directory` is expected).
+- **Two tests fail on Windows on master, outside this plan:** `LongChapterPageTables.AChapterFarPastTheReserveBuildsWhole`
+  and `LongChapterPageTables.ARefusedChunkStopsTheBuildWithBothTablesInStep` delete a cache directory while the book's
+  `book.bin` is still open, which Windows refuses ("cannot remove all"). Linux and CI pass them. The pipeline runs
+  below leave them out by name; the whole suite lists them as its only failures.
 - **Firmware builds:** `export PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 PYTHONIOENCODING=utf-8`, then
   `"$HOME/.platformio/penv/Scripts/pio.exe" run -e <env>`; one env at a time.
 - **A file changed right after a failed build:** mingw make compares timestamps in whole seconds, and CMake's Makefile
@@ -128,7 +137,7 @@ likely first. Each is pinned by a test in the task named:
 | `test/glyph_provider/GlyphProviderTest.cpp` | 2 | the kerning test |
 | `lib/Epub/Epub/ParsedText.{h,cpp}`, `blocks/TextBlock.h` (a comment) | 3, 4 | tokens; Hangul line-end breaks |
 | `test/cjk_layout/` (new target), `test/word_size_layout/` and `test/epub_pipeline/CMakeLists.txt` | 3, 4 | the layout tests; link `CjkLineBreak.cpp` |
-| `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.{h,cpp}`, `lib/Epub/Epub/Section.cpp` | 5 | parser continuity, runs, table charge, segment breaks; version 84 |
+| `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.{h,cpp}`, `lib/Epub/Epub/Section.cpp` | 5 | parser continuity, runs, table charge, segment breaks; version 87 |
 | `test/epubs/make_test_cjk_*.py` (new, 2), `test/epubs/test_cjk_*.epub` (new, 4) | 5 | the fixture and the excerpts |
 | `test/epub_pipeline/CjkRulesTest.cpp` (new), `goldens/test_cjk_*.golden.txt` (new, 4), `heap_peak_baseline.txt` | 5 | the rule checker; goldens; heap peaks |
 | (none: device run, PR) | 6 | X3 validation with a locally built Noto CJK font; the PR |
@@ -187,7 +196,7 @@ git -C /c/_development/witchhunt-reader fetch origin
 git -C /c/_development/witchhunt-reader worktree add -b feat/cjk-line-breaking /c/tmp/wt-cjk-a2 origin/master
 cd /c/tmp/wt-cjk-a2
 git submodule update --init freeink-sdk
-git log --oneline -1   # 7084c65ea Merge pull request #481 from jpirnay/feat/cjk-token-boundaries
+git log --oneline -1   # 236e25389 Merge pull request #491 from jpirnay/port/2026-10-17-fonts
 ```
 
 All paths below are relative to `/c/tmp/wt-cjk-a2`.
@@ -1393,8 +1402,9 @@ Expected: `[  PASSED  ] 10 tests.`
 Run: `cmake --build build/test --target WordSizeLayoutTest -j 8 && ./build/test/word_size_layout/WordSizeLayoutTest.exe --gtest_brief=1`
 Expected: `[  PASSED  ] 37 tests.`
 
-Run: `cmake --build build/test --target EpubPipelineTest -j 8 && ./build/test/epub_pipeline/EpubPipelineTest.exe --gtest_brief=1`
-Expected: `[  PASSED  ] 634 tests.` (2 skipped, as on master): no corpus book has CJK text yet, and no golden moves.
+Run: `cmake --build build/test --target EpubPipelineTest -j 8 && ./build/test/epub_pipeline/EpubPipelineTest.exe --gtest_brief=1 --gtest_filter=-LongChapterPageTables.AChapterFarPastTheReserveBuildsWhole:LongChapterPageTables.ARefusedChunkStopsTheBuildWithBothTablesInStep`
+Expected: `[  PASSED  ] 692 tests.` (2 skipped, as on master): no corpus book has CJK text yet, and no golden moves. The
+filter leaves out the two tests that fail on Windows on master too (see Global Constraints).
 
 - [ ] **Step 6: Commit**
 
@@ -1622,7 +1632,7 @@ run. This task adds four CJK books and a checker that finds those spaces, then f
 - Consumes: Tasks 1-4. `utf8IsUnspacedCjk`, `utf8IsCjkBreakable`, `CjkLineBreak::isNoLineStart`/`isNoLineEnd`;
   `ParsedText::size()` (tokens so far); `pipeline_harness::runAndDump` and `Profile` (`paragraphAlignment = 1` is left
   aligned).
-- Produces: `SECTION_FILE_VERSION` 84; the CJK books in the corpus (every corpus test now runs them).
+- Produces: `SECTION_FILE_VERSION` 87; the CJK books in the corpus (every corpus test now runs them).
 
 - [ ] **Step 1: The books**
 
@@ -2412,10 +2422,10 @@ Expected: `[  PASSED  ] 25 tests.`
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 83;  // v83: a TTF family kerns and draws fi/fl ligatures
-                                              // v82: a TTF family draws every size with a face of its own
-                                              // v81: a paragraph over 96 words gets its top margin and padding
-                                              // v79: a <span> styled display:block is a block,
+constexpr uint8_t SECTION_FILE_VERSION = 86;  // v86: a <span id> is in the anchor map
+                                              // v85: an <img> whose href has no extension is
+                                              // laid out as the image its bytes are; v84 pages
+                                              // hold its alt text
 ```
 with:
 
@@ -2423,11 +2433,11 @@ with:
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 84;  // v84: CJK text breaks between characters, with kinsoku
-                                              // v83: a TTF family kerns and draws fi/fl ligatures
-                                              // v82: a TTF family draws every size with a face of its own
-                                              // v81: a paragraph over 96 words gets its top margin and padding
-                                              // v79: a <span> styled display:block is a block,
+constexpr uint8_t SECTION_FILE_VERSION = 87;  // v87: CJK text breaks between characters, with kinsoku
+                                              // v86: a <span id> is in the anchor map
+                                              // v85: an <img> whose href has no extension is
+                                              // laid out as the image its bytes are; v84 pages
+                                              // hold its alt text
 ```
 
 - [ ] **Step 7: Goldens for the CJK books**
@@ -2435,16 +2445,16 @@ constexpr uint8_t SECTION_FILE_VERSION = 84;  // v84: CJK text breaks between ch
 Run: `UPDATE_GOLDENS=1 ./build/test/epub_pipeline/EpubPipelineTest.exe --gtest_filter='*MatchesGolden/test_cjk*' --gtest_brief=1`
 Expected: the four `MatchesGolden` cases skip (`golden regenerated`).
 
-Run: `cmake --build build/test --target EpubPipelineTest -j 8 && ./build/test/epub_pipeline/EpubPipelineTest.exe --gtest_brief=1`
-Expected: `[  PASSED  ] 699 tests.` (2 skipped, as on master). Every golden that existed before this plan is
+Run: `cmake --build build/test --target EpubPipelineTest -j 8 && ./build/test/epub_pipeline/EpubPipelineTest.exe --gtest_brief=1 --gtest_filter=-LongChapterPageTables.AChapterFarPastTheReserveBuildsWhole:LongChapterPageTables.ARefusedChunkStopsTheBuildWithBothTablesInStep`
+Expected: `[  PASSED  ] 757 tests.` (2 skipped, as on master). Every golden that existed before this plan is
 byte-identical: `git status --short test/epub_pipeline/goldens` lists only the four new ones.
 
 - [ ] **Step 8: Heap-peak baselines for the CJK books**
 
 The heap gate checks only the books its baseline lists.
-- **The excerpts** peak within the Latin books' range: arena 24.8 KB against 26.5 KB for test_inline_footnotes,
-  heap 45.9-56.1 KB against 42.8-62.9 KB.
-- **The fixture** peaks higher (arena 47.0 KB, heap 70.3 KB). Its case 8 cell buffers about 256 tokens before the
+- **The excerpts** peak within the Latin books' range: arena 24.9-25.1 KB against 26.5 KB for
+  test_inline_footnotes, heap 47.1-57.2 KB against 42.8-62.9 KB.
+- **The fixture** peaks higher (arena 48.3 KB, heap 71.6 KB). Its case 8 cell buffers about 256 tokens before the
   12 KB row budget trips, as a Latin cell of 256 words would.
 
 <!-- plan-edit: test/epub_pipeline/heap_peak_baseline.txt -->
@@ -2458,14 +2468,14 @@ with:
 
 ```text
 # fixture mode heap-side-peak-bytes (see heap_peak_check.py; regenerate with UPDATE_HEAP_BASELINE=1)
-epubs/test_cjk_ja_soseki.epub arena 24786
-epubs/test_cjk_ja_soseki.epub heap 56099
-epubs/test_cjk_ko_hyeon.epub arena 24775
-epubs/test_cjk_ko_hyeon.epub heap 45896
-epubs/test_cjk_line_breaking.epub arena 47046
-epubs/test_cjk_line_breaking.epub heap 70327
-epubs/test_cjk_zh_honglou.epub arena 24753
-epubs/test_cjk_zh_honglou.epub heap 54393
+epubs/test_cjk_ja_soseki.epub arena 25114
+epubs/test_cjk_ja_soseki.epub heap 57203
+epubs/test_cjk_ko_hyeon.epub arena 24887
+epubs/test_cjk_ko_hyeon.epub heap 47120
+epubs/test_cjk_line_breaking.epub arena 48270
+epubs/test_cjk_line_breaking.epub heap 71551
+epubs/test_cjk_zh_honglou.epub arena 24885
+epubs/test_cjk_zh_honglou.epub heap 55581
 epubs/test_inline_footnotes.epub arena 26465
 epubs/test_inline_footnotes.epub heap 42763
 epubs/test_jpeg_images.epub arena 28136
@@ -2477,7 +2487,8 @@ Expected: every line `ok` (within 8 KB of its baseline).
 - [ ] **Step 9: The whole suite and the firmware**
 
 Run: `cmake --build build/test -j 8 -- -k; (cd build/test && ctest -j 8 2>&1 | tail -3)`
-Expected: `100% tests passed out of 2415` (2312 on master).
+Expected: `99% tests passed, 2 tests failed out of 2591` (2,488 on master). The two are the LongChapterPageTables
+tests that fail on Windows on master too (see Global Constraints); nothing else fails.
 
 Run: `"$HOME/.platformio/penv/Scripts/pio.exe" run -e default`, then the same with `-e x4pro`.
 Expected: `[SUCCESS]` for each, with no new warning from the files this plan touches.
@@ -2492,7 +2503,7 @@ git add lib/Epub/Epub/parsers/ChapterHtmlSlimParser.h lib/Epub/Epub/parsers/Chap
   test/epubs/test_cjk_*.epub test/epub_pipeline/CjkRulesTest.cpp test/epub_pipeline/CMakeLists.txt \
   test/epub_pipeline/goldens/test_cjk_*.golden.txt test/epub_pipeline/heap_peak_baseline.txt
 git commit -m "feat(epub): the parser keeps CJK runs whole; CJK books and a rule checker" \
-  -m "After a forced 200-byte flush the next chunk continues the word, glued (crosspoint-reader PR #2652, Phạm Bình An, 3319aa17). A CJK run is flushed every 32 codepoints, glued, so the word lists keep their 128-entry steady state. A table row is charged for every token. A source line break between two characters of unspaced CJK text vanishes (CSS Text 3 segment-break rule). Four CJK books join the corpus: a fixture with one case per rule and public-domain excerpts in Japanese (Natsume Soseki), Chinese (Cao Xueqin) and Korean (Hyeon Jin-geon); a rule checker asserts kinsoku, no hyphen and no stray space on every line. SECTION_FILE_VERSION 84."
+  -m "After a forced 200-byte flush the next chunk continues the word, glued (crosspoint-reader PR #2652, Phạm Bình An, 3319aa17). A CJK run is flushed every 32 codepoints, glued, so the word lists keep their 128-entry steady state. A table row is charged for every token. A source line break between two characters of unspaced CJK text vanishes (CSS Text 3 segment-break rule). Four CJK books join the corpus: a fixture with one case per rule and public-domain excerpts in Japanese (Natsume Soseki), Chinese (Cao Xueqin) and Korean (Hyeon Jin-geon); a rule checker asserts kinsoku, no hyphen and no stray space on every line. SECTION_FILE_VERSION 87."
 ```
 
 ### Task 6: Validate on the X3, and open the PR
@@ -2564,7 +2575,7 @@ The body says:
 - the second of three PRs for CJK line breaking (spec `docs/superpowers/specs/2026-10-16-cjk-layout-design.md`);
 - what changes for a reader of Chinese, Japanese and Korean books;
 - the rule checker and the four books, with the excerpts' sources;
-- the section cache version 84: every book re-lays once;
+- the section cache version 87: every book re-lays once;
 - what is upstream's (PRs #2288, #2652, #2768, #3700, #3883's dashes) and what is ours (the crengine additions,
   the segment-break rule, the run flush, the per-token table charge, the checker);
 - the host heap figures (Task 5 Step 8) and the decisions on the 32-codepoint flush.
