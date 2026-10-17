@@ -99,7 +99,9 @@ class CssParser {
   // v22: `font-family` is parsed and persisted (its first family, hashed; see fontFamilyHash), and
   //      @font-face rules are recorded in a side file (see loadFontFaces). A v21 compile never
   //      looked at either, so a book's embedded fonts would stay unknown.
-  static constexpr uint8_t CSS_CACHE_VERSION = 22;
+  // v23: the @font-face side file holds one record per face to its end, without a count or the
+  //      family hash. Pre-release builds wrote the v22 layout, which v23 would misread.
+  static constexpr uint8_t CSS_CACHE_VERSION = 23;
   // Bytes before the sorted offset index: version(1) + ruleCount(2) + totalSelectorCandidates(4)
   // + unsupportedSelectorSkips(4) + flags(1).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 12;
@@ -283,28 +285,33 @@ class CssParser {
 
   // A book's embedded fonts: one @font-face rule each, in source order, recorded while the sheets
   // are compiled (at most MAX_FONT_FACES) and kept in a side file next to the rule cache, absent
-  // when the book declares none.
+  // when the book declares none. Read back as records (loadFontFaces), one face at a time
+  // (nextFontFace): a face's text points into them.
   struct FontFace {
     uint32_t family = 0;    // fontFamilyHash() of the declared name
     uint16_t weight = 400;  // font-weight: 100-900, normal 400, bold 700
     bool italic = false;    // font-style other than normal
-    std::string name;       // the declared family name as written, unquoted
+    std::string_view name;  // the declared family name as written, unquoted
     // The src url() the reader can best use, joined to its sheet's directory: an EPUB path, not
     // yet normalised or unescaped. TrueType first, then OpenType, then anything else; never
     // WOFF2, SVG, EOT, a data: URI or a remote font.
-    std::string href;
+    std::string_view href;
   };
   static constexpr size_t MAX_FONT_FACES = 32;
   // A family name's identity, as font-family and @font-face compare names: case-insensitive, runs
   // of whitespace as one space, quotes removed. Never 0, which CssStyle::fontFamily keeps for the
   // reader's font.
   [[nodiscard]] static uint32_t fontFamilyHash(std::string_view name);
-  // The faces recorded for the book whose cache is at `cachePath`. False when there are none or
-  // the side file cannot be read.
-  static bool loadFontFaces(const std::string& cachePath, std::vector<FontFace>& out);
+  // The face records of the book whose cache is at `cachePath`, for nextFontFace. False when there
+  // are none or the side file cannot be read.
+  static bool loadFontFaces(const std::string& cachePath, std::string& records);
+  // Takes the first face off `records`. False when none is left (or the rest is damaged).
+  static bool nextFontFace(std::string_view& records, FontFace& face);
 
  private:
-  std::vector<FontFace> fontFaces_;
+  // The faces recorded so far, as the side file stores them (see fontFacesFile), and their count.
+  std::string fontFaces_;
+  uint8_t fontFaceCount_ = 0;
   void parseFontFace(std::string_view declarations);
   void saveFontFaces() const;
 
