@@ -72,7 +72,7 @@ These are candidates for `docs/future_work/` once the work lands.
 | PR | Content | Section version |
 |---|---|---|
 | **A1: Token boundaries** (merged, PR #481) | 5.2, with no behaviour change; golden variants with hyphenation and bionic reading on | none |
-| **A2: CJK line breaking** | 5.1, 5.3-5.6 and the rule checker (9.1) | 87 (master is at 86) |
+| **A2: CJK line breaking** | 5.1, 5.3-5.6 and the rule checker (9.1) | 92 (master is at 91) |
 | **A3: CJK justification** | Section 6 | the next one |
 | **B: Ruby** | Section 7 | the next one (format change) |
 
