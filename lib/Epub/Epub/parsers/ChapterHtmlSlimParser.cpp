@@ -607,6 +607,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
         1, static_cast<int>(fontSizeLadder_.scaleOf(bs.headingFontId) * bs.fontSizeMultiplier * 100.0f + 0.5f));
   }
   const int blockSizeFromDepth = currentBlockSizeFromRoot_ ? currentBlockOwnerDepth_ : -1;
+  bool rootUndone = rootSizeUndoneAtDepth_ != INT_MAX;  // a block in the chain undid the root size
 
   // Apply inline style stack in order
   for (const auto& entry : inlineStyleStack) {
@@ -640,6 +641,16 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
     if (entry.hasFontSize && entry.depth >= blockSizeFromDepth) {
       sizePct = entry.fontSizeFromRoot ? (entry.fontSizePct * 100 + blockPct / 2) / blockPct
                                        : sizePct * entry.fontSizePct / 100;
+      // A span whose size undoes the book's dropped root size is body text, as a block's is
+      // (normalizeFontSizeForElement): Calibre sizes text by a class on a <span> too. Once per chain, so a span
+      // inside it at the same size again is smaller text.
+      if (!entry.fontSizeFromRoot && hasRootFontSizeBaseline_ && !rootUndone) {
+        const float fromRoot = rootFontSizeBaseline_ * static_cast<float>(blockPct * sizePct) / 10000.0f;
+        if (fromRoot > 0.99f && fromRoot < 1.01f) {
+          sizePct = (10000 + blockPct / 2) / blockPct;
+          rootUndone = true;
+        }
+      }
     }
   }
   // Snap composed word sizes near body to plain body text. When font-size normalization is
@@ -825,7 +836,7 @@ void ChapterHtmlSlimParser::observeFontSizeBaseline(const char* tagName, const C
   }
 }
 
-CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName, const CssStyle& cssStyle) const {
+CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName, const CssStyle& cssStyle) {
   if (!cssStyle.hasFontSizeMultiplier()) return cssStyle;
 
   CssStyle normalized = cssStyle;
@@ -861,10 +872,12 @@ CssStyle ChapterHtmlSlimParser::normalizeFontSizeForElement(const char* tagName,
     // A size that undoes the dropped root size is the book's body text: Calibre sets <body> to its base size and
     // sizes every paragraph back down by a class (1.125em x 0.88889em = 1). Dropping only the root's factor left
     // such paragraphs at 0.889 of the reader's size, drawn as the body face shrunk. Only an exact undo, within 1%:
-    // a size its designer chose below the body text's (0.85em under a 1.2em body, 1.02) is kept.
+    // a size its designer chose below the body text's (0.85em under a 1.2em body, 1.02) is kept. Once per chain:
+    // inside a block that undid it, a block at the same size again is smaller text (1.125 x 0.889 x 0.889).
     const float fromRoot = normalized.fontSizeMultiplier * rootFontSizeBaseline_;
-    if (hasRootFontSizeBaseline_ && fromRoot > 0.99f && fromRoot < 1.01f) {
+    if (hasRootFontSizeBaseline_ && rootSizeUndoneAtDepth_ == INT_MAX && fromRoot > 0.99f && fromRoot < 1.01f) {
       normalized.fontSizeMultiplier = 1.0f;
+      rootSizeUndoneAtDepth_ = depth;
     }
   }
   return normalized;
@@ -3849,6 +3862,10 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
   // Leaving a text-skip scope (zero-height spacer paragraph, or a transparent-text element)
   if (self->skipTextUntilDepth == self->depth) {
     self->skipTextUntilDepth = INT_MAX;
+  }
+  // Leaving the block that undid the book's root size (normalizeFontSizeForElement)
+  if (self->rootSizeUndoneAtDepth_ == self->depth) {
+    self->rootSizeUndoneAtDepth_ = INT_MAX;
   }
 
   if (self->currentTable && self->currentTable->depth == 1 && (strcmp(name, "td") == 0 || strcmp(name, "th") == 0)) {

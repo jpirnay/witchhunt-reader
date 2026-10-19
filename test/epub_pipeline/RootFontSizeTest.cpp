@@ -28,6 +28,7 @@ namespace {
 struct Line {
   std::string text;
   float mult;
+  std::vector<uint8_t> sizePct;  // each word's own size, percent of the block's
 };
 
 struct RootFontSizeFixture : testing::Test {
@@ -66,10 +67,11 @@ struct RootFontSizeFixture : testing::Test {
       if (el->getTag() != TAG_PageLine) continue;
       const TextBlock& block = *static_cast<const PageLine&>(*el).getBlock();
       if (block.wordCount() == 0) continue;
-      Line line{{}, block.getRenderStyle().fontSizeMultiplier};
+      Line line{{}, block.getRenderStyle().fontSizeMultiplier, {}};
       for (uint16_t w = 0; w < block.wordCount(); ++w) {
         if (w > 0) line.text += ' ';
         line.text += block.wordText(w);
+        line.sizePct.push_back(block.wordSizePct(w));
       }
       lines.push_back(line);
     }
@@ -106,4 +108,45 @@ TEST_F(RootFontSizeFixture, WithoutABodySizeAParagraphKeepsItsOwn) {
   const auto lines = layout(".gt { font-size: 0.88889em; }\n", "<p class=\"gt\">Body text</p>");
   ASSERT_EQ(lines.size(), 1u);
   EXPECT_NEAR(lines[0].mult, 0.889f, 0.01f);
+}
+
+// The same undo on a span instead of the paragraph: Calibre also sizes text by a class on a <span>.
+TEST_F(RootFontSizeFixture, ASpanAroundTheParagraphThatUndoesTheBodySizeIsBodyText) {
+  const auto lines = layout(".calibre { font-size: 1.125em; }\n.c2 { font-size: 0.88889em; }\n",
+                            "<p><span class=\"c2\">Body text</span></p>");
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_FLOAT_EQ(lines[0].mult, 1.0f);
+  EXPECT_EQ(lines[0].sizePct, (std::vector<uint8_t>{100, 100}));
+}
+
+TEST_F(RootFontSizeFixture, ASpanInsideALineThatUndoesTheBodySizeIsBodyText) {
+  const auto lines = layout(".calibre { font-size: 1.125em; }\n.c2 { font-size: 0.88889em; }\n",
+                            "<p>Plain <span class=\"c2\">spanned</span> text</p>");
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_FLOAT_EQ(lines[0].mult, 1.0f);
+  EXPECT_EQ(lines[0].sizePct, (std::vector<uint8_t>{100, 100, 100}));
+}
+
+// The root size is undone once: inside a paragraph that undid it, the same size again is smaller text
+// (1.125 x 0.889 x 0.889 = 0.889 of the book's default).
+TEST_F(RootFontSizeFixture, ASpanAtTheSameSizeInsideAnUndoingParagraphIsSmaller) {
+  const auto lines = layout(".calibre { font-size: 1.125em; }\n.gt { font-size: 0.88889em; }\n",
+                            "<p class=\"gt\">Plain <span class=\"gt\">smaller</span></p>");
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_FLOAT_EQ(lines[0].mult, 1.0f);
+  EXPECT_EQ(lines[0].sizePct, (std::vector<uint8_t>{100, 89}));
+}
+
+TEST_F(RootFontSizeFixture, AParagraphAtTheSameSizeInsideAnUndoingBlockIsSmaller) {
+  const auto lines = layout(".calibre { font-size: 1.125em; }\n.gt { font-size: 0.88889em; }\n",
+                            "<div class=\"gt\"><p class=\"gt\">Smaller</p></div>");
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_NEAR(lines[0].mult, 0.889f, 0.01f);
+}
+
+TEST_F(RootFontSizeFixture, ASmallerSpanStaysSmaller) {
+  const auto lines = layout(".calibre { font-size: 1.125em; }\n.small { font-size: 0.7em; }\n",
+                            "<p>Plain <span class=\"small\">small</span> text</p>");
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].sizePct, (std::vector<uint8_t>{100, 70, 100}));
 }

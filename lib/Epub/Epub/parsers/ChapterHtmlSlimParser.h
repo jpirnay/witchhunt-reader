@@ -258,6 +258,9 @@ class ChapterHtmlSlimParser final : public Print {
   // and headings/notes remain proportional to that prose size.
   float rootFontSizeBaseline_ = 1.0f;
   bool hasRootFontSizeBaseline_ = false;
+  // Depth of the open block whose size undid the dropped root size (normalizeFontSizeForElement); INT_MAX when
+  // none. The root size is undone once per chain of elements: inside such a block, sizes are the body text's.
+  int rootSizeUndoneAtDepth_ = INT_MAX;
   float mainTextFontSizeBaseline_ = 1.0f;
   bool hasMainTextFontSizeBaseline_ = false;
   float lineCompression;
@@ -677,7 +680,7 @@ class ChapterHtmlSlimParser final : public Print {
   void noteWordFamily();
   void initializeFontSizeBaseline();
   void observeFontSizeBaseline(const char* tagName, const CssStyle& cssStyle);
-  CssStyle normalizeFontSizeForElement(const char* tagName, const CssStyle& cssStyle) const;
+  CssStyle normalizeFontSizeForElement(const char* tagName, const CssStyle& cssStyle);
   // `block` is the ParsedText about to be laid out (null when there is none): a block whose word
   // vectors could not grow (ParsedText::wordGrowthRefused) aborts the parse here, on the same
   // partial-cache path as the heap floors, instead of laying out a truncated paragraph.
