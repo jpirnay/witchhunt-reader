@@ -68,32 +68,19 @@ bool logPreCallContext(const std::string& url) {
 }
 
 // The servers whose certificate could not be verified this session (VerifiedThenUnverified): a later
-// request to one goes straight to the unverified connection instead of a verify that would fail.
-// Keyed by SecureHttpClient::peerOf(), host:port, the name SecureClient's fallback line logs.
+// connect to one goes straight to the unverified connection instead of a verify that would fail.
+// Handed to every client; SecureHttpClient checks and fills it at each https connect, for the
+// server that connect reaches (crosspoint::planHop()).
 crosspoint::UnverifiableHosts g_unverifiableHosts;
 
-// What a transfer of url does about verification (crosspoint::planTls()): the caller's policy
-// against the user's "skip HTTPS validation" setting -- the escape hatch for self-hosted servers
-// with a private CA or a self-signed certificate, which Strict ignores by design -- and, for
+// What a transfer does about verification (crosspoint::planTls()): the caller's policy against the
+// user's "skip HTTPS validation" setting -- the escape hatch for self-hosted servers with a private
+// CA or a self-signed certificate, which Strict ignores by design -- and, for
 // VerifiedThenUnverified, whether the request carries credentials (a username or a password,
-// whether or not Basic auth would send them) and whether its server failed to verify before.
-crosspoint::TlsPlan tlsPlanFor(const HttpDownloader::TlsPolicy tls, const std::string& url, const std::string& username,
+// whether or not Basic auth would send them).
+crosspoint::TlsPlan tlsPlanFor(const HttpDownloader::TlsPolicy tls, const std::string& username,
                                const std::string& password) {
-  const std::string peer = crosspoint::SecureHttpClient::peerOf(url);
-  const crosspoint::TlsPlan plan = crosspoint::planTls(
-      tls, SETTINGS.skipHttpsValidation, !username.empty() || !password.empty(), g_unverifiableHosts.contains(peer));
-  if (tls == HttpDownloader::TlsPolicy::VerifiedThenUnverified && !plan.verify && !SETTINGS.skipHttpsValidation) {
-    LOG_INF("TLS", "%s: certificate not verifiable earlier this session, continuing unverified (no credentials)",
-            peer.c_str());
-  }
-  return plan;
-}
-
-// After a transfer under a plan that allowed the fallback: remember a server that took it.
-void noteFallback(const crosspoint::TlsPlan& plan, const crosspoint::SecureHttpClient& http) {
-  if (plan.fallbackOnVerifyError && http.lastConnectionWasInsecure()) {
-    g_unverifiableHosts.add(crosspoint::SecureHttpClient::peerOf(http.lastUrl()));
-  }
+  return crosspoint::planTls(tls, SETTINGS.skipHttpsValidation, !username.empty() || !password.empty());
 }
 
 // Modem sleep parks the radio between DTIM beacons, which costs packets on a transfer long
@@ -134,12 +121,13 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
           heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
 
   crosspoint::SecureHttpClient http;
-  const crosspoint::TlsPlan plan = tlsPlanFor(tls, url, username, password);
+  const crosspoint::TlsPlan plan = tlsPlanFor(tls, username, password);
   // No roots => SecureClient sets WOLFSSL_VERIFY_NONE and skips the hostname
   // check: one handshake, no chain work.
   http.setCACert(plan.verify ? CROSSPOINT_ROOTS_PEM : nullptr);
   // Never retry unverified behind the caller's back: only the policy that says so does.
   http.setAllowInsecureFallback(plan.fallbackOnVerifyError);
+  http.setUnverifiableHosts(&g_unverifiableHosts);
   http.setAllowCertificateDateErrors(!clockReady);
   http.setTimeout(HTTP_TIMEOUT_MS);
   http.setUserAgent("WitchReader-ESP32-" CROSSPOINT_VERSION);
@@ -162,7 +150,6 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
   // A one-shot download is its own session: whatever it learns ends with it.
   crosspoint::ChunkSession chunking;
   const int rc = crosspoint::downloadToSink(http, url, sink, chunking, &largestFreeBlock);
-  noteFallback(plan, http);
   // Log the handshake heap trough on EVERY path (incl. early abort via
   // treatAbortAsSuccess) so the TLS-specific low-water is always captured,
   // distinct from the all-time ESP.getMinFreeHeap() figure.
@@ -235,9 +222,10 @@ HttpDownloader::DownloadError runGetSecureOnSession(HttpDownloader::Session& ses
   }
   // Re-applied per call, like the clock verdict below: a session outlives a
   // single request and must not carry a previous caller's policy.
-  const crosspoint::TlsPlan plan = tlsPlanFor(tls, url, username, password);
+  const crosspoint::TlsPlan plan = tlsPlanFor(tls, username, password);
   impl->http->setCACert(plan.verify ? CROSSPOINT_ROOTS_PEM : nullptr);
   impl->http->setAllowInsecureFallback(plan.fallbackOnVerifyError);
+  impl->http->setUnverifiableHosts(&g_unverifiableHosts);
   impl->http->setAllowCertificateDateErrors(!clockReady);
   impl->http->clearHeaders();
   // Unconditionally, so a file without credentials does not inherit the previous one's
@@ -245,7 +233,6 @@ HttpDownloader::DownloadError runGetSecureOnSession(HttpDownloader::Session& ses
   impl->http->setBasicAuth(username, password);
 
   const int rc = crosspoint::downloadToSink(*impl->http, url, sink, impl->chunking, &largestFreeBlock);
-  noteFallback(plan, *impl->http);
   if (rc == crosspoint::SecureHttpClient::ERR_ABORTED) return HttpDownloader::ABORTED;
   if (rc == crosspoint::ERR_REWIND) return HttpDownloader::FILE_ERROR;
   if (isAuthRefusal(rc)) {

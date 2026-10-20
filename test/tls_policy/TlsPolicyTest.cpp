@@ -1,9 +1,11 @@
 // Which https requests verify the server, and which may continue unverified when its certificate
 // cannot be verified (lib/SecureNet/include/TlsPolicy.h). HttpDownloader resolves every request
-// through planTls(); SecureClient::connect() retries through retryUnverified().
+// through planTls(), SecureHttpClient every https hop of it through planHop(), and
+// SecureClient::connect() retries through retryUnverified().
 #include <TlsPolicy.h>
 #include <gtest/gtest.h>
 
+using crosspoint::planHop;
 using crosspoint::planTls;
 using crosspoint::TlsPlan;
 using crosspoint::TlsPolicy;
@@ -22,13 +24,14 @@ constexpr TlsPlan kVerifyThenFallBack{true, true};
 constexpr TlsPlan kUnverifiedOnly{false, false};
 }  // namespace
 
-// Firmware, and the release check that names it: verified whatever else holds.
+// Firmware, and the release check that names it: verified whatever else holds, on every hop.
 TEST(TlsPolicy, StrictIsNeverDowngraded) {
   for (const bool skip : {false, true}) {
     for (const bool credentials : {false, true}) {
+      const TlsPlan plan = planTls(TlsPolicy::Strict, skip, credentials);
+      EXPECT_TRUE(same(plan, kVerifyOnly)) << skip << credentials;
       for (const bool unverifiable : {false, true}) {
-        EXPECT_TRUE(same(planTls(TlsPolicy::Strict, skip, credentials, unverifiable), kVerifyOnly))
-            << skip << credentials << unverifiable;
+        EXPECT_TRUE(same(planHop(plan, credentials, unverifiable), kVerifyOnly)) << skip << credentials << unverifiable;
       }
     }
   }
@@ -36,39 +39,52 @@ TEST(TlsPolicy, StrictIsNeverDowngraded) {
 
 TEST(TlsPolicy, VerifiedHasNoFallbackAndHonoursTheSkipSetting) {
   for (const bool credentials : {false, true}) {
-    for (const bool unverifiable : {false, true}) {
-      EXPECT_TRUE(same(planTls(TlsPolicy::Verified, false, credentials, unverifiable), kVerifyOnly));
-      EXPECT_TRUE(same(planTls(TlsPolicy::Verified, kSkip, credentials, unverifiable), kUnverifiedOnly));
-    }
+    EXPECT_TRUE(same(planTls(TlsPolicy::Verified, false, credentials), kVerifyOnly));
+    EXPECT_TRUE(same(planTls(TlsPolicy::Verified, kSkip, credentials), kUnverifiedOnly));
+    EXPECT_TRUE(same(planHop(planTls(TlsPolicy::Verified, false, credentials), false, kUnverifiable), kVerifyOnly))
+        << "the memo serves only a request that may fall back";
   }
 }
 
 TEST(TlsPolicy, UnverifiedNeverVerifies) {
-  EXPECT_TRUE(same(planTls(TlsPolicy::Unverified, false, false, false), kUnverifiedOnly));
-  EXPECT_TRUE(same(planTls(TlsPolicy::Unverified, kSkip, kCredentials, kUnverifiable), kUnverifiedOnly));
+  EXPECT_TRUE(same(planTls(TlsPolicy::Unverified, false, false), kUnverifiedOnly));
+  EXPECT_TRUE(same(planTls(TlsPolicy::Unverified, kSkip, kCredentials), kUnverifiedOnly));
 }
 
 // An OPDS catalog without a login: verified first, unverified only if the certificate fails.
 TEST(TlsPolicy, AnAnonymousRequestMayFallBack) {
-  EXPECT_TRUE(same(planTls(TlsPolicy::VerifiedThenUnverified, false, false, false), kVerifyThenFallBack));
+  EXPECT_TRUE(same(planTls(TlsPolicy::VerifiedThenUnverified, false, false), kVerifyThenFallBack));
 }
 
 // The point of the policy's name: a password never goes over an unverified connection on its say-so.
 TEST(TlsPolicy, ARequestWithCredentialsStaysVerified) {
-  EXPECT_TRUE(same(planTls(TlsPolicy::VerifiedThenUnverified, false, kCredentials, false), kVerifyOnly));
-  EXPECT_TRUE(same(planTls(TlsPolicy::VerifiedThenUnverified, false, kCredentials, kUnverifiable), kVerifyOnly))
-      << "a host remembered as unverifiable is no reason to send a password unverified";
+  const TlsPlan plan = planTls(TlsPolicy::VerifiedThenUnverified, false, kCredentials);
+  EXPECT_TRUE(same(plan, kVerifyOnly));
+  for (const bool credentials : {false, true}) {
+    EXPECT_TRUE(same(planHop(plan, credentials, kUnverifiable), kVerifyOnly))
+        << "a server remembered as unverifiable is no reason to send a password unverified, and a hop of "
+           "this request to another server, which the credentials do not follow, does not fall back either";
+  }
 }
 
 // The user's own choice still reaches the policy, for a request with credentials too.
 TEST(TlsPolicy, TheSkipSettingStillWorks) {
-  EXPECT_TRUE(same(planTls(TlsPolicy::VerifiedThenUnverified, kSkip, false, false), kUnverifiedOnly));
-  EXPECT_TRUE(same(planTls(TlsPolicy::VerifiedThenUnverified, kSkip, kCredentials, false), kUnverifiedOnly));
+  EXPECT_TRUE(same(planTls(TlsPolicy::VerifiedThenUnverified, kSkip, false), kUnverifiedOnly));
+  EXPECT_TRUE(same(planTls(TlsPolicy::VerifiedThenUnverified, kSkip, kCredentials), kUnverifiedOnly));
 }
 
-// A host that already took the fallback this session skips the ~3 s verify it would fail again.
-TEST(TlsPolicy, AHostThatFailedBeforeGoesStraightToTheFallback) {
-  EXPECT_TRUE(same(planTls(TlsPolicy::VerifiedThenUnverified, false, false, kUnverifiable), kUnverifiedOnly));
+// A server that already took the fallback this session skips the ~3 s verify it would fail again;
+// any other server of the request still verifies first.
+TEST(TlsPolicy, AServerThatFailedBeforeGoesStraightToTheFallback) {
+  EXPECT_TRUE(same(planHop(kVerifyThenFallBack, false, kUnverifiable), kUnverifiedOnly));
+  EXPECT_TRUE(same(planHop(kVerifyThenFallBack, false, false), kVerifyThenFallBack));
+}
+
+// Whatever a caller asks for, a hop that sends credentials neither falls back nor takes the memo's
+// shortcut: planTls() never gives such a request the fallback, and planHop() holds it per hop.
+TEST(TlsPolicy, AHopWithCredentialsNeverFallsBack) {
+  EXPECT_TRUE(same(planHop(kVerifyThenFallBack, kCredentials, false), kVerifyOnly));
+  EXPECT_TRUE(same(planHop(kVerifyThenFallBack, kCredentials, kUnverifiable), kVerifyOnly));
 }
 
 // The fallback answers a certificate that cannot be verified, never a timeout, DNS or other error.
@@ -76,12 +92,12 @@ TEST(TlsPolicy, OnlyACertificateFailureIsRetriedUnverified) {
   EXPECT_TRUE(crosspoint::retryUnverified(kVerifyThenFallBack, VerifiedConnectFailure::Certificate));
   EXPECT_FALSE(crosspoint::retryUnverified(kVerifyThenFallBack, VerifiedConnectFailure::Other));
   EXPECT_FALSE(crosspoint::retryUnverified(kVerifyOnly, VerifiedConnectFailure::Certificate));
-  const TlsPlan anonymous = planTls(TlsPolicy::VerifiedThenUnverified, false, false, false);
-  const TlsPlan withLogin = planTls(TlsPolicy::VerifiedThenUnverified, false, kCredentials, false);
+  const TlsPlan anonymous = planTls(TlsPolicy::VerifiedThenUnverified, false, false);
+  const TlsPlan withLogin = planTls(TlsPolicy::VerifiedThenUnverified, false, kCredentials);
   EXPECT_TRUE(crosspoint::retryUnverified(anonymous, VerifiedConnectFailure::Certificate));
   EXPECT_FALSE(crosspoint::retryUnverified(withLogin, VerifiedConnectFailure::Certificate));
-  EXPECT_FALSE(crosspoint::retryUnverified(planTls(TlsPolicy::Strict, false, false, false),
-                                           VerifiedConnectFailure::Certificate));
+  EXPECT_FALSE(
+      crosspoint::retryUnverified(planTls(TlsPolicy::Strict, false, false), VerifiedConnectFailure::Certificate));
 }
 
 // --- UnverifiableHosts ---------------------------------------------------------------------------

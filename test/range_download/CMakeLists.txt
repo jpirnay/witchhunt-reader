@@ -4,7 +4,7 @@
 add_executable(RangeDownloadTest
   RangeDownloadTest.cpp
   CredentialRedirectTest.cpp
-  TlsPeerTest.cpp
+  TlsHopTest.cpp
   ${REPO_ROOT}/lib/SecureNet/src/RangeDownload.cpp
   ${REPO_ROOT}/lib/SecureNet/src/SecureHttpClient.cpp
   ${REPO_ROOT}/lib/SecureNet/src/HttpRange.cpp

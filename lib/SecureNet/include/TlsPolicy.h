@@ -37,10 +37,17 @@ struct TlsPlan {
 };
 
 // skipValidation: the user's "Skip HTTPS validation (risky)" setting. sendsCredentials: the request
-// carries a username or a password, or comes from a server entry that has either. hostUnverifiable:
-// this host's certificate already failed to verify this session (UnverifiableHosts), so its verify
-// would fail again and only cost time.
-TlsPlan planTls(TlsPolicy policy, bool skipValidation, bool sendsCredentials, bool hostUnverifiable);
+// carries a username or a password, or comes from a server entry that has either.
+TlsPlan planTls(TlsPolicy policy, bool skipValidation, bool sendsCredentials);
+
+// What one https hop of a request does: a redirect can lead to another server, so SecureHttpClient
+// decides this at each connect, for the server that connect reaches. The request's plan, except:
+// - a hop that sends credentials never falls back, whatever the plan (planTls() gives such a request
+//   no fallback anyway);
+// - where the plan allows the fallback, a server whose certificate already failed to verify this
+//   session (peerUnverifiable, UnverifiableHosts) goes straight to the unverified connection the
+//   fallback would make: its verify would fail again and only cost time.
+TlsPlan planHop(const TlsPlan& request, bool hopSendsCredentials, bool peerUnverifiable);
 
 // Why a verified connect failed: in certificate verification, or anywhere else (DNS, TCP, a
 // timeout, the handshake itself). Only the first is worth an unverified retry.
@@ -55,10 +62,11 @@ inline bool retryUnverified(const TlsPlan& plan, const VerifiedConnectFailure fa
 // a request to https://example.org/ and a redirect to https://example.org:443/ name one server.
 std::string tlsPeer(std::string_view host, uint16_t port);
 
-// The hosts whose certificate could not be verified this session, for VerifiedThenUnverified: a
-// later request to one skips the verify it would fail, about 3 s of a handshake on this chip. In RAM
-// only, a few bytes: the FNV-1a hashes of up to kCapacity server names (tlsPeer()), compared without
-// case, the oldest replaced first. Never persisted, so a reboot verifies again.
+// The servers whose certificate could not be verified this session, for VerifiedThenUnverified: a
+// later hop to one skips the verify it would fail, about 3 s of a handshake on this chip (planHop()).
+// Checked and filled by SecureHttpClient at each https connect, under the server's tlsPeer() name.
+// In RAM only, a few bytes: the FNV-1a hashes of up to kCapacity names, compared without case, the
+// oldest replaced first. Never persisted, so a reboot verifies again.
 class UnverifiableHosts {
  public:
   static constexpr size_t kCapacity = 4;

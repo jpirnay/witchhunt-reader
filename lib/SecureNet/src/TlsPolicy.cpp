@@ -2,8 +2,7 @@
 
 namespace crosspoint {
 
-TlsPlan planTls(const TlsPolicy policy, const bool skipValidation, const bool sendsCredentials,
-                const bool hostUnverifiable) {
+TlsPlan planTls(const TlsPolicy policy, const bool skipValidation, const bool sendsCredentials) {
   switch (policy) {
     case TlsPolicy::Strict:
       return {true, false};
@@ -16,11 +15,17 @@ TlsPlan planTls(const TlsPolicy policy, const bool skipValidation, const bool se
       if (skipValidation) return {false, false};
       // A password never goes over an unverified connection on the policy's say-so alone.
       if (sendsCredentials) return {true, false};
-      // Known to fail this session: straight to the connection the fallback would make.
-      if (hostUnverifiable) return {false, false};
       return {true, true};
   }
   return {true, false};
+}
+
+TlsPlan planHop(const TlsPlan& request, const bool hopSendsCredentials, const bool peerUnverifiable) {
+  if (!request.fallbackOnVerifyError) return request;
+  if (hopSendsCredentials) return {request.verify, false};
+  // Known to fail this session: straight to the connection the fallback would make.
+  if (peerUnverifiable) return {false, false};
+  return request;
 }
 
 std::string tlsPeer(const std::string_view host, const uint16_t port) {

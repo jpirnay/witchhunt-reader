@@ -25,6 +25,7 @@
 
 #include "HttpRange.h"
 #include "SecureClient.h"
+#include "TlsPolicy.h"
 
 namespace crosspoint {
 
@@ -45,6 +46,11 @@ class SecureHttpClient {
   // --- configuration (before request) ---
   void setCACert(const char* rootCA) { _rootCA = rootCA; }
   void setAllowInsecureFallback(bool allow) { _allowInsecureFallback = allow; }
+  // The session's memo of servers whose certificate could not be verified, for a client that allows
+  // the fallback: each https connect checks the server it reaches against it and adds that server
+  // when it takes the fallback (crosspoint::planHop()), so every hop of a redirect is decided, and
+  // remembered, for its own server. Not owned; nullptr (the default) keeps no memo.
+  void setUnverifiableHosts(UnverifiableHosts* hosts) { _unverifiableHosts = hosts; }
   // See SecureClient::setAllowCertificateDateErrors().
   void setAllowCertificateDateErrors(bool allow) { _allowCertificateDateErrors = allow; }
   void setTimeout(uint32_t ms) { _timeoutMs = ms; }
@@ -134,11 +140,6 @@ class SecureHttpClient {
   // Close the held-open keep-alive connection (if any).
   void close();
 
-  // The server a request to url connects to first, named as SecureClient's certificate log lines
-  // name it: host:port, the port always given (crosspoint::tlsPeer()). "" for a URL this client
-  // cannot parse.
-  static std::string peerOf(const std::string& url);
-
   // Negative return codes from get()/request() (distinct from HTTP status).
   enum SecureHttpError {
     ERR_BAD_URL = -1,
@@ -214,8 +215,11 @@ class SecureHttpClient {
   // which transact() handles with its one-shot retry.
   bool connectionMatches(const Url& u);
   // Ensure a live connection to (scheme,host,port); reuse the kept-open one when
-  // it matches, else (re)open. Returns false on connect failure.
-  bool ensureConnected(const Url& u);
+  // it matches, else (re)open. Returns false on connect failure. sendsCredentials: the request on
+  // it carries the credentials, so a new https connection to it never falls back (planHop()).
+  bool ensureConnected(const Url& u, bool sendsCredentials);
+  // Basic auth (both halves) or custom headers are set: what sendRequest() sends when told to.
+  bool holdsCredentials() const { return (!_user.empty() && !_pass.empty()) || !_headers.empty(); }
   // Connect (or reuse), send the request, and read the response headers — with
   // one transparent retry when a reused keep-alive socket turns out to be dead.
   // Returns 0, or a negative SecureHttpError.
@@ -243,6 +247,7 @@ class SecureHttpClient {
   // config
   const char* _rootCA = nullptr;
   bool _allowInsecureFallback = false;  // fail closed unless the caller asks (SecureClient)
+  UnverifiableHosts* _unverifiableHosts = nullptr;
   bool _allowCertificateDateErrors = false;
   uint32_t _timeoutMs = 15000;
   std::string _userAgent = "CrossPoint-ESP32";
