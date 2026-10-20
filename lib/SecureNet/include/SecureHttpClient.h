@@ -134,6 +134,10 @@ class SecureHttpClient {
   // Close the held-open keep-alive connection (if any).
   void close();
 
+  // Whether a request to url runs over TLS: the test every hop of request() and get() makes, for a
+  // caller that has to know beforehand. False for a URL the client cannot parse.
+  static bool isHttps(const std::string& url);
+
   // Negative return codes from get()/request() (distinct from HTTP status).
   enum SecureHttpError {
     ERR_BAD_URL = -1,
