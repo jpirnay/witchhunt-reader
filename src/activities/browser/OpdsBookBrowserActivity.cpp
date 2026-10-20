@@ -621,6 +621,10 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
       }
       auto fmtsStr = renderer.truncatedText(UI_10_FONT_ID, fmts.c_str(), contentRect.width - 20);
       renderer.drawCenteredText(UI_10_FONT_ID, fmtY, fmtsStr.c_str());
+    } else {
+      // Offered only in formats the reader cannot open (see OpdsEntry::acquisitionLinks).
+      auto note = renderer.truncatedText(UI_10_FONT_ID, tr(STR_FORMAT_NOT_SUPPORTED), contentRect.width - 20);
+      renderer.drawCenteredText(UI_10_FONT_ID, fmtY, note.c_str());
     }
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_DOWNLOAD), "", "");
@@ -661,9 +665,13 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     if (entry.type == OpdsEntryType::NAVIGATION) {
       displayText = "> " + entry.title;  // Folder/navigation indicator
     } else {
-      // Book: "Title - Author" or just "Title"
+      // Book: "Title - Author" or just "Title"; a book in formats the reader cannot open says so in
+      // place of the author (the detail screen still shows both). From witchling-reader 111f6ecc.
       displayText = entry.title;
-      if (!entry.author.empty()) {
+      if (entry.acquisitionLinks.empty()) {
+        displayText += " - ";
+        displayText += tr(STR_FORMAT_NOT_SUPPORTED);
+      } else if (!entry.author.empty()) {
         displayText += " - " + entry.author;
       }
     }
@@ -827,8 +835,9 @@ void OpdsBookBrowserActivity::leave() {
 // download is started immediately.
 void OpdsBookBrowserActivity::chooseBookFormat(const OpdsEntry& book) {
   if (book.acquisitionLinks.empty()) {
+    // The catalog offers this book only in formats the reader cannot open (PDF, MOBI, ...).
     state = BrowserState::ERROR;
-    errorMessage = tr(STR_DOWNLOAD_FAILED);
+    errorMessage = tr(STR_FORMAT_NOT_SUPPORTED);
     requestUpdate();
     return;
   }

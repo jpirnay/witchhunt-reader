@@ -165,6 +165,7 @@ void OpdsParser::clear() {
   currentEntry = OpdsEntry{};
   currentText.clear();
   inEntry = inTitle = inAuthor = inAuthorName = inId = inSummary = inContent = false;
+  hrefIsUnsupportedDownload = false;
 }
 
 const char* OpdsParser::findAttribute(const char** atts, const char* name) {
@@ -200,16 +201,23 @@ void OpdsParser::startElement(void* userData, const char* name, const char** att
 
       if (self->inEntry) {
         if (rel && strstr(rel, "opds-spec.org/acquisition") != nullptr) {
-          const auto acquisition = supportedAcquisitionLink(type, href, isDirectAcquisitionRel(rel));
+          const bool directDownload = isDirectAcquisitionRel(rel);
+          const auto acquisition = supportedAcquisitionLink(type, href, directDownload);
           if (!acquisition.formatKey.empty() && !hasEquivalentAcquisitionLink(self->currentEntry, acquisition)) {
             self->currentEntry.type = OpdsEntryType::BOOK;
             if (self->currentEntry.acquisitionLinks.empty()) {
               self->currentEntry.href = href;
+              self->hrefIsUnsupportedDownload = false;
             } else if (self->currentEntry.acquisitionLinks.size() == 1 &&
                        self->currentEntry.acquisitionLinks.capacity() < 3) {
               self->currentEntry.acquisitionLinks.reserve(3);
             }
             self->currentEntry.acquisitionLinks.push_back(acquisition);
+          } else if (acquisition.formatKey.empty() && directDownload && self->currentEntry.href.empty()) {
+            // A download in a format the reader cannot open (PDF, MOBI, ...). Its href holds the
+            // entry's place until a link the reader can follow turns up; endElement() decides.
+            self->currentEntry.href = href;
+            self->hrefIsUnsupportedDownload = true;
           }
         } else if (rel && strstr(rel, "opds-spec.org/image") != nullptr && strstr(rel, "thumbnail") == nullptr &&
                    (!type || type[0] == '\0' || strncmp(type, "image/", 6) == 0) &&
@@ -221,6 +229,7 @@ void OpdsParser::startElement(void* userData, const char* name, const char** att
           if (self->currentEntry.type != OpdsEntryType::BOOK) {
             self->currentEntry.type = OpdsEntryType::NAVIGATION;
             self->currentEntry.href = href;
+            self->hrefIsUnsupportedDownload = false;
           }
         }
       }
@@ -230,6 +239,7 @@ void OpdsParser::startElement(void* userData, const char* name, const char** att
   if (strcmp(name, "entry") == 0 || strstr(name, ":entry") != nullptr) {
     self->inEntry = true;
     self->currentEntry = OpdsEntry{};
+    self->hrefIsUnsupportedDownload = false;
     return;
   }
 
@@ -259,6 +269,15 @@ void OpdsParser::endElement(void* userData, const char* name) {
   auto* self = static_cast<OpdsParser*>(userData);
 
   if (strcmp(name, "entry") == 0 || strstr(name, ":entry") != nullptr) {
+    if (self->hrefIsUnsupportedDownload) {
+      // Its only downloads are in formats the reader cannot open, and it links nowhere else. It
+      // stays in the list as a book without acquisition links, which the browser shows as "Format
+      // not supported", instead of vanishing from the catalog. A navigation link always wins: a
+      // series entry with a shop link must stay a series. After witchling-reader commit 111f6ecc
+      // (syfq91), whose version also turned such navigation entries into books.
+      self->currentEntry.type = OpdsEntryType::BOOK;
+      self->hrefIsUnsupportedDownload = false;
+    }
     if (!self->currentEntry.title.empty() && !self->currentEntry.href.empty()) {
       if (self->onEntryParsed) {
         self->onEntryParsed(std::move(self->currentEntry));

@@ -145,7 +145,12 @@ TEST(OpdsParser, UnsupportedMimeType) {
   parser.flush();
 
   ASSERT_TRUE(!parser.error());
-  ASSERT_EQ(entries.size(), static_cast<size_t>(0));
+  // Kept, as a book without acquisition links: the browser's sign for "Format not supported". It
+  // used to vanish from the list.
+  ASSERT_EQ(entries.size(), static_cast<size_t>(1));
+  EXPECT_EQ(entries[0].type, OpdsEntryType::BOOK);
+  EXPECT_EQ(entries[0].href, "/books/example.mobi");
+  EXPECT_TRUE(entries[0].acquisitionLinks.empty());
 }
 
 TEST(OpdsParser, EmptyHrefOrType) {
@@ -435,14 +440,123 @@ TEST(OpdsParser, UntypedBuyLinkIsNotADownload) {
   EXPECT_TRUE(entries.empty());
 }
 
-// A file name that is not a format the reader opens still says nothing without a type.
-TEST(OpdsParser, UntypedLinkWithAnUnknownNameIsNotADownload) {
+// A file name that is not a format the reader opens says nothing without a type: the reader cannot
+// tell what it would download, so the book is one it cannot open.
+TEST(OpdsParser, UntypedLinkWithAnUnknownNameIsNotSupported) {
   const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
     <title>Unknown</title>
     <id>b8</id>
     <link rel="http://opds-spec.org/acquisition" href="/get/12345"/>
+  </entry>
+</feed>)";
+  OpdsParser parser;
+  const auto entries = parseFeed(xml, parser);
+  ASSERT_EQ(entries.size(), 1u);
+  EXPECT_EQ(entries[0].type, OpdsEntryType::BOOK);
+  EXPECT_TRUE(entries[0].acquisitionLinks.empty());
+}
+
+// From witchling-reader commit 111f6ecc (syfq91): a book offered only as PDF vanished from the list.
+TEST(OpdsParser, UnsupportedOnlyEntryIsListed) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>PDF Only</title>
+    <id>b9</id>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/pdf" href="/books/x.pdf"/>
+  </entry>
+</feed>)";
+  OpdsParser parser;
+  const auto entries = parseFeed(xml, parser);
+  ASSERT_EQ(entries.size(), 1u);
+  EXPECT_EQ(entries[0].type, OpdsEntryType::BOOK);
+  EXPECT_EQ(entries[0].href, "/books/x.pdf");
+  EXPECT_TRUE(entries[0].acquisitionLinks.empty());
+}
+
+TEST(OpdsParser, MixedSupportedAndUnsupportedFormatsKeepSupported) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Unsupported First</title>
+    <id>m1</id>
+    <link rel="http://opds-spec.org/acquisition" type="application/pdf" href="/books/mixed-1.pdf"/>
+    <link rel="http://opds-spec.org/acquisition" type="application/epub+zip" href="/books/mixed-1.epub"/>
+  </entry>
+  <entry>
+    <title>Supported First</title>
+    <id>m2</id>
+    <link rel="http://opds-spec.org/acquisition" type="application/epub+zip" href="/books/mixed-2.epub"/>
+    <link rel="http://opds-spec.org/acquisition" type="application/pdf" href="/books/mixed-2.pdf"/>
+  </entry>
+</feed>)";
+  OpdsParser parser;
+  const auto entries = parseFeed(xml, parser);
+  ASSERT_EQ(entries.size(), 2u);
+  for (const auto& entry : entries) {
+    EXPECT_EQ(entry.type, OpdsEntryType::BOOK);
+    ASSERT_EQ(entry.acquisitionLinks.size(), 1u);
+    EXPECT_EQ(entry.acquisitionLinks[0].formatKey, "epub");
+  }
+  EXPECT_EQ(entries[0].href, "/books/mixed-1.epub");
+  EXPECT_EQ(entries[1].href, "/books/mixed-2.epub");
+}
+
+// The regression in the fork's version of the rule above: a series entry that also carries a shop
+// link became a book with nothing to download, and the series could no longer be opened.
+TEST(OpdsParser, NavigationEntryWithBuyLinkStaysNavigation) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Series X</title>
+    <id>n1</id>
+    <link rel="subsection" type="application/atom+xml;profile=opds-catalog;kind=acquisition" href="/opds/series/x"/>
+    <link rel="http://opds-spec.org/acquisition/buy" type="text/html" href="https://shop.example/x"/>
+  </entry>
+</feed>)";
+  OpdsParser parser;
+  const auto entries = parseFeed(xml, parser);
+  ASSERT_EQ(entries.size(), 1u);
+  EXPECT_EQ(entries[0].type, OpdsEntryType::NAVIGATION);
+  EXPECT_EQ(entries[0].href, "/opds/series/x");
+}
+
+// A navigation link wins over a download the reader cannot open, in either order.
+TEST(OpdsParser, NavigationLinkBeatsAnUnsupportedDownload) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Download First</title>
+    <id>n2</id>
+    <link rel="http://opds-spec.org/acquisition" type="application/pdf" href="/books/n2.pdf"/>
+    <link rel="subsection" type="application/atom+xml;profile=opds-catalog;kind=acquisition" href="/opds/n2"/>
+  </entry>
+  <entry>
+    <title>Navigation First</title>
+    <id>n3</id>
+    <link rel="subsection" type="application/atom+xml;profile=opds-catalog;kind=acquisition" href="/opds/n3"/>
+    <link rel="http://opds-spec.org/acquisition" type="application/pdf" href="/books/n3.pdf"/>
+  </entry>
+</feed>)";
+  OpdsParser parser;
+  const auto entries = parseFeed(xml, parser);
+  ASSERT_EQ(entries.size(), 2u);
+  EXPECT_EQ(entries[0].type, OpdsEntryType::NAVIGATION);
+  EXPECT_EQ(entries[0].href, "/opds/n2");
+  EXPECT_EQ(entries[1].type, OpdsEntryType::NAVIGATION);
+  EXPECT_EQ(entries[1].href, "/opds/n3");
+}
+
+// A shop page alone is not a book the reader cannot open, it is no book at all for the reader.
+TEST(OpdsParser, BuyLinkAloneIsNotListed) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Shop Only</title>
+    <id>s1</id>
+    <link rel="http://opds-spec.org/acquisition/buy" type="text/html" href="https://shop.example/s1"/>
   </entry>
 </feed>)";
   OpdsParser parser;
