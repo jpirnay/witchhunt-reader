@@ -268,6 +268,36 @@ TEST(FirstOpenIndexing, MoreStylesheetsThanTheWalkNotesAreStillAllFound) {
   fs::remove_all(work);
 }
 
+// ReaderActivity asks an Epub whether the open needs indexing (the popup) before it loads one, and
+// the question costs the ZIP fingerprint: a walk of the whole central directory. Loading the instance
+// it asked, as ReaderActivity now does, walks for it once; a second instance walked again.
+TEST(FirstOpenIndexing, AProbedEpubLoadsWithoutWalkingForItsFingerprintAgain) {
+  const fs::path work = fs::temp_directory_path() / ("first_open_probe_" + std::to_string(getpid()));
+  fs::remove_all(work);
+  fs::create_directories(work);
+  const big_spine_book::Book book = big_spine_book::write((work / "book.epub").string(), 1732, 1600);
+  auto lent = std::make_unique<uint8_t[]>(kX3LentFramebuffer);
+  BuildArena scratch(lent.get(), kX3LentFramebuffer);
+  const auto openCost = [&](const bool reuseProbe) {
+    fs::remove_all(work / "cache");
+    zipScanStats() = {};
+    auto probe = std::make_unique<Epub>(book.path, (work / "cache").string());
+    probe->clearCacheIfContentChanged();
+    EXPECT_TRUE(probe->needsFirstOpenIndexing());
+    std::unique_ptr<Epub> epub =
+        reuseProbe ? std::move(probe) : std::make_unique<Epub>(book.path, (work / "cache").string());
+    EXPECT_TRUE(epub->load(true, false, &scratch));
+    return zipScanStats();
+  };
+  const auto reused = openCost(true);
+  const auto fresh = openCost(false);
+  std::printf("[ firstopen] probe reused: walks=%zu entriesRead=%zu; a second instance: walks=%zu entriesRead=%zu\n",
+              reused.walks, reused.entries, fresh.walks, fresh.entries);
+  EXPECT_EQ(reused.walks + 1, fresh.walks);
+  EXPECT_LE(reused.entries + book.entries, fresh.entries + 8);
+  fs::remove_all(work);
+}
+
 // The build tells its caller how far it has got, at each phase's end, for the popup's progress bar;
 // a load from the cache does not.
 std::vector<int> g_progress;
