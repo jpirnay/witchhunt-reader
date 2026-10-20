@@ -237,7 +237,7 @@ class SecureHttpClient {
 
   // config
   const char* _rootCA = nullptr;
-  bool _allowInsecureFallback = true;
+  bool _allowInsecureFallback = false;  // fail closed unless the caller asks (SecureClient)
   bool _allowCertificateDateErrors = false;
   uint32_t _timeoutMs = 15000;
   std::string _userAgent = "CrossPoint-ESP32";

@@ -1,5 +1,6 @@
 #pragma once
 #include <OpdsParser.h>
+#include <TlsPolicy.h>
 
 #include <atomic>
 #include <string>
@@ -75,6 +76,8 @@ class OpdsBookBrowserActivity final : public Activity {
 
   OpdsEntry getEntry(size_t index) const;
   void drawFormatNotice() const;
+  // The TLS policy of every request to this catalog (see the definition).
+  crosspoint::TlsPolicy catalogTlsPolicy() const;
   void dismissFormatNotice();
 
   void checkAndConnectWifi();

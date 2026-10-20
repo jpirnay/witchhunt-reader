@@ -698,6 +698,15 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
+crosspoint::TlsPolicy OpdsBookBrowserActivity::catalogTlsPolicy() const {
+  // A catalog without a login is public: its feeds, covers and books carry nothing secret, so a
+  // certificate the curated roots cannot verify is passed (and logged) rather than the catalog
+  // left unreachable. One with a username or a password is always verified; HttpDownloader checks
+  // the credentials again (crosspoint::planTls()). The user's skip setting reaches both alike.
+  return server.username.empty() && server.password.empty() ? HttpDownloader::TlsPolicy::VerifiedThenUnverified
+                                                            : HttpDownloader::TlsPolicy::Verified;
+}
+
 void OpdsBookBrowserActivity::drawFormatNotice() const {
   // On top of the frame this render composed, which its own displayBuffer() then ships: neither
   // ship here nor re-seed from the displayed frame (see PopupShip::Caller).
@@ -770,7 +779,7 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
   {
     OpdsParserStream stream{parser};
     const HttpDownloader::DownloadError fetched =
-        HttpDownloader::fetchUrl(url, stream, server.username, server.password);
+        HttpDownloader::fetchUrl(url, stream, server.username, server.password, catalogTlsPolicy());
     if (fetched != HttpDownloader::OK) {
       state = BrowserState::ERROR;
       errorMessage = fetched == HttpDownloader::AUTH_ERROR ? tr(STR_AUTH_FAILED) : tr(STR_FETCH_FEED_FAILED);
@@ -928,7 +937,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
         }
         return !mappedInput.wasPressed(MappedInputManager::Button::Back);
       },
-      server.username, server.password);
+      server.username, server.password, catalogTlsPolicy());
   // The download read Back by level to abort. Drop the events it left behind, or that same press
   // would reach the catalog afterwards as an event and leave the feed.
   buttonEvents.drain();
@@ -993,7 +1002,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
               }
               return !mappedInput.wasPressed(MappedInputManager::Button::Back);
             },
-            server.username, server.password);
+            server.username, server.password, catalogTlsPolicy());
         buttonEvents.drain();
         if (coverDlResult != HttpDownloader::OK) {
           LOG_ERR("OPDS", "Failed to download cover from %s (err %d)", coverUrl.c_str(), (int)coverDlResult);
@@ -1026,7 +1035,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
 
 void OpdsBookBrowserActivity::fetchOsdTemplate(const std::string& osdUrl) {
   std::string content;
-  if (!HttpDownloader::fetchUrl(osdUrl, content)) {
+  if (!HttpDownloader::fetchUrl(osdUrl, content, "", "", catalogTlsPolicy())) {
     LOG_ERR("OPDS", "Failed to fetch OSD: %s", osdUrl.c_str());
     return;
   }
@@ -1094,8 +1103,8 @@ void OpdsBookBrowserActivity::fetchCoverForEntry(const OpdsEntry& entry) {
       (entry.imageHref.rfind("http", 0) == 0) ? entry.imageHref : UrlUtils::buildUrl(server.url, entry.imageHref);
   LOG_DBG("OPDS", "Fetching cover: %s", coverUrl.c_str());
 
-  if (HttpDownloader::downloadToFile(coverUrl, "/.tmp_opds_cover.jpg", nullptr, server.username, server.password) !=
-      HttpDownloader::OK) {
+  if (HttpDownloader::downloadToFile(coverUrl, "/.tmp_opds_cover.jpg", nullptr, server.username, server.password,
+                                     catalogTlsPolicy()) != HttpDownloader::OK) {
     LOG_DBG("OPDS", "Cover download failed");
     return;
   }
