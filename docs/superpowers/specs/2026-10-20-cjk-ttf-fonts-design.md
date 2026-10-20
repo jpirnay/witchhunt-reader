@@ -427,16 +427,17 @@ now. When less than a segment is free, the oldest segment is reclaimed:
 saturating count in RAM. A full count would cost a byte or two per slot, 10–30 KB of heap a reader does not
 have.
 - **A use is a draw (my call):** once per glyph drawn on a page from the store (the draw path's
-  `TtfFontSet::ownsBitmap`); the draw that first stores a glyph is its first use. Layout, prefetch and the scan
-  pass look glyphs up too, but do not count: otherwise every glyph a chapter's layout touched would look used,
-  and a reclaim could free nothing.
+  `TtfFontSet::ownsBitmap`), in the renderer's black-and-white pass only: an anti-aliased page is drawn three
+  times. Layout, prefetch and the scan pass look glyphs up too, but do not count: otherwise every glyph a
+  chapter's layout touched would look used, and a reclaim could free nothing.
 - **A reclaim** keeps a glyph whose count is above 0, then halves the count (3 → 1, 2 → 1, 1 → 0). That keeps
   what is used often and lately.
 - **Each reclaim frees at least half a segment (my call).** When more than that is worth keeping, the least used
   are dropped too, the oldest first among equals.
-- **The counts are allocated when the log first passes 75% full and freed with the set (my call).** A store that
-  never fills, as with most Latin reading, never pays for them. They take 2.5–6 KB: 10,000–16,000 slots for a CJK
-  store, 24,576 for a flash-mode one. If the allocation fails, the store falls back to today's full wipe.
+- **The counts are allocated when the log first passes 75% full, or only three segments are left free, and freed
+  with the set (my call).** A store that never fills, as with most Latin reading, never pays for them. They take
+  2.5–6 KB: 10,000–16,000 slots for a CJK store, 24,576 for a flash-mode one. Without them (the allocation
+  failed, or a reclaim comes first) a reclaim drops its segment whole: first in, first out, never a wipe.
 - **The counts live in RAM only.** After a restart, or a reload of the set (reader exit, a font change, the memory
   ladder), every glyph starts at 0 again, so the first reclaim keeps only what has been drawn since. Accepted
   (my call).
@@ -446,8 +447,8 @@ segment a tick and yields to input between segments; at a chapter or book open i
 behind the busy indicator. Until it has run, new glyphs fill what is free and then go to the RAM ring, as today.
 
 **Index slots carry their segment's epoch.** Epochs come from one counter that only grows: the highest found at
-open, plus one. Each segment's header holds the epoch it got at its last erase; the epochs also order the
-segments into tail and head.
+open, plus one. Each segment's header holds the epoch it got when the head last moved into it; the epochs also
+order the segments into tail and head.
 - A slot's value packs the record's offset with its segment's epoch at the time of writing. A lookup whose slot
   names an epoch its segment no longer has treats the slot as stale and probes on: a copied glyph has a newer
   slot further along its chain.
@@ -457,16 +458,18 @@ segments into tail and head.
 
 **The index is rebuilt now and then.** Stale slots cannot be cleared without an erase, so they fill the index.
 - **When:** the index passes its load limit (my call: 70%), or a probe chain is full (`kMaxProbe`, today a
-  reason to wipe). The rebuild runs in idle time or at a chapter or book open, never in the middle of a page.
+  reason to wipe); also before the epochs could wrap, and at a chapter or book open once stale slots are an
+  eighth of the index. It runs in idle time only when the index stops writes, else at a chapter or book open;
+  never in the middle of a page.
 - **How:** the index is erased, then every live record inserted again, since records carry their keys. Their
   counts move with them. Estimated at one to two seconds, as long as a wipe.
 - **Power cuts:** the store marks a rebuild begun and done; an open that finds one begun and not done rebuilds
   again.
 - **Lost by a rebuild:** the "no glyph" markers, which are slots without a record. They are learned again.
 
-**Copies go through RAM.** Flash cannot be programmed from mapped flash, so a reclaim copies through a buffer
-of 4 KB (the largest record a batch takes), borrowed for its duration. Without one the reclaim waits for the
-next safe point.
+**Copies go through RAM.** Flash cannot be programmed from mapped flash, so a reclaim copies a record in pieces
+through a 512-byte buffer on the stack: no heap. What it keeps must fit the free room; a ring that filled
+completely has none, so its first reclaim drops the oldest segment whole.
 
 **Where it runs.** A reclaim or a rebuild needs a safe point where no record of the log is in use: under
 `RenderLock`, outside any lookup or draw. It runs in the reader's idle time, beside the pre-render in the idle
@@ -623,7 +626,7 @@ shipping is section 10's list.
 - **Bold:** headings and bold spans look bold, with open counters. Screenshots go through `CMD:SCREENSHOT`.
   The maintainer does not read CJK, so Claude reviews them for stroke weight and counters.
 - **Latin:** a regular-only Latin family, and a book with a regular-only embedded font, show synthetic bold.
-- **The store:** filled by `CMD:TTF:FULL` and by reading the store-fill book at 12 and 26 pt. Reclaims run in
+- **The store:** filled by reading the store-fill book at 12 and 26 pt, a reclaim forced by `CMD:TTF:FULL`. Reclaims run in
   idle time (`EVT:TTF_*` lines); the PR records how many glyphs a page draws again after one; no page shows a
   wrong glyph.
 
