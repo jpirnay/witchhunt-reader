@@ -49,13 +49,26 @@ class Epub {
   bool syntheticTocFallbackEnabled = false;
   // See setLostTocRetryEnabled().
   bool lostTocRetryEnabled_ = false;
+  // See setBuildProgress().
+  void (*buildProgress_)(void* ctx, uint8_t percent) = nullptr;
+  void* buildProgressCtx_ = nullptr;
+  void reportBuildProgress(const uint8_t percent) const {
+    if (buildProgress_ != nullptr) buildProgress_(buildProgressCtx_, percent);
+  }
 
   bool findContentOpfFile(std::string* contentOpfFile) const;
   bool parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, OpfCacheMode cacheMode);
-  // The first JPEG/PNG reference in a cover document (the guide's cover page, or an SVG wrapper
-  // named as the cover image), resolved against the document's folder; empty when it holds none.
-  // Streams the document, never reads it whole into RAM.
+  // The JPEG/PNG a cover document (the guide's cover page, or an SVG wrapper named as the cover
+  // image) shows, resolved against the document's folder; empty when it holds none. Of several of
+  // the best kind (see CoverImageRefScanner), the largest file. Streams the document, never reads it
+  // whole into RAM.
   std::string findCoverImageInDocument(const std::string& docHref) const;
+  // The picture a cover reference leads to: the reference itself when it names a JPEG or PNG, else
+  // the picture of the document it names (findCoverImageInDocument). A fragment is dropped.
+  std::string coverPictureOf(const std::string& href) const;
+  // The picture behind an EPUB 3 nav document's cover landmark (<a epub:type="cover">), or empty.
+  // Streams the document through NavCoverScanner.
+  std::string findCoverLandmark(const std::string& navHref) const;
   // writePageList=false leaves pagelist.bin alone (an NCX tried after a parsed nav).
   bool parseTocNcxFile(bool writePageList = true) const;
   bool parseTocNavFile() const;
@@ -75,6 +88,18 @@ class Epub {
   mutable uint32_t zipCentralDirOffset_ = 0;
   mutable uint16_t zipTotalEntries_ = 0;
   mutable bool zipDetailsCached_ = false;
+  // The lookup cursor of the last ZipFile, handed to the next (ZipFile::seedLookupCursor): the
+  // package documents sit together, often behind every chapter and image, and a lookup that
+  // started at the first entry each time read the whole directory for every one of them.
+  mutable uint32_t zipLookupCursor_ = 0;
+  // The last entry looked up by name and its stat. A document is sized and then read
+  // (container.xml, the OPF, the NCX, each stylesheet), and the read's lookup was a second walk of
+  // the directory for the same name. One entry: the reads that repeat follow straight on.
+  mutable std::string statMemoPath_;
+  mutable ZipFile::FileStatSlim statMemo_ = {};
+  mutable bool statMemoValid_ = false;
+  // The stat of the entry at the normalised `path`, from the memo or one lookup.
+  bool lookupItemStat(ZipFile& zip, const std::string& path, ZipFile::FileStatSlim* out) const;
 
   // Per-book cache of each spine entry's ZIP central-directory stat, resolved in ONE
   // central-directory walk (fillFileStats) the first time any spine stat is requested.
@@ -194,6 +219,14 @@ class Epub {
   // framebuffer for the rebuild. The sleep screen, book info and KOReader sync also call
   // load(true, ...), for metadata, and must not re-index on the way.
   void setLostTocRetryEnabled(bool enabled) { lostTocRetryEnabled_ = enabled; }
+
+  // Told by load(), when it builds the cache, how far the build has got: `fn(ctx, percent)` at the
+  // end of the OPF pass, the TOC pass and book.bin. For the first-open popup's progress bar
+  // (ReaderActivity); a load from the cache never calls it. Null clears it.
+  void setBuildProgress(void (*fn)(void* ctx, uint8_t percent), void* ctx) {
+    buildProgress_ = fn;
+    buildProgressCtx_ = ctx;
+  }
 
   // Sidecars above this are treated as not-a-metadata-file and ignored. A
   // Calibre metadata OPF is a couple of KB; the cap stops a stray large file
