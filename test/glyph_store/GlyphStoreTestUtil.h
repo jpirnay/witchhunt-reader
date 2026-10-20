@@ -165,6 +165,17 @@ inline bool storedIntact(const FlashGlyphStore& store, const uint32_t key, const
   return true;
 }
 
+/// Keys with the same home slot, found by search: a probe-chain test needs real collisions.
+inline std::vector<uint32_t> collidingKeys(const uint32_t slots, const size_t count) {
+  std::vector<uint32_t> keys;
+  const uint32_t home = glyphstore::homeSlot(glyphstore::makeKey(0x4E00, 0, 0), slots);
+  for (uint32_t cp = 0x4E00; keys.size() < count && cp < 0x10FFFF; ++cp) {
+    const uint32_t key = glyphstore::makeKey(cp, 0, 0);
+    if (glyphstore::homeSlot(key, slots) == home) keys.push_back(key);
+  }
+  return keys;
+}
+
 /// Not stored, or stored intact: a lookup may miss a glyph whose write was cut, but never serve wrong bytes.
 inline bool absentOrIntact(const FlashGlyphStore& store, const uint32_t key, const uint8_t width,
                            const uint8_t height) {

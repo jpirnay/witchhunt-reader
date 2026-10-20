@@ -27,16 +27,6 @@ class GlyphStoreGlyphs : public StoreTest {
   GlyphBatch batch{buffer, sizeof buffer};
 };
 
-// Keys with the same home slot, found by search: a probe-chain test needs real collisions.
-std::vector<uint32_t> collidingKeys(const uint32_t slots, const size_t count) {
-  std::vector<uint32_t> keys;
-  const uint32_t home = homeSlot(makeKey(0x4E00, 0, 0), slots);
-  for (uint32_t cp = 0x4E00; keys.size() < count && cp < 0x10FFFF; ++cp) {
-    if (homeSlot(makeKey(cp, 0, 0), slots) == home) keys.push_back(makeKey(cp, 0, 0));
-  }
-  return keys;
-}
-
 uint8_t widthOf(const uint32_t cp) { return static_cast<uint8_t>(6 + cp % 9); }
 uint8_t heightOf(const uint32_t cp) { return static_cast<uint8_t>(9 + cp % 7); }
 

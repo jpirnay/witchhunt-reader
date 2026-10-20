@@ -60,14 +60,11 @@ uint32_t limit(const uint32_t capacity, const uint32_t percent) {
   return static_cast<uint32_t>(uint64_t{capacity} * percent / 100);
 }
 
-// Slots in use; with `noGlyph`, also adds those holding kNoGlyph (a glyph index's slots without a record).
-uint32_t countUsed(const uint8_t* table, const uint32_t slots, uint32_t* noGlyph = nullptr) {
+// Slots in use: every one not wholly erased, a slot cut short included.
+uint32_t countUsed(const uint8_t* table, const uint32_t slots) {
   uint32_t used = 0;
   for (uint32_t i = 0; i < slots; ++i) {
-    const Slot slot = flashSlot(table, i);
-    if (slotErased(slot)) continue;
-    ++used;
-    if (noGlyph && slot.value == kNoGlyph) ++*noGlyph;
+    if (!slotErased(flashSlot(table, i))) ++used;
   }
   return used;
 }
@@ -252,17 +249,16 @@ FlashGlyphStore::OpenResult FlashGlyphStore::open(const uint8_t identity[kIdenti
     FaceEntry entry{};
     if (readFaceEntry(i, entry) && entry.claimed == 0) claimedFaces_ |= 1u << i;
   }
+  readJournal();
   findRing();
-  uint32_t noGlyph = 0;
-  usedSlots_ = countUsed(index_, g.indexSlots, &noGlyph);
-  liveSlots_ += noGlyph;
+  usedSlots_ = countUsed(index_, g.indexSlots);
   usedPairs_ = countUsed(pairs_, g.pairSlots);
   open_ = true;
-  LOG_INF("GST", "open: %u of %u segments live, log %u of %u B, epoch %u, %u of %u slots (%u live), %u pairs%s",
+  LOG_INF("GST", "open: %u of %u segments live, log %u of %u B, epoch %u, %u of %u slots (%u live), %u pairs%s%s",
           static_cast<unsigned>(live_), static_cast<unsigned>(segmentCount()), static_cast<unsigned>(logUsed()),
           static_cast<unsigned>(g.logSize), static_cast<unsigned>(nextEpoch_), static_cast<unsigned>(usedSlots_),
           static_cast<unsigned>(g.indexSlots), static_cast<unsigned>(liveSlots_), static_cast<unsigned>(usedPairs_),
-          wipePending_ ? ", wipe pending" : "");
+          journal_.done ? "" : ", a rebuild to redo", wipePending_ ? ", wipe pending" : "");
   return OpenResult::Ready;
 }
 
@@ -276,6 +272,8 @@ void FlashGlyphStore::close() {
   region_ = index_ = pairs_ = log_ = nullptr;
   geometry_ = Geometry{};
   resetRing();
+  journal_ = Journal{};
+  rebuilds_ = 0;
   usedSlots_ = usedPairs_ = claimedFaces_ = 0;
   dropCounts();
   open_ = false;
@@ -387,11 +385,25 @@ void FlashGlyphStore::findRing() {
     ++live_;
     s = prev;
   }
-  // The head resumes after its last record; the segments behind it are closed. Each live record counts as a live
-  // slot (open() adds the "no glyph" marks).
+  // The head resumes after its last record; the segments behind it are closed. A record counts as a live slot when a
+  // slot names it, as a reclaim counts what it takes away: one whose write a cut stopped before its slot does not.
   for (uint32_t s = tail_, n = 0; n < live_; s = s + 1 == count ? 0 : s + 1, ++n) {
-    const uint32_t used = scanLog(s, [this](uint32_t) { ++liveSlots_; });
+    const uint32_t epoch = segEpoch_[s];
+    const uint32_t used = scanLog(s, [this, epoch](const uint32_t offset) {
+      if (findSlot(flashU32(log_ + offset), glyphSlotValue(epoch, recordGlyph(offset).dataOffset)) != UINT32_MAX) {
+        ++liveSlots_;
+      }
+    });
     if (s == head_) headUsed_ = used;
+  }
+}
+
+// Calls visit(segment, offset) for each record of the live segments, from the tail, in log order.
+template <typename Visit>
+void FlashGlyphStore::walkLive(Visit&& visit) const {
+  const uint32_t count = segmentCount();
+  for (uint32_t s = tail_, n = 0; n < live_; s = s + 1 == count ? 0 : s + 1, ++n) {
+    scanLog(s, [&visit, s](const uint32_t offset) { visit(s, offset); });
   }
 }
 
@@ -538,31 +550,34 @@ FlashGlyphStore::Lookup FlashGlyphStore::find(const uint32_t key, const EpdGlyph
   return Lookup::NotStored;
 }
 
+// Puts {key, value} in the first erased slot of its probe chain, whose index goes to `at`.
 FlashGlyphStore::Insert FlashGlyphStore::insert(const uint32_t tableOffset, const uint8_t* table, const uint32_t slots,
-                                                const uint32_t key, const uint32_t value) {
+                                                const uint32_t key, const uint32_t value, uint32_t* at) {
   uint32_t i = homeSlot(key, slots);
   for (uint32_t probe = 0; probe < kMaxProbe; ++probe, i = nextSlot(i, slots)) {
     // A slot in use, or one cut short (some bits programmed), is never programmed again.
     if (!slotErased(flashSlot(table, i))) continue;
     const Slot slot{key, value};
-    return flash_.program(tableOffset + i * kSlotBytes, &slot, sizeof slot) ? Insert::Done : Insert::WriteFailed;
+    if (!flash_.program(tableOffset + i * kSlotBytes, &slot, sizeof slot)) return Insert::WriteFailed;
+    if (at) *at = i;
+    return Insert::Done;
   }
   return Insert::ChainFull;
 }
 
 // One glyph slot (a record's glyphSlotValue(), or kNoGlyph), and what a failure means for the store: a full probe
-// chain asks for an index rebuild, a failed write for a wipe.
-FlashGlyphStore::Commit FlashGlyphStore::insertGlyphSlot(const uint32_t key, const uint32_t value) {
-  switch (insert(geometry_.indexOffset, index_, geometry_.indexSlots, key, value)) {
+// chain stops writes until the index is rebuilt, a failed write until a wipe.
+FlashGlyphStore::Commit FlashGlyphStore::insertGlyphSlot(const uint32_t key, const uint32_t value, uint32_t* at) {
+  switch (insert(geometry_.indexOffset, index_, geometry_.indexSlots, key, value, at)) {
     case Insert::Done:
       ++usedSlots_;
-      ++liveSlots_;
+      if (value != kNoGlyph) ++liveSlots_;
       return Commit::Stored;
     case Insert::ChainFull:
       LOG_INF("GST", "full: a probe chain passed %u slots; the index needs a rebuild",
               static_cast<unsigned>(kMaxProbe));
       chainFull_ = true;
-      stopForRoom();
+      writesStopped_ = true;
       return Commit::Full;
     case Insert::WriteFailed:
       break;
@@ -604,7 +619,7 @@ FlashGlyphStore::Commit FlashGlyphStore::writeBatch(GlyphBatch& batch) {
     LOG_INF("GST", "full: %u of %u slots; the index needs a rebuild", static_cast<unsigned>(usedSlots_),
             static_cast<unsigned>(geometry_.indexSlots));
     indexFull_ = true;
-    stopForRoom();
+    writesStopped_ = true;
     return Commit::Full;
   }
   if (opens > freeSegments()) {
@@ -660,7 +675,7 @@ FlashGlyphStore::Commit FlashGlyphStore::markNoGlyph(const uint32_t key) {
     LOG_INF("GST", "full: %u of %u slots; the index needs a rebuild", static_cast<unsigned>(usedSlots_),
             static_cast<unsigned>(geometry_.indexSlots));
     indexFull_ = true;
-    stopForRoom();
+    writesStopped_ = true;
     return Commit::Full;
   }
   return insertGlyphSlot(key, kNoGlyph);
@@ -668,9 +683,10 @@ FlashGlyphStore::Commit FlashGlyphStore::markNoGlyph(const uint32_t key) {
 
 // --- Use counts ---
 
-// The slot holding exactly this key and value, probed as find() does; UINT32_MAX when none.
+// The slot holding exactly this key and value, probed as find() does; UINT32_MAX when none. open() uses it before the
+// store counts as open, once the index is mapped.
 uint32_t FlashGlyphStore::findSlot(const uint32_t key, const uint32_t value) const {
-  if (!open_) return UINT32_MAX;
+  if (!index_) return UINT32_MAX;
   const uint32_t slots = geometry_.indexSlots;
   uint32_t i = homeSlot(key, slots);
   for (uint32_t probe = 0; probe < kMaxProbe; ++probe, i = nextSlot(i, slots)) {
@@ -860,18 +876,51 @@ FlashGlyphStore::Room FlashGlyphStore::makeRoom(const Budget budget, RoomWork* w
   // With a wipe pending, a write failed (what the flash holds is not known for sure) or the face table is full: only
   // the wipe goes on from there.
   if (!open_ || wipePending_) return Room::Failed;
-  const uint32_t steps = budget == Budget::Idle ? 1 : segmentCount();
-  // A full index or probe chain stops writes until the index is rebuilt; a step meanwhile reclaims a segment, whose
-  // slots go stale.
-  for (uint32_t step = 0; step < steps && needsRoom() && live_ >= 2; ++step) {
-    if (!reclaimTail(done)) return Room::Failed;
-    roomAsked_ = false;
+  const uint32_t steps = budget == Budget::Idle ? 1 : segmentCount() + 1;
+  for (uint32_t step = 0; step < steps; ++step) {
+    const Step next = nextStep(budget, done.rebuilt);
+    if (next == Step::None) break;
+    if (next == Step::Reclaim) {
+      if (!reclaimTail(done)) return Room::Failed;
+      roomAsked_ = false;
+      continue;
+    }
+    const Rebuilt rebuilt = rebuildIndex(done);
+    if (rebuilt == Rebuilt::Failed) return Room::Failed;
+    if (rebuilt != Rebuilt::Done) break;  // wiped instead, or waiting for memory
   }
-  // A segment is free now (one was reclaimed, or at most one is live), so writes stopped for room resume; a batch
-  // that does not fit stops them again.
-  roomAsked_ = false;
-  writesStopped_ = indexFull_ || chainFull_;
-  return needsRoom() ? Room::More : Room::Enough;
+  // Writes stopped for room resume once a segment is free (one was reclaimed, or at most one is live); a batch that
+  // does not fit stops them again. A full index keeps them stopped until its rebuild.
+  if (live_ < 2) roomAsked_ = false;
+  writesStopped_ = roomAsked_ || indexFull_ || chainFull_;
+  return needsRoom(budget) ? Room::More : Room::Enough;
+}
+
+// What the next step of makeRoom() is. A rebuild comes at most once a call: it clears every reason for one.
+FlashGlyphStore::Step FlashGlyphStore::nextStep(const Budget budget, const bool rebuilt) const {
+  // The index stops writes: it is rebuilt now, in idle time too. A full index with few stale slots would fill again
+  // soon after, so while two or more segments are live a reclaim comes first and leaves its slots stale. A full probe
+  // chain is a rebuild's alone to clear.
+  if (!rebuilt && (indexFull_ || chainFull_)) {
+    return (chainFull_ || staleCrowds() || live_ < 2) ? Step::Rebuild : Step::Reclaim;
+  }
+  if (live_ >= 2 && (roomAsked_ || freeSegments() < kFreeSegmentsTarget)) return Step::Reclaim;
+  // The other reasons wait for a chapter or book open, and come after its reclaims: the slots those leave stale go
+  // with the rebuild.
+  if (!rebuilt && budget == Budget::Open && rebuildWaitsForOpen()) return Step::Rebuild;
+  return Step::None;
+}
+
+// What a rebuild frees, the slots that name no live record, is kRebuildStalePercent of the index or more.
+bool FlashGlyphStore::staleCrowds() const {
+  return uint64_t{usedSlots_ - liveSlots_} * 100 >= uint64_t{geometry_.indexSlots} * kRebuildStalePercent;
+}
+
+// A rebuild that waits for a chapter or book open: a power cut stopped the last one, the epochs since it began span
+// kRebuildEpochSpan (well short of the 12 bits a slot holds, so a slot never names a reused segment's epoch), or
+// stale slots crowd the index. A base above the epoch (a cut tore it) wraps the difference to a large one: due too.
+bool FlashGlyphStore::rebuildWaitsForOpen() const {
+  return !journal_.done || nextEpoch_ - journal_.base >= kRebuildEpochSpan || staleCrowds();
 }
 
 // Reclaims the tail segment T. A record of T is a candidate when its slot's use count is above 0. At most half T's
@@ -964,12 +1013,13 @@ bool FlashGlyphStore::reclaimTail(RoomWork& work) {
   --live_;
   const uint32_t kept = static_cast<uint16_t>(work.kept - keptBefore);
   liveSlots_ -= named;
-  work.dropped = static_cast<uint16_t>(work.dropped + named - kept);
   if (!eraseWritten(at, geometry_.segmentBytes)) {
     LOG_ERR("GST", "erasing segment %u failed; wipe pending", static_cast<unsigned>(tail));
     stopWrites();
     return false;
   }
+  // Counted once the segment is gone, as it is reclaimed.
+  work.dropped = static_cast<uint16_t>(work.dropped + named - kept);
   ++work.reclaimed;
   LOG_INF("GST", "segment %u reclaimed: %u glyphs kept, %u dropped; %u of %u segments free",
           static_cast<unsigned>(tail), static_cast<unsigned>(kept), static_cast<unsigned>(named - kept),
@@ -1005,13 +1055,132 @@ bool FlashGlyphStore::copyRecord(const uint32_t from, const uint32_t key, const 
     done += n;
   }
   headUsed_ += bytes;
-  const uint32_t value = glyphSlotValue(segEpoch_[head_], to + kRecordHeaderBytes);
-  const Commit slot = insertGlyphSlot(key, value);
-  if (slot == Commit::Stored) {
+  uint32_t slot = 0;
+  const Commit inserted = insertGlyphSlot(key, glyphSlotValue(segEpoch_[head_], to + kRecordHeaderBytes), &slot);
+  if (inserted == Commit::Stored) {
     ++work.kept;
-    setCount(findSlot(key, value), count / 2);
+    setCount(slot, count / 2);
   }
-  return slot != Commit::WriteFailed;
+  return inserted != Commit::WriteFailed;
+}
+
+// --- The index rebuild ---
+
+// Rebuilds the index from the log, journaled in the state sector: the entry's `base` before the index is touched, its
+// `done` after the last slot, so a cut in between leaves the rebuild to be done again at the next open.
+// 1. The plan, in walk order (from the tail, each segment's records in log order): whether a slot names each record,
+//    and that slot's count. Only those records get a slot again: one with none had its write cut before its slot, and
+//    may be torn. Without memory for the counts they start at 0; without memory for the rest the rebuild waits.
+// 2. The index is erased, and each planned record is inserted again with its segment's epoch, unless find() finds its
+//    key already (a duplicate a cut left, the copy of a reclaim cut short: the first stays). Its count follows.
+// A cut after the erase loses the slots not yet inserted: their glyphs are drawn and stored again. With the journal
+// full the store is wiped instead.
+FlashGlyphStore::Rebuilt FlashGlyphStore::rebuildIndex(RoomWork& work) {
+  if (journal_.used >= kJournalEntries) {
+    LOG_INF("GST", "the rebuild journal is full (%u entries): the store is wiped instead",
+            static_cast<unsigned>(kJournalEntries));
+    return wipe() ? Rebuilt::Wiped : Rebuilt::Failed;
+  }
+  uint32_t records = 0;
+  walkLive([&records](uint32_t, uint32_t) { ++records; });
+  const uint32_t namedBytes = records / 8 + 1;
+  const uint32_t countBytes = useCounts_ ? records / 4 + 1 : 0;
+  auto plan = makeUniqueNoThrow<uint8_t[]>(namedBytes + countBytes);
+  bool counted = countBytes != 0;
+  if (!plan && counted) {
+    LOG_ERR("GST", "rebuild: no memory for the counts (%u B); they start at 0", static_cast<unsigned>(countBytes));
+    plan = makeUniqueNoThrow<uint8_t[]>(namedBytes);
+    counted = false;
+  }
+  if (!plan) {
+    LOG_ERR("GST", "rebuild: no memory for its plan (%u B); it waits", static_cast<unsigned>(namedBytes));
+    return Rebuilt::NoMemory;
+  }
+  uint8_t* named = plan.get();
+  uint8_t* counts = counted ? plan.get() + namedBytes : nullptr;
+  uint32_t i = 0;
+  walkLive([&](const uint32_t segment, const uint32_t offset) {
+    const uint32_t slot =
+        findSlot(flashU32(log_ + offset), glyphSlotValue(segEpoch_[segment], recordGlyph(offset).dataOffset));
+    if (slot != UINT32_MAX) {
+      named[i / 8] = static_cast<uint8_t>(named[i / 8] | 1u << (i % 8));
+      if (counts) counts[i / 4] = static_cast<uint8_t>(counts[i / 4] | countAt(slot) << (i % 4 * 2));
+    }
+    ++i;
+  });
+
+  // The oldest epoch any slot from here on can name: the tail's, or with none live the next one.
+  const uint32_t base = live_ == 0 ? nextEpoch_ : segEpoch_[tail_];
+  const uint32_t entry = kJournalOffset + journal_.used * static_cast<uint32_t>(sizeof(JournalEntry));
+  if (!flash_.program(entry + offsetof(JournalEntry, base), &base, sizeof base)) {
+    LOG_ERR("GST", "rebuild: journal write failed; wipe pending");
+    stopWrites();
+    return Rebuilt::Failed;
+  }
+  journal_ = Journal{journal_.used + 1, base, false};
+  if (!eraseWritten(geometry_.indexOffset, tableBytes(geometry_.indexSlots))) {
+    LOG_ERR("GST", "rebuild: erasing the index failed; wipe pending");
+    stopWrites();
+    return Rebuilt::Failed;
+  }
+  if (useCounts_) std::memset(useCounts_.get(), 0, geometry_.indexSlots / 4);
+  uint32_t inserted = 0;
+  Insert result = Insert::Done;
+  i = 0;
+  walkLive([&](const uint32_t segment, const uint32_t offset) {
+    const uint32_t at = i++;
+    if (result != Insert::Done || ((named[at / 8] >> (at % 8)) & 1u) == 0) return;
+    const uint32_t key = flashU32(log_ + offset);
+    if (find(key, nullptr) == Lookup::Found) return;
+    uint32_t slot = 0;
+    result = insert(geometry_.indexOffset, index_, geometry_.indexSlots, key,
+                    glyphSlotValue(segEpoch_[segment], recordGlyph(offset).dataOffset), &slot);
+    if (result != Insert::Done) return;
+    ++inserted;
+    if (counts) setCount(slot, (counts[at / 4] >> (at % 4 * 2)) & 3u);
+  });
+  if (result != Insert::Done) {
+    LOG_ERR("GST", "rebuild: %s; wipe pending",
+            result == Insert::ChainFull ? "a probe chain filled" : "a slot write failed");
+    stopWrites();
+    return Rebuilt::Failed;
+  }
+  const uint32_t finished = 0;
+  if (!flash_.program(entry + offsetof(JournalEntry, done), &finished, sizeof finished)) {
+    LOG_ERR("GST", "rebuild: journal write failed; wipe pending");
+    stopWrites();
+    return Rebuilt::Failed;
+  }
+  journal_.done = true;
+  usedSlots_ = liveSlots_ = inserted;
+  indexFull_ = chainFull_ = false;
+  ++rebuilds_;
+  work.rebuilt = true;
+  LOG_INF("GST", "index rebuilt from epoch %u: %u of %u records have slots, of %u slots; journal %u of %u",
+          static_cast<unsigned>(base), static_cast<unsigned>(inserted), static_cast<unsigned>(records),
+          static_cast<unsigned>(geometry_.indexSlots), static_cast<unsigned>(journal_.used),
+          static_cast<unsigned>(kJournalEntries));
+  return Rebuilt::Done;
+}
+
+// Entries are used in order, so the first wholly erased one ends the journal. An unreadable journal counts as full: a
+// rebuild then wipes rather than program entries it could not read.
+void FlashGlyphStore::readJournal() {
+  journal_ = Journal{};
+  constexpr uint32_t kChunk = 32;
+  JournalEntry chunk[kChunk];
+  for (uint32_t first = 0; first < kJournalEntries; first += kChunk) {
+    const uint32_t n = kJournalEntries - first < kChunk ? kJournalEntries - first : kChunk;
+    if (!flash_.read(kJournalOffset + first * static_cast<uint32_t>(sizeof(JournalEntry)), chunk,
+                     n * static_cast<uint32_t>(sizeof(JournalEntry)))) {
+      journal_.used = kJournalEntries;
+      return;
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+      if (chunk[i].base == kErased && chunk[i].done == kErased) return;
+      journal_ = Journal{first + i + 1, chunk[i].base, chunk[i].done != kErased};
+    }
+  }
 }
 
 bool FlashGlyphStore::markFull() {
@@ -1023,7 +1192,7 @@ bool FlashGlyphStore::markFull() {
 
 // --- Wipe pending, and the wipe ---
 
-// The ring or the index is full: nothing is written until room is made, and the next makeRoom() reclaims. Nothing is
+// The ring is full, or markFull(): nothing is written until room is made, and the next makeRoom() reclaims. Nothing is
 // lost either, so no wipe.
 void FlashGlyphStore::stopForRoom() {
   writesStopped_ = true;
@@ -1066,6 +1235,7 @@ bool FlashGlyphStore::wipe() {
     return false;
   }
   resetRing();
+  journal_ = Journal{};
   usedSlots_ = usedPairs_ = claimedFaces_ = 0;
   dropCounts();
   ++generation_;

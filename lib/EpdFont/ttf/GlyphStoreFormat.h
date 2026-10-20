@@ -206,8 +206,11 @@ constexpr uint32_t kFaceTableOffset = kStateSectorOffset;
 constexpr uint32_t kWipeWordOffset = kFaceTableOffset + kFaceEntries * sizeof(FaceEntry);
 static_assert(kFaceEntries <= 32, "claimed faces are tracked in a 32-bit mask");
 
-/// An index rebuild, journaled in the rest of the state sector after the wipe word: the table (`base`) being rebuilt
-/// and how far it is (`done`). Each entry is programmed once, so the journal reads as a log of progress.
+/// An index rebuild, journaled in the rest of the state sector after the wipe word. `base`, programmed first, is the
+/// epoch of the oldest live segment when the rebuild began: no slot written since names an older one. `done` is
+/// programmed 0 once the last slot is in, so an entry with `base` and an erased `done` is a rebuild a power cut
+/// interrupted. Entries are used in order, each programmed once; with all of them used, the next rebuild wipes the
+/// store instead, which empties the journal.
 struct JournalEntry {
   uint32_t base;
   uint32_t done;

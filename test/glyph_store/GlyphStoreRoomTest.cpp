@@ -1,5 +1,6 @@
-// Making room by keeping what is drawn: the use counts, kept only once the ring nears full, and the reclaim of the
-// oldest segment that copies the drawn glyphs forward and drops the rest.
+// Making room by keeping what is drawn: the use counts, kept only once the ring nears full, the reclaim of the
+// oldest segment that copies the drawn glyphs forward and drops the rest, and the rebuild of an index crowded by the
+// slots reclaims leave stale.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -110,7 +111,37 @@ class GlyphStoreRoom : public StoreTest {
     return work;
   }
 
-  const Layout layout = smallLayout();
+  // --- The rebuild tests ---
+
+  void reinstall(const Layout& other) {
+    store.close();
+    layout = other;
+    ASSERT_TRUE(installAndOpen(store, layout));
+  }
+
+  // Marks glyphs the font lacks until the index is past its load limit.
+  void fillIndexWithMarks() {
+    uint32_t cp = 0x3000;
+    Commit commit;
+    while ((commit = store.markNoGlyph(makeKey(cp, 0, 0))) == Commit::Stored) ++cp;
+    ASSERT_EQ(Commit::Full, commit);
+    ASSERT_FALSE(store.wipePending());
+  }
+
+  // Programs journal entry `i` straight into the state sector; `done` false leaves its done word erased.
+  void writeJournalEntry(const uint32_t i, const uint32_t base, const bool done) {
+    const JournalEntry entry{base, done ? 0 : kErased};
+    ASSERT_TRUE(flash.program(kJournalOffset + i * static_cast<uint32_t>(sizeof entry), &entry,
+                              done ? sizeof entry : sizeof entry.base));
+  }
+
+  JournalEntry journalEntry(const uint32_t i) {
+    JournalEntry entry{};
+    EXPECT_TRUE(flash.read(kJournalOffset + i * static_cast<uint32_t>(sizeof entry), &entry, sizeof entry));
+    return entry;
+  }
+
+  Layout layout = smallLayout();
   alignas(4) uint8_t buffer[8192] = {};
   GlyphBatch batch{buffer, sizeof buffer};
 };
@@ -287,6 +318,7 @@ TEST_F(GlyphStoreRoom, AStaleSlotIsNeverServedFromAReusedSegment) {
     ++n;
   }
   ASSERT_EQ(offsets.size(), refilled);
+  ASSERT_EQ(0u, store.rebuilds());  // a rebuild would have cleared the stale slots this is about
   // Segment 0's first keys still have their slots, which point at the new records' offsets: never served.
   for (uint32_t k = 0; k < offsets.size(); ++k) EXPECT_EQ(Lookup::NotStored, lookup(k)) << k;
   for (uint32_t k = first; k < n; ++k) EXPECT_TRUE(intact(k)) << k;
@@ -479,4 +511,294 @@ TEST_F(GlyphStoreRoom, TheRingWearsItsSegmentsEvenly) {
   }
   EXPECT_GE(fewest, 20u);
   EXPECT_LE(most - fewest, 1u);
+}
+
+// --- The rebuild ---
+
+TEST_F(GlyphStoreRoom, ACrowdedIndexIsRebuiltFromTheLog) {
+  reinstall(smallLayout(256, 512, 65536));
+  // An idle reclaim whenever a commit leaves fewer than two segments free, so what stops the commits is the index:
+  // 179 slots, 70 % of 256.
+  uint32_t n = 0;
+  Commit commit;
+  while ((commit = commitRecord(n)) == Commit::Stored) {
+    ++n;
+    if (store.freeSegments() < kFreeSegmentsTarget) {
+      ASSERT_NE(Room::Failed, store.makeRoom(Budget::Idle)) << n;
+      ASSERT_GE(store.freeSegments(), kFreeSegmentsTarget) << n;
+    }
+  }
+  ASSERT_EQ(Commit::Full, commit);
+  ASSERT_TRUE(store.needsRoom());
+  ASSERT_GE(store.freeSegments(), kFreeSegmentsTarget);
+  ASSERT_TRUE(store.countsKept());
+  std::vector<uint32_t> live;
+  for (uint32_t k = 0; k < n; ++k) {
+    if (lookup(k) != Lookup::Found) continue;
+    live.push_back(k);
+    draw(k, k % 4);
+  }
+  ASSERT_LT(live.size() + 30, store.usedSlots());  // stale slots, over kRebuildStalePercent of the index
+  RoomWork work;
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Idle, &work));
+  EXPECT_TRUE(work.rebuilt);
+  EXPECT_EQ(0u, work.reclaimed);
+  EXPECT_EQ(1u, store.rebuilds());
+  EXPECT_EQ(live.size(), store.usedSlots());
+  EXPECT_EQ(store.usedSlots(), store.liveSlots());
+  for (const uint32_t k : live) {
+    EXPECT_TRUE(intact(k)) << k;
+    EXPECT_EQ(k % 4, countOf(k)) << k;
+  }
+  for (uint32_t k = 0; k < n; ++k) {
+    if (std::find(live.begin(), live.end(), k) == live.end()) {
+      EXPECT_EQ(Lookup::NotStored, lookup(k)) << k;
+    }
+  }
+  EXPECT_FALSE(store.writesStopped());
+  ASSERT_EQ(Commit::Stored, commitRecord(n));
+  EXPECT_TRUE(intact(n));
+}
+
+TEST_F(GlyphStoreRoom, ARebuildForgetsTheNoGlyphMarks) {
+  for (uint32_t n = 0; n < 6; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
+  const uint32_t lacked = makeKey(0x2603, 0, 0);
+  ASSERT_EQ(Commit::Stored, store.markNoGlyph(lacked));
+  EXPECT_EQ(Lookup::NoGlyph, store.find(lacked, nullptr));
+  fillIndexWithMarks();
+  RoomWork work;
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Idle, &work));
+  EXPECT_TRUE(work.rebuilt);
+  EXPECT_EQ(Lookup::NotStored, store.find(lacked, nullptr));
+  for (uint32_t n = 0; n < 6; ++n) EXPECT_TRUE(intact(n)) << n;
+  EXPECT_EQ(6u, store.usedSlots());
+  EXPECT_EQ(6u, store.liveSlots());
+  // Learned again.
+  ASSERT_EQ(Commit::Stored, store.markNoGlyph(lacked));
+  EXPECT_EQ(Lookup::NoGlyph, store.find(lacked, nullptr));
+}
+
+TEST_F(GlyphStoreRoom, AFullProbeChainAsksForARebuildNotAWipe) {
+  const std::vector<uint32_t> keys = collidingKeys(layout.geometry.indexSlots, kMaxProbe + 1);
+  ASSERT_EQ(kMaxProbe + 1, keys.size());
+  for (uint32_t i = 0; i < kMaxProbe; ++i) ASSERT_EQ(Commit::Stored, store.markNoGlyph(keys[i])) << i;
+  ASSERT_TRUE(stage(batch, keys[kMaxProbe], kWidth, kHeight));
+  EXPECT_EQ(Commit::Full, store.commit(batch));
+  EXPECT_FALSE(store.wipePending());
+  EXPECT_TRUE(store.needsRoom());
+  RoomWork work;
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Idle, &work));
+  EXPECT_TRUE(work.rebuilt);
+  EXPECT_FALSE(store.writesStopped());
+  ASSERT_TRUE(stage(batch, keys[kMaxProbe], kWidth, kHeight));
+  EXPECT_EQ(Commit::Stored, store.commit(batch));
+  EXPECT_TRUE(storedIntact(store, keys[kMaxProbe], kWidth, kHeight));
+}
+
+TEST_F(GlyphStoreRoom, AFullJournalTurnsTheRebuildIntoAWipe) {
+  for (uint32_t n = 0; n < 6; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
+  for (uint32_t i = 0; i < kJournalEntries; ++i) writeJournalEntry(i, 1, true);
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  ASSERT_EQ(1u, store.rebuildBase());
+  fillIndexWithMarks();
+  const uint32_t generation = store.generation();
+  RoomWork work;
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Idle, &work));
+  EXPECT_FALSE(work.rebuilt);
+  EXPECT_EQ(generation + 1, store.generation());
+  EXPECT_FALSE(store.wipePending());
+  EXPECT_EQ(0u, store.logUsed());
+  EXPECT_EQ(0u, store.usedSlots());
+  EXPECT_EQ(0u, store.rebuildBase());
+  for (uint32_t n = 0; n < 6; ++n) EXPECT_EQ(Lookup::NotStored, lookup(n)) << n;
+  const uint8_t* journal = flash.raw() + kJournalOffset;
+  EXPECT_TRUE(std::all_of(journal, journal + kJournalEntries * sizeof(JournalEntry),
+                          [](const uint8_t b) { return b == 0xFF; }));
+  ASSERT_TRUE(claimTestSizes(store));
+  EXPECT_EQ(Commit::Stored, commitRecord(0));
+}
+
+TEST_F(GlyphStoreRoom, IdleLeavesAnEpochRebuildToTheNextOpen) {
+  // The first segment at epoch 5000, and a finished rebuild from epoch 10: only the epoch span calls for one.
+  writeSegmentHeader(flash, layout, 0, 5000);
+  writeJournalEntry(0, 10, true);
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  ASSERT_EQ(5001u, store.epoch());
+  ASSERT_EQ(10u, store.rebuildBase());
+  for (uint32_t n = 0; n < 3; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
+  ASSERT_EQ(store.usedSlots(), store.liveSlots());  // the index is not crowded
+  EXPECT_FALSE(store.needsRoom());
+  EXPECT_TRUE(store.needsRoom(Budget::Open));
+  RoomWork work;
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Idle, &work));
+  EXPECT_FALSE(work.rebuilt);
+  EXPECT_EQ(0u, store.rebuilds());
+  EXPECT_EQ(10u, store.rebuildBase());
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
+  EXPECT_TRUE(work.rebuilt);
+  EXPECT_EQ(1u, store.rebuilds());
+  EXPECT_EQ(5000u, store.rebuildBase());  // the tail's epoch
+  EXPECT_FALSE(store.needsRoom(Budget::Open));
+  for (uint32_t n = 0; n < 3; ++n) EXPECT_TRUE(intact(n)) << n;
+  EXPECT_EQ(5000u, journalEntry(1).base);
+  EXPECT_EQ(0u, journalEntry(1).done);
+}
+
+TEST_F(GlyphStoreRoom, ARebuildAPowerCutInterruptedIsDoneAgainAtOpen) {
+  for (uint32_t n = 0; n < 8; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;  // two segments
+  writeJournalEntry(0, 1, false);
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_EQ(1u, store.rebuildBase());
+  EXPECT_FALSE(store.needsRoom());
+  EXPECT_TRUE(store.needsRoom(Budget::Open));
+  RoomWork work;
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Idle, &work));
+  EXPECT_FALSE(work.rebuilt);
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
+  EXPECT_TRUE(work.rebuilt);
+  EXPECT_EQ(1u, store.rebuilds());
+  for (uint32_t n = 0; n < 8; ++n) EXPECT_TRUE(intact(n)) << n;
+  EXPECT_EQ(kErased, journalEntry(0).done);  // the interrupted entry stays as it was; the next one is done
+  EXPECT_EQ(1u, journalEntry(1).base);
+  EXPECT_EQ(0u, journalEntry(1).done);
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_FALSE(store.needsRoom(Budget::Open));
+}
+
+TEST_F(GlyphStoreRoom, ARebuildNeverMakesATornRecordFindable) {
+  for (uint32_t n = 0; n < 3; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
+  // Record 3's write was cut in its bitmap, before its slot: its header reads complete.
+  writeRawRecord(flash, layout, inSegment(layout, 0, 3 * recordSize(kWidth, kHeight)), keyOf(3), kWidth, kHeight, 100);
+  writeJournalEntry(0, 1, false);  // a rebuild is due at the next open
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_EQ(3u, store.liveSlots());  // no slot names the torn record
+  EXPECT_EQ(Lookup::NotStored, lookup(3));
+  RoomWork work;
+  ASSERT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
+  ASSERT_TRUE(work.rebuilt);
+  EXPECT_EQ(Lookup::NotStored, lookup(3));
+  for (uint32_t n = 0; n < 3; ++n) EXPECT_TRUE(intact(n)) << n;
+  EXPECT_EQ(3u, store.usedSlots());
+  ASSERT_EQ(Commit::Stored, commitRecord(3));
+  EXPECT_TRUE(intact(3));
+}
+
+TEST_F(GlyphStoreRoom, ARebuildKeepsTheFirstOfTwoCopiesACutLeft) {
+  for (uint32_t n = 0; n < 13; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;  // the head holds one record
+  ASSERT_TRUE(store.markFull());
+  draw(0);
+  // The reclaim copies record 0 to the head, record then slot (608 bytes), and the power fails as segment 0 retires:
+  // both copies live, each with a slot.
+  flash.cutAfterSteps(recordSize(kWidth, kHeight) + kSlotBytes);
+  EXPECT_EQ(Room::Failed, store.makeRoom(Budget::Idle));
+  flash.powerCycle();
+  writeJournalEntry(0, 1, false);  // a rebuild is due at the next open
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  ASSERT_FALSE(store.wipePending());
+  ASSERT_EQ(14u, store.liveSlots());
+  RoomWork work;
+  ASSERT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
+  ASSERT_TRUE(work.rebuilt);
+  EXPECT_EQ(0u, work.reclaimed);
+  EXPECT_EQ(13u, store.usedSlots());
+  EXPECT_EQ(13u, store.liveSlots());
+  EXPECT_EQ(0u, segmentOf(0));  // the first copy, in the oldest segment
+  for (uint32_t n = 0; n < 13; ++n) EXPECT_TRUE(intact(n)) << n;
+}
+
+// --- A full index with few stale slots: 68-byte records (12 x 16), sixty to a segment, fill the 179 slots of a
+// 256-slot index over three segments, none of them stale. ---
+
+constexpr uint8_t kSmallWidth = 12;
+constexpr uint8_t kSmallHeight = 16;
+
+TEST_F(GlyphStoreRoom, AFullIndexWithFewStaleSlotsReclaimsBeforeItRebuilds) {
+  reinstall(smallLayout(256, 512, 65536));
+  uint32_t n = 0;
+  while (commitRecord(n, kSmallWidth, kSmallHeight) == Commit::Stored) ++n;
+  ASSERT_EQ(179u, n);
+  ASSERT_EQ(13u, store.freeSegments());
+  ASSERT_EQ(store.usedSlots(), store.liveSlots());
+  // A rebuild now would free nothing: the oldest segment goes first, its sixty slots going stale.
+  RoomWork work;
+  EXPECT_EQ(Room::More, store.makeRoom(Budget::Idle, &work));
+  EXPECT_EQ(1u, work.reclaimed);
+  EXPECT_FALSE(work.rebuilt);
+  EXPECT_TRUE(store.writesStopped());
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Idle, &work));
+  EXPECT_EQ(0u, work.reclaimed);
+  EXPECT_TRUE(work.rebuilt);
+  EXPECT_EQ(119u, store.usedSlots());
+  EXPECT_EQ(119u, store.liveSlots());
+  EXPECT_FALSE(store.writesStopped());
+  for (uint32_t k = 60; k < n; ++k) EXPECT_TRUE(storedIntact(store, keyOf(k), kSmallWidth, kSmallHeight)) << k;
+  EXPECT_EQ(Commit::Stored, commitRecord(n, kSmallWidth, kSmallHeight));
+}
+
+TEST_F(GlyphStoreRoom, OpenRebuildsAFullIndexInsteadOfReclaimingTheRing) {
+  reinstall(smallLayout(256, 512, 65536));
+  uint32_t n = 0;
+  while (commitRecord(n, kSmallWidth, kSmallHeight) == Commit::Stored) ++n;
+  ASSERT_EQ(179u, n);
+  RoomWork work;
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
+  EXPECT_EQ(1u, work.reclaimed);  // the one reclaim that makes the rebuild pay, not the whole ring
+  EXPECT_TRUE(work.rebuilt);
+  EXPECT_EQ(14u, store.freeSegments());
+  EXPECT_EQ(119u, store.usedSlots());
+  for (uint32_t k = 60; k < n; ++k) EXPECT_TRUE(storedIntact(store, keyOf(k), kSmallWidth, kSmallHeight)) << k;
+}
+
+// --- Epochs ---
+
+namespace {
+
+// An index of 20,480 slots on a chip of its own: with one record a segment, the slots 2,048 epochs leave stale stay
+// under kRebuildStalePercent of it, so the epoch span is what calls for the rebuild.
+class GlyphStoreEpochs : public ::testing::Test {
+ protected:
+  void TearDown() override {
+    EXPECT_EQ(0u, flash.violations());
+    EXPECT_EQ(0u, flash.reprograms());
+  }
+
+  SimNorFlash flash{327680};
+  FlashGlyphStore store{flash};
+};
+
+}  // namespace
+
+TEST_F(GlyphStoreEpochs, TheIndexIsRebuiltBeforeEpochsWrap) {
+  const Layout layout = smallLayout(20480, kMaxProbe, 4 * kSectorBytes, kSectorBytes);
+  ASSERT_TRUE(installAndOpen(store, layout));
+  constexpr uint8_t kSide = 100;  // a 2,520-byte record: one to a segment
+  alignas(4) uint8_t buffer[4096] = {};
+  GlyphBatch batch{buffer, sizeof buffer};
+  const auto key = [](const uint32_t n) { return makeKey(n, 0, 0); };
+  uint32_t n = 0;
+  for (uint32_t round = 1; store.epoch() <= 5000; ++round) {
+    Commit commit;
+    for (;;) {
+      ASSERT_TRUE(stage(batch, key(n), kSide, kSide)) << n;
+      if ((commit = store.commit(batch)) != Commit::Stored) break;
+      ++n;
+    }
+    ASSERT_EQ(Commit::Full, commit) << round;
+    const uint32_t base = store.rebuildBase();
+    const bool spanDue = store.epoch() - base >= kRebuildEpochSpan;
+    ASSERT_EQ(Room::Enough, store.makeRoom(Budget::Open)) << round;
+    if (store.rebuildBase() != base) {
+      EXPECT_TRUE(spanDue) << round;
+    }
+    ASSERT_LT(store.epoch() - store.rebuildBase(), kRebuildEpochSpan + store.segmentCount()) << round;
+    ASSERT_LT(uint64_t{store.usedSlots() - store.liveSlots()} * 100,
+              uint64_t{layout.geometry.indexSlots} * kRebuildStalePercent)
+        << round;
+    if (round % 250 == 0) {
+      for (uint32_t k = 0; k < n; ++k) ASSERT_TRUE(absentOrIntact(store, key(k), kSide, kSide)) << k;
+      ASSERT_TRUE(storedIntact(store, key(n - 1), kSide, kSide)) << round;
+    }
+  }
+  EXPECT_EQ(2u, store.rebuilds());
+  for (uint32_t k = 0; k < n; ++k) ASSERT_TRUE(absentOrIntact(store, key(k), kSide, kSide)) << k;
 }
