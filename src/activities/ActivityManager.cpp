@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <BoardConfig.h>  // FREEINK_CAP_USB_MSC
+#include <HalCapabilities.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
 #include <Logging.h>
@@ -566,6 +567,12 @@ void ActivityManager::goToKOReaderSync() {
 }
 
 void ActivityManager::replaceWithReader(std::string path, ReturnHint hint) {
+  // A book opened from a list starts on a clean HALF where the board asks for one (see
+  // HalCapabilities::halfRefreshOnBookOpen). Not for a picture: the viewer refreshes it HALF
+  // itself, and an armed HALF would go on its loading popup instead.
+  if (HalCapabilities::halfRefreshOnBookOpen() && !ReaderActivity::isImageFile(path)) {
+    renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+  }
   returnHint = std::move(hint);
   hasReturnHint = true;
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path)));  // see goToReader()

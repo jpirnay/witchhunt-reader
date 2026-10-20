@@ -131,6 +131,26 @@ inline bool hasSelectableGrayscaleLut() {
 // probe. Mirrors SettingRequires::SunlightFadingPanel.
 inline bool panelFadesInSunlight() { return BoardConfig::ACTIVE.panelFadesInSunlight; }
 
+// A book opened from the Library, All Files or the bookmark list paints its first page with a HALF
+// refresh rather than the reader's usual FAST diff, so the list's covers do not ghost through it.
+// Home arms that HALF on every board (HomeActivity::onSelectBook); this extends it to the other
+// list screens (ActivityManager::replaceWithReader).
+//
+// Every panel ghosts under a FAST diff of a whole-screen change; what differs is what the clean
+// start costs. So this is a per-board cost decision, not a panel fact, and it names the board. On
+// the T5S3 the HALF adds about 1.5 s to the open (HALF ~2.8 s against FAST ~1.2 s, measured); on
+// the X3 it would add ~1.8 s (see GfxRenderer::ghostClearingHalfWorthwhile). Another board opts
+// in here.
+constexpr bool halfRefreshOnBookOpen(const BoardConfig::BoardProfile& p) {
+  return p.board == BoardConfig::Board::LilyGoT5S3;
+}
+inline bool halfRefreshOnBookOpen() { return halfRefreshOnBookOpen(BoardConfig::ACTIVE); }
+
+static_assert(halfRefreshOnBookOpen(BoardConfig::LILYGO_T5S3), "T5S3: a book opened from a list starts on a HALF");
+static_assert(!halfRefreshOnBookOpen(BoardConfig::XTEINK_X3) && !halfRefreshOnBookOpen(BoardConfig::XTEINK_X3_UC8279) &&
+                  !halfRefreshOnBookOpen(BoardConfig::XTEINK_X4) && !halfRefreshOnBookOpen(BoardConfig::XTEINK_X4_PRO),
+              "only the T5S3 pays a HALF to open a book from a list");
+
 // --- Input / chrome ----------------------------------------------------------
 
 // A touch panel is present. Thin alias over the SDK predicate so call sites read

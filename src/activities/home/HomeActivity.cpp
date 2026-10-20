@@ -912,8 +912,8 @@ bool HomeActivity::handleHomeTouch() {
 void HomeActivity::onSelectBook(const std::string& path) {
   // Arm a clean HALF baseline for the reader's first page. It diffs against whatever RED RAM holds
   // — this home frame — and a FAST diff of a dramatic home->page change leaves the home screen
-  // ghosting through. The reader's onEnter expects the launching activity to arm this (FileBrowser
-  // does via enforceExitFullRefresh; Home didn't, so books opened from Home ghosted on entry).
+  // ghosting through. The reader's onEnter expects the launching activity to arm this. Home does on
+  // every board; the other list screens only where the board asks (ActivityManager::replaceWithReader).
   renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
   ReturnHint hint;
   hint.target = ReturnTo::Home;

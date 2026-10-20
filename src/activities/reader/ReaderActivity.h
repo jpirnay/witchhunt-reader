@@ -30,7 +30,6 @@ class ReaderActivity final : public Activity {
   static bool isXtcFile(const std::string& path);
   static bool isTxtFile(const std::string& path);
   static bool isMdFile(const std::string& path);
-  static bool isImageFile(const std::string& path);
 
   static std::string extractFolderPath(const std::string& filePath);
   void goToLibrary(const std::string& fromBookPath = "");
@@ -43,6 +42,8 @@ class ReaderActivity final : public Activity {
   void onGoBack();
 
  public:
+  // A path this activity hands to the image viewer rather than to a reader.
+  static bool isImageFile(const std::string& path);
   static std::string sidecarCoverPath(const std::string& bookPath);
   static std::string bookCacheDir(const std::string& bookPath);
 
