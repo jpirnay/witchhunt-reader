@@ -181,13 +181,15 @@ TEST_F(GlyphStoreRecovery, ATornWipeWordReadsAsPending) {
 TEST(GlyphStoreRecoveryEdge, GarbageAtTheVeryEndLeavesTheLogFull) {
   SimNorFlash flash(kFlashBytes);
   FlashGlyphStore store(flash);
-  const Layout layout = smallLayout(1024, 512, 8192);
+  const Layout layout = smallLayout(1024, 512, 16384);
   ASSERT_TRUE(install(store, layout));
-  writeRawRecord(flash, layout, 0, makeKey('a', 0, 0), 9, 12);
+  // Records up to the last 8 KB, so the scan's window past the walk's end reaches the log's last byte.
+  for (uint32_t at = 0; at < 8192; at += recordSize(9, 12))
+    writeRawRecord(flash, layout, at, makeKey('a', 0, 0), 9, 12);
   const uint8_t junk = 0x00;
-  ASSERT_TRUE(flash.program(layout.geometry.logOffset + 8190, &junk, 1));
+  ASSERT_TRUE(flash.program(layout.geometry.logOffset + 16383, &junk, 1));
   ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
-  EXPECT_EQ(8192u, store.logUsed());
+  EXPECT_EQ(16384u, store.logUsed());
   EXPECT_EQ(0u, flash.violations());
   EXPECT_EQ(0u, flash.reprograms());
 }

@@ -30,7 +30,9 @@ constexpr uint32_t kMagic = 0x54545043;  // "CPTT"
 /// 3: the mode is a style block's, not the store's (2c-4): StyleInfo holds it, and in SD mode the file the outlines
 /// come from and where they are; Geometry lost its mode, StyleInfo its table map. An older store reads as not
 /// installed and is installed over.
-constexpr uint16_t kFormatVersion = 3;
+/// 4: the log is a ring of segments, each opened by a SegmentHeader; a glyph slot's value packs its segment's epoch
+/// with the record's offset; the state sector keeps a journal of index rebuilds.
+constexpr uint16_t kFormatVersion = 4;
 constexpr uint8_t kModeFlash = 0;  ///< a style block holds the style's whole TTF
 constexpr uint8_t kModeSd = 1;     ///< it holds the tables; the outlines are read from the TTF file on the SD card
 /// Style blocks of every family together: two families of four, or a body of four and four one-style accent
@@ -53,11 +55,40 @@ constexpr uint32_t kSlotBytes = 8;
 constexpr uint32_t kSlotsPerPage = kPageBytes / kSlotBytes;  // 8,192
 constexpr uint32_t kMaxProbe = 128;         ///< a longer chain counts as full; tables have at least this many slots
 constexpr uint32_t kIndexLoadPercent = 70;  ///< more slots in use than this counts as full
-constexpr uint32_t kLogFullPercent = 95;
 
 constexpr uint32_t kRecordHeaderBytes = 20;  ///< u32 key + 16-byte EpdGlyph
 constexpr uint32_t kMaxBitmapBytes = 8192;
 constexpr uint32_t kMaxRecordBytes = kRecordHeaderBytes + kMaxBitmapBytes;
+
+/// The log is a ring of equal segments, each a whole number of sectors (the unit that is erased) and opened by a
+/// SegmentHeader. A ring needs room to move: at least kMinSegments, and few enough that the segment table stays small.
+constexpr uint32_t kSegmentMagic = 0x544D4753;  // "SGMT"
+constexpr uint32_t kSegmentHeaderBytes = 16;
+constexpr uint32_t kMinSegments = 4;
+constexpr uint32_t kMaxSegments = 64;
+/// Segments kept erased and ready, so a batch never waits for an erase.
+constexpr uint32_t kFreeSegmentsTarget = 2;
+
+/// A glyph slot's value: the record's bitmap offset in the log, in 4-byte units (20 bits, so a log of at most 4 MiB),
+/// under the low 12 bits of the epoch of the segment holding it. A reused segment gets a new epoch, so a slot still
+/// pointing into its old contents no longer matches and reads as stale. A bitmap lies past its segment and record
+/// headers, so the value is never kNoGlyph; it reads as kErased only for a bitmap starting in the log's last 4 bytes
+/// under epoch 0xFFF.
+constexpr uint32_t kSlotOffsetBits = 20;
+constexpr uint32_t kSlotEpochMask = 0xFFF;
+constexpr uint32_t kMaxLogBytes = 1u << (kSlotOffsetBits + 2);
+constexpr uint32_t glyphSlotValue(const uint32_t epoch, const uint32_t dataOffset) {
+  return ((epoch & kSlotEpochMask) << kSlotOffsetBits) | (dataOffset >> 2);
+}
+constexpr uint32_t slotDataOffset(const uint32_t value) { return (value & ((1u << kSlotOffsetBits) - 1)) << 2; }
+constexpr uint32_t slotEpoch(const uint32_t value) { return value >> kSlotOffsetBits; }
+
+/// Index rebuilds: epochs older than kRebuildEpochSpan behind the newest could alias a live one after the 12-bit
+/// epoch wraps, so the index is rebuilt before that. Slots count as stale-by-age from kCountsAtPercent of the span,
+/// and a rebuild pays once kRebuildStalePercent of the index's slots are stale.
+constexpr uint32_t kRebuildEpochSpan = 2048;
+constexpr uint32_t kCountsAtPercent = 75;
+constexpr uint32_t kRebuildStalePercent = 12;
 
 constexpr uint32_t kMinLogPages = 4;
 constexpr uint32_t kPairPages = 1;
@@ -134,6 +165,7 @@ struct Geometry {
   uint32_t pairSlots;
   uint32_t logOffset;
   uint32_t logSize;
+  uint32_t segmentBytes;  ///< the log is logSize / segmentBytes segments
 };
 
 /// Bump kFormatVersion whenever this layout changes.
@@ -148,6 +180,17 @@ struct Header {
 };
 static_assert(sizeof(Header) <= kSectorBytes, "the header fits its sector");
 
+/// The first 16 bytes of every log segment. The epoch is written with its complement, so a torn write fails the check;
+/// `retired` is programmed 0 before the segment is erased, so a cut during the erase never leaves a half-erased segment
+/// that still reads as live.
+struct SegmentHeader {
+  uint32_t magic;  ///< kSegmentMagic
+  uint32_t epoch;
+  uint32_t epochCheck;  ///< ~epoch
+  uint32_t retired;     ///< kErased while the segment is live
+};
+static_assert(sizeof(SegmentHeader) == kSegmentHeaderBytes, "a segment header is 16 bytes");
+
 /// A face-table entry. In use once `claimed` reads zero. The face is written first and `claimed` last, so
 /// an entry cut short reads as neither free nor in use, and is never claimed again.
 struct FaceEntry {
@@ -159,6 +202,15 @@ static_assert(sizeof(FaceEntry) == 8, "a face entry is 8 bytes");
 constexpr uint32_t kFaceTableOffset = kStateSectorOffset;
 constexpr uint32_t kWipeWordOffset = kFaceTableOffset + kFaceEntries * sizeof(FaceEntry);
 static_assert(kFaceEntries <= 32, "claimed faces are tracked in a 32-bit mask");
+
+/// An index rebuild, journaled in the rest of the state sector after the wipe word: the table (`base`) being rebuilt
+/// and how far it is (`done`). Each entry is programmed once, so the journal reads as a log of progress.
+struct JournalEntry {
+  uint32_t base;
+  uint32_t done;
+};
+constexpr uint32_t kJournalOffset = kWipeWordOffset + 4;
+constexpr uint32_t kJournalEntries = (kStateSectorOffset + kSectorBytes - kJournalOffset) / sizeof(JournalEntry);
 
 inline uint32_t fnv1a(const void* data, const size_t len, uint32_t hash = 2166136261u) {
   const auto* bytes = static_cast<const uint8_t*>(data);

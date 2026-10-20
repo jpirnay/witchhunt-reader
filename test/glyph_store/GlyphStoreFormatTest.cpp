@@ -60,6 +60,22 @@ TEST(GlyphStoreFormat, NoGlyphIsAValueOnlyACompleteWriteProduces) {
   EXPECT_GE(kRecordHeaderBytes, 1u);  // a record slot holds a dataOffset, which is never 0
 }
 
+TEST(GlyphStoreFormat, ASlotValuePacksTheEpochAndTheOffset) {
+  const uint32_t value = glyphSlotValue(0x1234, 0x3FFFFC);
+  EXPECT_EQ(0x234u, slotEpoch(value));  // the low 12 bits
+  EXPECT_EQ(0x3FFFFCu, slotDataOffset(value));
+}
+
+TEST(GlyphStoreFormat, AGlyphSlotValueIsNeverNoGlyphOrErased) {
+  // The first record's bitmap is past its segment header and its own header; the last bitmap that is not in the log's
+  // final 4 bytes ends inside 4 MiB.
+  const uint32_t first = kSegmentHeaderBytes + kRecordHeaderBytes;
+  for (uint32_t epoch : {0u, 1u, 0xFFFu, 0x1000u}) {
+    EXPECT_NE(kNoGlyph, glyphSlotValue(epoch, first));
+    EXPECT_NE(kErased, glyphSlotValue(epoch, kMaxLogBytes - 8));
+  }
+}
+
 TEST(GlyphStoreFormat, HomeSlotMatchesFibonacciHashingForPowersOfTwo) {
   for (const uint32_t bits : {10u, 13u, 15u}) {
     const uint32_t slots = 1u << bits;
@@ -77,9 +93,11 @@ TEST(GlyphStoreFormat, HomeSlotStaysInRangeForAnySlotCount) {
 
 TEST(GlyphStoreFormat, HeaderLayoutIsStable) {
   // Bump kFormatVersion when any of these change.
-  EXPECT_EQ(3u, kFormatVersion);
-  EXPECT_EQ(312u, sizeof(Header));
-  EXPECT_EQ(308u, offsetof(Header, check));
+  EXPECT_EQ(4u, kFormatVersion);
+  EXPECT_EQ(316u, sizeof(Header));
+  EXPECT_EQ(312u, offsetof(Header, check));
+  static_assert(sizeof(SegmentHeader) == kSegmentHeaderBytes, "a segment header is 16 bytes");
+  EXPECT_EQ(479u, kJournalEntries);
   EXPECT_EQ(32u, sizeof(StyleInfo));
   EXPECT_EQ(8u, sizeof(Slot));
   EXPECT_EQ(8u, sizeof(FaceEntry));
@@ -117,6 +135,16 @@ TEST(GlyphStorePlan, CjkSdModeGetsTheLargestLog) {
   EXPECT_EQ(8 * 65536u, g.indexOffset);
   EXPECT_EQ(kSlotsPerPage, g.indexSlots);
   EXPECT_EQ(21 * 65536u, g.logSize);
+}
+
+TEST(GlyphStorePlan, TheLogIsCutIntoPageSegments) {
+  Layout layout{};
+  ASSERT_TRUE(planLayout(input(kModeSd, 1, 430000), layout));
+  const Geometry& g = layout.geometry;
+  EXPECT_EQ(kPageBytes, g.segmentBytes);
+  EXPECT_EQ(0u, g.logOffset % kPageBytes);
+  EXPECT_EQ(0u, g.logSize % g.segmentBytes);
+  EXPECT_GE(g.logSize / g.segmentBytes, kMinSegments);
 }
 
 TEST(GlyphStorePlan, LargeStylesShrinkTheLog) {

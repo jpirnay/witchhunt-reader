@@ -24,9 +24,10 @@ constexpr uint32_t kFlashBytes = 262144;
 constexpr uint8_t kTestSizes = 4;
 constexpr uint32_t testPpem(const uint8_t size) { return (40u + size) << 6; }
 
-/// A small store: one 4 KB style at 64 KB, then the index, the pair index and the log, each on a sector.
+/// A small store: one 4 KB style at 64 KB, then the index, the pair index and the log, each on a sector. The log is
+/// logBytes / segmentBytes segments (16 of one sector by default).
 inline glyphstore::Layout smallLayout(const uint32_t indexSlots = 1024, const uint32_t pairSlots = 512,
-                                      const uint32_t logBytes = 65536) {
+                                      const uint32_t logBytes = 65536, const uint32_t segmentBytes = 4096) {
   glyphstore::Layout layout{};
   glyphstore::Geometry& g = layout.geometry;
   g.styleCount = 1;
@@ -38,6 +39,7 @@ inline glyphstore::Layout smallLayout(const uint32_t indexSlots = 1024, const ui
   g.pairSlots = pairSlots;
   g.logOffset = g.pairOffset + glyphstore::alignUp(pairSlots * glyphstore::kSlotBytes, glyphstore::kSectorBytes);
   g.logSize = logBytes;
+  g.segmentBytes = segmentBytes;
   return layout;
 }
 

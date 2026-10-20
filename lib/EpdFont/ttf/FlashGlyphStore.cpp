@@ -70,6 +70,12 @@ bool validGeometry(const Geometry& g, const uint32_t flashSize) {
   if (g.indexSlots < kMaxProbe || g.pairSlots < kMaxProbe || g.logSize == 0 || g.logSize % kSectorBytes != 0) {
     return false;
   }
+  // The log is a ring of 4 to 64 equal segments of whole sectors, and its offsets fit a slot value.
+  if (g.segmentBytes < kSectorBytes || g.segmentBytes % kSectorBytes != 0 || g.logSize % g.segmentBytes != 0 ||
+      g.logSize / g.segmentBytes < kMinSegments || g.logSize / g.segmentBytes > kMaxSegments ||
+      g.logSize > kMaxLogBytes) {
+    return false;
+  }
   if (g.indexOffset % kSectorBytes != 0 || g.pairOffset % kSectorBytes != 0 || g.logOffset % kSectorBytes != 0) {
     return false;
   }
@@ -462,7 +468,7 @@ FlashGlyphStore::Commit FlashGlyphStore::writeBatch(GlyphBatch& batch) {
     }
   }
   if (writesStopped_) return Commit::Full;
-  if (logUsed_ + batch.used_ > limit(geometry_.logSize, kLogFullPercent) ||
+  if (logUsed_ + batch.used_ > geometry_.logSize ||
       usedSlots_ + batch.count_ > limit(geometry_.indexSlots, kIndexLoadPercent)) {
     LOG_INF("GST", "full: log %u of %u B, %u of %u slots; wipe pending", static_cast<unsigned>(logUsed_),
             static_cast<unsigned>(geometry_.logSize), static_cast<unsigned>(usedSlots_),

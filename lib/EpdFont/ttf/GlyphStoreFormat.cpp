@@ -57,6 +57,7 @@ bool planLayout(const PlanInput& in, Layout& out) {
     g.pairSlots = kPairPages * kSlotsPerPage;
     g.logOffset = g.pairOffset + kPairPages * kPageBytes;
     g.logSize = log * kPageBytes;
+    g.segmentBytes = kPageBytes;  // the log starts on a page, so a page is the largest unit that fits
     return true;
   }
   out = Layout{};
