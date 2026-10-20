@@ -165,6 +165,26 @@ inline bool storedIntact(const FlashGlyphStore& store, const uint32_t key, const
   return true;
 }
 
+/// The helper ring's glyphs: record n is a kRingWidth x kRingHeight glyph under ringKey(n), a 600-byte record, six to
+/// a 4 KB segment (3,616 of its 4,096 bytes).
+constexpr uint8_t kRingWidth = 40;
+constexpr uint8_t kRingHeight = 58;
+constexpr uint32_t ringKey(const uint32_t n) { return glyphstore::makeKey(0x4E00 + n, 0, 0); }
+
+/// Fills an open store, from record 0, until one segment is free: the counts are kept, the tail is segment 0 and copies
+/// have room. On smallLayout(), 85 records: segments 0-13 full (six each), one record in segment 14. Returns how many
+/// were stored.
+inline uint32_t fillRing(FlashGlyphStore& store, GlyphBatch& batch) {
+  uint32_t n = 0;
+  while (store.freeSegments() > 1 && n < 200) {
+    EXPECT_TRUE(stage(batch, ringKey(n), kRingWidth, kRingHeight)) << n;
+    EXPECT_EQ(Commit::Stored, store.commit(batch)) << n;
+    ++n;
+  }
+  EXPECT_TRUE(store.countsKept());
+  return n;
+}
+
 /// Keys with the same home slot, found by search: a probe-chain test needs real collisions.
 inline std::vector<uint32_t> collidingKeys(const uint32_t slots, const size_t count) {
   std::vector<uint32_t> keys;

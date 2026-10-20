@@ -50,9 +50,9 @@ using Room = FlashGlyphStore::Room;
 using RoomWork = FlashGlyphStore::RoomWork;
 
 constexpr uint32_t kFirst = 0x4E00;  // the code point of the first glyph each test stores
-// The reclaim tests' glyphs: a 600-byte record, six to a 4 KB segment (3,616 of its 4,096 bytes).
-constexpr uint8_t kWidth = 40;
-constexpr uint8_t kHeight = 58;
+// The reclaim tests' glyphs: the helper ring's.
+constexpr uint8_t kWidth = kRingWidth;
+constexpr uint8_t kHeight = kRingHeight;
 
 class GlyphStoreRoom : public StoreTest {
  protected:
@@ -82,7 +82,7 @@ class GlyphStoreRoom : public StoreTest {
 
   // --- The reclaim tests: record n is a kWidth x kHeight glyph under keyOf(n). ---
 
-  static uint32_t keyOf(const uint32_t n) { return makeKey(kFirst + n, 0, 0); }
+  static uint32_t keyOf(const uint32_t n) { return ringKey(n); }
 
   Commit commitRecord(const uint32_t n, const uint8_t width = kWidth, const uint8_t height = kHeight) {
     EXPECT_TRUE(stage(batch, keyOf(n), width, height)) << n;
@@ -107,16 +107,10 @@ class GlyphStoreRoom : public StoreTest {
     for (uint32_t i = 0; i < times; ++i) store.noteDrawn(glyph);
   }
 
-  // Fills the ring from record 0 until one segment is free: the counts are kept, the tail is segment 0 (records 0-5)
-  // and copies have room. 85 records: segments 0-13 full, one record in segment 14.
+  // The helper ring: segments 0-13 full, one record in segment 14, one segment free.
   uint32_t fillRing() {
-    uint32_t n = 0;
-    while (store.freeSegments() > 1 && n < 200) {
-      EXPECT_EQ(Commit::Stored, commitRecord(n)) << n;
-      ++n;
-    }
+    const uint32_t n = gst_test::fillRing(store, batch);
     EXPECT_EQ(85u, n);
-    EXPECT_TRUE(store.countsKept());
     return n;
   }
 
