@@ -1,9 +1,8 @@
 # CJK fonts, CFF outlines, synthetic bold and a glyph store that makes room: design
 
-Status (2026-10-20): first version approved; revised the same day and awaiting approval again. The revision adds
-CFF outlines (section 9) and ships the CJK families as CFF (`.otf`). It also replaces "empty the full store at the
-next chapter" with a store that makes room (section 8), and puts the serial test API first in the order of work
-(section 13).
+Status (2026-10-20): approved. The first version was approved, then revised the same day and approved again:
+CFF outlines (section 9), the CJK families as CFF (`.otf`), a glyph store that makes room instead of being
+emptied whole (section 8), and the serial test API first in the order of work (section 13, PR #531).
 
 Working material, like every spec here: when the work merges, lasting parts move to reference docs, open
 items to `docs/future_work/cjk.md`, and this file is deleted.
