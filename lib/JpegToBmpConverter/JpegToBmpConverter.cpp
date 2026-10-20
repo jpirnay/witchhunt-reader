@@ -802,6 +802,14 @@ static bool chooseProgressiveShift(const OutputTarget* targets, const int count,
   return true;
 }
 
+// What a progressive cover's decode read, and whether through the read windows.
+static void logCoverReads(const ProgressiveJpeg::DecodeStats& stats, const bool windows) {
+  LOG_DBG("JPG", "Progressive cover read %u times / %u bytes (%s)", static_cast<unsigned>(stats.reads),
+          static_cast<unsigned>(stats.bytesRead), windows ? "read windows" : "shared buffer");
+  (void)stats;  // only read by LOG_DBG, which compiles out at lower log levels
+  (void)windows;
+}
+
 // Full progressive decode into the BMP pipeline. Returns false without writing anything when no
 // scale's workspace fits the heap, so the caller can fall back to the DC preview.
 static bool convertFromProgressive(FsFile& jpegFile, const OutputTarget* targets, const int count,
@@ -832,6 +840,8 @@ static bool convertFromProgressive(FsFile& jpegFile, const OutputTarget* targets
                               ProgressiveJpeg::ReadWindows windows;
                               windows.take(scratch);
                               windows.applyTo(options);
+                              ProgressiveJpeg::DecodeStats stats;
+                              options.stats = &stats;
                               const auto result =
                                   ProgressiveJpeg::decode(jpegFile, options, progressiveBandOutput, &sinks);
                               if (result != ProgressiveJpeg::Result::Ok || sinks.error) {
@@ -839,6 +849,7 @@ static bool convertFromProgressive(FsFile& jpegFile, const OutputTarget* targets
                                         ProgressiveJpeg::resultName(result), sinks.error ? 1 : 0);
                                 return false;
                               }
+                              logCoverReads(stats, windows.held());
                               return true;
                             });
 }
@@ -1058,7 +1069,8 @@ struct JpegThumbSession::Impl {
   TjpgJob tjpg;
   RowPipeline pipeline;
   ProgressiveJpeg::ReadWindows windows;  // taken after the pipeline's block
-  ProgressiveJpeg::Decoder decoder;      // ends (and rewinds the file) before the rest goes
+  ProgressiveJpeg::DecodeStats stats;
+  ProgressiveJpeg::Decoder decoder;  // ends (and rewinds the file) before the rest goes
   JDCURSOR cursor{};
   // TJpgDec reads the file as a stream; whatever the caller reads between slices must not move it.
   uint32_t streamPos = 0;
@@ -1106,6 +1118,7 @@ std::unique_ptr<JpegThumbSession> JpegThumbSession::begin(FsFile& jpegFile,
     // A scan each to read through, from what the region has left after the workspace and the pipeline.
     impl->windows.take(scratch);
     impl->windows.applyTo(options);
+    options.stats = &impl->stats;
     const auto result = impl->decoder.begin(jpegFile, options, progressiveBandOutput, &impl->pipeline.sinks());
     if (result != ProgressiveJpeg::Result::Ok) {
       LOG_ERR("JPG", "Progressive cover session refused (%s)", ProgressiveJpeg::resultName(result));
@@ -1150,6 +1163,7 @@ JpegThumbSession::Status JpegThumbSession::continueSteps(const uint16_t units) {
       return s.status;
     }
     s.decoder.end();
+    logCoverReads(s.stats, s.windows.held());
     finished = true;
   } else {
     FsFile& file = *s.tjpg.io.file;
