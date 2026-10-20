@@ -141,7 +141,9 @@ void OpdsParser::startElement(void* userData, const char* name, const char** att
         }
       } else if (rel && strcmp(rel, "next") == 0 && !self->inEntry) {
         self->nextPageUrl = href;
-      } else if (rel && strcmp(rel, "previous") == 0 && !self->inEntry) {
+      } else if (rel && (strcmp(rel, "previous") == 0 || strcmp(rel, "prev") == 0) && !self->inEntry) {
+        // The IANA link relations list "prev" beside "previous", and some catalogs use only that.
+        // From witchling-reader commit 18e5f3b1 (syfq91).
         self->prevPageUrl = href;
       }
 

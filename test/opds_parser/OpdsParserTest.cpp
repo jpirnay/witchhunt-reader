@@ -57,6 +57,14 @@ bool assertSingleFormat(const OpdsEntry& entry, const char* formatKey, const cha
   }
   return true;
 }
+
+std::vector<OpdsEntry> parseFeed(const char* xml, OpdsParser& parser) {
+  std::vector<OpdsEntry> entries;
+  parser.onEntryParsed = [&](OpdsEntry e) { entries.push_back(std::move(e)); };
+  parser.write(reinterpret_cast<const uint8_t*>(xml), strlen(xml));
+  parser.flush();
+  return entries;
+}
 }  // namespace
 
 TEST(OpdsParser, EpubExtension) {
@@ -282,4 +290,30 @@ TEST(OpdsParser, FirstAuthorIsKept) {
   ASSERT_TRUE(!parser.error());
   ASSERT_EQ(entries.size(), static_cast<size_t>(1));
   EXPECT_EQ(entries.front().author, "Leo Tolstoy");
+}
+
+// The IANA link relations list "prev" beside "previous"; a catalog that uses it lost its "Previous
+// page" row. From witchling-reader commit 18e5f3b1 (syfq91).
+TEST(OpdsParser, PrevRelIsAPreviousPageLink) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <link rel="prev" href="/opds/catalog?p=2" type="application/atom+xml;profile=opds-catalog"/>
+  <link rel="next" href="/opds/catalog?p=4" type="application/atom+xml;profile=opds-catalog"/>
+</feed>)";
+  OpdsParser parser;
+  parseFeed(xml, parser);
+  ASSERT_FALSE(parser.error());
+  EXPECT_EQ(parser.getPrevPageUrl(), "/opds/catalog?p=2");
+  EXPECT_EQ(parser.getNextPageUrl(), "/opds/catalog?p=4");
+}
+
+TEST(OpdsParser, PreviousRelIsStillAPreviousPageLink) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <link rel="previous" href="/opds/catalog?p=1" type="application/atom+xml;profile=opds-catalog"/>
+</feed>)";
+  OpdsParser parser;
+  parseFeed(xml, parser);
+  ASSERT_FALSE(parser.error());
+  EXPECT_EQ(parser.getPrevPageUrl(), "/opds/catalog?p=1");
 }
