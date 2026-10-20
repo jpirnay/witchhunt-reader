@@ -145,8 +145,11 @@ OpdsEntry readEntryFromCache(HalFile& f) {
 // Stores the root feed's nav entries and search template so the browser can
 // open instantly without a network round-trip. The filename is derived from a
 // 32-bit FNV-1a hash of the server URL. Format:
-//   { "v": 1, "st": "<search-template>", "nav": [{"t":"<title>","h":"<href>"}] }
+//   { "v": 2, "st": "<search-template>", "nav": [{"t":"<title>","h":"<href>"}] }
 // Increment "v" if the schema changes so old caches are automatically discarded.
+// Version 2: "st" from an OpenSearch description is its Atom template (OpenSearch::searchTemplate());
+// a version 1 cache may hold the description's suggestions or HTML one, which no search can follow.
+constexpr int OPDS_DISCOVERY_VERSION = 2;
 
 std::string opdsDiscoveryPath(const std::string& serverUrl) {
   uint32_t h = 2166136261u;
@@ -172,7 +175,7 @@ bool loadOpdsDiscovery(const std::string& serverUrl, std::string& searchTemplate
   JsonDocument doc;
   if (deserializeJson(doc, json)) return false;
 
-  if (doc["v"].as<int>() != 1) return false;  // unknown or pre-versioned format — discard
+  if (doc["v"].as<int>() != OPDS_DISCOVERY_VERSION) return false;  // unknown or pre-versioned format — discard
 
   searchTemplateOut = doc["st"] | std::string{};
 
@@ -202,7 +205,7 @@ void saveOpdsDiscovery(const std::string& serverUrl, const std::string& searchTe
   Storage.mkdir("/.crosspoint");
 
   JsonDocument doc;
-  doc["v"] = 1;
+  doc["v"] = OPDS_DISCOVERY_VERSION;
   doc["st"] = searchTemplate;
   JsonArray arr = doc["nav"].to<JsonArray>();
   for (const auto& [title, href] : navEntries) {
@@ -1048,12 +1051,14 @@ void OpdsBookBrowserActivity::fetchOsdTemplate(const std::string& osdUrl) {
   }
 
   const std::string templateUrl = OpenSearch::searchTemplate(content.data(), content.size());
-  if (!templateUrl.empty()) {
-    searchTemplate = UrlUtils::buildUrl(osdUrl, templateUrl);
-    if (!initialQuery_.empty()) {
-      performSearch(std::move(initialQuery_));
-      initialQuery_.clear();
-    }
+  if (templateUrl.empty()) {
+    LOG_INF("OPDS", "OSD has no Atom search template, so the catalog offers no search: %s", osdUrl.c_str());
+    return;
+  }
+  searchTemplate = UrlUtils::buildUrl(osdUrl, templateUrl);
+  if (!initialQuery_.empty()) {
+    performSearch(std::move(initialQuery_));
+    initialQuery_.clear();
   }
 }
 
