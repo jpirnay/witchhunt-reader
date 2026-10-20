@@ -59,6 +59,10 @@ char g_lastResponsePreview[160] = {0};
 // under 2xx, and 404 otherwise means a legitimate "no stored progress".
 bool g_lastInvalidBody = false;
 
+// Set when performKoRequest() did not follow a redirect to https for want of heap for the
+// handshake; see there.
+bool g_redirectRefusedForHeap = false;
+
 std::string previewBody(const char* body, const size_t maxLen = 120) {
   if (!body || !*body) {
     return "<empty>";
@@ -218,6 +222,20 @@ std::string base64Encode(const std::string& input) {
   return out;
 }
 
+// The threshold, against the heap snapshot beginRequest() or refreshHeapSnapshot() took. On a
+// shortfall it logs and records ESP_ERR_NO_MEM, which lastFailureDetail() reports.
+bool contigHeapCoversHandshake() {
+  const unsigned requiredContig = KOReaderSyncClient::MIN_CONTIG_HEAP_FOR_TLS;
+  if (KOReaderSyncClient::lastContigHeapAtFailure + TLS_CONTIG_HEAP_TOLERANCE < requiredContig) {
+    LOG_ERR("KOSync", "Insufficient contiguous heap for TLS: %u available, %u required",
+            KOReaderSyncClient::lastContigHeapAtFailure, requiredContig);
+    // Synthesize an esp_err_t-shaped value so the diagnostic detail string is uniform.
+    KOReaderSyncClient::lastEspError = ESP_ERR_NO_MEM;
+    return false;
+  }
+  return true;
+}
+
 // Verify there is enough contiguous heap to attempt a TLS handshake. The wolfSSL
 // handshake peaks on a contiguous block during the ECC key exchange and chain
 // verify. Total free heap can mislead because fragmentation leaves no single block
@@ -229,10 +247,15 @@ std::string base64Encode(const std::string& input) {
 // wolfSSL handshake's measured peak contiguous demand is 12-16 KB (logged by the
 // "TLS handshake heap" line below). See KOReaderSyncClient.h for the derivation.
 bool checkHeapForTls() {
+  // A plain-http server runs no handshake. One that redirects to https does, on that hop, which
+  // performKoRequest() checks when it is reached.
+  if (!crosspoint::SecureHttpClient::isHttps(KOREADER_STORE.getBaseUrl())) {
+    return true;
+  }
+
   const bool hasReusableSession = g_keepSessionOpen && g_sessionHttp != nullptr;
   const bool isUpload =
       (KOReaderSyncClient::lastOperation && strcmp(KOReaderSyncClient::lastOperation, "update progress") == 0);
-  const unsigned requiredContig = KOReaderSyncClient::MIN_CONTIG_HEAP_FOR_TLS;
 
   // Upload can often reuse the already-established GET connection. In that case
   // a full handshake allocation is typically unnecessary, so avoid failing fast
@@ -242,14 +265,7 @@ bool checkHeapForTls() {
   }
 
   // beginRequest() already populated lastContigHeapAtFailure for the diagnostic path.
-  if (KOReaderSyncClient::lastContigHeapAtFailure + TLS_CONTIG_HEAP_TOLERANCE < requiredContig) {
-    LOG_ERR("KOSync", "Insufficient contiguous heap for TLS: %u available, %u required",
-            KOReaderSyncClient::lastContigHeapAtFailure, requiredContig);
-    // Synthesize an esp_err_t-shaped value so the diagnostic detail string is uniform.
-    KOReaderSyncClient::lastEspError = ESP_ERR_NO_MEM;
-    return false;
-  }
-  return true;
+  return contigHeapCoversHandshake();
 }
 
 void refreshHeapSnapshot() {
@@ -290,7 +306,8 @@ void applyAuthHeaders(crosspoint::SecureHttpClient& http) {
 //   ESP_OK              : got an HTTP response (any status)
 //   KO_ERR_CONNECT: connect/transport failure (retryable)
 //   KO_ERR_EAGAIN : timeout/truncated mid-transfer (retryable)
-//   ESP_ERR_NO_MEM      : client alloc failure
+//   ESP_ERR_NO_MEM      : client alloc failure, or a redirect to https left unfollowed for want of
+//                         heap for its handshake
 // method: "GET" | "POST" | "PUT". contentType/body empty for GET.
 esp_err_t performKoRequest(const char* method, const std::string& url, const char* contentType, const std::string& body,
                            std::string& outBody) {
@@ -341,6 +358,20 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   if (contentType && *contentType) {
     http->addHeader("Content-Type", contentType);
   }
+  // A sync URL typed without a scheme starts out as http (KOReaderCredentialStore::getBaseUrl())
+  // and counts on the server to redirect it to https, so a request checkHeapForTls() let through as
+  // plain http can still end in a handshake. The same threshold applies before that hop.
+  g_redirectRefusedForHeap = false;
+  if (crosspoint::SecureHttpClient::isHttps(url)) {
+    http->setRedirectFilter(nullptr);
+  } else {
+    http->setRedirectFilter([](const std::string& next) {
+      if (!crosspoint::SecureHttpClient::isHttps(next)) return true;
+      refreshHeapSnapshot();
+      g_redirectRefusedForHeap = !contigHeapCoversHandshake();
+      return !g_redirectRefusedForHeap;
+    });
+  }
 
   // --- TLS handshake heap telemetry (gate health) ---
   // Reports the wolfSSL handshake's ACTUAL contiguous-heap trough vs the
@@ -358,6 +389,12 @@ esp_err_t performKoRequest(const char* method, const std::string& url, const cha
   const uint32_t requestStartMs = millis();
   const int rc = http->request(method, url, body);
   const uint32_t elapsedMs = millis() - requestStartMs;
+  if (g_redirectRefusedForHeap) {
+    // The redirect's 3xx is not the server's answer. Reported as a refusal before the first hop
+    // is: no status, ESP_ERR_NO_MEM, which lastFailureDetail() words as low memory.
+    LOG_ERR("KOSync", "%s %s redirects to https; not followed without the heap for a handshake", method, url.c_str());
+    return ESP_ERR_NO_MEM;
+  }
 
   const size_t troughLargest = http->lastHandshakeMinLargest();
   const bool didHandshake = (troughLargest != troughBefore) && (troughLargest != SIZE_MAX);
