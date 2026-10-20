@@ -272,6 +272,7 @@ void FlashGlyphStore::close() {
   geometry_ = Geometry{};
   resetRing();
   usedSlots_ = usedPairs_ = claimedFaces_ = 0;
+  dropCounts();
   open_ = false;
   wipePending_ = false;
   writesStopped_ = false;
@@ -558,6 +559,7 @@ FlashGlyphStore::Commit FlashGlyphStore::insertGlyphSlot(const uint32_t key, con
 
 FlashGlyphStore::Commit FlashGlyphStore::commit(GlyphBatch& batch) {
   const Commit result = batch.count_ == 0 ? Commit::Stored : writeBatch(batch);
+  keepCountsIfNeeded();
   batch.clear();  // the only place a batch is cleared, so no record is ever written twice
   return result;
 }
@@ -651,6 +653,81 @@ FlashGlyphStore::Commit FlashGlyphStore::markNoGlyph(const uint32_t key) {
     return Commit::Full;
   }
   return insertGlyphSlot(key, kNoGlyph);
+}
+
+// --- Use counts ---
+
+// The slot holding exactly this key and value, probed as find() does; UINT32_MAX when none.
+uint32_t FlashGlyphStore::findSlot(const uint32_t key, const uint32_t value) const {
+  if (!open_) return UINT32_MAX;
+  const uint32_t slots = geometry_.indexSlots;
+  uint32_t i = homeSlot(key, slots);
+  for (uint32_t probe = 0; probe < kMaxProbe; ++probe, i = nextSlot(i, slots)) {
+    const Slot slot = flashSlot(index_, i);
+    if (slotErased(slot)) break;
+    if (slot.key == key && slot.value == value) return i;
+  }
+  return UINT32_MAX;
+}
+
+void FlashGlyphStore::dropCounts() {
+  useCounts_.reset();
+  countsTried_ = false;
+  drawsCounted_ = 0;
+}
+
+// Counts are only wanted when room will have to be made: once the live segments reach kCountsAtPercent of the log, or
+// the free ones come within one of the target. One try a session: a refusal is not asked again until open().
+void FlashGlyphStore::keepCountsIfNeeded() {
+  if (!open_ || useCounts_ || countsTried_) return;
+  const uint32_t count = segmentCount();
+  if (uint64_t{live_} * 100 < uint64_t{count} * kCountsAtPercent && freeSegments() > kFreeSegmentsTarget + 1) return;
+  countsTried_ = true;
+  const uint32_t bytes = geometry_.indexSlots / 4;
+  useCounts_ = makeUniqueNoThrow<uint8_t[]>(bytes);
+  if (!useCounts_) {
+    LOG_ERR("GST", "no memory for the use counts (%u B); room is made without them", static_cast<unsigned>(bytes));
+    return;
+  }
+  LOG_INF("GST", "use counts kept (%u B): %u of %u segments live", static_cast<unsigned>(bytes),
+          static_cast<unsigned>(live_), static_cast<unsigned>(count));
+}
+
+void FlashGlyphStore::noteDrawn(const EpdGlyph* glyph) const {
+  if (!useCounts_ || !glyph) return;
+  // A record of the log: its EpdGlyph lies past a segment header and a key, and its key sits right before it.
+  const uintptr_t at = reinterpret_cast<uintptr_t>(glyph);
+  const uintptr_t base = reinterpret_cast<uintptr_t>(log_);
+  if (at < base + kSegmentHeaderBytes + 4 || at - base >= geometry_.logSize || (at - base) % 4 != 0) return;
+  const uint32_t offset = static_cast<uint32_t>(at - base) - 4;
+  const uint32_t key = flashU32(log_ + offset);
+  if (!isGlyphKey(key)) return;
+  const uint32_t dataOffset = glyph->dataOffset;
+  const uint32_t segment = dataOffset / geometry_.segmentBytes;
+  if (segment >= segmentCount() || dataOffset != offset + kRecordHeaderBytes) return;
+  const uint32_t value = glyphSlotValue(segEpoch_[segment], dataOffset);
+  if (validRecord(key, value) != glyph) return;
+  const uint32_t slot = findSlot(key, value);
+  if (slot == UINT32_MAX) return;
+  ++drawsCounted_;
+  uint8_t& byte = useCounts_[slot / 4];
+  const uint32_t shift = (slot % 4) * 2;
+  const uint32_t count = (byte >> shift) & 3u;
+  if (count < 3) byte = static_cast<uint8_t>(byte + (1u << shift));
+}
+
+uint8_t FlashGlyphStore::useCount(const uint32_t key) const {
+  if (!useCounts_ || !open_ || !isGlyphKey(key)) return 0;
+  const uint32_t slots = geometry_.indexSlots;
+  uint32_t i = homeSlot(key, slots);
+  for (uint32_t probe = 0; probe < kMaxProbe; ++probe, i = nextSlot(i, slots)) {
+    const Slot slot = flashSlot(index_, i);
+    if (slotErased(slot)) return 0;
+    if (slot.key != key) continue;
+    if (slot.value == kNoGlyph) return 0;
+    if (validRecord(key, slot.value)) return (useCounts_[i / 4] >> ((i % 4) * 2)) & 3u;
+  }
+  return 0;
 }
 
 // --- Faces ---
@@ -793,6 +870,7 @@ bool FlashGlyphStore::wipe() {
   }
   resetRing();
   usedSlots_ = usedPairs_ = claimedFaces_ = 0;
+  dropCounts();
   ++generation_;
   wipePending_ = false;
   writesStopped_ = false;

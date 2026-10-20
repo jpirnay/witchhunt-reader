@@ -6,13 +6,16 @@
 /// On-flash format of the TTF glyph store in the `spiffs` partition (magic "CPTT").
 ///
 ///   0            header sector: Header, written once per install
-///   4 KB         state sector: the face table, then the wipe word; a wipe erases it last
+///   4 KB         state sector: the face table, then the wipe word, then the journal of index rebuilds; a wipe
+///                erases it last
 ///   64 KB        style blocks, each starting on a 64 KB page so one maps alone (flash mode: the whole
 ///                TTF; SD mode: its tables behind a directory of their own), every family's styles in the set's
 ///                order, the SD-mode blocks after every flash-mode one
-///   indexOffset  glyph index: Slot {key, the record's dataOffset, or kNoGlyph}, open addressing
+///   indexOffset  glyph index: Slot {key, glyphSlotValue(its segment's epoch, the record's dataOffset), or
+///                kNoGlyph}, open addressing
 ///   pairOffset   kerning pair index: Slot {left << 16 | right, pairStyle(family, style) << 16 | font units}
-///   logOffset    append-only glyph records: [u32 key][EpdGlyph][2-bit bitmap], each 4-byte aligned
+///   logOffset    a ring of equal segments, each opened by a SegmentHeader (its epoch) and then appended with glyph
+///                records, [u32 key][EpdGlyph][2-bit bitmap], each 4-byte aligned and never crossing its segment's end
 ///
 /// Every byte is programmed at most once between erases. Erased flash reads 0xFF, so "erased" doubles as
 /// "empty". A power cut can only leave bytes with more 1 bits than were written (NorFlash.h); every marker

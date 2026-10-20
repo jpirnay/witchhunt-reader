@@ -133,6 +133,20 @@ class FlashGlyphStore {
   /// Records that the font has no glyph for this key: a slot with no record.
   Commit markNoGlyph(uint32_t key);
 
+  // --- Use counts ---
+
+  /// Counts one draw of `glyph`, a pointer find() handed out: adds one to its slot's count (at most 3) and to
+  /// drawsCounted(). Does nothing while counts are not kept, or for anything that is not a live record of the log.
+  /// Const because the font set draws through const paths; the counts are RAM, not store state.
+  void noteDrawn(const EpdGlyph* glyph) const;
+  /// Counts are kept from the commit that leaves the live segments at kCountsAtPercent of the log, or few free
+  /// segments, until close() or wipe(). Refused memory is logged once and not asked for again until open().
+  bool countsKept() const { return useCounts_ != nullptr; }
+  /// The count (0 to 3) of the slot find() answers with for `key`; 0 when counts are not kept or `key` is not stored.
+  uint8_t useCount(uint32_t key) const;
+  /// Draws counted since open(), saturated ones included.
+  uint32_t drawsCounted() const { return drawsCounted_; }
+
   // --- Faces ---
 
   /// The face-table index for `family` (its index in the set) at a pixels-per-em (26.6), claiming a free entry (a
@@ -204,6 +218,9 @@ class FlashGlyphStore {
   Commit insertGlyphSlot(uint32_t key, uint32_t value);
   Commit writeBatch(GlyphBatch& batch);
   bool faceClaimed(uint32_t key) const { return (claimedFaces_ >> glyphstore::keyFaceIndex(key)) & 1u; }
+  uint32_t findSlot(uint32_t key, uint32_t value) const;
+  void keepCountsIfNeeded();
+  void dropCounts();
   bool readFaceEntry(uint8_t i, glyphstore::FaceEntry& entry) const;
   bool eraseWritten(uint32_t offset, uint32_t len);
   bool isBlank(uint32_t sector) const;
@@ -242,5 +259,9 @@ class FlashGlyphStore {
   bool open_ = false;
   bool wipePending_ = false;
   bool writesStopped_ = false;
+  // Two bits an index slot, from the commit that nears a full ring. The pointee is changed from const noteDrawn().
+  std::unique_ptr<uint8_t[]> useCounts_;
+  bool countsTried_ = false;  // memory was asked for this session
+  mutable uint32_t drawsCounted_ = 0;
   std::unique_ptr<glyphstore::Header> installing_;  // written by finishInstall()
 };
