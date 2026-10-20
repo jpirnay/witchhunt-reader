@@ -72,7 +72,7 @@ TEST(GlyphStoreFormat, AGlyphSlotValueIsNeverNoGlyphOrErased) {
   const uint32_t first = kSegmentHeaderBytes + kRecordHeaderBytes;
   for (uint32_t epoch : {0u, 1u, 0xFFFu, 0x1000u}) {
     EXPECT_NE(kNoGlyph, glyphSlotValue(epoch, first));
-    EXPECT_NE(kErased, glyphSlotValue(epoch, kMaxLogBytes - 8));
+    EXPECT_NE(kErased, glyphSlotValue(epoch, kMaxLogBytes - kSectorBytes));
   }
 }
 

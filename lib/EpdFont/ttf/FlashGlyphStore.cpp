@@ -70,10 +70,11 @@ bool validGeometry(const Geometry& g, const uint32_t flashSize) {
   if (g.indexSlots < kMaxProbe || g.pairSlots < kMaxProbe || g.logSize == 0 || g.logSize % kSectorBytes != 0) {
     return false;
   }
-  // The log is a ring of 4 to 64 equal segments of whole sectors, and its offsets fit a slot value.
+  // The log is a ring of 4 to 64 equal segments of whole sectors, and under kMaxLogBytes so its offsets fit a slot
+  // value.
   if (g.segmentBytes < kSectorBytes || g.segmentBytes % kSectorBytes != 0 || g.logSize % g.segmentBytes != 0 ||
       g.logSize / g.segmentBytes < kMinSegments || g.logSize / g.segmentBytes > kMaxSegments ||
-      g.logSize > kMaxLogBytes) {
+      g.logSize >= kMaxLogBytes) {
     return false;
   }
   if (g.indexOffset % kSectorBytes != 0 || g.pairOffset % kSectorBytes != 0 || g.logOffset % kSectorBytes != 0) {

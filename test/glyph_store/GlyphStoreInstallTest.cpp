@@ -289,12 +289,15 @@ TEST_F(GlyphStoreInstall, AHeaderThatPassesItsCheckButDescribesOverlappingStyles
 }
 
 TEST_F(GlyphStoreInstall, ALayoutWithBadSegmentsIsRefused) {
-  SimNorFlash big(1u << 20);  // room for the 65-segment log below, so only its segment count refuses it
+  SimNorFlash big(5u << 20);  // room for every log below, so only its segment count or size refuses it
   FlashGlyphStore store(big);
   for (const uint32_t segment : {0u, 1000u, 24576u /* does not divide 64 KB */, 32768u /* 2 segments */}) {
     EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 65536, segment), kIdentityA, nullptr)) << segment;
   }
   // 65 segments: one past kMaxSegments.
   EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 65 * kSectorBytes, kSectorBytes), kIdentityA, nullptr));
+  // The log stays under kMaxLogBytes: 64 segments of 64 KB are exactly 4 MiB, 63 are not.
+  EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 64 * kPageBytes, kPageBytes), kIdentityA, nullptr));
+  EXPECT_TRUE(store.beginInstall(smallLayout(1024, 512, 63 * kPageBytes, kPageBytes), kIdentityA, nullptr));
   EXPECT_TRUE(store.beginInstall(smallLayout(1024, 512, 64 * kSectorBytes, kSectorBytes), kIdentityA, nullptr));
 }

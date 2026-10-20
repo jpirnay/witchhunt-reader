@@ -69,11 +69,11 @@ constexpr uint32_t kMaxSegments = 64;
 /// Segments kept erased and ready, so a batch never waits for an erase.
 constexpr uint32_t kFreeSegmentsTarget = 2;
 
-/// A glyph slot's value: the record's bitmap offset in the log, in 4-byte units (20 bits, so a log of at most 4 MiB),
+/// A glyph slot's value: the record's bitmap offset in the log, in 4-byte units (20 bits, so a log under 4 MiB),
 /// under the low 12 bits of the epoch of the segment holding it. A reused segment gets a new epoch, so a slot still
-/// pointing into its old contents no longer matches and reads as stale. A bitmap lies past its segment and record
-/// headers, so the value is never kNoGlyph; it reads as kErased only for a bitmap starting in the log's last 4 bytes
-/// under epoch 0xFFF.
+/// pointing into its old contents no longer matches and reads as stale. A log is under kMaxLogBytes (exclusive), so a
+/// data offset (at most the log's size, a sector multiple) never reaches the packing's limit: it fits the offset bits,
+/// and the value is neither kErased nor, being past the headers, kNoGlyph.
 constexpr uint32_t kSlotOffsetBits = 20;
 constexpr uint32_t kSlotEpochMask = 0xFFF;
 constexpr uint32_t kMaxLogBytes = 1u << (kSlotOffsetBits + 2);
