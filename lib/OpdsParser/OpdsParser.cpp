@@ -158,7 +158,7 @@ void OpdsParser::flush() {
 bool OpdsParser::error() const { return errorOccured; }
 
 void OpdsParser::clear() {
-  searchTemplate.clear();
+  searchTemplates.clear();
   osdUrl.clear();
   nextPageUrl.clear();
   prevPageUrl.clear();
@@ -185,11 +185,11 @@ void OpdsParser::startElement(void* userData, const char* name, const char** att
       const char* type = findAttribute(atts, "type");
 
       if (rel && strcmp(rel, "search") == 0) {
-        std::string sHref(href);
-        if (sHref.find("{searchTerms}") != std::string::npos) {
-          self->searchTemplate = sHref;
+        if (strstr(href, "{searchTerms}") != nullptr) {
+          // The rule of an OpenSearch description's templates: Atom first, never HTML or JSON.
+          self->searchTemplates.offer(href, type);
         } else if (type && strcmp(type, "application/opensearchdescription+xml") == 0) {
-          self->osdUrl = sHref;
+          self->osdUrl = href;
         }
       } else if (rel && strcmp(rel, "next") == 0 && !self->inEntry) {
         self->nextPageUrl = href;

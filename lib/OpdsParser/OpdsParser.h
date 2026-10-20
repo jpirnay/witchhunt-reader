@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "OpenSearchDescription.h"
+
 /**
  * Type of OPDS entry.
  */
@@ -65,7 +67,9 @@ class OpdsParser final : public Print {
   ~OpdsParser();
 
   // Disable copy
-  const std::string& getSearchTemplate() const { return searchTemplate; }
+  // The feed's own search template, picked by OpenSearch::TemplatePicker's rule; "" if it has none
+  // the browser can read (then getOsdUrl() may name a description that has one).
+  const std::string& getSearchTemplate() const { return searchTemplates.best(); }
   const std::string& getOsdUrl() const { return osdUrl; }
   const std::string& getNextPageUrl() const { return nextPageUrl; }
   const std::string& getPrevPageUrl() const { return prevPageUrl; }
@@ -98,7 +102,7 @@ class OpdsParser final : public Print {
   static void endElement(void* userData, const char* name);
   static void characterData(void* userData, const char* s, int len);
 
-  std::string searchTemplate;
+  OpenSearch::TemplatePicker searchTemplates;
   std::string osdUrl;
   std::string nextPageUrl;
   std::string prevPageUrl;

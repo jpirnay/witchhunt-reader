@@ -549,6 +549,74 @@ TEST(OpdsParser, NavigationLinkBeatsAnUnsupportedDownload) {
   EXPECT_EQ(entries[1].href, "/opds/n3");
 }
 
+// --- A feed's own search templates (<link rel="search" href="...{searchTerms}...">) ---------------
+// The rule of an OpenSearch description's templates (OpenSearch::TemplatePicker, see
+// OpenSearchDescriptionTest.cpp for its cases); these check that the feed goes through it.
+
+namespace {
+// The feed's search template; osdUrl gets the description it names, if any.
+std::string feedSearchTemplate(const std::string& links, std::string* osdUrl = nullptr) {
+  const std::string xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+)" + links + R"(
+</feed>)";
+  OpdsParser parser;
+  parseFeed(xml.c_str(), parser);
+  EXPECT_FALSE(parser.error());
+  if (osdUrl != nullptr) *osdUrl = parser.getOsdUrl();
+  return parser.getSearchTemplate();
+}
+}  // namespace
+
+TEST(OpdsParser, FeedSearchTemplateOfItsOnlyLink) {
+  EXPECT_EQ(feedSearchTemplate(R"(<link rel="search" type="application/atom+xml" href="/opds/search/{searchTerms}"/>)"),
+            "/opds/search/{searchTerms}");
+}
+
+// The last template used to win, whatever its type: here the JSON suggestions.
+TEST(OpdsParser, FeedSearchTakesTheAtomTemplate) {
+  EXPECT_EQ(feedSearchTemplate(R"(
+  <link rel="search" type="text/html" href="/search?q={searchTerms}"/>
+  <link rel="search" type="application/atom+xml" href="/opds/search?q={searchTerms}"/>
+  <link rel="search" type="application/x-suggestions+json" href="/suggest?q={searchTerms}"/>)"),
+            "/opds/search?q={searchTerms}");
+}
+
+TEST(OpdsParser, FeedSearchPrefersAnOpdsCatalogFeedInEitherOrder) {
+  EXPECT_EQ(feedSearchTemplate(R"(
+  <link rel="search" type="application/atom+xml;profile=opds-catalog;kind=acquisition" href="/opds/{searchTerms}"/>
+  <link rel="search" type="application/atom+xml" href="/atom/{searchTerms}"/>)"),
+            "/opds/{searchTerms}");
+  EXPECT_EQ(feedSearchTemplate(R"(
+  <link rel="search" type="application/atom+xml" href="/atom/{searchTerms}"/>
+  <link rel="search" type="application/atom+xml;profile=opds-catalog;kind=acquisition" href="/opds/{searchTerms}"/>)"),
+            "/opds/{searchTerms}");
+}
+
+// With no template the browser can read, it has none of its own, and goes to the description the
+// feed names (OpdsBookBrowserActivity::fetchFeed() fetches it only while the template is empty).
+TEST(OpdsParser, FeedSearchWithOnlyHtmlAndJsonLeavesTheDescription) {
+  std::string osdUrl;
+  EXPECT_EQ(feedSearchTemplate(R"(
+  <link rel="search" type="text/html" href="/search?q={searchTerms}"/>
+  <link rel="search" type="application/opensearchdescription+xml" href="/osd.xml"/>
+  <link rel="search" type="application/json" href="/api/search?q={searchTerms}"/>)",
+                               &osdUrl),
+            "");
+  EXPECT_EQ(osdUrl, "/osd.xml");
+}
+
+TEST(OpdsParser, FeedSearchUntypedIsTheLastResort) {
+  EXPECT_EQ(feedSearchTemplate(R"(
+  <link rel="search" href="/untyped/{searchTerms}"/>
+  <link rel="search" type="text/html" href="/html/{searchTerms}"/>)"),
+            "/untyped/{searchTerms}");
+  EXPECT_EQ(feedSearchTemplate(R"(
+  <link rel="search" type="application/atom+xml" href="/atom/{searchTerms}"/>
+  <link rel="search" href="/untyped/{searchTerms}"/>)"),
+            "/atom/{searchTerms}");
+}
+
 // A shop page alone is not a book the reader cannot open, it is no book at all for the reader.
 TEST(OpdsParser, BuyLinkAloneIsNotListed) {
   const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>

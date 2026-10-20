@@ -4,7 +4,6 @@
 #include <SaxParser/SaxParser.h>
 #include <strings.h>
 
-#include <cstdint>
 #include <cstring>
 #include <string_view>
 
@@ -20,16 +19,15 @@ std::string_view trimmed(std::string_view s) {
   return s;
 }
 
-// How well a <Url>'s results suit the browser, which reads Atom feeds only; best last. Never: a rel
-// other than "results" (a search box's suggestions, ...) or a type that is not Atom (an HTML page,
-// JSON, RSS), since the browser could read no answer to it. Untyped: no type, although OpenSearch
-// requires one; such a template served before this rule, so it still does when nothing ranks higher.
+// How well a template's results suit the browser, which reads Atom feeds only; best last. Never: a
+// type that is not Atom (an HTML page, JSON, RSS), since the browser could read no answer to it.
+// Untyped: no type, although OpenSearch requires one; such a template served before this rule, so
+// it still does when nothing ranks higher.
 enum class Rank : uint8_t { Never, Untyped, Atom, OpdsCatalog };
 
 // The media type is compared without case or spaces, and a profile parameter may be quoted:
 // "application/atom+xml; profile=opds-catalog; kind=acquisition" is an OPDS catalog feed.
-Rank rankOf(const char* type, const char* rel) {
-  if (rel != nullptr && !trimmed(rel).empty() && !equalsIgnoreCase(trimmed(rel), "results")) return Rank::Never;
+Rank rankOf(const char* type) {
   if (type == nullptr || trimmed(type).empty()) return Rank::Untyped;
   std::string_view rest{type};
   size_t semicolon = rest.find(';');
@@ -50,12 +48,10 @@ Rank rankOf(const char* type, const char* rel) {
 }
 
 struct Description {
-  std::string templateUrl;
-  Rank rank = Rank::Never;
+  TemplatePicker picker;
 
   static void onStart(void* userData, const char* name, const char** atts) {
     if (strcmp(name, "Url") != 0 && strstr(name, ":Url") == nullptr) return;
-    auto* self = static_cast<Description*>(userData);
     const char* templateAttr = nullptr;
     const char* type = nullptr;
     const char* rel = nullptr;
@@ -68,16 +64,23 @@ struct Description {
         rel = atts[i + 1];
       }
     }
-    if (templateAttr == nullptr || strstr(templateAttr, "{searchTerms}") == nullptr) return;
-    // The first of the best: a later <Url> takes over only by ranking higher.
-    const Rank rank = rankOf(type, rel);
-    if (rank > self->rank) {
-      self->rank = rank;
-      self->templateUrl = templateAttr;
-    }
+    // rel says what the template is for, "results" (the default) being a search; a search box's
+    // suggestions and the rest are no search, whatever their type.
+    if (rel != nullptr && !trimmed(rel).empty() && !equalsIgnoreCase(trimmed(rel), "results")) return;
+    static_cast<Description*>(userData)->picker.offer(templateAttr, type);
   }
 };
 }  // namespace
+
+void TemplatePicker::offer(const char* templateUrl, const char* type) {
+  if (templateUrl == nullptr || strstr(templateUrl, "{searchTerms}") == nullptr) return;
+  // The first of the best: a later template takes over only by ranking higher.
+  const auto rank = static_cast<uint8_t>(rankOf(type));
+  if (rank > rank_) {
+    rank_ = rank;
+    best_ = templateUrl;
+  }
+}
 
 std::string searchTemplate(const char* xml, const size_t length) {
   Description description;
@@ -89,7 +92,7 @@ std::string searchTemplate(const char* xml, const size_t length) {
   if (!parser.feed(reinterpret_cast<const uint8_t*>(xml), length) || !parser.finalize()) {
     LOG_ERR("OPDS", "OSD parse error at line %d: %s", parser.errorLine(), parser.errorString());
   }
-  return description.templateUrl;
+  return description.picker.best();
 }
 
 }  // namespace OpenSearch
