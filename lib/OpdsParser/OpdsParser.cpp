@@ -18,10 +18,61 @@ size_t trimmedHrefLength(const char* href) {
 
 std::string_view trimmedHrefView(const char* href) { return std::string_view{href, trimmedHrefLength(href)}; }
 
+// The publication itself: rel="http://opds-spec.org/acquisition", or its "/open-access" form. The
+// other acquisition rels (buy, borrow, subscribe, sample) mostly lead to a shop or loan page.
+bool isDirectAcquisitionRel(const char* rel) {
+  static constexpr char kAcquisition[] = "opds-spec.org/acquisition";
+  const char* at = strstr(rel, kAcquisition);
+  if (at == nullptr) return false;
+  const char* tail = at + sizeof(kAcquisition) - 1;
+  return tail[0] == '\0' || strcmp(tail, "/open-access") == 0;
+}
+
+// What a file name says about a download whose link names no format. Longer suffixes first.
+struct NamedFormat {
+  const char* suffix;
+  const char* mimeType;
+  const char* formatKey;
+  const char* fileExtension;
+};
+constexpr NamedFormat kNamedFormats[] = {
+    {".kepub.epub", "application/epub+zip", "kepub", ".kepub.epub"},
+    {".kepub", "application/epub+zip", "kepub", ".kepub.epub"},
+    {".epub", "application/epub+zip", "epub", ".epub"},
+    {".txt", "text/plain", "txt", ".txt"},
+    {".md", "text/markdown", "md", ".md"},
+    {".xtc", "application/vnd.xteink.xtc", "xtc", ".xtc"},
+    {".xtch", "application/vnd.xteink.xtch", "xtch", ".xtch"},
+    {".xth", "application/vnd.xteink.xtch", "xtch", ".xtch"},
+};
+
+// The format of a download whose link names none (no type, an empty one, or the generic
+// application/octet-stream), read from the file name its href ends in.
+OpdsAcquisitionLink acquisitionLinkFromFileName(const char* href) {
+  std::string_view name{href};
+  name = name.substr(0, name.find_first_of("?#"));
+  while (!name.empty() && name.back() == '/') name.remove_suffix(1);
+  for (const auto& format : kNamedFormats) {
+    if (FsHelpers::checkFileExtension(name, format.suffix)) {
+      return {href, format.mimeType, format.formatKey, format.fileExtension};
+    }
+  }
+  return {};
+}
+
 // Returns an OpdsAcquisitionLink if the type and href correspond to a supported
-// acquisition format, otherwise returns an empty OpdsAcquisitionLink.
-OpdsAcquisitionLink supportedAcquisitionLink(const char* type, const char* href) {
-  if (!type || !href || type[0] == '\0' || href[0] == '\0') {
+// acquisition format, otherwise returns an empty OpdsAcquisitionLink. A direct
+// download whose type names no format is judged by its file name instead.
+OpdsAcquisitionLink supportedAcquisitionLink(const char* type, const char* href, const bool directDownload) {
+  if (!href || href[0] == '\0') {
+    return {};
+  }
+  const bool typed = type && type[0] != '\0';
+  if (directDownload && (!typed || strcmp(type, "application/octet-stream") == 0)) {
+    OpdsAcquisitionLink fromName = acquisitionLinkFromFileName(href);
+    if (!fromName.formatKey.empty()) return fromName;
+  }
+  if (!typed) {
     return {};
   }
 
@@ -149,7 +200,7 @@ void OpdsParser::startElement(void* userData, const char* name, const char** att
 
       if (self->inEntry) {
         if (rel && strstr(rel, "opds-spec.org/acquisition") != nullptr) {
-          const auto acquisition = supportedAcquisitionLink(type, href);
+          const auto acquisition = supportedAcquisitionLink(type, href, isDirectAcquisitionRel(rel));
           if (!acquisition.formatKey.empty() && !hasEquivalentAcquisitionLink(self->currentEntry, acquisition)) {
             self->currentEntry.type = OpdsEntryType::BOOK;
             if (self->currentEntry.acquisitionLinks.empty()) {

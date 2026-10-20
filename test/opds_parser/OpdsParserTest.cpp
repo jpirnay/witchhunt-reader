@@ -184,7 +184,16 @@ TEST(OpdsParser, EmptyHrefOrType) {
   parser.flush();
 
   ASSERT_TRUE(!parser.error());
-  ASSERT_EQ(entries.size(), static_cast<size_t>(0));
+  // An empty or missing href leaves nothing to download, so those entries drop. An empty or missing
+  // type does not: the href names an .epub, and that is the format.
+  ASSERT_EQ(entries.size(), static_cast<size_t>(2));
+  EXPECT_EQ(entries[0].title, "Empty Type");
+  EXPECT_EQ(entries[1].title, "Missing Type");
+  for (const auto& entry : entries) {
+    if (assertSingleFormat(entry, "epub", ".epub")) {
+      EXPECT_EQ(entry.acquisitionLinks[0].mimeType, "application/epub+zip");
+    }
+  }
 }
 
 TEST(OpdsParser, DuplicateAcquisitionLinks) {
@@ -364,4 +373,79 @@ TEST(OpdsParser, CoverLinkRejectsThumbnailAndNonImageType) {
   ASSERT_EQ(entries.size(), 2u);
   EXPECT_TRUE(entries[0].imageHref.empty());
   EXPECT_TRUE(entries[1].imageHref.empty());
+}
+
+// An acquisition link with no type= whose href names an .epub was dropped, and the book with it,
+// although the file name says what it is.
+TEST(OpdsParser, UntypedEpubAcquisitionIsDownloadable) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Untyped</title>
+    <id>b5</id>
+    <link rel="http://opds-spec.org/acquisition" href="/books/untyped.epub"/>
+  </entry>
+</feed>)";
+  OpdsParser parser;
+  const auto entries = parseFeed(xml, parser);
+  ASSERT_EQ(entries.size(), 1u);
+  ASSERT_TRUE(assertSingleFormat(entries[0], "epub", ".epub"));
+  EXPECT_EQ(entries[0].href, "/books/untyped.epub");
+  // The mime type decides whether the download gets its cover and a fresh cache.
+  EXPECT_EQ(entries[0].acquisitionLinks[0].mimeType, "application/epub+zip");
+}
+
+// The generic binary type says no more than none at all; the query string is not part of the name.
+TEST(OpdsParser, OctetStreamAcquisitionIsReadFromItsFileName) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Generic Type</title>
+    <id>b6</id>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/octet-stream"
+          href="/get/Book.KEPUB.EPUB?token=abc"/>
+    <link rel="http://opds-spec.org/acquisition" type="application/octet-stream" href="/get/book.txt#start"/>
+    <link rel="http://opds-spec.org/acquisition" href="/get/book.xtc"/>
+  </entry>
+</feed>)";
+  OpdsParser parser;
+  const auto entries = parseFeed(xml, parser);
+  ASSERT_EQ(entries.size(), 1u);
+  const auto& links = entries[0].acquisitionLinks;
+  ASSERT_EQ(links.size(), 3u);
+  EXPECT_EQ(links[0].formatKey, "kepub");
+  EXPECT_EQ(links[0].fileExtension, ".kepub.epub");
+  EXPECT_EQ(links[1].formatKey, "txt");
+  EXPECT_EQ(links[2].formatKey, "xtc");
+}
+
+// A shop or loan page is no download, whatever its address ends in.
+TEST(OpdsParser, UntypedBuyLinkIsNotADownload) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>For Sale</title>
+    <id>b7</id>
+    <link rel="http://opds-spec.org/acquisition/buy" href="https://shop.example/book.epub"/>
+    <link rel="http://opds-spec.org/acquisition/borrow" href="https://library.example/book.epub"/>
+  </entry>
+</feed>)";
+  OpdsParser parser;
+  const auto entries = parseFeed(xml, parser);
+  EXPECT_TRUE(entries.empty());
+}
+
+// A file name that is not a format the reader opens still says nothing without a type.
+TEST(OpdsParser, UntypedLinkWithAnUnknownNameIsNotADownload) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Unknown</title>
+    <id>b8</id>
+    <link rel="http://opds-spec.org/acquisition" href="/get/12345"/>
+  </entry>
+</feed>)";
+  OpdsParser parser;
+  const auto entries = parseFeed(xml, parser);
+  EXPECT_TRUE(entries.empty());
 }
