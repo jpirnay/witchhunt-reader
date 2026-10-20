@@ -313,7 +313,8 @@ bool openReader(const std::string_view arg) {
     }
   }
 #endif
-  activityManager.goToReader(std::move(path));
+  // Opened as from a list, refresh included, so a test sees the open a reader sees.
+  activityManager.openBook(std::move(path));
   return true;
 }
 

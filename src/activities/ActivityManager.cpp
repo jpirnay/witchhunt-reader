@@ -2,7 +2,6 @@
 
 #include <Arduino.h>
 #include <BoardConfig.h>  // FREEINK_CAP_USB_MSC
-#include <HalCapabilities.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
 #include <Logging.h>
@@ -540,6 +539,21 @@ void ActivityManager::goToBrowserWithSearch(std::string query) {
   }
 }
 
+void ActivityManager::armBookOpenRefresh(const std::string& path) const {
+  // The reader's first page diffs against whatever the panel holds -- a list and its covers, the
+  // carousel, a menu, the last book's page -- and a FAST diff of a change that size leaves the old
+  // screen ghosting through. A HALF clears it, for about 1.8 s more on the X3 and 1.5 s on the T5S3.
+  // Not for a picture: the viewer refreshes it HALF itself, and an armed HALF would go on its
+  // loading popup instead.
+  if (ReaderActivity::isImageFile(path)) return;
+  renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+}
+
+void ActivityManager::openBook(std::string path) {
+  armBookOpenRefresh(path);
+  goToReader(std::move(path));
+}
+
 void ActivityManager::goToReader(std::string path) {
   // The book's font is loaded by ReaderActivity::onEnter(), once the activity it replaces has exited.
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path)));
@@ -567,12 +581,7 @@ void ActivityManager::goToKOReaderSync() {
 }
 
 void ActivityManager::replaceWithReader(std::string path, ReturnHint hint) {
-  // A book opened from a list starts on a clean HALF where the board asks for one (see
-  // HalCapabilities::halfRefreshOnBookOpen). Not for a picture: the viewer refreshes it HALF
-  // itself, and an armed HALF would go on its loading popup instead.
-  if (HalCapabilities::halfRefreshOnBookOpen() && !ReaderActivity::isImageFile(path)) {
-    renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
-  }
+  armBookOpenRefresh(path);
   returnHint = std::move(hint);
   hasReturnHint = true;
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path)));  // see goToReader()

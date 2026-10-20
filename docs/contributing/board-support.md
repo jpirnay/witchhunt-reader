@@ -233,11 +233,6 @@ chosen; without it a UC81xx unit is sent SSD1677 command streams and shows no im
   [future work](../future_work/boards-and-touch.md#sd-clock-on-the-t5s3)).
 - Frontlight: one channel, a PT4103 boost enable on GPIO11, 1 kHz and 12-bit. The SDK profile
   explains why not 5 kHz.
-- A book opened from the Library, All Files or the bookmark list starts on a HALF refresh, as one
-  opened from Home does on every board, so the list's covers do not ghost into its first page
-  (`HalCapabilities::halfRefreshOnBookOpen()`, about 1.5 s more per open). The predicate names the
-  board because it is a cost decision, not a hardware fact; the other boards open from those
-  screens with a FAST diff.
 
 ## Gotchas
 
