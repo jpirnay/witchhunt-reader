@@ -160,9 +160,11 @@ void OpdsParser::startElement(void* userData, const char* name, const char** att
             }
             self->currentEntry.acquisitionLinks.push_back(acquisition);
           }
-        } else if (rel && type && strstr(rel, "opds-spec.org/image") != nullptr &&
-                   strstr(rel, "thumbnail") == nullptr && strncmp(type, "image/", 6) == 0 &&
+        } else if (rel && strstr(rel, "opds-spec.org/image") != nullptr && strstr(rel, "thumbnail") == nullptr &&
+                   (!type || type[0] == '\0' || strncmp(type, "image/", 6) == 0) &&
                    self->currentEntry.imageHref.empty()) {
+          // Some servers leave type= off their cover links; only a type that is not an image rules
+          // one out. From witchling-reader commit 111f6ecc (syfq91).
           self->currentEntry.imageHref = href;
         } else if (type && strstr(type, "application/atom+xml") != nullptr) {
           if (self->currentEntry.type != OpdsEntryType::BOOK) {

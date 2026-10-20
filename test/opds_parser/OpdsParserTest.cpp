@@ -317,3 +317,51 @@ TEST(OpdsParser, PreviousRelIsStillAPreviousPageLink) {
   ASSERT_FALSE(parser.error());
   EXPECT_EQ(parser.getPrevPageUrl(), "/opds/catalog?p=1");
 }
+
+// A cover link without type= was dropped, so the catalog showed no cover for the book.
+// From witchling-reader commit 111f6ecc (syfq91).
+TEST(OpdsParser, CoverLinkWithoutTypeIsKept) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Example Book</title>
+    <id>b1</id>
+    <link rel="http://opds-spec.org/acquisition" type="application/epub+zip" href="/books/example.epub"/>
+    <link rel="http://opds-spec.org/image" href="/covers/1.jpg"/>
+  </entry>
+  <entry>
+    <title>Typed Cover</title>
+    <id>b2</id>
+    <link rel="http://opds-spec.org/acquisition" type="application/epub+zip" href="/books/example2.epub"/>
+    <link rel="http://opds-spec.org/image" type="image/png" href="/covers/2.png"/>
+  </entry>
+</feed>)";
+  OpdsParser parser;
+  const auto entries = parseFeed(xml, parser);
+  ASSERT_EQ(entries.size(), 2u);
+  EXPECT_EQ(entries[0].imageHref, "/covers/1.jpg");
+  EXPECT_EQ(entries[1].imageHref, "/covers/2.png");
+}
+
+TEST(OpdsParser, CoverLinkRejectsThumbnailAndNonImageType) {
+  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Thumbnail Only</title>
+    <id>b3</id>
+    <link rel="http://opds-spec.org/acquisition" type="application/epub+zip" href="/books/example.epub"/>
+    <link rel="http://opds-spec.org/image/thumbnail" href="/covers/thumb.jpg"/>
+  </entry>
+  <entry>
+    <title>Non-Image Cover</title>
+    <id>b4</id>
+    <link rel="http://opds-spec.org/acquisition" type="application/epub+zip" href="/books/example2.epub"/>
+    <link rel="http://opds-spec.org/image" type="text/html" href="/covers/page.html"/>
+  </entry>
+</feed>)";
+  OpdsParser parser;
+  const auto entries = parseFeed(xml, parser);
+  ASSERT_EQ(entries.size(), 2u);
+  EXPECT_TRUE(entries[0].imageHref.empty());
+  EXPECT_TRUE(entries[1].imageHref.empty());
+}
