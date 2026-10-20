@@ -196,21 +196,22 @@ class FlashGlyphStore {
   ///   they fit the head and the free segments; the rest are dropped, and the segment is erased. A copy's count is the
   ///   old one halved, so a glyph not drawn again is dropped within three passes.
   /// - A rebuild of the index from the log: the index is erased, and each live record a slot named gets a slot again,
-  ///   with its count; the "no glyph" marks are forgotten. When the index stops writes the rebuild comes first, in
-  ///   idle time too; but with under kRebuildStalePercent of the slots stale and two or more segments live, a rebuild
-  ///   would soon fill again, so a reclaim comes first and leaves its slots stale. The other reasons for a rebuild
-  ///   wait for Open, and come after its reclaims. With the rebuild journal full, the store is wiped instead
-  ///   (generation() moves on).
+  ///   with its count; the "no glyph" marks are forgotten. When the index stops writes (past its load limit, a probe
+  ///   chain full, or no epoch left short of kRebuildEpochLimit) the rebuild comes first, in idle time too; but with a
+  ///   full index, under kRebuildStalePercent of the slots stale and two or more segments live, a rebuild would soon
+  ///   fill again, so a reclaim comes first and leaves its slots stale. The other reasons for a rebuild wait for Open,
+  ///   and come after its reclaims. A rebuild that finds no memory waits for the next Open, or the next open(). With
+  ///   the rebuild journal full, the store is wiped instead (generation() moves on).
   /// Writes stopped for room resume, unless the index stops them. Fills `work` with what this call did. Call it only
   /// where no record of the log is in use: it invalidates every pointer into the log.
   Room makeRoom(Budget budget, RoomWork* work = nullptr);
   /// Room is to be made by makeRoom(budget): writes stopped for room (a batch that did not fit, or markFull()), fewer
-  /// than kFreeSegmentsTarget segments free, or the index stops writes (past its load limit, or a probe chain full).
-  /// With Open, also a rebuild that waits for one: kRebuildEpochSpan epochs since the last rebuild began, the last one
-  /// cut short by a power cut, or kRebuildStalePercent of the index's slots stale.
+  /// than kFreeSegmentsTarget segments free, or the index stops writes (past its load limit, a probe chain full, or the
+  /// epochs spent up to kRebuildEpochLimit). With Open, also a rebuild that waits for one: kRebuildEpochSpan epochs
+  /// since the last rebuild, the last one cut short by a power cut, or kRebuildStalePercent of the index's slots stale.
   bool needsRoom(Budget budget = Budget::Idle) const {
     return open_ && (roomAsked_ || freeSegments() < glyphstore::kFreeSegmentsTarget || indexFull_ || chainFull_ ||
-                     (budget == Budget::Open && rebuildWaitsForOpen()));
+                     epochsLeft() == 0 || (budget == Budget::Open && rebuildWaitsForOpen()));
   }
   /// The epoch the last rebuild began from, the tail's then: no slot written since names an older one. 0 with no
   /// rebuild since the last wipe.
@@ -256,9 +257,10 @@ class FlashGlyphStore {
   enum class Rebuilt : uint8_t { Done, Wiped, NoMemory, Failed };
   // The journal of index rebuilds in the state sector, as open() read it and the rebuilds since wrote it.
   struct Journal {
-    uint32_t used = 0;  // entries in use
-    uint32_t base = 0;  // the last entry's
-    bool done = true;   // the last entry's `done` is programmed, or there is none
+    uint32_t used = 0;   // entries in use
+    uint32_t base = 0;   // the last entry's
+    bool done = true;    // the last entry's `done` is programmed, or there is none
+    uint32_t floor = 0;  // the base of the last entry done: no slot names an older epoch, even after a cut rebuild
   };
 
   // The EpdGlyph of the record at `offset` in the log, read in place (4-byte aligned in mapped flash).
@@ -280,9 +282,11 @@ class FlashGlyphStore {
   void findRing();
   bool moveHead();
   void resetRing();
-  Step nextStep(Budget budget, bool rebuilt) const;
+  Step nextStep(Budget budget, bool rebuildTried) const;
   bool staleCrowds() const;
   bool rebuildWaitsForOpen() const;
+  uint32_t epochsLeft() const;
+  uint32_t segmentsToOpen() const { return freeSegments() < epochsLeft() ? freeSegments() : epochsLeft(); }
   bool reclaimTail(RoomWork& work);
   bool copyRecord(uint32_t from, uint32_t key, uint32_t bytes, uint8_t count, RoomWork& work);
   Rebuilt rebuildIndex(RoomWork& work);
@@ -331,7 +335,8 @@ class FlashGlyphStore {
   bool indexFull_ = false;  // the index passed kIndexLoadPercent: the same
   bool roomAsked_ = false;  // writes stopped for room: the next makeRoom() reclaims, however many segments are free
   Journal journal_;
-  uint32_t rebuilds_ = 0;  // since open()
+  uint32_t rebuilds_ = 0;        // since open()
+  bool rebuildStarved_ = false;  // a rebuild found no memory: idle time leaves the next try to an Open
   uint32_t usedSlots_ = 0;
   uint32_t usedPairs_ = 0;
   uint32_t claimedFaces_ = 0;  // bit i: face entry i is claimed

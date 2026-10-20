@@ -92,6 +92,12 @@ constexpr uint32_t slotEpoch(const uint32_t value) { return value >> kSlotOffset
 constexpr uint32_t kRebuildEpochSpan = 2048;
 constexpr uint32_t kCountsAtPercent = 75;
 constexpr uint32_t kRebuildStalePercent = 12;
+/// The hard bound behind kRebuildEpochSpan, which waits for a chapter or book open: no segment gets an epoch this far
+/// past the base of the last finished rebuild until the index is rebuilt again, in idle time if need be. Any bound up
+/// to 4,096 keeps the epochs a slot can name distinct in its 12 bits; this one stays two of the largest rings short.
+constexpr uint32_t kRebuildEpochLimit = (kSlotEpochMask + 1) - 2 * kMaxSegments;
+static_assert(kRebuildEpochSpan < kRebuildEpochLimit && kRebuildEpochLimit <= kSlotEpochMask + 1,
+              "the soft span comes first, and the hard bound stays inside a slot's epoch bits");
 
 constexpr uint32_t kMinLogPages = 4;
 constexpr uint32_t kPairPages = 1;

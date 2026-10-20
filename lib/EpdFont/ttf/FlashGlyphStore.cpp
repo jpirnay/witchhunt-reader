@@ -274,6 +274,7 @@ void FlashGlyphStore::close() {
   resetRing();
   journal_ = Journal{};
   rebuilds_ = 0;
+  rebuildStarved_ = false;
   usedSlots_ = usedPairs_ = claimedFaces_ = 0;
   dropCounts();
   open_ = false;
@@ -409,11 +410,11 @@ void FlashGlyphStore::walkLive(Visit&& visit) const {
 
 // Opens the segment after the head (with none live, head_ itself): erases it if it holds data (a header a cut tore,
 // or a retired segment whose erase a cut stopped), writes its header with the next epoch, and makes it the head. The
-// header's `retired` word stays erased until the segment is retired. False with no free segment, or when a write
-// failed.
+// header's `retired` word stays erased until the segment is retired. False with no free segment or no epoch left before
+// a rebuild (callers check segmentsToOpen() first), or when a write failed.
 bool FlashGlyphStore::moveHead() {
   const uint32_t count = segmentCount();
-  if (live_ >= count) return false;
+  if (live_ >= count || epochsLeft() == 0) return false;
   const uint32_t next = live_ == 0 ? head_ : (head_ + 1u == count ? 0 : head_ + 1u);
   const uint32_t at = geometry_.logOffset + next * geometry_.segmentBytes;
   const uint32_t epoch = nextEpoch_++;
@@ -626,6 +627,12 @@ FlashGlyphStore::Commit FlashGlyphStore::writeBatch(GlyphBatch& batch) {
     LOG_INF("GST", "full: %u of %u segments free, %u B batch; room must be made", static_cast<unsigned>(freeSegments()),
             static_cast<unsigned>(segmentCount()), static_cast<unsigned>(batch.used_));
     stopForRoom();
+    return Commit::Full;
+  }
+  if (opens > epochsLeft()) {
+    LOG_INF("GST", "full: epoch %u is %u past the last rebuild's; the index needs a rebuild",
+            static_cast<unsigned>(nextEpoch_), static_cast<unsigned>(nextEpoch_ - journal_.floor));
+    writesStopped_ = true;
     return Commit::Full;
   }
   // The records go one program call per segment: each run is what fits the head, which moves on in between. Each
@@ -877,37 +884,41 @@ FlashGlyphStore::Room FlashGlyphStore::makeRoom(const Budget budget, RoomWork* w
   // the wipe goes on from there.
   if (!open_ || wipePending_) return Room::Failed;
   const uint32_t steps = budget == Budget::Idle ? 1 : segmentCount() + 1;
+  bool rebuildTried = false;
   for (uint32_t step = 0; step < steps; ++step) {
-    const Step next = nextStep(budget, done.rebuilt);
+    const Step next = nextStep(budget, rebuildTried);
     if (next == Step::None) break;
     if (next == Step::Reclaim) {
       if (!reclaimTail(done)) return Room::Failed;
       roomAsked_ = false;
       continue;
     }
+    rebuildTried = true;
     const Rebuilt rebuilt = rebuildIndex(done);
     if (rebuilt == Rebuilt::Failed) return Room::Failed;
-    if (rebuilt != Rebuilt::Done) break;  // wiped instead, or waiting for memory
+    if (rebuilt == Rebuilt::Wiped) break;
   }
   // Writes stopped for room resume once a segment is free (one was reclaimed, or at most one is live); a batch that
-  // does not fit stops them again. A full index keeps them stopped until its rebuild.
+  // does not fit stops them again. A full index, or the epochs spent, keep them stopped until the rebuild.
   if (live_ < 2) roomAsked_ = false;
-  writesStopped_ = roomAsked_ || indexFull_ || chainFull_;
+  writesStopped_ = roomAsked_ || indexFull_ || chainFull_ || epochsLeft() == 0;
   return needsRoom(budget) ? Room::More : Room::Enough;
 }
 
-// What the next step of makeRoom() is. A rebuild comes at most once a call: it clears every reason for one.
-FlashGlyphStore::Step FlashGlyphStore::nextStep(const Budget budget, const bool rebuilt) const {
+// What the next step of makeRoom() is. A rebuild comes at most once a call, done or not: done, it clears every reason
+// for one. One that found no memory is tried again only by an Open.
+FlashGlyphStore::Step FlashGlyphStore::nextStep(const Budget budget, const bool rebuildTried) const {
+  const bool mayRebuild = !rebuildTried && (budget == Budget::Open || !rebuildStarved_);
   // The index stops writes: it is rebuilt now, in idle time too. A full index with few stale slots would fill again
   // soon after, so while two or more segments are live a reclaim comes first and leaves its slots stale. A full probe
-  // chain is a rebuild's alone to clear.
-  if (!rebuilt && (indexFull_ || chainFull_)) {
-    return (chainFull_ || staleCrowds() || live_ < 2) ? Step::Rebuild : Step::Reclaim;
+  // chain, or the epochs spent, are a rebuild's alone to clear.
+  if (mayRebuild && (indexFull_ || chainFull_ || epochsLeft() == 0)) {
+    return (chainFull_ || epochsLeft() == 0 || staleCrowds() || live_ < 2) ? Step::Rebuild : Step::Reclaim;
   }
   if (live_ >= 2 && (roomAsked_ || freeSegments() < kFreeSegmentsTarget)) return Step::Reclaim;
   // The other reasons wait for a chapter or book open, and come after its reclaims: the slots those leave stale go
   // with the rebuild.
-  if (!rebuilt && budget == Budget::Open && rebuildWaitsForOpen()) return Step::Rebuild;
+  if (mayRebuild && budget == Budget::Open && rebuildWaitsForOpen()) return Step::Rebuild;
   return Step::None;
 }
 
@@ -916,17 +927,24 @@ bool FlashGlyphStore::staleCrowds() const {
   return uint64_t{usedSlots_ - liveSlots_} * 100 >= uint64_t{geometry_.indexSlots} * kRebuildStalePercent;
 }
 
-// A rebuild that waits for a chapter or book open: a power cut stopped the last one, the epochs since it began span
-// kRebuildEpochSpan (well short of the 12 bits a slot holds, so a slot never names a reused segment's epoch), or
-// stale slots crowd the index. A base above the epoch (a cut tore it) wraps the difference to a large one: due too.
+// A rebuild that waits for a chapter or book open: a power cut stopped the last one, kRebuildEpochSpan epochs have
+// passed since the last that finished, or stale slots crowd the index.
 bool FlashGlyphStore::rebuildWaitsForOpen() const {
-  return !journal_.done || nextEpoch_ - journal_.base >= kRebuildEpochSpan || staleCrowds();
+  return !journal_.done || nextEpoch_ - journal_.floor >= kRebuildEpochSpan || staleCrowds();
+}
+
+// Epochs the head may still give out before the index must be rebuilt. Every slot names an epoch from the last
+// finished rebuild's base on, so keeping the newest under kRebuildEpochLimit past it keeps them all distinct in a
+// slot's 12 bits, whether or not an Open comes to run the rebuild kRebuildEpochSpan asks for.
+uint32_t FlashGlyphStore::epochsLeft() const {
+  const uint32_t span = nextEpoch_ - journal_.floor;
+  return span >= kRebuildEpochLimit ? 0 : kRebuildEpochLimit - span;
 }
 
 // Reclaims the tail segment T. A record of T is a candidate when its slot's use count is above 0. At most half T's
 // payload of candidates is kept, the most used first and the newest among equals, and only when all of it fits the
-// head and the free segments. Those are copied to the head, oldest first; then T is retired and erased, and its slots
-// go stale. False on a failed write (wipe pending).
+// head and the segments it may open (free, with an epoch left). Those are copied to the head, oldest first; then T is
+// retired and erased, and its slots go stale. False on a failed write (wipe pending).
 bool FlashGlyphStore::reclaimTail(RoomWork& work) {
   const uint32_t tail = tail_;
   const uint32_t epoch = segEpoch_[tail];
@@ -965,8 +983,8 @@ bool FlashGlyphStore::reclaimTail(RoomWork& work) {
     room -= levelBytes[count];
   }
 
-  // Where the dropped ones at `level` end, and whether what is kept fits the head and the free segments. A ring that
-  // filled completely has no room for copies, so its first reclaim drops the segment whole.
+  // Where the dropped ones at `level` end, and whether what is kept fits the head and the segments it may open. A ring
+  // that filled completely has no room for copies, so its first reclaim drops the segment whole.
   uint32_t cutoff = 0;  // the records at `level` before this offset are dropped
   uint32_t used = headUsed_;
   uint32_t opens = 0;
@@ -982,7 +1000,7 @@ bool FlashGlyphStore::reclaimTail(RoomWork& work) {
       placeRecord(s.bytes, used, opens);
     });
   }
-  const bool keep = opens <= freeSegments();
+  const bool keep = opens <= segmentsToOpen();
 
   // The copies, each record before its slot; and the records a slot names, whose slots go stale with T.
   const uint16_t keptBefore = work.kept;
@@ -1070,7 +1088,8 @@ bool FlashGlyphStore::copyRecord(const uint32_t from, const uint32_t key, const 
 // `done` after the last slot, so a cut in between leaves the rebuild to be done again at the next open.
 // 1. The plan, in walk order (from the tail, each segment's records in log order): whether a slot names each record,
 //    and that slot's count. Only those records get a slot again: one with none had its write cut before its slot, and
-//    may be torn. Without memory for the counts they start at 0; without memory for the rest the rebuild waits.
+//    may be torn. Without memory for the counts they start at 0; without memory for the rest the rebuild waits for an
+//    Open.
 // 2. The index is erased, and each planned record is inserted again with its segment's epoch, unless find() finds its
 //    key already (a duplicate a cut left, the copy of a reclaim cut short: the first stays). Its count follows.
 // A cut after the erase loses the slots not yet inserted: their glyphs are drawn and stored again. With the journal
@@ -1088,14 +1107,22 @@ FlashGlyphStore::Rebuilt FlashGlyphStore::rebuildIndex(RoomWork& work) {
   auto plan = makeUniqueNoThrow<uint8_t[]>(namedBytes + countBytes);
   bool counted = countBytes != 0;
   if (!plan && counted) {
-    LOG_ERR("GST", "rebuild: no memory for the counts (%u B); they start at 0", static_cast<unsigned>(countBytes));
     plan = makeUniqueNoThrow<uint8_t[]>(namedBytes);
     counted = false;
+    if (plan) {
+      LOG_ERR("GST", "rebuild: no memory for the counts (%u B); they start at 0", static_cast<unsigned>(countBytes));
+    }
   }
   if (!plan) {
-    LOG_ERR("GST", "rebuild: no memory for its plan (%u B); it waits", static_cast<unsigned>(namedBytes));
+    // Logged once: idle time does not try again (each try walks the log), an Open does.
+    if (!rebuildStarved_) {
+      LOG_ERR("GST", "rebuild: no memory for its plan (%u B); it waits for a chapter or book open",
+              static_cast<unsigned>(namedBytes + countBytes));
+    }
+    rebuildStarved_ = true;
     return Rebuilt::NoMemory;
   }
+  rebuildStarved_ = false;
   uint8_t* named = plan.get();
   uint8_t* counts = counted ? plan.get() + namedBytes : nullptr;
   uint32_t i = 0;
@@ -1117,7 +1144,7 @@ FlashGlyphStore::Rebuilt FlashGlyphStore::rebuildIndex(RoomWork& work) {
     stopWrites();
     return Rebuilt::Failed;
   }
-  journal_ = Journal{journal_.used + 1, base, false};
+  journal_ = Journal{journal_.used + 1, base, false, journal_.floor};
   if (!eraseWritten(geometry_.indexOffset, tableBytes(geometry_.indexSlots))) {
     LOG_ERR("GST", "rebuild: erasing the index failed; wipe pending");
     stopWrites();
@@ -1152,6 +1179,7 @@ FlashGlyphStore::Rebuilt FlashGlyphStore::rebuildIndex(RoomWork& work) {
     return Rebuilt::Failed;
   }
   journal_.done = true;
+  journal_.floor = base;
   usedSlots_ = liveSlots_ = inserted;
   indexFull_ = chainFull_ = false;
   ++rebuilds_;
@@ -1178,7 +1206,8 @@ void FlashGlyphStore::readJournal() {
     }
     for (uint32_t i = 0; i < n; ++i) {
       if (chunk[i].base == kErased && chunk[i].done == kErased) return;
-      journal_ = Journal{first + i + 1, chunk[i].base, chunk[i].done != kErased};
+      const bool done = chunk[i].done != kErased;
+      journal_ = Journal{first + i + 1, chunk[i].base, done, done ? chunk[i].base : journal_.floor};
     }
   }
 }
@@ -1236,6 +1265,7 @@ bool FlashGlyphStore::wipe() {
   }
   resetRing();
   journal_ = Journal{};
+  rebuildStarved_ = false;
   usedSlots_ = usedPairs_ = claimedFaces_ = 0;
   dropCounts();
   ++generation_;

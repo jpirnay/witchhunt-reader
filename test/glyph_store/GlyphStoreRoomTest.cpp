@@ -4,13 +4,44 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <new>
 #include <vector>
 
 #include "GlyphStoreTestUtil.h"
 
 using namespace glyphstore;
 using namespace gst_test;
+
+namespace {
+
+// A heap with nothing to give: the store asks for its arrays through makeUniqueNoThrow<T[]>, which lands in the nothrow
+// array new replaced below for this test binary. While a RefuseArrays lives, every such request is refused and counted.
+bool refuseArrays = false;
+uint32_t refusedArrays = 0;
+
+struct RefuseArrays {
+  RefuseArrays() { refuseArrays = true; }
+  ~RefuseArrays() { refuseArrays = false; }
+  RefuseArrays(const RefuseArrays&) = delete;
+  RefuseArrays& operator=(const RefuseArrays&) = delete;
+};
+
+}  // namespace
+
+// Unarmed it defers to the throwing array new, as the default does, so the default operator delete[] pairs with it.
+void* operator new[](const std::size_t size, const std::nothrow_t&) noexcept {
+  if (refuseArrays) {
+    ++refusedArrays;
+    return nullptr;
+  }
+  try {
+    return ::operator new[](size);
+  } catch (const std::bad_alloc&) {
+    return nullptr;
+  }
+}
 
 namespace {
 
@@ -619,12 +650,13 @@ TEST_F(GlyphStoreRoom, AFullJournalTurnsTheRebuildIntoAWipe) {
 }
 
 TEST_F(GlyphStoreRoom, IdleLeavesAnEpochRebuildToTheNextOpen) {
-  // The first segment at epoch 5000, and a finished rebuild from epoch 10: only the epoch span calls for one.
+  // The first segment at epoch 5000, and a finished rebuild from epoch 2500: only the epoch span calls for one, past
+  // kRebuildEpochSpan and short of kRebuildEpochLimit.
   writeSegmentHeader(flash, layout, 0, 5000);
-  writeJournalEntry(0, 10, true);
+  writeJournalEntry(0, 2500, true);
   ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
   ASSERT_EQ(5001u, store.epoch());
-  ASSERT_EQ(10u, store.rebuildBase());
+  ASSERT_EQ(2500u, store.rebuildBase());
   for (uint32_t n = 0; n < 3; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
   ASSERT_EQ(store.usedSlots(), store.liveSlots());  // the index is not crowded
   EXPECT_FALSE(store.needsRoom());
@@ -633,7 +665,7 @@ TEST_F(GlyphStoreRoom, IdleLeavesAnEpochRebuildToTheNextOpen) {
   EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Idle, &work));
   EXPECT_FALSE(work.rebuilt);
   EXPECT_EQ(0u, store.rebuilds());
-  EXPECT_EQ(10u, store.rebuildBase());
+  EXPECT_EQ(2500u, store.rebuildBase());
   EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
   EXPECT_TRUE(work.rebuilt);
   EXPECT_EQ(1u, store.rebuilds());
@@ -704,6 +736,57 @@ TEST_F(GlyphStoreRoom, ARebuildKeepsTheFirstOfTwoCopiesACutLeft) {
   EXPECT_EQ(13u, store.liveSlots());
   EXPECT_EQ(0u, segmentOf(0));  // the first copy, in the oldest segment
   for (uint32_t n = 0; n < 13; ++n) EXPECT_TRUE(intact(n)) << n;
+}
+
+TEST_F(GlyphStoreRoom, ARebuildWithoutMemoryWaitsForTheNextOpen) {
+  for (uint32_t n = 0; n < 6; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
+  fillIndexWithMarks();              // the index stops writes: a rebuild is due in idle time
+  ASSERT_FALSE(store.countsKept());  // so a rebuild asks for one array, its plan
+  const uint32_t refusedBefore = refusedArrays;
+  RoomWork work;
+  {
+    const RefuseArrays refuse;
+    EXPECT_EQ(Room::More, store.makeRoom(Budget::Idle, &work));
+    EXPECT_FALSE(work.rebuilt);
+    EXPECT_EQ(refusedBefore + 1, refusedArrays);
+    EXPECT_FALSE(store.wipePending());
+    EXPECT_TRUE(store.writesStopped());
+    // Idle time does not try again: no walk of the log, no request.
+    for (uint32_t tick = 0; tick < 3; ++tick) {
+      EXPECT_EQ(Room::More, store.makeRoom(Budget::Idle, &work)) << tick;
+      EXPECT_FALSE(work.rebuilt) << tick;
+    }
+    EXPECT_EQ(refusedBefore + 1, refusedArrays);
+    // An Open does.
+    EXPECT_EQ(Room::More, store.makeRoom(Budget::Open, &work));
+    EXPECT_EQ(refusedBefore + 2, refusedArrays);
+  }
+  // With memory again, idle time still leaves it to the next Open.
+  EXPECT_EQ(Room::More, store.makeRoom(Budget::Idle, &work));
+  EXPECT_FALSE(work.rebuilt);
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
+  EXPECT_TRUE(work.rebuilt);
+  EXPECT_FALSE(store.writesStopped());
+  for (uint32_t n = 0; n < 6; ++n) EXPECT_TRUE(intact(n)) << n;
+  // Once a rebuild got through, idle time tries the next one due.
+  fillIndexWithMarks();
+  {
+    const RefuseArrays refuse;
+    EXPECT_EQ(Room::More, store.makeRoom(Budget::Idle, &work));
+    EXPECT_EQ(refusedBefore + 3, refusedArrays);
+  }
+  // So does a new session.
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  ASSERT_EQ(Commit::Full, store.markNoGlyph(makeKey(0x2FFF, 0, 0)));  // the index is still past its load limit
+  {
+    const RefuseArrays refuse;
+    EXPECT_EQ(Room::More, store.makeRoom(Budget::Idle, &work));
+    EXPECT_EQ(refusedBefore + 4, refusedArrays);
+  }
+  EXPECT_EQ(Room::More, store.makeRoom(Budget::Idle, &work));
+  EXPECT_FALSE(work.rebuilt);
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
+  EXPECT_TRUE(work.rebuilt);
 }
 
 // --- A full index with few stale slots: 68-byte records (12 x 16), sixty to a segment, fill the 179 slots of a
@@ -801,4 +884,47 @@ TEST_F(GlyphStoreEpochs, TheIndexIsRebuiltBeforeEpochsWrap) {
   }
   EXPECT_EQ(2u, store.rebuilds());
   for (uint32_t k = 0; k < n; ++k) ASSERT_TRUE(absentOrIntact(store, key(k), kSide, kSide)) << k;
+}
+
+TEST_F(GlyphStoreEpochs, WithoutOpensTheEpochsStopShortOfWrapping) {
+  const Layout layout = smallLayout(20480, kMaxProbe, 4 * kSectorBytes, kSectorBytes);
+  ASSERT_TRUE(installAndOpen(store, layout));
+  constexpr uint8_t kSide = 100;  // a 2,520-byte record: one to a segment
+  alignas(4) uint8_t buffer[4096] = {};
+  GlyphBatch batch{buffer, sizeof buffer};
+  const auto key = [](const uint32_t n) { return makeKey(n, 0, 0); };
+  // No draws, so nothing is copied: only the newest records, one a live segment, are found, and intact.
+  const auto onlyTheNewestFound = [&](const uint32_t n) {
+    for (uint32_t k = 0; k < n; ++k) {
+      if (store.find(key(k), nullptr) == Lookup::NotStored) continue;
+      ASSERT_GE(k + store.segmentCount(), n) << k;
+      ASSERT_TRUE(storedIntact(store, key(k), kSide, kSide)) << k;
+    }
+  };
+  uint32_t n = 0;
+  bool pastTheSpan = false;        // kRebuildEpochSpan passed, and idle time left it
+  bool stoppedAtTheLimit = false;  // a commit stopped for want of an epoch
+  for (uint32_t round = 1; store.epoch() <= 5000; ++round) {
+    Commit commit;
+    for (;;) {
+      ASSERT_TRUE(stage(batch, key(n), kSide, kSide)) << n;
+      if ((commit = store.commit(batch)) != Commit::Stored) break;
+      ++n;
+    }
+    ASSERT_EQ(Commit::Full, commit) << round;
+    ASSERT_FALSE(store.wipePending()) << round;
+    const uint32_t span = store.epoch() - store.rebuildBase();
+    ASSERT_LE(span, kRebuildEpochLimit) << round;
+    pastTheSpan = pastTheSpan || (span >= kRebuildEpochSpan && store.rebuilds() == 0);
+    stoppedAtTheLimit = stoppedAtTheLimit || span == kRebuildEpochLimit;
+    Room room = Room::More;
+    for (uint32_t step = 0; step < 4 && room == Room::More; ++step) room = store.makeRoom(Budget::Idle);
+    ASSERT_EQ(Room::Enough, room) << round;
+    ASSERT_LE(store.epoch() - store.rebuildBase(), kRebuildEpochLimit) << round;
+    if (round % 250 == 0) onlyTheNewestFound(n);
+  }
+  EXPECT_TRUE(pastTheSpan);
+  EXPECT_TRUE(stoppedAtTheLimit);
+  EXPECT_EQ(1u, store.rebuilds());
+  onlyTheNewestFound(n);
 }
