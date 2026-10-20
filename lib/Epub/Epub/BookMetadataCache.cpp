@@ -644,8 +644,13 @@ void BookMetadataCache::createTocEntry(const std::string& title, const std::stri
     LOG_DBG("BMC", "createTocEntry: Could not find spine item for TOC href %s", href.c_str());
   }
 
-  const TocEntry entry(title, href, anchor, level, spineIndex);
-  writeTocEntry(*tocWriter_, entry);
+  // Written field by field, not through a TocEntry: its three string copies were heap blocks per
+  // TOC entry, thousands on a web novel's TOC.
+  tocWriter_->writeString(title);
+  tocWriter_->writeString(href);
+  tocWriter_->writeString(anchor);
+  tocWriter_->writePod(level);
+  tocWriter_->writePod(spineIndex);
   tocCount++;
   if (spineIndex >= 0) tocMappedCount_++;
 }
