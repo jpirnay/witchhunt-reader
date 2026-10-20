@@ -2446,18 +2446,18 @@ int Epub::getSpineIndexForTextReference() const {
     return 0;
   }
 
-  // loop through spine items to get the correct index matching the text href
-  const int spineCount = getSpineItemsCount();
-  for (int i = 0; i < spineCount; i++) {
-    if (getSpineItem(i).href == bookMetadataCache->coreMetadata.textReferenceHref) {
+  // Asked for by the first open's font examination and again by the reader: looked up once.
+  if (textReferenceSpine_ < 0) {
+    const int found = bookMetadataCache->findSpineIndexByHref(bookMetadataCache->coreMetadata.textReferenceHref, false);
+    if (found >= 0) {
       LOG_DBG("EBP", "Text reference %s found at index %d", bookMetadataCache->coreMetadata.textReferenceHref.c_str(),
-              i);
-      return i;
+              found);
+    } else {
+      LOG_DBG("EBP", "Section not found for text reference");
     }
+    textReferenceSpine_ = found >= 0 ? found : 0;
   }
-  // This should not happen, as we checked for empty textReferenceHref earlier
-  LOG_DBG("EBP", "Section not found for text reference");
-  return 0;
+  return textReferenceSpine_;
 }
 
 // Calculate progress in book (returns 0.0-1.0)
@@ -2569,8 +2569,5 @@ int Epub::resolveHrefToSpineIndex(const std::string& href) const {
 
   // The first spine item that matches exactly or by filename alone: in-book links are kept as
   // written, relative to their own document.
-  for (int i = 0; i < getSpineItemsCount(); i++) {
-    if (spine_href::match(target, getSpineItem(i).href) != SpineHrefMatch::None) return i;
-  }
-  return -1;
+  return bookMetadataCache->findSpineIndexByHref(target, true);
 }

@@ -158,6 +158,42 @@ TEST(FirstChapter, KingsAvatarTitlePageProfile) {
   fs::remove_all(work);
 }
 
+// The OPF guide's text reference names where reading starts, often with a fragment
+// ("Text/chapter2.xhtml#start"). With the fragment the href matched no spine item: the book opened
+// at its first one, after a lookup that read every spine record a field at a time -- 10395 card
+// calls for 1732 chapters, ~0.18 s on the X3, made twice by a first open (the font examination and
+// the reader). In-book links to the far end of a big book made the same scan.
+TEST(FirstChapter, AGuideTextReferenceWithAFragmentFindsItsChapter) {
+  const fs::path work = fs::temp_directory_path() / ("first_chapter_guide_" + std::to_string(getpid()));
+  fs::remove_all(work);
+  fs::create_directories(work);
+  big_spine_book::Options options;
+  options.titlePage = true;
+  options.guideTextReference = "Text/" + big_spine_book::chapterName(2) + "#start";
+  const big_spine_book::Book book = big_spine_book::write((work / "book.epub").string(), 1732, 1600, options);
+  auto epub = std::make_shared<Epub>(book.path, (work / "cache").string());
+  ASSERT_TRUE(epub->load(true, false));
+
+  card_cost::reset();
+  const int spine = epub->getSpineIndexForTextReference();
+  const Counters first = card_cost::now();
+  EXPECT_EQ(spine, 3) << "the title page, then chapters 0, 1 and 2";
+  EXPECT_EQ(epub->getSpineIndexForTextReference(), 3);
+  const Counters both = card_cost::now();
+  std::printf("[ guide    ] text reference: spine %d in %zu card calls, %zu for the second ask\n", spine, first.calls,
+              both.calls - first.calls);
+  EXPECT_LE(first.calls, 16u);
+  EXPECT_EQ(both.calls, first.calls) << "the answer is kept";
+
+  // A link to the last chapter reads the spine records through a window.
+  card_cost::reset();
+  EXPECT_EQ(epub->resolveHrefToSpineIndex("OEBPS/Text/" + big_spine_book::chapterName(1731) + "#n"), 1732);
+  const Counters link = card_cost::now();
+  std::printf("[ guide    ] link to the last chapter: %zu card calls\n", link.calls);
+  EXPECT_LE(link.calls, 128u);
+  fs::remove_all(work);
+}
+
 // A chapter's ZIP stat costs the open book no memory: it is read from the chapter's book.bin record
 // when the chapter opens. A table of every spine item's stat used to be held for as long as the
 // book stayed open, 16 B a spine item (27.7 KB for King's Avatar).

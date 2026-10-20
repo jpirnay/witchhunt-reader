@@ -65,6 +65,9 @@ struct Options {
   bool titlePage = false;
   // The cover's bytes; empty: a stand-in that is not a decodable picture.
   std::string coverBytes;
+  // The OPF guide's text reference, relative to the OPF (e.g. "Text/chapter2.xhtml#start"); empty:
+  // no guide.
+  std::string guideTextReference;
 };
 
 inline std::string titlePageDocument() {
@@ -138,13 +141,18 @@ inline Book write(const std::string& path, const int chapters, const int images,
                      "xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles><rootfile "
                      "full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles>\n"
                      "</container>\n"});
-  documents.push_back({"OEBPS/content.opf",
-                       "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
-                       "version=\"2.0\" unique-identifier=\"id\">\n<metadata "
-                       "xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"id\">big</dc:identifier>"
-                       "<dc:title>Big Spine</dc:title><dc:creator>Test</dc:creator><dc:language>en</dc:language>"
-                       "<meta name=\"cover\" content=\"cover\"/></metadata>\n<manifest>\n" +
-                           manifest + "</manifest>\n<spine toc=\"ncx\">\n" + spine + "</spine>\n</package>\n"});
+  documents.push_back(
+      {"OEBPS/content.opf",
+       "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
+       "version=\"2.0\" unique-identifier=\"id\">\n<metadata "
+       "xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"id\">big</dc:identifier>"
+       "<dc:title>Big Spine</dc:title><dc:creator>Test</dc:creator><dc:language>en</dc:language>"
+       "<meta name=\"cover\" content=\"cover\"/></metadata>\n<manifest>\n" +
+           manifest + "</manifest>\n<spine toc=\"ncx\">\n" + spine + "</spine>\n" +
+           (options.guideTextReference.empty() ? std::string()
+                                               : "<guide><reference type=\"text\" title=\"Start\" href=\"" +
+                                                     options.guideTextReference + "\"/></guide>\n") +
+           "</package>\n"});
   documents.push_back(
       {"OEBPS/toc.ncx",
        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" "

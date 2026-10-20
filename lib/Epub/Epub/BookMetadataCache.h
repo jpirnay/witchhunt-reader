@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "HashUtils.h"
@@ -156,6 +157,8 @@ class BookMetadataCache {
   // and the ZIP stat, read in one call. The spine temp file's records stop after tocIndex.
   static constexpr uint32_t BOOK_SPINE_STAT_BYTES = 14;
   static constexpr uint32_t BOOK_SPINE_FIXED_BYTES = 6 + BOOK_SPINE_STAT_BYTES;
+  // findSpineIndexByHref's read window.
+  static constexpr size_t SPINE_SCAN_WINDOW_BYTES = 2048;
 
   uint32_t writeTocEntry(FsFile& file, const TocEntry& entry) const;
   SpineEntry readSpineEntry(FsFile& file) const;
@@ -212,6 +215,10 @@ class BookMetadataCache {
   // Reading phase (read mode)
   bool load();
   SpineEntry getSpineEntry(int index);
+  // The first spine item, in spine order, whose href is `target` (or, with `byFilename`, names the
+  // same file: spine_href::match); -1 if none. The spine records are read in order through a
+  // window: getSpineEntry() for each was half a dozen card calls a spine item. Read mode only.
+  int findSpineIndexByHref(std::string_view target, bool byFilename);
   TocEntry getTocEntry(int index);
   int getSpineCount() const { return spineCount; }
   int getTocCount() const { return tocCount; }

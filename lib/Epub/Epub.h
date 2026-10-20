@@ -103,6 +103,8 @@ class Epub {
   // does not list, take no walk of their own. A cold open of King's Avatar walked its whole
   // central directory for the OPF, the NCX and that search, each. Kept until load() returns.
   mutable std::unique_ptr<ZipFile::KnownEntries> packageEntries_;
+  // getSpineIndexForTextReference's answer once looked up; -1 until then.
+  mutable int textReferenceSpine_ = -1;
   // The stat of the entry at the normalised `path`, from the memo or one lookup.
   bool lookupItemStat(ZipFile& zip, const std::string& path, ZipFile::FileStatSlim* out) const;
 
