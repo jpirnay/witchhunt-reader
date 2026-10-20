@@ -30,6 +30,7 @@
 #include "Epub.h"
 #include "Epub/Page.h"
 #include "Epub/Section.h"
+#include "Epub/blocks/ImageBlock.h"
 #include "GfxRenderer.h"
 
 namespace fs = std::filesystem;
@@ -83,6 +84,8 @@ struct FirstPage {
   Step build;
   Step load;
   Step warm;
+  Step rewarm;  // the same page again, its pictures cached by the first warm
+  bool cached = false;
   int pages = 0;
   bool built = false;
 };
@@ -126,9 +129,16 @@ FirstPage firstPage(const fs::path& work, const int chapters) {
     page = section.loadPageFromSectionFile();
   });
   out.pages = section.pageCount;
-  out.warm = measure([&] {
-    if (page) page->warmImageCaches(renderer, 0, 0, /*forceLoadLargeImages=*/false, true, /*alsoWarmGrayscale=*/true);
-  });
+  // In the lent framebuffer, as the reader's warm pass decodes (image_scratch).
+  const auto warm = [&] {
+    if (!page) return;
+    region.reset();
+    const image_scratch::ScopedArena scratch(&region);
+    page->warmImageCaches(renderer, 0, 0, /*forceLoadLargeImages=*/false, true, /*alsoWarmGrayscale=*/true);
+  };
+  out.warm = measure(warm);
+  out.cached = page && !page->hasUncachedImages(false, true, /*alsoWarmGrayscale=*/true);
+  out.rewarm = measure(warm);
   return out;
 }
 
@@ -138,6 +148,7 @@ void report(const int chapters, const FirstPage& f) {
   card_cost::print(label.c_str(), "section build", f.build.cost, f.build.hostMs);
   card_cost::print(label.c_str(), "page load", f.load.cost, f.load.hostMs);
   card_cost::print(label.c_str(), "image warm", f.warm.cost, f.warm.hostMs);
+  card_cost::print(label.c_str(), "warm again", f.rewarm.cost, f.rewarm.hostMs);
 }
 
 TEST(FirstChapter, KingsAvatarTitlePageProfile) {
@@ -155,6 +166,15 @@ TEST(FirstChapter, KingsAvatarTitlePageProfile) {
   EXPECT_LE(large.build.cost.walks, 1u);
   EXPECT_LE(large.build.cost.entries, 16u);
   EXPECT_LE(large.build.cost.calls, small.build.cost.calls + 200);
+  // The cover: a 106 KB progressive JPEG, decoded at 1/2 in bands, each band advancing every scan.
+  // Through one 512-byte buffer every scan re-read its data in every band: 1275 reads, 650 KB, and
+  // 2824 card calls for the warm. Through a window per scan, from the lent framebuffer, a fraction.
+  EXPECT_LT(large.warm.cost.calls, 1000u);
+  EXPECT_LT(large.warm.cost.bytesRead, 400u * 1024);
+  // Both variants of the picture are cached by the first warm: a page drawn later decodes nothing.
+  EXPECT_TRUE(large.cached);
+  EXPECT_LT(large.rewarm.cost.calls, 32u);
+  EXPECT_LT(large.rewarm.cost.bytesRead, 1024u);
   fs::remove_all(work);
 }
 

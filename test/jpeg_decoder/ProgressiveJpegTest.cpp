@@ -471,6 +471,121 @@ TEST(ProgressiveJpeg, ResumeRefusesAForeignCheckpoint) {
   std::remove(ckpt.c_str());
 }
 
+// Given scanWindowBytes() past its minimum workspace, the decode reads each scan through a window
+// of its own. With one buffer they all share, every scan re-read its 512 bytes in every band: a
+// 106 KB cover took 1275 reads and 650 KB. The rows must not change, and a checkpoint taken with or
+// without the windows must resume into either.
+class ProgressiveJpegReadWindows : public testing::TestWithParam<std::tuple<const char*, int>> {};
+
+struct WindowedRun {
+  ProgressiveJpeg::Result result = ProgressiveJpeg::Result::InvalidData;
+  ProgressiveJpeg::DecodeStats stats;
+  Capture capture;
+};
+
+WindowedRun decodeWith(const std::string& name, const int shift, const bool windows) {
+  WindowedRun run;
+  FsFile file;
+  EXPECT_TRUE(file.openForRead(fixture(name)));
+  ProgressiveJpeg::ImageInfo info;
+  EXPECT_EQ(ProgressiveJpeg::probe(file, info), ProgressiveJpeg::Result::Ok);
+  std::vector<uint8_t> workspace(ProgressiveJpeg::workspaceBytes(info, static_cast<uint8_t>(shift)) +
+                                 (windows ? ProgressiveJpeg::scanWindowBytes() : 0));
+  ProgressiveJpeg::DecodeOptions options;
+  options.scaleShift = static_cast<uint8_t>(shift);
+  options.workspace = workspace.data();
+  options.workspaceSize = workspace.size();
+  options.stats = &run.stats;
+  run.result = ProgressiveJpeg::decode(file, options, Capture::accept, &run.capture);
+  file.close();
+  return run;
+}
+
+TEST_P(ProgressiveJpegReadWindows, ReadTheFileFarLessOftenForTheSameRows) {
+  const auto& [jpg, shift] = GetParam();
+  const WindowedRun shared = decodeWith(jpg, shift, false);
+  const WindowedRun windowed = decodeWith(jpg, shift, true);
+  ASSERT_EQ(shared.result, ProgressiveJpeg::Result::Ok);
+  ASSERT_EQ(windowed.result, ProgressiveJpeg::Result::Ok);
+  EXPECT_TRUE(windowed.capture.orderOk);
+  EXPECT_EQ(windowed.capture.image.h, shared.capture.image.h);
+  EXPECT_TRUE(windowed.capture.image.px == shared.capture.image.px) << "the windows change only how the file is read";
+  std::printf("[ pjpeg    ] %s 1/%d: %u reads / %u bytes with one shared buffer, %u / %u with the windows\n", jpg,
+              1 << shift, static_cast<unsigned>(shared.stats.reads), static_cast<unsigned>(shared.stats.bytesRead),
+              static_cast<unsigned>(windowed.stats.reads), static_cast<unsigned>(windowed.stats.bytesRead));
+  EXPECT_LE(windowed.stats.reads * 4, shared.stats.reads);
+  EXPECT_LT(windowed.stats.bytesRead, shared.stats.bytesRead);
+}
+
+INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegReadWindows,
+                         testing::Combine(testing::Values("prog_full_420.jpg", "prog_full_gray.jpg",
+                                                          "prog_full_444_rst.jpg"),
+                                          testing::Values(0, 1)));
+
+TEST(ProgressiveJpeg, ACheckpointResumesWithOrWithoutTheReadWindows) {
+  const char* const jpg = "prog_full_420.jpg";
+  constexpr int kShift = 1;
+  Capture oneShot;
+  ASSERT_EQ(decode(jpg, kShift, oneShot), ProgressiveJpeg::Result::Ok);
+  const std::string ckpt = tempPath("windows.ckpt");
+  FsFile probeFile;
+  ASSERT_TRUE(probeFile.openForRead(fixture(jpg)));
+  ProgressiveJpeg::ImageInfo info;
+  ASSERT_EQ(ProgressiveJpeg::probe(probeFile, info), ProgressiveJpeg::Result::Ok);
+  probeFile.close();
+  const size_t minimum = ProgressiveJpeg::workspaceBytes(info, kShift);
+  for (const bool firstWindows : {false, true}) {
+    for (const bool secondWindows : {false, true}) {
+      // Stopped partway through the index (step 2), and partway through the bands.
+      for (const int stop : {2, 12}) {
+        SCOPED_TRACE(std::string("windows ") + (firstWindows ? "on" : "off") + " -> " + (secondWindows ? "on" : "off") +
+                     ", stopped after step " + std::to_string(stop));
+        Capture capture;
+        ProgressiveJpeg::DecodeOptions options;
+        options.scaleShift = kShift;
+        std::vector<uint8_t> a(minimum + (firstWindows ? ProgressiveJpeg::scanWindowBytes() : 0));
+        {
+          FsFile file;
+          ASSERT_TRUE(file.openForRead(fixture(jpg)));
+          options.workspace = a.data();
+          options.workspaceSize = a.size();
+          ProgressiveJpeg::Decoder first;
+          ASSERT_EQ(first.begin(file, options, Capture::accept, &capture), ProgressiveJpeg::Result::Ok);
+          for (int i = 0; i < stop; ++i) ASSERT_EQ(first.step(1), ProgressiveJpeg::Result::Pending);
+          FsFile out;
+          ASSERT_TRUE(out.openForWrite(ckpt));
+          ASSERT_TRUE(first.writeCheckpoint(out));
+          out.close();
+          first.end();
+          file.close();
+        }
+        std::vector<uint8_t> b(minimum + (secondWindows ? ProgressiveJpeg::scanWindowBytes() : 0) + 5);
+        {
+          FsFile file;
+          ASSERT_TRUE(file.openForRead(fixture(jpg)));
+          options.workspace = b.data() + 5;
+          options.workspaceSize = b.size() - 5;
+          FsFile in;
+          ASSERT_TRUE(in.openForRead(ckpt));
+          ProgressiveJpeg::Decoder second;
+          ASSERT_EQ(second.resume(file, options, Capture::accept, &capture, in), ProgressiveJpeg::Result::Ok);
+          in.close();
+          ProgressiveJpeg::Result r;
+          do {
+            r = second.step(1);
+          } while (r == ProgressiveJpeg::Result::Pending);
+          ASSERT_EQ(r, ProgressiveJpeg::Result::Ok);
+          second.end();
+          file.close();
+        }
+        EXPECT_TRUE(capture.orderOk);
+        EXPECT_TRUE(capture.image.px == oneShot.image.px);
+      }
+    }
+  }
+  std::remove(ckpt.c_str());
+}
+
 // Smaller output keeps fewer coefficients per block: the working set has to shrink with it.
 TEST(ProgressiveJpeg, WorkspaceShrinksWithScale) {
   ProgressiveJpeg::ImageInfo info;

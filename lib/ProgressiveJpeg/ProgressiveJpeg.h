@@ -52,6 +52,10 @@ Result probe(FsFile& file, ImageInfo& info, uint32_t base = 0);
 
 // Working memory decode() needs at output scale 1/2^scaleShift, including alignment slack.
 size_t workspaceBytes(const ImageInfo& info, uint8_t scaleShift);
+// Workspace past workspaceBytes() that, when the caller gives it, the decode reads the file
+// through: a window for each luma scan instead of one buffer they all share. The output is the
+// same; the reads are a fraction (8 KB).
+size_t scanWindowBytes();
 
 // One band of output rows: `rows` rows of `width` gray pixels starting at output row `y`, row
 // pitch `stride`. Rows arrive in order and cover floor(height >> s) rows in total. Return false
@@ -65,7 +69,7 @@ struct DecodeStats {
   uint32_t indexMs = 0;  // header + scan index: one pass over the whole file
   uint32_t bandsMs = 0;  // entropy decode, IDCT and the band callbacks (which include the caller's
                          // resample/dither/cache work)
-  uint32_t reads = 0;    // file reads (each a seek + up to 512 bytes)
+  uint32_t reads = 0;    // file reads (each a seek + up to 512 bytes, or a window's worth)
   uint32_t bytesRead = 0;
 };
 
@@ -78,8 +82,9 @@ struct DecodeOptions {
   // A Decoder driven in steps polls it the same way within each step.
   AbortCallback shouldAbort = nullptr;
   void* abortUser = nullptr;
-  // Caller-provided working memory of at least workspaceBytes() (e.g. a scratch arena). When
-  // null, decode() takes one heap block of that size for the duration of the call.
+  // Caller-provided working memory of at least workspaceBytes() (e.g. a scratch arena), plus
+  // scanWindowBytes() for the read windows if it can spare them. When null, decode() takes one
+  // heap block of workspaceBytes() for the duration of the call.
   uint8_t* workspace = nullptr;
   size_t workspaceSize = 0;
   // Optional instrumentation: filled when non-null; times only when `clock` (ms) is given too.

@@ -1610,6 +1610,12 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     wantedProgressiveScale = tjpgScale;
     for (; tjpgScale <= 3; ++tjpgScale) {
       progressiveWorkspaceBytes = ProgressiveJpeg::workspaceBytes(progressiveInfo, tjpgScale);
+      // With the read windows when the scratch arena (the lent framebuffer) has room for them: a scan
+      // each to read through cuts the decode's card reads to a fraction. Never asked of the heap.
+      if (const size_t windowed = progressiveWorkspaceBytes + ProgressiveJpeg::scanWindowBytes();
+          image_scratch::canServe(windowed)) {
+        progressiveWorkspaceBytes = windowed;
+      }
       progressiveWorkspace =
           makeUniqueNoThrow<JpegWorkPool>(progressiveWorkspaceBytes, PROGRESSIVE_WORKSPACE_HEAP_FLOOR);
       if (progressiveWorkspace && *progressiveWorkspace) break;
