@@ -626,9 +626,9 @@ shipping is section 10's list.
 - **Bold:** headings and bold spans look bold, with open counters. Screenshots go through `CMD:SCREENSHOT`.
   The maintainer does not read CJK, so Claude reviews them for stroke weight and counters.
 - **Latin:** a regular-only Latin family, and a book with a regular-only embedded font, show synthetic bold.
-- **The store:** filled by reading the store-fill book at 12 and 26 pt, a reclaim forced by `CMD:TTF:FULL`. Reclaims run in
-  idle time (`EVT:TTF_*` lines); the PR records how many glyphs a page draws again after one; no page shows a
-  wrong glyph.
+- **The store:** filled by reading the store-fill book at 12 and 26 pt, and a reclaim forced by `CMD:TTF:FULL`.
+  Reclaims run in idle time (`EVT:TTF_*` lines); the PR records how many glyphs a page draws again after one; no
+  page shows a wrong glyph.
 
 ## 11. Documentation
 
