@@ -252,4 +252,28 @@ inline void enforceExitFullRefresh(const GfxRenderer& renderer) {
   renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
 }
 
+// The HALF a book's open armed for its first page (ActivityManager::armBookOpenRefresh, or main.cpp after a boot),
+// held past the loading frames painted before that page: the "Indexing..." popups, a cold font load's "Loading font"
+// popup, the XTC "Loading" screen. Any of them would spend it and leave the page a FAST diff away from the frame
+// before it, and a popup still shows the screen the book was opened from (drawPopup() draws over the frame on screen),
+// so a HALF on one cleans that screen up only for the page to land on it FAST. Within the scope they paint FAST; the
+// HALF is armed again when it ends, for the page. EpubReaderActivity::buildSection moves it past the section's popup
+// the same way (launchHalf). Every override armed before a reader starts is that HALF, so its mode is not carried.
+class BookOpenRefreshHold {
+ public:
+  explicit BookOpenRefreshHold(const GfxRenderer& renderer)
+      : renderer(renderer), held(renderer.hasRefreshOverridePending()) {
+    if (held) renderer.clearRefreshOverride();
+  }
+  ~BookOpenRefreshHold() {
+    if (held) renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+  }
+  BookOpenRefreshHold(const BookOpenRefreshHold&) = delete;
+  BookOpenRefreshHold& operator=(const BookOpenRefreshHold&) = delete;
+
+ private:
+  const GfxRenderer& renderer;
+  const bool held;
+};
+
 }  // namespace ReaderUtils
