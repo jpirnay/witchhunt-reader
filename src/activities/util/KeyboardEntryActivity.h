@@ -92,6 +92,10 @@ class KeyboardEntryActivity : public Activity {
   bool cursorMode = false;
   bool togglePos = false;
   size_t cursorPos = 0;  // byte offset into text, always on a code point boundary
+  // Where the last typing ended. A password field shows the byte before the cursor in clear only
+  // while the cursor sits here, so what was just typed can be checked. npos until the user types,
+  // and again after a deletion: the value the field opened with is never shown.
+  size_t typedEnd = std::string::npos;
   bool upHeld = false;
   bool upLongHandled = false;
   bool downHeld = false;
