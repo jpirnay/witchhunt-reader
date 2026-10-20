@@ -9,6 +9,7 @@ target_include_directories(CssGapsTest PRIVATE
   ${REPO_ROOT}/lib/hal
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/Memory        # BuildArena.h (CssParser Phase-2 arena mode)
+  ${REPO_ROOT}/lib/Serialization # BufferedFileIO.h (the cache compile's windows)
 )
 
 target_compile_definitions(CssGapsTest PRIVATE

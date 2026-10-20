@@ -813,7 +813,7 @@ void Epub::parseCssFiles() const {
   }
 
   // Finalize compact cache for next time.
-  if (!cssParser->endCacheCompile()) {
+  if (!cssParser->endCacheCompile(loadScratch_)) {
     LOG_ERR("EBP", "Failed to finalize CSS rules cache");
   }
 
