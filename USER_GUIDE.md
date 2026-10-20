@@ -499,7 +499,7 @@ through a long catalog; **Up** / **Down** move one row. **Confirm** opens a fold
 book. When a book comes in several formats, you choose one from a short list that works the same
 way. A book the catalog offers only in formats the reader cannot open (PDF or MOBI, say) is still
 listed, with **Format not supported** in place of its author; **Confirm** on it says so in a box, which the
-next press takes down.
+next press, tap or swipe takes down.
 
 #### 3.7.6 Web Settings (WiFi + OPDS)
 

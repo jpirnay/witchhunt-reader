@@ -61,6 +61,17 @@ int formatItemsPerPage(const Rect& contentRect) {
   return itemsPerPage > 0 ? itemsPerPage : 1;
 }
 
+// A tap or a swipe anywhere on the screen. One that is found is taken whole: the rest of its contact
+// reaches nothing that runs after the activity's loop() (ActivityManager's list, light-panel and
+// hint-strip dispatch).
+bool takeTapOrSwipe(const MappedInputManager& input) {
+  int x = 0;
+  int y = 0;
+  if (!input.wasScreenTapped(x, y) && input.wasSwipe() == MappedInputManager::SwipeDir::None) return false;
+  input.suppressTouchContact();
+  return true;
+}
+
 void writeString(HalFile& f, const std::string& s) {
   if (s.length() > UINT16_MAX) {
     LOG_ERR("OPDS", "writeString: string truncated from %zu to %u bytes", s.length(), UINT16_MAX);
@@ -304,10 +315,12 @@ void OpdsBookBrowserActivity::loop() {
   }
 
   if (formatNotice && (state == BrowserState::BROWSING || state == BrowserState::BOOK_DETAIL)) {
-    // The next press only takes the notice down. It would act on the screen below otherwise, and
-    // Back there leaves the feed, which is the place in the catalog this notice exists to keep.
+    // The next press, tap or swipe only takes the notice down. It would act on the screen below
+    // otherwise, and Back there leaves the feed, which is the place in the catalog this notice exists
+    // to keep. Touch is read here, ahead of ActivityManager's list dispatch, for both screens: that
+    // dispatch reaches only a screen that recorded rows, and the book detail records none.
     ButtonEventManager::ButtonEvent event;
-    if (buttonEvents.consumeEvent(event)) dismissFormatNotice();
+    if (buttonEvents.consumeEvent(event) || takeTapOrSwipe(mappedInput)) dismissFormatNotice();
     return;
   }
   formatNotice = false;  // the screen it stood over is gone
@@ -1184,10 +1197,6 @@ void OpdsBookBrowserActivity::onWifiSelectionComplete(const bool connected) {
 }
 
 ListRowTap::Result OpdsBookBrowserActivity::selectListRow(const int index) {
-  if (formatNotice) {  // a tap, like a press, only takes the notice down
-    dismissFormatNotice();
-    return ListRowTap::Result::Rejected;
-  }
   // Two lists, two states. `state` is read on the loop task and may have moved on since the render
   // that recorded the band, so it decides which list a tap means.
   if (state == BrowserState::FORMAT_SELECTION) return formatList.tapRow(index);
@@ -1196,10 +1205,6 @@ ListRowTap::Result OpdsBookBrowserActivity::selectListRow(const int index) {
 }
 
 bool OpdsBookBrowserActivity::pageList(const ListPageDirection direction) {
-  if (formatNotice) {
-    dismissFormatNotice();
-    return true;
-  }
   const int step = direction == ListPageDirection::Forward ? 1 : -1;
   if (state == BrowserState::BROWSING) {
     catalogList.page(step);

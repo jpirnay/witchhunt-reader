@@ -65,7 +65,7 @@ class OpdsBookBrowserActivity final : public Activity {
   size_t downloadProgress = 0;
   size_t downloadTotal = 0;
   // "Format not supported" over the list or the book detail, after Confirm on a book the catalog
-  // offers only in formats the reader cannot open. The next press or tap only takes it down.
+  // offers only in formats the reader cannot open. The next press, tap or swipe only takes it down.
   bool formatNotice = false;
 
   OpdsServer server;  // Copied at construction — safe even if the store changes during browsing
