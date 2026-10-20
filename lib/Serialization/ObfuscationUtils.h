@@ -53,6 +53,24 @@ bool parseKeyId(const std::string& id, uint8_t key[6]);
 enum class PasswordWriter : uint8_t { Unknown, ThisReader, OtherReader };
 PasswordWriter passwordWriter(const std::string& writerKeyId, uint8_t writerKey[6]);
 
+// Whether a decoded password could be one somebody typed: empty, or well-formed UTF-8 without
+// control characters (C0, DEL, C1). A password decoded with another reader's key is almost never
+// that (ObfuscationUtilsTest measures how rarely), which tells a file written on another reader
+// from one written here when the file does not name its key.
+bool plausiblePassword(const std::string& decoded);
+
+// After a credentials file has loaded, whether to save it again at once under this reader's key.
+// writer is what its key id says (passwordWriter()); hasPassword whether it holds an obfuscated
+// password; allPlausible whether every one decoded to a plausiblePassword().
+//   OtherReader: when it holds a password. They were decoded with the writer's key and are
+//     re-keyed for this reader.
+//   ThisReader: never.
+//   Unknown (older firmware records no key id): when it holds a password and every one is
+//     plausible with this reader's key. The file was written here, and the stamp lets the next
+//     reader decode it. Otherwise another reader wrote it, and this reader's id on its bytes
+//     would make even that reader misread them: the file is left as it is.
+bool resaveUnderThisKey(PasswordWriter writer, bool hasPassword, bool allPlausible);
+
 // Self-test: verifies round-trip obfuscation with hardware key. Logs PASS/FAIL.
 void selfTest();
 
