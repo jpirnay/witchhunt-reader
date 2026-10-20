@@ -648,8 +648,10 @@ bool Epub::clearCacheIfContentChanged() const {
 }
 
 bool Epub::needsFirstOpenIndexing() const {
-  // Spine/TOC cache missing -> load() rebuilds it (content.opf + TOC/NCX + book.bin).
-  if (!BookMetadataCache::cacheExists(cachePath)) return true;
+  // Spine/TOC cache missing, or of another BOOK_CACHE_VERSION -> load() rebuilds it (content.opf +
+  // TOC/NCX + book.bin). A stale one was rebuilt without the popup and the lent framebuffer: the
+  // first open of every book after an update that bumped the version.
+  if (!BookMetadataCache::cacheIsCurrent(cachePath)) return true;
   // Compiled CSS rules cache missing -> load() runs the (slow) CSS compile.
   if (!CssParser(cachePath).hasCache()) return true;
   // Book content changed at the same path -> load() wipes the cache and rebuilds.
