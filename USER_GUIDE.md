@@ -481,6 +481,7 @@ Behavior notes:
 - You can store up to 8 OPDS servers.
 - OPDS authentication supports HTTP Basic auth. If you use Calibre Content Server with authentication enabled, set it to Basic (not Digest).
 - When the server turns the username or password down, the browser says **Authentication failed**.
+- Saved OPDS and KOReader passwords are stored scrambled on the SD card and keep working when the card moves to another reader.
 
 You can also manage OPDS servers from the web interface while in File Transfer mode:
 
