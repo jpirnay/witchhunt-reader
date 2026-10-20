@@ -471,8 +471,8 @@ TEST(ProgressiveJpeg, ResumeRefusesAForeignCheckpoint) {
   std::remove(ckpt.c_str());
 }
 
-// Given scanWindowBytes() past its minimum workspace, the decode reads each scan through a window
-// of its own. With one buffer they all share, every scan re-read its 512 bytes in every band: a
+// Given read windows (DecodeOptions::readWindows, scanWindowBytes()), the decode reads each scan
+// through a window of its own. With one buffer they all share, every scan re-read its 512 bytes in every band: a
 // 106 KB cover took 1275 reads and 650 KB. The rows must not change, and a checkpoint taken with or
 // without the windows must resume into either.
 class ProgressiveJpegReadWindows : public testing::TestWithParam<std::tuple<const char*, int>> {};
@@ -489,12 +489,17 @@ WindowedRun decodeWith(const std::string& name, const int shift, const bool wind
   EXPECT_TRUE(file.openForRead(fixture(name)));
   ProgressiveJpeg::ImageInfo info;
   EXPECT_EQ(ProgressiveJpeg::probe(file, info), ProgressiveJpeg::Result::Ok);
-  std::vector<uint8_t> workspace(ProgressiveJpeg::workspaceBytes(info, static_cast<uint8_t>(shift)) +
-                                 (windows ? ProgressiveJpeg::scanWindowBytes() : 0));
+  std::vector<uint8_t> workspace(ProgressiveJpeg::workspaceBytes(info, static_cast<uint8_t>(shift)));
+  // One byte off alignment: the decoder aligns the windows itself.
+  std::vector<uint8_t> readWindows(windows ? ProgressiveJpeg::scanWindowBytes() + 4 : 0);
   ProgressiveJpeg::DecodeOptions options;
   options.scaleShift = static_cast<uint8_t>(shift);
   options.workspace = workspace.data();
   options.workspaceSize = workspace.size();
+  if (windows) {
+    options.readWindows = readWindows.data() + 1;
+    options.readWindowsSize = readWindows.size() - 1;
+  }
   options.stats = &run.stats;
   run.result = ProgressiveJpeg::decode(file, options, Capture::accept, &run.capture);
   file.close();
@@ -543,12 +548,15 @@ TEST(ProgressiveJpeg, ACheckpointResumesWithOrWithoutTheReadWindows) {
         Capture capture;
         ProgressiveJpeg::DecodeOptions options;
         options.scaleShift = kShift;
-        std::vector<uint8_t> a(minimum + (firstWindows ? ProgressiveJpeg::scanWindowBytes() : 0));
+        std::vector<uint8_t> a(minimum);
+        std::vector<uint8_t> aWindows(ProgressiveJpeg::scanWindowBytes());
         {
           FsFile file;
           ASSERT_TRUE(file.openForRead(fixture(jpg)));
           options.workspace = a.data();
           options.workspaceSize = a.size();
+          options.readWindows = firstWindows ? aWindows.data() : nullptr;
+          options.readWindowsSize = firstWindows ? aWindows.size() : 0;
           ProgressiveJpeg::Decoder first;
           ASSERT_EQ(first.begin(file, options, Capture::accept, &capture), ProgressiveJpeg::Result::Ok);
           for (int i = 0; i < stop; ++i) ASSERT_EQ(first.step(1), ProgressiveJpeg::Result::Pending);
@@ -559,12 +567,15 @@ TEST(ProgressiveJpeg, ACheckpointResumesWithOrWithoutTheReadWindows) {
           first.end();
           file.close();
         }
-        std::vector<uint8_t> b(minimum + (secondWindows ? ProgressiveJpeg::scanWindowBytes() : 0) + 5);
+        std::vector<uint8_t> b(minimum + 5);
+        std::vector<uint8_t> bWindows(ProgressiveJpeg::scanWindowBytes());
         {
           FsFile file;
           ASSERT_TRUE(file.openForRead(fixture(jpg)));
           options.workspace = b.data() + 5;
           options.workspaceSize = b.size() - 5;
+          options.readWindows = secondWindows ? bWindows.data() : nullptr;
+          options.readWindowsSize = secondWindows ? bWindows.size() : 0;
           FsFile in;
           ASSERT_TRUE(in.openForRead(ckpt));
           ProgressiveJpeg::Decoder second;

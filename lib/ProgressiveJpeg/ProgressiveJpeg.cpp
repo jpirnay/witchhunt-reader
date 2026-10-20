@@ -17,9 +17,8 @@ constexpr uint8_t MAX_LUMA_SCANS = 32;
 // pool only reclaims entries nobody references.
 constexpr uint8_t TABLE_POOL = 16;
 constexpr size_t INPUT_BUFFER = 512;
-// Read windows past the workspace's minimum (see scanWindowBytes()): one per luma scan, the
-// first SCAN_WINDOWS of them, while the bands decode, and all of them as one while the file is
-// indexed.
+// The read windows (DecodeOptions::readWindows): one per luma scan, the first SCAN_WINDOWS of
+// them, while the bands decode, and all of them as one while the file is indexed.
 constexpr size_t SCAN_WINDOW_BYTES = 1024;
 constexpr uint8_t SCAN_WINDOWS = 8;
 
@@ -36,8 +35,8 @@ bool isStartOfFrame(const uint8_t marker) {
 // Random-access byte reader over the file. Every cursor reads through it. With the workspace's
 // minimum, all of them share one 512-byte buffer, and a cursor switch usually lands outside it:
 // a seek + read for every scan in every band, the file read ~6 times over (a 106 KB cover: 1275
-// reads, 650 KB). Given room for the extra windows (scanWindowBytes()), the first SCAN_WINDOWS
-// luma scans read through a window each, and the index pass through all of them as one.
+// reads, 650 KB). Given read windows (DecodeOptions::readWindows), the first SCAN_WINDOWS luma
+// scans read through a window each, and the index pass through all of them as one.
 struct Source {
   FsFile* file = nullptr;
   uint32_t base = 0;  // file offset of the JPEG's first byte; `pos` below is relative to it
@@ -1034,6 +1033,34 @@ Result probe(FsFile& file, ImageInfo& info, const uint32_t base) {
 
 size_t scanWindowBytes() { return Source::SLOTS_BYTES + SCAN_WINDOWS * SCAN_WINDOW_BYTES; }
 
+bool ReadWindows::take(BuildArena* const region) {
+  release();
+  const size_t bytes = scanWindowBytes();
+  if (region == nullptr || !region->valid() ||
+      region->capacity() - region->used() < bytes + 2 * alignof(std::max_align_t)) {
+    return false;
+  }
+  block_ = region->reserveBlock();
+  data_ = static_cast<uint8_t*>(region->alloc(bytes));
+  if (data_ == nullptr) {
+    region->release(block_);
+    return false;
+  }
+  region_ = region;
+  return true;
+}
+
+void ReadWindows::release() {
+  if (region_ != nullptr && block_.valid()) region_->release(block_);
+  region_ = nullptr;
+  data_ = nullptr;
+}
+
+void ReadWindows::applyTo(DecodeOptions& options) const {
+  options.readWindows = data_;
+  options.readWindowsSize = data_ != nullptr ? scanWindowBytes() : 0;
+}
+
 size_t workspaceBytes(const ImageInfo& info, const uint8_t scaleShift) {
   if (info.width == 0 || info.height == 0 || scaleShift > 3) return 0;
   return layoutFor(geometryFor(info.width, info.height, info.componentCount, info.maxHorizontal, info.maxVertical,
@@ -1084,9 +1111,13 @@ Result Decoder::claim(FsFile& file, const DecodeOptions& options, const BandCall
   session_->user = user;
   session_->st.source.file = &file;
   session_->st.source.base = options.base;
-  // Room past the layout for the extra windows: the decode reads through them.
-  const size_t used = layout.total - 8;  // the layout's last 8 bytes are the alignment slack
-  session_->st.source.bind(size - skew >= used + scanWindowBytes() ? workspace + used : nullptr);
+  // The windows' bookkeeping (Source::Slot) wants 4-byte alignment.
+  uint8_t* windows = nullptr;
+  if (options.readWindows != nullptr) {
+    const size_t pad = (4 - (reinterpret_cast<uintptr_t>(options.readWindows) & 3)) & 3;
+    if (options.readWindowsSize >= pad + scanWindowBytes()) windows = options.readWindows + pad;
+  }
+  session_->st.source.bind(windows);
   file_ = &file;
   options_ = options;
   if (options_.stats) *options_.stats = DecodeStats{};

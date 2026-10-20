@@ -827,6 +827,11 @@ static bool convertFromProgressive(FsFile& jpegFile, const OutputTarget* targets
                               options.shouldAbort = progressiveFullShouldAbort;
                               options.workspace = workspace;  // null: decode() takes one heap block
                               options.workspaceSize = workspace != nullptr ? workspaceBytes : 0;
+                              // A scan each to read through, from what the region has left after the
+                              // workspace and the row pipeline; released first, as taken last.
+                              ProgressiveJpeg::ReadWindows windows;
+                              windows.take(scratch);
+                              windows.applyTo(options);
                               const auto result =
                                   ProgressiveJpeg::decode(jpegFile, options, progressiveBandOutput, &sinks);
                               if (result != ProgressiveJpeg::Result::Ok || sinks.error) {
@@ -1052,7 +1057,8 @@ struct JpegThumbSession::Impl {
   ArenaBlockScope workspaceScope;
   TjpgJob tjpg;
   RowPipeline pipeline;
-  ProgressiveJpeg::Decoder decoder;  // ends (and rewinds the file) before the rest goes
+  ProgressiveJpeg::ReadWindows windows;  // taken after the pipeline's block
+  ProgressiveJpeg::Decoder decoder;      // ends (and rewinds the file) before the rest goes
   JDCURSOR cursor{};
   // TJpgDec reads the file as a stream; whatever the caller reads between slices must not move it.
   uint32_t streamPos = 0;
@@ -1097,6 +1103,9 @@ std::unique_ptr<JpegThumbSession> JpegThumbSession::begin(FsFile& jpegFile,
     options.shouldAbort = progressiveSessionPoll;
     options.workspace = workspace;  // null: the decoder takes one heap block for the session
     options.workspaceSize = workspace != nullptr ? workspaceBytes : 0;
+    // A scan each to read through, from what the region has left after the workspace and the pipeline.
+    impl->windows.take(scratch);
+    impl->windows.applyTo(options);
     const auto result = impl->decoder.begin(jpegFile, options, progressiveBandOutput, &impl->pipeline.sinks());
     if (result != ProgressiveJpeg::Result::Ok) {
       LOG_ERR("JPG", "Progressive cover session refused (%s)", ProgressiveJpeg::resultName(result));

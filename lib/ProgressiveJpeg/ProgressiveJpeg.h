@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BuildArena.h>
 #include <HalStorage.h>
 
 #include <cstddef>
@@ -52,9 +53,8 @@ Result probe(FsFile& file, ImageInfo& info, uint32_t base = 0);
 
 // Working memory decode() needs at output scale 1/2^scaleShift, including alignment slack.
 size_t workspaceBytes(const ImageInfo& info, uint8_t scaleShift);
-// Workspace past workspaceBytes() that, when the caller gives it, the decode reads the file
-// through: a window for each luma scan instead of one buffer they all share. The output is the
-// same; the reads are a fraction (8 KB).
+// The read windows a decode can be given (DecodeOptions::readWindows): a window for each luma scan
+// instead of one buffer they all share. The output is the same; the reads are a fraction. 8 KB.
 size_t scanWindowBytes();
 
 // One band of output rows: `rows` rows of `width` gray pixels starting at output row `y`, row
@@ -82,11 +82,14 @@ struct DecodeOptions {
   // A Decoder driven in steps polls it the same way within each step.
   AbortCallback shouldAbort = nullptr;
   void* abortUser = nullptr;
-  // Caller-provided working memory of at least workspaceBytes() (e.g. a scratch arena), plus
-  // scanWindowBytes() for the read windows if it can spare them. When null, decode() takes one
-  // heap block of workspaceBytes() for the duration of the call.
+  // Caller-provided working memory of at least workspaceBytes() (e.g. a scratch arena). When
+  // null, decode() takes one heap block of that size for the duration of the call.
   uint8_t* workspace = nullptr;
   size_t workspaceSize = 0;
+  // Optional read windows of at least scanWindowBytes() (ReadWindows takes them from a lent region),
+  // valid until the decode ends. Without them every scan reads through one shared 512-byte buffer.
+  uint8_t* readWindows = nullptr;
+  size_t readWindowsSize = 0;
   // Optional instrumentation: filled when non-null; times only when `clock` (ms) is given too.
   DecodeStats* stats = nullptr;
   uint32_t (*clock)() = nullptr;
@@ -149,5 +152,30 @@ class Decoder {
 };
 
 const char* resultName(Result result);
+
+// A decode's read windows (scanWindowBytes()) in a block of a lent region, when it has room: the
+// one way every caller gets them, and never from the heap -- a decode without them reads more,
+// but no worse. take() reserves the block; it goes back when this object does, so the object must
+// be released before any block reserved ahead of it (the region is LIFO), and must outlive the
+// decode it was applied to.
+class ReadWindows {
+ public:
+  ReadWindows() = default;
+  ~ReadWindows() { release(); }
+  ReadWindows(const ReadWindows&) = delete;
+  ReadWindows& operator=(const ReadWindows&) = delete;
+
+  // True when `region` served them.
+  bool take(BuildArena* region);
+  void release();
+  // Hands them, if any, to a decode.
+  void applyTo(DecodeOptions& options) const;
+  bool held() const { return data_ != nullptr; }
+
+ private:
+  BuildArena* region_ = nullptr;
+  BuildArena::Block block_;
+  uint8_t* data_ = nullptr;
+};
 
 }  // namespace ProgressiveJpeg
