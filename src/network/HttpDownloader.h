@@ -29,6 +29,7 @@ class HttpDownloader {
     HTTP_ERROR,
     FILE_ERROR,
     ABORTED,
+    AUTH_ERROR,  // HTTP 401 or 403: the server turned the credentials down, or wants some
   };
 
   /**
@@ -88,8 +89,13 @@ class HttpDownloader {
   static bool fetchUrl(const std::string& url, std::string& outContent, const std::string& username = "",
                        const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
 
-  static bool fetchUrl(const std::string& url, Stream& stream, const std::string& username = "",
-                       const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
+  /**
+   * Stream fetch. Returns the DownloadError rather than a bool so a caller can tell a refused
+   * password (AUTH_ERROR) from any other failure. Mind the sense: OK is 0, so `!fetchUrl(...)`
+   * is true on success.
+   */
+  static DownloadError fetchUrl(const std::string& url, Stream& stream, const std::string& username = "",
+                                const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
 
   static bool fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username = "",
                        const std::string& password = "");

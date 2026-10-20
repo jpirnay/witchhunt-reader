@@ -742,9 +742,11 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
 
   {
     OpdsParserStream stream{parser};
-    if (!HttpDownloader::fetchUrl(url, stream, server.username, server.password)) {
+    const HttpDownloader::DownloadError fetched =
+        HttpDownloader::fetchUrl(url, stream, server.username, server.password);
+    if (fetched != HttpDownloader::OK) {
       state = BrowserState::ERROR;
-      errorMessage = tr(STR_FETCH_FEED_FAILED);
+      errorMessage = fetched == HttpDownloader::AUTH_ERROR ? tr(STR_AUTH_FAILED) : tr(STR_FETCH_FEED_FAILED);
       requestUpdate();
       return;
     }
@@ -990,7 +992,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
     selectedBookIndex = -1;
     formatSelectionLabels.clear();
     state = BrowserState::ERROR;
-    errorMessage = tr(STR_DOWNLOAD_FAILED);
+    errorMessage = result == HttpDownloader::AUTH_ERROR ? tr(STR_AUTH_FAILED) : tr(STR_DOWNLOAD_FAILED);
     requestUpdate();
   }
 }

@@ -57,6 +57,11 @@ bool isRedirect(int status) {
   return status == 301 || status == 302 || status == 303 || status == 307 || status == 308;
 }
 
+// A server that turns the credentials down (or asks for some) answers 401, or 403 for an account
+// that may not see the resource. Reported apart from other HTTP failures so the user is told to
+// check the password rather than the network. From witchling-reader commit 111f6ecc (syfq91).
+bool isAuthRefusal(int status) { return status == 401 || status == 403; }
+
 // Runs once per http call (or once per session for reused sessions): logs
 // heap stats and ensures the wall clock is set so TLS cert-date validation
 // can succeed. Shared by both TLS backends. Returns false when https was requested and the
@@ -165,6 +170,10 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
     LOG_ERR("HTTP", "SecureNet GET failed: rc=%d url=%s", rc, url.c_str());
     return HttpDownloader::HTTP_ERROR;
   }
+  if (isAuthRefusal(rc)) {
+    LOG_ERR("HTTP", "SecureNet GET refused the credentials: %d", rc);
+    return HttpDownloader::AUTH_ERROR;
+  }
   if (rc != 200) {
     LOG_ERR("HTTP", "SecureNet unexpected status: %d", rc);
     return HttpDownloader::HTTP_ERROR;
@@ -230,6 +239,10 @@ HttpDownloader::DownloadError runGetSecureOnSession(HttpDownloader::Session& ses
   const int rc = crosspoint::downloadToSink(*impl->http, url, sink, impl->chunking, &largestFreeBlock);
   if (rc == crosspoint::SecureHttpClient::ERR_ABORTED) return HttpDownloader::ABORTED;
   if (rc == crosspoint::ERR_REWIND) return HttpDownloader::FILE_ERROR;
+  if (isAuthRefusal(rc)) {
+    LOG_ERR("HTTP", "SecureNet session GET refused the credentials: rc=%d url=%s", rc, url.c_str());
+    return HttpDownloader::AUTH_ERROR;
+  }
   if (rc != 200) {
     LOG_ERR("HTTP", "SecureNet session GET failed: rc=%d url=%s", rc, url.c_str());
     return HttpDownloader::HTTP_ERROR;
@@ -244,12 +257,13 @@ HttpDownloader::DownloadError runGetOnSession(HttpDownloader::Session& session, 
 }
 }  // namespace
 
-bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const std::string& username,
-                              const std::string& password, TlsPolicy tls) {
+HttpDownloader::DownloadError HttpDownloader::fetchUrl(const std::string& url, Stream& outContent,
+                                                       const std::string& username, const std::string& password,
+                                                       TlsPolicy tls) {
   LOG_DBG("HTTP", "Fetching: %s", url.c_str());
   Sink sink;
   sink.write = [&outContent](const uint8_t* data, size_t len) { return outContent.write(data, len) == len; };
-  return runGetDispatch(url, username, password, sink, tls) == OK;
+  return runGetDispatch(url, username, password, sink, tls);
 }
 
 bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username,
