@@ -300,6 +300,15 @@ void OpdsBookBrowserActivity::loop() {
     return;
   }
 
+  if (formatNotice && (state == BrowserState::BROWSING || state == BrowserState::BOOK_DETAIL)) {
+    // The next press only takes the notice down. It would act on the screen below otherwise, and
+    // Back there leaves the feed, which is the place in the catalog this notice exists to keep.
+    ButtonEventManager::ButtonEvent event;
+    if (buttonEvents.consumeEvent(event)) dismissFormatNotice();
+    return;
+  }
+  formatNotice = false;  // the screen it stood over is gone
+
   if (state == BrowserState::BROWSING) {
     catalogList.update();
     return;
@@ -344,8 +353,11 @@ void OpdsBookBrowserActivity::loop() {
       }
       if (button == MappedInputManager::Button::Confirm) {
         const auto entry = getEntry(selectorIndex);
-        state = BrowserState::BROWSING;
-        requestUpdate();
+        // A book the reader cannot open keeps its detail screen under the notice.
+        if (!entry.acquisitionLinks.empty()) {
+          state = BrowserState::BROWSING;
+          requestUpdate();
+        }
         chooseBookFormat(entry);
         return;
       }
@@ -629,6 +641,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_DOWNLOAD), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    drawFormatNotice();
     renderer.displayBuffer();
     return;
   }
@@ -681,7 +694,21 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
                       item.c_str(), i != static_cast<size_t>(selectorIndex));
   }
 
+  drawFormatNotice();
   renderer.displayBuffer();
+}
+
+void OpdsBookBrowserActivity::drawFormatNotice() const {
+  // On top of the frame this render composed, which its own displayBuffer() then ships: neither
+  // ship here nor re-seed from the displayed frame (see PopupShip::Caller).
+  if (formatNotice)
+    GUI.drawPopup(renderer, tr(STR_FORMAT_NOT_SUPPORTED), /*overlayDisplayedFrame=*/false, PopupShip::Caller);
+}
+
+void OpdsBookBrowserActivity::dismissFormatNotice() {
+  formatNotice = false;
+  buttonEvents.drain();  // the rest of that press (a list hears Up/Down under two names)
+  requestUpdate();
 }
 
 void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
@@ -837,9 +864,9 @@ void OpdsBookBrowserActivity::leave() {
 // download is started immediately.
 void OpdsBookBrowserActivity::chooseBookFormat(const OpdsEntry& book) {
   if (book.acquisitionLinks.empty()) {
-    // The catalog offers this book only in formats the reader cannot open (PDF, MOBI, ...).
-    state = BrowserState::ERROR;
-    errorMessage = tr(STR_FORMAT_NOT_SUPPORTED);
+    // The catalog offers this book only in formats the reader cannot open (PDF, MOBI, ...). Said
+    // over the screen it was chosen from, not on the error screen, whose Back leaves the feed.
+    formatNotice = true;
     requestUpdate();
     return;
   }
@@ -1165,6 +1192,10 @@ void OpdsBookBrowserActivity::onWifiSelectionComplete(const bool connected) {
 }
 
 ListRowTap::Result OpdsBookBrowserActivity::selectListRow(const int index) {
+  if (formatNotice) {  // a tap, like a press, only takes the notice down
+    dismissFormatNotice();
+    return ListRowTap::Result::Rejected;
+  }
   // Two lists, two states. `state` is read on the loop task and may have moved on since the render
   // that recorded the band, so it decides which list a tap means.
   if (state == BrowserState::FORMAT_SELECTION) return formatList.tapRow(index);
@@ -1173,6 +1204,10 @@ ListRowTap::Result OpdsBookBrowserActivity::selectListRow(const int index) {
 }
 
 bool OpdsBookBrowserActivity::pageList(const ListPageDirection direction) {
+  if (formatNotice) {
+    dismissFormatNotice();
+    return true;
+  }
   const int step = direction == ListPageDirection::Forward ? 1 : -1;
   if (state == BrowserState::BROWSING) {
     catalogList.page(step);

@@ -497,7 +497,8 @@ and its hint shows only the arrow. Hold **Left** / **Right**, or swipe on a touc
 through a long catalog; **Up** / **Down** move one row. **Confirm** opens a folder or downloads a
 book. When a book comes in several formats, you choose one from a short list that works the same
 way. A book the catalog offers only in formats the reader cannot open (PDF or MOBI, say) is still
-listed, with **Format not supported** in place of its author.
+listed, with **Format not supported** in place of its author; **Confirm** on it says so in a box, which the
+next press takes down.
 
 #### 3.7.6 Web Settings (WiFi + OPDS)
 
