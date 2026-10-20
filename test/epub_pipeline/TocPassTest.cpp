@@ -50,9 +50,9 @@ TocPass runTocPass(const fs::path& work, const big_spine_book::Book& book, const
   cache.beginContentOpfPass();
   for (const auto& href : book.spineHrefs) cache.createSpineEntry(href);
   cache.endContentOpfPass();
-  cache.beginTocPass();
   auto lent = std::make_unique<uint8_t[]>(52272);
   BuildArena region(lent.get(), 52272);
+  cache.beginTocPass(&region);
   {
     std::optional<AllocationRefusal> refusal;
     if (refuseAbove != 0) refusal.emplace(refuseAbove + 1);
@@ -69,21 +69,15 @@ TocPass runTocPass(const fs::path& work, const big_spine_book::Book& book, const
   cache.endWrite();
   out.entries = static_cast<size_t>(cache.getTocCount());
 
-  // Read the mapping back from the TOC temp file (title, href, anchor, level, spine index).
-  FsFile toc;
-  if (Storage.openFileForRead("TEST", cacheDir + "/toc.bin.tmp", toc)) {
+  // Read the mapping back from the file the pass writes each entry's spine item to, in TOC order.
+  FsFile spines;
+  if (Storage.openFileForRead("TEST", cacheDir + "/toc.spine.tmp", spines)) {
     for (size_t i = 0; i < out.entries; ++i) {
-      std::string title, href, anchor;
-      uint8_t level = 0;
       int16_t spineIndex = -1;
-      serialization::readString(toc, title);
-      serialization::readString(toc, href);
-      serialization::readString(toc, anchor);
-      serialization::readPod(toc, level);
-      serialization::readPod(toc, spineIndex);
+      serialization::readPod(spines, spineIndex);
       out.spineOf.push_back(spineIndex);
     }
-    toc.close();
+    spines.close();
   }
   return out;
 }

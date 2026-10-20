@@ -894,7 +894,7 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss, BuildArena
 
   // TOC Pass - try EPUB 3 nav first, fall back to NCX
   const uint32_t tocStart = millis();
-  if (!bookMetadataCache->beginTocPass()) {
+  if (!bookMetadataCache->beginTocPass(loadScratch_)) {
     LOG_ERR("EBP", "Could not begin writing toc pass");
     return false;
   }
