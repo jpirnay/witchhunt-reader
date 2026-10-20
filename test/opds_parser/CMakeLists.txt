@@ -1,6 +1,8 @@
 add_executable(OpdsParserTest
   OpdsParserTest.cpp
+  OpenSearchDescriptionTest.cpp
   ${REPO_ROOT}/lib/OpdsParser/OpdsParser.cpp
+  ${REPO_ROOT}/lib/OpdsParser/OpenSearchDescription.cpp
   ${REPO_ROOT}/lib/FsHelpers/FsHelpers.cpp
 )
 

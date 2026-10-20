@@ -8,7 +8,7 @@
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <OpdsStream.h>
-#include <SaxParser/SaxParser.h>
+#include <OpenSearchDescription.h>
 #include <WiFi.h>
 #include <Xtc.h>
 
@@ -1047,31 +1047,9 @@ void OpdsBookBrowserActivity::fetchOsdTemplate(const std::string& osdUrl) {
     return;
   }
 
-  struct OsdState {
-    std::string templateUrl;
-    static void onStart(void* ud, const char* name, const char** atts) {
-      if (strcmp(name, "Url") != 0 && strstr(name, ":Url") == nullptr) return;
-      auto* state = static_cast<OsdState*>(ud);
-      for (int i = 0; atts[i]; i += 2) {
-        if (strcmp(atts[i], "template") == 0 && strstr(atts[i + 1], "{searchTerms}") != nullptr) {
-          state->templateUrl = atts[i + 1];
-          break;
-        }
-      }
-    }
-  } osdState;
-
-  SaxParser parser;
-  if (!parser.init(&osdState, OsdState::onStart, nullptr)) {
-    LOG_ERR("OPDS", "OSD parser alloc failed");
-    return;
-  }
-  if (!parser.feed(reinterpret_cast<const uint8_t*>(content.data()), content.size()) || !parser.finalize()) {
-    LOG_ERR("OPDS", "OSD parse error at line %d: %s", parser.errorLine(), parser.errorString());
-  }
-
-  if (!osdState.templateUrl.empty()) {
-    searchTemplate = UrlUtils::buildUrl(osdUrl, osdState.templateUrl);
+  const std::string templateUrl = OpenSearch::searchTemplate(content.data(), content.size());
+  if (!templateUrl.empty()) {
+    searchTemplate = UrlUtils::buildUrl(osdUrl, templateUrl);
     if (!initialQuery_.empty()) {
       performSearch(std::move(initialQuery_));
       initialQuery_.clear();
