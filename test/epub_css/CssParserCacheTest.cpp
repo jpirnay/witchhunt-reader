@@ -917,6 +917,45 @@ TEST(CssParserCache, CompilingSyncsTheStagingFileOnlyToReadARuleBack) {
   std::filesystem::remove(cssPath, rmEc);
 }
 
+// Every section build loads the ruleset into its arena (RESIDENT), and the load read each rule's
+// 77-byte style a field at a time: ~33 SdFat calls a rule, every build -- 3384 calls for the 84
+// rules of the first page of a King's Avatar-shaped book, ~0.06 s on the X3 per 100 rules. One
+// read for the payload makes it four a rule; what resolves is the same.
+TEST(CssParserArena, LoadingTheRulesetIntoTheArenaReadsEachRuleInAFewCalls) {
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  constexpr int kRules = 400;
+  std::string css;
+  for (int i = 0; i < kRules; ++i) {
+    css += ".r" + std::to_string(i) + " { margin-left: " + std::to_string(i % 7) +
+           "em; text-indent: " + std::to_string(i % 3) + "em; font-style: italic }\n";
+  }
+  std::string cssPath;
+  ASSERT_TRUE(writeTempCssFile(std::vector<uint8_t>(css.begin(), css.end()), cssPath));
+  CssParser parser(cacheDir);
+  ASSERT_TRUE(compileCache(parser, cssPath));
+  parser.clear();
+  ASSERT_TRUE(parser.loadFromCache());
+  const CssStyle heap = parser.resolveStyle("p", "r123");
+
+  BuildArena arena(kRules * 128 + 8192);
+  ASSERT_TRUE(arena.valid());
+  parser.clear();
+  parser.setIndexArena(&arena);
+  parser.setLeanResolve(true);
+  const size_t callsBefore = FsFile::calls;
+  ASSERT_TRUE(parser.loadFromCache());
+  const size_t calls = FsFile::calls - callsBefore;
+  std::printf("[ css      ] %d rules loaded into the arena in %zu card calls\n", kRules, calls);
+  EXPECT_LE(calls, static_cast<size_t>(6 * kRules)) << "a field at a time was ~33 a rule";
+  EXPECT_TRUE(stylesEqual(heap, parser.resolveStyle("p", "r123")));
+  parser.clear();  // drop the arena view before the arena is destroyed
+
+  removePath(cacheDir);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);
+}
+
 // A compile that hits MAX_RULES mid-stream persists a cache that holds the first MAX_RULES rules
 // and is STAMPED truncated (flags byte bit 1), so the book is parsed once and every later open
 // says what is missing (rulesTruncated()). It used to write no cache at all, which re-parsed the

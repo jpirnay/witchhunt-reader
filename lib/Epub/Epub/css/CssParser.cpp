@@ -1681,33 +1681,44 @@ void CssParser::logResolveStats(const char* context) const {
 }
 
 bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
+  // Read in one call and taken apart in RAM: a field at a time was ~30 SdFat calls a rule, paid for
+  // every rule each time a section build loads the ruleset into its arena.
+  std::array<uint8_t, CSS_FIXED_STYLE_BYTES> payload;
+  if (file.read(payload.data(), payload.size()) != static_cast<int>(payload.size())) return false;
+  size_t at = 0;
+  const auto get = [&payload, &at](void* out, const size_t n) {
+    if (at + n > payload.size()) return false;  // a field past CSS_FIXED_STYLE_BYTES: see its static_assert
+    memcpy(out, payload.data() + at, n);
+    at += n;
+    return true;
+  };
   uint8_t enumVal;
-  if (file.read(&enumVal, 1) != 1) {
+  if (!get(&enumVal, 1)) {
     return false;
   }
   style.textAlign = static_cast<CssTextAlign>(enumVal);
 
-  if (file.read(&enumVal, 1) != 1) {
+  if (!get(&enumVal, 1)) {
     return false;
   }
   style.fontStyle = static_cast<CssFontStyle>(enumVal);
 
-  if (file.read(&enumVal, 1) != 1) {
+  if (!get(&enumVal, 1)) {
     return false;
   }
   style.fontWeight = static_cast<CssFontWeight>(enumVal);
 
-  if (file.read(&enumVal, 1) != 1) {
+  if (!get(&enumVal, 1)) {
     return false;
   }
   style.textDecoration = static_cast<CssTextDecoration>(enumVal);
 
-  auto readLength = [&file](CssLength& len) -> bool {
-    if (file.read(&len.value, sizeof(len.value)) != sizeof(len.value)) {
+  auto readLength = [&get](CssLength& len) -> bool {
+    if (!get(&len.value, sizeof(len.value))) {
       return false;
     }
     uint8_t unitVal;
-    if (file.read(&unitVal, 1) != 1) {
+    if (!get(&unitVal, 1)) {
       return false;
     }
     len.unit = static_cast<CssUnit>(unitVal);
@@ -1722,13 +1733,13 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   }
 
   uint8_t displayVal;
-  if (file.read(&displayVal, 1) != 1) {
+  if (!get(&displayVal, 1)) {
     return false;
   }
   style.display = static_cast<CssDisplay>(displayVal);
 
   uint16_t definedBits = 0;
-  if (file.read(&definedBits, sizeof(definedBits)) != sizeof(definedBits)) {
+  if (!get(&definedBits, sizeof(definedBits))) {
     return false;
   }
   style.defined.textAlign = (definedBits & 1 << 0) != 0;
@@ -1749,19 +1760,19 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.display = (definedBits & 1 << 15) != 0;
   uint8_t vertAlignVal = 0;
   uint8_t vertAlignDefined = 0;
-  if (file.read(&vertAlignVal, 1) != 1 || file.read(&vertAlignDefined, 1) != 1) {
+  if (!get(&vertAlignVal, 1) || !get(&vertAlignDefined, 1)) {
     return false;
   }
   style.verticalAlign = static_cast<CssVerticalAlign>(vertAlignVal);
   style.defined.verticalAlign = vertAlignDefined != 0 ? 1 : 0;
   uint8_t cssFloatVal = 0;
-  if (file.read(&cssFloatVal, 1) != 1) {
+  if (!get(&cssFloatVal, 1)) {
     return false;
   }
   style.cssFloat = static_cast<CssFloat>(cssFloatVal);
   style.defined.cssFloat = (cssFloatVal != static_cast<uint8_t>(CssFloat::None)) ? 1 : 0;
   uint8_t smallCapsVal = 0;
-  if (file.read(&smallCapsVal, 1) != 1) {
+  if (!get(&smallCapsVal, 1)) {
     return false;
   }
   // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset)
@@ -1769,7 +1780,7 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.smallCaps = (smallCapsVal & 0x2) != 0 ? 1 : 0;
   float fontSizeMul = 1.0f;
   uint8_t fontSizeFlags = 0;
-  if (file.read(&fontSizeMul, sizeof(fontSizeMul)) != sizeof(fontSizeMul) || file.read(&fontSizeFlags, 1) != 1) {
+  if (!get(&fontSizeMul, sizeof(fontSizeMul)) || !get(&fontSizeFlags, 1)) {
     return false;
   }
   if ((fontSizeFlags & 0x1) != 0) {
@@ -1779,7 +1790,7 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   }
   style.defined.fontFamily = (fontSizeFlags & 0x4) != 0 ? 1 : 0;
   uint8_t blockFlags = 0;
-  if (file.read(&blockFlags, 1) != 1) {
+  if (!get(&blockFlags, 1)) {
     return false;
   }
   style.listStyleNone = (blockFlags & 0x01) != 0;
@@ -1789,7 +1800,7 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.pageBreakAfter = (blockFlags & 0x10) != 0;
   style.defined.pageBreakAfter = (blockFlags & 0x20) != 0 ? 1 : 0;
   uint8_t visibilityFlags = 0;
-  if (file.read(&visibilityFlags, 1) != 1) {
+  if (!get(&visibilityFlags, 1)) {
     return false;
   }
   style.colorTransparent = (visibilityFlags & 0x01) != 0;
@@ -1798,7 +1809,7 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.opacityZero = (visibilityFlags & 0x08) != 0 ? 1 : 0;
   style.visibilityHidden = (visibilityFlags & 0x10) != 0;
   style.defined.visibilityHidden = (visibilityFlags & 0x20) != 0 ? 1 : 0;
-  return file.read(&style.fontFamily, sizeof(style.fontFamily)) == sizeof(style.fontFamily);
+  return get(&style.fontFamily, sizeof(style.fontFamily));
 }
 
 void CssParser::writeCssStylePayload(FsFile& file, const CssStyle& style) {
