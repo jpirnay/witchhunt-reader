@@ -59,7 +59,17 @@ struct Options {
   bool documentsLast = false;
   int stylesheets = 1;
   int rulesPerStylesheet = 40;
+  // A title page ahead of the first chapter, showing the cover, as converters put one first.
+  bool titlePage = false;
+  // The cover's bytes; empty: a stand-in that is not a decodable picture.
+  std::string coverBytes;
 };
+
+inline std::string titlePageDocument() {
+  return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Cover"
+         "</title><link rel=\"stylesheet\" href=\"../Styles/style.css\"/></head><body>\n<div class=\"cover\"><img "
+         "src=\"../Images/cover.jpg\" alt=\"cover\"/></div>\n</body></html>\n";
+}
 
 inline std::string stylesheetName(const int s) { return s == 0 ? "style.css" : "style" + std::to_string(s) + ".css"; }
 
@@ -96,6 +106,13 @@ inline Book write(const std::string& path, const int chapters, const int images,
   }
   std::string spine;
   std::string navPoints;
+  if (options.titlePage) {
+    manifest += "<item id=\"titlepage\" href=\"Text/titlepage.xhtml\" media-type=\"application/xhtml+xml\"/>\n";
+    spine += "<itemref idref=\"titlepage\"/>\n";
+    navPoints +=
+        "<navPoint id=\"cover\" playOrder=\"0\"><navLabel><text>Cover</text></navLabel><content "
+        "src=\"Text/titlepage.xhtml\"/></navPoint>\n";
+  }
   for (int i = 0; i < chapters; ++i) {
     const std::string id = "c" + std::to_string(i);
     spine += "<itemref idref=\"" + id + "\"/>\n";
@@ -135,8 +152,13 @@ inline Book write(const std::string& path, const int chapters, const int images,
     documents.push_back({"OEBPS/Styles/" + stylesheetName(s), stylesheet(s, options.rulesPerStylesheet)});
   }
   if (!options.documentsLast) entries.insert(entries.end(), documents.begin(), documents.end());
-  entries.push_back({"OEBPS/Images/cover.jpg", imageBytes(0)});
-  book.spineSizes.reserve(static_cast<size_t>(chapters));
+  entries.push_back({"OEBPS/Images/cover.jpg", options.coverBytes.empty() ? imageBytes(0) : options.coverBytes});
+  book.spineSizes.reserve(static_cast<size_t>(chapters) + 1);
+  if (options.titlePage) {
+    entries.push_back({"OEBPS/Text/titlepage.xhtml", titlePageDocument()});
+    book.spineHrefs.push_back("OEBPS/Text/titlepage.xhtml");
+    book.spineSizes.push_back(static_cast<uint32_t>(titlePageDocument().size()));
+  }
   for (int i = 0; i < chapters; ++i) {
     book.spineHrefs.push_back("OEBPS/Text/" + chapterName(i));
     book.spineSizes.push_back(static_cast<uint32_t>(chapterDocument(i).size()));

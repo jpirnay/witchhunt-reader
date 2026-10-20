@@ -182,26 +182,38 @@ NameMatch matchEntryName(const char* name, size_t len, const std::string& target
   return exact ? NameMatch::Exact : NameMatch::IgnoringCase;
 }
 
-// The answer rides in the struct's padding: a lookup table costs 16 B a name, as it did without it.
-static_assert(sizeof(ZipFile::SizeTarget) == 16, "SizeTarget grew");
+// A table-full of spine items a walk: the stat a chapter is opened with, and nothing besides.
+static_assert(sizeof(ZipFile::StatTarget) == 24, "StatTarget grew");
 
-bool targetBefore(const ZipFile::SizeTarget& a, const ZipFile::SizeTarget& b) {
-  return a.hash < b.hash || (a.hash == b.hash && a.len < b.len);
-}
-
-// Hands every target that names this entry to `fill`, the targets sorted by targetBefore. Returns
-// how many it handed over.
-template <typename It, typename Fill>
-int forEachTargetNamed(It begin, It end, const char* name, const uint16_t nameLen, Fill&& fill) {
-  const ZipFile::SizeTarget key = {HashUtils::fnvHash64(name, nameLen), nameLen, 0};
+// Hands every target that names this entry to `fill`, the targets sorted by StatTarget::before.
+// Returns how many it handed over.
+template <typename Fill>
+int forEachTargetNamed(ZipFile::StatTarget* const begin, ZipFile::StatTarget* const end, const char* name,
+                       const uint16_t nameLen, Fill&& fill) {
+  const auto key = ZipFile::StatTarget::named(std::string_view(name, nameLen));
   int n = 0;
-  for (It it = std::lower_bound(begin, end, key, targetBefore); it != end && it->hash == key.hash && it->len == nameLen;
-       ++it, ++n) {
+  for (auto* it = std::lower_bound(begin, end, key, ZipFile::StatTarget::before);
+       it != end && it->hash == key.hash && it->len == key.len; ++it, ++n) {
     fill(*it);
   }
   return n;
 }
 }  // namespace
+
+ZipFile::StatTarget ZipFile::StatTarget::named(const std::string_view path) {
+  StatTarget t;
+  t.hash = HashUtils::fnvHash64(path.data(), path.size());
+  t.len = static_cast<uint16_t>(path.size());
+  return t;
+}
+
+const ZipFile::StatTarget* ZipFile::StatTarget::find(const StatTarget* const begin, const StatTarget* const end,
+                                                     const std::string_view path) {
+  if (begin == nullptr || begin == end) return nullptr;
+  const StatTarget key = named(path);
+  const StatTarget* const it = std::lower_bound(begin, end, key, before);
+  return it != end && it->hash == key.hash && it->len == key.len ? it : nullptr;
+}
 
 bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
   const std::string target = normalizeZipPath(filename);
@@ -482,8 +494,8 @@ bool ZipFile::getInflatedFileSize(const char* filename, size_t* size) {
   return true;
 }
 
-int ZipFile::fillUncompressedSizes(SizeTarget* const targets, const size_t count, uint8_t* const window,
-                                   const size_t windowBytes) {
+int ZipFile::fillFileStats(StatTarget* const targets, const size_t count, uint8_t* const window,
+                           const size_t windowBytes) {
   if (targets == nullptr || count == 0) return 0;
   const ScopedOpenClose zip{*this};
   if (!zip || !loadZipDetails()) return 0;
@@ -493,28 +505,13 @@ int ZipFile::fillUncompressedSizes(SizeTarget* const targets, const size_t count
   ZIP_SCAN_STAT_WALK();
   int matched = 0;
   walkCentralDirectory(in, [&](const CentralDirRecord& r) {
-    matched += forEachTargetNamed(targets, targets + count, r.name, r.nameLen,
-                                  [&](SizeTarget& t) { t.size = r.stat.uncompressedSize; });
-    return matched < static_cast<int>(count);
-  });
-  return matched;
-}
-
-int ZipFile::fillFileStats(const std::deque<SizeTarget>& targets, std::deque<FileStatSlim>& stats) {
-  if (targets.empty()) return 0;
-  const ScopedOpenClose zip{*this};
-  if (!zip || !loadZipDetails()) return 0;
-
-  file.seek(zipDetails.centralDirOffset);
-  // Its own window, for the one walk a book makes here (pass-through if the heap refuses it).
-  serialization::BufferedFileReader in(file, CENTRAL_DIR_WINDOW_BYTES);
-  ZIP_SCAN_STAT_WALK();
-  int matched = 0;
-  walkCentralDirectory(in, [&](const CentralDirRecord& r) {
-    matched += forEachTargetNamed(targets.begin(), targets.end(), r.name, r.nameLen, [&](const SizeTarget& t) {
-      if (t.index < stats.size()) stats[t.index] = r.stat;
+    matched += forEachTargetNamed(targets, targets + count, r.name, r.nameLen, [&](StatTarget& t) {
+      t.method = r.stat.method;
+      t.compressedSize = r.stat.compressedSize;
+      t.uncompressedSize = r.stat.uncompressedSize;
+      t.localHeaderOffset = r.stat.localHeaderOffset;
     });
-    return matched < static_cast<int>(targets.size());
+    return matched < static_cast<int>(count);
   });
   return matched;
 }

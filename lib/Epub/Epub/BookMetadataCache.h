@@ -38,6 +38,13 @@ class BookMetadataCache {
     std::string href;
     uint32_t cumulativeSize;
     int16_t tocIndex;
+    // The item's ZIP central-directory stat, from buildBookBin's size walk: its chapter opens
+    // without looking the entry up. In book.bin only, not in the spine temp file. A
+    // zipLocalHeaderOffset of 0: the walk did not find it, so it is looked up by name.
+    uint16_t zipMethod = 0;
+    uint32_t zipCompressedSize = 0;
+    uint32_t zipUncompressedSize = 0;
+    uint32_t zipLocalHeaderOffset = 0;
 
     SpineEntry() : cumulativeSize(0), tocIndex(-1) {}
     SpineEntry(std::string href, const uint32_t cumulativeSize, const int16_t tocIndex)
@@ -140,22 +147,28 @@ class BookMetadataCache {
   uint32_t tocFilenameScanBudget_ = 0;
   static constexpr uint32_t TOC_FILENAME_SCAN_BUDGET = 32768;
 
-  // Batch ZIP size lookup and fast spine-href index are always better when N is
-  // larger than a handful — lower threshold so even moderate books (e.g. 105
-  // spine items) take the O(n·log m) batch path instead of O(n·m) per-item scans.
+  // The batch ZIP stat lookup is always better when N is larger than a handful — lower threshold
+  // so even moderate books (e.g. 105 spine items) take the O(n·log m) batch path instead of
+  // O(n·m) per-item scans.
   static constexpr uint16_t LARGE_SPINE_THRESHOLD = 16;
 
-  uint32_t writeSpineEntry(FsFile& file, const SpineEntry& entry) const;
+  // A spine record in book.bin: the href, then BOOK_SPINE_FIXED_BYTES of cumulativeSize, tocIndex
+  // and the ZIP stat, read in one call. The spine temp file's records stop after tocIndex.
+  static constexpr uint32_t BOOK_SPINE_STAT_BYTES = 14;
+  static constexpr uint32_t BOOK_SPINE_FIXED_BYTES = 6 + BOOK_SPINE_STAT_BYTES;
+
   uint32_t writeTocEntry(FsFile& file, const TocEntry& entry) const;
   SpineEntry readSpineEntry(FsFile& file) const;
   TocEntry readTocEntry(FsFile& file) const;
   // Out-parameter overloads reuse the caller's string capacity inside hot
   // build loops, eliminating per-iteration std::string allocation churn that
   // would otherwise fragment the heap during book.bin construction.
-  void readSpineEntry(FsFile& file, SpineEntry& out) const;
+  void readSpineEntry(FsFile& file, SpineEntry& out) const;  // book.bin's record
   void readTocEntry(FsFile& file, TocEntry& out) const;
-  // Buffered counterparts for the build loops (identical wire format).
+  // Buffered counterparts for the build loops. The spine ones are the temp file's record;
+  // writeBookSpineEntry writes book.bin's.
   uint32_t writeSpineEntry(serialization::BufferedFileWriter& out, const SpineEntry& entry) const;
+  uint32_t writeBookSpineEntry(serialization::BufferedFileWriter& out, const SpineEntry& entry) const;
   uint32_t writeTocEntry(serialization::BufferedFileWriter& out, const TocEntry& entry) const;
   void readSpineEntry(serialization::BufferedFileReader& in, SpineEntry& out) const;
   void readTocEntry(serialization::BufferedFileReader& in, TocEntry& out) const;

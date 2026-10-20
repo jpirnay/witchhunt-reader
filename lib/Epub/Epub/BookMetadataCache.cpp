@@ -10,6 +10,7 @@
 #include <esp_system.h>
 
 #include <algorithm>
+#include <cstring>
 #include <vector>
 
 #include "FsHelpers.h"
@@ -22,7 +23,8 @@ namespace {
 // v15: a named cover missing from the archive no longer blocks the ZIP-name scan; a v14 cache holds the dead path
 // v16: the cover fallbacks (ranked ZIP names, a cover page's largest picture, meta cover pages, cover ids, nav
 //      landmarks); a v15 cache holds a title banner, a logo or no cover for such books
-constexpr uint8_t BOOK_CACHE_VERSION = 16;
+// v17: a spine record carries its item's ZIP stat (BOOK_SPINE_STAT_BYTES); a v16 record ends at tocIndex
+constexpr uint8_t BOOK_CACHE_VERSION = 17;
 constexpr char bookBinFile[] = "/book.bin";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";
@@ -30,15 +32,16 @@ constexpr char tmpTocBinFile[] = "/toc.bin.tmp";
 // writes them into book.bin with these.
 constexpr char tmpTocSpineFile[] = "/toc.spine.tmp";
 
-// The table and read window of buildBookBin's spine size lookup.
+// The table and read window of buildBookBin's spine stat lookup: each spine item's size, and the
+// ZIP stat its chapter is opened with, which book.bin keeps beside it.
 //
 // One walk of the ZIP central directory resolves as many spine items as the table holds, so the
 // table decides how many walks a book costs. It used to be all or nothing: King's Avatar (1732
 // spine items, ~3300 entries) found 43.5 KB free on the X3, short of the 67 KB the whole table
 // asked for, and took a walk per spine item instead -- 427 s of a 431 s first open. Now it is a
-// PassTable: a block of the lent region when first-open indexing has one (52 KB on the X3, 3000
+// PassTable: a block of the lent region when first-open indexing has one (52 KB on the X3, 2000
 // spine items a walk) so the heap is not touched, else the heap's largest block, and at least
-// 128 entries: ceil(n / 128) walks wherever 2 KB can be had. Below LARGE_SPINE_THRESHOLD spine
+// 128 entries: ceil(n / 128) walks wherever 3 KB can be had. Below LARGE_SPINE_THRESHOLD spine
 // items, or with no table at all, the lookup goes per item.
 //
 // The walk reads through a 4 KB window beside the table: unbuffered, it is about a dozen card
@@ -46,13 +49,13 @@ constexpr char tmpTocSpineFile[] = "/toc.spine.tmp";
 constexpr size_t SIZE_LOOKUP_WINDOW_BYTES = 4096;
 constexpr size_t SIZE_LOOKUP_MIN_ENTRIES = 128;
 
-PassTable<ZipFile::SizeTarget> sizeLookupTable(BuildArena* scratch, const size_t spineCount) {
-  auto table = PassTable<ZipFile::SizeTarget>::fromRegion(scratch, spineCount, SIZE_LOOKUP_MIN_ENTRIES,
+PassTable<ZipFile::StatTarget> sizeLookupTable(BuildArena* scratch, const size_t spineCount) {
+  auto table = PassTable<ZipFile::StatTarget>::fromRegion(scratch, spineCount, SIZE_LOOKUP_MIN_ENTRIES,
                                                           SIZE_LOOKUP_WINDOW_BYTES);
   if (table.capacity() == 0) {
-    PassTable<ZipFile::SizeTarget>::HeapSizing sizing;
+    PassTable<ZipFile::StatTarget>::HeapSizing sizing;
     sizing.minEntries = SIZE_LOOKUP_MIN_ENTRIES;
-    table = PassTable<ZipFile::SizeTarget>::fromHeap(spineCount, sizing, SIZE_LOOKUP_WINDOW_BYTES);
+    table = PassTable<ZipFile::StatTarget>::fromHeap(spineCount, sizing, SIZE_LOOKUP_WINDOW_BYTES);
   }
   return table;
 }
@@ -375,15 +378,16 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   SpineEntry spineScratch;
   TocEntry tocScratch;
 
-  // Loop through spine entries, writing LUT positions
+  // Loop through spine entries, writing LUT positions. A book.bin spine record is its temp record
+  // and the ZIP stat after it.
   spineReader.seek(0);
   for (int i = 0; i < spineCount; i++) {
     uint32_t pos = spineReader.position();
     readSpineEntry(spineReader, spineScratch);
-    bookWriter.writePod(pos + lutOffset + lutSize);
+    bookWriter.writePod(pos + lutOffset + lutSize + static_cast<uint32_t>(i) * BOOK_SPINE_STAT_BYTES);
   }
   // Total bytes of spine records — the offset the TOC records start at in book.bin.
-  const uint32_t spineBytesTotal = spineReader.position();
+  const uint32_t spineBytesTotal = spineReader.position() + static_cast<uint32_t>(spineCount) * BOOK_SPINE_STAT_BYTES;
 
   // Loop through toc entries, writing LUT positions
   tocReader.seek(0);
@@ -438,12 +442,12 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
     return false;
   }
 
-  // Each spine item's size, a table-full of spine items per central-directory walk (see
+  // Each spine item's ZIP stat, a table-full of spine items per central-directory walk (see
   // sizeLookupTable). A table-full's names are read from the spine file ahead of the loop below,
-  // which reads the same records again to write them out with their sizes.
+  // which reads the same records again and finds each one's stat by name to write them out.
   const bool batched = spineCount >= LARGE_SPINE_THRESHOLD;
-  const PassTable<ZipFile::SizeTarget> lookup = sizeLookupTable(batched ? scratch : nullptr, batched ? spineCount : 0);
-  ZipFile::SizeTarget* const table = lookup.entries();
+  const PassTable<ZipFile::StatTarget> lookup = sizeLookupTable(batched ? scratch : nullptr, batched ? spineCount : 0);
+  ZipFile::StatTarget* const table = lookup.entries();
   const size_t perWalk = lookup.capacity();
   if (batched && perWalk == 0) {
     LOG_INF("BMC", "No room for a size table (free %u); per-item size lookup for %d spine items",
@@ -451,42 +455,34 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   }
   std::string pathScratch;
   int walks = 0;
-  // Fills table[0, count) with the sizes of spine items [first, first + count), in spine order, and
-  // leaves the spine reader where it found it.
-  const auto resolveSizes = [&](const int first, const int count) {
+  // Fills table[0, count) with the stats of spine items [first, first + count), sorted by name for
+  // StatTarget::find, and leaves the spine reader where it found it.
+  const auto resolveStats = [&](const int count) {
     const uint32_t resumeAt = spineReader.position();
     for (int j = 0; j < count; j++) {
       readSpineEntry(spineReader, spineScratch);
       // Cached hrefs are already decoded (see ContentOpfParser); decoding again would corrupt
       // filenames that legitimately contain '%' sequences.
       FsHelpers::normalisePath(spineScratch.href, pathScratch);
-      ZipFile::SizeTarget& t = table[j];
-      t.hash = HashUtils::fnvHash64(pathScratch.c_str(), pathScratch.size());
-      t.len = static_cast<uint16_t>(pathScratch.size());
-      t.index = static_cast<uint16_t>(first + j);
-      t.size = 0;
+      table[j] = ZipFile::StatTarget::named(pathScratch);
     }
-    std::sort(table, table + count, [](const ZipFile::SizeTarget& a, const ZipFile::SizeTarget& b) {
-      return a.hash < b.hash || (a.hash == b.hash && a.len < b.len);
-    });
-    zip.fillUncompressedSizes(table, count, lookup.extra(), lookup.extraBytes());
+    std::sort(table, table + count, ZipFile::StatTarget::before);
+    zip.fillFileStats(table, count, lookup.extra(), lookup.extraBytes());
     walks++;
-    std::sort(table, table + count,
-              [](const ZipFile::SizeTarget& a, const ZipFile::SizeTarget& b) { return a.index < b.index; });
     spineReader.seek(resumeAt);
   };
 
   uint32_t cumSize = 0;
   spineReader.seek(0);
   int lastSpineTocIndex = -1;
-  // Spine items [tableFirst, tableEnd) have their sizes in the table.
+  // Spine items [tableFirst, tableEnd) have their stats in the table.
   int tableFirst = 0;
   int tableEnd = 0;
   for (int i = 0; i < spineCount; i++) {
     if (perWalk > 0 && i == tableEnd) {
       tableFirst = i;
       tableEnd = i + static_cast<int>(std::min<size_t>(perWalk, spineCount - i));
-      resolveSizes(tableFirst, tableEnd - tableFirst);
+      resolveStats(tableEnd - tableFirst);
     }
     readSpineEntry(spineReader, spineScratch);
 
@@ -501,29 +497,28 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
     }
     lastSpineTocIndex = spineScratch.tocIndex;
 
-    size_t itemSize = 0;
-    if (perWalk > 0) {
-      itemSize = table[i - tableFirst].size;
+    FsHelpers::normalisePath(spineScratch.href, pathScratch);
+    const ZipFile::StatTarget* const found =
+        perWalk > 0 ? ZipFile::StatTarget::find(table, table + (tableEnd - tableFirst), pathScratch) : nullptr;
+    ZipFile::FileStatSlim stat = {};
+    if (found != nullptr && found->found()) {
+      stat = found->stat();
+    } else if (!zip.loadFileStatSlim(pathScratch.c_str(), &stat)) {
       // Not matched by the walk, which compares names byte for byte (an entry stored in another
-      // case or with backslashes), or an empty entry: looked up on its own.
-      if (itemSize == 0) {
-        FsHelpers::normalisePath(spineScratch.href, pathScratch);
-        if (!zip.getInflatedFileSize(pathScratch.c_str(), &itemSize)) {
-          LOG_ERR("BMC", "Warning: Could not get size for spine item: %s", pathScratch.c_str());
-        }
-      }
-    } else {
-      FsHelpers::normalisePath(spineScratch.href, pathScratch);
-      if (!zip.getInflatedFileSize(pathScratch.c_str(), &itemSize)) {
-        LOG_ERR("BMC", "Warning: Could not get size for spine item: %s", pathScratch.c_str());
-      }
+      // case or with backslashes): looked up on its own, and still unknown if that fails too.
+      LOG_ERR("BMC", "Warning: Could not get size for spine item: %s", pathScratch.c_str());
+      stat = {};
     }
 
-    cumSize += itemSize;
+    cumSize += stat.uncompressedSize;
     spineScratch.cumulativeSize = cumSize;
+    spineScratch.zipMethod = stat.method;
+    spineScratch.zipCompressedSize = stat.compressedSize;
+    spineScratch.zipUncompressedSize = stat.uncompressedSize;
+    spineScratch.zipLocalHeaderOffset = stat.localHeaderOffset;
 
     // Write out spine data to book.bin
-    writeSpineEntry(bookWriter, spineScratch);
+    writeBookSpineEntry(bookWriter, spineScratch);
   }
   if (perWalk > 0) {
     LOG_DBG("BMC", "Spine sizes: %d items in %d central-directory walks, table of %u in the %s", spineCount, walks,
@@ -577,14 +572,6 @@ bool BookMetadataCache::cleanupTmpFiles() const {
   return true;
 }
 
-uint32_t BookMetadataCache::writeSpineEntry(FsFile& file, const SpineEntry& entry) const {
-  const uint32_t pos = file.position();
-  serialization::writeString(file, entry.href);
-  serialization::writePod(file, entry.cumulativeSize);
-  serialization::writePod(file, entry.tocIndex);
-  return pos;
-}
-
 uint32_t BookMetadataCache::writeTocEntry(FsFile& file, const TocEntry& entry) const {
   const uint32_t pos = file.position();
   serialization::writeString(file, entry.title);
@@ -600,6 +587,15 @@ uint32_t BookMetadataCache::writeSpineEntry(serialization::BufferedFileWriter& o
   out.writeString(entry.href);
   out.writePod(entry.cumulativeSize);
   out.writePod(entry.tocIndex);
+  return pos;
+}
+
+uint32_t BookMetadataCache::writeBookSpineEntry(serialization::BufferedFileWriter& out, const SpineEntry& entry) const {
+  const uint32_t pos = writeSpineEntry(out, entry);
+  out.writePod(entry.zipMethod);
+  out.writePod(entry.zipCompressedSize);
+  out.writePod(entry.zipUncompressedSize);
+  out.writePod(entry.zipLocalHeaderOffset);
   return pos;
 }
 
@@ -801,8 +797,30 @@ BookMetadataCache::TocEntry BookMetadataCache::getTocEntry(const int index) {
 
 void BookMetadataCache::readSpineEntry(FsFile& file, SpineEntry& out) const {
   serialization::readString(file, out.href);
-  serialization::readPod(file, out.cumulativeSize);
-  serialization::readPod(file, out.tocIndex);
+  // The fixed fields in one call, not one each.
+  uint8_t fixed[BOOK_SPINE_FIXED_BYTES];
+  if (file.read(fixed, sizeof(fixed)) != static_cast<int>(sizeof(fixed))) {
+    const std::string href = std::move(out.href);
+    out = SpineEntry();
+    out.href = href;
+    return;
+  }
+  size_t at = 0;
+  const auto get = [&fixed, &at](auto& field) {
+    memcpy(&field, fixed + at, sizeof(field));
+    at += sizeof(field);
+  };
+  get(out.cumulativeSize);
+  get(out.tocIndex);
+  get(out.zipMethod);
+  get(out.zipCompressedSize);
+  get(out.zipUncompressedSize);
+  get(out.zipLocalHeaderOffset);
+  static_assert(sizeof(out.cumulativeSize) + sizeof(out.tocIndex) + sizeof(out.zipMethod) +
+                        sizeof(out.zipCompressedSize) + sizeof(out.zipUncompressedSize) +
+                        sizeof(out.zipLocalHeaderOffset) ==
+                    BOOK_SPINE_FIXED_BYTES,
+                "book.bin spine record changed: update BOOK_SPINE_FIXED_BYTES and bump BOOK_CACHE_VERSION");
 }
 
 void BookMetadataCache::readTocEntry(FsFile& file, TocEntry& out) const {
