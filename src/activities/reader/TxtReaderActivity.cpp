@@ -221,6 +221,8 @@ void TxtReaderActivity::render(RenderLock&&) {
 
   // Initialize reader if not done
   if (!initialized) {
+    // A first open's "Indexing..." popup (buildPageIndex) paints FAST: the open's HALF is for the page below.
+    const ReaderUtils::BookOpenRefreshHold bookOpenRefresh(renderer);
     initializeReader();
   }
 
