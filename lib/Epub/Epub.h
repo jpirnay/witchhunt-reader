@@ -199,6 +199,8 @@ class Epub {
   // (file-existence checks and small sidecar reads) so callers can decide
   // whether to show a progress popup before calling load().
   bool needsFirstOpenIndexing() const;
+  // Every cache load() rebuilds when it is missing or of another version is present and current.
+  bool indexCachesCurrent() const;
 
   // A different book dropped onto the same path: the cache, keyed by the path, is the old book's (sections, CSS,
   // thumbs, what BookFonts found in it), so it is wiped. True when it was. load() asks first; a caller that reads

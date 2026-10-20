@@ -647,13 +647,20 @@ bool Epub::clearCacheIfContentChanged() const {
   return true;
 }
 
+bool Epub::indexCachesCurrent() const {
+  // The caches a first open builds, which load() builds again when one is missing or of another
+  // version: the spine and TOC with each spine item's ZIP stat (book.bin, content.opf + TOC/NCX),
+  // and the compiled stylesheets (css_rules.cache; css_bg.bin and css_fonts.bin are written with
+  // it). A stale one used to count as built, and was rebuilt without the popup and the lent
+  // framebuffer: the first open of every book after an update that bumped either version.
+  // fingerprint.bin and toc.retry are needsFirstOpenIndexing()'s own; the book's embedded fonts
+  // are examined apart (BookFonts::read() takes a stale fonts.bin for unexamined).
+  return BookMetadataCache::cacheIsCurrent(cachePath) && CssParser(cachePath).cacheIsCurrent();
+}
+
 bool Epub::needsFirstOpenIndexing() const {
-  // Spine/TOC cache missing, or of another BOOK_CACHE_VERSION -> load() rebuilds it (content.opf +
-  // TOC/NCX + book.bin). A stale one was rebuilt without the popup and the lent framebuffer: the
-  // first open of every book after an update that bumped the version.
-  if (!BookMetadataCache::cacheIsCurrent(cachePath)) return true;
-  // Compiled CSS rules cache missing -> load() runs the (slow) CSS compile.
-  if (!CssParser(cachePath).hasCache()) return true;
+  // A cache missing or stale -> load() rebuilds it.
+  if (!indexCachesCurrent()) return true;
   // Book content changed at the same path -> load() wipes the cache and rebuilds.
   uint64_t zipFp = 0, storedFp = 0;
   if (computeZipFingerprint(&zipFp) && readStoredFingerprint(&storedFp) && storedFp != zipFp) return true;

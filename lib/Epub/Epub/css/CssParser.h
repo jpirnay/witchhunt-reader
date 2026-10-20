@@ -230,6 +230,9 @@ class CssParser {
    * Check if CSS rules cache file exists
    */
   bool hasCache() const;
+  // True when the rules cache is of this firmware's CSS_CACHE_VERSION, so a load reads it instead
+  // of compiling the stylesheets again: an open and a one-byte read (cache_version::isCurrent).
+  bool cacheIsCurrent() const;
 
   /**
    * Delete CSS rules cache file exists

@@ -13,6 +13,7 @@
 #include <cstring>
 #include <vector>
 
+#include "CacheVersion.h"
 #include "FsHelpers.h"
 #include "SpineHrefMatch.h"
 
@@ -724,14 +725,7 @@ bool BookMetadataCache::cacheExists(const std::string& cachePath) {
 }
 
 bool BookMetadataCache::cacheIsCurrent(const std::string& cachePath) {
-  // A plain open, not openFileForRead: a book never opened has none, and that logs every miss.
-  FsFile f = Storage.open((cachePath + bookBinFile).c_str());
-  if (!f) return false;
-  uint8_t version = 0;
-  const bool current =
-      f.read(&version, sizeof(version)) == static_cast<int>(sizeof(version)) && version == BOOK_CACHE_VERSION;
-  f.close();
-  return current;
+  return cache_version::isCurrent(cachePath + bookBinFile, BOOK_CACHE_VERSION);
 }
 
 bool BookMetadataCache::load() {

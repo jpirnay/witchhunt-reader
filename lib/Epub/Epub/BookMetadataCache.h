@@ -212,7 +212,7 @@ class BookMetadataCache {
   // i.e. load() can read it instead of rebuilding. Cheap (a single Storage.exists).
   static bool cacheExists(const std::string& cachePath);
   // True when that book.bin is of this firmware's BOOK_CACHE_VERSION, so load() reads it instead
-  // of rebuilding it: an open and a one-byte read.
+  // of rebuilding it: an open and a one-byte read (cache_version::isCurrent).
   static bool cacheIsCurrent(const std::string& cachePath);
 
   // Reading phase (read mode)

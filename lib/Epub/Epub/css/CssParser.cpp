@@ -13,6 +13,8 @@
 #include <optional>
 #include <string_view>
 
+#include "../CacheVersion.h"
+
 // Sparse resident-style codec (defined below, used by lookupRules before its definition).
 static size_t compressStyle(const CssStyle& s, uint8_t* out);
 static void decompressStyle(const uint8_t* in, CssStyle& out);
@@ -2852,6 +2854,10 @@ CssStyle CssParser::parseInlineStyle(const std::string& styleValue) { return par
 // Cache serialization
 
 bool CssParser::hasCache() const { return Storage.exists((cachePath + rulesCache).c_str()); }
+
+bool CssParser::cacheIsCurrent() const {
+  return !cachePath.empty() && cache_version::isCurrent(cachePath + rulesCache, CSS_CACHE_VERSION);
+}
 
 void CssParser::deleteCache() const {
   if (hasCache()) Storage.remove((cachePath + rulesCache).c_str());

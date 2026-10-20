@@ -298,38 +298,41 @@ TEST(FirstOpenIndexing, AProbedEpubLoadsWithoutWalkingForItsFingerprintAgain) {
   fs::remove_all(work);
 }
 
-// A book.bin of another BOOK_CACHE_VERSION is rebuilt by load(), and the open that does so needs
-// the popup and the lent framebuffer as much as a first one: King's Avatar's rebuild on the heap
-// alone is the one that lost its TOC. needsFirstOpenIndexing() saw only that the file existed, so
-// the first open of every book after a version bump rebuilt it without either.
-TEST(FirstOpenIndexing, ABookBinOfAnotherVersionNeedsIndexing) {
+// A cache of another version -- book.bin's BOOK_CACHE_VERSION, css_rules.cache's CSS_CACHE_VERSION
+// -- is rebuilt by load(), and the open that does so needs the popup and the lent framebuffer as
+// much as a first one: King's Avatar's rebuild on the heap alone is the one that lost its TOC.
+// needsFirstOpenIndexing() saw only that the files existed, so the first open of every book after
+// a version bump rebuilt them without either.
+TEST(FirstOpenIndexing, AnIndexCacheOfAnotherVersionNeedsIndexing) {
   const fs::path work = fs::temp_directory_path() / ("first_open_stale_" + std::to_string(getpid()));
-  fs::remove_all(work);
-  fs::create_directories(work);
-  const big_spine_book::Book book = big_spine_book::write((work / "book.epub").string(), 60, 50);
-  const std::string cacheDir = (work / "cache").string();
-  std::string bookBin;
-  {
-    Epub epub(book.path, cacheDir);
-    ASSERT_TRUE(epub.load(true, false));
-    bookBin = epub.getCachePath() + "/book.bin";
+  for (const char* const cacheFile : {"/book.bin", "/css_rules.cache"}) {
+    fs::remove_all(work);
+    fs::create_directories(work);
+    const big_spine_book::Book book = big_spine_book::write((work / "book.epub").string(), 60, 50);
+    const std::string cacheDir = (work / "cache").string();
+    std::string stale;
+    {
+      Epub epub(book.path, cacheDir);
+      ASSERT_TRUE(epub.load(true, false));
+      stale = epub.getCachePath() + cacheFile;
+    }
+    EXPECT_FALSE(Epub(book.path, cacheDir).needsFirstOpenIndexing()) << cacheFile << ": a current cache";
+    {
+      // The version byte of the firmware before.
+      FILE* f = std::fopen(stale.c_str(), "r+b");
+      ASSERT_NE(f, nullptr) << stale;
+      const int version = std::fgetc(f);
+      std::rewind(f);
+      std::fputc(version - 1, f);
+      std::fclose(f);
+    }
+    EXPECT_TRUE(Epub(book.path, cacheDir).needsFirstOpenIndexing()) << cacheFile << " of the version before";
+    {
+      Epub epub(book.path, cacheDir);
+      ASSERT_TRUE(epub.load(true, false));
+    }
+    EXPECT_FALSE(Epub(book.path, cacheDir).needsFirstOpenIndexing()) << cacheFile << ": rebuilt by that load";
   }
-  EXPECT_FALSE(Epub(book.path, cacheDir).needsFirstOpenIndexing()) << "a current cache";
-  {
-    // The version byte of the firmware before.
-    FILE* f = std::fopen(bookBin.c_str(), "r+b");
-    ASSERT_NE(f, nullptr);
-    const int version = std::fgetc(f);
-    std::rewind(f);
-    std::fputc(version - 1, f);
-    std::fclose(f);
-  }
-  EXPECT_TRUE(Epub(book.path, cacheDir).needsFirstOpenIndexing());
-  {
-    Epub epub(book.path, cacheDir);
-    ASSERT_TRUE(epub.load(true, false));
-  }
-  EXPECT_FALSE(Epub(book.path, cacheDir).needsFirstOpenIndexing()) << "rebuilt by that load";
   fs::remove_all(work);
 }
 
