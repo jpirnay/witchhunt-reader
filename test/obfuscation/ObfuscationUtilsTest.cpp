@@ -4,6 +4,7 @@
 // the T5S3's MAC (shims/esp_mac.h); "the other reader" is the X3 of the same device check.
 #include <ObfuscationUtils.h>
 #include <base64.h>
+#include <esp_mac.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -148,31 +149,73 @@ TEST(ObfuscationUtils, AWrongKeyDecodeIsAlmostNeverPlausible) {
   }
 }
 
+// --- cardHint: what the card's wifi.json says about the reader it was last in -------------------
+
+TEST(ObfuscationUtils, TheCardHintReadsWifiJsonsWriterAndWhereTheCardCameFrom) {
+  using obfuscation::CardHint;
+  const std::string here = obfuscation::deviceKeyId();
+  EXPECT_EQ(obfuscation::cardHint(here, ""), CardHint::ThisReader);
+  EXPECT_EQ(obfuscation::cardHint(kOtherReaderKeyId, ""), CardHint::OtherReader) << "not yet re-keyed here";
+  // Re-keyed here, which made lastKnownMacAddress name this reader; arrivedFrom keeps the move.
+  EXPECT_EQ(obfuscation::cardHint(here, kOtherReaderKeyId), CardHint::OtherReader);
+  EXPECT_EQ(obfuscation::cardHint(here, here), CardHint::ThisReader);
+  EXPECT_EQ(obfuscation::cardHint("", ""), CardHint::None) << "no wifi.json, or no field";
+  EXPECT_EQ(obfuscation::cardHint("", kOtherReaderKeyId), CardHint::None);
+  EXPECT_EQ(obfuscation::cardHint("70:af:09:5f:8a:84", ""), CardHint::None) << "malformed";
+}
+
 // --- resaveUnderThisKey: what the opds.json and koreader.json loaders do with a file -------------
 
 TEST(ObfuscationUtils, AFileFromAnotherReaderThatNamesItIsReKeyed) {
+  using obfuscation::CardHint;
   using obfuscation::PasswordWriter;
-  EXPECT_TRUE(obfuscation::resaveUnderThisKey(PasswordWriter::OtherReader, true, true));
-  EXPECT_FALSE(obfuscation::resaveUnderThisKey(PasswordWriter::OtherReader, false, true)) << "no password to re-key";
+  for (const CardHint hint : {CardHint::None, CardHint::ThisReader, CardHint::OtherReader}) {
+    EXPECT_TRUE(obfuscation::resaveUnderThisKey(PasswordWriter::OtherReader, true, true, hint));
+    EXPECT_FALSE(obfuscation::resaveUnderThisKey(PasswordWriter::OtherReader, false, true, hint))
+        << "nothing to re-key";
+  }
 }
 
 TEST(ObfuscationUtils, AFileThatNamesThisReaderStaysAsItIs) {
+  using obfuscation::CardHint;
   using obfuscation::PasswordWriter;
-  EXPECT_FALSE(obfuscation::resaveUnderThisKey(PasswordWriter::ThisReader, true, true));
-  EXPECT_FALSE(obfuscation::resaveUnderThisKey(PasswordWriter::ThisReader, true, false));
+  for (const CardHint hint : {CardHint::None, CardHint::ThisReader, CardHint::OtherReader}) {
+    EXPECT_FALSE(obfuscation::resaveUnderThisKey(PasswordWriter::ThisReader, true, true, hint));
+    EXPECT_FALSE(obfuscation::resaveUnderThisKey(PasswordWriter::ThisReader, true, false, hint));
+  }
 }
 
 // The device check's regression: a file older firmware wrote on the X3, first loaded on the T5S3,
 // was stamped with the T5S3's key id over the X3's bytes, and back on the X3 decoded wrongly.
 TEST(ObfuscationUtils, AFileWithoutAKeyIdIsStampedOnlyWhenItDecodesPlausiblyHere) {
+  using obfuscation::CardHint;
   using obfuscation::PasswordWriter;
   const std::string writtenHere = obfuscation::obfuscateToBase64("kosync-password-1").c_str();
   const std::string writtenOnTheX3 = obfuscatedWith(kOtherReaderKey, "kosync-password-1");
-  EXPECT_TRUE(obfuscation::resaveUnderThisKey(PasswordWriter::Unknown, true,
-                                              obfuscation::plausiblePassword(decodeHere(writtenHere))));
-  EXPECT_FALSE(obfuscation::resaveUnderThisKey(PasswordWriter::Unknown, true,
-                                               obfuscation::plausiblePassword(decodeHere(writtenOnTheX3))));
-  EXPECT_FALSE(obfuscation::resaveUnderThisKey(PasswordWriter::Unknown, false, true)) << "nothing to stamp";
+  const bool plausibleHere = obfuscation::plausiblePassword(decodeHere(writtenHere));
+  const bool plausibleFromTheX3 = obfuscation::plausiblePassword(decodeHere(writtenOnTheX3));
+  for (const CardHint hint : {CardHint::None, CardHint::ThisReader}) {
+    EXPECT_TRUE(obfuscation::resaveUnderThisKey(PasswordWriter::Unknown, true, plausibleHere, hint));
+    EXPECT_FALSE(obfuscation::resaveUnderThisKey(PasswordWriter::Unknown, true, plausibleFromTheX3, hint));
+  }
+  EXPECT_FALSE(obfuscation::resaveUnderThisKey(PasswordWriter::Unknown, false, true, CardHint::None)) << "nothing";
+}
+
+// Two readers of one batch: their MACs differ in a byte or two, so a password written on one
+// decodes to plausible text on the other far too often (AWrongKeyDecodeIsAlmostNeverPlausible).
+// The card's wifi.json saying it came from another reader is then what keeps the file as it is.
+TEST(ObfuscationUtils, ACardFromAnotherReaderIsNotStampedEvenWhenItsPasswordsLookPlausible) {
+  using obfuscation::CardHint;
+  using obfuscation::PasswordWriter;
+  uint8_t sameBatch[6];
+  std::memcpy(sameBatch, kTestReaderMac, sizeof(sameBatch));
+  sameBatch[5] ^= 0x20;  // the last byte differs by one bit: a letter only changes its case
+  const std::string writtenOnTheOther = obfuscatedWith(sameBatch, "Kosync-password-one");
+  const std::string decoded = decodeHere(writtenOnTheOther);
+  ASSERT_NE(decoded, "Kosync-password-one");
+  ASSERT_TRUE(obfuscation::plausiblePassword(decoded)) << "the case the hint exists for";
+  EXPECT_FALSE(obfuscation::resaveUnderThisKey(PasswordWriter::Unknown, true, true, CardHint::OtherReader));
+  EXPECT_TRUE(obfuscation::resaveUnderThisKey(PasswordWriter::Unknown, true, true, CardHint::ThisReader));
 }
 
 // Left as it is means byte for byte: a password decoded with the wrong key goes back to the card as

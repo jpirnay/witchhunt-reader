@@ -31,6 +31,10 @@ class KOReaderCredentialStore {
   static KOReaderCredentialStore instance;
   std::string username;
   std::string password;
+  // The password came from a koreader.json that names no key and could not be told to be this
+  // reader's: its bytes may be another reader's, so no save records this reader's key id beside
+  // it (JsonSettingsIO::saveKOReader()). A new password is this reader's.
+  bool passwordKeyUnknown = false;
   std::string serverUrl;                                            // Custom sync server URL (empty = default)
   DocumentMatchMethod matchMethod = DocumentMatchMethod::FILENAME;  // Default to filename for compatibility
   bool sendMetadata = false;

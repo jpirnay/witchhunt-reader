@@ -138,14 +138,29 @@ bool plausiblePassword(const std::string& decoded) {
   return true;
 }
 
-bool resaveUnderThisKey(const PasswordWriter writer, const bool hasPassword, const bool allPlausible) {
+CardHint cardHint(const std::string& lastKnownKeyId, const std::string& arrivedFromKeyId) {
+  uint8_t key[HW_KEY_LEN];
+  switch (passwordWriter(lastKnownKeyId, key)) {
+    case PasswordWriter::Unknown:
+      return CardHint::None;
+    case PasswordWriter::OtherReader:
+      return CardHint::OtherReader;
+    case PasswordWriter::ThisReader:
+      break;
+  }
+  return passwordWriter(arrivedFromKeyId, key) == PasswordWriter::OtherReader ? CardHint::OtherReader
+                                                                              : CardHint::ThisReader;
+}
+
+bool resaveUnderThisKey(const PasswordWriter writer, const bool hasPassword, const bool allPlausible,
+                        const CardHint hint) {
   switch (writer) {
     case PasswordWriter::OtherReader:
       return hasPassword;
     case PasswordWriter::ThisReader:
       return false;
     case PasswordWriter::Unknown:
-      return hasPassword && allPlausible;
+      return hasPassword && allPlausible && hint != CardHint::OtherReader;
   }
   return false;
 }

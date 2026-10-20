@@ -59,17 +59,30 @@ PasswordWriter passwordWriter(const std::string& writerKeyId, uint8_t writerKey[
 // from one written here when the file does not name its key.
 bool plausiblePassword(const std::string& decoded);
 
+// Which reader the card was last in, as its wifi.json tells it: lastKnownMacAddress names the
+// reader that last saved that file, and arrivedFrom the reader it was re-keyed from when the card
+// moved (loadWifi() keeps it from then on, so a re-key here does not erase the move). The writer
+// hint for a credentials file that names no key of its own.
+//   None: no wifi.json, or no usable lastKnownMacAddress in it.
+//   OtherReader: lastKnownMacAddress names another reader, or the file was re-keyed from one.
+//   ThisReader: lastKnownMacAddress names this reader, and the card never came from another.
+enum class CardHint : uint8_t { None, ThisReader, OtherReader };
+CardHint cardHint(const std::string& lastKnownKeyId, const std::string& arrivedFromKeyId);
+
 // After a credentials file has loaded, whether to save it again at once under this reader's key.
 // writer is what its key id says (passwordWriter()); hasPassword whether it holds an obfuscated
-// password; allPlausible whether every one decoded to a plausiblePassword().
+// password; allPlausible whether every one decoded to a plausiblePassword(); hint what the card's
+// wifi.json says (cardHint()).
 //   OtherReader: when it holds a password. They were decoded with the writer's key and are
 //     re-keyed for this reader.
 //   ThisReader: never.
-//   Unknown (older firmware records no key id): when it holds a password and every one is
-//     plausible with this reader's key. The file was written here, and the stamp lets the next
-//     reader decode it. Otherwise another reader wrote it, and this reader's id on its bytes
-//     would make even that reader misread them: the file is left as it is.
-bool resaveUnderThisKey(PasswordWriter writer, bool hasPassword, bool allPlausible);
+//   Unknown (older firmware records no key id): when it holds a password, every one is plausible
+//     with this reader's key, and the card's hint does not name another reader. The file was then
+//     written here, and the stamp lets the next reader decode it. Otherwise this reader's id on
+//     another reader's bytes would make even that reader misread them: the file is left as it
+//     is. The hint settles what plausibility cannot: two readers whose MACs differ in a byte or
+//     two decode each other's passwords to plausible text far too often (ObfuscationUtilsTest).
+bool resaveUnderThisKey(PasswordWriter writer, bool hasPassword, bool allPlausible, CardHint hint);
 
 // Self-test: verifies round-trip obfuscation with hardware key. Logs PASS/FAIL.
 void selfTest();
