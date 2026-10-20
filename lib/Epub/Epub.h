@@ -98,6 +98,11 @@ class Epub {
   mutable std::string statMemoPath_;
   mutable ZipFile::FileStatSlim statMemo_ = {};
   mutable bool statMemoValid_ = false;
+  // The package documents' entries (container.xml, the OPF, the NCX, the stylesheets), noted by
+  // the fingerprint walk as it passes them: their lookups, and the search for stylesheets the OPF
+  // does not list, take no walk of their own. A cold open of King's Avatar walked its whole
+  // central directory for the OPF, the NCX and that search, each. Kept until load() returns.
+  mutable std::unique_ptr<ZipFile::KnownEntries> packageEntries_;
   // The stat of the entry at the normalised `path`, from the memo or one lookup.
   bool lookupItemStat(ZipFile& zip, const std::string& path, ZipFile::FileStatSlim* out) const;
 

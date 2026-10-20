@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -75,8 +76,12 @@ Counters g_atPhaseEnd[PhaseCount];
 size_t g_heapPeak[PhaseCount];
 size_t g_liveAtStart = 0;
 int g_phase = 0;
+size_t g_stylesheets = 0;  // as the load's "Loaded N CSS style rules from M files" line counts them
 
 void onLog(const char*, const char*, const char* message) {
+  if (const char* from = std::strstr(message, "CSS style rules from ")) {
+    g_stylesheets = std::strtoul(from + std::strlen("CSS style rules from "), nullptr, 10);
+  }
   if (g_phase < PhaseCount && std::strstr(message, kPhaseEnds[g_phase]) != nullptr) {
     g_heapPeak[g_phase] = heapPeakBytes() - g_liveAtStart;
     resetHeapPeak();
@@ -90,6 +95,7 @@ struct Open {
   Counters phase[PhaseCount];
   size_t heapPeak[PhaseCount] = {};
   Counters total;
+  size_t stylesheets = 0;
 };
 
 // Every block larger than this refused (0: none), as a fragmented heap would.
@@ -109,6 +115,7 @@ Open firstOpen(const fs::path& work, const int chapters, const big_spine_book::O
   FsFile::bytesRead = 0;
   FsFile::flushes = 0;
   g_phase = 0;
+  g_stylesheets = 0;
   g_liveAtStart = heapLiveBytes();
   resetHeapPeak();
   setLogObserver(onLog);
@@ -129,6 +136,7 @@ Open firstOpen(const fs::path& work, const int chapters, const big_spine_book::O
     before = g_atPhaseEnd[p];
   }
   open.total = before;
+  open.stylesheets = g_stylesheets;
   EXPECT_EQ(scratch.used(), 0u) << "the lent region must come back empty";
   return open;
 }
@@ -214,6 +222,49 @@ TEST(FirstOpenIndexing, AKingsAvatarProfileReadsEachDocumentOnceAndIndexesNothin
   EXPECT_EQ(large.phase[Css].flushes, 0u) << "no rule here is merged, so nothing needs syncing";
   // No manifest index: the OPF parse holds the parser, its buffers and the spine's table only.
   EXPECT_LT(large.heapPeak[Opf], 32u * 1024);
+  fs::remove_all(work);
+}
+
+// The documents a first open reads by name -- container.xml, the OPF, the NCX, the stylesheets, and
+// the search for stylesheets the OPF does not list -- are noted by the fingerprint walk as it
+// passes them, so none of them walks the central directory again. With the documents behind every
+// chapter and image, each such lookup used to read the whole directory: the profile book's open
+// made 9 walks and read 5 directories' worth of entries (16681 of 3337).
+TEST(FirstOpenIndexing, APackageDocumentTakesNoWalkOfItsOwn) {
+  const fs::path work = fs::temp_directory_path() / ("first_open_documents_" + std::to_string(getpid()));
+  fs::remove_all(work);
+  fs::create_directories(work);
+  big_spine_book::Options options;
+  options.manifestInNameOrder = true;
+  options.documentsLast = true;
+  options.stylesheets = 2;
+  options.unlistedStylesheets = 1;
+  const Open open = firstOpen(work, 1732, options, kX3OpfBlock, kX3OpfBlock);
+  ASSERT_TRUE(open.loaded);
+  report("documents", 1732, open);
+  EXPECT_EQ(open.stylesheets, 3u) << "the unlisted stylesheet is found too";
+  // The fingerprint's walk, the cover's short lookup, and buildBookBin's size walk.
+  EXPECT_LE(open.total.walks, 3u);
+  EXPECT_LE(open.total.entries, 2 * open.archiveEntries + 64);
+  EXPECT_EQ(open.phase[Toc].walks, 0u) << "the NCX";
+  EXPECT_EQ(open.phase[Css].walks, 0u) << "the stylesheets, and the search for unlisted ones";
+  fs::remove_all(work);
+}
+
+// More stylesheets than the fingerprint walk notes: the search for unlisted ones walks the
+// directory as it did, and finds them all.
+TEST(FirstOpenIndexing, MoreStylesheetsThanTheWalkNotesAreStillAllFound) {
+  const fs::path work = fs::temp_directory_path() / ("first_open_many_css_" + std::to_string(getpid()));
+  fs::remove_all(work);
+  fs::create_directories(work);
+  big_spine_book::Options options;
+  options.stylesheets = 20;
+  options.unlistedStylesheets = 2;
+  options.rulesPerStylesheet = 4;
+  const Open open = firstOpen(work, 60, options);
+  ASSERT_TRUE(open.loaded);
+  EXPECT_EQ(open.stylesheets, 22u);
+  EXPECT_GE(open.phase[Css].walks, 1u) << "the search walks when the noted entries overflowed";
   fs::remove_all(work);
 }
 

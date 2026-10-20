@@ -207,6 +207,24 @@ ZipFile::StatTarget ZipFile::StatTarget::named(const std::string_view path) {
   return t;
 }
 
+bool ZipFile::KnownEntries::add(const std::string_view name, const FileStatSlim& stat) {
+  if (count_ == CAPACITY || name.size() > NAME_BYTES - used_) {
+    overflowed_ = true;
+    return false;
+  }
+  memcpy(names_ + used_, name.data(), name.size());
+  entries_[count_++] = {static_cast<uint16_t>(used_), static_cast<uint16_t>(name.size()), stat};
+  used_ += name.size();
+  return true;
+}
+
+const ZipFile::FileStatSlim* ZipFile::KnownEntries::find(const std::string_view name) const {
+  for (size_t i = 0; i < count_; i++) {
+    if (this->name(i) == name) return &entries_[i].stat;
+  }
+  return nullptr;
+}
+
 const ZipFile::StatTarget* ZipFile::StatTarget::find(const StatTarget* const begin, const StatTarget* const end,
                                                      const std::string_view path) {
   if (begin == nullptr || begin == end) return nullptr;
@@ -217,6 +235,12 @@ const ZipFile::StatTarget* ZipFile::StatTarget::find(const StatTarget* const beg
 
 bool ZipFile::loadFileStatSlim(const char* filename, FileStatSlim* fileStat) {
   const std::string target = normalizeZipPath(filename);
+  if (knownEntries_ != nullptr) {
+    if (const FileStatSlim* known = knownEntries_->find(target)) {
+      *fileStat = *known;
+      return true;
+    }
+  }
 
   const ScopedOpenClose zip{*this};
   if (!zip) {
@@ -405,7 +429,9 @@ bool ZipFile::loadZipDetails() {
   return false;
 }
 
-bool ZipFile::contentFingerprint(uint64_t* out) {
+bool ZipFile::contentFingerprint(uint64_t* out,
+                                 void (*const visit)(void* ctx, std::string_view name, const FileStatSlim& stat),
+                                 void* const ctx) {
   if (!out) return false;
   if (!loadZipDetails()) return false;
   const ScopedOpenClose zip{*this};
@@ -460,6 +486,10 @@ bool ZipFile::contentFingerprint(uint64_t* out) {
     mixPod(method);
     mixPod(localOff);
     entries++;
+    // A name that fits the buffer is all in it now, as walkCentralDirectory would show it.
+    if (visit != nullptr && nameLen < sizeof(nameBuf)) {
+      visit(ctx, std::string_view(nameBuf, nameLen), FileStatSlim{method, compSz, uncompSz, localOff});
+    }
 
     reader.seek(reader.position() + extraLen + commentLen);
   }

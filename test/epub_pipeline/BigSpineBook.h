@@ -59,6 +59,8 @@ struct Options {
   bool documentsLast = false;
   int stylesheets = 1;
   int rulesPerStylesheet = 40;
+  // Stylesheets in the archive that the manifest does not list, after the listed ones.
+  int unlistedStylesheets = 0;
   // A title page ahead of the first chapter, showing the cover, as converters put one first.
   bool titlePage = false;
   // The cover's bytes; empty: a stand-in that is not a decodable picture.
@@ -148,7 +150,7 @@ inline Book write(const std::string& path, const int chapters, const int images,
        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" "
        "version=\"2005-1\"><head></head><docTitle><text>Big Spine</text></docTitle><navMap>\n" +
            navPoints + "</navMap></ncx>\n"});
-  for (int s = 0; s < options.stylesheets; ++s) {
+  for (int s = 0; s < options.stylesheets + options.unlistedStylesheets; ++s) {
     documents.push_back({"OEBPS/Styles/" + stylesheetName(s), stylesheet(s, options.rulesPerStylesheet)});
   }
   if (!options.documentsLast) entries.insert(entries.end(), documents.begin(), documents.end());

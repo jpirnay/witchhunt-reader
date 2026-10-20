@@ -509,6 +509,7 @@ bool Epub::parsePageMapFile() const {
 
 void Epub::primeZip(ZipFile& zip) const {
   zip.seedLookupCursor(zipLookupCursor_);
+  zip.seedKnownEntries(packageEntries_.get());
   // A lookup's read window comes out of the region lent to load() while it runs (released before
   // the lookup returns), else from the heap.
   zip.setLookupScratch(loadScratch_);
@@ -541,11 +542,27 @@ bool Epub::lookupItemStat(ZipFile& zip, const std::string& path, ZipFile::FileSt
   return true;
 }
 
+namespace {
+// What a first open reads by name before it knows the names: container.xml names the OPF, the
+// OPF the NCX and the stylesheets. Told apart by name and extension as the fingerprint walk meets
+// them.
+void notePackageDocument(void* const ctx, const std::string_view name, const ZipFile::FileStatSlim& stat) {
+  if (name == "META-INF/container.xml" || FsHelpers::checkFileExtension(name, ".opf") ||
+      FsHelpers::checkFileExtension(name, ".ncx") || FsHelpers::hasCssExtension(name)) {
+    static_cast<ZipFile::KnownEntries*>(ctx)->add(name, stat);
+  }
+}
+}  // namespace
+
 bool Epub::computeZipFingerprint(uint64_t* out) const {
   if (!zipFingerprintComputed_) {
     ZipFile zip(filepath);
     primeZip(zip);
-    zipFingerprintValid_ = zip.contentFingerprint(&zipFingerprint_);
+    // Noted for this instance's load() (see packageEntries_); none if the heap has no room.
+    packageEntries_ = makeUniqueNoThrow<ZipFile::KnownEntries>();
+    zipFingerprintValid_ = zip.contentFingerprint(&zipFingerprint_, packageEntries_ ? notePackageDocument : nullptr,
+                                                  packageEntries_.get());
+    if (!zipFingerprintValid_) packageEntries_.reset();
     zipFingerprintComputed_ = true;
     adoptZipDetails(zip);
   }
@@ -673,15 +690,21 @@ void Epub::discoverCssFilesFromZip() {
   const size_t lastSlash = contentBasePath.find_last_of('/');
   const std::string opfDir = (lastSlash != std::string::npos) ? contentBasePath.substr(0, lastSlash + 1) : "";
 
-  if (!zf.streamCentralDirectoryNames([&](std::string_view filePath) {
-        if (!opfDir.empty() && filePath.find(opfDir) != 0) return;
-        if (FsHelpers::hasCssExtension(filePath)) {
-          if (std::find(cssFiles.begin(), cssFiles.end(), filePath) == cssFiles.end()) {
-            LOG_DBG("EBP", "Discovered CSS file via ZIP enumeration: %.*s", (int)filePath.size(), filePath.data());
-            cssFiles.push_back(std::string{filePath});
-          }
-        }
-      })) {
+  const auto consider = [&](const std::string_view filePath) {
+    if (!opfDir.empty() && filePath.find(opfDir) != 0) return;
+    if (FsHelpers::hasCssExtension(filePath)) {
+      if (std::find(cssFiles.begin(), cssFiles.end(), filePath) == cssFiles.end()) {
+        LOG_DBG("EBP", "Discovered CSS file via ZIP enumeration: %.*s", (int)filePath.size(), filePath.data());
+        cssFiles.push_back(std::string{filePath});
+      }
+    }
+  };
+  // The fingerprint walk noted every stylesheet unless it ran out of room: no walk of our own.
+  if (packageEntries_ && !packageEntries_->overflowed()) {
+    for (size_t i = 0; i < packageEntries_->size(); i++) consider(packageEntries_->name(i));
+    return;
+  }
+  if (!zf.streamCentralDirectoryNames(consider)) {
     LOG_ERR("EBP", "Failed to stream ZIP central directory for CSS discovery");
   }
 }
@@ -807,6 +830,11 @@ bool Epub::load(const bool buildIfMissing, const bool skipLoadingCss, BuildArena
     ~ScratchScope() { slot = nullptr; }
   } scratchScope{loadScratch_};
   loadScratch_ = (scratch != nullptr && scratch->valid()) ? scratch : nullptr;
+  // The package documents the fingerprint walk noted serve this load only.
+  struct PackageEntriesScope {
+    std::unique_ptr<ZipFile::KnownEntries>& entries;
+    ~PackageEntriesScope() { entries.reset(); }
+  } packageEntriesScope{packageEntries_};
   tocReliability = TocReliability::Unknown;
 
   // Initialize spine/TOC cache

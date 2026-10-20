@@ -67,6 +67,35 @@ class ZipFile {
     FileStatSlim stat() const { return {method, compressedSize, uncompressedSize, localHeaderOffset}; }
   };
 
+  // A few entries' stats a caller noted during a walk it made anyway (contentFingerprint's
+  // visitor), which loadFileStatSlim answers from before it walks (seedKnownEntries). Exact names
+  // only, up to CAPACITY of them in NAME_BYTES of names: about 1.3 KB, for the handful of package
+  // documents a book's first open reads by name.
+  class KnownEntries {
+   public:
+    static constexpr size_t CAPACITY = 16;
+    static constexpr size_t NAME_BYTES = 1024;
+    // False when there is no room left for `name`; overflowed() from then on.
+    bool add(std::string_view name, const FileStatSlim& stat);
+    const FileStatSlim* find(std::string_view name) const;
+    size_t size() const { return count_; }
+    std::string_view name(const size_t i) const { return {names_ + entries_[i].at, entries_[i].len}; }
+    // Some entry it was offered is not in it: it does not hold every name of its kind.
+    bool overflowed() const { return overflowed_; }
+
+   private:
+    struct Entry {
+      uint16_t at = 0;
+      uint16_t len = 0;
+      FileStatSlim stat = {};
+    };
+    Entry entries_[CAPACITY];
+    char names_[NAME_BYTES] = {};
+    size_t count_ = 0;
+    size_t used_ = 0;
+    bool overflowed_ = false;
+  };
+
  private:
   const std::string& filePath;
   FsFile file;
@@ -77,6 +106,8 @@ class ZipFile {
   bool lastCentralDirPosValid = false;
   // Where a lookup by name takes its read window (setLookupScratch); null: the heap.
   BuildArena* lookupScratch_ = nullptr;
+  // Answers loadFileStatSlim has without a walk (seedKnownEntries); not owned.
+  const KnownEntries* knownEntries_ = nullptr;
 
   long getDataOffset(const FileStatSlim& fileStat);
   bool loadZipDetails();
@@ -112,6 +143,9 @@ class ZipFile {
   // A region lookups by name may take their window from, a block at a time, released before
   // they return. For a caller holding a lent region (first-open indexing); null by default.
   void setLookupScratch(BuildArena* scratch) { lookupScratch_ = scratch; }
+  // Entries loadFileStatSlim finds by exact name without walking; null: none. Must outlive the
+  // lookups.
+  void seedKnownEntries(const KnownEntries* known) { knownEntries_ = known; }
   // The lookup cursor, an offset into the archive (0: none). A caller that makes many short-lived
   // ZipFiles over one book hands it from one to the next, so a lookup for a name stored after the
   // previous one does not start again at the first entry.
@@ -247,8 +281,11 @@ class ZipFile {
   // the per-entry DOS mod time/date so a byte-identical re-zip (same content,
   // new timestamps) keeps the same fingerprint. Any content or structural
   // change flips the CRC/size/offset mix. Used to detect a book replaced
-  // in place at the same path (the cache key is path-derived).
-  bool contentFingerprint(uint64_t* out);
+  // in place at the same path (the cache key is path-derived). `visit`, when given, is shown each
+  // entry whose name fits 255 bytes, with its stat, as the walk passes it.
+  bool contentFingerprint(uint64_t* out,
+                          void (*visit)(void* ctx, std::string_view name, const FileStatSlim& stat) = nullptr,
+                          void* ctx = nullptr);
 
   // Stream every filename in the central directory to a callback without building
   // the in-memory stat cache: one walk through a 4 KB window (straight from the file,
