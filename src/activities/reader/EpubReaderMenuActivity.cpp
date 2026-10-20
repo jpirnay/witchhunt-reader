@@ -709,5 +709,7 @@ void EpubReaderMenuActivity::drawChrome() {
 const char* EpubReaderMenuActivity::footerConfirmLabel() const {
   // Confirm means "next tab" while the bar holds focus and "select" on a row, so the hint names
   // the tab it would move to, as the settings screen does.
+  // The idea, and the first sentence above word for word, are from witchling-reader commit
+  // e17b99e4 (syfq91), who asked for it in issue #330.
   return selectedPosition() == 0 ? tabLabel((selectedTab() + 1) % tabCount()) : tr(STR_SELECT);
 }
