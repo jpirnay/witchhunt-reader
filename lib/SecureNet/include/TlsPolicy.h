@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <string_view>
 
 // Which https transfers verify the server, and what happens when its certificate cannot be
@@ -50,10 +51,14 @@ inline bool retryUnverified(const TlsPlan& plan, const VerifiedConnectFailure fa
   return plan.fallbackOnVerifyError && failure == VerifiedConnectFailure::Certificate;
 }
 
+// How the TLS log lines and UnverifiableHosts name a server: "host:port", the port always given, so
+// a request to https://example.org/ and a redirect to https://example.org:443/ name one server.
+std::string tlsPeer(std::string_view host, uint16_t port);
+
 // The hosts whose certificate could not be verified this session, for VerifiedThenUnverified: a
 // later request to one skips the verify it would fail, about 3 s of a handshake on this chip. In RAM
-// only, a few bytes: the FNV-1a hashes of up to kCapacity host names, compared without case, the
-// oldest replaced first. Never persisted, so a reboot verifies again.
+// only, a few bytes: the FNV-1a hashes of up to kCapacity server names (tlsPeer()), compared without
+// case, the oldest replaced first. Never persisted, so a reboot verifies again.
 class UnverifiableHosts {
  public:
   static constexpr size_t kCapacity = 4;

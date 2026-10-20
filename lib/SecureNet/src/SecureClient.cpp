@@ -410,15 +410,16 @@ int SecureClient::connect(const char* host, uint16_t port) {
   const TlsPlan plan{true, _allowInsecureFallback};
   if (retryUnverified(plan, isVerificationError(_lastConnectErr) ? VerifiedConnectFailure::Certificate
                                                                  : VerifiedConnectFailure::Other)) {
-    LOG_INF("TLS", "%s: certificate not verifiable (err=%d), continuing unverified (no credentials)", host,
-            _lastConnectErr);
+    LOG_INF("TLS", "%s: certificate not verifiable (err=%d), continuing unverified (no credentials)",
+            tlsPeer(host, port).c_str(), _lastConnectErr);
     const int ok = connectAtVerify(host, port, /*verifyPeer=*/false);
     _lastWasInsecure = ok == 1;
     return ok;
   }
 
   if (!_allowInsecureFallback && isVerificationError(_lastConnectErr)) {
-    LOG_ERR("TLS", "cert verify failed for %s (err=%d); insecure fallback disabled -> aborting", host, _lastConnectErr);
+    LOG_ERR("TLS", "cert verify failed for %s (err=%d); insecure fallback disabled -> aborting",
+            tlsPeer(host, port).c_str(), _lastConnectErr);
   }
   return 0;
 }

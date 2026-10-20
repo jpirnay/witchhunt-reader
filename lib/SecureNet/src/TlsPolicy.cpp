@@ -23,6 +23,13 @@ TlsPlan planTls(const TlsPolicy policy, const bool skipValidation, const bool se
   return {true, false};
 }
 
+std::string tlsPeer(const std::string_view host, const uint16_t port) {
+  std::string peer{host};
+  peer += ':';
+  peer += std::to_string(port);
+  return peer;
+}
+
 uint32_t UnverifiableHosts::hashOf(const std::string_view host) {
   uint32_t hash = 2166136261u;
   for (const char c : host) {

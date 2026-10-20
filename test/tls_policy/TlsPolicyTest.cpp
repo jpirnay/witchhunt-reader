@@ -112,3 +112,12 @@ TEST(UnverifiableHosts, ForgetsTheOldestWhenFull) {
   EXPECT_TRUE(hosts.contains("c.example"));
   EXPECT_TRUE(hosts.contains("f.example"));
 }
+
+// --- tlsPeer -------------------------------------------------------------------------------------
+
+// The fallback line, the "earlier this session" line and the memo all name a server this way.
+TEST(TlsPeer, IsTheHostAndAlwaysThePort) {
+  EXPECT_EQ(crosspoint::tlsPeer("www.gutenberg.org", 443), "www.gutenberg.org:443");
+  EXPECT_EQ(crosspoint::tlsPeer("192.168.0.113", 8443), "192.168.0.113:8443");
+  EXPECT_EQ(crosspoint::tlsPeer("opds.example", 80), "opds.example:80");
+}

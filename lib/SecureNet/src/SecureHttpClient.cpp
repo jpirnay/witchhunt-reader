@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "TlsPolicy.h"
+
 namespace crosspoint {
 
 namespace {
@@ -45,6 +47,11 @@ bool SecureHttpClient::parseUrl(const std::string& in, Url& out) {
     out.port = out.scheme == "https" ? 443 : 80;
   }
   return !out.host.empty() && (out.scheme == "http" || out.scheme == "https");
+}
+
+std::string SecureHttpClient::peerOf(const std::string& url) {
+  Url u;
+  return parseUrl(url, u) ? tlsPeer(u.host, u.port) : std::string{};
 }
 
 std::string SecureHttpClient::resolveRedirect(const Url& base, const std::string& location) {

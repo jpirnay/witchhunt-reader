@@ -134,6 +134,11 @@ class SecureHttpClient {
   // Close the held-open keep-alive connection (if any).
   void close();
 
+  // The server a request to url connects to first, named as SecureClient's certificate log lines
+  // name it: host:port, the port always given (crosspoint::tlsPeer()). "" for a URL this client
+  // cannot parse.
+  static std::string peerOf(const std::string& url);
+
   // Negative return codes from get()/request() (distinct from HTTP status).
   enum SecureHttpError {
     ERR_BAD_URL = -1,
