@@ -24,6 +24,10 @@ TtfFont::Hooks hooks;
 std::atomic<uint32_t> storeFills{0};
 std::atomic<uint32_t> storeWipes{0};
 std::atomic<uint32_t> lastWipeMs{0};
+std::atomic<uint32_t> storeRooms{0};
+std::atomic<uint32_t> storeRebuilds{0};
+std::atomic<uint32_t> storeDropped{0};
+std::atomic<uint32_t> lastRoomMs{0};
 
 // What a default-ignorable codepoint draws as: no advance and no ink, as the converter makes them (spec 8.1).
 const EpdGlyph kIgnorable{};
@@ -295,15 +299,27 @@ bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8
 
 bool TtfFontSet::wipeIfPending(const std::function<void()>& onBusy) {
   if (!store_.isOpen() || !store_.wipePending()) return false;
+  if (hooks.renderLockHeld && !hooks.renderLockHeld()) {
+    // A lookup or a draw (a pre-render among them) may hold a record of the log: they all run under RenderLock.
+    LOG_INF("TTF", "glyph store wipe deferred: RenderLock is not held");
+    return false;
+  }
   if (onBusy) onBusy();
   const uint32_t start = hooks.nowMs ? hooks.nowMs() : 0;
   if (!store_.wipe()) return false;  // stays pending: the next book open tries again
-  lastWipeMs = hooks.nowMs ? hooks.nowMs() - start : 0;
+  noteWiped(start);
+  return true;
+}
+
+// The store was wiped, by wipe() or by a rebuild with a full journal: the ring has no store to wait for, and every
+// size claims its index again at its next lookup.
+void TtfFontSet::noteWiped(const uint32_t startMs) {
+  lastWipeMs = hooks.nowMs ? hooks.nowMs() - startMs : 0;
   ++storeWipes;
   LOG_INF("TTF", "glyph store wiped");
   ringMode_ = false;
   freeRing();
-  // The log may map elsewhere now; every size claims its index again at its next lookup.
+  // The log may map elsewhere now.
   for (uint8_t f = 0; f < count_; ++f) {
     TtfFont& font = *fonts_[f];
     font.rebase(font.body_);
@@ -311,7 +327,40 @@ bool TtfFontSet::wipeIfPending(const std::function<void()>& onBusy) {
       if (size) font.rebase(*size);
     }
   }
-  return true;
+}
+
+bool TtfFontSet::makeRoom(const FlashGlyphStore::Budget budget, const std::function<void()>& onBusy) {
+  if (!store_.isOpen()) return false;
+  if (hooks.renderLockHeld && !hooks.renderLockHeld()) {
+    LOG_INF("TTF", "making room deferred: RenderLock is not held");
+    return false;
+  }
+  // A write failure left a wipe pending: only the wipe goes on from there, and the store's makeRoom() would fail.
+  const bool wiped = wipeIfPending(onBusy);
+  if (store_.wipePending() || !store_.needsRoom(budget)) return wiped;
+  if (budget == FlashGlyphStore::Budget::Open && onBusy) onBusy();
+  const uint32_t start = hooks.nowMs ? hooks.nowMs() : 0;
+  const uint32_t generation = store_.generation();
+  FlashGlyphStore::RoomWork work;
+  const FlashGlyphStore::Room room = store_.makeRoom(budget, &work);
+  if (store_.generation() != generation) {
+    noteWiped(start);  // the rebuild's journal was full: the store is wiped instead, and every face index is void
+  } else if (room == FlashGlyphStore::Room::Failed) {
+    if (store_.wipePending()) noteCommit(Commit::WriteFailed);
+  } else if (ringMode_ && !store_.writesStopped()) {
+    ringMode_ = false;
+    freeRing();
+  }
+  const bool did = work.reclaimed > 0 || work.rebuilt || store_.generation() != generation;
+  if (did) {
+    ++storeRooms;
+    if (work.rebuilt) ++storeRebuilds;
+    storeDropped += work.dropped;
+    lastRoomMs = hooks.nowMs ? hooks.nowMs() - start : 0;
+    LOG_INF("TTF", "room made: %u reclaimed (%u kept, %u dropped)%s", work.reclaimed, work.kept, work.dropped,
+            work.rebuilt ? ", index rebuilt" : "");
+  }
+  return wiped || did;
 }
 
 bool TtfFontSet::markFull() {
@@ -330,6 +379,10 @@ TtfFontSet::Stats TtfFontSet::stats() const {
   s.logUsed = store_.logUsed();
   s.logSize = store_.isOpen() ? store_.geometry().logSize : 0;
   s.usedSlots = store_.usedSlots();
+  s.segments = static_cast<uint16_t>(store_.segmentCount());
+  s.freeSegments = static_cast<uint16_t>(store_.freeSegments());
+  s.liveSlots = store_.liveSlots();
+  s.drawsCounted = store_.drawsCounted();
   for (uint8_t f = 0; f < count_; ++f) {
     s.renders += fonts_[f]->renders();
     s.hits += fonts_[f]->storeHits();
@@ -337,7 +390,10 @@ TtfFontSet::Stats TtfFontSet::stats() const {
   return s;
 }
 
-TtfFontSet::StoreEvents TtfFontSet::storeEvents() { return {storeFills.load(), storeWipes.load(), lastWipeMs.load()}; }
+TtfFontSet::StoreEvents TtfFontSet::storeEvents() {
+  return {storeFills.load(),    storeWipes.load(),   lastWipeMs.load(), storeRooms.load(),
+          storeRebuilds.load(), storeDropped.load(), lastRoomMs.load()};
+}
 
 // --- The set: what only a miss needs ---
 
@@ -493,6 +549,8 @@ bool TtfFontSet::ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const
     bitmap = nullptr;
     return true;
   }
+  // A record of the log, drawn: a use for the reclaims (nothing happens while the store keeps no counts).
+  if (!hooks.countsDraw || hooks.countsDraw()) store_.noteDrawn(glyph);
   return false;
 }
 
@@ -513,8 +571,12 @@ void TtfFontSet::failed(const uint8_t style, const uint32_t codepoint, const ttf
 void TtfFontSet::noteCommit(const Commit result) {
   if (result == Commit::Full || result == Commit::WriteFailed) {
     if (!ringMode_) {
-      LOG_INF("TTF", "glyph store %s: new glyphs are not stored until the next book open",
-              result == Commit::Full ? "full" : "write failed");
+      if (result == Commit::Full && !store_.wipePending()) {
+        LOG_INF("TTF", "glyph store full: new glyphs are not stored until room is made");
+      } else {
+        LOG_INF("TTF", "glyph store %s: new glyphs are not stored until the next book open",
+                result == Commit::Full ? "full" : "write failed");
+      }
       ++storeFills;
     }
     ringMode_ = true;
