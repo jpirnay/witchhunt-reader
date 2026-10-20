@@ -335,7 +335,9 @@ bool TtfFontSet::makeRoom(const FlashGlyphStore::Budget budget, const std::funct
     LOG_INF("TTF", "making room deferred: RenderLock is not held");
     return false;
   }
-  // A write failure left a wipe pending: only the wipe goes on from there, and the store's makeRoom() would fail.
+  // A write failure left a wipe pending: only the wipe goes on from there, and the store's makeRoom() would fail. A
+  // wipe takes seconds: an Idle step leaves it to the next Open, behind the busy indicator.
+  if (budget == FlashGlyphStore::Budget::Idle && store_.wipePending()) return false;
   const bool wiped = wipeIfPending(onBusy);
   if (store_.wipePending() || !store_.needsRoom(budget)) return wiped;
   if (budget == FlashGlyphStore::Budget::Open && onBusy) onBusy();

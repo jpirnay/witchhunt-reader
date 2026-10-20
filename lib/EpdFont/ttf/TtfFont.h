@@ -266,7 +266,8 @@ class TtfFontSet {
   /// at book open. True when a wipe ran. False, doing nothing, while the `renderLockHeld` hook says the lock is not
   /// held: a lookup or a draw may hold a record of the log.
   bool wipeIfPending(const std::function<void()>& onBusy = {});
-  /// Makes room in the store when it needs it (a full log, the index, or a rebuild due), after a pending wipe: a
+  /// Makes room in the store when it needs it (a full log, the index, or a rebuild due), after a pending wipe (Open
+  /// only: an Idle step leaves a wipe to the next Open, as it takes seconds, and does nothing else meanwhile): a
   /// reclaim of its oldest segment or a rebuild of its index, one step for Idle, until enough for Open, which calls
   /// `onBusy` first. Once writes resume the ring is freed and new glyphs are stored again. Only under RenderLock, and
   /// where no glyph record of the set is in use across the call: a rebuild with a full journal wipes the store

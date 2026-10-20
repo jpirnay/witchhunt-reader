@@ -532,6 +532,25 @@ TEST_F(TtfFontTest, MakingRoomWaitsForRenderLock) {
   EXPECT_FALSE(font->ringMode());
 }
 
+TEST_F(TtfFontTest, AnIdleStepLeavesAPendingWipeToTheNextOpen) {
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'A'));
+  flash.failNextProgram();
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'B'));
+  ASSERT_TRUE(font->ringMode());
+  ASSERT_TRUE(font.set->stats().wipePending);
+  busy = 0;
+  EXPECT_FALSE(font.set->makeRoom(FlashGlyphStore::Budget::Idle, [this] { ++busy; }));  // a wipe takes seconds
+  EXPECT_EQ(0, busy);
+  EXPECT_TRUE(font->ringMode());
+  EXPECT_TRUE(font.set->stats().wipePending);
+  EXPECT_TRUE(font.set->makeRoom(FlashGlyphStore::Budget::Open, [this] { ++busy; }));
+  EXPECT_EQ(1, busy);
+  EXPECT_FALSE(font->ringMode());
+  EXPECT_FALSE(font.set->stats().wipePending);
+}
+
 TEST_F(TtfFontTest, MakingRoomWithoutAStoreDoesNothing) {
   TtfFontSet closed(flash);
   EXPECT_FALSE(closed.makeRoom(FlashGlyphStore::Budget::Open));
