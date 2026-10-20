@@ -6,6 +6,7 @@ add_executable(GlyphStoreTest
   GlyphStoreGlyphTest.cpp
   GlyphStoreSizesPairsWipeTest.cpp
   GlyphStorePowerCutTest.cpp
+  GlyphStoreRingTest.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/GlyphStoreFormat.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/FlashGlyphStore.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp

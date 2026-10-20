@@ -274,8 +274,8 @@ TEST_F(GlyphStoreWipe, WipeErasesOnlySectorsThatHoldData) {
   const Geometry g = store.geometry();
   const uint32_t before = flash.totalSectorErases();
   ASSERT_TRUE(store.wipe());
-  // The state sector, the log's first sector and at most two index sectors; no pair sector (no pair stored),
-  // and never the header.
+  // The state sector, the log's first sector (the first segment: its header and the records) and at most two index
+  // sectors; no pair sector (no pair stored), and never the header.
   EXPECT_LE(flash.totalSectorErases() - before, 4u);
   EXPECT_EQ(1u, flash.sectorErases(g.logOffset / kSectorBytes));
   EXPECT_EQ(0u, flash.sectorErases(g.logOffset / kSectorBytes + 1));
@@ -284,7 +284,7 @@ TEST_F(GlyphStoreWipe, WipeErasesOnlySectorsThatHoldData) {
 }
 
 TEST_F(GlyphStoreWipe, WipingAnEmptyStoreErasesOnlyTheStateSector) {
-  fillSizeTable(store);
+  fillSizeTable(store);  // no glyph stored, so no segment was opened: the log holds no header either
   const uint32_t before = flash.totalSectorErases();
   ASSERT_TRUE(store.wipe());
   EXPECT_EQ(1u, flash.totalSectorErases() - before);

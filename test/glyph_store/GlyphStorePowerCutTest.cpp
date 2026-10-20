@@ -201,7 +201,7 @@ void checkAfterReboot(SimNorFlash& flash, const Install& what, const Outcome& ou
   EXPECT_EQ(0u, flash.reprograms()) << where;
 }
 
-// 200 more glyphs, 12.8 KB of log over several sectors, so a cut can leave a wipe half done.
+// 200 more glyphs, 12.8 KB of log over four segments, so a cut can leave a wipe half done.
 constexpr uint32_t kManyFirst = 0x4E00;
 constexpr uint32_t kMany = 200;
 constexpr Sizes kPopulateSizes{0, 1, 2};  // what claim() returns on a fresh store

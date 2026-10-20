@@ -55,12 +55,22 @@ uint32_t limit(const uint32_t capacity, const uint32_t percent) {
   return static_cast<uint32_t>(uint64_t{capacity} * percent / 100);
 }
 
-uint32_t countUsed(const uint8_t* table, const uint32_t slots) {
+// Slots in use; with `noGlyph`, also adds those holding kNoGlyph (a glyph index's slots without a record).
+uint32_t countUsed(const uint8_t* table, const uint32_t slots, uint32_t* noGlyph = nullptr) {
   uint32_t used = 0;
   for (uint32_t i = 0; i < slots; ++i) {
-    if (!slotErased(flashSlot(table, i))) ++used;
+    const Slot slot = flashSlot(table, i);
+    if (slotErased(slot)) continue;
+    ++used;
+    if (noGlyph && slot.value == kNoGlyph) ++*noGlyph;
   }
   return used;
+}
+
+// A segment header that only a complete write produces (a cut leaves extra 1 bits, which fail the check), of a
+// segment not retired.
+bool liveHeader(const SegmentHeader& h) {
+  return h.magic == kSegmentMagic && h.epoch != kErased && h.epochCheck == ~h.epoch && h.retired == kErased;
 }
 
 // The regions are sector-aligned, in the order index, pairs, log, after the header and state sectors, and
@@ -237,13 +247,17 @@ FlashGlyphStore::OpenResult FlashGlyphStore::open(const uint8_t identity[kIdenti
     FaceEntry entry{};
     if (readFaceEntry(i, entry) && entry.claimed == 0) claimedFaces_ |= 1u << i;
   }
-  logUsed_ = scanLog();
-  usedSlots_ = countUsed(index_, g.indexSlots);
+  findRing();
+  uint32_t noGlyph = 0;
+  usedSlots_ = countUsed(index_, g.indexSlots, &noGlyph);
+  liveSlots_ += noGlyph;
   usedPairs_ = countUsed(pairs_, g.pairSlots);
   open_ = true;
-  LOG_INF("GST", "open: log %u of %u B, %u of %u slots, %u pairs%s", static_cast<unsigned>(logUsed_),
-          static_cast<unsigned>(g.logSize), static_cast<unsigned>(usedSlots_), static_cast<unsigned>(g.indexSlots),
-          static_cast<unsigned>(usedPairs_), wipePending_ ? ", wipe pending" : "");
+  LOG_INF("GST", "open: %u of %u segments live, log %u of %u B, epoch %u, %u of %u slots (%u live), %u pairs%s",
+          static_cast<unsigned>(live_), static_cast<unsigned>(segmentCount()), static_cast<unsigned>(logUsed()),
+          static_cast<unsigned>(g.logSize), static_cast<unsigned>(nextEpoch_), static_cast<unsigned>(usedSlots_),
+          static_cast<unsigned>(g.indexSlots), static_cast<unsigned>(liveSlots_), static_cast<unsigned>(usedPairs_),
+          wipePending_ ? ", wipe pending" : "");
   return OpenResult::Ready;
 }
 
@@ -256,7 +270,8 @@ void FlashGlyphStore::close() {
   firstSd_ = 0;
   region_ = index_ = pairs_ = log_ = nullptr;
   geometry_ = Geometry{};
-  logUsed_ = usedSlots_ = usedPairs_ = claimedFaces_ = 0;
+  resetRing();
+  usedSlots_ = usedPairs_ = claimedFaces_ = 0;
   open_ = false;
   wipePending_ = false;
   writesStopped_ = false;
@@ -285,23 +300,30 @@ bool FlashGlyphStore::styleInfo(const uint8_t style, StyleInfo& out) const {
 
 // --- The log ---
 
-// A record the scan can step over: a glyph key, a bitmap length that matches its size and the cap, and a
-// dataOffset that points just past its own header. A header torn by a power cut fails one of these.
-bool FlashGlyphStore::plausibleRecord(const uint32_t offset) const {
-  if (offset % 4 != 0 || offset > geometry_.logSize || geometry_.logSize - offset < kRecordHeaderBytes) return false;
+// A record the scan can step over: a glyph key, a bitmap length that matches its size and the cap, a dataOffset
+// that points just past its own header, and an end at or before `end` (its segment's). A header torn by a power cut
+// fails one of these.
+bool FlashGlyphStore::plausibleRecord(const uint32_t offset, const uint32_t end) const {
+  if (offset % 4 != 0 || offset > end || end - offset < kRecordHeaderBytes) return false;
   if (!isGlyphKey(flashU32(log_ + offset))) return false;
   const EpdGlyph& glyph = recordGlyph(offset);
   return glyph.dataLength <= kMaxBitmapBytes && glyph.dataLength == glyphDataBytes(glyph.width, glyph.height, true) &&
-         glyph.dataOffset == offset + kRecordHeaderBytes && recordBytes(glyph.dataLength) <= geometry_.logSize - offset;
+         glyph.dataOffset == offset + kRecordHeaderBytes && recordBytes(glyph.dataLength) <= end - offset;
 }
 
-uint32_t FlashGlyphStore::scanLog() const {
-  const uint32_t size = geometry_.logSize;
-  uint32_t offset = 0;
+// Bytes in use in `segment`, its header included: where writing resumes when it is the head. With `records`, adds
+// the records the walk stepped over.
+uint32_t FlashGlyphStore::scanLog(const uint32_t segment, uint32_t* records) const {
+  const uint32_t start = segment * geometry_.segmentBytes;
+  const uint32_t size = start + geometry_.segmentBytes;
+  uint32_t offset = start + kSegmentHeaderBytes;
   for (;;) {
-    while (plausibleRecord(offset)) offset += recordBytes(recordGlyph(offset).dataLength);
-    // The walk stopped at an erased key, a torn record or the end. A cut write spans at most one record, and
-    // can have left programmed bytes after the stop, even behind a key that still reads erased.
+    while (plausibleRecord(offset, size)) {
+      offset += recordBytes(recordGlyph(offset).dataLength);
+      if (records) ++*records;
+    }
+    // The walk stopped at an erased key, a torn record or the segment's end. A cut write spans at most one record,
+    // and can have left programmed bytes after the stop, even behind a key that still reads erased.
     const uint32_t window = size - offset < kMaxRecordBytes ? size : offset + kMaxRecordBytes;
     uint32_t end = offset;  // one past the last programmed byte in the window
     for (uint32_t i = window; i > offset; --i) {
@@ -310,23 +332,91 @@ uint32_t FlashGlyphStore::scanLog() const {
         break;
       }
     }
-    if (end == offset) return offset;  // nothing after the stop: writing resumes here
-    // Every session after a torn write resumed on a sector boundary past it. If one of the boundaries
-    // up to the programmed bytes starts a record, the walk carries on there; otherwise it goes on past
-    // them, at the next boundary. Without this, a later boot would stop at the same torn record and
-    // write over what those sessions stored.
+    if (end == offset) return offset - start;  // nothing after the stop: writing resumes here
+    // Every session after a torn write resumed on a sector boundary past it, inside the segment or, at its end, in
+    // the next one. If one of the boundaries up to the programmed bytes starts a record, the walk carries on there;
+    // otherwise it goes on past them, at the next boundary. Without this, a later boot would stop at the same torn
+    // record and write over what those sessions stored.
     uint32_t next = alignUp(end, kSectorBytes);
     for (uint32_t boundary = alignUp(offset + 1, kSectorBytes); boundary < next; boundary += kSectorBytes) {
-      if (plausibleRecord(boundary)) {
+      if (plausibleRecord(boundary, size)) {
         next = boundary;
         break;
       }
     }
-    if (next >= size) return size;
+    if (next >= size) return geometry_.segmentBytes;  // the segment is closed: nothing more goes into it
     LOG_INF("GST", "log: torn write at %u; carrying on at %u", static_cast<unsigned>(offset),
             static_cast<unsigned>(next));
     offset = next;
   }
+}
+
+// Finds the ring from the segment headers. The head is the live segment with the largest epoch. Walking back from
+// it, each segment with a live header and an epoch below the one after it is live too; the first that is not ends
+// the run, and every segment outside it is free. With no live header the ring is empty: the first record opens
+// segment 0.
+void FlashGlyphStore::findRing() {
+  resetRing();
+  const uint32_t count = segmentCount();
+  uint32_t found[kMaxSegments];
+  uint32_t head = count;
+  for (uint32_t s = 0; s < count; ++s) {
+    SegmentHeader header;
+    std::memcpy(&header, __builtin_assume_aligned(log_ + s * geometry_.segmentBytes, 4), sizeof header);
+    found[s] = liveHeader(header) ? header.epoch : kErased;
+    if (found[s] != kErased && (head == count || found[s] > found[head])) head = s;
+  }
+  if (head == count) return;
+  nextEpoch_ = found[head] + 1;
+  segEpoch_[head] = found[head];
+  head_ = tail_ = static_cast<uint8_t>(head);
+  live_ = 1;
+  for (uint32_t s = head; live_ < count;) {
+    const uint32_t prev = s == 0 ? count - 1 : s - 1;
+    if (found[prev] == kErased || found[prev] >= found[s]) break;
+    segEpoch_[prev] = found[prev];
+    tail_ = static_cast<uint8_t>(prev);
+    ++live_;
+    s = prev;
+  }
+  // The head resumes after its last record; the segments behind it are closed. Each live record counts as a live
+  // slot (open() adds the "no glyph" marks).
+  for (uint32_t s = tail_, n = 0; n < live_; s = s + 1 == count ? 0 : s + 1, ++n) {
+    const uint32_t used = scanLog(s, &liveSlots_);
+    if (s == head_) headUsed_ = used;
+  }
+}
+
+// Opens the segment after the head (with none live, head_ itself): erases it if it holds data (a header a cut tore,
+// or a retired segment whose erase a cut stopped), writes its header with the next epoch, and makes it the head. The
+// header's `retired` word stays erased until the segment is retired. False with no free segment, or when a write
+// failed.
+bool FlashGlyphStore::moveHead() {
+  const uint32_t count = segmentCount();
+  if (live_ >= count) return false;
+  const uint32_t next = live_ == 0 ? head_ : (head_ + 1u == count ? 0 : head_ + 1u);
+  const uint32_t at = geometry_.logOffset + next * geometry_.segmentBytes;
+  const uint32_t epoch = nextEpoch_++;
+  const SegmentHeader header{kSegmentMagic, epoch, ~epoch, kErased};
+  if (!eraseWritten(at, geometry_.segmentBytes) || !flash_.program(at, &header, offsetof(SegmentHeader, retired))) {
+    return false;
+  }
+  segEpoch_[next] = epoch;
+  if (live_ == 0) tail_ = static_cast<uint8_t>(next);
+  head_ = static_cast<uint8_t>(next);
+  ++live_;
+  headUsed_ = kSegmentHeaderBytes;
+  return true;
+}
+
+// Every segment free, as after a wipe; the epochs start again at 1, since no slot names one any more.
+void FlashGlyphStore::resetRing() {
+  for (uint32_t& epoch : segEpoch_) epoch = kErased;
+  head_ = tail_ = live_ = 0;
+  headUsed_ = 0;
+  nextEpoch_ = 1;
+  liveSlots_ = 0;
+  chainFull_ = indexFull_ = false;
 }
 
 // --- Erasing ---
@@ -395,15 +485,23 @@ void GlyphBatch::dropLast() {
   --count_;
 }
 
-// The record a glyph slot points at, if it is complete and really this key's: the slot value is the record's
-// dataOffset, inside the written log.
-const EpdGlyph* FlashGlyphStore::validRecord(const uint32_t key, const uint32_t dataOffset) const {
-  if (dataOffset < kRecordHeaderBytes || dataOffset > logUsed_ || dataOffset % 4 != 0) return nullptr;
+// The record a glyph slot points at, if it is complete and really this key's: the slot value packs the record's
+// dataOffset with the epoch its segment had when the slot was written. That segment must still be live with that
+// epoch (a segment freed, or opened again since, holds other records now or will), and the record must lie inside
+// what the segment holds.
+const EpdGlyph* FlashGlyphStore::validRecord(const uint32_t key, const uint32_t value) const {
+  const uint32_t dataOffset = slotDataOffset(value);
+  const uint32_t segment = dataOffset / geometry_.segmentBytes;
+  if (segment >= segmentCount() || segEpoch_[segment] == kErased ||
+      (segEpoch_[segment] & kSlotEpochMask) != slotEpoch(value)) {
+    return nullptr;
+  }
+  const uint32_t start = segment * geometry_.segmentBytes;
+  const uint32_t end = start + (segment == head_ ? headUsed_ : geometry_.segmentBytes);
+  if (dataOffset < start + kSegmentHeaderBytes + kRecordHeaderBytes || dataOffset > end) return nullptr;
   const uint32_t offset = dataOffset - kRecordHeaderBytes;
-  if (flashU32(log_ + offset) != key || !plausibleRecord(offset)) return nullptr;
-  const EpdGlyph& glyph = recordGlyph(offset);
-  if (recordBytes(glyph.dataLength) > logUsed_ - offset) return nullptr;
-  return &glyph;
+  if (flashU32(log_ + offset) != key || !plausibleRecord(offset, end)) return nullptr;
+  return &recordGlyph(offset);
 }
 
 FlashGlyphStore::Lookup FlashGlyphStore::find(const uint32_t key, const EpdGlyph** glyph) const {
@@ -436,15 +534,19 @@ FlashGlyphStore::Insert FlashGlyphStore::insert(const uint32_t tableOffset, cons
   return Insert::ChainFull;
 }
 
-// One glyph slot (a record's dataOffset, or kNoGlyph), and what a failure means for the store.
+// One glyph slot (a record's glyphSlotValue(), or kNoGlyph), and what a failure means for the store: a full probe
+// chain asks for an index rebuild, a failed write for a wipe.
 FlashGlyphStore::Commit FlashGlyphStore::insertGlyphSlot(const uint32_t key, const uint32_t value) {
   switch (insert(geometry_.indexOffset, index_, geometry_.indexSlots, key, value)) {
     case Insert::Done:
       ++usedSlots_;
+      ++liveSlots_;
       return Commit::Stored;
     case Insert::ChainFull:
-      LOG_INF("GST", "full: a probe chain passed %u slots; wipe pending", static_cast<unsigned>(kMaxProbe));
-      stopWrites();
+      LOG_INF("GST", "full: a probe chain passed %u slots; the index needs a rebuild",
+              static_cast<unsigned>(kMaxProbe));
+      chainFull_ = true;
+      stopForRoom();
       return Commit::Full;
     case Insert::WriteFailed:
       break;
@@ -462,43 +564,78 @@ FlashGlyphStore::Commit FlashGlyphStore::commit(GlyphBatch& batch) {
 
 FlashGlyphStore::Commit FlashGlyphStore::writeBatch(GlyphBatch& batch) {
   if (!open_) return Commit::Refused;
-  for (uint32_t at = 0; at < batch.used_; at += recordBytes(ramGlyph(batch.buffer_ + at + 4).dataLength)) {
+  const uint32_t segmentBytes = geometry_.segmentBytes;
+  // Every key must be claimed and every record must fit a segment's payload. The batch is laid out as it will be
+  // written, to count the segments it opens: with none live, the first record opens one.
+  uint32_t used = live_ == 0 ? segmentBytes : headUsed_;
+  uint32_t opens = 0;
+  for (uint32_t at = 0; at < batch.used_;) {
+    const uint32_t bytes = recordBytes(ramGlyph(batch.buffer_ + at + 4).dataLength);
     if (!faceClaimed(ramU32(batch.buffer_ + at))) {
       LOG_ERR("GST", "commit refused: a key uses a face index not claimed since the last wipe");
       return Commit::Refused;
     }
+    if (bytes > segmentBytes - kSegmentHeaderBytes) {
+      LOG_ERR("GST", "commit refused: a %u B record is larger than a segment", static_cast<unsigned>(bytes));
+      return Commit::Refused;
+    }
+    if (bytes > segmentBytes - used) {
+      ++opens;
+      used = kSegmentHeaderBytes;
+    }
+    used += bytes;
+    at += bytes;
   }
   if (writesStopped_) return Commit::Full;
-  if (logUsed_ + batch.used_ > geometry_.logSize ||
-      usedSlots_ + batch.count_ > limit(geometry_.indexSlots, kIndexLoadPercent)) {
-    LOG_INF("GST", "full: log %u of %u B, %u of %u slots; wipe pending", static_cast<unsigned>(logUsed_),
-            static_cast<unsigned>(geometry_.logSize), static_cast<unsigned>(usedSlots_),
+  if (usedSlots_ + batch.count_ > limit(geometry_.indexSlots, kIndexLoadPercent)) {
+    LOG_INF("GST", "full: %u of %u slots; the index needs a rebuild", static_cast<unsigned>(usedSlots_),
             static_cast<unsigned>(geometry_.indexSlots));
-    stopWrites();
+    indexFull_ = true;
+    stopForRoom();
     return Commit::Full;
   }
-  // Each bitmap's offset is relative to the log base, known now.
-  const uint32_t base = logUsed_;
-  for (uint32_t at = 0; at < batch.used_;) {
-    EpdGlyph glyph = ramGlyph(batch.buffer_ + at + 4);
-    glyph.dataOffset = base + at + kRecordHeaderBytes;
-    std::memcpy(batch.buffer_ + at + 4, &glyph, sizeof glyph);
-    at += recordBytes(glyph.dataLength);
+  if (opens > freeSegments()) {
+    LOG_INF("GST", "full: %u of %u segments free, %u B batch; room must be made", static_cast<unsigned>(freeSegments()),
+            static_cast<unsigned>(segmentCount()), static_cast<unsigned>(batch.used_));
+    stopForRoom();
+    return Commit::Full;
   }
-  // Every record in one program call...
-  if (!flash_.program(geometry_.logOffset + base, batch.buffer_, batch.used_)) {
-    LOG_ERR("GST", "log write of %u B at %u failed; wipe pending", static_cast<unsigned>(batch.used_),
-            static_cast<unsigned>(base));
-    stopWrites();
-    return Commit::WriteFailed;
-  }
-  logUsed_ = base + batch.used_;
-  // ...then the slots, so a probe never finds a slot whose record is incomplete. A slot holds its record's
-  // dataOffset, never 0: a cut can only leave extra 1 bits, so a torn slot never reads as kNoGlyph.
+  // The records go one program call per segment: each run is what fits the head, which moves on in between. Each
+  // bitmap's offset, relative to the log base, is known once its run's place is.
   for (uint32_t at = 0; at < batch.used_;) {
-    const Commit slot = insertGlyphSlot(ramU32(batch.buffer_ + at), base + at + kRecordHeaderBytes);
+    if (live_ == 0 || recordBytes(ramGlyph(batch.buffer_ + at + 4).dataLength) > segmentBytes - headUsed_) {
+      if (!moveHead()) {
+        LOG_ERR("GST", "opening a log segment failed; wipe pending");
+        stopWrites();
+        return Commit::WriteFailed;
+      }
+    }
+    const uint32_t first = at;
+    const uint32_t base = head_ * segmentBytes + headUsed_;
+    while (at < batch.used_) {
+      EpdGlyph glyph = ramGlyph(batch.buffer_ + at + 4);
+      const uint32_t bytes = recordBytes(glyph.dataLength);
+      if (bytes > segmentBytes - headUsed_ - (at - first)) break;
+      glyph.dataOffset = base + (at - first) + kRecordHeaderBytes;
+      std::memcpy(batch.buffer_ + at + 4, &glyph, sizeof glyph);
+      at += bytes;
+    }
+    if (!flash_.program(geometry_.logOffset + base, batch.buffer_ + first, at - first)) {
+      LOG_ERR("GST", "log write of %u B at %u failed; wipe pending", static_cast<unsigned>(at - first),
+              static_cast<unsigned>(base));
+      stopWrites();
+      return Commit::WriteFailed;
+    }
+    headUsed_ += at - first;
+  }
+  // Then the slots, so a probe never finds a slot whose record is incomplete. A slot's value is never 0 (its offset
+  // is past the segment's header): a cut can only leave extra 1 bits, so a torn slot never reads as kNoGlyph.
+  for (uint32_t at = 0; at < batch.used_;) {
+    const EpdGlyph glyph = ramGlyph(batch.buffer_ + at + 4);
+    const uint32_t epoch = segEpoch_[glyph.dataOffset / segmentBytes];
+    const Commit slot = insertGlyphSlot(ramU32(batch.buffer_ + at), glyphSlotValue(epoch, glyph.dataOffset));
     if (slot != Commit::Stored) return slot;
-    at += recordBytes(ramGlyph(batch.buffer_ + at + 4).dataLength);
+    at += recordBytes(glyph.dataLength);
   }
   return Commit::Stored;
 }
@@ -507,7 +644,10 @@ FlashGlyphStore::Commit FlashGlyphStore::markNoGlyph(const uint32_t key) {
   if (!open_ || !isGlyphKey(key) || !faceClaimed(key)) return Commit::Refused;
   if (writesStopped_) return Commit::Full;
   if (usedSlots_ + 1 > limit(geometry_.indexSlots, kIndexLoadPercent)) {
-    stopWrites();
+    LOG_INF("GST", "full: %u of %u slots; the index needs a rebuild", static_cast<unsigned>(usedSlots_),
+            static_cast<unsigned>(geometry_.indexSlots));
+    indexFull_ = true;
+    stopForRoom();
     return Commit::Full;
   }
   return insertGlyphSlot(key, kNoGlyph);
@@ -606,6 +746,10 @@ bool FlashGlyphStore::storePair(const uint16_t left, const uint16_t right, const
 
 // --- Wipe pending, and the wipe ---
 
+// The ring or the index is full: nothing is written until room is made. Nothing is lost either, so no wipe.
+void FlashGlyphStore::stopForRoom() { writesStopped_ = true; }
+
+// A write failed: what the flash holds is not known for sure, so only a wipe makes the store writable again.
 void FlashGlyphStore::stopWrites() {
   writesStopped_ = true;
   if (wipePending_) return;
@@ -647,7 +791,8 @@ bool FlashGlyphStore::wipe() {
     LOG_ERR("GST", "wipe: erase failed; wipe stays pending");
     return false;
   }
-  logUsed_ = usedSlots_ = usedPairs_ = claimedFaces_ = 0;
+  resetRing();
+  usedSlots_ = usedPairs_ = claimedFaces_ = 0;
   ++generation_;
   wipePending_ = false;
   writesStopped_ = false;

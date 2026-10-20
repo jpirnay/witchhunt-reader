@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -99,6 +100,19 @@ inline uint8_t pattern(const uint32_t key, const uint32_t i) {
 /// Bytes a record with a width x height bitmap takes in the log.
 inline uint32_t recordSize(const uint8_t width, const uint8_t height) {
   return glyphstore::align4(glyphstore::kRecordHeaderBytes + glyphDataBytes(width, height, true));
+}
+
+/// The log offset `offset` bytes into `segment`'s payload, past its header.
+inline uint32_t inSegment(const glyphstore::Layout& layout, const uint32_t segment, const uint32_t offset) {
+  return segment * layout.geometry.segmentBytes + glyphstore::kSegmentHeaderBytes + offset;
+}
+
+/// Programs `segment`'s header with `epoch`, as the store opens a segment: its `retired` word stays erased.
+inline void writeSegmentHeader(SimNorFlash& flash, const glyphstore::Layout& layout, const uint32_t segment,
+                               const uint32_t epoch) {
+  const glyphstore::SegmentHeader header{glyphstore::kSegmentMagic, epoch, ~epoch, glyphstore::kErased};
+  ASSERT_TRUE(flash.program(layout.geometry.logOffset + segment * layout.geometry.segmentBytes, &header,
+                            offsetof(glyphstore::SegmentHeader, retired)));
 }
 
 /// Programs a record straight into the log at `offset`, bypassing the store (the recovery tests). Only the
