@@ -429,9 +429,17 @@ TEST_F(GlyphStoreRoom, ABatchLargerThanTheFreeSegmentsAsksForRoom) {
   for (uint32_t n = 0; n < 84; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;  // fourteen full segments
   ASSERT_EQ(kFreeSegmentsTarget, store.freeSegments());
   ASSERT_FALSE(store.needsRoom());
-  // Thirteen records need three new segments; two are free.
+  // Thirteen records need three new segments; two are free. The batch is refused whole: nothing is written.
   for (uint32_t n = 84; n < 97; ++n) ASSERT_TRUE(stage(batch, keyOf(n), kWidth, kHeight)) << n;
+  const uint32_t programs = flash.programCalls();
+  const uint32_t erases = flash.eraseCalls();
+  const uint32_t used = store.logUsed();
   ASSERT_EQ(Commit::Full, store.commit(batch));
+  EXPECT_EQ(programs, flash.programCalls());
+  EXPECT_EQ(erases, flash.eraseCalls());
+  EXPECT_EQ(used, store.logUsed());
+  EXPECT_EQ(kFreeSegmentsTarget, store.freeSegments());
+  for (uint32_t n = 84; n < 97; ++n) EXPECT_EQ(Lookup::NotStored, lookup(n)) << n;
   EXPECT_TRUE(store.writesStopped());
   EXPECT_TRUE(store.needsRoom());
   EXPECT_FALSE(store.wipePending());
@@ -495,6 +503,96 @@ TEST_F(GlyphStoreRoom, AFailedReclaimSetsTheWipePending) {
   ASSERT_TRUE(store.wipe());
   ASSERT_TRUE(claimTestSizes(store));
   EXPECT_EQ(Commit::Stored, commitRecord(0));
+}
+
+TEST_F(GlyphStoreRoom, AFailedRetireStopsTheReclaimWithEverythingServedWhole) {
+  const uint32_t stored = fillRing();
+  draw(0);
+  draw(3);
+  // Two copies, each two program calls (512 + 88 bytes) and a slot: the seventh call is segment 0's retire word.
+  flash.failNextProgram(6);
+  RoomWork work;
+  EXPECT_EQ(Room::Failed, store.makeRoom(Budget::Idle, &work));
+  EXPECT_EQ(2u, work.kept);
+  EXPECT_EQ(0u, work.reclaimed);
+  EXPECT_TRUE(store.wipePending());
+  EXPECT_TRUE(store.writesStopped());
+  SegmentHeader header{};
+  ASSERT_TRUE(flash.read(layout.geometry.logOffset, &header, sizeof header));
+  EXPECT_EQ(kErased, header.retired);
+  // Segment 0 never left the ring: its glyphs and the copies are served whole, now and after a reboot.
+  for (uint32_t n = 0; n < stored; ++n) EXPECT_TRUE(intact(n)) << n;
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_TRUE(store.wipePending());
+  EXPECT_EQ(1u, store.freeSegments());
+  for (uint32_t n = 0; n < stored; ++n) EXPECT_TRUE(intact(n)) << n;
+  EXPECT_EQ(Room::Failed, store.makeRoom(Budget::Open));  // only a wipe goes on from here
+  ASSERT_TRUE(store.wipe());
+  EXPECT_EQ(0u, store.logUsed());
+}
+
+TEST_F(GlyphStoreRoom, ACutInAReclaimsEraseLeavesItsSegmentFree) {
+  const uint32_t stored = fillRing();
+  draw(0);
+  draw(3);
+  // Two copies, each its record then its slot, and segment 0's retire word: the power fails in the erase after them.
+  flash.cutAfterSteps(2 * (recordSize(kWidth, kHeight) + kSlotBytes) + sizeof(uint32_t));
+  RoomWork work;
+  EXPECT_EQ(Room::Failed, store.makeRoom(Budget::Idle, &work));
+  ASSERT_TRUE(flash.dead());
+  EXPECT_EQ(2u, work.kept);
+  EXPECT_TRUE(store.wipePending());  // for this session: the chip took no more writes
+  // Segment 0 is out of the ring: of its glyphs only the copies are served.
+  const auto expectSegment0Gone = [&] {
+    EXPECT_TRUE(intact(0));
+    EXPECT_TRUE(intact(3));
+    for (const uint32_t n : {1u, 2u, 4u, 5u}) EXPECT_EQ(Lookup::NotStored, lookup(n)) << n;
+    for (uint32_t n = 6; n < stored; ++n) EXPECT_TRUE(intact(n)) << n;
+  };
+  expectSegment0Gone();
+  // After the reboot no wipe is pending (it never reached the chip), and segment 0, half erased, is free.
+  flash.powerCycle();
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_FALSE(store.wipePending());
+  EXPECT_EQ(2u, store.freeSegments());
+  expectSegment0Gone();
+  // The head comes round to segment 0 only through a whole erase of it.
+  const uint32_t sector = layout.geometry.logOffset / kSectorBytes;
+  const uint32_t erases = flash.sectorErases(sector);
+  uint32_t n = stored;
+  do {
+    ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
+  } while (segmentOf(n++) != 0 && n < stored + 50);
+  EXPECT_EQ(erases + 1, flash.sectorErases(sector));
+  expectSegment0Gone();
+  for (uint32_t k = stored; k < n; ++k) EXPECT_TRUE(intact(k)) << k;
+}
+
+TEST_F(GlyphStoreRoom, CopiesSplitAcrossAHeadMoveSurviveAReopen) {
+  uint32_t n = fillRing();
+  // Four more records leave the head, segment 14, room for one.
+  for (const uint32_t end = n + 4; n < end; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
+  ASSERT_EQ(14u, segmentOf(n - 1));
+  ASSERT_EQ(1u, store.freeSegments());
+  draw(0);
+  draw(2);
+  draw(4);
+  RoomWork work;
+  ASSERT_NE(Room::Failed, store.makeRoom(Budget::Idle, &work));
+  ASSERT_EQ(3u, work.kept);
+  EXPECT_EQ(14u, segmentOf(0));  // the first copy ends the head
+  EXPECT_EQ(15u, segmentOf(2));  // the other two open the segment after it
+  EXPECT_EQ(15u, segmentOf(4));
+  const uint32_t lastCopy = dataOffsetOf(4);
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  for (const uint32_t k : {0u, 2u, 4u}) EXPECT_TRUE(intact(k)) << k;
+  for (const uint32_t k : {1u, 3u, 5u}) EXPECT_EQ(Lookup::NotStored, lookup(k)) << k;
+  for (uint32_t k = 6; k < n; ++k) EXPECT_TRUE(intact(k)) << k;
+  EXPECT_EQ(1u, store.freeSegments());
+  EXPECT_EQ(n - 3, store.liveSlots());  // segment 0's six went stale, the three copies took new ones
+  // The head resumes after the last copy.
+  ASSERT_EQ(Commit::Stored, commitRecord(n));
+  EXPECT_EQ(lastCopy + recordSize(kWidth, kHeight), dataOffsetOf(n));
 }
 
 TEST_F(GlyphStoreRoom, CopiesSurviveAReopen) {
@@ -668,6 +766,44 @@ TEST_F(GlyphStoreRoom, IdleLeavesAnEpochRebuildToTheNextOpen) {
   for (uint32_t n = 0; n < 3; ++n) EXPECT_TRUE(intact(n)) << n;
   EXPECT_EQ(5000u, journalEntry(1).base);
   EXPECT_EQ(0u, journalEntry(1).done);
+}
+
+TEST_F(GlyphStoreRoom, TheEpochLimitCountsFromTheLastFinishedRebuild) {
+  // A rebuild from epoch 1000 finished; a later one, from 64 epochs short of `kLast`, was cut short. kLast is the last
+  // epoch the limit lets a segment have past the finished rebuild's base; segment 0 has the one before it.
+  constexpr uint32_t kFloor = 1000;
+  constexpr uint32_t kLast = kFloor + kRebuildEpochLimit - 1;
+  writeSegmentHeader(flash, layout, 0, kLast - 1);
+  writeJournalEntry(0, kFloor, true);
+  writeJournalEntry(1, kLast - 64, false);
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  ASSERT_EQ(kLast, store.epoch());
+  ASSERT_EQ(kLast - 64, store.rebuildBase());  // the interrupted entry's
+  EXPECT_FALSE(store.needsRoom());             // one epoch is left
+  EXPECT_TRUE(store.needsRoom(Budget::Open));  // the interrupted rebuild waits for an Open
+  // Seven records: six fill segment 0, the seventh opens segment 1 with the last epoch.
+  for (uint32_t n = 0; n < 7; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
+  ASSERT_EQ(1u, segmentOf(6));
+  ASSERT_EQ(kLast + 1, store.epoch());
+  // Counted from the finished rebuild's base no epoch is left; from the interrupted one's, only 65 would be spent.
+  EXPECT_TRUE(store.needsRoom());
+  // A batch that would open a segment is refused whole, and nothing is written.
+  for (uint32_t n = 7; n < 13; ++n) ASSERT_TRUE(stage(batch, keyOf(n), kWidth, kHeight)) << n;
+  const uint32_t programs = flash.programCalls();
+  EXPECT_EQ(Commit::Full, store.commit(batch));
+  EXPECT_EQ(programs, flash.programCalls());
+  EXPECT_TRUE(store.writesStopped());
+  EXPECT_FALSE(store.wipePending());
+  // Idle time rebuilds the index: the limit does not wait for an Open.
+  RoomWork work;
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Idle, &work));
+  EXPECT_TRUE(work.rebuilt);
+  EXPECT_EQ(kLast - 1, store.rebuildBase());  // the tail's epoch
+  EXPECT_FALSE(store.writesStopped());
+  for (uint32_t n = 0; n < 7; ++n) EXPECT_TRUE(intact(n)) << n;
+  for (uint32_t n = 7; n < 13; ++n) ASSERT_TRUE(stage(batch, keyOf(n), kWidth, kHeight)) << n;
+  ASSERT_EQ(Commit::Stored, store.commit(batch));
+  for (uint32_t n = 0; n < 13; ++n) EXPECT_TRUE(intact(n)) << n;
 }
 
 TEST_F(GlyphStoreRoom, ARebuildAPowerCutInterruptedIsDoneAgainAtOpen) {

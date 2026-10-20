@@ -2,6 +2,7 @@
 // at open, and a full ring that stops writes without a wipe.
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 
 #include "GlyphStoreTestUtil.h"
@@ -10,6 +11,10 @@ using namespace glyphstore;
 using namespace gst_test;
 
 namespace {
+
+using Budget = FlashGlyphStore::Budget;
+using Room = FlashGlyphStore::Room;
+using RoomWork = FlashGlyphStore::RoomWork;
 
 constexpr uint32_t kFirst = 0x4E00;  // the code point of the first glyph each test stores
 
@@ -44,6 +49,27 @@ class GlyphStoreRing : public StoreTest {
   }
 
   uint32_t liveSegments() const { return store.segmentCount() - store.freeSegments(); }
+
+  uint32_t segmentOf(const uint32_t cp) { return dataOffsetOf(cp) / layout.geometry.segmentBytes; }
+
+  bool intact(const uint32_t cp) const { return storedIntact(store, makeKey(cp, 0, 0), 60, 60); }
+  Lookup lookup(const uint32_t cp) const { return store.find(makeKey(cp, 0, 0), nullptr); }
+
+  // Commits glyphs until the ring is full; returns how many were stored: four in each of the 16 segments.
+  uint32_t fillUntilFull() {
+    uint32_t stored = 0;
+    while (stored < 100 && commitOne(kFirst + stored) == Commit::Stored) ++stored;
+    EXPECT_EQ(64u, stored);
+    return stored;
+  }
+
+  // markFull() then one idle step: the tail segment is reclaimed, however many are free.
+  void reclaimTail() {
+    ASSERT_TRUE(store.markFull());
+    RoomWork work;
+    ASSERT_NE(Room::Failed, store.makeRoom(Budget::Idle, &work));
+    ASSERT_EQ(1u, work.reclaimed);
+  }
 
   const Layout layout = smallLayout();
   alignas(4) uint8_t buffer[8192] = {};
@@ -150,4 +176,73 @@ TEST_F(GlyphStoreRing, ATornSegmentHeaderIsPreparedAgain) {
   expectHeader(1, 2);
   EXPECT_EQ(4096u + kSegmentHeaderBytes + kRecordHeaderBytes, dataOffsetOf(kFirst + 4));
   for (uint32_t i = 0; i < 5; ++i) EXPECT_TRUE(storedIntact(store, makeKey(kFirst + i, 0, 0), 60, 60)) << i;
+}
+
+TEST_F(GlyphStoreRing, AFullRingIsFoundAgainAtOpen) {
+  const uint32_t stored = fillUntilFull();
+  const uint32_t used = store.logUsed();
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_EQ(16u, liveSegments());
+  EXPECT_EQ(used, store.logUsed());
+  EXPECT_EQ(17u, store.epoch());  // the head is segment 15, opened with epoch 16
+  for (uint32_t i = 0; i < stored; ++i) EXPECT_TRUE(intact(kFirst + i)) << i;
+  // The tail is segment 0: a reclaim takes its four glyphs and nothing else.
+  reclaimTail();
+  for (uint32_t i = 0; i < 4; ++i) EXPECT_EQ(Lookup::NotStored, lookup(kFirst + i)) << i;
+  for (uint32_t i = 4; i < stored; ++i) EXPECT_TRUE(intact(kFirst + i)) << i;
+  // The head, full, moves into the segment after it: segment 0, with the next epoch.
+  ASSERT_EQ(Commit::Stored, commitOne(kFirst + stored));
+  EXPECT_EQ(kSegmentHeaderBytes + kRecordHeaderBytes, dataOffsetOf(kFirst + stored));
+  expectHeader(0, 17);
+}
+
+TEST_F(GlyphStoreRing, AWrappedRingIsFoundAgainAtOpen) {
+  const uint32_t stored = fillUntilFull();
+  // Room is made (segments 0 and 1 are reclaimed), then two glyphs take the head round into segment 0: the head is now
+  // before the tail, segment 2.
+  ASSERT_EQ(Room::Enough, store.makeRoom(Budget::Open));
+  for (uint32_t i = stored; i < stored + 2; ++i) ASSERT_EQ(Commit::Stored, commitOne(kFirst + i)) << i;
+  ASSERT_EQ(0u, segmentOf(kFirst + stored + 1));
+  const uint32_t used = store.logUsed();
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_EQ(15u, liveSegments());
+  EXPECT_EQ(used, store.logUsed());
+  EXPECT_EQ(18u, store.epoch());
+  for (uint32_t i = 0; i < 8; ++i) EXPECT_EQ(Lookup::NotStored, lookup(kFirst + i)) << i;
+  for (uint32_t i = 8; i < stored + 2; ++i) EXPECT_TRUE(intact(kFirst + i)) << i;
+  // The head resumes in segment 0, right after its two glyphs.
+  ASSERT_EQ(Commit::Stored, commitOne(kFirst + stored + 2));
+  EXPECT_EQ(kSegmentHeaderBytes + 2 * recordSize(60, 60) + kRecordHeaderBytes, dataOffsetOf(kFirst + stored + 2));
+  // The tail is segment 2: a reclaim takes its four glyphs and nothing else.
+  reclaimTail();
+  for (uint32_t i = 8; i < 12; ++i) EXPECT_EQ(Lookup::NotStored, lookup(kFirst + i)) << i;
+  for (uint32_t i = 12; i < stored + 3; ++i) EXPECT_TRUE(intact(kFirst + i)) << i;
+}
+
+TEST_F(GlyphStoreRing, ARetiredSegmentBehindTheTailIsFreeAtOpen) {
+  // Ten full segments, then the three oldest reclaimed: the tail is segment 3.
+  for (uint32_t i = 0; i < 40; ++i) ASSERT_EQ(Commit::Stored, commitOne(kFirst + i)) << i;
+  for (uint32_t s = 0; s < 3; ++s) reclaimTail();
+  // Segment 3 is reclaimed in turn and the power fails between its retire word and its erase: its header and glyphs
+  // are whole, and the retire word alone says it left the ring.
+  const uint32_t segment3 = layout.geometry.logOffset + 3 * layout.geometry.segmentBytes;
+  const uint32_t retired = 0;
+  ASSERT_TRUE(flash.program(segment3 + offsetof(SegmentHeader, retired), &retired, sizeof retired));
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_EQ(6u, liveSegments());  // 4 to 9
+  EXPECT_EQ(11u, store.epoch());
+  EXPECT_EQ(6 * layout.geometry.segmentBytes - 400, store.logUsed());  // the head, segment 9, ends 400 bytes short
+  for (uint32_t i = 0; i < 16; ++i) EXPECT_EQ(Lookup::NotStored, lookup(kFirst + i)) << i;
+  for (uint32_t i = 16; i < 40; ++i) EXPECT_TRUE(intact(kFirst + i)) << i;
+  // The head goes round the free segments; segment 3, the last of them, is erased before it gets its new header.
+  const uint32_t sector = segment3 / kSectorBytes;
+  const uint32_t erases = flash.sectorErases(sector);
+  uint32_t n = 40;
+  do {
+    ASSERT_EQ(Commit::Stored, commitOne(kFirst + n)) << n;
+  } while (segmentOf(kFirst + n++) != 3 && n < 100);
+  EXPECT_EQ(77u, n);  // nine segments of four, then the first in segment 3
+  EXPECT_EQ(erases + 1, flash.sectorErases(sector));
+  expectHeader(3, 20);
+  for (uint32_t i = 16; i < n; ++i) EXPECT_TRUE(intact(kFirst + i)) << i;
 }
