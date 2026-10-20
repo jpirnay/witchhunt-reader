@@ -33,17 +33,6 @@ bool isTransportFailure(int rc) {
   return rc == C::ERR_CONNECT || rc == C::ERR_SEND || rc == C::ERR_TIMEOUT || rc == C::ERR_TRUNCATED;
 }
 
-bool isHttps(const std::string& url) {
-  static constexpr char SCHEME[] = "https://";
-  if (url.size() < sizeof(SCHEME) - 1) return false;
-  for (size_t i = 0; i + 1 < sizeof(SCHEME); ++i) {
-    char c = url[i];
-    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    if (c != SCHEME[i]) return false;
-  }
-  return true;
-}
-
 // Fetches url in Range requests, so that no response, and so no TLS record, is larger than a chunk
 // plus its headers (HttpRange.h has why and the sizing). Each request is sized from the largest free
 // block just before it, starting from firstLargest, which the caller measured, and never above the
@@ -252,7 +241,7 @@ int chunkedGet(SecureHttpClient& http, const std::string& url, DownloadSink& sin
 int downloadToSink(SecureHttpClient& http, const std::string& url, DownloadSink& sink, ChunkSession& session,
                    LargestFreeBlockFn largestFreeBlock) {
   if (!sink.rewind) return streamGet(http, url, sink);
-  if (!isHttps(url)) {
+  if (!C::isHttps(url)) {
     LOG_DBG("HTTP", "download mode: streamed (plain http)");
     return streamGet(http, url, sink);
   }
