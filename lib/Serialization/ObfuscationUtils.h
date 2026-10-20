@@ -47,6 +47,12 @@ std::string deviceKeyId();
 // Parses a dashed key id back into its 6 bytes. False on anything malformed.
 bool parseKeyId(const std::string& id, uint8_t key[6]);
 
+// Which reader obfuscated the passwords of a store file, going by the key id (deviceKeyId()) the
+// file records beside them. OtherReader fills writerKey: pass it to deobfuscateFromBase64().
+// Unknown (no id, or a malformed one) and ThisReader decode with this reader's key.
+enum class PasswordWriter : uint8_t { Unknown, ThisReader, OtherReader };
+PasswordWriter passwordWriter(const std::string& writerKeyId, uint8_t writerKey[6]);
+
 // Self-test: verifies round-trip obfuscation with hardware key. Logs PASS/FAIL.
 void selfTest();
 

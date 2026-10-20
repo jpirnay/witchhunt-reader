@@ -120,6 +120,11 @@ bool parseKeyId(const std::string& id, uint8_t key[6]) {
   return true;
 }
 
+PasswordWriter passwordWriter(const std::string& writerKeyId, uint8_t writerKey[HW_KEY_LEN]) {
+  if (!parseKeyId(writerKeyId, writerKey)) return PasswordWriter::Unknown;
+  return std::memcmp(writerKey, getHwKey(), HW_KEY_LEN) == 0 ? PasswordWriter::ThisReader : PasswordWriter::OtherReader;
+}
+
 void selfTest() {
   const char* testInputs[] = {"", "hello", "WiFi P@ssw0rd!", "a"};
   bool allPassed = true;

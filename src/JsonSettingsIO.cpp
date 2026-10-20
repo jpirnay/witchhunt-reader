@@ -597,11 +597,9 @@ bool JsonSettingsIO::loadWifi(WifiCredentialStore& store, const char* json, bool
   // wifi.json) is therefore read with the writer's key and re-saved under ours. Read with ours it
   // gave passwords of the right length and the wrong bytes, which the router rejects as a 4-way
   // handshake timeout - indistinguishable from a weak signal on the device.
-  uint8_t ownKey[6];
   uint8_t writerKey[6];
-  const bool fromOtherReader = obfuscation::parseKeyId(obfuscation::deviceKeyId(), ownKey) &&
-                               obfuscation::parseKeyId(store.lastKnownMacAddress, writerKey) &&
-                               std::memcmp(ownKey, writerKey, sizeof(ownKey)) != 0;
+  const bool fromOtherReader =
+      obfuscation::passwordWriter(store.lastKnownMacAddress, writerKey) == obfuscation::PasswordWriter::OtherReader;
   if (fromOtherReader) {
     LOG_INF("WCS", "wifi.json was written by reader %s; re-keying its passwords for this one",
             store.lastKnownMacAddress.c_str());
