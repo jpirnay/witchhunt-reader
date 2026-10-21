@@ -34,9 +34,9 @@
 #include "util/UrlUtils.h"
 
 namespace {
-// The catalog draws CATALOG_ROW_HEIGHT rows from CATALOG_LIST_TOP down to the foot of the content
-// area; catalogRowsPerPage() turns that into the page both the render and paging use.
-constexpr int CATALOG_LIST_TOP = 60;
+// The catalog draws CATALOG_ROW_HEIGHT rows from the top of the body below the header
+// (UITheme::getBodyRect) down to its foot; catalogRowsPerPage() turns that into the page both the
+// render and paging use.
 constexpr int CATALOG_ROW_HEIGHT = 30;
 // Entries reserved before a fetch: about one portrait page, plus the prev/next navigation entries.
 constexpr size_t FEED_RESERVE_ENTRIES = 25;
@@ -64,10 +64,10 @@ void removeCoverFiles() {
   if (Storage.exists(OPDS_COVER_BMP)) Storage.remove(OPDS_COVER_BMP);
 }
 
-int formatItemsPerPage(const Rect& contentRect) {
-  const int midY = contentRect.y + contentRect.height / 2;
+int formatItemsPerPage(const Rect& body) {
+  const int midY = body.y + body.height / 2;
   const int listTop = midY + FORMAT_LIST_TOP_OFFSET;
-  const int listBottom = contentRect.y + contentRect.height - FORMAT_LIST_BOTTOM_PADDING;
+  const int listBottom = body.y + body.height - FORMAT_LIST_BOTTOM_PADDING;
   const int rawAvailableHeight = listBottom - listTop;
   const int availableHeight = rawAvailableHeight > FORMAT_ITEM_HEIGHT ? rawAvailableHeight : FORMAT_ITEM_HEIGHT;
   const int itemsPerPage = availableHeight / FORMAT_ITEM_HEIGHT;
@@ -424,8 +424,7 @@ bool OpdsBookBrowserActivity::preventAutoSleep() {
 }
 
 int OpdsBookBrowserActivity::catalogRowsPerPage() const {
-  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
-  const int rows = (contentRect.y + contentRect.height - CATALOG_LIST_TOP) / CATALOG_ROW_HEIGHT;
+  const int rows = UITheme::getBodyRect(renderer, true, true).height / CATALOG_ROW_HEIGHT;
   return std::max(1, std::min(rows, ListTouchBand::kMaxRows));
 }
 
@@ -519,12 +518,14 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   // The two lists, the catalog and the format picker, label their side buttons; every other state
   // uses Back and Confirm alone, so it keeps the full width.
   const bool showsList = state == BrowserState::BROWSING || state == BrowserState::FORMAT_SELECTION;
-  const Rect contentRect = UITheme::getContentRect(renderer, true, showsList);
-  const int midY = contentRect.y + contentRect.height / 2;
+  // Every state draws below the theme header, so nothing here sits at a y of its own: a constant
+  // one ends up inside the header once the header outgrows it (Lyra, a larger UI font).
+  const Rect body = UITheme::getBodyRect(renderer, true, showsList);
+  const int midY = body.y + body.height / 2;
 
   // Show server name in header if available, otherwise generic title
   const char* headerTitle = server.name.empty() ? tr(STR_OPDS_BROWSER) : server.name.c_str();
-  renderer.drawCenteredText(UI_12_FONT_ID, 15, headerTitle, true, EpdFontFamily::BOLD);
+  GUI.drawHeader(renderer, UITheme::getHeaderRect(renderer, true, showsList), headerTitle);
 
   if (state == BrowserState::CHECK_WIFI) {
     renderer.drawCenteredText(UI_10_FONT_ID, midY, statusMessage.c_str());
@@ -554,12 +555,12 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   if (state == BrowserState::DOWNLOADING) {
     renderer.drawCenteredText(UI_10_FONT_ID, midY - 40, tr(STR_DOWNLOADING));
     // Trim long titles to keep them within the content bounds.
-    auto title = renderer.truncatedText(UI_10_FONT_ID, statusMessage.c_str(), contentRect.width - 40);
+    auto title = renderer.truncatedText(UI_10_FONT_ID, statusMessage.c_str(), body.width - 40);
     renderer.drawCenteredText(UI_10_FONT_ID, midY - 10, title.c_str());
     if (downloadTotal > 0) {
-      const int barWidth = contentRect.width - 100;
+      const int barWidth = body.width - 100;
       constexpr int barHeight = 20;
-      const int barX = contentRect.x + 50;
+      const int barX = body.x + 50;
       const int barY = midY + 20;
       GUI.drawProgressBar(renderer, Rect{barX, barY, barWidth, barHeight}, downloadProgress, downloadTotal);
     }
@@ -571,15 +572,15 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
 
   if (state == BrowserState::FORMAT_SELECTION) {
     const auto entry = getEntry(selectedBookIndex);
-    auto title = renderer.truncatedText(UI_10_FONT_ID, entry.title.c_str(), contentRect.width - 40);
+    auto title = renderer.truncatedText(UI_10_FONT_ID, entry.title.c_str(), body.width - 40);
     renderer.drawCenteredText(UI_10_FONT_ID, midY - 40, title.c_str(), true, EpdFontFamily::BOLD);
     if (!entry.author.empty()) {
-      auto author = renderer.truncatedText(UI_10_FONT_ID, entry.author.c_str(), contentRect.width - 40);
+      auto author = renderer.truncatedText(UI_10_FONT_ID, entry.author.c_str(), body.width - 40);
       renderer.drawCenteredText(UI_10_FONT_ID, midY - 10, author.c_str());
     }
 
     const int listTop = midY + 20;
-    const int itemsPerPage = formatItemsPerPage(contentRect);
+    const int itemsPerPage = formatItemsPerPage(body);
     formatPageRows.store(itemsPerPage);
     const int pageStartIndex = formatSelectorIndex / itemsPerPage * itemsPerPage;
     formatTop.store(pageStartIndex);
@@ -587,16 +588,16 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     // only one is on screen at a time; the recorders are cleared at the top of each render pass,
     // so whichever state painted last is the only one a tap can reach.
     ListTouchBand::recordUniformRows(
-        contentRect.x, contentRect.width - 1, listTop - 2, FORMAT_ITEM_HEIGHT, pageStartIndex,
+        body.x, body.width - 1, listTop - 2, FORMAT_ITEM_HEIGHT, pageStartIndex,
         std::min(itemsPerPage, static_cast<int>(entry.acquisitionLinks.size()) - pageStartIndex));
-    renderer.fillRect(contentRect.x, listTop + (formatSelectorIndex - pageStartIndex) * FORMAT_ITEM_HEIGHT - 2,
-                      contentRect.width - 1, FORMAT_ITEM_HEIGHT);
+    renderer.fillRect(body.x, listTop + (formatSelectorIndex - pageStartIndex) * FORMAT_ITEM_HEIGHT - 2, body.width - 1,
+                      FORMAT_ITEM_HEIGHT);
     for (int i = pageStartIndex;
          i < static_cast<int>(entry.acquisitionLinks.size()) && i < pageStartIndex + itemsPerPage; i++) {
       const char* label = i < static_cast<int>(formatSelectionLabels.size()) ? formatSelectionLabels[i].c_str() : "";
-      auto item = renderer.truncatedText(UI_10_FONT_ID, label, contentRect.width - 40);
-      renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, listTop + (i - pageStartIndex) * FORMAT_ITEM_HEIGHT,
-                        item.c_str(), i != formatSelectorIndex);
+      auto item = renderer.truncatedText(UI_10_FONT_ID, label, body.width - 40);
+      renderer.drawText(UI_10_FONT_ID, body.x + 20, listTop + (i - pageStartIndex) * FORMAT_ITEM_HEIGHT, item.c_str(),
+                        i != formatSelectorIndex);
     }
 
     formatList.drawHints(renderer, tr(STR_BACK), tr(STR_DOWNLOAD));
@@ -607,7 +608,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   if (state == BrowserState::BOOK_DETAIL) {
     const auto entry = getEntry(selectorIndex);
     const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
-    const int fmtY = contentRect.y + contentRect.height - lineH - 4;
+    const int fmtY = body.y + body.height - lineH - 4;
 
     // Cover: draw on the left if available
     int coverColW = 0;
@@ -616,14 +617,14 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
       if (Storage.openFileForRead("OPDS", OPDS_COVER_BMP, bmpFile)) {
         Bitmap bmp(bmpFile);
         if (bmp.parseHeaders() == BmpReaderError::Ok && bmp.getWidth() > 0 && bmp.getHeight() > 0) {
-          const int coverAreaH = fmtY - 35 - 4;
+          const int coverAreaH = fmtY - body.y - 4;
           int coverH = std::min(bmp.getHeight(), coverAreaH);
           int coverW = bmp.getWidth() * coverH / bmp.getHeight();
-          if (coverW > contentRect.width / 3) {
-            coverW = contentRect.width / 3;
+          if (coverW > body.width / 3) {
+            coverW = body.width / 3;
             coverH = bmp.getHeight() * coverW / bmp.getWidth();
           }
-          renderer.drawBitmap(bmp, contentRect.x, 35, coverW, coverH);
+          renderer.drawBitmap(bmp, body.x, body.y, coverW, coverH);
           coverColW = coverW + 6;
         }
         bmpFile.close();
@@ -631,9 +632,9 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     }
 
     // Text column (right of cover, or full width)
-    const int textX = contentRect.x + coverColW + 10;
-    const int textW = contentRect.width - coverColW - 20;
-    int y = 35;
+    const int textX = body.x + coverColW + 10;
+    const int textW = body.width - coverColW - 20;
+    int y = body.y;
 
     auto title = renderer.truncatedText(UI_10_FONT_ID, entry.title.c_str(), textW, EpdFontFamily::BOLD);
     renderer.drawText(UI_10_FONT_ID, textX, y, title.c_str(), true, EpdFontFamily::BOLD);
@@ -645,7 +646,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
       y += lineH + 2;
     }
 
-    renderer.drawLine(contentRect.x + coverColW, y, contentRect.x + contentRect.width - 1, y);
+    renderer.drawLine(body.x + coverColW, y, body.x + body.width - 1, y);
     y += 5;
 
     if (!entry.summary.empty()) {
@@ -665,11 +666,11 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
         if (!fmts.empty()) fmts += " · ";
         fmts += link.formatKey;
       }
-      auto fmtsStr = renderer.truncatedText(UI_10_FONT_ID, fmts.c_str(), contentRect.width - 20);
+      auto fmtsStr = renderer.truncatedText(UI_10_FONT_ID, fmts.c_str(), body.width - 20);
       renderer.drawCenteredText(UI_10_FONT_ID, fmtY, fmtsStr.c_str());
     } else {
       // Offered only in formats the reader cannot open (see OpdsEntry::acquisitionLinks).
-      auto note = renderer.truncatedText(UI_10_FONT_ID, tr(STR_FORMAT_NOT_SUPPORTED), contentRect.width - 20);
+      auto note = renderer.truncatedText(UI_10_FONT_ID, tr(STR_FORMAT_NOT_SUPPORTED), body.width - 20);
       renderer.drawCenteredText(UI_10_FONT_ID, fmtY, note.c_str());
     }
 
@@ -695,13 +696,12 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
   catalogPageRows.store(rowsPerPage);
   const auto pageStartIndex = selectorIndex / rowsPerPage * rowsPerPage;
   catalogTop.store(pageStartIndex);
-  // Entry rows published for touch. The top is a bare CATALOG_LIST_TOP, NOT contentRect.y + it as
-  // the chapter selectors use — matched to the fill below, which is where the row visibly is.
-  ListTouchBand::recordUniformRows(contentRect.x, contentRect.width - 1, CATALOG_LIST_TOP - 2, CATALOG_ROW_HEIGHT,
-                                   pageStartIndex,
+  // Entry rows published for touch, from the same top as the fill below, which is where the row
+  // visibly is.
+  ListTouchBand::recordUniformRows(body.x, body.width - 1, body.y - 2, CATALOG_ROW_HEIGHT, pageStartIndex,
                                    std::min<int>(rowsPerPage, static_cast<int>(entryOffsets.size()) - pageStartIndex));
-  renderer.fillRect(contentRect.x, CATALOG_LIST_TOP + (selectorIndex % rowsPerPage) * CATALOG_ROW_HEIGHT - 2,
-                    contentRect.width - 1, CATALOG_ROW_HEIGHT);
+  renderer.fillRect(body.x, body.y + (selectorIndex % rowsPerPage) * CATALOG_ROW_HEIGHT - 2, body.width - 1,
+                    CATALOG_ROW_HEIGHT);
 
   for (size_t i = pageStartIndex; i < entryOffsets.size() && i < static_cast<size_t>(pageStartIndex + rowsPerPage);
        i++) {
@@ -723,9 +723,9 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
       }
     }
 
-    auto item = renderer.truncatedText(UI_10_FONT_ID, displayText.c_str(), contentRect.width - 40);
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, CATALOG_LIST_TOP + (i % rowsPerPage) * CATALOG_ROW_HEIGHT,
-                      item.c_str(), i != static_cast<size_t>(selectorIndex));
+    auto item = renderer.truncatedText(UI_10_FONT_ID, displayText.c_str(), body.width - 40);
+    renderer.drawText(UI_10_FONT_ID, body.x + 20, body.y + (i % rowsPerPage) * CATALOG_ROW_HEIGHT, item.c_str(),
+                      i != static_cast<size_t>(selectorIndex));
   }
 
   drawFormatNotice();
