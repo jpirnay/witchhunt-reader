@@ -24,6 +24,7 @@
 #include "EpubReaderActivity.h"
 #include "KOReaderCredentialStore.h"
 #include "MdReaderActivity.h"
+#include "ReaderUtils.h"
 #include "SdCardFontGlobals.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
@@ -857,6 +858,10 @@ void ReaderActivity::onGoToMdReader(std::unique_ptr<Txt> txt) {
 
 void ReaderActivity::onEnter() {
   Activity::onEnter();
+  // Before anything here can paint: the "Loading font" and "Indexing..." popups with the latter's progress bar, the
+  // XTC "Loading" screen. The reader it hands to is only queued (replaceActivity() defers while this one runs), so
+  // the HALF is armed again before that reader's first frame.
+  const ReaderUtils::BookOpenRefreshHold bookOpenRefresh(renderer);
   logReaderLaunchMemSnapshot("onEnter_begin");
   // Start the wake-to-page trace. Whether this open is a deep-sleep resume was latched by
   // setup() (WakeTrace::armResume) rather than read from APP_STATE here — see armResume().
