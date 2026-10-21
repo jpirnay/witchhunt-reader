@@ -87,9 +87,66 @@ TEST(TtfFamily, ACffFontMissingATableTheEngineNeedsIsRefused) {
     font[record] = 'X';
     EXPECT_EQ(-1, probe(font)) << table;
   }
-  // glyf and loca are TrueType's; a CFF font does not need them.
-  Bytes withGlyf = readFont("OpenDyslexic/OpenDyslexic-Regular.otf");
-  EXPECT_EQ(0, probe(withGlyf));
+  // glyf and loca are TrueType's; a CFF font does not need them, and lists with them too.
+  EXPECT_EQ(0, probe(readFont("OpenDyslexic/OpenDyslexic-Regular.otf")));
+}
+
+namespace {
+
+// A copy of the OpenDyslexic font whose GDEF and GPOS records are renamed `first` and `second`.
+Bytes cffFontWithRecords(const char* first, const char* second) {
+  Bytes font = readFont("OpenDyslexic/OpenDyslexic-Regular.otf");
+  std::memcpy(font.data() + findRecord(font, "GDEF"), first, 4);
+  std::memcpy(font.data() + findRecord(font, "GPOS"), second, 4);
+  return font;
+}
+
+// A TrueType font with a "CFF " record of `length` bytes at `offset`.
+Bytes trueTypeFontWithCffRecord(const uint32_t offset, const uint32_t length) {
+  Font font;
+  font.glyphs.resize(1);
+  font.glyphs[0].contours = {rect(0, 0, 64, 64)};
+  font.extraTables = {{"CFF ", Bytes(16, 0)}};
+  Bytes bytes = buildFont(font);
+  set32(bytes, findRecord(bytes, "CFF ") + 8, offset);
+  set32(bytes, findRecord(bytes, "CFF ") + 12, length);
+  return bytes;
+}
+
+}  // namespace
+
+TEST(TtfFamily, ATrueTypeFontWithACffRecordIsStillListed) {
+  // parseFace() reads a TrueType font's glyf and loca whatever else the directory holds.
+  Font font;
+  font.glyphs.resize(1);
+  font.glyphs[0].contours = {rect(0, 0, 64, 64)};
+  font.extraTables = {{"CFF ", Bytes(16, 0)}};
+  EXPECT_EQ(0, probe(buildFont(font)));
+}
+
+TEST(TtfFamily, ACffFontWithGlyfAndLocaRecordsIsListed) {
+  const Bytes font = cffFontWithRecords("glyf", "loca");
+  EXPECT_NE(0u, findRecord(font, "glyf"));
+  EXPECT_NE(0u, findRecord(font, "loca"));
+  EXPECT_EQ(0, probe(font));
+  MemoryFile file{font};
+  EXPECT_NE(UINT32_MAX, ttf::probeFile(file.source()).sdBytes) << "its SD-mode block is still planned";
+}
+
+TEST(TtfFamily, AnOutOfFileRecordTheKindDoesNotNeedDoesNotRefuse) {
+  const uint32_t past = 1u << 30;
+  // TrueType with a CFF record outside the file: the CFF table is not read.
+  EXPECT_EQ(0, probe(trueTypeFontWithCffRecord(past, 16)));
+  EXPECT_EQ(0, probe(trueTypeFontWithCffRecord(0, past)));
+  // CFF with glyf and loca records outside the file.
+  Bytes font = cffFontWithRecords("glyf", "loca");
+  set32(font, findRecord(font, "glyf") + 8, past);
+  set32(font, findRecord(font, "loca") + 12, past);
+  EXPECT_EQ(0, probe(font));
+  // What the kind does need still refuses.
+  Bytes noGlyf = builtFont();
+  set32(noGlyf, findRecord(noGlyf, "glyf") + 8, past);
+  EXPECT_EQ(-1, probe(noGlyf));
 }
 
 TEST(TtfFamily, ACffTableOutsideTheFileIsRefused) {

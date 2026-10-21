@@ -188,6 +188,7 @@ FileProbe probeFile(const FileSource& file) {
   struct Scan {
     const FileSource& file;
     FileProbe probe;
+    uint32_t version = 0;  ///< the sfnt version, known before the first record
     uint32_t found = 0;
     uint32_t headOffset = 0;
     uint32_t os2Offset = 0;
@@ -197,9 +198,9 @@ FileProbe probeFile(const FileSource& file) {
     uint32_t sdTables = 0;
     uint64_t sdTableBytes = 0;
   } scan{file};
-  uint32_t version = 0;
   const auto visit = [](void* ctx, const Record& record) {
     Scan& scan = *static_cast<Scan*>(ctx);
+    const uint32_t needed = scan.version == kVersionCff ? kRequiredCff : kRequiredTrueType;
     if (record.tag == tag("fvar")) scan.probe.variable = true;
     const int sd = sdTable(kSdTrueType, record.tag, scan.sdSeen);
     if (sd >= 0 && sd != kSdTrueType.outlines && inFile(scan.file, record.offset, record.length)) {
@@ -217,6 +218,9 @@ FileProbe probeFile(const FileSource& file) {
     }
     for (uint32_t k = 0; k < sizeof kRequired / sizeof kRequired[0]; ++k) {
       if (record.tag != kRequired[k]) continue;
+      // The other kind's tables are not read: parseFace() takes them as absent when their record lies outside the file,
+      // and does not look at them when it lies inside.
+      if (!(needed >> k & 1u)) continue;
       if (!inFile(scan.file, record.offset, record.length)) return false;
       if (record.tag == tag("head")) {
         if (record.length < kHeadBytes) return false;
@@ -226,9 +230,10 @@ FileProbe probeFile(const FileSource& file) {
     }
     return true;
   };
-  if (forEachTable(file, &version, visit, &scan) != Walk::Done) return {};
-  const bool cff = version == kVersionCff;
-  if (scan.found != (cff ? kRequiredCff : kRequiredTrueType) || (cff && scan.cff2)) return {};
+  if (forEachTable(file, &scan.version, visit, &scan) != Walk::Done) return {};
+  const bool cff = scan.version == kVersionCff;
+  const uint32_t needed = cff ? kRequiredCff : kRequiredTrueType;
+  if ((scan.found & needed) != needed || (cff && scan.cff2)) return {};
   FileProbe& probe = scan.probe;
   const uint32_t headOffset = scan.headOffset;
   if (!cff) {
