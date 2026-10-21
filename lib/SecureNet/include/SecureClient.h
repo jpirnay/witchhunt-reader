@@ -14,10 +14,11 @@
 //
 // Cert policy (WitchReader): verified-first. connect() verifies the peer against
 // the curated root set (see CrossPointRoots.h). On a *verification-class*
-// failure it optionally logs a warning and retries once with verification
-// disabled (setAllowInsecureFallback(true), the default). Non-verification
-// failures (DNS/TCP/handshake) never trigger the insecure retry. OTA disables
-// the fallback so firmware download always fails closed.
+// failure it can log the fact and retry once with verification disabled
+// (setAllowInsecureFallback(true); off by default, and only HttpDownloader's
+// TlsPolicy::VerifiedThenUnverified turns it on, for requests without
+// credentials). Non-verification failures (DNS/TCP/handshake) never trigger
+// the insecure retry.
 //
 // OPT-IN: enable with -DFREEINK_NET_WOLFSSL=1 and add wolfSSL to lib_deps. With
 // the flag off, this compiles to an inert stub (connect() returns 0) so the
@@ -44,8 +45,8 @@ class SecureClient : public Client {
   // lastConnectWasInsecure() reports it. Takes a bool because the client is reused
   // across requests, so the caller must be able to turn it back off.
   void setInsecure(bool insecure = true) { _insecure = insecure; }
-  // When true (default) and a CA is set, a verification-class handshake failure
-  // is retried once with verification disabled (logged). OTA sets this false.
+  // When true and a CA is set, a verification-class handshake failure is retried
+  // once with verification disabled (logged). Off by default: fail closed.
   void setAllowInsecureFallback(bool allow) { _allowInsecureFallback = allow; }
   // Keep CA-chain, signature, and hostname verification enabled, but tolerate certificate
   // notBefore/notAfter errors because the device has no trustworthy wall clock. Unlike the
@@ -101,7 +102,7 @@ class SecureClient : public Client {
   WiFiClient _transport;
   const char* _rootCA = nullptr;
   bool _insecure = false;
-  bool _allowInsecureFallback = true;
+  bool _allowInsecureFallback = false;
   bool _allowCertificateDateErrors = false;
   bool _lastWasInsecure = false;
   int _lastConnectErr = 0;                 // wolfSSL_get_error() from the last failed handshake

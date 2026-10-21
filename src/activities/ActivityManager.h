@@ -238,7 +238,8 @@ class ActivityManager {
   bool isReaderActivity() const;
   // True only while the reader itself is on top: the one case every configured reader action is
   // delivered (see currentTakesButtonAction()). A list opened from the reader answers false here
-  // but true above.
+  // but true above. witchling-reader commit babb8050 (syfq91, isCurrentReaderActivity()) made the
+  // same split ten days earlier, for the bug syfq91 then reported here as issue #350.
   bool currentIsReaderActivity() const;
   bool skipLoopDelay() const;
 

@@ -86,7 +86,7 @@ bool SecureHttpClient::credentialsFollow(Url& scope, const Url& hop, int index) 
   if (sameCredentialOrigin(scope, hop)) return true;
   // Logged at the redirect that leaves scope. A request that starts outside a pinned scope (each
   // later chunk of a download) is that decision again, and stays quiet.
-  if (index > 0 && ((!_user.empty() && !_pass.empty()) || !_headers.empty())) {
+  if (index > 0 && holdsCredentials()) {
     LOG_DBG("HTTP", "%s://%s:%u is not %s://%s:%u, where the credentials belong: sent without them", hop.scheme.c_str(),
             hop.host.c_str(), static_cast<unsigned>(hop.port), scope.scheme.c_str(), scope.host.c_str(),
             static_cast<unsigned>(scope.port));
@@ -108,19 +108,29 @@ bool SecureHttpClient::connectionMatches(const Url& u) {
   return _client && _client->connected() && _connectedHttps == u.https() && _connHost == u.host && _connPort == u.port;
 }
 
-bool SecureHttpClient::ensureConnected(const Url& u) {
+bool SecureHttpClient::ensureConnected(const Url& u, const bool sendsCredentials) {
   // Reuse a matching kept-open connection.
   if (connectionMatches(u)) return true;
   close();
 
   if (u.https()) {
-    _secure.setCACert(_rootCA);
+    // Decided for the server this connect reaches, not the one the request started at: a redirect
+    // to another server, or from http to https, is checked against the memo and recorded in it
+    // under that server's own name, the one SecureClient's fallback line logs.
+    const std::string peer = tlsPeer(u.host, u.port);
+    const TlsPlan hop = planHop(TlsPlan{_rootCA != nullptr, _allowInsecureFallback}, sendsCredentials,
+                                _unverifiableHosts != nullptr && _unverifiableHosts->contains(peer));
+    if (_rootCA != nullptr && !hop.verify) {
+      LOG_INF("TLS", "%s: certificate not verifiable earlier this session, continuing unverified (no credentials)",
+              peer.c_str());
+    }
+    _secure.setCACert(hop.verify ? _rootCA : nullptr);
     // No trust store means the caller asked for an unverified connection. Say so
     // explicitly rather than letting connect() take the verified path and quietly
     // find nothing to verify against: this is what makes lastConnectWasInsecure()
     // — and every log line derived from it — tell the truth.
-    _secure.setInsecure(_rootCA == nullptr);
-    _secure.setAllowInsecureFallback(_allowInsecureFallback);
+    _secure.setInsecure(!hop.verify);
+    _secure.setAllowInsecureFallback(hop.fallbackOnVerifyError);
     _secure.setAllowCertificateDateErrors(_allowCertificateDateErrors);
     _secure.setTimeout(_timeoutMs / 1000);
     if (!_secure.connect(u.host.c_str(), u.port)) {
@@ -128,6 +138,7 @@ bool SecureHttpClient::ensureConnected(const Url& u) {
       return false;
     }
     _lastInsecure = _secure.lastConnectWasInsecure();
+    if (hop.fallbackOnVerifyError && _lastInsecure && _unverifiableHosts != nullptr) _unverifiableHosts->add(peer);
     _client = &_secure;
     _connectedHttps = true;
   } else {
@@ -148,7 +159,8 @@ bool SecureHttpClient::ensureConnected(const Url& u) {
 bool SecureHttpClient::open(const std::string& url) {
   Url u;
   if (!parseUrl(url, u)) return false;
-  return ensureConnected(u);
+  // Whether the request that follows sends the credentials here is not known yet: assume it does.
+  return ensureConnected(u, holdsCredentials());
 }
 
 void SecureHttpClient::noteResponse(const ResponseMeta& meta, const std::string& url) {
@@ -218,7 +230,7 @@ int SecureHttpClient::transact(const char* method, const Url& u, const uint8_t* 
     _trace.reusedConnection = reusing;
     _trace.attempts = static_cast<uint8_t>(attempt + 1);
     const uint32_t connectStartMs = millis();
-    if (!ensureConnected(u)) {
+    if (!ensureConnected(u, credentials && holdsCredentials())) {
       logRequestTrace(method, u, ERR_CONNECT);
       return ERR_CONNECT;
     }

@@ -18,10 +18,61 @@ size_t trimmedHrefLength(const char* href) {
 
 std::string_view trimmedHrefView(const char* href) { return std::string_view{href, trimmedHrefLength(href)}; }
 
+// The publication itself: rel="http://opds-spec.org/acquisition", or its "/open-access" form. The
+// other acquisition rels (buy, borrow, subscribe, sample) mostly lead to a shop or loan page.
+bool isDirectAcquisitionRel(const char* rel) {
+  static constexpr char kAcquisition[] = "opds-spec.org/acquisition";
+  const char* at = strstr(rel, kAcquisition);
+  if (at == nullptr) return false;
+  const char* tail = at + sizeof(kAcquisition) - 1;
+  return tail[0] == '\0' || strcmp(tail, "/open-access") == 0;
+}
+
+// What a file name says about a download whose link names no format. Longer suffixes first.
+struct NamedFormat {
+  const char* suffix;
+  const char* mimeType;
+  const char* formatKey;
+  const char* fileExtension;
+};
+constexpr NamedFormat kNamedFormats[] = {
+    {".kepub.epub", "application/epub+zip", "kepub", ".kepub.epub"},
+    {".kepub", "application/epub+zip", "kepub", ".kepub.epub"},
+    {".epub", "application/epub+zip", "epub", ".epub"},
+    {".txt", "text/plain", "txt", ".txt"},
+    {".md", "text/markdown", "md", ".md"},
+    {".xtc", "application/vnd.xteink.xtc", "xtc", ".xtc"},
+    {".xtch", "application/vnd.xteink.xtch", "xtch", ".xtch"},
+    {".xth", "application/vnd.xteink.xtch", "xtch", ".xtch"},
+};
+
+// The format of a download whose link names none (no type, an empty one, or the generic
+// application/octet-stream), read from the file name its href ends in.
+OpdsAcquisitionLink acquisitionLinkFromFileName(const char* href) {
+  std::string_view name{href};
+  name = name.substr(0, name.find_first_of("?#"));
+  while (!name.empty() && name.back() == '/') name.remove_suffix(1);
+  for (const auto& format : kNamedFormats) {
+    if (FsHelpers::checkFileExtension(name, format.suffix)) {
+      return {href, format.mimeType, format.formatKey, format.fileExtension};
+    }
+  }
+  return {};
+}
+
 // Returns an OpdsAcquisitionLink if the type and href correspond to a supported
-// acquisition format, otherwise returns an empty OpdsAcquisitionLink.
-OpdsAcquisitionLink supportedAcquisitionLink(const char* type, const char* href) {
-  if (!type || !href || type[0] == '\0' || href[0] == '\0') {
+// acquisition format, otherwise returns an empty OpdsAcquisitionLink. A direct
+// download whose type names no format is judged by its file name instead.
+OpdsAcquisitionLink supportedAcquisitionLink(const char* type, const char* href, const bool directDownload) {
+  if (!href || href[0] == '\0') {
+    return {};
+  }
+  const bool typed = type && type[0] != '\0';
+  if (directDownload && (!typed || strcmp(type, "application/octet-stream") == 0)) {
+    OpdsAcquisitionLink fromName = acquisitionLinkFromFileName(href);
+    if (!fromName.formatKey.empty()) return fromName;
+  }
+  if (!typed) {
     return {};
   }
 
@@ -107,13 +158,14 @@ void OpdsParser::flush() {
 bool OpdsParser::error() const { return errorOccured; }
 
 void OpdsParser::clear() {
-  searchTemplate.clear();
+  searchTemplates.clear();
   osdUrl.clear();
   nextPageUrl.clear();
   prevPageUrl.clear();
   currentEntry = OpdsEntry{};
   currentText.clear();
   inEntry = inTitle = inAuthor = inAuthorName = inId = inSummary = inContent = false;
+  hrefIsUnsupportedDownload = false;
 }
 
 const char* OpdsParser::findAttribute(const char** atts, const char* name) {
@@ -133,39 +185,51 @@ void OpdsParser::startElement(void* userData, const char* name, const char** att
       const char* type = findAttribute(atts, "type");
 
       if (rel && strcmp(rel, "search") == 0) {
-        std::string sHref(href);
-        if (sHref.find("{searchTerms}") != std::string::npos) {
-          self->searchTemplate = sHref;
+        if (strstr(href, "{searchTerms}") != nullptr) {
+          // The rule of an OpenSearch description's templates: Atom first, never HTML or JSON.
+          self->searchTemplates.offer(href, type);
         } else if (type && strcmp(type, "application/opensearchdescription+xml") == 0) {
-          self->osdUrl = sHref;
+          self->osdUrl = href;
         }
       } else if (rel && strcmp(rel, "next") == 0 && !self->inEntry) {
         self->nextPageUrl = href;
-      } else if (rel && strcmp(rel, "previous") == 0 && !self->inEntry) {
+      } else if (rel && (strcmp(rel, "previous") == 0 || strcmp(rel, "prev") == 0) && !self->inEntry) {
+        // The IANA link relations list "prev" beside "previous", and some catalogs use only that.
+        // From witchling-reader commit 18e5f3b1 (syfq91).
         self->prevPageUrl = href;
       }
 
       if (self->inEntry) {
         if (rel && strstr(rel, "opds-spec.org/acquisition") != nullptr) {
-          const auto acquisition = supportedAcquisitionLink(type, href);
+          const bool directDownload = isDirectAcquisitionRel(rel);
+          const auto acquisition = supportedAcquisitionLink(type, href, directDownload);
           if (!acquisition.formatKey.empty() && !hasEquivalentAcquisitionLink(self->currentEntry, acquisition)) {
             self->currentEntry.type = OpdsEntryType::BOOK;
             if (self->currentEntry.acquisitionLinks.empty()) {
               self->currentEntry.href = href;
+              self->hrefIsUnsupportedDownload = false;
             } else if (self->currentEntry.acquisitionLinks.size() == 1 &&
                        self->currentEntry.acquisitionLinks.capacity() < 3) {
               self->currentEntry.acquisitionLinks.reserve(3);
             }
             self->currentEntry.acquisitionLinks.push_back(acquisition);
+          } else if (acquisition.formatKey.empty() && directDownload && self->currentEntry.href.empty()) {
+            // A download in a format the reader cannot open (PDF, MOBI, ...). Its href holds the
+            // entry's place until a link the reader can follow turns up; endElement() decides.
+            self->currentEntry.href = href;
+            self->hrefIsUnsupportedDownload = true;
           }
-        } else if (rel && type && strstr(rel, "opds-spec.org/image") != nullptr &&
-                   strstr(rel, "thumbnail") == nullptr && strncmp(type, "image/", 6) == 0 &&
+        } else if (rel && strstr(rel, "opds-spec.org/image") != nullptr && strstr(rel, "thumbnail") == nullptr &&
+                   (!type || type[0] == '\0' || strncmp(type, "image/", 6) == 0) &&
                    self->currentEntry.imageHref.empty()) {
+          // Some servers leave type= off their cover links; only a type that is not an image rules
+          // one out. From witchling-reader commit 111f6ecc (syfq91).
           self->currentEntry.imageHref = href;
         } else if (type && strstr(type, "application/atom+xml") != nullptr) {
           if (self->currentEntry.type != OpdsEntryType::BOOK) {
             self->currentEntry.type = OpdsEntryType::NAVIGATION;
             self->currentEntry.href = href;
+            self->hrefIsUnsupportedDownload = false;
           }
         }
       }
@@ -175,6 +239,7 @@ void OpdsParser::startElement(void* userData, const char* name, const char** att
   if (strcmp(name, "entry") == 0 || strstr(name, ":entry") != nullptr) {
     self->inEntry = true;
     self->currentEntry = OpdsEntry{};
+    self->hrefIsUnsupportedDownload = false;
     return;
   }
 
@@ -204,6 +269,15 @@ void OpdsParser::endElement(void* userData, const char* name) {
   auto* self = static_cast<OpdsParser*>(userData);
 
   if (strcmp(name, "entry") == 0 || strstr(name, ":entry") != nullptr) {
+    if (self->hrefIsUnsupportedDownload) {
+      // Its only downloads are in formats the reader cannot open, and it links nowhere else. It
+      // stays in the list as a book without acquisition links, which the browser shows as "Format
+      // not supported", instead of vanishing from the catalog. A navigation link always wins: a
+      // series entry with a shop link must stay a series. After witchling-reader commit 111f6ecc
+      // (syfq91), whose version also turned such navigation entries into books.
+      self->currentEntry.type = OpdsEntryType::BOOK;
+      self->hrefIsUnsupportedDownload = false;
+    }
     if (!self->currentEntry.title.empty() && !self->currentEntry.href.empty()) {
       if (self->onEntryParsed) {
         self->onEntryParsed(std::move(self->currentEntry));

@@ -1,5 +1,6 @@
 #pragma once
 #include <OpdsParser.h>
+#include <TlsPolicy.h>
 
 #include <atomic>
 #include <string>
@@ -63,6 +64,9 @@ class OpdsBookBrowserActivity final : public Activity {
   std::string statusMessage;
   size_t downloadProgress = 0;
   size_t downloadTotal = 0;
+  // "Format not supported" over the list or the book detail, after Confirm on a book the catalog
+  // offers only in formats the reader cannot open. The next press, tap or swipe only takes it down.
+  bool formatNotice = false;
 
   OpdsServer server;  // Copied at construction — safe even if the store changes during browsing
   OpdsBackTo backTo;
@@ -71,6 +75,10 @@ class OpdsBookBrowserActivity final : public Activity {
   std::string initialQuery_;
 
   OpdsEntry getEntry(size_t index) const;
+  void drawFormatNotice() const;
+  // The TLS policy of every request to this catalog (see the definition).
+  crosspoint::TlsPolicy catalogTlsPolicy() const;
+  void dismissFormatNotice();
 
   void checkAndConnectWifi();
   void launchWifiSelection();

@@ -1,5 +1,6 @@
 #pragma once
 #include <HalStorage.h>
+#include <TlsPolicy.h>
 
 #include <functional>
 #include <memory>
@@ -29,30 +30,21 @@ class HttpDownloader {
     HTTP_ERROR,
     FILE_ERROR,
     ABORTED,
+    AUTH_ERROR,  // HTTP 401 or 403: the server turned the credentials down, or wants some
   };
 
   /**
-   * TLS verification posture for an https transfer.
+   * TLS verification posture for an https transfer, chosen by each caller: Verified (the default),
+   * Strict, Unverified or VerifiedThenUnverified. See lib/SecureNet/include/TlsPolicy.h.
    *
-   * Verified — verify against the curated roots and abort if that fails, unless
-   *   the user has turned SETTINGS.skipHttpsValidation on. The default: there is
-   *   no "verify, then retry unverified" middle any more, because an on-path
-   *   attacker presenting a bad certificate was simply accepted on the retry —
-   *   it authenticated nothing while paying for the chain verification twice.
-   *   Reaching a private-CA or self-signed server is now an explicit,
-   *   user-visible choice instead of a silent per-call downgrade.
-   * Strict — always verified; the skip setting does not apply. For firmware,
-   *   which the device executes, so it is not the user's to downgrade.
-   * Unverified — never verified: no roots loaded, no hostname check, one
-   *   handshake. For public read-only data where there is no secret to leak and
-   *   nothing to authenticate; also materially cheaper, since the ECDSA chain
-   *   verify dominates a handshake on this chip.
+   * Verified has no "verify, then retry unverified" middle: an on-path attacker presenting a bad
+   * certificate was simply accepted on that retry, which authenticated nothing while paying for the
+   * chain verification twice. Reaching a private-CA or self-signed server is the user's explicit
+   * "Skip HTTPS validation" choice instead. VerifiedThenUnverified brings the retry back for
+   * requests that carry no credentials only, where it leaks nothing: an unverified feed is no
+   * worse than the plain http many catalogs are served over.
    */
-  enum class TlsPolicy {
-    Verified,
-    Strict,
-    Unverified,
-  };
+  using TlsPolicy = crosspoint::TlsPolicy;
 
   /**
    * Reusable HTTP+TLS session. Holding one of these across multiple
@@ -88,8 +80,13 @@ class HttpDownloader {
   static bool fetchUrl(const std::string& url, std::string& outContent, const std::string& username = "",
                        const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
 
-  static bool fetchUrl(const std::string& url, Stream& stream, const std::string& username = "",
-                       const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
+  /**
+   * Stream fetch. Returns the DownloadError rather than a bool so a caller can tell a refused
+   * password (AUTH_ERROR) from any other failure. Mind the sense: OK is 0, so `!fetchUrl(...)`
+   * is true on success.
+   */
+  static DownloadError fetchUrl(const std::string& url, Stream& stream, const std::string& username = "",
+                                const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
 
   static bool fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username = "",
                        const std::string& password = "");

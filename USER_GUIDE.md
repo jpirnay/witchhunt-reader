@@ -480,6 +480,9 @@ Behavior notes:
 
 - You can store up to 8 OPDS servers.
 - OPDS authentication supports HTTP Basic auth. If you use Calibre Content Server with authentication enabled, set it to Basic (not Digest).
+- When the server turns the username or password down, the browser says **Authentication failed**.
+- A catalog without a username and password is opened even when its HTTPS certificate cannot be checked against the reader's certificates: nothing secret goes over that connection, so the reader continues without the check (and notes it in the log). A catalog with a login is always checked, unless **Skip HTTPS validation** is on.
+- Saved OPDS and KOReader passwords are stored scrambled on the SD card and keep working when the card moves to another reader.
 
 You can also manage OPDS servers from the web interface while in File Transfer mode:
 
@@ -494,7 +497,9 @@ for the selected book. Where either does not apply, that button does nothing on 
 and its hint shows only the arrow. Hold **Left** / **Right**, or swipe on a touch screen, to page
 through a long catalog; **Up** / **Down** move one row. **Confirm** opens a folder or downloads a
 book. When a book comes in several formats, you choose one from a short list that works the same
-way.
+way. A book the catalog offers only in formats the reader cannot open (PDF or MOBI, say) is still
+listed, with **Format not supported** in place of its author; **Confirm** on it says so in a box, which the
+next press, tap or swipe takes down.
 
 #### 3.7.6 Web Settings (WiFi + OPDS)
 

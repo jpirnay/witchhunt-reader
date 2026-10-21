@@ -42,6 +42,7 @@ bool KOReaderCredentialStore::loadFromFile() {
 }
 
 void KOReaderCredentialStore::setCredentials(const std::string& user, const std::string& pass) {
+  if (pass != password) passwordKeyUnknown = false;
   username = user;
   password = pass;
   LOG_DBG("KRS", "Set credentials for user: %s", user.c_str());
