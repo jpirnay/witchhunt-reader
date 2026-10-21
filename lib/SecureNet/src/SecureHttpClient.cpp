@@ -47,6 +47,11 @@ bool SecureHttpClient::parseUrl(const std::string& in, Url& out) {
   return !out.host.empty() && (out.scheme == "http" || out.scheme == "https");
 }
 
+bool SecureHttpClient::isHttps(const std::string& url) {
+  Url u;
+  return parseUrl(url, u) && u.https();
+}
+
 std::string SecureHttpClient::resolveRedirect(const Url& base, const std::string& location) {
   if (location.find("://") != std::string::npos) return location;  // absolute
   if (!location.empty() && location[0] == '/') {                   // absolute path
