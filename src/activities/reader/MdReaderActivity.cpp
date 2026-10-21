@@ -23,7 +23,7 @@ namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;
 constexpr size_t MAX_LINE_LENGTH = 64 * 1024;
 constexpr uint32_t CACHE_MAGIC = 0x4D4B4449;  // "MKDI"
-constexpr uint8_t CACHE_VERSION = 5;          // Bumped: grid-rendered pipe tables
+constexpr uint8_t CACHE_VERSION = 6;          // Bumped: a list item's later lines wrap narrower
 
 static std::string flattenHeadingText(const MdParser::ParsedLine& parsed) {
   std::string result;
@@ -261,7 +261,8 @@ int MdReaderActivity::measureSpans(const std::vector<MdParser::Span>& spans) con
   });
 }
 
-bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const int availableWidth, const int maxLines,
+bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const int firstLineWidth,
+                                 const int continuationWidth, const int maxLines,
                                  std::vector<std::vector<MdParser::Span>>& outLines,
                                  std::vector<int>& outWidths) const {
   const size_t startSize = outLines.size();
@@ -276,13 +277,14 @@ bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const
     currentLine = std::vector<MdParser::Span>();
     currentWidth = 0;
   };
+  auto availableWidth = [&]() { return outLines.size() == startSize ? firstLineWidth : continuationWidth; };
 
   for (const auto& span : spans) {
     if (span.text.empty()) continue;
 
     const int spanWidth = renderer.getTextAdvanceX(cachedFontId, span.text.c_str(), span.style);
 
-    if (currentWidth + spanWidth <= availableWidth) {
+    if (currentWidth + spanWidth <= availableWidth()) {
       currentLine.push_back(span);
       currentWidth += spanWidth;
       continue;
@@ -301,7 +303,7 @@ bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const
 
       const int remWidth = renderer.getTextAdvanceX(cachedFontId, remaining.c_str(), style);
 
-      if (currentWidth + remWidth <= availableWidth) {
+      if (currentWidth + remWidth <= availableWidth()) {
         currentLine.push_back({remaining, style});
         currentWidth += remWidth;
         remaining.clear();
@@ -311,7 +313,7 @@ bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const
       size_t breakPos = remaining.size();
 
       while (breakPos > 0 && renderer.getTextAdvanceX(cachedFontId, remaining.substr(0, breakPos).c_str(), style) >
-                                 availableWidth - currentWidth) {
+                                 availableWidth() - currentWidth) {
         size_t spacePos = remaining.rfind(' ', breakPos - 1);
         if (spacePos != std::string::npos && spacePos > 0) {
           breakPos = spacePos;
@@ -381,9 +383,11 @@ bool MdReaderActivity::wordWrapParsedLine(const MdParser::ParsedLine& parsed, in
           : 0;
 
   // Transient span-line holders; the spans are moved into the RenderedLines.
+  // A list item's later lines start after its marker, so they have that much less room.
   std::vector<std::vector<MdParser::Span>> lines;
   std::vector<int> widths;
-  const bool fullyConsumed = wrapSpans(allSpans, availableWidth, maxLines, lines, widths);
+  const bool fullyConsumed =
+      wrapSpans(allSpans, availableWidth, availableWidth - listPrefixIndent, maxLines, lines, widths);
 
   if (lines.empty()) {
     // Spans with no text (an empty line inside a code block): still one blank line.
@@ -433,7 +437,7 @@ bool MdReaderActivity::layoutTableRow(const MdParser::ParsedLine& parsed, const 
                                                     static_cast<uint8_t>(EpdFontFamily::BOLD));
       }
     }
-    if (!wrapSpans(cellSpans, innerWidth, maxLines, cells[c].lines, cells[c].widths)) {
+    if (!wrapSpans(cellSpans, innerWidth, innerWidth, maxLines, cells[c].lines, cells[c].widths)) {
       return false;  // this cell alone is taller than the space the row may use
     }
     rowLines = std::max(rowLines, static_cast<int>(cells[c].lines.size()));

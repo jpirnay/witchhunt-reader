@@ -91,9 +91,10 @@ class MdReaderActivity final : public LineReaderActivity {
                           int maxLines, bool isCodeBlock = false);
 
   // Core span wrapping shared by flowed lines and table cells: wrap |spans|
-  // into visual lines no wider than availableWidth, appending each line's
-  // spans and measured width. Returns false when stopped by maxLines.
-  bool wrapSpans(const std::vector<MdParser::Span>& spans, int availableWidth, int maxLines,
+  // into visual lines, the first no wider than firstLineWidth and the rest no
+  // wider than continuationWidth, appending each line's spans and measured
+  // width. Returns false when stopped by maxLines.
+  bool wrapSpans(const std::vector<MdParser::Span>& spans, int firstLineWidth, int continuationWidth, int maxLines,
                  std::vector<std::vector<MdParser::Span>>& outLines, std::vector<int>& outWidths) const;
 
   // Lay out one pipe-table row on the ctx grid. Returns false when the row
