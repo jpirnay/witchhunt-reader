@@ -143,6 +143,7 @@ bool TtfFontSet::load(const Files* families, const uint8_t count, const uint8_t 
     opened = store_.open(identity);
     if (opened != OpenResult::Ready) {
       LOG_ERR("TTF", "glyph store did not open after a reinstall (%u)", static_cast<unsigned>(opened));
+      failedForNow_ = opened == OpenResult::NoMemory;
       return false;
     }
     plan = ttf::ScratchPlan{};
@@ -292,7 +293,11 @@ bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8
     if (held == Held::Same) kept |= static_cast<uint8_t>(1u << b);
     onCard += layout.styleMode[b] == glyphstore::kModeSd ? 1 : 0;
   }
-  if (!store_.beginInstall(layout, identity, work->sd, kept)) return false;
+  bool noHeaderMemory = false;
+  if (!store_.beginInstall(layout, identity, work->sd, kept, &noHeaderMemory)) {
+    failedForNow_ = noHeaderMemory;  // its header, made before anything is erased
+    return false;
+  }
   for (uint8_t b = 0; b < styles; ++b) {
     if ((kept & (1u << b)) != 0) continue;
     ttf::FileSource source;
@@ -563,6 +568,7 @@ TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uin
     body_.styles = makeUniqueNoThrow<Size::StyleFont[]>(count);
     if (!styles_ || !body_.styles) {
       LOG_ERR("TTF", "OOM: family %u's %u styles", family_, count);
+      set_.failedForNow_ = true;
       return StylesResult::Failed;
     }
     styleCount_ = count;

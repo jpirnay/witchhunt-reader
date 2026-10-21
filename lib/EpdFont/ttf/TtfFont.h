@@ -255,9 +255,11 @@ class TtfFontSet {
   /// is loaded: those files must stay open until then.
   bool load(const Files* families, uint8_t count, const uint8_t identity[glyphstore::kIdentityBytes],
             const std::function<void()>& onBusy = {}, Install install = Install::IfNeeded);
-  /// The last load() failed for now: no memory, or a card read failed. Nothing was erased unless a copy's read
-  /// failed after the erase, which the next load installs again. Loading fewer families would not help, and would
-  /// install another set over this one: load the same set again later.
+  /// The last load() failed for now: no memory, or a card read failed. Loading fewer families would not help, and
+  /// would install another set over this one: load the same set again later. The store is then as the next load wants
+  /// it: as it was (nothing erased), or holding this set whole when the install finished and opening it failed for
+  /// now, which the next load opens; only a read that failed in the copy, after the erase, leaves it not installed,
+  /// and the next load installs the same set again.
   bool failedForNow() const { return failedForNow_; }
   uint8_t familyCount() const { return count_; }
   /// The set's family `family`, in load()'s order; nullptr past familyCount().

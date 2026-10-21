@@ -89,9 +89,10 @@ class FlashGlyphStore {
   /// sector of the new layout that holds data, but for the style blocks in `keepStyles` (a bit per block), which
   /// the caller found holding their data already and does not write. A layout with SD-mode blocks needs `sdInfo`,
   /// a StyleInfo per block: each SD-mode style's file stamp, size and outlines (in the file, and past the block);
-  /// offsets, sizes and modes come from `layout`.
+  /// offsets, sizes and modes come from `layout`. False with `*noMemory` set (when given) when the header it writes
+  /// last finds no memory, before anything is erased.
   bool beginInstall(const glyphstore::Layout& layout, const uint8_t identity[glyphstore::kIdentityBytes],
-                    const glyphstore::StyleInfo* sdInfo, uint8_t keepStyles = 0);
+                    const glyphstore::StyleInfo* sdInfo, uint8_t keepStyles = 0, bool* noMemory = nullptr);
   /// Copies style data into a style block, each byte once. Only between beginInstall() and finishInstall().
   bool writeStyleData(uint8_t style, uint32_t offset, const void* data, uint32_t len);
   /// Writes the header. open() succeeds from now on.

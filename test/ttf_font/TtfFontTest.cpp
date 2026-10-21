@@ -2150,3 +2150,72 @@ TEST_F(TtfFontTest, AProbeThatCannotPlanForNowLeavesACffFamilyListed) {
   EXPECT_LT(planned, 64u * 1024);
   EXPECT_TRUE(ttf::fitsStore(&fileBytes, &planned, 1, kSdOnlyBytes, 24));
 }
+
+TEST_F(TtfFontSetTest, AnInstallWithoutMemoryForItsHeaderErasesNothingAndAsksForNoFewerFamilies) {
+  // The set is installed; another set (Bookerly alone) is to be installed over it. The store's header, made as the
+  // install begins, finds no memory this once: armed by onBusy, after the plan and before the install begins, so no
+  // other header (the open's, of the same size) takes the refusal. Nothing is erased yet, so the load fails for now.
+  ASSERT_NE(nullptr, openSet());
+  const uint32_t erases = flash.totalSectorErases();
+  TtfFontSet other(flash);
+  ttf::FileSource sources[4];
+  for (int s = 0; s < 4; ++s) sources[s] = files[s].source();
+  const auto beforeTheInstall = [this] {
+    ++busy;
+    refuseNextObjectBytes = sizeof(glyphstore::Header);
+  };
+  EXPECT_FALSE(other.load(&sources, 1, kIdentityA, beforeTheInstall));
+  EXPECT_TRUE(other.failedForNow());
+  EXPECT_EQ(2, busy);
+  EXPECT_EQ(0u, refuseNextObjectBytes);  // taken by the install's header
+  EXPECT_EQ(erases, flash.totalSectorErases());
+  // The store still holds the first set, whole.
+  ttf::FileSource both[2][4];
+  for (int s = 0; s < 4; ++s) {
+    both[0][s] = files[s].source();
+    if (!accent[s].bytes.empty()) both[1][s] = accent[s].source();
+  }
+  TtfFontSet same(flash);
+  EXPECT_TRUE(same.load(both, 2, kIdentitySet, {}, TtfFontSet::Install::Never));
+}
+
+namespace {
+
+// The first yield between install chunks makes the next nothrow new of a store header fail, once: past the install's
+// own header, that is the open's after the install.
+bool headerRefusalArmed = false;
+void refuseTheNextHeaderOnce() {
+  if (headerRefusalArmed) return;
+  headerRefusalArmed = true;
+  refuseNextObjectBytes = sizeof(glyphstore::Header);
+}
+
+}  // namespace
+
+TEST_F(TtfFontSetTest, AnOpenWithoutMemoryAfterAReinstallFailsForNowAndTheNextLoadOpensTheSet) {
+  MemoryFile cjk[4];
+  cjk[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
+  SimNorFlash chip{kSdOnlyBytes};
+  ASSERT_NE(nullptr, openFamilies(chip, {cjk}, busy));
+  // Another font written in its place: installed again. Its block differs from its first bytes on, so the kept check
+  // yields nothing; the first copied chunk arms the refusal, and the open after the install finds no memory for the
+  // header. The set is installed whole: the load fails for now, and the next opens it.
+  cjk[kRegular].bytes = tooLargeForFlashMode("NotoSansJP-CffFlat.otf");
+  headerRefusalArmed = false;
+  TtfFont::Hooks hooks;
+  hooks.yield = &refuseTheNextHeaderOnce;
+  TtfFont::setHooks(hooks);
+  bool forNow = false;
+  EXPECT_EQ(nullptr, openFamilies(chip, {cjk}, busy, kIdentitySet, &forNow));
+  TtfFont::setHooks({});
+  EXPECT_TRUE(forNow);
+  EXPECT_EQ(2, busy);
+  EXPECT_TRUE(headerRefusalArmed);
+  EXPECT_EQ(0u, refuseNextObjectBytes);  // taken by the open's header
+  const auto set = openFamilies(chip, {cjk}, busy);
+  ASSERT_NE(nullptr, set);
+  EXPECT_EQ(2, busy);
+  expectDrawnAs(reference(cjk[kRegular].bytes, 0x6F22, 14), *set->font(0), kRegular,
+                set->font(0)->glyph(kRegular, 0x6F22));
+  expectWrittenOnce(chip);
+}
