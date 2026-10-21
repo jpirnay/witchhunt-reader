@@ -27,16 +27,6 @@ class GlyphStoreGlyphs : public StoreTest {
   GlyphBatch batch{buffer, sizeof buffer};
 };
 
-// Keys with the same home slot, found by search: a probe-chain test needs real collisions.
-std::vector<uint32_t> collidingKeys(const uint32_t slots, const size_t count) {
-  std::vector<uint32_t> keys;
-  const uint32_t home = homeSlot(makeKey(0x4E00, 0, 0), slots);
-  for (uint32_t cp = 0x4E00; keys.size() < count && cp < 0x10FFFF; ++cp) {
-    if (homeSlot(makeKey(cp, 0, 0), slots) == home) keys.push_back(makeKey(cp, 0, 0));
-  }
-  return keys;
-}
-
 uint8_t widthOf(const uint32_t cp) { return static_cast<uint8_t>(6 + cp % 9); }
 uint8_t heightOf(const uint32_t cp) { return static_cast<uint8_t>(9 + cp % 7); }
 
@@ -56,6 +46,8 @@ TEST_F(GlyphStoreGlyphs, ABatchIsStoredAndFound) {
 }
 
 TEST_F(GlyphStoreGlyphs, ABatchIsOneLogWritePlusOneSlotWritePerGlyph) {
+  ASSERT_TRUE(stage(batch, makeKey('Z', 0, 0), 9, 12));
+  ASSERT_EQ(Commit::Stored, store.commit(batch));  // opens the first segment: its header is one more write
   for (uint32_t cp = 'a'; cp < 'a' + 10; ++cp) ASSERT_TRUE(stage(batch, makeKey(cp, 0, 0), 9, 12));
   const uint32_t before = flash.programCalls();
   ASSERT_EQ(Commit::Stored, store.commit(batch));
@@ -64,21 +56,35 @@ TEST_F(GlyphStoreGlyphs, ABatchIsOneLogWritePlusOneSlotWritePerGlyph) {
 
 TEST_F(GlyphStoreGlyphs, RecordsAreLaidOutAsTheFormatSays) {
   const uint32_t first = makeKey('A', 0, 0);
+  const uint32_t second = makeKey('B', 0, 0);
   ASSERT_TRUE(stage(batch, first, 9, 12));
-  ASSERT_TRUE(stage(batch, makeKey('B', 0, 0), 10, 12));
+  ASSERT_TRUE(stage(batch, second, 10, 12));
   ASSERT_EQ(Commit::Stored, store.commit(batch));
   const uint8_t* log = flash.raw() + layout.geometry.logOffset;
   uint32_t key = 0;
-  std::memcpy(&key, log, sizeof key);
+  std::memcpy(&key, log + kSegmentHeaderBytes, sizeof key);  // the first record follows the segment's header
   EXPECT_EQ(first, key);
   const EpdGlyph* found = nullptr;
   ASSERT_EQ(Lookup::Found, store.find(first, &found));
-  EXPECT_EQ(store.logBase() + 4, reinterpret_cast<const uint8_t*>(found));  // the EpdGlyph sits at offset 4
+  // The EpdGlyph sits 4 bytes into its record.
+  EXPECT_EQ(store.logBase() + kSegmentHeaderBytes + 4, reinterpret_cast<const uint8_t*>(found));
   EXPECT_EQ(0u, reinterpret_cast<uintptr_t>(found) % 4);
-  EXPECT_EQ(kRecordHeaderBytes, found->dataOffset);  // relative to the log base
-  std::memcpy(&key, log + recordSize(9, 12), sizeof key);
-  EXPECT_EQ(makeKey('B', 0, 0), key);  // the next record starts 4-byte aligned
-  EXPECT_EQ(recordSize(9, 12) + recordSize(10, 12), store.logUsed());
+  EXPECT_EQ(kSegmentHeaderBytes + kRecordHeaderBytes, found->dataOffset);  // relative to the log base
+  std::memcpy(&key, log + kSegmentHeaderBytes + recordSize(9, 12), sizeof key);
+  EXPECT_EQ(second, key);  // the next record starts 4-byte aligned
+  EXPECT_EQ(kSegmentHeaderBytes + recordSize(9, 12) + recordSize(10, 12), store.logUsed());
+  // Each slot packs its record's dataOffset with its segment's epoch: 1, the first segment's.
+  const auto slotValue = [&](const uint32_t wanted) {
+    uint32_t i = homeSlot(wanted, layout.geometry.indexSlots);
+    for (uint32_t probe = 0; probe < kMaxProbe; ++probe, i = (i + 1) % layout.geometry.indexSlots) {
+      Slot slot{};
+      EXPECT_TRUE(flash.read(layout.geometry.indexOffset + i * kSlotBytes, &slot, sizeof slot));
+      if (slot.key == wanted) return slot.value;
+    }
+    return kErased;
+  };
+  EXPECT_EQ(glyphSlotValue(1, kSegmentHeaderBytes + kRecordHeaderBytes), slotValue(first));
+  EXPECT_EQ(glyphSlotValue(1, kSegmentHeaderBytes + recordSize(9, 12) + kRecordHeaderBytes), slotValue(second));
 }
 
 TEST_F(GlyphStoreGlyphs, AGlyphWithNoPixelsIsStored) {
@@ -137,7 +143,9 @@ TEST_F(GlyphStoreGlyphs, ALongProbeChainCountsAsFull) {
   ASSERT_EQ(kMaxProbe + 1, keys.size());
   for (uint32_t i = 0; i < kMaxProbe; ++i) ASSERT_EQ(Commit::Stored, store.markNoGlyph(keys[i])) << i;
   EXPECT_EQ(Commit::Full, store.markNoGlyph(keys[kMaxProbe]));
-  EXPECT_TRUE(store.wipePending());
+  EXPECT_TRUE(store.needsRoom());  // the index is to be rebuilt, not the store wiped
+  EXPECT_TRUE(store.writesStopped());
+  EXPECT_FALSE(store.wipePending());
 }
 
 TEST_F(GlyphStoreGlyphs, SeventyPercentOfTheIndexCountsAsFull) {
@@ -152,26 +160,9 @@ TEST_F(GlyphStoreGlyphs, SeventyPercentOfTheIndexCountsAsFull) {
     ++stored;
   }
   EXPECT_EQ(700u, stored);
-  EXPECT_TRUE(store.wipePending());
-}
-
-TEST_F(GlyphStoreGlyphs, ANearlyFullLogCountsAsFull) {
-  // A 64 KB log, filled with 2,020-byte records (100 x 80 bitmaps), one per batch.
-  uint32_t stored = 0;
-  for (uint32_t cp = 0x41;; ++cp) {
-    ASSERT_TRUE(stage(batch, makeKey(cp, 0, 0), 100, 80));
-    const Commit result = store.commit(batch);
-    if (result != Commit::Stored) {
-      EXPECT_EQ(Commit::Full, result);
-      break;
-    }
-    ++stored;
-  }
-  const uint64_t limit = uint64_t{layout.geometry.logSize} * kLogFullPercent;
-  EXPECT_LE(uint64_t{store.logUsed()} * 100, limit);
-  EXPECT_GT((uint64_t{store.logUsed()} + recordSize(100, 80)) * 100, limit);
-  EXPECT_EQ(store.logUsed() / recordSize(100, 80), stored);
-  EXPECT_TRUE(store.wipePending());
+  EXPECT_TRUE(store.needsRoom());
+  EXPECT_TRUE(store.writesStopped());
+  EXPECT_FALSE(store.wipePending());
 }
 
 TEST_F(GlyphStoreGlyphs, MalformedRecordsAreRefusedAtStaging) {
@@ -205,7 +196,7 @@ TEST_F(GlyphStoreGlyphs, DropLastTakesBackOnlyTheLastRecord) {
   EXPECT_TRUE(storedIntact(store, makeKey('C', 0, 0), 8, 12));
   const EpdGlyph* c = nullptr;
   ASSERT_EQ(Lookup::Found, store.find(makeKey('C', 0, 0), &c));
-  EXPECT_EQ(recordSize(9, 12) + kRecordHeaderBytes, c->dataOffset);  // staged where B was
+  EXPECT_EQ(kSegmentHeaderBytes + recordSize(9, 12) + kRecordHeaderBytes, c->dataOffset);  // staged where B was
 }
 
 TEST_F(GlyphStoreGlyphs, KeysOfAnUnclaimedSizeAreRefused) {
@@ -228,7 +219,7 @@ TEST_F(GlyphStoreGlyphs, AClosedStoreRefusesWrites) {
 
 TEST_F(GlyphStoreGlyphs, AFailedLogWriteSetsWipePending) {
   ASSERT_TRUE(stage(batch, makeKey('A', 0, 0), 9, 12));
-  flash.failNextProgram();
+  flash.failNextProgram();  // the first log write: the first segment's header
   EXPECT_EQ(Commit::WriteFailed, store.commit(batch));
   EXPECT_TRUE(store.wipePending());
   store.close();
@@ -238,7 +229,7 @@ TEST_F(GlyphStoreGlyphs, AFailedLogWriteSetsWipePending) {
 
 TEST_F(GlyphStoreGlyphs, AFailedSlotWriteSetsWipePending) {
   ASSERT_TRUE(stage(batch, makeKey('A', 0, 0), 9, 12));
-  flash.failNextProgram(1);  // the record lands; its slot does not
+  flash.failNextProgram(2);  // the segment's header and the record land; the slot does not
   EXPECT_EQ(Commit::WriteFailed, store.commit(batch));
   EXPECT_TRUE(store.wipePending());
   EXPECT_EQ(Lookup::NotStored, store.find(makeKey('A', 0, 0), nullptr));
@@ -266,7 +257,8 @@ TEST_F(GlyphStoreGlyphs, ReinstallingErasesOnlySectorsThatHoldData) {
   store.close();
   const uint32_t before = flash.totalSectorErases();
   ASSERT_TRUE(install(store, layout, kIdentityB));
-  // The header, the state sector, the style, the log's first sector, and at most two index sectors.
+  // The header, the state sector, the style, the log's first sector (the first segment: its header and the
+  // records), and at most two index sectors.
   EXPECT_LE(flash.totalSectorErases() - before, 6u);
   const uint32_t logSector = layout.geometry.logOffset / kSectorBytes;
   EXPECT_EQ(1u, flash.sectorErases(logSector));

@@ -91,7 +91,7 @@ fonts need.
 | Magic | Written by | Version | Contents |
 |---|---|---|---|
 | `CPFC` | `FlashFontPartition` | none | A `.cpfont` family copied from the card, mapped in place. See [contributing/font-cache-structures.md](contributing/font-cache-structures.md) |
-| `CPTT` | `FlashGlyphStore` | `glyphstore::kFormatVersion` (3) | The TTF glyph store: [below](#the-ttf-glyph-store-cptt) |
+| `CPTT` | `FlashGlyphStore` | `glyphstore::kFormatVersion` (4) | The TTF glyph store: [below](#the-ttf-glyph-store-cptt) |
 
 ## `book.bin`
 
@@ -514,12 +514,12 @@ produces; a power cut leaves at worst bytes nothing references.
 
 | Offset | Size | Contents |
 |---|---|---|
-| 0 | 4 KB sector | `Header`, written last at install: `u32` magic `CPTT`, `u16` version, `u16` header bytes, the set's 16-byte identity, the `Geometry` (style count, the regions' offsets and sizes), 8 `StyleInfo` (a style block's offset, size and mode; in SD mode also its file and outlines, below), then `u32` FNV-1a over all of it |
-| 4 KB | 4 KB sector | The state: 32 face entries `{u32 face, u32 claimed}`, then the `u32` wipe word |
+| 0 | 4 KB sector | `Header`, written last at install: `u32` magic `CPTT`, `u16` version, `u16` header bytes, the set's 16-byte identity, the `Geometry` (style count, the regions' offsets and sizes, `segmentBytes`), 8 `StyleInfo` (a style block's offset, size and mode; in SD mode also its file and outlines, below), then `u32` FNV-1a over all of it |
+| 4 KB | 4 KB sector | The state: 32 face entries `{u32 face, u32 claimed}`, then the `u32` wipe word, then the rebuild journal: 479 entries `{u32 base, u32 done}` |
 | 64 KB | 64 KB pages | The style blocks, each family's styles in the set's order, each on its own page so one maps alone; the SD-mode blocks after every flash-mode one |
 | `indexOffset` | whole pages | Glyph index: 8-byte slots `{u32 key, u32 value}`, open addressing, at most 128 probes |
 | `pairOffset` | 64 KB | Kerning pairs: `{u32 left << 16 \| right, u32 pairStyle << 16 \| i16 font units}` |
-| `logOffset` | whole pages | Glyph records, append only: `u32 key`, the 16-byte `EpdGlyph`, the 2-bit bitmap, padded to 4 bytes |
+| `logOffset` | whole pages | The log, a ring of equal segments (`segmentBytes` each, a whole number of 4 KB sectors; 4 to 64 of them): each opens with a 16-byte `SegmentHeader`, then glyph records, append only: `u32 key`, the 16-byte `EpdGlyph`, the 2-bit bitmap, padded to 4 bytes |
 
 - **A style block's mode.** Flash mode: the style's whole TTF file. SD mode (a family too large for flash mode, or
   beside others that fill the font area): a font of its own made of the file's tables but `glyf` (`cmap`, `head`,
@@ -532,14 +532,49 @@ produces; a power cut leaves at worst bytes nothing references.
   the set). An entry is in use once `claimed` reads 0. A glyph key is `codepoint | style << 21 | faceIndex << 23`,
   bits 28-31 zero, so a key never reads as erased. The 32 entries are every family's; taking the last one, or asking
   for a 33rd, makes the wipe pending.
-- **A slot's value** is the record's `dataOffset` (its log offset + 20), or 0: the font has no glyph for that key.
+- **A slot's value** is 0 (the font has no glyph for that key), or the record's `dataOffset` (its log offset + 20) in
+  4-byte units in the low 20 bits (so a log is under 4 MiB), under the low 12 bits of the epoch of the segment that
+  holds the record. A reused segment gets a new epoch, so a slot still naming its old contents no longer matches and
+  reads as stale.
+- **A segment** opens with `SegmentHeader {u32 magic "SGMT", u32 epoch, u32 epochCheck = ~epoch, u32 retired}`. The
+  epoch is written with its complement, so a torn write fails the check. `retired` reads erased while the segment is
+  live and is programmed 0 before the segment is erased, so a cut during the erase never leaves a half-erased
+  segment reading as live. A record never crosses its segment's end; what does not fit starts the next segment.
+  Segments are used in ring order, each with the next epoch, and two are kept erased and ready, so a batch of new
+  glyphs never waits for an erase.
 - **A pair's style** is `family << 2 | style`; the value is the kerning in font units, the same at every size.
 - **The wipe word** reads erased unless a wipe is pending. A wipe erases the index, the pairs and the log (only
-  sectors that hold data), and the state sector last, at the next book open.
+  sectors that hold data), and the state sector last, at the next chapter or book open (idle time leaves it).
+- **The rebuild journal** fills the rest of the state sector after the wipe word, one `{u32 base, u32 done}` entry per
+  index rebuild, used in order and each programmed once. `base` is the epoch of the oldest live segment when the
+  rebuild began: no slot written since names an older one. `done` is programmed 0 after the last slot is in, so an
+  entry with `base` and an erased `done` is a rebuild a power cut interrupted, and is done again at the next chapter
+  or book open. With all 479 entries used, the next rebuild wipes the store instead, which erases the journal with the
+  state sector; like any wipe, only at a chapter or book open (idle time leaves it).
+- **Making room** keeps the log from filling, a segment at a time, in idle time (one step per tick) and at a chapter
+  or book open (until there is enough, behind the "Loading font" popup).
+  - *A reclaim* takes the oldest segment while two or more are live. It writes, in this order: each glyph it keeps
+    (one with a use count above 0, at most half a segment's payload, the most used first) copied to the head as the
+    record and then its slot (the count halved); then `retired` = 0 in the segment's header; then the erase of the
+    segment. A cut after a copy's record but before its slot leaves a record nothing names; a cut after the retire
+    and before the erase leaves a segment that no longer reads as live. The glyphs it did not keep are dropped: their
+    slots go stale.
+  - *A rebuild* of the index writes: the journal entry's `base`; the erase of the index; the slots again, one for
+    each live record that a slot named, with the segment's epoch (use counts kept; the "no glyph" marks are
+    forgotten); last the entry's `done`. It runs when the index stops writes (past its load limit, a probe chain
+    full, or the epochs used up), in idle time too. At a chapter or book open only, it also runs when 12 % of the
+    index's slots are stale (the "no glyph" marks do not count: they call for a rebuild only once they fill the
+    index), when a power cut stopped the last one, or 2,048 epochs after the last one's `base`.
+  - *The epoch limits.* The epochs a slot can name must stay distinct in 12 bits. A rebuild is due 2,048 epochs after
+    the last one's `base`, and waits for an open; the hard bound is 3,968 (4,096 less two rings of 64 segments): no
+    segment gets an epoch that far past the base until the index is rebuilt, in idle time if need be.
 - **The identity** is FNV-1a over the families' identities in the set's order (`ttf::setIdentity`); a family's is
   FNV-1a over each style file's name, size and modification time and the engine's render version
   (`ttf::familyIdentity`). A store of another identity, or one whose header fails its check, is installed again.
 
 Version 1 held one family: four style blocks, and a size table of bare ppems with pairs keyed by style alone.
 Version 2 had the mode in the `Geometry`, the store's, and a table map in each `StyleInfo` (1,240 B headers).
+Version 3 moved the mode into each `StyleInfo`, with the SD-mode outlines. Its log was one append-only run, emptied
+by a wipe when full, and a slot's value was the bare `dataOffset`; version 4 has the ring of segments, the packed
+slot value and the journal.
 An older header reads as not installed, so the first load installs the set over it.

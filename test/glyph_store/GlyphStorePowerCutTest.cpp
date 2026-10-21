@@ -2,9 +2,11 @@
 // reboot, nothing is served torn, and writing carries on without programming any byte twice.
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <string>
+#include <vector>
 
 #include "GlyphStoreTestUtil.h"
 
@@ -201,7 +203,7 @@ void checkAfterReboot(SimNorFlash& flash, const Install& what, const Outcome& ou
   EXPECT_EQ(0u, flash.reprograms()) << where;
 }
 
-// 200 more glyphs, 12.8 KB of log over several sectors, so a cut can leave a wipe half done.
+// 200 more glyphs, 12.8 KB of log over four segments, so a cut can leave a wipe half done.
 constexpr uint32_t kManyFirst = 0x4E00;
 constexpr uint32_t kMany = 200;
 constexpr Sizes kPopulateSizes{0, 1, 2};  // what claim() returns on a fresh store
@@ -317,6 +319,378 @@ void sweepSession(const Install& what) {
   }
 }
 
+// --- Making room: a head move, a reclaim and an index rebuild ---
+// Each builds its store once and copies the chip for every cut point. Record n is a glyph under ringKey(n).
+
+using Budget = FlashGlyphStore::Budget;
+using Room = FlashGlyphStore::Room;
+using RoomWork = FlashGlyphStore::RoomWork;
+
+// Commits records first to last - 1 as one batch, each width x height.
+Commit commitRecords(FlashGlyphStore& store, const uint32_t first, const uint32_t last, const uint8_t width,
+                     const uint8_t height) {
+  alignas(4) uint8_t buffer[8192];
+  GlyphBatch batch(buffer, sizeof buffer);
+  for (uint32_t n = first; n < last; ++n) {
+    if (!stage(batch, ringKey(n), width, height)) return Commit::Refused;
+  }
+  return store.commit(batch);
+}
+
+// The segment holding record n; UINT32_MAX when it is not found.
+uint32_t segmentOf(const FlashGlyphStore& store, const uint32_t n) {
+  const EpdGlyph* glyph = nullptr;
+  if (store.find(ringKey(n), &glyph) != Lookup::Found) return UINT32_MAX;
+  return glyph->dataOffset / store.geometry().segmentBytes;
+}
+
+void draw(const FlashGlyphStore& store, const uint32_t n, const uint32_t times = 1) {
+  const EpdGlyph* glyph = nullptr;
+  ASSERT_EQ(Lookup::Found, store.find(ringKey(n), &glyph)) << n;
+  for (uint32_t i = 0; i < times; ++i) store.noteDrawn(glyph);
+}
+
+// Three sessions after a cut, each as a reader's goes: open, make room as a chapter open does, store two new glyphs,
+// close; then a last boot that only checks. After each boot no wipe is pending, what was stored before the cut
+// (records 0 to before - 1) is found whole or not at all, and what the sessions stored is found whole. atBoot(store)
+// runs in the first session before it makes room, afterRoom(store) after.
+template <typename AtBoot, typename AfterRoom>
+void sessionsAfterACut(SimNorFlash& flash, const uint32_t before, const std::string& where, AtBoot&& atBoot,
+                       AfterRoom&& afterRoom) {
+  uint32_t next = before;  // the next new glyph
+  for (uint32_t session = 0; session <= 3; ++session) {
+    const std::string at = where + ", boot " + std::to_string(session);
+    FlashGlyphStore store(flash);
+    ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA)) << at;
+    ASSERT_FALSE(store.wipePending()) << at;
+    for (uint32_t n = 0; n < before; ++n) {
+      ASSERT_TRUE(absentOrIntact(store, ringKey(n), kRingWidth, kRingHeight)) << at << ": record " << n;
+    }
+    for (uint32_t n = before; n < next; ++n) {
+      ASSERT_TRUE(storedIntact(store, ringKey(n), kRingWidth, kRingHeight)) << at << ": record " << n;
+    }
+    if (session == 3) break;  // the last boot only checks
+    if (session == 0) atBoot(store);
+    ASSERT_EQ(Room::Enough, store.makeRoom(Budget::Open)) << at;
+    if (session == 0) afterRoom(store);
+    ASSERT_EQ(Commit::Stored, commitRecords(store, next, next + 2, kRingWidth, kRingHeight)) << at;
+    next += 2;
+    for (uint32_t n = before; n < next; ++n) {
+      ASSERT_TRUE(storedIntact(store, ringKey(n), kRingWidth, kRingHeight)) << at << ": record " << n;
+    }
+    if (::testing::Test::HasFailure()) return;
+  }
+  EXPECT_EQ(0u, flash.violations()) << where;
+  EXPECT_EQ(0u, flash.reprograms()) << where;
+}
+
+// --- A batch across a segment's end ---
+
+// 60 x 60 is a 920-byte record. The head, segment 0, holds all but one of what fits it, so of the batch's four the
+// first ends the head and the other three open segment 1.
+constexpr uint8_t kSide = 60;
+constexpr uint32_t kMoveBatch = 4;
+
+// The 60 x 60 records that fit a segment past its header.
+uint32_t sidesPerSegment(const Layout& layout) {
+  return (layout.geometry.segmentBytes - kSegmentHeaderBytes) / recordSize(kSide, kSide);
+}
+
+std::string sectorsOf(const Layout& layout) {
+  return std::to_string(layout.geometry.segmentBytes / kSectorBytes) + "-sector segments, ";
+}
+
+// With `tornNext`, segment 1 holds a header a cut tore, so the head move erases it (its first sector) before writing
+// its own.
+SimNorFlash headMoveStore(const Layout& layout, const bool tornNext) {
+  SimNorFlash flash(kFlashBytes);
+  {
+    FlashGlyphStore store(flash);
+    EXPECT_TRUE(installAndOpen(store, layout));
+    EXPECT_EQ(Commit::Stored, commitRecords(store, 0, sidesPerSegment(layout) - 1, kSide, kSide));
+  }
+  if (tornNext) {
+    const SegmentHeader torn{kSegmentMagic, 2, kErased, kErased};
+    EXPECT_TRUE(flash.program(layout.geometry.logOffset + layout.geometry.segmentBytes, &torn, 6));
+  }
+  return flash;
+}
+
+void sweepHeadMove(const Layout& layout, const bool tornNext) {
+  const uint32_t first = sidesPerSegment(layout) - 1;  // the batch's first record
+  const uint32_t last = first + kMoveBatch;
+  const SimNorFlash before = headMoveStore(layout, tornNext);
+  if (::testing::Test::HasFailure()) return;
+  // The dry run: every write of the batch is a cut point. The record that ends the head, the erase of segment 1 when it
+  // holds a torn header, segment 1's header, the three records after it, and the four slots.
+  uint64_t steps = 0;
+  {
+    SimNorFlash dry = before;
+    FlashGlyphStore store(dry);
+    ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+    const uint64_t start = dry.steps();
+    ASSERT_EQ(Commit::Stored, commitRecords(store, first, last, kSide, kSide));
+    steps = dry.steps() - start;
+    ASSERT_EQ(0u, segmentOf(store, first));
+    for (uint32_t n = first + 1; n < last; ++n) ASSERT_EQ(1u, segmentOf(store, n)) << n;
+  }
+  const uint32_t record = recordSize(kSide, kSide);
+  ASSERT_EQ(record + (tornNext ? 1u : 0u) + offsetof(SegmentHeader, retired) + (kMoveBatch - 1) * record +
+                kMoveBatch * kSlotBytes,
+            steps);
+  const uint32_t all = last + 1;  // and one record more after the cut
+  for (const bool partial : {false, true}) {
+    for (uint64_t cut = 0; cut < steps; ++cut) {
+      const std::string where = sectorsOf(layout) + (tornNext ? "torn next, " : "") + "head move cut " +
+                                std::to_string(cut) + (partial ? " partial" : "");
+      SimNorFlash flash = before;
+      {
+        FlashGlyphStore store(flash);
+        ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA)) << where;
+        flash.partialCut(partial);
+        flash.cutAfterSteps(static_cast<int64_t>(cut));
+        EXPECT_EQ(Commit::WriteFailed, commitRecords(store, first, last, kSide, kSide)) << where;
+      }
+      ASSERT_TRUE(flash.dead()) << where;
+      flash.powerCycle();
+      FlashGlyphStore store(flash);
+      ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA)) << where;
+      ASSERT_FALSE(store.wipePending()) << where;
+      for (uint32_t n = 0; n < first; ++n) {
+        EXPECT_TRUE(storedIntact(store, ringKey(n), kSide, kSide)) << where << ": record " << n;
+      }
+      for (uint32_t n = first; n < last; ++n) {
+        EXPECT_TRUE(absentOrIntact(store, ringKey(n), kSide, kSide)) << where << ": record " << n;
+      }
+      // Writing goes on: what the cut lost of the batch is stored again, with one record more, and all of it is found,
+      // after another reboot too.
+      alignas(4) uint8_t buffer[8192];
+      GlyphBatch batch(buffer, sizeof buffer);
+      for (uint32_t n = first; n < all; ++n) {
+        if (store.find(ringKey(n), nullptr) == Lookup::NotStored) {
+          ASSERT_TRUE(stage(batch, ringKey(n), kSide, kSide)) << where;
+        }
+      }
+      ASSERT_EQ(Commit::Stored, store.commit(batch)) << where;
+      store.close();
+      ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA)) << where;
+      for (uint32_t n = 0; n < all; ++n) {
+        EXPECT_TRUE(storedIntact(store, ringKey(n), kSide, kSide)) << where << ": record " << n;
+      }
+      EXPECT_EQ(0u, flash.violations()) << where;
+      EXPECT_EQ(0u, flash.reprograms()) << where;
+      if (::testing::Test::HasFailure()) return;
+    }
+  }
+}
+
+// --- A reclaim ---
+
+// The helper ring, built once and reopened at every cut. Each session stores records in the head until it has room for
+// one more, which keeps the counts again (one segment is free), and draws glyphs of segment 0. The reclaim copies the
+// first it keeps to the head and the rest to the segment it opens, so that segment's header is among the cut points.
+struct ReclaimCase {
+  Layout layout;
+  std::vector<uint32_t> drawn;  // records of segment 0, drawn once each
+  std::vector<uint32_t> kept;   // the ones it copies, in log order: at most half a segment's payload, the newest first
+};
+
+// Of four drawn, three fit half a segment; the oldest is dropped.
+ReclaimCase oneSectorReclaim() { return {smallLayout(), {0, 2, 3, 5}, {2, 3, 5}}; }
+
+// All four are kept. A copy a cut tears in the first sector of the segment it opened leaves the rest of that segment
+// to later sessions, past the next sector boundary, as on the device's 64 KB segments.
+ReclaimCase twoSectorReclaim() { return {smallLayout(1024, 512, 65536, 2 * kSectorBytes), {1, 3, 5, 7}, {1, 3, 5, 7}}; }
+
+struct Ring {
+  SimNorFlash flash{kFlashBytes};
+  uint32_t perSegment = 0;  // records a segment holds
+  uint32_t filled = 0;      // records fillRing() stored: the head holds one
+  uint32_t before = 0;      // with the session's in the head, every record stored before the cut
+};
+
+void buildRing(const Layout& layout, Ring& ring) {
+  FlashGlyphStore store(ring.flash);
+  alignas(4) uint8_t buffer[1024];
+  GlyphBatch batch(buffer, sizeof buffer);
+  ASSERT_TRUE(installAndOpen(store, layout));
+  ring.perSegment = (layout.geometry.segmentBytes - kSegmentHeaderBytes) / recordSize(kRingWidth, kRingHeight);
+  ring.filled = fillRing(store, batch);
+  ring.before = ring.filled + ring.perSegment - 2;
+}
+
+void reclaimSession(FlashGlyphStore& store, const Ring& ring, const ReclaimCase& what) {
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  ASSERT_EQ(Commit::Stored, commitRecords(store, ring.filled, ring.before, kRingWidth, kRingHeight));
+  ASSERT_TRUE(store.keepCountsIfDue());
+  ASSERT_EQ(1u, store.freeSegments());
+  for (const uint32_t n : what.drawn) draw(store, n);
+}
+
+void sweepReclaim(const ReclaimCase& what) {
+  Ring ring;
+  buildRing(what.layout, ring);
+  if (::testing::Test::HasFailure()) return;
+  uint64_t steps = 0;
+  {
+    SimNorFlash dry = ring.flash;
+    FlashGlyphStore store(dry);
+    reclaimSession(store, ring, what);
+    if (::testing::Test::HasFailure()) return;
+    const uint32_t head = segmentOf(store, ring.before - 1);
+    const uint64_t start = dry.steps();
+    RoomWork work;
+    ASSERT_NE(Room::Failed, store.makeRoom(Budget::Idle, &work));
+    steps = dry.steps() - start;
+    ASSERT_EQ(1u, work.reclaimed);
+    ASSERT_EQ(what.kept.size(), work.kept);
+    ASSERT_EQ(ring.perSegment - what.kept.size(), work.dropped);
+    ASSERT_EQ(head, segmentOf(store, what.kept[0]));
+    for (size_t i = 1; i < what.kept.size(); ++i) ASSERT_EQ(head + 1, segmentOf(store, what.kept[i])) << i;
+  }
+  // The copies, each its record then its slot, the opened segment's header, segment 0's retire word and its erase.
+  const uint32_t copy = recordSize(kRingWidth, kRingHeight) + kSlotBytes;
+  ASSERT_EQ(what.kept.size() * copy + offsetof(SegmentHeader, retired) + sizeof(uint32_t) +
+                what.layout.geometry.segmentBytes / kSectorBytes,
+            steps);
+  for (const bool partial : {false, true}) {
+    for (uint64_t cut = 0; cut < steps; ++cut) {
+      const std::string where =
+          sectorsOf(what.layout) + "reclaim cut " + std::to_string(cut) + (partial ? " partial" : "");
+      SimNorFlash flash = ring.flash;
+      {
+        FlashGlyphStore store(flash);
+        reclaimSession(store, ring, what);
+        if (::testing::Test::HasFailure()) return;
+        flash.partialCut(partial);
+        flash.cutAfterSteps(static_cast<int64_t>(cut));
+        EXPECT_EQ(Room::Failed, store.makeRoom(Budget::Idle)) << where;
+      }
+      ASSERT_TRUE(flash.dead()) << where;
+      flash.powerCycle();
+      sessionsAfterACut(
+          flash, ring.before, where,
+          [&](const FlashGlyphStore& store) {
+            // The reclaim writes only past the head's records and into segment 0: the segments in between are whole.
+            for (uint32_t n = ring.perSegment; n < ring.before; ++n) {
+              EXPECT_TRUE(storedIntact(store, ringKey(n), kRingWidth, kRingHeight)) << where << ": record " << n;
+            }
+          },
+          [](const FlashGlyphStore&) {});
+      if (::testing::Test::HasFailure()) return;
+    }
+  }
+}
+
+// --- An index rebuild ---
+
+// A crowded index of 512 slots, one sector, so a cut in its erase leaves half of it erased and half holding the old
+// slots. A few "no glyph" marks, then records stored one at a time, with an idle reclaim whenever fewer than two
+// segments are free, until the index stops the commits: 358 slots in use, 70 % of 512, most of them stale.
+constexpr uint32_t kCrowdedSlots = 512;
+constexpr uint32_t kMarks = 8;
+
+uint32_t markKey(const uint32_t i) { return makeKey(0x3000 + i, 0, 0); }
+
+SimNorFlash crowdedIndex(uint32_t& stored) {
+  SimNorFlash flash(kFlashBytes);
+  FlashGlyphStore store(flash);
+  EXPECT_TRUE(installAndOpen(store, smallLayout(kCrowdedSlots)));
+  for (uint32_t i = 0; i < kMarks; ++i) EXPECT_EQ(Commit::Stored, store.markNoGlyph(markKey(i))) << i;
+  uint32_t n = 0;
+  Commit commit;
+  while ((commit = commitRecords(store, n, n + 1, kRingWidth, kRingHeight)) == Commit::Stored && n < 1000) {
+    ++n;
+    if (store.freeSegments() < kFreeSegmentsTarget) {
+      EXPECT_NE(Room::Failed, store.makeRoom(Budget::Idle)) << n;
+    }
+  }
+  EXPECT_EQ(Commit::Full, commit);
+  EXPECT_EQ(0u, store.rebuilds());
+  store.close();
+  stored = n;
+  return flash;
+}
+
+// The commit of record `stored` finds the index past its load limit again, which stops writes; the glyphs found are
+// drawn, 0 to 3 times each, so the rebuild carries counts.
+void rebuildSession(FlashGlyphStore& store, const uint32_t stored) {
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  store.keepCountsIfDue();  // the font set does at the end of its load
+  ASSERT_EQ(Commit::Full, commitRecords(store, stored, stored + 1, kRingWidth, kRingHeight));
+  ASSERT_TRUE(store.needsRoom());
+  for (uint32_t n = 0; n < stored; ++n) {
+    if (store.find(ringKey(n), nullptr) == Lookup::Found) draw(store, n, n % 4);
+  }
+}
+
+void sweepRebuild() {
+  uint32_t stored = 0;
+  const SimNorFlash crowded = crowdedIndex(stored);
+  if (::testing::Test::HasFailure()) return;
+  uint64_t steps = 0;
+  uint32_t slots = 0;
+  {
+    SimNorFlash dry = crowded;
+    FlashGlyphStore store(dry);
+    rebuildSession(store, stored);
+    if (::testing::Test::HasFailure()) return;
+    ASSERT_TRUE(store.countsKept());
+    const uint32_t stale = store.usedSlots() - store.liveSlots();
+    ASSERT_GT(uint64_t{stale} * 100, uint64_t{kCrowdedSlots} * kRebuildStalePercent);
+    const uint64_t start = dry.steps();
+    RoomWork work;
+    ASSERT_EQ(Room::Enough, store.makeRoom(Budget::Idle, &work));
+    steps = dry.steps() - start;
+    ASSERT_TRUE(work.rebuilt);
+    ASSERT_EQ(0u, work.reclaimed);
+    slots = store.usedSlots();
+    ASSERT_EQ(slots, store.liveSlots());
+    ASSERT_GT(slots, 0u);
+  }
+  // The journal entry's base, the index's erase (one sector), the slots, and the entry's done word.
+  ASSERT_EQ(sizeof(uint32_t) + 1 + slots * kSlotBytes + sizeof(uint32_t), steps);
+  for (const bool partial : {false, true}) {
+    for (uint64_t cut = 0; cut < steps; ++cut) {
+      const std::string where = "rebuild cut " + std::to_string(cut) + (partial ? " partial" : "");
+      SimNorFlash flash = crowded;
+      {
+        FlashGlyphStore store(flash);
+        rebuildSession(store, stored);
+        if (::testing::Test::HasFailure()) return;
+        flash.partialCut(partial);
+        flash.cutAfterSteps(static_cast<int64_t>(cut));
+        EXPECT_EQ(Room::Failed, store.makeRoom(Budget::Idle)) << where;
+      }
+      ASSERT_TRUE(flash.dead()) << where;
+      flash.powerCycle();
+      // A rebuild whose done word reads programmed, even in part, had every slot in: it counts as finished. Any other
+      // is redone by the first Open, an interrupted one for its journal entry and one never begun for the stale slots.
+      bool finished = false;
+      sessionsAfterACut(
+          flash, stored + 1, where,
+          [&](const FlashGlyphStore& store) {
+            JournalEntry entry{};
+            ASSERT_TRUE(flash.read(kJournalOffset, &entry, sizeof entry)) << where;
+            finished = entry.done != kErased;
+            if (finished) {
+              EXPECT_EQ(slots, store.usedSlots()) << where;
+              EXPECT_EQ(slots, store.liveSlots()) << where;
+            }
+            EXPECT_NE(finished, store.needsRoom(Budget::Open)) << where;
+            for (uint32_t i = 0; i < kMarks; ++i) {
+              EXPECT_NE(Lookup::Found, store.find(markKey(i), nullptr)) << where << ": mark " << i;
+            }
+          },
+          [&](const FlashGlyphStore& store) {
+            EXPECT_EQ(finished ? 0u : 1u, store.rebuilds()) << where;
+            EXPECT_EQ(store.usedSlots(), store.liveSlots()) << where;
+          });
+      if (::testing::Test::HasFailure()) return;
+    }
+  }
+}
+
 }  // namespace
 
 TEST(GlyphStorePowerCut, EveryCutDuringASessionLeavesAConsistentStore) { sweepSession({sweepLayout(), nullptr}); }
@@ -330,3 +704,22 @@ TEST(GlyphStorePowerCut, EveryCutDuringASessionWithAnSdModeStyleLeavesAConsisten
 TEST(GlyphStorePowerCut, EveryCutDuringAWipeIsRecoverable) { sweepWipe(true); }
 
 TEST(GlyphStorePowerCut, EveryCutDuringAWipeOfAStoreNotFullIsRecoverable) { sweepWipe(false); }
+
+TEST(GlyphStorePowerCut, EveryCutDuringAHeadMoveLeavesAConsistentStore) {
+  // Segments of one sector, where a torn record closes its segment, and of two, where it leaves the rest of the
+  // segment to later sessions past the next sector boundary, as on the device's 64 KB segments.
+  for (const Layout& layout : {smallLayout(), smallLayout(1024, 512, 65536, 2 * kSectorBytes)}) {
+    for (const bool tornNext : {false, true}) {
+      sweepHeadMove(layout, tornNext);
+      if (HasFailure()) return;
+    }
+  }
+}
+
+TEST(GlyphStorePowerCut, EveryCutDuringAReclaimLeavesAConsistentStore) {
+  sweepReclaim(oneSectorReclaim());
+  if (HasFailure()) return;
+  sweepReclaim(twoSectorReclaim());
+}
+
+TEST(GlyphStorePowerCut, EveryCutDuringARebuildLeavesAConsistentStore) { sweepRebuild(); }

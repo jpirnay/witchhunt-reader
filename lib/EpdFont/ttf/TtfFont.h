@@ -52,6 +52,9 @@ class TtfFont {
     bool (*reclaim)() = nullptr;
     /// Milliseconds since boot, to time a wipe (TtfFontSet::storeEvents()); without it wipes are counted untimed.
     uint32_t (*nowMs)() = nullptr;
+    /// Whether a glyph drawn now counts as a use for the store's reclaims: the app answers true in the renderer's
+    /// black-and-white pass, the first of a page's passes. Null counts every draw.
+    bool (*countsDraw)() = nullptr;
   };
   static void setHooks(const Hooks& hooks);
 
@@ -82,7 +85,8 @@ class TtfFont {
   void dropNativeSizes();
   uint8_t nativeSizeCount() const;
 
-  /// New glyphs are drawn without being stored until the next wipe: the set's store filled up, or failed.
+  /// New glyphs are drawn without being stored until room is made (or the next wipe): the set's store filled up, or a
+  /// write failed.
   bool ringMode() const;
   /// A style of the family reads its outlines from its file on the card (SD mode): that file stays open while the
   /// set is loaded.
@@ -258,12 +262,28 @@ class TtfFontSet {
   /// The set's family `family`, in load()'s order; nullptr past familyCount().
   TtfFont* font(uint8_t family) const { return family < count_ ? fonts_[family].get() : nullptr; }
 
-  /// Runs a pending wipe (the store filled up, or a write failed), calling `onBusy` first. Only where no glyph
-  /// record of the set is in use: at book open. True when a wipe ran.
+  /// Runs a pending wipe (a write failed, or the face table filled), calling `onBusy` first. Only where no glyph record
+  /// of the set is in use: at a chapter or book open (load(), makeRoom() with Open). True when a wipe ran. False, doing
+  /// nothing, while the `renderLockHeld` hook says the lock is not held: a lookup or a draw may hold a record of the
+  /// log.
   bool wipeIfPending(const std::function<void()>& onBusy = {});
-  /// The store reacts as if it had just filled up: new glyphs go to the ring, and a wipe is pending. The serial test
-  /// API's CMD:TTF:FULL, to reach what a full store does at any size. False when no store is open.
+  /// Makes room in the store when it needs it (a full log, the index, or a rebuild due), after a pending wipe (Open
+  /// only: an Idle step leaves a wipe to the next Open, as it takes seconds, and does nothing else meanwhile): a
+  /// reclaim of its oldest segment or a rebuild of its index, one step for Idle, until enough for Open, which calls
+  /// `onBusy` first. Before that, room to make or not, it takes the store's use counts when a commit made them due
+  /// (FlashGlyphStore::countsDue()): a commit runs inside a draw or a section build, where a session-long block could
+  /// pin memory the reader released, so the counts wait for this call. Once writes resume the ring is freed and new
+  /// glyphs are stored again. Only under RenderLock, and where no glyph record of the set is in use across the call: a
+  /// rebuild with a full journal wipes the store instead. True when it did work (a reclaim, a rebuild or a wipe); false
+  /// when the store is not open, the lock is not held, or there was nothing to do (taking the counts aside).
+  bool makeRoom(FlashGlyphStore::Budget budget, const std::function<void()>& onBusy = {});
+  /// The store reacts as if it had just filled up: new glyphs go to the ring, and the next makeRoom() reclaims. The
+  /// serial test API's CMD:TTF:FULL, to reach what a full store does at any size. False when no store is open.
   bool markFull();
+  /// Whether an Idle step would do something now: the store is open, no wipe is pending (an Idle step leaves it to the
+  /// next Open), and its use counts are due or it has room to make in idle time. The serial test API's CMD:IDLE reads
+  /// it. Only under RenderLock.
+  bool needsIdleRoom() const;
 
   /// What the set and its store hold now, for the serial test API's CMD:TTF.
   struct Stats {
@@ -273,21 +293,29 @@ class TtfFontSet {
     bool wipePending = false;
     uint32_t logUsed = 0;
     uint32_t logSize = 0;
-    uint32_t usedSlots = 0;  ///< glyph index slots in use
-    uint32_t renders = 0;    ///< glyphs drawn from outlines since load, every family's
-    uint32_t hits = 0;       ///< lookups the store answered since load
+    uint32_t usedSlots = 0;     ///< glyph index slots in use
+    uint32_t renders = 0;       ///< glyphs drawn from outlines since load, every family's
+    uint32_t hits = 0;          ///< lookups the store answered since load
+    uint16_t segments = 0;      ///< the log's segments
+    uint16_t freeSegments = 0;  ///< of them, not live
+    uint32_t liveSlots = 0;     ///< index slots that name a live record
+    uint32_t drawsCounted = 0;  ///< draws the store counted as uses
   };
   Stats stats() const;
 
-  /// How often a store filled up and was wiped since boot, every set's, and how long the last wipe took (0 without
-  /// the nowMs hook). Read from any task: the serial test API polls it for its EVT: lines.
+  /// How often a store filled up, was wiped and made room since boot, every set's, and how long the last wipe and the
+  /// last room took (0 without the nowMs hook). Read from any task: the serial test API polls it for its EVT: lines.
   struct StoreEvents {
     uint32_t fills = 0;
     uint32_t wipes = 0;
     uint32_t lastWipeMs = 0;
+    uint32_t rooms = 0;     ///< makeRoom() calls that did work
+    uint32_t rebuilds = 0;  ///< index rebuilds they ran
+    uint32_t dropped = 0;   ///< glyphs their reclaims dropped
+    uint32_t lastRoomMs = 0;
   };
   static StoreEvents storeEvents();
-  /// New glyphs are drawn without being stored until the next wipe.
+  /// New glyphs are drawn without being stored until room is made (or the next wipe).
   bool ringMode() const { return ringMode_; }
   /// The heap the ring's bitmaps hold.
   uint32_t ringBytes() const;
@@ -322,6 +350,7 @@ class TtfFontSet {
   bool ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const;
   void failed(uint8_t style, uint32_t codepoint, ttf::Status status, bool haveKey, uint32_t key);
   void noteCommit(FlashGlyphStore::Commit result);
+  void noteWiped(uint32_t startMs);
   uint32_t batchCapacity() const { return rasterizer_.plan().outputBytes; }
   bool beginMiss();
   void endMiss();

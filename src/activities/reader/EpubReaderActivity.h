@@ -865,6 +865,12 @@ class EpubReaderActivity final : public Activity {
   // Serialises SD access against the render task via RenderLock; skips the tick instead of
   // blocking when the render task is busy.
   void stepBackgroundSectionBuild();
+  // One step of making room in the TrueType glyph store (a segment reclaimed or the index rebuilt), under a Try
+  // RenderLock. True when it did work; the tick then yields to the loop.
+  bool stepGlyphStoreRoom();
+  // The gates Background-B and the idle glyph-store step share: a section on screen in the READING phase, background
+  // work not suspended, and no pre-render, pre-rendered page, display refresh or image decode pending.
+  bool lookAheadMayRun() const;
   // The image lane's step; called from stepBackgroundSectionBuild with the RenderLock held. What
   // it found in its window (LaneBeforeBuild::Window): Dirty when it did a page's worth of work this
   // tick (the caller then yields to the loop); Background-B may borrow only on Clean or Closed.
