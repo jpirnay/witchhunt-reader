@@ -247,7 +247,7 @@ void QuickOverridesActivity::finishWithResult(bool cancelled) {
   payload.fontFamilyOverride = pendingFontFamilyOverride;
   payload.sdFontFamilyOverride = pendingSdFontFamilyOverride;
   payload.fontSizeOverride = pendingFontSizeOverride;
-  payload.bionicReadingOverride = (pendingBionicReadingOverride > 0) ? 1 : 0;
+  payload.bionicReadingOverride = pendingBionicReadingOverride;
   payload.guideDotsOverride = pendingGuideDotsOverride;
   payload.paragraphAlignmentOverride = pendingParagraphAlignmentOverride;
   payload.textAntiAliasingOverride = pendingTextAntiAliasingOverride;

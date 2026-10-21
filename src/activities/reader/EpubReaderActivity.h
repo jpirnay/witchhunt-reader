@@ -659,7 +659,9 @@ class EpubReaderActivity final : public Activity {
   bool usePreRenderedBuffer = false;
   // Progress save is posted by render() and consumed by loop() to keep SD I/O off the render task.
   // render() writes spineIndex/page/pageCount then sets pending with release semantics so loop()
-  // sees a coherent snapshot when it observes pending==true via acquire.
+  // sees a coherent snapshot when it observes pending==true via acquire. An exit that skips loop() writes it instead
+  // (writeOwedPageSave), and a restart's save of the live page drops it; every one of them, loop() included, holds
+  // the RenderLock, so one write per post.
   struct PendingProgressSave {
     std::atomic<bool> pending{false};
     int spineIndex = 0;
@@ -1057,8 +1059,11 @@ class EpubReaderActivity final : public Activity {
   // loop()'s idle branch: asks again for an owed minute-tick refresh once the reader has settled.
   void serviceOwedPeriodicRefresh();
   bool maybeRestartForFragmentedHeap(uint32_t freeHeap, uint32_t contigHeap);
-  // What a restart to the reader must save first, since it skips onExit: the position, when it is authoritative,
-  // and the link back stack.
+  // The page save render() posted and loop() has not written yet, written now unless the book is finished: for
+  // onExit() and a restart to the reader when they do not save the live position.
+  void writeOwedPageSave();
+  // What a restart to the reader must save first, since it skips onExit: the position, when it is authoritative (else
+  // a page save still owed), and the link back stack.
   void saveStateForRestart();
   // A layout change mid-session (a per-book override, the memory ladder's fewer families): the section goes, and
   // the next render builds it again at the paragraph (or page) on screen.
@@ -1144,7 +1149,7 @@ class EpubReaderActivity final : public Activity {
   void stopAutomaticPageTurn();
   void applyBookReaderOverrides(int8_t embeddedStyleOverride, int8_t imageRenderingOverride, int8_t fontFamilyOverride,
                                 const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
-                                bool bionicReadingOverride, int8_t paragraphAlignmentOverride);
+                                int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride);
   // Wider variant that also covers AA, hyphenation and guide dots. Used by
   // QuickOverridesActivity; the narrower overload above funnels through here,
   // preserving the AA/hyphenation/guide-dots values currently held on this activity.

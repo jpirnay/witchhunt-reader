@@ -909,6 +909,8 @@ void EpubReaderActivity::onExit() {
     const auto page = static_cast<uint16_t>(section->currentPage);
     saveProgress(currentSpineIndex, section->currentPage, section->pageCount, section->getParagraphIndexForPage(page),
                  shownProgress());
+  } else {
+    writeOwedPageSave();
   }
 
   // Save bookmarks before exit
@@ -978,8 +980,8 @@ void EpubReaderActivity::onExit() {
   // Flush the reading-stats session LAST: end() writes the book and the global figures in place
   // (~10 KB of heap whatever the history holds), and it needs nothing of the reader (the tracker
   // copied the id, title and author at begin()). Here it has the heap the teardown just freed.
-  // Sleep paths that bypass onExit() still end up here on resume because the activity is
-  // recreated.
+  // Deep sleep ends the session here too (goToSleep() replaces the activity, which runs this);
+  // the silent restarts, which skip onExit(), end it themselves (main.cpp).
   globalReadingSessionTracker().end();
 
   // Last: everything above saved under the book's path, which the finished-book flow may have moved.
@@ -997,15 +999,22 @@ void EpubReaderActivity::loop() {
   // this file -- on in release builds too).
   serviceBackgroundDebugLog();
 
+  // Under the RenderLock, which every post and every other writer of one holds. A heap-recovery restart saves the live
+  // page under it and keeps it up to the reboot; without it, an older post written beside that save or after it (in
+  // the restart's delay(50) or image warm pass) would reopen the book on the older page. Try, never wait: a busy lock
+  // leaves the post for the next pass, or for writeOwedPageSave() at exit, rather than hold input behind a pass.
   if (pendingProgressSave.pending.load(std::memory_order_acquire)) {
-    pendingProgressSave.pending.store(false, std::memory_order_relaxed);
-    saveProgress(pendingProgressSave.spineIndex, pendingProgressSave.page, pendingProgressSave.pageCount);
+    RenderLock lock(RenderLock::Mode::Try);
+    if (lock.ownsLock() && pendingProgressSave.pending.exchange(false, std::memory_order_acquire)) {
+      saveProgress(pendingProgressSave.spineIndex, pendingProgressSave.page, pendingProgressSave.pageCount);
+    }
   }
 
   // Deferred by the render task (renderFinishedBookPass) because it ends in pushActivity().
   // After the progress flush and before input handling: this is the reader's LAST loop() pass —
   // the launch pushes it onto the activity stack, which stops loop() being called — so anything
-  // still owed must be flushed above, and nothing below it will run again.
+  // still owed is flushed above (a busy lock leaves it to writeOwedPageSave()), and nothing below
+  // it will run again.
   if (finishedBookLaunchPending_.load(std::memory_order_acquire)) {
     serviceFinishedBookLaunch();
     return;
@@ -3166,13 +3175,12 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
 void EpubReaderActivity::applyBookReaderOverrides(const int8_t embeddedStyleOverride,
                                                   const int8_t imageRenderingOverride, const int8_t fontFamilyOverride,
                                                   const std::string& sdFontFamilyOverride,
-                                                  const int8_t fontSizeOverride, const bool bionicReadingOverride,
+                                                  const int8_t fontSizeOverride, const int8_t bionicReadingOverride,
                                                   const int8_t paragraphAlignmentOverride) {
   applyBookReaderOverrides(embeddedStyleOverride, imageRenderingOverride, fontFamilyOverride, sdFontFamilyOverride,
-                           fontSizeOverride, static_cast<int8_t>(bionicReadingOverride ? 1 : 0),
-                           paragraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
-                           bookFontSizeNormalizationOverride, bookGuideDotsOverride,
-                           bookInlineFootnotePreviewsOverride);
+                           fontSizeOverride, bionicReadingOverride, paragraphAlignmentOverride,
+                           bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride,
+                           bookGuideDotsOverride, bookInlineFootnotePreviewsOverride);
 }
 
 void EpubReaderActivity::applyBookReaderOverrides(
@@ -5645,6 +5653,22 @@ bool EpubReaderActivity::maybeRestartForFragmentedHeap(const uint32_t freeHeap, 
   return false;
 }
 
+void EpubReaderActivity::writeOwedPageSave() {
+  // render() posts each page's save for loop(), and loop() does not run while an overlay is on top, nor before a
+  // restart to the reader that comes first. X3, 2026-10-21: page 2 of 19 was drawn 11 ms before Confirm opened the
+  // reader menu, a layout change there dropped the section, Go Home skipped onExit()'s save of the live position, and
+  // the book reopened on page 1. Written as loop() would have written it, a mid-build turn's unknown page count
+  // included (issue #75); past the last spine the finished-book record stands.
+  //
+  // Settled under the RenderLock: every post is made under it, every caller holds it (onExit() the exclusive one), and
+  // loop() takes it to write a post, so each post is written once, never through two handles on progress.bin at once.
+  if (!epub || currentSpineIndex >= epub->getSpineItemsCount() ||
+      !pendingProgressSave.pending.exchange(false, std::memory_order_acquire)) {
+    return;
+  }
+  saveProgress(pendingProgressSave.spineIndex, pendingProgressSave.page, pendingProgressSave.pageCount);
+}
+
 void EpubReaderActivity::saveStateForRestart() {
   // Persist the live position only when it is authoritative. During a section (re)build
   // (readerPhase_ != READING, or section already reset for one) the saved navTarget has not
@@ -5652,7 +5676,19 @@ void EpubReaderActivity::saveStateForRestart() {
   // clobber the user's real position in progress.bin, which already holds the correct value
   // (issue #75: progress reset to the chapter start after a heap-recovery reboot).
   if (section && readerPhase_ == ReaderPhase::READING) {
+    // A post is a page drawn before the live one, or a mid-build turn saved without its page count: never more recent,
+    // so it goes. A refused restart lets the reader carry on, and loop() would write it over this save; up to the
+    // reboot, the RenderLock held here keeps loop() from writing it at all.
+    pendingProgressSave.pending.store(false, std::memory_order_relaxed);
     saveProgress(currentSpineIndex, section->currentPage, section->pageCount);
+  } else {
+    // progress.bin holds the correct value only once loop() has written the save posted for the page drawn last. A
+    // turn across a spine boundary taken while that page went out comes here without that: the pass that drew it
+    // posts its save after the waveform, the pass for the turn starts at once with no section, and its
+    // recoverSecondaryBufferIfNeeded() can restart before the loop task (same priority) has run. What was posted is a
+    // page the reader drew, or a mid-build turn saved for this very case (issue #75), never a fresh Section's page 0,
+    // so writing it keeps the guard above.
+    writeOwedPageSave();
   }
   // The reboot skips onExit, which is where the stack is otherwise saved. Unlike the position it
   // does not depend on the build phase: every entry was recorded when its link was followed.
@@ -7484,11 +7520,11 @@ void EpubReaderActivity::openQuickOverrides() {
           bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
-        applyBookReaderOverrides(
-            menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride, menu.sdFontFamilyOverride,
-            menu.fontSizeOverride, static_cast<int8_t>(menu.bionicReadingOverride), menu.paragraphAlignmentOverride,
-            menu.textAntiAliasingOverride, menu.hyphenationOverride, menu.fontSizeNormalizationOverride,
-            menu.guideDotsOverride, menu.inlineFootnotePreviewsOverride);
+        applyBookReaderOverrides(menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
+                                 menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,
+                                 menu.paragraphAlignmentOverride, menu.textAntiAliasingOverride,
+                                 menu.hyphenationOverride, menu.fontSizeNormalizationOverride, menu.guideDotsOverride,
+                                 menu.inlineFootnotePreviewsOverride);
       });
 }
 
@@ -7527,7 +7563,7 @@ void EpubReaderActivity::openReaderMenu() {
       std::make_unique<EpubReaderMenuActivity>(
           renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent, SETTINGS.orientation,
           !currentPageFootnotes.empty(), bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
-          bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness, getEffectiveBionicReading(),
+          bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness, bookBionicReadingOverride,
           bookGuideDotsOverride, bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
           bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, !bookmarkStore.isEmpty(),
           isCurrentPageStarred, hasPrintedPages),
@@ -7536,11 +7572,11 @@ void EpubReaderActivity::openReaderMenu() {
         applyOrientation(menu.orientation);
         applyTextDarkness(menu.textDarkness);
         toggleAutoPageTurn(menu.pageTurnOption);
-        applyBookReaderOverrides(
-            menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride, menu.sdFontFamilyOverride,
-            menu.fontSizeOverride, static_cast<bool>(menu.bionicReadingOverride), menu.paragraphAlignmentOverride,
-            menu.textAntiAliasingOverride, menu.hyphenationOverride, menu.fontSizeNormalizationOverride,
-            menu.guideDotsOverride, menu.inlineFootnotePreviewsOverride);
+        applyBookReaderOverrides(menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
+                                 menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,
+                                 menu.paragraphAlignmentOverride, menu.textAntiAliasingOverride,
+                                 menu.hyphenationOverride, menu.fontSizeNormalizationOverride, menu.guideDotsOverride,
+                                 menu.inlineFootnotePreviewsOverride);
         if (!result.isCancelled) {
           onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
         }
@@ -7724,7 +7760,8 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
     case BA::BTN_TOGGLE_BIONIC_READING:
       if (epub) {
         applyBookReaderOverrides(bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
-                                 bookSdFontFamilyOverride, bookFontSizeOverride, !getEffectiveBionicReading(),
+                                 bookSdFontFamilyOverride, bookFontSizeOverride,
+                                 static_cast<int8_t>(getEffectiveBionicReading() ? 0 : 1),
                                  bookParagraphAlignmentOverride);
         requestUpdate();
       }

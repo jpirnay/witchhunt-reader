@@ -55,7 +55,7 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
                                   const int8_t initialEmbeddedStyleOverride, const int8_t initialImageRenderingOverride,
                                   const int8_t initialFontFamilyOverride,
                                   const std::string& initialSdFontFamilyOverride, const int8_t initialFontSizeOverride,
-                                  const uint8_t initialTextDarkness, const bool initialBionicReadingOverride,
+                                  const uint8_t initialTextDarkness, const int8_t initialBionicReadingOverride,
                                   const int8_t initialGuideDotsOverride, const int8_t initialParagraphAlignmentOverride,
                                   const int8_t initialTextAntiAliasingOverride, const int8_t initialHyphenationOverride,
                                   const int8_t initialFontSizeNormalizationOverride,
@@ -130,7 +130,10 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
   // override is one of them (see ReaderSizeList).
   ReaderSizeList pendingSizeList() const;
   uint8_t pendingTextDarkness = 1;
-  bool pendingBionicReading = false;
+  // The row shows Off / On, what the page does; the book's override, and the one it opened with, travel behind it
+  // (see OnOffOverride).
+  int8_t pendingBionicReadingOverride = -1;
+  int8_t openedBionicReadingOverride = -1;
   int8_t pendingGuideDotsOverride = -1;
   int8_t pendingParagraphAlignmentOverride = -1;
   int8_t pendingTextAntiAliasingOverride = -1;

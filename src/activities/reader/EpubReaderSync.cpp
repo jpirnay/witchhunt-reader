@@ -37,6 +37,21 @@ void EpubReaderActivity::launchKOReaderSync(const SyncLaunchMode mode, const Syn
   int currentPage = positionOverride ? positionOverride->page : (section ? section->currentPage : 0);
   int totalPages = positionOverride ? positionOverride->pageCount : (section ? section->pageCount : 0);
 
+  // No live section, typically because the reader menu dropped it for a relayout (a changed layout
+  // override, the orientation, the auto-turn status band) before running the sync it was closed
+  // with. The drop kept the page and the chapter's page count in navTarget
+  // (resetSectionKeepingPosition() and its siblings), so sync that page. The session used to get
+  // 0/0: X3, 2026-10-21, a push from the menu on page 19 of 83 uploaded the first page of the
+  // chapter, and a session that ends without applying the remote (a failed push, a cancelled pull
+  // or compare) restores the reader to the page it was handed. A jump's target carries no page count
+  // of this spine and keeps 0/0.
+  if (!positionOverride && !section && navTarget.cachedPageCount > 0 && navTarget.cachedSpineIdx == currentSpineIndex) {
+    currentPage = navTarget.kind == NavigationTarget::Kind::Page ? navTarget.page : navTarget.fallbackPage;
+    totalPages = navTarget.cachedPageCount;
+    LOG_DBG("ERS", "Sync without a live section: page %d/%d of spine %d kept from before the relayout", currentPage,
+            totalPages, currentSpineIndex);
+  }
+
   // An override only ever comes from the finished-book flow, so it always means "the reader
   // reached the end of this book". Its call sites can usually say which page that was, but not
   // when there is no live section left to ask (renderFinishedBookPass, and the guarded fallbacks
