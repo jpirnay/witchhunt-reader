@@ -339,7 +339,11 @@ bool TtfFontSet::makeRoom(const FlashGlyphStore::Budget budget, const std::funct
   // wipe takes seconds: an Idle step leaves it to the next Open, behind the busy indicator.
   if (budget == FlashGlyphStore::Budget::Idle && store_.wipePending()) return false;
   const bool wiped = wipeIfPending(onBusy);
-  if (store_.wipePending() || !store_.needsRoom(budget)) return wiped;
+  if (store_.wipePending()) return wiped;
+  // A commit, inside a draw or a section build, only marks the use counts due. Their session-long block is taken here,
+  // room to make or not: an idle tick, or the top of a chapter's build, before it releases any of the reader's memory.
+  store_.keepCountsIfDue();
+  if (!store_.needsRoom(budget)) return wiped;
   if (budget == FlashGlyphStore::Budget::Open && onBusy) onBusy();
   const uint32_t start = hooks.nowMs ? hooks.nowMs() : 0;
   const uint32_t generation = store_.generation();
@@ -372,7 +376,9 @@ bool TtfFontSet::markFull() {
   return true;
 }
 
-bool TtfFontSet::needsIdleRoom() const { return store_.isOpen() && store_.idleWorkDue(); }
+bool TtfFontSet::needsIdleRoom() const {
+  return store_.isOpen() && !store_.wipePending() && (store_.countsDue() || store_.idleWorkDue());
+}
 
 TtfFontSet::Stats TtfFontSet::stats() const {
   Stats s;

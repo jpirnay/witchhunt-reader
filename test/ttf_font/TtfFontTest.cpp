@@ -585,6 +585,51 @@ TEST_F(TtfFontTest, ADrawnStoredGlyphIsCounted) {
   EXPECT_EQ(2u, font.set->stats().drawsCounted);
 }
 
+TEST_F(TtfFontTest, UseCountsAreTakenAtTheNextMakeRoomNotInTheDraw) {
+  // A five-segment log: with two live, the free ones are within one of the target, so counts are wanted.
+  flash.setFreePages(16);
+  const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
+  ASSERT_NE(nullptr, font);
+  uint32_t cp = 0x21;
+  // Each glyph is rendered and stored inside its draw, where a session-long block could pin a region the reader
+  // released: the commit that nears a full ring takes no memory for the counts.
+  fillToTwoSegments(font, cp);
+  ASSERT_EQ(3u, font.set->stats().freeSegments);
+  const EpdGlyph* a = font->glyph(kRegular, 'A');
+  ASSERT_NE(nullptr, a);
+  const uint8_t* bitmap = nullptr;
+  ASSERT_FALSE(font->ownsBitmap(a, bitmap));  // a record of the log, drawn
+  EXPECT_EQ(0u, font.set->stats().drawsCounted);
+  EXPECT_TRUE(font.set->needsIdleRoom());  // an idle step would take them
+  // The next idle step takes them, though it has no room to make.
+  EXPECT_FALSE(font.set->makeRoom(FlashGlyphStore::Budget::Idle));
+  EXPECT_FALSE(font.set->needsIdleRoom());
+  a = font->glyph(kRegular, 'A');
+  ASSERT_FALSE(font->ownsBitmap(a, bitmap));
+  EXPECT_EQ(1u, font.set->stats().drawsCounted);
+}
+
+TEST_F(TtfFontTest, ASetLoadedOverAStoreNearFullCountsItsFirstDraws) {
+  flash.setFreePages(16);
+  {
+    const auto first = open(kIdentityA, TtfFont::kMaxPointSize);
+    ASSERT_NE(nullptr, first);
+    uint32_t cp = 0x21;
+    fillToTwoSegments(first, cp);
+    ASSERT_EQ(3u, first.set->stats().freeSegments);
+  }
+  // The next boot opens the store near full: its counts are kept from the load on.
+  const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
+  ASSERT_NE(nullptr, font);
+  const uint32_t renders = font->renders();
+  const EpdGlyph* a = font->glyph(kRegular, 'A');
+  ASSERT_NE(nullptr, a);
+  ASSERT_EQ(renders, font->renders());  // read from the store
+  const uint8_t* bitmap = nullptr;
+  ASSERT_FALSE(font->ownsBitmap(a, bitmap));
+  EXPECT_EQ(1u, font.set->stats().drawsCounted);
+}
+
 TEST_F(TtfFontTest, TheStatsShowTheRing) {
   flash.setFreePages(16);
   const TtfFontSet::StoreEvents before = TtfFontSet::storeEvents();

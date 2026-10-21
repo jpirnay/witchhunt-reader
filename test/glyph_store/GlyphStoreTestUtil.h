@@ -171,9 +171,9 @@ constexpr uint8_t kRingWidth = 40;
 constexpr uint8_t kRingHeight = 58;
 constexpr uint32_t ringKey(const uint32_t n) { return glyphstore::makeKey(0x4E00 + n, 0, 0); }
 
-/// Fills an open store, from record 0, until one segment is free: the counts are kept, the tail is segment 0 and copies
-/// have room. On smallLayout(), 85 records: segments 0-13 full (six each), one record in segment 14. Returns how many
-/// were stored.
+/// Fills an open store, from record 0, until one segment is free: the counts are kept (taken as the font set's next
+/// makeRoom() takes them), the tail is segment 0 and copies have room. On smallLayout(), 85 records: segments 0-13 full
+/// (six each), one record in segment 14. Returns how many were stored.
 inline uint32_t fillRing(FlashGlyphStore& store, GlyphBatch& batch) {
   uint32_t n = 0;
   while (store.freeSegments() > 1 && n < 200) {
@@ -181,7 +181,7 @@ inline uint32_t fillRing(FlashGlyphStore& store, GlyphBatch& batch) {
     EXPECT_EQ(Commit::Stored, store.commit(batch)) << n;
     ++n;
   }
-  EXPECT_TRUE(store.countsKept());
+  EXPECT_TRUE(store.keepCountsIfDue());
   return n;
 }
 

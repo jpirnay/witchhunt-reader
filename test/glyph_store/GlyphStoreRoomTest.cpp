@@ -181,16 +181,71 @@ TEST_F(GlyphStoreRoom, NoCountsAreKeptWhileTheRingHasRoom) {
   EXPECT_EQ(0u, store.drawsCounted());
 }
 
-TEST_F(GlyphStoreRoom, CountsAreKeptOnceTheRingNearsFull) {
+TEST_F(GlyphStoreRoom, ACommitThatNearsAFullRingMakesTheCountsDueWithoutTakingThem) {
   fillTo(kFreeSegmentsTarget + 3);  // 11 of 16 segments live: under 75%, and 5 free
+  EXPECT_FALSE(store.countsDue());
   EXPECT_FALSE(store.countsKept());
+  // A commit runs inside a draw or a section build: the one that leaves the free segments within one of the target
+  // asks for no memory there.
   fillTo(kFreeSegmentsTarget + 1);
+  EXPECT_TRUE(store.countsDue());
+  EXPECT_FALSE(store.countsKept());
+  store.noteDrawn(glyphOf(kFirst));
+  EXPECT_EQ(0u, store.drawsCounted());
+  // The next safe point takes it.
+  EXPECT_TRUE(store.keepCountsIfDue());
   EXPECT_TRUE(store.countsKept());
+  EXPECT_FALSE(store.countsDue());
+  store.noteDrawn(glyphOf(kFirst));
+  EXPECT_EQ(1u, store.useCount(makeKey(kFirst, 0, 0)));
+  EXPECT_EQ(1u, store.drawsCounted());
+}
+
+TEST_F(GlyphStoreRoom, AnOpenOfARingNearFullKeepsTheCountsFromTheStart) {
+  fillTo(kFreeSegmentsTarget + 3);
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_FALSE(store.countsKept());  // room to spare: none wanted yet
+  fillTo(kFreeSegmentsTarget + 1);
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_TRUE(store.countsKept());
+  EXPECT_FALSE(store.countsDue());
+  // A glyph drawn right after the open is counted.
+  store.noteDrawn(glyphOf(kFirst));
+  EXPECT_EQ(1u, store.useCount(makeKey(kFirst, 0, 0)));
+}
+
+TEST_F(GlyphStoreRoom, CountsRefusedAreNotAskedForAgainUntilTheNextOpen) {
+  fillTo(kFreeSegmentsTarget + 1);
+  ASSERT_TRUE(store.countsDue());
+  const uint32_t refusedBefore = refusedArrays;
+  {
+    const RefuseArrays refuse;
+    EXPECT_FALSE(store.keepCountsIfDue());
+    EXPECT_EQ(refusedBefore + 1, refusedArrays);
+    EXPECT_FALSE(store.countsDue());
+    // Neither a later commit past the trigger, nor the next safe point, nor markFull() asks again.
+    ASSERT_EQ(Commit::Stored, commitOne(kFirst + 100));
+    EXPECT_FALSE(store.countsDue());
+    EXPECT_FALSE(store.keepCountsIfDue());
+    EXPECT_TRUE(store.markFull());
+    EXPECT_FALSE(store.countsKept());
+    EXPECT_EQ(refusedBefore + 1, refusedArrays);
+  }
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_TRUE(store.countsKept());
+}
+
+TEST_F(GlyphStoreRoom, MarkFullKeepsTheCountsAtOnce) {
+  ASSERT_EQ(Commit::Stored, commitOne(kFirst));
+  ASSERT_FALSE(store.countsDue());
+  ASSERT_TRUE(store.markFull());
+  EXPECT_TRUE(store.countsKept());
+  EXPECT_FALSE(store.countsDue());
 }
 
 TEST_F(GlyphStoreRoom, DrawsAreCountedUpToThree) {
   fillTo(kFreeSegmentsTarget + 1);
-  ASSERT_TRUE(store.countsKept());
+  ASSERT_TRUE(store.keepCountsIfDue());
   const EpdGlyph* glyph = glyphOf(kFirst);
   const uint32_t key = makeKey(kFirst, 0, 0);
   const uint8_t want[] = {0, 1, 2, 3, 3};
@@ -208,7 +263,7 @@ TEST_F(GlyphStoreRoom, DrawsAreCountedUpToThree) {
 
 TEST_F(GlyphStoreRoom, ADrawOfSomethingElseIsIgnored) {
   fillTo(kFreeSegmentsTarget + 1);
-  ASSERT_TRUE(store.countsKept());
+  ASSERT_TRUE(store.keepCountsIfDue());
   const uint32_t before = store.drawsCounted();
   EpdGlyph onStack{};
   store.noteDrawn(&onStack);
@@ -224,19 +279,30 @@ TEST_F(GlyphStoreRoom, ADrawOfSomethingElseIsIgnored) {
 
 TEST_F(GlyphStoreRoom, CountsStartAtZeroAfterAReopen) {
   fillTo(kFreeSegmentsTarget + 1);
+  ASSERT_TRUE(store.keepCountsIfDue());
   const uint32_t key = makeKey(kFirst, 0, 0);
   store.noteDrawn(glyphOf(kFirst));
   ASSERT_EQ(1u, store.useCount(key));
   ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
-  EXPECT_FALSE(store.countsKept());
+  EXPECT_TRUE(store.countsKept());  // the ring is still near full
   EXPECT_EQ(0u, store.useCount(key));
   EXPECT_EQ(0u, store.drawsCounted());
 }
 
 TEST_F(GlyphStoreRoom, CountsAreFreedByAWipe) {
   fillTo(kFreeSegmentsTarget + 1);
-  ASSERT_TRUE(store.countsKept());
+  ASSERT_TRUE(store.keepCountsIfDue());
   ASSERT_TRUE(store.wipe());
+  EXPECT_FALSE(store.countsKept());
+  EXPECT_FALSE(store.countsDue());
+}
+
+TEST_F(GlyphStoreRoom, AWipeDropsCountsThatWereDue) {
+  fillTo(kFreeSegmentsTarget + 1);
+  ASSERT_TRUE(store.countsDue());
+  ASSERT_TRUE(store.wipe());
+  EXPECT_FALSE(store.countsDue());
+  EXPECT_FALSE(store.keepCountsIfDue());
   EXPECT_FALSE(store.countsKept());
 }
 
@@ -380,7 +446,7 @@ TEST_F(GlyphStoreRoom, AFullRingsFirstReclaimDropsItsOldestWhole) {
   const uint32_t stored = fillUntilFull(0);
   ASSERT_EQ(96u, stored);
   ASSERT_EQ(0u, store.freeSegments());
-  ASSERT_TRUE(store.countsKept());
+  ASSERT_TRUE(store.keepCountsIfDue());
   for (uint32_t n = 0; n < 12; ++n) draw(n);  // segments 0 and 1
   // The head's 480 bytes take no record, and no segment is free: nothing of segment 0 can be kept.
   RoomWork work;
@@ -654,7 +720,7 @@ TEST_F(GlyphStoreRoom, ACrowdedIndexIsRebuiltFromTheLog) {
   ASSERT_EQ(Commit::Full, commit);
   ASSERT_TRUE(store.needsRoom());
   ASSERT_GE(store.freeSegments(), kFreeSegmentsTarget);
-  ASSERT_TRUE(store.countsKept());
+  ASSERT_TRUE(store.keepCountsIfDue());
   std::vector<uint32_t> live;
   for (uint32_t k = 0; k < n; ++k) {
     if (lookup(k) != Lookup::Found) continue;

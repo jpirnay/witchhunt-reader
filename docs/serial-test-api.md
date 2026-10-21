@@ -288,7 +288,8 @@ With `:SCREEN` it waits only until the screen has settled (everything above but 
 That is what you want before a screenshot after a page turn or after opening a book. A full
 `CMD:IDLE` in the reader also waits for the look-ahead builds of the next chapters, which start
 1.5 s after a page appears and can take tens of seconds on a long book, and for a TrueType glyph store that still
-needs room made (a reclaim or an index rebuild, `CMD:TTF`), which the reader does in idle time.
+needs room made (a reclaim or an index rebuild, `CMD:TTF`) or still has its use counts to take (their block is
+allocated at an idle step, not inside a draw), which the reader does in idle time.
 
 Send `CMD:IDLE` after the command it should wait for; the device handles them in order. While an
 `IDLE` is pending, the device still answers other commands; a second `IDLE` replaces the first.
@@ -531,7 +532,8 @@ reads its outlines from the card; `log_used`/`log_size` the store's log in bytes
 a wipe waits for the next chapter or book open (idle time leaves it); `renders` and `hits` the glyphs drawn from outlines and read from the store
 since the set loaded. `segments` and `free` the log's segments and the ones not live; `live_slots` the index slots
 that name a live record (`slots` less the stale ones); `draws` the glyph draws the store counted as uses (those of a
-page's black-and-white pass); it stays 0 until the store keeps use counts (the log near full, or `CMD:TTF:FULL`). `fills`, `wipes` and `last_wipe_ms` count since boot, whichever set was loaded; so do
+page's black-and-white pass); it stays 0 until the store keeps use counts: once the log nears full, from the next idle
+step or chapter open (from the set's load when the log already is), or from `CMD:TTF:FULL`. `fills`, `wipes` and `last_wipe_ms` count since boot, whichever set was loaded; so do
 `rooms` (`makeRoom` calls that did work: a segment reclaimed or the index rebuilt; a wipe counts only in `wipes`,
 except a rebuild whose journal is full, which becomes one), `rebuilds`, `dropped` (glyphs
 the reclaims dropped) and `last_room_ms`. With no TrueType family loaded the set's fields are replaced by `none`:

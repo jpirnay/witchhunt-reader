@@ -269,16 +269,19 @@ class TtfFontSet {
   /// Makes room in the store when it needs it (a full log, the index, or a rebuild due), after a pending wipe (Open
   /// only: an Idle step leaves a wipe to the next Open, as it takes seconds, and does nothing else meanwhile): a
   /// reclaim of its oldest segment or a rebuild of its index, one step for Idle, until enough for Open, which calls
-  /// `onBusy` first. Once writes resume the ring is freed and new glyphs are stored again. Only under RenderLock, and
-  /// where no glyph record of the set is in use across the call: a rebuild with a full journal wipes the store
-  /// instead. True when it did work (a reclaim, a rebuild or a wipe); false when the store is not open, the lock is not
-  /// held, or there was nothing to do.
+  /// `onBusy` first. Before that, room to make or not, it takes the store's use counts when a commit made them due
+  /// (FlashGlyphStore::countsDue()): a commit runs inside a draw or a section build, where a session-long block could
+  /// pin memory the reader released, so the counts wait for this call. Once writes resume the ring is freed and new
+  /// glyphs are stored again. Only under RenderLock, and where no glyph record of the set is in use across the call: a
+  /// rebuild with a full journal wipes the store instead. True when it did work (a reclaim, a rebuild or a wipe); false
+  /// when the store is not open, the lock is not held, or there was nothing to do (taking the counts aside).
   bool makeRoom(FlashGlyphStore::Budget budget, const std::function<void()>& onBusy = {});
   /// The store reacts as if it had just filled up: new glyphs go to the ring, and the next makeRoom() reclaims. The
   /// serial test API's CMD:TTF:FULL, to reach what a full store does at any size. False when no store is open.
   bool markFull();
-  /// Whether an Idle step would find room to make now: the store is open, no wipe is pending (an Idle step leaves it
-  /// to the next Open), and the store needs room. The serial test API's CMD:IDLE reads it. Only under RenderLock.
+  /// Whether an Idle step would do something now: the store is open, no wipe is pending (an Idle step leaves it to the
+  /// next Open), and its use counts are due or it has room to make in idle time. The serial test API's CMD:IDLE reads
+  /// it. Only under RenderLock.
   bool needsIdleRoom() const;
 
   /// What the set and its store hold now, for the serial test API's CMD:TTF.

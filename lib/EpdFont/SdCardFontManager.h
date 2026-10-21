@@ -91,7 +91,8 @@ class SdCardFontManager {
   // wipe, left by a failed write or a full face table, first), Idle in idle time. Only under RenderLock. True when it
   // did work.
   bool makeTtfRoom(FlashGlyphStore::Budget budget, const std::function<void()>& onBusy);
-  // An Idle step would find room to make (TtfFontSet::needsIdleRoom). Only under RenderLock.
+  // An Idle step would do work in the glyph store: room to make, or its use counts to take (TtfFontSet::needsIdleRoom).
+  // Only under RenderLock.
   bool ttfNeedsIdleRoom() const;
   bool ttfLoaded() const { return ttfSet_ != nullptr; }
   // The loaded set, for the serial test API (CMD:TTF): nullptr when none is loaded or it is suspended. Only under

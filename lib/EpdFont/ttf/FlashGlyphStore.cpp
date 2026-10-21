@@ -263,6 +263,9 @@ FlashGlyphStore::OpenResult FlashGlyphStore::open(const uint8_t identity[kIdenti
           static_cast<unsigned>(g.logSize), static_cast<unsigned>(nextEpoch_), static_cast<unsigned>(usedSlots_),
           static_cast<unsigned>(g.indexSlots), static_cast<unsigned>(liveSlots_), static_cast<unsigned>(usedPairs_),
           journal_.done ? "" : ", a rebuild to redo", wipePending_ ? ", wipe pending" : "");
+  // A ring already near full keeps its counts from the start, so the first draws count; open() runs at a set's load,
+  // not inside a draw. A pending wipe would drop them.
+  if (!wipePending_ && countsWanted()) keepCounts();
   return OpenResult::Ready;
 }
 
@@ -598,7 +601,9 @@ FlashGlyphStore::Commit FlashGlyphStore::insertGlyphSlot(const uint32_t key, con
 
 FlashGlyphStore::Commit FlashGlyphStore::commit(GlyphBatch& batch) {
   const Commit result = batch.count_ == 0 ? Commit::Stored : writeBatch(batch);
-  keepCountsIfNeeded();
+  // A commit runs inside a page draw or a section build: the counts' block is only marked due here, and taken at the
+  // next safe point (keepCountsIfDue()).
+  if (open_ && !wipePending_ && !useCounts_ && !countsTried_ && countsWanted()) countsDue_ = true;
   batch.clear();  // the only place a batch is cleared, so no record is ever written twice
   return result;
 }
@@ -728,20 +733,25 @@ void FlashGlyphStore::setCount(const uint32_t slot, const uint8_t count) {
 void FlashGlyphStore::dropCounts() {
   useCounts_.reset();
   countsTried_ = false;
+  countsDue_ = false;
   drawsCounted_ = 0;
 }
 
 // Counts are only wanted when room will have to be made: once the live segments reach kCountsAtPercent of the log, or
 // the free ones come within one of the target.
-void FlashGlyphStore::keepCountsIfNeeded() {
-  if (!open_ || useCounts_ || countsTried_) return;
-  const uint32_t count = segmentCount();
-  if (uint64_t{live_} * 100 < uint64_t{count} * kCountsAtPercent && freeSegments() > kFreeSegmentsTarget + 1) return;
-  keepCounts();
+bool FlashGlyphStore::countsWanted() const {
+  return uint64_t{live_} * 100 >= uint64_t{segmentCount()} * kCountsAtPercent ||
+         freeSegments() <= kFreeSegmentsTarget + 1;
+}
+
+bool FlashGlyphStore::keepCountsIfDue() {
+  if (countsDue_) keepCounts();
+  return countsKept();
 }
 
 // One try a session: a refusal is not asked again until open().
 void FlashGlyphStore::keepCounts() {
+  countsDue_ = false;
   if (useCounts_ || countsTried_) return;
   countsTried_ = true;
   const uint32_t bytes = geometry_.indexSlots / 4;
