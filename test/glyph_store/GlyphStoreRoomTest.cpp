@@ -701,6 +701,63 @@ TEST_F(GlyphStoreRoom, ARebuildForgetsTheNoGlyphMarks) {
   EXPECT_EQ(Lookup::NoGlyph, store.find(lacked, nullptr));
 }
 
+// A family that lacks a whole script (a Latin font in a CJK book) marks each code point of it it is asked for: 130
+// marks, over kRebuildStalePercent of the 1,024-slot index, and not one stale slot. A rebuild would only forget them,
+// to learn them again.
+constexpr uint32_t kScriptMarks = 130;
+
+TEST_F(GlyphStoreRoom, NoGlyphMarksAloneDoNotCallForARebuildAtAnOpen) {
+  ASSERT_GE(kScriptMarks * 100, layout.geometry.indexSlots * kRebuildStalePercent);
+  for (uint32_t n = 0; n < 6; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
+  for (uint32_t i = 0; i < kScriptMarks; ++i) {
+    ASSERT_EQ(Commit::Stored, store.markNoGlyph(makeKey(0x3000 + i, 0, 0))) << i;
+  }
+  ASSERT_EQ(6u + kScriptMarks, store.usedSlots());
+  ASSERT_EQ(6u, store.liveSlots());
+  const auto expectNoRebuild = [&](const char* when) {
+    EXPECT_FALSE(store.needsRoom(Budget::Open)) << when;
+    RoomWork work;
+    EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work)) << when;
+    EXPECT_FALSE(work.rebuilt) << when;
+    EXPECT_EQ(0u, store.rebuilds()) << when;
+    EXPECT_EQ(Lookup::NoGlyph, store.find(makeKey(0x3000, 0, 0), nullptr)) << when;
+  };
+  expectNoRebuild("as marked");
+  // Counted again by the next session's open.
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  expectNoRebuild("after a reopen");
+}
+
+TEST_F(GlyphStoreRoom, AnIndexFilledByMarksIsStillRebuiltAtAnOpen) {
+  for (uint32_t n = 0; n < 6; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
+  fillIndexWithMarks();
+  EXPECT_TRUE(store.needsRoom(Budget::Open));
+  RoomWork work;
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
+  EXPECT_TRUE(work.rebuilt);
+  EXPECT_EQ(Lookup::NotStored, store.find(makeKey(0x3000, 0, 0), nullptr));
+  EXPECT_EQ(6u, store.usedSlots());
+  EXPECT_EQ(6u, store.liveSlots());
+  for (uint32_t n = 0; n < 6; ++n) EXPECT_TRUE(intact(n)) << n;
+  // The marks went with the rebuild: as many again as a script's do not call for another.
+  for (uint32_t i = 0; i < kScriptMarks; ++i) {
+    ASSERT_EQ(Commit::Stored, store.markNoGlyph(makeKey(0x3000 + i, 0, 0))) << i;
+  }
+  EXPECT_FALSE(store.needsRoom(Budget::Open));
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
+  EXPECT_FALSE(work.rebuilt);
+}
+
+TEST_F(GlyphStoreRoom, AWipeForgetsTheMarks) {
+  fillIndexWithMarks();
+  ASSERT_TRUE(store.wipe());
+  ASSERT_TRUE(claimTestSizes(store));
+  for (uint32_t i = 0; i < kScriptMarks; ++i) {
+    ASSERT_EQ(Commit::Stored, store.markNoGlyph(makeKey(0x3000 + i, 0, 0))) << i;
+  }
+  EXPECT_FALSE(store.needsRoom(Budget::Open));
+}
+
 TEST_F(GlyphStoreRoom, AFullProbeChainAsksForARebuildNotAWipe) {
   const std::vector<uint32_t> keys = collidingKeys(layout.geometry.indexSlots, kMaxProbe + 1);
   ASSERT_EQ(kMaxProbe + 1, keys.size());

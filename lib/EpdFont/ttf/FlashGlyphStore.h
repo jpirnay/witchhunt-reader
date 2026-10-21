@@ -198,17 +198,18 @@ class FlashGlyphStore {
   /// - A rebuild of the index from the log: the index is erased, and each live record a slot named gets a slot again,
   ///   with its count; the "no glyph" marks are forgotten. When the index stops writes (past its load limit, a probe
   ///   chain full, or no epoch left short of kRebuildEpochLimit) the rebuild comes first, in idle time too; but with a
-  ///   full index, under kRebuildStalePercent of the slots stale and two or more segments live, a rebuild would soon
-  ///   fill again, so a reclaim comes first and leaves its slots stale. The other reasons for a rebuild wait for Open,
-  ///   and come after its reclaims. A rebuild that finds no memory waits for the next Open, or the next open(). With
-  ///   the rebuild journal full, the store is wiped instead (generation() moves on).
+  ///   full index whose stale slots and marks together are under kRebuildStalePercent of it, and two or more segments
+  ///   live, a rebuild would soon fill again, so a reclaim comes first and leaves its slots stale. The other reasons
+  ///   for a rebuild wait for Open, and come after its reclaims. A rebuild that finds no memory waits for the next
+  ///   Open, or the next open(). With the rebuild journal full, the store is wiped instead (generation() moves on).
   /// Writes stopped for room resume, unless the index stops them. Fills `work` with what this call did. Call it only
   /// where no record of the log is in use: it invalidates every pointer into the log.
   Room makeRoom(Budget budget, RoomWork* work = nullptr);
   /// Room is to be made by makeRoom(budget): writes stopped for room (a batch that did not fit, or markFull()), fewer
   /// than kFreeSegmentsTarget segments free, or the index stops writes (past its load limit, a probe chain full, or the
   /// epochs spent up to kRebuildEpochLimit). With Open, also a rebuild that waits for one: kRebuildEpochSpan epochs
-  /// since the last rebuild, the last one cut short by a power cut, or kRebuildStalePercent of the index's slots stale.
+  /// since the last rebuild, the last one cut short by a power cut, or kRebuildStalePercent of the index's slots stale
+  /// (the "no glyph" marks are not: a family lacking a whole script would rebuild at every open to learn them again).
   bool needsRoom(Budget budget = Budget::Idle) const {
     return open_ && (roomAsked_ || freeSegments() < glyphstore::kFreeSegmentsTarget || indexFull_ || chainFull_ ||
                      epochsLeft() == 0 || (budget == Budget::Open && rebuildWaitsForOpen()));
@@ -241,10 +242,11 @@ class FlashGlyphStore {
   /// Bytes the live segments hold, their headers included: whole segments behind the head, and the head up to where
   /// writing resumes.
   uint32_t logUsed() const { return live_ == 0 ? 0 : (live_ - 1u) * geometry_.segmentBytes + headUsed_; }
-  /// Index slots in use, stale ones included.
+  /// Index slots in use, stale ones and "no glyph" marks included.
   uint32_t usedSlots() const { return usedSlots_; }
   /// Index slots that name a live record. The rest of usedSlots() is what a rebuild frees: slots gone stale, and the
-  /// "no glyph" marks it forgets.
+  /// "no glyph" marks it forgets. Only the stale ones call for a rebuild at an open; the marks do once they fill the
+  /// index.
   uint32_t liveSlots() const { return liveSlots_; }
   uint32_t usedPairSlots() const { return usedPairs_; }
   uint32_t segmentCount() const { return geometry_.segmentBytes == 0 ? 0 : geometry_.logSize / geometry_.segmentBytes; }
@@ -287,7 +289,7 @@ class FlashGlyphStore {
   bool moveHead();
   void resetRing();
   Step nextStep(Budget budget, bool rebuildTried) const;
-  bool staleCrowds() const;
+  bool crowds(uint32_t slots) const;
   bool rebuildWaitsForOpen() const;
   uint32_t epochsLeft() const;
   uint32_t segmentsToOpen() const { return freeSegments() < epochsLeft() ? freeSegments() : epochsLeft(); }
@@ -342,6 +344,7 @@ class FlashGlyphStore {
   uint32_t rebuilds_ = 0;        // since open()
   bool rebuildStarved_ = false;  // a rebuild found no memory: idle time leaves the next try to an Open
   uint32_t usedSlots_ = 0;
+  uint32_t marks_ = 0;  // of usedSlots_, the "no glyph" marks: neither live nor stale
   uint32_t usedPairs_ = 0;
   uint32_t claimedFaces_ = 0;  // bit i: face entry i is claimed
   uint32_t generation_ = 0;

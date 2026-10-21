@@ -60,11 +60,15 @@ uint32_t limit(const uint32_t capacity, const uint32_t percent) {
   return static_cast<uint32_t>(uint64_t{capacity} * percent / 100);
 }
 
-// Slots in use: every one not wholly erased, a slot cut short included.
-uint32_t countUsed(const uint8_t* table, const uint32_t slots) {
+// Slots in use: every one not wholly erased, a slot cut short included. Of them, the "no glyph" marks go to `marks`
+// (a cut leaves extra 1 bits, so a torn slot never reads as one).
+uint32_t countUsed(const uint8_t* table, const uint32_t slots, uint32_t* marks = nullptr) {
   uint32_t used = 0;
   for (uint32_t i = 0; i < slots; ++i) {
-    if (!slotErased(flashSlot(table, i))) ++used;
+    const Slot slot = flashSlot(table, i);
+    if (slotErased(slot)) continue;
+    ++used;
+    if (marks && slot.value == kNoGlyph) ++*marks;
   }
   return used;
 }
@@ -251,7 +255,7 @@ FlashGlyphStore::OpenResult FlashGlyphStore::open(const uint8_t identity[kIdenti
   }
   readJournal();
   findRing();
-  usedSlots_ = countUsed(index_, g.indexSlots);
+  usedSlots_ = countUsed(index_, g.indexSlots, &marks_);
   usedPairs_ = countUsed(pairs_, g.pairSlots);
   open_ = true;
   LOG_INF("GST", "open: %u of %u segments live, log %u of %u B, epoch %u, %u of %u slots (%u live), %u pairs%s%s",
@@ -275,7 +279,7 @@ void FlashGlyphStore::close() {
   journal_ = Journal{};
   rebuilds_ = 0;
   rebuildStarved_ = false;
-  usedSlots_ = usedPairs_ = claimedFaces_ = 0;
+  usedSlots_ = marks_ = usedPairs_ = claimedFaces_ = 0;
   dropCounts();
   open_ = false;
   wipePending_ = false;
@@ -572,7 +576,11 @@ FlashGlyphStore::Commit FlashGlyphStore::insertGlyphSlot(const uint32_t key, con
   switch (insert(geometry_.indexOffset, index_, geometry_.indexSlots, key, value, at)) {
     case Insert::Done:
       ++usedSlots_;
-      if (value != kNoGlyph) ++liveSlots_;
+      if (value == kNoGlyph) {
+        ++marks_;
+      } else {
+        ++liveSlots_;
+      }
       return Commit::Stored;
     case Insert::ChainFull:
       LOG_INF("GST", "full: a probe chain passed %u slots; the index needs a rebuild",
@@ -909,11 +917,13 @@ FlashGlyphStore::Room FlashGlyphStore::makeRoom(const Budget budget, RoomWork* w
 // for one. One that found no memory is tried again only by an Open.
 FlashGlyphStore::Step FlashGlyphStore::nextStep(const Budget budget, const bool rebuildTried) const {
   const bool mayRebuild = !rebuildTried && (budget == Budget::Open || !rebuildStarved_);
-  // The index stops writes: it is rebuilt now, in idle time too. A full index with few stale slots would fill again
-  // soon after, so while two or more segments are live a reclaim comes first and leaves its slots stale. A full probe
-  // chain, or the epochs spent, are a rebuild's alone to clear.
+  // The index stops writes: it is rebuilt now, in idle time too. A full index with few slots to free would fill again
+  // soon after, so while two or more segments are live a reclaim comes first and leaves its slots stale. The "no
+  // glyph" marks count as freeable here: when they are what fills the index, the rebuild that forgets them is the
+  // only way on. A full probe chain, or the epochs spent, are a rebuild's alone to clear.
   if (mayRebuild && (indexFull_ || chainFull_ || epochsLeft() == 0)) {
-    return (chainFull_ || epochsLeft() == 0 || staleCrowds() || live_ < 2) ? Step::Rebuild : Step::Reclaim;
+    return (chainFull_ || epochsLeft() == 0 || crowds(usedSlots_ - liveSlots_) || live_ < 2) ? Step::Rebuild
+                                                                                             : Step::Reclaim;
   }
   if (live_ >= 2 && (roomAsked_ || freeSegments() < kFreeSegmentsTarget)) return Step::Reclaim;
   // The other reasons wait for a chapter or book open, and come after its reclaims: the slots those leave stale go
@@ -922,15 +932,16 @@ FlashGlyphStore::Step FlashGlyphStore::nextStep(const Budget budget, const bool 
   return Step::None;
 }
 
-// What a rebuild frees, the slots that name no live record, is kRebuildStalePercent of the index or more.
-bool FlashGlyphStore::staleCrowds() const {
-  return uint64_t{usedSlots_ - liveSlots_} * 100 >= uint64_t{geometry_.indexSlots} * kRebuildStalePercent;
+// `slots` index slots are kRebuildStalePercent of the index or more: enough for a rebuild that frees them to pay.
+bool FlashGlyphStore::crowds(const uint32_t slots) const {
+  return uint64_t{slots} * 100 >= uint64_t{geometry_.indexSlots} * kRebuildStalePercent;
 }
 
 // A rebuild that waits for a chapter or book open: a power cut stopped the last one, kRebuildEpochSpan epochs have
-// passed since the last that finished, or stale slots crowd the index.
+// passed since the last that finished, or stale slots crowd the index. The "no glyph" marks are not stale: a family
+// that lacks a whole script would have each open rebuild the index only to learn them again.
 bool FlashGlyphStore::rebuildWaitsForOpen() const {
-  return !journal_.done || nextEpoch_ - journal_.floor >= kRebuildEpochSpan || staleCrowds();
+  return !journal_.done || nextEpoch_ - journal_.floor >= kRebuildEpochSpan || crowds(usedSlots_ - liveSlots_ - marks_);
 }
 
 // Epochs the head may still give out before the index must be rebuilt. Every slot names an epoch from the last
@@ -1181,6 +1192,7 @@ FlashGlyphStore::Rebuilt FlashGlyphStore::rebuildIndex(RoomWork& work) {
   journal_.done = true;
   journal_.floor = base;
   usedSlots_ = liveSlots_ = inserted;
+  marks_ = 0;
   indexFull_ = chainFull_ = false;
   ++rebuilds_;
   work.rebuilt = true;
@@ -1266,7 +1278,7 @@ bool FlashGlyphStore::wipe() {
   resetRing();
   journal_ = Journal{};
   rebuildStarved_ = false;
-  usedSlots_ = usedPairs_ = claimedFaces_ = 0;
+  usedSlots_ = marks_ = usedPairs_ = claimedFaces_ = 0;
   dropCounts();
   ++generation_;
   wipePending_ = false;
