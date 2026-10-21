@@ -30,13 +30,12 @@ void CardLayout::card(const char* title, const std::function<void(Body&)>& bodyF
   Body body(*this, innerY);
   bodyFn(body);
 
-  const int bodyHeight = innerY - bodyTop;
-  const int cardHeight = cfg_.innerPadY + titleBlock + bodyHeight + cfg_.innerPadY;
-  renderer_.drawRoundedRect(cardLeft_, top, cardWidth_, cardHeight, 1, cfg_.radius, true);
+  const int height = cardHeight(title != nullptr, innerY - bodyTop);
+  renderer_.drawRoundedRect(cardLeft_, top, cardWidth_, height, 1, cfg_.radius, true);
   if (title) {
     renderer_.drawCenteredText(UI_10_FONT_ID, top + cfg_.innerPadY, title, true, EpdFontFamily::BOLD);
   }
-  y_ = top + cardHeight + cfg_.cardSpacing;
+  y_ = top + height + cfg_.cardSpacing;
 }
 
 void CardLayout::Body::rowLR(const char* label, const std::string& value) {
