@@ -368,6 +368,59 @@ TEST(TtfCff, EachGlyphHasItsFontDictsSubroutines) {
   expectGlyphSourcesAreFreeTypes(buildOtf(spec), "format 3, a range ending before it starts");
 }
 
+namespace {
+
+// Every glyph's source through one cache, in three orders, as without it.
+void expectTheCacheChangesNothing(const Bytes& font, const std::string& what) {
+  SCOPED_TRACE(what);
+  FontBytes bytes(font.data(), static_cast<uint32_t>(font.size()));
+  Face face;
+  ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face));
+  std::vector<uint16_t> order;
+  for (uint32_t g = 0; g < face.numGlyphs; ++g) order.push_back(static_cast<uint16_t>(g));
+  std::vector<std::vector<uint16_t>> orders = {order, std::vector<uint16_t>(order.rbegin(), order.rend()), {}};
+  for (uint32_t i = 0; i < order.size(); ++i) orders[2].push_back(order[(i * 7919u) % order.size()]);
+  for (const std::vector<uint16_t>& glyphs : orders) {
+    CffSourceCache cache;
+    for (const uint16_t g : glyphs) {
+      CffGlyphSource plain;
+      CffGlyphSource cached;
+      bytes.clearErrors();
+      const Status expected = cffGlyphSource(bytes, face, g, &plain);
+      bytes.clearErrors();
+      ASSERT_EQ(expected, cffGlyphSource(bytes, face, g, &cached, &cache)) << g;
+      ASSERT_EQ(0, std::memcmp(&plain.localSubrs, &cached.localSubrs, sizeof plain.localSubrs)) << g;
+      ASSERT_EQ(0, std::memcmp(&plain.matrix, &cached.matrix, sizeof plain.matrix)) << g;
+      ASSERT_EQ(plain.offset, cached.offset) << g;
+      ASSERT_EQ(plain.length, cached.length) << g;
+      ASSERT_EQ(plain.scaleNum, cached.scaleNum) << g;
+      ASSERT_EQ(plain.scaleDen, cached.scaleDen) << g;
+    }
+  }
+}
+
+}  // namespace
+
+TEST(TtfCff, ASourceCacheGivesWhatTheLookupGives) {
+  CffSpec spec;
+  spec.cid = true;
+  spec.charStrings.assign(6, Bytes{14});
+  spec.fds = {cffFontDict("", {{11}}), cffFontDict("0.0005 0 0 0.0005 0 0", {{11}, {11}}),
+              cffFontDict("3 0 0 3 0 0", {{11}, {11}, {11}})};
+  for (const Bytes& fdSelect : std::vector<Bytes>{{0, 2, 0, 1, 1, 2, 0},
+                                                  {3, 0, 3, 0, 0, 1, 0, 2, 2, 0, 4, 1, 0, 6},
+                                                  {3, 0, 3, 0, 0, 1, 0, 3, 2, 0, 3, 0, 0, 6},
+                                                  {3, 0, 1, 0, 2, 2, 0, 4},
+                                                  {3, 0, 2, 0, 2, 1, 0, 0, 2, 0, 6},
+                                                  {3, 0, 3, 0, 0, 1, 0, 4, 2, 0, 2, 0, 0, 6},
+                                                  {3, 0, 3, 0, 0, 0, 0, 3, 1, 0, 1, 2, 0, 4},
+                                                  {3, 0, 2, 0, 0, 7, 0, 2, 1, 0, 6}}) {
+    spec.fdSelect = fdSelect;
+    expectTheCacheChangesNothing(buildOtf(spec), "FDSelect " + std::to_string(fdSelect.size()));
+  }
+  for (const std::string& name : cffTestFonts()) expectTheCacheChangesNothing(readCffTestFont(name), name);
+}
+
 TEST(TtfCff, AScaleThatWouldDivideByZeroOrPass32BitsIsMalformed) {
   // cff_slot_load scales a CID-keyed glyph by the Top DICT's units per em over its font DICT's. A FontMatrix of 3 em
   // leaves 0 units per em, one of [1E-9 0 0 4E-10] 2.5 billion: FreeType would divide by zero or scale wildly; the

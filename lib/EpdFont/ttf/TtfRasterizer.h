@@ -115,6 +115,7 @@ class Rasterizer {
   Status loadCff(FontBytes& bytes, const Face& face, uint16_t glyph, int32_t scale, uint16_t* numPoints,
                  uint16_t* numContours);
 
+  CffSourceCache cffSources_;         // loadCff's: the last CID-keyed glyph's FDSelect range and font DICT
   uint8_t* block_ = nullptr;          // owned_, or the caller's (attach())
   std::unique_ptr<uint8_t[]> owned_;  // what allocate() made
   uint32_t blockBytes_ = 0;

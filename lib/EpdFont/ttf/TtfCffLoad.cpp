@@ -29,7 +29,7 @@ Status Rasterizer::loadCff(FontBytes& bytes, const Face& face, const uint16_t gl
   // A block planned without CFF faces has no room for the interpreter: the plan's fault, not the glyph's.
   if (plan_.decoderBytes < kCffDecoderBytes) return Status::Transient;
   CffGlyphSource source;
-  Status status = cffGlyphSource(bytes, face, glyph, &source);
+  Status status = cffGlyphSource(bytes, face, glyph, &source, &cffSources_);
   if (status != Status::Ok) return status;
   auto* points = reinterpret_cast<FT_Vector*>(block_ + pointsOffset_);
   CffOutline outline{points, block_ + tagsOffset_, reinterpret_cast<unsigned short*>(block_ + contoursOffset_),
