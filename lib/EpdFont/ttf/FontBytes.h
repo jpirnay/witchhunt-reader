@@ -42,6 +42,10 @@ class SdPageCache {
   /// Copies `len` bytes at `offset` of `file` to `dst`. False on a read error, or a range past the file. Pages are
   /// told apart by the file's ctx, so one without a ctx is not read.
   bool read(const FileSource& file, uint32_t offset, uint32_t len, void* dst);
+  /// The byte at `offset` of `file` where its page holds it, read as read() would read that one byte, and in *got how
+  /// many of the up to `len` bytes from there the page holds (at least 1). Valid until the next read through the cache.
+  /// nullptr where read() of that byte fails.
+  const uint8_t* window(const FileSource& file, uint32_t offset, uint32_t len, uint32_t* got);
   /// Pages read from the card since the cache was made.
   uint32_t misses() const { return misses_; }
 
@@ -106,6 +110,18 @@ class FontBytes {
     return readFar(offset, len, dst);
   }
 
+  /// Up to `len` bytes at `offset` in one piece, for a reader that walks them in order (a CFF charstring): in place,
+  /// or in the SD page that holds `offset`, valid until the next read of the far range. *got is how many lie there (at
+  /// least 1). nullptr, with the flag set, exactly where u8(offset) would fail.
+  const uint8_t* window(const uint32_t offset, const uint32_t len, uint32_t* got) {
+    if (offset < inPlace_) {
+      const uint32_t room = inPlace_ - offset;
+      *got = len < room ? len : room;
+      return data_ + offset;
+    }
+    return windowFar(offset, len, got);
+  }
+
   bool outOfRange() const { return outOfRange_; }
   bool ioError() const { return ioError_; }
   /// Forgets both flags. The engine clears them before each glyph, so a broken glyph does not taint the next.
@@ -123,6 +139,7 @@ class FontBytes {
   // Out of line (FontBytes.cpp), so the many inlined reads pay one call for what is not in place: the SD range,
   // through its cache; anything else is out of range.
   bool readFar(uint32_t offset, uint32_t len, void* dst);
+  const uint8_t* windowFar(uint32_t offset, uint32_t len, uint32_t* got);
 
   const uint8_t* data_ = nullptr;
   uint32_t inPlace_ = 0;

@@ -128,7 +128,16 @@ class Interpreter {
   }
 
   // --- Reading (cf2_buf_readByte: past the end of a charstring or subroutine, 0 without an error) ---
-  uint8_t readByte() { return d_.region.at < d_.region.end ? bytes_.u8(d_.region.at++) : 0; }
+  // Straight from the window when it holds the byte; refill() makes one where it does not.
+  uint8_t readByte() {
+    const uint32_t at = d_.region.at;
+    if (at >= d_.region.end) return 0;
+    d_.region.at = at + 1;
+    if (at - d_.windowAt < d_.windowBytes) return d_.window[at - d_.windowAt];
+    return refill(at);
+  }
+  uint8_t refill(uint32_t at);
+  void dropWindow() { d_.windowBytes = 0; }
 
   // --- The operand stack (psstack.c) ---
   bool isFixed(const uint32_t i) const { return (d_.fixedOperands[i >> 5] >> (i & 31)) & 1; }
@@ -187,6 +196,21 @@ class Interpreter {
   Status status_ = Status::Ok;
   bool finished_ = false;
 };
+
+// The window holding the byte at `at` of the region (FontBytes::window()), and that byte. Where u8(at) would fail, the
+// same flag is set and the byte reads 0, as u8() returns it.
+uint8_t Interpreter::refill(const uint32_t at) {
+  uint32_t got = 0;
+  const uint8_t* p = bytes_.window(at, d_.region.end - at, &got);
+  if (!p) {
+    dropWindow();
+    return 0;
+  }
+  d_.window = p;
+  d_.windowAt = at;
+  d_.windowBytes = got;
+  return p[0];
+}
 
 // --- The operand stack ---
 
@@ -275,6 +299,7 @@ void Interpreter::begin(const CffDecoder::Region region, const int32_t x, const 
   d_.fixedOperands[1] = 0;
   d_.operandCount = 0;
   d_.region = region;
+  dropWindow();
   d_.depth = 0;
   d_.stems = 0;
   d_.maskValid = false;
@@ -494,6 +519,7 @@ void Interpreter::step(const uint8_t op) {
         return;
       }
       d_.region = d_.callers[--d_.depth];
+      dropWindow();
       return;
 
     case kEscape:
@@ -722,6 +748,7 @@ void Interpreter::callSubr(const CffIndex& subrs, const uint32_t bias) {
   }
   d_.callers[d_.depth++] = d_.region;
   d_.region = {offset, offset + length};
+  dropWindow();
 }
 
 // cf2_doFlex: two curves from the deltas `reads` names; flex1 takes its last delta on the axis the first five travel
