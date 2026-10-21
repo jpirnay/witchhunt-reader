@@ -16,6 +16,8 @@ constexpr uint32_t kNoRegistry = 0xFFFF;  // cff_subfont_load's ROS registry whe
 constexpr uint32_t kMaxFontDicts = 256;   // CFF_MAX_CID_FONTS
 // The local subroutines fontDictsFit checks across all font DICTs, four full INDEXes (stock Noto CJK holds 45-54K).
 constexpr uint32_t kCffMaxCheckedSubrs = 4 * 65536;
+// The distinct local Subrs INDEXes fontDictsFit remembers; real CID fonts have 14-15 over about 18-20 font DICTs.
+constexpr uint32_t kRememberedSubrsIndexes = 32;
 constexpr uint32_t kMaxOperands = 6;  // the most any operator read here takes (FontMatrix)
 // The largest Top, font or Private DICT the engine reads. A CID-keyed glyph's font and Private DICTs are read again
 // for every glyph, so a hostile multi-megabyte DICT would cost every glyph that much; real ones are far smaller (the
@@ -619,9 +621,10 @@ WideMatrix fontDictMatrix(const CffFace& cff, const FontDict& dict) {
 // Font DICTs may share one local Subrs INDEX, so each distinct INDEX (by where it starts) is checked once, and the
 // distinct ones together may hold at most kCffMaxCheckedSubrs entries: without both, 256 font DICTs over one
 // 65,535-entry INDEX would read 16 million offsets, a minute of card reads at every discovery of the font.
+// kRememberedSubrsIndexes are remembered; a later one is checked, and charged, by every font DICT that has it.
 bool fontDictsFit(FontBytes& bytes, const CffFace& cff) {
   if (cff.fdArray.count == 0 || cff.fdArray.count > kMaxFontDicts) return false;
-  uint32_t checked[kMaxFontDicts];  // the starts of the local Subrs INDEXes checked so far
+  uint32_t checked[kRememberedSubrsIndexes];  // the starts of the local Subrs INDEXes checked so far
   uint32_t checkedCount = 0;
   uint32_t subrs = 0;  // entries of the INDEXes checked so far
   for (uint32_t fd = 0; fd < cff.fdArray.count; ++fd) {
@@ -638,7 +641,7 @@ bool fontDictsFit(FontBytes& bytes, const CffFace& cff) {
     if (seen) continue;
     subrs += localSubrs.count;
     if (subrs > kCffMaxCheckedSubrs || !plainSubroutines(bytes, localSubrs)) return false;
-    checked[checkedCount++] = localSubrs.start;
+    if (checkedCount < kRememberedSubrsIndexes) checked[checkedCount++] = localSubrs.start;
   }
   return true;
 }

@@ -218,8 +218,8 @@ FileProbe probeFile(const FileSource& file) {
     }
     for (uint32_t k = 0; k < sizeof kRequired / sizeof kRequired[0]; ++k) {
       if (record.tag != kRequired[k]) continue;
-      // The other kind's tables are not read: parseFace() takes them as absent when their record lies outside the file,
-      // and does not look at them when it lies inside.
+      // The other kind's tables are not read: parseFace() never looks up a record of the other kind's tags, inside the
+      // file or outside it.
       if (!(needed >> k & 1u)) continue;
       if (!inFile(scan.file, record.offset, record.length)) return false;
       if (record.tag == tag("head")) {

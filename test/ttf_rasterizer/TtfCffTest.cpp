@@ -699,6 +699,26 @@ TEST(TtfCff, FontDictsWithTooManySubroutinesInAllAreRefused) {
       << card.read << " bytes read of a " << five.size() << " byte font";
 }
 
+TEST(TtfCff, AFontWithMoreDistinctIndexesThanRememberedStaysWithinTheBudget) {
+  // 40 font DICTs with an INDEX of their own, then 200 sharing one of 1,000 entries: more distinct INDEXes than the
+  // check remembers, so the shared one is checked again by every font DICT that has it, and the budget bounds that.
+  CffSpec spec;
+  spec.cid = true;
+  for (size_t i = 0; i < 40; ++i) spec.fds.push_back(cffFontDict("", std::vector<Bytes>(3 + i)));
+  spec.fds.push_back(cffFontDict("", std::vector<Bytes>(1000)));
+  CffFontDict sharing;
+  sharing.sharesSubrsOf = 40;
+  spec.fds.insert(spec.fds.end(), 200, sharing);
+  const std::vector<uint8_t> font = buildOtf(spec);
+  Face face;
+  ASSERT_EQ(FaceStatus::Ok, parse(font, &face));
+
+  CountingCard card(font);
+  ASSERT_EQ(FaceStatus::Ok, card.parse(&face));
+  EXPECT_LT(card.read, 4 * uint64_t{kSubrsIndexBytes} + 64 * 1024)
+      << card.read << " bytes of a " << font.size() << " byte font";
+}
+
 TEST(TtfCff, StandardCharactersAreFoundThroughTheCharset) {
   // seac names its components by StandardEncoding code; FreeType maps the code to a SID and takes the first glyph
   // whose charset entry is that SID (cff_lookup_glyph_by_stdcharcode). FreeType's own charset and table are the
