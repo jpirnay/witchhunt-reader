@@ -69,8 +69,10 @@
 #include "SilentRestart.h"
 #include "StarredPagesActivity.h"
 #include "activities/home/BookInfoActivity.h"
+#include "activities/settings/ClearCacheActivity.h"
 #include "activities/settings/DictionarySelectionActivity.h"
 #include "activities/settings/ReadingStatsBookDetailActivity.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "components/LinkMarkerMatch.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -956,6 +958,14 @@ void EpubReaderActivity::onExit() {
   // controller's retained RED RAM instead of its host baseline (ghosting). No-op on X3.
   renderer.setSingleBufferFastDiff(false);
   UITheme::getInstance().getMutableTheme().onBookWillClose(epub ? epub->getPath() : "", epub.get(), nullptr, nullptr);
+  // Delete Book Cache from the reader menu. Not before now: the progress, bookmarks and link Back
+  // stack saved above are what Keep keeps, and every build that writes into the folder has stopped.
+  // The covers stay either way, for Home, which shows the book next.
+  if (clearCacheOnExit_ && epub) {
+    epub->clearCache(*clearCacheOnExit_, /*preserveThumbs=*/true);
+    // Reset: syncFromStore() above has just listed the bookmarks that went with the folder.
+    if (*clearCacheOnExit_ == BookCache::Keep::Nothing) GLOBAL_BOOKMARKS.removeBySourcePath(epub->getPath());
+  }
   epub.reset();
   currentPageFootnotes.clear();
   currentPageFootnotes.shrink_to_fit();
@@ -2964,26 +2974,26 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       return;
     }
     case EpubReaderMenuActivity::MenuAction::DELETE_CACHE: {
-      {
-        RenderLock lock(*this);
-        if (epub && section) {
-          uint16_t backupSpine = currentSpineIndex;
-          uint16_t backupPage = section->currentPage;
-          uint16_t backupPageCount = section->pageCount;
-          section.reset();
-          epub->clearCache(true);
-          epub->setupCacheDir();
-          saveProgress(backupSpine, backupPage, backupPageCount);
-          if (!bookmarkStore.isEmpty()) {
-            bookmarkStore.markDirty();
-            bookmarkStore.save();
-            GLOBAL_BOOKMARKS.syncFromStore(bookmarkStore, epub->getPath(), epub->getCachePath(), epub->getTitle(),
-                                           false);
-          }
-        }
+      if (!epub) break;
+      // The Library's question. The answer only goes Home: the folder is cleared in onExit(), once
+      // the reader has saved into it for the last time, whatever state the section is in.
+      auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput,
+                                                                  ClearCacheActivity::bookQuestion(epub->getTitle()));
+      if (!confirmation) {
+        LOG_ERR("ERS", "OOM: delete cache confirmation (%zu bytes)", sizeof(ConfirmationActivity));
+        break;
       }
-      onGoHome();
-      return;
+      startActivityForResult(std::move(confirmation), [this](const ActivityResult& res) {
+        if (res.isCancelled) {
+          // Back to the page from a full-screen prompt, as from the menu itself.
+          ReaderUtils::enforceExitFullRefresh(renderer);
+          requestUpdate();
+          return;
+        }
+        clearCacheOnExit_ = ClearCacheActivity::keepFor(res);
+        onGoHome();
+      });
+      break;
     }
     case EpubReaderMenuActivity::MenuAction::RENDER_BENCHMARK: {
 #if ENABLE_BENCHMARKS

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BookCache.h>
 #include <Print.h>
 
 #include <deque>
@@ -228,7 +229,8 @@ class Epub {
   // sharing the book's basename from being read into the heap.
   static constexpr size_t MAX_METADATA_SIDECAR_BYTES = 16384;
 
-  bool clearCache(bool preserveThumbs = false) const;
+  // Leaves what `keep` says (BookCache.h), and the covers too when preserveThumbs is set.
+  bool clearCache(BookCache::Keep keep = BookCache::Keep::Nothing, bool preserveThumbs = false) const;
   void setupCacheDir() const;
   const std::string& getCachePath() const;
   // Per-spine caches (section layouts, inflated XHTML, anchor spills) live in buckets of
