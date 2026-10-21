@@ -69,6 +69,8 @@ class MdReaderActivity final : public LineReaderActivity {
   static constexpr int LIST_INDENT = 20;
   static constexpr int BLOCKQUOTE_INDENT = 16;
   static constexpr int CODE_INDENT = 8;
+  // A wrapped code line's later lines: this many spaces deeper than its own indentation.
+  static constexpr int CODE_HANG_SPACES = 8;
 
   // Inline code frame (in pixels): the text sits CODE_PAD_X inside it on either side.
   static constexpr int CODE_PAD_X = 4;

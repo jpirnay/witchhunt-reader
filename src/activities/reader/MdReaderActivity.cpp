@@ -23,7 +23,7 @@ namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;
 constexpr size_t MAX_LINE_LENGTH = 64 * 1024;
 constexpr uint32_t CACHE_MAGIC = 0x4D4B4449;  // "MKDI"
-constexpr uint8_t CACHE_VERSION = 7;          // Bumped: inline code spans are wider by their frame
+constexpr uint8_t CACHE_VERSION = 8;          // Bumped: wrapped code lines hang deeper
 
 static std::string flattenHeadingText(const MdParser::ParsedLine& parsed) {
   std::string result;
@@ -316,10 +316,12 @@ bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const
       }
 
       size_t breakPos = remaining.size();
+      // A break inside the leading spaces would leave a blank line (a code line's indentation).
+      const size_t leadingSpaces = remaining.find_first_not_of(' ');
 
       while (breakPos > 0 && advanceOf(remaining.substr(0, breakPos), span) > availableWidth() - currentWidth) {
         size_t spacePos = remaining.rfind(' ', breakPos - 1);
-        if (spacePos != std::string::npos && spacePos > 0) {
+        if (spacePos != std::string::npos && spacePos > leadingSpaces) {
           breakPos = spacePos;
         } else {
           breakPos--;
@@ -386,12 +388,24 @@ bool MdReaderActivity::wordWrapParsedLine(const MdParser::ParsedLine& parsed, in
           ? renderer.getTextAdvanceX(cachedFontId, parsed.listPrefix.c_str(), EpdFontFamily::REGULAR)
           : 0;
 
+  // A list item's later lines start after its marker. A wrapped code line's later lines start two
+  // indent levels deeper than its own indentation, so they cannot pass for lines of their own (a
+  // hanging indent, as in PEP 8), but never past the middle of the line.
+  int continuationIndent = listPrefixIndent;
+  if (isCodeBlock) {
+    const std::string& code = parsed.spans.front().text;
+    const size_t lead = std::min(code.find_first_not_of(" \t"), code.size());
+    const int leadWidth =
+        lead > 0 ? renderer.getTextAdvanceX(cachedFontId, code.substr(0, lead).c_str(), EpdFontFamily::REGULAR) : 0;
+    continuationIndent =
+        std::min(leadWidth + CODE_HANG_SPACES * renderer.getSpaceWidth(cachedFontId), availableWidth / 2);
+  }
+
   // Transient span-line holders; the spans are moved into the RenderedLines.
-  // A list item's later lines start after its marker, so they have that much less room.
   std::vector<std::vector<MdParser::Span>> lines;
   std::vector<int> widths;
   const bool fullyConsumed =
-      wrapSpans(allSpans, availableWidth, availableWidth - listPrefixIndent, maxLines, lines, widths);
+      wrapSpans(allSpans, availableWidth, availableWidth - continuationIndent, maxLines, lines, widths);
 
   if (lines.empty()) {
     // Spans with no text (an empty line inside a code block): still one blank line.
@@ -406,7 +420,7 @@ bool MdReaderActivity::wordWrapParsedLine(const MdParser::ParsedLine& parsed, in
   for (size_t i = 0; i < lines.size(); i++) {
     RenderedLine rl;
     rl.spans = std::move(lines[i]);
-    rl.indent = (i == 0) ? indent : indent + listPrefixIndent;
+    rl.indent = (i == 0) ? indent : indent + continuationIndent;
     rl.isCodeBlock = isCodeBlock;
     outLines.push_back(std::move(rl));
   }
@@ -928,7 +942,8 @@ void MdReaderActivity::renderPage() {
         y += lineHeight;
       } else {
         if (line.isCodeBlock) {
-          const int barX = cachedOrientedMarginLeft + std::max(line.indent - 6, 0);
+          // At the block's edge, also beside a wrapped code line's deeper later lines.
+          const int barX = cachedOrientedMarginLeft + std::max(CODE_INDENT - 6, 0);
           renderer.drawLine(barX, y + 2, barX, y + lineHeight - 2);
         }
         if (!line.spans.empty()) {
