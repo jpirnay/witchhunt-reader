@@ -256,13 +256,13 @@ class ParserState {
 
 // ---- The font files --------------------------------------------------------------------------------------
 
-// Whether the font's first four bytes, XORed with `key`'s first four when it is set, are a TrueType signature
-// (0x00010000, or 'true' from Apple). Anything else is not drawn: CFF outlines ('OTTO'), WOFF, WOFF2, a
-// collection, or a font encrypted rather than obfuscated.
-bool isTrueType(const uint8_t (&sig)[4], const uint8_t* key) {
+// Whether the font's first four bytes, XORed with `key`'s first four when it is set, are an outline font's
+// signature: TrueType (0x00010000, or 'true' from Apple) or CFF ('OTTO'). Anything else is not drawn: WOFF, WOFF2,
+// a collection, or a font encrypted rather than obfuscated.
+bool isOutlineFont(const uint8_t (&sig)[4], const uint8_t* key) {
   uint32_t tag = 0;
   for (int i = 0; i < 4; ++i) tag = tag << 8 | static_cast<uint8_t>(sig[i] ^ (key ? key[i] : 0));
-  return tag == 0x00010000u || tag == 0x74727565u;
+  return tag == 0x00010000u || tag == 0x74727565u || tag == 0x4F54544Fu;
 }
 
 // The book's two obfuscation keys, read from the OPF the first time an obfuscated face needs them.
@@ -307,14 +307,15 @@ bool xorPrefix(const std::string& path, const uint8_t* key, const size_t keyLen,
     for (int i = 0; i < got; ++i) buf[i] ^= key[(at + static_cast<size_t>(i)) % keyLen];
     ok = file.seekSet(at) && file.write(buf, static_cast<size_t>(got)) == static_cast<size_t>(got);
     at += static_cast<size_t>(got);
+    ok = ok && file.seekSet(at);  // a read after a write needs a seek between, to stdio on Windows
   }
   return file.close() && ok;
 }
 
 enum class Copy : uint8_t { Done, Refused, Failed };
 
-// Copies one face to `dest` as plain TrueType, its obfuscation undone. Refused: not a font the TTF engine
-// draws (logged). Failed: a read or a write went wrong, which may pass.
+// Copies one face to `dest` as a plain font file (TrueType or CFF), its obfuscation undone. Refused: not a font the TTF
+// engine draws (logged). Failed: a read or a write went wrong, which may pass.
 Copy copyFace(const Epub& epub, const std::string& href, const std::string& dest, Keys& keys, BuildArena* scratch) {
   size_t size = 0;
   if (!epub.getItemSize(href, &size) || size < 12 || size > kMaxFaceBytes) {
@@ -326,22 +327,22 @@ Copy copyFace(const Epub& epub, const std::string& href, const std::string& dest
   const uint8_t* key = nullptr;
   size_t keyLen = 0;
   size_t obfuscated = 0;
-  if (!isTrueType(sig, nullptr)) {
+  if (!isOutlineFont(sig, nullptr)) {
     // An obfuscated font starts with its first bytes XORed; a key that gives the signature back is the one.
     // Testing the signature replaces reading META-INF/encryption.xml: an algorithm it names that is real
     // encryption gives no signature back, and the face is refused.
     if (!keys.loaded && !loadKeys(epub, scratch, keys)) return Copy::Failed;
-    if (keys.hasIdpf && isTrueType(sig, keys.idpf)) {
+    if (keys.hasIdpf && isOutlineFont(sig, keys.idpf)) {
       key = keys.idpf;
       keyLen = sizeof(keys.idpf);
       obfuscated = kIdpfBytes;
-    } else if (keys.hasAdobe && isTrueType(sig, keys.adobe)) {
+    } else if (keys.hasAdobe && isOutlineFont(sig, keys.adobe)) {
       key = keys.adobe;
       keyLen = sizeof(keys.adobe);
       obfuscated = kAdobeBytes;
     } else {
-      // The signature tells a support log what it is: 4f54544f 'OTTO' is CFF, 774f4646 WOFF, 774f4632 WOFF2.
-      LOG_INF("BKF", "%s: not TrueType (%02x%02x%02x%02x)", href.c_str(), sig[0], sig[1], sig[2], sig[3]);
+      // The signature tells a support log what it is: 774f4646 WOFF, 774f4632 WOFF2.
+      LOG_INF("BKF", "%s: not TrueType or CFF (%02x%02x%02x%02x)", href.c_str(), sig[0], sig[1], sig[2], sig[3]);
       return Copy::Refused;
     }
   }

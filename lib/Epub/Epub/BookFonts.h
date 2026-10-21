@@ -9,14 +9,14 @@ class BuildArena;
 class Epub;
 
 /// A book's embedded fonts (the Publisher Fonts setting), made ready for the TTF engine: found once per book from
-/// its CSS and the text of its first chapters, and copied out of the EPUB as plain TrueType files to
+/// its CSS and the text of its first chapters, and copied out of the EPUB as plain TrueType or CFF files to
 /// `<book cache>/fonts/`, where they load like a `.ttf` family on the card.
 ///
 /// The body text's family, and up to kMaxAccents accent families, ranked by the blocks (headings, a dedication, a
 /// code block) set in them. The glyph store holds them together, or the accent families beside a TrueType reader
 /// font (TTF spec, section 11.1). What is refused, so the book keeps the reader's font (or, for an accent family,
-/// the next one takes its place): a family that is generic or not embedded; CFF outlines (`OTTO`), WOFF, WOFF2 and
-/// font collections; fonts encrypted rather than obfuscated; faces over kMaxFaceBytes.
+/// the next one takes its place): a family that is generic or not embedded; WOFF, WOFF2 and font collections;
+/// fonts encrypted rather than obfuscated; faces over kMaxFaceBytes. TrueType and CFF (`OTTO`) faces are taken.
 namespace BookFonts {
 
 /// Bump when what prepare() decides or writes changes: every book is examined again.
@@ -26,7 +26,8 @@ namespace BookFonts {
 /// v4: the state file also holds the body's font-family and the accent family (fonts/accent/), and a book without
 /// @font-face rules is probed too, for its body's generic family.
 /// v5: up to kMaxAccents accent families, in fonts/accent<n>/.
-constexpr uint8_t kVersion = 5;
+/// v6: CFF faces are copied too (they were refused), so a book examined as having none is examined again.
+constexpr uint8_t kVersion = 6;
 /// Accent families copied at most: the glyph store's eight style blocks hold a body of four styles and three
 /// one-style families, and its face table (32 faces) a book's body sizes and a few of each.
 constexpr uint8_t kMaxAccents = 3;

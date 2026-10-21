@@ -170,7 +170,11 @@ Already decided:
 
 **Next step.** Write the 2c-4 plan. A2's line breaking is already in place, so CJK TTF testing can start as soon as SD mode loads.
 
-## UI text in CJK
+## CFF outlines (`.otf`)
+
+**Shipped** (branch `feat/cff-outlines`). The TTF engine draws CFF outlines as well as TrueType: a CFF parser and charstring interpreter in `lib/EpdFont/ttf/`, in flash mode and in SD mode (the charstring data read from the card). Font discovery lists `.otf` files and reads the content, so a file with an `OTTO` header is a CFF face whatever its name. Publisher Fonts takes a book's embedded CFF faces too, copied under their usual `<style>.ttf` names. CFF CJK families, which the CJK Noto and Source Han fonts mostly are, load like any other family.
+
+Still refused: variable CFF2 fonts and font collections.
 
 **Partly done** (branch `feat/cjk-ui-fonts`). Chinese, Japanese and Korean UI translations ship with
 their own small UI faces: each holds the characters its translation uses, at 10 and 12 pt, attached
