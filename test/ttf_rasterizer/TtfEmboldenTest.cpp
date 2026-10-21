@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <vector>
 
 #include "TtfBuilder.h"
@@ -107,4 +108,61 @@ TEST_F(TtfEmbolden, AZeroAdvanceStaysZero) {
   EXPECT_EQ(0, regular.metrics.advanceX);
   EXPECT_EQ(0, bold.metrics.advanceX);
   EXPECT_GT(bold.metrics.width, regular.metrics.width);
+}
+
+namespace {
+
+uint32_t blankInside(const EpdGlyph& m, const uint8_t* bitmap) {
+  uint32_t blank = 0;
+  const uint32_t pixels = static_cast<uint32_t>(m.width) * m.height;
+  for (uint32_t p = 0; p < pixels; ++p) blank += ((bitmap[p >> 2] >> (6 - 2 * (p & 3))) & 3) == 0;
+  return blank;
+}
+
+uint32_t inkOf(const EpdGlyph& m, const uint8_t* bitmap) {
+  uint32_t ink = 0;
+  const uint32_t pixels = static_cast<uint32_t>(m.width) * m.height;
+  for (uint32_t p = 0; p < pixels; ++p) ink += (bitmap[p >> 2] >> (6 - 2 * (p & 3))) & 3;
+  return ink;
+}
+
+}  // namespace
+
+// Synthetic bold on dense CJK characters (spec 7.2): at reading sizes the strength must leave their counters open.
+TEST_F(TtfEmbolden, DenseCharactersKeepThreeQuartersOfTheirOpenSpace) {
+  const uint32_t dense[] = {0x9B31, 0x66F8, 0x6176, 0x8B70, 0x9A5A};  // 鬱 書 慶 議 驚
+  for (const char* name : {"NotoSansJP-TrueType.ttf", "NotoSansJP-Cff.otf", "NotoSerifJP-Cff.otf"}) {
+    const std::vector<uint8_t> data = readFixture(name);
+    ASSERT_FALSE(data.empty()) << name;
+    FontBytes bytes(data.data(), static_cast<uint32_t>(data.size()));
+    Face face;
+    ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face)) << name;
+    for (const uint32_t points : {10u, 12u, 14u}) {
+      const uint32_t ppem = ppemFromPoints(points);
+      Rasterizer rasterizer;
+      ASSERT_TRUE(rasterizer.allocate(planScratch(face, ppem, kPoolBytesFlash, true)));
+      for (const uint32_t cp : dense) {
+        const uint16_t glyph = glyphIndex(bytes, face, cp);
+        ASSERT_NE(0, glyph) << name << " U+" << std::hex << cp;
+        EpdGlyph regular{};
+        ASSERT_EQ(Status::Ok, rasterizer.render(bytes, face, glyph, ppem, &regular));
+        // The regular glyph's bitmap and box are copied: the bold one reuses the output region.
+        std::vector<uint8_t> regularBits(rasterizer.output(), rasterizer.output() + regular.dataLength);
+        const uint32_t open = blankInside(regular, regularBits.data());
+        const uint32_t regularInk = inkOf(regular, regularBits.data());
+
+        EpdGlyph bold{};
+        ASSERT_EQ(Status::Ok, rasterizer.load(bytes, face, glyph, ppem, &bold));
+        ASSERT_EQ(Status::Ok, rasterizer.embolden(emboldenStrength(ppem), &bold));
+        ASSERT_EQ(Status::Ok, rasterizer.rasterize(rasterizer.output()));
+        // Blank pixels inside each glyph's box, as the brief counts them: the bold box is a pixel or two wider.
+        const uint32_t kept = blankInside(bold, rasterizer.output());
+        std::printf("%s %u pt U+%04X: %u of %u blank pixels kept\n", name, points, cp, kept, open);
+        EXPECT_GE(kept * 4, open * 3);
+        EXPECT_GT(inkOf(bold, rasterizer.output()), regularInk);
+        EXPECT_EQ(regular.top, bold.top);
+        EXPECT_EQ(regular.height, bold.height);
+      }
+    }
+  }
 }

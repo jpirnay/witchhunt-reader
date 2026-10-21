@@ -55,12 +55,14 @@ struct ScratchPlan {
 /// The plan for one face: points and contours from maxp, or for CFF outlines, which maxp does not count, the caps
 /// and the interpreter's state; the output from head's box at `maxPpem26_6` (the largest size the family renders),
 /// but never less than the em square, since head's box can lie; each capped. A glyph past a cap at a planned size
-/// reports Unsupported.
-ScratchPlan planScratch(const Face& face, uint32_t maxPpem26_6, uint32_t poolBytes);
+/// reports Unsupported. `emboldened`: with room for synthetic bold's growth too, twice its strength each way (a sharp
+/// corner reaches past the strength).
+ScratchPlan planScratch(const Face& face, uint32_t maxPpem26_6, uint32_t poolBytes, bool emboldened = false);
 /// The larger of each part, so one block serves every style of a family.
 ScratchPlan mergePlans(const ScratchPlan& a, const ScratchPlan& b);
 
-/// How much synthetic bold grows a glyph (spec 7.2): the outline's growth on each axis, 26.6 pixels.
+/// How much synthetic bold grows a glyph (spec 7.2): the outline's growth on each axis, 26.6 pixels. Never negative:
+/// embolden() refuses one as Unsupported.
 struct Strength {
   int32_t x = 0;
   int32_t y = 0;
