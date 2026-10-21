@@ -56,7 +56,9 @@ struct CffDecoder {
   };
 
   int32_t operands[kCffStackSize];  ///< cf2_stack: each an integer or a 16.16 number
-  uint64_t fixedOperands;           ///< bit i: operands[i] is 16.16
+  /// Bit i % 32 of word i / 32: operands[i] is 16.16. Two words, not a uint64_t: a variable 64-bit shift is a libgcc
+  /// call on the C3 (__ashldi3, __lshrdi3), and every operand pushed and read took one.
+  uint32_t fixedOperands[2];
   int32_t storage[kCffStorageSize];
   Region region;                     ///< where the interpreter reads
   Region callers[kCffMaxSubrDepth];  ///< where each subroutine call returns to

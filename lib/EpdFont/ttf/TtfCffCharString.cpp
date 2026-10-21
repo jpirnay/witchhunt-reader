@@ -131,7 +131,12 @@ class Interpreter {
   uint8_t readByte() { return d_.region.at < d_.region.end ? bytes_.u8(d_.region.at++) : 0; }
 
   // --- The operand stack (psstack.c) ---
-  bool isFixed(const uint32_t i) const { return (d_.fixedOperands >> i) & 1; }
+  bool isFixed(const uint32_t i) const { return (d_.fixedOperands[i >> 5] >> (i & 31)) & 1; }
+  void setFixed(const uint32_t i, const bool fixed) {
+    uint32_t& word = d_.fixedOperands[i >> 5];
+    const uint32_t bit = uint32_t{1} << (i & 31);
+    word = fixed ? word | bit : word & ~bit;
+  }
   void push(int32_t value, bool fixed);
   void pushInt(const int32_t value) { push(value, false); }
   void pushFixed(const int32_t value) { push(value, true); }
@@ -190,9 +195,8 @@ void Interpreter::push(const int32_t value, const bool fixed) {
     fail(Status::Malformed);  // Stack_Overflow
     return;
   }
-  const uint64_t bit = uint64_t{1} << d_.operandCount;
   d_.operands[d_.operandCount] = value;
-  d_.fixedOperands = fixed ? d_.fixedOperands | bit : d_.fixedOperands & ~bit;
+  setFixed(d_.operandCount, fixed);
   ++d_.operandCount;
 }
 
@@ -253,9 +257,8 @@ void Interpreter::roll(const int32_t count, int32_t shift) {
     }
     const int32_t value = d_.operands[index];
     const bool fixed = isFixed(static_cast<uint32_t>(index));
-    const uint64_t bit = uint64_t{1} << index;
     d_.operands[index] = last;
-    d_.fixedOperands = lastFixed ? d_.fixedOperands | bit : d_.fixedOperands & ~bit;
+    setFixed(static_cast<uint32_t>(index), lastFixed);
     last = value;
     lastFixed = fixed;
   }
@@ -268,7 +271,8 @@ void Interpreter::roll(const int32_t count, int32_t shift) {
 // the seac state carry over.
 void Interpreter::begin(const CffDecoder::Region region, const int32_t x, const int32_t y) {
   std::memset(d_.storage, 0, sizeof d_.storage);
-  d_.fixedOperands = 0;
+  d_.fixedOperands[0] = 0;
+  d_.fixedOperands[1] = 0;
   d_.operandCount = 0;
   d_.region = region;
   d_.depth = 0;
