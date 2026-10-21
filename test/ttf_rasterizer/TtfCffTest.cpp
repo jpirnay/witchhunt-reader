@@ -141,13 +141,17 @@ void expectGlyphSourcesAreFreeTypes(const std::vector<uint8_t>& data, const std:
       EXPECT_EQ(Status::Malformed, status) << glyph;
       continue;
     }
+    const FT_ULong top = cff->top_font.font_dict.units_per_em;
+    const FT_ULong own = sub->font_dict.units_per_em;
+    if (top != own && (top == 0 || own == 0 || top > INT32_MAX || own > INT32_MAX)) {
+      EXPECT_EQ(Status::Malformed, status) << glyph << ": a scale of " << top << " / " << own;  // the engine's own rule
+      continue;
+    }
     ASSERT_EQ(Status::Ok, status) << glyph;
     EXPECT_EQ(charStrings.dataStart + offsetAt(g) - 1, source.offset) << glyph;
     EXPECT_EQ(offsetAt(g + 1) - offsetAt(g), source.length) << glyph;
     expectIndex(sub->local_subrs_index, source.localSubrs, glyph + " local subroutines");
     expectMatrix(sub->font_dict, source.matrix, glyph);
-    const FT_ULong top = cff->top_font.font_dict.units_per_em;
-    const FT_ULong own = sub->font_dict.units_per_em;
     EXPECT_EQ(top == own ? 1 : top, source.scaleNum) << glyph;
     EXPECT_EQ(top == own ? 1 : own, source.scaleDen) << glyph;
   }
@@ -307,7 +311,7 @@ TEST(TtfCff, FontMatricesAreReadAndConcatenatedAsFreeTypeDoes) {
     CffSpec spec;
     spec.cid = true;
     spec.topMatrix = top;
-    spec.fds = {{fd, {}, ""}};
+    spec.fds = {cffFontDict(fd)};
     const std::string what = std::string("top [") + top + "] fd [" + fd + "]";
     const Bytes font = buildOtf(spec);
     const FreeTypeCff ft(font);
@@ -329,7 +333,7 @@ TEST(TtfCff, FontMatricesAreReadAndConcatenatedAsFreeTypeDoes) {
   for (const char* top : matrices) {
     CffSpec spec;
     spec.topMatrix = top;
-    spec.fds = {{"", {}, ""}};
+    spec.fds = {CffFontDict{}};
     const Bytes font = buildOtf(spec);
     const FreeTypeCff ft(font);
     Face face;
@@ -343,7 +347,7 @@ TEST(TtfCff, EachGlyphHasItsFontDictsSubroutines) {
   CffSpec spec;
   spec.cid = true;
   spec.charStrings.assign(6, Bytes{14});
-  spec.fds = {{"", {{11}}, ""}, {"", {{11}, {11}}, ""}, {"", {{11}, {11}, {11}}, ""}};
+  spec.fds = {cffFontDict("", {{11}}), cffFontDict("", {{11}, {11}}), cffFontDict("", {{11}, {11}, {11}})};
   spec.fdSelect = {0, 2, 0, 1, 1, 2, 0};
   expectGlyphSourcesAreFreeTypes(buildOtf(spec), "format 0");
   spec.fdSelect = {3, 0, 3, 0, 0, 1, 0, 2, 2, 0, 4, 1, 0, 6};  // 0-1: FD 1, 2-3: FD 2, 4-5: FD 1
@@ -352,13 +356,71 @@ TEST(TtfCff, EachGlyphHasItsFontDictsSubroutines) {
   expectGlyphSourcesAreFreeTypes(buildOtf(spec), "format 3, an empty range");
   spec.fdSelect = {3, 0, 1, 0, 2, 2, 0, 4};  // the first range starts late, the sentinel ends early: FD 0
   expectGlyphSourcesAreFreeTypes(buildOtf(spec), "format 3, glyphs outside the ranges");
+  // Ranges out of order: FreeType scans them in order, stopping at the first that starts past the glyph.
+  spec.fdSelect = {3, 0, 2, 0, 2, 1, 0, 0, 2, 0, 6};  // 0-1: FD 0 (the first range starts at 2), 2-5: FD 2
+  expectGlyphSourcesAreFreeTypes(buildOtf(spec), "format 3, a range starting before the one ahead of it");
+  spec.fdSelect = {3, 0, 3, 0, 0, 1, 0, 4, 2, 0, 2, 0, 0, 6};  // 0-3: FD 1, 4-5: FD 0
+  expectGlyphSourcesAreFreeTypes(buildOtf(spec), "format 3, a range ending before it starts");
+}
+
+TEST(TtfCff, AScaleThatWouldDivideByZeroOrPass32BitsIsMalformed) {
+  // cff_slot_load scales a CID-keyed glyph by the Top DICT's units per em over its font DICT's. A FontMatrix of 3 em
+  // leaves 0 units per em, one of [1E-9 0 0 4E-10] 2.5 billion: FreeType would divide by zero or scale wildly; the
+  // engine refuses those glyphs, and gives the others a ratio of two non-zero 32-bit numbers.
+  CffSpec spec;
+  spec.cid = true;
+  spec.fds = {cffFontDict("3 0 0 3 0 0"), cffFontDict("1E-9 0 0 4E-10 0 0"), cffFontDict("0.0005 0 0 0.0005 0 0")};
+  spec.fdSelect = {0, 0, 1, 2};
+  const Bytes font = buildOtf(spec);
+  FontBytes bytes(font.data(), static_cast<uint32_t>(font.size()));
+  Face face;
+  ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face));
+  CffGlyphSource source;
+  EXPECT_EQ(Status::Malformed, cffGlyphSource(bytes, face, 0, &source));
+  EXPECT_EQ(Status::Malformed, cffGlyphSource(bytes, face, 1, &source));
+  ASSERT_EQ(Status::Ok, cffGlyphSource(bytes, face, 2, &source));
+  EXPECT_EQ(1000u, source.scaleNum);
+  EXPECT_EQ(2000u, source.scaleDen);
+  const FreeTypeCff ft(font);
+  ASSERT_TRUE(ft.ok());
+  EXPECT_EQ(0u, ft.cff()->subfonts[0]->font_dict.units_per_em);  // what the rule guards against
+  EXPECT_GT(ft.cff()->subfonts[1]->font_dict.units_per_em, static_cast<FT_ULong>(INT32_MAX));
+  expectGlyphSourcesAreFreeTypes(font, "scales");
+}
+
+TEST(TtfCff, ADictOverFourKilobytesIsRefused) {
+  // The engine reads a CID-keyed glyph's font DICT and Private DICT again for every glyph, so their size bounds the
+  // work a glyph costs. The test fonts' largest are 77 bytes (a Top DICT), 11 (a font DICT) and 36 (a Private DICT);
+  // FreeType has no limit, the engine refuses a font with a DICT over 4,096 bytes.
+  const auto parsed = [](const CffSpec& spec) {
+    Face face;
+    return parse(buildOtf(spec), &face);
+  };
+  for (const bool cid : {true, false}) {
+    for (const size_t size : {size_t{4096}, size_t{4097}}) {
+      const FaceStatus expected = size <= 4096 ? FaceStatus::Ok : FaceStatus::Malformed;
+      const std::string what = std::string(cid ? "CID-keyed, " : "name-keyed, ") + std::to_string(size) + " bytes";
+      CffSpec spec;
+      spec.cid = cid;
+      spec.fds = {CffFontDict{}};
+      spec.topPad = cffDictPad(size - (cid ? 43 : 23));
+      EXPECT_EQ(expected, parsed(spec)) << what << ", the Top DICT";
+      spec.topPad.clear();
+      spec.fds[0].privatePad = cffDictPad(size - 6);
+      EXPECT_EQ(expected, parsed(spec)) << what << ", the Private DICT";
+      if (!cid) continue;
+      spec.fds[0].privatePad.clear();
+      spec.fds[0].dictPad = cffDictPad(size - 11);
+      EXPECT_EQ(expected, parsed(spec)) << what << ", the font DICT";
+    }
+  }
 }
 
 TEST(TtfCff, AnFdPastTheFdArrayIsMalformed) {
   // cff_decoder_prepare refuses the glyph; the others draw.
   CffSpec spec;
   spec.cid = true;
-  spec.fds = {{"", {{11}}, ""}, {"", {}, ""}};
+  spec.fds = {cffFontDict("", {{11}}), CffFontDict{}};
   spec.fdSelect = {0, 0, 2, 1};
   const Bytes font = buildOtf(spec);
   FontBytes bytes(font.data(), static_cast<uint32_t>(font.size()));
@@ -389,7 +451,7 @@ TEST(TtfCff, ASubrsOffsetGivenAsARealIsTruncated) {
   // cff_parse_num truncates a real DICT number to an integer: 11.75 is the Private DICT's 11 bytes (defaultWidthX in
   // 6, then the real in 4 and its operator).
   CffSpec spec;
-  spec.fds = {{"", {{11}, {11}}, "11.75"}};
+  spec.fds = {cffFontDict("", {{11}, {11}}, "11.75")};
   const Bytes font = buildOtf(spec);
   ASSERT_TRUE(FreeTypeCff(font).ok());
   Face face;
@@ -410,7 +472,7 @@ TEST(TtfCff, TablesAreRefusedWhereFreeTypeRefusesThem) {
   const auto add = [&](const char* what, const bool refused, const auto& change) {
     CffSpec spec;
     spec.cid = true;
-    spec.fds = {{"", {{11}}, ""}};
+    spec.fds = {cffFontDict("", {{11}})};
     change(spec);
     cases.push_back({what, refused, spec});
   };

@@ -48,9 +48,9 @@ struct CffMatrix {
   bool identity() const { return xx == 0x10000 && yy == 0x10000 && xy == 0 && yx == 0; }
 };
 
-/// What a Face holds of its CFF table. For a name-keyed font fdArray.count is 0, and privateDict, privateSize and
-/// localSubrs are the Top DICT's; for a CID-keyed font they are 0 and empty, and each glyph's are found through the
-/// FDSelect. `charset` is a predefined charset (0 to 2) or where the font's own lies.
+/// What a Face holds of its CFF table. For a name-keyed font fdArray.count is 0 and localSubrs are the Top DICT's
+/// Private DICT's; for a CID-keyed font localSubrs is empty, and each glyph's are found through the FDSelect.
+/// `charset` is a predefined charset (0 to 2) or where the font's own lies.
 struct CffFace {
   uint32_t table = 0;
   uint32_t tableLength = 0;
@@ -59,8 +59,6 @@ struct CffFace {
   CffIndex fdArray;
   uint32_t fdSelect = 0;
   uint8_t fdSelectFormat = 0;
-  uint32_t privateDict = 0;
-  uint32_t privateSize = 0;
   CffIndex localSubrs;
   uint32_t charset = 0;
   CffMatrix matrix;            ///< the Top DICT's
@@ -71,12 +69,14 @@ struct CffFace {
 /// Reads the CFF table at `table` (`length` bytes, inside the file) as cff_font_load and cff_face_init do, refusing
 /// what they refuse, and checks every structure a glyph reads lies inside the table. `unitsPerEm` is head's, the
 /// Top DICT's units per em when it has no FontMatrix. False for a table the engine cannot read: broken, a CID-keyed
-/// font with no font DICTs or more than 256, or a matrix out of 32-bit range.
+/// font with no font DICTs or more than 256, a Top, font or Private DICT over 4,096 bytes, or a matrix out of 32-bit
+/// range.
 bool readCffTable(FontBytes& bytes, uint32_t table, uint32_t length, uint16_t unitsPerEm, CffFace* out);
 
 /// A glyph's charstring and what interpreting it needs: its font DICT's local subroutines and matrix (for a CID-keyed
 /// glyph the font DICT's concatenated with the Top DICT's), and the scale cff_slot_load applies when the font DICT's
-/// units per em differ from the Top DICT's: scaleNum / scaleDen, 1 / 1 when they are equal.
+/// units per em differ from the Top DICT's: scaleNum / scaleDen, 1 / 1 when they are equal. For an Ok glyph both are
+/// non-zero and at most INT32_MAX.
 struct CffGlyphSource {
   uint32_t offset = 0;
   uint32_t length = 0;
@@ -87,12 +87,14 @@ struct CffGlyphSource {
 };
 
 /// Malformed for a glyph past the CharStrings or one whose FDSelect names an FD past the FDArray (FreeType refuses
-/// both: cff_slot_load, cff_decoder_prepare); Transient when an SD read fails.
+/// both: cff_slot_load, cff_decoder_prepare), and for one whose scale would be 0 or past 32 bits (the engine's own
+/// rule); Transient when an SD read fails.
 Status cffGlyphSource(FontBytes& bytes, const Face& face, uint16_t glyph, CffGlyphSource* out);
 
 /// The glyph seac takes for a StandardEncoding `code` (cff_lookup_glyph_by_stdcharcode): the first whose charset entry
 /// is the code's SID. A CID-keyed font's charset holds CIDs and is searched all the same, as FreeType does with an
-/// OpenType font. -1 for a code outside 0-255 or a SID no glyph has.
+/// OpenType font. -1 for a code outside 0-255 or a SID no glyph has. It cannot report a failed SD read (the charset's
+/// entries read as 0): the caller checks bytes.ioError() after it.
 int32_t cffStandardCharGlyph(FontBytes& bytes, const Face& face, int32_t code);
 
 }  // namespace ttf

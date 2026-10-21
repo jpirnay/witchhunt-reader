@@ -102,6 +102,13 @@ TEST(TtfFace, ACff2OnlyFontIsUnsupported) {
   EXPECT_EQ(FaceStatus::Unsupported, parse(buildFont(font), &face));
   font.extraTables.push_back({"CFF ", buildCff(CffSpec{})});
   EXPECT_EQ(FaceStatus::Unsupported, parse(buildFont(font), &face));
+  // Any CFF2 record will do: an empty one, or one outside the file.
+  font.extraTables[0].second.clear();
+  EXPECT_EQ(FaceStatus::Unsupported, parse(buildFont(font), &face));
+  font.extraTables[0].second = cff2;
+  Bytes outside = buildFont(font);
+  set32(outside, findRecord(outside, "CFF2") + 8, static_cast<uint32_t>(outside.size()) + 16);
+  EXPECT_EQ(FaceStatus::Unsupported, parse(outside, &face));
 }
 
 TEST(TtfFace, ACffFontTakesAShortMaxp) {

@@ -37,6 +37,14 @@ bool findTable(FontBytes& bytes, const uint16_t numTables, const uint32_t wanted
   return false;
 }
 
+// Whether the directory has a record for `wanted`, whatever its offset and length.
+bool listsTable(FontBytes& bytes, const uint16_t numTables, const uint32_t wanted) {
+  for (uint32_t i = 0; i < numTables; ++i) {
+    if (bytes.u32(12 + 16 * i) == wanted) return true;
+  }
+  return false;
+}
+
 // FreeType reads OS/2 field groups by version and treats a table too short for its version as missing.
 uint32_t os2Length(const uint16_t version) {
   if (version >= 5) return 100;
@@ -147,9 +155,9 @@ FaceStatus parseFace(FontBytes& bytes, Face* face) {
   }
   const uint16_t numTables = bytes.u16(4);
   if (12 + 16 * static_cast<uint64_t>(numTables) > bytes.size()) return readFailure(bytes, FaceStatus::Malformed);
-  // FreeType reads a CFF2 table (variable OpenType) before a CFF one (cff_face_init); CFF2 is not read here.
-  Table cff2;
-  if (cff && findTable(bytes, numTables, tag("CFF2"), 1, &cff2)) return readFailure(bytes, FaceStatus::Unsupported);
+  // FreeType reads a CFF2 table (variable OpenType) before a CFF one (cff_face_init); CFF2 is not read here, and a
+  // font listing one at all is not taken for a CFF font.
+  if (cff && listsTable(bytes, numTables, tag("CFF2"))) return readFailure(bytes, FaceStatus::Unsupported);
 
   Table head, hhea, maxp, cmap, loca, glyf, hmtx, cffTable;
   if (!findTable(bytes, numTables, tag("head"), 54, &head) || !findTable(bytes, numTables, tag("hhea"), 36, &hhea) ||

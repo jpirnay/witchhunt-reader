@@ -77,16 +77,37 @@ inline Bytes cffIndex(const std::vector<Bytes>& items) {
   return out;
 }
 
+/// `size` bytes (at least 2) of DICT entries every DICT parses and none reads: operator 13, UniqueID in a Top or font
+/// DICT, unknown in a Private DICT, after an operand of 0 (2 bytes) or, once for an odd size, of 108 (3 bytes).
+inline Bytes cffDictPad(const size_t size) {
+  Bytes out;
+  if (size % 2) out.insert(out.end(), {247, 0, 13});
+  while (out.size() < size) out.insert(out.end(), {139, 13});
+  return out;
+}
+
 /// A font DICT of a CID-keyed font, or (the first) the Private DICT of a name-keyed one.
 struct CffFontDict {
   std::string matrix;             ///< the FontMatrix's six numbers; empty: no FontMatrix
   std::vector<Bytes> localSubrs;  ///< empty: no Subrs entry
   std::string subrsReal;          ///< the Subrs offset as this real instead of an integer (it must truncate to it)
+  Bytes dictPad;                  ///< entries the font DICT starts with (11 bytes of its own without a FontMatrix)
+  Bytes privatePad;               ///< entries the Private DICT starts with (6 bytes of its own, 12 with Subrs)
 };
+
+inline CffFontDict cffFontDict(const std::string& matrix, const std::vector<Bytes>& localSubrs = {},
+                               const std::string& subrsReal = {}) {
+  CffFontDict dict;
+  dict.matrix = matrix;
+  dict.localSubrs = localSubrs;
+  dict.subrsReal = subrsReal;
+  return dict;
+}
 
 struct CffSpec {
   std::vector<Bytes> charStrings = {{14}, {14}, {14}};  ///< endchar each
   bool cid = false;
+  Bytes topPad;                  ///< entries the Top DICT starts with (43 bytes of its own when CID-keyed)
   std::string topMatrix;         ///< the Top DICT's FontMatrix; empty: none
   std::vector<CffFontDict> fds;  ///< CID: the FDArray; name-keyed: at most one, the Top DICT's Private
   Bytes fdSelect;                ///< CID: the FDSelect as is; empty: one format 3 range, every glyph in FD 0
@@ -125,7 +146,7 @@ inline Bytes buildCff(const CffSpec& spec) {
   std::vector<Bytes> privates;
   std::vector<uint32_t> privateSizes;
   for (const CffFontDict& fd : spec.fds) {
-    Bytes dict;
+    Bytes dict = fd.privatePad;
     putCffInt(dict, 0);
     putCffOp(dict, 20);
     if (!fd.localSubrs.empty()) {
@@ -144,7 +165,7 @@ inline Bytes buildCff(const CffSpec& spec) {
     privates.push_back(dict);
   }
   const auto fontDict = [&](const size_t i, const uint32_t privateAt) {
-    Bytes dict;
+    Bytes dict = spec.fds[i].dictPad;
     if (!spec.fds[i].matrix.empty()) putCffMatrix(dict, spec.fds[i].matrix);
     putCffInt(dict, static_cast<int32_t>(privateSizes[i]));
     putCffInt(dict, static_cast<int32_t>(privateAt));
@@ -153,7 +174,7 @@ inline Bytes buildCff(const CffSpec& spec) {
   };
   const auto topDict = [&](const uint32_t charsetAt, const uint32_t encodingAt, const uint32_t charStringsAt,
                            const uint32_t fdArrayAt, const uint32_t fdSelectAt, const uint32_t privateAt) {
-    Bytes dict;
+    Bytes dict = spec.topPad;
     if (spec.cid) {
       putCffInt(dict, 391);  // Adobe
       putCffInt(dict, 392);  // Identity

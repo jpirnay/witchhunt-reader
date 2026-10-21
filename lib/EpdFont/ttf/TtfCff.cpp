@@ -13,6 +13,11 @@ constexpr uint32_t kPrivateStack = 97;    // ... and a Private DICT's (cff_load_
 constexpr uint32_t kNoRegistry = 0xFFFF;  // cff_subfont_load's ROS registry when the DICT has none: not CID-keyed
 constexpr uint32_t kMaxFontDicts = 256;   // CFF_MAX_CID_FONTS
 constexpr uint32_t kMaxOperands = 6;      // the most any operator read here takes (FontMatrix)
+// The largest Top, font or Private DICT the engine reads. A CID-keyed glyph's font and Private DICTs are read again
+// for every glyph, so a hostile multi-megabyte DICT would cost every glyph that much; real ones are far smaller (the
+// test fonts' largest: a 77-byte Top DICT, an 11-byte font DICT, a 36-byte Private DICT in OpenDyslexic; a Private
+// DICT with every hint array full is a few hundred). FreeType has no such limit.
+constexpr uint32_t kMaxDictBytes = 4096;
 
 constexpr int32_t kPowerTens[] = {1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000};
 
@@ -470,12 +475,12 @@ bool readFontDictOperator(FontBytes& bytes, const uint32_t end, const DictOperat
   }
 }
 
-// cff_subfont_load's DICT: item `item` of the Top DICT INDEX or the FDArray.
+// cff_subfont_load's DICT: item `item` of the Top DICT INDEX or the FDArray, at most kMaxDictBytes.
 bool readFontDict(FontBytes& bytes, const CffIndex& index, const uint32_t item, FontDict* dict) {
   *dict = FontDict{};
   uint32_t offset = 0;
   uint32_t length = 0;
-  if (!cffIndexItem(bytes, index, item, &offset, &length)) return false;
+  if (!cffIndexItem(bytes, index, item, &offset, &length) || length > kMaxDictBytes) return false;
   const uint32_t end = offset + length;
   return runDict(bytes, offset, end, kTopStack,
                  [&](const DictOperator& op) { return readFontDictOperator(bytes, end, op, dict); });
@@ -483,11 +488,15 @@ bool readFontDict(FontBytes& bytes, const CffIndex& index, const uint32_t item, 
 
 // The Private DICT of `dict` (cff_load_private_dict) and its local subroutines (cff_subfont_load): none for a DICT
 // with ROS, which FreeType stops reading there, or without a Private DICT (an offset or a size of 0). The Subrs offset
-// is from the Private DICT's start, summed with wrap-around as FreeType sums it; everything lies inside the table.
+// is from the Private DICT's start, summed with wrap-around as FreeType sums it; everything lies inside the table, and
+// the DICT is at most kMaxDictBytes.
 bool readPrivate(FontBytes& bytes, const CffFace& cff, const FontDict& dict, CffIndex* localSubrs) {
   *localSubrs = CffIndex{};
   if (dict.registry != kNoRegistry || dict.privateOffset == 0 || dict.privateSize == 0) return true;
-  if (dict.privateOffset > cff.tableLength || dict.privateSize > cff.tableLength - dict.privateOffset) return false;
+  if (dict.privateSize > kMaxDictBytes || dict.privateOffset > cff.tableLength ||
+      dict.privateSize > cff.tableLength - dict.privateOffset) {
+    return false;
+  }
   const uint32_t start = cff.table + dict.privateOffset;
   const uint32_t end = start + dict.privateSize;
   uint32_t subrs = 0;
@@ -545,26 +554,18 @@ bool fontDictsFit(FontBytes& bytes, const CffFace& cff) {
   return true;
 }
 
-// A CID-keyed glyph's FD (cff_fd_select_get). FreeType scans the format 3 ranges in order for the first that holds
-// the glyph; with the ranges in ascending order, as the CFF spec has them, that is the last starting at or before it,
-// found here by bisection. A glyph before the first range or past the sentinel is in FD 0.
+// A CID-keyed glyph's FD, as cff_fd_select_get finds it with its range cache cold: the format 3 ranges in order, up
+// to the first that holds the glyph; a range starting past the glyph ends the search, and so does the sentinel. FD 0
+// when no range holds it. Any order of ranges gives FreeType's answer, at a read per range.
 uint32_t glyphFd(FontBytes& bytes, const CffFace& cff, const uint32_t glyph) {
   if (cff.fdSelectFormat == 0) return bytes.u8(cff.fdSelect + 1 + glyph);
   const uint32_t ranges = bytes.u16(cff.fdSelect + 1);
-  const uint32_t first = cff.fdSelect + 3;  // range i: its first glyph (2 bytes), its FD; then the sentinel
-  uint32_t lo = 0;
-  uint32_t hi = ranges;
-  while (lo < hi) {
-    const uint32_t mid = lo + (hi - lo) / 2;
-    if (bytes.u16(first + 3 * mid) <= glyph) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
+  uint32_t range = cff.fdSelect + 3;  // its first glyph (2 bytes) and FD; the next range's first glyph ends it
+  for (uint32_t i = 0; i < ranges; ++i, range += 3) {
+    if (glyph < bytes.u16(range)) break;
+    if (glyph < bytes.u16(range + 3)) return bytes.u8(range + 2);
   }
-  if (lo == 0) return 0;
-  const uint32_t range = first + 3 * (lo - 1);
-  return glyph < bytes.u16(range + 3) ? bytes.u8(range + 2) : 0;
+  return 0;
 }
 
 // CFF_Load_FD_Select: format 0, a byte per glyph, or format 3, at least one range; other formats are refused.
@@ -768,12 +769,7 @@ bool readCffTable(FontBytes& bytes, const uint32_t table, const uint32_t length,
       return false;
     }
   } else {
-    if (!readPrivate(bytes, *out, top, &out->localSubrs)) return false;
-    if (top.privateOffset != 0 && top.privateSize != 0) {
-      out->privateDict = table + top.privateOffset;
-      out->privateSize = top.privateSize;
-    }
-    if (!encodingFits(bytes, *out, top.encoding)) return false;
+    if (!readPrivate(bytes, *out, top, &out->localSubrs) || !encodingFits(bytes, *out, top.encoding)) return false;
   }
   if (!charsetFits(bytes, *out, top.charset)) return false;
   out->charset = top.charset <= 2 ? top.charset : table + top.charset;
@@ -799,10 +795,15 @@ Status cffGlyphSource(FontBytes& bytes, const Face& face, const uint16_t glyph, 
         !narrow(fontDictMatrix(cff, dict), &out->matrix) || !readPrivate(bytes, cff, dict, &out->localSubrs)) {
       return failed();
     }
-    // cff_slot_load scales by the Top DICT's units per em over the font DICT's.
-    if (out->matrix.upm != cff.matrix.upm) {
-      out->scaleNum = cff.matrix.upm;
-      out->scaleDen = out->matrix.upm;
+    // cff_slot_load scales by the Top DICT's units per em over the font DICT's. A FontMatrix of 3 em or more leaves 0
+    // units per em, a very fine one more than 2^31: FreeType would divide by zero or scale wildly, the engine
+    // refuses the glyph.
+    const uint32_t top = cff.matrix.upm;
+    const uint32_t own = out->matrix.upm;
+    if (top != own) {
+      if (top == 0 || own == 0 || top > INT32_MAX || own > INT32_MAX) return failed();
+      out->scaleNum = top;
+      out->scaleDen = own;
     }
   }
   if (bytes.ioError() || bytes.outOfRange()) return failed();
