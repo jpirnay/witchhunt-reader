@@ -1137,7 +1137,7 @@ class EpubReaderActivity final : public Activity {
   void stopAutomaticPageTurn();
   void applyBookReaderOverrides(int8_t embeddedStyleOverride, int8_t imageRenderingOverride, int8_t fontFamilyOverride,
                                 const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
-                                bool bionicReadingOverride, int8_t paragraphAlignmentOverride);
+                                int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride);
   // Wider variant that also covers AA, hyphenation and guide dots. Used by
   // QuickOverridesActivity; the narrower overload above funnels through here,
   // preserving the AA/hyphenation/guide-dots values currently held on this activity.

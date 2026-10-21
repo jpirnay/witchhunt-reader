@@ -3156,13 +3156,12 @@ void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption
 void EpubReaderActivity::applyBookReaderOverrides(const int8_t embeddedStyleOverride,
                                                   const int8_t imageRenderingOverride, const int8_t fontFamilyOverride,
                                                   const std::string& sdFontFamilyOverride,
-                                                  const int8_t fontSizeOverride, const bool bionicReadingOverride,
+                                                  const int8_t fontSizeOverride, const int8_t bionicReadingOverride,
                                                   const int8_t paragraphAlignmentOverride) {
   applyBookReaderOverrides(embeddedStyleOverride, imageRenderingOverride, fontFamilyOverride, sdFontFamilyOverride,
-                           fontSizeOverride, static_cast<int8_t>(bionicReadingOverride ? 1 : 0),
-                           paragraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
-                           bookFontSizeNormalizationOverride, bookGuideDotsOverride,
-                           bookInlineFootnotePreviewsOverride);
+                           fontSizeOverride, bionicReadingOverride, paragraphAlignmentOverride,
+                           bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride,
+                           bookGuideDotsOverride, bookInlineFootnotePreviewsOverride);
 }
 
 void EpubReaderActivity::applyBookReaderOverrides(
@@ -7694,7 +7693,8 @@ void EpubReaderActivity::onButtonAction(const CrossPointSettings::BUTTON_ACTION 
     case BA::BTN_TOGGLE_BIONIC_READING:
       if (epub) {
         applyBookReaderOverrides(bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
-                                 bookSdFontFamilyOverride, bookFontSizeOverride, !getEffectiveBionicReading(),
+                                 bookSdFontFamilyOverride, bookFontSizeOverride,
+                                 static_cast<int8_t>(getEffectiveBionicReading() ? 0 : 1),
                                  bookParagraphAlignmentOverride);
         requestUpdate();
       }
