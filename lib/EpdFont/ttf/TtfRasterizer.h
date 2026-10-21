@@ -13,12 +13,14 @@ namespace ttf {
 enum class Status : uint8_t {
   Ok,           ///< loaded or drawn; a glyph with no outline (a space) loads with width and height 0
   Unsupported,  ///< permanent: a point-matched or scaled-offset component, more points or contours than the
-                ///< scratch block holds, too deep or too many components, a bitmap over 255 px a side or
-                ///< over the output region, or coordinates out of range
+                ///< scratch block holds, too deep or too many components, a CFF charstring using `random` or
+                ///< past the interpreter's operator budget, a bitmap over 255 px a side or over the output
+                ///< region, or coordinates out of range
   Malformed,    ///< permanent: broken glyph data (a read past the glyph or the file, contour ends out of
                 ///< order, a flag run past the last point, a glyph index past numGlyphs)
   Transient,    ///< nothing is known to be wrong with the glyph (an SD read failed, Stage 2c; no scratch block;
-                ///< or a size larger than the block was planned for): not marked in the store, tried again
+                ///< or a size larger than the block was planned for, or CFF outlines in a block planned
+                ///< without them): not marked in the store, tried again
 };
 
 constexpr bool isPermanent(const Status status) { return status == Status::Unsupported || status == Status::Malformed; }
@@ -40,17 +42,21 @@ struct ScratchPlan {
   /// The largest size the output region was sized for. A glyph too big for the region at a larger size is
   /// the plan's fault, not the glyph's, so it reports Transient rather than Unsupported.
   uint32_t maxPpem26_6 = kMaxPpem26_6;
+  /// The CFF interpreter's state (kCffDecoderBytes) when a face the block serves has CFF outlines; 0 otherwise.
+  uint32_t decoderBytes = 0;
 };
 
-/// The plan for one face: points and contours from maxp; the output from head's box at `maxPpem26_6` (the
-/// largest size the family renders), but never less than the em square, since head's box can lie; each
-/// capped. A glyph past a cap at a planned size reports Unsupported.
+/// The plan for one face: points and contours from maxp, or for CFF outlines, which maxp does not count, the caps
+/// and the interpreter's state; the output from head's box at `maxPpem26_6` (the largest size the family renders),
+/// but never less than the em square, since head's box can lie; each capped. A glyph past a cap at a planned size
+/// reports Unsupported.
 ScratchPlan planScratch(const Face& face, uint32_t maxPpem26_6, uint32_t poolBytes);
 /// The larger of each part, so one block serves every style of a family.
 ScratchPlan mergePlans(const ScratchPlan& a, const ScratchPlan& b);
 
 /// Glyph outlines to 2-bit bitmaps: FreeType's TrueType loader rebuilt in integers (simple glyphs, compound
-/// glyphs with offsets and 2.14 transforms, unhinted, exactly as FreeType scales them) feeding FreeType's own
+/// glyphs with offsets and 2.14 transforms, unhinted, exactly as FreeType scales them), and its CFF loader (the
+/// charstring interpreter of TtfCffCharString, then cff_slot_load's font matrix and scale), feeding FreeType's own
 /// anti-aliasing rasterizer (ftgrays), whose coverage spans are packed straight into the 2-bit stream with the
 /// converter's thresholds. One per loaded set, drawing in the scratch block it makes or is lent.
 ///
@@ -105,6 +111,7 @@ class Rasterizer {
   uint32_t pointsOffset_ = 0;
   uint32_t contoursOffset_ = 0;
   uint32_t tagsOffset_ = 0;
+  uint32_t decoderOffset_ = 0;
   uint32_t outputOffset_ = 0;
   // The last load(): its status, outline size and bitmap box.
   Status loaded_ = Status::Malformed;

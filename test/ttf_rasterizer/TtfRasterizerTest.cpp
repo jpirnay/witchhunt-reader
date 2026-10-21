@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "TtfBuilder.h"
+#include "TtfCffCharString.h"
 #include "TtfRasterizer.h"
 #include "TtfTestUtil.h"
 
@@ -394,6 +395,63 @@ TEST(TtfScratch, OneBlockServesEveryStyle) {
   EXPECT_EQ(20, m.contours);
   EXPECT_EQ(900u, m.outputBytes);
   EXPECT_EQ(kPoolBytesSd, m.poolBytes);
+}
+
+TEST(TtfScratch, ACffFaceIsPlannedAtTheCapsWithTheInterpretersState) {
+  // maxp does not count a CFF font's points: the caps, and the charstring interpreter's region.
+  Face face;
+  face.outlines = Face::Outlines::Cff;
+  face.unitsPerEm = 1000;
+  face.xMax = 1000;
+  face.yMax = 1000;
+  const ScratchPlan cff = planScratch(face, 1000, kPoolBytesFlash);
+  EXPECT_EQ(kMaxScratchPoints, cff.points);
+  EXPECT_EQ(kMaxScratchContours, cff.contours);
+  EXPECT_EQ(kCffDecoderBytes, cff.decoderBytes);
+  EXPECT_EQ(81u, cff.outputBytes);  // head's box as for TrueType: 18 x 18 at 2 bits
+  face.outlines = Face::Outlines::TrueType;
+  face.maxPoints = 600;
+  face.maxContours = 40;
+  const ScratchPlan trueType = planScratch(face, 1000, kPoolBytesFlash);
+  EXPECT_EQ(0u, trueType.decoderBytes);
+  EXPECT_EQ(kCffDecoderBytes, mergePlans(trueType, cff).decoderBytes);
+  EXPECT_EQ(kCffDecoderBytes, mergePlans(cff, trueType).decoderBytes);
+}
+
+TEST(TtfScratch, TheInterpretersRegionFollowsTheTagsAligned) {
+  // 13 points leave the tags ending off an 8-byte boundary: the region starts at the next one, before the output.
+  ScratchPlan plan{13, 3, 100, kPoolBytesFlash};
+  Rasterizer trueType;
+  ASSERT_TRUE(trueType.setPlan(plan));
+  const uint32_t before = trueType.scratchBytes() - plan.outputBytes;  // the pool, points, contours and tags
+  plan.decoderBytes = kCffDecoderBytes;
+  Rasterizer cff;
+  ASSERT_TRUE(cff.setPlan(plan));
+  EXPECT_NE(0u, before % 8);
+  EXPECT_EQ((before + 7) / 8 * 8 + kCffDecoderBytes + plan.outputBytes, cff.scratchBytes());
+  plan.decoderBytes = kCffDecoderBytes - 8;  // too small for the interpreter
+  EXPECT_FALSE(cff.setPlan(plan));
+  plan.decoderBytes = kCffDecoderBytes + 8;
+  EXPECT_FALSE(cff.setPlan(plan));
+}
+
+TEST(TtfScratch, ACffGlyphInABlockPlannedWithoutTheInterpreterIsTransient) {
+  // The plan's fault, not the glyph's: drawn once the block is planned for the face.
+  const std::vector<uint8_t> data = readFixture("CffOperators.otf");
+  FontBytes bytes(data.data(), static_cast<uint32_t>(data.size()));
+  Face face;
+  ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face));
+  const uint16_t glyph = glyphIndex(bytes, face, 'A');
+  ASSERT_NE(0, glyph);
+  ScratchPlan plan = planScratch(face, kUnitPpem, kPoolBytesFlash);
+  plan.decoderBytes = 0;
+  Rasterizer rasterizer;
+  ASSERT_TRUE(rasterizer.allocate(plan));
+  EpdGlyph metrics{};
+  EXPECT_EQ(Status::Transient, rasterizer.render(bytes, face, glyph, kUnitPpem, &metrics));
+  ASSERT_TRUE(rasterizer.allocate(planScratch(face, kUnitPpem, kPoolBytesFlash)));
+  EXPECT_EQ(Status::Ok, rasterizer.render(bytes, face, glyph, kUnitPpem, &metrics));
+  EXPECT_GT(metrics.width, 0);
 }
 
 TEST(TtfScratch, AllocationHoldsThePlanAndRefusesImpossibleOnes) {

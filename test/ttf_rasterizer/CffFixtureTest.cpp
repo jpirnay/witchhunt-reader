@@ -23,7 +23,7 @@ FT_Library library() {
 // The CFF test fonts are the ground truth for the CFF rasterizer: the oracle's FreeType must load each one.
 TEST(CffFixtures, FreeTypeLoadsEveryCffTestFont) {
   for (const std::string& name : cffTestFonts()) {
-    const std::vector<uint8_t> font = name.find("OpenDyslexic") == 0 ? readFont(name) : readFixture(name);
+    const std::vector<uint8_t> font = readCffTestFont(name);
     ASSERT_FALSE(font.empty()) << name;
     FT_Face face = nullptr;
     ASSERT_EQ(0, FT_New_Memory_Face(library(), font.data(), static_cast<FT_Long>(font.size()), 0, &face)) << name;

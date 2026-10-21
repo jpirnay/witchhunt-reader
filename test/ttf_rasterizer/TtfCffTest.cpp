@@ -35,10 +35,6 @@ FT_Library library() {
   return lib;
 }
 
-std::vector<uint8_t> readCffTestFont(const std::string& name) {
-  return name.rfind("OpenDyslexic", 0) == 0 ? readFont(name) : readFixture(name);
-}
-
 FaceStatus parse(const std::vector<uint8_t>& data, Face* face) {
   FontBytes bytes(data.data(), static_cast<uint32_t>(data.size()));
   return parseFace(bytes, face);

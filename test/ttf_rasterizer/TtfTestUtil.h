@@ -47,6 +47,11 @@ inline const std::vector<std::string>& cffTestFonts() {
   return fonts;
 }
 
+/// A font of cffTestFonts(), exactly the file's bytes.
+inline std::vector<uint8_t> readCffTestFont(const std::string& name) {
+  return name.rfind("OpenDyslexic", 0) == 0 ? readFont(name) : readFixture(name);
+}
+
 /// Every TrueType source the reader bundles (the OpenDyslexic sources are CFF).
 inline const std::vector<std::string>& bundledTtfs() {
   static const std::vector<std::string> fonts = {

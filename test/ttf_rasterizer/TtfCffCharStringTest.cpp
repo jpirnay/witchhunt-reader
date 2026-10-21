@@ -251,10 +251,6 @@ Shape drawAsFreeType(const std::vector<uint8_t>& font, const uint16_t glyph = 1)
   return ours;
 }
 
-std::vector<uint8_t> readCffTestFont(const std::string& name) {
-  return name.rfind("OpenDyslexic", 0) == 0 ? readFont(name) : readFixture(name);
-}
-
 uint16_t glyphFor(Engine& engine, const uint32_t codepoint) {
   return glyphIndex(engine.bytes(), engine.face(), codepoint);
 }
