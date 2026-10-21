@@ -61,6 +61,183 @@ struct Cursor {
 
 bool inRange(const int64_t value) { return value >= -kMaxCoord && value <= kMaxCoord; }
 
+// --- Synthetic bold: FreeType 2.13.3's outline emboldening (ftoutln.c, ftcalc.c), bit for bit ---
+
+// FT_Vector_NormLen: `v` scaled to unit length (16.16), and its length returned. FreeType's own integer Newton
+// iteration, in its own 32-bit types: the wrap-arounds it relies on are the same on every target.
+int msb(const uint32_t v) { return 31 - __builtin_clz(v); }  // FT_MSB; v is never 0
+
+uint32_t normLen(FT_Vector* v) {
+  int32_t x_ = static_cast<int32_t>(v->x);
+  int32_t y_ = static_cast<int32_t>(v->y);
+  int sx = 1;
+  int sy = 1;
+  uint32_t x = x_ < 0 ? 0u - static_cast<uint32_t>(x_) : static_cast<uint32_t>(x_);
+  uint32_t y = y_ < 0 ? 0u - static_cast<uint32_t>(y_) : static_cast<uint32_t>(y_);
+  if (x_ < 0) sx = -1;
+  if (y_ < 0) sy = -1;
+  if (x == 0) {
+    if (y > 0) v->y = sy * 0x10000;
+    return y;
+  }
+  if (y == 0) {
+    if (x > 0) v->x = sx * 0x10000;
+    return x;
+  }
+  // Prenormalised by shifting, so the estimated length lies between 2/3 and 4/3.
+  uint32_t l = x > y ? x + (y >> 1) : y + (x >> 1);
+  int shift = 31 - msb(l);
+  shift -= 15 + (l >= (0xAAAAAAAAu >> shift) ? 1 : 0);
+  if (shift > 0) {
+    x <<= shift;
+    y <<= shift;
+    l = x > y ? x + (y >> 1) : y + (x >> 1);
+  } else {
+    x >>= -shift;
+    y >>= -shift;
+    l >>= -shift;
+  }
+  int32_t b = 0x10000 - static_cast<int32_t>(l);
+  x_ = static_cast<int32_t>(x);
+  y_ = static_cast<int32_t>(y);
+  uint32_t u = 0;
+  uint32_t w = 0;
+  int32_t z = 0;
+  do {  // Newton's iterations
+    u = static_cast<uint32_t>(x_ + (x_ * b >> 16));
+    w = static_cast<uint32_t>(y_ + (y_ * b >> 16));
+    z = -static_cast<int32_t>(u * u + w * w) / 0x200;
+    z = z * ((0x10000 + b) >> 8) / 0x10000;
+    b += z;
+  } while (z > 0);
+  v->x = sx < 0 ? -static_cast<FT_Pos>(u) : static_cast<FT_Pos>(u);
+  v->y = sy < 0 ? -static_cast<FT_Pos>(w) : static_cast<FT_Pos>(w);
+  l = static_cast<uint32_t>(0x10000 + static_cast<int32_t>(u * x + w * y) / 0x10000);
+  if (shift > 0) {
+    l = (l + (1u << (shift - 1))) >> shift;
+  } else {
+    l <<= -shift;
+  }
+  return l;
+}
+
+enum class Orientation : uint8_t { TrueType, PostScript, None };
+
+// FT_Outline_Get_Orientation: the sign of the control polygon's area, by the nonzero winding rule.
+Orientation orientation(const FT_Vector* points, const unsigned short* contours, const uint16_t numContours,
+                        const uint16_t numPoints) {
+  if (numPoints == 0) return Orientation::TrueType;
+  FT_Pos xMin = points[0].x;
+  FT_Pos yMin = points[0].y;
+  FT_Pos xMax = xMin;
+  FT_Pos yMax = yMin;
+  for (uint16_t i = 1; i < numPoints; ++i) {
+    xMin = points[i].x < xMin ? points[i].x : xMin;
+    yMin = points[i].y < yMin ? points[i].y : yMin;
+    xMax = points[i].x > xMax ? points[i].x : xMax;
+    yMax = points[i].y > yMax ? points[i].y : yMax;
+  }
+  if (xMin == xMax || yMin == yMax) return Orientation::None;
+  if (xMin < -0x1000000 || yMin < -0x1000000 || xMax > 0x1000000 || yMax > 0x1000000) return Orientation::None;
+  const auto absPos = [](const FT_Pos p) { return static_cast<uint32_t>(p < 0 ? -p : p); };
+  int xshift = msb(absPos(xMax) | absPos(xMin)) - 14;
+  xshift = xshift > 0 ? xshift : 0;
+  int yshift = msb(static_cast<uint32_t>(yMax - yMin)) - 14;
+  yshift = yshift > 0 ? yshift : 0;
+  int64_t area = 0;
+  int last = -1;
+  for (uint16_t c = 0; c < numContours; ++c) {
+    const int first = last + 1;
+    last = contours[c];
+    int64_t prevX = points[last].x >> xshift;
+    int64_t prevY = points[last].y >> yshift;
+    for (int n = first; n <= last; ++n) {
+      const int64_t curX = points[n].x >> xshift;
+      const int64_t curY = points[n].y >> yshift;
+      area += (curY - prevY) * (curX + prevX);
+      prevX = curX;
+      prevY = curY;
+    }
+  }
+  return area > 0 ? Orientation::PostScript : area < 0 ? Orientation::TrueType : Orientation::None;
+}
+
+// FT_Outline_EmboldenXY: every point moves outwards along the bisector of its two edges, by half the strength on each
+// axis, less where the edges are short or the turn is sharp, and the whole outline by half the strength up and to the
+// right, so the left edge and the baseline stay. False, the outline unchanged, where FreeType returns an error.
+bool emboldenXY(FT_Vector* points, const unsigned short* contours, const uint16_t numContours, const uint16_t numPoints,
+                int32_t xstrength, int32_t ystrength) {
+  xstrength /= 2;
+  ystrength /= 2;
+  if (xstrength == 0 && ystrength == 0) return true;
+  const Orientation orient = orientation(points, contours, numContours, numPoints);
+  if (orient == Orientation::None) return numContours == 0;
+  int last = -1;
+  for (uint16_t c = 0; c < numContours; ++c) {
+    const int first = last + 1;
+    last = contours[c];
+    FT_Vector in{0, 0};
+    FT_Vector out{0, 0};
+    FT_Vector anchor{0, 0};
+    FT_Vector shift{0, 0};
+    int32_t lIn = 0;
+    int32_t lOut = 0;
+    int32_t lAnchor = 0;
+    // j cycles through the points; i advances only when points are moved; the anchor k marks the first moved point.
+    for (int i = last, j = first, k = -1; j != i && i != k; j = j < last ? j + 1 : first) {
+      if (j != k) {
+        out.x = points[j].x - points[i].x;
+        out.y = points[j].y - points[i].y;
+        lOut = static_cast<int32_t>(normLen(&out));
+        if (lOut == 0) continue;
+      } else {
+        out = anchor;
+        lOut = lAnchor;
+      }
+      if (lIn != 0) {
+        if (k < 0) {
+          k = i;
+          anchor = in;
+          lAnchor = lIn;
+        }
+        const auto ix = static_cast<int32_t>(in.x);
+        const auto iy = static_cast<int32_t>(in.y);
+        const auto ox = static_cast<int32_t>(out.x);
+        const auto oy = static_cast<int32_t>(out.y);
+        int32_t d = mulFix(ix, ox) + mulFix(iy, oy);
+        if (d > -0xF000) {  // a turn of less than about 160 degrees
+          d += 0x10000;
+          // Along the lateral bisector, in the outline's orientation.
+          int32_t sx = iy + oy;
+          int32_t sy = ix + ox;
+          if (orient == Orientation::TrueType) {
+            sx = -sx;
+          } else {
+            sy = -sy;
+          }
+          // Limited, so collapsing segments are handled.
+          int32_t q = mulFix(ox, iy) - mulFix(oy, ix);
+          if (orient == Orientation::TrueType) q = -q;
+          const int32_t l = lIn < lOut ? lIn : lOut;
+          shift.x = mulFix(xstrength, q) <= mulFix(l, d) ? mulDiv(sx, xstrength, d) : mulDiv(sx, l, q);
+          shift.y = mulFix(ystrength, q) <= mulFix(l, d) ? mulDiv(sy, ystrength, d) : mulDiv(sy, l, q);
+        } else {
+          shift.x = shift.y = 0;
+        }
+        for (; i != j; i = i < last ? i + 1 : first) {
+          points[i].x += xstrength + shift.x;
+          points[i].y += ystrength + shift.y;
+        }
+      } else {
+        i = j;
+      }
+      in = out;
+      lIn = lOut;
+    }
+  }
+  return true;
+}
+
 // Packs ftgrays' coverage spans into the 2-bit stream with the PC converter's thresholds (coverage nibble
 // >= 12 -> 3, >= 8 -> 2, >= 4 -> 1). ftgrays counts rows from the bottom; the bitmap starts at the top.
 struct SpanSink {
@@ -312,6 +489,13 @@ ScratchPlan planScratch(const Face& face, const uint32_t maxPpem26_6, const uint
   return plan;
 }
 
+Strength emboldenStrength(const uint32_t ppem26_6) {
+  // FreeType's synthetic bold strength (FT_GlyphSlot_Embolden): x_ppem, rounded as FT_Request_Metrics rounds it,
+  // times 0x0AAA / 1024, about em/24.
+  const int32_t s = static_cast<int32_t>((ppem26_6 + 32) >> 6) * 0x0AAA / 1024;
+  return {s, s};
+}
+
 ScratchPlan mergePlans(const ScratchPlan& a, const ScratchPlan& b) {
   ScratchPlan plan;
   plan.points = a.points > b.points ? a.points : b.points;
@@ -403,17 +587,27 @@ Status Rasterizer::load(FontBytes& bytes, const Face& face, const uint16_t glyph
   if (bytes.ioError()) return loaded_ = Status::Transient;
   if (advance > 0xFFFF) return loaded_ = Status::Unsupported;  // past the 4,095.9 px EpdGlyph::advanceX holds
 
+  metrics->advanceX = static_cast<uint16_t>(advance);
+  numPoints_ = loader.numPoints;
+  numContours_ = loader.numContours;
+  left_ = bottom_ = 0;
+  ppem_ = ppem26_6;
+  return loaded_ = placeBox(metrics);
+}
+
+Status Rasterizer::placeBox(EpdGlyph* metrics) {
+  auto* points = reinterpret_cast<FT_Vector*>(block_ + pointsOffset_);
   int32_t left = 0;
   int32_t top = 0;
   int32_t width = 0;
   int32_t height = 0;
-  if (loader.numPoints > 0) {
+  if (numPoints_ > 0) {
     // FreeType's bitmap box for gray rendering: the control box, floored and ceiled to whole pixels.
     FT_Pos xMin = points[0].x;
     FT_Pos yMin = points[0].y;
     FT_Pos xMax = xMin;
     FT_Pos yMax = yMin;
-    for (uint16_t i = 1; i < loader.numPoints; ++i) {
+    for (uint16_t i = 1; i < numPoints_; ++i) {
       xMin = points[i].x < xMin ? points[i].x : xMin;
       yMin = points[i].y < yMin ? points[i].y : yMin;
       xMax = points[i].x > xMax ? points[i].x : xMax;
@@ -425,26 +619,46 @@ Status Rasterizer::load(FontBytes& bytes, const Face& face, const uint16_t glyph
     width = static_cast<int32_t>((xMax + 63) >> 6) - left;
     height = top - bottom;
     if (width > 255 || height > 255 || left < INT16_MIN || left > INT16_MAX || top < INT16_MIN || top > INT16_MAX) {
-      return loaded_ = Status::Unsupported;
+      return Status::Unsupported;
     }
     if (glyphDataBytes(width, height, true) > plan_.outputBytes) {
       // Past the output region: the glyph's own limit at a size the plan was made for; above those sizes the
       // caller must plan again, and nothing is wrong with the glyph.
-      return loaded_ = ppem26_6 > plan_.maxPpem26_6 ? Status::Transient : Status::Unsupported;
+      return ppem_ > plan_.maxPpem26_6 ? Status::Transient : Status::Unsupported;
     }
-    loader.translate(0, -left * 64, -bottom * 64);  // the box now starts at (0, 0), as ftgrays' clip box does
+    for (uint16_t i = 0; i < numPoints_; ++i) {  // the box now starts at (0, 0), as ftgrays' clip box does
+      points[i].x -= left * 64;
+      points[i].y -= bottom * 64;
+    }
+    left_ = left;
+    bottom_ = bottom;
   }
   metrics->width = static_cast<uint8_t>(width);
   metrics->height = static_cast<uint8_t>(height);
-  metrics->advanceX = static_cast<uint16_t>(advance);
   metrics->left = static_cast<int16_t>(left);
   metrics->top = static_cast<int16_t>(top);
   metrics->dataLength = glyphDataBytes(width, height, true);
-  numPoints_ = loader.numPoints;
-  numContours_ = loader.numContours;
   width_ = static_cast<uint16_t>(width);
   height_ = static_cast<uint16_t>(height);
-  return loaded_ = Status::Ok;
+  return Status::Ok;
+}
+
+Status Rasterizer::embolden(const Strength& strength, EpdGlyph* metrics) {
+  if (loaded_ != Status::Ok) return loaded_;
+  // FT_GlyphSlot_AdjustWeight: the advance grows by the horizontal strength, whatever became of the outline.
+  const uint32_t advance = metrics->advanceX + (static_cast<uint32_t>(strength.x) + 2) / 4;
+  if (advance > 0xFFFF) return loaded_ = Status::Unsupported;
+  metrics->advanceX = static_cast<uint16_t>(advance);
+  if (numPoints_ == 0) return Status::Ok;
+  // Back where FreeType has the outline (its orientation reads absolute coordinates), emboldened, boxed again.
+  auto* points = reinterpret_cast<FT_Vector*>(block_ + pointsOffset_);
+  for (uint16_t i = 0; i < numPoints_; ++i) {
+    points[i].x += left_ * 64;
+    points[i].y += bottom_ * 64;
+  }
+  emboldenXY(points, reinterpret_cast<const unsigned short*>(block_ + contoursOffset_), numContours_, numPoints_,
+             strength.x, strength.y);
+  return loaded_ = placeBox(metrics);
 }
 
 Status Rasterizer::rasterize(uint8_t* dst) {
