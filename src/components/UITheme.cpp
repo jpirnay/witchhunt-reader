@@ -176,6 +176,8 @@ Rect UITheme::getContentRect(const GfxRenderer& renderer, bool hasBottomHints, b
       }
       break;
   }
+  left = HeaderLayout::columnReserve(left);
+  right = HeaderLayout::columnReserve(right);
 
   const int w = renderer.getScreenWidth();
   const int h = renderer.getScreenHeight();

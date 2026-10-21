@@ -66,7 +66,8 @@ class UITheme {
   // Returns the drawable content Rect accounting for screen orientation and visible button hints.
   // Bottom hints occupy the physical bottom edge.
   // Side hints occupy the physical right edge on X4, and both physical sides on X3.
-  // The mapping to logical edges is orientation-dependent.
+  // The mapping to logical edges is orientation-dependent. A strip that ends up on the logical left
+  // or right edge also keeps HeaderLayout::HINT_COLUMN_GAP between it and the content.
   static Rect getContentRect(const GfxRenderer& renderer, bool hasBottomHints, bool hasSideHints);
   // The top strip the header, clock and battery are drawn in: one topPadding into the content area
   // getContentRect(renderer, hasBottomHints, hasSideHints) leaves (HeaderLayout::header), so it
