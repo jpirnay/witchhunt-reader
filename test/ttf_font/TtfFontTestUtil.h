@@ -13,6 +13,9 @@ namespace ttf_test {
 struct MemoryFile {
   std::vector<uint8_t> bytes;
   bool failReads = false;
+  /// Reads that do not lie inside [readsFrom, readsTo) fail as well.
+  uint32_t readsFrom = 0;
+  uint32_t readsTo = UINT32_MAX;
   uint32_t reads = 0;
   uint32_t stamp = 0x57A3;  ///< what the card says of the file: FileSource::stamp
   std::vector<uint32_t> offsets;
@@ -24,6 +27,7 @@ struct MemoryFile {
     ++file->reads;
     file->offsets.push_back(offset);
     if (file->failReads || offset > file->bytes.size() || len > file->bytes.size() - offset) return false;
+    if (offset < file->readsFrom || uint64_t{offset} + len > file->readsTo) return false;
     std::memcpy(dst, file->bytes.data() + offset, len);
     return true;
   }

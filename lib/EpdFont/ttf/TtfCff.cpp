@@ -1,5 +1,7 @@
 #include "TtfCff.h"
 
+#include <algorithm>
+
 #include "TtfFace.h"
 #include "TtfFixed.h"
 #include "TtfRasterizer.h"
@@ -17,7 +19,7 @@ constexpr uint32_t kMaxOperands = 6;      // the most any operator read here tak
 // for every glyph, so a hostile multi-megabyte DICT would cost every glyph that much; real ones are far smaller (the
 // test fonts' largest: a 77-byte Top DICT, an 11-byte font DICT, a 36-byte Private DICT in OpenDyslexic; a Private
 // DICT with every hint array full is a few hundred). FreeType has no such limit.
-constexpr uint32_t kMaxDictBytes = 4096;
+constexpr uint32_t kMaxDictBytes = kCffMaxDictBytes;
 
 constexpr int32_t kPowerTens[] = {1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000};
 
@@ -377,8 +379,9 @@ bool narrow(const WideMatrix& m, CffMatrix* out) {
 // A DICT operator and the operands before it: their count, and where the first ones start. FreeType's parser keeps a
 // pointer per operand (cff_parser_run); an operator reads its first ones.
 struct DictOperator {
-  uint16_t code = 0;  // one byte, or 0x100 | the second byte of an escaped (12 x) operator
-  uint32_t count = 0;
+  uint16_t code = 0;   // one byte, or 0x100 | the second byte of an escaped (12 x) operator
+  uint16_t count = 0;  // at most the stack's size
+  uint32_t at = 0;     // where the operator starts: its last operand ends there
   uint32_t operand[kMaxOperands] = {};
 };
 
@@ -410,6 +413,7 @@ bool runDict(FontBytes& bytes, const uint32_t start, const uint32_t end, const u
       continue;
     }
     op.code = static_cast<uint16_t>(v);
+    op.at = static_cast<uint32_t>(p);
     if (v == 12) {
       if (++p >= end) return false;
       op.code = static_cast<uint16_t>(0x100 | bytes.u8(static_cast<uint32_t>(p)));
@@ -505,6 +509,40 @@ bool readFontDictOperator(FontBytes& bytes, const uint32_t end, const DictOperat
   }
 }
 
+// Notes the operand of `op` that sets an offset SD mode's rebuilt table moves (CffDictOffsets), for an operator
+// readFontDictOperator accepted: it has the operands it needs.
+void noteOffset(const DictOperator& op, CffDictOffsets* out) {
+  uint8_t field = 0;
+  uint32_t i = 0;  // the operand: the first, but for Private (size, offset)
+  switch (op.code) {
+    case 15:
+      field = CffDictOffsets::Charset;
+      break;
+    case 16:
+      field = CffDictOffsets::Encoding;
+      break;
+    case 17:
+      field = CffDictOffsets::CharStrings;
+      break;
+    case 18:
+      field = CffDictOffsets::Private;
+      i = 1;
+      break;
+    case 0x124:
+      field = CffDictOffsets::FdArray;
+      break;
+    case 0x125:
+      field = CffDictOffsets::FdSelect;
+      break;
+    default:
+      return;
+  }
+  // The operand ends where the next one starts, or at the operator.
+  const uint32_t end = i + 1 < op.count ? op.operand[i + 1] : op.at;
+  out->operand[field] = op.operand[i];
+  out->operandBytes[field] = end - op.operand[i];
+}
+
 // cff_subfont_load's DICT: item `item` of the Top DICT INDEX or the FDArray, at most kMaxDictBytes.
 bool readFontDict(FontBytes& bytes, const CffIndex& index, const uint32_t item, FontDict* dict) {
   *dict = FontDict{};
@@ -516,13 +554,18 @@ bool readFontDict(FontBytes& bytes, const CffIndex& index, const uint32_t item, 
                  [&](const DictOperator& op) { return readFontDictOperator(bytes, end, op, dict); });
 }
 
-// The Private DICT of `dict` (cff_load_private_dict) and its local subroutines (cff_subfont_load): none for a DICT
-// with ROS, which FreeType stops reading there, or without a Private DICT (an offset or a size of 0). The Subrs offset
-// is from the Private DICT's start, summed with wrap-around as FreeType sums it; everything lies inside the table, and
-// the DICT is at most kMaxDictBytes.
+// Whether `dict` has a Private DICT FreeType reads: not for a DICT with ROS, which FreeType stops reading there, nor
+// without a Private DICT (an offset or a size of 0).
+bool readsPrivate(const FontDict& dict) {
+  return dict.registry == kNoRegistry && dict.privateOffset != 0 && dict.privateSize != 0;
+}
+
+// The Private DICT of `dict` (cff_load_private_dict) and its local subroutines (cff_subfont_load), when it has one it
+// reads (readsPrivate). The Subrs offset is from the Private DICT's start, summed with wrap-around as FreeType sums it;
+// everything lies inside the table, and the DICT is at most kMaxDictBytes.
 bool readPrivate(FontBytes& bytes, const CffFace& cff, const FontDict& dict, CffIndex* localSubrs) {
   *localSubrs = CffIndex{};
-  if (dict.registry != kNoRegistry || dict.privateOffset == 0 || dict.privateSize == 0) return true;
+  if (!readsPrivate(dict)) return true;
   if (dict.privateSize > kMaxDictBytes || dict.privateOffset > cff.tableLength ||
       dict.privateSize > cff.tableLength - dict.privateOffset) {
     return false;
@@ -598,60 +641,73 @@ uint32_t glyphFd(FontBytes& bytes, const CffFace& cff, const uint32_t glyph) {
   return 0;
 }
 
-// CFF_Load_FD_Select: format 0, a byte per glyph, or format 3, at least one range; other formats are refused.
-bool readFdSelect(FontBytes& bytes, const uint32_t offset, CffFace* cff) {
-  if (offset >= cff->tableLength) return false;
-  const uint32_t at = cff->table + offset;
-  const uint32_t room = cff->tableLength - offset;
+// The bytes of the FDSelect at `at`, `room` bytes from the table's end (CFF_Load_FD_Select): format 0, a byte per
+// glyph, or format 3, at least one range. 0 for another format, or one that does not fit.
+uint32_t fdSelectBytes(FontBytes& bytes, const uint32_t at, const uint32_t room, const uint32_t glyphs) {
   const uint8_t format = bytes.u8(at);
   uint64_t size = 0;
   if (format == 0) {
-    size = 1 + uint64_t{cff->charStrings.count};
+    size = 1 + uint64_t{glyphs};
   } else if (format == 3) {
-    if (room < 3) return false;
+    if (room < 3) return 0;
     const uint32_t ranges = bytes.u16(at + 1);
-    if (ranges == 0) return false;
+    if (ranges == 0) return 0;
     size = 3 + 3 * uint64_t{ranges} + 2;
   } else {
-    return false;
+    return 0;
   }
-  if (size > room) return false;
+  return size <= room ? static_cast<uint32_t>(size) : 0;
+}
+
+// The FDSelect at `offset` from the table's start.
+bool readFdSelect(FontBytes& bytes, const uint32_t offset, CffFace* cff) {
+  if (offset >= cff->tableLength) return false;
+  const uint32_t at = cff->table + offset;
+  if (fdSelectBytes(bytes, at, cff->tableLength - offset, cff->charStrings.count) == 0) return false;
   cff->fdSelect = at;
-  cff->fdSelectFormat = format;
+  cff->fdSelectFormat = bytes.u8(at);
   return true;
 }
 
-// cff_charset_load's checks: a predefined charset no smaller than the font, or format 0, 1 or 2 with an entry for
-// every glyph but .notdef inside the table.
-bool charsetFits(FontBytes& bytes, const CffFace& cff, const uint32_t offset) {
+// The bytes of the font's own charset at `offset` (cff_charset_load's checks): format 0, 1 or 2 with an entry for
+// every glyph but .notdef inside the table. 0 for another format, or one that does not fit.
+uint32_t charsetBytes(FontBytes& bytes, const CffFace& cff, const uint32_t offset) {
+  if (offset >= cff.tableLength) return 0;
   const uint32_t glyphs = cff.charStrings.count;
-  if (offset <= 2) return glyphs <= kPredefinedCharsetGlyphs[offset];
-  if (offset >= cff.tableLength) return false;
   const uint32_t at = cff.table + offset;
   const uint64_t end = uint64_t{cff.table} + cff.tableLength;
   const uint8_t format = bytes.u8(at);
-  if (format == 0) return uint64_t{at} + 1 + 2 * (uint64_t{glyphs} - 1) <= end;
-  if (format != 1 && format != 2) return false;
-  const uint32_t rangeBytes = format == 2 ? 4 : 3;
   uint64_t p = uint64_t{at} + 1;
-  for (uint32_t g = 1; g < glyphs; p += rangeBytes) {
-    if (p + rangeBytes > end) return false;
-    const uint32_t first = bytes.u16(static_cast<uint32_t>(p));
-    uint32_t left = format == 2 ? bytes.u16(static_cast<uint32_t>(p) + 2) : bytes.u8(static_cast<uint32_t>(p) + 2);
-    if (first > 0xFFFF - left) left = 0xFFFF - first;  // FreeType keeps the SIDs below 0xFFFF
-    g += left + 1;
+  if (format == 0) {
+    p += 2 * (uint64_t{glyphs} - 1);
+  } else if (format == 1 || format == 2) {
+    const uint32_t rangeBytes = format == 2 ? 4 : 3;
+    for (uint32_t g = 1; g < glyphs; p += rangeBytes) {
+      if (p + rangeBytes > end) return 0;
+      const uint32_t first = bytes.u16(static_cast<uint32_t>(p));
+      uint32_t left = format == 2 ? bytes.u16(static_cast<uint32_t>(p) + 2) : bytes.u8(static_cast<uint32_t>(p) + 2);
+      if (first > 0xFFFF - left) left = 0xFFFF - first;  // FreeType keeps the SIDs below 0xFFFF
+      g += left + 1;
+    }
+  } else {
+    return 0;
   }
-  return true;
+  return p <= end ? static_cast<uint32_t>(p - at) : 0;
 }
 
-// cff_encoding_load's checks (name-keyed fonts): a predefined encoding (0, 1), or format 0 or 1 with the codes its
-// count says, then the supplements its high bit announces.
-bool encodingFits(FontBytes& bytes, const CffFace& cff, const uint32_t offset) {
-  if (offset <= 1) return true;
-  if (offset >= cff.tableLength) return false;
+// A predefined charset no smaller than the font, or one of its own (charsetBytes).
+bool charsetFits(FontBytes& bytes, const CffFace& cff, const uint32_t offset) {
+  if (offset <= 2) return cff.charStrings.count <= kPredefinedCharsetGlyphs[offset];
+  return charsetBytes(bytes, cff, offset) != 0;
+}
+
+// The bytes of a name-keyed font's own Encoding at `offset` (cff_encoding_load's checks): format 0 or 1 with the codes
+// its count says, then the supplements its high bit announces. 0 for another format, or one that does not fit.
+uint32_t encodingBytes(FontBytes& bytes, const CffFace& cff, const uint32_t offset) {
+  if (offset >= cff.tableLength) return 0;
   const uint32_t at = cff.table + offset;
   const uint32_t room = cff.tableLength - offset;
-  if (room < 2) return false;
+  if (room < 2) return 0;
   const uint8_t format = bytes.u8(at);
   const uint32_t count = bytes.u8(at + 1);
   uint32_t size = 2;
@@ -660,13 +716,18 @@ bool encodingFits(FontBytes& bytes, const CffFace& cff, const uint32_t offset) {
   } else if ((format & 0x7F) == 1) {
     size += 2 * count;
   } else {
-    return false;
+    return 0;
   }
   if (format & 0x80) {
-    if (size >= room) return false;
+    if (size >= room) return 0;
     size += 1 + 3 * static_cast<uint32_t>(bytes.u8(at + size));
   }
-  return size <= room;
+  return size <= room ? size : 0;
+}
+
+// A predefined encoding (0, 1), or one of its own (encodingBytes).
+bool encodingFits(FontBytes& bytes, const CffFace& cff, const uint32_t offset) {
+  return offset <= 1 || encodingBytes(bytes, cff, offset) != 0;
 }
 
 // The first glyph whose charset entry is `sid` (at most 149), or -1. Entry 0 is .notdef's 0 in every charset.
@@ -855,6 +916,73 @@ Status cffGlyphSource(FontBytes& bytes, const Face& face, const uint16_t glyph, 
 int32_t cffStandardCharGlyph(FontBytes& bytes, const Face& face, const int32_t code) {
   if (face.outlines != Face::Outlines::Cff || code < 0 || code > 255) return -1;
   return charsetGlyph(bytes, face.cff, kStandardEncoding[code]);
+}
+
+bool readCffDictOffsets(FontBytes& bytes, const CffIndex& index, const uint32_t item, CffDictOffsets* out) {
+  *out = CffDictOffsets{};
+  FontDict dict;
+  if (!readFontDict(bytes, index, item, &dict)) return false;
+  // The DICT walked again for its operands, so that readFontDict keeps its operator reader to itself, inlined, on the
+  // render task's path. It parsed: every operator noted has the operands it needs.
+  cffIndexItem(bytes, index, item, &out->start, &out->length);
+  runDict(bytes, out->start, out->start + out->length, kTopStack, [&](const DictOperator& op) {
+    noteOffset(op, out);
+    return true;
+  });
+  out->value[CffDictOffsets::Charset] = dict.charset;
+  out->value[CffDictOffsets::Encoding] = dict.encoding;
+  out->value[CffDictOffsets::CharStrings] = dict.charStrings;
+  out->value[CffDictOffsets::Private] = dict.privateOffset;
+  out->value[CffDictOffsets::FdArray] = dict.fdArray;
+  out->value[CffDictOffsets::FdSelect] = dict.fdSelect;
+  out->readsPrivate = readsPrivate(dict);
+  return !bytes.outOfRange() && !bytes.ioError();
+}
+
+bool readCffParts(FontBytes& bytes, const CffFace& cff, CffParts* out) {
+  *out = CffParts{};
+  const uint32_t end = cff.table + cff.tableLength;
+  CffIndex names;
+  FontDict dict;  // the Top DICT, then each font DICT
+  if (!readCffIndex(bytes, cff.table + bytes.u8(cff.table + 2), end, &names) ||
+      !readCffIndex(bytes, names.end, end, &out->topDicts) || !readFontDict(bytes, out->topDicts, 0, &dict)) {
+    return false;
+  }
+  if (cff.charset > 2) {
+    out->charsetBytes = charsetBytes(bytes, cff, dict.charset);
+    if (out->charsetBytes == 0) return false;
+  }
+  if (!cff.cid && dict.encoding > 1) {
+    out->encoding = cff.table + dict.encoding;
+    out->encodingBytes = encodingBytes(bytes, cff, dict.encoding);
+    if (out->encodingBytes == 0) return false;
+  }
+  if (cff.cid) {
+    out->fdSelectBytes = fdSelectBytes(bytes, cff.fdSelect, end - cff.fdSelect, cff.charStrings.count);
+    if (out->fdSelectBytes == 0) return false;
+  }
+  // The Private DICTs and their Subrs, wherever they lie: the Top DICT's in a name-keyed font, the font DICTs' in a
+  // CID-keyed one.
+  uint32_t first = UINT32_MAX;
+  uint32_t last = 0;
+  const auto cover = [&]() {
+    CffIndex subrs;
+    if (!readPrivate(bytes, cff, dict, &subrs)) return false;
+    if (!readsPrivate(dict)) return true;
+    const uint32_t start = cff.table + dict.privateOffset;
+    first = std::min(first, subrs.start != 0 ? std::min(start, subrs.start) : start);
+    last = std::max(last, subrs.start != 0 ? std::max(start + dict.privateSize, subrs.end) : start + dict.privateSize);
+    return true;
+  };
+  if (!cff.cid && !cover()) return false;
+  for (uint32_t fd = 0; cff.cid && fd < cff.fdArray.count; ++fd) {
+    if (!readFontDict(bytes, cff.fdArray, fd, &dict) || !cover()) return false;
+  }
+  if (first < last) {
+    out->privates = first;
+    out->privatesEnd = last;
+  }
+  return !bytes.outOfRange() && !bytes.ioError();
 }
 
 }  // namespace ttf

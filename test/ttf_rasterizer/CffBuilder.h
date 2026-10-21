@@ -118,6 +118,9 @@ struct CffSpec {
   std::vector<Bytes> globalSubrs;
   std::vector<std::string> names = {"Test"};
   Bytes header = {1, 0, 4, 4};  ///< major, minor, hdrSize, offSize
+  /// Every Private DICT first, then the Subrs INDEXes, as makeotf lays them out (Noto CJK); else each Private DICT's
+  /// Subrs right after it. Integer Subrs offsets only.
+  bool subrsAfterPrivates = false;
 };
 
 inline Bytes buildCff(const CffSpec& spec) {
@@ -143,25 +146,36 @@ inline Bytes buildCff(const CffSpec& spec) {
   const Bytes charStrings = cffIndex(spec.charStrings);
 
   // Each Private DICT holds defaultWidthX 0, then Subrs when the font DICT has local subroutines, laid out right
-  // after the DICT.
+  // after the DICT, or after every Private DICT (subrsAfterPrivates).
   std::vector<Bytes> privates;
   std::vector<uint32_t> privateSizes;
-  for (const CffFontDict& fd : spec.fds) {
+  Bytes subrsAfterPrivates;
+  const auto privateSize = [](const CffFontDict& fd) {
+    return fd.privatePad.size() + (fd.localSubrs.empty() ? 6 : 12);
+  };
+  for (size_t i = 0; i < spec.fds.size(); ++i) {
+    const CffFontDict& fd = spec.fds[i];
     Bytes dict = fd.privatePad;
     putCffInt(dict, 0);
     putCffOp(dict, 20);
     if (!fd.localSubrs.empty()) {
-      if (fd.subrsReal.empty()) {
-        putCffInt(dict, static_cast<int32_t>(dict.size() + 6));
-      } else {
+      if (!fd.subrsReal.empty()) {
         putCffReal(dict, fd.subrsReal);
+      } else if (spec.subrsAfterPrivates) {
+        // Past this DICT and the ones after it, then past the Subrs INDEXes before its own.
+        size_t offset = dict.size() + 6 + subrsAfterPrivates.size();
+        for (size_t j = i + 1; j < spec.fds.size(); ++j) offset += privateSize(spec.fds[j]);
+        putCffInt(dict, static_cast<int32_t>(offset));
+      } else {
+        putCffInt(dict, static_cast<int32_t>(dict.size() + 6));
       }
       putCffOp(dict, 19);
     }
     privateSizes.push_back(static_cast<uint32_t>(dict.size()));
     if (!fd.localSubrs.empty()) {
       const Bytes subrs = cffIndex(fd.localSubrs);
-      dict.insert(dict.end(), subrs.begin(), subrs.end());
+      Bytes& into = spec.subrsAfterPrivates ? subrsAfterPrivates : dict;
+      into.insert(into.end(), subrs.begin(), subrs.end());
     }
     privates.push_back(dict);
   }
@@ -245,6 +259,7 @@ inline Bytes buildCff(const CffSpec& spec) {
     append(cffIndex(dicts));
   }
   for (const Bytes& priv : privates) append(priv);
+  append(subrsAfterPrivates);
   return out;
 }
 

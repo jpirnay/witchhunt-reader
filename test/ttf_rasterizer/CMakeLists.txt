@@ -27,7 +27,10 @@ add_executable(TtfRasterizerTest
   TtfCffCharStringTest.cpp
   FreeTypeReference.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/FontBytes.cpp
+  ${REPO_ROOT}/lib/EpdFont/ttf/GlyphStoreFormat.cpp
+  ${REPO_ROOT}/lib/EpdFont/ttf/TtfFamily.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfCff.cpp
+  ${REPO_ROOT}/lib/EpdFont/ttf/TtfCffBlock.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfCffCharString.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfCffLoad.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfFace.cpp

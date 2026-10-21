@@ -107,4 +107,45 @@ Status cffGlyphSource(FontBytes& bytes, const Face& face, uint16_t glyph, CffGly
 /// entries read as 0): the caller checks bytes.ioError() after it.
 int32_t cffStandardCharGlyph(FontBytes& bytes, const Face& face, int32_t code);
 
+// --- What SD mode's rebuilt CFF table needs (TtfCffBlock.h) ---
+
+/// The largest Top, font or Private DICT readCffTable accepts.
+constexpr uint32_t kCffMaxDictBytes = 4096;
+
+/// A Top DICT or font DICT as readCffTable reads it, with the operands that set the offsets SD mode's rebuilt table
+/// moves: of each offset, the operand of the operator's last occurrence, the one whose value readCffTable keeps (for
+/// Private, its second, the offset).
+struct CffDictOffsets {
+  enum Field : uint8_t { Charset, Encoding, CharStrings, Private, FdArray, FdSelect, kFields };
+  uint32_t start = 0;  ///< the DICT, in the font
+  uint32_t length = 0;
+  uint32_t operand[kFields] = {};       ///< where the operand starts, in the font
+  uint32_t operandBytes[kFields] = {};  ///< 0: the DICT does not set the offset
+  uint32_t value[kFields] = {};         ///< from the table's start, as read (a negative number wraps)
+  /// readCffTable reads the DICT's Private DICT: it has no ROS, and a Private offset and size that are not 0.
+  bool readsPrivate = false;
+};
+
+/// Item `item` of a Top DICT INDEX or an FDArray. False when it does not parse.
+bool readCffDictOffsets(FontBytes& bytes, const CffIndex& index, uint32_t item, CffDictOffsets* out);
+
+/// What a rebuild needs to know of a CFF table readCffTable accepted into `cff` that CffFace does not keep: where the
+/// parts it copies lie (offsets in the font), and their sizes.
+struct CffParts {
+  /// The Top DICT INDEX. The header and the Name INDEX end at its start; the String INDEX and then the Global Subr
+  /// INDEX follow its end.
+  CffIndex topDicts;
+  uint32_t charsetBytes = 0;  ///< the font's own charset (at CffFace::charset); 0 for a predefined one
+  /// A name-keyed font's own Encoding; none (0, 0 bytes) for a predefined one, and in a CID-keyed font, which never
+  /// reads it.
+  uint32_t encoding = 0;
+  uint32_t encodingBytes = 0;
+  uint32_t fdSelectBytes = 0;  ///< a CID-keyed font's FDSelect (at CffFace::fdSelect)
+  /// Every Private DICT readCffTable reads and its local Subrs INDEX, from the first byte of any of them to past the
+  /// last: privates == privatesEnd when there is none.
+  uint32_t privates = 0;
+  uint32_t privatesEnd = 0;
+};
+bool readCffParts(FontBytes& bytes, const CffFace& cff, CffParts* out);
+
 }  // namespace ttf

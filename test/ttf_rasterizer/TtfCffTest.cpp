@@ -12,12 +12,14 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
 #include "CffBuilder.h"
 #include "TtfCff.h"
 #include "TtfFace.h"
+#include "TtfFamily.h"
 #include "TtfRasterizer.h"
 #include "TtfTestUtil.h"
 
@@ -787,4 +789,145 @@ TEST(TtfCff, ACorruptedCffIsRefusedOrDrawsNothing) {
               static_cast<long long>(ms));
   EXPECT_GT(accepted, 0u);
   EXPECT_GT(refused, 0u);
+}
+
+// --- SD mode: the CFF table rebuilt in the style block, its charstring data read from the file ---
+
+namespace {
+
+// A font file served as the card serves one (ttf::FileSource), from memory.
+FileSource memorySource(const std::vector<uint8_t>& file) {
+  return {static_cast<uint32_t>(file.size()),
+          [](void* ctx, const uint32_t offset, void* dst, const uint32_t len) {
+            const auto& bytes = *static_cast<const std::vector<uint8_t>*>(ctx);
+            if (offset > bytes.size() || len > bytes.size() - offset) return false;
+            std::copy_n(bytes.data() + offset, len, static_cast<uint8_t*>(dst));
+            return true;
+          },
+          const_cast<std::vector<uint8_t>*>(&file)};
+}
+
+// `font`'s SD-mode block (its tables in place, the CFF table rebuilt last) with the charstring data read from the file
+// draws every glyph at 14 pt as the whole file does, byte for byte. `drawn` counts the glyphs with ink.
+void expectTheBlockDrawsAsTheFile(const std::vector<uint8_t>& font, const std::string& name, uint32_t* drawn) {
+  *drawn = 0;
+  const FileSource file = memorySource(font);
+  SdBlock block;
+  ASSERT_TRUE(block.plan(file)) << name;
+  // The block, read whole and in pieces of a prime size, which cut every part of it somewhere.
+  FileSource blockSource = block.source();
+  std::vector<uint8_t> tables(block.bytes());
+  ASSERT_TRUE(blockSource.read(blockSource.ctx, 0, tables.data(), block.bytes())) << name;
+  std::vector<uint8_t> pieces(block.bytes());
+  for (uint32_t at = 0; at < block.bytes(); at += 97) {
+    const uint32_t len = std::min<uint32_t>(97, block.bytes() - at);
+    ASSERT_TRUE(blockSource.read(blockSource.ctx, at, pieces.data() + at, len)) << name << " at " << at;
+  }
+  EXPECT_EQ(tables, pieces) << name;
+  EXPECT_FALSE(blockSource.read(blockSource.ctx, block.bytes() - 1, pieces.data(), 2)) << name;
+
+  // The block's tables in place and the charstring data on the card, as an SD-mode style reads them.
+  const glyphstore::SdOutlines outlines = block.outlines();
+  EXPECT_EQ(block.bytes(), outlines.fontOffset) << name;
+  SdPageCache cache;
+  const SdRange range{file, outlines.fontOffset, outlines.fileOffset, outlines.length, &cache};
+  FontBytes sd(tables.data(), block.bytes(), &range);
+  FontBytes whole(font.data(), static_cast<uint32_t>(font.size()));
+  Face sdFace;
+  Face face;
+  ASSERT_EQ(FaceStatus::Ok, parseFace(whole, &face)) << name;
+  ASSERT_EQ(FaceStatus::Ok, parseFace(sd, &sdFace)) << name;
+  // The CFF table ends the block: only the CharStrings INDEX's data lies past it, and that is the file's.
+  EXPECT_EQ(block.bytes(), sdFace.cff.charStrings.dataStart) << name;
+  EXPECT_EQ(sd.size(), sdFace.cff.table + sdFace.cff.tableLength) << name;
+  EXPECT_EQ(face.cff.charStrings.dataStart, outlines.fileOffset) << name;
+  EXPECT_EQ(face.cff.charStrings.end - face.cff.charStrings.dataStart, outlines.length) << name;
+  ASSERT_EQ(face.numGlyphs, sdFace.numGlyphs) << name;
+
+  const uint32_t ppem = ppemFromPoints(14);
+  Rasterizer fromFile;
+  Rasterizer fromBlock;
+  ASSERT_TRUE(fromFile.allocate(planScratch(face, ppem, kPoolBytesFlash))) << name;
+  ASSERT_TRUE(fromBlock.allocate(planScratch(sdFace, ppem, kPoolBytesSd))) << name;
+  for (uint32_t g = 0; g < face.numGlyphs; ++g) {
+    const std::string glyph = name + " glyph " + std::to_string(g);
+    whole.clearErrors();
+    sd.clearErrors();
+    EpdGlyph want{};
+    EpdGlyph got{};
+    const Status wanted = fromFile.render(whole, face, static_cast<uint16_t>(g), ppem, &want);
+    ASSERT_EQ(wanted, fromBlock.render(sd, sdFace, static_cast<uint16_t>(g), ppem, &got)) << glyph;
+    if (wanted != Status::Ok) continue;
+    ASSERT_EQ(want.width, got.width) << glyph;
+    ASSERT_EQ(want.height, got.height) << glyph;
+    ASSERT_EQ(want.left, got.left) << glyph;
+    ASSERT_EQ(want.top, got.top) << glyph;
+    ASSERT_EQ(want.advanceX, got.advanceX) << glyph;
+    ASSERT_EQ(want.dataLength, got.dataLength) << glyph;
+    ASSERT_EQ(0, std::memcmp(fromFile.output(), fromBlock.output(), want.dataLength)) << glyph;
+    *drawn += want.dataLength > 0 ? 1 : 0;
+  }
+  EXPECT_GT(cache.misses(), 0u) << name;  // the charstrings came from the file
+}
+
+// A charstring or subroutine drawing a `width` by 100 unit box from (50, 50), then ending with `op`.
+Bytes box(const int32_t width, const uint8_t op) {
+  Bytes out;
+  putType2Op(out, {50, 50}, 21);             // rmoveto
+  putType2Op(out, {width, 100, -width}, 6);  // hlineto, then alternating vlineto, hlineto
+  out.push_back(op);
+  return out;
+}
+
+// A charstring calling subroutine 0 (bias 107) with `op`, callsubr or callgsubr.
+Bytes callingFirst(const uint8_t op) {
+  Bytes out;
+  putType2Op(out, {-107}, op);
+  out.push_back(14);  // endchar
+  return out;
+}
+
+}  // namespace
+
+TEST(TtfCff, TheRebuiltCffDrawsAsTheOriginal) {
+  for (const std::string& name : cffTestFonts()) {
+    const std::vector<uint8_t> font = readCffTestFont(name);
+    ASSERT_FALSE(font.empty()) << name;
+    uint32_t drawn = 0;
+    expectTheBlockDrawsAsTheFile(font, name, &drawn);
+    EXPECT_GT(drawn, 40u) << name;
+  }
+}
+
+TEST(TtfCff, SubroutinesLaidOutAfterEveryPrivateDictKeepTheirPlaces) {
+  // As makeotf lays out a CID-keyed font (Noto CJK): every Private DICT, then every Subrs INDEX, each offset from its
+  // own Private DICT's start across the others. Each glyph draws its FD's own subroutine.
+  CffSpec spec;
+  spec.cid = true;
+  spec.subrsAfterPrivates = true;
+  spec.charStrings = {callingFirst(10), callingFirst(10), callingFirst(10)};
+  spec.fds = {cffFontDict("", {box(100, 11)}), cffFontDict("", {box(250, 11), box(400, 11)}),
+              cffFontDict("", {box(600, 11)})};
+  spec.fdSelect = {3, 0, 3, 0, 0, 0, 0, 1, 1, 0, 2, 2, 0, 3};  // glyph g in FD g
+  const Bytes font = buildOtf(spec);
+  uint32_t drawn = 0;
+  expectTheBlockDrawsAsTheFile(font, "subroutines after the Private DICTs", &drawn);
+  EXPECT_EQ(3u, drawn);
+}
+
+TEST(TtfCff, ANameKeyedFontKeepsItsEncodingAndTheLastOfARepeatedOffset) {
+  // A name-keyed font with an Encoding of its own, the predefined ISOAdobe charset (not moved), local and global
+  // subroutines, and a CharStrings offset set twice: the first is left as it is, the last moves.
+  CffSpec spec;
+  spec.charStrings = {callingFirst(10), callingFirst(29), box(300, 14)};
+  spec.fds = {cffFontDict("", {box(200, 11)})};
+  spec.globalSubrs = {box(500, 11)};
+  spec.charsetOffset = 0;
+  spec.encoding = {0, 2, 1, 2};  // format 0: codes 1 and 2
+  putCffInt(spec.topPad, 3);
+  putCffOp(spec.topPad, 17);  // CharStrings, overridden
+  const Bytes font = buildOtf(spec);
+  uint32_t drawn = 0;
+  expectTheBlockDrawsAsTheFile(font, "name-keyed", &drawn);
+  EXPECT_EQ(3u, drawn);
 }

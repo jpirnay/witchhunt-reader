@@ -1855,3 +1855,151 @@ TEST_F(TtfFontTest, ACjkCffFamilyDrawsInFlashMode) {
     expectDrawnAs(reference(files[kRegular].bytes, cp, 14), *font, kRegular, glyph);
   }
 }
+
+// --- OpenType CFF families in SD mode: the CFF table rebuilt in the style block, the charstrings on the card ---
+
+namespace {
+
+// A CFF fixture padded to the 24 pages of kSdOnlyBytes, which nothing reads past its tables: too large for flash mode
+// there, while its tables are not.
+std::vector<uint8_t> tooLargeForFlashMode(const std::string& fixture) {
+  std::vector<uint8_t> font = readFixture(fixture);
+  EXPECT_FALSE(font.empty()) << fixture;
+  font.resize(kSdOnlyBytes);
+  return font;
+}
+
+// Every codepoint the font maps to a glyph, below U+10000.
+std::vector<uint32_t> mappedCodepoints(const std::vector<uint8_t>& font) {
+  FontBytes bytes(font.data(), static_cast<uint32_t>(font.size()));
+  ttf::Face face;
+  EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+  std::vector<uint32_t> codepoints;
+  for (uint32_t cp = 0x20; cp < 0x10000; ++cp) {
+    if (ttf::glyphIndex(bytes, face, cp) != 0) codepoints.push_back(cp);
+  }
+  return codepoints;
+}
+
+// The CharStrings INDEX's data in the file: what an SD-mode CFF style reads from the card.
+std::pair<uint32_t, uint32_t> charStringData(const std::vector<uint8_t>& font) {
+  FontBytes bytes(font.data(), static_cast<uint32_t>(font.size()));
+  ttf::Face face;
+  EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+  return {face.cff.charStrings.dataStart, face.cff.charStrings.end};
+}
+
+}  // namespace
+
+TEST_F(TtfFontSetTest, ACffFamilyDrawsInSdMode) {
+  MemoryFile serif[4];
+  serif[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
+  SimNorFlash chip{kSdOnlyBytes};
+  const auto set = openFamilies(chip, {serif}, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  ASSERT_TRUE(font.readsCard());
+  // A batch of new glyphs reads only their charstrings from the card, each once, in file order: at most a page for
+  // each, and the one the last of them runs into.
+  const char* const kana =
+      "\xE3\x81\x82\xE3\x81\x84\xE3\x81\x86\xE3\x81\x88\xE3\x81\x8A\xE3\x81\x8B\xE3\x81\x8D"
+      "\xE3\x81\x8F\xE3\x81\x91\xE3\x81\x93";  // あいうえおかきくけこ
+  const uint32_t before = set->sdPageReads();
+  font.prefetch(kRegular, kana);
+  EXPECT_EQ(10u, font.renders());
+  EXPECT_LE(set->sdPageReads() - before, 10u + 1u);
+  EXPECT_GT(set->sdPageReads(), before);
+  // Every glyph of the fixture as flash mode draws it.
+  const std::vector<uint32_t> codepoints = mappedCodepoints(serif[kRegular].bytes);
+  ASSERT_GT(codepoints.size(), 250u);
+  for (const uint32_t cp : codepoints) {
+    expectDrawnAs(reference(serif[kRegular].bytes, cp, 14), font, kRegular, font.glyph(kRegular, cp));
+    if (HasFailure()) return;
+  }
+  expectWrittenOnce(chip);
+}
+
+TEST_F(TtfFontSetTest, ASubroutinizedCffKeepsItsSubroutinesInTheBlock) {
+  MemoryFile serif[4];
+  serif[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-Cff.otf");
+  SimNorFlash chip{kSdOnlyBytes};
+  const auto set = openFamilies(chip, {serif}, busy);
+  ASSERT_NE(nullptr, set);
+  ASSERT_TRUE(set->font(0)->readsCard());
+  // From now on the card serves only the charstring data, in the 512-byte pages the cache reads: the global and
+  // local subroutines, the font DICTs and everything else a glyph needs come from the block.
+  const auto [dataStart, dataEnd] = charStringData(serif[kRegular].bytes);
+  constexpr uint32_t kCachePage = ttf::SdPageCache::kPageBytes;
+  serif[kRegular].readsFrom = dataStart / kCachePage * kCachePage;
+  serif[kRegular].readsTo = (dataEnd + kCachePage - 1) / kCachePage * kCachePage;
+  serif[kRegular].reads = 0;
+  for (const uint32_t cp : mappedCodepoints(serif[kRegular].bytes)) {
+    expectDrawnAs(reference(serif[kRegular].bytes, cp, 14), *set->font(0), kRegular, set->font(0)->glyph(kRegular, cp));
+    if (HasFailure()) return;
+  }
+  EXPECT_GT(serif[kRegular].reads, 0u);
+}
+
+TEST_F(TtfFontSetTest, AChangedOtfFileIsInstalledOver) {
+  MemoryFile cjk[4];
+  cjk[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
+  SimNorFlash chip{kSdOnlyBytes};
+  ASSERT_NE(nullptr, openFamilies(chip, {cjk}, busy));
+  EXPECT_EQ(1, busy);
+  constexpr uint32_t kKanji = 0x6F22;
+  // The same file in another directory: its stamp changed.
+  cjk[kRegular].stamp ^= 1;
+  auto set = openFamilies(chip, {cjk}, busy);
+  ASSERT_NE(nullptr, set);
+  EXPECT_EQ(2, busy);
+  ASSERT_TRUE(set->font(0)->readsCard());
+  expectDrawnAs(reference(cjk[kRegular].bytes, kKanji, 14), *set->font(0), kRegular,
+                set->font(0)->glyph(kRegular, kKanji));
+  set.reset();
+  // Another font rewritten in its place, at the same size and time: its table directory tells it apart.
+  cjk[kRegular].bytes = tooLargeForFlashMode("NotoSansJP-CffFlat.otf");
+  set = openFamilies(chip, {cjk}, busy);
+  ASSERT_NE(nullptr, set);
+  EXPECT_EQ(3, busy);
+  expectDrawnAs(reference(cjk[kRegular].bytes, kKanji, 14), *set->font(0), kRegular,
+                set->font(0)->glyph(kRegular, kKanji));
+  set.reset();
+  ASSERT_NE(nullptr, openFamilies(chip, {cjk}, busy));
+  EXPECT_EQ(3, busy);  // and kept from then on
+  expectWrittenOnce(chip);
+}
+
+TEST_F(TtfFontSetTest, AFamilyOfTrueTypeAndCffStylesDrawsEachFromItsOwnOutlines) {
+  MemoryFile mixed[4];
+  mixed[kRegular].bytes = readFont("Bookerly/Bookerly-Regular.ttf");
+  mixed[kBold].bytes = readFont("OpenDyslexic/OpenDyslexic-Bold.otf");
+  const auto expectEachStylesOwn = [&](TtfFontSet& set) {
+    TtfFont& font = *set.font(0);
+    for (const uint32_t cp : {uint32_t{'A'}, uint32_t{'g'}, uint32_t{'W'}}) {
+      const Reference regular = reference(mixed[kRegular].bytes, cp, 14);
+      const Reference bold = reference(mixed[kBold].bytes, cp, 14);
+      ASSERT_NE(regular.bitmap, bold.bitmap) << cp;
+      expectDrawnAs(regular, font, kRegular, font.glyph(kRegular, cp));
+      expectDrawnAs(bold, font, kBold, font.glyph(kBold, cp));
+    }
+  };
+  {
+    // Flash mode: both files whole.
+    const auto set = openFamilies(flash, {mixed}, busy);
+    ASSERT_NE(nullptr, set);
+    EXPECT_FALSE(set->font(0)->readsCard());
+    expectEachStylesOwn(*set);
+  }
+  // SD mode: the bold file too large for flash mode on 24 pages; each style's outlines read from its own file.
+  mixed[kBold].bytes.resize(kSdOnlyBytes);
+  SimNorFlash chip{kSdOnlyBytes};
+  const auto set = openFamilies(chip, {mixed}, busy);
+  ASSERT_NE(nullptr, set);
+  ASSERT_TRUE(set->font(0)->readsCard());
+  mixed[kRegular].reads = 0;
+  mixed[kBold].reads = 0;
+  expectEachStylesOwn(*set);
+  EXPECT_GT(mixed[kRegular].reads, 0u);
+  EXPECT_GT(mixed[kBold].reads, 0u);
+  expectWrittenOnce(chip);
+}

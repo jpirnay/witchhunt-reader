@@ -60,8 +60,20 @@ TEST(TtfFamily, ACffFontIsAFamilyAndACollectionIsNot) {
     MemoryFile file{readFont(std::string("OpenDyslexic/OpenDyslexic-") + names[i] + ".otf")};
     const ttf::FileProbe probed = ttf::probeFile(file.source());
     EXPECT_EQ(styles[i], probed.style) << names[i];
-    EXPECT_EQ(UINT32_MAX, probed.sdBytes) << names[i];  // no SD-mode block for CFF yet
+    // Its SD-mode block, the CFF table rebuilt in it, as an install plans it.
+    ttf::SdBlock block;
+    ASSERT_TRUE(block.plan(file.source())) << names[i];
+    EXPECT_EQ(block.bytes(), probed.sdBytes) << names[i];
+    EXPECT_LT(probed.sdBytes, file.bytes.size()) << names[i];
   }
+  // A CFF table the engine cannot read (major version 2) leaves the font no SD-mode block: flash mode only.
+  Bytes unread = readFont("OpenDyslexic/OpenDyslexic-Regular.otf");
+  const size_t record = findRecord(unread, "CFF ") + 8;  // its offset
+  unread[static_cast<size_t>(unread[record]) << 24 | unread[record + 1] << 16 | unread[record + 2] << 8 |
+         unread[record + 3]] = 2;
+  MemoryFile broken{unread};
+  EXPECT_EQ(0, ttf::probeFile(broken.source()).style);
+  EXPECT_EQ(UINT32_MAX, ttf::probeFile(broken.source()).sdBytes);
   Bytes collection = builtFont();
   set32(collection, 0, 0x74746366);  // 'ttcf'
   EXPECT_EQ(-1, probe(collection));
@@ -553,7 +565,7 @@ TEST(TtfSdBlock, AnOptionalTableOutsideTheFileIsLeftOutAsTheFaceLeavesItOut) {
   EXPECT_TRUE(block.sameAs(image.data(), static_cast<uint32_t>(image.size())));
 }
 
-TEST(TtfSdBlock, AFileWithoutOutlinesOrNotTrueTypeHasNone) {
+TEST(TtfSdBlock, AFileWithoutTheOutlinesOfItsKindHasNone) {
   ttf::SdBlock block;
   Bytes noGlyf = builtFont();
   noGlyf[findRecord(noGlyf, "glyf") + 3] = 'X';  // 'glyX'
@@ -561,16 +573,16 @@ TEST(TtfSdBlock, AFileWithoutOutlinesOrNotTrueTypeHasNone) {
   EXPECT_FALSE(block.plan(withoutOutlines.source()));
   Bytes cff = builtFont();
   std::memcpy(cff.data(), "OTTO", 4);
-  MemoryFile notTrueType{cff};
-  EXPECT_FALSE(block.plan(notTrueType.source()));  // OTTO, though it carries a glyf: SD mode has no CFF block yet
-  MemoryFile openType{readFont("OpenDyslexic/OpenDyslexic-Regular.otf")};
-  EXPECT_FALSE(block.plan(openType.source()));
+  MemoryFile noCffTable{cff};
+  EXPECT_FALSE(block.plan(noCffTable.source()));  // OTTO: a glyf it carries is not its outlines
   Bytes broken = builtFont();
   set32(broken, findRecord(broken, "hmtx") + 12, static_cast<uint32_t>(broken.size()));  // runs past the end
   MemoryFile outside{broken};
   EXPECT_FALSE(block.plan(outside.source()));
   MemoryFile fine{builtFont()};
   EXPECT_TRUE(block.plan(fine.source()));
+  MemoryFile openType{readFont("OpenDyslexic/OpenDyslexic-Regular.otf")};
+  EXPECT_TRUE(block.plan(openType.source()));
 }
 
 // --- Native size font IDs ---
