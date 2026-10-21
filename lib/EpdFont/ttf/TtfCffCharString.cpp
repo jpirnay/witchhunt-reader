@@ -551,10 +551,6 @@ void Interpreter::step(const uint8_t op) {
       return;
     }
     default:
-      if (op >= 32) {
-        number(op);
-        return;
-      }
       break;  // reserved, Type 1 only (closepath, hsbw) or CFF2 only (vsindex, blend): ignored
   }
   clear();

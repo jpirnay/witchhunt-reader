@@ -477,7 +477,7 @@ typedef ptrdiff_t  FT_PtrDist;
   /* PATCH(witchhunt): (FT_Int64)0xFFFFFFFF / b for FT_UDIVPREP, b not 0, with a */
   /* 32-bit unsigned division: the quotient truncates toward zero, so it is the   */
   /* magnitude's quotient with b's sign, and 0 for a magnitude past 32 bits.  On  */
-  /* a 32-bit target the 64-bit division was a libgcc call (__divdi3).  Equal for */
+  /* a 32-bit target the 64-bit division is a libgcc call (__divdi3).   Equal for */
   /* every 32-bit b (checked exhaustively).                                       */
   static FT_Int64
   gray_udivprep( TPos  b )

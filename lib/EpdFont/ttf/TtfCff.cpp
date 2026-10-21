@@ -940,7 +940,7 @@ Status cffGlyphSource(FontBytes& bytes, const Face& face, const uint16_t glyph, 
       uint32_t lo = 0;
       uint32_t hi = 0;
       fd = glyphFd(bytes, cff, glyph, &lo, &hi);
-      if (cache && !bytes.ioError() && !bytes.outOfRange() && fd < 256) {
+      if (cache && !bytes.ioError() && !bytes.outOfRange()) {
         cache->rangeFirst = lo;
         cache->rangeEnd = hi;
         cache->rangeFd = static_cast<uint8_t>(fd);

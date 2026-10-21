@@ -1,5 +1,7 @@
 #include "TtfFace.h"
 
+#include <atomic>
+
 #include "TtfFixed.h"
 
 namespace ttf {
@@ -139,8 +141,9 @@ uint32_t format4Glyph(FontBytes& bytes, const Face& face, const uint32_t codepoi
 
 FaceStatus parseFace(FontBytes& bytes, Face* face) {
   *face = Face{};
-  static uint32_t lastStamp = 0;
-  face->stamp = ++lastStamp;
+  // Discovery parses outside the render lock, hence the atomic.
+  static std::atomic<uint32_t> lastStamp{0};
+  face->stamp = lastStamp.fetch_add(1, std::memory_order_relaxed) + 1;
   const uint32_t version = bytes.u32(0);
   if (version == kVersionCollection) return FaceStatus::Unsupported;
   const bool cff = version == kVersionCff;
