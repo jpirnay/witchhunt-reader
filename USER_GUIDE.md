@@ -126,12 +126,13 @@ T5 S3, which has no Up key, can always move up.
 
 When the reader asks before doing something (removing a book, clearing the cache, installing an
 update, saving a Wi-Fi password), the question has two buttons: the answer that leaves things as
-they are (**Cancel** or **No**) first, and the one that goes ahead (**Update**, **Clear**, **Yes**...)
+they are (**Cancel** or **No**) first, and the one that goes ahead (**Update**, **Start**, **Yes**...)
 second. Press the front button whose hint names your answer, or tap the answer on a touch screen.
 **Back** always answers **Cancel**; on the X4 Pro and the T5 S3, so does holding the Home key.
 
 A few questions have a third answer between the two, such as **Reset info** in a saved Wi-Fi
-network's options (**Cancel**, **Reset info**, **Forget**). Their buttons are stacked one above the
+network's options (**Cancel**, **Reset info**, **Forget**), or **Reset** when you clear a book's
+cache (**Cancel**, **Reset**, **Keep**). Their buttons are stacked one above the
 other. **Back** answers **Cancel** and carries its hint, and the two front buttons answer the other
 two.
 
@@ -453,7 +454,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 - **All Files**: Browse every file on the SD card, not just books: images, cover and `.opf` files, firmware images and anything else. It works like the Library's [Books](#33-library-screen) tab: **Confirm** opens a book or image, and on any other file it opens the menu, where you can **Move to folder** or **Remove** it. Images offer **Set Sleep**, which makes the image your sleep screen. Moving or removing a book here moves or removes that file only, not the cover and `.opf` beside it. **Back** at the top folder returns to Settings.
 
 **System**:
-- **Clear Reading Cache**: Clear the internal SD card cache.
+- **Clear Reading Cache**: Clear every book's cache on the SD card: its index, laid-out chapters, images and covers, which the reader builds again the next time the book is opened. It asks **Keep bookmarks and reading progress?** **Keep** leaves each book's reading position, bookmarks and link **Back** history, so a book opens again where you left it. **Reset** deletes those too, and the books' entries leave **Bookmarks**. **Cancel** (or **Back**) clears nothing. **Delete Book Cache**, in the Library's options and in the reader menu, does the same for one book and asks the same question.
 - **Repair Screen**: Clears ghosting left behind by fast page refreshes, by driving every pixel hard between black and white several times. Takes about 20 seconds and deletes nothing. A maintenance action, not a fix for ghosting while you read.
 - **System Information**: Display device info (firmware version, hardware, memory, SD card). When it runs to more than one page, the header shows the page ("1 / 2") and the page buttons move between pages, wrapping round at the ends. How many pages there are depends on the orientation.
 - **Boot Diagnostics**: How this boot started, where the last sleep stopped, and the history pairing each sleep with the boot that followed it. One screenful, meant to be photographed into a bug report when the device fails to sleep or fails to wake.

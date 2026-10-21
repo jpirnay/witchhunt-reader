@@ -38,8 +38,11 @@ truncates the file in place.
 
 `<hash>` is `std::hash` of the book's path, so a book moved or renamed gets a new directory (the
 `Epub`, `Xtc` and `Txt` constructors; `ReaderActivity::bookCacheDir`). TXT and Markdown books share
-`txt_`. Settings → System → Clear Reading Cache removes these directories whole, progress and
-bookmarks included, and `fontprev/` (`ClearCacheActivity`).
+`txt_`. Settings → System → Clear Reading Cache (`ClearCacheActivity`, which also removes
+`fontprev/`) and a book's Delete Book Cache clear them through `BookCache` (`lib/FsHelpers/`):
+**Keep** leaves the reading state, `progress.bin`, `linkstack.bin`, `bookmarks.bin` and
+`koreader_syncmethod.txt` (`BookCache::isReadingState`), and removes the rest; **Reset** removes the
+directory whole.
 
 | File | Formats | Version | Contents |
 |---|---|---|---|
