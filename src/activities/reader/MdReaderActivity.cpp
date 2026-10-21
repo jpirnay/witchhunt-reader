@@ -960,9 +960,10 @@ void MdReaderActivity::renderPage() {
         y += lineHeight;
       } else {
         if (line.isCodeBlock) {
-          // At the block's edge, also beside a wrapped code line's deeper later lines.
+          // At the block's edge, also beside a wrapped code line's deeper later lines. Two pixels
+          // wide: this close to the screen edge the bezel all but hides a one-pixel line.
           const int barX = cachedOrientedMarginLeft + std::max(CODE_INDENT - 6, 0);
-          renderer.drawLine(barX, y + 2, barX, y + lineHeight - 2);
+          renderer.fillRect(barX, y + 2, 2, lineHeight - 3);
         }
         if (!line.spans.empty()) {
           int x = cachedOrientedMarginLeft + line.indent;
