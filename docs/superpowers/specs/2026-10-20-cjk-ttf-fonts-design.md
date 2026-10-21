@@ -360,8 +360,9 @@ the outline-orientation helpers it uses:
 It works on any outline the loader leaves, quadratic or cubic. The FreeType licence is already credited.
 
 **Strength (measured).** FreeType's strength across (`x_ppem * 0x0AAA / 1024`, about em/24) and none down. With
-FreeType's vertical strength too, 鬱 書 慶 議 驚 lost 10–42% of their open space at 10–14 pt; across only, they keep
-at least 78%. A test pins three quarters on Noto Sans and Serif JP samples. It is one constant in one place.
+FreeType's vertical strength too, a regular blank pixel of 鬱 書 慶 議 驚 stays blank in 35–57% of cases at 10–14 pt,
+and 66 enclosed counters of 5 or more pixels fill; across only, in 69–91% of cases, and no such counter fills. A test
+pins two thirds and no filled counter on Noto Sans and Serif JP samples. It is one constant in one place.
 
 **Metrics.**
 - The ink box grows across; the left side bearing, the baseline and the line height stay.

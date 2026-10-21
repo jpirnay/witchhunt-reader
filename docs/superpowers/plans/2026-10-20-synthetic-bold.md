@@ -21,7 +21,7 @@
 - The oracle (spec 7.3, 9.3) covers every glyph of the 12 bundled TrueType fonts and of the 10 CFF test fonts (`cffTestFonts()`), at 8, 14 and 40 pt, emboldened at the engine's strength and at FreeType's own (both axes).
   - Advances and boxes: exact.
   - Bitmaps: "byte-identical is the target". For a CFF font where rounding makes that impossible, "at most 3% differing pixels per font and size in all", recorded in `kCffPixelTolerance`.
-- Counters: "A test pins three quarters on Noto Sans and Serif JP samples". The anti-goal is "synthetic bold fills the counters of dense characters at reading sizes".
+- Counters: "A test pins two thirds and no filled counter on Noto Sans and Serif JP samples" (a regular blank pixel counts as kept when the bold bitmap is blank at the same absolute position; an enclosed blank region of 5 or more pixels, 4-connected, fills when none of its pixels stays blank). The anti-goal is "synthetic bold fills the counters of dense characters at reading sizes".
 - Storage (spec 7.2):
   - glyphs are keyed by `glyphstore::makeKey(codepoint, style, faceIndex)` under the bold style's bits, with the face index of the size;
   - "`glyphstore::kMaxStyles` is untouched" (8), and the store's format (`kFormatVersion` 4) stays;
@@ -195,15 +195,20 @@ git commit -m "feat(ttf): synthetic bold, FreeType's outline emboldening in inte
 - Produces: `ttf::ScratchPlan ttf::planScratch(const Face& face, uint32_t maxPpem26_6, uint32_t poolBytes, bool emboldened = false)`.
 
 - [ ] **Step 1: Write the failing tests.**
-  - **`TEST(TtfEmbolden, DenseCharactersKeepThreeQuartersOfTheirOpenSpace)`**, in `TtfEmboldenTest.cpp`. Its comment: "Synthetic bold on dense CJK characters (spec 7.2): at reading sizes the strength must leave their counters open."
+  - **`TEST_F(TtfEmbolden, DenseCharactersKeepTheirCountersOpen)`**, in `TtfEmboldenTest.cpp`. Its comment: "Synthetic bold on dense CJK characters (spec 7.2): at reading sizes the strength must leave their counters open."
     ```cpp
     const uint32_t dense[] = {0x9B31, 0x66F8, 0x6176, 0x8B70, 0x9A5A};  // 鬱 書 慶 議 驚
     for (const char* name : {"NotoSansJP-TrueType.ttf", "NotoSansJP-Cff.otf", "NotoSerifJP-Cff.otf"}) {  // readFixture
       for (const uint32_t points : {10u, 12u, 14u}) {
         // planScratch(face, ppem, kPoolBytesFlash, true); per character: render() the regular,
         // then load(), embolden(emboldenStrength(ppem)), rasterize()
-        std::printf("%s %u pt U+%04X: %u of %u blank pixels kept\n", name, points, cp, kept, open);
-        EXPECT_GE(kept * 4, open * 3);            // blank = 2-bit value 0, inside the glyph's box
+        // kept: a regular blank pixel (2-bit value 0, inside the box) that is blank in the bold bitmap at the same
+        // absolute position (index by regular.left - bold.left and bold.top - regular.top)
+        // counters: 4-connected blank regions of the regular glyph, 5+ pixels, not touching the box edge
+        std::printf("%s %u pt U+%04X: %u of %u blank pixels kept, %u of %u counters open\n", name, points, cp, kept, open,
+                    countersOpen, counters);
+        EXPECT_GE(kept * 3, open * 2);
+        EXPECT_EQ(counters, countersOpen);        // no enclosed counter fills
         EXPECT_GT(ink(bold), ink(regular));       // grown outwards: TrueType and CFF outlines run opposite ways
         EXPECT_EQ(regular.top, bold.top);         // across only: the baseline...
         EXPECT_EQ(regular.height, bold.height);   // ...and the height stay
@@ -228,19 +233,19 @@ Expected: the build fails on `planScratch`'s fourth argument.
 
 Add the parameter (Step 3's `planScratch` part only), build again, and run `./build/test/ttf_rasterizer/TtfRasterizerTest.exe --gtest_filter='TtfEmbolden.*:TtfScratch.*'`.
 Expected: FAIL.
-- 31 of the 45 dense cases keep under three quarters with FreeType's strength on both axes (sans TrueType 11, sans CFF 12, serif CFF 8). Their tops and heights differ.
+- With FreeType's strength on both axes (`emboldenStrength` temporarily returning {s, s}) the dense test fails on all 45 cases (kept under two thirds) and on counters that fill; tops and heights differ.
 - `AnEmboldenedPlan...` reports 100 output bytes against 90.
 
 - [ ] **Step 3: Room for the growth, and the strength across only.**
   - **`planScratch`**, when `emboldened`, widens the planned box by `2 * ((grow.x + 63) >> 6)` across and `2 * ((grow.y + 63) >> 6)` down, with `grow = emboldenStrength(plan.maxPpem26_6)`. This comes before the em and 255 clamps. It applies to either outline kind: the CFF branch keeps its caps and `decoderBytes`. Its header comment gains: "`emboldened`: with room for synthetic bold's growth too, twice its strength each way (a sharp corner reaches past the strength)."
-  - **`emboldenStrength`** returns `{static_cast<int32_t>((ppem26_6 + 32) >> 6) * 0x0AAA / 1024, 0}`. Its comment gives the reason and the measurement: "With FreeType's vertical strength too, 鬱 書 慶 議 驚 lost 10–42% of their open space at 10–14 pt; across only, they keep at least 78%. The stems carry the weight, in Latin text too."
+  - **`emboldenStrength`** returns `{static_cast<int32_t>((ppem26_6 + 32) >> 6) * 0x0AAA / 1024, 0}`. Its comment gives the reason and the measurement: "With FreeType's vertical strength too, 鬱 書 慶 議 驚 stays blank in 35–57% of cases at 10–14 pt and 66 enclosed counters fill; across only, in 69–91% and none fills. The stems carry the weight, in Latin text too."
   - **The fixtures' `README.md`** gains: "`TtfEmboldenTest` reads the dense kanji 鬱書慶議驚 of `NotoSansJP-TrueType.ttf`, `NotoSansJP-Cff.otf` and `NotoSerifJP-Cff.otf` (synthetic bold's counters, spec 7.2)."
 
 - [ ] **Step 4: Run the rasterizer tests.**
 Run: `cmake --build build/test --target TtfRasterizerTest -j 8 && ./build/test/ttf_rasterizer/TtfRasterizerTest.exe`
 Expected:
 - PASS, every test.
-- `TtfEmbolden` prints its 45 lines. The lowest is 鬱 in `NotoSansJP-TrueType.ttf` at 12 pt, 198 of 252 blank pixels kept. The CFF sans is lowest at 210 of 260 and the CFF serif at 180 of 223 (議, 10 pt).
+- `TtfEmbolden` prints its 45 lines. The lowest is 鬱 in `NotoSansJP-TrueType.ttf` at 12 pt, 173 of 252 blank pixels kept (69%); every line has all its counters open.
 - Both emboldened oracle runs pass, now at two different strengths.
 
 - [ ] **Step 5: Commit.**
