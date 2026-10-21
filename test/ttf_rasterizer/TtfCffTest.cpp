@@ -376,6 +376,29 @@ TEST(TtfCff, EachGlyphHasItsFontDictsSubroutines) {
 
 namespace {
 
+// Whether a lookup through a cache gave what the plain one gave: the status, and for Ok every field.
+bool sameSource(const Status plainStatus, const CffGlyphSource& plain, const Status cachedStatus,
+                const CffGlyphSource& cached) {
+  EXPECT_EQ(plainStatus, cachedStatus);
+  if (plainStatus != cachedStatus) return false;
+  if (plainStatus != Status::Ok) return true;
+  const CffIndex& a = plain.localSubrs;
+  const CffIndex& b = cached.localSubrs;
+  const CffMatrix& m = plain.matrix;
+  const CffMatrix& n = cached.matrix;
+  EXPECT_TRUE(a.start == b.start && a.count == b.count && a.offSize == b.offSize && a.dataStart == b.dataStart &&
+              a.end == b.end)
+      << "local subroutines";
+  EXPECT_TRUE(m.xx == n.xx && m.xy == n.xy && m.yx == n.yx && m.yy == n.yy && m.dx == n.dx && m.dy == n.dy &&
+              m.upm == n.upm)
+      << "matrix";
+  EXPECT_EQ(plain.offset, cached.offset);
+  EXPECT_EQ(plain.length, cached.length);
+  EXPECT_EQ(plain.scaleNum, cached.scaleNum);
+  EXPECT_EQ(plain.scaleDen, cached.scaleDen);
+  return !::testing::Test::HasFailure();
+}
+
 // Every glyph's source through one cache, in three orders, as without it.
 void expectTheCacheChangesNothing(const Bytes& font, const std::string& what) {
   SCOPED_TRACE(what);
@@ -394,13 +417,8 @@ void expectTheCacheChangesNothing(const Bytes& font, const std::string& what) {
       bytes.clearErrors();
       const Status expected = cffGlyphSource(bytes, face, g, &plain);
       bytes.clearErrors();
-      ASSERT_EQ(expected, cffGlyphSource(bytes, face, g, &cached, &cache)) << g;
-      ASSERT_EQ(0, std::memcmp(&plain.localSubrs, &cached.localSubrs, sizeof plain.localSubrs)) << g;
-      ASSERT_EQ(0, std::memcmp(&plain.matrix, &cached.matrix, sizeof plain.matrix)) << g;
-      ASSERT_EQ(plain.offset, cached.offset) << g;
-      ASSERT_EQ(plain.length, cached.length) << g;
-      ASSERT_EQ(plain.scaleNum, cached.scaleNum) << g;
-      ASSERT_EQ(plain.scaleDen, cached.scaleDen) << g;
+      const Status actual = cffGlyphSource(bytes, face, g, &cached, &cache);
+      ASSERT_TRUE(sameSource(expected, plain, actual, cached)) << g;
     }
   }
 }
@@ -869,6 +887,9 @@ void sweepCorruptions(const std::vector<uint8_t>& intact, const std::string& nam
   const uint32_t tableEnd = table + intactFace.cff.tableLength;
   const size_t lengthField = findRecord(intact, "CFF ") + 12;
   ASSERT_NE(12u, lengthField) << name;
+  // One cache for every copy: the loop's Face sits at the same address each time, so a copy accepted after another is a
+  // font parsed again where one was, which only the Face's stamp tells from the old one.
+  CffSourceCache cache;
   for (uint32_t at = table; at < tableEnd; ++at) {
     for (int variant = 0; variant < 3; ++variant) {
       std::vector<uint8_t> copy;
@@ -900,6 +921,10 @@ void sweepCorruptions(const std::vector<uint8_t>& intact, const std::string& nam
         CffGlyphSource source;
         const Status glyph = cffGlyphSource(bytes, face, static_cast<uint16_t>(g), &source);
         ASSERT_TRUE(glyph == Status::Ok || glyph == Status::Malformed) << where << " glyph " << g;
+        CffGlyphSource cached;
+        bytes.clearErrors();
+        const Status viaCache = cffGlyphSource(bytes, face, static_cast<uint16_t>(g), &cached, &cache);
+        ASSERT_TRUE(sameSource(glyph, source, viaCache, cached)) << where << " glyph " << g;
         if (glyph != Status::Ok) continue;
         if (source.length > 0) {
           ASSERT_GE(source.offset, table) << where << " glyph " << g;
