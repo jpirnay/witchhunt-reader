@@ -2354,9 +2354,12 @@ bool EpubReaderActivity::finishLadder(const ImageMemoryLadder::Action action) {
     case ImageMemoryLadder::Action::DropAccent:  // the family is left out already (warmImagesClimbingLadder)
       break;
     case ImageMemoryLadder::Action::Restart:
-      // The images are cached by now; a fresh heap is what the fonts need.
-      saveStateForRestart();
-      if (trySilentRestartToReaderForHeapRecovery()) return true;
+      // The images are cached by now; a fresh heap is what the fonts need. The state is saved for a restart that
+      // will happen, not for one the latch refuses.
+      if (heapRecoveryRestartAvailable()) {
+        saveStateForRestart();
+        if (trySilentRestartToReaderForHeapRecovery()) return true;
+      }
       // Refused: one heap restart since the last cold boot already. The page is drawn with its images as boxes
       // then, without the ladder, or the next render would climb it to here again.
       if (section) {
