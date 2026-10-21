@@ -129,19 +129,19 @@ class Interpreter {
 
   // --- Reading (cf2_buf_readByte: past the end of a charstring or subroutine, 0 without an error) ---
   // Straight from the window when it holds the byte; refill() makes one where it does not.
-  uint8_t readByte() {
+  [[gnu::always_inline]] uint8_t readByte() {
     const uint32_t at = d_.region.at;
     if (at >= d_.region.end) return 0;
     d_.region.at = at + 1;
     if (at - d_.windowAt < d_.windowBytes) return d_.window[at - d_.windowAt];
     return refill(at);
   }
-  uint8_t refill(uint32_t at);
+  [[gnu::noinline]] uint8_t refill(uint32_t at);
   void dropWindow() { d_.windowBytes = 0; }
 
   // --- The operand stack (psstack.c) ---
-  bool isFixed(const uint32_t i) const { return (d_.fixedOperands[i >> 5] >> (i & 31)) & 1; }
-  void setFixed(const uint32_t i, const bool fixed) {
+  [[gnu::always_inline]] bool isFixed(const uint32_t i) const { return (d_.fixedOperands[i >> 5] >> (i & 31)) & 1; }
+  [[gnu::always_inline]] void setFixed(const uint32_t i, const bool fixed) {
     uint32_t& word = d_.fixedOperands[i >> 5];
     const uint32_t bit = uint32_t{1} << (i & 31);
     word = fixed ? word | bit : word & ~bit;
@@ -151,7 +151,14 @@ class Interpreter {
   void pushFixed(const int32_t value) { push(value, true); }
   int32_t popInt();
   int32_t popFixed();
-  int32_t real(uint32_t i);  // cf2_stack_getReal
+  // cf2_stack_getReal
+  int32_t real(const uint32_t i) {
+    if (i >= d_.operandCount) {
+      fail(Status::Malformed);  // Stack_Overflow (a bounds error)
+      return 0;
+    }
+    return isFixed(i) ? d_.operands[i] : intToFixed(d_.operands[i]);
+  }
   void clear() { d_.operandCount = 0; }
   void roll(int32_t count, int32_t shift);
 
@@ -244,14 +251,6 @@ int32_t Interpreter::popFixed() {
   return isFixed(d_.operandCount) ? value : intToFixed(value);
 }
 
-int32_t Interpreter::real(const uint32_t i) {
-  if (i >= d_.operandCount) {
-    fail(Status::Malformed);  // Stack_Overflow (a bounds error)
-    return 0;
-  }
-  return isFixed(i) ? d_.operands[i] : intToFixed(d_.operands[i]);
-}
-
 // cf2_stack_roll: rotates the BOTTOM `count` entries by `shift`, types and all, along the chains FreeType walks.
 void Interpreter::roll(const int32_t count, int32_t shift) {
   if (count < 2) return;
@@ -327,6 +326,14 @@ Status Interpreter::run(const uint32_t offset, const uint32_t length) {
       fail(Status::Unsupported);
       break;
     }
+    // The most frequent step by far, a one-byte integer (number()'s first case), pushed here as push() would.
+    if (op >= 32 && op <= 246 && d_.operandCount < kCffStackSize) {
+      const uint32_t n = d_.operandCount;
+      d_.operands[n] = op - 139;
+      setFixed(n, false);
+      d_.operandCount = static_cast<uint8_t>(n + 1);
+      continue;
+    }
     step(op);
   }
   if (ok()) closeContour();  // cf2_outline_close
@@ -338,6 +345,10 @@ Status Interpreter::run(const uint32_t offset, const uint32_t length) {
 // return here before the clear.
 void Interpreter::step(const uint8_t op) {
   CffDecoder::Point& current = d_.current;
+  if (op >= 32) {  // a number, before the operators' comparisons
+    number(op);
+    return;
+  }
   switch (op) {
     case kHstem:
     case kHstemhm:
