@@ -1136,17 +1136,18 @@ void WifiSelectionActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+  // From the top of the content area the state's hint strips leave (the list labels the side keys
+  // too): opened from KOReader sync over the reader, or from the weather screen, this screen can be
+  // in another orientation, where a strip lies across the logical top.
+  const Rect header = UITheme::getHeaderRect(renderer, true, state == WifiSelectionState::NETWORK_LIST);
 
   // Draw header. Sized for the longest translation in UTF-8 bytes, not the English string:
   // Belarusian "Знойдзена сетак: %zu" is 36 bytes on its own, so a 32-byte buffer truncated it.
   char countStr[64];
   snprintf(countStr, sizeof(countStr), tr(STR_NETWORKS_FOUND), realNetworkCount);
-  GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
-                 tr(STR_WIFI_NETWORKS), countStr);
-  GUI.drawSubHeader(
-      renderer, Rect{contentRect.x, metrics.topPadding + metrics.headerHeight, contentRect.width, metrics.tabBarHeight},
-      cachedMacAddress.c_str());
+  GUI.drawHeader(renderer, header, tr(STR_WIFI_NETWORKS), countStr);
+  GUI.drawSubHeader(renderer, Rect{header.x, header.y + header.height, header.width, metrics.tabBarHeight},
+                    cachedMacAddress.c_str());
 
   switch (state) {
     case WifiSelectionState::AUTO_CONNECTING:
@@ -1190,8 +1191,10 @@ void WifiSelectionActivity::renderNetworkList() const {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_NO_NETWORKS));
     renderer.drawCenteredText(SMALL_FONT_ID, top + height + 10, tr(STR_PRESS_OK_SCAN));
   } else {
-    int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing;
-    int contentHeight = contentRect.height - contentTop - metrics.verticalSpacing * 2;
+    // Under the sub-header render() draws below the header.
+    const Rect body = UITheme::getBodyRect(renderer, true, true);
+    const int contentTop = body.y + metrics.tabBarHeight;
+    const int contentHeight = body.y + body.height - contentTop - metrics.verticalSpacing * 2;
     GUI.drawList(
         renderer, Rect{contentRect.x, contentTop, contentRect.width, contentHeight}, static_cast<int>(networks.size()),
         selectedNetworkIndex,
@@ -1325,16 +1328,20 @@ void WifiSelectionActivity::renderCaptivePortal() const {
   const auto hintLines = renderer.wrappedText(UI_10_FONT_ID, hintText.c_str(), maxWidth, 4);
   const auto urlLines = renderer.wrappedText(SMALL_FONT_ID, captivePortalUrl.c_str(), maxWidth, 10);
 
-  const int totalHeight = lh12 + sp                                         // title
-                          + static_cast<int>(hintLines.size()) * lh10 + sp  // hint
-                          + QR_SIZE + sp                                    // QR code
-                          + static_cast<int>(urlLines.size()) * lhSmall;
+  const int textHeight = lh12 + sp                                         // title
+                         + static_cast<int>(hintLines.size()) * lh10 + sp  // hint
+                         + sp                                              // under the QR code
+                         + static_cast<int>(urlLines.size()) * lhSmall;
 
-  // contentRect covers the full screen minus button hints; subtract the header
-  // and sub-header that render() always draws above us.
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight;
-  const int contentBottom = contentRect.y + contentRect.height;
-  int y = contentTop + (contentBottom - contentTop - totalHeight) / 2;
+  // Centred under the header and the sub-header that render() always draws above us. The code gives
+  // way when the room is short -- landscape (from the weather screen, or over the reader), or a long
+  // portal URL -- instead of the stack growing up over the header: centred alone, its title landed
+  // on the sub-header there.
+  const Rect header = UITheme::getHeaderRect(renderer);
+  const int contentTop = header.y + header.height + metrics.tabBarHeight;
+  const int room = contentRect.y + contentRect.height - contentTop;
+  const int qrSize = std::max(0, std::min(QR_SIZE, room - textHeight));
+  int y = contentTop + std::max(0, (room - textHeight - qrSize) / 2);
 
   renderer.drawCenteredText(UI_12_FONT_ID, y, tr(STR_CAPTIVE_PORTAL_DETECTED), true, EpdFontFamily::BOLD);
   y += lh12 + sp;
@@ -1344,9 +1351,9 @@ void WifiSelectionActivity::renderCaptivePortal() const {
   }
   y += sp;
 
-  const int qrX = contentRect.x + (contentRect.width - QR_SIZE) / 2;
-  QrUtils::drawQrCode(renderer, Rect{qrX, y, QR_SIZE, QR_SIZE}, captivePortalUrl);
-  y += QR_SIZE + sp;
+  const int qrX = contentRect.x + (contentRect.width - qrSize) / 2;
+  QrUtils::drawQrCode(renderer, Rect{qrX, y, qrSize, qrSize}, captivePortalUrl);
+  y += qrSize + sp;
 
   for (const auto& line : urlLines) {
     renderer.drawCenteredText(SMALL_FONT_ID, y, line.c_str());
