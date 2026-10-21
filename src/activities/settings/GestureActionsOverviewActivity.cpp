@@ -156,7 +156,10 @@ void GestureActionsOverviewActivity::render(RenderLock&&) {
                  Rect{contentRect.x, contentRect.y + metrics.topPadding, contentRect.width, metrics.headerHeight},
                  I18N.get(title), pageOfPages.c_str());
 
-  int top = contentRect.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  // Above the line Base keeps for the "2 / 3" subtitle.
+  const Rect body =
+      UITheme::getBodyRect(renderer, /*hasBottomHints=*/true, /*hasSideHints=*/false, pageOfPages.c_str());
+  int top = body.y;
 
   // Each region carries TWO actions stacked, and without a key there is nothing to say which
   // line is which -- the page showed the information and left the reader to guess. Drawn above
@@ -168,7 +171,7 @@ void GestureActionsOverviewActivity::render(RenderLock&&) {
     renderer.drawText(fontId, contentRect.x + (contentRect.width - keyW) / 2, top, key);
     top += renderer.getLineHeight(fontId) + metrics.verticalSpacing / 2;
   }
-  const int available = contentRect.y + contentRect.height - top;
+  const int available = body.y + body.height - top;
   // A SCALE MODEL of the panel: the frame carries the screen's own aspect ratio, so a zone
   // drawn in the top-left of the frame is the top-left of the real screen and the thirds and
   // corners are in the proportions a finger will meet. Fitted to whichever dimension runs out

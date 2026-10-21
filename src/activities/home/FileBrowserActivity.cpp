@@ -249,9 +249,10 @@ FileBrowserActivity::CoverGrid FileBrowserActivity::coverGrid() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   CoverGrid g;
   g.content = UITheme::getContentRect(renderer, true, true);
+  const Rect body = UITheme::getBodyRect(renderer, true, true, indexingSubtitle());
   const CoverGridLayout::Placement placed =
       CoverGridLayout::place({.contentWidth = g.content.width,
-                              .contentBottom = g.content.height,
+                              .contentBottom = body.y + body.height,
                               .topPadding = metrics.topPadding,
                               .headerHeight = metrics.headerHeight,
                               .verticalSpacing = metrics.verticalSpacing,
@@ -260,6 +261,11 @@ FileBrowserActivity::CoverGrid FileBrowserActivity::coverGrid() const {
   g.cells = placed.cells;
   g.perPage = std::max(1, g.cells.cols * g.cells.rows);
   return g;
+}
+
+const char* FileBrowserActivity::indexingSubtitle() const {
+  const Mode mode = model.getMode();
+  return indexing && (mode == Mode::Added || mode == Mode::Authors) ? tr(STR_INDEXING) : nullptr;
 }
 
 void FileBrowserActivity::afterUiRender() {
@@ -1057,11 +1063,11 @@ void FileBrowserActivity::materializeListWindow() {
 
 void FileBrowserActivity::buildScreen(UiScreen& screen) {
   if (libraryTabs()) {
-    layoutListArea(screen, 0, 0, /*spacer=*/false);
+    layoutListArea(screen, 0, 0, /*spacer=*/false, indexingSubtitle());
     composeLibraryTabBar(screen);
     screen.spacer(static_cast<int16_t>(UITheme::getInstance().getMetrics().verticalSpacing));
   } else {
-    layoutListArea(screen);
+    layoutListArea(screen, 0, 0, /*spacer=*/true, indexingSubtitle());
   }
 
   if (listCount() == 0) {
@@ -1129,7 +1135,7 @@ void FileBrowserActivity::drawChrome() {
   }
   // While New and Authors are being indexed the header says so: their rows are still arriving.
   std::string status;
-  if (indexing && (mode == Mode::Added || mode == Mode::Authors)) {
+  if (indexingSubtitle()) {
     status = tr(STR_INDEXING);
     const uint16_t total = indexTotal;
     if (total > 0) status += " " + std::to_string(indexResolved.load()) + "/" + std::to_string(total);

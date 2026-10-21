@@ -142,8 +142,10 @@ void SystemInformationActivity::render(RenderLock&&) {
   const int lineH = renderer.getLineHeight(UI_10_FONT_ID);
   const int rowStep = lineH + 2;
   const int subHeaderHeight = lineH + 6;
-  const int pageTop = contentRect.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int pageBottom = contentRect.y + contentRect.height - metrics.verticalSpacing;
+  // The header always has a subtitle (the version, or "1 / 2"), so a page stops above its line.
+  const Rect body = UITheme::getBodyRect(renderer, /*hasBottomHints=*/true, /*hasSideHints=*/false, CROSSPOINT_VERSION);
+  const int pageTop = body.y;
+  const int pageBottom = body.y + body.height - metrics.verticalSpacing;
   int y = pageTop;
   int layoutPage = 0;
 

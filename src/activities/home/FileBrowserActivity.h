@@ -74,6 +74,9 @@ class FileBrowserActivity final : public UiListActivity {
     int perPage = 1;
   };
   CoverGrid coverGrid() const;
+  // The header's subtitle while New or Authors is being indexed ("Indexing 12/340"), null otherwise.
+  // The layout only needs to know there is one, so this is its first word, without the counts.
+  const char* indexingSubtitle() const;
   void afterUiRender() override;
   void drawCoverGrid();
   void drawCoverCell(int index, int x, int y, const CoverGridLayout::Layout& cells, bool selected);

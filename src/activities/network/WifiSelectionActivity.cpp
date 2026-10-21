@@ -1158,7 +1158,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
       renderConnecting();  // Reuse connecting screen with different message
       break;
     case WifiSelectionState::NETWORK_LIST:
-      renderNetworkList();
+      renderNetworkList(countStr);
       break;
     case WifiSelectionState::HIDDEN_SSID_ENTRY:
       // Transitioning to/from the SSID keyboard subactivity - nothing to draw
@@ -1180,9 +1180,12 @@ void WifiSelectionActivity::render(RenderLock&&) {
   renderer.displayBuffer();
 }
 
-void WifiSelectionActivity::renderNetworkList() const {
+void WifiSelectionActivity::renderNetworkList(const char* headerSubtitle) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, true);
+  // Under the sub-header render() draws below the header, and above the header subtitle's line.
+  const Rect body = UITheme::getBodyRect(renderer, true, true, headerSubtitle);
+  const int bodyBottom = body.y + body.height;
 
   if (networks.empty()) {
     // No networks found or scan failed
@@ -1191,10 +1194,8 @@ void WifiSelectionActivity::renderNetworkList() const {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_NO_NETWORKS));
     renderer.drawCenteredText(SMALL_FONT_ID, top + height + 10, tr(STR_PRESS_OK_SCAN));
   } else {
-    // Under the sub-header render() draws below the header.
-    const Rect body = UITheme::getBodyRect(renderer, true, true);
     const int contentTop = body.y + metrics.tabBarHeight;
-    const int contentHeight = body.y + body.height - contentTop - metrics.verticalSpacing * 2;
+    const int contentHeight = bodyBottom - contentTop - metrics.verticalSpacing * 2;
     GUI.drawList(
         renderer, Rect{contentRect.x, contentTop, contentRect.width, contentHeight}, static_cast<int>(networks.size()),
         selectedNetworkIndex,
@@ -1213,10 +1214,8 @@ void WifiSelectionActivity::renderNetworkList() const {
         });
   }
 
-  GUI.drawHelpText(
-      renderer,
-      Rect{contentRect.x, contentRect.y + contentRect.height - metrics.contentSidePadding - 15, contentRect.width, 20},
-      tr(STR_NETWORK_LEGEND));
+  GUI.drawHelpText(renderer, Rect{contentRect.x, bodyBottom - metrics.contentSidePadding - 15, contentRect.width, 20},
+                   tr(STR_NETWORK_LEGEND));
 
   const bool hasSavedPassword = !networks.empty() && networks[selectedNetworkIndex].hasSavedPassword;
   const char* optionsLabel = hasSavedPassword ? tr(STR_OPTIONS_BUTTON) : "";

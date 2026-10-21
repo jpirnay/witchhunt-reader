@@ -110,7 +110,9 @@ class WifiSelectionActivity final : public Activity {
   uint16_t evtIdStaStart = 0;
   uint16_t evtIdDisconnected = 0;
 
-  void renderNetworkList() const;
+  // `headerSubtitle` is the network count render() gives the header: the list and the legend stay
+  // above the line Base keeps for it.
+  void renderNetworkList(const char* headerSubtitle) const;
   void renderPasswordEntry() const;
   void renderConnecting() const;
   void renderConnected() const;
