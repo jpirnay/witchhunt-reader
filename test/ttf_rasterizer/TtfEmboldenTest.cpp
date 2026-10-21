@@ -35,7 +35,10 @@ class TtfEmbolden : public ::testing::Test {
     cffRing.contours = {rect(100, 0, 500, 700), inner};
     Glyph flat;  // two points: an area of 0, which FreeType cannot orient
     flat.contours = {{{100, 0, true}, {500, 700, true}}};
-    font.glyphs = {notdef, trueTypeRing, cffRing, flat};
+    Glyph zeroWidth;  // an advance of 0 with an outline, as a joiner some fonts draw
+    zeroWidth.advance = 0;
+    zeroWidth.contours = {rect(100, 0, 500, 700)};
+    font.glyphs = {notdef, trueTypeRing, cffRing, flat, zeroWidth};
     data = buildFont(font);
     bytes = FontBytes(data.data(), static_cast<uint32_t>(data.size()));
     ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face));
@@ -95,4 +98,13 @@ TEST_F(TtfEmbolden, AnOutlineWithNoOrientationStaysAsItIsButItsAdvanceGrows) {
   EXPECT_EQ(flat.metrics.left, flatBold.metrics.left);
   EXPECT_EQ(flat.metrics.top, flatBold.metrics.top);
   EXPECT_EQ(flat.metrics.advanceX + (strength.x + 2) / 4, flatBold.metrics.advanceX);
+}
+
+TEST_F(TtfEmbolden, AZeroAdvanceStaysZero) {
+  // FT_GlyphSlot_AdjustWeight grows an advance only when it is not zero: a zero-width glyph stays zero-width.
+  const Drawn regular = draw(4, false);
+  const Drawn bold = draw(4, true);
+  EXPECT_EQ(0, regular.metrics.advanceX);
+  EXPECT_EQ(0, bold.metrics.advanceX);
+  EXPECT_GT(bold.metrics.width, regular.metrics.width);
 }

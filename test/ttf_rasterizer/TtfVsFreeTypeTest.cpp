@@ -92,7 +92,8 @@ void compareWithFreeType(const std::string& name, const std::vector<uint8_t>& da
       ADD_FAILURE() << "glyph " << g << ": " << statusName(status);
       continue;
     }
-    const int32_t expectedAdvance = ((expected.linearAdvance + 2048) >> 12) + (emboldened ? (strength.x + 2) / 4 : 0);
+    int32_t expectedAdvance = (expected.linearAdvance + 2048) >> 12;
+    if (emboldened && expectedAdvance != 0) expectedAdvance += (strength.x + 2) / 4;  // a zero advance stays zero
     if (metrics.advanceX != static_cast<uint16_t>(expectedAdvance)) ++c.advanceDiffs;
     if (metrics.width != expected.width || metrics.height != expected.height || metrics.left != expected.left ||
         metrics.top != expected.top) {

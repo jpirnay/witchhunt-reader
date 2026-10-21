@@ -645,10 +645,13 @@ Status Rasterizer::placeBox(EpdGlyph* metrics) {
 
 Status Rasterizer::embolden(const Strength& strength, EpdGlyph* metrics) {
   if (loaded_ != Status::Ok) return loaded_;
-  // FT_GlyphSlot_AdjustWeight: the advance grows by the horizontal strength, whatever became of the outline.
-  const uint32_t advance = metrics->advanceX + (static_cast<uint32_t>(strength.x) + 2) / 4;
-  if (advance > 0xFFFF) return loaded_ = Status::Unsupported;
-  metrics->advanceX = static_cast<uint16_t>(advance);
+  // FT_GlyphSlot_AdjustWeight: a non-zero advance grows by the horizontal strength, whatever became of the outline;
+  // a zero one (a joiner, a zero-width space) stays zero.
+  if (metrics->advanceX != 0) {
+    const uint32_t advance = metrics->advanceX + (static_cast<uint32_t>(strength.x) + 2) / 4;
+    if (advance > 0xFFFF) return loaded_ = Status::Unsupported;
+    metrics->advanceX = static_cast<uint16_t>(advance);
+  }
   if (numPoints_ == 0) return Status::Ok;
   // Back where FreeType has the outline (its orientation reads absolute coordinates), emboldened, boxed again.
   auto* points = reinterpret_cast<FT_Vector*>(block_ + pointsOffset_);

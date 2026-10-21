@@ -111,9 +111,9 @@ class Rasterizer {
   Status load(FontBytes& bytes, const Face& face, uint16_t glyph, uint32_t ppem26_6, EpdGlyph* metrics);
   /// Synthetic bold (spec 7.2): emboldens the outline of the last load() exactly as FreeType's FT_Outline_EmboldenXY
   /// does with `strength`, and updates its `metrics` the way FT_GlyphSlot_AdjustWeight does: the bitmap box from the
-  /// new outline, the advance strength.x wider (12.4, rounded). An outline FreeType cannot orient stays as it is, the
-  /// advance growing all the same. After a failed load() it returns that status; a bitmap that no longer fits reports
-  /// what load() would.
+  /// new outline, a non-zero advance strength.x wider (12.4, rounded; zero stays zero). An outline FreeType cannot
+  /// orient stays as it is, the advance growing all the same. After a failed load() it returns that status; a bitmap
+  /// that no longer fits reports what load() would.
   Status embolden(const Strength& strength, EpdGlyph* metrics);
   /// Draws the glyph of the last load() into `dst`, writing all of its dataLength bytes (MSB-first, rows
   /// continuous, as .cpfont bitmaps). After a failed load() it writes nothing and returns that status.
