@@ -210,7 +210,8 @@ class FlashGlyphStore {
   ///   full index whose stale slots and marks together are under kRebuildStalePercent of it, and two or more segments
   ///   live, a rebuild would soon fill again, so a reclaim comes first and leaves its slots stale. The other reasons
   ///   for a rebuild wait for Open, and come after its reclaims. A rebuild that finds no memory waits for the next
-  ///   Open, or the next open(). With the rebuild journal full, the store is wiped instead (generation() moves on).
+  ///   Open, or the next open(). With the rebuild journal full, the store is wiped instead (generation() moves on), and
+  ///   only by an Open: a wipe takes seconds, so idle time leaves that rebuild, whatever calls for it, to the next one.
   /// Writes stopped for room resume, unless the index stops them. Fills `work` with what this call did. Call it only
   /// where no record of the log is in use: it invalidates every pointer into the log.
   Room makeRoom(Budget budget, RoomWork* work = nullptr);
@@ -224,8 +225,8 @@ class FlashGlyphStore {
                      epochsLeft() == 0 || (budget == Budget::Open && rebuildWaitsForOpen()));
   }
   /// Whether a makeRoom(Budget::Idle) call would do a step now, by the step it would choose: needsRoom(Idle) less what
-  /// idle time leaves alone (a wipe pending, a rebuild that found no memory and waits for an Open, a reclaim with fewer
-  /// than two segments live).
+  /// idle time leaves alone (a wipe pending, a rebuild that found no memory or would wipe the store with the journal
+  /// full and waits for an Open, a reclaim with fewer than two segments live).
   bool idleWorkDue() const { return open_ && !wipePending_ && nextStep(Budget::Idle, false) != Step::None; }
   /// The epoch the last rebuild began from, the tail's then: no slot written since names an older one. 0 with no
   /// rebuild since the last wipe.

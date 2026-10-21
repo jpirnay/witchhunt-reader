@@ -849,7 +849,16 @@ TEST_F(GlyphStoreRoom, AFullJournalTurnsTheRebuildIntoAWipe) {
   fillIndexWithMarks();
   const uint32_t generation = store.generation();
   RoomWork work;
-  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Idle, &work));
+  // A wipe takes seconds: idle time leaves it to the next Open, and does not count it as idle work.
+  EXPECT_TRUE(store.needsRoom(Budget::Idle));
+  EXPECT_FALSE(store.idleWorkDue());
+  EXPECT_EQ(Room::More, store.makeRoom(Budget::Idle, &work));
+  EXPECT_FALSE(work.rebuilt);
+  EXPECT_EQ(generation, store.generation());
+  EXPECT_TRUE(store.writesStopped());
+  EXPECT_FALSE(store.wipePending());
+  for (uint32_t n = 0; n < 6; ++n) EXPECT_TRUE(intact(n)) << n;
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
   EXPECT_FALSE(work.rebuilt);
   EXPECT_EQ(generation + 1, store.generation());
   EXPECT_FALSE(store.wipePending());

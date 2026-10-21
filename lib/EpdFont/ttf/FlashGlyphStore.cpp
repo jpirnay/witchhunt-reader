@@ -924,9 +924,11 @@ FlashGlyphStore::Room FlashGlyphStore::makeRoom(const Budget budget, RoomWork* w
 }
 
 // What the next step of makeRoom() is. A rebuild comes at most once a call, done or not: done, it clears every reason
-// for one. One that found no memory is tried again only by an Open.
+// for one. One that found no memory is tried again only by an Open; so is one that would wipe the store (a full
+// journal), since a wipe takes seconds and only an Open has the busy indicator up.
 FlashGlyphStore::Step FlashGlyphStore::nextStep(const Budget budget, const bool rebuildTried) const {
-  const bool mayRebuild = !rebuildTried && (budget == Budget::Open || !rebuildStarved_);
+  const bool mayRebuild =
+      !rebuildTried && (budget == Budget::Open || (!rebuildStarved_ && journal_.used < kJournalEntries));
   // The index stops writes: it is rebuilt now, in idle time too. A full index with few slots to free would fill again
   // soon after, so while two or more segments are live a reclaim comes first and leaves its slots stale. The "no
   // glyph" marks count as freeable here: when they are what fills the index, the rebuild that forgets them is the
@@ -1114,7 +1116,7 @@ bool FlashGlyphStore::copyRecord(const uint32_t from, const uint32_t key, const 
 // 2. The index is erased, and each planned record is inserted again with its segment's epoch, unless find() finds its
 //    key already (a duplicate a cut left, the copy of a reclaim cut short: the first stays). Its count follows.
 // A cut after the erase loses the slots not yet inserted: their glyphs are drawn and stored again. With the journal
-// full the store is wiped instead.
+// full the store is wiped instead (nextStep() lets only an Open come here then).
 FlashGlyphStore::Rebuilt FlashGlyphStore::rebuildIndex(RoomWork& work) {
   if (journal_.used >= kJournalEntries) {
     LOG_INF("GST", "the rebuild journal is full (%u entries): the store is wiped instead",
