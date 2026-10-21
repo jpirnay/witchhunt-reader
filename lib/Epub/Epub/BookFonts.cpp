@@ -430,9 +430,15 @@ State writeState(const std::string& cachePath, const uint8_t code, const Familie
 // Finds the body and accent families and copies their faces out of the book; the state file's code for what came
 // of it (kCodeFailed for a failed read). `found` gets the families, `names` their names as the book declares them
 // (the body's for a Family, then '\0' and each accent's that was copied), into `records`.
-uint8_t examine(const Epub& epub, BuildArena* scratch, std::string& records, Families& found, std::string& names) {
+uint8_t examine(const Epub& epub, BuildArena* scratch, std::string& records, Families& found, std::string& names,
+                bool& undecided) {
   // A book without faces is probed too: Accents needs its body's generic family (CssFontFamily).
-  if (!CssParser::loadFontFaces(epub.getCachePath(), records)) records.clear();
+  bool stale = false;
+  if (!CssParser::loadFontFaces(epub.getCachePath(), records, &stale)) records.clear();
+  if (stale) {  // a faces file of another version: not "no faces", the book is decided once the CSS is compiled again
+    undecided = true;
+    return kCodeNone;
+  }
   bool failed = false;
   const Found families = detectFamilies(epub, scratch, &failed, records);
   if (failed) return kCodeFailed;
@@ -612,7 +618,7 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
 State prepare(const Epub& epub, BuildArena* scratch) {
   const std::string& cachePath = epub.getCachePath();
   // The CSS was not loaded, or did not compile: nothing to decide from yet.
-  if (!epub.getCssParser() || !epub.getCssParser()->hasCache()) return State::Pending;
+  if (!epub.getCssParser() || !epub.getCssParser()->hasCurrentCache()) return State::Pending;
   const uint8_t last = readCode(cachePath, nullptr, nullptr, -1);
   const uint8_t attempts = last != kNoCode && last >= kCodeFailed ? static_cast<uint8_t>(last - kCodeFailed) : 0;
   Storage.removeDir((cachePath + kFontsDir).c_str());  // whatever an earlier attempt left
@@ -620,7 +626,9 @@ State prepare(const Epub& epub, BuildArena* scratch) {
   std::string records;
   Families found;
   std::string names;
-  const uint8_t code = examine(epub, scratch, records, found, names);
+  bool undecided = false;
+  const uint8_t code = examine(epub, scratch, records, found, names, undecided);
+  if (undecided) return State::Pending;  // no record: the next open asks again
   return writeState(cachePath, code == kCodeFailed ? static_cast<uint8_t>(kCodeFailed + attempts + 1) : code, found,
                     names);
 }

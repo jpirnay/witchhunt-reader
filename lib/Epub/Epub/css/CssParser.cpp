@@ -2782,6 +2782,16 @@ CssStyle CssParser::parseInlineStyle(const std::string& styleValue) { return par
 
 bool CssParser::hasCache() const { return Storage.exists((cachePath + rulesCache).c_str()); }
 
+bool CssParser::hasCurrentCache() const {
+  if (!hasCache()) return false;
+  FsFile file;
+  if (!Storage.openFileForRead("CSS", cachePath + rulesCache, file)) return false;
+  uint8_t version = 0;
+  const bool current = file.read(&version, 1) == 1 && version == CSS_CACHE_VERSION;
+  file.close();
+  return current;
+}
+
 void CssParser::deleteCache() const {
   if (hasCache()) Storage.remove((cachePath + rulesCache).c_str());
   const std::string backgrounds = cachePath + backgroundImagesFile;
@@ -2935,13 +2945,18 @@ void CssParser::saveFontFaces() const {
   out.close();
 }
 
-bool CssParser::loadFontFaces(const std::string& cachePath, std::string& records) {
+bool CssParser::loadFontFaces(const std::string& cachePath, std::string& records, bool* stale) {
   const std::string file = cachePath + fontFacesFile;
   constexpr size_t MAX_FILE = 1 + MAX_FONT_FACES * (5 + 2 * MAX_FONT_FACE_TEXT);
+  if (stale) *stale = false;
   // Checked first: the file is absent for almost every book, and a failed open logs.
-  if (!Storage.exists(file.c_str()) || !Storage.readFileToString("CSS", file, MAX_FILE, records) ||
-      records[0] != static_cast<char>(CSS_CACHE_VERSION)) {
+  if (!Storage.exists(file.c_str()) || !Storage.readFileToString("CSS", file, MAX_FILE, records) || records.empty()) {
     records.clear();
+    return false;
+  }
+  if (records[0] != static_cast<char>(CSS_CACHE_VERSION)) {
+    records.clear();
+    if (stale) *stale = true;
     return false;
   }
   records.erase(0, 1);

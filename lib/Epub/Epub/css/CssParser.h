@@ -232,6 +232,13 @@ class CssParser {
   bool hasCache() const;
 
   /**
+   * Whether the CSS rules cache file exists AND was written by this version (one byte read). A file of
+   * another version counts as no cache wherever the stylesheets are compiled or the CSS is waited for:
+   * loadFromCache() deletes it, and the book would be unstyled until the next open.
+   */
+  bool hasCurrentCache() const;
+
+  /**
    * Delete CSS rules cache file exists
    */
   void deleteCache() const;
@@ -345,8 +352,9 @@ class CssParser {
   // reader's font, and its low two bits are 0 (CssFontFamily).
   [[nodiscard]] static uint32_t fontFamilyHash(std::string_view name);
   // The face records of the book whose cache is at `cachePath`, for nextFontFace. False when there
-  // are none or the side file cannot be read.
-  static bool loadFontFaces(const std::string& cachePath, std::string& records);
+  // are none or the side file cannot be read. `stale` (optional) tells a file of another version, which is
+  // not "no faces" but "not known until the stylesheets are compiled again", from an absent one.
+  static bool loadFontFaces(const std::string& cachePath, std::string& records, bool* stale = nullptr);
   // Takes the first face off `records`. False when none is left (or the rest is damaged).
   static bool nextFontFace(std::string_view& records, FontFace& face);
 

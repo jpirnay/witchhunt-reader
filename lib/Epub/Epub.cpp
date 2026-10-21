@@ -634,7 +634,8 @@ bool Epub::needsFirstOpenIndexing() const {
   // Spine/TOC cache missing -> load() rebuilds it (content.opf + TOC/NCX + book.bin).
   if (!BookMetadataCache::cacheExists(cachePath)) return true;
   // Compiled CSS rules cache missing -> load() runs the (slow) CSS compile.
-  if (!CssParser(cachePath).hasCache()) return true;
+  // (A cache of another version counts as missing: loadFromCache() would delete it, unparsed.)
+  if (!CssParser(cachePath).hasCurrentCache()) return true;
   // Book content changed at the same path -> load() wipes the cache and rebuilds.
   uint64_t zipFp = 0, storedFp = 0;
   if (computeZipFingerprint(&zipFp) && readStoredFingerprint(&storedFp) && storedFp != zipFp) return true;
@@ -703,10 +704,11 @@ void Epub::parseCssFiles() const {
   LOG_DBG("EBP", "CSS files to parse: %zu", cssFiles.size());
 
   // See if we have a cached version of the CSS rules
-  if (cssParser->hasCache()) {
+  if (cssParser->hasCurrentCache()) {
     LOG_DBG("EBP", "CSS cache exists, skipping parseCssFiles");
     return;
   }
+  cssParser->deleteCache();  // one of another version: the rules, backgrounds and font faces compile again
 
   // No cache yet - parse CSS files
   if (!cssParser->beginCacheCompile()) {

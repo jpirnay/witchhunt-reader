@@ -320,6 +320,83 @@ TEST_F(BookFontsTest, ABookExaminedBeforeIsExaminedAgain) {
   EXPECT_EQ(BookFonts::State::Pending, BookFonts::read(epub->getCachePath()));
 }
 
+namespace {
+// Sets the first byte (the version) of a cache file.
+void setVersionByte(const fs::path& file, const char version) {
+  std::string bytes = readFile(file);
+  ASSERT_FALSE(bytes.empty()) << file;
+  bytes[0] = version;
+  std::ofstream out(file, std::ios::binary | std::ios::trunc);
+  out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+const char* const kCffBookCss =
+    "@font-face { font-family: Body; src: url(../Fonts/b.otf); }\np { font-family: Body; "
+    "font-style: italic }\n";
+}  // namespace
+
+// An upgrade that changes the book cache and the CSS cache versions: the book as an older firmware left it.
+TEST_F(BookFontsTest, AStaleCssCacheIsCompiledAgainWhenTheBookCacheIsRebuilt) {
+  const auto first = book(kCffBookCss, {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.otf", "font/otf", kCff}});
+  const fs::path cache = first->getCachePath();
+  ASSERT_TRUE(fs::exists(cache / "css_rules.cache"));
+  ASSERT_TRUE(fs::exists(cache / "css_fonts.bin"));
+  const char old = static_cast<char>(CssParser::CSS_CACHE_VERSION - 1);
+  setVersionByte(cache / "book.bin", 1);
+  setVersionByte(cache / "css_rules.cache", old);
+  setVersionByte(cache / "css_fonts.bin", old);
+
+  Epub again(first->getPath(), (work / "cache").string());
+  ASSERT_TRUE(again.load(true));
+  EXPECT_EQ(static_cast<char>(CssParser::CSS_CACHE_VERSION), readFile(cache / "css_rules.cache")[0]);
+  EXPECT_EQ(static_cast<char>(CssParser::CSS_CACHE_VERSION), readFile(cache / "css_fonts.bin")[0]);
+  ASSERT_NE(nullptr, again.getCssParser());
+  EXPECT_EQ(CssFontStyle::Italic, again.getCssParser()->resolveStyle("p", "").fontStyle) << "the rules apply";
+}
+
+TEST_F(BookFontsTest, AStaleCssCacheNeedsFirstOpenIndexing) {
+  const auto first = book(kCffBookCss, {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.otf", "font/otf", kCff}});
+  EXPECT_FALSE(Epub(first->getPath(), (work / "cache").string()).needsFirstOpenIndexing());
+  setVersionByte(fs::path(first->getCachePath()) / "css_rules.cache",
+                 static_cast<char>(CssParser::CSS_CACHE_VERSION - 1));
+  EXPECT_TRUE(Epub(first->getPath(), (work / "cache").string()).needsFirstOpenIndexing());
+}
+
+// The device case: the older firmware refused the book's CFF face, and the upgrade changed every cache version.
+TEST_F(BookFontsTest, ABookExaminedByAnOlderFirmwareGetsItsCffFontAfterTheUpgrade) {
+  const auto first = book(kCffBookCss, {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.otf", "font/otf", kCff}});
+  ASSERT_EQ(BookFonts::State::Family, BookFonts::prepare(*first, nullptr));
+  const fs::path cache = first->getCachePath();
+  const char old = static_cast<char>(CssParser::CSS_CACHE_VERSION - 1);
+  setVersionByte(cache / "fonts.bin", 5);
+  {
+    std::string bytes = readFile(cache / "fonts.bin");
+    bytes[1] = 0;  // None
+    std::ofstream out(cache / "fonts.bin", std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  }
+  fs::remove_all(fs::path(BookFonts::familyDir(first->getCachePath())));
+  setVersionByte(cache / "book.bin", 1);
+  setVersionByte(cache / "css_rules.cache", old);
+  setVersionByte(cache / "css_fonts.bin", old);
+  ASSERT_EQ(BookFonts::State::Pending, BookFonts::read(first->getCachePath()));
+
+  Epub again(first->getPath(), (work / "cache").string());
+  ASSERT_TRUE(again.load(true));
+  again.setupCacheDir();
+  EXPECT_EQ(BookFonts::State::Family, BookFonts::prepare(again, nullptr));
+  EXPECT_EQ(kCff, readFile(fs::path(BookFonts::familyDir(again.getCachePath())) / "0.ttf"));
+}
+
+// Not "no faces": the file is there, in a form this firmware cannot read, so nothing is decided from it.
+TEST_F(BookFontsTest, AFontFacesFileOfAnotherVersionLeavesTheBookPending) {
+  const auto epub = book(kCffBookCss, {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.otf", "font/otf", kCff}});
+  const fs::path cache = epub->getCachePath();
+  setVersionByte(cache / "css_fonts.bin", static_cast<char>(CssParser::CSS_CACHE_VERSION - 1));
+  EXPECT_EQ(BookFonts::State::Pending, BookFonts::prepare(*epub, nullptr));
+  EXPECT_FALSE(fs::exists(cache / "fonts.bin"));
+  EXPECT_FALSE(fs::exists(fs::path(BookFonts::familyDir(epub->getCachePath())) / "0.ttf"));
+}
+
 TEST_F(BookFontsTest, ABookWithoutAnEmbeddedBodyFamilyIsNone) {
   const auto plain = book("p { margin: 0 }\n", {"<body><p>Body text.</p></body>"});
   EXPECT_EQ(BookFonts::State::Pending, BookFonts::read(plain->getCachePath()));
