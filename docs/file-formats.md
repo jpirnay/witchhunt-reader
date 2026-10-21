@@ -514,7 +514,7 @@ produces; a power cut leaves at worst bytes nothing references.
 
 | Offset | Size | Contents |
 |---|---|---|
-| 0 | 4 KB sector | `Header`, written last at install: `u32` magic `CPTT`, `u16` version, `u16` header bytes, the set's 16-byte identity, the `Geometry` (style count, the regions' offsets and sizes), 8 `StyleInfo` (a style block's offset, size and mode; in SD mode also its file and outlines, below), then `u32` FNV-1a over all of it |
+| 0 | 4 KB sector | `Header`, written last at install: `u32` magic `CPTT`, `u16` version, `u16` header bytes, the set's 16-byte identity, the `Geometry` (style count, the regions' offsets and sizes, `segmentBytes`), 8 `StyleInfo` (a style block's offset, size and mode; in SD mode also its file and outlines, below), then `u32` FNV-1a over all of it |
 | 4 KB | 4 KB sector | The state: 32 face entries `{u32 face, u32 claimed}`, then the `u32` wipe word, then the rebuild journal: 479 entries `{u32 base, u32 done}` |
 | 64 KB | 64 KB pages | The style blocks, each family's styles in the set's order, each on its own page so one maps alone; the SD-mode blocks after every flash-mode one |
 | `indexOffset` | whole pages | Glyph index: 8-byte slots `{u32 key, u32 value}`, open addressing, at most 128 probes |
@@ -548,8 +548,9 @@ produces; a power cut leaves at worst bytes nothing references.
 - **The rebuild journal** fills the rest of the state sector after the wipe word, one `{u32 base, u32 done}` entry per
   index rebuild, used in order and each programmed once. `base` is the epoch of the oldest live segment when the
   rebuild began: no slot written since names an older one. `done` is programmed 0 after the last slot is in, so an
-  entry with `base` and an erased `done` is a rebuild a power cut interrupted, and is done again at the next open.
-  With all 479 entries used, the next rebuild wipes the store instead, which erases the journal with the state sector.
+  entry with `base` and an erased `done` is a rebuild a power cut interrupted, and is done again at the next chapter
+  or book open. With all 479 entries used, the next rebuild wipes the store instead, which erases the journal with the
+  state sector; like any wipe, only at a chapter or book open (idle time leaves it).
 - **Making room** keeps the log from filling, a segment at a time, in idle time (one step per tick) and at a chapter
   or book open (until there is enough, behind the "Loading font" popup).
   - *A reclaim* takes the oldest segment while two or more are live. It writes, in this order: each glyph it keeps
@@ -561,7 +562,9 @@ produces; a power cut leaves at worst bytes nothing references.
   - *A rebuild* of the index writes: the journal entry's `base`; the erase of the index; the slots again, one for
     each live record that a slot named, with the segment's epoch (use counts kept; the "no glyph" marks are
     forgotten); last the entry's `done`. It runs when the index stops writes (past its load limit, a probe chain
-    full, or the epochs used up), when 12 % of the index's slots are stale, or before the 12-bit epoch can wrap.
+    full, or the epochs used up), in idle time too. At a chapter or book open only, it also runs when 12 % of the
+    index's slots are stale (the "no glyph" marks do not count: they call for a rebuild only once they fill the
+    index), when a power cut stopped the last one, or 2,048 epochs after the last one's `base`.
   - *The epoch limits.* The epochs a slot can name must stay distinct in 12 bits. A rebuild is due 2,048 epochs after
     the last one's `base`, and waits for an open; the hard bound is 3,968 (4,096 less two rings of 64 segments): no
     segment gets an epoch that far past the base until the index is rebuilt, in idle time if need be.

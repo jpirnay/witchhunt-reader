@@ -306,7 +306,7 @@ bool TtfFontSet::wipeIfPending(const std::function<void()>& onBusy) {
   }
   if (onBusy) onBusy();
   const uint32_t start = hooks.nowMs ? hooks.nowMs() : 0;
-  if (!store_.wipe()) return false;  // stays pending: the next book open tries again
+  if (!store_.wipe()) return false;  // stays pending: the next chapter or book open tries again
   noteWiped(start);
   return true;
 }
@@ -581,10 +581,11 @@ void TtfFontSet::failed(const uint8_t style, const uint32_t codepoint, const ttf
 void TtfFontSet::noteCommit(const Commit result) {
   if (result == Commit::Full || result == Commit::WriteFailed) {
     if (!ringMode_) {
+      // Room is made in idle time or at the next chapter or book open; a wipe only at the open.
       if (result == Commit::Full && !store_.wipePending()) {
         LOG_INF("TTF", "glyph store full: new glyphs are not stored until room is made");
       } else {
-        LOG_INF("TTF", "glyph store %s: new glyphs are not stored until the next book open",
+        LOG_INF("TTF", "glyph store %s: new glyphs are not stored until the wipe at the next chapter or book open",
                 result == Commit::Full ? "full" : "write failed");
       }
       ++storeFills;

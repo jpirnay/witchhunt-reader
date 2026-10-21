@@ -827,8 +827,8 @@ bool FlashGlyphStore::faceIndex(const uint8_t family, const uint32_t ppem26_6, u
   }
   if (wipePending_) return false;
   if (free < 0) {
-    // Only a new face is refused: the claimed ones go on storing, and the wipe at the next book open frees the
-    // table.
+    // Only a new face is refused: the claimed ones go on storing, and the wipe at the next chapter or book open frees
+    // the table.
     LOG_INF("GST", "full: all %u faces in use; wipe pending", static_cast<unsigned>(kFaceEntries));
     wipePending_ = true;
     recordWipePending();
@@ -843,7 +843,8 @@ bool FlashGlyphStore::faceIndex(const uint8_t family, const uint32_t ppem26_6, u
   claimedFaces_ |= 1u << free;
   *index = static_cast<uint8_t>(free);
   if (freeCount == 1) {
-    // That was the last entry: the next book open empties the table, before a new body size needs one.
+    // That was the last entry: the wipe at the next chapter or book open empties the table, before a new body size
+    // (which lays the chapter out again) needs one.
     LOG_INF("GST", "the last of %u faces taken; wipe pending", static_cast<unsigned>(kFaceEntries));
     wipePending_ = true;
     recordWipePending();

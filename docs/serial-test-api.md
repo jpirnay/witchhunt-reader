@@ -281,7 +281,7 @@ press that changes nothing on screen counts as done 1 s after it was taken in.
 | `transition` | a screen change is queued |
 | `input` | a press (or touch) has not been taken in yet, or is waiting out the double-press window |
 | `render` | a frame is queued, being drawn, or still being refreshed onto the panel; or the screen is about to change by itself (the reader's page still being built, a page turn on its way, the anti-aliasing redraw of the page); or the frame of the last command's effect is still to come |
-| `background` | the screen has work of its own to finish: the reader's chapter builds (the current one and the look-ahead), the pre-render of the next page, image decodes; Home's cover loading |
+| `background` | the screen has work of its own to finish: the reader's chapter builds (the current one and the look-ahead), the pre-render of the next page, image decodes, a step of the TrueType glyph store an idle tick would run (room to make: a reclaim or an index rebuild; or its use counts to take); Home's cover loading |
 | `settling` | nothing was busy, but not yet for 250 ms when the timeout came |
 
 With `:SCREEN` it waits only until the screen has settled (everything above but `background`).
@@ -531,7 +531,7 @@ reads its outlines from the card; `log_used`/`log_size` the store's log in bytes
 `ring=1` while new glyphs are drawn without being stored (the store filled up, or a write failed); `pending=1` while
 a wipe waits for the next chapter or book open (idle time leaves it); `renders` and `hits` the glyphs drawn from outlines and read from the store
 since the set loaded. `segments` and `free` the log's segments and the ones not live; `live_slots` the index slots
-that name a live record (`slots` less the stale ones); `draws` the glyph draws the store counted as uses (those of a
+that name a live record (`slots` less the stale ones and the "no glyph" marks); `draws` the glyph draws the store counted as uses (those of a
 page's black-and-white pass); it stays 0 until the store keeps use counts: once the log nears full, from the next idle
 step or chapter open (from the set's load when the log already is), or from `CMD:TTF:FULL`. `fills`, `wipes` and `last_wipe_ms` count since boot, whichever set was loaded; so do
 `rooms` (`makeRoom` calls that did work: a segment reclaimed or the index rebuilt; a wipe counts only in `wipes`,

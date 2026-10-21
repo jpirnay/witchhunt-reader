@@ -86,12 +86,16 @@ constexpr uint32_t glyphSlotValue(const uint32_t epoch, const uint32_t dataOffse
 constexpr uint32_t slotDataOffset(const uint32_t value) { return (value & ((1u << kSlotOffsetBits) - 1)) << 2; }
 constexpr uint32_t slotEpoch(const uint32_t value) { return value >> kSlotOffsetBits; }
 
-/// Index rebuilds: epochs older than kRebuildEpochSpan behind the newest could alias a live one after the 12-bit
-/// epoch wraps, so the index is rebuilt before that. Slots count as stale-by-age from kCountsAtPercent of the span,
-/// and a rebuild pays once kRebuildStalePercent of the index's slots are stale.
+/// Index rebuilds. A slot names its segment by the low 12 bits of an epoch, so epochs 4,096 apart alias: every epoch
+/// a slot can name, from the base of the last finished rebuild on, must stay less than that apart. kRebuildEpochSpan
+/// is the soft span: this many epochs past that base, a rebuild waits for the next chapter or book open, where it
+/// runs behind the busy indicator. kRebuildEpochLimit, below, is the hard bound. A rebuild at an open also pays once
+/// kRebuildStalePercent of the index's slots are stale (the "no glyph" marks aside).
 constexpr uint32_t kRebuildEpochSpan = 2048;
-constexpr uint32_t kCountsAtPercent = 75;
 constexpr uint32_t kRebuildStalePercent = 12;
+/// Use counts are kept once the live segments take this share of the log (or the free ones come within one of
+/// kFreeSegmentsTarget): room will soon have to be made, and a reclaim keeps what was drawn.
+constexpr uint32_t kCountsAtPercent = 75;
 /// The hard bound behind kRebuildEpochSpan, which waits for a chapter or book open: no segment gets an epoch this far
 /// past the base of the last finished rebuild until the index is rebuilt again, in idle time if need be. Any bound up
 /// to 4,096 keeps the epochs a slot can name distinct in its 12 bits; this one stays two of the largest rings short.

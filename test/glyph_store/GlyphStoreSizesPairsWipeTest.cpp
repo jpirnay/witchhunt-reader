@@ -98,7 +98,7 @@ TEST_F(GlyphStoreSizes, EachFamilyOfTheSetHasItsOwnFaces) {
 }
 
 TEST_F(GlyphStoreSizes, TheFamiliesShareTheTable) {
-  // A wipe at the next book open frees it, as for one family.
+  // A wipe at the next chapter or book open frees it, as for one family.
   for (uint32_t i = 0; i < kFaceEntries; ++i) {
     ASSERT_EQ(static_cast<int>(i), claim((20 + i / 2) << 6, static_cast<uint8_t>(i % 2)));
   }

@@ -262,9 +262,10 @@ class TtfFontSet {
   /// The set's family `family`, in load()'s order; nullptr past familyCount().
   TtfFont* font(uint8_t family) const { return family < count_ ? fonts_[family].get() : nullptr; }
 
-  /// Runs a pending wipe (a write failed), calling `onBusy` first. Only where no glyph record of the set is in use:
-  /// at book open. True when a wipe ran. False, doing nothing, while the `renderLockHeld` hook says the lock is not
-  /// held: a lookup or a draw may hold a record of the log.
+  /// Runs a pending wipe (a write failed, or the face table filled), calling `onBusy` first. Only where no glyph record
+  /// of the set is in use: at a chapter or book open (load(), makeRoom() with Open). True when a wipe ran. False, doing
+  /// nothing, while the `renderLockHeld` hook says the lock is not held: a lookup or a draw may hold a record of the
+  /// log.
   bool wipeIfPending(const std::function<void()>& onBusy = {});
   /// Makes room in the store when it needs it (a full log, the index, or a rebuild due), after a pending wipe (Open
   /// only: an Idle step leaves a wipe to the next Open, as it takes seconds, and does nothing else meanwhile): a
