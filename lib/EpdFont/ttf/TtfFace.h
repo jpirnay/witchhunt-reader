@@ -3,10 +3,11 @@
 #include <cstdint>
 
 #include "FontBytes.h"
+#include "TtfCff.h"
 
-/// One TrueType font file as the TTF engine reads it: where its tables are, its metrics, and codepoint to
-/// glyph lookup. A Face holds offsets, never pointers, so it stays valid when the file's mapping moves; the
-/// FontBytes is passed to every call.
+/// One TrueType or OpenType (CFF outlines) font file as the TTF engine reads it: where its tables are, its metrics,
+/// and codepoint to glyph lookup. A Face holds offsets, never pointers, so it stays valid when the file's mapping
+/// moves; the FontBytes is passed to every call.
 ///
 /// Sizes and metrics reproduce FreeType 2.13 as the PC converter (fontconvert_sdcard.py) drives it:
 /// FT_Set_Char_Size at 150 dpi, advances from linearHoriAdvance, line metrics from the size metrics. A TTF
@@ -15,12 +16,14 @@ namespace ttf {
 
 enum class FaceStatus : uint8_t {
   Ok,
-  Unsupported,  ///< a CFF font ('OTTO'), a collection ('ttcf'), or no Unicode cmap of format 4 or 12
+  Unsupported,  ///< variable OpenType (a CFF2 table), a collection ('ttcf'), or no Unicode cmap of format 4 or 12
   Malformed,    ///< not a font, or a required table is missing, outside the file or impossible
   Transient,    ///< an SD read failed (Stage 2c): try again later
 };
 
 struct Face {
+  enum class Outlines : uint8_t { TrueType, Cff };
+
   uint32_t glyf = 0;
   uint32_t glyfLength = 0;
   uint32_t loca = 0;
@@ -36,10 +39,10 @@ struct Face {
   uint32_t kern = 0;  ///< the legacy kerning table
   uint32_t kernLength = 0;
   uint16_t unitsPerEm = 0;
-  uint16_t numGlyphs = 0;
+  uint16_t numGlyphs = 0;  ///< maxp's; for CFF outlines the CharStrings count, as FreeType's num_glyphs
   uint16_t numHMetrics = 0;
-  uint16_t maxPoints = 0;    ///< the larger of maxp's maxPoints and maxCompositePoints
-  uint16_t maxContours = 0;  ///< the larger of maxp's maxContours and maxCompositeContours
+  uint16_t maxPoints = 0;    ///< the larger of maxp's maxPoints and maxCompositePoints; 0 for CFF outlines
+  uint16_t maxContours = 0;  ///< the larger of maxp's maxContours and maxCompositeContours; 0 for CFF outlines
   int16_t xMin = 0;          ///< head: the box around every glyph, in font units
   int16_t yMin = 0;
   int16_t xMax = 0;
@@ -49,9 +52,12 @@ struct Face {
   int16_t height = 0;  ///< ascender - descender + line gap
   uint8_t cmapFormat = 0;
   bool longLoca = false;
+  Outlines outlines = Outlines::TrueType;
+  CffFace cff;  ///< Outlines::Cff: the CFF table (glyf and loca stay 0)
 };
 
-/// Reads the table directory and the tables every glyph needs. Read errors set the FontBytes flags as well.
+/// Reads the table directory and the tables every glyph needs: glyf and loca for TrueType outlines ('true' or
+/// 0x00010000), the CFF table for CFF ones ('OTTO'). Read errors set the FontBytes flags as well.
 FaceStatus parseFace(FontBytes& bytes, Face* face);
 
 /// The glyph for `codepoint`, or 0 (the font has none, or the cmap is broken: see bytes.outOfRange()).
