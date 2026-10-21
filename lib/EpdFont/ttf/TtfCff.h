@@ -29,9 +29,14 @@ bool readCffIndex(FontBytes& bytes, uint32_t at, uint32_t limit, CffIndex* out);
 
 /// Where `item` of `index` lies, as cff_index_access_element finds it: a zero end offset is passed over, an end past
 /// the INDEX's data is clamped to it, and an item that does not start before its end is empty (offset and length 0).
-/// For INDEXes with ascending offsets, as fonts have them, the subroutines lie where cff_index_get_pointers puts them.
-/// False for an item past the count.
+/// How FreeType reads a glyph's charstring. False for an item past the count.
 bool cffIndexItem(FontBytes& bytes, const CffIndex& index, uint32_t item, uint32_t* offset, uint32_t* length);
+
+/// Where subroutine `item` of a subroutine INDEX lies, from its two offsets: two reads, whatever the INDEX's size,
+/// which is what lets the interpreter's operator budget bound its work. readCffTable accepts only plain subroutine
+/// INDEXes (offsets from 1, never decreasing), and for those this is where cff_index_get_pointers puts each item.
+/// False for an item past the count, or (never for an INDEX readCffTable accepted) offsets out of order.
+bool cffSubroutine(FontBytes& bytes, const CffIndex& index, uint32_t item, uint32_t* offset, uint32_t* length);
 
 /// A font matrix as cff_face_init leaves it: normalized so yy (or yx, when yy is 0) is 1.0, the 2x2 part in 16.16,
 /// the offset in whole font units, and the units per em that remain once the scale is taken out of the matrix.
@@ -72,8 +77,10 @@ struct CffFace {
 /// Reads the CFF table at `table` (`length` bytes, inside the file) as cff_font_load and cff_face_init do, refusing
 /// what they refuse, and checks every structure a glyph reads lies inside the table. `unitsPerEm` is head's, the
 /// Top DICT's units per em when it has no FontMatrix. False for a table the engine cannot read: broken, a CID-keyed
-/// font with no font DICTs or more than 256, a Top, font or Private DICT over 4,096 bytes, or a matrix out of 32-bit
-/// range.
+/// font with no font DICTs or more than 256, a Top, font or Private DICT over 4,096 bytes, a matrix out of 32-bit
+/// range, or a subroutine INDEX (the global one, the Private DICT's, any font DICT's) that is not plain: its first
+/// offset not 1, or an offset below the one before. FreeType clamps such offsets into order; only a broken or hostile
+/// font has them, and refusing it lets cffSubroutine find any subroutine in two reads.
 bool readCffTable(FontBytes& bytes, uint32_t table, uint32_t length, uint16_t unitsPerEm, CffFace* out);
 
 /// A glyph's charstring and what interpreting it needs: its font DICT's local subroutines and matrix (for a CID-keyed

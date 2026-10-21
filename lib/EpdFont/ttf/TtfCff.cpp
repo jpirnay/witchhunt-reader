@@ -83,6 +83,32 @@ int32_t msb(uint32_t z) {
 
 int64_t absWide(const int64_t v) { return v < 0 ? -v : v; }
 
+// --- INDEXes ---
+
+uint32_t readOffset(FontBytes& bytes, const uint32_t at, const uint32_t size) {
+  uint32_t value = 0;
+  for (uint32_t i = 0; i < size; ++i) value = value << 8 | bytes.u8(at + i);
+  return value;
+}
+
+// A subroutine INDEX the interpreter can read item by item from two offsets (cffSubroutine): the first offset 1, none
+// smaller than the one before; readCffIndex checked that the last lies within the data. cff_index_get_pointers makes
+// any INDEX so (the first offset taken as 1, each clamped between the one before and the data's end), so for these the
+// two agree; a font that needs the clamping is broken or hostile, and the engine refuses it rather than search the
+// offsets on every call.
+bool plainSubroutines(FontBytes& bytes, const CffIndex& index) {
+  if (index.count == 0) return true;
+  const uint32_t offsets = index.start + 3;
+  uint32_t previous = readOffset(bytes, offsets, index.offSize);
+  if (previous != 1) return false;
+  for (uint32_t i = 1; i <= index.count; ++i) {
+    const uint32_t offset = readOffset(bytes, offsets + i * index.offSize, index.offSize);
+    if (offset < previous) return false;
+    previous = offset;
+  }
+  return true;
+}
+
 // --- DICTs ---
 
 // cff_parse_integer: the integer at `at`, 0 when its bytes run past the DICT's `end`.
@@ -551,7 +577,7 @@ bool fontDictsFit(FontBytes& bytes, const CffFace& cff) {
     CffMatrix matrix;
     CffIndex localSubrs;
     if (!readFontDict(bytes, cff.fdArray, fd, &dict) || !narrow(fontDictMatrix(cff, dict), &matrix) ||
-        !readPrivate(bytes, cff, dict, &localSubrs)) {
+        !readPrivate(bytes, cff, dict, &localSubrs) || !plainSubroutines(bytes, localSubrs)) {
       return false;
     }
   }
@@ -678,12 +704,6 @@ int32_t charsetGlyph(FontBytes& bytes, const CffFace& cff, const uint32_t sid) {
   return -1;
 }
 
-uint32_t readOffset(FontBytes& bytes, const uint32_t at, const uint32_t size) {
-  uint32_t value = 0;
-  for (uint32_t i = 0; i < size; ++i) value = value << 8 | bytes.u8(at + i);
-  return value;
-}
-
 }  // namespace
 
 bool readCffIndex(FontBytes& bytes, const uint32_t at, const uint32_t limit, CffIndex* out) {
@@ -723,14 +743,27 @@ bool cffIndexItem(FontBytes& bytes, const CffIndex& index, uint32_t item, uint32
       end = readOffset(bytes, offsets + item * index.offSize, index.offSize);
     } while (end == 0 && item < index.count);
   }
-  // FreeType clamps the end to the end of the file (cff_index_access_element), and a subroutine's to the end of the
-  // INDEX (cff_index_get_pointers); here every item ends inside its INDEX.
+  // FreeType clamps the end to the end of the file (cff_index_access_element); here every item ends inside its INDEX.
   const uint32_t room = index.end - index.dataStart + 1;
   if (end > room) end = room;
   if (start != 0 && end > start) {
     *offset = index.dataStart + start - 1;
     *length = end - start;
   }
+  return true;
+}
+
+bool cffSubroutine(FontBytes& bytes, const CffIndex& index, const uint32_t item, uint32_t* offset, uint32_t* length) {
+  *offset = 0;
+  *length = 0;
+  if (item >= index.count) return false;
+  const uint32_t at = index.start + 3 + item * index.offSize;
+  const uint32_t start = readOffset(bytes, at, index.offSize);
+  const uint32_t end = readOffset(bytes, at + index.offSize, index.offSize);
+  // Out of order or past the data: never in an INDEX readCffTable accepted, but an unchecked one stays inside its data.
+  if (start == 0 || end < start || end - 1 > index.end - index.dataStart) return false;
+  *offset = index.dataStart + start - 1;
+  *length = end - start;
   return true;
 }
 
@@ -750,7 +783,8 @@ bool readCffTable(FontBytes& bytes, const uint32_t table, const uint32_t length,
   CffIndex strings;
   if (!readCffIndex(bytes, table + headerSize, end, &names) || names.count != 1 ||
       !readCffIndex(bytes, names.end, end, &topDicts) || topDicts.count < 1 ||
-      !readCffIndex(bytes, topDicts.end, end, &strings) || !readCffIndex(bytes, strings.end, end, &out->globalSubrs)) {
+      !readCffIndex(bytes, topDicts.end, end, &strings) || !readCffIndex(bytes, strings.end, end, &out->globalSubrs) ||
+      !plainSubroutines(bytes, out->globalSubrs)) {
     return false;
   }
   FontDict top;
@@ -774,7 +808,10 @@ bool readCffTable(FontBytes& bytes, const uint32_t table, const uint32_t length,
       return false;
     }
   } else {
-    if (!readPrivate(bytes, *out, top, &out->localSubrs) || !encodingFits(bytes, *out, top.encoding)) return false;
+    if (!readPrivate(bytes, *out, top, &out->localSubrs) || !plainSubroutines(bytes, out->localSubrs) ||
+        !encodingFits(bytes, *out, top.encoding)) {
+      return false;
+    }
   }
   if (!charsetFits(bytes, *out, top.charset)) return false;
   out->charset = top.charset <= 2 ? top.charset : table + top.charset;

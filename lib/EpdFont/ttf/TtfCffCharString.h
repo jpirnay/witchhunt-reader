@@ -29,7 +29,8 @@ constexpr uint32_t kCffStorageSize = 32;   ///< CF2_STORAGE_SIZE: the transient 
 
 /// The outline runCharString() leaves, in the rasterizer's scratch arrays: points in integer font units (cf2 works in
 /// 16.16 at a scale of 1/64, and ps_builder_add_point keeps `>> 10` of each), tags FT_CURVE_TAG_ON (1) or
-/// FT_CURVE_TAG_CUBIC (2), and the last point of each contour.
+/// FT_CURVE_TAG_CUBIC (2), and the last point of each contour. The arrays must hold one point more than the outline
+/// keeps: a contour's closing point is added, and checked against maxPoints, before the builder removes it again.
 struct CffOutline {
   FT_Vector* points;
   unsigned char* tags;
@@ -79,8 +80,9 @@ struct CffDecoder {
   bool pathBegun;    ///< ps_builder: the builder's contour has its first point
 };
 
-/// What the scratch block reserves for a CffDecoder.
+/// What the scratch block reserves for a CffDecoder, in a region aligned to 8 bytes, which is all the decoder needs.
 constexpr uint32_t kCffDecoderBytes = (sizeof(CffDecoder) + 7) & ~uint32_t{7};
+static_assert(alignof(CffDecoder) <= 8, "the scratch block's regions are 8-aligned");
 
 /// Runs `glyph`'s charstring into `out`, using `decoder` for all its state. Ok; Malformed where FreeType fails the
 /// glyph (an invalid operator use, a stack overflow or underflow, a bad subroutine index or nesting past 16, return

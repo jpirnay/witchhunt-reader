@@ -247,10 +247,17 @@ TEST(TtfCff, SubroutinesAreTheItemsFreeTypeCalls) {
         EXPECT_EQ(theirs.data_offset + static_cast<FT_ULong>(pointers[i] - theirs.bytes), offset)
             << name << " " << which << " " << i;
         EXPECT_EQ(static_cast<FT_ULong>(pointers[i + 1] - pointers[i]), length) << name << " " << which << " " << i;
+        // The interpreter's own read of a subroutine, from its two offsets.
+        uint32_t subrOffset = 0;
+        uint32_t subrLength = 0;
+        ASSERT_TRUE(cffSubroutine(bytes, ours, i, &subrOffset, &subrLength)) << name << " " << which << " " << i;
+        EXPECT_EQ(offset, subrOffset) << name << " " << which << " " << i;
+        EXPECT_EQ(length, subrLength) << name << " " << which << " " << i;
       }
       uint32_t offset = 0;
       uint32_t length = 0;
       EXPECT_FALSE(cffIndexItem(bytes, ours, ours.count, &offset, &length)) << name << " " << which;
+      EXPECT_FALSE(cffSubroutine(bytes, ours, ours.count, &offset, &length)) << name << " " << which;
     };
     compare(ft.cff()->global_subrs_index, ft.cff()->global_subrs, face.cff.globalSubrs, "global");
     if (!face.cff.cid)
@@ -556,6 +563,74 @@ TEST(TtfCff, ACidKeyedFontHasOneTo256FontDicts) {
     Face face;
     EXPECT_EQ(fds >= 1 && fds <= 256 ? FaceStatus::Ok : FaceStatus::Malformed, parse(buildOtf(spec), &face)) << fds;
   }
+}
+
+namespace {
+
+// Offset `i` of `index` (4-byte offsets, as CffBuilder writes them) in `font`.
+void setIndexOffset(std::vector<uint8_t>& font, const CffIndex& index, const uint32_t i, const uint32_t value) {
+  ASSERT_EQ(4, index.offSize);
+  set32(font, index.start + 3 + i * 4, value);
+}
+
+}  // namespace
+
+TEST(TtfCff, SubroutineIndexesMustBePlain) {
+  // Ruling 8: the interpreter reads a subroutine from its two offsets, so every subroutine INDEX (global, the Private
+  // DICT's, every font DICT's) must start at offset 1 and never decrease. FreeType makes any INDEX so
+  // (cff_index_get_pointers: the first offset taken as 1, a running maximum); the engine refuses the font instead,
+  // which only a broken or hostile font notices. The case that matters: 65,535 subroutines with zero offsets after the
+  // first, each call of which cffIndexItem would answer by scanning them all.
+  std::vector<Bytes> many(65535);
+  CffSpec spec;
+  spec.fds = {cffFontDict("", many)};
+  spec.globalSubrs = {Bytes{11}, Bytes{11}, Bytes{11}};
+  const std::vector<uint8_t> intact = buildOtf(spec);
+  Face face;
+  const auto microseconds = [](const std::chrono::steady_clock::time_point since) {
+    return static_cast<long long>(
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - since).count());
+  };
+  auto started = std::chrono::steady_clock::now();
+  ASSERT_EQ(FaceStatus::Ok, parse(intact, &face));  // every offset read once
+  const long long plainUs = microseconds(started);
+  ASSERT_EQ(65535, face.cff.localSubrs.count);
+
+  std::vector<uint8_t> zeros = intact;
+  for (uint32_t i = 1; i < 65535; ++i) setIndexOffset(zeros, face.cff.localSubrs, i, 0);
+  started = std::chrono::steady_clock::now();
+  EXPECT_EQ(FaceStatus::Malformed, parse(zeros, &face));
+  std::printf("65,535 plain subroutine offsets read in %lld us; 65,535 with zeros refused in %lld us\n", plainUs,
+              microseconds(started));
+
+  ASSERT_EQ(FaceStatus::Ok, parse(intact, &face));
+  const CffIndex global = face.cff.globalSubrs;  // offsets 1, 2, 3, 4
+  std::vector<uint8_t> firstNotOne = intact;
+  setIndexOffset(firstNotOne, global, 0, 2);
+  EXPECT_EQ(FaceStatus::Malformed, parse(firstNotOne, &face));
+  std::vector<uint8_t> descending = intact;
+  setIndexOffset(descending, global, 2, 2);
+  setIndexOffset(descending, global, 1, 3);
+  EXPECT_EQ(FaceStatus::Malformed, parse(descending, &face));
+  std::vector<uint8_t> empties = intact;  // offsets 1, 1, 1, 4: two empty subroutines, then one of three bytes
+  setIndexOffset(empties, global, 1, 1);
+  setIndexOffset(empties, global, 2, 1);
+  EXPECT_EQ(FaceStatus::Ok, parse(empties, &face));
+
+  // A font DICT's local subroutines, in a CID-keyed font whose glyphs all use FD 1 (FD 0 has none).
+  CffSpec cid;
+  cid.cid = true;
+  cid.fds = {cffFontDict(""), cffFontDict("", {Bytes{11}, Bytes{11}})};
+  cid.fdSelect = {0, 1, 1, 1};  // format 0
+  const std::vector<uint8_t> cidIntact = buildOtf(cid);
+  FontBytes bytes(cidIntact.data(), static_cast<uint32_t>(cidIntact.size()));
+  ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face));
+  CffGlyphSource source;
+  ASSERT_EQ(Status::Ok, cffGlyphSource(bytes, face, 0, &source));
+  ASSERT_EQ(2, source.localSubrs.count);
+  std::vector<uint8_t> cidBroken = cidIntact;
+  setIndexOffset(cidBroken, source.localSubrs, 1, 0);
+  EXPECT_EQ(FaceStatus::Malformed, parse(cidBroken, &face));
 }
 
 TEST(TtfCff, StandardCharactersAreFoundThroughTheCharset) {

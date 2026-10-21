@@ -781,36 +781,68 @@ namespace {
 
 struct SweepCounts {
   uint32_t copies = 0;
-  uint32_t drawn = 0;        ///< glyphs both drew, identically
-  uint32_t refused = 0;      ///< glyphs FreeType failed, the engine Malformed or Unsupported
-  uint32_t unsupported = 0;  ///< glyphs FreeType drew, the engine Unsupported (random, operator or point limits)
+  uint32_t drawn = 0;               ///< glyphs both drew, identically
+  uint32_t refused = 0;             ///< glyphs FreeType failed, the engine Malformed or Unsupported
+  uint32_t unsupported = 0;         ///< glyphs FreeType drew, the engine Unsupported (random, operator or point limits)
+  uint32_t refusedAtLoad = 0;       ///< copies parseFace refused (a subroutine INDEX's header was hit)
+  uint32_t refusedAtLoadDrawn = 0;  ///< ... of which FreeType drew glyphs
+  uint32_t refusedAtLoadGlyphs = 0;  ///< ... the glyphs FreeType drew in them
+  uint32_t notPlain = 0;             ///< copies refused only for an INDEX that reads but is not plain (Ruling 8)
+  uint32_t notPlainDrawn = 0;        ///< ... of which FreeType drew glyphs: Ruling 8's exception to FreeType parity
+  uint32_t notPlainGlyphs = 0;       ///< ... the glyphs FreeType drew in them
+  uint32_t freeTypeRefusedFace = 0;  ///< copies FreeType could not open but the engine read
 };
 
-// Bytes of `intact`'s charstrings (every `step`th) and, when `subroutines`, of its subroutines, each set to values that
-// read as operators or numbers, and the glyphs that may run them drawn by both: the glyph owning the byte and
-// `seacGlyph` (which runs others as components), or every glyph for a subroutine's byte. An outline the engine draws is
-// FreeType's; a glyph FreeType fails, the engine refuses.
+// Whether the INDEX at `start` reads (readCffIndex) but is not plain: its first offset not 1, or one below the one
+// before.
+bool readsButIsNotPlain(const std::vector<uint8_t>& font, const Face& face, const uint32_t start) {
+  FontBytes bytes(font.data(), static_cast<uint32_t>(font.size()));
+  CffIndex index;
+  if (!readCffIndex(bytes, start, face.cff.table + face.cff.tableLength, &index) || index.count == 0) return false;
+  const auto offset = [&](const uint32_t i) {
+    uint32_t value = 0;
+    for (uint32_t b = 0; b < index.offSize; ++b) value = value << 8 | font[index.start + 3 + i * index.offSize + b];
+    return value;
+  };
+  if (offset(0) != 1) return true;
+  for (uint32_t i = 1; i <= index.count; ++i) {
+    if (offset(i) < offset(i - 1)) return true;
+  }
+  return false;
+}
+
+// Bytes of `intact`'s charstrings (every `step`th) and, when `subroutines`, of its subroutine INDEXes (their count,
+// offset size and offsets, and their data), each set to values that read as operators or numbers, and the glyphs that
+// may run them drawn by both: the glyph owning the byte and `seacGlyph` (which runs others as components), or every
+// glyph for a subroutine's byte. An outline the engine draws is FreeType's; a glyph FreeType fails, the engine refuses.
+// Only a subroutine INDEX's header may make the engine refuse the whole face (Ruling 8: an INDEX that is not plain);
+// FreeType reads such an INDEX all the same, and the glyphs it then draws are counted.
 void sweepCharStrings(const std::vector<uint8_t>& intact, const std::string& name, const uint32_t step,
                       const bool subroutines, const int32_t seacGlyph, SweepCounts* counts) {
   static const uint8_t kValues[] = {0, 10, 11, 12, 14, 19, 28, 29, 255};
   Engine original(intact);
   ASSERT_TRUE(original.ok()) << name;
   const Face& face = original.face();
+  constexpr int32_t kSubroutineData = -1;
+  constexpr int32_t kSubroutineHeader = -2;
   struct Range {
     uint32_t from;
     uint32_t to;
-    int32_t glyph;  ///< -1: a subroutine
+    int32_t glyph;        ///< the charstring's glyph, or kSubroutineData, kSubroutineHeader
+    uint32_t indexStart;  ///< a subroutine INDEX's start
   };
   std::vector<Range> ranges;
   for (uint32_t g = 0; g < face.numGlyphs; ++g) {
     uint32_t offset = 0;
     uint32_t length = 0;
     ASSERT_TRUE(cffIndexItem(original.bytes(), face.cff.charStrings, g, &offset, &length));
-    ranges.push_back({offset, offset + length, static_cast<int32_t>(g)});
+    ranges.push_back({offset, offset + length, static_cast<int32_t>(g), 0});
   }
   if (subroutines) {
-    ranges.push_back({face.cff.globalSubrs.dataStart, face.cff.globalSubrs.end, -1});
-    ranges.push_back({face.cff.localSubrs.dataStart, face.cff.localSubrs.end, -1});
+    for (const CffIndex& index : {face.cff.globalSubrs, face.cff.localSubrs}) {
+      ranges.push_back({index.start, index.dataStart, kSubroutineHeader, index.start});
+      ranges.push_back({index.dataStart, index.end, kSubroutineData, index.start});
+    }
   }
   for (const Range& range : ranges) {
     for (uint32_t at = range.from; at < range.to; at += step) {
@@ -819,26 +851,42 @@ void sweepCharStrings(const std::vector<uint8_t>& intact, const std::string& nam
         std::vector<uint8_t> copy = intact;
         copy[at] = value;
         ++counts->copies;
+        const std::string where = name + " byte " + std::to_string(at) + " = " + std::to_string(value);
         Engine engine(copy);
-        ASSERT_TRUE(engine.ok());
         const Oracle oracle(copy);
-        ASSERT_TRUE(oracle.ok());
+        if (!engine.ok()) {
+          ASSERT_EQ(kSubroutineHeader, range.glyph) << where << ": the face was refused";
+          ++counts->refusedAtLoad;
+          uint32_t drawn = 0;
+          for (uint32_t g = 0; oracle.ok() && g < face.numGlyphs; ++g) drawn += oracle.glyph(g).drawn ? 1 : 0;
+          counts->refusedAtLoadDrawn += drawn > 0 ? 1 : 0;
+          counts->refusedAtLoadGlyphs += drawn;
+          if (readsButIsNotPlain(copy, face, range.indexStart)) {
+            ++counts->notPlain;
+            counts->notPlainDrawn += drawn > 0 ? 1 : 0;
+            counts->notPlainGlyphs += drawn;
+          }
+          continue;
+        }
+        if (!oracle.ok()) {
+          ++counts->freeTypeRefusedFace;
+          continue;
+        }
         for (uint32_t g = 0; g < face.numGlyphs; ++g) {
           if (range.glyph >= 0 && static_cast<int32_t>(g) != range.glyph && static_cast<int32_t>(g) != seacGlyph) {
             continue;
           }
-          const std::string where =
-              name + " byte " + std::to_string(at) + " = " + std::to_string(value) + ", glyph " + std::to_string(g);
+          const std::string glyph = where + ", glyph " + std::to_string(g);
           const Shape theirs = oracle.glyph(static_cast<uint16_t>(g));
           const Shape ours = engine.glyph(static_cast<uint16_t>(g));
           if (!theirs.drawn) {
             ASSERT_TRUE(ours.status == Status::Malformed || ours.status == Status::Unsupported)
-                << where << ": " << statusName(ours.status) << " " << ours;
+                << glyph << ": " << statusName(ours.status) << " " << ours;
             ++counts->refused;
           } else if (ours.status == Status::Unsupported) {
             ++counts->unsupported;
           } else {
-            ASSERT_EQ(theirs, ours) << where;
+            ASSERT_EQ(theirs, ours) << glyph;
             ++counts->drawn;
           }
         }
@@ -850,9 +898,10 @@ void sweepCharStrings(const std::vector<uint8_t>& intact, const std::string& nam
 }  // namespace
 
 TEST(TtfCffCharString, ACorruptedCharStringDrawsAsFreeTypeOrNotAtAll) {
-  // Review focus 1, against the oracle: every byte of CffOperators' charstrings and subroutines, and every 7th of
-  // NotoSansJP-Cff's charstrings, set to operator bytes. No read outside the font (AddressSanitizer on CI, UBSan
-  // here), no hang, and no outline FreeType would not draw.
+  // Review focus 1, against the oracle: every byte of CffOperators' charstrings and of its subroutine INDEXes (header
+  // and data), and every 7th of NotoSansJP-Cff's charstrings, set to operator bytes. No read outside the font
+  // (AddressSanitizer on CI, UBSan here), no hang, and no outline FreeType would not draw; a face is refused only for
+  // a subroutine INDEX that is not plain (Ruling 8).
   const auto started = std::chrono::steady_clock::now();
   SweepCounts counts;
   const std::vector<uint8_t> operators = readFixture("CffOperators.otf");
@@ -864,10 +913,15 @@ TEST(TtfCffCharString, ACorruptedCharStringDrawsAsFreeTypeOrNotAtAll) {
       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
   std::printf(
       "charstring sweep: %u copies; %u glyphs drawn as FreeType, %u refused as FreeType, %u Unsupported "
-      "(FreeType drew), %lld ms\n",
-      counts.copies, counts.drawn, counts.refused, counts.unsupported, static_cast<long long>(ms));
+      "(FreeType drew); %u copies refused at load, %u of them with %u glyphs FreeType drew; of those refused, "
+      "%u for a subroutine INDEX not plain alone, %u of them with %u glyphs FreeType drew; %u copies FreeType "
+      "could not open; %lld ms\n",
+      counts.copies, counts.drawn, counts.refused, counts.unsupported, counts.refusedAtLoad, counts.refusedAtLoadDrawn,
+      counts.refusedAtLoadGlyphs, counts.notPlain, counts.notPlainDrawn, counts.notPlainGlyphs,
+      counts.freeTypeRefusedFace, static_cast<long long>(ms));
   EXPECT_GT(counts.drawn, 0u);
   EXPECT_GT(counts.refused, 0u);
+  EXPECT_GT(counts.notPlain, 0u);
 }
 
 // --- Limits ---

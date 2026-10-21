@@ -699,7 +699,9 @@ void Interpreter::hintMask(const bool counter) {
 }
 
 // callsubr and callgsubr: 16 levels below the glyph's charstring (cf2_arrstack_getPointer refuses the 17th), and a
-// subroutine number that, biased, is in the INDEX.
+// subroutine number that, biased, is in the INDEX. The subroutine is found from its two offsets (cffSubroutine), a
+// constant cost per call: the face's subroutine INDEXes are plain (readCffTable), so this is FreeType's own table
+// (cff_index_get_pointers), and the operator budget bounds the reads.
 void Interpreter::callSubr(const CffIndex& subrs, const uint32_t bias) {
   if (d_.depth >= kCffMaxSubrDepth) {
     fail(Status::Malformed);
@@ -710,7 +712,7 @@ void Interpreter::callSubr(const CffIndex& subrs, const uint32_t bias) {
   const uint32_t index = static_cast<uint32_t>(number + static_cast<int32_t>(bias));
   uint32_t offset = 0;
   uint32_t length = 0;
-  if (index >= subrs.count || !cffIndexItem(bytes_, subrs, index, &offset, &length)) {
+  if (!cffSubroutine(bytes_, subrs, index, &offset, &length)) {
     fail(Status::Malformed);
     return;
   }
