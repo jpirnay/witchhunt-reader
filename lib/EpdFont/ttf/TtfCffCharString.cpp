@@ -841,7 +841,17 @@ void Interpreter::startComponent(const int32_t code, const int32_t x, const int3
 // line of no length is still passed on. Device space is 16.16 at 1/64: FT_MulFix(x, 0x400) (cf2_glyphpath_hintPoint
 // with outerTransform the identity and no translation).
 
-Point toDevice(const Point p) { return {mulFix(p.x, kUnitScale), mulFix(p.y, kUnitScale)}; }
+// FT_MulFix(v, 0x400) without 64-bit arithmetic: with v = 64q + r, v * 0x400 = 0x10000q + 0x400r, so the product
+// rounded is q, plus 1 when 0x400r + 0x8000 - (v < 0) reaches 0x10000. Equal for every 32-bit v (checked exhaustively).
+constexpr int32_t toDeviceUnit(const int32_t v) { return (v >> 6) + ((v & 63) >= 32 + (v < 0 ? 1 : 0) ? 1 : 0); }
+static_assert(kUnitScale == 0x400, "toDeviceUnit() is FT_MulFix by 1/64");
+static_assert(toDeviceUnit(-32) == mulFix(-32, kUnitScale) && toDeviceUnit(-33) == mulFix(-33, kUnitScale) &&
+                  toDeviceUnit(32) == mulFix(32, kUnitScale) && toDeviceUnit(31) == mulFix(31, kUnitScale) &&
+                  toDeviceUnit(INT32_MIN) == mulFix(INT32_MIN, kUnitScale) &&
+                  toDeviceUnit(INT32_MAX) == mulFix(INT32_MAX, kUnitScale),
+              "toDeviceUnit() is FT_MulFix by 1/64");
+
+Point toDevice(const Point p) { return {toDeviceUnit(p.x), toDeviceUnit(p.y)}; }
 
 // cf2_hintmap_build, for what an unhinted outline sees of it: a map without a mask makes the mask of every stem
 // (cf2_hintmask_setAll), which more than 96 stems fail; then the map is valid and the mask no longer new.
