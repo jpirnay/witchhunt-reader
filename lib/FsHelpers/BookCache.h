@@ -20,8 +20,12 @@ enum class Keep : uint8_t {
   ReadingState,  // the isReadingState() files stay; the next open rebuilds everything else
 };
 
-// The reader's own files: where the book was left (progress.bin) and its bookmarks
-// (bookmarks.bin).
+// The reader's own files: where the book was left (progress.bin) and the link Back stack that
+// leads back from there (linkstack.bin), its bookmarks (bookmarks.bin), and which document id the
+// KOReader sync server keeps it under (koreader_syncmethod.txt), learned from the server. None of
+// them needs what a clear removes. A position and a bookmark name a page of the book's layout, and
+// the next open lays the book out again the same way from the same book and settings; a position
+// also carries its page's paragraph, which finds it in a layout that did change.
 bool isReadingState(std::string_view name);
 
 // Covers and thumbnails. They are derived from the book, but slow to make again (an inflate and an

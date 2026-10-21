@@ -8,7 +8,12 @@
 
 namespace BookCache {
 
-bool isReadingState(const std::string_view name) { return name == "progress.bin" || name == "bookmarks.bin"; }
+// Not kosync_push.bin: our last push, kept only to spare the sync screen a chapter inflate, and it
+// names its place by page number in the layout that is being cleared.
+bool isReadingState(const std::string_view name) {
+  return name == "progress.bin" || name == "linkstack.bin" || name == "bookmarks.bin" ||
+         name == "koreader_syncmethod.txt";
+}
 
 bool isCoverImage(const std::string_view name) {
   // cover.img is the cover image as the book stores it, before it is converted to a BMP.

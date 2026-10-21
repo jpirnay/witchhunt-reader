@@ -43,8 +43,12 @@ class BookCacheTest : public ::testing::Test {
     file("img/0.1bit.pxc");
     file("thumb_400.bmp");
     file("cover.img");
+    file("kosync_push.bin");
+    file("koreader_docid.txt");
     file("progress.bin", "position");
+    file("linkstack.bin", "back stack");
     file("bookmarks.bin", "marks");
+    file("koreader_syncmethod.txt", "1");
   }
 
   std::string dir_;
@@ -61,9 +65,11 @@ TEST_F(BookCacheTest, KeepReadingStateLeavesOnlyTheReadersFiles) {
   EXPECT_TRUE(BookCache::clear(dir_, BookCache::Keep::ReadingState));
 
   EXPECT_EQ("position", read("progress.bin"));
+  EXPECT_EQ("back stack", read("linkstack.bin"));
   EXPECT_EQ("marks", read("bookmarks.bin"));
-  for (const char* derived :
-       {"book.bin", "css_rules.cache", "fingerprint.bin", "pages.bin", "spines", "img", "thumb_400.bmp", "cover.img"}) {
+  EXPECT_EQ("1", read("koreader_syncmethod.txt"));
+  for (const char* derived : {"book.bin", "css_rules.cache", "fingerprint.bin", "pages.bin", "spines", "img",
+                              "thumb_400.bmp", "cover.img", "kosync_push.bin", "koreader_docid.txt"}) {
     EXPECT_FALSE(has(derived)) << derived << " is derived from the book and must go";
   }
 }
@@ -75,7 +81,9 @@ TEST_F(BookCacheTest, KeepCoversLeavesTheImagesAndNothingElse) {
   EXPECT_TRUE(has("thumb_400.bmp"));
   EXPECT_TRUE(has("cover.img"));
   EXPECT_FALSE(has("progress.bin"));
+  EXPECT_FALSE(has("linkstack.bin"));
   EXPECT_FALSE(has("bookmarks.bin"));
+  EXPECT_FALSE(has("koreader_syncmethod.txt"));
   EXPECT_FALSE(has("spines"));
 }
 

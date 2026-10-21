@@ -864,7 +864,7 @@ curl -X POST -H 'Content-Type: application/epub+zip' --data-binary @optimized.ep
 | Parameter | Description |
 | --------- | ----------- |
 | `path`    | An existing EPUB the file endpoints may write (the same check as `/upload`'s target) |
-| `keep`    | `1` when the new copy has the same chapter list: the reading position and bookmarks stay, and only the laid-out chapters, indexes and thumbnails are dropped. Without it the book starts afresh, as after any re-upload, and its entries leave the bookmark index. |
+| `keep`    | `1` when the new copy has the same chapter list: the reading position, the link Back stack, the bookmarks and the learned KOReader sync method stay, and only the laid-out chapters, indexes and thumbnails are dropped. Without it the book starts afresh, as after any re-upload, and its entries leave the bookmark index. |
 
 The body is written to `<path>.new` and swapped in only once complete. The original is kept as
 `<path>.bak`; if a `.bak` already exists, it holds the older original and stays, and the current
