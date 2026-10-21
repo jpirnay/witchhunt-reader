@@ -654,7 +654,8 @@ class EpubReaderActivity final : public Activity {
   bool usePreRenderedBuffer = false;
   // Progress save is posted by render() and consumed by loop() to keep SD I/O off the render task.
   // render() writes spineIndex/page/pageCount then sets pending with release semantics so loop()
-  // sees a coherent snapshot when it observes pending==true via acquire.
+  // sees a coherent snapshot when it observes pending==true via acquire. An exit that skips loop() writes it instead
+  // (writeOwedPageSave); each consumer takes the flag with an exchange, so one write per post.
   struct PendingProgressSave {
     std::atomic<bool> pending{false};
     int spineIndex = 0;
@@ -1051,10 +1052,10 @@ class EpubReaderActivity final : public Activity {
   void serviceOwedPeriodicRefresh();
   bool maybeRestartForFragmentedHeap(uint32_t freeHeap, uint32_t contigHeap);
   // The page save render() posted and loop() has not written yet, written now unless the book is finished: for
-  // onExit() when it does not save the live position.
+  // onExit() and a restart to the reader when they do not save the live position.
   void writeOwedPageSave();
-  // What a restart to the reader must save first, since it skips onExit: the position, when it is authoritative,
-  // and the link back stack.
+  // What a restart to the reader must save first, since it skips onExit: the position, when it is authoritative (else
+  // a page save still owed), and the link back stack.
   void saveStateForRestart();
   // A layout change mid-session (a per-book override, the memory ladder's fewer families): the section goes, and
   // the next render builds it again at the paragraph (or page) on screen.
