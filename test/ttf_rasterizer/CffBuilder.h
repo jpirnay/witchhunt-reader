@@ -46,15 +46,37 @@ inline void putCffOp(Bytes& out, const uint16_t op) {
   out.push_back(static_cast<uint8_t>(op));
 }
 
-/// A FontMatrix entry from six space-separated numbers: integers as integers, anything else as a real.
+/// An integer in the shortest DICT form, as font tools write one: one byte for -107..107, two for up to 1131, three
+/// (operator 28) for 16 bits, else five (operator 29).
+inline void putCffCompactInt(Bytes& out, const int32_t value) {
+  if (value >= -107 && value <= 107) {
+    out.push_back(static_cast<uint8_t>(value + 139));
+  } else if (value >= 108 && value <= 1131) {
+    out.push_back(static_cast<uint8_t>(247 + ((value - 108) >> 8)));
+    out.push_back(static_cast<uint8_t>((value - 108) & 0xFF));
+  } else if (value >= -1131 && value <= -108) {
+    out.push_back(static_cast<uint8_t>(251 + ((-value - 108) >> 8)));
+    out.push_back(static_cast<uint8_t>((-value - 108) & 0xFF));
+  } else if (value >= -32768 && value <= 32767) {
+    out.push_back(28);
+    put16(out, static_cast<uint32_t>(value) & 0xFFFF);
+  } else {
+    putCffInt(out, value);
+  }
+}
+
+/// A FontMatrix entry from six space-separated numbers: integers in their shortest form ("#-10" as a five-byte
+/// integer), anything else as a real.
 inline void putCffMatrix(Bytes& out, const std::string& numbers) {
   size_t at = 0;
   while (at < numbers.size()) {
     size_t end = numbers.find(' ', at);
     if (end == std::string::npos) end = numbers.size();
     const std::string number = numbers.substr(at, end - at);
-    if (number.find_first_not_of("-0123456789") == std::string::npos) {
-      putCffInt(out, std::stoi(number));
+    if (number[0] == '#') {
+      putCffInt(out, std::stoi(number.substr(1)));
+    } else if (number.find_first_not_of("-0123456789") == std::string::npos) {
+      putCffCompactInt(out, std::stoi(number));
     } else {
       putCffReal(out, number);
     }
