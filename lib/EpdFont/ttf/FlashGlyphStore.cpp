@@ -263,9 +263,10 @@ FlashGlyphStore::OpenResult FlashGlyphStore::open(const uint8_t identity[kIdenti
           static_cast<unsigned>(g.logSize), static_cast<unsigned>(nextEpoch_), static_cast<unsigned>(usedSlots_),
           static_cast<unsigned>(g.indexSlots), static_cast<unsigned>(liveSlots_), static_cast<unsigned>(usedPairs_),
           journal_.done ? "" : ", a rebuild to redo", wipePending_ ? ", wipe pending" : "");
-  // A ring already near full keeps its counts from the start, so the first draws count; open() runs at a set's load,
-  // not inside a draw. A pending wipe would drop them.
-  if (!wipePending_ && countsWanted()) keepCounts();
+  // A ring already near full wants its counts from the start, so the first draws count. open() only marks them due:
+  // the font set takes them (keepCountsIfDue()) once its own blocks are allocated, so they cannot starve those.
+  // A pending wipe would drop them.
+  if (!wipePending_ && countsWanted()) countsDue_ = true;
   return OpenResult::Ready;
 }
 

@@ -522,7 +522,7 @@ void buildRing(const Layout& layout, Ring& ring) {
 void reclaimSession(FlashGlyphStore& store, const Ring& ring, const ReclaimCase& what) {
   ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
   ASSERT_EQ(Commit::Stored, commitRecords(store, ring.filled, ring.before, kRingWidth, kRingHeight));
-  ASSERT_TRUE(store.countsKept());
+  ASSERT_TRUE(store.keepCountsIfDue());
   ASSERT_EQ(1u, store.freeSegments());
   for (const uint32_t n : what.drawn) draw(store, n);
 }
@@ -616,6 +616,7 @@ SimNorFlash crowdedIndex(uint32_t& stored) {
 // drawn, 0 to 3 times each, so the rebuild carries counts.
 void rebuildSession(FlashGlyphStore& store, const uint32_t stored) {
   ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  store.keepCountsIfDue();  // the font set does at the end of its load
   ASSERT_EQ(Commit::Full, commitRecords(store, stored, stored + 1, kRingWidth, kRingHeight));
   ASSERT_TRUE(store.needsRoom());
   for (uint32_t n = 0; n < stored; ++n) {

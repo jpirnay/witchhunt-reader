@@ -145,16 +145,17 @@ class FlashGlyphStore {
   void noteDrawn(const EpdGlyph* glyph) const;
   /// Counts are wanted once room will soon have to be made: the live segments at kCountsAtPercent of the log, or the
   /// free ones within one of kFreeSegmentsTarget. Their block (indexSlots / 4 bytes) is held for the session, so it is
-  /// taken only at a safe point: by open() of a ring already that full, by keepCountsIfDue() once a commit made them
+  /// taken only at a safe point: by keepCountsIfDue() once open() of a ring already that full, or a commit, made them
   /// due, or by markFull(). Kept until close() or wipe(). Refused memory is logged once and not asked for again until
   /// open().
   bool countsKept() const { return useCounts_ != nullptr; }
-  /// A commit left the ring as full as counts are wanted at, and they are not kept yet. A commit runs inside a page
-  /// draw or a section build, where the reader may have released memory it takes back after (the X3's secondary
-  /// framebuffer, for a build): a session-long block taken there could land in that region and pin it.
+  /// An open() or a commit left the ring as full as counts are wanted at, and they are not kept yet. A commit runs
+  /// inside a page draw or a section build, where the reader may have released memory it takes back after (the X3's
+  /// secondary framebuffer, for a build): a session-long block taken there could land in that region and pin it.
   bool countsDue() const { return countsDue_; }
-  /// Takes the counts' memory when countsDue(). Call it where the heap is settled: the font set's makeRoom(), at an
-  /// idle tick or at a chapter or book open before a section build releases anything. True when counts are kept.
+  /// Takes the counts' memory when countsDue(). Call it where the heap is settled: the end of a font set's load (after
+  /// its own blocks), the font set's makeRoom(), at an idle tick or at a chapter or book open before a section build
+  /// releases anything. True when counts are kept.
   bool keepCountsIfDue();
   /// The count (0 to 3) of the slot find() answers with for `key`; 0 when counts are not kept or `key` is not stored.
   uint8_t useCount(uint32_t key) const;

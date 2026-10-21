@@ -201,12 +201,23 @@ TEST_F(GlyphStoreRoom, ACommitThatNearsAFullRingMakesTheCountsDueWithoutTakingTh
   EXPECT_EQ(1u, store.drawsCounted());
 }
 
-TEST_F(GlyphStoreRoom, AnOpenOfARingNearFullKeepsTheCountsFromTheStart) {
+TEST_F(GlyphStoreRoom, AnOpenOfARingNearFullMakesTheCountsDueWithoutTakingThem) {
   fillTo(kFreeSegmentsTarget + 3);
   ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
   EXPECT_FALSE(store.countsKept());  // room to spare: none wanted yet
+  EXPECT_FALSE(store.countsDue());
   fillTo(kFreeSegmentsTarget + 1);
-  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  const uint32_t refusedBefore = refusedArrays;
+  {
+    // The font set allocates its own blocks after open(): the open asks for no memory.
+    const RefuseArrays refuse;
+    ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+    EXPECT_EQ(refusedBefore, refusedArrays);
+  }
+  EXPECT_FALSE(store.countsKept());
+  EXPECT_TRUE(store.countsDue());
+  // The set takes them once its blocks are in.
+  EXPECT_TRUE(store.keepCountsIfDue());
   EXPECT_TRUE(store.countsKept());
   EXPECT_FALSE(store.countsDue());
   // A glyph drawn right after the open is counted.
@@ -232,7 +243,7 @@ TEST_F(GlyphStoreRoom, CountsRefusedAreNotAskedForAgainUntilTheNextOpen) {
     EXPECT_EQ(refusedBefore + 1, refusedArrays);
   }
   ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
-  EXPECT_TRUE(store.countsKept());
+  EXPECT_TRUE(store.keepCountsIfDue());
 }
 
 TEST_F(GlyphStoreRoom, MarkFullKeepsTheCountsAtOnce) {
@@ -284,7 +295,7 @@ TEST_F(GlyphStoreRoom, CountsStartAtZeroAfterAReopen) {
   store.noteDrawn(glyphOf(kFirst));
   ASSERT_EQ(1u, store.useCount(key));
   ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
-  EXPECT_TRUE(store.countsKept());  // the ring is still near full
+  EXPECT_TRUE(store.keepCountsIfDue());  // the ring is still near full
   EXPECT_EQ(0u, store.useCount(key));
   EXPECT_EQ(0u, store.drawsCounted());
 }

@@ -173,6 +173,9 @@ bool TtfFontSet::load(const Files* families, const uint8_t count, const uint8_t 
             fonts_[f]->styles_[0].kerning.legacy() ? " (legacy kern table)" : "",
             fonts_[f]->styles_[0].ligatures.count);
   }
+  // Last: the counts' session-long block must not take the heap the set's own blocks need (a reload after an image
+  // decode runs with the heap at its shortest). A refusal only leaves them unkept.
+  store_.keepCountsIfDue();
   return true;
 }
 

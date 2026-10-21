@@ -618,7 +618,7 @@ TEST_F(TtfFontTest, ASetLoadedOverAStoreNearFullCountsItsFirstDraws) {
     fillToTwoSegments(first, cp);
     ASSERT_EQ(3u, first.set->stats().freeSegments);
   }
-  // The next boot opens the store near full: its counts are kept from the load on.
+  // The next boot opens the store near full: the load ends by keeping the counts, so they are kept when it returns.
   const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
   ASSERT_NE(nullptr, font);
   const uint32_t renders = font->renders();
