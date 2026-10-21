@@ -102,6 +102,19 @@ Next: one session per touch board against the tables in [Touch Gestures](../touc
 and the on-device Gesture overview, built with `BUTTON_TRACE`; on the X4 Pro also read the
 `btnSampler stack high-water` line.
 
+Device checks still owed for the 2026-10-21 PRs (all X3-only):
+
+- T5S3: cache clear (#538, touch answers and label fit in long languages), auto-pull open (#539),
+  reader menu and page saves (#540), heap-restart latch (#541), header layout (#543, Lyra and the
+  gesture overview's subtitle), and the OPDS temp-cover cleanup (#534, step 7).
+- X3: the Home open that builds a chapter on the book-open HALF (#535), the Library path and Settings
+  Keep/Reset of the cache clear (#538), the held-key steps of the password editor (#537).
+- X4: Base's portrait side-box gap and the X4 keyboard in landscape (#543).
+
+Test API gaps that block some of these: no level-holding button command (a `CMD:BTN:<key>:HOLD:<ms>`
+that keeps the key down, for the keyboard's held Up, Right and DEL), and no `CMD:HEAP:REFUSE` field
+that refuses the secondary-buffer realloc (it would make the fragmented-heap restart reachable).
+
 ## Localized tap flash
 
 Open: screens on the recorder path get no tap acknowledgement except the selection repaint
