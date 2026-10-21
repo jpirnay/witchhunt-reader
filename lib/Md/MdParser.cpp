@@ -30,6 +30,26 @@ static std::string trimLeft(const std::string& s) {
   return s.substr(i);
 }
 
+// Tabs to spaces at TAB_WIDTH stops: a font draws a tab as a missing glyph, and a code
+// line's indentation is its structure.
+static std::string expandTabs(const std::string& line) {
+  if (line.find('\t') == std::string::npos) return line;
+  std::string out;
+  out.reserve(line.size() + 3 * TAB_WIDTH);
+  size_t column = 0;
+  for (const char c : line) {
+    if (c == '\t') {
+      const size_t spaces = TAB_WIDTH - column % TAB_WIDTH;
+      out.append(spaces, ' ');
+      column += spaces;
+    } else {
+      out += c;
+      if ((static_cast<unsigned char>(c) & 0xC0) != 0x80) column++;  // one column per codepoint
+    }
+  }
+  return out;
+}
+
 static uint8_t parseListIndentLevel(size_t leadingSpaces) {
   // Top-level list markers may be preceded by up to 3 spaces.
   // Nested list items require at least 4 spaces before the marker.
@@ -337,7 +357,7 @@ ParsedLine parseLine(const std::string& rawLine, bool inCodeBlock) {
       return result;
     }
     result.blockType = BlockType::CodeBlock;
-    result.spans.push_back({rawLine, EpdFontFamily::REGULAR});
+    result.spans.push_back({expandTabs(rawLine), EpdFontFamily::REGULAR});
     return result;
   }
 

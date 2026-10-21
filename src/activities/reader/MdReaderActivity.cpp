@@ -23,7 +23,7 @@ namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;
 constexpr size_t MAX_LINE_LENGTH = 64 * 1024;
 constexpr uint32_t CACHE_MAGIC = 0x4D4B4449;  // "MKDI"
-constexpr uint8_t CACHE_VERSION = 9;          // Bumped: a word that does not fit moves to the next line
+constexpr uint8_t CACHE_VERSION = 10;         // Bumped: tabs in code blocks expand to spaces
 
 static std::string flattenHeadingText(const MdParser::ParsedLine& parsed) {
   std::string result;

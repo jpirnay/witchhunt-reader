@@ -121,6 +121,14 @@ TEST(MdParser, TableRowSplitsCellsWithInlineStyles) {
   ASSERT_TRUE(parsed.tableCells[2][0].code);
 }
 
+TEST(MdParser, CodeBlockTabsExpandToFourColumnStops) {
+  ASSERT_EQ(MdParser::parseLine("\tfoo\tbar", true).spans[0].text, "    foo bar");
+  ASSERT_EQ(MdParser::parseLine("ab\tc", true).spans[0].text, "ab  c");
+  ASSERT_EQ(MdParser::parseLine("\xc3\xa4\tx", true).spans[0].text,
+            "\xc3\xa4   x");  // a multi-byte codepoint is one column
+  ASSERT_EQ(MdParser::parseLine("no tabs", true).spans[0].text, "no tabs");
+}
+
 TEST(MdParser, TableSeparatorDetection) {
   ASSERT_TRUE(MdParser::isTableSeparator("| --- | --- |"));
   ASSERT_TRUE(MdParser::isTableSeparator("| :--- | :---: | ---: |"));
