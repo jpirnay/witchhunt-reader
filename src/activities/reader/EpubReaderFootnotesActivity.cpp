@@ -7,6 +7,7 @@
 
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/themes/HeaderLayout.h"
 #include "components/themes/ListTouchBand.h"
 #include "fontIds.h"
 
@@ -92,33 +93,37 @@ void EpubReaderFootnotesActivity::advanceSelection(int delta) {
 void EpubReaderFootnotesActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  renderer.drawCenteredText(UI_12_FONT_ID, 15, tr(STR_FOOTNOTES), true, EpdFontFamily::BOLD);
+  // Opened over the reader, so in the book's orientation: the title and the rows are measured from
+  // the content area's top, which the hint strip holds in PortraitInverted, and the rows from the
+  // title's line, which grows with the UI font size.
+  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+  renderer.drawCenteredText(UI_12_FONT_ID, HeaderLayout::overlayTitleY(contentRect), tr(STR_FOOTNOTES), true,
+                            EpdFontFamily::BOLD);
+  const Rect body = HeaderLayout::overlayBody(contentRect, renderer.getLineHeight(UI_12_FONT_ID));
 
   if (order.empty()) {
-    renderer.drawCenteredText(UI_10_FONT_ID, 90, tr(STR_NO_FOOTNOTES));
+    renderer.drawCenteredText(UI_10_FONT_ID, body.y + 40, tr(STR_NO_FOOTNOTES));
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer();
     return;
   }
 
-  constexpr int startY = 50;
   constexpr int lineHeight = 36;
-  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
   constexpr int marginLeft = 20;
 
-  const int visibleCount = std::max(1, (contentRect.height - startY) / lineHeight);
+  const int visibleCount = std::max(1, body.height / lineHeight);
   if (selectedIndex < scrollOffset) scrollOffset = selectedIndex;
   if (selectedIndex >= scrollOffset + visibleCount) scrollOffset = selectedIndex - visibleCount + 1;
 
   // Rows published for touch. This list SCROLLS rather than pages, so the top row is
   // scrollOffset, and its fill sits exactly at the row y (no -2 nudge, unlike the chapter
   // selectors) -- so the band top is that same y.
-  ListTouchBand::recordUniformRows(contentRect.x, contentRect.width, contentRect.y + startY, lineHeight, scrollOffset,
+  ListTouchBand::recordUniformRows(contentRect.x, contentRect.width, body.y, lineHeight, scrollOffset,
                                    std::min(visibleCount, static_cast<int>(order.size()) - scrollOffset));
 
   for (int i = scrollOffset; i < static_cast<int>(order.size()) && i < scrollOffset + visibleCount; i++) {
-    const int y = contentRect.y + startY + (i - scrollOffset) * lineHeight;
+    const int y = body.y + (i - scrollOffset) * lineHeight;
     const bool isSelected = (i == selectedIndex);
     const size_t entry = order[i];
 

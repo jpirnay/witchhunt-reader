@@ -97,6 +97,12 @@ class CardLayout {
   // skip a later section that wouldn't fit).
   int cursorY() const { return y_; }
 
+  // The height card() gives a card whose body draws `bodyHeight`: for a caller that has to know
+  // before drawing whether a card still fits.
+  int cardHeight(bool titled, int bodyHeight) const {
+    return cfg_.innerPadY * 2 + (titled ? titleH_ + cfg_.titleGap : 0) + bodyHeight;
+  }
+
  private:
   GfxRenderer& renderer_;
   Rect contentRect_;

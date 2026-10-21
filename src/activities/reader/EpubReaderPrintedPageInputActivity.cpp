@@ -8,6 +8,7 @@
 #include "ButtonEventManager.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
+#include "components/themes/HeaderLayout.h"
 #include "fontIds.h"
 
 int EpubReaderPrintedPageInputActivity::powTen(int exponent) {
@@ -141,7 +142,12 @@ void EpubReaderPrintedPageInputActivity::loop() {
 void EpubReaderPrintedPageInputActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  renderer.drawCenteredText(UI_12_FONT_ID, 15, tr(STR_GO_TO_PRINTED_PAGE), true, EpdFontFamily::BOLD);
+  // Opened over the reader, so in the book's orientation: the title and the value under it are
+  // measured from the top of the content area the hint strips leave, which the bottom strip holds
+  // in PortraitInverted and the side boxes in landscape on boards whose side keys sit on that edge.
+  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
+  renderer.drawCenteredText(UI_12_FONT_ID, HeaderLayout::overlayTitleY(contentRect), tr(STR_GO_TO_PRINTED_PAGE), true,
+                            EpdFontFamily::BOLD);
 
   // Big centred numeric value with an underline under the active digit position.
   // When the cursor sits over a digit position past the current value (e.g. cursor at the
@@ -152,7 +158,7 @@ void EpubReaderPrintedPageInputActivity::render(RenderLock&&) {
   std::string valueText;
   for (int i = 0; i < visibleDigits - digitCount(); i++) valueText += "0";  // leading zeros
   valueText += rawValueText;
-  const int valueY = 110;
+  const int valueY = HeaderLayout::overlayBody(contentRect, renderer.getLineHeight(UI_12_FONT_ID)).y + 60;
   renderer.drawCenteredText(UI_12_FONT_ID, valueY, valueText.c_str(), true, EpdFontFamily::BOLD);
 
   // Place the underline under the active digit. Width-based positioning approximates a

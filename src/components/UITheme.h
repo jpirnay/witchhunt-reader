@@ -66,16 +66,33 @@ class UITheme {
   // Returns the drawable content Rect accounting for screen orientation and visible button hints.
   // Bottom hints occupy the physical bottom edge.
   // Side hints occupy the physical right edge on X4, and both physical sides on X3.
-  // The mapping to logical edges is orientation-dependent.
+  // The mapping to logical edges is orientation-dependent. A strip that ends up on the logical left
+  // or right edge also keeps HeaderLayout::HINT_COLUMN_GAP between it and the content.
   static Rect getContentRect(const GfxRenderer& renderer, bool hasBottomHints, bool hasSideHints);
-  // The top strip the header, clock and battery are drawn in.
+  // The top strip the header, clock and battery are drawn in: one topPadding into the content area
+  // getContentRect(renderer, hasBottomHints, hasSideHints) leaves (HeaderLayout::header), so it
+  // clears a hint strip that lies across the logical top -- the bottom strip in PortraitInverted,
+  // and in landscape the side boxes on boards whose side keys sit on that edge. Pass the flags the
+  // screen's body uses, so getBodyRect() starts below this.
   //
-  // Full width even on a screen that reserves the side edge for button hints, because those
-  // boxes sit at mid-height and the header is one topPadding from the top. Building the header
-  // from the narrowed content rect instead pulls the clock and battery inward by the width of
-  // the side strip, which is why they sit further right on Home -- the one screen of these that
-  // reserves no side edge -- than on any other.
-  static Rect getHeaderRect(const GfxRenderer& renderer);
+  // Full width even on a screen that reserves the side edge for button hints, because in portrait
+  // those boxes sit at mid-height, beside the body. Building the header from the narrowed content
+  // rect instead pulls the clock and battery inward by the width of the side strip, which is why
+  // they sat further right on Home -- the one screen of these that reserves no side edge -- than
+  // on any other.
+  static Rect getHeaderRect(const GfxRenderer& renderer, bool hasBottomHints = true, bool hasSideHints = false);
+  // The area below the theme header: getContentRect(renderer, hasBottomHints, hasSideHints) less
+  // the header band at its top and the theme's verticalSpacing under it (HeaderLayout::body).
+  // Where a screen with a header starts its body, so the body moves with the header -- which grows
+  // with the UI font size and differs by theme -- instead of sitting at a constant it outgrows.
+  //
+  // `subtitle` is the one the screen gives drawHeader(). With text, and a theme that draws it below
+  // the body (Base), the body ends above getSubtitleLine(); null or empty, nothing is reserved.
+  static Rect getBodyRect(const GfxRenderer& renderer, bool hasBottomHints, bool hasSideHints,
+                          const char* subtitle = nullptr);
+  // The line a header subtitle is drawn in when the theme keeps it out of the band (Base): the foot
+  // of the content with every hint strip out. Height 0 for a theme that draws it in the band.
+  static Rect getSubtitleLine(const GfxRenderer& renderer);
   static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);
   static std::string getCoverThumbPath(std::string coverBmpPath, int width, int height);
   // Edge length of the "this book has no usable cover" marker BMP written by

@@ -8,6 +8,7 @@
 #include "SdCardFontGlobals.h"
 #include "activities/ActivityResult.h"
 #include "components/UITheme.h"
+#include "components/themes/HeaderLayout.h"
 #include "fontIds.h"
 
 ReaderSizeList QuickOverridesActivity::pendingSizeList() const {
@@ -266,11 +267,12 @@ void QuickOverridesActivity::render(RenderLock&&) {
   const std::string title = tr(STR_QUICK_OVERRIDES);
   const int titleX = contentRect.x +
                      (contentRect.width - renderer.getTextWidth(UI_12_FONT_ID, title.c_str(), EpdFontFamily::BOLD)) / 2;
-  renderer.drawText(UI_12_FONT_ID, titleX, 15 + contentRect.y, title.c_str(), true, EpdFontFamily::BOLD);
+  renderer.drawText(UI_12_FONT_ID, titleX, HeaderLayout::overlayTitleY(contentRect), title.c_str(), true,
+                    EpdFontFamily::BOLD);
 
-  const int startY = 50 + contentRect.y;
-  const int listHeight = contentRect.height - (startY - contentRect.y);
-  drawMenuList(Rect{contentRect.x, startY, contentRect.width, listHeight});
+  // Below the title's line, which grows with the UI font size: at a fixed 50 the large font's
+  // descenders ran into the first row.
+  drawMenuList(HeaderLayout::overlayBody(contentRect, renderer.getLineHeight(UI_12_FONT_ID)));
 
   drawListHints();
 

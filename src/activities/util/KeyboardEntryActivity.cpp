@@ -9,6 +9,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "components/themes/ButtonGeometry.h"
+#include "components/themes/HeaderLayout.h"
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
@@ -402,8 +403,8 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
-  const int inputStartY = content.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing +
-                          metrics.verticalSpacing * 4 + metrics.keyboardVerticalOffset;
+  const int inputStartY =
+      HeaderLayout::body(content, metrics).y + metrics.verticalSpacing * 4 + metrics.keyboardVerticalOffset;
 
   const int effectiveMargin = (content.width - content.width * metrics.keyboardTextFieldWidthPercent / 100) / 2;
   const int toggleGap = inputType == InputType::Password ? 4 : 0;
@@ -687,11 +688,13 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   const Rect content = keyboardContentRect(renderer);
   const auto& metrics = UITheme::getInstance().getMetrics();
 
-  GUI.drawHeader(renderer, Rect{content.x, metrics.topPadding, content.width, metrics.headerHeight}, title.c_str());
+  // In the content area, like the field under it: opened over the reader (search, renaming a starred
+  // page), the keyboard is in the book's orientation, where the hint strip can hold the logical top.
+  GUI.drawHeader(renderer, HeaderLayout::header(content, metrics), title.c_str());
 
   const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
-  const int inputStartY = content.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing +
-                          metrics.verticalSpacing * 4 + metrics.keyboardVerticalOffset;
+  const int inputStartY =
+      HeaderLayout::body(content, metrics).y + metrics.verticalSpacing * 4 + metrics.keyboardVerticalOffset;
   int inputHeight = 0;
 
   std::string displayText = displayTextForCurrentState();

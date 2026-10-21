@@ -9,6 +9,7 @@
 #include "SdCardFontGlobals.h"
 #include "activities/settings/SettingActionDispatch.h"
 #include "components/UITheme.h"
+#include "components/themes/HeaderLayout.h"
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
@@ -53,6 +54,17 @@ std::string defaultFontFamilyLabel(const SettingInfo& item) {
   // Built-in: index 0 is the "Default" entry, [1..] are built-in families
   // in CrossPointSettings::FONT_FAMILY order.
   return item.getEnumOptionLabel(static_cast<uint8_t>(SETTINGS.fontFamily + 1));
+}
+
+// drawChrome() puts the progress line directly under the title, and buildScreen() the tab bar under
+// that. Both measured from the lines above them, which grow with the UI font size: at fixed offsets
+// the large font's title ran into the progress line and the progress line into the tab bar.
+int progressLineY(const GfxRenderer& renderer, const Rect& content) {
+  return HeaderLayout::overlayTitleBottom(content, renderer.getLineHeight(UI_12_FONT_ID));
+}
+
+int tabBarTop(const GfxRenderer& renderer, const Rect& content) {
+  return progressLineY(renderer, content) + renderer.getLineHeight(UI_10_FONT_ID) + HeaderLayout::OVERLAY_TITLE_GAP;
 }
 }  // namespace
 
@@ -673,7 +685,7 @@ void EpubReaderMenuActivity::customizeTabBar(UiScreen& screen, fui::TabBarProps&
 
 void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
   const Rect contentRect = listContentRect();
-  const int16_t top = static_cast<int16_t>(contentRect.y + 75);
+  const int16_t top = static_cast<int16_t>(tabBarTop(renderer, contentRect));
   screen.setContentMarginFromScreen(
       fui::Insets{top, static_cast<int16_t>(renderer.getScreenWidth() - (contentRect.x + contentRect.width)),
                   static_cast<int16_t>(renderer.getScreenHeight() - (contentRect.y + contentRect.height)),
@@ -700,7 +712,8 @@ void EpubReaderMenuActivity::drawChrome() {
   const int titleX =
       contentRect.x +
       (contentRect.width - renderer.getTextWidth(UI_12_FONT_ID, truncTitle.c_str(), EpdFontFamily::BOLD)) / 2;
-  renderer.drawText(UI_12_FONT_ID, titleX, 15 + contentRect.y, truncTitle.c_str(), true, EpdFontFamily::BOLD);
+  renderer.drawText(UI_12_FONT_ID, titleX, HeaderLayout::overlayTitleY(contentRect), truncTitle.c_str(), true,
+                    EpdFontFamily::BOLD);
 
   std::string progressLine;
   if (totalPages > 0) {
@@ -711,7 +724,7 @@ void EpubReaderMenuActivity::drawChrome() {
   // Centred in the content rect, as the title is, rather than on the screen.
   const int progressX =
       contentRect.x + (contentRect.width - renderer.getTextWidth(UI_10_FONT_ID, progressLine.c_str())) / 2;
-  renderer.drawText(UI_10_FONT_ID, progressX, 45 + contentRect.y, progressLine.c_str());
+  renderer.drawText(UI_10_FONT_ID, progressX, progressLineY(renderer, contentRect), progressLine.c_str());
 }
 
 const char* EpubReaderMenuActivity::footerConfirmLabel() const {

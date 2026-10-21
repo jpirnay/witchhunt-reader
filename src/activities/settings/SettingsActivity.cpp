@@ -362,13 +362,9 @@ void SettingsActivity::materializeListWindow() {
 }
 
 void SettingsActivity::buildScreen(UiScreen& screen) {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect contentRect = listContentRect();
-  screen.setContentMarginFromScreen(
-      fui::Insets{static_cast<int16_t>(contentRect.y + metrics.topPadding + metrics.headerHeight),
-                  static_cast<int16_t>(renderer.getScreenWidth() - (contentRect.x + contentRect.width)),
-                  static_cast<int16_t>(renderer.getScreenHeight() - (contentRect.y + contentRect.height)),
-                  static_cast<int16_t>(contentRect.x)});
+  // The tab bar sits directly under the header; the list stops above the line Base keeps for the
+  // version drawChrome() gives the header.
+  layoutListArea(screen, 0, 0, /*spacer=*/false, CROSSPOINT_VERSION);
 
   buildTabBar(screen);
   screen.spacer(static_cast<int16_t>(UITheme::getInstance().getMetrics().verticalSpacing));
@@ -394,11 +390,7 @@ void SettingsActivity::onBackFromTabs() {
 }
 
 void SettingsActivity::drawChrome() {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect contentRect = listContentRect();
-  GUI.drawHeader(renderer,
-                 Rect{contentRect.x, contentRect.y + metrics.topPadding, contentRect.width, metrics.headerHeight},
-                 tr(STR_SETTINGS_TITLE), CROSSPOINT_VERSION);
+  GUI.drawHeader(renderer, listHeaderRect(), tr(STR_SETTINGS_TITLE), CROSSPOINT_VERSION);
 }
 
 const char* SettingsActivity::footerConfirmLabel() const {

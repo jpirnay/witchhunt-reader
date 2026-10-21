@@ -396,3 +396,15 @@ pages.
 
 **Next.** Measure on the X3 before deciding. Its turns are waveform-bound, which may change the
 trade-off. A runs there again as of 2026-10-08 (see "X3 and the pre-render heap floor").
+
+## Heap-recovery restart: a sleep during the warm pass
+
+Since #541 the fragmented-heap restart asks the once-per-boot latch (`heapRecoveryRestartAvailable()`)
+before it releases the framebuffers. One refusal is still possible after the release: a power press
+during the pre-reboot image warm pass (seconds, the whole chapter) sets `deepSleepInProgress` on the
+loop task, and `trySilentRestartToReaderForHeapRecovery()` then refuses with both buffers already
+released. The reader goes on with a null frame.
+
+- Next step: either give both buffers back on that refusal (a `HalDisplay`/`GfxRenderer` realloc), or
+  let `enterDeepSleep()`'s guard test the display's own buffer, as `GfxRenderer::displayBuffer()` does,
+  so a sleep requested during the pass reboots into sleep.

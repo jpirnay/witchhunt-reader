@@ -137,13 +137,15 @@ void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, c
 // Out of line on purpose: every list screen's buildScreen() calls these, and inlined they cost
 // about 800 B of FreeInkUI code per screen.
 void UiListActivity::layoutListArea(UiScreen& screen, const int16_t extraTop, const int16_t extraBottom,
-                                    const bool spacer) {
+                                    const bool spacer, const char* headerSubtitle) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = listContentRect();
+  const Rect header = listHeaderRect();
+  const Rect body = UITheme::getBodyRect(renderer, true, true, headerSubtitle);
   screen.setContentMarginFromScreen(
-      fui::Insets{static_cast<int16_t>(contentRect.y + metrics.topPadding + metrics.headerHeight + extraTop),
+      fui::Insets{static_cast<int16_t>(header.y + header.height + extraTop),
                   static_cast<int16_t>(renderer.getScreenWidth() - (contentRect.x + contentRect.width)),
-                  static_cast<int16_t>(renderer.getScreenHeight() - (contentRect.y + contentRect.height) + extraBottom),
+                  static_cast<int16_t>(renderer.getScreenHeight() - (body.y + body.height) + extraBottom),
                   static_cast<int16_t>(contentRect.x)});
   if (spacer) screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 }
@@ -198,11 +200,7 @@ void UiListActivity::drawListHints() { listController.drawHints(renderer, footer
 
 Rect UiListActivity::listContentRect() const { return UITheme::getContentRect(renderer, true, true); }
 
-Rect UiListActivity::listHeaderRect() const {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect content = listContentRect();
-  return Rect{content.x, content.y + metrics.topPadding, content.width, metrics.headerHeight};
-}
+Rect UiListActivity::listHeaderRect() const { return UITheme::getHeaderRect(renderer, true, true); }
 
 int UiListActivity::selectedPosition() const {
   // activeNav() hands out a mutable reference; reading through it changes nothing.
