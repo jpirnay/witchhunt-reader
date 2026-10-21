@@ -20,6 +20,14 @@ void ClearCacheActivity::askToKeepReadingState(ConfirmationActivity::Question& q
   question.acceptLabel = StrId::STR_KEEP_BUTTON;
 }
 
+ConfirmationActivity::Question ClearCacheActivity::bookQuestion(const std::string& bookName) {
+  ConfirmationActivity::Question question;
+  question.title = tr(STR_DELETE_CACHE);
+  askToKeepReadingState(question);
+  question.message = bookName;
+  return question;
+}
+
 BookCache::Keep ClearCacheActivity::keepFor(const ActivityResult& answer) {
   const auto* confirm = std::get_if<ConfirmResult>(&answer.data);
   return confirm && confirm->alternate ? BookCache::Keep::Nothing : BookCache::Keep::ReadingState;

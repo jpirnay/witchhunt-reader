@@ -21,7 +21,10 @@ class ClearCacheActivity final : public Activity {
   bool skipLoopDelay() override { return true; }  // Prevent power-saving mode
   void render(RenderLock&&) override;
 
-  // What an answer other than Cancel to askToKeepReadingState()'s question says the clear keeps.
+  // Delete Book Cache's question, in the Library's options: the book, and whether its bookmarks and
+  // reading progress stay. Clear Reading Cache asks the same of all books.
+  static ConfirmationActivity::Question bookQuestion(const std::string& bookName);
+  // What an answer other than Cancel to either question says the clear keeps.
   static BookCache::Keep keepFor(const ActivityResult& answer);
 
  private:
