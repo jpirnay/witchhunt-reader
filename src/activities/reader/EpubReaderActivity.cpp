@@ -2363,9 +2363,12 @@ bool EpubReaderActivity::finishLadder(const ImageMemoryLadder::Action action) {
     case ImageMemoryLadder::Action::DropAccent:  // the family is left out already (warmImagesClimbingLadder)
       break;
     case ImageMemoryLadder::Action::Restart:
-      // The images are cached by now; a fresh heap is what the fonts need.
-      saveStateForRestart();
-      if (trySilentRestartToReaderForHeapRecovery()) return true;
+      // The images are cached by now; a fresh heap is what the fonts need. The state is saved for a restart that
+      // will happen, not for one the latch refuses.
+      if (heapRecoveryRestartAvailable()) {
+        saveStateForRestart();
+        if (trySilentRestartToReaderForHeapRecovery()) return true;
+      }
       // Refused: one heap restart since the last cold boot already. The page is drawn with its images as boxes
       // then, without the ladder, or the next render would climb it to here again.
       if (section) {
@@ -5618,6 +5621,15 @@ bool EpubReaderActivity::maybeRestartForFragmentedHeap(const uint32_t freeHeap, 
   }
 
   fragmentationRecoveryRestartAttempted_ = true;
+  // Asked before anything below is given up: only the reboot gives the framebuffers back. A second
+  // episode since the last cold boot used to release them and run the warm pass before finding the
+  // restart latched, and the reader went on drawing into the scratch with no display buffer behind
+  // it. Refused here, it stays as it is: degraded, but on screen.
+  if (!heapRecoveryRestartAvailable()) {
+    LOG_ERR("ERS", "Heap recovery restart refused (free=%lu contig=%lu); staying in degraded mode", freeHeap,
+            contigHeap);
+    return false;
+  }
   saveStateForRestart();
   const int page = (section ? section->currentPage : 0);
   const int pageCount = (section ? section->pageCount : 0);
@@ -5649,7 +5661,8 @@ bool EpubReaderActivity::maybeRestartForFragmentedHeap(const uint32_t freeHeap, 
   if (trySilentRestartToReaderForHeapRecovery()) {
     return true;
   }
-  LOG_ERR("ERS", "Heap recovery restart blocked by safety latch; staying in degraded mode");
+  // Only a sleep that began during the warm pass gets here now (the latch was asked above).
+  LOG_ERR("ERS", "Heap recovery restart refused after the framebuffers were released");
   return false;
 }
 

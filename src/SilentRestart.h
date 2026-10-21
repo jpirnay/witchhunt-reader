@@ -17,6 +17,10 @@ void silentRestartToFileTransferOpds();  // File Transfer, on its OPDS Browser r
 // restart attempt across consecutive silent boots until a non-silent boot
 // clears the latch.
 bool trySilentRestartToReaderForHeapRecovery();
+// Whether trySilentRestartToReaderForHeapRecovery() would restart now. Changes nothing, so a
+// caller asks it BEFORE giving up what only the restart gives back (the framebuffers): a refusal
+// found after that left the reader with no display buffers for the rest of the session.
+bool heapRecoveryRestartAvailable();
 
 // Arm/disarm a boot target that routes setup() straight back into the USB serial
 // file-transfer activity. Unlike silentRestart*(), arm does NOT reboot — it only
