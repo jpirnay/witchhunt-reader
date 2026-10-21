@@ -23,7 +23,7 @@ namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;
 constexpr size_t MAX_LINE_LENGTH = 64 * 1024;
 constexpr uint32_t CACHE_MAGIC = 0x4D4B4449;  // "MKDI"
-constexpr uint8_t CACHE_VERSION = 8;          // Bumped: wrapped code lines hang deeper
+constexpr uint8_t CACHE_VERSION = 9;          // Bumped: a word that does not fit moves to the next line
 
 static std::string flattenHeadingText(const MdParser::ParsedLine& parsed) {
   std::string result;
@@ -328,6 +328,22 @@ bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const
           while (breakPos > 0 && (remaining[breakPos] & 0xC0) == 0x80) {
             breakPos--;
           }
+        }
+      }
+
+      // The line would end inside a word (a code span or an emphasised word has no space to break
+      // at). With a space before it, a word that fits on a line of its own moves to the next line
+      // whole; only a word wider than a line is split.
+      const bool atSpace = breakPos > leadingSpaces && breakPos < remaining.size() && remaining[breakPos] == ' ';
+      if (!atSpace && !currentLine.empty()) {
+        const size_t wordStart = std::min(leadingSpaces, remaining.size());
+        const size_t wordEnd = remaining.find(' ', wordStart);
+        const std::string& before = currentLine.back().text;
+        const bool spaceBefore = wordStart > 0 || (!before.empty() && before.back() == ' ');
+        if (spaceBefore && advanceOf(remaining.substr(wordStart, wordEnd - wordStart), span) <= continuationWidth) {
+          emitLine();
+          remaining.erase(0, wordStart);
+          continue;
         }
       }
 
