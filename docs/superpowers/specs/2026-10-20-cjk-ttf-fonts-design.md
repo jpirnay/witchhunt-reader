@@ -657,14 +657,17 @@ shipping is section 10's list.
 
 ## 13. Order of work
 
-Each is its own plan and PR; the device runs use the serial test API.
+Each is its own plan and PR; the device runs use the serial test API. State on 2026-10-21: 1, 3 and 4 have shipped. 2
+is next: synthetic bold moved behind CFF so that it covers CFF outlines from its first version.
 1. **The serial test API** (branch `feat/serial-api-ttf-fs`): `CMD:TTF` (the store's state), `CMD:TTF:FULL` (act
    as if it filled up), `CMD:FS:LS` and `CMD:FS:RM` (the card, without the USB Transfer screen), events for a full
    store, a wipe and a finished font install, and `devctl.py`'s `select:` step (Down until a row is selected).
-2. **Synthetic bold** (plan written, from its prototype).
+   **Shipped: #531.**
+2. **Synthetic bold** (plan written from its prototype, revised against the code after #544).
 3. **The store makes room** (section 8). It replaces the plan "glyph store emptied at the next chapter", which is
-   withdrawn; its safe point and `RenderLock` guard carry over.
-4. **CFF outlines** (section 9).
+   withdrawn; its safe point and `RenderLock` guard carry over. **Shipped: #532.**
+4. **CFF outlines** (section 9). **Shipped: #542; byte-exact speed-ups #544** (a cold CJK chapter in SD mode: 1,159 ms
+   as CFF against 1,114 ms as TrueType on the X4).
 5. **The CJK fonts as `.otf` in the font manager** (sections 4–6), once CFF has merged: the hosted fonts are only
    useful to firmware that draws them, and `fonts-v3.json` goes live with this.
 
