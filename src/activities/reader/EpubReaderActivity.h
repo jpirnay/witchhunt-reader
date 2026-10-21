@@ -1050,6 +1050,9 @@ class EpubReaderActivity final : public Activity {
   // loop()'s idle branch: asks again for an owed minute-tick refresh once the reader has settled.
   void serviceOwedPeriodicRefresh();
   bool maybeRestartForFragmentedHeap(uint32_t freeHeap, uint32_t contigHeap);
+  // The page save render() posted and loop() has not written yet, written now unless the book is finished: for
+  // onExit() when it does not save the live position.
+  void writeOwedPageSave();
   // What a restart to the reader must save first, since it skips onExit: the position, when it is authoritative,
   // and the link back stack.
   void saveStateForRestart();

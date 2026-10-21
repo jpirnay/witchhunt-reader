@@ -907,16 +907,8 @@ void EpubReaderActivity::onExit() {
     const auto page = static_cast<uint16_t>(section->currentPage);
     saveProgress(currentSpineIndex, section->currentPage, section->pageCount, section->getParagraphIndexForPage(page),
                  shownProgress());
-  } else if (epub && currentSpineIndex < epub->getSpineItemsCount() &&
-             pendingProgressSave.pending.load(std::memory_order_acquire)) {
-    // Without that save the page drawn last may still be owed: render() posts its save for loop(),
-    // and loop() does not run while an overlay is on top. X3, 2026-10-21: page 2 of 19 was drawn
-    // 11 ms before Confirm opened the reader menu, a layout change there dropped the section, Go
-    // Home skipped the save above, and the book reopened on page 1. Written as loop() would have
-    // written it, a mid-build turn's unknown page count included (issue #75). The fields are
-    // settled: onExit() runs under the exclusive RenderLock, with no render pass in flight.
-    pendingProgressSave.pending.store(false, std::memory_order_relaxed);
-    saveProgress(pendingProgressSave.spineIndex, pendingProgressSave.page, pendingProgressSave.pageCount);
+  } else {
+    writeOwedPageSave();
   }
 
   // Save bookmarks before exit
@@ -5622,6 +5614,20 @@ bool EpubReaderActivity::maybeRestartForFragmentedHeap(const uint32_t freeHeap, 
   }
   LOG_ERR("ERS", "Heap recovery restart blocked by safety latch; staying in degraded mode");
   return false;
+}
+
+void EpubReaderActivity::writeOwedPageSave() {
+  // render() posts each page's save for loop(), and loop() does not run while an overlay is on top. X3, 2026-10-21:
+  // page 2 of 19 was drawn 11 ms before Confirm opened the reader menu, a layout change there dropped the section, Go
+  // Home skipped onExit()'s save of the live position, and the book reopened on page 1. Written as loop() would have
+  // written it, a mid-build turn's unknown page count included (issue #75); past the last spine the finished-book
+  // record stands. The fields are settled: onExit() runs under the exclusive RenderLock, with no render pass in flight.
+  if (!epub || currentSpineIndex >= epub->getSpineItemsCount() ||
+      !pendingProgressSave.pending.load(std::memory_order_acquire)) {
+    return;
+  }
+  pendingProgressSave.pending.store(false, std::memory_order_relaxed);
+  saveProgress(pendingProgressSave.spineIndex, pendingProgressSave.page, pendingProgressSave.pageCount);
 }
 
 void EpubReaderActivity::saveStateForRestart() {
