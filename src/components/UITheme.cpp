@@ -98,10 +98,11 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
   UiFontLadder::applyTo(currentMetrics, fontGrowth());
 }
 
-Rect UITheme::getHeaderRect(const GfxRenderer& renderer) {
-  const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
-  const Rect full = getContentRect(renderer, /*hasBottomHints=*/true, /*hasSideHints=*/false);
-  return Rect{full.x, metrics.topPadding, full.width, metrics.headerHeight};
+Rect UITheme::getHeaderRect(const GfxRenderer& renderer, const bool hasBottomHints, const bool hasSideHints) {
+  const Rect full = getContentRect(renderer, hasBottomHints, /*hasSideHints=*/false);
+  const Rect band =
+      HeaderLayout::header(getContentRect(renderer, hasBottomHints, hasSideHints), UITheme::getInstance().getMetrics());
+  return Rect{full.x, band.y, full.width, band.height};
 }
 
 Rect UITheme::getBodyRect(const GfxRenderer& renderer, const bool hasBottomHints, const bool hasSideHints) {
