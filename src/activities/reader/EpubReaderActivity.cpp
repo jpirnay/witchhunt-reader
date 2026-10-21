@@ -7454,11 +7454,11 @@ void EpubReaderActivity::openQuickOverrides() {
           bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
-        applyBookReaderOverrides(
-            menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride, menu.sdFontFamilyOverride,
-            menu.fontSizeOverride, static_cast<int8_t>(menu.bionicReadingOverride), menu.paragraphAlignmentOverride,
-            menu.textAntiAliasingOverride, menu.hyphenationOverride, menu.fontSizeNormalizationOverride,
-            menu.guideDotsOverride, menu.inlineFootnotePreviewsOverride);
+        applyBookReaderOverrides(menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
+                                 menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,
+                                 menu.paragraphAlignmentOverride, menu.textAntiAliasingOverride,
+                                 menu.hyphenationOverride, menu.fontSizeNormalizationOverride, menu.guideDotsOverride,
+                                 menu.inlineFootnotePreviewsOverride);
       });
 }
 
