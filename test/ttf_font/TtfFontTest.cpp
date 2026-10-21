@@ -2095,6 +2095,38 @@ std::pair<uint32_t, uint32_t> charStringData(const std::vector<uint8_t>& font) {
 
 }  // namespace
 
+TEST_F(TtfFontTest, ACffFamilyMakesRoomAndDrawsEveryGlyphAfterIt) {
+  // The store makes room for a CFF family as for a TrueType one: the drawn glyphs are kept, nothing is wiped, and
+  // every glyph drawn before, kept or dropped, draws as FreeType's afterwards.
+  files[kRegular].bytes = readFixture("NotoSansJP-CffFlat.otf");
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+  flash.setFreePages(16);
+  const TtfFontSet::StoreEvents before = TtfFontSet::storeEvents();
+  const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
+  ASSERT_NE(nullptr, font);
+  const std::vector<uint32_t> cps = mappedCodepoints(files[kRegular].bytes);
+  size_t i = 0;
+  for (; i < cps.size() && !font->ringMode(); ++i) {
+    font->glyph(kRegular, cps[i]);
+    const TtfFontSet::Stats stats = font.set->stats();
+    if (stats.segments - stats.freeSegments >= 2) break;
+  }
+  ASSERT_FALSE(font->ringMode());
+  ASSERT_GE(font.set->stats().segments - font.set->stats().freeSegments, 2u) << i << " of " << cps.size();
+  ASSERT_TRUE(font.set->markFull());
+  for (size_t k = 0; k < 8; ++k) font->glyph(kRegular, cps[k]);  // drawn while full: counted, kept by the reclaim
+  EXPECT_TRUE(font->ringMode());
+  ASSERT_TRUE(font.set->makeRoom(FlashGlyphStore::Budget::Open));
+  EXPECT_FALSE(font->ringMode());
+  EXPECT_EQ(before.rooms + 1, TtfFontSet::storeEvents().rooms);
+  EXPECT_EQ(before.wipes, TtfFontSet::storeEvents().wipes);
+  for (size_t k = 0; k <= i && k < cps.size(); ++k) {
+    expectDrawnAs(reference(files[kRegular].bytes, cps[k], TtfFont::kMaxPointSize), *font, kRegular,
+                  font->glyph(kRegular, cps[k]));
+    if (HasFailure()) return;
+  }
+}
+
 TEST_F(TtfFontSetTest, ACffFamilyDrawsInSdMode) {
   MemoryFile serif[4];
   serif[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
@@ -2325,7 +2357,8 @@ TEST_F(TtfFontTest, AProbeThatCannotPlanForNowLeavesACffFamilyListed) {
   // Discovery plans a CFF file's block to learn its size. Without the memory this once, or with the card failing
   // past the file's first sector, the size is not known: the family stays listed for its load to decide, rather than
   // be dropped as too large until the next scan.
-  MemoryFile cjk{tooLargeForFlashMode("NotoSerifJP-CffFlat.otf")};
+  MemoryFile cjk;
+  cjk.bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
   const uint32_t fileBytes = static_cast<uint32_t>(cjk.bytes.size());
   refuseNextObjectBytes = ttf::CffBlock::planBytes();
   const ttf::FileProbe withoutMemory = ttf::probeFile(cjk.source());
