@@ -14,6 +14,7 @@
 #include "UiFontScale.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/ButtonGeometry.h"
+#include "components/themes/HeaderLayout.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
@@ -101,6 +102,11 @@ Rect UITheme::getHeaderRect(const GfxRenderer& renderer) {
   const ThemeMetrics& metrics = UITheme::getInstance().getMetrics();
   const Rect full = getContentRect(renderer, /*hasBottomHints=*/true, /*hasSideHints=*/false);
   return Rect{full.x, metrics.topPadding, full.width, metrics.headerHeight};
+}
+
+Rect UITheme::getBodyRect(const GfxRenderer& renderer, const bool hasBottomHints, const bool hasSideHints) {
+  return HeaderLayout::body(getContentRect(renderer, hasBottomHints, hasSideHints),
+                            UITheme::getInstance().getMetrics());
 }
 
 int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,

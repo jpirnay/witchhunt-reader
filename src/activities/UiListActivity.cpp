@@ -12,6 +12,7 @@
 #include "activities/ActivityManager.h"
 #include "activities/SliderPickerActivity.h"
 #include "components/UITheme.h"
+#include "components/themes/HeaderLayout.h"
 #include "settings/SliderSettingPicker.h"
 
 namespace fui = freeink::ui;
@@ -140,8 +141,9 @@ void UiListActivity::layoutListArea(UiScreen& screen, const int16_t extraTop, co
                                     const bool spacer) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = listContentRect();
+  const Rect header = listHeaderRect();
   screen.setContentMarginFromScreen(
-      fui::Insets{static_cast<int16_t>(contentRect.y + metrics.topPadding + metrics.headerHeight + extraTop),
+      fui::Insets{static_cast<int16_t>(header.y + header.height + extraTop),
                   static_cast<int16_t>(renderer.getScreenWidth() - (contentRect.x + contentRect.width)),
                   static_cast<int16_t>(renderer.getScreenHeight() - (contentRect.y + contentRect.height) + extraBottom),
                   static_cast<int16_t>(contentRect.x)});
@@ -199,9 +201,7 @@ void UiListActivity::drawListHints() { listController.drawHints(renderer, footer
 Rect UiListActivity::listContentRect() const { return UITheme::getContentRect(renderer, true, true); }
 
 Rect UiListActivity::listHeaderRect() const {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect content = listContentRect();
-  return Rect{content.x, content.y + metrics.topPadding, content.width, metrics.headerHeight};
+  return HeaderLayout::header(listContentRect(), UITheme::getInstance().getMetrics());
 }
 
 int UiListActivity::selectedPosition() const {

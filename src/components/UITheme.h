@@ -76,6 +76,11 @@ class UITheme {
   // the side strip, which is why they sit further right on Home -- the one screen of these that
   // reserves no side edge -- than on any other.
   static Rect getHeaderRect(const GfxRenderer& renderer);
+  // The area below the theme header: getContentRect(renderer, hasBottomHints, hasSideHints) less
+  // the header band at its top and the theme's verticalSpacing under it (HeaderLayout::body).
+  // Where a screen with a header starts its body, so the body moves with the header -- which grows
+  // with the UI font size and differs by theme -- instead of sitting at a constant it outgrows.
+  static Rect getBodyRect(const GfxRenderer& renderer, bool hasBottomHints, bool hasSideHints);
   static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);
   static std::string getCoverThumbPath(std::string coverBmpPath, int width, int height);
   // Edge length of the "this book has no usable cover" marker BMP written by
