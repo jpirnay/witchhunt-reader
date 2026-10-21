@@ -48,7 +48,7 @@ bookmarks included, and `fontprev/` (`ClearCacheActivity`).
 | `details.bin` | all | `BookDetailsCache` `VERSION` (3) | What the Library's lists show: [below](#detailsbin) |
 | `thumb_*.bmp` | all | in the name | Cover thumbnails: [below](#cover-thumbnails) |
 | `cover.bmp` | all | none | The sleep screen's cover (`cover_crop.bmp` for an EPUB's cropped one) |
-| `book.bin` | EPUB | `BOOK_CACHE_VERSION` (11) | Metadata, spine and TOC: [below](#bookbin) |
+| `book.bin` | EPUB | `BOOK_CACHE_VERSION` (17) | Metadata, spine and TOC: [below](#bookbin) |
 | `fingerprint.bin`, `toc.retry` | EPUB | none | [below](#fingerprintbin-and-tocretry) |
 | `pagelist.bin` | EPUB | none | The printed-page list: [below](#pagelistbin) |
 | `css_rules.cache`, `css_bg.bin`, `css_fonts.bin` | EPUB | `CSS_CACHE_VERSION` (29), `BACKGROUND_IMAGES_FILE_VERSION` (1) | [below](#css_rulescache-css_bgbin-and-css_fontsbin) |
@@ -66,8 +66,8 @@ bookmarks included, and `fontprev/` (`ClearCacheActivity`).
 | `index.bin` | TXT, Markdown | `CACHE_VERSION`: TXT 2 (magic `TXTI`), Markdown 4 (`MKDI`) | Page offsets under the current layout. `SleepActivity` checks the TXT magic and version too |
 | `page_<n>.bw1`, `page_<n>.gr2` | XTC | none | Up to four pages' planes, transposed for drawing (`Xtc::kPageCacheMax`) |
 
-Builds also write scratch files that they remove when done: `spine.bin.tmp` and `toc.bin.tmp`
-(`BookMetadataCache`), `.items.bin` (`ContentOpfParser`), `.tmp.css` and `css_rules.compile.tmp` (the
+Builds also write scratch files that they remove when done: `spine.bin.tmp`, `toc.bin.tmp` and
+`toc.spine.tmp` (each TOC entry's spine item, `s16` in TOC order) (`BookMetadataCache`), `.items.bin` (`ContentOpfParser`), `.tmp.css` and `css_rules.compile.tmp` (the
 CSS pass), `spines/<n>/anchors_<spine>.tmp` (a section's anchor map), `footnotes.bin.idx`,
 `images.pending.tmp`, and an XTC's `*.t2bit` and `page_preview.*`.
 
@@ -95,7 +95,7 @@ fonts need.
 
 ## `book.bin`
 
-Written by `BookMetadataCache`. The version byte is `BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`; it is bumped when the layout changes, and an older cache is rebuilt on the next open. The pattern below matches version 11.
+Written by `BookMetadataCache`. The version byte is `BOOK_CACHE_VERSION` in `lib/Epub/Epub/BookMetadataCache.cpp`; it is bumped when the layout changes, and an older cache is rebuilt on the next open. The pattern below matches version 17.
 
 ImHex Pattern:
 
@@ -105,7 +105,7 @@ import std.string;
 import std.core;
 
 // === Configuration ===
-#define EXPECTED_VERSION 11
+#define EXPECTED_VERSION 17
 #define MAX_STRING_LENGTH 65535
 
 // === String Structure ===
@@ -141,6 +141,11 @@ struct SpineEntry {
     String href [[comment("Resource path")]];
     u32 cumulativeSize [[comment("Cumulative size in bytes"), color("FF6B6B")]];
     s16 tocIndex [[comment("Index into TOC (-1 if none)"), color("4ECDC4")]];
+    // The item's ZIP central-directory stat (v17), so its chapter opens without a lookup
+    u16 zipMethod [[comment("0 stored, 8 deflated")]];
+    u32 zipCompressedSize;
+    u32 zipUncompressedSize;
+    u32 zipLocalHeaderOffset [[comment("0 if the build did not find the entry")]];
 } [[comment("Spine entry defining reading order")]];
 
 // === TOC Entry Structure ===

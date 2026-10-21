@@ -1601,6 +1601,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   bool noWorkspace = false;            // the full decoder would do, but its workspace found no room
   int jpegScaleDenom = 1;
   std::unique_ptr<JpegWorkPool> progressiveWorkspace;
+  // Taken after the workspace, so released before it (the arena is LIFO).
+  ProgressiveJpeg::ReadWindows progressiveWindows;
   size_t progressiveWorkspaceBytes = 0;
   if (mode == JpegMode::Baseline) {
     jpegScaleDenom = chooseJpegScale(targetScale, tjpgScale);
@@ -1617,6 +1619,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     }
     if (progressiveWorkspace) {
       jpegScaleDenom = 1 << tjpgScale;
+      // A scan each to read through, from the scratch arena (the lent framebuffer) when it has room.
+      progressiveWindows.take(image_scratch::get());
     } else {
       LOG_INF("JPG", "No room for a progressive workspace (%u free); DC-only preview",
               static_cast<unsigned>(ESP.getFreeHeap()));
@@ -1840,6 +1844,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     progressiveOptions.shouldAbort = fullProgressiveShouldAbort;
     progressiveOptions.workspace = progressiveWorkspace->get();
     progressiveOptions.workspaceSize = progressiveWorkspaceBytes;
+    progressiveWindows.applyTo(progressiveOptions);
     progressiveOptions.stats = &progressiveStats;
     progressiveOptions.clock = []() -> uint32_t { return millis(); };
   }
@@ -1947,6 +1952,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     const uint16_t bandsDone = progressive.bandsDone();
     const uint16_t bandCount = progressive.bandCount();
     progressive.end();
+    progressiveWindows.release();
     progressiveWorkspace.reset();
     if (isParked) {
       LOG_INF("JPG", "Parked at band %u/%u, row %d/%d in %lu ms (%u B of state): %s", bandsDone, bandCount,

@@ -44,12 +44,56 @@ class ZipFile {
     bool isSet;
   };
 
-  // Target for the batch lookups (sorted by hash, then len)
-  struct SizeTarget {
-    uint64_t hash;      // FNV-1a 64-bit hash of normalized path
-    uint16_t len;       // Length of path for collision reduction
-    uint16_t index;     // Caller's index (e.g. spine index)
-    uint32_t size = 0;  // fillUncompressedSizes' answer, in what would otherwise be tail padding
+  // A name for a batch walk to find (FNV-1a 64 of the normalised path, and its length), and the
+  // central-directory stat the walk found for it. A table of them is sorted by (hash, len) with
+  // before() and looked up afterwards with find(). 24 B: buildBookBin keeps one a spine item.
+  // localHeaderOffset stays 0 for a name the walk did not find; offset 0 is the archive's first
+  // entry, an EPUB's mimetype, never a document.
+  struct StatTarget {
+    uint64_t hash = 0;
+    uint32_t uncompressedSize = 0;
+    uint32_t compressedSize = 0;
+    uint32_t localHeaderOffset = 0;
+    uint16_t len = 0;
+    uint16_t method = 0;
+
+    static StatTarget named(std::string_view path);
+    static bool before(const StatTarget& a, const StatTarget& b) {
+      return a.hash < b.hash || (a.hash == b.hash && a.len < b.len);
+    }
+    // The first target of [begin, end), sorted by before(), that names `path`; null if none does.
+    static const StatTarget* find(const StatTarget* begin, const StatTarget* end, std::string_view path);
+    bool found() const { return localHeaderOffset != 0; }
+    FileStatSlim stat() const { return {method, compressedSize, uncompressedSize, localHeaderOffset}; }
+  };
+
+  // A few entries' stats a caller noted during a walk it made anyway (contentFingerprint's
+  // visitor), which loadFileStatSlim answers from before it walks (seedKnownEntries). Exact names
+  // only, up to CAPACITY of them in NAME_BYTES of names: about 1.3 KB, for the handful of package
+  // documents a book's first open reads by name.
+  class KnownEntries {
+   public:
+    static constexpr size_t CAPACITY = 16;
+    static constexpr size_t NAME_BYTES = 1024;
+    // False when there is no room left for `name`; overflowed() from then on.
+    bool add(std::string_view name, const FileStatSlim& stat);
+    const FileStatSlim* find(std::string_view name) const;
+    size_t size() const { return count_; }
+    std::string_view name(const size_t i) const { return {names_ + entries_[i].at, entries_[i].len}; }
+    // Some entry it was offered is not in it: it does not hold every name of its kind.
+    bool overflowed() const { return overflowed_; }
+
+   private:
+    struct Entry {
+      uint16_t at = 0;
+      uint16_t len = 0;
+      FileStatSlim stat = {};
+    };
+    Entry entries_[CAPACITY];
+    char names_[NAME_BYTES] = {};
+    size_t count_ = 0;
+    size_t used_ = 0;
+    bool overflowed_ = false;
   };
 
  private:
@@ -62,6 +106,8 @@ class ZipFile {
   bool lastCentralDirPosValid = false;
   // Where a lookup by name takes its read window (setLookupScratch); null: the heap.
   BuildArena* lookupScratch_ = nullptr;
+  // Answers loadFileStatSlim has without a walk (seedKnownEntries); not owned.
+  const KnownEntries* knownEntries_ = nullptr;
 
   long getDataOffset(const FileStatSlim& fileStat);
   bool loadZipDetails();
@@ -97,6 +143,9 @@ class ZipFile {
   // A region lookups by name may take their window from, a block at a time, released before
   // they return. For a caller holding a lent region (first-open indexing); null by default.
   void setLookupScratch(BuildArena* scratch) { lookupScratch_ = scratch; }
+  // Entries loadFileStatSlim finds by exact name without walking; null: none. Must outlive the
+  // lookups.
+  void seedKnownEntries(const KnownEntries* known) { knownEntries_ = known; }
   // The lookup cursor, an offset into the archive (0: none). A caller that makes many short-lived
   // ZipFiles over one book hands it from one to the next, so a lookup for a name stored after the
   // previous one does not start again at the first entry.
@@ -122,20 +171,13 @@ class ZipFile {
   // False for a deflated entry -- there is no such range: those bytes are a DEFLATE stream, not
   // the file. Also false if the entry is missing or its local header does not check out.
   bool getStoredEntryRange(const char* filename, uint32_t* offset, uint32_t* size);
-  // Batch lookup: ONE walk of the central directory sets `size` of every target whose (hash, len)
-  // names an entry to that entry's uncompressed size, and leaves the others alone. `targets` must
-  // be sorted by (hash, len); a caller with more names than it has table for walks once per
-  // table-full. The walk reads through `window` (null: straight from the file, a dozen card calls
-  // per entry), which the caller owns so that several walks share one. Returns the number of
-  // targets matched; the walk stops once that reaches `count`.
-  int fillUncompressedSizes(SizeTarget* targets, size_t count, uint8_t* window, size_t windowBytes);
-  // Batch lookup of FULL entry stats in ONE central-directory walk (vs one linear scan per
-  // loadFileStatSlim call). targets must be sorted by (hash, len) like fillUncompressedSizes;
-  // stats[target.index] receives the entry's FileStatSlim. Returns number matched. Deques: a
-  // 1700-spine book needs ~28 KB of targets, and demanding that as ONE contiguous block aborts on
-  // a fragmented heap (bare operator new under -fno-exceptions). Reads through a 4 KB window of its
-  // own when the heap has one.
-  int fillFileStats(const std::deque<SizeTarget>& targets, std::deque<FileStatSlim>& stats);
+  // Batch lookup: ONE walk of the central directory fills in the stat of every target whose
+  // (hash, len) names an entry, and leaves the others alone. `targets` must be sorted by
+  // StatTarget::before; a caller with more names than it has table for walks once per table-full.
+  // The walk reads through `window` (null: straight from the file, a dozen card calls per entry),
+  // which the caller owns so that several walks share one. Returns the number of targets matched;
+  // the walk stops once that reaches `count`.
+  int fillFileStats(StatTarget* targets, size_t count, uint8_t* window, size_t windowBytes);
   // Due to the memory required to run each of these, it is recommended to not preopen the zip file for multiple
   // These functions will open and close the zip as needed
   uint8_t* readFileToMemory(const char* filename, size_t* size = nullptr, bool trailingNullByte = false);
@@ -239,8 +281,11 @@ class ZipFile {
   // the per-entry DOS mod time/date so a byte-identical re-zip (same content,
   // new timestamps) keeps the same fingerprint. Any content or structural
   // change flips the CRC/size/offset mix. Used to detect a book replaced
-  // in place at the same path (the cache key is path-derived).
-  bool contentFingerprint(uint64_t* out);
+  // in place at the same path (the cache key is path-derived). `visit`, when given, is shown each
+  // entry whose name fits 255 bytes, with its stat, as the walk passes it.
+  bool contentFingerprint(uint64_t* out,
+                          void (*visit)(void* ctx, std::string_view name, const FileStatSlim& stat) = nullptr,
+                          void* ctx = nullptr);
 
   // Stream every filename in the central directory to a callback without building
   // the in-memory stat cache: one walk through a 4 KB window (straight from the file,

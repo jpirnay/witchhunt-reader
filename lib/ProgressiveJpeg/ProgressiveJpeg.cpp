@@ -17,6 +17,10 @@ constexpr uint8_t MAX_LUMA_SCANS = 32;
 // pool only reclaims entries nobody references.
 constexpr uint8_t TABLE_POOL = 16;
 constexpr size_t INPUT_BUFFER = 512;
+// The read windows (DecodeOptions::readWindows): one per luma scan, the first SCAN_WINDOWS of
+// them, while the bands decode, and all of them as one while the file is indexed.
+constexpr size_t SCAN_WINDOW_BYTES = 1024;
+constexpr uint8_t SCAN_WINDOWS = 8;
 
 // Zigzag index -> natural (row * 8 + column) index.
 constexpr uint8_t ZIGZAG[64] = {0,  1,  8,  16, 9,  2,  3,  10, 17, 24, 32, 25, 18, 11, 4,  5,  12, 19, 26, 33, 40, 48,
@@ -28,25 +32,87 @@ bool isStartOfFrame(const uint8_t marker) {
          (marker >= 0xC9 && marker <= 0xCB) || (marker >= 0xCD && marker <= 0xCF);
 }
 
-// Random-access byte reader over the file. Every cursor reads through it; a cursor switch
-// usually lands outside the buffer and costs one seek + read, which is the price of holding
-// one 512-byte buffer instead of one per scan.
+// Random-access byte reader over the file. Every cursor reads through it. With the workspace's
+// minimum, all of them share one 512-byte buffer, and a cursor switch usually lands outside it:
+// a seek + read for every scan in every band, the file read ~6 times over (a 106 KB cover: 1275
+// reads, 650 KB). Given read windows (DecodeOptions::readWindows), the first SCAN_WINDOWS luma
+// scans read through a window each, and the index pass through all of them as one.
 struct Source {
   FsFile* file = nullptr;
   uint32_t base = 0;  // file offset of the JPEG's first byte; `pos` below is relative to it
   uint8_t buffer[INPUT_BUFFER] = {};
+  // The window at() reads through (select()): its bytes, their capacity, and what they hold.
+  uint8_t* data = buffer;
+  uint16_t capacity = INPUT_BUFFER;
   uint32_t start = 0;
   uint16_t length = 0;
   bool ioError = false;
   uint32_t reads = 0;
   uint32_t bytesRead = 0;
 
+  // Windows: SHARED (`buffer`), 1..SCAN_WINDOWS (a scan's), WHOLE (the scan windows as one). A
+  // scan's or WHOLE's start and length are kept in a slot at the front of the extra area while
+  // another window is read, so a band's data picks up where the last band left it; SHARED's are
+  // not (it is only a cache). The bookkeeping lives there, not here: the session is part of the
+  // workspace's minimum, which a converter's 1/2-scale budget is held to.
+  struct Slot {
+    uint32_t start;
+    uint16_t length;
+  };
+  static constexpr uint8_t SHARED = 0;
+  static constexpr uint8_t WHOLE = SCAN_WINDOWS + 1;
+  static constexpr size_t SLOTS_BYTES = (WHOLE + 1) * sizeof(Slot);
+  uint8_t* extra = nullptr;  // [slots][SCAN_WINDOWS windows] in the workspace; null: none
+  uint8_t current = SHARED;
+
+  Slot* slots() const { return reinterpret_cast<Slot*>(extra); }
+  uint8_t* windows() const { return extra + SLOTS_BYTES; }
+
+  // Points the windows at `area` (scanWindowBytes(), or null for none), all empty. A resumed
+  // checkpoint is re-bound this way: the windows' bytes are not part of it.
+  void bind(uint8_t* const area) {
+    extra = area;
+    if (extra != nullptr) {
+      for (uint8_t i = 0; i <= WHOLE; ++i) slots()[i] = Slot{0, 0};
+    }
+    current = SHARED;
+    data = buffer;
+    capacity = INPUT_BUFFER;
+    start = 0;
+    length = 0;
+  }
+  // The window for the index pass.
+  void selectWhole() { select(extra != nullptr ? WHOLE : SHARED); }
+  // The window for luma scan `s` while the bands decode.
+  void selectScan(const uint8_t s) { select(extra != nullptr && s < SCAN_WINDOWS ? 1 + s : SHARED); }
+  void select(const uint8_t slot) {
+    if (slot == current) return;
+    if (current != SHARED) slots()[current] = Slot{start, length};
+    current = slot;
+    if (slot == SHARED) {
+      data = buffer;
+      capacity = INPUT_BUFFER;
+      start = 0;
+      length = 0;
+      return;
+    }
+    start = slots()[slot].start;
+    length = slots()[slot].length;
+    if (slot == WHOLE) {
+      data = windows();
+      capacity = static_cast<uint16_t>(SCAN_WINDOWS * SCAN_WINDOW_BYTES);
+    } else {
+      data = windows() + (slot - 1) * SCAN_WINDOW_BYTES;
+      capacity = SCAN_WINDOW_BYTES;
+    }
+  }
+
   // -1 past the end of the file (or on a read error, which sets ioError). A seek past the end
   // fails on SdFat: that is end of data too, which the bit reader pads with zeros like libjpeg.
   int at(const uint32_t pos) {
     if (pos - start >= length) {
       if (!file->seek(base + pos)) return -1;
-      const int count = file->read(buffer, sizeof(buffer));
+      const int count = file->read(data, capacity);
       ++reads;
       if (count > 0) bytesRead += static_cast<uint32_t>(count);
       if (count <= 0) {
@@ -57,7 +123,7 @@ struct Source {
       start = pos;
       length = static_cast<uint16_t>(count);
     }
-    return buffer[pos - start];
+    return data[pos - start];
   }
 };
 
@@ -438,6 +504,7 @@ Result parseScan(State& st, uint32_t p, const uint32_t end) {
 // resume. UINT32_MAX never pauses (the one-shot decode).
 Result indexStep(State& st, IndexCursor& ic, const DecodeOptions& options, const uint32_t budget) {
   Source& src = st.source;
+  src.selectWhole();
   if (!ic.started) {
     if (src.at(0) != 0xFF || src.at(1) != 0xD8) return inputFailure(src);
     ic.p = 2;
@@ -832,6 +899,7 @@ Result decodeBand(State& st, const Geometry& g, uint8_t* workspace, const Layout
   const int firstRow = band * g.bandBlockRows;
   for (uint8_t s = 0; s < st.scanCount; ++s) {
     const Scan& scan = st.scans[s];
+    st.source.selectScan(s);
     BitReader in{st.source, st.cursors[s]};
     if (scan.compCount > 1) {
       // Interleaved (always a DC scan): one MCU row, chroma decoded only to stay in step.
@@ -963,6 +1031,36 @@ Result probe(FsFile& file, ImageInfo& info, const uint32_t base) {
   }
 }
 
+size_t scanWindowBytes() { return Source::SLOTS_BYTES + SCAN_WINDOWS * SCAN_WINDOW_BYTES; }
+
+bool ReadWindows::take(BuildArena* const region) {
+  release();
+  const size_t bytes = scanWindowBytes();
+  if (region == nullptr || !region->valid() ||
+      region->capacity() - region->used() < bytes + 2 * alignof(std::max_align_t)) {
+    return false;
+  }
+  block_ = region->reserveBlock();
+  data_ = static_cast<uint8_t*>(region->alloc(bytes));
+  if (data_ == nullptr) {
+    region->release(block_);
+    return false;
+  }
+  region_ = region;
+  return true;
+}
+
+void ReadWindows::release() {
+  if (region_ != nullptr && block_.valid()) region_->release(block_);
+  region_ = nullptr;
+  data_ = nullptr;
+}
+
+void ReadWindows::applyTo(DecodeOptions& options) const {
+  options.readWindows = data_;
+  options.readWindowsSize = data_ != nullptr ? scanWindowBytes() : 0;
+}
+
 size_t workspaceBytes(const ImageInfo& info, const uint8_t scaleShift) {
   if (info.width == 0 || info.height == 0 || scaleShift > 3) return 0;
   return layoutFor(geometryFor(info.width, info.height, info.componentCount, info.maxHorizontal, info.maxVertical,
@@ -1013,6 +1111,13 @@ Result Decoder::claim(FsFile& file, const DecodeOptions& options, const BandCall
   session_->user = user;
   session_->st.source.file = &file;
   session_->st.source.base = options.base;
+  // The windows' bookkeeping (Source::Slot) wants 4-byte alignment.
+  uint8_t* windows = nullptr;
+  if (options.readWindows != nullptr) {
+    const size_t pad = (4 - (reinterpret_cast<uintptr_t>(options.readWindows) & 3)) & 3;
+    if (options.readWindowsSize >= pad + scanWindowBytes()) windows = options.readWindows + pad;
+  }
+  session_->st.source.bind(windows);
   file_ = &file;
   options_ = options;
   if (options_.stats) *options_.stats = DecodeStats{};
@@ -1119,6 +1224,7 @@ Result Decoder::resume(FsFile& file, const DecodeOptions& options, const BandCal
   const Geometry g = ss.g;
   const Layout layout = ss.layout;
   uint8_t* const workspace = ss.workspace;
+  uint8_t* const extra = ss.st.source.extra;
   if (checkpoint.read(reinterpret_cast<uint8_t*>(&ss), sizeof(Session)) != static_cast<int>(sizeof(Session))) {
     return refuse();
   }
@@ -1133,8 +1239,7 @@ Result Decoder::resume(FsFile& file, const DecodeOptions& options, const BandCal
   ss.user = user;
   ss.st.source.file = &file;
   ss.st.source.base = options.base;
-  ss.st.source.start = 0;
-  ss.st.source.length = 0;  // the buffered window refills on the first read
+  ss.st.source.bind(extra);  // this workspace's windows (or none), empty: they refill on the first read
   ss.st.source.ioError = false;
   for (HuffmanTable& table : ss.st.pool) {
     if (table.lookahead == nullptr) continue;

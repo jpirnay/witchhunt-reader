@@ -10,6 +10,7 @@ namespace {
 size_t refuseFrom = 0;
 size_t live = 0;
 size_t peak = 0;
+size_t allocations = 0;
 
 bool refused(const size_t bytes) { return refuseFrom != 0 && bytes >= refuseFrom; }
 
@@ -17,6 +18,7 @@ void* allocateOrNull(const size_t bytes) {
   if (refused(bytes)) return nullptr;
   void* p = std::malloc(bytes == 0 ? 1 : bytes);
   if (p != nullptr) {
+    ++allocations;
     live += malloc_usable_size(p);
     if (live > peak) peak = live;
   }
@@ -42,6 +44,7 @@ AllocationRefusal::~AllocationRefusal() { refuseFrom = 0; }
 size_t heapLiveBytes() { return live; }
 size_t heapPeakBytes() { return peak; }
 void resetHeapPeak() { peak = live; }
+size_t heapAllocations() { return allocations; }
 
 // Every allocating form and every releasing form, so the live count sees each block both ways.
 void* operator new(const size_t bytes) { return allocateOrThrow(bytes); }

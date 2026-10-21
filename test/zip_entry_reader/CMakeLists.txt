@@ -16,6 +16,7 @@ target_link_libraries(inflate_reader_host PUBLIC uzlib_host)
 add_executable(ZipEntryReaderTest
   ZipEntryReaderTest.cpp
   ZipCorruptSizeTest.cpp
+  ZipKnownEntriesTest.cpp
   LoggingStub.cpp
   ${REPO_ROOT}/lib/ZipFile/ZipFile.cpp
 )

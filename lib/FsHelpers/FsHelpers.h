@@ -9,6 +9,8 @@
 namespace FsHelpers {
 
 std::string decodeUriEscapes(const std::string& path);
+// Out-parameter overload: decodes into `out`, reusing its capacity (for per-entry loops).
+void decodeUriEscapes(std::string_view path, std::string& out);
 
 std::string normalisePath(const std::string& path);
 // Out-parameter overload that reuses `out`'s capacity and performs the

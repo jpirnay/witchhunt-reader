@@ -34,6 +34,12 @@ class TocNcxParser final : public Print {
 
   std::string currentLabel;
   std::string currentSrc;
+  // An entry's href joined, decoded and normalised in these, which keep their capacity from entry
+  // to entry: a fresh string for each step was ~5 heap blocks an entry (8700 for a 1732-entry NCX).
+  std::string targetScratch_;
+  std::string decodedScratch_;
+  std::string hrefScratch_;
+  std::string anchorScratch_;
   uint8_t currentDepth = 0;
 
   // <pageList> collection state

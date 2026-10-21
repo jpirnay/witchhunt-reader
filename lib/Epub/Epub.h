@@ -98,29 +98,22 @@ class Epub {
   mutable std::string statMemoPath_;
   mutable ZipFile::FileStatSlim statMemo_ = {};
   mutable bool statMemoValid_ = false;
+  // The package documents' entries (container.xml, the OPF, the NCX, the stylesheets), noted by
+  // the fingerprint walk as it passes them: their lookups, and the search for stylesheets the OPF
+  // does not list, take no walk of their own. A cold open of King's Avatar walked its whole
+  // central directory for the OPF, the NCX and that search, each. Kept until load() returns.
+  mutable std::unique_ptr<ZipFile::KnownEntries> packageEntries_;
+  // getSpineIndexForTextReference's answer once looked up; -1 until then.
+  mutable int textReferenceSpine_ = -1;
   // The stat of the entry at the normalised `path`, from the memo or one lookup.
   bool lookupItemStat(ZipFile& zip, const std::string& path, ZipFile::FileStatSlim* out) const;
 
-  // Per-book cache of each spine entry's ZIP central-directory stat, resolved in ONE
-  // central-directory walk (fillFileStats) the first time any spine stat is requested.
-  // Without it, every spine open re-runs a linear central-directory scan — on a book that
-  // interleaves ~1600 image entries with the XHTML spines (e.g. King's Avatar) that scan
-  // walks hundreds-to-thousands of entries and dominated the compile (~215 ms/spine,
-  // measured). Deque (not vector): ~14 B/spine, ~24 KB at 1732 spines — a vector would demand
-  // that as one contiguous block and abort on a fragmented heap under -fno-exceptions.
-  // Best-effort: on OOM the deque stays empty and getSpineItemStat falls back to a per-call
-  // linear scan (correct, just slow). In-memory only — content.bin is the durable cache, so
-  // this is cheap to rebuild and never persisted.
-  mutable std::deque<ZipFile::FileStatSlim> spineStats_;
-  mutable bool spineStatsResolved_ = false;
-  mutable bool spineStatsUsable_ = false;
-  void ensureSpineStats() const;
-
  public:
-  // Resolve a spine entry's ZIP central-directory stat via the per-book cache (one
-  // central-directory walk for the whole book, then O(1) per spine). Falls back to a single
-  // linear loadFileStatSlim scan if the cache couldn't be built (OOM) or the spine wasn't
-  // matched in the batch walk. Returns false only if the entry can't be found at all.
+  // A spine entry's ZIP central-directory stat, from its book.bin record: buildBookBin's walk
+  // found it at the first open, so a chapter opens without looking its entry up. Without it,
+  // every spine open re-ran a central-directory scan, which on a book interleaving ~1600 images
+  // with its chapters (King's Avatar) dominated the compile (~215 ms a spine, measured). A record
+  // the walk did not find is looked up by name. False only if the entry cannot be found at all.
   bool getSpineItemStat(int spineIndex, ZipFile::FileStatSlim* out) const;
 
   // Seed a fresh ZipFile over this book with the cached EOCD details (no-op
@@ -206,6 +199,8 @@ class Epub {
   // (file-existence checks and small sidecar reads) so callers can decide
   // whether to show a progress popup before calling load().
   bool needsFirstOpenIndexing() const;
+  // Every cache load() rebuilds when it is missing or of another version is present and current.
+  bool indexCachesCurrent() const;
 
   // A different book dropped onto the same path: the cache, keyed by the path, is the old book's (sections, CSS,
   // thumbs, what BookFonts found in it), so it is wiped. True when it was. load() asks first; a caller that reads

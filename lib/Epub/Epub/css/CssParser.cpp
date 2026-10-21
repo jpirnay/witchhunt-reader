@@ -1,6 +1,7 @@
 #include "CssParser.h"
 
 #include <Arduino.h>
+#include <BufferedFileIO.h>
 #include <BuildArena.h>
 #include <Logging.h>
 
@@ -9,7 +10,10 @@
 #include <cctype>
 #include <cstring>
 #include <new>
+#include <optional>
 #include <string_view>
+
+#include "../CacheVersion.h"
 
 // Sparse resident-style codec (defined below, used by lookupRules before its definition).
 static size_t compressStyle(const CssStyle& s, uint8_t* out);
@@ -108,6 +112,8 @@ static_assert(CSS_FIXED_STYLE_BYTES == 77,
 // A rule record is selectorLen(2) selector order(2) payload; the order sits between selector and
 // payload so a reader that has matched the selector reads the rest in one go (v22).
 constexpr size_t CSS_RULE_ORDER_BYTES = sizeof(uint16_t);
+// The read and write windows of endCacheCompile's copy of the staged rules into the cache.
+constexpr size_t CSS_FINALIZE_WINDOW_BYTES = 2048;
 
 // Specificity, packed so that comparing two values compares (ids, classes, element names) in that
 // order: five bits each, the element count lowest. resolveStyle ranks a rule as
@@ -1472,7 +1478,7 @@ void CssParser::abortCacheCompile() {
   endCacheCompile();
 }
 
-bool CssParser::endCacheCompile() {
+bool CssParser::endCacheCompile(BuildArena* const scratch) {
   if (!compileModeActive_) {
     return false;
   }
@@ -1500,16 +1506,6 @@ bool CssParser::endCacheCompile() {
     dropStaging();
     return false;
   }
-
-  outFile.write(CssParser::CSS_CACHE_VERSION);
-  const auto ruleCount = static_cast<uint16_t>(compileSelectorOffsets_.size() + compileRetiredOffsets_.size());
-  outFile.write(reinterpret_cast<const uint8_t*>(&ruleCount), sizeof(ruleCount));
-  outFile.write(reinterpret_cast<const uint8_t*>(&totalSelectorCandidates_), sizeof(totalSelectorCandidates_));
-  outFile.write(reinterpret_cast<const uint8_t*>(&unsupportedSelectorSkips_), sizeof(unsupportedSelectorSkips_));
-  outFile.write(static_cast<uint8_t>((hasIdSelectors_ ? 1 : 0) | (rulesTruncated_ ? 2 : 0)));  // v17 flags byte
-  writeComplexTable(outFile);
-  // v10: index immediately after the header — write zeroed placeholder, patch below.
-
   FsFile tempFile;
   if (!Storage.openFileForRead("CSS", compileTempPath_, tempFile)) {
     outFile.close();
@@ -1518,51 +1514,14 @@ bool CssParser::endCacheCompile() {
     return false;
   }
 
-  std::vector<SelectorEntry> indexEntries;
-  indexEntries.reserve(ruleCount);
-  {
-    constexpr SelectorEntry kZero{};
-    for (uint16_t i = 0; i < ruleCount; ++i) {
-      outFile.write(reinterpret_cast<const uint8_t*>(&kZero), sizeof(kZero));
-    }
-  }
-
-  // The staging records are already in the cache's record format; copy each live one across.
-  char selectorBuf[MAX_SELECTOR_LENGTH];
-  std::array<uint8_t, CSS_RULE_ORDER_BYTES + CSS_FIXED_STYLE_BYTES> tail{};
-  const auto copyRecord = [&](const uint32_t stagedOffset) {
-    uint16_t selectorLen = 0;
-    if (!tempFile.seek(stagedOffset) || tempFile.read(&selectorLen, sizeof(selectorLen)) != sizeof(selectorLen) ||
-        selectorLen > MAX_SELECTOR_LENGTH || tempFile.read(selectorBuf, selectorLen) != selectorLen ||
-        tempFile.read(tail.data(), tail.size()) != static_cast<int>(tail.size())) {
-      return false;
-    }
-    const uint32_t ruleOffset = outFile.position();
-    outFile.write(reinterpret_cast<const uint8_t*>(&selectorLen), sizeof(selectorLen));
-    outFile.write(reinterpret_cast<const uint8_t*>(selectorBuf), selectorLen);
-    outFile.write(tail.data(), tail.size());
-    indexEntries.push_back({selectorHash(std::string_view(selectorBuf, selectorLen)), ruleOffset});
-    return true;
-  };
-  bool copied = true;
-  for (const auto& it : compileSelectorOffsets_) copied = copied && copyRecord(it.second.offset);
-  for (const uint32_t offset : compileRetiredOffsets_) copied = copied && copyRecord(offset);
-  tempFile.close();
-  if (!copied) {
+  if (!writeCompiledCache(outFile, tempFile, scratch)) {
+    tempFile.close();
     outFile.close();
     Storage.remove((cachePath + rulesCache).c_str());
     dropStaging();
     return false;
   }
-
-  // Sort and patch the index placeholder at position 11.
-  std::sort(indexEntries.begin(), indexEntries.end(),
-            [](const SelectorEntry& a, const SelectorEntry& b) { return a.hash < b.hash; });
-  outFile.seek(CssParser::CSS_CACHE_HEADER_BYTES + complexBytes_);
-  for (const auto& entry : indexEntries) {
-    outFile.write(reinterpret_cast<const uint8_t*>(&entry), sizeof(entry));
-  }
-
+  tempFile.close();
   outFile.close();
   saveBackgroundImages();
   backgroundImagesLoaded_ = true;  // what was just compiled is what the file now holds
@@ -1579,6 +1538,91 @@ bool CssParser::endCacheCompile() {
   dropIndex();
 
   return ensureCacheIndexLoaded();
+}
+
+bool CssParser::writeCompiledCache(FsFile& outFile, FsFile& tempFile, BuildArena* const scratch) {
+  // The cache is written, and the staging file read, through small windows: a rule copied field by
+  // field was ~10 card calls -- a seek, three reads, four writes, and its index entry written
+  // twice. In a block of `scratch` when it has room (the lent framebuffer of a first open),
+  // released when this returns; else on the heap, pass-through if it refuses them.
+  struct Windows {
+    BuildArena* region = nullptr;
+    BuildArena::Block block;
+    uint8_t* data = nullptr;
+    Windows(BuildArena* const r, const size_t bytes) {
+      if (r == nullptr || !r->valid() || r->capacity() - r->used() < bytes + alignof(std::max_align_t)) return;
+      block = r->reserveBlock();
+      data = static_cast<uint8_t*>(r->alloc(bytes));
+      if (data != nullptr) {
+        region = r;
+      } else {
+        r->release(block);
+      }
+    }
+    ~Windows() {
+      if (region != nullptr) region->release(block);
+    }
+  } windows(scratch, 2 * CSS_FINALIZE_WINDOW_BYTES);
+  std::optional<serialization::BufferedFileWriter> writer;
+  std::optional<serialization::BufferedFileReader> reader;
+  if (windows.data != nullptr) {
+    writer.emplace(outFile, windows.data, CSS_FINALIZE_WINDOW_BYTES);
+    reader.emplace(tempFile, windows.data + CSS_FINALIZE_WINDOW_BYTES, CSS_FINALIZE_WINDOW_BYTES);
+  } else {
+    writer.emplace(outFile, CSS_FINALIZE_WINDOW_BYTES);
+    reader.emplace(tempFile, CSS_FINALIZE_WINDOW_BYTES);
+  }
+  serialization::BufferedFileWriter& out = *writer;
+  serialization::BufferedFileReader& in = *reader;
+
+  out.writePod(CssParser::CSS_CACHE_VERSION);
+  const auto ruleCount = static_cast<uint16_t>(compileSelectorOffsets_.size() + compileRetiredOffsets_.size());
+  out.writePod(ruleCount);
+  out.writePod(totalSelectorCandidates_);
+  out.writePod(unsupportedSelectorSkips_);
+  out.writePod(static_cast<uint8_t>((hasIdSelectors_ ? 1 : 0) | (rulesTruncated_ ? 2 : 0)));  // v17 flags byte
+  out.writePod(complexBytes_);
+  if (complexBytes_ > 0) out.write(complexTable(), complexBytes_);
+  // v10: index immediately after the header — write zeroed placeholder, patch below.
+  {
+    constexpr SelectorEntry kZero{};
+    for (uint16_t i = 0; i < ruleCount; ++i) out.writePod(kZero);
+  }
+
+  // The live staging records, in the order they were staged: the staging file is read once, front
+  // to back, with superseded records skipped inside the window. Each entry holds the record's
+  // staging offset until it is copied, then its hash and its offset in the cache.
+  std::vector<SelectorEntry> indexEntries;
+  indexEntries.reserve(ruleCount);
+  for (const auto& it : compileSelectorOffsets_) indexEntries.push_back({0, it.second.offset});
+  for (const uint32_t offset : compileRetiredOffsets_) indexEntries.push_back({0, offset});
+  std::sort(indexEntries.begin(), indexEntries.end(),
+            [](const SelectorEntry& a, const SelectorEntry& b) { return a.offset < b.offset; });
+
+  // The staging records are already in the cache's record format; copy each live one across.
+  char selectorBuf[MAX_SELECTOR_LENGTH];
+  std::array<uint8_t, CSS_RULE_ORDER_BYTES + CSS_FIXED_STYLE_BYTES> tail{};
+  for (SelectorEntry& entry : indexEntries) {
+    uint16_t selectorLen = 0;
+    in.seek(entry.offset);
+    if (!in.readPod(selectorLen) || selectorLen > MAX_SELECTOR_LENGTH || !in.read(selectorBuf, selectorLen) ||
+        !in.read(tail.data(), tail.size())) {
+      return false;
+    }
+    entry = {selectorHash(std::string_view(selectorBuf, selectorLen)), out.position()};
+    out.writePod(selectorLen);
+    out.write(selectorBuf, selectorLen);
+    out.write(tail.data(), tail.size());
+  }
+  if (!out.flush()) return false;
+
+  // Sort and patch the index placeholder at position 11, in one write.
+  std::sort(indexEntries.begin(), indexEntries.end(),
+            [](const SelectorEntry& a, const SelectorEntry& b) { return a.hash < b.hash; });
+  outFile.seek(CssParser::CSS_CACHE_HEADER_BYTES + complexBytes_);
+  const size_t indexBytes = indexEntries.size() * sizeof(SelectorEntry);
+  return indexBytes == 0 ||
+         outFile.write(reinterpret_cast<const uint8_t*>(indexEntries.data()), indexBytes) == indexBytes;
 }
 
 bool CssParser::empty() const { return ruleCount() == 0; }
@@ -1681,33 +1725,44 @@ void CssParser::logResolveStats(const char* context) const {
 }
 
 bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
+  // Read in one call and taken apart in RAM: a field at a time was ~30 SdFat calls a rule, paid for
+  // every rule each time a section build loads the ruleset into its arena.
+  std::array<uint8_t, CSS_FIXED_STYLE_BYTES> payload;
+  if (file.read(payload.data(), payload.size()) != static_cast<int>(payload.size())) return false;
+  size_t at = 0;
+  const auto get = [&payload, &at](void* out, const size_t n) {
+    if (at + n > payload.size()) return false;  // a field past CSS_FIXED_STYLE_BYTES: see its static_assert
+    memcpy(out, payload.data() + at, n);
+    at += n;
+    return true;
+  };
   uint8_t enumVal;
-  if (file.read(&enumVal, 1) != 1) {
+  if (!get(&enumVal, 1)) {
     return false;
   }
   style.textAlign = static_cast<CssTextAlign>(enumVal);
 
-  if (file.read(&enumVal, 1) != 1) {
+  if (!get(&enumVal, 1)) {
     return false;
   }
   style.fontStyle = static_cast<CssFontStyle>(enumVal);
 
-  if (file.read(&enumVal, 1) != 1) {
+  if (!get(&enumVal, 1)) {
     return false;
   }
   style.fontWeight = static_cast<CssFontWeight>(enumVal);
 
-  if (file.read(&enumVal, 1) != 1) {
+  if (!get(&enumVal, 1)) {
     return false;
   }
   style.textDecoration = static_cast<CssTextDecoration>(enumVal);
 
-  auto readLength = [&file](CssLength& len) -> bool {
-    if (file.read(&len.value, sizeof(len.value)) != sizeof(len.value)) {
+  auto readLength = [&get](CssLength& len) -> bool {
+    if (!get(&len.value, sizeof(len.value))) {
       return false;
     }
     uint8_t unitVal;
-    if (file.read(&unitVal, 1) != 1) {
+    if (!get(&unitVal, 1)) {
       return false;
     }
     len.unit = static_cast<CssUnit>(unitVal);
@@ -1722,13 +1777,13 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   }
 
   uint8_t displayVal;
-  if (file.read(&displayVal, 1) != 1) {
+  if (!get(&displayVal, 1)) {
     return false;
   }
   style.display = static_cast<CssDisplay>(displayVal);
 
   uint16_t definedBits = 0;
-  if (file.read(&definedBits, sizeof(definedBits)) != sizeof(definedBits)) {
+  if (!get(&definedBits, sizeof(definedBits))) {
     return false;
   }
   style.defined.textAlign = (definedBits & 1 << 0) != 0;
@@ -1749,19 +1804,19 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.display = (definedBits & 1 << 15) != 0;
   uint8_t vertAlignVal = 0;
   uint8_t vertAlignDefined = 0;
-  if (file.read(&vertAlignVal, 1) != 1 || file.read(&vertAlignDefined, 1) != 1) {
+  if (!get(&vertAlignVal, 1) || !get(&vertAlignDefined, 1)) {
     return false;
   }
   style.verticalAlign = static_cast<CssVerticalAlign>(vertAlignVal);
   style.defined.verticalAlign = vertAlignDefined != 0 ? 1 : 0;
   uint8_t cssFloatVal = 0;
-  if (file.read(&cssFloatVal, 1) != 1) {
+  if (!get(&cssFloatVal, 1)) {
     return false;
   }
   style.cssFloat = static_cast<CssFloat>(cssFloatVal);
   style.defined.cssFloat = (cssFloatVal != static_cast<uint8_t>(CssFloat::None)) ? 1 : 0;
   uint8_t smallCapsVal = 0;
-  if (file.read(&smallCapsVal, 1) != 1) {
+  if (!get(&smallCapsVal, 1)) {
     return false;
   }
   // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset)
@@ -1769,7 +1824,7 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.smallCaps = (smallCapsVal & 0x2) != 0 ? 1 : 0;
   float fontSizeMul = 1.0f;
   uint8_t fontSizeFlags = 0;
-  if (file.read(&fontSizeMul, sizeof(fontSizeMul)) != sizeof(fontSizeMul) || file.read(&fontSizeFlags, 1) != 1) {
+  if (!get(&fontSizeMul, sizeof(fontSizeMul)) || !get(&fontSizeFlags, 1)) {
     return false;
   }
   if ((fontSizeFlags & 0x1) != 0) {
@@ -1779,7 +1834,7 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   }
   style.defined.fontFamily = (fontSizeFlags & 0x4) != 0 ? 1 : 0;
   uint8_t blockFlags = 0;
-  if (file.read(&blockFlags, 1) != 1) {
+  if (!get(&blockFlags, 1)) {
     return false;
   }
   style.listStyleNone = (blockFlags & 0x01) != 0;
@@ -1789,7 +1844,7 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.pageBreakAfter = (blockFlags & 0x10) != 0;
   style.defined.pageBreakAfter = (blockFlags & 0x20) != 0 ? 1 : 0;
   uint8_t visibilityFlags = 0;
-  if (file.read(&visibilityFlags, 1) != 1) {
+  if (!get(&visibilityFlags, 1)) {
     return false;
   }
   style.colorTransparent = (visibilityFlags & 0x01) != 0;
@@ -1798,17 +1853,21 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.opacityZero = (visibilityFlags & 0x08) != 0 ? 1 : 0;
   style.visibilityHidden = (visibilityFlags & 0x10) != 0;
   style.defined.visibilityHidden = (visibilityFlags & 0x20) != 0 ? 1 : 0;
-  return file.read(&style.fontFamily, sizeof(style.fontFamily)) == sizeof(style.fontFamily);
+  return get(&style.fontFamily, sizeof(style.fontFamily));
 }
 
 void CssParser::writeCssStylePayload(FsFile& file, const CssStyle& style) {
   // Composed in one buffer and written once: a field at a time was ~30 SdFat calls a rule, the
   // bulk of a stylesheet's compile on the device.
   std::array<uint8_t, CSS_FIXED_STYLE_BYTES> payload;
+  file.write(payload.data(), encodeCssStylePayload(style, payload.data()));
+}
+
+size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const payload) {
   size_t at = 0;
-  const auto put = [&payload, &at](const void* data, const size_t n) {
-    if (at + n > payload.size()) return;  // a field past CSS_FIXED_STYLE_BYTES: see its static_assert
-    memcpy(payload.data() + at, data, n);
+  const auto put = [payload, &at](const void* data, const size_t n) {
+    if (at + n > CSS_FIXED_STYLE_BYTES) return;  // a field past CSS_FIXED_STYLE_BYTES: see its static_assert
+    memcpy(payload + at, data, n);
     at += n;
   };
   const auto put8 = [&put](const uint8_t v) { put(&v, 1); };
@@ -1877,7 +1936,7 @@ void CssParser::writeCssStylePayload(FsFile& file, const CssStyle& style) {
                                   (style.defined.visibilityHidden ? 0x20 : 0x00);
   put8(visibilityFlags);
   put(&style.fontFamily, sizeof(style.fontFamily));
-  file.write(payload.data(), at);
+  return at;
 }
 
 void CssParser::writeComplexTable(FsFile& file) const {
@@ -1888,6 +1947,20 @@ void CssParser::writeComplexTable(FsFile& file) const {
 void CssParser::writeRuleRecord(FsFile& file, const std::string& selector, const uint16_t order,
                                 const CssStyle& style) {
   const auto selectorLen = static_cast<uint16_t>(selector.size());
+  // The record in one write: its four fields were a card call each for every rule a compile stages.
+  if (selectorLen <= MAX_SELECTOR_LENGTH) {
+    std::array<uint8_t, sizeof(selectorLen) + MAX_SELECTOR_LENGTH + CSS_RULE_ORDER_BYTES + CSS_FIXED_STYLE_BYTES> rec;
+    size_t at = 0;
+    memcpy(rec.data() + at, &selectorLen, sizeof(selectorLen));
+    at += sizeof(selectorLen);
+    memcpy(rec.data() + at, selector.data(), selectorLen);
+    at += selectorLen;
+    memcpy(rec.data() + at, &order, sizeof(order));
+    at += sizeof(order);
+    at += encodeCssStylePayload(style, rec.data() + at);
+    file.write(rec.data(), at);
+    return;
+  }
   file.write(reinterpret_cast<const uint8_t*>(&selectorLen), sizeof(selectorLen));
   file.write(reinterpret_cast<const uint8_t*>(selector.data()), selectorLen);
   file.write(reinterpret_cast<const uint8_t*>(&order), sizeof(order));
@@ -2781,6 +2854,10 @@ CssStyle CssParser::parseInlineStyle(const std::string& styleValue) { return par
 // Cache serialization
 
 bool CssParser::hasCache() const { return Storage.exists((cachePath + rulesCache).c_str()); }
+
+bool CssParser::cacheIsCurrent() const {
+  return !cachePath.empty() && cache_version::isCurrent(cachePath + rulesCache, CSS_CACHE_VERSION);
+}
 
 void CssParser::deleteCache() const {
   if (hasCache()) Storage.remove((cachePath + rulesCache).c_str());
