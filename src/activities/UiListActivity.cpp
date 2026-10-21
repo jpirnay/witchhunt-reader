@@ -12,7 +12,6 @@
 #include "activities/ActivityManager.h"
 #include "activities/SliderPickerActivity.h"
 #include "components/UITheme.h"
-#include "components/themes/HeaderLayout.h"
 #include "settings/SliderSettingPicker.h"
 
 namespace fui = freeink::ui;
@@ -200,9 +199,7 @@ void UiListActivity::drawListHints() { listController.drawHints(renderer, footer
 
 Rect UiListActivity::listContentRect() const { return UITheme::getContentRect(renderer, true, true); }
 
-Rect UiListActivity::listHeaderRect() const {
-  return HeaderLayout::header(listContentRect(), UITheme::getInstance().getMetrics());
-}
+Rect UiListActivity::listHeaderRect() const { return UITheme::getHeaderRect(renderer, true, true); }
 
 int UiListActivity::selectedPosition() const {
   // activeNav() hands out a mutable reference; reading through it changes nothing.

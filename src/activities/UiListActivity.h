@@ -83,7 +83,9 @@ class UiListActivity : public Activity, protected UiAppHost {
 
   // The content area a list lays out in: room for the bottom hints AND the side Up/Down boxes.
   [[nodiscard]] Rect listContentRect() const;
-  // The theme's header, placed inside listContentRect() so the side hint strip never sits over it.
+  // The theme's header for a list: UITheme::getHeaderRect() with both hint strips, so it lies below
+  // a strip across the top and stops short of a column beside it (landscape), and spans the width
+  // in portrait, where the side boxes sit beside the rows below it -- as on Home and the file browser.
   [[nodiscard]] Rect listHeaderRect() const;
   // Both hint strips for this list, with footerBackLabel() / footerConfirmLabel() on Back / Confirm.
   void drawListHints();
