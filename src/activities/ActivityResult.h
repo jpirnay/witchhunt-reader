@@ -29,7 +29,7 @@ struct MenuResult {
   std::string sdFontFamilyOverride;
   int8_t fontSizeOverride = -1;
   uint8_t textDarkness = 1;
-  uint8_t bionicReadingOverride = 0;
+  int8_t bionicReadingOverride = -1;
   int8_t paragraphAlignmentOverride = -1;
   int8_t textAntiAliasingOverride = -1;
   int8_t hyphenationOverride = -1;

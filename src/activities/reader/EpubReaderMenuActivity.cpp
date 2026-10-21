@@ -5,6 +5,7 @@
 
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
+#include "OnOffOverride.h"
 #include "SdCardFontGlobals.h"
 #include "activities/settings/SettingActionDispatch.h"
 #include "components/UITheme.h"
@@ -64,7 +65,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
     const int totalPages, const int bookProgressPercent, const uint8_t currentOrientation, const bool hasFootnotes,
     const int8_t initialEmbeddedStyleOverride, const int8_t initialImageRenderingOverride,
     const int8_t initialFontFamilyOverride, const std::string& initialSdFontFamilyOverride,
-    const int8_t initialFontSizeOverride, const uint8_t initialTextDarkness, const bool initialBionicReadingOverride,
+    const int8_t initialFontSizeOverride, const uint8_t initialTextDarkness, const int8_t initialBionicReadingOverride,
     const int8_t initialGuideDotsOverride, const int8_t initialParagraphAlignmentOverride,
     const int8_t initialTextAntiAliasingOverride, const int8_t initialHyphenationOverride,
     const int8_t initialFontSizeNormalizationOverride, const int8_t initialInlineFootnotePreviewsOverride,
@@ -78,7 +79,8 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
       pendingSdFontFamilyOverride(initialSdFontFamilyOverride),
       pendingFontSizeOverride(initialFontSizeOverride),
       pendingTextDarkness(initialTextDarkness),
-      pendingBionicReading(initialBionicReadingOverride),
+      pendingBionicReadingOverride(initialBionicReadingOverride),
+      openedBionicReadingOverride(initialBionicReadingOverride),
       pendingGuideDotsOverride(initialGuideDotsOverride),
       pendingParagraphAlignmentOverride(initialParagraphAlignmentOverride),
       pendingTextAntiAliasingOverride(initialTextAntiAliasingOverride),
@@ -271,12 +273,18 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
           [](void* ctx, uint8_t v) { static_cast<EpubReaderMenuActivity*>(ctx)->pendingTextDarkness = v; })
           .withSelectorActivity());
 
+  // Bionic: off / on as the page reads, unlike the default / on / off rows below (see OnOffOverride)
   settingsItems.push_back(SettingInfo::DynamicEnumCtx(
       StrId::STR_BIONIC_READING, {StrId::STR_STATE_OFF, StrId::STR_STATE_ON}, self,
       [](const void* ctx) -> uint8_t {
-        return static_cast<const EpubReaderMenuActivity*>(ctx)->pendingBionicReading ? 1 : 0;
+        const auto* s = static_cast<const EpubReaderMenuActivity*>(ctx);
+        return OnOffOverride::isOn(s->pendingBionicReadingOverride, SETTINGS.bionicReading != 0) ? 1 : 0;
       },
-      [](void* ctx, uint8_t v) { static_cast<EpubReaderMenuActivity*>(ctx)->pendingBionicReading = (v != 0); }));
+      [](void* ctx, uint8_t v) {
+        auto* s = static_cast<EpubReaderMenuActivity*>(ctx);
+        s->pendingBionicReadingOverride =
+            OnOffOverride::forChoice(v != 0, s->openedBionicReadingOverride, SETTINGS.bionicReading != 0);
+      }));
 
   // Guide dots: default / on / off (mirrors QuickOverrides)
   settingsItems.push_back(SettingInfo::DynamicEnumCtx(
@@ -433,7 +441,7 @@ void EpubReaderMenuActivity::finishWithAction(MenuAction action) {
                      pendingSdFontFamilyOverride,
                      pendingFontSizeOverride,
                      pendingTextDarkness,
-                     static_cast<uint8_t>(pendingBionicReading),
+                     pendingBionicReadingOverride,
                      pendingParagraphAlignmentOverride,
                      pendingTextAntiAliasingOverride,
                      pendingHyphenationOverride};
@@ -476,7 +484,7 @@ void EpubReaderMenuActivity::onBackPressed() {
                      pendingSdFontFamilyOverride,
                      pendingFontSizeOverride,
                      pendingTextDarkness,
-                     static_cast<uint8_t>(pendingBionicReading),
+                     pendingBionicReadingOverride,
                      pendingParagraphAlignmentOverride,
                      pendingTextAntiAliasingOverride,
                      pendingHyphenationOverride};
