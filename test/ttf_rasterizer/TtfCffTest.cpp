@@ -813,7 +813,7 @@ void expectTheBlockDrawsAsTheFile(const std::vector<uint8_t>& font, const std::s
   *drawn = 0;
   const FileSource file = memorySource(font);
   SdBlock block;
-  ASSERT_TRUE(block.plan(file)) << name;
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file)) << name;
   // The block, read whole and in pieces of a prime size, which cut every part of it somewhere.
   FileSource blockSource = block.source();
   std::vector<uint8_t> tables(block.bytes());

@@ -59,19 +59,24 @@ struct CffBlock::Window {
   }
 };
 
-bool CffBlock::plan(const FileSource& file) {
+uint32_t CffBlock::planBytes() { return sizeof(PlanWork); }
+uint32_t CffBlock::readBytes() { return sizeof(FileParse); }
+
+SdPlan CffBlock::plan(const FileSource& file) {
   *this = CffBlock{};
   const auto work = makeUniqueNoThrow<PlanWork>(file);
   if (!work) {
     LOG_ERR("TTF", "SD mode: no %u B to read a CFF table with", static_cast<unsigned>(sizeof(PlanWork)));
-    return false;
+    return SdPlan::Transient;
   }
   FontBytes& bytes = work->parse.bytes;
+  // Whatever stops the plan: a read that failed is for now only; anything else is the font's.
+  const auto stopped = [&bytes]() { return bytes.ioError() ? SdPlan::Transient : SdPlan::NoBlock; };
   const CffFace& cff = work->face.cff;
   CffParts parts;
   if (parseFace(bytes, &work->face) != FaceStatus::Ok || work->face.outlines != Face::Outlines::Cff ||
       !readCffParts(bytes, cff, &parts)) {
-    return false;
+    return stopped();
   }
   cid_ = cff.cid;
   topDicts_ = parts.topDicts;
@@ -81,11 +86,11 @@ bool CffBlock::plan(const FileSource& file) {
   // The DICTs written again: their sizes do not depend on where anything lands.
   CffDictOffsets dict;  // the Top DICT, then each font DICT
   uint32_t topBytes = 0;
-  if (!readCffDictOffsets(bytes, topDicts_, 0, &dict) || !rewrittenBytes(dict, true, &topBytes)) return false;
+  if (!readCffDictOffsets(bytes, topDicts_, 0, &dict) || !rewrittenBytes(dict, true, &topBytes)) return stopped();
   uint32_t fontDictBytes = 0;  // at most 256 DICTs of kCffMaxDictBytes
   for (uint32_t fd = 0; cid_ && fd < fdArray_.count; ++fd) {
     uint32_t length = 0;
-    if (!readCffDictOffsets(bytes, fdArray_, fd, &dict) || !rewrittenBytes(dict, false, &length)) return false;
+    if (!readCffDictOffsets(bytes, fdArray_, fd, &dict) || !rewrittenBytes(dict, false, &length)) return stopped();
     fontDictBytes += length;
   }
 
@@ -116,11 +121,11 @@ bool CffBlock::plan(const FileSource& file) {
   }
   charStringsAt_ = add(Part::Copy, cff.charStrings.start, cff.charStrings.dataStart - cff.charStrings.start);
   // Every offset is written as a 5-byte integer: a positive int32.
-  if (end > INT32_MAX) return false;
+  if (end > INT32_MAX) return SdPlan::NoBlock;
   bytes_ = static_cast<uint32_t>(end);
   dataOffset_ = cff.charStrings.dataStart;
   dataLength_ = cff.charStrings.end - cff.charStrings.dataStart;
-  return true;
+  return SdPlan::Ok;
 }
 
 bool CffBlock::read(const FileSource& file, const uint32_t offset, uint8_t* dst, const uint32_t len) const {

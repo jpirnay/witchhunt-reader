@@ -81,28 +81,32 @@ struct Record {
   uint32_t length;
 };
 
-// Calls `visit(ctx, record)` for each record of `file`'s table directory, read eight records at a time. False when
-// the file is not an sfnt of TrueType or CFF outlines (a collection 'ttcf'), its directory does not fit it, a read
-// fails, or `visit` returns false. `version` gets the sfnt version. A function, not a template: the registry's probe
-// and SD mode's block share one copy.
-bool forEachTable(const FileSource& file, uint32_t* version, bool (*visit)(void* ctx, const Record& record),
+// What forEachTable() found: every record visited, a file it refuses, or a read that failed.
+enum class Walk : uint8_t { Done, Refused, ReadFailed };
+
+// Calls `visit(ctx, record)` for each record of `file`'s table directory, read eight records at a time. Refused when
+// the file is not an sfnt of TrueType or CFF outlines (a collection 'ttcf'), its directory does not fit it, or `visit`
+// returns false. `version` gets the sfnt version. A function, not a template: the registry's probe and SD mode's
+// block share one copy.
+Walk forEachTable(const FileSource& file, uint32_t* version, bool (*visit)(void* ctx, const Record& record),
                   void* ctx) {
   uint8_t header[12];
-  if (!file.read || file.size < sizeof header || !file.read(file.ctx, 0, header, sizeof header)) return false;
+  if (!file.read || file.size < sizeof header) return Walk::Refused;
+  if (!file.read(file.ctx, 0, header, sizeof header)) return Walk::ReadFailed;
   *version = be32(header);
-  if (*version != 0x00010000 && *version != tag("true") && *version != kVersionCff) return false;
+  if (*version != 0x00010000 && *version != tag("true") && *version != kVersionCff) return Walk::Refused;
   const uint16_t numTables = be16(header + 4);
-  if (numTables == 0 || numTables > kMaxDirectory || sizeof header + 16u * numTables > file.size) return false;
+  if (numTables == 0 || numTables > kMaxDirectory || sizeof header + 16u * numTables > file.size) return Walk::Refused;
   uint8_t records[8 * 16];
   for (uint16_t first = 0; first < numTables; first += 8) {
     const uint16_t n = std::min<uint16_t>(8, static_cast<uint16_t>(numTables - first));
-    if (!file.read(file.ctx, sizeof header + 16u * first, records, 16u * n)) return false;
+    if (!file.read(file.ctx, sizeof header + 16u * first, records, 16u * n)) return Walk::ReadFailed;
     for (uint16_t i = 0; i < n; ++i) {
       const uint8_t* raw = records + 16 * i;
-      if (!visit(ctx, {be32(raw), be32(raw + 4), be32(raw + 8), be32(raw + 12)})) return false;
+      if (!visit(ctx, {be32(raw), be32(raw + 4), be32(raw + 8), be32(raw + 12)})) return Walk::Refused;
     }
   }
-  return true;
+  return Walk::Done;
 }
 
 bool inFile(const FileSource& file, const uint32_t offset, const uint32_t length) {
@@ -164,9 +168,13 @@ bool fitsStore(const uint32_t* fileBytes, const uint32_t* sdBytes, const uint8_t
   in.freeMapPages = freeMapPages;
   glyphstore::Layout layout{};
   for (const uint8_t mode : {glyphstore::kModeFlash, glyphstore::kModeSd}) {
-    // A style without an SD-mode block (sdBytes UINT32_MAX, a CFF file whose block cannot be planned) cannot be mapped
-    // from the card; its size would also wrap pagesFor().
-    if (mode == glyphstore::kModeSd && std::find(sdBytes, sdBytes + count, UINT32_MAX) != sdBytes + count) continue;
+    if (mode == glyphstore::kModeSd) {
+      // A style without an SD-mode block (UINT32_MAX, a CFF file that can have none) cannot be mapped from the card.
+      // One whose block the probe could not plan for now (kSdBytesUnknown) leaves the family listed: its load plans
+      // the blocks again, and refuses the family if they do not fit. Neither size may reach pagesFor(): it would wrap.
+      if (std::find(sdBytes, sdBytes + count, UINT32_MAX) != sdBytes + count) continue;
+      if (std::find(sdBytes, sdBytes + count, kSdBytesUnknown) != sdBytes + count) return true;
+    }
     for (uint8_t s = 0; s < count; ++s) {
       in.styleMode[s] = mode;
       in.styleBytes[s] = mode == glyphstore::kModeFlash ? fileBytes[s] : sdBytes[s];
@@ -218,7 +226,7 @@ FileProbe probeFile(const FileSource& file) {
     }
     return true;
   };
-  if (!forEachTable(file, &version, visit, &scan)) return {};
+  if (forEachTable(file, &version, visit, &scan) != Walk::Done) return {};
   const bool cff = version == kVersionCff;
   if (scan.found != (cff ? kRequiredCff : kRequiredTrueType) || (cff && scan.cff2)) return {};
   FileProbe& probe = scan.probe;
@@ -226,7 +234,7 @@ FileProbe probeFile(const FileSource& file) {
   if (!cff) {
     // As SdBlock::plan() lays it out, by the same rule (sdTable()).
     const uint64_t sdBytes = sdBlockBytes(scan.sdTables, scan.sdTableBytes);
-    probe.sdBytes = sdBytes < UINT32_MAX ? static_cast<uint32_t>(sdBytes) : UINT32_MAX;
+    probe.sdBytes = sdBytes < kSdBytesUnknown ? static_cast<uint32_t>(sdBytes) : UINT32_MAX;
   }
 
   uint8_t head[kHeadBytes];
@@ -239,16 +247,18 @@ FileProbe probeFile(const FileSource& file) {
     probe.weight = be16(weight);
   }
   if (cff) {
-    // The rebuilt CFF table's size takes reading the table: the block planned as an install plans it.
+    // The rebuilt CFF table's size takes reading the table: the block planned as an install plans it. Without the
+    // memory, or with a read failing, its size is not known for now (fitsStore() then lists the family).
     const auto block = makeUniqueNoThrow<SdBlock>();
-    probe.sdBytes = block && block->plan(file) ? block->bytes() : UINT32_MAX;
+    const SdPlan planned = block ? block->plan(file) : SdPlan::Transient;
+    probe.sdBytes = planned == SdPlan::Ok ? block->bytes() : planned == SdPlan::NoBlock ? UINT32_MAX : kSdBytesUnknown;
   }
   return probe;
 }
 
 // --- SD mode's style block ---
 
-bool SdBlock::plan(const FileSource& file) {
+SdPlan SdBlock::plan(const FileSource& file) {
   file_ = file;
   seen_ = 0;
   count_ = 0;
@@ -256,9 +266,13 @@ bool SdBlock::plan(const FileSource& file) {
   outlinesAt_ = 0;
   outlinesLength_ = 0;
   const auto visit = [](void* ctx, const Record& record) { return static_cast<SdBlock*>(ctx)->addTable(&record); };
-  if (!forEachTable(file, &version_, visit, this)) return false;
+  const Walk walk = forEachTable(file, &version_, visit, this);
+  if (walk != Walk::Done) return walk == Walk::ReadFailed ? SdPlan::Transient : SdPlan::NoBlock;
   const bool cff = version_ == kVersionCff;
-  if (cff && !cff_.plan(file)) return false;
+  if (cff) {
+    const SdPlan table = cff_.plan(file);
+    if (table != SdPlan::Ok) return table;
+  }
   const SdTables& kept = cff ? kSdCff : kSdTrueType;
   // The directory, then the tables, each 4-byte aligned, the outline table last: glyf past them all
   // (sdBlockBytes()), the rebuilt CFF table ending the block, its charstring data past it.
@@ -272,14 +286,14 @@ bool SdBlock::plan(const FileSource& file) {
     tables_[i].blockOffset = static_cast<uint32_t>(end);
     end += glyphstore::align4(tables_[i].length);
     // The block and the outlines past it stay in 32 bits, whatever the tables.
-    if (end > UINT32_MAX - file.size) return false;
+    if (end > UINT32_MAX - file.size) return SdPlan::NoBlock;
   }
-  if (outlines < 0) return false;
+  if (outlines < 0) return SdPlan::NoBlock;
   Table& table = tables_[outlines];
   table.blockOffset = static_cast<uint32_t>(end);
   if (cff) {
     end += cff_.bytes();
-    if (end > UINT32_MAX - file.size) return false;
+    if (end > UINT32_MAX - file.size) return SdPlan::NoBlock;
     table.length = cff_.bytes() + cff_.dataLength();
     outlinesAt_ = cff_.dataOffset();
     outlinesLength_ = cff_.dataLength();
@@ -288,7 +302,7 @@ bool SdBlock::plan(const FileSource& file) {
     outlinesLength_ = table.length;
   }
   bytes_ = static_cast<uint32_t>(end);
-  return true;
+  return SdPlan::Ok;
 }
 
 // A directory record (a Record): kept when SD mode copies its table, or it is the outline table.

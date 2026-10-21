@@ -162,13 +162,19 @@ void openTtfFiles(const SdCardFontFamilyInfo& family, HalFile (&files)[4], ttf::
 }
 
 // The first `count` families as one set, under the set's identity; nullptr when they cannot be drawn together.
+// `forNow` tells a failure for now (no memory, a card read: TtfFontSet::failedForNow()) from the set's own.
 std::unique_ptr<TtfFontSet> loadSet(NorFlash& flash, const ttf::FileSource (*sources)[4],
                                     const uint8_t (*identities)[glyphstore::kIdentityBytes], const uint8_t count,
-                                    const std::function<void()>& onColdLoad, const TtfFontSet::Install install) {
+                                    const std::function<void()>& onColdLoad, const TtfFontSet::Install install,
+                                    bool* forNow) {
   uint8_t identity[glyphstore::kIdentityBytes];
   ttf::setIdentity(identities, count, identity);
   auto set = makeUniqueNoThrow<TtfFontSet>(flash);
-  if (!set || !set->load(sources, count, identity, onColdLoad, install)) return nullptr;
+  *forNow = !set;
+  if (!set || !set->load(sources, count, identity, onColdLoad, install)) {
+    *forNow = *forNow || set->failedForNow();
+    return nullptr;
+  }
   return set;
 }
 
@@ -214,14 +220,17 @@ bool SdCardFontManager::loadTtf(const SdCardFontFamilyInfo* const* families, uin
   const TtfFontSet::Install install =
       choice == TtfChoice::ExactlyThese ? TtfFontSet::Install::Never : TtfFontSet::Install::IfNeeded;
   uint8_t loaded = count;
-  auto set = loadSet(*flash, opened->sources, opened->identities, count, onColdLoad, install);
-  while (!set && loaded > 1 && choice == TtfChoice::FewerIfNeeded) {
-    // Too large together, or an accent family that does not read: without the last family, the least used accent,
-    // and so on down to the body's family alone, as before Stage B.
+  bool forNow = false;
+  auto set = loadSet(*flash, opened->sources, opened->identities, count, onColdLoad, install, &forNow);
+  // Too large together, or an accent family that does not read: without the last family, the least used accent,
+  // and so on down to the body's family alone, as before Stage B. Not after a failure for now (no memory, a card
+  // read): fewer families would install another set over the one the store holds; the next load tries this one again.
+  while (!set && !forNow && loaded > 1 && choice == TtfChoice::FewerIfNeeded) {
     --loaded;
     LOG_INF("SDMGR", "TTF families do not load together; %s left out", families[loaded]->name.c_str());
-    set = loadSet(*flash, opened->sources, opened->identities, loaded, onColdLoad, install);
+    set = loadSet(*flash, opened->sources, opened->identities, loaded, onColdLoad, install, &forNow);
   }
+  if (!set && forNow) LOG_ERR("SDMGR", "TTF families could not load for now (memory, or a card read)");
   if (!set) {
     LOG_ERR("SDMGR", "TTF family %s cannot be drawn", families[0]->name.c_str());
     return false;

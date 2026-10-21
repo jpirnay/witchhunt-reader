@@ -7,6 +7,13 @@
 
 namespace ttf {
 
+/// What planning an SD-mode block found (SdBlock::plan(), CffBlock::plan()).
+enum class SdPlan : uint8_t {
+  Ok,
+  NoBlock,    ///< the file can have none: not a font the engine draws, or one past what a block holds
+  Transient,  ///< no memory, or a card read failed: for now only, never a reason to install another set
+};
+
 /// SD mode's CFF table (spec 9.4): an OpenType CFF font's CFF table rebuilt for its style block (SdBlock), so that the
 /// charstring data, the one part of it left on the card, comes after everything else the engine reads. In order: the
 /// header and the Name INDEX, the Top DICT INDEX, the String and Global Subr INDEXes, the charset, the Encoding, the
@@ -22,10 +29,14 @@ namespace ttf {
 /// rewrites through a page cache made for that read.
 class CffBlock {
  public:
-  /// Plans the rebuilt table of `file`'s CFF table, reading the file through a page cache made for the plan. False
-  /// when the engine cannot draw the font (parseFace()), a DICT written again would pass kCffMaxDictBytes, the table
-  /// would pass 2^31 bytes, or there is no memory for the page cache.
-  bool plan(const FileSource& file);
+  /// Plans the rebuilt table of `file`'s CFF table, reading the file through a page cache made for the plan
+  /// (planBytes() on the heap). NoBlock when the engine cannot draw the font (parseFace()), a DICT written again would
+  /// pass kCffMaxDictBytes, or the table would pass 2^31 bytes; Transient without the memory, or when a read fails.
+  SdPlan plan(const FileSource& file);
+  /// The heap a plan holds while it runs, and a read() that makes a DICT INDEX again: their page cache, and the plan's
+  /// face.
+  static uint32_t planBytes();
+  static uint32_t readBytes();
   /// The rebuilt table's bytes, its charstring data aside: the CharStrings INDEX's offsets end it.
   uint32_t bytes() const { return bytes_; }
   /// The charstring data, which follows the rebuilt table: where it lies in the file, and its length.

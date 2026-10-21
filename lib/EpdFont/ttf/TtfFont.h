@@ -166,7 +166,8 @@ class TtfFont {
 
   // What opening the installed styles found: MapFailed means a style's block cannot be mapped (the budget shrank
   // since the install); Changed, an SD-mode style's file on the card is not the one installed; Failed, no usable
-  // regular style or an unreadable header.
+  // regular style, an unreadable header, or an SD-mode style's file that could not be checked for now (no memory, a
+  // card read: TtfFontSet::failedForNow()), which is never a reason to install again.
   enum class StylesResult : uint8_t { Ok, MapFailed, Changed, Failed };
 
   TtfFont(TtfFontSet& set, uint8_t family) : set_(set), family_(family) {}
@@ -254,6 +255,10 @@ class TtfFontSet {
   /// is loaded: those files must stay open until then.
   bool load(const Files* families, uint8_t count, const uint8_t identity[glyphstore::kIdentityBytes],
             const std::function<void()>& onBusy = {}, Install install = Install::IfNeeded);
+  /// The last load() failed for now: no memory, or a card read failed. Nothing was erased unless a copy's read
+  /// failed after the erase, which the next load installs again. Loading fewer families would not help, and would
+  /// install another set over this one: load the same set again later.
+  bool failedForNow() const { return failedForNow_; }
   uint8_t familyCount() const { return count_; }
   /// The set's family `family`, in load()'s order; nullptr past familyCount().
   TtfFont* font(uint8_t family) const { return family < count_ ? fonts_[family].get() : nullptr; }
@@ -341,6 +346,7 @@ class TtfFontSet {
   std::unique_ptr<TtfFont> fonts_[kMaxFamilies];
   uint8_t count_ = 0;
   bool readsCard_ = false;
+  bool failedForNow_ = false;   // failedForNow()
   bool missesStarved_ = false;  // the heap could not hold a miss's memory in this pass (beginMiss())
   bool ringMode_ = false;
 

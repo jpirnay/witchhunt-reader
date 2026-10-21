@@ -30,6 +30,9 @@ using namespace ttf_test;
 namespace {
 // A nothrow array new of exactly this many bytes fails, as the scratch block's does on a heap without room for it.
 size_t refuseArrayBytes = 0;
+// The next nothrow new of one object of exactly this many bytes fails, once: an SD-mode plan's or read's page cache
+// (ttf::CffBlock::planBytes(), readBytes()) on a heap without room for it at that moment.
+size_t refuseNextObjectBytes = 0;
 // The bytes the program's news hold now: what a loaded family keeps is the difference across its load.
 size_t heapBytesHeld = 0;
 
@@ -57,7 +60,13 @@ void* operator new(const size_t size) {
   if (void* p = holdBytes(size)) return p;
   throw std::bad_alloc();
 }
-void* operator new(const size_t size, const std::nothrow_t&) noexcept { return holdBytes(size); }
+void* operator new(const size_t size, const std::nothrow_t&) noexcept {
+  if (refuseNextObjectBytes != 0 && size == refuseNextObjectBytes) {
+    refuseNextObjectBytes = 0;
+    return nullptr;
+  }
+  return holdBytes(size);
+}
 void* operator new[](const size_t size) {
   if (void* p = holdBytes(size)) return p;
   throw std::bad_alloc();
@@ -148,6 +157,7 @@ class TtfFontTest : public ::testing::Test {
   void TearDown() override {
     TtfFont::setHooks({});
     refuseArrayBytes = 0;
+    refuseNextObjectBytes = 0;
     EXPECT_EQ(0u, flash.violations());
     EXPECT_EQ(0u, flash.reprograms());
   }
@@ -1232,7 +1242,7 @@ namespace {
 // Families of files, in the set's order, loaded on `chip` at 14 pt as the set `identity`; null when the set cannot
 // be drawn.
 std::unique_ptr<TtfFontSet> openFamilies(SimNorFlash& chip, const std::vector<MemoryFile*>& families, int& busy,
-                                         const uint8_t* identity = kIdentitySet) {
+                                         const uint8_t* identity = kIdentitySet, bool* failedForNow = nullptr) {
   auto set = std::make_unique<TtfFontSet>(chip);
   std::vector<std::array<ttf::FileSource, 4>> sources(families.size());
   for (size_t f = 0; f < families.size(); ++f) {
@@ -1241,10 +1251,10 @@ std::unique_ptr<TtfFontSet> openFamilies(SimNorFlash& chip, const std::vector<Me
     }
   }
   static_assert(sizeof(std::array<ttf::FileSource, 4>) == sizeof(TtfFontSet::Files), "one family's files");
-  if (!set->load(reinterpret_cast<const TtfFontSet::Files*>(sources.data()), static_cast<uint8_t>(families.size()),
-                 identity, [&busy] { ++busy; })) {
-    return nullptr;
-  }
+  const bool loaded = set->load(reinterpret_cast<const TtfFontSet::Files*>(sources.data()),
+                                static_cast<uint8_t>(families.size()), identity, [&busy] { ++busy; });
+  if (failedForNow) *failedForNow = set->failedForNow();
+  if (!loaded) return nullptr;
   for (uint8_t f = 0; f < families.size(); ++f) {
     if (!set->font(f)->setBodySize(14)) return nullptr;
   }
@@ -2002,4 +2012,141 @@ TEST_F(TtfFontSetTest, AFamilyOfTrueTypeAndCffStylesDrawsEachFromItsOwnOutlines)
   EXPECT_GT(mixed[kRegular].reads, 0u);
   EXPECT_GT(mixed[kBold].reads, 0u);
   expectWrittenOnce(chip);
+}
+
+// --- SD mode: a failure for now (no memory, a card read) is never a reason to install ---
+
+TEST_F(TtfFontSetTest, APlanWithoutMemoryAtTheOpenInstallsNothing) {
+  MemoryFile cjk[4];
+  cjk[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
+  SimNorFlash chip{kSdOnlyBytes};
+  ASSERT_NE(nullptr, openFamilies(chip, {cjk}, busy));
+  const uint32_t erases = chip.totalSectorErases();
+  // The open checks the file against its block through a plan, whose page cache the heap cannot hold this once: the
+  // load fails for now, and the store stays as it is.
+  refuseNextObjectBytes = ttf::CffBlock::planBytes();
+  bool forNow = false;
+  EXPECT_EQ(nullptr, openFamilies(chip, {cjk}, busy, kIdentitySet, &forNow));
+  EXPECT_TRUE(forNow);
+  EXPECT_EQ(1, busy);
+  EXPECT_EQ(erases, chip.totalSectorErases());
+  // With the memory back, the next load draws from the store as installed.
+  const auto set = openFamilies(chip, {cjk}, busy);
+  ASSERT_NE(nullptr, set);
+  EXPECT_EQ(1, busy);
+  expectDrawnAs(reference(cjk[kRegular].bytes, 0x6F22, 14), *set->font(0), kRegular,
+                set->font(0)->glyph(kRegular, 0x6F22));
+  expectWrittenOnce(chip);
+}
+
+TEST_F(TtfFontSetTest, ACardReadErrorAtTheOpenInstallsNothing) {
+  // A CFF file whose CFF table cannot be read past its first sector, and a TrueType family whose files cannot be read
+  // at all: neither load installs, both fail for now, and both draw once the card reads again.
+  MemoryFile cjk[4];
+  cjk[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
+  SimNorFlash cffChip{kSdOnlyBytes};
+  ASSERT_NE(nullptr, openFamilies(cffChip, {cjk}, busy));
+  SimNorFlash trueTypeChip{kSdOnlyBytes};
+  ASSERT_NE(nullptr, openFamilies(trueTypeChip, {files}, busy));
+  ASSERT_EQ(2, busy);
+  const uint32_t cffErases = cffChip.totalSectorErases();
+  const uint32_t trueTypeErases = trueTypeChip.totalSectorErases();
+  cjk[kRegular].readsTo = ttf::SdPageCache::kPageBytes;
+  for (MemoryFile& file : files) file.failReads = true;
+  bool forNow = false;
+  EXPECT_EQ(nullptr, openFamilies(cffChip, {cjk}, busy, kIdentitySet, &forNow));
+  EXPECT_TRUE(forNow);
+  forNow = false;
+  EXPECT_EQ(nullptr, openFamilies(trueTypeChip, {files}, busy, kIdentitySet, &forNow));
+  EXPECT_TRUE(forNow);
+  EXPECT_EQ(2, busy);
+  EXPECT_EQ(cffErases, cffChip.totalSectorErases());
+  EXPECT_EQ(trueTypeErases, trueTypeChip.totalSectorErases());
+  cjk[kRegular].readsTo = UINT32_MAX;
+  for (MemoryFile& file : files) file.failReads = false;
+  const auto cff = openFamilies(cffChip, {cjk}, busy);
+  const auto trueType = openFamilies(trueTypeChip, {files}, busy);
+  ASSERT_NE(nullptr, cff);
+  ASSERT_NE(nullptr, trueType);
+  EXPECT_EQ(2, busy);
+  expectDrawnAs(reference(cjk[kRegular].bytes, 0x6F22, 14), *cff->font(0), kRegular,
+                cff->font(0)->glyph(kRegular, 0x6F22));
+  expectDrawnAs(reference(files[kItalic].bytes, 'q', 14), *trueType->font(0), kItalic,
+                trueType->font(0)->glyph(kItalic, 'q'));
+  expectWrittenOnce(cffChip);
+  expectWrittenOnce(trueTypeChip);
+}
+
+TEST_F(TtfFontSetTest, AKeptBlockThatCannotBeReadForNowIsNotErased) {
+  // The file moved (its stamp changed), so the set is installed again; the block it would keep cannot be compared
+  // this once, its DICT INDEXes made without the memory for their page cache. The install stops before any erase.
+  MemoryFile cjk[4];
+  cjk[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
+  SimNorFlash chip{kSdOnlyBytes};
+  ASSERT_NE(nullptr, openFamilies(chip, {cjk}, busy));
+  const uint32_t erases = chip.totalSectorErases();
+  cjk[kRegular].stamp ^= 1;
+  refuseNextObjectBytes = ttf::CffBlock::readBytes();
+  bool forNow = false;
+  EXPECT_EQ(nullptr, openFamilies(chip, {cjk}, busy, kIdentitySet, &forNow));
+  EXPECT_TRUE(forNow);
+  EXPECT_EQ(erases, chip.totalSectorErases());
+  // Back where it was, the file finds the store as it was installed.
+  cjk[kRegular].stamp ^= 1;
+  const int installs = busy;
+  const auto set = openFamilies(chip, {cjk}, busy);
+  ASSERT_NE(nullptr, set);
+  EXPECT_EQ(installs, busy);
+  EXPECT_EQ(erases, chip.totalSectorErases());
+  expectDrawnAs(reference(cjk[kRegular].bytes, 0x3042, 14), *set->font(0), kRegular,
+                set->font(0)->glyph(kRegular, 0x3042));
+  expectWrittenOnce(chip);
+}
+
+TEST_F(TtfFontSetTest, APlanWithoutMemoryInAnInstallErasesNothingAndAsksForNoFewerFamilies) {
+  // The first install of a family only SD mode fits: its block's plan finds no memory this once. Not "too large":
+  // the load fails for now, nothing erased, and the manager loads the same set again later rather than fewer
+  // families.
+  MemoryFile cjk[4];
+  cjk[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
+  SimNorFlash chip{kSdOnlyBytes};
+  refuseNextObjectBytes = ttf::CffBlock::planBytes();
+  bool forNow = false;
+  EXPECT_EQ(nullptr, openFamilies(chip, {cjk}, busy, kIdentitySet, &forNow));
+  EXPECT_TRUE(forNow);
+  EXPECT_EQ(0, busy);
+  EXPECT_EQ(0u, chip.totalSectorErases());
+  // A set that is too large is not a failure for now.
+  SimNorFlash small{2 * kPage};
+  forNow = true;
+  EXPECT_EQ(nullptr, openFamilies(small, {cjk}, busy, kIdentitySet, &forNow));
+  EXPECT_FALSE(forNow);
+  const auto set = openFamilies(chip, {cjk}, busy);
+  ASSERT_NE(nullptr, set);
+  EXPECT_TRUE(set->font(0)->readsCard());
+  expectWrittenOnce(chip);
+}
+
+TEST_F(TtfFontTest, AProbeThatCannotPlanForNowLeavesACffFamilyListed) {
+  // Discovery plans a CFF file's block to learn its size. Without the memory this once, or with the card failing
+  // past the file's first sector, the size is not known: the family stays listed for its load to decide, rather than
+  // be dropped as too large until the next scan.
+  MemoryFile cjk{tooLargeForFlashMode("NotoSerifJP-CffFlat.otf")};
+  const uint32_t fileBytes = static_cast<uint32_t>(cjk.bytes.size());
+  refuseNextObjectBytes = ttf::CffBlock::planBytes();
+  const ttf::FileProbe withoutMemory = ttf::probeFile(cjk.source());
+  cjk.readsTo = ttf::SdPageCache::kPageBytes;
+  const ttf::FileProbe withoutReads = ttf::probeFile(cjk.source());
+  for (const ttf::FileProbe& probe : {withoutMemory, withoutReads}) {
+    EXPECT_EQ(0, probe.style);
+    EXPECT_EQ(ttf::kSdBytesUnknown, probe.sdBytes);
+    EXPECT_TRUE(ttf::fitsStore(&fileBytes, &probe.sdBytes, 1, kSdOnlyBytes, 24));
+  }
+  // A file too large for flash mode that can have no block is not listed; one that can, by its size.
+  const uint32_t none = UINT32_MAX;
+  EXPECT_FALSE(ttf::fitsStore(&fileBytes, &none, 1, kSdOnlyBytes, 24));
+  cjk.readsTo = UINT32_MAX;
+  const uint32_t planned = ttf::probeFile(cjk.source()).sdBytes;
+  EXPECT_LT(planned, 64u * 1024);
+  EXPECT_TRUE(ttf::fitsStore(&fileBytes, &planned, 1, kSdOnlyBytes, 24));
 }

@@ -62,7 +62,7 @@ TEST(TtfFamily, ACffFontIsAFamilyAndACollectionIsNot) {
     EXPECT_EQ(styles[i], probed.style) << names[i];
     // Its SD-mode block, the CFF table rebuilt in it, as an install plans it.
     ttf::SdBlock block;
-    ASSERT_TRUE(block.plan(file.source())) << names[i];
+    ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source())) << names[i];
     EXPECT_EQ(block.bytes(), probed.sdBytes) << names[i];
     EXPECT_LT(probed.sdBytes, file.bytes.size()) << names[i];
   }
@@ -456,7 +456,7 @@ TEST(TtfFamily, TheProbeSaysWhatTheSdModeBlockTakes) {
                            "Ubuntu/Ubuntu-Regular.ttf"}) {
     MemoryFile file{readFont(name)};
     ttf::SdBlock block;
-    ASSERT_TRUE(block.plan(file.source())) << name;
+    ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source())) << name;
     EXPECT_EQ(block.bytes(), ttf::probeFile(file.source()).sdBytes) << name;
   }
 }
@@ -478,7 +478,7 @@ std::vector<uint8_t> blockImage(ttf::SdBlock& block) {
 TEST(TtfSdBlock, IsTheFontButForItsOutlines) {
   MemoryFile file{readFont("Bookerly/Bookerly-Regular.ttf")};
   ttf::SdBlock block;
-  ASSERT_TRUE(block.plan(file.source()));
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
   // Its ten tables the engine reads, 4-byte aligned behind an 11-record directory (fontTools agrees); glyf is
   // 208,484 bytes at 58,840 in the file.
   EXPECT_EQ(176356u, block.bytes());
@@ -525,7 +525,7 @@ TEST(TtfSdBlock, IsTheFontButForItsOutlines) {
 TEST(TtfSdBlock, AnyRangeReadsAsTheWholeBlockDoes) {
   MemoryFile file{readFont("Inter/Inter-Regular.ttf")};
   ttf::SdBlock block;
-  ASSERT_TRUE(block.plan(file.source()));
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
   const std::vector<uint8_t> image = blockImage(block);
   const ttf::FileSource source = block.source();
   // Pieces of every size: the directory a byte at a time, across a table's end and its padding, a copy chunk.
@@ -552,7 +552,7 @@ TEST(TtfSdBlock, AnOptionalTableOutsideTheFileIsLeftOutAsTheFaceLeavesItOut) {
   set32(bytes, findRecord(bytes, "GPOS") + 12, static_cast<uint32_t>(bytes.size()));
   MemoryFile file{bytes};
   ttf::SdBlock block;
-  ASSERT_TRUE(block.plan(file.source()));
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
   EXPECT_EQ(block.bytes(), ttf::probeFile(file.source()).sdBytes);
   const std::vector<uint8_t> image = blockImage(block);
   const glyphstore::SdOutlines outlines = block.outlines();
@@ -570,19 +570,22 @@ TEST(TtfSdBlock, AFileWithoutTheOutlinesOfItsKindHasNone) {
   Bytes noGlyf = builtFont();
   noGlyf[findRecord(noGlyf, "glyf") + 3] = 'X';  // 'glyX'
   MemoryFile withoutOutlines{noGlyf};
-  EXPECT_FALSE(block.plan(withoutOutlines.source()));
+  EXPECT_EQ(ttf::SdPlan::NoBlock, block.plan(withoutOutlines.source()));
   Bytes cff = builtFont();
   std::memcpy(cff.data(), "OTTO", 4);
   MemoryFile noCffTable{cff};
-  EXPECT_FALSE(block.plan(noCffTable.source()));  // OTTO: a glyf it carries is not its outlines
+  EXPECT_EQ(ttf::SdPlan::NoBlock, block.plan(noCffTable.source()));  // OTTO: a glyf it carries is not its outlines
   Bytes broken = builtFont();
   set32(broken, findRecord(broken, "hmtx") + 12, static_cast<uint32_t>(broken.size()));  // runs past the end
   MemoryFile outside{broken};
-  EXPECT_FALSE(block.plan(outside.source()));
+  EXPECT_EQ(ttf::SdPlan::NoBlock, block.plan(outside.source()));
   MemoryFile fine{builtFont()};
-  EXPECT_TRUE(block.plan(fine.source()));
+  EXPECT_EQ(ttf::SdPlan::Ok, block.plan(fine.source()));
+  // A read that fails says nothing of the file: for now only.
+  fine.failReads = true;
+  EXPECT_EQ(ttf::SdPlan::Transient, block.plan(fine.source()));
   MemoryFile openType{readFont("OpenDyslexic/OpenDyslexic-Regular.otf")};
-  EXPECT_TRUE(block.plan(openType.source()));
+  EXPECT_EQ(ttf::SdPlan::Ok, block.plan(openType.source()));
 }
 
 // --- Native size font IDs ---
