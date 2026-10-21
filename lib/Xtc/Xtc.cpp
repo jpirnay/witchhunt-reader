@@ -37,8 +37,8 @@ bool Xtc::load() {
   return true;
 }
 
-bool Xtc::clearCache() const {
-  if (!BookCache::clear(cachePath, BookCache::Keep::Nothing)) {
+bool Xtc::clearCache(const BookCache::Keep keep) const {
+  if (!BookCache::clear(cachePath, keep)) {
     LOG_ERR("XTC", "Failed to clear cache");
     return false;
   }

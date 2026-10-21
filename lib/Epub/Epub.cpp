@@ -644,7 +644,7 @@ bool Epub::clearCacheIfContentChanged() const {
   }
   if (storedFp == zipFp) return false;
   LOG_INF("EBP", "Book content changed at same path, rebuilding cache");
-  clearCache(false);
+  clearCache();
   return true;
 }
 
@@ -1236,10 +1236,10 @@ bool Epub::loadForMetadata(BuildArena* scratch, const bool useBookBin) {
   return true;
 }
 
-bool Epub::clearCache(const bool preserveThumbs) const {
+bool Epub::clearCache(const BookCache::Keep keep, const bool preserveThumbs) const {
   // preserveThumbs keeps the thumbnail and cover BMPs and the cached raw cover image, so that Home
   // does not have to make them again (a ZIP inflate and an image conversion).
-  if (!BookCache::clear(cachePath, BookCache::Keep::Nothing, preserveThumbs)) {
+  if (!BookCache::clear(cachePath, keep, preserveThumbs)) {
     LOG_ERR("EPB", "Failed to clear cache");
     return false;
   }
