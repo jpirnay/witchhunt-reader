@@ -1,6 +1,7 @@
 #include "Epub.h"
 
 #include <Bitmap.h>
+#include <BookCache.h>
 #include <BufferedFileIO.h>
 #include <CooperativeAbort.h>
 #include <FsHelpers.h>
@@ -1236,57 +1237,14 @@ bool Epub::loadForMetadata(BuildArena* scratch, const bool useBookBin) {
 }
 
 bool Epub::clearCache(const bool preserveThumbs) const {
-  if (!Storage.exists(cachePath.c_str())) {
-    LOG_DBG("EPB", "Cache does not exist, no action needed");
-    return true;
-  }
-
-  if (!preserveThumbs) {
-    if (!Storage.removeDir(cachePath.c_str())) {
-      LOG_ERR("EPB", "Failed to clear cache");
-      return false;
-    }
-    LOG_DBG("EPB", "Cache cleared successfully");
-    return true;
-  }
-
-  // Delete the per-spine caches (bulk removal).
-  removeSpineCaches();
-
-  // Iterate the cache root and remove parsing artifacts, but preserve thumbnail
-  // and cover BMPs so the home screen doesn't have to regenerate them (slow).
-  FsFile dir = Storage.open(cachePath.c_str());
-  if (!dir || !dir.isDirectory()) {
-    LOG_ERR("EPB", "Failed to open cache dir for selective clear");
-    if (dir) dir.close();
+  // preserveThumbs keeps the thumbnail and cover BMPs and the cached raw cover image, so that Home
+  // does not have to make them again (a ZIP inflate and an image conversion).
+  if (!BookCache::clear(cachePath, BookCache::Keep::Nothing, preserveThumbs)) {
+    LOG_ERR("EPB", "Failed to clear cache");
     return false;
   }
-
-  char nameBuf[128];
-  bool anyFailed = false;
-  for (FsFile f = dir.openNextFile(); f; f = dir.openNextFile()) {
-    f.getName(nameBuf, sizeof(nameBuf));
-    const bool isDir = f.isDirectory();
-    f.close();
-
-    const std::string name(nameBuf);
-    // Keep thumbnail and cover BMPs, and the cached raw cover image — all are
-    // expensive to regenerate (require ZIP decompression or format conversion).
-    if (FsHelpers::hasBmpExtension(name) || name == "cover.img") continue;
-
-    // A subdirectory (the image manifest's img/) goes as a whole, like sections/ above: a plain
-    // file remove refuses a directory, which logged "Failed to remove cache file" on every clear
-    // and left the directory behind.
-    const std::string fullPath = cachePath + "/" + name;
-    if (!(isDir ? Storage.removeDir(fullPath.c_str()) : Storage.remove(fullPath.c_str()))) {
-      LOG_ERR("EPB", "Failed to remove cache %s: %s", isDir ? "directory" : "file", fullPath.c_str());
-      anyFailed = true;
-    }
-  }
-  dir.close();
-
   LOG_DBG("EPB", "Cache cleared successfully");
-  return !anyFailed;
+  return true;
 }
 
 void Epub::setupCacheDir() const {
