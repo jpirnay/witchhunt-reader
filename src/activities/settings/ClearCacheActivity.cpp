@@ -5,10 +5,25 @@
 #include <I18n.h>
 #include <Logging.h>
 
+#include <variant>
+
+#include "GlobalBookmarkIndex.h"
 #include "MappedInputManager.h"
-#include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+
+void ClearCacheActivity::askToKeepReadingState(ConfirmationActivity::Question& question) {
+  question.headline = tr(STR_KEEP_PROGRESS_QUESTION);
+  // Keep is where every other question has its yes, so going ahead as usual loses nothing of the
+  // reader's own. Reset is the deliberate answer, between it and Cancel.
+  question.alternateLabel = StrId::STR_RESET_BUTTON;
+  question.acceptLabel = StrId::STR_KEEP_BUTTON;
+}
+
+BookCache::Keep ClearCacheActivity::keepFor(const ActivityResult& answer) {
+  const auto* confirm = std::get_if<ConfirmResult>(&answer.data);
+  return confirm && confirm->alternate ? BookCache::Keep::Nothing : BookCache::Keep::ReadingState;
+}
 
 void ClearCacheActivity::onEnter() {
   Activity::onEnter();
@@ -18,10 +33,9 @@ void ClearCacheActivity::onEnter() {
   // Warning 1 is a sentence, not a caption, so it may wrap.
   question.title = tr(STR_CLEAR_CACHE_WARNING_1);
   question.titleMaxLines = 3;
-  question.headline = tr(STR_CLEAR_CACHE_WARNING_2);
+  askToKeepReadingState(question);
   // Warnings 3 and 4 are one sentence split across two keys.
   question.message = std::string(tr(STR_CLEAR_CACHE_WARNING_3)) + " " + tr(STR_CLEAR_CACHE_WARNING_4);
-  question.acceptLabel = StrId::STR_CLEAR_BUTTON;
   startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, std::move(question)),
                          [this](const ActivityResult& result) {
                            if (result.isCancelled) {
@@ -29,18 +43,19 @@ void ClearCacheActivity::onEnter() {
                              goBack();
                              return;
                            }
-                           startClearing();
+                           startClearing(keepFor(result));
                          });
 }
 
-void ClearCacheActivity::startClearing() {
-  LOG_DBG("CLEAR_CACHE", "User confirmed, starting cache clear");
+void ClearCacheActivity::startClearing(const BookCache::Keep keep) {
+  LOG_DBG("CLEAR_CACHE", "User confirmed, starting cache clear (%s)",
+          keep == BookCache::Keep::ReadingState ? "keeping reading state" : "resetting reading state");
   {
     RenderLock lock(*this);
     state = CLEARING;
   }
   requestUpdateAndWait();
-  clearCache();
+  clearCache(keep);
 }
 
 void ClearCacheActivity::render(RenderLock&&) {
@@ -87,7 +102,7 @@ void ClearCacheActivity::render(RenderLock&&) {
   }
 }
 
-void ClearCacheActivity::clearCache() {
+void ClearCacheActivity::clearCache(const BookCache::Keep keep) {
   LOG_DBG("CLEAR_CACHE", "Clearing cache...");
 
   // Open .crosspoint directory
@@ -109,14 +124,15 @@ void ClearCacheActivity::clearCache() {
     file.getName(name, sizeof(name));
     String itemName(name);
 
-    if (file.isDirectory() && (itemName.startsWith("epub_") || itemName.startsWith("xtc_") ||
-                               itemName.startsWith("txt_") || itemName == "fontprev")) {
+    const bool bookCache = itemName.startsWith("epub_") || itemName.startsWith("xtc_") || itemName.startsWith("txt_");
+    if (file.isDirectory() && (bookCache || itemName == "fontprev")) {
       String fullPath = "/.crosspoint/" + itemName;
       LOG_DBG("CLEAR_CACHE", "Removing cache: %s", fullPath.c_str());
 
       file.close();  // Close before attempting to delete
 
-      if (Storage.removeDir(fullPath.c_str())) {
+      // The font previews are no book's: they go whatever the answer.
+      if (bookCache ? BookCache::clear(fullPath.c_str(), keep) : Storage.removeDir(fullPath.c_str())) {
         clearedCount++;
       } else {
         LOG_ERR("CLEAR_CACHE", "Failed to remove: %s", fullPath.c_str());
@@ -127,6 +143,9 @@ void ClearCacheActivity::clearCache() {
     }
   }
   root.close();
+
+  // The bookmarks went with the folders: the Bookmarks list forgets them now, not at its next open.
+  if (keep == BookCache::Keep::Nothing) GLOBAL_BOOKMARKS.reconcile();
 
   LOG_DBG("CLEAR_CACHE", "Cache cleared: %d removed, %d failed", clearedCount, failedCount);
 
