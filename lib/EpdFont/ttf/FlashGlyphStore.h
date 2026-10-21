@@ -213,6 +213,10 @@ class FlashGlyphStore {
     return open_ && (roomAsked_ || freeSegments() < glyphstore::kFreeSegmentsTarget || indexFull_ || chainFull_ ||
                      epochsLeft() == 0 || (budget == Budget::Open && rebuildWaitsForOpen()));
   }
+  /// Whether a makeRoom(Budget::Idle) call would do a step now, by the step it would choose: needsRoom(Idle) less what
+  /// idle time leaves alone (a wipe pending, a rebuild that found no memory and waits for an Open, a reclaim with fewer
+  /// than two segments live).
+  bool idleWorkDue() const { return open_ && !wipePending_ && nextStep(Budget::Idle, false) != Step::None; }
   /// The epoch the last rebuild began from, the tail's then: no slot written since names an older one. 0 with no
   /// rebuild since the last wipe.
   uint32_t rebuildBase() const { return journal_.base; }

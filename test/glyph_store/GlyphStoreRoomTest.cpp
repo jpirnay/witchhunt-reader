@@ -868,6 +868,38 @@ TEST_F(GlyphStoreRoom, ARebuildKeepsTheFirstOfTwoCopiesACutLeft) {
   for (uint32_t n = 0; n < 13; ++n) EXPECT_TRUE(intact(n)) << n;
 }
 
+TEST_F(GlyphStoreRoom, IdleWorkIsDueOnlyWhereAnIdleStepWouldDoSomething) {
+  for (uint32_t n = 0; n < 18; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;  // three segments live
+  EXPECT_FALSE(store.idleWorkDue());
+  ASSERT_TRUE(store.markFull());
+  EXPECT_TRUE(store.needsRoom(Budget::Idle));
+  EXPECT_TRUE(store.idleWorkDue());
+  RoomWork work;
+  store.makeRoom(Budget::Idle, &work);
+  EXPECT_EQ(1u, work.reclaimed);
+  EXPECT_FALSE(store.idleWorkDue());
+}
+
+TEST_F(GlyphStoreRoom, IdleWorkIsNotDueWhileARebuildWaitsForMemory) {
+  for (uint32_t n = 0; n < 6; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
+  fillIndexWithMarks();
+  ASSERT_FALSE(store.countsKept());
+  EXPECT_TRUE(store.idleWorkDue());  // a rebuild is due in idle time
+  RoomWork work;
+  {
+    const RefuseArrays refuse;
+    EXPECT_EQ(Room::More, store.makeRoom(Budget::Idle, &work));
+    EXPECT_FALSE(work.rebuilt);
+  }
+  // The index still stops writes, but idle time leaves the rebuild to an Open.
+  EXPECT_TRUE(store.needsRoom(Budget::Idle));
+  EXPECT_FALSE(store.idleWorkDue());
+  EXPECT_EQ(Room::Enough, store.makeRoom(Budget::Open, &work));
+  EXPECT_TRUE(work.rebuilt);
+  EXPECT_FALSE(store.needsRoom(Budget::Idle));
+  EXPECT_FALSE(store.idleWorkDue());
+}
+
 TEST_F(GlyphStoreRoom, ARebuildWithoutMemoryWaitsForTheNextOpen) {
   for (uint32_t n = 0; n < 6; ++n) ASSERT_EQ(Commit::Stored, commitRecord(n)) << n;
   fillIndexWithMarks();              // the index stops writes: a rebuild is due in idle time
