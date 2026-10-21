@@ -52,22 +52,7 @@ constexpr Op and_{0x0C03}, or_{0x0C04}, not_{0x0C05}, abs{0x0C09}, add{0x0C0A}, 
     dup{0x0C1B}, exch{0x0C1C}, index{0x0C1D}, roll{0x0C1E}, hflex{0x0C22}, flex{0x0C23}, hflex1{0x0C24}, flex1{0x0C25};
 }  // namespace op
 
-// A Type 2 integer in its shortest form.
-void put(Bytes& out, const int32_t v) {
-  if (v >= -107 && v <= 107) {
-    out.push_back(static_cast<uint8_t>(v + 139));
-  } else if (v >= 108 && v <= 1131) {
-    out.push_back(static_cast<uint8_t>(247 + (v - 108) / 256));
-    out.push_back(static_cast<uint8_t>((v - 108) % 256));
-  } else if (v >= -1131 && v <= -108) {
-    out.push_back(static_cast<uint8_t>(251 + (-v - 108) / 256));
-    out.push_back(static_cast<uint8_t>((-v - 108) % 256));
-  } else {
-    out.push_back(28);
-    out.push_back(static_cast<uint8_t>(v >> 8));
-    out.push_back(static_cast<uint8_t>(v));
-  }
-}
+void put(Bytes& out, const int32_t v) { putType2Int(out, v); }
 void put(Bytes& out, const Fx f) {
   out.push_back(255);
   put32(out, static_cast<uint32_t>(f.value));

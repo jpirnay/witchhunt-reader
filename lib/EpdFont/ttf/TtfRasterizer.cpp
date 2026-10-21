@@ -5,7 +5,7 @@
 
 #include <cstring>
 
-#include "TtfCffCharString.h"
+#include "TtfCffCharString.h"  // kCffDecoderBytes
 #include "TtfFixed.h"
 #include "TtfGrays.h"
 
@@ -33,7 +33,6 @@ constexpr uint16_t kScaledOffset = 0x0800;
 
 constexpr int kMaxDepth = 8;                  // nesting below the top glyph; fonts use 1 to 3
 constexpr uint16_t kMaxComponentLoads = 256;  // per glyph: a compound of compounds cannot run away
-constexpr int64_t kMaxCoord = 1 << 24;        // 26.6, far past any glyph that fits; keeps every product in range
 
 uint32_t alignUp(const uint32_t value, const uint32_t alignment) {
   return (value + alignment - 1) / alignment * alignment;
@@ -61,62 +60,6 @@ struct Cursor {
 };
 
 bool inRange(const int64_t value) { return value >= -kMaxCoord && value <= kMaxCoord; }
-bool fitsInt32(const int64_t value) { return value >= INT32_MIN && value <= INT32_MAX; }
-
-// Moves points [first, end); false when one would leave the coordinate range.
-bool translatePoints(FT_Vector* points, const uint16_t first, const uint16_t end, const int32_t dx, const int32_t dy) {
-  if (dx == 0 && dy == 0) return true;
-  for (uint16_t i = first; i < end; ++i) {
-    const int64_t x = static_cast<int64_t>(points[i].x) + dx;
-    const int64_t y = static_cast<int64_t>(points[i].y) + dy;
-    if (!inRange(x) || !inRange(y)) return false;
-    points[i].x = static_cast<FT_Pos>(x);
-    points[i].y = static_cast<FT_Pos>(y);
-  }
-  return true;
-}
-
-// A CFF glyph as cff_slot_load leaves it unhinted (FT/cff/cffgload.c:420-460, 682-731): the charstring run into
-// `outline` in font units; the font matrix applied when it is not identity (FT_Outline_Transform, each point by
-// FT_Vector_Transform); the font offset added (FT_Outline_Translate); then each point scaled to 26.6 with FT_MulFix,
-// by `scale` times the Top DICT's units per em over the font DICT's when they differ (FT_MulDiv). The charstring draws
-// from the glyph's origin, so there is no left side bearing shift.
-Status loadCff(FontBytes& bytes, const Face& face, const uint16_t glyph, int32_t scale, CffDecoder* decoder,
-               CffOutline* outline) {
-  CffGlyphSource source;
-  Status status = cffGlyphSource(bytes, face, glyph, &source);
-  if (status == Status::Ok) status = runCharString(bytes, face, source, decoder, outline);
-  if (status != Status::Ok) return status;
-  if (source.scaleNum != source.scaleDen) {
-    const int64_t scaled =
-        mulDivWide(scale, static_cast<int32_t>(source.scaleNum), static_cast<int32_t>(source.scaleDen));
-    if (!fitsInt32(scaled)) return Status::Unsupported;
-    scale = static_cast<int32_t>(scaled);
-  }
-  const CffMatrix& matrix = source.matrix;
-  const bool transformed = !matrix.identity();
-  FT_Vector* points = outline->points;
-  for (uint16_t i = 0; i < outline->numPoints; ++i) {
-    // runCharString leaves integer font units, far inside 32 bits.
-    const int32_t px = static_cast<int32_t>(points[i].x);
-    const int32_t py = static_cast<int32_t>(points[i].y);
-    int64_t x = px;
-    int64_t y = py;
-    if (transformed) {
-      x = mulFixWide(px, matrix.xx) + mulFixWide(py, matrix.xy);
-      y = mulFixWide(px, matrix.yx) + mulFixWide(py, matrix.yy);
-    }
-    x += matrix.dx;
-    y += matrix.dy;
-    if (!fitsInt32(x) || !fitsInt32(y)) return Status::Unsupported;
-    x = mulFixWide(static_cast<int32_t>(x), scale);
-    y = mulFixWide(static_cast<int32_t>(y), scale);
-    if (!inRange(x) || !inRange(y)) return Status::Unsupported;
-    points[i].x = static_cast<FT_Pos>(x);
-    points[i].y = static_cast<FT_Pos>(y);
-  }
-  return Status::Ok;
-}
 
 // Packs ftgrays' coverage spans into the 2-bit stream with the PC converter's thresholds (coverage nibble
 // >= 12 -> 3, >= 8 -> 2, >= 4 -> 1). ftgrays counts rows from the bottom; the bitmap starts at the top.
@@ -317,7 +260,15 @@ struct Rasterizer::Loader {
 
   // Moves the points from `first` on; false when one would leave the coordinate range.
   bool translate(const uint16_t first, const int32_t dx, const int32_t dy) {
-    return translatePoints(points, first, numPoints, dx, dy);
+    if (dx == 0 && dy == 0) return true;
+    for (uint16_t i = first; i < numPoints; ++i) {
+      const int64_t x = static_cast<int64_t>(points[i].x) + dx;
+      const int64_t y = static_cast<int64_t>(points[i].y) + dy;
+      if (!inRange(x) || !inRange(y)) return false;
+      points[i].x = static_cast<FT_Pos>(x);
+      points[i].y = static_cast<FT_Pos>(y);
+    }
+    return true;
   }
 };
 
@@ -428,28 +379,23 @@ Status Rasterizer::load(FontBytes& bytes, const Face& face, const uint16_t glyph
 
   bytes.clearErrors();
   auto* points = reinterpret_cast<FT_Vector*>(block_ + pointsOffset_);
-  auto* contours = reinterpret_cast<unsigned short*>(block_ + contoursOffset_);
-  const int32_t scale = unitsToPixels(face, ppem26_6);
-  uint16_t numPoints = 0;
-  uint16_t numContours = 0;
-  Status status = Status::Ok;
-  if (face.outlines == Face::Outlines::Cff) {
-    // A block planned without CFF faces has no room for the interpreter: the plan's fault, not the glyph's.
-    if (plan_.decoderBytes < kCffDecoderBytes) return loaded_ = Status::Transient;
-    CffOutline outline{points, block_ + tagsOffset_, contours, plan_.points, plan_.contours};
-    status = loadCff(bytes, face, glyph, scale, reinterpret_cast<CffDecoder*>(block_ + decoderOffset_), &outline);
-    numPoints = outline.numPoints;
-    numContours = outline.numContours;
-  } else {
-    Loader loader{bytes, face, scale, points, contours, block_ + tagsOffset_, plan_.points, plan_.contours};
-    int32_t pp1x = 0;
-    status = loader.load(glyph, 0, &pp1x);
-    if (bytes.ioError()) status = Status::Transient;
-    if (status == Status::Ok && bytes.outOfRange()) status = Status::Malformed;
-    if (status == Status::Ok && !loader.translate(0, -pp1x, 0)) status = Status::Unsupported;
-    numPoints = loader.numPoints;
-    numContours = loader.numContours;
-  }
+  Loader loader{bytes,
+                face,
+                unitsToPixels(face, ppem26_6),
+                points,
+                reinterpret_cast<unsigned short*>(block_ + contoursOffset_),
+                block_ + tagsOffset_,
+                plan_.points,
+                plan_.contours};
+  // A CFF glyph fills the same arrays, and the loader holds its size. It is drawn from the glyph's origin, so pp1x,
+  // the TrueType outline's shift, stays 0.
+  int32_t pp1x = 0;
+  Status status = face.outlines == Face::Outlines::Cff
+                      ? loadCff(bytes, face, glyph, loader.scale, &loader.numPoints, &loader.numContours)
+                      : loader.load(glyph, 0, &pp1x);
+  if (bytes.ioError()) status = Status::Transient;
+  if (status == Status::Ok && bytes.outOfRange()) status = Status::Malformed;
+  if (status == Status::Ok && !loader.translate(0, -pp1x, 0)) status = Status::Unsupported;
   if (status != Status::Ok) return loaded_ = status;
   const uint32_t advance = advance12_4(bytes, face, glyph, ppem26_6);
   if (bytes.ioError()) return loaded_ = Status::Transient;
@@ -459,13 +405,13 @@ Status Rasterizer::load(FontBytes& bytes, const Face& face, const uint16_t glyph
   int32_t top = 0;
   int32_t width = 0;
   int32_t height = 0;
-  if (numPoints > 0) {
+  if (loader.numPoints > 0) {
     // FreeType's bitmap box for gray rendering: the control box, floored and ceiled to whole pixels.
     FT_Pos xMin = points[0].x;
     FT_Pos yMin = points[0].y;
     FT_Pos xMax = xMin;
     FT_Pos yMax = yMin;
-    for (uint16_t i = 1; i < numPoints; ++i) {
+    for (uint16_t i = 1; i < loader.numPoints; ++i) {
       xMin = points[i].x < xMin ? points[i].x : xMin;
       yMin = points[i].y < yMin ? points[i].y : yMin;
       xMax = points[i].x > xMax ? points[i].x : xMax;
@@ -484,8 +430,7 @@ Status Rasterizer::load(FontBytes& bytes, const Face& face, const uint16_t glyph
       // caller must plan again, and nothing is wrong with the glyph.
       return loaded_ = ppem26_6 > plan_.maxPpem26_6 ? Status::Transient : Status::Unsupported;
     }
-    // The box now starts at (0, 0), as ftgrays' clip box does.
-    translatePoints(points, 0, numPoints, -left * 64, -bottom * 64);
+    loader.translate(0, -left * 64, -bottom * 64);  // the box now starts at (0, 0), as ftgrays' clip box does
   }
   metrics->width = static_cast<uint8_t>(width);
   metrics->height = static_cast<uint8_t>(height);
@@ -493,8 +438,8 @@ Status Rasterizer::load(FontBytes& bytes, const Face& face, const uint16_t glyph
   metrics->left = static_cast<int16_t>(left);
   metrics->top = static_cast<int16_t>(top);
   metrics->dataLength = glyphDataBytes(width, height, true);
-  numPoints_ = numPoints;
-  numContours_ = numContours;
+  numPoints_ = loader.numPoints;
+  numContours_ = loader.numContours;
   width_ = static_cast<uint16_t>(width);
   height_ = static_cast<uint16_t>(height);
   return loaded_ = Status::Ok;

@@ -14,8 +14,10 @@ enum class Status : uint8_t {
   Ok,           ///< loaded or drawn; a glyph with no outline (a space) loads with width and height 0
   Unsupported,  ///< permanent: a point-matched or scaled-offset component, more points or contours than the
                 ///< scratch block holds, too deep or too many components, a CFF charstring using `random` or
-                ///< past the interpreter's operator budget, a bitmap over 255 px a side or over the output
-                ///< region, or coordinates out of range
+                ///< past the interpreter's operator budget, a CFF size scale past 32 bits once multiplied by
+                ///< the font DICT's units-per-em ratio, a bitmap over 255 px a side or over the output region,
+                ///< or coordinates out of range (past kMaxCoord, or a CFF point past 32 bits in font units once
+                ///< the font matrix and offset are applied)
   Malformed,    ///< permanent: broken glyph data (a read past the glyph or the file, contour ends out of
                 ///< order, a flag run past the last point, a glyph index past numGlyphs)
   Transient,    ///< nothing is known to be wrong with the glyph (an SD read failed, Stage 2c; no scratch block;
@@ -32,6 +34,9 @@ constexpr uint32_t kMaxOutputBytes = 4096;     ///< the 2-bit output region
 constexpr uint32_t kPoolBytesFlash = 4096;     ///< ftgrays' cell pool for a family in flash mode
 constexpr uint32_t kPoolBytesSd = 8192;        ///< ... and in SD mode (CJK: about 37% faster than 4 KB)
 constexpr uint32_t kMaxPpem26_6 = 255 << 6;    ///< larger sizes cannot fit EpdGlyph's 8-bit width and height
+/// Outline coordinates (26.6) past this either way are Unsupported: far past any glyph that fits, and every product
+/// stays in range.
+constexpr int64_t kMaxCoord = 1 << 24;
 
 /// The parts of the scratch block (spec 5.3).
 struct ScratchPlan {
@@ -103,6 +108,12 @@ class Rasterizer {
 
  private:
   struct Loader;
+
+  /// load()'s CFF outlines, into the scratch arrays at `scale` (26.6 per font unit), setting the outline's size. In
+  /// TtfCffLoad.cpp: in a unit of its own, the CFF loader's locals and inlining choices stay out of load()'s frame and
+  /// the TrueType loader's, which recurses through compound glyphs on the render task's stack.
+  Status loadCff(FontBytes& bytes, const Face& face, uint16_t glyph, int32_t scale, uint16_t* numPoints,
+                 uint16_t* numContours);
 
   uint8_t* block_ = nullptr;          // owned_, or the caller's (attach())
   std::unique_ptr<uint8_t[]> owned_;  // what allocate() made

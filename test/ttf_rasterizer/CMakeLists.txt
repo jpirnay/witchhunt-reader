@@ -29,6 +29,7 @@ add_executable(TtfRasterizerTest
   ${REPO_ROOT}/lib/EpdFont/ttf/FontBytes.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfCff.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfCffCharString.cpp
+  ${REPO_ROOT}/lib/EpdFont/ttf/TtfCffLoad.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfFace.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfRasterizer.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/third_party/freetype/ftgrays.c

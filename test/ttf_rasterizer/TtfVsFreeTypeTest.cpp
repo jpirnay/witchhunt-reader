@@ -100,7 +100,13 @@ void compareWithFreeType(const std::string& name, const std::vector<uint8_t>& da
     }
     c.pixels += static_cast<uint64_t>(expected.width) * static_cast<uint64_t>(expected.height);
     c.differingPixels += differ;
-    if (differ > 0 && ++c.inexact <= 3) {
+    // Byte for byte as well, over the whole dataLength, the last byte's padding bits included. An empty bitmap's
+    // data() may be null, and memcmp with a null pointer is undefined even for 0 bytes (glibc declares it nonnull:
+    // UBSan on CI's Linux GCC).
+    const bool bytesDiffer =
+        metrics.dataLength != expected.bitmap.size() ||
+        (!expected.bitmap.empty() && std::memcmp(ours, expected.bitmap.data(), expected.bitmap.size()) != 0);
+    if ((differ > 0 || bytesDiffer) && ++c.inexact <= 3) {
       c.inexactPictures += "glyph " + std::to_string(g) + ", " + std::to_string(differ) +
                            " pixels differ, ours then FreeType's:\n" + picture(metrics, ours) + "---\n" +
                            picture(metrics, expected.bitmap.data());
@@ -295,24 +301,12 @@ TEST(TtfVsFreeTypeCffSynthetic, FontMatricesAndFontDictScalesMatchFreeType) {
   // the Top DICT's, with offsets, and with units per em the glyph is scaled by (cffgload.c:446-452). Lines, a curve and
   // a counter in each glyph.
   Bytes shape;
-  const auto op = [&shape](const std::initializer_list<int> operands, const uint8_t code) {
-    for (const int v : operands) {  // Type 2 integers from -1131 to 1131
-      if (v >= -107 && v <= 107) {
-        shape.push_back(static_cast<uint8_t>(v + 139));
-      } else {
-        const int magnitude = (v < 0 ? -v : v) - 108;
-        shape.push_back(static_cast<uint8_t>((v < 0 ? 251 : 247) + magnitude / 256));
-        shape.push_back(static_cast<uint8_t>(magnitude % 256));
-      }
-    }
-    shape.push_back(code);
-  };
-  op({100, 100}, 21);                     // rmoveto
-  op({350, 0, -50, 300}, 5);              // rlineto
-  op({-80, 100, -150, 0, -70, -100}, 8);  // rrcurveto
-  op({100, -200}, 21);                    // the counter
-  op({0, 100, 150, 0, 0, -100}, 5);       // rlineto
-  shape.push_back(14);                    // endchar
+  putType2Op(shape, {100, 100}, 21);                     // rmoveto
+  putType2Op(shape, {350, 0, -50, 300}, 5);              // rlineto
+  putType2Op(shape, {-80, 100, -150, 0, -70, -100}, 8);  // rrcurveto
+  putType2Op(shape, {100, -200}, 21);                    // the counter
+  putType2Op(shape, {0, 100, 150, 0, 0, -100}, 5);       // rlineto
+  putType2Op(shape, {}, 14);                             // endchar
   const char* const fontDicts[] = {"", "0.0005 0 0 0.0005 0 0", "0.002 0 0 0.002 -10 20", "0.001 0 0.0003 0.001 5 5"};
   std::vector<std::pair<std::string, Bytes>> fonts;
   CffSpec named;

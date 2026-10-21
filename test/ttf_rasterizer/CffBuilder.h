@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -249,17 +250,41 @@ inline Bytes buildCff(const CffSpec& spec) {
 
 /// An OpenType font around `cff`: sfnt 'OTTO', with the TrueType builder's head, hhea, hmtx, maxp and cmap (its empty
 /// glyf and loca are left in; nothing reads them in a CFF font).
-inline Bytes buildOtf(const Bytes& cff, const uint32_t glyphs) {
+inline Bytes buildOtf(const Bytes& cff, const uint32_t glyphs, const uint16_t unitsPerEm = 1000) {
   Font font;
   font.sfntVersion = tagOf("OTTO");
+  font.unitsPerEm = unitsPerEm;
   font.glyphs.resize(glyphs);
   font.cmap = {{'A', 1}};
   font.extraTables = {{"CFF ", cff}};
   return buildFont(font);
 }
 
-inline Bytes buildOtf(const CffSpec& spec) {
-  return buildOtf(buildCff(spec), static_cast<uint32_t>(spec.charStrings.size()));
+inline Bytes buildOtf(const CffSpec& spec, const uint16_t unitsPerEm = 1000) {
+  return buildOtf(buildCff(spec), static_cast<uint32_t>(spec.charStrings.size()), unitsPerEm);
+}
+
+/// A Type 2 charstring integer in its shortest form.
+inline void putType2Int(Bytes& out, const int32_t v) {
+  if (v >= -107 && v <= 107) {
+    out.push_back(static_cast<uint8_t>(v + 139));
+  } else if (v >= 108 && v <= 1131) {
+    out.push_back(static_cast<uint8_t>(247 + (v - 108) / 256));
+    out.push_back(static_cast<uint8_t>((v - 108) % 256));
+  } else if (v >= -1131 && v <= -108) {
+    out.push_back(static_cast<uint8_t>(251 + (-v - 108) / 256));
+    out.push_back(static_cast<uint8_t>((-v - 108) % 256));
+  } else {
+    out.push_back(28);
+    out.push_back(static_cast<uint8_t>(v >> 8));
+    out.push_back(static_cast<uint8_t>(v));
+  }
+}
+
+/// Appends a one-byte charstring operator with its integer operands.
+inline void putType2Op(Bytes& out, const std::initializer_list<int32_t> operands, const uint8_t op) {
+  for (const int32_t v : operands) putType2Int(out, v);
+  out.push_back(op);
 }
 
 }  // namespace ttf_test
