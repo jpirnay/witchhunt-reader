@@ -736,10 +736,11 @@ void Epub::parseCssFiles() const {
   LOG_DBG("EBP", "CSS files to parse: %zu", cssFiles.size());
 
   // See if we have a cached version of the CSS rules
-  if (cssParser->hasCache()) {
+  if (cssParser->cacheIsCurrent()) {
     LOG_DBG("EBP", "CSS cache exists, skipping parseCssFiles");
     return;
   }
+  cssParser->deleteCache();  // one of another version: the rules, backgrounds and font faces compile again
 
   // No cache yet - parse CSS files
   if (!cssParser->beginCacheCompile()) {

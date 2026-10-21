@@ -5,6 +5,7 @@
 
 #include "FontBytes.h"
 #include "GlyphStoreFormat.h"
+#include "TtfCffBlock.h"
 
 /// What the registry and the manager need to know about a TrueType family before loading it: which style a
 /// file is, and the identity that tells an installed glyph store whether it holds this family.
@@ -32,21 +33,27 @@ FileSource fileSource(File& file, const uint32_t size, const uint32_t stamp = 0)
           &file, stamp};
 }
 
-/// True for a name ending in ".ttf", in any case. In-progress copies ("x.ttf.tmp") do not count.
-bool isTtfFileName(const char* name);
+/// True for a name ending in ".ttf" or ".otf", in any case. In-progress copies ("x.ttf.tmp") do not count.
+bool isOutlineFontFileName(const char* name);
 
-/// What discovery learns from a TrueType file, in a few small reads.
+/// What discovery learns from a TrueType or OpenType CFF file, in a few small reads.
 struct FileProbe {
   /// head.macStyle: bit 0 bold, bit 1 italic, as EpdFontFamily::Style. -1 when it is not a font the engine
-  /// draws: not TrueType (CFF, a collection), a table it needs missing or outside the file, or a read error.
+  /// draws: not TrueType or OpenType CFF (a collection, variable CFF2), a table it needs missing or outside the file,
+  /// or a read error.
   int style = -1;
   /// OS/2 usWeightClass (400 regular, 700 bold). Without an OS/2 table, 700 for a bold style and 400 otherwise.
   uint16_t weight = 400;
   /// It has an fvar table: a variable font, drawn as its default instance only (spec 5.6).
   bool variable = false;
-  /// What its SD-mode block would take (SdBlock::bytes()).
+  /// What its SD-mode block would take (SdBlock::bytes()). UINT32_MAX for a CFF file that can have none
+  /// (SdPlan::NoBlock): its family installs in flash mode only. kSdBytesUnknown for one whose block could not be
+  /// planned for now (SdPlan::Transient).
   uint32_t sdBytes = 0;
 };
+/// FileProbe::sdBytes of a CFF file whose block could not be planned for now (no memory, a card read failed): the
+/// size is not known, and fitsStore() lets the load, which plans the block again, decide.
+constexpr uint32_t kSdBytesUnknown = UINT32_MAX - 1;
 FileProbe probeFile(const FileSource& file);
 /// probeFile(file).style.
 int probeStyle(const FileSource& file);
@@ -61,20 +68,24 @@ int probeStyle(const FileSource& file);
 bool assignStyles(const FileProbe* files, size_t count, int (&out)[4]);
 
 /// SD mode (spec 4.1): what a style's block holds. A font of its own, made of the file's tables the engine reads but
-/// glyf (cmap, head, hhea, hmtx, loca, maxp, OS/2, GPOS, GSUB, kern, whichever it has), each 4-byte aligned, in file
-/// order, behind a table directory whose glyf record points past the block: FontBytes reads the outlines there from
-/// the file on the card. The block is never held in memory: source() serves any range of it, the directory made here
-/// and the tables read from the file, so an install copies it, and compares it with what flash holds, as it does a
-/// whole file in flash mode.
+/// its outlines, each 4-byte aligned, in file order, behind a table directory; FontBytes reads the outlines past the
+/// block from the file on the card. A TrueType file's: cmap, head, hhea, hmtx, loca, maxp, OS/2, GPOS, GSUB and kern,
+/// whichever it has, its glyf record pointing past the block. An OpenType CFF file's (spec 9.4): cmap, head, hhea,
+/// hmtx, maxp, OS/2, GPOS, GSUB and kern, then its CFF table rebuilt (CffBlock), ending the block with the CharStrings
+/// INDEX's offsets; their data lies past it. The block is never held in memory: source() serves any range of it, the
+/// directory made here and the tables read from the file, so an install copies it, and compares it with what flash
+/// holds, as it does a whole file in flash mode.
 class SdBlock {
  public:
-  /// Reads `file`'s table directory. False when it is no TrueType file with outlines, a table it would copy lies
-  /// outside the file, or a read fails. `file` must outlive the block.
-  bool plan(const FileSource& file);
+  /// Reads `file`'s table directory, and a CFF file's CFF table (CffBlock::plan()). NoBlock when it is no TrueType or
+  /// OpenType CFF file the engine draws, or a table it would copy lies outside the file; Transient when a read fails
+  /// or, for a CFF file, there is no memory to plan with. `file` must outlive the block.
+  SdPlan plan(const FileSource& file);
   /// The block's bytes: its directory and tables.
   uint32_t bytes() const { return bytes_; }
-  /// glyf: where it is in the file, and where the block's directory puts it.
-  glyphstore::SdOutlines outlines() const { return {glyf_.fileOffset, bytes_, glyf_.length}; }
+  /// The outlines read from the card, glyf or the CFF table's charstring data: where they are in the file, and where
+  /// the block's directory puts them, right past the block.
+  glyphstore::SdOutlines outlines() const { return {outlinesAt_, bytes_, outlinesLength_}; }
   /// The block as a file, bytes() long. Valid while the block and its file are.
   FileSource source() { return {bytes_, &SdBlock::readSource, this}; }
   /// Whether `block`, `size` bytes, starts with this block's table directory: every table's tag, checksum, length and
@@ -82,13 +93,14 @@ class SdBlock {
   bool sameAs(const uint8_t* block, uint32_t size) const;
 
  private:
-  static constexpr uint8_t kMaxTables = 11;  // the ten tables the engine reads, and glyf
+  // TrueType: the ten tables the engine reads, and glyf; CFF: nine of them, and the CFF table.
+  static constexpr uint8_t kMaxTables = 11;
   struct Table {
     uint32_t tag;
     uint32_t checksum;
     uint32_t fileOffset;
-    uint32_t length;
-    uint32_t blockOffset;  // glyf: past the block
+    uint32_t length;       // CFF: the rebuilt table's, its charstring data included
+    uint32_t blockOffset;  // glyf: past the block; CFF: the last in the block, only its charstring data past it
   };
   bool addTable(const void* record);
   uint32_t directoryWord(uint32_t index) const;
@@ -98,8 +110,10 @@ class SdBlock {
   // Set by plan(); empty until then, so a block asked before it (or after it failed) holds nothing.
   FileSource file_;
   uint32_t version_ = 0;
-  Table tables_[kMaxTables] = {};  // in file order, glyf among them
-  Table glyf_ = {};
+  Table tables_[kMaxTables] = {};  // in file order, the outline table among them
+  CffBlock cff_;                   // a CFF file's CFF table
+  uint32_t outlinesAt_ = 0;
+  uint32_t outlinesLength_ = 0;
   uint16_t seen_ = 0;  // the tags met in the directory
   uint8_t count_ = 0;
   uint32_t bytes_ = 0;
@@ -108,7 +122,8 @@ class SdBlock {
 /// True when the glyph store can install a family with these styles: in flash mode, every style's file
 /// (`fileBytes`) copied into a font area of `usableBytes`, with the largest style, the index and a minimal log mapped
 /// within `freeMapPages`; else in SD mode, every style's tables (`sdBytes`, FileProbe::sdBytes) copied and mapped
-/// together (glyphstore::planLayout).
+/// together (glyphstore::planLayout). When flash mode does not fit, every style can have a block and one's size is
+/// kSdBytesUnknown, true: the load plans the blocks again and decides.
 bool fitsStore(const uint32_t* fileBytes, const uint32_t* sdBytes, uint8_t count, uint32_t usableBytes,
                uint32_t freeMapPages);
 

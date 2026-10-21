@@ -5,6 +5,7 @@
 
 #include <cstring>
 
+#include "TtfCffCharString.h"  // kCffDecoderBytes
 #include "TtfFixed.h"
 #include "TtfGrays.h"
 
@@ -32,7 +33,6 @@ constexpr uint16_t kScaledOffset = 0x0800;
 
 constexpr int kMaxDepth = 8;                  // nesting below the top glyph; fonts use 1 to 3
 constexpr uint16_t kMaxComponentLoads = 256;  // per glyph: a compound of compounds cannot run away
-constexpr int64_t kMaxCoord = 1 << 24;        // 26.6, far past any glyph that fits; keeps every product in range
 
 uint32_t alignUp(const uint32_t value, const uint32_t alignment) {
   return (value + alignment - 1) / alignment * alignment;
@@ -288,8 +288,15 @@ const char* statusName(const Status status) {
 
 ScratchPlan planScratch(const Face& face, const uint32_t maxPpem26_6, const uint32_t poolBytes) {
   ScratchPlan plan;
-  plan.points = face.maxPoints < kMaxScratchPoints ? face.maxPoints : kMaxScratchPoints;
-  plan.contours = face.maxContours < kMaxScratchContours ? face.maxContours : kMaxScratchContours;
+  if (face.outlines == Face::Outlines::Cff) {
+    // A CFF font's maxp (version 0.5) does not count points or contours: the caps, and the interpreter's state.
+    plan.points = kMaxScratchPoints;
+    plan.contours = kMaxScratchContours;
+    plan.decoderBytes = kCffDecoderBytes;
+  } else {
+    plan.points = face.maxPoints < kMaxScratchPoints ? face.maxPoints : kMaxScratchPoints;
+    plan.contours = face.maxContours < kMaxScratchContours ? face.maxContours : kMaxScratchContours;
+  }
   plan.maxPpem26_6 = maxPpem26_6 < kMaxPpem26_6 ? maxPpem26_6 : kMaxPpem26_6;
   const int32_t scale = unitsToPixels(face, plan.maxPpem26_6);
   // head's box at that size, one pixel wider each way for the rounding of compound transforms. FreeType does
@@ -312,16 +319,18 @@ ScratchPlan mergePlans(const ScratchPlan& a, const ScratchPlan& b) {
   plan.outputBytes = a.outputBytes > b.outputBytes ? a.outputBytes : b.outputBytes;
   plan.poolBytes = a.poolBytes > b.poolBytes ? a.poolBytes : b.poolBytes;
   plan.maxPpem26_6 = a.maxPpem26_6 > b.maxPpem26_6 ? a.maxPpem26_6 : b.maxPpem26_6;
+  plan.decoderBytes = a.decoderBytes > b.decoderBytes ? a.decoderBytes : b.decoderBytes;
   return plan;
 }
 
 bool Rasterizer::setPlan(const ScratchPlan& plan) {
   if (plan.points > kMaxScratchPoints || plan.contours > kMaxScratchContours || plan.outputBytes > kMaxOutputBytes ||
       plan.poolBytes < 2048 || plan.poolBytes > kPoolBytesSd || plan.maxPpem26_6 == 0 ||
-      plan.maxPpem26_6 > kMaxPpem26_6) {
-    LOG_ERR("TTF", "scratch plan out of range: %u points, %u contours, %lu output, %lu pool, %lu ppem", plan.points,
-            plan.contours, static_cast<unsigned long>(plan.outputBytes), static_cast<unsigned long>(plan.poolBytes),
-            static_cast<unsigned long>(plan.maxPpem26_6));
+      plan.maxPpem26_6 > kMaxPpem26_6 || (plan.decoderBytes != 0 && plan.decoderBytes != kCffDecoderBytes)) {
+    LOG_ERR("TTF", "scratch plan out of range: %u points, %u contours, %lu output, %lu pool, %lu ppem, %lu decoder",
+            plan.points, plan.contours, static_cast<unsigned long>(plan.outputBytes),
+            static_cast<unsigned long>(plan.poolBytes), static_cast<unsigned long>(plan.maxPpem26_6),
+            static_cast<unsigned long>(plan.decoderBytes));
     return false;
   }
   release();
@@ -329,7 +338,10 @@ bool Rasterizer::setPlan(const ScratchPlan& plan) {
   pointsOffset_ = alignUp(plan.poolBytes, 8);
   contoursOffset_ = pointsOffset_ + plan.points * static_cast<uint32_t>(sizeof(FT_Vector));
   tagsOffset_ = contoursOffset_ + plan.contours * static_cast<uint32_t>(sizeof(unsigned short));
-  outputOffset_ = tagsOffset_ + plan.points;
+  // The CFF interpreter's state follows the tags, aligned to 8 as the block's start is; a block for TrueType faces
+  // alone has neither the region nor its padding.
+  decoderOffset_ = plan.decoderBytes != 0 ? alignUp(tagsOffset_ + plan.points, 8) : tagsOffset_ + plan.points;
+  outputOffset_ = decoderOffset_ + plan.decoderBytes;
   blockBytes_ = outputOffset_ + plan.outputBytes;
   plan_ = plan;  // last: `plan` may be plan_ itself, as allocate(plan()) passes it
   return true;
@@ -375,8 +387,12 @@ Status Rasterizer::load(FontBytes& bytes, const Face& face, const uint16_t glyph
                 block_ + tagsOffset_,
                 plan_.points,
                 plan_.contours};
+  // A CFF glyph fills the same arrays, and the loader holds its size. It is drawn from the glyph's origin, so pp1x,
+  // the TrueType outline's shift, stays 0.
   int32_t pp1x = 0;
-  Status status = loader.load(glyph, 0, &pp1x);
+  Status status = face.outlines == Face::Outlines::Cff
+                      ? loadCff(bytes, face, glyph, loader.scale, &loader.numPoints, &loader.numContours)
+                      : loader.load(glyph, 0, &pp1x);
   if (bytes.ioError()) status = Status::Transient;
   if (status == Status::Ok && bytes.outOfRange()) status = Status::Malformed;
   if (status == Status::Ok && !loader.translate(0, -pp1x, 0)) status = Status::Unsupported;
@@ -441,7 +457,7 @@ Status Rasterizer::rasterize(uint8_t* dst) {
   outline.points = reinterpret_cast<FT_Vector*>(block_ + pointsOffset_);
   outline.tags = block_ + tagsOffset_;
   outline.contours = reinterpret_cast<unsigned short*>(block_ + contoursOffset_);
-  outline.flags = FT_OUTLINE_NONE;  // nonzero winding, as TrueType
+  outline.flags = FT_OUTLINE_NONE;  // nonzero winding, as TrueType and CFF (ftgrays ignores REVERSE_FILL)
 
   SpanSink sink{dst, width_, height_};
   FT_Raster_Params params{};

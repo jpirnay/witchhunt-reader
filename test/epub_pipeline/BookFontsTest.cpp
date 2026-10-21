@@ -264,17 +264,137 @@ TEST_F(BookFontsTest, AnAdobeObfuscatedFaceIsUndoneWithTheUuid) {
   EXPECT_EQ(kTrueType, readFile(fs::path(BookFonts::familyDir(epub->getCachePath())) / "0.ttf"));
 }
 
-TEST_F(BookFontsTest, CffOutlinesAndUnknownBytesKeepTheReadersFont) {
+TEST_F(BookFontsTest, AnEmbeddedCffFaceIsAccepted) {
+  ASSERT_EQ(0, kCff.compare(0, 4, "OTTO"));
   const auto cff = book("@font-face { font-family: Body; src: url(../Fonts/b.otf); }\np { font-family: Body }\n",
                         {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.otf", "font/otf", kCff}});
-  EXPECT_EQ(BookFonts::State::None, BookFonts::prepare(*cff, nullptr));
-  EXPECT_FALSE(fs::exists(fs::path(BookFonts::familyDir(cff->getCachePath())) / "0.ttf"));
+  ASSERT_EQ(BookFonts::State::Family, BookFonts::prepare(*cff, nullptr));
+  // Under the copy name every face has; discovery reads the content.
+  EXPECT_EQ(kCff, readFile(fs::path(BookFonts::familyDir(cff->getCachePath())) / "0.ttf"));
+}
 
-  // Neither a font nor obfuscated with this book's keys: encrypted, so refused.
+TEST_F(BookFontsTest, AnObfuscatedCffFaceIsAccepted) {
+  const std::string uid = "urn:uuid:9f1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9";
+  uint8_t key[20];
+  ASSERT_TRUE(BookFonts::idpfKey(uid, key));
+  const auto epub = book("@font-face { font-family: Body; src: url(../Fonts/b.otf); }\np { font-family: Body }\n",
+                         {"<body><p>Body text.</p></body>"},
+                         {{"OEBPS/Fonts/b.otf", "application/vnd.ms-opentype", obfuscated(kCff, key, 20, 1040)}},
+                         "<dc:identifier id=\"uid\">" + uid + "</dc:identifier>");
+  ASSERT_EQ(BookFonts::State::Family, BookFonts::prepare(*epub, nullptr));
+  EXPECT_EQ(kCff, readFile(fs::path(BookFonts::familyDir(epub->getCachePath())) / "0.ttf"));
+}
+
+TEST_F(BookFontsTest, WoffCollectionsAndUnknownBytesStayRefused) {
+  // WOFF, WOFF2, a collection, and bytes that are neither a font nor obfuscated with this book's keys (encrypted).
+  const char* const tags[] = {"wOFF", "wOF2", "ttcf"};
+  for (const char* tag : tags) {
+    std::string bytes = kTrueType;
+    bytes.replace(0, 4, tag);
+    const auto epub = book("@font-face { font-family: Body; src: url(../Fonts/b.ttf); }\np { font-family: Body }\n",
+                           {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.ttf", "font/ttf", bytes}});
+    EXPECT_EQ(BookFonts::State::None, BookFonts::prepare(*epub, nullptr)) << tag;
+    EXPECT_FALSE(fs::exists(fs::path(BookFonts::familyDir(epub->getCachePath())) / "0.ttf")) << tag;
+  }
   const auto encrypted =
       book("@font-face { font-family: Body; src: url(../Fonts/b.ttf); }\np { font-family: Body }\n",
            {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.ttf", "font/ttf", std::string(4096, '\x5a')}});
   EXPECT_EQ(BookFonts::State::None, BookFonts::prepare(*encrypted, nullptr));
+}
+
+TEST_F(BookFontsTest, ABookExaminedBeforeIsExaminedAgain) {
+  // A CFF book was examined as None by the version before this one: its record must not stand.
+  const auto epub = book("@font-face { font-family: Body; src: url(../Fonts/b.otf); }\np { font-family: Body }\n",
+                         {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.otf", "font/otf", kCff}});
+  ASSERT_EQ(BookFonts::State::Family, BookFonts::prepare(*epub, nullptr));
+  const fs::path state = fs::path(epub->getCachePath()) / "fonts.bin";
+  std::string bytes = readFile(state);
+  ASSERT_FALSE(bytes.empty());
+  ASSERT_EQ(static_cast<char>(BookFonts::kVersion), bytes[0]);
+  bytes[0] = 5;  // the version before CFF faces
+  bytes[1] = 0;  // and its verdict on this book: None
+  {
+    std::ofstream out(state, std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  }
+  EXPECT_EQ(BookFonts::State::Pending, BookFonts::read(epub->getCachePath()));
+}
+
+namespace {
+// Sets the first byte (the version) of a cache file.
+void setVersionByte(const fs::path& file, const char version) {
+  std::string bytes = readFile(file);
+  ASSERT_FALSE(bytes.empty()) << file;
+  bytes[0] = version;
+  std::ofstream out(file, std::ios::binary | std::ios::trunc);
+  out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+const char* const kCffBookCss =
+    "@font-face { font-family: Body; src: url(../Fonts/b.otf); }\np { font-family: Body; "
+    "font-style: italic }\n";
+}  // namespace
+
+// An upgrade that changes the book cache and the CSS cache versions: the book as an older firmware left it.
+TEST_F(BookFontsTest, AStaleCssCacheIsCompiledAgainWhenTheBookCacheIsRebuilt) {
+  const auto first = book(kCffBookCss, {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.otf", "font/otf", kCff}});
+  const fs::path cache = first->getCachePath();
+  ASSERT_TRUE(fs::exists(cache / "css_rules.cache"));
+  ASSERT_TRUE(fs::exists(cache / "css_fonts.bin"));
+  const char old = static_cast<char>(CssParser::CSS_CACHE_VERSION - 1);
+  setVersionByte(cache / "book.bin", 1);
+  setVersionByte(cache / "css_rules.cache", old);
+  setVersionByte(cache / "css_fonts.bin", old);
+
+  Epub again(first->getPath(), (work / "cache").string());
+  ASSERT_TRUE(again.load(true));
+  EXPECT_EQ(static_cast<char>(CssParser::CSS_CACHE_VERSION), readFile(cache / "css_rules.cache")[0]);
+  EXPECT_EQ(static_cast<char>(CssParser::CSS_CACHE_VERSION), readFile(cache / "css_fonts.bin")[0]);
+  ASSERT_NE(nullptr, again.getCssParser());
+  EXPECT_EQ(CssFontStyle::Italic, again.getCssParser()->resolveStyle("p", "").fontStyle) << "the rules apply";
+}
+
+TEST_F(BookFontsTest, AStaleCssCacheNeedsFirstOpenIndexing) {
+  const auto first = book(kCffBookCss, {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.otf", "font/otf", kCff}});
+  EXPECT_FALSE(Epub(first->getPath(), (work / "cache").string()).needsFirstOpenIndexing());
+  setVersionByte(fs::path(first->getCachePath()) / "css_rules.cache",
+                 static_cast<char>(CssParser::CSS_CACHE_VERSION - 1));
+  EXPECT_TRUE(Epub(first->getPath(), (work / "cache").string()).needsFirstOpenIndexing());
+}
+
+// The device case: the older firmware refused the book's CFF face, and the upgrade changed every cache version.
+TEST_F(BookFontsTest, ABookExaminedByAnOlderFirmwareGetsItsCffFontAfterTheUpgrade) {
+  const auto first = book(kCffBookCss, {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.otf", "font/otf", kCff}});
+  ASSERT_EQ(BookFonts::State::Family, BookFonts::prepare(*first, nullptr));
+  const fs::path cache = first->getCachePath();
+  const char old = static_cast<char>(CssParser::CSS_CACHE_VERSION - 1);
+  setVersionByte(cache / "fonts.bin", 5);
+  {
+    std::string bytes = readFile(cache / "fonts.bin");
+    bytes[1] = 0;  // None
+    std::ofstream out(cache / "fonts.bin", std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  }
+  fs::remove_all(fs::path(BookFonts::familyDir(first->getCachePath())));
+  setVersionByte(cache / "book.bin", 1);
+  setVersionByte(cache / "css_rules.cache", old);
+  setVersionByte(cache / "css_fonts.bin", old);
+  ASSERT_EQ(BookFonts::State::Pending, BookFonts::read(first->getCachePath()));
+
+  Epub again(first->getPath(), (work / "cache").string());
+  ASSERT_TRUE(again.load(true));
+  again.setupCacheDir();
+  EXPECT_EQ(BookFonts::State::Family, BookFonts::prepare(again, nullptr));
+  EXPECT_EQ(kCff, readFile(fs::path(BookFonts::familyDir(again.getCachePath())) / "0.ttf"));
+}
+
+// Not "no faces": the file is there, in a form this firmware cannot read, so nothing is decided from it.
+TEST_F(BookFontsTest, AFontFacesFileOfAnotherVersionLeavesTheBookPending) {
+  const auto epub = book(kCffBookCss, {"<body><p>Body text.</p></body>"}, {{"OEBPS/Fonts/b.otf", "font/otf", kCff}});
+  const fs::path cache = epub->getCachePath();
+  setVersionByte(cache / "css_fonts.bin", static_cast<char>(CssParser::CSS_CACHE_VERSION - 1));
+  EXPECT_EQ(BookFonts::State::Pending, BookFonts::prepare(*epub, nullptr));
+  EXPECT_FALSE(fs::exists(cache / "fonts.bin"));
+  EXPECT_FALSE(fs::exists(fs::path(BookFonts::familyDir(epub->getCachePath())) / "0.ttf"));
 }
 
 TEST_F(BookFontsTest, ABookWithoutAnEmbeddedBodyFamilyIsNone) {
@@ -433,9 +553,11 @@ TEST_F(BookFontsTest, AnAccentWithOnlyABoldFaceIsDrawnInIt) {
 }
 
 TEST_F(BookFontsTest, ARefusedAccentGivesItsPlaceToTheNext) {
+  std::string woff = kTrueType;
+  woff.replace(0, 4, "wOFF");
   const auto epub = book(kAccentCss, {kAccentChapter},
                          {{"OEBPS/Fonts/b.ttf", "font/ttf", kTrueType},
-                          {"OEBPS/Fonts/d.ttf", "font/otf", kCff},
+                          {"OEBPS/Fonts/d.ttf", "font/woff", woff},
                           {"OEBPS/Fonts/s.ttf", "font/ttf", kNotoSans}});
   ASSERT_EQ(BookFonts::State::Family, BookFonts::prepare(*epub, nullptr));
   BookFonts::Families read;
@@ -443,7 +565,7 @@ TEST_F(BookFontsTest, ARefusedAccentGivesItsPlaceToTheNext) {
   std::string second = "stale";
   EXPECT_EQ(BookFonts::State::Family, BookFonts::read(epub->getCachePath(), &accent, &read, 0));
   EXPECT_EQ(BookFonts::State::Family, BookFonts::read(epub->getCachePath(), &second, nullptr, 1));
-  EXPECT_EQ(family("Script"), read.accents[0]);  // Display's CFF is refused: Script is the first accent now
+  EXPECT_EQ(family("Script"), read.accents[0]);  // Display's WOFF is refused: Script is the first accent now
   EXPECT_EQ(0u, read.accents[1]);
   EXPECT_EQ("Script", accent);
   EXPECT_EQ("", second);

@@ -74,19 +74,20 @@ void checkLock() {
   }
 }
 
+// What the flash at a style block's place holds: the block's bytes already, others, or not known (a read failed).
+enum class Held : uint8_t { Same, Differs, Unread };
+
 // Whether the flash at `offset` holds `file` already, compared in halves of the install's copy buffer (the file's
 // beside the flash's); a block that differs stops at its first chunk that does.
-bool holdsFile(const NorFlash& flash, const uint32_t offset, const ttf::FileSource& file, uint8_t* buffer) {
+Held holdsFile(const NorFlash& flash, const uint32_t offset, const ttf::FileSource& file, uint8_t* buffer) {
   constexpr uint32_t kHalf = kCopyBytes / 2;
   for (uint32_t at = 0; at < file.size; at += kHalf) {
     const uint32_t len = std::min(kHalf, file.size - at);
-    if (!file.read(file.ctx, at, buffer, len) || !flash.read(offset + at, buffer + kHalf, len) ||
-        std::memcmp(buffer, buffer + kHalf, len) != 0) {
-      return false;
-    }
+    if (!file.read(file.ctx, at, buffer, len) || !flash.read(offset + at, buffer + kHalf, len)) return Held::Unread;
+    if (std::memcmp(buffer, buffer + kHalf, len) != 0) return Held::Differs;
     if (hooks.yield) hooks.yield();
   }
-  return true;
+  return Held::Same;
 }
 
 }  // namespace
@@ -100,6 +101,7 @@ TtfFontSet::TtfFontSet(NorFlash& flash) : flash_(flash), store_(flash) {}
 bool TtfFontSet::load(const Files* families, const uint8_t count, const uint8_t identity[kIdentityBytes],
                       const std::function<void()>& onBusy, const Install mode) {
   count_ = 0;
+  failedForNow_ = false;
   if (count == 0 || count > kMaxFamilies) return false;
   for (uint8_t f = 0; f < count; ++f) {
     if (families[f][0].size == 0) {
@@ -109,6 +111,7 @@ bool TtfFontSet::load(const Files* families, const uint8_t count, const uint8_t 
     fonts_[f].reset(new (std::nothrow) TtfFont(*this, f));
     if (!fonts_[f]) {
       LOG_ERR("TTF", "OOM: family %u", f);
+      failedForNow_ = true;
       return false;
     }
   }
@@ -125,6 +128,7 @@ bool TtfFontSet::load(const Files* families, const uint8_t count, const uint8_t 
   }
   if (opened != OpenResult::Ready) {
     LOG_ERR("TTF", "glyph store did not open (%u)", static_cast<unsigned>(opened));
+    failedForNow_ = opened == OpenResult::NoMemory;
     return false;
   }
 
@@ -143,6 +147,7 @@ bool TtfFontSet::load(const Files* families, const uint8_t count, const uint8_t 
     opened = store_.open(identity);
     if (opened != OpenResult::Ready) {
       LOG_ERR("TTF", "glyph store did not open after a reinstall (%u)", static_cast<unsigned>(opened));
+      failedForNow_ = opened == OpenResult::NoMemory;
       return false;
     }
     plan = ttf::ScratchPlan{};
@@ -210,13 +215,22 @@ bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8
   const auto work = makeUniqueNoThrow<InstallWork>();
   if (!work) {
     LOG_ERR("TTF", "install: no %u B to work in", static_cast<unsigned>(sizeof(InstallWork)));
+    failedForNow_ = true;
     return false;
   }
+  // A failure for now (no memory, a card read) before anything is erased: the install stops there, the store kept
+  // as it is, and the load fails without asking for fewer families (failedForNow()).
+  const auto stopForNow = [this]([[maybe_unused]] const char* what, [[maybe_unused]] const uint8_t family,
+                                 [[maybe_unused]] const uint8_t block) {  // only the log reads them
+    LOG_ERR("TTF", "install: %s family %u's style block %u failed for now; nothing erased", what, family, block);
+    failedForNow_ = true;
+    return false;
+  };
 
   // Flash mode while the whole set fits; past that the families go to SD mode from the last on, the least used
   // accent first and the body last of all (from family `sdFrom` on, every one is in SD mode). An accent family keeps
-  // flash mode only while the log keeps kAccentFlashLogBytes. A style whose SD-mode block cannot be made keeps size
-  // 0 there, which the planner refuses.
+  // flash mode only while the log keeps kAccentFlashLogBytes. A style that can have no SD-mode block keeps size 0
+  // there, which the planner refuses.
   glyphstore::PlanInput in{};
   in.styleCount = styles;
   in.usableBytes = flash_.size();
@@ -228,12 +242,16 @@ bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8
   for (int sdFrom = count; sdFrom >= 0 && !planned; --sdFrom) {
     for (uint8_t b = 0; b < styles; ++b) {
       glyphstore::StyleInfo& sd = work->sd[b];
-      if (sdFrom == count - 1 && work->block.plan(*files[b])) {
+      if (sdFrom == count - 1) {
         // The SD-mode blocks, planned once from each file's table directory, when first wanted.
-        sd.size = work->block.bytes();
-        sd.fileStamp = files[b]->stamp;
-        sd.fileSize = files[b]->size;
-        sd.outlines = work->block.outlines();
+        const ttf::SdPlan block = work->block.plan(*files[b]);
+        if (block == ttf::SdPlan::Transient) return stopForNow("planning", familyOf[b], b);
+        if (block == ttf::SdPlan::Ok) {
+          sd.size = work->block.bytes();
+          sd.fileStamp = files[b]->stamp;
+          sd.fileSize = files[b]->size;
+          sd.outlines = work->block.outlines();
+        }
       }
       const bool card = familyOf[b] >= sdFrom;
       in.styleMode[b] = card ? glyphstore::kModeSd : glyphstore::kModeFlash;
@@ -256,42 +274,54 @@ bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8
   }
   if (onBusy) onBusy();
 
-  // A block's bytes as a file: the style's own file in flash mode, else its SD-mode block made from it.
+  // A block's bytes as a file: the style's own file in flash mode, else its SD-mode block made from it. Planned
+  // above already, so a plan that fails here failed for now, or the file changed meanwhile: no block to write either
+  // way.
   const auto blockSource = [&](const uint8_t b, ttf::FileSource* source) {
     if (layout.styleMode[b] == glyphstore::kModeFlash) {
       *source = *files[b];
       return true;
     }
-    if (!work->block.plan(*files[b])) return false;
+    if (work->block.plan(*files[b]) != ttf::SdPlan::Ok) return false;
     *source = work->block.source();
     return true;
   };
   // A style block that holds its bytes already where this layout puts it stays as it is, neither erased nor copied:
   // a set that keeps its leading families (a TrueType reader font beside another book's accent families, or beside
-  // none) copies only the rest. Reading a kept block costs a fraction of erasing and writing it again.
+  // none) copies only the rest. Reading a kept block costs a fraction of erasing and writing it again. A block that
+  // cannot be read now stops the install before anything is erased, rather than be erased as if it differed.
   uint8_t kept = 0;
   unsigned onCard = 0;
   for (uint8_t b = 0; b < styles; ++b) {
     ttf::FileSource source;
-    if (blockSource(b, &source) && holdsFile(flash_, layout.styleOffset[b], source, work->buffer)) {
-      kept |= static_cast<uint8_t>(1u << b);
-    }
+    if (!blockSource(b, &source)) return stopForNow("planning", familyOf[b], b);
+    const Held held = holdsFile(flash_, layout.styleOffset[b], source, work->buffer);
+    if (held == Held::Unread) return stopForNow("reading", familyOf[b], b);
+    if (held == Held::Same) kept |= static_cast<uint8_t>(1u << b);
     onCard += layout.styleMode[b] == glyphstore::kModeSd ? 1 : 0;
   }
-  if (!store_.beginInstall(layout, identity, work->sd, kept)) return false;
+  bool noHeaderMemory = false;
+  if (!store_.beginInstall(layout, identity, work->sd, kept, &noHeaderMemory)) {
+    failedForNow_ = noHeaderMemory;  // its header, made before anything is erased
+    return false;
+  }
   for (uint8_t b = 0; b < styles; ++b) {
     if ((kept & (1u << b)) != 0) continue;
     ttf::FileSource source;
-    bool copied = blockSource(b, &source);
+    bool read = blockSource(b, &source);
+    bool copied = read;
     for (uint32_t offset = 0; copied && offset < source.size; offset += kCopyBytes) {
       const uint32_t len = std::min(kCopyBytes, source.size - offset);
-      copied =
-          source.read(source.ctx, offset, work->buffer, len) && store_.writeStyleData(b, offset, work->buffer, len);
+      read = source.read(source.ctx, offset, work->buffer, len);
+      copied = read && store_.writeStyleData(b, offset, work->buffer, len);
       if (hooks.yield) hooks.yield();
     }
     if (!copied) {
       LOG_ERR("TTF", "install: copying family %u's style block %u failed", familyOf[b], b);
-      return false;  // the header is still erased: the next load installs again
+      // The header is still erased: the next load installs again. After a read that failed (memory, the card), the
+      // same set, not fewer families.
+      failedForNow_ = !read;
+      return false;
     }
   }
   if (!store_.finishInstall()) return false;
@@ -614,6 +644,7 @@ TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uin
     body_.styles = makeUniqueNoThrow<Size::StyleFont[]>(count);
     if (!styles_ || !body_.styles) {
       LOG_ERR("TTF", "OOM: family %u's %u styles", family_, count);
+      set_.failedForNow_ = true;
       return StylesResult::Failed;
     }
     styleCount_ = count;
@@ -642,10 +673,16 @@ TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uin
     FontBytes bytes;
     if (!fontBytes(s, &bytes)) return StylesResult::MapFailed;
     if (style.onCard) {
-      // The stamp misses a file rewritten in place at the same size and time; its table directory does not.
+      // The stamp misses a file rewritten in place at the same size and time; its table directory does not. A plan
+      // that fails for now (no memory, a card read) says nothing of the file: the load fails, and installs nothing.
       auto block = makeUniqueNoThrow<ttf::SdBlock>();
-      if (!block) return StylesResult::Failed;
-      if (!block->plan(files[s]) || !block->sameAs(bytes.span(0, style.bytes), style.bytes) ||
+      const ttf::SdPlan planned = block ? block->plan(files[s]) : ttf::SdPlan::Transient;
+      if (planned == ttf::SdPlan::Transient) {
+        LOG_ERR("TTF", "family %u style %u: its file could not be checked for now", family_, s);
+        set_.failedForNow_ = true;
+        return StylesResult::Failed;
+      }
+      if (planned != ttf::SdPlan::Ok || !block->sameAs(bytes.span(0, style.bytes), style.bytes) ||
           block->outlines().fileOffset != style.sd.fileOffset) {
         return StylesResult::Changed;
       }

@@ -136,8 +136,9 @@ bool validHeader(const Header& h, const uint32_t flashSize) {
 // --- Install ---
 
 bool FlashGlyphStore::beginInstall(const Layout& layout, const uint8_t identity[kIdentityBytes],
-                                   const StyleInfo* sdInfo, const uint8_t keepStyles) {
+                                   const StyleInfo* sdInfo, const uint8_t keepStyles, bool* noMemory) {
   close();
+  if (noMemory) *noMemory = false;
   const Geometry& g = layout.geometry;
   bool sd = false;
   for (uint8_t s = 0; s < g.styleCount && s < kMaxStyles; ++s) sd = sd || layout.styleMode[s] == kModeSd;
@@ -148,6 +149,7 @@ bool FlashGlyphStore::beginInstall(const Layout& layout, const uint8_t identity[
   auto header = makeUniqueNoThrow<Header>();
   if (!header) {
     LOG_ERR("GST", "install: no memory for the header (%u B)", static_cast<unsigned>(sizeof(Header)));
+    if (noMemory) *noMemory = true;
     return false;
   }
   header->magic = kMagic;

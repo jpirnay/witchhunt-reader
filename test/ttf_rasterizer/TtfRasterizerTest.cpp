@@ -7,7 +7,10 @@
 #include <string>
 #include <vector>
 
+#include "CffBuilder.h"
 #include "TtfBuilder.h"
+#include "TtfCff.h"
+#include "TtfCffCharString.h"
 #include "TtfRasterizer.h"
 #include "TtfTestUtil.h"
 
@@ -394,6 +397,122 @@ TEST(TtfScratch, OneBlockServesEveryStyle) {
   EXPECT_EQ(20, m.contours);
   EXPECT_EQ(900u, m.outputBytes);
   EXPECT_EQ(kPoolBytesSd, m.poolBytes);
+}
+
+TEST(TtfScratch, ACffFaceIsPlannedAtTheCapsWithTheInterpretersState) {
+  // maxp does not count a CFF font's points: the caps, and the charstring interpreter's region.
+  Face face;
+  face.outlines = Face::Outlines::Cff;
+  face.unitsPerEm = 1000;
+  face.xMax = 1000;
+  face.yMax = 1000;
+  const ScratchPlan cff = planScratch(face, 1000, kPoolBytesFlash);
+  EXPECT_EQ(kMaxScratchPoints, cff.points);
+  EXPECT_EQ(kMaxScratchContours, cff.contours);
+  EXPECT_EQ(kCffDecoderBytes, cff.decoderBytes);
+  EXPECT_EQ(81u, cff.outputBytes);  // head's box as for TrueType: 18 x 18 at 2 bits
+  face.outlines = Face::Outlines::TrueType;
+  face.maxPoints = 600;
+  face.maxContours = 40;
+  const ScratchPlan trueType = planScratch(face, 1000, kPoolBytesFlash);
+  EXPECT_EQ(0u, trueType.decoderBytes);
+  EXPECT_EQ(kCffDecoderBytes, mergePlans(trueType, cff).decoderBytes);
+  EXPECT_EQ(kCffDecoderBytes, mergePlans(cff, trueType).decoderBytes);
+}
+
+TEST(TtfScratch, TheInterpretersRegionFollowsTheTagsAligned) {
+  // 13 points leave the tags ending off an 8-byte boundary: the region starts at the next one, before the output.
+  ScratchPlan plan{13, 3, 100, kPoolBytesFlash};
+  Rasterizer trueType;
+  ASSERT_TRUE(trueType.setPlan(plan));
+  const uint32_t before = trueType.scratchBytes() - plan.outputBytes;  // the pool, points, contours and tags
+  plan.decoderBytes = kCffDecoderBytes;
+  Rasterizer cff;
+  ASSERT_TRUE(cff.setPlan(plan));
+  EXPECT_NE(0u, before % 8);
+  EXPECT_EQ((before + 7) / 8 * 8 + kCffDecoderBytes + plan.outputBytes, cff.scratchBytes());
+  plan.decoderBytes = kCffDecoderBytes - 8;  // too small for the interpreter
+  EXPECT_FALSE(cff.setPlan(plan));
+  plan.decoderBytes = kCffDecoderBytes + 8;
+  EXPECT_FALSE(cff.setPlan(plan));
+}
+
+TEST(TtfScratch, ACffGlyphInABlockPlannedWithoutTheInterpreterIsTransient) {
+  // The plan's fault, not the glyph's: drawn once the block is planned for the face.
+  const std::vector<uint8_t> data = readFixture("CffOperators.otf");
+  FontBytes bytes(data.data(), static_cast<uint32_t>(data.size()));
+  Face face;
+  ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face));
+  const uint16_t glyph = glyphIndex(bytes, face, 'A');
+  ASSERT_NE(0, glyph);
+  ScratchPlan plan = planScratch(face, kUnitPpem, kPoolBytesFlash);
+  plan.decoderBytes = 0;
+  Rasterizer rasterizer;
+  ASSERT_TRUE(rasterizer.allocate(plan));
+  EpdGlyph metrics{};
+  EXPECT_EQ(Status::Transient, rasterizer.render(bytes, face, glyph, kUnitPpem, &metrics));
+  ASSERT_TRUE(rasterizer.allocate(planScratch(face, kUnitPpem, kPoolBytesFlash)));
+  EXPECT_EQ(Status::Ok, rasterizer.render(bytes, face, glyph, kUnitPpem, &metrics));
+  EXPECT_GT(metrics.width, 0);
+}
+
+TEST(TtfCffLoad, APointPastThirtyTwoBitsOnceOffsetIsUnsupported) {
+  // A Top DICT offset of 2,147,482,993 font units ([1E-5 0 0 1E-5 32767.99 0], normalized to an em of 65,536) leaves
+  // 654 units below INT32_MAX. Glyph 1 lies 1,000 units left of the offset and draws; glyph 2 lies 1,000 units right
+  // and is refused before it is scaled. Kept to 32 bits it would wrap to about -2^31, which at this size lands in
+  // range, 2,048 px left of the origin.
+  CffSpec spec;
+  spec.topMatrix = "0.00001 0 0 0.00001 32767.99 0";
+  spec.fds = {CffFontDict{}};
+  Bytes inside;
+  putType2Op(inside, {-1000, 0}, 21);       // rmoveto
+  putType2Op(inside, {100, 0, 0, 100}, 5);  // rlineto
+  putType2Op(inside, {}, 14);               // endchar
+  Bytes past;
+  putType2Op(past, {1000, 0}, 21);
+  putType2Op(past, {100, 0, 0, 100}, 5);
+  putType2Op(past, {}, 14);
+  spec.charStrings = {{14}, inside, past};
+  const Bytes data = buildOtf(spec, 16384);
+  FontBytes bytes(data.data(), static_cast<uint32_t>(data.size()));
+  Face face;
+  ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face));
+  CffGlyphSource source;
+  ASSERT_EQ(Status::Ok, cffGlyphSource(bytes, face, 2, &source));
+  ASSERT_EQ(2147482993, source.matrix.dx);
+  Rasterizer rasterizer;
+  ASSERT_TRUE(rasterizer.allocate(planScratch(face, ppemFromPoints(14), kPoolBytesFlash)));
+  // At a 26.6 ppem of 1 and head's 16,384 units per em the scale is 4 (16.16): 2,147,481,993 units are 131,072 in
+  // 26.6, 2,048 px.
+  EpdGlyph metrics{};
+  ASSERT_EQ(Status::Ok, rasterizer.render(bytes, face, 1, 1, &metrics));
+  EXPECT_EQ(2048, metrics.left);
+  EXPECT_EQ(Status::Unsupported, rasterizer.render(bytes, face, 2, 1, &metrics));
+}
+
+TEST(TtfCffLoad, AFontDictScalePastThirtyTwoBitsIsUnsupported) {
+  // A font DICT matrix of [100 0 0 100 0 0] under a Top DICT one of [1E-5 0 0 1E-5 0 0] scales its glyphs by the Top
+  // DICT's units per em over the font DICT's, 100,000 / 1,000 (cff_slot_load). With head's 16 units per em the size
+  // scale is 4,096 x the 26.6 ppem, times 100 past INT32_MAX from 5,243 (82 px) on: refused before any point, so an
+  // empty glyph shows it.
+  CffSpec spec;
+  spec.cid = true;
+  spec.topMatrix = "0.00001 0 0 0.00001 0 0";
+  spec.fds = {cffFontDict("100 0 0 100 0 0")};
+  const Bytes data = buildOtf(spec, 16);
+  FontBytes bytes(data.data(), static_cast<uint32_t>(data.size()));
+  Face face;
+  ASSERT_EQ(FaceStatus::Ok, parseFace(bytes, &face));
+  CffGlyphSource source;
+  ASSERT_EQ(Status::Ok, cffGlyphSource(bytes, face, 1, &source));
+  ASSERT_EQ(100000u, source.scaleNum);
+  ASSERT_EQ(1000u, source.scaleDen);
+  Rasterizer rasterizer;
+  ASSERT_TRUE(rasterizer.allocate(planScratch(face, kMaxPpem26_6, kPoolBytesFlash)));
+  EpdGlyph metrics{};
+  EXPECT_EQ(Status::Ok, rasterizer.render(bytes, face, 1, 5242, &metrics));
+  EXPECT_EQ(Status::Unsupported, rasterizer.render(bytes, face, 1, 5243, &metrics));
+  EXPECT_EQ(Status::Unsupported, rasterizer.render(bytes, face, 1, kMaxPpem26_6, &metrics));
 }
 
 TEST(TtfScratch, AllocationHoldsThePlanAndRefusesImpossibleOnes) {

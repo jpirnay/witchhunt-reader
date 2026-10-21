@@ -256,13 +256,13 @@ class ParserState {
 
 // ---- The font files --------------------------------------------------------------------------------------
 
-// Whether the font's first four bytes, XORed with `key`'s first four when it is set, are a TrueType signature
-// (0x00010000, or 'true' from Apple). Anything else is not drawn: CFF outlines ('OTTO'), WOFF, WOFF2, a
-// collection, or a font encrypted rather than obfuscated.
-bool isTrueType(const uint8_t (&sig)[4], const uint8_t* key) {
+// Whether the font's first four bytes, XORed with `key`'s first four when it is set, are an outline font's
+// signature: TrueType (0x00010000, or 'true' from Apple) or CFF ('OTTO'). Anything else is not drawn: WOFF, WOFF2,
+// a collection, or a font encrypted rather than obfuscated.
+bool isOutlineFont(const uint8_t (&sig)[4], const uint8_t* key) {
   uint32_t tag = 0;
   for (int i = 0; i < 4; ++i) tag = tag << 8 | static_cast<uint8_t>(sig[i] ^ (key ? key[i] : 0));
-  return tag == 0x00010000u || tag == 0x74727565u;
+  return tag == 0x00010000u || tag == 0x74727565u || tag == 0x4F54544Fu;
 }
 
 // The book's two obfuscation keys, read from the OPF the first time an obfuscated face needs them.
@@ -307,14 +307,15 @@ bool xorPrefix(const std::string& path, const uint8_t* key, const size_t keyLen,
     for (int i = 0; i < got; ++i) buf[i] ^= key[(at + static_cast<size_t>(i)) % keyLen];
     ok = file.seekSet(at) && file.write(buf, static_cast<size_t>(got)) == static_cast<size_t>(got);
     at += static_cast<size_t>(got);
+    ok = ok && file.seekSet(at);  // a read after a write needs a seek between, to stdio on Windows
   }
   return file.close() && ok;
 }
 
 enum class Copy : uint8_t { Done, Refused, Failed };
 
-// Copies one face to `dest` as plain TrueType, its obfuscation undone. Refused: not a font the TTF engine
-// draws (logged). Failed: a read or a write went wrong, which may pass.
+// Copies one face to `dest` as a plain font file (TrueType or CFF), its obfuscation undone. Refused: not a font the TTF
+// engine draws (logged). Failed: a read or a write went wrong, which may pass.
 Copy copyFace(const Epub& epub, const std::string& href, const std::string& dest, Keys& keys, BuildArena* scratch) {
   size_t size = 0;
   if (!epub.getItemSize(href, &size) || size < 12 || size > kMaxFaceBytes) {
@@ -326,22 +327,22 @@ Copy copyFace(const Epub& epub, const std::string& href, const std::string& dest
   const uint8_t* key = nullptr;
   size_t keyLen = 0;
   size_t obfuscated = 0;
-  if (!isTrueType(sig, nullptr)) {
+  if (!isOutlineFont(sig, nullptr)) {
     // An obfuscated font starts with its first bytes XORed; a key that gives the signature back is the one.
     // Testing the signature replaces reading META-INF/encryption.xml: an algorithm it names that is real
     // encryption gives no signature back, and the face is refused.
     if (!keys.loaded && !loadKeys(epub, scratch, keys)) return Copy::Failed;
-    if (keys.hasIdpf && isTrueType(sig, keys.idpf)) {
+    if (keys.hasIdpf && isOutlineFont(sig, keys.idpf)) {
       key = keys.idpf;
       keyLen = sizeof(keys.idpf);
       obfuscated = kIdpfBytes;
-    } else if (keys.hasAdobe && isTrueType(sig, keys.adobe)) {
+    } else if (keys.hasAdobe && isOutlineFont(sig, keys.adobe)) {
       key = keys.adobe;
       keyLen = sizeof(keys.adobe);
       obfuscated = kAdobeBytes;
     } else {
-      // The signature tells a support log what it is: 4f54544f 'OTTO' is CFF, 774f4646 WOFF, 774f4632 WOFF2.
-      LOG_INF("BKF", "%s: not TrueType (%02x%02x%02x%02x)", href.c_str(), sig[0], sig[1], sig[2], sig[3]);
+      // The signature tells a support log what it is: 774f4646 WOFF, 774f4632 WOFF2.
+      LOG_INF("BKF", "%s: not TrueType or CFF (%02x%02x%02x%02x)", href.c_str(), sig[0], sig[1], sig[2], sig[3]);
       return Copy::Refused;
     }
   }
@@ -429,9 +430,15 @@ State writeState(const std::string& cachePath, const uint8_t code, const Familie
 // Finds the body and accent families and copies their faces out of the book; the state file's code for what came
 // of it (kCodeFailed for a failed read). `found` gets the families, `names` their names as the book declares them
 // (the body's for a Family, then '\0' and each accent's that was copied), into `records`.
-uint8_t examine(const Epub& epub, BuildArena* scratch, std::string& records, Families& found, std::string& names) {
+uint8_t examine(const Epub& epub, BuildArena* scratch, std::string& records, Families& found, std::string& names,
+                bool& undecided) {
   // A book without faces is probed too: Accents needs its body's generic family (CssFontFamily).
-  if (!CssParser::loadFontFaces(epub.getCachePath(), records)) records.clear();
+  bool stale = false;
+  if (!CssParser::loadFontFaces(epub.getCachePath(), records, &stale)) records.clear();
+  if (stale) {  // a faces file of another version: not "no faces", the book is decided once the CSS is compiled again
+    undecided = true;
+    return kCodeNone;
+  }
   bool failed = false;
   const Found families = detectFamilies(epub, scratch, &failed, records);
   if (failed) return kCodeFailed;
@@ -611,7 +618,7 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
 State prepare(const Epub& epub, BuildArena* scratch) {
   const std::string& cachePath = epub.getCachePath();
   // The CSS was not loaded, or did not compile: nothing to decide from yet.
-  if (!epub.getCssParser() || !epub.getCssParser()->hasCache()) return State::Pending;
+  if (!epub.getCssParser() || !epub.getCssParser()->cacheIsCurrent()) return State::Pending;
   const uint8_t last = readCode(cachePath, nullptr, nullptr, -1);
   const uint8_t attempts = last != kNoCode && last >= kCodeFailed ? static_cast<uint8_t>(last - kCodeFailed) : 0;
   Storage.removeDir((cachePath + kFontsDir).c_str());  // whatever an earlier attempt left
@@ -619,7 +626,9 @@ State prepare(const Epub& epub, BuildArena* scratch) {
   std::string records;
   Families found;
   std::string names;
-  const uint8_t code = examine(epub, scratch, records, found, names);
+  bool undecided = false;
+  const uint8_t code = examine(epub, scratch, records, found, names, undecided);
+  if (undecided) return State::Pending;  // no record: the next open asks again
   return writeState(cachePath, code == kCodeFailed ? static_cast<uint8_t>(kCodeFailed + attempts + 1) : code, found,
                     names);
 }

@@ -5,6 +5,10 @@
 #include <cstdlib>
 #include <new>
 
+#ifdef _WIN32
+#define malloc_usable_size _msize  // MinGW has no glibc call; _msize is the same size of a block
+#endif
+
 namespace {
 // 0: nothing refused.
 size_t refuseFrom = 0;

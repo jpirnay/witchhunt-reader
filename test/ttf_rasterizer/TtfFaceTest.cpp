@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "CffBuilder.h"
 #include "TtfBuilder.h"
 #include "TtfFace.h"
 #include "TtfTestUtil.h"
@@ -61,22 +62,65 @@ TEST(TtfFace, ParsesTheTablesAGlyphNeeds) {
   EXPECT_EQ(4, face.cmapFormat);
 }
 
-TEST(TtfFace, CffFontsAndCollectionsAreUnsupported) {
+TEST(TtfFace, CffFontsAreReadAndCollectionsAreUnsupported) {
   Font font = threeGlyphs();
   font.sfntVersion = tagOf("OTTO");
+  CffSpec cff;  // three glyphs, as the TrueType tables have
+  font.extraTables = {{"CFF ", buildCff(cff)}};
   Face face;
-  EXPECT_EQ(FaceStatus::Unsupported, parse(buildFont(font), &face));
+  ASSERT_EQ(FaceStatus::Ok, parse(buildFont(font), &face));
+  EXPECT_EQ(Face::Outlines::Cff, face.outlines);
+  EXPECT_EQ(3, face.numGlyphs);
+  EXPECT_EQ(0u, face.glyf);
+  EXPECT_EQ(0u, face.loca);
+  EXPECT_EQ(1, lookup(buildFont(font), 'A'));
+  font.extraTables.clear();  // 'OTTO' without a CFF table
+  EXPECT_EQ(FaceStatus::Malformed, parse(buildFont(font), &face));
   font.sfntVersion = tagOf("ttcf");
   EXPECT_EQ(FaceStatus::Unsupported, parse(buildFont(font), &face));
   font.sfntVersion = tagOf("true");  // Apple's TrueType tag is fine
-  EXPECT_EQ(FaceStatus::Ok, parse(buildFont(font), &face));
+  ASSERT_EQ(FaceStatus::Ok, parse(buildFont(font), &face));
+  EXPECT_EQ(Face::Outlines::TrueType, face.outlines);
 }
 
-TEST(TtfFace, ABundledCffSourceIsUnsupported) {
+TEST(TtfFace, ABundledCffSourceIsRead) {
   const std::vector<uint8_t> data = readFont("OpenDyslexic/OpenDyslexic-Regular.otf");
   ASSERT_FALSE(data.empty());
   Face face;
-  EXPECT_EQ(FaceStatus::Unsupported, parse(data, &face));
+  ASSERT_EQ(FaceStatus::Ok, parse(data, &face));
+  EXPECT_EQ(Face::Outlines::Cff, face.outlines);
+  EXPECT_EQ(1786, face.numGlyphs);
+}
+
+TEST(TtfFace, ACff2OnlyFontIsUnsupported) {
+  // Variable OpenType (CFF2) is not read; FreeType reads a CFF2 table before a CFF one, so neither is a font with both.
+  Font font = threeGlyphs();
+  font.sfntVersion = tagOf("OTTO");
+  Bytes cff2 = {2, 0, 5, 0, 0};
+  font.extraTables = {{"CFF2", cff2}};
+  Face face;
+  EXPECT_EQ(FaceStatus::Unsupported, parse(buildFont(font), &face));
+  font.extraTables.push_back({"CFF ", buildCff(CffSpec{})});
+  EXPECT_EQ(FaceStatus::Unsupported, parse(buildFont(font), &face));
+}
+
+TEST(TtfFace, ACffFontTakesAShortMaxp) {
+  // A CFF font's maxp is version 0.5, six bytes: no outline limits.
+  Font font = threeGlyphs();
+  font.sfntVersion = tagOf("OTTO");
+  Bytes maxp(6, 0);
+  set32(maxp, 0, 0x00005000);
+  set16(maxp, 4, 3);
+  font.extraTables = {{"CFF ", buildCff(CffSpec{})}, {"maxp", maxp}};
+  Face face;
+  EXPECT_EQ(FaceStatus::Ok, parse(buildFont(font), &face));
+  set32(maxp, 0, 0x00006000);
+  font.extraTables[1].second = maxp;
+  EXPECT_EQ(FaceStatus::Malformed, parse(buildFont(font), &face));
+  font.sfntVersion = 0x00010000;  // a TrueType font needs version 1.0
+  set32(maxp, 0, 0x00005000);
+  font.extraTables = {{"maxp", maxp}};
+  EXPECT_EQ(FaceStatus::Malformed, parse(buildFont(font), &face));
 }
 
 TEST(TtfFace, BrokenFilesAreMalformed) {
