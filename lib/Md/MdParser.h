@@ -11,6 +11,7 @@ namespace MdParser {
 struct Span {
   std::string text;
   EpdFontFamily::Style style;
+  bool code = false;  // an inline code span (`...`): the reader draws it in a frame
 };
 
 enum class BlockType : uint8_t {

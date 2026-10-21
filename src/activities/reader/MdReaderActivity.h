@@ -69,6 +69,13 @@ class MdReaderActivity final : public LineReaderActivity {
   static constexpr int LIST_INDENT = 20;
   static constexpr int BLOCKQUOTE_INDENT = 16;
   static constexpr int CODE_INDENT = 8;
+  // A wrapped code line's later lines: this many spaces deeper than its own indentation.
+  static constexpr int CODE_HANG_SPACES = 8;
+
+  // Inline code frame (in pixels): the text sits CODE_PAD_X inside it on either side.
+  static constexpr int CODE_PAD_X = 4;
+  static constexpr int CODE_FRAME_TOP = 3;  // top edge, below the line's top
+  static constexpr int CODE_FRAME_RADIUS = 4;
 
   void renderPage();
   void renderStatusBar() const;
@@ -91,9 +98,10 @@ class MdReaderActivity final : public LineReaderActivity {
                           int maxLines, bool isCodeBlock = false);
 
   // Core span wrapping shared by flowed lines and table cells: wrap |spans|
-  // into visual lines no wider than availableWidth, appending each line's
-  // spans and measured width. Returns false when stopped by maxLines.
-  bool wrapSpans(const std::vector<MdParser::Span>& spans, int availableWidth, int maxLines,
+  // into visual lines, the first no wider than firstLineWidth and the rest no
+  // wider than continuationWidth, appending each line's spans and measured
+  // width. Returns false when stopped by maxLines.
+  bool wrapSpans(const std::vector<MdParser::Span>& spans, int firstLineWidth, int continuationWidth, int maxLines,
                  std::vector<std::vector<MdParser::Span>>& outLines, std::vector<int>& outWidths) const;
 
   // Lay out one pipe-table row on the ctx grid. Returns false when the row
@@ -107,12 +115,17 @@ class MdReaderActivity final : public LineReaderActivity {
   bool appendFlattenedTableRow(const MdParser::ParsedLine& parsed, bool isHeader, int maxLines,
                                std::vector<RenderedLine>& outLines);
 
+  // Advance of |text| set in |attrs|' style, plus the frame padding when
+  // |attrs| is an inline code span. Every width of a span goes through here.
+  int advanceOf(const std::string& text, const MdParser::Span& attrs) const;
+
   // Measure total pixel width of a span list
   int measureSpans(const std::vector<MdParser::Span>& spans) const;
 
-  // Draw one span at (x, y) including its underline/strikethrough decoration;
-  // returns the span's advance width.
-  int drawSpanAt(int x, int y, const MdParser::Span& span) const;
+  // Draw one span at (x, y) including its underline/strikethrough decoration
+  // and an inline code span's frame (which sits on the row rule of a table
+  // line); returns the span's advance width.
+  int drawSpanAt(int x, int y, const MdParser::Span& span, bool tableLine) const;
 
  protected:
   void onReaderExit() override;
