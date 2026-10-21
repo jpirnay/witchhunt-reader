@@ -230,13 +230,11 @@ class CssParser {
    * Check if CSS rules cache file exists
    */
   bool hasCache() const;
-
-  /**
-   * Whether the CSS rules cache file exists AND was written by this version (one byte read). A file of
-   * another version counts as no cache wherever the stylesheets are compiled or the CSS is waited for:
-   * loadFromCache() deletes it, and the book would be unstyled until the next open.
-   */
-  bool hasCurrentCache() const;
+  // True when the rules cache is of this firmware's CSS_CACHE_VERSION, so a load reads it instead
+  // of compiling the stylesheets again: an open and a one-byte read (cache_version::isCurrent).
+  // A file of another version counts as no cache wherever the stylesheets are compiled or the CSS
+  // is waited for: loadFromCache() deletes it, and the book would be unstyled until the next open.
+  bool cacheIsCurrent() const;
 
   /**
    * Delete CSS rules cache file exists
@@ -262,7 +260,8 @@ class CssParser {
   // - endCacheCompile(): finalizes cache file from staged records
   bool beginCacheCompile();
   bool appendCompiledFromStream(FsFile& source);
-  bool endCacheCompile();
+  // `scratch`: a lent region the finish may take its two 2 KB windows from (null: the heap).
+  bool endCacheCompile(BuildArena* scratch = nullptr);
   // Abort a streaming compile (e.g. a stylesheet was skipped for low heap): discards the staged
   // temp file and persists NOTHING, so hasCache() stays false and the next open re-parses.
   // Persisting a partial compile is poison: an empty/incomplete index loads as VALID on every
@@ -525,11 +524,15 @@ class CssParser {
                                 uint16_t& outOrder) const;
   static bool readCssStylePayload(FsFile& file, CssStyle& style);
   static void writeCssStylePayload(FsFile& file, const CssStyle& style);
+  // The payload writeCssStylePayload writes, into `out` (CSS_FIXED_STYLE_BYTES); its length.
+  static size_t encodeCssStylePayload(const CssStyle& style, uint8_t* out);
   // A rule record, the unit of the cache file and the compile staging file:
   // selectorLen(2) selector order(2) style payload.
   static void writeRuleRecord(FsFile& file, const std::string& selector, uint16_t order, const CssStyle& style);
   // complexTableBytes(2) and the complex-rule table, as the cache header ends.
   void writeComplexTable(FsFile& file) const;
+  // endCacheCompile's copy of the staged rules into the cache file, and its index.
+  bool writeCompiledCache(FsFile& outFile, FsFile& tempFile, BuildArena* scratch);
   void touchHotRule(const std::string& selector) const;
   void cacheHotRule(const std::string& selector, const OrderedStyle& rule) const;
 

@@ -85,6 +85,7 @@ std::optional<size_t> OpdsServerStore::addServer(const OpdsServer& server) {
 
   const auto originalServers = servers;
   servers.push_back(server);
+  servers.back().passwordKeyUnknown = false;  // typed here
   if (!saveToFile()) {
     servers = originalServers;
     LOG_ERR("OPS", "Failed to persist added server, rolled back in-memory state");
@@ -102,7 +103,11 @@ bool OpdsServerStore::updateServer(size_t index, const OpdsServer& server) {
   }
 
   const auto originalServers = servers;
+  // A password kept as it was keeps what is known of its key; a new one is this reader's. Decided
+  // here, not by the callers, which build the entry afresh (the web settings page) or copy it.
+  const bool keyUnknown = servers[index].passwordKeyUnknown && server.password == servers[index].password;
   servers[index] = server;
+  servers[index].passwordKeyUnknown = keyUnknown;
   if (!saveToFile()) {
     servers = originalServers;
     LOG_ERR("OPS", "Failed to persist updated server at index %zu, rolled back in-memory state", index);

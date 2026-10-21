@@ -21,12 +21,17 @@ class GlyphStoreRecovery : public StoreTest {
     ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
   }
 
-  // Two complete records at the start of the log; returns where the next one would go.
+  // The first segment's header and two complete records after it; returns where the next record would go.
   uint32_t writeTwo() {
-    writeRawRecord(flash, layout, 0, makeKey('a', 0, 0), 9, 12);
+    writeSegmentHeader(flash, layout, 0, 1);
+    writeRawRecord(flash, layout, inSegment(layout, 0, 0), makeKey('a', 0, 0), 9, 12);
     const uint32_t second = recordSize(9, 12);
-    writeRawRecord(flash, layout, second, makeKey('b', 0, 0), 10, 12);
-    return second + recordSize(10, 12);
+    writeRawRecord(flash, layout, inSegment(layout, 0, second), makeKey('b', 0, 0), 10, 12);
+    return inSegment(layout, 0, second + recordSize(10, 12));
+  }
+
+  void programSlot(const uint32_t i, const Slot& slot) {
+    ASSERT_TRUE(flash.program(layout.geometry.indexOffset + i * kSlotBytes, &slot, sizeof slot));
   }
 
   Slot slotAt(const uint32_t i) {
@@ -35,7 +40,8 @@ class GlyphStoreRecovery : public StoreTest {
     return slot;
   }
 
-  const Layout layout = smallLayout();
+  // Four segments of 16 KB: a torn write's sector boundaries fall inside the head, where writing resumes.
+  const Layout layout = smallLayout(1024, 512, 65536, 16384);
 };
 
 }  // namespace
@@ -111,10 +117,11 @@ TEST_F(GlyphStoreRecovery, ATornRecordDoesNotHideWhatLaterSessionsWrote) {
   flash.cutAfterSteps(recordSize(11, 16) + 5);  // 'A' lands, 'B' gets 5 header bytes
   EXPECT_EQ(Commit::WriteFailed, store.commit(batch));
   flash.powerCycle();
-  // Session 2 writes far more than the 8 KB the scan looks past a torn record.
+  // Session 2 writes far more than the 8 KB the scan looks past a torn record, all in the same segment.
   reopen();
   const uint32_t resume = store.logUsed();
-  for (uint32_t i = 0; i < 200; ++i) {
+  constexpr uint32_t kSecond = 150;
+  for (uint32_t i = 0; i < kSecond; ++i) {
     if (!stage(batch, makeKey(0x4E00 + i, 0, 0), 11, 16)) {
       ASSERT_EQ(Commit::Stored, store.commit(batch));
       ASSERT_TRUE(stage(batch, makeKey(0x4E00 + i, 0, 0), 11, 16));
@@ -123,15 +130,16 @@ TEST_F(GlyphStoreRecovery, ATornRecordDoesNotHideWhatLaterSessionsWrote) {
   ASSERT_EQ(Commit::Stored, store.commit(batch));
   const uint32_t end = store.logUsed();
   ASSERT_GT(end - resume, kMaxRecordBytes);
+  ASSERT_EQ(1u, store.segmentCount() - store.freeSegments());
   // Session 3: everything session 2 wrote is still there, and writing resumes after it, not on top of it.
   reopen();
   EXPECT_EQ(end, store.logUsed());
-  for (uint32_t i = 0; i < 200; ++i) EXPECT_TRUE(storedIntact(store, makeKey(0x4E00 + i, 0, 0), 11, 16)) << i;
+  for (uint32_t i = 0; i < kSecond; ++i) EXPECT_TRUE(storedIntact(store, makeKey(0x4E00 + i, 0, 0), 11, 16)) << i;
   for (uint32_t i = 0; i < 40; ++i) ASSERT_TRUE(stage(batch, makeKey(0x5000 + i, 0, 0), 11, 16));
   ASSERT_EQ(Commit::Stored, store.commit(batch));
   reopen();
   for (uint32_t i = 0; i < 40; ++i) EXPECT_TRUE(storedIntact(store, makeKey(0x5000 + i, 0, 0), 11, 16)) << i;
-  for (uint32_t i = 0; i < 200; ++i) EXPECT_TRUE(storedIntact(store, makeKey(0x4E00 + i, 0, 0), 11, 16)) << i;
+  for (uint32_t i = 0; i < kSecond; ++i) EXPECT_TRUE(storedIntact(store, makeKey(0x4E00 + i, 0, 0), 11, 16)) << i;
 }
 
 TEST_F(GlyphStoreRecovery, ASlotWhoseValueWasCutNeverReadsAsNoGlyph) {
@@ -162,13 +170,28 @@ TEST_F(GlyphStoreRecovery, ASlotCutShortIsSkippedAndDoesNotEndAProbe) {
 }
 
 TEST_F(GlyphStoreRecovery, ASlotPointingAtAnotherKeysRecordReadsAsNotStored) {
-  writeRawRecord(flash, layout, 0, makeKey('J', 0, 0), 9, 12);
+  writeSegmentHeader(flash, layout, 0, 1);
+  writeRawRecord(flash, layout, inSegment(layout, 0, 0), makeKey('J', 0, 0), 9, 12);
   const uint32_t key = makeKey('K', 0, 0);
-  const Slot wrong{key, kRecordHeaderBytes};  // 'J''s record, at offset 0
-  ASSERT_TRUE(flash.program(layout.geometry.indexOffset + homeSlot(key, layout.geometry.indexSlots) * kSlotBytes,
-                            &wrong, sizeof wrong));
+  programSlot(homeSlot(key, layout.geometry.indexSlots),
+              {key, glyphSlotValue(1, inSegment(layout, 0, 0) + kRecordHeaderBytes)});  // 'J''s record
   reopen();
   EXPECT_EQ(Lookup::NotStored, store.find(key, nullptr));
+}
+
+TEST_F(GlyphStoreRecovery, ASlotNamingAnotherEpochIsStaleAndTheProbeGoesOn) {
+  // A slot written while its segment had another epoch points at whatever the segment holds now: never served.
+  writeSegmentHeader(flash, layout, 0, 1);
+  const uint32_t key = makeKey('J', 0, 0);
+  writeRawRecord(flash, layout, inSegment(layout, 0, 0), key, 9, 12);
+  const uint32_t home = homeSlot(key, layout.geometry.indexSlots);
+  const uint32_t dataOffset = inSegment(layout, 0, 0) + kRecordHeaderBytes;
+  programSlot(home, {key, glyphSlotValue(2, dataOffset)});
+  reopen();
+  EXPECT_EQ(Lookup::NotStored, store.find(key, nullptr));
+  // A slot with the segment's epoch, further along the chain, as a copied glyph's is.
+  programSlot((home + 1) % layout.geometry.indexSlots, {key, glyphSlotValue(1, dataOffset)});
+  EXPECT_TRUE(storedIntact(store, key, 9, 12));
 }
 
 TEST_F(GlyphStoreRecovery, ATornWipeWordReadsAsPending) {
@@ -178,16 +201,24 @@ TEST_F(GlyphStoreRecovery, ATornWipeWordReadsAsPending) {
   EXPECT_TRUE(store.wipePending());
 }
 
-TEST(GlyphStoreRecoveryEdge, GarbageAtTheVeryEndLeavesTheLogFull) {
-  SimNorFlash flash(kFlashBytes);
-  FlashGlyphStore store(flash);
-  const Layout layout = smallLayout(1024, 512, 8192);
-  ASSERT_TRUE(install(store, layout));
-  writeRawRecord(flash, layout, 0, makeKey('a', 0, 0), 9, 12);
+TEST_F(GlyphStoreRecovery, GarbageAtTheEndOfTheHeadClosesIt) {
+  // Records up to 8 KB into the head, so the scan's window past the walk's end reaches the segment's last byte.
+  writeSegmentHeader(flash, layout, 0, 1);
+  for (uint32_t at = inSegment(layout, 0, 0); at < 8192; at += recordSize(9, 12)) {
+    writeRawRecord(flash, layout, at, makeKey('a', 0, 0), 9, 12);
+  }
   const uint8_t junk = 0x00;
-  ASSERT_TRUE(flash.program(layout.geometry.logOffset + 8190, &junk, 1));
-  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
-  EXPECT_EQ(8192u, store.logUsed());
-  EXPECT_EQ(0u, flash.violations());
-  EXPECT_EQ(0u, flash.reprograms());
+  ASSERT_TRUE(flash.program(layout.geometry.logOffset + layout.geometry.segmentBytes - 1, &junk, 1));
+  reopen();
+  EXPECT_EQ(layout.geometry.segmentBytes, store.logUsed());  // nothing more goes into the head
+  ASSERT_TRUE(claimTestSizes(store));
+  alignas(4) uint8_t buffer[256];
+  GlyphBatch batch(buffer, sizeof buffer);
+  ASSERT_TRUE(stage(batch, makeKey('z', 0, 0), 9, 12));
+  ASSERT_EQ(Commit::Stored, store.commit(batch));
+  const EpdGlyph* glyph = nullptr;
+  ASSERT_EQ(Lookup::Found, store.find(makeKey('z', 0, 0), &glyph));
+  EXPECT_EQ(inSegment(layout, 1, 0) + kRecordHeaderBytes, glyph->dataOffset);  // the next segment's first record
+  EXPECT_TRUE(storedIntact(store, makeKey('z', 0, 0), 9, 12));
+  EXPECT_EQ(2u, store.segmentCount() - store.freeSegments());
 }

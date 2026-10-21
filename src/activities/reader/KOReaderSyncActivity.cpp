@@ -857,7 +857,8 @@ void KOReaderSyncActivity::resumeReader(const KOReaderSyncOutcomeState outcome, 
       activityManager.goHome();
       return;
     case KOReaderSyncPostAction::OpenBook:
-      activityManager.goToReader(postActionTarget_.empty() ? epubPath : postActionTarget_);
+      // The finished-book screen's next book, after the sync it asked for (see BookFinished).
+      activityManager.openBook(postActionTarget_.empty() ? epubPath : postActionTarget_);
       return;
     case KOReaderSyncPostAction::Reader:
     default:

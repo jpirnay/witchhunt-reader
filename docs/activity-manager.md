@@ -111,6 +111,8 @@ activityManager.replaceActivity(std::make_unique<MyActivity>(renderer, mappedInp
 
 `replaceActivity()` destroys the current activity and clears the stack. The `goTo*()` helpers are thin wrappers around it. The full list is in `ActivityManager.h`. `goHome()` is the hard reset to the home screen.
 
+A book the user opens goes through `replaceWithReader(path, hint)` (Home, the Library, All Files, Bookmarks) or `openBook(path)` (the finished-book screen's next book, `CMD:ACT:READER`). Both arm a HALF refresh for the book's first page, because a FAST diff over the screen it was opened from leaves that screen ghosting through. Pictures are left out, since the image viewer draws its own HALF. `goToReader(path)` arms nothing. It is for the reader's own resumes: after a boot, where `main.cpp` sets the refresh, and back into the book after a KOReader sync.
+
 ### Starting a child and receiving its result
 
 Use `startActivityForResult()` when the parent needs an answer:

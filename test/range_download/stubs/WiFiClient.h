@@ -8,13 +8,15 @@
 // - besides fully scripted replies, the server can serve one resource and answer Range requests
 //   itself (206 with Content-Range, 416 past the end, 200 when told to ignore Range);
 // - a reply can be cut short and end in a peer close or an out-of-memory read, which the stub
-//   SecureClient in the test reports as wolfSSL's MEMORY_E.
+//   SecureClient in the test reports as wolfSSL's MEMORY_E;
+// - a server's certificate can fail to verify, for the stub SecureClient's handshake.
 #include <Client.h>
 
 #include <algorithm>
 #include <cstdlib>
 #include <deque>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -68,7 +70,20 @@ struct FakeNet {
     static std::map<size_t, FakeFault> f;
     return f;
   }
+  // For the stub SecureClient: the servers (host:port) whose certificate does not verify, and each
+  // https handshake in order, as "host:port verified", "... fallback", "... unverified" or
+  // "... refused".
+  static std::set<std::string>& unverifiable() {
+    static std::set<std::string> s;
+    return s;
+  }
+  static std::vector<std::string>& handshakes() {
+    static std::vector<std::string> h;
+    return h;
+  }
   static void reset() {
+    unverifiable().clear();
+    handshakes().clear();
     replies().clear();
     requests().clear();
     connects() = 0;
@@ -113,6 +128,13 @@ struct FakeNet {
     return reply;
   }
 };
+
+// Scripted replies the redirect tests share: a redirect to location, and a short 200.
+inline FakeReply fakeRedirectTo(const std::string& location, int status = 302) {
+  return {"HTTP/1.1 " + std::to_string(status) + " Moved\r\nLocation: " + location + "\r\nContent-Length: 0\r\n\r\n",
+          FakeReply::End::KeepOpen};
+}
+inline FakeReply fakeOk() { return {"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", FakeReply::End::KeepOpen}; }
 
 class WiFiClient : public Client {
  public:

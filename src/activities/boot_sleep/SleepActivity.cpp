@@ -503,9 +503,11 @@ void SleepActivity::renderSleepScreen() {
   // puts the popup up there, because that path is seconds away from its own refresh.
   // The renderers below all expect portrait: the cover BMP is generated portrait-sized
   // (getDisplayHeight x getDisplayWidth) and the custom/default screens are laid out
-  // portrait. A timeout sleep bypasses the reader's onExit() orientation reset, so force
-  // portrait here or a landscape cover overflows the edges / mis-centers. OVERLAY manages
-  // its own orientation (renderOverlaySleepScreen), so leave it untouched here.
+  // portrait. The reader's onExit() puts portrait back before this runs, on a timeout sleep
+  // too (goToSleep() replaces the activity, which runs it); forced here as well, so a
+  // landscape cover cannot overflow the edges / mis-center whatever the outgoing activity
+  // left. OVERLAY manages its own orientation (renderOverlaySleepScreen), so leave it
+  // untouched here.
   if (SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::OVERLAY) {
     renderer.setOrientation(GfxRenderer::Portrait);
   }

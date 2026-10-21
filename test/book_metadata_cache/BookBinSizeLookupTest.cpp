@@ -164,6 +164,44 @@ std::vector<uint32_t> cumulativeSizes(const std::string& cacheDir) {
   return out;
 }
 
+// Each spine record's ZIP stat as book.bin has it, and as a lookup of its href in the archive finds
+// it (localHeaderOffset 0 for one the archive does not hold).
+struct SpineStats {
+  std::vector<ZipFile::FileStatSlim> recorded;
+  std::vector<ZipFile::FileStatSlim> lookedUp;
+};
+
+SpineStats spineStats(const std::string& cacheDir, const std::string& zipPath) {
+  SpineStats out;
+  BookMetadataCache cache(cacheDir);
+  if (!cache.load()) {
+    ADD_FAILURE() << "book.bin does not load";
+    return out;
+  }
+  ZipFile zip(zipPath);
+  for (int i = 0; i < cache.getSpineCount(); ++i) {
+    const BookMetadataCache::SpineEntry e = cache.getSpineEntry(i);
+    out.recorded.push_back({e.zipMethod, e.zipCompressedSize, e.zipUncompressedSize, e.zipLocalHeaderOffset});
+    ZipFile::FileStatSlim stat = {};
+    if (!zip.loadFileStatSlim(e.href.c_str(), &stat)) stat = {};
+    out.lookedUp.push_back(stat);
+  }
+  return out;
+}
+
+void expectSameStats(const SpineStats& s, const char* label) {
+  ASSERT_EQ(s.recorded.size(), s.lookedUp.size()) << label;
+  for (size_t i = 0; i < s.recorded.size(); ++i) {
+    const ZipFile::FileStatSlim& a = s.recorded[i];
+    const ZipFile::FileStatSlim& b = s.lookedUp[i];
+    EXPECT_TRUE(a.method == b.method && a.compressedSize == b.compressedSize &&
+                a.uncompressedSize == b.uncompressedSize && a.localHeaderOffset == b.localHeaderOffset)
+        << label << ": spine " << i << " recorded (" << a.method << ", " << a.compressedSize << ", "
+        << a.uncompressedSize << ", @" << a.localHeaderOffset << "), the archive has (" << b.method << ", "
+        << b.compressedSize << ", " << b.uncompressedSize << ", @" << b.localHeaderOffset << ")";
+  }
+}
+
 std::vector<uint32_t> expectedCumulative(const std::vector<uint32_t>& sizes) {
   std::vector<uint32_t> out;
   uint32_t sum = 0;
@@ -209,7 +247,7 @@ TEST_F(BookBinSizeLookupTest, AKingsAvatarSizedBookTakesAHandfulOfWalksAtEveryHe
       // The X3's open: the table in the lent framebuffer, one walk.
       {"x3-measured+lent", kX3Measured, kX3LentFramebuffer, 1},
       // No region lent (a load outside ReaderActivity's first open): the largest block's worth.
-      {"x3-measured", kX3Measured, 0, walksFor(spines, (kX3Measured.largestBlock - 64) / sizeof(ZipFile::SizeTarget))},
+      {"x3-measured", kX3Measured, 0, walksFor(spines, (kX3Measured.largestBlock - 64) / sizeof(ZipFile::StatTarget))},
       {"very-low+lent", kVeryLow, kX3LentFramebuffer, 1},
       // 12 KB free: the 2 KB minimum table, 128 spine items a walk.
       {"very-low", kVeryLow, 0, walksFor(spines, 128)},
@@ -232,7 +270,7 @@ TEST_F(BookBinSizeLookupTest, TheTableLivesInTheLentFramebufferNotTheHeap) {
   const BuildResult lent = buildBookBin(book_.path, book_.spineHrefs, cacheDir(), kPlenty, kX3LentFramebuffer);
   ASSERT_TRUE(heapOnly.built);
   ASSERT_TRUE(lent.built);
-  const size_t table = book_.spineHrefs.size() * sizeof(ZipFile::SizeTarget);
+  const size_t table = book_.spineHrefs.size() * sizeof(ZipFile::StatTarget);
   EXPECT_GE(lent.cost.arenaPeak, table + 4096);
   EXPECT_LE(lent.cost.arenaPeak, kX3LentFramebuffer);
   EXPECT_GE(heapOnly.cost.heapPeak, lent.cost.heapPeak + table) << "the heap-only build holds the table on the heap";
@@ -250,7 +288,7 @@ TEST_F(BookBinSizeLookupTest, TheTableLivesInTheLentFramebufferNotTheHeap) {
 TEST_F(BookBinSizeLookupTest, ASpineLargerThanTheLentRegionTakesATableFullPerWalk) {
   const BuildResult reference = buildBookBin(book_.path, book_.spineHrefs, cacheDir(), kPlenty);
   // Room for the window and 500 entries: 1732 spine items in four walks.
-  const size_t region = 4096 + 2 * alignof(std::max_align_t) + 500 * sizeof(ZipFile::SizeTarget);
+  const size_t region = 4096 + 2 * alignof(std::max_align_t) + 500 * sizeof(ZipFile::StatTarget);
   const BuildResult run = buildBookBin(book_.path, book_.spineHrefs, cacheDir(), kPlenty, region);
   ASSERT_TRUE(run.built);
   EXPECT_EQ(run.cost.walks, 4u);
@@ -288,6 +326,30 @@ TEST_F(BookBinSizeLookupTest, NamesTheWalkCannotMatchAreLookedUpOnTheirOwn) {
   const BuildResult heapOnly = buildBookBin(path, spine, cacheDir(), kVeryLow);
   ASSERT_TRUE(heapOnly.built);
   EXPECT_EQ(heapOnly.bookBin, lent.bookBin);
+  // The capitalised one's stat is the lookup's; the missing one has none.
+  const SpineStats stats = spineStats(cacheDir(), path);
+  expectSameStats(stats, "odd names");
+  ASSERT_EQ(stats.recorded.size(), spine.size());
+  EXPECT_NE(stats.recorded[7].localHeaderOffset, 0u);
+  EXPECT_EQ(stats.recorded.back().localHeaderOffset, 0u);
+}
+
+// Each spine record carries its item's ZIP stat, found by the same walks that size it: a chapter
+// opens straight from its record. The reader used to walk the central directory again at the
+// first chapter of every book instance, and hold the stats in RAM, 16 B a spine item, for as long
+// as the book stayed open.
+TEST_F(BookBinSizeLookupTest, EachSpineRecordCarriesItsItemsZipStat) {
+  for (const size_t arena : {kX3LentFramebuffer, size_t{0}}) {
+    const BuildResult run = buildBookBin(book_.path, book_.spineHrefs, cacheDir(), kX3Measured, arena);
+    ASSERT_TRUE(run.built);
+    const char* const label = arena > 0 ? "lent" : "heap";
+    const SpineStats stats = spineStats(cacheDir(), book_.path);
+    ASSERT_EQ(stats.recorded.size(), book_.spineHrefs.size()) << label;
+    expectSameStats(stats, label);
+    for (size_t i = 0; i < stats.recorded.size(); ++i) {
+      ASSERT_NE(stats.recorded[i].localHeaderOffset, 0u) << label << ": spine " << i;
+    }
+  }
 }
 
 }  // namespace

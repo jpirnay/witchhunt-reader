@@ -193,14 +193,19 @@ void KOReaderSettingsActivity::onActionSelected(int index) {
                            });
   } else if (item.nameId == StrId::STR_AUTHENTICATE) {
     if (!KOREADER_STORE.hasCredentials()) return;
-    startActivityForResult(
-        std::make_unique<KOReaderAuthActivity>(renderer, mappedInput, KOReaderAuthActivity::Mode::LOGIN),
-        [](const ActivityResult&) {});
+    // In place of this screen and the Settings below it, not on top of them. The account check
+    // reboots back to this screen on every exit (KOReaderAuthActivity::onExit()), so they would
+    // never be shown again, yet they hold ~35 KB. With them resident the WiFi stack fits only partly
+    // around them and takes the rest from the released framebuffer's block: on the X3 that left
+    // 21.5 KB contiguous for the handshake, under the 26 KB its gate asks for. A sync from the
+    // reader, alone on the stack, has 53 KB there.
+    activityManager.replaceActivity(
+        std::make_unique<KOReaderAuthActivity>(renderer, mappedInput, KOReaderAuthActivity::Mode::LOGIN));
   } else if (item.nameId == StrId::STR_REGISTER) {
     if (!KOREADER_STORE.hasCredentials()) return;
-    startActivityForResult(
-        std::make_unique<KOReaderAuthActivity>(renderer, mappedInput, KOReaderAuthActivity::Mode::REGISTER),
-        [](const ActivityResult&) {});
+    // In place of the screens below, as for Authenticate.
+    activityManager.replaceActivity(
+        std::make_unique<KOReaderAuthActivity>(renderer, mappedInput, KOReaderAuthActivity::Mode::REGISTER));
   }
 }
 

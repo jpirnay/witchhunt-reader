@@ -45,6 +45,7 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/ZipFile/ZipFile.cpp
   ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp
   ${REPO_ROOT}/lib/uzlib/src/tinflate.c
+  ${REPO_ROOT}/lib/FsHelpers/BookCache.cpp
   ${REPO_ROOT}/lib/FsHelpers/FsHelpers.cpp
   ${REPO_ROOT}/lib/FsHelpers/SidecarFiles.cpp
   ${REPO_ROOT}/lib/CooperativeAbort/CooperativeAbort.cpp
@@ -106,6 +107,7 @@ add_executable(EpubPipelineTest
   FootnotePreviewStoreTest.cpp
   FootnoteResolveSliceTest.cpp
   ParagraphAnchorTest.cpp
+  KeptReadingStateTest.cpp
   ParsedTextOffsetTest.cpp
   LowHeapLoadTest.cpp
   LongChapterPageTablesTest.cpp
@@ -144,6 +146,8 @@ add_executable(EpubPipelineTest
   TextNodeRulesTest.cpp
   BookFontsTest.cpp
   FirstOpenIndexingTest.cpp
+  FirstChapterTest.cpp
+  TocPassTest.cpp
   # A book's embedded body font (Publisher Fonts): the probe and the extraction. Its SHA-1 comes from
   # test/shims/wolfssl, standing in for wolfCrypt.
   ${REPO_ROOT}/lib/Epub/Epub/BookFonts.cpp

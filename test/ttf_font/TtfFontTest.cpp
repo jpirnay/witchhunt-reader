@@ -174,6 +174,17 @@ class TtfFontTest : public ::testing::Test {
     return font;
   }
 
+  /// Draws new glyphs from `cp` on until two segments of the log are live, so a reclaim has a tail to take.
+  void fillToTwoSegments(const Loaded& font, uint32_t& cp) {
+    for (; cp < 0x3000 && !font->ringMode(); ++cp) {
+      font->glyph(kRegular, cp);
+      const TtfFontSet::Stats stats = font.set->stats();
+      if (stats.segments - stats.freeSegments >= 2) break;
+    }
+    ASSERT_FALSE(font->ringMode());
+    ASSERT_GE(font.set->stats().segments - font.set->stats().freeSegments, 2u);
+  }
+
   /// A one-style family built in memory, so a test can give a glyph any outline.
   void useBuiltFont(const Font& font) {
     files[0].bytes = buildFont(font);
@@ -419,51 +430,234 @@ TEST_F(TtfFontTest, AWipeAtTheNextBookOpenEndsTheRing) {
 }
 
 TEST_F(TtfFontTest, AStoreMarkedFullActsAsAFullOneAndIsCounted) {
-  // CMD:TTF:FULL: what a filled store does, at any size, without filling it.
+  // CMD:TTF:FULL: what a filled store does, at any size, without filling it. It stops writes and asks for room; nothing
+  // is wiped.
+  flash.setFreePages(16);  // the smallest log the planner makes: 4 pages
   const TtfFontSet::StoreEvents before = TtfFontSet::storeEvents();
-  {
-    const auto font = open();
-    ASSERT_NE(nullptr, font);
-    ASSERT_NE(nullptr, font->glyph(kRegular, 'A'));
-    TtfFontSet::Stats stats = font.set->stats();
-    EXPECT_EQ(1, stats.families);
-    EXPECT_FALSE(stats.ringMode);
-    EXPECT_FALSE(stats.wipePending);
-    EXPECT_GT(stats.logUsed, 0u);
-    EXPECT_GT(stats.logSize, stats.logUsed);
-    EXPECT_EQ(1u, stats.renders);
-    ASSERT_TRUE(font.set->markFull());
-    stats = font.set->stats();
-    EXPECT_TRUE(stats.ringMode);
-    EXPECT_TRUE(stats.wipePending);
-    EXPECT_EQ(before.fills + 1, TtfFontSet::storeEvents().fills);
-    expectDrawnAs(reference(files[kRegular].bytes, 'B', 14), *font, kRegular, font->glyph(kRegular, 'B'));
-    EXPECT_TRUE(font->ringMode());  // drawn, not stored
-  }
-  const auto font = open();  // the next boot finishes the pending wipe
+  const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
   ASSERT_NE(nullptr, font);
-  EXPECT_FALSE(font.set->stats().wipePending);
-  EXPECT_EQ(before.wipes + 1, TtfFontSet::storeEvents().wipes);
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'A'));
+  TtfFontSet::Stats stats = font.set->stats();
+  EXPECT_EQ(1, stats.families);
+  EXPECT_FALSE(stats.ringMode);
+  EXPECT_FALSE(stats.wipePending);
+  EXPECT_GT(stats.logUsed, 0u);
+  EXPECT_GT(stats.logSize, stats.logUsed);
+  EXPECT_EQ(1u, stats.renders);
+  uint32_t cp = 0x21;
+  fillToTwoSegments(font, cp);
+  ASSERT_TRUE(font.set->markFull());
+  stats = font.set->stats();
+  EXPECT_TRUE(stats.ringMode);
+  EXPECT_FALSE(stats.wipePending);  // a full store is not wiped: it makes room
+  EXPECT_EQ(before.fills + 1, TtfFontSet::storeEvents().fills);
+  expectDrawnAs(reference(files[kRegular].bytes, 'B', TtfFont::kMaxPointSize), *font, kRegular,
+                font->glyph(kRegular, 'B'));
+  EXPECT_TRUE(font->ringMode());  // drawn, not stored
+  ASSERT_TRUE(font.set->makeRoom(FlashGlyphStore::Budget::Open));
+  EXPECT_FALSE(font->ringMode());
+  EXPECT_EQ(before.rooms + 1, TtfFontSet::storeEvents().rooms);
+  EXPECT_EQ(before.wipes, TtfFontSet::storeEvents().wipes);
 }
 
-TEST_F(TtfFontTest, AFullStoreSwitchesToTheRingAndTheLoadAfterItWipes) {
+TEST_F(TtfFontTest, AFullStoreSwitchesToTheRingAndMakingRoomEndsIt) {
   flash.setFreePages(16);  // the smallest log the planner makes: 4 pages
-  {
-    const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
-    ASSERT_NE(nullptr, font);
-    for (uint32_t cp = 0x21; cp < 0x3000 && !font->ringMode(); ++cp) font->glyph(kRegular, cp);
-    ASSERT_TRUE(font->ringMode());
-    expectDrawnAs(reference(files[kRegular].bytes, 0x2026, TtfFont::kMaxPointSize), *font, kRegular,
-                  font->glyph(kRegular, 0x2026));
-  }
-  busy = 0;
-  const auto font = open(kIdentityA, TtfFont::kMaxPointSize);  // the next boot finishes the pending wipe
+  const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
   ASSERT_NE(nullptr, font);
+  uint32_t cp = 0x21;
+  for (; cp < 0x3000 && !font->ringMode(); ++cp) font->glyph(kRegular, cp);
+  ASSERT_TRUE(font->ringMode());
+  expectDrawnAs(reference(files[kRegular].bytes, 0x2026, TtfFont::kMaxPointSize), *font, kRegular,
+                font->glyph(kRegular, 0x2026));
+  EXPECT_FALSE(font.set->stats().wipePending);
+  busy = 0;
+  ASSERT_TRUE(font.set->makeRoom(FlashGlyphStore::Budget::Open, [this] { ++busy; }));
   EXPECT_EQ(1, busy);
   EXPECT_FALSE(font->ringMode());
+  // Stored again from here on: the second lookup of a new glyph is a hit.
+  const uint32_t renders = font->renders();
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'A'));
+  const uint32_t rendersAfterFirst = font->renders();
+  EXPECT_GE(rendersAfterFirst, renders);
+  font->glyph(kRegular, 'A');
+  EXPECT_EQ(rendersAfterFirst, font->renders());
+}
+
+TEST_F(TtfFontTest, MakingRoomEndsTheRing) {
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'A'));
+  ASSERT_TRUE(font.set->markFull());
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'B'));
+  ASSERT_TRUE(font->ringMode());
+  font.set->makeRoom(FlashGlyphStore::Budget::Idle);
+  EXPECT_FALSE(font->ringMode());
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'C'));
+  const uint32_t renders = font->renders();
+  const uint32_t hits = font->storeHits();
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'C'));
+  EXPECT_EQ(renders, font->renders());
+  EXPECT_EQ(hits + 1, font->storeHits());
+}
+
+TEST_F(TtfFontTest, AWipeWaitsForRenderLock) {
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'A'));
+  flash.failNextProgram();
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'B'));
+  ASSERT_TRUE(font->ringMode());
+  static bool held = false;
+  held = false;
+  TtfFont::setHooks({[] { return held; }});
+  busy = 0;
+  EXPECT_FALSE(font.set->wipeIfPending([this] { ++busy; }));
+  EXPECT_EQ(0, busy);
+  EXPECT_TRUE(font->ringMode());  // still pending
+  held = true;
+  EXPECT_TRUE(font.set->wipeIfPending([this] { ++busy; }));
+  EXPECT_EQ(1, busy);
+  EXPECT_FALSE(font->ringMode());
+}
+
+TEST_F(TtfFontTest, MakingRoomWaitsForRenderLock) {
+  flash.setFreePages(16);
+  const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
+  ASSERT_NE(nullptr, font);
+  uint32_t cp = 0x21;
+  fillToTwoSegments(font, cp);
+  ASSERT_TRUE(font.set->markFull());
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'B'));
+  ASSERT_TRUE(font->ringMode());
+  static bool held = false;
+  held = false;
+  TtfFont::setHooks({[] { return held; }});
+  busy = 0;
+  EXPECT_FALSE(font.set->makeRoom(FlashGlyphStore::Budget::Open, [this] { ++busy; }));
+  EXPECT_EQ(0, busy);
+  EXPECT_TRUE(font->ringMode());
+  held = true;
+  EXPECT_TRUE(font.set->makeRoom(FlashGlyphStore::Budget::Open, [this] { ++busy; }));
+  EXPECT_EQ(1, busy);
+  EXPECT_FALSE(font->ringMode());
+}
+
+TEST_F(TtfFontTest, AnIdleStepLeavesAPendingWipeToTheNextOpen) {
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'A'));
+  flash.failNextProgram();
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'B'));
+  ASSERT_TRUE(font->ringMode());
+  ASSERT_TRUE(font.set->stats().wipePending);
+  busy = 0;
+  EXPECT_FALSE(font.set->makeRoom(FlashGlyphStore::Budget::Idle, [this] { ++busy; }));  // a wipe takes seconds
+  EXPECT_EQ(0, busy);
+  EXPECT_TRUE(font->ringMode());
+  EXPECT_TRUE(font.set->stats().wipePending);
+  EXPECT_TRUE(font.set->makeRoom(FlashGlyphStore::Budget::Open, [this] { ++busy; }));
+  EXPECT_EQ(1, busy);
+  EXPECT_FALSE(font->ringMode());
+  EXPECT_FALSE(font.set->stats().wipePending);
+}
+
+TEST_F(TtfFontTest, MakingRoomWithoutAStoreDoesNothing) {
+  TtfFontSet closed(flash);
+  EXPECT_FALSE(closed.makeRoom(FlashGlyphStore::Budget::Open));
+}
+
+TEST_F(TtfFontTest, ADrawnStoredGlyphIsCounted) {
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  const EpdGlyph* a = font->glyph(kRegular, 'A');
+  ASSERT_NE(nullptr, a);
+  ASSERT_TRUE(font.set->markFull());  // keeps the counts
+  static bool counts = false;
+  counts = false;
+  TtfFont::Hooks hooks;
+  hooks.countsDraw = [] { return counts; };
+  TtfFont::setHooks(hooks);
   const uint8_t* bitmap = nullptr;
-  EXPECT_FALSE(font->ownsBitmap(font->glyph(kRegular, 'A'), bitmap));
-  EXPECT_EQ(1u, font->renders());
+  EXPECT_FALSE(font->ownsBitmap(a, bitmap));
+  EXPECT_EQ(0u, font.set->stats().drawsCounted);  // not the pass that counts
+  counts = true;
+  EXPECT_FALSE(font->ownsBitmap(a, bitmap));
+  EXPECT_EQ(1u, font.set->stats().drawsCounted);
+  // A ring glyph is not a record of the log.
+  const EpdGlyph* b = font->glyph(kRegular, 'B');
+  ASSERT_NE(nullptr, b);
+  ASSERT_TRUE(font->ringMode());
+  EXPECT_TRUE(font->ownsBitmap(b, bitmap));
+  EXPECT_EQ(1u, font.set->stats().drawsCounted);
+  // Without the hook every draw counts.
+  TtfFont::setHooks({});
+  EXPECT_FALSE(font->ownsBitmap(a, bitmap));
+  EXPECT_EQ(2u, font.set->stats().drawsCounted);
+}
+
+TEST_F(TtfFontTest, UseCountsAreTakenAtTheNextMakeRoomNotInTheDraw) {
+  // A five-segment log: with two live, the free ones are within one of the target, so counts are wanted.
+  flash.setFreePages(16);
+  const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
+  ASSERT_NE(nullptr, font);
+  uint32_t cp = 0x21;
+  // Each glyph is rendered and stored inside its draw, where a session-long block could pin a region the reader
+  // released: the commit that nears a full ring takes no memory for the counts.
+  fillToTwoSegments(font, cp);
+  ASSERT_EQ(3u, font.set->stats().freeSegments);
+  const EpdGlyph* a = font->glyph(kRegular, 'A');
+  ASSERT_NE(nullptr, a);
+  const uint8_t* bitmap = nullptr;
+  ASSERT_FALSE(font->ownsBitmap(a, bitmap));  // a record of the log, drawn
+  EXPECT_EQ(0u, font.set->stats().drawsCounted);
+  EXPECT_TRUE(font.set->needsIdleRoom());  // an idle step would take them
+  // The next idle step takes them, though it has no room to make.
+  EXPECT_FALSE(font.set->makeRoom(FlashGlyphStore::Budget::Idle));
+  EXPECT_FALSE(font.set->needsIdleRoom());
+  a = font->glyph(kRegular, 'A');
+  ASSERT_FALSE(font->ownsBitmap(a, bitmap));
+  EXPECT_EQ(1u, font.set->stats().drawsCounted);
+}
+
+TEST_F(TtfFontTest, ASetLoadedOverAStoreNearFullCountsItsFirstDraws) {
+  flash.setFreePages(16);
+  {
+    const auto first = open(kIdentityA, TtfFont::kMaxPointSize);
+    ASSERT_NE(nullptr, first);
+    uint32_t cp = 0x21;
+    fillToTwoSegments(first, cp);
+    ASSERT_EQ(3u, first.set->stats().freeSegments);
+  }
+  // The next boot opens the store near full: the load ends by keeping the counts, so they are kept when it returns.
+  const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
+  ASSERT_NE(nullptr, font);
+  const uint32_t renders = font->renders();
+  const EpdGlyph* a = font->glyph(kRegular, 'A');
+  ASSERT_NE(nullptr, a);
+  ASSERT_EQ(renders, font->renders());  // read from the store
+  const uint8_t* bitmap = nullptr;
+  ASSERT_FALSE(font->ownsBitmap(a, bitmap));
+  EXPECT_EQ(1u, font.set->stats().drawsCounted);
+}
+
+TEST_F(TtfFontTest, TheStatsShowTheRing) {
+  flash.setFreePages(16);
+  const TtfFontSet::StoreEvents before = TtfFontSet::storeEvents();
+  const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
+  ASSERT_NE(nullptr, font);
+  for (const char c : {'A', 'B', 'C'}) ASSERT_NE(nullptr, font->glyph(kRegular, c));
+  TtfFontSet::Stats stats = font.set->stats();
+  EXPECT_GT(stats.segments, 0u);
+  EXPECT_LE(stats.freeSegments, stats.segments);
+  EXPECT_LT(stats.freeSegments, stats.segments);  // the head is live
+  EXPECT_GE(stats.liveSlots, 3u);
+  uint32_t cp = 0x21;
+  fillToTwoSegments(font, cp);
+  ASSERT_TRUE(font.set->markFull());
+  ASSERT_TRUE(font.set->makeRoom(FlashGlyphStore::Budget::Open));
+  const TtfFontSet::StoreEvents after = TtfFontSet::storeEvents();
+  EXPECT_EQ(before.rooms + 1, after.rooms);
+  EXPECT_GT(after.dropped, before.dropped);
 }
 
 TEST_F(TtfFontTest, ABrokenGlyphIsMarkedMissingAndNotTriedAgain) {
@@ -833,7 +1027,7 @@ TEST_F(TtfFontTest, ASizeTheFullTableRefusesIsDrawnFromTheRingWhileTheOthersStor
   expectDrawnAs(referenceAt(files[kRegular].bytes, 'M', px(60)), *font, kRegular, refused);
   EXPECT_FALSE(font->ringMode());
   EXPECT_FALSE(font->ownsBitmap(font->glyph(kRegular, 'Q'), bitmap));  // the body still stores its glyphs
-  // The wipe at the next book open frees the table.
+  // The wipe at the next chapter or book open frees the table.
   EXPECT_TRUE(font.set->wipeIfPending());
   EXPECT_FALSE(font->ownsBitmap(nativeGlyph(fonts[kRegular], 'M'), bitmap));
   expectDrawnAs(referenceAt(files[kRegular].bytes, 'M', px(60)), *font, kRegular, nativeGlyph(fonts[kRegular], 'M'));

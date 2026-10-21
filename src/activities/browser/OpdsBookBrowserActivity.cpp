@@ -8,7 +8,7 @@
 #include <JpegToBmpConverter.h>
 #include <Logging.h>
 #include <OpdsStream.h>
-#include <SaxParser/SaxParser.h>
+#include <OpenSearchDescription.h>
 #include <WiFi.h>
 #include <Xtc.h>
 
@@ -51,6 +51,19 @@ constexpr int FORMAT_ITEM_HEIGHT = 30;
 constexpr int FORMAT_LIST_TOP_OFFSET = 20;
 constexpr int FORMAT_LIST_BOTTOM_PADDING = 20;
 
+// The cover the book detail shows: downloaded as a JPEG, converted to the BMP its render draws.
+// Scratch files of this browser alone, at the card root, so removed when it closes, and when it
+// opens: a power cut or a crash mid-session leaves them.
+constexpr char OPDS_COVER_JPG[] = "/.tmp_opds_cover.jpg";
+constexpr char OPDS_COVER_BMP[] = "/.tmp_opds_cover.bmp";
+
+// Only what is there: a remove outside /.crosspoint notes a change to the card's content (HalStorage)
+// even when it finds nothing.
+void removeCoverFiles() {
+  if (Storage.exists(OPDS_COVER_JPG)) Storage.remove(OPDS_COVER_JPG);
+  if (Storage.exists(OPDS_COVER_BMP)) Storage.remove(OPDS_COVER_BMP);
+}
+
 int formatItemsPerPage(const Rect& contentRect) {
   const int midY = contentRect.y + contentRect.height / 2;
   const int listTop = midY + FORMAT_LIST_TOP_OFFSET;
@@ -59,6 +72,17 @@ int formatItemsPerPage(const Rect& contentRect) {
   const int availableHeight = rawAvailableHeight > FORMAT_ITEM_HEIGHT ? rawAvailableHeight : FORMAT_ITEM_HEIGHT;
   const int itemsPerPage = availableHeight / FORMAT_ITEM_HEIGHT;
   return itemsPerPage > 0 ? itemsPerPage : 1;
+}
+
+// A tap or a swipe anywhere on the screen. One that is found is taken whole: the rest of its contact
+// reaches nothing that runs after the activity's loop() (ActivityManager's list, light-panel and
+// hint-strip dispatch).
+bool takeTapOrSwipe(const MappedInputManager& input) {
+  int x = 0;
+  int y = 0;
+  if (!input.wasScreenTapped(x, y) && input.wasSwipe() == MappedInputManager::SwipeDir::None) return false;
+  input.suppressTouchContact();
+  return true;
 }
 
 void writeString(HalFile& f, const std::string& s) {
@@ -145,8 +169,11 @@ OpdsEntry readEntryFromCache(HalFile& f) {
 // Stores the root feed's nav entries and search template so the browser can
 // open instantly without a network round-trip. The filename is derived from a
 // 32-bit FNV-1a hash of the server URL. Format:
-//   { "v": 1, "st": "<search-template>", "nav": [{"t":"<title>","h":"<href>"}] }
+//   { "v": 2, "st": "<search-template>", "nav": [{"t":"<title>","h":"<href>"}] }
 // Increment "v" if the schema changes so old caches are automatically discarded.
+// Version 2: "st" from an OpenSearch description is its Atom template (OpenSearch::searchTemplate());
+// a version 1 cache may hold the description's suggestions or HTML one, which no search can follow.
+constexpr int OPDS_DISCOVERY_VERSION = 2;
 
 std::string opdsDiscoveryPath(const std::string& serverUrl) {
   uint32_t h = 2166136261u;
@@ -172,7 +199,7 @@ bool loadOpdsDiscovery(const std::string& serverUrl, std::string& searchTemplate
   JsonDocument doc;
   if (deserializeJson(doc, json)) return false;
 
-  if (doc["v"].as<int>() != 1) return false;  // unknown or pre-versioned format — discard
+  if (doc["v"].as<int>() != OPDS_DISCOVERY_VERSION) return false;  // unknown or pre-versioned format — discard
 
   searchTemplateOut = doc["st"] | std::string{};
 
@@ -202,7 +229,7 @@ void saveOpdsDiscovery(const std::string& serverUrl, const std::string& searchTe
   Storage.mkdir("/.crosspoint");
 
   JsonDocument doc;
-  doc["v"] = 1;
+  doc["v"] = OPDS_DISCOVERY_VERSION;
   doc["st"] = searchTemplate;
   JsonArray arr = doc["nav"].to<JsonArray>();
   for (const auto& [title, href] : navEntries) {
@@ -234,6 +261,7 @@ OpdsEntry OpdsBookBrowserActivity::getEntry(size_t index) const {
 
 void OpdsBookBrowserActivity::onEnter() {
   Activity::onEnter();
+  removeCoverFiles();  // left by a session that ended without onExit()
 
   state = BrowserState::CHECK_WIFI;
   entryOffsets.clear();
@@ -283,6 +311,10 @@ void OpdsBookBrowserActivity::onExit() {
   navigationHistory.clear();
   formatSelectionLabels.clear();
   Storage.remove("/.tmp_opds_cache.dat");
+  // Before the restart below, which does not return. Every way out ends here: Back to the server
+  // list or File Transfer, Home, sleep, and a browser buried under a child when the stack is
+  // replaced (ActivityManager calls onExit() on those too).
+  removeCoverFiles();
 
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
@@ -299,6 +331,17 @@ void OpdsBookBrowserActivity::loop() {
   if (state == BrowserState::WIFI_SELECTION || state == BrowserState::SEARCH_INPUT) {
     return;
   }
+
+  if (formatNotice && (state == BrowserState::BROWSING || state == BrowserState::BOOK_DETAIL)) {
+    // The next press, tap or swipe only takes the notice down. It would act on the screen below
+    // otherwise, and Back there leaves the feed, which is the place in the catalog this notice exists
+    // to keep. Touch is read here, ahead of ActivityManager's list dispatch, for both screens: that
+    // dispatch reaches only a screen that recorded rows, and the book detail records none.
+    ButtonEventManager::ButtonEvent event;
+    if (buttonEvents.consumeEvent(event) || takeTapOrSwipe(mappedInput)) dismissFormatNotice();
+    return;
+  }
+  formatNotice = false;  // the screen it stood over is gone
 
   if (state == BrowserState::BROWSING) {
     catalogList.update();
@@ -344,8 +387,11 @@ void OpdsBookBrowserActivity::loop() {
       }
       if (button == MappedInputManager::Button::Confirm) {
         const auto entry = getEntry(selectorIndex);
-        state = BrowserState::BROWSING;
-        requestUpdate();
+        // A book the reader cannot open keeps its detail screen under the notice.
+        if (!entry.acquisitionLinks.empty()) {
+          state = BrowserState::BROWSING;
+          requestUpdate();
+        }
         chooseBookFormat(entry);
         return;
       }
@@ -567,7 +613,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     int coverColW = 0;
     if (coverAvailable) {
       HalFile bmpFile;
-      if (Storage.openFileForRead("OPDS", "/.tmp_opds_cover.bmp", bmpFile)) {
+      if (Storage.openFileForRead("OPDS", OPDS_COVER_BMP, bmpFile)) {
         Bitmap bmp(bmpFile);
         if (bmp.parseHeaders() == BmpReaderError::Ok && bmp.getWidth() > 0 && bmp.getHeight() > 0) {
           const int coverAreaH = fmtY - 35 - 4;
@@ -621,10 +667,15 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
       }
       auto fmtsStr = renderer.truncatedText(UI_10_FONT_ID, fmts.c_str(), contentRect.width - 20);
       renderer.drawCenteredText(UI_10_FONT_ID, fmtY, fmtsStr.c_str());
+    } else {
+      // Offered only in formats the reader cannot open (see OpdsEntry::acquisitionLinks).
+      auto note = renderer.truncatedText(UI_10_FONT_ID, tr(STR_FORMAT_NOT_SUPPORTED), contentRect.width - 20);
+      renderer.drawCenteredText(UI_10_FONT_ID, fmtY, note.c_str());
     }
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_DOWNLOAD), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    drawFormatNotice();
     renderer.displayBuffer();
     return;
   }
@@ -661,9 +712,13 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     if (entry.type == OpdsEntryType::NAVIGATION) {
       displayText = "> " + entry.title;  // Folder/navigation indicator
     } else {
-      // Book: "Title - Author" or just "Title"
+      // Book: "Title - Author" or just "Title"; a book in formats the reader cannot open says so in
+      // place of the author (the detail screen still shows both). From witchling-reader 111f6ecc.
       displayText = entry.title;
-      if (!entry.author.empty()) {
+      if (entry.acquisitionLinks.empty()) {
+        displayText += " - ";
+        displayText += tr(STR_FORMAT_NOT_SUPPORTED);
+      } else if (!entry.author.empty()) {
         displayText += " - " + entry.author;
       }
     }
@@ -673,7 +728,30 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
                       item.c_str(), i != static_cast<size_t>(selectorIndex));
   }
 
+  drawFormatNotice();
   renderer.displayBuffer();
+}
+
+crosspoint::TlsPolicy OpdsBookBrowserActivity::catalogTlsPolicy() const {
+  // A catalog without a login is public: its feeds, covers and books carry nothing secret, so a
+  // certificate the curated roots cannot verify is passed (and logged) rather than the catalog
+  // left unreachable. One with a username or a password is always verified; HttpDownloader checks
+  // the credentials again (crosspoint::planTls()). The user's skip setting reaches both alike.
+  return server.username.empty() && server.password.empty() ? HttpDownloader::TlsPolicy::VerifiedThenUnverified
+                                                            : HttpDownloader::TlsPolicy::Verified;
+}
+
+void OpdsBookBrowserActivity::drawFormatNotice() const {
+  // On top of the frame this render composed, which its own displayBuffer() then ships: neither
+  // ship here nor re-seed from the displayed frame (see PopupShip::Caller).
+  if (formatNotice)
+    GUI.drawPopup(renderer, tr(STR_FORMAT_NOT_SUPPORTED), /*overlayDisplayedFrame=*/false, PopupShip::Caller);
+}
+
+void OpdsBookBrowserActivity::dismissFormatNotice() {
+  formatNotice = false;
+  buttonEvents.drain();  // the rest of that press (a list hears Up/Down under two names)
+  requestUpdate();
 }
 
 void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
@@ -734,9 +812,11 @@ void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {
 
   {
     OpdsParserStream stream{parser};
-    if (!HttpDownloader::fetchUrl(url, stream, server.username, server.password)) {
+    const HttpDownloader::DownloadError fetched =
+        HttpDownloader::fetchUrl(url, stream, server.username, server.password, catalogTlsPolicy());
+    if (fetched != HttpDownloader::OK) {
       state = BrowserState::ERROR;
-      errorMessage = tr(STR_FETCH_FEED_FAILED);
+      errorMessage = fetched == HttpDownloader::AUTH_ERROR ? tr(STR_AUTH_FAILED) : tr(STR_FETCH_FEED_FAILED);
       requestUpdate();
       return;
     }
@@ -827,8 +907,9 @@ void OpdsBookBrowserActivity::leave() {
 // download is started immediately.
 void OpdsBookBrowserActivity::chooseBookFormat(const OpdsEntry& book) {
   if (book.acquisitionLinks.empty()) {
-    state = BrowserState::ERROR;
-    errorMessage = tr(STR_DOWNLOAD_FAILED);
+    // The catalog offers this book only in formats the reader cannot open (PDF, MOBI, ...). Said
+    // over the screen it was chosen from, not on the error screen, whose Back leaves the feed.
+    formatNotice = true;
     requestUpdate();
     return;
   }
@@ -890,7 +971,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
         }
         return !mappedInput.wasPressed(MappedInputManager::Button::Back);
       },
-      server.username, server.password);
+      server.username, server.password, catalogTlsPolicy());
   // The download read Back by level to abort. Drop the events it left behind, or that same press
   // would reach the catalog afterwards as an event and leave the feed.
   buttonEvents.drain();
@@ -955,7 +1036,7 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
               }
               return !mappedInput.wasPressed(MappedInputManager::Button::Back);
             },
-            server.username, server.password);
+            server.username, server.password, catalogTlsPolicy());
         buttonEvents.drain();
         if (coverDlResult != HttpDownloader::OK) {
           LOG_ERR("OPDS", "Failed to download cover from %s (err %d)", coverUrl.c_str(), (int)coverDlResult);
@@ -981,14 +1062,14 @@ void OpdsBookBrowserActivity::downloadBook(const OpdsEntry& book, const OpdsAcqu
     selectedBookIndex = -1;
     formatSelectionLabels.clear();
     state = BrowserState::ERROR;
-    errorMessage = tr(STR_DOWNLOAD_FAILED);
+    errorMessage = result == HttpDownloader::AUTH_ERROR ? tr(STR_AUTH_FAILED) : tr(STR_DOWNLOAD_FAILED);
     requestUpdate();
   }
 }
 
 void OpdsBookBrowserActivity::fetchOsdTemplate(const std::string& osdUrl) {
   std::string content;
-  if (!HttpDownloader::fetchUrl(osdUrl, content)) {
+  if (!HttpDownloader::fetchUrl(osdUrl, content, "", "", catalogTlsPolicy())) {
     LOG_ERR("OPDS", "Failed to fetch OSD: %s", osdUrl.c_str());
     return;
   }
@@ -1000,35 +1081,15 @@ void OpdsBookBrowserActivity::fetchOsdTemplate(const std::string& osdUrl) {
     return;
   }
 
-  struct OsdState {
-    std::string templateUrl;
-    static void onStart(void* ud, const char* name, const char** atts) {
-      if (strcmp(name, "Url") != 0 && strstr(name, ":Url") == nullptr) return;
-      auto* state = static_cast<OsdState*>(ud);
-      for (int i = 0; atts[i]; i += 2) {
-        if (strcmp(atts[i], "template") == 0 && strstr(atts[i + 1], "{searchTerms}") != nullptr) {
-          state->templateUrl = atts[i + 1];
-          break;
-        }
-      }
-    }
-  } osdState;
-
-  SaxParser parser;
-  if (!parser.init(&osdState, OsdState::onStart, nullptr)) {
-    LOG_ERR("OPDS", "OSD parser alloc failed");
+  const std::string templateUrl = OpenSearch::searchTemplate(content.data(), content.size());
+  if (templateUrl.empty()) {
+    LOG_INF("OPDS", "OSD has no Atom search template, so the catalog offers no search: %s", osdUrl.c_str());
     return;
   }
-  if (!parser.feed(reinterpret_cast<const uint8_t*>(content.data()), content.size()) || !parser.finalize()) {
-    LOG_ERR("OPDS", "OSD parse error at line %d: %s", parser.errorLine(), parser.errorString());
-  }
-
-  if (!osdState.templateUrl.empty()) {
-    searchTemplate = UrlUtils::buildUrl(osdUrl, osdState.templateUrl);
-    if (!initialQuery_.empty()) {
-      performSearch(std::move(initialQuery_));
-      initialQuery_.clear();
-    }
+  searchTemplate = UrlUtils::buildUrl(osdUrl, templateUrl);
+  if (!initialQuery_.empty()) {
+    performSearch(std::move(initialQuery_));
+    initialQuery_.clear();
   }
 }
 
@@ -1049,15 +1110,15 @@ void OpdsBookBrowserActivity::launchSearch() {
 
 void OpdsBookBrowserActivity::fetchCoverForEntry(const OpdsEntry& entry) {
   coverAvailable = false;
-  Storage.remove("/.tmp_opds_cover.bmp");
+  Storage.remove(OPDS_COVER_BMP);
   if (entry.imageHref.empty()) return;
 
   const std::string coverUrl =
       (entry.imageHref.rfind("http", 0) == 0) ? entry.imageHref : UrlUtils::buildUrl(server.url, entry.imageHref);
   LOG_DBG("OPDS", "Fetching cover: %s", coverUrl.c_str());
 
-  if (HttpDownloader::downloadToFile(coverUrl, "/.tmp_opds_cover.jpg", nullptr, server.username, server.password) !=
-      HttpDownloader::OK) {
+  if (HttpDownloader::downloadToFile(coverUrl, OPDS_COVER_JPG, nullptr, server.username, server.password,
+                                     catalogTlsPolicy()) != HttpDownloader::OK) {
     LOG_DBG("OPDS", "Cover download failed");
     return;
   }
@@ -1066,9 +1127,9 @@ void OpdsBookBrowserActivity::fetchCoverForEntry(const OpdsEntry& entry) {
   const int coverMaxH = coverMaxW * 4 / 3;
 
   HalFile src;
-  if (!Storage.openFileForRead("OPDS", "/.tmp_opds_cover.jpg", src)) return;
+  if (!Storage.openFileForRead("OPDS", OPDS_COVER_JPG, src)) return;
   HalFile dst;
-  if (!Storage.openFileForWrite("OPDS", "/.tmp_opds_cover.bmp", dst)) {
+  if (!Storage.openFileForWrite("OPDS", OPDS_COVER_BMP, dst)) {
     src.close();
     return;
   }
@@ -1076,13 +1137,13 @@ void OpdsBookBrowserActivity::fetchCoverForEntry(const OpdsEntry& entry) {
   const bool ok = JpegToBmpConverter::jpegFileToBmpStreamWithSize(src, dst, coverMaxW, coverMaxH);
   src.close();
   dst.close();
-  Storage.remove("/.tmp_opds_cover.jpg");
+  Storage.remove(OPDS_COVER_JPG);
 
   if (ok) {
     coverAvailable = true;
     LOG_DBG("OPDS", "Cover ready");
   } else {
-    Storage.remove("/.tmp_opds_cover.bmp");
+    Storage.remove(OPDS_COVER_BMP);
     LOG_INF("OPDS", "Cover JPEG conversion failed (progressive JPEG unsupported; see JPG log for details)");
   }
 }

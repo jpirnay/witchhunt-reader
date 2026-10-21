@@ -618,7 +618,7 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
 State prepare(const Epub& epub, BuildArena* scratch) {
   const std::string& cachePath = epub.getCachePath();
   // The CSS was not loaded, or did not compile: nothing to decide from yet.
-  if (!epub.getCssParser() || !epub.getCssParser()->hasCurrentCache()) return State::Pending;
+  if (!epub.getCssParser() || !epub.getCssParser()->cacheIsCurrent()) return State::Pending;
   const uint8_t last = readCode(cachePath, nullptr, nullptr, -1);
   const uint8_t attempts = last != kNoCode && last >= kCodeFailed ? static_cast<uint8_t>(last - kCodeFailed) : 0;
   Storage.removeDir((cachePath + kFontsDir).c_str());  // whatever an earlier attempt left

@@ -18,8 +18,8 @@ uint8_t hexValue(const char c) {
 }
 }  // namespace
 
-std::string decodeUriEscapes(const std::string& path) {
-  std::string decoded;
+void decodeUriEscapes(const std::string_view path, std::string& decoded) {
+  decoded.clear();
   decoded.reserve(path.size());
 
   for (size_t i = 0; i < path.size(); i++) {
@@ -32,7 +32,11 @@ std::string decodeUriEscapes(const std::string& path) {
 
     decoded += path[i];
   }
+}
 
+std::string decodeUriEscapes(const std::string& path) {
+  std::string decoded;
+  decodeUriEscapes(std::string_view(path), decoded);
   return decoded;
 }
 

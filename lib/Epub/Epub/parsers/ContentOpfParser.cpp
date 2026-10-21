@@ -830,7 +830,14 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
       if (strcmp(atts[i], "type") == 0) {
         type = atts[i + 1];
       } else if (strcmp(atts[i], "href") == 0) {
-        guideHref = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(self->baseContentPath + atts[i + 1]));
+        // A reference names a document: its fragment is split off, before decoding so that an
+        // escaped '#' stays part of a filename. "Text/c1.xhtml#start" matched no spine item, and
+        // its lookup read every spine record.
+        const std::string_view raw(atts[i + 1]);
+        const std::string_view path = raw.substr(0, raw.find('#'));
+        if (!path.empty()) {
+          guideHref = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(self->baseContentPath + std::string(path)));
+        }
       }
     }
     if (!guideHref.empty()) {

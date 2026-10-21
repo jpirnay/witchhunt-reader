@@ -394,8 +394,10 @@ bool SdCardFontManager::setTtfBodySize(GfxRenderer& renderer, const uint8_t poin
   return true;
 }
 
-void SdCardFontManager::wipeTtfIfPending(const std::function<void()>& onBusy) {
-  if (ttfSet_) ttfSet_->wipeIfPending(onBusy);
+bool SdCardFontManager::ttfNeedsIdleRoom() const { return ttfSet_ && ttfSet_->needsIdleRoom(); }
+
+bool SdCardFontManager::makeTtfRoom(FlashGlyphStore::Budget budget, const std::function<void()>& onBusy) {
+  return ttfSet_ && ttfSet_->makeRoom(budget, onBusy);
 }
 
 uint32_t SdCardFontManager::releaseTtfMissMemory() { return ttfSet_ ? ttfSet_->releaseMissMemory() : 0; }

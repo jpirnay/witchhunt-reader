@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <BoardConfig.h>
+#include <BookCache.h>
 #include <Epub.h>
 #include <FileReplace.h>
 #include <FsHelpers.h>
@@ -3503,27 +3504,9 @@ String bookReplaceTarget(const String& rawPath) {
   return path;
 }
 
-// Everything in the book's cache folder except the reading position and the bookmarks.
+// Everything in the book's cache folder except its reading state (BookCache::isReadingState()).
 void dropLayoutCache(const String& bookPath) {
-  const std::string cacheDir = Epub(bookPath.c_str(), "/.crosspoint").getCachePath();
-  FsFile dir = Storage.open(cacheDir.c_str());
-  if (!dir || !dir.isDirectory()) {
-    if (dir) dir.close();
-    return;
-  }
-  char name[64];
-  for (FsFile entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
-    HalSystem::feedWatchdog();
-    entry.getName(name, sizeof(name));
-    const bool isDir = entry.isDirectory();
-    entry.close();
-    if (strcmp(name, "progress.bin") == 0 || strcmp(name, "bookmarks.bin") == 0) continue;
-    const std::string child = cacheDir + "/" + name;
-    if (isDir ? !Storage.removeDir(child.c_str()) : !Storage.remove(child.c_str())) {
-      LOG_ERR("WEB", "Could not remove %s", child.c_str());
-    }
-  }
-  dir.close();
+  BookCache::clear(Epub(bookPath.c_str(), "/.crosspoint").getCachePath(), BookCache::Keep::ReadingState);
 }
 
 }  // namespace

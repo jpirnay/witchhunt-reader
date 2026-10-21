@@ -767,6 +767,92 @@ TEST(JpegThumbSession, HoldsItsRegionBlocksUntilItGoes) {
   }
 }
 
+// Home's progressive covers read through the decoder's windows (ProgressiveJpeg::ReadWindows)
+// when the lent region has room left after the workspace and the row pipeline, as the reader's
+// pictures do: through one shared 512-byte buffer every scan re-read its data in every band. The
+// BMPs are the ones a decode without the windows writes, the one-shot and the sliced alike, and the
+// region comes back empty. Without a region there are no windows: the heap is never asked for them.
+namespace {
+
+struct CoverReads {
+  std::vector<uint8_t> large;
+  std::vector<uint8_t> small;
+  size_t calls = 0;
+  size_t bytes = 0;
+};
+
+CoverReads convertCover(const char* name, BuildArena* scratch, const bool sliced) {
+  CoverReads out;
+  FsFile file;
+  EXPECT_TRUE(file.openForRead(fixture(name)));
+  MemoryPrint large;
+  MemoryPrint small;
+  const JpegToBmpConverter::BmpTarget targets[2] = {{&large, 90, 60}, {&small, 40, 28}};
+  const size_t calls = FsFile::calls;
+  const size_t bytes = FsFile::bytesRead;
+  if (sliced) {
+    auto session = JpegThumbSession::begin(file, targets, 2, scratch);
+    EXPECT_NE(session, nullptr);
+    if (session) {
+      auto status = JpegThumbSession::Status::Running;
+      while (status == JpegThumbSession::Status::Running) status = session->continueSteps(3);
+      EXPECT_EQ(status, JpegThumbSession::Status::Done);
+    }
+  } else {
+    EXPECT_TRUE(JpegToBmpConverter::jpegFileTo1BitBmpStreamsWithSizes(file, targets, 2, scratch));
+  }
+  out.calls = FsFile::calls - calls;
+  out.bytes = FsFile::bytesRead - bytes;
+  file.close();
+  out.large = large.buf;
+  out.small = small.buf;
+  return out;
+}
+
+}  // namespace
+
+TEST(JpegToBmpConverter, AProgressiveCoverReadsThroughWindowsFromItsRegion) {
+  for (const bool sliced : {false, true}) {
+    SCOPED_TRACE(sliced ? "sliced (JpegThumbSession)" : "one-shot");
+    const CoverReads heap = convertCover("prog_full_420.jpg", nullptr, sliced);
+    BuildArena arena(64 * 1024);
+    ASSERT_TRUE(arena.valid());
+    const CoverReads lent = convertCover("prog_full_420.jpg", &arena, sliced);
+    EXPECT_EQ(arena.used(), 0u);
+    EXPECT_GE(arena.highWater(), ProgressiveJpeg::scanWindowBytes()) << "the windows came out of the region";
+    ASSERT_FALSE(heap.large.empty());
+    EXPECT_EQ(lent.large, heap.large);
+    EXPECT_EQ(lent.small, heap.small);
+    std::printf("[ thumbs   ] %s: %zu card calls / %zu bytes without a region, %zu / %zu lent\n",
+                sliced ? "sliced" : "one-shot", heap.calls, heap.bytes, lent.calls, lent.bytes);
+    EXPECT_LE(lent.calls * 2, heap.calls);
+    EXPECT_LT(lent.bytes, heap.bytes);
+  }
+}
+
+// A region with room for the workspace and the row pipeline but not for the windows: the decode runs
+// as before, in the region, and the heap is not asked for the windows.
+TEST(JpegToBmpConverter, AProgressiveCoverWithoutRoomForTheWindowsDecodesAsBefore) {
+  FsFile probeFile;
+  ASSERT_TRUE(probeFile.openForRead(fixture("prog_full_420.jpg")));
+  ProgressiveJpeg::ImageInfo info;
+  ASSERT_EQ(ProgressiveJpeg::probe(probeFile, info), ProgressiveJpeg::Result::Ok);
+  probeFile.close();
+  const CoverReads heap = convertCover("prog_full_420.jpg", nullptr, false);
+  // Find a region size the whole decode fits in, then take away less than the windows need.
+  BuildArena roomy(64 * 1024);
+  (void)convertCover("prog_full_420.jpg", &roomy, false);
+  const size_t withWindows = roomy.highWater();
+  BuildArena tight(withWindows - ProgressiveJpeg::scanWindowBytes() + 64);
+  ASSERT_TRUE(tight.valid());
+  const CoverReads squeezed = convertCover("prog_full_420.jpg", &tight, false);
+  EXPECT_EQ(tight.used(), 0u);
+  EXPECT_LT(tight.highWater(), withWindows) << "no windows";
+  EXPECT_EQ(squeezed.large, heap.large);
+  EXPECT_EQ(squeezed.small, heap.small);
+  EXPECT_EQ(squeezed.bytes, heap.bytes) << "read as without a region";
+}
+
 // Home leaves mid-cover (a book is opened): the session goes unfinished and must leave the
 // region empty so it can go back to the display.
 TEST(JpegThumbSession, AbandonedMidDecodeReleasesEverything) {

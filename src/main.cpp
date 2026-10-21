@@ -307,12 +307,17 @@ void silentRestartToFileTransferOpds() {
   ESP.restart();
 }
 
-bool trySilentRestartToReaderForHeapRecovery() {
+bool heapRecoveryRestartAvailable() {
   if (deepSleepInProgress) return false;  // sleeping supersedes the heap-defrag reboot
   if (heapRecoveryRestartLatch == HEAP_RECOVERY_RESTART_LATCH_MAGIC) {
     LOG_ERR("MAIN", "Heap-recovery restart suppressed by safety latch");
     return false;
   }
+  return true;
+}
+
+bool trySilentRestartToReaderForHeapRecovery() {
+  if (!heapRecoveryRestartAvailable()) return false;
   heapRecoveryRestartLatch = HEAP_RECOVERY_RESTART_LATCH_MAGIC;
   globalReadingSessionTracker().end();
   armSilentReboot(SILENT_REBOOT_TARGET_READER);
@@ -568,8 +573,9 @@ void enterDeepSleep(bool fromTimeout = false, BootDiag::SleepTrigger trigger = B
   const bool keepLpAlive = keepClockAliveForSleep();
   HalClock::saveBeforeSleep(keepLpAlive);
   // If sleeping from a running reader the book loaded successfully, so the boot-loop
-  // guard count is no longer needed. Reset it now because onExit() is never called
-  // on the reader activity during a sleep transition (only queued as a pending action).
+  // guard count is no longer needed. Reset here, before the state is saved below; the
+  // reader's onExit() resets it again when goToSleep() replaces the activity (its
+  // ActivityManager::loop() runs onExit() for the replace).
   if (APP_STATE.lastSleepFromReader) {
     APP_STATE.readerActivityLoadCount = 0;
   }
