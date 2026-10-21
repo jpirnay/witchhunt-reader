@@ -649,13 +649,28 @@ bool fontDictsFit(FontBytes& bytes, const CffFace& cff) {
 // A CID-keyed glyph's FD, as cff_fd_select_get finds it with its range cache cold: the format 3 ranges in order, up
 // to the first that holds the glyph; a range starting past the glyph ends the search, and so does the sentinel. FD 0
 // when no range holds it. Any order of ranges gives FreeType's answer, at a read per range.
-uint32_t glyphFd(FontBytes& bytes, const CffFace& cff, const uint32_t glyph) {
+// With `lo` and `hi`, the glyphs the same scan gives the same answer for, when a range held the glyph: from the largest
+// first glyph of the ranges scanned (none of them ends the scan early, in any order) to the next range's first glyph.
+// [0, 0) otherwise.
+uint32_t glyphFd(FontBytes& bytes, const CffFace& cff, const uint32_t glyph, uint32_t* lo = nullptr,
+                 uint32_t* hi = nullptr) {
+  if (lo) *lo = *hi = 0;
   if (cff.fdSelectFormat == 0) return bytes.u8(cff.fdSelect + 1 + glyph);
   const uint32_t ranges = bytes.u16(cff.fdSelect + 1);
   uint32_t range = cff.fdSelect + 3;  // its first glyph (2 bytes) and FD; the next range's first glyph ends it
+  uint32_t floor = 0;
   for (uint32_t i = 0; i < ranges; ++i, range += 3) {
-    if (glyph < bytes.u16(range)) break;
-    if (glyph < bytes.u16(range + 3)) return bytes.u8(range + 2);
+    const uint32_t first = bytes.u16(range);
+    if (glyph < first) break;
+    floor = first > floor ? first : floor;
+    const uint32_t next = bytes.u16(range + 3);
+    if (glyph < next) {
+      if (lo) {
+        *lo = floor;
+        *hi = next;
+      }
+      return bytes.u8(range + 2);
+    }
   }
   return 0;
 }
@@ -898,7 +913,8 @@ bool readCffTable(FontBytes& bytes, const uint32_t table, const uint32_t length,
   return !bytes.outOfRange();
 }
 
-Status cffGlyphSource(FontBytes& bytes, const Face& face, const uint16_t glyph, CffGlyphSource* out) {
+Status cffGlyphSource(FontBytes& bytes, const Face& face, const uint16_t glyph, CffGlyphSource* out,
+                      CffSourceCache* cache) {
   *out = CffGlyphSource{};
   const CffFace& cff = face.cff;
   const auto failed = [&]() {
@@ -911,7 +927,33 @@ Status cffGlyphSource(FontBytes& bytes, const Face& face, const uint16_t glyph, 
     out->localSubrs = cff.localSubrs;
     out->matrix = cff.matrix;
   } else {
-    const uint32_t fd = glyphFd(bytes, cff, glyph);
+    // A cache of another face, or of none, is this face's from here on: emptied.
+    if (cache && (cache->face != &face || cache->stamp != face.stamp)) {
+      *cache = CffSourceCache{};
+      cache->face = &face;
+      cache->stamp = face.stamp;
+    }
+    uint32_t fd = 0;
+    if (cache && glyph - cache->rangeFirst < cache->rangeEnd - cache->rangeFirst) {
+      fd = cache->rangeFd;
+    } else {
+      uint32_t lo = 0;
+      uint32_t hi = 0;
+      fd = glyphFd(bytes, cff, glyph, &lo, &hi);
+      if (cache && !bytes.ioError() && !bytes.outOfRange()) {
+        cache->rangeFirst = lo;
+        cache->rangeEnd = hi;
+        cache->rangeFd = static_cast<uint8_t>(fd);
+      }
+    }
+    if (cache && cache->haveSource && cache->fd == fd) {
+      out->localSubrs = cache->localSubrs;
+      out->matrix = cache->matrix;
+      out->scaleNum = cache->scaleNum;
+      out->scaleDen = cache->scaleDen;
+      if (bytes.ioError() || bytes.outOfRange()) return failed();
+      return Status::Ok;
+    }
     FontDict dict;
     if (fd >= cff.fdArray.count || !readFontDict(bytes, cff.fdArray, fd, &dict) ||
         !narrow(fontDictMatrix(cff, dict), &out->matrix) || !readPrivate(bytes, cff, dict, &out->localSubrs)) {
@@ -926,6 +968,14 @@ Status cffGlyphSource(FontBytes& bytes, const Face& face, const uint16_t glyph, 
       if (top == 0 || own == 0 || top > INT32_MAX || own > INT32_MAX) return failed();
       out->scaleNum = top;
       out->scaleDen = own;
+    }
+    if (cache && !bytes.ioError() && !bytes.outOfRange()) {
+      cache->haveSource = true;
+      cache->fd = static_cast<uint8_t>(fd);
+      cache->localSubrs = out->localSubrs;
+      cache->matrix = out->matrix;
+      cache->scaleNum = out->scaleNum;
+      cache->scaleDen = out->scaleDen;
     }
   }
   if (bytes.ioError() || bytes.outOfRange()) return failed();

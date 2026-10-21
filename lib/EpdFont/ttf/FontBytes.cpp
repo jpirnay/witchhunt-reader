@@ -43,7 +43,34 @@ bool SdPageCache::read(const FileSource& file, uint32_t offset, uint32_t len, vo
   return true;
 }
 
+const uint8_t* SdPageCache::window(const FileSource& file, const uint32_t offset, const uint32_t len, uint32_t* got) {
+  // read()'s checks for one byte at `offset`.
+  if (file.ctx == nullptr || offset >= file.size) return nullptr;
+  const uint8_t* page = this->page(file, offset / kPageBytes);
+  if (!page) return nullptr;
+  const uint32_t at = offset % kPageBytes;
+  uint32_t n = kPageBytes - at;
+  if (n > file.size - offset) n = file.size - offset;
+  *got = n < len ? n : len;
+  return page + at;
+}
+
 }  // namespace ttf
+
+const uint8_t* FontBytes::windowFar(const uint32_t offset, const uint32_t len, uint32_t* got) {
+  // readFar()'s checks for one byte at `offset`.
+  if (sd_ && offset >= sd_->fontOffset && offset - sd_->fontOffset < sd_->length) {
+    const uint32_t rel = offset - sd_->fontOffset;
+    const uint32_t room = sd_->length - rel;
+    const uint8_t* p =
+        sd_->cache ? sd_->cache->window(sd_->file, sd_->fileOffset + rel, len < room ? len : room, got) : nullptr;
+    if (p) return p;
+    ioError_ = true;
+    return nullptr;
+  }
+  outOfRange_ = true;
+  return nullptr;
+}
 
 bool FontBytes::readFar(const uint32_t offset, const uint32_t len, void* dst) {
   if (sd_ && offset >= sd_->fontOffset && offset - sd_->fontOffset <= sd_->length &&

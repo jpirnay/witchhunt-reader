@@ -128,16 +128,37 @@ class Interpreter {
   }
 
   // --- Reading (cf2_buf_readByte: past the end of a charstring or subroutine, 0 without an error) ---
-  uint8_t readByte() { return d_.region.at < d_.region.end ? bytes_.u8(d_.region.at++) : 0; }
+  // Straight from the window when it holds the byte; refill() makes one where it does not.
+  [[gnu::always_inline]] uint8_t readByte() {
+    const uint32_t at = d_.region.at;
+    if (at >= d_.region.end) return 0;
+    d_.region.at = at + 1;
+    if (at - d_.windowAt < d_.windowBytes) return d_.window[at - d_.windowAt];
+    return refill(at);
+  }
+  [[gnu::noinline]] uint8_t refill(uint32_t at);
+  void dropWindow() { d_.windowBytes = 0; }
 
   // --- The operand stack (psstack.c) ---
-  bool isFixed(const uint32_t i) const { return (d_.fixedOperands >> i) & 1; }
+  [[gnu::always_inline]] bool isFixed(const uint32_t i) const { return (d_.fixedOperands[i >> 5] >> (i & 31)) & 1; }
+  [[gnu::always_inline]] void setFixed(const uint32_t i, const bool fixed) {
+    uint32_t& word = d_.fixedOperands[i >> 5];
+    const uint32_t bit = uint32_t{1} << (i & 31);
+    word = fixed ? word | bit : word & ~bit;
+  }
   void push(int32_t value, bool fixed);
   void pushInt(const int32_t value) { push(value, false); }
   void pushFixed(const int32_t value) { push(value, true); }
   int32_t popInt();
   int32_t popFixed();
-  int32_t real(uint32_t i);  // cf2_stack_getReal
+  // cf2_stack_getReal
+  int32_t real(const uint32_t i) {
+    if (i >= d_.operandCount) {
+      fail(Status::Malformed);  // Stack_Overflow (a bounds error)
+      return 0;
+    }
+    return isFixed(i) ? d_.operands[i] : intToFixed(d_.operands[i]);
+  }
   void clear() { d_.operandCount = 0; }
   void roll(int32_t count, int32_t shift);
 
@@ -183,6 +204,21 @@ class Interpreter {
   bool finished_ = false;
 };
 
+// The window holding the byte at `at` of the region (FontBytes::window()), and that byte. Where u8(at) would fail, the
+// same flag is set and the byte reads 0, as u8() returns it.
+uint8_t Interpreter::refill(const uint32_t at) {
+  uint32_t got = 0;
+  const uint8_t* p = bytes_.window(at, d_.region.end - at, &got);
+  if (!p) {
+    dropWindow();
+    return 0;
+  }
+  d_.window = p;
+  d_.windowAt = at;
+  d_.windowBytes = got;
+  return p[0];
+}
+
 // --- The operand stack ---
 
 void Interpreter::push(const int32_t value, const bool fixed) {
@@ -190,9 +226,8 @@ void Interpreter::push(const int32_t value, const bool fixed) {
     fail(Status::Malformed);  // Stack_Overflow
     return;
   }
-  const uint64_t bit = uint64_t{1} << d_.operandCount;
   d_.operands[d_.operandCount] = value;
-  d_.fixedOperands = fixed ? d_.fixedOperands | bit : d_.fixedOperands & ~bit;
+  setFixed(d_.operandCount, fixed);
   ++d_.operandCount;
 }
 
@@ -214,14 +249,6 @@ int32_t Interpreter::popFixed() {
   --d_.operandCount;
   const int32_t value = d_.operands[d_.operandCount];
   return isFixed(d_.operandCount) ? value : intToFixed(value);
-}
-
-int32_t Interpreter::real(const uint32_t i) {
-  if (i >= d_.operandCount) {
-    fail(Status::Malformed);  // Stack_Overflow (a bounds error)
-    return 0;
-  }
-  return isFixed(i) ? d_.operands[i] : intToFixed(d_.operands[i]);
 }
 
 // cf2_stack_roll: rotates the BOTTOM `count` entries by `shift`, types and all, along the chains FreeType walks.
@@ -253,9 +280,8 @@ void Interpreter::roll(const int32_t count, int32_t shift) {
     }
     const int32_t value = d_.operands[index];
     const bool fixed = isFixed(static_cast<uint32_t>(index));
-    const uint64_t bit = uint64_t{1} << index;
     d_.operands[index] = last;
-    d_.fixedOperands = lastFixed ? d_.fixedOperands | bit : d_.fixedOperands & ~bit;
+    setFixed(static_cast<uint32_t>(index), lastFixed);
     last = value;
     lastFixed = fixed;
   }
@@ -268,9 +294,11 @@ void Interpreter::roll(const int32_t count, int32_t shift) {
 // the seac state carry over.
 void Interpreter::begin(const CffDecoder::Region region, const int32_t x, const int32_t y) {
   std::memset(d_.storage, 0, sizeof d_.storage);
-  d_.fixedOperands = 0;
+  d_.fixedOperands[0] = 0;
+  d_.fixedOperands[1] = 0;
   d_.operandCount = 0;
   d_.region = region;
+  dropWindow();
   d_.depth = 0;
   d_.stems = 0;
   d_.maskValid = false;
@@ -298,6 +326,14 @@ Status Interpreter::run(const uint32_t offset, const uint32_t length) {
       fail(Status::Unsupported);
       break;
     }
+    // The most frequent step by far, a one-byte integer (number()'s first case), pushed here as push() would.
+    if (op >= 32 && op <= 246 && d_.operandCount < kCffStackSize) {
+      const uint32_t n = d_.operandCount;
+      d_.operands[n] = op - 139;
+      setFixed(n, false);
+      d_.operandCount = static_cast<uint8_t>(n + 1);
+      continue;
+    }
     step(op);
   }
   if (ok()) closeContour();  // cf2_outline_close
@@ -309,6 +345,10 @@ Status Interpreter::run(const uint32_t offset, const uint32_t length) {
 // return here before the clear.
 void Interpreter::step(const uint8_t op) {
   CffDecoder::Point& current = d_.current;
+  if (op >= 32) {  // a number, before the operators' comparisons
+    number(op);
+    return;
+  }
   switch (op) {
     case kHstem:
     case kHstemhm:
@@ -490,6 +530,7 @@ void Interpreter::step(const uint8_t op) {
         return;
       }
       d_.region = d_.callers[--d_.depth];
+      dropWindow();
       return;
 
     case kEscape:
@@ -510,10 +551,6 @@ void Interpreter::step(const uint8_t op) {
       return;
     }
     default:
-      if (op >= 32) {
-        number(op);
-        return;
-      }
       break;  // reserved, Type 1 only (closepath, hsbw) or CFF2 only (vsindex, blend): ignored
   }
   clear();
@@ -718,6 +755,7 @@ void Interpreter::callSubr(const CffIndex& subrs, const uint32_t bias) {
   }
   d_.callers[d_.depth++] = d_.region;
   d_.region = {offset, offset + length};
+  dropWindow();
 }
 
 // cf2_doFlex: two curves from the deltas `reads` names; flex1 takes its last delta on the axis the first five travel
@@ -799,7 +837,17 @@ void Interpreter::startComponent(const int32_t code, const int32_t x, const int3
 // line of no length is still passed on. Device space is 16.16 at 1/64: FT_MulFix(x, 0x400) (cf2_glyphpath_hintPoint
 // with outerTransform the identity and no translation).
 
-Point toDevice(const Point p) { return {mulFix(p.x, kUnitScale), mulFix(p.y, kUnitScale)}; }
+// FT_MulFix(v, 0x400) without 64-bit arithmetic: with v = 64q + r, v * 0x400 = 0x10000q + 0x400r, so the product
+// rounded is q, plus 1 when 0x400r + 0x8000 - (v < 0) reaches 0x10000. Equal for every 32-bit v (checked exhaustively).
+constexpr int32_t toDeviceUnit(const int32_t v) { return (v >> 6) + ((v & 63) >= 32 + (v < 0 ? 1 : 0) ? 1 : 0); }
+static_assert(kUnitScale == 0x400, "toDeviceUnit() is FT_MulFix by 1/64");
+static_assert(toDeviceUnit(-32) == mulFix(-32, kUnitScale) && toDeviceUnit(-33) == mulFix(-33, kUnitScale) &&
+                  toDeviceUnit(32) == mulFix(32, kUnitScale) && toDeviceUnit(31) == mulFix(31, kUnitScale) &&
+                  toDeviceUnit(INT32_MIN) == mulFix(INT32_MIN, kUnitScale) &&
+                  toDeviceUnit(INT32_MAX) == mulFix(INT32_MAX, kUnitScale),
+              "toDeviceUnit() is FT_MulFix by 1/64");
+
+Point toDevice(const Point p) { return {toDeviceUnit(p.x), toDeviceUnit(p.y)}; }
 
 // cf2_hintmap_build, for what an unhinted outline sees of it: a map without a mask makes the mask of every stem
 // (cf2_hintmask_setAll), which more than 96 stems fail; then the map is valid and the mask no longer new.

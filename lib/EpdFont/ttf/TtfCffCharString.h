@@ -56,9 +56,16 @@ struct CffDecoder {
   };
 
   int32_t operands[kCffStackSize];  ///< cf2_stack: each an integer or a 16.16 number
-  uint64_t fixedOperands;           ///< bit i: operands[i] is 16.16
+  /// Bit i % 32 of word i / 32: operands[i] is 16.16. Two words, not a uint64_t: a variable 64-bit shift is a libgcc
+  /// call on the C3 (__ashldi3, __lshrdi3), which every operand pushed and read would take.
+  uint32_t fixedOperands[2];
   int32_t storage[kCffStorageSize];
-  Region region;                     ///< where the interpreter reads
+  Region region;  ///< where the interpreter reads
+  /// Bytes [windowAt, windowAt + windowBytes) of the region, in one piece (FontBytes::window()): read straight from
+  /// it, the font's own bytes as u8() reads them. Dropped whenever the region changes.
+  const uint8_t* window;
+  uint32_t windowAt;
+  uint32_t windowBytes;
   Region callers[kCffMaxSubrDepth];  ///< where each subroutine call returns to
   uint32_t operators;                ///< operators and operands run so far, seac's components included
   uint32_t stems;                    ///< horizontal and vertical stem hints declared

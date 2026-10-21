@@ -54,6 +54,9 @@ struct Face {
   bool longLoca = false;
   Outlines outlines = Outlines::TrueType;
   CffFace cff;  ///< Outlines::Cff: the CFF table (glyf and loca stay 0)
+  /// Set by parseFace(), a number no other parse gives: with the Face's address, what a cache of what was read from the
+  /// face (CffSourceCache) is keyed by, so a Face parsed again where another was is never taken for it.
+  uint32_t stamp = 0;
 };
 
 /// Reads the table directory and the tables every glyph needs: glyf and loca for TrueType outlines ('true' or

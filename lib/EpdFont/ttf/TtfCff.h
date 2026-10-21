@@ -96,10 +96,29 @@ struct CffGlyphSource {
   uint32_t scaleDen = 1;
 };
 
+/// What cffGlyphSource() last found for a CID-keyed face, so the next glyph of the same face skips what it would read
+/// again: the FDSelect range its glyph fell in, and its font DICT's local subroutines, matrix and scale. Keyed by the
+/// Face's address and stamp; only what a lookup found without a read error is kept.
+struct CffSourceCache {
+  const Face* face = nullptr;
+  uint32_t stamp = 0;
+  /// Glyphs [rangeFirst, rangeEnd) are in FD rangeFd: the FDSelect scan answers rangeFd for each of them.
+  uint32_t rangeFirst = 0;
+  uint32_t rangeEnd = 0;
+  uint8_t rangeFd = 0;
+  bool haveSource = false;
+  uint8_t fd = 0;  ///< the FD the source below is of
+  CffIndex localSubrs;
+  CffMatrix matrix;
+  uint32_t scaleNum = 1;
+  uint32_t scaleDen = 1;
+};
+
 /// Malformed for a glyph past the CharStrings or one whose FDSelect names an FD past the FDArray (FreeType refuses
 /// both: cff_slot_load, cff_decoder_prepare), and for one whose scale would be 0 or past 32 bits (the engine's own
-/// rule); Transient when an SD read fails.
-Status cffGlyphSource(FontBytes& bytes, const Face& face, uint16_t glyph, CffGlyphSource* out);
+/// rule); Transient when an SD read fails. With a `cache`, the same result, reading less.
+Status cffGlyphSource(FontBytes& bytes, const Face& face, uint16_t glyph, CffGlyphSource* out,
+                      CffSourceCache* cache = nullptr);
 
 /// The glyph seac takes for a StandardEncoding `code` (cff_lookup_glyph_by_stdcharcode): the first whose charset entry
 /// is the code's SID. A CID-keyed font's charset holds CIDs and is searched all the same, as FreeType does with an

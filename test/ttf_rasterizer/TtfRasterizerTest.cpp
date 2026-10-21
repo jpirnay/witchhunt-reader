@@ -420,17 +420,16 @@ TEST(TtfScratch, ACffFaceIsPlannedAtTheCapsWithTheInterpretersState) {
   EXPECT_EQ(kCffDecoderBytes, mergePlans(cff, trueType).decoderBytes);
 }
 
-TEST(TtfScratch, TheInterpretersRegionFollowsTheTagsAligned) {
-  // 13 points leave the tags ending off an 8-byte boundary: the region starts at the next one, before the output.
+TEST(TtfScratch, TheInterpretersStateLivesInTheCellPool) {
+  // The state is dead once load() has the outline, so a CFF plan takes no more scratch than a TrueType one of the same
+  // points and contours.
   ScratchPlan plan{13, 3, 100, kPoolBytesFlash};
   Rasterizer trueType;
   ASSERT_TRUE(trueType.setPlan(plan));
-  const uint32_t before = trueType.scratchBytes() - plan.outputBytes;  // the pool, points, contours and tags
   plan.decoderBytes = kCffDecoderBytes;
   Rasterizer cff;
   ASSERT_TRUE(cff.setPlan(plan));
-  EXPECT_NE(0u, before % 8);
-  EXPECT_EQ((before + 7) / 8 * 8 + kCffDecoderBytes + plan.outputBytes, cff.scratchBytes());
+  EXPECT_EQ(trueType.scratchBytes(), cff.scratchBytes());
   plan.decoderBytes = kCffDecoderBytes - 8;  // too small for the interpreter
   EXPECT_FALSE(cff.setPlan(plan));
   plan.decoderBytes = kCffDecoderBytes + 8;

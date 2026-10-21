@@ -40,6 +40,11 @@ patch must match its anchor exactly once, so a FreeType update that moves the co
    (a sign warning in the standalone build).
 6. **Renamed raster.** `ft_grays_raster` is `ttf_grays_raster`, so it cannot clash with a full FreeType
    linked into the same program (the host tests link one for the comparison).
+7. **`FT_UDIVPREP` in 32 bits.** The macro prepares a line's reciprocal as `(FT_Int64)0xFFFFFFFF / b`, a
+   64-bit division (`__divdi3`, about 50 instructions on the C3, up to two a line). `gray_udivprep()` computes the
+   same value from `b`'s magnitude with a 32-bit unsigned division and `b`'s sign, and 0 for a magnitude past
+   32 bits. Equal for every nonzero 32-bit `b` (checked exhaustively), so the output is unchanged: the TrueType
+   and CFF oracle comparisons against FreeType and the Bookerly golden hash pass.
 
 The standalone raster object is a single static (upstream): renders must not overlap. The TTF engine
 renders only under `RenderLock`.

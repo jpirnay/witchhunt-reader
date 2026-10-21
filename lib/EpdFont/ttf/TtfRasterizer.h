@@ -47,7 +47,8 @@ struct ScratchPlan {
   /// The largest size the output region was sized for. A glyph too big for the region at a larger size is
   /// the plan's fault, not the glyph's, so it reports Transient rather than Unsupported.
   uint32_t maxPpem26_6 = kMaxPpem26_6;
-  /// The CFF interpreter's state (kCffDecoderBytes) when a face the block serves has CFF outlines; 0 otherwise.
+  /// kCffDecoderBytes when a face the block serves has CFF outlines (the interpreter's state, which lives in the cell
+  /// pool and takes no scratch of its own); 0 otherwise.
   uint32_t decoderBytes = 0;
 };
 
@@ -115,6 +116,7 @@ class Rasterizer {
   Status loadCff(FontBytes& bytes, const Face& face, uint16_t glyph, int32_t scale, uint16_t* numPoints,
                  uint16_t* numContours);
 
+  CffSourceCache cffSources_;         // loadCff's: the last CID-keyed glyph's FDSelect range and font DICT
   uint8_t* block_ = nullptr;          // owned_, or the caller's (attach())
   std::unique_ptr<uint8_t[]> owned_;  // what allocate() made
   uint32_t blockBytes_ = 0;

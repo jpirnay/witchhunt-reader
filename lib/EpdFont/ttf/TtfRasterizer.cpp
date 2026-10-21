@@ -338,10 +338,12 @@ bool Rasterizer::setPlan(const ScratchPlan& plan) {
   pointsOffset_ = alignUp(plan.poolBytes, 8);
   contoursOffset_ = pointsOffset_ + plan.points * static_cast<uint32_t>(sizeof(FT_Vector));
   tagsOffset_ = contoursOffset_ + plan.contours * static_cast<uint32_t>(sizeof(unsigned short));
-  // The CFF interpreter's state follows the tags, aligned to 8 as the block's start is; a block for TrueType faces
-  // alone has neither the region nor its padding.
-  decoderOffset_ = plan.decoderBytes != 0 ? alignUp(tagsOffset_ + plan.points, 8) : tagsOffset_ + plan.points;
-  outputOffset_ = decoderOffset_ + plan.decoderBytes;
+  // The CFF interpreter's state lives in the cell pool, at the block's start (aligned to 8). It is dead once load() has
+  // the outline, and the pool is ftgrays' only during rasterize(), which sets it up again each time: the two never need
+  // it at once. setPlan() refuses a pool under 2,048 bytes, more than the state takes.
+  static_assert(kCffDecoderBytes <= 2048, "the CFF interpreter's state fits the smallest pool");
+  decoderOffset_ = 0;
+  outputOffset_ = tagsOffset_ + plan.points;
   blockBytes_ = outputOffset_ + plan.outputBytes;
   plan_ = plan;  // last: `plan` may be plan_ itself, as allocate(plan()) passes it
   return true;

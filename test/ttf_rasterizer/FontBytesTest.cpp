@@ -211,3 +211,121 @@ TEST(FontBytesSd, TwoFilesKeepTheirOwnPages) {
   EXPECT_EQ(a.at(11), bytesA.u8(11));
   EXPECT_EQ(2u, cache.misses());
 }
+
+// --- window(): the bytes at an offset in one piece, where u8() would read the first of them ---
+
+TEST(FontBytesWindow, InPlaceItRunsToTheEndOfTheMappedBytes) {
+  FontBytes bytes(kData, sizeof kData);
+  uint32_t got = 0;
+  const uint8_t* p = bytes.window(2, 100, &got);
+  ASSERT_NE(nullptr, p);
+  EXPECT_EQ(4u, got);
+  EXPECT_EQ(bytes.u8(2), p[0]);
+  EXPECT_EQ(bytes.u8(5), p[3]);
+  p = bytes.window(1, 2, &got);  // fewer than there are
+  ASSERT_NE(nullptr, p);
+  EXPECT_EQ(2u, got);
+  EXPECT_FALSE(bytes.outOfRange());
+  EXPECT_EQ(nullptr, bytes.window(sizeof kData, 1, &got));  // as u8() of that offset
+  EXPECT_TRUE(bytes.outOfRange());
+  EXPECT_FALSE(bytes.ioError());
+}
+
+TEST(FontBytesSd, AWindowEndsWhereItsPageEndsAndAnotherStartsAtTheNextByte) {
+  CardFile file(4096);
+  ttf::SdPageCache cache;
+  const ttf::SdRange sd{file.source(), kOutlines, kFileOffset, kLength, &cache};
+  FontBytes bytes(kData, sizeof kData, &sd);
+  // File offset 1020 is 4 bytes before the end of page 1 (offsets 512..1023).
+  uint32_t got = 0;
+  const uint8_t* p = bytes.window(kOutlines + (1020 - kFileOffset), 100, &got);
+  ASSERT_NE(nullptr, p);
+  EXPECT_EQ(4u, got);
+  for (uint32_t i = 0; i < got; ++i) EXPECT_EQ(file.at(1020 + i), p[i]) << i;
+  // A window at the page's last byte holds that byte alone.
+  p = bytes.window(kOutlines + (1023 - kFileOffset), 100, &got);
+  ASSERT_NE(nullptr, p);
+  EXPECT_EQ(1u, got);
+  EXPECT_EQ(file.at(1023), p[0]);
+  EXPECT_EQ(file.at(1023), bytes.u8(kOutlines + (1023 - kFileOffset)));
+  // The next byte is the next page's first: a whole page to the end of the request.
+  p = bytes.window(kOutlines + (1024 - kFileOffset), 100, &got);
+  ASSERT_NE(nullptr, p);
+  EXPECT_EQ(100u, got);
+  EXPECT_EQ(file.at(1024), p[0]);
+  EXPECT_EQ(file.at(1123), p[99]);
+  EXPECT_EQ((std::vector<uint32_t>{512, 1024}), file.reads);  // the pages u8() reads, no others
+  EXPECT_FALSE(bytes.outOfRange());
+  EXPECT_FALSE(bytes.ioError());
+}
+
+TEST(FontBytesSd, AWindowIsCutAtTheEndOfTheRangeAndOfTheFile) {
+  CardFile file(4096);
+  ttf::SdPageCache cache;
+  const ttf::SdRange sd{file.source(), kOutlines, kFileOffset, kLength, &cache};
+  FontBytes bytes(kData, sizeof kData, &sd);
+  uint32_t got = 0;
+  // The range's last byte: file offset 3699, in page 7 (3584..4095): the request is cut to 1.
+  const uint8_t* p = bytes.window(kOutlines + kLength - 1, 100, &got);
+  ASSERT_NE(nullptr, p);
+  EXPECT_EQ(1u, got);
+  EXPECT_EQ(file.at(kFileOffset + kLength - 1), p[0]);
+  // The file's own end cuts a window as it cuts a page.
+  CardFile small(600);
+  ttf::SdPageCache smallCache;
+  const ttf::SdRange tail{small.source(), 0, 0, 600, &smallCache};
+  FontBytes tailBytes(nullptr, 0, &tail);
+  p = tailBytes.window(590, 100, &got);
+  ASSERT_NE(nullptr, p);
+  EXPECT_EQ(10u, got);
+  EXPECT_EQ(small.at(599), p[9]);
+  EXPECT_FALSE(bytes.outOfRange());
+  EXPECT_FALSE(tailBytes.outOfRange());
+}
+
+TEST(FontBytesSd, AWindowOutsideTheFarRangeIsOutOfRangeAsU8IsAndAsksNothingOfTheCard) {
+  CardFile file(4096);
+  ttf::SdPageCache cache;
+  const ttf::SdRange sd{file.source(), kOutlines, kFileOffset, kLength, &cache};
+  for (const uint32_t offset : {uint32_t{6}, kOutlines - 1, kOutlines + kLength, kOutlines + kLength + 50}) {
+    FontBytes bytes(kData, sizeof kData, &sd);
+    uint32_t got = 0;
+    EXPECT_EQ(nullptr, bytes.window(offset, 4, &got)) << offset;
+    EXPECT_TRUE(bytes.outOfRange()) << offset;
+    EXPECT_FALSE(bytes.ioError()) << offset;
+    FontBytes viaU8(kData, sizeof kData, &sd);
+    viaU8.u8(offset);
+    EXPECT_EQ(viaU8.outOfRange(), bytes.outOfRange()) << offset;
+    EXPECT_EQ(viaU8.ioError(), bytes.ioError()) << offset;
+  }
+  EXPECT_TRUE(file.reads.empty());
+}
+
+TEST(FontBytesSd, AWindowOnAFailedCardReadSetsTheFlagU8SetsAndLeavesNothingBehind) {
+  CardFile file(4096);
+  ttf::SdPageCache cache;
+  const ttf::SdRange sd{file.source(), kOutlines, kFileOffset, kLength, &cache};
+  FontBytes bytes(kData, sizeof kData, &sd);
+  FontBytes viaU8(kData, sizeof kData, &sd);
+  uint32_t got = 0;
+  file.fail = true;
+  EXPECT_EQ(nullptr, bytes.window(kOutlines, 8, &got));
+  viaU8.u8(kOutlines);
+  EXPECT_TRUE(bytes.ioError());
+  EXPECT_FALSE(bytes.outOfRange());
+  EXPECT_EQ(viaU8.ioError(), bytes.ioError());
+  EXPECT_EQ(viaU8.outOfRange(), bytes.outOfRange());
+  bytes.clearErrors();
+  file.fail = false;
+  const uint8_t* p = bytes.window(kOutlines, 8, &got);  // read again, not served from a page that failed
+  ASSERT_NE(nullptr, p);
+  EXPECT_EQ(8u, got);
+  EXPECT_EQ(file.at(kFileOffset), p[0]);
+  EXPECT_FALSE(bytes.ioError());
+
+  const ttf::SdRange noCache{file.source(), kOutlines, kFileOffset, kLength, nullptr};
+  FontBytes uncached(kData, sizeof kData, &noCache);
+  EXPECT_EQ(nullptr, uncached.window(kOutlines, 8, &got));
+  EXPECT_TRUE(uncached.ioError());
+  EXPECT_FALSE(uncached.outOfRange());
+}
