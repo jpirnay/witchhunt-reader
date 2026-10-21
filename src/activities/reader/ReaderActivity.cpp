@@ -822,6 +822,11 @@ void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
     sync.outcome = KOReaderSyncOutcomeState::PENDING;
     sync.clearResult();
     sync.postAction = KOReaderSyncPostAction::Reader;
+    // The sync ends in a silent reboot, and the boot reopens APP_STATE.openEpubPath. The reader
+    // that records this book there (EpubReaderActivity::onEnter()) has not run yet, so without
+    // this the reboot reopened the book read before this one, whose reader skips the pulled
+    // position: the session is keyed to this book's path.
+    APP_STATE.openEpubPath = epubPath;
     APP_STATE.saveToFile();
     // Drop the loaded Epub before TLS — sync activity will reload it for remote-position
     // mapping. Holding it here would needlessly inflate the heap during WiFi/TLS work.
