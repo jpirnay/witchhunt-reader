@@ -307,12 +307,17 @@ void silentRestartToFileTransferOpds() {
   ESP.restart();
 }
 
-bool trySilentRestartToReaderForHeapRecovery() {
+bool heapRecoveryRestartAvailable() {
   if (deepSleepInProgress) return false;  // sleeping supersedes the heap-defrag reboot
   if (heapRecoveryRestartLatch == HEAP_RECOVERY_RESTART_LATCH_MAGIC) {
     LOG_ERR("MAIN", "Heap-recovery restart suppressed by safety latch");
     return false;
   }
+  return true;
+}
+
+bool trySilentRestartToReaderForHeapRecovery() {
+  if (!heapRecoveryRestartAvailable()) return false;
   heapRecoveryRestartLatch = HEAP_RECOVERY_RESTART_LATCH_MAGIC;
   globalReadingSessionTracker().end();
   armSilentReboot(SILENT_REBOOT_TARGET_READER);

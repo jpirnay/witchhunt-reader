@@ -76,9 +76,12 @@ If the secondary buffer cannot be restored and the heap looks fragmented rather 
 freeHeap >= framebuffer size + 32 KB   // a framebuffer plus a reading session's working set is free
 contigHeap < framebuffer size          // but no block holds one framebuffer
 !fragmentationRecoveryRestartAttempted_    // first attempt only
+heapRecoveryRestartAvailable()             // the latch allows it: one heap restart per cold boot, no sleep begun
 ```
 
 The framebuffer size is computed at run time from the panel (`getDisplayWidthBytes() * getDisplayHeight()`). Two of the three callers (after a released build, after a released image warm) pass `contigHeap = 0` on purpose: after decode failures under pressure the heap may be corrupt, and walking the free list there has crashed the device. `recoverSecondaryBufferIfNeeded` passes the real largest block.
+
+The latch is asked before anything is given up. The framebuffers come back only with the reboot, so a restart refused after the release left the reader with no display buffers; refused up front, the reader stays degraded but on screen.
 
 **Flow:**
 
@@ -86,8 +89,8 @@ The framebuffer size is computed at run time from the panel (`getDisplayWidthByt
 2. Allocate a scratch buffer of one framebuffer.
 3. Call `renderer.releaseFrameBuffersWithScratch(scratch, scratchSize)`. It frees both framebuffers and the scaled-glyph cache and points `frameBuffer` at the scratch. Pixel writes from the warm pass land in the scratch and are discarded on reboot.
 4. Call `section->warmAllImageCaches(...)` with both framebuffers free. This is the one pass with room for the full progressive JPEG workspace, so a `.pxc` that was written at a coarser scale is decoded again.
-5. Leak the scratch buffer on purpose; the reboot is unconditional after this point.
-6. Call `trySilentRestartToReaderForHeapRecovery()`, which sets the RTC reboot target and restarts. `heapRecoveryRestartLatch` in RTC memory prevents a second recovery reboot if the first one also fails.
+5. Leak the scratch buffer on purpose; the reboot follows.
+6. Call `trySilentRestartToReaderForHeapRecovery()`, which sets the RTC reboot target and restarts. `heapRecoveryRestartLatch` in RTC memory prevents a second recovery reboot if the first one also fails. It asks the same `heapRecoveryRestartAvailable()` as the condition above, so after it only a sleep that began during the warm pass can still refuse.
 
 After the reboot the section cache and the `.pxc` image caches are on SD, the heap is unfragmented and the reader renders normally.
 
