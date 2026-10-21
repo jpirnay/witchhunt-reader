@@ -129,7 +129,7 @@ uint32_t inkOf(const EpdGlyph& m, const uint8_t* bitmap) {
 }  // namespace
 
 // Synthetic bold on dense CJK characters (spec 7.2): at reading sizes the strength must leave their counters open.
-TEST_F(TtfEmbolden, DenseCharactersKeepThreeQuartersOfTheirOpenSpace) {
+TEST_F(TtfEmbolden, DenseCharactersKeepTheirCountersOpen) {
   const uint32_t dense[] = {0x9B31, 0x66F8, 0x6176, 0x8B70, 0x9A5A};  // 鬱 書 慶 議 驚
   for (const char* name : {"NotoSansJP-TrueType.ttf", "NotoSansJP-Cff.otf", "NotoSerifJP-Cff.otf"}) {
     const std::vector<uint8_t> data = readFixture(name);
@@ -155,10 +155,63 @@ TEST_F(TtfEmbolden, DenseCharactersKeepThreeQuartersOfTheirOpenSpace) {
         ASSERT_EQ(Status::Ok, rasterizer.load(bytes, face, glyph, ppem, &bold));
         ASSERT_EQ(Status::Ok, rasterizer.embolden(emboldenStrength(ppem), &bold));
         ASSERT_EQ(Status::Ok, rasterizer.rasterize(rasterizer.output()));
-        // Blank pixels inside each glyph's box, as the brief counts them: the bold box is a pixel or two wider.
-        const uint32_t kept = blankInside(bold, rasterizer.output());
-        std::printf("%s %u pt U+%04X: %u of %u blank pixels kept\n", name, points, cp, kept, open);
-        EXPECT_GE(kept * 4, open * 3);
+        const uint8_t* boldBits = rasterizer.output();
+        // A regular pixel's place in the bold bitmap, by absolute position: the bitmap's left may move a pixel, as
+        // FreeType's does (the left side bearing in the metrics stays, the bitmap box does not).
+        const int dx = regular.left - bold.left;
+        const int dy = bold.top - regular.top;
+        auto blankIn = [](const EpdGlyph& m, const uint8_t* bits, const int x, const int y) {
+          if (x < 0 || y < 0 || x >= m.width || y >= m.height) return true;  // outside the box: nothing drawn
+          const uint32_t p = static_cast<uint32_t>(y) * m.width + x;
+          return ((bits[p >> 2] >> (6 - 2 * (p & 3))) & 3) == 0;
+        };
+        uint32_t kept = 0;
+        for (int y = 0; y < regular.height; ++y) {
+          for (int x = 0; x < regular.width; ++x) {
+            kept += blankIn(regular, regularBits.data(), x, y) && blankIn(bold, boldBits, x + dx, y + dy);
+          }
+        }
+        // The enclosed blank regions (4-connected, not touching the box edge) of 5 or more pixels, and whether any
+        // pixel of each stays blank.
+        std::vector<uint8_t> seen(static_cast<size_t>(regular.width) * regular.height, 0);
+        uint32_t counters = 0;
+        uint32_t countersOpen = 0;
+        for (int y0 = 0; y0 < regular.height; ++y0) {
+          for (int x0 = 0; x0 < regular.width; ++x0) {
+            if (seen[y0 * regular.width + x0] || !blankIn(regular, regularBits.data(), x0, y0)) continue;
+            std::vector<int> stack{y0 * regular.width + x0};
+            seen[y0 * regular.width + x0] = 1;
+            uint32_t size = 0;
+            bool touchesEdge = false;
+            bool anyBlank = false;
+            while (!stack.empty()) {
+              const int at = stack.back();
+              stack.pop_back();
+              const int x = at % regular.width;
+              const int y = at / regular.width;
+              ++size;
+              touchesEdge |= x == 0 || y == 0 || x == regular.width - 1 || y == regular.height - 1;
+              anyBlank |= blankIn(bold, boldBits, x + dx, y + dy);
+              const int next[4][2] = {{x + 1, y}, {x - 1, y}, {x, y + 1}, {x, y - 1}};
+              for (const auto& n : next) {
+                if (n[0] < 0 || n[1] < 0 || n[0] >= regular.width || n[1] >= regular.height) continue;
+                const int ni = n[1] * regular.width + n[0];
+                if (seen[ni] || !blankIn(regular, regularBits.data(), n[0], n[1])) continue;
+                seen[ni] = 1;
+                stack.push_back(ni);
+              }
+            }
+            if (touchesEdge || size < 5) continue;
+            ++counters;
+            countersOpen += anyBlank;
+          }
+        }
+        std::printf("%s %u pt U+%04X: %u of %u blank pixels kept, %u of %u counters open\n", name, points, cp, kept,
+                    open, countersOpen, counters);
+        // Measured against FreeType at this strength: across only, a regular blank pixel stays blank in 69-91% of
+        // cases and no enclosed counter fills; with the vertical strength too, 35-57% and 66 counters fill.
+        EXPECT_GE(kept * 3, open * 2);
+        EXPECT_EQ(counters, countersOpen);
         EXPECT_GT(inkOf(bold, rasterizer.output()), regularInk);
         EXPECT_EQ(regular.top, bold.top);
         EXPECT_EQ(regular.height, bold.height);

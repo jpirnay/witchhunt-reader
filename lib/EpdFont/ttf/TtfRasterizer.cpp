@@ -497,8 +497,9 @@ ScratchPlan planScratch(const Face& face, const uint32_t maxPpem26_6, const uint
 
 Strength emboldenStrength(const uint32_t ppem26_6) {
   // FreeType's strength across (FT_GlyphSlot_Embolden): x_ppem, rounded as FT_Request_Metrics rounds it, times
-  // 0x0AAA / 1024, about em/24; none down. With FreeType's vertical strength too, 鬱 書 慶 議 驚 lost 10-42% of
-  // their open space at 10-14 pt; across only, they keep at least 78%. The stems carry the weight, in Latin text too.
+  // 0x0AAA / 1024, about em/24; none down. With FreeType's vertical strength too, a regular blank pixel of 鬱 書 慶
+  // 議 驚 stays blank in 35-57% of cases at 10-14 pt and 66 enclosed counters fill; across only, in 69-91% and none
+  // fills. The stems carry the weight, in Latin text too.
   return {static_cast<int32_t>((ppem26_6 + 32) >> 6) * 0x0AAA / 1024, 0};
 }
 
@@ -652,7 +653,8 @@ Status Rasterizer::placeBox(EpdGlyph* metrics) {
 Status Rasterizer::embolden(const Strength& strength, EpdGlyph* metrics) {
   if (loaded_ != Status::Ok) return loaded_;
   // FT_GlyphSlot_AdjustWeight: a non-zero advance grows by the horizontal strength, whatever became of the outline;
-  // a zero one (a joiner, a zero-width space) stays zero.
+  // an advance that rounds to zero (12.4) stays zero (a joiner, a zero-width space). FreeType tests the 26.6 advance;
+  // the two differ only below 1/32 px.
   if (metrics->advanceX != 0) {
     const uint32_t advance = metrics->advanceX + (static_cast<uint32_t>(strength.x) + 2) / 4;
     if (advance > 0xFFFF) return loaded_ = Status::Unsupported;

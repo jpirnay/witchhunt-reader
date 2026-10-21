@@ -62,7 +62,7 @@ ScratchPlan planScratch(const Face& face, uint32_t maxPpem26_6, uint32_t poolByt
 ScratchPlan mergePlans(const ScratchPlan& a, const ScratchPlan& b);
 
 /// How much synthetic bold grows a glyph (spec 7.2): the outline's growth on each axis, 26.6 pixels. Never negative:
-/// embolden() refuses one as Unsupported.
+/// emboldenStrength() never returns one, and embolden() does not check.
 struct Strength {
   int32_t x = 0;
   int32_t y = 0;
