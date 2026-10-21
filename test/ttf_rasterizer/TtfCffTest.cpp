@@ -312,6 +312,10 @@ TEST(TtfCff, FontMatricesAreReadAndConcatenatedAsFreeTypeDoes) {
   // An offset of 1,000 em takes FreeType's arithmetic past 32 bits. Its FT_Long is 32 bits on Windows and 64 on
   // Linux, and the two builds differ; the engine computes as the 64-bit one (TtfFixed.h).
   const char* const past32Bits[] = {"0.001 0 0 0.001 1E3 0"};
+  // A negative five-byte integer (operator 29) is a 32-bit two's complement number, and the engine reads it so.
+  // FreeType's cff_parse_integer assembles it in an FT_ULong: with a 64-bit FT_Long (Linux) -10 becomes 4,294,967,286
+  // and the matrix is dropped as strangely scaled; with a 32-bit one (Windows, the C3) it reads -10.
+  const char* const fiveByteNegatives[] = {"0.001 0 0 0.001 #-10 #20", "0.002 0 0 0.002 #12 #-7"};
   const auto compare = [](const char* top, const char* fd) {
     CffSpec spec;
     spec.cid = true;
@@ -332,6 +336,8 @@ TEST(TtfCff, FontMatricesAreReadAndConcatenatedAsFreeTypeDoes) {
     for (const char* top : matrices) compare(top, fd);
     if (sizeof(FT_Long) == 8) {
       for (const char* top : past32Bits) compare(top, fd);
+    } else {
+      for (const char* top : fiveByteNegatives) compare(top, fd);
     }
   }
   // A name-keyed font has only the Top DICT's.
