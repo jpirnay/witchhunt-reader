@@ -21,6 +21,7 @@
 #include "components/UITheme.h"
 #include "components/themes/ButtonHintLayout.h"
 #include "components/themes/CardTextFit.h"
+#include "components/themes/HeaderLayout.h"
 #include "components/themes/ListTouchBand.h"
 #include "components/themes/TapTargets.h"
 #include "fontIds.h"
@@ -29,7 +30,6 @@
 namespace {
 constexpr int homeMenuMargin = 20;
 constexpr int homeMarginTop = 30;
-constexpr int subtitleY = 738;
 
 // Helper: draw battery icon at given position
 void drawBatteryIcon(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight, uint16_t percentage) {
@@ -605,13 +605,16 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
     renderer.drawCenteredText(UI_12_FONT_ID, rect.y + 5, truncatedTitle.c_str(), true, EpdFontFamily::BOLD);
   }
 
-  if (subtitle) {
+  // The band has no room for a second line, so the subtitle goes in the line kept for it at the foot
+  // of the content, right-aligned under the header's right edge. A screen whose header has one takes
+  // its body from UITheme::getBodyRect() with the same subtitle, which ends above that line.
+  if (HeaderLayout::hasText(subtitle)) {
     auto truncatedSubtitle = renderer.truncatedText(
         SMALL_FONT_ID, subtitle, rect.width - BaseMetrics::values.contentSidePadding * 2, EpdFontFamily::REGULAR);
     int truncatedSubtitleWidth = renderer.getTextWidth(SMALL_FONT_ID, truncatedSubtitle.c_str());
     renderer.drawText(SMALL_FONT_ID,
-                      rect.x + rect.width - BaseMetrics::values.contentSidePadding - truncatedSubtitleWidth, subtitleY,
-                      truncatedSubtitle.c_str(), true);
+                      rect.x + rect.width - BaseMetrics::values.contentSidePadding - truncatedSubtitleWidth,
+                      UITheme::getSubtitleLine(renderer).y, truncatedSubtitle.c_str(), true);
   }
 }
 

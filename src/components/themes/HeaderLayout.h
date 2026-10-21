@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include "components/themes/BaseTheme.h"
 
 // Where a screen's header sits in its content area, and where the body below it starts.
@@ -39,6 +41,25 @@ inline Rect header(const Rect& content, const ThemeMetrics& metrics) {
 inline Rect body(const Rect& content, const ThemeMetrics& metrics) {
   const Rect band = header(content, metrics);
   return below(content, band.y + band.height + metrics.verticalSpacing);
+}
+
+// A header subtitle counts when it has text: a null or empty one reserves nothing.
+inline bool hasText(const char* text) { return text != nullptr && text[0] != '\0'; }
+
+// The line Base draws a header subtitle in: the foot of `area`, which is the content with every
+// hint strip out (getContentRect(renderer, true, true)), so the line clears them in any orientation
+// and on any panel height. It used to be a fixed y = 738, the foot of the X4's portrait content: on
+// the X3 that ran into the hint strip, on the T5S3 it landed mid-body, and in landscape off screen.
+// Empty (height 0) for a theme that draws the subtitle in the band.
+inline Rect subtitleLine(const Rect& area, const ThemeMetrics& metrics) {
+  return Rect{area.x, area.y + area.height - metrics.headerSubtitleLine, area.width, metrics.headerSubtitleLine};
+}
+
+// `body` ending where `line` starts, if that is higher: a body under a header with a subtitle stops
+// above the subtitle's line.
+inline Rect above(const Rect& body, const Rect& line) {
+  const int bottom = std::min(body.y + body.height, line.y);
+  return Rect{body.x, body.y, body.width, bottom - body.y};
 }
 
 // The reader's own overlays (the menu, the chapter and footnote lists, the pickers) draw a bare bold

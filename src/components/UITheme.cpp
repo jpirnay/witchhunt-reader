@@ -105,9 +105,16 @@ Rect UITheme::getHeaderRect(const GfxRenderer& renderer, const bool hasBottomHin
   return Rect{full.x, band.y, full.width, band.height};
 }
 
-Rect UITheme::getBodyRect(const GfxRenderer& renderer, const bool hasBottomHints, const bool hasSideHints) {
-  return HeaderLayout::body(getContentRect(renderer, hasBottomHints, hasSideHints),
-                            UITheme::getInstance().getMetrics());
+Rect UITheme::getBodyRect(const GfxRenderer& renderer, const bool hasBottomHints, const bool hasSideHints,
+                          const char* subtitle) {
+  const Rect body =
+      HeaderLayout::body(getContentRect(renderer, hasBottomHints, hasSideHints), UITheme::getInstance().getMetrics());
+  return HeaderLayout::hasText(subtitle) ? HeaderLayout::above(body, getSubtitleLine(renderer)) : body;
+}
+
+Rect UITheme::getSubtitleLine(const GfxRenderer& renderer) {
+  return HeaderLayout::subtitleLine(getContentRect(renderer, /*hasBottomHints=*/true, /*hasSideHints=*/true),
+                                    UITheme::getInstance().getMetrics());
 }
 
 int UITheme::getNumberOfItemsPerPage(const GfxRenderer& renderer, bool hasHeader, bool hasTabBar, bool hasButtonHints,

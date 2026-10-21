@@ -101,7 +101,10 @@ class UiListActivity : public Activity, protected UiAppHost {
   // reserved) plus the theme's top padding and header height, then the theme's spacer. extraTop /
   // extraBottom make room for a screen's own panel above the list or band below it. `spacer` false
   // leaves out the theme's spacer, for a bar the caller puts directly under the header.
-  void layoutListArea(UiScreen& screen, int16_t extraTop = 0, int16_t extraBottom = 0, bool spacer = true);
+  // `headerSubtitle` is the subtitle the screen gives its header: with text, the list ends above the
+  // line a theme that draws it below the body (Base) keeps for it (UITheme::getBodyRect()).
+  void layoutListArea(UiScreen& screen, int16_t extraTop = 0, int16_t extraBottom = 0, bool spacer = true,
+                      const char* headerSubtitle = nullptr);
   // The props every list here starts from: rows act on tap, touch input, body-text labels up to two
   // lines. The caller sets items / count / rowProvider and anything it draws differently.
   [[nodiscard]] freeink::ui::ListProps listProps(UiScreen& screen) const;

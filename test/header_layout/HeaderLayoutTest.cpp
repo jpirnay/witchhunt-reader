@@ -139,3 +139,54 @@ TEST(HeaderLayoutTest, HintColumnKeepsAGapFromTheContent) {
               theme.metrics.buttonHintsHeight + HeaderLayout::HINT_COLUMN_GAP);
   }
 }
+
+// Base draws a header subtitle in a line of its own, one SMALL_FONT_ID line at every UI font step;
+// the Lyra themes fit it in the band and keep no line.
+TEST(HeaderLayoutTest, OnlyBaseKeepsASubtitleLine) {
+  for (size_t step = 0; step < UiFontLadder::STEP_COUNT; step++) {
+    SCOPED_TRACE("step " + std::to_string(step));
+    const UiFontLadder::Step growth = UiFontLadder::growthAt(static_cast<uint8_t>(step));
+    ThemeMetrics base = BaseMetrics::values;
+    UiFontLadder::applyTo(base, growth);
+    EXPECT_EQ(base.headerSubtitleLine, UiFontLadder::STEPS[step].small);
+    for (ThemeMetrics lyra : {LyraMetrics::values, Lyra3CoversMetrics::values, LyraCarouselMetrics::values}) {
+      UiFontLadder::applyTo(lyra, growth);
+      EXPECT_EQ(lyra.headerSubtitleLine, 0);
+    }
+  }
+}
+
+// The line sits at the foot of the content, clear of the strips. On the X4's portrait content that
+// is [737, 760), where the fixed y = 738 put it 1 px into the hint strip; on other panel heights
+// (the X3's 752, the T5S3's 920, landscape) it follows the content instead of a constant.
+TEST(HeaderLayoutTest, SubtitleLineIsTheFootOfTheContent) {
+  const ThemeMetrics& m = BaseMetrics::values;
+  for (const int contentBottom : {760, 752, 920, 450, 498}) {
+    const Rect area{0, 0, 480, contentBottom};
+    const Rect line = HeaderLayout::subtitleLine(area, m);
+    EXPECT_EQ(bottomOf(line), contentBottom);
+    EXPECT_EQ(line.height, m.headerSubtitleLine);
+  }
+  EXPECT_EQ(HeaderLayout::subtitleLine(portraitContent(m), m).y, 737);
+}
+
+// A subtitle with text shortens the body by the line; a null or empty one reserves nothing, and
+// neither does a theme without the line.
+TEST(HeaderLayoutTest, BodyEndsAboveTheSubtitleLine) {
+  EXPECT_FALSE(HeaderLayout::hasText(nullptr));
+  EXPECT_FALSE(HeaderLayout::hasText(""));
+  EXPECT_TRUE(HeaderLayout::hasText("1 / 3"));
+  for (const auto& theme : allThemesAllSteps()) {
+    SCOPED_TRACE(theme.name);
+    const Rect content = portraitContent(theme.metrics);
+    const Rect body = HeaderLayout::body(content, theme.metrics);
+    const Rect line = HeaderLayout::subtitleLine(content, theme.metrics);
+    const Rect shortened = HeaderLayout::above(body, line);
+    EXPECT_EQ(shortened.y, body.y);
+    EXPECT_EQ(bottomOf(shortened), line.y);
+    EXPECT_EQ(body.height - shortened.height, theme.metrics.headerSubtitleLine);
+  }
+  // A body that already ends above the line is left as it is.
+  const Rect body{0, 60, 480, 600};
+  EXPECT_EQ(HeaderLayout::above(body, Rect{0, 737, 480, 23}).height, 600);
+}

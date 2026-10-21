@@ -85,7 +85,14 @@ class UITheme {
   // the header band at its top and the theme's verticalSpacing under it (HeaderLayout::body).
   // Where a screen with a header starts its body, so the body moves with the header -- which grows
   // with the UI font size and differs by theme -- instead of sitting at a constant it outgrows.
-  static Rect getBodyRect(const GfxRenderer& renderer, bool hasBottomHints, bool hasSideHints);
+  //
+  // `subtitle` is the one the screen gives drawHeader(). With text, and a theme that draws it below
+  // the body (Base), the body ends above getSubtitleLine(); null or empty, nothing is reserved.
+  static Rect getBodyRect(const GfxRenderer& renderer, bool hasBottomHints, bool hasSideHints,
+                          const char* subtitle = nullptr);
+  // The line a header subtitle is drawn in when the theme keeps it out of the band (Base): the foot
+  // of the content with every hint strip out. Height 0 for a theme that draws it in the band.
+  static Rect getSubtitleLine(const GfxRenderer& renderer);
   static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);
   static std::string getCoverThumbPath(std::string coverBmpPath, int width, int height);
   // Edge length of the "this book has no usable cover" marker BMP written by
