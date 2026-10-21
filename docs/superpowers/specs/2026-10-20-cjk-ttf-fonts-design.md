@@ -511,10 +511,12 @@ OpenType fonts with CFF outlines:
   DICTs);
 - Type 2 charstrings with global and local subroutines, curves and flex.
 
-Hint operators are read past: the engine draws unhinted, as for TrueType. Operators Noto CJK does not use (the
-arithmetic and storage operators, an accented `endchar`) are the builder's call: implemented, or reported as
-Unsupported so the glyph draws as missing. The oracle (9.3) counts any glyph of the test fonts that draws as
-missing.
+Hint operators are read past: the engine draws unhinted, as for TrueType (stems are still counted: more than 96
+fail the glyph, as in FreeType). Every operator FreeType's cf2 engine implements is implemented (my call: the
+arithmetic and storage operators, and an accented `endchar`, seac, whose components a CID-keyed font cannot name,
+so there it fails as in FreeType), but `random`, whose seed FreeType takes from memory addresses: Unsupported, the
+glyph drawn as missing. A glyph stops after 65,536 operators (my call; FreeType allows 20,000,000), so a hostile
+book cannot stall the reader. The interpreter's state lives in the scratch block (my call): no heap, no deep stack.
 
 **Not read:** CFF2 (variable OpenType), bare CFF and Type 1 files. They stay refused.
 
@@ -571,8 +573,10 @@ An SD-mode family copies its tables into its flash style block and reads its out
 
 **The install puts the charstring data last (my call).** `FontBytes` reads one far range, which must lie past the
 block's in-place bytes, and in CID fonts the charstring data usually sits mid-table, before the FDArray, the
-Private DICTs and the local subroutines. When a `CFF ` table is not already in that order, the install rewrites
-it with the charstring data last and the DICT offsets recomputed, rather than giving `FontBytes` a gap.
+Private DICTs and the local subroutines. The install rebuilds the `CFF ` table in the block with the charstring data
+last (the CharStrings INDEX's offsets end the block, its data is the far range on the card) and the moved DICT
+offsets re-encoded as 5-byte integers, rather than giving `FontBytes` a gap. It always rebuilds it, in order already
+or not (my call): one code path.
 
 ### 9.5 Where CFF fonts come from
 
