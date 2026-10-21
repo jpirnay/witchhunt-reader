@@ -6,7 +6,7 @@
 
 The script does not download: --source-dir holds NotoSansCJKjp-Regular.otf and NotoSerifCJKjp-Regular.otf, each
 checked against the sha256 pinned below. The output is byte-identical on every run (fixed timestamps, no
-randomness) and the script writes nothing but the six fonts.
+randomness) and the script writes nothing but the seven fonts.
 """
 
 import argparse
@@ -19,7 +19,9 @@ from fontTools import subset
 from fontTools.cffLib import SubrsIndex
 from fontTools.fontBuilder import FontBuilder
 from fontTools.misc.psCharStrings import T2CharString
-from fontTools.ttLib import TTFont
+from fontTools.pens.cu2quPen import Cu2QuPen
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTFont, newTable
 
 # Sources, pinned. noto-cjk release tags Sans2.004 and Serif2.003.
 SOURCES = {
@@ -86,6 +88,39 @@ def flatten(data: bytes) -> bytes:
     """The same font with every subroutine call inlined."""
     font = TTFont(io.BytesIO(data), recalcTimestamp=False)
     font["CFF "].cff.desubroutinize()
+    return save(font)
+
+
+def truetype_twin(data: bytes) -> bytes:
+    """The same glyphs as TrueType quadratics within one font unit (fontTools' otf2ttf recipe), for the device
+    bench's CFF-against-TrueType run."""
+    font = TTFont(io.BytesIO(data), recalcTimestamp=False)
+    order = font.getGlyphOrder()
+    glyph_set = font.getGlyphSet()
+    font["loca"] = newTable("loca")
+    font["glyf"] = glyf = newTable("glyf")
+    glyf.glyphOrder = order
+    glyf.glyphs = {}
+    for name in order:
+        pen = TTGlyphPen(glyph_set)
+        glyph_set[name].draw(Cu2QuPen(pen, 1.0, reverse_direction=True))
+        glyf.glyphs[name] = pen.glyph()
+    del font["CFF "]
+    if "VORG" in font:
+        del font["VORG"]
+    glyf.compile(font)
+    hmtx = font["hmtx"]
+    for name, glyph in glyf.glyphs.items():
+        if hasattr(glyph, "xMin"):
+            hmtx[name] = (hmtx[name][0], glyph.xMin)
+    font["maxp"] = maxp = newTable("maxp")
+    maxp.tableVersion = 0x00010000
+    for attr in ("maxZones", "maxTwilightPoints", "maxStorage", "maxFunctionDefs", "maxInstructionDefs",
+                 "maxStackElements", "maxSizeOfInstructions", "maxComponentElements"):
+        setattr(maxp, attr, 1 if attr == "maxZones" else 0)
+    maxp.compile(font)
+    font["post"].formatType = 3.0
+    font.sfntVersion = "\x00\x01\x00\x00"
     return save(font)
 
 
@@ -272,6 +307,7 @@ def main():
         "NotoSansJP-CffFlat.otf": flat_sans,
         "NotoSerifJP-CffFlat.otf": flatten(serif),
         "NotoSansJP-CffSlanted.otf": slant(flat_sans),
+        "NotoSansJP-TrueType.ttf": truetype_twin(flat_sans),
         "CffOperators.otf": make_operators_font(),
     }
     args.out.mkdir(parents=True, exist_ok=True)
