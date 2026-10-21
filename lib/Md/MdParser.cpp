@@ -179,12 +179,12 @@ std::vector<Span> parseInline(const std::string& text) {
       continue;
     }
 
-    // Backtick code span — strip backticks, render as regular
+    // Backtick code span — strip backticks, render as regular, marked as code
     if (c == '`') {
       size_t end = text.find('`', i + 1);
       if (end != std::string::npos) {
         emitSpan();
-        spans.push_back({text.substr(i + 1, end - i - 1), EpdFontFamily::REGULAR});
+        spans.push_back({text.substr(i + 1, end - i - 1), EpdFontFamily::REGULAR, true});
         i = end + 1;
         continue;
       }

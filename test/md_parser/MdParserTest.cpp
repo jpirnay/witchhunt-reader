@@ -50,6 +50,28 @@ TEST(MdParser, AsteriskEmphasisStillWorks) {
   ASSERT_EQ(spans[1].style, EpdFontFamily::ITALIC);
 }
 
+TEST(MdParser, CodeSpanIsMarkedAsCode) {
+  auto spans = MdParser::parseInline("run `pio run` now");
+  ASSERT_EQ(spans.size(), static_cast<size_t>(3));
+  ASSERT_FALSE(spans[0].code);
+  ASSERT_TRUE(spans[1].code);
+  ASSERT_EQ(spans[1].text, "pio run");
+  ASSERT_EQ(spans[1].style, EpdFontFamily::REGULAR);
+  ASSERT_FALSE(spans[2].code);
+}
+
+TEST(MdParser, UnclosedBacktickStaysLiteral) {
+  auto spans = MdParser::parseInline("a ` b");
+  ASSERT_EQ(flattenText(spans), "a ` b");
+  for (const auto& span : spans) ASSERT_FALSE(span.code);
+}
+
+TEST(MdParser, EscapedBackticksAreNotCode) {
+  auto spans = MdParser::parseInline("\\`not code\\`");
+  ASSERT_EQ(flattenText(spans), "`not code`");
+  for (const auto& span : spans) ASSERT_FALSE(span.code);
+}
+
 TEST(MdParser, StrikethroughWorks) {
   auto spans = MdParser::parseInline("foo ~~bar~~ baz");
   ASSERT_EQ(flattenText(spans), "foo bar baz");
@@ -95,6 +117,8 @@ TEST(MdParser, TableRowSplitsCellsWithInlineStyles) {
   ASSERT_EQ(flattenText(parsed.tableCells[1]), "bold");
   ASSERT_EQ(parsed.tableCells[1][0].style, EpdFontFamily::BOLD);
   ASSERT_EQ(flattenText(parsed.tableCells[2]), "code");
+  ASSERT_FALSE(parsed.tableCells[1][0].code);
+  ASSERT_TRUE(parsed.tableCells[2][0].code);
 }
 
 TEST(MdParser, TableSeparatorDetection) {

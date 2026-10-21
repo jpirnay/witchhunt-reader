@@ -23,7 +23,7 @@ namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;
 constexpr size_t MAX_LINE_LENGTH = 64 * 1024;
 constexpr uint32_t CACHE_MAGIC = 0x4D4B4449;  // "MKDI"
-constexpr uint8_t CACHE_VERSION = 6;          // Bumped: a list item's later lines wrap narrower
+constexpr uint8_t CACHE_VERSION = 7;          // Bumped: inline code spans are wider by their frame
 
 static std::string flattenHeadingText(const MdParser::ParsedLine& parsed) {
   std::string result;
@@ -255,9 +255,14 @@ void MdReaderActivity::initializeReader() {
   initialized = true;
 }
 
+int MdReaderActivity::advanceOf(const std::string& text, const MdParser::Span& attrs) const {
+  const int textWidth = renderer.getTextAdvanceX(cachedFontId, text.c_str(), attrs.style);
+  return attrs.code ? textWidth + 2 * CODE_PAD_X : textWidth;
+}
+
 int MdReaderActivity::measureSpans(const std::vector<MdParser::Span>& spans) const {
   return std::accumulate(spans.begin(), spans.end(), 0, [this](int acc, const MdParser::Span& span) {
-    return acc + (span.text.empty() ? 0 : renderer.getTextAdvanceX(cachedFontId, span.text.c_str(), span.style));
+    return acc + (span.text.empty() ? 0 : advanceOf(span.text, span));
   });
 }
 
@@ -282,7 +287,7 @@ bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const
   for (const auto& span : spans) {
     if (span.text.empty()) continue;
 
-    const int spanWidth = renderer.getTextAdvanceX(cachedFontId, span.text.c_str(), span.style);
+    const int spanWidth = advanceOf(span.text, span);
 
     if (currentWidth + spanWidth <= availableWidth()) {
       currentLine.push_back(span);
@@ -290,7 +295,7 @@ bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const
       continue;
     }
 
-    // Need to break within this span
+    // Need to break within this span; each piece keeps its attributes (a code piece gets a frame of its own).
     std::string remaining = span.text;
     const auto style = span.style;
 
@@ -301,10 +306,10 @@ bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const
         goto done;
       }
 
-      const int remWidth = renderer.getTextAdvanceX(cachedFontId, remaining.c_str(), style);
+      const int remWidth = advanceOf(remaining, span);
 
       if (currentWidth + remWidth <= availableWidth()) {
-        currentLine.push_back({remaining, style});
+        currentLine.push_back({remaining, style, span.code});
         currentWidth += remWidth;
         remaining.clear();
         break;
@@ -312,8 +317,7 @@ bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const
 
       size_t breakPos = remaining.size();
 
-      while (breakPos > 0 && renderer.getTextAdvanceX(cachedFontId, remaining.substr(0, breakPos).c_str(), style) >
-                                 availableWidth() - currentWidth) {
+      while (breakPos > 0 && advanceOf(remaining.substr(0, breakPos), span) > availableWidth() - currentWidth) {
         size_t spacePos = remaining.rfind(' ', breakPos - 1);
         if (spacePos != std::string::npos && spacePos > 0) {
           breakPos = spacePos;
@@ -337,8 +341,8 @@ bool MdReaderActivity::wrapSpans(const std::vector<MdParser::Span>& spans, const
         }
       }
 
-      currentLine.push_back({remaining.substr(0, breakPos), style});
-      currentWidth += renderer.getTextAdvanceX(cachedFontId, currentLine.back().text.c_str(), style);
+      currentLine.push_back({remaining.substr(0, breakPos), style, span.code});
+      currentWidth += advanceOf(currentLine.back().text, span);
       emitLine();
 
       size_t skip = breakPos;
@@ -473,7 +477,7 @@ bool MdReaderActivity::layoutTableRow(const MdParser::ParsedLine& parsed, const 
         x += std::max(0, innerWidth - lineWidth);
       }
       for (auto& s : cellLine) {
-        const int w = renderer.getTextAdvanceX(cachedFontId, s.text.c_str(), s.style);
+        const int w = advanceOf(s.text, s);
         rl.spans.push_back(std::move(s));
         rl.spanX.push_back(static_cast<int16_t>(x));
         x += w;
@@ -855,21 +859,32 @@ void MdReaderActivity::render(RenderLock&&) {
   saveProgress();
 }
 
-int MdReaderActivity::drawSpanAt(const int x, const int y, const MdParser::Span& span) const {
+int MdReaderActivity::drawSpanAt(const int x, const int y, const MdParser::Span& span, const bool tableLine) const {
   if (span.text.empty()) return 0;
   const int spanWidth = renderer.getTextAdvanceX(cachedFontId, span.text.c_str(), span.style);
-  renderer.drawText(cachedFontId, x, y, span.text.c_str(), true, span.style);
+  const int pad = span.code ? CODE_PAD_X : 0;
+  if (span.code) {
+    // Line boxes have no spare rows (descenders reach the last one), so the frame's bottom edge
+    // goes two rows into the next line, still above its tallest glyphs. In a table it sits on the
+    // row's bottom rule instead. The top edge leaves one blank row under a frame on the line above.
+    const int lineHeight = renderer.getLineHeight(cachedFontId);
+    const int top = y + CODE_FRAME_TOP;
+    const int bottom = tableLine ? y + lineHeight - 1 : y + lineHeight + 1;
+    renderer.drawRoundedRect(x, top, spanWidth + 2 * pad, bottom - top + 1, 1, CODE_FRAME_RADIUS, true);
+  }
+  const int textX = x + pad;
+  renderer.drawText(cachedFontId, textX, y, span.text.c_str(), true, span.style);
   if ((span.style & EpdFontFamily::UNDERLINE) != 0) {
     const int underlineY = y + renderer.getFontAscenderSize(cachedFontId) + 3;
-    renderer.drawLine(x, underlineY, x + spanWidth, underlineY, 2, true);
+    renderer.drawLine(textX, underlineY, textX + spanWidth, underlineY, 2, true);
   }
   if ((span.style & EpdFontFamily::STRIKETHROUGH) != 0) {
     // Arbitrary vertical offset of 4px from the font midline to avoid colliding with typical diacritics;
     // adjust as needed
     const int strikeY = y + renderer.getFontAscenderSize(cachedFontId) / 2 + 4;
-    renderer.drawLine(x, strikeY, x + spanWidth, strikeY, 2, true);
+    renderer.drawLine(textX, strikeY, textX + spanWidth, strikeY, 2, true);
   }
-  return spanWidth;
+  return spanWidth + 2 * pad;
 }
 
 void MdReaderActivity::renderPage() {
@@ -908,7 +923,7 @@ void MdReaderActivity::renderPage() {
           }
         }
         for (size_t i = 0; i < line.spans.size(); i++) {
-          drawSpanAt(x0 + line.spanX[i], y, line.spans[i]);
+          drawSpanAt(x0 + line.spanX[i], y, line.spans[i], true);
         }
         y += lineHeight;
       } else {
@@ -938,7 +953,7 @@ void MdReaderActivity::renderPage() {
 
           // Render each span
           for (const auto& span : line.spans) {
-            x += drawSpanAt(x, y, span);
+            x += drawSpanAt(x, y, span, false);
           }
         }
         y += lineHeight;
