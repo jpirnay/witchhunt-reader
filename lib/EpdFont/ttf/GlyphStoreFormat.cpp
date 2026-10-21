@@ -12,6 +12,11 @@ uint32_t indexPagesFor(const uint32_t logPages, const uint32_t expectedRecord) {
   return static_cast<uint32_t>((slots + kSlotsPerPage - 1) / kSlotsPerPage);
 }
 
+// The largest log the format takes, in pages (one segment each): at most kMaxSegments of them, and under kMaxLogBytes.
+constexpr uint32_t kMaxLogPages =
+    kMaxSegments < (kMaxLogBytes - 1) / kPageBytes ? kMaxSegments : (kMaxLogBytes - 1) / kPageBytes;
+static_assert(kMaxLogPages >= kMinLogPages && kMaxLogPages >= kMinSegments, "the format takes the smallest log");
+
 }  // namespace
 
 bool planLayout(const PlanInput& in, Layout& out) {
@@ -43,9 +48,9 @@ bool planLayout(const PlanInput& in, Layout& out) {
   const uint32_t mappedStyles = largestFlash + sdPages;
   const uint32_t expected = in.styleMode[0] == kModeSd ? kExpectedRecordSd : kExpectedRecordFlash;
 
-  // From the largest log the partition could hold down: the first that fits both the mapping budget and
-  // the partition, together with the index it needs.
-  for (uint32_t log = usablePages; log >= kMinLogPages; --log) {
+  // From the largest log the partition could hold, or the format takes, down: the first that fits both the mapping
+  // budget and the partition, together with the index it needs.
+  for (uint32_t log = usablePages < kMaxLogPages ? usablePages : kMaxLogPages; log >= kMinLogPages; --log) {
     const uint32_t index = indexPagesFor(log, expected);
     if (mappedStyles + index + kPairPages + log + kSparePages > in.freeMapPages) continue;
     if (fixedPages + index + kPairPages + log > usablePages) continue;

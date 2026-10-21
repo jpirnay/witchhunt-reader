@@ -145,6 +145,23 @@ TEST(GlyphStorePlan, TheLogIsCutIntoPageSegments) {
   EXPECT_EQ(0u, g.logOffset % kPageBytes);
   EXPECT_EQ(0u, g.logSize % g.segmentBytes);
   EXPECT_GE(g.logSize / g.segmentBytes, kMinSegments);
+  EXPECT_LE(g.logSize / g.segmentBytes, kMaxSegments);
+  EXPECT_LT(g.logSize, kMaxLogBytes);
+}
+
+TEST(GlyphStorePlan, ALargePartitionGetsTheLargestLogTheFormatAllows) {
+  // 8 MiB of partition and a budget to map it all: the log stops at 63 pages, the most segments under 4 MiB.
+  PlanInput in = input(kModeSd, 1, 430000, 200);
+  in.usableBytes = 128 * kPageBytes;
+  Layout layout{};
+  ASSERT_TRUE(planLayout(in, layout));
+  const Geometry& g = layout.geometry;
+  EXPECT_EQ(63 * kPageBytes, g.logSize);
+  EXPECT_LE(g.logSize / g.segmentBytes, kMaxSegments);
+  EXPECT_LT(g.logSize, kMaxLogBytes);
+  EXPECT_LE(uint64_t{g.logOffset} + g.logSize, in.usableBytes);
+  // The index still holds what the log holds.
+  EXPECT_GE(uint64_t{g.indexSlots} * kIndexLoadPercent / 100, uint64_t{g.logSize} / kExpectedRecordSd);
 }
 
 TEST(GlyphStorePlan, LargeStylesShrinkTheLog) {

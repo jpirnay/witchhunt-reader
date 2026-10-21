@@ -288,6 +288,27 @@ TEST_F(GlyphStoreInstall, AHeaderThatPassesItsCheckButDescribesOverlappingStyles
   EXPECT_EQ(OpenResult::NotInstalled, store.open(kIdentityA));
 }
 
+TEST_F(GlyphStoreInstall, APlanForALargePartitionInstalls) {
+  // 8 MiB of partition: the planner keeps the log inside what beginInstall() accepts.
+  constexpr uint32_t kBig = 128 * kPageBytes;
+  SimNorFlash big(kBig, 200);
+  FlashGlyphStore store(big);
+  PlanInput in{};
+  in.styleCount = 1;
+  in.styleMode[0] = kModeFlash;
+  in.styleBytes[0] = 4096;
+  in.usableBytes = kBig;
+  in.freeMapPages = 200;
+  Layout layout{};
+  ASSERT_TRUE(planLayout(in, layout));
+  ASSERT_TRUE(install(store, layout));
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_EQ(layout.geometry.logSize, store.geometry().logSize);
+  EXPECT_EQ(layout.geometry.logSize / layout.geometry.segmentBytes, store.segmentCount());
+  EXPECT_EQ(0u, big.violations());
+  EXPECT_EQ(0u, big.reprograms());
+}
+
 TEST_F(GlyphStoreInstall, ALayoutWithBadSegmentsIsRefused) {
   SimNorFlash big(5u << 20);  // room for every log below, so only its segment count or size refuses it
   FlashGlyphStore store(big);

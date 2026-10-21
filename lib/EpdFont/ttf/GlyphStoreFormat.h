@@ -253,7 +253,8 @@ struct Layout {
 
 /// Region sizes from the mapping budget:
 ///   log pages = free pages - mapped style pages - index pages - pair pages - 2 spare,
-/// also bounded by the partition. The index gets enough pages that 70 % of its slots holds the records the log
+/// also bounded by the partition and by the format (a page a segment, at most kMaxSegments of them, under
+/// kMaxLogBytes: 63 pages). The index gets enough pages that 70 % of its slots holds the records the log
 /// holds, so it does not fill first: kExpectedRecordSd bytes each when the body (the first style) is in SD mode, a
 /// font too large for flash mode being a CJK font, else kExpectedRecordFlash. Flash-mode blocks map one at a time,
 /// so the largest counts; SD-mode blocks map together, so all count. False when the log would be under
