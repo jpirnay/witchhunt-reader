@@ -51,6 +51,19 @@ constexpr int FORMAT_ITEM_HEIGHT = 30;
 constexpr int FORMAT_LIST_TOP_OFFSET = 20;
 constexpr int FORMAT_LIST_BOTTOM_PADDING = 20;
 
+// The cover the book detail shows: downloaded as a JPEG, converted to the BMP its render draws.
+// Scratch files of this browser alone, at the card root, so removed when it closes, and when it
+// opens: a power cut or a crash mid-session leaves them.
+constexpr char OPDS_COVER_JPG[] = "/.tmp_opds_cover.jpg";
+constexpr char OPDS_COVER_BMP[] = "/.tmp_opds_cover.bmp";
+
+// Only what is there: a remove outside /.crosspoint notes a change to the card's content (HalStorage)
+// even when it finds nothing.
+void removeCoverFiles() {
+  if (Storage.exists(OPDS_COVER_JPG)) Storage.remove(OPDS_COVER_JPG);
+  if (Storage.exists(OPDS_COVER_BMP)) Storage.remove(OPDS_COVER_BMP);
+}
+
 int formatItemsPerPage(const Rect& contentRect) {
   const int midY = contentRect.y + contentRect.height / 2;
   const int listTop = midY + FORMAT_LIST_TOP_OFFSET;
@@ -248,6 +261,7 @@ OpdsEntry OpdsBookBrowserActivity::getEntry(size_t index) const {
 
 void OpdsBookBrowserActivity::onEnter() {
   Activity::onEnter();
+  removeCoverFiles();  // left by a session that ended without onExit()
 
   state = BrowserState::CHECK_WIFI;
   entryOffsets.clear();
@@ -297,6 +311,10 @@ void OpdsBookBrowserActivity::onExit() {
   navigationHistory.clear();
   formatSelectionLabels.clear();
   Storage.remove("/.tmp_opds_cache.dat");
+  // Before the restart below, which does not return. Every way out ends here: Back to the server
+  // list or File Transfer, Home, sleep, and a browser buried under a child when the stack is
+  // replaced (ActivityManager calls onExit() on those too).
+  removeCoverFiles();
 
   if (WiFi.getMode() != WIFI_MODE_NULL) {
     WiFi.disconnect(false);
@@ -595,7 +613,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     int coverColW = 0;
     if (coverAvailable) {
       HalFile bmpFile;
-      if (Storage.openFileForRead("OPDS", "/.tmp_opds_cover.bmp", bmpFile)) {
+      if (Storage.openFileForRead("OPDS", OPDS_COVER_BMP, bmpFile)) {
         Bitmap bmp(bmpFile);
         if (bmp.parseHeaders() == BmpReaderError::Ok && bmp.getWidth() > 0 && bmp.getHeight() > 0) {
           const int coverAreaH = fmtY - 35 - 4;
@@ -1092,14 +1110,14 @@ void OpdsBookBrowserActivity::launchSearch() {
 
 void OpdsBookBrowserActivity::fetchCoverForEntry(const OpdsEntry& entry) {
   coverAvailable = false;
-  Storage.remove("/.tmp_opds_cover.bmp");
+  Storage.remove(OPDS_COVER_BMP);
   if (entry.imageHref.empty()) return;
 
   const std::string coverUrl =
       (entry.imageHref.rfind("http", 0) == 0) ? entry.imageHref : UrlUtils::buildUrl(server.url, entry.imageHref);
   LOG_DBG("OPDS", "Fetching cover: %s", coverUrl.c_str());
 
-  if (HttpDownloader::downloadToFile(coverUrl, "/.tmp_opds_cover.jpg", nullptr, server.username, server.password,
+  if (HttpDownloader::downloadToFile(coverUrl, OPDS_COVER_JPG, nullptr, server.username, server.password,
                                      catalogTlsPolicy()) != HttpDownloader::OK) {
     LOG_DBG("OPDS", "Cover download failed");
     return;
@@ -1109,9 +1127,9 @@ void OpdsBookBrowserActivity::fetchCoverForEntry(const OpdsEntry& entry) {
   const int coverMaxH = coverMaxW * 4 / 3;
 
   HalFile src;
-  if (!Storage.openFileForRead("OPDS", "/.tmp_opds_cover.jpg", src)) return;
+  if (!Storage.openFileForRead("OPDS", OPDS_COVER_JPG, src)) return;
   HalFile dst;
-  if (!Storage.openFileForWrite("OPDS", "/.tmp_opds_cover.bmp", dst)) {
+  if (!Storage.openFileForWrite("OPDS", OPDS_COVER_BMP, dst)) {
     src.close();
     return;
   }
@@ -1119,13 +1137,13 @@ void OpdsBookBrowserActivity::fetchCoverForEntry(const OpdsEntry& entry) {
   const bool ok = JpegToBmpConverter::jpegFileToBmpStreamWithSize(src, dst, coverMaxW, coverMaxH);
   src.close();
   dst.close();
-  Storage.remove("/.tmp_opds_cover.jpg");
+  Storage.remove(OPDS_COVER_JPG);
 
   if (ok) {
     coverAvailable = true;
     LOG_DBG("OPDS", "Cover ready");
   } else {
-    Storage.remove("/.tmp_opds_cover.bmp");
+    Storage.remove(OPDS_COVER_BMP);
     LOG_INF("OPDS", "Cover JPEG conversion failed (progressive JPEG unsupported; see JPG log for details)");
   }
 }
