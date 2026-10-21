@@ -2155,6 +2155,34 @@ TEST_F(TtfFontSetTest, ACffFamilyDrawsInSdMode) {
   expectWrittenOnce(chip);
 }
 
+TEST_F(TtfFontSetTest, ACardReadErrorInACffCharStringDrawsTheGlyphAsMissingAndAsksAgain) {
+  MemoryFile serif[4];
+  serif[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
+  SimNorFlash chip{kSdOnlyBytes};
+  const auto set = openFamilies(chip, {serif}, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  ASSERT_TRUE(font.readsCard());
+  // The charstring is the one read the card serves: a failed read must draw nothing, neither from the bytes of an
+  // earlier window nor with a status of Ok, and so commit nothing to the glyph store.
+  const std::vector<uint32_t> codepoints = mappedCodepoints(serif[kRegular].bytes);
+  ASSERT_GT(codepoints.size(), 250u);
+  serif[kRegular].failReads = true;
+  for (size_t i = 0; i < 20; ++i) {
+    const uint32_t cp = codepoints[i * 7];
+    EXPECT_EQ(nullptr, font.glyph(kRegular, cp)) << "U+" << std::hex << cp;  // transient: not marked as missing
+  }
+  const uint32_t renders = font.renders();
+  serif[kRegular].failReads = false;
+  for (size_t i = 0; i < 20; ++i) {
+    const uint32_t cp = codepoints[i * 7];
+    expectDrawnAs(reference(serif[kRegular].bytes, cp, 14), font, kRegular, font.glyph(kRegular, cp));
+    if (HasFailure()) return;
+  }
+  EXPECT_GT(font.renders(), renders);  // each was drawn now, none had been
+  EXPECT_FALSE(set->ringMode());
+}
+
 TEST_F(TtfFontSetTest, ASubroutinizedCffKeepsItsSubroutinesInTheBlock) {
   MemoryFile serif[4];
   serif[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-Cff.otf");
