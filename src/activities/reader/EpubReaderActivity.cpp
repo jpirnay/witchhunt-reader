@@ -1261,9 +1261,20 @@ void EpubReaderActivity::serviceBackgroundWork() {
   stepBackgroundSectionBuild();
 }
 
+bool EpubReaderActivity::lookAheadMayRun() const {
+  return epub && section && readerPhase_ == ReaderPhase::READING && !backgroundWorkSuspended_ && !pendingPreRender &&
+         !usePreRenderedBuffer && !renderer.isRefreshPending() && !imageProcessingActive_;
+}
+
 bool EpubReaderActivity::stepGlyphStoreRoom() {
+  // One step reclaims a whole segment (copies, retire, erase): it cannot be aborted, and holds the render lock and this
+  // loop. So it waits for what Background-B waits for, and for the same quiet after a page lands.
+  if (!lookAheadMayRun() || CooperativeAbort::shouldAbortLongTask() ||
+      (millis() - std::max(lastPageTurnTime, lastPageOnScreenMs_)) < BG_BUILD_BORROW_QUIET_MS) {
+    return false;
+  }
   RenderLock lock(RenderLock::Mode::Try);
-  if (!lock.ownsLock()) return false;
+  if (!lock.ownsLock() || !lookAheadMayRun()) return false;
   return sdFontSystem.makeTtfRoom(FlashGlyphStore::Budget::Idle, {});
 }
 
@@ -1674,8 +1685,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   // stale build removes its partial file) and the parse slice reads glyph metrics from
   // the shared renderer, so all of it must be serialised against the render task.
   RenderLock lock;
-  if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_ || pendingPreRender ||
-      usePreRenderedBuffer || renderer.isRefreshPending() || imageProcessingActive_) {
+  if (!lookAheadMayRun()) {
     return;
   }
 
@@ -4772,7 +4782,14 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
 
   // The render pass holds RenderLock here, before the chapter is laid out or drawn, so no record of the glyph store's
   // log is in use: a segment can be reclaimed or the index rebuilt now.
-  sdFontSystem.makeTtfRoom(FlashGlyphStore::Budget::Open, [this] { GUI.drawPopup(renderer, tr(STR_LOADING_FONT)); });
+  bool roomPopupDrawn = false;
+  sdFontSystem.makeTtfRoom(FlashGlyphStore::Budget::Open, [this, &roomPopupDrawn] {
+    GUI.drawPopup(renderer, tr(STR_LOADING_FONT));
+    roomPopupDrawn = true;
+  });
+  // The popup's displayBuffer() consumed any pending HALF override, so on a panel that diffs against a host frame the
+  // first content page would FAST-refresh over the popup and ghost it: it is forced to HALF, as after any popup.
+  if (roomPopupDrawn && renderer.fastRefreshNeedsHostFrame()) forceHalfRefreshAfterPopup_ = true;
 
   const uint16_t viewportWidth = layout.viewportWidth;
   const uint16_t viewportHeight = layout.viewportHeight;
@@ -6601,6 +6618,7 @@ bool EpubReaderActivity::hasPendingBackgroundWork() {
   if (section && section->hasActiveBuild()) return true;
   if (backgroundBuildState_ == BackgroundBuildState::Building) return true;
   if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_) return false;
+  if (sdFontSystem.ttfNeedsIdleRoom()) return true;  // a reclaim or rebuild is due in idle time
   // Work that has not started yet but will on its own. Background-B waits out its quiet period
   // after a page appears (and rechecks its gates once a second) before it borrows the buffer; past
   // that, a WaitHeap the heap keeps refusing is starved, not pending.

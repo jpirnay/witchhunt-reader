@@ -287,7 +287,8 @@ press that changes nothing on screen counts as done 1 s after it was taken in.
 With `:SCREEN` it waits only until the screen has settled (everything above but `background`).
 That is what you want before a screenshot after a page turn or after opening a book. A full
 `CMD:IDLE` in the reader also waits for the look-ahead builds of the next chapters, which start
-1.5 s after a page appears and can take tens of seconds on a long book.
+1.5 s after a page appears and can take tens of seconds on a long book, and for a TrueType glyph store that still
+needs room made (a reclaim or an index rebuild, `CMD:TTF`), which the reader does in idle time.
 
 Send `CMD:IDLE` after the command it should wait for; the device handles them in order. While an
 `IDLE` is pending, the device still answers other commands; a second `IDLE` replaces the first.
@@ -527,18 +528,20 @@ TTF:families=1 names=NotoSansTC sd=1 log_used=80800 log_size=1835008 slots=512 r
 `names` lists the set's families in its order (the body's first, then a book's accent families); `sd=1` when one
 reads its outlines from the card; `log_used`/`log_size` the store's log in bytes; `slots` its index slots in use;
 `ring=1` while new glyphs are drawn without being stored (the store filled up, or a write failed); `pending=1` while
-a wipe waits for the next book open; `renders` and `hits` the glyphs drawn from outlines and read from the store
+a wipe waits for the next chapter or book open (idle time leaves it); `renders` and `hits` the glyphs drawn from outlines and read from the store
 since the set loaded. `segments` and `free` the log's segments and the ones not live; `live_slots` the index slots
 that name a live record (`slots` less the stale ones); `draws` the glyph draws the store counted as uses (those of a
-page's black-and-white pass). `fills`, `wipes` and `last_wipe_ms` count since boot, whichever set was loaded; so do
-`rooms` (times the store made room: a segment reclaimed, the index rebuilt, or a wipe), `rebuilds`, `dropped` (glyphs
+page's black-and-white pass); it stays 0 until the store keeps use counts (the log near full, or `CMD:TTF:FULL`). `fills`, `wipes` and `last_wipe_ms` count since boot, whichever set was loaded; so do
+`rooms` (`makeRoom` calls that did work: a segment reclaimed or the index rebuilt; a wipe counts only in `wipes`,
+except a rebuild whose journal is full, which becomes one), `rebuilds`, `dropped` (glyphs
 the reclaims dropped) and `last_room_ms`. With no TrueType family loaded the set's fields are replaced by `none`:
 `TTF:none fills=0 wipes=0 last_wipe_ms=0 rooms=0 rebuilds=0 dropped=0 last_room_ms=0`.
 
 `CMD:TTF:FULL` makes the store act as if it had just filled up: `TTF_OK:full`, or `TTF_ERROR:no TrueType family
 loaded`. New glyphs are drawn without being stored, exactly as when the log runs out, and the next safe point (idle
 time, or a chapter or book open) reclaims the oldest segment, so what a full store does can be tested at any size
-without reading until it fills. Watch for `EVT:TTF_ROOM`. Development builds only.
+without reading until it fills. Watch for `EVT:TTF_ROOM`. With fewer than two live segments there is nothing to
+reclaim: writes simply resume and no event arrives. Development builds only.
 
 ### Files on the card: `FS`
 

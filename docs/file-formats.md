@@ -544,7 +544,7 @@ produces; a power cut leaves at worst bytes nothing references.
   glyphs never waits for an erase.
 - **A pair's style** is `family << 2 | style`; the value is the kerning in font units, the same at every size.
 - **The wipe word** reads erased unless a wipe is pending. A wipe erases the index, the pairs and the log (only
-  sectors that hold data), and the state sector last, at the next book open.
+  sectors that hold data), and the state sector last, at the next chapter or book open (idle time leaves it).
 - **The rebuild journal** fills the rest of the state sector after the wipe word, one `{u32 base, u32 done}` entry per
   index rebuild, used in order and each programmed once. `base` is the epoch of the oldest live segment when the
   rebuild began: no slot written since names an older one. `done` is programmed 0 after the last slot is in, so an

@@ -277,6 +277,9 @@ class TtfFontSet {
   /// The store reacts as if it had just filled up: new glyphs go to the ring, and the next makeRoom() reclaims. The
   /// serial test API's CMD:TTF:FULL, to reach what a full store does at any size. False when no store is open.
   bool markFull();
+  /// Whether an Idle step would find room to make now: the store is open, no wipe is pending (an Idle step leaves it
+  /// to the next Open), and the store needs room. The serial test API's CMD:IDLE reads it. Only under RenderLock.
+  bool needsIdleRoom() const;
 
   /// What the set and its store hold now, for the serial test API's CMD:TTF.
   struct Stats {

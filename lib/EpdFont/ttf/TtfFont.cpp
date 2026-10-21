@@ -372,6 +372,10 @@ bool TtfFontSet::markFull() {
   return true;
 }
 
+bool TtfFontSet::needsIdleRoom() const {
+  return store_.isOpen() && !store_.wipePending() && store_.needsRoom(FlashGlyphStore::Budget::Idle);
+}
+
 TtfFontSet::Stats TtfFontSet::stats() const {
   Stats s;
   s.families = count_;

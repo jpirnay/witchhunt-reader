@@ -87,11 +87,12 @@ class SdCardFontManager {
   // The loaded TTF families' body size: for each, a new font ID drawn natively at pointSize, never scaled.
   // False when no TTF family is loaded, the size is out of range, or an ID collides.
   bool setTtfBodySize(GfxRenderer& renderer, uint8_t pointSize);
-  // Runs the TTF glyph store's pending wipe (it filled up), calling onBusy first. Only at book open.
-  void wipeTtfIfPending(const std::function<void()>& onBusy);
-  // Makes room in the loaded set's glyph store (TtfFontSet::makeRoom): Open at book and chapter open, Idle in idle
-  // time. Only under RenderLock. True when it did work.
+  // Makes room in the loaded set's glyph store (TtfFontSet::makeRoom): Open at book and chapter open (it runs a pending
+  // wipe, left by a failed write or a full face table, first), Idle in idle time. Only under RenderLock. True when it
+  // did work.
   bool makeTtfRoom(FlashGlyphStore::Budget budget, const std::function<void()>& onBusy);
+  // An Idle step would find room to make (TtfFontSet::needsIdleRoom). Only under RenderLock.
+  bool ttfNeedsIdleRoom() const;
   bool ttfLoaded() const { return ttfSet_ != nullptr; }
   // The loaded set, for the serial test API (CMD:TTF): nullptr when none is loaded or it is suspended. Only under
   // RenderLock, as every use of the set.

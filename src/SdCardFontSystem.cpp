@@ -419,10 +419,9 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* const* wa
 
   if (family->ttf() && manager_.ttfFamiliesLoaded(families, found)) {
     // The same families from the same files (a book's family of the same name as the last book's is another):
-    // book open, so no glyph record or face of theirs is in use, a full store can be emptied here, and the last
-    // book's sizes go.
+    // book open, so no glyph record or face of theirs is in use, the store can make room here (a pending wipe, a
+    // reclaim, a rebuild), and the last book's sizes go.
     manager_.dropTtfNativeSizes(renderer);
-    manager_.wipeTtfIfPending(onColdLoad);
     manager_.makeTtfRoom(FlashGlyphStore::Budget::Open, onColdLoad);
     manager_.setTtfBodySize(renderer, targetPt);
     return;

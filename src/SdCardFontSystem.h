@@ -84,6 +84,8 @@ class SdCardFontSystem {
   bool makeTtfRoom(FlashGlyphStore::Budget budget, const std::function<void()>& onBusy) {
     return manager_.makeTtfRoom(budget, onBusy);
   }
+  /// An Idle step of the loaded set's glyph store would find room to make. Only under RenderLock.
+  bool ttfNeedsIdleRoom() const { return manager_.ttfNeedsIdleRoom(); }
   uint8_t ttfFamilyCount() const { return manager_.ttfFamilyCount(); }
   const std::string& ttfFamilyName(const uint8_t family) const { return manager_.ttfFamilyName(family); }
   uint32_t releaseTtfMissMemory() { return manager_.releaseTtfMissMemory(); }

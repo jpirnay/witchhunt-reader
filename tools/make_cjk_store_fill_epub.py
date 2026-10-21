@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build cjk_store_fill.epub: a Traditional Chinese book whose chapters hold different characters, to fill the
-TrueType glyph store on the device and watch it emptied when the next chapter opens.
+TrueType glyph store on the device, so that its reclaims (segments freed, glyphs kept or dropped, the index
+rebuilt) can be watched: CMD:TTF and EVT:TTF_ROOM in docs/serial-test-api.md.
 
 Every Big5 ideograph appears once, in Big5 order, about 1,700 a chapter over eight chapters, in paragraphs of 50.
 At 12 pt the store holds about 9,500 glyphs, so Noto Sans TC fills it in the sixth chapter; at 26 pt (about 2,000
