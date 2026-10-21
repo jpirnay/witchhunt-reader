@@ -168,6 +168,10 @@ Already decided:
 - SD-mode families start without kerning or ligatures (`FontBytes::data()` is null);
 - copying GPOS kern data into the mapped table area for large Latin and Cyrillic families can come later.
 
+**Shipped: the glyph store makes room.** The store's log is a ring of segments. A full log reclaims its oldest segment
+(keeping the glyphs drawn most) and a worn index is rebuilt, in idle time (`EpubReaderActivity::stepGlyphStoreRoom`) and
+at a chapter or book open, instead of wiping the store. Format 4: [file-formats.md](../file-formats.md#the-ttf-glyph-store-cptt).
+
 **Next step.** Write the 2c-4 plan. A2's line breaking is already in place, so CJK TTF testing can start as soon as SD mode loads.
 
 ## UI text in CJK

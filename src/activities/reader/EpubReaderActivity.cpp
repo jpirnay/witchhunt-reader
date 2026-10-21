@@ -1255,7 +1255,16 @@ void EpubReaderActivity::serviceBackgroundWork() {
     stepCurrentSectionBuild();
     return;
   }
+  // Room in the glyph store comes before Background-B's look-ahead; the section the reader waits on and the AA pass
+  // keep priority.
+  if (stepGlyphStoreRoom()) return;
   stepBackgroundSectionBuild();
+}
+
+bool EpubReaderActivity::stepGlyphStoreRoom() {
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock()) return false;
+  return sdFontSystem.makeTtfRoom(FlashGlyphStore::Budget::Idle, {});
 }
 
 void EpubReaderActivity::serviceBackgroundDebugLog() {
@@ -4760,6 +4769,10 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     requestUpdate();
     return false;
   }
+
+  // The render pass holds RenderLock here, before the chapter is laid out or drawn, so no record of the glyph store's
+  // log is in use: a segment can be reclaimed or the index rebuilt now.
+  sdFontSystem.makeTtfRoom(FlashGlyphStore::Budget::Open, [this] { GUI.drawPopup(renderer, tr(STR_LOADING_FONT)); });
 
   const uint16_t viewportWidth = layout.viewportWidth;
   const uint16_t viewportHeight = layout.viewportHeight;

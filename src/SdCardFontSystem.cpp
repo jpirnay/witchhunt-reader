@@ -41,6 +41,8 @@ SdCardFontSystem* ttfSystem = nullptr;
 bool ttfReclaim() { return ttfRenderer && ttfRenderer->releaseFontCaches(); }
 
 uint32_t ttfNowMs() { return millis(); }
+// A page's glyph uses count once: in its black-and-white pass, the first of its passes.
+bool ttfCountsDraw() { return ttfRenderer && ttfRenderer->getRenderMode() == GfxRenderer::BW; }
 
 void ttfPassEnded() {
   if (ttfSystem) ttfSystem->releaseTtfMissMemory();
@@ -327,7 +329,7 @@ ReaderSizeList SdCardFontSystem::sizeListFor(const char* familyName) const {
 void SdCardFontSystem::begin(GfxRenderer& renderer) {
   ttfRenderer = &renderer;
   ttfSystem = this;
-  TtfFont::setHooks({&RenderLock::heldByCurrentTask, &ttfYield, &ttfReclaim, &ttfNowMs});
+  TtfFont::setHooks({&RenderLock::heldByCurrentTask, &ttfYield, &ttfReclaim, &ttfNowMs, &ttfCountsDraw});
   // A miss's memory on the heap lasts as long as the pass that drew it: whichever task rendered gives it back with
   // RenderLock, and a page drawn from the glyph store needs none of it (TtfFontSet::releaseMissMemory).
   RenderLock::setReleaseHook(&ttfPassEnded);
@@ -421,6 +423,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* const* wa
     // book's sizes go.
     manager_.dropTtfNativeSizes(renderer);
     manager_.wipeTtfIfPending(onColdLoad);
+    manager_.makeTtfRoom(FlashGlyphStore::Budget::Open, onColdLoad);
     manager_.setTtfBodySize(renderer, targetPt);
     return;
   }

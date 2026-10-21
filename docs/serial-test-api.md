@@ -323,6 +323,7 @@ EVT:POPUP <text>                    a popup was drawn
 EVT:BUILD_DONE spine=<n> pages=<m>  a chapter (spine item n, 1-based) finished building, with m pages
 EVT:TTF_FULL fills=<n>              the TrueType glyph store filled up (n since boot)
 EVT:TTF_WIPE ms=<t> wipes=<n>       the glyph store was emptied, in t ms (n since boot)
+EVT:TTF_ROOM ms=<t> rooms=<n> dropped=<d>  the glyph store made room (a segment reclaimed or the index rebuilt) in t ms; n and d since boot
 EVT:FONT_INSTALLED family=<name> ok=<0|1>  a font download ended, from the Font Manager or the web page
 ```
 
@@ -520,19 +521,24 @@ CMD:TTF:FULL
 Reply to `CMD:TTF`, the loaded TrueType families and their glyph store:
 
 ```
-TTF:families=1 names=NotoSansTC sd=1 log_used=80800 log_size=1835008 slots=512 ring=0 pending=0 renders=540 hits=2210 fills=0 wipes=1 last_wipe_ms=1312
+TTF:families=1 names=NotoSansTC sd=1 log_used=80800 log_size=1835008 slots=512 ring=0 pending=0 renders=540 hits=2210 segments=7 free=5 live_slots=498 draws=1830 fills=0 wipes=1 last_wipe_ms=1312 rooms=2 rebuilds=0 dropped=140 last_room_ms=96
 ```
 
 `names` lists the set's families in its order (the body's first, then a book's accent families); `sd=1` when one
 reads its outlines from the card; `log_used`/`log_size` the store's log in bytes; `slots` its index slots in use;
 `ring=1` while new glyphs are drawn without being stored (the store filled up, or a write failed); `pending=1` while
 a wipe waits for the next book open; `renders` and `hits` the glyphs drawn from outlines and read from the store
-since the set loaded. `fills`, `wipes` and `last_wipe_ms` count since boot, whichever set was loaded. With no
-TrueType family loaded the set's fields are replaced by `none`: `TTF:none fills=0 wipes=0 last_wipe_ms=0`.
+since the set loaded. `segments` and `free` the log's segments and the ones not live; `live_slots` the index slots
+that name a live record (`slots` less the stale ones); `draws` the glyph draws the store counted as uses (those of a
+page's black-and-white pass). `fills`, `wipes` and `last_wipe_ms` count since boot, whichever set was loaded; so do
+`rooms` (times the store made room: a segment reclaimed, the index rebuilt, or a wipe), `rebuilds`, `dropped` (glyphs
+the reclaims dropped) and `last_room_ms`. With no TrueType family loaded the set's fields are replaced by `none`:
+`TTF:none fills=0 wipes=0 last_wipe_ms=0 rooms=0 rebuilds=0 dropped=0 last_room_ms=0`.
 
 `CMD:TTF:FULL` makes the store act as if it had just filled up: `TTF_OK:full`, or `TTF_ERROR:no TrueType family
-loaded`. New glyphs go to the ring and the wipe is pending, exactly as when the log runs out, so what a full store
-does can be tested at any size without reading until it fills. Development builds only.
+loaded`. New glyphs are drawn without being stored, exactly as when the log runs out, and the next safe point (idle
+time, or a chapter or book open) reclaims the oldest segment, so what a full store does can be tested at any size
+without reading until it fills. Watch for `EVT:TTF_ROOM`. Development builds only.
 
 ### Files on the card: `FS`
 

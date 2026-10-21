@@ -389,6 +389,10 @@ void SdCardFontManager::wipeTtfIfPending(const std::function<void()>& onBusy) {
   if (ttfSet_) ttfSet_->wipeIfPending(onBusy);
 }
 
+bool SdCardFontManager::makeTtfRoom(FlashGlyphStore::Budget budget, const std::function<void()>& onBusy) {
+  return ttfSet_ && ttfSet_->makeRoom(budget, onBusy);
+}
+
 uint32_t SdCardFontManager::releaseTtfMissMemory() { return ttfSet_ ? ttfSet_->releaseMissMemory() : 0; }
 
 uint32_t SdCardFontManager::ttfMissMemoryBytes() const { return ttfSet_ ? ttfSet_->missMemoryBytes() : 0; }

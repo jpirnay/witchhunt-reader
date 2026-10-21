@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "ttf/FlashGlyphStore.h"
+
 class EpdFontFamily;
 class GfxRenderer;
 template <typename Family>
@@ -87,6 +89,9 @@ class SdCardFontManager {
   bool setTtfBodySize(GfxRenderer& renderer, uint8_t pointSize);
   // Runs the TTF glyph store's pending wipe (it filled up), calling onBusy first. Only at book open.
   void wipeTtfIfPending(const std::function<void()>& onBusy);
+  // Makes room in the loaded set's glyph store (TtfFontSet::makeRoom): Open at book and chapter open, Idle in idle
+  // time. Only under RenderLock. True when it did work.
+  bool makeTtfRoom(FlashGlyphStore::Budget budget, const std::function<void()>& onBusy);
   bool ttfLoaded() const { return ttfSet_ != nullptr; }
   // The loaded set, for the serial test API (CMD:TTF): nullptr when none is loaded or it is suspended. Only under
   // RenderLock, as every use of the set.

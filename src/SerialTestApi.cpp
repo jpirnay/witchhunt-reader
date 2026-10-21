@@ -188,6 +188,7 @@ uint32_t reportedActivity = 0;
 uint32_t reportedPopup = 0;
 uint32_t reportedFills = 0;
 uint32_t reportedWipes = 0;
+uint32_t reportedRooms = 0;
 // An event line (sent unasked once EVENTS:ON) waits only 50 ms, so a host that enabled events and
 // went away cannot hold the loop up.
 constexpr unsigned long kEventStallMs = 50;
@@ -832,10 +833,14 @@ void appendStats(std::string& line, const TtfFontSet& set) {
   appendField(line, "pending", s.wipePending ? 1L : 0L);
   appendField(line, "renders", static_cast<long>(s.renders));
   appendField(line, "hits", static_cast<long>(s.hits));
+  appendField(line, "segments", static_cast<long>(s.segments));
+  appendField(line, "free", static_cast<long>(s.freeSegments));
+  appendField(line, "live_slots", static_cast<long>(s.liveSlots));
+  appendField(line, "draws", static_cast<long>(s.drawsCounted));
 }
 
 // CMD:TTF: what the loaded TrueType set and its glyph store hold. CMD:TTF:FULL: the store acts as if it had just filled
-// up (TtfFontSet::markFull), so what a full store does can be watched at any size.
+// up (TtfFontSet::markFull): the next safe point reclaims the oldest segment, so that can be watched at any size.
 void cmdTtf(const std::string_view arg) {
   if (!arg.empty() && arg != "FULL") {
     reply("TTF_ERROR:expected FULL, got ", arg);
@@ -858,6 +863,10 @@ void cmdTtf(const std::string_view arg) {
     appendField(line, "fills", static_cast<long>(events.fills));
     appendField(line, "wipes", static_cast<long>(events.wipes));
     appendField(line, "last_wipe_ms", static_cast<long>(events.lastWipeMs));
+    appendField(line, "rooms", static_cast<long>(events.rooms));
+    appendField(line, "rebuilds", static_cast<long>(events.rebuilds));
+    appendField(line, "dropped", static_cast<long>(events.dropped));
+    appendField(line, "last_room_ms", static_cast<long>(events.lastRoomMs));
   }
   reply(line);
 }
@@ -993,6 +1002,7 @@ void serviceEvents() {
     reportedPopup = popup.sequence;
     reportedFills = store.fills;
     reportedWipes = store.wipes;
+    reportedRooms = store.rooms;
     return;
   }
   if (activity != reportedActivity) {
@@ -1020,6 +1030,14 @@ void serviceEvents() {
     char line[56];
     snprintf(line, sizeof(line), "EVT:TTF_WIPE ms=%lu wipes=%lu", static_cast<unsigned long>(store.lastWipeMs),
              static_cast<unsigned long>(store.wipes));
+    reply(line, {}, kEventStallMs);
+  }
+  if (store.rooms != reportedRooms) {
+    reportedRooms = store.rooms;
+    char line[72];
+    snprintf(line, sizeof(line), "EVT:TTF_ROOM ms=%lu rooms=%lu dropped=%lu",
+             static_cast<unsigned long>(store.lastRoomMs), static_cast<unsigned long>(store.rooms),
+             static_cast<unsigned long>(store.dropped));
     reply(line, {}, kEventStallMs);
   }
   for (int i = 0; i < fontCount; ++i) {

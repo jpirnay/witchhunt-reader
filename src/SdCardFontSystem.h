@@ -80,6 +80,10 @@ class SdCardFontSystem {
   bool ttfLoaded() const { return manager_.ttfLoaded(); }
   /// The loaded TrueType set and its families' names, for the serial test API (CMD:TTF). Only under RenderLock.
   TtfFontSet* ttfSet() const { return manager_.ttfSet(); }
+  /// Makes room in the loaded set's glyph store (SdCardFontManager::makeTtfRoom). Only under RenderLock.
+  bool makeTtfRoom(FlashGlyphStore::Budget budget, const std::function<void()>& onBusy) {
+    return manager_.makeTtfRoom(budget, onBusy);
+  }
   uint8_t ttfFamilyCount() const { return manager_.ttfFamilyCount(); }
   const std::string& ttfFamilyName(const uint8_t family) const { return manager_.ttfFamilyName(family); }
   uint32_t releaseTtfMissMemory() { return manager_.releaseTtfMissMemory(); }
