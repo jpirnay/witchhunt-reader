@@ -893,7 +893,9 @@ int MdReaderActivity::drawSpanAt(const int x, const int y, const MdParser::Span&
   if (span.text.empty()) return 0;
   const int spanWidth = renderer.getTextAdvanceX(cachedFontId, span.text.c_str(), span.style);
   const int pad = span.code ? CODE_PAD_X : 0;
-  if (span.code) {
+  // Not in the prewarm scan pass: it measures all text 0 wide, so the frame would land at the
+  // line's start, and unlike drawLine() a rounded rect draws there anyway.
+  if (span.code && !renderer.isFontCacheScanning()) {
     // Line boxes have no spare rows (descenders reach the last one), so the frame's bottom edge
     // goes two rows into the next line, still above its tallest glyphs. In a table it sits on the
     // row's bottom rule instead. The top edge leaves one blank row under a frame on the line above.
