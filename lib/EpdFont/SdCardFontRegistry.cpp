@@ -95,7 +95,7 @@ bool SdCardFontRegistry::parseFilename(const char* filename, uint8_t& size, uint
   return true;
 }
 
-// A directory of .ttf files: each file's style and weight come from its head and OS/2 tables, and the file of
+// A directory of .ttf and .otf files: each file's style and weight come from its head and OS/2 tables, and the file of
 // each style nearest the regular or bold weight serves it (ttf::assignStyles; without a regular file, its nearest
 // style serves as the regular). Only a directory with a file the engine draws becomes a family.
 void SdCardFontRegistry::addTtfFiles(const char* dirPath, const std::vector<std::string>& names,
@@ -110,12 +110,12 @@ void SdCardFontRegistry::addTtfFiles(const char* dirPath, const std::vector<std:
     if (!Storage.openFileForRead("SDREG", path.c_str(), file)) continue;
     probes[i] = ttf::probeFile(ttf::fileSource(file, bytes[order[i]]));
     if (probes[i].style < 0) {
-      LOG_DBG("SDREG", "Not a TrueType font the reader draws: %s", path.c_str());
+      LOG_DBG("SDREG", "Not an outline font the reader draws: %s", path.c_str());
     }
   }
   int chosen[4];
   if (!ttf::assignStyles(probes.data(), probes.size(), chosen)) {
-    LOG_DBG("SDREG", "No TrueType style the engine draws in %s", dirPath);
+    LOG_DBG("SDREG", "No outline-font style the engine draws in %s", dirPath);
     return;
   }
   uint32_t fileBytes[4];
@@ -166,7 +166,7 @@ void SdCardFontRegistry::scanDirectory(const char* dirPath, SdCardFontFamilyInfo
 
     uint8_t size, style;
     if (!parseFilename(nameBuffer, size, style)) {
-      if (ttf::isTtfFileName(nameBuffer)) {
+      if (ttf::isOutlineFontFileName(nameBuffer)) {
         ttfNames.emplace_back(nameBuffer);
         ttfBytes.push_back(entryBytes);
       }

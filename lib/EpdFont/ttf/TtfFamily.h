@@ -32,19 +32,21 @@ FileSource fileSource(File& file, const uint32_t size, const uint32_t stamp = 0)
           &file, stamp};
 }
 
-/// True for a name ending in ".ttf", in any case. In-progress copies ("x.ttf.tmp") do not count.
-bool isTtfFileName(const char* name);
+/// True for a name ending in ".ttf" or ".otf", in any case. In-progress copies ("x.ttf.tmp") do not count.
+bool isOutlineFontFileName(const char* name);
 
-/// What discovery learns from a TrueType file, in a few small reads.
+/// What discovery learns from a TrueType or OpenType CFF file, in a few small reads.
 struct FileProbe {
   /// head.macStyle: bit 0 bold, bit 1 italic, as EpdFontFamily::Style. -1 when it is not a font the engine
-  /// draws: not TrueType (CFF, a collection), a table it needs missing or outside the file, or a read error.
+  /// draws: not TrueType or OpenType CFF (a collection, variable CFF2), a table it needs missing or outside the file,
+  /// or a read error.
   int style = -1;
   /// OS/2 usWeightClass (400 regular, 700 bold). Without an OS/2 table, 700 for a bold style and 400 otherwise.
   uint16_t weight = 400;
   /// It has an fvar table: a variable font, drawn as its default instance only (spec 5.6).
   bool variable = false;
-  /// What its SD-mode block would take (SdBlock::bytes()).
+  /// What its SD-mode block would take (SdBlock::bytes()). UINT32_MAX for a CFF file, which has none yet: its
+  /// family installs in flash mode only.
   uint32_t sdBytes = 0;
 };
 FileProbe probeFile(const FileSource& file);

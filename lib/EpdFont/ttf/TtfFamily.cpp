@@ -17,10 +17,14 @@ constexpr uint32_t tag(const char (&t)[5]) {
          static_cast<uint32_t>(static_cast<uint8_t>(t[2])) << 8 | static_cast<uint8_t>(t[3]);
 }
 
-// The tables parseFace() needs; a file without one of them can never draw a glyph.
-constexpr uint32_t kRequired[] = {tag("cmap"), tag("glyf"), tag("head"), tag("hhea"),
-                                  tag("hmtx"), tag("loca"), tag("maxp")};
-constexpr uint32_t kAllRequired = (1u << (sizeof kRequired / sizeof kRequired[0])) - 1;
+// The tables parseFace() needs; a file without one of them can never draw a glyph. The first five serve both outline
+// kinds; glyf and loca are TrueType's, "CFF " an OpenType CFF font's.
+constexpr uint32_t kRequired[] = {tag("cmap"), tag("head"), tag("hhea"), tag("hmtx"),
+                                  tag("maxp"), tag("glyf"), tag("loca"), tag("CFF ")};
+constexpr uint32_t kRequiredShared = 0x1F;
+constexpr uint32_t kRequiredTrueType = kRequiredShared | 1u << 5 | 1u << 6;
+constexpr uint32_t kRequiredCff = kRequiredShared | 1u << 7;
+constexpr uint32_t kVersionCff = tag("OTTO");
 // What an SD-mode block lists: every table the engine reads (parseFace(), the layout readers), all copied but glyf.
 // A font cannot draw without the first seven; the others it draws without, as parseFace() takes them absent when
 // their record lies outside the file.
@@ -63,15 +67,15 @@ struct Record {
 };
 
 // Calls `visit(ctx, record)` for each record of `file`'s table directory, read eight records at a time. False when
-// the file is not TrueType (CFF 'OTTO', a collection 'ttcf'), its directory does not fit it, a read fails, or `visit`
-// returns false. `version` gets the sfnt version. A function, not a template: the registry's probe and SD mode's
-// block share one copy.
+// the file is not an sfnt of TrueType or CFF outlines (a collection 'ttcf'), its directory does not fit it, a read
+// fails, or `visit` returns false. `version` gets the sfnt version. A function, not a template: the registry's probe
+// and SD mode's block share one copy.
 bool forEachTable(const FileSource& file, uint32_t* version, bool (*visit)(void* ctx, const Record& record),
                   void* ctx) {
   uint8_t header[12];
   if (!file.read || file.size < sizeof header || !file.read(file.ctx, 0, header, sizeof header)) return false;
   *version = be32(header);
-  if (*version != 0x00010000 && *version != tag("true")) return false;
+  if (*version != 0x00010000 && *version != tag("true") && *version != kVersionCff) return false;
   const uint16_t numTables = be16(header + 4);
   if (numTables == 0 || numTables > kMaxDirectory || sizeof header + 16u * numTables > file.size) return false;
   uint8_t records[8 * 16];
@@ -92,11 +96,12 @@ bool inFile(const FileSource& file, const uint32_t offset, const uint32_t length
 
 }  // namespace
 
-bool isTtfFileName(const char* name) {
+bool isOutlineFontFileName(const char* name) {
   const size_t len = std::strlen(name);
   if (len <= 4 || name[len - 4] != '.') return false;
   const char* ext = name + len - 3;
-  return (ext[0] | 0x20) == 't' && (ext[1] | 0x20) == 't' && (ext[2] | 0x20) == 'f';
+  const int first = ext[0] | 0x20;
+  return (first == 't' || first == 'o') && (ext[1] | 0x20) == 't' && (ext[2] | 0x20) == 'f';
 }
 
 bool assignStyles(const FileProbe* files, const size_t count, int (&out)[4]) {
@@ -144,6 +149,9 @@ bool fitsStore(const uint32_t* fileBytes, const uint32_t* sdBytes, const uint8_t
   in.freeMapPages = freeMapPages;
   glyphstore::Layout layout{};
   for (const uint8_t mode : {glyphstore::kModeFlash, glyphstore::kModeSd}) {
+    // A style without an SD-mode block (sdBytes UINT32_MAX, a CFF file) cannot be mapped from the card; its size
+    // would also wrap pagesFor().
+    if (mode == glyphstore::kModeSd && std::find(sdBytes, sdBytes + count, UINT32_MAX) != sdBytes + count) continue;
     for (uint8_t s = 0; s < count; ++s) {
       in.styleMode[s] = mode;
       in.styleBytes[s] = mode == glyphstore::kModeFlash ? fileBytes[s] : sdBytes[s];
@@ -161,6 +169,7 @@ FileProbe probeFile(const FileSource& file) {
     uint32_t headOffset = 0;
     uint32_t os2Offset = 0;
     bool hasOs2Weight = false;
+    bool cff2 = false;
     uint16_t sdSeen = 0;
     uint32_t sdTables = 0;
     uint64_t sdTableBytes = 0;
@@ -173,6 +182,11 @@ FileProbe probeFile(const FileSource& file) {
     if (sd >= 0 && sd != kSdGlyf && inFile(scan.file, record.offset, record.length)) {
       ++scan.sdTables;
       scan.sdTableBytes += glyphstore::align4(record.length);
+    }
+    // parseFace() refuses a CFF2 record that is not empty and lies in the file (as FreeType reads it before any CFF
+    // table); one it skips leaves the font to its CFF table.
+    if (record.tag == tag("CFF2") && record.length > 0 && inFile(scan.file, record.offset, record.length)) {
+      scan.cff2 = true;
     }
     if (record.tag == tag("OS/2") && inFile(scan.file, record.offset, record.length) && record.length >= 6) {
       scan.os2Offset = record.offset;
@@ -189,12 +203,18 @@ FileProbe probeFile(const FileSource& file) {
     }
     return true;
   };
-  if (!forEachTable(file, &version, visit, &scan) || scan.found != kAllRequired) return {};
+  if (!forEachTable(file, &version, visit, &scan)) return {};
+  const bool cff = version == kVersionCff;
+  if (scan.found != (cff ? kRequiredCff : kRequiredTrueType) || (cff && scan.cff2)) return {};
   FileProbe& probe = scan.probe;
   const uint32_t headOffset = scan.headOffset;
-  // As SdBlock::plan() lays it out, by the same rule (sdTable()).
-  const uint64_t sdBytes = sdBlockBytes(scan.sdTables, scan.sdTableBytes);
-  probe.sdBytes = sdBytes < UINT32_MAX ? static_cast<uint32_t>(sdBytes) : UINT32_MAX;
+  if (cff) {
+    probe.sdBytes = UINT32_MAX;  // SdBlock::plan() has no CFF block
+  } else {
+    // As SdBlock::plan() lays it out, by the same rule (sdTable()).
+    const uint64_t sdBytes = sdBlockBytes(scan.sdTables, scan.sdTableBytes);
+    probe.sdBytes = sdBytes < UINT32_MAX ? static_cast<uint32_t>(sdBytes) : UINT32_MAX;
+  }
 
   uint8_t head[kHeadBytes];
   if (!file.read(file.ctx, headOffset, head, sizeof head) || be32(head + 12) != kHeadMagic) return {};
@@ -217,7 +237,7 @@ bool SdBlock::plan(const FileSource& file) {
   bytes_ = 0;
   glyf_ = {};
   const auto visit = [](void* ctx, const Record& record) { return static_cast<SdBlock*>(ctx)->addTable(&record); };
-  if (!forEachTable(file, &version_, visit, this)) return false;
+  if (!forEachTable(file, &version_, visit, this) || version_ == kVersionCff) return false;  // no CFF block yet
   // The directory, then the tables, each 4-byte aligned; glyf at the end, past them all (sdBlockBytes()).
   uint64_t end = 12 + 16u * count_;
   int glyf = -1;

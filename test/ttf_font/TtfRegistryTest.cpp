@@ -2,8 +2,13 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <vector>
 
 #include "SdCardFontRegistry.h"
+#include "TtfBuilder.h"
+#include "TtfFamily.h"
+#include "TtfFontTestUtil.h"
+#include "TtfTestUtil.h"
 
 namespace {
 
@@ -64,4 +69,43 @@ TEST(TtfRegistry, AFamilyRecordCostsOnlyItsNameAndFiles) {
   // The registry reserves MAX_SD_FAMILIES (128) records at every discovery and keeps them: a field here is
   // 128 times permanent heap, so whether a family is TTF is derived from its files instead.
   EXPECT_EQ(sizeof(std::string) + sizeof(std::vector<SdCardFontFileInfo>), sizeof(SdCardFontFamilyInfo));
+}
+
+// --- Discovery of .otf files: the decisions scanDirectory makes with probeFile and assignStyles ---
+
+namespace {
+
+ttf::FileProbe probeOf(const std::vector<uint8_t>& bytes) {
+  ttf_test::MemoryFile file{bytes};
+  return ttf::probeFile(file.source());
+}
+
+}  // namespace
+
+TEST(TtfRegistry, AFolderOfTtfAndOtfFilesIsOneFamily) {
+  // Sorted by name: OpenDyslexic-Bold.otf, then a TrueType regular.
+  const ttf::FileProbe files[] = {probeOf(ttf_test::readFont("OpenDyslexic/OpenDyslexic-Bold.otf")),
+                                  probeOf(ttf_test::readFont("Bookerly/Bookerly-Regular.ttf"))};
+  ASSERT_EQ(1, files[0].style);
+  ASSERT_EQ(0, files[1].style);
+  int chosen[4];
+  ASSERT_TRUE(ttf::assignStyles(files, 2, chosen));
+  EXPECT_EQ(1, chosen[0]);
+  EXPECT_EQ(0, chosen[1]);
+  EXPECT_EQ(-1, chosen[2]);
+  EXPECT_EQ(-1, chosen[3]);
+}
+
+TEST(TtfRegistry, AnOtfFileIsListedAndACff2FileIsNot) {
+  EXPECT_TRUE(ttf::isOutlineFontFileName("OpenDyslexic-Regular.otf"));
+  const ttf::FileProbe cff[] = {probeOf(ttf_test::readFont("OpenDyslexic/OpenDyslexic-Regular.otf"))};
+  int chosen[4];
+  ASSERT_TRUE(ttf::assignStyles(cff, 1, chosen));
+  EXPECT_EQ(0, chosen[0]);
+  // Its CFF table renamed: the file has an outline table only the variable form has.
+  std::vector<uint8_t> bytes = ttf_test::readFont("OpenDyslexic/OpenDyslexic-Regular.otf");
+  bytes[ttf_test::findRecord(bytes, "CFF ") + 3] = '2';
+  const ttf::FileProbe cff2[] = {probeOf(bytes)};
+  EXPECT_EQ(-1, cff2[0].style);
+  EXPECT_FALSE(ttf::assignStyles(cff2, 1, chosen));
 }

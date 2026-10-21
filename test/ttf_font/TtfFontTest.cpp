@@ -1826,3 +1826,32 @@ TEST_F(TtfFontSetTest, AnSdModeMissMakesItsPageCacheWhereItMakesTheScratchBlock)
   expectDrawnAs(reference(files[kRegular].bytes, 'g', 14), *set->font(0), kRegular, set->font(0)->glyph(kRegular, 'g'));
   EXPECT_GT(files[kRegular].reads, 0u);
 }
+
+// --- OpenType CFF families ---
+
+TEST_F(TtfFontTest, AnOtfFamilyDrawsInFlashMode) {
+  files[kRegular].bytes = readFont("OpenDyslexic/OpenDyslexic-Regular.otf");
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  for (const uint32_t cp : {uint32_t{'A'}, uint32_t{'g'}, uint32_t{'W'}, uint32_t{' '}}) {
+    expectDrawnAs(reference(files[kRegular].bytes, cp, 14), *font, kRegular, font->glyph(kRegular, cp));
+  }
+  // OpenDyslexic's one kern lookup widens "!" and its like before a space: 160 units, 4.6 px at 14 pt.
+  EXPECT_GT(font->kerning(kRegular, '!', ' '), 0);
+  EXPECT_EQ(0, font->kerning(kRegular, 'A', 'B'));
+}
+
+TEST_F(TtfFontTest, ACjkCffFamilyDrawsInFlashMode) {
+  files[kRegular].bytes = readFixture("NotoSansJP-CffFlat.otf");
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+  ASSERT_FALSE(files[kRegular].bytes.empty());
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  for (const uint32_t cp : {uint32_t{0x6F22} /* kanji */, uint32_t{0x3042} /* hiragana a */}) {
+    const EpdGlyph* glyph = font->glyph(kRegular, cp);
+    ASSERT_NE(nullptr, glyph) << cp;
+    EXPECT_GT(glyph->dataLength, 0u) << cp;
+    expectDrawnAs(reference(files[kRegular].bytes, cp, 14), *font, kRegular, glyph);
+  }
+}
