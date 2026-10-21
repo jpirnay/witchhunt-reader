@@ -310,8 +310,11 @@ class EpubReaderActivity final : public Activity {
   //   - a deliberate jump to a possibly-uncached section (chapter/percent/footnote): those sites
   //     arm a HALF refresh override via ReaderUtils::enforceExitFullRefresh(), which the indexing
   //     popup would otherwise consume, leaving the content page a FAST diff. buildSection detects
-  //     that pending override (renderer.hasRefreshOverridePending()) and arms the post-popup HALF
-  //     too, so the override paints the popup and the flag paints the content — both clean.
+  //     that pending override (renderer.hasRefreshOverridePending()) and moves it to the content
+  //     page: the popup paints FAST and the flag paints the content HALF. The X3 leaves a jump's
+  //     HALF on its popup.
+  // A HALF still pending at the first section entry, the one the reader was launched with (a book
+  // open, or main.cpp after a boot), moves to the content page on every board, the X3 included.
   bool coldOpenHalfRefreshArmed_ = true;
   // True after the "Indexing..." popup is drawn for a build flagged as a dramatic transition (see
   // coldOpenHalfRefreshArmed_), until the first real page replaces it on screen. That first page is
@@ -865,6 +868,12 @@ class EpubReaderActivity final : public Activity {
   // Serialises SD access against the render task via RenderLock; skips the tick instead of
   // blocking when the render task is busy.
   void stepBackgroundSectionBuild();
+  // One step of making room in the TrueType glyph store (a segment reclaimed or the index rebuilt), under a Try
+  // RenderLock. True when it did work; the tick then yields to the loop.
+  bool stepGlyphStoreRoom();
+  // The gates Background-B and the idle glyph-store step share: a section on screen in the READING phase, background
+  // work not suspended, and no pre-render, pre-rendered page, display refresh or image decode pending.
+  bool lookAheadMayRun() const;
   // The image lane's step; called from stepBackgroundSectionBuild with the RenderLock held. What
   // it found in its window (LaneBeforeBuild::Window): Dirty when it did a page's worth of work this
   // tick (the caller then yields to the loop); Background-B may borrow only on Clean or Closed.

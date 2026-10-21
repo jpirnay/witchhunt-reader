@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "OpenSearchDescription.h"
+
 /**
  * Type of OPDS entry.
  */
@@ -31,6 +33,8 @@ struct OpdsEntry {
   std::string href;    // Navigation URL or epub download URL
   std::string id;
   std::string summary;  // Short description from <summary> or <content>, books only
+  // Empty on a BOOK the catalog offers only in formats the reader cannot open; href is then one
+  // of those downloads.
   std::vector<OpdsAcquisitionLink> acquisitionLinks;
   std::string imageHref;  // Cover image URL (rel="http://opds-spec.org/image"), books only
 };
@@ -63,7 +67,9 @@ class OpdsParser final : public Print {
   ~OpdsParser();
 
   // Disable copy
-  const std::string& getSearchTemplate() const { return searchTemplate; }
+  // The feed's own search template, picked by OpenSearch::TemplatePicker's rule; "" if it has none
+  // the browser can read (then getOsdUrl() may name a description that has one).
+  const std::string& getSearchTemplate() const { return searchTemplates.best(); }
   const std::string& getOsdUrl() const { return osdUrl; }
   const std::string& getNextPageUrl() const { return nextPageUrl; }
   const std::string& getPrevPageUrl() const { return prevPageUrl; }
@@ -96,7 +102,7 @@ class OpdsParser final : public Print {
   static void endElement(void* userData, const char* name);
   static void characterData(void* userData, const char* s, int len);
 
-  std::string searchTemplate;
+  OpenSearch::TemplatePicker searchTemplates;
   std::string osdUrl;
   std::string nextPageUrl;
   std::string prevPageUrl;
@@ -114,6 +120,9 @@ class OpdsParser final : public Print {
   bool inId = false;
   bool inSummary = false;
   bool inContent = false;
+  // currentEntry.href is a download in a format the reader cannot open, kept only until the entry
+  // shows a link it can use.
+  bool hrefIsUnsupportedDownload = false;
 
   bool errorOccured = false;
 };

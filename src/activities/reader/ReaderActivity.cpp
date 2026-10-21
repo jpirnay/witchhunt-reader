@@ -24,6 +24,7 @@
 #include "EpubReaderActivity.h"
 #include "KOReaderCredentialStore.h"
 #include "MdReaderActivity.h"
+#include "ReaderUtils.h"
 #include "SdCardFontGlobals.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
@@ -731,13 +732,14 @@ std::unique_ptr<PngDecodeSession> ReaderActivity::beginPngThumbSession(const std
 }
 
 std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path, BuildArena* scratch,
-                                               void (*progress)(void* ctx, uint8_t percent), void* progressCtx) {
+                                               void (*progress)(void* ctx, uint8_t percent), void* progressCtx,
+                                               std::unique_ptr<Epub> probed) {
   if (!Storage.exists(path.c_str())) {
     LOG_ERR("READER", "File does not exist: %s", path.c_str());
     return nullptr;
   }
 
-  auto epub = std::unique_ptr<Epub>(new Epub(path, "/.crosspoint"));
+  auto epub = probed ? std::move(probed) : std::unique_ptr<Epub>(new Epub(path, "/.crosspoint"));
   epub->setSyntheticTocFallbackEnabled(SETTINGS.syntheticTocFallback != 0);
   // The open that gets the indexing popup and the lent framebuffer: needsFirstOpenIndexing()
   // reports a due retry, so a TOC an earlier build lost is retried here and nowhere else.
@@ -856,6 +858,10 @@ void ReaderActivity::onGoToMdReader(std::unique_ptr<Txt> txt) {
 
 void ReaderActivity::onEnter() {
   Activity::onEnter();
+  // Before anything here can paint: the "Loading font" and "Indexing..." popups with the latter's progress bar, the
+  // XTC "Loading" screen. The reader it hands to is only queued (replaceActivity() defers while this one runs), so
+  // the HALF is armed again before that reader's first frame.
+  const ReaderUtils::BookOpenRefreshHold bookOpenRefresh(renderer);
   logReaderLaunchMemSnapshot("onEnter_begin");
   // Start the wake-to-page trace. Whether this open is a deep-sleep resume was latched by
   // setup() (WakeTrace::armResume) rather than read from APP_STATE here — see armResume().
@@ -869,11 +875,15 @@ void ReaderActivity::onEnter() {
   // compile): the EPUB branch below shows a popup for it, and skips it on a warm cache so cached re-opens don't add
   // an extra e-ink flash. The probe only computes paths, does a few file-existence checks and reads the fingerprint
   // (no parsing), so this is cheap.
+  //
+  // The probe is the instance loaded below: its fingerprint is a walk of the whole ZIP central
+  // directory, which a second instance walked again (with the package documents' entries it notes).
   bool firstOpenIndexing = false;
+  std::unique_ptr<Epub> probedEpub;
   if (FsHelpers::hasEpubExtension(initialBookPath)) {
-    const Epub probe(initialBookPath, "/.crosspoint");
-    probe.clearCacheIfContentChanged();
-    firstOpenIndexing = probe.needsFirstOpenIndexing();
+    probedEpub.reset(new Epub(initialBookPath, "/.crosspoint"));
+    probedEpub->clearCacheIfContentChanged();
+    firstOpenIndexing = probedEpub->needsFirstOpenIndexing();
   }
 
   // The book's font, loaded here rather than by goToReader(): the activity this one replaces has exited by now. A
@@ -996,7 +1006,8 @@ void ReaderActivity::onEnter() {
     BuildArena indexingScratch(lentForIndexing, lentSize);
     const bool showsProgress = firstOpenIndexing || bookFontsPending;
     auto epub = loadEpub(initialBookPath, indexingScratch.valid() ? &indexingScratch : nullptr,
-                         showsProgress ? +onBuildProgress : nullptr, showsProgress ? &indexingProgress : nullptr);
+                         showsProgress ? +onBuildProgress : nullptr, showsProgress ? &indexingProgress : nullptr,
+                         std::move(probedEpub));
     if (epub && bookFontsPending) {
       // load() left nothing in the region: its rings were scoped to each read.
       BookFonts::prepare(*epub, indexingScratch.valid() ? &indexingScratch : nullptr);

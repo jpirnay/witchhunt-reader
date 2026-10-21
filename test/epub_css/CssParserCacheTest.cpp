@@ -917,6 +917,115 @@ TEST(CssParserCache, CompilingSyncsTheStagingFileOnlyToReadARuleBack) {
   std::filesystem::remove(cssPath, rmEc);
 }
 
+// The compile stages each rule to a file and ends by copying the live ones into the cache, and both
+// went a field at a time: four writes a staged rule, then a seek and three reads of the staging
+// file, four writes, and the rule's index entry written twice -- about fourteen card calls a rule,
+// 5200 for these 400 (0.09 s on the X3, King's Avatar's 800 rules twice that). Now a staged rule is
+// one write and the finish goes through windows; the rules come out the same, a rule redeclared
+// further on included.
+TEST(CssParserCache, FinishingTheCompileWritesTheRulesInAFewCalls) {
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  constexpr int kRules = 400;
+  std::string css;
+  for (int i = 0; i < kRules; ++i) {
+    css += ".r" + std::to_string(i) + " { margin-left: " + std::to_string(i % 7) + "em; font-style: italic }\n";
+  }
+  css += ".r5 { font-weight: bold }\n";  // redeclared far from its first: kept as a second record
+  std::string cssPath;
+  ASSERT_TRUE(writeTempCssFile(std::vector<uint8_t>(css.begin(), css.end()), cssPath));
+
+  CssParser parser(cacheDir);
+  ASSERT_TRUE(parser.beginCacheCompile());
+  const size_t stageBefore = FsFile::calls;
+  {
+    FsFile cssFile;
+    ASSERT_TRUE(Storage.openFileForRead("CSS", cssPath.c_str(), cssFile));
+    ASSERT_TRUE(parser.appendCompiledFromStream(cssFile));
+  }
+  const size_t stageCalls = FsFile::calls - stageBefore;
+  const size_t callsBefore = FsFile::calls;
+  ASSERT_TRUE(parser.endCacheCompile());
+  const size_t calls = FsFile::calls - callsBefore;
+  std::printf("[ css      ] %d rules: staged in %zu card calls, the compile's finish took %zu\n", kRules + 1,
+              stageCalls, calls);
+  EXPECT_LE(stageCalls, static_cast<size_t>(kRules + kRules / 4)) << "four writes a rule were ~1600";
+  EXPECT_LE(calls, static_cast<size_t>(kRules / 4)) << "a field at a time was ~10 a rule";
+
+  const CssStyle r5 = parser.resolveStyle("p", "r5");
+  EXPECT_EQ(r5.fontWeight, CssFontWeight::Bold);
+  EXPECT_EQ(r5.fontStyle, CssFontStyle::Italic);
+  EXPECT_TRUE(r5.hasMarginLeft());
+  EXPECT_EQ(r5.marginLeft.value, 5.0f);
+  const CssStyle r398 = parser.resolveStyle("p", "r398");
+  EXPECT_EQ(r398.marginLeft.value, static_cast<float>(398 % 7));
+  parser.clear();
+  ASSERT_TRUE(parser.loadFromCache());
+  EXPECT_EQ(parser.ruleCount(), static_cast<size_t>(kRules + 1));
+  EXPECT_TRUE(stylesEqual(r5, parser.resolveStyle("p", "r5")));
+
+  // Lent a region, as a first open does, the windows come out of it and go back.
+  const std::string lentDir = makeTempDir();
+  ASSERT_FALSE(lentDir.empty());
+  BuildArena arena(8192);
+  ASSERT_TRUE(arena.valid());
+  CssParser lent(lentDir);
+  ASSERT_TRUE(lent.beginCacheCompile());
+  {
+    FsFile cssFile;
+    ASSERT_TRUE(Storage.openFileForRead("CSS", cssPath.c_str(), cssFile));
+    ASSERT_TRUE(lent.appendCompiledFromStream(cssFile));
+  }
+  ASSERT_TRUE(lent.endCacheCompile(&arena));
+  EXPECT_GE(arena.highWater(), 4096u) << "the windows were taken from the region";
+  EXPECT_EQ(arena.used(), 0u);
+  EXPECT_TRUE(stylesEqual(r5, lent.resolveStyle("p", "r5")));
+  removePath(lentDir);
+
+  removePath(cacheDir);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);
+}
+
+// Every section build loads the ruleset into its arena (RESIDENT), and the load read each rule's
+// 77-byte style a field at a time: ~33 SdFat calls a rule, every build -- 3384 calls for the 84
+// rules of the first page of a King's Avatar-shaped book, ~0.06 s on the X3 per 100 rules. One
+// read for the payload makes it four a rule; what resolves is the same.
+TEST(CssParserArena, LoadingTheRulesetIntoTheArenaReadsEachRuleInAFewCalls) {
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  constexpr int kRules = 400;
+  std::string css;
+  for (int i = 0; i < kRules; ++i) {
+    css += ".r" + std::to_string(i) + " { margin-left: " + std::to_string(i % 7) +
+           "em; text-indent: " + std::to_string(i % 3) + "em; font-style: italic }\n";
+  }
+  std::string cssPath;
+  ASSERT_TRUE(writeTempCssFile(std::vector<uint8_t>(css.begin(), css.end()), cssPath));
+  CssParser parser(cacheDir);
+  ASSERT_TRUE(compileCache(parser, cssPath));
+  parser.clear();
+  ASSERT_TRUE(parser.loadFromCache());
+  const CssStyle heap = parser.resolveStyle("p", "r123");
+
+  BuildArena arena(kRules * 128 + 8192);
+  ASSERT_TRUE(arena.valid());
+  parser.clear();
+  parser.setIndexArena(&arena);
+  parser.setLeanResolve(true);
+  const size_t callsBefore = FsFile::calls;
+  ASSERT_TRUE(parser.loadFromCache());
+  const size_t calls = FsFile::calls - callsBefore;
+  std::printf("[ css      ] %d rules loaded into the arena in %zu card calls\n", kRules, calls);
+  EXPECT_LE(calls, static_cast<size_t>(6 * kRules)) << "a field at a time was ~33 a rule";
+  EXPECT_TRUE(stylesEqual(heap, parser.resolveStyle("p", "r123")));
+  parser.clear();  // drop the arena view before the arena is destroyed
+
+  removePath(cacheDir);
+  std::error_code rmEc;
+  std::filesystem::remove(cssPath, rmEc);
+}
+
 // A compile that hits MAX_RULES mid-stream persists a cache that holds the first MAX_RULES rules
 // and is STAMPED truncated (flags byte bit 1), so the book is parsed once and every later open
 // says what is missing (rulesTruncated()). It used to write no cache at all, which re-parsed the

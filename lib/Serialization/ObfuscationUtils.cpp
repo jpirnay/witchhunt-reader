@@ -1,6 +1,7 @@
 #include "ObfuscationUtils.h"
 
 #include <Logging.h>
+#include <Utf8.h>
 #include <base64.h>
 #include <esp_mac.h>
 #include <wolfssl/wolfcrypt/coding.h>
@@ -118,6 +119,50 @@ bool parseKeyId(const std::string& id, uint8_t key[6]) {
     key[i] = static_cast<uint8_t>(std::strtoul(id.substr(at, 2).c_str(), nullptr, 16));
   }
   return true;
+}
+
+PasswordWriter passwordWriter(const std::string& writerKeyId, uint8_t writerKey[HW_KEY_LEN]) {
+  if (!parseKeyId(writerKeyId, writerKey)) return PasswordWriter::Unknown;
+  return std::memcmp(writerKey, getHwKey(), HW_KEY_LEN) == 0 ? PasswordWriter::ThisReader : PasswordWriter::OtherReader;
+}
+
+bool plausiblePassword(const std::string& decoded) {
+  const auto* p = reinterpret_cast<const unsigned char*>(decoded.c_str());
+  const auto* const end = p + decoded.size();
+  while (p < end) {
+    if (*p == 0) return false;  // a NUL would also end utf8NextCodepoint()'s walk early
+    const uint32_t cp = utf8NextCodepoint(&p);
+    // U+FFFD is what utf8NextCodepoint() answers for a malformed sequence.
+    if (cp == REPLACEMENT_GLYPH || cp < 0x20 || (cp >= 0x7F && cp <= 0x9F)) return false;
+  }
+  return true;
+}
+
+CardHint cardHint(const std::string& lastKnownKeyId, const std::string& arrivedFromKeyId) {
+  uint8_t key[HW_KEY_LEN];
+  switch (passwordWriter(lastKnownKeyId, key)) {
+    case PasswordWriter::Unknown:
+      return CardHint::None;
+    case PasswordWriter::OtherReader:
+      return CardHint::OtherReader;
+    case PasswordWriter::ThisReader:
+      break;
+  }
+  return passwordWriter(arrivedFromKeyId, key) == PasswordWriter::OtherReader ? CardHint::OtherReader
+                                                                              : CardHint::ThisReader;
+}
+
+bool resaveUnderThisKey(const PasswordWriter writer, const bool hasPassword, const bool allPlausible,
+                        const CardHint hint) {
+  switch (writer) {
+    case PasswordWriter::OtherReader:
+      return hasPassword;
+    case PasswordWriter::ThisReader:
+      return false;
+    case PasswordWriter::Unknown:
+      return hasPassword && allPlausible && hint != CardHint::OtherReader;
+  }
+  return false;
 }
 
 void selfTest() {

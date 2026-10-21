@@ -43,6 +43,10 @@ class WifiCredentialStore {
   std::vector<WifiCredential> credentials;
   std::string lastConnectedSsid;
   std::string lastKnownMacAddress;
+  // The key id of the reader this card's wifi.json was re-keyed from when the card moved here, kept
+  // from then on (empty for a card that never moved): the writer hint for opds.json and
+  // koreader.json files that name no key (obfuscation::cardHint()).
+  std::string arrivedFromKeyId;
 
   static constexpr size_t MAX_NETWORKS = 8;
 
@@ -53,6 +57,8 @@ class WifiCredentialStore {
   friend bool JsonSettingsIO::loadWifi(WifiCredentialStore&, const char*, bool*);
 
  public:
+  static constexpr char FILE_PATH[] = "/.crosspoint/wifi.json";
+
   // Delete copy constructor and assignment
   WifiCredentialStore(const WifiCredentialStore&) = delete;
   WifiCredentialStore& operator=(const WifiCredentialStore&) = delete;

@@ -164,18 +164,18 @@ void TocNcxParser::endElement(void* userData, const char* name) {
     // This is the safest place to push the data, assuming <navLabel> always comes before <content>.
     // NCX spec says navLabel comes before content.
     if (!self->currentLabel.empty() && !self->currentSrc.empty()) {
-      const std::string rawTarget = self->baseContentPath + self->currentSrc;
+      std::string& rawTarget = self->targetScratch_;
+      rawTarget.assign(self->baseContentPath).append(self->currentSrc);
       const size_t pos = rawTarget.find('#');
-      const std::string rawPath = pos == std::string::npos ? rawTarget : rawTarget.substr(0, pos);
-      std::string href = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(rawPath));
-      std::string anchor;
-
+      FsHelpers::decodeUriEscapes(std::string_view(rawTarget).substr(0, pos), self->decodedScratch_);
+      FsHelpers::normalisePath(self->decodedScratch_, self->hrefScratch_);
+      self->anchorScratch_.clear();
       if (pos != std::string::npos) {
-        anchor = FsHelpers::decodeUriEscapes(rawTarget.substr(pos + 1));
+        FsHelpers::decodeUriEscapes(std::string_view(rawTarget).substr(pos + 1), self->anchorScratch_);
       }
 
       if (self->cache) {
-        self->cache->createTocEntry(self->currentLabel, href, anchor, self->currentDepth);
+        self->cache->createTocEntry(self->currentLabel, self->hrefScratch_, self->anchorScratch_, self->currentDepth);
       }
 
       // Clear them so we don't re-add them if there are weird XML structures

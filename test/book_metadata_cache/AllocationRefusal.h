@@ -22,3 +22,6 @@ class AllocationRefusal {
 size_t heapLiveBytes();
 size_t heapPeakBytes();
 void resetHeapPeak();
+// Blocks handed out so far through operator new: allocation churn, which a no-compaction heap pays
+// for in time and fragmentation whatever the peak.
+size_t heapAllocations();

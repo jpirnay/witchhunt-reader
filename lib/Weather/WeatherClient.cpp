@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <TlsPolicy.h>  // for HttpDownloader.h below: names lib/SecureNet to PlatformIO's LDF
 
 #include <cstdio>
 #include <ctime>

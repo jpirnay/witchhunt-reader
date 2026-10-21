@@ -287,3 +287,38 @@ TEST_F(GlyphStoreInstall, AHeaderThatPassesItsCheckButDescribesOverlappingStyles
   ASSERT_TRUE(flash.program(0, &header, sizeof header));
   EXPECT_EQ(OpenResult::NotInstalled, store.open(kIdentityA));
 }
+
+TEST_F(GlyphStoreInstall, APlanForALargePartitionInstalls) {
+  // 8 MiB of partition: the planner keeps the log inside what beginInstall() accepts.
+  constexpr uint32_t kBig = 128 * kPageBytes;
+  SimNorFlash big(kBig, 200);
+  FlashGlyphStore store(big);
+  PlanInput in{};
+  in.styleCount = 1;
+  in.styleMode[0] = kModeFlash;
+  in.styleBytes[0] = 4096;
+  in.usableBytes = kBig;
+  in.freeMapPages = 200;
+  Layout layout{};
+  ASSERT_TRUE(planLayout(in, layout));
+  ASSERT_TRUE(install(store, layout));
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_EQ(layout.geometry.logSize, store.geometry().logSize);
+  EXPECT_EQ(layout.geometry.logSize / layout.geometry.segmentBytes, store.segmentCount());
+  EXPECT_EQ(0u, big.violations());
+  EXPECT_EQ(0u, big.reprograms());
+}
+
+TEST_F(GlyphStoreInstall, ALayoutWithBadSegmentsIsRefused) {
+  SimNorFlash big(5u << 20);  // room for every log below, so only its segment count or size refuses it
+  FlashGlyphStore store(big);
+  for (const uint32_t segment : {0u, 1000u, 24576u /* does not divide 64 KB */, 32768u /* 2 segments */}) {
+    EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 65536, segment), kIdentityA, nullptr)) << segment;
+  }
+  // 65 segments: one past kMaxSegments.
+  EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 65 * kSectorBytes, kSectorBytes), kIdentityA, nullptr));
+  // The log stays under kMaxLogBytes: 64 segments of 64 KB are exactly 4 MiB, 63 are not.
+  EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 64 * kPageBytes, kPageBytes), kIdentityA, nullptr));
+  EXPECT_TRUE(store.beginInstall(smallLayout(1024, 512, 63 * kPageBytes, kPageBytes), kIdentityA, nullptr));
+  EXPECT_TRUE(store.beginInstall(smallLayout(1024, 512, 64 * kSectorBytes, kSectorBytes), kIdentityA, nullptr));
+}

@@ -1255,7 +1255,27 @@ void EpubReaderActivity::serviceBackgroundWork() {
     stepCurrentSectionBuild();
     return;
   }
+  // Room in the glyph store comes before Background-B's look-ahead; the section the reader waits on and the AA pass
+  // keep priority.
+  if (stepGlyphStoreRoom()) return;
   stepBackgroundSectionBuild();
+}
+
+bool EpubReaderActivity::lookAheadMayRun() const {
+  return epub && section && readerPhase_ == ReaderPhase::READING && !backgroundWorkSuspended_ && !pendingPreRender &&
+         !usePreRenderedBuffer && !renderer.isRefreshPending() && !imageProcessingActive_;
+}
+
+bool EpubReaderActivity::stepGlyphStoreRoom() {
+  // One step reclaims a whole segment (copies, retire, erase): it cannot be aborted, and holds the render lock and this
+  // loop. So it waits for what Background-B waits for, and for the same quiet after a page lands.
+  if (!lookAheadMayRun() || CooperativeAbort::shouldAbortLongTask() ||
+      (millis() - std::max(lastPageTurnTime, lastPageOnScreenMs_)) < BG_BUILD_BORROW_QUIET_MS) {
+    return false;
+  }
+  RenderLock lock(RenderLock::Mode::Try);
+  if (!lock.ownsLock() || !lookAheadMayRun()) return false;
+  return sdFontSystem.makeTtfRoom(FlashGlyphStore::Budget::Idle, {});
 }
 
 void EpubReaderActivity::serviceBackgroundDebugLog() {
@@ -1665,8 +1685,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   // stale build removes its partial file) and the parse slice reads glyph metrics from
   // the shared renderer, so all of it must be serialised against the render task.
   RenderLock lock;
-  if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_ || pendingPreRender ||
-      usePreRenderedBuffer || renderer.isRefreshPending() || imageProcessingActive_) {
+  if (!lookAheadMayRun()) {
     return;
   }
 
@@ -4761,6 +4780,17 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     return false;
   }
 
+  // The render pass holds RenderLock here, before the chapter is laid out or drawn, so no record of the glyph store's
+  // log is in use: a segment can be reclaimed or the index rebuilt now.
+  bool roomPopupDrawn = false;
+  sdFontSystem.makeTtfRoom(FlashGlyphStore::Budget::Open, [this, &roomPopupDrawn] {
+    GUI.drawPopup(renderer, tr(STR_LOADING_FONT));
+    roomPopupDrawn = true;
+  });
+  // The popup's displayBuffer() consumed any pending HALF override, so on a panel that diffs against a host frame the
+  // first content page would FAST-refresh over the popup and ghost it: it is forced to HALF, as after any popup.
+  if (roomPopupDrawn && renderer.fastRefreshNeedsHostFrame()) forceHalfRefreshAfterPopup_ = true;
+
   const uint16_t viewportWidth = layout.viewportWidth;
   const uint16_t viewportHeight = layout.viewportHeight;
   const bool embeddedStyle = lastRenderStats.embeddedStyle;
@@ -4931,6 +4961,13 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
                                                             : "INCR_RELEASED",
             cacheHit ? 1 : 0, cssFallbackRebuild ? 1 : 0, resumeBackgroundBuild ? 1 : 0);
 
+    // The HALF the reader was launched with, still pending at its first section: armed by the book's
+    // open (ActivityManager::armBookOpenRefresh) or after a boot (main.cpp). It is meant for the book's
+    // first page, on every board. The popups below are drawn over the frame on screen (drawPopup()
+    // syncs from it), which is still the screen the book was opened from, so a HALF spent on one cleans
+    // that screen up only for the page to land on it FAST.
+    const bool launchHalf = coldOpenHalfRefreshArmed_ && renderer.hasRefreshOverridePending();
+
     if (incremental) {
       // Capture the "dramatic transition" signal before anything can display, because a popup's
       // refresh would otherwise consume the pending exit-full-refresh override:
@@ -4941,6 +4978,10 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       //     to a FAST diff against the popup frame and ghost its outline.
       const bool dramaticTransition = coldOpenHalfRefreshArmed_ || renderer.hasRefreshOverridePending();
       coldOpenHalfRefreshArmed_ = false;
+      // Whether that HALF goes on the first CONTENT page (forceHalfRefreshAfterPopup_), with the popup
+      // painted FAST: on the X4 family for every dramatic transition, on the X3 for the launch HALF.
+      // The X3 leaves a jump's HALF on its popup (below).
+      const bool halfOnContentPage = dramaticTransition && (renderer.fastRefreshNeedsHostFrame() || launchHalf);
 
       // Whether the popup has to be painted before the build starts, or can wait until the first
       // slice proves the build is actually long enough to need one.
@@ -4962,9 +5003,11 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         // (forceHalfRefreshAfterPopup_ below), not the popup. The popup is a transient box over the
         // already-correct current page, so a FAST overlay is clean and instant — drop the pending
         // HALF override here so drawPopup() doesn't spend a second ~1.7s HALF on the popup itself.
-        // On X3 the popup's own refresh IS the baseline step (its displayBuffer updates DTM1, which
-        // the following FAST content page diffs against), so leave the override for drawPopup().
-        if (renderer.fastRefreshNeedsHostFrame() && dramaticTransition) {
+        // X3: a jump's HALF is left for drawPopup(), as it always was. Not for the baseline: the
+        // driver re-syncs DTM1 from the frame after every refresh, FAST included
+        // (Uc8253X3Driver::displayFinish), so the content page diffs against the popup either way.
+        // The launch HALF moves to the page there too (launchHalf above).
+        if (halfOnContentPage) {
           renderer.clearRefreshOverride();  // discard the armed HALF -> popup paints FAST
         }
         GUI.drawPopup(renderer, tr(STR_INDEXING));  // immediate feedback before the first page lands
@@ -5032,13 +5075,14 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       // one-page cover) — to HALF, so a dramatic content change (text popup -> photo) doesn't leave
       // a ghost outline of the popup box, and so released-buffer builds don't compound that ghosting
       // across many subsequent FAST mid-build pages before the periodic full-resync cadence cleans
-      // it up. X4 only: its FAST refresh needs a host-side previous-frame copy (or the single-buffer-
+      // it up. X4: its FAST refresh needs a host-side previous-frame copy (or the single-buffer-
       // fast-diff opt-in above) to diff against, so a dramatic frame change can under-drive pixels.
       // X3's fast differential reads the controller's own DTM1 RAM, which drawPopup()'s displayBuffer()
-      // call already updated correctly — no host-side baseline gap to paper over, so forcing HALF
-      // there is pure unnecessary cost. A routine forward-reading crossing into a still-building
+      // call already updated correctly — no host-side baseline gap to paper over, so a jump's HALF
+      // stays on the popup there. The launch HALF does not: what it clears is the screen the book was
+      // opened from, which the popup still shows. A routine forward-reading crossing into a still-building
       // Background-B section is NOT dramatic (neither signal is set), so it keeps the fast cadence.
-      if (renderer.fastRefreshNeedsHostFrame() && dramaticTransition && popupBeforeBuild) {
+      if (halfOnContentPage && popupBeforeBuild) {
         forceHalfRefreshAfterPopup_ = true;
       }
       renderer.clearFontAccumulation();
@@ -5061,7 +5105,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         // branch), which is also where the reader would otherwise sit with no feedback. Arm the
         // same transition handling the up-front path arms, so a popup drawn late is followed by
         // the same clean content refresh as one drawn early.
-        if (!popupBeforeBuild && renderer.fastRefreshNeedsHostFrame() && dramaticTransition) {
+        if (!popupBeforeBuild && halfOnContentPage) {
           renderer.clearRefreshOverride();
           forceHalfRefreshAfterPopup_ = true;
         }
@@ -5070,7 +5114,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
       }
       // Fell through: the kickoff finished the section. On the deferred path no popup was ever
       // painted, so there is no box for the content page to ghost against and no armed HALF --
-      // the page lands on the normal refresh cadence.
+      // the page lands on the normal refresh cadence, or on the launch HALF, still pending.
       readerPhase_ = ReaderPhase::READING;
       if (step == Section::BuildStep::Failed) {
         LOG_ERR("ERS", "Background-C kickoff failed for spine %d; using blocking path", currentSpineIndex);
@@ -5099,6 +5143,12 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
         LOG_INF("ERS", "Background-C declined for spine %d (cssFallback=%d hasBuf=%d latched=%d); blocking build",
                 currentSpineIndex, cssFallbackRebuild ? 1 : 0, renderer.hasSecondaryBuffer() ? 1 : 0,
                 forceBlockingBuildSpine_ == currentSpineIndex ? 1 : 0);
+      }
+      // compileSectionCache() paints its popup over the frame on screen as well: the launch HALF goes
+      // on the page that replaces it (renderContents()), as on the incremental paths above.
+      if (launchHalf) {
+        renderer.clearRefreshOverride();
+        forceHalfRefreshAfterPopup_ = true;
       }
       const BuildOutcome outcome = compileSectionCache(layout, embeddedStyle, imageRendering);
       if (outcome == BuildOutcome::Restarting) {
@@ -6588,6 +6638,7 @@ bool EpubReaderActivity::hasPendingBackgroundWork() {
   if (section && section->hasActiveBuild()) return true;
   if (backgroundBuildState_ == BackgroundBuildState::Building) return true;
   if (!epub || !section || readerPhase_ != ReaderPhase::READING || backgroundWorkSuspended_) return false;
+  if (sdFontSystem.ttfNeedsIdleRoom()) return true;  // a glyph-store step is due in idle time (room, or use counts)
   // Work that has not started yet but will on its own. Background-B waits out its quiet period
   // after a page appears (and rechecks its gates once a second) before it borrows the buffer; past
   // that, a WaitHeap the heap keeps refusing is starved, not pending.

@@ -59,7 +59,22 @@ struct Options {
   bool documentsLast = false;
   int stylesheets = 1;
   int rulesPerStylesheet = 40;
+  // Stylesheets in the archive that the manifest does not list, after the listed ones.
+  int unlistedStylesheets = 0;
+  // A title page ahead of the first chapter, showing the cover, as converters put one first.
+  bool titlePage = false;
+  // The cover's bytes; empty: a stand-in that is not a decodable picture.
+  std::string coverBytes;
+  // The OPF guide's text reference, relative to the OPF (e.g. "Text/chapter2.xhtml#start"); empty:
+  // no guide.
+  std::string guideTextReference;
 };
+
+inline std::string titlePageDocument() {
+  return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Cover"
+         "</title><link rel=\"stylesheet\" href=\"../Styles/style.css\"/></head><body>\n<div class=\"cover\"><img "
+         "src=\"../Images/cover.jpg\" alt=\"cover\"/></div>\n</body></html>\n";
+}
 
 inline std::string stylesheetName(const int s) { return s == 0 ? "style.css" : "style" + std::to_string(s) + ".css"; }
 
@@ -96,6 +111,13 @@ inline Book write(const std::string& path, const int chapters, const int images,
   }
   std::string spine;
   std::string navPoints;
+  if (options.titlePage) {
+    manifest += "<item id=\"titlepage\" href=\"Text/titlepage.xhtml\" media-type=\"application/xhtml+xml\"/>\n";
+    spine += "<itemref idref=\"titlepage\"/>\n";
+    navPoints +=
+        "<navPoint id=\"cover\" playOrder=\"0\"><navLabel><text>Cover</text></navLabel><content "
+        "src=\"Text/titlepage.xhtml\"/></navPoint>\n";
+  }
   for (int i = 0; i < chapters; ++i) {
     const std::string id = "c" + std::to_string(i);
     spine += "<itemref idref=\"" + id + "\"/>\n";
@@ -119,24 +141,34 @@ inline Book write(const std::string& path, const int chapters, const int images,
                      "xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles><rootfile "
                      "full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles>\n"
                      "</container>\n"});
-  documents.push_back({"OEBPS/content.opf",
-                       "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
-                       "version=\"2.0\" unique-identifier=\"id\">\n<metadata "
-                       "xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"id\">big</dc:identifier>"
-                       "<dc:title>Big Spine</dc:title><dc:creator>Test</dc:creator><dc:language>en</dc:language>"
-                       "<meta name=\"cover\" content=\"cover\"/></metadata>\n<manifest>\n" +
-                           manifest + "</manifest>\n<spine toc=\"ncx\">\n" + spine + "</spine>\n</package>\n"});
+  documents.push_back(
+      {"OEBPS/content.opf",
+       "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
+       "version=\"2.0\" unique-identifier=\"id\">\n<metadata "
+       "xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"id\">big</dc:identifier>"
+       "<dc:title>Big Spine</dc:title><dc:creator>Test</dc:creator><dc:language>en</dc:language>"
+       "<meta name=\"cover\" content=\"cover\"/></metadata>\n<manifest>\n" +
+           manifest + "</manifest>\n<spine toc=\"ncx\">\n" + spine + "</spine>\n" +
+           (options.guideTextReference.empty() ? std::string()
+                                               : "<guide><reference type=\"text\" title=\"Start\" href=\"" +
+                                                     options.guideTextReference + "\"/></guide>\n") +
+           "</package>\n"});
   documents.push_back(
       {"OEBPS/toc.ncx",
        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" "
        "version=\"2005-1\"><head></head><docTitle><text>Big Spine</text></docTitle><navMap>\n" +
            navPoints + "</navMap></ncx>\n"});
-  for (int s = 0; s < options.stylesheets; ++s) {
+  for (int s = 0; s < options.stylesheets + options.unlistedStylesheets; ++s) {
     documents.push_back({"OEBPS/Styles/" + stylesheetName(s), stylesheet(s, options.rulesPerStylesheet)});
   }
   if (!options.documentsLast) entries.insert(entries.end(), documents.begin(), documents.end());
-  entries.push_back({"OEBPS/Images/cover.jpg", imageBytes(0)});
-  book.spineSizes.reserve(static_cast<size_t>(chapters));
+  entries.push_back({"OEBPS/Images/cover.jpg", options.coverBytes.empty() ? imageBytes(0) : options.coverBytes});
+  book.spineSizes.reserve(static_cast<size_t>(chapters) + 1);
+  if (options.titlePage) {
+    entries.push_back({"OEBPS/Text/titlepage.xhtml", titlePageDocument()});
+    book.spineHrefs.push_back("OEBPS/Text/titlepage.xhtml");
+    book.spineSizes.push_back(static_cast<uint32_t>(titlePageDocument().size()));
+  }
   for (int i = 0; i < chapters; ++i) {
     book.spineHrefs.push_back("OEBPS/Text/" + chapterName(i));
     book.spineSizes.push_back(static_cast<uint32_t>(chapterDocument(i).size()));

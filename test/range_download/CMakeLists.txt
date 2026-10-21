@@ -5,9 +5,11 @@ add_executable(RangeDownloadTest
   RangeDownloadTest.cpp
   CredentialRedirectTest.cpp
   HttpsSchemeTest.cpp
+  TlsHopTest.cpp
   ${REPO_ROOT}/lib/SecureNet/src/RangeDownload.cpp
   ${REPO_ROOT}/lib/SecureNet/src/SecureHttpClient.cpp
   ${REPO_ROOT}/lib/SecureNet/src/HttpRange.cpp
+  ${REPO_ROOT}/lib/SecureNet/src/TlsPolicy.cpp
 )
 
 target_include_directories(RangeDownloadTest BEFORE PRIVATE

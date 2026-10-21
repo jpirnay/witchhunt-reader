@@ -1,24 +1,24 @@
 // Characterization tests for BookMetadataCache's TOC href -> spineIndex resolution.
 //
-// These pin the CURRENT behaviour so the allocation-hardening work (nothrow growth
-// for the per-spine index containers) can be shown not to change any observable
-// result. The property that matters: the fast binary-search index and the
-// linear-scan fallback must resolve IDENTICALLY. The index is a pure speed
-// optimisation, never correctness — so degrading to the scan on OOM must be safe.
+// These pin the behaviour so the lookup's speed work can be shown not to change any
+// observable result. The entries are now looked up a table-full at a time when the
+// pass ends (a per-spine href index used to answer them as they were parsed); the
+// small and large corpora that once picked the scan or the index are kept as shapes,
+// and must still resolve identically.
 //
-// LARGE_SPINE_THRESHOLD is 16: a corpus below it exercises the linear scan, one
-// above it exercises the index. Both are asserted against the same expectations.
-//
-// The resolution is observed by reading back the temp TOC file the pass writes
-// (toc.bin.tmp, still on disk until cleanupTmpFiles), using the same
-// serialization helpers the production reader uses. No test hooks in production
+// The resolution is observed by reading back the temp file the pass writes the
+// spine indices to (toc.spine.tmp, still on disk until cleanupTmpFiles), using the
+// same serialization helpers the production reader uses. No test hooks in production
 // code, and no dependency on buildBookBin (which would need a real ZIP archive).
 
+#include <BuildArena.h>
 #include <HalStorage.h>
 #include <Serialization.h>
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -48,29 +48,24 @@ class BookMetadataCacheTest : public testing::Test {
   std::string cacheDir_;
 };
 
-// Read the spineIndex each TOC entry resolved to, in TOC order, straight out of
-// the temp file the TOC pass wrote.
+// Read the spineIndex each TOC entry resolved to, in TOC order, straight out of the file the TOC
+// pass writes them to (toc.spine.tmp, int16 per entry; the TOC records themselves carry -1 until
+// buildBookBin writes book.bin).
 std::vector<int16_t> readResolvedSpineIndices(const std::string& cacheDir, size_t expectedCount) {
   std::vector<int16_t> out;
-  FsFile toc;
-  const std::string tocPath = cacheDir + "/toc.bin.tmp";
-  if (!Storage.openFileForRead("TEST", tocPath, toc)) {
-    ADD_FAILURE() << "could not open " << tocPath;
+  FsFile spines;
+  const std::string path = cacheDir + "/toc.spine.tmp";
+  if (!Storage.openFileForRead("TEST", path, spines)) {
+    ADD_FAILURE() << "could not open " << path;
     return out;
   }
-  toc.seek(0);
+  spines.seek(0);
   for (size_t i = 0; i < expectedCount; i++) {
-    std::string title, href, anchor;
-    uint8_t level = 0;
     int16_t spineIndex = -1;
-    serialization::readString(toc, title);
-    serialization::readString(toc, href);
-    serialization::readString(toc, anchor);
-    serialization::readPod(toc, level);
-    serialization::readPod(toc, spineIndex);
+    serialization::readPod(spines, spineIndex);
     out.push_back(spineIndex);
   }
-  toc.close();
+  spines.close();
   return out;
 }
 
@@ -80,7 +75,7 @@ std::vector<int16_t> readResolvedSpineIndices(const std::string& cacheDir, size_
 // whose path conversion allocates more than the device's FsFile ever would.
 std::vector<int16_t> resolveTocToSpine(const std::string& cacheDir, const std::vector<std::string>& spineHrefs,
                                        const std::vector<std::string>& tocHrefs, const size_t refuseAllocationsFrom = 0,
-                                       size_t* tocEntryBytesRead = nullptr) {
+                                       size_t* tocEntryBytesRead = nullptr, BuildArena* scratch = nullptr) {
   {
     BookMetadataCache cache(cacheDir);
     EXPECT_TRUE(cache.beginWrite());
@@ -90,15 +85,16 @@ std::vector<int16_t> resolveTocToSpine(const std::string& cacheDir, const std::v
     }
     EXPECT_TRUE(cache.endContentOpfPass());
 
-    EXPECT_TRUE(cache.beginTocPass());
+    EXPECT_TRUE(cache.beginTocPass(scratch));
     std::optional<AllocationRefusal> refusal;
     if (refuseAllocationsFrom != 0) refusal.emplace(refuseAllocationsFrom);
     const size_t bytesReadBefore = FsFile::bytesRead;
     for (size_t i = 0; i < tocHrefs.size(); i++) {
       cache.createTocEntry("Title " + std::to_string(i), tocHrefs[i], /*anchor=*/"", /*level=*/0);
     }
-    if (tocEntryBytesRead) *tocEntryBytesRead = FsFile::bytesRead - bytesReadBefore;
+    // The spine items are looked up when the pass ends: the reads it costs are counted there too.
     EXPECT_TRUE(cache.endTocPass());
+    if (tocEntryBytesRead) *tocEntryBytesRead = FsFile::bytesRead - bytesReadBefore;
     refusal.reset();
     EXPECT_TRUE(cache.endWrite());
   }
@@ -114,7 +110,7 @@ std::vector<std::string> chapterHrefs(int count) {
   return hrefs;
 }
 
-// --- Below LARGE_SPINE_THRESHOLD: the linear scan runs -----------------------
+// --- A small spine ------------------------------------------------------------
 
 TEST_F(BookMetadataCacheTest, SmallCorpusResolvesEveryTocHrefViaLinearScan) {
   const std::vector<std::string> spine = chapterHrefs(8);
@@ -126,7 +122,7 @@ TEST_F(BookMetadataCacheTest, SmallCorpusResolvesEveryTocHrefViaLinearScan) {
   }
 }
 
-// --- Above the threshold: the fast binary-search index runs ------------------
+// --- A larger one ---------------------------------------------------------------
 
 TEST_F(BookMetadataCacheTest, LargeCorpusResolvesEveryTocHrefViaFastIndex) {
   const std::vector<std::string> spine = chapterHrefs(64);
@@ -214,7 +210,56 @@ TEST_F(BookMetadataCacheTest, AnInOrderTocReadsTheSpineAboutOnceWithoutTheIndex)
     ASSERT_EQ(got[i], static_cast<int16_t>(i)) << "toc entry " << i;
   }
   const auto spineFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "spine.bin.tmp"));
-  EXPECT_LE(bytesRead, 2 * spineFileBytes) << "spine file is " << spineFileBytes << " bytes";
+  // The TOC records are read back once to look their hrefs up.
+  const auto tocFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "toc.bin.tmp"));
+  EXPECT_LE(bytesRead, 2 * spineFileBytes + tocFileBytes)
+      << "spine file is " << spineFileBytes << " bytes, TOC file " << tocFileBytes;
+}
+
+// In any other order, the entries are looked up a table-full at a time, one pass over the spine
+// file each; the table lives in the lent framebuffer during a first open, which holds thousands.
+// Each entry's own scan from where the previous one matched cost about a spine read per entry for
+// this book: a TOC that lists the newest chapter first.
+TEST_F(BookMetadataCacheTest, AReversedTocReadsTheSpineAboutOnceFromTheLentRegion) {
+  const std::vector<std::string> spine = chapterHrefs(3000);
+  const std::vector<std::string> toc(spine.rbegin(), spine.rend());
+  constexpr size_t kRegionBytes = 48 * 1024 + 256;
+  std::unique_ptr<uint8_t[]> region(new uint8_t[kRegionBytes]);
+  BuildArena arena(region.get(), kRegionBytes);
+
+  size_t bytesRead = 0;
+  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, toc, kIndexDoesNotFit, &bytesRead, &arena);
+  const auto spineFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "spine.bin.tmp"));
+  const auto tocFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "toc.bin.tmp"));
+  std::printf("[ toc      ] reversed TOC of %zu, lent region: %zu bytes read (spine file %zu, TOC file %zu)\n",
+              toc.size(), bytesRead, spineFileBytes, tocFileBytes);
+  EXPECT_LE(bytesRead, 2 * spineFileBytes + tocFileBytes);
+
+  ASSERT_EQ(got.size(), toc.size());
+  for (size_t i = 0; i < got.size(); i++) {
+    ASSERT_EQ(got[i], static_cast<int16_t>(toc.size() - 1 - i)) << "toc entry " << i;
+  }
+  EXPECT_EQ(arena.used(), 0u) << "the table is handed back to the region";
+}
+
+// Without a lent region, on a heap that serves only small blocks, the table is small and the
+// passes many: correct, and still well short of a spine read per entry.
+TEST_F(BookMetadataCacheTest, AReversedTocOnASmallHeapStillResolvesEveryEntry) {
+  const std::vector<std::string> spine = chapterHrefs(1000);
+  const std::vector<std::string> toc(spine.rbegin(), spine.rend());
+
+  size_t bytesRead = 0;
+  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, toc, kIndexDoesNotFit, &bytesRead);
+  const auto spineFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "spine.bin.tmp"));
+  std::printf("[ toc      ] reversed TOC of %zu, small heap: %zu bytes read (spine file %zu)\n", toc.size(), bytesRead,
+              spineFileBytes);
+  // 16 entries a pass on this heap (a 256 B table): 63 passes for 1000 entries, not 1000.
+  EXPECT_LE(bytesRead, 70 * spineFileBytes);
+
+  ASSERT_EQ(got.size(), toc.size());
+  for (size_t i = 0; i < got.size(); i++) {
+    ASSERT_EQ(got[i], static_cast<int16_t>(toc.size() - 1 - i)) << "toc entry " << i;
+  }
 }
 
 // Resuming must not cost correctness: entries out of order, repeated, before the previous match
@@ -278,8 +323,8 @@ TEST_F(BookMetadataCacheTest, AFilenameTwoSpineItemsShareIsNotGuessed) {
 
 // The book this exists for has every entry off by a folder. Rereading the spine file for each of
 // them would be the O(entries x spine) cost the resumed scan was written to remove; the folder the
-// first match was found in answers the rest with the index.
-TEST_F(BookMetadataCacheTest, AnOffByAFolderTocReadsTheSpineAboutTwice) {
+// first match was found in answers the rest, found in reading order.
+TEST_F(BookMetadataCacheTest, AnOffByAFolderTocReadsTheSpineAFewTimes) {
   const std::vector<std::string> spine = hrefsIn("OEBPS/text/", 3000);
 
   size_t bytesRead = 0;
@@ -290,8 +335,12 @@ TEST_F(BookMetadataCacheTest, AnOffByAFolderTocReadsTheSpineAboutTwice) {
     ASSERT_EQ(got[i], static_cast<int16_t>(i)) << "toc entry " << i;
   }
   const auto spineFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "spine.bin.tmp"));
-  // Once to build the index, once for the first entry's filename scan.
-  EXPECT_LE(bytesRead, 3 * spineFileBytes) << "spine file is " << spineFileBytes << " bytes";
+  const auto tocFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "toc.bin.tmp"));
+  // The exact pass (which matches nothing), the first entry's filename scan, then the shifted
+  // hrefs found in reading order: about three spine reads. The TOC records are read back twice,
+  // for the exact pass and for the misses.
+  EXPECT_LE(bytesRead, 4 * spineFileBytes + 2 * tocFileBytes)
+      << "spine file is " << spineFileBytes << " bytes, TOC file " << tocFileBytes;
 }
 
 // Hrefs that match nothing, not even by filename, each cost a read of the whole spine; on a book
@@ -307,8 +356,11 @@ TEST_F(BookMetadataCacheTest, TocHrefsThatMatchNothingStopCostingWholeSpineReads
   ASSERT_EQ(got.size(), toc.size());
   EXPECT_EQ(got.back(), -1);
   const auto spineFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "spine.bin.tmp"));
-  // 32768 spine records of full scans per parse: 10 reads of a 3000-item spine, plus the index.
-  EXPECT_LE(bytesRead, 12 * spineFileBytes) << "spine file is " << spineFileBytes << " bytes";
+  const auto tocFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "toc.bin.tmp"));
+  // 32768 spine records of full scans per parse: 10 reads of a 3000-item spine, plus the exact
+  // pass; the TOC records read back twice.
+  EXPECT_LE(bytesRead, 12 * spineFileBytes + 2 * tocFileBytes)
+      << "spine file is " << spineFileBytes << " bytes, TOC file " << tocFileBytes;
 }
 
 }  // namespace

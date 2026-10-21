@@ -4,6 +4,8 @@
 #include <Logging.h>
 #include <esp_heap_caps.h>
 
+#include "TlsPolicy.h"
+
 // wolfSSL is only pulled in when explicitly enabled, keeping flag-off builds
 // (and host tests) free of the dependency. See SecureClient.h.
 #if defined(FREEINK_NET_WOLFSSL)
@@ -403,16 +405,21 @@ int SecureClient::connect(const char* host, uint16_t port) {
   // Verified-first.
   if (connectAtVerify(host, port, /*verifyPeer=*/true)) return 1;
 
-  // Only fall back to insecure on a verification-class failure, when allowed.
-  if (_allowInsecureFallback && isVerificationError(_lastConnectErr)) {
-    LOG_INF("TLS", "WARNING: cert verify failed for %s (err=%d); retrying WITHOUT verification", host, _lastConnectErr);
+  // Only fall back to insecure on a verification-class failure, when allowed (the caller allows it
+  // only for a request without credentials: HttpDownloader, TlsPolicy::VerifiedThenUnverified).
+  const TlsPlan plan{true, _allowInsecureFallback};
+  if (retryUnverified(plan, isVerificationError(_lastConnectErr) ? VerifiedConnectFailure::Certificate
+                                                                 : VerifiedConnectFailure::Other)) {
+    LOG_INF("TLS", "%s: certificate not verifiable (err=%d), continuing unverified (no credentials)",
+            tlsPeer(host, port).c_str(), _lastConnectErr);
     const int ok = connectAtVerify(host, port, /*verifyPeer=*/false);
     _lastWasInsecure = ok == 1;
     return ok;
   }
 
   if (!_allowInsecureFallback && isVerificationError(_lastConnectErr)) {
-    LOG_ERR("TLS", "cert verify failed for %s (err=%d); insecure fallback disabled -> aborting", host, _lastConnectErr);
+    LOG_ERR("TLS", "cert verify failed for %s (err=%d); insecure fallback disabled -> aborting",
+            tlsPeer(host, port).c_str(), _lastConnectErr);
   }
   return 0;
 }

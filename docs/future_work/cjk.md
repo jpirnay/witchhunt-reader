@@ -168,7 +168,35 @@ Already decided:
 - SD-mode families start without kerning or ligatures (`FontBytes::data()` is null);
 - copying GPOS kern data into the mapped table area for large Latin and Cyrillic families can come later.
 
+**Shipped: the glyph store makes room.** The store's log is a ring of segments. A full log reclaims its oldest segment
+(keeping the glyphs drawn most) and a worn index is rebuilt, in idle time (`EpubReaderActivity::stepGlyphStoreRoom`) and
+at a chapter or book open, instead of wiping the store. Format 4: [file-formats.md](../file-formats.md#the-ttf-glyph-store-cptt).
+
 **Next step.** Write the 2c-4 plan. A2's line breaking is already in place, so CJK TTF testing can start as soon as SD mode loads.
+
+## Glyph store: a faster index rebuild
+
+**Open.** An index rebuild takes about 1.8 s on the X4 (Noto Sans TC at 12 pt: about 9,400 records, 16,384 slots), and
+in idle time it holds the loop task that long, so a key pressed then waits. With CJK at 12 pt the index fills before the
+log, so while many new glyphs arrive (the store-fill test book, `tools/make_cjk_store_fill_epub.py`) a rebuild comes about
+every five reclaims; a reclaim itself takes about 150 ms.
+
+**Ideas**, cheapest first:
+1. **Size the index for CJK records.** `planLayout` sizes an SD-mode index for 250 B a record (`kExpectedRecordSd`); at
+   12 pt a CJK record is about 150 B, so 70% of the index is reached before the log is full. Sized for 150 B, the log
+   fills first and reclaims make the room. Cost: index pages from the mapping budget (one 64 KB page per 8,192 slots),
+   so a little less log.
+2. **Program the index a sector at a time.** Each re-inserted slot is one 8-byte program call today (about 100 µs of
+   overhead each on the X3, so about 1 s of the 1.8 s). A RAM bitmap of occupied slots (2 KB for 16,384) gives every
+   record's slot without writing; one log walk per index sector fills a 4 KB buffer that is programmed whole: 32 program
+   calls instead of about 9,400. Estimated 0.5-0.8 s.
+3. **Rebuild more at opens.** Lower the open-only stale share (`kRebuildStalePercent`, 12%) so more rebuilds run behind
+   the chapter-open popup and fewer in idle time.
+4. **An A/B index rebuilt in slices.** A second index region filled across idle ticks while the first serves lookups,
+   switched by a journal entry: no long block at all. Cost: a second index's flash and mapping pages.
+
+**Next step.** Measure how the 1.8 s splits between the index erase, the log walks and the slot programs
+(`FlashGlyphStore::rebuildIndex`), then take 1 and 2.
 
 ## UI text in CJK
 

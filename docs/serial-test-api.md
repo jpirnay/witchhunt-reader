@@ -281,13 +281,15 @@ press that changes nothing on screen counts as done 1 s after it was taken in.
 | `transition` | a screen change is queued |
 | `input` | a press (or touch) has not been taken in yet, or is waiting out the double-press window |
 | `render` | a frame is queued, being drawn, or still being refreshed onto the panel; or the screen is about to change by itself (the reader's page still being built, a page turn on its way, the anti-aliasing redraw of the page); or the frame of the last command's effect is still to come |
-| `background` | the screen has work of its own to finish: the reader's chapter builds (the current one and the look-ahead), the pre-render of the next page, image decodes; Home's cover loading |
+| `background` | the screen has work of its own to finish: the reader's chapter builds (the current one and the look-ahead), the pre-render of the next page, image decodes, a step of the TrueType glyph store an idle tick would run (room to make: a reclaim or an index rebuild; or its use counts to take); Home's cover loading |
 | `settling` | nothing was busy, but not yet for 250 ms when the timeout came |
 
 With `:SCREEN` it waits only until the screen has settled (everything above but `background`).
 That is what you want before a screenshot after a page turn or after opening a book. A full
 `CMD:IDLE` in the reader also waits for the look-ahead builds of the next chapters, which start
-1.5 s after a page appears and can take tens of seconds on a long book.
+1.5 s after a page appears and can take tens of seconds on a long book, and for a TrueType glyph store that still
+needs room made (a reclaim or an index rebuild, `CMD:TTF`) or still has its use counts to take (their block is
+allocated at an idle step, not inside a draw), which the reader does in idle time.
 
 Send `CMD:IDLE` after the command it should wait for; the device handles them in order. While an
 `IDLE` is pending, the device still answers other commands; a second `IDLE` replaces the first.
@@ -323,6 +325,7 @@ EVT:POPUP <text>                    a popup was drawn
 EVT:BUILD_DONE spine=<n> pages=<m>  a chapter (spine item n, 1-based) finished building, with m pages
 EVT:TTF_FULL fills=<n>              the TrueType glyph store filled up (n since boot)
 EVT:TTF_WIPE ms=<t> wipes=<n>       the glyph store was emptied, in t ms (n since boot)
+EVT:TTF_ROOM ms=<t> rooms=<n> dropped=<d>  the glyph store made room (a segment reclaimed or the index rebuilt) in t ms; n and d since boot
 EVT:FONT_INSTALLED family=<name> ok=<0|1>  a font download ended, from the Font Manager or the web page
 ```
 
@@ -520,19 +523,27 @@ CMD:TTF:FULL
 Reply to `CMD:TTF`, the loaded TrueType families and their glyph store:
 
 ```
-TTF:families=1 names=NotoSansTC sd=1 log_used=80800 log_size=1835008 slots=512 ring=0 pending=0 renders=540 hits=2210 fills=0 wipes=1 last_wipe_ms=1312
+TTF:families=1 names=NotoSansTC sd=1 log_used=80800 log_size=1835008 slots=512 ring=0 pending=0 renders=540 hits=2210 segments=7 free=5 live_slots=498 draws=1830 fills=0 wipes=1 last_wipe_ms=1312 rooms=2 rebuilds=0 dropped=140 last_room_ms=96
 ```
 
 `names` lists the set's families in its order (the body's first, then a book's accent families); `sd=1` when one
 reads its outlines from the card; `log_used`/`log_size` the store's log in bytes; `slots` its index slots in use;
 `ring=1` while new glyphs are drawn without being stored (the store filled up, or a write failed); `pending=1` while
-a wipe waits for the next book open; `renders` and `hits` the glyphs drawn from outlines and read from the store
-since the set loaded. `fills`, `wipes` and `last_wipe_ms` count since boot, whichever set was loaded. With no
-TrueType family loaded the set's fields are replaced by `none`: `TTF:none fills=0 wipes=0 last_wipe_ms=0`.
+a wipe waits for the next chapter or book open (idle time leaves it); `renders` and `hits` the glyphs drawn from outlines and read from the store
+since the set loaded. `segments` and `free` the log's segments and the ones not live; `live_slots` the index slots
+that name a live record (`slots` less the stale ones and the "no glyph" marks); `draws` the glyph draws the store counted as uses (those of a
+page's black-and-white pass); it stays 0 until the store keeps use counts: once the log nears full, from the next idle
+step or chapter open (from the set's load when the log already is), or from `CMD:TTF:FULL`. `fills`, `wipes` and `last_wipe_ms` count since boot, whichever set was loaded; so do
+`rooms` (`makeRoom` calls that did work: a segment reclaimed or the index rebuilt; a wipe counts only in `wipes`,
+except a rebuild whose journal is full, which becomes one), `rebuilds`, `dropped` (glyphs
+the reclaims dropped) and `last_room_ms`. With no TrueType family loaded the set's fields are replaced by `none`:
+`TTF:none fills=0 wipes=0 last_wipe_ms=0 rooms=0 rebuilds=0 dropped=0 last_room_ms=0`.
 
 `CMD:TTF:FULL` makes the store act as if it had just filled up: `TTF_OK:full`, or `TTF_ERROR:no TrueType family
-loaded`. New glyphs go to the ring and the wipe is pending, exactly as when the log runs out, so what a full store
-does can be tested at any size without reading until it fills. Development builds only.
+loaded`. New glyphs are drawn without being stored, exactly as when the log runs out, and the next safe point (idle
+time, or a chapter or book open) reclaims the oldest segment, so what a full store does can be tested at any size
+without reading until it fills. Watch for `EVT:TTF_ROOM`. With fewer than two live segments there is nothing to
+reclaim: writes simply resume and no event arrives. Development builds only.
 
 ### Files on the card: `FS`
 

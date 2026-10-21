@@ -23,9 +23,28 @@ constexpr int FAKE_MEMORY_E = -125;  // wolfSSL MEMORY_E
 SecureClient::~SecureClient() { stop(); }
 bool SecureClient::tls13Available() { return false; }
 int SecureClient::connect(IPAddress, uint16_t) { return 0; }
+// The handshake as the real connect() decides it, without TLS: unverified when told to be insecure;
+// else verified, unless the server is in FakeNet::unverifiable(), which takes the fallback when it
+// is allowed and is refused when not.
 int SecureClient::connect(const char* host, uint16_t port) {
   _lastReadErr = 0;
+  _lastWasInsecure = false;
+  const std::string peer = tlsPeer(host, port);
+  const char* how = "unverified";
+  if (!_insecure) {
+    if (FakeNet::unverifiable().count(peer) == 0) {
+      how = "verified";
+    } else if (_allowInsecureFallback) {
+      how = "fallback";
+    } else {
+      FakeNet::handshakes().push_back(peer + " refused");
+      _connected = false;
+      return 0;
+    }
+  }
+  FakeNet::handshakes().push_back(peer + " " + how);
   _connected = _transport.connect(host, port) == 1;
+  _lastWasInsecure = _connected && std::string(how) != "verified";
   return _connected ? 1 : 0;
 }
 size_t SecureClient::write(uint8_t b) { return write(&b, 1); }

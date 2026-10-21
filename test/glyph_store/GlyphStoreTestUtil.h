@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -24,9 +25,10 @@ constexpr uint32_t kFlashBytes = 262144;
 constexpr uint8_t kTestSizes = 4;
 constexpr uint32_t testPpem(const uint8_t size) { return (40u + size) << 6; }
 
-/// A small store: one 4 KB style at 64 KB, then the index, the pair index and the log, each on a sector.
+/// A small store: one 4 KB style at 64 KB, then the index, the pair index and the log, each on a sector. The log is
+/// logBytes / segmentBytes segments (16 of one sector by default).
 inline glyphstore::Layout smallLayout(const uint32_t indexSlots = 1024, const uint32_t pairSlots = 512,
-                                      const uint32_t logBytes = 65536) {
+                                      const uint32_t logBytes = 65536, const uint32_t segmentBytes = 4096) {
   glyphstore::Layout layout{};
   glyphstore::Geometry& g = layout.geometry;
   g.styleCount = 1;
@@ -38,6 +40,7 @@ inline glyphstore::Layout smallLayout(const uint32_t indexSlots = 1024, const ui
   g.pairSlots = pairSlots;
   g.logOffset = g.pairOffset + glyphstore::alignUp(pairSlots * glyphstore::kSlotBytes, glyphstore::kSectorBytes);
   g.logSize = logBytes;
+  g.segmentBytes = segmentBytes;
   return layout;
 }
 
@@ -99,6 +102,19 @@ inline uint32_t recordSize(const uint8_t width, const uint8_t height) {
   return glyphstore::align4(glyphstore::kRecordHeaderBytes + glyphDataBytes(width, height, true));
 }
 
+/// The log offset `offset` bytes into `segment`'s payload, past its header.
+inline uint32_t inSegment(const glyphstore::Layout& layout, const uint32_t segment, const uint32_t offset) {
+  return segment * layout.geometry.segmentBytes + glyphstore::kSegmentHeaderBytes + offset;
+}
+
+/// Programs `segment`'s header with `epoch`, as the store opens a segment: its `retired` word stays erased.
+inline void writeSegmentHeader(SimNorFlash& flash, const glyphstore::Layout& layout, const uint32_t segment,
+                               const uint32_t epoch) {
+  const glyphstore::SegmentHeader header{glyphstore::kSegmentMagic, epoch, ~epoch, glyphstore::kErased};
+  ASSERT_TRUE(flash.program(layout.geometry.logOffset + segment * layout.geometry.segmentBytes, &header,
+                            offsetof(glyphstore::SegmentHeader, retired)));
+}
+
 /// Programs a record straight into the log at `offset`, bypassing the store (the recovery tests). Only the
 /// first `bitmapBytes` of its bitmap are written, as a cut write would leave it.
 inline void writeRawRecord(SimNorFlash& flash, const glyphstore::Layout& layout, const uint32_t offset,
@@ -147,6 +163,37 @@ inline bool storedIntact(const FlashGlyphStore& store, const uint32_t key, const
     if (bitmap[i] != pattern(key, i)) return false;
   }
   return true;
+}
+
+/// The helper ring's glyphs: record n is a kRingWidth x kRingHeight glyph under ringKey(n), a 600-byte record, six to
+/// a 4 KB segment (3,616 of its 4,096 bytes).
+constexpr uint8_t kRingWidth = 40;
+constexpr uint8_t kRingHeight = 58;
+constexpr uint32_t ringKey(const uint32_t n) { return glyphstore::makeKey(0x4E00 + n, 0, 0); }
+
+/// Fills an open store, from record 0, until one segment is free: the counts are kept (taken as the font set's next
+/// makeRoom() takes them), the tail is segment 0 and copies have room. On smallLayout(), 85 records: segments 0-13 full
+/// (six each), one record in segment 14. Returns how many were stored.
+inline uint32_t fillRing(FlashGlyphStore& store, GlyphBatch& batch) {
+  uint32_t n = 0;
+  while (store.freeSegments() > 1 && n < 200) {
+    EXPECT_TRUE(stage(batch, ringKey(n), kRingWidth, kRingHeight)) << n;
+    EXPECT_EQ(Commit::Stored, store.commit(batch)) << n;
+    ++n;
+  }
+  EXPECT_TRUE(store.keepCountsIfDue());
+  return n;
+}
+
+/// Keys with the same home slot, found by search: a probe-chain test needs real collisions.
+inline std::vector<uint32_t> collidingKeys(const uint32_t slots, const size_t count) {
+  std::vector<uint32_t> keys;
+  const uint32_t home = glyphstore::homeSlot(glyphstore::makeKey(0x4E00, 0, 0), slots);
+  for (uint32_t cp = 0x4E00; keys.size() < count && cp < 0x10FFFF; ++cp) {
+    const uint32_t key = glyphstore::makeKey(cp, 0, 0);
+    if (glyphstore::homeSlot(key, slots) == home) keys.push_back(key);
+  }
+  return keys;
 }
 
 /// Not stored, or stored intact: a lookup may miss a glyph whose write was cut, but never serve wrong bytes.

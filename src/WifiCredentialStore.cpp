@@ -10,18 +10,14 @@
 // Initialize the static instance
 WifiCredentialStore WifiCredentialStore::instance;
 
-namespace {
-constexpr char WIFI_FILE_JSON[] = "/.crosspoint/wifi.json";
-}  // namespace
-
 bool WifiCredentialStore::saveToFile() const {
   Storage.mkdir("/.crosspoint");
-  return JsonSettingsIO::saveWifi(*this, WIFI_FILE_JSON);
+  return JsonSettingsIO::saveWifi(*this, FILE_PATH);
 }
 
 bool WifiCredentialStore::loadFromFile() {
-  if (Storage.exists(WIFI_FILE_JSON)) {
-    String json = Storage.readFile(WIFI_FILE_JSON);
+  if (Storage.exists(FILE_PATH)) {
+    String json = Storage.readFile(FILE_PATH);
     if (!json.isEmpty()) {
       bool resave = false;
       bool result = JsonSettingsIO::loadWifi(*this, json.c_str(), &resave);

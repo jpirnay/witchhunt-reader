@@ -9,10 +9,10 @@
 #include "GlyphStoreFormat.h"
 
 /// Glyph records staged in a caller-owned buffer exactly as they will sit in the log, so
-/// FlashGlyphStore::commit() writes a whole batch with ONE program call. On the X3 each write call costs
-/// about 100 µs on top of its bytes, and one call per batch also programs each flash page once rather than
-/// once per record. On boards with PSRAM, keep the buffer in internal RAM (flash writes from PSRAM go in
-/// 32-byte pieces).
+/// FlashGlyphStore::commit() writes a whole batch with ONE program call (one per segment when the batch crosses into
+/// the next). On the X3 each write call costs about 100 µs on top of its bytes, and one call per batch also programs
+/// each flash page once rather than once per record. On boards with PSRAM, keep the buffer in internal RAM (flash
+/// writes from PSRAM go in 32-byte pieces).
 class GlyphBatch {
  public:
   GlyphBatch(uint8_t* buffer, const uint32_t capacity) : buffer_(buffer), capacity_(capacity) {}
@@ -44,7 +44,9 @@ class GlyphBatch {
 };
 
 /// The persistent TTF glyph store in the `spiffs` partition:
-/// - a write-once hash index and an append-only log of rendered glyphs;
+/// - a write-once hash index and a log of rendered glyphs, a ring of segments: records are appended at the head
+///   segment, the head moves into the next free segment when a record does not fit, and the oldest live segment is
+///   the tail;
 /// - a kerning pair index, and a face table that gives each family's pixel sizes a small index for the glyph keys;
 /// - the fonts' own bytes, in style blocks: a family set's (spec 11.1), one family or several, all in one store.
 ///
@@ -52,11 +54,17 @@ class GlyphBatch {
 /// - Every byte is programmed at most once between erases.
 /// - A record is written before the slot that points at it, so a power cut leaves at worst bytes that
 ///   nothing references, and the next open resumes past them.
-/// - Erases happen only at install and wipe, and only on sectors that hold data.
+/// - A slot names its record's segment by the epoch the segment got when the head moved into it, so a slot into a
+///   segment that is no longer live, or was opened again since, is never served. The index is rebuilt before the
+///   epochs a slot can name span enough to wrap its 12 bits.
+/// - A rebuild of the index gives a slot back only to records a slot named before it: one without (its write cut
+///   before its slot) may be torn, and stays unreferenced.
+/// - Erases happen only at install, wipe, when the head moves into a segment, when the oldest is reclaimed and when the
+///   index is rebuilt, and only on sectors that hold data.
 /// - A lookup reads mapped flash in place: a hit is a pointer to the EpdGlyph inside the log.
 ///
 /// Lifetimes: every pointer the store hands out (find()'s EpdGlyph, logBase(), mapStyle()) stays valid until
-/// close(), open(), beginInstall() or wipe(). The NorFlash must outlive the store.
+/// close(), open(), beginInstall(), wipe() or makeRoom(). The NorFlash must outlive the store.
 ///
 /// Not thread-safe: TtfFont calls it only under RenderLock.
 class FlashGlyphStore {
@@ -73,12 +81,16 @@ class FlashGlyphStore {
   /// What commit() and markNoGlyph() did:
   /// - Stored: everything is findable.
   /// - Refused: nothing was written. A key was not a glyph key or used a face index not claimed since the
-  ///   last wipe, or the store is not open. Wipe pending does not change.
-  /// - Full, WriteFailed: the store is full, or a write failed. Part of a batch may have been stored
-  ///   (find() tells). Wipe is now pending, and later writes are refused with Full until wipe().
+  ///   last wipe, a record is larger than a segment's payload, or the store is not open. Wipe pending does not
+  ///   change.
+  /// - Full: no free segment for the batch, the index past its load limit, or a probe chain full (needsRoom()),
+  ///   or writes were already stopped. Writes stop until room is made; nothing is wiped. Part of a batch may have
+  ///   been stored (find() tells).
+  /// - WriteFailed: a write failed. Part of a batch may have been stored. Wipe is now pending, and later writes are
+  ///   refused with Full until wipe().
   enum class Commit : uint8_t { Stored, Refused, Full, WriteFailed };
 
-  explicit FlashGlyphStore(NorFlash& flash) : flash_(flash) {}
+  explicit FlashGlyphStore(NorFlash& flash) : flash_(flash) { resetRing(); }
   ~FlashGlyphStore() { close(); }
   FlashGlyphStore(const FlashGlyphStore&) = delete;
   FlashGlyphStore& operator=(const FlashGlyphStore&) = delete;
@@ -119,10 +131,36 @@ class FlashGlyphStore {
   // --- Glyphs ---
 
   Lookup find(uint32_t key, const EpdGlyph** glyph) const;
-  /// Writes the staged records with one program call, then one slot per record, and clears the batch.
+  /// Writes the staged records, one program call per segment they go to, then one slot per record, and clears the
+  /// batch. A record never crosses a segment's end: one that does not fit the head moves the head on.
   Commit commit(GlyphBatch& batch);
   /// Records that the font has no glyph for this key: a slot with no record.
   Commit markNoGlyph(uint32_t key);
+
+  // --- Use counts ---
+
+  /// Counts one draw of `glyph`, a pointer find() handed out: adds one to its slot's count (at most 3) and to
+  /// drawsCounted(). Does nothing while counts are not kept, or for anything that is not a live record of the log.
+  /// Const because the font set draws through const paths; the counts are RAM, not store state.
+  void noteDrawn(const EpdGlyph* glyph) const;
+  /// Counts are wanted once room will soon have to be made: the live segments at kCountsAtPercent of the log, or the
+  /// free ones within one of kFreeSegmentsTarget. Their block (indexSlots / 4 bytes) is held for the session, so it is
+  /// taken only at a safe point: by keepCountsIfDue() once open() of a ring already that full, or a commit, made them
+  /// due, or by markFull(). Kept until close() or wipe(). Refused memory is logged once and not asked for again until
+  /// open().
+  bool countsKept() const { return useCounts_ != nullptr; }
+  /// An open() or a commit left the ring as full as counts are wanted at, and they are not kept yet. A commit runs
+  /// inside a page draw or a section build, where the reader may have released memory it takes back after (the X3's
+  /// secondary framebuffer, for a build): a session-long block taken there could land in that region and pin it.
+  bool countsDue() const { return countsDue_; }
+  /// Takes the counts' memory when countsDue(). Call it where the heap is settled: the end of a font set's load (after
+  /// its own blocks), the font set's makeRoom(), at an idle tick or at a chapter or book open before a section build
+  /// releases anything. True when counts are kept.
+  bool keepCountsIfDue();
+  /// The count (0 to 3) of the slot find() answers with for `key`; 0 when counts are not kept or `key` is not stored.
+  uint8_t useCount(uint32_t key) const;
+  /// Draws counted since open(), saturated ones included.
+  uint32_t drawsCounted() const { return drawsCounted_; }
 
   // --- Faces ---
 
@@ -142,46 +180,150 @@ class FlashGlyphStore {
   /// stops them).
   bool storePair(uint16_t left, uint16_t right, uint8_t family, uint8_t style, int16_t fontUnits);
 
-  // --- A full store, and the wipe ---
+  // --- Making room, and the wipe ---
 
-  bool wipePending() const { return wipePending_; }
-  /// Stops writes and records wipe pending, as a full log does: what a filled store does next, at any size. The serial
-  /// test API's CMD:TTF:FULL. False when the store is not open or the wipe word could not be written.
+  /// How long makeRoom() may take: Idle, one step (a reader's idle tick); Open, until there is enough room (a chapter
+  /// or book open, behind the busy indicator).
+  enum class Budget : uint8_t { Idle, Open };
+  /// What makeRoom() left:
+  /// - Enough: needsRoom(budget) is false, and writes go on.
+  /// - More: room is still to be made; writes go on into what is free, unless the index stops them.
+  /// - Failed: a write failed (wipe now pending), or the store is not open or already has a wipe pending: only wipe()
+  ///   or open() goes on from here.
+  enum class Room : uint8_t { Enough, More, Failed };
+  /// What one makeRoom() call did: segments reclaimed, the glyphs they copied forward and the ones they dropped, and
+  /// whether the index was rebuilt.
+  struct RoomWork {
+    uint16_t reclaimed = 0;
+    uint16_t kept = 0;
+    uint16_t dropped = 0;
+    bool rebuilt = false;
+  };
+  /// Makes room a step at a time: Idle takes one step, Open steps until enough (at most segmentCount() reclaims and one
+  /// rebuild). A step is one of:
+  /// - A reclaim of the oldest segment, while two or more are live: its glyphs whose use count is above 0 are copied
+  ///   to the head, at most half a segment's payload of them (the most used first, then the newest), and only when
+  ///   they fit the head and the free segments; the rest are dropped, and the segment is erased. A copy's count is the
+  ///   old one halved, so a glyph not drawn again is dropped within three passes.
+  /// - A rebuild of the index from the log: the index is erased, and each live record a slot named gets a slot again,
+  ///   with its count; the "no glyph" marks are forgotten. When the index stops writes (past its load limit, a probe
+  ///   chain full, or no epoch left short of kRebuildEpochLimit) the rebuild comes first, in idle time too; but with a
+  ///   full index whose stale slots and marks together are under kRebuildStalePercent of it, and two or more segments
+  ///   live, a rebuild would soon fill again, so a reclaim comes first and leaves its slots stale. The other reasons
+  ///   for a rebuild wait for Open, and come after its reclaims. A rebuild that finds no memory waits for the next
+  ///   Open, or the next open(). With the rebuild journal full, the store is wiped instead (generation() moves on), and
+  ///   only by an Open: a wipe takes seconds, so idle time leaves that rebuild, whatever calls for it, to the next one.
+  /// Writes stopped for room resume, unless the index stops them. Fills `work` with what this call did. Call it only
+  /// where no record of the log is in use: it invalidates every pointer into the log.
+  Room makeRoom(Budget budget, RoomWork* work = nullptr);
+  /// Room is to be made by makeRoom(budget): writes stopped for room (a batch that did not fit, or markFull()), fewer
+  /// than kFreeSegmentsTarget segments free, or the index stops writes (past its load limit, a probe chain full, or the
+  /// epochs spent up to kRebuildEpochLimit). With Open, also a rebuild that waits for one: kRebuildEpochSpan epochs
+  /// since the last rebuild, the last one cut short by a power cut, or kRebuildStalePercent of the index's slots stale
+  /// (the "no glyph" marks are not: a family lacking a whole script would rebuild at every open to learn them again).
+  bool needsRoom(Budget budget = Budget::Idle) const {
+    return open_ && (roomAsked_ || freeSegments() < glyphstore::kFreeSegmentsTarget || indexFull_ || chainFull_ ||
+                     epochsLeft() == 0 || (budget == Budget::Open && rebuildWaitsForOpen()));
+  }
+  /// Whether a makeRoom(Budget::Idle) call would do a step now, by the step it would choose: needsRoom(Idle) less what
+  /// idle time leaves alone (a wipe pending, a rebuild that found no memory or would wipe the store with the journal
+  /// full and waits for an Open, a reclaim with fewer than two segments live).
+  bool idleWorkDue() const { return open_ && !wipePending_ && nextStep(Budget::Idle, false) != Step::None; }
+  /// The epoch the last rebuild began from, the tail's then: no slot written since names an older one. 0 with no
+  /// rebuild since the last wipe.
+  uint32_t rebuildBase() const { return journal_.base; }
+  /// Rebuilds since open().
+  uint32_t rebuilds() const { return rebuilds_; }
+  /// Acts as if the store had just filled up: writes stop, the use counts are kept from now on if they are not yet,
+  /// and the next makeRoom() reclaims the oldest segment however many are free, when two or more are live; either way
+  /// writes resume after it. The serial test API's CMD:TTF:FULL. False when the store is not open.
   bool markFull();
-  /// Nothing is written until the next wipe: the log or the index filled, a write failed, or the store opened
-  /// with a wipe pending. A full face table alone does not stop writes.
+  /// Nothing is written until room is made or the next wipe: the ring or the index filled, or markFull() (needsRoom()),
+  /// a write failed, or the store opened with a wipe pending. A full face table alone does not stop writes.
   bool writesStopped() const { return writesStopped_; }
+  bool wipePending() const { return wipePending_; }
   /// Records wipe pending in flash, then erases the index, the pair index and the log (only sectors that hold
-  /// data) and last the state sector (face table and wipe word). A cut anywhere leaves wipe pending, and the
-  /// next wipe() finishes the job. Call it only where no pointer into the log and no face index is in use:
+  /// data) and last the state sector (face table, wipe word, rebuild journal). A cut anywhere leaves wipe pending,
+  /// and the next wipe() finishes the job. Call it only where no pointer into the log and no face index is in use:
   /// at book open, or before a section build. False: not done; it stays pending.
   bool wipe();
 
   // --- Stats ---
 
-  uint32_t logUsed() const { return logUsed_; }
+  /// Bytes the live segments hold, their headers included: whole segments behind the head, and the head up to where
+  /// writing resumes.
+  uint32_t logUsed() const { return live_ == 0 ? 0 : (live_ - 1u) * geometry_.segmentBytes + headUsed_; }
+  /// Index slots in use, stale ones and "no glyph" marks included.
   uint32_t usedSlots() const { return usedSlots_; }
+  /// Index slots that name a live record. The rest of usedSlots() is what a rebuild frees: slots gone stale, and the
+  /// "no glyph" marks it forgets. Only the stale ones call for a rebuild at an open; the marks do once they fill the
+  /// index.
+  uint32_t liveSlots() const { return liveSlots_; }
   uint32_t usedPairSlots() const { return usedPairs_; }
+  uint32_t segmentCount() const { return geometry_.segmentBytes == 0 ? 0 : geometry_.logSize / geometry_.segmentBytes; }
+  uint32_t freeSegments() const { return segmentCount() - live_; }
+  /// The epoch the next segment the head moves into gets.
+  uint32_t epoch() const { return nextEpoch_; }
   const glyphstore::Geometry& geometry() const { return geometry_; }
 
  private:
   enum class Insert : uint8_t { Done, ChainFull, WriteFailed };
+  enum class Step : uint8_t { None, Reclaim, Rebuild };
+  // What a rebuild came to: done, the store wiped instead (a full journal), no memory for its plan (nothing written;
+  // it waits), or a failed write (wipe pending).
+  enum class Rebuilt : uint8_t { Done, Wiped, NoMemory, Failed };
+  // The journal of index rebuilds in the state sector, as open() read it and the rebuilds since wrote it.
+  struct Journal {
+    uint32_t used = 0;   // entries in use
+    uint32_t base = 0;   // the last entry's
+    bool done = true;    // the last entry's `done` is programmed, or there is none
+    uint32_t floor = 0;  // the base of the last entry done: no slot names an older epoch, even after a cut rebuild
+  };
 
   // The EpdGlyph of the record at `offset` in the log, read in place (4-byte aligned in mapped flash).
   const EpdGlyph& recordGlyph(const uint32_t offset) const {
     return *reinterpret_cast<const EpdGlyph*>(__builtin_assume_aligned(log_ + offset + 4, 4));
   }
-  bool plausibleRecord(uint32_t offset) const;
-  const EpdGlyph* validRecord(uint32_t key, uint32_t dataOffset) const;
-  uint32_t scanLog() const;
-  Insert insert(uint32_t tableOffset, const uint8_t* table, uint32_t slots, uint32_t key, uint32_t value);
-  Commit insertGlyphSlot(uint32_t key, uint32_t value);
+  // The one rule for where records go: a record of `bytes` fits a segment with `used` bytes in use, its header
+  // included, when it ends at or before the segment's end. One that does not goes to the next segment.
+  bool fitsSegment(const uint32_t used, const uint32_t bytes) const { return bytes <= geometry_.segmentBytes - used; }
+  // Lays a record of `bytes` after `used` bytes of a segment: in it when it fits, else past the header of the next
+  // one, counted in `opens`.
+  void placeRecord(uint32_t bytes, uint32_t& used, uint32_t& opens) const;
+  bool plausibleRecord(uint32_t offset, uint32_t end) const;
+  const EpdGlyph* validRecord(uint32_t key, uint32_t value) const;
+  template <typename Visit>
+  uint32_t scanLog(uint32_t segment, Visit&& visit) const;
+  template <typename Visit>
+  void walkLive(Visit&& visit) const;
+  void findRing();
+  bool moveHead();
+  void resetRing();
+  Step nextStep(Budget budget, bool rebuildTried) const;
+  bool crowds(uint32_t slots) const;
+  bool rebuildWaitsForOpen() const;
+  uint32_t epochsLeft() const;
+  uint32_t segmentsToOpen() const { return freeSegments() < epochsLeft() ? freeSegments() : epochsLeft(); }
+  bool reclaimTail(RoomWork& work);
+  bool copyRecord(uint32_t from, uint32_t key, uint32_t bytes, uint8_t count, RoomWork& work);
+  Rebuilt rebuildIndex(RoomWork& work);
+  void readJournal();
+  Insert insert(uint32_t tableOffset, const uint8_t* table, uint32_t slots, uint32_t key, uint32_t value,
+                uint32_t* at = nullptr);
+  Commit insertGlyphSlot(uint32_t key, uint32_t value, uint32_t* at = nullptr);
   Commit writeBatch(GlyphBatch& batch);
   bool faceClaimed(uint32_t key) const { return (claimedFaces_ >> glyphstore::keyFaceIndex(key)) & 1u; }
+  uint32_t findSlot(uint32_t key, uint32_t value) const;
+  uint8_t countAt(uint32_t slot) const;
+  void setCount(uint32_t slot, uint8_t count);
+  bool countsWanted() const;
+  void keepCounts();
+  void dropCounts();
   bool readFaceEntry(uint8_t i, glyphstore::FaceEntry& entry) const;
   bool eraseWritten(uint32_t offset, uint32_t len);
   bool isBlank(uint32_t sector) const;
   void stopWrites();
+  void stopForRoom();
   bool recordWipePending();
 
   NorFlash& flash_;
@@ -196,13 +338,35 @@ class FlashGlyphStore {
   const uint8_t* sdMap_ = nullptr;     // every SD-mode style's block
   uint8_t mappedStyle_ = 0xFF;
   uint8_t firstSd_ = 0;  // the first SD-mode block; styleCount() when none
-  uint32_t logUsed_ = 0;
+  // The ring. A live segment's epoch is the one in its header; a free one's is kErased. The live segments run from
+  // the tail to the head in ring order, their epochs growing; with none live, head_ is the segment the first record
+  // opens.
+  uint32_t segEpoch_[glyphstore::kMaxSegments];
+  uint8_t head_ = 0;
+  uint8_t tail_ = 0;
+  uint8_t live_ = 0;
+  uint32_t headUsed_ = 0;  // bytes used in the head, its header included
+  uint32_t nextEpoch_ = 1;
+  uint32_t liveSlots_ = 0;
+  bool chainFull_ = false;  // a probe chain filled: writes stop until the index is rebuilt
+  bool indexFull_ = false;  // the index passed kIndexLoadPercent: the same
+  bool roomAsked_ = false;  // writes stopped for room: the next makeRoom() reclaims, however many segments are free
+  Journal journal_;
+  uint32_t rebuilds_ = 0;        // since open()
+  bool rebuildStarved_ = false;  // a rebuild found no memory: idle time leaves the next try to an Open
   uint32_t usedSlots_ = 0;
+  uint32_t marks_ = 0;  // of usedSlots_, the "no glyph" marks: neither live nor stale
   uint32_t usedPairs_ = 0;
   uint32_t claimedFaces_ = 0;  // bit i: face entry i is claimed
   uint32_t generation_ = 0;
   bool open_ = false;
   bool wipePending_ = false;
   bool writesStopped_ = false;
+  // Two bits an index slot, taken at a safe point once the ring nears full, or by markFull(). The pointee is changed
+  // from const noteDrawn().
+  std::unique_ptr<uint8_t[]> useCounts_;
+  bool countsTried_ = false;  // memory was asked for this session
+  bool countsDue_ = false;    // a commit found counts wanted: keepCountsIfDue() takes them
+  mutable uint32_t drawsCounted_ = 0;
   std::unique_ptr<glyphstore::Header> installing_;  // written by finishInstall()
 };
