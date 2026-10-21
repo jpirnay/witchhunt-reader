@@ -10,6 +10,7 @@
 #include <Arduino.h>
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
+#include <ttf/TtfFamily.h>
 #include <ttf/TtfRasterizer.h>
 
 #include "ttf_raster_golden.h"
@@ -78,8 +79,77 @@ constexpr char32_t kKanji[] = U"日本語文字書読鬱慶議驚龍鑑響漢点
 constexpr uint32_t kKanjiCount = sizeof(kKanji) / sizeof(kKanji[0]) - 1;
 constexpr uint32_t kKanaCount = (0x3094 - 0x3041) + (0x30F4 - 0x30A1);
 
+// The glyphs of `glyphs` drawn twice each, the second timed: the cost with the code and the font already cached.
+Run renderWarm(Rasterizer& rasterizer, FontBytes& bytes, const Face& face, const uint16_t* glyphs, const uint32_t count,
+               const uint32_t ppem26_6) {
+  Run run;
+  for (uint32_t i = 0; i < count; ++i) {
+    EpdGlyph metrics{};
+    rasterizer.render(bytes, face, glyphs[i], ppem26_6, &metrics);
+    const int64_t start = esp_timer_get_time();
+    const Status status = rasterizer.render(bytes, face, glyphs[i], ppem26_6, &metrics);
+    const int64_t us = esp_timer_get_time() - start;
+    if (status != Status::Ok) {
+      ++run.failed;
+      continue;
+    }
+    ++run.ok;
+    run.totalUs += us;
+    run.maxUs = us > run.maxUs ? us : run.maxUs;
+    run.pixels += static_cast<uint64_t>(metrics.width) * metrics.height;
+    run.hash = ttf_golden::hashGlyph(run.hash, glyphs[i], metrics, rasterizer.output());
+  }
+  return run;
+}
+
+// What another component does to the flash cache between two glyphs (the layout, the store, SdFat): `bytes` of flash
+// read, a line at a time. Bookerly's file is flash the Japanese runs never read.
+volatile uint32_t gPolluteSink = 0;
+void polluteCache(const uint32_t bytes) {
+  uint32_t sum = 0;
+  for (uint32_t at = 0; at < bytes && kFontStart + at < kFontEnd; at += 32) sum += kFontStart[at];
+  gPolluteSink = sum;
+}
+
+Run renderPolluted(Rasterizer& rasterizer, FontBytes& bytes, const Face& face, const uint16_t* glyphs,
+                   const uint32_t count, const uint32_t ppem26_6, const uint32_t pollute) {
+  Run run;
+  for (uint32_t i = 0; i < count; ++i) {
+    polluteCache(pollute);
+    EpdGlyph metrics{};
+    const int64_t start = esp_timer_get_time();
+    const Status status = rasterizer.render(bytes, face, glyphs[i], ppem26_6, &metrics);
+    const int64_t us = esp_timer_get_time() - start;
+    if (status != Status::Ok) {
+      ++run.failed;
+      continue;
+    }
+    ++run.ok;
+    run.totalUs += us;
+    run.maxUs = us > run.maxUs ? us : run.maxUs;
+    run.pixels += static_cast<uint64_t>(metrics.width) * metrics.height;
+    run.hash = ttf_golden::hashGlyph(run.hash, glyphs[i], metrics, rasterizer.output());
+  }
+  return run;
+}
+
+// SD mode without a card: the style's block made from the file (SdBlock) and copied to the heap, the outlines read
+// through FontBytes' far range and an SdPageCache from the file in flash, as the card would hand them over (the card's
+// own time aside). What the engine spends per glyph reading outlines in SD mode.
+struct FlashFile {
+  const uint8_t* data;
+  uint32_t size;
+};
+bool flashRead(void* ctx, const uint32_t offset, void* dst, const uint32_t len) {
+  const auto* f = static_cast<const FlashFile*>(ctx);
+  if (offset > f->size || len > f->size - offset) return false;
+  memcpy(dst, f->data + offset, len);
+  return true;
+}
+
 // One font of the subset at 12 pt: kana and kanji together, the kanji alone (the dense ones), and the kanji
-// with the SD mode's 8 KB pool.
+// with the SD mode's 8 KB pool. Then kana and kanji: drawn twice each (warm), with 8 KB of other
+// flash read before each glyph (polluted), from a copy of the file in RAM (no flash reads of the font), and in SD mode.
 void benchJapanese(const char* name, const uint8_t* start, const uint8_t* end) {
   FontBytes bytes(start, static_cast<uint32_t>(end - start));
   Face face;
@@ -102,14 +172,61 @@ void benchJapanese(const char* name, const uint8_t* start, const uint8_t* end) {
   }
   Serial.printf("%s: font %u B, %u glyphs, scratch %u B\n", name, static_cast<unsigned>(bytes.size()),
                 static_cast<unsigned>(face.numGlyphs), static_cast<unsigned>(rasterizer.scratchBytes()));
-  char label[32];
+  char label[40];
   snprintf(label, sizeof(label), "%s_kana+kanji_12pt", name);
   report(label, renderGlyphs(rasterizer, bytes, face, glyphs, count, ppem));
   snprintf(label, sizeof(label), "%s_kanji_12pt", name);
   report(label, renderGlyphs(rasterizer, bytes, face, kanji, kKanjiCount, ppem));
+  snprintf(label, sizeof(label), "%s_warm_12pt", name);
+  report(label, renderWarm(rasterizer, bytes, face, glyphs, count, ppem));
+  snprintf(label, sizeof(label), "%s_polluted8k_12pt", name);
+  report(label, renderPolluted(rasterizer, bytes, face, glyphs, count, ppem, 8192));
+  {
+    const uint32_t size = static_cast<uint32_t>(end - start);
+    auto* copy = static_cast<uint8_t*>(malloc(size));
+    if (copy) {
+      memcpy(copy, start, size);
+      FontBytes ram(copy, size);
+      Face ramFace;
+      if (parseFace(ram, &ramFace) == FaceStatus::Ok) {
+        snprintf(label, sizeof(label), "%s_ram_12pt", name);
+        report(label, renderGlyphs(rasterizer, ram, ramFace, glyphs, count, ppem));
+      }
+      free(copy);
+    } else {
+      Serial.printf("%s: no %u B for the RAM copy\n", name, static_cast<unsigned>(size));
+    }
+  }
   rasterizer.allocate(planScratch(face, ppem, kPoolBytesSd));
   snprintf(label, sizeof(label), "%s_kanji_12pt_pool8k", name);
   report(label, renderGlyphs(rasterizer, bytes, face, kanji, kKanjiCount, ppem));
+  snprintf(label, sizeof(label), "%s_kana+kanji_12pt_pool8k", name);
+  report(label, renderGlyphs(rasterizer, bytes, face, glyphs, count, ppem));
+  {
+    FlashFile file{start, static_cast<uint32_t>(end - start)};
+    const FileSource source{file.size, flashRead, &file, 1};
+    SdBlock* block = new SdBlock();
+    SdPageCache* pages = new SdPageCache();
+    uint8_t* blockData = nullptr;
+    if (block->plan(source) == SdPlan::Ok && (blockData = static_cast<uint8_t*>(malloc(block->bytes())))) {
+      FileSource blockSource = block->source();
+      const glyphstore::SdOutlines outlines = block->outlines();
+      const SdRange range{source, outlines.fontOffset, outlines.fileOffset, outlines.length, pages};
+      FontBytes sd(blockData, block->bytes(), &range);
+      Face sdFace;
+      if (blockSource.read(blockSource.ctx, 0, blockData, block->bytes()) && parseFace(sd, &sdFace) == FaceStatus::Ok) {
+        snprintf(label, sizeof(label), "%s_sd_12pt_pool8k", name);
+        report(label, renderGlyphs(rasterizer, sd, sdFace, glyphs, count, ppem));
+        Serial.printf("%s: SD block %u B, %u page reads\n", name, static_cast<unsigned>(block->bytes()),
+                      static_cast<unsigned>(pages->misses()));
+      }
+    } else {
+      Serial.printf("%s: no SD block\n", name);
+    }
+    free(blockData);
+    delete pages;
+    delete block;
+  }
   rasterizer.release();
 }
 
