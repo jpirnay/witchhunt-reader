@@ -90,6 +90,7 @@ const fui::KeyboardLayout URL_SNIPPET_LAYOUT{URL_SNIP_ROWS, 4};
 void KeyboardEntryActivity::onEnter() {
   Activity::onEnter();
   cursorPos = text.length();
+  typedEnd = std::string::npos;
   // URL layers are English; everything else opens on the UI language's layout.
   layoutId = inputType == InputType::Url ? fui::KeyboardLayoutId::QwertyEn : keyboard_layouts::startingLayout();
   // The key only earns its slot in the bottom row with somewhere to go.
@@ -232,6 +233,7 @@ void KeyboardEntryActivity::insertUtf8(const char* out) {
   if (cursorPos > text.length()) cursorPos = text.length();
   text.insert(cursorPos, out, n);
   cursorPos += n;
+  typedEnd = cursorPos;
 }
 
 bool KeyboardEntryActivity::backspaceUtf8() {
@@ -239,6 +241,7 @@ bool KeyboardEntryActivity::backspaceUtf8() {
   const size_t prev = utf8Prev(text, cursorPos);
   text.erase(prev, cursorPos - prev);
   cursorPos = prev;
+  typedEnd = std::string::npos;
   return true;
 }
 
@@ -288,6 +291,7 @@ bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPr
       if (longPress) {
         text.clear();
         cursorPos = 0;
+        typedEnd = std::string::npos;
         return true;
       }
       backspaceUtf8();
@@ -315,6 +319,7 @@ bool KeyboardEntryActivity::clearAllOrAltOnSelected() {
   if (key->value == fui::QWERTY_KEY_BACKSPACE) {
     text.clear();
     cursorPos = 0;
+    typedEnd = std::string::npos;
     return true;
   }
   // Explicit alternates and the letter case flip, same as a touch long-press.
@@ -339,7 +344,8 @@ std::string KeyboardEntryActivity::displayTextForCurrentState() const {
   if (cursorMode) {
     revealPos = text.length();  // no reveal in displayText; the block draws the actual char
   } else {
-    revealPos = (text.length() > 0 && cursorPos > 0) ? cursorPos - 1 : std::string::npos;
+    // Only what was just typed (typedEnd): never a character of the value the field opened with.
+    revealPos = (cursorPos > 0 && cursorPos == typedEnd) ? cursorPos - 1 : std::string::npos;
   }
   for (size_t i = 0; i < displayText.length(); i++) {
     if (i != revealPos) {

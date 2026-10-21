@@ -31,12 +31,6 @@ bool hasHeader(size_t request, const std::string& name) {
   return ::testing::AssertionFailure() << "request " << i << " carries credentials:\n" << FakeNet::requests().at(i);
 }
 
-FakeReply redirectTo(const std::string& location, int status = 302) {
-  return {"HTTP/1.1 " + std::to_string(status) + " Moved\r\nLocation: " + location + "\r\nContent-Length: 0\r\n\r\n",
-          FakeReply::End::KeepOpen};
-}
-FakeReply ok() { return {"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", FakeReply::End::KeepOpen}; }
-
 struct CredentialRedirect : ::testing::Test {
   crosspoint::SecureHttpClient http;
 
@@ -50,8 +44,8 @@ struct CredentialRedirect : ::testing::Test {
 
   // GET url through redirects to each of locations in turn, then a 200.
   int getThrough(const std::string& url, std::initializer_list<const char*> locations) {
-    for (const char* location : locations) FakeNet::replies().push_back(redirectTo(location));
-    FakeNet::replies().push_back(ok());
+    for (const char* location : locations) FakeNet::replies().push_back(fakeRedirectTo(location));
+    FakeNet::replies().push_back(fakeOk());
     return http.get(url, [](const uint8_t*, size_t) { return true; });
   }
 };
@@ -131,8 +125,8 @@ TEST_F(CredentialRedirect, TheRangeFollowsWithoutThem) {
 
 // KOSync's progress update: a 307 keeps the method and the body, never the login.
 TEST_F(CredentialRedirect, ARedirectedPutKeepsItsBodyAndDropsThem) {
-  FakeNet::replies().push_back(redirectTo("https://elsewhere.example/syncs/progress", 307));
-  FakeNet::replies().push_back(ok());
+  FakeNet::replies().push_back(fakeRedirectTo("https://elsewhere.example/syncs/progress", 307));
+  FakeNet::replies().push_back(fakeOk());
   EXPECT_EQ(http.PUT("https://sync.example/syncs/progress", "{\"progress\":\"1\"}"), 200);
   ASSERT_EQ(FakeNet::requests().size(), 2u);
   EXPECT_TRUE(credentialsSent(0));

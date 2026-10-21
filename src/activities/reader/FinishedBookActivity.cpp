@@ -619,7 +619,7 @@ void launchFinishedBookFlow(Activity& host, GfxRenderer& renderer, MappedInputMa
         if (goHome) {
           activityManager.goHome();
         } else if (openNext) {
-          activityManager.goToReader(nextBookPath);
+          activityManager.openBook(nextBookPath);
         } else {
           activityManager.goToBrowserWithSearch(author);
         }

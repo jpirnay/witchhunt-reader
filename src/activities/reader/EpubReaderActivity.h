@@ -8,6 +8,7 @@
 #define ENABLE_BENCHMARKS 0
 #endif
 
+#include <BookCache.h>
 #include <BuildArena.h>
 #include <Epub.h>
 #include <Epub/FootnoteEntry.h>
@@ -15,6 +16,7 @@
 
 #include <array>
 #include <atomic>
+#include <optional>
 
 #include "BookmarkStore.h"
 #include "ChapterPageSpan.h"
@@ -310,8 +312,11 @@ class EpubReaderActivity final : public Activity {
   //   - a deliberate jump to a possibly-uncached section (chapter/percent/footnote): those sites
   //     arm a HALF refresh override via ReaderUtils::enforceExitFullRefresh(), which the indexing
   //     popup would otherwise consume, leaving the content page a FAST diff. buildSection detects
-  //     that pending override (renderer.hasRefreshOverridePending()) and arms the post-popup HALF
-  //     too, so the override paints the popup and the flag paints the content — both clean.
+  //     that pending override (renderer.hasRefreshOverridePending()) and moves it to the content
+  //     page: the popup paints FAST and the flag paints the content HALF. The X3 leaves a jump's
+  //     HALF on its popup.
+  // A HALF still pending at the first section entry, the one the reader was launched with (a book
+  // open, or main.cpp after a boot), moves to the content page on every board, the X3 included.
   bool coldOpenHalfRefreshArmed_ = true;
   // True after the "Indexing..." popup is drawn for a build flagged as a dramatic transition (see
   // coldOpenHalfRefreshArmed_), until the first real page replaces it on screen. That first page is
@@ -755,6 +760,8 @@ class EpubReaderActivity final : public Activity {
   // the reader had already returned from, which would be worse than none: Back would jump from
   // wherever they had read on to an origin they had already left behind.
   bool linkStackOnDisk_ = false;
+  // Delete Book Cache's answer, set when the reader leaves for it: what onExit() keeps of the folder.
+  std::optional<BookCache::Keep> clearCacheOnExit_;
 
   // --- render() pass dispatch (see RenderPass) ---
   // Opportunistically restore the secondary display buffer if a prior OOM degraded it.

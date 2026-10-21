@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <BookCache.h>
+
 #include <deque>
 #include <memory>
 #include <string>
@@ -53,10 +55,10 @@ class Xtc {
   bool load();
 
   /**
-   * Clear cached data
+   * Clear cached data, leaving what `keep` says (BookCache.h)
    * @return true on success
    */
-  bool clearCache() const;
+  bool clearCache(BookCache::Keep keep = BookCache::Keep::Nothing) const;
 
   /**
    * Setup cache directory

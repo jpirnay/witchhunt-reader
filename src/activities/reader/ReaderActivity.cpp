@@ -24,6 +24,7 @@
 #include "EpubReaderActivity.h"
 #include "KOReaderCredentialStore.h"
 #include "MdReaderActivity.h"
+#include "ReaderUtils.h"
 #include "SdCardFontGlobals.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
@@ -821,6 +822,11 @@ void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
     sync.outcome = KOReaderSyncOutcomeState::PENDING;
     sync.clearResult();
     sync.postAction = KOReaderSyncPostAction::Reader;
+    // The sync ends in a silent reboot, and the boot reopens APP_STATE.openEpubPath. The reader
+    // that records this book there (EpubReaderActivity::onEnter()) has not run yet, so without
+    // this the reboot reopened the book read before this one, whose reader skips the pulled
+    // position: the session is keyed to this book's path.
+    APP_STATE.openEpubPath = epubPath;
     APP_STATE.saveToFile();
     // Drop the loaded Epub before TLS — sync activity will reload it for remote-position
     // mapping. Holding it here would needlessly inflate the heap during WiFi/TLS work.
@@ -857,6 +863,10 @@ void ReaderActivity::onGoToMdReader(std::unique_ptr<Txt> txt) {
 
 void ReaderActivity::onEnter() {
   Activity::onEnter();
+  // Before anything here can paint: the "Loading font" and "Indexing..." popups with the latter's progress bar, the
+  // XTC "Loading" screen. The reader it hands to is only queued (replaceActivity() defers while this one runs), so
+  // the HALF is armed again before that reader's first frame.
+  const ReaderUtils::BookOpenRefreshHold bookOpenRefresh(renderer);
   logReaderLaunchMemSnapshot("onEnter_begin");
   // Start the wake-to-page trace. Whether this open is a deep-sleep resume was latched by
   // setup() (WakeTrace::armResume) rather than read from APP_STATE here — see armResume().

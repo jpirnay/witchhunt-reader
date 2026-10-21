@@ -126,6 +126,8 @@ class ActivityManager {
 
   // Paints the "working on it" banner before a queued transition runs. See the .cpp.
   void showBusyIndicator();
+  // The clean first page a book the user opens starts on. See openBook().
+  void armBookOpenRefresh(const std::string& path) const;
 
   // When true, input events are consumed (discarded) until all buttons are released
   // and no press/release events remain.  Armed automatically on activity transitions
@@ -174,6 +176,11 @@ class ActivityManager {
   void goToBrowser();
   // The same, searching `query` on arrival: a finished book's "more by this author". Back goes Home.
   void goToBrowserWithSearch(std::string query);
+  // Opens a book the user picked: the finished-book screen's next book, CMD:ACT:READER. Its first
+  // page is painted with a HALF instead of a FAST diff over the screen it was opened from, as
+  // replaceWithReader() does for the lists. goToReader() arms nothing: it is the reader's own
+  // resume, after a boot (main.cpp sets that refresh) or back into the book after a KOReader sync.
+  void openBook(std::string path);
   void goToReader(std::string path);
   void goToKOReaderSync();
   // fromTimeout=true marks this as an auto-sleep (used to gate Quick Resume on Timeout).
@@ -189,7 +196,7 @@ class ActivityManager {
 
   // Replace-with-hint helpers: destroy the current activity before launching the new
   // one (freeing its memory) and record where to route control when the new activity
-  // exits. Consumed by returnFromChild().
+  // exits. Consumed by returnFromChild(). replaceWithReader() opens the book as openBook() does.
   void replaceWithReader(std::string path, ReturnHint hint);
   void replaceWithFileBrowser(std::string path, ReturnHint hint, std::string focusName = {});
 
@@ -238,7 +245,8 @@ class ActivityManager {
   bool isReaderActivity() const;
   // True only while the reader itself is on top: the one case every configured reader action is
   // delivered (see currentTakesButtonAction()). A list opened from the reader answers false here
-  // but true above.
+  // but true above. witchling-reader commit babb8050 (syfq91, isCurrentReaderActivity()) made the
+  // same split ten days earlier, for the bug syfq91 then reported here as issue #350.
   bool currentIsReaderActivity() const;
   bool skipLoopDelay() const;
 

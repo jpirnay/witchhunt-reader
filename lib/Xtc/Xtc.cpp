@@ -8,6 +8,7 @@
 #include "Xtc.h"
 
 #include <Bitmap.h>
+#include <BookCache.h>
 #include <BufferedPrint.h>
 #include <HalStorage.h>
 #include <Logging.h>
@@ -36,13 +37,8 @@ bool Xtc::load() {
   return true;
 }
 
-bool Xtc::clearCache() const {
-  if (!Storage.exists(cachePath.c_str())) {
-    LOG_DBG("XTC", "Cache does not exist, no action needed");
-    return true;
-  }
-
-  if (!Storage.removeDir(cachePath.c_str())) {
+bool Xtc::clearCache(const BookCache::Keep keep) const {
+  if (!BookCache::clear(cachePath, keep)) {
     LOG_ERR("XTC", "Failed to clear cache");
     return false;
   }

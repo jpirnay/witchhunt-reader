@@ -18,7 +18,7 @@ truncates the file in place.
 | `settings.json` | `JsonSettingsIO::saveSettings` | `fontSizeOrderV`: `CrossPointSettings::FONT_SIZE_ORDER_VERSION` (2); `gestureDefaultsV`: `GESTURE_DEFAULTS_VERSION` (3) | The settings. From `fontSizeOrderV` 2, `fontSize` and `txtFontSize` are point sizes; an older file is converted as it loads and saved again |
 | `state.json` | `JsonSettingsIO::saveState` | none | The open book, the sleep image, a pending KOReader sync or bookmark jump, the Library tab last left (`libraryTab`) and the views of its lists (`recentBooksView`, `addedBooksView`, `authorsView`; an old `recentBooksGridView` is read to migrate) |
 | `recent.json` | `JsonSettingsIO::saveRecentBooks` | `fontSizeOrderV` (2), stamped separately from `settings.json` | Recently opened books and their per-book overrides; `fontSizeOverride` is a point size from version 2 |
-| `wifi.json`, `opds.json`, `koreader.json` | `JsonSettingsIO::saveWifi`, `saveOpds`, `saveKOReader` | none | Credentials, obfuscated. The web file endpoints refuse them (`lib/FsHelpers/ProtectedPaths.h`) |
+| `wifi.json`, `opds.json`, `koreader.json` | `JsonSettingsIO::saveWifi`, `saveOpds`, `saveKOReader` | none | Credentials, obfuscated with the key of the reader that saved them, which `wifi.json` names in `lastKnownMacAddress` and the other two in `keyId`, so a card moved to another reader still decodes; `wifi.json` also keeps `arrivedFrom`, the reader it was re-keyed from when the card moved. A file without `keyId` (older firmware) gets one the first time it loads if its passwords decode to plausible text with this reader's key and `wifi.json` does not say the card came from another reader; otherwise it is left as it is, and no later save records a `keyId` until those passwords are entered again. The web file endpoints refuse them (`lib/FsHelpers/ProtectedPaths.h`) |
 | `weather_settings.json`, `weather_cache.json` | `WeatherSettingsStore`, `WeatherClient::saveCache` | none | Weather settings, and the last forecast (dropped when its `requestSignature` no longer matches the settings) |
 | `autosync.json` | `AutoSyncState::saveToFile` | none | KOReader auto-sync state |
 | `language.bin` | `I18n::saveSettings` | `SETTINGS_VERSION` (2) | `u8` version, then the UI language's code; version 1 (an enum index) is migrated. See [i18n.md](i18n.md) |
@@ -31,15 +31,18 @@ truncates the file in place.
 | `fileindex/<hash>.idx` | `FileIndex` | `INDEX_VERSION` (2) | A large folder's sorted listing, magic `CPFI`; `<hash>` is FNV-1a 64 of the folder's path |
 | `fonts/<Family>/<Family>_<size>.cpfont` | Font Manager, web upload | `CPFONT_VERSION` (4) in `lib/EpdFont/SdCardFont.cpp` | SD fonts; one of another version is refused. Downloads are staged in `<Family>__staging/` and swapped in. See [contributing/font-cache-structures.md](contributing/font-cache-structures.md) |
 | `fontprev/*.fpv` | `FontPreviewCache::store` | `FORMAT_VERSION` (2) | Rendered font previews, magic `CPFP` |
-| `opds_<hash>_disc.json` | `saveOpdsDiscovery` | `"v": 1` | An OPDS server's navigation entries and search template; `<hash>` is FNV-1a of the server's URL |
+| `opds_<hash>_disc.json` | `saveOpdsDiscovery` | `"v"` (`OPDS_DISCOVERY_VERSION`, 2) | An OPDS server's navigation entries and search template; `<hash>` is FNV-1a of the server's URL. Version 2: a template from an OpenSearch description is its Atom one |
 | `epub_<hash>/`, `xtc_<hash>/`, `txt_<hash>/` | | | One per book: next table |
 
 ### Per book
 
 `<hash>` is `std::hash` of the book's path, so a book moved or renamed gets a new directory (the
 `Epub`, `Xtc` and `Txt` constructors; `ReaderActivity::bookCacheDir`). TXT and Markdown books share
-`txt_`. Settings → System → Clear Reading Cache removes these directories whole, progress and
-bookmarks included, and `fontprev/` (`ClearCacheActivity`).
+`txt_`. Settings → System → Clear Reading Cache (`ClearCacheActivity`, which also removes
+`fontprev/`) and a book's Delete Book Cache clear them through `BookCache` (`lib/FsHelpers/`):
+**Keep** leaves the reading state, `progress.bin`, `linkstack.bin`, `bookmarks.bin` and
+`koreader_syncmethod.txt` (`BookCache::isReadingState`), and removes the rest; **Reset** removes the
+directory whole.
 
 | File | Formats | Version | Contents |
 |---|---|---|---|
@@ -77,7 +80,7 @@ CSS pass), `spines/<n>/anchors_<spine>.tmp` (a section's anchor map), `footnotes
 |---|---|---|
 | `/fonts_families.bin` | Font Manager | The family list, parked during a download: [below](#fonts_familiesbin) |
 | `/fonts_manifest.tmp`, `/fonts_manifest_web.tmp` | Font Manager, web UI | The downloaded font manifest; removed once parsed |
-| `/.tmp_opds_cache.dat`, `/.tmp_opds_cover.*` | `OpdsBookBrowserActivity` | The OPDS browser's entries and the cover being shown; removed when it closes |
+| `/.tmp_opds_cache.dat`, `/.tmp_opds_cover.*` | `OpdsBookBrowserActivity` | The OPDS browser's entries and the cover being shown; removed when it closes, and the cover files also when it opens (a power cut or a crash leaves them) |
 | `/sleep.bmp` | `BmpViewerActivity` | An image set as the sleep screen. A rendered one goes through `/sleep.bmp.tmp`, the old file kept as `/sleep.bmp.bak` until the swap is done |
 | `/crash_report.txt` | `HalSystem` | The last panic |
 | `/screenshots/*.bmp` | `ScreenshotUtil` | Screenshots |

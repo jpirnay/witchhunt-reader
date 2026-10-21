@@ -39,6 +39,9 @@ BUILTIN_HOSTS = [
     # Public OPDS catalogs commonly used with this reader (Let's Encrypt-served).
     "standardebooks.org:443",
     "catalog.feedbooks.com:443",
+    # Project Gutenberg's OPDS (SSL.com-served); m. redirects to www., where the books are too.
+    "m.gutenberg.org:443",
+    "www.gutenberg.org:443",
 ]
 
 

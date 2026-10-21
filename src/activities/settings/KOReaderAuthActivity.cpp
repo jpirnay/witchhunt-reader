@@ -152,7 +152,8 @@ void KOReaderAuthActivity::onExit() {
   // session and nothing reallocates it, so every exit path — including a
   // cancelled WiFi selection that never brought the radio up — must reboot to
   // restore double-buffered rendering. Land back in KOReader settings, where the
-  // user started, rather than on Home.
+  // user started, rather than on Home. It is also the only way back there:
+  // KOReader settings replaces itself with this screen.
   silentRestartToKOReaderSettings();
 }
 

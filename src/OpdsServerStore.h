@@ -8,6 +8,10 @@ struct OpdsServer {
   std::string url;
   std::string username;
   std::string password;  // Plaintext in memory; obfuscated with hardware key on disk
+  // The password came from an opds.json that names no key and could not be told to be this
+  // reader's: its bytes may be another reader's, so no save records this reader's key id while
+  // it is there (JsonSettingsIO::saveOpds()). A new password is this reader's.
+  bool passwordKeyUnknown = false;
 };
 
 class OpdsServerStore;

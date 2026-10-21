@@ -1,13 +1,16 @@
 #pragma once
 
+#include <BookCache.h>
+
 #include <functional>
 #include <string>
 
 #include "activities/Activity.h"
+#include "activities/util/ConfirmationActivity.h"
 
 // WARNING asks whether to clear through a ConfirmationActivity pushed above this one, like every
-// other question; the answer starts the clearing or leaves. The other states are progress/result
-// screens with nothing to answer.
+// other question; the answer starts the clearing, keeping the books' bookmarks and reading
+// progress or not, or leaves. The other states are progress/result screens with nothing to answer.
 class ClearCacheActivity final : public Activity {
  public:
   explicit ClearCacheActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
@@ -18,8 +21,18 @@ class ClearCacheActivity final : public Activity {
   bool skipLoopDelay() override { return true; }  // Prevent power-saving mode
   void render(RenderLock&&) override;
 
+  // Delete Book Cache's question, in the Library's options and in the reader menu: the book, and
+  // whether its bookmarks and reading progress stay. Clear Reading Cache asks the same of all books.
+  static ConfirmationActivity::Question bookQuestion(const std::string& bookName);
+  // What an answer other than Cancel to either question says the clear keeps.
+  static BookCache::Keep keepFor(const ActivityResult& answer);
+
  private:
   enum State { WARNING, CLEARING, SUCCESS, FAILED };
+
+  // Every clear of a book's cache asks whether the bookmarks and reading progress stay: this puts
+  // that question and its answers into `question`.
+  static void askToKeepReadingState(ConfirmationActivity::Question& question);
 
   State state = WARNING;
 
@@ -27,7 +40,7 @@ class ClearCacheActivity final : public Activity {
 
   int clearedCount = 0;
   int failedCount = 0;
-  void clearCache();
+  void clearCache(BookCache::Keep keep);
 
-  void startClearing();
+  void startClearing(BookCache::Keep keep);
 };

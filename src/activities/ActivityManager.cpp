@@ -539,6 +539,24 @@ void ActivityManager::goToBrowserWithSearch(std::string query) {
   }
 }
 
+void ActivityManager::armBookOpenRefresh(const std::string& path) const {
+  // The reader's first page diffs against whatever the panel holds -- a list and its covers, the
+  // carousel, a menu, the last book's page -- and a FAST diff of a change that size leaves the old
+  // screen ghosting through. A HALF clears it. Measured on cached opens: about 0.1 s more on the X3,
+  // where the page's HALF goes through triggerDisplay() without the settle passes a displayBuffer()
+  // HALF takes (a 453 ms waveform against 383 ms FAST); 1.4 s more on the T5S3, and 0.7 s from a
+  // list, which no longer paints the busy indicator first (showBusyIndicator()).
+  // Not for a picture: the viewer refreshes it HALF itself, and an armed HALF would go on its
+  // loading popup instead.
+  if (ReaderActivity::isImageFile(path)) return;
+  renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
+}
+
+void ActivityManager::openBook(std::string path) {
+  armBookOpenRefresh(path);
+  goToReader(std::move(path));
+}
+
 void ActivityManager::goToReader(std::string path) {
   // The book's font is loaded by ReaderActivity::onEnter(), once the activity it replaces has exited.
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path)));
@@ -566,6 +584,7 @@ void ActivityManager::goToKOReaderSync() {
 }
 
 void ActivityManager::replaceWithReader(std::string path, ReturnHint hint) {
+  armBookOpenRefresh(path);
   returnHint = std::move(hint);
   hasReturnHint = true;
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path)));  // see goToReader()
