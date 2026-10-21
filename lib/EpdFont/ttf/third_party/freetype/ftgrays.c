@@ -417,8 +417,9 @@ typedef ptrdiff_t  FT_PtrDist;
   /* divisors to provide sufficient accuracy of the multiply-shift.    */
   /* It should not exceed (64 - PIXEL_BITS) to prevent overflowing and */
   /* leave enough room for 64-bit unsigned multiplication however.     */
+  /* PATCH(witchhunt): gray_udivprep(), defined below the types, is the division. */
 #define FT_UDIVPREP( c, b )                                \
-  FT_Int64  b ## _r = c ? (FT_Int64)0xFFFFFFFF / ( b ) : 0
+  FT_Int64  b ## _r = c ? gray_udivprep( b ) : 0
 #define FT_UDIV( a, b )                                           \
   (TCoord)( ( (FT_UInt64)( a ) * (FT_UInt64)( b ## _r ) ) >> 32 )
 
@@ -470,6 +471,25 @@ typedef ptrdiff_t  FT_PtrDist;
   typedef long  TPos;     /* subpixel coordinate               */
   typedef int   TCoord;   /* integer scanline/pixel coordinate */
   typedef int   TArea;    /* cell areas, coordinate products   */
+
+
+#ifdef FT_INT64
+  /* PATCH(witchhunt): (FT_Int64)0xFFFFFFFF / b for FT_UDIVPREP, b not 0, with a */
+  /* 32-bit unsigned division: the quotient truncates toward zero, so it is the   */
+  /* magnitude's quotient with b's sign, and 0 for a magnitude past 32 bits.  On  */
+  /* a 32-bit target the 64-bit division was a libgcc call (__divdi3).  Equal for */
+  /* every 32-bit b (checked exhaustively).                                       */
+  static FT_Int64
+  gray_udivprep( TPos  b )
+  {
+    FT_UInt64  m = b < 0 ? (FT_UInt64)0 - (FT_UInt64)b : (FT_UInt64)b;
+    FT_Int64   q = m <= 0xFFFFFFFFU ? (FT_Int64)( 0xFFFFFFFFU / (unsigned int)m )
+                                    : 0;
+
+
+    return b < 0 ? -q : q;
+  }
+#endif
 
 
   typedef struct TCell_*  PCell;

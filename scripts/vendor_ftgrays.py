@@ -175,6 +175,37 @@ INT64_NEW = """\
   typedef unsigned int  FT_UInt;
 """
 
+UDIVPREP_OLD = r"""#define FT_UDIVPREP( c, b )                                \
+  FT_Int64  b ## _r = c ? (FT_Int64)0xFFFFFFFF / ( b ) : 0
+"""
+UDIVPREP_NEW = r"""  /* PATCH(witchhunt): gray_udivprep(), defined below the types, is the division. */
+#define FT_UDIVPREP( c, b )                                \
+  FT_Int64  b ## _r = c ? gray_udivprep( b ) : 0
+"""
+
+UDIVPREP_FUNC_OLD = "  typedef int   TArea;    /* cell areas, coordinate products   */\n\n\n"
+UDIVPREP_FUNC_NEW = UDIVPREP_FUNC_OLD + """\
+#ifdef FT_INT64
+  /* PATCH(witchhunt): (FT_Int64)0xFFFFFFFF / b for FT_UDIVPREP, b not 0, with a */
+  /* 32-bit unsigned division: the quotient truncates toward zero, so it is the   */
+  /* magnitude's quotient with b's sign, and 0 for a magnitude past 32 bits.  On  */
+  /* a 32-bit target the 64-bit division was a libgcc call (__divdi3).  Equal for */
+  /* every 32-bit b (checked exhaustively).                                       */
+  static FT_Int64
+  gray_udivprep( TPos  b )
+  {
+    FT_UInt64  m = b < 0 ? (FT_UInt64)0 - (FT_UInt64)b : (FT_UInt64)b;
+    FT_Int64   q = m <= 0xFFFFFFFFU ? (FT_Int64)( 0xFFFFFFFFU / (unsigned int)m )
+                                    : 0;
+
+
+    return b < 0 ? -q : q;
+  }
+#endif
+
+
+"""
+
 TAGS_OLD ="    char*       tags;\n"
 TAGS_NEW = "    unsigned char*  tags;  /* PATCH(witchhunt): ftimage.h's type (was char*) */\n"
 
@@ -204,6 +235,8 @@ def patch_ftgrays(text: str) -> str:
     text = replace_once(text, CONVERT_OLD, CONVERT_NEW, "gray_convert_glyph")
     text = replace_once(text, CALL_OLD, CALL_NEW, "gray_convert_glyph call")
     text = replace_once(text, RESET_OLD, RESET_NEW, "gray_raster_reset")
+    text = replace_once(text, UDIVPREP_OLD, UDIVPREP_NEW, "FT_UDIVPREP")
+    text = replace_once(text, UDIVPREP_FUNC_OLD, UDIVPREP_FUNC_NEW, "gray_udivprep")
     text = replace_once(text, TAGS_OLD, TAGS_NEW, "outline tags type")
     text = replace_once(text, RENAME_OLD + ",\n", RENAME_NEW + ",\n", "raster funcs name")
     return text
