@@ -8,6 +8,7 @@
 #define ENABLE_BENCHMARKS 0
 #endif
 
+#include <BookCache.h>
 #include <BuildArena.h>
 #include <Epub.h>
 #include <Epub/FootnoteEntry.h>
@@ -15,6 +16,7 @@
 
 #include <array>
 #include <atomic>
+#include <optional>
 
 #include "BookmarkStore.h"
 #include "ChapterPageSpan.h"
@@ -753,6 +755,8 @@ class EpubReaderActivity final : public Activity {
   // the reader had already returned from, which would be worse than none: Back would jump from
   // wherever they had read on to an origin they had already left behind.
   bool linkStackOnDisk_ = false;
+  // Delete Book Cache's answer, set when the reader leaves for it: what onExit() keeps of the folder.
+  std::optional<BookCache::Keep> clearCacheOnExit_;
 
   // --- render() pass dispatch (see RenderPass) ---
   // Opportunistically restore the secondary display buffer if a prior OOM degraded it.
