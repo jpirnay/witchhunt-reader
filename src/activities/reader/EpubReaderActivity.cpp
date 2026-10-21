@@ -989,15 +989,22 @@ void EpubReaderActivity::loop() {
   // this file -- on in release builds too).
   serviceBackgroundDebugLog();
 
-  // One exchange, as writeOwedPageSave() takes it: a restart on the render task may be writing the same save.
-  if (pendingProgressSave.pending.exchange(false, std::memory_order_acquire)) {
-    saveProgress(pendingProgressSave.spineIndex, pendingProgressSave.page, pendingProgressSave.pageCount);
+  // Under the RenderLock, which every post and every other writer of one holds. A heap-recovery restart saves the live
+  // page under it and keeps it up to the reboot; without it, an older post written beside that save or after it (in
+  // the restart's delay(50) or image warm pass) would reopen the book on the older page. Try, never wait: a busy lock
+  // leaves the post for the next pass, or for writeOwedPageSave() at exit, rather than hold input behind a pass.
+  if (pendingProgressSave.pending.load(std::memory_order_acquire)) {
+    RenderLock lock(RenderLock::Mode::Try);
+    if (lock.ownsLock() && pendingProgressSave.pending.exchange(false, std::memory_order_acquire)) {
+      saveProgress(pendingProgressSave.spineIndex, pendingProgressSave.page, pendingProgressSave.pageCount);
+    }
   }
 
   // Deferred by the render task (renderFinishedBookPass) because it ends in pushActivity().
   // After the progress flush and before input handling: this is the reader's LAST loop() pass —
   // the launch pushes it onto the activity stack, which stops loop() being called — so anything
-  // still owed must be flushed above, and nothing below it will run again.
+  // still owed is flushed above (a busy lock leaves it to writeOwedPageSave()), and nothing below
+  // it will run again.
   if (finishedBookLaunchPending_.load(std::memory_order_acquire)) {
     serviceFinishedBookLaunch();
     return;
@@ -5623,9 +5630,8 @@ void EpubReaderActivity::writeOwedPageSave() {
   // the book reopened on page 1. Written as loop() would have written it, a mid-build turn's unknown page count
   // included (issue #75); past the last spine the finished-book record stands.
   //
-  // The fields are settled: every post is made under the RenderLock, and every caller holds it (onExit() the exclusive
-  // one). The flag is not: a restart from the render task runs beside loop(), which takes the flag without the lock.
-  // Both take it with one exchange, so one of them writes the save, never both through two handles on progress.bin.
+  // Settled under the RenderLock: every post is made under it, every caller holds it (onExit() the exclusive one), and
+  // loop() takes it to write a post, so each post is written once, never through two handles on progress.bin at once.
   if (!epub || currentSpineIndex >= epub->getSpineItemsCount() ||
       !pendingProgressSave.pending.exchange(false, std::memory_order_acquire)) {
     return;
@@ -5640,6 +5646,10 @@ void EpubReaderActivity::saveStateForRestart() {
   // clobber the user's real position in progress.bin, which already holds the correct value
   // (issue #75: progress reset to the chapter start after a heap-recovery reboot).
   if (section && readerPhase_ == ReaderPhase::READING) {
+    // A post is a page drawn before the live one, or a mid-build turn saved without its page count: never more recent,
+    // so it goes. A refused restart lets the reader carry on, and loop() would write it over this save; up to the
+    // reboot, the RenderLock held here keeps loop() from writing it at all.
+    pendingProgressSave.pending.store(false, std::memory_order_relaxed);
     saveProgress(currentSpineIndex, section->currentPage, section->pageCount);
   } else {
     // progress.bin holds the correct value only once loop() has written the save posted for the page drawn last. A

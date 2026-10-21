@@ -655,7 +655,8 @@ class EpubReaderActivity final : public Activity {
   // Progress save is posted by render() and consumed by loop() to keep SD I/O off the render task.
   // render() writes spineIndex/page/pageCount then sets pending with release semantics so loop()
   // sees a coherent snapshot when it observes pending==true via acquire. An exit that skips loop() writes it instead
-  // (writeOwedPageSave); each consumer takes the flag with an exchange, so one write per post.
+  // (writeOwedPageSave), and a restart's save of the live page drops it; every one of them, loop() included, holds
+  // the RenderLock, so one write per post.
   struct PendingProgressSave {
     std::atomic<bool> pending{false};
     int spineIndex = 0;
