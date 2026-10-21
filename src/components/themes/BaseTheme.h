@@ -82,6 +82,11 @@ struct ThemeMetrics {
   int keyboardVerticalOffset;
   int keyboardTextFieldWidthPercent;
   int keyboardKeyCornerRadius = 0;
+
+  // The line kept at the foot of the content for a header subtitle, when the theme draws it there
+  // rather than in the header band (HeaderLayout::subtitleLine): one line of SMALL_FONT_ID. 0 for a
+  // theme that fits the subtitle in the band, which then reserves nothing.
+  int headerSubtitleLine = 0;
 };
 
 enum UIIcon { Folder, Text, Image, Book, File, Recent, Settings, Transfer, Library, Weather, Stats, Ellipsis };
@@ -122,7 +127,8 @@ constexpr ThemeMetrics values = {.batteryWidth = 15,
                                  .keyboardKeySpacing = 0,
                                  .keyboardCenteredText = false,
                                  .keyboardVerticalOffset = -13,
-                                 .keyboardTextFieldWidthPercent = 85};
+                                 .keyboardTextFieldWidthPercent = 85,
+                                 .headerSubtitleLine = 23};
 }
 
 enum class SyncIndicator : uint8_t { None, Active, Failed };

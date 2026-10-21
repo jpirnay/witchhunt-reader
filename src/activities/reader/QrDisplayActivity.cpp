@@ -29,17 +29,18 @@ void QrDisplayActivity::loop() {
 void QrDisplayActivity::render(RenderLock&&) {
   renderer.clearScreen();
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+  // Opened over the reader, so in the book's orientation: header and code are measured from the
+  // content area's top, which the hint strip holds in PortraitInverted.
+  const Rect body = UITheme::getBodyRect(renderer, true, false);
 
-  GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
-                 tr(STR_DISPLAY_QR), nullptr);
+  GUI.drawHeader(renderer, UITheme::getHeaderRect(renderer), tr(STR_DISPLAY_QR), nullptr);
 
-  const int startY = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int startY = body.y;
   constexpr int truncNoticeHeight = 16;
-  const int availableHeight = contentRect.height - startY - metrics.verticalSpacing - truncNoticeHeight;
+  const int availableHeight = body.height - metrics.verticalSpacing - truncNoticeHeight;
 
-  const Rect qrBounds(contentRect.x + metrics.contentSidePadding, startY,
-                      contentRect.width - metrics.contentSidePadding * 2, availableHeight);
+  const Rect qrBounds(body.x + metrics.contentSidePadding, startY, body.width - metrics.contentSidePadding * 2,
+                      availableHeight);
   const bool truncated = QrUtils::drawQrCode(renderer, qrBounds, textPayload);
 
   if (truncated) {

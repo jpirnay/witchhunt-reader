@@ -131,10 +131,14 @@ void ReadingStatsBookDetailActivity::render(RenderLock&&) {
                  Rect{contentRect.x, contentRect.y + metrics.topPadding, contentRect.width, metrics.headerHeight},
                  headerTitle.c_str(), book && !book->author.empty() ? book->author.c_str() : nullptr);
 
-  const int startY = contentRect.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  // Above the line Base keeps for the author subtitle. The cards are not cut to it; the optional
+  // last one is left out when it would run past it (see the sparkline below).
+  const Rect body = UITheme::getBodyRect(renderer, /*hasBottomHints=*/true, /*hasSideHints=*/false,
+                                         book ? book->author.c_str() : nullptr);
+  const int bodyBottom = body.y + body.height;
   CardLayout::Config cfg;
   cfg.outerMarginX = metrics.verticalSpacing * 2;
-  CardLayout layout(renderer, contentRect, startY, cfg);
+  CardLayout layout(renderer, contentRect, body.y, cfg);
 
   if (!book) {
     // No history for this book: opened from the reader's menu before its
@@ -189,12 +193,14 @@ void ReadingStatsBookDetailActivity::render(RenderLock&&) {
       }
     });
 
-    // ---- Per-book sparkline (only when clock-anchored data exists) ----
+    // ---- Per-book sparkline (only when clock-anchored data exists, and it fits above the body's
+    // foot: in landscape the cards above already take the height) ----
+    constexpr int kSparkHeight = 32;
     const uint16_t today = currentLocalDayIndex();
-    if (today != 0 && !book->days.empty()) {
+    const bool sparkFits = layout.cursorY() + layout.cardHeight(true, kSparkHeight + 2) <= bodyBottom;
+    if (today != 0 && !book->days.empty() && sparkFits) {
       layout.card(tr(STR_READING_STATS_LAST_30D), [&](CardLayout::Body& b) {
         constexpr int kSparkDays = 30;
-        constexpr int kSparkHeight = 32;
         constexpr int kBarGap = 1;
         const int innerWidth = b.innerWidth();
         const int innerLeft = b.innerLeft();

@@ -130,21 +130,19 @@ void StarredPagesActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect contentRect = UITheme::getContentRect(renderer, true, true);
+  // Opened over the reader, so in the book's orientation: both measured from the content area's
+  // top, which a hint strip can occupy there.
+  const Rect body = UITheme::getBodyRect(renderer, true, true);
 
-  GUI.drawHeader(renderer, UITheme::getHeaderRect(renderer), tr(STR_STARRED_PAGES));
-
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int contentHeight = contentRect.height - contentTop - metrics.verticalSpacing;
+  GUI.drawHeader(renderer, UITheme::getHeaderRect(renderer, true, true), tr(STR_STARRED_PAGES));
 
   const int totalItems = static_cast<int>(bookmarkStore.getAll().size());
 
   if (totalItems == 0) {
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + metrics.contentSidePadding, contentTop + 20,
-                      tr(STR_NO_STARRED_PAGES));
+    renderer.drawText(UI_10_FONT_ID, body.x + metrics.contentSidePadding, body.y + 20, tr(STR_NO_STARRED_PAGES));
   } else {
-    GUI.drawList(renderer, Rect{contentRect.x, contentTop, contentRect.width, contentHeight}, totalItems, selectorIndex,
-                 [this](int index) { return getItemLabel(index); });
+    GUI.drawList(renderer, Rect{body.x, body.y, body.width, body.height - metrics.verticalSpacing}, totalItems,
+                 selectorIndex, [this](int index) { return getItemLabel(index); });
   }
 
   const bool hasItems = totalItems > 0;

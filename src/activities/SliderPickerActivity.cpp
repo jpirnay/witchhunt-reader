@@ -7,6 +7,7 @@
 #include "activities/ActivityResult.h"
 #include "components/SliderGeometry.h"
 #include "components/UITheme.h"
+#include "components/themes/HeaderLayout.h"
 #include "fontIds.h"
 
 namespace {
@@ -15,11 +16,13 @@ constexpr int kLargeStep = 10;
 
 // The bar, in one place. render() paints it and handleSliderTouch() hit-tests it, and the two
 // must agree to the pixel or the knob lands somewhere other than the fingertip. Derived rather
-// than recorded: it depends only on the content rect and two constants, so both tasks can
-// compute it and there is no snapshot to go stale.
+// than recorded: it depends only on the content rect, the title's line height and a few constants,
+// so both tasks can compute it and there is no snapshot to go stale.
 constexpr int kBarWidth = 360;
 constexpr int kBarHeight = 16;
-constexpr int kBarY = 140;
+// Below the top of the body under the title: the value line, then the bar.
+constexpr int kValueOffset = 40;
+constexpr int kBarOffset = 90;
 
 // Finger-sized hit band around a 16 px bar. The SDK's own components use 44 px as the minimum
 // touch target (CoverGridProps::minTouchSize) and a slider is the control where a near-miss is
@@ -30,6 +33,18 @@ int barLeft(const GfxRenderer& renderer) {
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
   return contentRect.x + (contentRect.width - kBarWidth) / 2;
 }
+
+// The title and everything under it, measured from the top of the content area this screen's hint
+// strips leave: opened over the reader (the percent jump), the picker is in the book's orientation,
+// where the bottom strip lies across the logical top in PortraitInverted, and the side boxes do in
+// landscape on boards whose side keys sit on that edge. Upright the top is 0, as it always was.
+Rect contentArea(const GfxRenderer& renderer) { return UITheme::getContentRect(renderer, true, true); }
+
+int bodyTop(const GfxRenderer& renderer) {
+  return HeaderLayout::overlayBody(contentArea(renderer), renderer.getLineHeight(UI_12_FONT_ID)).y;
+}
+
+int barTop(const GfxRenderer& renderer) { return bodyTop(renderer) + kBarOffset; }
 }  // namespace
 
 void SliderPickerActivity::onEnter() {
@@ -83,7 +98,7 @@ bool SliderPickerActivity::handleSliderTouch() {
   // (SliderGeometry::valueForX clamps). Horizontal slack matches the vertical padding so the
   // band is a comfortable rectangle rather than a hairline.
   const int bandPad = (kTouchBandHeight - kBarHeight) / 2;
-  const int bandTop = kBarY - bandPad;
+  const int bandTop = barTop(renderer) - bandPad;
   const int bandLeft = barX - bandPad;
   const int bandRight = barX + kBarWidth + bandPad;
   const auto inBand = [&](const int x, const int y) {
@@ -151,7 +166,8 @@ void SliderPickerActivity::loop() {
 void SliderPickerActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  renderer.drawCenteredText(UI_12_FONT_ID, 15, I18N.get(cfg.titleId), true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(UI_12_FONT_ID, HeaderLayout::overlayTitleY(contentArea(renderer)), I18N.get(cfg.titleId),
+                            true, EpdFontFamily::BOLD);
 
   std::string valueText;
   if (!cfg.zeroLabel.empty() && value == cfg.minValue) {
@@ -161,22 +177,24 @@ void SliderPickerActivity::render(RenderLock&&) {
   } else {
     valueText = std::to_string(value) + cfg.suffix;
   }
-  renderer.drawCenteredText(UI_12_FONT_ID, 90, valueText.c_str(), true, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(UI_12_FONT_ID, bodyTop(renderer) + kValueOffset, valueText.c_str(), true,
+                            EpdFontFamily::BOLD);
 
   const int barX = barLeft(renderer);
+  const int barY = barTop(renderer);
 
-  renderer.drawRect(barX, kBarY, kBarWidth, kBarHeight);
+  renderer.drawRect(barX, barY, kBarWidth, kBarHeight);
 
   // Same mapping the hit test inverts — see SliderGeometry.
   const int fillWidth = SliderGeometry::fillWidthFor(value, kBarWidth, cfg.minValue, cfg.maxValue);
   if (fillWidth > 0) {
-    renderer.fillRect(barX + SliderGeometry::kTrackInset, kBarY + 2, fillWidth, kBarHeight - 4);
+    renderer.fillRect(barX + SliderGeometry::kTrackInset, barY + 2, fillWidth, kBarHeight - 4);
   }
 
   const int knobX = SliderGeometry::trackX(barX) + fillWidth - 2;
-  renderer.fillRect(knobX, kBarY - 4, 4, kBarHeight + 8, true);
+  renderer.fillRect(knobX, barY - 4, 4, kBarHeight + 8, true);
 
-  renderer.drawCenteredText(SMALL_FONT_ID, kBarY + 30, I18N.get(cfg.hintId), true);
+  renderer.drawCenteredText(SMALL_FONT_ID, barY + 30, I18N.get(cfg.hintId), true);
 
   // The slider runs across the screen, so - / + ride logical Left/Right and move to whichever
   // button pair lies on that axis; the coarse step rides logical Up/Down and is unlabelled.

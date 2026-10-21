@@ -87,10 +87,9 @@ void BookInfoActivity::renderLoading() {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
 
-  GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
-                 tr(STR_INFO));
+  GUI.drawHeader(renderer, UITheme::getHeaderRect(renderer), tr(STR_INFO));
 
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentTop = UITheme::getBodyRect(renderer, true, false).y;
   renderer.drawText(UI_12_FONT_ID, contentRect.x + metrics.contentSidePadding, contentTop, tr(STR_LOADING));
 
   renderer.displayBuffer();
@@ -275,11 +274,11 @@ void BookInfoActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
 
-  // Header
-  GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
-                 tr(STR_INFO));
+  // Header. Measured, like the body under it, from the content area's top: opened over the reader,
+  // this screen is in the book's orientation, where the hint strip can hold the logical top.
+  GUI.drawHeader(renderer, UITheme::getHeaderRect(renderer), tr(STR_INFO));
 
-  const int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  const int contentTop = UITheme::getBodyRect(renderer, true, false).y;
   const int contentBottom = contentRect.y + contentRect.height - metrics.verticalSpacing;
   const int textX = contentRect.x + metrics.contentSidePadding;
   const int textWidth = contentRect.width - metrics.contentSidePadding * 2;

@@ -80,6 +80,9 @@ constexpr void applyTo(ThemeMetrics& metrics, const Step& growth) {
 
   // A title line plus an optional subtitle line.
   metrics.headerHeight += growth.title + growth.small;
+
+  // The subtitle's own line, where the theme keeps one (0 stays 0: that theme draws it in the band).
+  if (metrics.headerSubtitleLine > 0) metrics.headerSubtitleLine += growth.small;
 }
 
 }  // namespace UiFontLadder

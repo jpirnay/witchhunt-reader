@@ -72,11 +72,10 @@ void DictionaryDefinitionActivity::onExit() {
 
 DictionaryDefinitionActivity::BodyArea DictionaryDefinitionActivity::bodyArea() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
-  const int topArea = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int bottomArea = metrics.verticalSpacing;
-  return {contentRect.x + SIDE_PADDING, topArea, contentRect.width - 2 * SIDE_PADDING,
-          contentRect.height - topArea - bottomArea};
+  // Opened over the reader, so in the book's orientation: measured, like the header in render(),
+  // from the content area's top, which the hint strip holds in PortraitInverted.
+  const Rect body = UITheme::getBodyRect(renderer, true, false);
+  return {body.x + SIDE_PADDING, body.y, body.width - 2 * SIDE_PADDING, body.height - metrics.verticalSpacing};
 }
 
 // Styled path: lay the HTML definition out through the EPUB chapter parser into
@@ -348,12 +347,11 @@ void DictionaryDefinitionActivity::drawBody(const int fontId, const int x, const
 void DictionaryDefinitionActivity::render(RenderLock&&) {
   renderer.clearScreen();
 
-  const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
 
   // Header: matched headword left, page counter right.
-  const int headerY = metrics.topPadding;
-  GUI.drawHeader(renderer, Rect{contentRect.x, headerY, contentRect.width, metrics.headerHeight}, headword.c_str());
+  const Rect header = UITheme::getHeaderRect(renderer);
+  GUI.drawHeader(renderer, header, headword.c_str());
 
   // Right of the header: which dictionary this came from, and which page of it.
   // The name only appears when there is more than one installed -- otherwise it
@@ -376,7 +374,7 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
     while (*shown != '\0' && renderer.getTextWidth(UI_10_FONT_ID, shown) > available) shown++;
     const int statusWidth = renderer.getTextWidth(UI_10_FONT_ID, shown);
     renderer.drawText(UI_10_FONT_ID, contentRect.x + contentRect.width - SIDE_PADDING - statusWidth,
-                      headerY + metrics.headerHeight / 2, shown);
+                      header.y + header.height / 2, shown);
   }
 
   if (layoutFailed) {
