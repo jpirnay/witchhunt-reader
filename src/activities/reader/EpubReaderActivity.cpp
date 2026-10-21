@@ -970,8 +970,8 @@ void EpubReaderActivity::onExit() {
   // Flush the reading-stats session LAST: end() writes the book and the global figures in place
   // (~10 KB of heap whatever the history holds), and it needs nothing of the reader (the tracker
   // copied the id, title and author at begin()). Here it has the heap the teardown just freed.
-  // Sleep paths that bypass onExit() still end up here on resume because the activity is
-  // recreated.
+  // Deep sleep ends the session here too (goToSleep() replaces the activity, which runs this);
+  // the silent restarts, which skip onExit(), end it themselves (main.cpp).
   globalReadingSessionTracker().end();
 
   // Last: everything above saved under the book's path, which the finished-book flow may have moved.
