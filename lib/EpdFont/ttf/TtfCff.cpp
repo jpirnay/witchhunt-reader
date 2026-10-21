@@ -14,7 +14,9 @@ constexpr uint32_t kTopStack = 96;        // CFF_MAX_STACK_DEPTH: a Top or font 
 constexpr uint32_t kPrivateStack = 97;    // ... and a Private DICT's (cff_load_private_dict)
 constexpr uint32_t kNoRegistry = 0xFFFF;  // cff_subfont_load's ROS registry when the DICT has none: not CID-keyed
 constexpr uint32_t kMaxFontDicts = 256;   // CFF_MAX_CID_FONTS
-constexpr uint32_t kMaxOperands = 6;      // the most any operator read here takes (FontMatrix)
+// The local subroutines fontDictsFit checks across all font DICTs, four full INDEXes (stock Noto CJK holds 45-54K).
+constexpr uint32_t kCffMaxCheckedSubrs = 4 * 65536;
+constexpr uint32_t kMaxOperands = 6;  // the most any operator read here takes (FontMatrix)
 // The largest Top, font or Private DICT the engine reads. A CID-keyed glyph's font and Private DICTs are read again
 // for every glyph, so a hostile multi-megabyte DICT would cost every glyph that much; real ones are far smaller (the
 // test fonts' largest: a 77-byte Top DICT, an 11-byte font DICT, a 36-byte Private DICT in OpenDyslexic; a Private
@@ -613,16 +615,30 @@ WideMatrix fontDictMatrix(const CffFace& cff, const FontDict& dict) {
 // A CID-keyed font's font DICTs, each with its matrix and its Private DICT, as cff_font_load reads them all: 1 to 256
 // of them. FreeType takes a font without any, or with more than it holds, as having none, and draws every glyph with
 // the Top DICT, whose Private DICT it never reads; the engine refuses both.
+//
+// Font DICTs may share one local Subrs INDEX, so each distinct INDEX (by where it starts) is checked once, and the
+// distinct ones together may hold at most kCffMaxCheckedSubrs entries: without both, 256 font DICTs over one
+// 65,535-entry INDEX would read 16 million offsets, a minute of card reads at every discovery of the font.
 bool fontDictsFit(FontBytes& bytes, const CffFace& cff) {
   if (cff.fdArray.count == 0 || cff.fdArray.count > kMaxFontDicts) return false;
+  uint32_t checked[kMaxFontDicts];  // the starts of the local Subrs INDEXes checked so far
+  uint32_t checkedCount = 0;
+  uint32_t subrs = 0;  // entries of the INDEXes checked so far
   for (uint32_t fd = 0; fd < cff.fdArray.count; ++fd) {
     FontDict dict;
     CffMatrix matrix;
     CffIndex localSubrs;
     if (!readFontDict(bytes, cff.fdArray, fd, &dict) || !narrow(fontDictMatrix(cff, dict), &matrix) ||
-        !readPrivate(bytes, cff, dict, &localSubrs) || !plainSubroutines(bytes, localSubrs)) {
+        !readPrivate(bytes, cff, dict, &localSubrs)) {
       return false;
     }
+    if (localSubrs.count == 0) continue;
+    bool seen = false;
+    for (uint32_t i = 0; i < checkedCount && !seen; ++i) seen = checked[i] == localSubrs.start;
+    if (seen) continue;
+    subrs += localSubrs.count;
+    if (subrs > kCffMaxCheckedSubrs || !plainSubroutines(bytes, localSubrs)) return false;
+    checked[checkedCount++] = localSubrs.start;
   }
   return true;
 }

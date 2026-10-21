@@ -94,6 +94,9 @@ struct CffFontDict {
   std::string subrsReal;          ///< the Subrs offset as this real instead of an integer (it must truncate to it)
   Bytes dictPad;                  ///< entries the font DICT starts with (11 bytes of its own without a FontMatrix)
   Bytes privatePad;               ///< entries the Private DICT starts with (6 bytes of its own, 12 with Subrs)
+  /// Without localSubrs of its own: the font DICT whose Subrs INDEX this one's Private DICT points at (an earlier one
+  /// with localSubrs, laid out right after its Private DICT, not subrsAfterPrivates); -1: none.
+  int sharesSubrsOf = -1;
 };
 
 inline CffFontDict cffFontDict(const std::string& matrix, const std::vector<Bytes>& localSubrs = {},
@@ -150,6 +153,7 @@ inline Bytes buildCff(const CffSpec& spec) {
   std::vector<Bytes> privates;
   std::vector<uint32_t> privateSizes;
   Bytes subrsAfterPrivates;
+  std::vector<size_t> sharedOffsetAt(spec.fds.size(), 0);
   const auto privateSize = [](const CffFontDict& fd) {
     return fd.privatePad.size() + (fd.localSubrs.empty() ? 6 : 12);
   };
@@ -169,6 +173,10 @@ inline Bytes buildCff(const CffSpec& spec) {
       } else {
         putCffInt(dict, static_cast<int32_t>(dict.size() + 6));
       }
+      putCffOp(dict, 19);
+    } else if (fd.sharesSubrsOf >= 0) {
+      sharedOffsetAt[i] = dict.size() + 1;  // the integer's 4 bytes; patched once the Private DICTs have places
+      putCffInt(dict, 0);
       putCffOp(dict, 19);
     }
     privateSizes.push_back(static_cast<uint32_t>(dict.size()));
@@ -240,6 +248,12 @@ inline Bytes buildCff(const CffSpec& spec) {
   for (const Bytes& priv : privates) {
     privateAt.push_back(at);
     at += static_cast<uint32_t>(priv.size());
+  }
+  for (size_t i = 0; i < spec.fds.size(); ++i) {
+    if (!sharedOffsetAt[i]) continue;
+    const size_t of = static_cast<size_t>(spec.fds[i].sharesSubrsOf);
+    const uint32_t offset = privateAt[of] + privateSizes[of] - privateAt[i];  // the Subrs follow the DICT proper
+    for (int b = 0; b < 4; ++b) privates[i][sharedOffsetAt[i] + b] = static_cast<uint8_t>(offset >> (24 - 8 * b));
   }
 
   Bytes out = spec.header;

@@ -631,6 +631,74 @@ TEST(TtfCff, SubroutineIndexesMustBePlain) {
   EXPECT_EQ(FaceStatus::Malformed, parse(cidBroken, &face));
 }
 
+namespace {
+
+// A font file on a card that counts the bytes it is asked for, read as discovery reads it: through an SdRange over the
+// whole file with no tables in place (FileParse's way), so every read but those the page cache answers is counted.
+struct CountingCard {
+  explicit CountingCard(const std::vector<uint8_t>& font) : bytes(font) {}
+  const std::vector<uint8_t>& bytes;
+  uint64_t read = 0;
+
+  FaceStatus parse(Face* face) {
+    const FileSource file{static_cast<uint32_t>(bytes.size()),
+                          [](void* ctx, const uint32_t offset, void* dst, const uint32_t len) {
+                            auto& card = *static_cast<CountingCard*>(ctx);
+                            if (offset > card.bytes.size() || len > card.bytes.size() - offset) return false;
+                            std::copy_n(card.bytes.data() + offset, len, static_cast<uint8_t*>(dst));
+                            card.read += len;
+                            return true;
+                          },
+                          this};
+    SdPageCache cache;
+    const SdRange range{file, 0, 0, file.size, &cache};
+    FontBytes sd(nullptr, 0, &range);
+    return parseFace(sd, face);
+  }
+};
+
+constexpr uint32_t kSubrsIndexBytes = 65535 * 4;  // the offsets of a full local Subrs INDEX
+
+}  // namespace
+
+TEST(TtfCff, ManyFontDictsSharingOneSubrsIndexAreCheckedOnce) {
+  // 256 font DICTs whose Private DICTs all point at one 65,535-entry Subrs INDEX: the check reads its offsets once, not
+  // once per font DICT (256 x 262 KB from a 300 KB font, a minute of card reads at every discovery).
+  CffSpec spec;
+  spec.cid = true;
+  spec.fds.assign(256, CffFontDict{});
+  spec.fds[0] = cffFontDict("", std::vector<Bytes>(65535));
+  for (size_t i = 1; i < 256; ++i) spec.fds[i].sharesSubrsOf = 0;
+  const std::vector<uint8_t> font = buildOtf(spec);
+  Face face;
+  ASSERT_EQ(FaceStatus::Ok, parse(font, &face));
+
+  CountingCard card(font);
+  ASSERT_EQ(FaceStatus::Ok, card.parse(&face));
+  // The INDEX once, in 512-byte pages, and the small rest of the file (tables, the font DICTs and Private DICTs).
+  EXPECT_LT(card.read, uint64_t{kSubrsIndexBytes} + 64 * 1024)
+      << card.read << " bytes of a " << font.size() << " byte font";
+}
+
+TEST(TtfCff, FontDictsWithTooManySubroutinesInAllAreRefused) {
+  // Distinct local Subrs INDEXes past 4 x 65,536 entries together: four full ones fit, a fifth is refused before its
+  // offsets are read.
+  const auto build = [](const size_t indexes) {
+    CffSpec spec;
+    spec.cid = true;
+    for (size_t i = 0; i < indexes; ++i) spec.fds.push_back(cffFontDict("", std::vector<Bytes>(65535)));
+    return buildOtf(spec);
+  };
+  Face face;
+  const std::vector<uint8_t> four = build(4);
+  EXPECT_EQ(FaceStatus::Ok, parse(four, &face)) << "four full INDEXes: 262,140 entries";
+  const std::vector<uint8_t> five = build(5);
+  CountingCard card(five);
+  EXPECT_EQ(FaceStatus::Malformed, card.parse(&face));
+  EXPECT_LT(card.read, 4 * uint64_t{kSubrsIndexBytes} + 64 * 1024)
+      << card.read << " bytes read of a " << five.size() << " byte font";
+}
+
 TEST(TtfCff, StandardCharactersAreFoundThroughTheCharset) {
   // seac names its components by StandardEncoding code; FreeType maps the code to a SID and takes the first glyph
   // whose charset entry is that SID (cff_lookup_glyph_by_stdcharcode). FreeType's own charset and table are the
