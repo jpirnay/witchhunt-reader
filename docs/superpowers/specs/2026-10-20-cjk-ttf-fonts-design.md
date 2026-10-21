@@ -513,8 +513,8 @@ OpenType fonts with CFF outlines:
 
 Hint operators are read past: the engine draws unhinted, as for TrueType (stems are still counted: more than 96
 fail the glyph, as in FreeType). Every operator FreeType's cf2 engine implements is implemented (my call: the
-arithmetic and storage operators, and an accented `endchar`, seac, whose components a CID-keyed font cannot name,
-so there it fails as in FreeType), but `random`, whose seed FreeType takes from memory addresses: Unsupported, the
+arithmetic and storage operators, and an accented `endchar`, seac, its components found through the charset as
+FreeType finds them, a CID-keyed OpenType font's included), but `random`, whose seed FreeType takes from memory addresses: Unsupported, the
 glyph drawn as missing. A glyph stops after 65,536 operators (my call; FreeType allows 20,000,000), so a hostile
 book cannot stall the reader. The interpreter's state lives in the scratch block (my call): no heap, no deep stack.
 
