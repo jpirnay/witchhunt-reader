@@ -43,6 +43,7 @@ target_include_directories(TtfFontTest PRIVATE
 
 target_compile_definitions(TtfFontTest PRIVATE
   TTF_FONT_DIR="${REPO_ROOT}/lib/EpdFont/builtinFonts/source"
+  TTF_FIXTURE_DIR="${REPO_ROOT}/test/fixtures/fonts"
 )
 
 target_link_libraries(TtfFontTest PRIVATE

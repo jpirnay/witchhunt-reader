@@ -20,6 +20,33 @@ inline std::vector<uint8_t> readFont(const std::string& relative) {
   return data;
 }
 
+/// A test font under test/fixtures/fonts (TTF_FIXTURE_DIR), exactly the file's bytes.
+inline std::vector<uint8_t> readFixture(const std::string& name) {
+  std::ifstream in(std::string(TTF_FIXTURE_DIR) + "/" + name, std::ios::binary | std::ios::ate);
+  if (!in) return {};
+  std::vector<uint8_t> data(static_cast<size_t>(in.tellg()));
+  in.seekg(0);
+  in.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
+  return data;
+}
+
+/// The CFF test fonts: the fixtures (readFixture) and the bundled OpenDyslexic sources (readFont).
+inline const std::vector<std::string>& cffTestFonts() {
+  static const std::vector<std::string> fonts = {
+      "CffOperators.otf",
+      "NotoSansJP-Cff.otf",
+      "NotoSansJP-CffFlat.otf",
+      "NotoSansJP-CffSlanted.otf",
+      "NotoSerifJP-Cff.otf",
+      "NotoSerifJP-CffFlat.otf",
+      "OpenDyslexic/OpenDyslexic-Regular.otf",
+      "OpenDyslexic/OpenDyslexic-Bold.otf",
+      "OpenDyslexic/OpenDyslexic-Italic.otf",
+      "OpenDyslexic/OpenDyslexic-BoldItalic.otf",
+  };
+  return fonts;
+}
+
 /// Every TrueType source the reader bundles (the OpenDyslexic sources are CFF).
 inline const std::vector<std::string>& bundledTtfs() {
   static const std::vector<std::string> fonts = {

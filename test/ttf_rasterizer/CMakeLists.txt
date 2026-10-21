@@ -5,7 +5,12 @@
 # wrappers as FreeInkFont's host tests compile it. Third-party code, so its warnings are not ours.
 set(FREEINK_FONT ${REPO_ROOT}/freeink-sdk/libs/font/FreeInkFont)
 file(GLOB FREETYPE_HOST_SOURCES ${FREEINK_FONT}/src/freetype/ft_*.c)
-add_library(freetype_host STATIC ${FREETYPE_HOST_SOURCES})
+# base/ftcid.c (FT_Get_CID_Is_Internally_CID_Keyed) is not among the SDK's wrappers; the CFF tests need it.
+set_source_files_properties(${FREEINK_FONT}/third_party/freetype/src/base/ftcid.c PROPERTIES COMPILE_DEFINITIONS FT2_BUILD_LIBRARY)
+add_library(freetype_host STATIC ${FREETYPE_HOST_SOURCES} ${FREEINK_FONT}/third_party/freetype/src/base/ftcid.c)
+# The CFF driver (with psnames, psaux, pshinter): the oracle for the CFF rasterizer. Public because
+# ftinit.c's module list reads it from the include chain.
+target_compile_definitions(freetype_host PUBLIC FREEINK_FONT_ENABLE_CFF=1)
 target_include_directories(freetype_host PUBLIC ${FREEINK_FONT}/third_party/freetype/include)
 target_compile_options(freetype_host PRIVATE -w)
 
@@ -17,6 +22,7 @@ add_executable(TtfRasterizerTest
   TtfRasterizerTest.cpp
   TtfVsFreeTypeTest.cpp
   TtfCorruptFontTest.cpp
+  CffFixtureTest.cpp
   FreeTypeReference.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/FontBytes.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfFace.cpp
@@ -37,6 +43,7 @@ target_include_directories(TtfRasterizerTest PRIVATE
 
 target_compile_definitions(TtfRasterizerTest PRIVATE
   TTF_FONT_DIR="${REPO_ROOT}/lib/EpdFont/builtinFonts/source"
+  TTF_FIXTURE_DIR="${REPO_ROOT}/test/fixtures/fonts"
 )
 
 target_link_libraries(TtfRasterizerTest PRIVATE
