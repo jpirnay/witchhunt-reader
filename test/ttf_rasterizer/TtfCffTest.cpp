@@ -518,6 +518,34 @@ TEST(TtfCff, TablesAreRefusedWhereFreeTypeRefusesThem) {
   }
 }
 
+TEST(TtfCff, ACff2RecordCountsAsFreeTypeCountsIt) {
+  // FreeType reads a CFF2 table before a CFF one, but it skips a table record that is empty or lies outside the file
+  // (tt_face_lookup_table, tt_face_load_font_dir): such a font is read through its CFF table. A real CFF2 table, with
+  // or without a CFF one, is not read here.
+  Font font;
+  font.sfntVersion = tagOf("OTTO");
+  font.glyphs.resize(3);
+  font.cmap = {{'A', 1}};
+  const Bytes cff2 = {2, 0, 5, 0, 0};
+  font.extraTables = {{"CFF2", Bytes{}}, {"CFF ", buildCff(CffSpec{})}};
+  const Bytes empty = buildFont(font);
+  font.extraTables[0].second = cff2;
+  const Bytes both = buildFont(font);
+  Bytes outside = both;
+  set32(outside, findRecord(outside, "CFF2") + 8, static_cast<uint32_t>(outside.size()) + 16);
+  for (const auto& [what, data] : {std::pair<const char*, const Bytes&>{"an empty CFF2 record", empty},
+                                   std::pair<const char*, const Bytes&>{"a CFF2 record outside the file", outside}}) {
+    EXPECT_TRUE(FreeTypeCff(data).ok()) << what;
+    Face face;
+    ASSERT_EQ(FaceStatus::Ok, parse(data, &face)) << what;
+    EXPECT_EQ(Face::Outlines::Cff, face.outlines) << what;
+  }
+  Face face;
+  EXPECT_EQ(FaceStatus::Unsupported, parse(both, &face)) << "a CFF2 table and a CFF table";
+  font.extraTables.pop_back();
+  EXPECT_EQ(FaceStatus::Unsupported, parse(buildFont(font), &face)) << "a CFF2 table alone";
+}
+
 TEST(TtfCff, ACidKeyedFontHasOneTo256FontDicts) {
   // FreeType reads a CID-keyed font without font DICTs, or with more than it can hold, with the Top DICT's (which
   // it never gives a Private DICT); the engine refuses both.
