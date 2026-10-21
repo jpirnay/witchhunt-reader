@@ -64,6 +64,9 @@ struct CffFace {
   CffMatrix matrix;            ///< the Top DICT's
   bool hasFontMatrix = false;  ///< the Top DICT has a FontMatrix: a font DICT's matrix is concatenated with it
   bool cid = false;
+  /// The Top DICT's CharstringType. FreeType runs every CFF charstring as Type 2 (cf2) whatever it says; 1 only makes
+  /// the subroutine bias 0 (cff_compute_bias).
+  int32_t charstringType = 2;
 };
 
 /// Reads the CFF table at `table` (`length` bytes, inside the file) as cff_font_load and cff_face_init do, refusing

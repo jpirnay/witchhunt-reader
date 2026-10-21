@@ -405,6 +405,7 @@ struct FontDict {
   uint32_t fdArray = 0;
   uint32_t fdSelect = 0;
   uint32_t registry = kNoRegistry;
+  int32_t charstringType = 2;
   bool hasMatrix = false;
   WideMatrix matrix;  // without a FontMatrix: identity, 0 units per em
 };
@@ -450,6 +451,9 @@ bool readFontDictOperator(FontBytes& bytes, const uint32_t end, const DictOperat
       dict->privateOffset = static_cast<uint32_t>(offset);
       return true;
     }
+    case 0x106:  // CharstringType
+      dict->charstringType = number(0);
+      return true;
     case 0x107:  // FontMatrix
       if (op.count < 6) return false;
       dict->matrix = dictFontMatrix(bytes, op.operand, end);
@@ -761,6 +765,7 @@ bool readCffTable(FontBytes& bytes, const uint32_t table, const uint32_t length,
   normalize(&top.matrix);
   if (!narrow(top.matrix, &out->matrix)) return false;
   out->hasFontMatrix = top.hasMatrix;
+  out->charstringType = top.charstringType;
 
   out->cid = top.registry != kNoRegistry;
   if (out->cid) {

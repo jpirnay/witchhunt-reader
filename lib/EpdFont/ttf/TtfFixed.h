@@ -42,4 +42,20 @@ constexpr int32_t mulDiv(const int32_t a, const int32_t b, const int32_t c) {
   return static_cast<int32_t>(mulDivWide(a, b, c));
 }
 
+/// FT_SqrtFixed (64-bit build): the square root of an unsigned 16.16 value, by the Babylonian method from a power of
+/// two near the root, each division rounded up. The CFF interpreter's `sqrt`.
+constexpr uint32_t sqrtFixed(const uint32_t v) {
+  if (v == 0) return 0;
+  int32_t msb = 0;  // FT_MSB
+  for (uint32_t z = v; z >>= 1;) ++msb;
+  const uint64_t r = (uint64_t{v} << 16) - 1;
+  uint32_t q = uint32_t{1} << ((17 + msb) >> 1);
+  uint32_t t = 0;
+  do {
+    t = q;
+    q = (t + static_cast<uint32_t>(r / t) + 1) >> 1;
+  } while (q != t);
+  return q;
+}
+
 }  // namespace ttf

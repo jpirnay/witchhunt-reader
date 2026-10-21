@@ -1,6 +1,7 @@
 #pragma once
 
-// The vendored FreeType rasterizer (third_party/freetype/PATCHES.md), for the one .cpp that drives it.
+// The vendored FreeType rasterizer (third_party/freetype/PATCHES.md), for the .cpp that drives it, and its outline
+// types (FT_Vector, the curve tags) for the .cpp that fills its scratch arrays with CFF outlines.
 // ftimage.h and ftgrays.h expect the macros that ftgrays.c defines for itself before it includes them.
 // Never include this from a header: ftimage.h's types would clash with a full FreeType's in a program that
 // links both, as the host tests do.
