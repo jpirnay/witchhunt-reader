@@ -20,6 +20,7 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "network/HttpDownloader.h"
+#include "util/FontDownloadRules.h"
 #include "util/FontManifestReader.h"
 
 namespace fui = freeink::ui;
@@ -158,25 +159,10 @@ bool FontDownloadActivity::fetchAndParseManifest() {
 
   for (size_t i = 0; i < parsed.count(); i++) {
     const char* familyName = parsed.name(i);
-    parsed.setInstalled(i, fontInstaller_.isFamilyInstalled(familyName));
+    parsed.setInstalled(i, fontInstaller_.isFamilyOnCard(familyName));
 
     if (parsed.installed(i)) {
-      for (size_t j = 0; j < parsed.fileCount(i); j++) {
-        char path[128];
-        FontInstaller::buildFontPath(familyName, parsed.fileLocalName(i, j), path, sizeof(path));
-        FsFile f;
-        if (Storage.openFileForRead("FONT", path, f)) {
-          size_t actual = f.fileSize();
-          f.close();
-          if (actual != parsed.fileSize(i, j)) {
-            parsed.setHasUpdate(i, true);
-            break;
-          }
-        } else {
-          parsed.setHasUpdate(i, true);
-          break;
-        }
-      }
+      parsed.setHasUpdate(i, FontInstaller::hasUpdate(parsed, i));
     } else {
       // Surface leftover staging from a previously interrupted download so the
       // UI can offer "Resume" instead of restarting from scratch.
@@ -266,7 +252,8 @@ void FontDownloadActivity::downloadAll() {
   std::vector<int> targetIndices;
   targetIndices.reserve(families_.count());
   for (size_t i = 0; i < families_.count(); i++) {
-    if (!families_.installed(i)) targetIndices.push_back(static_cast<int>(i));
+    // Not the CJK families, many MB each: their rows install them one at a time.
+    if (FontDownloadRules::downloadAllTakes(families_, i)) targetIndices.push_back(static_cast<int>(i));
   }
   for (int idx : targetIndices) {
     downloadFamily(idx);
@@ -300,6 +287,7 @@ void FontDownloadActivity::refreshRowTotals() {
   updateCount_ = 0;
   for (size_t i = 0; i < families_.count(); i++) {
     if (!families_.installed(i)) {
+      if (!FontDownloadRules::downloadAllTakes(families_, i)) continue;  // offered on its own row only
       ++uninstalledCount_;
       uninstalledBytes += families_.totalSize(i);
     } else if (families_.hasUpdate(i)) {
@@ -373,6 +361,25 @@ void FontDownloadActivity::downloadFamily(int familyIdx) {
     fileTotal_ = 0;
   }
   requestUpdateAndWait();
+
+  // Before the first byte: a family the card cannot hold fails here, not at 90%. families_ is still in memory, so
+  // Retry (once space is freed) runs downloadFamily() again.
+  uint64_t freeBytes = 0;
+  if (!FontInstaller::hasRoomFor(family.totalSize(0), &freeBytes)) {
+    SerialTestApi::noteFontInstalled(family.name(0), false);
+    char needed[32];
+    char available[32];
+    formatSize(family.totalSize(0) + FontDownloadRules::kSpaceMarginBytes, needed, sizeof(needed));
+    formatSize(static_cast<size_t>(freeBytes), available, sizeof(available));
+    char message[96];
+    snprintf(message, sizeof(message), tr(STR_FONT_SPACE_NEEDED), needed, available);
+    RenderLock lock(*this);
+    state_ = ERROR;
+    pendingErrorAction_ = PendingFontAction::Download;
+    downloadingFamilyIndex_ = familyIdx;
+    errorMessage_ = message;
+    return;
+  }
 
   if (!stashFamiliesToSd()) {
     RenderLock lock(*this);
@@ -487,7 +494,7 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
           crcOk = (actualCrc == expectedCrc32);
         }
       }
-      if (sizeOk && crcOk && fontInstaller_.validateCpfontFile(stagedPath)) {
+      if (sizeOk && crcOk && fontInstaller_.validateFontFile(stagedPath)) {
         LOG_DBG("FONT", "Resuming: reusing %s", stagedPath);
         fileProgress_ = expectedSize;
         fileTotal_ = expectedSize;
@@ -579,8 +586,8 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
       }
     }
 
-    if (!fontInstaller_.validateCpfontFile(stagedPath)) {
-      LOG_ERR("FONT", "Invalid .cpfont: %s", stagedPath);
+    if (!fontInstaller_.validateFontFile(stagedPath)) {
+      LOG_ERR("FONT", "Invalid font file: %s", stagedPath);
       Storage.remove(stagedPath);
       family.setHasResumableDownload(0, !family.installed(0));
       RenderLock lock(*this);
@@ -642,6 +649,12 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
   // it needs families_ which is empty during this impl.
 
   RenderLock lock(*this);
+  if (family.outline(0) && !fontInstaller_.isFamilyInstalled(familyName)) {
+    // On the card, but the registry does not list it: an outline family the glyph store cannot hold. The list shows
+    // it installed, so it is not offered again; the note says why it is not in the font choices.
+    LOG_INF("FONT", "%s installed but not listed: the glyph store cannot hold it", familyName);
+    completeNote_ = tr(STR_FONT_NOT_LISTED);
+  }
   state_ = COMPLETE;
 }
 
@@ -724,6 +737,7 @@ void FontDownloadActivity::activateIndex(const int index) {
   // Activation starts a download or opens the delete prompt; a lingering tap flash would gray an
   // unrelated row once the list comes back.
   app.clearTapFlash();
+  completeNote_ = nullptr;
   if (isDownloadAllRow(index)) {
     downloadAll();
   } else if (isUpdateAllRow(index)) {
@@ -763,6 +777,7 @@ bool FontDownloadActivity::handleCustomInput() {
           // The delete held the loop task; presses made meanwhile must not reach the list.
           buttonEvents.drain();
         } else {
+          completeNote_ = nullptr;
           downloadFamily(downloadingFamilyIndex_);
         }
         requestUpdateAndWait();
@@ -807,6 +822,10 @@ void FontDownloadActivity::provideRow(void* ctx, const uint16_t index, fui::List
     item.value = tr(STR_INSTALLED);
   } else if (families.hasResumableDownload(familyIndex)) {
     item.value = tr(STR_RESUME);
+  } else {
+    // What the download takes: a CJK family is 1.6-7 MB, the others well under one.
+    formatSize(families.totalSize(familyIndex), self->rowSize_, sizeof(self->rowSize_));
+    item.value = self->rowSize_;
   }
 }
 
@@ -878,6 +897,9 @@ void FontDownloadActivity::drawChrome() {
                               (std::to_string(static_cast<int>(progress * 100)) + "%").c_str());
   } else if (state_ == COMPLETE) {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_FONT_INSTALLED), true, EpdFontFamily::BOLD);
+    if (completeNote_ != nullptr) {
+      renderer.drawCenteredText(UI_10_FONT_ID, centerY + lineHeight + metrics.verticalSpacing, completeNote_);
+    }
   } else if (state_ == ERROR) {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, tr(STR_FONT_INSTALL_FAILED), true,
                               EpdFontFamily::BOLD);

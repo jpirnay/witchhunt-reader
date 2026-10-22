@@ -2338,7 +2338,7 @@ bool installRemoteFamily(HttpDownloader::Session& session, const FontCatalog& fa
           crcOk = (actualCrc == expectedCrc32);
         }
       }
-      if (sizeOk && crcOk && installer.validateCpfontFile(stagedPath)) {
+      if (sizeOk && crcOk && installer.validateFontFile(stagedPath)) {
         LOG_DBG("WEB", "Resuming: reusing %s", stagedPath);
         continue;
       }
@@ -2371,7 +2371,7 @@ bool installRemoteFamily(HttpDownloader::Session& session, const FontCatalog& fa
       }
     }
 
-    if (!installer.validateCpfontFile(stagedPath)) {
+    if (!installer.validateFontFile(stagedPath)) {
       Storage.remove(stagedPath);
       outError = std::string("Invalid font file: ") + fileName;
       return false;

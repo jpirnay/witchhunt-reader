@@ -71,6 +71,10 @@ class FontDownloadActivity final : public UiListActivity {
   bool downloadingFamilyHasResumable_ = false;
   PendingFontAction pendingErrorAction_ = PendingFontAction::None;
   std::string errorMessage_;
+  // Shown under "Font installed!": why an installed family is not among the font choices. Points at a translation, so
+  // it takes no heap. Set by an install, cleared when the next one starts (activateIndex, Retry), so a batch keeps
+  // any family's note.
+  const char* completeNote_ = nullptr;
   bool cancelRequested_ = false;
   int previousActionCount_ = 0;
   // What the two action rows offer, counted by refreshRowTotals() so that listCount() and the row
@@ -79,6 +83,9 @@ class FontDownloadActivity final : public UiListActivity {
   int updateCount_ = 0;
   char downloadAllLabel_[64] = {};
   char updateAllLabel_[64] = {};
+  // A row's download size, formatted for the row being laid out: the list reads its strings before asking for the
+  // next row (fui::ListProps::rowProvider), so one buffer is enough.
+  mutable char rowSize_[16] = {};
   int lastProgressPercent_ = -1;
   unsigned long lastProgressUpdateMs_ = 0;
 

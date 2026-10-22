@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "CrossPointSettings.h"
+#include "util/FontDownloadRules.h"
 
 FontInstaller::FontInstaller(SdCardFontRegistry& registry) : registry_(registry) {}
 
@@ -84,29 +85,48 @@ bool FontInstaller::ensureFamilyDir(const char* familyName) {
   return true;
 }
 
-bool FontInstaller::validateCpfontFile(const char* path) {
+bool FontInstaller::validateFontFile(const char* path) {
+  const FontDownloadRules::FileKind kind = FontDownloadRules::kindOf(path);
+  if (kind == FontDownloadRules::FileKind::Unknown) {
+    LOG_ERR("FONT", "Not a font file the reader installs: %s", path);
+    return false;
+  }
   FsFile file;
   if (!Storage.openFileForRead("FONT", path, file)) {
     LOG_ERR("FONT", "Cannot open for validation: %s", path);
     return false;
   }
 
-  uint8_t magic[CPFONT_MAGIC_LEN];
-  // Signed: a failed read (-1) as a size_t passed the size check and left `magic` uninitialised.
-  const int bytesRead = file.read(magic, CPFONT_MAGIC_LEN);
+  uint8_t head[FontDownloadRules::kHeadBytes];
+  // Signed: a failed read (-1) as a size_t passed the size check and left `head` uninitialised.
+  const int bytesRead = file.read(head, sizeof head);
   file.close();
 
-  if (bytesRead < static_cast<int>(CPFONT_MAGIC_LEN)) {
+  if (bytesRead < static_cast<int>(sizeof head)) {
     LOG_ERR("FONT", "File too small or unreadable: %s (%d bytes)", path, bytesRead);
     return false;
   }
 
-  if (memcmp(magic, "CPFONT\0\0", CPFONT_MAGIC_LEN) != 0) {
-    LOG_ERR("FONT", "Bad magic in: %s", path);
+  if (!FontDownloadRules::headOk(kind, head, sizeof head)) {
+    const char* kindName = kind == FontDownloadRules::FileKind::Cpfont     ? ".cpfont"
+                           : kind == FontDownloadRules::FileKind::TrueType ? "TrueType"
+                                                                           : "OpenType CFF";
+    LOG_ERR("FONT", "Not a %s file: %s", kindName, path);
     return false;
   }
 
   return true;
+}
+
+bool FontInstaller::hasRoomFor(const uint64_t bytes, uint64_t* freeBytes) {
+  const uint64_t available = Storage.sdFreeBytes();
+  if (freeBytes) *freeBytes = available;
+  const bool fits = FontDownloadRules::fits(available, bytes);
+  if (!fits) {
+    LOG_ERR("FONT", "No room for %llu B on the card: %llu B free", static_cast<unsigned long long>(bytes),
+            static_cast<unsigned long long>(available));
+  }
+  return fits;
 }
 
 void FontInstaller::buildFontPath(const char* family, const char* filename, char* outBuf, size_t outBufSize) {
@@ -177,4 +197,36 @@ void FontInstaller::refreshRegistry() { registry_.discover(); }
 
 bool FontInstaller::isFamilyInstalled(const char* familyName) const {
   return registry_.findFamily(familyName) != nullptr;
+}
+
+bool FontInstaller::isFamilyOnCard(const char* familyName) const {
+  if (isFamilyInstalled(familyName)) return true;
+  if (!isValidFamilyName(familyName)) return false;
+  char dirPath[128];
+  snprintf(dirPath, sizeof(dirPath), "%s/%s", SdCardFontRegistry::FONTS_DIR, familyName);
+  return Storage.exists(dirPath);
+}
+
+bool FontInstaller::hasUpdate(const FontCatalog& families, const size_t family) {
+  size_t same = 0;
+  size_t changed = 0;
+  size_t absent = 0;
+  const char* familyName = families.name(family);
+  for (size_t j = 0; j < families.fileCount(family); j++) {
+    char path[128];
+    buildFontPath(familyName, families.fileLocalName(family, j), path, sizeof(path));
+    FsFile f;
+    if (!Storage.openFileForRead("FONT", path, f)) {
+      ++absent;
+      continue;
+    }
+    const size_t actual = f.fileSize();
+    f.close();
+    if (actual == families.fileSize(family, j)) {
+      ++same;
+    } else {
+      ++changed;
+    }
+  }
+  return FontDownloadRules::isUpdate(same, changed, absent);
 }
