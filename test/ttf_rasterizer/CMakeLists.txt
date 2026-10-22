@@ -21,6 +21,7 @@ add_executable(TtfRasterizerTest
   TtfFaceTest.cpp
   TtfRasterizerTest.cpp
   TtfVsFreeTypeTest.cpp
+  TtfEmboldenTest.cpp
   TtfCorruptFontTest.cpp
   CffFixtureTest.cpp
   TtfCffTest.cpp

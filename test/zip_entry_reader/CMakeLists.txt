@@ -4,6 +4,9 @@ add_library(uzlib_host STATIC
   ${REPO_ROOT}/lib/uzlib/src/tinflate.c
 )
 target_include_directories(uzlib_host PUBLIC ${REPO_ROOT}/lib/uzlib/src)
+# The firmware builds tinflate with the memcpy LZ copy (platformio.ini build_flags); the whole-buffer
+# inflate path runs that branch on the device, so the host tests compile it too.
+target_compile_definitions(uzlib_host PUBLIC UZLIB_CONF_USE_MEMCPY=1)
 
 add_library(inflate_reader_host STATIC
   ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp

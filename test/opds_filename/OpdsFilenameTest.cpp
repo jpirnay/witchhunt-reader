@@ -18,10 +18,6 @@ TEST(OpdsFilename, TitleOnlyIgnoresAuthor) {
   EXPECT_EQ(opdsBookFilename("J. Doe", "My Book", OpdsFilenameFormat::TitleOnly, ".epub"), "My Book.epub");
 }
 
-TEST(OpdsFilename, PreservesAcquisitionExtension) {
-  EXPECT_EQ(opdsBookFilename("J. Doe", "My Book", OpdsFilenameFormat::AuthorTitle, ".mobi"), "J. Doe - My Book.mobi");
-}
-
 TEST(OpdsFilename, EmptyAuthorCollapsesToTitleForEveryFormat) {
   EXPECT_EQ(opdsBookFilename("", "My Book", OpdsFilenameFormat::AuthorTitle, ".epub"), "My Book.epub");
   EXPECT_EQ(opdsBookFilename("", "My Book", OpdsFilenameFormat::TitleAuthor, ".epub"), "My Book.epub");

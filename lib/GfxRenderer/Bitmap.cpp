@@ -199,13 +199,9 @@ BmpReaderError Bitmap::parseHeaders() {
 
   const bool highColor = !nativePalette;
   if (highColor && dithering) {
-    // Always DisplayTuned, tone mapping or not: the tone curve corrects the IMAGE's
+    // The panel-tuned quantizer, tone mapping or not: the tone curve corrects the IMAGE's
     // range and the quantizer's thresholds correct for the PANEL, so the two are
-    // orthogonal and there is nothing for a mode swap to avoid. The earlier swap to
-    // Native on tone-mapped input was a real bug (near-black sleep covers), but so was
-    // the thing it was compensating for -- DisplayTuned used to feed error diffusion a
-    // bunched 15/30/80/210 level spacing, which is what actually washed the midtones
-    // out. Both live under Gray4QuantizationMode now; see the note there.
+    // orthogonal (see the note on quantizeGray4()).
     if (USE_ATKINSON) {
       atkinsonDitherer = new (std::nothrow) AtkinsonDitherer(width);
     } else {

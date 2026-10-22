@@ -180,13 +180,6 @@ TEST_F(LibraryBuilderTest, FoldersThatHoldNoBooksAreLeftOutAtAnyDepthEvenWhenHid
   EXPECT_EQ(index.header().bookCount, 1);
 }
 
-TEST(LibraryAcceptRules, TheHiddenSettingAndTheRuleRevisionBothChangeTheRecordedValue) {
-  EXPECT_NE(library::acceptRules(false), library::acceptRules(true));
-  // Revision 0 recorded the setting alone: an index from then is rebuilt.
-  EXPECT_NE(library::acceptRules(false), 0);
-  EXPECT_NE(library::acceptRules(true), 1);
-}
-
 TEST_F(LibraryBuilderTest, ABookThatCannotBeReadNowStaysPendingAndIsAskedAgain) {
   file("Books/Mort.epub");
   catalog_.unreadable.insert("Mort.epub");

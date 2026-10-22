@@ -338,37 +338,30 @@ TEST(ProgressiveJpegDc, RejectsBaselineWithoutEmittingRows) {
 // forces a 1/2 DCT pre-scale. Before the floor fix this wrote 0 rows and failed.
 // ---------------------------------------------------------------------------
 TEST(JpegToBmpConverter, OddDimensionThumbnailDecodesAllRows) {
-  FsFile f;
-  ASSERT_TRUE(f.openForRead(fixture("odd_420.jpg")));
-
-  MemoryPrint out;
+  struct Case {
+    const char* name;
+    int width;
+    int height;
+  };
   // 35x53 -> target 15x22 forces 1/2 DCT (effSrc 17x26) then fine-scales down,
-  // so needsScaling=true and the MCU-row completion path is exercised.
-  const bool ok = JpegToBmpConverter::jpegFileToBmpStreamWithSize(f, out, 15, 22);
-  f.close();
+  // so needsScaling=true and the MCU-row completion path is exercised. The even-dimension
+  // control, 96x64 -> 40x26 (1/2 DCT, effSrc 48x32), must keep working after the floor fix.
+  for (const Case c : {Case{"odd_420.jpg", 15, 22}, Case{"contrast_420.jpg", 40, 26}}) {
+    SCOPED_TRACE(c.name);
+    FsFile f;
+    ASSERT_TRUE(f.openForRead(fixture(c.name)));
 
-  ASSERT_TRUE(ok) << "converter failed on odd-dimension cover (descale-width regression)";
-  ASSERT_GE(out.buf.size(), 70u);
-  ASSERT_EQ(out.buf[0], 'B');
-  ASSERT_EQ(out.buf[1], 'M');
-  EXPECT_EQ(le32(out.buf, 18), 15);   // BMP width
-  EXPECT_EQ(le32(out.buf, 22), -22);  // BMP height (top-down => negative)
-}
+    MemoryPrint out;
+    const bool ok = JpegToBmpConverter::jpegFileToBmpStreamWithSize(f, out, c.width, c.height);
+    f.close();
 
-// Even-dimension control: the same path must keep working after the floor fix.
-TEST(JpegToBmpConverter, EvenDimensionThumbnailDecodesAllRows) {
-  FsFile f;
-  ASSERT_TRUE(f.openForRead(fixture("contrast_420.jpg")));
-
-  MemoryPrint out;
-  // 96x64 -> target 40x26 forces 1/2 DCT (effSrc 48x32) then fine-scales down.
-  const bool ok = JpegToBmpConverter::jpegFileToBmpStreamWithSize(f, out, 40, 26);
-  f.close();
-
-  ASSERT_TRUE(ok);
-  ASSERT_GE(out.buf.size(), 70u);
-  EXPECT_EQ(le32(out.buf, 18), 40);
-  EXPECT_EQ(le32(out.buf, 22), -26);
+    ASSERT_TRUE(ok) << "converter failed (descale-width regression)";
+    ASSERT_GE(out.buf.size(), 70u);
+    ASSERT_EQ(out.buf[0], 'B');
+    ASSERT_EQ(out.buf[1], 'M');
+    EXPECT_EQ(le32(out.buf, 18), c.width);    // BMP width
+    EXPECT_EQ(le32(out.buf, 22), -c.height);  // BMP height (top-down => negative)
+  }
 }
 
 // Unpack a 2-bit BMP the converter wrote into levels 0..3, top row first.

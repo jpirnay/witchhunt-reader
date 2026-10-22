@@ -267,32 +267,16 @@ TEST_F(ProgressMapperFixture, UnresolvedParagraphWithUnusablePercentageLandsOnFi
 }
 
 // --- 3. No usable spine in the XPath ------------------------------------------------------------
+//
+// An empty XPath, DocFragment[0] and one past the last spine take the same branch as a path with no
+// DocFragment at all: XPathSpine (XPathExtractionTest) pins which strings yield no spine, and
+// ASpineFromTheXPathIsTrustedAndOneFromThePercentageIsNot the range check.
 
 TEST_F(ProgressMapperFixture, NoDocFragmentFallsBackToThePercentageSpine) {
   const auto pos = map("/body/p[3]", percentageInto(kSectionSpine, 0.5f));
 
   EXPECT_EQ(pos.spineIndex, kSectionSpine);
   EXPECT_NEAR(pos.pageNumber, 20, 1);
-  EXPECT_FALSE(pos.hasParagraphIndex);
-}
-
-TEST_F(ProgressMapperFixture, EmptyXPathFallsBackToThePercentage) {
-  const auto pos = map("", percentageInto(kFlatSpine, 0.5f));
-
-  EXPECT_EQ(pos.spineIndex, kFlatSpine);
-}
-
-TEST_F(ProgressMapperFixture, DocFragmentOutOfRangeFallsBackToThePercentage) {
-  const auto pos = map("/body/DocFragment[99]/body/p[1]", percentageInto(kFlatSpine, 0.5f));
-
-  EXPECT_EQ(pos.spineIndex, kFlatSpine);
-}
-
-TEST_F(ProgressMapperFixture, DocFragmentZeroIsNotASpine) {
-  // XPath predicates are 1-based; [0] is not a chapter.
-  const auto pos = map("/body/DocFragment[0]/body/p[1]", percentageInto(kSectionSpine, 0.5f));
-
-  EXPECT_EQ(pos.spineIndex, kSectionSpine);
   EXPECT_FALSE(pos.hasParagraphIndex);
 }
 

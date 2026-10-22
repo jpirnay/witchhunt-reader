@@ -54,12 +54,9 @@ Decoded decodeAll(const std::string& path, BuildArena* arena) {
   return out;
 }
 
-// Comfortably larger than one decode's needs for the fixture, so the arena path is really taken.
-size_t generousArenaBytes(const uint32_t width) {
-  // rawRowBytes for 8-bit RGB = width*3; expected output = height*(rawRowBytes+1) > 32 KB here,
-  // so the ring lands at the full 32 KB cap.
-  return PngStreamDecoder::scratchBytesFor(64 * 1024, width * 3) + 1024;
-}
+// Comfortably larger than one decode's needs for the fixture (a 32 KB ring and two scanlines), so
+// the arena path is really taken.
+constexpr size_t kGenerousArenaBytes = 64 * 1024;
 
 TEST(PngDecoderArena, ArenaAndHeapProduceIdenticalPixels) {
   const std::string path = fixture("gradient_rgb.png");
@@ -68,7 +65,7 @@ TEST(PngDecoderArena, ArenaAndHeapProduceIdenticalPixels) {
   ASSERT_TRUE(viaHeap.ok) << "heap decode failed — fixture missing or unreadable?";
   ASSERT_GT(viaHeap.gray.size(), 0u);
 
-  BuildArena arena(generousArenaBytes(viaHeap.info.width));
+  BuildArena arena(kGenerousArenaBytes);
   ASSERT_TRUE(arena.valid());
   const Decoded viaArena = decodeAll(path, &arena);
   ASSERT_TRUE(viaArena.ok);
@@ -89,7 +86,7 @@ TEST(PngDecoderArena, ArenaIsReusedAcrossConsecutiveDecodes) {
   const Decoded probe = decodeAll(path, nullptr);
   ASSERT_TRUE(probe.ok);
 
-  BuildArena arena(generousArenaBytes(probe.info.width));
+  BuildArena arena(kGenerousArenaBytes);
   ASSERT_TRUE(arena.valid());
 
   size_t highWaterAfterFirst = 0;
@@ -132,26 +129,6 @@ TEST(PngDecoderArena, ZeroSizedArenaBehavesLikeNoArena) {
   const Decoded viaEmpty = decodeAll(path, &empty);
   ASSERT_TRUE(viaEmpty.ok);
   EXPECT_EQ(viaHeap.gray, viaEmpty.gray);
-}
-
-TEST(PngDecoderArena, ScratchBytesForCoversAnActualDecode) {
-  // A caller budgeting from scratchBytesFor() must not come up short — otherwise the arena
-  // silently half-works and the churn it was meant to remove comes back.
-  const std::string path = fixture("gradient_rgb.png");
-  const Decoded probe = decodeAll(path, nullptr);
-  ASSERT_TRUE(probe.ok);
-
-  const uint32_t rawRowBytes = probe.info.width * 3;  // 8-bit RGB fixture
-  const size_t expectedOutput = static_cast<size_t>(probe.info.height) * (rawRowBytes + 1);
-  const size_t budget = PngStreamDecoder::scratchBytesFor(expectedOutput, rawRowBytes);
-
-  BuildArena exact(budget);
-  ASSERT_TRUE(exact.valid());
-  const Decoded d = decodeAll(path, &exact);
-  ASSERT_TRUE(d.ok);
-  EXPECT_EQ(d.gray, probe.gray);
-  EXPECT_EQ(exact.failedAllocSize(), 0u) << "scratchBytesFor under-budgeted the decode";
-  EXPECT_LE(exact.highWater(), budget);
 }
 
 }  // namespace

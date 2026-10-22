@@ -44,28 +44,13 @@ struct QuantizedGray4 {
 // widened the midtones first, which is why this surfaced as "the adaptive filter washes
 // covers out".
 //
-// So both modes now feed error diffusion the even 0/85/170/255 spacing, and differ only
-// in their thresholds -- which is the half a display tuning was ever meant to touch:
-//   DisplayTuned: X4-tuned thresholds 30/50/140. The brightening is preserved.
-//   Native: even thresholds 43/128/213, the untuned midpoints.
-// Note: `Native` matches quantizeGray4Level() in Epub/converters/DitherUtils.h, which
-// serves the reader's in-book image path -- and that path really does use it, because
-// the AtkinsonDitherer in JpegToFramebufferConverter sits inside
-// ENABLE_IMAGE_DITHERING_EXTENSION, which no build defines. Kept as separate enumerators
-// because quantizeGray4Level returns only an index and has no threshold counterpart.
-enum class Gray4QuantizationMode : uint8_t { DisplayTuned, Native };
-
-inline QuantizedGray4 quantizeGray4(int gray, const Gray4QuantizationMode mode) {
+// So error diffusion is fed the even 0/85/170/255 spacing, and only the thresholds carry the
+// display tuning: the X4-tuned 30/50/140, where the even midpoints would be 43/128/213.
+// (The reader's in-book image path uses the untuned midpoints, quantizeGray4Level() in
+// Epub/converters/DitherUtils.h, which returns only an index.)
+inline QuantizedGray4 quantizeGray4(int gray) {
   if (gray < 0) gray = 0;
   if (gray > 255) gray = 255;
-
-  if (mode == Gray4QuantizationMode::Native) {
-    // Untuned midpoints between the four levels.
-    if (gray < 43) return {0, 0};
-    if (gray < 128) return {1, 85};
-    if (gray < 213) return {2, 170};
-    return {3, 255};
-  }
 
   // X4-tuned thresholds; same level spacing fed back to the diffuser (see above).
   if (gray < 30) return {0, 0};
@@ -182,8 +167,7 @@ class Atkinson1BitDitherer {
 // Less error buildup = fewer artifacts than Floyd-Steinberg
 class AtkinsonDitherer {
  public:
-  explicit AtkinsonDitherer(int width, Gray4QuantizationMode quantizationMode = Gray4QuantizationMode::DisplayTuned)
-      : width(width), quantizationMode(quantizationMode) {
+  explicit AtkinsonDitherer(int width) : width(width) {
     const size_t stride = static_cast<size_t>(width + 4);
     errorRows = new (std::nothrow) int16_t[stride * 3]();
     if (errorRows) {
@@ -206,7 +190,7 @@ class AtkinsonDitherer {
     if (adjusted < 0) adjusted = 0;
     if (adjusted > 255) adjusted = 255;
 
-    const QuantizedGray4 quantized = quantizeGray4(adjusted, quantizationMode);
+    const QuantizedGray4 quantized = quantizeGray4(adjusted);
 
     if (!errorRows) return quantized.index;
 
@@ -242,7 +226,6 @@ class AtkinsonDitherer {
 
  private:
   int width;
-  Gray4QuantizationMode quantizationMode;
   int16_t* errorRows{nullptr};
   int16_t* errorRow0{nullptr};
   int16_t* errorRow1{nullptr};
@@ -259,9 +242,7 @@ class AtkinsonDitherer {
 //      7/16  X
 class FloydSteinbergDitherer {
  public:
-  explicit FloydSteinbergDitherer(int width,
-                                  Gray4QuantizationMode quantizationMode = Gray4QuantizationMode::DisplayTuned)
-      : width(width), quantizationMode(quantizationMode), rowCount(0) {
+  explicit FloydSteinbergDitherer(int width) : width(width), rowCount(0) {
     const size_t stride = static_cast<size_t>(width + 2);
     errorRows = new (std::nothrow) int16_t[stride * 2]();
     if (errorRows) {
@@ -288,7 +269,7 @@ class FloydSteinbergDitherer {
     if (adjusted < 0) adjusted = 0;
     if (adjusted > 255) adjusted = 255;
 
-    const QuantizedGray4 quantized = quantizeGray4(adjusted, quantizationMode);
+    const QuantizedGray4 quantized = quantizeGray4(adjusted);
 
     if (!errorRows) return quantized.index;
 
@@ -346,7 +327,6 @@ class FloydSteinbergDitherer {
 
  private:
   int width;
-  Gray4QuantizationMode quantizationMode;
   int rowCount;
   int16_t* errorRows{nullptr};
   int16_t* errorCurRow{nullptr};

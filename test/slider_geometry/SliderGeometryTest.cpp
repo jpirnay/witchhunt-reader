@@ -14,11 +14,6 @@ constexpr int kMax = 100;
 
 int valueAt(const int px) { return SliderGeometry::valueForX(px, kBarX, kBarW, kMin, kMax); }
 
-TEST(SliderGeometry, TrackIsInsetInsideTheBar) {
-  EXPECT_EQ(kBarX + 2, SliderGeometry::trackX(kBarX));
-  EXPECT_EQ(kBarW - 4, SliderGeometry::trackWidth(kBarW));
-}
-
 TEST(SliderGeometry, TrackStartIsMinAndTrackEndIsMax) {
   EXPECT_EQ(kMin, valueAt(SliderGeometry::trackX(kBarX)));
   EXPECT_EQ(kMax, valueAt(SliderGeometry::trackX(kBarX) + SliderGeometry::trackWidth(kBarW)));

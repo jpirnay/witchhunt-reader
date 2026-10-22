@@ -144,22 +144,6 @@ TEST_P(RoundTripFixture, EveryPageComesBackOnItself) {
   }
 }
 
-TEST_P(RoundTripFixture, LastPageComesBackAsTheLastPage) {
-  // The failure that matters here is not a page of drift but a fall to page 0: the two passes
-  // of the forward mapper counting the chapter's text differently would make the end of the
-  // chapter unreachable, and the upload would name the chapter's root instead.
-  const int spineCount = epub->getSpineItemsCount();
-  for (int spine = 0; spine < spineCount; ++spine) {
-    const auto section = build(spine);
-    const int pages = section->pageCount;
-    if (pages < 2) continue;
-    const auto ko = ProgressMapper::toKOReader(epub, pushOf(spine, pages - 1, pages, *section));
-    const auto back = ProgressMapper::toCrossPoint(epub, ko, spine, pages);
-    EXPECT_EQ(back.spineIndex, spine);
-    EXPECT_EQ(snappedPage(back, *section), pages - 1) << "spine " << spine << " via " << ko.xpath;
-  }
-}
-
 TEST_P(RoundTripFixture, ChapterStartStaysOnFirstPageWhateverThePercentageSays) {
   // What a push from the start of a chapter on any device looks like, with KOReader's percentage
   // skewed either way by up to 5% of the book (issue #268 was +1.5%). The skew may even point

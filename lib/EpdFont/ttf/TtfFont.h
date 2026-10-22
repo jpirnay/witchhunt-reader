@@ -25,7 +25,7 @@ class TtfFontSet;
 /// TtfFontSet, the families installed together, whose store and scratch block it shares.
 ///
 /// It serves the body size and, on demand, native sizes (headings, CSS sizes, drop caps at their own pixel size):
-/// each size is an EpdFontData without tables for each style the family has, so every lookup goes to a per-style
+/// each size is an EpdFontData without tables for each style the family draws, so every lookup goes to a per-style
 /// GlyphProvider adapter, and has its own entry in the store's face table. Kerning comes from the font's GPOS (or
 /// legacy kern) table through the store's pair index, and the fi/fl/ff/ffi/ffl ligatures from its GSUB table
 /// (spec 5.4).
@@ -66,8 +66,11 @@ class TtfFont {
   /// or over kMaxPointSize, or its line height does not fit EpdFontData (advanceY over 255).
   bool setBodySize(uint8_t pointSize);
   uint8_t bodySize() const { return pointSize_; }
-  /// The body face's font for `style`; nullptr for a style the family lacks (EpdFontFamily then falls back).
+  /// The body face's font for `style`; nullptr for a style the family lacks (EpdFontFamily then falls back). A family
+  /// none of whose files is bold draws bold, and bold italic without a file of its own, emboldened (spec 7.1).
   const EpdFont* font(uint8_t style) const;
+  /// Whether `style` is drawn emboldened from another style's file (spec 7.1).
+  bool synthetic(const uint8_t style) const { return style < 4 && (synthetic_ & (1u << style)) != 0; }
   /// The body face's pixels per em (26.6), which native sizes are measured against; 0 before setBodySize().
   uint32_t bodyPpem() const { return body_.ppem; }
   /// The family's largest native size: kMaxNativePx, or less when its tallest glyph (head.yMax) or the furthest
@@ -141,7 +144,7 @@ class TtfFont {
     bool indexValid = false;
     bool claimTried = false;  // in store generation `generation`
     uint32_t generation = 0;
-    // One for each style the family has a file for, where slot_ says: the body's made at load, a native size's with it.
+    // One for each style the family draws, where slot_ says: the body's made at load, a native size's with it.
     std::unique_ptr<StyleFont[]> styles;
   };
 
@@ -175,16 +178,17 @@ class TtfFont {
   enum class StylesResult : uint8_t { Ok, MapFailed, Changed, Failed };
 
   TtfFont(TtfFontSet& set, uint8_t family) : set_(set), family_(family) {}
-  // The style `style`, when the family has a file for it; else nullptr.
+  // The file that draws `style`: its own, or a synthetic style's source's; nullptr when none does.
   Style* styleAt(const uint8_t style) const {
-    return style < 4 && slot_[style] != kNoSlot ? &styles_[slot_[style]] : nullptr;
+    return style < 4 && source_[style] != kNoSlot ? &styles_[fileSlot_[source_[style]]] : nullptr;
   }
-  // Whether the family draws `style`: it has a file for it that the engine reads.
+  // Whether the family draws `style`: the file that draws it is one the engine reads.
   bool draws(const uint8_t style) const {
     const Style* const found = styleAt(style);
     return found && found->present;
   }
   StylesResult openStyles(const ttf::FileSource (&files)[4], uint8_t& block, ttf::ScratchPlan* plan);
+  void chooseSynthetic();
   bool fontBytes(uint8_t style, FontBytes* bytes);
   bool configure(Size& size, uint32_t ppem);
   void rebase(Size& size);
@@ -193,18 +197,26 @@ class TtfFont {
   bool claimSize(Size& size);
   bool storeKey(Size& size, uint8_t style, uint32_t codepoint, uint32_t* key);
   const EpdGlyph* glyph(Size& size, uint8_t style, uint32_t codepoint);
-  int8_t kerning(const Size& size, uint8_t style, uint32_t left, uint32_t right);
+  int8_t kerning(const Size& size, uint8_t drawn, uint32_t left, uint32_t right);
   void prefetch(Size& size, uint8_t style, const char* utf8Text);
   const EpdGlyph* render(const Size& size, uint8_t style, uint32_t codepoint, bool haveKey, uint32_t key);
+  ttf::Status load(FontBytes& bytes, const ttf::Face& face, uint16_t index, const Size& size, uint8_t style,
+                   EpdGlyph* metrics);
 
   TtfFontSet& set_;
   uint8_t family_;  // its index in the set: in its face entries and pair slots
   // Only the styles the family has a file for, a book's accent family often one or two (each style ~260 B, and its
-  // font in every size ~130 B): slot_ gives a style's place in them and in each size's fonts. Made at load.
+  // font in every size ~130 B): fileSlot_ gives a file's place in them. Each size has a font only for each style the
+  // family draws, a synthetic one too: slot_ gives its place there. source_ is the style whose file draws a style:
+  // its own, or for a synthetic style the regular or the italic. Made at load.
   static constexpr uint8_t kNoSlot = 0xFF;
   std::unique_ptr<Style[]> styles_;
+  uint8_t fileSlot_[4] = {kNoSlot, kNoSlot, kNoSlot, kNoSlot};
   uint8_t slot_[4] = {kNoSlot, kNoSlot, kNoSlot, kNoSlot};
-  uint8_t styleCount_ = 0;
+  uint8_t source_[4] = {kNoSlot, kNoSlot, kNoSlot, kNoSlot};
+  uint8_t styleCount_ = 0;  // files: styles_'s length
+  uint8_t fontCount_ = 0;   // each size's fonts
+  uint8_t synthetic_ = 0;   // synthetic(): one bit per style
   Size body_;
   uint8_t pointSize_ = 0;
   std::unique_ptr<Size> native_[kMaxNativeSizes];

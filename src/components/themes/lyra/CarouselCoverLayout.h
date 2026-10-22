@@ -10,9 +10,8 @@
 // tapping it did nothing; with exactly two books a target was recorded for a tile that is not
 // drawn at all.
 //
-// Pure arithmetic over its inputs, with no theme or renderer dependency, so the round trip
-// (compute a slot, hit-test the pixel it was drawn at) is exercised on the host -- the gate that
-// caught two bugs in SliderGeometry and would have caught this one.
+// Pure arithmetic over its inputs, with no theme or renderer dependency, so the slots are
+// exercised on the host.
 namespace CarouselCoverLayout {
 
 // The tile sizes the theme paints with. Passed in rather than baked in so this header stays free
@@ -77,8 +76,8 @@ inline Slots compute(const Dimensions& d, const int screenW, const int rectY, co
 // beside it. A press there opened a book that was not visible under the finger.
 //
 // Clipping on the RECORDING side rather than in the hit test, so the geometry a caller reads is
-// the geometry a reader can see; a slot clipped away entirely reports w/h 0 and hitTest misses
-// it like any other empty rect.
+// the geometry a reader can see; a slot clipped away entirely reports w/h 0, which the recorder
+// skips.
 inline Slot clampToScreen(const Slot& slot, const int screenW, const int screenH) {
   Slot out = slot;
   const int right = slot.x + slot.w;
@@ -92,17 +91,6 @@ inline Slot clampToScreen(const Slot& slot, const int screenW, const int screenH
   if (out.w < 0) out.w = 0;
   if (out.h < 0) out.h = 0;
   return out;
-}
-
-// The book under a point, or -1 for a miss. Centre first: the side tiles slide behind it and the
-// draw puts the centre on top, so the overlapping strip belongs to whatever the reader can see.
-inline int hitTest(const Slots& slots, const int px, const int py) {
-  for (const Slot* slot : {&slots.centre, &slots.left, &slots.right}) {
-    if (slot->bookIndex < 0) continue;
-    if (slot->w <= 0 || slot->h <= 0) continue;
-    if (px >= slot->x && px < slot->x + slot->w && py >= slot->y && py < slot->y + slot->h) return slot->bookIndex;
-  }
-  return -1;
 }
 
 }  // namespace CarouselCoverLayout

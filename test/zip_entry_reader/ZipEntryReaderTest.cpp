@@ -24,13 +24,13 @@ class ZipEntryReaderTest : public ::testing::Test {
   ZipFile zip_{epubPath_};
 };
 
-// Helper: drain an EntryReader into a byte vector.
-static bool drain(ZipFile::EntryReader& reader, std::vector<uint8_t>& out) {
+// Helper: drain an EntryReader into a byte vector, asking for `chunk` bytes per step.
+static bool drain(ZipFile::EntryReader& reader, std::vector<uint8_t>& out, const size_t chunk = 512) {
   uint8_t buf[512];
   bool done = false;
   while (!done) {
     size_t produced = 0;
-    if (!reader.step(buf, sizeof(buf), &produced, &done)) return false;
+    if (!reader.step(buf, chunk, &produced, &done)) return false;
     out.insert(out.end(), buf, buf + produced);
   }
   return true;
@@ -64,7 +64,7 @@ TEST_F(ZipEntryReaderTest, ChunkedOutputMatchesOneShot) {
   EXPECT_EQ(reader.inflatedSize(), ref.data.size());
 
   std::vector<uint8_t> got;
-  ASSERT_TRUE(drain(reader, got));
+  ASSERT_TRUE(drain(reader, got, 97));
 
   EXPECT_EQ(got.size(), ref.data.size());
   EXPECT_EQ(got, ref.data);

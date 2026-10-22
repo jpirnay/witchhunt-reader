@@ -165,30 +165,11 @@ TEST(AdaptiveToneStretch, NeverDarkensNearWhites) {
   }
 }
 
-TEST(AdaptiveToneStretch, IsNearlyANoOpOnAnImageAlreadySpanningTheRange) {
-  // The case that made adaptive sleep covers look flat: a dark scene with a small bright
-  // element pins p99 near 255, so the gain is ~1.0 and the curve mostly just subtracts
-  // the black point. Documented here as known behaviour -- it is what Equalize addresses.
-  Histogram h{};
-  for (int i = 27; i <= 90; i++) h[static_cast<size_t>(i)] = 1000;  // ~90% of the mass
-  for (int i = 248; i <= 253; i++) h[static_cast<size_t>(i)] = 1200;
-
-  const Points points = derive(h);
-  ASSERT_TRUE(points.active);
-  const int span = points.whitePoint - points.blackPoint;
-  EXPECT_GT(span, 200) << "endpoints should already be far apart";
-
-  // The dominant band is pushed down, not spread out.
-  EXPECT_LT(adaptive_tone::apply(points, 68), 68);
-  const int spreadBefore = 90 - 27;
-  const int spreadAfter = adaptive_tone::apply(points, 90) - adaptive_tone::apply(points, 27);
-  EXPECT_LT(spreadAfter, spreadBefore * 5 / 4) << "stretch buys almost no extra separation here";
-}
-
 // --- Mode::Equalize ---------------------------------------------------------
 
 TEST(AdaptiveToneEqualize, SpreadsTheDominantBand) {
-  // Same bimodal histogram as above. Equalization allocates output range by pixel mass,
+  // A bimodal histogram: Stretch cannot help it, since the pixels near 255 pin p99 and the gain is
+  // ~1. Equalization allocates output range by pixel mass,
   // so the band carrying 90% of the image gets most of the range.
   Histogram h{};
   for (int i = 27; i <= 90; i++) h[static_cast<size_t>(i)] = 1000;
@@ -284,59 +265,40 @@ TEST(AdaptiveToneEqualize, ReachesFullWhiteAtTheTop) {
   EXPECT_EQ(adaptive_tone::apply(points, 255), 255);
 }
 
-// --- Gray4QuantizationMode --------------------------------------------------
+// --- quantizeGray4 ----------------------------------------------------------
 //
-// The two modes are a threshold tuning, not two different claims about the level
-// spacing. Feeding error diffusion a bunched spacing (the old 15/30/80/210) collapsed
-// midtone images onto two levels 130 apart and washed the covers out; these pin the
-// separation of concerns so it cannot be reintroduced by "tuning the quantizer".
-
-TEST(Gray4Quantization, BothModesFeedBackTheSameLevelSpacing) {
-  // Whatever the thresholds, `value` is the error-diffusion feedback term and must
-  // describe how far apart the levels are -- identically in both modes.
-  for (int index = 0; index < 4; index++) {
-    const int expected = index * 85;
-    for (int gray = 0; gray <= 255; gray++) {
-      const QuantizedGray4 tuned = quantizeGray4(gray, Gray4QuantizationMode::DisplayTuned);
-      const QuantizedGray4 native = quantizeGray4(gray, Gray4QuantizationMode::Native);
-      if (tuned.index == index) EXPECT_EQ(tuned.value, expected) << "tuned gray=" << gray;
-      if (native.index == index) EXPECT_EQ(native.value, expected) << "native gray=" << gray;
-    }
-  }
-}
+// The quantizer's tuning is in its thresholds, not in the level spacing. Feeding error
+// diffusion a bunched spacing (the old 15/30/80/210) collapsed midtone images onto two
+// levels 130 apart and washed the covers out; these pin the separation of concerns so it
+// cannot be reintroduced by "tuning the quantizer".
 
 TEST(Gray4Quantization, FeedbackValuesAreEvenlySpaced) {
-  // The gap between adjacent levels is what a midtone pixel has to be dithered across.
-  // An uneven set strands whole bands of the image between two far-apart levels.
-  for (const auto mode : {Gray4QuantizationMode::DisplayTuned, Gray4QuantizationMode::Native}) {
-    int value[4] = {-1, -1, -1, -1};
-    for (int gray = 0; gray <= 255; gray++) {
-      const QuantizedGray4 q = quantizeGray4(gray, mode);
-      value[q.index] = q.value;
-    }
-    ASSERT_EQ(value[0], 0);
-    ASSERT_EQ(value[3], 255);
-    for (int i = 1; i < 4; i++) EXPECT_EQ(value[i] - value[i - 1], 85) << "level " << i;
-  }
-}
-
-TEST(Gray4Quantization, DisplayTunedKeepsItsBrighteningThresholds) {
-  // The X4 compensation lives here and only here: the tuned mode promotes a pixel to a
-  // higher level than the untuned midpoints would. Losing this is the near-black failure.
-  EXPECT_EQ(quantizeGray4(100, Gray4QuantizationMode::DisplayTuned).index, 2);
-  EXPECT_EQ(quantizeGray4(100, Gray4QuantizationMode::Native).index, 1);
+  // `value` is the error-diffusion feedback term and must describe how far apart the levels are:
+  // the gap between adjacent levels is what a midtone pixel has to be dithered across, and an
+  // uneven set strands whole bands of the image between two far-apart levels.
+  int value[4] = {-1, -1, -1, -1};
   for (int gray = 0; gray <= 255; gray++) {
-    EXPECT_GE(quantizeGray4(gray, Gray4QuantizationMode::DisplayTuned).index,
-              quantizeGray4(gray, Gray4QuantizationMode::Native).index)
-        << "gray=" << gray;
+    const QuantizedGray4 q = quantizeGray4(gray);
+    value[q.index] = q.value;
+  }
+  ASSERT_EQ(value[0], 0);
+  ASSERT_EQ(value[3], 255);
+  for (int i = 1; i < 4; i++) EXPECT_EQ(value[i] - value[i - 1], 85) << "level " << i;
+}
+
+TEST(Gray4Quantization, KeepsItsBrighteningThresholds) {
+  // The X4 compensation lives here and only here: a pixel is promoted to a higher level than the
+  // even midpoints (43/128/213) would give it. Losing this is the near-black failure.
+  EXPECT_EQ(quantizeGray4(100).index, 2);  // the even midpoints give 1
+  for (int gray = 0; gray <= 255; gray++) {
+    const int evenIndex = gray < 43 ? 0 : gray < 128 ? 1 : gray < 213 ? 2 : 3;
+    EXPECT_GE(quantizeGray4(gray).index, evenIndex) << "gray=" << gray;
   }
 }
 
-TEST(Gray4Quantization, IsMonotonicInBothModes) {
-  for (const auto mode : {Gray4QuantizationMode::DisplayTuned, Gray4QuantizationMode::Native}) {
-    for (int gray = 1; gray <= 255; gray++) {
-      EXPECT_GE(quantizeGray4(gray, mode).index, quantizeGray4(gray - 1, mode).index) << "gray=" << gray;
-    }
+TEST(Gray4Quantization, IsMonotonic) {
+  for (int gray = 1; gray <= 255; gray++) {
+    EXPECT_GE(quantizeGray4(gray).index, quantizeGray4(gray - 1).index) << "gray=" << gray;
   }
 }
 

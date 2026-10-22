@@ -22,9 +22,6 @@ std::string authorFilingName(const std::string& name, const std::string& fileAs)
 // file-as of "Le Guin Ursula K" are one key.
 std::string filingKey(const std::string& filing);
 
-// The key an author files under: filingKey(authorFilingName(name, fileAs)).
-std::string authorSortKey(const std::string& name, const std::string& fileAs);
-
 // One author across books: FNV-1a of the folded name, so the same name in another case, accent form
 // or spacing still groups. An empty name is library::AUTHOR_UNKNOWN; no name hashes to that or to
 // library::AUTHOR_PENDING.

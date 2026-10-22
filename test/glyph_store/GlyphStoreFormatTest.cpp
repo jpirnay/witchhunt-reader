@@ -54,12 +54,6 @@ TEST(GlyphStoreFormat, APairStyleIsItsFamilyAndItsStyle) {
   EXPECT_LE(pairStyle(kMaxStyles - 1, 3), 0xFFFFu);  // the high half of a pair slot's value
 }
 
-TEST(GlyphStoreFormat, NoGlyphIsAValueOnlyACompleteWriteProduces) {
-  // A cut leaves extra 1 bits; only a write that lands every bit reads as 0.
-  EXPECT_EQ(0u, kNoGlyph);
-  EXPECT_GE(kRecordHeaderBytes, 1u);  // a record slot holds a dataOffset, which is never 0
-}
-
 TEST(GlyphStoreFormat, ASlotValuePacksTheEpochAndTheOffset) {
   const uint32_t value = glyphSlotValue(0x1234, 0x3FFFFC);
   EXPECT_EQ(0x234u, slotEpoch(value));  // the low 12 bits
@@ -232,12 +226,6 @@ TEST(GlyphStorePlan, TheIndexExpectsTheBodysRecords) {
   EXPECT_LT(b.geometry.indexSlots, a.geometry.indexSlots);
 }
 
-TEST(GlyphStorePlan, EightStyleBlocksAreTheMost) {
-  Layout layout{};
-  EXPECT_TRUE(planLayout(input(kModeFlash, kMaxStyles, 200000), layout));
-  EXPECT_FALSE(planLayout(input(kModeFlash, kMaxStyles + 1, 200000), layout));
-}
-
 TEST(GlyphStorePlan, StylesThatDoNotFitAreRefused) {
   Layout layout{};
   EXPECT_FALSE(planLayout(input(kModeFlash, 4, 900000), layout));
@@ -261,6 +249,7 @@ TEST(GlyphStorePlan, TheIndexHoldsWhatTheLogHolds) {
 
 TEST(GlyphStorePlan, BadInputIsRefused) {
   Layout layout{};
+  EXPECT_TRUE(planLayout(input(kModeFlash, kMaxStyles, 200000), layout)) << "the most styles it accepts";
   EXPECT_FALSE(planLayout(input(kModeFlash, 0, 1000), layout));
   EXPECT_FALSE(planLayout(input(kModeFlash, kMaxStyles + 1, 1000), layout));
   EXPECT_FALSE(planLayout(input(2, 1, 1000), layout));

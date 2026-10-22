@@ -68,24 +68,17 @@ TEST_F(LibraryJoinTest, AFirstBuildLeavesEveryBookPendingAndNew) {
   }
 }
 
-TEST_F(LibraryJoinTest, AuthorsAndFirstSeenAreCarriedByIdentity) {
+TEST_F(LibraryJoinTest, AuthorsAndFirstSeenAreCarriedByIdentityEvenWhenTheBookMoved) {
   addName("Terry Pratchett");
+  // The book moved to another folder: identity is the file name and size, not the path.
   ASSERT_TRUE(publish({book("/Disc/Mort.epub", "Terry Pratchett", 0, 4)}, 4));
-  const auto result = join({staged("/Disc/Mort.epub")});
+  const auto result = join({staged("/Discworld/Mort.epub")});
   EXPECT_EQ(result.pending, 0);
   EXPECT_EQ(result.buildGen, 4u) << "nothing new: the generation stays";
   const auto records = joined();
   ASSERT_EQ(records.size(), 1u);
   EXPECT_EQ(records[0].authorHash, LibraryKeys::authorHash("Terry Pratchett"));
   EXPECT_EQ(records[0].firstSeen, 4u);
-}
-
-TEST_F(LibraryJoinTest, AMovedBookKeepsItsAuthorAndFirstSeen) {
-  addName("Terry Pratchett");
-  ASSERT_TRUE(publish({book("/Inbox/Mort.epub", "Terry Pratchett", 0, 2)}, 2));
-  const auto result = join({staged("/Discworld/Mort.epub")});
-  EXPECT_EQ(result.pending, 0);
-  EXPECT_EQ(joined()[0].firstSeen, 2u);
 }
 
 TEST_F(LibraryJoinTest, ANewBookTakesTheNextGenerationAndIsNewest) {

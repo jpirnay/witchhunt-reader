@@ -18,6 +18,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | [opds-and-kosync.md](opds-and-kosync.md) | Gutenberg's repeated OpenSearch fetch and truncated-field warning, KOSync redirect gate and log labels |
 | [reader-state.md](reader-state.md) | Mark as read vs. a pending page save, menu actions after a layout change, sync mid-build, dead override overloads |
 | [screen-layout.md](screen-layout.md) | Overlaps and layout arithmetic left from the header/body audit, cleanup |
+| [test-suite.md](test-suite.md) | Host test suite: firmware paths with no host test, tests blind to corruption, goldens to extend, renames and moves, small cleanups from the second audit |
 
 Design records for shipped features, cited from code, are in [../design/](../design/); reference
 documentation is in [../contributing/](../contributing/) and the other files under `docs/`.

@@ -220,23 +220,20 @@ TEST_F(CoverFallback, ANavLandmarkMayNameThePictureItself) {
 }
 
 // properties tokens separated by a newline or a tab: already recognised (the SAX parser normalises
-// attribute whitespace), kept as tests because the fork claimed them broken.
-TEST_F(CoverFallback, CoverImagePropertySeparatedByNewline) {
-  Book book;
-  book.manifestExtra =
-      "<item id=\"x\" media-type=\"image/png\" href=\"image/img0001.png\" properties=\"svg\ncover-image\"/>\n";
-  book.files = {{"OEBPS/image/img0001.png", kPng}};
-  writeBook(book);
-  EXPECT_EQ(coverViaLoad(), "OEBPS/image/img0001.png");
-}
-
-TEST_F(CoverFallback, CoverImagePropertySeparatedByTab) {
-  Book book;
-  book.manifestExtra =
-      "<item id=\"x\" media-type=\"image/png\" href=\"image/img0001.png\" properties=\"svg\tcover-image\"/>\n";
-  book.files = {{"OEBPS/image/img0001.png", kPng}};
-  writeBook(book);
-  EXPECT_EQ(coverViaLoad(), "OEBPS/image/img0001.png");
+// attribute whitespace), kept as a test because the fork claimed them broken.
+TEST_F(CoverFallback, CoverImagePropertySeparatedByNewlineOrTab) {
+  for (const char* separator : {"\n", "\t"}) {
+    SCOPED_TRACE(separator[0] == '\n' ? "newline" : "tab");
+    fs::remove_all(cacheDir);
+    Epub::clearCoverMetadataMemo();
+    Book book;
+    book.manifestExtra =
+        std::string("<item id=\"x\" media-type=\"image/png\" href=\"image/img0001.png\" properties=\"svg") + separator +
+        "cover-image\"/>\n";
+    book.files = {{"OEBPS/image/img0001.png", kPng}};
+    writeBook(book);
+    EXPECT_EQ(coverViaLoad(), "OEBPS/image/img0001.png");
+  }
 }
 
 // A guide cover page that shows a small publisher logo before the cover picture took the logo: the

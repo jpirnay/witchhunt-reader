@@ -55,15 +55,6 @@ ReleaseJsonParser::ReleaseJsonParser()
     : parser(JsonCallbacks{this, sOnKey, sOnString, sOnNumber, sOnBool, sOnNull, sOnObjectStart, sOnObjectEnd,
                            sOnArrayStart, sOnArrayEnd, sOnStringOverflow}) {
   safeCopy(firmwareAssetName, sizeof(firmwareAssetName), "firmware.bin", sizeof("firmware.bin") - 1);
-  reset();
-}
-
-void ReleaseJsonParser::setFirmwareAssetName(const char* name) {
-  safeCopy(firmwareAssetName, sizeof(firmwareAssetName), name, strlen(name));
-}
-
-void ReleaseJsonParser::reset() {
-  parser.reset();
   position = Position::TOP_LEVEL;
   lastKey = LastKey::NONE;
   depth = 0;
@@ -84,6 +75,10 @@ void ReleaseJsonParser::reset() {
   currentAssetSize = 0;
   memset(currentAssetSha256, 0, sizeof(currentAssetSha256));
   currentAssetHasSha256 = false;
+}
+
+void ReleaseJsonParser::setFirmwareAssetName(const char* name) {
+  safeCopy(firmwareAssetName, sizeof(firmwareAssetName), name, strlen(name));
 }
 
 bool ReleaseJsonParser::inReleaseObject() const {

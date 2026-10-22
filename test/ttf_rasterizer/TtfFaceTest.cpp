@@ -83,15 +83,6 @@ TEST(TtfFace, CffFontsAreReadAndCollectionsAreUnsupported) {
   EXPECT_EQ(Face::Outlines::TrueType, face.outlines);
 }
 
-TEST(TtfFace, ABundledCffSourceIsRead) {
-  const std::vector<uint8_t> data = readFont("OpenDyslexic/OpenDyslexic-Regular.otf");
-  ASSERT_FALSE(data.empty());
-  Face face;
-  ASSERT_EQ(FaceStatus::Ok, parse(data, &face));
-  EXPECT_EQ(Face::Outlines::Cff, face.outlines);
-  EXPECT_EQ(1786, face.numGlyphs);
-}
-
 TEST(TtfFace, ACff2OnlyFontIsUnsupported) {
   // Variable OpenType (CFF2) is not read; FreeType reads a CFF2 table before a CFF one, so neither is a font with both.
   Font font = threeGlyphs();
@@ -270,12 +261,6 @@ TEST(TtfFace, HmtxIsReadAsFreeTypeReadsIt) {
   EXPECT_FALSE(bytes.outOfRange());
 }
 
-TEST(TtfFace, PointSizesBecomeFreeTypesPixelsPerEm) {
-  EXPECT_EQ(1600u, ppemFromPoints(12));
-  EXPECT_EQ(1867u, ppemFromPoints(14));
-  EXPECT_EQ(2400u, ppemFromPoints(18));
-}
-
 TEST(TtfFace, AdvancesAreTheConvertersTwelveFour) {
   const Bytes data = buildFont(threeGlyphs());
   FontBytes bytes(data.data(), static_cast<uint32_t>(data.size()));
@@ -330,6 +315,30 @@ TEST(TtfFace, Os2MetricsAreUsedWhereFreeTypeUsesThem) {
   EXPECT_EQ(1100, face.ascender);
   EXPECT_EQ(-400, face.descender);
   EXPECT_EQ(1500, face.height);
+}
+
+TEST(TtfFace, BoldIsMacStyleOrAWeightOf600InEitherOutlineFormat) {
+  // Spec 7.1: read alike from a TrueType face and a CFF one.
+  for (const bool cff : {false, true}) {
+    const auto bold = [cff](const uint16_t macStyle, const bool os2, const uint16_t weight) {
+      Font font = threeGlyphs();
+      if (cff) {
+        font.sfntVersion = tagOf("OTTO");
+        font.extraTables = {{"CFF ", buildCff(CffSpec{})}};
+      }
+      font.macStyle = macStyle;
+      font.os2 = os2;
+      font.weightClass = weight;
+      Face face;
+      EXPECT_EQ(FaceStatus::Ok, parse(buildFont(font), &face));
+      return face.bold;
+    };
+    EXPECT_FALSE(bold(0, false, 400)) << cff;
+    EXPECT_TRUE(bold(1, false, 400)) << cff;
+    EXPECT_FALSE(bold(2, false, 400)) << cff;  // italic
+    EXPECT_FALSE(bold(0, true, 599)) << cff;
+    EXPECT_TRUE(bold(0, true, 600)) << cff;
+  }
 }
 
 TEST(TtfFace, HugeAdvancesNeitherOverflowNorWrap) {

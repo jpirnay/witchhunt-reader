@@ -906,7 +906,9 @@ async function realBookChecks(file) {
   try {
     off = await readBook((await optimize(bytes, name, { split: false })).bytes);
   } catch (e) {
-    note(`${name}: not optimized: ${e.message}`);
+    // A book named on the command line may be one the converter refuses (DRM, say). A shipped fixture must convert.
+    if (bookArgs.length) note(`${name}: not optimized: ${e.message}`);
+    else check(false, `${name}: not optimized: ${e.message}`);
     return;
   }
   const { bytes: onBytes, log } = await optimize(bytes, name, { split: true });

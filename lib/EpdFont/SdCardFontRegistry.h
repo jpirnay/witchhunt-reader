@@ -39,6 +39,11 @@ struct SdCardFontFamilyInfo {
   const SdCardFontFileInfo* pickClosestSize(uint8_t targetPtSize) const;
 };
 
+// The registry reserves MAX_SD_FAMILIES records at every discovery and keeps them: a field here is that many times
+// permanent heap, so whether a family is TTF is derived from its files instead.
+static_assert(sizeof(SdCardFontFamilyInfo) == sizeof(std::string) + sizeof(std::vector<SdCardFontFileInfo>),
+              "a family record costs only its name and its files");
+
 class SdCardFontRegistry {
  public:
   static constexpr int MAX_SD_FAMILIES = 128;

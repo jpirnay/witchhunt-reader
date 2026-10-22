@@ -33,8 +33,8 @@ class FreeTypeReference {
   uint32_t glyphIndex(uint32_t codepoint) const;
   /// The glyph unhinted. FreeType renders an outline flagged OVERLAP 4x4 oversampled, which the engine does
   /// not (spec 11.6); unless `oversampleOverlaps`, the flag is cleared first, so every glyph renders the way
-  /// the engine does.
-  ReferenceGlyph glyph(uint32_t index, bool oversampleOverlaps = false) const;
+  /// the engine does. A non-zero strength (26.6) emboldens the outline first, with FT_Outline_EmboldenXY.
+  ReferenceGlyph glyph(uint32_t index, bool oversampleOverlaps = false, long xStrength = 0, long yStrength = 0) const;
   /// The size metrics in 26.6, as the converter reads face.size.
   int32_t ascender() const;
   int32_t descender() const;
