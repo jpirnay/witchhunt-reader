@@ -5,33 +5,11 @@
 
 #include "lib/Epub/Epub/TokenBoundary.h"
 
-TEST(TokenBoundary, OrdinaryWordGapIsBreakableAndJustifiable) {
-  EXPECT_TRUE(TokenBoundary::allowsBreak(/*continues=*/false, /*noSpaceBefore=*/false));
-  EXPECT_TRUE(TokenBoundary::isJustifiableGap(/*continues=*/false, /*noSpaceBefore=*/false,
-                                              /*isSpaceToken=*/false));
-}
-
-TEST(TokenBoundary, CjkZeroWidthGapIsBreakableAndJustifiable) {
-  EXPECT_TRUE(TokenBoundary::allowsBreak(/*continues=*/false, /*noSpaceBefore=*/true));
-  EXPECT_TRUE(TokenBoundary::isJustifiableGap(/*continues=*/false, /*noSpaceBefore=*/true,
-                                              /*isSpaceToken=*/false));
-}
-
-TEST(TokenBoundary, AttachedTextIsNeitherBreakableNorJustifiable) {
-  EXPECT_FALSE(TokenBoundary::allowsBreak(/*continues=*/true, /*noSpaceBefore=*/false));
-  EXPECT_FALSE(TokenBoundary::isJustifiableGap(/*continues=*/true, /*noSpaceBefore=*/false,
-                                               /*isSpaceToken=*/false));
-}
-
-TEST(TokenBoundary, ExplicitHyphenBoundaryIsBreakableButNotJustifiable) {
-  EXPECT_TRUE(TokenBoundary::allowsBreak(/*continues=*/true, /*noSpaceBefore=*/true));
-  EXPECT_FALSE(TokenBoundary::isJustifiableGap(/*continues=*/true, /*noSpaceBefore=*/true,
-                                               /*isSpaceToken=*/false));
-}
-
-TEST(TokenBoundary, LiteralAttachedSpaceRemainsJustifiable) {
-  EXPECT_TRUE(TokenBoundary::isJustifiableGap(/*continues=*/true, /*noSpaceBefore=*/false,
-                                              /*isSpaceToken=*/true));
+TEST(TokenBoundary, AllowsBreakFollowsTheTwoFlags) {
+  EXPECT_TRUE(TokenBoundary::allowsBreak(/*continues=*/false, /*noSpaceBefore=*/false));  // ordinary word gap
+  EXPECT_TRUE(TokenBoundary::allowsBreak(/*continues=*/false, /*noSpaceBefore=*/true));   // CJK zero-width gap
+  EXPECT_FALSE(TokenBoundary::allowsBreak(/*continues=*/true, /*noSpaceBefore=*/false));  // attached text
+  EXPECT_TRUE(TokenBoundary::allowsBreak(/*continues=*/true, /*noSpaceBefore=*/true));    // after a visible hyphen
 }
 
 TEST(TokenBoundary, VisibleExplicitHyphensAllowBreaks) {
