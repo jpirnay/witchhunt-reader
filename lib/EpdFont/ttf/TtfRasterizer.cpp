@@ -482,7 +482,8 @@ ScratchPlan planScratch(const Face& face, const uint32_t maxPpem26_6, const uint
   int32_t width = ((mulFix(face.xMax, scale) + 63) >> 6) - (mulFix(face.xMin, scale) >> 6) + 2;
   int32_t height = ((mulFix(face.yMax, scale) + 63) >> 6) - (mulFix(face.yMin, scale) >> 6) + 2;
   if (emboldened) {
-    // Room for synthetic bold's growth: twice the strength each way, since a sharp corner reaches past it.
+    // Room below the output cap for synthetic bold's growth: twice the strength each way, since a sharp corner
+    // reaches past it. At the cap itself there is none; such a glyph is drawn unemboldened (TtfFont::load).
     const Strength grow = emboldenStrength(plan.maxPpem26_6);
     width += 2 * ((grow.x + 63) >> 6);
     height += 2 * ((grow.y + 63) >> 6);

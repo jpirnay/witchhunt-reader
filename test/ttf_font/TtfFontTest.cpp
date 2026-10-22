@@ -2659,6 +2659,48 @@ TEST_F(TtfFontTest, SyntheticBoldDrawsEveryGlyphAtTheLargestNativeSize) {
   expectEveryGlyph(readFixture("NotoSansJP-CffFlat.otf"), kIdentityB, 0x20, 0xFFFF, 250);
 }
 
+TEST_F(TtfFontTest, SyntheticBoldDrawsAGlyphTooLargeToEmboldenUnemboldened) {
+  // At the largest native size the 4 KB output region decides: a glyph that fits as the regular does not once
+  // emboldened. It is drawn unemboldened, as before synthetic bold, never marked missing (spec 7.2).
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();  // Bookerly Regular: its largest native size is 119 px
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  ASSERT_TRUE(font->synthetic(kBold));
+  const uint32_t ppem = px(font->maxNativePx());
+  const std::vector<uint8_t>& regular = files[kRegular].bytes;
+  // The glyphs that load but do not embolden, found with the rasterizer on its own.
+  std::vector<uint32_t> tooLarge;
+  {
+    FontBytes bytes(regular.data(), static_cast<uint32_t>(regular.size()));
+    ttf::Face face;
+    ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+    ttf::Rasterizer rasterizer;
+    ASSERT_TRUE(rasterizer.allocate(
+        ttf::planScratch(face, static_cast<uint32_t>(TtfFont::kMaxNativePx) << 6, ttf::kPoolBytesFlash, true)));
+    for (const uint32_t cp : mappedCodepoints(regular)) {
+      EpdGlyph metrics{};
+      if (rasterizer.load(bytes, face, ttf::glyphIndex(bytes, face, cp), ppem, &metrics) != ttf::Status::Ok) continue;
+      if (rasterizer.embolden(ttf::emboldenStrength(ppem), &metrics) == ttf::Status::Unsupported) {
+        tooLarge.push_back(cp);
+      }
+    }
+  }
+  ASSERT_FALSE(tooLarge.empty());
+  const EpdFont* fonts[4] = {};
+  ASSERT_TRUE(font->nativeFonts(font->maxNativePx(), fonts));
+  ASSERT_NE(nullptr, fonts[kBold]);
+  for (const uint32_t cp : tooLarge) {
+    // The bold style's glyph is the regular weight's, drawn under the bold key.
+    expectDrawnAs(referenceAt(regular, cp, ppem), *font, kBold, nativeGlyph(fonts[kBold], cp));
+    if (HasFailure()) {
+      ADD_FAILURE() << "U+" << std::hex << cp;
+      return;
+    }
+  }
+  // A glyph that fits is still emboldened.
+  expectDrawnAs(emboldenedAt(regular, 'W', ppem), *font, kBold, nativeGlyph(fonts[kBold], 'W'));
+}
+
 // What a synthetic style costs: its fonts in each size, as a style with a file costs, and no file of its own.
 TEST_F(TtfFontTest, ASyntheticStyleCostsItsFontsAndNoFile) {
   Font built = kernedBoxes();

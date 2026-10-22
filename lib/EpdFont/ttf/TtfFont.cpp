@@ -967,8 +967,12 @@ ttf::Status TtfFont::load(FontBytes& bytes, const ttf::Face& face, const uint16_
                           const uint8_t style, EpdGlyph* metrics) {
   ttf::Rasterizer& rasterizer = set_.rasterizer_;
   ttf::Status loaded = rasterizer.load(bytes, face, index, size.ppem, metrics);
-  // After a failed load(), embolden() returns its status.
-  if (synthetic(style)) loaded = rasterizer.embolden(ttf::emboldenStrength(size.ppem), metrics);
+  if (synthetic(style) && loaded == ttf::Status::Ok) {
+    loaded = rasterizer.embolden(ttf::emboldenStrength(size.ppem), metrics);
+    // Too large once emboldened (the output region's cap, or the box or advance limits), though it fits as the file's
+    // style: drawn unemboldened, as the regular weight, rather than missing (spec 7.2). A Transient stays so.
+    if (loaded == ttf::Status::Unsupported) loaded = rasterizer.load(bytes, face, index, size.ppem, metrics);
+  }
   return placeable(loaded, *metrics);
 }
 
