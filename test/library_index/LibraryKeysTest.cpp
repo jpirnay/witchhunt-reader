@@ -6,8 +6,6 @@
 #include <gtest/gtest.h>
 
 #include <string>
-#include <utility>
-#include <vector>
 
 namespace {
 
@@ -43,18 +41,14 @@ TEST(LibraryKeys, FoldKeepsOtherScriptsAsTheyAre) {
   EXPECT_EQ(LibraryKeys::fold("\xD0\x9B\xD0\xB5\xD0\xB2"), "\xD0\x9B\xD0\xB5\xD0\xB2");  // Лев
 }
 
-TEST(LibraryKeys, TheSortKeyIsTheFileAsWhenThereIsOne) {
-  EXPECT_EQ(LibraryKeys::authorSortKey("Ursula K. Le Guin", "Le Guin, Ursula K."), "le guin ursula k");
-}
-
-TEST(LibraryKeys, ANameWithACommaSortsAsWritten) {
-  EXPECT_EQ(LibraryKeys::authorSortKey("Le Guin, Ursula K.", ""), "le guin ursula k");
-}
-
-TEST(LibraryKeys, OtherwiseTheLastWordComesFirst) {
-  EXPECT_EQ(LibraryKeys::authorSortKey("Terry Pratchett", ""), "pratchett terry");
-  EXPECT_EQ(LibraryKeys::authorSortKey("Homer", ""), "homer");
-  EXPECT_EQ(LibraryKeys::authorSortKey("", ""), "");
+// The sort key is the folded filing name with commas and full stops dropped, so a file-as written with
+// and without them is one key.
+TEST(LibraryKeys, FilingKeyFoldsAndDropsCommasAndStops) {
+  EXPECT_EQ(LibraryKeys::filingKey("Le Guin, Ursula K."), "le guin ursula k");
+  EXPECT_EQ(LibraryKeys::filingKey("Le Guin Ursula K"), "le guin ursula k");
+  EXPECT_EQ(LibraryKeys::filingKey("Pratchett, Terry"), "pratchett terry");
+  EXPECT_EQ(LibraryKeys::filingKey("\xC3\x89mile  Zola"), "emile zola");
+  EXPECT_EQ(LibraryKeys::filingKey(""), "");
 }
 
 // The Authors list shows what it is sorted by: the filing name, as readable as the book gives it.
@@ -75,20 +69,6 @@ TEST(LibraryKeys, OtherwiseTheFilingNamePutsTheLastWordFirst) {
 TEST(LibraryKeys, TheFilingNameTidiesItsSpacing) {
   EXPECT_EQ(LibraryKeys::authorFilingName("  Terry 	 Pratchett ", ""), "Pratchett, Terry");
   EXPECT_EQ(LibraryKeys::authorFilingName("Terry Pratchett", "  Pratchett,   Terry "), "Pratchett, Terry");
-}
-
-// The list's order is the order of what it shows: the sort key is the filing name, folded.
-TEST(LibraryKeys, TheSortKeyIsTheFilingNameFolded) {
-  const std::vector<std::pair<std::string, std::string>> authors{{"Terry Pratchett", ""},
-                                                                 {"Ursula K. Le Guin", "Le Guin, Ursula K."},
-                                                                 {"Le Guin, Ursula K.", ""},
-                                                                 {"Homer", ""},
-                                                                 {"Ãmile  Zola", ""}};
-  for (const auto& [name, fileAs] : authors) {
-    EXPECT_EQ(LibraryKeys::filingKey(LibraryKeys::authorFilingName(name, fileAs)),
-              LibraryKeys::authorSortKey(name, fileAs))
-        << name;
-  }
 }
 
 TEST(LibraryKeys, TheAuthorHashIgnoresCaseAccentsAndSpacing) {
