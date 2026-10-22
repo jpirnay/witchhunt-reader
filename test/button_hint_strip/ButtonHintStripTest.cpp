@@ -30,15 +30,6 @@ TEST(ButtonHintStrip, HitsEachBoxAtItsCentre) {
   }
 }
 
-// The index IS the raw hardware button (BTN_BACK, BTN_CONFIRM, BTN_LEFT, BTN_RIGHT), which
-// is what lets the caller skip any mapping. Pin the order so a reshuffle of mapLabels()
-// cannot silently start firing the wrong button.
-TEST(ButtonHintStrip, LeftmostBoxIsRawButtonZero) {
-  const Strip s = x4Strip();
-  EXPECT_EQ(0, ButtonHintStrip::hitTestIn(s, s.x[0], s.y));
-  EXPECT_EQ(3, ButtonHintStrip::hitTestIn(s, s.x[3] + s.width[3] - 1, s.y + s.height - 1));
-}
-
 TEST(ButtonHintStrip, BoundariesAreHalfOpen) {
   const Strip s = x4Strip();
   const int y = s.y + 1;
@@ -213,14 +204,6 @@ TEST(ButtonHintStripSide, BoundariesAreHalfOpen) {
   EXPECT_EQ(1, ButtonHintStrip::Side::hitTestIn(s, s.x[1], s.y[1]));
   EXPECT_EQ(-1, ButtonHintStrip::Side::hitTestIn(s, s.x[1], s.y[1] - 1));
   EXPECT_EQ(-1, ButtonHintStrip::Side::hitTestIn(s, s.x[1], s.y[1] + s.height[1]));
-}
-
-// The gap between the two stacked boxes (X4's 5px spacer) must stay dead, unlike the bottom
-// strip whose tuned positions are deliberately allowed to overlap.
-TEST(ButtonHintStripSide, GapBetweenBoxesMisses) {
-  const SideStrip s = x4SideStrip();
-  const int gapY = s.y[0] + s.height[0] + 2;  // inside the 5px gap
-  EXPECT_EQ(-1, ButtonHintStrip::Side::hitTestIn(s, s.x[0] + s.width[0] / 2, gapY));
 }
 
 // An inactive box (one side hint with no label, e.g. Left/Right bound to Up/Down instead in

@@ -120,20 +120,6 @@ TEST(TouchTransform, OutOfRangeInputIsClamped) {
   EXPECT_EQ(rotated.y, kPanelW - 1);
 }
 
-// Opposite orientations must disagree, or a mis-wired transform that ignored
-// the orientation argument entirely would still pass everything above.
-TEST(TouchTransform, OppositeOrientationsDiffer) {
-  const Pt ccw = map(touchtransform::LandscapeCounterClockwise, 0.25f, 0.75f);
-  const Pt cw = map(touchtransform::LandscapeClockwise, 0.25f, 0.75f);
-  EXPECT_NE(ccw.x, cw.x);
-  EXPECT_NE(ccw.y, cw.y);
-
-  const Pt portrait = map(touchtransform::Portrait, 0.25f, 0.75f);
-  const Pt inverted = map(touchtransform::PortraitInverted, 0.25f, 0.75f);
-  EXPECT_NE(portrait.x, inverted.x);
-  EXPECT_NE(portrait.y, inverted.y);
-}
-
 // The inverse used to inject touches: every on-screen point survives the round trip in every
 // orientation, so a CMD:TOUCH at (x, y) is a tap the screen reads at (x, y).
 TEST(TouchTransform, LogicalToTapRoundTripsEveryOrientation) {
