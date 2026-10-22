@@ -834,10 +834,9 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
   } else if (propNameBuf == "color" || propNameBuf == "-webkit-text-fill-color") {
     // Only the INVISIBLE value defines the property. A visible colour UNDEFINES it instead of
     // defining it false, for two reasons: a rule that only sets `color: red` still counts as
-    // "nothing we use" and stays out of the rule cache (see the SkipsRulesWithoutSupportedDeclarations
-    // test -- on a monochrome panel every book's colour rules would otherwise be retained for
-    // nothing); and within one declaration list `color: transparent; color: black` still ends
-    // visible, because black clears what transparent set. Across separate rules a later visible
+    // "nothing we use" and stays out of the rule cache (on a monochrome panel every book's colour
+    // rules would otherwise be retained for nothing); and within one declaration list `color: transparent; color:
+    // black` still ends visible, because black clears what transparent set. Across separate rules a later visible
     // colour cannot cancel an earlier transparent one -- accepted: OCR layers do not toggle
     // transparency by class. Cascade keywords (inherit/initial/unset/currentcolor) touch nothing.
     const std::string_view val = propValueBuf;

@@ -76,8 +76,8 @@ TEST(TapZones, CornersAreSquareAndSizedOffTheShorterEdge) {
 }
 
 TEST(TapZones, OnlyTheFourSquaresAreCorners) {
-  // The mirror of CentreMatchesTheReaderMenuRectangle: sweep the frame and
-  // assert cornerFor is non-None on exactly the set the geometry describes, so a
+  // Sweep the frame and assert cornerFor is non-None on exactly the set the
+  // geometry describes, so a
   // corner cannot quietly grow into the page-turn zone.
   const int side = W / 8;
   for (int x = 0; x < W; x += 7) {
