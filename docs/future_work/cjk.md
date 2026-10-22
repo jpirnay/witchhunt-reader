@@ -23,7 +23,7 @@ behind CFF.
 | 1 | Serial test API for the font work (`CMD:TTF`, `CMD:FS`) | shipped (#531) |
 | 2 | The glyph store makes room (spec section 8) | shipped (#532) |
 | 3 | CFF outlines (spec section 9), and their speed-ups | shipped (#542, #544) |
-| 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#PR) |
+| 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#548) |
 | 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | plan to write after 4 |
 | 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | needs a design |
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan to write |
