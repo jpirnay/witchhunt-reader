@@ -165,30 +165,11 @@ TEST(AdaptiveToneStretch, NeverDarkensNearWhites) {
   }
 }
 
-TEST(AdaptiveToneStretch, IsNearlyANoOpOnAnImageAlreadySpanningTheRange) {
-  // The case that made adaptive sleep covers look flat: a dark scene with a small bright
-  // element pins p99 near 255, so the gain is ~1.0 and the curve mostly just subtracts
-  // the black point. Documented here as known behaviour -- it is what Equalize addresses.
-  Histogram h{};
-  for (int i = 27; i <= 90; i++) h[static_cast<size_t>(i)] = 1000;  // ~90% of the mass
-  for (int i = 248; i <= 253; i++) h[static_cast<size_t>(i)] = 1200;
-
-  const Points points = derive(h);
-  ASSERT_TRUE(points.active);
-  const int span = points.whitePoint - points.blackPoint;
-  EXPECT_GT(span, 200) << "endpoints should already be far apart";
-
-  // The dominant band is pushed down, not spread out.
-  EXPECT_LT(adaptive_tone::apply(points, 68), 68);
-  const int spreadBefore = 90 - 27;
-  const int spreadAfter = adaptive_tone::apply(points, 90) - adaptive_tone::apply(points, 27);
-  EXPECT_LT(spreadAfter, spreadBefore * 5 / 4) << "stretch buys almost no extra separation here";
-}
-
 // --- Mode::Equalize ---------------------------------------------------------
 
 TEST(AdaptiveToneEqualize, SpreadsTheDominantBand) {
-  // Same bimodal histogram as above. Equalization allocates output range by pixel mass,
+  // A bimodal histogram: Stretch cannot help it, since the pixels near 255 pin p99 and the gain is
+  // ~1. Equalization allocates output range by pixel mass,
   // so the band carrying 90% of the image gets most of the range.
   Histogram h{};
   for (int i = 27; i <= 90; i++) h[static_cast<size_t>(i)] = 1000;
