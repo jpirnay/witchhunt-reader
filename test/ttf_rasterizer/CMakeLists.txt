@@ -5,9 +5,11 @@
 # wrappers as FreeInkFont's host tests compile it. Third-party code, so its warnings are not ours.
 set(FREEINK_FONT ${REPO_ROOT}/freeink-sdk/libs/font/FreeInkFont)
 file(GLOB FREETYPE_HOST_SOURCES ${FREEINK_FONT}/src/freetype/ft_*.c)
-# base/ftcid.c (FT_Get_CID_Is_Internally_CID_Keyed) is not among the SDK's wrappers; the CFF tests need it.
-set_source_files_properties(${FREEINK_FONT}/third_party/freetype/src/base/ftcid.c PROPERTIES COMPILE_DEFINITIONS FT2_BUILD_LIBRARY)
-add_library(freetype_host STATIC ${FREETYPE_HOST_SOURCES} ${FREEINK_FONT}/third_party/freetype/src/base/ftcid.c)
+# base/ftcid.c (FT_Get_CID_Is_Internally_CID_Keyed) and base/ftsynth.c (FT_GlyphSlot_Oblique) are not among the SDK's
+# wrappers either; the CFF tests and the synthetic italic tests need them.
+set(FREETYPE_HOST_EXTRA ${FREEINK_FONT}/third_party/freetype/src/base/ftcid.c ${FREEINK_FONT}/third_party/freetype/src/base/ftsynth.c)
+set_source_files_properties(${FREETYPE_HOST_EXTRA} PROPERTIES COMPILE_DEFINITIONS FT2_BUILD_LIBRARY)
+add_library(freetype_host STATIC ${FREETYPE_HOST_SOURCES} ${FREETYPE_HOST_EXTRA})
 # The CFF driver (with psnames, psaux, pshinter): the oracle for the CFF rasterizer. Public because
 # ftinit.c's module list reads it from the include chain.
 target_compile_definitions(freetype_host PUBLIC FREEINK_FONT_ENABLE_CFF=1)
@@ -22,6 +24,7 @@ add_executable(TtfRasterizerTest
   TtfRasterizerTest.cpp
   TtfVsFreeTypeTest.cpp
   TtfEmboldenTest.cpp
+  TtfSlantTest.cpp
   TtfCorruptFontTest.cpp
   CffFixtureTest.cpp
   TtfCffTest.cpp
