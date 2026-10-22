@@ -97,8 +97,10 @@ target_link_libraries(EpubCssCascadeTest PRIVATE
 gtest_discover_tests(EpubCssCascadeTest)
 
 # Selector census over the EPUBs the tests ship: how common each kind of selector is, and how many
-# the resolver can use. Prints CSS_CENSUS lines; see CssCensusTest.cpp.
-add_executable(EpubCssCensusTest
+# the resolver can use. Prints CSS_CENSUS lines; see CssCensusTest.cpp. A manual tool, not a test: it
+# is not part of the default build or of ctest. Build it with `--target EpubCssCensusTest` and run
+# the executable (CSS_CENSUS_DIR points it at another folder of books).
+add_executable(EpubCssCensusTest EXCLUDE_FROM_ALL
   CssCensusTest.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
   ${REPO_ROOT}/lib/Epub/Epub/css/CssParser.cpp
@@ -132,5 +134,3 @@ target_link_libraries(EpubCssCensusTest PRIVATE
   crosspoint_test_common
   GTest::gtest_main
 )
-
-gtest_discover_tests(EpubCssCensusTest)
