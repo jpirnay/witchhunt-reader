@@ -271,7 +271,7 @@
           meta.className = 'family-meta';
           const sizes = Array.isArray(f.sizes) ? f.sizes.join(', ') : '';
           const fileSizes = Array.isArray(f.files) ? f.files.map(fi => formatSize(fi.size)).join(' + ') : '';
-          meta.textContent = sizes + 'pt - ' + fileSizes;
+          meta.textContent = (f.outline ? 'all sizes' : sizes + 'pt') + ' - ' + fileSizes;
 
           info.appendChild(title);
           info.appendChild(meta);
@@ -385,6 +385,17 @@
       }
     }
 
+    // The install answer's status: installed outline families the reader does not list are an error, one line each.
+    function showInstallResult(data, okText) {
+      const missing = Array.isArray(data.notListed) ? data.notListed : [];
+      if (missing.length === 0) {
+        setStatus('remoteStatus', okText, true);
+        return;
+      }
+      setStatus('remoteStatus', missing.map(name => 'Installed "' + name +
+        '", but it is too large for this reader\'s font area: the reader does not list it.').join(' '), false);
+    }
+
     async function downloadRemoteFamily(family) {
       setStatus('remoteStatus', 'Downloading "' + family + '"...');
       try {
@@ -397,7 +408,7 @@
         if (!res.ok || !data.ok) {
           throw new Error(data.error || 'download failed');
         }
-        setStatus('remoteStatus', 'Installed "' + family + '".', true);
+        showInstallResult(data, 'Installed "' + family + '".');
         await loadFonts();
         await loadRemoteManifest();
       } catch (err) {
@@ -419,7 +430,7 @@
         if (!res.ok || !data.ok) {
           throw new Error(data.error || 'download failed');
         }
-        setStatus('remoteStatus', 'Installed/updated ' + (data.installedCount || 0) + ' family(s).', true);
+        showInstallResult(data, 'Installed/updated ' + (data.installedCount || 0) + ' family(s).');
         await loadFonts();
         await loadRemoteManifest();
       } catch (err) {

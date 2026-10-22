@@ -48,6 +48,7 @@
 #include "WifiCredentialStore.h"
 #include "html/WebSetupPageHtml.generated.h"
 #include "network/HttpDownloader.h"
+#include "util/FontDownloadRules.h"
 #include "util/FontManifestReader.h"
 #include "util/PluginLocations.h"
 
@@ -2234,26 +2235,9 @@ bool fetchRemoteFontManifest(HttpDownloader::Session& session, FontInstaller& in
 
   for (size_t i = 0; i < outFamilies.count(); i++) {
     const char* familyName = outFamilies.name(i);
-    outFamilies.setInstalled(i, installer.isFamilyInstalled(familyName));
-    outFamilies.setHasUpdate(i, false);
-    if (outFamilies.installed(i)) {
-      for (size_t j = 0; j < outFamilies.fileCount(i); j++) {
-        char path[128];
-        FontInstaller::buildFontPath(familyName, outFamilies.fileLocalName(i, j), path, sizeof(path));
-        FsFile f;
-        if (Storage.openFileForRead("WEB", path, f)) {
-          const size_t actual = static_cast<size_t>(f.size());
-          f.close();
-          if (actual != outFamilies.fileSize(i, j)) {
-            outFamilies.setHasUpdate(i, true);
-            break;
-          }
-        } else {
-          outFamilies.setHasUpdate(i, true);
-          break;
-        }
-      }
-    }
+    // On the card, listed or not: a family too large for the glyph store is installed, and is not offered again.
+    outFamilies.setInstalled(i, installer.isFamilyOnCard(familyName));
+    outFamilies.setHasUpdate(i, outFamilies.installed(i) && FontInstaller::hasUpdate(outFamilies, i));
   }
 
   return true;
@@ -2292,6 +2276,18 @@ bool installRemoteFamily(HttpDownloader::Session& session, const FontCatalog& fa
   n = snprintf(backupDir, sizeof(backupDir), "%s/%s__backup", SdCardFontRegistry::FONTS_DIR, familyName);
   if (n < 0 || static_cast<size_t>(n) >= sizeof(backupDir)) {
     outError = "Family path too long";
+    return false;
+  }
+
+  // Before the staging folder exists: a family the card cannot hold is refused here, with the numbers the device's
+  // Font Manager shows (the total plus the margin, in MB).
+  uint64_t freeBytes = 0;
+  if (!FontInstaller::hasRoomFor(families.totalSize(familyIndex), &freeBytes)) {
+    char message[96];
+    snprintf(message, sizeof(message), "Not enough space on the SD card: %.1f MB needed, %.1f MB free",
+             static_cast<double>(families.totalSize(familyIndex) + FontDownloadRules::kSpaceMarginBytes) / 1048576.0,
+             static_cast<double>(freeBytes) / 1048576.0);
+    outError = message;
     return false;
   }
 
@@ -2426,6 +2422,7 @@ void CrossPointWebServer::handleFontList() {
   for (const auto& family : families) {
     JsonObject fObj = arr.add<JsonObject>();
     fObj["name"] = family.name;
+    fObj["outline"] = family.ttf();
 
     JsonArray sizes = fObj["sizes"].to<JsonArray>();
     for (uint8_t s : family.availableSizes()) {
@@ -2533,7 +2530,9 @@ void CrossPointWebServer::handleFontDownload() {
   if (installAll) {
     copied = targets.copyFrom(
         families,
-        [](const void*, const FontCatalog& from, const size_t i) { return !from.installed(i) || from.hasUpdate(i); },
+        [](const void*, const FontCatalog& from, const size_t i) {
+          return FontDownloadRules::downloadAllTakes(from, i) || from.hasUpdate(i);
+        },
         nullptr);
   } else {
     size_t found = families.count();
@@ -2586,6 +2585,11 @@ void CrossPointWebServer::handleFontDownload() {
   JsonDocument res;
   res["ok"] = true;
   res["installedCount"] = static_cast<unsigned>(installedCount);
+  // The outline families installed that the reader does not list (too large for the glyph store).
+  JsonArray notListed = res["notListed"].to<JsonArray>();
+  for (size_t i = 0; i < targets.count(); i++) {
+    if (targets.outline(i) && !installer.isFamilyInstalled(targets.name(i))) notListed.add(targets.name(i));
+  }
   sendJson(server.get(), 200, res);
 }
 

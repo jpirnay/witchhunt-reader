@@ -727,22 +727,26 @@ curl -X POST -H "Content-Type: application/json" -d '{"docId":"..."}' http://cro
 
 ## Fonts
 
-Manages the `.cpfont` families on the SD card. Bodies are JSON. `/api/fonts/manifest`
+Manages the font families on the SD card: `.cpfont` bitmap families and TrueType or OpenType outline families. Bodies are JSON. `/api/fonts/manifest`
 and `/api/fonts/download` need the device to be online, because the device itself fetches
 from the font server over TLS.
 
 | Method | Path                  | Request                                                 | Response                                                                 |
 | ------ | --------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------ |
-| GET    | `/api/fonts`          | -                                                       | `{"families":[{"name","sizes":[pt...],"files":[{"name","size"}]}],"maxFamilies":N}` |
+| GET    | `/api/fonts`          | -                                                       | `{"families":[{"name","outline","sizes":[pt...],"files":[{"name","size"}]}],"maxFamilies":N}` |
 | GET    | `/api/fonts/manifest` | -                                                       | `{"ok":true,"baseUrl","families":[{"name","description","installed","hasUpdate","totalSize","fileCount"}]}` |
-| POST   | `/api/fonts/download` | `{"family":"Name"}` or `{"all":true}`                   | `{"ok":true,"installedCount":N}`                                         |
+| POST   | `/api/fonts/download` | `{"family":"Name"}` or `{"all":true}`                   | `{"ok":true,"installedCount":N,"notListed":["Name",...]}`                |
 | POST   | `/api/fonts/upload`   | multipart: one `.cpfont` file; `?family=Name` in the URL | `{"ok":true}`                                                           |
 | POST   | `/api/fonts/delete`   | `{"family":"Name"}`                                     | `{"ok":true}`                                                            |
 
 Notes:
 - `/api/fonts` rescans the SD card first. `maxFamilies` is the registry's limit on installed SD families.
-- `download` with `all` installs every family that is missing or has an update; with `family`, that one.
-  The files of a batch share one TLS connection.
+- `/api/fonts` marks an outline (TrueType or OpenType) family with `"outline":true`; its `sizes` are empty.
+- `download` with `all` installs every missing family the manifest puts in Download all, and every update;
+  with `family`, that one (the CJK families are installed one at a time). The files of a batch share one
+  TLS connection. Downloads are checked by file kind: `.cpfont` magic, TrueType or `OTTO` (CFF) outlines.
+  `notListed` names the outline families installed that the reader does not list because they are too
+  large for its font area; it is empty when there are none. The card needs the family's size plus 1 MB free.
 - `upload` takes the family name from the query string, because multipart fields are not
   available until the file has arrived. The family name must be valid, and the file must end in `.cpfont`,
   carry no path separators or `..`, and start with the `CPFONT\0\0` magic. A request refused on its names
@@ -762,6 +766,7 @@ Notes:
 | 404    | `{"ok":false,"error":"Family not found in manifest"}`   | `download` of an unknown family            |
 | 500    | `{"ok":false,"error":"<message>"}`                      | Manifest fetch or install failed; install failures also carry `family` and `installedCount` |
 | 500    | `{"ok":false,"error":"Out of memory"}`                  | `download` could not build its list        |
+| 500    | `{"ok":false,"error":"Not enough space on the SD card: 8.0 MB needed, 2.1 MB free","family","installedCount"}` | `download` of a family the card cannot hold (sizes in MB, the total plus 1 MB) |
 | 500    | `{"error":"Delete failed"}`                             | `delete` failed                            |
 
 ---
