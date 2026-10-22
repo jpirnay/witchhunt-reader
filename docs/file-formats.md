@@ -539,7 +539,9 @@ produces; a power cut leaves at worst bytes nothing references.
 - **A face** is a family at one size: `face = family << 24 | ppem` (26.6 pixels per em; the family is its index in
   the set). An entry is in use once `claimed` reads 0. A glyph key is `codepoint | style << 21 | faceIndex << 23`,
   bits 28-31 zero, so a key never reads as erased. The 32 entries are every family's; taking the last one, or asking
-  for a 33rd, makes the wipe pending.
+  for a 33rd, makes the wipe pending. A synthetic bold style (spec 7.1), drawn from another style's file, keys its
+  glyphs under its own style bits and the face index of its size, like a style with a file; its kerning pairs are
+  those of the style it is drawn from.
 - **A slot's value** is 0 (the font has no glyph for that key), or the record's `dataOffset` (its log offset + 20) in
   4-byte units in the low 20 bits (so a log is under 4 MiB), under the low 12 bits of the epoch of the segment that
   holds the record. A reused segment gets a new epoch, so a slot still naming its old contents no longer matches and
