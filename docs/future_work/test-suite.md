@@ -1,6 +1,6 @@
 # Host test suite
 
-Status: open items as of 2026-10-22, from the second test-suite audit (PR #<PR>). The audit removed
+Status: open items as of 2026-10-22, from the second test-suite audit (PR #547). The audit removed
 about 270 redundant test cases; the items below are coverage it found missing, tests to strengthen,
 rename or move, and small code cleanups it noticed.
 
