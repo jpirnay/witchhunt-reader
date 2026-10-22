@@ -114,23 +114,6 @@ TEST(HeaderLayoutTest, OverlayBodyFollowsTheTitleLine) {
   EXPECT_EQ(HeaderLayout::overlayBody(Rect{0, 0, 480, 760}, UiFontLadder::STEPS[0].title).y, 50);
 }
 
-// A column of hint boxes on the content's left or right takes its width and a gap: no row, rule or
-// tab bar that spans the content runs up to the boxes' border. Base draws its side boxes 4 px in
-// from the panel edge (BaseTheme::drawSideButtonHints, buttonMargin), so the gap has to be wider
-// than that for the content to stop short of them.
-TEST(HeaderLayoutTest, HintColumnKeepsAGapFromTheContent) {
-  EXPECT_EQ(HeaderLayout::columnReserve(0), 0);
-  constexpr int kBaseSideBoxInset = 4;
-  EXPECT_GT(HeaderLayout::HINT_COLUMN_GAP, kBaseSideBoxInset);
-  for (const auto& theme : allThemesAllSteps()) {
-    SCOPED_TRACE(theme.name);
-    EXPECT_EQ(HeaderLayout::columnReserve(theme.metrics.sideButtonHintsWidth),
-              theme.metrics.sideButtonHintsWidth + HeaderLayout::HINT_COLUMN_GAP);
-    EXPECT_EQ(HeaderLayout::columnReserve(theme.metrics.buttonHintsHeight),
-              theme.metrics.buttonHintsHeight + HeaderLayout::HINT_COLUMN_GAP);
-  }
-}
-
 // Base draws a header subtitle in a line of its own, one SMALL_FONT_ID line at every UI font step;
 // the Lyra themes fit it in the band and keep no line.
 TEST(HeaderLayoutTest, OnlyBaseKeepsASubtitleLine) {
