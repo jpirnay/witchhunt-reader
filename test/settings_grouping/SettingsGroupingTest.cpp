@@ -35,11 +35,10 @@ SettingInfo row(const StrId label, const StrId submenu, const StrId subcategory)
   return s;
 }
 
-// What SettingsActivity::onEnter does, in the order it does it: rows in plain, submenus lifted
-// out, then headings inserted into whatever each list ended up holding.
+// What SettingsActivity::onEnter and MenuListActivity::onEnter do to a list of rows: the same
+// SettingInfo::groupRows, so the order of the two passes is the firmware's.
 void buildLikeTheSettingsScreen(std::vector<SettingInfo>& tab, std::vector<SettingInfo::SubmenuData>& submenus) {
-  SettingInfo::prepareSubmenus(tab, submenus);
-  SettingInfo::insertSubcategorySeparators(tab);
+  SettingInfo::groupRows(tab, submenus);
 }
 
 std::vector<SettingInfo>& submenuItems(std::vector<SettingInfo::SubmenuData>& submenus, const StrId id) {

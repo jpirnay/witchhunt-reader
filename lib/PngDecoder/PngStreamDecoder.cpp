@@ -83,13 +83,6 @@ constexpr uint32_t MAX_RAW_ROW_BYTES = 16384;
 
 PngStreamDecoder::~PngStreamDecoder() { end(); }
 
-size_t PngStreamDecoder::scratchBytesFor(const size_t expectedOutputSize, const uint32_t rawRowBytes) {
-  // Ring + two scanline buffers, plus per-allocation alignment slack so a caller sizing an
-  // arena from this never comes up short by a few padding bytes.
-  constexpr size_t kAlignSlack = 3 * alignof(std::max_align_t);
-  return InflateReader::ringSizeFor(expectedOutputSize) + 2 * static_cast<size_t>(rawRowBytes) + kAlignSlack;
-}
-
 void PngStreamDecoder::end() {
   reader_.deinit();  // no-op on the ring when it was supplied externally (ownsRing_ == false)
   if (!arenaOwnsBuffers_) {

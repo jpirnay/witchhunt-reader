@@ -263,6 +263,8 @@ SteppedRun decodeStepped(const std::string& name, const int shift, const uint16_
   return run;
 }
 
+// The scale picks only the IDCT size, not how the decode is sliced, so one shift is enough here:
+// ProgressiveJpegCheckpoint steps one unit at a time at shifts 0 and 1.
 class ProgressiveJpegStepped : public testing::TestWithParam<std::tuple<const char*, int>> {};
 
 TEST_P(ProgressiveJpegStepped, MatchesTheOneShotDecode) {
@@ -290,7 +292,7 @@ TEST_P(ProgressiveJpegStepped, MatchesTheOneShotDecode) {
 INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegStepped,
                          testing::Combine(testing::Values("prog_full_420.jpg", "prog_full_gray.jpg",
                                                           "prog_full_444_rst.jpg"),
-                                          testing::Values(0, 1, 3)));
+                                          testing::Values(3)));
 
 // A pass that gives up halfway (the reader opened a book) must leave nothing behind, and the next
 // attempt starts clean.
@@ -475,6 +477,7 @@ TEST(ProgressiveJpeg, ResumeRefusesAForeignCheckpoint) {
 // through a window of its own. With one buffer they all share, every scan re-read its 512 bytes in every band: a
 // 106 KB cover took 1275 reads and 650 KB. The rows must not change, and a checkpoint taken with or
 // without the windows must resume into either.
+// The windows sit in the bit reader and the file is read the same way at every scale: one shift.
 class ProgressiveJpegReadWindows : public testing::TestWithParam<std::tuple<const char*, int>> {};
 
 struct WindowedRun {
@@ -525,7 +528,7 @@ TEST_P(ProgressiveJpegReadWindows, ReadTheFileFarLessOftenForTheSameRows) {
 INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegReadWindows,
                          testing::Combine(testing::Values("prog_full_420.jpg", "prog_full_gray.jpg",
                                                           "prog_full_444_rst.jpg"),
-                                          testing::Values(0, 1)));
+                                          testing::Values(0)));
 
 TEST(ProgressiveJpeg, ACheckpointResumesWithOrWithoutTheReadWindows) {
   const char* const jpg = "prog_full_420.jpg";

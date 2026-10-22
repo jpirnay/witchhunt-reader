@@ -91,38 +91,19 @@ TEST_F(BookDetailsCacheTest, MissingOrTruncatedFileIsNotAnswered) {
   EXPECT_FALSE(BookDetailsCache::read(path_, 1, 0, out));
 }
 
+// Any other format version is parsed again. Version 1 has no primary author (answering from it
+// would group the book under "Unknown author" for good), version 2 no ISBN or ASIN (KOReader sync
+// would go without them until the book changed), 99 is a record from the future.
 TEST_F(BookDetailsCacheTest, AnotherFormatVersionIsNotAnswered) {
-  ASSERT_TRUE(BookDetailsCache::write(path_, 1, 0, sample()));
-  {
-    std::fstream f(path_, std::ios::in | std::ios::out | std::ios::binary);
-    f.put(static_cast<char>(99));
+  for (const int version : {1, 2, 99}) {
+    ASSERT_TRUE(BookDetailsCache::write(path_, 1, 0, sample()));
+    {
+      std::fstream f(path_, std::ios::in | std::ios::out | std::ios::binary);
+      f.put(static_cast<char>(version));
+    }
+    BookDetails out;
+    EXPECT_FALSE(BookDetailsCache::read(path_, 1, 0, out)) << "version " << version;
   }
-  BookDetails out;
-  EXPECT_FALSE(BookDetailsCache::read(path_, 1, 0, out));
-}
-
-// A version 1 record has no primary author. Answering from it would group the book under "Unknown
-// author" for good, so it is parsed again instead.
-TEST_F(BookDetailsCacheTest, AVersionOneRecordIsNotAnswered) {
-  ASSERT_TRUE(BookDetailsCache::write(path_, 1, 0, sample()));
-  {
-    std::fstream f(path_, std::ios::in | std::ios::out | std::ios::binary);
-    f.put(static_cast<char>(1));
-  }
-  BookDetails out;
-  EXPECT_FALSE(BookDetailsCache::read(path_, 1, 0, out));
-}
-
-// A version 2 record has no ISBN or ASIN. Answering from it would leave KOReader sync without them
-// until the book changed, so it is parsed again instead.
-TEST_F(BookDetailsCacheTest, AVersionTwoRecordIsNotAnswered) {
-  ASSERT_TRUE(BookDetailsCache::write(path_, 1, 0, sample()));
-  {
-    std::fstream f(path_, std::ios::in | std::ios::out | std::ios::binary);
-    f.put(static_cast<char>(2));
-  }
-  BookDetails out;
-  EXPECT_FALSE(BookDetailsCache::read(path_, 1, 0, out));
 }
 
 }  // namespace

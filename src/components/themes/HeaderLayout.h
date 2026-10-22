@@ -25,6 +25,11 @@ namespace HeaderLayout {
 // and the bodies' own spacing already keep clear of it.
 inline constexpr int HINT_COLUMN_GAP = 8;
 
+// How far in from the panel edge Base draws its side hint boxes (BaseTheme::drawSideButtonHints).
+// The gap above has to be wider, or the content would not stop short of them.
+inline constexpr int BASE_SIDE_BOX_INSET = 4;
+static_assert(HINT_COLUMN_GAP > BASE_SIDE_BOX_INSET, "the hint column gap must clear Base's side boxes");
+
 inline int columnReserve(const int columnWidth) { return columnWidth > 0 ? columnWidth + HINT_COLUMN_GAP : 0; }
 
 // The rest of `content` from `top` down.

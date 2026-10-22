@@ -83,10 +83,6 @@ class PngStreamDecoder {
   // too-small arena degrades in speed, never in correctness.
   void setScratchArena(BuildArena* arena) { scratchArena_ = arena; }
 
-  // Bytes setScratchArena() needs for an image of this shape. Callers size their arena from
-  // the worst case in the pass; `expectedOutputSize` is height * (rawRowBytes + 1).
-  static size_t scratchBytesFor(size_t expectedOutputSize, uint32_t rawRowBytes);
-
   // Decode the next source scanline (top to bottom).
   //   grayOut  : receives `info.width` 8-bit grayscale samples. When alphaOut is
   //              null, transparent pixels are composited over white (the opaque

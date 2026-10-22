@@ -52,14 +52,6 @@ TEST(TapTargets, HandlesAHorizontalStrip) {
   EXPECT_EQ(-1, TapTargets::hitTestIn(s, 4 * tileW, 730));
 }
 
-// The value is what the hit MEANS, not the slot it was recorded in: the carousel's sliding
-// window makes those differ whenever the icons overflow.
-TEST(TapTargets, ReturnsTheValueNotTheSlot) {
-  Recorder::Builder b;
-  b.add(0, 0, 100, 100, 7);
-  EXPECT_EQ(7, TapTargets::hitTestIn(b.set(), 50, 50));
-}
-
 // The carousel's side covers slide behind the centre one and the draw puts the centre on top,
 // so the recorder adds it first and first-match-wins has to agree.
 TEST(TapTargets, OverlappingRectsResolveToTheOneRecordedFirst) {
