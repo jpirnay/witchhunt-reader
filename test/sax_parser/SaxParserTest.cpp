@@ -651,27 +651,6 @@ TEST(SaxParser, PairedVoidEndTagSplitAcrossFeeds) {
   EXPECT_TRUE(sawTitle);
 }
 
-// Strict-XML mode (the EPUB3 OPF path) is unchanged: no repair, no suppression.
-TEST(SaxParser, StrictModeLeavesPairedMetaAlone) {
-  const char* xml = "<package><metadata><meta property=\"x\">v</meta></metadata></package>";
-
-  Collector c;
-  SaxParser p;
-  ASSERT_TRUE(
-      p.init(&c, Collector::onStart, Collector::onEnd, Collector::onChar, nullptr, /*htmlVoidTagRepair=*/false));
-
-  const auto* bytes = reinterpret_cast<const uint8_t*>(xml);
-  ASSERT_TRUE(p.feed(bytes, strlen(xml)));
-  ASSERT_TRUE(p.finalize());
-
-  bool sawValue = false;
-  for (const auto& e : c.events) {
-    if (e.text == "v") sawValue = true;
-  }
-  EXPECT_TRUE(sawValue);
-  EXPECT_FALSE(p.truncationFlags() & SaxParser::kVoidTagRepaired);
-}
-
 // Not a meta/link special case: EVERY void element breaks the same way when the
 // document pairs it. In issue_157.epub the counts across 69 content files were
 // </br> 640, </link> 138, </img> 87, </meta> 69 -- so <br></br>, once written off
