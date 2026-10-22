@@ -134,6 +134,10 @@ class TtfVsFreeType : public ::testing::TestWithParam<std::string> {
   Face face;
 };
 
+// The fonts whose glyphs carry the OVERLAP flag (fontTools: Inter and NotoSans); the other bundled fonts have none, so
+// FreeType would render them 1x1 and there would be nothing for the oversampled comparison to measure.
+class TtfVsFreeTypeOverlap : public TtfVsFreeType {};
+
 }  // namespace
 
 TEST_P(TtfVsFreeType, EveryGlyphMatchesFreeType) {
@@ -151,7 +155,7 @@ TEST_P(TtfVsFreeType, EveryGlyphMatchesFreeType) {
   }
 }
 
-TEST_P(TtfVsFreeType, OversampledOverlapsStayWithinThreePercent) {
+TEST_P(TtfVsFreeTypeOverlap, OversampledOverlapsStayWithinThreePercent) {
   // Spec 9.3's pixel budget, against FreeType as it really renders outlines flagged OVERLAP: 4x4 oversampled.
   const FreeTypeReference reference(data, kPoints);
   ASSERT_TRUE(reference.ok());
@@ -176,6 +180,7 @@ TEST_P(TtfVsFreeType, OversampledOverlapsStayWithinThreePercent) {
   std::printf("%s @%u pt: %u overlap glyphs, %.2f%% of their pixels differ from FreeType's oversampled ones\n",
               GetParam().c_str(), kPoints, overlapGlyphs,
               pixels ? 100.0 * static_cast<double>(differ) / static_cast<double>(pixels) : 0.0);
+  EXPECT_GT(overlapGlyphs, 0u) << "a font without OVERLAP glyphs measures nothing";
   EXPECT_LE(differ * 100, pixels * 3);
 }
 
@@ -206,6 +211,11 @@ TEST_P(TtfVsFreeType, LineMetricsMatchTheConverterAtEverySize) {
 }
 
 INSTANTIATE_TEST_SUITE_P(BundledFonts, TtfVsFreeType, ::testing::ValuesIn(bundledTtfs()), testName);
+INSTANTIATE_TEST_SUITE_P(OverlapFonts, TtfVsFreeTypeOverlap,
+                         ::testing::Values("Inter/Inter-Regular.ttf", "Inter/Inter-Bold.ttf",
+                                           "NotoSans/NotoSans-Regular.ttf", "NotoSans/NotoSans-Bold.ttf",
+                                           "NotoSans/NotoSans-Italic.ttf", "NotoSans/NotoSans-BoldItalic.ttf"),
+                         testName);
 
 TEST(TtfPoolSize, ThePoolNeverChangesTheOutput) {
   // Spec 2: the pool size is a speed dial only. Every glyph of a text face, with three pools.

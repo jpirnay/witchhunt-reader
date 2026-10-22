@@ -202,17 +202,12 @@ void SettingsActivity::onEnter() {
   addToMoved(systemSettings, std::move(SettingInfo::Action(StrId::STR_FONT_SCALING_TEST, SettingAction::FontScalingTest)
                                            .withSubcategory(StrId::STR_MENU_SYS_SYSTEM)));
 
-  SettingInfo::prepareSubmenus(displaySettings, submenuData);
-  SettingInfo::prepareSubmenus(readerSettings, submenuData);
-  SettingInfo::prepareSubmenus(controlsSettings, submenuData);
-  SettingInfo::prepareSubmenus(systemSettings, submenuData);
-
-  // Now that the tabs hold exactly the rows they will show, group them. prepareSubmenus has done
-  // the same for each submenu's own rows.
-  SettingInfo::insertSubcategorySeparators(displaySettings);
-  SettingInfo::insertSubcategorySeparators(readerSettings);
-  SettingInfo::insertSubcategorySeparators(controlsSettings);
-  SettingInfo::insertSubcategorySeparators(systemSettings);
+  // Each tab ends up holding exactly the rows it will show, grouped under its headings; the same
+  // goes for each submenu's own rows.
+  SettingInfo::groupRows(displaySettings, submenuData);
+  SettingInfo::groupRows(readerSettings, submenuData);
+  SettingInfo::groupRows(controlsSettings, submenuData);
+  SettingInfo::groupRows(systemSettings, submenuData);
 
   resetUi();
   // Opens on the Display tab with the bar focused; TabbedUiListActivity::onEnter() wires the row

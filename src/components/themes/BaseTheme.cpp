@@ -344,7 +344,7 @@ void BaseTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, co
   const int screenHeight = renderer.getScreenHeight();
   constexpr int buttonWidth = BaseMetrics::values.sideButtonHintsWidth;  // Width on screen (height when rotated)
   constexpr int buttonHeight = 80;  // Tuned height on screen (width when rotated); a longer label grows it
-  constexpr int buttonMargin = 4;
+  constexpr int buttonMargin = HeaderLayout::BASE_SIDE_BOX_INSET;
   const bool hasUp = upBtn != nullptr && upBtn[0] != '\0';
   const bool hasDown = downBtn != nullptr && downBtn[0] != '\0';
 

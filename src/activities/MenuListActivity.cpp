@@ -26,8 +26,7 @@ bool MenuListActivity::isRowSelectable(const int index) const {
 
 void MenuListActivity::onEnter() {
   if (!submenusPrepared) {
-    prepareSubmenus();
-    SettingInfo::insertSubcategorySeparators(menuItems);
+    SettingInfo::groupRows(menuItems, submenuData);
     submenusPrepared = true;
   }
   UiListActivity::onEnter();
@@ -138,8 +137,6 @@ void MenuListActivity::buildScreen(UiScreen& screen) {
   noteListSelection(props);
   screen.list(props);
 }
-
-void MenuListActivity::prepareSubmenus() { SettingInfo::prepareSubmenus(menuItems, submenuData); }
 
 void MenuListActivity::openSubmenu(const SettingInfo& submenuEntry) {
   auto it = std::find_if(submenuData.begin(), submenuData.end(),

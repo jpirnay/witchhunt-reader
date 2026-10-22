@@ -376,14 +376,8 @@ class SummaryScan final : public Scanner {
   }
 
   void onBookEnd(const Book& book) override {
-    // The loader skips an entry without a docId; so does everything counted here.
+    // The loader skips an entry without a docId; so does the request.
     if (book.docId.empty()) return;
-    ++summary_.bookCount;
-    if (book.finished()) ++summary_.finishedBookCount;
-    if (ReadingStatsStore::countsTowardPace(book.progress)) {
-      summary_.paceSeconds += book.totalSeconds;
-      summary_.pacePercents += book.progress;
-    }
     if (request_.onBook) request_.onBook(book.toStats());
   }
 

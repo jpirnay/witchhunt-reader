@@ -11,9 +11,8 @@ the book does not have. What the golden variants pin (EpubPipelineTest):
   _accents       Accents with a built-in reader font: Book Display, Book Script and Book Code are the accent
                  families, ranked by their blocks (their own faces, native sizes); sans-serif and a sans-serif
                  fallback go to the built-in sans; the body family, serif (the body's own generic) and monospace
-                 stay the body font
-  _alltext       All Text: Book Body is the body font, and the accent families beside it in one glyph store: the
-                 same layout as _accents, the body font ID aside
+                 stay the body font; also All Text, where Book Body is the body font and the accent families sit
+                 beside it in one glyph store: the same layout, the body font ID aside
 
 Per block: a block's words all in one family give the block that family (a heading set in a span, a paragraph that
 is one span), else the family of the element that opened it (a body paragraph with an inline accent). Per word: a

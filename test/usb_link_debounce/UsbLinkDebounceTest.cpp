@@ -50,12 +50,8 @@ TEST(UsbLinkDebounce, TheDropoutsTheX3LoggedAreNoEdges) {
   }
   EXPECT_EQ(1, loop.edges);
   EXPECT_TRUE(loop.link.connected());
-}
 
-TEST(UsbLinkDebounce, DropoutsInARowAreNoEdgesEither) {
   // Three inside one page turn: absent 33 ms, back 177 ms, absent 37 ms, back 23 ms, absent 32 ms.
-  Loop loop;
-  loop.run(true, 100);
   loop.run(false, 33);
   loop.run(true, 177);
   loop.run(false, 37);

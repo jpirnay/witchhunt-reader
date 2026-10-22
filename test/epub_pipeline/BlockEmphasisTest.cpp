@@ -18,6 +18,9 @@
 //   3. Nothing leaks past the container's end tag.
 //   4. Headings stay bold, and take an enclosing block's italic too.
 //   5. A <br> does not end the paragraph's own style.
+//
+// test_block_emphasis.epub sets every one of these, and its golden pins each word's style. What
+// the book does not set is a <pre> styled by its own rule with an inline element inside it.
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -86,26 +89,6 @@ struct BlockEmphasisFixture : testing::Test {
 
 }  // namespace
 
-TEST_F(BlockEmphasisFixture, DivItalicReachesNestedParagraphAndTail) {
-  const auto s = styles("", "<div style=\"font-style:italic\"><p>Inner</p>Tail</div><p>After</p>");
-  EXPECT_EQ(s.at("Inner"), kItalic);
-  EXPECT_EQ(s.at("Tail"), kItalic);
-  EXPECT_EQ(s.at("After"), 0) << "the div's italic leaked past </div>";
-}
-
-TEST_F(BlockEmphasisFixture, ChildOverridesAndParentIsRestored) {
-  const auto s = styles(".it { font-style: italic; } .up { font-style: normal; }",
-                        "<div class=\"it\"><p class=\"up\">Upright</p><p>Slanted</p></div>");
-  EXPECT_EQ(s.at("Upright"), 0);
-  EXPECT_EQ(s.at("Slanted"), kItalic);
-}
-
-TEST_F(BlockEmphasisFixture, BoldListItemReachesItsParagraph) {
-  const auto s = styles("li { font-weight: bold; }", "<ul><li><p>Item</p></li></ul><p>Plain</p>");
-  EXPECT_EQ(s.at("Item"), kBold);
-  EXPECT_EQ(s.at("Plain"), 0);
-}
-
 TEST_F(BlockEmphasisFixture, BlockquoteAndPreReachTheirChildren) {
   const auto s = styles("blockquote { font-style: italic; } pre { font-weight: bold; }",
                         "<blockquote><p>Quoted</p></blockquote><pre><span>Code</span></pre>"
@@ -114,25 +97,4 @@ TEST_F(BlockEmphasisFixture, BlockquoteAndPreReachTheirChildren) {
   EXPECT_EQ(s.at("Code"), kBold);
   EXPECT_EQ(s.at("Nested"), kBold);
   EXPECT_EQ(s.at("Done"), 0);
-}
-
-TEST_F(BlockEmphasisFixture, SectionChildCanSetNormal) {
-  const auto s = styles("section { font-style: italic; } .up { font-style: normal; }",
-                        "<section><p class=\"up\">Roman</p><p>Oblique</p></section>");
-  EXPECT_EQ(s.at("Roman"), 0) << "the <section>'s italic overrode the paragraph's own font-style:normal";
-  EXPECT_EQ(s.at("Oblique"), kItalic);
-}
-
-TEST_F(BlockEmphasisFixture, HeadingStaysBoldAndTakesEnclosingItalic) {
-  const auto s = styles("", "<div style=\"font-style:italic\"><h2>Heading</h2><p>Body</p></div><h3>Plainhead</h3>");
-  EXPECT_EQ(s.at("Heading"), kEmphasis);
-  EXPECT_EQ(s.at("Body"), kItalic);
-  EXPECT_EQ(s.at("Plainhead"), kBold);
-}
-
-TEST_F(BlockEmphasisFixture, BrKeepsTheParagraphsOwnStyle) {
-  const auto s = styles("", "<p style=\"font-style:italic\">Before<br/>Below</p><p>Next</p>");
-  EXPECT_EQ(s.at("Before"), kItalic);
-  EXPECT_EQ(s.at("Below"), kItalic) << "the <br> cleared the paragraph's italic";
-  EXPECT_EQ(s.at("Next"), 0);
 }

@@ -223,6 +223,12 @@ struct SettingInfo {
   // manually placed Separator suppresses an immediate auto-insert for the same group.
   static void insertSubcategorySeparators(std::vector<SettingInfo>& items);
 
+  // The list a screen shows: submenu rows lifted out first, then the headings inserted into what each
+  // list is left holding. The other order strands headings in the list the rows moved out of, which
+  // is why both screens that group their rows (SettingsActivity, MenuListActivity) call this and
+  // not the two passes themselves.
+  static void groupRows(std::vector<SettingInfo>& items, std::vector<SubmenuData>& submenuData);
+
   SettingInfo& withObfuscated() {
     obfuscated = true;
     return *this;
@@ -581,6 +587,11 @@ inline void SettingInfo::prepareSubmenus(std::vector<SettingInfo>& items,
     // an existing separator as the running heading rather than adding a second one.
     insertSubcategorySeparators(it->items);
   }
+}
+
+inline void SettingInfo::groupRows(std::vector<SettingInfo>& items, std::vector<SubmenuData>& submenuData) {
+  prepareSubmenus(items, submenuData);
+  insertSubcategorySeparators(items);
 }
 
 inline void SettingInfo::insertSubcategorySeparators(std::vector<SettingInfo>& items) {

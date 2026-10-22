@@ -409,16 +409,13 @@ TEST(GifDimensions, TruncatedBuffer) {
   EXPECT_FALSE(GifToFramebufferConverter::getDimensionsFromBuffer(buf, sizeof(buf), dims));
 }
 
-TEST(GifDimensions, ZeroWidth) {
-  const uint8_t buf[] = {0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x00, 0x00, 0x10, 0x00};
+// One condition in getDimensionsFromBuffer rejects a zero width or a zero height.
+TEST(GifDimensions, ZeroWidthOrHeight) {
+  const uint8_t zeroWidth[] = {0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x00, 0x00, 0x10, 0x00};
+  const uint8_t zeroHeight[] = {0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x10, 0x00, 0x00, 0x00};
   ImageDimensions dims{};
-  EXPECT_FALSE(GifToFramebufferConverter::getDimensionsFromBuffer(buf, sizeof(buf), dims));
-}
-
-TEST(GifDimensions, ZeroHeight) {
-  const uint8_t buf[] = {0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0x10, 0x00, 0x00, 0x00};
-  ImageDimensions dims{};
-  EXPECT_FALSE(GifToFramebufferConverter::getDimensionsFromBuffer(buf, sizeof(buf), dims));
+  EXPECT_FALSE(GifToFramebufferConverter::getDimensionsFromBuffer(zeroWidth, sizeof(zeroWidth), dims));
+  EXPECT_FALSE(GifToFramebufferConverter::getDimensionsFromBuffer(zeroHeight, sizeof(zeroHeight), dims));
 }
 
 // ---------------------------------------------------------------------------
@@ -693,23 +690,6 @@ std::vector<uint8_t> grayPalette8() {
 }
 
 }  // namespace
-
-// Realistic-size image with a flat run (long single-colour stretch) — this is
-// what compresses into long LZW strings and grows stackTop.
-TEST(GifDecodeStress, FlatRunDecodes) {
-  const int w = 40, h = 29;
-  std::vector<uint8_t> pixels(w * h, 3);  // all one colour → maximal run
-  const std::string path = writeTempGif(buildGif(w, h, grayPalette8(), pixels));
-
-  std::vector<uint8_t> out;
-  ImageDimensions dims{};
-  ASSERT_TRUE(GifToFramebufferConverter::decodeFirstFrameToGrayscale(path, out, dims));
-  EXPECT_EQ(dims.width, w);
-  EXPECT_EQ(dims.height, h);
-  ASSERT_EQ(out.size(), static_cast<size_t>(w * h));
-  for (auto px : out) EXPECT_EQ(px, 3u * 36u);
-  std::filesystem::remove(path);
-}
 
 // Large flat image: a long run forces the longest possible decoded LZW string,
 // stressing the lzwStack / KwKwK expansion path that overflows on a 1-byte bug.

@@ -157,8 +157,6 @@ bool assignStyles(const FileProbe* files, const size_t count, int (&out)[4]) {
   return out[0] >= 0;
 }
 
-int probeStyle(const FileSource& file) { return probeFile(file).style; }
-
 bool fitsStore(const uint32_t* fileBytes, const uint32_t* sdBytes, const uint8_t count, const uint32_t usableBytes,
                const uint32_t freeMapPages) {
   if (count == 0 || count > glyphstore::kMaxStyles) return false;

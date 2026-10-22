@@ -33,46 +33,34 @@ TEST(ListRowTap, MovingAwayBeforeTheSecondTapNeverActivates) {
 // A screen is entered with its selection already somewhere — usually 0, or restored from a
 // return hint. Tapping that row activates on the FIRST tap, which is correct: it is already
 // highlighted, so the reader has the feedback the rule exists to give.
+// Another tap on it is another Activate, not a toggle back to Selected, and a one-item list
+// activates on its first tap. apply() takes the selection by reference, so SettingsActivity (which
+// compares in the band's frame and shifts by one) and StatusBarSettings (a uint8_t round trip) see
+// the update without duplicating the rule.
 TEST(ListRowTap, TappingTheRowThatIsAlreadySelectedOnEntryActivatesImmediately) {
   int selection = 4;
   EXPECT_EQ(Result::Activate, ListRowTap::apply(4, 10, selection));
+  EXPECT_EQ(Result::Activate, ListRowTap::apply(4, 10, selection));
   EXPECT_EQ(4, selection);
+
+  int only = 0;
+  EXPECT_EQ(Result::Activate, ListRowTap::apply(0, 1, only));
+
+  int shifted = 3 - 1;  // SettingsActivity's band frame
+  EXPECT_EQ(Result::Activate, ListRowTap::apply(2, 8, shifted));
+  EXPECT_EQ(2, shifted);
 }
 
+// Including a list that emptied, or SHRANK, between the render that recorded the band and this
+// tap: the recorded row may no longer exist, and is rejected rather than clamped onto another item.
 TEST(ListRowTap, OutOfRangeIsRejectedAndLeavesTheSelectionAlone) {
   int selection = 2;
   EXPECT_EQ(Result::Rejected, ListRowTap::apply(-1, 10, selection));
   EXPECT_EQ(Result::Rejected, ListRowTap::apply(10, 10, selection));
   EXPECT_EQ(Result::Rejected, ListRowTap::apply(99, 10, selection));
-  EXPECT_EQ(2, selection);
-}
-
-// A list that emptied between the render that recorded the band and this tap.
-TEST(ListRowTap, AnEmptyListRejectsEverything) {
-  int selection = 0;
   EXPECT_EQ(Result::Rejected, ListRowTap::apply(0, 0, selection));
-  EXPECT_EQ(0, selection);
-}
-
-// A list that SHRANK between the render and the tap: the recorded row may no longer exist, and
-// must be rejected rather than clamped onto a different item.
-TEST(ListRowTap, ARowThatNoLongerExistsIsRejectedNotClamped) {
-  int selection = 1;
   EXPECT_EQ(Result::Rejected, ListRowTap::apply(8, 3, selection));
-  EXPECT_EQ(1, selection);
-}
-
-TEST(ListRowTap, SingleItemListActivatesOnTheFirstTap) {
-  int selection = 0;
-  EXPECT_EQ(Result::Activate, ListRowTap::apply(0, 1, selection));
-}
-
-// Two taps on the same row are the contract, but three must not do anything surprising: the
-// third is another Activate, not a toggle back to Selected.
-TEST(ListRowTap, RepeatedTapsOnTheSelectedRowKeepActivating) {
-  int selection = 5;
-  EXPECT_EQ(Result::Activate, ListRowTap::apply(5, 10, selection));
-  EXPECT_EQ(Result::Activate, ListRowTap::apply(5, 10, selection));
+  EXPECT_EQ(2, selection);
 }
 
 TEST(ListRowTap, SelectThenActivatePreferenceKeepsFirstTapAsSelection) {
@@ -106,18 +94,6 @@ TEST(ListRowTap, ResetRequiresAFirstTapAgain) {
   EXPECT_EQ(Result::Selected, state.applyPreference(3, Result::Selected, false));
   state.reset();
   EXPECT_EQ(Result::Selected, state.applyPreference(3, Result::Activate, false));
-}
-
-// SettingsActivity compares in the BAND's frame and then shifts by one; StatusBarSettings
-// round-trips a uint8_t. Both hand apply() a plain int by reference, so the update has to be
-// visible to the caller — that is what lets those two adapt without duplicating the rule.
-TEST(ListRowTap, UpdatesTheSelectionThroughTheReference) {
-  int selection = 0;
-  ListRowTap::apply(6, 10, selection);
-  EXPECT_EQ(6, selection);
-  int shifted = 3 - 1;  // SettingsActivity's band frame
-  EXPECT_EQ(Result::Activate, ListRowTap::apply(2, 8, shifted));
-  EXPECT_EQ(2, shifted);
 }
 
 }  // namespace

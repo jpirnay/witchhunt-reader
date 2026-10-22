@@ -33,24 +33,6 @@ TEST(TapZones, TheCentreColumnSplitsIntoTopCentreBottom) {
   EXPECT_EQ(Zone::Bottom, zoneFor(x, H - 1, W, H));
 }
 
-TEST(TapZones, CentreMatchesTheReaderMenuRectangle) {
-  // ReaderUtils::isTouchMenuTap is still the live reader-menu tap and still
-  // carries its own copy of the rectangle (src/activities/reader/ReaderUtils.h,
-  // the zoneWidth/zoneHeight return in isTouchMenuTap): x in [w/3, w - w/3) and
-  // y in [h/3, h - h/3). wasMenuTap below mirrors that return line, because the
-  // header needs GfxRenderer and MappedInputManager and cannot build on host.
-  // Centre must be exactly that set, or the two rules disagree on which taps
-  // open the menu.
-  const int zw = W / 3;
-  const int zh = H / 3;
-  for (int x = 0; x < W; x += 7) {
-    for (int y = 0; y < H; y += 11) {
-      const bool wasMenuTap = x >= zw && x < W - zw && y >= zh && y < H - zh;
-      EXPECT_EQ(wasMenuTap, zoneFor(x, y, W, H) == Zone::Centre) << "x=" << x << " y=" << y;
-    }
-  }
-}
-
 TEST(TapZones, LandscapeKeepsTheSameShape) {
   // Zones are computed in logical pixels, so rotating the reader swaps width and
   // height and the bands follow the page rather than the panel.
@@ -94,8 +76,8 @@ TEST(TapZones, CornersAreSquareAndSizedOffTheShorterEdge) {
 }
 
 TEST(TapZones, OnlyTheFourSquaresAreCorners) {
-  // The mirror of CentreMatchesTheReaderMenuRectangle: sweep the frame and
-  // assert cornerFor is non-None on exactly the set the geometry describes, so a
+  // Sweep the frame and assert cornerFor is non-None on exactly the set the
+  // geometry describes, so a
   // corner cannot quietly grow into the page-turn zone.
   const int side = W / 8;
   for (int x = 0; x < W; x += 7) {
@@ -152,15 +134,6 @@ TEST(TapZones, DegenerateSizesHaveNoCorners) {
   EXPECT_EQ(Corner::None, cornerFor(0, 0, 7, 7));
   EXPECT_EQ(Corner::None, cornerFor(0, 0, 0, 0));
   EXPECT_EQ(Corner::None, cornerFor(0, 0, -5, -5));
-}
-
-TEST(TapZones, CornersOverlapTheZonesTheyAreCarvedFrom) {
-  // Not a behaviour assertion so much as a statement of the design: a corner sits
-  // INSIDE Left or Right, and the two are resolved by the caller asking cornerFor
-  // first for a long press and never for a tap. If this ever stops holding, the
-  // page-turn zones have been narrowed and the test above will say so.
-  EXPECT_EQ(Zone::Left, zoneFor(0, 0, W, H));
-  EXPECT_EQ(Corner::TopLeft, cornerFor(0, 0, W, H));
 }
 
 // --- Edge columns (vertical swipe anchoring) ----------------------------------

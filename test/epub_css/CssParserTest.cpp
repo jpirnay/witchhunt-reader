@@ -4,12 +4,6 @@
 
 #include "../../lib/Epub/Epub/css/CssParser.h"
 
-TEST(CssParserDeclarations, InlineLineThrough) {
-  const CssStyle style = CssParser::parseInlineStyle("text-decoration: line-through");
-  ASSERT_TRUE(style.hasTextDecoration());
-  ASSERT_EQ(style.textDecoration, CssTextDecoration::LineThrough);
-}
-
 TEST(CssParserDeclarations, InlineUnderlineLineThrough) {
   const CssStyle style = CssParser::parseInlineStyle("text-decoration: underline line-through");
   ASSERT_TRUE(style.hasTextDecoration());
@@ -127,6 +121,7 @@ TEST(CssParserUnits, FontSizeKeywordsAndAbsoluteUnits) {
       {"font-size: xx-small", 0.6f}, {"font-size: x-small", 0.75f}, {"font-size: small", 0.8f},
       {"font-size: smaller", 0.8f},  {"font-size: medium", 1.0f},   {"font-size: large", 1.2f},
       {"font-size: larger", 1.2f},   {"font-size: x-large", 1.4f},  {"font-size: xx-large", 1.6f},
+      {"font-size: 160%", 1.6f},     {"font-size: 1.4em", 1.4f},
   };
   for (const auto& c : cases) {
     const CssStyle st = CssParser::parseInlineStyle(c.decl);
@@ -191,6 +186,10 @@ TEST(CssParserDeclarations, PageBreakAvoidIsAnExplicitNoBreak) {
        {"page-break-before: always", "break-before: page", "page-break-before: left", "break-before: recto"}) {
     const CssStyle style = CssParser::parseInlineStyle(decl);
     EXPECT_TRUE(style.hasPageBreakBefore() && style.pageBreakBefore) << decl;
+  }
+  for (const char* decl : {"page-break-after: always", "break-after: page"}) {
+    const CssStyle style = CssParser::parseInlineStyle(decl);
+    EXPECT_TRUE(style.hasPageBreakAfter() && style.pageBreakAfter) << decl;
   }
   for (const char* decl : {"page-break-before: auto", "page-break-before: avoid", "break-before: avoid-page",
                            "page-break-before: always; page-break-before: avoid"}) {

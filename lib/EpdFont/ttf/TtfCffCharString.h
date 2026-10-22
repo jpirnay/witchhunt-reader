@@ -90,6 +90,7 @@ struct CffDecoder {
 /// What the scratch block reserves for a CffDecoder, in a region aligned to 8 bytes, which is all the decoder needs.
 constexpr uint32_t kCffDecoderBytes = (sizeof(CffDecoder) + 7) & ~uint32_t{7};
 static_assert(alignof(CffDecoder) <= 8, "the scratch block's regions are 8-aligned");
+static_assert(kCffDecoderBytes <= 1024, "the interpreter's state stays a small share of the smallest cell pool");
 
 /// Runs `glyph`'s charstring into `out`, using `decoder` for all its state. Ok; Malformed where FreeType fails the
 /// glyph (an invalid operator use, a stack overflow or underflow, a bad subroutine index or nesting past 16, return

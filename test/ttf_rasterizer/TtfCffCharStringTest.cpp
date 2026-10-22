@@ -706,20 +706,6 @@ TEST(TtfCffCharString, ASeacFailsWhereFreeTypeFails) {
 
 // --- Whole fonts ---
 
-TEST(TtfCffCharString, EveryGlyphOfTheOperatorFontMatchesFreeTypeUnscaled) {
-  const std::vector<uint8_t> font = readFixture("CffOperators.otf");
-  Engine engine(font);
-  ASSERT_TRUE(engine.ok());
-  const Oracle oracle(font);
-  ASSERT_TRUE(oracle.ok());
-  for (uint32_t g = 0; g < engine.face().numGlyphs; ++g) {
-    ASSERT_TRUE(engine.untransformed(static_cast<uint16_t>(g)));
-    const Shape theirs = oracle.glyph(static_cast<uint16_t>(g));
-    ASSERT_TRUE(theirs.drawn) << "glyph " << g;
-    EXPECT_EQ(theirs, engine.glyph(static_cast<uint16_t>(g))) << "glyph " << g;
-  }
-}
-
 TEST(TtfCffCharString, EveryGlyphOfEveryTestFontMatchesFreeTypeUnscaled) {
   // Every glyph whose font matrix is identity (all but NotoSansJP-CffSlanted's): the same points, tags and contour
   // ends as FreeType's, or Malformed / Unsupported where FreeType fails.
@@ -917,12 +903,4 @@ TEST(TtfCffCharString, MorePointsOrContoursThanTheOutlineHoldsAreUnsupported) {
   const auto square = fontWith(cs(10, 20, op::rmoveto, 100, 0, 0, 100, -100, 0, op::rlineto, op::endchar));
   EXPECT_EQ(Status::Unsupported, Engine(square, 4, 1).glyph(1).status);
   EXPECT_TRUE(Engine(square, 5, 1).glyph(1).drawn);
-}
-
-TEST(TtfCffCharString, TheDecoderIsSmall) {
-  static_assert(kCffDecoderBytes % 8 == 0, "the scratch block is planned in 8-byte steps");
-  static_assert(kCffDecoderBytes >= sizeof(CffDecoder), "the planned size holds the decoder");
-  std::printf("sizeof(CffDecoder) %u, planned %u\n", static_cast<unsigned>(sizeof(CffDecoder)),
-              static_cast<unsigned>(kCffDecoderBytes));
-  EXPECT_LE(kCffDecoderBytes, 1024u);
 }

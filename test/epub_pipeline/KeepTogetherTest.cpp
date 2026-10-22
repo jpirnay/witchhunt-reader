@@ -21,6 +21,11 @@
 //      its last page gets two lines, also when it is laid out in parts (over 96 words).
 //   7. The build lent an arena (the reader's background build, where the page-fit test runs
 //      before the line exists) lays out the same pages.
+//
+// test_keep_together.epub sets shapes 1-5 and its golden pins them in heap mode, the harness
+// default, so those run here in the lent arena only. The rest run in both modes: the book has no
+// two-line paragraph and no heading with room, and its long paragraph ends with lines to spare,
+// so no golden reaches the widow on the last page of a paragraph longer than a page.
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -45,11 +50,12 @@ struct Layout {
   std::map<uint16_t, int> linesOn;         // text lines per page
 };
 
-class KeepTogetherFixture : public testing::TestWithParam<bool> {
+class KeepTogetherLayout : public testing::Test {
  protected:
   fs::path work;
   int books = 0;
   int words = 0;
+  bool lentArena = false;
 
   void SetUp() override {
     std::string name = testing::UnitTest::GetInstance()->current_test_info()->name();
@@ -98,7 +104,7 @@ class KeepTogetherFixture : public testing::TestWithParam<bool> {
     GfxRenderer renderer;
     Section section(epub, 0, renderer);
     std::unique_ptr<BuildArena> lent;
-    if (GetParam()) {
+    if (lentArena) {
       lent = std::make_unique<BuildArena>(52272);
       section.setExternalBuildScratch(lent.get());
     }
@@ -121,16 +127,32 @@ class KeepTogetherFixture : public testing::TestWithParam<bool> {
   }
 };
 
+class KeepTogetherInArena : public KeepTogetherLayout {
+ protected:
+  void SetUp() override {
+    lentArena = true;
+    KeepTogetherLayout::SetUp();
+  }
+};
+
+class KeepTogetherFixture : public KeepTogetherLayout, public testing::WithParamInterface<bool> {
+ protected:
+  void SetUp() override {
+    lentArena = GetParam();
+    KeepTogetherLayout::SetUp();
+  }
+};
+
 }  // namespace
 
-TEST_P(KeepTogetherFixture, OrphanMovesTheParagraphToTheNextPage) {
+TEST_F(KeepTogetherInArena, OrphanMovesTheParagraphToTheNextPage) {
   std::string first;
   const auto l = layout(fill(9) + para(4, &first));
   EXPECT_EQ(l.pageOf.at(first), 1) << "the paragraph's first line was left alone at the foot of the page";
   EXPECT_EQ(l.linesOn.at(0), 9);
 }
 
-TEST_P(KeepTogetherFixture, WidowTakesALineWithIt) {
+TEST_F(KeepTogetherInArena, WidowTakesALineWithIt) {
   std::string first, last;
   const auto l = layout(fill(7) + para(4, &first, &last));
   EXPECT_EQ(l.pageOf.at(first), 0);
@@ -139,7 +161,7 @@ TEST_P(KeepTogetherFixture, WidowTakesALineWithIt) {
   EXPECT_EQ(l.pageOf.at(last), 1);
 }
 
-TEST_P(KeepTogetherFixture, ThreeLinesThatCannotSplitMoveWhole) {
+TEST_F(KeepTogetherInArena, ThreeLinesThatCannotSplitMoveWhole) {
   std::string first;
   const auto l = layout(fill(8) + para(3, &first));
   EXPECT_EQ(l.pageOf.at(first), 1);
@@ -152,7 +174,7 @@ TEST_P(KeepTogetherFixture, TwoLineParagraphMovesWhole) {
   EXPECT_EQ(l.pageOf.at(first), 1);
 }
 
-TEST_P(KeepTogetherFixture, AGoodSplitAndAFittingParagraphAreLeftAlone) {
+TEST_F(KeepTogetherInArena, AGoodSplitAndAFittingParagraphAreLeftAlone) {
   std::string first, last;
   auto l = layout(fill(7) + para(5, &first, &last));
   EXPECT_EQ(l.linesOn.at(0), 10) << "a 3/2 split breaks no rule";
@@ -162,7 +184,7 @@ TEST_P(KeepTogetherFixture, AGoodSplitAndAFittingParagraphAreLeftAlone) {
   EXPECT_EQ(l.pages, 1);
 }
 
-TEST_P(KeepTogetherFixture, HeadingMovesWithWhatFollows) {
+TEST_F(KeepTogetherInArena, HeadingMovesWithWhatFollows) {
   std::string first;
   // The h2 is 34 px (1.4 x 24): after eight lines it fits at 192..226, its paragraph does not.
   const auto l = layout(fill(8) + "<h2>Hdg</h2>" + para(3, &first));

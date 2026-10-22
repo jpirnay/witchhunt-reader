@@ -60,22 +60,14 @@ TEST(FontLookup, MissAsksTheResolverAndRegistersWhatItSupplies) {
   EXPECT_TRUE(scales.empty());  // drawn at its own size
 }
 
-TEST(FontLookup, ResolverIsAskedOncePerMiss) {
-  std::map<int, int> fonts;
-  std::map<int, float> scales;
-  Resolver r;  // declines
-
-  EXPECT_EQ(nullptr, findOrResolveFont(fonts, scales, 8, r.hook()));
-  EXPECT_EQ(1, r.calls);
-}
-
 TEST(FontLookup, DeclinedIdIsNotRegistered) {
   std::map<int, int> fonts{{7, 70}};
   std::map<int, float> scales;
   Resolver r;  // declines
 
-  findOrResolveFont(fonts, scales, 8, r.hook());
+  EXPECT_EQ(nullptr, findOrResolveFont(fonts, scales, 8, r.hook()));
 
+  EXPECT_EQ(1, r.calls);
   EXPECT_EQ(1u, fonts.size());
   EXPECT_EQ(0u, fonts.count(8));
 }

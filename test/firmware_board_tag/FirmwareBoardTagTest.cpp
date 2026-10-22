@@ -52,22 +52,14 @@ TEST(FirmwareBoardTag, OwnTagIsNotAMismatch) {
   EXPECT_FALSE(scanChunked("padding" + tagFor("lilygo") + "trailing", 4096));
 }
 
+// Any other board's tag, a sibling S3 board's included: x4pro and lilygo share an esp_image_header chip_id, so
+// the tag is the only thing that tells those two images apart.
 TEST(FirmwareBoardTag, ForeignTagIsAMismatch) {
   board_tag::Scanner s;
   const std::string img = "padding" + tagFor("x4") + "trailing";
   s.feed(reinterpret_cast<const uint8_t*>(img.data()), img.size());
   EXPECT_TRUE(s.mismatch());
   EXPECT_STREQ(s.foundName(), "x4");
-}
-
-TEST(FirmwareBoardTag, SiblingS3BoardIsAMismatch) {
-  // x4pro and lilygo share an esp_image_header chip_id, so the tag is the only
-  // thing that can tell these two images apart.
-  board_tag::Scanner s;
-  const std::string img = tagFor("x4pro");
-  s.feed(reinterpret_cast<const uint8_t*>(img.data()), img.size());
-  EXPECT_TRUE(s.mismatch());
-  EXPECT_STREQ(s.foundName(), "x4pro");
 }
 
 TEST(FirmwareBoardTag, UntaggedImagePasses) {

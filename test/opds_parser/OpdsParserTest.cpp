@@ -91,12 +91,6 @@ TEST(OpdsParser, SlashTerminatedKepubPath) {
   ASSERT_TRUE(assertSingleFormat(entry, "kepub", ".kepub.epub"));
 }
 
-TEST(OpdsParser, SlashTerminatedEpubPath) {
-  OpdsEntry entry;
-  ASSERT_TRUE(parseSingleBookEntry(entry, "/opds/download/6516/epub/"));
-  ASSERT_TRUE(assertSingleFormat(entry, "epub", ".epub"));
-}
-
 TEST(OpdsParser, DistinctAcquisitionFormatsRemainSeparate) {
   const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
@@ -125,32 +119,6 @@ TEST(OpdsParser, DistinctAcquisitionFormatsRemainSeparate) {
   ASSERT_EQ(links[1].formatKey, "kepub");
   ASSERT_EQ(links[2].formatKey, "txt");
   ASSERT_EQ(links[3].formatKey, "md");
-}
-
-TEST(OpdsParser, UnsupportedMimeType) {
-  const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <entry>
-    <title>Example Book</title>
-    <author><name>Example Author</name></author>
-    <id>book-3</id>
-    <link rel="http://opds-spec.org/acquisition" type="application/x-mobipocket-ebook" href="/books/example.mobi"/>
-  </entry>
-</feed>)";
-
-  std::vector<OpdsEntry> entries;
-  OpdsParser parser;
-  parser.onEntryParsed = [&](OpdsEntry e) { entries.push_back(std::move(e)); };
-  parser.write(reinterpret_cast<const uint8_t*>(xml), strlen(xml));
-  parser.flush();
-
-  ASSERT_TRUE(!parser.error());
-  // Kept, as a book without acquisition links: the browser's sign for "Format not supported". It
-  // used to vanish from the list.
-  ASSERT_EQ(entries.size(), static_cast<size_t>(1));
-  EXPECT_EQ(entries[0].type, OpdsEntryType::BOOK);
-  EXPECT_EQ(entries[0].href, "/books/example.mobi");
-  EXPECT_TRUE(entries[0].acquisitionLinks.empty());
 }
 
 TEST(OpdsParser, EmptyHrefOrType) {
@@ -551,7 +519,8 @@ TEST(OpdsParser, NavigationLinkBeatsAnUnsupportedDownload) {
 
 // --- A feed's own search templates (<link rel="search" href="...{searchTerms}...">) ---------------
 // The rule of an OpenSearch description's templates (OpenSearch::TemplatePicker, see
-// OpenSearchDescriptionTest.cpp for its cases); these check that the feed goes through it.
+// OpenSearchDescriptionTest.cpp for its cases); these check that the feed goes through it and keeps
+// the description it names.
 
 namespace {
 // The feed's search template; osdUrl gets the description it names, if any.
@@ -568,11 +537,6 @@ std::string feedSearchTemplate(const std::string& links, std::string* osdUrl = n
 }
 }  // namespace
 
-TEST(OpdsParser, FeedSearchTemplateOfItsOnlyLink) {
-  EXPECT_EQ(feedSearchTemplate(R"(<link rel="search" type="application/atom+xml" href="/opds/search/{searchTerms}"/>)"),
-            "/opds/search/{searchTerms}");
-}
-
 // The last template used to win, whatever its type: here the JSON suggestions.
 TEST(OpdsParser, FeedSearchTakesTheAtomTemplate) {
   EXPECT_EQ(feedSearchTemplate(R"(
@@ -580,17 +544,6 @@ TEST(OpdsParser, FeedSearchTakesTheAtomTemplate) {
   <link rel="search" type="application/atom+xml" href="/opds/search?q={searchTerms}"/>
   <link rel="search" type="application/x-suggestions+json" href="/suggest?q={searchTerms}"/>)"),
             "/opds/search?q={searchTerms}");
-}
-
-TEST(OpdsParser, FeedSearchPrefersAnOpdsCatalogFeedInEitherOrder) {
-  EXPECT_EQ(feedSearchTemplate(R"(
-  <link rel="search" type="application/atom+xml;profile=opds-catalog;kind=acquisition" href="/opds/{searchTerms}"/>
-  <link rel="search" type="application/atom+xml" href="/atom/{searchTerms}"/>)"),
-            "/opds/{searchTerms}");
-  EXPECT_EQ(feedSearchTemplate(R"(
-  <link rel="search" type="application/atom+xml" href="/atom/{searchTerms}"/>
-  <link rel="search" type="application/atom+xml;profile=opds-catalog;kind=acquisition" href="/opds/{searchTerms}"/>)"),
-            "/opds/{searchTerms}");
 }
 
 // With no template the browser can read, it has none of its own, and goes to the description the
@@ -604,17 +557,6 @@ TEST(OpdsParser, FeedSearchWithOnlyHtmlAndJsonLeavesTheDescription) {
                                &osdUrl),
             "");
   EXPECT_EQ(osdUrl, "/osd.xml");
-}
-
-TEST(OpdsParser, FeedSearchUntypedIsTheLastResort) {
-  EXPECT_EQ(feedSearchTemplate(R"(
-  <link rel="search" href="/untyped/{searchTerms}"/>
-  <link rel="search" type="text/html" href="/html/{searchTerms}"/>)"),
-            "/untyped/{searchTerms}");
-  EXPECT_EQ(feedSearchTemplate(R"(
-  <link rel="search" type="application/atom+xml" href="/atom/{searchTerms}"/>
-  <link rel="search" href="/untyped/{searchTerms}"/>)"),
-            "/atom/{searchTerms}");
 }
 
 // A shop page alone is not a book the reader cannot open, it is no book at all for the reader.

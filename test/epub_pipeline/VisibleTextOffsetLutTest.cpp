@@ -138,12 +138,6 @@ TEST_P(LutFixture, EveryStartLooksUpItsOwnPage) {
   }
 }
 
-TEST_P(LutFixture, PageBeyondTheLutHasNoOffset) {
-  const auto section = build(0);
-  EXPECT_EQ(section->getVisibleTextOffsetForPage(section->pageCount), std::nullopt);
-  EXPECT_EQ(section->getVisibleTextOffsetForPage(0xFFFF), std::nullopt);
-}
-
 INSTANTIATE_TEST_SUITE_P(Corpus, LutFixture, testing::ValuesIn(corpusBooks()),
                          [](const testing::TestParamInfo<std::string>& info) {
                            std::string name = fs::path(info.param).stem().string();
@@ -230,6 +224,14 @@ struct SyntheticLutFixture : testing::Test {
     return out;
   }
 };
+
+// A page past the LUT's end has no start: a bounds guard, the same for every book.
+TEST_F(SyntheticLutFixture, PageBeyondTheLutHasNoOffset) {
+  const auto section = build(book(paragraphs(80)));
+  ASSERT_GT(section->pageCount, 1);
+  EXPECT_EQ(section->getVisibleTextOffsetForPage(section->pageCount), std::nullopt);
+  EXPECT_EQ(section->getVisibleTextOffsetForPage(0xFFFF), std::nullopt);
+}
 
 TEST_F(SyntheticLutFixture, StyleTextInsideBodyIsNotCounted) {
   // The mapper skips <style> wherever it is; so must the parser, or the two drift apart by the

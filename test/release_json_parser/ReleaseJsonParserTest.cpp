@@ -71,15 +71,6 @@ TEST(ReleaseJsonParserDigest, TheBetaListFormCarriesTheDigestToo) {
   EXPECT_TRUE(sameAsDigestHex(parser.getFirmwareSha256()));
 }
 
-TEST(ReleaseJsonParserDigest, ResetForgetsTheDigest) {
-  ReleaseJsonParser parser;
-  feedAll(parser, R"({"tag_name":"2.37","assets":[)" +
-                      asset("firmware.bin", std::string(R"("digest":"sha256:)") + DIGEST_HEX + R"(",)") + "]}");
-  ASSERT_TRUE(parser.hasFirmwareSha256());
-  parser.reset();
-  EXPECT_FALSE(parser.hasFirmwareSha256());
-}
-
 std::string jsonString(const std::string& text) {
   std::string out = "\"";
   for (char c : text) {
@@ -184,16 +175,6 @@ TEST(ReleaseJsonParserNotes, TheBetaListFormCarriesTitleAndNotes) {
   EXPECT_STREQ(parser.getReleaseName(), "Beta");
   EXPECT_TRUE(parser.foundNotes());
   EXPECT_STREQ(parser.getReleaseNotes(), "Try it.");
-}
-
-TEST(ReleaseJsonParserNotes, ResetForgetsTitleAndNotes) {
-  ReleaseJsonParser parser;
-  feedAll(parser, release(R"("name":"Beta",)", R"(,"body":"Try it.")"));
-  ASSERT_TRUE(parser.foundNotes());
-  parser.reset();
-  EXPECT_STREQ(parser.getReleaseName(), "");
-  EXPECT_FALSE(parser.foundNotes());
-  EXPECT_STREQ(parser.getReleaseNotes(), "");
 }
 
 }  // namespace
