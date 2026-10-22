@@ -314,6 +314,16 @@ jobs:
           done
           exit $status
 
+      # The bundle's identity must not depend on the firmware version or the build host.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Check the web bundle identity
+        run: |
+          pip install zopfli
+          python test/web/bundle_identity_test.py
+
   # This job is used as the PR required actions check, allows for changes to other steps in the future without breaking
   # PR requirements.
   test-status:
