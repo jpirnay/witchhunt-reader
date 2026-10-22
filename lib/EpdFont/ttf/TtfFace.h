@@ -71,11 +71,11 @@ FaceStatus parseFace(FontBytes& bytes, Face* face);
 /// The glyph for `codepoint`, or 0 (the font has none, or the cmap is broken: see bytes.outOfRange()).
 uint16_t glyphIndex(FontBytes& bytes, const Face& face, uint32_t codepoint);
 
-/// 26.6 pixels per em for a point size at the converter's 150 dpi, as FreeType derives it: 14 pt -> 1867.
 /// The post table's header, which FreeType reads (tt_face_load_post) and which holds italicAngle; SD mode copies only
 /// it.
 constexpr uint32_t kPostHeaderBytes = 32;
 
+/// 26.6 pixels per em for a point size at the converter's 150 dpi, as FreeType derives it: 14 pt -> 1867.
 constexpr uint32_t ppemFromPoints(const uint32_t points) { return (points * 64 * 150 + 36) / 72; }
 
 /// The 16.16 factor from font units to 26.6 pixels at `ppem26_6` (FreeType's x_scale, equal to y_scale).

@@ -392,6 +392,8 @@ TEST(TtfFace, ItalicIsMacStyleFsSelectionOrItalicAngleInEitherOutlineFormat) {
     EXPECT_TRUE(italic(2, true, 0, 64)) << cff;                // macStyle still counts
     EXPECT_TRUE(italic(0, false, 0, 78, postTable(0x00030000, -15 * 0x10000))) << cff;
     EXPECT_TRUE(italic(0, false, 0, 78, postTable(0x00020000, 12 * 0x10000, 64))) << cff;  // glyph names follow
+    EXPECT_TRUE(italic(0, false, 0, 78, postTable(0x00010000, -12 * 0x10000))) << cff;     // format 1
+    EXPECT_TRUE(italic(0, false, 0, 78, postTable(0x00025000, -12 * 0x10000))) << cff;     // format 2.5
     EXPECT_FALSE(italic(0, false, 0, 78, postTable(0x00030000, 0))) << cff;
     EXPECT_FALSE(italic(0, false, 0, 78, postTable(0x00030000, -15 * 0x10000, 31))) << cff;  // too short
     EXPECT_FALSE(italic(0, false, 0, 78, postTable(0x00040000, -15 * 0x10000))) << cff;      // format refused
