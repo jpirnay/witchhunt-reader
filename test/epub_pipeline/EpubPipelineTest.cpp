@@ -16,9 +16,9 @@
 // (<book>_hyph.golden.txt: the two greedy breakers and the page-bottom retry), and
 // a few with bionic reading ON (<book>_bionic.golden.txt: the word-list rebuild).
 //
-// The books set in several font families also run with the families Publisher Fonts lays their blocks out in:
-// Accents (<book>_accents.golden.txt) and All Text (<book>_alltext.golden.txt). Off and Body Text are the default
-// golden (Body Text changes only the body font ID, which the shim renderer draws alike).
+// The books set in several font families also run with the families Publisher Fonts lays their blocks out in,
+// Accents (<book>_accents.golden.txt). Off and Body Text are the default golden, and All Text is the Accents one:
+// Body Text and All Text change only the body font ID, which the shim renderer draws alike.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -44,7 +44,7 @@ std::string freshCacheDir(const std::string& tag) {
 }
 
 // The render setting a case turns ON; every other one stays as in the default.
-enum class Variant { Default, Normalization, Hyphenation, Bionic, Accents, AllText };
+enum class Variant { Default, Normalization, Hyphenation, Bionic, Accents };
 
 // One corpus book under one variant.
 struct Case {
@@ -62,8 +62,6 @@ const char* variantName(const Variant v) {
       return "bionicReading";
     case Variant::Accents:
       return "publisherFontsAccents";
-    case Variant::AllText:
-      return "publisherFontsAllText";
     case Variant::Default:
       break;
   }
@@ -94,9 +92,9 @@ const char* const kFontFamilyBooks[] = {"test_font_families"};
 
 // The families as the reader builds them for a 14 pt built-in body (buildBookFontFamilies), with stand-in IDs: the
 // built-in sans-serif's rungs are 2000 + their size, the accent families' native sizes 0x12345600, 0x23456700 and
-// 0x34567800 | px. Both have the book's three accent families (Stage B phase 3): Accents beside the built-in body, All
-// Text beside the book's TTF body, Book Body, in one glyph store. All Text's body font ID is another one, which the
-// shim renderer draws alike, so its layout is Accents'.
+// 0x34567800 | px: the book's three accent families (Stage B phase 3) beside the built-in body. All Text sets them
+// beside the book's TTF body, Book Body, in one glyph store; only its body font ID differs, which the shim renderer
+// draws alike, so its layout is this one's.
 BlockFontFamilies publisherFontFamilies() {
   BlockFontFamilies families;
   families.body = CssParser::fontFamilyHash("Book Body") | CssFontFamily::kSerif;
@@ -117,7 +115,6 @@ BlockFontFamilies publisherFontFamilies() {
   return families;
 }
 const BlockFontFamilies kAccentsFamilies = publisherFontFamilies();
-const BlockFontFamilies kAllTextFamilies = publisherFontFamilies();
 
 // Distinguishes the variants' cache dirs and golden files. The default keeps the
 // historical unsuffixed golden name so its committed layout stays reviewable
@@ -132,8 +129,6 @@ std::string variantSuffix(const Case& c) {
       return "_bionic";
     case Variant::Accents:
       return "_accents";
-    case Variant::AllText:
-      return "_alltext";
     case Variant::Default:
       break;
   }
@@ -146,7 +141,6 @@ std::string runOnce(const Case& c, const std::string& cacheDir) {
   profile.hyphenationEnabled = c.variant == Variant::Hyphenation;
   profile.bionicReadingEnabled = c.variant == Variant::Bionic;
   if (c.variant == Variant::Accents) profile.fontFamilies = &kAccentsFamilies;
-  if (c.variant == Variant::AllText) profile.fontFamilies = &kAllTextFamilies;
   std::ostringstream dump;
   const bool ok = pipeline_harness::runAndDump(c.epub, cacheDir, profile, dump);
   EXPECT_TRUE(ok) << "pipeline failed for " << c.epub << " (" << variantName(c.variant) << ")\n" << dump.str();
@@ -228,10 +222,7 @@ std::vector<Case> corpusCases() {
     if (listed(kNormalizationSensitiveBooks, stem(path))) cases.push_back(Case{path, Variant::Normalization});
     if (listed(kHyphenationBooks, stem(path))) cases.push_back(Case{path, Variant::Hyphenation});
     if (listed(kBionicBooks, stem(path))) cases.push_back(Case{path, Variant::Bionic});
-    if (listed(kFontFamilyBooks, stem(path))) {
-      cases.push_back(Case{path, Variant::Accents});
-      cases.push_back(Case{path, Variant::AllText});
-    }
+    if (listed(kFontFamilyBooks, stem(path))) cases.push_back(Case{path, Variant::Accents});
   }
   return cases;
 }
