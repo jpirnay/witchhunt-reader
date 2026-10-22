@@ -340,10 +340,10 @@ bool hasCjkGap(const DumpLine& line) {
 // shape (x, alignment, size) share a text width; the shape's left edge is where its leftmost line starts. A line
 // is not its paragraph's last when the next line of its flow has the same shape, starts at that left edge (not
 // indented) and follows without a margin. Lines justified at word spaces (Latin, Korean) keep their old rounding
-// and are not checked.
+// and are not checked: the Korean book is not instantiated here.
 TEST_P(CjkJustifiedRules, JustifiedLinesEndFlushOnAWholeEmGrid) {
   const TypographyProfile profile = TypographyProfile::forLanguage(GetParam().language);
-  if (profile.justify != TypographyProfile::Justify::BetweenCharacters) GTEST_SKIP() << "justified at word spaces";
+  ASSERT_EQ(profile.justify, TypographyProfile::Justify::BetweenCharacters);
 
   const std::vector<std::string> keys = blockKeys(lines);
   std::map<std::string, int> leftEdge = blockLeftEdges(renderer, lines, keys, table);  // shape -> its left edge
@@ -397,12 +397,20 @@ std::vector<Case> cjkBooks() {
   return cases;
 }
 
+// The books a justified line stretches between characters in: Chinese and Japanese. Korean justifies at word spaces.
+std::vector<Case> booksJustifiedBetweenCharacters() {
+  std::vector<Case> cases = cjkBooks();
+  cases.erase(std::remove_if(cases.begin(), cases.end(), [](const Case& c) { return c.language == "ko"; }),
+              cases.end());
+  return cases;
+}
+
 std::string caseName(const testing::TestParamInfo<Case>& info) {
   return fs::path(info.param.epub).stem().string() + (info.param.hyphenation ? "_hyph" : "");
 }
 
 INSTANTIATE_TEST_SUITE_P(CjkCorpus, CjkRules, testing::ValuesIn(cjkBooks()), caseName);
-INSTANTIATE_TEST_SUITE_P(CjkCorpus, CjkJustifiedRules, testing::ValuesIn(cjkBooks()), caseName);
+INSTANTIATE_TEST_SUITE_P(CjkCorpus, CjkJustifiedRules, testing::ValuesIn(booksJustifiedBetweenCharacters()), caseName);
 
 }  // namespace
 
