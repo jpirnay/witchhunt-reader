@@ -85,9 +85,3 @@ rename or move, and small code cleanups it noticed.
 
 The real-book sweep runs 46 books and 44 of them print "nothing split". Trim it to the structurally
 distinct books: anchors, TOC edges, footnotes, images, CJK and moby-dick.
-
-## LP64 filter
-
-In the LP64 recipe (the `tools/ftprobe` `build_tests.sh` invocation) the `TtfVsFreeType*` gtest
-filter matches no instantiated `TEST_P`, because their names start with the instantiation prefix.
-Use `*TtfVsFreeType*` so the `test/ttf_rasterizer` oracle runs under it.
