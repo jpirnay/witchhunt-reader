@@ -706,20 +706,6 @@ TEST(TtfCffCharString, ASeacFailsWhereFreeTypeFails) {
 
 // --- Whole fonts ---
 
-TEST(TtfCffCharString, EveryGlyphOfTheOperatorFontMatchesFreeTypeUnscaled) {
-  const std::vector<uint8_t> font = readFixture("CffOperators.otf");
-  Engine engine(font);
-  ASSERT_TRUE(engine.ok());
-  const Oracle oracle(font);
-  ASSERT_TRUE(oracle.ok());
-  for (uint32_t g = 0; g < engine.face().numGlyphs; ++g) {
-    ASSERT_TRUE(engine.untransformed(static_cast<uint16_t>(g)));
-    const Shape theirs = oracle.glyph(static_cast<uint16_t>(g));
-    ASSERT_TRUE(theirs.drawn) << "glyph " << g;
-    EXPECT_EQ(theirs, engine.glyph(static_cast<uint16_t>(g))) << "glyph " << g;
-  }
-}
-
 TEST(TtfCffCharString, EveryGlyphOfEveryTestFontMatchesFreeTypeUnscaled) {
   // Every glyph whose font matrix is identity (all but NotoSansJP-CffSlanted's): the same points, tags and contour
   // ends as FreeType's, or Malformed / Unsupported where FreeType fails.
@@ -918,4 +904,3 @@ TEST(TtfCffCharString, MorePointsOrContoursThanTheOutlineHoldsAreUnsupported) {
   EXPECT_EQ(Status::Unsupported, Engine(square, 4, 1).glyph(1).status);
   EXPECT_TRUE(Engine(square, 5, 1).glyph(1).drawn);
 }
-
