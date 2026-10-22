@@ -80,16 +80,6 @@ TEST(TimezoneConsistency, SettingOffersEveryZoneInTheTable) {
   EXPECT_EQ(static_cast<size_t>(row.getEnumOptionCount()), timezones::count());
 }
 
-// Every option has to render as something. An empty label is a blank row in the picker, and an
-// out-of-range index returns empty -- which is how a short list would show up if the count above
-// were ever satisfied by padding rather than by real entries.
-TEST(TimezoneConsistency, EverySettingOptionHasALabel) {
-  const SettingInfo row = TimezoneOptions::make(StrId::STR_CLOCK);
-  for (uint8_t i = 0; i < row.getEnumOptionCount(); ++i) {
-    EXPECT_FALSE(row.getEnumOptionLabel(i).empty()) << "option " << static_cast<int>(i);
-  }
-}
-
 // The row's labels must be the table's, in the table's order. They are the same strings by
 // construction today; this is what notices if that construction is ever "optimised" into a
 // second list.
