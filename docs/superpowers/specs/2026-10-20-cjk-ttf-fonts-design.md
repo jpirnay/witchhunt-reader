@@ -88,8 +88,7 @@ Added after the first approval:
 - an interrupted download leaves a family that the font selector lists but cannot draw;
 - an older firmware's font manager stops working, or offers a family it cannot install (section 6.2);
 - synthetic bold fills the counters of dense characters at reading sizes (a character like 鬱 at 12 pt);
-- any regular glyph, any glyph of a family with a real Bold, or any TrueType glyph renders differently because
-  of this work;
+- any glyph of a style the family has a file for, TrueType or CFF, renders differently because of this work;
 - making room in the store loses a glyph a page being drawn uses, or serves a glyph under another glyph's key;
 - floating point reaches the font engine (`scripts/check_no_float.py`);
 - rebuilding the fonts without a change to their inputs rewrites their bytes and grows the repository.
@@ -427,7 +426,12 @@ italic in a regular-only family is bold but upright. This affects:
 italic. A file counts as italic when:
 - its `head.macStyle` says italic (bit 1);
 - or its OS/2 `fsSelection` says italic or oblique (bits 0 and 9);
+- or its `post` table's `italicAngle` is not 0 (the maintainer's call: OpenDyslexic's Italic says upright in the
+  other two);
 - or it sits in the italic or bold-italic slot.
+
+The OS/2 and `post` tables are read only as FreeType accepts them: an OS/2 table long enough for its version, a
+`post` table of at least 32 bytes in format 1, 2, 2.5 or 3 (`tt_face_load_post`).
 
 Then:
 - italic is drawn from the regular file, slanted;
@@ -441,6 +445,7 @@ Then:
 | Regular and Italic | the Italic | the Italic, emboldened (7.1, unchanged) |
 | Regular, Bold and Italic, no BoldItalic | the Italic | the upright Bold (7.1, unchanged) |
 | No regular file, an Italic moved into the regular slot | not slanted again | as 7.1 |
+| No italic file, bold only by its faces (a bold or heavy file serving as the regular) | the regular, slanted | none of its own: it falls back to the italic, slanted (`EpdFontFamily::getFont`) |
 
 **Scope.**
 - A style the family has a file for is never synthesized.
@@ -464,7 +469,11 @@ rarely ask for italic, and a Latin word set in italic inside one should look ita
   fallback does today.
   - Line breaking therefore does not change: in these families italic is laid out with the regular advances
     today, and bold italic with those of the font it falls back to (the Bold, or the emboldened regular).
-  - Neither `SECTION_FILE_VERSION` nor the Markdown cache version moves.
+  - The Markdown cache version stays: the Markdown reader measures by advance.
+  - `SECTION_FILE_VERSION` moves to 98 (the maintainer's call). A section also caches two values taken from the
+    ink box, which the slant moves: an italic drop cap's width (`ChapterHtmlSlimParser`) and a narrowed CJK mark's
+    place (`ParsedText`). The render version's new font IDs (below) lay out again only the chapters set in an
+    outline body font, not one whose italic drop cap or CJK mark is in a book's accent font.
 - **Ink box.** It is taken from the slanted outline: ascenders reach right, descenders left. The left side bearing
   can turn negative.
 - **Scratch plan.** A synthetic family's plan leaves room for the slanted box, which grows by up to the glyph's
@@ -476,6 +485,8 @@ rarely ask for italic, and a Latin word set in italic inside one should look ita
 **Storage.**
 - **Keys.** Synthetic italic glyphs are stored under the italic style's bits of the glyph key, bold italic under
   the bold-italic bits, as now. No new style block.
+- **SD mode.** A style block keeps the `post` table's first 32 bytes, its header, so a face reads `italicAngle` in
+  either mode. The glyph names after it, tens of KB in a TrueType file, are left out.
 - **`ttf::kRenderVersion` goes to 3 (my call).**
   - Since #548, a regular-only family stores emboldened, upright glyphs under the bold-italic bits; slanting
     changes what those keys draw.
@@ -496,7 +507,8 @@ rarely ask for italic, and a Latin word set in italic inside one should look ita
 - **The FreeType oracle.** Every glyph of the bundled TrueType and CFF test fonts at 8, 14 and 40 pt, slanted, and
   emboldened at the engine's strength and then slanted. It is compared with `FT_GlyphSlot_Oblique` on FreeType's
   side: advances, boxes and bitmaps byte-identical.
-- **Style resolution.** A test per row of the table above, plus a regular face whose `fsSelection` says oblique.
+- **Style resolution.** A test per row of the table above, plus a regular face whose `fsSelection` says oblique,
+  and OpenDyslexic's Italic alone, italic only by its `italicAngle`.
 - **The store.** A store written before the bump is not reused.
 - **Device (X4).**
   - A regular-only Latin family and `bookfont_cff.epub`'s embedded face draw `<em>` slanted.

@@ -4,7 +4,7 @@
 
 **Goal:** Italic and bold italic text in a TrueType or CFF family without an italic file of its own draws slanted, as FreeType's `FT_GlyphSlot_Oblique` and KOReader draw it. This covers regular-only Latin families on the card, the CJK families, fonts books embed, and the two italic styles of a Regular-and-Bold family.
 
-**Architecture:** `ttf::Rasterizer` gains `slant()`, FreeType 2.13.3's `FT_GlyphSlot_Oblique` rebuilt in integers: each point's x gains `mulFix(y, kSlant)`, measured from the glyph's origin. It runs on the outline that `load()` (and `embolden()`) leaves, then boxes the glyph again; the advance stays. `planScratch` leaves room for the shear. `Face::italic` reads head.macStyle bit 1 and OS/2 fsSelection bits 0 and 9. `TtfFont::chooseSynthetic()` applies spec 7.4's rule after 7.1's, so a drawn style is emboldened, slanted or both, always from a file's style block (`source_`), and keyed under its own style bits. `TtfFont::load()` drops the slant, then the emboldening, for a glyph they make too large. `ttf::kRenderVersion` goes to 3, because a regular-only family's bold-italic keys now draw slanted. Advances do not change, so neither the section version nor the Markdown cache version moves.
+**Architecture:** `ttf::Rasterizer` gains `slant()`, FreeType 2.13.3's `FT_GlyphSlot_Oblique` rebuilt in integers: each point's x gains `mulFix(y, kSlant)`, measured from the glyph's origin. It runs on the outline that `load()` (and `embolden()`) leaves, then boxes the glyph again; the advance stays. `planScratch` leaves room for the shear. `Face::italic` reads head.macStyle bit 1, OS/2 fsSelection bits 0 and 9, and a non-zero `post.italicAngle`; an SD-mode style block now keeps the `post` table's 32-byte header, so a face reads the same in either mode. `TtfFont::chooseSynthetic()` applies spec 7.4's rule after 7.1's, so a drawn style is emboldened, slanted or both, always from a file's style block (`source_`), and keyed under its own style bits. `TtfFont::load()` drops the slant, then the emboldening, for a glyph they make too large. `ttf::kRenderVersion` goes to 3, because a regular-only family's bold-italic keys now draw slanted. Advances do not change, so line breaks and the Markdown cache stay. `SECTION_FILE_VERSION` still goes to 98: a section caches an italic drop cap's width and a narrowed CJK mark's place, both taken from the ink box the slant moves.
 
 **Tech Stack:** C++20 firmware (PlatformIO, ESP32-C3), GoogleTest host tests (`test/ttf_rasterizer`, `test/ttf_font`) against FreeType 2.13.3 (the SDK's copy, with `src/base/ftsynth.c` added to the oracle), the device bench `bench/ttf_raster_main.cpp`, `tools/devctl.py`.
 
@@ -18,13 +18,14 @@
 - **Output that must not change** (spec 7.4: "A style the family has a file for is never synthesized"). A style with a file of its own, and a synthetic bold style that is not an italic, draw exactly as on master. These pass unchanged:
   - `TtfVsFreeType.EveryGlyphMatchesFreeType` and `.EveryGlyphEmboldenedMatchesFreeType`, and their `TtfVsFreeTypeCff` siblings;
   - `TtfVsFreeTypeCffSynthetic.*`, `TtfGolden.TheDeviceBenchExpectsThisOutput` and `TtfCffGolden.TrueTypeOutputIsUnchanged`;
-  - every synthetic bold test in `TtfFontTest.cpp` except the ones Task 2 changes.
-- **The rule** (spec 7.4, verbatim): "An outline family gets synthetic italic only when none of its files is italic. A file counts as italic when: its `head.macStyle` says italic (bit 1); or its OS/2 `fsSelection` says italic or oblique (bits 0 and 9); or it sits in the italic or bold-italic slot."
+  - every synthetic bold test in `TtfFontTest.cpp` except the ones Task 3 changes.
+- **The rule** (spec 7.4, verbatim): "An outline family gets synthetic italic only when none of its files is italic. A file counts as italic when: its `head.macStyle` says italic (bit 1); or its OS/2 `fsSelection` says italic or oblique (bits 0 and 9); or its `post` table's `italicAngle` is not 0 (the maintainer's call: OpenDyslexic's Italic says upright in the other two); or it sits in the italic or bold-italic slot."
+  - "The OS/2 and `post` tables are read only as FreeType accepts them: an OS/2 table long enough for its version, a `post` table of at least 32 bytes in format 1, 2, 2.5 or 3 (`tt_face_load_post`)."
   - Then: "italic is drawn from the regular file, slanted; bold italic is drawn from the bold file, slanted, when the family has one; otherwise bold italic is drawn from the regular, emboldened (7.1) and then slanted."
   - "A style the family has a file for is never synthesized."
   - Not covered: `.cpfont` families, built-in fonts and the UI faces.
   - "There is no setting": no setting and no new strings.
-- **The table** (spec 7.4). Task 2 has one test per row:
+- **The table** (spec 7.4). Task 3 has one test per row:
 
   | Family | Italic | Bold italic |
   |---|---|---|
@@ -33,6 +34,7 @@
   | Regular and Italic | the Italic | the Italic, emboldened |
   | Regular, Bold and Italic | the Italic | the upright Bold |
   | An Italic moved into the regular slot | not slanted again | as in 7.1 |
+  | No italic file, bold only by its faces (a bold or heavy file serving as the regular) | the regular, slanted | none of its own: it falls back to the italic, slanted (`EpdFontFamily::getFont`) |
 
 - **The shear** (spec 7.4): "each point's x gains `FT_MulFix(y, 0x366A)`; `FT_MulFix(x, 0x10000)` is x exactly; y stays."
   - `ttf::mulFix` (`TtfFixed.h`) is `FT_MulFix` bit for bit. The inline `FT_MulFix_x86_64` that the oracle's `ftoutln.c` compiles to rounds the same way.
@@ -47,7 +49,8 @@
   - Glyphs are keyed by `glyphstore::makeKey(codepoint, style, faceIndex)` under the drawn style's bits.
   - `glyphstore::kMaxStyles` (8) and the store's `kFormatVersion` (4) stay as they are.
   - `ttf::kRenderVersion` goes from 2 to 3.
-  - `SECTION_FILE_VERSION` stays 97, and the Markdown `CACHE_VERSION` stays 11.
+  - An SD-mode style block keeps the `post` table's first 32 bytes, its header; the glyph names after it are left out (spec 7.4, Storage).
+  - `SECTION_FILE_VERSION` goes from 97 to 98 (the maintainer's call, spec 7.4 Metrics); the Markdown `CACHE_VERSION` stays 11, because the Markdown reader measures by advance.
 - **Comments and formatting.** Comments say what the code does and why; no history narration. Before each commit, format the task's `.cpp` and `.h` files with clang-format 21:
   `CF=/c/Users/jens/AppData/Local/Temp/claude/c---development-witchhunt-reader/fc578506-1ee1-4ff8-934c-5cbb87f79026/scratchpad/cf21/clang_format/data/bin/clang-format.exe; "$CF" -i <files>`.
 - **Host tests** (Git Bash). Configure once:
@@ -63,7 +66,7 @@
 - **The oracle on LP64**, as CI's Linux runs it. From PowerShell: `C:\msys64\usr\bin\bash.exe -lc "bash /tmp/ftprobe/build_tests.sh /c/tmp/wt-italic '<filter>'"`. Its FreeType objects (`/tmp/ftprobe/obj`) lack `ftsynth.c`; Task 1 adds it once.
 - **Firmware.** `PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 pio run -e default`, one `pio run` at a time, in the background.
   - `x4pro` and `lilygo_t5s3` are left to CI.
-  - `bench_ttf_raster` is built in Task 3.
+  - `bench_ttf_raster` is built in Task 4.
 - **Device: the X4 only** (the X3 is out of scope).
   - It is driven over the serial test API (`tools/devctl.py`, `docs/serial-test-api.md`).
   - `cmd:GET` each setting before changing it, and restore it afterwards.
@@ -73,24 +76,26 @@
 
 1. **Book fonts (Publisher Fonts).** `pickFaces` (`BookFonts.cpp:359`) fills the style slots from the CSS, and moves a book's lone face to the regular slot.
    - A regular-only embedded family now draws `<em>` slanted.
-   - A lone CSS-italic face whose file says italic must not be slanted again (table row 5). Pinned by Task 2's `AnItalicFileServingAsTheRegularIsNotSlantedAgain` and `AFaceWhoseFsSelectionSaysItalicOrObliqueIsNotSlanted`.
-   - Task 4 reads such a book.
-   - A file that is drawn italic but says upright is slanted again. That is the spec's rule; Task 3 documents it as a known limit.
+   - A lone CSS-italic face whose file says italic, by any of the three flags, must not be slanted again (table row 5). Pinned by Task 3's `AnItalicFileServingAsTheRegularIsNotSlantedAgain`, `AFaceWhoseFsSelectionSaysItalicOrObliqueIsNotSlanted` and `AFaceFlaggedItalicOnlyByItsAngleIsNotSlanted` (OpenDyslexic's Italic: `macStyle` 0, `fsSelection` 0xC0, `italicAngle` -15).
+   - In SD mode the face reads the same flags: Task 2's `TtfSdBlock.KeepsThePostHeaderSoTheFaceReadsItalicAsTheFileDoes`.
+   - Task 5 reads such a book.
+   - A file whose three flags all say upright, though it is drawn italic, is slanted again. That is the spec's rule; Task 4 documents it as a known limit.
 2. **Italic headings and drop caps at the largest native size.** At 120 px, most slanted glyphs exceed the 4 KB output region.
    - Such a glyph is drawn upright, never missing. Bold italic falls back to emboldened upright, then plain.
-   - Pinned by Task 2's `SyntheticItalicAtTheLargestNativeSizeIsSlantedWhereItFitsAndUprightWhereItDoesNot` (TrueType and CFF), and Task 1's `TtfSlant.ABitmapThatNoLongerFitsTheOutputIsUnsupported`.
+   - Pinned by Task 3's `SyntheticItalicAtTheLargestNativeSizeIsSlantedWhereItFitsAndUprightWhereItDoesNot` (TrueType and CFF), and Task 1's `TtfSlant.ABitmapThatNoLongerFitsTheOutputIsUnsupported`.
    - The shear margin in `planScratch` (`TtfScratch.ASlantedPlanHasRoomForTheShear`) is insurance below the cap. The reviewer judges it by reading `planScratch`.
 3. **A descender far left of the pen.** The slant moves a glyph's foot to the left. Past `EpdGlyphRef`'s 8-bit `left`, the glyph would be missing.
    - The check is `placeable()`, which runs after the rasterizer. #548's bold fallback did not retry on it; `TtfFont::load()` now must.
-   - Pinned by Task 2's `AnItalicGlyphReachingTooFarLeftOnceSlantedIsDrawnUpright`.
-4. **Layout stays where it was.** In these families, italic was laid out with the regular's advances and pairs, and bold italic with those of the Bold or the emboldened regular. The section version does not move, so a changed advance or pair would leave cached chapters wrong.
-   - Pinned by Task 2's `SyntheticItalicKernsAsItsFileAndKeepsItsAdvance`, and by the `EpdFontFamily` advances in `ARegularAndBoldFamilyDrawsItalicAndBoldItalicSlanted`.
-   - Two cached values do depend on the ink box:
+   - Pinned by Task 3's `AnItalicGlyphReachingTooFarLeftOnceSlantedIsDrawnUpright`.
+4. **Layout.** In these families, italic was laid out with the regular's advances and pairs, and bold italic with those of the Bold or the emboldened regular. The slant keeps both, so line breaks and the Markdown cache (measured by advance) stay as they were.
+   - Pinned by Task 3's `SyntheticItalicKernsAsItsFileAndKeepsItsAdvance`, and by the `EpdFontFamily` advances in `ARegularAndBoldFamilyDrawsItalicAndBoldItalicSlanted`.
+   - A section also caches two values taken from the ink box, which the slant moves:
      - a drop cap's width (`ChapterHtmlSlimParser.cpp:1674`, `getTextWidthScaled` → `getTextBounds`);
      - a narrowed CJK mark's ink shift (`ParsedText.cpp:1530-1546`, `getGlyphInk`).
-   - Chapters laid out in an outline body font are laid out again anyway, because the render version moves its font ID (spec 7.4). The reviewer checks what that leaves out: an accent family's italic drop cap or CJK mark.
+   - `SECTION_FILE_VERSION` therefore goes to 98 (Task 4). The render version's new font IDs alone would lay out again only the chapters set in an outline body font, not one whose italic drop cap or CJK mark is in a book's accent font.
 5. **A store written by #548.** Its regular-only families hold upright emboldened glyphs under the bold-italic bits.
-   - Pinned by Task 3's `TtfFamily.TheIdentityChangesWithTheRenderVersion`, together with `AnotherFamilyIsInstalledOverTheStore`, which installs again over a store of another identity.
+   - Pinned by Task 4's `TtfFamily.TheIdentityChangesWithTheRenderVersion`, together with `AnotherFamilyIsInstalledOverTheStore`, which installs again over a store of another identity.
+   - An SD-mode block written before Task 2 lacks the `post` header; `SdBlock::sameAs` then finds it changed and installs it again, as the render version does anyway.
    - The reviewer checks against `TtfFont::storeKey` that no other key changes what it draws:
      - no style-2 keys ever existed in a family without an italic file (`EpdFontFamily::getFont` fell back to the regular's font);
      - no style-3 keys existed in a Regular-and-Bold family (it fell back to the Bold's).
@@ -222,47 +227,111 @@ git add lib/EpdFont/ttf/TtfRasterizer.h lib/EpdFont/ttf/TtfRasterizer.cpp test/t
 git commit -m "feat(ttf): synthetic italic, FreeType's oblique shear in integers"
 ```
 
-### Task 2: Which styles are slanted, and how TtfFont draws them
+### Task 2: What a file says: italic, read alike in flash mode and SD mode
 
 **Files:**
-- Modify: `lib/EpdFont/ttf/TtfFace.h`, `lib/EpdFont/ttf/TtfFace.cpp` (`Face::italic`), `test/ttf_rasterizer/TtfBuilder.h` (`Font::os2Bytes`); Test: `test/ttf_rasterizer/TtfFaceTest.cpp`
+- Modify: `lib/EpdFont/ttf/TtfFace.h`, `lib/EpdFont/ttf/TtfFace.cpp` (`Face::italic`, `kPostHeaderBytes`), `test/ttf_rasterizer/TtfBuilder.h` (`Font::os2Bytes`); Test: `test/ttf_rasterizer/TtfFaceTest.cpp`
+- Modify: `lib/EpdFont/ttf/TtfFamily.h`, `lib/EpdFont/ttf/TtfFamily.cpp` (the SD-mode block keeps the `post` header); Test: `test/ttf_font/TtfFamilyTest.cpp`
+- Modify: `docs/file-formats.md` (the SD-mode block's tables)
+
+**Interfaces:**
+- Produces: `bool ttf::Face::italic`: head.macStyle bit 1, or OS/2 fsSelection bit 0 or 9, or a non-zero `post.italicAngle`. It reads the same from either outline kind and either mode.
+- Produces: `constexpr uint32_t ttf::kPostHeaderBytes = 32;` in `TtfFace.h`, commented "The post table's header, which FreeType reads (tt_face_load_post) and which holds italicAngle; SD mode copies only it."
+- Produces (test builder): `uint16_t Font::os2Bytes = 78;`, the OS/2 table's length.
+
+- [ ] **Step 1: Write the failing face test**, in `TtfFaceTest.cpp` after `BoldIsMacStyleOrAWeightOf600InEitherOutlineFormat`.
+  - It is built as that test is: a `threeGlyphs()` font, and the same font with CFF outlines.
+  - A `post` table goes in through `extraTables`, made by a test helper `Bytes postTable(uint32_t format, int32_t italicAngle, size_t bytes = 32)`: the format at offset 0, the 16.16 angle at 4, zeros after.
+  ```cpp
+  TEST(TtfFace, ItalicIsMacStyleFsSelectionOrItalicAngleInEitherOutlineFormat) {
+    // Spec 7.4. OS/2 and post are read as FreeType accepts them: one too short (for its version), or a post table
+    // of a format FreeType refuses, counts as missing.
+    // italic(macStyle, os2, fsSelection, os2Bytes = 78, post = {}) builds the font and returns face.italic.
+    EXPECT_FALSE(italic(0, false, 0)) << cff;
+    EXPECT_TRUE(italic(2, false, 0)) << cff;
+    EXPECT_FALSE(italic(1, false, 0)) << cff;                    // bold
+    EXPECT_TRUE(italic(0, true, 1)) << cff;                      // ITALIC
+    EXPECT_TRUE(italic(0, true, 1u << 9)) << cff;                // OBLIQUE
+    EXPECT_FALSE(italic(0, true, 0x20 | 0x40 | 0x80)) << cff;    // BOLD, REGULAR, USE_TYPO_METRICS
+    EXPECT_FALSE(italic(0, true, 1, 64)) << cff;                 // a 64-byte OS/2: missing
+    EXPECT_TRUE(italic(2, true, 0, 64)) << cff;                  // macStyle still counts
+    EXPECT_TRUE(italic(0, false, 0, 78, postTable(0x00030000, -15 * 0x10000))) << cff;
+    EXPECT_TRUE(italic(0, false, 0, 78, postTable(0x00020000, 12 * 0x10000, 64))) << cff;   // glyph names follow
+    EXPECT_FALSE(italic(0, false, 0, 78, postTable(0x00030000, 0))) << cff;
+    EXPECT_FALSE(italic(0, false, 0, 78, postTable(0x00030000, -15 * 0x10000, 31))) << cff;  // too short
+    EXPECT_FALSE(italic(0, false, 0, 78, postTable(0x00040000, -15 * 0x10000))) << cff;      // format refused
+  }
+  ```
+  The test also parses the bundled `OpenDyslexic/OpenDyslexic-Italic.otf` (italic by its angle alone) and `Bookerly/Bookerly-Italic.ttf` (italic), and their Regulars (not italic).
+
+- [ ] **Step 2: Write the failing SD-mode test**, in `TtfFamilyTest.cpp` after `IsTheFontButForItsOutlines`.
+  ```cpp
+  TEST(TtfSdBlock, KeepsThePostHeaderSoTheFaceReadsItalicAsTheFileDoes) {
+    // Spec 7.4: a style block keeps post's first 32 bytes, italicAngle among them. A TrueType file's glyph names after
+    // them (NotoSans-Italic: 52,692 bytes of post) stay out.
+    for (const char* name : {"NotoSans/NotoSans-Italic.ttf", "OpenDyslexic/OpenDyslexic-Italic.otf",
+                             "Bookerly/Bookerly-Regular.ttf"}) {
+      // plan the block, read its image (blockImage) and parseFace() it as IsTheFontButForItsOutlines does
+      EXPECT_EQ(wholeFace.italic, face.italic) << name;
+      EXPECT_EQ(32u, /* the image's post record length: be32 at findRecord(image, "post") + 12 */) << name;
+      EXPECT_EQ(block.bytes(), ttf::probeFile(file.source()).sdBytes) << name;
+    }
+    // italic is true for the two Italics, false for Bookerly Regular
+  }
+  ```
+  `IsTheFontButForItsOutlines` changes:
+  - `176356u` becomes `176404u` (one more directory record and 32 bytes);
+  - its comment becomes "Its eleven tables the engine reads, post's header among them, 4-byte aligned behind a 12-record directory".
+
+- [ ] **Step 3: Run them to see them fail.**
+Run: `cmake --build build/test --target TtfRasterizerTest TtfFontTest -j 8`
+Expected: the build fails. `Face` has no member `italic`, and `Font` has no member `os2Bytes`.
+
+- [ ] **Step 4: Read the flags, and keep `post`'s header in SD mode.**
+  - **`TtfFace.h`.** Add `kPostHeaderBytes`. After `bold`, add `/// An italic face: head.macStyle says italic, OS/2's fsSelection says italic or oblique, or post's italicAngle is not 0. Never slanted (spec 7.4).` `bool italic = false;`.
+  - **`parseFace`**, beside the macStyle bold read: `face->italic = (bytes.u16(head.offset + 44) & 2) != 0;  // macStyle`.
+  - **`parseFace`**, after the usWeightClass line: `if (haveOs2 && (bytes.u16(os2.offset + 62) & 0x0201) != 0) face->italic = true;  // fsSelection: ITALIC, OBLIQUE`. It sits under the same `haveOs2` as every OS/2 read, which is FreeType's rule.
+  - **`parseFace`, `post`.** With `findTable(bytes, numTables, tag("post"), kPostHeaderBytes, &post)`, a format of 0x00010000, 0x00020000, 0x00025000 or 0x00030000, and a non-zero `bytes.u32(post.offset + 4)`, `face->italic = true`. The comment: "post.italicAngle, read as FreeType accepts the table (tt_face_load_post)".
+  - **`TtfFamily.cpp`:**
+    - include `TtfFace.h`;
+    - `tag("post")` joins `kSdTrueType` (12 tags) and `kSdCff` (11) as their last optional table;
+    - `SdTables::tags` grows to 12, and `SdBlock::kMaxTables` to 12, with its comment: "TrueType: the eleven tables the engine reads, and glyf; CFF: ten of them, and the CFF table";
+    - a helper `uint32_t sdCopyBytes(uint32_t tableTag, uint32_t length)`, commented "What SD mode copies of a table: all of it, but post's header alone (kPostHeaderBytes); the glyph names after it, tens of KB in a TrueType font, are never read";
+    - `SdBlock::addTable` records that length (its in-file check keeps the file's length);
+    - `probeFile` sums `align4(sdCopyBytes(record.tag, record.length))` for a TrueType file's block.
+
+    The record's checksum stays the file's: only `sameAs` reads it, against a block made the same way.
+  - **`TtfFamily.h`.** The `SdBlock` comment's two table lists gain "post (its header)".
+  - **`TtfBuilder.h`.** `Font` gains `uint16_t os2Bytes = 78;  ///< the OS/2 table's length; shorter than its version's, FreeType ignores it`. `buildFont` resizes the OS/2 bytes to it after setting the fields.
+  - **`docs/file-formats.md`**, the style block's mode bullet. The SD-mode list ends "`GPOS`, `GSUB`, `kern`, and the first 32 bytes of `post`, whichever it has".
+
+  An SD-mode block written before this change lacks the `post` record. `SdBlock::sameAs` finds it changed, and the set is installed again. Task 4's render version does that anyway.
+
+- [ ] **Step 5: Run the tests.**
+Run: `./build/test/ttf_rasterizer/TtfRasterizerTest.exe --gtest_filter='TtfFace.*' && ./build/test/ttf_font/TtfFontTest.exe`
+Expected:
+- PASS, every test.
+- A style block grows by 48 bytes. Should an SD-mode test that fills its partition to the page fail by that, report it with the figures rather than loosen it.
+
+- [ ] **Step 6: Format and commit.**
+```bash
+"$CF" -i lib/EpdFont/ttf/TtfFace.h lib/EpdFont/ttf/TtfFace.cpp lib/EpdFont/ttf/TtfFamily.h lib/EpdFont/ttf/TtfFamily.cpp \
+  test/ttf_rasterizer/TtfBuilder.h test/ttf_rasterizer/TtfFaceTest.cpp test/ttf_font/TtfFamilyTest.cpp
+git add lib/EpdFont/ttf/TtfFace.h lib/EpdFont/ttf/TtfFace.cpp lib/EpdFont/ttf/TtfFamily.h lib/EpdFont/ttf/TtfFamily.cpp \
+  test/ttf_rasterizer/TtfBuilder.h test/ttf_rasterizer/TtfFaceTest.cpp test/ttf_font/TtfFamilyTest.cpp docs/file-formats.md
+git commit -m "feat(ttf): a face is italic by macStyle, fsSelection or italicAngle, read alike in SD mode"
+```
+
+### Task 3: Which styles are slanted, and how TtfFont draws them
+
+**Files:**
 - Modify: `lib/EpdFont/ttf/TtfFont.h`, `lib/EpdFont/ttf/TtfFont.cpp`; Test: `test/ttf_font/TtfFontTest.cpp`
 
 **Interfaces:**
-- Consumes: Task 1's `Rasterizer::slant(EpdGlyph*)` and `planScratch(face, ppem, pool, emboldened, slanted)`.
-- Produces: `bool ttf::Face::italic`: head.macStyle bit 1, or OS/2 fsSelection bit 0 or 9, read from either outline kind.
+- Consumes: Task 1's `Rasterizer::slant(EpdGlyph*)` and `planScratch(face, ppem, pool, emboldened, slanted)`; Task 2's `Face::italic`.
 - Produces: `bool TtfFont::emboldened(uint8_t style) const` and `bool TtfFont::slanted(uint8_t style) const`. `bool TtfFont::synthetic(uint8_t style) const` now means either of the two.
-- Produces (test builder): `uint16_t Font::os2Bytes = 78;`, the OS/2 table's length.
 
-- [ ] **Step 1: Write the failing face test**, in `TtfFaceTest.cpp` after `BoldIsMacStyleOrAWeightOf600InEitherOutlineFormat`. It is built as that test is: a `threeGlyphs()` font, and the same font with CFF outlines.
-  ```cpp
-  TEST(TtfFace, ItalicIsMacStyleOrFsSelectionInEitherOutlineFormat) {
-    // Spec 7.4. OS/2 is read as FreeType reads it: a table too short for its version counts as missing.
-    // italic(macStyle, os2, fsSelection, os2Bytes = 78) builds the font and returns face.italic.
-    EXPECT_FALSE(italic(0, false, 0)) << cff;
-    EXPECT_TRUE(italic(2, false, 0)) << cff;
-    EXPECT_FALSE(italic(1, false, 0)) << cff;            // bold
-    EXPECT_TRUE(italic(0, true, 1)) << cff;              // ITALIC
-    EXPECT_TRUE(italic(0, true, 1u << 9)) << cff;        // OBLIQUE
-    EXPECT_FALSE(italic(0, true, 0x20 | 0x40 | 0x80)) << cff;  // BOLD, REGULAR, USE_TYPO_METRICS
-    EXPECT_FALSE(italic(0, true, 1, 64)) << cff;         // a 64-byte OS/2: missing
-    EXPECT_TRUE(italic(2, true, 0, 64)) << cff;          // macStyle still counts
-  }
-  ```
-
-- [ ] **Step 2: Run it to see it fail.**
-Run: `cmake --build build/test --target TtfRasterizerTest -j 8`
-Expected: the build fails. `Face` has no member `italic`, and `Font` has no member `os2Bytes`.
-
-- [ ] **Step 3: Add `Face::italic`, and the builder's `os2Bytes`.**
-  - **`TtfFace.h`**, after `bold`: `/// An italic face: head.macStyle says italic, or OS/2's fsSelection says italic or oblique. Never slanted (spec 7.4).` `bool italic = false;`.
-  - **`parseFace`**, beside the macStyle bold read: `face->italic = (bytes.u16(head.offset + 44) & 2) != 0;  // macStyle`.
-  - **`parseFace`**, after the usWeightClass line: `if (haveOs2 && (bytes.u16(os2.offset + 62) & 0x0201) != 0) face->italic = true;  // fsSelection: ITALIC, OBLIQUE`. It sits under the same `haveOs2` as every OS/2 read, which is FreeType's rule.
-  - **`TtfBuilder.h`.** `Font` gains `uint16_t os2Bytes = 78;  ///< the OS/2 table's length; shorter than its version's, FreeType ignores it`. `buildFont` resizes the OS/2 bytes to it after setting the fields.
-
-- [ ] **Step 4: Run it.** `./build/test/ttf_rasterizer/TtfRasterizerTest.exe --gtest_filter='TtfFace.*'`. Expected: PASS.
-
-- [ ] **Step 5: Write the failing font tests**, in `TtfFontTest.cpp`.
+- [ ] **Step 1: Write the failing font tests**, in `TtfFontTest.cpp`.
   - **Helpers**, beside `emboldened()`:
     - `Reference slantedAt(const std::vector<uint8_t>& file, uint32_t cp, uint32_t ppem, bool bold = false)` works as `emboldenedAt`. It plans `planScratch(face, kMaxNativePx << 6, kPoolBytesFlash, true, true)`, which is the plan a regular-only family merges. It runs `load()`, then `embolden()` when `bold`, then `slant()`, then `rasterize()`, each expected `Ok`.
     - `Reference slanted(const std::vector<uint8_t>& file, uint32_t cp, uint8_t points, bool bold = false)`.
@@ -279,7 +348,7 @@ Expected: the build fails. `Face` has no member `italic`, and `Font` has no memb
       - 'W' is drawn as `emboldened(regular, 'W', 14)` in `kBold`, as `slanted(regular, 'W', 14)` in `kItalic`, as `slanted(regular, 'W', 14, true)` in `kBoldItalic`, and as `reference()` in `kRegular`.
     - **`BoldItalicIsEmboldenedFromTheItalicWhenThereIsOne`** (row 3) gains `for (uint8_t s = 0; s < 4; ++s) EXPECT_FALSE(font->slanted(s)) << int{s};`.
     - **`AFamilyWithABoldFileIsNeverEmboldened`** (row 4) keeps its code. Its comment says that `synthetic()` covers the slant now, so its loop pins row 4 too.
-    - **`ABoldFileServingAsTheRegularIsNotEmboldenedAgain`** gains `EXPECT_TRUE(font->slanted(kItalic))` and `EXPECT_EQ(nullptr, font->font(kBoldItalic))`. The comment on the second: "bold only by its face: bold italic falls back to the slanted face (EpdFontFamily::getFont)".
+    - **`ABoldFileServingAsTheRegularIsNotEmboldenedAgain`** (row 6) gains `EXPECT_TRUE(font->slanted(kItalic))` and `EXPECT_EQ(nullptr, font->font(kBoldItalic))`. The comment on the second: "bold only by its face: bold italic falls back to the slanted face (EpdFontFamily::getFont)".
     - **`ABrokenGlyphIsMarkedMissingAndNotTriedAgain`**: its last line becomes `EXPECT_TRUE(font->slanted(kItalic));  // a one-style family: its bold and italic are synthetic (spec 7.1, 7.4)`.
     - **`AFamilyHoldsMemoryOnlyForTheStylesItHas`**: `built.macStyle = 3;  // declared bold italic, so no style is synthetic: ...`.
     - **`ASyntheticStyleCostsItsFontsAndNoFile`:**
@@ -295,17 +364,18 @@ Expected: the build fails. `Face` has no member `italic`, and `Font` has no memb
     | `ARegularAndBoldFamilyDrawsItalicAndBoldItalicSlanted` | Bookerly Regular and Bold (row 2) | No style emboldened; `slanted()` false, false, true, true. 'W' in `kItalic` = `slanted(regular)`, in `kBoldItalic` = `slanted(bold)`. Through `EpdFontFamily(font(0..3))`, ITALIC 'W' has REGULAR's `advanceX`, and BOLD_ITALIC 'W' has `reference(files[kBold], 'W', 14)`'s: the advances the fallback gave |
     | `AnItalicFileServingAsTheRegularIsNotSlantedAgain` | `Bookerly/Bookerly-Italic.ttf`, then `NotoSans/NotoSans-Italic.ttf`, each alone in the regular slot (row 5) | `!slanted(kItalic)` and `font(kItalic) == nullptr`. `emboldened(kBold)` and `emboldened(kBoldItalic)`, and 'W' in `kBoldItalic` = `emboldened(file, 'W', 14)` |
     | `AFaceWhoseFsSelectionSaysItalicOrObliqueIsNotSlanted` | `kernedBoxes()` with `os2 = true` and `os2Selection` 1, then `1u << 9`, each alone | `!slanted(kItalic)`, `font(kItalic) == nullptr`, `emboldened(kBold)` |
+    | `AFaceFlaggedItalicOnlyByItsAngleIsNotSlanted` | `OpenDyslexic/OpenDyslexic-Italic.otf` alone in the regular slot: `macStyle` 0, `fsSelection` 0xC0, `post.italicAngle` -15 | `!slanted(kItalic)` and `font(kItalic) == nullptr`. `emboldened(kBold)` and `emboldened(kBoldItalic)`, and 'W' in `kBoldItalic` = `emboldened(file, 'W', 14)` |
     | `SyntheticItalicIsStoredUnderTheItalicStyleAndServesTheNextBoot` | Bookerly Regular alone | First boot: `glyph(kRegular/kItalic/kBoldItalic, 'W')` all non-null, and `renders() == 3`. Next boot: drawn as `reference`, `slanted` and `slanted(..., true)`, with `renders() == 0` and `storeHits() == 3` |
     | `SyntheticItalicKernsAsItsFileAndKeepsItsAdvance` | `kernedBoxes()` | `slanted(kItalic)`. `kerning(kRegular, 'A', 'B') == -47` and `kerning(kItalic, 'A', 'B') == -47`, with `kernLookups() == 1`. Italic 'A' has regular 'A''s `advanceX`, `left`, `top` and `height`, and a greater `width`. Bold-italic 'A' has bold 'A''s `advanceX` |
     | `SyntheticItalicAtTheLargestNativeSizeIsSlantedWhereItFitsAndUprightWhereItDoesNot` | Bookerly Regular alone (U+0021–U+024F, more than 300 codepoints), then `NotoSansJP-CffFlat.otf` alone (`mappedCodepoints()`, more than 250), at `nativeFonts(maxNativePx())` | For every codepoint the regular draws there, `kItalic` = `drawnAt(file, cp, ppem, false, &leaning)` and `kBoldItalic` = `drawnAt(file, cp, ppem, true, &leaning)`. For Bookerly, the `kItalic` glyphs include both leaning and upright ones (each count above 0): the 4 KB cap decides |
     | `AnItalicGlyphReachingTooFarLeftOnceSlantedIsDrawnUpright` | A built font, regular only: 'A' `rect(50, 0, 450, 700)`, 'J' `rect(-2200, -2000, -2100, 0)`; opened at `TtfFont::kMaxPointSize` (26 pt, 54 px) | 'J' in `kItalic` = `reference(file, 'J', 26)`: upright it reaches 120 px left of the pen; slanted, its foot reaches 143 px, past int8. 'A' in `kItalic` = `slanted(file, 'A', 26)` |
     | `TtfFontSetTest.SyntheticItalicInSdModeIsDrawnFromTheRegularFile` | as `SyntheticBoldInSdModeIsDrawnFromTheRegularFile` | `readsCard()` and `slanted(kItalic)`. `prefetch(kItalic, <the ten kana>)` gives `renders() == 10`, and more than 0 but at most 11 new `sdPageReads()`. Each kana in `kItalic` = `slanted(file, cp, 14)`, with `renders()` still 10. 'あ' in `kRegular` = `reference(...)`. `expectWrittenOnce(chip)` |
 
-- [ ] **Step 6: Run them to see them fail.**
+- [ ] **Step 2: Run them to see them fail.**
 Run: `cmake --build build/test --target TtfFontTest -j 8`
 Expected: the build fails. `TtfFont` has no members `emboldened` and `slanted`.
 
-- [ ] **Step 7: Choose and draw the slanted styles.**
+- [ ] **Step 3: Choose and draw the slanted styles.**
   - **`TtfFont.h`.**
     - `synthetic_` gives way to `uint8_t emboldened_ = 0;` and `uint8_t slanted_ = 0;`, one bit per style.
     - Public:
@@ -355,37 +425,33 @@ Expected: the build fails. `TtfFont` has no members `emboldened` and `slanted`.
       }
     }
     ```
-    A bold glyph whose offsets no longer fit `EpdGlyphRef` is now drawn unemboldened too. Emboldening keeps the left edge and the top, so in practice that does not happen.
+    One change to bold is intended (ruled 2026-10-22): a bold glyph whose emboldened offsets no longer fit `EpdGlyphRef` is now drawn unemboldened, where #548 drew it missing. Emboldening keeps the left edge and the top, so in practice that does not happen.
   - **Unchanged:** `render`, `prefetch`, `kerning` (`source_[drawn]` already names the file's style), `configure`, `rebase`, `nativeSize`, and `TtfFontSet`.
 
-- [ ] **Step 8: Run the font tests.**
+- [ ] **Step 4: Run the font tests.**
 Run: `cmake --build build/test --target TtfFontTest -j 8 && ./build/test/ttf_font/TtfFontTest.exe`
 Expected:
 - PASS, every test.
 - The heap line shows about 720 B more for the family with synthetic styles, and the same for a native size: three fonts of about 240 B on the 64-bit host.
 
-Also run: `cmake --build build/test --target TtfRasterizerTest -j 8 && ./build/test/ttf_rasterizer/TtfRasterizerTest.exe --gtest_filter='TtfFace.*'`
-Expected: PASS.
-
-- [ ] **Step 9: Format and commit.**
+- [ ] **Step 5: Format and commit.**
 ```bash
-"$CF" -i lib/EpdFont/ttf/TtfFace.h lib/EpdFont/ttf/TtfFace.cpp lib/EpdFont/ttf/TtfFont.h lib/EpdFont/ttf/TtfFont.cpp \
-  test/ttf_rasterizer/TtfBuilder.h test/ttf_rasterizer/TtfFaceTest.cpp test/ttf_font/TtfFontTest.cpp
-git add lib/EpdFont/ttf/TtfFace.h lib/EpdFont/ttf/TtfFace.cpp lib/EpdFont/ttf/TtfFont.h lib/EpdFont/ttf/TtfFont.cpp \
-  test/ttf_rasterizer/TtfBuilder.h test/ttf_rasterizer/TtfFaceTest.cpp test/ttf_font/TtfFontTest.cpp
+"$CF" -i lib/EpdFont/ttf/TtfFont.h lib/EpdFont/ttf/TtfFont.cpp test/ttf_font/TtfFontTest.cpp
+git add lib/EpdFont/ttf/TtfFont.h lib/EpdFont/ttf/TtfFont.cpp test/ttf_font/TtfFontTest.cpp
 git commit -m "feat(ttf): a family without an italic file draws italic and bold italic slanted"
 ```
 
-### Task 3: Render version 3, the bench, the docs, the firmware
+### Task 4: Render version 3, section version 98, the bench, the docs, the firmware
 
 **Files:**
 - Modify: `lib/EpdFont/ttf/TtfFamily.h`; Test: `test/ttf_font/TtfFamilyTest.cpp`
+- Modify: `lib/Epub/Epub/Section.cpp`
 - Modify: `bench/ttf_raster_main.cpp`
 - Modify: `docs/file-formats.md`, `USER_GUIDE.md`, `docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md` (7.4)
 
 **Interfaces:**
 - Consumes: Task 1's `Rasterizer::slant` and `planScratch(..., emboldened, slanted)`.
-- Produces: `ttf::kRenderVersion == 3`.
+- Produces: `ttf::kRenderVersion == 3`, `SECTION_FILE_VERSION == 98`.
 
 - [ ] **Step 1: Write the failing identity test**, in `TtfFamilyTest.cpp` after `TheIdentityChangesWithAnyFileDetail`.
   - A test helper, `identityAt(const ttf::FileStamp (&styles)[4], uint8_t version)`, rebuilds the identity as `docs/file-formats.md` describes it:
@@ -412,37 +478,47 @@ Expected: FAIL. `kRenderVersion` is 2, and the identity is `identityAt(styles, 2
 
 - [ ] **Step 4: Run it.** Run the same command. Expected: PASS. Then run `./build/test/ttf_font/TtfFontTest.exe` whole. Expected: PASS.
 
-- [ ] **Step 5: The bench times a slanted miss** (spec 7.4: "The device bench confirms it, as it did for bold").
+- [ ] **Step 5: The section version** (spec 7.4, Metrics: the maintainer's call). In `lib/Epub/Epub/Section.cpp`, with its history line on top:
+  ```cpp
+  constexpr uint8_t SECTION_FILE_VERSION = 98;  // v98: synthetic italic slants an outline family
+                                                // without an italic file; an italic drop cap's
+                                                // width and a narrowed CJK mark's place come from
+                                                // the ink box, an accent font's too
+                                                // v97: bold in an outline family without a bold
+  ```
+  `docs/file-formats.md` quotes no number for it (its `section.bin` section says to read it in `Section.cpp`), so nothing changes there. The Markdown reader's `CACHE_VERSION` stays 11: it measures by advance.
+
+- [ ] **Step 6: The bench times a slanted miss** (spec 7.4: "The device bench confirms it, as it did for bold").
   - **`renderGlyphs`** gains `const bool slant = false` after `bold`. It runs `slant(&metrics)` after the emboldening, timed with the rest as one miss. `renderAll` passes it on.
   - **Bookerly's rasterizer** is planned `planScratch(face, heading, kPoolBytesFlash, true, true)`. After `bold_40pt_pool4k`, the bench reports `italic_14pt_pool4k` (slanted), `italic_40pt_pool4k`, and `bolditalic_14pt_pool4k` (emboldened, then slanted).
   - **`benchJapanese`.** The 8 KB-pool rasterizer is planned `planScratch(face, ppem, kPoolBytesSd, true, true)`. After `<name>_kanji_12pt_pool8k_bold`, it reports `<name>_kanji_12pt_pool8k_italic`.
   - **The file's header comment** names the new runs.
   - Bookerly's 14 pt hash must still match the host's (`TtfGolden`).
 
-- [ ] **Step 6: Docs.**
+- [ ] **Step 7: Docs.**
   - **`docs/file-formats.md`, the glyph store's face bullet.** "A synthetic bold style (spec 7.1), drawn from another style's file, keys its glyphs ..." becomes "A synthetic style (spec 7.1, 7.4), drawn emboldened or slanted from another style's file, keys its glyphs ...".
   - **`docs/file-formats.md`, the identity bullet:** "and the engine's render version (`ttf::kRenderVersion`, 3)".
   - **`USER_GUIDE.md`, Font Family:** "A TrueType or OpenType font without a bold file draws bold text emboldened, and without an italic file draws italic text slanted."
   - **`USER_GUIDE.md`, Publisher Fonts:** "A book font without a bold face draws bold text emboldened, and without an italic face draws italic text slanted."
-  - **The spec, section 7.4**, after the **Scope** bullets: "**Known limit.** A book face declared italic in CSS whose file says upright (`macStyle` bit 1 and `fsSelection` bits 0 and 9 clear) is slanted again: `pickFaces` moves a lone face to the regular slot and its CSS style is not kept. OpenDyslexic's `OpenDyslexic-Italic.otf` is such a file."
+  - **The spec, section 7.4**, after the **Scope** bullets: "**Known limit.** A file drawn italic whose flags all say upright (`macStyle` bit 1 clear, `fsSelection` bits 0 and 9 clear, `post.italicAngle` 0) is slanted again, as a lone book face declared italic in CSS can be: `pickFaces` moves a lone face to the regular slot and its CSS style is not kept."
 
-- [ ] **Step 7: Build the firmware and the bench**, one at a time, in the background:
+- [ ] **Step 8: Build the firmware and the bench**, one at a time, in the background:
   - `PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 pio run -e default`
   - `PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 pio run -e bench_ttf_raster`
 
 Expected: `SUCCESS` for each, and `check_no_float: <n> TTF engine objects, no floating point` on the firmware build. Note the flash size against master's.
 
-- [ ] **Step 8: Run the whole host suite, then format and commit.**
+- [ ] **Step 9: Run the whole host suite, then format and commit.**
 Run: `cmake --build build/test -j 8 -- -k 0 && (cd build/test && ctest -j 8 --output-on-failure)`
 Expected: every test that passes on master passes here. Compare with the same suite run on master 0eaac6878.
 ```bash
-"$CF" -i lib/EpdFont/ttf/TtfFamily.h test/ttf_font/TtfFamilyTest.cpp bench/ttf_raster_main.cpp
-git add lib/EpdFont/ttf/TtfFamily.h test/ttf_font/TtfFamilyTest.cpp bench/ttf_raster_main.cpp docs/file-formats.md \
-  USER_GUIDE.md docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md
-git commit -m "feat(ttf): render version 3 for synthetic italic; the bench times a slanted miss"
+"$CF" -i lib/EpdFont/ttf/TtfFamily.h test/ttf_font/TtfFamilyTest.cpp lib/Epub/Epub/Section.cpp bench/ttf_raster_main.cpp
+git add lib/EpdFont/ttf/TtfFamily.h test/ttf_font/TtfFamilyTest.cpp lib/Epub/Epub/Section.cpp bench/ttf_raster_main.cpp \
+  docs/file-formats.md USER_GUIDE.md docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md
+git commit -m "feat(ttf): render version 3 and section version 98 for synthetic italic; the bench times a slanted miss"
 ```
 
-### Task 4: On the X4
+### Task 5: On the X4
 
 **Files:** none changed. The figures and the screenshots go into the PR description.
 

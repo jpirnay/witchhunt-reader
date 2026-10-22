@@ -306,9 +306,13 @@ UI face's misses, so the SD font would be its last source. Questions that decide
 
 **Where.** `EpubReaderActivity` (`releasePageGlyphArena`, `preRenderMinFreeHeap`, `pageDrawsUnscaled`), `SdCardFont` (`setInkOnlyPrewarm`, `releasePageArenaIfAtLeast`).
 
-## Smaller edge cases from the A2 reviews
+## Smaller edge cases from the reviews
 
 None of these is visible in the test books. Each is a one-line note of the case and the symbol.
+
+**Font files** (found while planning synthetic italic, 2026-10-22).
+- `ttf::probeFile` takes a file's style from `head.macStyle` alone, so `OpenDyslexic-Italic.otf` (macStyle 0) is a regular: in a card folder that also holds `OpenDyslexic-Regular.otf`, it serves the regular style, being first by name (`assignStyles`). `post.italicAngle` would tell it apart, as `Face::italic` does.
+- `probeFile` reads OS/2's weight class from a table of 6 bytes or more, while `parseFace` ignores an OS/2 table FreeType would (under 78 bytes, or short for its version): a lone heavy face with such a table is emboldened (spec 7.1's third row).
 
 **Line breaking.**
 - Combining dakuten U+3099/U+309A, U+302A-302F and ideographic variation selectors U+E0100-E01EF can be split from their base (`CjkLineBreak::boundaryAllowsBreak`). Rare: NFD kana, IVS texts.
