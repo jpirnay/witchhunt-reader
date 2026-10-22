@@ -63,13 +63,15 @@ struct ImageExtractionFixture : testing::Test {
 // The write buffer is reserved from the arena BEFORE the reader takes its block, because
 // BuildArena is LIFO. Get that order wrong and the release is rejected, leaking the block for
 // the rest of the pass — so assert the arena comes back empty, not just that the bytes are right.
+// The arena is EXTRACT_ARENA_BYTES, what callers gate on: if that were too small for the reader,
+// every extraction would silently take the slow fallback and the arena would do nothing.
 TEST_F(ImageExtractionFixture, ArenaPathMatchesHeapByteForByte) {
   const auto viaHeap = extract("heap.png", nullptr);
   ASSERT_EQ(viaHeap.size(), kEntryBytes);
   EXPECT_EQ(viaHeap[0], 0x89);  // PNG signature survived the round trip
   EXPECT_EQ(viaHeap[1], 'P');
 
-  BuildArena arena(Epub::EXTRACT_ARENA_BYTES + 1024);  // budget + alignment slack
+  BuildArena arena(Epub::EXTRACT_ARENA_BYTES);
   ASSERT_TRUE(arena.valid());
   const auto viaArena = extract("arena.png", &arena);
 
@@ -77,17 +79,6 @@ TEST_F(ImageExtractionFixture, ArenaPathMatchesHeapByteForByte) {
   EXPECT_GT(arena.highWater(), 32u * 1024u + Epub::EXTRACT_WRITE_BUFFER_BYTES)
       << "both the ring and the write buffer should have come from the arena";
   EXPECT_EQ(arena.used(), 0u) << "write buffer and reader block must both be released";
-  EXPECT_EQ(arena.failedAllocSize(), 0u);
-}
-
-// EXTRACT_ARENA_BYTES is what callers gate on; if it were too small for the reader, every
-// extraction would silently take the slow fallback and the fix would do nothing.
-TEST_F(ImageExtractionFixture, BudgetConstantActuallyCoversTheReader) {
-  BuildArena arena(Epub::EXTRACT_ARENA_BYTES);
-  ASSERT_TRUE(arena.valid());
-  const auto bytes = extract("budget.png", &arena);
-
-  ASSERT_EQ(bytes.size(), kEntryBytes);
   EXPECT_EQ(arena.failedAllocSize(), 0u) << "EXTRACT_ARENA_BYTES must fit readBuf + ring + alignment";
 }
 
