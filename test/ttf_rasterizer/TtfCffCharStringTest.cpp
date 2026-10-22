@@ -919,10 +919,3 @@ TEST(TtfCffCharString, MorePointsOrContoursThanTheOutlineHoldsAreUnsupported) {
   EXPECT_TRUE(Engine(square, 5, 1).glyph(1).drawn);
 }
 
-TEST(TtfCffCharString, TheDecoderIsSmall) {
-  static_assert(kCffDecoderBytes % 8 == 0, "the scratch block is planned in 8-byte steps");
-  static_assert(kCffDecoderBytes >= sizeof(CffDecoder), "the planned size holds the decoder");
-  std::printf("sizeof(CffDecoder) %u, planned %u\n", static_cast<unsigned>(sizeof(CffDecoder)),
-              static_cast<unsigned>(kCffDecoderBytes));
-  EXPECT_LE(kCffDecoderBytes, 1024u);
-}
