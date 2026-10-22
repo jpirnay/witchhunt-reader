@@ -54,6 +54,9 @@ struct Face {
   bool longLoca = false;
   /// A bold face: head.macStyle says bold, or OS/2's weight class is 600 or more. Never emboldened (spec 7.1).
   bool bold = false;
+  /// An italic face: head.macStyle says italic, OS/2's fsSelection says italic or oblique, or post's italicAngle is not
+  /// 0. Never slanted (spec 7.4).
+  bool italic = false;
   Outlines outlines = Outlines::TrueType;
   CffFace cff;  ///< Outlines::Cff: the CFF table (glyf and loca stay 0)
   /// Set by parseFace(), a number no other parse gives: with the Face's address, what a cache of what was read from the
@@ -69,6 +72,10 @@ FaceStatus parseFace(FontBytes& bytes, Face* face);
 uint16_t glyphIndex(FontBytes& bytes, const Face& face, uint32_t codepoint);
 
 /// 26.6 pixels per em for a point size at the converter's 150 dpi, as FreeType derives it: 14 pt -> 1867.
+/// The post table's header, which FreeType reads (tt_face_load_post) and which holds italicAngle; SD mode copies only
+/// it.
+constexpr uint32_t kPostHeaderBytes = 32;
+
 constexpr uint32_t ppemFromPoints(const uint32_t points) { return (points * 64 * 150 + 36) / 72; }
 
 /// The 16.16 factor from font units to 26.6 pixels at `ppem26_6` (FreeType's x_scale, equal to y_scale).

@@ -531,7 +531,7 @@ produces; a power cut leaves at worst bytes nothing references.
 
 - **A style block's mode.** Flash mode: the style's whole TTF file. SD mode (a family too large for flash mode, or
   beside others that fill the font area): a font of its own made of the file's tables but `glyf` (`cmap`, `head`,
-  `hhea`, `hmtx`, `loca`, `maxp`, `OS/2`, `GPOS`, `GSUB`, `kern`, whichever it has), each 4-byte aligned behind a
+  `hhea`, `hmtx`, `loca`, `maxp`, `OS/2`, `GPOS`, `GSUB`, `kern`, and the first 32 bytes of `post`, whichever it has), each 4-byte aligned behind a
   table directory whose `glyf` record points past the block (`SdOutlines::fontOffset`); the outlines are read from
   the file on the card there (`SdOutlines::fileOffset`, `length`). An SD-mode `StyleInfo` also holds the file's
   stamp (`FileSource::stamp`: FNV-1a over its path and modification time) and size; a file that no longer matches

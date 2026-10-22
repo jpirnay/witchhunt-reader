@@ -530,9 +530,9 @@ TEST(TtfSdBlock, IsTheFontButForItsOutlines) {
   MemoryFile file{readFont("Bookerly/Bookerly-Regular.ttf")};
   ttf::SdBlock block;
   ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
-  // Its ten tables the engine reads, 4-byte aligned behind an 11-record directory (fontTools agrees); glyf is
+  // Its eleven tables the engine reads, post's header among them, 4-byte aligned behind a 12-record directory; glyf is
   // 208,484 bytes at 58,840 in the file.
-  EXPECT_EQ(176356u, block.bytes());
+  EXPECT_EQ(176404u, block.bytes());
   const glyphstore::SdOutlines outlines = block.outlines();
   EXPECT_EQ(block.bytes(), outlines.fontOffset);
   EXPECT_EQ(58840u, outlines.fileOffset);
@@ -571,6 +571,35 @@ TEST(TtfSdBlock, IsTheFontButForItsOutlines) {
   EXPECT_EQ(nullptr, card.span(face.glyf, 1));
   EXPECT_FALSE(card.outOfRange());
   EXPECT_EQ(0u, cache.misses());  // nothing of the outlines read yet
+}
+
+TEST(TtfSdBlock, KeepsThePostHeaderSoTheFaceReadsItalicAsTheFileDoes) {
+  // Spec 7.4: a style block keeps post's first 32 bytes, italicAngle among them. A TrueType file's glyph names after
+  // them (NotoSans-Italic: 52,692 bytes of post) stay out.
+  for (const char* name :
+       {"NotoSans/NotoSans-Italic.ttf", "OpenDyslexic/OpenDyslexic-Italic.otf", "Bookerly/Bookerly-Regular.ttf"}) {
+    MemoryFile file{readFont(name)};
+    ttf::SdBlock block;
+    ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source())) << name;
+    const std::vector<uint8_t> image = blockImage(block);
+    ttf::SdPageCache cache;
+    const glyphstore::SdOutlines outlines = block.outlines();
+    const ttf::SdRange sd{file.source(), outlines.fontOffset, outlines.fileOffset, outlines.length, &cache};
+    FontBytes card(image.data(), static_cast<uint32_t>(image.size()), &sd);
+    FontBytes whole(file.bytes.data(), static_cast<uint32_t>(file.bytes.size()));
+    ttf::Face face;
+    ttf::Face wholeFace;
+    ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(card, &face)) << name;
+    ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(whole, &wholeFace)) << name;
+    EXPECT_EQ(wholeFace.italic, face.italic) << name;
+    EXPECT_EQ(std::string(name) != "Bookerly/Bookerly-Regular.ttf", face.italic) << name;
+    const size_t record = findRecord(image, "post");
+    ASSERT_NE(0u, record) << name;
+    const uint32_t length = static_cast<uint32_t>(image[record + 12] << 24 | image[record + 13] << 16 |
+                                                  image[record + 14] << 8 | image[record + 15]);
+    EXPECT_EQ(32u, length) << name;
+    EXPECT_EQ(block.bytes(), ttf::probeFile(file.source()).sdBytes) << name;
+  }
 }
 
 TEST(TtfSdBlock, AnyRangeReadsAsTheWholeBlockDoes) {

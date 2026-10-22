@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstring>
 
+#include "TtfFace.h"
+
 namespace ttf {
 namespace {
 
@@ -32,19 +34,19 @@ constexpr uint32_t kVersionCff = tag("OTTO");
 // `firstOptional`; the others it draws without, as parseFace() takes them absent when their record lies outside the
 // file.
 struct SdTables {
-  uint32_t tags[11];
+  uint32_t tags[12];
   uint8_t count;
   uint8_t outlines;
   uint8_t firstOptional;
 };
 constexpr SdTables kSdTrueType = {{tag("cmap"), tag("head"), tag("hhea"), tag("hmtx"), tag("loca"), tag("maxp"),
-                                   tag("glyf"), tag("OS/2"), tag("GPOS"), tag("GSUB"), tag("kern")},
-                                  11,
+                                   tag("glyf"), tag("OS/2"), tag("GPOS"), tag("GSUB"), tag("kern"), tag("post")},
+                                  12,
                                   6,
                                   7};
 constexpr SdTables kSdCff = {{tag("cmap"), tag("head"), tag("hhea"), tag("hmtx"), tag("maxp"), tag("CFF "), tag("OS/2"),
-                              tag("GPOS"), tag("GSUB"), tag("kern")},
-                             10,
+                              tag("GPOS"), tag("GSUB"), tag("kern"), tag("post")},
+                             11,
                              5,
                              6};
 
@@ -58,6 +60,11 @@ int sdTable(const SdTables& tables, const uint32_t tableTag, uint16_t& seen) {
     return first ? k : -1;
   }
   return -1;
+}
+// What SD mode copies of a table: all of it, but post's header alone (kPostHeaderBytes); the glyph names after it, tens
+// of KB in a TrueType font, are never read.
+uint32_t sdCopyBytes(const uint32_t tableTag, const uint32_t length) {
+  return tableTag == tag("post") ? std::min(length, kPostHeaderBytes) : length;
 }
 // An SD-mode block's bytes: the sfnt header, a record per copied table and one for glyf, then the tables.
 constexpr uint64_t sdBlockBytes(const uint32_t copied, const uint64_t tableBytes) {
@@ -203,7 +210,7 @@ FileProbe probeFile(const FileSource& file) {
     const int sd = sdTable(kSdTrueType, record.tag, scan.sdSeen);
     if (sd >= 0 && sd != kSdTrueType.outlines && inFile(scan.file, record.offset, record.length)) {
       ++scan.sdTables;
-      scan.sdTableBytes += glyphstore::align4(record.length);
+      scan.sdTableBytes += glyphstore::align4(sdCopyBytes(record.tag, record.length));
     }
     // parseFace() refuses a CFF2 record that is not empty and lies in the file (as FreeType reads it before any CFF
     // table); one it skips leaves the font to its CFF table.
@@ -319,7 +326,7 @@ bool SdBlock::addTable(const void* record) {
   // In file order, so the install reads the file forward.
   uint8_t at = count_++;
   for (; at > 0 && tables_[at - 1].fileOffset > table.offset; --at) tables_[at] = tables_[at - 1];
-  tables_[at] = {table.tag, table.checksum, table.offset, table.length, 0};
+  tables_[at] = {table.tag, table.checksum, table.offset, sdCopyBytes(table.tag, table.length), 0};
   return true;
 }
 
