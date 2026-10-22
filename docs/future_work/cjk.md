@@ -161,15 +161,18 @@ families; both hit a CJK font that a reader converts to `.cpfont` and installs.
 1. **The interval table is copied to the heap.**
    - **What:** `SdCardFont::loadFromMmap` copies the interval table out of the flash mapping. For Japanese that is 49 KB
      of heap, and it turned pre-rendering off.
-   - **Why:** the table is read into a heap array per style (`fullIntervals`) instead of being used where it sits.
+   - **Why:** `loadFromMmap` has no in-place path for the table: it copies it into a heap array per style
+     (`fullIntervals`) because the table may sit unaligned in the mapping.
    - **Where:** `SdCardFont::loadFromMmap`. `MAX_INTERVALS` is 4096; the Japanese set has 4,083.
-   - **Next step:** a fix that reads the table in place when it is 4-byte aligned is on branch
-     `spike/mmap-intervals-in-flash`. Review it and merge it.
+   - **Next step:** read the table in place: when it sits 4-byte aligned in the mapped partition, point
+     `fullIntervals` at it, and keep the heap copy for an unaligned one. Then check that a Japanese `.cpfont` keeps
+     pre-rendering on.
 2. **A `.cpfont` larger than the partition erases the whole partition.**
    - **What:** on the first book open after every restart, the partition is erased (4-5 s), then the append fails.
    - **Why:** the single-file path in `SdCardFontManager` calls `FlashFontPartition::beginWrite`, which erases, before
      `appendFile` checks that the file fits.
-   - **Where:** the single-file fallback of the caching function in `lib/EpdFont/SdCardFontManager.cpp`;
+   - **Where:** the function that caches a family into flash, `lib/EpdFont/SdCardFontManager.cpp`: its single-file
+     fallback after the whole-family check;
      `FlashFontPartition::beginWrite` and `appendFile` (`lib/hal/FlashFontPartition.cpp`).
    - **Next step:** compare the file with `FlashFontPartition::fontUsableSize()` before `beginWrite`, and remember the
      refusal so the next open does not try again.
@@ -266,7 +269,9 @@ the boxes the faces made it worse: the Home card showed a lone 雪, the one char
 **Next step.** Chain the installed CJK family (`NotoSans<XX>`/`NotoSerif<XX>`, `.otf`, drawn through `TtfFont`; not an
 SD bitmap font) behind the CJK UI faces, as upstream does with its SD font (crosspoint-reader
 #2521, Tsz Ho Sze, and follow-ups #3026, #3071, #3484, #3646): `FallbackFaceProvider` already serves a
-UI face's misses, so the installed family would be its last source. Questions that decide the design:
+UI face's misses, so the installed family would be its last source. The design is decided in
+`docs/superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md`. Upstream's SD-font approach raised these
+questions, which it answers:
 - An SD font is 2-bit and the UI faces are 1-bit, and the renderer draws at the depth of the font it
   was asked for: the 2-bit glyph has to be thresholded on the way, or drawn as its ink mask (#500's
   1-bit pre-render does exactly that).
