@@ -233,9 +233,17 @@ TEST_F(LargeImageFixture, ResolvesSizeFromTheArchiveBeforeExtraction) {
   EXPECT_FALSE(block.isLargeImage()) << kEntryBytes << " bytes is under the threshold";
   EXPECT_FALSE(fs::exists(notExtracted)) << "asking the size must not extract anything";
 
-  // The corpus has no entry above the threshold, so the archive path's TRUE case is not covered
-  // here — a failed lookup and a small entry both answer false, and there is no way to tell them
-  // apart from outside. What is pinned is that the lookup neither extracts nor throws.
+  // A small entry and a failed lookup both answer false; only an entry over the threshold tells
+  // that the archive was asked. The corpus has none, so the archive here is written for it.
+  const std::string bigBook = (work / "big.epub").string();
+  test_zip::StoredZipWriter zip;
+  zip.add("mimetype", "application/epub+zip");
+  zip.add("OEBPS/images/big.png", std::string(LARGE_IMAGE_SOURCE_BYTES + 1, 'x'));
+  zip.write(bigBook);
+  const std::string bigNotExtracted = (work / "big_never_written.png").string();
+  ImageBlock big(bigNotExtracted, 100, 100, "", bigBook, "OEBPS/images/big.png");
+  EXPECT_TRUE(big.isLargeImage()) << "the entry's size was not read from the archive";
+  EXPECT_FALSE(fs::exists(bigNotExtracted)) << "asking the size must not extract anything";
 }
 
 TEST_F(LargeImageFixture, UnknownSizeRendersRatherThanHides) {
