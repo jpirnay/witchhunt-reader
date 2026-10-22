@@ -8,6 +8,7 @@
 #include <cstdint>
 
 #include "MappedInputManager.h"
+#include "components/TapZones.h"
 
 namespace ReaderUtils {
 
@@ -160,13 +161,13 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
   // Outer thirds only: the centre column carries the reader-menu tap target
   // (isTouchMenuTap below), so it must not double as a page turn. The vertical
   // bounds keep the menu zone from swallowing the whole centre column.
-  const int zoneWidth = width / 3;
   if (y < 0 || y >= height) return result;
   const bool inverted = SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
-  if (x < zoneWidth) {
+  const TapZones::Zone zone = TapZones::zoneFor(x, y, width, height);
+  if (zone == TapZones::Zone::Left) {
     result.prev = !inverted;
     result.next = inverted;
-  } else if (x >= width - zoneWidth) {
+  } else if (zone == TapZones::Zone::Right) {
     result.prev = inverted;
     result.next = !inverted;
   }
@@ -183,9 +184,7 @@ inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager
   if (!input.wasScreenTapped(x, y)) return false;
   const int width = renderer.getScreenWidth();
   const int height = renderer.getScreenHeight();
-  const int zoneWidth = width / 3;
-  const int zoneHeight = height / 3;
-  return x >= zoneWidth && x < width - zoneWidth && y >= zoneHeight && y < height - zoneHeight;
+  return TapZones::zoneFor(x, y, width, height) == TapZones::Zone::Centre;
 }
 
 // Reader menu opens on the menu edge-swipe or a centre-third tap.
