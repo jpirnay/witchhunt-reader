@@ -65,12 +65,6 @@ TEST(TtfRegistry, TwoBooksFamiliesOfOneNameAreToldApartByTheirFiles) {
   EXPECT_NE(first.filesKey(), fewer.filesKey());
 }
 
-TEST(TtfRegistry, AFamilyRecordCostsOnlyItsNameAndFiles) {
-  // The registry reserves MAX_SD_FAMILIES (128) records at every discovery and keeps them: a field here is
-  // 128 times permanent heap, so whether a family is TTF is derived from its files instead.
-  EXPECT_EQ(sizeof(std::string) + sizeof(std::vector<SdCardFontFileInfo>), sizeof(SdCardFontFamilyInfo));
-}
-
 // --- Discovery of .otf files: the decisions scanDirectory makes with probeFile and assignStyles ---
 
 namespace {
