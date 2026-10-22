@@ -164,14 +164,14 @@ TEST(HttpRangeHeap, RoundsLikeTheC3Heap) {
 TEST(HttpRangeHeap, ChunkSizeFollowsTheLargestFreeBlock) {
   // X3: 16,372 B after a handshake, 12,276 B before the manifest, 4.6-6.1 KB once a long
   // download had fragmented the heap.
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(16372), 6144u);
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(12276), 6144u);
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(9000), 4096u);
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(7680), 3072u);
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(6656), 2048u);
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(6132), 1024u);
+  EXPECT_EQ(hr::ChunkSizer().next(16372), 6144u);
+  EXPECT_EQ(hr::ChunkSizer().next(12276), 6144u);
+  EXPECT_EQ(hr::ChunkSizer().next(9000), 4096u);
+  EXPECT_EQ(hr::ChunkSizer().next(7680), 3072u);
+  EXPECT_EQ(hr::ChunkSizer().next(6656), 2048u);
+  EXPECT_EQ(hr::ChunkSizer().next(6132), 1024u);
   // Nothing fits: the smallest chunk is still the best chance.
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(4596), hr::MIN_CHUNK_BYTES);
+  EXPECT_EQ(hr::ChunkSizer().next(4596), hr::MIN_CHUNK_BYTES);
 }
 
 TEST(HttpRangeHeap, ASixKilobyteChunkWithItsHeadersDoesNotFitTheLateDownloadBlock) {
@@ -183,9 +183,9 @@ TEST(HttpRangeHeap, ASixKilobyteChunkWithItsHeadersDoesNotFitTheLateDownloadBloc
 TEST(HttpRangeHeap, EachSizeStartsExactlyAtItsBudget) {
   for (size_t i = 0; i < hr::CHUNK_LADDER_SIZE; ++i) {
     const size_t chunk = hr::CHUNK_LADDER[i];
-    EXPECT_EQ(hr::chunkSizeForLargestBlock(hr::chunkBudget(chunk)), chunk) << chunk;
+    EXPECT_EQ(hr::ChunkSizer().next(hr::chunkBudget(chunk)), chunk) << chunk;
     if (i + 1 < hr::CHUNK_LADDER_SIZE) {
-      EXPECT_EQ(hr::chunkSizeForLargestBlock(hr::chunkBudget(chunk) - 1), hr::CHUNK_LADDER[i + 1]) << chunk;
+      EXPECT_EQ(hr::ChunkSizer().next(hr::chunkBudget(chunk) - 1), hr::CHUNK_LADDER[i + 1]) << chunk;
     }
   }
 }
