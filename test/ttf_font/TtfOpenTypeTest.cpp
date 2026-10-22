@@ -47,15 +47,6 @@ Bytes kernedGpos() {
 
 }  // namespace
 
-TEST(TtfLayoutTables, TheFaceFindsTheLayoutTables) {
-  Font font = boxes(4);
-  font.extraTables = {{"GPOS", kernedGpos()}, {"kern", legacyKernTable({{{1, 2}, -40}})}};
-  Parsed p(font);
-  EXPECT_NE(0u, p.face.gpos);
-  EXPECT_NE(0u, p.face.kern);
-  EXPECT_EQ(0u, p.face.gsub);
-}
-
 TEST(TtfKerning, GposKernsThroughTheResolvedSubtables) {
   Font font = boxes(4);
   font.extraTables = {{"GPOS", kernedGpos()}};

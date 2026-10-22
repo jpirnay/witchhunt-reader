@@ -19,7 +19,7 @@ namespace {
 
 int probe(const Bytes& bytes) {
   MemoryFile file{bytes};
-  return ttf::probeStyle(file.source());
+  return ttf::probeFile(file.source()).style;
 }
 
 Bytes builtFont(const uint16_t macStyle = 0) {
@@ -161,12 +161,6 @@ TEST(TtfFamily, ATrueTypeFontWithoutGlyfIsRefusedWhateverElseItHas) {
   EXPECT_EQ(-1, probe(font));
 }
 
-TEST(TtfFamily, ACff2OnlyFontIsNotAFamily) {
-  Bytes font = readFont("OpenDyslexic/OpenDyslexic-Regular.otf");
-  std::memcpy(font.data() + findRecord(font, "CFF "), "CFF2", 4);
-  EXPECT_EQ(-1, probe(font));
-}
-
 TEST(TtfFamily, ACff2RecordIsReadAsTheFaceReadsIt) {
   // Any table slot, renamed CFF2: a real one makes the face Unsupported (so the probe says -1), an empty one or one
   // outside the file is skipped and the CFF table draws.
@@ -220,12 +214,12 @@ TEST(TtfFamily, AHeadWithoutItsMagicIsRefused) {
 TEST(TtfFamily, AReadErrorIsRefused) {
   MemoryFile file{readFont("Bookerly/Bookerly-Bold.ttf")};
   file.failReads = true;
-  EXPECT_EQ(-1, ttf::probeStyle(file.source()));
+  EXPECT_EQ(-1, ttf::probeFile(file.source()).style);
 }
 
 TEST(TtfFamily, TheProbeReadsOnlyTheDirectoryAndHead) {
   MemoryFile file{readFont("NotoSans/NotoSans-Regular.ttf")};
-  ASSERT_EQ(0, ttf::probeStyle(file.source()));
+  ASSERT_EQ(0, ttf::probeFile(file.source()).style);
   EXPECT_LE(file.reads, 6u);  // the header, the directory 8 records at a time, head: cheap at discovery
 }
 
@@ -246,10 +240,10 @@ TEST(TtfFamily, AFileSourceReadsThroughSeekAndRead) {
     }
   };
   SeekReadFile file{readFont("Bookerly/Bookerly-Italic.ttf")};
-  EXPECT_EQ(2, ttf::probeStyle(ttf::fileSource(file, static_cast<uint32_t>(file.bytes.size()))));
+  EXPECT_EQ(2, ttf::probeFile(ttf::fileSource(file, static_cast<uint32_t>(file.bytes.size()))).style);
   const auto size = static_cast<uint32_t>(file.bytes.size());
   file.bytes.resize(100);  // the file shrank under the source: short reads fail
-  EXPECT_EQ(-1, ttf::probeStyle(ttf::fileSource(file, size)));
+  EXPECT_EQ(-1, ttf::probeFile(ttf::fileSource(file, size)).style);
 }
 
 TEST(TtfFamily, TheIdentityChangesWithAnyFileDetail) {

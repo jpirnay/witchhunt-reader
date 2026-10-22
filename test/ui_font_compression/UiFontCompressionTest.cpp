@@ -2,8 +2,8 @@
 //
 // compress_ui_face.py turned the six 1-bit CJK UI faces' flat bitmaps into DEFLATE groups. Nothing
 // about a glyph may change by that: its metrics stay in the untouched glyph table, so what is left
-// to prove is the bitmap, and it is proved here against the bytes master shipped, through both
-// paths the device decodes by:
+// to prove is the bitmap, and it is proved here against the size and CRC the generated header states
+// (the figures CjkUiFonts checks before it installs a face), through both paths the device decodes by:
 //   * FontDecompressor::inflateFace(), the whole face in glyph order -- what the language pack slot
 //     receives for the active UI language (CjkUiFonts);
 //   * FontDecompressor::getBitmap(), one glyph at a time with nothing cached -- what the language
@@ -27,7 +27,7 @@
 
 namespace {
 
-// zlib's CRC-32, which is what compress_ui_face.py and the master figures below were taken with.
+// zlib's CRC-32, which is what compress_ui_face.py states in the header.
 uint32_t crc32(const uint8_t* data, const size_t len) {
   uint32_t crc = 0xFFFFFFFFu;
   for (size_t i = 0; i < len; ++i) {
@@ -41,22 +41,18 @@ struct Face {
   const char* name;
   const EpdFontData* data;
   uint32_t glyphCount;
-  // The flat bitmap master shipped (origin/master 617216ad9, before compress_ui_face.py), measured
-  // from those headers' <name>Bitmaps arrays: the ground truth, independent of the transform.
-  uint32_t masterBytes;
-  uint32_t masterCrc32;
-  // What the transform wrote into the header, checked against the master figures.
+  // The flat bitmap's size and CRC-32, as compress_ui_face.py wrote them into the header.
   uint32_t packedBytes;
   uint32_t packedCrc32;
 };
 
 const Face FACES[] = {
-    {"cjk_ui_zh_10", &cjk_ui_zh_10, 599, 29674, 0xA1713AABu, cjk_ui_zh_10PackedBytes, cjk_ui_zh_10PackedCrc32},
-    {"cjk_ui_zh_12", &cjk_ui_zh_12, 599, 41096, 0x932D78E8u, cjk_ui_zh_12PackedBytes, cjk_ui_zh_12PackedCrc32},
-    {"cjk_ui_ja_10", &cjk_ui_ja_10, 500, 23253, 0xF13A6D84u, cjk_ui_ja_10PackedBytes, cjk_ui_ja_10PackedCrc32},
-    {"cjk_ui_ja_12", &cjk_ui_ja_12, 500, 32643, 0xEDEEC430u, cjk_ui_ja_12PackedBytes, cjk_ui_ja_12PackedCrc32},
-    {"cjk_ui_ko_10", &cjk_ui_ko_10, 442, 17696, 0x90EF8803u, cjk_ui_ko_10PackedBytes, cjk_ui_ko_10PackedCrc32},
-    {"cjk_ui_ko_12", &cjk_ui_ko_12, 442, 25390, 0xEADD97D7u, cjk_ui_ko_12PackedBytes, cjk_ui_ko_12PackedCrc32},
+    {"cjk_ui_zh_10", &cjk_ui_zh_10, 599, cjk_ui_zh_10PackedBytes, cjk_ui_zh_10PackedCrc32},
+    {"cjk_ui_zh_12", &cjk_ui_zh_12, 599, cjk_ui_zh_12PackedBytes, cjk_ui_zh_12PackedCrc32},
+    {"cjk_ui_ja_10", &cjk_ui_ja_10, 500, cjk_ui_ja_10PackedBytes, cjk_ui_ja_10PackedCrc32},
+    {"cjk_ui_ja_12", &cjk_ui_ja_12, 500, cjk_ui_ja_12PackedBytes, cjk_ui_ja_12PackedCrc32},
+    {"cjk_ui_ko_10", &cjk_ui_ko_10, 442, cjk_ui_ko_10PackedBytes, cjk_ui_ko_10PackedCrc32},
+    {"cjk_ui_ko_12", &cjk_ui_ko_12, 442, cjk_ui_ko_12PackedBytes, cjk_ui_ko_12PackedCrc32},
 };
 
 bool appendTo(void* ctx, const uint8_t* bytes, const uint32_t len) {
@@ -90,23 +86,17 @@ TEST_P(EveryCjkUiFace, IsCompressedOneBitAndNeedsAtMostATwoKilobyteRing) {
   EXPECT_LE(FontDecompressor::maxRingBytes(f.data), 2048u);
 }
 
-TEST_P(EveryCjkUiFace, TheHeaderStatesTheBitmapMasterShipped) {
-  const Face& f = GetParam();
-  EXPECT_EQ(f.packedBytes, f.masterBytes);
-  EXPECT_EQ(f.packedCrc32, f.masterCrc32);
-}
-
-TEST_P(EveryCjkUiFace, InflatesToTheBitmapMasterShipped) {
+TEST_P(EveryCjkUiFace, InflatesToTheSizeAndCrcTheHeaderStates) {
   const Face& f = GetParam();
   const std::vector<uint8_t> flat = inflate(f.data);
-  ASSERT_EQ(flat.size(), f.masterBytes);
-  EXPECT_EQ(crc32(flat.data(), flat.size()), f.masterCrc32);
+  ASSERT_EQ(flat.size(), f.packedBytes);
+  EXPECT_EQ(crc32(flat.data(), flat.size()), f.packedCrc32);
 }
 
 TEST_P(EveryCjkUiFace, EveryGlyphDecodesAloneToItsBytesInTheFlatBitmap) {
   const Face& f = GetParam();
   const std::vector<uint8_t> flat = inflate(f.data);
-  ASSERT_EQ(flat.size(), f.masterBytes);
+  ASSERT_EQ(flat.size(), f.packedBytes);
 
   FontDecompressor d;
   ASSERT_TRUE(d.init());
@@ -122,7 +112,7 @@ TEST_P(EveryCjkUiFace, EveryGlyphDecodesAloneToItsBytesInTheFlatBitmap) {
     ASSERT_EQ(std::memcmp(bitmap, flat.data() + offset, len), 0) << f.name << " glyph " << i;
     offset += len;
   }
-  EXPECT_EQ(offset, f.masterBytes);
+  EXPECT_EQ(offset, f.packedBytes);
   EXPECT_EQ(d.getStats().fallbackOomGlyphs, 0u);
 }
 

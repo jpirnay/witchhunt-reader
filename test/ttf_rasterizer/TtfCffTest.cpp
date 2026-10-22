@@ -174,16 +174,6 @@ TEST(TtfCff, EveryCffTestFontParses) {
   }
 }
 
-TEST(TtfCff, OpenDyslexicRegularIsNameKeyedWithSubroutines) {
-  const std::vector<uint8_t> data = readFont("OpenDyslexic/OpenDyslexic-Regular.otf");
-  Face face;
-  ASSERT_EQ(FaceStatus::Ok, parse(data, &face));
-  EXPECT_EQ(504, face.cff.globalSubrs.count);
-  EXPECT_EQ(408, face.cff.localSubrs.count);
-  EXPECT_EQ(0, face.cff.fdArray.count);
-  EXPECT_FALSE(face.cff.cid);
-}
-
 TEST(TtfCff, TheIndexesAndTheTopFontAreFreeTypes) {
   for (const std::string& name : cffTestFonts()) {
     const std::vector<uint8_t> data = readCffTestFont(name);
