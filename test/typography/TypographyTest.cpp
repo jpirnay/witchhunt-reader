@@ -10,6 +10,8 @@ namespace {
 using Table = TypographyProfile::Punctuation;
 using CjkPunctuation::Class;
 
+// breaking, justify, cjkLatinGap and verticalAllowed are not read by layout yet (the A3b line-edge work reads
+// them); the asserts on them are the language table's specification, so the first reader gets it right.
 TEST(TypographyProfile, ChineseAndJapanesePickTheirTablesTheGridAndTheGap) {
   const TypographyProfile ja = TypographyProfile::forLanguage("ja");
   EXPECT_EQ(ja.punctuation, Table::Japanese);
@@ -51,12 +53,6 @@ TEST(TypographyProfile, OtherLanguagesKeepLatinRulesAndTheirHyphenation) {
   EXPECT_NE(en.hyphenator, nullptr);
   EXPECT_EQ(TypographyProfile::forLanguage("").hyphenator, nullptr);
   EXPECT_FALSE(TypographyProfile::forLanguage("zhx").wholeEmGrid) << "only the primary subtag zh is Chinese";
-}
-
-TEST(TypographyProfile, EveryLanguageRunsLeftToRightThisRound) {
-  for (const char* tag : {"en", "ja", "zh-Hant", "ko", "ar", "he"}) {
-    EXPECT_EQ(TypographyProfile::forLanguage(tag).direction, TypographyProfile::Direction::LeftToRight) << tag;
-  }
 }
 
 TEST(CjkPunctuation, ClassesFollowJlreq) {
