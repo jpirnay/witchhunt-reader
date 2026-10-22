@@ -129,7 +129,9 @@ bool fitsStore(const uint32_t* fileBytes, const uint32_t* sdBytes, uint8_t count
 /// thresholds): the identity changes with it, so every installed store is rebuilt.
 /// 2: kerning and GSUB ligatures (2c-3): U+FB00-FB04 now draw the glyphs GSUB names, so stores holding the cmap's
 /// glyphs or a no-glyph marker for them must go.
-constexpr uint8_t kRenderVersion = 2;
+/// 3: synthetic italic (spec 7.4): a family with neither a bold nor an italic file stored its bold italic emboldened
+/// and upright under the bold-italic bits, which now draw slanted.
+constexpr uint8_t kRenderVersion = 3;
 
 /// One style's file as the card lists it.
 struct FileStamp {

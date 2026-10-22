@@ -36,6 +36,29 @@ std::array<uint8_t, glyphstore::kIdentityBytes> identityOf(const ttf::FileStamp 
   return out;
 }
 
+// The identity as docs/file-formats.md describes it, with the render version a parameter.
+std::array<uint8_t, glyphstore::kIdentityBytes> identityAt(const ttf::FileStamp (&styles)[4], const uint8_t version) {
+  std::array<uint8_t, glyphstore::kIdentityBytes> out{};
+  for (uint32_t lane = 0; lane < glyphstore::kIdentityBytes / 4; ++lane) {
+    uint32_t hash = 2166136261u ^ (lane * 0x9E3779B9u);
+    for (uint8_t style = 0; style < 4; ++style) {
+      const ttf::FileStamp& file = styles[style];
+      const uint8_t marker = file.name ? style : static_cast<uint8_t>(0x80 | style);
+      hash = glyphstore::fnv1a(&marker, 1, hash);
+      if (!file.name) continue;
+      hash = glyphstore::fnv1a(file.name, std::strlen(file.name) + 1, hash);
+      const uint8_t fields[8] = {static_cast<uint8_t>(file.size),       static_cast<uint8_t>(file.size >> 8),
+                                 static_cast<uint8_t>(file.size >> 16), static_cast<uint8_t>(file.size >> 24),
+                                 static_cast<uint8_t>(file.date),       static_cast<uint8_t>(file.date >> 8),
+                                 static_cast<uint8_t>(file.time),       static_cast<uint8_t>(file.time >> 8)};
+      hash = glyphstore::fnv1a(fields, sizeof fields, hash);
+    }
+    hash = glyphstore::fnv1a(&version, 1, hash);
+    for (int byte = 0; byte < 4; ++byte) out[4 * lane + byte] = static_cast<uint8_t>(hash >> (8 * byte));
+  }
+  return out;
+}
+
 }  // namespace
 
 TEST(TtfFamily, TheBundledBookerlyFilesDeclareTheirStyles) {
@@ -265,6 +288,14 @@ TEST(TtfFamily, TheIdentityChangesWithAnyFileDetail) {
   for (const auto* other : {&renamed, &resized, &redated, &retimed, &moved, &fewer}) {
     EXPECT_NE(identity, identityOf(*other));
   }
+}
+
+TEST(TtfFamily, TheIdentityChangesWithTheRenderVersion) {
+  // Spec 7.4: a store #548 wrote holds a regular-only family's bold italic upright; at version 3 it is installed again.
+  const ttf::FileStamp styles[4] = {{"Lit-Regular.ttf", 450048, 0x5A21, 0x6400}};
+  EXPECT_EQ(3, ttf::kRenderVersion);
+  EXPECT_EQ(identityAt(styles, 3), identityOf(styles));
+  EXPECT_NE(identityAt(styles, 2), identityOf(styles));
 }
 
 TEST(TtfFamily, TheIdentityIsSixteenIndependentBytes) {

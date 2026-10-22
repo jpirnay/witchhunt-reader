@@ -539,7 +539,7 @@ produces; a power cut leaves at worst bytes nothing references.
 - **A face** is a family at one size: `face = family << 24 | ppem` (26.6 pixels per em; the family is its index in
   the set). An entry is in use once `claimed` reads 0. A glyph key is `codepoint | style << 21 | faceIndex << 23`,
   bits 28-31 zero, so a key never reads as erased. The 32 entries are every family's; taking the last one, or asking
-  for a 33rd, makes the wipe pending. A synthetic bold style (spec 7.1), drawn from another style's file, keys its
+  for a 33rd, makes the wipe pending. A synthetic style (spec 7.1, 7.4), drawn emboldened or slanted from another style's file, keys its
   glyphs under its own style bits and the face index of its size, like a style with a file; its kerning pairs are
   those of the style it is drawn from.
 - **A slot's value** is 0 (the font has no glyph for that key), or the record's `dataOffset` (its log offset + 20) in
@@ -580,7 +580,7 @@ produces; a power cut leaves at worst bytes nothing references.
     segment gets an epoch that far past the base until the index is rebuilt, in idle time if need be.
 - **The identity** is FNV-1a over the families' identities in the set's order (`ttf::setIdentity`); a family's is
   FNV-1a over each style file's name, size and modification time and the engine's render version
-  (`ttf::familyIdentity`). A store of another identity, or one whose header fails its check, is installed again.
+  (`ttf::kRenderVersion`, 3; `ttf::familyIdentity`). A store of another identity, or one whose header fails its check, is installed again.
 
 Version 1 held one family: four style blocks, and a size table of bare ppems with pairs keyed by style alone.
 Version 2 had the mode in the `Geometry`, the store's, and a table map in each `StyleInfo` (1,240 B headers).

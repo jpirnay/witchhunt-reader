@@ -453,6 +453,10 @@ Then:
 - It does not cover `.cpfont` families, built-in fonts or the UI faces.
 - There is no setting (my call).
 
+**Known limit.** A file drawn italic whose flags all say upright (`macStyle` bit 1 clear, `fsSelection` bits 0 and 9
+clear, `post.italicAngle` 0) is slanted again, as a lone book face declared italic in CSS can be: `pickFaces` moves a
+lone face to the regular slot and its CSS style is not kept.
+
 **CJK (proposed with the step, 2026-10-22).** Every glyph is slanted, CJK included, as KOReader does. CJK books
 rarely ask for italic, and a Latin word set in italic inside one should look italic.
 
