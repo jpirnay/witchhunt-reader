@@ -44,15 +44,37 @@ questions at once:
   build expects pass. The download therefore uses unverified TLS: the hash authenticates the bytes
   more strictly than a certificate chain, and skipping the chain verify keeps the handshake cheap.
 - **Whether it matches the firmware.** There is no version-compatibility rule to get wrong.
-- **Whether a firmware update needs new pages.** The installed stamp (`bundle.id`, the hash) no
-  longer matches. An update that did not change the pages keeps them, because the pages carry
-  nothing build-specific: `WelcomePage.html` used to have `%%VERSION%%` baked in, and now asks
-  `/api/status/fast`. Otherwise every release, and every branch switch in a dev build, would have
-  needed a new bundle.
+- **Whether a firmware update needs new pages.** The installed stamp (`bundle.id`) holds
+  `web_bundle::PAGES_ID`, not the bundle's hash. The two answer different questions: `DIGEST` (the
+  hash of the bytes) says whether a file is the bundle this build would install, and `PAGES_ID`
+  says whether the installed pages are the pages this build serves. `PAGES_ID` is the SHA-256 of
+  the page sources (includes resolved, line endings normalised, build placeholders unsubstituted),
+  the other bundled files, the product name and `WEB_API_VERSION` (`scripts/build_html.py`). It
+  does not cover the compressed bytes, so a build with another terser, zopfli or host line endings,
+  and any firmware version or branch, accepts the installed pages. A page edit changes it
+  automatically; `WEB_API_VERSION` is bumped by hand when a page would misbehave against the new
+  server although no page changed (an endpoint a page calls was renamed, removed or changed its
+  reply incompatibly). Forgetting the bump is the one way this goes wrong, which is why the
+  sources are in the identity too.
+- **What the pages know of the build.** Nothing. Decision: a bundled page keeps `%%VERSION%%` (and
+  any other build-specific value) as a placeholder, and fills it in at run time from the server
+  (`/api/status`, as `WelcomePage.html` does), starting from neutral text and setting it on
+  `DOMContentLoaded`. `build_html.py` substitutes the version only into the setup page, which is
+  in flash. Otherwise every version string would change the bundle for every firmware build.
+
+A card stamped by a firmware from before `PAGES_ID` holds a bundle hash, which no `PAGES_ID`
+equals: it reads as stale and is reinstalled once.
+
+Installed files may therefore differ in size from this build's `ENTRIES[i].size` (same pages,
+different compression); `serve()` uses the file's own size, and `ENTRIES` sizes are used only to
+split a bundle being installed, which has been hash-verified.
 
 The bundle has no header or manifest: the firmware already knows every file's size, so splitting
-it is a loop over `web_bundle::ENTRIES`. The build is byte-reproducible (zopfli and terser are
-deterministic, the order is sorted), which is what lets one release asset serve every board.
+it is a loop over `web_bundle::ENTRIES`. A given source tree builds byte-identical bundles on a
+given toolchain (zopfli and terser are deterministic, the order is sorted, text files' line endings
+are normalised), which is what lets one release asset serve every board. The release asset is
+`web-<DIGEST>.bin` under each release's tag; two releases with the same bytes simply each carry an
+asset of the same name, and the lookup is by tag and name, so it is unaffected.
 
 ### Installing
 

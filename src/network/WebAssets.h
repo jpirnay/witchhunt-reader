@@ -20,15 +20,17 @@ class WebServer;
 // The hash is why the source does not matter: a download from the GitHub
 // release, an upload through the setup page and a file copied onto the card are
 // accepted on the same terms, because only the exact bytes this build expects
-// pass. It is also how a firmware update that changed the pages is noticed: the
-// installed stamp no longer matches. One that did not change them keeps them,
-// since the pages carry nothing build-specific (WelcomePage asks for the version).
+// pass. A firmware update that changed the pages is noticed by the installed
+// stamp, web_bundle::PAGES_ID: the identity of the page sources and of
+// WEB_API_VERSION (scripts/build_html.py), not of the compressed bytes. One that
+// changed neither keeps the pages, whatever its version or toolchain, since the
+// pages carry nothing build-specific (they ask the server for the version).
 namespace WebAssets {
 
 enum class State : uint8_t {
-  Installed,  // the stamp matches this build's bundle and its files are present
+  Installed,  // the stamp matches this build's pages and its files are present
   Missing,    // nothing installed, or an installed file is gone
-  Stale,      // a bundle from another build is installed
+  Stale,      // other pages (or another WEB_API_VERSION) are installed
 };
 
 enum class InstallError : uint8_t {
