@@ -5,7 +5,7 @@ Status: open items as of 2026-10-21.
 Line breaking for Chinese, Japanese and Korean is done, and so are punctuation widths, flush justification and the
 whole-em grid (A3a). The font engine is done too: TrueType and CFF (`.otf`) outlines, families too large for flash
 read from the card, and a glyph store that makes room. What remains for full CJK support:
-- **Fonts:** synthetic bold, then the CJK families as `.otf` downloads in the font manager.
+- **Fonts:** the CJK families as `.otf` downloads in the font manager.
 - **UI text:** the UI itself is translated; book titles, TOC entries and status-bar chapter names in CJK
   still need the reader's CJK font as a fallback.
 - **Typography:** push-in and the CJK–Latin gap (A3b), and ruby with emphasis dots (B).
@@ -23,7 +23,7 @@ behind CFF.
 | 1 | Serial test API for the font work (`CMD:TTF`, `CMD:FS`) | shipped (#531) |
 | 2 | The glyph store makes room (spec section 8) | shipped (#532) |
 | 3 | CFF outlines (spec section 9), and their speed-ups | shipped (#542, #544) |
-| 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | next: plan `docs/superpowers/plans/2026-10-20-synthetic-bold.md` |
+| 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#PR) |
 | 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | plan to write after 4 |
 | 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | needs a design |
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan to write |

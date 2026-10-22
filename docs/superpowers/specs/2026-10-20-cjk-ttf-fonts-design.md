@@ -345,6 +345,9 @@ A style the family has a file for is never synthesized.
 
 **It does not cover** `.cpfont` families, built-in fonts or the UI faces.
 
+**Known limit.** A book face declared bold in CSS whose file says regular (`macStyle` 0, weight under 600) is
+emboldened, unlike in a browser: `pickFaces` moves a lone face to the regular slot and its CSS weight is not kept.
+
 There is no setting to turn it off (my call).
 
 ### 7.2 How
@@ -368,6 +371,7 @@ pins two thirds and no filled counter on Noto Sans and Serif JP samples. It is o
 - The ink box grows across; the left side bearing, the baseline and the line height stay.
 - The advance grows by the strength, rounded as FreeType rounds it.
 - A synthetic family's scratch plan leaves room for the wider box.
+- A glyph whose emboldened bitmap exceeds the output cap is drawn unemboldened.
 
 **Storage.**
 - **Glyph store:** synthetic bold glyphs are stored under the bold style's bits of the glyph key, with the face

@@ -66,7 +66,7 @@ directory whole.
 | `fonts.bin`, `fonts/<style>.ttf`, `fonts/accent<n>/<style>.ttf` | EPUB | `BookFonts::kVersion` (6) | The book's embedded body and accent fonts (Publisher Fonts): [below](#fontsbin) |
 | `kosync_push.bin` | EPUB | `LastPush::kVersion` (1) | Our last KOReader push: [below](#kosync_pushbin) |
 | `koreader_docid.txt`, `koreader_syncmethod.txt` | EPUB | none | The KOReader document id, after the file size and fingerprint it was computed for, and the match method learned for the book |
-| `index.bin` | TXT, Markdown | `CACHE_VERSION`: TXT 2 (magic `TXTI`), Markdown 4 (`MKDI`) | Page offsets under the current layout. `SleepActivity` checks the TXT magic and version too |
+| `index.bin` | TXT, Markdown | `CACHE_VERSION`: TXT 2 (magic `TXTI`), Markdown 11 (`MKDI`) | Page offsets under the current layout. `SleepActivity` checks the TXT magic and version too |
 | `page_<n>.bw1`, `page_<n>.gr2` | XTC | none | Up to four pages' planes, transposed for drawing (`Xtc::kPageCacheMax`) |
 
 Builds also write scratch files that they remove when done: `spine.bin.tmp`, `toc.bin.tmp` and
