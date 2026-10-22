@@ -23,7 +23,7 @@ namespace {
 constexpr size_t CHUNK_SIZE = 8 * 1024;
 constexpr size_t MAX_LINE_LENGTH = 64 * 1024;
 constexpr uint32_t CACHE_MAGIC = 0x4D4B4449;  // "MKDI"
-constexpr uint8_t CACHE_VERSION = 10;         // Bumped: tabs in code blocks expand to spaces
+constexpr uint8_t CACHE_VERSION = 11;         // Bumped: synthetic bold is wider than the regular
 
 static std::string flattenHeadingText(const MdParser::ParsedLine& parsed) {
   std::string result;
