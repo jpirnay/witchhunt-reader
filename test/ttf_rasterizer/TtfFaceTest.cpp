@@ -317,6 +317,30 @@ TEST(TtfFace, Os2MetricsAreUsedWhereFreeTypeUsesThem) {
   EXPECT_EQ(1500, face.height);
 }
 
+TEST(TtfFace, BoldIsMacStyleOrAWeightOf600InEitherOutlineFormat) {
+  // Spec 7.1: read alike from a TrueType face and a CFF one.
+  for (const bool cff : {false, true}) {
+    const auto bold = [cff](const uint16_t macStyle, const bool os2, const uint16_t weight) {
+      Font font = threeGlyphs();
+      if (cff) {
+        font.sfntVersion = tagOf("OTTO");
+        font.extraTables = {{"CFF ", buildCff(CffSpec{})}};
+      }
+      font.macStyle = macStyle;
+      font.os2 = os2;
+      font.weightClass = weight;
+      Face face;
+      EXPECT_EQ(FaceStatus::Ok, parse(buildFont(font), &face));
+      return face.bold;
+    };
+    EXPECT_FALSE(bold(0, false, 400)) << cff;
+    EXPECT_TRUE(bold(1, false, 400)) << cff;
+    EXPECT_FALSE(bold(2, false, 400)) << cff;  // italic
+    EXPECT_FALSE(bold(0, true, 599)) << cff;
+    EXPECT_TRUE(bold(0, true, 600)) << cff;
+  }
+}
+
 TEST(TtfFace, HugeAdvancesNeitherOverflowNorWrap) {
   // A lying hmtx on a tiny em: the 16.16 linear advance passes 2^31, and the 12.4 result passes 16 bits.
   Font font = threeGlyphs();

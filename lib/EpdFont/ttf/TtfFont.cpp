@@ -636,22 +636,30 @@ TtfFont::~TtfFont() = default;  // out of line: its styles and sizes are freed i
 TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uint8_t& block, ttf::ScratchPlan* plan) {
   maxNativePx_ = kMaxNativePx;
   if (!styles_) {
-    // The styles the family has files for, and the body size's fonts of them. Opened again after an install, the
-    // family keeps them: its files are the same.
+    // The styles the family has files for, each drawn from its own. Opened again after an install, the family keeps
+    // them: its files are the same.
     uint8_t count = 0;
-    for (uint8_t s = 0; s < 4; ++s) slot_[s] = files[s].size != 0 ? count++ : kNoSlot;
+    for (uint8_t s = 0; s < 4; ++s) {
+      fileSlot_[s] = files[s].size != 0 ? count++ : kNoSlot;
+      source_[s] = files[s].size != 0 ? s : kNoSlot;
+    }
     styles_ = makeUniqueNoThrow<Style[]>(count);
-    body_.styles = makeUniqueNoThrow<Size::StyleFont[]>(count);
-    if (!styles_ || !body_.styles) {
+    if (!styles_) {
       LOG_ERR("TTF", "OOM: family %u's %u styles", family_, count);
       set_.failedForNow_ = true;
       return StylesResult::Failed;
     }
     styleCount_ = count;
   }
+  // Planned for the largest size drawn: a native size (5 x 26 pt's pixels per em, about) above the body sizes. A
+  // body too large for flash mode is a CJK font in practice, and draws about 37% faster with the larger pool.
+  const uint32_t largest = std::max(ttf::ppemFromPoints(kMaxPointSize), static_cast<uint32_t>(kMaxNativePx) << 6);
+  const auto poolFor = [this](const Style& style) {
+    return style.onCard && family_ == 0 ? ttf::kPoolBytesSd : ttf::kPoolBytesFlash;
+  };
   for (uint8_t s = 0; s < 4; ++s) {
     if (files[s].size == 0) continue;
-    Style& style = styles_[slot_[s]];
+    Style& style = styles_[fileSlot_[s]];
     style.present = false;
     style.onCard = false;
     style.sd = {};
@@ -696,14 +704,42 @@ TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uin
     style.kerning.resolve(bytes, style.face);
     ttf::resolveLigatures(bytes, style.face, &style.ligatures);
     maxNativePx_ = std::min(maxNativePx_, nativeCeilingPx(style.face));
-    // Planned for the largest size drawn: a native size (5 x 26 pt's pixels per em, about) above the body sizes. A
-    // body too large for flash mode is a CJK font in practice, and draws about 37% faster with the larger pool.
-    const uint32_t largest = std::max(ttf::ppemFromPoints(kMaxPointSize), static_cast<uint32_t>(kMaxNativePx) << 6);
-    const uint32_t pool = style.onCard && family_ == 0 ? ttf::kPoolBytesSd : ttf::kPoolBytesFlash;
-    *plan = ttf::mergePlans(*plan, ttf::planScratch(style.face, largest, pool));
+    *plan = ttf::mergePlans(*plan, ttf::planScratch(style.face, largest, poolFor(style)));
   }
   if (!draws(0)) return StylesResult::Failed;
+  if (!body_.styles) {
+    // The styles the family draws, a synthetic one too, and the body size's fonts of them.
+    chooseSynthetic();
+    body_.styles = makeUniqueNoThrow<Size::StyleFont[]>(fontCount_);
+    if (!body_.styles) {
+      LOG_ERR("TTF", "OOM: family %u's %u fonts", family_, fontCount_);
+      set_.failedForNow_ = true;
+      return StylesResult::Failed;
+    }
+  }
+  // An emboldened glyph is wider than its file's plan allows for.
+  for (uint8_t s = 0; s < 4; ++s) {
+    if (!synthetic(s) || !draws(s)) continue;
+    const Style& source = *styleAt(s);
+    *plan = ttf::mergePlans(*plan, ttf::planScratch(source.face, largest, poolFor(source), true));
+  }
   return StylesResult::Ok;
+}
+
+void TtfFont::chooseSynthetic() {
+  // Spec 7.1: a family gets synthetic bold only when none of its files is bold. A file in the bold or bold italic slot
+  // counts as bold whatever its face says; so does any file whose face says bold (macStyle, or a weight of 600 or
+  // more), such as a bold file serving as the regular.
+  bool bold = fileSlot_[1] != kNoSlot || fileSlot_[3] != kNoSlot;
+  for (uint8_t s = 0; s < 4; ++s) bold = bold || (draws(s) && styleAt(s)->face.bold);
+  if (!bold) {
+    // Bold from the regular; bold italic from the italic when the family draws one, else from the regular too.
+    source_[1] = 0;
+    source_[3] = draws(2) ? 2 : 0;
+    synthetic_ = static_cast<uint8_t>((1u << 1) | (1u << 3));
+  }
+  fontCount_ = 0;
+  for (uint8_t s = 0; s < 4; ++s) slot_[s] = source_[s] != kNoSlot ? fontCount_++ : kNoSlot;
 }
 
 bool TtfFont::configure(Size& size, const uint32_t ppem) {
@@ -742,8 +778,8 @@ bool TtfFont::configure(Size& size, const uint32_t ppem) {
 
 void TtfFont::rebase(Size& size) {
   if (size.ppem == 0) return;
-  for (uint8_t i = 0; i < styleCount_; ++i) {
-    if (styles_[i].present) size.styles[i].data.bitmap = set_.store_.logBase();
+  for (uint8_t s = 0; s < 4; ++s) {
+    if (draws(s)) size.styles[slot_[s]].data.bitmap = set_.store_.logBase();
   }
 }
 
@@ -782,7 +818,7 @@ TtfFont::Size* TtfFont::nativeSize(const uint8_t px) {
   }
   checkLock();
   auto size = makeUniqueNoThrow<Size>();
-  if (size) size->styles = makeUniqueNoThrow<Size::StyleFont[]>(styleCount_);
+  if (size) size->styles = makeUniqueNoThrow<Size::StyleFont[]>(fontCount_);
   if (!size || !size->styles) {
     LOG_ERR("TTF", "%u px: no memory for a native size; the nearest serves", px);
     return nearestNative(ppem);
@@ -900,7 +936,7 @@ const EpdGlyph* TtfFont::render(const Size& size, const uint8_t style, const uin
   }
   glyph_miss::noteDrawn();
   EpdGlyph metrics{};
-  const ttf::Status loaded = placeable(set.rasterizer_.load(bytes, face, index, size.ppem, &metrics), metrics);
+  const ttf::Status loaded = load(bytes, face, index, size, style, &metrics);
   if (loaded != ttf::Status::Ok) {
     set.failed(style, codepoint, loaded, haveKey, key);
     return nullptr;
@@ -926,10 +962,26 @@ const EpdGlyph* TtfFont::render(const Size& size, const uint8_t style, const uin
   return set.drawToRing(metrics);
 }
 
-int8_t TtfFont::kerning(const Size& size, const uint8_t style, const uint32_t left, const uint32_t right) {
-  Style* const found = styleAt(style);
+// The rasterizer's load(), emboldened when `style` is synthetic (spec 7.2), for a glyph EpdGlyphRef can place.
+ttf::Status TtfFont::load(FontBytes& bytes, const ttf::Face& face, const uint16_t index, const Size& size,
+                          const uint8_t style, EpdGlyph* metrics) {
+  ttf::Rasterizer& rasterizer = set_.rasterizer_;
+  ttf::Status loaded = rasterizer.load(bytes, face, index, size.ppem, metrics);
+  if (synthetic(style) && loaded == ttf::Status::Ok) {
+    loaded = rasterizer.embolden(ttf::emboldenStrength(size.ppem), metrics);
+    // Too large once emboldened (the output region's cap, or the box or advance limits), though it fits as the file's
+    // style: drawn unemboldened, as the regular weight, rather than missing (spec 7.2). A Transient stays so.
+    if (loaded == ttf::Status::Unsupported) loaded = rasterizer.load(bytes, face, index, size.ppem, metrics);
+  }
+  return placeable(loaded, *metrics);
+}
+
+int8_t TtfFont::kerning(const Size& size, const uint8_t drawn, const uint32_t left, const uint32_t right) {
+  Style* const found = styleAt(drawn);
   if (!found || !found->present || !found->kerning.any() || size.ppem == 0) return 0;
   Style& s = *found;
+  // A synthetic style kerns as its file does, with the file's style's pairs: every glyph is the same amount wider.
+  const uint8_t style = source_[drawn];
   FlashGlyphStore& store = set_.store_;
   // The store keys a pair by its codepoints (BMP only) and keeps font units, so every size shares it.
   const bool storable = left <= 0xFFFF && right <= 0xFFFF;
@@ -1019,7 +1071,7 @@ void TtfFont::prefetch(Size& size, const uint8_t style, const char* utf8Text) {
     const TtfFontSet::Pending& p = pending[i];
     key = glyphstore::makeKey(p.codepoint, style, size.index);
     EpdGlyph metrics{};
-    const ttf::Status loaded = placeable(set.rasterizer_.load(bytes, face, p.glyph, size.ppem, &metrics), metrics);
+    const ttf::Status loaded = load(bytes, face, p.glyph, size, style, &metrics);
     if (loaded != ttf::Status::Ok) {
       set.failed(style, p.codepoint, loaded, true, key);
       continue;

@@ -24,6 +24,7 @@
 #include "TtfFontTestUtil.h"
 #include "TtfLayoutBuilder.h"
 #include "TtfTestUtil.h"
+#include "Utf8.h"
 
 using namespace ttf_test;
 
@@ -88,6 +89,7 @@ constexpr uint32_t kFlashBytes = 3538944 - 65536;  // the X3's font area: spiffs
 constexpr uint8_t kRegular = 0;
 constexpr uint8_t kBold = 1;
 constexpr uint8_t kItalic = 2;
+constexpr uint8_t kBoldItalic = 3;
 constexpr uint8_t kIdentityA[glyphstore::kIdentityBytes] = {'f', 'a', 'm', 'i', 'l', 'y', '-', 'A'};
 constexpr uint8_t kIdentityB[glyphstore::kIdentityBytes] = {'f', 'a', 'm', 'i', 'l', 'y', '-', 'B'};
 
@@ -113,6 +115,27 @@ Reference referenceAt(const std::vector<uint8_t>& file, const uint32_t cp, const
 
 Reference reference(const std::vector<uint8_t>& file, const uint32_t cp, const uint8_t points) {
   return referenceAt(file, cp, ttf::ppemFromPoints(points));
+}
+
+/// What the rasterizer draws for `cp` at a pixels-per-em (26.6), emboldened at the engine's strength: what a glyph of
+/// a synthetic bold style must equal.
+Reference emboldenedAt(const std::vector<uint8_t>& file, const uint32_t cp, const uint32_t ppem) {
+  FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+  ttf::Face face;
+  EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+  ttf::Rasterizer rasterizer;
+  EXPECT_TRUE(rasterizer.allocate(
+      ttf::planScratch(face, static_cast<uint32_t>(TtfFont::kMaxNativePx) << 6, ttf::kPoolBytesFlash, true)));
+  Reference ref;
+  EXPECT_EQ(ttf::Status::Ok, rasterizer.load(bytes, face, ttf::glyphIndex(bytes, face, cp), ppem, &ref.metrics));
+  EXPECT_EQ(ttf::Status::Ok, rasterizer.embolden(ttf::emboldenStrength(ppem), &ref.metrics));
+  EXPECT_EQ(ttf::Status::Ok, rasterizer.rasterize(rasterizer.output()));
+  ref.bitmap.assign(rasterizer.output(), rasterizer.output() + ref.metrics.dataLength);
+  return ref;
+}
+
+Reference emboldened(const std::vector<uint8_t>& file, const uint32_t cp, const uint8_t points) {
+  return emboldenedAt(file, cp, ttf::ppemFromPoints(points));
 }
 
 constexpr uint32_t px(const uint32_t pixels) { return pixels << 6; }
@@ -675,7 +698,7 @@ TEST_F(TtfFontTest, ABrokenGlyphIsMarkedMissingAndNotTriedAgain) {
   EXPECT_EQ(nullptr, font->glyph(kRegular, 'B'));
   EXPECT_EQ(writes, flash.programCalls());
   EXPECT_NE(nullptr, font->glyph(kRegular, 'A'));
-  EXPECT_EQ(nullptr, font->font(kBold));  // a one-style family
+  EXPECT_EQ(nullptr, font->font(kItalic));  // a one-style family; its bold is synthetic (spec 7.1)
 }
 
 TEST_F(TtfFontTest, AGlyphReachingTooFarFromThePenIsMissing) {
@@ -1149,6 +1172,7 @@ TEST_F(TtfFontTest, AFontWithoutKerningAsksNothing) {
 TEST_F(TtfFontTest, AFamilyHoldsMemoryOnlyForTheStylesItHas) {
   Font built = kernedBoxes();
   built.extraTables.clear();  // no kerning: nothing else a style holds differs between them
+  built.macStyle = 1;  // declared bold, so no style is synthetic: ASyntheticStyleCostsItsFontsAndNoFile counts those
   const std::vector<uint8_t> bytes = buildFont(built);
   const uint8_t* const identities[] = {kIdentityA, kIdentityB, kIdentityA};
   const int styleCounts[] = {1, 2, 4};
@@ -2472,5 +2496,262 @@ TEST_F(TtfFontSetTest, AnOpenWithoutMemoryAfterAReinstallFailsForNowAndTheNextLo
   EXPECT_EQ(2, busy);
   expectDrawnAs(reference(cjk[kRegular].bytes, 0x6F22, 14), *set->font(0), kRegular,
                 set->font(0)->glyph(kRegular, 0x6F22));
+  expectWrittenOnce(chip);
+}
+
+// --- Synthetic bold (spec 7.1) ---
+
+TEST_F(TtfFontTest, ARegularOnlyFamilyDrawsBoldAndBoldItalicEmboldened) {
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  EXPECT_FALSE(font->synthetic(kRegular));
+  EXPECT_TRUE(font->synthetic(kBold));
+  EXPECT_FALSE(font->synthetic(kItalic));
+  EXPECT_TRUE(font->synthetic(kBoldItalic));
+  ASSERT_NE(nullptr, font->font(kBold));
+  ASSERT_NE(nullptr, font->font(kBoldItalic));
+  EXPECT_NE(font->font(kRegular), font->font(kBold));
+  EXPECT_NE(font->font(kRegular), font->font(kBoldItalic));
+  EXPECT_EQ(nullptr, font->font(kItalic));  // only bold is synthesized: the italic falls back to the regular
+  const std::vector<uint8_t>& regular = files[kRegular].bytes;
+  expectDrawnAs(emboldened(regular, 'W', 14), *font, kBold, font->glyph(kBold, 'W'));
+  expectDrawnAs(emboldened(regular, 'W', 14), *font, kBoldItalic, font->glyph(kBoldItalic, 'W'));
+  expectDrawnAs(reference(regular, 'W', 14), *font, kRegular, font->glyph(kRegular, 'W'));
+}
+
+TEST_F(TtfFontTest, BoldItalicIsEmboldenedFromTheItalicWhenThereIsOne) {
+  files[kBold].bytes.clear();
+  files[kBoldItalic].bytes.clear();
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  EXPECT_TRUE(font->synthetic(kBold));
+  EXPECT_TRUE(font->synthetic(kBoldItalic));
+  expectDrawnAs(emboldened(files[kRegular].bytes, 'W', 14), *font, kBold, font->glyph(kBold, 'W'));
+  expectDrawnAs(emboldened(files[kItalic].bytes, 'W', 14), *font, kBoldItalic, font->glyph(kBoldItalic, 'W'));
+  expectDrawnAs(reference(files[kItalic].bytes, 'W', 14), *font, kItalic, font->glyph(kItalic, 'W'));
+}
+
+TEST_F(TtfFontTest, AFamilyWithABoldFileIsNeverEmboldened) {
+  // Spec 7.1's first row: a bold file and no bold italic one. Bold italic falls back as it always has, to the real
+  // upright Bold.
+  files[kBoldItalic].bytes.clear();
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  for (uint8_t style = 0; style < 4; ++style) EXPECT_FALSE(font->synthetic(style)) << int{style};
+  EXPECT_EQ(nullptr, font->font(kBoldItalic));
+  const EpdFontFamily family(font->font(0), font->font(1), font->font(2), font->font(3));
+  const EpdGlyphRef boldItalic = family.getGlyph('W', EpdFontFamily::BOLD_ITALIC);
+  ASSERT_TRUE(boldItalic);
+  EXPECT_EQ(reference(files[kBold].bytes, 'W', 14).metrics.advanceX, boldItalic.advanceX);
+}
+
+TEST_F(TtfFontTest, ABoldFileServingAsTheRegularIsNotEmboldenedAgain) {
+  // Spec 7.1's second row: a family of one bold file, which assignStyles moves to the regular slot. Its face says bold.
+  const std::pair<const char*, const uint8_t*> families[] = {{"Bookerly/Bookerly-Bold.ttf", kIdentityA},
+                                                             {"OpenDyslexic/OpenDyslexic-Bold.otf", kIdentityB}};
+  for (const auto& [name, identity] : families) {
+    files[kRegular].bytes = readFont(name);
+    for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+    const auto font = open(identity);
+    ASSERT_NE(nullptr, font) << name;
+    EXPECT_FALSE(font->synthetic(kBold)) << name;
+    EXPECT_EQ(nullptr, font->font(kBold)) << name;
+  }
+}
+
+TEST_F(TtfFontTest, ASingleHeavyFaceIsNotEmboldened) {
+  // Spec 7.1's third row: Inter Bold's head.macStyle says regular; its OS/2 weight, 700, says bold.
+  files[kRegular].bytes = readFont("Inter/Inter-Bold.ttf");
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  EXPECT_FALSE(font->synthetic(kBold));
+  EXPECT_EQ(nullptr, font->font(kBold));
+}
+
+TEST_F(TtfFontTest, AnOtfFamilyIsEmboldenedAsATrueTypeOne) {
+  files[kRegular].bytes = readFont("OpenDyslexic/OpenDyslexic-Regular.otf");
+  files[kItalic].bytes = readFont("OpenDyslexic/OpenDyslexic-Italic.otf");
+  files[kBold].bytes.clear();
+  files[kBoldItalic].bytes.clear();
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  EXPECT_TRUE(font->synthetic(kBold));
+  EXPECT_TRUE(font->synthetic(kBoldItalic));
+  expectDrawnAs(emboldened(files[kRegular].bytes, 'W', 14), *font, kBold, font->glyph(kBold, 'W'));
+  expectDrawnAs(emboldened(files[kItalic].bytes, 'W', 14), *font, kBoldItalic, font->glyph(kBoldItalic, 'W'));
+  // OpenDyslexic's one kern lookup widens "!" and its like before a space: the bold kerns by the regular's pairs.
+  const int8_t widened = font->kerning(kRegular, '!', ' ');
+  EXPECT_GT(widened, 0);
+  EXPECT_EQ(widened, font->kerning(kBold, '!', ' '));
+}
+
+TEST_F(TtfFontTest, SyntheticBoldIsStoredUnderTheBoldStyleAndServesTheNextBoot) {
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+  {
+    const auto font = open();
+    ASSERT_NE(nullptr, font);
+    ASSERT_NE(nullptr, font->glyph(kBold, 'W'));
+    ASSERT_NE(nullptr, font->glyph(kRegular, 'W'));
+    EXPECT_EQ(2u, font->renders());  // the regular's key is not the bold's
+  }
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  expectDrawnAs(emboldened(files[kRegular].bytes, 'W', 14), *font, kBold, font->glyph(kBold, 'W'));
+  expectDrawnAs(reference(files[kRegular].bytes, 'W', 14), *font, kRegular, font->glyph(kRegular, 'W'));
+  EXPECT_EQ(0u, font->renders());
+  EXPECT_EQ(2u, font->storeHits());
+}
+
+TEST_F(TtfFontTest, SyntheticBoldKernsAsItsFileAndIsWiderByItsStrength) {
+  useBuiltFont(kernedBoxes());
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  EXPECT_TRUE(font->synthetic(kBold));
+  // Every glyph is the same amount wider: the bold kerns by the regular's pairs, looked up once for both.
+  EXPECT_EQ(-47, font->kerning(kRegular, 'A', 'B'));
+  EXPECT_EQ(-47, font->kerning(kBold, 'A', 'B'));
+  EXPECT_EQ(1u, font->kernLookups());
+  const EpdGlyph* regular = font->glyph(kRegular, 'A');
+  const EpdGlyph* bold = font->glyph(kBold, 'A');
+  ASSERT_NE(nullptr, regular);
+  ASSERT_NE(nullptr, bold);
+  // The advance grows by the strength, from 26.6 to 12.4 as FreeType rounds it; the left side bearing and the
+  // baseline stay (spec 7.2).
+  EXPECT_EQ(regular->advanceX + (ttf::emboldenStrength(ttf::ppemFromPoints(14)).x + 2) / 4, bold->advanceX);
+  EXPECT_EQ(regular->left, bold->left);
+  EXPECT_EQ(regular->top, bold->top);
+}
+
+TEST_F(TtfFontTest, SyntheticBoldDrawsEveryGlyphAtTheLargestNativeSize) {
+  // An emboldened glyph is wider than its file's plan allows for: the scratch block has room for the growth at the
+  // largest size, for TrueType outlines and CFF ones.
+  const auto expectEveryGlyph = [this](const std::vector<uint8_t>& regular, const uint8_t* identity,
+                                       const uint32_t first, const uint32_t last, const size_t atLeast) {
+    files[kRegular].bytes = regular;
+    for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+    const auto font = open(identity);
+    ASSERT_NE(nullptr, font);
+    const EpdFont* fonts[4] = {};
+    ASSERT_TRUE(font->nativeFonts(font->maxNativePx(), fonts));
+    ASSERT_NE(nullptr, fonts[kBold]);
+    // What the regular draws at this size: a glyph past the output region's 4 KB is not drawn in any style. A
+    // default-ignorable codepoint draws as nothing in every style.
+    std::vector<uint32_t> codepoints;
+    for (const uint32_t cp : mappedCodepoints(regular)) {
+      if (cp >= first && cp <= last && !utf8IsDefaultIgnorable(cp) && nativeGlyph(fonts[kRegular], cp)) {
+        codepoints.push_back(cp);
+      }
+    }
+    ASSERT_GT(codepoints.size(), atLeast);
+    const uint32_t ppem = px(font->maxNativePx());
+    for (const uint32_t cp : codepoints) {
+      expectDrawnAs(emboldenedAt(regular, cp, ppem), *font, kBold, nativeGlyph(fonts[kBold], cp));
+      if (HasFailure()) {
+        ADD_FAILURE() << "U+" << std::hex << cp;
+        return;
+      }
+    }
+  };
+  expectEveryGlyph(readFont("Bookerly/Bookerly-Regular.ttf"), kIdentityA, 0x21, 0x24F, 300);
+  if (HasFailure()) return;
+  expectEveryGlyph(readFixture("NotoSansJP-CffFlat.otf"), kIdentityB, 0x20, 0xFFFF, 250);
+}
+
+TEST_F(TtfFontTest, SyntheticBoldDrawsAGlyphTooLargeToEmboldenUnemboldened) {
+  // At the largest native size the 4 KB output region decides: a glyph that fits as the regular does not once
+  // emboldened. It is drawn unemboldened, as before synthetic bold, never marked missing (spec 7.2).
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();  // Bookerly Regular: its largest native size is 119 px
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  ASSERT_TRUE(font->synthetic(kBold));
+  const uint32_t ppem = px(font->maxNativePx());
+  const std::vector<uint8_t>& regular = files[kRegular].bytes;
+  // The glyphs that load but do not embolden, found with the rasterizer on its own.
+  std::vector<uint32_t> tooLarge;
+  {
+    FontBytes bytes(regular.data(), static_cast<uint32_t>(regular.size()));
+    ttf::Face face;
+    ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+    ttf::Rasterizer rasterizer;
+    ASSERT_TRUE(rasterizer.allocate(
+        ttf::planScratch(face, static_cast<uint32_t>(TtfFont::kMaxNativePx) << 6, ttf::kPoolBytesFlash, true)));
+    for (const uint32_t cp : mappedCodepoints(regular)) {
+      EpdGlyph metrics{};
+      if (rasterizer.load(bytes, face, ttf::glyphIndex(bytes, face, cp), ppem, &metrics) != ttf::Status::Ok) continue;
+      if (rasterizer.embolden(ttf::emboldenStrength(ppem), &metrics) == ttf::Status::Unsupported) {
+        tooLarge.push_back(cp);
+      }
+    }
+  }
+  ASSERT_FALSE(tooLarge.empty());
+  const EpdFont* fonts[4] = {};
+  ASSERT_TRUE(font->nativeFonts(font->maxNativePx(), fonts));
+  ASSERT_NE(nullptr, fonts[kBold]);
+  for (const uint32_t cp : tooLarge) {
+    // The bold style's glyph is the regular weight's, drawn under the bold key.
+    expectDrawnAs(referenceAt(regular, cp, ppem), *font, kBold, nativeGlyph(fonts[kBold], cp));
+    if (HasFailure()) {
+      ADD_FAILURE() << "U+" << std::hex << cp;
+      return;
+    }
+  }
+  // A glyph that fits is still emboldened.
+  expectDrawnAs(emboldenedAt(regular, 'W', ppem), *font, kBold, nativeGlyph(fonts[kBold], 'W'));
+}
+
+// What a synthetic style costs: its fonts in each size, as a style with a file costs, and no file of its own.
+TEST_F(TtfFontTest, ASyntheticStyleCostsItsFontsAndNoFile) {
+  Font built = kernedBoxes();
+  built.extraTables.clear();  // no kerning: nothing else a style holds differs between them
+  const uint8_t* const identities[] = {kIdentityA, kIdentityB};
+  size_t family[2] = {};
+  size_t native[2] = {};
+  for (int i = 0; i < 2; ++i) {
+    built.macStyle = i == 0 ? 1 : 0;  // declared bold, then regular: the second draws bold and bold italic emboldened
+    useBuiltFont(built);
+    ASSERT_NE(nullptr, open(identities[i]));  // installed: what an install or the first mapping keeps is not counted
+    const size_t before = heapBytesHeld;
+    const auto font = open(identities[i]);
+    ASSERT_NE(nullptr, font);
+    family[i] = heapBytesHeld - before;
+    const EpdFont* fonts[4] = {};
+    const size_t beforeNative = heapBytesHeld;
+    ASSERT_TRUE(font->nativeFonts(40, fonts));
+    native[i] = heapBytesHeld - beforeNative;
+    EXPECT_EQ(i == 1, fonts[kBold] != nullptr);
+  }
+  std::printf("[  heap    ] a one-file family without and with synthetic bold: %zu/%zu B; a native size: %zu/%zu B\n",
+              family[0], family[1], native[0], native[1]);
+  EXPECT_GT(family[1], family[0]);
+  EXPECT_LT(family[1] - family[0], 512u);
+  EXPECT_GT(native[1], native[0]);
+  EXPECT_LT(native[1] - native[0], 512u);
+}
+
+TEST_F(TtfFontSetTest, SyntheticBoldInSdModeIsDrawnFromTheRegularFile) {
+  // A synthetic style has no style block of its own: it maps its file's, and reads that file's outlines from the card.
+  MemoryFile serif[4];
+  serif[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
+  SimNorFlash chip{kSdOnlyBytes};
+  const auto set = openFamilies(chip, {serif}, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  ASSERT_TRUE(font.readsCard());
+  ASSERT_TRUE(font.synthetic(kBold));
+  const char* const kana =
+      "\xE3\x81\x82\xE3\x81\x84\xE3\x81\x86\xE3\x81\x88\xE3\x81\x8A\xE3\x81\x8B\xE3\x81\x8D"
+      "\xE3\x81\x8F\xE3\x81\x91\xE3\x81\x93";  // あいうえおかきくけこ
+  const uint32_t before = set->sdPageReads();
+  font.prefetch(kBold, kana);
+  EXPECT_EQ(10u, font.renders());
+  EXPECT_GT(set->sdPageReads(), before);
+  EXPECT_LE(set->sdPageReads() - before, 10u + 1u);  // a page for each charstring, and the one the last runs into
+  for (const uint32_t cp : {0x3042u, 0x3044u, 0x3046u, 0x3048u, 0x304Au, 0x304Bu, 0x304Du, 0x304Fu, 0x3051u, 0x3053u}) {
+    expectDrawnAs(emboldened(serif[kRegular].bytes, cp, 14), font, kBold, font.glyph(kBold, cp));
+  }
+  EXPECT_EQ(10u, font.renders());  // stored by the batch
+  expectDrawnAs(reference(serif[kRegular].bytes, 0x3042, 14), font, kRegular, font.glyph(kRegular, 0x3042));
   expectWrittenOnce(chip);
 }

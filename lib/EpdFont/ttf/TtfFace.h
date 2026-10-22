@@ -52,6 +52,8 @@ struct Face {
   int16_t height = 0;  ///< ascender - descender + line gap
   uint8_t cmapFormat = 0;
   bool longLoca = false;
+  /// A bold face: head.macStyle says bold, or OS/2's weight class is 600 or more. Never emboldened (spec 7.1).
+  bool bold = false;
   Outlines outlines = Outlines::TrueType;
   CffFace cff;  ///< Outlines::Cff: the CFF table (glyf and loca stay 0)
   /// Set by parseFace(), a number no other parse gives: with the Face's address, what a cache of what was read from the

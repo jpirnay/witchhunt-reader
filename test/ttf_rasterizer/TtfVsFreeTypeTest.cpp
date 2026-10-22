@@ -54,19 +54,25 @@ struct Comparison {
 // Every glyph of `face` at `points`, drawn by the engine and by FreeType, into `out`. A load failure, and a glyph too
 // large that is not Unsupported, fail the test here; the caller checks the counts.
 void compareWithFreeType(const std::string& name, const std::vector<uint8_t>& data, FontBytes& bytes, const Face& face,
-                         const uint32_t points, Comparison* out) {
+                         const uint32_t points, Comparison* out, const Strength& strength = {}) {
   Comparison& c = *out;
   const FreeTypeReference reference(data, points);
   ASSERT_TRUE(reference.ok());
   ASSERT_EQ(reference.numGlyphs(), face.numGlyphs);
   const uint32_t ppem = ppemFromPoints(points);
   Rasterizer rasterizer;
-  ASSERT_TRUE(rasterizer.allocate(planScratch(face, ppem, kPoolBytesFlash)));
+  const bool emboldened = strength.x != 0 || strength.y != 0;
+  ScratchPlan plan = planScratch(face, ppem, kPoolBytesFlash);
+  // Emboldened glyphs grow past what the plan sized the output for: every one under 4 KB is compared.
+  if (emboldened) plan.outputBytes = kMaxOutputBytes;
+  ASSERT_TRUE(rasterizer.allocate(plan));
 
   for (uint32_t g = 0; g < face.numGlyphs; ++g) {
-    const ReferenceGlyph expected = reference.glyph(g);
+    const ReferenceGlyph expected = reference.glyph(g, false, strength.x, strength.y);
     EpdGlyph metrics{};
-    const Status status = rasterizer.render(bytes, face, static_cast<uint16_t>(g), ppem, &metrics);
+    Status status = rasterizer.load(bytes, face, static_cast<uint16_t>(g), ppem, &metrics);
+    if (status == Status::Ok && emboldened) status = rasterizer.embolden(strength, &metrics);
+    if (status == Status::Ok) status = rasterizer.rasterize(rasterizer.output());
     if (!expected.loaded) {
       ++c.freeTypeFails;
       c.refusedAsFreeType += status == Status::Malformed || status == Status::Unsupported;
@@ -86,7 +92,9 @@ void compareWithFreeType(const std::string& name, const std::vector<uint8_t>& da
       ADD_FAILURE() << "glyph " << g << ": " << statusName(status);
       continue;
     }
-    if (metrics.advanceX != static_cast<uint16_t>((expected.linearAdvance + 2048) >> 12)) ++c.advanceDiffs;
+    int32_t expectedAdvance = (expected.linearAdvance + 2048) >> 12;
+    if (emboldened && expectedAdvance != 0) expectedAdvance += (strength.x + 2) / 4;  // a zero advance stays zero
+    if (metrics.advanceX != static_cast<uint16_t>(expectedAdvance)) ++c.advanceDiffs;
     if (metrics.width != expected.width || metrics.height != expected.height || metrics.left != expected.left ||
         metrics.top != expected.top) {
       ++c.boxDiffs;
@@ -112,12 +120,14 @@ void compareWithFreeType(const std::string& name, const std::vector<uint8_t>& da
                            picture(metrics, expected.bitmap.data());
     }
   }
+  const std::string label =
+      emboldened ? " emboldened by " + std::to_string(strength.x) + "," + std::to_string(strength.y) + "/64" : "";
   std::printf(
-      "%s @%u pt: %u glyphs (%u too large, %u flagged overlap), %u load failures, %u advance diffs, %u box "
+      "%s @%u pt%s: %u glyphs (%u too large, %u flagged overlap), %u load failures, %u advance diffs, %u box "
       "diffs, %u inexact (%llu of %llu pixels differ); %u FreeType cannot load, %u of them refused\n",
-      name.c_str(), points, c.glyphs, c.tooLarge, c.overlapGlyphs, c.loadFailures, c.advanceDiffs, c.boxDiffs,
-      c.inexact, static_cast<unsigned long long>(c.differingPixels), static_cast<unsigned long long>(c.pixels),
-      c.freeTypeFails, c.refusedAsFreeType);
+      name.c_str(), points, label.c_str(), c.glyphs, c.tooLarge, c.overlapGlyphs, c.loadFailures, c.advanceDiffs,
+      c.boxDiffs, c.inexact, static_cast<unsigned long long>(c.differingPixels),
+      static_cast<unsigned long long>(c.pixels), c.freeTypeFails, c.refusedAsFreeType);
 }
 
 class TtfVsFreeType : public ::testing::TestWithParam<std::string> {
@@ -152,6 +162,23 @@ TEST_P(TtfVsFreeType, EveryGlyphMatchesFreeType) {
     EXPECT_EQ(0u, c.advanceDiffs);
     EXPECT_EQ(0u, c.boxDiffs);  // spec 9.3 allows 5; scaling exactly as FreeType does leaves none
     EXPECT_EQ(0u, c.inexact) << c.inexactPictures;
+  }
+}
+
+TEST_P(TtfVsFreeType, EveryGlyphEmboldenedMatchesFreeType) {
+  for (const uint32_t points : {8u, kPoints, 40u}) {
+    const Strength engine = emboldenStrength(ppemFromPoints(points));
+    for (const Strength& strength : {engine, Strength{engine.x, engine.x}}) {  // the engine's; FreeType's own
+      SCOPED_TRACE(testing::Message() << points << " pt, " << strength.x << "," << strength.y << "/64");
+      Comparison c;
+      compareWithFreeType(GetParam(), data, bytes, face, points, &c, strength);
+      if (HasFatalFailure()) return;
+      EXPECT_GT(c.glyphs, 1000u);
+      EXPECT_EQ(0u, c.loadFailures);
+      EXPECT_EQ(0u, c.advanceDiffs);
+      EXPECT_EQ(0u, c.boxDiffs);
+      EXPECT_EQ(0u, c.inexact) << c.inexactPictures;
+    }
   }
 }
 
@@ -299,6 +326,31 @@ TEST_P(TtfVsFreeTypeCff, EveryGlyphMatchesFreeType) {
       ASSERT_LE(tolerance->percent, 3.0);
       EXPECT_LE(static_cast<double>(c.differingPixels), static_cast<double>(c.pixels) * tolerance->percent / 100)
           << c.inexactPictures;
+    }
+  }
+}
+
+TEST_P(TtfVsFreeTypeCff, EveryGlyphEmboldenedMatchesFreeType) {
+  for (const uint32_t points : {8u, kPoints, 40u}) {
+    const Strength engine = emboldenStrength(ppemFromPoints(points));
+    for (const Strength& strength : {engine, Strength{engine.x, engine.x}}) {  // the engine's; FreeType's own
+      SCOPED_TRACE(testing::Message() << points << " pt, " << strength.x << "," << strength.y << "/64");
+      Comparison c;
+      compareWithFreeType(GetParam(), data, bytes, face, points, &c, strength);
+      if (HasFatalFailure()) return;
+      EXPECT_GT(c.glyphs, 0u);
+      EXPECT_EQ(0u, c.loadFailures);
+      EXPECT_EQ(c.freeTypeFails, c.refusedAsFreeType);
+      EXPECT_EQ(0u, c.advanceDiffs);
+      EXPECT_EQ(0u, c.boxDiffs);
+      const PixelTolerance* tolerance = cffPixelTolerance(GetParam(), points);
+      if (tolerance == nullptr) {
+        EXPECT_EQ(0u, c.inexact) << c.inexactPictures;
+      } else {
+        ASSERT_LE(tolerance->percent, 3.0);
+        EXPECT_LE(static_cast<double>(c.differingPixels), static_cast<double>(c.pixels) * tolerance->percent / 100)
+            << c.inexactPictures;
+      }
     }
   }
 }

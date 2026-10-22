@@ -55,10 +55,20 @@ struct ScratchPlan {
 /// The plan for one face: points and contours from maxp, or for CFF outlines, which maxp does not count, the caps
 /// and the interpreter's state; the output from head's box at `maxPpem26_6` (the largest size the family renders),
 /// but never less than the em square, since head's box can lie; each capped. A glyph past a cap at a planned size
-/// reports Unsupported.
-ScratchPlan planScratch(const Face& face, uint32_t maxPpem26_6, uint32_t poolBytes);
+/// reports Unsupported. `emboldened`: with room for synthetic bold's growth too, twice its strength each way (a sharp
+/// corner reaches past the strength).
+ScratchPlan planScratch(const Face& face, uint32_t maxPpem26_6, uint32_t poolBytes, bool emboldened = false);
 /// The larger of each part, so one block serves every style of a family.
 ScratchPlan mergePlans(const ScratchPlan& a, const ScratchPlan& b);
+
+/// How much synthetic bold grows a glyph (spec 7.2): the outline's growth on each axis, 26.6 pixels. Never negative:
+/// emboldenStrength() never returns one, and embolden() does not check.
+struct Strength {
+  int32_t x = 0;
+  int32_t y = 0;
+};
+/// Synthetic bold's strength at `ppem26_6`.
+Strength emboldenStrength(uint32_t ppem26_6);
 
 /// Glyph outlines to 2-bit bitmaps: FreeType's TrueType loader rebuilt in integers (simple glyphs, compound
 /// glyphs with offsets and 2.14 transforms, unhinted, exactly as FreeType scales them), and its CFF loader (the
@@ -101,6 +111,12 @@ class Rasterizer {
   /// dataLength; dataOffset is 0. The converter auto-hints its bitmaps, so only advances and line metrics
   /// match a .cpfont of the same font; the boxes and pixels match FreeType unhinted.
   Status load(FontBytes& bytes, const Face& face, uint16_t glyph, uint32_t ppem26_6, EpdGlyph* metrics);
+  /// Synthetic bold (spec 7.2): emboldens the outline of the last load() exactly as FreeType's FT_Outline_EmboldenXY
+  /// does with `strength`, and updates its `metrics` the way FT_GlyphSlot_AdjustWeight does: the bitmap box from the
+  /// new outline, a non-zero advance strength.x wider (12.4, rounded; zero stays zero). An outline FreeType cannot
+  /// orient stays as it is, the advance growing all the same. After a failed load() it returns that status; a bitmap
+  /// that no longer fits reports what load() would.
+  Status embolden(const Strength& strength, EpdGlyph* metrics);
   /// Draws the glyph of the last load() into `dst`, writing all of its dataLength bytes (MSB-first, rows
   /// continuous, as .cpfont bitmaps). After a failed load() it writes nothing and returns that status.
   Status rasterize(uint8_t* dst);
@@ -115,6 +131,10 @@ class Rasterizer {
   /// the TrueType loader's, which recurses through compound glyphs on the render task's stack.
   Status loadCff(FontBytes& bytes, const Face& face, uint16_t glyph, int32_t scale, uint16_t* numPoints,
                  uint16_t* numContours);
+
+  /// load()'s bitmap box from the outline as it now is: moves the points so the box starts at (0, 0), records the
+  /// corner it moved them from, and fills the box part of `metrics`. Leaves loaded_ alone.
+  Status placeBox(EpdGlyph* metrics);
 
   CffSourceCache cffSources_;         // loadCff's: the last CID-keyed glyph's FDSelect range and font DICT
   uint8_t* block_ = nullptr;          // owned_, or the caller's (attach())
@@ -132,6 +152,10 @@ class Rasterizer {
   uint16_t numContours_ = 0;
   uint16_t width_ = 0;
   uint16_t height_ = 0;
+  // The last load()'s size and bitmap box, whose bottom-left corner the outline was moved to.
+  int32_t left_ = 0;
+  int32_t bottom_ = 0;
+  uint32_t ppem_ = 0;
 };
 
 }  // namespace ttf

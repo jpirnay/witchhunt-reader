@@ -66,7 +66,7 @@ directory whole.
 | `fonts.bin`, `fonts/<style>.ttf`, `fonts/accent<n>/<style>.ttf` | EPUB | `BookFonts::kVersion` (6) | The book's embedded body and accent fonts (Publisher Fonts): [below](#fontsbin) |
 | `kosync_push.bin` | EPUB | `LastPush::kVersion` (1) | Our last KOReader push: [below](#kosync_pushbin) |
 | `koreader_docid.txt`, `koreader_syncmethod.txt` | EPUB | none | The KOReader document id, after the file size and fingerprint it was computed for, and the match method learned for the book |
-| `index.bin` | TXT, Markdown | `CACHE_VERSION`: TXT 2 (magic `TXTI`), Markdown 4 (`MKDI`) | Page offsets under the current layout. `SleepActivity` checks the TXT magic and version too |
+| `index.bin` | TXT, Markdown | `CACHE_VERSION`: TXT 2 (magic `TXTI`), Markdown 11 (`MKDI`) | Page offsets under the current layout. `SleepActivity` checks the TXT magic and version too |
 | `page_<n>.bw1`, `page_<n>.gr2` | XTC | none | Up to four pages' planes, transposed for drawing (`Xtc::kPageCacheMax`) |
 
 Builds also write scratch files that they remove when done: `spine.bin.tmp`, `toc.bin.tmp` and
@@ -539,7 +539,9 @@ produces; a power cut leaves at worst bytes nothing references.
 - **A face** is a family at one size: `face = family << 24 | ppem` (26.6 pixels per em; the family is its index in
   the set). An entry is in use once `claimed` reads 0. A glyph key is `codepoint | style << 21 | faceIndex << 23`,
   bits 28-31 zero, so a key never reads as erased. The 32 entries are every family's; taking the last one, or asking
-  for a 33rd, makes the wipe pending.
+  for a 33rd, makes the wipe pending. A synthetic bold style (spec 7.1), drawn from another style's file, keys its
+  glyphs under its own style bits and the face index of its size, like a style with a file; its kerning pairs are
+  those of the style it is drawn from.
 - **A slot's value** is 0 (the font has no glyph for that key), or the record's `dataOffset` (its log offset + 20) in
   4-byte units in the low 20 bits (so a log is under 4 MiB), under the low 12 bits of the epoch of the segment that
   holds the record. A reused segment gets a new epoch, so a slot still naming its old contents no longer matches and

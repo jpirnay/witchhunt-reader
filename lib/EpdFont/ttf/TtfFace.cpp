@@ -202,6 +202,7 @@ FaceStatus parseFace(FontBytes& bytes, Face* face) {
   face->yMin = bytes.i16(head.offset + 38);
   face->xMax = bytes.i16(head.offset + 40);
   face->yMax = bytes.i16(head.offset + 42);
+  face->bold = (bytes.u16(head.offset + 44) & 1) != 0;  // macStyle
   face->hmtx = hmtx.offset;
   face->hmtxLength = hmtx.length;
 
@@ -210,6 +211,7 @@ FaceStatus parseFace(FontBytes& bytes, Face* face) {
   Table os2;
   bool haveOs2 = findTable(bytes, numTables, tag("OS/2"), 78, &os2);
   if (haveOs2) haveOs2 = os2.length >= os2Length(bytes.u16(os2.offset));
+  if (haveOs2 && bytes.u16(os2.offset + 4) >= 600) face->bold = true;  // usWeightClass
   const int16_t typoAscender = haveOs2 ? bytes.i16(os2.offset + 68) : 0;
   const int16_t typoDescender = haveOs2 ? bytes.i16(os2.offset + 70) : 0;
   const int16_t typoLineGap = haveOs2 ? bytes.i16(os2.offset + 72) : 0;

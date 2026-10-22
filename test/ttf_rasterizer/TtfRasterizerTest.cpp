@@ -327,6 +327,34 @@ TEST(TtfScratch, ACffFaceIsPlannedAtTheCapsWithTheInterpretersState) {
   EXPECT_EQ(kCffDecoderBytes, mergePlans(cff, trueType).decoderBytes);
 }
 
+TEST(TtfScratch, AnEmboldenedPlanHasRoomForTheGrowthAndKeepsTheCffCaps) {
+  Face face;
+  face.outlines = Face::Outlines::Cff;
+  face.unitsPerEm = 1000;
+  face.xMax = 1000;
+  face.yMax = 1000;
+  const ScratchPlan plain = planScratch(face, 1000, kPoolBytesFlash);
+  const ScratchPlan bold = planScratch(face, 1000, kPoolBytesFlash, true);
+  EXPECT_EQ(81u, plain.outputBytes);
+  EXPECT_EQ(90u, bold.outputBytes);  // 20 x 18: two pixels across for emboldenStrength(1000).x = 42/64, none down
+  EXPECT_EQ(kMaxScratchPoints, bold.points);
+  EXPECT_EQ(kMaxScratchContours, bold.contours);
+  EXPECT_EQ(kCffDecoderBytes, bold.decoderBytes);
+  EXPECT_EQ(kMaxOutputBytes, planScratch(face, kMaxPpem26_6, kPoolBytesFlash, true).outputBytes);
+}
+
+TEST(TtfScratch, TheEmboldenedGrowthIsClampedWithTheBox) {
+  // 60 px per em: the box is 5000 units wide, 302 px, past the 255 cap before the growth (6 px) is added; the height
+  // is the em square, 62 px, with no growth down.
+  Face face;
+  face.unitsPerEm = 1000;
+  face.xMax = 5000;
+  face.yMax = 1000;
+  const ScratchPlan bold = planScratch(face, 3840, kPoolBytesFlash, true);
+  EXPECT_EQ(255u * 62u / 4u + 1u, bold.outputBytes);  // 255 x 62 at 2 bits: 3953, not a width of 261
+  EXPECT_EQ(bold.outputBytes, planScratch(face, 3840, kPoolBytesFlash).outputBytes);
+}
+
 TEST(TtfScratch, TheInterpretersStateLivesInTheCellPool) {
   // The state is dead once load() has the outline, so a CFF plan takes no more scratch than a TrueType one of the same
   // points and contours.

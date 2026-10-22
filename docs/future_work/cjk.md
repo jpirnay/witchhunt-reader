@@ -1,15 +1,37 @@
 # CJK support
 
-Status: open items as of 2026-10-19.
+Status: open items as of 2026-10-21.
 
 Line breaking for Chinese, Japanese and Korean is done, and so are punctuation widths, flush justification and the
-whole-em grid (A3a). What remains for full CJK support:
-- **Typography:** push-in and the CJK–Latin gap (A3b), and ruby with emphasis dots (B).
-- **Fonts:** a CJK font readers can install, fast, plus a TTF path for CJK fonts.
+whole-em grid (A3a). The font engine is done too: TrueType and CFF (`.otf`) outlines, families too large for flash
+read from the card, and a glyph store that makes room. What remains for full CJK support:
+- **Fonts:** the CJK families as `.otf` downloads in the font manager.
 - **UI text:** the UI itself is translated; book titles, TOC entries and status-bar chapter names in CJK
   still need the reader's CJK font as a fallback.
+- **Typography:** push-in and the CJK–Latin gap (A3b), and ruby with emphasis dots (B).
 - **The dictionary** on CJK pages.
 - **Small edge cases** the reviews found.
+
+## Roadmap
+
+In order. Each step is its own plan and PR. Steps 1-5 are the CJK fonts spec's order of work
+(`docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md`, section 13), in the order they run: synthetic bold moved
+behind CFF.
+
+| Step | What | State |
+|---|---|---|
+| 1 | Serial test API for the font work (`CMD:TTF`, `CMD:FS`) | shipped (#531) |
+| 2 | The glyph store makes room (spec section 8) | shipped (#532) |
+| 3 | CFF outlines (spec section 9), and their speed-ups | shipped (#542, #544) |
+| 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#548) |
+| 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | plan to write after 4 |
+| 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | needs a design |
+| 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan to write |
+| 8 | Ruby and emphasis dots ([B](#ruby-furigana-pr-b)) | plan to write |
+| 9 | The dictionary on CJK pages ([below](#dictionary-on-cjk-pages)) | open |
+
+Synthetic bold comes before the font manager because the CJK families ship in their Regular weight only (spec
+section 4). Step 6 is what makes a CJK library navigable once a font is installed.
 
 ## Already shipped
 
@@ -126,6 +148,11 @@ Listed here so nobody redoes it.
 
 ## A CJK font readers can install
 
+**Decided, open** ([Roadmap](#roadmap) step 5). The CJK families ship as per-language `.otf` subsets that the font
+manager downloads, drawn by the TTF engine: Japanese, Simplified Chinese, Traditional Chinese and Korean, sans and
+serif, about 27.5 MB for all eight (spec sections 4-6, Appendix B). The bitmap families below are removed then. The
+analysis that led there follows.
+
 **Open.** No CJK font ships, and `lib/EpdFont/scripts/sd-fonts.yaml` keeps NotoSansCJK, NotoSerifCJK and NotoSansHangul commented out.
 
 **What the sizes cost.** The fonts are 3.5 MB at 12 pt and 4.5 MB at 14 pt, per style (NotoSansCJK SC, 22,389 glyphs). The flash font partition is 3.375 MB (`partitions.csv`, `spiffs`):
@@ -151,11 +178,15 @@ Listed here so nobody redoes it.
 3. **Ship 12 pt only.** It fits today, but 12 pt CJK is small on the X3.
 4. **TTF Stage 2c-4** (next item): CJK TrueType fonts loaded from SD.
 
-**Next step.** Decide 1 or 4 first. Option 1 needs a fallback chain from the subset face to a full face, which the renderer does not have yet.
+**Decided:** option 4, through the CJK fonts spec.
 
 ## TTF Stage 2c-4: TrueType families too large for flash mode
 
-**Open.** TTF families load in flash mode only, at about 1.5 MB per style, and every CJK TTF exceeds that. The same stage owns font-selector previews for TTF families.
+**Shipped** (#506): a family too large for flash mode keeps its tables in the glyph store and reads its outlines from
+the card (SD mode); CFF families do the same since #542. Font-selector previews for TTF families were assigned to this
+stage (TTF spec section 7.6); check the font selector before planning them.
+
+What follows is the stage as it was planned.
 
 **Where.** The design is `docs/superpowers/specs/2026-10-13-ttf-fonts-design.md` (on master):
 - section 4, the glyph store;
@@ -172,7 +203,8 @@ Already decided:
 (keeping the glyphs drawn most) and a worn index is rebuilt, in idle time (`EpubReaderActivity::stepGlyphStoreRoom`) and
 at a chapter or book open, instead of wiping the store. Format 4: [file-formats.md](../file-formats.md#the-ttf-glyph-store-cptt).
 
-**Next step.** Write the 2c-4 plan. A2's line breaking is already in place, so CJK TTF testing can start as soon as SD mode loads.
+**Measured** on the X4 at 12 pt, Traditional Chinese in SD mode (`test_cjk_zh_honglou`): a cold chapter lays out in
+1,114 ms as TrueType and 1,159 ms as CFF; with its glyphs stored, in 315 ms either way (#544).
 
 ## Glyph store: a faster index rebuild
 
