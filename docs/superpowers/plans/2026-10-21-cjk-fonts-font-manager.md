@@ -9,7 +9,7 @@
 - **The manifests.** `generate-font-manifest.py --config` writes two from one scan: `fonts.json` (version 2, `.cpfont` only, what older firmware reads) and `fonts-v3.json` (every family with its `format`). The new firmware's `FONT_MANIFEST_URL` names the second.
 - **The firmware.** `FontDownloadRules`, header-only and host-tested, decides a file's kind and first bytes, room on the card, what "Download all" takes and what counts as an update. `FontManifestParser`, `FontManifestReader` and `FontCatalog` carry the format and the Download-all flag; `FontInstaller`, the Font Manager and the web API use them.
 
-**Spec:** `docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md` (Task 9 moves it to `docs/design/cjk-ttf-fonts.md`), sections 4, 5, 6, 10 and 11; step 5 of section 13.
+**Spec:** `docs/design/cjk-ttf-fonts.md` (moved there by Task 9), sections 4, 5, 6, 10 and 11; step 5 of section 13.
 
 **Prototype:** `proto/cjk-ttf-fonts` (worktree `C:/tmp/wt-cjkfonts-proto`; read it, never modify it), built for TrueType `.ttf` on master 2d09575f3. The manifest parser, reader, catalog and installer have not changed on master since, so its diffs to them still apply. Each task says what to take; where this plan and the prototype differ, the plan is right. Reviewed against master 5ae036f79 on 2026-10-22.
 

@@ -4,8 +4,8 @@ Status (2026-10-20): approved. The first version was approved, then revised the 
 CFF outlines (section 9), the CJK families as CFF (`.otf`), a glyph store that makes room instead of being
 emptied whole (section 8), and the serial test API first in the order of work (section 13, PR #531).
 
-Working material, like every spec here: when the work merges, lasting parts move to reference docs, open
-items to `docs/future_work/cjk.md`, and this file is deleted.
+Design record: shipped in #531, #532, #542, #544, synthetic bold (#548) and the CJK families (#PR). The code is the
+authority on what it does now.
 
 ## 1. Why
 

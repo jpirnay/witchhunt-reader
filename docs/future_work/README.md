@@ -7,7 +7,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | File | Topic |
 |---|---|
 | [alternative-sync-providers.md](alternative-sync-providers.md) | OPDS progression sync (Kavita, Audiobookshelf) and BookOrbit, offered in the reader itself |
-| [cjk.md](cjk.md) | CJK: justification, squeeze and grid (A3), ruby (B), an installable CJK font, TTF SD mode, UI text, the dictionary, arena follow-ups, edge cases from the A2 reviews |
+| [cjk.md](cjk.md) | CJK: justification, squeeze and grid (A3), ruby (B), CJK `.cpfont` bugs, 龘, the Font Manager follow-ups, TTF SD mode, UI text, the dictionary, arena follow-ups, edge cases from the A2 reviews |
 | [book-cache.md](book-cache.md) | Book replacement and deletion that still wipe reading state, TXT/MD caches, cache-clear inconsistencies |
 | [boards-and-touch.md](boards-and-touch.md) | Light sleep with the frontlight, board-name checks still to convert, the T5S3 SD clock, trace scaffolding, the X4 Pro fast-DU shortcut, device validation, touch follow-ups |
 | [display-and-refresh.md](display-and-refresh.md) | Framebuffer baselines, sleep ghosting follow-ups, windowed refresh, busy indicator, pre-render coverage |
@@ -17,6 +17,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | [memory-and-parsing.md](memory-and-parsing.md) | Nested-table text, case-blind class and id selectors, the simplified-chapter hint, the image lane and Background-B, heap transients, preempted decodes |
 | [opds-and-kosync.md](opds-and-kosync.md) | Gutenberg's repeated OpenSearch fetch and truncated-field warning, KOSync redirect gate and log labels |
 | [reader-state.md](reader-state.md) | Mark as read vs. a pending page save, menu actions after a layout change, sync mid-build, dead override overloads |
+| [screen-flow.md](screen-flow.md) | Screens that end on a message and wait for Back: one timed return for all of them |
 | [screen-layout.md](screen-layout.md) | Overlaps and layout arithmetic left from the header/body audit, cleanup |
 | [test-suite.md](test-suite.md) | Host test suite: firmware paths with no host test, tests blind to corruption, goldens to extend, renames and moves, small cleanups from the second audit |
 

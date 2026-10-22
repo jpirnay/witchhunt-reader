@@ -1,11 +1,11 @@
 # CJK support
 
-Status: open items as of 2026-10-21.
+Status: open items as of 2026-10-22.
 
 Line breaking for Chinese, Japanese and Korean is done, and so are punctuation widths, flush justification and the
 whole-em grid (A3a). The font engine is done too: TrueType and CFF (`.otf`) outlines, families too large for flash
-read from the card, and a glyph store that makes room. What remains for full CJK support:
-- **Fonts:** the CJK families as `.otf` downloads in the font manager.
+read from the card, and a glyph store that makes room. The font manager installs eight CJK families as `.otf`. What
+remains for full CJK support:
 - **UI text:** the UI itself is translated; book titles, TOC entries and status-bar chapter names in CJK
   still need the reader's CJK font as a fallback.
 - **Typography:** push-in and the CJK–Latin gap (A3b), and ruby with emphasis dots (B).
@@ -15,7 +15,7 @@ read from the card, and a glyph store that makes room. What remains for full CJK
 ## Roadmap
 
 In order. Each step is its own plan and PR. Steps 1-5 are the CJK fonts spec's order of work
-(`docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md`, section 13), in the order they run: synthetic bold moved
+(`docs/design/cjk-ttf-fonts.md`, section 13), in the order they run: synthetic bold moved
 behind CFF.
 
 | Step | What | State |
@@ -24,7 +24,7 @@ behind CFF.
 | 2 | The glyph store makes room (spec section 8) | shipped (#532) |
 | 3 | CFF outlines (spec section 9), and their speed-ups | shipped (#542, #544) |
 | 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#548) |
-| 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | plan to write after 4 |
+| 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | shipped (#PR) |
 | 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | needs a design |
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan to write |
 | 8 | Ruby and emphasis dots ([B](#ruby-furigana-pr-b)) | plan to write |
@@ -148,56 +148,61 @@ Listed here so nobody redoes it.
 
 ## A CJK font readers can install
 
-**Decided, open** ([Roadmap](#roadmap) step 5). The CJK families ship as per-language `.otf` subsets that the font
-manager downloads, drawn by the TTF engine: Japanese, Simplified Chinese, Traditional Chinese and Korean, sans and
-serif, about 27.5 MB for all eight (spec sections 4-6, Appendix B). The bitmap families below are removed then. The
-analysis that led there follows.
+**Shipped** (#PR). The font manager installs eight CJK families as `.otf`: NotoSans and NotoSerif in JP, SC, TC and KR,
+1.7 to 7.3 MB each (9.9 MB sans, 17.7 MB serif), drawn by the TTF engine. They are cut by
+`lib/EpdFont/scripts/cjk_subset.py`, listed in `sd-fonts.yaml` and `assets/sd-fonts/fonts-v3.json` (manifest version 3).
+"Download all" leaves them out. The design is `docs/design/cjk-ttf-fonts.md`, sections 4-6.
 
-**Open.** No CJK font ships, and `lib/EpdFont/scripts/sd-fonts.yaml` keeps NotoSansCJK, NotoSerifCJK and NotoSansHangul commented out.
+## CJK `.cpfont` fonts converted by hand
 
-**What the sizes cost.** The fonts are 3.5 MB at 12 pt and 4.5 MB at 14 pt, per style (NotoSansCJK SC, 22,389 glyphs). The flash font partition is 3.375 MB (`partitions.csv`, `spiffs`):
-- **14 pt** does not fit (`FlashFontPartition::appendFile` logs "would overflow partition"). It loads from SD: a 25-31 KB per-page arena and ~130 ms of SD reads per page to prewarm.
-- **12 pt** just fits, and is then served from the flash mapping with no arena and no SD reads.
+**Open.** Two bugs in the bitmap path, found while building the CJK families. Neither touches the shipped `.otf`
+families; both hit a CJK font that a reader converts to `.cpfont` and installs.
 
-**The Korean split.** Korean needs NotoSansHangul (the `hangul` interval), a different family from Chinese and Japanese (the `cjk` interval has no Hangul). Hanja inside Korean text, such as names in parentheses, draws blank with the Hangul font.
+1. **The interval table is copied to the heap.**
+   - **What:** `SdCardFont::loadFromMmap` copies the interval table out of the flash mapping. For Japanese that is 49 KB
+     of heap, and it turned pre-rendering off.
+   - **Why:** the table is read into a heap array per style (`fullIntervals`) instead of being used where it sits.
+   - **Where:** `SdCardFont::loadFromMmap`. `MAX_INTERVALS` is 4096; the Japanese set has 4,083.
+   - **Next step:** a fix that reads the table in place when it is 4-byte aligned is on branch
+     `spike/mmap-intervals-in-flash`. Review it and merge it.
+2. **A `.cpfont` larger than the partition erases the whole partition.**
+   - **What:** on the first book open after every restart, the partition is erased (4-5 s), then the append fails.
+   - **Why:** the single-file path in `SdCardFontManager` calls `FlashFontPartition::beginWrite`, which erases, before
+     `appendFile` checks that the file fits.
+   - **Where:** the single-file fallback of the caching function in `lib/EpdFont/SdCardFontManager.cpp`;
+     `FlashFontPartition::beginWrite` and `appendFile` (`lib/hal/FlashFontPartition.cpp`).
+   - **Next step:** compare the file with `FlashFontPartition::fontUsableSize()` before `beginWrite`, and remember the
+     refusal so the next open does not try again.
 
-**Why it matters.** Without a downloadable font a reader cannot read a CJK book at all. A font that fits the flash partition makes every page cheaper.
+### 龘 in Noto Serif TC
 
-**Where.**
-- The font list: `sd-fonts.yaml`, `build-sd-fonts.py`, `fontconvert_sdcard.py` (interval presets `cjk`, `hangul`).
-- `FlashFontPartition`, and `partitions.csv`.
-- The font download manager (`FontInstaller`, `/api/fonts/*`).
+**Open.** U+9F98 has 621 points, over the CFF scratch cap of 512 points, and draws as missing in either outline format.
+A larger block for every family is not worth one glyph. A Hong Kong or full-set family would need it.
 
-**What was tried.** Building takes time:
-- NotoSansCJK at one size takes over 30 minutes on a desktop, so the script's default timeout fails;
-- `--timeout 14400`, with sizes built in parallel through separate configs, works.
+**Next step.** Raise the cap only if such a family is added.
 
-**Options.**
-1. **A common-characters subset** at 14 pt: GB2312 + JIS X 0208 + kana + Hangul, about 8-10k glyphs, ~2-2.5 MB. It fits flash and covers Chinese, Japanese and Korean in one family. Rare characters then need a fallback to a full SD font.
-2. **Grow the font partition.** There is little room: the app image uses ~89 % of each 6.4 MB OTA slot.
-3. **Ship 12 pt only.** It fits today, but 12 pt CJK is small on the X3.
-4. **TTF Stage 2c-4** (next item): CJK TrueType fonts loaded from SD.
+## Font Manager follow-ups
 
-**Decided:** option 4, through the CJK fonts spec.
+**Open.** Left out of the CJK families' round (`docs/design/cjk-ttf-fonts.md`, section 6.5):
+- **Uploading a `.ttf` or `.otf` through the web page as it is.** The upload takes `.cpfont` only, and the Convert card
+  needs its own choice for it.
+- **A family installed but not listed.** The web page's installed list comes from the registry, so such a family is
+  missing from it and only the device can delete it.
+- **Resume works per file.** An interrupted one-file family (every `.otf`) restarts from zero.
+- **The card's free space is cached for 20 s.** The SDK caches the used bytes
+  (`freeink-sdk/libs/hardware/SDCardManager/src/SDCardManager.cpp`) and a remove or a write does not invalidate the
+  cache. A Retry right after deleting a family, or the second family of a "Download all", can be judged on the old
+  figure; a batch can then run the card full mid-download (a loud failure, recoverable by resume).
+
+**Where.** `FontInstaller`, `FontDownloadActivity`, the `/api/fonts/*` handlers and the font page.
+
+**Next step.** Take them one at a time. For the last, invalidate the cache in the SDK's remove, removeDir and write paths.
 
 ## TTF Stage 2c-4: TrueType families too large for flash mode
 
 **Shipped** (#506): a family too large for flash mode keeps its tables in the glyph store and reads its outlines from
 the card (SD mode); CFF families do the same since #542. Font-selector previews for TTF families were assigned to this
 stage (TTF spec section 7.6); check the font selector before planning them.
-
-What follows is the stage as it was planned.
-
-**Where.** The design is `docs/superpowers/specs/2026-10-13-ttf-fonts-design.md` (on master):
-- section 4, the glyph store;
-- section 5.1, `FontBytes` in flash versus SD mode (a 4 KB page cache);
-- section 7.6, previews;
-- section 8, the 2c-4 row.
-
-Already decided:
-- no kerning for CJK pairs, with a range check before the GPOS store probe (A2 short-circuits `EpdFont::getKerning` for built-in and `.cpfont` fonts only);
-- SD-mode families start without kerning or ligatures (`FontBytes::data()` is null);
-- copying GPOS kern data into the mapped table area for large Latin and Cyrillic families can come later.
 
 **Shipped: the glyph store makes room.** The store's log is a ring of segments. A full log reclaims its oldest segment
 (keeping the glyphs drawn most) and a worn index is rebuilt, in idle time (`EpubReaderActivity::stepGlyphStoreRoom`) and
@@ -258,9 +263,10 @@ the boxes the faces made it worse: the Home card showed a lone 雪, the one char
 
 **Why it matters.** Even with a CJK reading font, a CJK reader cannot find or navigate their books.
 
-**Next step.** Chain the reader's SD CJK font behind the CJK UI faces, as upstream does (crosspoint-reader
+**Next step.** Chain the installed CJK family (`NotoSans<XX>`/`NotoSerif<XX>`, `.otf`, drawn through `TtfFont`; not an
+SD bitmap font) behind the CJK UI faces, as upstream does with its SD font (crosspoint-reader
 #2521, Tsz Ho Sze, and follow-ups #3026, #3071, #3484, #3646): `FallbackFaceProvider` already serves a
-UI face's misses, so the SD font would be its last source. Questions that decide the design:
+UI face's misses, so the installed family would be its last source. Questions that decide the design:
 - An SD font is 2-bit and the UI faces are 1-bit, and the renderer draws at the depth of the font it
   was asked for: the 2-bit glyph has to be thresholded on the way, or drawn as its ink mask (#500's
   1-bit pre-render does exactly that).
@@ -349,10 +355,9 @@ These were set aside in the layout spec (section 3) and the A3 spec (section 10)
 
 ## Testing on a device
 
-**Fonts.** Build them locally:
-1. Copy `sd-fonts.yaml` to a scratch file and keep only the CJK entries, uncommented.
-2. Run `build-sd-fonts.py --config <scratch> --only NotoSansCJK --timeout 14400`, one config per size, so the sizes build in parallel.
-3. Install over Wi-Fi: on the File Transfer web server, `POST /api/fonts/upload?family=<Family>` with the `.cpfont` as multipart `file`. Use relative file paths with the Windows curl. Books go in with `POST /upload?path=/books`.
+**Fonts.** Install a CJK family from the Font Manager. For a branch that is not merged, use the scratch-manifest
+recipe of Task 10, Step 1 in `docs/superpowers/plans/2026-10-21-cjk-fonts-font-manager.md`. Rebuilding the families
+needs `pip install fonttools==4.63.0`.
 
 **Driving the X3.** Use the serial test API (`docs/serial-test-api.md`, `tools/devctl.py`):
 - **Choose the font:** `CMD:SET:fontFamily=<index or name>`. On the boot straight into USB Transfer the family keys are refused; leave that screen first.

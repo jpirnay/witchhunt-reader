@@ -8,7 +8,7 @@
 
 **Tech Stack:** C++20 firmware (PlatformIO, ESP32-C3/S3), GoogleTest host tests on `SimNorFlash` (`test/glyph_store`, `test/ttf_font`), the serial test API (`docs/serial-test-api.md`), the `bench_glyph_store` sketch.
 
-**Spec:** `docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md` section 8 (this plan replaces 8.2's "How: the index is erased, then every live record inserted again"); the shipped plan `docs/superpowers/plans/2026-10-20-glyph-store-makes-room.md`; `docs/file-formats.md` (CPTT); `docs/future_work/cjk.md`, "Glyph store: a faster index rebuild" (the four ideas).
+**Spec:** `docs/design/cjk-ttf-fonts.md` section 8 (this plan replaces 8.2's "How: the index is erased, then every live record inserted again"); the shipped plan `docs/superpowers/plans/2026-10-20-glyph-store-makes-room.md`; `docs/file-formats.md` (CPTT); `docs/future_work/cjk.md`, "Glyph store: a faster index rebuild" (the four ideas).
 
 ## Analysis
 

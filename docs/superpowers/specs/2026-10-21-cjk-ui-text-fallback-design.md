@@ -6,7 +6,7 @@ Working material, like every spec here: when the work merges, lasting parts move
 open items to `docs/future_work/cjk.md`, and this file is deleted.
 
 Roadmap step 6 in `docs/future_work/cjk.md`. It builds on the CJK fonts spec
-(`docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md`), which set the UI fallback aside as its own design
+(`docs/design/cjk-ttf-fonts.md`), which set the UI fallback aside as its own design
 (section 2 there), and needs its step 5, the CJK families as `.otf` downloads. Until those ship it can be built and
 tested with a hand-installed `.otf` family, since CFF outlines have merged (#542, #544).
 
