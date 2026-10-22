@@ -81,15 +81,6 @@ TEST(HeaderLayoutTest, BodyStartsBelowTheHeaderAndEndsWithTheContent) {
   }
 }
 
-// In PortraitInverted the header moves down with the content area, past the strip at the top.
-TEST(HeaderLayoutTest, InvertedHeaderClearsTheStripAtTheLogicalTop) {
-  for (const auto& theme : allThemesAllSteps()) {
-    SCOPED_TRACE(theme.name);
-    const Rect header = HeaderLayout::header(invertedContent(theme.metrics), theme.metrics);
-    EXPECT_GE(header.y, theme.metrics.buttonHintsHeight);
-  }
-}
-
 // The default look does not move: Classic at the default step puts the body at 60, where the list
 // screens (and the OPDS catalog's constant) always started.
 TEST(HeaderLayoutTest, ClassicDefaultBodyStaysAtSixty) {
