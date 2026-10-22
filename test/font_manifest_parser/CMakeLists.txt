@@ -22,6 +22,7 @@ target_include_directories(FontManifestParserTest PRIVATE
 
 target_compile_definitions(FontManifestParserTest PRIVATE
   FONT_MANIFEST_PATH="${REPO_ROOT}/assets/sd-fonts/fonts.json"
+  FONT_MANIFEST_V3_PATH="${REPO_ROOT}/assets/sd-fonts/fonts-v3.json"
   SD_FONTS_DIR="${REPO_ROOT}/assets/sd-fonts"
 )
 

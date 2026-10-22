@@ -488,6 +488,33 @@ another change came while the build ran. While it is there, the next visit to Ne
 the index (`LibraryStaleness::rebuildNeeded`). Being inside `/.crosspoint`, writing it is not itself a
 change.
 
+## The font manifests (`fonts.json`, `fonts-v3.json`)
+
+`assets/sd-fonts/fonts.json` and `fonts-v3.json`, both written by `scripts/generate-font-manifest.py --config` from
+one scan of `sd-fonts.yaml`, and fetched from `master` by the Font Manager and the web font API
+(`FONT_MANIFEST_URL`, `src/util/FontManifestReader.h`). `FontManifestReader` streams them through
+`FontManifestParser` into a `FontCatalog`.
+
+Version 2 (`fonts.json`):
+
+```json
+{ "version": 2, "baseUrl": "https://.../assets/sd-fonts/",
+  "families": [ { "name": "Alegreya", "description": "...", "styles": ["regular", "bold"],
+                  "files": [ { "name": "Alegreya/Alegreya_10.cpfont", "size": 269830, "crc32": 3998528417 } ] } ] }
+```
+
+Version 3 (`fonts-v3.json`) adds two keys to a family:
+
+- `format`: `cpfont` (the default when it is left out), `ttf` or `otf`. A `.cpfont` family has one file per size; a
+  `ttf` or `otf` family has one file per style, and the reader draws every size from it.
+- `inDownloadAll`: a boolean, `true` when left out. The CJK families say `false`: "Download all" does not take them.
+
+Who reads which: `fonts.json` lists the `.cpfont` families alone, for firmware from before version 3, which rejects a
+manifest of a version it does not know. Firmware with this format reads `fonts-v3.json`, and versions 1 to 3 alike.
+A family of an unknown format is left out, and so is one whose files are not of its format (judged when the family
+closes, since `format` may follow `files`: a `.ttf` in an `otf` family, an `.otf` in a `cpfont` one, any other
+extension).
+
 ## `fonts_families.bin`
 
 `/fonts_families.bin`, at the card's root: the Font Manager's list of downloadable families, parked on
@@ -498,8 +525,8 @@ device's byte order:
 
 | Part | Layout |
 |---|---|
-| Header, 16 B | `u32` magic `CPFC`; `u16` version (1); `u16` families, files, stringBytes; `u32` blockBytes, the whole block |
-| Families | 12 B each: `u32` totalSize; `u16` name, description, firstFile; `u8` flags (bit 0 installed, bit 1 update available, bit 2 resumable download); `u8` 0 |
+| Header, 16 B | `u32` magic `CPFC`; `u16` version (2); `u16` families, files, stringBytes; `u32` blockBytes, the whole block |
+| Families | 12 B each: `u32` totalSize; `u16` name, description, firstFile; `u8` flags (bit 0 installed, bit 1 update available, bit 2 resumable download, bit 3 an outline family, bit 4 not in "Download all"); `u8` 0 |
 | Files | 12 B each: `u32` size, crc32; `u16` name; `u8` hasCrc32; `u8` 0 |
 | Strings | NUL-terminated; `name` and `description` are offsets into them |
 

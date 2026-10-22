@@ -8,10 +8,6 @@
 #include "network/HttpDownloader.h"
 #include "util/FontCatalog.h"
 
-#ifndef FONT_MANIFEST_URL
-#define FONT_MANIFEST_URL "https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/fonts.json"
-#endif
-
 // Adapted from upstream crosspoint-reader's FontDownloadActivity
 // (develop @ cdac66ffe, src/activities/settings/FontDownloadActivity.cpp).
 // Only the family list's FreeInkUI skeleton is theirs. The stash-to-SD download, resume, the v1

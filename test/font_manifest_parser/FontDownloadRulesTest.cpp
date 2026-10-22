@@ -1,6 +1,7 @@
 // FontDownloadRules: what a font download is checked for, on the device and from the web page alike: the kind of file
 // a manifest names, what a downloaded file of that kind starts with, room on the card, and whether a family is an
 // update.
+#include <FontCatalog.h>
 #include <FontDownloadRules.h>
 #include <gtest/gtest.h>
 
@@ -110,4 +111,35 @@ TEST(FontDownloadRulesTest, AFolderHoldingNoneOfTheManifestsFilesIsNotAnUpdate) 
   EXPECT_TRUE(FontDownloadRules::isUpdate(1, 0, 1));  // a hosted family that gained a file
   EXPECT_TRUE(FontDownloadRules::isUpdate(0, 1, 0));  // a file of the same name, other bytes
   EXPECT_FALSE(FontDownloadRules::isUpdate(0, 0, 0));
+}
+
+// "Download all" takes the families that are not on the card and say they belong to it; an update to an installed
+// family is the caller's `|| hasUpdate`, and does not bring a family into the set.
+TEST(FontDownloadRulesTest, DownloadAllTakesOnlyMissingFamiliesThatJoinIt) {
+  const auto feedFamilies = [](FontCatalog::Builder& builder) {
+    builder.beginFamily();
+    builder.keepFamily("A", 1);
+    builder.beginFamily();
+    builder.outline(true);
+    builder.inDownloadAll(false);
+    builder.keepFamily("B", 1);
+    builder.beginFamily();
+    builder.keepFamily("C", 1);
+  };
+  FontCatalog::Builder counter;
+  feedFamilies(counter);
+  FontCatalog catalog;
+  ASSERT_TRUE(catalog.allocate(counter.size()));
+  FontCatalog::Builder filler(catalog);
+  feedFamilies(filler);
+  catalog.setInstalled(2, true);
+
+  EXPECT_TRUE(FontDownloadRules::downloadAllTakes(catalog, 0));
+  EXPECT_FALSE(FontDownloadRules::downloadAllTakes(catalog, 1));
+  EXPECT_FALSE(FontDownloadRules::downloadAllTakes(catalog, 2));
+
+  catalog.setHasUpdate(1, true);
+  EXPECT_FALSE(FontDownloadRules::downloadAllTakes(catalog, 1));
+  catalog.setHasUpdate(2, true);
+  EXPECT_FALSE(FontDownloadRules::downloadAllTakes(catalog, 2));
 }

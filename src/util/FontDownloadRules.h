@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "FontCatalog.h"
+
 // What the Font Manager and the web font API check of a font download, apart from the card so the host can test it:
 // which kind of file a manifest names, what a downloaded file of that kind starts with, whether the card has room for
 // the download, and whether a family already on the card is being updated.
@@ -71,6 +73,12 @@ constexpr bool fits(const uint64_t freeBytes, const uint64_t downloadBytes) {
 // is someone else's family of that name, not an update.
 constexpr bool isUpdate(const size_t same, const size_t changed, const size_t absent) {
   return changed > 0 || (absent > 0 && same > 0);
+}
+
+// "Download all" on the device, and the web's "all" with updates: a family that is not on the card and says it
+// belongs. An update to an installed family is the caller's `|| catalog.hasUpdate(family)`.
+inline bool downloadAllTakes(const FontCatalog& catalog, const size_t family) {
+  return !catalog.installed(family) && catalog.inDownloadAll(family);
 }
 
 }  // namespace FontDownloadRules
