@@ -163,11 +163,14 @@ bool readFile(const fs::path& path, std::string& out) {
 
 class EpubPipelineTest : public testing::TestWithParam<Case> {};
 
+// The warm run, over the variants whose layout the book-level cache can change (see warmCases()).
+class EpubPipelineWarmTest : public EpubPipelineTest {};
+
 // runAndDump always rebuilds every section, so the second run is not a page cache served without a
 // build. What it does read back instead of the archive is the book-level state the first run left:
 // book.bin, the compiled CSS index, the image manifest, the banked chapter XHTML and the footnote
 // store with its resolved-spine bits.
-TEST_P(EpubPipelineTest, RebuildOverWarmBookCacheMatchesColdRun) {
+TEST_P(EpubPipelineWarmTest, RebuildOverWarmBookCacheMatchesColdRun) {
   const Case c = GetParam();
   const std::string cacheDir = caseCacheDir(c, "warm");
   const std::string cold = runOnce(c, cacheDir);
@@ -227,12 +230,27 @@ std::vector<Case> corpusCases() {
   return cases;
 }
 
-INSTANTIATE_TEST_SUITE_P(SyntheticCorpus, EpubPipelineTest, testing::ValuesIn(corpusCases()),
-                         [](const testing::TestParamInfo<Case>& info) {
-                           std::string name = stem(info.param.epub) + variantSuffix(info.param);
-                           for (char& c : name)
-                             if (!isalnum(static_cast<unsigned char>(c))) c = '_';
-                           return name;
-                         });
+// The cases whose warm run can differ from their cold one. What the warm run reads back is the book-level cache,
+// which the default layout, normalization (the CSS index's font sizes) and the accent families (its font families)
+// all draw on. Hyphenation and bionic reading draw on none of it: the language the hyphenator needs comes from
+// book.bin, which the default warm case of the same book already compares (its BOOK line).
+std::vector<Case> warmCases() {
+  std::vector<Case> cases = corpusCases();
+  cases.erase(
+      std::remove_if(cases.begin(), cases.end(),
+                     [](const Case& c) { return c.variant == Variant::Hyphenation || c.variant == Variant::Bionic; }),
+      cases.end());
+  return cases;
+}
+
+std::string caseName(const testing::TestParamInfo<Case>& info) {
+  std::string name = stem(info.param.epub) + variantSuffix(info.param);
+  for (char& c : name)
+    if (!isalnum(static_cast<unsigned char>(c))) c = '_';
+  return name;
+}
+
+INSTANTIATE_TEST_SUITE_P(SyntheticCorpus, EpubPipelineTest, testing::ValuesIn(corpusCases()), caseName);
+INSTANTIATE_TEST_SUITE_P(SyntheticCorpus, EpubPipelineWarmTest, testing::ValuesIn(warmCases()), caseName);
 
 }  // namespace
