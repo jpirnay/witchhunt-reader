@@ -9,6 +9,9 @@ add_executable(CssParserTest
   ${REPO_ROOT}/lib/uzlib/src/tinflate.c
 )
 
+# Firmware's tinflate build (platformio.ini): the memcpy LZ copy.
+target_compile_definitions(CssParserTest PRIVATE UZLIB_CONF_USE_MEMCPY=1)
+
 target_include_directories(CssParserTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${REPO_ROOT}
@@ -39,6 +42,9 @@ add_executable(EpubCssCacheTest
   ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp
   ${REPO_ROOT}/lib/uzlib/src/tinflate.c
 )
+
+# Firmware's tinflate build (platformio.ini): the memcpy LZ copy.
+target_compile_definitions(EpubCssCacheTest PRIVATE UZLIB_CONF_USE_MEMCPY=1)
 
 target_include_directories(EpubCssCacheTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -100,6 +106,9 @@ add_executable(EpubCssCensusTest
   ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp
   ${REPO_ROOT}/lib/uzlib/src/tinflate.c
 )
+
+# Firmware's tinflate build (platformio.ini): the memcpy LZ copy.
+target_compile_definitions(EpubCssCensusTest PRIVATE UZLIB_CONF_USE_MEMCPY=1)
 
 target_include_directories(EpubCssCensusTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
