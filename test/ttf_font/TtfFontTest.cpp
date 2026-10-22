@@ -138,6 +138,61 @@ Reference emboldened(const std::vector<uint8_t>& file, const uint32_t cp, const 
   return emboldenedAt(file, cp, ttf::ppemFromPoints(points));
 }
 
+/// The same, slanted at the engine's shear, emboldened first when `bold`: what a glyph of a synthetic italic style must
+/// equal. The plan is the one a regular-only family merges.
+Reference slantedAt(const std::vector<uint8_t>& file, const uint32_t cp, const uint32_t ppem, const bool bold = false) {
+  FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+  ttf::Face face;
+  EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+  ttf::Rasterizer rasterizer;
+  EXPECT_TRUE(rasterizer.allocate(
+      ttf::planScratch(face, static_cast<uint32_t>(TtfFont::kMaxNativePx) << 6, ttf::kPoolBytesFlash, true, true)));
+  Reference ref;
+  EXPECT_EQ(ttf::Status::Ok, rasterizer.load(bytes, face, ttf::glyphIndex(bytes, face, cp), ppem, &ref.metrics));
+  if (bold) EXPECT_EQ(ttf::Status::Ok, rasterizer.embolden(ttf::emboldenStrength(ppem), &ref.metrics));
+  EXPECT_EQ(ttf::Status::Ok, rasterizer.slant(&ref.metrics));
+  EXPECT_EQ(ttf::Status::Ok, rasterizer.rasterize(rasterizer.output()));
+  ref.bitmap.assign(rasterizer.output(), rasterizer.output() + ref.metrics.dataLength);
+  return ref;
+}
+
+Reference slanted(const std::vector<uint8_t>& file, const uint32_t cp, const uint8_t points, const bool bold = false) {
+  return slantedAt(file, cp, ttf::ppemFromPoints(points), bold);
+}
+
+/// What an italic style must draw for `cp`, where the slant may not fit: the first of the slanted glyph (emboldened
+/// first when `bold`), the same without the slant, and the plain one, that the rasterizer draws with left and top
+/// inside int8. `*leaning` says whether the slant stayed.
+Reference drawnAt(const std::vector<uint8_t>& file, const uint32_t cp, const uint32_t ppem, const bool bold,
+                  bool* leaning) {
+  FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+  ttf::Face face;
+  EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+  ttf::Rasterizer rasterizer;
+  EXPECT_TRUE(rasterizer.allocate(
+      ttf::planScratch(face, static_cast<uint32_t>(TtfFont::kMaxNativePx) << 6, ttf::kPoolBytesFlash, true, true)));
+  const uint16_t index = ttf::glyphIndex(bytes, face, cp);
+  Reference ref;
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    const bool slant = attempt == 0;
+    const bool embolden = bold && attempt < 2;
+    ttf::Status status = rasterizer.load(bytes, face, index, ppem, &ref.metrics);
+    if (status == ttf::Status::Ok && embolden) {
+      status = rasterizer.embolden(ttf::emboldenStrength(ppem), &ref.metrics);
+    }
+    if (status == ttf::Status::Ok && slant) status = rasterizer.slant(&ref.metrics);
+    const bool fits = ref.metrics.left >= INT8_MIN && ref.metrics.left <= INT8_MAX && ref.metrics.top >= INT8_MIN &&
+                      ref.metrics.top <= INT8_MAX;
+    if (status != ttf::Status::Ok || !fits) continue;
+    EXPECT_EQ(ttf::Status::Ok, rasterizer.rasterize(rasterizer.output()));
+    ref.bitmap.assign(rasterizer.output(), rasterizer.output() + ref.metrics.dataLength);
+    *leaning = slant;
+    return ref;
+  }
+  ADD_FAILURE() << "U+" << std::hex << cp << " draws in no form";
+  return ref;
+}
+
 constexpr uint32_t px(const uint32_t pixels) { return pixels << 6; }
 
 /// A glyph's bitmap, wherever TtfFont keeps it: the ring, or the store's log.
@@ -698,7 +753,7 @@ TEST_F(TtfFontTest, ABrokenGlyphIsMarkedMissingAndNotTriedAgain) {
   EXPECT_EQ(nullptr, font->glyph(kRegular, 'B'));
   EXPECT_EQ(writes, flash.programCalls());
   EXPECT_NE(nullptr, font->glyph(kRegular, 'A'));
-  EXPECT_EQ(nullptr, font->font(kItalic));  // a one-style family; its bold is synthetic (spec 7.1)
+  EXPECT_TRUE(font->slanted(kItalic));  // a one-style family: its bold and italic are synthetic (spec 7.1, 7.4)
 }
 
 TEST_F(TtfFontTest, AGlyphReachingTooFarFromThePenIsMissing) {
@@ -1172,7 +1227,8 @@ TEST_F(TtfFontTest, AFontWithoutKerningAsksNothing) {
 TEST_F(TtfFontTest, AFamilyHoldsMemoryOnlyForTheStylesItHas) {
   Font built = kernedBoxes();
   built.extraTables.clear();  // no kerning: nothing else a style holds differs between them
-  built.macStyle = 1;  // declared bold, so no style is synthetic: ASyntheticStyleCostsItsFontsAndNoFile counts those
+  built.macStyle =
+      3;  // declared bold italic, so no style is synthetic: ASyntheticStyleCostsItsFontsAndNoFile counts those
   const std::vector<uint8_t> bytes = buildFont(built);
   const uint8_t* const identities[] = {kIdentityA, kIdentityB, kIdentityA};
   const int styleCounts[] = {1, 2, 4};
@@ -1309,7 +1365,7 @@ TEST_F(TtfFontSetTest, TheFamiliesAreInstalledTogetherAndTheNextLoadReusesThem) 
   EXPECT_EQ(2, set->familyCount());
   EXPECT_NE(nullptr, set->font(0)->font(kItalic));
   EXPECT_NE(nullptr, set->font(1)->font(kBold));
-  EXPECT_EQ(nullptr, set->font(1)->font(kItalic));  // no Inter italic here
+  EXPECT_TRUE(set->font(1)->slanted(kItalic));  // no Inter italic file: the regular, slanted (spec 7.4)
   EXPECT_EQ(nullptr, set->font(2));
 }
 
@@ -2501,22 +2557,26 @@ TEST_F(TtfFontSetTest, AnOpenWithoutMemoryAfterAReinstallFailsForNowAndTheNextLo
 
 // --- Synthetic bold (spec 7.1) ---
 
-TEST_F(TtfFontTest, ARegularOnlyFamilyDrawsBoldAndBoldItalicEmboldened) {
+TEST_F(TtfFontTest, ARegularOnlyFamilyDrawsBoldEmboldenedItalicSlantedAndBoldItalicBoth) {
   for (int s = 1; s < 4; ++s) files[s].bytes.clear();
   const auto font = open();
   ASSERT_NE(nullptr, font);
-  EXPECT_FALSE(font->synthetic(kRegular));
-  EXPECT_TRUE(font->synthetic(kBold));
-  EXPECT_FALSE(font->synthetic(kItalic));
-  EXPECT_TRUE(font->synthetic(kBoldItalic));
+  const bool bolds[4] = {false, true, false, true};
+  const bool slants[4] = {false, false, true, true};
+  for (uint8_t s = 0; s < 4; ++s) {
+    EXPECT_EQ(bolds[s], font->emboldened(s)) << int{s};
+    EXPECT_EQ(slants[s], font->slanted(s)) << int{s};
+  }
   ASSERT_NE(nullptr, font->font(kBold));
+  ASSERT_NE(nullptr, font->font(kItalic));
   ASSERT_NE(nullptr, font->font(kBoldItalic));
   EXPECT_NE(font->font(kRegular), font->font(kBold));
+  EXPECT_NE(font->font(kRegular), font->font(kItalic));
   EXPECT_NE(font->font(kRegular), font->font(kBoldItalic));
-  EXPECT_EQ(nullptr, font->font(kItalic));  // only bold is synthesized: the italic falls back to the regular
   const std::vector<uint8_t>& regular = files[kRegular].bytes;
   expectDrawnAs(emboldened(regular, 'W', 14), *font, kBold, font->glyph(kBold, 'W'));
-  expectDrawnAs(emboldened(regular, 'W', 14), *font, kBoldItalic, font->glyph(kBoldItalic, 'W'));
+  expectDrawnAs(slanted(regular, 'W', 14), *font, kItalic, font->glyph(kItalic, 'W'));
+  expectDrawnAs(slanted(regular, 'W', 14, true), *font, kBoldItalic, font->glyph(kBoldItalic, 'W'));
   expectDrawnAs(reference(regular, 'W', 14), *font, kRegular, font->glyph(kRegular, 'W'));
 }
 
@@ -2527,13 +2587,15 @@ TEST_F(TtfFontTest, BoldItalicIsEmboldenedFromTheItalicWhenThereIsOne) {
   ASSERT_NE(nullptr, font);
   EXPECT_TRUE(font->synthetic(kBold));
   EXPECT_TRUE(font->synthetic(kBoldItalic));
+  for (uint8_t s = 0; s < 4; ++s) EXPECT_FALSE(font->slanted(s)) << int{s};
   expectDrawnAs(emboldened(files[kRegular].bytes, 'W', 14), *font, kBold, font->glyph(kBold, 'W'));
   expectDrawnAs(emboldened(files[kItalic].bytes, 'W', 14), *font, kBoldItalic, font->glyph(kBoldItalic, 'W'));
   expectDrawnAs(reference(files[kItalic].bytes, 'W', 14), *font, kItalic, font->glyph(kItalic, 'W'));
 }
 
 TEST_F(TtfFontTest, AFamilyWithABoldFileIsNeverEmboldened) {
-  // Spec 7.1's first row: a bold file and no bold italic one. Bold italic falls back as it always has, to the real
+  // Spec 7.1's first row, and 7.4's fourth: a bold file and no bold italic one, with a real italic. synthetic() covers
+  // the slant too, so nothing is drawn from another style's file. Bold italic falls back as it always has, to the real
   // upright Bold.
   files[kBoldItalic].bytes.clear();
   const auto font = open();
@@ -2557,6 +2619,9 @@ TEST_F(TtfFontTest, ABoldFileServingAsTheRegularIsNotEmboldenedAgain) {
     ASSERT_NE(nullptr, font) << name;
     EXPECT_FALSE(font->synthetic(kBold)) << name;
     EXPECT_EQ(nullptr, font->font(kBold)) << name;
+    EXPECT_TRUE(font->slanted(kItalic)) << name;
+    // Bold only by its face: bold italic falls back to the slanted face (EpdFontFamily::getFont).
+    EXPECT_EQ(nullptr, font->font(kBoldItalic)) << name;
   }
 }
 
@@ -2709,7 +2774,7 @@ TEST_F(TtfFontTest, ASyntheticStyleCostsItsFontsAndNoFile) {
   size_t family[2] = {};
   size_t native[2] = {};
   for (int i = 0; i < 2; ++i) {
-    built.macStyle = i == 0 ? 1 : 0;  // declared bold, then regular: the second draws bold and bold italic emboldened
+    built.macStyle = i == 0 ? 3 : 0;  // declared bold italic, then regular: the second draws three styles synthetically
     useBuiltFont(built);
     ASSERT_NE(nullptr, open(identities[i]));  // installed: what an install or the first mapping keeps is not counted
     const size_t before = heapBytesHeld;
@@ -2721,13 +2786,14 @@ TEST_F(TtfFontTest, ASyntheticStyleCostsItsFontsAndNoFile) {
     ASSERT_TRUE(font->nativeFonts(40, fonts));
     native[i] = heapBytesHeld - beforeNative;
     EXPECT_EQ(i == 1, fonts[kBold] != nullptr);
+    EXPECT_EQ(i == 1, fonts[kItalic] != nullptr);
   }
-  std::printf("[  heap    ] a one-file family without and with synthetic bold: %zu/%zu B; a native size: %zu/%zu B\n",
+  std::printf("[  heap    ] a one-file family without and with synthetic styles: %zu/%zu B; a native size: %zu/%zu B\n",
               family[0], family[1], native[0], native[1]);
   EXPECT_GT(family[1], family[0]);
-  EXPECT_LT(family[1] - family[0], 512u);
+  EXPECT_LT(family[1] - family[0], 768u);
   EXPECT_GT(native[1], native[0]);
-  EXPECT_LT(native[1] - native[0], 512u);
+  EXPECT_LT(native[1] - native[0], 768u);
 }
 
 TEST_F(TtfFontSetTest, SyntheticBoldInSdModeIsDrawnFromTheRegularFile) {
@@ -2750,6 +2816,204 @@ TEST_F(TtfFontSetTest, SyntheticBoldInSdModeIsDrawnFromTheRegularFile) {
   EXPECT_LE(set->sdPageReads() - before, 10u + 1u);  // a page for each charstring, and the one the last runs into
   for (const uint32_t cp : {0x3042u, 0x3044u, 0x3046u, 0x3048u, 0x304Au, 0x304Bu, 0x304Du, 0x304Fu, 0x3051u, 0x3053u}) {
     expectDrawnAs(emboldened(serif[kRegular].bytes, cp, 14), font, kBold, font.glyph(kBold, cp));
+  }
+  EXPECT_EQ(10u, font.renders());  // stored by the batch
+  expectDrawnAs(reference(serif[kRegular].bytes, 0x3042, 14), font, kRegular, font.glyph(kRegular, 0x3042));
+  expectWrittenOnce(chip);
+}
+
+// --- Synthetic italic (spec 7.4) ---
+
+TEST_F(TtfFontTest, ARegularAndBoldFamilyDrawsItalicAndBoldItalicSlanted) {
+  files[kItalic].bytes.clear();
+  files[kBoldItalic].bytes.clear();
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  const bool slants[4] = {false, false, true, true};
+  for (uint8_t s = 0; s < 4; ++s) {
+    EXPECT_FALSE(font->emboldened(s)) << int{s};
+    EXPECT_EQ(slants[s], font->slanted(s)) << int{s};
+  }
+  expectDrawnAs(slanted(files[kRegular].bytes, 'W', 14), *font, kItalic, font->glyph(kItalic, 'W'));
+  expectDrawnAs(slanted(files[kBold].bytes, 'W', 14), *font, kBoldItalic, font->glyph(kBoldItalic, 'W'));
+  // The family's fallback for a style it lacks serves the advance of the file it falls back to.
+  const EpdFontFamily family(font->font(kRegular), font->font(kBold), font->font(kItalic), font->font(kBoldItalic));
+  const EpdGlyphRef italic = family.getGlyph('W', EpdFontFamily::ITALIC);
+  const EpdGlyphRef boldItalic = family.getGlyph('W', EpdFontFamily::BOLD_ITALIC);
+  ASSERT_TRUE(italic);
+  ASSERT_TRUE(boldItalic);
+  EXPECT_EQ(reference(files[kRegular].bytes, 'W', 14).metrics.advanceX, italic.advanceX);
+  EXPECT_EQ(reference(files[kBold].bytes, 'W', 14).metrics.advanceX, boldItalic.advanceX);
+}
+
+TEST_F(TtfFontTest, AnItalicFileServingAsTheRegularIsNotSlantedAgain) {
+  const char* const names[] = {"Bookerly/Bookerly-Italic.ttf", "NotoSans/NotoSans-Italic.ttf"};
+  const uint8_t* const identities[] = {kIdentityA, kIdentityB};
+  for (int i = 0; i < 2; ++i) {
+    files[kRegular].bytes = readFont(names[i]);
+    for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+    const auto font = open(identities[i]);
+    ASSERT_NE(nullptr, font) << names[i];
+    EXPECT_FALSE(font->slanted(kItalic)) << names[i];
+    EXPECT_EQ(nullptr, font->font(kItalic)) << names[i];
+    EXPECT_TRUE(font->emboldened(kBold)) << names[i];
+    EXPECT_TRUE(font->emboldened(kBoldItalic)) << names[i];
+    expectDrawnAs(emboldened(files[kRegular].bytes, 'W', 14), *font, kBoldItalic, font->glyph(kBoldItalic, 'W'));
+  }
+}
+
+TEST_F(TtfFontTest, AFaceWhoseFsSelectionSaysItalicOrObliqueIsNotSlanted) {
+  const uint16_t selections[] = {1, static_cast<uint16_t>(1u << 9)};
+  const uint8_t* const identities[] = {kIdentityA, kIdentityB};
+  for (int i = 0; i < 2; ++i) {
+    Font built = kernedBoxes();
+    built.os2 = true;
+    built.os2Selection = selections[i];
+    useBuiltFont(built);
+    const auto font = open(identities[i]);
+    ASSERT_NE(nullptr, font) << i;
+    EXPECT_FALSE(font->slanted(kItalic)) << i;
+    EXPECT_EQ(nullptr, font->font(kItalic)) << i;
+    EXPECT_TRUE(font->emboldened(kBold)) << i;
+  }
+}
+
+TEST_F(TtfFontTest, AFaceFlaggedItalicOnlyByItsAngleIsNotSlanted) {
+  // OpenDyslexic Italic: macStyle 0, fsSelection 0xC0, post.italicAngle -15.
+  files[kRegular].bytes = readFont("OpenDyslexic/OpenDyslexic-Italic.otf");
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  EXPECT_FALSE(font->slanted(kItalic));
+  EXPECT_EQ(nullptr, font->font(kItalic));
+  EXPECT_TRUE(font->emboldened(kBold));
+  EXPECT_TRUE(font->emboldened(kBoldItalic));
+  expectDrawnAs(emboldened(files[kRegular].bytes, 'W', 14), *font, kBoldItalic, font->glyph(kBoldItalic, 'W'));
+}
+
+TEST_F(TtfFontTest, SyntheticItalicIsStoredUnderTheItalicStyleAndServesTheNextBoot) {
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+  {
+    const auto font = open();
+    ASSERT_NE(nullptr, font);
+    ASSERT_NE(nullptr, font->glyph(kRegular, 'W'));
+    ASSERT_NE(nullptr, font->glyph(kItalic, 'W'));
+    ASSERT_NE(nullptr, font->glyph(kBoldItalic, 'W'));
+    EXPECT_EQ(3u, font->renders());  // each style has its own key
+  }
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  expectDrawnAs(reference(files[kRegular].bytes, 'W', 14), *font, kRegular, font->glyph(kRegular, 'W'));
+  expectDrawnAs(slanted(files[kRegular].bytes, 'W', 14), *font, kItalic, font->glyph(kItalic, 'W'));
+  expectDrawnAs(slanted(files[kRegular].bytes, 'W', 14, true), *font, kBoldItalic, font->glyph(kBoldItalic, 'W'));
+  EXPECT_EQ(0u, font->renders());
+  EXPECT_EQ(3u, font->storeHits());
+}
+
+TEST_F(TtfFontTest, SyntheticItalicKernsAsItsFileAndKeepsItsAdvance) {
+  useBuiltFont(kernedBoxes());
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  EXPECT_TRUE(font->slanted(kItalic));
+  EXPECT_EQ(-47, font->kerning(kRegular, 'A', 'B'));
+  EXPECT_EQ(-47, font->kerning(kItalic, 'A', 'B'));
+  EXPECT_EQ(1u, font->kernLookups());
+  const EpdGlyph* regular = font->glyph(kRegular, 'A');
+  const EpdGlyph* italic = font->glyph(kItalic, 'A');
+  const EpdGlyph* bold = font->glyph(kBold, 'A');
+  const EpdGlyph* boldItalic = font->glyph(kBoldItalic, 'A');
+  ASSERT_NE(nullptr, regular);
+  ASSERT_NE(nullptr, italic);
+  ASSERT_NE(nullptr, bold);
+  ASSERT_NE(nullptr, boldItalic);
+  EXPECT_EQ(regular->advanceX, italic->advanceX);
+  EXPECT_EQ(regular->left, italic->left);
+  EXPECT_EQ(regular->top, italic->top);
+  EXPECT_EQ(regular->height, italic->height);
+  EXPECT_GT(italic->width, regular->width);
+  EXPECT_EQ(bold->advanceX, boldItalic->advanceX);
+}
+
+TEST_F(TtfFontTest, SyntheticItalicAtTheLargestNativeSizeIsSlantedWhereItFitsAndUprightWhereItDoesNot) {
+  const auto expectEveryGlyph = [this](const std::vector<uint8_t>& regular, const uint8_t* identity,
+                                       const uint32_t first, const uint32_t last, const size_t atLeast,
+                                       const bool bothKinds) {
+    files[kRegular].bytes = regular;
+    for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+    const auto font = open(identity);
+    ASSERT_NE(nullptr, font);
+    const EpdFont* fonts[4] = {};
+    ASSERT_TRUE(font->nativeFonts(font->maxNativePx(), fonts));
+    ASSERT_NE(nullptr, fonts[kItalic]);
+    ASSERT_NE(nullptr, fonts[kBoldItalic]);
+    std::vector<uint32_t> codepoints;
+    for (const uint32_t cp : mappedCodepoints(regular)) {
+      if (cp >= first && cp <= last && !utf8IsDefaultIgnorable(cp) && nativeGlyph(fonts[kRegular], cp)) {
+        codepoints.push_back(cp);
+      }
+    }
+    ASSERT_GT(codepoints.size(), atLeast);
+    const uint32_t ppem = px(font->maxNativePx());
+    size_t leaningItalic = 0;
+    size_t uprightItalic = 0;
+    for (const uint32_t cp : codepoints) {
+      bool leaning = false;
+      expectDrawnAs(drawnAt(regular, cp, ppem, false, &leaning), *font, kItalic, nativeGlyph(fonts[kItalic], cp));
+      (leaning ? leaningItalic : uprightItalic) += 1;
+      bool leaningBold = false;
+      expectDrawnAs(drawnAt(regular, cp, ppem, true, &leaningBold), *font, kBoldItalic,
+                    nativeGlyph(fonts[kBoldItalic], cp));
+      if (HasFailure()) {
+        ADD_FAILURE() << "U+" << std::hex << cp;
+        return;
+      }
+    }
+    if (bothKinds) {
+      EXPECT_GT(leaningItalic, 0u);
+      EXPECT_GT(uprightItalic, 0u);  // the 4 KB cap decides
+    }
+  };
+  expectEveryGlyph(readFont("Bookerly/Bookerly-Regular.ttf"), kIdentityA, 0x21, 0x24F, 300, true);
+  if (HasFailure()) return;
+  expectEveryGlyph(readFixture("NotoSansJP-CffFlat.otf"), kIdentityB, 0x20, 0xFFFF, 250, false);
+}
+
+TEST_F(TtfFontTest, AnItalicGlyphReachingTooFarLeftOnceSlantedIsDrawnUpright) {
+  Font built;
+  built.glyphs.resize(3);
+  built.glyphs[0].contours = {rect(0, 0, 400, 600)};
+  built.glyphs[1].contours = {rect(50, 0, 450, 700)};
+  built.glyphs[2].contours = {rect(-2200, -2000, -2100, 0)};
+  built.cmap = {{'A', 1}, {'J', 2}};
+  useBuiltFont(built);
+  const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
+  ASSERT_NE(nullptr, font);
+  ASSERT_TRUE(font->slanted(kItalic));
+  // Upright 'J' reaches 120 px left of the pen; slanted, its foot reaches 143 px, past int8.
+  expectDrawnAs(reference(files[kRegular].bytes, 'J', TtfFont::kMaxPointSize), *font, kItalic,
+                font->glyph(kItalic, 'J'));
+  expectDrawnAs(slanted(files[kRegular].bytes, 'A', TtfFont::kMaxPointSize), *font, kItalic, font->glyph(kItalic, 'A'));
+}
+
+TEST_F(TtfFontSetTest, SyntheticItalicInSdModeIsDrawnFromTheRegularFile) {
+  MemoryFile serif[4];
+  serif[kRegular].bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
+  SimNorFlash chip{kSdOnlyBytes};
+  const auto set = openFamilies(chip, {serif}, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  ASSERT_TRUE(font.readsCard());
+  ASSERT_TRUE(font.slanted(kItalic));
+  const char* const kana =
+      "\xE3\x81\x82\xE3\x81\x84\xE3\x81\x86\xE3\x81\x88\xE3\x81\x8A\xE3\x81\x8B\xE3\x81\x8D"
+      "\xE3\x81\x8F\xE3\x81\x91\xE3\x81\x93";  // the ten kana
+  const uint32_t before = set->sdPageReads();
+  font.prefetch(kItalic, kana);
+  EXPECT_EQ(10u, font.renders());
+  EXPECT_GT(set->sdPageReads(), before);
+  EXPECT_LE(set->sdPageReads() - before, 10u + 1u);
+  for (const uint32_t cp : {0x3042u, 0x3044u, 0x3046u, 0x3048u, 0x304Au, 0x304Bu, 0x304Du, 0x304Fu, 0x3051u, 0x3053u}) {
+    expectDrawnAs(slanted(serif[kRegular].bytes, cp, 14), font, kItalic, font.glyph(kItalic, cp));
   }
   EXPECT_EQ(10u, font.renders());  // stored by the batch
   expectDrawnAs(reference(serif[kRegular].bytes, 0x3042, 14), font, kRegular, font.glyph(kRegular, 0x3042));
