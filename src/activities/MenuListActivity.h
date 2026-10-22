@@ -82,8 +82,6 @@ class MenuListActivity : public UiListActivity {
   // row isRowSelectable() accepts.
   void initMenuList();
 
-  // Process SettingInfo items marked with withSubmenu() into submenu placeholders.
-  void prepareSubmenus();
   // Virtual so a subclass can supply its own submenu wiring: toggleCurrentItem()
   // below dispatches through this, and EpubReaderMenuActivity needs a per-item
   // value-string override that the plain version has no way to pass.
