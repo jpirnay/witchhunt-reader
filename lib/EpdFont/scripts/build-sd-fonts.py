@@ -301,10 +301,11 @@ def build_family(
 def generate_manifest(
     config_path: Path, output_base: Path, base_url: str, manifest_path: Path
 ):
-    """Generate fonts.json manifest from config + built output.
+    """Generate the manifests from config + built output: fonts.json (.cpfont families, version 2, for older
+    firmware) and fonts-v3.json beside it (every family, version 3).
 
-    Uses the standalone generate-font-manifest.py as a subprocess so
-    descriptions come from the YAML config via --descriptions-from.
+    Uses the standalone generate-font-manifest.py as a subprocess so the
+    family list and descriptions come from the YAML config via --config.
     """
     manifest_script = SCRIPT_DIR.parent.parent.parent / "scripts" / "generate-font-manifest.py"
 
@@ -316,10 +317,11 @@ def generate_manifest(
         "--input", str(output_base),
         "--base-url", base_url,
         "--output", str(manifest_path),
+        "--output-v3", str(manifest_path.with_name("fonts-v3.json")),
     ]
 
     if config_path.exists():
-        cmd.extend(["--descriptions-from", str(config_path)])
+        cmd.extend(["--config", str(config_path)])
 
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(cmd, capture_output=True, text=True)
