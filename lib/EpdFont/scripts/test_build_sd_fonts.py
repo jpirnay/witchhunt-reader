@@ -7,6 +7,7 @@ Needs fontTools and PyYAML (requirements.txt). No network: the build test cuts t
 
 import importlib.util
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -88,6 +89,21 @@ class SdFontsYaml(unittest.TestCase):
         self.assertEqual(config["fonttools"], "4.63.0")
         # the bitmap entries, commented out or not (the source URLs name NotoSansCJKjp... and stay)
         self.assertNotRegex(text, r"(?m)^\s*#?\s*-?\s*name:\s*(NotoSansCJK|NotoSerifCJK|NotoSansHangul)\s*$")
+
+
+class HostedFontsLicense(unittest.TestCase):
+    def test_the_ofl_names_every_copyright_the_hosted_fonts_carry(self):
+        fonts = REPO / "assets" / "sd-fonts"
+        ofl = (fonts / "OFL.txt").read_text(encoding="utf-8")
+        files = sorted(fonts.glob("*/*.otf"))
+        self.assertEqual(len(files), 8)
+        for path in files:
+            font = TTFont(str(path))
+            notice = font["name"].getDebugName(0)
+            years = re.search(r"\d{4}-\d{4}", notice)
+            self.assertIsNotNone(years, f"{path.name}: {notice}")
+            self.assertIn(years.group(0), ofl, path.name)
+        self.assertIn("Copyright 2022 The Noto Project Authors", ofl)
 
 
 if __name__ == "__main__":

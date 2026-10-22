@@ -154,5 +154,24 @@ class Manifests(unittest.TestCase):
             self.assertNotIn(b"\r\n", data)
 
 
+class ShippedManifests(unittest.TestCase):
+    def test_the_shipped_manifests_are_what_the_generator_writes(self):
+        repo = SCRIPT.parent.parent
+        fonts = repo / "assets" / "sd-fonts"
+        config = repo / "lib" / "EpdFont" / "scripts" / "sd-fonts.yaml"
+        base = "https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/"
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            args = [sys.executable, str(SCRIPT), "--input", str(fonts), "--base-url", base, "--config", str(config),
+                    "--output", str(out / "fonts.json"), "--output-v3", str(out / "fonts-v3.json")]
+            result = subprocess.run(args, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for name in ("fonts.json", "fonts-v3.json"):
+                committed = fonts / name
+                self.assertTrue(committed.is_file(), name)
+                self.assertEqual((out / name).read_bytes().replace(b"\r\n", b"\n"),
+                                 committed.read_bytes().replace(b"\r\n", b"\n"), name)
+
+
 if __name__ == "__main__":
     unittest.main()
