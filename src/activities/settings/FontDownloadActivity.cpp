@@ -872,6 +872,15 @@ void FontDownloadActivity::drawChrome() {
   const auto lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
   const auto centerY = (pageHeight - lineHeight) / 2;
 
+  // Translated notes and error text can outrun the screen on one line; wrap within the content margins.
+  const int maxTextWidth = pageWidth - metrics.contentSidePadding * 2;
+  auto drawWrappedCentered = [&](int y, const char* text, int maxLines) {
+    for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, text, maxTextWidth, maxLines)) {
+      renderer.drawCenteredText(UI_10_FONT_ID, y, line.c_str());
+      y += lineHeight;
+    }
+  };
+
   if (state_ == LOADING_MANIFEST) {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_LOADING_FONT_LIST));
   } else if (state_ == DOWNLOADING) {
@@ -898,13 +907,13 @@ void FontDownloadActivity::drawChrome() {
   } else if (state_ == COMPLETE) {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY, tr(STR_FONT_INSTALLED), true, EpdFontFamily::BOLD);
     if (completeNote_ != nullptr) {
-      renderer.drawCenteredText(UI_10_FONT_ID, centerY + lineHeight + metrics.verticalSpacing, completeNote_);
+      drawWrappedCentered(centerY + lineHeight + metrics.verticalSpacing, completeNote_, 2);
     }
   } else if (state_ == ERROR) {
     renderer.drawCenteredText(UI_10_FONT_ID, centerY - lineHeight, tr(STR_FONT_INSTALL_FAILED), true,
                               EpdFontFamily::BOLD);
     if (!errorMessage_.empty()) {
-      renderer.drawCenteredText(UI_10_FONT_ID, centerY + metrics.verticalSpacing, errorMessage_.c_str());
+      drawWrappedCentered(centerY + metrics.verticalSpacing, errorMessage_.c_str(), 3);
     }
   }
 }
