@@ -28,7 +28,8 @@ constexpr char WEB_DIR[] = "/.crosspoint/web";
 // install never replaces a working set.
 constexpr char STAGING_DIR[] = "/.crosspoint/web.new";
 constexpr char DOWNLOAD_PATH[] = "/.crosspoint/web-download.bin";
-// Holds the installed bundle's SHA-256.
+// Holds the installed bundle's web_bundle::PAGES_ID. Before PAGES_ID existed it held the bundle's
+// SHA-256, which no PAGES_ID equals, so such a card reads as Stale and is reinstalled once.
 constexpr char STAMP_FILE[] = "bundle.id";
 constexpr size_t COPY_CHUNK = 2048;
 
@@ -45,11 +46,11 @@ State readState() {
   if (!Storage.exists(path)) return State::Missing;
   FsFile f;
   if (!Storage.openFileForRead("WEB", path, f)) return State::Missing;
-  uint8_t stamp[sizeof(web_bundle::DIGEST)];
+  uint8_t stamp[sizeof(web_bundle::PAGES_ID)];
   const int got = f.read(stamp, sizeof(stamp));
   f.close();
   if (got != static_cast<int>(sizeof(stamp))) return State::Stale;
-  return memcmp(stamp, web_bundle::DIGEST, sizeof(stamp)) == 0 ? State::Installed : State::Stale;
+  return memcmp(stamp, web_bundle::PAGES_ID, sizeof(stamp)) == 0 ? State::Installed : State::Stale;
 }
 
 void setState(const State state) {
@@ -117,9 +118,9 @@ InstallError unpack(FsFile& in, uint8_t* buf) {
   joinPath(path, sizeof(path), STAGING_DIR, STAMP_FILE);
   FsFile stamp;
   if (!Storage.openFileForWrite("WEB", path, stamp)) return InstallError::CardError;
-  const size_t wrote = stamp.write(web_bundle::DIGEST, sizeof(web_bundle::DIGEST));
+  const size_t wrote = stamp.write(web_bundle::PAGES_ID, sizeof(web_bundle::PAGES_ID));
   stamp.close();
-  if (wrote != sizeof(web_bundle::DIGEST)) return InstallError::CardError;
+  if (wrote != sizeof(web_bundle::PAGES_ID)) return InstallError::CardError;
 
   // A power cut between these two leaves no WEB_DIR: Missing, and reinstalled.
   if (Storage.exists(WEB_DIR) && !Storage.removeDir(WEB_DIR)) return InstallError::CardError;
@@ -178,10 +179,9 @@ const char* stateName(const State state) {
 bool serve(WebServer& server, const web_bundle::Index index) {
   if (state() != State::Installed) return false;
 
-  // The bundle's name holds the hash of its contents, so it stands for every file in it. The
-  // headers go out only with an answer: a false return leaves the response to the caller.
-  char etag[sizeof(web_bundle::ASSET_NAME) + 2];
-  snprintf(etag, sizeof(etag), "\"%s\"", web_bundle::ASSET_NAME);
+  // The pages' identity stands for every file in the bundle. The headers go out only with an
+  // answer: a false return leaves the response to the caller.
+  const char* etag = web_bundle::ETAG;
   if (server.header("If-None-Match") == etag) {
     server.sendHeader("Cache-Control", "no-cache");
     server.sendHeader("ETag", etag);
@@ -198,9 +198,11 @@ bool serve(WebServer& server, const web_bundle::Index index) {
     setState(State::Missing);
     return false;
   }
-  if (f.size() != entry.size) {
-    LOG_ERR("WEB", "%s is %u B, expected %u B - the web interface needs reinstalling", path,
-            static_cast<unsigned>(f.size()), static_cast<unsigned>(entry.size));
+  // Not entry.size: the installed bundle may have been compressed by another build of the same
+  // pages (web_bundle::PAGES_ID), whose files differ in size. The install verified its own.
+  const uint32_t size = f.size();
+  if (size == 0) {
+    LOG_ERR("WEB", "%s is empty - the web interface needs reinstalling", path);
     f.close();
     setState(State::Missing);
     return false;
@@ -209,7 +211,7 @@ bool serve(WebServer& server, const web_bundle::Index index) {
   server.sendHeader("Content-Encoding", "gzip");
   server.sendHeader("Cache-Control", "no-cache");
   server.sendHeader("ETag", etag);
-  server.setContentLength(entry.size);
+  server.setContentLength(size);
   server.send(200, entry.contentType, "");
   NetworkClient client = server.client();
   if (!HttpFileStreamer::streamFileToClient(f, client)) {
