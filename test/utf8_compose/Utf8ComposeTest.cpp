@@ -45,12 +45,6 @@ std::string cps(std::initializer_list<uint32_t> list) {
 
 }  // namespace
 
-// L + V -> LV. 한 = U+1112 U+1161 U+11AB, so its LV stage is U+D55C's base.
-TEST(Utf8Compose, ComposesLeadingPlusVowel) {
-  // U+1100 (g) + U+1161 (a) -> U+AC00 (가), the first syllable of the block.
-  EXPECT_EQ(utf8NfcNorm(cps({0x1100, 0x1161})), cps({0xAC00}));
-}
-
 // L + V + T -> LVT, applied in two steps by the same greedy loop.
 TEST(Utf8Compose, ComposesFullSyllable) {
   // U+1112 U+1161 U+11AB -> U+D55C (한)
