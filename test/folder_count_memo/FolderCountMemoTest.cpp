@@ -70,10 +70,11 @@ TEST(FolderCountMemo, AFullTableDropsTheOldestEntry) {
             static_cast<int>(FolderCountMemo::CAPACITY));
 }
 
-TEST(FolderCountMemo, TheCappedCountSurvivesTheRoundTrip) {
+// The count is stored in 16 bits: a larger one is clamped, never wrapped into a negative "unknown".
+TEST(FolderCountMemo, ACountBeyondSixteenBitsIsClampedNotWrapped) {
   FolderCountMemo memo;
-  memo.store("/library", 1000, kStamp);  // FileBrowserModel's "999+"
-  EXPECT_EQ(memo.find("/library", kStamp), 1000);
+  memo.store("/library", 40000, kStamp);
+  EXPECT_EQ(memo.find("/library", kStamp), 32767);
 }
 
 TEST(FolderCountMemo, TheTableStaysSmall) {
