@@ -290,8 +290,8 @@ def write_manifest(manifest: dict, output_path: Path) -> None       # UTF-8, LF,
       - each probes as style 0, weight 400, not variable, and `fitsStore(&bytes, &probe.sdBytes, 1, kX3FontAreaBytes, 32)` holds, with `kX3FontAreaBytes = 3538944 - 65536` as `TtfFamilyTest` uses it;
       - each loads alone into `SimNorFlash flash(kX3FontAreaBytes)` with `TtfFontSet::load`, and at 12 pt these draw (`glyph(0, cp) != nullptr`, `advanceX > 0`): the first mapped code point, every 97th mapped one from U+0020 to U+2FFFF but U+9F98, and U+FFFD;
       - more than 7,000 code points are mapped;
-      - `glyph(EpdFontFamily::BOLD, 0x6F22)` (漢) is not null: the families are regular only, and bold draws through it (synthetic since step 4).
-    - `ShippedOtfFamilies.SerifTcDrawsTheOneOversizeGlyphAsMissing`: NotoSerifTC maps U+9F98 and `glyph(0, 0x9F98) == nullptr`, its 621 points being over the 512-point cap (spec 9.2); U+9F97, mapped, draws.
+      - `glyph(EpdFontFamily::BOLD, 0x6F22)` (漢), or U+6C49 (汉) in the SC families, which do not map 漢, is not null: the families are regular only, and bold draws through it (synthetic since step 4).
+    - `ShippedOtfFamilies.SerifTcDrawsTheOneOversizeGlyphAsMissing`: NotoSerifTC maps U+9F98 and `glyph(0, 0x9F98) == nullptr`, its 621 points being over the 512-point cap (spec 9.2); U+9F95, mapped, draws (U+9F97 is not in the set).
   - **`scripts/test_generate_font_manifest.py`** gains `ShippedManifests.test_the_shipped_manifests_are_what_the_generator_writes`: the generator, run on `assets/sd-fonts` with the real config and the master base URL into a temp folder, writes the committed `fonts.json` and `fonts-v3.json`, compared after `.replace(b"\r\n", b"\n")` (the working tree may hold CRLF under `core.autocrlf`).
   - **`lib/EpdFont/scripts/test_build_sd_fonts.py`** gains `test_the_ofl_names_every_copyright_the_hosted_fonts_carry`: for every `assets/sd-fonts/*/*.otf`, the year range of its name ID 0 ("2014-2021" or "2017-2024") appears in `assets/sd-fonts/OFL.txt`, and so does "Copyright 2022 The Noto Project Authors".
 
