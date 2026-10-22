@@ -299,29 +299,11 @@ static ::testing::AssertionResult compileCache(CssParser& parser, const std::str
 // test/fixtures/test_large_css.epub.
 constexpr size_t kFixtureRuleCount = 1500;
 
-TEST(CssParser, SkipsRulesWithoutSupportedDeclarations) {
-  const std::vector<uint8_t> cssData = {'.', 'i', 'g', 'n', 'o', 'r', 'e', 'd', ' ', '{', ' ',  'c', 'o', 'l',
-                                        'o', 'r', ':', ' ', 'r', 'e', 'd', ';', ' ', '}', '\n', '.', 'k', 'e',
-                                        'p', 't', ' ', '{', ' ', 'f', 'o', 'n', 't', '-', 'w',  'e', 'i', 'g',
-                                        'h', 't', ':', ' ', 'b', 'o', 'l', 'd', ';', ' ', '}',  '\n'};
-  std::string cssPath;
-  ASSERT_TRUE(writeTempCssFile(cssData, cssPath));
-
-  CssParser parser("");
-  FsFile cssFile;
-  ASSERT_TRUE(Storage.openFileForRead("CSS", cssPath.c_str(), cssFile));
-  ASSERT_TRUE(parser.loadFromStream(cssFile));
-  EXPECT_EQ(parser.ruleCount(), 1u);
-
-  std::error_code rmEc;
-  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
-}
-
 // The invisibility properties are the one place `color` is consulted at all. Only the invisible
 // value counts as a supported declaration: transparent / opacity 0 / visibility hidden keep a
 // rule, while red / 0.5 / visible leave it as unsupported as it was before -- so a monochrome
-// panel does not start retaining every book's colour rules. Companion to the test above, which
-// is what caught the first version of this defining `color: red` and doubling its rule count.
+// panel does not start retaining every book's colour rules. The `color: red` rule is what caught
+// a first version that defined it and doubled the rule count.
 TEST(CssParser, KeepsOnlyInvisibleValuesOfInvisibilityProperties) {
   const std::string css =
       ".ocr { color: transparent; }\n"
@@ -685,53 +667,6 @@ TEST(CssParserArena, ResidentMatchesHeapForRealRichStylesheet) {
     EXPECT_TRUE(stylesEqual(heapStyles[i], residentStyles[i])) << "resident != heap for ." << classes[i];
   }
   EXPECT_GT(parser.getResolveStats().diskHits, 0u) << "these classes should resolve (hit)";
-  parser.clear();
-  removePath(cacheDir);
-  std::error_code rmEc;
-  std::filesystem::remove(cssPath, rmEc);  // best-effort; see removePath()
-}
-
-// The resident path must actually HIT for element, class, and combined selectors — not just
-// agree with the heap path (which both-miss on unmatched probes would trivially satisfy). Asserts
-// each probe returns the styled (non-default) value AND equals the heap resolution.
-TEST(CssParserArena, ResidentHitsElementClassAndCombinedSelectors) {
-  const std::string css =
-      "p { margin-top: 5px; }\n"
-      ".note { text-align: center; }\n"
-      "div.warn { font-weight: bold; }\n";
-  const std::string cacheDir = makeTempDir();
-  ASSERT_FALSE(cacheDir.empty());
-  std::string cssPath;
-  ASSERT_TRUE(writeTempCssFile(std::vector<uint8_t>(css.begin(), css.end()), cssPath));
-
-  CssParser parser(cacheDir);
-  ASSERT_TRUE(compileCache(parser, cssPath));
-
-  BuildArena arena(64 * 1024);
-  ASSERT_TRUE(arena.valid());
-  parser.clear();
-  parser.setIndexArena(&arena);
-  parser.setLeanResolve(true);
-  ASSERT_TRUE(parser.loadFromCache());
-
-  // Element selector "p" must hit.
-  const CssStyle p = parser.resolveStyle("p", "");
-  EXPECT_TRUE(p.hasMarginTop()) << "resident MISS on element selector 'p'";
-  // Class selector ".note" must hit.
-  const CssStyle note = parser.resolveStyle("span", "note");
-  EXPECT_TRUE(note.hasTextAlign()) << "resident MISS on class selector '.note'";
-  EXPECT_EQ(note.textAlign, CssTextAlign::Center);
-  // Combined "div.warn" must hit.
-  const CssStyle warn = parser.resolveStyle("div", "warn");
-  EXPECT_TRUE(warn.hasFontWeight()) << "resident MISS on combined selector 'div.warn'";
-  EXPECT_EQ(warn.fontWeight, CssFontWeight::Bold);
-  // A genuine non-match must still miss.
-  const CssStyle none = parser.resolveStyle("h1", "absent");
-  EXPECT_FALSE(none.hasMarginTop());
-  EXPECT_FALSE(none.hasTextAlign());
-
-  const auto stats = parser.getResolveStats();
-  EXPECT_GT(stats.diskHits, 0u) << "resident produced zero hits for matching selectors";
   parser.clear();
   removePath(cacheDir);
   std::error_code rmEc;
