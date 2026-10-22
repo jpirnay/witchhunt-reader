@@ -460,6 +460,21 @@ TEST(CssParserCache, OversizedIndexEvictionReleasesIt) {
 // layout must keep resolving under moderate heap pressure (it touches no SD).
 // ---------------------------------------------------------------------------
 namespace {
+// Every bit of CssPropertyFlags, so a codec that drops a `defined` bit (an explicit value that has to
+// travel up the cascade) cannot pass on the value fields alone.
+bool definedEqual(const CssPropertyFlags& a, const CssPropertyFlags& b) {
+  return a.textAlign == b.textAlign && a.fontStyle == b.fontStyle && a.fontWeight == b.fontWeight &&
+         a.textDecoration == b.textDecoration && a.textIndent == b.textIndent && a.marginTop == b.marginTop &&
+         a.marginBottom == b.marginBottom && a.marginLeft == b.marginLeft && a.marginRight == b.marginRight &&
+         a.paddingTop == b.paddingTop && a.paddingBottom == b.paddingBottom && a.paddingLeft == b.paddingLeft &&
+         a.paddingRight == b.paddingRight && a.imageHeight == b.imageHeight && a.imageWidth == b.imageWidth &&
+         a.display == b.display && a.verticalAlign == b.verticalAlign && a.listStyleNone == b.listStyleNone &&
+         a.pageBreakBefore == b.pageBreakBefore && a.pageBreakAfter == b.pageBreakAfter &&
+         a.lineHeight == b.lineHeight && a.fontSizeMultiplier == b.fontSizeMultiplier && a.cssFloat == b.cssFloat &&
+         a.smallCaps == b.smallCaps && a.colorTransparent == b.colorTransparent && a.opacityZero == b.opacityZero &&
+         a.visibilityHidden == b.visibilityHidden && a.fontFamily == b.fontFamily;
+}
+
 bool stylesEqual(const CssStyle& a, const CssStyle& b) {
   auto len = [](const CssLength& l) { return std::make_pair(l.value, static_cast<int>(l.unit)); };
   return a.textAlign == b.textAlign && a.fontStyle == b.fontStyle && a.fontWeight == b.fontWeight &&
@@ -473,7 +488,8 @@ bool stylesEqual(const CssStyle& a, const CssStyle& b) {
          len(a.paddingTop) == len(b.paddingTop) && len(a.paddingBottom) == len(b.paddingBottom) &&
          len(a.paddingLeft) == len(b.paddingLeft) && len(a.paddingRight) == len(b.paddingRight) &&
          len(a.imageHeight) == len(b.imageHeight) && len(a.imageWidth) == len(b.imageWidth) &&
-         a.fontFamily == b.fontFamily && a.defined.fontFamily == b.defined.fontFamily;
+         a.fontFamily == b.fontFamily && a.colorTransparent == b.colorTransparent && a.opacityZero == b.opacityZero &&
+         a.visibilityHidden == b.visibilityHidden && definedEqual(a.defined, b.defined);
 }
 }  // namespace
 
@@ -684,7 +700,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       "list-style: none; page-break-before: always; page-break-after: always; font-family: 'EB Garamond'; }\n"
       ".b { margin-top: 3px; text-align: right; font-size: 1.25rem; font-family: serif; }\n"
       ".c { display: none; }\n"
-      ".d { display: inline; }\n";
+      ".d { display: inline; }\n"
+      ".e { color: transparent; opacity: 0; visibility: hidden; }\n";
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   std::string cssPath;
@@ -693,8 +710,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   CssParser parser(cacheDir);
   ASSERT_TRUE(compileCache(parser, cssPath));
 
-  const std::vector<std::pair<std::string, std::string>> probes = {{"p", "a"},    {"p", "b"},    {"div", "c"},
-                                                                   {"span", "a"}, {"p", "none"}, {"span", "d"}};
+  const std::vector<std::pair<std::string, std::string>> probes = {
+      {"p", "a"}, {"p", "b"}, {"div", "c"}, {"span", "a"}, {"p", "none"}, {"span", "d"}, {"span", "e"}};
   auto resolveAll = [&](CssParser& p) {
     std::vector<CssStyle> out;
     for (const auto& pr : probes) out.push_back(p.resolveStyle(pr.first, pr.second));
@@ -707,6 +724,10 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   // Both paths agreeing proves nothing if the disk cache already lost the value.
   EXPECT_EQ(static_cast<int>(heapStyles[5].display), static_cast<int>(CssDisplay::Inline))
       << "display:inline did not survive the disk cache";
+  EXPECT_TRUE(heapStyles[6].colorTransparent && heapStyles[6].opacityZero && heapStyles[6].visibilityHidden)
+      << "the invisibility flags did not survive the disk cache";
+  EXPECT_TRUE(heapStyles[6].defined.colorTransparent && heapStyles[6].defined.opacityZero &&
+              heapStyles[6].defined.visibilityHidden);
 
   BuildArena arena(64 * 1024);
   ASSERT_TRUE(arena.valid());
