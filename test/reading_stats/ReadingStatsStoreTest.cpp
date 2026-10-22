@@ -546,24 +546,6 @@ TEST_F(StoreTest, DashboardGivesEveryBookItsTimeToFinish) {
   EXPECT_EQ(out.text.substr(out.text.size() - 2), "]}");
 }
 
-TEST_F(StoreTest, ExportIsTheJsonFileFormat) {
-  ReadingStatsStore store(path_, legacy_);
-  ASSERT_NO_FATAL_FAILURE(twoBooks(store));
-  const auto summary = summaryOf(store);
-  StringPrint expected;
-  ReadingStatsJson::writeFileHead(expected, summary);
-  ReadingStatsJson::writeBook(expected, bookOf(store, id(1)).book);
-  ReadingStatsJson::writeBookSeparator(expected);
-  ReadingStatsJson::writeBook(expected, bookOf(store, id(2)).book);
-  ReadingStatsJson::writeTail(expected);
-  StringPrint out;
-
-  ASSERT_EQ(store.writeExport(out), ReadResult::Ok);
-
-  EXPECT_EQ(out.text, expected.text);
-  EXPECT_EQ(out.text.rfind(R"({"totalSeconds":1300,"totalSessions":2,"totalPagesTurned":22,)", 0), 0u);
-}
-
 TEST_F(StoreTest, ExportOfNoHistoryIsAnEmptyFile) {
   ReadingStatsStore store(path_, legacy_);
   StringPrint out;

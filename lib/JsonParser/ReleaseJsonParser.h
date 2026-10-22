@@ -17,10 +17,9 @@ class ReleaseJsonParser {
 
   // Release asset this parser accepts as the firmware image, matched exactly.
   // Defaults to "firmware.bin" (the X3/X4 asset); other boards set their own
-  // "firmware-<board>.bin". Survives reset() so a retry keeps the choice.
+  // "firmware-<board>.bin". Set it before feed().
   void setFirmwareAssetName(const char* name);
 
-  void reset();
   void feed(const char* data, size_t len);
 
   bool foundTag() const;

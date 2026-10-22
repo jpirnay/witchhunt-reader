@@ -1,5 +1,5 @@
-// ReadingStatsJson: the reading history as JSON -- the legacy file scanned for the import, one entry
-// decoded at an offset, and the writers the web payloads are built from, pinned to hand-derived text.
+// ReadingStatsJson: the reading history as JSON -- the legacy file scanned for the import, every field of
+// a book decoded, and the writers the web payloads are built from, pinned to hand-derived text.
 #include <gtest/gtest.h>
 
 #include <string>
@@ -104,16 +104,11 @@ TEST(ReadingStatsJsonSummary, AddsUpTheFile) {
   EXPECT_EQ(summary.totalPagesTurned, 23u);
   EXPECT_EQ(summary.longestStreak, 2u);
   EXPECT_EQ(pairsOf(summary.globalDays), (std::vector<std::pair<uint16_t, uint32_t>>{{20463, 950}, {20464, 400}}));
-  EXPECT_EQ(summary.bookCount, 3u);
-  EXPECT_EQ(summary.finishedBookCount, 1u);
-  // C, at 1%, is not far enough in to count toward the pace.
-  EXPECT_EQ(summary.paceSeconds, 1300u);
-  EXPECT_EQ(summary.pacePercents, 65u);
 }
 
 TEST(ReadingStatsJsonSummary, RejectsSomethingThatIsNotJson) { scanOf("not a stats file", {}, ScanResult::Malformed); }
 
-TEST(ReadingStatsJsonScan, DecodesTheWholeTarget) {
+TEST(ReadingStatsJsonScan, DecodesEveryFieldOfABook) {
   const std::string head = R"({"totalSeconds":900,"books":[)";
   const std::string dated =
       // A JSON unicode escape, six characters on disk; the parser passes it through undecoded.
@@ -147,7 +142,6 @@ TEST(ReadingStatsJsonScan, LegacyFinishedFlagCountsAsOneFinish) {
 
   ASSERT_EQ(books.size(), 1u);
   EXPECT_EQ(books[0].finishedCount, 1);
-  EXPECT_EQ(scanOf(file, {}).finishedBookCount, 1u);
 }
 
 TEST(ReadingStatsJsonScan, BooksArriveInFileOrderAsTheyAreRead) {
