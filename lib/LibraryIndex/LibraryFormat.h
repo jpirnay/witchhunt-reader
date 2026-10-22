@@ -34,6 +34,10 @@ constexpr uint8_t ACCEPT_RULES_REVISION = 1;
 constexpr uint8_t acceptRules(const bool showHidden) {
   return static_cast<uint8_t>((ACCEPT_RULES_REVISION << 1) | (showHidden ? 1 : 0));
 }
+// The setting changes the value, and neither value is what revision 0 recorded (the setting alone): an index
+// from then is rebuilt.
+static_assert(acceptRules(false) != acceptRules(true) && acceptRules(false) != 0 && acceptRules(true) != 1,
+              "acceptRules must tell the setting and the rule revision apart");
 
 // Where the index and a build's working files live on the card.
 constexpr const char* DIR = "/.crosspoint/library";
