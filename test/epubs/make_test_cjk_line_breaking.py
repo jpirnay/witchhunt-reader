@@ -13,7 +13,7 @@
   7. table         CJK text in a table cell
   8. table budget  a cell of 289 CJK characters, one token each: charged per token (about 14 KB), the
                    row passes the 12 KB row budget and flows as text
-                   (CjkTable.ALongCjkCellIsChargedPerToken). The row degrades before the run that
+                   (the golden lays its first character out in a LINE, not a cell). The row degrades before the run that
                    would cross the budget is added, so the cell's word lists never double to 512
                    entries (the heap baseline guards it)
   9. chunk seams   the SAX parser hands text over in 256-byte pieces that may cut a character in two:

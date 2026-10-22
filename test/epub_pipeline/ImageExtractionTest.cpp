@@ -63,13 +63,15 @@ struct ImageExtractionFixture : testing::Test {
 // The write buffer is reserved from the arena BEFORE the reader takes its block, because
 // BuildArena is LIFO. Get that order wrong and the release is rejected, leaking the block for
 // the rest of the pass — so assert the arena comes back empty, not just that the bytes are right.
+// The arena is EXTRACT_ARENA_BYTES, what callers gate on: if that were too small for the reader,
+// every extraction would silently take the slow fallback and the arena would do nothing.
 TEST_F(ImageExtractionFixture, ArenaPathMatchesHeapByteForByte) {
   const auto viaHeap = extract("heap.png", nullptr);
   ASSERT_EQ(viaHeap.size(), kEntryBytes);
   EXPECT_EQ(viaHeap[0], 0x89);  // PNG signature survived the round trip
   EXPECT_EQ(viaHeap[1], 'P');
 
-  BuildArena arena(Epub::EXTRACT_ARENA_BYTES + 1024);  // budget + alignment slack
+  BuildArena arena(Epub::EXTRACT_ARENA_BYTES);
   ASSERT_TRUE(arena.valid());
   const auto viaArena = extract("arena.png", &arena);
 
@@ -77,17 +79,6 @@ TEST_F(ImageExtractionFixture, ArenaPathMatchesHeapByteForByte) {
   EXPECT_GT(arena.highWater(), 32u * 1024u + Epub::EXTRACT_WRITE_BUFFER_BYTES)
       << "both the ring and the write buffer should have come from the arena";
   EXPECT_EQ(arena.used(), 0u) << "write buffer and reader block must both be released";
-  EXPECT_EQ(arena.failedAllocSize(), 0u);
-}
-
-// EXTRACT_ARENA_BYTES is what callers gate on; if it were too small for the reader, every
-// extraction would silently take the slow fallback and the fix would do nothing.
-TEST_F(ImageExtractionFixture, BudgetConstantActuallyCoversTheReader) {
-  BuildArena arena(Epub::EXTRACT_ARENA_BYTES);
-  ASSERT_TRUE(arena.valid());
-  const auto bytes = extract("budget.png", &arena);
-
-  ASSERT_EQ(bytes.size(), kEntryBytes);
   EXPECT_EQ(arena.failedAllocSize(), 0u) << "EXTRACT_ARENA_BYTES must fit readBuf + ring + alignment";
 }
 
@@ -242,9 +233,17 @@ TEST_F(LargeImageFixture, ResolvesSizeFromTheArchiveBeforeExtraction) {
   EXPECT_FALSE(block.isLargeImage()) << kEntryBytes << " bytes is under the threshold";
   EXPECT_FALSE(fs::exists(notExtracted)) << "asking the size must not extract anything";
 
-  // The corpus has no entry above the threshold, so the archive path's TRUE case is not covered
-  // here — a failed lookup and a small entry both answer false, and there is no way to tell them
-  // apart from outside. What is pinned is that the lookup neither extracts nor throws.
+  // A small entry and a failed lookup both answer false; only an entry over the threshold tells
+  // that the archive was asked. The corpus has none, so the archive here is written for it.
+  const std::string bigBook = (work / "big.epub").string();
+  test_zip::StoredZipWriter zip;
+  zip.add("mimetype", "application/epub+zip");
+  zip.add("OEBPS/images/big.png", std::string(LARGE_IMAGE_SOURCE_BYTES + 1, 'x'));
+  zip.write(bigBook);
+  const std::string bigNotExtracted = (work / "big_never_written.png").string();
+  ImageBlock big(bigNotExtracted, 100, 100, "", bigBook, "OEBPS/images/big.png");
+  EXPECT_TRUE(big.isLargeImage()) << "the entry's size was not read from the archive";
+  EXPECT_FALSE(fs::exists(bigNotExtracted)) << "asking the size must not extract anything";
 }
 
 TEST_F(LargeImageFixture, UnknownSizeRendersRatherThanHides) {
@@ -368,27 +367,20 @@ struct ImageHeapGateFixture : testing::Test {
   }
 };
 
-TEST_F(ImageHeapGateFixture, HeapRefusalIsLatchedSoTheCacheCanBeDiscarded) {
+// A heap refusal is latched, and the latch has to survive the build. A starved rebuild cached a
+// chapter with all of its images laid out as alt text, and nothing on the next open knew: the
+// chapter stayed image-less even after a reboot had freed the heap that would have sized them (X3
+// 2026-09-25). The flag now lives in the section header, where the reader's cache probe can see it.
+TEST_F(ImageHeapGateFixture, HeapRefusalIsReadBackFromTheCachedSection) {
   const std::string book = makeBookWithUnresolvableImage();
-
+  const std::string cache = (work / "persisted").string();
   // Between the text-layout hard abort (9 KB, below which the parse gives up entirely) and
   // EHP_IMAGE_HEADER_MIN_FREE_HEAP (16 KB): the parse runs to completion, and the header read is
   // refused before it is attempted. That ordering is the point of the ladder — an image is given
   // up long before the chapter is.
   ESP.setFreeHeap(12 * 1024);
-  EXPECT_TRUE(buildAndReportDegraded(book, (work / "lowheap").string()))
+  ASSERT_TRUE(buildAndReportDegraded(book, cache))
       << "a heap refusal must be latched, or the alt-text page is cached forever";
-}
-
-// The latch has to survive the build. A starved rebuild cached a chapter with all of its images
-// laid out as alt text, and nothing on the next open knew: the chapter stayed image-less even
-// after a reboot had freed the heap that would have sized them (X3 2026-09-25). The flag now
-// lives in the section header, where the reader's cache probe can see it.
-TEST_F(ImageHeapGateFixture, HeapRefusalIsReadBackFromTheCachedSection) {
-  const std::string book = makeBookWithUnresolvableImage();
-  const std::string cache = (work / "persisted").string();
-  ESP.setFreeHeap(12 * 1024);
-  ASSERT_TRUE(buildAndReportDegraded(book, cache));
   ESP.setFreeHeap(200 * 1024);
 
   auto epub = std::make_shared<Epub>(book, cache);
@@ -404,11 +396,15 @@ TEST_F(ImageHeapGateFixture, HeapRefusalIsReadBackFromTheCachedSection) {
   EXPECT_FALSE(section.isTruncatedCache()) << "the flag shares a byte with parseComplete";
 }
 
+// Ample heap: the read is attempted and fails on its own merits (the entry does not exist). Same
+// alt text on screen, but nothing transient about it — caching that is correct, so the build must
+// NOT be flagged for discard, in the build or in its cache, or the spine would rebuild forever.
 TEST_F(ImageHeapGateFixture, CleanBuildIsNotReadBackAsDegraded) {
   const std::string book = makeBookWithUnresolvableImage();
   const std::string cache = (work / "clean").string();
   ESP.setFreeHeap(200 * 1024);
-  ASSERT_FALSE(buildAndReportDegraded(book, cache));
+  ASSERT_FALSE(buildAndReportDegraded(book, cache))
+      << "an unreadable image is alt text for good; flagging it would cause endless rebuilds";
 
   auto epub = std::make_shared<Epub>(book, cache);
   ASSERT_TRUE(epub->load(true));
@@ -429,21 +425,10 @@ TEST_F(ImageHeapGateFixture, ReleasingFontCachesRecoversARefusedHeaderRead) {
   // reclaim. The retry must lift free heap back over the gate and let the read proceed, so
   // the image is no longer given up for want of memory. It then fails on its own merits (the
   // entry does not exist), which is not a heap refusal and so must not be latched — the
-  // inverse outcome of HeapRefusalIsLatchedSoTheCacheCanBeDiscarded, from the same start.
+  // inverse outcome of HeapRefusalIsReadBackFromTheCachedSection, from the same start.
   ESP.setFreeHeap(12 * 1024);
   EXPECT_FALSE(buildAndReportDegraded(book, (work / "recovered").string(), /*heapAfterRelease=*/200 * 1024))
       << "releasing the font caches must let the header read proceed instead of degrading the build";
-}
-
-TEST_F(ImageHeapGateFixture, AnImageThatSimplyCannotBeReadIsNotLatched) {
-  const std::string book = makeBookWithUnresolvableImage();
-
-  // Ample heap: the read is attempted and fails on its own merits (the entry does not exist).
-  // Same alt text on screen, but nothing transient about it — caching that is correct, so the
-  // build must NOT be flagged for discard or the spine would rebuild forever.
-  ESP.setFreeHeap(200 * 1024);
-  EXPECT_FALSE(buildAndReportDegraded(book, (work / "fullheap").string()))
-      << "an unreadable image is alt text for good; flagging it would cause endless rebuilds";
 }
 
 TEST_F(ImageHeapGateFixture, AResolvableImageIsNeverFlagged) {

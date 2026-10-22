@@ -340,10 +340,10 @@ bool hasCjkGap(const DumpLine& line) {
 // shape (x, alignment, size) share a text width; the shape's left edge is where its leftmost line starts. A line
 // is not its paragraph's last when the next line of its flow has the same shape, starts at that left edge (not
 // indented) and follows without a margin. Lines justified at word spaces (Latin, Korean) keep their old rounding
-// and are not checked.
+// and are not checked: the Korean book is not instantiated here.
 TEST_P(CjkJustifiedRules, JustifiedLinesEndFlushOnAWholeEmGrid) {
   const TypographyProfile profile = TypographyProfile::forLanguage(GetParam().language);
-  if (profile.justify != TypographyProfile::Justify::BetweenCharacters) GTEST_SKIP() << "justified at word spaces";
+  ASSERT_EQ(profile.justify, TypographyProfile::Justify::BetweenCharacters);
 
   const std::vector<std::string> keys = blockKeys(lines);
   std::map<std::string, int> leftEdge = blockLeftEdges(renderer, lines, keys, table);  // shape -> its left edge
@@ -397,39 +397,22 @@ std::vector<Case> cjkBooks() {
   return cases;
 }
 
+// The books a justified line stretches between characters in: Chinese and Japanese. Korean justifies at word spaces.
+std::vector<Case> booksJustifiedBetweenCharacters() {
+  std::vector<Case> cases = cjkBooks();
+  cases.erase(std::remove_if(cases.begin(), cases.end(), [](const Case& c) { return c.language == "ko"; }),
+              cases.end());
+  return cases;
+}
+
 std::string caseName(const testing::TestParamInfo<Case>& info) {
   return fs::path(info.param.epub).stem().string() + (info.param.hyphenation ? "_hyph" : "");
 }
 
 INSTANTIATE_TEST_SUITE_P(CjkCorpus, CjkRules, testing::ValuesIn(cjkBooks()), caseName);
-INSTANTIATE_TEST_SUITE_P(CjkCorpus, CjkJustifiedRules, testing::ValuesIn(cjkBooks()), caseName);
+INSTANTIATE_TEST_SUITE_P(CjkCorpus, CjkJustifiedRules, testing::ValuesIn(booksJustifiedBetweenCharacters()), caseName);
 
 }  // namespace
-
-// A CJK word is one token per character, and the table row budget charges every token: the fixture's
-// case 8, a cell of 289 CJK characters (14 KB of tokens), passes the 12 KB row budget and flows as
-// text, as a cell of 289 Latin words does. Charged once per flushed run, it would count as a dozen
-// words and stay buffered.
-TEST(CjkTable, ALongCjkCellIsChargedPerToken) {
-  const auto cacheDir = fs::temp_directory_path() / "epub_pipeline_test" / "cjk_table_budget";
-  fs::remove_all(cacheDir);
-  fs::create_directories(cacheDir);
-  std::ostringstream dump;
-  ASSERT_TRUE(pipeline_harness::runAndDump((fs::path(CORPUS_DIR) / "test_cjk_line_breaking.epub").string(),
-                                           cacheDir.string(), pipeline_harness::Profile{}, dump));
-  std::istringstream in(dump.str());
-  std::string raw;
-  std::string lastLineRecord;
-  while (std::getline(in, raw)) {
-    const std::string line = raw.substr(raw.find_first_not_of(' '));
-    if (line.rfind("LINE ", 0) == 0 || line.rfind("LN ", 0) == 0) lastLineRecord = line;
-    if (line.find(" t=鑑") != std::string::npos) {
-      EXPECT_EQ(lastLineRecord.rfind("LINE ", 0), 0u) << "case 8 stayed in a table cell: " << lastLineRecord;
-      return;
-    }
-  }
-  FAIL() << "case 8's first character is missing from the dump";
-}
 
 // A source line break next to an element that is not inline formatting is a word gap, not a CJK
 // segment break to drop (test_cjk_block_seams.epub; not in cjkBooks(), since these spaces are

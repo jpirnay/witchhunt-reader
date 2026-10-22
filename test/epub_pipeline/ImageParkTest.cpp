@@ -212,11 +212,19 @@ TEST_P(ImageParkFixture, APassWithoutRoomToCacheLeavesTheParkedDecode) {
   EXPECT_EQ(read(c.companionCachePath), read(ref.companionCachePath));
 }
 
-// Without a checkpoint path a stopped decode is thrown away, as before, and leaves nothing.
-TEST_P(ImageParkFixture, WithoutACheckpointPathAStopIsDiscarded) {
+// Without a checkpoint path a stopped progressive decode is thrown away, as before, and leaves
+// nothing. TJpgDec polls only when it can park, so a baseline decode ignores the stop and runs to
+// the end, as it always did.
+TEST_P(ImageParkFixture, WithoutACheckpointPathADecodeDoesNotPark) {
   const RenderConfig c = config("nockpt", 150, 104, false);
   const bool stopped = decodeOnce(c, 2);
-  if (!stopped) GTEST_SKIP() << "this decoder only polls when it can park";
+  if (std::string(GetParam()).find("_base") != std::string::npos) {
+    EXPECT_FALSE(stopped) << "a baseline decode with nowhere to park must not stop";
+    EXPECT_TRUE(fs::exists(c.cachePath));
+    EXPECT_FALSE(fs::exists(PixelCache::partPathFor(c.cachePath)));
+    return;
+  }
+  ASSERT_TRUE(stopped);
   EXPECT_FALSE(fs::exists(c.cachePath));
   EXPECT_FALSE(fs::exists(PixelCache::partPathFor(c.cachePath)));
 }

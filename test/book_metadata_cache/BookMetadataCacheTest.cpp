@@ -1,10 +1,8 @@
 // Characterization tests for BookMetadataCache's TOC href -> spineIndex resolution.
 //
 // These pin the behaviour so the lookup's speed work can be shown not to change any
-// observable result. The entries are now looked up a table-full at a time when the
-// pass ends (a per-spine href index used to answer them as they were parsed); the
-// small and large corpora that once picked the scan or the index are kept as shapes,
-// and must still resolve identically.
+// observable result. The entries are looked up a table-full at a time when the TOC
+// pass ends, one pass over the spine file per table-full (BookMetadataCache.h).
 //
 // The resolution is observed by reading back the temp file the pass writes the
 // spine indices to (toc.spine.tmp, still on disk until cleanupTmpFiles), using the
@@ -110,21 +108,9 @@ std::vector<std::string> chapterHrefs(int count) {
   return hrefs;
 }
 
-// --- A small spine ------------------------------------------------------------
+// --- A heap with room ------------------------------------------------------------
 
-TEST_F(BookMetadataCacheTest, SmallCorpusResolvesEveryTocHrefViaLinearScan) {
-  const std::vector<std::string> spine = chapterHrefs(8);
-  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, spine);
-
-  ASSERT_EQ(got.size(), spine.size());
-  for (size_t i = 0; i < got.size(); i++) {
-    EXPECT_EQ(got[i], static_cast<int16_t>(i)) << "toc entry " << i;
-  }
-}
-
-// --- A larger one ---------------------------------------------------------------
-
-TEST_F(BookMetadataCacheTest, LargeCorpusResolvesEveryTocHrefViaFastIndex) {
+TEST_F(BookMetadataCacheTest, EveryTocHrefResolvesToItsSpineItem) {
   const std::vector<std::string> spine = chapterHrefs(64);
   const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, spine);
 
@@ -134,65 +120,13 @@ TEST_F(BookMetadataCacheTest, LargeCorpusResolvesEveryTocHrefViaFastIndex) {
   }
 }
 
-// The core invariant the hardening must preserve: both modes agree.
-TEST_F(BookMetadataCacheTest, FastIndexAndLinearScanAgreeOnTheSameTocHrefs) {
-  const std::vector<std::string> toc = chapterHrefs(8);
-
-  const std::vector<int16_t> viaScan = resolveTocToSpine(cacheDir_, chapterHrefs(8), toc);
-  // Same TOC hrefs, but a spine large enough to trigger the index. The extra
-  // spines are never referenced by the TOC and must not shift any resolution.
-  const std::vector<int16_t> viaIndex = resolveTocToSpine(cacheDir_, chapterHrefs(64), toc);
-
-  ASSERT_EQ(viaScan.size(), viaIndex.size());
-  EXPECT_EQ(viaScan, viaIndex) << "the fast index resolved differently than the linear scan";
-}
-
-TEST_F(BookMetadataCacheTest, UnmatchedTocHrefResolvesToMinusOneInBothModes) {
-  const std::vector<std::string> toc = {"OEBPS/chapter0.xhtml", "OEBPS/nowhere.xhtml"};
-
-  const std::vector<int16_t> viaScan = resolveTocToSpine(cacheDir_, chapterHrefs(8), toc);
-  ASSERT_EQ(viaScan.size(), 2u);
-  EXPECT_EQ(viaScan[0], 0);
-  EXPECT_EQ(viaScan[1], -1) << "an href with no spine match must resolve to -1, not to a neighbour";
-
-  const std::vector<int16_t> viaIndex = resolveTocToSpine(cacheDir_, chapterHrefs(64), toc);
-  ASSERT_EQ(viaIndex.size(), 2u);
-  EXPECT_EQ(viaIndex[0], 0);
-  EXPECT_EQ(viaIndex[1], -1);
-}
-
-// Many spines, sparse TOC — the shape the allocation hardening targets, since
-// the index containers are sized by spineCount regardless of how small the TOC is.
-TEST_F(BookMetadataCacheTest, LargeSpineCountWithSparseTocResolvesCorrectly) {
-  const std::vector<std::string> spine = chapterHrefs(1000);
-  const std::vector<std::string> toc = {spine[0], spine[499], spine[999]};
-
-  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, toc);
-  ASSERT_EQ(got.size(), 3u);
-  EXPECT_EQ(got[0], 0);
-  EXPECT_EQ(got[1], 499);
-  EXPECT_EQ(got[2], 999);
-}
-
-// --- A heap that cannot hold the index ----------------------------------------
+// --- A heap that serves only small blocks ---------------------------------------
 //
 // First-open indexing runs with the secondary framebuffer lent, not freed: ~50 KB of fragmented
-// heap. A 2956-spine book's index (16 B/spine) does not fit there, and the deque that held it
-// allocated through the throwing operator new -- abort() on the device. Refusing every block from
-// 512 B up leaves the index (one block, 1 KB even for 64 spines) no room, while the small
-// allocations a lookup makes still succeed. The 4 KB read/write buffers are refused as well and
-// degrade to pass-through, as they would on such a heap.
-constexpr size_t kIndexDoesNotFit = 512;
-
-TEST_F(BookMetadataCacheTest, TocPassSurvivesAnIndexTheHeapCannotHold) {
-  const std::vector<std::string> spine = chapterHrefs(64);
-  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, spine, kIndexDoesNotFit);
-
-  ASSERT_EQ(got.size(), spine.size());
-  for (size_t i = 0; i < got.size(); i++) {
-    EXPECT_EQ(got[i], static_cast<int16_t>(i)) << "toc entry " << i;
-  }
-}
+// heap. Refusing every block from 512 B up leaves the TOC's lookup table 16 entries a pass (a
+// 256 B table), while the small allocations a lookup makes still succeed. The 4 KB read/write
+// buffers are refused as well and degrade to pass-through, as they would on such a heap.
+constexpr size_t kSmallBlocksOnly = 512;
 
 // Without the index, each TOC entry used to rescan the spine from its first record: ~4.4 million
 // spine records for a 2956-entry TOC. A TOC lists its chapters in reading order, so resuming after
@@ -203,7 +137,7 @@ TEST_F(BookMetadataCacheTest, AnInOrderTocReadsTheSpineAboutOnceWithoutTheIndex)
   const std::vector<std::string> spine = chapterHrefs(3000);
 
   size_t bytesRead = 0;
-  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, spine, kIndexDoesNotFit, &bytesRead);
+  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, spine, kSmallBlocksOnly, &bytesRead);
 
   ASSERT_EQ(got.size(), spine.size());
   for (size_t i = 0; i < got.size(); i++) {
@@ -228,7 +162,7 @@ TEST_F(BookMetadataCacheTest, AReversedTocReadsTheSpineAboutOnceFromTheLentRegio
   BuildArena arena(region.get(), kRegionBytes);
 
   size_t bytesRead = 0;
-  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, toc, kIndexDoesNotFit, &bytesRead, &arena);
+  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, toc, kSmallBlocksOnly, &bytesRead, &arena);
   const auto spineFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "spine.bin.tmp"));
   const auto tocFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "toc.bin.tmp"));
   std::printf("[ toc      ] reversed TOC of %zu, lent region: %zu bytes read (spine file %zu, TOC file %zu)\n",
@@ -249,7 +183,7 @@ TEST_F(BookMetadataCacheTest, AReversedTocOnASmallHeapStillResolvesEveryEntry) {
   const std::vector<std::string> toc(spine.rbegin(), spine.rend());
 
   size_t bytesRead = 0;
-  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, toc, kIndexDoesNotFit, &bytesRead);
+  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, toc, kSmallBlocksOnly, &bytesRead);
   const auto spineFileBytes = static_cast<size_t>(fs::file_size(fs::path(cacheDir_) / "spine.bin.tmp"));
   std::printf("[ toc      ] reversed TOC of %zu, small heap: %zu bytes read (spine file %zu)\n", toc.size(), bytesRead,
               spineFileBytes);
@@ -269,7 +203,7 @@ TEST_F(BookMetadataCacheTest, TheResumedScanResolvesAnyOrderLikeAFullScan) {
   const std::vector<std::string> toc = {
       spine[5], spine[2], spine[63], spine[63], spine[0], spine[40], "OEBPS/nowhere.xhtml", spine[41], spine[1]};
 
-  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, toc, kIndexDoesNotFit);
+  const std::vector<int16_t> got = resolveTocToSpine(cacheDir_, spine, toc, kSmallBlocksOnly);
   const std::vector<int16_t> expected = {5, 2, 63, 63, 0, 40, -1, 41, 1};
   EXPECT_EQ(got, expected);
 }
@@ -296,17 +230,6 @@ TEST(SpineHrefMatchTest, APathMatchesExactlyOrByItsFilename) {
   EXPECT_EQ(spine_href::match("c1.xhtml", "OEBPS/text/c1.xhtml"), SpineHrefMatch::Filename);
   EXPECT_EQ(spine_href::match("OEBPS/c1.xhtml", "OEBPS/text/c11.xhtml"), SpineHrefMatch::None);
   EXPECT_EQ(spine_href::match("OEBPS/", "OEBPS/text/"), SpineHrefMatch::None) << "no filename, nothing to match";
-}
-
-TEST_F(BookMetadataCacheTest, TocHrefsOffByAFolderResolveByFilenameInBothModes) {
-  for (const int spines : {8, 64}) {  // the linear scan, then the index
-    const std::vector<int16_t> got =
-        resolveTocToSpine(cacheDir_, hrefsIn("OEBPS/text/", spines), hrefsIn("OEBPS/", spines));
-    ASSERT_EQ(got.size(), static_cast<size_t>(spines));
-    for (int i = 0; i < spines; i++) {
-      EXPECT_EQ(got[i], static_cast<int16_t>(i)) << "toc entry " << i << " of " << spines;
-    }
-  }
 }
 
 TEST_F(BookMetadataCacheTest, AFilenameTwoSpineItemsShareIsNotGuessed) {
