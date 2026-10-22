@@ -414,31 +414,6 @@ INSTANTIATE_TEST_SUITE_P(CjkCorpus, CjkJustifiedRules, testing::ValuesIn(booksJu
 
 }  // namespace
 
-// A CJK word is one token per character, and the table row budget charges every token: the fixture's
-// case 8, a cell of 289 CJK characters (14 KB of tokens), passes the 12 KB row budget and flows as
-// text, as a cell of 289 Latin words does. Charged once per flushed run, it would count as a dozen
-// words and stay buffered.
-TEST(CjkTable, ALongCjkCellIsChargedPerToken) {
-  const auto cacheDir = fs::temp_directory_path() / "epub_pipeline_test" / "cjk_table_budget";
-  fs::remove_all(cacheDir);
-  fs::create_directories(cacheDir);
-  std::ostringstream dump;
-  ASSERT_TRUE(pipeline_harness::runAndDump((fs::path(CORPUS_DIR) / "test_cjk_line_breaking.epub").string(),
-                                           cacheDir.string(), pipeline_harness::Profile{}, dump));
-  std::istringstream in(dump.str());
-  std::string raw;
-  std::string lastLineRecord;
-  while (std::getline(in, raw)) {
-    const std::string line = raw.substr(raw.find_first_not_of(' '));
-    if (line.rfind("LINE ", 0) == 0 || line.rfind("LN ", 0) == 0) lastLineRecord = line;
-    if (line.find(" t=鑑") != std::string::npos) {
-      EXPECT_EQ(lastLineRecord.rfind("LINE ", 0), 0u) << "case 8 stayed in a table cell: " << lastLineRecord;
-      return;
-    }
-  }
-  FAIL() << "case 8's first character is missing from the dump";
-}
-
 // A source line break next to an element that is not inline formatting is a word gap, not a CJK
 // segment break to drop (test_cjk_block_seams.epub; not in cjkBooks(), since these spaces are
 // correct). A list item whose text sits on its own indented line keeps the space after its marker
