@@ -452,8 +452,8 @@ Then:
 rarely ask for italic, and a Latin word set in italic inside one should look italic.
 
 **How.** `Rasterizer::slant()` runs after `embolden()` and before `rasterize()`.
-- It ports `FT_GlyphSlot_Oblique` in integers. That function calls `FT_Outline_Transform` with the matrix
-  {0x10000, 0x366A; 0, 0x10000}:
+- It ports `FT_GlyphSlot_Oblique` in integers. That function calls `FT_GlyphSlot_Slant(slot, 0x366A, 0)`, which
+  calls `FT_Outline_Transform` with the matrix {0x10000, 0x366A; 0, 0x10000}:
   - each point's x gains `FT_MulFix(y, 0x366A)`; `FT_MulFix(x, 0x10000)` is x exactly;
   - y stays.
 - The glyph is boxed again.
@@ -470,7 +470,8 @@ rarely ask for italic, and a Latin word set in italic inside one should look ita
 - **Scratch plan.** A synthetic family's plan leaves room for the slanted box, which grows by up to the glyph's
   height × 0x366A / 65536.
 - **Oversized glyphs.** A glyph is drawn upright when its slanted bitmap exceeds the output cap or its offsets no
-  longer fit the glyph record, as an oversized bold glyph draws unemboldened (#548).
+  longer fit `EpdGlyphRef`'s 8-bit `left` and `top` (`placeable()` in `TtfFont.cpp`), as an oversized bold glyph
+  draws unemboldened (#548).
 
 **Storage.**
 - **Keys.** Synthetic italic glyphs are stored under the italic style's bits of the glyph key, bold italic under
@@ -479,14 +480,17 @@ rarely ask for italic, and a Latin word set in italic inside one should look ita
   - Since #548, a regular-only family stores emboldened, upright glyphs under the bold-italic bits; slanting
     changes what those keys draw.
   - The bump rebuilds every installed store once after the update, so the first pages after it render cold.
+  - It also gives every outline family a new font ID (`SdCardFontManager::computeFontId` hashes the identity), and a
+    section is checked against its body font's ID: every chapter laid out in an outline body font is laid out again
+    once.
   - Cost if wrong: a narrower scheme, a synthetic-style version folded into only the affected families'
     identities, would have spared the stores of families with italic files.
 
 **Cost.**
 - **Speed.** One multiply-add per outline point; next to the rasterizer it should not show. The device bench
   confirms it, as it did for bold.
-- **RAM.** One more StyleFont per native size (about 130 B on the C3) in a regular-only family, two in a
-  Regular-and-Bold family.
+- **RAM.** One more StyleFont per size, the body's and each native one's (about 130 B on the C3), in a regular-only
+  family, two in a Regular-and-Bold family.
 
 **Proof.**
 - **The FreeType oracle.** Every glyph of the bundled TrueType and CFF test fonts at 8, 14 and 40 pt, slanted, and
