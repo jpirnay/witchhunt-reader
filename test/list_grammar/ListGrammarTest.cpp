@@ -77,13 +77,6 @@ void expectTurn(const ListGrammar::PageTurn turn, int row, int top) {
 
 // --- Commands -------------------------------------------------------------------------------
 
-TEST(ListGrammarCommand, UpDownStepOnEveryShape) {
-  for (const Shape& s : {kDefault, kBoth, shape(false, false, false, true)}) {
-    expectCommand(Key::Up, Press::Short, s, kAll, Command::StepPrev, 1);
-    expectCommand(Key::Down, Press::Short, s, kAll, Command::StepNext, 1);
-  }
-}
-
 TEST(ListGrammarCommand, UpDownLongJumpsToTheEnds) {
   expectCommand(Key::Up, Press::Long, kDefault, kNone, Command::First, 1);
   expectCommand(Key::Down, Press::Long, kDefault, kNone, Command::Last, 1);
@@ -129,8 +122,6 @@ TEST(ListGrammarCommand, ActionThatDoesNotApplyIsNoneNeverAStep) {
 }
 
 TEST(ListGrammarCommand, DoubleStepsTwiceButRunsActionsOnce) {
-  expectCommand(Key::Down, Press::Double, kDefault, kNone, Command::StepNext, 2);
-  expectCommand(Key::Up, Press::Double, kBoth, kAll, Command::StepPrev, 2);
   expectCommand(Key::Right, Press::Double, kDefault, kNone, Command::StepNext, 2);
   expectCommand(Key::Right, Press::Double, kBoth, kAll, Command::RightAction, 1);
   expectCommand(Key::Confirm, Press::Double, kDefault, kNone, Command::Activate, 1);

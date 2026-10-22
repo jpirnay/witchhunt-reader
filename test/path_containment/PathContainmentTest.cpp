@@ -36,20 +36,10 @@ TEST(PathContainment, LeavesPlainPathsAlone) {
 TEST(PathContainment, ResolvesParentReferences) {
   EXPECT_EQ(norm("/books/../notes.txt"), "notes.txt");
   EXPECT_EQ(norm("/a/b/c/../../d"), "a/d");
-}
-
-// The case the protected-item rules depend on. Before normalisation the last
-// component is an innocuous "notes.txt" while the path reaches into a dot-folder;
-// after it, the dot-folder is visible in the result the caller will open.
-TEST(PathContainment, TraversalCannotHideADotFolder) {
-  const std::string raw = "/books/../.private/notes.txt";
-  const std::string resolved = norm(raw);
-  EXPECT_EQ(resolved, ".private/notes.txt");
-  // The last component looks harmless either way ...
-  EXPECT_EQ(resolved.substr(resolved.rfind('/') + 1), "notes.txt");
-  // ... so protection has to judge every segment of the RESOLVED path, where the
+  // The protected-item rules depend on this: the last component is an innocuous "notes.txt" while the path
+  // reaches into a dot-folder, so protection has to judge every segment of the RESOLVED path, where the
   // dot-folder is now present.
-  EXPECT_EQ(resolved.rfind(".private/", 0), 0u);
+  EXPECT_EQ(norm("/books/../.private/notes.txt"), ".private/notes.txt");
 }
 
 // Climbing past the root clamps there rather than escaping or underflowing.

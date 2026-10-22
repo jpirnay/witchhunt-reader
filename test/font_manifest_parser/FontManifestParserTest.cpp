@@ -5,8 +5,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <fstream>
-#include <iterator>
 #include <string>
 #include <vector>
 
@@ -377,72 +375,4 @@ TEST(FontManifestParserTest, ResetStartsAFreshDocument) {
   EXPECT_EQ(rec.events, kTwoFamiliesEvents);
   EXPECT_TRUE(parser.complete());
   EXPECT_FALSE(parser.hasError());
-}
-
-// Callbacks left null are skipped: a pass that only counts families sets just one.
-TEST(FontManifestParserTest, NullCallbacksAreSkipped) {
-  struct Counter {
-    int families = 0;
-  } counter;
-  FontManifestCallbacks cb{};
-  cb.ctx = &counter;
-  cb.onFamilyBegin = [](void* ctx) { ++static_cast<Counter*>(ctx)->families; };
-  FontManifestParser parser(cb);
-  parser.feed(kTwoFamilies.data(), kTwoFamilies.size());
-  EXPECT_EQ(counter.families, 2);
-  EXPECT_TRUE(parser.complete());
-}
-
-// 10. The manifest the Font Manager downloads, end to end, in the 512-byte pieces the device reads.
-// Structural checks only, so regenerating assets/sd-fonts/fonts.json does not break them.
-TEST(FontManifestParserTest, ParsesTheShippedManifest) {
-  std::ifstream in(FONT_MANIFEST_PATH, std::ios::binary);
-  ASSERT_TRUE(in.good()) << FONT_MANIFEST_PATH;
-  const std::string json((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-
-  struct Tally {
-    int families = 0;
-    int files = 0;
-    int withCrc = 0;
-    int overflowed = 0;
-    std::string firstFamily;
-    std::string firstDescription;
-    std::string firstFile;
-  } tally;
-  FontManifestCallbacks cb{};
-  cb.ctx = &tally;
-  cb.onFamilyBegin = [](void* ctx) { ++static_cast<Tally*>(ctx)->families; };
-  cb.onFamilyName = [](void* ctx, const char* v, size_t n) {
-    auto& t = *static_cast<Tally*>(ctx);
-    if (t.families == 1) t.firstFamily.assign(v, n);
-  };
-  cb.onFamilyDescription = [](void* ctx, const char* v, size_t n) {
-    auto& t = *static_cast<Tally*>(ctx);
-    if (t.families == 1) t.firstDescription.assign(v, n);
-  };
-  cb.onFile = [](void* ctx, const FontManifestFile& f) {
-    auto& t = *static_cast<Tally*>(ctx);
-    if (++t.files == 1) {
-      t.firstFile.assign(f.name, f.nameLen);
-    }
-    if (f.hasCrc32) ++t.withCrc;
-    if (f.nameOverflow) ++t.overflowed;
-  };
-
-  FontManifestParser parser(cb);
-  for (size_t at = 0; at < json.size(); at += 512) {
-    parser.feed(json.data() + at, std::min<size_t>(512, json.size() - at));
-  }
-
-  EXPECT_FALSE(parser.hasError());
-  EXPECT_TRUE(parser.complete());
-  EXPECT_EQ(parser.version(), 2);
-  EXPECT_STREQ(parser.baseUrl(), "https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/");
-  EXPECT_FALSE(parser.baseUrlOverflow());
-  EXPECT_GT(tally.families, 0);
-  EXPECT_GT(tally.files, 0);
-  EXPECT_EQ(tally.withCrc, tally.files);
-  EXPECT_EQ(tally.overflowed, 0);
-  EXPECT_FALSE(tally.firstFamily.empty());
-  EXPECT_FALSE(tally.firstFile.empty());
 }

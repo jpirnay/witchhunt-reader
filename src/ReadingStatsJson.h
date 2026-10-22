@@ -31,13 +31,7 @@ struct ScanRequest {
 
 // One pass over the file: the global figures and whatever the request asked for. Days are
 // filtered and trimmed the way a load would.
-struct Summary : ReadingTotals {
-  uint32_t bookCount = 0;
-  uint32_t finishedBookCount = 0;
-  // Over the books far enough in to count toward the global pace (see ReadingStatsStore).
-  uint32_t paceSeconds = 0;
-  uint32_t pacePercents = 0;
-};
+struct Summary : ReadingTotals {};
 
 ScanResult scan(HalFile& in, Summary& summary, const ScanRequest& request);
 

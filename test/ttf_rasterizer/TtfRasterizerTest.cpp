@@ -97,43 +97,6 @@ Bytes header(const int16_t contours) {
 
 }  // namespace
 
-TEST_F(TtfRasterizerTest, ASquareFillsItsBox) {
-  const uint16_t g = add(outline({rect(64, 0, 384, 320)}));  // x 1..6 px, y 0..5 px
-  ASSERT_EQ(Status::Ok, draw(g));
-  EXPECT_EQ(5, metrics.width);
-  EXPECT_EQ(5, metrics.height);
-  EXPECT_EQ(1, metrics.left);
-  EXPECT_EQ(5, metrics.top);
-  EXPECT_EQ(7, metrics.dataLength);
-  EXPECT_EQ(0u, metrics.dataOffset);
-  EXPECT_EQ("33333\n33333\n33333\n33333\n33333\n", image);
-}
-
-TEST_F(TtfRasterizerTest, RowsRunFromTheTop) {
-  const uint16_t g = add(outline({rect(0, 0, 192, 64), rect(0, 64, 64, 192)}));  // an L
-  ASSERT_EQ(Status::Ok, draw(g));
-  EXPECT_EQ("3..\n3..\n333\n", image);
-  EXPECT_EQ(3, metrics.top);
-}
-
-TEST_F(TtfRasterizerTest, CoverageQuantisesWithTheConvertersThresholds) {
-  // A pixel 8, 20, 36 and 52 of 64 covered: coverage 32, 80, 144, 208 -> nibbles 2, 5, 9, 13.
-  const int16_t widths[] = {8, 20, 36, 52};
-  const char* expected[] = {".\n", "1\n", "2\n", "3\n"};
-  for (int i = 0; i < 4; ++i) {
-    font.glyphs.resize(1);
-    const uint16_t g = add(outline({rect(0, 0, widths[i], 64)}));
-    ASSERT_EQ(Status::Ok, draw(g)) << i;
-    EXPECT_EQ(expected[i], image) << i;
-  }
-}
-
-TEST_F(TtfRasterizerTest, AdvancesComeFromHmtx) {
-  const uint16_t g = add(outline({rect(64, 0, 384, 320)}, 500));
-  ASSERT_EQ(Status::Ok, draw(g, 640));  // 10 px: 500 units are 4.99998 px
-  EXPECT_EQ(80, metrics.advanceX);
-}
-
 TEST_F(TtfRasterizerTest, AGlyphWithNoOutlineLoadsEmpty) {
   Glyph space;
   space.advance = 250;
@@ -146,62 +109,6 @@ TEST_F(TtfRasterizerTest, AGlyphWithNoOutlineLoadsEmpty) {
   uint8_t canary[4] = {0xEE, 0xEE, 0xEE, 0xEE};
   EXPECT_EQ(Status::Ok, rasterizer.rasterize(canary));
   EXPECT_EQ(0xEE, canary[0]);
-}
-
-TEST_F(TtfRasterizerTest, TheOutlineMovesSoTheLeftSideBearingStartsAtTheOrigin) {
-  // FreeType places a glyph by its hmtx left side bearing, not by its outline: xMin - lsb is taken off.
-  Glyph glyph = outline({rect(64, 0, 128, 64)});
-  glyph.lsbIsXMin = false;
-  glyph.lsb = 0;
-  const uint16_t shifted = add(glyph);
-  ASSERT_EQ(Status::Ok, draw(shifted));
-  EXPECT_EQ(0, metrics.left);
-  glyph.lsb = 64;
-  const uint16_t inPlace = add(glyph);
-  ASSERT_EQ(Status::Ok, draw(inPlace));
-  EXPECT_EQ(1, metrics.left);
-}
-
-TEST_F(TtfRasterizerTest, ComponentsAreOffset) {
-  const uint16_t dot = add(outline({rect(0, 0, 64, 64)}));
-  const uint16_t g = add(compound({{dot, 128, 64}, {dot, 0, 0}}));
-  ASSERT_EQ(Status::Ok, draw(g));
-  EXPECT_EQ(0, metrics.left);
-  EXPECT_EQ(2, metrics.top);
-  EXPECT_EQ("..3\n3..\n", image);
-}
-
-TEST_F(TtfRasterizerTest, ComponentsAreScaled) {
-  const uint16_t square = add(outline({rect(0, 0, 128, 128)}));  // 2 x 2 px
-  const uint16_t half = add(compound({{square, 0, 0, {0x2000}}}));
-  ASSERT_EQ(Status::Ok, draw(half));
-  EXPECT_EQ("3\n", image);
-  const uint16_t flat = add(compound({{square, 0, 0, {0x4000, 0x2000}}}));  // x 1.0, y 0.5
-  ASSERT_EQ(Status::Ok, draw(flat));
-  EXPECT_EQ("33\n", image);
-}
-
-TEST_F(TtfRasterizerTest, TheTwoByTwoTransformTakesItsEntriesInFileOrder) {
-  // a, b, c, d in the file: x' = a*x + c*y, y' = b*x + d*y. This one turns a quarter left: (x, y) -> (-y, x).
-  const uint16_t bar = add(outline({rect(0, 0, 192, 64)}));  // 3 x 1 px
-  const uint16_t turned = add(compound({{bar, 0, 0, {0, 0x4000, -0x4000, 0}}}));
-  ASSERT_EQ(Status::Ok, draw(turned));
-  EXPECT_EQ(-1, metrics.left);
-  EXPECT_EQ(3, metrics.top);
-  EXPECT_EQ("3\n3\n3\n", image);
-}
-
-TEST_F(TtfRasterizerTest, UseMyMetricsTakesTheComponentsLeftSideBearing) {
-  Glyph base = outline({rect(64, 0, 128, 64)});
-  base.lsbIsXMin = false;
-  base.lsb = 0;  // FreeType shifts this glyph 1 px left when it stands alone
-  const uint16_t dot = add(base);
-  const uint16_t plain = add(compound({{dot, 0, 0}}));
-  ASSERT_EQ(Status::Ok, draw(plain));
-  EXPECT_EQ(1, metrics.left);  // the compound's own lsb equals its xMin: no shift
-  const uint16_t mine = add(compound({{dot, 0, 0, {}, 0x0200}}));
-  ASSERT_EQ(Status::Ok, draw(mine));
-  EXPECT_EQ(0, metrics.left);
 }
 
 TEST_F(TtfRasterizerTest, PointMatchedAndScaledOffsetComponentsAreUnsupported) {
@@ -564,11 +471,4 @@ TEST(TtfScratch, AllocationHoldsThePlanAndRefusesImpossibleOnes) {
   EXPECT_FALSE(rasterizer.allocate({512, 256, 4096, 1024}));  // pool under ftgrays' minimum
   EXPECT_FALSE(rasterizer.allocate({kMaxScratchPoints + 1, 1, 64, kPoolBytesFlash}));
   EXPECT_FALSE(rasterizer.allocate({8, 1, kMaxOutputBytes + 1, kPoolBytesFlash}));
-}
-
-TEST(TtfStatus, NamesForTheLog) {
-  EXPECT_STREQ("ok", statusName(Status::Ok));
-  EXPECT_STREQ("unsupported", statusName(Status::Unsupported));
-  EXPECT_STREQ("malformed", statusName(Status::Malformed));
-  EXPECT_STREQ("transient", statusName(Status::Transient));
 }

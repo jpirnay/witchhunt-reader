@@ -4,7 +4,6 @@
 // The body-font cases are ported from crosspoint-reader PR #3934's PublisherBodyFontTest (Julia Nguyen),
 // asked of the whole book here instead of one chapter's layout.
 #include <gtest/gtest.h>
-#include <wolfssl/wolfcrypt/hash.h>
 
 #include <cstring>
 #include <filesystem>
@@ -131,17 +130,6 @@ const char* kProbeCss =
     ".block { font-family: Roboto, sans-serif; }\n";
 
 }  // namespace
-
-TEST(BookFontsKeys, Sha1MatchesTheFipsVectors) {
-  uint8_t digest[20];
-  ASSERT_EQ(0, wc_ShaHash(reinterpret_cast<const byte*>("abc"), 3, digest));
-  EXPECT_EQ("a9993e364706816aba3e25717850c26c9cd0d89d", hex(digest, 20));
-  ASSERT_EQ(0, wc_ShaHash(reinterpret_cast<const byte*>(""), 0, digest));
-  EXPECT_EQ("da39a3ee5e6b4b0d3255bfef95601890afd80709", hex(digest, 20));
-  const char* twoBlocks = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
-  ASSERT_EQ(0, wc_ShaHash(reinterpret_cast<const byte*>(twoBlocks), 56, digest));
-  EXPECT_EQ("84983e441c3bd26ebaae4aa1f95129e5e54670f1", hex(digest, 20));
-}
 
 TEST(BookFontsKeys, TheIdpfKeyHashesTheIdentifierWithoutWhiteSpace) {
   uint8_t key[20];

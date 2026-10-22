@@ -41,14 +41,12 @@ Result shortSide(const Side side, const Press press, const Shape& shape, const A
 
 Result commandFor(const Key key, const Press press, const Shape& shape, const Availability& available) {
   const bool isLong = press == Press::Long;
-  const uint8_t steps = press == Press::Double ? 2 : 1;
   switch (key) {
+    // Short and double Up/Down are the caller's tapVertical(): single steps and double-tap paging.
     case Key::Up:
-      if (isLong) return once(shape.tabbed ? Command::TabPrev : Command::First);
-      return {Command::StepPrev, steps};
+      return isLong ? once(shape.tabbed ? Command::TabPrev : Command::First) : Result{};
     case Key::Down:
-      if (isLong) return once(shape.tabbed ? Command::TabNext : Command::Last);
-      return {Command::StepNext, steps};
+      return isLong ? once(shape.tabbed ? Command::TabNext : Command::Last) : Result{};
     case Key::Left:
       if (isLong) return once(Command::PagePrev);
       return shortSide(Side::Left, press, shape, available);

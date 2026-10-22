@@ -290,6 +290,8 @@ TEST(FontManifestReaderTest, ReadsTheShippedManifest) {
 
   const Outcome out = read(json);
   ASSERT_EQ(out.status, FontManifestStatus::Ok) << out.failure;
+  EXPECT_EQ(out.version, 2);
+  EXPECT_EQ(out.baseUrl, "https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/");
   const FontCatalog& catalog = out.catalog;
   ASSERT_GT(catalog.count(), 0u);
   EXPECT_GT(catalog.totalFiles(), 0u);

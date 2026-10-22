@@ -77,22 +77,9 @@ BuiltSection build(const std::string& tag, int spineIndex) {
 
 }  // namespace
 
-// Every id in the document resolves. Not "the map is non-empty" — a map that kept only some of
-// its entries still answers a lookup, it just silently strands the fragments it dropped, which
-// on a notes document means the footnotes that no longer go anywhere.
-TEST(AnchorMap, EveryAnchorInTheChapterResolves) {
-  const auto built = build("all_anchors", kWrappedSpine);
-
-  EXPECT_TRUE(built.section->getPageForAnchor("ch01").has_value()) << "the wrapping div's id";
-  for (int i = 1; i <= 24; ++i) {
-    const std::string id = "p" + std::to_string(i);
-    EXPECT_TRUE(built.section->getPageForAnchor(id).has_value()) << id << " is missing from the anchor map";
-  }
-}
-
 // The last anchor in a document is recorded during finalize, after the parse has ended, which
 // makes it the one entry a lifecycle mistake drops (or keeps alone). Pinned separately from the
-// sweep above so a failure says which case broke.
+// sweep below so a failure says which case broke.
 TEST(AnchorMap, TheLastAnchorSurvivesFinalize) {
   const auto built = build("last_anchor", kWrappedSpine);
 
@@ -111,17 +98,21 @@ TEST(AnchorMap, TheLastAnchorSurvivesFinalize) {
   EXPECT_TRUE(built.section->getPageForAnchor("p24").has_value());
 }
 
-// Anchors map to the page they actually sit on, in order. A map whose pages were all zero (or all
-// the last page) would still pass a has_value() sweep.
+// Every id in the document resolves, to the page it actually sits on, in order. Not "the map is
+// non-empty" — a map that kept only some of its entries still answers a lookup, it just silently
+// strands the fragments it dropped, which on a notes document means the footnotes that no longer
+// go anywhere. And a map whose pages were all zero (or all the last page) would still pass a
+// has_value() sweep.
 TEST(AnchorMap, AnchorPagesAdvanceThroughTheChapter) {
   const auto built = build("pages_advance", kWrappedSpine);
   ASSERT_GT(built.section->pageCount, 1) << "fixture must span several pages to be meaningful";
 
+  EXPECT_TRUE(built.section->getPageForAnchor("ch01").has_value()) << "the wrapping div's id";
   uint16_t previous = 0;
   bool sawLaterPage = false;
   for (int i = 1; i <= 24; ++i) {
     const auto page = built.section->getPageForAnchor("p" + std::to_string(i));
-    ASSERT_TRUE(page.has_value()) << "p" << i;
+    ASSERT_TRUE(page.has_value()) << "p" << i << " is missing from the anchor map";
     EXPECT_GE(*page, previous) << "p" << i << " maps before the paragraph ahead of it";
     if (*page > previous) sawLaterPage = true;
     previous = *page;

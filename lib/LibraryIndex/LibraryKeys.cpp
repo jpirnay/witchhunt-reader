@@ -140,10 +140,6 @@ std::string filingKey(const std::string& filing) {
   return out;
 }
 
-std::string authorSortKey(const std::string& name, const std::string& fileAs) {
-  return filingKey(authorFilingName(name, fileAs));
-}
-
 uint32_t authorHash(const std::string& name) {
   const std::string folded = fold(name);
   if (folded.empty()) return library::AUTHOR_UNKNOWN;

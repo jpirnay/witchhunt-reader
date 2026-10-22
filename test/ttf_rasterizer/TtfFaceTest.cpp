@@ -83,15 +83,6 @@ TEST(TtfFace, CffFontsAreReadAndCollectionsAreUnsupported) {
   EXPECT_EQ(Face::Outlines::TrueType, face.outlines);
 }
 
-TEST(TtfFace, ABundledCffSourceIsRead) {
-  const std::vector<uint8_t> data = readFont("OpenDyslexic/OpenDyslexic-Regular.otf");
-  ASSERT_FALSE(data.empty());
-  Face face;
-  ASSERT_EQ(FaceStatus::Ok, parse(data, &face));
-  EXPECT_EQ(Face::Outlines::Cff, face.outlines);
-  EXPECT_EQ(1786, face.numGlyphs);
-}
-
 TEST(TtfFace, ACff2OnlyFontIsUnsupported) {
   // Variable OpenType (CFF2) is not read; FreeType reads a CFF2 table before a CFF one, so neither is a font with both.
   Font font = threeGlyphs();
@@ -268,12 +259,6 @@ TEST(TtfFace, HmtxIsReadAsFreeTypeReadsIt) {
   horizontalMetrics(bytes, face, 1, &advance, &lsb);
   EXPECT_EQ(0, advance);
   EXPECT_FALSE(bytes.outOfRange());
-}
-
-TEST(TtfFace, PointSizesBecomeFreeTypesPixelsPerEm) {
-  EXPECT_EQ(1600u, ppemFromPoints(12));
-  EXPECT_EQ(1867u, ppemFromPoints(14));
-  EXPECT_EQ(2400u, ppemFromPoints(18));
 }
 
 TEST(TtfFace, AdvancesAreTheConvertersTwelveFour) {

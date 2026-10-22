@@ -55,8 +55,6 @@ struct FileProbe {
 /// size is not known, and fitsStore() lets the load, which plans the block again, decide.
 constexpr uint32_t kSdBytesUnknown = UINT32_MAX - 1;
 FileProbe probeFile(const FileSource& file);
-/// probeFile(file).style.
-int probeStyle(const FileSource& file);
 
 /// Which file serves each style of a directory's TrueType files, the files sorted by name. Each style takes, of
 /// the files declaring it, a static one before a variable one, then the weight nearest 400 (regular, italic) or

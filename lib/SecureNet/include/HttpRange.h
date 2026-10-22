@@ -106,10 +106,6 @@ size_t recordBlockFor(size_t chunkSize);
 // (Wi-Fi/lwIP receive buffers that may be carved out of the same block while the record arrives).
 size_t chunkBudget(size_t chunkSize);
 
-// The largest size from CHUNK_LADDER whose budget fits in largestFreeBlock. The smallest when none
-// fits: the smallest records are the best remaining chance.
-size_t chunkSizeForLargestBlock(size_t largestFreeBlock);
-
 // The most reconnects one file may use: MAX_RECONNECTS_BASE plus one per
 // BYTES_PER_EXTRA_RECONNECT of the file.
 unsigned maxReconnectsFor(size_t fileBytes);

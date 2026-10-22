@@ -136,8 +136,6 @@ size_t ladderIndexFor(size_t largestFreeBlock) {
 }
 }  // namespace
 
-size_t chunkSizeForLargestBlock(size_t largestFreeBlock) { return CHUNK_LADDER[ladderIndexFor(largestFreeBlock)]; }
-
 ChunkSizer::ChunkSizer(size_t ceiling) : ceilingIndex_(CHUNK_LADDER_SIZE - 1) {
   for (size_t i = 0; i < CHUNK_LADDER_SIZE; ++i) {
     if (CHUNK_LADDER[i] <= ceiling) {

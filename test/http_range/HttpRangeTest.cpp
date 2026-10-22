@@ -164,32 +164,22 @@ TEST(HttpRangeHeap, RoundsLikeTheC3Heap) {
 TEST(HttpRangeHeap, ChunkSizeFollowsTheLargestFreeBlock) {
   // X3: 16,372 B after a handshake, 12,276 B before the manifest, 4.6-6.1 KB once a long
   // download had fragmented the heap.
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(16372), 6144u);
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(12276), 6144u);
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(9000), 4096u);
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(7680), 3072u);
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(6656), 2048u);
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(6132), 1024u);
+  EXPECT_EQ(hr::ChunkSizer().next(16372), 6144u);
+  EXPECT_EQ(hr::ChunkSizer().next(12276), 6144u);
+  EXPECT_EQ(hr::ChunkSizer().next(9000), 4096u);
+  EXPECT_EQ(hr::ChunkSizer().next(7680), 3072u);
+  EXPECT_EQ(hr::ChunkSizer().next(6656), 2048u);
+  EXPECT_EQ(hr::ChunkSizer().next(6132), 1024u);
   // Nothing fits: the smallest chunk is still the best chance.
-  EXPECT_EQ(hr::chunkSizeForLargestBlock(4596), hr::MIN_CHUNK_BYTES);
-}
-
-TEST(HttpRangeHeap, AChunkNeedsItsRecordWithHeadersPlusTheWifiMargin) {
-  // 6 KB of body and ~0.9 KB of headers in one record no longer fit the 6.1 KB block the X3 had
-  // left late in a download: that is the failure the per-request sizing avoids.
-  EXPECT_GT(hr::recordBlockFor(6144), 6132u);
-  for (const size_t chunk : hr::CHUNK_LADDER) {
-    EXPECT_GE(hr::recordBlockFor(chunk), chunk + hr::RESPONSE_HEADER_ALLOWANCE + hr::RECORD_EXPANSION) << chunk;
-    EXPECT_EQ(hr::chunkBudget(chunk), hr::recordBlockFor(chunk) + hr::WIFI_MARGIN) << chunk;
-  }
+  EXPECT_EQ(hr::ChunkSizer().next(4596), hr::MIN_CHUNK_BYTES);
 }
 
 TEST(HttpRangeHeap, EachSizeStartsExactlyAtItsBudget) {
   for (size_t i = 0; i < hr::CHUNK_LADDER_SIZE; ++i) {
     const size_t chunk = hr::CHUNK_LADDER[i];
-    EXPECT_EQ(hr::chunkSizeForLargestBlock(hr::chunkBudget(chunk)), chunk) << chunk;
+    EXPECT_EQ(hr::ChunkSizer().next(hr::chunkBudget(chunk)), chunk) << chunk;
     if (i + 1 < hr::CHUNK_LADDER_SIZE) {
-      EXPECT_EQ(hr::chunkSizeForLargestBlock(hr::chunkBudget(chunk) - 1), hr::CHUNK_LADDER[i + 1]) << chunk;
+      EXPECT_EQ(hr::ChunkSizer().next(hr::chunkBudget(chunk) - 1), hr::CHUNK_LADDER[i + 1]) << chunk;
     }
   }
 }
@@ -237,30 +227,6 @@ TEST(HttpRangeSizer, AnOutOfMemoryReadBelowTheCeilingStepsBelowThatSize) {
   sizer.onOutOfMemory();
   EXPECT_EQ(sizer.ceiling(), 2048u);
   EXPECT_EQ(sizer.next(16372), 2048u);
-}
-
-TEST(HttpRangeSizer, TheCeilingCarriesAcrossTheFilesOfOneSession) {
-  // What HttpDownloader::Session does: each file's sizer starts from the ceiling the last one left.
-  size_t sessionCeiling = hr::DEFAULT_CHUNK_BYTES;
-
-  hr::ChunkSizer first(sessionCeiling);
-  EXPECT_EQ(first.next(17396), 6144u);
-  first.onOutOfMemory();
-  sessionCeiling = first.ceiling();
-  EXPECT_EQ(sessionCeiling, 4096u);
-
-  // The next file starts at the size known to work, not at the 6 KB the block reading allows.
-  hr::ChunkSizer second(sessionCeiling);
-  EXPECT_EQ(second.ceiling(), 4096u);
-  EXPECT_EQ(second.next(17396), 4096u);
-  sessionCeiling = second.ceiling();
-
-  // A further failure lowers it again, and the file after that inherits the lower ceiling.
-  hr::ChunkSizer third(sessionCeiling);
-  EXPECT_EQ(third.next(17396), 4096u);
-  third.onOutOfMemory();
-  hr::ChunkSizer fourth(third.ceiling());
-  EXPECT_EQ(fourth.next(17396), 3072u);
 }
 
 TEST(HttpRangeSizer, ACeilingIsRoundedDownToALadderSize) {

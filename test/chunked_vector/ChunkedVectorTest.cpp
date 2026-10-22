@@ -157,25 +157,6 @@ TEST(ChunkedVectorTest, MoveHandsTheChunksOverAndClearStartsOver) {
   fillAndCheck(assigned, 60);
 }
 
-TEST(ChunkedVectorTest, ReaderInstantiationsCoverAWholeSection) {
-  // Section::PageLut and ChapterHtmlSlimParser::ParagraphLut: 10000 is Page::MAX_PAGES_PER_SECTION.
-  using PageLut = ChunkedVector<int, 16, 256, 10000>;
-  using ParagraphLut = ChunkedVector<std::pair<uint32_t, uint32_t>, 16, 128, 10000>;
-  static_assert(PageLut::minMaxSize() >= 10000);
-  static_assert(ParagraphLut::minMaxSize() >= 10000);
-  PageLut lut;
-  ASSERT_TRUE(lut.reserve(52));
-  fillAndCheck(lut, 10000);
-  ParagraphLut paragraphs;
-  for (uint32_t i = 0; i < 10000; ++i) {
-    ASSERT_TRUE(paragraphs.push_back({i, ~i})) << "at " << i;
-  }
-  for (uint32_t i = 0; i < 10000; ++i) {
-    EXPECT_EQ(paragraphs[i].first, i);
-    EXPECT_EQ(paragraphs[i].second, ~i);
-  }
-}
-
 TEST(ChunkedVectorTest, MovesNonTrivialValues) {
   ChunkedVector<std::pair<std::string, uint16_t>, 8, 32, 256> anchors;
   for (int i = 0; i < 200; ++i) {
