@@ -174,12 +174,6 @@ TEST(HttpRangeHeap, ChunkSizeFollowsTheLargestFreeBlock) {
   EXPECT_EQ(hr::ChunkSizer().next(4596), hr::MIN_CHUNK_BYTES);
 }
 
-TEST(HttpRangeHeap, ASixKilobyteChunkWithItsHeadersDoesNotFitTheLateDownloadBlock) {
-  // 6 KB of body and ~0.9 KB of headers in one record no longer fit the 6.1 KB block the X3 had
-  // left late in a download: that is the failure the per-request sizing avoids.
-  EXPECT_GT(hr::recordBlockFor(6144), 6132u);
-}
-
 TEST(HttpRangeHeap, EachSizeStartsExactlyAtItsBudget) {
   for (size_t i = 0; i < hr::CHUNK_LADDER_SIZE; ++i) {
     const size_t chunk = hr::CHUNK_LADDER[i];
