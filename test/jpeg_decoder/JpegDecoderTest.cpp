@@ -16,9 +16,11 @@
 #include <gtest/gtest.h>
 #include <tjpgd.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -906,6 +908,129 @@ TEST(JpegThumbSession, RefusesWhatOnlyTheDcPreviewTakes) {
   const JpegToBmpConverter::BmpTarget roomyTarget[1] = {{&roomy, 40, 28}};
   EXPECT_NE(JpegThumbSession::begin(file, roomyTarget, 1), nullptr);
   file.close();
+}
+
+// ---------------------------------------------------------------------------
+// A cover whose decode fails partway -- a baseline file cut short -- or finishes short of what the
+// file should hold (a progressive one cut in its last scan: ProgressiveJpeg's Degraded) keeps the
+// rows decoded so far, and the rest of the BMP is white. It is still a complete BMP of its box, kept
+// like any other (JpegToBmpConverter.h says why): before, such a cover failed and the book ended up
+// with no cover at all. A decode that fails before its first row still fails.
+// ---------------------------------------------------------------------------
+namespace {
+
+std::vector<uint8_t> fixtureBytes(const char* name) {
+  std::vector<uint8_t> bytes;
+  FILE* fp = fopen(fixture(name).c_str(), "rb");
+  EXPECT_NE(fp, nullptr);
+  if (!fp) return bytes;
+  int c;
+  while ((c = fgetc(fp)) != EOF) bytes.push_back(static_cast<uint8_t>(c));
+  fclose(fp);
+  return bytes;
+}
+
+// The first `length` bytes of a fixture, as a temporary file.
+std::string cutCopy(const char* name, const size_t length) {
+  const std::vector<uint8_t> whole = fixtureBytes(name);
+  const std::string path = (std::filesystem::temp_directory_path() / (std::string("jpgbmp_cut_") + name)).string();
+  FILE* fp = fopen(path.c_str(), "wb");
+  EXPECT_NE(fp, nullptr);
+  if (fp) {
+    fwrite(whole.data(), 1, std::min(length, whole.size()), fp);
+    fclose(fp);
+  }
+  return path;
+}
+
+// Where the first scan's entropy data starts.
+size_t firstScanData(const std::vector<uint8_t>& d) {
+  for (size_t i = 2; i + 3 < d.size();) {
+    if (d[i] != 0xFF) return 0;
+    const size_t length = (static_cast<size_t>(d[i + 2]) << 8) | d[i + 3];
+    if (d[i + 1] == 0xDA) return i + 2 + length;
+    i += 2 + length;
+  }
+  return 0;
+}
+
+struct PartialCover {
+  bool ok = false;
+  std::vector<uint8_t> px;  // 1-bit pixels, 1 = white
+  int w = 0, h = 0;
+};
+
+PartialCover convertPath(const std::string& path, const bool sliced) {
+  PartialCover out;
+  FsFile file;
+  EXPECT_TRUE(file.openForRead(path));
+  MemoryPrint bmp;
+  const JpegToBmpConverter::BmpTarget target[1] = {{&bmp, 90, 60}};
+  if (sliced) {
+    auto session = JpegThumbSession::begin(file, target, 1);
+    EXPECT_NE(session, nullptr);
+    if (session) {
+      auto status = JpegThumbSession::Status::Running;
+      while (status == JpegThumbSession::Status::Running) status = session->continueSteps(2);
+      out.ok = status == JpegThumbSession::Status::Done;
+    }
+  } else {
+    out.ok = JpegToBmpConverter::jpegFileTo1BitBmpStreamsWithSizes(file, target, 1);
+  }
+  file.close();
+  if (out.ok) out.px = unpack1BitBmp(bmp.buf, out.w, out.h);
+  return out;
+}
+
+// Rows from the top that two pictures share.
+int sameLeadingRows(const PartialCover& a, const PartialCover& b) {
+  int rows = 0;
+  while (rows < a.h &&
+         std::equal(a.px.begin() + rows * a.w, a.px.begin() + (rows + 1) * a.w, b.px.begin() + rows * b.w))
+    ++rows;
+  return rows;
+}
+
+void expectPartialCover(const char* name, const size_t cutAt, const bool bottomWhite) {
+  const PartialCover clean = convertPath(fixture(name), false);
+  ASSERT_TRUE(clean.ok);
+  const std::string cut = cutCopy(name, cutAt);
+  for (const bool sliced : {false, true}) {
+    SCOPED_TRACE(std::string(name) + (sliced ? ", sliced" : ", one-shot"));
+    const PartialCover partial = convertPath(cut, sliced);
+    ASSERT_TRUE(partial.ok) << "the rows so far make a cover";
+    ASSERT_EQ(partial.w, 90);
+    ASSERT_EQ(partial.h, 60);
+    const int same = sameLeadingRows(partial, clean);
+    EXPECT_GE(same, 10) << "the rows decoded before the failure are the clean cover's";
+    EXPECT_LT(same, partial.h) << "the cut must cost something, or this test proves nothing";
+    if (bottomWhite) {
+      const auto last = partial.px.begin() + (partial.h - 1) * partial.w;
+      EXPECT_TRUE(std::all_of(last, last + partial.w, [](const uint8_t v) { return v == 1; })) << "the rest is white";
+    }
+  }
+  std::remove(cut.c_str());
+}
+
+}  // namespace
+
+TEST(JpegToBmpConverter, ABaselineCoverCutShortKeepsItsTopRows) {
+  expectPartialCover("prog_full_420_base.jpg", fixtureBytes("prog_full_420_base.jpg").size() / 2, true);
+}
+
+TEST(JpegToBmpConverter, AProgressiveCoverCutInItsLastScanKeepsEveryRow) {
+  // prog_420_cut.jpg's cut: every row is decoded, and below the cut the last refinement is missing.
+  expectPartialCover("prog_full_420.jpg", fixtureBytes("prog_420_cut.jpg").size(), false);
+}
+
+TEST(JpegToBmpConverter, ACoverThatFailsBeforeItsFirstRowStillFails) {
+  const std::vector<uint8_t> whole = fixtureBytes("prog_full_420_base.jpg");
+  const size_t data = firstScanData(whole);
+  ASSERT_GT(data, 0u);
+  const std::string cut = cutCopy("prog_full_420_base.jpg", data + 16);
+  EXPECT_FALSE(convertPath(cut, false).ok);
+  EXPECT_FALSE(convertPath(cut, true).ok);
+  std::remove(cut.c_str());
 }
 
 TEST(JpegThumbSession, RejectsBadArguments) {

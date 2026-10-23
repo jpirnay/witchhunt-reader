@@ -1318,6 +1318,29 @@ bool parkDecode(JpegContext& ctx, const RenderConfig& config, Header header, Wri
 }
 }  // namespace park
 
+// A resumed decode draws only the rows after its park point: the rows before it were drawn by the
+// pass that parked it and are kept only in the primary cache's partial file. A resumed decode that
+// ends without publishing that cache draws them from there, so the page shows what an uninterrupted
+// decode would have drawn. The cache is dropped right after, so its band buffer serves as the row
+// buffer.
+void drawParkedRows(GfxRenderer& renderer, PixelCache& cache, const RenderConfig& config, const int rows) {
+  if (rows <= 0 || !cache.file.isOpen() || cache.buffer == nullptr || renderer.getWriteRows() == 0) return;
+  if (!cache.file.seekSet(PixelCache::PXC_HEADER_BYTES)) return;
+  DirectPixelWriter pw;
+  pw.init(renderer);
+  const size_t rowBytes = static_cast<size_t>(cache.bytesPerRow);
+  for (int r = 0; r < rows; ++r) {
+    if (cache.file.read(cache.buffer, rowBytes) != static_cast<int>(rowBytes)) return;
+    pw.beginRow(config.y + r);
+    int colStart = 0;
+    int colEnd = 0;
+    pw.bandColRange(config.x, cache.width, colStart, colEnd);
+    for (int col = colStart; col < colEnd; ++col) {
+      pw.writePixel(config.x + col, (cache.buffer[col >> 2] >> (6 - (col & 3) * 2)) & 0x03);
+    }
+  }
+}
+
 // Draw a simple bordered placeholder where an undecodable (non-baseline) JPEG would
 // have gone, so the layout shows a framed gap rather than a silent blank.
 void drawUnsupportedPlaceholder(GfxRenderer& renderer, const RenderConfig& config) {
@@ -1923,7 +1946,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
   unsigned long decodeStart = millis();
   ProgressiveJpegDc::Result progressiveResult = ProgressiveJpegDc::Result::Ok;
   bool runDcPreview = dcPreview;
-  bool aborted = false;  // stopped for input between two rows of blocks
+  bool degraded = false;  // every row drawn, from a file short of what it should hold
+  bool aborted = false;   // stopped for input between two rows of blocks
   bool isParked = false;
   unsigned long parkMs = 0;
   if (fullProgressive) {
@@ -1959,6 +1983,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
               ctx.finalDstRows, destHeight, parkMs,
               static_cast<unsigned>(sizeof(park::Header) + park::sinkBytes(ctx) + progressive.checkpointSize()),
               imagePath.c_str());
+    } else if (result == ProgressiveJpeg::Result::Degraded) {
+      degraded = true;
     } else if (!aborted && result != ProgressiveJpeg::Result::Ok) {
       LOG_ERR("JPG", "Progressive JPEG full decode failed (%s)%s: %s", ProgressiveJpeg::resultName(result),
               progressiveSink.emitted ? "" : ", trying the DC preview", imagePath.c_str());
@@ -2036,15 +2062,32 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     if (ctx.companion) ctx.companion->cache.abort();
     if (resuming) park::discard(config);
   };
-  if (mode == JpegMode::Progressive && progressiveResult != ProgressiveJpegDc::Result::Ok) {
+  const bool progressiveFailed = mode == JpegMode::Progressive && progressiveResult != ProgressiveJpegDc::Result::Ok;
+  const bool baselineFailed = mode == JpegMode::Baseline && jr != JDR_OK;
+  if (progressiveFailed) {
     LOG_ERR("JPG", "Progressive JPEG decode failed (%s): %s", ProgressiveJpegDc::resultName(progressiveResult),
             imagePath.c_str());
+  }
+  if (baselineFailed) LOG_ERR("JPG", "TJpgDec decode failed (jr=%d): %s", jr, imagePath.c_str());
+  // Rows drawn, then a failure -- or every row, from a file short of what it should hold (a corrupt
+  // scan, a stream that ends early): the rows stay as drawn, the rest of the box is left to the page
+  // background, and no placeholder frame goes over the picture. Nothing is cached: the next visit
+  // decodes again, so a file that is whole by then is drawn whole, and a decoder that does better
+  // has its chance. A resumed decode draws the rows from before its park point first, which only
+  // the partial cache holds.
+  if ((progressiveFailed || baselineFailed || degraded) && ctx.finalDstRows > 0) {
+    LOG_INF("JPG", "%s after %d/%d rows: keeping them, not cached: %s", degraded ? "Degraded" : "Failed",
+            ctx.finalDstRows, destHeight, imagePath.c_str());
+    if (resuming && ctx.caching) drawParkedRows(renderer, ctx.cache, config, parked.finalRows);
+    dropAll();
+    return true;
+  }
+  if (progressiveFailed) {
     dropAll();
     drawUnsupportedPlaceholder(renderer, config);
     return true;
   }
-  if (mode == JpegMode::Baseline && jr != JDR_OK) {
-    LOG_ERR("JPG", "TJpgDec decode failed (jr=%d): %s", jr, imagePath.c_str());
+  if (baselineFailed) {
     dropAll();
     return false;
   }

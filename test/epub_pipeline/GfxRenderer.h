@@ -56,12 +56,13 @@ class GfxRenderer {
   int getWriteRows() const { return 800; }
   void clearScreen(uint8_t = 0xFF) const {}
 
-  // --- Drawing (no-ops: the harness never inspects pixels) ---
+  // --- Drawing (no-ops; only rectangles are counted, for the image placeholder's frame) ---
   void drawPixel(int, int, bool = true) const {}
   void drawLine(int, int, int, int, bool = true) const {}
   void drawLine(int, int, int, int, int, bool) const {}
-  void drawRect(int, int, int, int, bool = true) const {}
-  void drawRect(int, int, int, int, int, bool) const {}
+  void drawRect(int, int, int, int, bool = true) const { ++rectsDrawn; }
+  void drawRect(int, int, int, int, int, bool) const { ++rectsDrawn; }
+  mutable int rectsDrawn = 0;
   void fillRect(int, int, int, int, bool = true) const {}
   void fillRectDither(int, int, int, int, Color) const {}
 

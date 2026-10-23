@@ -130,6 +130,7 @@ add_executable(EpubPipelineTest
   JpegDownscaleTest.cpp
   CompanionCacheTest.cpp
   ImageParkTest.cpp
+  JpegPartialDecodeTest.cpp
   StoredEntryDecodeTest.cpp
   PlaceholderOnlyScopeTest.cpp
   PixelCacheWriteTest.cpp

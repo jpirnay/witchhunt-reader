@@ -43,6 +43,8 @@ class JpegToFramebufferConverter final : public ImageToFramebufferDecoder {
   static bool getDimensionsFromEntryReader(ZipFile::EntryReader& reader, ImageDimensions& out,
                                            JpegMode* outMode = nullptr, bool* needMore = nullptr);
 
+  // A decode that fails after drawing rows, or finishes short of what the file holds (a corrupt
+  // scan, a stream cut short), keeps the rows it drew, reports true, and caches nothing.
   bool decodeToFramebuffer(const std::string& imagePath, GfxRenderer& renderer, const RenderConfig& config) override;
 
   bool getDimensions(const std::string& imagePath, ImageDimensions& dims) const override {

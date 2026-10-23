@@ -108,29 +108,33 @@ struct BmpConvertCtx {
   bool error;
 };
 
-// Write a fully-assembled output row (grayscale bytes, length outWidth) to BMP.
-// The whole row is dithered (diffusion state must see every pixel), but only the
+// The page background a cover's missing rows are filled with (a null source row).
+constexpr uint8_t BACKGROUND_GRAY = 255;
+
+// Write a fully-assembled output row (grayscale bytes, length outWidth) to BMP; null is a row of
+// background. The whole row is dithered (diffusion state must see every pixel), but only the
 // crop window columns are packed, and rows outside the vertical window are
 // dithered-then-dropped (see BmpConvertCtx::outCropX).
 static void writeOutputRow(BmpConvertCtx* ctx, const uint8_t* srcRow, int outY) {
   memset(ctx->bmpRow, 0, ctx->bytesPerRow);
+  const auto at = [srcRow](const int x) -> uint8_t { return srcRow ? srcRow[x] : BACKGROUND_GRAY; };
 
   if (ctx->eightBit && !ctx->oneBit) {
     for (int x = 0; x < ctx->outWidth; x++) {
       const int ox = x - ctx->outCropX;
-      if (ox >= 0 && ox < ctx->finalW) ctx->bmpRow[ox] = adjustPixel(srcRow[x]);
+      if (ox >= 0 && ox < ctx->finalW) ctx->bmpRow[ox] = adjustPixel(at(x));
     }
   } else if (ctx->oneBit) {
     for (int x = 0; x < ctx->outWidth; x++) {
-      const uint8_t bit = ctx->atkinson1BitDitherer ? ctx->atkinson1BitDitherer->processPixel(srcRow[x], x)
-                                                    : quantize1bit(srcRow[x], x, outY);
+      const uint8_t bit =
+          ctx->atkinson1BitDitherer ? ctx->atkinson1BitDitherer->processPixel(at(x), x) : quantize1bit(at(x), x, outY);
       const int ox = x - ctx->outCropX;
       if (ox >= 0 && ox < ctx->finalW) ctx->bmpRow[ox / 8] |= (bit << (7 - (ox % 8)));
     }
     if (ctx->atkinson1BitDitherer) ctx->atkinson1BitDitherer->nextRow();
   } else {
     for (int x = 0; x < ctx->outWidth; x++) {
-      const uint8_t gray = adjustPixel(srcRow[x]);
+      const uint8_t gray = adjustPixel(at(x));
       uint8_t twoBit;
       if (ctx->atkinsonDitherer) {
         twoBit = ctx->atkinsonDitherer->processPixel(gray, x);
@@ -199,15 +203,16 @@ static void flushScaledRow(BmpConvertCtx* ctx) {
   ctx->currentOutY++;
 }
 
-// One complete source row (srcWidth gray pixels) at source row y: scaled on X into the row
-// accumulators and flushed on Y as output rows complete, or written straight through at 1:1.
-// Shared by the TJpgDec MCU-row path and the progressive decoder's band path.
+// One complete source row (srcWidth gray pixels; null: background) at source row y: scaled on X
+// into the row accumulators and flushed on Y as output rows complete, or written straight through
+// at 1:1. Shared by the TJpgDec MCU-row path and the progressive decoder's band path.
 static void processSourceRow(BmpConvertCtx* ctx, const uint8_t* srcRow, const int y) {
   if (!ctx->needsScaling) {
     // 1:1 — outWidth == srcWidth, write directly
     writeOutputRow(ctx, srcRow, y);
     return;
   }
+  const auto at = [srcRow](const int x) -> uint8_t { return srcRow ? srcRow[x] : BACKGROUND_GRAY; };
   // Fixed-point area averaging on X axis
   for (int outX = 0; outX < ctx->outWidth; outX++) {
     const int srcXStart = (static_cast<uint32_t>(outX) * ctx->scaleX_fp) >> 16;
@@ -215,11 +220,11 @@ static void processSourceRow(BmpConvertCtx* ctx, const uint8_t* srcRow, const in
     int sum = 0;
     int count = 0;
     for (int srcX = srcXStart; srcX < srcXEnd && srcX < ctx->srcWidth; srcX++) {
-      sum += srcRow[srcX];
+      sum += at(srcX);
       count++;
     }
     if (count == 0 && srcXStart < ctx->srcWidth) {
-      sum = srcRow[srcXStart];
+      sum = at(srcXStart);
       count = 1;
     }
     ctx->rowAccum[outX] += sum;
@@ -257,14 +262,38 @@ struct SinkSet {
   // later. A JpegThumbSession is sliced by its caller instead, which checks for input between
   // slices; aborting inside one would throw away the work the slicing exists to keep.
   bool pollAbort = true;
+  int rowsDone = 0;  // source rows every output has taken, from the top
 
   void processRow(const uint8_t* srcRow, const int y) {
     for (int i = 0; i < count; ++i) {
       processSourceRow(ctx[i], srcRow, y);
       if (ctx[i]->error) error = true;
     }
+    rowsDone = y + 1;
+  }
+
+  // The source rows a decode did not deliver, as background: the outputs then hold every row.
+  void fillBackground() {
+    for (int y = rowsDone; y < srcHeight && !error; ++y) processRow(nullptr, y);
   }
 };
+
+// How a decode feeding a SinkSet ended.
+enum class Decoded : uint8_t {
+  Whole,    // every row
+  Partial,  // rows from the top, then a failure -- or every row of a file short of what it should hold
+  Failed,   // nothing to keep: no row, the pipeline failed, or the decode stopped for input
+};
+
+// A decode that did not end cleanly. What it delivered is kept, with a background rest
+// (SinkSet::fillBackground): a cover cut short or partly corrupt beats no cover. Not when it
+// stopped for input (the caller converts again later), when the row pipeline itself failed, or
+// when no row arrived (the caller's fallbacks take over, as before).
+static Decoded keptOrFailed(const SinkSet& sinks, const bool stoppedForInput) {
+  if (stoppedForInput || sinks.error || sinks.rowsDone == 0) return Decoded::Failed;
+  LOG_INF("JPG", "Keeping %d/%d decoded rows of the cover, the rest background", sinks.rowsDone, sinks.srcHeight);
+  return Decoded::Partial;
+}
 
 // Full progressive decode (ProgressiveJpeg): each band is one block row of full-width gray rows
 // at the chosen 1/2^s scale, fed through the same per-row scaling as a TJpgDec MCU row.
@@ -749,7 +778,7 @@ bool RowPipeline::finish() {
 }
 
 // A one-shot conversion: the pipeline around `run(sinks)`, which drives whichever decoder feeds
-// SinkSet::processRow to the end.
+// SinkSet::processRow to the end and says how that went (Decoded).
 template <typename Run>
 static bool convertScaledMulti(const OutputTarget* targets, const int count, const int effectiveSrcW,
                                const int effectiveSrcH, const bool oneBit, const bool crop, const bool eightBit,
@@ -758,7 +787,9 @@ static bool convertScaledMulti(const OutputTarget* targets, const int count, con
   if (!pipeline.begin(targets, count, effectiveSrcW, effectiveSrcH, oneBit, crop, eightBit, needMcuBuf, scratch)) {
     return false;
   }
-  if (!run(pipeline.sinks())) return false;
+  const Decoded decoded = run(pipeline.sinks());
+  if (decoded == Decoded::Failed) return false;
+  if (decoded == Decoded::Partial) pipeline.sinks().fillBackground();
   return pipeline.finish();
 }
 
@@ -845,12 +876,12 @@ static bool convertFromProgressive(FsFile& jpegFile, const OutputTarget* targets
                               const auto result =
                                   ProgressiveJpeg::decode(jpegFile, options, progressiveBandOutput, &sinks);
                               if (result != ProgressiveJpeg::Result::Ok || sinks.error) {
-                                LOG_ERR("JPG", "Progressive cover decode failed (%s, ctxErr=%d)",
+                                LOG_ERR("JPG", "Progressive cover decode: %s (ctxErr=%d)",
                                         ProgressiveJpeg::resultName(result), sinks.error ? 1 : 0);
-                                return false;
+                                return keptOrFailed(sinks, result == ProgressiveJpeg::Result::Aborted);
                               }
                               logCoverReads(stats, windows.held());
-                              return true;
+                              return Decoded::Whole;
                             });
 }
 
@@ -1009,9 +1040,10 @@ static bool jpegFileToBmpStreamsInternal(FsFile& jpegFile, const OutputTarget* t
                            const JRESULT jr = jd_decomp(&job.jdec, tjpgBmpOutput, job.scale);
                            if (jr != JDR_OK || sinks.error) {
                              LOG_ERR("JPG", "TJpgDec decode failed (jr=%d, ctxErr=%d)", jr, sinks.error ? 1 : 0);
-                             return false;
+                             // A stop for input sets sinks.error too (tjpgBmpOutput).
+                             return keptOrFailed(sinks, false);
                            }
-                           return true;
+                           return Decoded::Whole;
                          });
   if (ok) {
     LOG_DBG("JPG", "Successfully converted JPEG to BMP");
@@ -1152,18 +1184,20 @@ JpegThumbSession::Status JpegThumbSession::continueSteps(const uint16_t units) {
   if (s.status != Status::Running) return s.status;
   SinkSet& sinks = s.pipeline.sinks();
   bool finished = false;
+  // A decode that ends before the last row keeps what it delivered (keptOrFailed), as the one-shot
+  // conversion does.
+  Decoded decoded = Decoded::Whole;
   if (s.isProgressive) {
     const auto result = s.decoder.step(units);
     if (result == ProgressiveJpeg::Result::Pending && !sinks.error) return Status::Running;
-    if (result != ProgressiveJpeg::Result::Ok || sinks.error) {
-      LOG_ERR("JPG", "Progressive cover decode failed (%s, ctxErr=%d)", ProgressiveJpeg::resultName(result),
-              sinks.error ? 1 : 0);
-      s.decoder.end();
-      s.status = Status::Error;
-      return s.status;
-    }
     s.decoder.end();
-    logCoverReads(s.stats, s.windows.held());
+    if (result != ProgressiveJpeg::Result::Ok || sinks.error) {
+      LOG_ERR("JPG", "Progressive cover decode: %s (ctxErr=%d)", ProgressiveJpeg::resultName(result),
+              sinks.error ? 1 : 0);
+      decoded = keptOrFailed(sinks, false);  // nothing in a session stops for input
+    } else {
+      logCoverReads(s.stats, s.windows.held());
+    }
     finished = true;
   } else {
     FsFile& file = *s.tjpg.io.file;
@@ -1176,12 +1210,18 @@ JpegThumbSession::Status JpegThumbSession::continueSteps(const uint16_t units) {
     s.streamPos = static_cast<uint32_t>(file.position());
     if (jr != JDR_OK || sinks.error) {
       LOG_ERR("JPG", "TJpgDec decode failed (jr=%d, ctxErr=%d)", jr, sinks.error ? 1 : 0);
-      s.status = Status::Error;
-      return s.status;
+      decoded = keptOrFailed(sinks, false);
+      finished = true;
+    } else {
+      finished = s.cursor.done != 0;
     }
-    finished = s.cursor.done != 0;
+  }
+  if (decoded == Decoded::Failed) {
+    s.status = Status::Error;
+    return s.status;
   }
   if (!finished) return Status::Running;
+  if (decoded == Decoded::Partial) sinks.fillBackground();
   s.status = s.pipeline.finish() ? Status::Done : Status::Error;
   return s.status;
 }

@@ -9,6 +9,15 @@ class BuildArena;  // lib/Memory -- optional scratch for the work pool / progres
 class Print;
 class ZipFile;
 
+// A JPEG whose decode fails after it has delivered rows -- a file cut short, a corrupt stretch --
+// or that finishes short of what the file should hold (ProgressiveJpeg's Degraded) still makes a
+// complete BMP of its box: the rows decoded so far, and white below. Every entry point reports it
+// as converted, and the callers keep it like any cover: the BMP is the only thing Home and the
+// sleep screen can draw, and a cover that is not kept ends, after Home's retry budget, as the
+// no-cover placeholder for good. The covers that reach a conversion have passed a completeness
+// check first (Epub::coverImageComplete: the EOI marker) or are read in place from a complete
+// archive, so what is short here is short in the source, and converting again would give the same.
+// A decode that stops for input, or delivers no row, fails as before.
 class JpegToBmpConverter {
   static bool jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bmpOut, int targetWidth, int targetHeight,
                                           bool oneBit, bool crop = true, bool eightBit = false,
@@ -74,7 +83,8 @@ class JpegThumbSession {
 
   // Does up to `units` of decoding: a unit is one MCU row of a baseline image, or 4 KB of a
   // progressive image's index pass and then one band. Running: call again. Done: every BMP is
-  // complete and flushed. Error: the conversion failed; the outputs hold partial data.
+  // complete and flushed -- also for a decode that ended early after rows (see JpegToBmpConverter).
+  // Error: the conversion failed; the outputs hold partial data.
   Status continueSteps(uint16_t units);
 
   bool progressive() const;
