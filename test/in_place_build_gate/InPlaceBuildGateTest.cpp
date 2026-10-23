@@ -1,61 +1,94 @@
-// InPlaceBuildGate: the free heap a resident section build asks for at its start.
+// InPlaceBuildGate: whether a section build may run in place (resident) or borrows the secondary buffer.
 #include <gtest/gtest.h>
+
+#include <cstdint>
 
 #include "activities/reader/InPlaceBuildGate.h"
 
 namespace {
 
-using InPlaceBuildGate::minFreeHeap;
-using InPlaceBuildGate::ttfMissBytesFor;
+using InPlaceBuildGate::Admission;
+using InPlaceBuildGate::admitsResident;
+using InPlaceBuildGate::kContigSlackBytes;
+using InPlaceBuildGate::kMaxRingBytes;
+using InPlaceBuildGate::Request;
 
-constexpr uint32_t kCssParseBase = 56 * 1024;  // IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES
-constexpr uint32_t kParseBase = 60 * 1024;     // IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES
-constexpr uint32_t kExtractBase = 50 * 1024;   // IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES
+constexpr size_t kSmallChapter = 1539;    // the 1.5 KB Simplified Chinese chapter: its ring stays under the bases
+constexpr size_t kLargeChapter = 583991;  // a whole book in one entry: the ring is capped at 32 KB
+constexpr uint32_t kPlenty = 120 * 1024;  // more than the X4's reading heap ever has
 
-// A CJK CFF family read from the card: its 17,408-byte scratch block and the 4,204-byte page cache.
-constexpr uint32_t kCffSdMiss = 17408 + 4204;
-
-uint32_t missBytes(const char* language, const uint32_t planBytes) {
-  return ttfMissBytesFor(TypographyProfile::forLanguage(language), planBytes);
+Request request(const bool css, const size_t inflated, const uint32_t freeHeap, const uint32_t contigHeap,
+                const bool cjk = false, const bool trueType = false) {
+  Request r;
+  r.embeddedStyle = css;
+  r.inflatedSize = inflated;
+  r.cjkRepertoire = cjk;
+  r.trueTypeSet = trueType;
+  r.freeHeap = freeHeap;
+  r.contigHeap = contigHeap;
+  return r;
 }
 
-TEST(InPlaceBuildGate, WithoutMissMemoryTheFloorIsTheLargerPhase) {
-  EXPECT_EQ(kCssParseBase, minFreeHeap(kCssParseBase, kExtractBase, 1539, 0));  // a small chapter: the parse
-  EXPECT_EQ(kParseBase, minFreeHeap(kParseBase, kExtractBase, 9602, 0));
-  EXPECT_EQ(kExtractBase + 32768, minFreeHeap(kCssParseBase, kExtractBase, 32768, 0));  // a large one: extraction
+// The floors a Latin book has on master, from the build's own constants.
+struct Floors {
+  bool css;
+  size_t inflated;
+  uint32_t freeFloor;
+  uint32_t contigFloor;
+};
+
+const Floors kFloors[] = {
+    {false, kSmallChapter, IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES,
+     IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES - kContigSlackBytes},
+    {true, kSmallChapter, IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES,
+     IN_PLACE_BUILD_CSS_MIN_CONTIG_HEAP_BYTES - kContigSlackBytes},
+    {false, kLargeChapter, IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES + kMaxRingBytes,
+     kMaxRingBytes + 8 * 1024 - kContigSlackBytes},
+    {true, kLargeChapter, IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES + kMaxRingBytes,
+     kMaxRingBytes + 8 * 1024 - kContigSlackBytes},
+};
+
+// Admitted exactly at both floors and refused one byte under either, as on master.
+void expectLatinFloors(const bool cjk, const bool trueType) {
+  for (const Floors& f : kFloors) {
+    SCOPED_TRACE(testing::Message() << "css=" << f.css << " inflated=" << f.inflated << " cjk=" << cjk
+                                    << " trueType=" << trueType);
+    const Admission at = admitsResident(request(f.css, f.inflated, f.freeFloor, f.contigFloor, cjk, trueType));
+    EXPECT_TRUE(at.resident);
+    EXPECT_FALSE(at.cjkTrueType);
+    EXPECT_EQ(f.freeFloor, at.freeFloor);
+    EXPECT_EQ(f.contigFloor, at.contigFloor);
+    EXPECT_FALSE(admitsResident(request(f.css, f.inflated, f.freeFloor - 1, kPlenty, cjk, trueType)).resident);
+    EXPECT_FALSE(admitsResident(request(f.css, f.inflated, kPlenty, f.contigFloor - 1, cjk, trueType)).resident);
+    EXPECT_TRUE(admitsResident(request(f.css, f.inflated, kPlenty, kPlenty, cjk, trueType)).resident);
+  }
 }
 
-TEST(InPlaceBuildGate, MissMemoryRaisesTheParsePhase) {
-  EXPECT_EQ(kCssParseBase + kCffSdMiss, minFreeHeap(kCssParseBase, kExtractBase, 1539, kCffSdMiss));
-  // The X4 (2026-10-23): a 1.5 KB Simplified Chinese chapter admitted at 67,704 B free fell to 8,992 B and aborted.
-  EXPECT_GE(67704u, minFreeHeap(kCssParseBase, kExtractBase, 1539, 0));
-  EXPECT_LT(67704u, minFreeHeap(kCssParseBase, kExtractBase, 1539, kCffSdMiss));
-  // A family in flash mode: the scratch block alone.
-  EXPECT_EQ(kParseBase + 13312, minFreeHeap(kParseBase, kExtractBase, 9602, 13312));
+TEST(InPlaceBuildGate, ALatinBookIsAdmittedAtTheFloorsAndRefusedUnderThem) { expectLatinFloors(false, false); }
+
+TEST(InPlaceBuildGate, TheRingRaisesTheFloorsOnlyPastTheBases) {
+  // A small chapter's ring hides under the parse bases; a large one's sets both floors.
+  EXPECT_EQ(kSmallChapter, admitsResident(request(true, kSmallChapter, 0, 0)).ringBytes);
+  EXPECT_EQ(kMaxRingBytes, admitsResident(request(true, kLargeChapter, 0, 0)).ringBytes);
+  EXPECT_EQ(0u, admitsResident(request(false, 0, 0, 0)).ringBytes);  // size unknown
 }
 
-TEST(InPlaceBuildGate, TheRingAndTheMissMemoryAreNeverLiveTogether) {
-  // The ring goes before the parse begins, and a miss happens only while text is laid out.
-  EXPECT_EQ(kExtractBase + 32768, minFreeHeap(kCssParseBase, kExtractBase, 32768, kCffSdMiss));
-  EXPECT_EQ(kCssParseBase + kCffSdMiss, minFreeHeap(kCssParseBase, kExtractBase, 16384, kCffSdMiss));
+TEST(InPlaceBuildGate, ACjkBookInATrueTypeSetNeverBuildsInPlace) {
+  for (const bool css : {false, true}) {
+    for (const size_t inflated : {kSmallChapter, size_t{9602}, kLargeChapter}) {
+      SCOPED_TRACE(testing::Message() << "css=" << css << " inflated=" << inflated);
+      // The X4's measured Japanese chapter (2026-10-23), a heap it never has, and all of it.
+      for (const uint32_t heap : {uint32_t{68368}, kPlenty, UINT32_MAX}) {
+        const Admission a = admitsResident(request(css, inflated, heap, heap, /*cjk=*/true, /*trueType=*/true));
+        EXPECT_FALSE(a.resident) << heap;
+        EXPECT_TRUE(a.cjkTrueType) << heap;
+      }
+    }
+  }
 }
 
-TEST(InPlaceBuildGate, ACjkBookLeavesRoomForTheMisses) {
-  EXPECT_EQ(kCffSdMiss, missBytes("zh-CN", kCffSdMiss));
-  EXPECT_EQ(kCffSdMiss, missBytes("zh_TW", kCffSdMiss));
-  EXPECT_EQ(13312u, missBytes("ja", 13312));
-  EXPECT_EQ(kCffSdMiss, missBytes("ko-KR", kCffSdMiss));
-}
+TEST(InPlaceBuildGate, ACjkBookInABuiltInOrCpfontFamilyKeepsTheFloors) { expectLatinFloors(true, false); }
 
-TEST(InPlaceBuildGate, ABookSetBetweenSpacesKeepsTheFloorItHad) {
-  EXPECT_EQ(0u, missBytes("en", 13312));
-  EXPECT_EQ(0u, missBytes("de-DE", kCffSdMiss));
-  EXPECT_EQ(0u, missBytes("", kCffSdMiss));  // no language tag: Latin rules
-}
-
-TEST(InPlaceBuildGate, WithoutATrueTypeSetThereIsNothingToLeave) {
-  EXPECT_EQ(0u, missBytes("ja", 0));
-  EXPECT_EQ(0u, missBytes("en", 0));
-}
+TEST(InPlaceBuildGate, ALatinBookInATrueTypeSetKeepsTheFloors) { expectLatinFloors(false, true); }
 
 }  // namespace
