@@ -735,11 +735,29 @@ bool ParsedText::addRubyGroup(const size_t firstToken, const size_t tokenCount, 
   }
   const size_t ordinal = leadersBefore(firstToken);
   if (ordinal > rubyTexts_.size()) return false;
+  // A space inside the base stays, as a glued space token (the form a no-break space takes): the group never breaks,
+  // and the space is drawn and stretched like any other.
+  size_t spaces = 0;
+  for (size_t i = firstToken + 1; i < firstToken + tokenCount; ++i) {
+    if (TokenBoundary::hasSpace(wordBoundaries[i])) ++spaces;
+  }
+  if (spaces != 0 && !reserveWords(spaces)) return false;
   rubyTexts_.insert(rubyTexts_.begin() + ordinal, std::move(text));
   wordBoundaries[firstToken] = TokenBoundary::withRubyRole(wordBoundaries[firstToken], TokenBoundary::RubyRole::Leader);
-  for (size_t i = firstToken + 1; i < firstToken + tokenCount; ++i) {
-    wordBoundaries[i] =
-        TokenBoundary::withRubyRole(TokenBoundary::Boundary{true, false}, TokenBoundary::RubyRole::Follower);
+  constexpr TokenBoundary::Boundary kGluedFollower =
+      TokenBoundary::withRubyRole(TokenBoundary::Boundary{true, false}, TokenBoundary::RubyRole::Follower);
+  size_t end = firstToken + tokenCount;
+  for (size_t i = firstToken + 1; i < end; ++i) {
+    if (TokenBoundary::hasSpace(wordBoundaries[i])) {
+      words.insert(words.begin() + i, " ");
+      wordStyles.insert(wordStyles.begin() + i, wordStyles[i]);
+      wordSizes.insert(wordSizes.begin() + i, wordSizes[i]);
+      wordVisibleOffsets.insert(wordVisibleOffsets.begin() + i, wordVisibleOffsets[i]);
+      wordBoundaries.insert(wordBoundaries.begin() + i, kGluedFollower);
+      ++i;
+      ++end;
+    }
+    wordBoundaries[i] = kGluedFollower;
   }
   return true;
 }

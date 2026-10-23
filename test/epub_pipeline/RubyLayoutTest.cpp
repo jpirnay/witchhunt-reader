@@ -273,6 +273,34 @@ TEST_F(RubyLayout, ALongGroupIsKeptWholeAndAnOverlongOneFallsBackInline) {
   EXPECT_EQ(joined(inlined), hanRun(90) + hanRun(140) + "よみ");
 }
 
+TEST_F(RubyLayout, AMultiWordBaseKeepsTheSpaceBetweenItsWords) {
+  const auto plain = lines("<p>See New York now</p>");
+  const auto l = lines("<p>See <ruby>New York<rt>ニューヨーク</rt></ruby> now</p>");
+  ASSERT_EQ(l.size(), 1u);
+  ASSERT_EQ(plain.size(), 1u);
+  std::string text;
+  for (const auto& w : l[0].words) text += w;
+  EXPECT_NE(text.find("New York"), std::string::npos) << "the base reads New York, not NewYork: " << text;
+  // The group spans the base's every token, the space included; "York" sits where it does without ruby.
+  ASSERT_EQ(l[0].ruby.size(), 1u);
+  const auto& [first, count, reading] = l[0].ruby[0];
+  EXPECT_EQ(first, 1u);
+  EXPECT_EQ(l[0].words[first], "New");
+  EXPECT_EQ(l[0].words[first + count - 1], "York");
+  EXPECT_EQ(l[0].x[first + count - 1], plain[0].x[2]);
+}
+
+TEST_F(RubyLayout, APrettyPrintedBaseGetsNoSpaceFromItsMarkup) {
+  const auto l = lines(R"(<p>a<ruby>
+  New York
+  <rt>ニューヨーク</rt>
+</ruby>b</p>)");
+  ASSERT_EQ(l.size(), 1u);
+  std::string text;
+  for (const auto& w : l[0].words) text += w;
+  EXPECT_EQ(text, "aNew Yorkb");
+}
+
 TEST_F(RubyLayout, ARubyLineIsTallerByHalfAnAscender) {
   const auto l = lines("<p>前</p><p><ruby>漢<rt>かん</rt></ruby></p><p>後</p>");
   ASSERT_EQ(l.size(), 3u);
