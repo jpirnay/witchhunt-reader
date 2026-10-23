@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "../TextEmphasis.h"
+
 // Matches order of PARAGRAPH_ALIGNMENT in CrossPointSettings. Inherit is not an alignment: it is
 // the marker for an explicit `inherit`, which must beat a value set lower in the cascade and then
 // leave the element to its parent's alignment (CssStyle::hasTextAlign reports it as unset).
@@ -104,6 +106,7 @@ struct CssPropertyFlags {
   uint32_t opacityZero : 1;
   uint32_t visibilityHidden : 1;
   uint32_t fontFamily : 1;
+  uint32_t textEmphasis : 1;
 
   CssPropertyFlags()
       : textAlign(0),
@@ -133,14 +136,15 @@ struct CssPropertyFlags {
         colorTransparent(0),
         opacityZero(0),
         visibilityHidden(0),
-        fontFamily(0) {}
+        fontFamily(0),
+        textEmphasis(0) {}
 
   [[nodiscard]] bool anySet() const {
     return textAlign || fontStyle || fontWeight || textDecoration || textIndent || marginTop || marginBottom ||
            marginLeft || marginRight || paddingTop || paddingBottom || paddingLeft || paddingRight || imageHeight ||
            imageWidth || display || verticalAlign || listStyleNone || pageBreakBefore || pageBreakAfter || lineHeight ||
            fontSizeMultiplier || cssFloat || smallCaps || colorTransparent || opacityZero || visibilityHidden ||
-           fontFamily;
+           fontFamily || textEmphasis;
   }
 
   void clearAll() {
@@ -149,7 +153,7 @@ struct CssPropertyFlags {
     paddingTop = paddingBottom = paddingLeft = paddingRight = 0;
     imageHeight = imageWidth = display = verticalAlign = 0;
     listStyleNone = pageBreakBefore = pageBreakAfter = lineHeight = fontSizeMultiplier = cssFloat = 0;
-    smallCaps = colorTransparent = opacityZero = visibilityHidden = fontFamily = 0;
+    smallCaps = colorTransparent = opacityZero = visibilityHidden = fontFamily = textEmphasis = 0;
   }
 };
 
@@ -212,11 +216,13 @@ struct CssStyle {
   // A font-family list as CssFontFamily describes it: its first family's identity and its generic serif or
   // sans-serif; 0 for the reader's font.
   uint32_t fontFamily = 0;
+  // A TextEmphasis mark (Shape | kOpen); 0 is `none`, which is a defined value.
+  uint8_t textEmphasis = 0;
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
 
   // Number of properties applyOver() merges: the size of its `ranks` array.
-  static constexpr int kCascadeProperties = 28;
+  static constexpr int kCascadeProperties = 29;
 
   // Apply properties from another style, only overwriting if the other style
   // has that property explicitly defined.
@@ -350,6 +356,10 @@ struct CssStyle {
       fontFamily = base.fontFamily;
       defined.fontFamily = 1;
     }
+    if (base.hasTextEmphasis() && take(defined.textEmphasis, 28)) {
+      textEmphasis = base.textEmphasis;
+      defined.textEmphasis = 1;
+    }
   }
 
   // An explicit `inherit` is defined (it overrides lower rules in applyOver) but reports as unset:
@@ -377,6 +387,7 @@ struct CssStyle {
   [[nodiscard]] bool hasListStyleNone() const { return defined.listStyleNone; }
   [[nodiscard]] bool hasCssFloat() const { return defined.cssFloat; }
   [[nodiscard]] bool hasSmallCaps() const { return defined.smallCaps; }
+  [[nodiscard]] bool hasTextEmphasis() const { return defined.textEmphasis; }
   [[nodiscard]] bool hasColorTransparent() const { return defined.colorTransparent; }
   [[nodiscard]] bool hasOpacityZero() const { return defined.opacityZero; }
   [[nodiscard]] bool hasVisibilityHidden() const { return defined.visibilityHidden; }
@@ -426,6 +437,7 @@ struct CssStyle {
     opacityZero = false;
     visibilityHidden = false;
     fontFamily = 0;
+    textEmphasis = 0;
     defined.clearAll();
   }
 };

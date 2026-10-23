@@ -472,7 +472,7 @@ bool definedEqual(const CssPropertyFlags& a, const CssPropertyFlags& b) {
          a.pageBreakBefore == b.pageBreakBefore && a.pageBreakAfter == b.pageBreakAfter &&
          a.lineHeight == b.lineHeight && a.fontSizeMultiplier == b.fontSizeMultiplier && a.cssFloat == b.cssFloat &&
          a.smallCaps == b.smallCaps && a.colorTransparent == b.colorTransparent && a.opacityZero == b.opacityZero &&
-         a.visibilityHidden == b.visibilityHidden && a.fontFamily == b.fontFamily;
+         a.visibilityHidden == b.visibilityHidden && a.fontFamily == b.fontFamily && a.textEmphasis == b.textEmphasis;
 }
 
 bool stylesEqual(const CssStyle& a, const CssStyle& b) {
@@ -488,8 +488,9 @@ bool stylesEqual(const CssStyle& a, const CssStyle& b) {
          len(a.paddingTop) == len(b.paddingTop) && len(a.paddingBottom) == len(b.paddingBottom) &&
          len(a.paddingLeft) == len(b.paddingLeft) && len(a.paddingRight) == len(b.paddingRight) &&
          len(a.imageHeight) == len(b.imageHeight) && len(a.imageWidth) == len(b.imageWidth) &&
-         a.fontFamily == b.fontFamily && a.colorTransparent == b.colorTransparent && a.opacityZero == b.opacityZero &&
-         a.visibilityHidden == b.visibilityHidden && definedEqual(a.defined, b.defined);
+         a.fontFamily == b.fontFamily && a.textEmphasis == b.textEmphasis && a.colorTransparent == b.colorTransparent &&
+         a.opacityZero == b.opacityZero && a.visibilityHidden == b.visibilityHidden &&
+         definedEqual(a.defined, b.defined);
 }
 }  // namespace
 
@@ -697,11 +698,13 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       ".a { text-align: center; font-weight: bold; font-style: italic; text-decoration: underline; "
       "margin: 2em; padding-left: 5px; padding-right: 3px; text-indent: 1.5em; line-height: 1.6; "
       "font-size: 120%; vertical-align: super; float: left; font-variant: small-caps; "
-      "list-style: none; page-break-before: always; page-break-after: always; font-family: 'EB Garamond'; }\n"
+      "list-style: none; page-break-before: always; page-break-after: always; font-family: 'EB Garamond'; "
+      "-epub-text-emphasis-style: open sesame; }\n"
       ".b { margin-top: 3px; text-align: right; font-size: 1.25rem; font-family: serif; }\n"
       ".c { display: none; }\n"
       ".d { display: inline; }\n"
-      ".e { color: transparent; opacity: 0; visibility: hidden; }\n";
+      ".e { color: transparent; opacity: 0; visibility: hidden; }\n"
+      ".f { text-emphasis-style: none; }\n";
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   std::string cssPath;
@@ -711,7 +714,7 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   ASSERT_TRUE(compileCache(parser, cssPath));
 
   const std::vector<std::pair<std::string, std::string>> probes = {
-      {"p", "a"}, {"p", "b"}, {"div", "c"}, {"span", "a"}, {"p", "none"}, {"span", "d"}, {"span", "e"}};
+      {"p", "a"}, {"p", "b"}, {"div", "c"}, {"span", "a"}, {"p", "none"}, {"span", "d"}, {"span", "e"}, {"span", "f"}};
   auto resolveAll = [&](CssParser& p) {
     std::vector<CssStyle> out;
     for (const auto& pr : probes) out.push_back(p.resolveStyle(pr.first, pr.second));
@@ -728,6 +731,10 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       << "the invisibility flags did not survive the disk cache";
   EXPECT_TRUE(heapStyles[6].defined.colorTransparent && heapStyles[6].defined.opacityZero &&
               heapStyles[6].defined.visibilityHidden);
+  EXPECT_EQ(heapStyles[0].textEmphasis, TextEmphasis::Sesame | TextEmphasis::kOpen)
+      << "text-emphasis-style did not survive the disk cache";
+  EXPECT_TRUE(heapStyles[7].hasTextEmphasis() && heapStyles[7].textEmphasis == 0)
+      << "an explicit text-emphasis-style: none did not survive the disk cache";
 
   BuildArena arena(64 * 1024);
   ASSERT_TRUE(arena.valid());
