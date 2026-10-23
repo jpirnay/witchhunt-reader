@@ -34,8 +34,19 @@ struct DumpWord {
   std::string text;
 };
 
+// A ruby group: the box over words [first, first + count), at x for w (the `R` record).
+struct DumpRuby {
+  size_t first = 0;
+  size_t count = 0;
+  int x = 0;
+  int w = 0;
+  std::string text;
+};
+
 struct DumpLine {
   std::vector<DumpWord> words;
+  std::vector<DumpRuby> rubies;
+  int x = 0;                    // the LINE record's x= (0 for a table cell line)
   float sizeMultiplier = 1.0f;  // the block's font-size multiplier (LINE mult=); table cell lines have none
   bool followsLine = false;     // the line before it in `lines` is the previous line of the same flow
   std::string shape;            // x, alignment and size of the LINE record: lines of one shape share a text width
@@ -85,6 +96,7 @@ std::vector<DumpLine> parseLines(const std::string& dump) {
         if (field.rfind("mult=", 0) == 0) size = field;
         if (field.rfind("y=", 0) == 0) next.y = std::stoi(field.substr(2));
       }
+      if (!next.cell && !x.empty()) next.x = std::stoi(x.substr(2));
       next.shape = x + " " + align + " " + size;
       next.justified = align == "align=0";
       lines.push_back(next);
@@ -101,6 +113,19 @@ std::vector<DumpLine> parseLines(const std::string& dump) {
       }
       word.text = textAt == std::string::npos ? "" : line.substr(textAt + 3);
       lines.back().words.push_back(word);
+    } else if (line.rfind("R first=", 0) == 0 && !lines.empty()) {
+      DumpRuby ruby;
+      const size_t textAt = line.find(" t=");
+      std::istringstream fields(line.substr(0, textAt));
+      std::string field;
+      while (fields >> field) {
+        if (field.rfind("first=", 0) == 0) ruby.first = std::stoul(field.substr(6));
+        if (field.rfind("count=", 0) == 0) ruby.count = std::stoul(field.substr(6));
+        if (field.rfind("x=", 0) == 0) ruby.x = std::stoi(field.substr(2));
+        if (field.rfind("w=", 0) == 0) ruby.w = std::stoi(field.substr(2));
+      }
+      ruby.text = textAt == std::string::npos ? "" : line.substr(textAt + 3);
+      lines.back().rubies.push_back(ruby);
     } else if (line.rfind("SPINE ", 0) == 0 || line.rfind("TABLE ", 0) == 0 || line.rfind("ROW ", 0) == 0 ||
                line.rfind("CELL ", 0) == 0) {
       inFlow = false;
@@ -202,6 +227,21 @@ std::vector<std::string> blockKeys(const std::vector<DumpLine>& lines) {
   return keys;
 }
 
+// A line's left: its first word's left edge, or a ruby box that overhangs it further left.
+int lineLeft(const GfxRenderer& renderer, const DumpLine& line, const TypographyProfile::Punctuation table) {
+  int left = LineWidths(renderer, line, table).left(0);
+  for (const auto& ruby : line.rubies) left = std::min(left, ruby.x);
+  return left;
+}
+
+// Whether word k is in a ruby group of the line.
+bool inRubyGroup(const DumpLine& line, const size_t k) {
+  for (const auto& ruby : line.rubies) {
+    if (k >= ruby.first && k < ruby.first + ruby.count) return true;
+  }
+  return false;
+}
+
 // Where each block's leftmost line starts. A line that starts further right is a paragraph's indented first line
 // (or a centred line); with the CJK grid every line of a block starts a few pixels in.
 std::map<std::string, int> blockLeftEdges(const GfxRenderer& renderer, const std::vector<DumpLine>& lines,
@@ -210,7 +250,7 @@ std::map<std::string, int> blockLeftEdges(const GfxRenderer& renderer, const std
   std::map<std::string, int> edges;
   for (size_t i = 0; i < lines.size(); ++i) {
     if (lines[i].words.empty()) continue;
-    const int left = LineWidths(renderer, lines[i], table).left(0);
+    const int left = lineLeft(renderer, lines[i], table);
     const auto [at, inserted] = edges.emplace(keys[i], left);
     if (!inserted) at->second = std::min(at->second, left);
   }
@@ -281,7 +321,7 @@ TEST_P(CjkRules, KinsokuHoldsAtEveryCjkLineBreak) {
     if (!utf8IsUnspacedCjk(end) && !utf8IsUnspacedCjk(start)) continue;
     ++breaks;
     // A paragraph's indented first line is not a layout break.
-    if (LineWidths(renderer, line, table).left(0) > leftEdge.at(keys[i])) continue;
+    if (lineLeft(renderer, line, table) > leftEdge.at(keys[i])) continue;
     ++checked;
     EXPECT_FALSE(CjkLineBreak::isNoLineEnd(end))
         << "line ends with an opening bracket: " << lineText(prev) << " before: " << lineText(line);
@@ -314,6 +354,7 @@ TEST_P(CjkRules, UnspacedCjkSitsWhereItsWidthsPutIt) {
       const DumpWord& left = line.words[i];
       const DumpWord& right = line.words[i + 1];
       if (!utf8IsUnspacedCjk(lastCodepoint(left.text)) || !utf8IsUnspacedCjk(firstCodepoint(right.text))) continue;
+      if (inRubyGroup(line, i) || inRubyGroup(line, i + 1)) continue;  // the base is spread there
       const int gap = widths.left(i + 1) - widths.right(i);
       if (line.justified || line.cell) {
         EXPECT_GE(gap, 0) << "\"" << right.text << "\" overlaps \"" << left.text << "\" in: " << lineText(line);
@@ -322,6 +363,54 @@ TEST_P(CjkRules, UnspacedCjkSitsWhereItsWidthsPutIt) {
                           << "\" ends, in: " << lineText(line);
       }
     }
+  }
+}
+
+// Every ruby box lies inside its block and the page, no two boxes on a line overlap, and a box covers no word
+// outside its group but kana and CJK punctuation outside any group (spec 7.2): never Han, Latin or another
+// group's base.
+TEST_P(CjkRules, RubyStaysOverItsBaseAndOffTheHan) {
+  const std::vector<std::string> keys = blockKeys(lines);
+  const std::map<std::string, int> leftEdge = blockLeftEdges(renderer, lines, keys, table);
+  const int viewportWidth = pipeline_harness::Profile{}.viewportWidth;
+  const auto overhangable = [](const uint32_t cp) {
+    return utf8IsKana(cp) || CjkPunctuation::classOf(cp) != CjkPunctuation::Class::None;
+  };
+  size_t boxes = 0;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    const DumpLine& line = lines[i];
+    if (line.rubies.empty()) continue;
+    std::vector<DumpRuby> sorted = line.rubies;
+    std::sort(sorted.begin(), sorted.end(), [](const DumpRuby& a, const DumpRuby& b) { return a.x < b.x; });
+    for (size_t k = 0; k < sorted.size(); ++k) {
+      const DumpRuby& box = sorted[k];
+      ++boxes;
+      EXPECT_GE(box.x, leftEdge.at(keys[i]))
+          << "ruby " << box.text << " leaves its block on the left: " << lineText(line);
+      if (!line.cell) {
+        EXPECT_LE(box.x + box.w, viewportWidth - line.x)
+            << "ruby " << box.text << " leaves the page on the right: " << lineText(line);
+      }
+      if (k + 1 < sorted.size()) {
+        EXPECT_LE(box.x + box.w, sorted[k + 1].x)
+            << "ruby " << box.text << " overlaps " << sorted[k + 1].text << ": " << lineText(line);
+      }
+      for (size_t word = 0; word < line.words.size(); ++word) {
+        if (word >= box.first && word < box.first + box.count) continue;
+        const int wordLeft = line.words[word].x;
+        const int wordRight = wordLeft + wordWidth(line, line.words[word]);
+        if (wordRight <= box.x || wordLeft >= box.x + box.w) continue;
+        const std::string& text = line.words[word].text;
+        EXPECT_TRUE(!inRubyGroup(line, word) && overhangable(firstCodepoint(text)) && overhangable(lastCodepoint(text)))
+            << "ruby " << box.text << " covers \"" << text << "\" in: " << lineText(line);
+      }
+    }
+  }
+  const std::string book = fs::path(GetParam().epub).stem().string();
+  if (book == "test_cjk_line_breaking" || book == "test_cjk_ja_soseki") {
+    ASSERT_GE(boxes, 20u) << book << " has too few ruby boxes";
+  } else if (boxes == 0) {
+    GTEST_SKIP() << book << " has no ruby";
   }
 }
 
@@ -362,9 +451,11 @@ TEST_P(CjkJustifiedRules, JustifiedLinesEndFlushOnAWholeEmGrid) {
     const DumpLine& next = lines[i + 1];
     if (line.words.empty() || next.words.empty() || !line.justified || !hasCjkGap(line)) continue;
     if (!next.followsLine || next.shape != line.shape) continue;
-    if (LineWidths(renderer, next, table).left(0) != leftEdge[line.shape]) continue;  // the next paragraph's start
-    if (next.y > line.y && next.y - line.y > lineStep[line.shape]) continue;          // a margin: a new paragraph
-    rightEdges[line.shape].emplace_back(LineWidths(renderer, line, table).right(line.words.size() - 1), i);
+    if (lineLeft(renderer, next, table) != leftEdge[line.shape]) continue;    // the next paragraph's start
+    if (next.y > line.y && next.y - line.y > lineStep[line.shape]) continue;  // a margin: a new paragraph
+    int lineRight = LineWidths(renderer, line, table).right(line.words.size() - 1);
+    for (const auto& ruby : line.rubies) lineRight = std::max(lineRight, ruby.x + ruby.w);
+    rightEdges[line.shape].emplace_back(lineRight, i);
   }
   ASSERT_FALSE(rightEdges.empty()) << "no justified CJK line to check";
 
