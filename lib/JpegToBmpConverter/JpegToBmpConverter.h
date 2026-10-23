@@ -17,7 +17,8 @@ class ZipFile;
 // no-cover placeholder for good. The covers that reach a conversion have passed a completeness
 // check first (Epub::coverImageComplete: the EOI marker) or are read in place from a complete
 // archive, so what is short here is short in the source, and converting again would give the same.
-// A decode that stops for input, or delivers no row, fails as before.
+// A decode that stops for input, delivers no row, or meets a read the card fails (an I/O error, not
+// the end of the file: converting again may read it whole) fails as before.
 class JpegToBmpConverter {
   static bool jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bmpOut, int targetWidth, int targetHeight,
                                           bool oneBit, bool crop = true, bool eightBit = false,

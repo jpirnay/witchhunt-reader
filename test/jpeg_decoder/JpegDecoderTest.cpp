@@ -26,6 +26,7 @@
 
 #include "BitmapHelpers.h"
 #include "BuildArena.h"
+#include "CooperativeAbort.h"
 #include "HalStorage.h"  // FsFile (stdio-backed shim)
 #include "JpegToBmpConverter.h"
 #include "Print.h"
@@ -1029,6 +1030,103 @@ TEST(JpegToBmpConverter, ACoverThatFailsBeforeItsFirstRowStillFails) {
   EXPECT_FALSE(convertPath(cut, false).ok);
   EXPECT_FALSE(convertPath(cut, true).ok);
   std::remove(cut.c_str());
+}
+
+// A read the card fails partway through a cover is no damage of the file: converting again may read
+// it whole. So the rows so far are not kept -- the conversion fails, and Home converts the cover again
+// later -- unlike a file cut short or corrupt, which gives the same picture on every attempt.
+namespace {
+
+// Every read fails from the Nth poll of the cooperative-abort hook on (1-based). A one-shot
+// conversion polls it before every band (progressive) or MCU (baseline), so with N > 1 the reads
+// fail after rows have been delivered.
+int gFailReadsAtPoll = 0;
+int gPolls = 0;
+bool failReadsFromPoll() {
+  if (++gPolls == gFailReadsAtPoll) FsFile::failReadsFrom = 0;
+  return false;
+}
+
+class ReadFailureScope {
+ public:
+  explicit ReadFailureScope(const int poll) {
+    gPolls = 0;
+    gFailReadsAtPoll = poll;
+    CooperativeAbort::setLongTaskAbortPredicate(failReadsFromPoll);
+  }
+  ~ReadFailureScope() {
+    CooperativeAbort::setLongTaskAbortPredicate(nullptr);
+    CooperativeAbort::clearAborted();
+    FsFile::failReadsFrom = -1;
+    gFailReadsAtPoll = 0;
+  }
+  ReadFailureScope(const ReadFailureScope&) = delete;
+  ReadFailureScope& operator=(const ReadFailureScope&) = delete;
+};
+
+// A one-shot conversion of `name` into a 90x60 box, its reads failing from poll `poll` on.
+bool convertWithReadFailure(const char* name, const int poll) {
+  ReadFailureScope fault(poll);
+  FsFile file;
+  EXPECT_TRUE(file.openForRead(fixture(name)));
+  MemoryPrint bmp;
+  const JpegToBmpConverter::BmpTarget target[1] = {{&bmp, 90, 60}};
+  const bool ok = JpegToBmpConverter::jpegFileTo1BitBmpStreamsWithSizes(file, target, 1);
+  EXPECT_GE(gPolls, poll) << "the fault must strike, or this test proves nothing";
+  file.close();
+  return ok;
+}
+
+// The same, sliced: every read fails once `slices` one-unit slices have run.
+JpegThumbSession::Status sliceWithReadFailure(const char* name, const int slices) {
+  ReadFailureScope fault(0);
+  FsFile file;
+  EXPECT_TRUE(file.openForRead(fixture(name)));
+  MemoryPrint bmp;
+  const JpegToBmpConverter::BmpTarget target[1] = {{&bmp, 90, 60}};
+  auto status = JpegThumbSession::Status::Error;
+  {
+    auto session = JpegThumbSession::begin(file, target, 1);
+    EXPECT_NE(session, nullptr);
+    if (session) {
+      int calls = 0;
+      do {
+        if (calls++ == slices) FsFile::failReadsFrom = 0;
+        status = session->continueSteps(1);
+      } while (status == JpegThumbSession::Status::Running);
+      EXPECT_GT(calls, slices) << "the fault must strike, or this test proves nothing";
+    }
+  }
+  file.close();
+  return status;
+}
+
+}  // namespace
+
+TEST(JpegToBmpConverter, AReadFailurePartwayKeepsNoCover) {
+  // prog_full_420 at 1/2 is 9 bands, the baseline twin 117 MCUs, 9 rows of them: the reads fail a
+  // third of the way down.
+  EXPECT_FALSE(convertWithReadFailure("prog_full_420.jpg", 4)) << "progressive, one-shot";
+  EXPECT_FALSE(convertWithReadFailure("prog_full_420_base.jpg", 40)) << "baseline, one-shot";
+  // The progressive session indexes its 17 KB in 5 slices, then decodes a band a slice.
+  EXPECT_EQ(sliceWithReadFailure("prog_full_420.jpg", 8), JpegThumbSession::Status::Error) << "progressive, sliced";
+  EXPECT_EQ(sliceWithReadFailure("prog_full_420_base.jpg", 3), JpegThumbSession::Status::Error) << "baseline, sliced";
+  // Control: without the fault each converts.
+  EXPECT_TRUE(convertWithReadFailure("prog_full_420.jpg", 0));
+  EXPECT_TRUE(convertWithReadFailure("prog_full_420_base.jpg", 0));
+}
+
+// The same for a cover left to the 1/8 decode resized (ProgressiveJpeg::decodeResized): the heap
+// holds no finer scale's workspace beside the row pipeline's 16 KB.
+TEST(JpegToBmpConverter, AReadFailurePartwayThroughAResizedCoverKeepsNoCover) {
+  FsFile probeFile;
+  ASSERT_TRUE(probeFile.openForRead(fixture("prog_full_420.jpg")));
+  ProgressiveJpeg::ImageInfo info;
+  ASSERT_EQ(ProgressiveJpeg::probe(probeFile, info), ProgressiveJpeg::Result::Ok);
+  probeFile.close();
+  FreeHeapScope squeezed(static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 3) + 16 * 1024 - 1));
+  EXPECT_FALSE(convertWithReadFailure("prog_full_420.jpg", 4));
+  EXPECT_TRUE(convertWithReadFailure("prog_full_420.jpg", 0)) << "control: without the fault it converts";
 }
 
 // A cover the heap leaves only the 1/8 decode for, in a box larger than the 1/8 picture: the row

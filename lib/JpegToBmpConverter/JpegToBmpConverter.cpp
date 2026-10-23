@@ -280,18 +280,56 @@ struct SinkSet {
 // How a decode feeding a SinkSet ended.
 enum class Decoded : uint8_t {
   Whole,    // every row
-  Partial,  // rows from the top, then a failure -- or every row of a file short of what it should hold
-  Failed,   // nothing to keep: no row, the pipeline failed, or the decode stopped for input
+  Partial,  // rows from the top, then the file's own damage -- or every row of a file short of what it should hold
+  Failed,   // nothing to keep: no row, the pipeline failed, a read failed, or the decode stopped for input
 };
 
-// A decode that did not end cleanly. What it delivered is kept, with a background rest
-// (SinkSet::fillBackground): a cover cut short or partly corrupt beats no cover. Not when it
-// stopped for input (the caller converts again later), when the row pipeline itself failed, or
-// when no row arrived (the caller's fallbacks take over, as before).
-static Decoded keptOrFailed(const SinkSet& sinks, const bool stoppedForInput) {
-  if (stoppedForInput || sinks.error || sinks.rowsDone == 0) return Decoded::Failed;
-  LOG_INF("JPG", "Keeping %d/%d decoded rows of the cover, the rest background", sinks.rowsDone, sinks.srcHeight);
-  return Decoded::Partial;
+// Why a decode ended short of a whole picture.
+enum class ShortBy : uint8_t {
+  Damage,     // corrupt data, or a file that ends early: converting again gives the same picture
+  InputStop,  // it gave way to a button press; the caller converts again later
+  ReadError,  // the card failed a read: converting again may read the file whole
+};
+
+// ProgressiveJpeg reports nothing after its first row but Degraded, an I/O error, the abort hook's
+// stop, or Stopped -- which only the row pipeline's own failure (SinkSet::error) asks for.
+static ShortBy shortBy(const ProgressiveJpeg::Result result) {
+  if (result == ProgressiveJpeg::Result::Aborted) return ShortBy::InputStop;
+  if (result == ProgressiveJpeg::Result::IoError) return ShortBy::ReadError;
+  return ShortBy::Damage;
+}
+
+// TJpgDec reports a read the card failed and a stream that ended alike (JDR_INP): where the file
+// stands tells them apart. Its stop for input comes with SinkSet::error (tjpgBmpOutput).
+static ShortBy shortBy(const JRESULT jr, FsFile& file) {
+  if (jr == JDR_INP && file.position() < file.size()) return ShortBy::ReadError;
+  return ShortBy::Damage;
+}
+
+// Whether a decode that ended short keeps the rows it delivered, the rest background: a cover cut
+// short or partly corrupt beats no cover, and converting it again would give the same picture. Not
+// when the row pipeline itself failed or no row arrived (the caller's fallbacks take over, as
+// before), and not when the cause may be gone next time -- a stop for input, a failed read: a
+// partial BMP would be cached for good, so the conversion fails and the caller converts again.
+static bool keepsShortCover(const ShortBy cause, const bool pipelineError, const int rows, const int height) {
+  (void)height;  // only read by the logs, which compile out at lower log levels
+  if (pipelineError || rows == 0) return false;
+  switch (cause) {
+    case ShortBy::InputStop:
+      return false;
+    case ShortBy::ReadError:
+      LOG_ERR("JPG", "A read failed after %d/%d rows of the cover: not kept, converted again later", rows, height);
+      return false;
+    case ShortBy::Damage:
+      LOG_INF("JPG", "Keeping %d/%d decoded rows of the cover, the rest background", rows, height);
+      return true;
+  }
+  return false;
+}
+
+// keepsShortCover() for a decode feeding a SinkSet (SinkSet::fillBackground adds the rest).
+static Decoded keptOrFailed(const SinkSet& sinks, const ShortBy cause) {
+  return keepsShortCover(cause, sinks.error, sinks.rowsDone, sinks.srcHeight) ? Decoded::Partial : Decoded::Failed;
 }
 
 // Full progressive decode (ProgressiveJpeg): each band is one block row of full-width gray rows
@@ -481,7 +519,7 @@ static bool convertResized(FsFile& jpegFile, Print& sink, int targetWidth, int t
   if (result != ProgressiveJpeg::Result::Ok) {
     LOG_ERR("JPG", "Resized progressive cover: %s", ProgressiveJpeg::resultName(result));
     // As for the full conversions (keptOrFailed): rows that arrived stay, with a background rest.
-    if (result == ProgressiveJpeg::Result::Aborted || ctx.error || out.rows == 0) return false;
+    if (!keepsShortCover(shortBy(result), ctx.error, out.rows, outHeight)) return false;
     for (int y = out.rows; y < outHeight; ++y) writeOutputRow(&ctx, nullptr, y);
   }
   // Fold the final flush into the result: a write that fails here would otherwise be reported
@@ -889,7 +927,7 @@ static bool convertFromProgressive(FsFile& jpegFile, const OutputTarget* targets
                               if (result != ProgressiveJpeg::Result::Ok || sinks.error) {
                                 LOG_ERR("JPG", "Progressive cover decode: %s (ctxErr=%d)",
                                         ProgressiveJpeg::resultName(result), sinks.error ? 1 : 0);
-                                return keptOrFailed(sinks, result == ProgressiveJpeg::Result::Aborted);
+                                return keptOrFailed(sinks, shortBy(result));
                               }
                               logCoverReads(stats, windows.held());
                               return Decoded::Whole;
@@ -1053,7 +1091,7 @@ static bool jpegFileToBmpStreamsInternal(FsFile& jpegFile, const OutputTarget* t
                            if (jr != JDR_OK || sinks.error) {
                              LOG_ERR("JPG", "TJpgDec decode failed (jr=%d, ctxErr=%d)", jr, sinks.error ? 1 : 0);
                              // A stop for input sets sinks.error too (tjpgBmpOutput).
-                             return keptOrFailed(sinks, false);
+                             return keptOrFailed(sinks, shortBy(jr, jpegFile));
                            }
                            return Decoded::Whole;
                          });
@@ -1201,7 +1239,7 @@ JpegThumbSession::Status JpegThumbSession::continueSteps(const uint16_t units) {
     if (result != ProgressiveJpeg::Result::Ok || sinks.error) {
       LOG_ERR("JPG", "Progressive cover decode: %s (ctxErr=%d)", ProgressiveJpeg::resultName(result),
               sinks.error ? 1 : 0);
-      decoded = keptOrFailed(sinks, false);  // nothing in a session stops for input
+      decoded = keptOrFailed(sinks, shortBy(result));  // nothing in a session stops for input
     } else {
       logCoverReads(s.stats, s.windows.held());
     }
@@ -1217,7 +1255,7 @@ JpegThumbSession::Status JpegThumbSession::continueSteps(const uint16_t units) {
     s.streamPos = static_cast<uint32_t>(file.position());
     if (jr != JDR_OK || sinks.error) {
       LOG_ERR("JPG", "TJpgDec decode failed (jr=%d, ctxErr=%d)", jr, sinks.error ? 1 : 0);
-      decoded = keptOrFailed(sinks, false);
+      decoded = keptOrFailed(sinks, shortBy(jr, file));
       finished = true;
     } else {
       finished = s.cursor.done != 0;
