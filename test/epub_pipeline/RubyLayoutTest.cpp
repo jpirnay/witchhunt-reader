@@ -177,6 +177,16 @@ TEST_F(RubyLayout, StrayRubyMarkupLosesNoText) {
   EXPECT_EQ(reading[0].words[0], "字");
   EXPECT_EQ(reading[0].words[1], "a");
   EXPECT_EQ(reading[0].words[2].substr(0, 7), "reading");
+  // The words are the same either way; the spacing is what a mangled reading changes.
+  EXPECT_EQ(two[0].x, lines("<p>前two words本</p>")[0].x);
+  const auto readingPlain = lines("<p>字a readingend</p>");
+  EXPECT_EQ(reading[0].x[2], readingPlain[0].x[2]);
+  const auto br = lines("<p><ruby>字<br/>本<rt>a reading</rt></ruby>end</p>");
+  const auto brPlain = lines("<p>字<br/>本a readingend</p>");
+  ASSERT_EQ(br.size(), 2u);
+  ASSERT_EQ(brPlain.size(), 2u);
+  EXPECT_EQ(br[1].x[1], brPlain[1].x[1]);  // <rt> start: base glued to its reading
+  EXPECT_EQ(br[1].x[2], brPlain[1].x[2]);
   // An <rt> with no base appends only to a group of its own <ruby>.
   const auto l = lines("<p>漢<ruby>字<rt>じ</rt></ruby><ruby><rt>よみ</rt></ruby></p>");
   EXPECT_EQ(joined(l), "漢字よみ");
@@ -203,6 +213,20 @@ TEST_F(RubyLayout, AReadingOver255BytesKeepsItsPrefixAndTheLine) {
     for (const auto& r : line.ruby) {
       ++groups;
       EXPECT_EQ(std::get<2>(r), reading.substr(0, 255));
+    }
+  }
+  EXPECT_EQ(groups, 1u);
+}
+
+TEST_F(RubyLayout, ACapCutAfterASpaceLeavesNoTrailingSpace) {
+  // 253 letters, a space, then a kana whose bytes the 255-byte cap cuts: the reading ends at the letters.
+  const std::string letters(253, 'a');
+  const auto l = lines("<p><ruby>漢<rt>" + letters + " あ</rt></ruby></p>");
+  size_t groups = 0;
+  for (const auto& line : l) {
+    for (const auto& r : line.ruby) {
+      ++groups;
+      EXPECT_EQ(std::get<2>(r), letters);
     }
   }
   EXPECT_EQ(groups, 1u);

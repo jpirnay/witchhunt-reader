@@ -1079,9 +1079,9 @@ void ChapterHtmlSlimParser::closeRt() {
   // consumeText collapsed the whitespace runs; the ends are trimmed here.
   std::string text = std::move(rubyText_);
   rubyText_.clear();
-  if (!text.empty() && text.back() == ' ') text.pop_back();
-  // A character cut by the byte cap is dropped whole.
+  // A character cut by the byte cap is dropped whole, then the end is trimmed.
   text.resize(static_cast<size_t>(utf8SafeTruncateBuffer(text.data(), static_cast<int>(text.size()))));
+  if (!text.empty() && text.back() == ' ') text.pop_back();
 
   ParsedText* target = wordTarget();
   bool taken = false;
