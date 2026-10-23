@@ -1426,16 +1426,10 @@ bool EpubReaderActivity::inkOnlyPrerenderAvailable() const {
 }
 
 bool EpubReaderActivity::pageDrawsUnscaled(const Page& page) {
-  constexpr uint8_t scaledStyles = EpdFontFamily::SUP | EpdFontFamily::SUB | EpdFontFamily::SMALL_CAPS;
   for (const auto& element : page.elements) {
     if (element->getTag() != TAG_PageLine) return false;  // tables, images: not worth proving
     const TextBlock* block = static_cast<const PageLine*>(element.get())->getBlock();
-    if (!block || !block->valid()) continue;
-    const RenderStyle& style = block->getRenderStyle();
-    if (style.fontSizeMultiplier != 1.0f || style.headingFontId != 0 || block->hasWordSizes()) return false;
-    for (uint16_t i = 0; i < block->wordCount(); i++) {
-      if (block->wordStyle(i) & scaledStyles) return false;
-    }
+    if (block && !block->drawsUnscaled()) return false;
   }
   return true;
 }

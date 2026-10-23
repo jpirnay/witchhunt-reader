@@ -1439,20 +1439,24 @@ void ChapterHtmlSlimParser::wireTextBlock() {
 void ChapterHtmlSlimParser::wireParagraphLines(ParsedText& text) {
   text.setLineArena(buildArena_);
   if (buildArena_) {
-    text.setBeforeLineHook([this](const uint8_t maxSizePct, bool /*annotated*/) { beforeLineHook(maxSizePct); });
+    text.setBeforeLineHook([this](const uint8_t maxSizePct, bool annotated) { beforeLineHook(maxSizePct, annotated); });
   } else {
     text.setBeforeLineHook(nullptr);
   }
 }
 
-void ChapterHtmlSlimParser::beforeLineHook(const uint8_t maxSizePct) {
+void ChapterHtmlSlimParser::beforeLineHook(const uint8_t maxSizePct, const bool annotated) {
   // The page-fit test of addLineToPage, run before the line is materialised (see
   // ParsedText::beforeLine_): the same arithmetic, so addLineToPage's own test then finds the
   // line fits and everything after it (anchors, footnotes, the hyphenation retry) is unchanged.
   if (currentPage && currentTextBlock) {
-    int lineHeight = effectiveLineHeight(currentTextBlock->getBlockStyle());
+    const BlockStyle& bs = currentTextBlock->getBlockStyle();
+    int lineHeight = effectiveLineHeight(bs);
     if (maxSizePct != 100) {
       lineHeight = lineHeight * maxSizePct / 100;
+    }
+    if (annotated) {
+      lineHeight += TextBlock::annotationBandFor(renderer, effectiveFontId(bs), bs.fontSizeMultiplier, maxSizePct);
     }
     if (currentPageNextY + lineHeight > viewportHeight || keepTogetherBreak(lineHeight)) {
       emitPage();
@@ -4511,6 +4515,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
   if (maxPct != 100) {
     lineHeight = lineHeight * maxPct / 100;
   }
+  lineHeight += line->annotationBand(renderer, fontId);  // a line with ruby is taller by half an ascender
 
   if (!currentPage) {
     currentPage.reset(new Page());
@@ -5368,7 +5373,9 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
       cell.image = buildCellImage(bufCell.imageSrc, bufCell.imageAlt, cellImageMaxWidth, cellImageMaxHeight);
     }
 
-    uint16_t contentHeight = static_cast<uint16_t>(cell.lines.size() * lineHeight);
+    int cellTextHeight = 0;
+    for (const auto& cellLine : cell.lines) cellTextHeight += lineHeight + cellLine->annotationBand(renderer, fontId);
+    uint16_t contentHeight = static_cast<uint16_t>(cellTextHeight);
     if (cell.image) contentHeight = static_cast<uint16_t>(contentHeight + cell.image->getRenderedHeight());
     // A cell taller than the whole viewport can never be a grid row on any device, so the
     // fragment packer would emit a row that cannot be displayed. Adopted from CrossInk,

@@ -33,7 +33,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 97;  // v97: bold in an outline family without a bold
+constexpr uint8_t SECTION_FILE_VERSION = 99;  // v99: ruby (furigana) is laid out above its base: a line with
+                                              // ruby keeps its groups (TextBlock annotations) and is taller
+                                              // by half an ascender; <rp> is not laid out.
+                                              // v97: bold in an outline family without a bold
                                               // file is synthetic, wider than the regular
                                               // v96: CJK punctuation is narrowed by the book's
                                               // table, a mark is a token of its own, CJK lines

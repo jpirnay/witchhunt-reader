@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -12,6 +13,7 @@
 #include "Epub/Page.h"
 #include "Epub/Section.h"
 #include "GfxRenderer.h"
+#include "PipelineRunner.h"
 #include "SyntheticBook.h"
 
 namespace fs = std::filesystem;
@@ -269,4 +271,57 @@ TEST_F(RubyLayout, ALongGroupIsKeptWholeAndAnOverlongOneFallsBackInline) {
   const auto inlined = lines("<p>" + hanRun(90) + "<ruby>" + hanRun(140) + "<rt>よみ</rt></ruby></p>");
   EXPECT_FALSE(anyRuby(inlined));
   EXPECT_EQ(joined(inlined), hanRun(90) + hanRun(140) + "よみ");
+}
+
+TEST_F(RubyLayout, ARubyLineIsTallerByHalfAnAscender) {
+  const auto l = lines("<p>前</p><p><ruby>漢<rt>かん</rt></ruby></p><p>後</p>");
+  ASSERT_EQ(l.size(), 3u);
+  EXPECT_EQ((l[2].y - l[1].y) - (l[1].y - l[0].y), 9);
+}
+
+TEST_F(RubyLayout, ATableRowWithRubyIsTallerByTheBand) {
+  const std::string doc = R"(<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>C</title></head><body>
+<table><tr><td>前</td></tr><tr><td><ruby>漢<rt>かん</rt></ruby></td></tr></table>
+</body></html>
+)";
+  auto epub = syntheticBookFromDocument(work, books++, doc);
+  Section::BuildParams params;
+  params.viewportWidth = 480;
+  params.viewportHeight = 800;
+  params.lineCompression = 1.0f;
+  params.embeddedStyle = true;
+  GfxRenderer renderer;
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
+  ASSERT_TRUE(section.loadSectionFile(params));
+  section.currentPage = 0;
+  const auto page = section.loadPageFromSectionFile();
+  ASSERT_TRUE(page);
+  bool found = false;
+  for (const auto& el : page->elements) {
+    if (el->getTag() != TAG_PageTable) continue;
+    const auto& rows = static_cast<const PageTableFragment&>(*el).getRows();
+    ASSERT_EQ(rows.size(), 2u);
+    EXPECT_EQ(rows[1].height - rows[0].height, 9);
+    found = true;
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST_F(RubyLayout, ARubyBookPagesTheSameWithAndWithoutALentArena) {
+  auto dump = [&](const size_t lent, const char* name) {
+    const fs::path cache = work / name;
+    fs::create_directories(cache);
+    pipeline_harness::Profile profile;
+    profile.lentArenaBytes = lent;
+    std::ostringstream out;
+    EXPECT_TRUE(pipeline_harness::runAndDump((fs::path(CORPUS_DIR) / "test_cjk_ja_soseki.epub").string(),
+                                             cache.string(), profile, out));
+    return out.str();
+  };
+  const std::string plain = dump(0, "plain");
+  const std::string lent = dump(52272, "lent");
+  EXPECT_EQ(plain, lent);
+  EXPECT_NE(plain.find(" PAGE 1 "), std::string::npos) << "more than one page expected";
 }
