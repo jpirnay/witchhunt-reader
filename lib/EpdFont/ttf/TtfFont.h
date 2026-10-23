@@ -351,10 +351,6 @@ class TtfFontSet {
   uint32_t releaseMissMemory();
   /// What releaseMissMemory() would free now.
   uint32_t missMemoryBytes() const;
-  /// What a miss makes on the heap when nothing is lent to it: the scratch block and, in SD mode, the page cache (the
-  /// ring aside: only a store that stopped taking glyphs makes it). Known from load(), before any miss: the room a
-  /// section build that lends the misses no region must leave for them.
-  uint32_t missMemoryPlanBytes() const;
 
  private:
   friend class TtfFont;

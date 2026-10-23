@@ -404,8 +404,6 @@ uint32_t SdCardFontManager::releaseTtfMissMemory() { return ttfSet_ ? ttfSet_->r
 
 uint32_t SdCardFontManager::ttfMissMemoryBytes() const { return ttfSet_ ? ttfSet_->missMemoryBytes() : 0; }
 
-uint32_t SdCardFontManager::ttfMissMemoryPlanBytes() const { return ttfSet_ ? ttfSet_->missMemoryPlanBytes() : 0; }
-
 void SdCardFontManager::closeTtfSet(GfxRenderer& renderer) {
   dropTtfNativeSizes(renderer);
   renderer.setFontResolver(nullptr, nullptr);

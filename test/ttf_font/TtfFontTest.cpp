@@ -2055,29 +2055,6 @@ TEST_F(TtfFontSetTest, AnSdModeMissMakesItsPageCacheWhereItMakesTheScratchBlock)
   EXPECT_GT(files[kRegular].reads, 0u);
 }
 
-TEST_F(TtfFontSetTest, TheMissMemoryPlanIsWhatAMissMakesOnTheHeap) {
-  // Known from the load, before any miss: what a build that lends the misses nothing must leave room for.
-  {
-    const auto set = openSet();
-    ASSERT_NE(nullptr, set);
-    ASSERT_FALSE(set->readsCard());
-    EXPECT_EQ(set->scratchBytes(), set->missMemoryPlanBytes());  // flash mode: the scratch block alone
-    EXPECT_EQ(0u, set->missMemoryBytes());
-    ASSERT_NE(nullptr, set->font(0)->glyph(kRegular, 'Q'));  // nothing lent: on the heap
-    EXPECT_EQ(set->missMemoryPlanBytes(), set->missMemoryBytes());
-    EXPECT_EQ(set->missMemoryPlanBytes(), set->releaseMissMemory());
-  }
-  SimNorFlash chip{kSdOnlyBytes};
-  const auto set = openFamilies(chip, {files}, busy);
-  ASSERT_NE(nullptr, set);
-  ASSERT_TRUE(set->readsCard());
-  EXPECT_EQ(set->scratchBytes() + sizeof(ttf::SdPageCache), set->missMemoryPlanBytes());  // and the page cache
-  EXPECT_EQ(0u, set->missMemoryBytes());
-  ASSERT_NE(nullptr, set->font(0)->glyph(kRegular, 'Q'));
-  EXPECT_EQ(set->missMemoryPlanBytes(), set->missMemoryBytes());
-  EXPECT_EQ(set->missMemoryPlanBytes(), set->releaseMissMemory());
-}
-
 // --- OpenType CFF families ---
 
 TEST_F(TtfFontTest, AnOtfFamilyDrawsInFlashMode) {

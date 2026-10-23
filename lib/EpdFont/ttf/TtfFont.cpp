@@ -525,10 +525,6 @@ uint32_t TtfFontSet::missMemoryBytes() const {
          (ownedPages_ ? static_cast<uint32_t>(sizeof(ttf::SdPageCache)) : 0) + ringBytes();
 }
 
-uint32_t TtfFontSet::missMemoryPlanBytes() const {
-  return rasterizer_.scratchBytes() + (readsCard_ ? static_cast<uint32_t>(sizeof(ttf::SdPageCache)) : 0);
-}
-
 uint32_t TtfFontSet::releaseMissMemory() {
   missesStarved_ = false;                                                      // the next pass asks the heap again
   if (!rasterizer_.allocated() && !ownedPages_ && ringBytes() == 0) return 0;  // as RenderLock goes back, mostly
