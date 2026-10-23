@@ -531,17 +531,17 @@ produces; a power cut leaves at worst bytes nothing references.
 
 - **A style block's mode.** Flash mode: the style's whole TTF file. SD mode (a family too large for flash mode, or
   beside others that fill the font area): a font of its own made of the file's tables but `glyf` (`cmap`, `head`,
-  `hhea`, `hmtx`, `loca`, `maxp`, `OS/2`, `GPOS`, `GSUB`, `kern`, and the first 32 bytes of `post`, whichever it has), each 4-byte aligned behind a
-  table directory whose `glyf` record points past the block (`SdOutlines::fontOffset`); the outlines are read from
-  the file on the card there (`SdOutlines::fileOffset`, `length`). An SD-mode `StyleInfo` also holds the file's
-  stamp (`FileSource::stamp`: FNV-1a over its path and modification time) and size; a file that no longer matches
-  them installs the set again. Flash-mode blocks map one at a time, the SD-mode ones together.
+  `hhea`, `hmtx`, `loca`, `maxp`, `OS/2`, `GPOS`, `GSUB`, `kern`, and the first 32 bytes of `post`, whichever it
+  has), each 4-byte aligned behind a table directory whose `glyf` record points past the block
+  (`SdOutlines::fontOffset`); the outlines are read from the file on the card there (`SdOutlines::fileOffset`,
+  `length`). An SD-mode `StyleInfo` also holds the file's stamp (`FileSource::stamp`: FNV-1a over its path and
+  modification time) and size; a file that no longer matches them installs the set again. Flash-mode blocks map one at a time, the SD-mode ones together.
 - **A face** is a family at one size: `face = family << 24 | ppem` (26.6 pixels per em; the family is its index in
   the set). An entry is in use once `claimed` reads 0. A glyph key is `codepoint | style << 21 | faceIndex << 23`,
   bits 28-31 zero, so a key never reads as erased. The 32 entries are every family's; taking the last one, or asking
-  for a 33rd, makes the wipe pending. A synthetic style (spec 7.1, 7.4), drawn emboldened or slanted from another style's file, keys its
-  glyphs under its own style bits and the face index of its size, like a style with a file; its kerning pairs are
-  those of the style it is drawn from.
+  for a 33rd, makes the wipe pending. A synthetic style (spec 7.1, 7.4), drawn emboldened or slanted from another
+  style's file, keys its glyphs under its own style bits and the face index of its size, like a style with a file;
+  its kerning pairs are those of the style it is drawn from.
 - **A slot's value** is 0 (the font has no glyph for that key), or the record's `dataOffset` (its log offset + 20) in
   4-byte units in the low 20 bits (so a log is under 4 MiB), under the low 12 bits of the epoch of the segment that
   holds the record. A reused segment gets a new epoch, so a slot still naming its old contents no longer matches and
@@ -580,7 +580,8 @@ produces; a power cut leaves at worst bytes nothing references.
     segment gets an epoch that far past the base until the index is rebuilt, in idle time if need be.
 - **The identity** is FNV-1a over the families' identities in the set's order (`ttf::setIdentity`); a family's is
   FNV-1a over each style file's name, size and modification time and the engine's render version
-  (`ttf::kRenderVersion`, 3; `ttf::familyIdentity`). A store of another identity, or one whose header fails its check, is installed again.
+  (`ttf::kRenderVersion`, 3; `ttf::familyIdentity`). A store of another identity, or one whose header fails its
+  check, is installed again.
 
 Version 1 held one family: four style blocks, and a size table of bare ppems with pairs keyed by style alone.
 Version 2 had the mode in the `Geometry`, the store's, and a table map in each `StyleInfo` (1,240 B headers).
