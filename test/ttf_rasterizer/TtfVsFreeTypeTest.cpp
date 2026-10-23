@@ -54,7 +54,8 @@ struct Comparison {
 // Every glyph of `face` at `points`, drawn by the engine and by FreeType, into `out`. A load failure, and a glyph too
 // large that is not Unsupported, fail the test here; the caller checks the counts.
 void compareWithFreeType(const std::string& name, const std::vector<uint8_t>& data, FontBytes& bytes, const Face& face,
-                         const uint32_t points, Comparison* out, const Strength& strength = {}) {
+                         const uint32_t points, Comparison* out, const Strength& strength = {},
+                         const bool slant = false) {
   Comparison& c = *out;
   const FreeTypeReference reference(data, points);
   ASSERT_TRUE(reference.ok());
@@ -63,15 +64,16 @@ void compareWithFreeType(const std::string& name, const std::vector<uint8_t>& da
   Rasterizer rasterizer;
   const bool emboldened = strength.x != 0 || strength.y != 0;
   ScratchPlan plan = planScratch(face, ppem, kPoolBytesFlash);
-  // Emboldened glyphs grow past what the plan sized the output for: every one under 4 KB is compared.
-  if (emboldened) plan.outputBytes = kMaxOutputBytes;
+  // Emboldened and slanted glyphs grow past what the plan sized the output for: every one under 4 KB is compared.
+  if (emboldened || slant) plan.outputBytes = kMaxOutputBytes;
   ASSERT_TRUE(rasterizer.allocate(plan));
 
   for (uint32_t g = 0; g < face.numGlyphs; ++g) {
-    const ReferenceGlyph expected = reference.glyph(g, false, strength.x, strength.y);
+    const ReferenceGlyph expected = reference.glyph(g, false, strength.x, strength.y, slant);
     EpdGlyph metrics{};
     Status status = rasterizer.load(bytes, face, static_cast<uint16_t>(g), ppem, &metrics);
     if (status == Status::Ok && emboldened) status = rasterizer.embolden(strength, &metrics);
+    if (status == Status::Ok && slant) status = rasterizer.slant(&metrics);
     if (status == Status::Ok) status = rasterizer.rasterize(rasterizer.output());
     if (!expected.loaded) {
       ++c.freeTypeFails;
@@ -86,6 +88,16 @@ void compareWithFreeType(const std::string& name, const std::vector<uint8_t>& da
       EXPECT_EQ(Status::Unsupported, status) << "glyph " << g;
       ++c.tooLarge;
       continue;
+    }
+    // A shear can narrow a glyph that leans back (a swash): FreeType's slanted bitmap then fits where the upright
+    // outline the engine boxes first (load(), embolden()) does not. Unsupported by design, like any glyph past the cap.
+    if (slant && status == Status::Unsupported) {
+      const ReferenceGlyph upright = reference.glyph(g, false, strength.x, strength.y, false);
+      if (upright.loaded && (upright.width > 255 || upright.height > 255 ||
+                             glyphDataBytes(upright.width, upright.height, true) > rasterizer.plan().outputBytes)) {
+        ++c.tooLarge;
+        continue;
+      }
     }
     if (status != Status::Ok) {
       ++c.loadFailures;
@@ -121,7 +133,8 @@ void compareWithFreeType(const std::string& name, const std::vector<uint8_t>& da
     }
   }
   const std::string label =
-      emboldened ? " emboldened by " + std::to_string(strength.x) + "," + std::to_string(strength.y) + "/64" : "";
+      (emboldened ? " emboldened by " + std::to_string(strength.x) + "," + std::to_string(strength.y) + "/64" : "") +
+      (slant ? " slanted" : "");
   std::printf(
       "%s @%u pt%s: %u glyphs (%u too large, %u flagged overlap), %u load failures, %u advance diffs, %u box "
       "diffs, %u inexact (%llu of %llu pixels differ); %u FreeType cannot load, %u of them refused\n",
@@ -172,6 +185,23 @@ TEST_P(TtfVsFreeType, EveryGlyphEmboldenedMatchesFreeType) {
       SCOPED_TRACE(testing::Message() << points << " pt, " << strength.x << "," << strength.y << "/64");
       Comparison c;
       compareWithFreeType(GetParam(), data, bytes, face, points, &c, strength);
+      if (HasFatalFailure()) return;
+      EXPECT_GT(c.glyphs, 1000u);
+      EXPECT_EQ(0u, c.loadFailures);
+      EXPECT_EQ(0u, c.advanceDiffs);
+      EXPECT_EQ(0u, c.boxDiffs);
+      EXPECT_EQ(0u, c.inexact) << c.inexactPictures;
+    }
+  }
+}
+
+TEST_P(TtfVsFreeType, EveryGlyphSlantedMatchesFreeType) {
+  for (const uint32_t points : {8u, kPoints, 40u}) {
+    // Slanted; and emboldened at the engine's strength, then slanted (spec 7.4).
+    for (const Strength& strength : {Strength{}, emboldenStrength(ppemFromPoints(points))}) {
+      SCOPED_TRACE(testing::Message() << points << " pt, " << strength.x << "," << strength.y << "/64, slanted");
+      Comparison c;
+      compareWithFreeType(GetParam(), data, bytes, face, points, &c, strength, true);
       if (HasFatalFailure()) return;
       EXPECT_GT(c.glyphs, 1000u);
       EXPECT_EQ(0u, c.loadFailures);
@@ -337,6 +367,31 @@ TEST_P(TtfVsFreeTypeCff, EveryGlyphEmboldenedMatchesFreeType) {
       SCOPED_TRACE(testing::Message() << points << " pt, " << strength.x << "," << strength.y << "/64");
       Comparison c;
       compareWithFreeType(GetParam(), data, bytes, face, points, &c, strength);
+      if (HasFatalFailure()) return;
+      EXPECT_GT(c.glyphs, 0u);
+      EXPECT_EQ(0u, c.loadFailures);
+      EXPECT_EQ(c.freeTypeFails, c.refusedAsFreeType);
+      EXPECT_EQ(0u, c.advanceDiffs);
+      EXPECT_EQ(0u, c.boxDiffs);
+      const PixelTolerance* tolerance = cffPixelTolerance(GetParam(), points);
+      if (tolerance == nullptr) {
+        EXPECT_EQ(0u, c.inexact) << c.inexactPictures;
+      } else {
+        ASSERT_LE(tolerance->percent, 3.0);
+        EXPECT_LE(static_cast<double>(c.differingPixels), static_cast<double>(c.pixels) * tolerance->percent / 100)
+            << c.inexactPictures;
+      }
+    }
+  }
+}
+
+TEST_P(TtfVsFreeTypeCff, EveryGlyphSlantedMatchesFreeType) {
+  for (const uint32_t points : {8u, kPoints, 40u}) {
+    // Slanted; and emboldened at the engine's strength, then slanted (spec 7.4).
+    for (const Strength& strength : {Strength{}, emboldenStrength(ppemFromPoints(points))}) {
+      SCOPED_TRACE(testing::Message() << points << " pt, " << strength.x << "," << strength.y << "/64, slanted");
+      Comparison c;
+      compareWithFreeType(GetParam(), data, bytes, face, points, &c, strength, true);
       if (HasFatalFailure()) return;
       EXPECT_GT(c.glyphs, 0u);
       EXPECT_EQ(0u, c.loadFailures);

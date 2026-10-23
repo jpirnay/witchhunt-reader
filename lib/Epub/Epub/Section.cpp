@@ -33,7 +33,11 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 97;  // v97: bold in an outline family without a bold
+constexpr uint8_t SECTION_FILE_VERSION = 98;  // v98: synthetic italic slants an outline family
+                                              // without an italic file; an italic drop cap's
+                                              // width and a narrowed CJK mark's place come from
+                                              // the ink box, an accent font's too
+                                              // v97: bold in an outline family without a bold
                                               // file is synthetic, wider than the regular
                                               // v96: CJK punctuation is narrowed by the book's
                                               // table, a mark is a token of its own, CJK lines

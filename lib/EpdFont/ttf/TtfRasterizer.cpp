@@ -3,6 +3,7 @@
 #include <Logging.h>
 #include <Memory.h>
 
+#include <algorithm>
 #include <cstring>
 
 #include "TtfCffCharString.h"  // kCffDecoderBytes
@@ -463,7 +464,8 @@ const char* statusName(const Status status) {
   return "?";
 }
 
-ScratchPlan planScratch(const Face& face, const uint32_t maxPpem26_6, const uint32_t poolBytes, const bool emboldened) {
+ScratchPlan planScratch(const Face& face, const uint32_t maxPpem26_6, const uint32_t poolBytes, const bool emboldened,
+                        const bool slanted) {
   ScratchPlan plan;
   if (face.outlines == Face::Outlines::Cff) {
     // A CFF font's maxp (version 0.5) does not count points or contours: the caps, and the interpreter's state.
@@ -490,6 +492,10 @@ ScratchPlan planScratch(const Face& face, const uint32_t maxPpem26_6, const uint
   }
   width = width < em ? em : width > 255 ? 255 : width;
   height = height < em ? em : height > 255 ? 255 : height;
+  // Room below the output cap for synthetic italic's shear: the planned height times kSlant, rounded up, across.
+  // After the clamps: the shear grows with whatever height a glyph has. At the cap itself there is none; such a glyph
+  // is drawn upright (TtfFont::load).
+  if (slanted) width = std::min<int32_t>(255, width + ((height * kSlant + 0xFFFF) >> 16));
   const uint32_t bytes = glyphDataBytes(width, height, true);
   plan.outputBytes = bytes < kMaxOutputBytes ? bytes : kMaxOutputBytes;
   plan.poolBytes = poolBytes;
@@ -651,6 +657,24 @@ Status Rasterizer::placeBox(EpdGlyph* metrics) {
   return Status::Ok;
 }
 
+void Rasterizer::unbox() {
+  auto* points = reinterpret_cast<FT_Vector*>(block_ + pointsOffset_);
+  for (uint16_t i = 0; i < numPoints_; ++i) {
+    points[i].x += left_ * 64;
+    points[i].y += bottom_ * 64;
+  }
+}
+
+Status Rasterizer::slant(EpdGlyph* metrics) {
+  if (loaded_ != Status::Ok) return loaded_;
+  if (numPoints_ == 0) return Status::Ok;
+  // FT_GlyphSlot_Oblique: x += FT_MulFix(y, xy) for every point, from the glyph's origin; the advance stays.
+  unbox();
+  auto* points = reinterpret_cast<FT_Vector*>(block_ + pointsOffset_);
+  for (uint16_t i = 0; i < numPoints_; ++i) points[i].x += mulFix(static_cast<int32_t>(points[i].y), kSlant);
+  return loaded_ = placeBox(metrics);
+}
+
 Status Rasterizer::embolden(const Strength& strength, EpdGlyph* metrics) {
   if (loaded_ != Status::Ok) return loaded_;
   // FT_GlyphSlot_AdjustWeight: a non-zero advance grows by the horizontal strength, whatever became of the outline;
@@ -663,11 +687,8 @@ Status Rasterizer::embolden(const Strength& strength, EpdGlyph* metrics) {
   }
   if (numPoints_ == 0) return Status::Ok;
   // Back where FreeType has the outline (its orientation reads absolute coordinates), emboldened, boxed again.
+  unbox();
   auto* points = reinterpret_cast<FT_Vector*>(block_ + pointsOffset_);
-  for (uint16_t i = 0; i < numPoints_; ++i) {
-    points[i].x += left_ * 64;
-    points[i].y += bottom_ * 64;
-  }
   emboldenXY(points, reinterpret_cast<const unsigned short*>(block_ + contoursOffset_), numContours_, numPoints_,
              strength.x, strength.y);
   return loaded_ = placeBox(metrics);

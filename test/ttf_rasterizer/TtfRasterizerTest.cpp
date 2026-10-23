@@ -355,6 +355,22 @@ TEST(TtfScratch, TheEmboldenedGrowthIsClampedWithTheBox) {
   EXPECT_EQ(bold.outputBytes, planScratch(face, 3840, kPoolBytesFlash).outputBytes);
 }
 
+TEST(TtfScratch, ASlantedPlanHasRoomForTheShear) {
+  Face face;
+  face.outlines = Face::Outlines::Cff;
+  face.unitsPerEm = 1000;
+  face.xMax = 1000;
+  face.yMax = 1000;
+  EXPECT_EQ(99u, planScratch(face, 1000, kPoolBytesFlash, false, true).outputBytes);  // 22 x 18: 18 rows x kSlant,
+                                                                                      // rounded up, is 4 px across
+  const ScratchPlan both = planScratch(face, 1000, kPoolBytesFlash, true, true);
+  EXPECT_EQ(108u, both.outputBytes);  // 24 x 18: and emboldening's 2
+  EXPECT_EQ(kMaxScratchPoints, both.points);
+  EXPECT_EQ(kMaxScratchContours, both.contours);
+  EXPECT_EQ(kCffDecoderBytes, both.decoderBytes);
+  EXPECT_EQ(kMaxOutputBytes, planScratch(face, kMaxPpem26_6, kPoolBytesFlash, true, true).outputBytes);
+}
+
 TEST(TtfScratch, TheInterpretersStateLivesInTheCellPool) {
   // The state is dead once load() has the outline, so a CFF plan takes no more scratch than a TrueType one of the same
   // points and contours.

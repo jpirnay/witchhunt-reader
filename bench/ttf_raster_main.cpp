@@ -3,7 +3,9 @@
 // through the flash cache, as the glyph store's mapped styles will be. Prints timings, the scratch block, the
 // heap and the loop task's stack, and a hash of the output that must equal the host's
 // (bench/ttf_raster_golden.h). Then every glyph emboldened (synthetic bold, bold_14pt_pool4k and bold_40pt_pool4k),
-// and the same for the kanji at 12 pt (<name>_kanji_12pt_pool8k_bold). Then the kana and kanji of a Japanese subset at
+// and the same for the kanji at 12 pt (<name>_kanji_12pt_pool8k_bold). Then every glyph slanted (synthetic italic,
+// italic_14pt_pool4k and italic_40pt_pool4k), emboldened then slanted (bolditalic_14pt_pool4k), and the kanji slanted
+// (<name>_kanji_12pt_pool8k_italic). Then the kana and kanji of a Japanese subset at
 // 12 pt, as CFF with and without subroutines and as TrueType (test/fixtures/fonts/README.md): what decoding a
 // charstring costs on a store miss. Ends with "=== done ===".
 //
@@ -39,9 +41,10 @@ struct Run {
 };
 
 // The glyphs of `glyphs` (count of them), or every glyph of the face when it is null. `bold`: each is emboldened
-// between load and rasterize, the three timed together as a store miss for a synthetic bold style.
+// between load and rasterize, the three timed together as a store miss for a synthetic bold style. `slant`: each is
+// sheared after the emboldening, timed with the rest, for a synthetic italic or bold italic style.
 Run renderGlyphs(Rasterizer& rasterizer, FontBytes& bytes, const Face& face, const uint16_t* glyphs, uint32_t count,
-                 const uint32_t ppem26_6, const bool bold = false) {
+                 const uint32_t ppem26_6, const bool bold = false, const bool slant = false) {
   Run run;
   for (uint32_t i = 0; i < count; ++i) {
     const uint32_t g = glyphs ? glyphs[i] : i;
@@ -49,6 +52,7 @@ Run renderGlyphs(Rasterizer& rasterizer, FontBytes& bytes, const Face& face, con
     const int64_t start = esp_timer_get_time();
     Status status = rasterizer.load(bytes, face, static_cast<uint16_t>(g), ppem26_6, &metrics);
     if (status == Status::Ok && bold) status = rasterizer.embolden(emboldenStrength(ppem26_6), &metrics);
+    if (status == Status::Ok && slant) status = rasterizer.slant(&metrics);
     if (status == Status::Ok) status = rasterizer.rasterize(rasterizer.output());
     const int64_t us = esp_timer_get_time() - start;
     if (status != Status::Ok) {
@@ -65,8 +69,8 @@ Run renderGlyphs(Rasterizer& rasterizer, FontBytes& bytes, const Face& face, con
 }
 
 Run renderAll(Rasterizer& rasterizer, FontBytes& bytes, const Face& face, const uint32_t ppem26_6,
-              const bool bold = false) {
-  return renderGlyphs(rasterizer, bytes, face, nullptr, face.numGlyphs, ppem26_6, bold);
+              const bool bold = false, const bool slant = false) {
+  return renderGlyphs(rasterizer, bytes, face, nullptr, face.numGlyphs, ppem26_6, bold, slant);
 }
 
 void report(const char* name, const Run& run) {
@@ -202,11 +206,13 @@ void benchJapanese(const char* name, const uint8_t* start, const uint8_t* end) {
       Serial.printf("%s: no %u B for the RAM copy\n", name, static_cast<unsigned>(size));
     }
   }
-  rasterizer.allocate(planScratch(face, ppem, kPoolBytesSd, true));
+  rasterizer.allocate(planScratch(face, ppem, kPoolBytesSd, true, true));
   snprintf(label, sizeof(label), "%s_kanji_12pt_pool8k", name);
   report(label, renderGlyphs(rasterizer, bytes, face, kanji, kKanjiCount, ppem));
   snprintf(label, sizeof(label), "%s_kanji_12pt_pool8k_bold", name);
   report(label, renderGlyphs(rasterizer, bytes, face, kanji, kKanjiCount, ppem, true));
+  snprintf(label, sizeof(label), "%s_kanji_12pt_pool8k_italic", name);
+  report(label, renderGlyphs(rasterizer, bytes, face, kanji, kKanjiCount, ppem, false, true));
   snprintf(label, sizeof(label), "%s_kana+kanji_12pt_pool8k", name);
   report(label, renderGlyphs(rasterizer, bytes, face, glyphs, count, ppem));
   {
@@ -260,7 +266,7 @@ void setup() {
   const uint32_t heading = ppemFromPoints(40);
   Rasterizer rasterizer;
   const unsigned heapBefore = freeHeap();
-  if (!rasterizer.allocate(planScratch(face, heading, kPoolBytesFlash, true))) {
+  if (!rasterizer.allocate(planScratch(face, heading, kPoolBytesFlash, true, true))) {
     Serial.println("FATAL: scratch block");
     Serial.println("=== done ===");
     return;
@@ -278,6 +284,9 @@ void setup() {
   report("render_40pt_pool4k", renderAll(rasterizer, bytes, face, heading));
   report("bold_14pt_pool4k", renderAll(rasterizer, bytes, face, body, true));
   report("bold_40pt_pool4k", renderAll(rasterizer, bytes, face, heading, true));
+  report("italic_14pt_pool4k", renderAll(rasterizer, bytes, face, body, false, true));
+  report("italic_40pt_pool4k", renderAll(rasterizer, bytes, face, heading, false, true));
+  report("bolditalic_14pt_pool4k", renderAll(rasterizer, bytes, face, body, true, true));
   Serial.printf("loop task stack: lowest free %u B before rendering, %u B after\n", stackBefore,
                 static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 

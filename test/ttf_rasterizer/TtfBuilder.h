@@ -78,6 +78,7 @@ struct Font {
   bool os2 = false;
   uint16_t weightClass = 400;  ///< OS/2 usWeightClass
   uint16_t os2Selection = 0;
+  uint16_t os2Bytes = 78;  ///< the OS/2 table's length; shorter than its version's, FreeType ignores it
   int16_t typoAscender = 0;
   int16_t typoDescender = 0;
   int16_t typoLineGap = 0;
@@ -411,6 +412,7 @@ inline Bytes buildFont(const Font& font) {
     set16(os2, 72, static_cast<uint16_t>(font.typoLineGap));
     set16(os2, 74, font.winAscent);
     set16(os2, 76, font.winDescent);
+    os2.resize(font.os2Bytes);
     tables.emplace_back("OS/2", os2);
   }
   for (const auto& [name, data] : font.extraTables) {

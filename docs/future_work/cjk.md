@@ -14,7 +14,7 @@ read from the card, and a glyph store that makes room. What remains for full CJK
 
 ## Roadmap
 
-In order. Each step is its own plan and PR. Steps 1-5 are the CJK fonts spec's order of work
+In order. Each step is its own plan and PR. Steps 1-5b are the CJK fonts spec's order of work
 (`docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md`, section 13), in the order they run: synthetic bold moved
 behind CFF.
 
@@ -25,6 +25,7 @@ behind CFF.
 | 3 | CFF outlines (spec section 9), and their speed-ups | shipped (#542, #544) |
 | 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#548) |
 | 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | plan to write after 4 |
+| 5b | Synthetic italic (spec section 7.4): families without an italic file draw italic slanted, as KOReader does | shipped (#551) |
 | 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | needs a design |
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan to write |
 | 8 | Ruby and emphasis dots ([B](#ruby-furigana-pr-b)) | plan to write |
@@ -305,9 +306,13 @@ UI face's misses, so the SD font would be its last source. Questions that decide
 
 **Where.** `EpubReaderActivity` (`releasePageGlyphArena`, `preRenderMinFreeHeap`, `pageDrawsUnscaled`), `SdCardFont` (`setInkOnlyPrewarm`, `releasePageArenaIfAtLeast`).
 
-## Smaller edge cases from the A2 reviews
+## Smaller edge cases from the reviews
 
 None of these is visible in the test books. Each is a one-line note of the case and the symbol.
+
+**Font files** (found while planning synthetic italic, 2026-10-22).
+- `ttf::probeFile` takes a file's style from `head.macStyle` alone, so `OpenDyslexic-Italic.otf` (macStyle 0) is a regular: in a card folder that also holds `OpenDyslexic-Regular.otf`, it serves the regular style, being first by name (`assignStyles`). `post.italicAngle` would tell it apart, as `Face::italic` does.
+- `probeFile` reads OS/2's weight class from a table of 6 bytes or more, while `parseFace` ignores an OS/2 table FreeType would (under 78 bytes, or short for its version): a lone heavy face with such a table is emboldened (spec 7.1's third row).
 
 **Line breaking.**
 - Combining dakuten U+3099/U+309A, U+302A-302F and ideographic variation selectors U+E0100-E01EF can be split from their base (`CjkLineBreak::boundaryAllowsBreak`). Rare: NFD kana, IVS texts.
