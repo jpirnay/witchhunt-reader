@@ -3,6 +3,7 @@
 #include <Memory.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <new>
 #include <type_traits>
@@ -11,12 +12,33 @@ namespace ProgressiveJpeg {
 namespace {
 
 constexpr uint8_t MAX_COMPONENTS = 4;
-constexpr uint8_t MAX_LUMA_SCANS = 32;
-// Huffman tables live in a pool the scans point into. A DHT can redefine a slot between scans
-// (optimised files emit one per scan), so a table a recorded scan still uses must survive; the
-// pool only reclaims entries nobody references.
-constexpr uint8_t TABLE_POOL = 16;
 constexpr size_t INPUT_BUFFER = 512;
+
+// What a session has room for. Huffman tables live in a pool the scans point into: a DHT can
+// redefine a slot between scans (optimised files emit one per scan), so a table a recorded scan
+// still uses must survive, and the pool only reclaims entries nobody references.
+struct FullCaps {
+  static constexpr bool kDcOnly = false;
+  static constexpr uint8_t kTables = 16;
+  static constexpr uint16_t kSymbols = 256;
+  static constexpr uint8_t kLookaheads = 6;  // AC tables luma scans use: ~2 (spectral selection) to ~6 (SA)
+  static constexpr uint8_t kScans = 32;      // luma scans
+  static constexpr uint8_t kQuantized = 64;  // coefficients a quantization table keeps
+  static constexpr uint8_t kBasis = 8;       // IDCT basis rows (8 >> scale)
+};
+// At 1/8 a block is its DC level: the AC scans are neither recorded nor decoded, and the session
+// holds only what the DC scans need -- 2.3 KB on the C3 instead of 11.7.
+struct DcCaps {
+  static constexpr bool kDcOnly = true;
+  // DC tables in use at once: one per table id, plus the ones a recorded DC scan still uses after
+  // a redefinition.
+  static constexpr uint8_t kTables = 8;
+  static constexpr uint16_t kSymbols = 16;  // a DC symbol is a size category, 0..15
+  static constexpr uint8_t kLookaheads = 0;
+  static constexpr uint8_t kScans = 14;     // the first DC scan and a refinement per bit (Al <= 13)
+  static constexpr uint8_t kQuantized = 1;  // the DC quantizer
+  static constexpr uint8_t kBasis = 1;
+};
 // The read windows (DecodeOptions::readWindows): one per luma scan, the first SCAN_WINDOWS of
 // them, while the bands decode, and all of them as one while the file is indexed.
 constexpr size_t SCAN_WINDOW_BYTES = 1024;
@@ -135,14 +157,16 @@ struct Lookahead {
   uint16_t entry[256];
 };
 
+template <uint16_t kSymbols>
 struct HuffmanTable {
   uint8_t count[17] = {};
   uint16_t firstCode[17] = {};
   uint16_t firstSymbol[17] = {};
   const Lookahead* lookahead = nullptr;  // into State::lookaheads; State never moves
   uint16_t symbolCount = 0;
-  uint8_t symbols[256] = {};
+  uint8_t symbols[kSymbols] = {};
 
+  // False for a code space that is over-full, or more symbols than the table holds.
   bool build(const uint8_t counts[16]) {
     uint32_t code = 0;
     uint16_t offset = 0;
@@ -156,7 +180,7 @@ struct HuffmanTable {
       offset = static_cast<uint16_t>(offset + n);
     }
     symbolCount = offset;
-    return offset <= 256;
+    return offset <= kSymbols;
   }
 
   void buildLookahead(Lookahead& la) {
@@ -215,7 +239,9 @@ struct Cursor {
   uint32_t stopUnit = UINT32_MAX;
 };
 
+template <class C>
 struct State {
+  using Table = HuffmanTable<C::kSymbols>;
   Source source;
 
   uint16_t width = 0;
@@ -224,25 +250,25 @@ struct State {
   uint8_t maxH = 1;
   uint8_t maxV = 1;
   Component comps[MAX_COMPONENTS];
-  uint16_t quant[4][64] = {};  // natural order
+  uint16_t quant[4][C::kQuantized] = {};  // natural order, the first kQuantized coefficients
 
-  HuffmanTable pool[TABLE_POOL];
+  Table pool[C::kTables];
   uint8_t poolUsed = 0;
-  static constexpr uint8_t kMaxLookaheads = 6;  // AC tables luma scans use: ~2 (spectral selection) to ~6 (SA)
-  Lookahead lookaheads[kMaxLookaheads];
+  std::array<Lookahead, C::kLookaheads> lookaheads;
   uint8_t lookaheadsUsed = 0;
   int8_t current[2][4] = {{-1, -1, -1, -1}, {-1, -1, -1, -1}};  // [DC/AC][id] -> pool index
 
-  Scan scans[MAX_LUMA_SCANS];
-  Cursor cursors[MAX_LUMA_SCANS];
+  Scan scans[C::kScans];
+  Cursor cursors[C::kScans];
   uint8_t scanCount = 0;
   uint16_t restartInterval = 0;
   bool frameSeen = false;
   bool endedEarly = false;  // the file ends before its EOI marker: scans after the end are missing
 
   // Scaled inverse DCT basis for the chosen output size, x 1024 (see idctBlock).
-  int16_t basis[8][8] = {};
-  int8_t keptIndex[64] = {};  // natural index -> index into a block's kept coefficients, -1 = not kept
+  int16_t basis[C::kBasis][C::kBasis] = {};
+  // Natural index -> index into a block's kept coefficients, -1 = not kept.
+  int8_t keptIndex[C::kBasis * C::kBasis] = {};
 };
 
 struct Geometry {
@@ -300,13 +326,12 @@ struct IndexCursor {
   bool inEntropy = false;  // skipping a scan's entropy-coded data
 };
 
-}  // namespace
-
 // Everything a decode keeps between Decoder::step() calls. It sits at the front of the workspace,
 // so a paused decode holds no memory of its own beyond the caller's block.
+enum class Phase : uint8_t { Index, Bands, Done };
+template <class C>
 struct Session {
-  enum class Phase : uint8_t { Index, Bands, Done };
-  State st;
+  State<C> st;
   ImageInfo info;
   Geometry g;
   Layout layout;
@@ -320,15 +345,26 @@ struct Session {
 };
 // A checkpoint is the session's bytes (Decoder::writeCheckpoint), so nothing in it may need a
 // constructor or destructor to be valid.
-static_assert(std::is_trivially_copyable<Session>::value, "a checkpoint is the session's raw bytes");
+static_assert(std::is_trivially_copyable<Session<FullCaps>>::value, "a checkpoint is the session's raw bytes");
+static_assert(std::is_trivially_copyable<Session<DcCaps>>::value, "a checkpoint is the session's raw bytes");
 
-namespace {
+// A 1/8 decode keeps only DC (see DcCaps); every other scale the whole file.
+bool dcOnly(const uint8_t scaleShift) { return scaleShift == 3; }
 
+// The work for one kind of session: `f(session)` with the session at `p` as what it is.
+template <typename F>
+decltype(auto) withSession(void* const p, const bool dc, F&& f) {
+  if (dc) return f(*static_cast<Session<DcCaps>*>(p));
+  return f(*static_cast<Session<FullCaps>*>(p));
+}
+
+template <class C>
 Layout layoutFor(const Geometry& g) {
   const size_t blocks = static_cast<size_t>(g.bandBlockRows) * g.paddedCols;
   Layout l{};
-  l.maskOffset = alignUp(sizeof(Session));
-  l.coefOffset = alignUp(l.maskOffset + blocks * sizeof(uint64_t));
+  l.maskOffset = alignUp(sizeof(Session<C>));
+  // Which coefficients are non-zero matters to AC refinements only: a DC session keeps no masks.
+  l.coefOffset = alignUp(l.maskOffset + (C::kDcOnly ? 0 : blocks * sizeof(uint64_t)));
   l.pixelOffset = alignUp(l.coefOffset + blocks * g.kept * sizeof(int16_t));
   l.total = alignUp(l.pixelOffset + static_cast<size_t>(g.n) * g.paddedCols * g.n) + 8;  // + alignment slack
   return l;
@@ -338,7 +374,8 @@ Result inputFailure(const Source& source) { return source.ioError ? Result::IoEr
 
 // ---- header pass ------------------------------------------------------------------------
 
-bool tableReferenced(const State& st, const uint8_t index) {
+template <class C>
+bool tableReferenced(const State<C>& st, const uint8_t index) {
   for (const auto& cls : st.current) {
     for (const int8_t t : cls) {
       if (t == index) return true;
@@ -359,15 +396,17 @@ bool tableReferenced(const State& st, const uint8_t index) {
   return false;
 }
 
-int freeTableSlot(const State& st) {
-  if (st.poolUsed < TABLE_POOL) return st.poolUsed;
-  for (uint8_t i = 0; i < TABLE_POOL; ++i) {
+template <class C>
+int freeTableSlot(const State<C>& st) {
+  if (st.poolUsed < C::kTables) return st.poolUsed;
+  for (uint8_t i = 0; i < C::kTables; ++i) {
     if (!tableReferenced(st, i)) return i;
   }
   return -1;
 }
 
-Result parseQuantizers(State& st, uint32_t p, uint32_t end) {
+template <class C>
+Result parseQuantizers(State<C>& st, uint32_t p, uint32_t end) {
   while (p < end) {
     const int descriptor = st.source.at(p++);
     if (descriptor < 0) return inputFailure(st.source);
@@ -378,13 +417,14 @@ Result parseQuantizers(State& st, uint32_t p, uint32_t end) {
       int value = st.source.at(p++);
       if (precision) value = (value << 8) | st.source.at(p++);
       if (value < 0) return inputFailure(st.source);
-      st.quant[id][ZIGZAG[k]] = static_cast<uint16_t>(value);
+      if (ZIGZAG[k] < C::kQuantized) st.quant[id][ZIGZAG[k]] = static_cast<uint16_t>(value);
     }
   }
   return Result::Ok;
 }
 
-Result parseHuffmanTables(State& st, uint32_t p, const uint32_t end) {
+template <class C>
+Result parseHuffmanTables(State<C>& st, uint32_t p, const uint32_t end) {
   while (p < end) {
     if (p + 17 > end) return Result::InvalidData;
     const int descriptor = st.source.at(p++);
@@ -392,16 +432,25 @@ Result parseHuffmanTables(State& st, uint32_t p, const uint32_t end) {
     const uint8_t cls = static_cast<uint8_t>(descriptor) >> 4;
     const uint8_t id = static_cast<uint8_t>(descriptor) & 0x0F;
     if (cls > 1 || id >= 4) return Result::InvalidData;
-    const int slot = freeTableSlot(st);
-    if (slot < 0) return Result::Unsupported;
-    HuffmanTable& table = st.pool[slot];
-    table.lookahead = nullptr;  // a reclaimed slot: any lookahead described the old table
     uint8_t counts[16];
+    uint16_t symbolCount = 0;
     for (uint8_t& c : counts) {
       const int value = st.source.at(p++);
       if (value < 0) return inputFailure(st.source);
       c = static_cast<uint8_t>(value);
+      symbolCount = static_cast<uint16_t>(symbolCount + c);
     }
+    if constexpr (C::kDcOnly) {
+      if (cls == 1) {  // an AC table: no scan this session decodes uses it
+        if (p + symbolCount > end) return Result::InvalidData;
+        p += symbolCount;
+        continue;
+      }
+    }
+    const int slot = freeTableSlot(st);
+    if (slot < 0) return Result::Unsupported;
+    auto& table = st.pool[slot];
+    table.lookahead = nullptr;  // a reclaimed slot: any lookahead described the old table
     if (!table.build(counts) || p + table.symbolCount > end) return Result::InvalidData;
     for (uint16_t i = 0; i < table.symbolCount; ++i) {
       const int value = st.source.at(p++);
@@ -421,7 +470,8 @@ Result parseHuffmanTables(State& st, uint32_t p, const uint32_t end) {
   return Result::Ok;
 }
 
-Result parseFrame(State& st, uint32_t p, const uint32_t end) {
+template <class C>
+Result parseFrame(State<C>& st, uint32_t p, const uint32_t end) {
   if (end - p < 6) return Result::InvalidData;
   const int precision = st.source.at(p);
   st.height = static_cast<uint16_t>((st.source.at(p + 1) << 8) | st.source.at(p + 2));
@@ -449,8 +499,10 @@ Result parseFrame(State& st, uint32_t p, const uint32_t end) {
   return Result::Ok;
 }
 
-// Records the scan if it touches luma. `p` is the first entropy-coded byte on success.
-Result parseScan(State& st, uint32_t p, const uint32_t end) {
+// Records the scan if it touches luma (and, in a DC session, is a DC scan). `p` is the first
+// entropy-coded byte on success.
+template <class C>
+Result parseScan(State<C>& st, uint32_t p, const uint32_t end) {
   if (!st.frameSeen) return Result::InvalidData;
   const int n = st.source.at(p++);
   if (n <= 0 || n > MAX_COMPONENTS || end - p != 2U * n + 3U) return Result::InvalidData;
@@ -481,8 +533,8 @@ Result parseScan(State& st, uint32_t p, const uint32_t end) {
   if (badSpectrum || scan.al > 13) {
     return Result::InvalidData;
   }
-  if (!hasLuma) return Result::Ok;
-  if (st.scanCount >= MAX_LUMA_SCANS) return Result::Unsupported;
+  if (!hasLuma || (C::kDcOnly && scan.ss > 0)) return Result::Ok;
+  if (st.scanCount >= C::kScans) return Result::Unsupported;
 
   if (scan.ss == 0) {
     if (scan.ah == 0) {
@@ -492,11 +544,11 @@ Result parseScan(State& st, uint32_t p, const uint32_t end) {
         scan.dcTable[k] = static_cast<uint8_t>(t);
       }
     }
-  } else {
+  } else if constexpr (!C::kDcOnly) {
     const int8_t t = st.current[1][acId];
     if (t < 0) return Result::InvalidData;
     scan.acTable = static_cast<uint8_t>(t);
-    if (!st.pool[t].lookahead && st.lookaheadsUsed < State::kMaxLookaheads) {
+    if (!st.pool[t].lookahead && st.lookaheadsUsed < C::kLookaheads) {
       st.pool[t].buildLookahead(st.lookaheads[st.lookaheadsUsed++]);
     }
   }
@@ -511,7 +563,8 @@ Result parseScan(State& st, uint32_t p, const uint32_t end) {
 // One pass over the file: every table, the frame and each scan's data offset. Pending when
 // `budget` bytes of entropy data were skipped without reaching the end of the file; call again to
 // resume. UINT32_MAX never pauses (the one-shot decode).
-Result indexStep(State& st, IndexCursor& ic, const DecodeOptions& options, const uint32_t budget) {
+template <class C>
+Result indexStep(State<C>& st, IndexCursor& ic, const DecodeOptions& options, const uint32_t budget) {
   Source& src = st.source;
   src.selectWhole();
   if (!ic.started) {
@@ -657,7 +710,8 @@ struct BitReader {
 
   bool readBit() { return bits(1) != 0; }
 
-  int symbol(const HuffmanTable& table) {
+  template <class Table>
+  int symbol(const Table& table) {
     if (c.bitCount < 16) fill();
     uint8_t length = 1;
     if (table.lookahead) {
@@ -712,7 +766,8 @@ struct BlockRef {
   uint64_t* mask = nullptr;
 };
 
-inline void setCoefficient(const State& st, const BlockRef& block, const uint8_t zigzag, const int32_t value) {
+inline void setCoefficient(const State<FullCaps>& st, const BlockRef& block, const uint8_t zigzag,
+                           const int32_t value) {
   const uint8_t natural = ZIGZAG[zigzag];
   *block.mask |= 1ULL << natural;
   const int8_t kept = st.keptIndex[natural];
@@ -720,7 +775,7 @@ inline void setCoefficient(const State& st, const BlockRef& block, const uint8_t
 }
 
 // Correction bit for a coefficient already non-zero (G.1.2.3): widen its magnitude by p1.
-inline void refineCoefficient(const State& st, BitReader& in, const BlockRef& block, const uint8_t natural,
+inline void refineCoefficient(const State<FullCaps>& st, BitReader& in, const BlockRef& block, const uint8_t natural,
                               const int32_t p1) {
   if (!in.readBit()) return;
   const int8_t kept = st.keptIndex[natural];
@@ -729,7 +784,8 @@ inline void refineCoefficient(const State& st, BitReader& in, const BlockRef& bl
   if ((coef & p1) == 0) coef = static_cast<int16_t>(coef >= 0 ? coef + p1 : coef - p1);
 }
 
-bool decodeDcFirst(const State& st, BitReader& in, const Scan& scan, const uint8_t scanComp, const BlockRef& block) {
+template <class C>
+bool decodeDcFirst(const State<C>& st, BitReader& in, const Scan& scan, const uint8_t scanComp, const BlockRef& block) {
   const int size = in.symbol(st.pool[scan.dcTable[scanComp]]);
   if (size < 0 || size > 11) return false;
   const uint8_t comp = scan.comp[scanComp];
@@ -746,13 +802,13 @@ void decodeDcRefine(BitReader& in, const Scan& scan, const BlockRef& block) {
 }
 
 // G.1.2.2 (libjpeg decode_mcu_AC_first)
-bool decodeAcFirst(const State& st, BitReader& in, const Scan& scan, const BlockRef& block) {
+bool decodeAcFirst(const State<FullCaps>& st, BitReader& in, const Scan& scan, const BlockRef& block) {
   Cursor& c = in.c;
   if (c.eobrun > 0) {
     --c.eobrun;
     return true;
   }
-  const HuffmanTable& table = st.pool[scan.acTable];
+  const auto& table = st.pool[scan.acTable];
   for (int k = scan.ss; k <= scan.se; ++k) {
     const int rs = in.symbol(table);
     if (rs < 0) return false;
@@ -778,10 +834,10 @@ bool decodeAcFirst(const State& st, BitReader& in, const Scan& scan, const Block
 // G.1.2.3 (libjpeg decode_mcu_AC_refine). Which coefficients are non-zero comes from the mask,
 // because a refinement must emit/consume a correction bit for every non-zero coefficient in the
 // band -- including those this output scale does not keep.
-bool decodeAcRefine(const State& st, BitReader& in, const Scan& scan, const BlockRef& block) {
+bool decodeAcRefine(const State<FullCaps>& st, BitReader& in, const Scan& scan, const BlockRef& block) {
   Cursor& c = in.c;
   const int32_t p1 = 1 << scan.al;
-  const HuffmanTable& table = st.pool[scan.acTable];
+  const auto& table = st.pool[scan.acTable];
   int k = scan.ss;
   if (c.eobrun == 0) {
     for (; k <= scan.se; ++k) {
@@ -840,7 +896,8 @@ uint64_t spectralBand(const uint8_t ss, const uint8_t se) {
 // coefficients -- and in turn of theirs -- stops at that unit too, or it would read its bits against
 // the wrong coefficients and paint noise. A DC refinement reads one bit a block whatever came
 // before, and goes on.
-void finishUnit(State& st, const uint8_t s, BitReader& in, const bool ok, const uint32_t unit) {
+template <class C>
+void finishUnit(State<C>& st, const uint8_t s, BitReader& in, const bool ok, const uint32_t unit) {
   if (ok && !in.overrun) return;
   in.c.stopUnit = ok ? unit + 1 : unit;
   const Scan& stopped = st.scans[s];
@@ -878,7 +935,7 @@ constexpr int16_t COS16[32] = {512,  502,  473,  426,  362,  284,  196,  100,  0
 // C(u)/2 normalisation is the 8-point one, so the DC level is preserved. Scaled by 1024
 // (|entries| <= 0.5); with s = 8/n the angle is (2X+1) u s pi / 16, so it comes from COS16 and
 // the decoder needs no floating point (the ESP32-C3 has no FPU).
-void buildBasis(State& st, const uint8_t n) {
+void buildBasis(State<FullCaps>& st, const uint8_t n) {
   const int s = 8 / n;
   for (int X = 0; X < n; ++X) {
     for (int u = 0; u < n; ++u) {
@@ -902,7 +959,7 @@ void fillDcBlock(const int16_t dc, const uint16_t quant0, const uint8_t n, uint8
   for (int Y = 0; Y < n; ++Y) memset(out + static_cast<size_t>(Y) * stride, level, n);
 }
 
-void idctBlock(const State& st, const int16_t* coef, const uint16_t* quant, const uint8_t n, uint8_t* out,
+void idctBlock(const State<FullCaps>& st, const int16_t* coef, const uint16_t* quant, const uint8_t n, uint8_t* out,
                const size_t stride) {
   int32_t t[8][8];  // basis * F, x 8: the only full-block temporary (256 B of stack)
   for (int v = 0; v < n; ++v) {
@@ -934,7 +991,8 @@ void idctBlock(const State& st, const int16_t* coef, const uint16_t* quant, cons
 // ---- band loop --------------------------------------------------------------------------
 
 // Whether the picture lacks part of the file: a scan stopped short, or the file ended early.
-bool degraded(const State& st) {
+template <class C>
+bool degraded(const State<C>& st) {
   if (st.endedEarly) return true;
   for (uint8_t s = 0; s < st.scanCount; ++s) {
     if (st.cursors[s].stopUnit != UINT32_MAX) return true;
@@ -943,7 +1001,8 @@ bool degraded(const State& st) {
 }
 
 // Every luma scan's cursor at the start of its entropy data, before the first band.
-void initCursors(State& st) {
+template <class C>
+void initCursors(State<C>& st) {
   for (uint8_t s = 0; s < st.scanCount; ++s) {
     Cursor& c = st.cursors[s];
     c = Cursor{};
@@ -953,9 +1012,10 @@ void initCursors(State& st) {
 }
 
 // One band: advance every scan across its block rows, then emit its output rows.
-Result decodeBand(State& st, const Geometry& g, uint8_t* workspace, const Layout& layout, const uint16_t band,
+template <class C>
+Result decodeBand(State<C>& st, const Geometry& g, uint8_t* workspace, const Layout& layout, const uint16_t band,
                   const BandCallback callback, void* user) {
-  auto* masks = reinterpret_cast<uint64_t*>(workspace + layout.maskOffset);
+  auto* masks = C::kDcOnly ? nullptr : reinterpret_cast<uint64_t*>(workspace + layout.maskOffset);
   auto* coefs = reinterpret_cast<int16_t*>(workspace + layout.coefOffset);
   uint8_t* pixels = workspace + layout.pixelOffset;
   const size_t bandBlocks = static_cast<size_t>(g.bandBlockRows) * g.paddedCols;
@@ -966,17 +1026,14 @@ Result decodeBand(State& st, const Geometry& g, uint8_t* workspace, const Layout
 
   auto blockAt = [&](const int bandRow, const int col) {
     const size_t index = static_cast<size_t>(bandRow) * g.paddedCols + col;
-    return BlockRef{coefs + index * g.kept, masks + index};
+    return BlockRef{coefs + index * g.kept, masks ? masks + index : nullptr};
   };
 
-  memset(masks, 0, bandBlocks * sizeof(uint64_t));
+  if (masks) memset(masks, 0, bandBlocks * sizeof(uint64_t));
   memset(coefs, 0, bandBlocks * g.kept * sizeof(int16_t));
   const int firstRow = band * g.bandBlockRows;
   for (uint8_t s = 0; s < st.scanCount; ++s) {
     const Scan& scan = st.scans[s];
-    // At 1/8 a block is its DC level alone, and AC scans touch no DC coefficient: their cursors
-    // stay where the index left them, which a checkpoint at this scale carries as it is.
-    if (g.n == 1 && scan.ss > 0) continue;
     st.source.selectScan(s);
     Cursor& cursor = st.cursors[s];
     BitReader in{st.source, cursor};
@@ -1016,7 +1073,7 @@ Result decodeBand(State& st, const Geometry& g, uint8_t* workspace, const Layout
             } else {
               decodeDcRefine(in, scan, block);
             }
-          } else {
+          } else if constexpr (!C::kDcOnly) {
             ok = scan.ah == 0 ? decodeAcFirst(st, in, scan, block) : decodeAcRefine(st, in, scan, block);
           }
         }
@@ -1034,7 +1091,9 @@ Result decodeBand(State& st, const Geometry& g, uint8_t* workspace, const Layout
     for (uint16_t col = 0; col < colsNeeded; ++col) {
       const BlockRef block = blockAt(r, col);
       uint8_t* dst = pixels + static_cast<size_t>(col) * g.n;
-      if ((*block.mask & ~1ULL) == 0) {
+      if constexpr (C::kDcOnly) {
+        fillDcBlock(block.coef[0], quant[0], g.n, dst, pixelStride);
+      } else if ((*block.mask & ~1ULL) == 0) {
         fillDcBlock(block.coef[0], quant[0], g.n, dst, pixelStride);
       } else {
         idctBlock(st, block.coef, quant, g.n, dst, pixelStride);
@@ -1146,15 +1205,18 @@ void ReadWindows::applyTo(DecodeOptions& options) const {
 
 size_t workspaceBytes(const ImageInfo& info, const uint8_t scaleShift) {
   if (info.width == 0 || info.height == 0 || scaleShift > 3) return 0;
-  return layoutFor(geometryFor(info.width, info.height, info.componentCount, info.maxHorizontal, info.maxVertical,
-                               scaleShift))
-      .total;
+  const Geometry g =
+      geometryFor(info.width, info.height, info.componentCount, info.maxHorizontal, info.maxVertical, scaleShift);
+  return (dcOnly(scaleShift) ? layoutFor<DcCaps>(g) : layoutFor<FullCaps>(g)).total;
 }
 
 Result Decoder::begin(FsFile& file, const DecodeOptions& options, const BandCallback callback, void* user) {
   const Result claimed = claim(file, options, callback, user);
   if (claimed != Result::Ok) return claimed;
-  buildBasis(session_->st, session_->g.n);
+  if (!dcOnly_) {
+    auto& ss = *static_cast<Session<FullCaps>*>(session_);
+    buildBasis(ss.st, ss.g.n);
+  }
   return Result::Ok;
 }
 
@@ -1167,7 +1229,8 @@ Result Decoder::claim(FsFile& file, const DecodeOptions& options, const BandCall
 
   const Geometry g = geometryFor(info.width, info.height, info.componentCount, info.maxHorizontal, info.maxVertical,
                                  options.scaleShift);
-  const Layout layout = layoutFor(g);
+  dcOnly_ = dcOnly(options.scaleShift);
+  const Layout layout = dcOnly_ ? layoutFor<DcCaps>(g) : layoutFor<FullCaps>(g);
 
   uint8_t* base = options.workspace;
   size_t size = options.workspaceSize;
@@ -1185,53 +1248,60 @@ Result Decoder::claim(FsFile& file, const DecodeOptions& options, const BandCall
   }
   uint8_t* workspace = base + skew;
 
-  session_ = new (workspace) Session();
-  session_->info = info;
-  session_->g = g;
-  session_->layout = layout;
-  session_->workspace = workspace;
-  session_->callback = callback;
-  session_->user = user;
-  session_->st.source.file = &file;
-  session_->st.source.base = options.base;
+  if (dcOnly_) {
+    session_ = new (workspace) Session<DcCaps>();
+  } else {
+    session_ = new (workspace) Session<FullCaps>();
+  }
   // The windows' bookkeeping (Source::Slot) wants 4-byte alignment.
   uint8_t* windows = nullptr;
   if (options.readWindows != nullptr) {
     const size_t pad = (4 - (reinterpret_cast<uintptr_t>(options.readWindows) & 3)) & 3;
     if (options.readWindowsSize >= pad + scanWindowBytes()) windows = options.readWindows + pad;
   }
-  session_->st.source.bind(windows);
+  withSession(session_, dcOnly_, [&](auto& ss) {
+    ss.info = info;
+    ss.g = g;
+    ss.layout = layout;
+    ss.workspace = workspace;
+    ss.callback = callback;
+    ss.user = user;
+    ss.st.source.file = &file;
+    ss.st.source.base = options.base;
+    ss.st.source.bind(windows);
+  });
   file_ = &file;
   options_ = options;
   if (options_.stats) *options_.stats = DecodeStats{};
   return Result::Ok;
 }
 
-Result Decoder::step(const uint16_t units) {
-  if (session_ == nullptr) return Result::InvalidData;
-  Session& ss = *session_;
-  if (ss.phase == Session::Phase::Done) return ss.outcome;
-  const uint32_t t0 = options_.clock ? options_.clock() : 0;
+namespace {
+
+template <class C>
+Result stepSession(Session<C>& ss, const DecodeOptions& options, const uint16_t units) {
+  if (ss.phase == Phase::Done) return ss.outcome;
+  const uint32_t t0 = options.clock ? options.clock() : 0;
   Result result = Result::Pending;
-  if (ss.phase == Session::Phase::Index) {
+  if (ss.phase == Phase::Index) {
     const uint32_t budget =
         units == UINT16_MAX ? UINT32_MAX : static_cast<uint32_t>(std::max<uint16_t>(units, 1)) * INDEX_STEP_BYTES;
-    result = indexStep(ss.st, ss.index, options_, budget);
+    result = indexStep(ss.st, ss.index, options, budget);
     if (result == Result::Ok) {
       // The probe and the full index read the same SOF; disagreeing means the file changed shape.
       if (ss.st.width != ss.info.width || ss.st.height != ss.info.height || ss.st.compCount != ss.info.componentCount) {
         result = Result::InvalidData;
       } else {
         initCursors(ss.st);
-        ss.phase = Session::Phase::Bands;
+        ss.phase = Phase::Bands;
         result = Result::Pending;
       }
     }
-    if (options_.stats) options_.stats->indexMs += (options_.clock ? options_.clock() : 0) - t0;
+    if (options.stats) options.stats->indexMs += (options.clock ? options.clock() : 0) - t0;
   } else {
     const uint16_t count = std::max<uint16_t>(units, 1);
     for (uint16_t i = 0; i < count && ss.nextBand < ss.g.bandCount; ++i) {
-      if (options_.shouldAbort && options_.shouldAbort(options_.abortUser)) {
+      if (options.shouldAbort && options.shouldAbort(options.abortUser)) {
         result = Result::Aborted;
         break;
       }
@@ -1243,78 +1313,70 @@ Result Decoder::step(const uint16_t units) {
       ++ss.nextBand;
     }
     if (result == Result::Pending && ss.nextBand >= ss.g.bandCount) {
-      ss.phase = Session::Phase::Done;
+      ss.phase = Phase::Done;
       result = degraded(ss.st) ? Result::Degraded : Result::Ok;
     }
-    if (options_.stats) options_.stats->bandsMs += (options_.clock ? options_.clock() : 0) - t0;
+    if (options.stats) options.stats->bandsMs += (options.clock ? options.clock() : 0) - t0;
   }
-  if (options_.stats) {
-    options_.stats->reads = ss.st.source.reads;
-    options_.stats->bytesRead = ss.st.source.bytesRead;
+  if (options.stats) {
+    options.stats->reads = ss.st.source.reads;
+    options.stats->bytesRead = ss.st.source.bytesRead;
   }
   // An abort stops between index chunks or before a band, where the session is exactly the state
   // the next step would start from: it stays resumable (and checkpointable). Anything else is final.
   if (result != Result::Pending && result != Result::Aborted) {
-    ss.phase = Session::Phase::Done;
+    ss.phase = Phase::Done;
     ss.outcome = result;
   }
   return result;
 }
 
-namespace {
 constexpr uint32_t CHECKPOINT_MAGIC = 0x31434A50;  // "PJC1"
 struct CheckpointHeader {
   uint32_t magic;
-  uint32_t sessionBytes;   // sizeof(Session): another firmware's layout is refused, not misread
+  uint32_t sessionBytes;   // sizeof(Session): another firmware's layout, or another kind, is refused, not misread
   uint64_t lookaheadBase;  // where State::lookaheads sat: each table's lookahead pointer rebases from it
   uint32_t base;
   uint8_t scaleShift;
   uint8_t reserved[3];
 };
-}  // namespace
 
-size_t Decoder::checkpointSize() const { return sizeof(CheckpointHeader) + sizeof(Session); }
-
-bool Decoder::writeCheckpoint(FsFile& out) const {
-  if (session_ == nullptr || session_->phase == Session::Phase::Done) return false;
+template <class C>
+bool writeSession(const Session<C>& ss, const DecodeOptions& options, FsFile& out) {
+  if (ss.phase == Phase::Done) return false;
   CheckpointHeader header{};
   header.magic = CHECKPOINT_MAGIC;
-  header.sessionBytes = sizeof(Session);
-  header.lookaheadBase = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&session_->st.lookaheads[0]));
-  header.base = options_.base;
-  header.scaleShift = options_.scaleShift;
+  header.sessionBytes = sizeof(Session<C>);
+  header.lookaheadBase = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(ss.st.lookaheads.data()));
+  header.base = options.base;
+  header.scaleShift = options.scaleShift;
   return out.write(reinterpret_cast<const uint8_t*>(&header), sizeof(header)) == sizeof(header) &&
-         out.write(reinterpret_cast<const uint8_t*>(session_), sizeof(Session)) == sizeof(Session);
+         out.write(reinterpret_cast<const uint8_t*>(&ss), sizeof(Session<C>)) == sizeof(Session<C>);
 }
 
-Result Decoder::resume(FsFile& file, const DecodeOptions& options, const BandCallback callback, void* user,
-                       FsFile& checkpoint) {
-  const Result claimed = claim(file, options, callback, user);
-  if (claimed != Result::Ok) return claimed;
-  const auto refuse = [this]() {
-    end();
-    return Result::InvalidData;
-  };
+// A checkpoint's session read over a freshly claimed one. False when it does not fit.
+template <class C>
+bool readSession(Session<C>& ss, const DecodeOptions& options, const BandCallback callback, void* user, FsFile& file,
+                 FsFile& checkpoint) {
   CheckpointHeader header{};
   if (checkpoint.read(reinterpret_cast<uint8_t*>(&header), sizeof(header)) != static_cast<int>(sizeof(header)) ||
-      header.magic != CHECKPOINT_MAGIC || header.sessionBytes != sizeof(Session) || header.base != options.base ||
+      header.magic != CHECKPOINT_MAGIC || header.sessionBytes != sizeof(Session<C>) || header.base != options.base ||
       header.scaleShift != options.scaleShift) {
-    return refuse();
+    return false;
   }
   // The fresh session knows the image as it is now; the checkpoint must describe the same one.
-  Session& ss = *session_;
   const ImageInfo info = ss.info;
   const Geometry g = ss.g;
   const Layout layout = ss.layout;
   uint8_t* const workspace = ss.workspace;
   uint8_t* const extra = ss.st.source.extra;
-  if (checkpoint.read(reinterpret_cast<uint8_t*>(&ss), sizeof(Session)) != static_cast<int>(sizeof(Session))) {
-    return refuse();
+  if (checkpoint.read(reinterpret_cast<uint8_t*>(&ss), sizeof(Session<C>)) != static_cast<int>(sizeof(Session<C>))) {
+    return false;
   }
   if (ss.info.width != info.width || ss.info.height != info.height || ss.info.componentCount != info.componentCount ||
       ss.g.bandCount != g.bandCount || ss.g.n != g.n || ss.g.paddedCols != g.paddedCols ||
-      ss.layout.total != layout.total || ss.phase == Session::Phase::Done || ss.nextBand > g.bandCount) {
-    return refuse();
+      ss.layout.total != layout.total || ss.phase == Phase::Done || ss.nextBand > g.bandCount) {
+    return false;
   }
   // Re-bind what the checkpoint cannot carry: this workspace, this file, this caller.
   ss.workspace = workspace;
@@ -1324,21 +1386,56 @@ Result Decoder::resume(FsFile& file, const DecodeOptions& options, const BandCal
   ss.st.source.base = options.base;
   ss.st.source.bind(extra);  // this workspace's windows (or none), empty: they refill on the first read
   ss.st.source.ioError = false;
-  for (HuffmanTable& table : ss.st.pool) {
+  for (auto& table : ss.st.pool) {
     if (table.lookahead == nullptr) continue;
     const uint64_t offset = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(table.lookahead)) - header.lookaheadBase;
-    if (offset % sizeof(Lookahead) != 0 || offset / sizeof(Lookahead) >= State::kMaxLookaheads) return refuse();
+    if (offset % sizeof(Lookahead) != 0 || offset / sizeof(Lookahead) >= C::kLookaheads) return false;
     table.lookahead = &ss.st.lookaheads[offset / sizeof(Lookahead)];
+  }
+  return true;
+}
+
+}  // namespace
+
+Result Decoder::step(const uint16_t units) {
+  if (session_ == nullptr) return Result::InvalidData;
+  return withSession(session_, dcOnly_, [&](auto& ss) { return stepSession(ss, options_, units); });
+}
+
+size_t Decoder::checkpointSize() const {
+  return sizeof(CheckpointHeader) + (dcOnly_ ? sizeof(Session<DcCaps>) : sizeof(Session<FullCaps>));
+}
+
+bool Decoder::writeCheckpoint(FsFile& out) const {
+  if (session_ == nullptr) return false;
+  return withSession(session_, dcOnly_, [&](const auto& ss) { return writeSession(ss, options_, out); });
+}
+
+Result Decoder::resume(FsFile& file, const DecodeOptions& options, const BandCallback callback, void* user,
+                       FsFile& checkpoint) {
+  const Result claimed = claim(file, options, callback, user);
+  if (claimed != Result::Ok) return claimed;
+  if (!withSession(session_, dcOnly_,
+                   [&](auto& ss) { return readSession(ss, options, callback, user, file, checkpoint); })) {
+    end();
+    return Result::InvalidData;
   }
   return Result::Ok;
 }
 
-uint16_t Decoder::bandsDone() const { return session_ ? session_->nextBand : 0; }
-uint16_t Decoder::bandCount() const { return session_ ? session_->g.bandCount : 0; }
+uint16_t Decoder::bandsDone() const {
+  return session_ ? withSession(session_, dcOnly_, [](const auto& ss) { return ss.nextBand; }) : 0;
+}
+uint16_t Decoder::bandCount() const {
+  return session_ ? withSession(session_, dcOnly_, [](const auto& ss) { return ss.g.bandCount; }) : 0;
+}
 
 void Decoder::end() {
   if (session_ == nullptr) return;
-  session_->~Session();
+  withSession(session_, dcOnly_, [](auto& ss) {
+    using S = std::remove_reference_t<decltype(ss)>;
+    ss.~S();
+  });
   session_ = nullptr;
   owned_.reset();
   if (file_) file_->seek(options_.base);

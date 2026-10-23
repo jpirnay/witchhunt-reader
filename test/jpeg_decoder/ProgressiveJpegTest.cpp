@@ -477,7 +477,9 @@ TEST(ProgressiveJpegDamageAtAnEighth, ACorruptDcScanLeavesMidGreyFromThereOn) {
   ASSERT_GT(got.image.h, kRstDamagedUnit / kRstLumaCols);
   for (int y = 0; y < got.image.h; ++y) {
     for (int x = 0; x < got.image.w; ++x) {  // 18 pixels a row: the 19th block is cut by floor()
-      if (y * kRstLumaCols + x >= kRstDamagedUnit) EXPECT_NEAR(got.image.at(x, y), 128, 2) << x << "," << y;
+      if (y * kRstLumaCols + x >= kRstDamagedUnit) {
+        EXPECT_NEAR(got.image.at(x, y), 128, 2) << x << "," << y;
+      }
     }
   }
   std::remove(path.c_str());
@@ -1072,6 +1074,22 @@ TEST(ProgressiveJpeg, WorkspaceShrinksWithScale) {
   EXPECT_GT(full, half);
   EXPECT_GT(half, eighth);
   EXPECT_LT(half, 20u * 1024) << "the Strange Pictures diagrams decode at 1/2; this is their budget";
+}
+
+// At 1/8 a block is its DC level, so the session holds only what the DC scans need: the decode the
+// converters fall back to when the heap is short costs what the DC-only preview it replaces cost
+// (about 2 KB of state plus a row of blocks), not the 13-16 KB of a full session. Host sizes are
+// 64-bit; the C3's are smaller.
+TEST(ProgressiveJpeg, AnEighthNeedsNoMoreThanTheDcScans) {
+  ProgressiveJpeg::ImageInfo info;
+  info.width = 1200;
+  info.height = 1600;
+  info.componentCount = 3;
+  info.maxHorizontal = 2;
+  info.maxVertical = 2;
+  const size_t eighth = ProgressiveJpeg::workspaceBytes(info, 3);
+  EXPECT_LT(eighth, 4u * 1024);
+  EXPECT_LT(eighth * 4, ProgressiveJpeg::workspaceBytes(info, 2));
 }
 
 }  // namespace
