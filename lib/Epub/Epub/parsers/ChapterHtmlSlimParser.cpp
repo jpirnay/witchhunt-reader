@@ -308,7 +308,7 @@ const char* INLINE_FORMATTING_TAGS[] = {"span", "a",      "b",    "strong", "i",
                                         "dfn",  "kbd",    "samp", "var",    "tt",    "bdi",  "bdo",     "time", "data"};
 constexpr int NUM_INLINE_FORMATTING_TAGS = sizeof(INLINE_FORMATTING_TAGS) / sizeof(INLINE_FORMATTING_TAGS[0]);
 
-const char* SKIP_TAGS[] = {"head"};
+const char* SKIP_TAGS[] = {"head", "rp"};
 constexpr int NUM_SKIP_TAGS = sizeof(SKIP_TAGS) / sizeof(SKIP_TAGS[0]);
 
 bool isWhitespace(const char c) { return c == ' ' || c == '\r' || c == '\n' || c == '\t'; }
@@ -1069,6 +1069,57 @@ bool ChapterHtmlSlimParser::recoverHeapForImageHeader() {
   return true;
 }
 
+ParsedText* ChapterHtmlSlimParser::wordTarget() {
+  if (currentTableCell && currentTableCell->text) return currentTableCell->text.get();
+  return currentTextBlock.get();
+}
+
+void ChapterHtmlSlimParser::closeRt() {
+  rtDepth_ = -1;
+  // Whitespace runs (newlines and indentation of a pretty-printed <rt>) become one space; the ends are trimmed.
+  std::string text;
+  text.reserve(rubyText_.size());
+  for (const char c : rubyText_) {
+    if (isWhitespace(c)) {
+      if (!text.empty() && text.back() != ' ') text.push_back(' ');
+    } else {
+      text.push_back(c);
+    }
+  }
+  if (!text.empty() && text.back() == ' ') text.pop_back();
+  rubyText_.clear();
+  // A character cut by the byte cap is dropped whole.
+  text.resize(static_cast<size_t>(utf8SafeTruncateBuffer(text.data(), static_cast<int>(text.size()))));
+
+  ParsedText* target = wordTarget();
+  bool taken = false;
+  if (!text.empty() && target && rubyGroupStart_ != kNoRubyGroup) {
+    if (target->size() > rubyGroupStart_) {
+      const size_t tokens = target->size() - rubyGroupStart_;
+      if (target->addRubyGroup(rubyGroupStart_, tokens, text)) {
+        rubyGroupStart_ = target->size();
+        rubyHasGroup_ = true;
+        taken = true;
+        if (currentTableCell && currentTableCell->text && currentTable && !currentTable->degraded &&
+            !currentTable->rowDegraded) {
+          currentTable->pendingRowBytes += TABLE_BUFFER_BYTES_PER_WORD;
+          if (currentTable->pendingRowBytes >= MAX_TABLE_ROW_BUFFER_BYTES && !degradeRowAtOpenCell("row size budget")) {
+            return;
+          }
+        }
+      }
+    } else if (rubyHasGroup_ && target->appendRubyText(text)) {
+      taken = true;
+    }
+  }
+  if (!taken && !text.empty()) {
+    // Nothing to put it over: the reading is text like any other, at the offset it had in the source.
+    consumeText(this, text.c_str(), static_cast<int>(text.size()), rtVisibleOffset_, /*source=*/false);
+  }
+  target = wordTarget();
+  if (target && !target->isEmpty()) nextWordContinues = true;
+}
+
 // flush the contents of partWordBuffer to currentTextBlock
 bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   partWordCjkCodepoints_ = 0;  // the run being counted ends with this flush
@@ -1195,7 +1246,9 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     // A block laid out in parts has its font already: a family its later words bring in gets its face now.
     if (newFontSlot && wordFontsSize_ != 0) resolveWordFont(fontSlot);
 
-    if (currentTextBlock->size() > 96) {
+    // A split waits for a ruby that is open, up to kRubyGroupSlack tokens, so its group is made whole.
+    if (currentTextBlock->size() > 96 && !(rubyDepth_ >= 0 && currentTextBlock->size() <= 96 + kRubyGroupSlack)) {
+      if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the group's start goes out with the split
       if (!ensureHeapForTextLayout("long-block split", currentTextBlock.get())) {
         partWordBufferIndex = 0;
         nextWordContinues = false;
@@ -1825,7 +1878,8 @@ void ChapterHtmlSlimParser::addAncestorInsets(BlockStyle& style, const float emS
 
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
-  nextWordContinues = false;  // New block = new paragraph, no continuation
+  nextWordContinues = false;                            // New block = new paragraph, no continuation
+  if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the open ruby's bases are in the block left behind
   endCjkSegment();
   // Base style for the new block — normally the incoming blockStyle, but when falling
   // through from the empty-block merge path (see below) we use the merged style so that
@@ -2817,6 +2871,33 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     return;
   }
 
+  // Ported from crosspoint-reader PR #2665 ("feat(epub): native <ruby> support for Chinese, Japanese", Phạm Bình An /
+  // @brianhuster) and #3102 ("fix(ruby): don't flush while in a ruby group"). Theirs: the state machine, the
+  // collapsed <rt> text, an <rt> without a base appending to the last group, no split inside a group. Ours: the
+  // groups go to a table cell's own text, the split waits a bounded number of tokens, stray <rt>/<rtc> text stays
+  // inline, and <rp> stays visible text for KOSync.
+  if (self->rubyDepth_ < 0 && strcmp(name, "ruby") == 0) {
+    if (self->partWordBufferIndex > 0) {
+      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
+      if (!self->flushPartWordBuffer()) return;
+      if (!endsAtDashBreak) self->nextWordContinues = true;
+    }
+    self->rubyDepth_ = self->depth;
+    self->rubyHasGroup_ = false;
+    const ParsedText* target = self->wordTarget();
+    self->rubyGroupStart_ = target ? target->size() : kNoRubyGroup;
+    // The generic inline path below does the rest.
+  } else if (self->rubyDepth_ >= 0 && strcmp(name, "rtc") == 0) {
+    self->rtcDepth_ = self->depth;
+  } else if (self->rubyDepth_ >= 0 && self->rtcDepth_ < 0 && self->rtDepth_ < 0 && strcmp(name, "rt") == 0) {
+    if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) return;
+    self->rtDepth_ = self->depth;
+    self->rubyText_.clear();
+    self->rtVisibleOffset_ = self->visibleTextOffset_;
+    self->depth += 1;
+    return;
+  }
+
   // removed skipping of doc-pagebreak and epub:type="pagebreak"
   // as publishers sometimes wrap actual content in these tags
   /*
@@ -3409,6 +3490,19 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     return;
   }
 
+  // An <rt>'s text is collected whole; closeRt() decides what it becomes.
+  if (self->rtDepth_ >= 0) {
+    const size_t room = TextBlock::kMaxAnnotationText > self->rubyText_.size()
+                            ? TextBlock::kMaxAnnotationText - self->rubyText_.size()
+                            : 0;
+    size_t n = std::min(static_cast<size_t>(len), room);
+    if (n < static_cast<size_t>(len)) {
+      while (n > 0 && (static_cast<uint8_t>(s[n]) & 0xC0) == 0x80) --n;  // cut at a character boundary
+    }
+    self->rubyText_.append(s, n);
+    return;
+  }
+
   // Collect footnote link display text (for the number label)
   // Remove leading/trailing whitespace and square brackets from the
   // footnote link text to normalize noterefs like "[1]" → "1"
@@ -3708,6 +3802,23 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
   if (VisibleText::isNonVisibleTag(name) && self->nonVisibleTextDepth_ > 0) self->nonVisibleTextDepth_--;
   if (self->streamFailed) {
     return;
+  }
+
+  if (self->rtDepth_ >= 0 && self->rtDepth_ == self->depth - 1 && strcmp(name, "rt") == 0) {
+    self->closeRt();
+    self->depth -= 1;
+    return;
+  }
+  if (self->rtcDepth_ >= 0 && self->rtcDepth_ == self->depth - 1 && strcmp(name, "rtc") == 0) {
+    self->rtcDepth_ = -1;
+  }
+  if (self->rubyDepth_ >= 0 && self->rubyDepth_ == self->depth - 1 && strcmp(name, "ruby") == 0) {
+    if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) return;
+    self->rubyDepth_ = -1;
+    self->rubyGroupStart_ = kNoRubyGroup;
+    self->rubyHasGroup_ = false;
+    const ParsedText* target = self->wordTarget();
+    if (target && !target->isEmpty()) self->nextWordContinues = true;
   }
 
   // Check if any style state will change after we decrement depth
@@ -5128,6 +5239,7 @@ bool ChapterHtmlSlimParser::degradeRowAtOpenCell(const char* reason) {
   if (!currentTable || currentTable->rowDegraded || currentTable->degraded || !currentTableCell) return true;
   auto& t = *currentTable;
   if (t.pendingRow.cells.empty()) return true;
+  if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the open cell's words go out, a ruby's bases with them
 
   // degradeRow() cannot be used here: it drains every buffered cell and clears the row, which
   // would destroy the cell we are still filling. Lift the open cell out first, degrade the rest

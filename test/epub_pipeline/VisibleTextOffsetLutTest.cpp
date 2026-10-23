@@ -295,6 +295,36 @@ TEST_F(SyntheticLutFixture, MarkerLedPagesStartAtTheItemsFirstWord) {
   }
 }
 
+TEST_F(SyntheticLutFixture, RubyAndRpTextCountTowardTheContentOffsets) {
+  // The parser drops <rp> from the layout and takes <rt> into a ruby group, but KOSync's offsets count
+  // every text byte in the chapter, parentheses and readings included. Each paragraph is 42 visible
+  // bytes (6 + 3 + 12 + 3 + 18) and one line, so each page starts at 42 x the lines on the pages before it.
+  constexpr uint32_t kParagraphBytes = 42;
+  constexpr int kParagraphs = 200;
+  std::string body;
+  for (int i = 0; i < kParagraphs; ++i) {
+    body += "<p><ruby>吾輩<rp>（</rp><rt>わがはい</rt><rp>）</rp></ruby>は猫である。</p>\n";
+  }
+  const auto epub = book(body);
+  const auto section = build(epub);
+  ASSERT_GT(section->pageCount, 2);
+  const auto counted = ChapterXPathIndexerInternal::countTotalTextBytes(epub, 0);
+  ASSERT_TRUE(counted.has_value());
+  EXPECT_EQ(*counted, kParagraphBytes * kParagraphs);
+  uint32_t lines = 0;
+  for (uint16_t page = 0; page < section->pageCount; ++page) {
+    EXPECT_EQ(*section->getVisibleTextOffsetForPage(page), kParagraphBytes * lines) << "page " << page;
+    EXPECT_EQ(roundTrip(epub, *section, page), std::optional<uint16_t>(page)) << "page " << page;
+    section->currentPage = page;
+    const auto loaded = section->loadPageFromSectionFile();
+    ASSERT_TRUE(loaded);
+    for (const auto& el : loaded->elements) {
+      if (el->getTag() == TAG_PageLine) ++lines;
+    }
+  }
+  EXPECT_EQ(lines, static_cast<uint32_t>(kParagraphs));
+}
+
 TEST_F(SyntheticLutFixture, EmptyPageStartsWhereTheNextElementDoes) {
   // A top margin taller than the page pushes the opening paragraph's first line off page 0, which
   // goes out with nothing on it. That happens while the paragraph is laid out, after its text was

@@ -95,6 +95,7 @@ set(PIPELINE_INCLUDES
 add_executable(EpubPipelineTest
   EpubPipelineTest.cpp
   CjkRulesTest.cpp
+  RubyLayoutTest.cpp
   FingerprintTest.cpp
   LostTocRetryTest.cpp
   TocSourceTest.cpp
