@@ -24,7 +24,7 @@ behind CFF.
 | 2 | The glyph store makes room (spec section 8) | shipped (#532) |
 | 3 | CFF outlines (spec section 9), and their speed-ups | shipped (#542, #544) |
 | 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#548) |
-| 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | shipped (#PR) |
+| 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | shipped (#550) |
 | 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | design decided ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)); plan to write |
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-a3b-push-in-and-gap.md)) |
 | 8 | Ruby and emphasis dots ([B](#ruby-furigana-pr-b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md)); in progress on `feat/cjk-ruby` |
@@ -148,7 +148,7 @@ Listed here so nobody redoes it.
 
 ## A CJK font readers can install
 
-**Shipped** (#PR). The font manager installs eight CJK families as `.otf`: NotoSans and NotoSerif in JP, SC, TC and KR,
+**Shipped** (#550). The font manager installs eight CJK families as `.otf`: NotoSans and NotoSerif in JP, SC, TC and KR,
 1.6 to 7.0 MB each (9.4 MB sans, 16.9 MB serif), drawn by the TTF engine. They are cut by
 `lib/EpdFont/scripts/cjk_subset.py`, listed in `sd-fonts.yaml` and `assets/sd-fonts/fonts-v3.json` (manifest version 3).
 "Download all" leaves them out. The design is `docs/design/cjk-ttf-fonts.md`, sections 4-6.
