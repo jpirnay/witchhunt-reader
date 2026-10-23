@@ -382,7 +382,7 @@ pins two thirds and no filled counter on Noto Sans and Serif JP samples. It is o
   index of the size (`glyphstore::makeKey`).
 - **No new style block:** the regular file's tables serve both, so `glyphstore::kMaxStyles` is untouched; kerning
   uses the source file's pairs.
-- **`ttf::kRenderVersion` stays:** until now a regular-only family's bold fell back to another style's font, whose
+- **`ttf::kRenderVersion` stays (7.4 moves it to 3):** until now a regular-only family's bold fell back to another style's font, whose
   glyphs carry that style's bits, so no store holds a key a synthetic style uses.
 - **After the first render** a bold glyph costs what a regular one costs.
 
@@ -457,7 +457,7 @@ Then:
 clear, `post.italicAngle` 0) is slanted again, as a lone book face declared italic in CSS can be: `pickFaces` moves a
 lone face to the regular slot and its CSS style is not kept.
 
-**CJK (proposed with the step, 2026-10-22).** Every glyph is slanted, CJK included, as KOReader does. CJK books
+**CJK (validated on the X4, 2026-10-23).** Every glyph is slanted, CJK included, as KOReader does. CJK books
 rarely ask for italic, and a Latin word set in italic inside one should look italic.
 
 **How.** `Rasterizer::slant()` runs after `embolden()` and before `rasterize()`.
@@ -502,8 +502,11 @@ rarely ask for italic, and a Latin word set in italic inside one should look ita
     identities, would have spared the stores of families with italic files.
 
 **Cost.**
-- **Speed.** One multiply-add per outline point; next to the rasterizer it should not show. The device bench
-  confirms it, as it did for bold.
+- **Speed** (X4, ESP32-C3, device bench, average per store miss, upright to slanted): Bookerly 14 pt 420 to 471 µs
+  (+12%), 40 pt 1,072 to 1,195 µs (+11.5%), bold to bold italic 760 to 809 µs (+6%), kanji at 12 pt in TrueType 594
+  to 710 µs (+19.5%), CFF 719 to 834 µs (flat) and 748 to 862 µs (subrs), about +16%. That is +6-20% per store miss,
+  from the wider bitmap (about the height times 0.21 more columns to sweep and store), not the shear; paid once per
+  glyph, before the store holds it.
 - **RAM.** One more StyleFont per size, the body's and each native one's (about 130 B on the C3), in a regular-only
   family, two in a Regular-and-Bold family.
 
