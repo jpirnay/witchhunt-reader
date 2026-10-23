@@ -1227,8 +1227,8 @@ TEST_F(TtfFontTest, AFontWithoutKerningAsksNothing) {
 TEST_F(TtfFontTest, AFamilyHoldsMemoryOnlyForTheStylesItHas) {
   Font built = kernedBoxes();
   built.extraTables.clear();  // no kerning: nothing else a style holds differs between them
-  built.macStyle =
-      3;  // declared bold italic, so no style is synthetic: ASyntheticStyleCostsItsFontsAndNoFile counts those
+  // Declared bold italic, so no style is synthetic: ASyntheticStyleCostsItsFontsAndNoFile counts those.
+  built.macStyle = 3;
   const std::vector<uint8_t> bytes = buildFont(built);
   const uint8_t* const identities[] = {kIdentityA, kIdentityB, kIdentityA};
   const int styleCounts[] = {1, 2, 4};
