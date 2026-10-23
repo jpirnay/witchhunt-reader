@@ -25,9 +25,9 @@ behind CFF.
 | 3 | CFF outlines (spec section 9), and their speed-ups | shipped (#542, #544) |
 | 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#548) |
 | 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | shipped (#PR) |
-| 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | needs a design |
-| 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan to write |
-| 8 | Ruby and emphasis dots ([B](#ruby-furigana-pr-b)) | plan to write |
+| 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | design decided ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)); plan to write |
+| 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-a3b-push-in-and-gap.md)) |
+| 8 | Ruby and emphasis dots ([B](#ruby-furigana-pr-b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md)); in progress on `feat/cjk-ruby` |
 | 9 | The dictionary on CJK pages ([below](#dictionary-on-cjk-pages)) | open |
 
 Synthetic bold comes before the font manager because the CJK families ship in their Regular weight only (spec
@@ -108,7 +108,7 @@ Listed here so nobody redoes it.
 - **The gap:** at token boundaries without a space, in the profile's Chinese and Japanese rules. It stretches with justification and shrinks under push-in. It is not a break opportunity of its own.
 
 **Next step.**
-1. Write the A3b plan from spec sections 5.3 and 5.4.
+1. Carry out the A3b plan, `docs/superpowers/plans/2026-10-21-cjk-a3b-push-in-and-gap.md` (from spec sections 5.3 and 5.4).
 2. Extend the rule checker: no line is wider than the text width; a shrunk line could not have been laid out at full widths.
 3. Bump `SECTION_FILE_VERSION` (`lib/Epub/Epub/Section.cpp`).
 
@@ -141,7 +141,7 @@ Listed here so nobody redoes it.
 - **Emphasis dots** (傍点, CSS `text-emphasis`): dots or sesame marks above each character of a span, as Aozora Bunko books use them. They share ruby's storage and its taller line.
 
 **Next step.**
-1. Write the B plan from spec section 7.
+1. The B plan is written (`docs/superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md`) and being implemented on `feat/cjk-ruby`; finish it.
 2. Port upstream #2665 and its follow-ups by hand (Phạm Bình An's, with `Co-authored-by`).
 3. Add mono-ruby, group ruby, `<rp>` and ruby-at-line-edge cases to the fixture.
 4. Bump `SECTION_FILE_VERSION`.
@@ -149,7 +149,7 @@ Listed here so nobody redoes it.
 ## A CJK font readers can install
 
 **Shipped** (#PR). The font manager installs eight CJK families as `.otf`: NotoSans and NotoSerif in JP, SC, TC and KR,
-1.7 to 7.3 MB each (9.9 MB sans, 17.7 MB serif), drawn by the TTF engine. They are cut by
+1.6 to 7.0 MB each (9.4 MB sans, 16.9 MB serif), drawn by the TTF engine. They are cut by
 `lib/EpdFont/scripts/cjk_subset.py`, listed in `sd-fonts.yaml` and `assets/sd-fonts/fonts-v3.json` (manifest version 3).
 "Download all" leaves them out. The design is `docs/design/cjk-ttf-fonts.md`, sections 4-6.
 
@@ -236,11 +236,12 @@ every five reclaims; a reclaim itself takes about 150 ms.
    switched by a journal entry: no long block at all. Cost: a second index's flash and mapping pages.
 
 **Next step.** Measure how the 1.8 s splits between the index erase, the log walks and the slot programs
-(`FlashGlyphStore::rebuildIndex`), then take 1 and 2.
+(`FlashGlyphStore::rebuildIndex`), then take 1 and 2; the plan is
+`docs/superpowers/plans/2026-10-21-glyph-store-faster-rebuild.md`.
 
 ## CFF outlines (`.otf`)
 
-**Shipped** (branch `feat/cff-outlines`). The TTF engine draws CFF outlines as well as TrueType: a CFF parser and charstring interpreter in `lib/EpdFont/ttf/`, in flash mode and in SD mode (the charstring data read from the card). Font discovery lists `.otf` files and reads the content, so a file with an `OTTO` header is a CFF face whatever its name. Publisher Fonts takes a book's embedded CFF faces too, copied under their usual `<style>.ttf` names. Tested with CJK `.otf` files: subsets and a desubroutinized NotoSansTC (3.45 MB), in SD mode on the X4. Full stock files (NotoSansCJKjp-Regular.otf, which would need an SD-mode block of about 2.2 MB) are untested.
+**Shipped** (#542 and #544). The TTF engine draws CFF outlines as well as TrueType: a CFF parser and charstring interpreter in `lib/EpdFont/ttf/`, in flash mode and in SD mode (the charstring data read from the card). Font discovery lists `.otf` files and reads the content, so a file with an `OTTO` header is a CFF face whatever its name. Publisher Fonts takes a book's embedded CFF faces too, copied under their usual `<style>.ttf` names. Tested with CJK `.otf` files: subsets and a desubroutinized NotoSansTC (3.45 MB), in SD mode on the X4. Full stock files (NotoSansCJKjp-Regular.otf, which would need an SD-mode block of about 2.2 MB) are untested.
 
 Still refused: variable CFF2 fonts and font collections.
 
