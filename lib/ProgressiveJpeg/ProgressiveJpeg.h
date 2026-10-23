@@ -97,7 +97,9 @@ struct DecodeOptions {
 };
 
 // Every failure is reported before the first band is emitted unless the entropy data itself is
-// corrupt, so a caller can fall back to another decoder on Unsupported / OutOfMemory.
+// corrupt, so a caller can fall back to another decoder on Unsupported / OutOfMemory. A stream
+// that ends early is no failure: what arrived is decoded, and the rest of the scan it ends in
+// keeps what the scans before it gave, as libjpeg does.
 Result decode(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user);
 
 struct Session;

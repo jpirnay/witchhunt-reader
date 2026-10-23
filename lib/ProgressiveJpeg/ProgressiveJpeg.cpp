@@ -201,10 +201,16 @@ struct Cursor {
   uint32_t pos = 0;   // next entropy-coded byte
   uint32_t bits = 0;  // left-aligned bit buffer
   uint8_t bitCount = 0;
+  uint8_t padBits = 0;     // how many of the buffer's last bits are padding past a marker or EOF
   bool markerHit = false;  // reached a marker (or EOF): further bits read as zero, as libjpeg does
   uint16_t unitsToRestart = 0;
   uint32_t eobrun = 0;
-  int32_t predictor[MAX_COMPONENTS] = {};
+  // An 8-bit frame's DC values fit in 12 bits; 16 keep the cursor, and every session's 32 of them,
+  // at their size.
+  int16_t predictor[MAX_COMPONENTS] = {};
+  // The scan contributes to its units (MCUs of an interleaved scan, luma blocks otherwise, in scan
+  // order) before this one only: its data ran out there. The rest keep what earlier scans gave.
+  uint32_t stopUnit = UINT32_MAX;
 };
 
 struct State {
@@ -588,6 +594,8 @@ Result indexStep(State& st, IndexCursor& ic, const DecodeOptions& options, const
 struct BitReader {
   Source& src;
   Cursor& c;
+  // Set once a unit took padding bits for data: the scan's data ended inside it.
+  bool overrun = false;
 
   void fill() {
     while (c.bitCount <= 24) {
@@ -609,17 +617,25 @@ struct BitReader {
           ++c.pos;
         }
       }
+      if (c.markerHit) c.padBits = static_cast<uint8_t>(c.padBits + 8);
       c.bits |= byte << (24 - c.bitCount);
       c.bitCount = static_cast<uint8_t>(c.bitCount + 8);
     }
+  }
+
+  // Drops `count` bits from the front of the buffer; padding sits at its end.
+  void consume(const uint8_t count) {
+    if (count > c.bitCount - c.padBits) overrun = true;
+    c.bits <<= count;
+    c.bitCount = static_cast<uint8_t>(c.bitCount - count);
+    if (c.padBits > c.bitCount) c.padBits = c.bitCount;
   }
 
   uint32_t bits(const uint8_t count) {
     if (count == 0) return 0;
     if (c.bitCount < count) fill();
     const uint32_t value = c.bits >> (32 - count);
-    c.bits <<= count;
-    c.bitCount = static_cast<uint8_t>(c.bitCount - count);
+    consume(count);
     return value;
   }
 
@@ -631,9 +647,7 @@ struct BitReader {
     if (table.lookahead) {
       const uint16_t e = table.lookahead->entry[c.bits >> 24];
       if (e != 0) {
-        const uint8_t len = static_cast<uint8_t>(e >> 8);
-        c.bits <<= len;
-        c.bitCount = static_cast<uint8_t>(c.bitCount - len);
+        consume(static_cast<uint8_t>(e >> 8));
         return e & 0xFF;
       }
       length = 9;  // every code of 8 bits or fewer is in the table
@@ -642,8 +656,7 @@ struct BitReader {
       const uint32_t code = c.bits >> (32 - length);
       const uint32_t offset = code - table.firstCode[length];
       if (code >= table.firstCode[length] && offset < table.count[length]) {
-        c.bits <<= length;
-        c.bitCount = static_cast<uint8_t>(c.bitCount - length);
+        consume(length);
         return table.symbols[table.firstSymbol[length] + offset];
       }
     }
@@ -659,11 +672,13 @@ struct BitReader {
   bool restart() {
     c.bits = 0;
     c.bitCount = 0;
+    c.padBits = 0;
     c.markerHit = false;
     int b = src.at(c.pos);
     while (b >= 0 && b != 0xFF) b = src.at(++c.pos);  // tolerate junk before the marker
-    int marker = src.at(c.pos + 1);
+    int marker = b < 0 ? -1 : src.at(c.pos + 1);
     while (marker == 0xFF) marker = src.at(++c.pos + 1);
+    if (marker < 0) overrun = true;  // the file ends where the next interval should start
     if (marker < 0xD0 || marker > 0xD7) return false;
     c.pos += 2;
     c.eobrun = 0;
@@ -699,7 +714,8 @@ bool decodeDcFirst(const State& st, BitReader& in, const Scan& scan, const uint8
   const int size = in.symbol(st.pool[scan.dcTable[scanComp]]);
   if (size < 0 || size > 11) return false;
   const uint8_t comp = scan.comp[scanComp];
-  in.c.predictor[comp] += BitReader::extend(in.bits(static_cast<uint8_t>(size)), static_cast<uint8_t>(size));
+  in.c.predictor[comp] = static_cast<int16_t>(
+      in.c.predictor[comp] + BitReader::extend(in.bits(static_cast<uint8_t>(size)), static_cast<uint8_t>(size)));
   if (block.coef) {
     block.coef[0] = static_cast<int16_t>(std::clamp<int32_t>(in.c.predictor[comp] * (1 << scan.al), -32768, 32767));
   }
@@ -787,6 +803,17 @@ bool decodeAcRefine(const State& st, BitReader& in, const Scan& scan, const Bloc
     --c.eobrun;
   }
   return true;
+}
+
+// After one unit of a scan: where its data ran out, the scan stops (Cursor::stopUnit). A unit that
+// ran past the end of the data is kept, as libjpeg keeps it, and the scan stops after it -- or at it,
+// when the padding did not even decode. False: the unit is corrupt with data still to come.
+bool finishUnit(BitReader& in, const bool ok, const uint32_t unit) {
+  if (in.overrun) {
+    in.c.stopUnit = ok ? unit + 1 : unit;
+    return true;
+  }
+  return ok;
 }
 
 bool beginUnit(BitReader& in, const Scan& scan) {
@@ -903,44 +930,49 @@ Result decodeBand(State& st, const Geometry& g, uint8_t* workspace, const Layout
     // stay where the index left them, which a checkpoint at this scale carries as it is.
     if (g.n == 1 && scan.ss > 0) continue;
     st.source.selectScan(s);
-    BitReader in{st.source, st.cursors[s]};
+    Cursor& cursor = st.cursors[s];
+    BitReader in{st.source, cursor};
     if (scan.compCount > 1) {
       // Interleaved (always a DC scan): one MCU row, chroma decoded only to stay in step.
-      for (uint16_t mx = 0; mx < g.mcuCols; ++mx) {
-        if (!beginUnit(in, scan)) return Result::InvalidData;
-        for (uint8_t k = 0; k < scan.compCount; ++k) {
+      const uint32_t firstUnit = static_cast<uint32_t>(band) * g.mcuCols;
+      for (uint16_t mx = 0; mx < g.mcuCols && firstUnit + mx < cursor.stopUnit; ++mx) {
+        bool ok = beginUnit(in, scan);
+        for (uint8_t k = 0; ok && k < scan.compCount; ++k) {
           const Component& comp = st.comps[scan.comp[k]];
-          for (uint8_t by = 0; by < comp.v; ++by) {
-            for (uint8_t bx = 0; bx < comp.h; ++bx) {
+          for (uint8_t by = 0; ok && by < comp.v; ++by) {
+            for (uint8_t bx = 0; ok && bx < comp.h; ++bx) {
               const BlockRef block = scan.comp[k] == 0 ? blockAt(by, mx * st.maxH + bx) : BlockRef{};
               if (scan.ah == 0) {
-                if (!decodeDcFirst(st, in, scan, k, block)) return Result::InvalidData;
+                ok = decodeDcFirst(st, in, scan, k, block);
               } else {
                 decodeDcRefine(in, scan, block);
               }
             }
           }
         }
+        if (!finishUnit(in, ok, firstUnit + mx)) return Result::InvalidData;
       }
       continue;
     }
     // Non-interleaved luma: whole block rows of the component's own (unpadded) grid.
     const int lastRow = std::min<int>(firstRow + g.bandBlockRows, g.lumaRows);
     for (int row = firstRow; row < lastRow; ++row) {
-      for (uint16_t col = 0; col < g.lumaCols; ++col) {
-        if (!beginUnit(in, scan)) return Result::InvalidData;
-        const BlockRef block = blockAt(row - firstRow, col);
-        bool ok = true;
-        if (scan.ss == 0) {
-          if (scan.ah == 0) {
-            ok = decodeDcFirst(st, in, scan, 0, block);
+      const uint32_t rowUnit = static_cast<uint32_t>(row) * g.lumaCols;
+      for (uint16_t col = 0; col < g.lumaCols && rowUnit + col < cursor.stopUnit; ++col) {
+        bool ok = beginUnit(in, scan);
+        if (ok) {
+          const BlockRef block = blockAt(row - firstRow, col);
+          if (scan.ss == 0) {
+            if (scan.ah == 0) {
+              ok = decodeDcFirst(st, in, scan, 0, block);
+            } else {
+              decodeDcRefine(in, scan, block);
+            }
           } else {
-            decodeDcRefine(in, scan, block);
+            ok = scan.ah == 0 ? decodeAcFirst(st, in, scan, block) : decodeAcRefine(st, in, scan, block);
           }
-        } else {
-          ok = scan.ah == 0 ? decodeAcFirst(st, in, scan, block) : decodeAcRefine(st, in, scan, block);
         }
-        if (!ok) return Result::InvalidData;
+        if (!finishUnit(in, ok, rowUnit + col)) return Result::InvalidData;
       }
     }
   }

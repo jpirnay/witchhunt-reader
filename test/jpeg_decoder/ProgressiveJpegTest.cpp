@@ -165,6 +165,10 @@ TEST_P(ProgressiveJpegMatchesLibjpeg, AtEveryScale) {
   Capture capture;
   const auto result = decode(c.jpg, shift, capture);
   ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  if (expected.h == 0) {  // floor(h >> s) is 0: a picture shorter than 2^s pixels has no row
+    EXPECT_EQ(capture.bands, 0);
+    return;
+  }
   EXPECT_TRUE(capture.orderOk) << "bands must arrive in order, full width";
   ASSERT_EQ(capture.image.w, expected.w);
   ASSERT_EQ(capture.image.h, expected.h);
@@ -184,6 +188,166 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegMatchesLibjpeg,
                                                           Case{"prog_full_gray.jpg", "prog_full_gray.y.pgm"},
                                                           Case{"prog_full_444_rst.jpg", "prog_full_444_rst.y.pgm"}),
                                           testing::Values(0, 1, 2, 3)));
+
+// The Free-Ink SDK decoder's test matrix (see generate_fixtures.py): 4:2:2 with restarts inside MCU
+// rows, a restart at every MCU row, grayscale with restarts, and an image smaller than one MCU.
+INSTANTIATE_TEST_SUITE_P(FreeInkMatrix, ProgressiveJpegMatchesLibjpeg,
+                         testing::Combine(testing::Values(Case{"prog_422_rst.jpg", "prog_422_rst.y.pgm"},
+                                                          Case{"prog_420_rst_row.jpg", "prog_420_rst_row.y.pgm"},
+                                                          Case{"prog_gray_rst.jpg", "prog_gray_rst.y.pgm"},
+                                                          Case{"prog_tiny_9x5.jpg", "prog_tiny_9x5.y.pgm"}),
+                                          testing::Values(0, 1, 2, 3)));
+
+// A stream cut halfway through its last scan: what arrived is decoded, the rest of that scan is
+// missing -- libjpeg's rows, not a failure and not the zero bits past the end decoded as data.
+// The one block the data ends in is decoded from those zero bits by both decoders, and libjpeg
+// carries on through symbols its rules reject; that block may differ.
+class ProgressiveJpegTruncated : public testing::TestWithParam<int> {};
+
+TEST_P(ProgressiveJpegTruncated, DecodesWhatArrivedLikeLibjpeg) {
+  const int shift = GetParam();
+  const Gray full = loadPgm(fixture("prog_420_cut.y.pgm"));
+  ASSERT_FALSE(full.px.empty());
+  const Gray expected = reducedReference(full, shift);
+
+  Capture capture;
+  const auto result = decode("prog_420_cut.jpg", shift, capture);
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  EXPECT_TRUE(capture.orderOk);
+  ASSERT_EQ(capture.image.w, expected.w);
+  ASSERT_EQ(capture.image.h, expected.h);
+  const Diff d = compare(capture.image, expected);
+  EXPECT_LT(d.mean, shift == 0 ? 0.2 : 0.6) << "at 1/" << (1 << shift);
+  // Blocks (n x n output pixels each) past the tolerance the libjpeg match allows.
+  const int n = 8 >> shift;
+  const int limit = shift == 0 ? 2 : 12;
+  int badBlocks = 0;
+  for (int by = 0; by * n < expected.h; ++by) {
+    for (int bx = 0; bx * n < expected.w; ++bx) {
+      int worst = 0;
+      for (int y = by * n; y < std::min((by + 1) * n, expected.h); ++y) {
+        for (int x = bx * n; x < std::min((bx + 1) * n, expected.w); ++x) {
+          worst = std::max(worst, std::abs(capture.image.at(x, y) - expected.at(x, y)));
+        }
+      }
+      badBlocks += worst > limit;
+    }
+  }
+  EXPECT_LE(badBlocks, 1) << "at 1/" << (1 << shift);
+}
+
+INSTANTIATE_TEST_SUITE_P(Scales, ProgressiveJpegTruncated, testing::Values(0, 1, 2, 3));
+
+// ---- damaged copies of a fixture, made on the fly -----------------------------------------------
+
+std::string tempPath(const std::string& name);
+
+std::vector<uint8_t> readBytes(const std::string& path) {
+  std::vector<uint8_t> bytes;
+  FILE* fp = fopen(path.c_str(), "rb");
+  if (!fp) return bytes;
+  int c;
+  while ((c = fgetc(fp)) != EOF) bytes.push_back(static_cast<uint8_t>(c));
+  fclose(fp);
+  return bytes;
+}
+
+std::string writeTemp(const std::string& name, const std::vector<uint8_t>& bytes) {
+  const std::string path = tempPath(name);
+  FILE* fp = fopen(path.c_str(), "wb");
+  EXPECT_NE(fp, nullptr);
+  if (fp) {
+    fwrite(bytes.data(), 1, bytes.size(), fp);
+    fclose(fp);
+  }
+  return path;
+}
+
+// One scan of a JPEG: its header fields and where its entropy-coded data lies.
+struct ScanSpan {
+  int components = 0;
+  int ss = 0, se = 0, ah = 0, al = 0;
+  size_t dataStart = 0;
+  size_t dataEnd = 0;  // the marker that ends it
+};
+
+std::vector<ScanSpan> scansOf(const std::vector<uint8_t>& d) {
+  std::vector<ScanSpan> scans;
+  size_t i = 2;
+  while (i + 1 < d.size()) {
+    if (d[i] != 0xFF) {
+      ++i;
+      continue;
+    }
+    const uint8_t marker = d[i + 1];
+    if (marker == 0x00 || marker == 0xFF || (marker >= 0xD0 && marker <= 0xD7)) {
+      ++i;
+      continue;
+    }
+    if (!scans.empty() && scans.back().dataEnd == 0) scans.back().dataEnd = i;
+    if (marker == 0xD9 || i + 3 >= d.size()) break;
+    const size_t length = (static_cast<size_t>(d[i + 2]) << 8) | d[i + 3];
+    if (marker == 0xDA) {
+      ScanSpan s;
+      s.components = d[i + 4];
+      const size_t o = i + 5 + 2 * s.components;
+      s.ss = d[o];
+      s.se = d[o + 1];
+      s.ah = d[o + 2] >> 4;
+      s.al = d[o + 2] & 15;
+      s.dataStart = i + 2 + length;
+      scans.push_back(s);
+    }
+    i += 2 + length;
+  }
+  if (!scans.empty() && scans.back().dataEnd == 0) scans.back().dataEnd = d.size();
+  return scans;
+}
+
+// Where the k-th restart marker of a scan's data sits (0 when there are fewer).
+size_t restartMarker(const std::vector<uint8_t>& d, const ScanSpan& scan, const int k) {
+  int seen = 0;
+  for (size_t i = scan.dataStart; i + 1 < scan.dataEnd; ++i) {
+    if (d[i] == 0xFF && d[i + 1] >= 0xD0 && d[i + 1] <= 0xD7 && seen++ == k) return i;
+  }
+  return 0;
+}
+
+// A file cut just before a restart marker of its last scan: the data ends where an interval ends.
+// The rows above that interval are the complete file's; nothing fails.
+TEST(ProgressiveJpeg, AStreamCutAtARestartMarkerKeepsWhatArrived) {
+  const std::vector<uint8_t> whole = readBytes(fixture("prog_full_444_rst.jpg"));
+  const std::vector<ScanSpan> scans = scansOf(whole);
+  ASSERT_FALSE(scans.empty());
+  const ScanSpan& last = scans.back();
+  ASSERT_EQ(last.components, 1) << "the fixture ends with a luma scan";
+  constexpr int kInterval = 3;  // restart_marker_blocks in generate_fixtures.py
+  constexpr int kMarker = 40;   // 41 intervals arrive: blocks 0-122 of 19 x 12, block rows 0-5 whole
+  const size_t cut = restartMarker(whole, last, kMarker);
+  ASSERT_GT(cut, 0u);
+  const std::string path = writeTemp("cut_at_rst.jpg", std::vector<uint8_t>(whole.begin(), whole.begin() + cut));
+
+  Capture clean;
+  ASSERT_EQ(decode("prog_full_444_rst.jpg", 0, clean), ProgressiveJpeg::Result::Ok);
+  Capture cutRows;
+  FsFile file;
+  ASSERT_TRUE(file.openForRead(path));
+  ProgressiveJpeg::DecodeOptions options;
+  const auto result = ProgressiveJpeg::decode(file, options, Capture::accept, &cutRows);
+  file.close();
+  std::remove(path.c_str());
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  ASSERT_EQ(cutRows.image.h, clean.image.h);
+  const int lumaCols = (clean.image.w + 7) / 8;
+  const int firstMissingRow = (kMarker + 1) * kInterval / lumaCols * 8;
+  ASSERT_GT(firstMissingRow, 0);
+  for (int y = 0; y < firstMissingRow; ++y) {
+    ASSERT_TRUE(std::equal(cutRows.image.px.begin() + y * clean.image.w,
+                           cutRows.image.px.begin() + (y + 1) * clean.image.w,
+                           clean.image.px.begin() + y * clean.image.w))
+        << "row " << y;
+  }
+}
 
 TEST(ProgressiveJpeg, ProbeReportsGeometry) {
   FsFile file;

@@ -49,9 +49,22 @@ Fixtures:
                      preview it replaced shows 1/8 resolution, where they all blur away.
   thin_hlines_gray.jpg   The same, transposed (32x600, horizontal lines): lines in the last
                      row of an MCU row need the carry across MCU rows, not just blocks.
+
+Progressive cases from the Free-Ink SDK decoder's test matrix (freeink-sdk c51246c8,
+libs/assets/ProgressiveJpeg/test/host/run.py), each with its libjpeg luma as the reference
+(<name>.y.pgm), checked like prog_full_*:
+  prog_422_rst.jpg       4:2:2 (MCU 16x8), 117x61, restart marker every 3 MCUs.
+  prog_420_rst_row.jpg   4:2:0, 133x77, restart marker at every MCU row.
+  prog_gray_rst.jpg      Grayscale, 101x63, restart marker every 5 blocks.
+  prog_tiny_9x5.jpg      4:2:0, 9x5: smaller than one MCU.
+  prog_420_cut.jpg       prog_full_420.jpg cut halfway through its last scan (the luma AC
+                     refinement): the decode keeps what arrived. Reference: libjpeg with
+                     Pillow's LOAD_TRUNCATED_IMAGES. Cut there, not earlier: while any of the
+                     first AC coefficients is still incomplete libjpeg smooths DC-only blocks
+                     (block smoothing), which no decoder of ours does.
 """
 import os
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -171,6 +184,57 @@ save_reference("prog_full_gray.jpg", "prog_full_gray.y.pgm")
 busy_picture(150, 90).save(os.path.join(HERE, "prog_full_444_rst.jpg"), "JPEG", quality=85, subsampling=0,
                             progressive=True, optimize=True, restart_marker_blocks=3)
 save_reference("prog_full_444_rst.jpg", "prog_full_444_rst.y.pgm")
+
+# --- the Free-Ink SDK test matrix (see the docstring) ---
+busy_picture(117, 61).save(os.path.join(HERE, "prog_422_rst.jpg"), "JPEG", quality=85, subsampling=1,
+                           progressive=True, optimize=True, restart_marker_blocks=3)
+save_reference("prog_422_rst.jpg", "prog_422_rst.y.pgm")
+busy_picture(133, 77).save(os.path.join(HERE, "prog_420_rst_row.jpg"), "JPEG", quality=85, subsampling=2,
+                           progressive=True, optimize=True, restart_marker_rows=1)
+save_reference("prog_420_rst_row.jpg", "prog_420_rst_row.y.pgm")
+busy_picture(101, 63, "L").save(os.path.join(HERE, "prog_gray_rst.jpg"), "JPEG", quality=85, progressive=True,
+                                optimize=True, restart_marker_blocks=5)
+save_reference("prog_gray_rst.jpg", "prog_gray_rst.y.pgm")
+# Soft content: busy_picture saturates nearly every pixel at this size, and the scaled references
+# are derived from libjpeg's clamped pixels, which are then no longer the blocks' content.
+tiny = Image.new("RGB", (9, 5))
+for y in range(5):
+    for x in range(9):
+        tiny.putpixel((x, y), (60 + 15 * x, 90 + 20 * y, 200 - 10 * x))
+ImageDraw.Draw(tiny).rectangle([3, 1, 5, 3], fill=(40, 40, 40))
+tiny.save(os.path.join(HERE, "prog_tiny_9x5.jpg"), "JPEG", quality=85, subsampling=2, progressive=True,
+          optimize=True)
+save_reference("prog_tiny_9x5.jpg", "prog_tiny_9x5.y.pgm")
+
+
+def last_scan_data(data):
+    """(start, end) of the entropy-coded data of a JPEG's last scan."""
+    i, found = 2, None
+    while i + 1 < len(data):
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker in (0x00, 0xFF) or 0xD0 <= marker <= 0xD7:
+            i += 1
+            continue
+        if marker == 0xD9:
+            return found[0], i
+        length = (data[i + 2] << 8) | data[i + 3]
+        if marker == 0xDA:
+            found = (i + 2 + length, None)
+        i += 2 + length
+    raise ValueError("no EOI")
+
+
+with open(os.path.join(HERE, "prog_full_420.jpg"), "rb") as f:
+    whole = f.read()
+start, end = last_scan_data(whole)
+with open(os.path.join(HERE, "prog_420_cut.jpg"), "wb") as f:
+    f.write(whole[: (start + end) // 2])
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+save_reference("prog_420_cut.jpg", "prog_420_cut.y.pgm")
+ImageFile.LOAD_TRUNCATED_IMAGES = False
 
 print("Fixtures written to", HERE)
 for f in sorted(os.listdir(HERE)):
