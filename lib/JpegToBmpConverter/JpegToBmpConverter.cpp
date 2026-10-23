@@ -429,12 +429,21 @@ static bool resizedBmpOutput(void* user, uint16_t y, const uint8_t* grayscale, u
   return !ctx->error;
 }
 
+// What a progressive cover's decode read, and whether through the read windows.
+static void logCoverReads(const ProgressiveJpeg::DecodeStats& stats, const bool windows) {
+  LOG_DBG("JPG", "Progressive cover read %u times / %u bytes (%s)", static_cast<unsigned>(stats.reads),
+          static_cast<unsigned>(stats.bytesRead), windows ? "read windows" : "shared buffer");
+  (void)stats;  // only read by LOG_DBG, which compiles out at lower log levels
+  (void)windows;
+}
+
 // One output from the 1/8 decode resampled to its size (ProgressiveJpeg::decodeResized): when no
 // finer scale's workspace fits, or the 1/8 picture is smaller than the output and the row pipeline
 // would enlarge it into blocks. `workspace`: from the caller's region, or null for a heap block.
+// `scratch`: that region, for the read windows.
 static bool convertResized(FsFile& jpegFile, Print& sink, int targetWidth, int targetHeight, bool oneBit, bool crop,
                            const ProgressiveJpeg::ImageInfo& image, bool eightBit, const uint32_t base,
-                           uint8_t* workspace, const size_t workspaceSize) {
+                           uint8_t* workspace, const size_t workspaceSize, BuildArena* scratch) {
   // One row per write is one file call per row (see BufferedPrint); coalesce them.
   BufferedPrint bmpOut(sink);
   constexpr int MAX_IMAGE_WIDTH = 2048;
@@ -513,9 +522,17 @@ static bool convertResized(FsFile& jpegFile, Print& sink, int targetWidth, int t
   options.shouldAbort = progressiveFullShouldAbort;
   options.workspace = workspace;
   options.workspaceSize = workspaceSize;
+  // A scan each to read through, from what the region has left after the workspace; released
+  // first, as taken last. Without them the index pass reads the whole file 512 bytes at a time.
+  ProgressiveJpeg::ReadWindows windows;
+  windows.take(scratch);
+  windows.applyTo(options);
+  ProgressiveJpeg::DecodeStats stats;
+  options.stats = &stats;
   ResizedOutput out{&ctx, 0};
   const auto result = ProgressiveJpeg::decodeResized(jpegFile, options, static_cast<uint16_t>(outWidth),
                                                      static_cast<uint16_t>(outHeight), resizedBmpOutput, &out);
+  logCoverReads(stats, windows.held());
   if (result != ProgressiveJpeg::Result::Ok) {
     LOG_ERR("JPG", "Resized progressive cover: %s", ProgressiveJpeg::resultName(result));
     // As for the full conversions (keptOrFailed): rows that arrived stay, with a background rest.
@@ -882,14 +899,6 @@ static bool chooseProgressiveShift(const OutputTarget* targets, const int count,
   return true;
 }
 
-// What a progressive cover's decode read, and whether through the read windows.
-static void logCoverReads(const ProgressiveJpeg::DecodeStats& stats, const bool windows) {
-  LOG_DBG("JPG", "Progressive cover read %u times / %u bytes (%s)", static_cast<unsigned>(stats.reads),
-          static_cast<unsigned>(stats.bytesRead), windows ? "read windows" : "shared buffer");
-  (void)stats;  // only read by LOG_DBG, which compiles out at lower log levels
-  (void)windows;
-}
-
 // Full progressive decode into the BMP pipeline. Returns false without writing anything when
 // chooseProgressiveShift() leaves the cover to convertResized().
 static bool convertFromProgressive(FsFile& jpegFile, const OutputTarget* targets, const int count,
@@ -1066,15 +1075,15 @@ static bool jpegFileToBmpStreamsInternal(FsFile& jpegFile, const OutputTarget* t
         convertFromProgressive(jpegFile, targets, count, full, oneBit, crop, eightBit, &attempted, scratch, base);
     if (attempted) return ok;
     // The last resort: the 1/8 decode resized to each output, one decode per output -- a 1/8
-    // decode is the least work a progressive file takes. Its workspace from the region, when it
-    // has room, as the full decode's would be.
+    // decode is the least work a progressive file takes. Its workspace and read windows from the
+    // region, when it has room, as the full decode's would be.
     for (int i = 0; i < count; ++i) {
       jpegFile.seek(base);
       ArenaBlockScope workspaceScope;
       const size_t workspaceBytes = ProgressiveJpeg::workspaceBytes(full, 3);
       uint8_t* workspace = workspaceScope.take(scratch, workspaceBytes);
       if (!convertResized(jpegFile, *targets[i].out, targets[i].targetWidth, targets[i].targetHeight, oneBit, crop,
-                          full, eightBit, base, workspace, workspace != nullptr ? workspaceBytes : 0)) {
+                          full, eightBit, base, workspace, workspace != nullptr ? workspaceBytes : 0, scratch)) {
         return false;
       }
     }

@@ -1154,6 +1154,26 @@ TEST(JpegToBmpConverter, AnEnlargedEighthIsResizedAsWhenNothingFits) {
   EXPECT_EQ(onlyTheEighth, nothing);
 }
 
+// A cover left to the 1/8 decode resized reads through the decoder's windows from the region too,
+// as a finer decode does (AProgressiveCoverReadsThroughWindowsFromItsRegion): through the shared
+// 512-byte buffer the index pass reads the whole file in 512-byte pieces, and every DC scan re-reads
+// its data in every band -- once for each output.
+TEST(JpegToBmpConverter, AResizedCoverReadsThroughWindowsFromItsRegion) {
+  FreeHeapScope squeezed(8 * 1024);  // below the row pipeline's 16 KB: no scale fits, the 1/8 resize
+  const CoverReads heap = convertCover("prog_full_420.jpg", nullptr, false);
+  BuildArena arena(64 * 1024);
+  ASSERT_TRUE(arena.valid());
+  const CoverReads lent = convertCover("prog_full_420.jpg", &arena, false);
+  EXPECT_EQ(arena.used(), 0u);
+  EXPECT_GE(arena.highWater(), ProgressiveJpeg::scanWindowBytes()) << "the windows came out of the region";
+  ASSERT_FALSE(heap.large.empty());
+  EXPECT_EQ(lent.large, heap.large);
+  EXPECT_EQ(lent.small, heap.small);
+  std::printf("[ thumbs   ] resized: %zu card calls / %zu bytes without a region, %zu / %zu lent\n", heap.calls,
+              heap.bytes, lent.calls, lent.bytes);
+  EXPECT_LE(lent.calls * 2, heap.calls);
+}
+
 // ...and the sliced conversion leaves such a cover to the one-shot one, which resizes it.
 TEST(JpegThumbSession, LeavesAnEnlargedEighthToTheOneShotConversion) {
   FsFile file;
