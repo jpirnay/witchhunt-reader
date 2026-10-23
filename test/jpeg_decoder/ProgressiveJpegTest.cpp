@@ -1029,6 +1029,51 @@ TEST(ProgressiveJpeg, ResumeRefusesAForeignCheckpoint) {
   std::remove(ckpt.c_str());
 }
 
+// The session's layout changed with the damage handling (Cursor::padBits, stopUnit, ...), so a
+// checkpoint an older firmware wrote ("PJC1") is refused by its magic -- not only when its size
+// happens to differ.
+TEST(ProgressiveJpeg, ResumeRefusesACheckpointOfTheOlderLayout) {
+  const std::string ckpt = tempPath("older.ckpt");
+  for (const int shift : {1, 3}) {  // a full session and a DC-only one
+    SCOPED_TRACE("at 1/" + std::to_string(1 << shift));
+    ProgressiveJpeg::DecodeOptions options;
+    options.scaleShift = static_cast<uint8_t>(shift);
+    {
+      FsFile file;
+      ASSERT_TRUE(file.openForRead(fixture("prog_full_420.jpg")));
+      Capture capture;
+      ProgressiveJpeg::Decoder d;
+      ASSERT_EQ(d.begin(file, options, Capture::accept, &capture), ProgressiveJpeg::Result::Ok);
+      ASSERT_EQ(d.step(1), ProgressiveJpeg::Result::Pending);
+      FsFile out;
+      ASSERT_TRUE(out.openForWrite(ckpt));
+      ASSERT_TRUE(d.writeCheckpoint(out));
+      out.close();
+      file.close();
+    }
+    const auto resumeWithMagic = [&](const char* magic) {
+      std::vector<uint8_t> bytes = readBytes(ckpt);
+      EXPECT_GT(bytes.size(), 4u);
+      std::copy(magic, magic + 4, bytes.begin());
+      const std::string patched = writeTemp("older_patched.ckpt", bytes);
+      FsFile file;
+      EXPECT_TRUE(file.openForRead(fixture("prog_full_420.jpg")));
+      FsFile in;
+      EXPECT_TRUE(in.openForRead(patched));
+      ProgressiveJpeg::Decoder d;
+      Capture c;
+      const auto r = d.resume(file, options, Capture::accept, &c, in);
+      in.close();
+      file.close();
+      std::remove(patched.c_str());
+      return r;
+    };
+    EXPECT_EQ(resumeWithMagic("PJC2"), ProgressiveJpeg::Result::Ok) << "control: this firmware's own";
+    EXPECT_EQ(resumeWithMagic("PJC1"), ProgressiveJpeg::Result::InvalidData);
+  }
+  std::remove(ckpt.c_str());
+}
+
 // Given read windows (DecodeOptions::readWindows, scanWindowBytes()), the decode reads each scan
 // through a window of its own. With one buffer they all share, every scan re-read its 512 bytes in every band: a
 // 106 KB cover took 1275 reads and 650 KB. The rows must not change, and a checkpoint taken with or

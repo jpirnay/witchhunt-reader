@@ -1351,7 +1351,9 @@ Result stepSession(Session<C>& ss, const DecodeOptions& options, const uint16_t 
   return result;
 }
 
-constexpr uint32_t CHECKPOINT_MAGIC = 0x31434A50;  // "PJC1"
+// "PJC2": the session layout of the damage handling (Cursor::padBits, stopUnit, State::completed).
+// A layout change bumps it; sessionBytes alone may not notice one.
+constexpr uint32_t CHECKPOINT_MAGIC = 0x32434A50;
 struct CheckpointHeader {
   uint32_t magic;
   uint32_t sessionBytes;   // sizeof(Session): another firmware's layout, or another kind, is refused, not misread
