@@ -209,3 +209,34 @@ TEST(RubyTextBlock, AnAnnotatedLineIsNotDrawnUnscaled) {
   EXPECT_FALSE(rubyLine({{0, 2, 0, 20, Kind::Ruby, 0, "かんじ"}})->drawsUnscaled());
   EXPECT_TRUE(rubyLine({})->drawsUnscaled());
 }
+
+TEST(RubyTextBlock, RubyIsPlacedByTheRawPrefixRoundedOnce) {
+  // Block multiplier 0.3: the ruby draws at 0.15, 10 px glyphs advance 1.5 px. Rounding each character gave 2 px a
+  // character (a 6 px ruby, the third character at 11); layout measures the whole ruby once: 4.5 -> 5 px, and the
+  // characters stand at the rounded prefixes 0, 2, 3.
+  const auto line = rubyLine({{0, 2, 0, 20, Kind::Ruby, 0, "abc"}}, {"漢", "字"}, 0.3f);
+  GfxRenderer renderer;
+  line->render(renderer, kFontId, 0, 100);
+  std::vector<int> xs;
+  for (const auto& call : renderer.drawCalls)
+    if (call.text.size() == 1) xs.push_back(call.x);
+  ASSERT_EQ(xs.size(), 3u);
+  EXPECT_EQ(xs[0], 7);  // (20 - 5) / 2
+  EXPECT_EQ(xs[1], 9);
+  EXPECT_EQ(xs[2], 10);
+}
+
+TEST(RubyTextBlock, TheBandRoundsUpForAnOddAscender) {
+  // Ascender 16 at 1.0625 is 17: a band of 9, the ruby's own ascender round(17 * 0.5) = 9.
+  GfxRenderer renderer;
+  EXPECT_EQ(TextBlock::annotationBandFor(renderer, kFontId, 1.0625f, 100), 9);
+  EXPECT_EQ(TextBlock::annotationBandFor(renderer, kFontId, 1.0f, 100), 8);
+}
+
+TEST(RubyTextBlock, TheRangeConstructorRefusesBadAnnotations) {
+  EXPECT_FALSE(rubyLine({{0, 0, 0, 20, Kind::Ruby, 0, "かんじ"}})->valid());  // no words
+  EXPECT_FALSE(rubyLine({{1, 2, 0, 20, Kind::Ruby, 0, "かんじ"}})->valid());  // past the line
+  const std::string tooLong(256, 'a');
+  EXPECT_FALSE(rubyLine({{0, 2, 0, 20, Kind::Ruby, 0, tooLong}})->valid());
+  EXPECT_TRUE(rubyLine({{0, 2, 0, 20, Kind::Ruby, 0, std::string(255, 'a')}})->valid());
+}

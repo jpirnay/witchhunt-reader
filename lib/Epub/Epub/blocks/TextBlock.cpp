@@ -14,7 +14,7 @@
 
 bool TextBlock::guideDotsEnabled = false;
 
-// 32-bit layout: vptr 4, RenderStyle 12, four scalars and a pad byte 8, arena 4, arenaOwned_ and annotationBytes_ 4,
+// 32-bit layout: vptr 4, RenderStyle 12, five scalars and a pad byte 8, arena 4, arenaOwned_ and annotationBytes_ 4,
 // five views 20.
 static_assert(sizeof(void*) != 4 || sizeof(TextBlock) == 52, "a resident page holds ~28 TextBlocks");
 
@@ -76,7 +76,7 @@ bool TextBlock::allocArena(const size_t size, BuildArena* scratch) {
 
 void TextBlock::bindArenaPointers() {
   const uint8_t* base = arena;
-  const ArenaOffsets o = arenaOffsets(numWords, sizesPresent, wordFontCount);
+  const ArenaOffsets o = arenaOffsets(numWords, sizesPresent, wordFontCount, textBytes);
   textOffArr = reinterpret_cast<const uint16_t*>(base + o.textOff);
   xposArr = reinterpret_cast<const int16_t*>(base + o.xpos);
   stylesArr = base + o.styles;
@@ -138,7 +138,7 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
   // Pass 2: fill through mutable pointers derived from the same layout offsets
   // that bindArenaPointers() uses for the const views (bound below for reads).
   uint8_t* base = arena;
-  const ArenaOffsets o = arenaOffsets(numWords, sizesPresent, 0);
+  const ArenaOffsets o = arenaOffsets(numWords, sizesPresent, 0, textBytes);
   auto* textOff = reinterpret_cast<uint16_t*>(base);
   auto* xpos = reinterpret_cast<int16_t*>(base + o.xpos);
   uint8_t* styles = base + o.styles;
@@ -398,7 +398,7 @@ int TextBlock::annotationBandFor(const GfxRenderer& renderer, const int effFontI
   const int ascender = (maxSizePct == 100 && blockScale == 1.0f)
                            ? renderer.getFontAscenderSize(effFontId)
                            : renderer.getFontAscenderSizeScaled(effFontId, blockScale * maxSizePct / 100.0f);
-  return ascender / 2;
+  return (ascender + 1) / 2;  // the ruby's own ascender is round(ascender * 0.5)
 }
 
 int TextBlock::annotationBand(const GfxRenderer& renderer, const int fontId) const {
@@ -486,11 +486,11 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   if (sizesPresent) {
     lineAscender = renderer.getFontAscenderSizeScaled(effFontId, blockScale * (maxSizePct() / 100.0f));
   }
+  // The base sits below the band the line's ruby is drawn in.
+  const int baseY = y + (hasAnnotations() ? annotationBandFor(renderer, effFontId, blockScale, maxSizePct()) : 0);
   // Guide dots (see setGuideDots): one dot centered in each inter-word gap.
   // Sized and vertically anchored off the block's base metrics, not per-word
   // scales, so the dot row stays level across inline size changes.
-  // The base sits below the band the line's ruby is drawn in.
-  const int baseY = y + (hasAnnotations() ? annotationBandFor(renderer, effFontId, blockScale, maxSizePct()) : 0);
   const bool guideDots = guideDotsEnabled && !scanning;
   const int dotSize = std::max(2, blockAscender / 8);
   int prevWordEndX = 0;  // right edge of the previous word; valid once i > 0
@@ -604,25 +604,26 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     };
     char buf[5];
     int chars = 0;
-    int sum = 0;
+    int rawTotal = 0;    // the ruby's advance unscaled: rounded once, as layout measures the whole ruby
     bool spread = true;  // 1:2:1 only when every codepoint of the ruby and of its base is unspaced CJK
     for (size_t pos = 0; pos < a.text.size(); chars++) {
       const bool cjk = utf8IsUnspacedCjk(nextChar(pos, buf));
       spread = spread && cjk;
-      sum += static_cast<int>(renderer.getTextAdvanceX(font, buf, EpdFontFamily::REGULAR) * rubyScale + 0.5f);
+      rawTotal += renderer.getTextAdvanceX(font, buf, EpdFontFamily::REGULAR);
     }
     for (uint16_t w = a.firstWord; spread && w < a.firstWord + a.wordCount; w++) {
       const unsigned char* p = reinterpret_cast<const unsigned char*>(wordText(w));
       while (spread && *p != 0) spread = utf8IsUnspacedCjk(utf8NextCodepoint(&p));
     }
-    const int slack = a.width - sum;
-    int advanced = 0;
+    const int slack = a.width - static_cast<int>(rawTotal * rubyScale + 0.5f);
+    int rawBefore = 0;
     size_t pos = 0;
     for (int c = 0; c < chars; c++) {
       nextChar(pos, buf);
       const int offset = spread ? slack * (2 * c + 1) / (2 * chars) : slack / 2;
+      const int advanced = static_cast<int>(rawBefore * rubyScale + 0.5f);
       renderer.drawTextScaled(font, x + a.x + offset + advanced, rubyY, buf, true, EpdFontFamily::REGULAR, rubyScale);
-      advanced += static_cast<int>(renderer.getTextAdvanceX(font, buf, EpdFontFamily::REGULAR) * rubyScale + 0.5f);
+      rawBefore += renderer.getTextAdvanceX(font, buf, EpdFontFamily::REGULAR);
     }
   }
 }

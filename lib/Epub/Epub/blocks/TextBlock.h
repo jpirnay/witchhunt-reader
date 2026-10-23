@@ -37,7 +37,7 @@ class BuildArena;  // lib/Memory -- optional page-scoped storage for the arena b
 //   uint8_t  sizes[wordCount]     present only when sizesPresent
 //   uint8_t  fontSlots[wordCount] present with fonts: 0 the block's font, n fonts[n - 1]
 //   char     text[textBytes]      all words back to back, each NUL-terminated
-//   annotation region             present only when annotationBytes_ != 0, read with memcpy (it starts at an odd
+//   annotation region             present only when annotationBytes_ != 0, read with memcpy (it may start at an odd
 //   offset):
 //                                 u16 count, then count records of 10 B (u16 firstWord, u16 wordCount, s16 x, u16
 //                                 width, u8 kind, u8 len), then the ruby texts back to back, len bytes each, no NUL.
@@ -121,8 +121,8 @@ class TextBlock final : public Block {
   struct Annotation {
     uint16_t firstWord = 0;  // the line's word index
     uint16_t wordCount = 0;
-    int16_t x = 0;  // the ruby box, in wordXpos's space
-    uint16_t width = 0;
+    int16_t x = 0;       // the ruby box, in wordXpos's space
+    uint16_t width = 0;  // at least the ruby's advance at half the base size
     AnnotationKind kind = AnnotationKind::Ruby;
     uint8_t mark = 0;       // an emphasis run's mark; 0 for ruby
     std::string_view text;  // the ruby, at most kMaxAnnotationText bytes; empty for emphasis
@@ -160,7 +160,7 @@ class TextBlock final : public Block {
   struct ArenaOffsets {
     size_t textOff, xpos, styles, sizes, fontSlots, text, annotations;
   };
-  static ArenaOffsets arenaOffsets(uint16_t wordCount, bool hasSizes, uint8_t fontCount, uint16_t textBytes = 0);
+  static ArenaOffsets arenaOffsets(uint16_t wordCount, bool hasSizes, uint8_t fontCount, uint16_t textBytes);
   // The word fonts and the slots, addressed from the arena rather than held: a pointer each on every line of a
   // resident page would cost more than the rare line that has them saves. Only when wordFontCount != 0.
   const WordFont* wordFontsArr() const { return reinterpret_cast<const WordFont*>(arena); }
