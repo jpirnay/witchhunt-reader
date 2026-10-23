@@ -36,6 +36,9 @@ enum class Result : uint8_t {
   Aborted,
   Stopped,  // the band callback asked to stop
   Pending,  // Decoder::step(): more work remains
+  // Every row was emitted, but the picture lacks part of what the file should hold: a scan's data
+  // was corrupt, or the stream ended early. Not a picture to keep as the image's for good.
+  Degraded,
 };
 
 struct ImageInfo {
@@ -96,10 +99,12 @@ struct DecodeOptions {
   uint32_t (*clock)() = nullptr;
 };
 
-// Every failure is reported before the first band is emitted unless the entropy data itself is
-// corrupt, so a caller can fall back to another decoder on Unsupported / OutOfMemory. A stream
-// that ends early is no failure: what arrived is decoded, and the rest of the scan it ends in
-// keeps what the scans before it gave, as libjpeg does.
+// Every failure is reported before the first band is emitted, so a caller can fall back to
+// another decoder on Unsupported / OutOfMemory -- except an I/O error, or the band callback's
+// stop. Damaged entropy data is no failure: a scan whose data is corrupt, misses a restart marker
+// or ends early stops there, the blocks after keep what the other scans gave (a DC scan's: mid
+// grey), and the decode goes on to every row and reports Degraded. So does a stream that ends
+// before its EOI.
 Result decode(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user);
 
 struct Session;
@@ -122,9 +127,10 @@ class Decoder {
   // results decode() reports before its first band).
   Result begin(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user);
   // Does up to `units` of work: while indexing, a unit is 4 KB of the file; after that, one band.
-  // The index pass and the bands never share a step. Pending: call again. Ok: every band was
-  // emitted. Aborted (the abort hook fired): stopped between two units, and the session can be
-  // stepped on or checkpointed. Anything else is final; a finished decode reports its outcome again.
+  // The index pass and the bands never share a step. Pending: call again. Ok / Degraded: every
+  // band was emitted (see decode()). Aborted (the abort hook fired): stopped between two units, and
+  // the session can be stepped on or checkpointed -- where a damaged scan stopped is part of it.
+  // Anything else is final; a finished decode reports its outcome again.
   Result step(uint16_t units);
 
   // A paused decode as bytes, for a caller that must give its workspace back before it can finish

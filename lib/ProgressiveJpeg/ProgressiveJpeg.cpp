@@ -201,15 +201,17 @@ struct Cursor {
   uint32_t pos = 0;   // next entropy-coded byte
   uint32_t bits = 0;  // left-aligned bit buffer
   uint8_t bitCount = 0;
-  uint8_t padBits = 0;     // how many of the buffer's last bits are padding past a marker or EOF
-  bool markerHit = false;  // reached a marker (or EOF): further bits read as zero, as libjpeg does
+  uint8_t padBits = 0;      // how many of the buffer's last bits are padding past a marker or EOF
+  bool markerHit = false;   // reached a marker (or EOF): further bits read as zero, as libjpeg does
+  uint8_t nextRestart = 0;  // n of the RSTn marker the next restart must find
   uint16_t unitsToRestart = 0;
   uint32_t eobrun = 0;
   // An 8-bit frame's DC values fit in 12 bits; 16 keep the cursor, and every session's 32 of them,
   // at their size.
   int16_t predictor[MAX_COMPONENTS] = {};
   // The scan contributes to its units (MCUs of an interleaved scan, luma blocks otherwise, in scan
-  // order) before this one only: its data ran out there. The rest keep what earlier scans gave.
+  // order) before this one only: its data is corrupt or ran out there, or that of a scan whose
+  // coefficients it refines is (see finishUnit). The rest keep what earlier scans gave.
   uint32_t stopUnit = UINT32_MAX;
 };
 
@@ -236,6 +238,7 @@ struct State {
   uint8_t scanCount = 0;
   uint16_t restartInterval = 0;
   bool frameSeen = false;
+  bool endedEarly = false;  // the file ends before its EOI marker: scans after the end are missing
 
   // Scaled inverse DCT basis for the chosen output size, x 1024 (see idctBlock).
   int16_t basis[8][8] = {};
@@ -543,25 +546,38 @@ Result indexStep(State& st, IndexCursor& ic, const DecodeOptions& options, const
         }
       }
       ic.inEntropy = false;
-      if (src.at(p) < 0) break;
+      if (src.at(p) < 0) {
+        st.endedEarly = true;
+        break;
+      }
       continue;
     }
 
+    // The file may end anywhere before its EOI: decode what was indexed up to there.
     int value = src.at(p);
-    if (value < 0) break;  // truncated after the last complete segment: decode what we have
+    if (value < 0) {
+      st.endedEarly = true;
+      break;
+    }
     if (value != 0xFF) return Result::InvalidData;
     int marker = src.at(p + 1);
     while (marker == 0xFF) marker = src.at(++p + 1);
-    if (marker < 0) break;
+    if (marker < 0) {
+      st.endedEarly = true;
+      break;
+    }
     p += 2;
     if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) continue;
     if (marker == 0xD9) break;
 
     const int hi = src.at(p);
     const int lo = src.at(p + 1);
-    if (hi < 0 || lo < 0) return inputFailure(src);
     const uint32_t length = static_cast<uint32_t>((hi << 8) | lo);
-    if (length < 2) return Result::InvalidData;
+    if (hi >= 0 && lo >= 0 && length < 2) return Result::InvalidData;
+    if (hi < 0 || lo < 0 || src.at(p + length - 1) < 0) {  // the segment is cut short
+      st.endedEarly = true;
+      break;
+    }
     const uint32_t payload = p + 2;
     const uint32_t end = p + length;
     Result result = Result::Ok;
@@ -679,7 +695,10 @@ struct BitReader {
     int marker = b < 0 ? -1 : src.at(c.pos + 1);
     while (marker == 0xFF) marker = src.at(++c.pos + 1);
     if (marker < 0) overrun = true;  // the file ends where the next interval should start
-    if (marker < 0xD0 || marker > 0xD7) return false;
+    // Another RSTn than the next one means this interval's marker is missing: the data that follows
+    // belongs to a later interval, and decoding it here would misplace every block after it.
+    if (marker != 0xD0 + c.nextRestart) return false;
+    c.nextRestart = static_cast<uint8_t>((c.nextRestart + 1) & 7);
     c.pos += 2;
     c.eobrun = 0;
     memset(c.predictor, 0, sizeof(c.predictor));
@@ -805,15 +824,35 @@ bool decodeAcRefine(const State& st, BitReader& in, const Scan& scan, const Bloc
   return true;
 }
 
-// After one unit of a scan: where its data ran out, the scan stops (Cursor::stopUnit). A unit that
-// ran past the end of the data is kept, as libjpeg keeps it, and the scan stops after it -- or at it,
-// when the padding did not even decode. False: the unit is corrupt with data still to come.
-bool finishUnit(BitReader& in, const bool ok, const uint32_t unit) {
-  if (in.overrun) {
-    in.c.stopUnit = ok ? unit + 1 : unit;
-    return true;
+// Bits ss..se: a spectral band of zigzag indices.
+uint64_t spectralBand(const uint8_t ss, const uint8_t se) {
+  const uint64_t upTo = se >= 63 ? ~0ULL : (1ULL << (se + 1)) - 1;
+  return upTo & ~((1ULL << ss) - 1);
+}
+
+// After one unit of scan `s`: where its data is unusable, the scan stops (Cursor::stopUnit) and
+// the decode goes on without it -- the picture degrades instead of failing. A unit that could not
+// be decoded stops it there (it keeps what it read before); one that only ran past the end of the
+// data is kept, as libjpeg keeps it, and the scan stops after it.
+//
+// An AC refinement reads a correction bit for every coefficient its predecessors made non-zero, so
+// it can only follow them: once an AC scan stops at a unit, every later refinement of any of its
+// coefficients -- and in turn of theirs -- stops at that unit too, or it would read its bits against
+// the wrong coefficients and paint noise. A DC refinement reads one bit a block whatever came
+// before, and goes on.
+void finishUnit(State& st, const uint8_t s, BitReader& in, const bool ok, const uint32_t unit) {
+  if (ok && !in.overrun) return;
+  in.c.stopUnit = ok ? unit + 1 : unit;
+  const Scan& stopped = st.scans[s];
+  if (stopped.ss == 0) return;
+  uint64_t lost = spectralBand(stopped.ss, stopped.se);
+  for (uint8_t later = static_cast<uint8_t>(s + 1); later < st.scanCount; ++later) {
+    const Scan& scan = st.scans[later];
+    const uint64_t band = spectralBand(scan.ss, scan.se);
+    if (scan.ss == 0 || scan.ah == 0 || (band & lost) == 0) continue;
+    lost |= band;
+    st.cursors[later].stopUnit = std::min(st.cursors[later].stopUnit, unit);
   }
-  return ok;
 }
 
 bool beginUnit(BitReader& in, const Scan& scan) {
@@ -894,6 +933,15 @@ void idctBlock(const State& st, const int16_t* coef, const uint16_t* quant, cons
 
 // ---- band loop --------------------------------------------------------------------------
 
+// Whether the picture lacks part of the file: a scan stopped short, or the file ended early.
+bool degraded(const State& st) {
+  if (st.endedEarly) return true;
+  for (uint8_t s = 0; s < st.scanCount; ++s) {
+    if (st.cursors[s].stopUnit != UINT32_MAX) return true;
+  }
+  return false;
+}
+
 // Every luma scan's cursor at the start of its entropy data, before the first band.
 void initCursors(State& st) {
   for (uint8_t s = 0; s < st.scanCount; ++s) {
@@ -950,7 +998,7 @@ Result decodeBand(State& st, const Geometry& g, uint8_t* workspace, const Layout
             }
           }
         }
-        if (!finishUnit(in, ok, firstUnit + mx)) return Result::InvalidData;
+        finishUnit(st, s, in, ok, firstUnit + mx);
       }
       continue;
     }
@@ -972,7 +1020,7 @@ Result decodeBand(State& st, const Geometry& g, uint8_t* workspace, const Layout
             ok = scan.ah == 0 ? decodeAcFirst(st, in, scan, block) : decodeAcRefine(st, in, scan, block);
           }
         }
-        if (!finishUnit(in, ok, rowUnit + col)) return Result::InvalidData;
+        finishUnit(st, s, in, ok, rowUnit + col);
       }
     }
   }
@@ -1196,7 +1244,7 @@ Result Decoder::step(const uint16_t units) {
     }
     if (result == Result::Pending && ss.nextBand >= ss.g.bandCount) {
       ss.phase = Session::Phase::Done;
-      result = Result::Ok;
+      result = degraded(ss.st) ? Result::Degraded : Result::Ok;
     }
     if (options_.stats) options_.stats->bandsMs += (options_.clock ? options_.clock() : 0) - t0;
   }
@@ -1325,6 +1373,8 @@ const char* resultName(const Result result) {
       return "stopped";
     case Result::Pending:
       return "pending";
+    case Result::Degraded:
+      return "degraded";
   }
   return "unknown";
 }

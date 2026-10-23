@@ -212,7 +212,7 @@ TEST_P(ProgressiveJpegTruncated, DecodesWhatArrivedLikeLibjpeg) {
 
   Capture capture;
   const auto result = decode("prog_420_cut.jpg", shift, capture);
-  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Degraded) << ProgressiveJpeg::resultName(result);
   EXPECT_TRUE(capture.orderOk);
   ASSERT_EQ(capture.image.w, expected.w);
   ASSERT_EQ(capture.image.h, expected.h);
@@ -266,7 +266,9 @@ std::string writeTemp(const std::string& name, const std::vector<uint8_t>& bytes
 // One scan of a JPEG: its header fields and where its entropy-coded data lies.
 struct ScanSpan {
   int components = 0;
+  int firstComponent = 0;  // the first component's id
   int ss = 0, se = 0, ah = 0, al = 0;
+  size_t sosStart = 0;  // its SOS marker
   size_t dataStart = 0;
   size_t dataEnd = 0;  // the marker that ends it
 };
@@ -290,11 +292,13 @@ std::vector<ScanSpan> scansOf(const std::vector<uint8_t>& d) {
     if (marker == 0xDA) {
       ScanSpan s;
       s.components = d[i + 4];
+      s.firstComponent = d[i + 5];
       const size_t o = i + 5 + 2 * s.components;
       s.ss = d[o];
       s.se = d[o + 1];
       s.ah = d[o + 2] >> 4;
       s.al = d[o + 2] & 15;
+      s.sosStart = i;
       s.dataStart = i + 2 + length;
       scans.push_back(s);
     }
@@ -311,6 +315,256 @@ size_t restartMarker(const std::vector<uint8_t>& d, const ScanSpan& scan, const 
     if (d[i] == 0xFF && d[i + 1] >= 0xD0 && d[i + 1] <= 0xD7 && seen++ == k) return i;
   }
   return 0;
+}
+
+ProgressiveJpeg::Result decodePath(const std::string& path, const int shift, Capture& capture) {
+  FsFile file;
+  EXPECT_TRUE(file.openForRead(path));
+  ProgressiveJpeg::DecodeOptions options;
+  options.scaleShift = static_cast<uint8_t>(shift);
+  const auto result = ProgressiveJpeg::decode(file, options, Capture::accept, &capture);
+  file.close();
+  return result;
+}
+
+// Damage in prog_full_444_rst.jpg (150 x 90, 4:4:4, a restart every 3 units): written just after
+// restart marker 40 of a scan, it starts at unit 123 -- block 9 of block row 6 in the 19 x 12 grid
+// an interleaved DC scan and a luma scan share.
+constexpr int kRstLumaCols = 19;
+constexpr int kRstMarker = 40;
+constexpr int kRstDamagedUnit = (kRstMarker + 1) * 3;
+
+// The first luma scan of prog_full_444_rst.jpg with these fields (the frame's luma id is 1).
+const ScanSpan* lumaScan(const std::vector<ScanSpan>& scans, const int components, const int ss, const int ah) {
+  for (const ScanSpan& s : scans) {
+    if (s.firstComponent == 1 && s.components == components && s.ss == ss && s.ah == ah) return &s;
+  }
+  return nullptr;
+}
+
+// No code of a Huffman table libjpeg writes is all ones: 48 one bits are undecodable right away.
+const std::vector<uint8_t> kBadCode = {0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00};
+
+// prog_full_444_rst.jpg with `bytes` over the start of the interval after restart marker 40 of
+// `scan` -- or, with `atMarker`, over the marker itself.
+std::string damagedRstCopy(const std::string& name, const int components, const int ss, const int ah,
+                           const std::vector<uint8_t>& bytes, const bool atMarker = false) {
+  std::vector<uint8_t> data = readBytes(fixture("prog_full_444_rst.jpg"));
+  const std::vector<ScanSpan> scans = scansOf(data);
+  const ScanSpan* scan = lumaScan(scans, components, ss, ah);
+  EXPECT_NE(scan, nullptr);
+  if (!scan) return {};
+  const size_t marker = restartMarker(data, *scan, kRstMarker);
+  EXPECT_GT(marker, 0u);
+  const size_t at = atMarker ? marker : marker + 2;
+  std::copy(bytes.begin(), bytes.end(), data.begin() + static_cast<std::ptrdiff_t>(at));
+  return writeTemp(name, data);
+}
+
+// The fixture with whole scans taken out (their SOS segments and data): still a valid progressive
+// JPEG, which never had them. `drop` holds scan indices into scansOf().
+std::string withoutScans(const std::string& name, const std::vector<uint8_t>& data, const std::vector<int>& drop) {
+  const std::vector<ScanSpan> scans = scansOf(data);
+  std::vector<uint8_t> out;
+  size_t from = 0;
+  for (const int s : drop) {
+    out.insert(out.end(), data.begin() + from, data.begin() + scans[s].sosStart);
+    from = scans[s].dataEnd;
+  }
+  out.insert(out.end(), data.begin() + from, data.end());
+  return writeTemp(name, out);
+}
+
+int scanIndex(const std::vector<ScanSpan>& scans, const ScanSpan* scan) {
+  return static_cast<int>(scan - scans.data());
+}
+
+// Each n x n block (one unit; `cols` a row) of `got` before `unit` must be `before`'s, and from
+// `unit` on `after`'s.
+void expectBlocks(const Gray& got, const Gray& before, const Gray& after, const int n, const int cols, const int unit) {
+  ASSERT_EQ(got.w, before.w);
+  ASSERT_EQ(got.h, before.h);
+  ASSERT_EQ(got.w, after.w);
+  ASSERT_EQ(got.h, after.h);
+  for (int y = 0; y < got.h; ++y) {
+    for (int x = 0; x < got.w; ++x) {
+      const int u = (y / n) * cols + x / n;
+      const Gray& want = u < unit ? before : after;
+      ASSERT_EQ(got.at(x, y), want.at(x, y))
+          << "block " << u << " pixel " << x << "," << y << (u < unit ? ": before the damage" : ": after it");
+    }
+  }
+}
+
+// A corrupt scan is decoded up to the damage; from there on the picture is the one the file would
+// give without that scan -- and without every later refinement of its coefficients, which would
+// otherwise read its bits against coefficients that are not what the encoder had, and paint noise.
+// The other scans are untouched, and the decode says it is degraded.
+struct DamageCase {
+  const char* name;
+  int components, ss, ah;              // the damaged scan (lumaScan)
+  std::vector<uint8_t> bytes;          // written after its restart marker 40,
+  bool atMarker;                       // or over that marker
+  std::vector<std::vector<int>> gone;  // the scans the picture lacks from the damage on, as lumaScan keys
+  std::vector<int> shifts;
+};
+
+void PrintTo(const DamageCase& c, std::ostream* os) { *os << c.name; }
+
+class ProgressiveJpegDamagedScan : public testing::TestWithParam<DamageCase> {};
+
+TEST_P(ProgressiveJpegDamagedScan, DecodesUpToTheDamageAndWithoutItsScansAfter) {
+  const DamageCase& c = GetParam();
+  const std::vector<uint8_t> whole = readBytes(fixture("prog_full_444_rst.jpg"));
+  const std::vector<ScanSpan> scans = scansOf(whole);
+  std::vector<int> drop;
+  for (const auto& key : c.gone) {
+    const ScanSpan* s = lumaScan(scans, key[0], key[1], key[2]);
+    ASSERT_NE(s, nullptr);
+    drop.push_back(scanIndex(scans, s));
+  }
+  std::sort(drop.begin(), drop.end());
+  const std::string damaged =
+      damagedRstCopy(std::string(c.name) + ".jpg", c.components, c.ss, c.ah, c.bytes, c.atMarker);
+  const std::string without = withoutScans(std::string(c.name) + "_without.jpg", whole, drop);
+  for (const int shift : c.shifts) {
+    SCOPED_TRACE(std::string(c.name) + " at 1/" + std::to_string(1 << shift));
+    Capture clean;
+    ASSERT_EQ(decode("prog_full_444_rst.jpg", shift, clean), ProgressiveJpeg::Result::Ok);
+    Capture lacking;
+    ASSERT_EQ(decodePath(without, shift, lacking), ProgressiveJpeg::Result::Ok);
+    ASSERT_FALSE(lacking.image.px == clean.image.px) << "the scans must matter, or this test proves nothing";
+    Capture got;
+    const auto result = decodePath(damaged, shift, got);
+    EXPECT_EQ(result, ProgressiveJpeg::Result::Degraded) << ProgressiveJpeg::resultName(result);
+    expectBlocks(got.image, clean.image, lacking.image, 8 >> shift, kRstLumaCols, kRstDamagedUnit);
+  }
+  std::remove(damaged.c_str());
+  std::remove(without.c_str());
+}
+
+INSTANTIATE_TEST_SUITE_P(Scans, ProgressiveJpegDamagedScan,
+                         testing::Values(
+                             // The first AC 1-5 pass: it and both 1-63 refinements go, the 6-63 first pass stays.
+                             DamageCase{
+                                 "bad_ac_first", 1, 1, 0, kBadCode, false, {{1, 1, 0}, {1, 1, 2}, {1, 1, 1}}, {0, 1}},
+                             // The first 1-63 refinement: it and the last one go.
+                             DamageCase{"bad_ac_refine", 1, 1, 2, kBadCode, false, {{1, 1, 2}, {1, 1, 1}}, {0, 1}},
+                             // The DC scan: no DC level from there on -- mid grey under the AC detail, as libjpeg
+                             // leaves the blocks it has no data for -- but the DC refinement still adds its bit.
+                             DamageCase{"bad_dc", 3, 0, 0, kBadCode, false, {{3, 0, 0}}, {0, 1, 3}},
+                             // A restart marker that is not there (FF 00 is a data byte): the last refinement cannot
+                             // find where its next interval starts, and stops there.
+                             DamageCase{"no_rst", 1, 1, 1, {0xFF, 0x00}, true, {{1, 1, 1}}, {0, 1}}),
+                         [](const testing::TestParamInfo<DamageCase>& info) { return std::string(info.param.name); });
+
+// The same at 1/8, where the AC scans are not decoded: a corrupt one costs nothing. The DC scan's
+// blocks after the damage are mid grey plus the refinement bit.
+TEST(ProgressiveJpegDamageAtAnEighth, ACorruptAcScanIsNotEvenRead) {
+  const std::string path = damagedRstCopy("bad_ac_eighth.jpg", 1, 1, 0, kBadCode);
+  Capture clean;
+  ASSERT_EQ(decode("prog_full_444_rst.jpg", 3, clean), ProgressiveJpeg::Result::Ok);
+  Capture got;
+  EXPECT_EQ(decodePath(path, 3, got), ProgressiveJpeg::Result::Ok);
+  EXPECT_TRUE(got.image.px == clean.image.px);
+  std::remove(path.c_str());
+}
+
+TEST(ProgressiveJpegDamageAtAnEighth, ACorruptDcScanLeavesMidGreyFromThereOn) {
+  const std::string path = damagedRstCopy("bad_dc_eighth.jpg", 3, 0, 0, kBadCode);
+  Capture got;
+  EXPECT_EQ(decodePath(path, 3, got), ProgressiveJpeg::Result::Degraded);
+  ASSERT_GT(got.image.h, kRstDamagedUnit / kRstLumaCols);
+  for (int y = 0; y < got.image.h; ++y) {
+    for (int x = 0; x < got.image.w; ++x) {  // 18 pixels a row: the 19th block is cut by floor()
+      if (y * kRstLumaCols + x >= kRstDamagedUnit) EXPECT_NEAR(got.image.at(x, y), 128, 2) << x << "," << y;
+    }
+  }
+  std::remove(path.c_str());
+}
+
+// A stream that ends between two scans has no unit that ran short, but it lacks the scans after
+// the cut: degraded too.
+TEST(ProgressiveJpegDamage, AStreamCutBetweenScansIsDegraded) {
+  const std::vector<uint8_t> whole = readBytes(fixture("prog_full_420.jpg"));
+  const std::vector<ScanSpan> scans = scansOf(whole);
+  ASSERT_GE(scans.size(), 2u);
+  // Cut at the marker that ends the second-to-last scan's data (a DHT or the last SOS).
+  const size_t cut = scans[scans.size() - 2].dataEnd;
+  const std::string path = writeTemp("cut_between.jpg", std::vector<uint8_t>(whole.begin(), whole.begin() + cut));
+  Capture got;
+  EXPECT_EQ(decodePath(path, 0, got), ProgressiveJpeg::Result::Degraded);
+  EXPECT_EQ(got.image.h, 141);
+  std::remove(path.c_str());
+}
+
+// Cut inside the table segment before the last scan: the segment is incomplete, so indexing ends
+// before it, as if the stream had ended there.
+TEST(ProgressiveJpegDamage, AStreamCutInsideASegmentIsDegraded) {
+  const std::vector<uint8_t> whole = readBytes(fixture("prog_full_420.jpg"));
+  const std::vector<ScanSpan> scans = scansOf(whole);
+  ASSERT_GE(scans.size(), 2u);
+  const size_t marker = scans[scans.size() - 2].dataEnd;
+  ASSERT_EQ(whole[marker + 1], 0xC4) << "the last scan's Huffman table comes before it";
+  const std::string path =
+      writeTemp("cut_in_dht.jpg", std::vector<uint8_t>(whole.begin(), whole.begin() + marker + 12));
+  Capture got;
+  EXPECT_EQ(decodePath(path, 0, got), ProgressiveJpeg::Result::Degraded);
+  EXPECT_EQ(got.image.h, 141);
+  std::remove(path.c_str());
+}
+
+// Where a scan stopped is part of the decode's state: a checkpoint taken before or after the
+// damage resumes to the same rows, and the resumed decode still says it is degraded.
+TEST(ProgressiveJpegDamage, ACheckpointCarriesAStoppedScan) {
+  const std::string path = damagedRstCopy("bad_ac_ckpt.jpg", 1, 1, 0, kBadCode);
+  Capture oneShot;
+  ASSERT_EQ(decodePath(path, 0, oneShot), ProgressiveJpeg::Result::Degraded);
+  const std::string ckpt = tempPath("bad_ac.ckpt");
+  int stop = 1;
+  for (;; ++stop) {
+    SCOPED_TRACE("checkpoint after step " + std::to_string(stop));
+    Capture capture;
+    ProgressiveJpeg::DecodeOptions options;
+    bool finishedFirst = false;
+    {
+      FsFile file;
+      ASSERT_TRUE(file.openForRead(path));
+      ProgressiveJpeg::Decoder first;
+      ASSERT_EQ(first.begin(file, options, Capture::accept, &capture), ProgressiveJpeg::Result::Ok);
+      for (int i = 0; i < stop && !finishedFirst; ++i)
+        finishedFirst = first.step(1) != ProgressiveJpeg::Result::Pending;
+      if (!finishedFirst) {
+        FsFile out;
+        ASSERT_TRUE(out.openForWrite(ckpt));
+        ASSERT_TRUE(first.writeCheckpoint(out));
+        out.close();
+      }
+      first.end();
+      file.close();
+    }
+    if (finishedFirst) break;
+    {
+      FsFile file;
+      ASSERT_TRUE(file.openForRead(path));
+      FsFile in;
+      ASSERT_TRUE(in.openForRead(ckpt));
+      ProgressiveJpeg::Decoder second;
+      ASSERT_EQ(second.resume(file, options, Capture::accept, &capture, in), ProgressiveJpeg::Result::Ok);
+      in.close();
+      ProgressiveJpeg::Result r;
+      do {
+        r = second.step(1);
+      } while (r == ProgressiveJpeg::Result::Pending);
+      EXPECT_EQ(r, ProgressiveJpeg::Result::Degraded);
+      second.end();
+      file.close();
+    }
+    EXPECT_TRUE(capture.image.px == oneShot.image.px);
+  }
+  EXPECT_GT(stop, 10) << "the decode must have been stopped on both sides of the damage";
+  std::remove(ckpt.c_str());
+  std::remove(path.c_str());
 }
 
 // A file cut just before a restart marker of its last scan: the data ends where an interval ends.
@@ -336,7 +590,7 @@ TEST(ProgressiveJpeg, AStreamCutAtARestartMarkerKeepsWhatArrived) {
   const auto result = ProgressiveJpeg::decode(file, options, Capture::accept, &cutRows);
   file.close();
   std::remove(path.c_str());
-  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Degraded) << ProgressiveJpeg::resultName(result);
   ASSERT_EQ(cutRows.image.h, clean.image.h);
   const int lumaCols = (clean.image.w + 7) / 8;
   const int firstMissingRow = (kMarker + 1) * kInterval / lumaCols * 8;
