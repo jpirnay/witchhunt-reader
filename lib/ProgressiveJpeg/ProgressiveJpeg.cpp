@@ -54,6 +54,22 @@ bool isStartOfFrame(const uint8_t marker) {
          (marker >= 0xC9 && marker <= 0xCB) || (marker >= 0xCD && marker <= 0xCF);
 }
 
+// Bits ss..se: a spectral band of zigzag indices.
+uint64_t spectralBand(const uint8_t ss, const uint8_t se) {
+  const uint64_t upTo = se >= 63 ? ~0ULL : (1ULL << (se + 1)) - 1;
+  return upTo & ~((1ULL << ss) - 1);
+}
+
+// The coefficients (zigzag bits) a decode keeps at `n` output pixels a block side: the block's
+// top-left n x n square.
+uint64_t keptCoefficients(const uint8_t n) {
+  uint64_t kept = 0;
+  for (uint8_t k = 0; k < 64; ++k) {
+    if (ZIGZAG[k] / 8 < n && ZIGZAG[k] % 8 < n) kept |= 1ULL << k;
+  }
+  return kept;
+}
+
 // Random-access byte reader over the file. Every cursor reads through it. With the workspace's
 // minimum, all of them share one 512-byte buffer, and a cursor switch usually lands outside it:
 // a seek + read for every scan in every band, the file read ~6 times over (a 106 KB cover: 1275
@@ -263,7 +279,10 @@ struct State {
   uint8_t scanCount = 0;
   uint16_t restartInterval = 0;
   bool frameSeen = false;
-  bool endedEarly = false;  // the file ends before its EOI marker: scans after the end are missing
+  bool endedEarly = false;  // the file ends before its EOI marker: scans after the end may be missing
+  // The luma coefficients (zigzag bits) a recorded scan finishes, down to their last bit (Al == 0):
+  // a file that ends early is still whole when they hold every coefficient the decode keeps.
+  uint64_t completed = 0;
 
   // Scaled inverse DCT basis for the chosen output size, x 1024 (see idctBlock).
   int16_t basis[C::kBasis][C::kBasis] = {};
@@ -560,6 +579,7 @@ Result parseScan(State<C>& st, uint32_t p, const uint32_t end) {
   scan.restartInterval = st.restartInterval;
   scan.dataStart = end;
   st.scans[st.scanCount++] = scan;
+  if (scan.al == 0) st.completed |= spectralBand(scan.ss, scan.se);
   return Result::Ok;
 }
 
@@ -885,12 +905,6 @@ bool decodeAcRefine(const State<FullCaps>& st, BitReader& in, const Scan& scan, 
   return true;
 }
 
-// Bits ss..se: a spectral band of zigzag indices.
-uint64_t spectralBand(const uint8_t ss, const uint8_t se) {
-  const uint64_t upTo = se >= 63 ? ~0ULL : (1ULL << (se + 1)) - 1;
-  return upTo & ~((1ULL << ss) - 1);
-}
-
 // After one unit of scan `s`: where its data is unusable, the scan stops (Cursor::stopUnit) and
 // the decode goes on without it -- the picture degrades instead of failing. A unit that could not
 // be decoded stops it there (it keeps what it read before); one that only ran past the end of the
@@ -995,14 +1009,15 @@ void idctBlock(const State<FullCaps>& st, const int16_t* coef, const uint16_t* q
 
 // ---- band loop --------------------------------------------------------------------------
 
-// Whether the picture lacks part of the file: a scan stopped short, or the file ended early.
+// Whether the picture lacks part of the file: a scan stopped short, or the file ended before the
+// scans that finish every coefficient the decode keeps (`kept`, zigzag bits). A file that lacks only
+// its EOI marker is whole.
 template <class C>
-bool degraded(const State<C>& st) {
-  if (st.endedEarly) return true;
+bool degraded(const State<C>& st, const uint64_t kept) {
   for (uint8_t s = 0; s < st.scanCount; ++s) {
     if (st.cursors[s].stopUnit != UINT32_MAX) return true;
   }
-  return false;
+  return st.endedEarly && (st.completed & kept) != kept;
 }
 
 // Every luma scan's cursor at the start of its entropy data, before the first band.
@@ -1319,7 +1334,7 @@ Result stepSession(Session<C>& ss, const DecodeOptions& options, const uint16_t 
     }
     if (result == Result::Pending && ss.nextBand >= ss.g.bandCount) {
       ss.phase = Phase::Done;
-      result = degraded(ss.st) ? Result::Degraded : Result::Ok;
+      result = degraded(ss.st, keptCoefficients(ss.g.n)) ? Result::Degraded : Result::Ok;
     }
     if (options.stats) options.stats->bandsMs += (options.clock ? options.clock() : 0) - t0;
   }

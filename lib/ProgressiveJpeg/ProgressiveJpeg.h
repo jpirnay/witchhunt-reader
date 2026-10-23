@@ -37,7 +37,8 @@ enum class Result : uint8_t {
   Stopped,  // the band callback asked to stop
   Pending,  // Decoder::step(): more work remains
   // Every row was emitted, but the picture lacks part of what the file should hold: a scan's data
-  // was corrupt, or the stream ended early. Not a picture to keep as the image's for good.
+  // was corrupt, or the stream ended before the scans the output needs. Not a picture to keep as
+  // the image's for good.
   Degraded,
 };
 
@@ -109,7 +110,8 @@ struct DecodeOptions {
 // stop. Damaged entropy data is no failure: a scan whose data is corrupt, misses a restart marker
 // or ends early stops there, the blocks after keep what the other scans gave (a DC scan's: mid
 // grey), and the decode goes on to every row and reports Degraded. So does a stream that ends
-// before its EOI.
+// before its EOI, unless the scans that arrived finish every coefficient the output scale keeps: a
+// file that lacks only its EOI marker is whole, and Ok.
 Result decode(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user);
 
 // One output row of decodeResized(): `width` gray pixels at row `y`. False stops the decode.

@@ -245,7 +245,8 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegResizedIdentity,
 // A stream cut halfway through its last scan: what arrived is decoded, the rest of that scan is
 // missing -- libjpeg's rows, not a failure and not the zero bits past the end decoded as data.
 // The one block the data ends in is decoded from those zero bits by both decoders, and libjpeg
-// carries on through symbols its rules reject; that block may differ.
+// carries on through symbols its rules reject; that block may differ. The last scan refines AC
+// coefficients, which 1/8 does not keep: there the picture is whole.
 class ProgressiveJpegTruncated : public testing::TestWithParam<int> {};
 
 TEST_P(ProgressiveJpegTruncated, DecodesWhatArrivedLikeLibjpeg) {
@@ -256,7 +257,8 @@ TEST_P(ProgressiveJpegTruncated, DecodesWhatArrivedLikeLibjpeg) {
 
   Capture capture;
   const auto result = decode("prog_420_cut.jpg", shift, capture);
-  ASSERT_EQ(result, ProgressiveJpeg::Result::Degraded) << ProgressiveJpeg::resultName(result);
+  ASSERT_EQ(result, shift == 3 ? ProgressiveJpeg::Result::Ok : ProgressiveJpeg::Result::Degraded)
+      << ProgressiveJpeg::resultName(result);
   EXPECT_TRUE(capture.orderOk);
   ASSERT_EQ(capture.image.w, expected.w);
   ASSERT_EQ(capture.image.h, expected.h);
@@ -541,6 +543,59 @@ TEST(ProgressiveJpegDamage, AStreamCutBetweenScansIsDegraded) {
   Capture got;
   EXPECT_EQ(decodePath(path, 0, got), ProgressiveJpeg::Result::Degraded);
   EXPECT_EQ(got.image.h, 141);
+  std::remove(path.c_str());
+}
+
+// A file that holds every scan but ends without its EOI marker is whole: its rows are the complete
+// file's, so it is no Degraded picture -- the reader caches it, as it did before Degraded existed.
+TEST(ProgressiveJpegDamage, AFileThatOnlyLacksItsEoiIsWhole) {
+  for (const char* jpg : {"prog_full_420.jpg", "prog_full_gray.jpg", "prog_full_444_rst.jpg"}) {
+    const std::vector<uint8_t> whole = readBytes(fixture(jpg));
+    ASSERT_GE(whole.size(), 2u);
+    ASSERT_EQ(whole[whole.size() - 2], 0xFF);
+    ASSERT_EQ(whole[whole.size() - 1], 0xD9) << "the fixture ends with its EOI";
+    const std::string path =
+        writeTemp(std::string("no_eoi_") + jpg, std::vector<uint8_t>(whole.begin(), whole.end() - 2));
+    for (int shift = 0; shift <= 3; ++shift) {
+      SCOPED_TRACE(std::string(jpg) + " at 1/" + std::to_string(1 << shift));
+      Capture clean;
+      ASSERT_EQ(decode(jpg, shift, clean), ProgressiveJpeg::Result::Ok);
+      Capture got;
+      const auto result = decodePath(path, shift, got);
+      EXPECT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+      EXPECT_EQ(got.image.h, clean.image.h);
+      EXPECT_TRUE(got.image.px == clean.image.px);
+    }
+    std::remove(path.c_str());
+  }
+}
+
+// ...but a file cut after its last scan's header, before that scan's data, lacks the scan: the
+// header promises the last bit of every AC coefficient, and none arrived. At 1/8, which keeps no AC
+// coefficient, the picture is whole.
+TEST(ProgressiveJpegDamage, AFileCutBeforeItsLastScansDataIsDegraded) {
+  const std::vector<uint8_t> whole = readBytes(fixture("prog_full_420.jpg"));
+  const std::vector<ScanSpan> scans = scansOf(whole);
+  ASSERT_FALSE(scans.empty());
+  const ScanSpan& last = scans.back();
+  ASSERT_GT(last.ss, 0) << "the fixture ends with an AC scan";
+  ASSERT_EQ(last.al, 0) << "...that completes its coefficients";
+  const std::string path =
+      writeTemp("cut_before_data.jpg", std::vector<uint8_t>(whole.begin(), whole.begin() + last.dataStart));
+  for (int shift = 0; shift <= 3; ++shift) {
+    SCOPED_TRACE("at 1/" + std::to_string(1 << shift));
+    Capture clean;
+    ASSERT_EQ(decode("prog_full_420.jpg", shift, clean), ProgressiveJpeg::Result::Ok);
+    Capture got;
+    const auto result = decodePath(path, shift, got);
+    EXPECT_EQ(got.image.h, clean.image.h) << "every row is emitted";
+    if (shift == 3) {
+      EXPECT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+      EXPECT_TRUE(got.image.px == clean.image.px);
+    } else {
+      EXPECT_EQ(result, ProgressiveJpeg::Result::Degraded) << ProgressiveJpeg::resultName(result);
+    }
+  }
   std::remove(path.c_str());
 }
 
