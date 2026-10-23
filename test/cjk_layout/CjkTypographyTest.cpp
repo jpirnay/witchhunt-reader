@@ -181,6 +181,15 @@ TEST(CjkPunctuationWidths, ReleasingTheLayoutScratchGivesBackTheMarksScratchToo)
   text.releaseLayoutScratch();
   EXPECT_EQ(gLiveAllocations, before);
 }
+TEST(RubyGroups, ReleasingAnEmptyBlocksScratchGivesBackItsRuby) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  const long before = gLiveAllocations;
+  text.addWord("漢字", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(0, 2, "かんじ"));
+  layout(text, 400);
+  text.releaseLayoutScratch();
+  EXPECT_EQ(gLiveAllocations, before);
+}
 // CjkRubyTest.cpp: the same hand-built line.
 std::unique_ptr<TextBlock> rubyLine(std::vector<TextBlock::Annotation> annotations,
                                     std::vector<std::string> words = {"漢", "字"}, float multiplier = 1.0f,

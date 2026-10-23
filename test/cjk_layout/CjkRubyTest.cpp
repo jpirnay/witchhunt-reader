@@ -6,9 +6,12 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
+#include "Epub/ParsedText.h"
 #include "Epub/blocks/TextBlock.h"
+#include "Epub/hyphenation/Hyphenator.h"
 #include "GfxRenderer.h"
 
 // Defined outside the anonymous namespace: CjkTypographyTest.cpp, where the global operator new counter lives, uses
@@ -239,4 +242,162 @@ TEST(RubyTextBlock, TheRangeConstructorRefusesBadAnnotations) {
   const std::string tooLong(256, 'a');
   EXPECT_FALSE(rubyLine({{0, 2, 0, 20, Kind::Ruby, 0, tooLong}})->valid());
   EXPECT_TRUE(rubyLine({{0, 2, 0, 20, Kind::Ruby, 0, std::string(255, 'a')}})->valid());
+}
+
+// Ruby groups through ParsedText: the groups ride on the tokens' boundaries and come out as the line's annotations.
+namespace {
+
+struct RubyBox {
+  size_t first;
+  size_t count;
+  int x;
+  int w;
+  std::string text;
+};
+
+struct Line {
+  std::vector<std::string> words;
+  std::vector<RubyBox> ruby;
+};
+
+BlockStyle aligned(const CssTextAlign alignment, const int16_t indent = 0) {
+  BlockStyle bs;
+  bs.alignment = alignment;
+  bs.textIndent = indent;
+  bs.textIndentDefined = true;
+  return bs;
+}
+
+std::vector<Line> layout(ParsedText& text, const uint16_t width, const bool includeLastLine = true,
+                         const bool preserveSource = false) {
+  GfxRenderer renderer;
+  std::vector<Line> lines;
+  text.layoutAndExtractLines(
+      renderer, kFontId, width,
+      [&](std::unique_ptr<TextBlock> block, bool, bool) {
+        Line& line = lines.emplace_back();
+        for (uint16_t i = 0; i < block->wordCount(); ++i) line.words.emplace_back(block->wordText(i));
+        for (uint16_t i = 0; i < block->annotationCount(); ++i) {
+          const TextBlock::Annotation a = block->annotation(i);
+          line.ruby.push_back({a.firstWord, a.wordCount, a.x, a.width, std::string(a.text)});
+        }
+        return ParsedText::LineProcessResult::Accepted;
+      },
+      includeLastLine, 0, 0, preserveSource);
+  return lines;
+}
+
+std::vector<std::vector<std::string>> wordsOf(const std::vector<Line>& lines) {
+  std::vector<std::vector<std::string>> result;
+  for (const auto& line : lines) result.push_back(line.words);
+  return result;
+}
+
+// (first, count, text) of each of a line's ruby boxes.
+std::vector<std::tuple<size_t, size_t, std::string>> rubyOf(const Line& line) {
+  std::vector<std::tuple<size_t, size_t, std::string>> result;
+  for (const auto& box : line.ruby) result.emplace_back(box.first, box.count, box.text);
+  return result;
+}
+
+using Words = std::vector<std::vector<std::string>>;
+using Ruby = std::vector<std::tuple<size_t, size_t, std::string>>;
+
+}  // namespace
+
+TEST(RubyGroups, AGroupNeverBreaksInside) {
+  for (const bool hyphenation : {false, true}) {
+    ParsedText text(false, hyphenation, aligned(CssTextAlign::Left));
+    text.addWord("は吾輩", EpdFontFamily::REGULAR);
+    ASSERT_TRUE(text.addRubyGroup(1, 2, "わがはい"));
+    const auto lines = layout(text, 25);
+    EXPECT_EQ(wordsOf(lines), (Words{{"は"}, {"吾", "輩"}})) << hyphenation;
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_EQ(rubyOf(lines[0]), Ruby{});
+    EXPECT_EQ(rubyOf(lines[1]), (Ruby{{0, 2, "わがはい"}}));
+  }
+}
+
+TEST(RubyGroups, AGroupRefusesWhatCannotBeOne) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("一二三", EpdFontFamily::REGULAR);
+  EXPECT_FALSE(text.addRubyGroup(0, 0, "x"));
+  EXPECT_FALSE(text.addRubyGroup(2, 2, "x"));
+  EXPECT_TRUE(text.addRubyGroup(1, 2, "x"));
+  EXPECT_FALSE(text.addRubyGroup(0, 2, "y"));  // token 1 has a role
+  EXPECT_TRUE(text.addRubyGroup(0, 1, "z"));   // a group before it keeps the texts in token order
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(rubyOf(lines[0]), (Ruby{{0, 1, "z"}, {1, 2, "x"}}));
+}
+
+TEST(RubyGroups, AnRtWithoutANewBaseAppendsToTheLastGroup) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  EXPECT_FALSE(text.appendRubyText("じ"));
+  text.addWord("漢", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(0, 1, "かん"));
+  EXPECT_TRUE(text.appendRubyText("じ"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(rubyOf(lines[0]), (Ruby{{0, 1, "かんじ"}}));
+}
+
+TEST(RubyGroups, ConsumedLinesTakeTheirRubyWithThem) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("吾輩は猫", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(0, 2, "わがはい"));
+  ASSERT_TRUE(text.addRubyGroup(3, 1, "ねこ"));
+  const auto first = layout(text, 30, /*includeLastLine=*/false);
+  ASSERT_EQ(first.size(), 1u);
+  EXPECT_EQ(first[0].words, (std::vector<std::string>{"吾", "輩", "は"}));
+  EXPECT_EQ(rubyOf(first[0]), (Ruby{{0, 2, "わがはい"}}));
+  const auto second = layout(text, 30, /*includeLastLine=*/true);
+  ASSERT_EQ(second.size(), 1u);
+  EXPECT_EQ(second[0].words, (std::vector<std::string>{"猫"}));
+  EXPECT_EQ(rubyOf(second[0]), (Ruby{{0, 1, "ねこ"}}));
+}
+
+TEST(RubyGroups, PreserveSourceLaysTheSameGroupsOutTwice) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("吾輩は猫", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(0, 2, "わがはい"));
+  ASSERT_TRUE(text.addRubyGroup(3, 1, "ねこ"));
+  for (int pass = 0; pass < 2; ++pass) {
+    const auto lines = layout(text, 30, /*includeLastLine=*/true, /*preserveSource=*/true);
+    ASSERT_EQ(lines.size(), 2u) << pass;
+    EXPECT_EQ(wordsOf(lines), (Words{{"吾", "輩", "は"}, {"猫"}})) << pass;
+    EXPECT_EQ(rubyOf(lines[0]), (Ruby{{0, 2, "わがはい"}})) << pass;
+    EXPECT_EQ(rubyOf(lines[1]), (Ruby{{0, 1, "ねこ"}})) << pass;
+  }
+}
+
+TEST(RubyGroups, ALatinBaseSplitByBionicReadingStaysOneGroup) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left), /*bionicReadingEnabled=*/true);
+  text.addWord("Tokyo", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(0, 1, "とうきょう"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].words, (std::vector<std::string>{"Tok", "yo"}));
+  EXPECT_EQ(rubyOf(lines[0]), (Ruby{{0, 2, "とうきょう"}}));
+}
+
+TEST(RubyGroups, AGroupBaseIsNeverHyphenated) {
+  Hyphenator::setPreferredLanguage("en");
+  ParsedText text(false, /*hyphenationEnabled=*/true, aligned(CssTextAlign::Left));
+  text.addWord("internationalization", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(0, 1, "x"));
+  const auto lines = layout(text, 60);
+  EXPECT_EQ(wordsOf(lines), (Words{{"internationalization"}}));
+}
+
+TEST(RubyGroups, AGroupInTheMiddleOfAWordKeepsItsRuby) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("と煙を", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(1, 1, "けむり"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(rubyOf(lines[0]), (Ruby{{1, 1, "けむり"}}));
+  ASSERT_EQ(lines[0].ruby.size(), 1u);
+  EXPECT_EQ(lines[0].ruby[0].x, 10);
+  EXPECT_EQ(lines[0].ruby[0].w, 10);
 }

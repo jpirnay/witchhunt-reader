@@ -413,6 +413,7 @@ void ParsedText::layoutAndExtractLines(
   std::vector<TextBlock::WordSize> savedSizes;
   std::vector<uint32_t> savedOffsets;
   std::vector<TokenBoundary::Boundary> savedBoundaries;
+  std::vector<std::string> savedRubyTexts;
   bool savedIsContinuation = false;
   size_t savedBionicWatermark = 0;
   if (preserveSource) {
@@ -421,6 +422,7 @@ void ParsedText::layoutAndExtractLines(
     savedSizes = wordSizes;
     savedOffsets = wordVisibleOffsets;
     savedBoundaries = wordBoundaries;
+    savedRubyTexts = rubyTexts_;
     savedIsContinuation = isContinuation_;
     savedBionicWatermark = bionicTransformedUpTo_;
   }
@@ -661,6 +663,9 @@ void ParsedText::layoutAndExtractLines(
   // to still be there. It pays for that in residency, so it is opt-in.
   if (lineCount > 0 && !preserveSource) {
     const size_t consumed = lineBreakIndices[lineCount - 1];
+    // The ruby texts of the groups that led the consumed tokens go with them.
+    const size_t consumedRuby = leadersBefore(consumed);
+    rubyTexts_.erase(rubyTexts_.begin(), rubyTexts_.begin() + std::min(consumedRuby, rubyTexts_.size()));
     words.erase(words.begin(), words.begin() + consumed);
     wordStyles.erase(wordStyles.begin(), wordStyles.begin() + consumed);
     wordBoundaries.erase(wordBoundaries.begin(), wordBoundaries.begin() + consumed);
@@ -678,9 +683,40 @@ void ParsedText::layoutAndExtractLines(
     wordSizes = std::move(savedSizes);
     wordVisibleOffsets = std::move(savedOffsets);
     wordBoundaries = std::move(savedBoundaries);
+    rubyTexts_ = std::move(savedRubyTexts);
     isContinuation_ = savedIsContinuation;
     bionicTransformedUpTo_ = savedBionicWatermark;
   }
+}
+
+size_t ParsedText::leadersBefore(const size_t tokenIndex) const {
+  size_t leaders = 0;
+  for (size_t i = 0; i < tokenIndex && i < wordBoundaries.size(); ++i) {
+    if (TokenBoundary::rubyRole(wordBoundaries[i]) == TokenBoundary::RubyRole::Leader) ++leaders;
+  }
+  return leaders;
+}
+
+bool ParsedText::addRubyGroup(const size_t firstToken, const size_t tokenCount, std::string text) {
+  if (tokenCount == 0 || firstToken >= words.size() || tokenCount > words.size() - firstToken) return false;
+  for (size_t i = firstToken; i < firstToken + tokenCount; ++i) {
+    if (TokenBoundary::rubyRole(wordBoundaries[i]) != TokenBoundary::RubyRole::None) return false;
+  }
+  const size_t ordinal = leadersBefore(firstToken);
+  if (ordinal > rubyTexts_.size()) return false;
+  rubyTexts_.insert(rubyTexts_.begin() + ordinal, std::move(text));
+  wordBoundaries[firstToken] = TokenBoundary::withRubyRole(wordBoundaries[firstToken], TokenBoundary::RubyRole::Leader);
+  for (size_t i = firstToken + 1; i < firstToken + tokenCount; ++i) {
+    wordBoundaries[i] =
+        TokenBoundary::withRubyRole(TokenBoundary::Boundary{true, false}, TokenBoundary::RubyRole::Follower);
+  }
+  return true;
+}
+
+bool ParsedText::appendRubyText(const std::string_view text) {
+  if (rubyTexts_.empty()) return false;
+  rubyTexts_.back().append(text);
+  return true;
 }
 
 void ParsedText::releaseLayoutScratch() {
@@ -702,6 +738,7 @@ void ParsedText::releaseLayoutScratch() {
   std::vector<size_t>().swap(ans_);
   std::vector<int16_t>().swap(lineXPosScratch_);
   std::string().swap(allText_);
+  std::vector<TextBlock::Annotation>().swap(lineAnnotations_);
   // The word vectors carry the paragraph in progress: an empty block gives them back whole; a
   // block mid-paragraph keeps them AS THEY ARE. This used to shrink_to_fit them, and a slice
   // yields inside a paragraph almost always (the 1 KB feed chunk ends mid-<p>), so every yield
@@ -715,6 +752,7 @@ void ParsedText::releaseLayoutScratch() {
     std::vector<TokenBoundary::Boundary>().swap(wordBoundaries);
     std::vector<TextBlock::WordSize>().swap(wordSizes);
     std::vector<uint32_t>().swap(wordVisibleOffsets);
+    std::vector<std::string>().swap(rubyTexts_);
   }
 }
 
@@ -725,6 +763,7 @@ void ParsedText::reset(const BlockStyle& newBlockStyle) {
   wordBoundaries.clear();
   wordSizes.clear();
   wordVisibleOffsets.clear();
+  rubyTexts_.clear();
   for (TextBlock::WordFont& slot : fontSlots_) slot = {};
   fontSlotsUsed_ = 0;
   blockStyle = newBlockStyle;
@@ -1069,7 +1108,11 @@ void ParsedText::applyBionicReadingTransform() {
     }
 
     // The first span keeps the word's own boundary; every span after it is glued to the one before.
-    constexpr TokenBoundary::Boundary kGlued{true, false};
+    // A span of a ruby base after the first belongs to the base's group.
+    TokenBoundary::Boundary kGlued{true, false};
+    if (TokenBoundary::rubyRole(originalBoundary) != TokenBoundary::RubyRole::None) {
+      kGlued = TokenBoundary::withRubyRole(kGlued, TokenBoundary::RubyRole::Follower);
+    }
     TokenBoundary::Boundary boundary = originalBoundary;
     for (size_t spanIndex = 0; spanIndex < spans.size(); ++spanIndex) {
       const TokenSpan span = spans[spanIndex];
@@ -1331,6 +1374,10 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
                                       const bool allowFallbackBreaks, bool* outInsertedHyphen) {
   // Guard against invalid indices or zero available width before attempting to split.
   if (availableWidth <= 0 || wordIndex >= words.size()) {
+    return false;
+  }
+  // A ruby base is never split: its ruby sits over the whole of it.
+  if (TokenBoundary::rubyRole(wordBoundaries[wordIndex]) != TokenBoundary::RubyRole::None) {
     return false;
   }
 
@@ -1602,6 +1649,34 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   range.fontTable = fontSlots_;
   range.first = lastBreakAt;
   range.count = lineWordCount;
+
+  // One ruby box per group leader on the line, over the leader and the followers the line holds. A follower with no
+  // leader on its line (a group the breaker had to split) has nothing to hang its ruby on and is skipped.
+  lineAnnotations_.clear();
+  if (!rubyTexts_.empty()) {
+    size_t ordinal = leadersBefore(lastBreakAt);
+    for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
+      if (TokenBoundary::rubyRole(boundaries[lastBreakAt + wordIdx]) != TokenBoundary::RubyRole::Leader) continue;
+      const size_t textIdx = ordinal++;
+      if (textIdx >= rubyTexts_.size()) break;
+      size_t groupCount = 1;
+      int groupWidth = boxWidth(wordIdx);
+      while (wordIdx + groupCount < lineWordCount &&
+             TokenBoundary::rubyRole(boundaries[lastBreakAt + wordIdx + groupCount]) ==
+                 TokenBoundary::RubyRole::Follower) {
+        groupWidth += boxWidth(wordIdx + groupCount);
+        ++groupCount;
+      }
+      TextBlock::Annotation& a = lineAnnotations_.emplace_back();
+      a.firstWord = static_cast<uint16_t>(wordIdx);
+      a.wordCount = static_cast<uint16_t>(groupCount);
+      a.x = lineXPos[wordIdx];
+      a.width = static_cast<uint16_t>(std::max(groupWidth, 0));
+      a.kind = TextBlock::AnnotationKind::Ruby;
+      a.text = rubyTexts_[textIdx];
+    }
+  }
+  range.annotations = &lineAnnotations_;
 
   // The page-fit decision runs before the line exists (see beforeLine_): the parser may emit
   // the current page here and open the next one's arena block, so the block built just below

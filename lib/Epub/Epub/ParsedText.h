@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "CjkPunctuation.h"
@@ -111,6 +112,11 @@ class ParsedText {
   // The first word's offset of the line most recently handed to processLine. Read by the parser's
   // line callbacks, which only get the TextBlock.
   uint32_t lastLineVisibleOffset_ = 0;
+  // The ruby text of each Leader token (TokenBoundary::RubyRole) of the block, in token order: the n-th Leader owns the
+  // n-th text. Moves with the tokens through every erase, snapshot and reset.
+  std::vector<std::string> rubyTexts_;
+  // The annotations of the line being extracted, handed to its TextBlock; reused across lines.
+  std::vector<TextBlock::Annotation> lineAnnotations_;
   LinePlace linePlace_;
   BlockStyle blockStyle;
   // The book's typography (TypographyProfile.h): Latin rules until the parser sets the book's.
@@ -126,6 +132,8 @@ class ParsedText {
   bool wordGrowthRefused_ = false;
   size_t bionicTransformedUpTo_ = 0;  ///< words[0..bionicTransformedUpTo_) have already been bionic-transformed
 
+  // How many tokens before tokenIndex lead a ruby group: the index of the ruby text of the first group at or after it.
+  size_t leadersBefore(size_t tokenIndex) const;
   void applyParagraphIndent(const GfxRenderer& renderer, int fontId);
   void applyBionicReadingTransform();
   // Effective measurement scale of words[i]: the block-level multiplier (a word font's own scale for a word in
@@ -237,6 +245,12 @@ class ParsedText {
   // fontSlot: the word's font slot (see setFontSlot), below TextBlock::kMaxWordFonts.
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
                uint8_t sizePct = DEFAULT_WORD_SIZE_PCT, uint32_t visibleOffset = 0, uint8_t fontSlot = 0);
+  // Tokens [firstToken, firstToken + tokenCount) become one ruby group: the first keeps its boundary (a break may
+  // come before the group), the rest are glued to it. False when the range is empty, runs past size(), or a token
+  // in it already has a role.
+  bool addRubyGroup(size_t firstToken, size_t tokenCount, std::string text);
+  // An <rt> with no new base: appended to the block's last group. False when the block has none.
+  bool appendRubyText(std::string_view text);
   // The face the words in `slot` are laid out in; a fontId of 0 (every slot after reset()) is the block's font. The
   // parser fills the slots its block's words use once it knows the block's font (see fontSlotsUsed).
   void setFontSlot(const uint8_t slot, const TextBlock::WordFont& font) {
