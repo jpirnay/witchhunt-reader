@@ -516,6 +516,49 @@ TEST(ProgressiveJpegDamageAtAnEighth, ACorruptAcScanIsNotEvenRead) {
   std::remove(path.c_str());
 }
 
+// ...nor its header: a 1/8 session skips every AC scan unread, so nothing in one's header can refuse
+// the picture. A decode that reads the scan still refuses it.
+TEST(ProgressiveJpegDamageAtAnEighth, ACorruptAcScanHeaderIsNotEvenRead) {
+  const std::vector<uint8_t> whole = readBytes(fixture("prog_full_420.jpg"));
+  const std::vector<ScanSpan> scans = scansOf(whole);
+  const ScanSpan* ac = nullptr;
+  for (const ScanSpan& s : scans) {
+    if (s.firstComponent == 1 && s.components == 1 && s.ss > 0) {
+      ac = &s;
+      break;
+    }
+  }
+  ASSERT_NE(ac, nullptr) << "the fixture has a luma AC scan";
+  const size_t ns = ac->sosStart + 4;  // FF DA, length, then Ns, Ns x (Cs, Td/Ta), Ss, Se, Ah/Al
+  const size_t spectral = ns + 1 + 2 * ac->components;
+  struct Corruption {
+    const char* name;
+    size_t at;
+    uint8_t value;
+  };
+  const Corruption corruptions[] = {
+      {"Se below Ss", spectral + 1, 0},
+      {"Al above 13", spectral + 2, 0x0E},
+      {"two components in an AC scan", ns, 2},
+      {"an unknown component", ns + 1, 9},
+  };
+  Capture clean;
+  ASSERT_EQ(decode("prog_full_420.jpg", 3, clean), ProgressiveJpeg::Result::Ok);
+  for (const Corruption& c : corruptions) {
+    SCOPED_TRACE(c.name);
+    std::vector<uint8_t> bytes = whole;
+    bytes[c.at] = c.value;
+    const std::string path = writeTemp("bad_ac_header.jpg", bytes);
+    Capture eighth;
+    const auto result = decodePath(path, 3, eighth);
+    EXPECT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+    EXPECT_TRUE(eighth.image.px == clean.image.px);
+    Capture full;
+    EXPECT_EQ(decodePath(path, 0, full), ProgressiveJpeg::Result::InvalidData) << "1/1 decodes the scan";
+    std::remove(path.c_str());
+  }
+}
+
 TEST(ProgressiveJpegDamageAtAnEighth, ACorruptDcScanLeavesMidGreyFromThereOn) {
   const std::string path = damagedRstCopy("bad_dc_eighth.jpg", 3, 0, 0, kBadCode);
   Capture got;

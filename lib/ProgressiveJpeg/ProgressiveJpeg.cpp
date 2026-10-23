@@ -523,11 +523,17 @@ Result parseFrame(State<C>& st, uint32_t p, const uint32_t end) {
   return Result::Ok;
 }
 
-// Records the scan if it touches luma (and, in a DC session, is a DC scan). `p` is the first
-// entropy-coded byte on success.
+// Records the scan if it touches luma (and, in a DC session, is a DC scan: an AC one is not even
+// validated). `p` is the first entropy-coded byte on success.
 template <class C>
 Result parseScan(State<C>& st, uint32_t p, const uint32_t end) {
   if (!st.frameSeen) return Result::InvalidData;
+  if constexpr (C::kDcOnly) {
+    // A DC session skips every AC scan unread, so nothing in one's header may refuse the picture:
+    // only Ss is read, the third byte from the end of any SOS whatever its component count says.
+    constexpr uint32_t SHORTEST_SCAN_HEADER = 6;  // Ns, one component (Cs, Td/Ta), Ss, Se, Ah/Al
+    if (end - p >= SHORTEST_SCAN_HEADER && st.source.at(end - 3) > 0) return Result::Ok;
+  }
   const int n = st.source.at(p++);
   if (n <= 0 || n > MAX_COMPONENTS || end - p != 2U * n + 3U) return Result::InvalidData;
   Scan scan;
@@ -557,7 +563,7 @@ Result parseScan(State<C>& st, uint32_t p, const uint32_t end) {
   if (badSpectrum || scan.al > 13) {
     return Result::InvalidData;
   }
-  if (!hasLuma || (C::kDcOnly && scan.ss > 0)) return Result::Ok;
+  if (!hasLuma) return Result::Ok;
   if (st.scanCount >= C::kScans) return Result::Unsupported;
 
   if (scan.ss == 0) {
