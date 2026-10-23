@@ -619,3 +619,16 @@ Measured on the X3 (2026-10-19, four TrueType families with three of them in SD 
 pre-render's gate rose from 28.2–30.1 KB free (13.3 KB largest) to 43.2–45.1 KB (27.6 KB), and Background-B's lowest
 heap during a build from 12.9–17.0 KB to 27.8–32.0 KB, with the scratch block and page cache in its arena (high water
 12 KB to 27 KB of 52 KB).
+
+A resident build, the X4's in-place build that keeps the secondary buffer and runs on the owned 10 KB arena (§9.2),
+lends the misses nothing, so each slice that misses makes them on the heap. For a book in Chinese, Japanese or Korean,
+where misses are the rule, its admission gate (`EpubReaderActivity::heapAllowsInPlaceBuild`) therefore adds what a
+miss makes there (`TtfFontSet::missMemoryPlanBytes`: the scratch block, and in SD mode the page cache) to the parse
+phase's floor (`InPlaceBuildGate.h`); a build that cannot also hold it borrows the buffer from the start, and its misses
+draw in the lent region. Before that (X4, 2026-10-23, CJK chapters of 1.5–9.6 KB, glyph store empty) every such build
+started resident at about 67.7 KB free; the first miss took 22,792 B of heap for a CFF family's 17,408 + 4,204 B, the
+heap-backed SAX state held another 9.7 KB, and the build fell to 8–15 KB (about 20 KB for a family in flash mode, whose
+miss needs 13,312 B), under the parser's hard floor or the between-slice guard (`RESIDENT_BUILD_ABORT_*`), and was
+thrown away for a borrowed rebuild, once or twice per chapter. A book set between spaces keeps the floor it had: its
+glyphs are stored within its first pages, and the resident builds of 0.3 KB Latin chapters held a miss and finished in
+two TrueType families, store empty or full, without the indexing popup a borrowed build draws first (about 0.54 s).
