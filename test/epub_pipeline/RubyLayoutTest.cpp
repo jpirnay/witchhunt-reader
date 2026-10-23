@@ -301,6 +301,18 @@ TEST_F(RubyLayout, APrettyPrintedBaseGetsNoSpaceFromItsMarkup) {
   EXPECT_EQ(text, "aNew Yorkb");
 }
 
+TEST_F(RubyLayout, ALongMonoRubyElementKeepsEveryReadingOverItsBase) {
+  std::string pairs;
+  for (int i = 0; i < 80; ++i) pairs += "字<rt>じ</rt>";
+  const auto l = lines("<p>" + hanRun(90) + "<ruby>" + pairs + "</ruby></p>");
+  size_t groups = 0;
+  for (const auto& line : l) {
+    groups += line.ruby.size();
+    for (const auto& w : line.words) EXPECT_NE(w, "じ") << "a reading drawn inline";
+  }
+  EXPECT_EQ(groups, 80u);
+}
+
 TEST_F(RubyLayout, ARubyLineIsTallerByHalfAnAscender) {
   const auto l = lines("<p>前</p><p><ruby>漢<rt>かん</rt></ruby></p><p>後</p>");
   ASSERT_EQ(l.size(), 3u);

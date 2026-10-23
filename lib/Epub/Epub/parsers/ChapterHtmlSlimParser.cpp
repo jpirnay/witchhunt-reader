@@ -1111,6 +1111,8 @@ void ChapterHtmlSlimParser::closeRt() {
   }
   target = wordTarget();
   if (target && !target->isEmpty()) nextWordContinues = true;
+  // A split inside this ruby took the group start with it; the bases still to come anchor at the block's new end.
+  if (rubyDepth_ >= 0 && rubyGroupStart_ == kNoRubyGroup && target) rubyGroupStart_ = target->size();
 }
 
 // flush the contents of partWordBuffer to currentTextBlock
@@ -1241,7 +1243,13 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
 
     // A split waits for a ruby that is open, up to kRubyGroupSlack tokens, so its group is made whole.
     if (currentTextBlock->size() > 96 && !(rubyDepth_ >= 0 && currentTextBlock->size() <= 96 + kRubyGroupSlack)) {
-      if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the group's start goes out with the split
+      // The bases waiting for their reading are the block's last tokens, and the layout keeps the last line: a base
+      // that is still there after the split stays the start of its group.
+      size_t pendingBases = kNoRubyGroup;
+      if (rubyDepth_ >= 0 && rubyGroupStart_ <= currentTextBlock->size()) {
+        pendingBases = currentTextBlock->size() - rubyGroupStart_;
+      }
+      if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;
       if (!ensureHeapForTextLayout("long-block split", currentTextBlock.get())) {
         partWordBufferIndex = 0;
         nextWordContinues = false;
@@ -1301,6 +1309,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
                                  currentTextBlock->lastLineVisibleOffset());
           },
           false, static_cast<int16_t>(currentPageNextY), splitLineHeight);
+      if (pendingBases <= currentTextBlock->size()) rubyGroupStart_ = currentTextBlock->size() - pendingBases;
       // emitPage() clears floatZoneCount mid-layout when the page overflows — that's
       // intentional: lines on the continuation page should not be narrowed for an
       // image that lives on the previous page.
