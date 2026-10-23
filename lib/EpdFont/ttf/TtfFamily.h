@@ -67,12 +67,12 @@ bool assignStyles(const FileProbe* files, size_t count, int (&out)[4]);
 
 /// SD mode (spec 4.1): what a style's block holds. A font of its own, made of the file's tables the engine reads but
 /// its outlines, each 4-byte aligned, in file order, behind a table directory; FontBytes reads the outlines past the
-/// block from the file on the card. A TrueType file's: cmap, head, hhea, hmtx, loca, maxp, OS/2, GPOS, GSUB and kern,
-/// whichever it has, its glyf record pointing past the block. An OpenType CFF file's (spec 9.4): cmap, head, hhea,
-/// hmtx, maxp, OS/2, GPOS, GSUB and kern, then its CFF table rebuilt (CffBlock), ending the block with the CharStrings
-/// INDEX's offsets; their data lies past it. The block is never held in memory: source() serves any range of it, the
-/// directory made here and the tables read from the file, so an install copies it, and compares it with what flash
-/// holds, as it does a whole file in flash mode.
+/// block from the file on the card. A TrueType file's: cmap, head, hhea, hmtx, loca, maxp, OS/2, GPOS, GSUB, kern and
+/// post (its header), whichever it has, its glyf record pointing past the block. An OpenType CFF file's (spec 9.4):
+/// cmap, head, hhea, hmtx, maxp, OS/2, GPOS, GSUB, kern and post (its header), then its CFF table rebuilt (CffBlock),
+/// ending the block with the CharStrings INDEX's offsets; their data lies past it. The block is never held in memory:
+/// source() serves any range of it, the directory made here and the tables read from the file, so an install copies it,
+/// and compares it with what flash holds, as it does a whole file in flash mode.
 class SdBlock {
  public:
   /// Reads `file`'s table directory, and a CFF file's CFF table (CffBlock::plan()). NoBlock when it is no TrueType or
@@ -91,8 +91,8 @@ class SdBlock {
   bool sameAs(const uint8_t* block, uint32_t size) const;
 
  private:
-  // TrueType: the ten tables the engine reads, and glyf; CFF: nine of them, and the CFF table.
-  static constexpr uint8_t kMaxTables = 11;
+  // TrueType: the eleven tables the engine reads, and glyf; CFF: ten of them, and the CFF table.
+  static constexpr uint8_t kMaxTables = 12;
   struct Table {
     uint32_t tag;
     uint32_t checksum;
@@ -129,7 +129,9 @@ bool fitsStore(const uint32_t* fileBytes, const uint32_t* sdBytes, uint8_t count
 /// thresholds): the identity changes with it, so every installed store is rebuilt.
 /// 2: kerning and GSUB ligatures (2c-3): U+FB00-FB04 now draw the glyphs GSUB names, so stores holding the cmap's
 /// glyphs or a no-glyph marker for them must go.
-constexpr uint8_t kRenderVersion = 2;
+/// 3: synthetic italic (spec 7.4): a family with neither a bold nor an italic file stored its bold italic emboldened
+/// and upright under the bold-italic bits, which now draw slanted.
+constexpr uint8_t kRenderVersion = 3;
 
 /// One style's file as the card lists it.
 struct FileStamp {
