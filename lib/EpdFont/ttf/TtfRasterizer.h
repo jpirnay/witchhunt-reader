@@ -56,8 +56,10 @@ struct ScratchPlan {
 /// and the interpreter's state; the output from head's box at `maxPpem26_6` (the largest size the family renders),
 /// but never less than the em square, since head's box can lie; each capped. A glyph past a cap at a planned size
 /// reports Unsupported. `emboldened`: with room for synthetic bold's growth too, twice its strength each way (a sharp
-/// corner reaches past the strength).
-ScratchPlan planScratch(const Face& face, uint32_t maxPpem26_6, uint32_t poolBytes, bool emboldened = false);
+/// corner reaches past the strength). `slanted`: with room for synthetic italic's shear too, the planned height times
+/// kSlant, across.
+ScratchPlan planScratch(const Face& face, uint32_t maxPpem26_6, uint32_t poolBytes, bool emboldened = false,
+                        bool slanted = false);
 /// The larger of each part, so one block serves every style of a family.
 ScratchPlan mergePlans(const ScratchPlan& a, const ScratchPlan& b);
 
@@ -69,6 +71,8 @@ struct Strength {
 };
 /// Synthetic bold's strength at `ppem26_6`.
 Strength emboldenStrength(uint32_t ppem26_6);
+/// Synthetic italic's shear (spec 7.4), 16.16: FT_GlyphSlot_Oblique's, about 12 degrees.
+constexpr int32_t kSlant = 0x366A;
 
 /// Glyph outlines to 2-bit bitmaps: FreeType's TrueType loader rebuilt in integers (simple glyphs, compound
 /// glyphs with offsets and 2.14 transforms, unhinted, exactly as FreeType scales them), and its CFF loader (the
@@ -117,6 +121,11 @@ class Rasterizer {
   /// orient stays as it is, the advance growing all the same. After a failed load() it returns that status; a bitmap
   /// that no longer fits reports what load() would.
   Status embolden(const Strength& strength, EpdGlyph* metrics);
+  /// Synthetic italic (spec 7.4): shears the outline of the last load() (and embolden()) exactly as FreeType's
+  /// FT_GlyphSlot_Oblique does, each point's x gaining FT_MulFix(y, kSlant) measured from the glyph's origin, and boxes
+  /// it again; the advance stays. After a failed load() or embolden() it returns that status; a bitmap that no longer
+  /// fits reports what load() would.
+  Status slant(EpdGlyph* metrics);
   /// Draws the glyph of the last load() into `dst`, writing all of its dataLength bytes (MSB-first, rows
   /// continuous, as .cpfont bitmaps). After a failed load() it writes nothing and returns that status.
   Status rasterize(uint8_t* dst);
@@ -135,6 +144,9 @@ class Rasterizer {
   /// load()'s bitmap box from the outline as it now is: moves the points so the box starts at (0, 0), records the
   /// corner it moved them from, and fills the box part of `metrics`. Leaves loaded_ alone.
   Status placeBox(EpdGlyph* metrics);
+  /// Moves the outline back from its bitmap box's corner to the glyph's origin, where load() had it and where
+  /// FreeType's synthesis reads it.
+  void unbox();
 
   CffSourceCache cffSources_;         // loadCff's: the last CID-keyed glyph's FDSelect range and font DICT
   uint8_t* block_ = nullptr;          // owned_, or the caller's (attach())

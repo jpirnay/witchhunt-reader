@@ -8,7 +8,7 @@
 
 **Tech Stack:** C++17 firmware (PlatformIO, ESP32-C3/S3), GoogleTest host tests (`test/glyph_store`, `test/ttf_font`) on the simulated chip `SimNorFlash`, the serial test API for the device runs.
 
-**Spec:** `docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md`, section 8 (the store), with sections 10 (validation), 11 (documentation) and 13 (order of work: step 3). It replaces the withdrawn plan "glyph store emptied at the next chapter"; that plan's RenderLock guard and chapter-open call are Task 7 and Task 8 here. Not prototyped: the rulings an executor makes go in the ledger.
+**Spec:** `docs/design/cjk-ttf-fonts.md`, section 8 (the store), with sections 10 (validation), 11 (documentation) and 13 (order of work: step 3). It replaces the withdrawn plan "glyph store emptied at the next chapter"; that plan's RenderLock guard and chapter-open call are Task 7 and Task 8 here. Not prototyped: the rulings an executor makes go in the ledger.
 
 ## Global Constraints
 

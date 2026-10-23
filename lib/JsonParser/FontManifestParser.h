@@ -26,13 +26,18 @@ struct FontManifestCallbacks {
   void (*onFamilyDescription)(void* ctx, const char* value, size_t len);
   void (*onFile)(void* ctx, const FontManifestFile& file);
   void (*onFamilyEnd)(void* ctx);
+  void (*onFamilyFormat)(void* ctx, const char* value, size_t len);  // "format", version 3
+  void (*onFamilyInDownloadAll)(void* ctx, bool value);              // "inDownloadAll", version 3; booleans only
 };
 
-// The font manifest (assets/sd-fonts/fonts.json) as a stream of events, over StreamingJsonParser:
+// The font manifest (assets/sd-fonts/fonts.json, fonts-v3.json) as a stream of events, over StreamingJsonParser:
 //
-//   { "version": 2, "baseUrl": "https://...",
+//   { "version": 3, "baseUrl": "https://...",
 //     "families": [ { "name": "...", "description": "...", "styles": [...],
+//                     "format": "cpfont", "inDownloadAll": true,
 //                     "files": [ { "name": "Fam/Fam_10.cpfont", "size": 269830, "crc32": 3998528417 } ] } ] }
+//
+// "format" (a string) and "inDownloadAll" (a boolean) came with version 3; earlier manifests leave them out.
 //
 // Fed in pieces of any size, it holds one token and one file entry, never the document. No key order
 // is assumed. styles[] and every unknown key are skipped whole; a known key holding the wrong type
@@ -74,7 +79,20 @@ class FontManifestParser {
   enum class Where : uint8_t { BEFORE_ROOT, IN_ROOT, IN_FAMILIES, IN_FAMILY, IN_FILES, IN_FILE, DONE };
 
   // The key whose value comes next.
-  enum class Key : uint8_t { NONE, OTHER, VERSION, BASE_URL, FAMILIES, NAME, DESCRIPTION, FILES, SIZE, CRC32 };
+  enum class Key : uint8_t {
+    NONE,
+    OTHER,
+    VERSION,
+    BASE_URL,
+    FAMILIES,
+    NAME,
+    DESCRIPTION,
+    FORMAT,
+    IN_DOWNLOAD_ALL,
+    FILES,
+    SIZE,
+    CRC32
+  };
 
   static void sOnKey(void* ctx, const char* key, size_t len);
   static void sOnString(void* ctx, const char* value, size_t len);
@@ -89,6 +107,7 @@ class FontManifestParser {
   void onKey(const char* key, size_t len);
   void onString(const char* value, size_t len);
   void onNumber(const char* value, size_t len);
+  void onBool(bool value);
   void onOtherValue();
   void onOpen(bool isArray);
   void onClose(bool isArray);

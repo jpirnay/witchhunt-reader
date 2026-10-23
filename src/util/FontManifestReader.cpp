@@ -6,10 +6,12 @@
 
 #include <cstring>
 
+#include "FontDownloadRules.h"
+
 // The reader's working state, on the heap while read() runs and freed on return: the parser (its
 // 512-byte token buffer, the base URL and one file name), the two passes' builders, the open family's
 // name and first bad file name, which wait for the family to close, and the read block (one SD sector
-// per read). About 1.9 KB, too much for the stack.
+// per read). About 1.9 KB plus the format fields, too much for the stack.
 struct FontManifestReader::Work {
   Work(const FontManifestCallbacks& callbacks, FontCatalog& catalog) : parser(callbacks), filler(catalog) {}
 
@@ -23,6 +25,11 @@ struct FontManifestReader::Work {
   bool familyNameOverflow = false;
   bool badFile = false;
   char badFileName[FontManifestParser::FILE_NAME_BUF_SIZE] = {};
+  // The family's format (Unknown for one this reader does not know), its name for the log, and a bit per FileKind of
+  // the files it names: the format may follow the files, so the two are compared when the family closes.
+  FontDownloadRules::FileKind format = FontDownloadRules::FileKind::Cpfont;
+  char formatName[16] = {};
+  uint8_t fileKinds = 0;
   char block[512] = {};
 };
 
@@ -55,6 +62,12 @@ FontManifestStatus FontManifestReader::read(HalFile& file, FontCatalog& catalog,
   };
   callbacks.onFile = [](void* ctx, const FontManifestFile& f) { static_cast<FontManifestReader*>(ctx)->fileEntry(f); };
   callbacks.onFamilyEnd = [](void* ctx) { static_cast<FontManifestReader*>(ctx)->familyEnd(); };
+  callbacks.onFamilyFormat = [](void* ctx, const char* v, size_t n) {
+    static_cast<FontManifestReader*>(ctx)->familyFormat(v, n);
+  };
+  callbacks.onFamilyInDownloadAll = [](void* ctx, const bool v) {
+    static_cast<FontManifestReader*>(ctx)->familyInDownloadAll(v);
+  };
 
   const auto state = makeUniqueNoThrow<Work>(callbacks, catalog);
   if (!state) {
@@ -78,9 +91,9 @@ FontManifestStatus FontManifestReader::read(HalFile& file, FontCatalog& catalog,
   filling = false;
   if (!feedFile(file)) return FontManifestStatus::Invalid;
   manifestVersion = work->parser.version();
-  // v1 (legacy, no crc32) and v2 (with crc32) are both read; the crc check is skipped per file when
-  // the field is absent. See upstream PR #1904 and scripts/generate-font-manifest.py.
-  if (manifestVersion != 1 && manifestVersion != 2) return FontManifestStatus::UnsupportedVersion;
+  // v1 (legacy, no crc32), v2 (with crc32) and v3 (each family's format) are all read; the crc check is skipped per
+  // file when the field is absent. See upstream PR #1904 and scripts/generate-font-manifest.py.
+  if (manifestVersion < 1 || manifestVersion > 3) return FontManifestStatus::UnsupportedVersion;
 
   const FontCatalog::Size size = counter.size();
   if (!FontCatalog::fits(size)) {
@@ -138,6 +151,9 @@ void FontManifestReader::familyBegin() {
   work->familyNameOverflow = false;
   work->badFile = false;
   work->badFileName[0] = '\0';
+  work->format = FontDownloadRules::FileKind::Cpfont;
+  work->formatName[0] = '\0';
+  work->fileKinds = 0;
 }
 
 // The last one given wins.
@@ -147,6 +163,14 @@ void FontManifestReader::familyName(const char* value, const size_t len) {
 }
 
 void FontManifestReader::familyDescription(const char* value, const size_t len) { builder->description(value, len); }
+
+// The last one given wins; a family that gives none is a .cpfont family.
+void FontManifestReader::familyFormat(const char* value, const size_t len) {
+  copyBounded(work->formatName, sizeof(work->formatName), value, len);
+  work->format = FontDownloadRules::kindOfFormat(value, len);
+}
+
+void FontManifestReader::familyInDownloadAll(const bool value) { builder->inDownloadAll(value); }
 
 // Each file is checked as it comes, in both passes: the counting pass must leave out what the filling
 // pass will leave out.
@@ -158,6 +182,7 @@ void FontManifestReader::fileEntry(const FontManifestFile& f) {
     copyBounded(work->badFileName, sizeof(work->badFileName), f.name, f.nameLen);
     return;
   }
+  work->fileKinds |= static_cast<uint8_t>(1u << static_cast<uint8_t>(FontDownloadRules::kindOf(f.name)));
   builder->addFile(f.name, f.nameLen, f.size, f.crc32, f.hasCrc32);
 }
 
@@ -177,5 +202,19 @@ void FontManifestReader::familyEnd() {
     builder->dropFamily();
     return;
   }
+  if (w.format == FontDownloadRules::FileKind::Unknown) {
+    // A format newer than this reader: not an error, the family is for firmware that knows it.
+    if (filling) LOG_INF(logTag, "Manifest entry %s left out: format %s", w.familyName, w.formatName);
+    builder->dropFamily();
+    return;
+  }
+  if (w.fileKinds & ~static_cast<uint8_t>(1u << static_cast<uint8_t>(w.format))) {
+    if (filling) {
+      LOG_ERR(logTag, "Manifest entry rejected, a file of %s is not of its format %s", w.familyName, w.formatName);
+    }
+    builder->dropFamily();
+    return;
+  }
+  builder->outline(w.format != FontDownloadRules::FileKind::Cpfont);
   builder->keepFamily(w.familyName, w.familyNameLen);
 }

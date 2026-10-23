@@ -56,10 +56,12 @@ TypographyProfile TypographyProfile::forLanguage(const std::string& tag) {
     p.cjkLatinGap = true;
     p.wholeEmGrid = true;
     p.verticalAllowed = true;
+    p.cjkRepertoire = true;
   } else if (hasPrimary(t, "ko")) {
     // Korean spaces its words and uses Western punctuation (KLREQ): the Simplified Chinese table only meets
     // the rare CJK mark, and there is no grid and no CJK-Latin gap.
     p.breaking = Breaking::KoreanWords;
+    p.cjkRepertoire = true;
   }
   return p;
 }

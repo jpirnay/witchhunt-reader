@@ -341,6 +341,69 @@ TEST(TtfFace, BoldIsMacStyleOrAWeightOf600InEitherOutlineFormat) {
   }
 }
 
+namespace {
+
+// A post table: the format at offset 0, the 16.16 italicAngle at 4, zeros after.
+Bytes postTable(const uint32_t format, const int32_t italicAngle, const size_t bytes = 32) {
+  Bytes post(bytes, 0);
+  for (int i = 0; i < 4; ++i) {
+    post[i] = static_cast<uint8_t>(format >> (24 - 8 * i));
+    post[4 + i] = static_cast<uint8_t>(static_cast<uint32_t>(italicAngle) >> (24 - 8 * i));
+  }
+  return post;
+}
+
+bool fileIsItalic(const char* name) {
+  const Bytes data = readFont(name);
+  Face face;
+  EXPECT_EQ(FaceStatus::Ok, parse(data, &face)) << name;
+  return face.italic;
+}
+
+}  // namespace
+
+TEST(TtfFace, ItalicIsMacStyleFsSelectionOrItalicAngleInEitherOutlineFormat) {
+  // Spec 7.4. OS/2 and post are read as FreeType accepts them: one too short (for its version), or a post table
+  // of a format FreeType refuses, counts as missing.
+  for (const bool cff : {false, true}) {
+    const auto italic = [cff](const uint16_t macStyle, const bool os2, const uint16_t fsSelection,
+                              const uint16_t os2Bytes = 78, const Bytes& post = {}) {
+      Font font = threeGlyphs();
+      if (cff) {
+        font.sfntVersion = tagOf("OTTO");
+        font.extraTables = {{"CFF ", buildCff(CffSpec{})}};
+      }
+      if (!post.empty()) font.extraTables.push_back({"post", post});
+      font.macStyle = macStyle;
+      font.os2 = os2;
+      font.os2Selection = fsSelection;
+      font.os2Bytes = os2Bytes;
+      Face face;
+      EXPECT_EQ(FaceStatus::Ok, parse(buildFont(font), &face));
+      return face.italic;
+    };
+    EXPECT_FALSE(italic(0, false, 0)) << cff;
+    EXPECT_TRUE(italic(2, false, 0)) << cff;
+    EXPECT_FALSE(italic(1, false, 0)) << cff;                  // bold
+    EXPECT_TRUE(italic(0, true, 1)) << cff;                    // ITALIC
+    EXPECT_TRUE(italic(0, true, 1u << 9)) << cff;              // OBLIQUE
+    EXPECT_FALSE(italic(0, true, 0x20 | 0x40 | 0x80)) << cff;  // BOLD, REGULAR, USE_TYPO_METRICS
+    EXPECT_FALSE(italic(0, true, 1, 64)) << cff;               // a 64-byte OS/2: missing
+    EXPECT_TRUE(italic(2, true, 0, 64)) << cff;                // macStyle still counts
+    EXPECT_TRUE(italic(0, false, 0, 78, postTable(0x00030000, -15 * 0x10000))) << cff;
+    EXPECT_TRUE(italic(0, false, 0, 78, postTable(0x00020000, 12 * 0x10000, 64))) << cff;  // glyph names follow
+    EXPECT_TRUE(italic(0, false, 0, 78, postTable(0x00010000, -12 * 0x10000))) << cff;     // format 1
+    EXPECT_TRUE(italic(0, false, 0, 78, postTable(0x00025000, -12 * 0x10000))) << cff;     // format 2.5
+    EXPECT_FALSE(italic(0, false, 0, 78, postTable(0x00030000, 0))) << cff;
+    EXPECT_FALSE(italic(0, false, 0, 78, postTable(0x00030000, -15 * 0x10000, 31))) << cff;  // too short
+    EXPECT_FALSE(italic(0, false, 0, 78, postTable(0x00040000, -15 * 0x10000))) << cff;      // format refused
+  }
+  EXPECT_TRUE(fileIsItalic("OpenDyslexic/OpenDyslexic-Italic.otf"));  // by its angle alone
+  EXPECT_FALSE(fileIsItalic("OpenDyslexic/OpenDyslexic-Regular.otf"));
+  EXPECT_TRUE(fileIsItalic("Bookerly/Bookerly-Italic.ttf"));
+  EXPECT_FALSE(fileIsItalic("Bookerly/Bookerly-Regular.ttf"));
+}
+
 TEST(TtfFace, HugeAdvancesNeitherOverflowNorWrap) {
   // A lying hmtx on a tiny em: the 16.16 linear advance passes 2^31, and the 12.4 result passes 16 bits.
   Font font = threeGlyphs();

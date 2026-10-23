@@ -8,7 +8,7 @@
 
 **Tech Stack:** C++17 firmware (PlatformIO, ESP32-C3/S3), GoogleTest host tests (`test/ttf_rasterizer`, `test/ttf_font`) against FreeType 2.13.3 (the SDK's copy, CFF driver included), the device bench `bench/ttf_raster_main.cpp`, `tools/devctl.py`.
 
-**Spec:** `docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md`, section 7, with 9.3 (the oracle's bar for CFF) and section 10's "Bold" and "Latin" bullets. The prototype is `proto/synthetic-bold` (worktree `C:/tmp/wt-bold-proto`, 0da58ed81 on master 2d09575f3). It predates #532, #542 and #544. This plan was checked against master 5ae036f79 on 2026-10-21. Where a step points at the prototype's code, that code is right as it stands; everything else follows master.
+**Spec:** `docs/design/cjk-ttf-fonts.md`, section 7, with 9.3 (the oracle's bar for CFF) and section 10's "Bold" and "Latin" bullets. The prototype is `proto/synthetic-bold` (worktree `C:/tmp/wt-bold-proto`, 0da58ed81 on master 2d09575f3). It predates #532, #542 and #544. This plan was checked against master 5ae036f79 on 2026-10-21. Where a step points at the prototype's code, that code is right as it stands; everything else follows master.
 
 ## Global Constraints
 

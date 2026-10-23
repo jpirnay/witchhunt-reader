@@ -5,6 +5,7 @@
 #include <FontManifestReader.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <fstream>
@@ -93,6 +94,12 @@ const std::string kManifest = R"({
      "files": [{"name": "Beta/Beta_10.cpfont", "size": 3000}]}
   ]
 })";
+
+std::string slurp(const char* path) {
+  std::ifstream in(path, std::ios::binary);
+  EXPECT_TRUE(in.good()) << path;
+  return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
 
 }  // namespace
 
@@ -238,11 +245,11 @@ TEST(FontManifestReaderTest, AnUnreadableFileIsInvalid) {
   EXPECT_NE(reader.failure(), nullptr);
 }
 
-// Only versions 1 and 2 are read; any other leaves nothing behind and reports the version found.
-TEST(FontManifestReaderTest, OnlyVersions1And2AreAccepted) {
-  Outcome out = read(R"({"version":3,"families":[{"name":"A"}]})");
+// Only versions 1 to 3 are read; any other leaves nothing behind and reports the version found.
+TEST(FontManifestReaderTest, OnlyVersions1To3AreAccepted) {
+  Outcome out = read(R"({"version":4,"families":[{"name":"A"}]})");
   EXPECT_EQ(out.status, FontManifestStatus::UnsupportedVersion);
-  EXPECT_EQ(out.version, 3);
+  EXPECT_EQ(out.version, 4);
   EXPECT_TRUE(out.catalog.empty());
   EXPECT_EQ(out.baseUrl, "");
 
@@ -251,6 +258,10 @@ TEST(FontManifestReaderTest, OnlyVersions1And2AreAccepted) {
   EXPECT_EQ(out.version, 0);
 
   out = read(R"({"version":1,"families":[{"name":"A"}]})");
+  EXPECT_EQ(out.status, FontManifestStatus::Ok);
+  EXPECT_EQ(names(out.catalog), (std::vector<std::string>{"A"}));
+
+  out = read(R"({"version":3,"families":[{"name":"A"}]})");
   EXPECT_EQ(out.status, FontManifestStatus::Ok);
   EXPECT_EQ(names(out.catalog), (std::vector<std::string>{"A"}));
 }
@@ -319,4 +330,128 @@ TEST(FontManifestReaderTest, ReadsTheShippedManifest) {
   RecordProperty("blockBytes", static_cast<int>(catalog.blockBytes()));
   // A memory budget with real headroom, not an exact value (the block is ~8 KB today).
   EXPECT_LE(catalog.blockBytes(), 16u * 1024u);
+}
+
+// Version 3 names each family's format. An outline family (ttf or otf) is marked, and a family may say it is not
+// part of "Download all"; a family that says neither is a .cpfont family that is.
+TEST(FontManifestReaderTest, AnOutlineFamilyIsMarkedAndMayStayOutOfDownloadAll) {
+  const Outcome out = read(R"({"version":3,"baseUrl":"https://x/","families":[
+    {"name":"Alpha","format":"cpfont","files":[{"name":"Alpha/Alpha_10.cpfont","size":1}]},
+    {"name":"Beta","files":[{"name":"Beta/Beta_10.cpfont","size":1}]},
+    {"name":"Gamma","format":"ttf","files":[{"name":"Gamma/Gamma-Regular.ttf","size":2}]},
+    {"name":"NotoSansJP","format":"otf","inDownloadAll":false,
+     "files":[{"name":"NotoSansJP/NotoSansJP-Regular.OTF","size":3}]}
+  ]})");
+  ASSERT_EQ(out.status, FontManifestStatus::Ok) << out.failure;
+  EXPECT_EQ(out.version, 3);
+  const FontCatalog& catalog = out.catalog;
+  ASSERT_EQ(names(catalog), (std::vector<std::string>{"Alpha", "Beta", "Gamma", "NotoSansJP"}));
+  EXPECT_FALSE(catalog.outline(0));
+  EXPECT_FALSE(catalog.outline(1));
+  EXPECT_TRUE(catalog.outline(2));
+  EXPECT_TRUE(catalog.outline(3));
+  EXPECT_TRUE(catalog.inDownloadAll(0));
+  EXPECT_TRUE(catalog.inDownloadAll(1));
+  EXPECT_TRUE(catalog.inDownloadAll(2));
+  EXPECT_FALSE(catalog.inDownloadAll(3));
+  EXPECT_STREQ(catalog.fileLocalName(3, 0), "NotoSansJP-Regular.OTF");
+}
+
+// A format a newer app may add is not an error: the family is for firmware that knows it, and takes no room.
+TEST(FontManifestReaderTest, AFamilyOfAFormatThisReaderDoesNotKnowIsLeftOut) {
+  const Outcome out = read(R"({"version":3,"families":[
+    {"name":"Future","format":"woff2","files":[{"name":"Future/Future.woff2","size":1}]},
+    {"name":"Fine","format":"cpfont","files":[{"name":"Fine/Fine_10.cpfont","size":1}]}
+  ]})");
+  ASSERT_EQ(out.status, FontManifestStatus::Ok) << out.failure;
+  EXPECT_EQ(names(out.catalog), (std::vector<std::string>{"Fine"}));
+  EXPECT_EQ(out.catalog.blockBytes(), FontCatalog::blockBytesFor({1, 1, stringBytes(out.catalog)}));
+}
+
+// A family's files are all of its format's kind; one that is not, or whose name is no kind at all, rejects the family.
+TEST(FontManifestReaderTest, AFileNotOfItsFamilysFormatRejectsTheFamily) {
+  const Outcome out = read(R"({"version":3,"families":[
+    {"name":"OtfWithTtf","format":"otf","files":[{"name":"OtfWithTtf/a.ttf","size":1}]},
+    {"name":"NoFormatWithOtf","files":[{"name":"NoFormatWithOtf/a.otf","size":1}]},
+    {"name":"OtfPart","format":"otf","files":[{"name":"OtfPart/x.otf.part","size":1}]},
+    {"name":"Fine","format":"cpfont","files":[{"name":"Fine/Fine_10.cpfont","size":1}]}
+  ]})");
+  ASSERT_EQ(out.status, FontManifestStatus::Ok) << out.failure;
+  EXPECT_EQ(names(out.catalog), (std::vector<std::string>{"Fine"}));
+  EXPECT_EQ(out.catalog.blockBytes(), FontCatalog::blockBytesFor({1, 1, stringBytes(out.catalog)}));
+}
+
+// The format may follow the files, and the last one given wins; the family is judged when it closes.
+TEST(FontManifestReaderTest, TheFormatMayFollowTheFilesAndTheLastOneWins) {
+  const Outcome out = read(R"({"version":3,"families":[
+    {"name":"Late","files":[{"name":"Late/Late-Regular.otf","size":1}],"format":"otf"},
+    {"name":"Twice","format":"otf","files":[{"name":"Twice/Twice_10.cpfont","size":1}],"format":"cpfont"}
+  ]})");
+  ASSERT_EQ(out.status, FontManifestStatus::Ok) << out.failure;
+  ASSERT_EQ(names(out.catalog), (std::vector<std::string>{"Late", "Twice"}));
+  EXPECT_TRUE(out.catalog.outline(0));
+  EXPECT_FALSE(out.catalog.outline(1));
+}
+
+// The shipped version 3 manifest, end to end: the eight CJK families are outline and out of "Download all"; the rest
+// are the .cpfont families, in it.
+TEST(FontManifestReaderTest, ReadsTheShippedV3Manifest) {
+  const Outcome out = read(slurp(FONT_MANIFEST_V3_PATH));
+  ASSERT_EQ(out.status, FontManifestStatus::Ok) << out.failure;
+  EXPECT_EQ(out.version, 3);
+  EXPECT_EQ(out.baseUrl, "https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/");
+  const FontCatalog& catalog = out.catalog;
+
+  const std::vector<std::string> cjk = {"NotoSansJP",  "NotoSansKR",  "NotoSansSC",  "NotoSansTC",
+                                        "NotoSerifJP", "NotoSerifKR", "NotoSerifSC", "NotoSerifTC"};
+  size_t outlines = 0;
+  for (size_t i = 0; i < catalog.count(); ++i) {
+    const std::string name = catalog.name(i);
+    EXPECT_NE(name, "NotoSansCJK");
+    EXPECT_NE(name, "NotoSerifCJK");
+    EXPECT_NE(name, "NotoSansHangul");
+    if (std::find(cjk.begin(), cjk.end(), name) != cjk.end()) {
+      ++outlines;
+      EXPECT_TRUE(catalog.outline(i)) << name;
+      EXPECT_FALSE(catalog.inDownloadAll(i)) << name;
+      ASSERT_EQ(catalog.fileCount(i), 1u) << name;
+      EXPECT_EQ(std::string(catalog.fileName(i, 0)), name + "/" + name + "-Regular.otf");
+      EXPECT_TRUE(catalog.fileHasCrc32(i, 0)) << name;
+    } else {
+      EXPECT_FALSE(catalog.outline(i)) << name;
+      EXPECT_TRUE(catalog.inDownloadAll(i)) << name;
+    }
+  }
+  EXPECT_EQ(outlines, 8u);
+  EXPECT_LE(catalog.blockBytes(), 16u * 1024u);
+}
+
+// An older reader sees what it always saw: a version 2 document of .cpfont families, no mention of format.
+TEST(FontManifestReaderTest, TheShippedVersion2ManifestListsCpfontFamiliesOnly) {
+  const std::string v2Text = slurp(FONT_MANIFEST_PATH);
+  EXPECT_EQ(v2Text.find(R"("format")"), std::string::npos);
+  EXPECT_EQ(v2Text.find("inDownloadAll"), std::string::npos);
+
+  const Outcome v2 = read(v2Text);
+  ASSERT_EQ(v2.status, FontManifestStatus::Ok) << v2.failure;
+  EXPECT_EQ(v2.version, 2);
+  for (size_t i = 0; i < v2.catalog.count(); ++i) {
+    const std::string name = v2.catalog.name(i);
+    EXPECT_NE(name, "NotoSansCJK");
+    EXPECT_NE(name, "NotoSerifCJK");
+    EXPECT_NE(name, "NotoSansHangul");
+    for (size_t j = 0; j < v2.catalog.fileCount(i); ++j) {
+      const std::string file = v2.catalog.fileName(i, j);
+      ASSERT_GT(file.size(), 7u);
+      EXPECT_EQ(file.substr(file.size() - 7), ".cpfont") << file;
+    }
+  }
+  const Outcome v3 = read(slurp(FONT_MANIFEST_V3_PATH));
+  ASSERT_EQ(v3.status, FontManifestStatus::Ok) << v3.failure;
+  EXPECT_EQ(v2.catalog.count(), v3.catalog.count() - 8);
+}
+
+TEST(FontManifestReaderTest, TheManifestUrlIsTheV3ManifestOnMaster) {
+  EXPECT_STREQ(FONT_MANIFEST_URL,
+               "https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/fonts-v3.json");
 }

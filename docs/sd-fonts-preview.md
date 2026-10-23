@@ -2,9 +2,9 @@
 
 This page lists the SD font families under `assets/sd-fonts` and embeds a rendered preview image for each family that has one.
 
-Families with no preview image yet: Charis, Libron, NotoSansCJK, NotoSansHangul, NotoSerifCJK, Sourcerer.
+Families with no preview image yet: Charis, Libron, NotoSansJP, NotoSansKR, NotoSansSC, NotoSansTC, NotoSerifJP, NotoSerifKR, NotoSerifSC, NotoSerifTC, Sourcerer.
 
-The previews come from `scripts/generate_sd_font_previews.py`. The build recipe for the families is `lib/EpdFont/scripts/sd-fonts.yaml`. It differs from the shipped set in two ways: `Domitian` is listed there but has no folder in `assets/sd-fonts`, and the CJK and Hangul families (`NotoSansCJK`, `NotoSerifCJK`, `NotoSansHangul`) are commented out there but are present in `assets/sd-fonts`. `Readerly` was retired and replaced by `Libron`.
+The previews come from `scripts/generate_sd_font_previews.py`. The build recipe for the families is `lib/EpdFont/scripts/sd-fonts.yaml`. It differs from the shipped set in one way: `Domitian` is listed there but has no folder in `assets/sd-fonts`. `Readerly` was retired and replaced by `Libron`.
 
 | Font Family | Preview |
 |---|---|
@@ -24,11 +24,16 @@ The previews come from `scripts/generate_sd_font_previews.py`. The build recipe 
 | Literata | ![Preview of Literata](images/sd-font-previews/Literata.png) |
 | Lora | ![Preview of Lora](images/sd-font-previews/Lora.png) |
 | Merriweather | ![Preview of Merriweather](images/sd-font-previews/Merriweather.png) |
-| NotoSansCJK | (no preview image yet) |
 | NotoSansExtended | ![Preview of NotoSansExtended](images/sd-font-previews/NotoSansExtended.png) |
-| NotoSansHangul | (no preview image yet) |
-| NotoSerifCJK | (no preview image yet) |
+| NotoSansJP | (no preview image yet) |
+| NotoSansKR | (no preview image yet) |
+| NotoSansSC | (no preview image yet) |
+| NotoSansTC | (no preview image yet) |
 | NotoSerifExtended | ![Preview of NotoSerifExtended](images/sd-font-previews/NotoSerifExtended.png) |
+| NotoSerifJP | (no preview image yet) |
+| NotoSerifKR | (no preview image yet) |
+| NotoSerifSC | (no preview image yet) |
+| NotoSerifTC | (no preview image yet) |
 | OpenDyslexic | ![Preview of OpenDyslexic](images/sd-font-previews/OpenDyslexic.png) |
 | SourceCodePro | ![Preview of SourceCodePro](images/sd-font-previews/SourceCodePro.png) |
 | Sourcerer | (no preview image yet) |

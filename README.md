@@ -183,6 +183,10 @@ Pulled from the PlatformIO registry at build time.
 - **ArduinoJson** by Benoît Blanchon — JSON parsing/serialization. https://github.com/bblanchon/ArduinoJson — MIT.
 - **arduinoWebSockets** by Markus Sattler — WebSocket client (KOReader sync). https://github.com/Links2004/arduinoWebSockets — LGPL-2.1.
 
+## Fonts the Font Manager downloads (assets/sd-fonts)
+
+- **Noto Sans CJK and Noto Serif CJK** (Adobe) — subset per language into NotoSansJP … NotoSerifKR by `lib/EpdFont/scripts/cjk_subset.py`, with U+FFFD from Noto Sans. https://github.com/notofonts/noto-cjk — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
+
 # Why this name
 Originally this fork was called CrossPoint++ - it had a small userbase and then I made an honest mistake by reusing the crosspoint fork, providing ample reference in the PRs and the release notes of code origin and authorship but was losing the github commit author information in the progress when I copied code over instead of taking the tedious (and correct) way of cherrypicking the original commit and post-cleanup effort.
 

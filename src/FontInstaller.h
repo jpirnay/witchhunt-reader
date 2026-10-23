@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "util/FontCatalog.h"
+
 /// Shared utility for font installation (device download + browser upload).
 /// Handles directory creation, file validation, deletion, and registry refresh.
 class FontInstaller {
@@ -33,8 +35,13 @@ class FontInstaller {
   /// Ensure /.crosspoint/fonts/<family>/ directory exists.
   bool ensureFamilyDir(const char* familyName);
 
-  /// Validate a .cpfont file on disk (check magic bytes).
-  bool validateCpfontFile(const char* path);
+  /// Validate a downloaded font file on disk by its kind (FontDownloadRules::kindOf and headOk): a .cpfont's magic, a
+  /// .ttf's TrueType outlines, an .otf's CFF outlines. A file of another kind fails.
+  bool validateFontFile(const char* path);
+
+  /// Whether the card has room for a download of `bytes` (FontDownloadRules::fits); `freeBytes`, when given, gets
+  /// what is free. Scans the FAT once per 20 s (SDCardManager caches it), so ask once per download, not per file.
+  static bool hasRoomFor(uint64_t bytes, uint64_t* freeBytes = nullptr);
 
   /// Compute CRC32 of a file (esp_rom_crc32_le accumulator, matches
   /// zlib.crc32 used by scripts/generate-font-manifest.py). Returns false if
@@ -61,9 +68,28 @@ class FontInstaller {
   /// Check whether a family name already exists in the registry.
   bool isFamilyInstalled(const char* familyName) const;
 
- private:
-  SdCardFontRegistry& registry_;
+  /// The family is on the card: the registry lists it, or its folder is there. An outline family the glyph store
+  /// cannot hold is installed but not listed; the Font Manager must not offer it again.
+  bool isFamilyOnCard(const char* familyName) const;
 
-  static constexpr const char* CPFONT_MAGIC = "CPFONT\0";
-  static constexpr size_t CPFONT_MAGIC_LEN = 8;
+  /// Whether downloading `family` of `families` would update what the card holds: counts its files that are there at
+  /// the manifest's size, at another size, or missing, and asks FontDownloadRules::isUpdate.
+  static bool hasUpdate(const FontCatalog& families, size_t family);
+
+  /// Whether the folder of `family` holds none of the manifest's files (not at their size, not at another): a family
+  /// of the reader's own under a hosted name. Asked of an installed family; installing over it replaces its files.
+  static bool holdsOwnFiles(const FontCatalog& families, size_t family);
+
+  /// An outline family just installed that the registry does not list: the glyph store cannot hold it.
+  bool installedButNotListed(const FontCatalog& families, size_t family) const;
+
+ private:
+  struct FileCounts {
+    size_t same = 0;     // on the card at the manifest's size
+    size_t changed = 0;  // on the card at another size
+    size_t absent = 0;   // missing
+  };
+  static FileCounts countFiles(const FontCatalog& families, size_t family);
+
+  SdCardFontRegistry& registry_;
 };

@@ -30,9 +30,16 @@ struct Recorder {
     self(ctx).events.push_back(line);
   }
   static void familyEnd(void* ctx) { self(ctx).events.emplace_back("}family"); }
+  static void familyFormat(void* ctx, const char* value, size_t len) {
+    self(ctx).events.push_back("format=" + std::string(value, len));
+  }
+  static void familyInDownloadAll(void* ctx, bool value) {
+    self(ctx).events.push_back(std::string("inDownloadAll=") + (value ? "true" : "false"));
+  }
 
   FontManifestCallbacks callbacks() {
-    return FontManifestCallbacks{this, familyBegin, familyName, familyDescription, file, familyEnd};
+    return FontManifestCallbacks{this, familyBegin, familyName,   familyDescription,
+                                 file, familyEnd,   familyFormat, familyInDownloadAll};
   }
 };
 
@@ -375,4 +382,60 @@ TEST(FontManifestParserTest, ResetStartsAFreshDocument) {
   EXPECT_EQ(rec.events, kTwoFamiliesEvents);
   EXPECT_TRUE(parser.complete());
   EXPECT_FALSE(parser.hasError());
+}
+
+// Version 3: a family says its format and whether "Download all" takes it, in any order among its keys.
+TEST(FontManifestParserTest, AVersion3FamilyGivesItsFormatAndItsPlaceInDownloadAll) {
+  const Parsed run = parse(
+      R"({"version":3,"baseUrl":"https://x/","families":[{"name":"NotoSansJP","inDownloadAll":false,"format":"otf",)"
+      R"("files":[{"name":"NotoSansJP/NotoSansJP-Regular.otf","size":5,"crc32":6}],"description":"JP"},)"
+      R"({"format":"cpfont","inDownloadAll":true,"name":"Alpha"}]})");
+  EXPECT_EQ(run.events, (Events{
+                            "family{",
+                            "name=NotoSansJP",
+                            "inDownloadAll=false",
+                            "format=otf",
+                            "file=NotoSansJP/NotoSansJP-Regular.otf size=5 crc=6",
+                            "desc=JP",
+                            "}family",
+                            "family{",
+                            "format=cpfont",
+                            "inDownloadAll=true",
+                            "name=Alpha",
+                            "}family",
+                        }));
+  EXPECT_EQ(run.version, 3);
+  EXPECT_TRUE(run.complete);
+}
+
+// inDownloadAll is a boolean or nothing: a string, a number or null is dropped, and the family still arrives.
+TEST(FontManifestParserTest, AnInDownloadAllThatIsNotABooleanIsIgnored) {
+  const Parsed run =
+      parse(R"({"version":3,"families":[{"name":"A","inDownloadAll":"false"},{"name":"B","inDownloadAll":0},)"
+            R"({"name":"C","inDownloadAll":null}]})");
+  EXPECT_EQ(run.events, (Events{
+                            "family{",
+                            "name=A",
+                            "}family",
+                            "family{",
+                            "name=B",
+                            "}family",
+                            "family{",
+                            "name=C",
+                            "}family",
+                        }));
+  EXPECT_TRUE(run.complete);
+}
+
+// A boolean that is an element of families[] is still the empty entry any non-object is.
+TEST(FontManifestParserTest, ABooleanInAFamiliesArrayIsStillAnEmptyEntry) {
+  EXPECT_EQ(parse(R"({"version":3,"families":[true]})").events, (Events{"family{", "}family"}));
+}
+
+// Only a family's own object says its format.
+TEST(FontManifestParserTest, AFormatOutsideAFamilyIsIgnored) {
+  const Parsed run =
+      parse(R"({"version":3,"format":"otf","families":[{"name":"A","files":[{"name":"A/a.otf","format":"otf",)"
+            R"("inDownloadAll":false}]}]})");
+  EXPECT_EQ(run.events, (Events{"family{", "name=A", "file=A/a.otf size=0 crc=-", "}family"}));
 }

@@ -3,7 +3,8 @@
 
 Reads sd-fonts.yaml, downloads any missing source fonts, runs
 fontconvert_sdcard.py in parallel for each family, and optionally
-generates the fonts.json manifest.
+generates the fonts.json manifest. A family with `format: otf` is a CFF
+subset instead (cjk_subset.py): one <name>-Regular.otf, drawn at every size.
 
 Usage:
     # Generate fonts (output in ./output/)
@@ -26,6 +27,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import os
 import shutil
 import subprocess
@@ -47,20 +49,32 @@ DEFAULT_OUTPUT = SCRIPT_DIR / "output"
 DOWNLOAD_DIR = SCRIPT_DIR / "downloaded_fonts"
 INSTANCE_DIR = SCRIPT_DIR / "instanced_fonts"
 
+sys.path.insert(0, str(SCRIPT_DIR))  # cjk_subset, when this file is loaded by path
 
-def download_font(url: str, dest: Path) -> Path:
-    """Download a font file if not already cached. Returns the local path."""
-    if dest.exists():
-        return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    print(f"  Downloading {dest.name}...")
-    try:
-        urllib.request.urlretrieve(url, dest)
-    except Exception as e:
-        dest.unlink(missing_ok=True)
-        raise RuntimeError(f"Failed to download {url}: {e}") from e
-    size_kb = dest.stat().st_size / 1024
-    print(f"  Downloaded {dest.name} ({size_kb:.0f} KB)")
+
+def sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def download_font(url: str, dest: Path, sha256: str | None = None) -> Path:
+    """Download a font file if not already cached. Returns the local path. With `sha256`, the file must have
+    that hash, cached or downloaded: a pinned source that changed under its URL fails the build."""
+    if not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        print(f"  Downloading {dest.name}...")
+        try:
+            urllib.request.urlretrieve(url, dest)
+        except Exception as e:
+            dest.unlink(missing_ok=True)
+            raise RuntimeError(f"Failed to download {url}: {e}") from e
+        size_kb = dest.stat().st_size / 1024
+        print(f"  Downloaded {dest.name} ({size_kb:.0f} KB)")
+    if sha256 and sha256_of(dest) != sha256.lower():
+        raise RuntimeError(f"{dest} does not have the sha256 sd-fonts.yaml pins for {url}; delete it to download again")
     return dest
 
 
@@ -136,7 +150,7 @@ def resolve_font_path(style_spec: dict, family_name: str, style_name: str) -> Pa
         # Derive a stable filename from the URL
         filename = url.rsplit("/", 1)[-1]
         dest = DOWNLOAD_DIR / family_name / filename
-        resolved = download_font(url, dest)
+        resolved = download_font(url, dest, style_spec.get("sha256"))
     else:
         raise ValueError(f"{family_name}/{style_name}: must have 'path' or 'url'")
 
@@ -156,13 +170,48 @@ def _stream_pipe(pipe, prefix: str, dest: list[str]):
         print(f"  [{prefix}] {line}", end="", flush=True)
 
 
+def resolve_unihan(config: dict) -> Path | None:
+    """The Unicode Han database the CJK character sets read (sd-fonts.yaml's `unihan`), downloaded once."""
+    spec = config.get("unihan")
+    if not spec:
+        return None
+    url = spec["url"]
+    version = url.rstrip("/").split("/")[-3]  # .../Public/<version>/ucd/Unihan.zip
+    return download_font(url, DOWNLOAD_DIR / "Unihan" / f"Unihan-{version}.zip", spec.get("sha256"))
+
+
+def build_otf_family(
+    family: dict, output_dir: Path, unihan: Path | None, fonttools_pin: str | None
+) -> tuple[str, bool, str]:
+    """A `format: otf` entry: the CFF subset of its source (cjk_subset.py)."""
+    import cjk_subset
+
+    name = family["name"]
+    if unihan is None:
+        return name, False, "a CJK subset needs the config's unihan entry"
+    try:
+        if fonttools_pin:
+            cjk_subset.check_fonttools(fonttools_pin)
+        source = resolve_font_path(family["source"], name, "regular")
+        report = cjk_subset.build_family(family, output_dir, source, unihan)
+    except (FileNotFoundError, RuntimeError, cjk_subset.BuildError) as e:
+        return name, False, str(e)
+    dropped = ", ".join(f"{tag} {size / 1024:.0f} KB" for tag, size in report["dropped"].items())
+    return name, True, (f"{report['characters']} characters, cmap {report['cmap']}, {report['glyphs']} glyphs, "
+                        f"{report['bytes'] / 1e6:.2f} MB; kerning pairs about {report['kernPairs']}; "
+                        f"dropped {dropped}")
+
+
 def build_family(
-    family: dict, output_base: Path, verbose: bool = False, timeout: int = 600
+    family: dict, output_base: Path, verbose: bool = False, timeout: int = 600,
+    unihan: Path | None = None, fonttools_pin: str | None = None
 ) -> tuple[str, bool, str]:
     """Build a single font family. Returns (name, success, message)."""
     name = family["name"]
     output_dir = output_base / name
     output_dir.mkdir(parents=True, exist_ok=True)
+    if family.get("format") == "otf":
+        return build_otf_family(family, output_dir, unihan, fonttools_pin)
 
     styles = family.get("styles", {})
     intervals = family["intervals"]
@@ -252,10 +301,11 @@ def build_family(
 def generate_manifest(
     config_path: Path, output_base: Path, base_url: str, manifest_path: Path
 ):
-    """Generate fonts.json manifest from config + built output.
+    """Generate the manifests from config + built output: fonts.json (.cpfont families, version 2, for older
+    firmware) and fonts-v3.json beside it (every family, version 3).
 
-    Uses the standalone generate-font-manifest.py as a subprocess so
-    descriptions come from the YAML config via --descriptions-from.
+    Uses the standalone generate-font-manifest.py as a subprocess so the
+    family list and descriptions come from the YAML config via --config.
     """
     manifest_script = SCRIPT_DIR.parent.parent.parent / "scripts" / "generate-font-manifest.py"
 
@@ -267,10 +317,11 @@ def generate_manifest(
         "--input", str(output_base),
         "--base-url", base_url,
         "--output", str(manifest_path),
+        "--output-v3", str(manifest_path.with_name("fonts-v3.json")),
     ]
 
     if config_path.exists():
-        cmd.extend(["--descriptions-from", str(config_path)])
+        cmd.extend(["--config", str(config_path)])
 
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -319,7 +370,7 @@ def main():
         print(f"ERROR: Config not found: {config_path}", file=sys.stderr)
         sys.exit(1)
 
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     families = config.get("families", [])
@@ -348,25 +399,32 @@ def main():
 
     # Download phase (sequential — avoids hammering servers)
     print(f"\n=== Resolving {len(families)} font families ===\n")
-    for family in families:
-        for style_name, style_spec in family.get("styles", {}).items():
-            if "url" in style_spec:
-                try:
+    unihan = None
+    try:
+        if any(f.get("format") == "otf" for f in families):
+            unihan = resolve_unihan(config)
+        for family in families:
+            specs = dict(family.get("styles", {}))
+            if "source" in family:
+                specs["regular"] = family["source"]
+            for style_name, style_spec in specs.items():
+                if "url" in style_spec:
                     resolve_font_path(style_spec, family["name"], style_name)
-                except Exception as e:
-                    print(f"ERROR: {e}", file=sys.stderr)
-                    sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     # Build phase (parallel)
     max_workers = args.jobs or len(families)
     verbose = args.verbose
     timeout = args.timeout
+    fonttools_pin = config.get("fonttools")
     print(f"\n=== Building {len(families)} families ({max_workers} parallel jobs, timeout {timeout}s) ===\n")
 
     failed = []
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(build_family, family, output_base, verbose, timeout): family["name"]
+            executor.submit(build_family, family, output_base, verbose, timeout, unihan, fonttools_pin): family["name"]
             for family in families
         }
         for future in as_completed(futures):
@@ -374,18 +432,18 @@ def main():
             if success:
                 # Count output files
                 family_dir = output_base / name
-                count = len(list(family_dir.glob("*.cpfont")))
-                size = sum(f.stat().st_size for f in family_dir.glob("*.cpfont"))
-                print(f"  OK: {name} ({count} files, {size / 1024 / 1024:.1f} MB)")
+                files = list(family_dir.glob("*.cpfont")) + list(family_dir.glob("*.otf"))
+                size = sum(f.stat().st_size for f in files)
+                print(f"  OK: {name} ({len(files)} files, {size / 1024 / 1024:.1f} MB) {message}")
             else:
                 print(f"  FAILED: {name}: {message}", file=sys.stderr)
                 failed.append(name)
 
     # Summary
     print("\n=== Summary ===\n")
-    total_files = len(list(output_base.rglob("*.cpfont")))
-    total_size = sum(f.stat().st_size for f in output_base.rglob("*.cpfont"))
-    print(f"Total: {total_files} .cpfont files ({total_size / 1024 / 1024:.1f} MB)")
+    built = list(output_base.rglob("*.cpfont")) + list(output_base.rglob("*.otf"))
+    total_size = sum(f.stat().st_size for f in built)
+    print(f"Total: {len(built)} font files ({total_size / 1024 / 1024:.1f} MB)")
 
     if failed:
         print(f"\nFailed families: {', '.join(failed)}", file=sys.stderr)

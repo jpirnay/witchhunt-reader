@@ -73,7 +73,7 @@ void FontManifestParser::sOnNumber(void* ctx, const char* value, const size_t le
   static_cast<FontManifestParser*>(ctx)->onNumber(value, len);
 }
 
-void FontManifestParser::sOnBool(void* ctx, bool /*value*/) { static_cast<FontManifestParser*>(ctx)->onOtherValue(); }
+void FontManifestParser::sOnBool(void* ctx, const bool value) { static_cast<FontManifestParser*>(ctx)->onBool(value); }
 
 void FontManifestParser::sOnNull(void* ctx) { static_cast<FontManifestParser*>(ctx)->onOtherValue(); }
 
@@ -113,6 +113,10 @@ void FontManifestParser::onKey(const char* key, const size_t len) {
         pendingKey = Key::NAME;
       } else if (keyIs(key, len, "description")) {
         pendingKey = Key::DESCRIPTION;
+      } else if (keyIs(key, len, "format")) {
+        pendingKey = Key::FORMAT;
+      } else if (keyIs(key, len, "inDownloadAll")) {
+        pendingKey = Key::IN_DOWNLOAD_ALL;
       } else if (keyIs(key, len, "files")) {
         pendingKey = Key::FILES;
       } else {
@@ -162,6 +166,7 @@ void FontManifestParser::onString(const char* value, const size_t len) {
     case Where::IN_FAMILY:
       if (key == Key::NAME && cb.onFamilyName) cb.onFamilyName(cb.ctx, value, len);
       if (key == Key::DESCRIPTION && cb.onFamilyDescription) cb.onFamilyDescription(cb.ctx, value, len);
+      if (key == Key::FORMAT && cb.onFamilyFormat) cb.onFamilyFormat(cb.ctx, value, len);
       break;
     case Where::IN_FILES:
       emitEmptyFile();
@@ -208,7 +213,17 @@ void FontManifestParser::onNumber(const char* value, const size_t len) {
   }
 }
 
-// true, false or null: never a value the manifest reads, but still an element of an array.
+void FontManifestParser::onBool(const bool value) {
+  if (ignoring()) return;
+  if (where == Where::IN_FAMILY && pendingKey == Key::IN_DOWNLOAD_ALL) {
+    takeKey();
+    if (cb.onFamilyInDownloadAll) cb.onFamilyInDownloadAll(cb.ctx, value);
+    return;
+  }
+  onOtherValue();
+}
+
+// true, false or null where the manifest reads none, which is still an element of an array.
 void FontManifestParser::onOtherValue() {
   if (ignoring()) return;
   takeKey();
