@@ -152,7 +152,7 @@ uint16_t magicOf(const fs::path& cache) {
   return magic;
 }
 
-// A cache as a decode that settled for the DC preview leaves it: stamped coarse.
+// A cache as a decode that settled for a coarser scale leaves it: stamped coarse.
 void plantCoarseCache(const fs::path& cache) {
   std::ofstream out(cache.string(), std::ios::binary);
   const uint16_t header[3] = {PixelCache::PXC_MAGIC_COARSE, 120, 160};

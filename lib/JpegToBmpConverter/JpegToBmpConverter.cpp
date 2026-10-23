@@ -8,7 +8,6 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <ProgressiveJpeg.h>
-#include <ProgressiveJpegDc.h>
 #include <tjpgd.h>
 
 #include <algorithm>
@@ -377,22 +376,27 @@ int tjpgBmpOutput(JDEC* jd, void* bitmap, JRECT* rect) {
   return sinks->error ? 0 : 1;
 }
 
-static bool progressiveBmpShouldAbort(void*) {
-  if (!CooperativeAbort::shouldAbortLongTask()) return false;
-  CooperativeAbort::markAborted();
-  return true;
-}
+// An output written straight from decodeResized()'s rows, and how many arrived.
+struct ResizedOutput {
+  BmpConvertCtx* ctx;
+  int rows;
+};
 
-static bool progressiveBmpOutput(void* user, uint16_t y, const uint8_t* grayscale, uint16_t width) {
-  auto* ctx = static_cast<BmpConvertCtx*>(user);
+static bool resizedBmpOutput(void* user, uint16_t y, const uint8_t* grayscale, uint16_t width) {
+  auto* out = static_cast<ResizedOutput*>(user);
+  BmpConvertCtx* ctx = out->ctx;
   if (!ctx || ctx->error || width != ctx->outWidth || y >= ctx->outHeight) return false;
   writeOutputRow(ctx, grayscale, y);
+  out->rows = y + 1;
   return !ctx->error;
 }
 
-static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& sink, int targetWidth, int targetHeight, bool oneBit,
-                                  bool crop, const ProgressiveJpegDc::ImageInfo& image, bool eightBit,
-                                  const uint32_t base) {
+// One output from the 1/8 decode resampled to its size (ProgressiveJpeg::decodeResized): when no
+// finer scale's workspace fits, or the 1/8 picture is smaller than the output and the row pipeline
+// would enlarge it into blocks. `workspace`: from the caller's region, or null for a heap block.
+static bool convertResized(FsFile& jpegFile, Print& sink, int targetWidth, int targetHeight, bool oneBit, bool crop,
+                           const ProgressiveJpeg::ImageInfo& image, bool eightBit, const uint32_t base,
+                           uint8_t* workspace, const size_t workspaceSize) {
   // One row per write is one file call per row (see BufferedPrint); coalesce them.
   BufferedPrint bmpOut(sink);
   constexpr int MAX_IMAGE_WIDTH = 2048;
@@ -466,16 +470,19 @@ static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& sink, int targetWidth
     ctx.fsDitherer = fsDitherer.get();
   }
 
-  ProgressiveJpegDc::DecodeOptions options;
+  ProgressiveJpeg::DecodeOptions options;
   options.base = base;
-  options.outputWidth = outWidth;
-  options.outputHeight = outHeight;
-  options.shouldAbort = progressiveBmpShouldAbort;
-  const auto result = ProgressiveJpegDc::decode(jpegFile, options, progressiveBmpOutput, &ctx);
-
-  if (result != ProgressiveJpegDc::Result::Ok) {
-    LOG_ERR("JPG", "Progressive JPEG preview failed: %s", ProgressiveJpegDc::resultName(result));
-    return false;
+  options.shouldAbort = progressiveFullShouldAbort;
+  options.workspace = workspace;
+  options.workspaceSize = workspaceSize;
+  ResizedOutput out{&ctx, 0};
+  const auto result = ProgressiveJpeg::decodeResized(jpegFile, options, static_cast<uint16_t>(outWidth),
+                                                     static_cast<uint16_t>(outHeight), resizedBmpOutput, &out);
+  if (result != ProgressiveJpeg::Result::Ok) {
+    LOG_ERR("JPG", "Resized progressive cover: %s", ProgressiveJpeg::resultName(result));
+    // As for the full conversions (keptOrFailed): rows that arrived stay, with a background rest.
+    if (result == ProgressiveJpeg::Result::Aborted || ctx.error || out.rows == 0) return false;
+    for (int y = out.rows; y < outHeight; ++y) writeOutputRow(&ctx, nullptr, y);
   }
   // Fold the final flush into the result: a write that fails here would otherwise be reported
   // as a complete BMP, and the caller would cache a truncated file.
@@ -483,7 +490,7 @@ static bool decodeProgressiveJpeg(FsFile& jpegFile, Print& sink, int targetWidth
     LOG_ERR("JPG", "Failed to flush buffered BMP output");
     return false;
   }
-  LOG_DBG("JPG", "Progressive JPEG preview decoded: %ux%u -> %dx%d", image.width, image.height, outWidth, outHeight);
+  LOG_DBG("JPG", "Progressive cover resized from 1/8: %ux%u -> %dx%d", image.width, image.height, outWidth, outHeight);
   return true;
 }
 
@@ -797,21 +804,20 @@ static bool convertScaledMulti(const OutputTarget* targets, const int count, con
 // (accumulators, BMP row, a ditherer -- a few KB at thumbnail widths) and a floor for the rest.
 constexpr size_t PROGRESSIVE_ROW_PIPELINE_HEAP = 16 * 1024;
 
-// The DCT pre-scale for a full progressive decode: the largest that keeps both axes >= every
-// target (as the TJpgDec path chooses), then coarser while the workspace does not fit -- a coarser
-// cover beats the 1/8 DC preview. False when no scale fits.
+// The DCT pre-scale for a full progressive decode into the row pipeline: the largest that keeps
+// both axes >= every target (as the TJpgDec path chooses), then coarser while the workspace does
+// not fit. False when the cover is the 1/8 decode resized instead (convertResized): no scale fits,
+// or only 1/8 does and the pipeline would enlarge it -- a source pixel per output pixel, blocks.
 static bool chooseProgressiveShift(const OutputTarget* targets, const int count, const ProgressiveJpeg::ImageInfo& info,
                                    BuildArena* scratch, uint8_t* shiftOut) {
   uint8_t shift = 0;
-  {
-    const float scaleMax = finestTargetScale(targets, count, info.width, info.height);
-    if (scaleMax <= 0.125f) {
-      shift = 3;
-    } else if (scaleMax <= 0.25f) {
-      shift = 2;
-    } else if (scaleMax <= 0.5f) {
-      shift = 1;
-    }
+  const float scaleMax = finestTargetScale(targets, count, info.width, info.height);
+  if (scaleMax <= 0.125f) {
+    shift = 3;
+  } else if (scaleMax <= 0.25f) {
+    shift = 2;
+  } else if (scaleMax <= 0.5f) {
+    shift = 1;
   }
   const bool arenaBacked = scratch != nullptr && scratch->valid();
   for (; shift <= 3; ++shift) {
@@ -824,7 +830,12 @@ static bool chooseProgressiveShift(const OutputTarget* targets, const int count,
     if (fits) break;
   }
   if (shift > 3) {
-    LOG_INF("JPG", "Progressive cover: no scale's workspace fits (%u free); DC preview",
+    LOG_INF("JPG", "Progressive cover: no scale's workspace fits (%u free); the 1/8 decode, resized",
+            static_cast<unsigned>(ESP.getFreeHeap()));
+    return false;
+  }
+  if (shift == 3 && scaleMax > 0.125f) {
+    LOG_INF("JPG", "Progressive cover: only 1/8 fits (%u free); resized rather than enlarged in blocks",
             static_cast<unsigned>(ESP.getFreeHeap()));
     return false;
   }
@@ -841,8 +852,8 @@ static void logCoverReads(const ProgressiveJpeg::DecodeStats& stats, const bool 
   (void)windows;
 }
 
-// Full progressive decode into the BMP pipeline. Returns false without writing anything when no
-// scale's workspace fits the heap, so the caller can fall back to the DC preview.
+// Full progressive decode into the BMP pipeline. Returns false without writing anything when
+// chooseProgressiveShift() leaves the cover to convertResized().
 static bool convertFromProgressive(FsFile& jpegFile, const OutputTarget* targets, const int count,
                                    const ProgressiveJpeg::ImageInfo& info, const bool oneBit, const bool crop,
                                    const bool eightBit, bool* attempted, BuildArena* scratch, const uint32_t base) {
@@ -1010,21 +1021,22 @@ static bool jpegFileToBmpStreamsInternal(FsFile& jpegFile, const OutputTarget* t
 
   ProgressiveJpeg::ImageInfo full;
   if (ProgressiveJpeg::probe(jpegFile, full, base) == ProgressiveJpeg::Result::Ok) {
-    // Every scan, at the scale the targets need. The DC-only preview below (1/8 resolution,
-    // upscaled) is what made a 221x324 progressive cover a 27x40 smear on the home screen.
+    // Every scan, at the scale the targets need. Only 1/8 resolution, upscaled, is what made a
+    // 221x324 progressive cover a 27x40 smear on the home screen.
     bool attempted = false;
     const bool ok =
         convertFromProgressive(jpegFile, targets, count, full, oneBit, crop, eightBit, &attempted, scratch, base);
     if (attempted) return ok;
-  }
-  ProgressiveJpegDc::ImageInfo image;
-  if (ProgressiveJpegDc::probe(jpegFile, image, base) == ProgressiveJpegDc::Result::Ok) {
-    // The DC preview is its own cheap pass per output (it resizes the DC grid straight to the
-    // output), so several targets simply run it once each.
+    // The last resort: the 1/8 decode resized to each output, one decode per output -- a 1/8
+    // decode is the least work a progressive file takes. Its workspace from the region, when it
+    // has room, as the full decode's would be.
     for (int i = 0; i < count; ++i) {
       jpegFile.seek(base);
-      if (!decodeProgressiveJpeg(jpegFile, *targets[i].out, targets[i].targetWidth, targets[i].targetHeight, oneBit,
-                                 crop, image, eightBit, base)) {
+      ArenaBlockScope workspaceScope;
+      const size_t workspaceBytes = ProgressiveJpeg::workspaceBytes(full, 3);
+      uint8_t* workspace = workspaceScope.take(scratch, workspaceBytes);
+      if (!convertResized(jpegFile, *targets[i].out, targets[i].targetWidth, targets[i].targetHeight, oneBit, crop,
+                          full, eightBit, base, workspace, workspace != nullptr ? workspaceBytes : 0)) {
         return false;
       }
     }
@@ -1131,7 +1143,7 @@ std::unique_ptr<JpegThumbSession> JpegThumbSession::begin(FsFile& jpegFile,
   ProgressiveJpeg::ImageInfo full;
   if (ProgressiveJpeg::probe(jpegFile, full, base) == ProgressiveJpeg::Result::Ok) {
     uint8_t shift = 0;
-    if (!chooseProgressiveShift(converted, count, full, scratch, &shift)) return nullptr;  // DC preview: one-shot
+    if (!chooseProgressiveShift(converted, count, full, scratch, &shift)) return nullptr;  // resized: one-shot
     const int effectiveSrcW = full.width >> shift;
     const int effectiveSrcH = full.height >> shift;
     const size_t workspaceBytes = ProgressiveJpeg::workspaceBytes(full, shift);
@@ -1160,11 +1172,6 @@ std::unique_ptr<JpegThumbSession> JpegThumbSession::begin(FsFile& jpegFile,
     LOG_DBG("JPG", "Sliced progressive cover %ux%u at 1/%d -> %dx%d (%d output%s)", full.width, full.height, 1 << shift,
             effectiveSrcW, effectiveSrcH, count, count == 1 ? "" : "s");
   } else {
-    ProgressiveJpegDc::ImageInfo dc;
-    if (ProgressiveJpegDc::probe(jpegFile, dc, base) == ProgressiveJpegDc::Result::Ok) {
-      jpegFile.seek(base);
-      return nullptr;  // progressive, but only the DC preview takes it: one-shot
-    }
     if (!impl->tjpg.prepare(jpegFile, base, converted, count, scratch)) return nullptr;
     if (!impl->pipeline.begin(converted, count, impl->tjpg.effectiveSrcW, impl->tjpg.effectiveSrcH, /*oneBit=*/true,
                               /*crop=*/true, /*eightBit=*/false, /*needMcuBuf=*/true, scratch)) {

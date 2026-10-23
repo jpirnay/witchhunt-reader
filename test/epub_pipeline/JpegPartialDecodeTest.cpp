@@ -139,7 +139,9 @@ struct JpegPartialDecode : testing::Test {
     EXPECT_FALSE(fs::exists(c.companionCachePath));
     EXPECT_FALSE(fs::exists(PixelCache::partPathFor(c.cachePath)));
     EXPECT_FALSE(fs::exists(PixelCache::partPathFor(c.companionCachePath)));
-    if (!c.checkpointPath.empty()) EXPECT_FALSE(fs::exists(c.checkpointPath));
+    if (!c.checkpointPath.empty()) {
+      EXPECT_FALSE(fs::exists(c.checkpointPath));
+    }
   }
 };
 

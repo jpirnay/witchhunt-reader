@@ -1121,7 +1121,7 @@ TEST(ProgressiveJpeg, WorkspaceShrinksWithScale) {
 }
 
 // At 1/8 a block is its DC level, so the session holds only what the DC scans need: the decode the
-// converters fall back to when the heap is short costs what the DC-only preview it replaces cost
+// converters fall back to when the heap is short costs what a DC-only preview decoder costs
 // (about 2 KB of state plus a row of blocks), not the 13-16 KB of a full session. Host sizes are
 // 64-bit; the C3's are smaller.
 TEST(ProgressiveJpeg, AnEighthNeedsNoMoreThanTheDcScans) {

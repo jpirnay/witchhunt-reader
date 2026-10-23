@@ -97,7 +97,7 @@ save_baseline_420(im, os.path.join(HERE, "contrast_420.jpg"))
 ref = Image.open(os.path.join(HERE, "contrast_420.jpg")).convert("L")
 ref.save(os.path.join(HERE, "contrast_420.gray.pgm"))
 
-# --- progressive_420.jpg : low-frequency regions survive the DC-only preview ---
+# --- progressive_420.jpg : low-frequency regions survive a 1/8 decode ---
 W, H = 96, 64
 im = Image.new("RGB", (W, H), (255, 255, 255))
 d = ImageDraw.Draw(im)

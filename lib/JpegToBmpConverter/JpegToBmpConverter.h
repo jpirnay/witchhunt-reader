@@ -63,10 +63,10 @@ class JpegToBmpConverter {
 // the file's first byte (memory audit 2026-09, R9 item 3). The BMPs are byte-identical to the
 // one-shot conversion's however the work is sliced.
 //
-// Baseline JPEGs (TJpgDec) and full progressive decodes run sliced. A progressive image only the
-// 1/8 DC preview can take (no scale's workspace fits, or unusual sampling) is refused, and so is
-// anything else the one-shot path would reject: begin() returns null and the caller falls back to
-// the one-shot conversion, which handles every case.
+// Baseline JPEGs (TJpgDec) and full progressive decodes run sliced. A progressive image the
+// one-shot conversion resizes from its 1/8 decode (no scale's workspace fits, or only 1/8 does and
+// the box is larger) is refused, and so is anything else the one-shot path would reject: begin()
+// returns null and the caller falls back to the one-shot conversion, which handles every case.
 //
 // The session keeps its decoder state, working memory and row pipeline between calls -- from
 // `scratch` when there is room, else the heap -- so `scratch` must stay lent, the JPEG file and
