@@ -54,6 +54,7 @@
 #include "EpubReaderPrintedPageInputActivity.h"
 #include "FinishedBookActivity.h"
 #include "GlobalBookmarkIndex.h"
+#include "InPlaceBuildGate.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
@@ -4434,9 +4435,14 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
   // fix is not "let more builds go resident" — it is "let this gate be answerable at all". What it
   // changes in practice is the NON-CSS case, where the floor drops from 60 KB + ring (up to 92 KB,
   // unreachable) to a flat 60 KB, which the ~62-69 KB reading heap can actually clear.
-  const uint32_t freeFloor =
-      std::max<uint32_t>(embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES : IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES,
-                         IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes);
+  //
+  // With a TrueType set loaded, a CJK book's parse phase also holds what a glyph miss makes, on the heap: a resident
+  // build lends the misses no region (InPlaceBuildGate::ttfMissBytesFor). 0 without a set.
+  const uint32_t ttfMissBytes = InPlaceBuildGate::ttfMissBytesFor(TypographyProfile::forLanguage(epub->getLanguage()),
+                                                                  sdFontSystem.ttfMissMemoryPlanBytes());
+  const uint32_t freeFloor = InPlaceBuildGate::minFreeHeap(
+      embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES : IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES,
+      IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES, ringBytes, ttfMissBytes);
   const uint32_t contigFloor = std::max<uint32_t>(embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_CONTIG_HEAP_BYTES
                                                                 : IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES,
                                                   ringBytes + 8 * 1024) -
@@ -4447,8 +4453,9 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
   // One line per gate evaluation: the resident/released choice and the exact heap-vs-floor
   // arithmetic behind it. This is the first thing to check when a section build takes the wrong
   // path (a resident build starving on the inflate ring cascades into the released rebuild).
-  LOG_INF("ERS", "heapAllowsInPlaceBuild=%d css=%d ring=%lu free=%lu(floor=%lu) contig=%lu(floor=%lu)", ok ? 1 : 0,
-          embeddedStyle ? 1 : 0, static_cast<unsigned long>(ringBytes), static_cast<unsigned long>(freeHeap),
+  LOG_INF("ERS", "heapAllowsInPlaceBuild=%d css=%d ring=%lu ttf=%lu free=%lu(floor=%lu) contig=%lu(floor=%lu)",
+          ok ? 1 : 0, embeddedStyle ? 1 : 0, static_cast<unsigned long>(ringBytes),
+          static_cast<unsigned long>(ttfMissBytes), static_cast<unsigned long>(freeHeap),
           static_cast<unsigned long>(freeFloor), static_cast<unsigned long>(contigHeap),
           static_cast<unsigned long>(contigFloor));
   // Also emit in the shared gate format so one `grep HEAP` collects every gate decision in a run.
