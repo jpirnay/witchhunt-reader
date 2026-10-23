@@ -2309,7 +2309,7 @@ bool CssParser::ensureCacheIndexLoaded() const {
 
 // --- Sparse CssStyle compression for the resident pool ---
 // A style is serialized to a canonical, SPARSE record: only the fields the 'defined' mask
-// flags are written (a real rule sets a handful of 27 properties). Because the encoding is
+// flags are written (a real rule sets a handful of the 29 properties). Because the encoding is
 // canonical, two equivalent styles produce identical bytes, so dedup is a memcmp — and lookup
 // decompresses back to a full CssStyle. Values are copied with memcpy so the byte-packed
 // (unaligned) records are safe to read on the C3.
@@ -2318,7 +2318,8 @@ bool CssParser::ensureCacheIndexLoaded() const {
 // + the font-family hash (4) + the text-emphasis mark (1) = 75 bytes.
 constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 11 * 5 + 2 * 4 + 4 + 1;
 
-// Canonical "which properties are set" mask: 27 defined bits (0-26), then the three boolean
+// Canonical "which properties are set" mask: the defined bits of the first 27 properties (0-26; font-family and
+// text-emphasis are the other two, flagged in the extra byte below), then the three boolean
 // VALUES of the invisibility properties in bits 27-29 and the high bit of `display` in bit 30 --
 // the uint16 of enum values below is full. (By the CssStyle invariant a defined invisibility
 // property is currently always true, so bits 27-29 mirror bits 24-26; they are carried for

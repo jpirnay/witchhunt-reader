@@ -31,10 +31,12 @@ constexpr uint32_t markCodepoint(const uint8_t mark) {
   }
 }
 
-// Whether a character gets a mark: not a space, a control character or punctuation (ASCII punctuation,
+// Whether a character gets a mark: not a space, a control character or punctuation (ASCII and Latin-1 punctuation,
 // U+2010-205E, a CjkPunctuation class).
 inline bool takesMark(const uint32_t cp) {
   if (cp <= 0x20 || (cp >= 0x7F && cp <= 0xA0)) return false;  // controls, space, no-break space
+  // Latin-1 punctuation: ¡ § « ¶ · » ¿
+  if (cp == 0xA1 || cp == 0xA7 || cp == 0xAB || cp == 0xB6 || cp == 0xB7 || cp == 0xBB || cp == 0xBF) return false;
   if (cp < 0x7F) {
     const bool alnum = (cp >= '0' && cp <= '9') || (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z');
     return alnum;

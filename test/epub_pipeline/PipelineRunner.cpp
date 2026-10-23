@@ -41,14 +41,19 @@ void dumpWords(std::ostream& out, const TextBlock& block, const char* indent) {
   }
 }
 
-// One `R` record per ruby group of the line, after its `W` records, at `indent`; a line without annotations prints
-// nothing. It does not match the word-stream pattern, so the "no content dropped" check ignores it.
+// One `R` record per ruby group and one `E` record per emphasis run of the line, after its `W` records, at `indent`;
+// a line without annotations prints nothing. Neither matches the word-stream pattern, so the "no content dropped"
+// check ignores them.
 void dumpAnnotations(std::ostream& out, const TextBlock& block, const char* indent) {
   for (uint16_t a = 0; a < block.annotationCount(); ++a) {
     const TextBlock::Annotation annotation = block.annotation(a);
-    if (annotation.kind != TextBlock::AnnotationKind::Ruby) continue;
-    out << indent << "R first=" << annotation.firstWord << " count=" << annotation.wordCount << " x=" << annotation.x
-        << " w=" << annotation.width << " t=" << annotation.text << "\n";
+    if (annotation.kind == TextBlock::AnnotationKind::Ruby) {
+      out << indent << "R first=" << annotation.firstWord << " count=" << annotation.wordCount << " x=" << annotation.x
+          << " w=" << annotation.width << " t=" << annotation.text << "\n";
+    } else if (annotation.kind == TextBlock::AnnotationKind::Emphasis) {
+      out << indent << "E first=" << annotation.firstWord << " count=" << annotation.wordCount
+          << " m=" << static_cast<int>(annotation.mark) << "\n";
+    }
   }
 }
 
