@@ -78,6 +78,17 @@ uint32_t lastCodepoint(const std::string& word) {
 
 bool containsSoftHyphen(const std::string& word) { return word.find(SOFT_HYPHEN_UTF8) != std::string::npos; }
 
+// True when every codepoint of `text` but a soft hyphen (TextBlock strips them) is unspaced CJK: TextBlock's test for
+// spreading a ruby 1:2:1 rather than centring it (Ruling R4).
+bool allUnspacedCjk(const std::string& text) {
+  const auto* p = reinterpret_cast<const unsigned char*>(text.c_str());
+  while (*p != 0) {
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (cp != 0x00AD && !utf8IsUnspacedCjk(cp)) return false;
+  }
+  return true;
+}
+
 // Removes every soft hyphen in-place so rendered glyphs match measured widths.
 void stripSoftHyphensInPlace(std::string& word) {
   size_t pos = 0;
@@ -838,24 +849,34 @@ void ParsedText::applyRubyWidths(const GfxRenderer& renderer, const int fontId, 
     const int ruby = rubyWidth(renderer, fontId, i, text);
     if (ruby <= base) continue;  // TextBlock spreads a shorter ruby over its base when it draws it
 
-    // The base widens to what the neighbours cannot take; the rest overhangs them, evenly where both can take it.
-    const int roomLeft = i > 0 ? room(i - 1, i, true) : 0;
-    const int roomRight = room(last + 1, last + 1, false);
-    const int container = std::max(base, ruby - roomLeft - roomRight);
-    const int overhang = ruby - container;
-    int left = std::min(roomLeft, overhang / 2);
-    if (overhang - left > roomRight) left = overhang - roomRight;
-    const int right = overhang - left;
+    // The ruby is centred over its base (spec 7.2): it passes each side by half of what it is longer. Beside a kana or
+    // a CJK mark, up to `room` of that half overhangs the neighbour; the rest of the half, and all of it beside
+    // anything else, pushes the neighbour away.
+    const int excess = ruby - base;
+    const int halfLeft = excess / 2;
+    const int halfRight = excess - halfLeft;
+    const int left = std::min(i > 0 ? room(i - 1, i, true) : 0, halfLeft);
+    const int right = std::min(room(last + 1, last + 1, false), halfRight);
+    const int pushLeft = halfLeft - left;
+    const int pushRight = halfRight - right;
 
-    // What the base widens by goes to its characters evenly, each drawn in the middle of its share: half a share
-    // before the first character, a whole one between two, half after the last (1:2:1).
-    const int extra = container - base;
+    // The base widens by each push on its own side, so it stays under the ruby's centre. Where ruby and base are all
+    // unspaced CJK (Ruling R4, as TextBlock spreads the ruby), what the two pushes have in common spreads the base
+    // 1:2:1 instead: its characters share it evenly, each drawn in the middle of its share (half a share before the
+    // first character, a whole one between two, half after the last). Anything else stays one block, so no gap opens
+    // inside a word split into tokens (bionic reading).
     const int n = static_cast<int>(last - i + 1);
+    bool cjk = allUnspacedCjk(text);
+    for (size_t k = i; cjk && k <= last; ++k) cjk = allUnspacedCjk(words[k]);
+    const int spread = cjk ? 2 * std::min(pushLeft, pushRight) : 0;
     for (int k = 0; k < n; ++k) {
-      const int e = extra * (k + 1) / n - extra * k / n;
+      const int e = spread * (k + 1) / n - spread * k / n;
       widths[i + k] = static_cast<uint16_t>(widths[i + k] + e);
       rubyEdge_[i + k].lead = static_cast<int16_t>(e / 2);
     }
+    widths[i] = static_cast<uint16_t>(widths[i] + pushLeft - spread / 2);
+    rubyEdge_[i].lead = static_cast<int16_t>(rubyEdge_[i].lead + pushLeft - spread / 2);
+    widths[last] = static_cast<uint16_t>(widths[last] + pushRight - spread / 2);
     // The overhang on each side lies over the neighbour mid-line. A group starting or ending a line has no neighbour
     // there: the line holds that overhang inside the leader's or the last token's box (lineStartTrim, lineEndTrim).
     rubyEdge_[i].start = static_cast<int16_t>(left);

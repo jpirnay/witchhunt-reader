@@ -297,6 +297,26 @@ std::vector<Line> layout(ParsedText& text, const uint16_t width, const bool incl
   return lines;
 }
 
+// As layout(), but the first line that ends hyphenated is refused once, as the parser does at a page bottom: the
+// line is laid out again whole and the rest broken again after it.
+std::vector<Line> layoutRetryingOnce(ParsedText& text, const uint16_t width, bool& retried) {
+  GfxRenderer renderer;
+  std::vector<Line> lines;
+  retried = false;
+  text.layoutAndExtractLines(
+      renderer, kFontId, width,
+      [&](std::unique_ptr<TextBlock> block, const bool endsHyphenated, const bool suppressRetry) {
+        if (endsHyphenated && !suppressRetry && !retried) {
+          retried = true;
+          return ParsedText::LineProcessResult::RetryWithoutHyphenation;
+        }
+        lines.push_back(lineOf(*block));
+        return ParsedText::LineProcessResult::Accepted;
+      },
+      /*includeLastLine=*/true);
+  return lines;
+}
+
 std::vector<std::vector<std::string>> wordsOf(const std::vector<Line>& lines) {
   std::vector<std::vector<std::string>> result;
   for (const auto& line : lines) result.push_back(line.words);
@@ -457,15 +477,66 @@ TEST(RubyWidths, ALongerRubyPushesHanNeighboursAndSpreadsItsBase) {
 }
 
 TEST(RubyWidths, AdjacentGroupsShareNoSpace) {
-  // Each ruby overhangs only its kana side: the first ends where the second starts.
+  // Each 15 px ruby passes its 10 px base by 2 px on the left and 3 on the right. Over its kana neighbour it
+  // overhangs; beside the other group it pushes: 煙 widens by 3 on its right, 草 by 2 on its left (drawn 2 px in).
+  // The first ruby ends where the second starts.
   ParsedText text(false, false, aligned(CssTextAlign::Left));
   text.addWord("の煙草が", EpdFontFamily::REGULAR);
   ASSERT_TRUE(text.addRubyGroup(1, 1, "けむり"));
   ASSERT_TRUE(text.addRubyGroup(2, 1, "くさき"));
   const auto lines = layout(text, 400);
   ASSERT_EQ(lines.size(), 1u);
-  EXPECT_EQ(lines[0].xpos, (X{0, 10, 20, 30}));
-  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{5, 15}, {20, 15}}));
+  EXPECT_EQ(lines[0].xpos, (X{0, 10, 25, 35}));
+  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{8, 15}, {23, 15}}));
+}
+
+TEST(RubyWidths, AnOverhangOnOneSideOnlyKeepsTheRubyCentred) {
+  // 30 px of ruby over 20 px of base passes it by 5 px each side: over と on the left, a push on the right (漢). The
+  // ruby is not slid over the kana: the base widens on its right only, unspread, and stays under the ruby's centre.
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("と字字漢", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(1, 2, "ああああああ"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].xpos, (X{0, 10, 20, 35}));
+  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{5, 30}}));
+}
+
+TEST(RubyWidths, AKanaNeighbourTakesAtMostHalfOfItself) {
+  // 25 px of ruby over 10 px of base: 7 px a side on the left, 8 on the right. と and を take 5 each (half of 10);
+  // the rest, 2 and 3, push them away: 志 widens to 15 and is drawn 2 px in, under the ruby's centre.
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("と志を", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(1, 1, "こころざし"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].xpos, (X{0, 12, 25}));
+  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{5, 25}}));
+}
+
+TEST(RubyWidths, ANarrowedMarkLendsHalfOfItsNarrowedWidth) {
+  // 」 before 。 is 5 px wide (half), so it takes 2 px of the ruby's 8 on the right; と takes 5 of the 7 on the left.
+  // 煙 widens by 2 + 6 to 18 and is drawn 2 px in; the ruby spans 5..30, 2 px over 」 at 28.
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("と煙」。", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(1, 1, "こころざし"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  ASSERT_EQ(lines[0].words, (std::vector<std::string>{"と", "煙", "」", "。"}));
+  EXPECT_EQ(lines[0].xpos, (X{0, 12, 28, 33}));
+  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{5, 25}}));
+}
+
+TEST(RubyWidths, ARubyOverANonCjkBaseKeepsTheBaseTogether) {
+  // "tobacco" is not CJK: the 15 px the ruby is longer (7 left, 8 right, both beside kanji) widen the base as one
+  // block, 煙 drawn 7 px in and 草 right after it, with no 1:2:1 gap between them.
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("漢煙草漢", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(1, 2, "tobacco"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].xpos, (X{0, 17, 27, 45}));
+  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{10, 35}}));
 }
 
 TEST(RubyWidths, RubyFollowsTheWordsSize) {
@@ -546,40 +617,63 @@ TEST(RubyEdges, APageBottomRetryKeepsTheRubyInside) {
   ParsedText text(false, /*hyphenationEnabled=*/true, aligned(CssTextAlign::Justify));
   for (const char* word : {"가나", "다라마바사아", "あああ煙を"}) text.addWord(word, EpdFontFamily::REGULAR);
   ASSERT_TRUE(text.addRubyGroup(5, 1, "けむり"));
-  GfxRenderer renderer;
-  std::vector<Line> lines;
   bool retried = false;
-  text.layoutAndExtractLines(
-      renderer, kFontId, 55,
-      [&](std::unique_ptr<TextBlock> block, const bool endsHyphenated, const bool suppressRetry) {
-        if (endsHyphenated && !suppressRetry && !retried) {  // what the parser does at a page bottom
-          retried = true;
-          return ParsedText::LineProcessResult::RetryWithoutHyphenation;
-        }
-        lines.push_back(lineOf(*block));
-        return ParsedText::LineProcessResult::Accepted;
-      },
-      /*includeLastLine=*/true);
+  const auto lines = layoutRetryingOnce(text, 55, retried);
   ASSERT_TRUE(retried);
   ASSERT_EQ(wordsOf(lines), (Words{{"가나"}, {"다라마바사"}, {"아", "あ", "あ", "あ"}, {"煙", "を"}}));
   EXPECT_EQ(lines[3].xpos, (X{2, 12}));
   EXPECT_EQ(boxesOf(lines[3]), (Boxes{{0, 15}}));
 }
 
+TEST(RubyEdges, ARetriedLineStartingWithAGroupHoldsItsReserve) {
+  // Line 2 is retried whole (the page-bottom breaker): 煙 is 13 px (3 px pushed on its right, before the space) and
+  // holds its ruby's 2 px left overhang, so 煙 다라마바사아 is 2 + 13 + 5 + 60 = 80 px: it does not fit in 78.
+  Hyphenator::setPreferredLanguage("ko");
+  ParsedText text(false, /*hyphenationEnabled=*/true, aligned(CssTextAlign::Left));
+  for (const char* word : {"ああああああと煙", "다라마바사아"}) text.addWord(word, EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(7, 1, "けむり"));
+  bool retried = false;
+  const auto lines = layoutRetryingOnce(text, 78, retried);
+  ASSERT_TRUE(retried);
+  ASSERT_EQ(wordsOf(lines), (Words{{"あ", "あ", "あ", "あ", "あ", "あ", "と"}, {"煙"}, {"다라마바사아"}}));
+  EXPECT_EQ(lines[1].xpos, (X{2}));
+  EXPECT_EQ(boxesOf(lines[1]), (Boxes{{0, 15}}));
+}
+
+TEST(RubyEdges, AWordHyphenatedAfterARetryStaysInsideToo) {
+  // After the retried first line, the rest is broken again from there (the suffix breaker). 煙 starts line 4 holding
+  // its ruby's 2 px left overhang, 13 px wide: the word split at that line's end has 58 - 2 - 13 - 5 = 38 px left,
+  // not 40, so 다라마 ends it at 50 px rather than 다라마바 at 60.
+  Hyphenator::setPreferredLanguage("ko");
+  ParsedText text(false, /*hyphenationEnabled=*/true, aligned(CssTextAlign::Left));
+  for (const char* word : {"가나", "다라마바사아", "ああああ煙", "다라마바사아"})
+    text.addWord(word, EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(6, 1, "けむり"));
+  bool retried = false;
+  const auto lines = layoutRetryingOnce(text, 58, retried);
+  ASSERT_TRUE(retried);
+  ASSERT_EQ(wordsOf(lines),
+            (Words{{"가나"}, {"다라마바사"}, {"아", "あ", "あ", "あ", "あ"}, {"煙", "다라마"}, {"바사아"}}));
+  EXPECT_EQ(lines[3].xpos, (X{2, 20}));
+  EXPECT_EQ(boxesOf(lines[3]), (Boxes{{0, 15}}));
+}
+
 TEST(RubyEdges, AWordHyphenatedAfterAGroupStartingALineStaysInside) {
-  // 煙 starts line 2 with its ruby's whole 5 px overhang held inside (a space follows it, so nothing on the right
-  // takes any). The word split at that line's end has 75 - 5 - 10 - 5 = 55 px left, not 60: "inter-" no longer fits.
+  // 煙's ruby passes it by 2 px on the left, held inside the line where 煙 starts line 2, and 3 on the right, a push
+  // (a space follows): 煙 is 13 px wide. The word split at that line's end has 78 - 2 - 13 - 5 = 58 px left, not 60:
+  // "inter-" no longer fits.
   Hyphenator::setPreferredLanguage("en");
   ParsedText text(false, /*hyphenationEnabled=*/true, aligned(CssTextAlign::Left));
   text.addWord("ああああああと煙", EpdFontFamily::REGULAR);
   text.addWord("internationalization", EpdFontFamily::REGULAR);
   ASSERT_TRUE(text.addRubyGroup(7, 1, "けむり"));
-  const auto lines = layout(text, 75);
+  const auto lines = layout(text, 78);
   ASSERT_GE(lines.size(), 2u);
   EXPECT_EQ(lines[1].words, (std::vector<std::string>{"煙"}));
+  EXPECT_EQ(lines[1].xpos, (X{2}));
   EXPECT_EQ(boxesOf(lines[1]), (Boxes{{0, 15}}));
   for (const Line& line : lines) {
     const int right = line.xpos.back() + GfxRenderer::countCodepoints(line.words.back().c_str()) * GfxRenderer::GLYPH_W;
-    EXPECT_LE(right, 75) << line.words.back();
+    EXPECT_LE(right, 78) << line.words.back();
   }
 }
