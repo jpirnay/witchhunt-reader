@@ -546,6 +546,42 @@ TEST(ProgressiveJpegDamage, AStreamCutBetweenScansIsDegraded) {
   std::remove(path.c_str());
 }
 
+// A stream cut halfway through its first DC scan: past the end the bit reader feeds zero bits, as
+// libjpeg does, and a unit that takes them ends the scan there (Cursor::padBits). Below the cut no
+// block has a DC level, so the picture is mid grey, as libjpeg leaves the blocks it has no data
+// for. Decoded as data, those zero bits would drift the DC predictors into a black bottom.
+TEST(ProgressiveJpegDamage, AStreamCutInItsDcScanIsMidGreyBelowTheCut) {
+  for (const char* jpg : {"prog_full_420.jpg", "prog_full_gray.jpg"}) {
+    const std::vector<uint8_t> whole = readBytes(fixture(jpg));
+    const std::vector<ScanSpan> scans = scansOf(whole);
+    ASSERT_FALSE(scans.empty());
+    ASSERT_EQ(scans[0].ss, 0);
+    ASSERT_EQ(scans[0].ah, 0) << "the first scan is the first DC scan";
+    const size_t cut = (scans[0].dataStart + scans[0].dataEnd) / 2;
+    const std::string path =
+        writeTemp(std::string("cut_in_dc_") + jpg, std::vector<uint8_t>(whole.begin(), whole.begin() + cut));
+    for (const int shift : {0, 3}) {
+      SCOPED_TRACE(std::string(jpg) + " at 1/" + std::to_string(1 << shift));
+      Capture clean;
+      ASSERT_EQ(decode(jpg, shift, clean), ProgressiveJpeg::Result::Ok);
+      Capture got;
+      const auto result = decodePath(path, shift, got);
+      EXPECT_EQ(result, ProgressiveJpeg::Result::Degraded) << ProgressiveJpeg::resultName(result);
+      ASSERT_EQ(got.image.h, clean.image.h) << "every row is emitted";
+      // The cut is about halfway down the picture: the bottom quarter is well below it.
+      int bottomOff = 0;
+      for (int y = got.image.h * 3 / 4; y < got.image.h; ++y) {
+        for (int x = 0; x < got.image.w; ++x) bottomOff += std::abs(got.image.at(x, y) - 128) > 2;
+      }
+      EXPECT_EQ(bottomOff, 0) << "pixels of the bottom quarter that are not mid grey";
+      int topGrey = 0;
+      for (int x = 0; x < got.image.w; ++x) topGrey += std::abs(got.image.at(x, 0) - 128) <= 2;
+      EXPECT_LT(topGrey, got.image.w) << "above the cut is the picture, or this test proves nothing";
+    }
+    std::remove(path.c_str());
+  }
+}
+
 // A file that holds every scan but ends without its EOI marker is whole: its rows are the complete
 // file's, so it is no Degraded picture -- the reader caches it, as it did before Degraded existed.
 TEST(ProgressiveJpegDamage, AFileThatOnlyLacksItsEoiIsWhole) {
