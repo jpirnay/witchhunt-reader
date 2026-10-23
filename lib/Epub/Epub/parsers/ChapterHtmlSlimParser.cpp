@@ -1095,6 +1095,7 @@ void ChapterHtmlSlimParser::closeRt() {
         if (currentTableCell && currentTableCell->text && currentTable && !currentTable->degraded &&
             !currentTable->rowDegraded) {
           currentTable->pendingRowBytes += TABLE_BUFFER_BYTES_PER_WORD;
+          if (text.size() > TABLE_BUFFER_SSO_CAPACITY) currentTable->pendingRowBytes += text.size() + 1;
           if (currentTable->pendingRowBytes >= MAX_TABLE_ROW_BUFFER_BYTES && !degradeRowAtOpenCell("row size budget")) {
             return;
           }

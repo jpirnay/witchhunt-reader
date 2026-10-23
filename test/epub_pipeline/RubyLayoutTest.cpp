@@ -313,6 +313,21 @@ TEST_F(RubyLayout, ALongMonoRubyElementKeepsEveryReadingOverItsBase) {
   EXPECT_EQ(groups, 80u);
 }
 
+TEST_F(RubyLayout, ReadingsPastTheSsoAreChargedToTheTableRowBudget) {
+  // Each pair costs a word and a group (96 B), and the reading's own heap block (19 B) once it is charged: 12 KB is
+  // passed at about 106 pairs with the blocks and 126 without them.
+  auto tableLines = [&](const int pairs) {
+    std::string cell;
+    for (int i = 0; i < pairs; ++i) cell += "字<rt>おだいどころ</rt>";
+    const auto l = lines("<table><tr><td><ruby>" + cell + "</ruby></td></tr></table>");
+    size_t inTable = 0;
+    for (const auto& line : l) inTable += line.inTable ? 1 : 0;
+    return inTable;
+  };
+  EXPECT_GT(tableLines(90), 0u) << "a cell under the budget stays a table";
+  EXPECT_EQ(tableLines(118), 0u) << "readings over 15 bytes count toward the row budget, as long words do";
+}
+
 TEST_F(RubyLayout, ARubyLineIsTallerByHalfAnAscender) {
   const auto l = lines("<p>前</p><p><ruby>漢<rt>かん</rt></ruby></p><p>後</p>");
   ASSERT_EQ(l.size(), 3u);
