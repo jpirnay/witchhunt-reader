@@ -1009,7 +1009,8 @@ int8_t TtfFont::kerning(const Size& size, const uint8_t drawn, const uint32_t le
   Style* const found = styleAt(drawn);
   if (!found || !found->present || !found->kerning.any() || size.ppem == 0) return 0;
   Style& s = *found;
-  // A synthetic style kerns as its file does, with the file's style's pairs: every glyph is the same amount wider.
+  // A synthetic style kerns as its file does, with the file's style's pairs: every glyph is the same amount wider
+  // (bold) or unchanged (italic: the shear keeps the advance).
   const uint8_t style = source_[drawn];
   FlashGlyphStore& store = set_.store_;
   // The store keys a pair by its codepoints (BMP only) and keeps font units, so every size shares it.
