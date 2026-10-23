@@ -91,6 +91,7 @@ class SdCardFontSystem {
   const std::string& ttfFamilyName(const uint8_t family) const { return manager_.ttfFamilyName(family); }
   uint32_t releaseTtfMissMemory() { return manager_.releaseTtfMissMemory(); }
   uint32_t ttfMissMemoryBytes() const { return manager_.ttfMissMemoryBytes(); }
+  uint32_t ttfMissMemoryPlanBytes() const { return manager_.ttfMissMemoryPlanBytes(); }
   bool suspendTtf(GfxRenderer& renderer) { return manager_.suspendTtf(renderer); }
   /// The suspended families loaded again, found by name, under the same font IDs. False, none loaded, when they
   /// cannot be.

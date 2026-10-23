@@ -104,6 +104,9 @@ class SdCardFontManager {
   uint32_t releaseTtfMissMemory();
   // What releaseTtfMissMemory() would free now.
   uint32_t ttfMissMemoryBytes() const;
+  // What one of their misses makes on the heap when nothing is lent to it (TtfFontSet::missMemoryPlanBytes): 0 when
+  // none is loaded.
+  uint32_t ttfMissMemoryPlanBytes() const;
   // What they give up for an image decode at the reader's memory ladder's heavier step: all of their memory, until
   // resumeTtf(): the set, its files, its native sizes, and their font IDs, which leave the renderer meanwhile, so
   // nothing may be laid out or drawn with them. Only where no glyph of theirs is in use
