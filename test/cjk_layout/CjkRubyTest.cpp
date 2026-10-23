@@ -381,6 +381,26 @@ TEST(RubyGroups, AnRtWithoutANewBaseAppendsToTheLastGroup) {
   EXPECT_EQ(rubyOf(lines[0]), (Ruby{{0, 1, "かんじ"}}));
 }
 
+TEST(RubyGroups, ARubyOver255BytesIsCutAtACharacterBoundary) {
+  // 100 x 3-byte kana = 300 bytes: 255 is a whole number of characters, 254 would not be if the cut
+  // were mid-sequence. Appended text is cut the same way, against what the group already holds.
+  std::string longRuby;
+  for (int i = 0; i < 100; ++i) longRuby += "あ";
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("漢字", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(0, 2, longRuby));
+  text.addWord("猫", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(2, 1, std::string(254, 'a') + "あ"));  // 254 ASCII + a 3-byte character
+  ASSERT_TRUE(text.appendRubyText("い"));                              // already at 254: nothing fits
+  const auto lines = layout(text, 2000);
+  ASSERT_EQ(lines.size(), 1u);
+  const auto ruby = rubyOf(lines[0]);
+  ASSERT_EQ(ruby.size(), 2u);
+  EXPECT_EQ(std::get<2>(ruby[0]).size(), 255u);
+  EXPECT_EQ(std::get<2>(ruby[0]), longRuby.substr(0, 255));
+  EXPECT_EQ(std::get<2>(ruby[1]), std::string(254, 'a'));
+}
+
 TEST(RubyGroups, ConsumedLinesTakeTheirRubyWithThem) {
   ParsedText text(false, false, aligned(CssTextAlign::Left));
   text.addWord("吾輩は猫", EpdFontFamily::REGULAR);

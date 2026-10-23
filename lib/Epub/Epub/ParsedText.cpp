@@ -717,7 +717,18 @@ size_t ParsedText::leadersBefore(const size_t tokenIndex) const {
   return leaders;
 }
 
+// The longest prefix of `text` of at most `room` bytes that ends on a character boundary.
+static size_t rubyBytesThatFit(const std::string_view text, const size_t room) {
+  if (text.size() <= room) return text.size();
+  size_t n = room;
+  while (n > 0 && (static_cast<uint8_t>(text[n]) & 0xC0) == 0x80) --n;
+  return n;
+}
+
 bool ParsedText::addRubyGroup(const size_t firstToken, const size_t tokenCount, std::string text) {
+  // A ruby over TextBlock::kMaxAnnotationText bytes would make its whole line invalid: cap it where it enters,
+  // at a character boundary.
+  text.resize(rubyBytesThatFit(text, TextBlock::kMaxAnnotationText));
   if (tokenCount == 0 || firstToken >= words.size() || tokenCount > words.size() - firstToken) return false;
   for (size_t i = firstToken; i < firstToken + tokenCount; ++i) {
     if (TokenBoundary::rubyRole(wordBoundaries[i]) != TokenBoundary::RubyRole::None) return false;
@@ -735,7 +746,11 @@ bool ParsedText::addRubyGroup(const size_t firstToken, const size_t tokenCount, 
 
 bool ParsedText::appendRubyText(const std::string_view text) {
   if (rubyTexts_.empty()) return false;
-  rubyTexts_.back().append(text);
+  // Capped like addRubyGroup's text: only what whole characters leave room for is appended.
+  std::string& last = rubyTexts_.back();
+  if (last.size() >= TextBlock::kMaxAnnotationText) return true;
+  const size_t room = TextBlock::kMaxAnnotationText - last.size();
+  last.append(text.data(), rubyBytesThatFit(text, room));
   return true;
 }
 
