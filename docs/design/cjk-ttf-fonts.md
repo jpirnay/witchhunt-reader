@@ -221,8 +221,8 @@ prototype (`ttf_subset.py`, written for TrueType) becomes the CFF one.
 **Bugs left behind.** The spike found two bugs on the CJK bitmap path. They still hit anyone who converts
 a CJK `.cpfont` by hand, so they move to `docs/future_work/cjk.md`:
 1. `SdCardFont::loadFromMmap` copies the interval table to the heap: 49 KB for Japanese, which turned
-   pre-rendering off. A fix that reads it in place when 4-byte aligned is on branch
-   `spike/mmap-intervals-in-flash`. `MAX_INTERVALS` is 4096; the Japanese set has 4,083.
+   pre-rendering off. A fix that reads it in place when 4-byte aligned is described in
+   `docs/future_work/cjk.md`. `MAX_INTERVALS` is 4096; the Japanese set has 4,083.
 2. A `.cpfont` larger than the partition erases the whole partition (4–5 s) on the first book open after
    every restart, then fails to append.
 
