@@ -264,7 +264,7 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
 | Mode | When | Buffer |
 |---|---|---|
 | `IncrementalReleased` | **X3** (always), another board that misses the in-place floors, a spine whose resident build already aborted on low heap, or the buffer is already lent | **borrowed** as the build arena; *released* only when there is none to lend. Restored via `recoverSecondaryBufferIfNeeded()` |
-| `IncrementalResident` | a non-X3 board that fits the in-place floors of `heapAllowsInPlaceBuild()` (`IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES` 60 KB / `IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES` 28 KB; a CSS book uses the `IN_PLACE_BUILD_CSS_*` pair, 56 KB / 32 KB; both raised for a large spine's inflate ring, and, for a CJK book, the free floor by what a loaded TrueType set's glyph misses make on the heap, `InPlaceBuildGate.h`) | kept resident |
+| `IncrementalResident` | a non-X3 board that fits the in-place floors of `heapAllowsInPlaceBuild()` (`IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES` 60 KB / `IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES` 28 KB; a CSS book uses the `IN_PLACE_BUILD_CSS_*` pair, 56 KB / 32 KB; both raised for a large spine's inflate ring; never a CJK book in a TrueType set, whose glyph misses would take their memory from the heap, `InPlaceBuildGate.h`) | kept resident |
 | `Blocking` | `forceBlockingBuildSpine_` latch, no secondary buffer, or a CSS-fallback rebuild | resident if the in-place floors fit (non-X3), else borrowed; released only for the C-failure latch (to gain the ~52 KB a failed borrowed build lacked) or when nothing can be lent; realloc'd at the end |
 
 The mode name is historical: `IncrementalReleased` *borrows* first and only releases as a fallback,

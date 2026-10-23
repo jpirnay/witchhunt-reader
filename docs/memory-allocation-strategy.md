@@ -621,14 +621,14 @@ heap during a build from 12.9–17.0 KB to 27.8–32.0 KB, with the scratch bloc
 12 KB to 27 KB of 52 KB).
 
 A resident build, the X4's in-place build that keeps the secondary buffer and runs on the owned 10 KB arena (§9.2),
-lends the misses nothing, so each slice that misses makes them on the heap. For a book in Chinese, Japanese or Korean,
-where misses are the rule, its admission gate (`EpubReaderActivity::heapAllowsInPlaceBuild`) therefore adds what a
-miss makes there (`TtfFontSet::missMemoryPlanBytes`: the scratch block, and in SD mode the page cache) to the parse
-phase's floor (`InPlaceBuildGate.h`); a build that cannot also hold it borrows the buffer from the start, and its misses
-draw in the lent region. Before that (X4, 2026-10-23, CJK chapters of 1.5–9.6 KB, glyph store empty) every such build
-started resident at about 67.7 KB free; the first miss took 22,792 B of heap for a CFF family's 17,408 + 4,204 B, the
-heap-backed SAX state held another 9.7 KB, and the build fell to 8–15 KB (about 20 KB for a family in flash mode, whose
-miss needs 13,312 B), under the parser's hard floor or the between-slice guard (`RESIDENT_BUILD_ABORT_*`), and was
-thrown away for a borrowed rebuild, once or twice per chapter. A book set between spaces keeps the floor it had: its
-glyphs are stored within its first pages, and the resident builds of 0.3 KB Latin chapters held a miss and finished in
-two TrueType families, store empty or full, without the indexing popup a borrowed build draws first (about 0.54 s).
+lends the misses nothing, so each slice that misses makes at least the scratch block, and in SD mode the page cache,
+on the heap. A book whose language is written with the CJK repertoire (`TypographyProfile::cjkRepertoire`) and whose
+fonts are a TrueType set therefore never builds in place (`InPlaceBuildGate::admitsResident`): it borrows the buffer
+from the start, and its misses draw in the lent region. Measured on the X4 (2026-10-23, chapters of 1.5–9.6 KB admitted
+at about 67.7 KB free): with the glyph store empty, the first miss took 22,792 B of heap for a CFF family's 17,408 +
+4,204 B, the heap-backed SAX state held another 9.7 KB, and every build fell to 8–20 KB, under the parser's hard floor
+or the between-slice guard (`RESIDENT_BUILD_ABORT_*`), and was thrown away for a borrowed rebuild, once or twice per
+chapter; with every glyph stored, a Japanese chapter still fell to 28.9 KB at the guard. Such a build would need about
+79–89 KB free at its start, more than the reading heap reaches. Every other book keeps its floors: built-in and .cpfont
+fonts make no miss memory, and single-slice Latin chapters in two TrueType families built in place and finished with
+the store empty and full, without the indexing popup a borrowed build draws first (about 0.54 s).
