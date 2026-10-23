@@ -8,7 +8,7 @@
 
 **Tech Stack:** C++20 firmware (PlatformIO, ESP32-C3), GoogleTest host tests (`test/ttf_rasterizer`, `test/ttf_font`) against FreeType 2.13.3 (the SDK's copy, with `src/base/ftsynth.c` added to the oracle), the device bench `bench/ttf_raster_main.cpp`, `tools/devctl.py`.
 
-**Spec:** `docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md`, section 7.4, with 7.1–7.3 (synthetic bold), which it mirrors. Synthetic bold shipped in #548 (plan `docs/superpowers/plans/2026-10-20-synthetic-bold.md`). Where this plan points at bold's code, it means master as merged. That code departs from bold's plan in three rulings: a zero advance stays zero (cc62bafff), a bold glyph too large to embolden is drawn unemboldened (62afe787a), and the Markdown cache version moved as well (bdcfc6368). This plan was checked against master 0eaac6878 on 2026-10-22.
+**Spec:** `docs/design/cjk-ttf-fonts.md` (then `docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md`), section 7.4, with 7.1–7.3 (synthetic bold), which it mirrors. Synthetic bold shipped in #548 (plan `docs/superpowers/plans/2026-10-20-synthetic-bold.md`). Where this plan points at bold's code, it means master as merged. That code departs from bold's plan in three rulings: a zero advance stays zero (cc62bafff), a bold glyph too large to embolden is drawn unemboldened (62afe787a), and the Markdown cache version moved as well (bdcfc6368). This plan was checked against master 0eaac6878 on 2026-10-22.
 
 ## Global Constraints
 

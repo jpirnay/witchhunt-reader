@@ -8,6 +8,14 @@
 
 #include "FontCatalog.h"
 
+// Where the Font Manager and the web font API fetch the manifest. fonts-v3.json lists every hosted family, each with
+// its format; fonts.json lists the .cpfont families alone, for firmware that reads versions 1 and 2 only
+// (scripts/generate-font-manifest.py writes both).
+#ifndef FONT_MANIFEST_URL
+#define FONT_MANIFEST_URL \
+  "https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/fonts-v3.json"
+#endif
+
 struct FontManifestFile;
 
 enum class FontManifestStatus : uint8_t { Ok, Invalid, UnsupportedVersion, OutOfMemory };
@@ -20,7 +28,9 @@ enum class FontManifestStatus : uint8_t { Ok, Invalid, UnsupportedVersion, OutOf
 // what its families hold, so nothing is built for a manifest that is rejected and the catalog's one
 // block is allocated at exactly its final size; the second fills the block. Each family is checked
 // when it closes, as the whole-document parse checked it: its name, then its file names in order. The
-// first that fails is logged (in the second pass) and the family left out; it takes no room.
+// first that fails is logged (in the second pass) and the family left out; it takes no room. A family of a format this
+// reader does not know (version 3 names each family's) is left out the same way, and so is one with a file that is
+// not of its format.
 class FontManifestReader {
  public:
   using NameCheck = bool (*)(const char* name);
@@ -56,6 +66,8 @@ class FontManifestReader {
   void familyBegin();
   void familyName(const char* value, size_t len);
   void familyDescription(const char* value, size_t len);
+  void familyFormat(const char* value, size_t len);
+  void familyInDownloadAll(bool value);
   void fileEntry(const FontManifestFile& f);
   void familyEnd();
 

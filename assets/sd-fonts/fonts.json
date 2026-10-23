@@ -595,25 +595,6 @@
       ]
     },
     {
-      "name": "NotoSansCJK",
-      "description": "Sans-serif (Chinese, Japanese, Korean)",
-      "styles": [
-        "regular"
-      ],
-      "files": [
-        {
-          "name": "NotoSansCJK/NotoSansCJK_10.cpfont",
-          "size": 2567898,
-          "crc32": 1729141454
-        },
-        {
-          "name": "NotoSansCJK/NotoSansCJK_12.cpfont",
-          "size": 3611786,
-          "crc32": 3308886697
-        }
-      ]
-    },
-    {
       "name": "NotoSansExtended",
       "description": "Sans-serif (Latin, Greek, Cyrillic, Georgian, Armenian, Ethiopic)",
       "styles": [
@@ -647,54 +628,6 @@
           "name": "NotoSansExtended/NotoSansExtended_18.cpfont",
           "size": 1174593,
           "crc32": 331825734
-        }
-      ]
-    },
-    {
-      "name": "NotoSansHangul",
-      "description": "Sans-serif (Korean Hangul)",
-      "styles": [
-        "regular"
-      ],
-      "files": [
-        {
-          "name": "NotoSansHangul/NotoSansHangul_10.cpfont",
-          "size": 1210189,
-          "crc32": 2914649522
-        },
-        {
-          "name": "NotoSansHangul/NotoSansHangul_12.cpfont",
-          "size": 1652040,
-          "crc32": 10562107
-        },
-        {
-          "name": "NotoSansHangul/NotoSansHangul_14.cpfont",
-          "size": 2134684,
-          "crc32": 323936021
-        },
-        {
-          "name": "NotoSansHangul/NotoSansHangul_16.cpfont",
-          "size": 2628464,
-          "crc32": 241952219
-        }
-      ]
-    },
-    {
-      "name": "NotoSerifCJK",
-      "description": "Serif (Chinese, Japanese, Korean)",
-      "styles": [
-        "regular"
-      ],
-      "files": [
-        {
-          "name": "NotoSerifCJK/NotoSerifCJK_10.cpfont",
-          "size": 2615442,
-          "crc32": 3173986362
-        },
-        {
-          "name": "NotoSerifCJK/NotoSerifCJK_12.cpfont",
-          "size": 3680444,
-          "crc32": 2790875638
         }
       ]
     },

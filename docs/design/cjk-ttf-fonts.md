@@ -5,8 +5,8 @@ CFF outlines (section 9), the CJK families as CFF (`.otf`), a glyph store that m
 emptied whole (section 8), and the serial test API first in the order of work (section 13, PR #531). Synthetic
 italic (section 7.4) was added on 2026-10-22.
 
-Working material, like every spec here: when the work merges, lasting parts move to reference docs, open
-items to `docs/future_work/cjk.md`, and this file is deleted.
+Design record: shipped in #531, #532, #542, #544, synthetic bold (#548) and the CJK families (#550). The code is the
+authority on what it does now.
 
 ## 1. Why
 
@@ -225,8 +225,8 @@ prototype (`ttf_subset.py`, written for TrueType) becomes the CFF one.
 **Bugs left behind.** The spike found two bugs on the CJK bitmap path. They still hit anyone who converts
 a CJK `.cpfont` by hand, so they move to `docs/future_work/cjk.md`:
 1. `SdCardFont::loadFromMmap` copies the interval table to the heap: 49 KB for Japanese, which turned
-   pre-rendering off. A fix that reads it in place when 4-byte aligned is on branch
-   `spike/mmap-intervals-in-flash`. `MAX_INTERVALS` is 4096; the Japanese set has 4,083.
+   pre-rendering off. A fix that reads it in place when 4-byte aligned is described in
+   `docs/future_work/cjk.md`. `MAX_INTERVALS` is 4096; the Japanese set has 4,083.
 2. A `.cpfont` larger than the partition erases the whole partition (4–5 s) on the first book open after
    every restart, then fails to append.
 

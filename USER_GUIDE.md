@@ -375,6 +375,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 **EPUB Font** (submenu):
 - **Font Family**: Font used for EPUB reading. Includes built-in fonts (Bookerly, Noto Sans) plus any TrueType (`.ttf`) or OpenType (`.otf`) fonts and `.cpfont` fonts installed on the SD card. A TrueType or OpenType font without a bold file draws bold text emboldened, and without an italic file draws italic text slanted.
 - **Font Size**: For Bookerly and Noto Sans, 10pt to 26pt: 10pt to 18pt are typefaces designed at that size; 20, 22, 24 and 26pt are the 18pt face enlarged. For a font on the SD card, the sizes its files were built at (the number in each file name: `MyFont_8.cpfont` is 8pt), then the standard sizes above its largest file, drawn from that file enlarged. A size the selected font does not offer, such as 8pt after switching from an SD font to Bookerly, is shown and drawn as the nearest size it does offer, and comes back when you switch back.
+- **Font Manager**: downloads font families over Wi-Fi and deletes the ones you no longer use. Each row shows the family, what it is for, and, until it is installed, its download size. **Download All** installs every missing family but the eight CJK ones (Japanese, Simplified Chinese, Traditional Chinese and Korean, each sans serif and serif, 1.6–7.0 MB): install your language's from its own row. A CJK family is one file drawn at every size. The reader restarts when you leave the Font Manager.
 - **Text Anti-Aliasing**: Smooth grey edges on text. Slows page turns slightly. "ON" / "OFF"
 - **Fast AA** *(X3 only)*: Swaps the slow 53-frame grayscale waveform for a fast 7-frame LUT (~130 ms). Mid-tones appear slightly darker. "ON" / "OFF"
 - **Text Darkness**: Ink density for rendered text: "Normal" (default), "Dark", "Extra Dark", "Max Dark"
@@ -954,7 +955,7 @@ Please note that this firmware is currently in active development. The following
 
 * **Cover Images:** Large cover images embedded into EPUB require several seconds (~10s for ~2000 pixel tall image) to convert for the sleep screen and home screen thumbnail. Uploading the book with **Optimize EPUB** in the web interface's File Manager, or optimizing it there afterwards, resizes them and speeds this up (see [Optimizing EPUBs](./docs/webserver.md#optimizing-epubs)).
 * **Right-to-left scripts (Hebrew, Arabic):** Not currently supported. For BiDi / RTL support, use the original [CrossPoint](https://github.com/crosspoint-reader/crosspoint-reader) firmware.
-* **CJK (Chinese, Japanese, Korean):** Not supported. See https://github.com/aBER0724/crosspoint-reader-cjk for a CJK-capable fork.
+* **CJK (Chinese, Japanese, Korean):** books break lines and space punctuation by CJK rules; install your language's font from the **Font Manager**. Book titles, authors and chapter names outside the page still show a box for characters the menu fonts lack, and there is no vertical text, no ruby (furigana) and no CJK keyboard.
 
 ---
 
