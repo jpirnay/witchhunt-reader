@@ -2479,6 +2479,8 @@ void CrossPointWebServer::handleFontManifest() {
     obj["description"] = families.description(i);
     obj["installed"] = families.installed(i);
     obj["hasUpdate"] = families.hasUpdate(i);
+    // The folder is the reader's own family under this name: installing would replace its files.
+    obj["ownFiles"] = families.installed(i) && !families.hasUpdate(i) && FontInstaller::holdsOwnFiles(families, i);
     obj["totalSize"] = static_cast<unsigned long>(families.totalSize(i));
     obj["fileCount"] = static_cast<unsigned>(families.fileCount(i));
   }

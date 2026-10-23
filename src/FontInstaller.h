@@ -76,6 +76,10 @@ class FontInstaller {
   /// the manifest's size, at another size, or missing, and asks FontDownloadRules::isUpdate.
   static bool hasUpdate(const FontCatalog& families, size_t family);
 
+  /// Whether the folder of `family` holds none of the manifest's files (not at their size, not at another): a family
+  /// of the reader's own under a hosted name. Asked of an installed family; installing over it replaces its files.
+  static bool holdsOwnFiles(const FontCatalog& families, size_t family);
+
   /// An outline family just installed that the registry does not list: the glyph store cannot hold it.
   bool installedButNotListed(const FontCatalog& families, size_t family) const;
 

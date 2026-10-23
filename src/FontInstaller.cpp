@@ -234,6 +234,12 @@ bool FontInstaller::hasUpdate(const FontCatalog& families, const size_t family) 
   return FontDownloadRules::isUpdate(counts.same, counts.changed, counts.absent);
 }
 
+bool FontInstaller::holdsOwnFiles(const FontCatalog& families, const size_t family) {
+  if (families.fileCount(family) == 0) return false;
+  const FileCounts counts = countFiles(families, family);
+  return counts.same == 0 && counts.changed == 0;
+}
+
 bool FontInstaller::installedButNotListed(const FontCatalog& families, const size_t family) const {
   return families.outline(family) && !isFamilyInstalled(families.name(family));
 }

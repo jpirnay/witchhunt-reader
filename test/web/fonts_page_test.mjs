@@ -55,12 +55,12 @@ function response(status, body) {
 }
 
 // Loads the Font Manager with a fake fetch only; `answer(url, init)` answers a request (undefined: 404).
-function loadPage(answer) {
+function loadPage(answer, confirmAnswer = true, asked = []) {
   const html = resolveIncludes(fs.readFileSync(path.join(HTML_DIR, 'FontsPage.html'), 'utf8'));
   const beforeParse = (w) => {
     w.fetch = async (u, init = {}) => answer(String(u), init) || response(404, '');
     w.alert = () => {};
-    w.confirm = () => true;
+    w.confirm = (message) => { asked.push(message); return confirmAnswer; };
   };
   const dom = new JSDOM(html, { url: 'http://reader.test/fonts', runScripts: 'dangerously', virtualConsole: new VirtualConsole(), beforeParse });
   return { dom, w: dom.window };
@@ -117,6 +117,26 @@ console.log('- a refused download');
 {
   const r = await installKorean({ ok: false, error: 'Not enough space on the SD card: 8.0 MB needed, 2.1 MB free' });
   same(r.text, 'Install failed for "NotoSerifKR": Not enough space on the SD card: 8.0 MB needed, 2.1 MB free', 'the status shows the device\'s error');
+}
+
+console.log('- a folder of the reader\'s own under a hosted name');
+for (const agree of [false, true]) {
+  const asked = [];
+  let downloads = 0;
+  const { w, dom } = loadPage((u) => {
+    if (u === '/api/fonts') return response(200, { families: [] });
+    if (u === '/api/fonts/manifest') return response(200, { ...REMOTE, families: [{ ...REMOTE.families[0], installed: true, hasUpdate: false, ownFiles: true }] });
+    if (u === '/api/fonts/download') { downloads++; return response(200, { ok: true, installedCount: 1, notListed: [] }); }
+  }, agree, asked);
+  await until(() => w.document.querySelector('#remoteFamilies button[data-family]'));
+  const button = w.document.querySelector('#remoteFamilies button[data-family]');
+  same(button.textContent, 'Reinstall', 'the family offers Reinstall');
+  button.click();
+  await until(() => asked.length > 0);
+  await until(() => downloads > 0, 200);
+  check(asked.length === 1 && asked[0].includes('NotoSerifKR') && /replace/i.test(asked[0]), 'it asks, naming the family and saying its files are replaced');
+  same(downloads, agree ? 1 : 0, agree ? 'OK sends the download' : 'Cancel sends no download');
+  dom.window.close();
 }
 
 console.log(failures ? `${failures} check(s) FAILED` : 'all passed');

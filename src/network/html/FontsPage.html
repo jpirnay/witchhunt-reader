@@ -366,6 +366,7 @@
           // Only an update stands out; a list of green buttons would hide it.
           btn.className = 'btn btn-small' + (f.installed && f.hasUpdate ? ' btn-primary' : '');
           btn.dataset.family = f.name;
+          if (f.ownFiles) btn.dataset.ownFiles = '1';
           btn.textContent = f.installed ? (f.hasUpdate ? 'Update' : 'Reinstall') : 'Download';
 
           row.appendChild(info);
@@ -375,6 +376,11 @@
 
         el.querySelectorAll('button[data-family]').forEach(btn => {
           btn.addEventListener('click', async () => {
+            // The folder holds the reader's own files under this name: installing replaces them.
+            if (btn.dataset.ownFiles && !confirm('The folder "' + btn.dataset.family +
+                '" on the reader holds your own font files, not the hosted ones. Installing replaces its current files. Continue?')) {
+              return;
+            }
             btn.disabled = true;
             await downloadRemoteFamily(btn.dataset.family);
             btn.disabled = false;
