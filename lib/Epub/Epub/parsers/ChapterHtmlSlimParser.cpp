@@ -1393,7 +1393,7 @@ void ChapterHtmlSlimParser::wireTextBlock() {
 void ChapterHtmlSlimParser::wireParagraphLines(ParsedText& text) {
   text.setLineArena(buildArena_);
   if (buildArena_) {
-    text.setBeforeLineHook([this](const uint8_t maxSizePct) { beforeLineHook(maxSizePct); });
+    text.setBeforeLineHook([this](const uint8_t maxSizePct, bool /*annotated*/) { beforeLineHook(maxSizePct); });
   } else {
     text.setBeforeLineHook(nullptr);
   }

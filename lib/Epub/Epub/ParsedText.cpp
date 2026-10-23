@@ -452,12 +452,14 @@ void ParsedText::layoutAndExtractLines(
   // immediately). For SD card fonts it reads glyph metadata (advanceX, no bitmaps)
   // for all codepoints in this paragraph so calculateWordWidths() needs no SD I/O.
   // Each font gets its own words: the block's font, then each font slot in use (a TTF
-  // family renders the glyphs it is handed, so not the other families' text).
+  // family renders the glyphs it is handed, so not the other families' text). A ruby is
+  // drawn in its leader's font: its text follows that font's words, after a space.
   size_t totalSize = 1;  // reserve room for a possible hyphen fallback
   for (size_t i = 0; i < words.size(); i++) {
     if (i > 0 && TokenBoundary::hasSpace(wordBoundaries[i])) totalSize += 1;
     totalSize += words[i].size();
   }
+  for (const std::string& ruby : rubyTexts_) totalSize += 1 + ruby.size();
   for (int slot = -1; slot < TextBlock::kMaxWordFonts; slot++) {
     const int32_t font = slot < 0 ? 0 : fontSlots_[slot].fontId;  // 0: the block's
     if (slot >= 0 && (font == 0 || (fontSlotsUsed_ & (1u << slot)) == 0)) continue;
@@ -468,6 +470,13 @@ void ParsedText::layoutAndExtractLines(
       if (fontSlots_[wordSizes[i].fontSlot].fontId != font) continue;
       if (!allText.empty() && TokenBoundary::hasSpace(wordBoundaries[i])) allText += ' ';
       allText += words[i];
+    }
+    for (size_t i = 0, ordinal = 0; i < words.size() && ordinal < rubyTexts_.size(); i++) {
+      if (TokenBoundary::rubyRole(wordBoundaries[i]) != TokenBoundary::RubyRole::Leader) continue;
+      const std::string& ruby = rubyTexts_[ordinal++];
+      if (fontSlots_[wordSizes[i].fontSlot].fontId != font) continue;
+      allText += ' ';
+      allText += ruby;
     }
     allText += '-';
     renderer.ensureFontReady(font != 0 ? font : fontId, allText.c_str());
@@ -724,6 +733,7 @@ void ParsedText::releaseLayoutScratch() {
   std::vector<uint16_t>().swap(wordWidths_);
   std::vector<uint8_t>().swap(markClass_);
   std::vector<int8_t>().swap(edgeTrim_);
+  std::vector<RubyEdge>().swap(rubyEdge_);
   std::vector<size_t>().swap(lineBreakIndices_);
   std::vector<bool>().swap(lineEndsWithHyphenatedWord_);
   std::vector<int>().swap(splitPrefixWordIndexes_);
@@ -779,6 +789,78 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
     out.push_back(measureWordWidth(renderer, wordFontId(i, fontId), words[i], wordStyles[i], false, wordScale(i)));
   }
   applyPunctuationWidths(renderer, fontId, out);
+  // After the marks are narrowed: a narrowed mark lends a ruby only its narrowed width.
+  applyRubyWidths(renderer, fontId, out);
+}
+
+int ParsedText::rubyWidth(const GfxRenderer& renderer, const int fontId, const size_t leader,
+                          const std::string& text) const {
+  return measureWordWidth(renderer, wordFontId(leader, fontId), text, EpdFontFamily::REGULAR, false,
+                          0.5f * wordScale(leader));
+}
+
+// Ruby widths after crosspoint-reader PR #2665 ("feat(epub): native <ruby> support for Chinese, Japanese", Phạm Bình
+// An / @brianhuster) and #2781 (ruby inside the margins). Theirs: a longer ruby overhangs its neighbours, a Han
+// neighbour is pushed away, a line edge keeps the overhang inside. Ours: overhang only over kana and CJK punctuation,
+// the 1:2:1 spreading JLREQ asks for, and the line-edge reserves as edge trims, so all four breakers see them.
+void ParsedText::applyRubyWidths(const GfxRenderer& renderer, const int fontId, std::vector<uint16_t>& widths) {
+  using TokenBoundary::RubyRole;
+  rubyEdge_.clear();
+  if (rubyTexts_.empty()) return;
+  const size_t count = words.size();
+  rubyEdge_.assign(count, RubyEdge{});
+
+  // How far a ruby may overhang neighbour n: half of n's character next to the group (its last when n is left of the
+  // group, else its first) when that is a kana or a CJK mark, n has no ruby of its own and no space separates them.
+  // At most half of n's width here, so a narrowed mark lends half of its narrowed width.
+  const auto room = [&](const size_t n, const size_t boundaryIndex, const bool leftOfGroup) {
+    if (n >= count || TokenBoundary::hasSpace(wordBoundaries[boundaryIndex]) ||
+        TokenBoundary::rubyRole(wordBoundaries[n]) != RubyRole::None) {
+      return 0;
+    }
+    const uint32_t cp = leftOfGroup ? lastCodepoint(words[n]) : firstCodepoint(words[n]);
+    if (!utf8IsKana(cp) && CjkPunctuation::classOf(cp) == CjkPunctuation::Class::None) return 0;
+    std::string glyph;  // at most 4 bytes: no allocation
+    utf8AppendCodepoint(glyph, cp);
+    const int advance = measureWordWidth(renderer, wordFontId(n, fontId), glyph, wordStyles[n], false, wordScale(n));
+    return std::min<int>(widths[n], advance) / 2;
+  };
+
+  size_t ordinal = 0;  // the n-th leader owns the n-th ruby text
+  for (size_t i = 0; i < count && ordinal < rubyTexts_.size(); ++i) {
+    if (TokenBoundary::rubyRole(wordBoundaries[i]) != RubyRole::Leader) continue;
+    const std::string& text = rubyTexts_[ordinal++];
+    size_t last = i;
+    int base = widths[i];
+    while (last + 1 < count && TokenBoundary::rubyRole(wordBoundaries[last + 1]) == RubyRole::Follower) {
+      base += widths[++last];
+    }
+    const int ruby = rubyWidth(renderer, fontId, i, text);
+    if (ruby <= base) continue;  // TextBlock spreads a shorter ruby over its base when it draws it
+
+    // The base widens to what the neighbours cannot take; the rest overhangs them, evenly where both can take it.
+    const int roomLeft = i > 0 ? room(i - 1, i, true) : 0;
+    const int roomRight = room(last + 1, last + 1, false);
+    const int container = std::max(base, ruby - roomLeft - roomRight);
+    const int overhang = ruby - container;
+    int left = std::min(roomLeft, overhang / 2);
+    if (overhang - left > roomRight) left = overhang - roomRight;
+    const int right = overhang - left;
+
+    // What the base widens by goes to its characters evenly, each drawn in the middle of its share: half a share
+    // before the first character, a whole one between two, half after the last (1:2:1).
+    const int extra = container - base;
+    const int n = static_cast<int>(last - i + 1);
+    for (int k = 0; k < n; ++k) {
+      const int e = extra * (k + 1) / n - extra * k / n;
+      widths[i + k] = static_cast<uint16_t>(widths[i + k] + e);
+      rubyEdge_[i + k].lead = static_cast<int16_t>(e / 2);
+    }
+    // The overhang on each side lies over the neighbour mid-line. A group starting or ending a line has no neighbour
+    // there: the line holds that overhang inside the leader's or the last token's box (lineStartTrim, lineEndTrim).
+    rubyEdge_[i].start = static_cast<int16_t>(left);
+    rubyEdge_[last].end = static_cast<int16_t>(right);
+  }
 }
 
 void ParsedText::applyPunctuationWidths(const GfxRenderer& renderer, const int fontId, std::vector<uint16_t>& widths) {
@@ -932,8 +1014,10 @@ void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
     for (size_t j = i; j < totalWordCount; ++j) {
       const int gap = (j > static_cast<size_t>(i)) ? interWordGaps[j] : 0;
       currlen += wordWidths[j] + gap;
-      // The line as drawn: its first and last token at their line-edge widths (CJK punctuation, spec 5.2). It only
-      // grows with j, as a token is always wider than what a line edge takes off it.
+      // The line as drawn: its first and last token at their line-edge widths (CJK punctuation, spec 5.2), with the
+      // overhang of a ruby at either edge held inside. It only grows with j, so the break below holds: a token is
+      // always wider than what a line edge takes off it, and a ruby's end reserve on token j is at most half of token
+      // j + 1, the neighbour it overhangs when the line goes on.
       const int lineLen = withEdgeTrims(currlen, i, j);
 
       if (lineLen > effectivePageWidth) {
@@ -1226,8 +1310,9 @@ void ParsedText::computeHyphenatedLineBreaks(
         continue;
       }
 
-      // Word would overflow — try to split based on hyphenation points
-      const int availableWidth = effectivePageWidth - lineWidth - spacing;
+      // Word would overflow — try to split based on hyphenation points. What the line's first token grows by at the
+      // line start (a ruby's overhang held inside it) is no room for the prefix.
+      const int availableWidth = effectivePageWidth - lineWidth - spacing - std::max(0, lineStartTrim(lineStart));
       const bool allowFallbackBreaks = isFirstWord;  // Only for first word on line
 
       bool insertedHyphen = false;
@@ -1323,7 +1408,7 @@ void ParsedText::computeHyphenatedLineBreaksFromIndex(
         continue;
       }
 
-      const int availableWidth = effectivePageWidth - lineWidth - spacing;
+      const int availableWidth = effectivePageWidth - lineWidth - spacing - std::max(0, lineStartTrim(lineStart));
       const bool allowFallbackBreaks = isFirstWord;
 
       bool insertedHyphen = false;
@@ -1471,6 +1556,8 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   wordWidths.insert(wordWidths.begin() + wordIndex + 1, remainderWidth);
   markClass_.insert(markClass_.begin() + wordIndex + 1, static_cast<uint8_t>(CjkPunctuation::Class::None));
   edgeTrim_.insert(edgeTrim_.begin() + wordIndex + 1, 0);
+  // A split word is never a ruby base (refused above): its remainder holds no ruby reserve either.
+  if (!rubyEdge_.empty()) rubyEdge_.insert(rubyEdge_.begin() + wordIndex + 1, RubyEdge{});
   if (outInsertedHyphen) {
     *outInsertedHyphen = chosenNeedsHyphen;
   }
@@ -1593,6 +1680,35 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     return removed / 2;
   };
 
+  // One ruby box per group leader on the line, over the leader and the followers the line holds. A follower with no
+  // leader on its line (a group the breaker had to split) has nothing to hang its ruby on and is skipped. The box is
+  // the group's base, or the whole ruby where that is longer, overhanging the base's left by the leader's `start`:
+  // over the neighbour mid-line, inside the leader's own box when the group opens the line.
+  lineAnnotations_.clear();
+  size_t rubyOrdinal = rubyTexts_.empty() ? 0 : leadersBefore(lastBreakAt);
+  const auto addRubyBox = [&](const size_t wordIdx, const int boxLeft) {
+    if (rubyOrdinal >= rubyTexts_.size()) return;
+    const std::string& text = rubyTexts_[rubyOrdinal++];
+    const size_t leader = lastBreakAt + wordIdx;
+    const int start = rubyEdge_.empty() ? 0 : rubyEdge_[leader].start;
+    size_t groupCount = 1;
+    int base = wordWidths[leader];
+    while (wordIdx + groupCount < lineWordCount &&
+           TokenBoundary::rubyRole(boundaries[leader + groupCount]) == TokenBoundary::RubyRole::Follower) {
+      base += wordWidths[leader + groupCount];
+      ++groupCount;
+    }
+    const int baseLeft = boxLeft + (wordIdx == 0 ? start : 0);
+    const int ruby = rubyWidth(renderer, fontId, leader, text);
+    TextBlock::Annotation& a = lineAnnotations_.emplace_back();
+    a.firstWord = static_cast<uint16_t>(wordIdx);
+    a.wordCount = static_cast<uint16_t>(groupCount);
+    a.x = static_cast<int16_t>(ruby <= base ? baseLeft : baseLeft - start);
+    a.width = static_cast<uint16_t>(std::max(base, ruby));
+    a.kind = TextBlock::AnnotationKind::Ruby;
+    a.text = text;
+  };
+
   // Pre-calculate X positions for words
   // Continuation words attach to the previous word with no space before them
   std::vector<int16_t>& lineXPos = lineXPosScratch_;
@@ -1601,7 +1717,18 @@ ParsedText::LineProcessResult ParsedText::extractLine(
 
   for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
     const int box = boxWidth(wordIdx);
-    lineXPos.push_back(static_cast<int16_t>(xpos - inkShift(wordIdx, box)));
+    // A base character widened by its ruby is drawn into its share (lead); the line's first token moves in by the
+    // ruby overhang its box holds (start).
+    int rubyShift = 0;
+    if (!rubyEdge_.empty()) {
+      const RubyEdge& edge = rubyEdge_[lastBreakAt + wordIdx];
+      rubyShift = edge.lead + (wordIdx == 0 ? edge.start : 0);
+    }
+    if (!rubyTexts_.empty() &&
+        TokenBoundary::rubyRole(boundaries[lastBreakAt + wordIdx]) == TokenBoundary::RubyRole::Leader) {
+      addRubyBox(wordIdx, xpos);
+    }
+    lineXPos.push_back(static_cast<int16_t>(xpos - inkShift(wordIdx, box) + rubyShift));
 
     const bool nextIsContinuation = wordIdx + 1 < lineWordCount && boundaries[lastBreakAt + wordIdx + 1].continues;
     if (nextIsContinuation) {
@@ -1649,33 +1776,6 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   range.fontTable = fontSlots_;
   range.first = lastBreakAt;
   range.count = lineWordCount;
-
-  // One ruby box per group leader on the line, over the leader and the followers the line holds. A follower with no
-  // leader on its line (a group the breaker had to split) has nothing to hang its ruby on and is skipped.
-  lineAnnotations_.clear();
-  if (!rubyTexts_.empty()) {
-    size_t ordinal = leadersBefore(lastBreakAt);
-    for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
-      if (TokenBoundary::rubyRole(boundaries[lastBreakAt + wordIdx]) != TokenBoundary::RubyRole::Leader) continue;
-      const size_t textIdx = ordinal++;
-      if (textIdx >= rubyTexts_.size()) break;
-      size_t groupCount = 1;
-      int groupWidth = boxWidth(wordIdx);
-      while (wordIdx + groupCount < lineWordCount &&
-             TokenBoundary::rubyRole(boundaries[lastBreakAt + wordIdx + groupCount]) ==
-                 TokenBoundary::RubyRole::Follower) {
-        groupWidth += boxWidth(wordIdx + groupCount);
-        ++groupCount;
-      }
-      TextBlock::Annotation& a = lineAnnotations_.emplace_back();
-      a.firstWord = static_cast<uint16_t>(wordIdx);
-      a.wordCount = static_cast<uint16_t>(groupCount);
-      a.x = lineXPos[wordIdx];
-      a.width = static_cast<uint16_t>(std::max(groupWidth, 0));
-      a.kind = TextBlock::AnnotationKind::Ruby;
-      a.text = rubyTexts_[textIdx];
-    }
-  }
   range.annotations = &lineAnnotations_;
 
   // The page-fit decision runs before the line exists (see beforeLine_): the parser may emit
@@ -1686,7 +1786,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
       maxPct = std::max(maxPct, wordSizes[lastBreakAt + wordIdx].pct);
     }
-    beforeLine_(maxPct);
+    beforeLine_(maxPct, !lineAnnotations_.empty());
   }
 
   // TextBlock flattens the range into its arena on construct; on arena OOM the

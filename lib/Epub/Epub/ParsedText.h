@@ -62,6 +62,16 @@ class ParsedText {
   // hyphenateWordAtIndex inserts into both.
   std::vector<uint8_t> markClass_;
   std::vector<int8_t> edgeTrim_;
+  // How a ruby group's tokens sit in their widths (applyRubyWidths), in pixels: `start` on the leader and `end` on
+  // the group's last token are the overhang a line edge must hold when the group starts or ends a line; `lead` is
+  // how far a base character widened by a longer ruby is drawn into its share (1:2:1 spreading).
+  struct RubyEdge {
+    int16_t start = 0;
+    int16_t end = 0;
+    int16_t lead = 0;
+  };
+  // A RubyEdge per token, in step with wordWidths_ like markClass_; empty when the block has no ruby. 6 B a token.
+  std::vector<RubyEdge> rubyEdge_;
   // How far the block's lines sit in from the left: half of what rounding the width down to whole ems took (the CJK
   // grid, spec section 5.5). Set by each layout pass.
   int16_t gridInset_ = 0;
@@ -84,12 +94,12 @@ class ParsedText {
   // (without the hook: the row is placed as a whole inside a block of its own). A cell laid out
   // as a fallback paragraph keeps the heap.
   BuildArena* lineArena_ = nullptr;
-  // Called with the line's largest word-size percent just before the line is materialised.
-  // The parser uses it to run its page-fit test BEFORE the allocation: a line that does not
+  // Called with the line's largest word-size percent, and whether the line carries ruby, just before the line is
+  // materialised. The parser uses it to run its page-fit test BEFORE the allocation: a line that does not
   // fit is then allocated from the page it lands on, not from the block of the page it
   // overflowed -- with page-scoped arena blocks, allocating first would leave page N+1 holding
   // bytes that die with page N.
-  std::function<void(uint8_t maxSizePct)> beforeLine_;
+  std::function<void(uint8_t maxSizePct, bool annotated)> beforeLine_;
   std::vector<EpdFontFamily::Style> wordStyles;
   // How each word joins the one before it (TokenBoundary.h): a space, glued, or a breakable CJK gap.
   // In lockstep with `words` through every insert/erase, like the per-word vectors below.
@@ -207,9 +217,19 @@ class ParsedText {
                            std::vector<uint16_t>& out);  // uses blockStyle.fontSizeMultiplier internally
   // Narrows each CJK mark that is a token to its mid-line width and fills markClass_/edgeTrim_.
   void applyPunctuationWidths(const GfxRenderer& renderer, int fontId, std::vector<uint16_t>& widths);
-  // How token i's width changes when a line starts at it, and when a line ends after it.
-  int lineStartTrim(const size_t i) const { return opensLine(i) ? edgeTrim_[i] : 0; }
-  int lineEndTrim(const size_t i) const { return opensLine(i) ? 0 : edgeTrim_[i]; }
+  // Widens the base of each ruby longer than what its neighbours let it overhang, and fills rubyEdge_.
+  void applyRubyWidths(const GfxRenderer& renderer, int fontId, std::vector<uint16_t>& widths);
+  // The advance of a ruby text over the group led by token `leader`: half the leader's size, its font, regular style,
+  // rounded once as TextBlock draws it.
+  int rubyWidth(const GfxRenderer& renderer, int fontId, size_t leader, const std::string& text) const;
+  // How token i's width changes when a line starts at it, and when a line ends after it: a CJK mark's line-edge
+  // width, and the overhang of a ruby group's ruby that the line edge has to hold.
+  int lineStartTrim(const size_t i) const {
+    return (opensLine(i) ? edgeTrim_[i] : 0) + (rubyEdge_.empty() ? 0 : rubyEdge_[i].start);
+  }
+  int lineEndTrim(const size_t i) const {
+    return (opensLine(i) ? 0 : edgeTrim_[i]) + (rubyEdge_.empty() ? 0 : rubyEdge_[i].end);
+  }
   bool opensLine(const size_t i) const { return markClass_[i] == static_cast<uint8_t>(CjkPunctuation::Class::Opening); }
   // A line first..last as drawn: its first and last token at their line-edge widths.
   int withEdgeTrims(const int naturalWidth, const size_t first, const size_t last) const {
@@ -274,7 +294,9 @@ class ParsedText {
   void setTypography(const TypographyProfile& typography) { typography_ = typography; }
   // See lineArena_ / beforeLine_. Both survive reset().
   void setLineArena(BuildArena* arena) { lineArena_ = arena; }
-  void setBeforeLineHook(std::function<void(uint8_t maxSizePct)> hook) { beforeLine_ = std::move(hook); }
+  void setBeforeLineHook(std::function<void(uint8_t maxSizePct, bool annotated)> hook) {
+    beforeLine_ = std::move(hook);
+  }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
   uint32_t lastLineVisibleOffset() const { return lastLineVisibleOffset_; }

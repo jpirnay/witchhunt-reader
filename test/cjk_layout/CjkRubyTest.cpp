@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "Epub/ParsedText.h"
@@ -257,6 +258,7 @@ struct RubyBox {
 
 struct Line {
   std::vector<std::string> words;
+  std::vector<int16_t> xpos;
   std::vector<RubyBox> ruby;
 };
 
@@ -268,6 +270,19 @@ BlockStyle aligned(const CssTextAlign alignment, const int16_t indent = 0) {
   return bs;
 }
 
+Line lineOf(const TextBlock& block) {
+  Line line;
+  for (uint16_t i = 0; i < block.wordCount(); ++i) {
+    line.words.emplace_back(block.wordText(i));
+    line.xpos.push_back(block.wordXpos(i));
+  }
+  for (uint16_t i = 0; i < block.annotationCount(); ++i) {
+    const TextBlock::Annotation a = block.annotation(i);
+    line.ruby.push_back({a.firstWord, a.wordCount, a.x, a.width, std::string(a.text)});
+  }
+  return line;
+}
+
 std::vector<Line> layout(ParsedText& text, const uint16_t width, const bool includeLastLine = true,
                          const bool preserveSource = false) {
   GfxRenderer renderer;
@@ -275,12 +290,7 @@ std::vector<Line> layout(ParsedText& text, const uint16_t width, const bool incl
   text.layoutAndExtractLines(
       renderer, kFontId, width,
       [&](std::unique_ptr<TextBlock> block, bool, bool) {
-        Line& line = lines.emplace_back();
-        for (uint16_t i = 0; i < block->wordCount(); ++i) line.words.emplace_back(block->wordText(i));
-        for (uint16_t i = 0; i < block->annotationCount(); ++i) {
-          const TextBlock::Annotation a = block->annotation(i);
-          line.ruby.push_back({a.firstWord, a.wordCount, a.x, a.width, std::string(a.text)});
-        }
+        lines.push_back(lineOf(*block));
         return ParsedText::LineProcessResult::Accepted;
       },
       includeLastLine, 0, 0, preserveSource);
@@ -300,8 +310,17 @@ std::vector<std::tuple<size_t, size_t, std::string>> rubyOf(const Line& line) {
   return result;
 }
 
+// {x, width} of each of a line's ruby boxes.
+std::vector<std::pair<int, int>> boxesOf(const Line& line) {
+  std::vector<std::pair<int, int>> result;
+  for (const auto& box : line.ruby) result.emplace_back(box.x, box.w);
+  return result;
+}
+
 using Words = std::vector<std::vector<std::string>>;
 using Ruby = std::vector<std::tuple<size_t, size_t, std::string>>;
+using Boxes = std::vector<std::pair<int, int>>;
+using X = std::vector<int16_t>;
 
 }  // namespace
 
@@ -397,7 +416,170 @@ TEST(RubyGroups, AGroupInTheMiddleOfAWordKeepsItsRuby) {
   const auto lines = layout(text, 400);
   ASSERT_EQ(lines.size(), 1u);
   EXPECT_EQ(rubyOf(lines[0]), (Ruby{{1, 1, "けむり"}}));
+  // Over 煙 at 10, overhanging と and を (RubyWidths).
+  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{8, 15}}));
+}
+
+// Ruby widths (spec section 7.2, A3 spec section 9): a ruby at half size, 5 px a character, is spread over a wider
+// base; a longer one overhangs a kana or punctuation neighbour by up to half of it, pushes any other neighbour away
+// and spreads its base 1:2:1.
+TEST(RubyWidths, AShorterRubyIsSpreadOverItsBase) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("煙草", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(0, 2, "たばこ"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].xpos, (X{0, 10}));
+  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{0, 20}}));
+}
+
+TEST(RubyWidths, ALongerRubyOverhangsTheKanaBesideIt) {
+  // 15 px of ruby over 10 px of base: 2 px over と, 3 px over を, and the base keeps its width.
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("と煙を", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(1, 1, "けむり"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].xpos, (X{0, 10, 20}));
+  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{8, 15}}));
+}
+
+TEST(RubyWidths, ALongerRubyPushesHanNeighboursAndSpreadsItsBase) {
+  // 30 px of ruby over 20 px of base between two kanji: the base widens to 30, 5 px more for each character, and
+  // each character is drawn in the middle of its 15 px share (1:2:1).
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("漢字字漢", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(1, 2, "ああああああ"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].xpos, (X{0, 12, 27, 40}));
+  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{10, 30}}));
+}
+
+TEST(RubyWidths, AdjacentGroupsShareNoSpace) {
+  // Each ruby overhangs only its kana side: the first ends where the second starts.
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("の煙草が", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(1, 1, "けむり"));
+  ASSERT_TRUE(text.addRubyGroup(2, 1, "くさき"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].xpos, (X{0, 10, 20, 30}));
+  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{5, 15}, {20, 15}}));
+}
+
+TEST(RubyWidths, RubyFollowsTheWordsSize) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("と煙を", EpdFontFamily::REGULAR, false, false, 200);
+  ASSERT_TRUE(text.addRubyGroup(1, 1, "けむり"));
+  const auto lines = layout(text, 400);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].xpos, (X{0, 20, 40}));
+  EXPECT_EQ(boxesOf(lines[0]), (Boxes{{15, 30}}));
+}
+
+TEST(RubyWidths, TheRubyIsReadiedWithItsWords) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("と煙を", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(1, 1, "けむり"));
+  GfxRenderer renderer;
+  text.layoutAndExtractLines(renderer, kFontId, 400, [](std::unique_ptr<TextBlock>, bool, bool) {
+    return ParsedText::LineProcessResult::Accepted;
+  });
+  ASSERT_FALSE(renderer.readyCalls.empty());
+  EXPECT_EQ(renderer.readyCalls[0].text, "と煙を けむり-");
+}
+
+// A group at a line edge keeps its overhang inside the margins: what the edge cannot take is reserved in the line.
+TEST(RubyEdges, AGroupStartingALineKeepsItsRubyInside) {
+  for (const bool hyphenation : {false, true}) {
+    ParsedText text(false, hyphenation, aligned(CssTextAlign::Left));
+    text.addWord("あああと煙を", EpdFontFamily::REGULAR);
+    ASSERT_TRUE(text.addRubyGroup(4, 1, "けむり"));
+    const auto lines = layout(text, 40);
+    ASSERT_EQ(wordsOf(lines), (Words{{"あ", "あ", "あ", "と"}, {"煙", "を"}})) << hyphenation;
+    // 煙 moves 2 px in, so its ruby's left overhang starts at the margin.
+    EXPECT_EQ(lines[1].xpos, (X{2, 12})) << hyphenation;
+    EXPECT_EQ(boxesOf(lines[1]), (Boxes{{0, 15}})) << hyphenation;
+  }
+}
+
+TEST(RubyEdges, AGroupEndingALineKeepsItsRubyInside) {
+  for (const bool hyphenation : {false, true}) {
+    {
+      // あああ煙 is 40 px, its ruby 3 px past 煙: 43 px do not fit in 42.
+      ParsedText text(false, hyphenation, aligned(CssTextAlign::Left));
+      text.addWord("あああ煙を", EpdFontFamily::REGULAR);
+      ASSERT_TRUE(text.addRubyGroup(3, 1, "けむり"));
+      EXPECT_EQ(wordsOf(layout(text, 42)), (Words{{"あ", "あ", "あ"}, {"煙", "を"}})) << hyphenation;
+    }
+    {
+      ParsedText text(false, hyphenation, aligned(CssTextAlign::Left));
+      text.addWord("あああ煙を", EpdFontFamily::REGULAR);
+      ASSERT_TRUE(text.addRubyGroup(3, 1, "けむり"));
+      const auto lines = layout(text, 43);
+      ASSERT_EQ(wordsOf(lines), (Words{{"あ", "あ", "あ", "煙"}, {"を"}})) << hyphenation;
+      EXPECT_EQ(boxesOf(lines[0]), (Boxes{{28, 15}})) << hyphenation;
+    }
+  }
+}
+
+TEST(RubyEdges, AJustifiedLineEndingInAGroupEndsFlushWithItsRuby) {
+  ParsedText text(false, false, aligned(CssTextAlign::Justify));
+  text.addWord("あああ煙をを", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(3, 1, "けむり"));
+  const auto lines = layout(text, 47);
+  ASSERT_GE(lines.size(), 1u);
+  ASSERT_EQ(lines[0].words, (std::vector<std::string>{"あ", "あ", "あ", "煙"}));
   ASSERT_EQ(lines[0].ruby.size(), 1u);
-  EXPECT_EQ(lines[0].ruby[0].x, 10);
-  EXPECT_EQ(lines[0].ruby[0].w, 10);
+  EXPECT_EQ(lines[0].ruby[0].x + lines[0].ruby[0].w, 47);
+  // The whole ruby ends there, not only its base: 煙 sits 3 px in from the margin.
+  EXPECT_EQ(lines[0].ruby[0].w, 15);
+  EXPECT_EQ(lines[0].xpos, (X{0, 11, 22, 34}));
+}
+
+TEST(RubyEdges, APageBottomRetryKeepsTheRubyInside) {
+  // The retry re-lays a hyphenated line with its words whole: it merges tokens back and measures again, so the
+  // ruby's reserves must stay in step with the tokens. 아あああ煙 is 55 px; with 煙's ruby 3 px past it the line
+  // ends before 煙, and the next line starts at it.
+  Hyphenator::setPreferredLanguage("ko");
+  ParsedText text(false, /*hyphenationEnabled=*/true, aligned(CssTextAlign::Justify));
+  for (const char* word : {"가나", "다라마바사아", "あああ煙を"}) text.addWord(word, EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(5, 1, "けむり"));
+  GfxRenderer renderer;
+  std::vector<Line> lines;
+  bool retried = false;
+  text.layoutAndExtractLines(
+      renderer, kFontId, 55,
+      [&](std::unique_ptr<TextBlock> block, const bool endsHyphenated, const bool suppressRetry) {
+        if (endsHyphenated && !suppressRetry && !retried) {  // what the parser does at a page bottom
+          retried = true;
+          return ParsedText::LineProcessResult::RetryWithoutHyphenation;
+        }
+        lines.push_back(lineOf(*block));
+        return ParsedText::LineProcessResult::Accepted;
+      },
+      /*includeLastLine=*/true);
+  ASSERT_TRUE(retried);
+  ASSERT_EQ(wordsOf(lines), (Words{{"가나"}, {"다라마바사"}, {"아", "あ", "あ", "あ"}, {"煙", "を"}}));
+  EXPECT_EQ(lines[3].xpos, (X{2, 12}));
+  EXPECT_EQ(boxesOf(lines[3]), (Boxes{{0, 15}}));
+}
+
+TEST(RubyEdges, AWordHyphenatedAfterAGroupStartingALineStaysInside) {
+  // 煙 starts line 2 with its ruby's whole 5 px overhang held inside (a space follows it, so nothing on the right
+  // takes any). The word split at that line's end has 75 - 5 - 10 - 5 = 55 px left, not 60: "inter-" no longer fits.
+  Hyphenator::setPreferredLanguage("en");
+  ParsedText text(false, /*hyphenationEnabled=*/true, aligned(CssTextAlign::Left));
+  text.addWord("ああああああと煙", EpdFontFamily::REGULAR);
+  text.addWord("internationalization", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(7, 1, "けむり"));
+  const auto lines = layout(text, 75);
+  ASSERT_GE(lines.size(), 2u);
+  EXPECT_EQ(lines[1].words, (std::vector<std::string>{"煙"}));
+  EXPECT_EQ(boxesOf(lines[1]), (Boxes{{0, 15}}));
+  for (const Line& line : lines) {
+    const int right = line.xpos.back() + GfxRenderer::countCodepoints(line.words.back().c_str()) * GfxRenderer::GLYPH_W;
+    EXPECT_LE(right, 75) << line.words.back();
+  }
 }

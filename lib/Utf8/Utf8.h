@@ -130,6 +130,15 @@ inline bool utf8IsHangul(const uint32_t cp) {
 // words. A source line break between two of these is not a word gap (CSS Text 3 segment-break rule).
 inline bool utf8IsUnspacedCjk(const uint32_t cp) { return utf8IsCjkBreakable(cp) && !utf8IsHangul(cp); }
 
+// Hiragana, katakana (with its phonetic extensions) and halfwidth katakana: with CJK punctuation, the characters a
+// ruby longer than its base may overhang.
+inline bool utf8IsKana(const uint32_t cp) {
+  return (cp >= 0x3040 && cp <= 0x309F)      // Hiragana
+         || (cp >= 0x30A0 && cp <= 0x30FF)   // Katakana
+         || (cp >= 0x31F0 && cp <= 0x31FF)   // Katakana Phonetic Extensions
+         || (cp >= 0xFF66 && cp <= 0xFF9F);  // Halfwidth Katakana
+}
+
 // Apply lightweight NFC-like normalization for Vietnamese precomposed characters and for
 // conjoining Hangul jamo (L+V -> LV, LV+T -> LVT).
 // Converts NFD sequences (base vowel + combining marks) into NFC precomposed
