@@ -111,6 +111,14 @@ class ChapterHtmlSlimParser final : public Print {
   // The last codepoint added to partWordBuffer was CJK, so a non-CJK character after it starts a
   // run that counts toward partWordCjkCodepoints_.
   bool partWordLastWasCjk_ = false;
+  // The last codepoint of the last word flushed, kept across whitespace (set by flushPartWordBuffer).
+  uint32_t lastTextCodepoint_ = 0;
+  // A whitespace run with a line break in it followed unspaced CJK text or a quotation mark
+  // (lastTextCodepoint_). If the next word starts with unspaced CJK, or with a quote after unspaced
+  // CJK (flushPartWordBuffer decides), the run vanishes instead of becoming a space (CSS Text 3
+  // segment-break rule; in CJK text the quotes are CJK punctuation): hard-wrapped Chinese and
+  // Japanese sources break lines mid-sentence.
+  bool cjkSegmentBreakPending_ = false;
 
   // <ruby>: a group is made when an <rt> closes, over the tokens the target got since the last group (see
   // startElement).
@@ -127,14 +135,6 @@ class ChapterHtmlSlimParser final : public Print {
   ParsedText* wordTarget();
   // </rt>: the collected text becomes a group over the bases before it, or flows inline when it cannot.
   void closeRt();
-  // The last codepoint of the last word flushed, kept across whitespace (set by flushPartWordBuffer).
-  uint32_t lastTextCodepoint_ = 0;
-  // A whitespace run with a line break in it followed unspaced CJK text or a quotation mark
-  // (lastTextCodepoint_). If the next word starts with unspaced CJK, or with a quote after unspaced
-  // CJK (flushPartWordBuffer decides), the run vanishes instead of becoming a space (CSS Text 3
-  // segment-break rule; in CJK text the quotes are CJK punctuation): hard-wrapped Chinese and
-  // Japanese sources break lines mid-sentence.
-  bool cjkSegmentBreakPending_ = false;
   // KOReader sync content offsets (docs/contributing/koreader-synchronization.md).
   // visibleTextOffset_ counts VisibleText.h's visible bytes of the source text the SAX parser has
   // delivered: inside <body>, outside head/script/style, before any layout decision. The mappers

@@ -1076,18 +1076,10 @@ ParsedText* ChapterHtmlSlimParser::wordTarget() {
 
 void ChapterHtmlSlimParser::closeRt() {
   rtDepth_ = -1;
-  // Whitespace runs (newlines and indentation of a pretty-printed <rt>) become one space; the ends are trimmed.
-  std::string text;
-  text.reserve(rubyText_.size());
-  for (const char c : rubyText_) {
-    if (isWhitespace(c)) {
-      if (!text.empty() && text.back() != ' ') text.push_back(' ');
-    } else {
-      text.push_back(c);
-    }
-  }
-  if (!text.empty() && text.back() == ' ') text.pop_back();
+  // consumeText collapsed the whitespace runs; the ends are trimmed here.
+  std::string text = std::move(rubyText_);
   rubyText_.clear();
+  if (!text.empty() && text.back() == ' ') text.pop_back();
   // A character cut by the byte cap is dropped whole.
   text.resize(static_cast<size_t>(utf8SafeTruncateBuffer(text.data(), static_cast<int>(text.size()))));
 
@@ -1115,6 +1107,7 @@ void ChapterHtmlSlimParser::closeRt() {
   if (!taken && !text.empty()) {
     // Nothing to put it over: the reading is text like any other, at the offset it had in the source.
     consumeText(this, text.c_str(), static_cast<int>(text.size()), rtVisibleOffset_, /*source=*/false);
+    if (partWordBufferIndex > 0 && !flushPartWordBuffer()) return;
   }
   target = wordTarget();
   if (target && !target->isEmpty()) nextWordContinues = true;
@@ -2890,7 +2883,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   } else if (self->rubyDepth_ >= 0 && strcmp(name, "rtc") == 0) {
     self->rtcDepth_ = self->depth;
   } else if (self->rubyDepth_ >= 0 && self->rtcDepth_ < 0 && self->rtDepth_ < 0 && strcmp(name, "rt") == 0) {
-    if (self->partWordBufferIndex > 0 && !self->flushPartWordBuffer()) return;
+    if (self->partWordBufferIndex > 0) {
+      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
+      if (!self->flushPartWordBuffer()) return;
+      if (!endsAtDashBreak) self->nextWordContinues = true;
+    }
     self->rtDepth_ = self->depth;
     self->rubyText_.clear();
     self->rtVisibleOffset_ = self->visibleTextOffset_;
@@ -3490,16 +3487,16 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     return;
   }
 
-  // An <rt>'s text is collected whole; closeRt() decides what it becomes.
+  // An <rt>'s text is collected whole, its whitespace runs collapsed to one space as it comes (so the byte cap counts
+  // the bytes kept); closeRt() decides what it becomes.
   if (self->rtDepth_ >= 0) {
-    const size_t room = TextBlock::kMaxAnnotationText > self->rubyText_.size()
-                            ? TextBlock::kMaxAnnotationText - self->rubyText_.size()
-                            : 0;
-    size_t n = std::min(static_cast<size_t>(len), room);
-    if (n < static_cast<size_t>(len)) {
-      while (n > 0 && (static_cast<uint8_t>(s[n]) & 0xC0) == 0x80) --n;  // cut at a character boundary
+    for (int i = 0; i < len && self->rubyText_.size() < TextBlock::kMaxAnnotationText; ++i) {
+      if (isWhitespace(s[i])) {
+        if (!self->rubyText_.empty() && self->rubyText_.back() != ' ') self->rubyText_.push_back(' ');
+      } else {
+        self->rubyText_.push_back(s[i]);
+      }
     }
-    self->rubyText_.append(s, n);
     return;
   }
 
@@ -3805,9 +3802,7 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
   }
 
   if (self->rtDepth_ >= 0 && self->rtDepth_ == self->depth - 1 && strcmp(name, "rt") == 0) {
-    self->closeRt();
-    self->depth -= 1;
-    return;
+    self->closeRt();  // then the generic close below: it ends the element's scopes like any inline element's
   }
   if (self->rtcDepth_ >= 0 && self->rtcDepth_ == self->depth - 1 && strcmp(name, "rtc") == 0) {
     self->rtcDepth_ = -1;
@@ -4681,6 +4676,7 @@ void ChapterHtmlSlimParser::clearSpentBlockHeadingStyle() {
 }
 
 void ChapterHtmlSlimParser::makePages() {
+  if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the block is laid out and drained: a ruby's bases go with it
   if (layoutFailed) {
     currentTextBlock.reset();
     return;

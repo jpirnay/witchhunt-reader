@@ -167,11 +167,54 @@ TEST_F(RubyLayout, StrayRubyMarkupLosesNoText) {
     EXPECT_EQ(joined(l), c.text) << c.body;
     EXPECT_FALSE(anyRuby(l)) << c.body;
   }
+  // A stray reading of several words keeps its spaces; one after a base without a group glues to its text.
+  const auto two = lines("<p>前<ruby><rt>two words</rt></ruby>本</p>");
+  ASSERT_EQ(two.size(), 1u);
+  EXPECT_EQ(two[0].words, (std::vector<std::string>{"前", "two", "words", "本"}));
+  const auto reading = lines("<p>字<ruby><rt>a reading</rt></ruby>end</p>");
+  ASSERT_EQ(reading.size(), 1u);
+  ASSERT_GE(reading[0].words.size(), 3u);
+  EXPECT_EQ(reading[0].words[0], "字");
+  EXPECT_EQ(reading[0].words[1], "a");
+  EXPECT_EQ(reading[0].words[2].substr(0, 7), "reading");
   // An <rt> with no base appends only to a group of its own <ruby>.
   const auto l = lines("<p>漢<ruby>字<rt>じ</rt></ruby><ruby><rt>よみ</rt></ruby></p>");
   EXPECT_EQ(joined(l), "漢字よみ");
   ASSERT_EQ(l.size(), 1u);
   EXPECT_EQ(l[0].ruby, (RubyList{{1, 1, "じ"}}));
+}
+
+TEST_F(RubyLayout, ATransparentReadingDoesNotHideTheTextAfterIt) {
+  // The </rt> close must reset the text-skip scope its element opened, or the next deeper text is dropped.
+  const auto l = lines(
+      "<p>漢<ruby>字<rt style=\"color: transparent\">じ</rt></ruby>です。</p>"
+      "<p><span><em>deep</em></span>tail</p>");
+  EXPECT_EQ(joined(l), "漢字です。deeptail");
+  EXPECT_FALSE(anyRuby(l));
+}
+
+TEST_F(RubyLayout, AReadingOver255BytesKeepsItsPrefixAndTheLine) {
+  std::string reading;
+  for (int i = 0; i < 100; ++i) reading += "あ";  // 300 bytes
+  const auto l = lines("<p>漢字<ruby>猫<rt>" + reading + "</rt></ruby>です</p>");
+  EXPECT_EQ(joined(l), "漢字猫です");  // the ruby is wide, so the paragraph may take several lines
+  size_t groups = 0;
+  for (const auto& line : l) {
+    for (const auto& r : line.ruby) {
+      ++groups;
+      EXPECT_EQ(std::get<2>(r), reading.substr(0, 255));
+    }
+  }
+  EXPECT_EQ(groups, 1u);
+}
+
+TEST_F(RubyLayout, AWhitespaceHeavyReadingKeepsItsTail) {
+  std::string reading = "あ";
+  for (int i = 0; i < 400; ++i) reading += "\n   ";
+  reading += "いう";
+  const auto l = lines("<p><ruby>漢<rt>" + reading + "</rt></ruby></p>");
+  ASSERT_EQ(l.size(), 1u);
+  EXPECT_EQ(l[0].ruby, (RubyList{{0, 1, "あ いう"}}));
 }
 
 TEST_F(RubyLayout, RubyInATableCellAnnotatesTheCellsWords) {

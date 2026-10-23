@@ -401,6 +401,26 @@ TEST(RubyGroups, ARubyOver255BytesIsCutAtACharacterBoundary) {
   EXPECT_EQ(std::get<2>(ruby[1]), std::string(254, 'a'));
 }
 
+TEST(RubyGroups, TheCapNeverCutsATwoOrFourByteSequence) {
+  // 254 ASCII then a 2-byte (é) or 4-byte (U+1F600) character straddling or filling the limit.
+  const std::string two = std::string(254, 'a') + "\xC3\xA9";                // 256 bytes: cut before the 2-byte char
+  const std::string fourAt252 = std::string(252, 'a') + "\xF0\x9F\x98\x80";  // 256 bytes: cut before the 4-byte char
+  const std::string fourFits = std::string(251, 'a') + "\xF0\x9F\x98\x80";   // 255 bytes: kept whole
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.addWord("一二三", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(0, 1, two));
+  ASSERT_TRUE(text.addRubyGroup(1, 1, fourAt252));
+  ASSERT_TRUE(text.addRubyGroup(2, 1, fourFits));
+  ASSERT_TRUE(text.appendRubyText("\xC3\xA9"));  // no room left in the last: nothing appended
+  const auto lines = layout(text, 4000);
+  ASSERT_EQ(lines.size(), 1u);
+  const auto ruby = rubyOf(lines[0]);
+  ASSERT_EQ(ruby.size(), 3u);
+  EXPECT_EQ(std::get<2>(ruby[0]), std::string(254, 'a'));
+  EXPECT_EQ(std::get<2>(ruby[1]), std::string(252, 'a'));
+  EXPECT_EQ(std::get<2>(ruby[2]), fourFits);
+}
+
 TEST(RubyGroups, ConsumedLinesTakeTheirRubyWithThem) {
   ParsedText text(false, false, aligned(CssTextAlign::Left));
   text.addWord("吾輩は猫", EpdFontFamily::REGULAR);
