@@ -929,10 +929,13 @@ std::vector<uint8_t> fixtureBytes(const char* name) {
   return bytes;
 }
 
-// The first `length` bytes of a fixture, as a temporary file.
+// The first `length` bytes of a fixture, as a temporary file. The length is in its name: ctest runs
+// the tests in parallel processes, and two cuts of one fixture must not share a file.
 std::string cutCopy(const char* name, const size_t length) {
   const std::vector<uint8_t> whole = fixtureBytes(name);
-  const std::string path = (std::filesystem::temp_directory_path() / (std::string("jpgbmp_cut_") + name)).string();
+  const std::string path =
+      (std::filesystem::temp_directory_path() / (std::string("jpgbmp_cut_") + std::to_string(length) + "_" + name))
+          .string();
   FILE* fp = fopen(path.c_str(), "wb");
   EXPECT_NE(fp, nullptr);
   if (fp) {
