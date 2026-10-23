@@ -21,6 +21,7 @@
 #include <Epub/FootnotePreviews.h>
 #include <Epub/FootnoteShape.h>
 #include <Epub/Page.h>
+#include <Epub/TypographyProfile.h>
 #include <Epub/blocks/ImageBlock.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
@@ -54,6 +55,7 @@
 #include "EpubReaderPrintedPageInputActivity.h"
 #include "FinishedBookActivity.h"
 #include "GlobalBookmarkIndex.h"
+#include "InPlaceBuildGate.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
 #include "MappedInputManager.h"
@@ -296,71 +298,7 @@ constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 #define BG_BUILD_LOOKAHEAD_PAGES 50
 #endif
 
-// Foreground in-place section build (the "keep the secondary buffer" path). When heap is
-// ample we build the new section WITHOUT releasing the secondary framebuffer, so the chapter's
-// first page keeps a valid fast-refresh baseline and avoids the baseline-resetting half-
-// refresh. Conservative floors: the foreground build runs at page-turn time with the secondary
-// buffer (and possibly a pre-rendered page) resident, so pin above Background-B's idle gate.
-// Failure is recoverable — the build retries with the buffer released — so these gate "try in
-// place" rather than guaranteeing success; tune from the "Index start mem" serial logs.
-//
-// SHAPE (fixed 2026-08-15, device-measured — see heapAllowsInPlaceBuild): the free floor is the
-// MAXIMUM of the two phase peaks, not their sum. runBuildParse releases the inflate ring before
-// the parse begins, so the ring and the layout working set are never live together; adding them
-// asked for memory no build has ever needed. The bases below are the PARSE-phase floors and are
-// unchanged by that fix — only the arithmetic combining them with the ring changed, so an A/B
-// against the old behaviour reads cleanly.
-#ifndef IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES
-#define IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES (60 * 1024)
-#endif
-#ifndef IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES
-#define IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES (28 * 1024)
-#endif
-// Extract-phase free floor, to which the entry's ring is added (the ring IS live in this phase,
-// so here the sum is correct). Its own name: this floor is reached from a page turn, not from
-// Background-B's borrow-first path (whose heap-backed twin was deleted in the 2026-09 audit).
-//
-// 30 -> 50 KB (2026-09-01), device-measured on Small Gods spine 1 — the whole book in one
-// 583991-byte entry — which the 30 KB version admitted to a resident build that could not
-// possibly finish. The trace, from the gate to the abort ~170 ms later:
-//
-//   gate      free=71592  (floor was 67584: the CSS base, since 30720 + 32768 = 63488 lost the max)
-//   start     free=60396  -11196  activity/section/popup before the build begins
-//   setup     free=56648   -3748  CSS index load
-//   abort     free=19924  -36724  ZipFile + read buffer + the 32768 inflate ring
-//
-// So the ring is only two thirds of what the extract phase costs from here; the other ~18.9 KB is
-// fixed overhead the base is meant to cover, and on top of that the build has to stay above
-// RESIDENT_BUILD_ABORT_FREE_HEAP_BYTES (30 KB) or it aborts anyway. 18.9 + 30 = 48.9 KB, so 50
-// with a little margin. Note what this does NOT change: with the ring capped at 32 KB the base
-// only binds for large entries — a few-KB chapter still floors at the flat 60/66 KB above and
-// still builds in place. What it changes is that a whole-book-in-one-spine entry now goes
-// straight to the released path instead of paying ~1.4 s for setup, abort, cache clear and a
-// second setup to get there.
-#ifndef IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES
-#define IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES (50 * 1024)
-#endif
-// CSS books need more margin to build in place: the parse resolves embedded styles, and the lean
-// resolver skips lookups below its floor, which yields a css-degraded cache and (since audit R3
-// step 4) one released rebuild -- seconds of resident work thrown away. Since every build is
-// two-phase (the inflate ring is released BEFORE the CSS-resolving parse), the resolve runs with
-// the ring gone; contig stays pinned at the ring size (<=32 KB) for the extraction phase.
-//
-// Re-derived 2026-09-26 (memory audit R3). The old 66 KB was "parse working set ~25-28 KB + the
-// 40 KB resolver floor"; the resolver has run lean on every build since Section::runBuildSetup
-// set it unconditionally, so the floor it protects is CSS_LEAN_MIN_FREE_HEAP_FOR_CSS:
-//   parse working set of a heap-backed CSS build (SAX ~10 KB, index, page/paragraph heap)  28 KB
-//   resolver lean floor                                                                   24 KB
-//   margin                                                                                 4 KB
-//                                                                                       = 56 KB
-// The residentAbort guard (RESIDENT_BUILD_ABORT_*) still catches a build that dips further. X4
-// device confirmation of the new admission band (56-66 KB free) is pending.
-#ifndef IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES
-#define IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES (56 * 1024)
-#endif
-#ifndef IN_PLACE_BUILD_CSS_MIN_CONTIG_HEAP_BYTES
-#define IN_PLACE_BUILD_CSS_MIN_CONTIG_HEAP_BYTES (32 * 1024)
-#endif
+// The in-place build floors (IN_PLACE_BUILD_*) live in InPlaceBuildGate.h with the rule that applies them.
 // Proactive low-heap guard for a resident (AA-buffer-kept) Background-C build. The in-place start
 // floors can't bound the parse's transient working set, which can ride free heap well down on a
 // big chapter (a 123 KB CSS section was observed dipping to ~24 KB). If the between-slice baseline
@@ -4410,50 +4348,26 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
       return false;
     }
   }
-  // The extraction phase holds an inflate ring sized to the entry (≤32 KB) — a per-spine cost the
-  // static floors were never tuned for (they fit the common few-KB chapter, where the ring is
-  // noise). Add it to the floors the same way Background-B's WaitHeap gate does (ring on top of
-  // the base, contig raised to ring + scratch), so a whole-book-in-one-spine entry is sent
-  // straight to the released path instead of starting a resident build that is doomed to the
-  // low-heap abort (~1.4 s of popup/setup/abort/re-setup waste, observed heap dip to <8 KB free).
-  const uint32_t ringBytes = static_cast<uint32_t>(std::min<size_t>(32768, inflatedSize));
-  // max(), not sum: the build's two phases have disjoint peaks (runBuildParse releases the
-  // inflate ring before the CSS-resolving parse starts), so the ring and the layout working set
-  // are never live at the same time. This is the same shape Background-B's heap-backed gate has
-  // always used; only this one summed them.
-  //
-  // Device-measured on X4 (2026-08-15, HEAP_GATE_TRACE, book cache deleted to force builds):
-  //   spine 14  ring=27875  free=62468  old floor=95459   arena high-water 39268/48000, failedAlloc=0
-  //   spine 16  ring=32768  free=61580  old floor=100352  arena high-water 44148/48000, failedAlloc=0
-  // Total heap on that device is 265120 and free never exceeds ~69 KB at reader time, so the old
-  // floor could not be met by any book on any page — it was a constant false, not a tuning. That
-  // also made RESIDENT_BUILD_ABORT_* dead code, since reaching it requires IncrementalResident.
-  //
-  // NOTE the CSS base still (correctly) rejects both of those builds at ~62 KB free: a heap-backed
-  // parse there would dip under the runtime CSS-resolve floor (~40 KB) and come out degraded. The
-  // fix is not "let more builds go resident" — it is "let this gate be answerable at all". What it
-  // changes in practice is the NON-CSS case, where the floor drops from 60 KB + ring (up to 92 KB,
-  // unreachable) to a flat 60 KB, which the ~62-69 KB reading heap can actually clear.
-  const uint32_t freeFloor =
-      std::max<uint32_t>(embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_FREE_HEAP_BYTES : IN_PLACE_BUILD_MIN_FREE_HEAP_BYTES,
-                         IN_PLACE_BUILD_EXTRACT_BASE_HEAP_BYTES + ringBytes);
-  const uint32_t contigFloor = std::max<uint32_t>(embeddedStyle ? IN_PLACE_BUILD_CSS_MIN_CONTIG_HEAP_BYTES
-                                                                : IN_PLACE_BUILD_MIN_CONTIG_HEAP_BYTES,
-                                                  ringBytes + 8 * 1024) -
-                               LARGEST_FREE_BLOCK_SLACK;
-  const uint32_t freeHeap = esp_get_free_heap_size();
-  const uint32_t contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
-  const bool ok = freeHeap >= freeFloor && contigHeap >= contigFloor;
+  InPlaceBuildGate::Request request;
+  request.embeddedStyle = embeddedStyle;
+  request.inflatedSize = inflatedSize;
+  request.cjkRepertoire = TypographyProfile::forLanguage(epub->getLanguage()).cjkRepertoire;
+  request.trueTypeSet = sdFontSystem.ttfLoaded();
+  request.freeHeap = esp_get_free_heap_size();
+  request.contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  const InPlaceBuildGate::Admission admission = InPlaceBuildGate::admitsResident(request);
   // One line per gate evaluation: the resident/released choice and the exact heap-vs-floor
   // arithmetic behind it. This is the first thing to check when a section build takes the wrong
   // path (a resident build starving on the inflate ring cascades into the released rebuild).
-  LOG_INF("ERS", "heapAllowsInPlaceBuild=%d css=%d ring=%lu free=%lu(floor=%lu) contig=%lu(floor=%lu)", ok ? 1 : 0,
-          embeddedStyle ? 1 : 0, static_cast<unsigned long>(ringBytes), static_cast<unsigned long>(freeHeap),
-          static_cast<unsigned long>(freeFloor), static_cast<unsigned long>(contigHeap),
-          static_cast<unsigned long>(contigFloor));
+  LOG_INF("ERS", "heapAllowsInPlaceBuild=%d css=%d cjkTtf=%d ring=%lu free=%lu(floor=%lu) contig=%lu(floor=%lu)",
+          admission.resident ? 1 : 0, embeddedStyle ? 1 : 0, admission.cjkTrueType ? 1 : 0,
+          static_cast<unsigned long>(admission.ringBytes), static_cast<unsigned long>(request.freeHeap),
+          static_cast<unsigned long>(admission.freeFloor), static_cast<unsigned long>(request.contigHeap),
+          static_cast<unsigned long>(admission.contigFloor));
   // Also emit in the shared gate format so one `grep HEAP` collects every gate decision in a run.
-  HEAP_GATE(embeddedStyle ? "inPlace_css" : "inPlace", ok, freeHeap, freeFloor, contigHeap, contigFloor);
-  return ok;
+  HEAP_GATE(embeddedStyle ? "inPlace_css" : "inPlace", admission.resident, request.freeHeap, admission.freeFloor,
+            request.contigHeap, admission.contigFloor);
+  return admission.resident;
 }
 
 EpubReaderActivity::SectionBuildMode EpubReaderActivity::chooseSectionBuildMode(const bool embeddedStyle,
