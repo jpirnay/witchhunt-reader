@@ -535,7 +535,8 @@ produces; a power cut leaves at worst bytes nothing references.
   has), each 4-byte aligned behind a table directory whose `glyf` record points past the block
   (`SdOutlines::fontOffset`); the outlines are read from the file on the card there (`SdOutlines::fileOffset`,
   `length`). An SD-mode `StyleInfo` also holds the file's stamp (`FileSource::stamp`: FNV-1a over its path and
-  modification time) and size; a file that no longer matches them installs the set again. Flash-mode blocks map one at a time, the SD-mode ones together.
+  modification time) and size; a file that no longer matches them installs the set again. Flash-mode blocks map one
+  at a time, the SD-mode ones together.
 - **A face** is a family at one size: `face = family << 24 | ppem` (26.6 pixels per em; the family is its index in
   the set). An entry is in use once `claimed` reads 0. A glyph key is `codepoint | style << 21 | faceIndex << 23`,
   bits 28-31 zero, so a key never reads as erased. The 32 entries are every family's; taking the last one, or asking
