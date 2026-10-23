@@ -76,6 +76,16 @@ class FontInstaller {
   /// the manifest's size, at another size, or missing, and asks FontDownloadRules::isUpdate.
   static bool hasUpdate(const FontCatalog& families, size_t family);
 
+  /// An outline family just installed that the registry does not list: the glyph store cannot hold it.
+  bool installedButNotListed(const FontCatalog& families, size_t family) const;
+
  private:
+  struct FileCounts {
+    size_t same = 0;     // on the card at the manifest's size
+    size_t changed = 0;  // on the card at another size
+    size_t absent = 0;   // missing
+  };
+  static FileCounts countFiles(const FontCatalog& families, size_t family);
+
   SdCardFontRegistry& registry_;
 };

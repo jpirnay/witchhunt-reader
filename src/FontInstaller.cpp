@@ -207,26 +207,33 @@ bool FontInstaller::isFamilyOnCard(const char* familyName) const {
   return Storage.exists(dirPath);
 }
 
-bool FontInstaller::hasUpdate(const FontCatalog& families, const size_t family) {
-  size_t same = 0;
-  size_t changed = 0;
-  size_t absent = 0;
+FontInstaller::FileCounts FontInstaller::countFiles(const FontCatalog& families, const size_t family) {
+  FileCounts counts;
   const char* familyName = families.name(family);
   for (size_t j = 0; j < families.fileCount(family); j++) {
     char path[128];
     buildFontPath(familyName, families.fileLocalName(family, j), path, sizeof(path));
     FsFile f;
     if (!Storage.openFileForRead("FONT", path, f)) {
-      ++absent;
+      ++counts.absent;
       continue;
     }
     const size_t actual = f.fileSize();
     f.close();
     if (actual == families.fileSize(family, j)) {
-      ++same;
+      ++counts.same;
     } else {
-      ++changed;
+      ++counts.changed;
     }
   }
-  return FontDownloadRules::isUpdate(same, changed, absent);
+  return counts;
+}
+
+bool FontInstaller::hasUpdate(const FontCatalog& families, const size_t family) {
+  const FileCounts counts = countFiles(families, family);
+  return FontDownloadRules::isUpdate(counts.same, counts.changed, counts.absent);
+}
+
+bool FontInstaller::installedButNotListed(const FontCatalog& families, const size_t family) const {
+  return families.outline(family) && !isFamilyInstalled(families.name(family));
 }

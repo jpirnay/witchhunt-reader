@@ -649,7 +649,7 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
   // it needs families_ which is empty during this impl.
 
   RenderLock lock(*this);
-  if (family.outline(0) && !fontInstaller_.isFamilyInstalled(familyName)) {
+  if (fontInstaller_.installedButNotListed(family, 0)) {
     // On the card, but the registry does not list it: an outline family the glyph store cannot hold. The list shows
     // it installed, so it is not offered again; the note says why it is not in the font choices.
     LOG_INF("FONT", "%s installed but not listed: the glyph store cannot hold it", familyName);

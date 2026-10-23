@@ -2588,7 +2588,7 @@ void CrossPointWebServer::handleFontDownload() {
   // The outline families installed that the reader does not list (too large for the glyph store).
   JsonArray notListed = res["notListed"].to<JsonArray>();
   for (size_t i = 0; i < targets.count(); i++) {
-    if (targets.outline(i) && !installer.isFamilyInstalled(targets.name(i))) notListed.add(targets.name(i));
+    if (installer.installedButNotListed(targets, i)) notListed.add(targets.name(i));
   }
   sendJson(server.get(), 200, res);
 }
