@@ -2580,6 +2580,29 @@ TEST_F(TtfFontTest, ARegularOnlyFamilyDrawsBoldEmboldenedItalicSlantedAndBoldIta
   expectDrawnAs(reference(regular, 'W', 14), *font, kRegular, font->glyph(kRegular, 'W'));
 }
 
+/// The style choice, run again on a family that has made it (a reopen after an install does not, today; a future one
+/// might).
+struct TtfFontTestAccess {
+  static void chooseAgain(TtfFont& font) { font.chooseSynthetic(); }
+  static bool draws(const TtfFont& font, const uint8_t style) { return font.draws(style); }
+  static uint8_t source(const TtfFont& font, const uint8_t style) { return font.source_[style]; }
+};
+
+TEST_F(TtfFontTest, ChoosingSyntheticStylesAgainGivesTheSameChoice) {
+  // A regular-only family: the first choice sets source_[2] to the regular, and a second must not read that as an
+  // italic file (draws(2)), or bold italic would be drawn from file slot 0xFF.
+  for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  uint8_t before[4];
+  for (uint8_t s = 0; s < 4; ++s) before[s] = TtfFontTestAccess::source(*font, s);
+  TtfFontTestAccess::chooseAgain(*font);
+  for (uint8_t s = 0; s < 4; ++s) EXPECT_EQ(before[s], TtfFontTestAccess::source(*font, s)) << int{s};
+  EXPECT_TRUE(TtfFontTestAccess::draws(*font, kBoldItalic));
+  EXPECT_TRUE(font->emboldened(kBoldItalic));
+  EXPECT_TRUE(font->slanted(kBoldItalic));
+}
+
 TEST_F(TtfFontTest, BoldItalicIsEmboldenedFromTheItalicWhenThereIsOne) {
   files[kBold].bytes.clear();
   files[kBoldItalic].bytes.clear();

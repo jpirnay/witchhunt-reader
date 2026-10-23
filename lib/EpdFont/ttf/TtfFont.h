@@ -115,6 +115,7 @@ class TtfFont {
 
  private:
   friend class TtfFontSet;
+  friend struct TtfFontTestAccess;  // host tests: the style choice, run again
   struct Size;
 
   class StyleProvider final : public GlyphProvider {

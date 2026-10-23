@@ -732,6 +732,10 @@ void TtfFont::chooseSynthetic() {
   // more), such as a bold file serving as the regular.
   // Spec 7.4 reads italic alike: a file in the italic or bold italic slot, or a face that says italic (macStyle,
   // fsSelection, italicAngle). Both rules read the files before either changes source_.
+  // Derived from the files each time, so a second call gives the first's result (a synthetic source it set must not
+  // read as a file below).
+  for (uint8_t s = 0; s < 4; ++s) source_[s] = fileSlot_[s] != kNoSlot ? s : kNoSlot;
+  emboldened_ = slanted_ = 0;
   bool bold = fileSlot_[1] != kNoSlot || fileSlot_[3] != kNoSlot;
   bool italic = fileSlot_[2] != kNoSlot || fileSlot_[3] != kNoSlot;
   for (uint8_t s = 0; s < 4; ++s) {
