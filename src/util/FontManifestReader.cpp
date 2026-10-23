@@ -11,7 +11,7 @@
 // The reader's working state, on the heap while read() runs and freed on return: the parser (its
 // 512-byte token buffer, the base URL and one file name), the two passes' builders, the open family's
 // name and first bad file name, which wait for the family to close, and the read block (one SD sector
-// per read). About 1.9 KB, too much for the stack.
+// per read). About 1.9 KB plus the format fields, too much for the stack.
 struct FontManifestReader::Work {
   Work(const FontManifestCallbacks& callbacks, FontCatalog& catalog) : parser(callbacks), filler(catalog) {}
 

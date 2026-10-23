@@ -245,7 +245,7 @@ TEST(FontManifestReaderTest, AnUnreadableFileIsInvalid) {
   EXPECT_NE(reader.failure(), nullptr);
 }
 
-// Only versions 1 and 2 are read; any other leaves nothing behind and reports the version found.
+// Only versions 1 to 3 are read; any other leaves nothing behind and reports the version found.
 TEST(FontManifestReaderTest, OnlyVersions1To3AreAccepted) {
   Outcome out = read(R"({"version":4,"families":[{"name":"A"}]})");
   EXPECT_EQ(out.status, FontManifestStatus::UnsupportedVersion);
