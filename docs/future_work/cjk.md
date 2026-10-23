@@ -191,6 +191,9 @@ A larger block for every family is not worth one glyph. A Hong Kong or full-set 
   needs its own choice for it.
 - **A family installed but not listed.** The web page's installed list comes from the registry, so such a family is
   missing from it and only the device can delete it.
+- **The update rule has two accepted limits** (`FontDownloadRules::isUpdate`). A reader's own file with a manifest file
+  name but other bytes counts as an update and is replaced. A hosted family whose files are all renamed is never offered
+  an update, so hosted files are never renamed: a renamed set ships as a new family.
 - **Resume works per file.** An interrupted one-file family (every `.otf`) restarts from zero.
 - **The card's free space is cached for 20 s.** The SDK caches the used bytes
   (`freeink-sdk/libs/hardware/SDCardManager/src/SDCardManager.cpp`) and a remove or a write does not invalidate the
