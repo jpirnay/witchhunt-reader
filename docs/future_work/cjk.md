@@ -91,6 +91,10 @@ Listed here so nobody redoes it.
 - **Taller lines.** A line with ruby is taller by half an ascender: in `addLineToPage`, in table rows and cells, in `TextBlock::wordBox` (the dictionary boxes the base, not the ruby) and in link areas. Other lines keep their height.
 - **Section version** 99.
 - **Tests.** `dumpPage` prints the ruby groups, so the goldens see them; the rule checker checks ruby spacing and margins; stray ruby readings keep their spacing, pinned by x positions.
+- **Ruby: known limits** (from the final review).
+  - A reading is measured with kerning (`getTextAdvanceX`) but drawn one character at a time without it, so a Latin gloss with kern pairs can sit 1-2 px past the margin. Fix: measure the unkerned sum, or draw the reading in one call and spread per character only for 1:2:1.
+  - A reading over a word in another font family (publisher fonts on) is placed by that word's ascender, but the band is half the block font's ascender: with a taller family it can rise above the band into the line above. Fix: clamp `rubyY` to the line's top.
+  - `room()` takes Latin curly quotes (U+2018, U+2019, U+201C, U+201D) as punctuation a reading may overhang, though `applyPunctuationWidths` leaves them out as narrow Latin glyphs: a pixel or two over an apostrophe. Fix: ask `markClass_` instead of `CjkPunctuation::classOf`.
 
 **Tests and books.**
 - `test/epub_pipeline/CjkRulesTest.cpp`, the rule checker, lays out every line and asserts kinsoku, no hyphen, and no stray space between CJK characters.
