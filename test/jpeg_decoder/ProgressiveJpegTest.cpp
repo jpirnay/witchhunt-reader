@@ -430,10 +430,11 @@ TEST_P(ProgressiveJpegCheckpoint, ResumesWithIdenticalRowsFromEveryStep) {
   std::remove(ckpt.c_str());
 }
 
+// 1/8 decodes no AC scan (their cursors never move), so it is checkpointed on its own.
 INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegCheckpoint,
                          testing::Combine(testing::Values("prog_full_420.jpg", "prog_full_gray.jpg",
                                                           "prog_full_444_rst.jpg"),
-                                          testing::Values(0, 1)));
+                                          testing::Values(0, 1, 3)));
 
 // A checkpoint only resumes the decode it was taken of.
 TEST(ProgressiveJpeg, ResumeRefusesAForeignCheckpoint) {
@@ -599,6 +600,47 @@ TEST(ProgressiveJpeg, ACheckpointResumesWithOrWithoutTheReadWindows) {
   }
   std::remove(ckpt.c_str());
 }
+
+// At 1/8 a block is one pixel, its DC level: the AC scans cannot change it, so the decode skips
+// them. Rows must stay byte for byte what decoding every scan gave (recorded below from the decoder
+// that still decoded them), and the file must be read less than at 1/4, which still needs them.
+uint64_t fnv1a(const std::vector<uint8_t>& bytes) {
+  uint64_t h = 1469598103934665603ULL;
+  for (const uint8_t b : bytes) h = (h ^ b) * 1099511628211ULL;
+  return h;
+}
+
+struct EighthCase {
+  const char* jpg;
+  uint64_t rowsHash;  // FNV-1a of the 1/8 rows when every scan was decoded
+};
+
+class ProgressiveJpegEighth : public testing::TestWithParam<EighthCase> {};
+
+TEST_P(ProgressiveJpegEighth, SkipsTheAcScansWithTheSameRows) {
+  const EighthCase& c = GetParam();
+  for (const bool windows : {false, true}) {
+    SCOPED_TRACE(windows ? "with read windows" : "with the shared buffer");
+    const WindowedRun eighth = decodeWith(c.jpg, 3, windows);
+    const WindowedRun quarter = decodeWith(c.jpg, 2, windows);
+    ASSERT_EQ(eighth.result, ProgressiveJpeg::Result::Ok);
+    ASSERT_EQ(quarter.result, ProgressiveJpeg::Result::Ok);
+    EXPECT_TRUE(eighth.capture.orderOk);
+    EXPECT_EQ(fnv1a(eighth.capture.image.px), c.rowsHash) << c.jpg;
+    std::printf("[ pjpeg    ] %s %s: 1/8 %u reads / %u bytes, 1/4 %u / %u\n", c.jpg, windows ? "windows" : "shared",
+                static_cast<unsigned>(eighth.stats.reads), static_cast<unsigned>(eighth.stats.bytesRead),
+                static_cast<unsigned>(quarter.stats.reads), static_cast<unsigned>(quarter.stats.bytesRead));
+    EXPECT_LT(eighth.stats.reads, quarter.stats.reads);
+    EXPECT_LT(eighth.stats.bytesRead, quarter.stats.bytesRead);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegEighth,
+                         testing::Values(EighthCase{"prog_full_420.jpg", 13821861766860504631ULL},
+                                         EighthCase{"prog_full_gray.jpg", 7087090682878387780ULL},
+                                         EighthCase{"prog_full_444_rst.jpg", 10387207835323122819ULL},
+                                         EighthCase{"thin_lines_prog.jpg", 2001519597461149831ULL},
+                                         EighthCase{"progressive_tall.jpg", 11623068769939918297ULL}));
 
 // Smaller output keeps fewer coefficients per block: the working set has to shrink with it.
 TEST(ProgressiveJpeg, WorkspaceShrinksWithScale) {

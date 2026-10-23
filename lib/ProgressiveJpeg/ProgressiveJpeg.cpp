@@ -899,6 +899,9 @@ Result decodeBand(State& st, const Geometry& g, uint8_t* workspace, const Layout
   const int firstRow = band * g.bandBlockRows;
   for (uint8_t s = 0; s < st.scanCount; ++s) {
     const Scan& scan = st.scans[s];
+    // At 1/8 a block is its DC level alone, and AC scans touch no DC coefficient: their cursors
+    // stay where the index left them, which a checkpoint at this scale carries as it is.
+    if (g.n == 1 && scan.ss > 0) continue;
     st.source.selectScan(s);
     BitReader in{st.source, st.cursors[s]};
     if (scan.compCount > 1) {
