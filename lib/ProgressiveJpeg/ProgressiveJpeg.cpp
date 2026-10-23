@@ -278,13 +278,18 @@ struct Geometry {
   uint16_t paddedCols = 0;    // band width in blocks (covers both)
   uint8_t bandBlockRows = 1;  // luma block rows per band (one MCU row)
   uint16_t bandCount = 0;
-  uint8_t n = 8;      // output pixels per block side
-  uint8_t kept = 64;  // coefficients kept per block (n * n)
+  uint8_t n = 8;          // output pixels per block side
+  uint8_t kept = 64;      // coefficients kept per block (n * n)
+  uint16_t outWidth = 0;  // the rows emitted: floor(width >> scale), or at 1/8 with wholeBlocks every block
+  uint16_t outHeight = 0;
 };
 
 Geometry geometryFor(const uint16_t width, const uint16_t height, const uint8_t compCount, const uint8_t maxH,
-                     const uint8_t maxV, const uint8_t shift) {
+                     const uint8_t maxV, const uint8_t shift, const bool wholeBlocks = false) {
   Geometry g;
+  const bool everyBlock = wholeBlocks && shift == 3;
+  g.outWidth = static_cast<uint16_t>(everyBlock ? (width + 7) / 8 : width >> shift);
+  g.outHeight = static_cast<uint16_t>(everyBlock ? (height + 7) / 8 : height >> shift);
   g.lumaCols = static_cast<uint16_t>((width + 7) / 8);
   g.lumaRows = static_cast<uint16_t>((height + 7) / 8);
   if (compCount == 1) {  // every scan of a one-component frame is non-interleaved, MCU = one block
@@ -1020,8 +1025,8 @@ Result decodeBand(State<C>& st, const Geometry& g, uint8_t* workspace, const Lay
   uint8_t* pixels = workspace + layout.pixelOffset;
   const size_t bandBlocks = static_cast<size_t>(g.bandBlockRows) * g.paddedCols;
   const size_t pixelStride = static_cast<size_t>(g.paddedCols) * g.n;
-  const uint16_t outWidth = static_cast<uint16_t>(st.width >> (3 - __builtin_ctz(g.n)));
-  const uint16_t outHeight = static_cast<uint16_t>(st.height >> (3 - __builtin_ctz(g.n)));
+  const uint16_t outWidth = g.outWidth;
+  const uint16_t outHeight = g.outHeight;
   const uint16_t* quant = st.quant[st.comps[0].quantizer];
 
   auto blockAt = [&](const int bandRow, const int col) {
@@ -1228,7 +1233,7 @@ Result Decoder::claim(FsFile& file, const DecodeOptions& options, const BandCall
   if (probed != Result::Ok) return probed;
 
   const Geometry g = geometryFor(info.width, info.height, info.componentCount, info.maxHorizontal, info.maxVertical,
-                                 options.scaleShift);
+                                 options.scaleShift, options.wholeBlocks);
   dcOnly_ = dcOnly(options.scaleShift);
   const Layout layout = dcOnly_ ? layoutFor<DcCaps>(g) : layoutFor<FullCaps>(g);
 
@@ -1375,7 +1380,8 @@ bool readSession(Session<C>& ss, const DecodeOptions& options, const BandCallbac
   }
   if (ss.info.width != info.width || ss.info.height != info.height || ss.info.componentCount != info.componentCount ||
       ss.g.bandCount != g.bandCount || ss.g.n != g.n || ss.g.paddedCols != g.paddedCols ||
-      ss.layout.total != layout.total || ss.phase == Phase::Done || ss.nextBand > g.bandCount) {
+      ss.g.outWidth != g.outWidth || ss.g.outHeight != g.outHeight || ss.layout.total != layout.total ||
+      ss.phase == Phase::Done || ss.nextBand > g.bandCount) {
     return false;
   }
   // Re-bind what the checkpoint cannot carry: this workspace, this file, this caller.
@@ -1450,6 +1456,133 @@ Result decode(FsFile& file, const DecodeOptions& options, const BandCallback cal
     result = decoder.step(UINT16_MAX);  // one step indexes the whole file, the next decodes every band
   } while (result == Result::Pending);
   return result;
+}
+
+namespace {
+
+// Bilinear resampling of whole rows to the output size, a source row at a time: decodeResized()'s.
+// Corner-aligned -- the first and last output pixels sit on the first and last source ones -- and
+// it keeps the previous source row, so output rows between two source rows blend them.
+class RowScaler {
+ public:
+  RowScaler(uint16_t sourceWidth, uint16_t sourceHeight, uint16_t outputWidth, uint16_t outputHeight, uint8_t* rows,
+            RowCallback callback, void* callbackUser)
+      : sourceWidth_(sourceWidth),
+        sourceHeight_(sourceHeight),
+        outputWidth_(outputWidth),
+        outputHeight_(outputHeight),
+        previous_(rows),
+        current_(rows + outputWidth),
+        blended_(rows + outputWidth * 2U),
+        callback_(callback),
+        callbackUser_(callbackUser) {}
+
+  bool submit(const uint8_t* sourceRow, uint16_t sourceY) {
+    resizeHorizontal(sourceRow, current_);
+    while (nextOutputY_ < outputHeight_) {
+      const uint32_t sourcePosition = mapCoordinate(nextOutputY_, outputHeight_, sourceHeight_);
+      const uint16_t lowerY = static_cast<uint16_t>(sourcePosition >> 16);
+      const uint16_t upperY = std::min<uint16_t>(lowerY + 1, sourceHeight_ - 1);
+      if (upperY > sourceY) break;
+
+      const uint8_t* lower = lowerY == sourceY ? current_ : previous_;
+      const uint8_t* upper = upperY == sourceY ? current_ : previous_;
+      const uint32_t fraction = sourcePosition & 0xFFFF;
+      for (uint16_t x = 0; x < outputWidth_; ++x) {
+        blended_[x] = interpolate(lower[x], upper[x], fraction);
+      }
+      if (!callback_(callbackUser_, nextOutputY_, blended_, outputWidth_)) return false;
+      ++nextOutputY_;
+    }
+    std::swap(previous_, current_);
+    submittedY_ = sourceY;
+    return true;
+  }
+
+  bool finish() {
+    while (nextOutputY_ < outputHeight_ && submittedY_ >= 0) {
+      if (!callback_(callbackUser_, nextOutputY_, previous_, outputWidth_)) return false;
+      ++nextOutputY_;
+    }
+    return nextOutputY_ == outputHeight_;
+  }
+
+ private:
+  // 16.16 source position for one output row/column.
+  //
+  // The intermediate MUST be 64-bit. `*` binds tighter than `<<`, so the product is formed first
+  // and then shifted; in 32 bits that wraps as soon as outputIndex * (sourceSize - 1) reaches
+  // 65536 — for a 1920x2708 progressive cover scaled to 382x540 that is output row 194 of 540.
+  // Past the wrap, lowerY collapses to ~0, submit()'s "have we reached this source row yet" test
+  // passes for every remaining row at once, and they all get emitted from the last decoded row:
+  // the top third of the image decodes correctly and the rest is that one row repeated.
+  // The RESULT always fits in uint32 ((sourceSize - 1) << 16 <= 0xFFFF0000); only the
+  // intermediate needs the wider type.
+  static uint32_t mapCoordinate(uint16_t outputIndex, uint16_t outputSize, uint16_t sourceSize) {
+    if (outputSize <= 1 || sourceSize <= 1) return 0;
+    if (outputIndex + 1 == outputSize) return static_cast<uint32_t>(sourceSize - 1) << 16;
+    return static_cast<uint32_t>((static_cast<uint64_t>(outputIndex) * (sourceSize - 1) << 16) / (outputSize - 1));
+  }
+
+  static uint8_t interpolate(uint8_t first, uint8_t second, uint32_t fraction) {
+    return static_cast<uint8_t>((first * (0x10000U - fraction) + second * fraction) >> 16);
+  }
+
+  void resizeHorizontal(const uint8_t* source, uint8_t* output) const {
+    for (uint16_t x = 0; x < outputWidth_; ++x) {
+      const uint32_t sourcePosition = mapCoordinate(x, outputWidth_, sourceWidth_);
+      const uint16_t left = static_cast<uint16_t>(sourcePosition >> 16);
+      const uint16_t right = std::min<uint16_t>(left + 1, sourceWidth_ - 1);
+      output[x] = interpolate(source[left], source[right], sourcePosition & 0xFFFF);
+    }
+  }
+
+  uint16_t sourceWidth_;
+  uint16_t sourceHeight_;
+  uint16_t outputWidth_;
+  uint16_t outputHeight_;
+  uint8_t* previous_;
+  uint8_t* current_;
+  uint8_t* blended_;
+  RowCallback callback_;
+  void* callbackUser_;
+  uint16_t nextOutputY_ = 0;
+  int32_t submittedY_ = -1;
+};
+
+// A band of the 1/8 decode, row by row into the scaler.
+bool resizeBand(void* user, const uint16_t y, const uint8_t* gray, uint16_t, const uint16_t rows,
+                const uint16_t stride) {
+  auto& scaler = *static_cast<RowScaler*>(user);
+  for (uint16_t r = 0; r < rows; ++r) {
+    if (!scaler.submit(gray + static_cast<size_t>(r) * stride, static_cast<uint16_t>(y + r))) return false;
+  }
+  return true;
+}
+
+}  // namespace
+
+Result decodeResized(FsFile& file, const DecodeOptions& options, const uint16_t outputWidth,
+                     const uint16_t outputHeight, const RowCallback callback, void* user) {
+  if (outputWidth == 0 || outputHeight == 0 || callback == nullptr) return Result::InvalidData;
+  ImageInfo info;
+  const Result probed = probe(file, info, options.base);
+  if (probed != Result::Ok) return probed;
+  // Every block, the partial ones at the edges too (DecodeOptions::wholeBlocks): the picture maps
+  // onto the box as a whole.
+  const uint16_t sourceWidth = static_cast<uint16_t>((info.width + 7) / 8);
+  const uint16_t sourceHeight = static_cast<uint16_t>((info.height + 7) / 8);
+  // The previous and current source row at the output width, and the blended output row: the
+  // resampler's whole state, outputWidth bytes each, freed on every return.
+  auto rows = makeUniqueNoThrow<uint8_t[]>(static_cast<size_t>(outputWidth) * 3);
+  if (!rows) return Result::OutOfMemory;
+  RowScaler scaler(sourceWidth, sourceHeight, outputWidth, outputHeight, rows.get(), callback, user);
+  DecodeOptions eighth = options;
+  eighth.scaleShift = 3;
+  eighth.wholeBlocks = true;
+  const Result result = decode(file, eighth, resizeBand, &scaler);
+  if (result != Result::Ok && result != Result::Degraded) return result;
+  return scaler.finish() ? result : Result::Stopped;
 }
 
 const char* resultName(const Result result) {

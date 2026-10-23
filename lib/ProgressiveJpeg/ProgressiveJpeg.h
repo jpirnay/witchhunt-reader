@@ -97,6 +97,11 @@ struct DecodeOptions {
   // Optional instrumentation: filled when non-null; times only when `clock` (ms) is given too.
   DecodeStats* stats = nullptr;
   uint32_t (*clock)() = nullptr;
+  // At 1/8: a pixel for every block, the partial ones at the right and bottom edges too, so the
+  // output is ceil(width / 8) x ceil(height / 8). Each of those is its block's average, padding
+  // included -- a resampler that maps the picture onto a box wants them all (decodeResized); a
+  // caller that wants the scale's own size (floor, as at every scale) leaves it off.
+  bool wholeBlocks = false;
 };
 
 // Every failure is reported before the first band is emitted, so a caller can fall back to
@@ -106,6 +111,20 @@ struct DecodeOptions {
 // grey), and the decode goes on to every row and reports Degraded. So does a stream that ends
 // before its EOI.
 Result decode(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user);
+
+// One output row of decodeResized(): `width` gray pixels at row `y`. False stops the decode.
+using RowCallback = bool (*)(void* user, uint16_t y, const uint8_t* gray, uint16_t width);
+
+// The whole picture at the size of a box: the 1/8 decode (a DC-only session, see workspaceBytes)
+// resampled bilinearly to outputWidth x outputHeight, rows in order. The converters' last resort
+// when the heap holds no finer scale's workspace. A 1/8 level is a whole block's average, so an
+// upscale has to interpolate between them in both axes, or it shows the block grid; a converter's
+// per-band resampler sees one row of blocks at a time and cannot. The source is every block
+// (DecodeOptions::wholeBlocks), mapped corner to corner onto the box. The workspace comes as for
+// decode() (options.scaleShift and wholeBlocks are set here), the resampler's three output rows
+// from the heap. Results as decode()'s.
+Result decodeResized(FsFile& file, const DecodeOptions& options, uint16_t outputWidth, uint16_t outputHeight,
+                     RowCallback callback, void* user);
 
 // decode() in pieces, for a caller that must stay responsive between them (Home's cover pass
 // pauses for a button press and resumes where it stopped instead of starting over). decode() is

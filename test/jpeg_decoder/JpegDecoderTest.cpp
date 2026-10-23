@@ -336,6 +336,93 @@ TEST(ProgressiveJpegDc, RejectsBaselineWithoutEmittingRows) {
 }
 
 // ---------------------------------------------------------------------------
+// ProgressiveJpeg::decodeResized: the 1/8 decode resampled to a box -- the DC-only preview's job,
+// from every DC scan, and the same tests. The 1/8 levels are whole blocks' averages, so it
+// interpolates between them in both axes.
+// ---------------------------------------------------------------------------
+namespace {
+
+ProgressiveJpeg::Result decodeResized(const char* name, const uint16_t width, const uint16_t height,
+                                      ProgressiveRows& capture) {
+  FsFile file;
+  EXPECT_TRUE(file.openForRead(fixture(name)));
+  ProgressiveJpeg::DecodeOptions options;
+  const auto result = ProgressiveJpeg::decodeResized(file, options, width, height, ProgressiveRows::accept, &capture);
+  file.close();
+  return result;
+}
+
+}  // namespace
+
+TEST(ProgressiveJpegResized, DecodesTheEighthIntoResizedRows) {
+  ProgressiveRows capture;
+  const auto result = decodeResized("progressive_420.jpg", 48, 32, capture);
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  ASSERT_EQ(capture.width, 48);
+  ASSERT_EQ(capture.height, 32);
+  ASSERT_EQ(capture.pixels.size(), 48u * 32u);
+  EXPECT_LT(capture.pixels[8 * 48 + 40], 80);    // black upper-right region
+  EXPECT_GT(capture.pixels[24 * 48 + 40], 175);  // white lower-right region
+  EXPECT_LT(capture.pixels[16 * 48 + 4], capture.pixels[16 * 48 + 20]);
+}
+
+// ---------------------------------------------------------------------------
+// RowScaler::mapCoordinate computed `outputIndex * (sourceSize - 1) << 16` in 32 bits.
+// `*` binds tighter than `<<`, so the product was formed first and the shift overflowed
+// once it reached 65536; the source position then wrapped to near zero, submit()'s
+// "have we reached this source row yet" test passed for every remaining output row at
+// once, and they were all emitted from the last decoded row. On a real 1920x2708
+// progressive cover scaled to a 540-row thumbnail that meant 194 correct rows followed
+// by 346 copies of one row. Both axes were affected; one test each.
+// ---------------------------------------------------------------------------
+TEST(ProgressiveJpegResized, TallImageDoesNotRepeatRowsPastOverflow) {
+  ProgressiveRows capture;
+  // 339 rows at 1/8: the wrap began at output row 194.
+  const auto result = decodeResized("progressive_tall.jpg", 8, 540, capture);
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  ASSERT_EQ(capture.height, 540);
+
+  // The source is a black-to-white gradient top to bottom, so the output has to keep
+  // getting brighter all the way down. The bug froze it at the value of row ~193.
+  const auto row = [&](int y) { return capture.pixels[static_cast<size_t>(y) * capture.width]; };
+  EXPECT_LT(row(0), row(193));
+  EXPECT_LT(row(193), row(300));
+  EXPECT_LT(row(300), row(539));
+  EXPECT_GT(row(539), 200);  // reaches white rather than freezing at ~36% grey
+}
+
+TEST(ProgressiveJpegResized, WideImageDoesNotRepeatColumnsPastOverflow) {
+  ProgressiveRows capture;
+  // 240 columns at 1/8: the wrap began at output column 275.
+  const auto result = decodeResized("progressive_wide.jpg", 382, 8, capture);
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  ASSERT_EQ(capture.width, 382);
+
+  // Left-to-right gradient, read across the first output row.
+  const auto col = [&](int x) { return capture.pixels[static_cast<size_t>(x)]; };
+  EXPECT_LT(col(0), col(274));
+  EXPECT_LT(col(274), col(330));
+  EXPECT_LT(col(330), col(381));
+  EXPECT_GT(col(381), 200);
+}
+
+TEST(ProgressiveJpegResized, RejectsBaselineWithoutEmittingRows) {
+  ProgressiveRows capture;
+  EXPECT_EQ(decodeResized("contrast_420.jpg", 48, 32, capture), ProgressiveJpeg::Result::Unsupported);
+  EXPECT_TRUE(capture.pixels.empty());
+}
+
+// The resize starts from every block, the partial ones at the right and bottom edges too: a 9x5
+// image is two levels side by side, not nothing (a picture with no whole block row at 1/8).
+TEST(ProgressiveJpegResized, ResizesFromEveryBlockEvenAPartialOne) {
+  ProgressiveRows capture;
+  const auto result = decodeResized("prog_tiny_9x5.jpg", 18, 10, capture);
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  ASSERT_EQ(capture.height, 10);
+  EXPECT_NE(capture.pixels[0], capture.pixels[17]) << "the second, partial block has a level of its own";
+}
+
+// ---------------------------------------------------------------------------
 // Bug 1 end-to-end: the thumbnail converter on an odd-width baseline JPEG that
 // forces a 1/2 DCT pre-scale. Before the floor fix this wrote 0 rows and failed.
 // ---------------------------------------------------------------------------
