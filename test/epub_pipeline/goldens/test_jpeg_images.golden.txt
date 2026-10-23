@@ -339,35 +339,35 @@ SPINE 9 href=OEBPS/chapter10.xhtml pages=2 truncated=0 cssFallback=0
    W x=290 s=0 z=100 t=because
    W x=367 s=0 z=100 t=the
    W x=412 s=0 z=100 t=empty
-  LINE y=678 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=678 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=heading's
-   W x=114 s=0 z=100 t=default
-   W x=209 s=0 z=100 t=Center
-   W x=292 s=0 z=100 t=alignment
-   W x=407 s=0 z=100 t=bleeds
-  LINE y=702 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=0 z=100 t=through
-   W x=89 s=0 z=100 t=the
-   W x=133 s=0 z=100 t=chain
-   W x=194 s=0 z=100 t=of
-   W x=229 s=0 z=100 t=empty
-   W x=285 s=0 z=100 t=text
-   W x=334 s=0 z=100 t=blocks.
-   W x=408 s=0 z=100 t=Lorem
+   W x=94 s=0 z=100 t=default
+   W x=169 s=0 z=100 t=Center
+   W x=232 s=0 z=100 t=alignment
+   W x=327 s=0 z=100 t=bleeds
+   W x=383 s=0 z=100 t=through
+  LINE y=702 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=the
+   W x=40 s=0 z=100 t=chain
+   W x=97 s=0 z=100 t=of
+   W x=128 s=0 z=100 t=empty
+   W x=180 s=0 z=100 t=text
+   W x=225 s=0 z=100 t=blocks.
+   W x=295 s=0 z=100 t=Lorem
+   W x=355 s=0 z=100 t=ipsum
+   W x=406 s=0 z=100 t=dolor
  PAGE 1 elements=9 footnotes=0
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=ipsum
-   W x=54 s=0 z=100 t=dolor
-   W x=115 s=0 z=100 t=sit
-   W x=152 s=0 z=100 t=amet,
-   W x=213 s=0 z=100 t=consectetur
-   W x=328 s=0 z=100 t=adipiscing
-   W x=422 s=0 z=100 t=elit
-  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=0 s=0 z=100 t=sed
-   W x=32 s=0 z=100 t=do
-   W x=58 s=0 z=100 t=eiusmod
-   W x=129 s=0 z=100 t=tempor.
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=sit
+   W x=33 s=0 z=100 t=amet,
+   W x=90 s=0 z=100 t=consectetur
+   W x=201 s=0 z=100 t=adipiscing
+   W x=291 s=0 z=100 t=elit
+   W x=333 s=0 z=100 t=sed
+   W x=367 s=0 z=100 t=do
+   W x=395 s=0 z=100 t=eiusmod
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=tempor.
   LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=18 s=0 z=100 t=SECOND
    W x=86 s=0 z=100 t=PARAGRAPH
@@ -385,40 +385,40 @@ SPINE 9 href=OEBPS/chapter10.xhtml pages=2 truncated=0 cssFallback=0
    W x=284 s=0 z=100 t=because
    W x=366 s=0 z=100 t=the
    W x=416 s=0 z=100 t=first
-  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=paragraph's
-   W x=121 s=0 z=100 t=text
-   W x=172 s=0 z=100 t=block
-   W x=229 s=0 z=100 t=was
-   W x=271 s=0 z=100 t=flushed.
-   W x=364 s=0 z=100 t=Duis
-   W x=416 s=0 z=100 t=aute
+   W x=113 s=0 z=100 t=text
+   W x=156 s=0 z=100 t=block
+   W x=205 s=0 z=100 t=was
+   W x=239 s=0 z=100 t=flushed.
+   W x=324 s=0 z=100 t=Duis
+   W x=368 s=0 z=100 t=aute
+   W x=417 s=0 z=100 t=irure
   LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=irure
-   W x=56 s=0 z=100 t=dolor
-   W x=119 s=0 z=100 t=in
-   W x=150 s=0 z=100 t=reprehenderit
-   W x=277 s=0 z=100 t=in
-   W x=308 s=0 z=100 t=voluptate
-   W x=413 s=0 z=100 t=velit
+   W x=0 s=0 z=100 t=dolor
+   W x=64 s=0 z=100 t=in
+   W x=96 s=0 z=100 t=reprehenderit
+   W x=224 s=0 z=100 t=in
+   W x=256 s=0 z=100 t=voluptate
+   W x=362 s=0 z=100 t=velit
+   W x=423 s=0 z=100 t=esse
   LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=esse
-   W x=52 s=0 z=100 t=cillum
-   W x=120 s=0 z=100 t=dolore
-   W x=194 s=0 z=100 t=eu
-   W x=230 s=0 z=100 t=fugiat
-   W x=306 s=0 z=100 t=nulla
-   W x=374 s=0 z=100 t=pariatur.
-  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=Excepteur
-   W x=95 s=0 z=100 t=sint
-   W x=147 s=0 z=100 t=occaecat
-   W x=239 s=0 z=100 t=cupidatat
-   W x=337 s=0 z=100 t=non
-   W x=387 s=0 z=100 t=proident
-  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=0 s=0 z=100 t=sunt
-   W x=47 s=0 z=100 t=in
-   W x=70 s=0 z=100 t=culpa
-   W x=121 s=0 z=100 t=qui
-   W x=151 s=0 z=100 t=officia.
+   W x=0 s=0 z=100 t=cillum
+   W x=61 s=0 z=100 t=dolore
+   W x=128 s=0 z=100 t=eu
+   W x=157 s=0 z=100 t=fugiat
+   W x=226 s=0 z=100 t=nulla
+   W x=287 s=0 z=100 t=pariatur.
+   W x=379 s=0 z=100 t=Excepteur
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=sint
+   W x=44 s=0 z=100 t=occaecat
+   W x=128 s=0 z=100 t=cupidatat
+   W x=218 s=0 z=100 t=non
+   W x=260 s=0 z=100 t=proident
+   W x=338 s=0 z=100 t=sunt
+   W x=387 s=0 z=100 t=in
+   W x=412 s=0 z=100 t=culpa
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=qui
+   W x=30 s=0 z=100 t=officia.

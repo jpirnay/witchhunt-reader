@@ -1,6 +1,6 @@
 BOOK title=Inline Footnote Previews lang=en spine=2 toc=2 reliableToc=1
 SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=14 footnotes=3
+ PAGE 0 elements=13 footnotes=3
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
    W x=86 s=1 z=100 t=Chapter
    W x=214 s=1 z=100 t=With
@@ -43,24 +43,24 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=283 s=0 z=100 t=long
    W x=335 s=0 z=100 t=enough
    W x=410 s=0 z=100 t=that
-  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=a
-   W x=30 s=0 z=100 t=narrow
-   W x=105 s=0 z=100 t=viewport
-   W x=192 s=0 z=100 t=must
-   W x=250 s=0 z=100 t=abbreviate
-   W x=358 s=0 z=100 t=the
-   W x=407 s=0 z=100 t=inline
-  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=preview
-   W x=62 s=0 z=100 t=while
-   W x=110 s=0 z=100 t=a
-   W x=128 s=0 z=100 t=wide
-   W x=163 s=0 z=100 t=viewport
-   W x=238 s=0 z=100 t=shows
-   W x=292 s=0 z=100 t=it
-   W x=314 s=0 z=100 t=in
-   W x=337 s=0 z=100 t=full.
+   W x=19 s=0 z=100 t=narrow
+   W x=83 s=0 z=100 t=viewport
+   W x=159 s=0 z=100 t=must
+   W x=206 s=0 z=100 t=abbreviate
+   W x=303 s=0 z=100 t=the
+   W x=341 s=0 z=100 t=inline
+   W x=400 s=0 z=100 t=preview
+  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=while
+   W x=48 s=0 z=100 t=a
+   W x=66 s=0 z=100 t=wide
+   W x=101 s=0 z=100 t=viewport
+   W x=176 s=0 z=100 t=shows
+   W x=230 s=0 z=100 t=it
+   W x=252 s=0 z=100 t=in
+   W x=275 s=0 z=100 t=full.
   LINE y=182 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=A
    W x=35 s=0 z=100 t=second
@@ -89,32 +89,31 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=315 s=0 z=100 t=by
    W x=343 s=0 z=100 t=its
    W x=382 s=0 z=100 t=bracketed
-  LINE y=254 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=254 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=text
    W x=36 s=4 z=100 t=[3]
-   W x=82 s=2 z=100 t=(The
-   W x=144 s=2 z=100 t=third
-   W x=212 s=2 z=100 t=note
-   W x=278 s=2 z=100 t=is
-   W x=317 s=2 z=100 t=reached
-   W x=406 s=2 z=100 t=by
-   W x=444 s=2 z=100 t=a
+   W x=64 s=2 z=100 t=(The
+   W x=108 s=2 z=100 t=third
+   W x=158 s=2 z=100 t=note
+   W x=206 s=2 z=100 t=is
+   W x=227 s=2 z=100 t=reached
+   W x=298 s=2 z=100 t=by
+   W x=318 s=2 z=100 t=a
+   W x=336 s=2 z=100 t=marker-shaped
   LINE y=278 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=0 s=2 z=100 t=marker-shaped
-   W x=144 s=2 z=100 t=link.)
-   W x=224 s=0 z=100 t=qualifies
-   W x=327 s=0 z=100 t=through
-   W x=427 s=0 z=100 t=the
-  LINE y=302 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=marker-shaped-text
-   W x=178 s=0 z=100 t=path
-   W x=231 s=0 z=100 t=rather
-   W x=303 s=0 z=100 t=than
-   W x=361 s=0 z=100 t=an
-   W x=397 s=0 z=100 t=explicit
-  LINE y=326 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=noteref
-   W x=75 s=0 z=100 t=type.
+   W x=0 s=2 z=100 t=link.)
+   W x=69 s=0 z=100 t=qualifies
+   W x=161 s=0 z=100 t=through
+   W x=250 s=0 z=100 t=the
+   W x=294 s=0 z=100 t=marker-shaped-text
+  LINE y=302 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=path
+   W x=46 s=0 z=100 t=rather
+   W x=111 s=0 z=100 t=than
+   W x=162 s=0 z=100 t=an
+   W x=191 s=0 z=100 t=explicit
+   W x=257 s=0 z=100 t=noteref
+   W x=332 s=0 z=100 t=type.
   FN n=1 href=notes.xhtml#n1
   FN n=2 href=notes.xhtml#n2
   FN n=3 href=notes.xhtml#n3
@@ -122,24 +121,24 @@ SPINE 1 href=OEBPS/notes.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=7 footnotes=0
   LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=1
    W x=188 s=1 z=100 t=Notes
-  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=18 s=0 z=100 t=This
-   W x=57 s=0 z=100 t=first
-   W x=106 s=0 z=100 t=note
-   W x=154 s=0 z=100 t=is
-   W x=175 s=0 z=100 t=deliberately
-   W x=284 s=0 z=100 t=verbose
-   W x=355 s=0 z=100 t=so
-   W x=382 s=0 z=100 t=that
-   W x=432 s=0 z=100 t=its
-  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=inline
-   W x=63 s=0 z=100 t=preview
-   W x=130 s=0 z=100 t=overflows
-   W x=228 s=0 z=100 t=a
-   W x=251 s=0 z=100 t=narrow
-   W x=319 s=0 z=100 t=reading
-   W x=395 s=0 z=100 t=column
+   W x=61 s=0 z=100 t=first
+   W x=114 s=0 z=100 t=note
+   W x=166 s=0 z=100 t=is
+   W x=191 s=0 z=100 t=deliberately
+   W x=304 s=0 z=100 t=verbose
+   W x=379 s=0 z=100 t=so
+   W x=410 s=0 z=100 t=that
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=its
+   W x=31 s=0 z=100 t=inline
+   W x=89 s=0 z=100 t=preview
+   W x=151 s=0 z=100 t=overflows
+   W x=244 s=0 z=100 t=a
+   W x=262 s=0 z=100 t=narrow
+   W x=325 s=0 z=100 t=reading
+   W x=396 s=0 z=100 t=column
   LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=and
    W x=46 s=0 z=100 t=gets

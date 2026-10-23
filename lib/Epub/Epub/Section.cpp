@@ -33,7 +33,8 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 98;  // v98: synthetic italic slants an outline family
+constexpr uint8_t SECTION_FILE_VERSION = 99;  // v99: the optimal line breaker indents only a paragraph's first line
+                                              // v98: synthetic italic slants an outline family
                                               // without an italic file; an italic drop cap's
                                               // width and a narrowed CJK mark's place come from
                                               // the ink box, an accent font's too

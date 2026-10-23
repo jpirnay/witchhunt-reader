@@ -67,8 +67,8 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
     CELL 2 hdr=0 span=1 lines=1
      LN words=1
       W x=18 s=0 z=100 t=Oho
-SPINE 3 href=EPUB/text/ch002.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=18 footnotes=0
+SPINE 3 href=EPUB/text/ch002.xhtml pages=2 truncated=0 cssFallback=0
+ PAGE 0 elements=2 footnotes=0
   LINE y=54 x=0 align=2 mult=2.000 hfid=0 words=3
    W x=84 s=1 z=100 t=Some
    W x=190 s=1 z=100 t=big
@@ -78,152 +78,175 @@ SPINE 3 href=EPUB/text/ch002.xhtml pages=1 truncated=0 cssFallback=0
    W x=13 s=0 z=100 t=columns,
    W x=96 s=0 z=100 t=1
    W x=108 s=0 z=100 t=row
-  LINE y=162 x=0 align=0 mult=1.000 hfid=0 words=11
-   W x=18 s=0 z=100 t=This
-   W x=58 s=0 z=100 t=is
-   W x=80 s=0 z=100 t=one
-   W x=119 s=0 z=100 t=very
-   W x=163 s=0 z=100 t=long
-   W x=213 s=0 z=100 t=sentence.
-   W x=305 s=0 z=100 t=It
-   W x=331 s=0 z=100 t=is
-   W x=353 s=0 z=100 t=part
-   W x=396 s=0 z=100 t=of
-   W x=425 s=0 z=100 t=the
-  LINE y=186 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=first
-   W x=49 s=0 z=100 t=cell
-   W x=89 s=0 z=100 t=of
-   W x=117 s=0 z=100 t=this
-   W x=160 s=0 z=100 t=table.
-   W x=222 s=0 z=100 t=It
-   W x=247 s=0 z=100 t=is
-   W x=268 s=0 z=100 t=quite
-   W x=317 s=0 z=100 t=nice.
-  LINE y=210 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=18 s=0 z=100 t=This
-   W x=59 s=0 z=100 t=is
-   W x=82 s=0 z=100 t=the
-   W x=121 s=0 z=100 t=second
-   W x=185 s=0 z=100 t=cell.
-   W x=237 s=0 z=100 t=It
-   W x=264 s=0 z=100 t=will
-   W x=302 s=0 z=100 t=probably
-   W x=377 s=0 z=100 t=overflow
-  LINE y=234 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=into
-   W x=50 s=0 z=100 t=the
-   W x=92 s=0 z=100 t=next
-   W x=140 s=0 z=100 t=page.
-   W x=199 s=0 z=100 t=Lorem
-   W x=261 s=0 z=100 t=ipsum
-   W x=314 s=0 z=100 t=dolor
-   W x=374 s=0 z=100 t=sit
-   W x=410 s=0 z=100 t=amet,
-  LINE y=258 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=consetetur
-   W x=116 s=0 z=100 t=sadipscing
-   W x=221 s=0 z=100 t=elitr,
-   W x=291 s=0 z=100 t=sed
-   W x=337 s=0 z=100 t=diam
-   W x=393 s=0 z=100 t=nonumy
-  LINE y=282 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=0 z=100 t=eirmod
-   W x=62 s=0 z=100 t=tempor
-   W x=126 s=0 z=100 t=invidunt
-   W x=210 s=0 z=100 t=ut
-   W x=240 s=0 z=100 t=labore
-   W x=305 s=0 z=100 t=et
-   W x=333 s=0 z=100 t=dolore
-   W x=400 s=0 z=100 t=magna
-  LINE y=306 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=aliquyam
-   W x=84 s=0 z=100 t=erat,
-   W x=140 s=0 z=100 t=sed
-   W x=175 s=0 z=100 t=diam
-   W x=220 s=0 z=100 t=voluptua.
-   W x=322 s=0 z=100 t=At
-   W x=349 s=0 z=100 t=vero
-   W x=399 s=0 z=100 t=eos
-   W x=438 s=0 z=100 t=et
-  LINE y=330 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=accusam
-   W x=79 s=0 z=100 t=et
-   W x=109 s=0 z=100 t=justo
-   W x=169 s=0 z=100 t=duo
-   W x=211 s=0 z=100 t=dolores
-   W x=289 s=0 z=100 t=et
-   W x=319 s=0 z=100 t=ea
-   W x=351 s=0 z=100 t=rebum.
-   W x=416 s=0 z=100 t=Stet
-  LINE y=354 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=clita
-   W x=58 s=0 z=100 t=kasd
-   W x=109 s=0 z=100 t=gubergren,
-   W x=215 s=0 z=100 t=no
-   W x=252 s=0 z=100 t=sea
-   W x=296 s=0 z=100 t=takimata
-   W x=390 s=0 z=100 t=sanctus
-  LINE y=378 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=est
-   W x=37 s=0 z=100 t=Lorem
-   W x=97 s=0 z=100 t=ipsum
-   W x=148 s=0 z=100 t=dolor
-   W x=206 s=0 z=100 t=sit
-   W x=240 s=0 z=100 t=amet.
-   W x=300 s=0 z=100 t=Lorem
-   W x=360 s=0 z=100 t=ipsum
-   W x=411 s=0 z=100 t=dolor
-  LINE y=402 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=sit
-   W x=40 s=0 z=100 t=amet,
-   W x=104 s=0 z=100 t=consetetur
-   W x=215 s=0 z=100 t=sadipscing
-   W x=315 s=0 z=100 t=elitr,
-   W x=380 s=0 z=100 t=sed
-   W x=421 s=0 z=100 t=diam
-  LINE y=426 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=0 z=100 t=nonumy
-   W x=71 s=0 z=100 t=eirmod
-   W x=132 s=0 z=100 t=tempor
-   W x=195 s=0 z=100 t=invidunt
-   W x=278 s=0 z=100 t=ut
-   W x=307 s=0 z=100 t=labore
-   W x=371 s=0 z=100 t=et
-   W x=398 s=0 z=100 t=dolore
-  LINE y=450 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=0 z=100 t=magna
-   W x=65 s=0 z=100 t=aliquyam
-   W x=149 s=0 z=100 t=erat,
-   W x=205 s=0 z=100 t=sed
-   W x=240 s=0 z=100 t=diam
-   W x=285 s=0 z=100 t=voluptua.
-   W x=387 s=0 z=100 t=At
-   W x=414 s=0 z=100 t=vero
-  LINE y=474 x=0 align=0 mult=1.000 hfid=0 words=10
-   W x=0 s=0 z=100 t=eos
-   W x=39 s=0 z=100 t=et
-   W x=67 s=0 z=100 t=accusam
-   W x=144 s=0 z=100 t=et
-   W x=172 s=0 z=100 t=justo
-   W x=230 s=0 z=100 t=duo
-   W x=270 s=0 z=100 t=dolores
-   W x=346 s=0 z=100 t=et
-   W x=374 s=0 z=100 t=ea
-   W x=404 s=0 z=100 t=rebum.
-  LINE y=498 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=Stet
-   W x=59 s=0 z=100 t=clita
-   W x=121 s=0 z=100 t=kasd
-   W x=176 s=0 z=100 t=gubergren,
-   W x=286 s=0 z=100 t=no
-   W x=327 s=0 z=100 t=sea
-   W x=375 s=0 z=100 t=takimata
-  LINE y=522 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=sanctus
-   W x=75 s=0 z=100 t=est
-   W x=109 s=0 z=100 t=Lorem
-   W x=166 s=0 z=100 t=ipsum
-   W x=214 s=0 z=100 t=dolor
-   W x=269 s=0 z=100 t=sit
-   W x=300 s=0 z=100 t=amet.
+ PAGE 1 elements=1 footnotes=0
+  TABLE y=0 x=0 w=460 h=732 cols=2 border=1 rows=1
+   ROW h=730 hdr=0 cells=2
+    CELL 0 hdr=0 span=1 lines=4
+     LN words=5
+      W x=18 s=0 z=100 t=This
+      W x=61 s=0 z=100 t=is
+      W x=86 s=0 z=100 t=one
+      W x=128 s=0 z=100 t=very
+      W x=175 s=0 z=100 t=long
+     LN words=5
+      W x=0 s=0 z=100 t=sentence.
+      W x=95 s=0 z=100 t=It
+      W x=124 s=0 z=100 t=is
+      W x=149 s=0 z=100 t=part
+      W x=195 s=0 z=100 t=of
+     LN words=5
+      W x=0 s=0 z=100 t=the
+      W x=44 s=0 z=100 t=first
+      W x=100 s=0 z=100 t=cell
+      W x=147 s=0 z=100 t=of
+      W x=182 s=0 z=100 t=this
+     LN words=5
+      W x=0 s=0 z=100 t=table.
+      W x=62 s=0 z=100 t=It
+      W x=87 s=0 z=100 t=is
+      W x=108 s=0 z=100 t=quite
+      W x=157 s=0 z=100 t=nice.
+    CELL 1 hdr=0 span=1 lines=30
+     LN words=4
+      W x=18 s=0 z=100 t=This
+      W x=73 s=0 z=100 t=is
+      W x=110 s=0 z=100 t=the
+      W x=163 s=0 z=100 t=second
+     LN words=4
+      W x=0 s=0 z=100 t=cell.
+      W x=64 s=0 z=100 t=It
+      W x=103 s=0 z=100 t=will
+      W x=153 s=0 z=100 t=probably
+     LN words=4
+      W x=0 s=0 z=100 t=overflow
+      W x=89 s=0 z=100 t=into
+      W x=139 s=0 z=100 t=the
+      W x=181 s=0 z=100 t=next
+     LN words=4
+      W x=0 s=0 z=100 t=page.
+      W x=58 s=0 z=100 t=Lorem
+      W x=119 s=0 z=100 t=ipsum
+      W x=171 s=0 z=100 t=dolor
+     LN words=3
+      W x=0 s=0 z=100 t=sit
+      W x=50 s=0 z=100 t=amet,
+      W x=124 s=0 z=100 t=consetetur
+     LN words=4
+      W x=0 s=0 z=100 t=sadipscing
+      W x=92 s=0 z=100 t=elitr,
+      W x=149 s=0 z=100 t=sed
+      W x=182 s=0 z=100 t=diam
+     LN words=3
+      W x=0 s=0 z=100 t=nonumy
+      W x=87 s=0 z=100 t=eirmod
+      W x=164 s=0 z=100 t=tempor
+     LN words=4
+      W x=0 s=0 z=100 t=invidunt
+      W x=91 s=0 z=100 t=ut
+      W x=128 s=0 z=100 t=labore
+      W x=200 s=0 z=100 t=et
+     LN words=3
+      W x=0 s=0 z=100 t=dolore
+      W x=73 s=0 z=100 t=magna
+      W x=144 s=0 z=100 t=aliquyam
+     LN words=4
+      W x=0 s=0 z=100 t=erat,
+      W x=53 s=0 z=100 t=sed
+      W x=85 s=0 z=100 t=diam
+      W x=127 s=0 z=100 t=voluptua.
+     LN words=5
+      W x=0 s=0 z=100 t=At
+      W x=29 s=0 z=100 t=vero
+      W x=81 s=0 z=100 t=eos
+      W x=122 s=0 z=100 t=et
+      W x=152 s=0 z=100 t=accusam
+     LN words=4
+      W x=0 s=0 z=100 t=et
+      W x=37 s=0 z=100 t=justo
+      W x=104 s=0 z=100 t=duo
+      W x=153 s=0 z=100 t=dolores
+     LN words=5
+      W x=0 s=0 z=100 t=et
+      W x=29 s=0 z=100 t=ea
+      W x=60 s=0 z=100 t=rebum.
+      W x=124 s=0 z=100 t=Stet
+      W x=175 s=0 z=100 t=clita
+     LN words=4
+      W x=0 s=0 z=100 t=kasd
+      W x=49 s=0 z=100 t=gubergren,
+      W x=153 s=0 z=100 t=no
+      W x=188 s=0 z=100 t=sea
+     LN words=3
+      W x=0 s=0 z=100 t=takimata
+      W x=101 s=0 z=100 t=sanctus
+      W x=191 s=0 z=100 t=est
+     LN words=4
+      W x=0 s=0 z=100 t=Lorem
+      W x=68 s=0 z=100 t=ipsum
+      W x=127 s=0 z=100 t=dolor
+      W x=193 s=0 z=100 t=sit
+     LN words=4
+      W x=0 s=0 z=100 t=amet.
+      W x=60 s=0 z=100 t=Lorem
+      W x=120 s=0 z=100 t=ipsum
+      W x=171 s=0 z=100 t=dolor
+     LN words=3
+      W x=0 s=0 z=100 t=sit
+      W x=50 s=0 z=100 t=amet,
+      W x=124 s=0 z=100 t=consetetur
+     LN words=4
+      W x=0 s=0 z=100 t=sadipscing
+      W x=92 s=0 z=100 t=elitr,
+      W x=149 s=0 z=100 t=sed
+      W x=182 s=0 z=100 t=diam
+     LN words=3
+      W x=0 s=0 z=100 t=nonumy
+      W x=87 s=0 z=100 t=eirmod
+      W x=164 s=0 z=100 t=tempor
+     LN words=4
+      W x=0 s=0 z=100 t=invidunt
+      W x=91 s=0 z=100 t=ut
+      W x=128 s=0 z=100 t=labore
+      W x=200 s=0 z=100 t=et
+     LN words=3
+      W x=0 s=0 z=100 t=dolore
+      W x=73 s=0 z=100 t=magna
+      W x=144 s=0 z=100 t=aliquyam
+     LN words=4
+      W x=0 s=0 z=100 t=erat,
+      W x=53 s=0 z=100 t=sed
+      W x=85 s=0 z=100 t=diam
+      W x=127 s=0 z=100 t=voluptua.
+     LN words=5
+      W x=0 s=0 z=100 t=At
+      W x=29 s=0 z=100 t=vero
+      W x=81 s=0 z=100 t=eos
+      W x=122 s=0 z=100 t=et
+      W x=152 s=0 z=100 t=accusam
+     LN words=4
+      W x=0 s=0 z=100 t=et
+      W x=37 s=0 z=100 t=justo
+      W x=104 s=0 z=100 t=duo
+      W x=153 s=0 z=100 t=dolores
+     LN words=5
+      W x=0 s=0 z=100 t=et
+      W x=29 s=0 z=100 t=ea
+      W x=60 s=0 z=100 t=rebum.
+      W x=124 s=0 z=100 t=Stet
+      W x=175 s=0 z=100 t=clita
+     LN words=4
+      W x=0 s=0 z=100 t=kasd
+      W x=49 s=0 z=100 t=gubergren,
+      W x=153 s=0 z=100 t=no
+      W x=188 s=0 z=100 t=sea
+     LN words=3
+      W x=0 s=0 z=100 t=takimata
+      W x=101 s=0 z=100 t=sanctus
+      W x=191 s=0 z=100 t=est
+     LN words=4
+      W x=0 s=0 z=100 t=Lorem
+      W x=68 s=0 z=100 t=ipsum
+      W x=127 s=0 z=100 t=dolor
+      W x=193 s=0 z=100 t=sit
+     LN words=1
+      W x=0 s=0 z=100 t=amet.

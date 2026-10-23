@@ -38,40 +38,38 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
    W x=437 s=0 z=100 t=as
   LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=paragraphs.
-  TABLE y=210 x=0 w=460 h=108 cols=2 border=1 rows=1
-   ROW h=106 hdr=0 cells=2
-    CELL 0 hdr=0 span=1 lines=4
-     LN words=3
-      W x=18 s=0 z=100 t=Outer
-      W x=95 s=0 z=100 t=cell
-      W x=160 s=0 z=100 t=before
-     LN words=3
-      W x=0 s=0 z=100 t=the
-      W x=64 s=0 z=100 t=nesting
-      W x=164 s=0 z=100 t=point.
+  TABLE y=210 x=0 w=460 h=84 cols=2 border=1 rows=1
+   ROW h=82 hdr=0 cells=2
+    CELL 0 hdr=0 span=1 lines=3
      LN words=4
-      W x=0 s=0 z=100 t=This
-      W x=54 s=0 z=100 t=text
-      W x=111 s=0 z=100 t=is
-      W x=147 s=0 z=100 t=buffered
-     LN words=1
-      W x=0 s=0 z=100 t=normally.
-    CELL 1 hdr=0 span=1 lines=4
+      W x=18 s=0 z=100 t=Outer
+      W x=76 s=0 z=100 t=cell
+      W x=122 s=0 z=100 t=before
+      W x=188 s=0 z=100 t=the
+     LN words=4
+      W x=0 s=0 z=100 t=nesting
+      W x=76 s=0 z=100 t=point.
+      W x=140 s=0 z=100 t=This
+      W x=182 s=0 z=100 t=text
+     LN words=3
+      W x=0 s=0 z=100 t=is
+      W x=21 s=0 z=100 t=buffered
+      W x=98 s=0 z=100 t=normally.
+    CELL 1 hdr=0 span=1 lines=3
      LN words=3
       W x=18 s=0 z=100 t=Second
       W x=102 s=0 z=100 t=outer
       W x=177 s=0 z=100 t=cell,
-     LN words=3
+     LN words=4
       W x=0 s=0 z=100 t=also
-      W x=68 s=0 z=100 t=buffered
-      W x=165 s=0 z=100 t=before
+      W x=49 s=0 z=100 t=buffered
+      W x=127 s=0 z=100 t=before
+      W x=188 s=0 z=100 t=the
      LN words=3
-      W x=0 s=0 z=100 t=the
-      W x=64 s=0 z=100 t=inner
-      W x=142 s=0 z=100 t=table
-     LN words=1
-      W x=0 s=0 z=100 t=appears.
-  LINE y=318 x=0 align=0 mult=1.000 hfid=0 words=9
+      W x=0 s=0 z=100 t=inner
+      W x=51 s=0 z=100 t=table
+      W x=103 s=0 z=100 t=appears.
+  LINE y=294 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=Outer
    W x=73 s=0 z=100 t=cell
    W x=116 s=0 z=100 t=that
@@ -81,11 +79,11 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
    W x=350 s=0 z=100 t=table
    W x=405 s=0 z=100 t=and
    W x=445 s=0 z=100 t=is
-  LINE y=342 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=318 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=emitted
    W x=68 s=0 z=100 t=while
    W x=116 s=0 z=100 t=streaming.
-  LINE y=366 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=342 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=18 s=0 z=100 t=Final
    W x=69 s=0 z=100 t=outer
    W x=126 s=0 z=100 t=row,
@@ -94,10 +92,10 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
    W x=266 s=0 z=100 t=streamed
    W x=348 s=0 z=100 t=straight
    W x=433 s=0 z=100 t=to
-  LINE y=390 x=0 align=0 mult=1.000 hfid=0 words=2
+  LINE y=366 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=a
    W x=18 s=0 z=100 t=paragraph.
-  LINE y=414 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=390 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=Final
    W x=68 s=0 z=100 t=outer
    W x=124 s=0 z=100 t=row,
@@ -105,7 +103,7 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
    W x=226 s=0 z=100 t=cell,
    W x=274 s=0 z=100 t=likewise
    W x=342 s=0 z=100 t=streamed.
-  LINE y=438 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=414 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=Text
    W x=46 s=0 z=100 t=after
    W x=109 s=0 z=100 t=the
@@ -114,7 +112,7 @@ SPINE 2 href=EPUB/text/ch001.xhtml pages=1 truncated=0 cssFallback=0
    W x=292 s=0 z=100 t=which
    W x=349 s=0 z=100 t=must
    W x=403 s=0 z=100 t=resume
-  LINE y=462 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=438 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=normal
    W x=68 s=0 z=100 t=block
    W x=116 s=0 z=100 t=layout.
