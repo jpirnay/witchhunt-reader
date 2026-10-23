@@ -1081,8 +1081,9 @@ bool fullProgressiveShouldAbort(void* user) {
 
 // Fine-scale factors for scaledSrc* -> dst*, and whether the downscale area-averages. Area
 // averaging covers pure downscales (see emitGrayBlock); the carry that makes it exact across
-// block edges costs 2 x 3 bytes per output column. Re-run when a decode falls back to the DC
-// preview, which resizes to the destination itself.
+// block edges costs 2 x 3 bytes per output column. Re-run when a full decode refused before its
+// first row is retried as the 1/8 resize (ProgressiveJpeg::decodeResized), which resizes to the
+// destination itself.
 void configureResample(JpegContext& ctx, const bool allowAreaAverage) {
   ctx.fineScaleFPX = (int32_t)((int64_t)ctx.dstWidth * FP_ONE / ctx.scaledSrcWidth);
   ctx.invScaleFPX = (int32_t)((int64_t)ctx.scaledSrcWidth * FP_ONE / ctx.dstWidth);
@@ -1878,7 +1879,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     if (ok && fullProgressive) {
       ok = progressive.resume(file, progressiveOptions, fullProgressiveOutput, &progressiveSink, checkpoint) ==
            ProgressiveJpeg::Result::Ok;
-      progressiveSink.emitted = true;  // rows exist: a failure from here on is no case for the preview
+      progressiveSink.emitted = true;  // rows exist: a failure from here on is no case for the 1/8 retry
     } else if (ok) {
       ok = park::readAll(checkpoint, &baseline, 1);
     }
