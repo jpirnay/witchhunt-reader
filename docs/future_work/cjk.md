@@ -362,7 +362,10 @@ These were set aside in the layout spec (section 3) and the A3 spec (section 10)
 ## Testing on a device
 
 **Fonts.** Install a CJK family from the Font Manager. For a branch that is not merged, use the scratch-manifest
-recipe of Task 10, Step 1 in `docs/superpowers/plans/2026-10-21-cjk-fonts-font-manager.md`. Rebuilding the families
+recipe of Task 10, Step 1 in `docs/superpowers/plans/2026-10-21-cjk-fonts-font-manager.md`. Set the build flag from
+PowerShell: Git Bash rewrites the `http://...:8000/...` value as a path list. The working form is
+`$env:PLATFORMIO_BUILD_FLAGS = '-DFONT_MANIFEST_URL=\"http://<PC address>:8000/fonts-v3.json\"'`, then
+`pio run -e default -t upload --upload-port <port>` from the same PowerShell. Rebuilding the families
 needs `pip install fonttools==4.63.0`.
 
 **Driving the X3.** Use the serial test API (`docs/serial-test-api.md`, `tools/devctl.py`):

@@ -71,6 +71,9 @@ constexpr bool fits(const uint64_t freeBytes, const uint64_t downloadBytes) {
 // Whether downloading a family is an update of what the card holds, from the counts of the manifest's files: `same`
 // are on the card at their manifest size, `changed` at another size, `absent` missing. A folder holding none of them
 // is someone else's family of that name, not an update.
+// Two accepted limits: a reader's own file with a manifest file name but other bytes counts as an update and is replaced;
+// a hosted family whose files are all renamed is never offered an update (never rename hosted files: ship a renamed
+// set as a new family).
 constexpr bool isUpdate(const size_t same, const size_t changed, const size_t absent) {
   return changed > 0 || (absent > 0 && same > 0);
 }
