@@ -795,7 +795,7 @@ Each is its own plan and PR; the device runs use the serial test API. State on 2
    as CFF against 1,114 ms as TrueType on the X4).
 5. **The CJK fonts as `.otf` in the font manager** (sections 4–6), once CFF has merged: the hosted fonts are only
    useful to firmware that draws them, and `fonts-v3.json` goes live with this.
-6. **Synthetic italic** (section 7.4), after 5: step 5b of the roadmap.
+6. **Synthetic italic** (section 7.4), after 5: step 5b of the roadmap. **Shipped: #551.**
 
 ## Appendix A. Spike measurements (X4, 2026-10-19/20)
 
