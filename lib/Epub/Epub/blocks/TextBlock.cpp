@@ -5,24 +5,38 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <Serialization.h>
+#include <Utf8.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
 bool TextBlock::guideDotsEnabled = false;
 
+// 32-bit layout: vptr 4, RenderStyle 12, five scalars and a pad byte 8, arena 4, arenaOwned_ and annotationBytes_ 4,
+// five views 20.
+static_assert(sizeof(void*) != 4 || sizeof(TextBlock) == 52, "a resident page holds ~28 TextBlocks");
+
 namespace {
 // Style and continuation share one arena byte: bits 0-6 are the EpdFontFamily::Style, bit 7
 // says the word is glued to its predecessor. See TextBlock::wordContinues.
+constexpr size_t kAnnotationRecordBytes = 10;  // u16 firstWord, u16 wordCount, s16 x, u16 width, u8 kind, u8 len
+constexpr size_t kAnnotationHeaderBytes = 2;   // u16 count
+
+bool knownKind(const uint8_t kind) {
+  return kind == static_cast<uint8_t>(TextBlock::AnnotationKind::Ruby) ||
+         kind == static_cast<uint8_t>(TextBlock::AnnotationKind::Emphasis);
+}
+
 uint8_t packStyle(const EpdFontFamily::Style style, const bool continues) {
   return static_cast<uint8_t>((static_cast<uint8_t>(style) & ~TextBlock::WORD_CONTINUES_BIT) |
                               (continues ? TextBlock::WORD_CONTINUES_BIT : 0));
 }
 }  // namespace
 
-TextBlock::ArenaOffsets TextBlock::arenaOffsets(const uint16_t wordCount, const bool hasSizes,
-                                                const uint8_t fontCount) {
+TextBlock::ArenaOffsets TextBlock::arenaOffsets(const uint16_t wordCount, const bool hasSizes, const uint8_t fontCount,
+                                                const uint16_t textBytes) {
   // Layout documented in TextBlock.h: the word fonts (4-byte fields) first, then the 16-bit
   // arrays (textOff, xpos), then the 8-bit arrays (styles, optional sizes and font slots), then
   // the text blob. Without word fonts textOff sits at 0.
@@ -34,12 +48,13 @@ TextBlock::ArenaOffsets TextBlock::arenaOffsets(const uint16_t wordCount, const 
   o.sizes = o.styles + wc * sizeof(uint8_t);  // only meaningful when hasSizes
   o.fontSlots = o.sizes + (hasSizes ? wc * sizeof(uint8_t) : 0);
   o.text = o.fontSlots + (fontCount != 0 ? wc * sizeof(uint8_t) : 0);
+  o.annotations = o.text + textBytes;
   return o;
 }
 
 size_t TextBlock::arenaSize(const uint16_t wordCount, const bool hasSizes, const uint8_t fontCount,
-                            const uint16_t textBytes) {
-  return arenaOffsets(wordCount, hasSizes, fontCount).text + textBytes;
+                            const uint16_t textBytes, const uint16_t annotationBytes) {
+  return arenaOffsets(wordCount, hasSizes, fontCount, textBytes).annotations + annotationBytes;
 }
 
 bool TextBlock::allocArena(const size_t size, BuildArena* scratch) {
@@ -61,7 +76,7 @@ bool TextBlock::allocArena(const size_t size, BuildArena* scratch) {
 
 void TextBlock::bindArenaPointers() {
   const uint8_t* base = arena;
-  const ArenaOffsets o = arenaOffsets(numWords, sizesPresent, wordFontCount);
+  const ArenaOffsets o = arenaOffsets(numWords, sizesPresent, wordFontCount, textBytes);
   textOffArr = reinterpret_cast<const uint16_t*>(base + o.textOff);
   xposArr = reinterpret_cast<const int16_t*>(base + o.xpos);
   stylesArr = base + o.styles;
@@ -123,7 +138,7 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
   // Pass 2: fill through mutable pointers derived from the same layout offsets
   // that bindArenaPointers() uses for the const views (bound below for reads).
   uint8_t* base = arena;
-  const ArenaOffsets o = arenaOffsets(numWords, sizesPresent, 0);
+  const ArenaOffsets o = arenaOffsets(numWords, sizesPresent, 0, textBytes);
   auto* textOff = reinterpret_cast<uint16_t*>(base);
   auto* xpos = reinterpret_cast<int16_t*>(base + o.xpos);
   uint8_t* styles = base + o.styles;
@@ -171,6 +186,29 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
             static_cast<uint32_t>(word_xpos.size()));
     isValid = false;
     return;
+  }
+
+  // The boxes over the line's words: each must name words of the line, and the region must fit its u16 size.
+  const std::vector<Annotation>* annotationSrc =
+      (range.annotations != nullptr && !range.annotations->empty()) ? range.annotations : nullptr;
+  size_t annotationBytes = 0;
+  if (annotationSrc != nullptr) {
+    annotationBytes = kAnnotationHeaderBytes;
+    bool annotationsOk = annotationSrc->size() <= UINT16_MAX;
+    for (const Annotation& a : *annotationSrc) {
+      if (a.wordCount == 0 || static_cast<size_t>(a.firstWord) + a.wordCount > count ||
+          a.text.size() > kMaxAnnotationText || !knownKind(static_cast<uint8_t>(a.kind))) {
+        annotationsOk = false;
+        break;
+      }
+      annotationBytes += kAnnotationRecordBytes + (a.kind == AnnotationKind::Ruby ? a.text.size() : 0);
+    }
+    if (!annotationsOk || annotationBytes > UINT16_MAX) {
+      LOG_ERR("TXB", "Construction failed: bad annotations (count=%u, words=%u)",
+              static_cast<uint32_t>(annotationSrc->size()), static_cast<uint32_t>(count));
+      isValid = false;
+      return;
+    }
   }
 
   // Normalize the all-100% case to no sizes, matching the vector constructor so both paths
@@ -221,7 +259,8 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
   }
   textBytes = static_cast<uint16_t>(totalText);
 
-  const size_t size = arenaSize(numWords, sizesPresent, wordFontCount, textBytes);
+  const size_t size =
+      arenaSize(numWords, sizesPresent, wordFontCount, textBytes, static_cast<uint16_t>(annotationBytes));
   if (!allocArena(size, scratch)) {
     LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
     numWords = 0;
@@ -234,7 +273,7 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
 
   // Pass 2: fill straight from the caller's arrays — no intermediate per-line vectors.
   uint8_t* base = arena;
-  const ArenaOffsets o = arenaOffsets(numWords, sizesPresent, wordFontCount);
+  const ArenaOffsets o = arenaOffsets(numWords, sizesPresent, wordFontCount, textBytes);
   auto* textOff = reinterpret_cast<uint16_t*>(base + o.textOff);
   auto* xpos = reinterpret_cast<int16_t*>(base + o.xpos);
   uint8_t* styles = base + o.styles;
@@ -269,6 +308,30 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
     uint8_t* slots = base + o.fontSlots;
     for (uint16_t i = 0; i < numWords; i++) slots[i] = lineSlot[(*range.sizes)[first + i].fontSlot % kMaxWordFonts];
   }
+  if (annotationSrc != nullptr) {
+    uint8_t* region = base + o.annotations;
+    const uint16_t n = static_cast<uint16_t>(annotationSrc->size());
+    memcpy(region, &n, sizeof(n));
+    uint8_t* record = region + kAnnotationHeaderBytes;
+    uint8_t* texts = record + n * kAnnotationRecordBytes;
+    for (const Annotation& a : *annotationSrc) {
+      const int16_t ax = a.x;
+      memcpy(record, &a.firstWord, 2);
+      memcpy(record + 2, &a.wordCount, 2);
+      memcpy(record + 4, &ax, 2);
+      memcpy(record + 6, &a.width, 2);
+      record[8] = static_cast<uint8_t>(a.kind);
+      if (a.kind == AnnotationKind::Ruby) {
+        record[9] = static_cast<uint8_t>(a.text.size());
+        memcpy(texts, a.text.data(), a.text.size());
+        texts += a.text.size();
+      } else {
+        record[9] = a.mark;
+      }
+      record += kAnnotationRecordBytes;
+    }
+    annotationBytes_ = static_cast<uint16_t>(annotationBytes);
+  }
   bindArenaPointers();
 }
 
@@ -279,6 +342,81 @@ uint8_t TextBlock::maxSizePct() const {
   uint8_t m = 0;
   for (uint16_t i = 0; i < numWords; i++) m = std::max(m, sizesArr[i]);
   return m;
+}
+
+uint16_t TextBlock::annotationCount() const {
+  if (annotationBytes_ == 0) return 0;
+  uint16_t count = 0;
+  memcpy(&count, annotationRegion(), sizeof(count));
+  return count;
+}
+
+TextBlock::Annotation TextBlock::annotation(const uint16_t i) const {
+  Annotation a;
+  const uint16_t count = annotationCount();
+  if (i >= count) return a;
+  const uint8_t* record = annotationRegion() + kAnnotationHeaderBytes;
+  const uint8_t* text = record + count * kAnnotationRecordBytes;
+  for (uint16_t j = 0; j < i; j++, record += kAnnotationRecordBytes) {
+    if (record[8] == static_cast<uint8_t>(AnnotationKind::Ruby)) text += record[9];
+  }
+  memcpy(&a.firstWord, record, 2);
+  memcpy(&a.wordCount, record + 2, 2);
+  memcpy(&a.x, record + 4, 2);
+  memcpy(&a.width, record + 6, 2);
+  a.kind = static_cast<AnnotationKind>(record[8]);
+  if (a.kind == AnnotationKind::Ruby) {
+    a.text = std::string_view(reinterpret_cast<const char*>(text), record[9]);
+  } else {
+    a.mark = record[9];
+  }
+  return a;
+}
+
+bool TextBlock::annotationsValid() const {
+  if (annotationBytes_ < kAnnotationHeaderBytes + kAnnotationRecordBytes) return false;
+  const uint16_t count = annotationCount();
+  const size_t recordsEnd = kAnnotationHeaderBytes + static_cast<size_t>(count) * kAnnotationRecordBytes;
+  if (count == 0 || recordsEnd > annotationBytes_) return false;
+  const uint8_t* record = annotationRegion() + kAnnotationHeaderBytes;
+  size_t textBytesSum = 0;
+  for (uint16_t j = 0; j < count; j++, record += kAnnotationRecordBytes) {
+    uint16_t firstWord = 0;
+    uint16_t wordCountOf = 0;
+    memcpy(&firstWord, record, 2);
+    memcpy(&wordCountOf, record + 2, 2);
+    if (wordCountOf == 0 || static_cast<size_t>(firstWord) + wordCountOf > numWords || !knownKind(record[8])) {
+      return false;
+    }
+    if (record[8] == static_cast<uint8_t>(AnnotationKind::Ruby)) textBytesSum += record[9];
+  }
+  return recordsEnd + textBytesSum == annotationBytes_;
+}
+
+int TextBlock::annotationBandFor(const GfxRenderer& renderer, const int effFontId, const float blockScale,
+                                 const uint8_t maxSizePct) {
+  const int ascender = (maxSizePct == 100 && blockScale == 1.0f)
+                           ? renderer.getFontAscenderSize(effFontId)
+                           : renderer.getFontAscenderSizeScaled(effFontId, blockScale * maxSizePct / 100.0f);
+  return (ascender + 1) / 2;  // the ruby's own ascender is round(ascender * 0.5)
+}
+
+int TextBlock::annotationBand(const GfxRenderer& renderer, const int fontId) const {
+  if (annotationBytes_ == 0) return 0;
+  const int effFontId = renderStyle.headingFontId != 0 ? renderStyle.headingFontId : fontId;
+  return annotationBandFor(renderer, effFontId, renderStyle.fontSizeMultiplier, maxSizePct());
+}
+
+bool TextBlock::drawsUnscaled() const {
+  if (!isValid) return true;  // draws nothing
+  if (renderStyle.fontSizeMultiplier != 1.0f || renderStyle.headingFontId != 0 || sizesPresent || hasAnnotations()) {
+    return false;
+  }
+  constexpr uint8_t scaledStyles = EpdFontFamily::SUP | EpdFontFamily::SUB | EpdFontFamily::SMALL_CAPS;
+  for (uint16_t i = 0; i < numWords; i++) {
+    if (wordStyle(i) & scaledStyles) return false;
+  }
+  return true;
 }
 
 // Mirrors the per-word geometry in render() below. Kept adjacent to it on
@@ -296,6 +434,7 @@ TextBlock::WordBox TextBlock::wordBox(const GfxRenderer& renderer, const uint16_
   if (sizesPresent) {
     lineAscender = renderer.getFontAscenderSizeScaled(effFontId, blockScale * (maxSizePct() / 100.0f));
   }
+  const int baseY = y + annotationBand(renderer, fontId);  // the ruby's band is above the base
 
   const char* word = wordText(i);
   const EpdFontFamily::Style style = wordStyle(i);
@@ -304,7 +443,7 @@ TextBlock::WordBox TextBlock::wordBox(const GfxRenderer& renderer, const uint16_
   const int ascender =
       (font == effFontId && scale == blockScale) ? blockAscender : renderer.getFontAscenderSizeScaled(font, scale);
 
-  int wordY = y + (lineAscender - ascender);
+  int wordY = baseY + (lineAscender - ascender);
   if ((style & EpdFontFamily::SUP) != 0) {
     wordY -= blockAscender * 2 / 5;
   } else if ((style & EpdFontFamily::SUB) != 0) {
@@ -347,6 +486,8 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   if (sizesPresent) {
     lineAscender = renderer.getFontAscenderSizeScaled(effFontId, blockScale * (maxSizePct() / 100.0f));
   }
+  // The base sits below the band the line's ruby is drawn in.
+  const int baseY = y + (hasAnnotations() ? annotationBandFor(renderer, effFontId, blockScale, maxSizePct()) : 0);
   // Guide dots (see setGuideDots): one dot centered in each inter-word gap.
   // Sized and vertically anchored off the block's base metrics, not per-word
   // scales, so the dot row stays level across inline size changes.
@@ -381,7 +522,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     const int ascender = getOrCacheAscender(font, scale);
     // Baseline alignment: shift smaller words down so all baselines meet at y + lineAscender. A word in
     // another family meets it too: the line keeps its block font's baseline, whatever the word's ascender.
-    int wordY = y + (lineAscender - ascender);
+    int wordY = baseY + (lineAscender - ascender);
     // SUP/SUB shift the baseline only — the glyph shrink comes from the word's own size
     // percentage (parser default 50%, or the publisher's CSS). Offsets are anchored to the
     // BLOCK's full-size ascender, not the shrunken word's, so the raised/lowered positions
@@ -416,7 +557,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
           const int dotX = prevWordEndX + (gap - dotSize) / 2;
           // A third of the ascender above the shared baseline -- roughly mid
           // x-height, like a typographic middle dot.
-          const int dotY = y + lineAscender - blockAscender / 3 - dotSize / 2;
+          const int dotY = baseY + lineAscender - blockAscender / 3 - dotSize / 2;
           renderer.fillRect(dotX, dotY, dotSize, dotSize, true);
         }
       }
@@ -425,7 +566,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
 
     if (hasDecoration) {
       if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
-        const int underlineY = y + lineAscender + 3;
+        const int underlineY = baseY + lineAscender + 3;
         renderer.drawLine(wordX, underlineY, wordX + lineWidth, underlineY, 2, true);
       }
 
@@ -433,6 +574,56 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
         const int strikeY = wordY + ascender / 2 + 4;
         renderer.drawLine(wordX, strikeY, wordX + lineWidth, strikeY, 2, true);
       }
+    }
+  }
+
+  // The ruby: one glyph style (REGULAR) per group, a call per character, half the base's size; the scanning pass draws
+  // it too, so the glyph prewarm learns it. Nothing here allocates.
+  const uint16_t annotations = annotationCount();
+  for (uint16_t k = 0; k < annotations; k++) {
+    const Annotation a = annotation(k);
+    if (a.kind != AnnotationKind::Ruby || a.text.empty()) continue;
+    const int font = wordFontId(a.firstWord, effFontId);
+    const float rubyScale = 0.5f * wordScale(a.firstWord);
+    const int rubyY = baseY - renderer.getFontAscenderSizeScaled(font, rubyScale);
+
+    // Walk the ruby's characters (at most 4 bytes and a NUL each; the view is not NUL-terminated).
+    auto nextChar = [&a](size_t& pos, char (&buf)[5]) -> uint32_t {
+      const auto lead = static_cast<unsigned char>(a.text[pos]);
+      size_t len = lead < 0x80             ? 1
+                   : (lead & 0xE0) == 0xC0 ? 2
+                   : (lead & 0xF0) == 0xE0 ? 3
+                   : (lead & 0xF8) == 0xF0 ? 4
+                                           : 1;
+      len = std::min(len, a.text.size() - pos);
+      memcpy(buf, a.text.data() + pos, len);
+      buf[len] = '\0';
+      pos += len;
+      const unsigned char* q = reinterpret_cast<const unsigned char*>(buf);
+      return utf8NextCodepoint(&q);
+    };
+    char buf[5];
+    int chars = 0;
+    int rawTotal = 0;    // the ruby's advance unscaled: rounded once, as layout measures the whole ruby
+    bool spread = true;  // 1:2:1 only when every codepoint of the ruby and of its base is unspaced CJK
+    for (size_t pos = 0; pos < a.text.size(); chars++) {
+      const bool cjk = utf8IsUnspacedCjk(nextChar(pos, buf));
+      spread = spread && cjk;
+      rawTotal += renderer.getTextAdvanceX(font, buf, EpdFontFamily::REGULAR);
+    }
+    for (uint16_t w = a.firstWord; spread && w < a.firstWord + a.wordCount; w++) {
+      const unsigned char* p = reinterpret_cast<const unsigned char*>(wordText(w));
+      while (spread && *p != 0) spread = utf8IsUnspacedCjk(utf8NextCodepoint(&p));
+    }
+    const int slack = a.width - static_cast<int>(rawTotal * rubyScale + 0.5f);
+    int rawBefore = 0;
+    size_t pos = 0;
+    for (int c = 0; c < chars; c++) {
+      nextChar(pos, buf);
+      const int offset = spread ? slack * (2 * c + 1) / (2 * chars) : slack / 2;
+      const int advanced = static_cast<int>(rawBefore * rubyScale + 0.5f);
+      renderer.drawTextScaled(font, x + a.x + offset + advanced, rubyY, buf, true, EpdFontFamily::REGULAR, rubyScale);
+      rawBefore += renderer.getTextAdvanceX(font, buf, EpdFontFamily::REGULAR);
     }
   }
 }
@@ -446,13 +637,16 @@ bool TextBlock::serialize(FsFile& file) const {
   // Word data: scalars, then the arena verbatim -- its in-memory layout is
   // exactly the on-disk layout (see TextBlock.h), so one write covers all
   // per-word arrays and the text blob. The flags byte holds the sizes in bit 0
-  // and the word-font count in bits 4-7: a line without word fonts writes the
-  // 0 or 1 it always did.
+  // bit 1 says the line has annotations (u16 annotationBytes follows textBytes), and
+  // the word-font count in bits 4-7: a line without word fonts or annotations
+  // writes the 0 or 1 it always did.
   serialization::writePod(file, numWords);
-  serialization::writePod(file, static_cast<uint8_t>((sizesPresent ? 1 : 0) | wordFontCount << 4));
+  serialization::writePod(
+      file, static_cast<uint8_t>((sizesPresent ? 1 : 0) | (annotationBytes_ != 0 ? 2 : 0) | wordFontCount << 4));
   serialization::writePod(file, textBytes);
+  if (annotationBytes_ != 0) serialization::writePod(file, annotationBytes_);
   if (numWords > 0) {
-    const size_t size = arenaSize(numWords, sizesPresent, wordFontCount, textBytes);
+    const size_t size = arenaSize(numWords, sizesPresent, wordFontCount, textBytes, annotationBytes_);
     if (file.write(arena, size) != size) {
       LOG_ERR("TXB", "Serialization failed: arena write (%u bytes)", static_cast<uint32_t>(size));
       return false;
@@ -476,22 +670,32 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
   uint16_t wc = 0;
   uint8_t flags = 0;
   uint16_t textBytes = 0;
+  uint16_t annotationBytes = 0;
   if (file.read(reinterpret_cast<uint8_t*>(&wc), sizeof(wc)) != static_cast<int>(sizeof(wc)) ||
       file.read(&flags, sizeof(flags)) != static_cast<int>(sizeof(flags)) ||
       file.read(reinterpret_cast<uint8_t*>(&textBytes), sizeof(textBytes)) != static_cast<int>(sizeof(textBytes))) {
     LOG_ERR("TXB", "Deserialization failed: incomplete arena header");
     return nullptr;
   }
+  if ((flags & 0x02) != 0 && file.read(reinterpret_cast<uint8_t*>(&annotationBytes), sizeof(annotationBytes)) !=
+                                 static_cast<int>(sizeof(annotationBytes))) {
+    LOG_ERR("TXB", "Deserialization failed: incomplete annotation size");
+    return nullptr;
+  }
 
   // Sanity checks: cap the arena allocation and reject impossible geometry
   // (every word carries at least its NUL terminator).
   const uint8_t fontCount = flags >> 4;
-  if (wc > 10000 || (flags & 0x0E) != 0 || fontCount > kMaxWordFonts || (fontCount != 0 && wc == 0)) {
+  if (wc > 10000 || (flags & 0x0C) != 0 || fontCount > kMaxWordFonts || (fontCount != 0 && wc == 0)) {
     LOG_ERR("TXB", "Deserialization failed: word count %u or flags 0x%02x out of range", wc, flags);
     return nullptr;
   }
   if ((wc == 0 && textBytes != 0) || (wc > 0 && textBytes < wc)) {
     LOG_ERR("TXB", "Deserialization failed: bad text size %u for %u words", textBytes, wc);
+    return nullptr;
+  }
+  if ((flags & 0x02) != 0 && (wc == 0 || annotationBytes < kAnnotationHeaderBytes + kAnnotationRecordBytes)) {
+    LOG_ERR("TXB", "Deserialization failed: bad annotation size %u for %u words", annotationBytes, wc);
     return nullptr;
   }
 
@@ -506,7 +710,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
   block->wordFontCount = fontCount;
 
   if (wc > 0) {
-    const size_t size = arenaSize(wc, block->sizesPresent, fontCount, textBytes);
+    const size_t size = arenaSize(wc, block->sizesPresent, fontCount, textBytes, annotationBytes);
     if (!block->allocArena(size, scratch)) {
       LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
       return nullptr;
@@ -539,6 +743,12 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
       fontsValid = fontsValid && block->fontSlotsArr()[i] <= fontCount;
     if (!fontsValid) {
       LOG_ERR("TXB", "Deserialization failed: corrupt word fonts");
+      return nullptr;
+    }
+    // The annotation region: its records fit, name words of the line, and the ruby lengths add up to the rest.
+    block->annotationBytes_ = annotationBytes;
+    if (annotationBytes != 0 && !block->annotationsValid()) {
+      LOG_ERR("TXB", "Deserialization failed: corrupt annotations");
       return nullptr;
     }
   }

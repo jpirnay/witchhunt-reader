@@ -33,112 +33,115 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 99;  // v99: the optimal line breaker indents only a paragraph's first line
-                                              // v98: synthetic italic slants an outline family
-                                              // without an italic file; an italic drop cap's
-                                              // width and a narrowed CJK mark's place come from
-                                              // the ink box, an accent font's too
-                                              // v97: bold in an outline family without a bold
-                                              // file is synthetic, wider than the regular
-                                              // v96: CJK punctuation is narrowed by the book's
-                                              // table, a mark is a token of its own, CJK lines
-                                              // justify flush, zh/ja text sits on a whole-em grid
-                                              // v95: a paragraph whose size undoes the book's
-                                              // root size is body text (Calibre: body 1.125em,
-                                              // p 0.88889em); v94 laid it out at 0.889
-                                              // v94: a word in another of the book's families
-                                              // than its block's is laid out in that family's
-                                              // face (a line's word fonts, TextBlock::WordFont);
-                                              // v93 lines hold it in the block's font
-                                              // v93: 20 pt is the 18 pt faces scaled, so the
-                                              // 20-26 pt font IDs changed; a v92 heading still
-                                              // names the old ones and would draw nothing
-                                              // v92: CJK text breaks between characters, with kinsoku
-                                              // v91: rem/px/pt font sizes are relative to the
-                                              // body (v90 compounded nested ones), and CSS
-                                              // specificity, compound, descendant/child
-                                              // selectors and `inherit` apply
-                                              // v90: small caps shrink ł ń ž ÿ, Greek and
-                                              // Cyrillic, and no longer Ł Ń Ž, and set fi/fl
-                                              // as two letters; v89 pages measured such words
-                                              // the old way
-                                              // v89: widow/orphan control, and a heading
-                                              // keeps room for two lines below it, so pages
-                                              // end earlier than in v88
-                                              // v88: page-break-after breaks, and a
-                                              // page-break-before keeps the paragraph before
-                                              // it on the old page
-                                              // v87: a block's bold/italic reaches the blocks
-                                              // nested inside it; v86 pages set them upright
-                                              // v86: a <span id> is in the anchor map
-                                              // v85: an <img> whose href has no extension is
-                                              // laid out as the image its bytes are; v84 pages
-                                              // hold its alt text
-                                              // v84: text declared at font-size 2px or less (a
-                                              // watermark span) is dropped; v83 pages show it
-                                              // v83: a TTF family kerns and draws fi/fl ligatures
-                                              // v82: a TTF family draws every size with a face of its own
-                                              // v81: a paragraph over 96 words gets its top margin and padding
-                                              // v79: a <span> styled display:block is a block,
-                                              // and every block in a heading keeps its centring
-                                              // and size (#388); v78 pages run them together
-                                              // v78: a span indent (poem line shape) gives way
-                                              // before its line wraps; v77 pages of such poems
-                                              // carry the wrapped lines
-                                              // v77: the status byte records a heap-degraded
-                                              // image build (kStatusImageHeaderDegraded); a v76
-                                              // cache may be image-less without saying so
-                                              // v76: a percentage wrapper (<div
-                                              // style="width:60%">) no longer shrinks a block
-                                              // image below min(native, column), so image
-                                              // sizes baked into v75 pages are stale
-                                              // v75: the reader ladder gained rungs above
-                                              // 18 pt (20/22/24/26), so a heading snaps to a
-                                              // different face and residual than it did under
-                                              // v74 and breaks across lines differently. The
-                                              // ladder is derived from the body fontId and so is
-                                              // deliberately absent from the property hash; the
-                                              // hash therefore still MATCHES, and this version
-                                              // is the only thing that rejects a v74 cache
-                                              // v74: the HTML `hidden` attribute now
-                                              // suppresses an element, so a v73 cache still
-                                              // holds the laid-out text it should have hidden
-                                              // v73: an internal link honours CSS
-                                              // vertical-align, so footnote references marked
-                                              // `a { vertical-align: super }` are raised and
-                                              // shrunk. Word size/position are baked into layout
-                                              // v72: `!important` is now stripped from every
-                                              // CSS declaration value, so margins, text-align and
-                                              // text-indent that carry the marker take effect. Those
-                                              // feed layout, so a v71 cache holds the old geometry
-                                              // v71: the packed word style byte now carries a
-                                              // per-word "continues the previous word" bit, so the
-                                              // dictionary overlay can select a bionic-split or
-                                              // hyphenated word as one word. A v70 cache reads the
-                                              // bit as clear everywhere, i.e. keeps the old split
-                                              // selection, so it has to be rebuilt
-                                              // v70: a wrapper's horizontal inset reaches every
-                                              // child block, and insets/hanging indents are clamped to
-                                              // the panel. Layout bakes insets into word xpos (see v61),
-                                              // so a v69 cache keeps the off-panel lines this fixes
-                                              // v69: table cells carry a colSpan
-                                              // v68: near-body font-size snapping now also covers block-level
-                                              // CSS (p.body { font-size: 1.1em }), not just inline wrappers
-                                              // v67: img boxes honour `auto` and keep the source aspect ratio
-                                              // v64: main-text font-size normalization
-                                              // v63: drop-cap float zones + ink-metric cap placement
-                                              // (62 was consumed by an earlier iteration of this feature)
-                                              // v61: TextBlock no longer serializes the block-spacing
-                                              // fields (margins/padding/indent + their defined flags);
-                                              // layout bakes them into word xpos/line y and nothing read
-                                              // them back — 19 bytes/line saved
-                                              // v60: TextBlock word data serialized as one flat arena
-                                              // (offset table + NUL-terminated text blob) instead of
-                                              // length-prefixed strings and per-field arrays
-                                              // v59: FontSizeLadder residual dead zone (±3% renders native) changes
-                                              // near-rung block metrics from v58
-                                              // (v58: block sizes snap to the FontSizeLadder, uniform spans fold;
-                                              //  v57: sup/sub scaling moved into the per-word size channel)
+constexpr uint8_t SECTION_FILE_VERSION = 100;  // v100: the optimal line breaker indents only a paragraph's first line
+                                               // v99: ruby (furigana) is laid out above its base: a line with
+                                               // ruby keeps its groups (TextBlock annotations) and is taller
+                                               // by half an ascender; <rp> is not laid out.
+                                               // v98: synthetic italic slants an outline family
+                                               // without an italic file; an italic drop cap's
+                                               // width and a narrowed CJK mark's place come from
+                                               // the ink box, an accent font's too
+                                               // v97: bold in an outline family without a bold
+                                               // file is synthetic, wider than the regular
+                                               // v96: CJK punctuation is narrowed by the book's
+                                               // table, a mark is a token of its own, CJK lines
+                                               // justify flush, zh/ja text sits on a whole-em grid
+                                               // v95: a paragraph whose size undoes the book's
+                                               // root size is body text (Calibre: body 1.125em,
+                                               // p 0.88889em); v94 laid it out at 0.889
+                                               // v94: a word in another of the book's families
+                                               // than its block's is laid out in that family's
+                                               // face (a line's word fonts, TextBlock::WordFont);
+                                               // v93 lines hold it in the block's font
+                                               // v93: 20 pt is the 18 pt faces scaled, so the
+                                               // 20-26 pt font IDs changed; a v92 heading still
+                                               // names the old ones and would draw nothing
+                                               // v92: CJK text breaks between characters, with kinsoku
+                                               // v91: rem/px/pt font sizes are relative to the
+                                               // body (v90 compounded nested ones), and CSS
+                                               // specificity, compound, descendant/child
+                                               // selectors and `inherit` apply
+                                               // v90: small caps shrink ł ń ž ÿ, Greek and
+                                               // Cyrillic, and no longer Ł Ń Ž, and set fi/fl
+                                               // as two letters; v89 pages measured such words
+                                               // the old way
+                                               // v89: widow/orphan control, and a heading
+                                               // keeps room for two lines below it, so pages
+                                               // end earlier than in v88
+                                               // v88: page-break-after breaks, and a
+                                               // page-break-before keeps the paragraph before
+                                               // it on the old page
+                                               // v87: a block's bold/italic reaches the blocks
+                                               // nested inside it; v86 pages set them upright
+                                               // v86: a <span id> is in the anchor map
+                                               // v85: an <img> whose href has no extension is
+                                               // laid out as the image its bytes are; v84 pages
+                                               // hold its alt text
+                                               // v84: text declared at font-size 2px or less (a
+                                               // watermark span) is dropped; v83 pages show it
+                                               // v83: a TTF family kerns and draws fi/fl ligatures
+                                               // v82: a TTF family draws every size with a face of its own
+                                               // v81: a paragraph over 96 words gets its top margin and padding
+                                               // v79: a <span> styled display:block is a block,
+                                               // and every block in a heading keeps its centring
+                                               // and size (#388); v78 pages run them together
+                                               // v78: a span indent (poem line shape) gives way
+                                               // before its line wraps; v77 pages of such poems
+                                               // carry the wrapped lines
+                                               // v77: the status byte records a heap-degraded
+                                               // image build (kStatusImageHeaderDegraded); a v76
+                                               // cache may be image-less without saying so
+                                               // v76: a percentage wrapper (<div
+                                               // style="width:60%">) no longer shrinks a block
+                                               // image below min(native, column), so image
+                                               // sizes baked into v75 pages are stale
+                                               // v75: the reader ladder gained rungs above
+                                               // 18 pt (20/22/24/26), so a heading snaps to a
+                                               // different face and residual than it did under
+                                               // v74 and breaks across lines differently. The
+                                               // ladder is derived from the body fontId and so is
+                                               // deliberately absent from the property hash; the
+                                               // hash therefore still MATCHES, and this version
+                                               // is the only thing that rejects a v74 cache
+                                               // v74: the HTML `hidden` attribute now
+                                               // suppresses an element, so a v73 cache still
+                                               // holds the laid-out text it should have hidden
+                                               // v73: an internal link honours CSS
+                                               // vertical-align, so footnote references marked
+                                               // `a { vertical-align: super }` are raised and
+                                               // shrunk. Word size/position are baked into layout
+                                               // v72: `!important` is now stripped from every
+                                               // CSS declaration value, so margins, text-align and
+                                               // text-indent that carry the marker take effect. Those
+                                               // feed layout, so a v71 cache holds the old geometry
+                                               // v71: the packed word style byte now carries a
+                                               // per-word "continues the previous word" bit, so the
+                                               // dictionary overlay can select a bionic-split or
+                                               // hyphenated word as one word. A v70 cache reads the
+                                               // bit as clear everywhere, i.e. keeps the old split
+                                               // selection, so it has to be rebuilt
+                                               // v70: a wrapper's horizontal inset reaches every
+                                               // child block, and insets/hanging indents are clamped to
+                                               // the panel. Layout bakes insets into word xpos (see v61),
+                                               // so a v69 cache keeps the off-panel lines this fixes
+                                               // v69: table cells carry a colSpan
+                                               // v68: near-body font-size snapping now also covers block-level
+                                               // CSS (p.body { font-size: 1.1em }), not just inline wrappers
+                                               // v67: img boxes honour `auto` and keep the source aspect ratio
+                                               // v64: main-text font-size normalization
+                                               // v63: drop-cap float zones + ink-metric cap placement
+                                               // (62 was consumed by an earlier iteration of this feature)
+                                               // v61: TextBlock no longer serializes the block-spacing
+                                               // fields (margins/padding/indent + their defined flags);
+                                               // layout bakes them into word xpos/line y and nothing read
+                                               // them back — 19 bytes/line saved
+                                               // v60: TextBlock word data serialized as one flat arena
+                                               // (offset table + NUL-terminated text blob) instead of
+                                               // length-prefixed strings and per-field arrays
+                                               // v59: FontSizeLadder residual dead zone (±3% renders native) changes
+                                               // near-rung block metrics from v58
+                                               // (v58: block sizes snap to the FontSizeLadder, uniform spans fold;
+                                               //  v57: sup/sub scaling moved into the per-word size channel)
 
 namespace header {
 constexpr uint32_t kVersion = 0;

@@ -182,6 +182,28 @@ TEST(CjkPunctuationWidths, ReleasingTheLayoutScratchGivesBackTheMarksScratchToo)
   text.releaseLayoutScratch();
   EXPECT_EQ(gLiveAllocations, before);
 }
+TEST(RubyGroups, ReleasingAnEmptyBlocksScratchGivesBackItsRuby) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  const long before = gLiveAllocations;
+  text.addWord("漢字", EpdFontFamily::REGULAR);
+  ASSERT_TRUE(text.addRubyGroup(0, 2, "かんじ"));
+  layout(text, 400);
+  text.releaseLayoutScratch();
+  EXPECT_EQ(gLiveAllocations, before);
+}
+// CjkRubyTest.cpp: the same hand-built line.
+std::unique_ptr<TextBlock> rubyLine(std::vector<TextBlock::Annotation> annotations,
+                                    std::vector<std::string> words = {"漢", "字"}, float multiplier = 1.0f,
+                                    std::vector<uint8_t> sizePct = {});
+TEST(RubyTextBlock, DrawingRubyAllocatesNothing) {
+  const auto line = rubyLine({{0, 2, 0, 20, TextBlock::AnnotationKind::Ruby, 0, "かんじ"}});
+  GfxRenderer renderer;
+  renderer.drawCalls.reserve(16);
+  const long before = gLiveAllocations;
+  line->render(renderer, kFontId, 0, 100);
+  EXPECT_EQ(gLiveAllocations, before);
+  EXPECT_EQ(renderer.drawCalls.size(), 5u);
+}
 TEST(CjkJustification, AJustifiedCjkLineEndsFlush) {
   // 4 characters on a 47 px line: 7 px over 3 gaps, 2 px each and the last pixel to one of them.
   ParsedText text(false, false, aligned(CssTextAlign::Justify));
