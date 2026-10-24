@@ -5,8 +5,10 @@
 // Generated rather than checked in: several tests care about a book's SHAPE (spine sizes, note
 // counts, a reference to an entry that does not exist) and a fixture per case would be a pile of
 // binaries no one can diff. ZipFile reads method 0, so no deflater is needed here; the tests that
-// specifically need the inflate path use the corpus books instead.
+// specifically need the inflate path use the corpus books instead -- or addDeflateStoredBlocks(),
+// a method-8 entry whose DEFLATE stream holds the data in stored blocks, which needs no deflater.
 
+#include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <string>
@@ -18,14 +20,43 @@ namespace test_zip {
 
 class StoredZipWriter {
  public:
-  void add(const std::string& name, const std::string& data) { entries_.push_back({name, data, 0}); }
+  void add(const std::string& name, const std::string& data) {
+    entries_.push_back({name, data, 0, ZIP_STORED, data, static_cast<uint32_t>(data.size())});
+  }
+
+  // A DEFLATE (method 8) entry whose stream carries `data` in stored blocks of up to `blockBytes`
+  // (RFC 1951 BTYPE 00), as a deflater does with data that will not compress. `claimedSize`, when
+  // non-zero, is the uncompressed size both headers state in place of the real one.
+  void addDeflateStoredBlocks(const std::string& name, const std::string& data, const size_t blockBytes,
+                              const uint32_t claimedSize = 0) {
+    std::string stream;
+    for (size_t at = 0; at < data.size() || at == 0; at += blockBytes) {
+      const size_t len = std::min(blockBytes, data.size() - at);
+      const bool last = at + len >= data.size();
+      stream.push_back(static_cast<char>(last ? 1 : 0));  // BFINAL, BTYPE 00, padded to the byte
+      put16(stream, static_cast<uint16_t>(len));
+      put16(stream, static_cast<uint16_t>(~len));
+      stream.append(data, at, len);
+      if (last) break;
+    }
+    entries_.push_back(
+        {name, data, 0, ZIP_DEFLATED, stream, claimedSize != 0 ? claimedSize : static_cast<uint32_t>(data.size())});
+  }
+
+  // Where `name`'s payload (its stored bytes, or its DEFLATE stream) starts in the written file.
+  uint32_t payloadOffset(const std::string& name) const {
+    for (const Entry& e : entries_) {
+      if (e.name == name) return e.localOffset + 30 + static_cast<uint32_t>(e.name.size());
+    }
+    return 0;
+  }
 
   void write(const std::string& path) {
     std::string out;
     for (Entry& e : entries_) {
       e.localOffset = static_cast<uint32_t>(out.size());
       appendLocalHeader(out, e);
-      out += e.data;
+      out += e.payload;
     }
     const uint32_t centralStart = static_cast<uint32_t>(out.size());
     for (const Entry& e : entries_) {
@@ -38,10 +69,15 @@ class StoredZipWriter {
   }
 
  private:
+  static constexpr uint16_t ZIP_STORED = 0;
+  static constexpr uint16_t ZIP_DEFLATED = 8;
   struct Entry {
     std::string name;
-    std::string data;
+    std::string data;  // the entry's contents
     uint32_t localOffset;
+    uint16_t method;
+    std::string payload;  // what follows the local header: `data`, or its DEFLATE stream
+    uint32_t uncompressedSize;
   };
 
   static void put16(std::string& out, const uint16_t v) {
@@ -65,12 +101,12 @@ class StoredZipWriter {
     put32(out, 0x04034B50);
     put16(out, 20);  // version needed
     put16(out, 0);   // flags
-    put16(out, 0);   // method: stored
-    put16(out, 0);   // time
-    put16(out, 0);   // date
+    put16(out, e.method);
+    put16(out, 0);  // time
+    put16(out, 0);  // date
     put32(out, crc32(e.data));
-    put32(out, static_cast<uint32_t>(e.data.size()));
-    put32(out, static_cast<uint32_t>(e.data.size()));
+    put32(out, static_cast<uint32_t>(e.payload.size()));
+    put32(out, e.uncompressedSize);
     put16(out, static_cast<uint16_t>(e.name.size()));
     put16(out, 0);
     out += e.name;
@@ -80,12 +116,12 @@ class StoredZipWriter {
     put16(out, 20);  // version made by
     put16(out, 20);  // version needed
     put16(out, 0);
-    put16(out, 0);  // method: stored
+    put16(out, e.method);
     put16(out, 0);
     put16(out, 0);
     put32(out, crc32(e.data));
-    put32(out, static_cast<uint32_t>(e.data.size()));
-    put32(out, static_cast<uint32_t>(e.data.size()));
+    put32(out, static_cast<uint32_t>(e.payload.size()));
+    put32(out, e.uncompressedSize);
     put16(out, static_cast<uint16_t>(e.name.size()));
     put16(out, 0);  // extra
     put16(out, 0);  // comment
