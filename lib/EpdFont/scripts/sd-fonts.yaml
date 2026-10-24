@@ -14,6 +14,17 @@
 #                  path: relative to lib/EpdFont (for committed fonts)
 #                  url:  download URL (for fonts not in the repo)
 #
+# CJK families (format: otf):
+#   A CFF subset of Noto CJK cut by cjk_subset.py: one <name>-Regular.otf, drawn at every size by the reader's
+#   engine, instead of a .cpfont family. They take these fields in place of intervals, sizes and styles:
+#   format:        otf
+#   charset:       ja, zh-Hans, zh-Hant or ko (cjk_subset.CHARSETS)
+#   fontName:      the family name written into the font
+#   source:        {url, sha256} of the Noto CJK region OTF (or {path}); the build fails when the hash differs
+#   inDownloadAll: false keeps the family out of "Download all"
+#   Rebuilding them needs the pinned fontTools (top-level `fonttools`, another version writes other bytes):
+#     pip install fonttools==4.63.0
+#
 # Variable fonts:
 #   Some fonts (Bitter, Inter, Alegreya) are distributed as variable fonts.
 #   freetype-py can't set variable font axis values, so the build script
@@ -28,6 +39,12 @@
 #
 #   Extracted static fonts are cached in instanced_fonts/ (gitignored).
 #   Requires fonttools: pip install -r requirements.txt
+
+# The Unicode Han database the CJK character sets read (cjk_subset.py), pinned to a release.
+unihan: {url: "https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip", sha256: "f7a48b2b545acfaa77b2d607ae28747404ce02baefee16396c5d2d7a8ef34b5e"}
+
+# The fontTools version the CJK subsets are built with: the build refuses any other.
+fonttools: "4.63.0"
 
 families:
   # ── Serif ──────────────────────────────────────────────────────────────
@@ -304,25 +321,70 @@ families:
       italic:     {path: "builtinFonts/source/OpenDyslexic/OpenDyslexic-Italic.otf"}
       bolditalic: {path: "builtinFonts/source/OpenDyslexic/OpenDyslexic-BoldItalic.otf"}
 
-  # ── CJK & Hangul ──────────────────────────────────────────────────────
+  # ── CJK (CFF subsets) ─────────────────────────────────────────────────
+  # Per-language subsets of Noto CJK cut by cjk_subset.py: one Regular .otf each, drawn at every size, bold
+  # synthesized. Left out of "Download all": a reader downloads their own language's. See the header.
 
-  # - name: NotoSansCJK
-  #   description: "Sans-serif (Chinese, Japanese, Korean)"
-  #   intervals: builtin,ascii,latin1,punctuation,cjk
-  #   sizes: [10, 12, 14, 16, 18]
-  #   styles:
-  #     regular: {url: "https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf"}
+  - name: NotoSansJP
+    description: "Japanese, sans serif"
+    format: otf
+    inDownloadAll: false
+    charset: ja
+    fontName: "Noto Sans JP"
+    source: {url: "https://github.com/notofonts/noto-cjk/raw/Sans2.004/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf", sha256: "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5"}
 
-  # - name: NotoSerifCJK
-  #   description: "Serif (Chinese, Japanese, Korean)"
-  #   intervals: builtin,ascii,latin1,punctuation,cjk
-  #   sizes: [10, 12, 14, 16, 18]
-  #   styles:
-  #     regular: {url: "https://github.com/notofonts/noto-cjk/raw/main/Serif/OTF/SimplifiedChinese/NotoSerifCJKsc-Regular.otf"}
+  - name: NotoSerifJP
+    description: "Japanese, serif"
+    format: otf
+    inDownloadAll: false
+    charset: ja
+    fontName: "Noto Serif JP"
+    source: {url: "https://github.com/notofonts/noto-cjk/raw/Serif2.003/Serif/OTF/Japanese/NotoSerifCJKjp-Regular.otf", sha256: "d9854c7a8ef170b5a7932558856fd64eb8de0b007cd823fed6f9f514ad2803d3"}
 
-  # - name: NotoSansHangul
-  #   description: "Sans-serif (Korean Hangul)"
-  #   intervals: builtin,ascii,latin1,punctuation,hangul
-  #   sizes: [10, 12, 14, 16, 18]
-  #   styles:
-  #     regular: {url: "https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf"}
+  - name: NotoSansSC
+    description: "Simplified Chinese, sans serif"
+    format: otf
+    inDownloadAll: false
+    charset: zh-Hans
+    fontName: "Noto Sans SC"
+    source: {url: "https://github.com/notofonts/noto-cjk/raw/Sans2.004/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf", sha256: "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b"}
+
+  - name: NotoSerifSC
+    description: "Simplified Chinese, serif"
+    format: otf
+    inDownloadAll: false
+    charset: zh-Hans
+    fontName: "Noto Serif SC"
+    source: {url: "https://github.com/notofonts/noto-cjk/raw/Serif2.003/Serif/OTF/SimplifiedChinese/NotoSerifCJKsc-Regular.otf", sha256: "2a2eae2628df83556c54018c41e20fa532c1b862c5256ae8b3f23feb918d12ca"}
+
+  - name: NotoSansTC
+    description: "Traditional Chinese, sans serif"
+    format: otf
+    inDownloadAll: false
+    charset: zh-Hant
+    fontName: "Noto Sans TC"
+    source: {url: "https://github.com/notofonts/noto-cjk/raw/Sans2.004/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf", sha256: "dce08bd4fd91aa8aa76ed8fea4b694c2dfb8550f67871e326843212ddbeb88b4"}
+
+  - name: NotoSerifTC
+    description: "Traditional Chinese, serif"
+    format: otf
+    inDownloadAll: false
+    charset: zh-Hant
+    fontName: "Noto Serif TC"
+    source: {url: "https://github.com/notofonts/noto-cjk/raw/Serif2.003/Serif/OTF/TraditionalChinese/NotoSerifCJKtc-Regular.otf", sha256: "234301038e76e7c35c43113785024700c4e4fe7bdce1d1fbbc42fca7e6683798"}
+
+  - name: NotoSansKR
+    description: "Korean, sans serif"
+    format: otf
+    inDownloadAll: false
+    charset: ko
+    fontName: "Noto Sans KR"
+    source: {url: "https://github.com/notofonts/noto-cjk/raw/Sans2.004/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf", sha256: "6bcb2a0703aa137e874fc2dffa85f6c21ba9a67fa329e81b8c801663af7e992a"}
+
+  - name: NotoSerifKR
+    description: "Korean, serif"
+    format: otf
+    inDownloadAll: false
+    charset: ko
+    fontName: "Noto Serif KR"
+    source: {url: "https://github.com/notofonts/noto-cjk/raw/Serif2.003/Serif/OTF/Korean/NotoSerifCJKkr-Regular.otf", sha256: "77b4b741f864d27f15e90f275b17106dde90b2ad28f82bab72dc95805db5fb42"}

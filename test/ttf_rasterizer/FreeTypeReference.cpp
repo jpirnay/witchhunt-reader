@@ -3,6 +3,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_OUTLINE_H
+#include FT_SYNTHESIS_H
 
 namespace ttf_test {
 
@@ -39,7 +40,7 @@ int32_t FreeTypeReference::descender() const { return static_cast<int32_t>(impl_
 int32_t FreeTypeReference::height() const { return static_cast<int32_t>(impl_->face->size->metrics.height); }
 
 ReferenceGlyph FreeTypeReference::glyph(const uint32_t index, const bool oversampleOverlaps, const long xStrength,
-                                        const long yStrength) const {
+                                        const long yStrength, const bool slant) const {
   ReferenceGlyph out;
   FT_GlyphSlot slot = impl_->face->glyph;
   if (FT_Load_Glyph(impl_->face, index, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP) != 0) return out;
@@ -47,6 +48,7 @@ ReferenceGlyph FreeTypeReference::glyph(const uint32_t index, const bool oversam
   if (!oversampleOverlaps) slot->outline.flags &= ~FT_OUTLINE_OVERLAP;
   out.linearAdvance = static_cast<int32_t>(slot->linearHoriAdvance);
   if (xStrength != 0 || yStrength != 0) FT_Outline_EmboldenXY(&slot->outline, xStrength, yStrength);
+  if (slant) FT_GlyphSlot_Oblique(slot);
   if (FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL) != 0) return out;
   out.loaded = true;
   const FT_Bitmap& bitmap = slot->bitmap;

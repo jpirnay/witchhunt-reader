@@ -35,12 +35,14 @@ struct FontCatalog::FileRecord {
 namespace {
 
 constexpr uint32_t MAGIC = 0x43465043;  // "CPFC" in the file
-constexpr uint16_t VERSION = 1;
-constexpr size_t LIMIT = 0xFFFF;  // the 16-bit counts and offsets
+constexpr uint16_t VERSION = 2;         // 2: the outline and Download-all flags
+constexpr size_t LIMIT = 0xFFFF;        // the 16-bit counts and offsets
 
 constexpr uint8_t INSTALLED = 1 << 0;
 constexpr uint8_t HAS_UPDATE = 1 << 1;
 constexpr uint8_t RESUMABLE = 1 << 2;
+constexpr uint8_t OUTLINE = 1 << 3;
+constexpr uint8_t NOT_IN_DOWNLOAD_ALL = 1 << 4;
 
 constexpr size_t NO_FILE = static_cast<size_t>(-1);
 
@@ -189,6 +191,10 @@ void FontCatalog::setFlag(const size_t family, const uint8_t flag, const bool va
   flags = value ? static_cast<uint8_t>(flags | flag) : static_cast<uint8_t>(flags & ~flag);
 }
 
+bool FontCatalog::outline(const size_t family) const { return flag(family, OUTLINE); }
+bool FontCatalog::inDownloadAll(const size_t family) const {
+  return family < count() && !flag(family, NOT_IN_DOWNLOAD_ALL);
+}
 bool FontCatalog::installed(const size_t family) const { return flag(family, INSTALLED); }
 bool FontCatalog::hasUpdate(const size_t family) const { return flag(family, HAS_UPDATE); }
 bool FontCatalog::hasResumableDownload(const size_t family) const { return flag(family, RESUMABLE); }
@@ -307,7 +313,17 @@ void FontCatalog::Builder::beginFamily() {
   familyTotal = 0;
   descriptionOffset = 0;
   hasDescription = false;
+  familyFlags = 0;
   familyOverflow = false;
+}
+
+void FontCatalog::Builder::outline(const bool value) {
+  familyFlags = value ? static_cast<uint8_t>(familyFlags | OUTLINE) : static_cast<uint8_t>(familyFlags & ~OUTLINE);
+}
+
+void FontCatalog::Builder::inDownloadAll(const bool value) {
+  familyFlags = value ? static_cast<uint8_t>(familyFlags & ~NOT_IN_DOWNLOAD_ALL)
+                      : static_cast<uint8_t>(familyFlags | NOT_IN_DOWNLOAD_ALL);
 }
 
 void FontCatalog::Builder::description(const char* text, const size_t len) {
@@ -353,7 +369,7 @@ void FontCatalog::Builder::keepFamily(const char* name, const size_t nameLen) {
     record.name = nameOffset;
     record.description = descriptionOffset;
     record.firstFile = static_cast<uint16_t>(kept.files);
-    record.flags = 0;
+    record.flags = familyFlags;
     record.reserved = 0;
   }
   kept.families += 1;

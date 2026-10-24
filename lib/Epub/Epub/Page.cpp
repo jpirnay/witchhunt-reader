@@ -117,7 +117,7 @@ void PageTableFragment::render(GfxRenderer& renderer, const int fontId, const in
       int lineY = rowY + TABLE_CELL_PADDING;
       for (const auto& line : cell.lines) {
         line->render(renderer, fontId, colX[col] + TABLE_CELL_PADDING, lineY);
-        lineY += lineHeight;
+        lineY += lineHeight + line->annotationBand(renderer, fontId);
       }
       // In-cell graphic, drawn below the cell text. Always 1-bit (BW) thumbnails:
       // the decode/cache machinery lives in ImageBlock; the BW cache is built during

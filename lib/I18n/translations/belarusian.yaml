@@ -394,6 +394,8 @@ STR_FIRMWARE_WRITE_FAILED: "Не ўдалося запісаць прашыўк�
 STR_FLASH_TOTAL: "Агульная флэш-памяць"
 STR_FONT_INSTALLED: "Шрыфт усталяваны!"
 STR_FONT_INSTALL_FAILED: "Не ўдалося ўсталяваць шрыфт"
+STR_FONT_SPACE_NEEDED: "SD-карта: трэба %s, вольна %s"
+STR_FONT_NOT_LISTED: "Занадта вялікі для вобласці шрыфтоў прылады"
 STR_FONT_MANAGER: "Менеджэр шрыфтоў"
 STR_FORGET_BOOK: "Забыць кнігу"
 STR_KO_SYNC_FINISHED_BOOK: "Сінхранізаваць прагрэс з KOReader"

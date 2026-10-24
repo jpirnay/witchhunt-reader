@@ -717,11 +717,11 @@ TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uin
       return StylesResult::Failed;
     }
   }
-  // An emboldened glyph is wider than its file's plan allows for.
+  // A synthetic glyph outgrows its file's plan: wider emboldened, wider again slanted.
   for (uint8_t s = 0; s < 4; ++s) {
     if (!synthetic(s) || !draws(s)) continue;
     const Style& source = *styleAt(s);
-    *plan = ttf::mergePlans(*plan, ttf::planScratch(source.face, largest, poolFor(source), true));
+    *plan = ttf::mergePlans(*plan, ttf::planScratch(source.face, largest, poolFor(source), emboldened(s), slanted(s)));
   }
   return StylesResult::Ok;
 }
@@ -730,13 +730,32 @@ void TtfFont::chooseSynthetic() {
   // Spec 7.1: a family gets synthetic bold only when none of its files is bold. A file in the bold or bold italic slot
   // counts as bold whatever its face says; so does any file whose face says bold (macStyle, or a weight of 600 or
   // more), such as a bold file serving as the regular.
+  // Spec 7.4 reads italic alike: a file in the italic or bold italic slot, or a face that says italic (macStyle,
+  // fsSelection, italicAngle). Both rules read the files before either changes source_.
+  // Derived from the files each time, so a second call gives the first's result (a synthetic source it set must not
+  // read as a file below).
+  for (uint8_t s = 0; s < 4; ++s) source_[s] = fileSlot_[s] != kNoSlot ? s : kNoSlot;
+  emboldened_ = slanted_ = 0;
   bool bold = fileSlot_[1] != kNoSlot || fileSlot_[3] != kNoSlot;
-  for (uint8_t s = 0; s < 4; ++s) bold = bold || (draws(s) && styleAt(s)->face.bold);
+  bool italic = fileSlot_[2] != kNoSlot || fileSlot_[3] != kNoSlot;
+  for (uint8_t s = 0; s < 4; ++s) {
+    if (!draws(s)) continue;
+    bold = bold || styleAt(s)->face.bold;
+    italic = italic || styleAt(s)->face.italic;
+  }
   if (!bold) {
     // Bold from the regular; bold italic from the italic when the family draws one, else from the regular too.
     source_[1] = 0;
     source_[3] = draws(2) ? 2 : 0;
-    synthetic_ = static_cast<uint8_t>((1u << 1) | (1u << 3));
+    emboldened_ = static_cast<uint8_t>((1u << 1) | (1u << 3));
+  }
+  if (!italic) {
+    // Italic from the regular. Bold italic: the emboldened regular above, else the Bold file. A family that is bold
+    // only by its faces (a bold or heavy file serving as the regular) has neither: its bold italic falls back to the
+    // italic.
+    source_[2] = 0;
+    if (source_[3] == kNoSlot && fileSlot_[1] != kNoSlot && draws(1)) source_[3] = 1;
+    slanted_ = static_cast<uint8_t>((1u << 2) | (source_[3] != kNoSlot ? 1u << 3 : 0u));
   }
   fontCount_ = 0;
   for (uint8_t s = 0; s < 4; ++s) slot_[s] = source_[s] != kNoSlot ? fontCount_++ : kNoSlot;
@@ -962,25 +981,36 @@ const EpdGlyph* TtfFont::render(const Size& size, const uint8_t style, const uin
   return set.drawToRing(metrics);
 }
 
-// The rasterizer's load(), emboldened when `style` is synthetic (spec 7.2), for a glyph EpdGlyphRef can place.
+// The rasterizer's load(), then embolden() and slant() as the style asks (spec 7.2, 7.4), for a glyph EpdGlyphRef can
+// place. A glyph that the synthesis makes too large (the output region's cap, the box or advance limits, EpdGlyphRef's
+// 8-bit offsets), though its file's glyph fits, is drawn without the slant, then without the emboldening too, rather
+// than missing. A Transient stays so.
 ttf::Status TtfFont::load(FontBytes& bytes, const ttf::Face& face, const uint16_t index, const Size& size,
                           const uint8_t style, EpdGlyph* metrics) {
   ttf::Rasterizer& rasterizer = set_.rasterizer_;
-  ttf::Status loaded = rasterizer.load(bytes, face, index, size.ppem, metrics);
-  if (synthetic(style) && loaded == ttf::Status::Ok) {
-    loaded = rasterizer.embolden(ttf::emboldenStrength(size.ppem), metrics);
-    // Too large once emboldened (the output region's cap, or the box or advance limits), though it fits as the file's
-    // style: drawn unemboldened, as the regular weight, rather than missing (spec 7.2). A Transient stays so.
-    if (loaded == ttf::Status::Unsupported) loaded = rasterizer.load(bytes, face, index, size.ppem, metrics);
+  bool bold = emboldened(style);
+  bool slant = slanted(style);
+  for (;;) {
+    ttf::Status loaded = rasterizer.load(bytes, face, index, size.ppem, metrics);
+    if (loaded != ttf::Status::Ok) return loaded;
+    if (bold) loaded = rasterizer.embolden(ttf::emboldenStrength(size.ppem), metrics);
+    if (slant && loaded == ttf::Status::Ok) loaded = rasterizer.slant(metrics);
+    loaded = placeable(loaded, *metrics);
+    if (loaded != ttf::Status::Unsupported || (!bold && !slant)) return loaded;
+    if (slant) {
+      slant = false;  // upright first
+    } else {
+      bold = false;  // then the file's own weight
+    }
   }
-  return placeable(loaded, *metrics);
 }
 
 int8_t TtfFont::kerning(const Size& size, const uint8_t drawn, const uint32_t left, const uint32_t right) {
   Style* const found = styleAt(drawn);
   if (!found || !found->present || !found->kerning.any() || size.ppem == 0) return 0;
   Style& s = *found;
-  // A synthetic style kerns as its file does, with the file's style's pairs: every glyph is the same amount wider.
+  // A synthetic style kerns as its file does, with the file's style's pairs: every glyph is the same amount wider
+  // (bold) or unchanged (italic: the shear keeps the advance).
   const uint8_t style = source_[drawn];
   FlashGlyphStore& store = set_.store_;
   // The store keys a pair by its codepoints (BMP only) and keeps font units, so every size shares it.

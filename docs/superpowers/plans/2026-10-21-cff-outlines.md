@@ -8,7 +8,7 @@
 
 **Tech Stack:** C++17 firmware (PlatformIO, ESP32-C3/S3), GoogleTest host tests (`test/ttf_rasterizer`, `test/ttf_font`) with the SDK's FreeType as the oracle, Python fontTools for the test fonts.
 
-**Spec:** `docs/superpowers/specs/2026-10-20-cjk-ttf-fonts-design.md`, section 9 (with sections 10 and 11). Order of work step 4; the maintainer moved it ahead of synthetic bold on 2026-10-21. Not prototyped.
+**Spec:** `docs/design/cjk-ttf-fonts.md`, section 9 (with sections 10 and 11). Order of work step 4; the maintainer moved it ahead of synthetic bold on 2026-10-21. Not prototyped.
 
 **FreeType reference.** The SDK's copy is `freeink-sdk/libs/font/FreeInkFont/third_party/freetype/src/` (below: `FT/`). Every rule the port must match is in these files; a task names the lines it ports. Summary of the unhinted path (`FT_LOAD_NO_HINTING`, the cf2 engine; `CFF_CONFIG_OPTION_OLD_ENGINE` is off, stem darkening off by default):
 - cf2 interprets in 16.16 (`CF2_Fixed`) at unit scale: a point becomes `FT_MulFix(X, 0x400) >> 10` (`FT/psaux/pshints.c:1180-1203`, `FT/psaux/psobjs.c:2217-2219`), i.e. integer font units, fractions floored.

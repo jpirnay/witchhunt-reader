@@ -55,6 +55,17 @@ TEST(TypographyProfile, OtherLanguagesKeepLatinRulesAndTheirHyphenation) {
   EXPECT_FALSE(TypographyProfile::forLanguage("zhx").wholeEmGrid) << "only the primary subtag zh is Chinese";
 }
 
+TEST(TypographyProfile, ChineseJapaneseAndKoreanAreWrittenWithTheCjkRepertoire) {
+  for (const char* tag : {"zh", "zh-CN", "zh_TW", "zh-Hant-HK", "lzh", "ja", "ja-JP", "ko", "ko-KR", "KO_kr"}) {
+    EXPECT_TRUE(TypographyProfile::forLanguage(tag).cjkRepertoire) << tag;
+  }
+  // Korean breaks at spaces as a Latin book does, and is still written with thousands of Hangul syllables.
+  EXPECT_EQ(TypographyProfile::forLanguage("ko").breaking, TypographyProfile::Breaking::KoreanWords);
+  for (const char* tag : {"", "en", "en-US", "de-DE", "vi", "zhx", "kok", "jv"}) {
+    EXPECT_FALSE(TypographyProfile::forLanguage(tag).cjkRepertoire) << tag;
+  }
+}
+
 TEST(CjkPunctuation, ClassesFollowJlreq) {
   EXPECT_EQ(CjkPunctuation::classOf(0x300C), Class::Opening);           // 「
   EXPECT_EQ(CjkPunctuation::classOf(0x300D), Class::Closing);           // 」

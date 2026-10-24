@@ -33,6 +33,11 @@ struct TypographyProfile {
   Direction direction = Direction::LeftToRight;
   // A book may set this language vertically (CSS writing-mode). Nothing reads it yet.
   bool verticalAllowed = false;
+  // The language is written with the CJK repertoire (Chinese, Japanese, Korean): thousands of Han characters, kana or
+  // Hangul syllables rather than an alphabet's hundred-odd letters, whatever its line breaking (Korean breaks at
+  // spaces). Not a layout rule: the reader asks it what a chapter's glyphs cost a font drawn on demand
+  // (InPlaceBuildGate.h).
+  bool cjkRepertoire = false;
   // The language's hyphenation patterns, null when it has none.
   const LanguageHyphenator* hyphenator = nullptr;
 

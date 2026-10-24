@@ -433,7 +433,7 @@ TEST(FontCatalogTest, ACorruptOrShortStashIsRejected) {
   cases.push_back({"not a catalog", good});
   cases.back().bytes[0] ^= 0x20;
   cases.push_back({"another version", good});
-  putU16(cases.back().bytes, 4, 2);
+  putU16(cases.back().bytes, 4, 1);
   cases.push_back({"counts that do not match the size", good});
   putU16(cases.back().bytes, 6, 4);
   cases.push_back({"no families", good});
@@ -552,4 +552,47 @@ TEST(FontCatalogTest, ABlockTheHeapCannotGiveLeavesTheCatalogEmpty) {
   HalFile file = HalFile::fromString(stash);
   EXPECT_TRUE(target.readFrom(file));
   EXPECT_EQ(dump(target), dump(catalog));
+}
+
+// The flags the manifest sets, not the ones the Font Manager sets later, ride along a copy and a stash.
+TEST(FontCatalogTest, TheOutlineAndDownloadAllFlagsSurviveACopyAndAStash) {
+  FontCatalog::Builder counter;
+  FontCatalog catalog;
+  const auto feedFlags = [](FontCatalog::Builder& builder) {
+    builder.beginFamily();
+    builder.keepFamily("Plain", 5);
+    builder.beginFamily();
+    builder.outline(true);
+    builder.inDownloadAll(false);
+    builder.keepFamily("Cjk", 3);
+    builder.beginFamily();  // a family begins with neither flag, whatever the one before it said
+    builder.keepFamily("After", 5);
+  };
+  feedFlags(counter);
+  ASSERT_TRUE(catalog.allocate(counter.size()));
+  FontCatalog::Builder filler(catalog);
+  feedFlags(filler);
+  EXPECT_FALSE(catalog.outline(0));
+  EXPECT_TRUE(catalog.inDownloadAll(0));
+  EXPECT_TRUE(catalog.outline(1));
+  EXPECT_FALSE(catalog.inDownloadAll(1));
+  EXPECT_FALSE(catalog.outline(2));
+  EXPECT_TRUE(catalog.inDownloadAll(2));
+  EXPECT_FALSE(catalog.outline(3));  // out of range
+  EXPECT_FALSE(catalog.inDownloadAll(3));
+
+  FontCatalog one;
+  ASSERT_TRUE(one.copyFamilyFrom(catalog, 1));
+  EXPECT_TRUE(one.outline(0));
+  EXPECT_FALSE(one.inDownloadAll(0));
+
+  HalFile file = HalFile::fromString(stashBytes(one));
+  FontCatalog restored;
+  ASSERT_TRUE(restored.readFrom(file));
+  EXPECT_TRUE(restored.outline(0));
+  EXPECT_FALSE(restored.inDownloadAll(0));
+
+  restored.setInstalled(0, true);  // the later flags do not disturb them
+  EXPECT_TRUE(restored.outline(0));
+  EXPECT_FALSE(restored.inDownloadAll(0));
 }

@@ -47,3 +47,11 @@ the text start. Rare.
 
 `CMD:REBOOT` → `silentRestart()` skips `onExit()` and loses a save still posted. Test API only; a
 device test should `IDLE` after a page turn before rebooting.
+
+## Deleting a font family leaves the TXT/Markdown font pointing at it
+
+`FontInstaller::deleteFamily` clears `sdFontFamilyName` but not `txtSdFontFamilyName`, so the TXT/Markdown reader's font
+can name a family that is no longer on the card. Found while mapping the Font Manager
+(`docs/design/cjk-ttf-fonts.md`, section 6.5).
+
+- Next step: clear both, with a host test on the settings.

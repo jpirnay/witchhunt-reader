@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 class BuildArena;  // lib/Memory -- optional page-scoped storage for the arena bytes
@@ -36,6 +37,14 @@ class BuildArena;  // lib/Memory -- optional page-scoped storage for the arena b
 //   uint8_t  sizes[wordCount]     present only when sizesPresent
 //   uint8_t  fontSlots[wordCount] present with fonts: 0 the block's font, n fonts[n - 1]
 //   char     text[textBytes]      all words back to back, each NUL-terminated
+//   annotation region             present only when annotationBytes_ != 0, read with memcpy (it may start at an odd
+//   offset):
+//                                 u16 count, then count records of 10 B (u16 firstWord, u16 wordCount, s16 x, u16
+//                                 width, u8 kind, u8 len), then the ruby texts back to back, len bytes each, no NUL.
+//                                 For an Emphasis record len is the mark and no text follows.
+//
+// Lines without annotations cost nothing: the idea of crosspoint-reader #2772 (Uri Tauber) and #2735 (William Floyd),
+// which drop empty ruby vectors; here the bytes are not written at all.
 //
 // Each word is stored NUL-terminated so render() can hand `text + textOff[i]`
 // straight to C APIs (drawText) with no std::string materialization.
@@ -105,6 +114,19 @@ class TextBlock final : public Block {
     uint8_t pct = 100;
     uint8_t fontSlot = 0;
   };
+  // A box over a run of the line's words, drawn in a band above them: the ruby of a group (Emphasis is filled from the
+  // emphasis dots on).
+  enum class AnnotationKind : uint8_t { Ruby = 1, Emphasis = 2 };
+  static constexpr size_t kMaxAnnotationText = 255;
+  struct Annotation {
+    uint16_t firstWord = 0;  // the line's word index
+    uint16_t wordCount = 0;
+    int16_t x = 0;       // the ruby box, in wordXpos's space
+    uint16_t width = 0;  // at least the ruby's advance at half the base size
+    AnnotationKind kind = AnnotationKind::Ruby;
+    uint8_t mark = 0;       // an emphasis run's mark; 0 for ruby
+    std::string_view text;  // the ruby, at most kMaxAnnotationText bytes; empty for emphasis
+  };
 
  private:
   RenderStyle renderStyle;
@@ -121,6 +143,7 @@ class TextBlock final : public Block {
   // this was the largest of three heap allocations, ~7,000 per book (memory audit 2026-09, R2).
   uint8_t* arena = nullptr;
   bool arenaOwned_ = false;
+  uint16_t annotationBytes_ = 0;  // the annotation region's size (see the arena layout); 0: none
   // Takes the arena bytes from `scratch` when given and it has room, else the heap. False on OOM.
   bool allocArena(size_t size, BuildArena* scratch);
   // Typed views into the arena, bound once after the arena is filled. All
@@ -135,9 +158,9 @@ class TextBlock final : public Block {
   // truth for the layout, shared by the fill path, bindArenaPointers() and
   // arenaSize() so the in-RAM and on-disk layouts can never drift apart.
   struct ArenaOffsets {
-    size_t textOff, xpos, styles, sizes, fontSlots, text;
+    size_t textOff, xpos, styles, sizes, fontSlots, text, annotations;
   };
-  static ArenaOffsets arenaOffsets(uint16_t wordCount, bool hasSizes, uint8_t fontCount);
+  static ArenaOffsets arenaOffsets(uint16_t wordCount, bool hasSizes, uint8_t fontCount, uint16_t textBytes);
   // The word fonts and the slots, addressed from the arena rather than held: a pointer each on every line of a
   // resident page would cost more than the rare line that has them saves. Only when wordFontCount != 0.
   const WordFont* wordFontsArr() const { return reinterpret_cast<const WordFont*>(arena); }
@@ -149,7 +172,11 @@ class TextBlock final : public Block {
   static bool guideDotsEnabled;
 
   TextBlock() = default;  // deserialize() fills the fields directly
-  static size_t arenaSize(uint16_t wordCount, bool hasSizes, uint8_t fontCount, uint16_t textBytes);
+  static size_t arenaSize(uint16_t wordCount, bool hasSizes, uint8_t fontCount, uint16_t textBytes,
+                          uint16_t annotationBytes = 0);
+  const uint8_t* annotationRegion() const { return reinterpret_cast<const uint8_t*>(textArr) + textBytes; }
+  // Whether the region read from a file is consistent with the line (see deserialize).
+  bool annotationsValid() const;
   void bindArenaPointers();
 
   // Effective render scale of word i: its font's scale (a word font's own, else the block multiplier) x the word's
@@ -194,6 +221,8 @@ class TextBlock final : public Block {
     // What the sizes' font slots stand for: kMaxWordFonts entries, a fontId of 0 the block's font. Null: every word
     // in the block's font.
     const WordFont* fontTable = nullptr;
+    // The boxes over the range's words, indexed from the line's first word, in firstWord order. Null: none.
+    const std::vector<Annotation>* annotations = nullptr;
     size_t first = 0;
     size_t count = 0;
   };
@@ -251,6 +280,16 @@ class TextBlock final : public Block {
   // vertical advance scales with this so an enlarged inline word doesn't collide
   // with the next line.
   uint8_t maxSizePct() const;
+
+  uint16_t annotationCount() const;
+  Annotation annotation(uint16_t i) const;
+  bool hasAnnotations() const { return annotationBytes_ != 0; }
+  // Half the line's ascender when the line has annotations, else 0: the band above the base the ruby is drawn in.
+  int annotationBand(const GfxRenderer& renderer, int fontId) const;
+  // The same band from what a layout knows before the line exists.
+  static int annotationBandFor(const GfxRenderer& renderer, int effFontId, float blockScale, uint8_t maxSizePct);
+  // No word draws scaled: block multiplier 1, no heading font, no word sizes, no SUP/SUB/SMALL_CAPS, no annotations.
+  bool drawsUnscaled() const;
 
   // Screen box of one word, in the same coordinate space render(fontId, x, y)
   // draws it in. Shares render()'s geometry rather than restating it: the

@@ -1,11 +1,12 @@
-# CJK fonts, CFF outlines, synthetic bold and a glyph store that makes room: design
+# CJK fonts, CFF outlines, synthetic bold and italic, and a glyph store that makes room: design
 
 Status (2026-10-20): approved. The first version was approved, then revised the same day and approved again:
 CFF outlines (section 9), the CJK families as CFF (`.otf`), a glyph store that makes room instead of being
-emptied whole (section 8), and the serial test API first in the order of work (section 13, PR #531).
+emptied whole (section 8), and the serial test API first in the order of work (section 13, PR #531). Synthetic
+italic (section 7.4) was added on 2026-10-22.
 
-Working material, like every spec here: when the work merges, lasting parts move to reference docs, open
-items to `docs/future_work/cjk.md`, and this file is deleted.
+Design record: shipped in #531, #532, #542, #544, synthetic bold (#548) and the CJK families (#550). The code is the
+authority on what it does now.
 
 ## 1. Why
 
@@ -57,6 +58,8 @@ Added after the first approval:
 - **The serial test API grows first**, so the device work below can be driven and watched (section 13).
 - **Not now: the Font Manager staying on "Font installed!" until Back.** A screen that goes back by itself after a
   time is wanted in several places; it goes to future work as one mechanism (section 6.5).
+- **Synthetic italic** (2026-10-22) for every outline family that has no italic of its own, as KOReader does
+  (section 7.4). It runs after the font downloads.
 
 ## 3. Goals, non-goals, anti-goals
 
@@ -66,12 +69,14 @@ Added after the first approval:
 - The engine draws CFF (`.otf`) fonts: the hosted CJK families, `.otf` families readers put on the card, and the
   CFF fonts books embed.
 - Bold text in a family without a bold file looks bold.
+- Italic text in a family without an italic file looks italic (section 7.4).
 - A full glyph store keeps the glyphs a reader uses and makes room without a pause they notice.
 - Reading performance as measured in the spike (Appendix A).
 
 **Non-goals.**
 - The UI fallback (section 2).
-- Bold or italic files; synthetic italic or oblique. CJK typesetting does not use italics.
+- Bold or italic files for the CJK families. CJK typesetting does not use italics; when a book asks for italic,
+  synthetic italic slants their glyphs too (section 7.4).
 - CFF2 (variable CFF fonts), bare CFF and Type 1 files: they stay refused.
 - Vertical text and vertical glyph forms.
 - One family for all three languages. Glyph shapes differ by region (骨 is drawn differently in Chinese and
@@ -83,8 +88,7 @@ Added after the first approval:
 - an interrupted download leaves a family that the font selector lists but cannot draw;
 - an older firmware's font manager stops working, or offers a family it cannot install (section 6.2);
 - synthetic bold fills the counters of dense characters at reading sizes (a character like 鬱 at 12 pt);
-- any regular glyph, any glyph of a family with a real Bold, or any TrueType glyph renders differently because
-  of this work;
+- any glyph of a style the family has a file for, TrueType or CFF, renders differently because of this work;
 - making room in the store loses a glyph a page being drawn uses, or serves a glyph under another glyph's key;
 - floating point reaches the font engine (`scripts/check_no_float.py`);
 - rebuilding the fonts without a change to their inputs rewrites their bytes and grows the repository.
@@ -221,8 +225,8 @@ prototype (`ttf_subset.py`, written for TrueType) becomes the CFF one.
 **Bugs left behind.** The spike found two bugs on the CJK bitmap path. They still hit anyone who converts
 a CJK `.cpfont` by hand, so they move to `docs/future_work/cjk.md`:
 1. `SdCardFont::loadFromMmap` copies the interval table to the heap: 49 KB for Japanese, which turned
-   pre-rendering off. A fix that reads it in place when 4-byte aligned is on branch
-   `spike/mmap-intervals-in-flash`. `MAX_INTERVALS` is 4096; the Japanese set has 4,083.
+   pre-rendering off. A fix that reads it in place when 4-byte aligned is described in
+   `docs/future_work/cjk.md`. `MAX_INTERVALS` is 4096; the Japanese set has 4,083.
 2. A `.cpfont` larger than the partition erases the whole partition (4–5 s) on the first book open after
    every restart, then fails to append.
 
@@ -378,7 +382,7 @@ pins two thirds and no filled counter on Noto Sans and Serif JP samples. It is o
   index of the size (`glyphstore::makeKey`).
 - **No new style block:** the regular file's tables serve both, so `glyphstore::kMaxStyles` is untouched; kerning
   uses the source file's pairs.
-- **`ttf::kRenderVersion` stays:** until now a regular-only family's bold fell back to another style's font, whose
+- **`ttf::kRenderVersion` stays (7.4 moves it to 3):** until now a regular-only family's bold fell back to another style's font, whose
   glyphs carry that style's bits, so no store holds a key a synthetic style uses.
 - **After the first render** a bold glyph costs what a regular one costs.
 
@@ -400,6 +404,122 @@ pins two thirds and no filled counter on Noto Sans and Serif JP samples. It is o
   store holds the glyph.
 
 The plan is `docs/superpowers/plans/2026-10-20-synthetic-bold.md`.
+
+### 7.4 Synthetic italic
+
+Added on 2026-10-22 at the maintainer's request: step 5b of the roadmap, after the font downloads.
+
+**Why.** An outline family with no italic file draws italic text upright: `EpdFontFamily::getFont` falls back to
+the regular font. Emphasis, titles and foreign words set in `<em>` or `<i>` lose their only mark. Since #548, bold
+italic in a regular-only family is bold but upright. This affects:
+- single-file fonts on the card;
+- books that embed only a regular (CSS `font-synthesis` synthesizes style by default, as it does weight);
+- Latin runs in the CJK families.
+
+**Prior art.**
+- **FreeType:** `FT_GlyphSlot_Oblique` (`src/base/ftsynth.c`) shears the outline: x gains y × 0x366A / 65536,
+  about 12°. It leaves the advance alone.
+- **KOReader:** crengine (`lvfntman.cpp`) gives every font without an italic face a "fake italic" clone that does
+  exactly this, after its synthetic weight, and boxes the glyph again from its slanted corners.
+
+**Which styles (my call, mirroring 7.1).** An outline family gets synthetic italic only when none of its files is
+italic. A file counts as italic when:
+- its `head.macStyle` says italic (bit 1);
+- or its OS/2 `fsSelection` says italic or oblique (bits 0 and 9);
+- or its `post` table's `italicAngle` is not 0 (the maintainer's call: OpenDyslexic's Italic says upright in the
+  other two);
+- or it sits in the italic or bold-italic slot.
+
+The OS/2 and `post` tables are read only as FreeType accepts them: an OS/2 table long enough for its version, a
+`post` table of at least 32 bytes in format 1, 2, 2.5 or 3 (`tt_face_load_post`).
+
+Then:
+- italic is drawn from the regular file, slanted;
+- bold italic is drawn from the bold file, slanted, when the family has one;
+- otherwise bold italic is drawn from the regular, emboldened (7.1) and then slanted.
+
+| Family | Italic | Bold italic |
+|---|---|---|
+| Regular only | the regular, slanted | the regular, emboldened, slanted |
+| Regular and Bold | the regular, slanted | the Bold, slanted |
+| Regular and Italic | the Italic | the Italic, emboldened (7.1, unchanged) |
+| Regular, Bold and Italic, no BoldItalic | the Italic | the upright Bold (7.1, unchanged) |
+| No regular file, an Italic moved into the regular slot | not slanted again | as 7.1 |
+| No italic file, bold only by its faces (a bold or heavy file serving as the regular) | the regular, slanted | none of its own: it falls back to the italic, slanted (`EpdFontFamily::getFont`) |
+
+**Scope.**
+- A style the family has a file for is never synthesized.
+- Like bold, it covers reader outline families, book-embedded families and any later outline family.
+- It does not cover `.cpfont` families, built-in fonts or the UI faces.
+- There is no setting (my call).
+
+**Known limit.** A file drawn italic whose flags all say upright (`macStyle` bit 1 clear, `fsSelection` bits 0 and 9
+clear, `post.italicAngle` 0) is slanted again, as a lone book face declared italic in CSS can be: `pickFaces` moves a
+lone face to the regular slot and its CSS style is not kept.
+
+**CJK (validated on the X4, 2026-10-23).** Every glyph is slanted, CJK included, as KOReader does. CJK books
+rarely ask for italic, and a Latin word set in italic inside one should look italic.
+
+**How.** `Rasterizer::slant()` runs after `embolden()` and before `rasterize()`.
+- It ports `FT_GlyphSlot_Oblique` in integers. That function calls `FT_GlyphSlot_Slant(slot, 0x366A, 0)`, which
+  calls `FT_Outline_Transform` with the matrix {0x10000, 0x366A; 0, 0x10000}:
+  - each point's x gains `FT_MulFix(y, 0x366A)`; `FT_MulFix(x, 0x10000)` is x exactly;
+  - y stays.
+- The glyph is boxed again.
+- Emboldening comes first, then the shear: crengine's order. The oracle uses the same order.
+
+**Metrics.**
+- **Advance.** It stays the same, as in FreeType and crengine, and kerning uses the source file's pairs, as the
+  fallback does today.
+  - Line breaking therefore does not change: in these families italic is laid out with the regular advances
+    today, and bold italic with those of the font it falls back to (the Bold, or the emboldened regular).
+  - The Markdown cache version stays: the Markdown reader measures by advance.
+  - `SECTION_FILE_VERSION` moves to 98 (the maintainer's call). A section also caches two values taken from the
+    ink box, which the slant moves: an italic drop cap's width (`ChapterHtmlSlimParser`) and a narrowed CJK mark's
+    place (`ParsedText`). The render version's new font IDs (below) lay out again only the chapters set in an
+    outline body font, not one whose italic drop cap or CJK mark is in a book's accent font.
+- **Ink box.** It is taken from the slanted outline: ascenders reach right, descenders left. The left side bearing
+  can turn negative.
+- **Scratch plan.** A synthetic family's plan leaves room for the slanted box, which grows by up to the glyph's
+  height × 0x366A / 65536.
+- **Oversized glyphs.** A glyph is drawn upright when its slanted bitmap exceeds the output cap or its offsets no
+  longer fit `EpdGlyphRef`'s 8-bit `left` and `top` (`placeable()` in `TtfFont.cpp`), as an oversized bold glyph
+  draws unemboldened (#548).
+
+**Storage.**
+- **Keys.** Synthetic italic glyphs are stored under the italic style's bits of the glyph key, bold italic under
+  the bold-italic bits, as now. No new style block.
+- **SD mode.** A style block keeps the `post` table's first 32 bytes, its header, so a face reads `italicAngle` in
+  either mode. The glyph names after it, tens of KB in a TrueType file, are left out.
+- **`ttf::kRenderVersion` goes to 3 (my call).**
+  - Since #548, a regular-only family stores emboldened, upright glyphs under the bold-italic bits; slanting
+    changes what those keys draw.
+  - The bump rebuilds every installed store once after the update, so the first pages after it render cold.
+  - It also gives every outline family a new font ID (`SdCardFontManager::computeFontId` hashes the identity), and a
+    section is checked against its body font's ID: every chapter laid out in an outline body font is laid out again
+    once.
+  - Cost if wrong: a narrower scheme, a synthetic-style version folded into only the affected families'
+    identities, would have spared the stores of families with italic files.
+
+**Cost.**
+- **Speed** (X4, ESP32-C3, device bench, average per store miss, upright to slanted): Bookerly 14 pt 420 to 471 µs
+  (+12%), 40 pt 1,072 to 1,195 µs (+11.5%), bold to bold italic 760 to 809 µs (+6%), kanji at 12 pt in TrueType 594
+  to 710 µs (+19.5%), CFF 719 to 834 µs (flat) and 748 to 862 µs (subrs), about +16%. That is +6-20% per store miss,
+  from the wider bitmap (about the height times 0.21 more columns to sweep and store), not the shear; paid once per
+  glyph, before the store holds it.
+- **RAM.** One more StyleFont per size, the body's and each native one's (about 130 B on the C3), in a regular-only
+  family, two in a Regular-and-Bold family.
+
+**Proof.**
+- **The FreeType oracle.** Every glyph of the bundled TrueType and CFF test fonts at 8, 14 and 40 pt, slanted, and
+  emboldened at the engine's strength and then slanted. It is compared with `FT_GlyphSlot_Oblique` on FreeType's
+  side: advances, boxes and bitmaps byte-identical.
+- **Style resolution.** A test per row of the table above, plus a regular face whose `fsSelection` says oblique,
+  and OpenDyslexic's Italic alone, italic only by its `italicAngle`.
+- **The store.** A store written before the bump is not reused.
+- **Device (X4).**
+  - A regular-only Latin family and `bookfont_cff.epub`'s embedded face draw `<em>` slanted.
+  - The bench times a slanted miss.
 
 ## 8. The glyph store makes room
 
@@ -662,19 +782,20 @@ shipping is section 10's list.
 
 ## 13. Order of work
 
-Each is its own plan and PR; the device runs use the serial test API. State on 2026-10-21: 1, 3 and 4 have shipped. 2
-is next: synthetic bold moved behind CFF so that it covers CFF outlines from its first version.
+Each is its own plan and PR; the device runs use the serial test API. State on 2026-10-22: 1 to 4 have shipped
+(synthetic bold moved behind CFF, so that it covered CFF outlines from its first version). 5 is next, then 6.
 1. **The serial test API** (branch `feat/serial-api-ttf-fs`): `CMD:TTF` (the store's state), `CMD:TTF:FULL` (act
    as if it filled up), `CMD:FS:LS` and `CMD:FS:RM` (the card, without the USB Transfer screen), events for a full
    store, a wipe and a finished font install, and `devctl.py`'s `select:` step (Down until a row is selected).
    **Shipped: #531.**
-2. **Synthetic bold** (plan written from its prototype, revised against the code after #544).
+2. **Synthetic bold** (plan written from its prototype, revised against the code after #544). **Shipped: #548.**
 3. **The store makes room** (section 8). It replaces the plan "glyph store emptied at the next chapter", which is
    withdrawn; its safe point and `RenderLock` guard carry over. **Shipped: #532.**
 4. **CFF outlines** (section 9). **Shipped: #542; byte-exact speed-ups #544** (a cold CJK chapter in SD mode: 1,159 ms
    as CFF against 1,114 ms as TrueType on the X4).
 5. **The CJK fonts as `.otf` in the font manager** (sections 4–6), once CFF has merged: the hosted fonts are only
    useful to firmware that draws them, and `fonts-v3.json` goes live with this.
+6. **Synthetic italic** (section 7.4), after 5: step 5b of the roadmap. **Shipped: #551.**
 
 ## Appendix A. Spike measurements (X4, 2026-10-19/20)
 

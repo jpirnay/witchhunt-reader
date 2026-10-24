@@ -278,13 +278,16 @@ password**.
 
 Fonts for reading live on the SD card. The menu on the left switches between four parts:
 
-**Installed fonts** lists the font families on the card, with their sizes, and deletes the ones you no
-longer use.
+**Installed fonts** lists the font families on the card, with their sizes (a TrueType or OpenType
+family shows "all sizes"), and deletes the ones you no longer use.
 
 **Download fonts** lists the families in the online catalog. **Download** installs one, **Update**
 appears when a newer version is available (the number beside the menu entry counts them), and
-**Download all updates** fetches them all. The reader downloads the files itself, so it must be
-online.
+**Download all updates** fetches every missing family and every update, except the CJK families you
+have not installed (Japanese, Simplified Chinese, Traditional Chinese and Korean, sans serif and
+serif): install your language's with its own **Download**. The reader checks the card has room first.
+A family too large for the reader's font area is installed but not listed, and the page says so. The
+reader downloads the files itself, so it must be online.
 
 ![Downloading fonts](images/web/fonts-download.png)
 

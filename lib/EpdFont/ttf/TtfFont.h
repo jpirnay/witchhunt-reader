@@ -67,10 +67,15 @@ class TtfFont {
   bool setBodySize(uint8_t pointSize);
   uint8_t bodySize() const { return pointSize_; }
   /// The body face's font for `style`; nullptr for a style the family lacks (EpdFontFamily then falls back). A family
-  /// none of whose files is bold draws bold, and bold italic without a file of its own, emboldened (spec 7.1).
+  /// none of whose files is bold draws bold, and bold italic without a file of its own, emboldened (spec 7.1). A family
+  /// none of whose files is italic draws italic, and bold italic without a file of its own, slanted (spec 7.4).
   const EpdFont* font(uint8_t style) const;
   /// Whether `style` is drawn emboldened from another style's file (spec 7.1).
-  bool synthetic(const uint8_t style) const { return style < 4 && (synthetic_ & (1u << style)) != 0; }
+  bool emboldened(const uint8_t style) const { return style < 4 && (emboldened_ & (1u << style)) != 0; }
+  /// Whether `style` is drawn slanted from another style's file (spec 7.4).
+  bool slanted(const uint8_t style) const { return style < 4 && (slanted_ & (1u << style)) != 0; }
+  /// Whether `style` is drawn from another style's file, emboldened or slanted.
+  bool synthetic(const uint8_t style) const { return emboldened(style) || slanted(style); }
   /// The body face's pixels per em (26.6), which native sizes are measured against; 0 before setBodySize().
   uint32_t bodyPpem() const { return body_.ppem; }
   /// The family's largest native size: kMaxNativePx, or less when its tallest glyph (head.yMax) or the furthest
@@ -110,6 +115,7 @@ class TtfFont {
 
  private:
   friend class TtfFontSet;
+  friend struct TtfFontTestAccess;  // host tests: the style choice, run again
   struct Size;
 
   class StyleProvider final : public GlyphProvider {
@@ -208,7 +214,7 @@ class TtfFont {
   // Only the styles the family has a file for, a book's accent family often one or two (each style ~260 B, and its
   // font in every size ~130 B): fileSlot_ gives a file's place in them. Each size has a font only for each style the
   // family draws, a synthetic one too: slot_ gives its place there. source_ is the style whose file draws a style:
-  // its own, or for a synthetic style the regular or the italic. Made at load.
+  // its own, or for a synthetic style the regular, the italic or the bold. Made at load.
   static constexpr uint8_t kNoSlot = 0xFF;
   std::unique_ptr<Style[]> styles_;
   uint8_t fileSlot_[4] = {kNoSlot, kNoSlot, kNoSlot, kNoSlot};
@@ -216,7 +222,8 @@ class TtfFont {
   uint8_t source_[4] = {kNoSlot, kNoSlot, kNoSlot, kNoSlot};
   uint8_t styleCount_ = 0;  // files: styles_'s length
   uint8_t fontCount_ = 0;   // each size's fonts
-  uint8_t synthetic_ = 0;   // synthetic(): one bit per style
+  uint8_t emboldened_ = 0;  // emboldened(): one bit per style
+  uint8_t slanted_ = 0;     // slanted(): one bit per style
   Size body_;
   uint8_t pointSize_ = 0;
   std::unique_ptr<Size> native_[kMaxNativeSizes];

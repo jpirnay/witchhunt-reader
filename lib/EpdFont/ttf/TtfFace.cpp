@@ -203,6 +203,7 @@ FaceStatus parseFace(FontBytes& bytes, Face* face) {
   face->xMax = bytes.i16(head.offset + 40);
   face->yMax = bytes.i16(head.offset + 42);
   face->bold = (bytes.u16(head.offset + 44) & 1) != 0;  // macStyle
+  face->italic = (bytes.u16(head.offset + 44) & 2) != 0;
   face->hmtx = hmtx.offset;
   face->hmtxLength = hmtx.length;
 
@@ -211,7 +212,17 @@ FaceStatus parseFace(FontBytes& bytes, Face* face) {
   Table os2;
   bool haveOs2 = findTable(bytes, numTables, tag("OS/2"), 78, &os2);
   if (haveOs2) haveOs2 = os2.length >= os2Length(bytes.u16(os2.offset));
-  if (haveOs2 && bytes.u16(os2.offset + 4) >= 600) face->bold = true;  // usWeightClass
+  if (haveOs2 && bytes.u16(os2.offset + 4) >= 600) face->bold = true;              // usWeightClass
+  if (haveOs2 && (bytes.u16(os2.offset + 62) & 0x0201) != 0) face->italic = true;  // fsSelection: ITALIC, OBLIQUE
+  // post.italicAngle, read as FreeType accepts the table (tt_face_load_post).
+  Table post;
+  if (findTable(bytes, numTables, tag("post"), kPostHeaderBytes, &post)) {
+    const uint32_t format = bytes.u32(post.offset);
+    if ((format == 0x00010000 || format == 0x00020000 || format == 0x00025000 || format == 0x00030000) &&
+        bytes.u32(post.offset + 4) != 0) {
+      face->italic = true;
+    }
+  }
   const int16_t typoAscender = haveOs2 ? bytes.i16(os2.offset + 68) : 0;
   const int16_t typoDescender = haveOs2 ? bytes.i16(os2.offset + 70) : 0;
   const int16_t typoLineGap = haveOs2 ? bytes.i16(os2.offset + 72) : 0;
