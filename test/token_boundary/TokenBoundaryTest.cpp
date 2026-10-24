@@ -43,3 +43,16 @@ TEST(TokenBoundary, BoundaryKindsMatchTheTwoFlagPredicates) {
   EXPECT_FALSE(TokenBoundary::hasSpace(cjkGap));
   EXPECT_TRUE(TokenBoundary::allowsBreak(cjkGap));
 }
+
+TEST(TokenBoundaryRuby, ARoleChangesNeitherBreakNorSpace) {
+  for (const TokenBoundary::Boundary b :
+       {TokenBoundary::Boundary{}, TokenBoundary::Boundary{false, true}, TokenBoundary::Boundary{true, false}}) {
+    for (const TokenBoundary::RubyRole role : {TokenBoundary::RubyRole::Leader, TokenBoundary::RubyRole::Follower}) {
+      const TokenBoundary::Boundary withRole = TokenBoundary::withRubyRole(b, role);
+      EXPECT_EQ(TokenBoundary::allowsBreak(b), TokenBoundary::allowsBreak(withRole));
+      EXPECT_EQ(TokenBoundary::hasSpace(b), TokenBoundary::hasSpace(withRole));
+      EXPECT_EQ(TokenBoundary::rubyRole(withRole), role);
+    }
+    EXPECT_EQ(TokenBoundary::rubyRole(b), TokenBoundary::RubyRole::None);
+  }
+}

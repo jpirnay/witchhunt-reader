@@ -9,6 +9,7 @@
 
 #include <array>
 #include <climits>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -118,6 +119,22 @@ class ChapterHtmlSlimParser final : public Print {
   // segment-break rule; in CJK text the quotes are CJK punctuation): hard-wrapped Chinese and
   // Japanese sources break lines mid-sentence.
   bool cjkSegmentBreakPending_ = false;
+
+  // <ruby>: a group is made when an <rt> closes, over the tokens the target got since the last group (see
+  // startElement).
+  static constexpr size_t kNoRubyGroup = SIZE_MAX;
+  static constexpr size_t kRubyGroupSlack = 32;  // tokens the 96-token split may wait for a group
+  int rubyDepth_ = -1;                           // the open <ruby>'s depth
+  int rtDepth_ = -1;                             // collecting <rt> text while >= 0
+  int rtcDepth_ = -1;                            // inside <rtc>: its <rt> flows inline
+  size_t rubyGroupStart_ = kNoRubyGroup;
+  bool rubyHasGroup_ = false;  // this <ruby> made a group: a later <rt> without a base appends to it
+  std::string rubyText_;
+  uint32_t rtVisibleOffset_ = 0;  // where the <rt> text starts, for the inline fallback
+  // The open table cell's text, else currentTextBlock: where words go.
+  ParsedText* wordTarget();
+  // </rt>: the collected text becomes a group over the bases before it, or flows inline when it cannot.
+  void closeRt();
   // KOReader sync content offsets (docs/contributing/koreader-synchronization.md).
   // visibleTextOffset_ counts VisibleText.h's visible bytes of the source text the SAX parser has
   // delivered: inside <body>, outside head/script/style, before any layout decision. The mappers
@@ -1006,7 +1023,7 @@ class ChapterHtmlSlimParser final : public Print {
   // wireParagraphLines does the same for any text laid out as a paragraph of the page.
   void wireTextBlock();
   void wireParagraphLines(ParsedText& text);
-  void beforeLineHook(uint8_t maxSizePct);
+  void beforeLineHook(uint8_t maxSizePct, bool annotated);
   // Widow/orphan control and keep-with-next (CSS defaults: orphans 2, widows 2), decided before
   // each line of currentTextBlock is placed: true when the page should end before a line that
   // still fits. A placed line is never moved, so the decision looks ahead instead. `nextLine`

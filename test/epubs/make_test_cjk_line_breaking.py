@@ -26,6 +26,14 @@
  11. dense digits  600 codepoints of Han characters alternating with digits: every digit is a token
                    of its own, and the parser's 32-token run flush counts it, so the paragraph's
                    word lists keep their 128-entry steady state (the heap baseline guards it)
+ 12. ruby markup   <ruby>: mono-ruby, a group with <rb>, <rp> dropped, a pretty-printed paragraph (the source
+                   of RubyLayout.APrettyPrintedRubyLaysOutWithoutSpaces), an <rt> with no new base, an <rt>
+                   outside <ruby>, <rtc>
+ 13. ruby at edges 煙<rt>けむり</rt> between kana every 27 characters for 30 lines: at 28 ems a line the group
+                   lands in every column, the first and last included
+ 14. longer ruby   a reading longer than its base: between Han characters (the base spreads), 御台所 with
+                   おだいどころ, two adjacent groups between kana
+ 15. ruby in table <ruby> in a table cell
 
 Each case paragraph opens with an indented first line (CSS text-indent), so the rule checker tells a
 paragraph's first line from a line the layout broke.
@@ -83,6 +91,41 @@ QUOTE_SEAMS = (
 # Case 11: 300 Han characters, each followed by a digit, in one paragraph of 600 codepoints.
 DENSE_DIGITS = "".join(f"{c}{i % 10}" for i, c in enumerate((LONG_RUN * 4)[:300]))
 
+# Case 12: the fourth paragraph is RubyLayout's kPrettyPrinted, verbatim.
+RUBY_MARKUP = (
+    "<p><ruby>漢<rp>（</rp><rt>かん</rt><rp>）</rp>字<rp>（</rp><rt>じ</rt><rp>）</rp></ruby>は"
+    "<ruby>難<rt>むずか</rt></ruby>しいです。</p>\n"
+    "<p><ruby><rb>吾輩</rb><rt>わがはい</rt></ruby>は猫である。名前はまだ無い。</p>\n"
+    "<p>これは<ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby>です。</p>\n"
+    "<p>\n"
+    "  <ruby>\n"
+    "    漢<rp>（</rp><rt>かん</rt><rp>）</rp>\n"
+    "    字<rp>（</rp><rt>じ</rt><rp>）</rp>\n"
+    "  </ruby>は<ruby>難<rt>むずか</rt></ruby>しいですが、<ruby>\n"
+    "    面<rt>おも</rt>\n"
+    "    白<rt>しろ</rt>\n"
+    "  </ruby>いです。\n"
+    "</p>\n"
+    "<p><ruby>漢<rt>かん</rt><rt>じ</rt></ruby>の読みが基底字より多い。</p>\n"
+    "<p>前<rt>まえ</rt>後に読みだけが現れる。</p>\n"
+    "<p><ruby>漢<rtc><rt>かん</rt></rtc></ruby>の複合ルビ。</p>"
+)
+
+# Case 13: 26 kana, then a ruby base: a group every 27 characters, 30 times.
+RUBY_EDGES = "<p>" + "".join("あ" * 26 + "<ruby>煙<rt>けむり</rt></ruby>" for _ in range(30)) + "</p>"
+
+# Case 14: a reading longer than its Han base, 御台所, and two adjacent groups between kana.
+RUBY_LONGER = (
+    "<p>それは<ruby>日<rt>にちじょうさはんじ</rt></ruby><ruby>本<rt>ほんとう</rt></ruby>の話だ。</p>\n"
+    "<p>奥様は<ruby>御台所<rt>おだいどころ</rt></ruby>へ行った。</p>\n"
+    "<p>これは<ruby>東<rt>とう</rt></ruby><ruby>京<rt>きょう</rt></ruby>という町です。</p>"
+)
+
+RUBY_TABLE = (
+    "<table><tr><td><p>表のセルの<ruby>漢字<rt>かんじ</rt></ruby>にも<ruby>振<rt>ふ</rt></ruby>り仮名がつく。"
+    "<ruby>長<rt>ながい</rt></ruby>い文章も折り返される。</p></td><td><p>短い</p></td></tr></table>"
+)
+
 CASES = [
     ("1. kinsoku", f"<p>{KINSOKU}</p>\n<p>{KINSOKU}</p>"),
     (
@@ -117,6 +160,10 @@ CASES = [
     ("9. chunk seams", f"<p>{SEAM_AFTER_1}</p>\n<p>{SEAM_AFTER_2}</p>\n<p>{SEAM_BEFORE}</p>"),
     ("10. quote seams", QUOTE_SEAMS),
     ("11. dense digits", f"<p>{DENSE_DIGITS}</p>"),
+    ("12. ruby markup", RUBY_MARKUP),
+    ("13. ruby at edges", RUBY_EDGES),
+    ("14. longer ruby", RUBY_LONGER),
+    ("15. ruby in table", RUBY_TABLE),
 ]
 
 CHAPTER = """<?xml version="1.0" encoding="UTF-8"?>
