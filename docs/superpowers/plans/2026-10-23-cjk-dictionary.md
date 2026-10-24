@@ -46,6 +46,12 @@
 - §5.6, the H1 stop rule: "if H1 does not get the gate to pass on the X3 dense page (section 7), take H4 and leave the gates alone."
 - §5.7, L1: "The first miss logs at debug level; `prewarm()` logs one line after the retry: info with the glyph count kept and dropped, error only when nothing is resident".
 - §7 row 2: "median within 1.5× today's exact lookup on the same dictionary (target to agree)".
+
+**The maintainer's answers (2026-10-24), which override the spec where they differ:**
+- **Every entry of a headword is shown.** A CJK lookup shows every entry of the longest match first: CC-CEDICT's 行 xíng and háng, both. The shorter matches come after them (up to two, as planned) while the buffer has room under `MAX_DEFINITION_BYTES`. This replaces §5.3's "≤ 3 entries". A shorter match brings all of its entries too (Ruling 8).
+- **The exact lookup does not change.** `resolve()` and `lookup()`, which every Latin word takes, still read one entry.
+- **The speed target is a firm gate:** at most 1.5× today's exact lookup, as the median over ~50 words per book, on the X4. It is no longer "target to agree".
+- **Devices:** the X4 only, with `CMD:HEAP:HOLD` ballast standing in for the X3. There is no X3 run and no touch-board run. Spec row 12 is recorded as not run.
 - **The maintainer's decisions:**
   - the selection grows to the longest match with "no extra press";
   - there is "no shrink gesture";
@@ -62,8 +68,8 @@
 - **Execution.** Subagent-driven: one implementer and one reviewer per task. Device steps run one at a time: there is one X4, on COM6, and one process per port.
 - **Devices.**
   - Validate on the X4 only, with `tools/devctl.py` (`docs/serial-test-api.md`).
-  - An X3 run: ask the maintainer; it is not planned.
-  - Touch boards (X4 Pro, T5S3, spec §7 row 12): not planned either. The reviewer reads the tap code instead.
+  - There is no X3 run: `CMD:HEAP:HOLD` ballast stands in for its heap (the maintainer, 2026-10-24).
+  - There is no touch-board run (X4 Pro, T5S3). Spec §7 row 12 is recorded as not run, and the reviewer reads the tap code instead.
 - **Host tests.** Run from Git Bash, never from PowerShell. Configure each worktree once, from its root:
   `cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=C:/msys64/ucrt64/bin/cc.exe -DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/c++.exe -DCMAKE_MAKE_PROGRAM=C:/msys64/ucrt64/bin/ninja.exe -DFETCHCONTENT_SOURCE_DIR_SDFAT=C:/tmp/SdFat-2.3.1`
 - **Before each PR:** the PR gate below, including the whole host suite. The known Windows-only failures are FirstChapter ×2, LongChapterPageTables ×2 and KeptReadingState.
@@ -99,22 +105,26 @@
 4. **A Latin dictionary chosen while reading CJK, and a Latin word with a CJK dictionary.**
    - Expected: the CJK run reports Missing after one probe per index file. The Latin word takes today's exact path, byte for byte.
    - Pinned by the Task 4 test `LatinDictionaryAnswersACjkRunInOneProbePerFile` and Task 9 Step 9.
-5. **Same-headword entries** (CC-CEDICT's 行 xíng and háng), **and a `.syn` alias that resolves to an entry already listed.**
-   - Expected: each definition appears once, and of a duplicate run the first, as the exact lookup takes it.
-   - Pinned by the Task 4 tests `PrefixSearchKeepsTheFirstOfDuplicateHeadwords` and `PrefixSearchListsEachDefinitionOnce`.
+5. **Same-headword entries** (CC-CEDICT's 行 xíng and háng), **including a run of them that crosses a sample boundary, or that a `.syn` alias points into the middle of.**
+   - Expected: every entry of the longest match appears, in `.idx` order and starting from the run's first entry, before the shorter matches. Each definition appears once.
+   - Pinned by the Task 4 tests `PrefixSearchCountsEveryEntryOfADuplicateHeadword`, `PrefixSearchFindsADuplicateRunAcrossASample`, `PrefixSearchListsTheWholeRunBehindASynonym` and `PrefixSearchListsEachDefinitionOnce`, and the Task 5 tests `PrefixDefinitionsListEveryEntryOfTheLongestMatchFirst` and `PrefixDefinitionsFillTheBufferBeforeTheShorterMatches`.
 
 ## Rulings on the spec
 
 Where the spec left a choice open or disagreed with the project's rules, this plan decided as follows. A reviewer holds each task to these.
 
 1. **One plan for three PRs.** §9 says "Each is its own plan and PR". This document keeps one part per PR, each with its own branch and gate.
-2. **H1's stop rule is measured on the X4.** The spec names the X3, but X3 runs are opt-in. `CMD:HEAP:HOLD` ballast stands in for the room the X3 lacks (Task 2 Step 3). If the X3 still falls short, it falls back to plain text, which is H4: no crash.
+2. **H1's stop rule is measured on the X4,** as the maintainer confirmed on 2026-10-24. The spec names the X3, but `CMD:HEAP:HOLD` ballast stands in for the room the X3 lacks (Task 2 Step 3). If the X3 still falls short, it falls back to plain text, which is H4: no crash.
 3. **`.idx` and `.syn` hits are merged by length.** On a tie the `.idx` hit wins, and each definition is listed once. This reads "take the longer result" so that the shorter matches from the other file survive (大學生 → 大学 through `.syn`, then 大).
-4. **No probe cap before the first hit; at most 3 probes per file after it.** The spec says "usually one or two". A cap before the first hit could report a false Missing. The loop is still bounded: the target shortens on every probe, so there are at most 12.
+4. **No probe cap before the first hit; at most 3 probes per file after it.** The spec says "usually one or two". A cap before the first hit could report a false Missing. The loop is still bounded: the target shortens on every probe, so there are at most 12, plus one `locateRun` per hit whose run may begin before its window (Ruling 8). The firm 1.5× gate (Task 9 Step 4) checks what this costs.
 5. **The abort is opt-in per call.** Speculation passes the input check. Confirm and the serial lookup do not, because the reader is waiting for them. `Dictionary` gets the check as a function pointer and never sees `MappedInputManager`.
 6. **The test dictionaries are built in `DictionaryTest.cpp`** with its `writeDictionary` helper, not with `make_fixture.py` (§6). That helper is the existing pattern for rule tests. Regenerating the fixture could also rewrite the checked-in `.dict.dz`, whose bytes depend on the zlib version.
 7. **The CJK definition's header has no title.** The dictionary name and the page counter stay as they are today, so the name appears only when two or more dictionaries are installed.
-8. **Of duplicate headwords, the first wins**, as in the exact lookup. CC-CEDICT's second reading of 行 is not shown. This is recorded as open in Task 9.
+8. **Every entry of a listed headword is shown** (the maintainer, 2026-10-24, reversing this plan's first draft). This applies to the longest match first, then to each shorter one.
+   - **Contiguity.** StarDict sorts by `asciiCaseCmp` with a `strcmp` tiebreak, so the entries of one headword (byte-for-byte equal) sit next to each other in the `.idx`. A hit therefore records where its run starts (`idxStart`) and how long it is (`entryCount`, at most 8). The reader reads the run again from there.
+   - **Where a run can be cut.** The run is cut only when the headword is the window's first entry (`w0`), because then it may begin in the window before. One extra probe ("locate the run": the last sample strictly below the headword, then a scan forward to its first entry) finds the start.
+   - **Synonyms.** A `.syn` hit resolves to one entry, which may lie in the middle of its run, so it takes the same probe.
+   - **The exact lookup is unchanged:** it still reads one entry.
 9. **Speculation is re-enabled once an index build succeeds**, for Latin too. Without it, a dictionary indexed in this session would never grow a CJK span until the screen is opened again.
 10. **L2 is not taken.** Asking `heapHasBlockFor` first has no visible effect, and the arena path has no heap block to ask about.
 
@@ -602,23 +612,30 @@ git commit -m "feat(dictionary): the run of CJK text a lookup starts on"
 
 **Files:**
 - Modify: `src/util/Dictionary.h`. Add the two structs next to `DictLocation` (`:17-25`), the public API after `readResolved` (`:117`), and private helpers and counters near `locate` (`:249`).
-- Modify: `src/util/Dictionary.cpp`. The search goes after `resolve()` (`:907-1008`).
-- Test: `test/dictionary/DictionaryTest.cpp`. In `writeDictionary` (`:114-145`), `std::sort` becomes `std::stable_sort`, so that duplicate headwords keep the order a test gives them.
+- Modify: `src/util/Dictionary.cpp`. The search goes after `resolve()` (`:907-1008`). `bisectSamples` (`.h:246-247`, `.cpp:493-544`) gains a trailing `bool strictlyBelow = false`: when true, it finds the last sample whose headword is strictly below the target (`asciiCaseCmp < 0`), and it neither reads nor records the window cache.
+- Test: `test/dictionary/DictionaryTest.cpp`, two changes to its helpers:
+  - In `writeDictionary` (`:114-145`), `std::sort` becomes `std::stable_sort`, so that duplicate headwords keep the order a test gives them.
+  - `SynonymSpec` (`:95-98`) gains `int occurrence = 0`, which says which of several equal headwords the synonym points at. The ordinal lookup at `:130-134` counts the matches.
 
 **Interfaces:**
 - Produces:
 
 ```cpp
-// One headword found at the start of a run of CJK text.
+// One headword found at the start of a run of CJK text, with every .idx entry it has. StarDict's
+// order puts entries with byte-equal headwords next to each other, so they are a run in the .idx:
+// where it starts and how long it is are all a reader needs to read them all.
 struct DictPrefixHit {
-  DictLocation location;
-  uint8_t runBytes = 0;   // bytes of the run it covers, a codepoint boundary
-  std::string headword;   // the .idx headword, also for a .syn hit; SSO up to 15 bytes (5 CJK chars)
+  DictLocation location;   // the run's FIRST entry, in .idx order
+  uint8_t runBytes = 0;    // bytes of the run of text it covers, a codepoint boundary
+  std::string headword;    // the .idx headword, also for a .syn hit; SSO up to 15 bytes (5 CJK chars)
+  uint32_t idxStart = 0;   // byte offset in .idx of that first entry
+  uint8_t entryCount = 0;  // entries in the run, at most DictPrefixMatch::MAX_ENTRIES_PER_HIT
 };
 
-// What Dictionary::resolvePrefixes() found. ~130 bytes; a member or stack local, never on the heap.
+// What Dictionary::resolvePrefixes() found. ~140 bytes; a member or stack local, never on the heap.
 struct DictPrefixMatch {
   static constexpr uint8_t MAX_HITS = 3;
+  static constexpr uint8_t MAX_ENTRIES_PER_HIT = 8;  // more same-headword entries are not listed
   DictPrefixHit hits[MAX_HITS];  // longest first
   uint8_t count = 0;
   bool aborted = false;   // gave up between probes because the AbortCheck said so: no verdict
@@ -631,7 +648,8 @@ class Dictionary {
   using AbortCheck = bool (*)();
   // The search of spec 5.2 for a lookup that starts on CJK text. `run` is searched as given: the
   // caller has cleaned it (CjkLookupRun). Up to MAX_HITS headwords that are prefixes of `run`,
-  // longest first, at most one per length, each definition once. None of resolve()'s fallbacks.
+  // longest first, at most one per length, each with its whole run of same-headword entries, each
+  // run listed once. None of resolve()'s fallbacks.
   // abortCheck (optional) is asked before every probe after the first; when it says yes the
   // search returns false with matchOut.aborted set, count 0 and *outResult NotFound. outResult as
   // for resolve(): Found, NotFound, LowMemory (no scan buffers), ReadError (no verdict reached).
@@ -663,7 +681,9 @@ Each test writes its own folder and opens it with `openIndexed` unless it says o
 | `PrefixSearchFindsTheOtherScriptThroughTheSynonyms` | idx `大`, `大学`; syn `大學`→`大学` | `"大學生"` | `{{"大学",6},{"大",3}}`; `definitionAt(hits[0]) == "university"` |
 | `PrefixSearchPrefersTheIndexOnATie` | idx `大学` "university", `学校` "school"; syn `大学`→`学校` | `"大学生"` | `{{"大学",6}}`; `definitionAt(hits[0]) == "university"` |
 | `PrefixSearchListsEachDefinitionOnce` | idx `大学`; syn `大学生`→`大学` | `"大学生活"` | `{{"大学",9}}`: the longer hit keeps the shared entry |
-| `PrefixSearchKeepsTheFirstOfDuplicateHeadwords` | `行` "xing: to walk", `行` "hang: a row", `行人` "pedestrian" | `"行人们"` | `{{"行人",6},{"行",3}}`; `definitionAt(hits[1]) == "xing: to walk"` |
+| `PrefixSearchCountsEveryEntryOfADuplicateHeadword` | `行` "xing: to walk", `行` "hang: a row", `行人` "pedestrian" | `"行人们"`, then `"行了"` | `{{"行人",6},{"行",3}}` with `hits[0].entryCount == 1`, `hits[1].entryCount == 2`, `definitionAt(hits[1]) == "xing: to walk"` (the first in `.idx` order); then `{{"行",3}}` with `entryCount == 2` |
+| `PrefixSearchFindsADuplicateRunAcrossASample` | for each `leading` in {254, 255, 256}: `leading` fillers `a000`…, then `行` "xing: to walk", `行` "hang: a row". At 255 the sample at entry 256 lands on the second 行, so the run starts in the window before | `"行了"` | `{{"行",3}}`, `entryCount == 2`, `definitionAt(hits[0]) == "xing: to walk"` (each `leading` in the `<<` message) |
+| `PrefixSearchListsTheWholeRunBehindASynonym` | idx `银` "silver", `银行` "bank", `银行` "row of silver shops"; syn `{"銀行", "银行", /*occurrence=*/1}`, pointing at the SECOND 银行 | `"銀行家"` | `{{"银行",6}}`, `entryCount == 2`, `definitionAt(hits[0]) == "bank"`: the run is listed from its first entry |
 | `PrefixSearchOnHangulFindsTheNounBeforeItsParticle` | `학` "learning", `학교` "school" | `"학교에서"` | `{{"학교",6},{"학",3}}` |
 | `PrefixSearchWorksBeforeTheIndexIsBuilt` | `kBasic`, `open()` only, with `needsIndex()` true | `"大学生活"` | the three hits of the first test |
 | `PrefixSearchGivesUpBetweenProbesWhenAsked` | (a) the `leading=256, trailing=300` layout; (b) `kBasic` | `resolvePrefixes("大学生活", m, &r, &abortAlways)` | (a) false, `m.aborted`, `m.count == 0`, `m.probes == 1`; (b) true, `!m.aborted`, `m.count == 3`: one probe answers, so there is no "between" |
@@ -690,9 +710,13 @@ collect(file, run):                      // file = .idx (offset+size suffix) or 
     start = bisectSamples(target, window)   // w0 = window.low, the headword at `start`
     scan from start while headword <= target (asciiCaseCmp):
       if headword is a prefix of run (asciiCaseCmp-folded bytes) ending on a codepoint boundary
-         of run, and no hit of that length yet: record (length, suffix, headword)
+         of run, and no hit of that length yet: record (length, suffix, headword, entry offset)
          -- a later prefix in a scan is longer; keep the MAX_HITS longest
+      else if headword is byte-equal (strcmp) to the hit just recorded: entryCount++ (cap 8)
+         -- same-headword entries are next to each other in StarDict's order
     probes++, probesInFile++
+    if a hit's first entry was the window's first (headword == w0) and start != 0:
+      its run may begin in the window before: locateRun(hit)       // one more probe
     stop when: hits.size() == MAX_HITS
                or (hits non-empty and probesInFile >= PREFIX_PROBES_PER_FILE)
                or start == 0                       // nothing sorts before the window
@@ -701,15 +725,26 @@ collect(file, run):                      // file = .idx (offset+size suffix) or 
     if limit == 0: stop
     target = run[0, limit)                // strictly shorter every time: <= 12 probes in all
 
+locateRun(hit):                          // the .idx run of hit.headword, from its first entry
+  start = bisectSamples(.qidx, hit.headword, strictlyBelow = true)
+  scan from start to the first entry byte-equal to hit.headword: idxStart, location
+  count the byte-equal entries that follow it (cap 8): entryCount
+
 resolvePrefixes:
   idx = collect(.idx, run)
   if hasSyn and (idx is empty or its longest < strlen(run)):   // only a longer match could change the answer
-     syn = collect(.syn, run); resolve each kept syn hit through locateByOrdinal (after its scan)
+     syn = collect(.syn, run)
+     for each kept syn hit (after the scans): locateByOrdinal gives its .idx headword, then locateRun
+        -- the ordinal may point into the middle of that headword's run
   merge longest first: one hit per length, the .idx hit on a tie; then drop a hit whose
-  (offset, size) equals a longer kept hit's; keep MAX_HITS
+  first entry (location) equals a longer kept hit's; keep MAX_HITS
 ```
 
-Why it is correct is spec §5.2: every prefix of the run that sorts before `w0` is a prefix of `w0`, and is shorter than every hit already seen. The scan stops at `target` rather than at the window's end, so no window is scanned twice.
+The abort check runs before every probe after the first, `locateRun`'s included.
+
+Why it is correct:
+- Spec §5.2: every prefix of the run that sorts before `w0` is a prefix of `w0`, and is shorter than every hit already seen. The scan stops at `target` rather than at the window's end, so no window is scanned twice.
+- A run of same-headword entries can begin before `start` only when its headword is `w0`. Every entry before `start` sorts below `w0`, so it is not byte-equal to any later headword.
 
 - [ ] **Step 4: Run the whole binary** (the Latin tests must not move)
 
@@ -734,24 +769,32 @@ git commit -m "feat(dictionary): find the longest headwords that start a run of 
 - Produces:
 
 ```cpp
-// The definitions of match.hits[0..count), longest first, in one string sized once from the index
-// sizes (one allocation, as readDefinition's). Plain: "headword\n" + definition per entry, entries
-// joined by "\n\n". HTML (definitionsAreHtml()): "<p><b>" + headword with & < > escaped + "</b></p>"
-// + definition per entry, no separator. At most MAX_DEFINITION_BYTES in all: the first entry's
-// definition is cut to fit, a shorter match is included only whole. Refused with LowMemory, like
-// readDefinition, when ESP.getMaxAllocHeap() < total + 8 KB; a .dict.dz takes its inflate window first.
+// The definitions of match.hits[0..count), in one string sized once from the index sizes (one
+// allocation, as readDefinition's). Every entry of every hit, in this order: hit by hit, longest
+// first; within a hit, its entryCount entries read from .idx at idxStart, in .idx order. So the
+// longest match's entries all come before the shorter matches. Plain: "headword\n" + definition
+// per entry (a duplicate headword repeats its line), entries joined by "\n\n". HTML
+// (definitionsAreHtml()): "<p><b>" + headword with & < > escaped + "</b></p>" + definition per
+// entry, no separator. At most MAX_DEFINITION_BYTES in all: the very first entry's definition is
+// cut to fit; every later entry is taken only whole, and at the first one that does not fit, it
+// and everything after it are left out. Refused with LowMemory, like readDefinition, when
+// ESP.getMaxAllocHeap() < total + 8 KB; a .dict.dz takes its inflate window first.
 bool readPrefixDefinitions(const DictPrefixMatch& match, std::string& definitionOut,
                            LookupResult* outResult = nullptr);
 ```
+
+The entries' locations are read from `.idx` twice, through the session's scan buffer: once to size the buffer, once to fill it. That is a few buffered reads per hit. Holding up to 24 locations instead would put 192 bytes on the stack.
 
 - [ ] **Step 1: Write the failing tests**
 
 | Test | Setup | Expect |
 |---|---|---|
 | `PrefixDefinitionsListEachEntryUnderItsHeadword` | `kBasic`, then `resolvePrefixes("大学生活")` | `"大学生\nstudent\n\n大学\nuniversity\n\n大\nbig"`, `r == Found` |
-| `HtmlPrefixDefinitionsBoldTheirEscapedHeadword` | `writeDictionary("DefsHtml", {{"大","<i>big</i>"},{"大学","<i>university</i>"},{"a<b&c","odd"}}, {}, "h")`; run `"大学"`; then a hand-built match with one hit, `resolve("a<b&c", hit.location, hit.headword)`, `runBytes = 5` | `"<p><b>大学</b></p><i>university</i><p><b>大</b></p><i>big</i>"`; then `"<p><b>a&lt;b&amp;c</b></p>odd"` |
+| `PrefixDefinitionsListEveryEntryOfTheLongestMatchFirst` | `银` "silver", `银行` "bank", `银行` "row of silver shops" (in that order); `resolvePrefixes("银行家")` | `"银行\nbank\n\n银行\nrow of silver shops\n\n银\nsilver"`: both entries in `.idx` order, then the shorter match |
+| `PrefixDefinitionsFillTheBufferBeforeTheShorterMatches` | `银` "silver", `银行` `std::string(32768, 'a')`, `银行` `std::string(32748, 'b')`; `resolvePrefixes("银行家")` | `out.size() == 65532` (7 + 32768 + 2 + 7 + 32748); both 银行 entries are in it; `out.find("silver") == npos`, because the 12 bytes of 银's entry do not fit the 4 that are left |
+| `HtmlPrefixDefinitionsBoldTheirEscapedHeadword` | `writeDictionary("DefsHtml", {{"大","<i>big</i>"},{"大学","<i>university</i>"},{"a<b&c","odd"}}, {}, "h")`; runs `"大学"` and `"a<b&c"` (`resolvePrefixes` searches any bytes it is given) | `"<p><b>大学</b></p><i>university</i><p><b>大</b></p><i>big</i>"`; then `"<p><b>a&lt;b&amp;c</b></p>odd"` |
 | `PrefixDefinitionsStayWithinTheCap` | `大` "big", `大学` with `std::string(Dictionary::MAX_DEFINITION_BYTES, 'y')`; run `"大学"` | `out.size() == MAX_DEFINITION_BYTES`; `out.rfind("大学\n", 0) == 0`; `out.find("big") == npos` |
-| `PrefixDefinitionsFromADictZipMatchThePlainOnes` | `provision("plain")` and `provision("zipped")`; in each, a hand-built match: `quixotic` (`runBytes` 8), then `longword` (8), both through `resolve()` | the two outputs are equal, and equal to `"quixotic\n" + expectedDefinition("quixotic") + "\n\nlongword\n" + expectedDefinition("longword")` |
+| `PrefixDefinitionsFromADictZipMatchThePlainOnes` | `provision("plain")` and `provision("zipped")`; in each, `resolvePrefixes` then `readPrefixDefinitions` for the runs `"quixotic"` and `"longword"` (headwords of the fixture; `longword` spans several dictzip chunks) | for each run, the plain and zipped outputs are equal and start with `"<run>\n" + expectedDefinition("<run>")` |
 | `PrefixDefinitionsReportLowMemory` | `kBasic`, run `"大学生活"`; `ESP.setMaxAllocHeap(1024)` around the read, the old value restored | false, `r == LowMemory`, `out.empty()` |
 | `PrefixDefinitionsOfNoHitsReadNothing` | an empty `DictPrefixMatch` | false, `r == NotFound` |
 
@@ -761,11 +804,11 @@ Run: `cmake --build build/test --target DictionaryTest`
 Expected: a build error, `'class Dictionary' has no member named 'readPrefixDefinitions'`.
 
 - [ ] **Step 3: Implement** `readEntryInto`, then `readPrefixDefinitions`, as the Interfaces block says. Do it in this order:
-  1. compute the total from the sizes and the escaped headword lengths;
+  1. open `.idx` (`openSession`); walk each hit's `entryCount` entries from `idxStart`; decide by the fill rule which entries are taken; compute the total from their sizes and the escaped headword lengths;
   2. call `dzScratch.ensure()` (for `.dict.dz` only);
   3. check the heap;
   4. `definitionOut.assign(total, '\0')`;
-  5. fill it in place.
+  5. walk the same entries again, and fill the buffer in place.
 
   On any read failure, clear `definitionOut` and return that read's result.
 
@@ -793,23 +836,24 @@ git commit -m "feat(dictionary): read a match's definitions into one buffer, eac
   - `Dictionary::resolvePrefixes`, `readPrefixDefinitions`, `DictPrefixMatch` (Tasks 4 and 5).
 - Produces the reply for a word whose script is not `Other`. The Latin reply is unchanged:
   ```
-  DICT:result=<outcome> dict=<d> word=<w>[ headword=<hits[0]> bytes=<n>] run=<run> matched=<codepoints of hits[0]> hits=<h1,h2,h3> probes=<n> reads=<n> ms=<t>[ exact_ms=<t>]
+  DICT:result=<outcome> dict=<d> word=<w>[ headword=<hits[0]> bytes=<n>] run=<run> matched=<codepoints of hits[0]> hits=<h1,h2,h3> entries=<n1,n2,n3> probes=<n> reads=<n> ms=<t>[ exact_ms=<t>]
   ```
-  - `matched=0` and an empty `hits` on a miss.
+  - `matched=0` and empty `hits` and `entries` on a miss.
+  - `entries` is each hit's `entryCount`.
   - `ms` times `resolvePrefixes`.
   - `exact_ms` times `resolve(hits[0].headword)` and is sent only on a hit. It needs the prefix search's headword, so it runs second: any cache warmth then favours the old path, and the ratio errs against the new one.
   - `bytes` is the length of `readPrefixDefinitions`'s output.
   - The search runs without an AbortCheck.
   - `logLookup` is given the run as its word.
 
-- [ ] **Step 1: Write the expected replies into the doc first**, as the check Step 4 runs against: the reply grammar above, with the example `DICT:result=found dict=cedict word=大学生活 headword=大学生 bytes=<n> run=大学生活 matched=3 hits=大学生,大学,大 probes=1 reads=<n> ms=<t> exact_ms=<t>`. Also say that a word starting with Han, kana or Hangul takes the prefix search, as the word screen does.
+- [ ] **Step 1: Write the expected replies into the doc first**, as the check Step 4 runs against: the reply grammar above, with the example `DICT:result=found dict=cedict word=大学生活 headword=大学生 bytes=<n> run=大学生活 matched=3 hits=大学生,大学,大 entries=1,1,1 probes=1 reads=<n> ms=<t> exact_ms=<t>`. Also say that a word starting with Han, kana or Hangul takes the prefix search, as the word screen does.
 
 - [ ] **Step 2: Implement** the branch in `lookUpWord`:
   1. `scriptOf(text)`.
   2. For a CJK script, build a `CjkLookupRun` from `text` as one word.
   3. Run the timed `resolvePrefixes`, then (on a hit) the timed exact baseline, then `readPrefixDefinitions`.
   4. Count `matched` with `utf8NextCodepoint` over `hits[0].runBytes`.
-  5. Join the headwords with `,` (for `appendField`).
+  5. Join the headwords, and the entry counts, each with `,` (for `appendField`).
 
 - [ ] **Step 3: Build and flash**
 
@@ -818,12 +862,13 @@ Expected: `[SUCCESS]`.
 
 - [ ] **Step 4: Check on the X4**, with `cedict` chosen (Task 2 Step 2)
 
-Run: `MSYS_NO_PATHCONV=1 python tools/devctl.py --port COM6 --log C:/tmp/cjkdict/t6.log "cmd:ACT:DICT:大学生活" "cmd:ACT:DICT:龘龘" "cmd:ACT:DICT:學校"`
+Run: `MSYS_NO_PATHCONV=1 python tools/devctl.py --port COM6 --log C:/tmp/cjkdict/t6.log "cmd:ACT:DICT:大学生活" "cmd:ACT:DICT:龘龘" "cmd:ACT:DICT:學校" "cmd:ACT:DICT:行了"`
 
 Expected:
 - `大学生活`: `result=found`, `headword=大学生`, `matched=3`, `hits=大学生,大学,大`. If CC-CEDICT also carries `大学生活`, expect `matched=4` and `hits=大学生活,大学生,大学`.
 - `龘龘`: `result=not_found matched=0`.
 - `學校`: the traditional form. It is `found headword=学校` when PyGlossary put the traditional forms in `.syn`. Record what it shows: Task 9 documents it.
+- `行了`: `hits` starts with `行`, and its `entries` value counts CC-CEDICT's 行 entries (xíng, háng, …). If it is 1, PyGlossary merged them into one entry, which then holds every reading. Record which, for Task 9.
 
 Then switch to `en-de` (Task 2 Step 2's sequence, `"select:en-de"`) and run `"cmd:ACT:DICT:house"`. Expected: today's reply exactly, with no `run=`, `ms=` or other new field. Switch back to `cedict`.
 
@@ -1076,7 +1121,10 @@ git commit -m "feat(dictionary): the highlight covers the whole CJK match, and a
   2. Write them as `cmd:ACT:DICT:<run>` lines into a devctl script, and run it with `--log`.
   3. Compute the median of `ms / exact_ms` over the hits.
 
-  Expected: at most 1.5 (the spec's target, "to agree"). Record the median `ms`, `probes` and `reads`. The serial search is the Confirm search, and the speculative one is the same search, so one set of numbers covers both. Do the same for JMdict over the Soseki chapter.
+  Expected: at most 1.5, per book. This is a firm gate (the maintainer, 2026-10-24).
+  - If a book's median is above it, PR 3 does not open. Find the cost in `probes` and `reads` (extra `locateRun` probes, the `.syn` pass), fix it in Task 4's code with a test, measure again, and tell the coordinator.
+  - Record the median `ms`, `probes` and `reads`. The serial search is the Confirm search, and the speculative one is the same search, so one set of numbers covers both.
+  - Do the same for JMdict over the Soseki chapter.
 - [ ] **Step 5: Definitions in the reader's font (row 7) and Japanese on the X4.**
   1. On `dict_cjk.epub` with `cedict`, time each definition's opening: Confirm to the `IDLE` reply, from `devctl --log`'s timestamps. Record `cmd:TTF` before and after, for a TrueType family.
   2. If a `.cpfont` CJK family exists (Task 1 Step 7), repeat with it.
@@ -1100,7 +1148,7 @@ git commit -m "feat(dictionary): the highlight covers the whole CJK match, and a
   2. In the reader, open `/TEST/ePubTest.epub` (or any Latin book), POWER, `wait:1`, Confirm, `shot:C:/tmp/cjkdict/t9-latin.png`. Expected: the headword in the header, the body in Noto Sans as before.
   3. With `cedict` on paragraph 4 of `dict_cjk.epub`: STATE `spec=missing` after `wait:1`.
 - [ ] **Step 10: Write the user docs.** In `docs/dictionary.md`:
-  - **How it works:** put the cursor on a word's first character; after a moment the highlight grows over the longest word; Confirm shows it, then up to two shorter words; in your reading font, the word at the top of the text; a tap inside the highlight looks it up.
+  - **How it works:** put the cursor on a word's first character; after a moment the highlight grows over the longest word; Confirm shows every entry the dictionary has for that word (all of CC-CEDICT's readings of 行), then up to two shorter words, as far as the 64 KB definition limit allows; in your reading font, each entry under its word; a tap inside the highlight looks it up. Record whether the PyGlossary conversion keeps same-word entries apart or merges them (Task 6 Step 4).
   - **What it does not do:** no deinflection (食べた finds 食); simplified and traditional only as the dictionary carries them (`.syn`).
   - **The sources table** from spec §5.4, with the verified PyGlossary commands from Task 2 Step 1 and this task's Step 1. Recommend the plain `.dict`.
   - **The measured sizes and first-open times** from Step 2.
@@ -1112,8 +1160,7 @@ git commit -m "feat(dictionary): the highlight covers the whole CJK match, and a
     - deinflection, and which JMdict `.syn` builds carry inflected forms;
     - moving the cursor word by word, and a manual range;
     - greedy over-long matches, with Step 3's F1;
-    - duplicate same-headword entries, where only the first is shown;
-    - the X3 dense-page measurement, and the touch check on the X4 Pro and T5S3;
+    - the X3 dense-page measurement and the touch check on the X4 Pro and T5S3 (spec row 12): not run, by the maintainer's decision; the X4 with ballast stood in for the X3;
     - if Task 2 dropped H1: H4, with the numbers.
 - [ ] **Step 12: Delete the spec and fix its links.**
 
@@ -1126,7 +1173,10 @@ git add docs/dictionary.md docs/future_work/cjk.md
 git commit -m "docs: CJK dictionary lookups: how they work, where to get dictionaries, what remains"
 ```
 
-- [ ] **Step 14: Run the PR gate, then open PR 3.** The body carries the measurements of spec rows 1-4, 7, 8, 10 and 11, the stop-rule outcome from Task 2, and "row 12 (touch) not checked: no touch board here".
+- [ ] **Step 14: Run the PR gate, then open PR 3.** The body carries:
+  - the measurements of spec rows 1-4, 7, 8, 10 and 11, with row 2 against the firm 1.5× gate;
+  - the stop-rule outcome from Task 2;
+  - "row 12 (touch) not run, and no X3 run: the maintainer's decision; the X4 with heap ballast stood in for the X3".
 
 ---
 
@@ -1137,11 +1187,11 @@ git commit -m "docs: CJK dictionary lookups: how they work, where to get diction
 | §5.7 L1 (decision 6, PR 1) | 1 |
 | §5.6 H1 and the stop rule, rows 5 and 6 | 2 |
 | §5.1 run rules, script choice, cap, kept letters | 3 |
-| §5.2 C2 search, step 3, `.syn` pass, codepoint boundaries, no fallbacks, abort between probes, Latin dictionary cost | 4 |
-| §5.3 shorter matches, entry formats, one buffer within `MAX_DEFINITION_BYTES` | 5 |
+| §5.2 C2 search, step 3, `.syn` pass, codepoint boundaries, no fallbacks, abort between probes, Latin dictionary cost; every same-headword entry (the maintainer's answer) | 4 |
+| §5.3 shorter matches, entry formats, one buffer within `MAX_DEFINITION_BYTES`; the longest match's entries before the shorter matches | 5 |
 | §5.2 `ACT:DICT` reports length, hits, reads and time | 6 |
 | §5.1 speculation and Confirm; §5.3 the reader's font and the headword in the body | 7 |
 | §5.1 span highlight and tap; §4 snapshot limits | 8 |
 | §5.4 sources and PyGlossary; §7 rows 1-4, 7, 8, 10, 11; §6 docs; roadmap | 9 |
 | §5.5 no deinflection | nothing to build; documented in 9 |
-| §7 row 12 (touch), X3 rows | not planned: questions for the maintainer |
+| §7 row 12 (touch), X3 rows | not run, by the maintainer's decision; recorded in Task 9 Steps 11 and 14 |
