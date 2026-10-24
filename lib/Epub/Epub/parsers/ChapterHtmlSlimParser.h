@@ -689,8 +689,9 @@ class ChapterHtmlSlimParser final : public Print {
   // Fold an element's CSS font-weight, font-style, text-decoration, font-variant and text-emphasis-style into an
   // inline style-stack entry. `text-decoration: none` cancels an inherited underline/strike.
   static void applyCssEmphasisToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
-  // Fold an element's text-emphasis-style into an entry; `none` cancels an inherited mark. The bold, italic and
-  // underline tags take only this from the full set above (their own tag decides the rest).
+  // Fold an element's text-emphasis-style into an entry; `none` cancels an inherited mark. The bold, italic,
+  // underline, sup/sub and internal-link paths take only this from the full set above (their own tag decides the
+  // rest).
   static void applyCssTextEmphasisToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
   // Fold an element's font-family into an entry, while the book has other families; true when it did.
   bool applyCssFontFamilyToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) const;

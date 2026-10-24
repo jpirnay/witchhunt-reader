@@ -180,9 +180,45 @@ TEST(CjkEmphasis, ABionicHalfKeepsItsMark) {
   EXPECT_EQ(r.lines[0].records, (std::vector<Record>{{0, 2, Kind::Emphasis, Dot}}));
 }
 
+TEST(CjkEmphasis, ASpanOfOnlyPunctuationGetsNoRecordAndNoBand) {
+  for (const char* span : {"……", "「」"}) {
+    ParsedText text(false, false, leftAligned());
+    text.addWord(span, EpdFontFamily::REGULAR, false, false, 100, 0, 0, Dot);
+    Result r;
+    layout(text, 400, r);
+    ASSERT_EQ(r.lines.size(), 1u);
+    EXPECT_TRUE(r.lines[0].records.empty()) << span;
+    EXPECT_EQ(r.lines[0].band, 0) << span;
+  }
+}
+
+TEST(CjkEmphasis, ASpanWithOneMarkableCharacterKeepsItsRecord) {
+  ParsedText text(false, false, leftAligned());
+  text.addWord("「強」", EpdFontFamily::REGULAR, false, false, 100, 0, 0, Dot);
+  Result r;
+  layout(text, 400, r);
+  ASSERT_EQ(r.lines.size(), 1u);
+  EXPECT_EQ(r.lines[0].records.size(), 1u);
+}
+
+TEST(CjkEmphasis, AHyphenationRemainderKeepsItsMark) {
+  Hyphenator::setPreferredLanguage("en");
+  ParsedText text(false, /*hyphenationEnabled=*/true, leftAligned());
+  text.addWord("internationalization", EpdFontFamily::REGULAR, false, false, 100, 0, 0, Dot);
+  Result r;
+  layout(text, 80, r);
+  ASSERT_GE(r.lines.size(), 2u);
+  for (const Line& line : r.lines) {
+    ASSERT_EQ(line.records.size(), 1u);
+    EXPECT_EQ(line.records[0].first, 0);
+    EXPECT_EQ(line.records[0].count, line.words.size());
+    EXPECT_EQ(line.records[0].mark, Dot);
+  }
+}
+
 TEST(TextEmphasisMarks, LettersAndDigitsTakeAMarkAsciiPunctuationDoesNot) {
   for (const char c : std::string("aZ09mQ")) EXPECT_TRUE(TextEmphasis::takesMark(static_cast<uint8_t>(c))) << c;
-  for (const char c : std::string(" .,;:!?-\"'()[]/\_@#$%&*+=<>~^`{|}")) {
+  for (const char c : std::string(" .,;:!?-\"'()[]/\\_@#$%&*+=<>~^`{|}")) {
     EXPECT_FALSE(TextEmphasis::takesMark(static_cast<uint8_t>(c))) << c;
   }
 }

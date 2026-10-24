@@ -1839,6 +1839,17 @@ ParsedText::LineProcessResult ParsedText::extractLine(
            TokenBoundary::rubyRole(boundaries[lastBreakAt + end]) == TokenBoundary::RubyRole::None) {
       ++end;
     }
+    // A run with no character that takes a mark (only punctuation or spaces) draws nothing: no record, so no band.
+    bool markable = false;
+    for (size_t t = wordIdx; t < end && !markable; ++t) {
+      for (const auto* q = reinterpret_cast<const unsigned char*>(words[lastBreakAt + t].c_str()); *q && !markable;) {
+        markable = TextEmphasis::takesMark(utf8NextCodepoint(&q));
+      }
+    }
+    if (!markable) {
+      wordIdx = end;
+      continue;
+    }
     TextBlock::Annotation& a = lineAnnotations_.emplace_back();
     a.firstWord = static_cast<uint16_t>(wordIdx);
     a.wordCount = static_cast<uint16_t>(end - wordIdx);

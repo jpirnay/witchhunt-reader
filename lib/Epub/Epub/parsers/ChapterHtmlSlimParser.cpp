@@ -2983,6 +2983,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       // publisher CSS on the link (`a.fn { font-size: 0.7em }`) still wins over the 50% default.
       // applyCssFontSizeToEntry is a no-op unless the link itself carries a font-size.
       applySupSubDefaultSize(entry);
+      applyCssTextEmphasisToEntry(entry, cssStyle);
       applyCssFontSizeToEntry(entry, cssStyle);
       self->inlineStyleStack.push_back(entry);
       self->updateEffectiveInlineStyle();

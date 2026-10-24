@@ -341,3 +341,11 @@ TEST_F(RubyLayout, ACssClassMarksItsSpan) {
   EXPECT_EQ(l[0].emphasis, (RubyList{{1, 2, "5"}}));
   EXPECT_TRUE(l[0].ruby.empty());
 }
+
+TEST_F(RubyLayout, AnInternalLinkKeepsItsOwnMark) {
+  const auto l = lines("<p>前<a class=\"bouten\" href=\"#x\">強調</a>後</p><p id=\"x\">先</p>",
+                       ".bouten { -epub-text-emphasis-style: sesame }");
+  ASSERT_GE(l.size(), 1u);
+  EXPECT_EQ(l[0].words, (std::vector<std::string>{"前", "強", "調", "後"}));
+  EXPECT_EQ(l[0].emphasis, (RubyList{{1, 2, "5"}}));
+}
