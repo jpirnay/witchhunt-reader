@@ -33,8 +33,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 100;  // v100: CSS text-emphasis marks (傍点) are drawn above each
+constexpr uint8_t SECTION_FILE_VERSION = 101;  // v101: CSS text-emphasis marks (傍点) are drawn above each
                                                // character of their span
+                                               // v100: taken by the DP line-breaker indent fix
                                                // v99: ruby (furigana) is laid out above its base: a line with
                                                // ruby keeps its groups (TextBlock annotations) and is taller
                                                // by half an ascender; <rp> is not laid out.
