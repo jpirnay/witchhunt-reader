@@ -46,13 +46,18 @@ struct Face {
   uint32_t packedCrc32;
 };
 
+// The glyph count is the length of the face's own generated glyph table, so regenerating a face
+// (build_cjk_ui_fonts.py gains or drops characters) cannot leave a stale literal here. The group walk
+// is then checked against it: the groups must tile exactly the glyphs the table holds.
+#define GLYPHS(face) static_cast<uint32_t>(sizeof(face##Glyphs) / sizeof(face##Glyphs[0]))
+
 const Face FACES[] = {
-    {"cjk_ui_zh_10", &cjk_ui_zh_10, 599, cjk_ui_zh_10PackedBytes, cjk_ui_zh_10PackedCrc32},
-    {"cjk_ui_zh_12", &cjk_ui_zh_12, 599, cjk_ui_zh_12PackedBytes, cjk_ui_zh_12PackedCrc32},
-    {"cjk_ui_ja_10", &cjk_ui_ja_10, 500, cjk_ui_ja_10PackedBytes, cjk_ui_ja_10PackedCrc32},
-    {"cjk_ui_ja_12", &cjk_ui_ja_12, 500, cjk_ui_ja_12PackedBytes, cjk_ui_ja_12PackedCrc32},
-    {"cjk_ui_ko_10", &cjk_ui_ko_10, 442, cjk_ui_ko_10PackedBytes, cjk_ui_ko_10PackedCrc32},
-    {"cjk_ui_ko_12", &cjk_ui_ko_12, 442, cjk_ui_ko_12PackedBytes, cjk_ui_ko_12PackedCrc32},
+    {"cjk_ui_zh_10", &cjk_ui_zh_10, GLYPHS(cjk_ui_zh_10), cjk_ui_zh_10PackedBytes, cjk_ui_zh_10PackedCrc32},
+    {"cjk_ui_zh_12", &cjk_ui_zh_12, GLYPHS(cjk_ui_zh_12), cjk_ui_zh_12PackedBytes, cjk_ui_zh_12PackedCrc32},
+    {"cjk_ui_ja_10", &cjk_ui_ja_10, GLYPHS(cjk_ui_ja_10), cjk_ui_ja_10PackedBytes, cjk_ui_ja_10PackedCrc32},
+    {"cjk_ui_ja_12", &cjk_ui_ja_12, GLYPHS(cjk_ui_ja_12), cjk_ui_ja_12PackedBytes, cjk_ui_ja_12PackedCrc32},
+    {"cjk_ui_ko_10", &cjk_ui_ko_10, GLYPHS(cjk_ui_ko_10), cjk_ui_ko_10PackedBytes, cjk_ui_ko_10PackedCrc32},
+    {"cjk_ui_ko_12", &cjk_ui_ko_12, GLYPHS(cjk_ui_ko_12), cjk_ui_ko_12PackedBytes, cjk_ui_ko_12PackedCrc32},
 };
 
 bool appendTo(void* ctx, const uint8_t* bytes, const uint32_t len) {
