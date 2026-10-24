@@ -80,3 +80,22 @@ target_link_libraries(HtmlToPlainTextTest PRIVATE
 )
 
 gtest_discover_tests(HtmlToPlainTextTest)
+
+# The run of CJK text a lookup starts on: pure string logic, no storage.
+add_executable(CjkLookupRunTest
+  CjkLookupRunTest.cpp
+  ${REPO_ROOT}/src/util/CjkLookupRun.cpp
+  ${REPO_ROOT}/lib/Utf8/Utf8.cpp
+)
+
+target_include_directories(CjkLookupRunTest PRIVATE
+  ${REPO_ROOT}/src/util
+  ${REPO_ROOT}/lib/Utf8
+)
+
+target_link_libraries(CjkLookupRunTest PRIVATE
+  crosspoint_test_common
+  GTest::gtest_main
+)
+
+gtest_discover_tests(CjkLookupRunTest)
