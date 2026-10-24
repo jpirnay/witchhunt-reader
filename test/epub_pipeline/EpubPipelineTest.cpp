@@ -153,7 +153,7 @@ std::string caseCacheDir(const Case& c, const std::string& tag) {
 }
 
 bool readFile(const fs::path& path, std::string& out) {
-  std::ifstream in(path);
+  std::ifstream in(path, std::ios::binary);
   if (!in) return false;
   std::stringstream bytes;
   bytes << in.rdbuf();
@@ -187,7 +187,7 @@ TEST_P(EpubPipelineTest, MatchesGolden) {
   const fs::path goldenPath = fs::path(GOLDEN_DIR) / (stem(c.epub) + variantSuffix(c) + ".golden.txt");
 
   if (std::getenv("UPDATE_GOLDENS")) {
-    std::ofstream(goldenPath) << dump;
+    std::ofstream(goldenPath, std::ios::binary) << dump;
     GTEST_SKIP() << "golden regenerated: " << goldenPath;
   }
   std::string golden;
