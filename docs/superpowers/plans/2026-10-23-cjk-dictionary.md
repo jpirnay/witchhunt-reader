@@ -66,6 +66,7 @@
 
 **Project rules:**
 - **Execution.** Subagent-driven: one implementer and one reviewer per task. Device steps run one at a time: there is one X4, on COM6, and one process per port.
+  - The CJK UI text fallback plan (roadmap step 6) uses the same X4 and flashes its own builds. A device session of this plan starts by flashing this branch's build, unless the ledger shows that build is still on the device, and sets the settings it needs (`fontFamily`, the dictionary) itself.
 - **Devices.**
   - Validate on the X4 only, with `tools/devctl.py` (`docs/serial-test-api.md`).
   - There is no X3 run: `CMD:HEAP:HOLD` ballast stands in for its heap (the maintainer, 2026-10-24).
@@ -85,11 +86,15 @@
   - `makeUniqueNoThrow` for fallible allocations;
   - `heapHasBlockFor` or `ESP.getMaxAllocHeap()` before container growth;
   - a size note on every new allocation.
-- **Versions.** No section or cache version changes. If a step finds it needs one, it takes 102, and the number is renumbered to master's + 1 at merge.
+- **Versions.** No section or cache version changes.
+  - Master is at section 99 (ruby B1, #554). In flight: the DP line-indent fix (section 100) and emphasis dots B2 (section 101, `CSS_CACHE_VERSION` 30).
+  - If a step finds it needs a bump, it takes the next free number: section 102, or 103 if the UI text fallback plan has taken 102; CSS cache 31. The number is renumbered to master's + 1 at merge.
 - **Parallel work this plan must not touch:**
-  - Ruby B1 (`feat/cjk-ruby`) and emphasis dots B2 own `TextBlock`, `ParsedText`, `ChapterHtmlSlimParser`, `Section` and `CssParser`.
-  - Roadmap step 6 (CJK UI text fallback) owns `FallbackFaceProvider`, `CjkUiFonts` and the UI faces.
-  - This plan draws CJK definitions in the reader's font through one function, `DictionaryWordSelectActivity::definitionFontId()`, so step 6 can replace it. It builds no UI fallback of its own.
+  - Emphasis dots B2 (in flight) owns `TextBlock`, `ParsedText`, `ChapterHtmlSlimParser`, `Section` and `CssParser`. Ruby B1 has merged (#554).
+  - Roadmap step 6 (CJK UI text fallback, `docs/superpowers/plans/2026-10-23-cjk-ui-text-fallback.md`) owns `FallbackFaceProvider`, `CjkUiFonts`, the UI faces and `SdCardFontManager`.
+  - This plan draws CJK definitions in the reader's font through one function, `DictionaryWordSelectActivity::definitionFontId()`. Step 6 does not touch the dictionary. Once both have merged, a follow-up moves the headword back into the header, adopting step 6's `BookTextScope`, `CjkUiFonts::readerFontAttached()` and `prefetchBookText()`. This plan builds no UI fallback of its own.
+  - Both plans add `STATE` rows to `docs/serial-test-api.md`. This plan's rows go directly after the `sel`, `label` row; step 6's go after `heap`, `maxblock`. The two then merge cleanly in either order.
+  - `lib/EpdFont/SdCardFont.cpp`: PR 1 changes `prewarm()` and `prewarmStyle()`, and step 6 moves `packInkMask()` out of the same file. The changes are 30 lines apart and merge cleanly in either order.
 
 ## Review Focus
 
@@ -191,18 +196,20 @@ Do the same for `C:/tmp/wt-dict-h1` and `feat/dict-release-word-arrays`.
 - Keep runs sent over serial to 12 characters or fewer, so a `CMD:` line stays short.
 - Logs and test files go under `C:/tmp/cjkdict/` (`mkdir -p /c/tmp/cjkdict` once). Each devctl run that a step greps passes `--log C:/tmp/cjkdict/<name>.log`.
 
-## When ruby B1 lands
+## Ruby B1 (merged in #554)
 
-- **No code in this plan changes.**
-  - B1 keeps readings out of the token stream: they become `TextBlock` annotations, flags bit 1. `extractWords` and `CjkLookupRun` therefore see only the base tokens, so a run over 吾輩 continues like any other run. On master, the inline （わがはい） stops the run at （.
-  - B1's `TextBlock::wordBox` puts each box on the base, below the ruby band. The highlight boxes come from `wordBox`, so they cover the base, and they are no larger, so the snapshot limits hold.
-- **After merging B1 (section version 99) or B2 (100, CSS cache 30) into this branch:**
-  - rerun the PR gate's suite;
-  - rerun Task 9 Step 5 on `/test/test_cjk_ja_soseki.epub`. A run from 吾 must continue past 輩 (STATE `span`, `match`), and the screenshot must show the box on the base characters.
+B1 is on master (`82756a9c8`, section 99), and this branch has it merged. **No code in this plan changes.** Checked against that tree:
+- B1 keeps readings out of the token stream: they are `TextBlock` annotations (flags bit 1). `RubyLayout.GroupRubySpansItsWholeBase` pins that a ruby line's words are its base tokens only. `extractWords` and `CjkLookupRun` therefore see only the bases, and the inline （わがはい） that stopped a run before B1 is gone.
+- A group's follower tokens are glued (`continues`, `ParsedText::addRubyGroup`). The word screen therefore makes a whole base group one `Word`:
+  - the cursor sits on 吾輩, never on 輩 alone, and the run starts at the group's first character;
+  - a match that ends inside a group maps to the whole group (`wordsCovering`, pinned by `MatchLengthsMapBackToWords` with 生活), so its highlight can be wider than the match, as with kinsoku glue.
+- `TextBlock::wordBox` puts each box on the base, below the ruby band (`CjkRubyTest`'s `WordBoxSitsBelowTheBand`). The highlight boxes come from `wordBox`, at the font's line height, so they cover the base and are no taller on a ruby line. The snapshot limits hold.
+- Task 9 Step 5 checks this on the device, on `/test/test_cjk_ja_soseki.epub`.
+- **After merging B2 (section 101, CSS cache 30) into this branch:** rerun the PR gate's suite, and Task 9 Step 5.
 
 ## File map
 
-Line numbers in this plan are master's at `fe786edb1`. Once an earlier task has changed a file, find the function by its name.
+Line numbers in this plan are master's at `82756a9c8` (checked 2026-10-24: #553 and #554 changed none of the code files cited here, only `docs/future_work/cjk.md`). Once an earlier task has changed a file, find the function by its name.
 
 | File | Part | What |
 |---|---|---|
@@ -399,7 +406,7 @@ Expected: `[ERR] [DHTML] Low heap for styled definition (<free> free, <block> ma
 
 - [ ] **Step 4: Implement H1** in `DictionaryWordSelectActivity`
 
-1. **`releaseWordArrays()`.** Add it as in Interfaces. Call it in `performLookup` right after `dict.releaseCaches()` (`:589`), before `startActivityForResult`.
+1. **`releaseWordArrays()`.** Add it as in Interfaces. Call it in `performLookup` right after `dict.releaseCaches()` (`:589`), before `startActivityForResult`, under `RenderLock lock(*this);`: `performLookup` runs in `loop()`, and the render task reads the same arrays (`render`, `appendDebugState`).
 2. **The rebuild.**
    - In `extractWords()`, keep `selected` on a rebuild instead of recentring it (`:310-315`).
    - Take the snapshot after the arrays.
@@ -477,7 +484,7 @@ Tasks 3-6 run on this branch now. Before Task 7, merge Part B (see the PR table)
 ### Task 3: The run of CJK text a lookup starts on
 
 **Files:**
-- Create: `src/util/DictionaryPunctuation.h`. Move in `EDGE_PUNCTUATION`, its `CodepointRange` struct and its comment and attribution, from `src/util/Dictionary.cpp:61-90`.
+- Create: `src/util/DictionaryPunctuation.h`. Move in `EDGE_PUNCTUATION`, its `CodepointRange` struct and its comment and attribution, from `src/util/Dictionary.cpp:65-90`.
 - Modify: `src/util/Dictionary.cpp:92-105`. `edgePunctuationLen` calls `isDictionaryEdgePunctuation`.
 - Create: `src/util/CjkLookupRun.h`, `src/util/CjkLookupRun.cpp`
 - Modify: `test/dictionary/CMakeLists.txt`. Add a `CjkLookupRunTest` executable: `CjkLookupRunTest.cpp`, `src/util/CjkLookupRun.cpp` and `lib/Utf8/Utf8.cpp`; include dirs `src/util` and `lib/Utf8`; `crosspoint_test_common`, `GTest::gtest_main`, `gtest_discover_tests`.
@@ -827,7 +834,7 @@ git commit -m "feat(dictionary): read a match's definitions into one buffer, eac
 ### Task 6: `CMD:ACT:DICT` reports the prefix search
 
 **Files:**
-- Modify: `src/SerialTestApi.cpp:345-380` (`lookUpWord`)
+- Modify: `src/SerialTestApi.cpp:346-387` (`lookUpWord`)
 - Modify: `docs/serial-test-api.md:407-428` (Dictionary: `ACT:DICT`)
 
 **Interfaces:**
@@ -924,6 +931,7 @@ explicit DictionaryDefinitionActivity(GfxRenderer&, MappedInputManager&, std::st
 2. Replace `DICTIONARY_FONT_ID` with `bodyFontId` at `.cpp:87, 140, 388`.
 3. At `:354`, pass `headword.empty() ? nullptr : headword.c_str()`.
 4. Update the two comments: Latin definitions are pinned to Noto Sans for its IPA, and a lookup that started on CJK text uses the reader's font.
+5. Lay the definition out under `RenderLock`. `onEnter()` runs without it (`ActivityManager.cpp:408-409`), and `layoutHtmlPages()` and `wrapText()` measure with `bodyFontId`. A TrueType or CFF reader font may be measured only under the lock (TTF spec 3.4; `checkLock`, `TtfFont.cpp:69-75`). Take `RenderLock lock(*this);` in `onEnter()` around the two, as `FileBrowserActivity::onEnter` does (`FileBrowserActivity.cpp:143`).
 
 - [ ] **Step 3: Send CJK text through the prefix search**
 
@@ -943,7 +951,7 @@ explicit DictionaryDefinitionActivity(GfxRenderer&, MappedInputManager&, std::st
 
 - [ ] **Step 4: Add the STATE fields and their doc rows**
 
-Add a STATE table row to `docs/serial-test-api.md`: "`spec`, `span`, `match` | the dictionary's word screen | what the search found for the word under the cursor: `unknown`, `found` or `missing`; how many words the found headword covers (more than 1 only on CJK text); the headword (the longest, on CJK text)".
+Add a STATE table row to `docs/serial-test-api.md`, directly after the `sel`, `label` row (the UI text fallback plan adds its rows after `heap`, `maxblock`): "`spec`, `span`, `match` | the dictionary's word screen | what the search found for the word under the cursor: `unknown`, `found` or `missing`; how many words the found headword covers (more than 1 only on CJK text); the headword (the longest, on CJK text)".
 
 - [ ] **Step 5: Make the CJK test book**
 
@@ -982,7 +990,8 @@ MSYS_NO_PATHCONV=1 python tools/devctl.py --port COM6 --log C:/tmp/cjkdict/t7.lo
 Expected:
 - the checks pass, and `match` equals Task 6's `ACT:DICT:大学生活` headword;
 - `t7-def.png` shows no title in the header, and a body that starts with the headword line, in readable Han with pinyin vowels and no boxes;
-- `grep "Lookup dict=cedict" t7.log` shows `word="大学生活很有意思"` with `found headword=大学生`.
+- `grep "Lookup dict=cedict" t7.log` shows `word="大学生活很有意思"` with `found headword=大学生`;
+- `grep -c "without RenderLock" C:/tmp/cjkdict/t7.log` is 0 (Step 2 item 5).
 
 - [ ] **Step 7: Check a dictionary switch on CJK text** (Review Focus 1)
 
@@ -1092,9 +1101,10 @@ git commit -m "feat(dictionary): the highlight covers the whole CJK match, and a
 - Modify: `docs/dictionary.md`. Add a section "Chinese, Japanese and Korean" after "How Lookup Works" (`:65-70`), and update the font paragraph `:83` and the "Where to find dictionaries" list `:87-99`.
 - Modify: `docs/future_work/cjk.md`:
   - roadmap row 9 (`:32`) becomes `shipped (#<PR 1>, #<PR 2>, #<PR 3>)`;
-  - a new "Already shipped" entry after `:56`;
-  - the section "Dictionary on CJK pages" (`:300-312`) keeps only what remains open.
-- Delete: `docs/superpowers/specs/2026-10-21-cjk-dictionary-design.md`. Fix every link to it that `git grep -n cjk-dictionary-design` finds, except this plan's Spec line.
+  - a new "Already shipped" entry after the #554 (B1) entry (`:83-93`), before "Tests and books";
+  - the section "Dictionary on CJK pages" (`:287-299`) keeps only what remains open.
+  - The UI text fallback plan edits roadmap row 6 and "UI text in CJK" (`:239-286`) of the same file. Edit nothing else here, and find the rows and sections by their names once either plan has merged.
+- Delete: `docs/superpowers/specs/2026-10-21-cjk-dictionary-design.md`. Fix every link to it that `git grep -n cjk-dictionary-design` finds, except this plan's own lines.
 
 **Interfaces:** consumes everything above. Produces documentation and the PR.
 
@@ -1129,12 +1139,12 @@ git commit -m "feat(dictionary): the highlight covers the whole CJK match, and a
   1. On `dict_cjk.epub` with `cedict`, time each definition's opening: Confirm to the `IDLE` reply, from `devctl --log`'s timestamps. Record `cmd:TTF` before and after, for a TrueType family.
   2. If a `.cpfont` CJK family exists (Task 1 Step 7), repeat with it.
   3. Choose `jmdict` (Task 2 Step 2's settings sequence, with `"select:jmdict"`). Put the cursor on 吾 (paragraph 2), then `wait:1 state shot:C:/tmp/cjkdict/t9-ja.png`, then Confirm and `shot:C:/tmp/cjkdict/t9-ja-def.png`. Then Back, move the cursor to コ, and `wait:1 state`.
-  4. Open `/test/test_cjk_ja_soseki.epub`, a book with ruby, and put the cursor on a base that has a reading. Then `wait:1 state`.
+  4. Open `/test/test_cjk_ja_soseki.epub`, a book with ruby, and put the cursor on a base that has a reading (吾輩 if the page shows it). Then `wait:1 state shot:C:/tmp/cjkdict/t9-ruby.png`.
 
   Expected:
   - readable Han, kana and pinyin in the screenshots;
   - `コーヒー`'s run keeps its ー: STATE `match=コーヒー` with the cursor on コ;
-  - on the ruby book, on master, the run stops at the inline （ before the reading. With B1 merged it continues past the base (see "When ruby B1 lands").
+  - on the ruby book (B1 is on master; see "Ruby B1 (merged in #554)"): STATE `label=` is the whole base group (吾輩), the run continues past it (`match` starts with the group, or `spec=missing` if the dictionary lacks it), and `t9-ruby.png` shows the box on the base characters, below the ruby, with the ruby drawn plain.
 - [ ] **Step 6: Korean (optional).** If PyGlossary reads CC-KEDICT, convert it, put the cursor on 학 (paragraph 3), and `wait:1 state`. Expected: `match=학교`, `span=1`. Otherwise record "not checked".
 - [ ] **Step 7: Span fallbacks (row 8).** Take the counts from Task 8 Steps 5 and 6. Expected: none at the default size.
 - [ ] **Step 8: Size (row 10).**
@@ -1165,7 +1175,7 @@ git commit -m "feat(dictionary): the highlight covers the whole CJK match, and a
 - [ ] **Step 12: Delete the spec and fix its links.**
 
   Run: `git rm docs/superpowers/specs/2026-10-21-cjk-dictionary-design.md && git grep -n "cjk-dictionary-design"`
-  Expected: only this plan's Spec line remains.
+  Expected: only this plan's own lines remain (its Spec line, and Task 9's Files list and this step). The UI text fallback plan cites this plan, not the spec.
 - [ ] **Step 13: Commit.** Restore every setting this plan changed: `fontFamily`, `fontSize`, `sleepTimeoutMinutes`, and the chosen dictionary.
 
 ```bash
