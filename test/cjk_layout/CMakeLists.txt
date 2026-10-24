@@ -1,6 +1,7 @@
 add_executable(CjkLayoutTest
   CjkLayoutTest.cpp
   CjkTypographyTest.cpp
+  CjkRubyTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/CjkLineBreak.cpp
   ${REPO_ROOT}/lib/Epub/Epub/CjkPunctuation.cpp
   ${REPO_ROOT}/lib/Epub/Epub/ParsedText.cpp

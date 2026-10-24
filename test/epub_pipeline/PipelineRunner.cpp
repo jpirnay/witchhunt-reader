@@ -41,6 +41,17 @@ void dumpWords(std::ostream& out, const TextBlock& block, const char* indent) {
   }
 }
 
+// One `R` record per ruby group of the line, after its `W` records, at `indent`; a line without annotations prints
+// nothing. It does not match the word-stream pattern, so the "no content dropped" check ignores it.
+void dumpAnnotations(std::ostream& out, const TextBlock& block, const char* indent) {
+  for (uint16_t a = 0; a < block.annotationCount(); ++a) {
+    const TextBlock::Annotation annotation = block.annotation(a);
+    if (annotation.kind != TextBlock::AnnotationKind::Ruby) continue;
+    out << indent << "R first=" << annotation.firstWord << " count=" << annotation.wordCount << " x=" << annotation.x
+        << " w=" << annotation.width << " t=" << annotation.text << "\n";
+  }
+}
+
 void dumpTextLine(std::ostream& out, const PageLine& line) {
   const auto& block = *line.getBlock();
   const auto& bs = block.getRenderStyle();
@@ -48,6 +59,7 @@ void dumpTextLine(std::ostream& out, const PageLine& line) {
       << " mult=" << std::fixed << std::setprecision(3) << bs.fontSizeMultiplier << " hfid=" << bs.headingFontId
       << " words=" << block.wordCount() << "\n";
   dumpWords(out, block, "   ");
+  dumpAnnotations(out, block, "   ");
 }
 
 // Table fragments used to dump as a single `TABLE y= x= h=` line, so every golden was blind to the
@@ -67,6 +79,7 @@ void dumpTableFragment(std::ostream& out, const PageTableFragment& tbl, const st
       for (const auto& line : cell.lines) {
         out << "     LN words=" << line->wordCount() << "\n";
         dumpWords(out, *line, "      ");
+        dumpAnnotations(out, *line, "      ");
       }
       if (cell.image) {
         out << "     CELLIMG w=" << cell.image->getWidth() << " h=" << cell.image->getRenderedHeight()

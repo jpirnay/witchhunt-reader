@@ -1,5 +1,5 @@
 BOOK title=CJK Line Breaking lang=ja spine=1 toc=0 reliableToc=0
-SPINE 0 href=OEBPS/chapter1.xhtml pages=4 truncated=0 cssFallback=0
+SPINE 0 href=OEBPS/chapter1.xhtml pages=6 truncated=0 cssFallback=0
  PAGE 0 elements=27 footnotes=0
   LINE y=18 x=0 align=2 mult=1.000 hfid=0 words=2
    W x=182 s=1 z=100 t=1.
@@ -1597,7 +1597,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=4 truncated=0 cssFallback=0
    W x=414 s=0 z=100 t=6
    W x=425 s=0 z=100 t=生
    W x=442 s=0 z=100 t=7
- PAGE 3 elements=10 footnotes=0
+ PAGE 3 elements=26 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=35
    W x=6 s=0 z=100 t=麗
    W x=22 s=0 z=100 t=8
@@ -1932,3 +1932,1079 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=4 truncated=0 cssFallback=0
    W x=87 s=0 z=100 t=8
    W x=93 s=0 z=100 t=昃
    W x=109 s=0 z=100 t=9
+  LINE y=258 x=0 align=2 mult=1.000 hfid=0 words=3
+   W x=162 s=1 z=100 t=12.
+   W x=194 s=1 z=100 t=ruby
+   W x=237 s=1 z=100 t=markup
+  LINE y=282 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=22 s=0 z=100 t=漢
+   W x=38 s=0 z=100 t=字
+   W x=54 s=0 z=100 t=は
+   W x=70 s=0 z=100 t=難
+   W x=86 s=0 z=100 t=し
+   W x=102 s=0 z=100 t=い
+   W x=118 s=0 z=100 t=で
+   W x=134 s=0 z=100 t=す
+   W x=150 s=0 z=100 t=。
+   R first=0 count=1 x=22 w=16 t=かん
+   R first=1 count=1 x=38 w=16 t=じ
+   R first=3 count=1 x=66 w=24 t=むずか
+  LINE y=315 x=0 align=0 mult=1.000 hfid=0 words=16
+   W x=22 s=0 z=100 t=吾
+   W x=38 s=0 z=100 t=輩
+   W x=54 s=0 z=100 t=は
+   W x=70 s=0 z=100 t=猫
+   W x=86 s=0 z=100 t=で
+   W x=102 s=0 z=100 t=あ
+   W x=118 s=0 z=100 t=る
+   W x=134 s=0 z=100 t=。
+   W x=150 s=0 z=100 t=名
+   W x=166 s=0 z=100 t=前
+   W x=182 s=0 z=100 t=は
+   W x=198 s=0 z=100 t=ま
+   W x=214 s=0 z=100 t=だ
+   W x=230 s=0 z=100 t=無
+   W x=246 s=0 z=100 t=い
+   W x=262 s=0 z=100 t=。
+   R first=0 count=2 x=22 w=32 t=わがはい
+  LINE y=348 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=22 s=0 z=100 t=こ
+   W x=38 s=0 z=100 t=れ
+   W x=54 s=0 z=100 t=は
+   W x=70 s=0 z=100 t=漢
+   W x=86 s=0 z=100 t=字
+   W x=102 s=0 z=100 t=で
+   W x=118 s=0 z=100 t=す
+   W x=134 s=0 z=100 t=。
+   R first=3 count=2 x=70 w=32 t=かんじ
+  LINE y=381 x=0 align=0 mult=1.000 hfid=0 words=16
+   W x=22 s=0 z=100 t=漢
+   W x=38 s=0 z=100 t=字
+   W x=54 s=0 z=100 t=は
+   W x=70 s=0 z=100 t=難
+   W x=86 s=0 z=100 t=し
+   W x=102 s=0 z=100 t=い
+   W x=118 s=0 z=100 t=で
+   W x=134 s=0 z=100 t=す
+   W x=150 s=0 z=100 t=が
+   W x=166 s=0 z=100 t=、
+   W x=182 s=0 z=100 t=面
+   W x=198 s=0 z=100 t=白
+   W x=214 s=0 z=100 t=い
+   W x=230 s=0 z=100 t=で
+   W x=246 s=0 z=100 t=す
+   W x=262 s=0 z=100 t=。
+   R first=0 count=1 x=22 w=16 t=かん
+   R first=1 count=1 x=38 w=16 t=じ
+   R first=3 count=1 x=66 w=24 t=むずか
+   R first=10 count=1 x=182 w=16 t=おも
+   R first=11 count=1 x=198 w=16 t=しろ
+  LINE y=414 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=26 s=0 z=100 t=漢
+   W x=42 s=0 z=100 t=の
+   W x=58 s=0 z=100 t=読
+   W x=74 s=0 z=100 t=み
+   W x=90 s=0 z=100 t=が
+   W x=106 s=0 z=100 t=基
+   W x=122 s=0 z=100 t=底
+   W x=138 s=0 z=100 t=字
+   W x=154 s=0 z=100 t=よ
+   W x=170 s=0 z=100 t=り
+   W x=186 s=0 z=100 t=多
+   W x=202 s=0 z=100 t=い
+   W x=218 s=0 z=100 t=。
+   R first=0 count=1 x=22 w=24 t=かんじ
+  LINE y=447 x=0 align=0 mult=1.000 hfid=0 words=14
+   W x=22 s=0 z=100 t=前
+   W x=38 s=0 z=100 t=ま
+   W x=54 s=0 z=100 t=え
+   W x=70 s=0 z=100 t=後
+   W x=86 s=0 z=100 t=に
+   W x=102 s=0 z=100 t=読
+   W x=118 s=0 z=100 t=み
+   W x=134 s=0 z=100 t=だ
+   W x=150 s=0 z=100 t=け
+   W x=166 s=0 z=100 t=が
+   W x=182 s=0 z=100 t=現
+   W x=198 s=0 z=100 t=れ
+   W x=214 s=0 z=100 t=る
+   W x=230 s=0 z=100 t=。
+  LINE y=471 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=22 s=0 z=100 t=漢
+   W x=38 s=0 z=100 t=か
+   W x=54 s=0 z=100 t=ん
+   W x=70 s=0 z=100 t=の
+   W x=86 s=0 z=100 t=複
+   W x=102 s=0 z=100 t=合
+   W x=118 s=0 z=100 t=ル
+   W x=134 s=0 z=100 t=ビ
+   W x=150 s=0 z=100 t=。
+  LINE y=513 x=0 align=2 mult=1.000 hfid=0 words=4
+   W x=151 s=1 z=100 t=13.
+   W x=184 s=1 z=100 t=ruby
+   W x=227 s=1 z=100 t=at
+   W x=257 s=1 z=100 t=edges
+  LINE y=537 x=0 align=0 mult=1.000 hfid=0 words=26
+   W x=22 s=0 z=100 t=あ
+   W x=38 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=71 s=0 z=100 t=あ
+   W x=88 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=121 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=171 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=221 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=254 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=304 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+  LINE y=561 x=0 align=0 mult=1.000 hfid=0 words=26
+   W x=10 s=0 z=100 t=煙
+   W x=27 s=0 z=100 t=あ
+   W x=44 s=0 z=100 t=あ
+   W x=61 s=0 z=100 t=あ
+   W x=78 s=0 z=100 t=あ
+   W x=95 s=0 z=100 t=あ
+   W x=112 s=0 z=100 t=あ
+   W x=129 s=0 z=100 t=あ
+   W x=146 s=0 z=100 t=あ
+   W x=164 s=0 z=100 t=あ
+   W x=181 s=0 z=100 t=あ
+   W x=198 s=0 z=100 t=あ
+   W x=215 s=0 z=100 t=あ
+   W x=232 s=0 z=100 t=あ
+   W x=249 s=0 z=100 t=あ
+   W x=266 s=0 z=100 t=あ
+   W x=283 s=0 z=100 t=あ
+   W x=301 s=0 z=100 t=あ
+   W x=318 s=0 z=100 t=あ
+   W x=335 s=0 z=100 t=あ
+   W x=352 s=0 z=100 t=あ
+   W x=369 s=0 z=100 t=あ
+   W x=386 s=0 z=100 t=あ
+   W x=403 s=0 z=100 t=あ
+   W x=420 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=0 count=1 x=6 w=24 t=けむり
+  LINE y=594 x=0 align=0 mult=1.000 hfid=0 words=26
+   W x=6 s=0 z=100 t=あ
+   W x=23 s=0 z=100 t=煙
+   W x=40 s=0 z=100 t=あ
+   W x=57 s=0 z=100 t=あ
+   W x=75 s=0 z=100 t=あ
+   W x=92 s=0 z=100 t=あ
+   W x=109 s=0 z=100 t=あ
+   W x=126 s=0 z=100 t=あ
+   W x=144 s=0 z=100 t=あ
+   W x=161 s=0 z=100 t=あ
+   W x=178 s=0 z=100 t=あ
+   W x=196 s=0 z=100 t=あ
+   W x=213 s=0 z=100 t=あ
+   W x=230 s=0 z=100 t=あ
+   W x=247 s=0 z=100 t=あ
+   W x=265 s=0 z=100 t=あ
+   W x=282 s=0 z=100 t=あ
+   W x=299 s=0 z=100 t=あ
+   W x=317 s=0 z=100 t=あ
+   W x=334 s=0 z=100 t=あ
+   W x=351 s=0 z=100 t=あ
+   W x=368 s=0 z=100 t=あ
+   W x=386 s=0 z=100 t=あ
+   W x=403 s=0 z=100 t=あ
+   W x=420 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=19 w=24 t=けむり
+  LINE y=627 x=0 align=0 mult=1.000 hfid=0 words=26
+   W x=6 s=0 z=100 t=あ
+   W x=23 s=0 z=100 t=あ
+   W x=40 s=0 z=100 t=煙
+   W x=57 s=0 z=100 t=あ
+   W x=75 s=0 z=100 t=あ
+   W x=92 s=0 z=100 t=あ
+   W x=109 s=0 z=100 t=あ
+   W x=126 s=0 z=100 t=あ
+   W x=144 s=0 z=100 t=あ
+   W x=161 s=0 z=100 t=あ
+   W x=178 s=0 z=100 t=あ
+   W x=196 s=0 z=100 t=あ
+   W x=213 s=0 z=100 t=あ
+   W x=230 s=0 z=100 t=あ
+   W x=247 s=0 z=100 t=あ
+   W x=265 s=0 z=100 t=あ
+   W x=282 s=0 z=100 t=あ
+   W x=299 s=0 z=100 t=あ
+   W x=317 s=0 z=100 t=あ
+   W x=334 s=0 z=100 t=あ
+   W x=351 s=0 z=100 t=あ
+   W x=368 s=0 z=100 t=あ
+   W x=386 s=0 z=100 t=あ
+   W x=403 s=0 z=100 t=あ
+   W x=420 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=2 count=1 x=36 w=24 t=けむり
+  LINE y=660 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=あ
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=煙
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=3 count=1 x=51 w=24 t=けむり
+  LINE y=693 x=0 align=0 mult=1.000 hfid=0 words=28
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=あ
+   W x=38 s=0 z=100 t=あ
+   W x=54 s=0 z=100 t=煙
+   W x=70 s=0 z=100 t=あ
+   W x=86 s=0 z=100 t=あ
+   W x=102 s=0 z=100 t=あ
+   W x=118 s=0 z=100 t=あ
+   W x=134 s=0 z=100 t=あ
+   W x=150 s=0 z=100 t=あ
+   W x=166 s=0 z=100 t=あ
+   W x=182 s=0 z=100 t=あ
+   W x=198 s=0 z=100 t=あ
+   W x=214 s=0 z=100 t=あ
+   W x=230 s=0 z=100 t=あ
+   W x=246 s=0 z=100 t=あ
+   W x=262 s=0 z=100 t=あ
+   W x=278 s=0 z=100 t=あ
+   W x=294 s=0 z=100 t=あ
+   W x=310 s=0 z=100 t=あ
+   W x=326 s=0 z=100 t=あ
+   W x=342 s=0 z=100 t=あ
+   W x=358 s=0 z=100 t=あ
+   W x=374 s=0 z=100 t=あ
+   W x=390 s=0 z=100 t=あ
+   W x=406 s=0 z=100 t=あ
+   W x=422 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=3 count=1 x=50 w=24 t=けむり
+  LINE y=726 x=0 align=0 mult=1.000 hfid=0 words=28
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=あ
+   W x=38 s=0 z=100 t=煙
+   W x=54 s=0 z=100 t=あ
+   W x=70 s=0 z=100 t=あ
+   W x=86 s=0 z=100 t=あ
+   W x=102 s=0 z=100 t=あ
+   W x=118 s=0 z=100 t=あ
+   W x=134 s=0 z=100 t=あ
+   W x=150 s=0 z=100 t=あ
+   W x=166 s=0 z=100 t=あ
+   W x=182 s=0 z=100 t=あ
+   W x=198 s=0 z=100 t=あ
+   W x=214 s=0 z=100 t=あ
+   W x=230 s=0 z=100 t=あ
+   W x=246 s=0 z=100 t=あ
+   W x=262 s=0 z=100 t=あ
+   W x=278 s=0 z=100 t=あ
+   W x=294 s=0 z=100 t=あ
+   W x=310 s=0 z=100 t=あ
+   W x=326 s=0 z=100 t=あ
+   W x=342 s=0 z=100 t=あ
+   W x=358 s=0 z=100 t=あ
+   W x=374 s=0 z=100 t=あ
+   W x=390 s=0 z=100 t=あ
+   W x=406 s=0 z=100 t=あ
+   W x=422 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=2 count=1 x=34 w=24 t=けむり
+ PAGE 4 elements=22 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=33 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=66 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=99 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=132 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=165 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=198 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=231 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=297 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=330 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=363 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=396 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=429 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=462 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=495 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=561 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=594 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=627 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=660 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=693 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+ PAGE 5 elements=8 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   W x=39 s=0 z=100 t=あ
+   W x=55 s=0 z=100 t=あ
+   W x=72 s=0 z=100 t=あ
+   W x=89 s=0 z=100 t=あ
+   W x=105 s=0 z=100 t=あ
+   W x=122 s=0 z=100 t=あ
+   W x=138 s=0 z=100 t=あ
+   W x=155 s=0 z=100 t=あ
+   W x=172 s=0 z=100 t=あ
+   W x=188 s=0 z=100 t=あ
+   W x=205 s=0 z=100 t=あ
+   W x=222 s=0 z=100 t=あ
+   W x=238 s=0 z=100 t=あ
+   W x=255 s=0 z=100 t=あ
+   W x=271 s=0 z=100 t=あ
+   W x=288 s=0 z=100 t=あ
+   W x=305 s=0 z=100 t=あ
+   W x=321 s=0 z=100 t=あ
+   W x=338 s=0 z=100 t=あ
+   W x=354 s=0 z=100 t=あ
+   W x=371 s=0 z=100 t=あ
+   W x=388 s=0 z=100 t=あ
+   W x=404 s=0 z=100 t=あ
+   W x=421 s=0 z=100 t=あ
+   W x=438 s=0 z=100 t=あ
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=33 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=6 s=0 z=100 t=あ
+   W x=22 s=0 z=100 t=煙
+   R first=1 count=1 x=18 w=24 t=けむり
+  LINE y=84 x=0 align=2 mult=1.000 hfid=0 words=3
+   W x=158 s=1 z=100 t=14.
+   W x=192 s=1 z=100 t=longer
+   W x=264 s=1 z=100 t=ruby
+  LINE y=108 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=22 s=0 z=100 t=そ
+   W x=38 s=0 z=100 t=れ
+   W x=54 s=0 z=100 t=は
+   W x=90 s=0 z=100 t=日
+   W x=142 s=0 z=100 t=本
+   W x=158 s=0 z=100 t=の
+   W x=174 s=0 z=100 t=話
+   W x=190 s=0 z=100 t=だ
+   W x=206 s=0 z=100 t=。
+   R first=3 count=1 x=62 w=72 t=にちじょうさはんじ
+   R first=4 count=1 x=134 w=32 t=ほんとう
+  LINE y=141 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=22 s=0 z=100 t=奥
+   W x=38 s=0 z=100 t=様
+   W x=54 s=0 z=100 t=は
+   W x=70 s=0 z=100 t=御
+   W x=86 s=0 z=100 t=台
+   W x=102 s=0 z=100 t=所
+   W x=118 s=0 z=100 t=へ
+   W x=134 s=0 z=100 t=行
+   W x=150 s=0 z=100 t=っ
+   W x=166 s=0 z=100 t=た
+   W x=182 s=0 z=100 t=。
+   R first=3 count=3 x=70 w=48 t=おだいどころ
+  LINE y=174 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=22 s=0 z=100 t=こ
+   W x=38 s=0 z=100 t=れ
+   W x=54 s=0 z=100 t=は
+   W x=70 s=0 z=100 t=東
+   W x=90 s=0 z=100 t=京
+   W x=106 s=0 z=100 t=と
+   W x=122 s=0 z=100 t=い
+   W x=138 s=0 z=100 t=う
+   W x=154 s=0 z=100 t=町
+   W x=170 s=0 z=100 t=で
+   W x=186 s=0 z=100 t=す
+   W x=202 s=0 z=100 t=。
+   R first=3 count=1 x=70 w=16 t=とう
+   R first=4 count=1 x=86 w=24 t=きょう
+  LINE y=225 x=0 align=2 mult=1.000 hfid=0 words=4
+   W x=153 s=1 z=100 t=15.
+   W x=188 s=1 z=100 t=ruby
+   W x=231 s=1 z=100 t=in
+   W x=256 s=1 z=100 t=table
+  TABLE y=249 x=0 w=460 h=102 cols=2 border=1 rows=1
+   ROW h=100 hdr=0 cells=2
+    CELL 0 hdr=0 span=1 lines=3
+     LN words=12
+      W x=22 s=0 z=100 t=表
+      W x=38 s=0 z=100 t=の
+      W x=54 s=0 z=100 t=セ
+      W x=70 s=0 z=100 t=ル
+      W x=86 s=0 z=100 t=の
+      W x=102 s=0 z=100 t=漢
+      W x=118 s=0 z=100 t=字
+      W x=134 s=0 z=100 t=に
+      W x=150 s=0 z=100 t=も
+      W x=166 s=0 z=100 t=振
+      W x=182 s=0 z=100 t=り
+      W x=198 s=0 z=100 t=仮
+      R first=5 count=2 x=102 w=32 t=かんじ
+      R first=9 count=1 x=166 w=16 t=ふ
+     LN words=12
+      W x=6 s=0 z=100 t=名
+      W x=23 s=0 z=100 t=が
+      W x=41 s=0 z=100 t=つ
+      W x=58 s=0 z=100 t=く
+      W x=74 s=0 z=100 t=。
+      W x=92 s=0 z=100 t=長
+      W x=110 s=0 z=100 t=い
+      W x=127 s=0 z=100 t=文
+      W x=145 s=0 z=100 t=章
+      W x=162 s=0 z=100 t=も
+      W x=180 s=0 z=100 t=折
+      W x=198 s=0 z=100 t=り
+      R first=5 count=1 x=88 w=24 t=ながい
+     LN words=5
+      W x=6 s=0 z=100 t=返
+      W x=22 s=0 z=100 t=さ
+      W x=38 s=0 z=100 t=れ
+      W x=54 s=0 z=100 t=る
+      W x=70 s=0 z=100 t=。
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=2
+      W x=22 s=0 z=100 t=短
+      W x=38 s=0 z=100 t=い
