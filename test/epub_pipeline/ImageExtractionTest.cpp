@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -24,6 +25,7 @@
 #include "Epub/Section.h"
 #include "Epub/blocks/ImageBlock.h"
 #include "GfxRenderer.h"
+#include "HalStorage.h"
 #include "StoredZipWriter.h"
 
 namespace fs = std::filesystem;
@@ -133,6 +135,89 @@ TEST_F(ImageExtractionFixture, ASuccessfulExtractLeavesOnlyTheFinalName) {
   ASSERT_TRUE(epub.extractItemToFile(kEntry, dest, nullptr));
   EXPECT_EQ(fs::file_size(dest), kEntryBytes);
   EXPECT_FALSE(fs::exists(dest + ".part"));
+}
+
+// An extract that is not the entry must not be reported as written: a damaged picture decoded
+// from it is kept for good (its pixel caches, like any other), and nothing would extract it again.
+// A deflater stores data that will not compress -- a JPEG's -- in stored DEFLATE blocks, and a
+// read the card failed inside the last of them used to come out as zeros up to the block's stated
+// length: the right size, the tail gone.
+namespace {
+
+std::string pseudoRandomBytes(const size_t n) {
+  std::string out(n, '\0');
+  uint32_t x = 2463534242u;
+  for (char& c : out) {
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    c = static_cast<char>(x & 0xFF);
+  }
+  return out;
+}
+
+std::string readAll(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+class FailReadAtScope {
+ public:
+  explicit FailReadAtScope(const long offset) { FsFile::failReadAt = offset; }
+  ~FailReadAtScope() { FsFile::failReadAt = -1; }
+  FailReadAtScope(const FailReadAtScope&) = delete;
+  FailReadAtScope& operator=(const FailReadAtScope&) = delete;
+};
+
+}  // namespace
+
+TEST_F(ImageExtractionFixture, AReadErrorInsideAStoredDeflateBlockFailsTheExtract) {
+  const std::string data = pseudoRandomBytes(40000);
+  const std::string book = (work / "stored_blocks.epub").string();
+  test_zip::StoredZipWriter zip;
+  zip.addDeflateStoredBlocks("img.jpg", data, 16000);  // blocks at stream bytes 0, 16005, 32010 (the last)
+  zip.write(book);
+  // Both extract paths read the stream 1 KB at a time from its start: the read at 33 KB is the
+  // last block's.
+  const long lastBlockRead = static_cast<long>(zip.payloadOffset("img.jpg")) + 33 * 1024;
+  for (const bool withArena : {false, true}) {
+    SCOPED_TRACE(withArena ? "arena path" : "heap path");
+    BuildArena arena(Epub::EXTRACT_ARENA_BYTES);
+    ASSERT_TRUE(arena.valid());
+    Epub epub(book, cacheDir);
+    const std::string whole = (work / "whole.jpg").string();
+    ASSERT_TRUE(epub.extractItemToFile("img.jpg", whole, withArena ? &arena : nullptr));
+    ASSERT_EQ(readAll(whole), data) << "control: read whole, the extract is the entry";
+
+    const std::string failed = (work / "failed.jpg").string();
+    {
+      FailReadAtScope fault(lastBlockRead);
+      EXPECT_FALSE(epub.extractItemToFile("img.jpg", failed, withArena ? &arena : nullptr));
+    }
+    EXPECT_FALSE(fs::exists(failed));
+    EXPECT_FALSE(fs::exists(failed + ".part"));
+    EXPECT_EQ(arena.used(), 0u);
+  }
+}
+
+// An entry whose stream holds fewer bytes than its directory entry says: the heap path always
+// refused it, the arena path wrote it short and reported success.
+TEST_F(ImageExtractionFixture, AnExtractShorterThanItsEntryFails) {
+  const std::string book = (work / "short_stream.epub").string();
+  test_zip::StoredZipWriter zip;
+  zip.addDeflateStoredBlocks("img.jpg", pseudoRandomBytes(40000), 16000, /*claimedSize=*/50000);
+  zip.write(book);
+  for (const bool withArena : {false, true}) {
+    SCOPED_TRACE(withArena ? "arena path" : "heap path");
+    BuildArena arena(Epub::EXTRACT_ARENA_BYTES);
+    ASSERT_TRUE(arena.valid());
+    Epub epub(book, cacheDir);
+    const std::string dest = (work / "short.jpg").string();
+    EXPECT_FALSE(epub.extractItemToFile("img.jpg", dest, withArena ? &arena : nullptr));
+    EXPECT_FALSE(fs::exists(dest));
+    EXPECT_FALSE(fs::exists(dest + ".part"));
+    EXPECT_EQ(arena.used(), 0u);
+  }
 }
 
 TEST_F(ImageExtractionFixture, ATruncatedExtractIsReplacedBeforeItIsDecoded) {
