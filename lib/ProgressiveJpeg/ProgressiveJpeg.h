@@ -37,8 +37,8 @@ enum class Result : uint8_t {
   Stopped,  // the band callback asked to stop
   Pending,  // Decoder::step(): more work remains
   // Every row was emitted, but the picture lacks part of what the file should hold: a scan's data
-  // was corrupt, or the stream ended before the scans the output needs. Not a picture to keep as
-  // the image's for good.
+  // was corrupt, or the stream ended before the scans the output needs. The same bytes decode to
+  // the same rows again (a read that failed is IoError, never this), so a caller may keep them.
   Degraded,
 };
 

@@ -2035,6 +2035,9 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     }
   }
   unsigned long decodeTime = millis() - decodeStart;
+  // TJpgDec reports a read the card failed and a stream that ended alike (JDR_INP): where the file
+  // stands tells them apart, so it is asked before the file closes.
+  const bool baselineReadFailed = mode == JpegMode::Baseline && jr == JDR_INP && file.position() < file.size();
   // Check before abort() so a corrupt reading is attributed to the decode itself
   // rather than to the SD-buffer free inside cache cleanup. Runs on both paths.
   jpgCheckHeap("jpg_after_decode");
@@ -2064,29 +2067,39 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
             imagePath.c_str());
   }
   if (baselineFailed) LOG_ERR("JPG", "TJpgDec decode failed (jr=%d): %s", jr, imagePath.c_str());
-  // Rows drawn, then a failure -- or every row, from a file short of what it should hold (a corrupt
-  // scan, a stream that ends early): the rows stay as drawn, the rest of the box is left to the page
-  // background, and no placeholder frame goes over the picture. Nothing is cached: the next visit
-  // decodes again, so a file that is whole by then is drawn whole, and a decoder that does better
-  // has its chance. A resumed decode draws the rows from before its park point first, which only
-  // the partial cache holds.
-  if ((progressiveFailed || baselineFailed || degraded) && ctx.finalDstRows > 0) {
-    LOG_INF("JPG", "%s after %d/%d rows: keeping them, not cached: %s", degraded ? "Degraded" : "Failed",
-            ctx.finalDstRows, destHeight, imagePath.c_str());
-    if (resuming && ctx.caching) drawParkedRows(renderer, ctx.cache, config, parked.finalRows);
+  // Rows drawn from a file short of what it should hold -- ProgressiveJpeg's Degraded (a corrupt
+  // scan, a stream that ends early: every row), or TJpgDec stopped by corrupt data or by the end of
+  // a file cut short (the rows so far) -- are as final as a whole picture. The image's bytes are an
+  // extract of the book (Epub::extractItemToFile checks it against the entry), so decoding again
+  // gives the same rows. They are cached like a whole picture: the rest of the box stays page
+  // background in the cache too (PixelCache::FILL_BYTE), every later render draws from it, and the
+  // image lane counts the page as warmed. Uncached, every render pass of every visit decoded the
+  // picture again -- 8 decodes, ~14 s, for one page on the X4.
+  const bool damaged = degraded || (baselineFailed && !baselineReadFailed && ctx.finalDstRows > 0);
+  if (!damaged && (progressiveFailed || baselineFailed)) {
+    if (ctx.finalDstRows > 0) {
+      // Rows drawn, then a read the card failed: no damage of the file, so the rows stay as drawn,
+      // the rest of the box is left to the page background, no placeholder frame goes over the
+      // picture, and nothing is cached -- the next visit decodes again. A resumed decode draws the
+      // rows from before its park point first, which only the partial cache holds.
+      LOG_INF("JPG", "Failed after %d/%d rows: keeping them, not cached: %s", ctx.finalDstRows, destHeight,
+              imagePath.c_str());
+      if (resuming && ctx.caching) drawParkedRows(renderer, ctx.cache, config, parked.finalRows);
+      dropAll();
+      return true;
+    }
     dropAll();
-    return true;
-  }
-  if (progressiveFailed) {
-    dropAll();
-    drawUnsupportedPlaceholder(renderer, config);
-    return true;
-  }
-  if (baselineFailed) {
-    dropAll();
+    if (progressiveFailed) {
+      drawUnsupportedPlaceholder(renderer, config);
+      return true;
+    }
     return false;
   }
 
+  if (damaged) {
+    LOG_INF("JPG", "%s after %d/%d rows: cached like a whole picture: %s", degraded ? "Degraded" : "Damaged",
+            ctx.finalDstRows, destHeight, imagePath.c_str());
+  }
   LOG_DBG("JPG", "JPEG decoding complete - render time: %lu ms%s%s", decodeTime,
           ctx.companion ? " (both variants)" : "", resuming ? " (resumed)" : "");
 
