@@ -1,4 +1,4 @@
-# Writing modes step 0: every markup trigger parsed, CSS boxes and start/end read along them, line-height dropped — Implementation Plan
+# Writing modes step 0: every markup trigger parsed, CSS boxes and start/end read along them, line-height kept as CSS means it — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -7,12 +7,13 @@
 books use; the HTML `dir` attribute with `<bdo>` and `<bdi>`; the OPF spine's `page-progression-direction`. Two of them
 take effect now: margins, paddings and image sizes are read along each element's writing mode, and `start`/`end` along
 its direction. Books are still set horizontally and left to right; books without any of this markup lay out
-byte-identically. `line-height`, parsed and stored but read by nothing, is removed.
+byte-identically. `line-height` is parsed as CSS means it (a multiple of the font size) and kept through the rule
+cache, which until now dropped it, for the line-spacing feature to read.
 
 **Architecture:** `CssStyle` gains five one-byte enums (`writingMode`, `textOrientation`, `textCombine`, `direction`,
-`unicodeBidi`), each with an `Unset` value of 0 instead of a defined bit (with `line-height` gone the flag word holds 27
-of 32 bits; five more would fill it to the last one), and `CssTextAlign` gains `Start` and `End`. `line-height` leaves
-the parser, `CssStyle` and the codecs first. `CssParser` parses them; the three style codecs
+`unicodeBidi`), each with an `Unset` value of 0 instead of a defined bit (the flag word holds 28 of 32 bits, and five
+more would overflow it), and `CssTextAlign` gains `Start` and `End`. First, `line-height` is made to mean what CSS says
+and to survive the rule cache. `CssParser` parses them; the three style codecs
 carry them in one 16-bit flow word. An HTML layer (`HtmlDirectionality.h`) turns `dir`, `<bdo>` and `<bdi>` into the
 same properties under the author's CSS. `ChapterHtmlSlimParser` keeps the inherited writing mode and direction in a small
 fixed stack keyed by element depth, and right after an element's style is resolved it calls
@@ -35,7 +36,10 @@ report, not a number to adjust silently.
 2. Step 0 covers every parser trigger, including those first acted on in later steps.
 3. Writing modes follow the book, with a global setting and a per-book override (spec section 9); none of that is in
    step 0, which sets nothing vertically.
-4. `line-height`, which nothing reads, is removed in step 0.
+4. `line-height` stays. A line-spacing setting that can follow the book or override it is wanted, CJK readers above all
+   (upstream added "Extra wide" for them, crosspoint-reader #3037, and widened it for TrueType fonts, #3646 and #4013).
+   Step 0 makes the value right and persistent; the setting that reads it has its own plan (`docs/future_work/cjk.md`,
+   "Line spacing").
 
 ## The triggers and who reads them
 
@@ -90,28 +94,31 @@ Decided for this plan (reasons in the tasks and in the report):
   for a child of another direction. Rare (a direction change inside a `text-align: start` container); noted in the
   report.
 - **Storage.**
-  - `CssStyle`: `lineHeightMultiplier`'s 4 bytes go, and the five enums take padding bytes (after `pageBreakAfter`:
-    offsets 97-99; after `visibilityHidden`: 110-111), so `sizeof(CssStyle)` goes from 124 to 120. Measured on the host
-    on 2026-10-26 with exactly this layout; every member is 4-byte aligned or smaller, so the C3 lays it out the same.
-    `CssPropertyFlags` loses `lineHeight`: 27 of its 32 bits.
+  - `CssStyle`: the five enums take padding bytes (after `pageBreakAfter`: offsets 97-99; after `visibilityHidden`:
+    114-115), so `sizeof(CssStyle)` stays 124. Measured on the host on 2026-10-26 with the fields inserted; every member
+    is 4-byte aligned or smaller, so the C3 lays it out the same. `CssPropertyFlags` is unchanged: 28 of its 32 bits.
+    `lineHeightMultiplier` becomes `lineHeightEm`, the same float.
   - The flow word, the same 16 bits in both codecs: bits 0-1 `writingMode`, 2-3 `direction`, 4-6 `textCombine`, 7-8
     `textOrientation`, 9-11 `unicodeBidi`; each 0 when Unset.
-  - The rule cache's payload appends it: `CSS_FIXED_STYLE_BYTES` 77 → 79, `CSS_CACHE_VERSION` 30. The payload never
-    stored `line-height` (`encodeCssStylePayload` and `readCssStylePayload` have no field for it), so the removal
-    leaves it alone.
+  - The rule cache's payload: `line-height` was never in it (`encodeCssStylePayload` and `readCssStylePayload` have no
+    field for it), so a book loaded from its cache never carried it. Task 1 appends its float, with its defined bit in
+    bit 3 of the font-size flags byte (77 → 81); Task 3 appends the flow word (81 → 83). `CSS_CACHE_VERSION` 30 once,
+    in Task 1: both land in one PR, so no released cache is ever v30 at 81 bytes.
   - The arena record: bit 4 of the `extra` byte announces it, written right after that byte; `kMaxCompressedStyle`
-    74 → 70 without `line-height`'s 4 bytes, then 72 with the flow word. Records without any of these properties are
-    unchanged.
+    74 → 76 (`line-height`'s float is in it already). Records without any of these properties are unchanged.
   - `CssTextAlign` Start = 6 and End = 7 fit the payload's byte and the arena's 3 bits.
   - `book.bin`: one byte after the description, `BOOK_CACHE_VERSION` 18. Every book is indexed again once, behind the
     first-open popup, on its next open; its section caches stay (a version mismatch rebuilds `book.bin` only,
     `BookMetadataCache::load`). The largest test book took 4.9 s behind that popup after #533; ordinary books well
     under a second.
   - Section files: `SECTION_FILE_VERSION` 101.
-- **`line-height` has no reader.** Layout's line height is the font's, times the reader's line spacing, times the
-  block's font size (`ChapterHtmlSlimParser::effectiveLineHeight`, :4504); `BlockStyle` has no line height; and since the
-  rule cache never stored it, only a `style` attribute ever brought it as far as the parser. Removing it changes no
-  layout. Honouring a book's line height would be a reading feature of its own, not part of this plan.
+- **`line-height` in step 0.** Nothing reads it yet: layout's line height is the font's, times the reader's line
+  spacing, times the block's font size (`ChapterHtmlSlimParser::effectiveLineHeight`, :4504), and `BlockStyle` has no
+  line height. Stored as `lineHeightEm`, a multiple of the element's font size as CSS has it: unitless and `em` as given,
+  `rem` as `em`, `%` divided by 100, `px` by 16 and `pt` by 12 (CSS's 16 px medium); `normal`, `inherit`, `initial`,
+  `unset` and anything unparseable leave it unset; clamped to 0.5-4.0. The base-1.5 normalisation goes: it tied the
+  value to each font's own line height, which differs by font (Noto CJK's is about 1.45 em, a Latin face's about 1.2),
+  and no reader depended on it. No layout moves.
 - **Parser state:** a fixed array of 8 `{depth, writingMode, direction}` entries in `ChapterHtmlSlimParser`, no heap.
   The parser object lives across a sliced build's steps (`Section.cpp:844`), so no saved state changes.
 - **`anyDefined()`:** `CssStyle::anyDefined()` is `defined.anySet()` or any of the five enums set. It replaces
@@ -120,10 +127,9 @@ Decided for this plan (reasons in the tasks and in the report):
   with only `writing-mode` (the EBPAJ template's `html.vrtl`) must be kept.
 - **Logging:** one `LOG_INF("EHP", ...)` per section build when an element switches writing mode or direction, naming
   it. A ninth nested switch is dropped with one `LOG_ERR`.
-- **`CompiledContent`** (`lib/Epub/Epub/content/`, not wired) has its own `CssStyle` codec. It is touched only to drop
-  `line-height`, since it must still compile: its `kVersion` goes to 2. No file of it exists on any device (it has no
-  firmware caller, and its test went in b0d0f9d43). It does not get the five new properties; its own plan decides
-  whether it stores logical styles.
+- **`CompiledContent`** (`lib/Epub/Epub/content/`, not wired) has its own `CssStyle` codec. It is touched only for the
+  field's new name (a rename; its float is unchanged, so its format is too). It does not get the five new properties;
+  its own plan decides whether it stores logical styles.
 - Books without this markup lay out exactly as before: every golden in `test/epub_pipeline/goldens` stays
   byte-identical (no fixture declares any trigger, checked 2026-10-26), and the dump prints the new BOOK field only when
   the OPF declares it. The new goldens are the two new fixtures'.
@@ -154,57 +160,68 @@ Decided for this plan (reasons in the tasks and in the report):
 5. **Precedence of `dir`:** the author's CSS beats the attribute, the attribute beats inheritance, and the attribute
    holds with the book's CSS off. Pinned in Task 5 (`HtmlDirectionality.AuthorCssBeatsTheAttribute`) and Task 6
    (`WritingModeLayout.DirHoldsWithoutTheBooksCss`).
-6. **The cascade's rank indices** shift down by one after `line-height`'s (20) in Task 1, and `ranks` is sized by
-   `kCascadeProperties`: an index left behind would let two properties share a rank slot and merge in the wrong order.
-   Pinned by the existing `EpubCssCascadeTest`, run after Task 1 and again after Task 2.
+6. **`line-height`'s meaning changes** from a factor on the font's line height to a multiple of the font size. Nothing
+   reads it, so no layout moves; the line-spacing plan must read it as ems. Pinned in Task 1:
+   `CssGapsLineHeight.IsAMultipleOfTheFontSize`.
 7. **The 4 em inset cap** (`BlockStyle::MAX_HORIZONTAL_INSET_EM`): a vertical book's large `margin-top` becomes a left
    inset and is capped like any other. Intended; noted in the report.
 
 ---
 
-### Task 1: Drop `line-height`
-
-Nothing reads it (Global Constraints), so it goes before anything is added: the cascade's rank indices and the arena's
-defined mask are renumbered once, here.
+### Task 1: `line-height` as CSS means it, kept through the cache
 
 **Files:**
-- Modify: `lib/Epub/Epub/css/CssStyle.h` (the flag at :96, the constructor at :129, `anySet` at :141, `clearAll` at :151,
-  the field at :192, `applyOver` at :320-323 with every later rank index down by one and `kCascadeProperties` 28 → 27,
-  `hasLineHeight` at :403, `reset` at :420)
-- Modify: `lib/Epub/Epub/css/CssParser.cpp` (the declaration at :936-972; `packDefinedMask`'s bit 20 and the bits above
-  it down by one at :2276-2282, with their comment; `compressStyle` at :2338-2341; `decompressStyle` at :2386 and
-  :2430-2433; `kMaxCompressedStyle` 74 → 70 and its comment at :2262-2265)
-- Modify: `lib/Epub/Epub/content/CompiledContent.cpp` (:55, :85, :112, :150, :304), `CompiledContent.h` (`kVersion` 2
-  at :27)
-- Test: `test/css_gaps/CssGapsTest.cpp` (the six `CssGapsLineHeight` tests and their banner at :23-72),
-  `test/epub_css/CssParserCacheTest.cpp` (`definedEqual` at :473, `stylesEqual` at :484, `line-height: 1.6` in
-  `ResidentPreservesAllStyleFields` at :698)
+- Modify: `lib/Epub/Epub/css/CssStyle.h` (`lineHeightMultiplier` at :192 becomes `lineHeightEm`, its comment saying
+  what it is; `applyOver` at :320-323 and `reset` at :420 follow the name)
+- Modify: `lib/Epub/Epub/css/CssParser.cpp` (the declaration at :936-972 rewritten; `encodeCssStylePayload` and
+  `readCssStylePayload` append the float and use bit 3 of the font-size flags byte; `CSS_FIXED_STYLE_BYTES` 77 → 81 and
+  its layout comment at :99-111; the arena codec at :2338-2341 and :2430-2433 follows the name),
+  `CssParser.h` (`CSS_CACHE_VERSION` 30 at :119, with a `v30` line: "`line-height` is persisted, as a multiple of the
+  font size; v29 dropped it from the cache and stored it relative to a 1.5 base")
+- Modify: `lib/Epub/Epub/content/CompiledContent.cpp` (the name at :112, :150, :304)
+- Test: `test/css_gaps/CssGapsTest.cpp` (the six `CssGapsLineHeight` tests at :23-72),
+  `test/epub_css/CssParserCacheTest.cpp` (`stylesEqual` at :484; `ResidentPreservesAllStyleFields`, whose `.a` already
+  sets `line-height: 1.6` at :698)
 
-- [ ] **Step 1: Write the failing test.** Replace the six tests with one:
+- [ ] **Step 1: Write the failing tests.** Replace the six tests:
 ```cpp
-// line-height is not parsed: layout sets lines from the font and the reader's line spacing, and nothing read the
-// book's value. A rule with only line-height says nothing, so it stays out of the rule cache.
-TEST(CssGapsLineHeight, IsNotParsed) {
-  EXPECT_FALSE(CssParser::parseInlineStyle("line-height: 1.5").defined.anySet());
-  EXPECT_FALSE(CssParser::parseInlineStyle("line-height: 120%").defined.anySet());
-  const CssStyle mixed = CssParser::parseInlineStyle("line-height: 2; text-indent: 1em");
-  EXPECT_TRUE(mixed.hasTextIndent());
+// line-height is a multiple of the element's font size, as CSS has it; normal and the keywords leave it unset.
+TEST(CssGapsLineHeight, IsAMultipleOfTheFontSize) {
+  const auto em = [](const char* decl) {
+    const CssStyle s = CssParser::parseInlineStyle(decl);
+    return s.hasLineHeight() ? s.lineHeightEm : -1.0f;
+  };
+  EXPECT_FLOAT_EQ(1.5f, em("line-height: 1.5"));
+  EXPECT_FLOAT_EQ(1.75f, em("line-height: 175%"));
+  EXPECT_FLOAT_EQ(1.6f, em("line-height: 1.6em"));
+  EXPECT_FLOAT_EQ(1.5f, em("line-height: 24px"));  // CSS's medium is 16 px
+  EXPECT_FLOAT_EQ(2.0f, em("line-height: 24pt"));  // 12 pt to the em
+  EXPECT_FLOAT_EQ(0.5f, em("line-height: 0.1"));   // clamped
+  EXPECT_FLOAT_EQ(4.0f, em("line-height: 9"));
+  EXPECT_FLOAT_EQ(-1.0f, em("line-height: normal"));
+  EXPECT_FLOAT_EQ(-1.0f, em("line-height: inherit"));
+  EXPECT_FLOAT_EQ(-1.0f, em("line-height: tall"));
 }
 ```
-- [ ] **Step 2: Run it; it fails** (`line-height` still sets its bit).
-  `cmake --build build/test --target CssGapsTest -j 8 && ctest --test-dir build/test -R CssGaps --output-on-failure`
-- [ ] **Step 3: Remove** the property everywhere listed above, and `line-height` from the cache test's CSS and helpers.
+  and in `ResidentPreservesAllStyleFields`, after the disk-cache checks:
+```cpp
+  EXPECT_TRUE(heapStyles[0].hasLineHeight()) << "line-height did not survive the disk cache";
+  EXPECT_FLOAT_EQ(1.6f, heapStyles[0].lineHeightEm);
+```
+  (`stylesEqual` already compares the float under its old name; rename it.)
+- [ ] **Step 2: Run; they fail** (1.5 reads as 1.0 under the old base; the disk cache drops the value).
+  `cmake --build build/test --target CssGapsTest EpubCssCacheTest -j 8 && ctest --test-dir build/test -R "CssGaps|CssParserArena" --output-on-failure`
+- [ ] **Step 3: Implement** the parse, the payload field and the version bump.
 - [ ] **Step 4: Run** `CssGapsTest`, `CssParserTest`, `EpubCssCacheTest`, `EpubCssCascadeTest` and `EpubPipelineTest`:
-  pass, every golden unchanged. `grep -rn "lineHeight\b\|lineHeightMultiplier\|line-height" lib src test` finds no CSS
-  use left (the layout's own `lineHeight` variables and `getLineHeight` stay).
-- [ ] **Step 5: Commit** `refactor(css): drop line-height, which nothing read`.
+  pass, every golden unchanged.
+- [ ] **Step 5: Commit** `fix(css): parse line-height as a multiple of the font size and keep it in the rule cache`.
 
 ### Task 2: The CSS properties
 
 **Files:**
 - Modify: `lib/Epub/Epub/css/CssStyle.h` (`CssTextAlign` at :9; the five enums after `CssFloat` at :76; the fields at
   :187 and :211; `kCascadeProperties` at :219; `applyOver`; the `has*()` accessors; `anyDefined()`; `reset`; a
-  `static_assert(sizeof(CssStyle) == 120, ...)` naming the padding the fields took)
+  `static_assert(sizeof(CssStyle) == 124, ...)` naming the padding the fields took)
 - Modify: `lib/Epub/Epub/css/CssParser.cpp` (the declaration dispatch beside `text-align` at :757; `interpretAlignment`
   at :566-574; `anySet` → `anyDefined` at :1094 and :2842), `CssParser.h` (the `interpret*` declarations)
 - Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp` (`anySet` → `anyDefined` at :2164),
@@ -224,8 +241,7 @@ enum class CssUnicodeBidi : uint8_t { Unset = 0, Normal, Embed, Isolate, BidiOve
 ```
 - `CssStyle` fields `writingMode`, `textOrientation`, `textCombine` (after `pageBreakAfter`), `direction`,
   `unicodeBidi` (after `visibilityHidden`), each Unset by default; `hasWritingMode()` and so on test `!= Unset`.
-- `applyOver` merges each at rank indices 27-31 when the base's value is set; `kCascadeProperties` becomes 32 (27
-  after Task 1).
+- `applyOver` merges each at rank indices 28-32 when the base's value is set; `kCascadeProperties` becomes 33.
 - `bool CssStyle::anyDefined() const;`
 - `static bool CssParser::interpretWritingMode(std::string_view, CssWritingMode&)` and the same for the other four;
   false leaves the property Unset. The `-epub-text-combine` and `-ms-text-combine-horizontal` digit forms parse the
@@ -301,13 +317,12 @@ TEST(CssParserDeclarations, AStyleWithOnlyAFlowPropertySaysSomething) {
 ### Task 3: The two persisted codecs
 
 **Files:**
-- Modify: `lib/Epub/Epub/css/CssParser.cpp` (`CSS_FIXED_STYLE_BYTES` and its layout comment at :99-111;
-  `encodeCssStylePayload` after the font-family hash; `readCssStylePayload`; `kMaxCompressedStyle` and the comment at
-  :2262-2271; `compressStyle`'s `extra` byte at :2296-2304; `decompressStyle`)
-- Modify: `lib/Epub/Epub/css/CssParser.h` (`CSS_CACHE_VERSION` 30 at :119; a `v30` line above it: "`writing-mode`,
-  `text-orientation`, `text-combine-upright`, `direction` and `unicode-bidi` are persisted in a flow word, and
-  `text-align: start/end` as themselves, and `line-height` is no longer parsed; a v29 compile dropped the five and
-  stored start/end as left/right")
+- Modify: `lib/Epub/Epub/css/CssParser.cpp` (`CSS_FIXED_STYLE_BYTES` 81 → 83 and its layout comment;
+  `encodeCssStylePayload` after Task 1's line-height float; `readCssStylePayload`; `kMaxCompressedStyle` 74 → 76 and
+  the comment at :2262-2271; `compressStyle`'s `extra` byte at :2296-2304; `decompressStyle`)
+- Modify: `lib/Epub/Epub/css/CssParser.h` (Task 1's `v30` line, extended: "... and `writing-mode`, `text-orientation`,
+  `text-combine-upright`, `direction` and `unicode-bidi` in a flow word, `text-align: start/end` as themselves; v29
+  dropped the five and stored start/end as left/right". No second bump: Tasks 1 and 3 land in one PR.)
 - Test: `test/epub_css/CssParserCacheTest.cpp` (`definedEqual` at :465, `stylesEqual` at :478,
   `ResidentPreservesAllStyleFields` at :695)
 
