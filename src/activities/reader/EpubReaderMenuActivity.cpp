@@ -81,7 +81,8 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
     const int8_t initialGuideDotsOverride, const int8_t initialParagraphAlignmentOverride,
     const int8_t initialTextAntiAliasingOverride, const int8_t initialHyphenationOverride,
     const int8_t initialFontSizeNormalizationOverride, const int8_t initialInlineFootnotePreviewsOverride,
-    const bool hasStarredPages, const bool isCurrentPageStarred, const bool hasPrintedPages)
+    const int8_t initialLineSpacingOverride, const bool hasStarredPages, const bool isCurrentPageStarred,
+    const bool hasPrintedPages)
     : TabbedUiListActivity("EpubReaderMenu", renderer, mappedInput),
       currentPageStarred(isCurrentPageStarred),
       pendingOrientation(currentOrientation),
@@ -99,6 +100,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
       pendingHyphenationOverride(initialHyphenationOverride),
       pendingFontSizeNormalizationOverride(initialFontSizeNormalizationOverride),
       pendingInlineFootnotePreviewsOverride(initialInlineFootnotePreviewsOverride),
+      pendingLineSpacingOverride(initialLineSpacingOverride),
       title(title),
       currentPage(currentPage),
       totalPages(totalPages),
@@ -326,6 +328,24 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
                               })
                               .withSelectorActivity());
 
+  // Line spacing: default(-1) + the 6 global options
+  settingsItems.push_back(SettingInfo::DynamicEnumCtx(
+                              StrId::STR_LINE_SPACING,
+                              {StrId::STR_DEFAULT_VALUE, StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE,
+                               StrId::STR_EXTRA_WIDE, StrId::STR_WIDEST, StrId::STR_BOOK_S_STYLE},
+                              self,
+                              [](const void* ctx) -> uint8_t {
+                                const auto* s = static_cast<const EpubReaderMenuActivity*>(ctx);
+                                return (s->pendingLineSpacingOverride < 0)
+                                           ? 0
+                                           : static_cast<uint8_t>(s->pendingLineSpacingOverride + 1);
+                              },
+                              [](void* ctx, uint8_t v) {
+                                auto* s = static_cast<EpubReaderMenuActivity*>(ctx);
+                                s->pendingLineSpacingOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
+                              })
+                              .withSelectorActivity());
+
   // Text anti-aliasing: default / on / off (mirrors QuickOverrides)
   settingsItems.push_back(SettingInfo::DynamicEnumCtx(
       StrId::STR_TEXT_AA, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
@@ -461,6 +481,7 @@ void EpubReaderMenuActivity::finishWithAction(MenuAction action) {
   payload.fontSizeNormalizationOverride = pendingFontSizeNormalizationOverride;
   payload.guideDotsOverride = pendingGuideDotsOverride;
   payload.inlineFootnotePreviewsOverride = pendingInlineFootnotePreviewsOverride;
+  payload.lineSpacingOverride = pendingLineSpacingOverride;
   setResult(std::move(payload));
   finish();
 }
@@ -504,6 +525,7 @@ void EpubReaderMenuActivity::onBackPressed() {
   payload.fontSizeNormalizationOverride = pendingFontSizeNormalizationOverride;
   payload.guideDotsOverride = pendingGuideDotsOverride;
   payload.inlineFootnotePreviewsOverride = pendingInlineFootnotePreviewsOverride;
+  payload.lineSpacingOverride = pendingLineSpacingOverride;
   result.data = std::move(payload);
   setResult(std::move(result));
   finish();
@@ -549,6 +571,10 @@ std::string EpubReaderMenuActivity::getItemValueString(int index) const {
     }
     if (item.nameId == StrId::STR_PARA_ALIGNMENT && pendingParagraphAlignmentOverride < 0) {
       const auto label = item.getEnumOptionLabel(static_cast<uint8_t>(SETTINGS.paragraphAlignment + 1));
+      if (!label.empty()) return std::string(tr(STR_DEFAULT_VALUE)) + " (" + label + ")";
+    }
+    if (item.nameId == StrId::STR_LINE_SPACING && pendingLineSpacingOverride < 0) {
+      const auto label = item.getEnumOptionLabel(static_cast<uint8_t>(SETTINGS.lineSpacing + 1));
       if (!label.empty()) return std::string(tr(STR_DEFAULT_VALUE)) + " (" + label + ")";
     }
     if (item.nameId == StrId::STR_TEXT_AA && pendingTextAntiAliasingOverride < 0) {

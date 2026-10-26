@@ -731,6 +731,7 @@ class EpubReaderActivity final : public Activity {
   int8_t bookFontSizeNormalizationOverride = -1;
   int8_t bookGuideDotsOverride = -1;
   int8_t bookInlineFootnotePreviewsOverride = -1;
+  int8_t bookLineSpacingOverride = -1;
 
   // Bookmarks (starred pages)
   BookmarkStore bookmarkStore;
@@ -1159,7 +1160,7 @@ class EpubReaderActivity final : public Activity {
                                 int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride,
                                 int8_t textAntiAliasingOverride, int8_t hyphenationOverride,
                                 int8_t fontSizeNormalizationOverride, int8_t guideDotsOverride,
-                                int8_t inlineFootnotePreviewsOverride);
+                                int8_t inlineFootnotePreviewsOverride, int8_t lineSpacingOverride);
   void openReaderMenu();
   void openQuickOverrides();
   bool getEffectiveEmbeddedStyle() const;
@@ -1175,6 +1176,7 @@ class EpubReaderActivity final : public Activity {
   // getEffectiveReaderFontId(), and the family it resolved to (a built-in's label or an SD family
   // name) when `familyOut` is given.
   int resolveReaderFont(std::string* familyOut) const;
+  uint8_t getEffectiveLineSpacingStep() const;
   LineSpacing getEffectiveLineSpacing() const;
   // The line spacing `epub` is laid out with at `step` (CrossPointSettings::LINE_COMPRESSION) in body font `fontId` at
   // `pointSize`: Chinese, Japanese and Korean books by an em pitch, others by a factor on the font's line height. The

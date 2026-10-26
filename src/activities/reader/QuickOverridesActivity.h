@@ -8,7 +8,7 @@
 
 // Bottom-of-the-toolbox quick-overrides menu: shows only the per-book overrides
 // (font family, size, embedded style, image rendering, bionic, guide dots,
-// paragraph alignment, anti-aliasing, hyphenation). Optimised for snappy in-book toggling:
+// paragraph alignment, line spacing, anti-aliasing, hyphenation). Optimised for snappy in-book toggling:
 // renders in FAST_REFRESH mode and reports back through MenuResult; the parent
 // reader applies the result through its existing applyBookReaderOverrides()
 // path, which itself short-circuits when nothing changed.
@@ -20,7 +20,7 @@ class QuickOverridesActivity final : public MenuListActivity {
                          int8_t initialBionicReadingOverride, int8_t initialGuideDotsOverride,
                          int8_t initialParagraphAlignmentOverride, int8_t initialTextAntiAliasingOverride,
                          int8_t initialHyphenationOverride, int8_t initialFontSizeNormalizationOverride,
-                         int8_t initialInlineFootnotePreviewsOverride);
+                         int8_t initialInlineFootnotePreviewsOverride, int8_t initialLineSpacingOverride);
 
   void onEnter() override;
   void render(RenderLock&&) override;
@@ -47,4 +47,5 @@ class QuickOverridesActivity final : public MenuListActivity {
   int8_t pendingHyphenationOverride = -1;
   int8_t pendingFontSizeNormalizationOverride = -1;
   int8_t pendingInlineFootnotePreviewsOverride = -1;
+  int8_t pendingLineSpacingOverride = -1;
 };
