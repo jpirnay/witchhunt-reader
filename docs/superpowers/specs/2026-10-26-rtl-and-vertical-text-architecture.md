@@ -173,11 +173,27 @@ per case:
     existing fast path, no new rotation code.
   - Tables come out as vertical-rl tables (rows become columns), which is what CSS does.
   - Images are drawn in the reader's frame at the mapped rectangle; the parser swaps an image's width and height when
-    it sizes it in the turned frame.
+    it sizes it in the turned frame, so the decoder and the pixel cache (`.pxc`) see the reader's dimensions. Drawn in
+    the turned frame, a portrait image no longer fits its 792×528 screen and is rejected (spike, section 10).
+  - Text decorations go on the line's "over" side in vertical: an overline and the Japanese side line land right of
+    the column. Drawn as horizontal decorations they land on the left (spike).
   - Taps map through the content frame (`tapToLogical` exists); selection overlays drawn in the frame map themselves.
   - Status bar and header stay in the reader's frame.
   - The frame switch lives inside `Page::render` and `renderTextOnly`, so the black-and-white pass, the grayscale
     planes, the prewarm scan and the pre-render all inherit it.
+
+**CSS box properties are physical; layout is logical.** `margin-top`, `padding-right`, `border-left`, `width` and
+`height` name sides of the screen. Layout reads them as block-start, inline-end and so on, which is right only for a
+book written horizontally. In a book written for vertical-rl, top is inline-start (down the column), right is
+block-start (before the first column), bottom is inline-end, left is block-end, and width is the block size. The
+spike's contents page showed it: entries styled `margin: 1em 0`, meant as "start each column 1em down, columns
+touching", came out as columns 2em apart with no indent, 13 pages instead of about 4. The fix is one rotation where
+`CssStyle` becomes `BlockStyle` (and in image sizing), chosen by the writing mode **the CSS was written for**, the
+book's declared mode, not the rendered one:
+- a vertical book set vertically: rotate (CSS's own rule);
+- a horizontal book the reader forces vertical (an Aozora conversion): no rotation, so the author's spacing is kept
+  along the same logical axes, transposed with the page;
+- a vertical book the reader forces horizontal: rotate the other way, for the same reason.
 
 **Why not matcha's second engine.** It would duplicate tables, images, footnotes, links, anchors, KOSync offsets,
 progress, the pre-render, the dictionary, background builds and the section cache, and its glyph grid costs 20 B per
@@ -351,9 +367,33 @@ master one.
 | horizontal (master 0625ac40a) | 63-70 ms | 5.8-6.1 KB |
 | vertical (spike) | 62-83 ms | 6.4-10.4 KB |
 
-**Left for step 3:**
-- The pre-render costs ~4 KB more heap in vertical. Not investigated; the spike's per-character advance and ascender
-  lookups during the prewarm scan are the first suspect.
-- Images, the dictionary's word boxes, taps, and page progression were not touched by the spike.
-- The corner offsets for 、。 and small kana are by eye; the baked vertical forms of 5.6 replace them where the font
-  has them.
+### 10.1 The reference run: a commercial vertical book
+
+The spike against the acceptance book (Hayakawa's 『七王国の玉座』 vol. 1, ppd `rtl`, `-webkit-writing-mode`, ~1,400
+ruby groups), then master on the same pages for the horizontal figures. X3, portrait, NotoSansJP 14 pt.
+
+| Spine item | Pages (v / h) | Build (v / h) | Pre-render (v / h) | Heap cost of the pre-render (v / h) |
+|---|---|---|---|---|
+| 9, prologue (10k characters, 45 ruby) | 60 / 52 | 4,282 / 3,863 ms | 33-86 / 40-116 ms | 3.6-19.5 / 4.9-19.4 KB |
+| 39, longest chapter (20k characters) | 102 / 93 | 6,190 / 5,995 ms | 54-94 / 48-84 ms | 5.9-19.4 / 5.0-19.3 KB |
+| 22, chapter with an image | 48 / 43 | 3,873 / 3,720 ms | 60-109 / 53-113 ms | 6.2-19.5 / 5.8-19.5 KB |
+| 4, contents | 13 / 9 | 1,616 / 1,579 ms | 9-10 / 9-10 ms | 2.1 / 2.7 KB |
+
+- **Speed:** the same per page (71-74 ms of build per page either way); pre-render times overlap. Every turn hit the
+  pre-render.
+- **Heap:** the ~19 KB peaks come in both modes, so the fixture's "~4 KB more in vertical" does not hold on a real
+  book; ordinary pages overlap.
+- **Prose:** dense columns, ruby beside its base, small kana, 、。 and brackets as in the fixtures.
+- **What broke, all expected or now explained:**
+  - the full-page image is rejected (`Render bounds rejected ... screen (528x792)`) and the "Press Confirm" placeholder
+    is drawn sideways: images must be drawn in the reader's frame (5.2);
+  - image pixel caches written at the turned frame's size mismatch on master afterwards (`Cache width mismatch`);
+  - the contents page's spacing: CSS box properties not rotated for a vertical-authored book (5.2);
+  - overlines and the heading's side line on the left of the column (5.2);
+  - the chapter number `13` (tate-chu-yoko) set sideways (step 4).
+- **Not the frame's doing:** ギャレ｜ッド breaks before a small kana. That is A2's kinsoku (CSS `line-break: normal`
+  allows it in Japanese).
+
+**Left for step 3:** images (drawing frame and sizing), CSS box rotation by authored mode, decoration side, the
+dictionary's word boxes, taps, and page progression. The corner offsets for 、。 and small kana are by eye; the baked
+vertical forms of 5.6 replace them where the font has them.

@@ -45,6 +45,12 @@ images, ~380,000 CJK characters.
 
 ## Left from the spike, for step 3
 
-- The pre-render costs ~4 KB more heap in vertical (6.4-10.4 KB against 5.8-6.1 KB on the same pages). First suspect:
-  the per-character advance and ascender lookups during the prewarm scan.
-- Images, the dictionary's word boxes, taps and page progression were not touched.
+The reference run on the acceptance book is spec section 10.1: the same speed per page as horizontal, the same heap
+peaks.
+- **Images:** drawn in the turned frame they are rejected (a portrait image does not fit 792×528) and the placeholder
+  turns sideways; their pixel caches were written at the turned size. Draw in the reader's frame, size with the
+  reader's dimensions.
+- **CSS box properties** (margins, padding, borders, width/height) must be rotated by the writing mode the book's CSS
+  was written for (spec 5.2). Without it the contents page took 13 pages instead of about 4.
+- **Decorations:** overlines and side lines land left of the column; in vertical they belong on the right.
+- The dictionary's word boxes, taps and page progression were not touched.
