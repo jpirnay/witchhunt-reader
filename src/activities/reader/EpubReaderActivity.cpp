@@ -22,6 +22,7 @@
 #include <Epub/FootnoteShape.h>
 #include <Epub/Page.h>
 #include <Epub/TypographyProfile.h>
+#include <Epub/VerticalSpike.h>
 #include <Epub/blocks/ImageBlock.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
@@ -655,6 +656,10 @@ void EpubReaderActivity::onEnter() {
   }
   logReaderMemSnapshot("onEnter_after_orientation");
 
+  // SPIKE: every Chinese or Japanese book is laid out vertically through the turned frame.
+  VerticalSpike::active = TypographyProfile::forLanguage(epub->getLanguage()).verticalAllowed;
+  LOG_INF("VSPIKE", "vertical=%d lang=%s", VerticalSpike::active ? 1 : 0, epub->getLanguage().c_str());
+
   epub->setupCacheDir();
   logReaderMemSnapshot("onEnter_after_setupCacheDir");
 
@@ -797,6 +802,7 @@ void EpubReaderActivity::onEnter() {
 }
 
 void EpubReaderActivity::onExit() {
+  VerticalSpike::active = false;  // SPIKE
   Activity::onExit();
   logReaderMemSnapshot("onExit_before_release");
 
@@ -1392,6 +1398,7 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.paragraphAlignment = getEffectiveParagraphAlignment();
   p.viewportWidth = layout.viewportWidth;
   p.viewportHeight = layout.viewportHeight;
+  if (VerticalSpike::active) std::swap(p.viewportWidth, p.viewportHeight);  // SPIKE: the turned frame
   p.hyphenationEnabled = getEffectiveHyphenation();
   p.fontSizeNormalization = getEffectiveFontSizeNormalization();
   p.embeddedStyle = lastRenderStats.embeddedStyle;
@@ -4068,6 +4075,7 @@ EpubReaderActivity::RenderLayout EpubReaderActivity::computeRenderLayout() const
   layout.marginLeft = orientedMarginLeft;
   layout.viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
   layout.viewportHeight = renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom;
+  VerticalSpike::readerViewportWidth = layout.viewportWidth;  // SPIKE
   return layout;
 }
 
@@ -4433,6 +4441,7 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   buildParams.imageRendering = imageRendering;
   buildParams.viewportWidth = layout.viewportWidth;
   buildParams.viewportHeight = layout.viewportHeight;
+  if (VerticalSpike::active) std::swap(buildParams.viewportWidth, buildParams.viewportHeight);  // SPIKE
 
   // Image headers an earlier build could not size (a walk short of memory keeps its image queued
   // in the manifest) are resolved now, from the framebuffer, before this build carves up the
@@ -4782,6 +4791,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   Section::BuildParams probeParams = makeSectionBuildParams();
   probeParams.viewportWidth = viewportWidth;
   probeParams.viewportHeight = viewportHeight;
+  if (VerticalSpike::active) std::swap(probeParams.viewportWidth, probeParams.viewportHeight);  // SPIKE
   probeParams.embeddedStyle = embeddedStyle;
   probeParams.imageRendering = imageRendering;
   bool cacheHit = !resumeBackgroundBuild && section->loadSectionFile(probeParams);

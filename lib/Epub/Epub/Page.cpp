@@ -8,6 +8,40 @@
 
 #include <optional>
 
+#include "VerticalSpike.h"
+
+bool VerticalSpike::active = false;
+int VerticalSpike::readerViewportWidth = 0;
+GfxRenderer::Orientation VerticalSpike::readerOrientation = GfxRenderer::Portrait;
+int VerticalSpike::readerWidth = 0;
+
+namespace {
+// SPIKE: draws a page in the turned content frame for its lifetime. The reader's offsets (left margin, content top)
+// become the content frame's: inline starts at the content top, block at the reader's right margin.
+class VerticalFrameScope {
+ public:
+  VerticalFrameScope(GfxRenderer& renderer, int& xOffset, int& yOffset) : renderer_(renderer) {
+    if (!VerticalSpike::active) return;
+    held_ = renderer.getOrientation();
+    VerticalSpike::readerOrientation = held_;
+    VerticalSpike::readerWidth = renderer.getScreenWidth();
+    const int readerLeft = xOffset;
+    xOffset = yOffset;
+    yOffset = VerticalSpike::readerWidth - readerLeft - VerticalSpike::readerViewportWidth;
+    renderer.setDrawOrientation(VerticalSpike::contentOrientation(held_));
+    switched_ = true;
+  }
+  ~VerticalFrameScope() {
+    if (switched_) renderer_.setDrawOrientation(held_);
+  }
+
+ private:
+  GfxRenderer& renderer_;
+  GfxRenderer::Orientation held_ = GfxRenderer::Portrait;
+  bool switched_ = false;
+};
+}  // namespace
+
 void PageLine::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset) {
   block->render(renderer, fontId, xPos + xOffset, yPos + yOffset);
 }
@@ -295,8 +329,9 @@ std::unique_ptr<PageTableFragment> PageTableFragment::deserialize(FsFile& file, 
       new PageTableFragment(columnCount, totalWidth, totalHeight, std::move(rows), xPos, yPos, hasBorder));
 }
 
-void Page::render(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset,
-                  const bool forceLoadLargeImages, const bool monochromeOutput) const {
+void Page::render(GfxRenderer& renderer, const int fontId, int xOffset, int yOffset, const bool forceLoadLargeImages,
+                  const bool monochromeOutput) const {
+  VerticalFrameScope frame(renderer, xOffset, yOffset);
   for (auto& element : elements) {
     if (element->getTag() == TAG_PageImage) {
       static_cast<PageImage&>(*element).renderWithForceLoad(renderer, xOffset, yOffset, forceLoadLargeImages,
@@ -393,8 +428,9 @@ bool Page::allImagesArePlaceholders(const bool forceLoadLargeImages, const bool 
   return anyImage;
 }
 
-bool Page::renderTextOnly(GfxRenderer& renderer, const int fontId, const int xOffset, const int yOffset,
+bool Page::renderTextOnly(GfxRenderer& renderer, const int fontId, int xOffset, int yOffset,
                           const bool abortable) const {
+  VerticalFrameScope frame(renderer, xOffset, yOffset);
   for (auto& element : elements) {
     // Scan every non-image element so prewarm covers text from table fragments
     // and other composite text containers, not only plain PageLine entries.

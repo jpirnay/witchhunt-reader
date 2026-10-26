@@ -12,7 +12,162 @@
 #include <cstdint>
 #include <cstring>
 
+#include "../VerticalSpike.h"
+
 bool TextBlock::guideDotsEnabled = false;
+
+// ---- SPIKE: vertical-rl through the turned frame (VerticalSpike.h) ---------------------------------------------
+namespace vspike {
+
+enum class Orient : uint8_t { Sideways, Upright, UprightCorner, SmallKana };
+
+// A rough UAX #50 for the spike: CJK and kana upright, the marks that sit in the corner of a vertical cell, small
+// kana, and everything else (Latin, brackets, dashes, the long vowel mark) sideways.
+Orient orientOf(const uint32_t cp) {
+  switch (cp) {
+    case 0x3001:
+    case 0x3002:
+    case 0xFF0C:
+    case 0xFF0E:
+      return Orient::UprightCorner;
+    case 0x3041:
+    case 0x3043:
+    case 0x3045:
+    case 0x3047:
+    case 0x3049:
+    case 0x3063:
+    case 0x3083:
+    case 0x3085:
+    case 0x3087:
+    case 0x308E:
+    case 0x3095:
+    case 0x3096:
+    case 0x30A1:
+    case 0x30A3:
+    case 0x30A5:
+    case 0x30A7:
+    case 0x30A9:
+    case 0x30C3:
+    case 0x30E3:
+    case 0x30E5:
+    case 0x30E7:
+    case 0x30EE:
+    case 0x30F5:
+    case 0x30F6:
+      return Orient::SmallKana;
+    case 0x30FC:
+    case 0x301C:
+    case 0xFF5E:
+    case 0xFF08:
+    case 0xFF09:
+    case 0xFF3B:
+    case 0xFF3D:
+    case 0xFF5B:
+    case 0xFF5D:
+    case 0xFF5F:
+    case 0xFF60:
+    case 0xFF62:
+    case 0xFF63:
+    case 0xFF1A:
+    case 0xFF1B:
+    case 0xFF1D:
+    case 0xFF0D:
+    case 0xFF3F:
+      return Orient::Sideways;
+    default:
+      break;
+  }
+  if (cp >= 0x3008 && cp <= 0x3011) return Orient::Sideways;  // angle and corner brackets
+  if (cp >= 0x3014 && cp <= 0x301B) return Orient::Sideways;  // tortoise and white brackets
+  if (cp >= 0x31F0 && cp <= 0x31FF) return Orient::SmallKana;
+  if ((cp >= 0x3000 && cp <= 0x30FF) || (cp >= 0x3400 && cp <= 0x4DBF) || (cp >= 0x4E00 && cp <= 0x9FFF) ||
+      (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFF01 && cp <= 0xFF60) || (cp >= 0xAC00 && cp <= 0xD7AF) ||
+      (cp >= 0x1100 && cp <= 0x11FF) || (cp >= 0x3130 && cp <= 0x318F) || (cp >= 0x2E80 && cp <= 0x2FDF) ||
+      (cp >= 0x3200 && cp <= 0x33FF) || (cp >= 0xFE30 && cp <= 0xFE4F) || (cp >= 0x20000 && cp <= 0x3FFFF)) {
+    return Orient::Upright;
+  }
+  return Orient::Sideways;
+}
+
+int advanceOf(const GfxRenderer& r, const int font, const char* text, const EpdFontFamily::Style style,
+              const float scale) {
+  const int raw = r.getTextAdvanceX(font, text, style);
+  return scale == 1.0f ? raw : static_cast<int>(raw * scale + 0.5f);
+}
+
+void drawIn(const GfxRenderer& r, const int font, const int x, const int y, const char* text,
+            const EpdFontFamily::Style style, const float scale) {
+  if (scale == 1.0f) {
+    r.drawText(font, x, y, text, true, style);
+  } else {
+    r.drawTextScaled(font, x, y, text, true, style, scale);
+  }
+}
+
+// Draws `text` as one run along a column. (x, top) is where render() would hand drawText the word in the content
+// frame: x is the pen along the column, top + ascender the horizontal baseline. The column's axis is that baseline
+// less 0.38 em (the centre of a CJK em box, 880 above and 120 below the baseline). Sideways runs are drawn as they
+// are, so they come out turned clockwise; an upright character is drawn in the reader's frame, its em box centred
+// on the axis with its top at the pen.
+void drawColumnRun(const GfxRenderer& constR, const int font, const int x, const int top, const char* text,
+                   const EpdFontFamily::Style style, const float scale) {
+  auto& r = const_cast<GfxRenderer&>(constR);  // spike: the draw orientation is renderer state
+  const int ascender = scale == 1.0f ? r.getFontAscenderSize(font) : r.getFontAscenderSizeScaled(font, scale);
+  const int em = advanceOf(r, font, "\xE4\xB8\x80", style, scale);  // 一
+  const int baseline = top + ascender;
+  const int axis = baseline - (em * 38 + 50) / 100;
+  const GfxRenderer::Orientation content = r.getOrientation();
+
+  char run[96];
+  size_t runLen = 0;
+  int runPen = x;
+  int pen = x;
+  const auto flushRun = [&]() {
+    if (runLen == 0) return;
+    run[runLen] = '\0';
+    drawIn(r, font, runPen, top, run, style, scale);
+    pen = runPen + advanceOf(r, font, run, style, scale);
+    runLen = 0;
+  };
+
+  const auto* p = reinterpret_cast<const unsigned char*>(text);
+  while (*p != 0) {
+    const unsigned char* start = p;
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (cp == 0) break;
+    const auto len = static_cast<size_t>(p - start);
+    const Orient o = orientOf(cp);
+    if (o == Orient::Sideways) {
+      if (runLen == 0) runPen = pen;
+      if (runLen + len < sizeof(run)) {
+        memcpy(run + runLen, start, len);
+        runLen += len;
+      }
+      continue;
+    }
+    flushRun();
+    char one[5] = {};
+    memcpy(one, start, len);
+    const int adv = advanceOf(r, font, one, style, scale);
+    // Reader frame: content (cx, cy) is reader (readerWidth - 1 - cy, cx).
+    int rx = VerticalSpike::readerWidth - 1 - axis - adv / 2;
+    int ry = pen + (em * 88 + 50) / 100 - ascender;  // em box top at the pen
+    if (o == Orient::UprightCorner) {                // 、。 sit in the upper right of a vertical cell
+      rx += em * 55 / 100;
+      ry -= em * 62 / 100;
+    } else if (o == Orient::SmallKana) {
+      rx += em / 10;
+      ry -= em / 10;
+    }
+    r.setDrawOrientation(VerticalSpike::readerOrientation);
+    drawIn(r, font, rx, ry, one, style, scale);
+    r.setDrawOrientation(content);
+    pen += adv;
+  }
+  flushRun();
+}
+
+}  // namespace vspike
 
 // 32-bit layout: vptr 4, RenderStyle 12, five scalars and a pad byte 8, arena 4, arenaOwned_ and annotationBytes_ 4,
 // five views 20.
@@ -534,7 +689,9 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     } else if ((currentStyle & EpdFontFamily::SUB) != 0) {
       wordY += blockAscender / 4;
     }
-    if (scale == 1.0f) {
+    if (VerticalSpike::active) {
+      vspike::drawColumnRun(renderer, font, wordX, wordY, word, currentStyle, scale);
+    } else if (scale == 1.0f) {
       renderer.drawText(font, wordX, wordY, word, true, currentStyle);
     } else {
       renderer.drawTextScaled(font, wordX, wordY, word, true, currentStyle, scale);
@@ -622,7 +779,12 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       nextChar(pos, buf);
       const int offset = spread ? slack * (2 * c + 1) / (2 * chars) : slack / 2;
       const int advanced = static_cast<int>(rawBefore * rubyScale + 0.5f);
-      renderer.drawTextScaled(font, x + a.x + offset + advanced, rubyY, buf, true, EpdFontFamily::REGULAR, rubyScale);
+      if (VerticalSpike::active) {
+        vspike::drawColumnRun(renderer, font, x + a.x + offset + advanced, rubyY, buf, EpdFontFamily::REGULAR,
+                              rubyScale);
+      } else {
+        renderer.drawTextScaled(font, x + a.x + offset + advanced, rubyY, buf, true, EpdFontFamily::REGULAR, rubyScale);
+      }
       rawBefore += renderer.getTextAdvanceX(font, buf, EpdFontFamily::REGULAR);
     }
   }

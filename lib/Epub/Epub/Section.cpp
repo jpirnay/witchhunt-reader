@@ -33,7 +33,7 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 100;  // v100: the optimal line breaker indents only a paragraph's first line
+constexpr uint8_t SECTION_FILE_VERSION = 201;  // v100: the optimal line breaker indents only a paragraph's first line
                                                // v99: ruby (furigana) is laid out above its base: a line with
                                                // ruby keeps its groups (TextBlock annotations) and is taller
                                                // by half an ascender; <rp> is not laid out.
