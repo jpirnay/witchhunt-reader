@@ -85,10 +85,9 @@ struct WritingModeLayout : testing::Test {
   }
   void TearDown() override { fs::remove_all(work); }
 
-  // A one-chapter book of `xhtml` with `css` as its stylesheet, built and dumped in a cache of its own.
-  std::string dump(const std::string& css, const std::string& xhtml,
-                   const pipeline_harness::Profile& profile = pipeline_harness::Profile{},
-                   const std::vector<SyntheticFile>& extra = {}) {
+  // A one-chapter book of `xhtml` with `css` as its stylesheet; `spineAttrs` go on its OPF's <spine>.
+  std::string writeBook(const std::string& css, const std::string& xhtml, const std::vector<SyntheticFile>& extra = {},
+                        const std::string& spineAttrs = "") {
     const int index = books++;
     std::vector<SyntheticFile> files = extra;
     files.push_back({"style.css", "text/css", std::string(kBaseCss) + css});
@@ -108,15 +107,21 @@ struct WritingModeLayout : testing::Test {
             "version=\"3.0\" unique-identifier=\"id\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
             "<dc:identifier id=\"id\">wm</dc:identifier><dc:title>WM</dc:title><dc:language>en</dc:language>"
             "</metadata>\n<manifest>\n" +
-                manifest + "</manifest>\n<spine><itemref idref=\"c\"/></spine>\n</package>\n");
+                manifest + "</manifest>\n<spine" + spineAttrs + "><itemref idref=\"c\"/></spine>\n</package>\n");
     zip.add("chapter.xhtml", xhtml);
     for (const auto& file : files) zip.add(file.href, file.bytes);
     const fs::path path = work / ("book" + std::to_string(index) + ".epub");
     zip.write(path.string());
+    return path.string();
+  }
+
+  // The book built and dumped in a cache of its own.
+  std::string dump(const std::string& css, const std::string& xhtml,
+                   const pipeline_harness::Profile& profile = pipeline_harness::Profile{},
+                   const std::vector<SyntheticFile>& extra = {}, const std::string& spineAttrs = "") {
+    const std::string path = writeBook(css, xhtml, extra, spineAttrs);
     std::ostringstream out;
-    EXPECT_TRUE(
-        pipeline_harness::runAndDump(path.string(), (work / ("cache" + std::to_string(index))).string(), profile, out))
-        << out.str();
+    EXPECT_TRUE(pipeline_harness::runAndDump(path, path + ".cache", profile, out)) << out.str();
     return out.str();
   }
 };
@@ -308,6 +313,29 @@ TEST_F(WritingModeLayout, DirHoldsWithoutTheBooksCss) {
   for (const std::string& message : ehp)
     sawRtl = sawRtl || message.find("Text runs horizontal, rtl") != std::string::npos;
   EXPECT_TRUE(sawRtl);
+}
+
+// ---- The spine's page progression ----
+
+TEST_F(WritingModeLayout, ThePageProgressionSurvivesBookBin) {
+  const std::string path = writeBook("", document("<p>Alpha</p>"), {}, " page-progression-direction=\"rtl\"");
+  const std::string cache = path + ".cache";
+  {
+    Epub built(path, cache);
+    ASSERT_TRUE(built.load(true));
+    EXPECT_EQ(PageProgression::Rtl, built.pageProgression());
+  }
+  {
+    Epub reloaded(path, cache);  // from book.bin this time
+    ASSERT_TRUE(reloaded.load(true));
+    EXPECT_EQ(PageProgression::Rtl, reloaded.pageProgression());
+  }
+}
+
+TEST_F(WritingModeLayout, TheDumpNamesADeclaredPageProgressionOnly) {
+  EXPECT_NE(std::string::npos,
+            dump("", document("<p>Alpha</p>"), {}, {}, " page-progression-direction=\"rtl\"").find(" ppd=rtl\n"));
+  EXPECT_EQ(std::string::npos, dump("", document("<p>Alpha</p>")).find("ppd="));
 }
 
 }  // namespace

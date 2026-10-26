@@ -207,6 +207,7 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, OpfCac
   bookMetadata.title = opfParser.title;
   bookMetadata.author = opfParser.author;
   bookMetadata.language = opfParser.language;
+  bookMetadata.pageProgression = opfParser.pageProgression;
   bookMetadata.coverItemHref = opfParser.coverItemHref;
   bookMetadata.series = opfParser.series;
   bookMetadata.seriesIndex = opfParser.seriesIndex;
@@ -1334,6 +1335,11 @@ const std::string& Epub::getLanguage() const {
   }
 
   return bookMetadataCache->coreMetadata.language;
+}
+
+PageProgression Epub::pageProgression() const {
+  if (!bookMetadataCache || !bookMetadataCache->isLoaded()) return PageProgression::Default;
+  return bookMetadataCache->coreMetadata.pageProgression;
 }
 
 const std::string& Epub::getSeries() const {

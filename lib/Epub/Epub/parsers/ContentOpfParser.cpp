@@ -605,6 +605,12 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
 
   if (self->state == IN_PACKAGE && isSpineTag(name)) {
     self->state = IN_SPINE;
+    // Metadata, so read with or without a cache (the spine table below needs one).
+    for (int i = 0; atts[i]; i += 2) {
+      if (strcmp(atts[i], "page-progression-direction") != 0) continue;
+      if (strcasecmp(atts[i + 1], "rtl") == 0) self->pageProgression = PageProgression::Rtl;
+      if (strcasecmp(atts[i + 1], "ltr") == 0) self->pageProgression = PageProgression::Ltr;
+    }
     // No cache => no spine parsing (see the isItemRefTag branch), so nothing will read this.
     // queueSpineItemRef() already treats an absent reader as "cannot resolve".
     if (self->cache) {
