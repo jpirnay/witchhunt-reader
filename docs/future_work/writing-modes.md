@@ -19,15 +19,16 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 
 | Step | What | State |
 |---|---|---|
-| 0 | Parse every trigger (`writing-mode`, `text-orientation`, `text-combine-upright`, `direction`, `unicode-bidi`, `start`/`end`, `dir` with `<bdo>`/`<bdi>`, OPF ppd); CSS boxes along the writing mode, `start`/`end` along the direction; `line-height` parsed as CSS means it and kept through the cache; fixture books | built on `feat/writing-modes-step0`, X3-checked 2026-10-26 ([plan](../superpowers/plans/2026-10-26-writing-modes-step0.md)) |
+| 0 | Parse every trigger (`writing-mode`, `text-orientation`, `text-combine-upright`, `direction`, `unicode-bidi`, `start`/`end`, `dir` with `<bdo>`/`<bdi>`, OPF ppd); CSS boxes along the writing mode, `start`/`end` along the direction; `line-height` parsed as CSS means it and kept through the cache; fixture books | shipped (#560) ([plan](../superpowers/plans/2026-10-26-writing-modes-step0.md)) |
 | 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; FlowContext and page progression | open |
 | 2 | Arabic script | open |
 | 3 | Vertical frame (from the spike); the vertical decision and its settings | open |
 | 4 | Vertical typography: baked vertical forms, small kana, tate-chu-yoko (the per-word flag), A3a in vertical | open |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
 
-**Next step.** Line spacing (`cjk.md`, step 10), before steps 1-4 (maintainer, 2026-10-26): it reads the
-`line-height` step 0 keeps, and it helps every horizontal CJK book now.
+**Next step.** Line spacing (`cjk.md`, step 10) comes before steps 1-4 (maintainer, 2026-10-26): it reads the
+`line-height` step 0 keeps, and it helps every horizontal CJK book now. It is built on `feat/line-spacing`; step 1
+follows.
 
 ## Parsed in step 0, read later
 

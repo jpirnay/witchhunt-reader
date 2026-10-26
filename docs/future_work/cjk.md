@@ -30,7 +30,7 @@ behind CFF.
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-a3b-push-in-and-gap.md)) |
 | 8 | Ruby and emphasis dots ([B2](#emphasis-dots-pr-b2)) | B1 shipped (#554); B2 emphasis dots next ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
 | 9 | The dictionary on CJK pages ([below](#dictionary-on-cjk-pages)) | open |
-| 10 | Line spacing: the book's `line-height`, an Extra wide, a CJK default, a per-book override ([below](#line-spacing)) | next after writing-modes step 0, which parses and caches the book's value (maintainer, 2026-10-26) |
+| 10 | Line spacing: a CJK em-pitch scale, Extra wide and Widest, Book's style, a per-book override ([below](#line-spacing)) | built on `feat/line-spacing` ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md), [plan](../superpowers/plans/2026-10-26-line-spacing.md)) |
 
 Synthetic bold comes before the font manager because the CJK families ship in their Regular weight only (spec
 section 4). Step 6 is what makes a CJK library navigable once a font is installed.
@@ -305,32 +305,23 @@ questions, which it answers:
 
 ## Line spacing
 
-**Open.** CJK readers want more leading than Latin text gets, and a setting that can follow the book or override it.
-- **What exists.** One global setting, Tight, Normal or Wide, which scales the font's own line height by 0.95, 1.0 or 1.1
-  (0.90 to 1.0 for the built-in Noto Sans; `CrossPointSettings::getReaderLineCompression`,
-  `EpubReaderActivity::getEffectiveReaderLineCompression`). No "book's style" entry, and no per-book override (Quick
-  overrides has twelve, line spacing not among them). With Noto CJK, whose own line height is about 1.45 em, Wide gives
-  about 1.6 em.
-- **The book's value.** Writing-modes step 0 (`docs/future_work/writing-modes.md`) parses `line-height` as a multiple of
-  the font size and keeps it through the rule cache. Before that the cache dropped it, so nothing could use it.
-- **Why it matters.**
-  - JLREQ recommends a line gap of half to a whole character, a pitch of 1.5 to 2 em. Typotheque's figure for CJK, about
-    1.7, is the one upstream's Extra wide cites (crosspoint-reader #3037, asked for by its Korean contributor).
-  - Upstream then widened Wide and Extra wide for TrueType fonts to 1.3 and 1.6 (#3646) and kept 1.1 and 1.2 for
-    `.cpfont` fonts after complaints (#4013): a factor on each font's own line height means something different per font.
-  - Commercial Japanese books set `line-height` themselves, often 1.75.
-  - In vertical text the same value is the column pitch.
-- **A shape to judge** (not decided):
-  - the setting follows paragraph alignment's pattern: a "Book's style" entry that uses the book's `line-height` where it
-    sets one, and fixed entries (Tight, Normal, Wide, Extra wide) that override it;
-  - the fixed entries as a line pitch in ems rather than a factor on the font's own line height, so a bitmap and an
-    outline font at one size space alike;
-  - a default from the typography profile where the book says nothing, CJK wider than Latin;
-  - a per-book override in Quick overrides;
-  - the section cache key carries the setting where it now carries the line compression.
+**Built** on `feat/line-spacing` ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md),
+[plan](../superpowers/plans/2026-10-26-line-spacing.md)), after an X3 study of a Japanese, a Chinese and a Korean book
+at 1.5, 1.7 and 2.0 em against the old Normal and Wide.
+- **The scale** (maintainer, 2026-10-26). Chinese, Japanese and Korean books get a line pitch in ems: Tight 1.5, Normal
+  1.7, Wide 1.85, Extra wide 2.0, Widest 2.2. JLREQ and CLREQ set the gap at half to one character (1.5 to 2 em); KLREQ
+  gives no figure (its example, and Hancom Hangul's default, is 160%). The old Normal was Noto CJK's own line, about
+  1.45 em. Other books keep factors on the font's line height (0.95 to 1.3; 0.90 to 1.2 for the built-in Noto Sans).
+- **Book's style** reads each block's `line-height`, inherited as CSS has it, floored at Tight. EBPAJ books declare
+  1.75; calibre conversions carry 1.2, which the floor lifts to 1.5 em in a CJK book.
+- **A per-book override** in Quick overrides and the reader menu.
 
-**Next step.** Screenshots on the X3 of a Japanese, a Chinese and a Korean book at 1.5, 1.7 and 2.0 em against today's
-Normal and Wide, then a spec.
+**Left for later.**
+- The TXT and Markdown readers keep the font's line height (maintainer: not in this round).
+- In Book's style, lines that are not a block's (a `<br>` separator's blank line, an `<hr>`'s margin, table rows) keep
+  Normal's pitch, and `em` and `%` values are inherited as numbers, which differs from CSS only where a child changes
+  font size.
+- In vertical text (writing-modes step 3) the same pitch becomes the column pitch.
 
 ## Page glyph arena follow-ups (after #500)
 
