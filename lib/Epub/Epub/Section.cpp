@@ -360,8 +360,9 @@ uint32_t fnv1a(const uint8_t* data, size_t length) {
 
 uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   uint8_t buffer[96];
-  static_assert(sizeof(buffer) >= 21 + sizeof(uint32_t) + BlockFontFamilies::kMaxFamilies * 3 * sizeof(int32_t),
-                "the settings (21 B) and every family fit");
+  static_assert(sizeof(buffer) >= 21 + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) +
+                                      BlockFontFamilies::kMaxFamilies * 3 * sizeof(int32_t),
+                "the settings (21 B), Book's style line spacing and every family fit");
   size_t offset = 0;
 
   auto append = [&](const void* ptr, size_t size) {
@@ -384,6 +385,10 @@ uint32_t Section::calculatePropertyHash(const BuildParams& p) {
     append(&INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION, sizeof(INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION));
   }
   append(&p.imageRendering, sizeof(p.imageRendering));
+  if (p.bookLineHeightFloor > 0.0f) {
+    append(&p.bookLineHeightFloor, sizeof(p.bookLineHeightFloor));
+    append(&p.lineHeightEmPx, sizeof(p.lineHeightEmPx));
+  }
   // Only what the book's CSS can reach, and only when there is any: a variant without families keeps its old key.
   if (p.embeddedStyle && p.fontFamilies && p.fontFamilies->count != 0) {
     append(&p.fontFamilies->body, sizeof(p.fontFamilies->body));
@@ -1240,6 +1245,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   }
   st.visitor->endExternalPageBreakAnchors();
   st.visitor->setFontSizeLadder(p.fontSizeLadder);
+  st.visitor->setBookLineHeight(p.bookLineHeightFloor, p.lineHeightEmPx);
   if (p.embeddedStyle && p.fontFamilies) st.visitor->setFontFamilies(*p.fontFamilies);
   // Anchors stream to SD as they are found rather than accumulating in the parser; the
   // finalizer below copies the spill into the section file's anchor map. Set before setup(),

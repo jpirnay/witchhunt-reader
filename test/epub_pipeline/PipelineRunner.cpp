@@ -163,6 +163,8 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
     Section::BuildParams p;
     p.fontId = profile.fontId;
     p.lineCompression = profile.lineCompression;
+    p.bookLineHeightFloor = profile.bookLineHeightFloor;
+    p.lineHeightEmPx = profile.lineHeightEmPx;
     p.extraParagraphSpacing = profile.extraParagraphSpacing;
     p.paragraphAlignment = profile.paragraphAlignment;
     p.viewportWidth = profile.viewportWidth;

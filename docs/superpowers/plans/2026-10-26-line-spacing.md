@@ -89,8 +89,8 @@ reproduce is a finding to report, not a number to adjust silently.
    into the element's copy after the memo, never into the memo. Pinned in Task 3:
    `LineSpacingLayout.OneClassUnderTwoAncestors`.
 3. **Byte-identical with Book's style off**, including for books that declare `line-height`: every golden unchanged,
-   and the property hash of a default `BuildParams` unchanged. Pinned in Task 3: `SectionPropertyHash.
-   BookStyleOffKeepsTheKey`, and the golden run.
+   and the property hash of a default `BuildParams` unchanged. Pinned in Task 3: `LineSpacingLayout.
+   BookStyleOffKeepsTheCacheKey`, and the golden run.
 4. **CJK pitch is absolute.** The same CJK book at Normal gets 1.7 em whatever the font's own line height. Pinned in
    Task 1: `LineSpacing.CjkPitchIsTheSameEmWhateverTheFont`.
 5. **The sleep screen's page** must build under the same key as the reader, or the sleep path makes a duplicate section
@@ -129,8 +129,8 @@ reproduce is a finding to report, not a number to adjust silently.
 ### Task 2: The setting and its two existing readers
 
 **Files:**
-- Modify: `src/CrossPointSettings.h` (:273 enum; asserts against `LineSpacingStep`), `src/CrossPointSettings.cpp`
-  (`getReaderLineCompression` → `lineSpacingFor`, font or Noto Sans scale; Book's style reads as Normal there)
+- Modify: `src/CrossPointSettings.h` (:273 enum), `src/CrossPointSettings.cpp` (asserts against `LineSpacingStep`;
+  `getReaderLineCompression` → `lineSpacingFor`, font or Noto Sans scale; Book's style reads as Normal there)
 - Modify: `src/SettingsList.h:389` (six labels), `lib/I18n/translations/english.yaml` (two keys beside `STR_WIDE`)
 - Modify: `src/util/DictHtmlPages.cpp:87` only if the signature changes (it should not)
 - Modify: `test/setting_info_options` if it pins the option count (check)
@@ -147,9 +147,11 @@ reproduce is a finding to report, not a number to adjust silently.
 
 **Files:**
 - Modify: `lib/Epub/Epub/blocks/BlockStyle.h` (`lineHeightEm`; `fromCssStyle` copies it when defined;
-  `getCombinedBlockStyle` takes the child's when set, else the parent's, as `fontSizeMultiplier` does)
-- Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.h` (`FlowEntry::lineHeightEm` and its comment; the constructor's
-  `bookLineHeightFloor` and `lineHeightEmPx` after `lineCompression`; `bookPerEm_`, `bookFloor_`)
+  `getCombinedBlockStyle` takes the child's: the value is inherited through the flow stack already, and a spent sibling
+  block merging into the next paragraph must not lend its own)
+- Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.h` (`FlowEntry::lineHeightEm` and its comment;
+  `setBookLineHeight(floor, emPx)` beside `setTypography`, so the long constructor and the dictionary's call stay as
+  they are; `bookPerEm_`, `bookFloor_`)
 - Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp` (`enterFlow` :894, the log only for mode/direction
   changes; after `enterFlow` at :2210 write the computed value into `cssStyle`; `effectiveLineHeight` :4545)
 - Modify: `lib/Epub/Epub/Section.h` (`BuildParams`), `lib/Epub/Epub/Section.cpp` (hash :361 with its static_assert,
@@ -161,18 +163,19 @@ reproduce is a finding to report, not a number to adjust silently.
   1.0, `bookLineHeightFloor` 0.95, `lineHeightEmPx` 20, so `bookPerEm` = 20 / 24; line pitch = `int(24 × c + 0.5)`):
   - `AParagraphsOwnValue`: `p { line-height: 1.75 }`: c = 1.75 × 20/24 = 1.4583, pitch 35 (`y` of line 2 minus line 1).
   - `ATightValueIsFloored`: `line-height: 1.0`: 0.833 < 0.95, pitch `int(22.8 + 0.5)` = 23.
-  - `NoValueIsNormal`: no `line-height`: pitch 24.
+  - `NoValueIsTheReadersSpacing`: no `line-height`: pitch 24.
   - `InheritedFromHtml`: `html { line-height: 1.75 }`, `p` without: pitch 35.
   - `AChildOverridesItsParent`: `body { line-height: 2 }`, `p.n { line-height: 1.5 }`: `p.n` pitch 30 (1.25 × 24),
     a plain `p` pitch 40.
   - `AHiddenElementsValueDoesNotLeak`: `<div style="display:none; line-height: 3">…</div><p>…</p>`: the `p` pitch 24.
+  - `ASpentSiblingDoesNotLendItsValue`: an empty `<div class="lh">` (3) before a plain `p`: pitch 24.
   - `OneClassUnderTwoAncestors`: `.a { line-height: 2 }`, `<div class="a"><p class="x">…</p></div><p class="x">…</p>`:
     40 then 24.
   - `BookStyleOffIgnoresTheValue`: floor 0, `p { line-height: 1.75 }`: pitch 24.
   - `WithoutTheBooksCss`: `embeddedStyle` false, floor 0.95: pitch 24.
-  - `SectionPropertyHash.BookStyleOffKeepsTheKey` (in the existing Section hash tests if there are any, else here): the
-    hash of a default `BuildParams` equals the value computed before this change (pin the literal, measured on master
-    `e978c0f2c` before editing `Section.cpp`); with a floor it differs, and two emPx values differ.
+  - `BookStyleOffKeepsTheCacheKey`: the default profile's section file is `0_9fe217c6.bin`, the name master
+    `e978c0f2c` gives it (measured before `Section.cpp` changed), also with an emPx and no floor;
+    `BookStyleHasAKeyPerEm`: a floor gives another name, and two emPx values two names.
 - [ ] **Step 2:** Run, see them fail. **Step 3:** Implement. Keep the flow stack's comment accurate: it now carries the
   inherited values layout reads (writing mode, direction, line-height).
 - [ ] **Step 4:** Run `EpubPipelineTest` and the new target: every golden byte-identical (`UPDATE_GOLDENS` unset), the

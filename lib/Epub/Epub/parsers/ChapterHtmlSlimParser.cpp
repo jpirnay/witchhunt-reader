@@ -898,15 +898,18 @@ ChapterHtmlSlimParser::FlowEntry ChapterHtmlSlimParser::enterFlow(const CssStyle
   element.depth = static_cast<int16_t>(depth);
   if (style.hasWritingMode()) element.writingMode = style.writingMode;
   if (style.hasDirection()) element.direction = style.direction;
-  if (element.writingMode == inherited.writingMode && element.direction == inherited.direction) return element;
+  if (style.hasLineHeight()) element.lineHeightEm = style.lineHeightEm;
+  const bool flowChanges = element.writingMode != inherited.writingMode || element.direction != inherited.direction;
+  if (!flowChanges && element.lineHeightEm == inherited.lineHeightEm) return element;
   if (flowCount_ == kMaxFlowEntries) {
     if (!flowOverflowLogged_)
-      LOG_ERR("EHP", "More than %u nested writing-mode or direction changes; deeper ones dropped", kMaxFlowEntries);
+      LOG_ERR("EHP", "More than %u nested writing-mode, direction or line-height changes; deeper ones dropped",
+              kMaxFlowEntries);
     flowOverflowLogged_ = true;
     return inherited;
   }
   flows_[flowCount_++] = element;
-  if (!flowLogged_) {
+  if (flowChanges && !flowLogged_) {
     LOG_INF("EHP", "Text runs %s, %s from depth %d",
             element.writingMode == CssWritingMode::VerticalRl   ? "vertical-rl"
             : element.writingMode == CssWritingMode::VerticalLr ? "vertical-lr"
@@ -2209,6 +2212,9 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   applyHtmlDirectionality(cssStyle, name, dirAttr);
   self->elementFlow_ = self->enterFlow(cssStyle);
   cssStyle.resolveLogical(self->elementFlow_.writingMode, self->elementFlow_.direction);
+  // line-height is inherited: the element's copy carries the computed value, for every block built from it.
+  cssStyle.lineHeightEm = self->elementFlow_.lineHeightEm;
+  cssStyle.defined.lineHeight = self->elementFlow_.lineHeightEm > 0.0f;
 
   // The HTML `hidden` attribute means display:none, and outranks the CSS that got
   // us here -- it is applied after the cascade above for that reason. EPUBs use it
@@ -4542,8 +4548,20 @@ void ChapterHtmlSlimParser::resolveWordFont(const uint8_t slot) {
   currentTextBlock->setFontSlot(slot, font);
 }
 
+void ChapterHtmlSlimParser::setBookLineHeight(const float floor, const uint16_t emPx) {
+  const int bodyLineHeight = renderer.getLineHeight(fontId);
+  bookFloor_ = floor;
+  bookPerEm_ =
+      floor > 0.0f && bodyLineHeight > 0 ? static_cast<float>(emPx) / static_cast<float>(bodyLineHeight) : 0.0f;
+}
+
 int ChapterHtmlSlimParser::effectiveLineHeight(const BlockStyle& bs) const {
-  return static_cast<int>(renderer.getLineHeight(effectiveFontId(bs)) * lineCompression * bs.fontSizeMultiplier + 0.5f);
+  // Book's style: the block's line-height in ems of the body text, as a compression on the body font's line height, so
+  // a heading in a taller face gets its own em's pitch from that face's line height.
+  const float compression = bookPerEm_ > 0.0f && bs.lineHeightEm > 0.0f
+                                ? std::max(bs.lineHeightEm * bookPerEm_, bookFloor_)
+                                : lineCompression;
+  return static_cast<int>(renderer.getLineHeight(effectiveFontId(bs)) * compression * bs.fontSizeMultiplier + 0.5f);
 }
 
 ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line,

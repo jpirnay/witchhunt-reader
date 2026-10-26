@@ -279,6 +279,10 @@ class ChapterHtmlSlimParser final : public Print {
   float mainTextFontSizeBaseline_ = 1.0f;
   bool hasMainTextFontSizeBaseline_ = false;
   float lineCompression;
+  // Book's style line spacing (setBookLineHeight): the compression of one em of line-height, and the least a block
+  // takes. bookPerEm_ 0: off.
+  float bookPerEm_ = 0.0f;
+  float bookFloor_ = 0.0f;
   bool extraParagraphSpacing;
   uint8_t paragraphAlignment;
   uint16_t viewportWidth;
@@ -667,13 +671,14 @@ class ChapterHtmlSlimParser final : public Print {
   CssParser::Ancestry cssAncestry(const std::string& tagName, const std::string& classAttr,
                                   const std::string& idAttr) const;
 
-  // The writing mode and direction open elements run in, where they change: both are inherited, so an element takes
-  // the innermost entry above it. Trimmed by depth at every start tag, so an element closed through a skip path leaves
-  // nothing behind. A book nests a change a level or two deep; an entry past the eighth is dropped.
+  // The inherited values layout reads (writing mode, direction, line-height), where an open element changes one: an
+  // element takes the innermost entry above it. Trimmed by depth at every start tag, so an element closed through a
+  // skip path leaves nothing behind. A book nests a change a few levels deep; an entry past the eighth is dropped.
   struct FlowEntry {
     int16_t depth = 0;
     CssWritingMode writingMode = CssWritingMode::Unset;
     CssDirection direction = CssDirection::Unset;
+    float lineHeightEm = 0.0f;  // 0: no line-height set
   };
   static constexpr uint8_t kMaxFlowEntries = 8;
   FlowEntry flows_[kMaxFlowEntries] = {};
@@ -681,8 +686,9 @@ class ChapterHtmlSlimParser final : public Print {
   FlowEntry elementFlow_;  // the element startElement is resolving, its values computed
   bool flowLogged_ = false;
   bool flowOverflowLogged_ = false;
-  // Trims the stack to the element's ancestors, pushes the element when it sets a writing mode or direction other than
-  // its parent's, and returns its computed values. `depth` is the element's own (startElement increments it last).
+  // Trims the stack to the element's ancestors, pushes the element when it sets a writing mode, direction or
+  // line-height other than its parent's, and returns its computed values. `depth` is the element's own (startElement
+  // increments it last).
   FlowEntry enterFlow(const CssStyle& style);
 
   // Default size for superscript/subscript text, percent of the surrounding size.
@@ -1014,6 +1020,9 @@ class ChapterHtmlSlimParser final : public Print {
   void setFontFamilies(const BlockFontFamilies& families) { fontFamilies_ = families; }
   // The book's typography (TypographyProfile.h), handed to every block the parser lays out; Latin rules by default.
   void setTypography(const TypographyProfile& typography) { typography_ = typography; }
+  // Book's style line spacing: a block's CSS line-height sets its pitch, a multiple of `emPx`, never below `floor`
+  // (a compression on the font's line height). Off by default, and with a floor of 0.
+  void setBookLineHeight(float floor, uint16_t emPx);
 
  private:
   // Snap a completed block's effective font size (block multiplier, after uniform per-word
