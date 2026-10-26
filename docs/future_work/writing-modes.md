@@ -19,7 +19,7 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 
 | Step | What | State |
 |---|---|---|
-| 0 | Parse every trigger (`writing-mode`, `text-orientation`, `text-combine-upright`, `direction`, `unicode-bidi`, `start`/`end`, `dir` with `<bdo>`/`<bdi>`, OPF ppd); CSS boxes along the writing mode, `start`/`end` along the direction; fixture books | plan written ([plan](../superpowers/plans/2026-10-26-writing-modes-step0.md)) |
+| 0 | Parse every trigger (`writing-mode`, `text-orientation`, `text-combine-upright`, `direction`, `unicode-bidi`, `start`/`end`, `dir` with `<bdo>`/`<bdi>`, OPF ppd); CSS boxes along the writing mode, `start`/`end` along the direction; `line-height`, which nothing read, dropped; fixture books | plan written ([plan](../superpowers/plans/2026-10-26-writing-modes-step0.md)) |
 | 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; FlowContext and page progression | open |
 | 2 | Arabic script | open |
 | 3 | Vertical frame (from the spike); the vertical decision and its settings | open |

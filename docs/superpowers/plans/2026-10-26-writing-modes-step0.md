@@ -1,4 +1,4 @@
-# Writing modes step 0: every markup trigger parsed, CSS boxes and start/end read along them — Implementation Plan
+# Writing modes step 0: every markup trigger parsed, CSS boxes and start/end read along them, line-height dropped — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -7,11 +7,12 @@
 books use; the HTML `dir` attribute with `<bdo>` and `<bdi>`; the OPF spine's `page-progression-direction`. Two of them
 take effect now: margins, paddings and image sizes are read along each element's writing mode, and `start`/`end` along
 its direction. Books are still set horizontally and left to right; books without any of this markup lay out
-byte-identically.
+byte-identically. `line-height`, parsed and stored but read by nothing, is removed.
 
 **Architecture:** `CssStyle` gains five one-byte enums (`writingMode`, `textOrientation`, `textCombine`, `direction`,
-`unicodeBidi`), each with an `Unset` value of 0 instead of a defined bit (the flag word holds 28 of 32 bits, and five
-more would overflow it), and `CssTextAlign` gains `Start` and `End`. `CssParser` parses them; the three style codecs
+`unicodeBidi`), each with an `Unset` value of 0 instead of a defined bit (with `line-height` gone the flag word holds 27
+of 32 bits; five more would fill it to the last one), and `CssTextAlign` gains `Start` and `End`. `line-height` leaves
+the parser, `CssStyle` and the codecs first. `CssParser` parses them; the three style codecs
 carry them in one 16-bit flow word. An HTML layer (`HtmlDirectionality.h`) turns `dir`, `<bdo>` and `<bdi>` into the
 same properties under the author's CSS. `ChapterHtmlSlimParser` keeps the inherited writing mode and direction in a small
 fixed stack keyed by element depth, and right after an element's style is resolved it calls
@@ -34,6 +35,7 @@ report, not a number to adjust silently.
 2. Step 0 covers every parser trigger, including those first acted on in later steps.
 3. Writing modes follow the book, with a global setting and a per-book override (spec section 9); none of that is in
    step 0, which sets nothing vertically.
+4. `line-height`, which nothing reads, is removed in step 0.
 
 ## The triggers and who reads them
 
@@ -88,20 +90,28 @@ Decided for this plan (reasons in the tasks and in the report):
   for a child of another direction. Rare (a direction change inside a `text-align: start` container); noted in the
   report.
 - **Storage.**
-  - `CssStyle`: the five enums take padding bytes (after `pageBreakAfter`: offsets 97-99; after `visibilityHidden`:
-    114-115), so `sizeof(CssStyle)` stays 124. Checked on the host on 2026-10-26 with the five fields inserted; every
-    member is 4-byte aligned or smaller, so the C3 lays it out the same. `CssPropertyFlags` is unchanged.
+  - `CssStyle`: `lineHeightMultiplier`'s 4 bytes go, and the five enums take padding bytes (after `pageBreakAfter`:
+    offsets 97-99; after `visibilityHidden`: 110-111), so `sizeof(CssStyle)` goes from 124 to 120. Measured on the host
+    on 2026-10-26 with exactly this layout; every member is 4-byte aligned or smaller, so the C3 lays it out the same.
+    `CssPropertyFlags` loses `lineHeight`: 27 of its 32 bits.
   - The flow word, the same 16 bits in both codecs: bits 0-1 `writingMode`, 2-3 `direction`, 4-6 `textCombine`, 7-8
     `textOrientation`, 9-11 `unicodeBidi`; each 0 when Unset.
-  - The rule cache's payload appends it: `CSS_FIXED_STYLE_BYTES` 77 → 79, `CSS_CACHE_VERSION` 30.
+  - The rule cache's payload appends it: `CSS_FIXED_STYLE_BYTES` 77 → 79, `CSS_CACHE_VERSION` 30. The payload never
+    stored `line-height` (`encodeCssStylePayload` and `readCssStylePayload` have no field for it), so the removal
+    leaves it alone.
   - The arena record: bit 4 of the `extra` byte announces it, written right after that byte; `kMaxCompressedStyle`
-    74 → 76. Records without any of these properties are unchanged.
+    74 → 70 without `line-height`'s 4 bytes, then 72 with the flow word. Records without any of these properties are
+    unchanged.
   - `CssTextAlign` Start = 6 and End = 7 fit the payload's byte and the arena's 3 bits.
   - `book.bin`: one byte after the description, `BOOK_CACHE_VERSION` 18. Every book is indexed again once, behind the
     first-open popup, on its next open; its section caches stay (a version mismatch rebuilds `book.bin` only,
     `BookMetadataCache::load`). The largest test book took 4.9 s behind that popup after #533; ordinary books well
     under a second.
   - Section files: `SECTION_FILE_VERSION` 101.
+- **`line-height` has no reader.** Layout's line height is the font's, times the reader's line spacing, times the
+  block's font size (`ChapterHtmlSlimParser::effectiveLineHeight`, :4504); `BlockStyle` has no line height; and since the
+  rule cache never stored it, only a `style` attribute ever brought it as far as the parser. Removing it changes no
+  layout. Honouring a book's line height would be a reading feature of its own, not part of this plan.
 - **Parser state:** a fixed array of 8 `{depth, writingMode, direction}` entries in `ChapterHtmlSlimParser`, no heap.
   The parser object lives across a sliced build's steps (`Section.cpp:844`), so no saved state changes.
 - **`anyDefined()`:** `CssStyle::anyDefined()` is `defined.anySet()` or any of the five enums set. It replaces
@@ -110,8 +120,10 @@ Decided for this plan (reasons in the tasks and in the report):
   with only `writing-mode` (the EBPAJ template's `html.vrtl`) must be kept.
 - **Logging:** one `LOG_INF("EHP", ...)` per section build when an element switches writing mode or direction, naming
   it. A ninth nested switch is dropped with one `LOG_ERR`.
-- **Out of scope:** `CompiledContent` (`lib/Epub/Epub/content/`, not wired) has its own `CssStyle` codec; it is not
-  touched, and its own plan decides whether it stores logical styles.
+- **`CompiledContent`** (`lib/Epub/Epub/content/`, not wired) has its own `CssStyle` codec. It is touched only to drop
+  `line-height`, since it must still compile: its `kVersion` goes to 2. No file of it exists on any device (it has no
+  firmware caller, and its test went in b0d0f9d43). It does not get the five new properties; its own plan decides
+  whether it stores logical styles.
 - Books without this markup lay out exactly as before: every golden in `test/epub_pipeline/goldens` stays
   byte-identical (no fixture declares any trigger, checked 2026-10-26), and the dump prints the new BOOK field only when
   the OPF declares it. The new goldens are the two new fixtures'.
@@ -130,29 +142,69 @@ Decided for this plan (reasons in the tasks and in the report):
 ## Review Focus
 
 1. **An element closed through a skip path** (`display: none`, `hidden`, an unreadably small or transparent run): its
-   stack entry must not outlive it. The stack is trimmed by depth at every start tag. Pinned in Task 5:
+   stack entry must not outlive it. The stack is trimmed by depth at every start tag. Pinned in Task 6:
    `WritingModeLayout.AHiddenElementsModeDoesNotLeak`.
 2. **The style memo** (`cssStyleCache_`, keyed tag|class): one entry can serve elements under different modes and
-   directions, so `resolveLogical` runs on the element's copy after the memo. Pinned in Task 5:
+   directions, so `resolveLogical` runs on the element's copy after the memo. Pinned in Task 6:
    `WritingModeLayout.OneClassUnderTwoModes`.
 3. **Shorthands and partial declarations:** the defined bits move with the values. The rotation runs after the cascade,
-   so no rotated style is merged again. Pinned in Task 3: `CssLogical.DefinedBitsTurnWithTheirValues`.
+   so no rotated style is merged again. Pinned in Task 4: `CssLogical.DefinedBitsTurnWithTheirValues`.
 4. **Percentages:** a vertical book's `height: 50%` on an image is half its column; rotated it is `imageWidth`,
-   resolved against the container width. Pinned in Task 5: `WritingModeLayout.AVerticalImageHeightIsAHorizontalWidth`.
+   resolved against the container width. Pinned in Task 6: `WritingModeLayout.AVerticalImageHeightIsAHorizontalWidth`.
 5. **Precedence of `dir`:** the author's CSS beats the attribute, the attribute beats inheritance, and the attribute
-   holds with the book's CSS off. Pinned in Task 4 (`HtmlDirectionality.AuthorCssBeatsTheAttribute`) and Task 5
+   holds with the book's CSS off. Pinned in Task 5 (`HtmlDirectionality.AuthorCssBeatsTheAttribute`) and Task 6
    (`WritingModeLayout.DirHoldsWithoutTheBooksCss`).
-6. **The 4 em inset cap** (`BlockStyle::MAX_HORIZONTAL_INSET_EM`): a vertical book's large `margin-top` becomes a left
+6. **The cascade's rank indices** shift down by one after `line-height`'s (20) in Task 1, and `ranks` is sized by
+   `kCascadeProperties`: an index left behind would let two properties share a rank slot and merge in the wrong order.
+   Pinned by the existing `EpubCssCascadeTest`, run after Task 1 and again after Task 2.
+7. **The 4 em inset cap** (`BlockStyle::MAX_HORIZONTAL_INSET_EM`): a vertical book's large `margin-top` becomes a left
    inset and is capped like any other. Intended; noted in the report.
 
 ---
 
-### Task 1: The CSS properties
+### Task 1: Drop `line-height`
+
+Nothing reads it (Global Constraints), so it goes before anything is added: the cascade's rank indices and the arena's
+defined mask are renumbered once, here.
+
+**Files:**
+- Modify: `lib/Epub/Epub/css/CssStyle.h` (the flag at :96, the constructor at :129, `anySet` at :141, `clearAll` at :151,
+  the field at :192, `applyOver` at :320-323 with every later rank index down by one and `kCascadeProperties` 28 → 27,
+  `hasLineHeight` at :403, `reset` at :420)
+- Modify: `lib/Epub/Epub/css/CssParser.cpp` (the declaration at :936-972; `packDefinedMask`'s bit 20 and the bits above
+  it down by one at :2276-2282, with their comment; `compressStyle` at :2338-2341; `decompressStyle` at :2386 and
+  :2430-2433; `kMaxCompressedStyle` 74 → 70 and its comment at :2262-2265)
+- Modify: `lib/Epub/Epub/content/CompiledContent.cpp` (:55, :85, :112, :150, :304), `CompiledContent.h` (`kVersion` 2
+  at :27)
+- Test: `test/css_gaps/CssGapsTest.cpp` (the six `CssGapsLineHeight` tests and their banner at :23-72),
+  `test/epub_css/CssParserCacheTest.cpp` (`definedEqual` at :473, `stylesEqual` at :484, `line-height: 1.6` in
+  `ResidentPreservesAllStyleFields` at :698)
+
+- [ ] **Step 1: Write the failing test.** Replace the six tests with one:
+```cpp
+// line-height is not parsed: layout sets lines from the font and the reader's line spacing, and nothing read the
+// book's value. A rule with only line-height says nothing, so it stays out of the rule cache.
+TEST(CssGapsLineHeight, IsNotParsed) {
+  EXPECT_FALSE(CssParser::parseInlineStyle("line-height: 1.5").defined.anySet());
+  EXPECT_FALSE(CssParser::parseInlineStyle("line-height: 120%").defined.anySet());
+  const CssStyle mixed = CssParser::parseInlineStyle("line-height: 2; text-indent: 1em");
+  EXPECT_TRUE(mixed.hasTextIndent());
+}
+```
+- [ ] **Step 2: Run it; it fails** (`line-height` still sets its bit).
+  `cmake --build build/test --target CssGapsTest -j 8 && ctest --test-dir build/test -R CssGaps --output-on-failure`
+- [ ] **Step 3: Remove** the property everywhere listed above, and `line-height` from the cache test's CSS and helpers.
+- [ ] **Step 4: Run** `CssGapsTest`, `CssParserTest`, `EpubCssCacheTest`, `EpubCssCascadeTest` and `EpubPipelineTest`:
+  pass, every golden unchanged. `grep -rn "lineHeight\b\|lineHeightMultiplier\|line-height" lib src test` finds no CSS
+  use left (the layout's own `lineHeight` variables and `getLineHeight` stay).
+- [ ] **Step 5: Commit** `refactor(css): drop line-height, which nothing read`.
+
+### Task 2: The CSS properties
 
 **Files:**
 - Modify: `lib/Epub/Epub/css/CssStyle.h` (`CssTextAlign` at :9; the five enums after `CssFloat` at :76; the fields at
   :187 and :211; `kCascadeProperties` at :219; `applyOver`; the `has*()` accessors; `anyDefined()`; `reset`; a
-  `static_assert(sizeof(CssStyle) == 124, ...)` naming the padding the fields took)
+  `static_assert(sizeof(CssStyle) == 120, ...)` naming the padding the fields took)
 - Modify: `lib/Epub/Epub/css/CssParser.cpp` (the declaration dispatch beside `text-align` at :757; `interpretAlignment`
   at :566-574; `anySet` → `anyDefined` at :1094 and :2842), `CssParser.h` (the `interpret*` declarations)
 - Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp` (`anySet` → `anyDefined` at :2164),
@@ -172,7 +224,8 @@ enum class CssUnicodeBidi : uint8_t { Unset = 0, Normal, Embed, Isolate, BidiOve
 ```
 - `CssStyle` fields `writingMode`, `textOrientation`, `textCombine` (after `pageBreakAfter`), `direction`,
   `unicodeBidi` (after `visibilityHidden`), each Unset by default; `hasWritingMode()` and so on test `!= Unset`.
-- `applyOver` merges each at rank indices 28-32 when the base's value is set; `kCascadeProperties` becomes 33.
+- `applyOver` merges each at rank indices 27-31 when the base's value is set; `kCascadeProperties` becomes 32 (27
+  after Task 1).
 - `bool CssStyle::anyDefined() const;`
 - `static bool CssParser::interpretWritingMode(std::string_view, CssWritingMode&)` and the same for the other four;
   false leaves the property Unset. The `-epub-text-combine` and `-ms-text-combine-horizontal` digit forms parse the
@@ -245,7 +298,7 @@ TEST(CssParserDeclarations, AStyleWithOnlyAFlowPropertySaysSomething) {
 - [ ] **Step 4: Run** `ctest --test-dir build/test -R "CssParser|EpubCssCascade" --output-on-failure`: pass.
 - [ ] **Step 5: Commit** `feat(css): parse writing-mode, text-orientation, text-combine-upright, direction and unicode-bidi`.
 
-### Task 2: The two persisted codecs
+### Task 3: The two persisted codecs
 
 **Files:**
 - Modify: `lib/Epub/Epub/css/CssParser.cpp` (`CSS_FIXED_STYLE_BYTES` and its layout comment at :99-111;
@@ -253,7 +306,8 @@ TEST(CssParserDeclarations, AStyleWithOnlyAFlowPropertySaysSomething) {
   :2262-2271; `compressStyle`'s `extra` byte at :2296-2304; `decompressStyle`)
 - Modify: `lib/Epub/Epub/css/CssParser.h` (`CSS_CACHE_VERSION` 30 at :119; a `v30` line above it: "`writing-mode`,
   `text-orientation`, `text-combine-upright`, `direction` and `unicode-bidi` are persisted in a flow word, and
-  `text-align: start/end` as themselves; a v29 compile dropped the five and stored start/end as left/right")
+  `text-align: start/end` as themselves, and `line-height` is no longer parsed; a v29 compile dropped the five and
+  stored start/end as left/right")
 - Test: `test/epub_css/CssParserCacheTest.cpp` (`definedEqual` at :465, `stylesEqual` at :478,
   `ResidentPreservesAllStyleFields` at :695)
 
@@ -282,7 +336,7 @@ TEST(CssParserDeclarations, AStyleWithOnlyAFlowPropertySaysSomething) {
 - [ ] **Step 4: Run** all of `EpubCssCacheTest`: pass.
 - [ ] **Step 5: Commit** `feat(css): keep the flow properties in the rule cache and the arena (CSS cache v30)`.
 
-### Task 3: `CssStyle::resolveLogical`
+### Task 4: `CssStyle::resolveLogical`
 
 **Files:**
 - Modify: `lib/Epub/Epub/css/CssStyle.h`
@@ -395,7 +449,7 @@ TEST(CssLogical, StartAndEndFollowTheDirection) {
 - [ ] **Step 4: Run** `ctest --test-dir build/test -R CssLogical --output-on-failure`: pass.
 - [ ] **Step 5: Commit** `feat(css): resolve a box's sides and start/end along writing mode and direction`.
 
-### Task 4: HTML's `dir`, `<bdo>` and `<bdi>`
+### Task 5: HTML's `dir`, `<bdo>` and `<bdi>`
 
 **Files:**
 - Create: `lib/Epub/Epub/parsers/HtmlDirectionality.h` (header-only, no parser state)
@@ -452,7 +506,7 @@ TEST(HtmlDirectionality, NoAttributeChangesNothing) {
 - [ ] **Step 4: Run** `ctest --test-dir build/test -R HtmlDirectionality --output-on-failure`: pass.
 - [ ] **Step 5: Commit** `feat(epub): HTML's directionality rules for dir, bdo and bdi`.
 
-### Task 5: The parser follows writing mode and direction
+### Task 6: The parser follows writing mode and direction
 
 **Files:**
 - Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.h` (the stack beside `cssAncestorMasks_`; `enterFlow`)
@@ -551,7 +605,7 @@ vertically must dump exactly like its horizontal twin, whose CSS names the same 
 - [ ] **Step 4: Run** the new tests, then all of `EpubPipelineTest`: every existing golden unchanged.
 - [ ] **Step 5: Commit** `feat(epub): read boxes along the writing mode and start/end along the direction`.
 
-### Task 6: The OPF's page progression
+### Task 7: The OPF's page progression
 
 **Files:**
 - Modify: `lib/Epub/Epub/parsers/ContentOpfParser.cpp` (the `<spine>` start tag at :606), `ContentOpfParser.h` (a
@@ -577,7 +631,7 @@ vertically must dump exactly like its horizontal twin, whose CSS names the same 
 - [ ] **Step 4: Run** both suites and `EpubPipelineTest`: pass, goldens unchanged (no fixture declares it).
 - [ ] **Step 5: Commit** `feat(epub): record the spine's page-progression-direction (book cache v18)`.
 
-### Task 7: The fixture books
+### Task 8: The fixture books
 
 **Files:**
 - Create: `test/epubs/make_test_writing_modes.py`, writing `test_writing_modes.epub` and `test_rtl_markup.epub`
@@ -611,18 +665,19 @@ part pins, in the style of `make_test_cjk_block_seams.py`.
     `align=1`, the one inside the `direction: ltr` div at `align=1`, the `dir="auto"` one at `align=1`.
 - [ ] **Step 4: Commit** `test(epub): writing-mode and right-to-left markup fixtures and their goldens`.
 
-### Task 8: Documents
+### Task 9: Documents
 
 **Files:**
 - Modify: `docs/file-formats.md` (`CSS_CACHE_VERSION (29)` at :57, :300 and :316 → 30, and the payload's flow word in
-  the record layout below :316; `book.bin`'s page-progression byte and its version)
+  the record layout below :316; `book.bin`'s page-progression byte and its version). Check it says nothing of
+  `line-height`.
 - Modify: `docs/future_work/writing-modes.md` (step 0 shipped; the "CSS box properties" item under "Left from the
   spike" removed; the triggers table above, as "parsed in step 0, first read in step N")
 
 - [ ] **Step 1:** Make the edits.
 - [ ] **Step 2: Commit** `docs: the flow properties in the cache formats, and the roadmap`.
 
-### Task 9: Firmware builds and the X3
+### Task 10: Firmware builds and the X3
 
 - [ ] **Step 1:** `pio run -e default` and `-e gh_release` from the worktree. Record flash and static RAM against master
   0625ac40a (6,097,497 B flash and 57,408 B RAM for `default`, measured 2026-10-26).
