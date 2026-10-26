@@ -104,11 +104,13 @@ constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
 //         + visibility flags byte (colorTransparent / opacityZero / visibilityHidden value+defined pairs; v19)
 //         + fontFamily hash (uint32; defined is bit 2 of the font-size flags byte; v28)
 //         + line-height in ems (float; defined is bit 3 of the font-size flags byte; v30)
+//         + the flow word (uint16: writing-mode, direction, text-combine-upright, text-orientation,
+//           unicode-bidi; packFlow; v30)
 constexpr size_t CSS_FIXED_STYLE_BYTES = 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
                                          sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t) +
                                          sizeof(uint8_t) + sizeof(float) + sizeof(uint8_t) + sizeof(uint8_t) +
-                                         sizeof(uint8_t) + sizeof(uint32_t) + sizeof(float);
-static_assert(CSS_FIXED_STYLE_BYTES == 81,
+                                         sizeof(uint8_t) + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t);
+static_assert(CSS_FIXED_STYLE_BYTES == 83,
               "style payload layout changed — update read/writeCssStylePayload and bump CSS_CACHE_VERSION");
 // A rule record is selectorLen(2) selector order(2) payload; the order sits between selector and
 // payload so a reader that has matched the selector reads the rest in one go (v22).
@@ -1809,6 +1811,25 @@ void CssParser::logResolveStats(const char* context) const {
   (void)s;
 }
 
+namespace {
+// The flow properties (CssStyle's writingMode, direction, textCombine, textOrientation, unicodeBidi), packed the same
+// way in the rule cache's payload and in the arena's records: bits 0-1, 2-3, 4-6, 7-8 and 9-11, each 0 when unset.
+uint16_t packFlow(const CssStyle& s) {
+  return static_cast<uint16_t>(
+      (static_cast<unsigned>(s.writingMode) & 3u) | ((static_cast<unsigned>(s.direction) & 3u) << 2) |
+      ((static_cast<unsigned>(s.textCombine) & 7u) << 4) | ((static_cast<unsigned>(s.textOrientation) & 3u) << 7) |
+      ((static_cast<unsigned>(s.unicodeBidi) & 7u) << 9));
+}
+
+void unpackFlow(const uint16_t flow, CssStyle& s) {
+  s.writingMode = static_cast<CssWritingMode>(flow & 3u);
+  s.direction = static_cast<CssDirection>((flow >> 2) & 3u);
+  s.textCombine = static_cast<CssTextCombine>((flow >> 4) & 7u);
+  s.textOrientation = static_cast<CssTextOrientation>((flow >> 7) & 3u);
+  s.unicodeBidi = static_cast<CssUnicodeBidi>((flow >> 9) & 7u);
+}
+}  // namespace
+
 bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   // Read in one call and taken apart in RAM: a field at a time was ~30 SdFat calls a rule, paid for
   // every rule each time a section build loads the ruleset into its arena.
@@ -1940,9 +1961,12 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.visibilityHidden = (visibilityFlags & 0x10) != 0;
   style.defined.visibilityHidden = (visibilityFlags & 0x20) != 0 ? 1 : 0;
   float lineHeightEm = 0.0f;
-  if (!get(&style.fontFamily, sizeof(style.fontFamily)) || !get(&lineHeightEm, sizeof(lineHeightEm))) {
+  uint16_t flow = 0;
+  if (!get(&style.fontFamily, sizeof(style.fontFamily)) || !get(&lineHeightEm, sizeof(lineHeightEm)) ||
+      !get(&flow, sizeof(flow))) {
     return false;
   }
+  unpackFlow(flow, style);
   if (lineHeightDefined) {
     style.lineHeightEm = lineHeightEm;
     style.defined.lineHeight = 1;
@@ -2032,6 +2056,8 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
   put8(visibilityFlags);
   put(&style.fontFamily, sizeof(style.fontFamily));
   put(&style.lineHeightEm, sizeof(style.lineHeightEm));
+  const uint16_t flow = packFlow(style);
+  put(&flow, sizeof(flow));
   return at;
 }
 
@@ -2358,9 +2384,9 @@ bool CssParser::ensureCacheIndexLoaded() const {
 // decompresses back to a full CssStyle. Values are copied with memcpy so the byte-packed
 // (unaligned) records are safe to read on the C3.
 
-// Worst case: 4 (mask) + 2 (packed enums) + 1 (extra values) + 11 lengths * 5 + 2 multipliers * 4
-// + the font-family hash (4) = 74 bytes.
-constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 11 * 5 + 2 * 4 + 4;
+// Worst case: 4 (mask) + 2 (packed enums) + 1 (extra values) + 2 (the flow word) + 11 lengths * 5 + 2 multipliers * 4
+// + the font-family hash (4) = 76 bytes.
+constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 2 + 11 * 5 + 2 * 4 + 4;
 
 // Canonical "which properties are set" mask: 27 defined bits (0-26), then the three boolean
 // VALUES of the invisibility properties in bits 27-29 and the high bit of `display` in bit 30 --
@@ -2389,12 +2415,15 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   if (s.defined.display && (static_cast<unsigned>(s.display) & 2u)) mask |= 1u << 30;
   // Bit 31 announces a byte of values the uint16 below has no room for, written after it: an
   // explicit `inherit` of font-weight (bit 0) and of font-style (bit 1), a font-size relative to
-  // the body (bit 2), a font-family (bit 3: its hash follows the multipliers).
+  // the body (bit 2), a font-family (bit 3: its hash follows the multipliers), a flow property (bit 4: the flow word,
+  // packFlow, follows this byte).
   uint8_t extra = 0;
   if (s.defined.fontWeight && s.fontWeight == CssFontWeight::Inherit) extra |= 0x01;
   if (s.defined.fontStyle && s.fontStyle == CssFontStyle::Inherit) extra |= 0x02;
   if (s.defined.fontSizeMultiplier && s.fontSizeRootRelative) extra |= 0x04;
   if (s.defined.fontFamily) extra |= 0x08;
+  const uint16_t flow = packFlow(s);
+  if (flow != 0) extra |= 0x10;
   if (extra != 0) mask |= 1u << 31;
   std::memcpy(p, &mask, 4);
   p += 4;
@@ -2414,6 +2443,10 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   std::memcpy(p, &enums, 2);
   p += 2;
   if (extra != 0) *p++ = extra;
+  if (flow != 0) {
+    std::memcpy(p, &flow, 2);
+    p += 2;
+  }
   const auto putLen = [&](bool def, const CssLength& l) {
     if (def) {
       std::memcpy(p, &l.value, 4);
@@ -2458,6 +2491,12 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
   std::memcpy(&enums, p, 2);
   p += 2;
   const uint8_t extra = ((mask >> 31) & 1u) ? *p++ : 0;
+  if ((extra & 0x10) != 0) {
+    uint16_t flow = 0;
+    std::memcpy(&flow, p, 2);
+    p += 2;
+    unpackFlow(flow, out);
+  }
   const auto isDefined = [&](int index) { return (mask >> index) & 1u; };
   CssPropertyFlags& d = out.defined;
   d.textAlign = isDefined(0);

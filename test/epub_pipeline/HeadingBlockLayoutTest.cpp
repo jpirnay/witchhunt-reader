@@ -130,6 +130,10 @@ const char* alignName(const CssTextAlign a) {
       return "right";
     case CssTextAlign::None:
       return "none";
+    case CssTextAlign::Inherit:
+    case CssTextAlign::Start:
+    case CssTextAlign::End:
+      break;  // markers of the cascade: a laid-out line never carries them
   }
   return "?";
 }
