@@ -249,6 +249,8 @@ class Epub {
   const std::string& getPrimaryAuthor() const;
   const std::string& getAuthorSort() const;
   const std::string& getLanguage() const;
+  // The spine's page-progression-direction; Default when the book does not say.
+  PageProgression pageProgression() const;
   const std::string& getSeries() const;
   const std::string& getSeriesIndex() const;
   const std::string& getDescription() const;

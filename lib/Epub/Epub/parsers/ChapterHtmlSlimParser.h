@@ -667,6 +667,24 @@ class ChapterHtmlSlimParser final : public Print {
   CssParser::Ancestry cssAncestry(const std::string& tagName, const std::string& classAttr,
                                   const std::string& idAttr) const;
 
+  // The writing mode and direction open elements run in, where they change: both are inherited, so an element takes
+  // the innermost entry above it. Trimmed by depth at every start tag, so an element closed through a skip path leaves
+  // nothing behind. A book nests a change a level or two deep; an entry past the eighth is dropped.
+  struct FlowEntry {
+    int16_t depth = 0;
+    CssWritingMode writingMode = CssWritingMode::Unset;
+    CssDirection direction = CssDirection::Unset;
+  };
+  static constexpr uint8_t kMaxFlowEntries = 8;
+  FlowEntry flows_[kMaxFlowEntries] = {};
+  uint8_t flowCount_ = 0;
+  FlowEntry elementFlow_;  // the element startElement is resolving, its values computed
+  bool flowLogged_ = false;
+  bool flowOverflowLogged_ = false;
+  // Trims the stack to the element's ancestors, pushes the element when it sets a writing mode or direction other than
+  // its parent's, and returns its computed values. `depth` is the element's own (startElement increments it last).
+  FlowEntry enterFlow(const CssStyle& style);
+
   // Default size for superscript/subscript text, percent of the surrounding size.
   // Sup/sub scaling flows through the ordinary per-word size channel (the SUP/SUB
   // style bits only shift the baseline at render time); an explicit CSS font-size

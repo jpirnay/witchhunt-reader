@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "../PageProgression.h"
 #include "Epub.h"
 
 class BookMetadataCache;
@@ -174,6 +175,7 @@ class ContentOpfParser final : public Print {
   std::string primaryAuthor;
   std::string authorSort;
   std::string language;
+  PageProgression pageProgression = PageProgression::Default;  // the spine's page-progression-direction
   std::string description;
   std::string series;
   std::string seriesIndex;

@@ -24,51 +24,33 @@ TEST(CssGapsListStyle, TypeDiscIsNotNone) {
 // Gap 2: line-height
 // ============================================================================
 
-TEST(CssGapsLineHeight, Unitless) {
-  const CssStyle style = CssParser::parseInlineStyle("line-height: 1.5");
-  ASSERT_TRUE(style.hasLineHeight());
-  // 1.5 normalised around 1.5 base => 100%. Allow ±5%.
-  ASSERT_NEAR(style.lineHeightMultiplier, 1.0f, 0.05f);
-
-  // Compact and spacious values scale linearly against the same base (inside the 0.7..2.0 clamp).
-  const CssStyle compact = CssParser::parseInlineStyle("line-height: 1.2");
-  ASSERT_TRUE(compact.hasLineHeight());
-  ASSERT_NEAR(compact.lineHeightMultiplier, 0.8f, 0.01f);
-  const CssStyle spacious = CssParser::parseInlineStyle("line-height: 2.0");
-  ASSERT_TRUE(spacious.hasLineHeight());
-  ASSERT_NEAR(spacious.lineHeightMultiplier, 1.333f, 0.01f);
+// line-height is a multiple of the element's font size, as CSS has it: unitless and em as given, rem as em, % over 100,
+// px and pt at CSS's 16 px medium. normal and the keywords leave it unset (the font's own line height).
+TEST(CssGapsLineHeight, IsAMultipleOfTheFontSize) {
+  const auto em = [](const char* decl) {
+    const CssStyle s = CssParser::parseInlineStyle(decl);
+    return s.hasLineHeight() ? s.lineHeightEm : -1.0f;
+  };
+  EXPECT_FLOAT_EQ(1.5f, em("line-height: 1.5"));
+  EXPECT_FLOAT_EQ(1.75f, em("line-height: 175%"));
+  EXPECT_FLOAT_EQ(1.6f, em("line-height: 1.6em"));
+  EXPECT_FLOAT_EQ(1.25f, em("line-height: 1.25rem"));
+  EXPECT_FLOAT_EQ(1.5f, em("line-height: 24px"));
+  EXPECT_FLOAT_EQ(2.0f, em("line-height: 24pt"));
+  EXPECT_FLOAT_EQ(1.75f, em("LINE-HEIGHT : 1.75 !important"));
 }
 
-TEST(CssGapsLineHeight, Percent) {
-  const CssStyle style = CssParser::parseInlineStyle("line-height: 150%");
-  ASSERT_TRUE(style.hasLineHeight());
-  ASSERT_NEAR(style.lineHeightMultiplier, 1.0f, 0.05f);
+TEST(CssGapsLineHeight, IsClamped) {
+  const auto em = [](const char* decl) { return CssParser::parseInlineStyle(decl).lineHeightEm; };
+  EXPECT_FLOAT_EQ(0.5f, em("line-height: 0.1"));
+  EXPECT_FLOAT_EQ(4.0f, em("line-height: 9"));
 }
 
-TEST(CssGapsLineHeight, Em) {
-  const CssStyle style = CssParser::parseInlineStyle("line-height: 1.5em");
-  ASSERT_TRUE(style.hasLineHeight());
-  ASSERT_NEAR(style.lineHeightMultiplier, 1.0f, 0.05f);
-}
-
-TEST(CssGapsLineHeight, ClampMin) {
-  // Very small value must be clamped to minimum (0.7)
-  const CssStyle style = CssParser::parseInlineStyle("line-height: 0.1");
-  ASSERT_TRUE(style.hasLineHeight());
-  ASSERT_GE(style.lineHeightMultiplier, 0.7f);
-}
-
-TEST(CssGapsLineHeight, ClampMax) {
-  // Very large value must be clamped to maximum (2.0)
-  const CssStyle style = CssParser::parseInlineStyle("line-height: 10.0");
-  ASSERT_TRUE(style.hasLineHeight());
-  ASSERT_LE(style.lineHeightMultiplier, 2.0f);
-}
-
-TEST(CssGapsLineHeight, NormalIsNotSet) {
-  // 'normal' keyword should not set a line-height override
-  const CssStyle style = CssParser::parseInlineStyle("line-height: normal");
-  ASSERT_FALSE(style.hasLineHeight());
+TEST(CssGapsLineHeight, KeywordsAndNonsenseLeaveItUnset) {
+  for (const char* decl : {"line-height: normal", "line-height: inherit", "line-height: initial", "line-height: unset",
+                           "line-height: tall", "line-height: 0", "line-height: -1.5", "line-height: 1.5vh"}) {
+    EXPECT_FALSE(CssParser::parseInlineStyle(decl).hasLineHeight()) << decl;
+  }
 }
 
 // ============================================================================

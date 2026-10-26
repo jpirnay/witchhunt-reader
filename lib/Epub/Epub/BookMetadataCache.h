@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "HashUtils.h"
+#include "PageProgression.h"
 
 class BuildArena;
 
@@ -26,6 +27,7 @@ class BookMetadataCache {
     std::string series;
     std::string seriesIndex;
     std::string description;
+    PageProgression pageProgression = PageProgression::Default;  // the spine's page-progression-direction (v18)
     // Not stored in book.bin: its version would have to go up and every book be cached again. Set by
     // a fresh OPF parse and by the metadata sidecar; BookDetailsLookup::parse() loads past book.bin
     // to get them.
