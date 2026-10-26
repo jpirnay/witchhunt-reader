@@ -12,6 +12,7 @@
 #include <BuildArena.h>
 #include <Epub.h>
 #include <Epub/FootnoteEntry.h>
+#include <Epub/LineSpacing.h>
 #include <Epub/Section.h>
 
 #include <array>
@@ -1174,7 +1175,12 @@ class EpubReaderActivity final : public Activity {
   // getEffectiveReaderFontId(), and the family it resolved to (a built-in's label or an SD family
   // name) when `familyOut` is given.
   int resolveReaderFont(std::string* familyOut) const;
-  float getEffectiveReaderLineCompression() const;
+  LineSpacing getEffectiveLineSpacing() const;
+  // The line spacing `epub` is laid out with at `step` (CrossPointSettings::LINE_COMPRESSION) in body font `fontId` at
+  // `pointSize`: Chinese, Japanese and Korean books by an em pitch, others by a factor on the font's line height. The
+  // reader and the sleep screen's page both take it from here, so both build under one section key.
+  static LineSpacing lineSpacingForBook(uint8_t step, const Epub& epub, int fontId, uint8_t pointSize,
+                                        const GfxRenderer& renderer);
   // Re-point navTarget at the page currently displayed. Must be called after every move of
   // section->currentPage that stays inside the loaded section — see the definition for why.
   void anchorNavTargetToCurrentPage();

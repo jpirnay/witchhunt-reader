@@ -1387,7 +1387,10 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   const RenderLayout layout = computeRenderLayout();
   Section::BuildParams p;
   p.fontId = getEffectiveReaderFontId();
-  p.lineCompression = getEffectiveReaderLineCompression();
+  const LineSpacing lineSpacing = getEffectiveLineSpacing();
+  p.lineCompression = lineSpacing.compression;
+  p.bookLineHeightFloor = lineSpacing.bookFloor;
+  p.lineHeightEmPx = lineSpacing.emPx;
   p.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
   p.paragraphAlignment = getEffectiveParagraphAlignment();
   p.viewportWidth = layout.viewportWidth;
@@ -3289,33 +3292,22 @@ uint8_t EpubReaderActivity::getEffectiveParagraphAlignment() const {
   return SETTINGS.paragraphAlignment;
 }
 
-float EpubReaderActivity::getEffectiveReaderLineCompression() const {
+LineSpacing EpubReaderActivity::lineSpacingForBook(const uint8_t step, const Epub& epub, const int fontId,
+                                                   const uint8_t pointSize, const GfxRenderer& renderer) {
+  LineSpacingScale scale = LineSpacingScale::Font;
+  if (TypographyProfile::forLanguage(epub.getLanguage()).cjkRepertoire) {
+    scale = LineSpacingScale::CjkPitch;
+  } else if (fontId == CrossPointSettings::getBuiltinReaderFontIdForPoints(CrossPointSettings::NOTOSANS, pointSize)) {
+    scale = LineSpacingScale::BuiltinNotoSans;
+  }
+  return lineSpacingFor(step, scale, pointSize, renderer.getLineHeight(fontId));
+}
+
+LineSpacing EpubReaderActivity::getEffectiveLineSpacing() const {
   const uint8_t pointSize =
       (bookFontSizeOverride >= 0) ? static_cast<uint8_t>(bookFontSizeOverride) : SETTINGS.fontPointSize;
-  const int effectiveFontId = getEffectiveReaderFontId();
-  const int notosansId = CrossPointSettings::getBuiltinReaderFontIdForPoints(CrossPointSettings::NOTOSANS, pointSize);
-
-  if (effectiveFontId == notosansId) {
-    switch (SETTINGS.lineSpacing) {
-      case CrossPointSettings::TIGHT:
-        return 0.90f;
-      case CrossPointSettings::NORMAL:
-      default:
-        return 0.95f;
-      case CrossPointSettings::WIDE:
-        return 1.0f;
-    }
-  }
-
-  switch (SETTINGS.lineSpacing) {
-    case CrossPointSettings::TIGHT:
-      return 0.95f;
-    case CrossPointSettings::NORMAL:
-    default:
-      return 1.0f;
-    case CrossPointSettings::WIDE:
-      return 1.1f;
-  }
+  if (!epub) return lineSpacingFor(SETTINGS.lineSpacing, LineSpacingScale::Font, pointSize, 0);
+  return lineSpacingForBook(SETTINGS.lineSpacing, *epub, getEffectiveReaderFontId(), pointSize, renderer);
 }
 
 int EpubReaderActivity::getEffectiveReaderFontId() const { return resolveReaderFont(nullptr); }
@@ -7355,38 +7347,14 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   if (effectiveFontId == 0) {
     effectiveFontId = SETTINGS.getReaderFontId();
   }
-  const auto getEffectiveLineCompression = [&](int fontId) {
-    const int notosansId =
-        CrossPointSettings::getBuiltinReaderFontIdForPoints(CrossPointSettings::NOTOSANS, effectiveFontSize);
-
-    if (fontId == notosansId) {
-      switch (SETTINGS.lineSpacing) {
-        case CrossPointSettings::TIGHT:
-          return 0.90f;
-        case CrossPointSettings::NORMAL:
-        default:
-          return 0.95f;
-        case CrossPointSettings::WIDE:
-          return 1.0f;
-      }
-    }
-
-    switch (SETTINGS.lineSpacing) {
-      case CrossPointSettings::TIGHT:
-        return 0.95f;
-      case CrossPointSettings::NORMAL:
-      default:
-        return 1.0f;
-      case CrossPointSettings::WIDE:
-        return 1.1f;
-    }
-  };
-
-  const float effectiveLineCompression = getEffectiveLineCompression(effectiveFontId);
+  const LineSpacing lineSpacing =
+      lineSpacingForBook(SETTINGS.lineSpacing, *epub, effectiveFontId, effectiveFontSize, renderer);
   auto section = std::make_unique<Section>(epub, spineIndex, renderer);
   Section::BuildParams p;
   p.fontId = effectiveFontId;
-  p.lineCompression = effectiveLineCompression;
+  p.lineCompression = lineSpacing.compression;
+  p.bookLineHeightFloor = lineSpacing.bookFloor;
+  p.lineHeightEmPx = lineSpacing.emPx;
   p.extraParagraphSpacing = SETTINGS.extraParagraphSpacing;
   p.paragraphAlignment = effectiveParagraphAlignment;
   p.viewportWidth = viewportWidth;
