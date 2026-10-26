@@ -188,8 +188,9 @@ book written horizontally. In a book written for vertical-rl, top is inline-star
 block-start (before the first column), bottom is inline-end, left is block-end, and width is the block size. The
 spike's contents page showed it: entries styled `margin: 1em 0`, meant as "start each column 1em down, columns
 touching", came out as columns 2em apart with no indent, 13 pages instead of about 4. The fix is one rotation where
-`CssStyle` becomes `BlockStyle` (and in image sizing), chosen by the writing mode **the CSS was written for**, the
-book's declared mode, not the rendered one:
+`CssStyle` becomes `BlockStyle` (and in image sizing), chosen by the writing mode **the CSS was written for**: each
+element's computed writing mode (its own, else inherited), not the mode the page is set in. A book that mixes modes
+(horizontal blocks inside a vertical body) gets each block read its own way:
 - a vertical book set vertically: rotate (CSS's own rule);
 - a horizontal book the reader forces vertical (an Aozora conversion): no rotation, so the author's spacing is kept
   along the same logical axes, transposed with the page;
@@ -305,12 +306,15 @@ Each step is its own plan and PR, like the CJK roadmap.
 
 | Step | What | What a reader sees |
 |---|---|---|
-| 0 | Parse `dir`, `direction`, `writing-mode`, `text-combine-upright`, `start`/`end`, OPF ppd; FlowContext; page progression in the reader; generated fixture books | right-to-left books turn the right way; nothing else changes |
-| 1 | Bidi core and Hebrew: levels, split, visualize, mirrored insets, a Hebrew family | Hebrew books readable, niqqud included |
+| 0 | Parse `writing-mode`; read CSS box properties along each element's writing mode; a fixture book | a book written for vertical text, still set horizontally, keeps its spacing along the right axes |
+| 1 | Bidi core and Hebrew: `dir`, `direction`, `start`/`end`; levels, split, visualize, mirrored insets; OPF ppd, FlowContext and page progression; a Hebrew family | Hebrew books readable, niqqud included, pages turn right to left |
 | 2 | Arabic script: logical shaping, ligature guard, an Arabic family with baked forms, Persian and Urdu letters | Arabic and Persian books readable |
-| 3 | Vertical frame: turned frame, `drawTextVertical` (U and R), measurement seam, images, taps | vertical Japanese readable, punctuation rough |
-| 4 | Vertical typography: baked vertical forms (fonts re-cut), small kana, tate-chu-yoko, A3a in vertical, Traditional Chinese marks | vertical text set properly |
+| 3 | Vertical frame: turned frame, `drawTextVertical` (U and R), measurement seam, images, taps; the vertical decision (CSS, then ppd) with its global and per-book settings; page progression from step 1 | vertical Japanese readable, punctuation rough |
+| 4 | Vertical typography: baked vertical forms (fonts re-cut), small kana, tate-chu-yoko (parsing `text-combine-upright`), A3a in vertical, Traditional Chinese marks | vertical text set properly |
 | 5 | UI and other readers: visual strings and glyph fallback for titles and TOC; bidi in TXT and MD | right-to-left titles in the library |
+
+Step 0 was re-scoped by its plan (`docs/superpowers/plans/2026-10-26-writing-modes-step0.md`): each item is parsed in the
+step that first reads it, so no field waits unread and no page turns right to left before its text does.
 
 After step 0, steps 1-2 and steps 3-4 do not depend on each other, and neither depends on CJK steps 6-9 in
 `docs/future_work/cjk.md`.

@@ -19,14 +19,14 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 
 | Step | What | State |
 |---|---|---|
-| 0 | Parse `dir`, `direction`, `writing-mode`, `text-combine-upright`, `start`/`end`, OPF ppd; FlowContext; page progression in the reader; generated fixture books | plan to write |
-| 1 | Bidi core and Hebrew | open |
+| 0 | Parse `writing-mode`; read CSS box properties along each element's writing mode; a fixture book | plan written ([plan](../superpowers/plans/2026-10-26-writing-modes-step0.md)) |
+| 1 | Bidi core and Hebrew; `dir`, `direction`, `start`/`end`; OPF ppd, FlowContext and page progression | open |
 | 2 | Arabic script | open |
-| 3 | Vertical frame (from the spike) | open |
-| 4 | Vertical typography: baked vertical forms, small kana, tate-chu-yoko, A3a in vertical | open |
+| 3 | Vertical frame (from the spike); the vertical decision and its settings | open |
+| 4 | Vertical typography: baked vertical forms, small kana, tate-chu-yoko (`text-combine-upright`), A3a in vertical | open |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
 
-**Next step.** Write the step 0 plan.
+**Next step.** Carry out the step 0 plan, after the maintainer confirms its re-scope (its Task 0).
 
 ## Found while looking at real books
 
@@ -42,6 +42,9 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 **The acceptance book for steps 0, 3 and 4:** Hayakawa's 『七王国の玉座』 vol. 1 (`.idea/annas-arch-91dbd462043f.epub`,
 local only, never in the repo): ppd `rtl`, `-webkit-writing-mode`, ~1,400 ruby groups, tate-chu-yoko, sesame dots, 12
 images, ~380,000 CJK characters.
+
+**The control for step 0:** the English original of the same novel (`.idea/A Game Of Thrones Book 1 -- Martin, George
+R_ R_ -- 2011 -- chenjin5.epub`, local only): no `writing-mode` and 160 margin rules, so its page counts must not move.
 
 ## Left from the spike, for step 3
 
