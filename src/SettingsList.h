@@ -387,7 +387,9 @@ inline void buildSettings(const RowSink& emit) {
                           StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_READER_SPACING));
   emit(SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing,
-                         {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE}, "lineSpacing", StrId::STR_CAT_READER)
+                         {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE,
+                          StrId::STR_WIDEST, StrId::STR_BOOK_S_STYLE},
+                         "lineSpacing", StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_READER_SPACING));
   emit(SettingInfo::Toggle(StrId::STR_EXTRA_SPACING, &CrossPointSettings::extraParagraphSpacing,
                            "extraParagraphSpacing", StrId::STR_CAT_READER)

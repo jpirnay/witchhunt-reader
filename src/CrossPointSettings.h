@@ -270,7 +270,16 @@ class CrossPointSettings {
     return best;
   }
 
-  enum LINE_COMPRESSION { TIGHT = 0, NORMAL = 1, WIDE = 2, LINE_COMPRESSION_COUNT };
+  // Stored by number, in LineSpacingStep's order (Epub/LineSpacing.h). FROM_BOOK is Book's style.
+  enum LINE_COMPRESSION {
+    TIGHT = 0,
+    NORMAL = 1,
+    WIDE = 2,
+    EXTRA_WIDE = 3,
+    WIDEST = 4,
+    FROM_BOOK = 5,
+    LINE_COMPRESSION_COUNT
+  };
   enum PARAGRAPH_ALIGNMENT {
     JUSTIFIED = 0,
     LEFT_ALIGN = 1,
