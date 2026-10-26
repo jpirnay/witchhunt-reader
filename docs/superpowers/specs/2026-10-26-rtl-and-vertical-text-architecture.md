@@ -306,15 +306,16 @@ Each step is its own plan and PR, like the CJK roadmap.
 
 | Step | What | What a reader sees |
 |---|---|---|
-| 0 | Parse `writing-mode`; read CSS box properties along each element's writing mode; a fixture book | a book written for vertical text, still set horizontally, keeps its spacing along the right axes |
-| 1 | Bidi core and Hebrew: `dir`, `direction`, `start`/`end`; levels, split, visualize, mirrored insets; OPF ppd, FlowContext and page progression; a Hebrew family | Hebrew books readable, niqqud included, pages turn right to left |
+| 0 | Parse every trigger: `writing-mode`, `text-orientation`, `text-combine-upright`, `direction`, `unicode-bidi`, `start`/`end`, `dir` with `<bdo>`/`<bdi>`, OPF ppd; read CSS box properties along each element's writing mode and `start`/`end` along its direction; fixture books | a book written for vertical text, still set horizontally, keeps its spacing along the right axes; `start`/`end` follow `dir` |
+| 1 | Bidi core and Hebrew: levels, split, visualize, the start-side indent and list markers; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; FlowContext and page progression; a Hebrew family | Hebrew books readable, niqqud included, pages turn right to left |
 | 2 | Arabic script: logical shaping, ligature guard, an Arabic family with baked forms, Persian and Urdu letters | Arabic and Persian books readable |
 | 3 | Vertical frame: turned frame, `drawTextVertical` (U and R), measurement seam, images, taps; the vertical decision (CSS, then ppd) with its global and per-book settings; page progression from step 1 | vertical Japanese readable, punctuation rough |
-| 4 | Vertical typography: baked vertical forms (fonts re-cut), small kana, tate-chu-yoko (parsing `text-combine-upright`), A3a in vertical, Traditional Chinese marks | vertical text set properly |
+| 4 | Vertical typography: baked vertical forms (fonts re-cut), small kana, tate-chu-yoko (the per-word flag from `text-combine-upright`), A3a in vertical, Traditional Chinese marks | vertical text set properly |
 | 5 | UI and other readers: visual strings and glyph fallback for titles and TOC; bidi in TXT and MD | right-to-left titles in the library |
 
-Step 0 was re-scoped by its plan (`docs/superpowers/plans/2026-10-26-writing-modes-step0.md`): each item is parsed in the
-step that first reads it, so no field waits unread and no page turns right to left before its text does.
+Step 0 parses every trigger (maintainer, 2026-10-26), including those first acted on later; its plan,
+`docs/superpowers/plans/2026-10-26-writing-modes-step0.md`, lists which step first reads each. Page turns follow the
+book only from step 1, when text can run right to left.
 
 After step 0, steps 1-2 and steps 3-4 do not depend on each other, and neither depends on CJK steps 6-9 in
 `docs/future_work/cjk.md`.
