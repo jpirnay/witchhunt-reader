@@ -34,6 +34,14 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
   `cn` as `zh` (`TypographyProfile.cpp`).
 - **Aozora Bunko conversions declare no writing mode.** They open horizontally under Automatic; the global setting's On
   is what sets them vertically (spec section 5.1).
+- **A calibre-processed commercial book says it only as `-webkit-writing-mode: vertical-rl`,** with no unprefixed
+  property, through a class on `<body>`; its tate-chu-yoko (`text-combine-upright: all` with `-webkit-text-combine:
+  horizontal`) and sesame dots arrive through renamed classes too. Step 0 must read the prefixed property and resolve
+  `body`'s classes through the cascade.
+
+**The acceptance book for steps 0, 3 and 4:** Hayakawa's 『七王国の玉座』 vol. 1 (`.idea/annas-arch-91dbd462043f.epub`,
+local only, never in the repo): ppd `rtl`, `-webkit-writing-mode`, ~1,400 ruby groups, tate-chu-yoko, sesame dots, 12
+images, ~380,000 CJK characters.
 
 ## Left from the spike, for step 3
 

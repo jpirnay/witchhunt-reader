@@ -79,6 +79,21 @@ Missing outright:
    the right, sesame dots. It also shows what a second engine costs: every reader feature needs a vertical twin, and
    tables, heading sizes and justification never got one. Its rules are worth taking; its engine is not.
 
+**koreader-tategumi** (m-tky/crengine and m-tky/koreader-base, active in October 2026), looked at on 2026-10-26 because
+it is the vertical Japanese most often recommended for KOReader:
+- **Layout:** each horizontal formatter function has a `*Vertical` sibling cloned from it, with an x/y coordinate swap
+  (`lvtextfm_vert.cpp`, ~2,800 lines; ~4,500 lines of vertical code in all). Its own header asks that every upstream
+  fix to a horizontal function be checked against its vertical copy: the cost the turned frame avoids.
+- **Glyphs:** HarfBuzz applies the font's `vert` and `vrt2`; failing that, a 23-entry table maps to the Unicode vertical
+  forms (from LuaTeX-ja); failing that, the glyph bitmap is rotated 90°. The font's `vmtx` is used where present.
+  JLREQ slot widths come from LuaTeX-ja's `jfm-ujisv.lua`.
+- **"Kerning must be Best"** is a crengine detail: only its Best mode runs HarfBuzz, so only Best applies `vert`. It
+  has no counterpart here.
+- **What it changes here:** nothing in the architecture. The same three-step order (the font's vertical form, then the
+  Unicode vertical form, then rotation) is section 5.4's. Unicode itself gives the vertical-form mapping (33 code points
+  in U+FE10-FE4F decompose `<vertical>` to their horizontal form), so no table needs to be taken from the fork, which
+  is GPL code in an MIT project anyway. LuaTeX-ja's classes are a cross-check for A3a in vertical.
+
 ## 4. The proposal under review: a format provider per language
 
 **What is right.**
@@ -226,9 +241,14 @@ by its vertical decision; one rule covers both cases here.
 ### 5.6 Fonts: bake GSUB when the font is built
 
 Vertical alternates (`vert`, `vrt2`) and Arabic joining forms (`isol`, `init`, `medi`, `fina`, `rlig`) are GSUB
-substitutions. The device has no shaper and should not get one. They go into the cmap when the font is cut:
+substitutions. The device has no shaper and should not get one: the vertical ones are one-to-one substitutions with no
+context, which a table lookup does, and HarfBuzz would cost hundreds of KB of flash and needs the full GSUB and GPOS
+tables the CJK cuts leave out. They go into the cmap when the font is cut:
 - **`cjk_subset.py`:** map each `vert` alternate to its Unicode vertical form, or to a private code point where Unicode
-  has none (a few dozen glyphs per family). The manifest version goes up and the families are re-cut.
+  has none (a few dozen glyphs per family). The manifest version goes up and the families are re-cut. `vert`, not
+  `vrt2`: `vrt2` also holds pre-rotated glyphs for what is set sideways, and the turned frame already rotates those.
+- **A font with the Unicode vertical forms but no baked map** (Traditional Chinese has 27 through Big5): the 33
+  `<vertical>` decompositions of U+FE10-FE4F say which character each form stands for.
 - **Hebrew and Arabic families** in the Font Manager (Noto Sans and Serif Hebrew, Noto Naskh or Sans Arabic), with
   presentation forms baked from GSUB where the cmap lacks them.
 - **A reader's own `.ttf`** without presentation forms draws Arabic unjoined. Reading GSUB single substitutions on the
