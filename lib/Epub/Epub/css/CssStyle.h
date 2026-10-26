@@ -447,6 +447,60 @@ struct CssStyle {
   }
   [[nodiscard]] bool hasFontSizeMultiplier() const { return defined.fontSizeMultiplier; }
 
+  // Rewrites what layout reads physically into what the element means logically. Afterwards top, right, bottom and
+  // left are block-start, inline-end, block-end and inline-start, and imageWidth/imageHeight the inline and block size,
+  // as horizontal-tb names them; text-align start and end are left or right. Both arguments are the element's computed
+  // values: the writing mode its CSS was written for, not the one the page is set in (Unset reads as horizontal-tb and
+  // ltr). Line-relative properties (text-align left/right, float, text-indent) need nothing. CSS Writing Modes 3, 6.2.
+  void resolveLogical(const CssWritingMode writingModeIn, const CssDirection directionIn) {
+    if (textAlign == CssTextAlign::Start || textAlign == CssTextAlign::End) {
+      const bool rtl = directionIn == CssDirection::Rtl;  // Auto reads as ltr until the text decides
+      textAlign = (textAlign == CssTextAlign::Start) != rtl ? CssTextAlign::Left : CssTextAlign::Right;
+    }
+    if (writingModeIn != CssWritingMode::VerticalRl && writingModeIn != CssWritingMode::VerticalLr) return;
+    const bool rl = writingModeIn == CssWritingMode::VerticalRl;  // block-start is the right side, else the left
+    struct Side {
+      CssLength length;
+      bool defined;
+    };
+    // top, right, bottom, left in; block-start, inline-end, block-end, inline-start out.
+    const auto turn = [rl](const Side top, const Side right, const Side bottom, const Side left, Side(&out)[4]) {
+      out[0] = rl ? right : left;
+      out[1] = bottom;
+      out[2] = rl ? left : right;
+      out[3] = top;
+    };
+    Side m[4];
+    turn({marginTop, defined.marginTop != 0}, {marginRight, defined.marginRight != 0},
+         {marginBottom, defined.marginBottom != 0}, {marginLeft, defined.marginLeft != 0}, m);
+    marginTop = m[0].length;
+    defined.marginTop = m[0].defined;
+    marginRight = m[1].length;
+    defined.marginRight = m[1].defined;
+    marginBottom = m[2].length;
+    defined.marginBottom = m[2].defined;
+    marginLeft = m[3].length;
+    defined.marginLeft = m[3].defined;
+    Side pd[4];
+    turn({paddingTop, defined.paddingTop != 0}, {paddingRight, defined.paddingRight != 0},
+         {paddingBottom, defined.paddingBottom != 0}, {paddingLeft, defined.paddingLeft != 0}, pd);
+    paddingTop = pd[0].length;
+    defined.paddingTop = pd[0].defined;
+    paddingRight = pd[1].length;
+    defined.paddingRight = pd[1].defined;
+    paddingBottom = pd[2].length;
+    defined.paddingBottom = pd[2].defined;
+    paddingLeft = pd[3].length;
+    defined.paddingLeft = pd[3].defined;
+    // A vertical box's height runs along its lines: the inline size, which layout reads as the width.
+    const CssLength width = imageWidth;
+    const uint32_t widthDefined = defined.imageWidth;
+    imageWidth = imageHeight;
+    defined.imageWidth = defined.imageHeight;
+    imageHeight = width;
+    defined.imageHeight = widthDefined;
+  }
+
   void reset() {
     textAlign = CssTextAlign::Left;
     fontStyle = CssFontStyle::Normal;

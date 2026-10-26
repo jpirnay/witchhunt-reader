@@ -346,3 +346,71 @@ TEST(CssParserDeclarations, AStyleWithOnlyAFlowPropertySaysSomething) {
   EXPECT_FALSE(CssParser::parseInlineStyle("writing-mode: inherit").anyDefined());
   EXPECT_FALSE(CssStyle{}.anyDefined());
 }
+
+// ---- resolveLogical: what layout reads, along the element's writing mode and direction ----
+
+// margin: 1px 2px 3px 4px is top 1, right 2, bottom 3, left 4.
+TEST(CssLogical, VerticalRlTurnsTheBox) {
+  CssStyle s =
+      CssParser::parseInlineStyle("margin: 1px 2px 3px 4px; padding: 5px 6px 7px 8px; width: 9px; height: 10px");
+  s.resolveLogical(CssWritingMode::VerticalRl, CssDirection::Unset);
+  EXPECT_FLOAT_EQ(2, s.marginTop.value);     // block-start: right
+  EXPECT_FLOAT_EQ(3, s.marginRight.value);   // inline-end: bottom
+  EXPECT_FLOAT_EQ(4, s.marginBottom.value);  // block-end: left
+  EXPECT_FLOAT_EQ(1, s.marginLeft.value);    // inline-start: top
+  EXPECT_FLOAT_EQ(6, s.paddingTop.value);
+  EXPECT_FLOAT_EQ(7, s.paddingRight.value);
+  EXPECT_FLOAT_EQ(8, s.paddingBottom.value);
+  EXPECT_FLOAT_EQ(5, s.paddingLeft.value);
+  EXPECT_FLOAT_EQ(10, s.imageWidth.value);  // inline size: height
+  EXPECT_FLOAT_EQ(9, s.imageHeight.value);  // block size: width
+}
+
+TEST(CssLogical, VerticalLrTurnsTheBox) {
+  CssStyle s = CssParser::parseInlineStyle("margin: 1px 2px 3px 4px");
+  s.resolveLogical(CssWritingMode::VerticalLr, CssDirection::Unset);
+  EXPECT_FLOAT_EQ(4, s.marginTop.value);     // block-start: left
+  EXPECT_FLOAT_EQ(3, s.marginRight.value);   // inline-end: bottom
+  EXPECT_FLOAT_EQ(2, s.marginBottom.value);  // block-end: right
+  EXPECT_FLOAT_EQ(1, s.marginLeft.value);    // inline-start: top
+}
+
+TEST(CssLogical, DefinedBitsTurnWithTheirValues) {
+  CssStyle s = CssParser::parseInlineStyle("margin-right: 2em; height: auto");
+  s.resolveLogical(CssWritingMode::VerticalRl, CssDirection::Unset);
+  EXPECT_TRUE(s.hasMarginTop());
+  EXPECT_EQ(CssUnit::Em, s.marginTop.unit);
+  EXPECT_FALSE(s.hasMarginRight());
+  EXPECT_FALSE(s.hasMarginBottom());
+  EXPECT_FALSE(s.hasMarginLeft());
+  EXPECT_TRUE(s.defined.imageWidth);  // the explicit auto travels with its axis
+  EXPECT_FALSE(s.hasImageWidth());
+  EXPECT_FALSE(s.defined.imageHeight);
+}
+
+TEST(CssLogical, HorizontalLeavesTheBox) {
+  CssStyle s = CssParser::parseInlineStyle("margin: 1px 2px 3px 4px; width: 9px");
+  s.resolveLogical(CssWritingMode::HorizontalTb, CssDirection::Rtl);
+  EXPECT_FLOAT_EQ(1, s.marginTop.value);
+  EXPECT_FLOAT_EQ(4, s.marginLeft.value);  // margins are physical in CSS: direction does not mirror them
+  EXPECT_FLOAT_EQ(9, s.imageWidth.value);
+  CssStyle unset = CssParser::parseInlineStyle("margin: 1px 2px 3px 4px");
+  unset.resolveLogical(CssWritingMode::Unset, CssDirection::Unset);  // reads as horizontal-tb
+  EXPECT_FLOAT_EQ(2, unset.marginRight.value);
+}
+
+TEST(CssLogical, StartAndEndFollowTheDirection) {
+  const auto align = [](const CssTextAlign a, const CssDirection d) {
+    CssStyle s;
+    s.textAlign = a;
+    s.defined.textAlign = 1;
+    s.resolveLogical(CssWritingMode::Unset, d);
+    return s.textAlign;
+  };
+  EXPECT_EQ(CssTextAlign::Left, align(CssTextAlign::Start, CssDirection::Unset));
+  EXPECT_EQ(CssTextAlign::Right, align(CssTextAlign::Start, CssDirection::Rtl));
+  EXPECT_EQ(CssTextAlign::Left, align(CssTextAlign::End, CssDirection::Rtl));
+  EXPECT_EQ(CssTextAlign::Right, align(CssTextAlign::End, CssDirection::Ltr));
+  EXPECT_EQ(CssTextAlign::Left, align(CssTextAlign::Start, CssDirection::Auto));  // until the text decides
+  EXPECT_EQ(CssTextAlign::Center, align(CssTextAlign::Center, CssDirection::Rtl));
+}
