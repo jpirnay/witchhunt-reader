@@ -236,3 +236,113 @@ TEST(CssParserDeclarations, InheritDefersToTheParent) {
   EXPECT_FALSE(resolved.hasFontWeight());
   EXPECT_FALSE(resolved.hasTextAlign());
 }
+
+// ---- How text runs: writing-mode, text-orientation, text-combine-upright, direction, unicode-bidi, start/end ----
+
+// Every spelling a book uses: the unprefixed property, the EPUB 3.0 and WebKit prefixes (a calibre conversion keeps
+// only -webkit-), and IE's, whose legacy values CSS Writing Modes 3 maps.
+TEST(CssParserDeclarations, WritingModeSpellings) {
+  const auto mode = [](const char* decl) { return CssParser::parseInlineStyle(decl).writingMode; };
+  EXPECT_EQ(CssWritingMode::VerticalRl, mode("writing-mode: vertical-rl"));
+  EXPECT_EQ(CssWritingMode::VerticalRl, mode("-webkit-writing-mode: vertical-rl"));
+  EXPECT_EQ(CssWritingMode::VerticalLr, mode("-epub-writing-mode: vertical-lr"));
+  EXPECT_EQ(CssWritingMode::VerticalRl, mode("-ms-writing-mode: tb-rl"));
+  EXPECT_EQ(CssWritingMode::VerticalLr, mode("-ms-writing-mode: tb-lr"));
+  EXPECT_EQ(CssWritingMode::VerticalRl, mode("writing-mode: tb"));
+  EXPECT_EQ(CssWritingMode::HorizontalTb, mode("-ms-writing-mode: lr-tb"));
+  EXPECT_EQ(CssWritingMode::HorizontalTb, mode("writing-mode: rl"));
+  EXPECT_EQ(CssWritingMode::HorizontalTb, mode("writing-mode: horizontal-tb"));
+  EXPECT_EQ(CssWritingMode::VerticalRl, mode("writing-mode: sideways-rl"));
+  EXPECT_EQ(CssWritingMode::VerticalLr, mode("writing-mode: sideways-lr"));
+  EXPECT_EQ(CssWritingMode::HorizontalTb, mode("writing-mode: initial"));
+  EXPECT_EQ(CssWritingMode::VerticalRl, mode("WRITING-MODE : VERTICAL-RL !important"));
+  EXPECT_EQ(CssWritingMode::Unset, mode("writing-mode: inherit"));
+  EXPECT_EQ(CssWritingMode::Unset, mode("writing-mode: unset"));
+  EXPECT_EQ(CssWritingMode::Unset, mode("writing-mode: diagonal"));
+}
+
+TEST(CssParserDeclarations, TextOrientationSpellings) {
+  const auto orient = [](const char* decl) { return CssParser::parseInlineStyle(decl).textOrientation; };
+  EXPECT_EQ(CssTextOrientation::Upright, orient("text-orientation: upright"));
+  EXPECT_EQ(CssTextOrientation::Upright, orient("-epub-text-orientation: upright"));
+  EXPECT_EQ(CssTextOrientation::Sideways, orient("-webkit-text-orientation: sideways"));
+  EXPECT_EQ(CssTextOrientation::Sideways, orient("text-orientation: sideways-right"));
+  EXPECT_EQ(CssTextOrientation::Mixed, orient("text-orientation: mixed"));
+  EXPECT_EQ(CssTextOrientation::Mixed, orient("text-orientation: use-glyph-orientation"));
+  EXPECT_EQ(CssTextOrientation::Mixed, orient("text-orientation: initial"));
+  EXPECT_EQ(CssTextOrientation::Unset, orient("text-orientation: inherit"));
+  EXPECT_EQ(CssTextOrientation::Unset, orient("text-orientation: diagonal"));
+}
+
+TEST(CssParserDeclarations, TextCombineSpellings) {
+  const auto tcy = [](const char* decl) { return CssParser::parseInlineStyle(decl).textCombine; };
+  EXPECT_EQ(CssTextCombine::All, tcy("text-combine-upright: all"));
+  EXPECT_EQ(CssTextCombine::None, tcy("text-combine-upright: none"));
+  EXPECT_EQ(CssTextCombine::Digits2, tcy("text-combine-upright: digits"));
+  EXPECT_EQ(CssTextCombine::Digits4, tcy("text-combine-upright: digits 4"));
+  EXPECT_EQ(CssTextCombine::All, tcy("-webkit-text-combine: horizontal"));
+  EXPECT_EQ(CssTextCombine::None, tcy("-webkit-text-combine: none"));
+  EXPECT_EQ(CssTextCombine::All, tcy("-epub-text-combine: horizontal"));
+  EXPECT_EQ(CssTextCombine::Digits3, tcy("-epub-text-combine: horizontal 3"));
+  EXPECT_EQ(CssTextCombine::Digits2, tcy("-ms-text-combine-horizontal: digits 2"));
+  EXPECT_EQ(CssTextCombine::All, tcy("-ms-text-combine-horizontal: all"));
+  EXPECT_EQ(CssTextCombine::None, tcy("text-combine-upright: initial"));
+  EXPECT_EQ(CssTextCombine::Unset, tcy("text-combine-upright: digits 7"));  // outside 2-4: invalid
+  EXPECT_EQ(CssTextCombine::Unset, tcy("text-combine-upright: inherit"));
+}
+
+TEST(CssParserDeclarations, DirectionValues) {
+  const auto dir = [](const char* decl) { return CssParser::parseInlineStyle(decl).direction; };
+  EXPECT_EQ(CssDirection::Rtl, dir("direction: rtl"));
+  EXPECT_EQ(CssDirection::Ltr, dir("direction: ltr"));
+  EXPECT_EQ(CssDirection::Ltr, dir("direction: initial"));
+  EXPECT_EQ(CssDirection::Unset, dir("direction: auto"));  // only the HTML dir attribute has auto
+  EXPECT_EQ(CssDirection::Unset, dir("direction: inherit"));
+}
+
+TEST(CssParserDeclarations, UnicodeBidiValues) {
+  const auto bidi = [](const char* decl) { return CssParser::parseInlineStyle(decl).unicodeBidi; };
+  EXPECT_EQ(CssUnicodeBidi::Normal, bidi("unicode-bidi: normal"));
+  EXPECT_EQ(CssUnicodeBidi::Embed, bidi("unicode-bidi: embed"));
+  EXPECT_EQ(CssUnicodeBidi::Isolate, bidi("unicode-bidi: isolate"));
+  EXPECT_EQ(CssUnicodeBidi::BidiOverride, bidi("unicode-bidi: bidi-override"));
+  EXPECT_EQ(CssUnicodeBidi::IsolateOverride, bidi("unicode-bidi: isolate-override"));
+  EXPECT_EQ(CssUnicodeBidi::Plaintext, bidi("unicode-bidi: plaintext"));
+  EXPECT_EQ(CssUnicodeBidi::Isolate, bidi("unicode-bidi: -webkit-isolate"));
+  EXPECT_EQ(CssUnicodeBidi::IsolateOverride, bidi("unicode-bidi: -moz-isolate-override"));
+  EXPECT_EQ(CssUnicodeBidi::Plaintext, bidi("unicode-bidi: -webkit-plaintext"));
+  EXPECT_EQ(CssUnicodeBidi::Normal, bidi("unicode-bidi: initial"));
+  EXPECT_EQ(CssUnicodeBidi::Unset, bidi("unicode-bidi: inherit"));
+}
+
+// The last declaration wins across spellings, as CSS has it: they are one property.
+TEST(CssParserDeclarations, TheLastSpellingWins) {
+  EXPECT_EQ(CssWritingMode::HorizontalTb,
+            CssParser::parseInlineStyle("-webkit-writing-mode: vertical-rl; writing-mode: horizontal-tb").writingMode);
+  EXPECT_EQ(CssTextCombine::All,
+            CssParser::parseInlineStyle("text-combine-upright: none; -webkit-text-combine: horizontal").textCombine);
+}
+
+// A more specific rule's value beats a less specific one's, through applyOver's ranks.
+TEST(CssParserDeclarations, TheFlowPropertiesCascade) {
+  CssStyle merged;
+  uint32_t ranks[CssStyle::kCascadeProperties] = {};
+  merged.applyOver(CssParser::parseInlineStyle("direction: ltr; unicode-bidi: isolate; writing-mode: vertical-lr"), 2,
+                   ranks);
+  merged.applyOver(CssParser::parseInlineStyle("direction: rtl; unicode-bidi: plaintext; writing-mode: vertical-rl; "
+                                               "text-orientation: upright; text-combine-upright: all"),
+                   1, ranks);
+  EXPECT_EQ(CssDirection::Ltr, merged.direction);
+  EXPECT_EQ(CssUnicodeBidi::Isolate, merged.unicodeBidi);
+  EXPECT_EQ(CssWritingMode::VerticalLr, merged.writingMode);
+  EXPECT_EQ(CssTextOrientation::Upright, merged.textOrientation);  // only the lower rule set these two
+  EXPECT_EQ(CssTextCombine::All, merged.textCombine);
+}
+
+TEST(CssParserDeclarations, AStyleWithOnlyAFlowPropertySaysSomething) {
+  EXPECT_TRUE(CssParser::parseInlineStyle("writing-mode: vertical-rl").anyDefined());
+  EXPECT_TRUE(CssParser::parseInlineStyle("unicode-bidi: isolate").anyDefined());
+  EXPECT_TRUE(CssParser::parseInlineStyle("text-combine-upright: none").anyDefined());
+  EXPECT_FALSE(CssParser::parseInlineStyle("writing-mode: inherit").anyDefined());
+  EXPECT_FALSE(CssStyle{}.anyDefined());
+}

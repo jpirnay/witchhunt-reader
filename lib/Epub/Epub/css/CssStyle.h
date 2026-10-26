@@ -6,7 +6,18 @@
 // the marker for an explicit `inherit`, which must beat a value set lower in the cascade and then
 // leave the element to its parent's alignment (CssStyle::hasTextAlign reports it as unset).
 // Based on the `inherit` patch Leopoldo Pla Sempere (@lpla) posted on crosspoint-reader PR #3891.
-enum class CssTextAlign : uint8_t { Justify = 0, Left = 1, Center = 2, Right = 3, None = 4, Inherit = 5 };
+// Start and End are `text-align: start` and `end`, left or right by the element's direction: CssStyle::resolveLogical
+// turns them into Left or Right before layout reads the alignment.
+enum class CssTextAlign : uint8_t {
+  Justify = 0,
+  Left = 1,
+  Center = 2,
+  Right = 3,
+  None = 4,
+  Inherit = 5,
+  Start = 6,
+  End = 7
+};
 // Auto is not a length: it is the marker for an explicit `width: auto` / `height: auto`, which
 // must beat a length set earlier in the cascade rather than be ignored as unparseable. Only
 // imageWidth/imageHeight carry it (see CssStyle::hasImageWidth/hasImageHeight, which report the
@@ -70,6 +81,15 @@ enum class CssVerticalAlign : uint8_t { Baseline = 0, Super = 1, Sub = 2 };
 
 // Float options — used to detect inline images beside paragraph text
 enum class CssFloat : uint8_t { None = 0, Left = 1, Right = 2 };
+
+// How text runs, as the element's CSS says it. These properties have no defined bit (the flag word is nearly full):
+// 0 is Unset in each, which tells "not declared" from a declared initial value. Sideways writing modes read as the
+// vertical mode with the same block direction; Auto direction comes only from the HTML dir attribute.
+enum class CssWritingMode : uint8_t { Unset = 0, HorizontalTb, VerticalRl, VerticalLr };
+enum class CssTextOrientation : uint8_t { Unset = 0, Mixed, Upright, Sideways };
+enum class CssTextCombine : uint8_t { Unset = 0, None, All, Digits2, Digits3, Digits4 };
+enum class CssDirection : uint8_t { Unset = 0, Ltr, Rtl, Auto };
+enum class CssUnicodeBidi : uint8_t { Unset = 0, Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext };
 
 // Bitmask for tracking which properties have been explicitly set
 struct CssPropertyFlags {
@@ -189,6 +209,10 @@ struct CssStyle {
   bool listStyleNone = false;    // true when list-style-type: none / list-style: none
   bool pageBreakBefore = false;  // true when page-break-before: always (or break-before: page)
   bool pageBreakAfter = false;   // true when page-break-after: always (or break-after: page)
+  // Three of the five flow properties, in the padding before the floats (see the size check below the struct).
+  CssWritingMode writingMode = CssWritingMode::Unset;
+  CssTextOrientation textOrientation = CssTextOrientation::Unset;
+  CssTextCombine textCombine = CssTextCombine::Unset;
   // line-height as a multiple of the element's font size, as CSS has it (unitless, em, % and px all end up here);
   // unset is `normal`, the font's own line height. Not read by layout yet: the reader's line-spacing setting decides.
   float lineHeightEm = 0.0f;
@@ -211,6 +235,9 @@ struct CssStyle {
   bool colorTransparent = false;
   bool opacityZero = false;
   bool visibilityHidden = false;  // visibility: hidden | collapse
+  // The other two, in the padding before fontFamily.
+  CssDirection direction = CssDirection::Unset;
+  CssUnicodeBidi unicodeBidi = CssUnicodeBidi::Unset;
   // A font-family list as CssFontFamily describes it: its first family's identity and its generic serif or
   // sans-serif; 0 for the reader's font.
   uint32_t fontFamily = 0;
@@ -218,7 +245,7 @@ struct CssStyle {
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
 
   // Number of properties applyOver() merges: the size of its `ranks` array.
-  static constexpr int kCascadeProperties = 28;
+  static constexpr int kCascadeProperties = 33;
 
   // Apply properties from another style, only overwriting if the other style
   // has that property explicitly defined.
@@ -352,6 +379,11 @@ struct CssStyle {
       fontFamily = base.fontFamily;
       defined.fontFamily = 1;
     }
+    if (base.hasWritingMode() && take(hasWritingMode(), 28)) writingMode = base.writingMode;
+    if (base.hasTextOrientation() && take(hasTextOrientation(), 29)) textOrientation = base.textOrientation;
+    if (base.hasTextCombine() && take(hasTextCombine(), 30)) textCombine = base.textCombine;
+    if (base.hasDirection() && take(hasDirection(), 31)) direction = base.direction;
+    if (base.hasUnicodeBidi() && take(hasUnicodeBidi(), 32)) unicodeBidi = base.unicodeBidi;
   }
 
   // An explicit `inherit` is defined (it overrides lower rules in applyOver) but reports as unset:
@@ -403,6 +435,16 @@ struct CssStyle {
   [[nodiscard]] bool hasPageBreakBefore() const { return defined.pageBreakBefore; }
   [[nodiscard]] bool hasPageBreakAfter() const { return defined.pageBreakAfter; }
   [[nodiscard]] bool hasLineHeight() const { return defined.lineHeight; }
+  [[nodiscard]] bool hasWritingMode() const { return writingMode != CssWritingMode::Unset; }
+  [[nodiscard]] bool hasTextOrientation() const { return textOrientation != CssTextOrientation::Unset; }
+  [[nodiscard]] bool hasTextCombine() const { return textCombine != CssTextCombine::Unset; }
+  [[nodiscard]] bool hasDirection() const { return direction != CssDirection::Unset; }
+  [[nodiscard]] bool hasUnicodeBidi() const { return unicodeBidi != CssUnicodeBidi::Unset; }
+  // Whether the style says anything at all: a defined bit, or one of the flow properties, which have none.
+  [[nodiscard]] bool anyDefined() const {
+    return defined.anySet() || hasWritingMode() || hasTextOrientation() || hasTextCombine() || hasDirection() ||
+           hasUnicodeBidi();
+  }
   [[nodiscard]] bool hasFontSizeMultiplier() const { return defined.fontSizeMultiplier; }
 
   void reset() {
@@ -428,6 +470,15 @@ struct CssStyle {
     opacityZero = false;
     visibilityHidden = false;
     fontFamily = 0;
+    writingMode = CssWritingMode::Unset;
+    textOrientation = CssTextOrientation::Unset;
+    textCombine = CssTextCombine::Unset;
+    direction = CssDirection::Unset;
+    unicodeBidi = CssUnicodeBidi::Unset;
     defined.clearAll();
   }
 };
+
+// The flow properties sit in padding (after pageBreakAfter and after visibilityHidden), so a style costs no more than
+// it did without them: every member is 4-byte aligned or smaller, so the C3 lays it out as the host does.
+static_assert(sizeof(CssStyle) == 124, "CssStyle grew: the flow properties no longer fit its padding");

@@ -671,6 +671,88 @@ bool CssParser::tryInterpretLength(const std::string_view v, CssLength& out) {
   return true;
 }
 
+bool CssParser::interpretWritingMode(const std::string_view v, CssWritingMode& out) {
+  // The SVG 1.1 and IE values CSS Writing Modes 3 maps, and the sideways modes by the block direction they share.
+  if (v == "horizontal-tb" || v == "lr" || v == "lr-tb" || v == "rl" || v == "rl-tb" || v == "initial") {
+    out = CssWritingMode::HorizontalTb;
+  } else if (v == "vertical-rl" || v == "tb" || v == "tb-rl" || v == "sideways-rl") {
+    out = CssWritingMode::VerticalRl;
+  } else if (v == "vertical-lr" || v == "tb-lr" || v == "sideways-lr") {
+    out = CssWritingMode::VerticalLr;
+  } else {
+    return false;  // inherit, unset, revert and the unknown: the parent's mode
+  }
+  return true;
+}
+
+bool CssParser::interpretTextOrientation(const std::string_view v, CssTextOrientation& out) {
+  if (v == "mixed" || v == "use-glyph-orientation" || v == "initial") {
+    out = CssTextOrientation::Mixed;
+  } else if (v == "upright") {
+    out = CssTextOrientation::Upright;
+  } else if (v == "sideways" || v == "sideways-right") {
+    out = CssTextOrientation::Sideways;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+bool CssParser::interpretTextCombine(const std::string_view v, CssTextCombine& out) {
+  // text-combine-upright: none | all | digits [2-4]; -webkit-text-combine and -epub-text-combine: horizontal [n];
+  // -ms-text-combine-horizontal takes the unprefixed values.
+  if (v == "none" || v == "initial") {
+    out = CssTextCombine::None;
+    return true;
+  }
+  if (v == "all" || v == "horizontal") {
+    out = CssTextCombine::All;
+    return true;
+  }
+  const auto digits = [&out](const std::string_view count) {
+    const int n = count.empty() ? 2 : (count.size() == 1 ? count[0] - '0' : 0);  // `digits` alone is two
+    if (n < 2 || n > 4) return false;
+    out = static_cast<CssTextCombine>(static_cast<int>(CssTextCombine::Digits2) + n - 2);
+    return true;
+  };
+  if (v == "digits") return digits({});
+  if (v.substr(0, 7) == "digits ") return digits(v.substr(7));
+  if (v.substr(0, 11) == "horizontal ") return digits(v.substr(11));
+  return false;
+}
+
+bool CssParser::interpretDirection(const std::string_view v, CssDirection& out) {
+  if (v == "ltr" || v == "initial") {
+    out = CssDirection::Ltr;
+  } else if (v == "rtl") {
+    out = CssDirection::Rtl;
+  } else {
+    return false;  // auto exists only for the HTML dir attribute
+  }
+  return true;
+}
+
+bool CssParser::interpretUnicodeBidi(std::string_view v, CssUnicodeBidi& out) {
+  if (v.substr(0, 8) == "-webkit-") v.remove_prefix(8);  // the old prefixed values
+  if (v.substr(0, 5) == "-moz-") v.remove_prefix(5);
+  if (v == "normal" || v == "initial") {
+    out = CssUnicodeBidi::Normal;
+  } else if (v == "embed") {
+    out = CssUnicodeBidi::Embed;
+  } else if (v == "isolate") {
+    out = CssUnicodeBidi::Isolate;
+  } else if (v == "bidi-override") {
+    out = CssUnicodeBidi::BidiOverride;
+  } else if (v == "isolate-override") {
+    out = CssUnicodeBidi::IsolateOverride;
+  } else if (v == "plaintext") {
+    out = CssUnicodeBidi::Plaintext;
+  } else {
+    return false;
+  }
+  return true;
+}
+
 bool CssParser::interpretLineHeight(const std::string_view v, float& em) {
   // A multiple of the element's font size, as CSS has it. px and pt are taken at CSS's 16 px medium, so a book written
   // in pixels keeps its ratio to the text. Clamped to what a page can sensibly show; zero and below are not a value.
@@ -777,7 +859,20 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
   propValueBuf.resize(stripTrailingImportant(propValueBuf).size());
   if (propValueBuf.empty()) return;
 
-  if (propNameBuf == "text-align") {
+  if (propNameBuf == "writing-mode" || propNameBuf == "-webkit-writing-mode" || propNameBuf == "-epub-writing-mode" ||
+      propNameBuf == "-ms-writing-mode") {
+    interpretWritingMode(propValueBuf, style.writingMode);
+  } else if (propNameBuf == "text-orientation" || propNameBuf == "-webkit-text-orientation" ||
+             propNameBuf == "-epub-text-orientation") {
+    interpretTextOrientation(propValueBuf, style.textOrientation);
+  } else if (propNameBuf == "text-combine-upright" || propNameBuf == "-webkit-text-combine" ||
+             propNameBuf == "-epub-text-combine" || propNameBuf == "-ms-text-combine-horizontal") {
+    interpretTextCombine(propValueBuf, style.textCombine);
+  } else if (propNameBuf == "direction") {
+    interpretDirection(propValueBuf, style.direction);
+  } else if (propNameBuf == "unicode-bidi") {
+    interpretUnicodeBidi(propValueBuf, style.unicodeBidi);
+  } else if (propNameBuf == "text-align") {
     style.textAlign = interpretAlignment(propValueBuf);
     style.defined.textAlign = 1;
   } else if (propNameBuf == "font-style") {
@@ -1082,7 +1177,7 @@ CssStyle CssParser::parseDeclarations(const std::string_view declBlock) {
 void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, const CssStyle& style) {
   // Inspired by crosspoint-reader#2604: a selector with no renderer-supported
   // declarations only consumes scarce rule-map and cache-index capacity.
-  if (!style.defined.anySet()) {
+  if (!style.anyDefined()) {
     return;
   }
 
@@ -2841,7 +2936,7 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
     applyComplexRules(self, ancestry, cascade, dependsOnAncestors);
   }
 
-  if (!cascade.result.defined.anySet()) {
+  if (!cascade.result.anyDefined()) {
     resolveStats_.misses++;
   }
 

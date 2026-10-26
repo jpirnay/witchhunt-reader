@@ -2161,7 +2161,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
           // A style a descendant or child rule could reach is not memoised at all: the next
           // element with this tag and class may stand elsewhere. Whether that can happen depends
           // on the tag and class alone, so such a key is never in the memo and never hit.
-          if (resolved.defined.anySet() && !dependsOnAncestors && self->styleMemoHasRoom(self->cssStyleCache_))
+          if (resolved.anyDefined() && !dependsOnAncestors && self->styleMemoHasRoom(self->cssStyleCache_))
             self->cssStyleCache_.emplace(std::move(cacheKey), resolved);
           cssStyle = resolved;
         }

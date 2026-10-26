@@ -510,6 +510,13 @@ class CssParser {
   static bool interpretImageSize(std::string_view val, CssLength& out);
   /** line-height as a multiple of the element's font size; false for normal, the keywords and what is not a length. */
   static bool interpretLineHeight(std::string_view val, float& em);
+  // How text runs. Each leaves `out` alone and returns false for inherit, unset, revert and values it does not know,
+  // which leaves the property unset: the element takes its parent's value where the property is inherited.
+  static bool interpretWritingMode(std::string_view val, CssWritingMode& out);
+  static bool interpretTextOrientation(std::string_view val, CssTextOrientation& out);
+  static bool interpretTextCombine(std::string_view val, CssTextCombine& out);
+  static bool interpretDirection(std::string_view val, CssDirection& out);
+  static bool interpretUnicodeBidi(std::string_view val, CssUnicodeBidi& out);
 
   // String utilities
   static std::string normalized(const std::string& s);
