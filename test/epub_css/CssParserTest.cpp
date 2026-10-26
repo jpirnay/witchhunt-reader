@@ -3,6 +3,7 @@
 #include <string>
 
 #include "../../lib/Epub/Epub/css/CssParser.h"
+#include "../../lib/Epub/Epub/parsers/HtmlDirectionality.h"
 
 TEST(CssParserDeclarations, InlineUnderlineLineThrough) {
   const CssStyle style = CssParser::parseInlineStyle("text-decoration: underline line-through");
@@ -413,4 +414,47 @@ TEST(CssLogical, StartAndEndFollowTheDirection) {
   EXPECT_EQ(CssTextAlign::Right, align(CssTextAlign::End, CssDirection::Ltr));
   EXPECT_EQ(CssTextAlign::Left, align(CssTextAlign::Start, CssDirection::Auto));  // until the text decides
   EXPECT_EQ(CssTextAlign::Center, align(CssTextAlign::Center, CssDirection::Rtl));
+}
+
+// ---- HTML's dir, <bdo> and <bdi> ----
+
+TEST(HtmlDirectionality, DirSetsDirectionAndIsolates) {
+  CssStyle s;
+  applyHtmlDirectionality(s, "p", "rtl");
+  EXPECT_EQ(CssDirection::Rtl, s.direction);
+  EXPECT_EQ(CssUnicodeBidi::Isolate, s.unicodeBidi);
+}
+
+TEST(HtmlDirectionality, ValuesAreCaseInsensitiveAndAnythingElseIsAbsent) {
+  CssStyle a, b;
+  applyHtmlDirectionality(a, "div", "AUTO");
+  applyHtmlDirectionality(b, "div", "sideways");
+  EXPECT_EQ(CssDirection::Auto, a.direction);
+  EXPECT_EQ(CssDirection::Unset, b.direction);
+  EXPECT_EQ(CssUnicodeBidi::Unset, b.unicodeBidi);
+}
+
+TEST(HtmlDirectionality, BdoOverridesAndBdiIsolatesWithAutoDirection) {
+  CssStyle bdo, bdi, bdiRtl;
+  applyHtmlDirectionality(bdo, "bdo", "ltr");
+  applyHtmlDirectionality(bdi, "bdi", "");
+  applyHtmlDirectionality(bdiRtl, "bdi", "rtl");
+  EXPECT_EQ(CssUnicodeBidi::IsolateOverride, bdo.unicodeBidi);
+  EXPECT_EQ(CssDirection::Ltr, bdo.direction);
+  EXPECT_EQ(CssUnicodeBidi::Isolate, bdi.unicodeBidi);
+  EXPECT_EQ(CssDirection::Auto, bdi.direction);
+  EXPECT_EQ(CssDirection::Rtl, bdiRtl.direction);
+}
+
+TEST(HtmlDirectionality, AuthorCssBeatsTheAttribute) {
+  CssStyle s = CssParser::parseInlineStyle("direction: ltr; unicode-bidi: plaintext");
+  applyHtmlDirectionality(s, "p", "rtl");
+  EXPECT_EQ(CssDirection::Ltr, s.direction);
+  EXPECT_EQ(CssUnicodeBidi::Plaintext, s.unicodeBidi);
+}
+
+TEST(HtmlDirectionality, NoAttributeChangesNothing) {
+  CssStyle s;
+  applyHtmlDirectionality(s, "span", "");
+  EXPECT_FALSE(s.anyDefined());
 }
