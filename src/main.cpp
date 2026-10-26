@@ -800,10 +800,15 @@ std::string publisherFontsCache(const char* path, const RecentBook& book) {
 
 struct ResolvedBookFonts {
   std::string primaryFamily;
-  const char* families[1 + BookFonts::kMaxAccents] = {};
+  const char* accents[BookFonts::kMaxAccents] = {};
   uint8_t count = 0;
   uint8_t pointSize = 0;
   bool pending = false;
+
+  void fillFamilies(const char* (&out)[1 + BookFonts::kMaxAccents]) const {
+    out[0] = primaryFamily.c_str();
+    for (uint8_t n = 0; n < BookFonts::kMaxAccents; ++n) out[1 + n] = accents[n];
+  }
 };
 
 ResolvedBookFonts resolveBookFontsForPath(const char* path, const bool waitForBookFonts, const bool resetAccentLimit) {
@@ -811,7 +816,6 @@ ResolvedBookFonts resolveBookFontsForPath(const char* path, const bool waitForBo
   if (!path || path[0] == '\0') {
     sdFontSystem.selectBookFamilies({});
     out.primaryFamily = SETTINGS.sdFontFamilyName;
-    out.families[0] = out.primaryFamily.c_str();
     out.count = 1;
     out.pointSize = SETTINGS.fontPointSize;
     return out;
@@ -822,7 +826,6 @@ ResolvedBookFonts resolveBookFontsForPath(const char* path, const bool waitForBo
   if (isTxtMd) {
     sdFontSystem.selectBookFamilies({});
     out.primaryFamily = SETTINGS.txtSdFontFamilyName;
-    out.families[0] = out.primaryFamily.c_str();
     out.count = 1;
     out.pointSize = SETTINGS.txtFontPointSize;
     return out;
@@ -849,9 +852,8 @@ ResolvedBookFonts resolveBookFontsForPath(const char* path, const bool waitForBo
   sdFontSystem.selectBookFamilies(cachePath, SETTINGS.publisherFonts, family);
   if (sdFontSystem.bookFamilyName()[0] != '\0') family = sdFontSystem.bookFamilyName();
   out.primaryFamily = family;
-  out.families[0] = out.primaryFamily.c_str();
   for (uint8_t n = 0; n < BookFonts::kMaxAccents; ++n) {
-    out.families[1 + n] = sdFontSystem.accentFamilyName(n);
+    out.accents[n] = sdFontSystem.accentFamilyName(n);
   }
   out.count = 1 + BookFonts::kMaxAccents;
   return out;
@@ -877,7 +879,9 @@ void ensureSdFontLoadedForPath(const char* path, const bool waitForBookFonts) {
   const auto onColdFontLoad = [] { GUI.drawPopup(renderer, tr(STR_LOADING_FONT)); };
   const ResolvedBookFonts resolved = resolveBookFontsForPath(path, waitForBookFonts, true);
   if (resolved.pending) return;
-  sdFontSystem.ensureLoaded(renderer, resolved.families, resolved.count, resolved.pointSize, onColdFontLoad);
+  const char* families[1 + BookFonts::kMaxAccents] = {};
+  resolved.fillFamilies(families);
+  sdFontSystem.ensureLoaded(renderer, families, resolved.count, resolved.pointSize, onColdFontLoad);
 }
 
 void syncUiBookFonts(const bool needed, const uint32_t neededCodepoint) {
@@ -890,7 +894,9 @@ void syncUiBookFonts(const bool needed, const uint32_t neededCodepoint) {
     }
     const ResolvedBookFonts resolved = resolveBookFontsForPath(APP_STATE.openEpubPath.c_str(), false, false);
     if (!resolved.pending && resolved.count > 0 && !resolved.primaryFamily.empty()) {
-      sdFontSystem.openUiFallback(resolved.families, resolved.count, neededCodepoint);
+      const char* families[1 + BookFonts::kMaxAccents] = {};
+      resolved.fillFamilies(families);
+      sdFontSystem.openUiFallback(families, resolved.count, neededCodepoint);
       if (sdFontSystem.uiOnlyFallback()) return;
     }
     const char* candidate = nullptr;

@@ -1073,6 +1073,14 @@ bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPa
     s.stubData.is2Bit = s.header.is2Bit;
     s.stubData.ligaturePairs = s.ligaturePairs;
     s.stubData.ligaturePairCount = s.header.ligaturePairCount;
+    s.stubData.intervals = s.fullIntervals;
+    s.stubData.intervalCount = s.header.intervalCount;
+    if (s.glyphsFileOffset + static_cast<size_t>(s.header.glyphCount) * sizeof(EpdGlyph) <= size) {
+      s.stubData.glyph = reinterpret_cast<const EpdGlyph*>(base + s.glyphsFileOffset);
+    }
+    if (s.bitmapFileOffset <= size) {
+      s.stubData.bitmap = base + s.bitmapFileOffset;
+    }
 
     s.epdFont.data = &s.stubData;
     applyGlyphMissCallback(i);
@@ -1926,6 +1934,19 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   // Under an ink-only page the font data says 1-bit, so the miss must be an ink mask too.
   const bool ink = s.miniInkOnly && s.epdFont.data == &s.miniData;
 
+  if (s.miniMode == PerStyle::MiniMode::FULL && s.miniData.intervalCount > 0 && s.miniInkOnly == ink) {
+    const auto* intervals = s.miniIntervals;
+    const auto* end = intervals + s.miniIntervalCount;
+    const auto it = std::upper_bound(
+        intervals, end, codepoint, [](uint32_t val, const EpdUnicodeInterval& iv) { return val < iv.first; });
+    if (it != intervals) {
+      const auto& iv = *(it - 1);
+      if (codepoint <= iv.last && s.miniGlyphs) {
+        return &s.miniGlyphs[iv.offset + (codepoint - iv.first)];
+      }
+    }
+  }
+
   // Check overflow cache first (matching codepoint, style and depth).
   // Probe all slots: the ring may be sparse after failed insertions.
   for (uint32_t i = 0; i < OVERFLOW_CAPACITY; i++) {
@@ -2069,4 +2090,30 @@ bool SdCardFont::covers(const uint32_t codepoint) const {
 
 const EpdFontData* SdCardFont::uiFontData() const {
   return (loaded_ && styles_[0].present) ? &styles_[0].stubData : nullptr;
+}
+
+bool SdCardFont::StyleProvider::ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const {
+  if (self->isOverflowGlyph(glyph)) {
+    bitmap = self->getOverflowBitmap(glyph);
+    return true;
+  }
+  if (styleIdx < MAX_STYLES) {
+    const auto& s = self->styles_[styleIdx];
+    if (s.miniMode == PerStyle::MiniMode::FULL && s.miniGlyphs && glyph >= s.miniGlyphs &&
+        glyph < s.miniGlyphs + s.miniGlyphCount) {
+      bitmap = s.miniData.bitmap ? s.miniData.bitmap + glyph->dataOffset : nullptr;
+      return true;
+    }
+  }
+  return false;
+}
+
+void SdCardFont::prefetchUi(const uint8_t styleIdx, const char* utf8Text) {
+  if (!loaded_ || styleIdx >= MAX_STYLES || !styles_[styleIdx].present) return;
+  if (mmapDataBase_) return;
+  if (styles_[styleIdx].epdFont.data == &styles_[styleIdx].miniData &&
+      styles_[styleIdx].miniMode == PerStyle::MiniMode::FULL) {
+    return;
+  }
+  prewarm(utf8Text, static_cast<uint8_t>(1u << styleIdx), /*metadataOnly=*/false, /*loadKernLigatureData=*/false);
 }

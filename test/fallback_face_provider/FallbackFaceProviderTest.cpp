@@ -456,6 +456,7 @@ TEST_F(FallbackFaceProviderTest, BatchPrefetchInvokesChainedProvider) {
     std::string prefetched;
     const EpdGlyph* missGlyph(uint32_t) override { return nullptr; }
     bool ownsBitmap(const EpdGlyph*, const uint8_t*&) const override { return false; }
+    bool covers(uint32_t) const override { return true; }
     void prefetch(const char* utf8Text) override {
       if (utf8Text) prefetched += utf8Text;
     }
@@ -489,6 +490,114 @@ TEST_F(FallbackFaceProviderTest, BatchPrefetchInvokesChainedProvider) {
   };
   provider.prefetch(getter, &mixedTitles, static_cast<int>(mixedTitles.size()));
   EXPECT_EQ(mockProvider.prefetched, "\xE4\xB9\xA6\xE5\x90\x8D\xE4\xB8\x80\xE6\x9B\xB8\xE5\x90\x8D\xE4\xBA\x8C");
+}
+
+TEST_F(FallbackFaceProviderTest, PartialCoverageProtectionKeepsFaces0Active) {
+  // When faces_[0] (JA) is active and a string has an unsupported codepoint U+1F600 that
+  // chained_ does NOT cover alongside a JA character covered by faces_[0], preferChained_
+  // remains false and the JA character is served from faces_[0].
+  const EpdFontData* faces[] = {&cjk_ui_ja_10, &cjk_ui_zh_10};
+  provider.setFaces(faces, 2);
+  provider.setAfterFirstFace(true);
+  provider.setPrimaryFace(&inter_ui_10_regular);
+
+  static EpdGlyph chainedGlyphs[1] = {{8, 8, 8, 0, 0, 8, 0}};
+  static EpdUnicodeInterval chainedIntervals[1] = {{ZH_AND_JA, ZH_AND_JA, 0}};
+  static uint8_t chainedBmp[8] = {0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55};
+  static EpdFontData chainedFace{};
+  chainedFace.bitmap = chainedBmp;
+  chainedFace.glyph = chainedGlyphs;
+  chainedFace.intervals = chainedIntervals;
+  chainedFace.intervalCount = 1;
+
+  provider.setChainedFace(&chainedFace, true);
+
+  // Prefetch string with ZH_AND_JA and emoji U+1F600 (ð)
+  // U+1F600 is missing from both primary_ and faces_[0], but chained_ does NOT cover it either.
+  provider.prefetch("\xE5\xAE\x9A\xF0\x9F\x98\x80");
+
+  // preferChained_ must remain false; ZH_AND_JA must be served from faces_[0] (JA)
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(ZH_AND_JA)), faceBytes(cjk_ui_ja_10, ZH_AND_JA));
+  provider.setChainedFace(nullptr);
+}
+
+TEST_F(FallbackFaceProviderTest, MultiFamilyWrongInitialFamilySwitchesOnDemand) {
+  // When chained_ initially lacks the missing codepoint (covers(cp) == false),
+  // onDemandAttach_(cp) is invoked even though chained_ was non-null, switching
+  // chained_ to a face that covers cp.
+  provider.setPrimaryFace(&inter_ui_10_regular);
+
+  struct ProviderA : public GlyphProvider {
+    const EpdGlyph* missGlyph(uint32_t) override { return nullptr; }
+    bool ownsBitmap(const EpdGlyph*, const uint8_t*&) const override { return false; }
+    bool covers(uint32_t cp) const override { return cp == 0x039F; }  // Greek only
+  } pA;
+
+  struct ProviderB : public GlyphProvider {
+    const EpdGlyph* missGlyph(uint32_t) override { return nullptr; }
+    bool ownsBitmap(const EpdGlyph*, const uint8_t*&) const override { return false; }
+    bool covers(uint32_t cp) const override { return cp == 0x4E00; }  // CJK only
+  } pB;
+
+  EpdFontData faceA{};
+  faceA.provider = &pA;
+  EpdFontData faceB{};
+  faceB.provider = &pB;
+
+  // Initially faceA is chained (Greek), which does not cover CJK 0x4E00
+  provider.setChainedFace(&faceA);
+
+  static FallbackFaceProvider* sProvider = &provider;
+  static EpdFontData* sFaceB = &faceB;
+  provider.setOnDemandHook([](uint32_t cp) {
+    if (cp == 0x4E00) {
+      sProvider->setChainedFace(sFaceB);
+    }
+  });
+
+  // Prefetch CJK 0x4E00 (ä¸)
+  provider.prefetch("\xE4\xB8\x80");
+
+  // On-demand hook must have switched chained_ to faceB
+  EXPECT_TRUE(provider.hasChainedFace());
+  provider.setOnDemandHook(nullptr);
+  provider.setChainedFace(nullptr);
+}
+
+TEST_F(FallbackFaceProviderTest, PureAsciiPrefetchResetsPreferChained) {
+  // After a string sets preferChained_ = true, prefetching a pure-ASCII string
+  // resets preferChained_ = false.
+  const EpdFontData* faces[] = {&cjk_ui_zh_10, &cjk_ui_ja_10};
+  provider.setFaces(faces, 2);
+  provider.setAfterFirstFace(true);
+
+  static EpdGlyph chainedGlyphs[2] = {
+      {8, 8, 8, 0, 0, 8, 0},
+      {8, 8, 8, 0, 0, 8, 8}
+  };
+  static EpdUnicodeInterval chainedIntervals[2] = {
+      {ZH_AND_JA, ZH_AND_JA, 0},
+      {IN_NO_FACE, IN_NO_FACE, 1}
+  };
+  static uint8_t chainedBmp[16];
+  for (int i = 0; i < 16; ++i) chainedBmp[i] = 0xAA;
+  static EpdFontData chainedFace{};
+  chainedFace.bitmap = chainedBmp;
+  chainedFace.glyph = chainedGlyphs;
+  chainedFace.intervals = chainedIntervals;
+  chainedFace.intervalCount = 2;
+
+  provider.setChainedFace(&chainedFace, true);
+
+  // 1. String with character outside faces_[0] sets preferChained_ = true
+  provider.prefetch("\xE5\xAE\x9A\xE9\xBE\x98");
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(ZH_AND_JA)), Bytes(chainedBmp, chainedBmp + 8));
+
+  // 2. Prefetch pure ASCII string -> must reset preferChained_ to false!
+  provider.prefetch("Pure Ascii Title");
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(ZH_AND_JA)), faceBytes(cjk_ui_zh_10, ZH_AND_JA));
+
+  provider.setChainedFace(nullptr);
 }
 
 }  // namespace

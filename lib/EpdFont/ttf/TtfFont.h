@@ -140,7 +140,11 @@ class TtfFont {
     int8_t kerning(const uint32_t leftCp, const uint32_t rightCp) override {
       return owner->kerning(*size, style, leftCp, rightCp);
     }
+    bool covers(const uint32_t codepoint) const override {
+      return owner && owner->covers(codepoint);
+    }
   };
+  using Provider = StyleProvider;
 
   /// One pixel size: its index in the store's face table and the fonts of the family's styles. Never copied or moved:
   /// each font points at its own data, and each provider at its size.

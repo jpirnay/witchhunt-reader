@@ -82,4 +82,10 @@ class GlyphProvider {
   /// `utf8Text` is about to be measured or drawn in this provider's style: a provider that renders glyphs
   /// can prepare the ones it lacks in one batch. Lookups must still work for anything it skipped.
   virtual void prefetch(const char* utf8Text) { (void)utf8Text; }
+
+  /// True when this provider (or its underlying font) covers `codepoint`, without rasterizing or allocating.
+  virtual bool covers(uint32_t codepoint) const {
+    (void)codepoint;
+    return false;
+  }
 };

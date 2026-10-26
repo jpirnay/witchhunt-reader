@@ -109,6 +109,7 @@ class SdCardFont {
 
   bool covers(uint32_t codepoint) const;
   const EpdFontData* uiFontData() const;
+  void prefetchUi(uint8_t styleIdx, const char* utf8Text);
 
   // Returns true if the glyph pointer points into the overflow buffer.
   bool isOverflowGlyph(const EpdGlyph* glyph) const;
@@ -259,10 +260,12 @@ class SdCardFont {
     uint8_t styleIdx = 0;
 
     const EpdGlyph* missGlyph(const uint32_t codepoint) override { return SdCardFont::onGlyphMiss(this, codepoint); }
-    bool ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const override {
-      if (!self->isOverflowGlyph(glyph)) return false;
-      bitmap = self->getOverflowBitmap(glyph);
-      return true;
+    bool ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const override;
+    void prefetch(const char* utf8Text) override {
+      if (self && utf8Text && *utf8Text) self->prefetchUi(styleIdx, utf8Text);
+    }
+    bool covers(const uint32_t codepoint) const override {
+      return self && self->covers(codepoint);
     }
   };
   StyleProvider styleProviders_[MAX_STYLES];

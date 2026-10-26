@@ -436,7 +436,9 @@ void SdCardFontManager::attachUiFallback(const uint32_t neededCodepoint) {
       return;
     }
   }
-  uiFallbackHook_(nullptr, nullptr);
+  if (neededCodepoint == 0) {
+    uiFallbackHook_(nullptr, nullptr);
+  }
 }
 
 void SdCardFontManager::detachUiFallback() {
@@ -451,7 +453,7 @@ bool SdCardFontManager::openUiFallback(const SdCardFontFamilyInfo* const* famili
   }
   if (count > kMaxTtfFamilies) count = kMaxTtfFamilies;
   const uint32_t key = askedKey(families, count);
-  if (key != 0 && key == uncoveredUiAskedKey_ && neededCodepoint == uncoveredUiCodepoint_) return false;
+  if (isUncoveredUiCodepoint(key, neededCodepoint)) return false;
 
   if (families[0]->ttf()) {
     if (FlashFontPartition::isMapped()) FlashFontPartition::unmap();
@@ -475,8 +477,7 @@ bool SdCardFontManager::openUiFallback(const SdCardFontFamilyInfo* const* famili
     ttfSet_ = std::move(set);
     TtfFont* ui = uiTtfFont(neededCodepoint);
     if (!ui) {
-      uncoveredUiAskedKey_ = key;
-      uncoveredUiCodepoint_ = neededCodepoint;
+      noteUncoveredUiCodepoint(key, neededCodepoint);
       ttfSet_.reset();
       ttfFlash_.reset();
       return false;
@@ -530,8 +531,7 @@ bool SdCardFontManager::openUiFallback(const SdCardFontFamilyInfo* const* famili
   }
 
   if (neededCodepoint != 0 && !font->covers(neededCodepoint)) {
-    uncoveredUiAskedKey_ = key;
-    uncoveredUiCodepoint_ = neededCodepoint;
+    noteUncoveredUiCodepoint(key, neededCodepoint);
     delete font;
     if (FlashFontPartition::isMapped()) FlashFontPartition::unmap();
     return false;

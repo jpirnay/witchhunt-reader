@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "FallbackFaceProvider.h"
 
 #include <cstring>
@@ -11,6 +12,8 @@ uint8_t FallbackFaceProvider::packedBuf_[FallbackFaceProvider::PACKED_BUF_BYTES]
 
 bool FallbackFaceProvider::setFaces(const EpdFontData* const* faces, const uint8_t count) {
   faceCount_ = 0;
+  lastPrefetchHash_ = 0;
+  lastPrefetchChained_ = nullptr;
   if (count > MAX_FACES) return false;
   for (uint8_t i = 0; i < count; ++i) {
     if (faces[i]->groups && !decompressor_) return false;
@@ -25,6 +28,8 @@ void FallbackFaceProvider::invalidateRing() {
     slot.face = nullptr;
     slot.sourceRecord = nullptr;
   }
+  lastPrefetchHash_ = 0;
+  lastPrefetchChained_ = nullptr;
 }
 
 void FallbackFaceProvider::setChainedFace(const EpdFontData* face, const bool afterFirstFace) {
@@ -32,10 +37,29 @@ void FallbackFaceProvider::setChainedFace(const EpdFontData* face, const bool af
   chained_ = face;
   afterFirstFace_ = afterFirstFace;
   preferChained_ = false;
+  lastPrefetchHash_ = 0;
+  lastPrefetchChained_ = nullptr;
+}
+
+bool FallbackFaceProvider::faceCovers(const EpdFontData* face, const uint32_t cp) {
+  if (!face) return false;
+  const uint32_t count = face->intervalCount;
+  if (count > 0 && face->intervals) {
+    const EpdUnicodeInterval* intervals = face->intervals;
+    const auto* end = intervals + count;
+    const auto it = std::upper_bound(
+        intervals, end, cp, [](uint32_t value, const EpdUnicodeInterval& interval) { return value < interval.first; });
+    if (it != intervals) {
+      const auto& interval = *(it - 1);
+      if (cp <= interval.last) return true;
+    }
+  }
+  if (face->provider) return face->provider->covers(cp);
+  return false;
 }
 
 void FallbackFaceProvider::ensureChainedAttached(const uint32_t codepoint) const {
-  if (onDemandAttach_ && !inOnDemand_ && (!chained_ || (codepoint != 0 && !EpdFont(chained_).findGlyph(codepoint)))) {
+  if (onDemandAttach_ && !inOnDemand_ && (!chained_ || (codepoint != 0 && !faceCovers(chained_, codepoint)))) {
     inOnDemand_ = true;
     onDemandAttach_(codepoint);
     inOnDemand_ = false;
@@ -51,18 +75,28 @@ const EpdGlyph* FallbackFaceProvider::missGlyph(const uint32_t codepoint) {
 const EpdGlyph* FallbackFaceProvider::serve(const uint32_t codepoint) {
   const bool chainedFirst = preferChained_ || !afterFirstFace_ || faceCount_ == 0;
   if (chainedFirst) {
-    ensureChainedAttached(codepoint);
-    if (const EpdGlyph* g = serveFace(chained_, codepoint)) return g;
+    if (!chained_ || !faceCovers(chained_, codepoint)) ensureChainedAttached(codepoint);
+    if (chained_ && faceCovers(chained_, codepoint)) {
+      if (const EpdGlyph* g = serveFace(chained_, codepoint)) return g;
+    }
     for (uint8_t i = 0; i < faceCount_; ++i) {
-      if (const EpdGlyph* g = serveFace(faces_[i], codepoint)) return g;
+      if (faceCovers(faces_[i], codepoint)) {
+        if (const EpdGlyph* g = serveFace(faces_[i], codepoint)) return g;
+      }
     }
     return nullptr;
   }
-  if (const EpdGlyph* g = serveFace(faces_[0], codepoint)) return g;
-  ensureChainedAttached(codepoint);
-  if (const EpdGlyph* g = serveFace(chained_, codepoint)) return g;
+  if (faceCovers(faces_[0], codepoint)) {
+    if (const EpdGlyph* g = serveFace(faces_[0], codepoint)) return g;
+  }
+  if (!chained_ || !faceCovers(chained_, codepoint)) ensureChainedAttached(codepoint);
+  if (chained_ && faceCovers(chained_, codepoint)) {
+    if (const EpdGlyph* g = serveFace(chained_, codepoint)) return g;
+  }
   for (uint8_t i = 1; i < faceCount_; ++i) {
-    if (const EpdGlyph* g = serveFace(faces_[i], codepoint)) return g;
+    if (faceCovers(faces_[i], codepoint)) {
+      if (const EpdGlyph* g = serveFace(faces_[i], codepoint)) return g;
+    }
   }
   return nullptr;
 }
@@ -142,6 +176,7 @@ bool FallbackFaceProvider::ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bit
 }
 
 void FallbackFaceProvider::prefetch(const char* (*getter)(void* ctx, int index), void* ctx, const int count) {
+  preferChained_ = false;
   if (!getter || count <= 0) return;
 
   bool hasNonAscii = false;
@@ -159,35 +194,25 @@ void FallbackFaceProvider::prefetch(const char* (*getter)(void* ctx, int index),
   }
   if (!hasNonAscii) return;
 
-  uint32_t firstMissingCp = 0;
   const bool checkFirstFace = afterFirstFace_ && faceCount_ > 0 && faces_[0] != nullptr;
-  for (int i = 0; i < count && firstMissingCp == 0; ++i) {
+  for (int i = 0; i < count && !preferChained_; ++i) {
     const char* p = getter(ctx, i);
     if (!p) continue;
     while (*p) {
       const uint32_t cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&p));
       if (cp == 0) break;
       if (cp < 0x80) continue;
-      if (primary_ && EpdFont(primary_).findGlyph(cp)) continue;
-      if (checkFirstFace && EpdFont(faces_[0]).findGlyph(cp)) continue;
-      firstMissingCp = cp;
-      break;
+      if (faceCovers(primary_, cp)) continue;
+      if (checkFirstFace && faceCovers(faces_[0], cp)) continue;
+      ensureChainedAttached(cp);
+      if (chained_ && faceCovers(chained_, cp)) {
+        preferChained_ = true;
+        break;
+      }
     }
   }
 
-  if (firstMissingCp == 0 && checkFirstFace) {
-    preferChained_ = false;
-    return;
-  }
-
-  ensureChainedAttached(firstMissingCp);
-  if (!chained_) {
-    preferChained_ = false;
-    return;
-  }
-
-  preferChained_ = true;
-  if (!chained_->provider) return;
+  if (!preferChained_ || !chained_ || !chained_->provider) return;
 
   char buf[196];
   size_t bufLen = 0;
@@ -200,7 +225,8 @@ void FallbackFaceProvider::prefetch(const char* (*getter)(void* ctx, int index),
       const size_t spanLen = static_cast<size_t>(p - spanStart);
       if (cp == 0 || spanLen == 0) break;
       if (cp < 0x80) continue;
-      if (primary_ && EpdFont(primary_).findGlyph(cp)) continue;
+      if (faceCovers(primary_, cp)) continue;
+      if (!faceCovers(chained_, cp)) continue;
       if (bufLen + spanLen >= sizeof(buf)) {
         buf[bufLen] = 0;
         chained_->provider->prefetch(buf);
@@ -219,9 +245,33 @@ void FallbackFaceProvider::prefetch(const char* (*getter)(void* ctx, int index),
 }
 
 void FallbackFaceProvider::prefetch(const char* utf8Text) {
-  if (!utf8Text || !*utf8Text) return;
+  if (!utf8Text || !*utf8Text) {
+    preferChained_ = false;
+    lastPrefetchHash_ = 0;
+    lastPrefetchChained_ = nullptr;
+    return;
+  }
+  uint32_t hash = 2166136261u;
+  bool hasNonAscii = false;
+  for (const char* s = utf8Text; *s; ++s) {
+    const uint8_t b = static_cast<uint8_t>(*s);
+    if (b >= 0x80) hasNonAscii = true;
+    hash ^= b;
+    hash *= 16777619u;
+  }
+  if (!hasNonAscii) {
+    preferChained_ = false;
+    lastPrefetchHash_ = 0;
+    lastPrefetchChained_ = nullptr;
+    return;
+  }
+  if (hash != 0 && hash == lastPrefetchHash_ && chained_ == lastPrefetchChained_) {
+    return;
+  }
   auto getSingle = [](void* ctx, int /*index*/) -> const char* {
     return static_cast<const char*>(ctx);
   };
   prefetch(getSingle, const_cast<char*>(utf8Text), 1);
+  lastPrefetchHash_ = hash;
+  lastPrefetchChained_ = chained_;
 }

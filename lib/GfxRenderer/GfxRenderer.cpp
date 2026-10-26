@@ -2960,6 +2960,8 @@ std::string GfxRenderer::truncatedText(const int fontId, const char* text, const
     return text;
   }
 
+  family->prefetch(text, static_cast<uint8_t>(1u << (style & 3)));
+
   // SMALL_CAPS scales every metric, which the single-pass walk does not model; a font with no
   // U+2026 has nothing to truncate with. Neither case occurs today, so both take the old loop.
   if (!(style & EpdFontFamily::SMALL_CAPS) && textTruncation::canTruncate(*family, style)) {
@@ -3227,6 +3229,8 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     return 0;
   }
 
+  if (text && *text) family->prefetch(text, static_cast<uint8_t>(1u << (style & 3)));
+
   // A synthesised size measures on its own path, because the two accumulation models differ and
   // this function's whole contract is that measurement and rendering agree EXACTLY.
   //
@@ -3338,6 +3342,7 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
   }
 
   const auto& font = *family;
+  font.prefetch(text, static_cast<uint8_t>(1u << (style & 3)));
 
   int lastBaseY = y;
   int lastBaseLeft = 0;

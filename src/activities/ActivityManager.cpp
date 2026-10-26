@@ -436,6 +436,7 @@ void ActivityManager::exitActivity(const RenderLock& lock) {
     currentActivity->onExit();
     currentActivity.reset();
     refreshWifiActivityFlag();
+    syncUiBookFonts(false);
   }
 }
 

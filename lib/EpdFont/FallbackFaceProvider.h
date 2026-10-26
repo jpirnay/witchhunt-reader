@@ -95,7 +95,10 @@ class FallbackFaceProvider final : public GlyphProvider {
   mutable bool inOnDemand_ = false;
   bool preferChained_ = false;
 
+  static bool faceCovers(const EpdFontData* face, uint32_t cp);
   void ensureChainedAttached(uint32_t codepoint = 0) const;
+  uint32_t lastPrefetchHash_ = 0;
+  const EpdFontData* lastPrefetchChained_ = nullptr;
   uint32_t standIn_ = 0;
   bool (*claims_)(uint32_t) = nullptr;
   FontDecompressor* decompressor_ = nullptr;

@@ -150,9 +150,32 @@ class SdCardFontManager {
   }
   void attachUiFallback(uint32_t neededCodepoint = 0);
   void detachUiFallback();
+  static constexpr uint8_t kUncoveredUiCacheSize = 16;
+  bool isUncoveredUiCodepoint(const uint32_t key, const uint32_t cp) const {
+    if (key == 0 || key != uncoveredUiAskedKey_ || cp == 0) return false;
+    for (uint8_t i = 0; i < uncoveredUiCount_; ++i) {
+      if (uncoveredUiCodepoints_[i] == cp) return true;
+    }
+    return false;
+  }
+  void noteUncoveredUiCodepoint(const uint32_t key, const uint32_t cp) {
+    if (key == 0 || cp == 0) return;
+    if (key != uncoveredUiAskedKey_) {
+      uncoveredUiAskedKey_ = key;
+      uncoveredUiCount_ = 0;
+      uncoveredUiNext_ = 0;
+    }
+    for (uint8_t i = 0; i < uncoveredUiCount_; ++i) {
+      if (uncoveredUiCodepoints_[i] == cp) return;
+    }
+    uncoveredUiCodepoints_[uncoveredUiNext_] = cp;
+    uncoveredUiNext_ = (uncoveredUiNext_ + 1) % kUncoveredUiCacheSize;
+    if (uncoveredUiCount_ < kUncoveredUiCacheSize) ++uncoveredUiCount_;
+  }
   void resetUiFallbackCache() {
     uncoveredUiAskedKey_ = 0;
-    uncoveredUiCodepoint_ = 0;
+    uncoveredUiCount_ = 0;
+    uncoveredUiNext_ = 0;
   }
   void closeUiFallback();
   bool uiOnlyFallback() const { return uiOnlyFallback_; }
@@ -219,7 +242,9 @@ class SdCardFontManager {
   uint8_t ttfCount_ = 0;
   uint32_t ttfAsked_ = 0;  // the families the load was asked for (ttfFamiliesLoaded)
   uint32_t uncoveredUiAskedKey_ = 0;
-  uint32_t uncoveredUiCodepoint_ = 0;
+  uint32_t uncoveredUiCodepoints_[kUncoveredUiCacheSize] = {};
+  uint8_t uncoveredUiCount_ = 0;
+  uint8_t uncoveredUiNext_ = 0;
   // suspendTtf(): the set is gone, its families' names and font IDs kept for resumeTtf().
   bool ttfSuspended_ = false;
   bool uiOnlyFallback_ = false;
