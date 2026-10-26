@@ -103,11 +103,12 @@ constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
 //         (listStyleNone / pageBreakBefore / pageBreakAfter value+defined pairs)
 //         + visibility flags byte (colorTransparent / opacityZero / visibilityHidden value+defined pairs; v19)
 //         + fontFamily hash (uint32; defined is bit 2 of the font-size flags byte; v28)
+//         + line-height in ems (float; defined is bit 3 of the font-size flags byte; v30)
 constexpr size_t CSS_FIXED_STYLE_BYTES = 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
                                          sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t) +
                                          sizeof(uint8_t) + sizeof(float) + sizeof(uint8_t) + sizeof(uint8_t) +
-                                         sizeof(uint8_t) + sizeof(uint32_t);
-static_assert(CSS_FIXED_STYLE_BYTES == 77,
+                                         sizeof(uint8_t) + sizeof(uint32_t) + sizeof(float);
+static_assert(CSS_FIXED_STYLE_BYTES == 81,
               "style payload layout changed — update read/writeCssStylePayload and bump CSS_CACHE_VERSION");
 // A rule record is selectorLen(2) selector order(2) payload; the order sits between selector and
 // payload so a reader that has matched the selector reads the rest in one go (v22).
@@ -670,6 +671,28 @@ bool CssParser::tryInterpretLength(const std::string_view v, CssLength& out) {
   return true;
 }
 
+bool CssParser::interpretLineHeight(const std::string_view v, float& em) {
+  // A multiple of the element's font size, as CSS has it. px and pt are taken at CSS's 16 px medium, so a book written
+  // in pixels keeps its ratio to the text. Clamped to what a page can sensibly show; zero and below are not a value.
+  CssLength length;
+  if (!tryInterpretLength(v, length)) return false;
+  const size_t unitAt = v.find_first_not_of("0123456789.+-");
+  const std::string_view unit = unitAt == std::string_view::npos ? std::string_view{} : v.substr(unitAt);
+  float value = length.value;
+  if (unit == "%") {
+    value /= 100.0f;
+  } else if (unit == "px") {
+    value /= 16.0f;
+  } else if (unit == "pt") {
+    value /= 12.0f;
+  } else if (!unit.empty() && unit != "em" && unit != "rem") {
+    return false;
+  }
+  if (!(value > 0.0f)) return false;
+  em = std::max(0.5f, std::min(4.0f, value));
+  return true;
+}
+
 bool CssParser::interpretImageSize(const std::string_view v, CssLength& out) {
   if (tryInterpretLength(v, out)) return true;
 
@@ -934,42 +957,10 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
       style.defined.pageBreakAfter = 1;
     }
   } else if (propNameBuf == "line-height") {
-    const std::string_view val = propValueBuf;
-    if (val != "normal" && val != "inherit" && val != "initial" && val != "unset") {
-      // Parse unitless, %, or em. Normalise to a multiplier relative to default y_advance.
-      // Base = 1.5 (typical body line-height). Result range clamped to [0.7, 2.0].
-      static constexpr float kBase = 1.5f;
-      float parsed = 0.0f;
-      bool ok = false;
-      if (!val.empty() && val.back() == '%') {
-        const char* p = val.data();
-        char* end = nullptr;
-        float v = std::strtof(p, &end);
-        if (end != p) {
-          parsed = v / 100.0f / kBase;
-          ok = true;
-        }
-      } else if (val.size() > 2 && val.substr(val.size() - 2) == "em") {
-        const char* p = val.data();
-        char* end = nullptr;
-        float v = std::strtof(p, &end);
-        if (end != p) {
-          parsed = v / kBase;
-          ok = true;
-        }
-      } else {
-        const char* p = val.data();
-        char* end = nullptr;
-        float v = std::strtof(p, &end);
-        if (end != p && *end == '\0') {
-          parsed = v / kBase;
-          ok = true;
-        }
-      }
-      if (ok && parsed > 0.0f) {
-        style.lineHeightMultiplier = std::max(0.7f, std::min(2.0f, parsed));
-        style.defined.lineHeight = 1;
-      }
+    float em = 0.0f;
+    if (interpretLineHeight(propValueBuf, em)) {
+      style.lineHeightEm = em;
+      style.defined.lineHeight = 1;
     }
   } else if (propNameBuf == "font-size") {
     const std::string_view val = propValueBuf;
@@ -1832,6 +1823,7 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
     style.defined.fontSizeMultiplier = 1;
   }
   style.defined.fontFamily = (fontSizeFlags & 0x4) != 0 ? 1 : 0;
+  const bool lineHeightDefined = (fontSizeFlags & 0x8) != 0;
   uint8_t blockFlags = 0;
   if (!get(&blockFlags, 1)) {
     return false;
@@ -1852,7 +1844,15 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.opacityZero = (visibilityFlags & 0x08) != 0 ? 1 : 0;
   style.visibilityHidden = (visibilityFlags & 0x10) != 0;
   style.defined.visibilityHidden = (visibilityFlags & 0x20) != 0 ? 1 : 0;
-  return get(&style.fontFamily, sizeof(style.fontFamily));
+  float lineHeightEm = 0.0f;
+  if (!get(&style.fontFamily, sizeof(style.fontFamily)) || !get(&lineHeightEm, sizeof(lineHeightEm))) {
+    return false;
+  }
+  if (lineHeightDefined) {
+    style.lineHeightEm = lineHeightEm;
+    style.defined.lineHeight = 1;
+  }
+  return true;
 }
 
 void CssParser::writeCssStylePayload(FsFile& file, const CssStyle& style) {
@@ -1918,10 +1918,11 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
   uint8_t smallCapsVal = (style.smallCaps ? 0x1 : 0x0) | (style.defined.smallCaps ? 0x2 : 0x0);
   put8(smallCapsVal);
   // font-size multiplier: float + flags byte (bit 0 = defined, bit 1 = relative to the body, v27;
-  // bit 2 = font-family defined, v28)
+  // bit 2 = font-family defined, v28; bit 3 = line-height defined, v30)
   put(&style.fontSizeMultiplier, sizeof(style.fontSizeMultiplier));
   const uint8_t fontSizeFlags = (style.defined.fontSizeMultiplier ? 0x1 : 0x0) |
-                                (style.fontSizeRootRelative ? 0x2 : 0x0) | (style.defined.fontFamily ? 0x4 : 0x0);
+                                (style.fontSizeRootRelative ? 0x2 : 0x0) | (style.defined.fontFamily ? 0x4 : 0x0) |
+                                (style.defined.lineHeight ? 0x8 : 0x0);
   put8(fontSizeFlags);
   // Block flags byte: value/defined pairs, same convention as smallCaps above.
   const uint8_t blockFlags = (style.listStyleNone ? 0x01 : 0x00) | (style.defined.listStyleNone ? 0x02 : 0x00) |
@@ -1935,6 +1936,7 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
                                   (style.defined.visibilityHidden ? 0x20 : 0x00);
   put8(visibilityFlags);
   put(&style.fontFamily, sizeof(style.fontFamily));
+  put(&style.lineHeightEm, sizeof(style.lineHeightEm));
   return at;
 }
 
@@ -2336,7 +2338,7 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   putLen(d.imageHeight, s.imageHeight);
   putLen(d.imageWidth, s.imageWidth);
   if (d.lineHeight) {
-    std::memcpy(p, &s.lineHeightMultiplier, 4);
+    std::memcpy(p, &s.lineHeightEm, 4);
     p += 4;
   }
   if (d.fontSizeMultiplier) {
@@ -2428,7 +2430,7 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
   getLen(d.imageHeight, out.imageHeight);
   getLen(d.imageWidth, out.imageWidth);
   if (d.lineHeight) {
-    std::memcpy(&out.lineHeightMultiplier, p, 4);
+    std::memcpy(&out.lineHeightEm, p, 4);
     p += 4;
   }
   if (d.fontSizeMultiplier) {

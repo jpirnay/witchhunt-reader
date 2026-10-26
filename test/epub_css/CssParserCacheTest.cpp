@@ -481,7 +481,7 @@ bool stylesEqual(const CssStyle& a, const CssStyle& b) {
          a.textDecoration == b.textDecoration && a.display == b.display && a.verticalAlign == b.verticalAlign &&
          a.listStyleNone == b.listStyleNone && a.pageBreakBefore == b.pageBreakBefore &&
          a.pageBreakAfter == b.pageBreakAfter && a.cssFloat == b.cssFloat && a.smallCaps == b.smallCaps &&
-         a.lineHeightMultiplier == b.lineHeightMultiplier && a.fontSizeMultiplier == b.fontSizeMultiplier &&
+         a.lineHeightEm == b.lineHeightEm && a.fontSizeMultiplier == b.fontSizeMultiplier &&
          a.fontSizeRootRelative == b.fontSizeRootRelative && len(a.textIndent) == len(b.textIndent) &&
          len(a.marginTop) == len(b.marginTop) && len(a.marginBottom) == len(b.marginBottom) &&
          len(a.marginLeft) == len(b.marginLeft) && len(a.marginRight) == len(b.marginRight) &&
@@ -728,6 +728,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       << "the invisibility flags did not survive the disk cache";
   EXPECT_TRUE(heapStyles[6].defined.colorTransparent && heapStyles[6].defined.opacityZero &&
               heapStyles[6].defined.visibilityHidden);
+  EXPECT_TRUE(heapStyles[0].hasLineHeight()) << "line-height did not survive the disk cache";
+  EXPECT_FLOAT_EQ(1.6f, heapStyles[0].lineHeightEm);
 
   BuildArena arena(64 * 1024);
   ASSERT_TRUE(arena.valid());

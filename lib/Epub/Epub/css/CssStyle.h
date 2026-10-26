@@ -186,11 +186,13 @@ struct CssStyle {
   CssDisplay display = CssDisplay::Block;                       // display property (Block, Inline or None)
   CssVerticalAlign verticalAlign = CssVerticalAlign::Baseline;  // vertical-align for inline elements
 
-  bool listStyleNone = false;         // true when list-style-type: none / list-style: none
-  bool pageBreakBefore = false;       // true when page-break-before: always (or break-before: page)
-  bool pageBreakAfter = false;        // true when page-break-after: always (or break-after: page)
-  float lineHeightMultiplier = 1.0f;  // normalised line-height multiplier (relative to default y_advance)
-  float fontSizeMultiplier = 1.0f;    // font-size multiplier relative to body em size
+  bool listStyleNone = false;    // true when list-style-type: none / list-style: none
+  bool pageBreakBefore = false;  // true when page-break-before: always (or break-before: page)
+  bool pageBreakAfter = false;   // true when page-break-after: always (or break-after: page)
+  // line-height as a multiple of the element's font size, as CSS has it (unitless, em, % and px all end up here);
+  // unset is `normal`, the font's own line height. Not read by layout yet: the reader's line-spacing setting decides.
+  float lineHeightEm = 0.0f;
+  float fontSizeMultiplier = 1.0f;  // font-size multiplier relative to body em size
   // Part of font-size, set with it: true for rem, px, pt and the absolute keywords, whose size is
   // the body's times the multiplier; false for em, % and smaller/larger, which scale the parent's.
   bool fontSizeRootRelative = false;
@@ -318,7 +320,7 @@ struct CssStyle {
       defined.pageBreakAfter = 1;
     }
     if (base.hasLineHeight() && take(defined.lineHeight, 20)) {
-      lineHeightMultiplier = base.lineHeightMultiplier;
+      lineHeightEm = base.lineHeightEm;
       defined.lineHeight = 1;
     }
     if (base.hasFontSizeMultiplier() && take(defined.fontSizeMultiplier, 21)) {
@@ -417,7 +419,7 @@ struct CssStyle {
     listStyleNone = false;
     pageBreakBefore = false;
     pageBreakAfter = false;
-    lineHeightMultiplier = 1.0f;
+    lineHeightEm = 0.0f;
     fontSizeMultiplier = 1.0f;
     fontSizeRootRelative = false;
     cssFloat = CssFloat::None;
