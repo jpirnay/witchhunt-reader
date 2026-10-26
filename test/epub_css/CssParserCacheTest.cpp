@@ -705,7 +705,7 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       ".d { display: inline; }\n"
       ".e { color: transparent; opacity: 0; visibility: hidden; }\n"
       ".f { -webkit-writing-mode: vertical-lr; -webkit-text-orientation: upright; text-combine-upright: digits 3; "
-      "direction: rtl; unicode-bidi: isolate-override; }\n"
+      "direction: rtl; unicode-bidi: isolate-override; text-align: end; }\n"
       ".g { writing-mode: vertical-rl; }\n";  // a rule with nothing else is kept
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
@@ -742,6 +742,7 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   EXPECT_EQ(CssTextCombine::Digits3, flow.textCombine);
   EXPECT_EQ(CssDirection::Rtl, flow.direction);
   EXPECT_EQ(CssUnicodeBidi::IsolateOverride, flow.unicodeBidi);
+  EXPECT_EQ(CssTextAlign::End, flow.textAlign) << "text-align: end did not survive the disk cache as itself";
   EXPECT_EQ(CssWritingMode::VerticalRl, heapStyles[8].writingMode) << "a rule with only writing-mode was dropped";
 
   BuildArena arena(64 * 1024);

@@ -23,6 +23,7 @@
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/ImageToFramebufferDecoder.h"
 #include "../htmlEntities.h"
+#include "HtmlDirectionality.h"
 
 namespace {
 // An entry whose name has no extension at all: FB2-to-EPUB conversions write <img
@@ -888,6 +889,35 @@ CssStyle ChapterHtmlSlimParser::resolvedImgStyle(const std::string& classAttr) {
   CssStyle resolved = cssParser->resolveStyle("img", classAttr, {}, &ancestry, &dependsOnAncestors);
   if (!dependsOnAncestors && styleMemoHasRoom(cssStyleCache_)) cssStyleCache_.emplace(std::move(key), resolved);
   return resolved;
+}
+
+ChapterHtmlSlimParser::FlowEntry ChapterHtmlSlimParser::enterFlow(const CssStyle& style) {
+  while (flowCount_ > 0 && flows_[flowCount_ - 1].depth >= depth) --flowCount_;
+  const FlowEntry inherited = flowCount_ > 0 ? flows_[flowCount_ - 1] : FlowEntry{};
+  FlowEntry element = inherited;
+  element.depth = static_cast<int16_t>(depth);
+  if (style.hasWritingMode()) element.writingMode = style.writingMode;
+  if (style.hasDirection()) element.direction = style.direction;
+  if (element.writingMode == inherited.writingMode && element.direction == inherited.direction) return element;
+  if (flowCount_ == kMaxFlowEntries) {
+    if (!flowOverflowLogged_)
+      LOG_ERR("EHP", "More than %u nested writing-mode or direction changes; deeper ones dropped", kMaxFlowEntries);
+    flowOverflowLogged_ = true;
+    return inherited;
+  }
+  flows_[flowCount_++] = element;
+  if (!flowLogged_) {
+    LOG_INF("EHP", "Text runs %s, %s from depth %d",
+            element.writingMode == CssWritingMode::VerticalRl   ? "vertical-rl"
+            : element.writingMode == CssWritingMode::VerticalLr ? "vertical-lr"
+                                                                : "horizontal",
+            element.direction == CssDirection::Rtl    ? "rtl"
+            : element.direction == CssDirection::Auto ? "auto"
+                                                      : "ltr",
+            depth);
+    flowLogged_ = true;
+  }
+  return element;
 }
 
 CssParser::Ancestry ChapterHtmlSlimParser::cssAncestry(const std::string& tagName, const std::string& classAttr,
@@ -2029,6 +2059,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   std::string idAttr;
   std::string ariaLabel;
   std::string titleAttr;
+  std::string dirAttr;
   bool hasHiddenAttr = false;
   bool isPageBreakMarker = false;
   if (atts != nullptr) {
@@ -2043,6 +2074,8 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         ariaLabel = atts[i + 1];
       } else if (strcmp(atts[i], "title") == 0) {
         titleAttr = atts[i + 1];
+      } else if (strcmp(atts[i], "dir") == 0) {
+        dirAttr = atts[i + 1];
       } else if (strcmp(atts[i], "hidden") == 0) {
         // A boolean attribute: its presence is what counts. HTML says any value,
         // including the empty string and "false", still means hidden.
@@ -2169,6 +2202,13 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     }
     if (!styleAttr.empty()) cssStyle.applyOver(self->inlineStyleFor(styleAttr));
   }
+
+  // How the element's text runs: HTML's dir under the author's CSS (outside the block above, so it holds with the
+  // book's CSS off), then its computed writing mode and direction, along which its box and start/end are read from here
+  // on.
+  applyHtmlDirectionality(cssStyle, name, dirAttr);
+  self->elementFlow_ = self->enterFlow(cssStyle);
+  cssStyle.resolveLogical(self->elementFlow_.writingMode, self->elementFlow_.direction);
 
   // The HTML `hidden` attribute means display:none, and outranks the CSS that got
   // us here -- it is applied after the cascade above for that reason. EPUBs use it
@@ -2580,6 +2620,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 CssStyle imgStyle = self->cssParser ? self->resolvedImgStyle(classAttr) : CssStyle{};
                 // Merge inline style (e.g. style="height: 2em") so it overrides stylesheet rules
                 if (!styleAttr.empty()) imgStyle.applyOver(self->inlineStyleFor(styleAttr));
+                imgStyle.resolveLogical(self->elementFlow_.writingMode, self->elementFlow_.direction);
                 const bool hasCssHeight = imgStyle.hasImageHeight();
                 const bool hasCssWidth = imgStyle.hasImageWidth();
                 // The column the image would get if no percentage wrapper narrowed it.

@@ -568,8 +568,10 @@ std::vector<std::string> CssParser::splitWhitespace(const std::string& s) {
 
 CssTextAlign CssParser::interpretAlignment(const std::string_view v) {
   if (v == "inherit") return CssTextAlign::Inherit;
-  if (v == "left" || v == "start") return CssTextAlign::Left;
-  if (v == "right" || v == "end") return CssTextAlign::Right;
+  if (v == "left") return CssTextAlign::Left;
+  if (v == "right") return CssTextAlign::Right;
+  if (v == "start") return CssTextAlign::Start;  // left or right by the element's direction: CssStyle::resolveLogical
+  if (v == "end") return CssTextAlign::End;
   if (v == "center") return CssTextAlign::Center;
   if (v == "justify") return CssTextAlign::Justify;
 

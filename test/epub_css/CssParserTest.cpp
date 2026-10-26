@@ -316,6 +316,12 @@ TEST(CssParserDeclarations, UnicodeBidiValues) {
   EXPECT_EQ(CssUnicodeBidi::Unset, bidi("unicode-bidi: inherit"));
 }
 
+// Kept as themselves: they become left or right only along the element's direction (CssStyle::resolveLogical).
+TEST(CssParserDeclarations, StartAndEndStayLogical) {
+  EXPECT_EQ(CssTextAlign::Start, CssParser::parseInlineStyle("text-align: start").textAlign);
+  EXPECT_EQ(CssTextAlign::End, CssParser::parseInlineStyle("text-align: end").textAlign);
+}
+
 // The last declaration wins across spellings, as CSS has it: they are one property.
 TEST(CssParserDeclarations, TheLastSpellingWins) {
   EXPECT_EQ(CssWritingMode::HorizontalTb,
