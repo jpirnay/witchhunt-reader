@@ -698,6 +698,8 @@ void applyUiFontScale() {
   }
 }
 
+void syncUiBookFonts(bool needed = true, uint32_t neededCodepoint = 0);
+
 void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = false) {
   display.begin(seamless);
   // Carry the panel's measured FAST cost across the reboot. Without this the first decision that
@@ -753,6 +755,7 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   CjkUiFonts::attach(ui12BoldFont, 12);
   CjkUiFonts::attach(ui14RegularFont, 14);
   CjkUiFonts::attach(ui14BoldFont, 14);
+  CjkUiFonts::setOnDemandResolver([](uint32_t cp) { syncUiBookFonts(true, cp); });
   // The faces ship compressed; those the language pack does not hold decode through the same
   // decompressor as the reader faces, glyph by glyph.
   CjkUiFonts::setDecompressor(&fontDecompressor);
@@ -794,6 +797,66 @@ std::string publisherFontsCache(const char* path, const RecentBook& book) {
   }
   return Epub::cachePathFor(path, "/.crosspoint");
 }
+
+struct ResolvedBookFonts {
+  std::string primaryFamily;
+  const char* families[1 + BookFonts::kMaxAccents] = {};
+  uint8_t count = 0;
+  uint8_t pointSize = 0;
+  bool pending = false;
+};
+
+ResolvedBookFonts resolveBookFontsForPath(const char* path, const bool waitForBookFonts, const bool resetAccentLimit) {
+  ResolvedBookFonts out;
+  if (!path || path[0] == '\0') {
+    sdFontSystem.selectBookFamilies({});
+    out.primaryFamily = SETTINGS.sdFontFamilyName;
+    out.families[0] = out.primaryFamily.c_str();
+    out.count = 1;
+    out.pointSize = SETTINGS.fontPointSize;
+    return out;
+  }
+  const std::string_view filePath(path);
+  const bool isTxtMd = static_cast<bool (*)(std::string_view)>(FsHelpers::hasTxtExtension)(filePath) ||
+                       static_cast<bool (*)(std::string_view)>(FsHelpers::hasMarkdownExtension)(filePath);
+  if (isTxtMd) {
+    sdFontSystem.selectBookFamilies({});
+    out.primaryFamily = SETTINGS.txtSdFontFamilyName;
+    out.families[0] = out.primaryFamily.c_str();
+    out.count = 1;
+    out.pointSize = SETTINGS.txtFontPointSize;
+    return out;
+  }
+
+  const RecentBook book = RECENT_BOOKS.getBookByPath(path);
+  out.pointSize = (book.fontSizeOverride >= 0) ? static_cast<uint8_t>(book.fontSizeOverride) : SETTINGS.fontPointSize;
+
+  const std::string cachePath = publisherFontsCache(path, book);
+  if (waitForBookFonts && !cachePath.empty() && BookFonts::read(cachePath) == BookFonts::State::Pending) {
+    out.pending = true;
+    return out;
+  }
+  if (resetAccentLimit && cachePath.empty()) {
+    BookFonts::setAccentLimit(Epub::cachePathFor(path, "/.crosspoint"), 0, BookFonts::kMaxAccents);
+  }
+
+  const char* family = SETTINGS.sdFontFamilyName;
+  if (!book.sdFontFamilyOverride.empty()) {
+    family = book.sdFontFamilyOverride.c_str();
+  } else if (book.fontFamilyOverride >= 0) {
+    family = "";
+  }
+  sdFontSystem.selectBookFamilies(cachePath, SETTINGS.publisherFonts, family);
+  if (sdFontSystem.bookFamilyName()[0] != '\0') family = sdFontSystem.bookFamilyName();
+  out.primaryFamily = family;
+  out.families[0] = out.primaryFamily.c_str();
+  for (uint8_t n = 0; n < BookFonts::kMaxAccents; ++n) {
+    out.families[1 + n] = sdFontSystem.accentFamilyName(n);
+  }
+  out.count = 1 + BookFonts::kMaxAccents;
+  return out;
+}
+
 }  // namespace
 
 bool bookFontsPendingForPath(const char* path) {
@@ -812,47 +875,39 @@ void ensureSdFontLoadedForPath(const char* path, const bool waitForBookFonts) {
   // moment; advertise it. Callers (ReaderActivity::onEnter and the reader) already hold a
   // RenderLock, so the lambda must not take one. Fires only on a genuine first load.
   const auto onColdFontLoad = [] { GUI.drawPopup(renderer, tr(STR_LOADING_FONT)); };
+  const ResolvedBookFonts resolved = resolveBookFontsForPath(path, waitForBookFonts, true);
+  if (resolved.pending) return;
+  sdFontSystem.ensureLoaded(renderer, resolved.families, resolved.count, resolved.pointSize, onColdFontLoad);
+}
 
-  const std::string_view filePath(path);
-  const bool isTxtMd = static_cast<bool (*)(std::string_view)>(FsHelpers::hasTxtExtension)(filePath) ||
-                       static_cast<bool (*)(std::string_view)>(FsHelpers::hasMarkdownExtension)(filePath);
-  if (isTxtMd) {
-    // TXT/MD has no per-book SD font override — use global settings directly.
-    sdFontSystem.selectBookFamilies({});
-    sdFontSystem.ensureLoaded(renderer, SETTINGS.txtSdFontFamilyName, SETTINGS.txtFontPointSize, onColdFontLoad);
-    return;
+void syncUiBookFonts(const bool needed, const uint32_t neededCodepoint) {
+  std::optional<RenderLock> lock;
+  if (!RenderLock::heldByCurrentTask()) lock.emplace();
+  if (needed) {
+    if (sdFontSystem.readerFontLoaded() && !sdFontSystem.uiOnlyFallback()) {
+      sdFontSystem.openUiFallback(nullptr, 0, neededCodepoint);
+      return;
+    }
+    const ResolvedBookFonts resolved = resolveBookFontsForPath(APP_STATE.openEpubPath.c_str(), false, false);
+    if (!resolved.pending && resolved.count > 0 && !resolved.primaryFamily.empty()) {
+      sdFontSystem.openUiFallback(resolved.families, resolved.count, neededCodepoint);
+      if (sdFontSystem.uiOnlyFallback()) return;
+    }
+    const char* candidate = nullptr;
+    if (SETTINGS.sdFontFamilyName[0] != '\0') {
+      candidate = SETTINGS.sdFontFamilyName;
+    } else if (SETTINGS.txtSdFontFamilyName[0] != '\0') {
+      candidate = SETTINGS.txtSdFontFamilyName;
+    }
+    if (candidate) {
+      const char* families[1] = {candidate};
+      sdFontSystem.openUiFallback(families, 1, neededCodepoint);
+    }
+  } else {
+    if (sdFontSystem.uiOnlyFallback()) {
+      sdFontSystem.closeUiFallback();
+    }
   }
-
-  // For EPUB: honour per-book SD font and/or size overrides. The book record
-  // is available here — the reader activity hasn't started yet, but
-  // RecentBooksStore already has the persisted overrides for this path.
-  const RecentBook book = RECENT_BOOKS.getBookByPath(path);
-  const uint8_t effectiveSize =
-      (book.fontSizeOverride >= 0) ? static_cast<uint8_t>(book.fontSizeOverride) : SETTINGS.fontPointSize;
-
-  // Publisher Fonts: not examined yet, what is loaded stays, until the reader has examined the book and asks again.
-  const std::string cachePath = publisherFontsCache(path, book);
-  if (waitForBookFonts && !cachePath.empty() && BookFonts::read(cachePath) == BookFonts::State::Pending) return;
-  // They do not apply to the book now (off, the book's own style off, a font chosen for it): the accent families the
-  // memory ladder left out of it are tried again once they do (BookFonts::accentLimit).
-  if (cachePath.empty()) {
-    BookFonts::setAccentLimit(Epub::cachePathFor(path, "/.crosspoint"), 0, BookFonts::kMaxAccents);
-  }
-
-  // No family override: the global SD font (if any), at the effective size.
-  const char* family = SETTINGS.sdFontFamilyName;
-  if (!book.sdFontFamilyOverride.empty()) {
-    family = book.sdFontFamilyOverride.c_str();  // per-book SD font override
-  } else if (book.fontFamilyOverride >= 0) {
-    family = "";  // per-book built-in font override: no SD font needed; unload if one was active
-  }
-  // The families BookFonts copied out of the book: its body family in place of the reader's font, and its accent
-  // families beside whichever draws the body. They load together, the body's first and the most used accent next.
-  sdFontSystem.selectBookFamilies(cachePath, SETTINGS.publisherFonts, family);
-  if (sdFontSystem.bookFamilyName()[0] != '\0') family = sdFontSystem.bookFamilyName();
-  const char* families[1 + BookFonts::kMaxAccents] = {family};
-  for (uint8_t n = 0; n < BookFonts::kMaxAccents; ++n) families[1 + n] = sdFontSystem.accentFamilyName(n);
-  sdFontSystem.ensureLoaded(renderer, families, 1 + BookFonts::kMaxAccents, effectiveSize, onColdFontLoad);
 }
 
 // --- Temporary boot-phase heap-corruption bisect probes -------------------------------

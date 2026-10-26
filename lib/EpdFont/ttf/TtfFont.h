@@ -55,6 +55,9 @@ class TtfFont {
     /// Whether a glyph drawn now counts as a use for the store's reclaims: the app answers true in the renderer's
     /// black-and-white pass, the first of a page's passes. Null counts every draw.
     bool (*countsDraw)() = nullptr;
+    /// Called when the glyph store is wiped (by wipe() or a journal replay), so external caches/rings referencing
+    /// glyph records can be invalidated.
+    void (*onWiped)() = nullptr;
   };
   static void setHooks(const Hooks& hooks);
 
@@ -92,6 +95,12 @@ class TtfFont {
   /// (their font IDs removed) and no glyph of the set is in use.
   void dropNativeSizes();
   uint8_t nativeSizeCount() const;
+
+  /// The regular style at a CJK UI size (10 or 12 pt), made on first use and kept across dropNativeSizes() for the
+  /// life of the font; nullptr for any other point size or when the regular style cannot be drawn.
+  const EpdFont* uiFont(uint8_t pointSize);
+  /// Whether the regular style's cmap maps `codepoint` to a glyph, checked without rendering or opening a MissScope.
+  bool covers(uint32_t codepoint);
 
   /// New glyphs are drawn without being stored until room is made (or the next wipe): the set's store filled up, or a
   /// write failed.
@@ -226,6 +235,7 @@ class TtfFont {
   uint8_t slanted_ = 0;     // slanted(): one bit per style
   Size body_;
   uint8_t pointSize_ = 0;
+  Size ui_[2];  // 10 pt and 12 pt regular-only UI faces, made on first use
   std::unique_ptr<Size> native_[kMaxNativeSizes];
   uint8_t maxNativePx_ = kMaxNativePx;
   uint32_t renders_ = 0;

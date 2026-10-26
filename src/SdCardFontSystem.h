@@ -96,6 +96,14 @@ class SdCardFontSystem {
   /// cannot be.
   bool resumeTtf(GfxRenderer& renderer);
 
+  /// Opens `familyNames` read-only (Install::Never) for UI screens outside the reader when the glyph store already
+  /// holds the set or a .cpfont is loaded/cached and a family in it covers fallback.
+  bool openUiFallback(const char* const* familyNames, uint8_t count, uint32_t neededCodepoint = 0);
+  void closeUiFallback();
+  bool uiOnlyFallback() const { return manager_.uiOnlyFallback(); }
+  bool readerFontLoaded() const { return manager_.readerFontLoaded(); }
+  const std::string& uiFallbackFamilyName() const { return manager_.uiFallbackFamilyName(); }
+
   /// Publisher Fonts in `mode` (CrossPointSettings::PUBLISHER_FONTS) for the book cached at `cachePath`, whose body
   /// is otherwise drawn in `readerFamily` ("" for a built-in font): the families BookFonts copied out of it become
   /// the book's, drawn like families on the card while that book is open. Body Text and All Text take its body family

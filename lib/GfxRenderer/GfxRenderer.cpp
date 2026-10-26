@@ -1464,6 +1464,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     return;
   }
   const auto& font = *family;
+  font.prefetch(text, static_cast<uint8_t>(1u << (style & 3)));
   const auto renderModeSnapshot = getRenderMode();
 
   uint32_t cp;
@@ -1577,6 +1578,7 @@ void GfxRenderer::drawTextAtScale(const int fontId, const int x, const int y, co
   const EpdFontFamily* const family = findFontFamily(fontId);
   if (!family) return;
   const auto& font = *family;
+  font.prefetch(text, static_cast<uint8_t>(1u << (style & 3)));
   const auto renderModeSnapshot = getRenderMode();
 
   // RAW: `scale` already carries the font's base, so the public accessor would apply it twice.
@@ -2975,6 +2977,11 @@ std::string GfxRenderer::truncatedText(const int fontId, const char* text, const
 
 std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* text, const int maxWidth,
                                                   const int maxLines, const EpdFontFamily::Style style) const {
+  if (text && *text) {
+    if (const EpdFontFamily* const family = findFontFamily(fontId)) {
+      family->prefetch(text, static_cast<uint8_t>(1u << (style & 3)));
+    }
+  }
   return textWrap::wrapLines(
       text, maxWidth, maxLines, wordBreaker_,
       [&](const std::string& line) { return getTextWidth(fontId, line.c_str(), style); },

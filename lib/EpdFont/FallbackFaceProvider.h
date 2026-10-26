@@ -7,29 +7,51 @@
 
 class FontDecompressor;
 
-/// Serves a font's missing glyphs out of other BUILT-IN faces: the CJK UI faces behind the Inter UI
-/// faces (src/CjkUiFonts.cpp).
+/// Serves a font's missing glyphs out of fallback faces: built-in UI fallback faces (such as CJK)
+/// and, when an SD card or reader font is open, that font's matching UI size (src/CjkUiFonts.cpp).
+/// The fallback mechanism is script-agnostic: any non-ASCII character missing from the primary
+/// UI face (CJK, Greek, Hebrew, Cyrillic, symbols, etc.) can be borrowed from the reader font.
 ///
 /// Installed as EpdFontData::provider, so EpdFont asks it only after the font's own interval table
 /// has missed, and the renderer gets the bitmap back through ownsBitmap(). Kerning stays the font's
 /// own: a codepoint the font has no glyph for is in none of its kern classes.
 ///
-/// A face may be flat (its bitmap a plain pointer into flash, mapped or not) or compressed in
-/// DEFLATE groups (compress_ui_face.py), whose glyphs ownsBitmap() decodes through the
+/// A built-in face may be flat (its bitmap a plain pointer into flash, mapped or not) or compressed
+/// in DEFLATE groups (compress_ui_face.py), whose glyphs ownsBitmap() decodes through the
 /// FontDecompressor it was given -- into that decompressor's per-glyph fallback cache, so the
 /// pointer it hands back lives until the next decode, which is the lifetime the renderer already
-/// honours for every compressed glyph. Faces must be of the bit depth of the font asking, because
-/// the renderer draws at the depth of the font it was given; the depth is the caller's to match.
+/// honours for every compressed glyph. A chained 2-bit face (TtfFont) is packed to a 1-bit ink mask
+/// in ownsBitmap() into a shared 256-byte static buffer.
 class FallbackFaceProvider final : public GlyphProvider {
  public:
   static constexpr uint8_t MAX_FACES = 4;
+  static constexpr uint16_t PACKED_BUF_BYTES = 256;
 
   /// Where compressed faces are decoded. setFaces() refuses one until this is set.
   void setDecompressor(FontDecompressor* decompressor) { decompressor_ = decompressor; }
 
-  /// The faces to search, first match wins. False, and no faces, when there are too many or one of
-  /// them is compressed and there is no decompressor.
+  /// The built-in faces to search, first match wins. False, and no faces, when there are too many
+  /// or one of them is compressed and there is no decompressor.
   bool setFaces(const EpdFontData* const* faces, uint8_t count);
+
+  /// Optional primary UI face (e.g. inter_ui_10_regular) whose interval table is searched before
+  /// this provider; used by prefetch() to skip characters the primary face already covers.
+  void setPrimaryFace(const EpdFontData* primary) { primary_ = primary; }
+
+  /// Optional reader face (e.g. TtfFont at 10 or 12 pt) chained into the lookup order. When
+  /// `afterFirstFace` is true (active UI language is CJK) and preferChained_ is false, `faces_[0]`
+  /// is searched first and `face` second, ahead of `faces_[1..]`. When `afterFirstFace` is false
+  /// or preferChained_ is true, `face` is searched before `faces_[0..]`.
+  void setChainedFace(const EpdFontData* face, bool afterFirstFace = true);
+  void setAfterFirstFace(bool afterFirstFace) { afterFirstFace_ = afterFirstFace; }
+  bool hasChainedFace() const { return chained_ != nullptr; }
+
+  /// Invalidates all ring slots so none can reference stale records after a wipe or font close.
+  void invalidateRing();
+
+  /// Sets hook called on-demand with the missing codepoint when an unsupported character needs borrowing.
+  void setOnDemandHook(void (*hook)(uint32_t codepoint)) { onDemandAttach_ = hook; }
+  void resetOnDemand() {}
 
   /// A codepoint `claims` returns true for that no face has is served as `standIn` instead, from
   /// the first face that has that. Subset faces carry only part of their script, and a character
@@ -46,30 +68,39 @@ class FallbackFaceProvider final : public GlyphProvider {
   /// logs. Answering false would send the renderer to the asking font's own bitmap at an offset
   /// that belongs to another face.
   bool ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const override;
+  void prefetch(const char* utf8Text) override;
+
+  /// Batch-prefetch missing glyphs across multiple strings without per-string MissScope churn.
+  void prefetch(const char* (*getter)(void* ctx, int index), void* ctx, int count);
 
  private:
-  // A served glyph as GlyphProvider hands it out: a full EpdGlyph record (the faces store the 6-byte
-  // packed form, which has no field to say whose glyph it is) and which glyph of which face it is,
-  // which is all ownsBitmap() needs to find its bitmap, flat or compressed. `record` comes first so
-  // ownsBitmap() can get from the record pointer back to the slot. The face is a pointer rather than
-  // a position in faces_ so a record stays right across setFaces(): 24 B a slot.
   struct Served {
     EpdGlyph record;
     const EpdFontData* face;
+    const EpdGlyph* sourceRecord;
     uint16_t index;
   };
-  // EpdFont copies the metrics out at once and the renderer asks for the bitmap before it resolves
-  // the next glyph, so one slot would do for that caller. The few more cost 24 B each and keep a
-  // caller that resolves a glyph or two ahead correct, the same lifetime SdCardFont's miss ring
-  // gives (GlyphProvider::missGlyph).
   static constexpr uint8_t RING_SIZE = 8;
+  static uint8_t packedBuf_[PACKED_BUF_BYTES];
+
   Served ring_[RING_SIZE] = {};
   uint8_t next_ = 0;
   const EpdFontData* faces_[MAX_FACES] = {};
   uint8_t faceCount_ = 0;
+  const EpdFontData* primary_ = nullptr;
+  const EpdFontData* chained_ = nullptr;
+  bool afterFirstFace_ = true;
+  bool loggedOversize_ = false;
+  void (*onDemandAttach_)(uint32_t codepoint) = nullptr;
+  mutable bool inOnDemand_ = false;
+  bool preferChained_ = false;
+
+  void ensureChainedAttached(uint32_t codepoint = 0) const;
   uint32_t standIn_ = 0;
   bool (*claims_)(uint32_t) = nullptr;
   FontDecompressor* decompressor_ = nullptr;
 
   const EpdGlyph* serve(uint32_t codepoint);
+  const EpdGlyph* serveStandIn();
+  const EpdGlyph* serveFace(const EpdFontData* face, uint32_t codepoint);
 };

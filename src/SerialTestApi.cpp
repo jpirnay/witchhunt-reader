@@ -35,6 +35,8 @@
 #include "ButtonEventManager.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
+#include <GlyphProvider.h>
+#include "CjkUiFonts.h"
 #include "SdCardFontGlobals.h"
 #include "SettingsByKey.h"
 #include "TouchUi.h"  // CP_TOUCH_UI
@@ -485,6 +487,11 @@ void cmdState(std::string_view /*arg*/) {
     appendField(state, "popup", popup.text);
     appendField(state, "popup_ms", static_cast<long>(millis() - popup.atMs));
   }
+  if (CjkUiFonts::hasReaderFallback()) {
+    appendField(state, "ui_family", sdFontSystem.uiFallbackFamilyName().c_str());
+    appendField(state, "ui_ttf", sdFontSystem.uiOnlyFallback() ? 1L : 0L);
+  }
+  appendField(state, "starved", static_cast<long>(glyph_miss::starvedCount()));
   appendField(state, "heap", static_cast<long>(ESP.getFreeHeap()));
   appendField(state, "maxblock",
               static_cast<long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));

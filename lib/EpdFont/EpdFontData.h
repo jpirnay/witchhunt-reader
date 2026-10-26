@@ -140,6 +140,23 @@ constexpr uint32_t groupRowBytes(const int width, const bool is2Bit) {
   return is2Bit ? (static_cast<uint32_t>(width) + 3u) / 4u : (static_cast<uint32_t>(width) + 7u) / 8u;
 }
 
+/// Packs a run of 2-bit glyph bytes (4 pixels each, first pixel in the top bits) into the glyph's
+/// 1-bit ink mask (8 pixels a byte, first pixel in the top bit): a pixel is ink when its level is
+/// not 0, the rule GfxRenderer's black-and-white pass draws by (draw mask 0x0E, raw {1,2,3}).
+/// Writes (inBytes + 1) / 2 bytes. `out` may alias `in`: byte j is written after bytes 2j and
+/// 2j + 1 are read.
+inline void packInkMask(const uint8_t* in, const uint32_t inBytes, uint8_t* out) {
+  const auto nibble = [](const uint8_t b) -> uint8_t {
+    return static_cast<uint8_t>(((b & 0xC0) ? 8 : 0) | ((b & 0x30) ? 4 : 0) | ((b & 0x0C) ? 2 : 0) |
+                                ((b & 0x03) ? 1 : 0));
+  };
+  for (uint32_t j = 0; 2 * j < inBytes; j++) {
+    const uint8_t hi = nibble(in[2 * j]);
+    const uint8_t lo = 2 * j + 1 < inBytes ? nibble(in[2 * j + 1]) : 0;
+    out[j] = static_cast<uint8_t>((hi << 4) | lo);
+  }
+}
+
 /// One glyph's metrics, resolved from whichever representation its font uses.
 ///
 /// Returned BY VALUE. A pointer cannot serve both forms, and the old `const EpdGlyph*` carried a

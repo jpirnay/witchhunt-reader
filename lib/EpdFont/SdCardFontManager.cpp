@@ -200,7 +200,7 @@ bool SdCardFontManager::loadTtf(const SdCardFontFamilyInfo* const* families, uin
                                 const uint8_t targetPtSize, const std::function<void()>& onColdLoad,
                                 const TtfChoice choice) {
   if (!renderer_) renderer_ = &renderer;
-  if (!loadedFamilyName_.empty()) unloadAll(renderer);
+  if (!loadedFamilyName_.empty() || ttfSet_) unloadAll(renderer);
   if (count == 0) return false;
   if (count > kMaxTtfFamilies) count = kMaxTtfFamilies;
   // The partition has one owner (spec 4.1): a .cpfont mapping goes before the glyph store opens.
@@ -271,11 +271,12 @@ bool SdCardFontManager::loadTtf(const SdCardFontFamilyInfo* const* families, uin
   ttfAsked_ = askedKey(families, count);
   loadedFamilyName_ = ttfFamilies_[0].name;
   loadedPointSize_ = targetPtSize;
+  attachUiFallback();
   return true;
 }
 
 bool SdCardFontManager::ttfFamiliesLoaded(const SdCardFontFamilyInfo* const* families, const uint8_t count) const {
-  return ttfSet_ && count != 0 && count <= kMaxTtfFamilies && ttfAsked_ == askedKey(families, count);
+  return ttfSet_ && !uiOnlyFallback_ && count != 0 && count <= kMaxTtfFamilies && ttfAsked_ == askedKey(families, count);
 }
 
 void SdCardFontManager::registerTtfFace(GfxRenderer& renderer, const uint8_t family, const int fontId) {
@@ -375,7 +376,10 @@ void SdCardFontManager::dropTtfNativeSizes(GfxRenderer& renderer) {
 
 bool SdCardFontManager::setTtfBodySize(GfxRenderer& renderer, const uint8_t pointSize) {
   if (!ttfSet_) return false;
-  if (pointSize == loadedPointSize_) return true;
+  if (pointSize == loadedPointSize_) {
+    attachUiFallback();
+    return true;
+  }
   // A native size the body stood in for was scaled from the old body size: all of them go, and come back on demand.
   dropTtfNativeSizes(renderer);
   for (uint8_t f = 0; f < ttfCount_; ++f) {
@@ -391,6 +395,7 @@ bool SdCardFontManager::setTtfBodySize(GfxRenderer& renderer, const uint8_t poin
     LOG_INF("SDMGR", "TTF family %s now at %u pt (id=%d)", family.name.c_str(), pointSize, fontId);
   }
   loadedPointSize_ = pointSize;
+  attachUiFallback();
   return true;
 }
 
@@ -404,7 +409,168 @@ uint32_t SdCardFontManager::releaseTtfMissMemory() { return ttfSet_ ? ttfSet_->r
 
 uint32_t SdCardFontManager::ttfMissMemoryBytes() const { return ttfSet_ ? ttfSet_->missMemoryBytes() : 0; }
 
+TtfFont* SdCardFontManager::uiTtfFont(const uint32_t neededCodepoint) const {
+  if (!ttfSet_) return nullptr;
+  const uint8_t n = ttfCount_ != 0 ? ttfCount_ : ttfSet_->familyCount();
+  for (uint8_t f = 0; f < n; ++f) {
+    TtfFont* font = ttfSet_->font(f);
+    if (!font) continue;
+    if (neededCodepoint == 0 || font->covers(neededCodepoint)) return font;
+  }
+  return nullptr;
+}
+
+void SdCardFontManager::attachUiFallback(const uint32_t neededCodepoint) {
+  if (!uiFallbackHook_) return;
+  if (TtfFont* ui = uiTtfFont(neededCodepoint)) {
+    const EpdFont* f10 = ui->uiFont(10);
+    const EpdFont* f12 = ui->uiFont(12);
+    uiFallbackHook_(f10 ? f10->data : nullptr, f12 ? f12->data : nullptr);
+    return;
+  }
+  if (!loaded_.empty() && loaded_.front().font) {
+    auto* font = loaded_.front().font;
+    if (neededCodepoint == 0 || font->covers(neededCodepoint)) {
+      const EpdFontData* data = font->uiFontData();
+      uiFallbackHook_(data, data);
+      return;
+    }
+  }
+  uiFallbackHook_(nullptr, nullptr);
+}
+
+void SdCardFontManager::detachUiFallback() {
+  if (uiFallbackHook_) uiFallbackHook_(nullptr, nullptr);
+}
+
+bool SdCardFontManager::openUiFallback(const SdCardFontFamilyInfo* const* families, uint8_t count, const uint32_t neededCodepoint) {
+  if (count == 0 || !families || !families[0]) return false;
+  if (readerFontLoaded()) {
+    attachUiFallback(neededCodepoint);
+    return true;
+  }
+  if (count > kMaxTtfFamilies) count = kMaxTtfFamilies;
+  const uint32_t key = askedKey(families, count);
+  if (key != 0 && key == uncoveredUiAskedKey_ && neededCodepoint == uncoveredUiCodepoint_) return false;
+
+  if (families[0]->ttf()) {
+    if (FlashFontPartition::isMapped()) FlashFontPartition::unmap();
+
+    auto flash = makeUniqueNoThrow<EspNorFlash>();
+    auto opened = makeUniqueNoThrow<TtfSources>();
+    if (!flash || !opened || !flash->begin()) return false;
+    for (uint8_t f = 0; f < count; ++f) {
+      openTtfFiles(*families[f], opened->files[f], opened->sources[f], opened->identities[f]);
+    }
+    uint8_t loaded = count;
+    bool forNow = false;
+    auto set = loadSet(*flash, opened->sources, opened->identities, loaded, {}, TtfFontSet::Install::Never, &forNow);
+    while (!set && !forNow && loaded > 1) {
+      --loaded;
+      set = loadSet(*flash, opened->sources, opened->identities, loaded, {}, TtfFontSet::Install::Never, &forNow);
+    }
+    if (!set) return false;
+
+    ttfFlash_ = std::move(flash);
+    ttfSet_ = std::move(set);
+    TtfFont* ui = uiTtfFont(neededCodepoint);
+    if (!ui) {
+      uncoveredUiAskedKey_ = key;
+      uncoveredUiCodepoint_ = neededCodepoint;
+      ttfSet_.reset();
+      ttfFlash_.reset();
+      return false;
+    }
+    bool onCard = false;
+    for (uint8_t f = 0; f < count; ++f) {
+      if (f < loaded && ttfSet_->font(f)->readsCard()) {
+        onCard = true;
+        continue;
+      }
+      for (HalFile& file : opened->files[f]) file = HalFile();
+    }
+    if (onCard) ttfSources_ = std::move(opened);
+    for (uint8_t f = 0; f < loaded; ++f) {
+      ttfFamilies_[f] = {};
+      ttfFamilies_[f].name = families[f]->name;
+    }
+    ttfCount_ = loaded;
+    uiOnlyFallback_ = true;
+    attachUiFallback(neededCodepoint);
+    return true;
+  }
+
+  // .cpfont family
+  const SdCardFontFileInfo* selected = families[0]->pickClosestSize(12);
+  if (!selected) return false;
+  auto* font = new (std::nothrow) SdCardFont();
+  if (!font) return false;
+
+  if (FlashFontPartition::isMapped()) FlashFontPartition::unmap();
+  bool loadedOk = false;
+  if (FlashFontPartition::hasEntry(families[0]->name.c_str(), selected->pointSize)) {
+    const uint8_t* mmapPtr = nullptr;
+    size_t mmapSize = 0;
+    if (FlashFontPartition::mmap(families[0]->name.c_str(), selected->pointSize, &mmapPtr, &mmapSize)) {
+      if (font->loadFromMmap(mmapPtr, mmapSize, selected->path.c_str())) {
+        loadedOk = true;
+      } else {
+        FlashFontPartition::unmap();
+      }
+    }
+  }
+  if (!loadedOk) {
+    if (font->load(selected->path.c_str())) {
+      loadedOk = true;
+    }
+  }
+  if (!loadedOk) {
+    delete font;
+    return false;
+  }
+
+  if (neededCodepoint != 0 && !font->covers(neededCodepoint)) {
+    uncoveredUiAskedKey_ = key;
+    uncoveredUiCodepoint_ = neededCodepoint;
+    delete font;
+    if (FlashFontPartition::isMapped()) FlashFontPartition::unmap();
+    return false;
+  }
+
+  loaded_.push_back({font, 0, selected->pointSize});
+  loadedFamilyName_ = families[0]->name;
+  loadedPointSize_ = selected->pointSize;
+  uiOnlyFallback_ = true;
+  attachUiFallback(neededCodepoint);
+  return true;
+}
+
+void SdCardFontManager::closeUiFallback() {
+  if (!uiOnlyFallback_) return;
+  detachUiFallback();
+  if (ttfSet_) {
+    ttfSet_.reset();
+    ttfSources_.reset();
+    ttfFlash_.reset();
+    for (uint8_t f = 0; f < ttfCount_; ++f) ttfFamilies_[f] = {};
+    ttfCount_ = 0;
+  }
+  for (auto& lf : loaded_) {
+    delete lf.font;
+  }
+  loaded_.clear();
+  loadedFamilyName_.clear();
+  loadedPointSize_ = 0;
+  if (FlashFontPartition::isMapped()) FlashFontPartition::unmap();
+  uiOnlyFallback_ = false;
+}
+
 void SdCardFontManager::closeTtfSet(GfxRenderer& renderer) {
+  detachUiFallback();
+  if (uiOnlyFallback_) {
+    closeUiFallback();
+    return;
+  }
   dropTtfNativeSizes(renderer);
   renderer.setFontResolver(nullptr, nullptr);
   for (uint8_t f = 0; f < ttfCount_; ++f) renderer.removeFont(ttfFamilies_[f].fontId);
@@ -452,7 +618,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
                                    const std::function<void()>& onColdLoad, const FlashCachePolicy policy,
                                    BuildArena* const arena) {
   if (!renderer_) renderer_ = &renderer;
-  if (!loadedFamilyName_.empty()) unloadAll(renderer);
+  if (!loadedFamilyName_.empty() || ttfSet_) unloadAll(renderer);
 
   if (family.ttf()) {
     // A preview must never install over the partition; TTF previews come later (spec 7.6).
@@ -548,6 +714,7 @@ bool SdCardFontManager::loadFamily(const SdCardFontFamilyInfo& family, GfxRender
   // A failure here is logged and leaves the target size unresolvable; the face itself is still
   // loaded and usable at its own size, so it is not a failed load.
   ensureSizeAlias(renderer, targetPtSize);
+  attachUiFallback();
   return true;
 }
 
@@ -595,6 +762,8 @@ void SdCardFontManager::dropSizeAlias(GfxRenderer& renderer) {
 
 void SdCardFontManager::unloadAll(GfxRenderer& renderer) {
   if (!renderer_) renderer_ = &renderer;
+  detachUiFallback();
+  uiOnlyFallback_ = false;
   if (ttfSet_) {
     for (uint8_t f = 0; f < ttfCount_; ++f) {
       const TtfFont& font = *ttfSet_->font(f);
@@ -615,7 +784,7 @@ void SdCardFontManager::unloadAll(GfxRenderer& renderer) {
   dropSizeAlias(renderer);
   renderer.clearSdCardFonts();
   for (auto& lf : loaded_) {
-    renderer.removeFont(lf.fontId);
+    if (lf.fontId != 0) renderer.removeFont(lf.fontId);
     delete lf.font;
   }
   loaded_.clear();

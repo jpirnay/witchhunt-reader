@@ -356,10 +356,14 @@ void TtfFontSet::noteWiped(const uint32_t startMs) {
   for (uint8_t f = 0; f < count_; ++f) {
     TtfFont& font = *fonts_[f];
     font.rebase(font.body_);
+    for (auto& ui : font.ui_) {
+      if (ui.ppem != 0 && ui.styles) ui.styles[0].data.bitmap = store_.logBase();
+    }
     for (auto& size : font.native_) {
       if (size) font.rebase(*size);
     }
   }
+  if (hooks.onWiped) hooks.onWiped();
 }
 
 bool TtfFontSet::makeRoom(const FlashGlyphStore::Budget budget, const std::function<void()>& onBusy) {
@@ -707,6 +711,7 @@ TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uin
     *plan = ttf::mergePlans(*plan, ttf::planScratch(style.face, largest, poolFor(style)));
   }
   if (!draws(0)) return StylesResult::Failed;
+  for (Size& ui : ui_) ui.ppem = 0;
   if (!body_.styles) {
     // The styles the family draws, a synthetic one too, and the body size's fonts of them.
     chooseSynthetic();
@@ -879,6 +884,55 @@ uint8_t TtfFont::nativeSizeCount() const {
   uint8_t count = 0;
   for (const auto& size : native_) count += size ? 1 : 0;
   return count;
+}
+
+const EpdFont* TtfFont::uiFont(const uint8_t pointSize) {
+  const int idx = pointSize == 10 ? 0 : (pointSize == 12 ? 1 : -1);
+  if (idx < 0 || !draws(0)) return nullptr;
+  Size& size = ui_[idx];
+  const uint32_t ppem = ttf::ppemFromPoints(pointSize);
+  if (size.ppem == ppem && size.styles) return &size.styles[0].font;
+  checkLock();
+  const ttf::LineMetrics metrics = ttf::lineMetrics(styleAt(0)->face, ppem);
+  if (metrics.advanceY <= 0 || metrics.advanceY > 255) {
+    LOG_ERR("TTF", "UI style 0 at %lu/64 px: line height %ld does not fit", static_cast<unsigned long>(ppem),
+            static_cast<long>(metrics.advanceY));
+    return nullptr;
+  }
+  if (!size.styles) {
+    size.styles = makeUniqueNoThrow<Size::StyleFont[]>(1);
+    if (!size.styles) {
+      LOG_ERR("TTF", "OOM: family %u UI size %u pt", family_, pointSize);
+      return nullptr;
+    }
+  }
+  size.ppem = ppem;
+  size.claimTried = false;
+  Size::StyleFont& style = size.styles[0];
+  style.provider.owner = this;
+  style.provider.size = &size;
+  style.provider.style = 0;
+  style.data = EpdFontData{};
+  style.data.advanceY = static_cast<uint8_t>(metrics.advanceY);
+  style.data.ascender = metrics.ascender;
+  style.data.descender = metrics.descender;
+  style.data.is2Bit = true;
+  style.data.bitmap = set_.store_.logBase();
+  style.data.provider = &style.provider;
+  const ttf::Ligatures& ligatures = styleAt(0)->ligatures;
+  style.data.ligaturePairs = ligatures.count != 0 ? ligatures.pairs : nullptr;
+  style.data.ligaturePairCount = ligatures.count;
+  claimSize(size);
+  return &style.font;
+}
+
+bool TtfFont::covers(const uint32_t codepoint) {
+  if (!draws(0)) return false;
+  checkLock();
+  FontBytes bytes;
+  if (!fontBytes(0, &bytes)) return false;
+  const Style& drawn = *styleAt(0);
+  return drawn.ligatures.glyphFor(bytes, drawn.face, codepoint) != 0 && !bytes.ioError();
 }
 
 // --- A family: its glyphs ---

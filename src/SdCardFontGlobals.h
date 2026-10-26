@@ -80,3 +80,8 @@ std::string txtFontSizeOptionLabel(const void* ctx, uint8_t index);
 // family, its own SD override when it has one, otherwise the global choice. Points into
 // `sdFamilyOverride` or SETTINGS, so use it before either changes.
 const char* bookSdFontFamily(int8_t builtinFamilyOverride, const std::string& sdFamilyOverride);
+
+// Syncs UI-only reader font loading (Install::Never) for activities outside the reader that draw
+// book text (Home, Library, finished-book screen, book info, bookmark and reading-stats lists).
+// Managed centrally by ActivityManager on activity transitions.
+void syncUiBookFonts(bool needed, uint32_t neededCodepoint = 0);

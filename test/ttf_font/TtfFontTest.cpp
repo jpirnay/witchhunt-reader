@@ -3042,3 +3042,53 @@ TEST_F(TtfFontSetTest, SyntheticItalicInSdModeIsDrawnFromTheRegularFile) {
   expectDrawnAs(reference(serif[kRegular].bytes, 0x3042, 14), font, kRegular, font.glyph(kRegular, 0x3042));
   expectWrittenOnce(chip);
 }
+
+TEST_F(TtfFontTest, UiSizesSurviveDropNativeSizesAndRebaseOnWipe) {
+  static bool wipedCalled = false;
+  wipedCalled = false;
+  TtfFont::Hooks hooks{};
+  hooks.onWiped = []() { wipedCalled = true; };
+  TtfFont::setHooks(hooks);
+
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+
+  // covers() check
+  EXPECT_TRUE(font->covers('A'));
+  EXPECT_FALSE(font->covers(0x4E00));
+
+  // uiFont checks
+  const EpdFont* u10 = font->uiFont(10);
+  const EpdFont* u12 = font->uiFont(12);
+  ASSERT_NE(nullptr, u10);
+  ASSERT_NE(nullptr, u12);
+  EXPECT_EQ(nullptr, font->uiFont(14));
+
+  // Resolve a glyph to populate size and verify bitmap
+  const EpdGlyphRef g10 = u10->getGlyph('A');
+  ASSERT_TRUE(g10);
+  const uint8_t* bmp = nullptr;
+  EXPECT_FALSE(font->ownsBitmap(g10.sdRecord, bmp));
+
+  // Survival across dropNativeSizes()
+  font->dropNativeSizes();
+  EXPECT_EQ(u10, font->uiFont(10));
+  EXPECT_EQ(u12, font->uiFont(12));
+
+  // Force ring mode / wipe pending
+  flash.failNextProgram();
+  ASSERT_NE(nullptr, font->glyph(kRegular, 'B'));
+  ASSERT_TRUE(font->ringMode());
+
+  // Wipe store and verify onWiped hook + rebase
+  EXPECT_FALSE(wipedCalled);
+  EXPECT_TRUE(font.set->wipeIfPending());
+  EXPECT_TRUE(wipedCalled);
+
+  // u10 is still valid and can render after wipe
+  const EpdGlyphRef gAfter = u10->getGlyph('A');
+  ASSERT_TRUE(gAfter);
+
+  // Reset hooks to clean up
+  TtfFont::setHooks(TtfFont::Hooks{});
+}

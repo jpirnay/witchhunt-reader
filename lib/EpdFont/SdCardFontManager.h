@@ -134,6 +134,29 @@ class SdCardFontManager {
   // out with them is in use: book open, a body size change, unload.
   void dropTtfNativeSizes(GfxRenderer& renderer);
 
+  // Hook notified with the active CJK TTF family's 10 and 12 pt EpdFontData when a TTF set is attached, or
+  // (nullptr, nullptr) before it is detached.
+  void setUiFallbackHook(void (*hook)(const EpdFontData* face10, const EpdFontData* face12)) {
+    uiFallbackHook_ = hook;
+  }
+  // Opens `families` read-only (Install::Never) for UI screens outside the reader when the store already holds the set
+  // and at least one family covers CJK; attaches the CJK family's 10 and 12 pt UI faces without registering body or
+  // native font IDs. False, and nothing kept open, when a set is already open, the store does not hold this set, or no
+  // family in the set covers CJK.
+  bool openUiFallback(const SdCardFontFamilyInfo* const* families, uint8_t count, uint32_t neededCodepoint = 0);
+  bool readerFontLoaded() const { return ttfSet_ != nullptr || !loaded_.empty(); }
+  const std::string& uiFallbackFamilyName() const {
+    return (ttfSet_ && ttfCount_ > 0) ? ttfFamilies_[0].name : loadedFamilyName_;
+  }
+  void attachUiFallback(uint32_t neededCodepoint = 0);
+  void detachUiFallback();
+  void resetUiFallbackCache() {
+    uncoveredUiAskedKey_ = 0;
+    uncoveredUiCodepoint_ = 0;
+  }
+  void closeUiFallback();
+  bool uiOnlyFallback() const { return uiOnlyFallback_; }
+
   // Font ID that renders a loaded family AT pointSize: the face itself when that is the loaded
   // size, the alias when one was made for it, else 0 -- never a nearby size. The setting says
   // "24pt" and the page has to be 24pt; a quiet 18pt is indistinguishable from the feature not
@@ -175,8 +198,10 @@ class SdCardFontManager {
   int ttfFamilyOfNativeId(int fontId) const;
   bool fontIdTaken(const GfxRenderer& renderer, int fontId) const;
   static std::optional<ResolvedFont<EpdFontFamily>> resolveTtfSize(void* ctx, int fontId);
+  TtfFont* uiTtfFont(uint32_t neededCodepoint = 0) const;
 
   GfxRenderer* renderer_ = nullptr;
+  void (*uiFallbackHook_)(const EpdFontData* face10, const EpdFontData* face12) = nullptr;
   std::string loadedFamilyName_;
   uint8_t loadedPointSize_ = 0;
   std::vector<LoadedFont> loaded_;
@@ -193,6 +218,9 @@ class SdCardFontManager {
   TtfFamily ttfFamilies_[kMaxTtfFamilies];  // the set's families, in its order
   uint8_t ttfCount_ = 0;
   uint32_t ttfAsked_ = 0;  // the families the load was asked for (ttfFamiliesLoaded)
+  uint32_t uncoveredUiAskedKey_ = 0;
+  uint32_t uncoveredUiCodepoint_ = 0;
   // suspendTtf(): the set is gone, its families' names and font IDs kept for resumeTtf().
   bool ttfSuspended_ = false;
+  bool uiOnlyFallback_ = false;
 };

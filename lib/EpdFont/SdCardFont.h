@@ -107,6 +107,9 @@ class SdCardFont {
   // Number of styles present in this font file.
   uint8_t styleCount() const { return styleCount_; }
 
+  bool covers(uint32_t codepoint) const;
+  const EpdFontData* uiFontData() const;
+
   // Returns true if the glyph pointer points into the overflow buffer.
   bool isOverflowGlyph(const EpdGlyph* glyph) const;
 
@@ -165,6 +168,7 @@ class SdCardFont {
     // CJK font that is up to 48 KB per style. Only the owner frees; a borrower survives
     // unloadMetadata() so reloadMetadata() can point it at the owner's new table.
     int8_t intervalsOwner = -1;
+    bool intervalsFromMmap = false;
 
     // Persistent kern-class + ligature tables (lazy-loaded on first prewarm).
     // The full kern MATRIX is NOT resident — on Literata-class fonts a single
@@ -294,6 +298,7 @@ class SdCardFont {
   // Non-null only when metadataOwned_ == false. Used to read sections (e.g. the
   // kern matrix) directly from flash without SD I/O.
   const uint8_t* mmapDataBase_ = nullptr;
+  size_t mmapDataSize_ = 0;
 
   // See useArena(). Null: every allocation below is the plain heap call it replaced.
   BuildArena* arena_ = nullptr;

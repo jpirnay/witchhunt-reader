@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "CjkUiFonts.h"
 #include "CrossPointSettings.h"
 #include "SdCardFontGlobals.h"
 #include "SerialTestApi.h"
@@ -309,9 +310,29 @@ bool SdCardFontSystem::resumeTtf(GfxRenderer& renderer) {
   return manager_.resumeTtf(families, renderer);
 }
 
+bool SdCardFontSystem::openUiFallback(const char* const* wantedFamilies, const uint8_t count, const uint32_t neededCodepoint) {
+  if (!discovered_) return false;
+  if (manager_.readerFontLoaded() && !manager_.uiOnlyFallback()) {
+    manager_.attachUiFallback(neededCodepoint);
+    return true;
+  }
+  const SdCardFontFamilyInfo* families[SdCardFontManager::kMaxTtfFamilies] = {};
+  uint8_t found = 0;
+  for (uint8_t i = 0; i < count && found < SdCardFontManager::kMaxTtfFamilies; ++i) {
+    const SdCardFontFamilyInfo* family = findFamily(wantedFamilies[i]);
+    if (family && (found == 0 || (family->ttf() && families[0]->ttf()))) families[found++] = family;
+  }
+  if (found == 0) return false;
+  return manager_.openUiFallback(families, found, neededCodepoint);
+}
+
+void SdCardFontSystem::closeUiFallback() { manager_.closeUiFallback(); }
+
 void SdCardFontSystem::unload(GfxRenderer& renderer) {
   manager_.unloadAll(renderer);
   selectBookFamilies({});  // the reader is closing; its next open selects again
+  manager_.resetUiFallbackCache();
+  CjkUiFonts::resetOnDemand();
 }
 
 ReaderSizeList SdCardFontSystem::sizeListFor(const char* familyName) const {
@@ -329,7 +350,9 @@ ReaderSizeList SdCardFontSystem::sizeListFor(const char* familyName) const {
 void SdCardFontSystem::begin(GfxRenderer& renderer) {
   ttfRenderer = &renderer;
   ttfSystem = this;
-  TtfFont::setHooks({&RenderLock::heldByCurrentTask, &ttfYield, &ttfReclaim, &ttfNowMs, &ttfCountsDraw});
+  manager_.setUiFallbackHook(&CjkUiFonts::setReaderFallback);
+  TtfFont::setHooks({&RenderLock::heldByCurrentTask, &ttfYield, &ttfReclaim, &ttfNowMs, &ttfCountsDraw,
+                     &CjkUiFonts::invalidateRing});
   // A miss's memory on the heap lasts as long as the pass that drew it: whichever task rendered gives it back with
   // RenderLock, and a page drawn from the glyph store needs none of it (TtfFontSet::releaseMissMemory).
   RenderLock::setReleaseHook(&ttfPassEnded);
@@ -348,7 +371,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
   const uint8_t targetPt = sizeListFor(wantedFamily).snap(SETTINGS.fontPointSize);
 
   if (wantedFamily[0] == '\0') {
-    if (!currentFamily.empty()) {
+    if (!currentFamily.empty() || manager_.ttfLoaded()) {
       manager_.unloadAll(renderer);
     }
     return;
@@ -357,7 +380,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
   // Reload if family changed OR if the user-selected size changed and the
   // family has a closer file than what's currently loaded.
   bool familyMatches = (currentFamily == wantedFamily);
-  if (familyMatches) {
+  if (familyMatches && !manager_.uiOnlyFallback()) {
     const auto* family = findFamily(wantedFamily);
     if (!family) {
       LOG_DBG("SDFS", "SD font family disappeared: %s (clearing)", wantedFamily);
@@ -381,7 +404,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
             targetPt);
   }
 
-  if (!currentFamily.empty()) {
+  if (manager_.readerFontLoaded()) {
     manager_.unloadAll(renderer);
   }
 
@@ -411,13 +434,13 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* const* wa
     if (family && (found == 0 || (family->ttf() && families[0]->ttf()))) families[found++] = family;
   }
   if (found == 0) {
-    if (!manager_.currentFamilyName().empty()) manager_.unloadAll(renderer);
+    if (!manager_.currentFamilyName().empty() || manager_.ttfLoaded()) manager_.unloadAll(renderer);
     return;
   }
   const SdCardFontFamilyInfo* family = families[0];
   const uint8_t targetPt = sizeListFor(family->name.c_str()).snap(pointSize);
 
-  if (family->ttf() && manager_.ttfFamiliesLoaded(families, found)) {
+  if (family->ttf() && !manager_.uiOnlyFallback() && manager_.ttfFamiliesLoaded(families, found)) {
     // The same families from the same files (a book's family of the same name as the last book's is another):
     // book open, so no glyph record or face of theirs is in use, the store can make room here (a pending wipe, a
     // reclaim, a rebuild), and the last book's sizes go.
@@ -426,7 +449,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* const* wa
     manager_.setTtfBodySize(renderer, targetPt);
     return;
   }
-  if (!family->ttf() && family->name == manager_.currentFamilyName()) {
+  if (!family->ttf() && !manager_.uiOnlyFallback() && family->name == manager_.currentFamilyName()) {
     const auto* best = family->pickClosestSize(targetPt);
     if (best && best->pointSize == manager_.currentPointSize()) {
       manager_.ensureSizeAlias(renderer, targetPt);  // same face, possibly a new target size
@@ -434,7 +457,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* const* wa
     }
   }
 
-  if (!manager_.currentFamilyName().empty()) manager_.unloadAll(renderer);
+  if (manager_.readerFontLoaded()) manager_.unloadAll(renderer);
 
   // The loader and the resolver used to disagree, and the loader lost. loadFamily() takes the
   // CLOSEST size the family ships, but resolveFontId() only handed the font out on an EXACT

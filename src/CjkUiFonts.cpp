@@ -119,6 +119,7 @@ const EpdFontData* servedFace(const LanguageFaces& row, const size_t size) {
 }
 
 void orderFaces() {
+  const bool activeIsCjk = facesOf(uiLanguage) != nullptr;
   for (size_t size = 0; size < SIZE_COUNT; ++size) {
     const EpdFontData* order[LANGUAGE_COUNT];
     size_t count = 0;
@@ -131,6 +132,7 @@ void orderFaces() {
     if (!providers[size].setFaces(order, static_cast<uint8_t>(count))) {
       LOG_ERR("CJK", "CJK UI faces at %u pt refused", SIZES[size]);
     }
+    providers[size].setAfterFirstFace(activeIsCjk);
     providers[size].setStandIn(STAND_IN, &isCjkCharacter);
   }
 }
@@ -268,7 +270,10 @@ void CjkUiFonts::attach(EpdFont& font, const uint8_t points) {
   }
   EpdFontData& copy = attached[attachedCount++];
   copy = *data;
-  copy.provider = &providers[sizeIndexFor(points)];
+  const size_t idx = sizeIndexFor(points);
+  if (points == SIZES[idx]) providers[idx].setPrimaryFace(data);
+  providers[idx].setOnDemandHook(&CjkUiFonts::onDemandAttach);
+  copy.provider = &providers[idx];
   font.data = &copy;
 }
 
@@ -276,4 +281,45 @@ void CjkUiFonts::setLanguage(const Language language) {
   uiLanguage = language;
   languageSet = true;
   orderFaces();
+}
+
+void CjkUiFonts::setReaderFallback(const EpdFontData* face10, const EpdFontData* face12) {
+  const bool activeIsCjk = facesOf(uiLanguage) != nullptr;
+  providers[0].setChainedFace(face10, activeIsCjk);
+  providers[1].setChainedFace(face12, activeIsCjk);
+}
+
+void CjkUiFonts::clearReaderFallback() { setReaderFallback(nullptr, nullptr); }
+
+bool CjkUiFonts::hasReaderFallback() {
+  return providers[0].hasChainedFace() || providers[1].hasChainedFace();
+}
+
+void CjkUiFonts::invalidateRing() {
+  providers[0].invalidateRing();
+  providers[1].invalidateRing();
+}
+
+void CjkUiFonts::prefetch(const char* utf8Text, const uint8_t points) {
+  providers[sizeIndexFor(points)].prefetch(utf8Text);
+}
+
+void CjkUiFonts::prefetch(const char* (*getter)(void* ctx, int index), void* ctx, const int count,
+                          const uint8_t points) {
+  providers[sizeIndexFor(points)].prefetch(getter, ctx, count);
+}
+
+static void (*onDemandResolver_)(uint32_t codepoint) = nullptr;
+
+void CjkUiFonts::setOnDemandResolver(void (*resolver)(uint32_t codepoint)) {
+  onDemandResolver_ = resolver;
+}
+
+void CjkUiFonts::onDemandAttach(const uint32_t codepoint) {
+  if (onDemandResolver_) onDemandResolver_(codepoint);
+}
+
+void CjkUiFonts::resetOnDemand() {
+  providers[0].resetOnDemand();
+  providers[1].resetOnDemand();
 }

@@ -23,6 +23,7 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
   if (*string == '\0') {
     return;
   }
+  if (data->provider) data->provider->prefetch(string);
 
   int lastBaseX = startX;
   int lastBaseLeft = 0;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <FallbackFaceProvider.h>
 #include <I18n.h>
 
 #include <cstdint>
@@ -44,5 +45,26 @@ void attach(EpdFont& font, uint8_t points);
 /// Korean. All three stay attached whatever the language: the language picker draws every
 /// language's name in its own script.
 void setLanguage(Language language);
+
+
+/// Attach or detach (`nullptr`) the reader's CJK TrueType/CFF faces at 10 and 12 pt.
+void setReaderFallback(const EpdFontData* face10, const EpdFontData* face12);
+void clearReaderFallback();
+bool hasReaderFallback();
+
+/// Invalidate cached glyph records in the UI fallback rings (e.g. after a glyph store wipe).
+void invalidateRing();
+
+void setOnDemandResolver(void (*resolver)(uint32_t codepoint));
+void onDemandAttach(uint32_t codepoint);
+void resetOnDemand();
+
+/// Batch-prefetch missing glyphs in `utf8Text` into the chained reader font at the CJK UI size
+/// serving `points` (10 pt for <= 10 pt, 12 pt for >= 12 pt). No-op when no reader font is chained.
+void prefetch(const char* utf8Text, uint8_t points = 10);
+
+/// Batch-prefetch missing glyphs across multiple strings into the chained reader font at the CJK UI
+/// size serving `points`.
+void prefetch(const char* (*getter)(void* ctx, int index), void* ctx, int count, uint8_t points = 10);
 
 }  // namespace CjkUiFonts

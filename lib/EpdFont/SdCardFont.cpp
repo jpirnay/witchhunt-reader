@@ -164,11 +164,12 @@ void SdCardFont::freeStyleMiniKern(PerStyle& s) {
 void SdCardFont::freeStyleAll(PerStyle& s) {
   freeStyleMiniData(s);
   s.reportedMissCount = 0;
-  if (metadataOwned_ && s.intervalsOwner < 0) {
+  if (metadataOwned_ && s.intervalsOwner < 0 && !s.intervalsFromMmap) {
     freeArray(s.fullIntervals);
   }
   s.fullIntervals = nullptr;
   s.intervalsOwner = -1;
+  s.intervalsFromMmap = false;
   freeStyleKernLigatureData(s);
   s.present = false;
 }
@@ -185,6 +186,7 @@ void SdCardFont::freeAll() {
   loaded_ = false;
   metadataOwned_ = true;
   mmapDataBase_ = nullptr;
+  mmapDataSize_ = 0;
 }
 
 void SdCardFont::unloadMetadata() {
@@ -912,6 +914,7 @@ static inline uint32_t mmapU32(const uint8_t* p) { return p[0] | (p[1] << 8) | (
 
 bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPath) {
   freeAll();
+  mmapDataSize_ = size;
 
   if (!base || size < HEADER_SIZE) {
     LOG_ERR("SDCF", "loadFromMmap: invalid pointer or size %u", static_cast<unsigned>(size));
@@ -1013,13 +1016,18 @@ bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPa
     if (s.intervalsOwner >= 0) {
       s.fullIntervals = styles_[s.intervalsOwner].fullIntervals;
     } else {
-      s.fullIntervals = allocArray<EpdUnicodeInterval>(s.header.intervalCount);
-      if (!s.fullIntervals) {
-        LOG_ERR("SDCF", "loadFromMmap: OOM for intervals style %u", i);
-        freeAll();
-        return false;
+      if ((reinterpret_cast<uintptr_t>(base + s.intervalsFileOffset) & 3u) == 0) {
+        s.fullIntervals = reinterpret_cast<EpdUnicodeInterval*>(const_cast<uint8_t*>(base + s.intervalsFileOffset));
+        s.intervalsFromMmap = true;
+      } else {
+        s.fullIntervals = allocArray<EpdUnicodeInterval>(s.header.intervalCount);
+        if (!s.fullIntervals) {
+          LOG_ERR("SDCF", "loadFromMmap: OOM for intervals style %u", i);
+          freeAll();
+          return false;
+        }
+        memcpy(s.fullIntervals, base + s.intervalsFileOffset, intervalsSz);
       }
-      memcpy(s.fullIntervals, base + s.intervalsFileOffset, intervalsSz);
     }
 
     // Kern class tables: EpdKernClassEntry is __attribute__((packed)) with only
@@ -1269,22 +1277,6 @@ bool SdCardFont::allCpsCovered(const PerStyle& s, const uint32_t* codepoints, ui
     if (!found) return false;
   }
   return true;
-}
-
-// Packs a run of 2-bit glyph bytes (4 pixels each, first pixel in the top bits) into the glyph's ink
-// mask (8 pixels a byte, first pixel in the top bit): a pixel is ink when its level is not 0, the
-// rule GfxRenderer's black-and-white pass draws by (draw mask 0x0E, raw {1,2,3}). Writes
-// (inBytes + 1) / 2 bytes. `out` may be `in`: byte j is written after bytes 2j and 2j + 1 are read.
-static void packInkMask(const uint8_t* in, const uint32_t inBytes, uint8_t* out) {
-  const auto nibble = [](const uint8_t b) -> uint8_t {
-    return static_cast<uint8_t>(((b & 0xC0) ? 8 : 0) | ((b & 0x30) ? 4 : 0) | ((b & 0x0C) ? 2 : 0) |
-                                ((b & 0x03) ? 1 : 0));
-  };
-  for (uint32_t j = 0; 2 * j < inBytes; j++) {
-    const uint8_t hi = nibble(in[2 * j]);
-    const uint8_t lo = 2 * j + 1 < inBytes ? nibble(in[2 * j + 1]) : 0;
-    out[j] = static_cast<uint8_t>((hi << 4) | lo);
-  }
 }
 
 int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly,
@@ -1957,49 +1949,71 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
   self->overflowNext_ = (slot + 1) % OVERFLOW_CAPACITY;
 
   // Read glyph metadata into temporary
-  FsFile file;
-  if (!Storage.openFileForRead("SDCF", self->filePath_, file)) {
-    LOG_ERR("SDCF", "Overflow: failed to open .cpfont");
-    return nullptr;
-  }
-
   EpdGlyph tempGlyph;
-  uint32_t glyphFileOff = s.glyphsFileOffset + static_cast<uint32_t>(globalIdx) * sizeof(EpdGlyph);
-  if (!file.seekSet(glyphFileOff)) {
-    LOG_ERR("SDCF", "Overflow: seek failed for glyph metadata U+%04X style %u", codepoint, styleIdx);
-    file.close();
-    return nullptr;
-  }
-  if (file.read(reinterpret_cast<uint8_t*>(&tempGlyph), sizeof(EpdGlyph)) != sizeof(EpdGlyph)) {
-    LOG_ERR("SDCF", "Overflow: failed to read glyph metadata for U+%04X style %u", codepoint, styleIdx);
-    file.close();
-    return nullptr;
-  }
-
-  // Read bitmap data into temporary (if any)
   uint8_t* tempBitmap = nullptr;
-  if (tempGlyph.dataLength > 0) {
-    tempBitmap = new (std::nothrow) uint8_t[tempGlyph.dataLength];  // heap even in arena mode (OverflowEntry)
-    if (!tempBitmap) {
-      LOG_ERR("SDCF", "Overflow: failed to allocate %u bytes for U+%04X bitmap", tempGlyph.dataLength, codepoint);
-      file.close();
-      return nullptr;
-    }
-    if (!file.seekSet(s.bitmapFileOffset + tempGlyph.dataOffset)) {
-      LOG_ERR("SDCF", "Overflow: seek failed for bitmap U+%04X style %u", codepoint, styleIdx);
-      delete[] tempBitmap;
-      file.close();
-      return nullptr;
-    }
-    if (file.read(tempBitmap, tempGlyph.dataLength) != static_cast<int>(tempGlyph.dataLength)) {
-      LOG_ERR("SDCF", "Overflow: failed to read bitmap for U+%04X", codepoint);
-      delete[] tempBitmap;
-      file.close();
-      return nullptr;
-    }
-  }
+  const uint32_t glyphFileOff = s.glyphsFileOffset + static_cast<uint32_t>(globalIdx) * sizeof(EpdGlyph);
 
-  file.close();
+  if (self->mmapDataBase_) {
+    if (glyphFileOff + sizeof(EpdGlyph) > self->mmapDataSize_) {
+      LOG_ERR("SDCF", "Overflow: mmap out of bounds for glyph metadata U+%04X", codepoint);
+      return nullptr;
+    }
+    memcpy(&tempGlyph, self->mmapDataBase_ + glyphFileOff, sizeof(EpdGlyph));
+    if (tempGlyph.dataLength > 0) {
+      const uint32_t bmpOff = s.bitmapFileOffset + tempGlyph.dataOffset;
+      if (bmpOff + tempGlyph.dataLength > self->mmapDataSize_) {
+        LOG_ERR("SDCF", "Overflow: mmap out of bounds for bitmap U+%04X", codepoint);
+        return nullptr;
+      }
+      tempBitmap = new (std::nothrow) uint8_t[tempGlyph.dataLength];
+      if (!tempBitmap) {
+        LOG_ERR("SDCF", "Overflow: failed to allocate %u bytes for U+%04X bitmap", tempGlyph.dataLength, codepoint);
+        return nullptr;
+      }
+      memcpy(tempBitmap, self->mmapDataBase_ + bmpOff, tempGlyph.dataLength);
+    }
+  } else {
+    FsFile file;
+    if (!Storage.openFileForRead("SDCF", self->filePath_, file)) {
+      LOG_ERR("SDCF", "Overflow: failed to open .cpfont");
+      return nullptr;
+    }
+
+    if (!file.seekSet(glyphFileOff)) {
+      LOG_ERR("SDCF", "Overflow: seek failed for glyph metadata U+%04X style %u", codepoint, styleIdx);
+      file.close();
+      return nullptr;
+    }
+    if (file.read(reinterpret_cast<uint8_t*>(&tempGlyph), sizeof(EpdGlyph)) != sizeof(EpdGlyph)) {
+      LOG_ERR("SDCF", "Overflow: failed to read glyph metadata for U+%04X style %u", codepoint, styleIdx);
+      file.close();
+      return nullptr;
+    }
+
+    // Read bitmap data into temporary (if any)
+    if (tempGlyph.dataLength > 0) {
+      tempBitmap = new (std::nothrow) uint8_t[tempGlyph.dataLength];  // heap even in arena mode (OverflowEntry)
+      if (!tempBitmap) {
+        LOG_ERR("SDCF", "Overflow: failed to allocate %u bytes for U+%04X bitmap", tempGlyph.dataLength, codepoint);
+        file.close();
+        return nullptr;
+      }
+      if (!file.seekSet(s.bitmapFileOffset + tempGlyph.dataOffset)) {
+        LOG_ERR("SDCF", "Overflow: seek failed for bitmap U+%04X style %u", codepoint, styleIdx);
+        delete[] tempBitmap;
+        file.close();
+        return nullptr;
+      }
+      if (file.read(tempBitmap, tempGlyph.dataLength) != static_cast<int>(tempGlyph.dataLength)) {
+        LOG_ERR("SDCF", "Overflow: failed to read bitmap for U+%04X", codepoint);
+        delete[] tempBitmap;
+        file.close();
+        return nullptr;
+      }
+    }
+
+    file.close();
+  }
 
   if (ink && tempBitmap) {
     packInkMask(tempBitmap, tempGlyph.dataLength, tempBitmap);  // in place: the mask is the front half
@@ -2047,4 +2061,12 @@ const uint8_t* SdCardFont::getOverflowBitmap(const EpdGlyph* glyph) const {
     }
   }
   return nullptr;
+}
+
+bool SdCardFont::covers(const uint32_t codepoint) const {
+  return loaded_ && styles_[0].present && findGlobalGlyphIndex(styles_[0], codepoint) >= 0;
+}
+
+const EpdFontData* SdCardFont::uiFontData() const {
+  return (loaded_ && styles_[0].present) ? &styles_[0].stubData : nullptr;
 }
