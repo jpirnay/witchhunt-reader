@@ -357,7 +357,7 @@ These were set aside in the layout spec (section 3) and the A3 spec (section 10)
 - `<rtc>` and ruby below the text;
 - hanging punctuation;
 - upstream's Latin dash split (#3883);
-- right-to-left and vertical text, `writing-mode` and `page-progression-direction`. KOReader has no vertical text either. The typography profile already carries each language's inline direction (A3 spec, section 4).
+- vertical text, `writing-mode` and `page-progression-direction`: no longer out of scope, planned in [writing-modes.md](writing-modes.md).
 
 ## Testing on a device
 
