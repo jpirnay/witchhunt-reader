@@ -26,7 +26,8 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 | 4 | Vertical typography: baked vertical forms, small kana, tate-chu-yoko (the per-word flag), A3a in vertical | open |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
 
-**Next step.** Carry out the step 0 plan.
+**Next step.** Carry out the step 0 plan. Then line spacing (`cjk.md`, step 10), before steps 1-4 (maintainer,
+2026-10-26): it reads the `line-height` step 0 keeps, and it helps every horizontal CJK book now.
 
 ## Found while looking at real books
 

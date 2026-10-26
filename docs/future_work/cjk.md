@@ -30,7 +30,7 @@ behind CFF.
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-a3b-push-in-and-gap.md)) |
 | 8 | Ruby and emphasis dots ([B2](#emphasis-dots-pr-b2)) | B1 shipped (#554); B2 emphasis dots next ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
 | 9 | The dictionary on CJK pages ([below](#dictionary-on-cjk-pages)) | open |
-| 10 | Line spacing: the book's `line-height`, an Extra wide, a CJK default, a per-book override ([below](#line-spacing)) | open; writing-modes step 0 parses and caches the book's value |
+| 10 | Line spacing: the book's `line-height`, an Extra wide, a CJK default, a per-book override ([below](#line-spacing)) | next after writing-modes step 0, which parses and caches the book's value (maintainer, 2026-10-26) |
 
 Synthetic bold comes before the font manager because the CJK families ship in their Regular weight only (spec
 section 4). Step 6 is what makes a CJK library navigable once a font is installed.

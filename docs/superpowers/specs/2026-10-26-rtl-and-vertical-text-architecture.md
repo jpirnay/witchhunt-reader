@@ -315,7 +315,8 @@ Each step is its own plan and PR, like the CJK roadmap.
 
 Step 0 parses every trigger (maintainer, 2026-10-26), including those first acted on later; its plan,
 `docs/superpowers/plans/2026-10-26-writing-modes-step0.md`, lists which step first reads each. Page turns follow the
-book only from step 1, when text can run right to left.
+book only from step 1, when text can run right to left. Line spacing (`docs/future_work/cjk.md`, step 10) comes
+right after step 0, before steps 1-4: it reads the `line-height` step 0 keeps.
 
 After step 0, steps 1-2 and steps 3-4 do not depend on each other, and neither depends on CJK steps 6-9 in
 `docs/future_work/cjk.md`.
