@@ -382,6 +382,43 @@ TEST_F(FallbackFaceProviderTest, TextTheUiFaceCoversPreparesNothing) {
   EXPECT_TRUE(reader.prefetched.empty());
 }
 
+// --- glyph_miss::LendScope: a pass's misses borrow the secondary framebuffer once, until its return ---
+
+int lendCalls = 0;
+BuildArena* const kRegion = reinterpret_cast<BuildArena*>(0x1000);  // never dereferenced
+BuildArena* countingLender() {
+  ++lendCalls;
+  return kRegion;
+}
+
+TEST(GlyphMissLend, TheFirstMissLendsAndTheReturnEndsItForTheRestOfThePass) {
+  lendCalls = 0;
+  {
+    const glyph_miss::LendScope scope(&countingLender);
+    EXPECT_EQ(glyph_miss::arena(), nullptr);  // nothing is lent before a miss asks
+    EXPECT_EQ(lendCalls, 0);
+    EXPECT_EQ(glyph_miss::lendingArena(), kRegion);
+    EXPECT_EQ(glyph_miss::lendingArena(), kRegion);
+    EXPECT_EQ(lendCalls, 1);
+    glyph_miss::regionReturned(kRegion);  // the pass released the RenderLock: the display has it again
+    EXPECT_EQ(glyph_miss::lendingArena(), nullptr);
+    EXPECT_EQ(lendCalls, 1);
+  }
+  EXPECT_EQ(glyph_miss::arena(), nullptr);
+}
+
+TEST(GlyphMissLend, ARegionLentByItsOwnerIsUsedWithoutLending) {
+  lendCalls = 0;
+  BuildArena* const owners = reinterpret_cast<BuildArena*>(0x2000);
+  const glyph_miss::Scope owner(owners);
+  {
+    const glyph_miss::LendScope scope(&countingLender);
+    EXPECT_EQ(glyph_miss::lendingArena(), owners);
+    EXPECT_EQ(lendCalls, 0);
+  }
+  EXPECT_EQ(glyph_miss::arena(), owners);
+}
+
 TEST(FallbackFaceProviderSetup, ACompressedFaceIsRefusedWithoutADecompressor) {
   FallbackFaceProvider provider;
   const EpdFontData* faces[] = {&cjk_ui_ja_10};

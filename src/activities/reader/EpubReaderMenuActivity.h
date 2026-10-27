@@ -20,6 +20,7 @@
 
 class EpubReaderMenuActivity final : public TabbedUiListActivity {
  public:
+  bool drawsBookText() const override { return true; }
   // Menu actions identified by StrId of the menu item.
   // Used by the parent activity to interpret the result.
   enum class MenuAction {

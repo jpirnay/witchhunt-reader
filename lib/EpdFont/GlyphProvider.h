@@ -14,12 +14,30 @@ namespace glyph_miss {
 
 namespace detail {
 inline BuildArena* arena = nullptr;
+inline BuildArena* (*lend)() = nullptr;
 inline uint32_t starved = 0;
 inline uint32_t drawn = 0;
 }  // namespace detail
 
 /// The region lent to the misses (Scope), or nullptr: they use the heap.
 inline BuildArena* arena() { return detail::arena; }
+
+/// The region a TrueType miss draws in: the one lent (Scope), else one LendScope's lender lends now, for the rest of
+/// the scope (asked once, lent or not), else nullptr: the heap. Only a miss's scratch block asks: lending is worth it
+/// for that, not for a built-in font's group ring.
+inline BuildArena* lendingArena() {
+  if (!detail::arena && detail::lend) {
+    BuildArena* (*const lend)() = detail::lend;
+    detail::lend = nullptr;
+    detail::arena = lend();
+  }
+  return detail::arena;
+}
+
+/// The lender gives `region` back before its scope ends: no miss may draw in it any more.
+inline void regionReturned(const BuildArena* region) {
+  if (detail::arena == region) detail::arena = nullptr;
+}
 
 /// Lookups answered with nothing because that memory could not be had, not because the font lacks the glyph: a
 /// layout made while the count moved measured such glyphs as missing, and a page drawn while it moved has gaps.
@@ -44,6 +62,25 @@ class Scope {
  private:
   BuildArena* previous_ = nullptr;
   uint32_t starvedBefore_ = 0;
+};
+
+/// For the scope, a TrueType miss that finds no region lent may have `lend` lend one (lendingArena()), which stays the
+/// misses' until its lender gives it back (regionReturned()) or the scope ends. nullptr: none. Nests.
+class LendScope {
+ public:
+  explicit LendScope(BuildArena* (*lend)()) : previousLend_(detail::lend), previousArena_(detail::arena) {
+    detail::lend = lend;
+  }
+  ~LendScope() {
+    detail::lend = previousLend_;
+    detail::arena = previousArena_;
+  }
+  LendScope(const LendScope&) = delete;
+  LendScope& operator=(const LendScope&) = delete;
+
+ private:
+  BuildArena* (*previousLend_)() = nullptr;
+  BuildArena* previousArena_ = nullptr;
 };
 
 }  // namespace glyph_miss

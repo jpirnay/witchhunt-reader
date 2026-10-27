@@ -457,7 +457,7 @@ class TtfFontSet::MissScope {
 
 bool TtfFontSet::beginMiss() {
   if (rasterizer_.allocated() && (!readsCard_ || sdPages_)) return true;  // on the heap since an earlier miss
-  BuildArena* const arena = glyph_miss::arena();
+  BuildArena* const arena = glyph_miss::lendingArena();
   // Room for all of it, the worst padding included: a refused allocation would read in the arena's own log as its
   // owner running out.
   const size_t want = rasterizer_.scratchBytes() + alignof(std::max_align_t) +

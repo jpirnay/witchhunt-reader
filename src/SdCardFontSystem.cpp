@@ -1,8 +1,10 @@
 #include "SdCardFontSystem.h"
 
+#include <BuildArena.h>
 #include <Epub/BookFonts.h>
 #include <EspNorFlash.h>
 #include <GfxRenderer.h>
+#include <GlyphProvider.h>
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -14,6 +16,7 @@
 #include <climits>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 
 #include "CjkUiFonts.h"
 #include "CrossPointSettings.h"
@@ -48,8 +51,25 @@ uint32_t ttfNowMs() { return millis(); }
 // A page's glyph uses count once: in its black-and-white pass, the first of its passes.
 bool ttfCountsDraw() { return ttfRenderer && ttfRenderer->getRenderMode() == GfxRenderer::BW; }
 
+// A render pass's glyph misses outside the reader draw in the secondary framebuffer, lent on the first one that needs
+// a scratch block (glyph_miss::LendScope, ActivityManager) and given back as the pass releases the RenderLock: after
+// the frame is pushed, before the waveform. The lend is the screens' black-and-white one (HomeActivity, the font
+// selector): RED is seeded with the displayed frame while the secondary still holds it, and the push diffs against it
+// (single-buffer fast diff). The return seeds the secondary from the pushed frame and arms the next FAST to diff
+// against RED, which that push left holding it: fast refresh survives. Nothing of the heap is taken.
+std::optional<BuildArena> glyphLend;
+
+void returnGlyphLend() {
+  if (!glyphLend || !ttfRenderer) return;
+  glyph_miss::regionReturned(&*glyphLend);
+  glyphLend.reset();
+  ttfRenderer->returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+  ttfRenderer->setSingleBufferFastDiff(false);
+}
+
 void ttfPassEnded() {
   if (ttfSystem) ttfSystem->releaseTtfMissMemory();
+  returnGlyphLend();
 }
 
 // Lists a TTF family only when the glyph store can install it, in flash mode or, larger, in SD mode.
@@ -61,6 +81,24 @@ bool ttfFamilyFits(const uint32_t* fileBytes, const uint32_t* sdBytes, const uin
 }
 
 }  // namespace
+
+BuildArena* lendFramebufferForGlyphs() {
+  if (!ttfRenderer || glyphLend || !ttfRenderer->hasSecondaryBuffer()) return nullptr;
+  ttfRenderer->syncRedRamFromFrameBuffer();  // the displayed frame, while the secondary still holds it
+  size_t size = 0;
+  uint8_t* const region = ttfRenderer->borrowSecondaryBuffer(&size);
+  if (!region) return nullptr;
+  glyphLend.emplace(region, size);
+  if (!glyphLend->valid()) {
+    glyphLend.reset();
+    ttfRenderer->returnSecondaryBuffer();
+    return nullptr;
+  }
+  ttfRenderer->setSingleBufferFastDiff(true);
+  LOG_DBG("SDFS", "Lent the secondary framebuffer to the pass's glyph misses (%u bytes, free=%lu)",
+          static_cast<unsigned>(size), static_cast<unsigned long>(esp_get_free_heap_size()));
+  return &*glyphLend;
+}
 
 // Free-function resolver used by CrossPointSettings::getReaderFontId() and the reader.
 // Resolved by the linker — no callback indirection stored in settings.

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <BoardConfig.h>  // FREEINK_CAP_USB_MSC
+#include <GlyphProvider.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
 #include <Logging.h>
@@ -159,7 +160,13 @@ void ActivityManager::renderTaskLoop() {
       // on activity transitions like the rest, and every path that displays a page republishes
       // it (with an empty set when the page has no links), so a displayed page always describes
       // itself.
-      currentActivity->render(std::move(lock));
+      {
+        // A screen that draws book text draws its first-sight glyphs in the secondary framebuffer, not on the heap:
+        // black-and-white screens all. The reader keeps it for its grayscale passes and pre-renders.
+        const bool lend = currentActivity->drawsBookText() && !currentActivity->isReaderActivity();
+        const glyph_miss::LendScope glyphLend(lend ? &lendFramebufferForGlyphs : nullptr);
+        currentActivity->render(std::move(lock));
+      }
       // Cleared unconditionally on every exit path of render(): the call cannot throw
       // (-fno-exceptions) and every `return` inside it lands here.
       renderPassActive.store(false, std::memory_order_release);
@@ -442,8 +449,8 @@ void ActivityManager::exitActivity(const RenderLock& lock) {
 }
 
 void ActivityManager::syncBookFonts() {
-  syncUiBookFonts(currentActivity && currentActivity->drawsBookText(),
-                  currentActivity && currentActivity->isReaderActivity());
+  // A reader anywhere on the stack owns the fonts: its menu, TOC and lists borrow from its set.
+  syncUiBookFonts(currentActivity && currentActivity->drawsBookText(), isReaderActivity());
 }
 
 void ActivityManager::refreshWifiActivityFlag() {

@@ -73,8 +73,9 @@ class Activity {
   // while the host still owns the sectors.
   virtual bool requiresExclusiveStorageLoop() const { return false; }
   virtual bool isReaderActivity() const { return false; }
-  // Draws book text (titles, authors, file names) outside the reader: while it is current, the last book's font is
-  // open read-only behind the UI faces (syncUiBookFonts), so a script they lack draws.
+  // Draws book text (titles, authors, file names, chapter names) and only black and white: outside the reader, the
+  // last book's font is open read-only behind the UI faces while it is current (syncUiBookFonts), so a script they lack
+  // draws; and its passes draw first-sight glyphs in the lent secondary framebuffer (lendFramebufferForGlyphs).
   virtual bool drawsBookText() const { return false; }
   virtual bool usesWifi() const { return false; }
 
