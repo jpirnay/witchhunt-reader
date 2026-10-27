@@ -1303,22 +1303,6 @@ bool SdCardFont::allCpsCovered(const PerStyle& s, const uint32_t* codepoints, ui
   return true;
 }
 
-// Packs a run of 2-bit glyph bytes (4 pixels each, first pixel in the top bits) into the glyph's ink
-// mask (8 pixels a byte, first pixel in the top bit): a pixel is ink when its level is not 0, the
-// rule GfxRenderer's black-and-white pass draws by (draw mask 0x0E, raw {1,2,3}). Writes
-// (inBytes + 1) / 2 bytes. `out` may be `in`: byte j is written after bytes 2j and 2j + 1 are read.
-static void packInkMask(const uint8_t* in, const uint32_t inBytes, uint8_t* out) {
-  const auto nibble = [](const uint8_t b) -> uint8_t {
-    return static_cast<uint8_t>(((b & 0xC0) ? 8 : 0) | ((b & 0x30) ? 4 : 0) | ((b & 0x0C) ? 2 : 0) |
-                                ((b & 0x03) ? 1 : 0));
-  };
-  for (uint32_t j = 0; 2 * j < inBytes; j++) {
-    const uint8_t hi = nibble(in[2 * j]);
-    const uint8_t lo = 2 * j + 1 < inBytes ? nibble(in[2 * j + 1]) : 0;
-    out[j] = static_cast<uint8_t>((hi << 4) | lo);
-  }
-}
-
 int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly,
                              bool loadKernLigatureData) {
   auto& s = styles_[styleIdx];
