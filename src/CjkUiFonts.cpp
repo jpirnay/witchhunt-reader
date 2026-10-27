@@ -149,6 +149,7 @@ void orderFaces() {
 // --- The reader's TrueType font behind the UI faces (setReaderFont) ---
 
 bool primaryAttached[SIZE_COUNT] = {};  // attach(): a provider's primary face is set
+void (*readerFontOpener)() = nullptr;
 TtfFont* readerFont = nullptr;
 const EpdFontData* readerFaces[SIZE_COUNT] = {};
 bool readerFaceTried[SIZE_COUNT] = {};
@@ -158,7 +159,9 @@ bool readerFaceTried[SIZE_COUNT] = {};
 // using it on another task.
 const EpdFontData* readerFaceAt(void* ctx) {
   const auto size = reinterpret_cast<uintptr_t>(ctx);
-  if (!readerFont || size >= SIZE_COUNT || !RenderLock::heldByCurrentTask()) return nullptr;
+  if (size >= SIZE_COUNT || !RenderLock::heldByCurrentTask()) return nullptr;
+  if (!readerFont && readerFontOpener) readerFontOpener();  // the first string that needs it opens it
+  if (!readerFont) return nullptr;
   if (!readerFaceTried[size]) {
     readerFaceTried[size] = true;
     // At the em of the CJK UI faces, which their full-width ideographic space spans.
@@ -318,6 +321,8 @@ void CjkUiFonts::attach(EpdFont& font, const uint8_t points) {
 }
 
 bool CjkUiFonts::hasReaderFont() { return readerFont != nullptr; }
+
+void CjkUiFonts::setReaderFontOpener(void (*open)()) { readerFontOpener = open; }
 
 void CjkUiFonts::setReaderFont(TtfFont* font) {
   readerFont = font;

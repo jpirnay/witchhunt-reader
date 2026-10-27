@@ -26,7 +26,7 @@ behind CFF.
 | 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#548) |
 | 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | shipped (#550) |
 | 5b | Synthetic italic (spec section 7.4): families without an italic file draw italic slanted, as KOReader does | shipped (#551) |
-| 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | built (PR #562) without the list prefetch; device check pending ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
+| 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | built (feat/ui-book-text-heap); device check pending ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-a3b-push-in-and-gap.md)) |
 | 8 | Ruby and emphasis dots ([B2](#emphasis-dots-pr-b2)) | B1 shipped (#554); B2 emphasis dots next ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
 | 9 | The dictionary on CJK pages ([below](#dictionary-on-cjk-pages)) | open |
@@ -260,21 +260,26 @@ finished-book screen) draws what the UI faces lack from the reader's TrueType fo
 - in the reader, from the loaded set's first family with CJK (else its first), lent by `SdCardFontManager` on every
   load and body size, and taken back before its native sizes go;
 - outside it, on the screens that draw book text (`Activity::drawsBookText`), from the last book's set, opened
-  read-only when the glyph store holds it and its body family has CJK (`syncUiBookFonts`), closed on every other
-  screen;
-- searched before the CJK UI faces, or after the active UI language's own, except inside a `BookTextScope` (book
-  text: the Home cards, list rows of books, the status-bar and TOC titles, book information), where it goes first;
-- its 2-bit glyphs drawn as their ink; its UI-size faces made on the first glyph a screen needs, under the RenderLock
-  only.
+  read-only by the first string that needs it (once per screen; never installed or wiped from the UI), only when the
+  glyph store holds it and its body family has CJK, and closed on every other screen (`syncUiBookFonts`): a screen's
+  cover work before it draws never has it on the heap;
+- per string: every text call of `GfxRenderer` tells the provider which string comes next (`beginText`). One with a
+  character neither the UI face nor the active language's face has is book text (the build gives every translation's
+  characters a face): the reader's font goes first for all of it, so a title draws in one font, and what the UI face
+  lacks is rendered in one batch;
+- a book-text screen's first-sight glyphs draw in the secondary framebuffer, lent on the pass's first miss with the
+  black-and-white sequence (RED seeded, single-buffer fast diff) and returned before the waveform
+  (`lendFramebufferForGlyphs`): no heap transient, FAST kept;
+- its 2-bit glyphs drawn as their ink; its UI-size faces made on the first glyph a screen needs.
 
 Without a CJK TrueType family nothing opens, and the boxes (□) stay. Before the CJK faces these strings drew nothing
 (X3, 2026-10-18, 紅樓夢); without the boxes the Home card showed a lone 雪 of the author 曹雪芹 as if it were the title.
 
 **Still open:**
-- the list prefetch (spec 7.6): a screen's first-sight glyphs render one by one on lookup, since UI text draws no
-  prefetch; batching them needs the renderer's UI draw paths to call one;
-- the carousel theme's fast Home path (`tryFastHomeRender`) draws its menu labels with the cards, so it runs outside
-  the book-text scope: for a CJK UI language a title there may mix the UI face's and the book font's forms.
+- the reader's own passes (its status-bar title) keep their miss scratch on the heap: the reader holds the secondary
+  for its grayscale passes. A scratch block planned for the UI's sizes (~9.4 KB against 17.4 KB) would halve it;
+- a screen whose buffer is lent already (Home's covers, then its carousel frame cache; the Library's background work)
+  draws first-sight glyphs on the heap.
 
 **Smaller items:**
 - a CJK keyboard: none of the three has one, so text entry stays Latin;

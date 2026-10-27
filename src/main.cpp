@@ -699,6 +699,10 @@ void applyUiFontScale() {
   }
 }
 
+namespace {
+void openUiBookFonts();  // syncUiBookFonts' opener, below
+}  // namespace
+
 void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = false) {
   display.begin(seamless);
   // Carry the panel's measured FAST cost across the reboot. Without this the first decision that
@@ -754,6 +758,7 @@ void setupDisplayAndFonts(bool seamless = false, bool skipSdFontDiscovery = fals
   CjkUiFonts::attach(ui12BoldFont, 12);
   CjkUiFonts::attach(ui14RegularFont, 14);
   CjkUiFonts::attach(ui14BoldFont, 14);
+  CjkUiFonts::setReaderFontOpener(&openUiBookFonts);
   // The faces ship compressed; those the language pack does not hold decode through the same
   // decompressor as the reader faces, glyph by glyph.
   CjkUiFonts::setDecompressor(&fontDecompressor);
@@ -875,18 +880,21 @@ void ensureSdFontLoadedForPath(const char* path, const bool waitForBookFonts) {
   sdFontSystem.ensureLoaded(renderer, families, 1 + BookFonts::kMaxAccents, size, onColdFontLoad);
 }
 
-void syncUiBookFonts(const bool bookText, const bool reader) {
-  // The set this opened, which only this closes: the reader loads and unloads its own, and takes this one over.
-  static bool opened = false;
-  std::optional<RenderLock> lock;  // a font load or unload: the TTF engine works under the RenderLock (spec 3.4)
-  if (!RenderLock::heldByCurrentTask()) lock.emplace();
-  if (reader || !bookText) {
-    if (opened && !reader) sdFontSystem.unload(renderer);
-    opened = false;
-    return;
-  }
-  if (opened || !sdFontSystem.loadedFamily().empty() || !FsHelpers::hasEpubExtension(APP_STATE.openEpubPath)) return;
-  // The last book's fonts as its open chose them, in the language it was read in.
+namespace {
+// The UI's book-text fonts outside the reader (syncUiBookFonts): wanted while a screen that draws book text is current,
+// opened by the first string that needs a glyph from them (openUiBookFonts), at most once per screen, and closed by
+// whatever opened them only.
+bool uiBookFontsWanted = false;
+bool uiBookFontsTried = false;
+bool uiBookFontsOpen = false;
+
+// The last book's fonts as its open chose them, in the language it was read in, read-only: when the glyph store holds
+// them and the body family has CJK. Inside a render pass, under the RenderLock (CjkUiFonts::readerFaceAt): a screen's
+// cover work, done before it draws (BookInfoActivity::onEnter) or while it does not, never has them on the heap.
+void openUiBookFonts() {
+  if (!uiBookFontsWanted || uiBookFontsTried || uiBookFontsOpen || !sdFontSystem.loadedFamily().empty()) return;
+  uiBookFontsTried = true;
+  if (!FsHelpers::hasEpubExtension(APP_STATE.openEpubPath)) return;
   const char* path = APP_STATE.openEpubPath.c_str();
   std::string language;
   if (BookMetadataCache::readLanguage(Epub::cachePathFor(path, "/.crosspoint"), language)) {
@@ -898,9 +906,20 @@ void syncUiBookFonts(const bool bookText, const bool reader) {
   if (!chooseEpubFonts(path, /*wait=*/false, /*opening=*/false, families, body, size)) return;
   // A font without CJK is not worth its 2-3 KB here: the UI faces have the rest.
   if (!sdFontSystem.coversCjk(families[0])) return;
-  opened = sdFontSystem.openReadOnly(renderer, families, 1 + BookFonts::kMaxAccents, size);
-  LOG_INF("MAIN", "Book text fonts for the UI: %s %s (free=%lu)", families[0], opened ? "open" : "not in the store",
-          static_cast<unsigned long>(esp_get_free_heap_size()));
+  uiBookFontsOpen = sdFontSystem.openReadOnly(renderer, families, 1 + BookFonts::kMaxAccents, size);
+  LOG_INF("MAIN", "Book text fonts for the UI: %s %s (free=%lu)", families[0],
+          uiBookFontsOpen ? "open" : "not in the store", static_cast<unsigned long>(esp_get_free_heap_size()));
+}
+}  // namespace
+
+void syncUiBookFonts(const bool bookText, const bool reader) {
+  std::optional<RenderLock> lock;  // an unload: the TTF engine works under the RenderLock (spec 3.4)
+  if (!RenderLock::heldByCurrentTask()) lock.emplace();
+  // A reader owns the fonts, and takes over what the UI opened; any other screen without book text closes it.
+  if ((reader || !bookText) && uiBookFontsOpen && !reader) sdFontSystem.unload(renderer);
+  if (reader || !bookText) uiBookFontsOpen = false;
+  uiBookFontsWanted = bookText && !reader;
+  uiBookFontsTried = false;  // each screen tries once
 }
 
 // --- Temporary boot-phase heap-corruption bisect probes -------------------------------
