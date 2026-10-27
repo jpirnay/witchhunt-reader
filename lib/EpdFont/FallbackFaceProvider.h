@@ -43,6 +43,9 @@ class FallbackFaceProvider final : public GlyphProvider {
     readerCtx_ = ctx;
   }
   void setReaderFaceAfterFirst(const bool afterFirst) { readerAfterFirst_ = afterFirst; }
+  /// The UI face this provider serves, whose own table beginText() reads to tell which of a string's characters it
+  /// lacks: the regular face of the provider's size. Its siblings (bold, other sizes) cover the same characters.
+  void setPrimaryFace(const EpdFontData* primary) { primary_ = primary; }
 
   /// A codepoint `claims` returns true for that no face has is served as `standIn` instead, from
   /// the first face that has that. Subset faces carry only part of their script, and a character
@@ -59,6 +62,11 @@ class FallbackFaceProvider final : public GlyphProvider {
   /// logs. Answering false would send the renderer to the asking font's own bitmap at an offset
   /// that belongs to another face.
   bool ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const override;
+  /// Per string: one with a character neither the UI face nor the active language's own face has is no translation
+  /// (the build gives every translation's characters a face), so it is book text, and the reader's font goes first
+  /// for all of it, before the active language's face too, so a title draws in one font. Its characters the reader's
+  /// face is asked for are rendered in one batch (the face's prefetch()).
+  void beginText(const char* utf8Text) override;
 
  private:
   // A served glyph as GlyphProvider hands it out: a full EpdGlyph record (the faces store the 6-byte
@@ -91,6 +99,8 @@ class FallbackFaceProvider final : public GlyphProvider {
   const EpdFontData* (*readerFace_)(void* ctx) = nullptr;
   void* readerCtx_ = nullptr;
   bool readerAfterFirst_ = false;
+  const EpdFontData* primary_ = nullptr;
+  bool bookText_ = false;  // beginText(): the string being drawn is book text
 
   const EpdGlyph* serve(uint32_t codepoint);
   const EpdGlyph* serveFrom(const EpdFontData* face, uint32_t codepoint, bool reader);

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -271,6 +272,8 @@ struct ReaderFace final : GlyphProvider {
     out = bitmap.data();
     return true;
   }
+  void prefetch(const char* utf8Text) override { prefetched.emplace_back(utf8Text); }
+  std::vector<std::string> prefetched;  // what each prefetch() was given
   Bytes ink() const {
     Bytes mask(glyphDataBytes(record.width, record.height, false));
     packInkMask(bitmap.data(), static_cast<uint32_t>(bitmap.size()), mask.data());
@@ -329,6 +332,54 @@ TEST_F(FallbackFaceProviderTest, TextTheUiFaceCoversNeverAsksForTheReaderFace) {
     ASSERT_TRUE(EpdFont(&ui).getGlyph(cp));
   }
   EXPECT_EQ(reader.asked, 0);
+}
+
+// --- Per string (beginText): book text in one font, its glyphs prepared in one batch ---
+
+std::string utf8(const uint32_t cp) {
+  std::string out;
+  if (cp < 0x800) {
+    out += static_cast<char>(0xC0 | (cp >> 6));
+  } else {
+    out += static_cast<char>(0xE0 | (cp >> 12));
+    out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+  }
+  out += static_cast<char>(0x80 | (cp & 0x3F));
+  return out;
+}
+
+TEST_F(FallbackFaceProviderTest, ForACjkUiLanguageBookTextTakesTheReaderFaceForEveryCharacter) {
+  ReaderFace reader({ZH_ONLY, JA_ONLY}, 12, 12);
+  provider.setPrimaryFace(&inter_ui_10_regular);
+  provider.setReaderFace(&ReaderFace::source, &reader);
+  provider.setReaderFaceAfterFirst(true);  // Chinese UI
+  // 書 is no Chinese UI face's: the string is book text, and 设, which the Chinese face has, comes from the book's
+  // font.
+  const std::string title = "A " + utf8(ZH_ONLY) + utf8(JA_ONLY);
+  provider.beginText(title.c_str());
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(ZH_ONLY)), reader.ink());
+  ASSERT_EQ(reader.prefetched.size(), 1u);
+  EXPECT_EQ(reader.prefetched[0], utf8(ZH_ONLY) + utf8(JA_ONLY));  // what Inter lacks, in one batch
+}
+
+TEST_F(FallbackFaceProviderTest, ForACjkUiLanguageATranslationKeepsItsOwnFace) {
+  ReaderFace reader({ZH_ONLY}, 12, 12);
+  provider.setPrimaryFace(&inter_ui_10_regular);
+  provider.setReaderFace(&ReaderFace::source, &reader);
+  provider.setReaderFaceAfterFirst(true);
+  const std::string string = utf8(ZH_ONLY) + utf8(ZH_AND_JA);  // every character the Chinese face's
+  provider.beginText(string.c_str());
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(ZH_ONLY)), faceBytes(cjk_ui_zh_10, ZH_ONLY));
+  EXPECT_TRUE(reader.prefetched.empty());
+}
+
+TEST_F(FallbackFaceProviderTest, TextTheUiFaceCoversPreparesNothing) {
+  ReaderFace reader({GREEK_ALPHA}, 11, 14);
+  provider.setPrimaryFace(&inter_ui_10_regular);
+  provider.setReaderFace(&ReaderFace::source, &reader);
+  provider.beginText("Caf\xC3\xA9 au lait");
+  EXPECT_EQ(reader.asked, 0);
+  EXPECT_TRUE(reader.prefetched.empty());
 }
 
 TEST(FallbackFaceProviderSetup, ACompressedFaceIsRefusedWithoutADecompressor) {

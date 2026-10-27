@@ -5,7 +5,6 @@
 
 #include <algorithm>
 
-#include "CjkUiFonts.h"
 #include "CrossPointSettings.h"
 #include "I18nKeys.h"
 #include "MappedInputManager.h"
@@ -261,15 +260,10 @@ ListWindow UiListActivity::publishedWindow() const {
 void UiListActivity::render(RenderLock&&) {
   renderer.clearScreen();
   drawChrome();
-  {
-    // A list of books' rows (titles, file names): book text.
-    const CjkUiFonts::BookTextScope bookText(drawsBookText());
-    renderUi();
-  }
+  renderUi();
   for (int pass = 0; activeNav().consumeRebuildNeeded() && pass < 8; ++pass) {
     renderer.clearScreen();
     drawChrome();
-    const CjkUiFonts::BookTextScope bookText(drawsBookText());
     renderUi();
   }
   publishListWindow();

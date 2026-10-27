@@ -121,13 +121,10 @@ const EpdFontData* servedFace(const LanguageFaces& row, const size_t size) {
   return row.language == inSlotLanguage ? &inSlot[size] : row.faces[size].data;
 }
 
-// BookTextScope's depth: book text being drawn.
-uint8_t bookTextDepth = 0;
-
-// A CJK UI language's own face goes first, so its strings draw alike; any other UI language, and book text in any,
-// looks in the book's font before the translations' faces.
+// A CJK UI language's own face goes first, so its strings draw alike; any other UI language looks in the book's
+// font before the translations' faces. Book text goes to the book's font first in either (FallbackFaceProvider).
 void orderReaderFace() {
-  const bool afterFirst = bookTextDepth == 0 && facesOf(uiLanguage) != nullptr;
+  const bool afterFirst = facesOf(uiLanguage) != nullptr;
   for (FallbackFaceProvider& provider : providers) provider.setReaderFaceAfterFirst(afterFirst);
 }
 
@@ -151,6 +148,7 @@ void orderFaces() {
 
 // --- The reader's TrueType font behind the UI faces (setReaderFont) ---
 
+bool primaryAttached[SIZE_COUNT] = {};  // attach(): a provider's primary face is set
 TtfFont* readerFont = nullptr;
 const EpdFontData* readerFaces[SIZE_COUNT] = {};
 bool readerFaceTried[SIZE_COUNT] = {};
@@ -311,18 +309,15 @@ void CjkUiFonts::attach(EpdFont& font, const uint8_t points) {
   const size_t size = sizeIndexFor(points);
   copy.provider = &providers[size];
   providers[size].setReaderFace(&readerFaceAt, reinterpret_cast<void*>(size));
+  // The face of the provider's own size: the first attached (main.cpp attaches the regular before the bold).
+  if (points == SIZES[size] && !primaryAttached[size]) {
+    providers[size].setPrimaryFace(data);
+    primaryAttached[size] = true;
+  }
   font.data = &copy;
 }
 
 bool CjkUiFonts::hasReaderFont() { return readerFont != nullptr; }
-
-CjkUiFonts::BookTextScope::BookTextScope(const bool active) : active_(active) {
-  if (active_ && bookTextDepth++ == 0) orderReaderFace();
-}
-
-CjkUiFonts::BookTextScope::~BookTextScope() {
-  if (active_ && --bookTextDepth == 0) orderReaderFace();
-}
 
 void CjkUiFonts::setReaderFont(TtfFont* font) {
   readerFont = font;

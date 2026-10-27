@@ -82,4 +82,9 @@ class GlyphProvider {
   /// `utf8Text` is about to be measured or drawn in this provider's style: a provider that renders glyphs
   /// can prepare the ones it lacks in one batch. Lookups must still work for anything it skipped.
   virtual void prefetch(const char* utf8Text) { (void)utf8Text; }
+
+  /// The renderer starts measuring or drawing the string `utf8Text`: the lookups that follow are its glyphs. Every
+  /// text call of GfxRenderer says so, so a provider may settle per string where its glyphs come from. Unlike
+  /// prefetch(), which a page's layout calls once for its words, this comes with every string drawn.
+  virtual void beginText(const char* utf8Text) { (void)utf8Text; }
 };

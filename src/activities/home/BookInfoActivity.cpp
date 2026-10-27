@@ -14,7 +14,6 @@
 #include <cstdio>
 #include <ctime>
 
-#include "CjkUiFonts.h"
 #include "ReadingStats.h"
 #include "components/TapZones.h"
 #include "components/UITheme.h"
@@ -241,8 +240,6 @@ void BookInfoActivity::loop() {
 }
 
 void BookInfoActivity::render(RenderLock&&) {
-  // The screen is the book's: its title, author, series, file name and description.
-  const CjkUiFonts::BookTextScope bookText;
   // Fast path: only the description page / button hints changed. Reuse the
   // already-rendered header/cover/meta by clearing just those two bands. Cap
   // consecutive partial renders to bound e-ink ghosting buildup.

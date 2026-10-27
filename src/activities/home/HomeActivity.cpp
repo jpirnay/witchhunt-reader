@@ -24,7 +24,6 @@
 #include <string>
 #include <vector>
 
-#include "CjkUiFonts.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "GlobalBookmarkIndex.h"
@@ -794,13 +793,10 @@ void HomeActivity::render(RenderLock&&) {
   coverRectW = contentRect.width;
   coverRectH = layout.recentTileHeight;
 
-  {
-    const CjkUiFonts::BookTextScope bookText;  // the cards' titles and authors
-    GUI.drawRecentBookCover(renderer,
-                            Rect{contentRect.x, metrics.homeTopPadding, contentRect.width, layout.recentTileHeight},
-                            recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
-                            std::bind(&HomeActivity::storeCoverBuffer, this));
-  }
+  GUI.drawRecentBookCover(renderer,
+                          Rect{contentRect.x, metrics.homeTopPadding, contentRect.width, layout.recentTileHeight},
+                          recentBooks, selectorIndex, coverRendered, coverBufferStored, bufferRestored,
+                          std::bind(&HomeActivity::storeCoverBuffer, this));
 
   GUI.drawButtonMenu(
       renderer,

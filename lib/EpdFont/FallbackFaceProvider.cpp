@@ -1,5 +1,10 @@
 #include "FallbackFaceProvider.h"
 
+#include <Utf8.h>
+
+#include <algorithm>
+#include <cstring>
+
 #include "EpdFont.h"
 #include "FontDecompressor.h"
 
@@ -23,8 +28,8 @@ const EpdGlyph* FallbackFaceProvider::missGlyph(const uint32_t codepoint) {
 }
 
 const EpdGlyph* FallbackFaceProvider::serve(const uint32_t codepoint) {
-  // The built-in faces before the reader's: none, or the active UI language's own.
-  const uint8_t before = readerAfterFirst_ && faceCount_ > 0 ? 1 : 0;
+  // The built-in faces before the reader's: none, or the active UI language's own, but for book text.
+  const uint8_t before = readerAfterFirst_ && !bookText_ && faceCount_ > 0 ? 1 : 0;
   for (uint8_t i = 0; i < before; ++i) {
     if (const EpdGlyph* glyph = serveFrom(faces_[i], codepoint, false)) return glyph;
   }
@@ -63,6 +68,46 @@ const EpdGlyph* FallbackFaceProvider::serveFrom(const EpdFontData* face, const u
   slot.source = reader ? glyph.sdRecord : nullptr;
   slot.index = glyph.index;
   return &slot.record;
+}
+
+namespace {
+
+// Whether `face`'s own interval table holds `cp`: no provider, no fallbacks.
+bool inTable(const EpdFontData* face, const uint32_t cp) {
+  if (!face || !face->intervals || face->intervalCount == 0) return false;
+  const EpdUnicodeInterval* const end = face->intervals + face->intervalCount;
+  const EpdUnicodeInterval* const after =
+      std::upper_bound(face->intervals, end, cp,
+                       [](const uint32_t value, const EpdUnicodeInterval& interval) { return value < interval.first; });
+  return after != face->intervals && cp <= (after - 1)->last;
+}
+
+}  // namespace
+
+void FallbackFaceProvider::beginText(const char* utf8Text) {
+  bookText_ = false;
+  if (!utf8Text || !readerFace_) return;
+  // The characters the UI face lacks, up to a batch, as UTF-8: what the reader's face is asked for when the string is
+  // book text. It is when one of them is not the active language's either (for any other UI language, any of them).
+  char lacking[96];
+  size_t used = 0;
+  const auto* p = reinterpret_cast<const uint8_t*>(utf8Text);
+  while (*p != 0) {
+    const uint8_t* const start = p;
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (cp < 0x80 || inTable(primary_, cp)) continue;
+    if (!readerAfterFirst_ || faceCount_ == 0 || !inTable(faces_[0], cp)) bookText_ = true;
+    const size_t bytes = static_cast<size_t>(p - start);
+    if (used + bytes < sizeof(lacking)) {
+      std::memcpy(lacking + used, start, bytes);
+      used += bytes;
+    }
+  }
+  if (!bookText_ || used == 0) return;
+  const EpdFontData* const reader = readerFace_(readerCtx_);
+  if (!reader || !reader->provider) return;
+  lacking[used] = '\0';
+  reader->provider->prefetch(lacking);
 }
 
 bool FallbackFaceProvider::ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const {
