@@ -35,6 +35,7 @@ BASE = (
     | set(range(0x2010, 0x2028))
     | set(range(0x2030, 0x205F))
     | set(range(0x3000, 0x3040))
+    | {0x30FC}
     | set(range(0xFF01, 0xFFA0))
 )
 
@@ -128,7 +129,19 @@ def charset(name: str, unihan_zip: Path) -> set[int]:
             except UnicodeDecodeError:
                 pass
         return (
+            # Keep the proven JIS X 0208 repertoire, then add only CJK
+            # ideographs from JIS X 0213 Plane 1. The full Plane-1 codec
+            # also contains Latin/other characters absent from Noto CJK JP.
             _encodable("euc_jp", _double_byte(0xA1, 0xFE))
+            | {
+                cp
+                for cp in _encodable("euc_jis_2004", _double_byte(0xA1, 0xFE))
+                if (
+                    0x3400 <= cp <= 0x4DBF
+                    or 0x4E00 <= cp <= 0x9FFF
+                    or 0xF900 <= cp <= 0xFAFF
+                )
+            }
             | nec_row13
             | unihan_field(unihan_zip, "kJoyoKanji")
             | unihan_field(unihan_zip, "kJinmeiyoKanji")

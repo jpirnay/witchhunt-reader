@@ -3418,13 +3418,19 @@ static void buildBookFontFamilies(BlockFontFamilies& families, const std::string
   const auto rung = CrossPointSettings::builtinRungForPoints(pointSize);
   int familyBody[CrossPointSettings::BUILTIN_FONT_COUNT];
   uint8_t bodyPt = pointSize;
+  bool bodyIsBuiltin = false;
   for (uint8_t family = 0; family < CrossPointSettings::BUILTIN_FONT_COUNT; ++family) {
     familyBody[family] = CrossPointSettings::getBuiltinReaderFontId(family, rung);
-    if (familyBody[family] == bodyFontId) bodyPt = CrossPointSettings::fontSizePoints(rung);
+    if (familyBody[family] == bodyFontId) {
+      bodyPt = CrossPointSettings::fontSizePoints(rung);
+      bodyIsBuiltin = true;
+    }
   }
-  for (uint8_t family = 0; family < CrossPointSettings::BUILTIN_FONT_COUNT; ++family) {
-    if ((book->body & CssFontFamily::kGenericMask) == family + 1u || familyBody[family] == bodyFontId) continue;
-    families.add(family + 1u, familyBody[family], builtinFontSizeLadder(family, bodyPt));
+  if (bodyIsBuiltin) {
+    for (uint8_t family = 0; family < CrossPointSettings::BUILTIN_FONT_COUNT; ++family) {
+      if ((book->body & CssFontFamily::kGenericMask) == family + 1u || familyBody[family] == bodyFontId) continue;
+      families.add(family + 1u, familyBody[family], builtinFontSizeLadder(family, bodyPt));
+    }
   }
   for (uint8_t n = 0; n < BookFonts::kMaxAccents; ++n) {
     const char* accent = sdFontSystem.accentFamilyNameFor(cachePath, n);
