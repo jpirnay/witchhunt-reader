@@ -17,6 +17,8 @@
 
 #include "EpubReaderActivity.h"
 
+#include "SdCardFontSystem.h"
+
 #include <CooperativeAbort.h>
 #include <Epub/FootnotePreviews.h>
 #include <Epub/FootnoteShape.h>
@@ -798,6 +800,8 @@ void EpubReaderActivity::onEnter() {
 }
 
 void EpubReaderActivity::onExit() {
+  sdFontSystem.clearReaderLanguage();
+  sdFontSystem.ensureLoaded(renderer);
   Activity::onExit();
   logReaderMemSnapshot("onExit_before_release");
 
@@ -5370,6 +5374,10 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
 
 // TODO: Failure handling
 void EpubReaderActivity::render(RenderLock&& lock) {
+  if (epub) {
+    sdFontSystem.setReaderLanguage(epub->getLanguage());
+    sdFontSystem.ensureLoaded(renderer);
+  }
   if (!epub) {
     return;
   }
