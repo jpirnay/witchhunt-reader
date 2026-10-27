@@ -43,12 +43,15 @@ int8_t threeStateOverrideFromSlot(uint8_t slot) {
 // override menu's "Default" label should reflect that family by name even
 // though the per-book override list itself is built-in only.
 std::string defaultFontFamilyLabel(const SettingInfo& item) {
+  // A CJK book draws the default in a Noto CJK family: the one that stands in for a font without its script, or the
+  // regional sibling of a Noto CJK default (SdCardFontSystem, set for this book at its open).
+  if (sdFontSystem.languageFamily()[0] != '\0') return sdFontSystem.languageFamily();
   if (SETTINGS.sdFontFamilyName[0] != '\0') {
     const auto& families = sdFontSystem.registry().getFamilies();
     const auto it = std::find_if(families.begin(), families.end(),
                                  [](const auto& family) { return family.name == SETTINGS.sdFontFamilyName; });
     if (it != families.end()) {
-      return std::string(SETTINGS.sdFontFamilyName);
+      return sdFontSystem.effectiveReaderFamily(SETTINGS.sdFontFamilyName);
     }
   }
   // Built-in: index 0 is the "Default" entry, [1..] are built-in families
