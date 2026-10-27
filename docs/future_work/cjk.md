@@ -260,16 +260,17 @@ finished-book screen) draws what the UI faces lack from the reader's TrueType fo
 - in the reader, from the loaded set's first family with CJK (else its first), lent by `SdCardFontManager` on every
   load and body size, and taken back before its native sizes go;
 - outside it, on the screens that draw book text (`Activity::drawsBookText`), from the last book's set, opened
-  read-only by the first string that needs it (once per screen; never installed or wiped from the UI), only when the
-  glyph store holds it and its body family has CJK, and closed on every other screen (`syncUiBookFonts`): a screen's
-  cover work before it draws never has it on the heap;
+  read-only by the first string that needs it (never installed or wiped from the UI), only when the glyph store holds
+  it and its body family has CJK, kept from one such screen to the next, and closed on any other (`syncUiBookFonts`):
+  a screen's cover work before it draws never has it on the heap;
 - per string: every text call of `GfxRenderer` tells the provider which string comes next (`beginText`). One with a
   character neither the UI face nor the active language's face has is book text (the build gives every translation's
   characters a face): the reader's font goes first for all of it, so a title draws in one font, and what the UI face
   lacks is rendered in one batch;
-- a book-text screen's first-sight glyphs draw in the secondary framebuffer, lent on the pass's first miss with the
-  black-and-white sequence (RED seeded, single-buffer fast diff) and returned before the waveform
-  (`lendFramebufferForGlyphs`): no heap transient, FAST kept;
+- a book-text screen's first-sight glyphs draw in the secondary framebuffer when the heap could not hold their scratch
+  with 24 KB to spare (the reader menu): lent on the pass's first miss with the black-and-white sequence (RED seeded,
+  single-buffer fast diff) and returned as the frame is about to be pushed (`lendFramebufferForGlyphs`,
+  `GfxRenderer::setBeforePushHook`). A lend costs the X3 a slower refresh, so screens with room keep the heap;
 - its 2-bit glyphs drawn as their ink; its UI-size faces made on the first glyph a screen needs.
 
 Without a CJK TrueType family nothing opens, and the boxes (□) stay. Before the CJK faces these strings drew nothing
@@ -278,8 +279,10 @@ Without a CJK TrueType family nothing opens, and the boxes (□) stay. Before th
 **Still open:**
 - the reader's own passes (its status-bar title) keep their miss scratch on the heap: the reader holds the secondary
   for its grayscale passes. A scratch block planned for the UI's sizes (~9.4 KB against 17.4 KB) would halve it;
-- a screen whose buffer is lent already (Home's covers, then its carousel frame cache; the Library's background work)
-  draws first-sight glyphs on the heap.
+- the set held while a book-text screen is current costs ~4 KB (Home after the Library), more than the spec's 2-3 KB;
+  opening it per screen instead cost 35-100 ms a visit, which weighed more;
+- the reader menu's 2.42 s opening refresh on the X3 is its anti-ghosting HALF (a full resync and a conditioning pass
+  on the UC8253), not this work: a FAST would do when no grey is on the glass.
 
 **Smaller items:**
 - a CJK keyboard: none of the three has one, so text entry stays Latin;
