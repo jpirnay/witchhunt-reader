@@ -83,8 +83,15 @@ bool ttfFamilyFits(const uint32_t* fileBytes, const uint32_t* sdBytes, const uin
 
 }  // namespace
 
-BuildArena* lendFramebufferForGlyphs() {
+BuildArena* lendFramebufferForGlyphs(const size_t bytes) {
   if (!ttfRenderer || glyphLend || !ttfRenderer->hasSecondaryBuffer()) return nullptr;
+  // Only when the heap needs it: a lend can cost the X3 a slower refresh (a 2.55 s HALF where the chapter list took
+  // 1-1.3 s, and a wait for the last refresh to finish). A miss the heap holds with kLendFloor to spare stays there:
+  // the chapter list, the Library and Book Info (~50 KB free); the reader menu (~39 KB) lends.
+  static constexpr size_t kLendFloor = 24 * 1024;
+  const size_t freeBytes = esp_get_free_heap_size();
+  const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  if (freeBytes >= bytes + kLendFloor && largest >= bytes) return nullptr;
   ttfRenderer->syncRedRamFromFrameBuffer();  // the displayed frame, while the secondary still holds it
   size_t size = 0;
   uint8_t* const region = ttfRenderer->borrowSecondaryBuffer(&size);

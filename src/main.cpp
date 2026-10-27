@@ -915,10 +915,11 @@ void openUiBookFonts() {
 void syncUiBookFonts(const bool bookText, const bool reader) {
   std::optional<RenderLock> lock;  // an unload: the TTF engine works under the RenderLock (spec 3.4)
   if (!RenderLock::heldByCurrentTask()) lock.emplace();
-  // Each screen opens what it needs itself (openUiBookFonts): what the last one opened goes, held on Home after the
-  // Library otherwise (+4 KB, X3). A reader owns the fonts, and takes over what the UI opened.
-  if (uiBookFontsOpen && !reader) sdFontSystem.unload(renderer);
-  uiBookFontsOpen = false;
+  // Kept from one book-text screen to the next: opening it again costs 35-100 ms a visit (X3, more as the glyph store
+  // fills), which the user weighs above the ~4 KB it holds on Home after the Library. Any other screen closes it; a
+  // reader owns the fonts, and takes over what the UI opened.
+  if (uiBookFontsOpen && !bookText && !reader) sdFontSystem.unload(renderer);
+  if (!bookText || reader) uiBookFontsOpen = false;
   uiBookFontsWanted = bookText && !reader;
   uiBookFontsTried = false;  // each screen tries once
 }

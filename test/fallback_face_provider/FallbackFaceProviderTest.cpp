@@ -386,8 +386,10 @@ TEST_F(FallbackFaceProviderTest, TextTheUiFaceCoversPreparesNothing) {
 
 int lendCalls = 0;
 BuildArena* const kRegion = reinterpret_cast<BuildArena*>(0x1000);  // never dereferenced
-BuildArena* countingLender() {
+size_t lentFor = 0;
+BuildArena* countingLender(const size_t bytes) {
   ++lendCalls;
+  lentFor = bytes;
   return kRegion;
 }
 
@@ -397,11 +399,12 @@ TEST(GlyphMissLend, TheFirstMissLendsAndTheReturnEndsItForTheRestOfThePass) {
     const glyph_miss::LendScope scope(&countingLender);
     EXPECT_EQ(glyph_miss::arena(), nullptr);  // nothing is lent before a miss asks
     EXPECT_EQ(lendCalls, 0);
-    EXPECT_EQ(glyph_miss::lendingArena(), kRegion);
-    EXPECT_EQ(glyph_miss::lendingArena(), kRegion);
+    EXPECT_EQ(glyph_miss::lendingArena(21000), kRegion);
+    EXPECT_EQ(lentFor, 21000u);  // the lender knows what the miss needs, to leave it to the heap when it can
+    EXPECT_EQ(glyph_miss::lendingArena(21000), kRegion);
     EXPECT_EQ(lendCalls, 1);
-    glyph_miss::regionReturned(kRegion);  // the pass released the RenderLock: the display has it again
-    EXPECT_EQ(glyph_miss::lendingArena(), nullptr);
+    glyph_miss::regionReturned(kRegion);  // the frame is about to be pushed: the display has it again
+    EXPECT_EQ(glyph_miss::lendingArena(21000), nullptr);
     EXPECT_EQ(lendCalls, 1);
   }
   EXPECT_EQ(glyph_miss::arena(), nullptr);
@@ -413,7 +416,7 @@ TEST(GlyphMissLend, ARegionLentByItsOwnerIsUsedWithoutLending) {
   const glyph_miss::Scope owner(owners);
   {
     const glyph_miss::LendScope scope(&countingLender);
-    EXPECT_EQ(glyph_miss::lendingArena(), owners);
+    EXPECT_EQ(glyph_miss::lendingArena(21000), owners);
     EXPECT_EQ(lendCalls, 0);
   }
   EXPECT_EQ(glyph_miss::arena(), owners);

@@ -27,11 +27,11 @@ extern void ensureSdFontLoadedForPath(const char* path, bool waitForBookFonts = 
 // change of the current activity. Defined in main.cpp.
 extern void syncUiBookFonts(bool bookText, bool reader);
 
-// The glyph_miss lender for render passes outside the reader: lends the secondary framebuffer to the pass's TrueType
-// misses (black-and-white, single-buffer fast diff) until the pass releases the RenderLock. Defined in
-// SdCardFontSystem.cpp.
+// The glyph_miss lender for book-text screens: lends the secondary framebuffer to the pass's TrueType misses
+// (black-and-white, single-buffer fast diff) when the heap could not hold their `bytes` with room to spare, until the
+// frame is pushed. Defined in SdCardFontSystem.cpp.
 class BuildArena;
-BuildArena* lendFramebufferForGlyphs();
+BuildArena* lendFramebufferForGlyphs(size_t bytes);
 
 // True when the EPUB at `path` is to be drawn in its embedded body font (Publisher Fonts on, the book's own
 // style in use, no font family chosen for it) and BookFonts has not examined it yet. Defined in main.cpp.

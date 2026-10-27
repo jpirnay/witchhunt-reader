@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "EpdFontData.h"
@@ -14,7 +15,7 @@ namespace glyph_miss {
 
 namespace detail {
 inline BuildArena* arena = nullptr;
-inline BuildArena* (*lend)() = nullptr;
+inline BuildArena* (*lend)(size_t bytes) = nullptr;
 inline uint32_t starved = 0;
 inline uint32_t drawn = 0;
 }  // namespace detail
@@ -22,14 +23,14 @@ inline uint32_t drawn = 0;
 /// The region lent to the misses (Scope), or nullptr: they use the heap.
 inline BuildArena* arena() { return detail::arena; }
 
-/// The region a TrueType miss draws in: the one lent (Scope), else one LendScope's lender lends now, for the rest of
-/// the scope (asked once, lent or not), else nullptr: the heap. Only a miss's scratch block asks: lending is worth it
-/// for that, not for a built-in font's group ring.
-inline BuildArena* lendingArena() {
+/// The region a TrueType miss that needs `bytes` draws in: the one lent (Scope), else one LendScope's lender lends now,
+/// for the rest of the scope (asked once, lent or not; it may leave a miss the heap has room for to the heap), else
+/// nullptr: the heap. Only a miss's scratch block asks: lending is worth it for that, not for a built-in font's ring.
+inline BuildArena* lendingArena(const size_t bytes) {
   if (!detail::arena && detail::lend) {
-    BuildArena* (*const lend)() = detail::lend;
+    BuildArena* (*const lend)(size_t) = detail::lend;
     detail::lend = nullptr;
-    detail::arena = lend();
+    detail::arena = lend(bytes);
   }
   return detail::arena;
 }
@@ -68,7 +69,7 @@ class Scope {
 /// misses' until its lender gives it back (regionReturned()) or the scope ends. nullptr: none. Nests.
 class LendScope {
  public:
-  explicit LendScope(BuildArena* (*lend)()) : previousLend_(detail::lend), previousArena_(detail::arena) {
+  explicit LendScope(BuildArena* (*lend)(size_t bytes)) : previousLend_(detail::lend), previousArena_(detail::arena) {
     detail::lend = lend;
   }
   ~LendScope() {
@@ -79,7 +80,7 @@ class LendScope {
   LendScope& operator=(const LendScope&) = delete;
 
  private:
-  BuildArena* (*previousLend_)() = nullptr;
+  BuildArena* (*previousLend_)(size_t) = nullptr;
   BuildArena* previousArena_ = nullptr;
 };
 
