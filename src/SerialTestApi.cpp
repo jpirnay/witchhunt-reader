@@ -33,6 +33,7 @@
 #include <cstring>
 
 #include "ButtonEventManager.h"
+#include "CjkUiFonts.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "SdCardFontGlobals.h"
@@ -485,6 +486,8 @@ void cmdState(std::string_view /*arg*/) {
     appendField(state, "popup", popup.text);
     appendField(state, "popup_ms", static_cast<long>(millis() - popup.atMs));
   }
+  // The TrueType family behind the UI faces (CjkUiFonts::setReaderFont), when one is.
+  if (CjkUiFonts::hasReaderFont()) appendField(state, "ui_font", sdFontSystem.loadedFamily().c_str());
   appendField(state, "heap", static_cast<long>(ESP.getFreeHeap()));
   appendField(state, "maxblock",
               static_cast<long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));

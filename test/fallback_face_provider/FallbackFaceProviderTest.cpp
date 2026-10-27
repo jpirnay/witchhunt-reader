@@ -7,7 +7,9 @@
 // points at its inflated bitmap, which is exactly what CjkUiFonts builds over the mapped slot.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 #include "EpdFont.h"
@@ -234,6 +236,99 @@ TEST_F(FallbackFaceProviderTest, AGlyphThatCannotBeDecodedIsOwnedAndDrawsNothing
   const uint8_t* bitmap = reinterpret_cast<const uint8_t*>(1);
   EXPECT_TRUE(provider.ownsBitmap(glyph.sdRecord, bitmap));
   EXPECT_EQ(bitmap, nullptr);
+}
+
+// A reader font's face as TtfFont::nativeFonts() hands it out: 2-bit, no interval table, every glyph from its
+// provider, which owns the glyph's bitmap.
+struct ReaderFace final : GlyphProvider {
+  std::vector<uint32_t> codepoints;
+  EpdGlyph record{};
+  Bytes bitmap;
+  EpdFontData data{};
+  int asked = 0;  // how often the provider's source asked for the face
+
+  ReaderFace(std::vector<uint32_t> covered, const uint8_t width, const uint8_t height)
+      : codepoints(std::move(covered)) {
+    record = EpdGlyph{width,
+                      height,
+                      static_cast<uint16_t>(width << 4),
+                      1,
+                      static_cast<int16_t>(height),
+                      glyphDataBytes(width, height, true),
+                      0};
+    bitmap.resize(record.dataLength);
+    // Every level in every position: 0 (no ink), 1, 2 and 3.
+    for (size_t i = 0; i < bitmap.size(); ++i) bitmap[i] = static_cast<uint8_t>(0x1B * (i + 1));
+    data.is2Bit = true;
+    data.advanceY = height;
+    data.provider = this;
+  }
+  const EpdGlyph* missGlyph(const uint32_t cp) override {
+    return std::find(codepoints.begin(), codepoints.end(), cp) != codepoints.end() ? &record : nullptr;
+  }
+  bool ownsBitmap(const EpdGlyph* glyph, const uint8_t*& out) const override {
+    if (glyph != &record) return false;
+    out = bitmap.data();
+    return true;
+  }
+  Bytes ink() const {
+    Bytes mask(glyphDataBytes(record.width, record.height, false));
+    packInkMask(bitmap.data(), static_cast<uint32_t>(bitmap.size()), mask.data());
+    return mask;
+  }
+  static const EpdFontData* source(void* ctx) {
+    auto* face = static_cast<ReaderFace*>(ctx);
+    ++face->asked;
+    return &face->data;
+  }
+};
+
+const EpdFontData* noFace(void* /*ctx*/) { return nullptr; }
+
+TEST_F(FallbackFaceProviderTest, TheReaderFaceServesWhatTheUiFacesLackAsItsInk) {
+  ReaderFace reader({GREEK_ALPHA}, 11, 14);
+  provider.setReaderFace(&ReaderFace::source, &reader);
+  const EpdGlyphRef glyph = EpdFont(&ui).getGlyph(GREEK_ALPHA);
+  ASSERT_TRUE(glyph);
+  EXPECT_EQ(glyph.width, 11);
+  EXPECT_EQ(glyph.height, 14);
+  EXPECT_EQ(glyph.advanceX, 11 << 4);
+  EXPECT_EQ(drawn(ui, glyph), reader.ink());
+}
+
+TEST_F(FallbackFaceProviderTest, ForAnotherUiLanguageTheReaderFaceGoesBeforeTheCjkFaces) {
+  ReaderFace reader({ZH_ONLY}, 12, 12);
+  provider.setReaderFace(&ReaderFace::source, &reader);
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(ZH_ONLY)), reader.ink());
+}
+
+TEST_F(FallbackFaceProviderTest, ForACjkUiLanguageItsOwnFaceGoesFirstAndTheReaderFaceNext) {
+  ReaderFace reader({ZH_ONLY, JA_ONLY}, 12, 12);
+  provider.setReaderFace(&ReaderFace::source, &reader);
+  provider.setReaderFaceAfterFirst(true);  // Chinese UI: its face is the first
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(ZH_ONLY)), faceBytes(cjk_ui_zh_10, ZH_ONLY));
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(JA_ONLY)), reader.ink());  // before the Japanese face
+}
+
+TEST_F(FallbackFaceProviderTest, WithoutAReaderFaceNowTheUiFacesServeAsBefore) {
+  provider.setReaderFace(&noFace, nullptr);
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(ZH_ONLY)), faceBytes(cjk_ui_zh_10, ZH_ONLY));
+  EXPECT_FALSE(EpdFont(&ui).getGlyph(GREEK_ALPHA));
+}
+
+TEST_F(FallbackFaceProviderTest, AReaderGlyphTooLargeToPackIsLeftToTheNextFace) {
+  ReaderFace reader({ZH_ONLY}, 40, 40);  // 200 B of ink
+  provider.setReaderFace(&ReaderFace::source, &reader);
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(ZH_ONLY)), faceBytes(cjk_ui_zh_10, ZH_ONLY));
+}
+
+TEST_F(FallbackFaceProviderTest, TextTheUiFaceCoversNeverAsksForTheReaderFace) {
+  ReaderFace reader({GREEK_ALPHA}, 11, 14);
+  provider.setReaderFace(&ReaderFace::source, &reader);
+  for (const uint32_t cp : {static_cast<uint32_t>('A'), static_cast<uint32_t>('z'), 0xE9u}) {
+    ASSERT_TRUE(EpdFont(&ui).getGlyph(cp));
+  }
+  EXPECT_EQ(reader.asked, 0);
 }
 
 TEST(FallbackFaceProviderSetup, ACompressedFaceIsRefusedWithoutADecompressor) {

@@ -21,9 +21,12 @@ class FontDecompressor;
 /// which only the language picker's names and CJK book titles ever ask for. If the slot cannot
 /// hold the faces, the active language decodes on demand too: slower, never wrong.
 ///
-/// They cover the translations and nothing else: a CJK book title draws the characters it shares
-/// with them, and a box for each of the rest. Titles need the reader's CJK font
-/// (docs/future_work/cjk.md).
+/// They cover the translations and nothing else. A book title, an author or a chapter name in a
+/// script they lack takes its glyphs from the reader's TrueType font while one is loaded (it stays
+/// loaded past the reader, for Home and the Library), at the CJK UI faces' em; a CJK character
+/// nothing covers draws as a box.
+class TtfFont;
+
 namespace CjkUiFonts {
 
 /// What the language pack slot carries for a CJK language: its faces, inflated. Register with
@@ -44,5 +47,11 @@ void attach(EpdFont& font, uint8_t points);
 /// Korean. All three stay attached whatever the language: the language picker draws every
 /// language's name in its own script.
 void setLanguage(Language language);
+
+/// The reader's TrueType family behind the UI faces (nullptr: none), searched before the translations'
+/// faces, or after the active UI language's own. Its faces at the CJK UI sizes are made the first
+/// time UI text needs one. SdCardFontManager calls it when a set loads and before its native sizes go.
+void setReaderFont(TtfFont* font);
+bool hasReaderFont();
 
 }  // namespace CjkUiFonts

@@ -51,6 +51,15 @@ class SdCardFontSystem {
   void selectLanguageFamily(const char* family);
   const char* languageFamily() const { return languageFamily_.c_str(); }
 
+  /// Whether a TrueType `family` has CJK (一 or 가), read from its file on the card once per family. False for a
+  /// .cpfont family, which the UI never borrows from.
+  bool coversCjk(const char* family);
+  /// The families of a book, loaded read-only for UI screens: only when the glyph store holds them as a set already
+  /// (SdCardFontManager::openTtfFamiliesReadOnly). False, nothing loaded, otherwise or when the first is no TrueType.
+  bool openReadOnly(GfxRenderer& renderer, const char* const* familyNames, uint8_t count, uint8_t pointSize);
+  /// The first family loaded: the reader's, or what openReadOnly() opened; "" when none is.
+  const std::string& loadedFamily() const { return manager_.currentFamilyName(); }
+
   /// The family the reader loads and resolves for `configuredFamily`: its regional Noto CJK sibling for the book's
   /// language when that is installed, else the family itself. ensureSdFontLoadedForPath() and resolveSdCardFontId()
   /// both go through it, so the face loaded is the face the layout asks for.
@@ -183,6 +192,8 @@ class SdCardFontSystem {
   static bool familyMapsCodepoint(const SdCardFontFamilyInfo& family, uint32_t codepoint);
 
   ReaderCjkRegion readerCjkRegion_ = ReaderCjkRegion::None;
+  uint32_t cjkFamilyKey_ = 0;  // coversCjk(): the family it last read, and what it found
+  bool cjkFamily_ = false;
   std::string languageFamily_;      // selectLanguageFamily()
   uint32_t languageFamilyKey_ = 0;  // what it was decided for: the reader's font and the region; 0: nothing
   SdCardFontRegistry registry_;

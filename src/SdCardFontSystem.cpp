@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "CjkUiFonts.h"
 #include "CrossPointSettings.h"
 #include "SdCardFontGlobals.h"
 #include "SerialTestApi.h"
@@ -414,6 +415,30 @@ bool SdCardFontSystem::familyMapsCodepoint(const SdCardFontFamilyInfo& family, c
   return maps || bytes.ioError();
 }
 
+bool SdCardFontSystem::coversCjk(const char* family) {
+  const SdCardFontFamilyInfo* info = family && family[0] != '\0' ? findFamily(family) : nullptr;
+  if (!info || !info->ttf()) return false;
+  const uint32_t files = info->filesKey();
+  const uint32_t key = glyphstore::fnv1a(&files, sizeof files, glyphstore::fnv1a(family, strlen(family)));
+  if (key != cjkFamilyKey_) {
+    cjkFamilyKey_ = key;
+    cjkFamily_ = familyMapsCodepoint(*info, 0x4E00) || familyMapsCodepoint(*info, 0xAC00);  // 一, 가
+  }
+  return cjkFamily_;
+}
+
+bool SdCardFontSystem::openReadOnly(GfxRenderer& renderer, const char* const* familyNames, const uint8_t count,
+                                    const uint8_t pointSize) {
+  const SdCardFontFamilyInfo* families[SdCardFontManager::kMaxTtfFamilies] = {};
+  uint8_t found = 0;
+  for (uint8_t i = 0; i < count && found < SdCardFontManager::kMaxTtfFamilies; ++i) {
+    const SdCardFontFamilyInfo* family = findFamily(familyNames[i]);
+    if (family && family->ttf()) families[found++] = family;
+  }
+  if (found == 0 || families[0] != findFamily(familyNames[0])) return false;
+  return manager_.openTtfFamiliesReadOnly(families, found, renderer, sizeListFor(familyNames[0]).snap(pointSize));
+}
+
 void SdCardFontSystem::selectLanguageFamily(const char* family) {
   const std::string name = family ? family : "";
   const auto region = static_cast<uint8_t>(readerCjkRegion_);
@@ -541,6 +566,7 @@ std::string SdCardFontSystem::effectiveReaderFamily(const char* configuredFamily
 void SdCardFontSystem::begin(GfxRenderer& renderer) {
   ttfRenderer = &renderer;
   ttfSystem = this;
+  manager_.setUiFontHook(&CjkUiFonts::setReaderFont);
   TtfFont::setHooks({&RenderLock::heldByCurrentTask, &ttfYield, &ttfReclaim, &ttfNowMs, &ttfCountsDraw});
   // A miss's memory on the heap lasts as long as the pass that drew it: whichever task rendered gives it back with
   // RenderLock, and a page drawn from the glyph store needs none of it (TtfFontSet::releaseMissMemory).

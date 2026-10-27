@@ -20,6 +20,13 @@ extern void ensureSdFontLoaded();
 // regional Noto CJK family while the book's language is pending (SdCardFontSystem::waitsForReaderLanguage).
 extern void ensureSdFontLoadedForPath(const char* path, bool waitForBookFonts = true);
 
+// Book text outside the reader (Home, the Library, book information, the bookmark and reading-stats lists): while such
+// a screen is current (`bookText`), the glyph store's set of the last book opened is open read-only, when it has CJK,
+// so its titles draw in that font behind the UI faces (CjkUiFonts::setReaderFont). Never installed or wiped from
+// here; closed again on any other screen, and taken over by a reader (`reader`). ActivityManager calls it on every
+// change of the current activity. Defined in main.cpp.
+extern void syncUiBookFonts(bool bookText, bool reader);
+
 // True when the EPUB at `path` is to be drawn in its embedded body font (Publisher Fonts on, the book's own
 // style in use, no font family chosen for it) and BookFonts has not examined it yet. Defined in main.cpp.
 extern bool bookFontsPendingForPath(const char* path);

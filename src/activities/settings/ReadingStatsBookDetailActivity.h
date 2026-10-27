@@ -13,6 +13,7 @@
 // the screen.
 class ReadingStatsBookDetailActivity final : public Activity {
  public:
+  bool drawsBookText() const override { return true; }
   ReadingStatsBookDetailActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string docId)
       : Activity("ReadingStatsBookDetail", renderer, mappedInput), docId(std::move(docId)) {}
 

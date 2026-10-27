@@ -196,6 +196,11 @@ bool SdCardFontManager::loadTtfFamilies(const SdCardFontFamilyInfo* const* famil
   return loadTtf(families, count, renderer, targetPtSize, onColdLoad, TtfChoice::FewerIfNeeded);
 }
 
+bool SdCardFontManager::openTtfFamiliesReadOnly(const SdCardFontFamilyInfo* const* families, const uint8_t count,
+                                                GfxRenderer& renderer, const uint8_t targetPtSize) {
+  return loadTtf(families, count, renderer, targetPtSize, {}, TtfChoice::ExactlyThese);
+}
+
 bool SdCardFontManager::loadTtf(const SdCardFontFamilyInfo* const* families, uint8_t count, GfxRenderer& renderer,
                                 const uint8_t targetPtSize, const std::function<void()>& onColdLoad,
                                 const TtfChoice choice) {
@@ -271,7 +276,12 @@ bool SdCardFontManager::loadTtf(const SdCardFontFamilyInfo* const* families, uin
   ttfAsked_ = askedKey(families, count);
   loadedFamilyName_ = ttfFamilies_[0].name;
   loadedPointSize_ = targetPtSize;
+  lendUiFont();
   return true;
+}
+
+void SdCardFontManager::lendUiFont() {
+  if (uiFontHook_) uiFontHook_(ttfSet_ && ttfCount_ > 0 ? ttfSet_->font(0) : nullptr);
 }
 
 bool SdCardFontManager::ttfFamiliesLoaded(const SdCardFontFamilyInfo* const* families, const uint8_t count) const {
@@ -360,6 +370,7 @@ std::optional<SdCardFontManager::NativeSizes> SdCardFontManager::ttfNativeSizes(
 
 void SdCardFontManager::dropTtfNativeSizes(GfxRenderer& renderer) {
   if (!ttfSet_) return;
+  if (uiFontHook_) uiFontHook_(nullptr);  // the UI's faces of the font are native sizes too
   // One at a time: removeFont() ends the walk over the map.
   for (bool found = true; found;) {
     found = false;
@@ -375,7 +386,10 @@ void SdCardFontManager::dropTtfNativeSizes(GfxRenderer& renderer) {
 
 bool SdCardFontManager::setTtfBodySize(GfxRenderer& renderer, const uint8_t pointSize) {
   if (!ttfSet_) return false;
-  if (pointSize == loadedPointSize_) return true;
+  if (pointSize == loadedPointSize_) {
+    lendUiFont();  // again after a book open's dropTtfNativeSizes()
+    return true;
+  }
   // A native size the body stood in for was scaled from the old body size: all of them go, and come back on demand.
   dropTtfNativeSizes(renderer);
   for (uint8_t f = 0; f < ttfCount_; ++f) {
@@ -391,6 +405,7 @@ bool SdCardFontManager::setTtfBodySize(GfxRenderer& renderer, const uint8_t poin
     LOG_INF("SDMGR", "TTF family %s now at %u pt (id=%d)", family.name.c_str(), pointSize, fontId);
   }
   loadedPointSize_ = pointSize;
+  lendUiFont();
   return true;
 }
 

@@ -73,6 +73,9 @@ class Activity {
   // while the host still owns the sectors.
   virtual bool requiresExclusiveStorageLoop() const { return false; }
   virtual bool isReaderActivity() const { return false; }
+  // Draws book text (titles, authors, file names) outside the reader: while it is current, the last book's font is
+  // open read-only behind the UI faces (syncUiBookFonts), so a script they lack draws.
+  virtual bool drawsBookText() const { return false; }
   virtual bool usesWifi() const { return false; }
 
   // What a tap on the row at `index` should do, moving this screen's selection if it lands on a

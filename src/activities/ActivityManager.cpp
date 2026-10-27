@@ -333,6 +333,7 @@ void ActivityManager::loop() {
         if (exitingReader && !currentActivity->isReaderActivity()) {
           unloadSdFontIfLoaded();
         }
+        syncBookFonts();
         LOG_DBG("ACT", "Popped from activity stack, new size = %zu", stackActivities.size());
         // Handle result if necessary
         if (currentActivity->resultHandler) {
@@ -404,6 +405,7 @@ void ActivityManager::loop() {
       currentActivity = std::move(pendingActivity);
       refreshWifiActivityFlag();
       noteActivityChanged();
+      syncBookFonts();
 
       lock.unlock();  // onEnter may acquire its own lock
       currentActivity->onEnter();
@@ -439,6 +441,11 @@ void ActivityManager::exitActivity(const RenderLock& lock) {
   }
 }
 
+void ActivityManager::syncBookFonts() {
+  syncUiBookFonts(currentActivity && currentActivity->drawsBookText(),
+                  currentActivity && currentActivity->isReaderActivity());
+}
+
 void ActivityManager::refreshWifiActivityFlag() {
   // The whole stack, not just the top: a network activity with a prompt or a picker above it still
   // owns the radio -- it brought it up and takes it down in its own onExit().
@@ -463,6 +470,7 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
     currentActivity = std::move(newActivity);
     refreshWifiActivityFlag();
     noteActivityChanged();
+    syncBookFonts();
     currentActivity->onEnter();
   }
 }
