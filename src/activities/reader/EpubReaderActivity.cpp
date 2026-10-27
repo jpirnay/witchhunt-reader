@@ -67,6 +67,7 @@
 #include "ReadingSessionTracker.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontGlobals.h"
+#include "SdCardFontSystem.h"
 #include "SerialTestApi.h"
 #include "SilentRestart.h"
 #include "StarredPagesActivity.h"
@@ -727,7 +728,14 @@ void EpubReaderActivity::onEnter() {
 
   // Save current epub as last opened epub and add to recent books
   APP_STATE.openEpubPath = epub->getPath();
-  APP_STATE.saveToFile();
+  const uint32_t lastBookSaveHeap = esp_get_free_heap_size();
+  if (APP_STATE.saveToFile()) {
+    LOG_INF("ERS", "Saved last-book state: %s (heap=%lu)", APP_STATE.openEpubPath.c_str(),
+            static_cast<unsigned long>(lastBookSaveHeap));
+  } else {
+    LOG_ERR("ERS", "Failed to save last-book state: %s (heap=%lu)", APP_STATE.openEpubPath.c_str(),
+            static_cast<unsigned long>(lastBookSaveHeap));
+  }
   std::string series = epub->getSeries();
   if (!series.empty() && !epub->getSeriesIndex().empty()) {
     series += " #" + epub->getSeriesIndex();
@@ -863,7 +871,14 @@ void EpubReaderActivity::onExit() {
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
   APP_STATE.readerActivityLoadCount = 0;
-  APP_STATE.saveToFile();
+  const uint32_t readerExitSaveHeap = esp_get_free_heap_size();
+  if (!APP_STATE.saveToFile()) {
+    LOG_ERR("ERS", "Failed to save reader exit state: book=%s loadCount=%u heap=%lu", APP_STATE.openEpubPath.c_str(),
+            APP_STATE.readerActivityLoadCount, static_cast<unsigned long>(readerExitSaveHeap));
+  } else {
+    LOG_INF("ERS", "Saved reader exit state: book=%s loadCount=%u heap=%lu", APP_STATE.openEpubPath.c_str(),
+            APP_STATE.readerActivityLoadCount, static_cast<unsigned long>(readerExitSaveHeap));
+  }
   // Release any deferred AA page before tearing down the section/epub.
   pendingGrayscale_ = {};
   // Abort any in-flight Background-B build (deletes its partial cache file) before the
@@ -3334,10 +3349,11 @@ int EpubReaderActivity::resolveReaderFont(std::string* familyOut) const {
   // open), then the global one, each only while it is loaded at this size (resolveSdCardFontId() is 0
   // for a family taken off the card); otherwise the built-in family. With no size override and no
   // book family this is SETTINGS.getReaderFontId().
+  // A CJK book whose font has none of its script is drawn in a Noto CJK family (selectLanguageFamily at book open).
   const char* publisherFamily =
       (bookSdFontFamilyOverride.empty() && epub) ? sdFontSystem.bookFamilyNameFor(epub->getCachePath()) : "";
-  for (const char* sdFamily :
-       {bookSdFontFamilyOverride.c_str(), publisherFamily, static_cast<const char*>(SETTINGS.sdFontFamilyName)}) {
+  for (const char* sdFamily : {bookSdFontFamilyOverride.c_str(), publisherFamily, sdFontSystem.languageFamily(),
+                               static_cast<const char*>(SETTINGS.sdFontFamilyName)}) {
     if (sdFamily[0] == '\0') continue;
     const int id = resolveSdCardFontId(sdFamily, pointSize);
     if (id != 0) {
@@ -3418,13 +3434,19 @@ static void buildBookFontFamilies(BlockFontFamilies& families, const std::string
   const auto rung = CrossPointSettings::builtinRungForPoints(pointSize);
   int familyBody[CrossPointSettings::BUILTIN_FONT_COUNT];
   uint8_t bodyPt = pointSize;
+  bool bodyIsBuiltin = false;
   for (uint8_t family = 0; family < CrossPointSettings::BUILTIN_FONT_COUNT; ++family) {
     familyBody[family] = CrossPointSettings::getBuiltinReaderFontId(family, rung);
-    if (familyBody[family] == bodyFontId) bodyPt = CrossPointSettings::fontSizePoints(rung);
+    if (familyBody[family] == bodyFontId) {
+      bodyPt = CrossPointSettings::fontSizePoints(rung);
+      bodyIsBuiltin = true;
+    }
   }
-  for (uint8_t family = 0; family < CrossPointSettings::BUILTIN_FONT_COUNT; ++family) {
-    if ((book->body & CssFontFamily::kGenericMask) == family + 1u || familyBody[family] == bodyFontId) continue;
-    families.add(family + 1u, familyBody[family], builtinFontSizeLadder(family, bodyPt));
+  if (bodyIsBuiltin) {
+    for (uint8_t family = 0; family < CrossPointSettings::BUILTIN_FONT_COUNT; ++family) {
+      if ((book->body & CssFontFamily::kGenericMask) == family + 1u || familyBody[family] == bodyFontId) continue;
+      families.add(family + 1u, familyBody[family], builtinFontSizeLadder(family, bodyPt));
+    }
   }
   for (uint8_t n = 0; n < BookFonts::kMaxAccents; ++n) {
     const char* accent = sdFontSystem.accentFamilyNameFor(cachePath, n);
@@ -7339,8 +7361,10 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   if (hasLocalSdOverride) {
     effectiveFontId = resolveSdCardFontId(currentBook.sdFontFamilyOverride.c_str(), effectiveFontSize);
   } else if (currentBook.fontFamilyOverride < 0) {
-    // Publisher Fonts, as getEffectiveReaderFontId(): the book's embedded body family when it has one.
+    // Publisher Fonts, as getEffectiveReaderFontId(): the book's embedded body family when it has one, then the Noto
+    // CJK family a CJK book takes in place of a font without its script, each only while it is loaded.
     effectiveFontId = resolveSdCardFontId(sdFontSystem.bookFamilyNameFor(epub->getCachePath()), effectiveFontSize);
+    if (effectiveFontId == 0) effectiveFontId = resolveSdCardFontId(sdFontSystem.languageFamily(), effectiveFontSize);
   }
   if (effectiveFontId == 0 && currentBook.fontFamilyOverride >= 0) {
     effectiveFontId = CrossPointSettings::getBuiltinReaderFontIdForPoints(effectiveFontFamily, effectiveFontSize);

@@ -839,13 +839,22 @@ void ensureSdFontLoadedForPath(const char* path, const bool waitForBookFonts) {
     BookFonts::setAccentLimit(Epub::cachePathFor(path, "/.crosspoint"), 0, BookFonts::kMaxAccents);
   }
 
+  // The book's language picks the font below (SdCardFontSystem): a first open waits for it.
+  if (waitForBookFonts && sdFontSystem.waitsForReaderLanguage()) return;
   // No family override: the global SD font (if any), at the effective size.
   const char* family = SETTINGS.sdFontFamilyName;
+  const bool ownFont = !book.sdFontFamilyOverride.empty() || book.fontFamilyOverride >= 0;
   if (!book.sdFontFamilyOverride.empty()) {
     family = book.sdFontFamilyOverride.c_str();  // per-book SD font override
   } else if (book.fontFamilyOverride >= 0) {
     family = "";  // per-book built-in font override: no SD font needed; unload if one was active
   }
+  // A CJK book whose font has none of its script takes a Noto CJK family of its region; a Noto CJK family loads as
+  // its sibling for the book's language. Both are the face the reader's resolvers hand out for it.
+  sdFontSystem.selectLanguageFamily(ownFont ? nullptr : family);
+  if (sdFontSystem.languageFamily()[0] != '\0') family = sdFontSystem.languageFamily();
+  const std::string readerFamily = sdFontSystem.effectiveReaderFamily(family);
+  family = readerFamily.c_str();
   // The families BookFonts copied out of the book: its body family in place of the reader's font, and its accent
   // families beside whichever draws the body. They load together, the body's first and the most used accent next.
   sdFontSystem.selectBookFamilies(cachePath, SETTINGS.publisherFonts, family);
@@ -1327,6 +1336,9 @@ void setup() {
   // APP_STATE is needed before display init so Quick Resume can skip the on-wake resync
   // and so the seamless-wake path can paint the LoadingIcon over the restored framebuffer.
   APP_STATE.loadFromFile();
+  LOG_INF("MAIN", "Loaded state: book='%s' lastSleepFromReader=%d readerLoadCount=%u showBootScreen=%d",
+          APP_STATE.openEpubPath.c_str(), APP_STATE.lastSleepFromReader ? 1 : 0, APP_STATE.readerActivityLoadCount,
+          APP_STATE.showBootScreen ? 1 : 0);
 
   HalSystem::checkPanic();
   HalSystem::clearPanic();  // TODO: move this to an activity when we have one to display the panic info

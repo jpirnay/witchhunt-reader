@@ -5,6 +5,7 @@ add_executable(TtfFontTest
   TtfFontTest.cpp
   TtfRegistryTest.cpp
   TtfOpenTypeTest.cpp
+  TtfMapsCodepointTest.cpp
   ShippedFamiliesTest.cpp
   ${REPO_ROOT}/lib/EpdFont/SdCardFontRegistry.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfFamily.cpp

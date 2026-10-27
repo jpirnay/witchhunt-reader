@@ -216,6 +216,9 @@ class BookMetadataCache {
   // True when that book.bin is of this firmware's BOOK_CACHE_VERSION, so load() reads it instead
   // of rebuilding it: an open and a one-byte read (cache_version::isCurrent).
   static bool cacheIsCurrent(const std::string& cachePath);
+  // The book's dc:language as book.bin holds it, without a load(): the header and three strings. False when there is
+  // no current book.bin (a first open builds it).
+  static bool readLanguage(const std::string& cachePath, std::string& language);
 
   // Reading phase (read mode)
   bool load();

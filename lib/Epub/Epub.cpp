@@ -1328,6 +1328,10 @@ const std::string& Epub::getAuthorSort() const {
   return bookMetadataCache->coreMetadata.authorSort;
 }
 
+bool Epub::readCachedLanguage(std::string& language) const {
+  return BookMetadataCache::readLanguage(cachePath, language);
+}
+
 const std::string& Epub::getLanguage() const {
   static std::string blank;
   if (!bookMetadataCache || !bookMetadataCache->isLoaded()) {

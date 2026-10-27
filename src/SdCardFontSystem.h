@@ -30,6 +30,32 @@ class SdCardFontSystem {
   /// Call before entering the reader or after settings change.
   void ensureLoaded(GfxRenderer& renderer);
 
+  /// Set the EPUB language used to select a matching regional Noto CJK sibling.
+  /// It never changes the persisted font setting. It is the language of the book whose fonts are loaded: set and
+  /// cleared where a book open loads them (ReaderActivity), and kept past the reader's exit, whose last draw
+  /// (restoreCurrentPageToBufferIfPreRendered) still resolves the book's family: cleared first, a Chinese book's
+  /// page was redrawn in a built-in face, a box per character (X3, 2026-10-27).
+  void setReaderLanguage(const std::string& language);
+  void clearReaderLanguage();
+  /// The open book's language is not known yet: a first open learns it from the load that builds book.bin. While a
+  /// Noto CJK family is installed, which the language may pick (effectiveReaderFamily, selectLanguageFamily), the
+  /// book's font waits for it (waitsForReaderLanguage) rather than install one face and then another.
+  void setReaderLanguagePending();
+  bool waitsForReaderLanguage() const;
+
+  /// A Chinese, Japanese or Korean book (by its language) whose reader font has none of its script is drawn in an
+  /// installed Noto CJK family of the book's region instead: NotoSerif<R> or NotoSans<R>, the sans first for a font
+  /// named Sans. Decided at book open for the font the book takes from the settings (`family`: the global SD family,
+  /// "" for a built-in one; nullptr when the book has a font of its own), from that font's file on the card;
+  /// languageFamily() is "" when it has the script, the book is no CJK book, or no such family is installed.
+  void selectLanguageFamily(const char* family);
+  const char* languageFamily() const { return languageFamily_.c_str(); }
+
+  /// The family the reader loads and resolves for `configuredFamily`: its regional Noto CJK sibling for the book's
+  /// language when that is installed, else the family itself. ensureSdFontLoadedForPath() and resolveSdCardFontId()
+  /// both go through it, so the face loaded is the face the layout asks for.
+  std::string effectiveReaderFamily(const char* configuredFamily) const;
+
   /// Ensure the correct SD font family is loaded for an explicit family + size.
   /// Used when the reader type determines which settings field to consult.
   /// onColdLoad (if set) fires only when the font has to be written to the flash
@@ -141,6 +167,24 @@ class SdCardFontSystem {
   // Reads a book family's directory as a family directory on the card, named "book:<name>"; else empties `family`.
   void scanBookFamily(SdCardFontFamilyInfo& family, const std::string& name, const std::string& dir);
 
+  enum class ReaderCjkRegion {
+    None,
+    Pending,  // a first open, before the load that reads the language
+    Japanese,
+    SimplifiedChinese,
+    TraditionalChinese,
+    Korean,
+    ChineseAmbiguous,
+  };
+
+  // The region of a regional Noto CJK family ("NotoSans" or "NotoSerif" + JP/SC/TC/KR) and its stem; None otherwise.
+  static ReaderCjkRegion familyRegion(const std::string& family, std::string& stem);
+  // Whether `family`'s regular file maps `codepoint`; true too when the file cannot be read, which keeps the font.
+  static bool familyMapsCodepoint(const SdCardFontFamilyInfo& family, uint32_t codepoint);
+
+  ReaderCjkRegion readerCjkRegion_ = ReaderCjkRegion::None;
+  std::string languageFamily_;      // selectLanguageFamily()
+  uint32_t languageFamilyKey_ = 0;  // what it was decided for: the reader's font and the region; 0: nothing
   SdCardFontRegistry registry_;
   SdCardFontManager manager_;
   SdCardFontFamilyInfo bookBody_;                             // the book's body family; empty name: none

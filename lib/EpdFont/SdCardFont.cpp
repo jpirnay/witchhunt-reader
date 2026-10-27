@@ -736,6 +736,38 @@ int8_t SdCardFont::findIdenticalIntervals(const uint8_t styleIdx, const uint8_t*
 
 // --- Load ---
 
+bool SdCardFont::fileMapsCodepoint(const char* path, const uint32_t codepoint, bool* readable) {
+  *readable = false;
+  FsFile file;
+  if (!Storage.openFileForRead("SDCF", path, file)) return false;
+  uint8_t header[HEADER_SIZE];
+  uint8_t toc[STYLE_TOC_ENTRY_SIZE];
+  bool maps = false;
+  if (file.read(header, HEADER_SIZE) == HEADER_SIZE && memcmp(header, CPFONT_MAGIC, 8) == 0 &&
+      readU16(header + 8) == CPFONT_VERSION && header[12] != 0 &&
+      file.read(toc, STYLE_TOC_ENTRY_SIZE) == STYLE_TOC_ENTRY_SIZE && file.seekSet(readU32(toc + 24))) {
+    // The first style's intervals, in pieces, in codepoint order: a family's styles are cut from one character set.
+    uint32_t left = readU32(toc + 4);
+    *readable = true;
+    EpdUnicodeInterval piece[8];
+    while (left > 0 && !maps) {
+      const uint32_t count = left < 8 ? left : 8;
+      const auto bytes = static_cast<int>(count * sizeof(EpdUnicodeInterval));
+      if (file.read(reinterpret_cast<uint8_t*>(piece), bytes) != bytes) {
+        *readable = false;
+        break;
+      }
+      left -= count;
+      for (uint32_t i = 0; i < count && !maps; ++i) {
+        if (piece[i].first > codepoint) left = 0;  // past it
+        maps = piece[i].first <= codepoint && codepoint <= piece[i].last;
+      }
+    }
+  }
+  file.close();
+  return maps;
+}
+
 bool SdCardFont::load(const char* path) {
   freeAll();
   if (strlen(path) >= sizeof(filePath_)) {
