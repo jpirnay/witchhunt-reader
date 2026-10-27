@@ -178,6 +178,32 @@ TEST(SdFontIntervals, MmapSharesIdenticalTablesOnly) {
   EXPECT_EQ(font.getEpdFont(3)->data->intervals[0].first, static_cast<uint32_t>('a'));
 }
 
+// The coverage probe the reader runs before a font is loaded (SdCardFont::fileMapsCodepoint): the first style's
+// intervals, read in pieces of 8, so a table of 37 spans five reads.
+TEST(SdFontIntervals, TheFileProbeFindsACodepointInAnyPieceOfTheTable) {
+  const std::string path = writeTemp(buildFont(kMixed));
+  bool readable = false;
+  EXPECT_TRUE(SdCardFont::fileMapsCodepoint(path.c_str(), 'A', &readable));  // the first interval
+  EXPECT_TRUE(readable);
+  EXPECT_TRUE(SdCardFont::fileMapsCodepoint(path.c_str(), 'A' + 3 * 20 + 1, &readable));  // the third piece
+  EXPECT_TRUE(SdCardFont::fileMapsCodepoint(path.c_str(), 0xFFFD, &readable));            // the last, in the third
+  EXPECT_FALSE(SdCardFont::fileMapsCodepoint(path.c_str(), 'A' + 2, &readable));          // between two intervals
+  EXPECT_FALSE(SdCardFont::fileMapsCodepoint(path.c_str(), 0x3042, &readable));
+  EXPECT_TRUE(readable);
+}
+
+TEST(SdFontIntervals, TheFileProbeTellsAFileItCannotRead) {
+  bool readable = true;
+  EXPECT_FALSE(SdCardFont::fileMapsCodepoint("/nonexistent/none.cpfont", 'A', &readable));
+  EXPECT_FALSE(readable);
+  std::vector<uint8_t> notAFont = buildFont(kMixed);
+  notAFont[0] = 'X';
+  const std::string path = writeTemp(notAFont);
+  readable = true;
+  EXPECT_FALSE(SdCardFont::fileMapsCodepoint(path.c_str(), 'A', &readable));
+  EXPECT_FALSE(readable);
+}
+
 TEST(SdFontIntervals, AllDifferentSharesNothing) {
   constexpr uint32_t kDistinct[SdCardFont::MAX_STYLES] = {'A', 'a', 0x100, 0x200};
   const std::string path = writeTemp(buildFont(kDistinct));

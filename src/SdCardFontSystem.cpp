@@ -5,6 +5,9 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
+#include <SdCardFont.h>
+#include <ttf/TtfFace.h>
 #include <ttf/TtfFamily.h>
 #include <ttf/TtfFont.h>
 
@@ -363,13 +366,108 @@ void SdCardFontSystem::setReaderLanguage(const std::string& language) {
   readerCjkRegion_ = region;
 }
 
-void SdCardFontSystem::clearReaderLanguage() { readerCjkRegion_ = ReaderCjkRegion::None; }
+void SdCardFontSystem::clearReaderLanguage() {
+  readerCjkRegion_ = ReaderCjkRegion::None;
+  languageFamily_.clear();
+  languageFamilyKey_ = 0;
+}
 
 void SdCardFontSystem::setReaderLanguagePending() { readerCjkRegion_ = ReaderCjkRegion::Pending; }
 
-bool SdCardFontSystem::waitsForReaderLanguage(const char* family) const {
+bool SdCardFontSystem::waitsForReaderLanguage() const {
+  if (readerCjkRegion_ != ReaderCjkRegion::Pending) return false;
+  // The language may give the book a regional sibling, or a Noto CJK family in place of a font without its script,
+  // whenever one is installed.
   std::string stem;
-  return readerCjkRegion_ == ReaderCjkRegion::Pending && family && familyRegion(family, stem) != ReaderCjkRegion::None;
+  for (const auto& installed : registry_.getFamilies()) {
+    if (familyRegion(installed.name, stem) != ReaderCjkRegion::None) return true;
+  }
+  return false;
+}
+
+bool SdCardFontSystem::familyMapsCodepoint(const SdCardFontFamilyInfo& family, const uint32_t codepoint) {
+  if (family.files.empty()) return true;
+  const SdCardFontFileInfo* regular = &family.files.front();
+  for (const auto& file : family.files) {
+    if (file.style == 0) regular = &file;
+  }
+  if (!family.ttf()) {
+    bool readable = false;
+    const bool maps = SdCardFont::fileMapsCodepoint(regular->path.c_str(), codepoint, &readable);
+    return maps || !readable;
+  }
+  HalFile handle;
+  if (!Storage.openFileForRead("SDFS", regular->path.c_str(), handle)) return true;
+  // The table directory and the cmap, read through a page cache (4 KB, for this call only).
+  auto pages = makeUniqueNoThrow<ttf::SdPageCache>();
+  if (!pages) {
+    handle.close();
+    return true;
+  }
+  ttf::SdRange range;
+  range.file = ttf::fileSource(handle, static_cast<uint32_t>(handle.fileSize()));
+  range.length = range.file.size;
+  range.cache = pages.get();
+  FontBytes bytes(nullptr, 0, &range);
+  const bool maps = ttf::mapsCodepoint(bytes, codepoint);
+  handle.close();
+  return maps || bytes.ioError();
+}
+
+void SdCardFontSystem::selectLanguageFamily(const char* family) {
+  const std::string name = family ? family : "";
+  const auto region = static_cast<uint8_t>(readerCjkRegion_);
+  const uint8_t own = family ? 0 : 1;
+  const uint32_t key =
+      glyphstore::fnv1a(name.data(), name.size(), glyphstore::fnv1a(&region, 1, glyphstore::fnv1a(&own, 1)));
+  if (key == languageFamilyKey_) return;
+  languageFamilyKey_ = key;
+  languageFamily_.clear();
+
+  // A character every font of the region's script has.
+  uint32_t probe = 0;
+  const char* suffix = nullptr;
+  switch (readerCjkRegion_) {
+    case ReaderCjkRegion::Japanese:
+      probe = 0x3042;  // あ
+      suffix = "JP";
+      break;
+    case ReaderCjkRegion::SimplifiedChinese:
+    case ReaderCjkRegion::ChineseAmbiguous:  // as effectiveReaderFamily(): Simplified for a bare "zh"
+      probe = 0x7684;                        // 的
+      suffix = "SC";
+      break;
+    case ReaderCjkRegion::TraditionalChinese:
+      probe = 0x7684;
+      suffix = "TC";
+      break;
+    case ReaderCjkRegion::Korean:
+      probe = 0xAC00;  // 가
+      suffix = "KR";
+      break;
+    case ReaderCjkRegion::None:
+    case ReaderCjkRegion::Pending:
+      return;
+  }
+  if (!family) return;  // the book's own font
+  std::string stem;
+  if (familyRegion(name, stem) != ReaderCjkRegion::None) return;  // a Noto CJK family: effectiveReaderFamily()'s
+  // A built-in reader face has no CJK: fontconvert.py's default intervals leave it out.
+  if (const SdCardFontFamilyInfo* info = name.empty() ? nullptr : findFamily(name.c_str())) {
+    if (familyMapsCodepoint(*info, probe)) return;
+  }
+
+  const bool sansFirst = name.find("Sans") != std::string::npos;
+  for (const char* candidateStem : {sansFirst ? "NotoSans" : "NotoSerif", sansFirst ? "NotoSerif" : "NotoSans"}) {
+    const std::string candidate = std::string(candidateStem) + suffix;
+    if (findFamily(candidate.c_str())) {
+      LOG_INF("SDFS", "Book language draws %s in %s: '%s' has no U+%04lX",
+              name.empty() ? "a built-in font" : name.c_str(), candidate.c_str(), name.c_str(),
+              static_cast<unsigned long>(probe));
+      languageFamily_ = candidate;
+      return;
+    }
+  }
 }
 
 SdCardFontSystem::ReaderCjkRegion SdCardFontSystem::familyRegion(const std::string& family, std::string& stem) {
