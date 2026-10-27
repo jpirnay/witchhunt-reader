@@ -40,8 +40,8 @@ class SdCardFontSystem {
   bool waitsForReaderLanguage(const char* family) const;
 
   /// The family the reader loads and resolves for `configuredFamily`: its regional Noto CJK sibling for the book's
-  /// language when that is installed, else the family itself. ensureSdFontLoadedForPath() and resolveFontId() both
-  /// go through it, so the face loaded is the face the layout asks for.
+  /// language when that is installed, else the family itself. ensureSdFontLoadedForPath() and resolveSdCardFontId()
+  /// both go through it, so the face loaded is the face the layout asks for.
   std::string effectiveReaderFamily(const char* configuredFamily) const;
 
   /// Ensure the correct SD font family is loaded for an explicit family + size.

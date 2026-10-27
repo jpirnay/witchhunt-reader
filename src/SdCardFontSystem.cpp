@@ -58,10 +58,12 @@ bool ttfFamilyFits(const uint32_t* fileBytes, const uint32_t* sdBytes, const uin
 
 }  // namespace
 
-// Free-function resolver used by CrossPointSettings::getReaderFontId().
+// Free-function resolver used by CrossPointSettings::getReaderFontId() and the reader.
 // Resolved by the linker — no callback indirection stored in settings.
+// It resolves the family the book's language asks for, the one ensureSdFontLoadedForPath() loaded; a font preview
+// asks SdCardFontSystem::resolveFontId() for the family it shows.
 int resolveSdCardFontId(const char* familyName, uint8_t pointSize) {
-  return sdFontSystem.resolveFontId(familyName, pointSize);
+  return sdFontSystem.resolveFontId(sdFontSystem.effectiveReaderFamily(familyName).c_str(), pointSize);
 }
 
 // --- Font-family dynamic SettingInfo trampolines ---
@@ -567,12 +569,11 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* const* wa
 }
 
 int SdCardFontSystem::resolveFontId(const char* familyName, const uint8_t pointSize) const {
-  const std::string effectiveFamilyName = effectiveReaderFamily(familyName);
   // The manager loads exactly one face for the active SD family and serves ONE target size from
   // it: the face's own, or a scaled alias made by ensureLoaded(). That target is the stored size
   // snapped to the family's list, exactly as ensureLoaded() snapped it. The settings row shows the
   // same snapped size, so a nearby size is never handed out without the reader seeing which.
   // Anything not prepared returns 0, and the caller falls back to a built-in family.
-  if (effectiveFamilyName.empty()) return 0;
-  return manager_.getFontId(effectiveFamilyName, sizeListFor(effectiveFamilyName.c_str()).snap(pointSize));
+  if (!familyName || familyName[0] == '\0') return 0;
+  return manager_.getFontId(familyName, sizeListFor(familyName).snap(pointSize));
 }

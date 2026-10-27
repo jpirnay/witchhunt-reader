@@ -846,7 +846,7 @@ void ensureSdFontLoadedForPath(const char* path, const bool waitForBookFonts) {
   } else if (book.fontFamilyOverride >= 0) {
     family = "";  // per-book built-in font override: no SD font needed; unload if one was active
   }
-  // A Noto CJK family loads as its sibling for the book's language, the face resolveFontId() hands out for it.
+  // A Noto CJK family loads as its sibling for the book's language, the face resolveSdCardFontId() hands out for it.
   if (waitForBookFonts && sdFontSystem.waitsForReaderLanguage(family)) return;
   const std::string readerFamily = sdFontSystem.effectiveReaderFamily(family);
   family = readerFamily.c_str();
