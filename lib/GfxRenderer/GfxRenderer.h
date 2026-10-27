@@ -81,6 +81,7 @@ class GfxRenderer {
   // Mutable because a lookup from a const draw or measure call may register a font the resolver
   // supplies on demand (findFontFamily). Same compromise as sdCardFonts_ below.
   mutable std::map<int, EpdFontFamily> fontMap;
+  static inline void (*beforePushHook_)() = nullptr;  // setBeforePushHook()
   FontResolverHook<EpdFontFamily> fontResolver_;
   // The one place a font ID becomes a family: fontMap, then the resolver for an unknown ID.
   const EpdFontFamily* findFontFamily(const int fontId) const {
@@ -427,6 +428,10 @@ class GfxRenderer {
   // as the normalized coordinates the touch HAL reports.
   void logicalToTap(int x, int y, float& outNx, float& outNy) const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
+  // Called as a frame is about to go to the panel (displayBuffer, displayWindow): the drawing is done, so a region
+  // lent from the secondary buffer for it goes back now (SdCardFontSystem's glyph lend), and the push runs with both
+  // buffers. One hook; nullptr removes it.
+  static void setBeforePushHook(void (*hook)()) { beforePushHook_ = hook; }
   void setNextDisplayRefreshMode(HalDisplay::RefreshMode refreshMode) const;
   // True if a setNextDisplayRefreshMode() override is armed but not yet consumed. Peek only —
   // does NOT consume it (unlike consumeRefreshOverride). Lets a caller that is about to issue an

@@ -2820,6 +2820,7 @@ void GfxRenderer::invertScreen() const {
 }
 
 void GfxRenderer::displayWindow(int logX, int logY, int logW, int logH, bool turnOffScreen) const {
+  if (beforePushHook_) beforePushHook_();
   // Translate logical rectangle to physical panel coordinates using the same
   // rotation rules as rotateCoordinates(). Physical (x=source, y=gate row).
   uint16_t physX, physY, physW, physH;
@@ -2918,6 +2919,7 @@ void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const
     LOG_ERR("GFX", "displayBuffer with released framebuffer ignored");
     return;
   }
+  if (beforePushHook_) beforePushHook_();
   const auto effectiveMode = consumeRefreshOverride(refreshMode);
   noteRefresh(effectiveMode);
 

@@ -52,11 +52,12 @@ uint32_t ttfNowMs() { return millis(); }
 bool ttfCountsDraw() { return ttfRenderer && ttfRenderer->getRenderMode() == GfxRenderer::BW; }
 
 // A render pass's glyph misses outside the reader draw in the secondary framebuffer, lent on the first one that needs
-// a scratch block (glyph_miss::LendScope, ActivityManager) and given back as the pass releases the RenderLock: after
-// the frame is pushed, before the waveform. The lend is the screens' black-and-white one (HomeActivity, the font
-// selector): RED is seeded with the displayed frame while the secondary still holds it, and the push diffs against it
-// (single-buffer fast diff). The return seeds the secondary from the pushed frame and arms the next FAST to diff
-// against RED, which that push left holding it: fast refresh survives. Nothing of the heap is taken.
+// a scratch block (glyph_miss::LendScope, ActivityManager) and given back as the frame is about to be pushed
+// (GfxRenderer's before-push hook), or as the pass releases the RenderLock when it pushes nothing. The lend is the
+// screens' black-and-white one (HomeActivity, the font selector): RED is seeded with the displayed frame while the
+// secondary still holds it. The return seeds the secondary from the finished frame and arms the next FAST to diff
+// against RED: the push runs with both buffers (held through it, the X3's HALF was a 2.5 s full refresh), and fast
+// refresh survives. Nothing of the heap is taken.
 std::optional<BuildArena> glyphLend;
 
 void returnGlyphLend() {
@@ -605,6 +606,7 @@ void SdCardFontSystem::begin(GfxRenderer& renderer) {
   ttfRenderer = &renderer;
   ttfSystem = this;
   manager_.setUiFontHook(&CjkUiFonts::setReaderFont);
+  GfxRenderer::setBeforePushHook(&returnGlyphLend);
   TtfFont::setHooks({&RenderLock::heldByCurrentTask, &ttfYield, &ttfReclaim, &ttfNowMs, &ttfCountsDraw});
   // A miss's memory on the heap lasts as long as the pass that drew it: whichever task rendered gives it back with
   // RenderLock, and a page drawn from the glyph store needs none of it (TtfFontSet::releaseMissMemory).
