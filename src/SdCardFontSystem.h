@@ -32,8 +32,9 @@ class SdCardFontSystem {
 
   /// Set the EPUB language used to select a matching regional Noto CJK sibling.
   /// It never changes the persisted font setting. It is the language of the book whose fonts are loaded: set and
-  /// cleared where a book open loads them (ReaderActivity), and kept past the reader's exit, for the sleep screen's
-  /// page of that book.
+  /// cleared where a book open loads them (ReaderActivity), and kept past the reader's exit, whose last draw
+  /// (restoreCurrentPageToBufferIfPreRendered) still resolves the book's family: cleared first, a Chinese book's
+  /// page was redrawn in a built-in face, a box per character (X3, 2026-10-27).
   void setReaderLanguage(const std::string& language);
   void clearReaderLanguage();
   /// The open book's language is not known yet: a first open learns it from the load that builds book.bin. While a
