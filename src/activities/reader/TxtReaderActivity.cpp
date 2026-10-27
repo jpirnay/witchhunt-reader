@@ -9,6 +9,7 @@
 
 #include <algorithm>
 
+#include "CjkUiFonts.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "GlobalBookmarkIndex.h"
@@ -323,6 +324,7 @@ void TxtReaderActivity::renderStatusBar() const {
     title = txt->getTitle();
   }
   const bool isStarred = bookmarkStore.has(0, static_cast<uint16_t>(currentPage));
+  const CjkUiFonts::BookTextScope bookText;  // the book's title
   GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title, 0, isStarred);
 
   noteStatusBarRendered();

@@ -88,8 +88,8 @@ class SdCardFontManager {
   // Unload everything, unregister from renderer.
   void unloadAll(GfxRenderer& renderer);
 
-  // Told the TrueType family the UI may borrow glyphs from, the loaded set's first (the body's), when a set loads or
-  // its body size is set, and nullptr before the set's native sizes go (CjkUiFonts::setReaderFont).
+  // Told the TrueType family the UI may borrow glyphs from, the loaded set's first with CJK or else its first, when a
+  // set loads or its body size is set, and nullptr before the set's native sizes go (CjkUiFonts::setReaderFont).
   void setUiFontHook(void (*hook)(TtfFont* font)) { uiFontHook_ = hook; }
 
   // The loaded TTF families' body size: for each, a new font ID drawn natively at pointSize, never scaled.

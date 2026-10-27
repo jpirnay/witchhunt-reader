@@ -121,6 +121,16 @@ const EpdFontData* servedFace(const LanguageFaces& row, const size_t size) {
   return row.language == inSlotLanguage ? &inSlot[size] : row.faces[size].data;
 }
 
+// BookTextScope's depth: book text being drawn.
+uint8_t bookTextDepth = 0;
+
+// A CJK UI language's own face goes first, so its strings draw alike; any other UI language, and book text in any,
+// looks in the book's font before the translations' faces.
+void orderReaderFace() {
+  const bool afterFirst = bookTextDepth == 0 && facesOf(uiLanguage) != nullptr;
+  for (FallbackFaceProvider& provider : providers) provider.setReaderFaceAfterFirst(afterFirst);
+}
+
 void orderFaces() {
   for (size_t size = 0; size < SIZE_COUNT; ++size) {
     const EpdFontData* order[LANGUAGE_COUNT];
@@ -135,10 +145,8 @@ void orderFaces() {
       LOG_ERR("CJK", "CJK UI faces at %u pt refused", SIZES[size]);
     }
     providers[size].setStandIn(STAND_IN, &isCjkCharacter);
-    // A CJK UI language's own face goes first, so its strings draw alike; any other UI language looks in the book's
-    // font before the translations' faces.
-    providers[size].setReaderFaceAfterFirst(facesOf(uiLanguage) != nullptr);
   }
+  orderReaderFace();
 }
 
 // --- The reader's TrueType font behind the UI faces (setReaderFont) ---
@@ -307,6 +315,14 @@ void CjkUiFonts::attach(EpdFont& font, const uint8_t points) {
 }
 
 bool CjkUiFonts::hasReaderFont() { return readerFont != nullptr; }
+
+CjkUiFonts::BookTextScope::BookTextScope(const bool active) : active_(active) {
+  if (active_ && bookTextDepth++ == 0) orderReaderFace();
+}
+
+CjkUiFonts::BookTextScope::~BookTextScope() {
+  if (active_ && --bookTextDepth == 0) orderReaderFace();
+}
 
 void CjkUiFonts::setReaderFont(TtfFont* font) {
   readerFont = font;

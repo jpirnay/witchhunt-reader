@@ -12,6 +12,7 @@
 #include <ctime>
 #include <utility>
 
+#include "CjkUiFonts.h"
 #include "MappedInputManager.h"
 #include "ReadingSessionTracker.h"
 #include "ReadingStats.h"
@@ -127,9 +128,12 @@ void ReadingStatsBookDetailActivity::render(RenderLock&&) {
       headerTitle += "…";
     }
   }
-  GUI.drawHeader(renderer,
-                 Rect{contentRect.x, contentRect.y + metrics.topPadding, contentRect.width, metrics.headerHeight},
-                 headerTitle.c_str(), book && !book->author.empty() ? book->author.c_str() : nullptr);
+  {
+    const CjkUiFonts::BookTextScope bookText;  // the book's title and author
+    GUI.drawHeader(renderer,
+                   Rect{contentRect.x, contentRect.y + metrics.topPadding, contentRect.width, metrics.headerHeight},
+                   headerTitle.c_str(), book && !book->author.empty() ? book->author.c_str() : nullptr);
+  }
 
   // Above the line Base keeps for the author subtitle. The cards are not cut to it; the optional
   // last one is left out when it would run past it (see the sparkline below).

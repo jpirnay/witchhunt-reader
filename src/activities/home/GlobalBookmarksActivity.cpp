@@ -11,6 +11,7 @@
 
 #include "../ActivityManager.h"
 #include "BookmarkStore.h"
+#include "CjkUiFonts.h"
 #include "CrossPointState.h"
 #include "GlobalBookmarkIndex.h"
 #include "MappedInputManager.h"
@@ -272,6 +273,7 @@ void GlobalBookmarksActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, contentRect.x + metrics.contentSidePadding, contentTop + 20,
                       tr(STR_NO_GLOBAL_BOOKMARKS));
   } else {
+    const CjkUiFonts::BookTextScope bookText;  // the books' titles and their marks
     GUI.drawList(renderer, Rect{contentRect.x, contentTop, contentRect.width, contentHeight},
                  static_cast<int>(rows.size()), selectorIndex, [this](int index) { return getRowTitle(index); });
   }

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 
+#include "CjkUiFonts.h"
 #include "MappedInputManager.h"
 #include "SerialTestApi.h"
 #include "components/UITheme.h"
@@ -110,6 +111,7 @@ void EpubReaderChapterSelectionActivity::render(RenderLock&&) {
 
     // Indent per TOC level while keeping content within the gutter-safe region.
     const int indentSize = contentRect.x + 20 + (item.level - 1) * 15;
+    const CjkUiFonts::BookTextScope bookText;  // the chapter's name
     const std::string chapterName =
         renderer.truncatedText(UI_10_FONT_ID, item.title.c_str(), contentRect.width - 40 - indentSize);
 

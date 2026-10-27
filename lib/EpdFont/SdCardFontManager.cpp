@@ -281,7 +281,16 @@ bool SdCardFontManager::loadTtf(const SdCardFontFamilyInfo* const* families, uin
 }
 
 void SdCardFontManager::lendUiFont() {
-  if (uiFontHook_) uiFontHook_(ttfSet_ && ttfCount_ > 0 ? ttfSet_->font(0) : nullptr);
+  if (!uiFontHook_) return;
+  // The first family with CJK, the script the UI faces have least of (a Publisher Fonts book's may be an accent's);
+  // else the first, for any other script they lack.
+  TtfFont* lent = nullptr;
+  for (uint8_t f = 0; ttfSet_ && f < ttfCount_ && !lent; ++f) {
+    TtfFont* font = ttfSet_->font(f);
+    if (font->mapsCodepoint(0x4E00) || font->mapsCodepoint(0x3042) || font->mapsCodepoint(0xAC00)) lent = font;
+  }
+  if (!lent && ttfSet_ && ttfCount_ > 0) lent = ttfSet_->font(0);
+  uiFontHook_(lent);
 }
 
 bool SdCardFontManager::ttfFamiliesLoaded(const SdCardFontFamilyInfo* const* families, const uint8_t count) const {

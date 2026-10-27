@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include "CjkUiFonts.h"
 #include "MappedInputManager.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
@@ -141,6 +142,7 @@ void StarredPagesActivity::render(RenderLock&&) {
   if (totalItems == 0) {
     renderer.drawText(UI_10_FONT_ID, body.x + metrics.contentSidePadding, body.y + 20, tr(STR_NO_STARRED_PAGES));
   } else {
+    const CjkUiFonts::BookTextScope bookText;  // the pages' names, from the book
     GUI.drawList(renderer, Rect{body.x, body.y, body.width, body.height - metrics.verticalSpacing}, totalItems,
                  selectorIndex, [this](int index) { return getItemLabel(index); });
   }

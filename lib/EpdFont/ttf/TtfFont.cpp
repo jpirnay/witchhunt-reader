@@ -900,6 +900,13 @@ bool TtfFont::storeKey(Size& size, const uint8_t style, const uint32_t codepoint
   return true;
 }
 
+bool TtfFont::mapsCodepoint(const uint32_t codepoint) {
+  if (!draws(0)) return false;
+  checkLock();
+  FontBytes bytes;
+  return fontBytes(0, &bytes) && ttf::glyphIndex(bytes, styleAt(0)->face, codepoint) != 0;
+}
+
 bool TtfFont::fontBytes(const uint8_t style, FontBytes* bytes) {
   // Flash mode maps one style block at a time, every family's, so the pointer is fetched again for every render.
   Style& s = *styleAt(style);

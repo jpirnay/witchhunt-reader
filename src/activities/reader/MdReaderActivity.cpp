@@ -11,6 +11,7 @@
 #include <functional>
 #include <numeric>
 
+#include "CjkUiFonts.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "MdReaderTocSelectionActivity.h"
@@ -1023,6 +1024,7 @@ void MdReaderActivity::renderStatusBar() const {
   if (SETTINGS.statusBarTitle != CrossPointSettings::STATUS_BAR_TITLE::HIDE_TITLE) {
     title = txt->getTitle();
   }
+  const CjkUiFonts::BookTextScope bookText;  // the book's title
   GUI.drawStatusBar(renderer, progress, currentPage + 1, totalPages, title);
 
   noteStatusBarRendered();

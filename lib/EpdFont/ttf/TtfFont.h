@@ -88,6 +88,8 @@ class TtfFont {
   /// is outside kMinNativePx..kMaxNativePx, a line height does not fit EpdFontData, or no size can serve. They live
   /// until dropNativeSizes() or the font's end.
   bool nativeFonts(uint8_t px, const EpdFont* (&fonts)[4], uint32_t* servedPpem = nullptr);
+  /// Whether the regular style's cmap maps `codepoint`: a lookup in its tables, nothing rendered.
+  bool mapsCodepoint(uint32_t codepoint);
   /// Frees every native size, and the set's ring with them. Only once nothing refers to their fonts any more
   /// (their font IDs removed) and no glyph of the set is in use.
   void dropNativeSizes();

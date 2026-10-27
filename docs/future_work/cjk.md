@@ -26,7 +26,7 @@ behind CFF.
 | 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#548) |
 | 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | shipped (#550) |
 | 5b | Synthetic italic (spec section 7.4): families without an italic file draw italic slanted, as KOReader does | shipped (#551) |
-| 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | built (feat/ui-reader-font-fallback) without the book-text scope and the list prefetch; device check pending ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
+| 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | built (PR #562) without the list prefetch; device check pending ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-a3b-push-in-and-gap.md)) |
 | 8 | Ruby and emphasis dots ([B2](#emphasis-dots-pr-b2)) | B1 shipped (#554); B2 emphasis dots next ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
 | 9 | The dictionary on CJK pages ([below](#dictionary-on-cjk-pages)) | open |
@@ -257,23 +257,24 @@ language picker and CJK book titles, decode one at a time, ~1.9 ms each on the X
 **Text that is not a UI string** (book titles and authors, TOC entries, the status-bar chapter title, file names, the
 finished-book screen) draws what the UI faces lack from the reader's TrueType font, at the CJK UI faces' em
 (`CjkUiFonts::setReaderFont`, `FallbackFaceProvider::setReaderFace`):
-- in the reader, from the loaded set's first family, lent by `SdCardFontManager` on every load and body size, and
-  taken back before its native sizes go;
+- in the reader, from the loaded set's first family with CJK (else its first), lent by `SdCardFontManager` on every
+  load and body size, and taken back before its native sizes go;
 - outside it, on the screens that draw book text (`Activity::drawsBookText`), from the last book's set, opened
   read-only when the glyph store holds it and its body family has CJK (`syncUiBookFonts`), closed on every other
   screen;
-- searched before the CJK UI faces, or after the active UI language's own; its 2-bit glyphs drawn as their ink;
-- its UI-size faces made on the first glyph a screen needs, under the RenderLock only.
+- searched before the CJK UI faces, or after the active UI language's own, except inside a `BookTextScope` (book
+  text: the Home cards, list rows of books, the status-bar and TOC titles, book information), where it goes first;
+- its 2-bit glyphs drawn as their ink; its UI-size faces made on the first glyph a screen needs, under the RenderLock
+  only.
 
 Without a CJK TrueType family nothing opens, and the boxes (□) stay. Before the CJK faces these strings drew nothing
 (X3, 2026-10-18, 紅樓夢); without the boxes the Home card showed a lone 雪 of the author 曹雪芹 as if it were the title.
 
-**Still open** (the spec's decisions not built yet):
-- the book-text scope (decision 3): for a Chinese, Japanese or Korean UI language, book text should take the reader's
-  font before the UI language's own face, so a title draws in one font; about ten call sites;
-- the list prefetch (spec 7.6): a screen's first-sight glyphs render one by one on lookup;
-- the in-reader source is the set's first family, not the first one that covers CJK (spec 7.2): a Publisher Fonts
-  book whose body family is Latin and whose CJK is in an accent family keeps the boxes.
+**Still open:**
+- the list prefetch (spec 7.6): a screen's first-sight glyphs render one by one on lookup, since UI text draws no
+  prefetch; batching them needs the renderer's UI draw paths to call one;
+- the carousel theme's fast Home path (`tryFastHomeRender`) draws its menu labels with the cards, so it runs outside
+  the book-text scope: for a CJK UI language a title there may mix the UI face's and the book font's forms.
 
 **Smaller items:**
 - a CJK keyboard: none of the three has one, so text entry stays Latin;

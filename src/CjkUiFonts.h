@@ -54,4 +54,18 @@ void setLanguage(Language language);
 void setReaderFont(TtfFont* font);
 bool hasReaderFont();
 
+/// While one is active, book text is measured and drawn (titles, authors, file names, chapter names): the reader's
+/// font goes before the active UI language's own CJK face too, so a title draws in one font, and UI strings keep the
+/// UI faces outside it. On the render task, under the RenderLock.
+class BookTextScope {
+ public:
+  explicit BookTextScope(bool active = true);
+  ~BookTextScope();
+  BookTextScope(const BookTextScope&) = delete;
+  BookTextScope& operator=(const BookTextScope&) = delete;
+
+ private:
+  bool active_;
+};
+
 }  // namespace CjkUiFonts
