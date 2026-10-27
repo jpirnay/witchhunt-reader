@@ -17,8 +17,6 @@
 
 #include "EpubReaderActivity.h"
 
-#include "SdCardFontSystem.h"
-
 #include <CooperativeAbort.h>
 #include <Epub/FootnotePreviews.h>
 #include <Epub/FootnoteShape.h>
@@ -69,6 +67,7 @@
 #include "ReadingSessionTracker.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontGlobals.h"
+#include "SdCardFontSystem.h"
 #include "SerialTestApi.h"
 #include "SilentRestart.h"
 #include "StarredPagesActivity.h"
@@ -729,7 +728,14 @@ void EpubReaderActivity::onEnter() {
 
   // Save current epub as last opened epub and add to recent books
   APP_STATE.openEpubPath = epub->getPath();
-  APP_STATE.saveToFile();
+  const uint32_t lastBookSaveHeap = esp_get_free_heap_size();
+  if (APP_STATE.saveToFile()) {
+    LOG_INF("ERS", "Saved last-book state: %s (heap=%lu)", APP_STATE.openEpubPath.c_str(),
+            static_cast<unsigned long>(lastBookSaveHeap));
+  } else {
+    LOG_ERR("ERS", "Failed to save last-book state: %s (heap=%lu)", APP_STATE.openEpubPath.c_str(),
+            static_cast<unsigned long>(lastBookSaveHeap));
+  }
   std::string series = epub->getSeries();
   if (!series.empty() && !epub->getSeriesIndex().empty()) {
     series += " #" + epub->getSeriesIndex();
@@ -801,7 +807,6 @@ void EpubReaderActivity::onEnter() {
 
 void EpubReaderActivity::onExit() {
   sdFontSystem.clearReaderLanguage();
-  sdFontSystem.ensureLoaded(renderer);
   Activity::onExit();
   logReaderMemSnapshot("onExit_before_release");
 
@@ -867,7 +872,14 @@ void EpubReaderActivity::onExit() {
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
 
   APP_STATE.readerActivityLoadCount = 0;
-  APP_STATE.saveToFile();
+  const uint32_t readerExitSaveHeap = esp_get_free_heap_size();
+  if (!APP_STATE.saveToFile()) {
+    LOG_ERR("ERS", "Failed to save reader exit state: book=%s loadCount=%u heap=%lu", APP_STATE.openEpubPath.c_str(),
+            APP_STATE.readerActivityLoadCount, static_cast<unsigned long>(readerExitSaveHeap));
+  } else {
+    LOG_INF("ERS", "Saved reader exit state: book=%s loadCount=%u heap=%lu", APP_STATE.openEpubPath.c_str(),
+            APP_STATE.readerActivityLoadCount, static_cast<unsigned long>(readerExitSaveHeap));
+  }
   // Release any deferred AA page before tearing down the section/epub.
   pendingGrayscale_ = {};
   // Abort any in-flight Background-B build (deletes its partial cache file) before the
@@ -2144,11 +2156,11 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
     pendingPreRender = true;
     markStagedForCurrentPage();
   }
-  const char* note = !complete                  ? (preempted ? " -- preempted by input, retries after the next settle"
-                                                   : imageWarmGaveUp(spine, pageIndex) ? " -- incomplete, giving up on this page"
-                                                                                       : " -- incomplete, will retry once")
-                     : redraw                   ? " -- on screen, redrawing"
-                     : shownNowCached           ? " -- on screen, input waiting (the next render shows it)"
+  const char* note = !complete        ? (preempted ? " -- preempted by input, retries after the next settle"
+                                         : imageWarmGaveUp(spine, pageIndex) ? " -- incomplete, giving up on this page"
+                                                                             : " -- incomplete, will retry once")
+                     : redraw         ? " -- on screen, redrawing"
+                     : shownNowCached ? " -- on screen, input waiting (the next render shows it)"
                      : nextPageNowPreRenderable ? " -- next page, pre-rendering it"
                                                 : "";
   LOG_INF("ERS", "Image lane: spine %d page %d warmed in %lums%s (free=%lu contig=%lu)", spine, pageIndex,

@@ -1097,9 +1097,9 @@ JRESULT jd_prepare(JDEC* jd,                                  /* Blank decompres
 
 JD_FASTPATH JRESULT jd_decomp_rows(JDEC* jd,                             /* Initialized decompression object */
                                    int (*outfunc)(JDEC*, void*, JRECT*), /* RGB output function */
-                                   uint8_t scale,     /* Output de-scaling factor (0 to 3) */
-                                   JDCURSOR* cursor,  /* Where the decode stands (zeroed to start) */
-                                   unsigned int mcuRows /* Rows of MCUs to output in this call */
+                                   uint8_t scale,                        /* Output de-scaling factor (0 to 3) */
+                                   JDCURSOR* cursor,                     /* Where the decode stands (zeroed to start) */
+                                   unsigned int mcuRows                  /* Rows of MCUs to output in this call */
 ) {
   unsigned int x, y, mx, my, rows;
   JRESULT rc;
@@ -1122,7 +1122,7 @@ JD_FASTPATH JRESULT jd_decomp_rows(JDEC* jd,                             /* Init
 
   rc = JDR_OK;
   for (rows = 0, y = cursor->y; y < jd->height && rows < mcuRows; y += my, rows++) { /* Vertical loop of MCUs */
-    for (x = 0; x < jd->width; x += mx) { /* Horizontal loop of MCUs */
+    for (x = 0; x < jd->width; x += mx) {                                            /* Horizontal loop of MCUs */
       if (jd->nrst && cursor->rst++ == jd->nrst) { /* Process restart interval if enabled */
         rc = restart(jd, cursor->rsc++);
         if (rc != JDR_OK) return rc;

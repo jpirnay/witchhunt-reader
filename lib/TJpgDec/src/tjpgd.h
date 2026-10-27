@@ -86,8 +86,8 @@ struct JDEC {
 
 /* Where a jd_decomp_rows() decode stands between calls (added here, not upstream). */
 typedef struct {
-  uint32_t y;      /* top of the next MCU row, in pixels */
-  uint16_t rst;    /* restart-interval bookkeeping, as in jd_decomp */
+  uint32_t y;   /* top of the next MCU row, in pixels */
+  uint16_t rst; /* restart-interval bookkeeping, as in jd_decomp */
   uint16_t rsc;
   uint8_t started; /* 0 in a fresh (zeroed) cursor */
   uint8_t done;    /* set once the last MCU row has been output */

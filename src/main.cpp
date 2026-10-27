@@ -1327,6 +1327,9 @@ void setup() {
   // APP_STATE is needed before display init so Quick Resume can skip the on-wake resync
   // and so the seamless-wake path can paint the LoadingIcon over the restored framebuffer.
   APP_STATE.loadFromFile();
+  LOG_INF("MAIN", "Loaded state: book='%s' lastSleepFromReader=%d readerLoadCount=%u showBootScreen=%d",
+          APP_STATE.openEpubPath.c_str(), APP_STATE.lastSleepFromReader ? 1 : 0, APP_STATE.readerActivityLoadCount,
+          APP_STATE.showBootScreen ? 1 : 0);
 
   HalSystem::checkPanic();
   HalSystem::clearPanic();  // TODO: move this to an activity when we have one to display the panic info

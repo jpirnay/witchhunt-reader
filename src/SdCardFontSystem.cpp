@@ -342,8 +342,7 @@ void SdCardFontSystem::setReaderLanguage(const std::string& language) {
   const auto tagIs = [&lang](const char* tag) {
     const std::string value(tag);
     return lang == value ||
-           (lang.size() > value.size() && lang.compare(0, value.size(), value) == 0 &&
-            lang[value.size()] == '-');
+           (lang.size() > value.size() && lang.compare(0, value.size(), value) == 0 && lang[value.size()] == '-');
   };
 
   ReaderCjkRegion region = ReaderCjkRegion::None;
@@ -351,11 +350,9 @@ void SdCardFontSystem::setReaderLanguage(const std::string& language) {
     region = ReaderCjkRegion::Japanese;
   } else if (tagIs("ko")) {
     region = ReaderCjkRegion::Korean;
-  } else if (lang == "cn" || tagIs("zh-hans") || tagIs("zh-cn") || tagIs("zh-sg") ||
-             tagIs("zh-chs")) {
+  } else if (lang == "cn" || tagIs("zh-hans") || tagIs("zh-cn") || tagIs("zh-sg") || tagIs("zh-chs")) {
     region = ReaderCjkRegion::SimplifiedChinese;
-  } else if (tagIs("zh-hant") || tagIs("zh-tw") || tagIs("zh-hk") || tagIs("zh-mo") ||
-             tagIs("zh-cht")) {
+  } else if (tagIs("zh-hant") || tagIs("zh-tw") || tagIs("zh-hk") || tagIs("zh-mo") || tagIs("zh-cht")) {
     region = ReaderCjkRegion::TraditionalChinese;
   } else if (tagIs("zh")) {
     region = ReaderCjkRegion::ChineseAmbiguous;
@@ -364,9 +361,7 @@ void SdCardFontSystem::setReaderLanguage(const std::string& language) {
   readerCjkRegion_ = region;
 }
 
-void SdCardFontSystem::clearReaderLanguage() {
-  readerCjkRegion_ = ReaderCjkRegion::None;
-}
+void SdCardFontSystem::clearReaderLanguage() { readerCjkRegion_ = ReaderCjkRegion::None; }
 
 std::string SdCardFontSystem::effectiveReaderFamily(const char* configuredFamily) const {
   const std::string configured = configuredFamily ? configuredFamily : "";
@@ -427,7 +422,7 @@ std::string SdCardFontSystem::effectiveReaderFamily(const char* configuredFamily
   }
 
   const std::string candidate = stem + targetSuffix;
-  if (!registry_.findFamily(candidate.c_str())) {
+  if (!registry_.findFamily(candidate)) {
     LOG_DBG("SDFS", "Regional CJK sibling %s not installed; keeping %s", candidate.c_str(), configured.c_str());
     return configured;
   }
@@ -455,8 +450,7 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
   const std::string wantedFamilyName = effectiveReaderFamily(SETTINGS.sdFontFamilyName);
   const char* wantedFamily = wantedFamilyName.c_str();
   if (wantedFamilyName != SETTINGS.sdFontFamilyName) {
-    LOG_DBG("SDFS", "Book language selects regional CJK family: %s -> %s", SETTINGS.sdFontFamilyName,
-            wantedFamily);
+    LOG_DBG("SDFS", "Book language selects regional CJK family: %s -> %s", SETTINGS.sdFontFamilyName, wantedFamily);
   }
   const std::string& currentFamily = manager_.currentFamilyName();
   const uint8_t targetPt = sizeListFor(wantedFamily).snap(SETTINGS.fontPointSize);
@@ -566,12 +560,11 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer, const char* const* wa
 
 int SdCardFontSystem::resolveFontId(const char* familyName, const uint8_t pointSize) const {
   const std::string effectiveFamilyName = effectiveReaderFamily(familyName);
-  familyName = effectiveFamilyName.c_str();
   // The manager loads exactly one face for the active SD family and serves ONE target size from
   // it: the face's own, or a scaled alias made by ensureLoaded(). That target is the stored size
   // snapped to the family's list, exactly as ensureLoaded() snapped it. The settings row shows the
   // same snapped size, so a nearby size is never handed out without the reader seeing which.
   // Anything not prepared returns 0, and the caller falls back to a built-in family.
-  if (!familyName || familyName[0] == '\0') return 0;
-  return manager_.getFontId(familyName, sizeListFor(familyName).snap(pointSize));
+  if (effectiveFamilyName.empty()) return 0;
+  return manager_.getFontId(effectiveFamilyName, sizeListFor(effectiveFamilyName.c_str()).snap(pointSize));
 }
