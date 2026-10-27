@@ -34,6 +34,15 @@ class SdCardFontSystem {
   /// The override is reader-session only and never changes the persisted font setting.
   void setReaderLanguage(const std::string& language);
   void clearReaderLanguage();
+  /// The open book's language is not known yet: a first open learns it from the load that builds book.bin. A
+  /// regional family waits for it (waitsForReaderLanguage) rather than install one region's face and then another's.
+  void setReaderLanguagePending();
+  bool waitsForReaderLanguage(const char* family) const;
+
+  /// The family the reader loads and resolves for `configuredFamily`: its regional Noto CJK sibling for the book's
+  /// language when that is installed, else the family itself. ensureSdFontLoadedForPath() and resolveFontId() both
+  /// go through it, so the face loaded is the face the layout asks for.
+  std::string effectiveReaderFamily(const char* configuredFamily) const;
 
   /// Ensure the correct SD font family is loaded for an explicit family + size.
   /// Used when the reader type determines which settings field to consult.
@@ -148,6 +157,7 @@ class SdCardFontSystem {
 
   enum class ReaderCjkRegion {
     None,
+    Pending,  // a first open, before the load that reads the language
     Japanese,
     SimplifiedChinese,
     TraditionalChinese,
@@ -155,7 +165,8 @@ class SdCardFontSystem {
     ChineseAmbiguous,
   };
 
-  std::string effectiveReaderFamily(const char* configuredFamily) const;
+  // The region of a regional Noto CJK family ("NotoSans" or "NotoSerif" + JP/SC/TC/KR) and its stem; None otherwise.
+  static ReaderCjkRegion familyRegion(const std::string& family, std::string& stem);
 
   ReaderCjkRegion readerCjkRegion_ = ReaderCjkRegion::None;
   SdCardFontRegistry registry_;

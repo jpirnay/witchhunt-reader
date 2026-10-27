@@ -730,6 +730,28 @@ bool BookMetadataCache::cacheIsCurrent(const std::string& cachePath) {
   return cache_version::isCurrent(cachePath + bookBinFile, BOOK_CACHE_VERSION);
 }
 
+bool BookMetadataCache::readLanguage(const std::string& cachePath, std::string& language) {
+  FsFile file;
+  if (!Storage.openFileForRead("BMC", cachePath + bookBinFile, file)) return false;
+  // The header as load() reads it, up to the language.
+  uint8_t version = 0;
+  uint32_t lutOffset = 0;
+  uint16_t spineCount = 0;
+  uint16_t tocCount = 0;
+  uint8_t tocReliable = 0;
+  serialization::readPod(file, version);
+  serialization::readPod(file, lutOffset);
+  serialization::readPod(file, spineCount);
+  serialization::readPod(file, tocCount);
+  serialization::readPod(file, tocReliable);
+  std::string skipped;
+  const bool ok = version == BOOK_CACHE_VERSION && serialization::readString(file, skipped) &&  // title
+                  serialization::readString(file, skipped) &&                                   // author
+                  serialization::readString(file, language);
+  file.close();
+  return ok;
+}
+
 bool BookMetadataCache::load() {
   if (!Storage.openFileForRead("BMC", cachePath + bookBinFile, bookFile)) {
     return false;

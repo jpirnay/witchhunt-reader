@@ -193,6 +193,8 @@ class Epub {
   // X3 with 39 KB contiguous and a 350 KB OPF.
   // useBookBin = false skips book.bin and always parses the OPF: book.bin keeps no primary author.
   bool loadForMetadata(BuildArena* scratch = nullptr, bool useBookBin = true);
+  // The book's language from its book.bin, before load(): false when the cache has none yet (BookMetadataCache).
+  bool readCachedLanguage(std::string& language) const;
 
   // True when opening the book will trigger the (multi-second) first-open index
   // build inside load(): the spine/TOC cache (book.bin) or the compiled CSS rules

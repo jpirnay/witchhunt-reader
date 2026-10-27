@@ -5386,10 +5386,6 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
 
 // TODO: Failure handling
 void EpubReaderActivity::render(RenderLock&& lock) {
-  if (epub) {
-    sdFontSystem.setReaderLanguage(epub->getLanguage());
-    sdFontSystem.ensureLoaded(renderer);
-  }
   if (!epub) {
     return;
   }

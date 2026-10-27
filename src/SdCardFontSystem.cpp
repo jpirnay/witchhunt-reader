@@ -363,32 +363,39 @@ void SdCardFontSystem::setReaderLanguage(const std::string& language) {
 
 void SdCardFontSystem::clearReaderLanguage() { readerCjkRegion_ = ReaderCjkRegion::None; }
 
-std::string SdCardFontSystem::effectiveReaderFamily(const char* configuredFamily) const {
-  const std::string configured = configuredFamily ? configuredFamily : "";
-  if (configured.empty() || readerCjkRegion_ == ReaderCjkRegion::None) return configured;
+void SdCardFontSystem::setReaderLanguagePending() { readerCjkRegion_ = ReaderCjkRegion::Pending; }
 
+bool SdCardFontSystem::waitsForReaderLanguage(const char* family) const {
   std::string stem;
-  if (configured.rfind("NotoSans", 0) == 0) {
+  return readerCjkRegion_ == ReaderCjkRegion::Pending && family && familyRegion(family, stem) != ReaderCjkRegion::None;
+}
+
+SdCardFontSystem::ReaderCjkRegion SdCardFontSystem::familyRegion(const std::string& family, std::string& stem) {
+  if (family.rfind("NotoSans", 0) == 0) {
     stem = "NotoSans";
-  } else if (configured.rfind("NotoSerif", 0) == 0) {
+  } else if (family.rfind("NotoSerif", 0) == 0) {
     stem = "NotoSerif";
   } else {
+    return ReaderCjkRegion::None;
+  }
+
+  const std::string suffix = family.substr(stem.size());
+  if (suffix == "JP") return ReaderCjkRegion::Japanese;
+  if (suffix == "SC") return ReaderCjkRegion::SimplifiedChinese;
+  if (suffix == "TC") return ReaderCjkRegion::TraditionalChinese;
+  if (suffix == "KR") return ReaderCjkRegion::Korean;
+  return ReaderCjkRegion::None;
+}
+
+std::string SdCardFontSystem::effectiveReaderFamily(const char* configuredFamily) const {
+  const std::string configured = configuredFamily ? configuredFamily : "";
+  if (configured.empty() || readerCjkRegion_ == ReaderCjkRegion::None || readerCjkRegion_ == ReaderCjkRegion::Pending) {
     return configured;
   }
 
-  const std::string suffix = configured.substr(stem.size());
-  ReaderCjkRegion configuredRegion = ReaderCjkRegion::None;
-  if (suffix == "JP") {
-    configuredRegion = ReaderCjkRegion::Japanese;
-  } else if (suffix == "SC") {
-    configuredRegion = ReaderCjkRegion::SimplifiedChinese;
-  } else if (suffix == "TC") {
-    configuredRegion = ReaderCjkRegion::TraditionalChinese;
-  } else if (suffix == "KR") {
-    configuredRegion = ReaderCjkRegion::Korean;
-  } else {
-    return configured;
-  }
+  std::string stem;
+  const ReaderCjkRegion configuredRegion = familyRegion(configured, stem);
+  if (configuredRegion == ReaderCjkRegion::None) return configured;
 
   ReaderCjkRegion targetRegion = readerCjkRegion_;
   if (targetRegion == ReaderCjkRegion::ChineseAmbiguous) {
@@ -417,6 +424,7 @@ std::string SdCardFontSystem::effectiveReaderFamily(const char* configuredFamily
       targetSuffix = "KR";
       break;
     case ReaderCjkRegion::None:
+    case ReaderCjkRegion::Pending:
     case ReaderCjkRegion::ChineseAmbiguous:
       return configured;
   }
