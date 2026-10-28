@@ -57,13 +57,14 @@ Gray loadPgm(const std::string& path) {
 // forward-transformed, its top-left n x n coefficients inverted with the n-point IDCT (n = 8 >> s),
 // over the floor(w >> s) x floor(h >> s) output. Edge blocks are padded by replicating the last
 // row/column, which is what the encoder did.
-Gray reducedReference(const Gray& full, const int shift) {
+// `wholeBlocks`: every block, the partial ones at the right and bottom edges too.
+Gray reducedReference(const Gray& full, const int shift, const bool wholeBlocks = false) {
   const int n = 8 >> shift;
   const double pi = 3.14159265358979323846;
   auto c = [](const int k) { return k == 0 ? 0.70710678118654752 : 1.0; };
   Gray out;
-  out.w = full.w >> shift;
-  out.h = full.h >> shift;
+  out.w = wholeBlocks ? (full.w + 7) / 8 * n : full.w >> shift;
+  out.h = wholeBlocks ? (full.h + 7) / 8 * n : full.h >> shift;
   out.px.resize(static_cast<size_t>(out.w) * out.h);
   for (int by = 0; by * 8 < full.h; ++by) {
     for (int bx = 0; bx * 8 < full.w; ++bx) {
@@ -197,6 +198,49 @@ INSTANTIATE_TEST_SUITE_P(FreeInkMatrix, ProgressiveJpegMatchesLibjpeg,
                                                           Case{"prog_gray_rst.jpg", "prog_gray_rst.y.pgm"},
                                                           Case{"prog_tiny_9x5.jpg", "prog_tiny_9x5.y.pgm"}),
                                           testing::Values(0, 1, 2, 3)));
+
+// decodeResized() at the size of the 1/8 picture over every block: nothing to interpolate, so it is
+// the reduced reference of every block -- the partial ones at the right and bottom edges too, which
+// a 1/8 decode leaves out (floor(width / 8)). Leaving them out stretched the rest over the box and
+// put every sample up to a block away from where it belongs.
+class ProgressiveJpegResizedIdentity : public testing::TestWithParam<Case> {};
+
+TEST_P(ProgressiveJpegResizedIdentity, IsTheEighthOfEveryBlock) {
+  const Case& c = GetParam();
+  const Gray full = loadPgm(fixture(c.reference));
+  ASSERT_FALSE(full.px.empty());
+  const Gray expected = reducedReference(full, 3, /*wholeBlocks=*/true);
+  ASSERT_TRUE(full.w % 8 != 0 || full.h % 8 != 0) << "the fixture must have a partial block";
+
+  struct Rows {
+    Gray image;
+    static bool take(void* user, uint16_t y, const uint8_t* gray, uint16_t width) {
+      auto& r = *static_cast<Rows*>(user);
+      if (y != r.image.h) return false;
+      r.image.w = width;
+      r.image.px.insert(r.image.px.end(), gray, gray + width);
+      ++r.image.h;
+      return true;
+    }
+  } rows;
+  FsFile file;
+  ASSERT_TRUE(file.openForRead(fixture(c.jpg)));
+  ProgressiveJpeg::DecodeOptions options;
+  const auto result = ProgressiveJpeg::decodeResized(file, options, static_cast<uint16_t>(expected.w),
+                                                     static_cast<uint16_t>(expected.h), Rows::take, &rows);
+  file.close();
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  ASSERT_EQ(rows.image.w, expected.w);
+  ASSERT_EQ(rows.image.h, expected.h);
+  const Diff d = compare(rows.image, expected);
+  EXPECT_LT(d.mean, 0.6) << c.jpg;
+  EXPECT_LE(d.max, 12) << c.jpg;
+}
+
+INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegResizedIdentity,
+                         testing::Values(Case{"prog_full_420.jpg", "prog_full_420.y.pgm"},
+                                         Case{"prog_full_gray.jpg", "prog_full_gray.y.pgm"},
+                                         Case{"prog_full_444_rst.jpg", "prog_full_444_rst.y.pgm"}));
 
 TEST(ProgressiveJpeg, ProbeReportsGeometry) {
   FsFile file;
