@@ -45,6 +45,8 @@ TEST(CjkLookupRun, RunsFollowTheSpecRules) {
       {{"〆", "切"}, "〆切"},
       {{"コ", "ー", "ヒ", "ー"}, "コーヒー"},
       {{"大", "A"}, "大"},
+      {{"大", "(学"}, "大"},       // a later word's leading ASCII punctuation stops the run
+      {{"大", "", "学"}, "大学"},  // an empty word adds nothing and leaves the run open
       {{"大", "학"}, "大"},
       {{"大", "\u3000", "学"}, "大"},
       {{"１", "９", "世", "紀"}, "１９世紀"},  // fullwidth digits are not punctuation
@@ -77,6 +79,20 @@ TEST(CjkLookupRun, MatchLengthsMapBackToWords) {
   EXPECT_EQ(run.wordsCovering(12), 3);
   EXPECT_EQ(run.wordsCovering(4), 0);  // not the end of a codepoint
   EXPECT_EQ(run.wordsCovering(0), 0);
+}
+
+TEST(CjkLookupRun, AnEmptyWordStillCountsAsAWord) {
+  const CjkLookupRun run = runOf({"大", "", "学"});
+  EXPECT_EQ(run.wordsCovering(3), 1);
+  EXPECT_EQ(run.wordsCovering(6), 3);  // 学 is the page's third word
+}
+
+TEST(CjkLookupRun, ATruncatedSequenceClosesTheRun) {
+  CjkLookupRun run;
+  EXPECT_FALSE(run.append("大\xE5\xAD", 5));  // 学 cut off after two of its three bytes
+  EXPECT_STREQ(run.text(), "大");
+  EXPECT_EQ(run.bytes(), 3);
+  EXPECT_EQ(Script::Other, CjkLookupRun::scriptOf("\xE5\xAD", 2));
 }
 
 TEST(CjkLookupRun, SupplementaryIdeographsCountAsOneCodepoint) {

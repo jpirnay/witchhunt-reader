@@ -729,7 +729,7 @@ std::string Dictionary::cleanWord(const char* word) {
   size_t end = strlen(word);
   // Curly quotes, dashes, guillemets and the like are all >= 0x80, so
   // isWordByte keeps them; strip those codepoints from the edges too, or EPUB
-  // text like garage.” never matches a headword. See EDGE_PUNCTUATION.
+  // text like garage.” never matches a headword. See DictionaryPunctuation.h.
   while (start < end) {
     if (!isWordByte(b[start])) {
       start++;

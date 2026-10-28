@@ -9,18 +9,10 @@
 
 namespace {
 
-// Byte length of the UTF-8 sequence a lead byte starts (1 for ASCII and stray bytes).
-size_t sequenceLength(const unsigned char lead) {
-  if (lead >= 0xF0) return 4;
-  if (lead >= 0xE0) return 3;
-  if (lead >= 0xC0) return 2;
-  return 1;
-}
-
 // Decodes the codepoint at text[i]; false when `length` cuts it off. `len` gets its byte count.
 bool decodeAt(const char* text, const size_t length, const size_t i, uint32_t& cp, size_t& len) {
   const auto* p = reinterpret_cast<const unsigned char*>(text) + i;
-  len = sequenceLength(*p);
+  len = static_cast<size_t>(utf8CodepointLen(*p));
   if (i + len > length) return false;
   cp = utf8NextCodepoint(&p);
   return true;
