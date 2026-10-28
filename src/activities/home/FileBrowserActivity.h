@@ -25,6 +25,7 @@ class LibraryBuilder;
 
 class FileBrowserActivity final : public UiListActivity {
  public:
+  bool drawsBookText() const override { return true; }
   // Books = the book browser opened from Home; AllFiles = every file, opened from Settings;
   // PickFirmware / PickFolder = pickers that return a path via ActivityResult. Owned by the model,
   // which needs it to filter; aliased here so callers keep naming it FileBrowserActivity::Mode.

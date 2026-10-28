@@ -457,11 +457,11 @@ class TtfFontSet::MissScope {
 
 bool TtfFontSet::beginMiss() {
   if (rasterizer_.allocated() && (!readsCard_ || sdPages_)) return true;  // on the heap since an earlier miss
-  BuildArena* const arena = glyph_miss::arena();
   // Room for all of it, the worst padding included: a refused allocation would read in the arena's own log as its
   // owner running out.
   const size_t want = rasterizer_.scratchBytes() + alignof(std::max_align_t) +
                       (readsCard_ ? sizeof(ttf::SdPageCache) + alignof(ttf::SdPageCache) : 0);
+  BuildArena* const arena = glyph_miss::lendingArena(want);
   if (arena && !rasterizer_.allocated() && !sdPages_ && arena->capacity() - arena->used() >= want) {
     // All of it from the lent region, for this lookup alone: endMiss() gives it back, so the arena's owner finds its
     // blocks as it left them.
@@ -898,6 +898,13 @@ bool TtfFont::storeKey(Size& size, const uint8_t style, const uint32_t codepoint
   if (!set_.store_.isOpen() || size.ppem == 0 || !claimSize(size)) return false;
   *key = glyphstore::makeKey(codepoint, style, size.index);
   return true;
+}
+
+bool TtfFont::mapsCodepoint(const uint32_t codepoint) {
+  if (!draws(0)) return false;
+  checkLock();
+  FontBytes bytes;
+  return fontBytes(0, &bytes) && ttf::glyphIndex(bytes, styleAt(0)->face, codepoint) != 0;
 }
 
 bool TtfFont::fontBytes(const uint8_t style, FontBytes* bytes) {

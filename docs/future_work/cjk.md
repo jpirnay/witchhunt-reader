@@ -26,7 +26,7 @@ behind CFF.
 | 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#548) |
 | 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | shipped (#550) |
 | 5b | Synthetic italic (spec section 7.4): families without an italic file draw italic slanted, as KOReader does | shipped (#551) |
-| 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | design decided ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)); plan to write |
+| 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | built (feat/ui-book-text-heap); device check pending ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-a3b-push-in-and-gap.md)) |
 | 8 | Ruby and emphasis dots ([B2](#emphasis-dots-pr-b2)) | B1 shipped (#554); B2 emphasis dots next ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
 | 9 | The dictionary on CJK pages ([below](#dictionary-on-cjk-pages)) | open |
@@ -254,27 +254,35 @@ The faces ship as 1-bit DEFLATE groups, 97,132 B where they took 175,916 B flat
 slot and drawn from flash with no decode (`docs/i18n.md`); the other two languages' glyphs, for the
 language picker and CJK book titles, decode one at a time, ~1.9 ms each on the X3.
 
-**Still open: text that is not a UI string.** Book titles and authors, TOC entries, chapter titles in
-the status bar, file names and the finished-book screen draw the characters they share with a
-translation and a box (□) for each of the rest. Before the CJK faces they drew nothing (X3,
-2026-10-18, 紅樓夢: no title or author on the Home card, no caption under the Library cover). Without
-the boxes the faces made it worse: the Home card showed a lone 雪, the one character of the author
-曹雪芹 a translation happens to use, as if it were the title.
+**Text that is not a UI string** (book titles and authors, TOC entries, the status-bar chapter title, file names, the
+finished-book screen) draws what the UI faces lack from the reader's TrueType font, at the CJK UI faces' em
+(`CjkUiFonts::setReaderFont`, `FallbackFaceProvider::setReaderFace`):
+- in the reader, from the loaded set's first family with CJK (else its first), lent by `SdCardFontManager` on every
+  load and body size, and taken back before its native sizes go;
+- outside it, on the screens that draw book text (`Activity::drawsBookText`), from the last book's set, opened
+  read-only by the first string that needs it (never installed or wiped from the UI), only when the glyph store holds
+  it and its body family has CJK, kept from one such screen to the next, and closed on any other (`syncUiBookFonts`):
+  a screen's cover work before it draws never has it on the heap;
+- per string: every text call of `GfxRenderer` tells the provider which string comes next (`beginText`). One with a
+  character neither the UI face nor the active language's face has is book text (the build gives every translation's
+  characters a face): the reader's font goes first for all of it, so a title draws in one font, and what the UI face
+  lacks is rendered in one batch;
+- a book-text screen's first-sight glyphs draw in the secondary framebuffer when the heap could not hold their scratch
+  with 24 KB to spare (the reader menu): lent on the pass's first miss with the black-and-white sequence (RED seeded,
+  single-buffer fast diff) and returned as the frame is about to be pushed (`lendFramebufferForGlyphs`,
+  `GfxRenderer::setBeforePushHook`). A lend costs the X3 a slower refresh, so screens with room keep the heap;
+- its 2-bit glyphs drawn as their ink; its UI-size faces made on the first glyph a screen needs.
 
-**Why it matters.** Even with a CJK reading font, a CJK reader cannot find or navigate their books.
+Without a CJK TrueType family nothing opens, and the boxes (□) stay. Before the CJK faces these strings drew nothing
+(X3, 2026-10-18, 紅樓夢); without the boxes the Home card showed a lone 雪 of the author 曹雪芹 as if it were the title.
 
-**Next step.** Chain the installed CJK family (`NotoSans<XX>`/`NotoSerif<XX>`, `.otf`, drawn through `TtfFont`; not an
-SD bitmap font) behind the CJK UI faces, as upstream does with its SD font (crosspoint-reader
-#2521, Tsz Ho Sze, and follow-ups #3026, #3071, #3484, #3646): `FallbackFaceProvider` already serves a
-UI face's misses, so the installed family would be its last source. The design is decided in
-`docs/superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md`. Upstream's SD-font approach raised these
-questions, which it answers:
-- An SD font is 2-bit and the UI faces are 1-bit, and the renderer draws at the depth of the font it
-  was asked for: the 2-bit glyph has to be thresholded on the way, or drawn as its ink mask (#500's
-  1-bit pre-render does exactly that).
-- Its glyphs live in a heap page arena filled by a prewarm, which UI screens do not run; upstream
-  prewarms per string (#3026) and bounds it for lists (#3071).
-- Heap: upstream loads extra SD font sizes for the UI only on boards with PSRAM (#3646).
+**Still open:**
+- the reader's own passes (its status-bar title) keep their miss scratch on the heap: the reader holds the secondary
+  for its grayscale passes. A scratch block planned for the UI's sizes (~9.4 KB against 17.4 KB) would halve it;
+- the set held while a book-text screen is current costs ~4 KB (Home after the Library), more than the spec's 2-3 KB;
+  opening it per screen instead cost 35-100 ms a visit, which weighed more;
+- the reader menu's 2.42 s opening refresh on the X3 is its anti-ghosting HALF (a full resync and a conditioning pass
+  on the UC8253), not this work: a FAST would do when no grey is on the glass.
 
 **Smaller items:**
 - a CJK keyboard: none of the three has one, so text entry stays Latin;

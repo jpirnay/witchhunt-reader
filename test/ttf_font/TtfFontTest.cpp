@@ -383,6 +383,19 @@ TEST_F(TtfFontTest, ACodepointTheFontLacksIsAskedOnlyOnce) {
   EXPECT_EQ(writes, flash.programCalls());  // the "missing" slot answered
 }
 
+TEST_F(TtfFontTest, ItsMapAnswersWhatItCoversWithoutRenderingOrWriting) {
+  // What the UI asks of a loaded set's families to pick the one with CJK (SdCardFontManager::lendUiFont).
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  const uint32_t writes = flash.programCalls();
+  const uint32_t renders = font->renders();
+  EXPECT_TRUE(font->mapsCodepoint('A'));
+  EXPECT_FALSE(font->mapsCodepoint(0x4E00));
+  EXPECT_FALSE(font->mapsCodepoint(0x3042));
+  EXPECT_EQ(writes, flash.programCalls());
+  EXPECT_EQ(renders, font->renders());
+}
+
 TEST_F(TtfFontTest, DefaultIgnorableCodepointsHaveNoAdvanceAndNoInk) {
   const auto font = open();
   ASSERT_NE(nullptr, font);

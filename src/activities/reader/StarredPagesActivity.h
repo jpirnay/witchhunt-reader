@@ -21,6 +21,7 @@ class StarredPagesActivity final : public Activity {
   void deleteSelected();
 
  public:
+  bool drawsBookText() const override { return true; }
   explicit StarredPagesActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, BookmarkStore& bookmarkStore,
                                 std::shared_ptr<Epub> epub = nullptr)
       : Activity("StarredPages", renderer, mappedInput), epub(std::move(epub)), bookmarkStore(bookmarkStore) {}
