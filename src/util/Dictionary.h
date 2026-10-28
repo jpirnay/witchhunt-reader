@@ -30,12 +30,13 @@ struct DictLocation {
 struct DictPrefixHit {
   DictLocation location;   // the run's FIRST entry, in .idx order
   uint8_t runBytes = 0;    // bytes of the run of text it covers, a codepoint boundary
+  uint8_t entryCount = 0;  // entries in the run, at most DictPrefixMatch::MAX_ENTRIES_PER_HIT
   std::string headword;    // the .idx headword, also for a .syn hit; SSO up to 15 bytes (5 CJK chars)
   uint32_t idxStart = 0;   // byte offset in .idx of that first entry
-  uint8_t entryCount = 0;  // entries in the run, at most DictPrefixMatch::MAX_ENTRIES_PER_HIT
 };
 
-// What Dictionary::resolvePrefixes() found. ~140 bytes; a member or stack local, never on the heap.
+// What Dictionary::resolvePrefixes() found. ~140 bytes on the ESP32; a member or stack local, never
+// on the heap.
 struct DictPrefixMatch {
   static constexpr uint8_t MAX_HITS = 3;
   static constexpr uint8_t MAX_ENTRIES_PER_HIT = 8;  // more same-headword entries are not listed
@@ -151,7 +152,7 @@ class Dictionary {
                        AbortCheck abortCheck = nullptr);
 
   // The longest run resolvePrefixes() searches: CjkLookupRun's longest, 12 codepoints of up to 4
-  // bytes. A stack buffer of this size holds each probe's target.
+  // bytes (CjkLookupRun.cpp asserts it). A stack buffer of this size holds each probe's target.
   static constexpr size_t MAX_PREFIX_RUN_BYTES = 48;
 
   static std::string cleanWord(const char* word);
@@ -298,54 +299,30 @@ class Dictionary {
   // first hit there is no cap: one could call a run absent whose match lies a few windows down.
   static constexpr uint8_t PREFIX_PROBES_PER_FILE = 3;
 
-  // A prefix hit as collectPrefixes() records it. A .syn hit carries the synonym as its headword
-  // and no location until followSynonym() turns it into the .idx run that `ordinal` names.
-  struct PrefixCandidate {
-    DictPrefixHit hit;
-    uint32_t ordinal = 0;  // .syn only: the .idx entry the synonym points at
-  };
+  // What the probes of one resolvePrefixes() call share, and the .syn hits its .syn scans keep
+  // (each its run bytes and ordinal only, until followed). Defined in Dictionary.cpp.
+  struct PrefixSearch;
+  struct SynonymHits;
 
-  // One file's hits, longest first, at most one per length.
-  struct PrefixHits {
-    PrefixCandidate items[DictPrefixMatch::MAX_HITS];
-    uint8_t count = 0;
-    bool hasLength(uint8_t runBytes) const;
-    // The slot for a new hit of runBytes, in length order: the shortest is dropped when all
-    // MAX_HITS are taken; nullptr when they are all longer.
-    PrefixCandidate* insert(uint8_t runBytes);
-  };
-
-  // What the probes of one resolvePrefixes() call share.
-  struct PrefixSearch {
-    const char* run = nullptr;
-    uint8_t runBytes = 0;  // of `run` searched, at most MAX_PREFIX_RUN_BYTES
-    AbortCheck abortCheck = nullptr;
-    uint8_t probes = 0;
-    bool aborted = false;
-    bool failed = false;  // a probe could not read what it needed: a miss is no verdict
-    // Before each probe: counts it, or sets `aborted` and returns false when it is not the first
-    // and abortCheck says to give up.
-    bool beginProbe();
-  };
-
-  // One file's half of resolvePrefixes() (spec 5.2): a window scan per probe, each probe's target
-  // a shorter prefix of the run than the last, until the run's prefixes in that file are all seen
-  // or enough of them are. An .idx hit whose first entry opens a window past byte 0 gets
-  // locateRun(): its run may begin in the window before.
-  void collectPrefixes(LookupSession& session, bool synonyms, PrefixSearch& search, PrefixHits& out);
+  // One file's half of resolvePrefixes() (spec 5.2), into `out`: matchOut's hits for .idx, a
+  // SynonymHits for .syn. A window scan per probe, each probe's target a shorter prefix of the
+  // run than the last, until the run's prefixes in that file are all seen or enough of them are.
+  // An .idx hit whose first entry opens a window past byte 0 gets locateRun(): its run may begin
+  // in the window before.
+  template <typename Hits>
+  void collectPrefixes(LookupSession& session, PrefixSearch& search, Hits& out);
 
   // The .idx run of hit.headword from its first entry: the last sample strictly below the
   // headword, then forward to the first byte-equal entry, counting it and those that follow.
   // Sets location, idxStart and entryCount; false, leaving the hit alone, when it is not found.
   bool locateRun(LookupSession& session, DictPrefixHit& hit);
 
-  // A .syn hit as the .idx run its ordinal names: locateByOrdinal() gives the headword, whose
-  // entry may lie in the middle of its run, and locateRun() finds the run's start.
-  bool followSynonym(LookupSession& session, PrefixCandidate& candidate);
-
-  // Longest first, one hit per length with the .idx hit on a tie; then a hit whose first entry a
-  // longer kept hit already has is dropped; at most MAX_HITS.
-  static void mergePrefixHits(PrefixHits& idx, PrefixHits& syn, DictPrefixMatch& matchOut);
+  // Merges the .syn hits into matchOut's .idx hits: longest first, one hit per length with the
+  // .idx hit on a tie; then a hit whose first entry a longer kept hit already has is dropped; at
+  // most MAX_HITS. Each .syn hit that could still be kept is followed, one probe each:
+  // locateByOrdinal() gives its .idx headword, whose entry may lie in the middle of its run, and
+  // locateRun() finds the run's start.
+  void mergeSynonymHits(LookupSession& session, PrefixSearch& search, SynonymHits& syn, DictPrefixMatch& matchOut);
 
   // Resolve an ordinal (the N-th .idx entry, 0-based) to its .dict location via
   // the .qidx samples. Used to follow a .syn synonym back to its headword.

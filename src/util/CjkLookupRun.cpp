@@ -5,7 +5,12 @@
 #include <cctype>
 #include <cstring>
 
+#include "Dictionary.h"
 #include "DictionaryPunctuation.h"
+
+// Dictionary::resolvePrefixes() searches a run's first MAX_PREFIX_RUN_BYTES: the longest run must fit.
+static_assert(CjkLookupRun::MAX_CODEPOINTS * 4 <= Dictionary::MAX_PREFIX_RUN_BYTES,
+              "Dictionary::resolvePrefixes() must search the whole of the longest run");
 
 namespace {
 

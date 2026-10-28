@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -1096,6 +1097,70 @@ TEST_F(DictionaryTest, PrefixSearchListsTheWholeRunBehindASynonym) {
   EXPECT_EQ(hitsOf(m), (HitList{{"银行", 6}}));
   EXPECT_EQ(m.hits[0].entryCount, 2);
   EXPECT_EQ(definitionAt(dict, m.hits[0].location), "bank");
+}
+
+// Ten entries of 行: the scan counts at most eight, and so does locateRun. At 250 fillers the sample
+// at entry 256 lands on the seventh 行, so the run is counted again from its first entry.
+TEST_F(DictionaryTest, PrefixSearchListsAtMostEightEntriesOfAHeadword) {
+  for (const int leading : {0, 250}) {
+    std::vector<HeadwordSpec> headwords = asciiFillers(leading);
+    for (int i = 0; i < 10; i++) headwords.push_back({"行", "xing " + std::to_string(i)});
+    const std::string folder = "PrefixEightEntries" + std::to_string(leading);
+    ASSERT_NO_FATAL_FAILURE(writeDictionary(folder, headwords));
+    Dictionary dict;
+    ASSERT_NO_FATAL_FAILURE(openIndexed(dict, folder));
+
+    DictPrefixMatch m;
+    ASSERT_TRUE(dict.resolvePrefixes("行了", m)) << leading;
+    EXPECT_EQ(hitsOf(m), (HitList{{"行", 3}})) << leading;
+    EXPECT_EQ(m.hits[0].entryCount, 8) << leading;  // DictPrefixMatch::MAX_ENTRIES_PER_HIT
+    EXPECT_EQ(definitionAt(dict, m.hits[0].location), "xing 0") << leading;
+  }
+}
+
+// The .idx keeps its three longest; a longer .syn hit takes a place and the shortest falls off,
+// and a .syn hit shorter than all three is not even followed (no probe).
+TEST_F(DictionaryTest, PrefixSearchMergesALongerSynonymIntoAFullList) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("PrefixFullMerge",
+                                          {{"大", "big"},
+                                           {"大学", "university"},
+                                           {"大学生", "student"},
+                                           {"大学生活", "student life"},
+                                           {"活动", "activity"}},
+                                          {{"大学生活动", "活动"}, {"大", "活动"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "PrefixFullMerge"));
+
+  DictPrefixMatch m;
+  ASSERT_TRUE(dict.resolvePrefixes("大学生活动", m));
+  EXPECT_EQ(hitsOf(m), (HitList{{"活动", 15}, {"大学生活", 12}, {"大学生", 9}}));
+  EXPECT_EQ(definitionAt(dict, m.hits[0].location), "activity");
+  EXPECT_EQ(m.probes, 3);  // the .idx scan, the .syn scan, and following 大学生活动 only
+}
+
+// The search takes a run's first MAX_PREFIX_RUN_BYTES (48), cut back to a codepoint boundary.
+TEST_F(DictionaryTest, PrefixSearchSearchesTheFirstFortyEightBytesOfALongerRun) {
+  const auto repeat = [](const std::string& s, int n) {
+    std::string out;
+    for (int i = 0; i < n; i++) out += s;
+    return out;
+  };
+  const std::string sixteen = repeat("中", 16);  // 48 bytes
+  const std::string aFifteen = "a" + repeat("中", 15);
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("PrefixLongRun", {{sixteen, "sixteen"},
+                                                            {sixteen + "中", "seventeen"},
+                                                            {aFifteen, "a and fifteen"},
+                                                            {"a" + sixteen, "a and sixteen"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "PrefixLongRun"));
+
+  DictPrefixMatch m;
+  ASSERT_TRUE(dict.resolvePrefixes((sixteen + "中").c_str(), m));
+  EXPECT_EQ(hitsOf(m), (HitList{{sixteen, 48}}));
+
+  // Byte 48 of this run falls inside its sixteenth 中, so the search takes 46 bytes.
+  ASSERT_TRUE(dict.resolvePrefixes(("a" + sixteen).c_str(), m));
+  EXPECT_EQ(hitsOf(m), (HitList{{aFifteen, 46}}));
 }
 
 TEST_F(DictionaryTest, PrefixSearchOnHangulFindsTheNounBeforeItsParticle) {

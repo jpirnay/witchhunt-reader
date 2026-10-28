@@ -9,15 +9,12 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <type_traits>
 
-#include "CjkLookupRun.h"
 #include "DictZip.h"
 #include "DictionaryPunctuation.h"
 #include "DictionaryRegistry.h"
 #include "StringUtils.h"
-
-static_assert(CjkLookupRun::MAX_CODEPOINTS * 4 <= Dictionary::MAX_PREFIX_RUN_BYTES,
-              "resolvePrefixes() must search the whole of the longest run CjkLookupRun builds");
 
 namespace {
 
@@ -61,48 +58,6 @@ bool readSampleOffset(HalFile& file, uint32_t sampleIndex, uint32_t* out) {
 uint32_t readBe32(const uint8_t* p) {
   return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
          (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
-}
-
-// The .dict location an .idx entry's suffix (BE32 offset, BE32 size) names.
-DictLocation idxEntryLocation(const uint8_t* suffix) {
-  DictLocation location;
-  location.offset = readBe32(suffix);
-  location.size = readBe32(suffix + 4);
-  location.found = true;
-  return location;
-}
-
-// --- prefix search byte compares: ASCII-folded as asciiCaseCmp orders the index ---
-
-unsigned char foldAsciiCase(const char c) {
-  const auto u = static_cast<unsigned char>(c);
-  return u >= 'A' && u <= 'Z' ? static_cast<unsigned char>(u + ('a' - 'A')) : u;
-}
-
-bool isContinuationByte(const char c) { return (static_cast<unsigned char>(c) & 0xC0) == 0x80; }
-
-// `bytes` cut back to the start of the codepoint of `run` it falls inside; `run` is NUL-terminated
-// and at least `bytes` long.
-size_t codepointFloor(const char* run, size_t bytes) {
-  while (bytes > 0 && isContinuationByte(run[bytes])) bytes--;
-  return bytes;
-}
-
-// True when the `wordLen` bytes of `word` are the first bytes of `run` and end on one of its
-// codepoint boundaries.
-bool isRunPrefix(const char* word, const size_t wordLen, const char* run, const size_t runBytes) {
-  if (wordLen == 0 || wordLen > runBytes) return false;
-  for (size_t i = 0; i < wordLen; i++) {
-    if (foldAsciiCase(word[i]) != foldAsciiCase(run[i])) return false;
-  }
-  return wordLen == runBytes || !isContinuationByte(run[wordLen]);
-}
-
-// Bytes of the first `runBytes` of `run` that NUL-terminated `word` starts with.
-size_t commonPrefixLen(const char* run, const size_t runBytes, const char* word) {
-  size_t n = 0;
-  while (n < runBytes && word[n] != '\0' && foldAsciiCase(word[n]) == foldAsciiCase(run[n])) n++;
-  return n;
 }
 
 // Word characters for cleaning: ASCII alphanumerics plus any UTF-8
@@ -1034,34 +989,150 @@ bool Dictionary::resolve(const char* word, DictLocation& locationOut, std::strin
 
 // --- prefix search (spec 5.2) ------------------------------------------------
 
-bool Dictionary::PrefixSearch::beginProbe() {
-  if (probes > 0 && abortCheck && abortCheck()) {
-    aborted = true;
-    return false;
+struct Dictionary::PrefixSearch {
+  const char* run = nullptr;
+  uint8_t runBytes = 0;  // of `run` searched, at most MAX_PREFIX_RUN_BYTES
+  AbortCheck abortCheck = nullptr;
+  uint8_t probes = 0;
+  bool aborted = false;
+  bool failed = false;  // a probe could not read what it needed: a miss is no verdict
+
+  // Before each probe: counts it, or sets `aborted` and returns false when it is not the first
+  // and abortCheck says to give up.
+  bool beginProbe() {
+    if (probes > 0 && abortCheck && abortCheck()) {
+      aborted = true;
+      return false;
+    }
+    probes++;
+    return true;
   }
-  probes++;
-  return true;
+};
+
+// Longest first, one per length. Following a .syn hit reads its headword, location and entries
+// from the .idx, so until then it is only the run bytes it covers and the entry it names.
+struct Dictionary::SynonymHits {
+  struct Hit {
+    uint8_t runBytes = 0;
+    uint32_t ordinal = 0;  // the .idx entry the synonym points at
+  };
+  Hit hits[DictPrefixMatch::MAX_HITS];
+  uint8_t count = 0;
+};
+
+namespace {
+
+// The .dict location an .idx entry's suffix (BE32 offset, BE32 size) names.
+DictLocation idxEntryLocation(const uint8_t* suffix) {
+  DictLocation location;
+  location.offset = readBe32(suffix);
+  location.size = readBe32(suffix + 4);
+  location.found = true;
+  return location;
 }
 
-bool Dictionary::PrefixHits::hasLength(const uint8_t runBytes) const {
-  for (uint8_t i = 0; i < count; i++) {
-    if (items[i].hit.runBytes == runBytes) return true;
-  }
-  return false;
+// Byte compares, ASCII-folded as asciiCaseCmp orders the index.
+unsigned char foldAsciiCase(const char c) {
+  const auto u = static_cast<unsigned char>(c);
+  return u >= 'A' && u <= 'Z' ? static_cast<unsigned char>(u + ('a' - 'A')) : u;
 }
 
-Dictionary::PrefixCandidate* Dictionary::PrefixHits::insert(const uint8_t runBytes) {
+bool isContinuationByte(const char c) { return (static_cast<unsigned char>(c) & 0xC0) == 0x80; }
+
+// `bytes` cut back to the start of the codepoint of `run` it falls inside; `run` is NUL-terminated
+// and at least `bytes` long.
+size_t codepointFloor(const char* run, size_t bytes) {
+  while (bytes > 0 && isContinuationByte(run[bytes])) bytes--;
+  return bytes;
+}
+
+// True when the `wordLen` bytes of `word` are the first bytes of `run` and end on one of its
+// codepoint boundaries.
+bool isRunPrefix(const char* word, const size_t wordLen, const char* run, const size_t runBytes) {
+  if (wordLen == 0 || wordLen > runBytes) return false;
+  for (size_t i = 0; i < wordLen; i++) {
+    if (foldAsciiCase(word[i]) != foldAsciiCase(run[i])) return false;
+  }
+  return wordLen == runBytes || !isContinuationByte(run[wordLen]);
+}
+
+// Bytes of the first `runBytes` of `run` that NUL-terminated `word` starts with.
+size_t commonPrefixLen(const char* run, const size_t runBytes, const char* word) {
+  size_t n = 0;
+  while (n < runBytes && word[n] != '\0' && foldAsciiCase(word[n]) == foldAsciiCase(run[n])) n++;
+  return n;
+}
+
+// Hits name the same run (or, from two headwords, the same definition) by their first entry.
+bool sameLocation(const DictLocation& a, const DictLocation& b) { return a.offset == b.offset && a.size == b.size; }
+
+void clearHit(DictPrefixHit& hit) {
+  hit.location = DictLocation{};
+  hit.runBytes = 0;
+  hit.entryCount = 0;
+  hit.headword.clear();
+  hit.idxStart = 0;
+}
+
+void clearHits(DictPrefixMatch& match) {
+  for (DictPrefixHit& hit : match.hits) clearHit(hit);
+  match.count = 0;
+}
+
+// Opens the slot for a hit of `runBytes` in hits[0, count), which is longest first with one hit
+// per length, keeping the MAX_HITS longest: the shorter hits move down a slot and the shortest
+// falls off a full list. Sets the slot's runBytes; the caller fills the rest. nullptr when that
+// length is taken or all MAX_HITS hits are longer.
+template <typename Hit>
+Hit* openHitSlot(Hit (&hits)[DictPrefixMatch::MAX_HITS], uint8_t& count, const uint8_t runBytes) {
   uint8_t at = 0;
-  while (at < count && items[at].hit.runBytes > runBytes) at++;
-  if (at == DictPrefixMatch::MAX_HITS) return nullptr;
+  while (at < count && hits[at].runBytes > runBytes) at++;
+  if (at == DictPrefixMatch::MAX_HITS || (at < count && hits[at].runBytes == runBytes)) return nullptr;
   if (count < DictPrefixMatch::MAX_HITS) count++;
-  for (uint8_t i = count - 1; i > at; i--) items[i] = std::move(items[i - 1]);
-  items[at] = PrefixCandidate{};
-  items[at].hit.runBytes = runBytes;
-  return &items[at];
+  for (uint8_t i = count - 1; i > at; i--) hits[i] = std::move(hits[i - 1]);
+  hits[at].runBytes = runBytes;
+  return &hits[at];
 }
 
-void Dictionary::collectPrefixes(LookupSession& session, const bool synonyms, PrefixSearch& search, PrefixHits& out) {
+// Removes match.hits[at]; the shorter hits move up a slot.
+void removeHit(DictPrefixMatch& match, const uint8_t at) {
+  for (uint8_t i = at; i + 1 < match.count; i++) match.hits[i] = std::move(match.hits[i + 1]);
+  match.count--;
+  clearHit(match.hits[match.count]);
+}
+
+// One hit per first entry: the longest keeps it.
+void keepLongestPerEntry(DictPrefixMatch& match) {
+  for (uint8_t i = 1; i < match.count;) {
+    bool listed = false;
+    for (uint8_t k = 0; k < i; k++) listed = listed || sameLocation(match.hits[k].location, match.hits[i].location);
+    if (listed) {
+      removeHit(match, i);
+    } else {
+      i++;
+    }
+  }
+}
+
+// Adds a followed .syn hit of a length no hit has: it gives way to a longer hit with the same first
+// entry and takes the place of a shorter one. Offered one at a time, the hits end up as the batch
+// rule (longest first, then one per first entry, then MAX_HITS) would leave them, because a hit
+// that falls off a full list can never come back.
+void offerHit(DictPrefixMatch& match, DictPrefixHit& hit) {
+  for (uint8_t k = 0; k < match.count; k++) {
+    if (!sameLocation(match.hits[k].location, hit.location)) continue;
+    if (match.hits[k].runBytes > hit.runBytes) return;
+    removeHit(match, k);
+    break;
+  }
+  if (DictPrefixHit* slot = openHitSlot(match.hits, match.count, hit.runBytes)) *slot = std::move(hit);
+}
+
+}  // namespace
+
+template <typename Hits>
+void Dictionary::collectPrefixes(LookupSession& session, PrefixSearch& search, Hits& out) {
+  constexpr bool synonyms = std::is_same<Hits, SynonymHits>::value;
   HalFile& sidecar = synonyms ? session.sidx : session.qidx;
   ScanReader& scan = synonyms ? session.synScan : session.idxScan;
   SampleWindow& window = synonyms ? session.synWindow : session.idxWindow;
@@ -1086,7 +1157,7 @@ void Dictionary::collectPrefixes(LookupSession& session, const bool synonyms, Pr
 
     // The scan stops at the target rather than at the window's end, so no window is scanned twice.
     // Prefixes of the run sort by length, so a later hit of a scan is a longer one.
-    PrefixCandidate* last = nullptr;  // the scan's latest hit while its byte-equal entries follow
+    [[maybe_unused]] DictPrefixHit* last = nullptr;  // .idx: the latest hit while its byte-equal entries follow
     while (scan.position() < fileSize) {
       const uint32_t entryStart = scan.position();
       const int wordLen = scan.readWord(wordBuf, sizeof(wordBuf));
@@ -1096,33 +1167,37 @@ void Dictionary::collectPrefixes(LookupSession& session, const bool synonyms, Pr
       if (StringUtils::asciiCaseCmp(wordBuf, target) > 0) break;
 
       const auto len = static_cast<size_t>(wordLen);
-      if (isRunPrefix(wordBuf, len, search.run, search.runBytes) && !out.hasLength(static_cast<uint8_t>(len))) {
-        last = out.insert(static_cast<uint8_t>(len));
-        if (!last) continue;
-        last->hit.headword.assign(wordBuf, len);
-        last->hit.entryCount = 1;
-        if (synonyms) {
-          last->ordinal = readBe32(suffix);
-        } else {
-          last->hit.location = idxEntryLocation(suffix);
-          last->hit.idxStart = entryStart;
-        }
-      } else if (last && strcmp(wordBuf, last->hit.headword.c_str()) == 0) {
-        // Same-headword entries sit next to each other in StarDict's order.
-        if (last->hit.entryCount < DictPrefixMatch::MAX_ENTRIES_PER_HIT) last->hit.entryCount++;
+      auto* hit = isRunPrefix(wordBuf, len, search.run, search.runBytes)
+                      ? openHitSlot(out.hits, out.count, static_cast<uint8_t>(len))
+                      : nullptr;
+      if constexpr (synonyms) {
+        if (hit) hit->ordinal = readBe32(suffix);
       } else {
-        last = nullptr;  // the run's entries are only those next to each other
+        if (hit) {
+          hit->entryCount = 1;
+          hit->headword.assign(wordBuf, len);
+          hit->idxStart = entryStart;
+          hit->location = idxEntryLocation(suffix);
+          last = hit;
+        } else if (last && strcmp(wordBuf, last->headword.c_str()) == 0) {
+          // Same-headword entries sit next to each other in StarDict's order.
+          if (last->entryCount < DictPrefixMatch::MAX_ENTRIES_PER_HIT) last->entryCount++;
+        } else {
+          last = nullptr;  // the run's entries are only those next to each other
+        }
       }
     }
     probesInFile++;
 
-    // A run of same-headword entries can begin before `start` only when its headword is w0: every
-    // entry before `start` sorts below w0, so none is byte-equal to a later headword.
-    if (!synonyms && start != 0) {
-      for (uint8_t i = 0; i < out.count; i++) {
-        if (out.items[i].hit.idxStart != start) continue;
-        if (!search.beginProbe()) return;
-        locateRun(session, out.items[i].hit);  // on a read error the hit keeps what its window holds
+    if constexpr (!synonyms) {
+      // A run of same-headword entries can begin before `start` only when its headword is w0:
+      // every entry before `start` sorts below w0, so none is byte-equal to a later headword.
+      if (start != 0) {
+        for (uint8_t i = 0; i < out.count; i++) {
+          if (out.hits[i].idxStart != start) continue;
+          if (!search.beginProbe()) return;
+          locateRun(session, out.hits[i]);  // on a read error the hit keeps what its window holds
+        }
       }
     }
 
@@ -1133,7 +1208,7 @@ void Dictionary::collectPrefixes(LookupSession& session, const bool synonyms, Pr
     // Spec 5.2: every prefix of the run that sorts before w0 is a prefix of w0, and shorter than
     // every hit already seen.
     size_t limit = commonPrefixLen(search.run, search.runBytes, window.low.c_str());
-    if (out.count > 0) limit = std::min<size_t>(limit, out.items[out.count - 1].hit.runBytes - 1);
+    if (out.count > 0) limit = std::min<size_t>(limit, out.hits[out.count - 1].runBytes - 1);
     limit = codepointFloor(search.run, limit);
     if (limit == 0 || limit >= targetBytes) return;  // strictly shorter every time, so it ends
     targetBytes = limit;
@@ -1170,29 +1245,34 @@ bool Dictionary::locateRun(LookupSession& session, DictPrefixHit& hit) {
   return true;
 }
 
-bool Dictionary::followSynonym(LookupSession& session, PrefixCandidate& candidate) {
-  const DictLocation entry = locateByOrdinal(session, candidate.ordinal, &candidate.hit.headword);
-  return entry.found && locateRun(session, candidate.hit);
-}
+void Dictionary::mergeSynonymHits(LookupSession& session, PrefixSearch& search, SynonymHits& syn,
+                                  DictPrefixMatch& matchOut) {
+  // The .idx hit wins a tie, so a .syn hit of a length the .idx found is never followed. Ties go
+  // before the .idx hits lose their duplicates, as the batch rule has them.
+  uint8_t untied = 0;
+  for (uint8_t i = 0; i < syn.count; i++) {
+    bool tied = false;
+    for (uint8_t k = 0; k < matchOut.count; k++) tied = tied || matchOut.hits[k].runBytes == syn.hits[i].runBytes;
+    if (!tied) syn.hits[untied++] = syn.hits[i];
+  }
+  syn.count = untied;
+  keepLongestPerEntry(matchOut);
 
-void Dictionary::mergePrefixHits(PrefixHits& idx, PrefixHits& syn, DictPrefixMatch& matchOut) {
-  uint8_t i = 0;
-  uint8_t j = 0;
-  while (matchOut.count < DictPrefixMatch::MAX_HITS && (i < idx.count || j < syn.count)) {
-    DictPrefixHit* next = nullptr;
-    if (j == syn.count || (i < idx.count && idx.items[i].hit.runBytes >= syn.items[j].hit.runBytes)) {
-      if (j < syn.count && syn.items[j].hit.runBytes == idx.items[i].hit.runBytes) j++;  // a tie: .idx
-      next = &idx.items[i++].hit;
-    } else {
-      next = &syn.items[j++].hit;
+  DictPrefixHit followed;
+  for (uint8_t i = 0; i < syn.count; i++) {
+    // A full list keeps nothing shorter than its shortest hit, whatever its first entry.
+    if (matchOut.count == DictPrefixMatch::MAX_HITS &&
+        syn.hits[i].runBytes < matchOut.hits[DictPrefixMatch::MAX_HITS - 1].runBytes) {
+      break;
     }
-    if (!next->location.found) continue;  // a .syn hit that could not be followed
-    bool listed = false;
-    for (uint8_t k = 0; k < matchOut.count; k++) {
-      const DictLocation& kept = matchOut.hits[k].location;
-      listed = listed || (kept.offset == next->location.offset && kept.size == next->location.size);
+    if (!search.beginProbe()) return;
+    followed.runBytes = syn.hits[i].runBytes;
+    const DictLocation entry = locateByOrdinal(session, syn.hits[i].ordinal, &followed.headword);
+    if (!entry.found || !locateRun(session, followed)) {
+      search.failed = true;
+      continue;
     }
-    if (!listed) matchOut.hits[matchOut.count++] = std::move(*next);
+    offerHit(matchOut, followed);
   }
 }
 
@@ -1202,7 +1282,10 @@ bool Dictionary::resolvePrefixes(const char* run, DictPrefixMatch& matchOut, Loo
     if (outResult) *outResult = r;
   };
   setResult(LookupResult::NotFound);
-  matchOut = DictPrefixMatch{};
+  clearHits(matchOut);
+  matchOut.aborted = false;
+  matchOut.probes = 0;
+  matchOut.reads = 0;
   if (!run || !isOpen()) return false;
 
   PrefixSearch search;
@@ -1212,38 +1295,34 @@ bool Dictionary::resolvePrefixes(const char* run, DictPrefixMatch& matchOut, Loo
   if (search.runBytes == 0) return false;
 
   sampleReads = 0;
-  PrefixHits idxHits;
-  PrefixHits synHits;
   {
     LookupSession session;
     if (!openSession(session)) {
       setResult(scanBuf ? LookupResult::ReadError : LookupResult::LowMemory);
       return false;
     }
-    collectPrefixes(session, /*synonyms=*/false, search, idxHits);
+    // The .idx hits go straight into matchOut; the .syn hits are merged into them.
+    collectPrefixes(session, search, matchOut);
+    SynonymHits syn;
     // Only a longer match could change the answer.
-    if (!search.aborted && hasSyn && (idxHits.count == 0 || idxHits.items[0].hit.runBytes < search.runBytes)) {
+    if (!search.aborted && hasSyn && (matchOut.count == 0 || matchOut.hits[0].runBytes < search.runBytes)) {
       if (openSynonyms(session)) {
-        collectPrefixes(session, /*synonyms=*/true, search, synHits);
-        // After the scans, so only the hits kept are followed.
-        for (uint8_t k = 0; k < synHits.count; k++) {
-          if (!search.beginProbe()) break;
-          if (!followSynonym(session, synHits.items[k])) search.failed = true;
-        }
+        collectPrefixes(session, search, syn);
       } else if (session.synFailed) {
         search.failed = true;
       }
     }
+    if (!search.aborted) mergeSynonymHits(session, search, syn, matchOut);
     const uint32_t reads = sampleReads + session.idxScan.reads() + session.synScan.reads();
     matchOut.reads = static_cast<uint16_t>(std::min<uint32_t>(reads, UINT16_MAX));
   }
   matchOut.probes = search.probes;
   if (search.aborted) {
+    clearHits(matchOut);
     matchOut.aborted = true;
     return false;
   }
 
-  mergePrefixHits(idxHits, synHits, matchOut);
   if (matchOut.count == 0) {
     if (search.failed) setResult(LookupResult::ReadError);
     return false;

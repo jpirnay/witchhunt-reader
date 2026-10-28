@@ -81,7 +81,8 @@ target_link_libraries(HtmlToPlainTextTest PRIVATE
 
 gtest_discover_tests(HtmlToPlainTextTest)
 
-# The run of CJK text a lookup starts on: pure string logic, no storage.
+# The run of CJK text a lookup starts on: pure string logic, no storage. It includes Dictionary.h
+# only for the constant it asserts against.
 add_executable(CjkLookupRunTest
   CjkLookupRunTest.cpp
   ${REPO_ROOT}/src/util/CjkLookupRun.cpp
@@ -89,6 +90,8 @@ add_executable(CjkLookupRunTest
 )
 
 target_include_directories(CjkLookupRunTest PRIVATE
+  ${REPO_ROOT}/test/zip_entry_reader   # HalStorage.h, which Dictionary.h includes
+  ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/src/util
   ${REPO_ROOT}/lib/Utf8
 )
