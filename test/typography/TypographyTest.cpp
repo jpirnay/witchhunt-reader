@@ -166,4 +166,34 @@ TEST(CjkPunctuation, TheCjkLatinGapSitsBetweenHanOrKanaAndLatinLettersOrDigits) 
   EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x5B57));
 }
 
+TEST(CjkPunctuation, TheCjkLatinGapRangesEndWhereTheyShould) {
+  using CjkPunctuation::takesCjkLatinGap;
+  // Each pair is the last codepoint inside a range and the first outside it, against 'A'.
+  EXPECT_FALSE(takesCjkLatinGap(0x3004, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x3005, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x3007, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0x3008, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x3096, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0x3097, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x30FA, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0x30FB, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x9FFF, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0xA000, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x2A6DF, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0x2A6E0, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x00BF));  // ¿
+  EXPECT_TRUE(takesCjkLatinGap(0x6F22, 0x00C0));   // À
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x00D7));  // ×
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x00F7));  // ÷
+  EXPECT_TRUE(takesCjkLatinGap(0x6F22, 0x024F));   // ɏ
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x0250));  // ɐ: IPA
+  EXPECT_TRUE(takesCjkLatinGap(0x6F22, 0x1EFF));   // ỿ
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x1F00));  // Greek extended
+  EXPECT_TRUE(takesCjkLatinGap(0x3083, 'A'));      // ゃ
+  EXPECT_TRUE(takesCjkLatinGap(0x30C3, 'A'));      // ッ
+  EXPECT_TRUE(takesCjkLatinGap(0x31F0, 'A'));      // ㇰ, katakana extension
+  EXPECT_TRUE(takesCjkLatinGap('9', 0x30AB));      // 9カ
+  EXPECT_TRUE(takesCjkLatinGap(0x3042, '0'));      // あ0
+}
+
 }  // namespace

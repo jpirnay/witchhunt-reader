@@ -63,6 +63,22 @@ std::vector<std::vector<std::string>> wordsOf(const std::vector<Line>& lines) {
 using Words = std::vector<std::vector<std::string>>;
 using X = std::vector<int16_t>;
 
+// The language's profile with the whole-em grid off, so a test line is as wide as it asks.
+TypographyProfile withoutGrid(const char* language) {
+  TypographyProfile profile = TypographyProfile::forLanguage(language);
+  profile.wholeEmGrid = false;
+  return profile;
+}
+
+// One paragraph of `text`; `greedy` selects the greedy breaker (hyphenation on), else the optimal one.
+std::vector<Line> layoutText(const char* text, const TypographyProfile& profile, const CssTextAlign alignment,
+                             const uint16_t width, const bool greedy = false, const int fontId = kFontId) {
+  ParsedText paragraph(false, greedy, aligned(alignment));
+  paragraph.setTypography(profile);
+  paragraph.addWord(text, EpdFontFamily::REGULAR);
+  return layout(paragraph, width, fontId);
+}
+
 }  // namespace
 
 TEST(CjkPunctuationWidths, EachMarkIsATokenGluedWhereKinsokuHoldsIt) {
@@ -333,4 +349,59 @@ TEST(OptimalBreakerIndent, BesideAFloatTheFirstLineTakesBothAndLaterLinesOnlyThe
   EXPECT_EQ(lineSize(lines, 0), 2u);
   EXPECT_EQ(lineSize(lines, 1), 3u);
   EXPECT_EQ(lineSize(lines, 2), 4u);
+}
+
+TEST(CjkLatinGap, AQuarterEmBetweenHanOrKanaAndLatinLettersOrDigits) {
+  // 10 px ems: (2 × 10 + 4) / 8 = 3 px on each side of A and 1.
+  EXPECT_EQ(layoutText("字A字1か", withoutGrid("ja"), CssTextAlign::Left, 400)[0].xpos, (X{0, 13, 26, 39, 52}));
+  EXPECT_EQ(layoutText("字A", withoutGrid("zh"), CssTextAlign::Left, 400)[0].xpos, (X{0, 13}));
+}
+TEST(CjkLatinGap, NoGapAtASpaceAMarkAFullWidthLetterOrInOtherBooks) {
+  const auto xpos = [](const TypographyProfile& profile, const std::vector<const char*>& words) {
+    ParsedText text(false, false, aligned(CssTextAlign::Left));
+    text.setTypography(profile);
+    for (const char* word : words) text.addWord(word, EpdFontFamily::REGULAR);
+    return layout(text, 400)[0].xpos;
+  };
+  EXPECT_EQ(xpos(withoutGrid("ja"), {"字", "A字"}), (X{0, 15, 28}));           // the source's space; the gap after A
+  EXPECT_EQ(xpos(withoutGrid("ja"), {"字「A」字"}), (X{0, 10, 20, 30, 40}));   // next to brackets
+  EXPECT_EQ(xpos(withoutGrid("ja"), {"字ＡＢ字"}), (X{0, 10, 20, 30}));        // full-width letters
+  EXPECT_EQ(xpos(withoutGrid("ja"), {"ｱA"}), (X{0, 10}));                      // half-width katakana
+  EXPECT_EQ(xpos(TypographyProfile::forLanguage("ko"), {"漢A"}), (X{0, 10}));  // Korean books (KLREQ)
+  EXPECT_EQ(xpos(TypographyProfile{}, {"字A字"}), (X{0, 10, 20}));             // other books (spec 5.6)
+}
+TEST(CjkLatinGap, ALineBreakAtTheGapDropsIt) {
+  // 字字字A is 43 px with its gap and fills 43 px; the last 字 would need 13 px more and starts the next line at 0.
+  // The other way round, A starts the next line at 0.
+  for (const bool greedy : {false, true}) {
+    const auto after = layoutText("字字字A字", withoutGrid("ja"), CssTextAlign::Left, 43, greedy);
+    ASSERT_EQ(wordsOf(after), (Words{{"字", "字", "字", "A"}, {"字"}})) << (greedy ? "greedy" : "DP");
+    EXPECT_EQ(after[0].xpos, (X{0, 10, 20, 33}));
+    EXPECT_EQ(after[1].xpos, (X{0}));
+    const auto before = layoutText("字字字字A", withoutGrid("ja"), CssTextAlign::Left, 40, greedy);
+    ASSERT_EQ(wordsOf(before), (Words{{"字", "字", "字", "字"}, {"A"}})) << (greedy ? "greedy" : "DP");
+    EXPECT_EQ(before[1].xpos, (X{0}));
+  }
+}
+TEST(CjkLatinGap, TheGapIsAQuarterEmOfTheCjkSide) {
+  // 字 at 160 % is 16 px: the gaps on both of its sides are (2 × 16 + 4) / 8 = 4 px, though the letters are at 100 %.
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.setTypography(withoutGrid("ja"));
+  text.addWord("A", EpdFontFamily::REGULAR);
+  text.addWord("字", EpdFontFamily::REGULAR, false, /*attachToPrevious=*/true, 160);
+  text.addWord("A", EpdFontFamily::REGULAR, false, /*attachToPrevious=*/true);
+  EXPECT_EQ(layout(text, 400)[0].xpos, (X{0, 14, 34}));
+}
+TEST(CjkLatinGap, AFontWithoutCjkGlyphsGetsNoGap) {
+  // A Latin reader font has no 一 of its own: no em, so no gap, as no grid and no narrowed mark (A3a).
+  EXPECT_EQ(layoutText("字A字", TypographyProfile::forLanguage("ja"), CssTextAlign::Left, 400, false,
+                       GfxRenderer::LATIN_FONT)[0]
+                .xpos,
+            (X{0, 10, 20}));
+}
+TEST(CjkLatinGap, TheGapStretchesWithJustification) {
+  // 字A字字 is 46 px; the 4 px left on 50 go 1, 1 and 2 to its three gaps (the two CJK-Latin gaps among them), flush.
+  const auto lines = layoutText("字A字字字字", withoutGrid("ja"), CssTextAlign::Justify, 50);
+  ASSERT_EQ(wordsOf(lines), (Words{{"字", "A", "字", "字"}, {"字", "字"}}));
+  EXPECT_EQ(lines[0].xpos, (X{0, 14, 28, 40}));
 }

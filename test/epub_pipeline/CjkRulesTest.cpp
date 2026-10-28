@@ -51,6 +51,7 @@ struct DumpLine {
   bool followsLine = false;     // the line before it in `lines` is the previous line of the same flow
   std::string shape;            // x, alignment and size of the LINE record: lines of one shape share a text width
   bool justified = false;       // align=0
+  int align = -1;               // the LINE record's align= (0 justified, 1 left, 2 right); -1 for a cell's LN
   bool cell = false;            // a table cell line (LN record)
   int y = 0;
 };
@@ -99,6 +100,7 @@ std::vector<DumpLine> parseLines(const std::string& dump) {
       if (!next.cell && !x.empty()) next.x = std::stoi(x.substr(2));
       next.shape = x + " " + align + " " + size;
       next.justified = align == "align=0";
+      if (!next.cell && !align.empty()) next.align = std::stoi(align.substr(6));
       lines.push_back(next);
       inFlow = true;
     } else if (line.rfind("W x=", 0) == 0 && !lines.empty()) {
@@ -260,6 +262,8 @@ std::map<std::string, int> blockLeftEdges(const GfxRenderer& renderer, const std
 struct Case {
   std::string epub;
   std::string language;
+  bool mixesLatin = false;    // puts Latin letters or digits against Han or kana with no space
+  bool forcesPushIn = false;  // has lines the push-in must narrow marks on to fit
   bool hyphenation = false;
 };
 
@@ -279,12 +283,13 @@ class CjkRules : public testing::TestWithParam<Case> {
                            (c.hyphenation ? "_hyph" : "") + (alignment() == 0 ? "_justified" : ""));
     fs::remove_all(cacheDir);
     fs::create_directories(cacheDir);
-    pipeline_harness::Profile profile;
-    profile.paragraphAlignment = alignment();
-    profile.hyphenationEnabled = c.hyphenation;
-    table = TypographyProfile::forLanguage(c.language).punctuation;
+    pipeline_harness::Profile run;
+    run.paragraphAlignment = alignment();
+    run.hyphenationEnabled = c.hyphenation;
+    profile = TypographyProfile::forLanguage(c.language);
+    table = profile.punctuation;
     std::ostringstream dump;
-    ASSERT_TRUE(pipeline_harness::runAndDump(c.epub, cacheDir.string(), profile, dump)) << dump.str();
+    ASSERT_TRUE(pipeline_harness::runAndDump(c.epub, cacheDir.string(), run, dump)) << dump.str();
     lines = parseLines(dump.str());
     ASSERT_FALSE(lines.empty());
   }
@@ -294,6 +299,7 @@ class CjkRules : public testing::TestWithParam<Case> {
   virtual uint8_t alignment() const { return 1; }
 
   GfxRenderer renderer;
+  TypographyProfile profile;
   TypographyProfile::Punctuation table = TypographyProfile::Punctuation::SimplifiedChinese;
   std::vector<DumpLine> lines;
 };
@@ -366,6 +372,38 @@ TEST_P(CjkRules, UnspacedCjkSitsWhereItsWidthsPutIt) {
   }
 }
 
+// Between Han or kana and a Latin letter or European digit with no space in the source, a Chinese or Japanese book
+// sets a quarter em of the CJK character's size, at least half of it on a line that was pushed in; other books set
+// nothing (spec 5.4). A gap of the space advance or more is the source's own space.
+TEST_P(CjkRules, CjkLatinGapsSitWhereTheSpecPutsThem) {
+  const int space = renderer.getSpaceWidth(1);
+  size_t checked = 0;
+  for (const auto& line : lines) {
+    if (line.align != 1 && line.align != 2) continue;  // a justified line stretches its gaps
+    for (size_t k = 0; k + 1 < line.words.size(); ++k) {
+      const uint32_t left = lastCodepoint(line.words[k].text);
+      const uint32_t right = firstCodepoint(line.words[k + 1].text);
+      if (!CjkPunctuation::takesCjkLatinGap(left, right)) continue;
+      // The base of a ruby group is widened and drawn into its share: its x says nothing about the gap.
+      if (inRubyGroup(line, k) || inRubyGroup(line, k + 1)) continue;
+      const int gap = line.words[k + 1].x - line.words[k].x - wordWidth(line, line.words[k]);
+      if (gap >= space) continue;  // the source's own space
+      ++checked;
+      DumpWord one = line.words[CjkPunctuation::isHanOrKana(left) ? k : k + 1];
+      one.text = "\xE4\xB8\x80";  // 一, in the CJK token's style and size
+      const int em = wordWidth(line, one);
+      const int quarter = (em * CjkPunctuation::kCjkLatinGap + 4) / 8;
+      if (profile.cjkLatinGap) {
+        EXPECT_GE(gap, quarter / 2) << "gap in: " << lineText(line);
+        EXPECT_LE(gap, quarter) << "gap in: " << lineText(line);
+      } else {
+        EXPECT_EQ(gap, 0) << "gap in: " << lineText(line);
+      }
+    }
+  }
+  if (GetParam().mixesLatin) EXPECT_GT(checked, 0u) << "no CJK-Latin boundary checked";
+}
+
 // Every ruby box lies inside its block and the page, no two boxes on a line overlap, and a box covers no word
 // outside its group but kana and CJK punctuation outside any group (spec 7.2): never Han, Latin or another
 // group's base.
@@ -431,7 +469,6 @@ bool hasCjkGap(const DumpLine& line) {
 // indented) and follows without a margin. Lines justified at word spaces (Latin, Korean) keep their old rounding
 // and are not checked: the Korean book is not instantiated here.
 TEST_P(CjkJustifiedRules, JustifiedLinesEndFlushOnAWholeEmGrid) {
-  const TypographyProfile profile = TypographyProfile::forLanguage(GetParam().language);
   ASSERT_EQ(profile.justify, TypographyProfile::Justify::BetweenCharacters);
 
   const std::vector<std::string> keys = blockKeys(lines);
@@ -474,16 +511,21 @@ TEST_P(CjkJustifiedRules, JustifiedLinesEndFlushOnAWholeEmGrid) {
 }
 
 std::vector<Case> cjkBooks() {
+  struct Book {
+    const char* name;
+    const char* language;
+    bool mixesLatin;
+    bool forcesPushIn;
+  };
   std::vector<Case> cases;
-  for (const auto& [book, language] :
-       std::vector<std::pair<const char*, const char*>>{{"test_cjk_line_breaking", "ja"},
-                                                        {"test_cjk_ja_soseki", "ja"},
-                                                        {"test_cjk_ko_hyeon", "ko"},
-                                                        {"test_cjk_zh_honglou", "zh-Hant"},
-                                                        {"test_cjk_zh_punctuation", "zh-Hans"}}) {
-    const std::string path = (fs::path(CORPUS_DIR) / (std::string(book) + ".epub")).string();
-    cases.push_back(Case{path, language, false});
-    cases.push_back(Case{path, language, true});
+  for (const Book& book : std::vector<Book>{{"test_cjk_line_breaking", "ja", true, false},
+                                            {"test_cjk_ja_soseki", "ja", false, false},
+                                            {"test_cjk_ko_hyeon", "ko", false, false},
+                                            {"test_cjk_zh_honglou", "zh-Hant", false, false},
+                                            {"test_cjk_zh_punctuation", "zh-Hans", true, false}}) {
+    const std::string path = (fs::path(CORPUS_DIR) / (std::string(book.name) + ".epub")).string();
+    cases.push_back(Case{path, book.language, book.mixesLatin, book.forcesPushIn, false});
+    cases.push_back(Case{path, book.language, book.mixesLatin, book.forcesPushIn, true});
   }
   return cases;
 }

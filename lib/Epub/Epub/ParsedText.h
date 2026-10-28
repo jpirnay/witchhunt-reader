@@ -166,8 +166,13 @@ class ParsedText {
   // (no float zones active) that returns pageWidth unchanged.
   int widthForLine(int lineIndex, int lineHeight, int16_t blockStartY, int pageWidth) const;
   // The natural gap before words[j] (j > 0), unscaled: kerning across a glued boundary, nothing at a
-  // CJK gap, else the space advance. Every breaker measures gaps through this.
+  // CJK gap but the CJK-Latin gap, which is a quarter of the CJK side's scaled em, else the space advance.
+  // Every breaker measures gaps through this.
   int naturalGapBefore(const GfxRenderer& renderer, int fontId, size_t j) const;
+  // The CJK-Latin gap before words[j] (j > 0) in pixels, already scaled to the CJK side: callers must not
+  // multiply it by wordScale. 0 unless the profile sets it and the boundary is a breakable CJK gap between
+  // Han or kana and a Latin letter or digit.
+  int cjkLatinGapBefore(const GfxRenderer& renderer, int fontId, size_t j) const;
   // Room in all five per-word vectors for `additional` more tokens; false (and wordGrowthRefused_)
   // when the heap cannot hold the growth.
   bool reserveWords(size_t additional);

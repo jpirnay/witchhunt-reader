@@ -26,7 +26,7 @@ struct TypographyProfile {
   Breaking breaking = Breaking::AtSpaces;
   Justify justify = Justify::WordSpaces;
   Punctuation punctuation = Punctuation::SimplifiedChinese;
-  // A quarter em between Han or kana and a Latin letter or digit with no space between them (PR A3b).
+  // A quarter em between Han or kana and a Latin letter or digit with no space between them (spec 5.4).
   bool cjkLatinGap = false;
   // Text width and first-line indent rounded down to whole ems, so CJK characters sit in columns.
   bool wholeEmGrid = false;

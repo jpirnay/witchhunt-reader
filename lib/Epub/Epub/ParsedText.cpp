@@ -402,8 +402,23 @@ int ParsedText::kernBefore(const GfxRenderer& renderer, const int fontId, const 
 int ParsedText::naturalGapBefore(const GfxRenderer& renderer, const int fontId, const size_t j) const {
   const TokenBoundary::Boundary boundary = wordBoundaries[j];
   if (boundary.continues) return kernBefore(renderer, fontId, j);
-  if (boundary.noSpaceBefore) return 0;
+  if (boundary.noSpaceBefore) return cjkLatinGapBefore(renderer, fontId, j);
   return spaceBefore(renderer, fontId, j);
+}
+
+int ParsedText::cjkLatinGapBefore(const GfxRenderer& renderer, const int fontId, const size_t j) const {
+  if (!typography_.cjkLatinGap) return 0;
+  const TokenBoundary::Boundary boundary = wordBoundaries[j];
+  if (boundary.continues || !boundary.noSpaceBefore) return 0;
+  const uint32_t left = lastCodepoint(words[j - 1]);
+  const uint32_t right = firstCodepoint(words[j]);
+  if (!CjkPunctuation::takesCjkLatinGap(left, right)) return 0;
+  // The gap is a quarter of the CJK character's em, in its own face and size.
+  const size_t k = CjkPunctuation::isHanOrKana(left) ? j - 1 : j;
+  const int em = cjkEm(renderer, wordFontId(k, fontId),
+                       static_cast<EpdFontFamily::Style>(wordStyles[k] & EpdFontFamily::BOLD_ITALIC), wordScale(k));
+  if (em <= 0) return 0;
+  return (em * CjkPunctuation::kCjkLatinGap + 4) / 8;
 }
 
 void ParsedText::layoutAndExtractLines(
@@ -1695,6 +1710,9 @@ ParsedText::LineProcessResult ParsedText::extractLine(
         // Inter-word gaps scale with the preceding word's effective size, matching wordStyles usage.
         totalNaturalGaps += static_cast<int>(
             spaceBefore(renderer, fontId, lastBreakAt + wordIdx) * wordScale(lastBreakAt + wordIdx - 1) + 0.5f);
+      } else {
+        // The CJK-Latin gap is already scaled to its CJK side.
+        totalNaturalGaps += cjkLatinGapBefore(renderer, fontId, lastBreakAt + wordIdx);
       }
     } else if (wordIdx > 0) {
       // Non-breaking space tokens (" " with continues=true) are visible, stretchable spaces —
@@ -1831,10 +1849,12 @@ ParsedText::LineProcessResult ParsedText::extractLine(
       int gap = 0;
       if (wordIdx + 1 < lineWordCount) {
         const uint32_t nextFirstCp = firstCodepoint(words[lastBreakAt + wordIdx + 1]);
-        // A CJK gap has no natural width; it only takes the justification share below.
+        // A CJK gap has no natural width but the CJK-Latin gap; it takes the justification share below.
         if (TokenBoundary::hasSpace(boundaries[lastBreakAt + wordIdx + 1])) {
           gap = static_cast<int>(
               spaceBefore(renderer, fontId, lastBreakAt + wordIdx + 1) * wordScale(lastBreakAt + wordIdx) + 0.5f);
+        } else {
+          gap = cjkLatinGapBefore(renderer, fontId, lastBreakAt + wordIdx + 1);
         }
         // Don't stretch the gap before closing punctuation — it looks wrong with
         // extra space before ".", ")", "»" etc.

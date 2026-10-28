@@ -37,6 +37,8 @@
  16. emphasis dots text-emphasis-style spans: sesame, dot and open circle by class (plain, -epub- and -webkit-
                    forms) and by style=, a filled double-circle, a span that wraps over several lines, and a span
                    over 。 and 「」 (the marks skip the punctuation)
+ 17. cjk-latin     a quarter em between Han or kana and Latin letters or digits, and none next to brackets,
+                   full-width letters, half-width katakana or a source space (spec 5.4)
 
 Each case paragraph opens with an indented first line (CSS text-indent), so the rule checker tells a
 paragraph's first line from a line the layout broke.
@@ -142,6 +144,13 @@ EMPHASIS = (
     "<p>句読点は<span class=\"dot\">「強調」の中。そして、続く。</span>印は付かない。</p>"
 )
 
+# Case 17: the CJK-Latin gap where it belongs (kana and Latin, digits and Han, a hyphenated Latin word), and the
+# boundaries that take none: brackets, full-width letters, half-width katakana, the source's own spaces.
+CJK_LATIN = (
+    "<p>新しいiPhoneは2026年10月に出た。USB-C端子が付き、価格は約15万円だ。</p>\n"
+    "<p>「Python」と書いた本の第3章とChapter 4、ＡＢＣ全角、abcｱｲｳ半角。漢字 Latin 漢字は空白のまま。</p>"
+)
+
 CASES = [
     ("1. kinsoku", f"<p>{KINSOKU}</p>\n<p>{KINSOKU}</p>"),
     (
@@ -181,6 +190,7 @@ CASES = [
     ("14. longer ruby", RUBY_LONGER),
     ("15. ruby in table", RUBY_TABLE),
     ("16. emphasis dots", EMPHASIS),
+    ("17. cjk-latin", CJK_LATIN),
 ]
 
 CHAPTER = """<?xml version="1.0" encoding="UTF-8"?>
