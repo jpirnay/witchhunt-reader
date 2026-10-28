@@ -157,6 +157,7 @@ bool readerFaceTried[SIZE_COUNT] = {};
 // The reader font's face at SIZES[size], made the first time UI text needs a glyph the faces before it lack: no
 // memory until then. Only under the RenderLock, which the TTF engine draws under (spec 3.4): a page build may be
 // using it on another task.
+// cppcheck-suppress constParameterCallback ; the signature is FallbackFaceProvider::setReaderFace's
 const EpdFontData* readerFaceAt(void* ctx) {
   const auto size = reinterpret_cast<uintptr_t>(ctx);
   if (size >= SIZE_COUNT || !RenderLock::heldByCurrentTask()) return nullptr;
