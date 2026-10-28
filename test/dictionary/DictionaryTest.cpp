@@ -117,7 +117,7 @@ void appendBe32(std::string& out, uint32_t v) {
 // /dictionaries/<folder>, both indexes sorted the way StarDict sorts them.
 // Byte-equal headwords keep the order the test gives them.
 void writeDictionary(const std::string& folder, std::vector<HeadwordSpec> headwords,
-                     std::vector<SynonymSpec> synonyms = {}) {
+                     std::vector<SynonymSpec> synonyms = {}, const std::string& sametypesequence = "m") {
   std::stable_sort(headwords.begin(), headwords.end(),
                    [](const HeadwordSpec& a, const HeadwordSpec& b) { return stardictLess(a.word, b.word); });
   std::stable_sort(synonyms.begin(), synonyms.end(),
@@ -150,7 +150,7 @@ void writeDictionary(const std::string& folder, std::vector<HeadwordSpec> headwo
   fs::remove_all(dir);
   writeWholeFile(dir / "words.idx", idx);
   writeWholeFile(dir / "words.dict", dict);
-  writeWholeFile(dir / "words.ifo", "StarDict's dict ifo file\nsametypesequence=m\n");
+  writeWholeFile(dir / "words.ifo", "StarDict's dict ifo file\nsametypesequence=" + sametypesequence + "\n");
   if (!syn.empty()) writeWholeFile(dir / "words.syn", syn);
 }
 
@@ -1223,6 +1223,105 @@ TEST_F(DictionaryTest, LatinDictionaryAnswersACjkRunInOneProbePerFile) {
     EXPECT_EQ(r, Dictionary::LookupResult::NotFound) << c.fixture;
     EXPECT_EQ(m.probes, c.probes) << c.fixture;
   }
+}
+
+// --- readPrefixDefinitions ----------------------------------------------------
+
+std::string prefixDefinitions(Dictionary& dict, const char* run, Dictionary::LookupResult* r = nullptr) {
+  DictPrefixMatch m;
+  EXPECT_TRUE(dict.resolvePrefixes(run, m)) << run;
+  std::string out;
+  EXPECT_TRUE(dict.readPrefixDefinitions(m, out, r)) << run;
+  return out;
+}
+
+TEST_F(DictionaryTest, PrefixDefinitionsListEachEntryUnderItsHeadword) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("DefsBasic", kBasic));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "DefsBasic"));
+  Dictionary::LookupResult r = Dictionary::LookupResult::NotFound;
+  EXPECT_EQ(prefixDefinitions(dict, "大学生活", &r), "大学生\nstudent\n\n大学\nuniversity\n\n大\nbig");
+  EXPECT_EQ(r, Dictionary::LookupResult::Found);
+}
+
+TEST_F(DictionaryTest, PrefixDefinitionsListEveryEntryOfTheLongestMatchFirst) {
+  ASSERT_NO_FATAL_FAILURE(
+      writeDictionary("DefsRun", {{"银", "silver"}, {"银行", "bank"}, {"银行", "row of silver shops"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "DefsRun"));
+  EXPECT_EQ(prefixDefinitions(dict, "银行家"), "银行\nbank\n\n银行\nrow of silver shops\n\n银\nsilver");
+}
+
+TEST_F(DictionaryTest, PrefixDefinitionsFillTheBufferBeforeTheShorterMatches) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary(
+      "DefsFill", {{"银", "silver"}, {"银行", std::string(32768, 'a')}, {"银行", std::string(32748, 'b')}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "DefsFill"));
+  const std::string out = prefixDefinitions(dict, "银行家");
+  EXPECT_EQ(out.size(), 65532u);  // 7 + 32768 + 2 + 7 + 32748
+  EXPECT_NE(out.find(std::string(32748, 'b')), std::string::npos);
+  EXPECT_EQ(out.find("silver"), std::string::npos);  // its 12 bytes do not fit the 4 that are left
+}
+
+TEST_F(DictionaryTest, HtmlPrefixDefinitionsBoldTheirEscapedHeadword) {
+  ASSERT_NO_FATAL_FAILURE(
+      writeDictionary("DefsHtml", {{"大", "<i>big</i>"}, {"大学", "<i>university</i>"}, {"a<b&c", "odd"}}, {}, "h"));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "DefsHtml"));
+  ASSERT_TRUE(dict.definitionsAreHtml());
+  EXPECT_EQ(prefixDefinitions(dict, "大学"), "<p><b>大学</b></p><i>university</i><p><b>大</b></p><i>big</i>");
+  EXPECT_EQ(prefixDefinitions(dict, "a<b&c"), "<p><b>a&lt;b&amp;c</b></p>odd");
+}
+
+TEST_F(DictionaryTest, PrefixDefinitionsStayWithinTheCap) {
+  ASSERT_NO_FATAL_FAILURE(
+      writeDictionary("DefsCap", {{"大", "big"}, {"大学", std::string(Dictionary::MAX_DEFINITION_BYTES, 'y')}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "DefsCap"));
+  const std::string out = prefixDefinitions(dict, "大学");
+  EXPECT_EQ(out.size(), Dictionary::MAX_DEFINITION_BYTES);
+  EXPECT_EQ(out.rfind("大学\n", 0), 0u);
+  EXPECT_EQ(out.find("big"), std::string::npos);
+}
+
+TEST_F(DictionaryTest, PrefixDefinitionsFromADictZipMatchThePlainOnes) {
+  Dictionary plain;
+  Dictionary zipped;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(plain, provision("plain", "DefsPlain")));
+  ASSERT_NO_FATAL_FAILURE(openIndexed(zipped, provision("zipped", "DefsZipped")));
+  for (const std::string run : {"quixotic", "longword"}) {
+    const std::string fromPlain = prefixDefinitions(plain, run.c_str());
+    EXPECT_EQ(prefixDefinitions(zipped, run.c_str()), fromPlain) << run;
+    EXPECT_EQ(fromPlain.rfind(run + "\n" + expectedDefinition(run), 0), 0u) << run;
+  }
+}
+
+TEST_F(DictionaryTest, PrefixDefinitionsReportLowMemory) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("DefsLowMem", kBasic));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "DefsLowMem"));
+  DictPrefixMatch m;
+  ASSERT_TRUE(dict.resolvePrefixes("大学生活", m));
+
+  const auto savedContig = ESP.getMaxAllocHeap();
+  ESP.setMaxAllocHeap(1024);
+  std::string out = "stale";
+  Dictionary::LookupResult r = Dictionary::LookupResult::Found;
+  EXPECT_FALSE(dict.readPrefixDefinitions(m, out, &r));
+  ESP.setMaxAllocHeap(savedContig);
+  EXPECT_EQ(r, Dictionary::LookupResult::LowMemory);
+  EXPECT_TRUE(out.empty());
+}
+
+TEST_F(DictionaryTest, PrefixDefinitionsOfNoHitsReadNothing) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("DefsNone", kBasic));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "DefsNone"));
+  const DictPrefixMatch m;
+  std::string out;
+  Dictionary::LookupResult r = Dictionary::LookupResult::Found;
+  EXPECT_FALSE(dict.readPrefixDefinitions(m, out, &r));
+  EXPECT_EQ(r, Dictionary::LookupResult::NotFound);
 }
 
 }  // namespace

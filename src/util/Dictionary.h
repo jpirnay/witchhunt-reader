@@ -155,6 +155,19 @@ class Dictionary {
   // bytes (CjkLookupRun.cpp asserts it). A stack buffer of this size holds each probe's target.
   static constexpr size_t MAX_PREFIX_RUN_BYTES = 48;
 
+  // The definitions of match.hits[0..count), in one string sized once from the index sizes (one
+  // allocation, as readDefinition's). Every entry of every hit, in this order: hit by hit, longest
+  // first; within a hit, its entryCount entries read from .idx at idxStart, in .idx order. So the
+  // longest match's entries all come before the shorter matches. Plain: "headword\n" + definition
+  // per entry (a duplicate headword repeats its line), entries joined by "\n\n". HTML
+  // (definitionsAreHtml()): "<p><b>" + headword with & < > escaped + "</b></p>" + definition per
+  // entry, no separator. At most MAX_DEFINITION_BYTES in all: the very first entry's definition is
+  // cut to fit; every later entry is taken only whole, and at the first one that does not fit, it
+  // and everything after it are left out. Refused with LowMemory, like readDefinition, when
+  // ESP.getMaxAllocHeap() < total + 8 KB; a .dict.dz takes its inflate window first.
+  bool readPrefixDefinitions(const DictPrefixMatch& match, std::string& definitionOut,
+                             LookupResult* outResult = nullptr);
+
   static std::string cleanWord(const char* word);
 
   // A short fixed name for a lookup outcome ("found", "not_found", ...), for log lines and the
@@ -344,9 +357,19 @@ class Dictionary {
   // buildIndex() so each sidecar is rebuilt only when actually stale.
   bool sidecarIsStale(const std::string& sourcePath, const std::string& sidecarPath, uint32_t magic);
 
-  // Read the definition at location straight into out. On failure returns false
-  // and, if outResult is given, sets it to the specific reason (Decompress /
-  // LowMemory / ReadError).
+  // Read size bytes of the definition at location into dst (room for size bytes). On failure
+  // returns false and, if outResult is given, sets the reason (Decompress / LowMemory / ReadError).
+  // The caller has taken the inflate window of a .dict.dz and checked the heap.
+  bool readEntryInto(const DictLocation& location, uint32_t size, char* dst, LookupResult* outResult);
+
+  // The next .idx entry of match's hits in reading order: hit by hit, each hit's entryCount entries
+  // from its idxStart. `hit` and `entry` are the position of the entry to read, advanced past it.
+  // False when there are none left or the .idx could not be read (`ioError`).
+  bool nextPrefixEntry(LookupSession& session, const DictPrefixMatch& match, uint8_t& hit, uint8_t& entry,
+                       DictLocation& locationOut, bool& ioError);
+
+  // Read the definition at location straight into out. On failure returns false and, if outResult
+  // is given, sets it to the specific reason (Decompress / LowMemory / ReadError).
   bool readDefinition(const DictLocation& location, std::string& out, LookupResult* outResult = nullptr);
   static void stemVariants(const std::string& word, std::vector<std::string>& out);
   // The word after a French elision ("l'histoire" -> "histoire"); empty when

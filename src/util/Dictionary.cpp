@@ -661,8 +661,6 @@ bool Dictionary::readDefinition(const DictLocation& location, std::string& out, 
     return fail(LookupResult::ReadError);
   }
 
-  const char* const dictPath = buildPath(hasPlainDict ? ".dict" : ".dict.dz");
-
   // Take the inflate window BEFORE the definition buffer: it is the larger of
   // the two and both come out of the same free run, so asking for it second is
   // what leaves it a few bytes short on a fragmented heap. After the first
@@ -681,18 +679,30 @@ bool Dictionary::readDefinition(const DictLocation& location, std::string& out, 
   }
   out.assign(size, '\0');
 
+  if (!readEntryInto(location, size, &out[0], outResult)) {
+    out.clear();
+    return false;
+  }
+  return true;
+}
+
+bool Dictionary::readEntryInto(const DictLocation& location, uint32_t size, char* dst, LookupResult* outResult) {
+  const auto fail = [outResult](LookupResult r) {
+    if (outResult) *outResult = r;
+    return false;
+  };
+  const char* const dictPath = buildPath(hasPlainDict ? ".dict" : ".dict.dz");
+
   if (!hasPlainDict) {
     // Inflate straight into the definition buffer. Upstream staged this through
     // a temp file on the SD and read it back, paying a write, a FAT directory
     // update, a reopen and a reread per lookup for bytes it was going to
     // allocate room for anyway.
     DictZip::ExtractError xerr = DictZip::ExtractError::None;
-    if (!DictZip::extractEntry(dictPath, location.offset, size, reinterpret_cast<uint8_t*>(&out[0]), dzScratch,
-                               &xerr)) {
+    if (!DictZip::extractEntry(dictPath, location.offset, size, reinterpret_cast<uint8_t*>(dst), dzScratch, &xerr)) {
       // Map the specific extraction cause to the lookup result: allocation
       // failure (heap fragmentation) vs corrupt/truncated .dz vs an IO error.
       LOG_ERR("DICT", "dictzip extraction failed for %s (error %d)", basePath.c_str(), static_cast<int>(xerr));
-      out.clear();
       switch (xerr) {
         case DictZip::ExtractError::LowMemory:
           return fail(LookupResult::LowMemory);
@@ -708,25 +718,21 @@ bool Dictionary::readDefinition(const DictLocation& location, std::string& out, 
 
   HalFile dict;
   if (!Storage.openFileForRead("DICT", dictPath, dict)) {
-    out.clear();
     return fail(LookupResult::ReadError);
   }
   const uint32_t dictSize = static_cast<uint32_t>(dict.fileSize());
   if (location.offset > dictSize || size > dictSize - location.offset) {
     LOG_ERR("DICT", "Definition out of bounds (%lu+%lu > %lu)", static_cast<unsigned long>(location.offset),
             static_cast<unsigned long>(size), static_cast<unsigned long>(dictSize));
-    out.clear();
     return fail(LookupResult::ReadError);
   }
   if (!dict.seekSet(location.offset)) {
     LOG_ERR("DICT", "Seek to %lu failed", static_cast<unsigned long>(location.offset));
-    out.clear();
     return fail(LookupResult::ReadError);
   }
   // The bounds check above guarantees the bytes exist, so a short read is an IO
   // failure — surface it instead of returning a silently truncated definition.
-  if (dict.read(&out[0], size) != static_cast<int>(size)) {
-    out.clear();
+  if (dict.read(dst, size) != static_cast<int>(size)) {
     return fail(LookupResult::ReadError);
   }
   return true;
@@ -1328,6 +1334,164 @@ bool Dictionary::resolvePrefixes(const char* run, DictPrefixMatch& matchOut, Loo
     return false;
   }
   setResult(LookupResult::Found);
+  return true;
+}
+
+namespace {
+
+// What readPrefixDefinitions() writes before an entry's definition: the headword on its own line,
+// or, for HTML, the headword in bold with & < > escaped.
+constexpr char HTML_HEAD_OPEN[] = "<p><b>";
+constexpr char HTML_HEAD_CLOSE[] = "</b></p>";
+constexpr char ENTRY_SEPARATOR[] = "\n\n";
+
+const char* htmlEscape(const char c) {
+  switch (c) {
+    case '&':
+      return "&amp;";
+    case '<':
+      return "&lt;";
+    case '>':
+      return "&gt;";
+    default:
+      return nullptr;
+  }
+}
+
+uint32_t headingBytes(const std::string& headword, const bool html) {
+  if (!html) return static_cast<uint32_t>(headword.size()) + 1;
+  uint32_t bytes = sizeof(HTML_HEAD_OPEN) - 1 + sizeof(HTML_HEAD_CLOSE) - 1;
+  for (const char c : headword) bytes += htmlEscape(c) ? static_cast<uint32_t>(strlen(htmlEscape(c))) : 1;
+  return bytes;
+}
+
+// Writes the heading at dst; returns the bytes written (headingBytes()).
+uint32_t writeHeading(char* dst, const std::string& headword, const bool html) {
+  char* p = dst;
+  if (html) {
+    memcpy(p, HTML_HEAD_OPEN, sizeof(HTML_HEAD_OPEN) - 1);
+    p += sizeof(HTML_HEAD_OPEN) - 1;
+    for (const char c : headword) {
+      const char* escaped = htmlEscape(c);
+      if (escaped) {
+        const size_t n = strlen(escaped);
+        memcpy(p, escaped, n);
+        p += n;
+      } else {
+        *p++ = c;
+      }
+    }
+    memcpy(p, HTML_HEAD_CLOSE, sizeof(HTML_HEAD_CLOSE) - 1);
+    p += sizeof(HTML_HEAD_CLOSE) - 1;
+  } else {
+    memcpy(p, headword.data(), headword.size());
+    p += headword.size();
+    *p++ = '\n';
+  }
+  return static_cast<uint32_t>(p - dst);
+}
+
+}  // namespace
+
+bool Dictionary::nextPrefixEntry(LookupSession& session, const DictPrefixMatch& match, uint8_t& hit, uint8_t& entry,
+                                 DictLocation& locationOut, bool& ioError) {
+  if (hit < match.count && entry >= match.hits[hit].entryCount) {
+    hit++;
+    entry = 0;
+  }
+  if (hit >= match.count) return false;
+  if (entry == 0 && !session.idxScan.seekSet(match.hits[hit].idxStart)) {
+    ioError = true;
+    return false;
+  }
+  uint8_t suffix[8];
+  if (session.idxScan.readWord(wordBuf, sizeof(wordBuf)) < 0 || !session.idxScan.readBytes(suffix, sizeof(suffix))) {
+    ioError = true;
+    return false;
+  }
+  entry++;
+  locationOut = idxEntryLocation(suffix);
+  return true;
+}
+
+bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string& definitionOut,
+                                       LookupResult* outResult) {
+  const auto fail = [&](LookupResult r) {
+    definitionOut.clear();
+    if (outResult) *outResult = r;
+    return false;
+  };
+  definitionOut.clear();
+  if (match.count == 0) return fail(LookupResult::NotFound);
+
+  LookupSession session;
+  if (!openSession(session)) return fail(scanBuf ? LookupResult::ReadError : LookupResult::LowMemory);
+
+  // Pass 1: which entries fit, and how many bytes they take. The first entry's definition is cut
+  // to what is left of the cap; a later entry is taken whole or not at all, and the first that
+  // does not fit ends the list.
+  const bool html = htmlDefinitions;
+  uint32_t total = 0;
+  uint32_t taken = 0;
+  {
+    uint8_t hit = 0;
+    uint8_t entry = 0;
+    bool ioError = false;
+    DictLocation location;
+    while (nextPrefixEntry(session, match, hit, entry, location, ioError)) {
+      const uint32_t heading = headingBytes(match.hits[hit].headword, html);
+      const uint32_t separator = (taken > 0 && !html) ? sizeof(ENTRY_SEPARATOR) - 1 : 0;
+      uint32_t definition = location.size;
+      if (taken == 0) {
+        definition = std::min(definition, MAX_DEFINITION_BYTES - std::min(heading, MAX_DEFINITION_BYTES));
+      } else if (static_cast<uint64_t>(total) + separator + heading + definition > MAX_DEFINITION_BYTES) {
+        break;
+      }
+      total += separator + heading + definition;
+      taken++;
+    }
+    if (ioError) return fail(LookupResult::ReadError);
+  }
+  if (taken == 0) return fail(LookupResult::ReadError);
+
+  // The inflate window before the buffer, as readDefinition does: it is the larger of the two.
+  if (!hasPlainDict && !dzScratch.ensure()) {
+    LOG_INF("DICT", "Low heap for the dictzip inflate window");
+    return fail(LookupResult::LowMemory);
+  }
+  if (ESP.getMaxAllocHeap() < total + DEFINITION_HEAP_HEADROOM_BYTES) {
+    LOG_INF("DICT", "Low heap for %lu bytes of definitions", static_cast<unsigned long>(total));
+    return fail(LookupResult::LowMemory);
+  }
+  definitionOut.assign(total, '\0');
+
+  // Pass 2: the same entries, read in place.
+  uint8_t hit = 0;
+  uint8_t entry = 0;
+  bool ioError = false;
+  DictLocation location;
+  uint32_t pos = 0;
+  for (uint32_t i = 0; i < taken; i++) {
+    if (!nextPrefixEntry(session, match, hit, entry, location, ioError)) return fail(LookupResult::ReadError);
+    char* const out = &definitionOut[0];
+    if (i > 0 && !html) {
+      memcpy(out + pos, ENTRY_SEPARATOR, sizeof(ENTRY_SEPARATOR) - 1);
+      pos += sizeof(ENTRY_SEPARATOR) - 1;
+    }
+    const std::string& headword = match.hits[hit].headword;
+    const uint32_t heading = headingBytes(headword, html);
+    uint32_t definition = location.size;
+    if (i == 0) definition = std::min(definition, MAX_DEFINITION_BYTES - std::min(heading, MAX_DEFINITION_BYTES));
+    // The index changed under us between the passes: refuse rather than write past the buffer.
+    if (static_cast<uint64_t>(pos) + heading + definition > total) return fail(LookupResult::ReadError);
+    pos += writeHeading(out + pos, headword, html);
+    if (definition > 0) {
+      LookupResult r = LookupResult::ReadError;
+      if (!readEntryInto(location, definition, out + pos, &r)) return fail(r);
+      pos += definition;
+    }
+  }
+  if (outResult) *outResult = LookupResult::Found;
   return true;
 }
 
