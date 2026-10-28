@@ -696,6 +696,127 @@ TEST(ProgressiveJpeg, ASeekTheCardFailsInsideTheFileIsAnError) {
   }
 }
 
+// ---- altered copies of a fixture, made on the fly -----------------------------------------------
+
+std::vector<uint8_t> readBytes(const std::string& path) {
+  std::vector<uint8_t> bytes;
+  FILE* fp = fopen(path.c_str(), "rb");
+  if (!fp) return bytes;
+  int c;
+  while ((c = fgetc(fp)) != EOF) bytes.push_back(static_cast<uint8_t>(c));
+  fclose(fp);
+  return bytes;
+}
+
+std::string writeTemp(const std::string& name, const std::vector<uint8_t>& bytes) {
+  const std::string path = tempPath(name);
+  FILE* fp = fopen(path.c_str(), "wb");
+  EXPECT_NE(fp, nullptr);
+  if (fp) {
+    fwrite(bytes.data(), 1, bytes.size(), fp);
+    fclose(fp);
+  }
+  return path;
+}
+
+// One scan of a JPEG: its header fields and where its entropy-coded data lies.
+struct ScanSpan {
+  int components = 0;
+  int firstComponent = 0;  // the first component's id
+  int ss = 0, se = 0, ah = 0, al = 0;
+  size_t sosStart = 0;  // its SOS marker
+  size_t dataStart = 0;
+  size_t dataEnd = 0;  // the marker that ends it
+};
+
+std::vector<ScanSpan> scansOf(const std::vector<uint8_t>& d) {
+  std::vector<ScanSpan> scans;
+  size_t i = 2;
+  while (i + 1 < d.size()) {
+    if (d[i] != 0xFF) {
+      ++i;
+      continue;
+    }
+    const uint8_t marker = d[i + 1];
+    if (marker == 0x00 || marker == 0xFF || (marker >= 0xD0 && marker <= 0xD7)) {
+      ++i;
+      continue;
+    }
+    if (!scans.empty() && scans.back().dataEnd == 0) scans.back().dataEnd = i;
+    if (marker == 0xD9 || i + 3 >= d.size()) break;
+    const size_t length = (static_cast<size_t>(d[i + 2]) << 8) | d[i + 3];
+    if (marker == 0xDA) {
+      ScanSpan s;
+      s.components = d[i + 4];
+      s.firstComponent = d[i + 5];
+      const size_t o = i + 5 + 2 * s.components;
+      s.ss = d[o];
+      s.se = d[o + 1];
+      s.ah = d[o + 2] >> 4;
+      s.al = d[o + 2] & 15;
+      s.sosStart = i;
+      s.dataStart = i + 2 + length;
+      scans.push_back(s);
+    }
+    i += 2 + length;
+  }
+  if (!scans.empty() && scans.back().dataEnd == 0) scans.back().dataEnd = d.size();
+  return scans;
+}
+
+ProgressiveJpeg::Result decodePath(const std::string& path, const int shift, Capture& capture) {
+  FsFile file;
+  EXPECT_TRUE(file.openForRead(path));
+  ProgressiveJpeg::DecodeOptions options;
+  options.scaleShift = static_cast<uint8_t>(shift);
+  const auto result = ProgressiveJpeg::decode(file, options, Capture::accept, &capture);
+  file.close();
+  return result;
+}
+
+// A 1/8 session skips every AC scan unread, so nothing in one's header may refuse the picture: the
+// DC-only preview drew such a file. A decode that reads the scan still refuses it.
+TEST(ProgressiveJpeg, AnEighthDoesNotReadTheAcScanHeadersItSkips) {
+  const std::vector<uint8_t> whole = readBytes(fixture("prog_full_420.jpg"));
+  const std::vector<ScanSpan> scans = scansOf(whole);
+  const ScanSpan* ac = nullptr;
+  for (const ScanSpan& s : scans) {
+    if (s.firstComponent == 1 && s.components == 1 && s.ss > 0) {
+      ac = &s;
+      break;
+    }
+  }
+  ASSERT_NE(ac, nullptr) << "the fixture has a luma AC scan";
+  const size_t ns = ac->sosStart + 4;  // FF DA, length, then Ns, Ns x (Cs, Td/Ta), Ss, Se, Ah/Al
+  const size_t spectral = ns + 1 + 2 * ac->components;
+  struct Corruption {
+    const char* name;
+    size_t at;
+    uint8_t value;
+  };
+  const Corruption corruptions[] = {
+      {"Se below Ss", spectral + 1, 0},
+      {"Al above 13", spectral + 2, 0x0E},
+      {"two components in an AC scan", ns, 2},
+      {"an unknown component", ns + 1, 9},
+  };
+  Capture clean;
+  ASSERT_EQ(decode("prog_full_420.jpg", 3, clean), ProgressiveJpeg::Result::Ok);
+  for (const Corruption& c : corruptions) {
+    SCOPED_TRACE(c.name);
+    std::vector<uint8_t> bytes = whole;
+    bytes[c.at] = c.value;
+    const std::string path = writeTemp("bad_ac_header.jpg", bytes);
+    Capture eighth;
+    const auto result = decodePath(path, 3, eighth);
+    EXPECT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+    EXPECT_TRUE(eighth.image.px == clean.image.px);
+    Capture full;
+    EXPECT_EQ(decodePath(path, 0, full), ProgressiveJpeg::Result::InvalidData) << "1/1 decodes the scan";
+    std::remove(path.c_str());
+  }
+}
+
 // At 1/8 a block is one pixel, its DC level: the AC scans cannot change it, so the decode skips
 // them. Rows must stay byte for byte what decoding every scan gave (recorded below from the decoder
 // that still decoded them), and the file must be read less than at 1/4, which still needs them.
@@ -752,6 +873,22 @@ TEST(ProgressiveJpeg, WorkspaceShrinksWithScale) {
   EXPECT_GT(full, half);
   EXPECT_GT(half, eighth);
   EXPECT_LT(half, 20u * 1024) << "the Strange Pictures diagrams decode at 1/2; this is their budget";
+}
+
+// At 1/8 a block is its DC level, so the session holds only what the DC scans need: the decode the
+// converters fall back to when the heap is short costs what the DC-only preview it replaces cost
+// (about 2 KB of state plus a row of blocks), not the 13-16 KB of a full session. Host sizes are
+// 64-bit; the C3's are smaller.
+TEST(ProgressiveJpeg, AnEighthNeedsNoMoreThanTheDcScans) {
+  ProgressiveJpeg::ImageInfo info;
+  info.width = 1200;
+  info.height = 1600;
+  info.componentCount = 3;
+  info.maxHorizontal = 2;
+  info.maxVertical = 2;
+  const size_t eighth = ProgressiveJpeg::workspaceBytes(info, 3);
+  EXPECT_LT(eighth, 4u * 1024);
+  EXPECT_LT(eighth * 4, ProgressiveJpeg::workspaceBytes(info, 2));
 }
 
 }  // namespace

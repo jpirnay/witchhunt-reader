@@ -101,8 +101,6 @@ struct DecodeOptions {
 // on Unsupported / OutOfMemory.
 Result decode(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user);
 
-struct Session;
-
 // decode() in pieces, for a caller that must stay responsive between them (Home's cover pass
 // pauses for a button press and resumes where it stopped instead of starting over). decode() is
 // begin() + step() until done, so the output is identical however the work is sliced.
@@ -147,7 +145,10 @@ class Decoder {
  private:
   Result claim(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user);
 
-  Session* session_ = nullptr;
+  // The session at the front of the workspace: one for every scan, or at 1/8 one for the DC scans
+  // alone (dcOnly_), which is a fraction of the size.
+  void* session_ = nullptr;
+  bool dcOnly_ = false;
   std::unique_ptr<uint8_t[]> owned_;
   FsFile* file_ = nullptr;
   DecodeOptions options_{};
