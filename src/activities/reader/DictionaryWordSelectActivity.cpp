@@ -19,6 +19,7 @@
 #include "CrossPointSettings.h"
 #include "DictionaryDefinitionActivity.h"
 #include "components/UITheme.h"
+#include "util/SerialCommandGrammar.h"
 
 namespace {
 
@@ -92,10 +93,19 @@ void indexBuildYield(void*) { vTaskDelay(1); }
 
 void DictionaryWordSelectActivity::onEnter() {
   Activity::onEnter();
-  // No null check: a failed allocation just disables the differential fast path
-  // (drawHighlightWithSnapshot skips the read), leaving the full repaint.
-  snapshot = makeUniqueNoThrow<uint8_t[]>(SNAPSHOT_CAPACITY);
   requestUpdate();
+}
+
+void DictionaryWordSelectActivity::releaseWordArrays() {
+  // Swapped with empty vectors, not clear()ed: clear() keeps the capacity, which is the whole
+  // block this exists to give back.
+  std::vector<Fragment>().swap(fragments);
+  std::vector<Word>().swap(words);
+  std::vector<DrawStyle>().swap(drawStyles);
+  snapshot.reset();
+  snapshotIdx = -1;
+  snapshotRunCount = 0;
+  wordsExtracted = false;
 }
 
 // Collect the selectable words and their screen boxes. Called from render()
@@ -136,6 +146,8 @@ size_t DictionaryWordSelectActivity::countPageTokens(size_t& wordEstimate) const
 }
 
 void DictionaryWordSelectActivity::extractWords() {
+  const unsigned long startMs = millis();
+  const bool rebuild = wordsBuiltOnce;
   // Reserve once, up front, from a real count. A dense page runs to ~280 tokens and bionic
   // reading roughly doubles that, so a fixed guess is either far too small -- and then the
   // vector doubles repeatedly, each growth holding the old block alongside the new -- or far too
@@ -306,13 +318,30 @@ void DictionaryWordSelectActivity::extractWords() {
 
   joinHyphenatedWords();
 
-  wordsExtracted = true;
-  // Start on the middle row's word nearest mid-screen instead of top-left: any
-  // word on the page is then at most half a page of moves away.
+  // After the two arrays, so they are the first claim on the heap. No null check: a failed
+  // allocation just disables the differential fast path (drawHighlightWithSnapshot skips the
+  // read), leaving the full repaint.
+  if (!snapshot) snapshot = makeUniqueNoThrow<uint8_t[]>(SNAPSHOT_CAPACITY);
+
   if (!words.empty()) {
-    const int initial = closestInRow(rowCount / 2, renderer.getScreenWidth() / 2);
-    if (initial >= 0) selected = initial;
+    if (!rebuild) {
+      // Start on the middle row's word nearest mid-screen instead of top-left: any
+      // word on the page is then at most half a page of moves away.
+      const int initial = closestInRow(rowCount / 2, renderer.getScreenWidth() / 2);
+      if (initial >= 0) selected = initial;
+    } else if (selected >= static_cast<int>(words.size())) {
+      // Same page, same metrics: the rebuild gives the same words, so this only guards a drift.
+      selected = static_cast<int>(words.size()) - 1;
+      speculation = Speculation::Unknown;
+      speculationIdx = -1;
+    }
   }
+  wordsBuiltOnce = true;
+  if (rebuild) {
+    LOG_DBG("DICT", "Rebuilt %u words in %lu ms", static_cast<unsigned>(words.size()), millis() - startMs);
+  }
+  // Last: the render task reads this flag, and the loop task acts on the words once it is set.
+  wordsExtracted = true;
 }
 
 void DictionaryWordSelectActivity::joinHyphenatedWords() {
@@ -548,6 +577,14 @@ void DictionaryWordSelectActivity::performLookup() {
     LOG_INF("DICT", "Released the font caches for the lookup");
   }
 
+  // The dictionary switch arrives here with the arrays released: the repaint above rebuilt them.
+  // A refused rebuild left the popup extractWords() set and nothing to look up.
+  if (words.empty()) {
+    if (popup == Popup::Busy) popup = Popup::None;
+    requestUpdate();
+    return;
+  }
+
   bool ok = dictOpenOk;
   Dictionary::IndexResult indexResult = Dictionary::IndexResult::Ok;
   if (ok && dictNeedsIndex) {
@@ -590,6 +627,13 @@ void DictionaryWordSelectActivity::performLookup() {
     // Name the dictionary for the viewer only when there is another to switch
     // to; that is what turns its Confirm button on.
     const bool multiple = installedDictionaries().size() > 1;
+    // The word arrays are the other big block held. The render task reads them, hence the lock,
+    // and the release is the last step before the push: a render queued for this activity would
+    // otherwise find them gone and rebuild them just before the definition opens. The push only
+    // records a pending activity (ActivityManager::pushActivity), so it is safe under the lock.
+    // The page is rebuilt from the same Page when the definition returns.
+    RenderLock lock(*this);
+    releaseWordArrays();
     startActivityForResult(std::make_unique<DictionaryDefinitionActivity>(
                                renderer, mappedInput, std::move(headword), std::move(definition), html,
                                multiple ? std::string(SETTINGS.dictionaryName) : std::string()),
@@ -671,12 +715,12 @@ void DictionaryWordSelectActivity::loop() {
     finish();
     return;
   }
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && !words.empty()) {
+  // Until the rebuild after a definition has been drawn there is nothing to move over or look up.
+  if (!wordsExtracted || words.empty()) return;
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     performLookup();
     return;
   }
-
-  if (words.empty()) return;
 
   const bool hasNextWord = selected + 1 < static_cast<int>(words.size());
   const int before = selected;
@@ -919,3 +963,14 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
   }
   renderer.displayBuffer(HalDisplay::FAST_REFRESH);
 }
+
+#if SERIAL_TEST_API
+void DictionaryWordSelectActivity::appendDebugState(std::string& out) const {
+  using SerialCommandGrammar::appendField;
+  if (!wordsExtracted || words.empty()) return;
+  appendField(out, "sel", static_cast<long>(selected));
+  char text[WORD_TEXT_CAPACITY];
+  buildWordText(selected, text, sizeof(text), true);
+  appendField(out, "label", text);
+}
+#endif  // SERIAL_TEST_API
