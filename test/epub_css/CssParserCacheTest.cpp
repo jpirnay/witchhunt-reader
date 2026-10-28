@@ -472,7 +472,7 @@ bool definedEqual(const CssPropertyFlags& a, const CssPropertyFlags& b) {
          a.pageBreakBefore == b.pageBreakBefore && a.pageBreakAfter == b.pageBreakAfter &&
          a.lineHeight == b.lineHeight && a.fontSizeMultiplier == b.fontSizeMultiplier && a.cssFloat == b.cssFloat &&
          a.smallCaps == b.smallCaps && a.colorTransparent == b.colorTransparent && a.opacityZero == b.opacityZero &&
-         a.visibilityHidden == b.visibilityHidden && a.fontFamily == b.fontFamily;
+         a.visibilityHidden == b.visibilityHidden && a.fontFamily == b.fontFamily && a.textEmphasis == b.textEmphasis;
 }
 
 bool stylesEqual(const CssStyle& a, const CssStyle& b) {
@@ -491,7 +491,7 @@ bool stylesEqual(const CssStyle& a, const CssStyle& b) {
          a.fontFamily == b.fontFamily && a.colorTransparent == b.colorTransparent && a.opacityZero == b.opacityZero &&
          a.visibilityHidden == b.visibilityHidden && a.writingMode == b.writingMode &&
          a.textOrientation == b.textOrientation && a.textCombine == b.textCombine && a.direction == b.direction &&
-         a.unicodeBidi == b.unicodeBidi && definedEqual(a.defined, b.defined);
+         a.unicodeBidi == b.unicodeBidi && a.textEmphasis == b.textEmphasis && definedEqual(a.defined, b.defined);
 }
 }  // namespace
 
@@ -699,14 +699,17 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       ".a { text-align: center; font-weight: bold; font-style: italic; text-decoration: underline; "
       "margin: 2em; padding-left: 5px; padding-right: 3px; text-indent: 1.5em; line-height: 1.6; "
       "font-size: 120%; vertical-align: super; float: left; font-variant: small-caps; "
-      "list-style: none; page-break-before: always; page-break-after: always; font-family: 'EB Garamond'; }\n"
+      "list-style: none; page-break-before: always; page-break-after: always; font-family: 'EB Garamond'; "
+      "-epub-text-emphasis-style: open sesame; }\n"
       ".b { margin-top: 3px; text-align: right; font-size: 1.25rem; font-family: serif; }\n"
       ".c { display: none; }\n"
       ".d { display: inline; }\n"
       ".e { color: transparent; opacity: 0; visibility: hidden; }\n"
       ".f { -webkit-writing-mode: vertical-lr; -webkit-text-orientation: upright; text-combine-upright: digits 3; "
       "direction: rtl; unicode-bidi: isolate-override; text-align: end; }\n"
-      ".g { writing-mode: vertical-rl; }\n";  // a rule with nothing else is kept
+      ".g { writing-mode: vertical-rl; }\n"  // a rule with nothing else is kept
+      ".h { text-emphasis-style: none; }\n"
+      ".i { writing-mode: vertical-rl; text-emphasis: filled triangle; }\n";  // the flow word and a mark in one record
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   std::string cssPath;
@@ -715,9 +718,9 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   CssParser parser(cacheDir);
   ASSERT_TRUE(compileCache(parser, cssPath));
 
-  const std::vector<std::pair<std::string, std::string>> probes = {{"p", "a"},    {"p", "b"},    {"div", "c"},
-                                                                   {"span", "a"}, {"p", "none"}, {"span", "d"},
-                                                                   {"span", "e"}, {"div", "f"},  {"html", "g"}};
+  const std::vector<std::pair<std::string, std::string>> probes = {
+      {"p", "a"},    {"p", "b"},   {"div", "c"},  {"span", "a"}, {"p", "none"}, {"span", "d"},
+      {"span", "e"}, {"div", "f"}, {"html", "g"}, {"span", "h"}, {"span", "i"}};
   auto resolveAll = [&](CssParser& p) {
     std::vector<CssStyle> out;
     for (const auto& pr : probes) out.push_back(p.resolveStyle(pr.first, pr.second));
@@ -744,6 +747,12 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   EXPECT_EQ(CssUnicodeBidi::IsolateOverride, flow.unicodeBidi);
   EXPECT_EQ(CssTextAlign::End, flow.textAlign) << "text-align: end did not survive the disk cache as itself";
   EXPECT_EQ(CssWritingMode::VerticalRl, heapStyles[8].writingMode) << "a rule with only writing-mode was dropped";
+  EXPECT_EQ(heapStyles[0].textEmphasis, TextEmphasis::Sesame | TextEmphasis::kOpen)
+      << "text-emphasis-style did not survive the disk cache";
+  EXPECT_TRUE(heapStyles[9].hasTextEmphasis() && heapStyles[9].textEmphasis == 0)
+      << "an explicit text-emphasis-style: none did not survive the disk cache";
+  EXPECT_EQ(CssWritingMode::VerticalRl, heapStyles[10].writingMode);
+  EXPECT_EQ(heapStyles[10].textEmphasis, TextEmphasis::Triangle) << "a mark beside the flow word did not survive";
 
   BuildArena arena(64 * 1024);
   ASSERT_TRUE(arena.valid());

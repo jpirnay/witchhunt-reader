@@ -464,3 +464,32 @@ TEST(HtmlDirectionality, NoAttributeChangesNothing) {
   applyHtmlDirectionality(s, "span", "");
   EXPECT_FALSE(s.anyDefined());
 }
+
+// --- text-emphasis-style ---
+
+TEST(CssTextEmphasis, ParsesStyleAndShorthandWithVendorPrefixes) {
+  CssStyle style = CssParser::parseInlineStyle("text-emphasis-style: sesame");
+  ASSERT_TRUE(style.hasTextEmphasis());
+  EXPECT_EQ(style.textEmphasis, TextEmphasis::Sesame);
+
+  style = CssParser::parseInlineStyle("-epub-text-emphasis-style: filled sesame");
+  ASSERT_TRUE(style.hasTextEmphasis());
+  EXPECT_EQ(style.textEmphasis, TextEmphasis::Sesame);
+
+  style = CssParser::parseInlineStyle("-webkit-text-emphasis: open dot red");
+  ASSERT_TRUE(style.hasTextEmphasis());
+  EXPECT_EQ(style.textEmphasis, TextEmphasis::Dot | TextEmphasis::kOpen);
+
+  style = CssParser::parseInlineStyle("text-emphasis: filled");
+  ASSERT_TRUE(style.hasTextEmphasis());
+  EXPECT_EQ(style.textEmphasis, TextEmphasis::Circle);
+
+  style = CssParser::parseInlineStyle("text-emphasis-style: none");
+  EXPECT_TRUE(style.hasTextEmphasis());
+  EXPECT_EQ(style.textEmphasis, 0);
+}
+
+TEST(CssTextEmphasis, AStringMarkIsNotSupported) {
+  const CssStyle style = CssParser::parseInlineStyle("text-emphasis-style: '*'");
+  EXPECT_FALSE(style.hasTextEmphasis());
+}

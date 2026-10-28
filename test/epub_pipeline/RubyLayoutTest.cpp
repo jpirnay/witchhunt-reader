@@ -26,6 +26,7 @@ struct LaidLine {
   std::vector<std::string> words;
   std::vector<int> x;
   RubyList ruby;
+  RubyList emphasis;  // (first, count, mark as a decimal) of each emphasis run
   int y = 0;
   bool inTable = false;
 };
@@ -52,6 +53,10 @@ struct RubyLayout : testing::Test {
     }
     for (uint16_t a = 0; a < block.annotationCount(); ++a) {
       const auto annotation = block.annotation(a);
+      if (annotation.kind == TextBlock::AnnotationKind::Emphasis) {
+        line.emphasis.emplace_back(annotation.firstWord, annotation.wordCount, std::to_string(annotation.mark));
+        continue;
+      }
       if (annotation.kind != TextBlock::AnnotationKind::Ruby) continue;
       line.ruby.emplace_back(annotation.firstWord, annotation.wordCount, std::string(annotation.text));
     }
@@ -59,12 +64,14 @@ struct RubyLayout : testing::Test {
   }
 
   // Every line of the chapter, in page order; a table cell's lines come where the table stands.
-  std::vector<LaidLine> lines(const std::string& body) {
+  std::vector<LaidLine> lines(const std::string& body, const std::string& css = "") {
     const std::string doc =
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>C"
-        "</title></head><body>\n" +
-        body + "\n</body></html>\n";
-    auto epub = syntheticBookFromDocument(work, books++, doc);
+        "</title>" +
+        std::string(css.empty() ? "" : "<link rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"/>") +
+        "</head><body>\n" + body + "\n</body></html>\n";
+    auto epub = css.empty() ? syntheticBookFromDocument(work, books++, doc)
+                            : syntheticBookFromDocument(work, books++, doc, {{"style.css", "text/css", css}});
     Section::BuildParams params;
     params.viewportWidth = 480;
     params.viewportHeight = 800;
@@ -379,4 +386,47 @@ TEST_F(RubyLayout, ARubyBookPagesTheSameWithAndWithoutALentArena) {
   const std::string lent = dump(52272, "lent");
   EXPECT_EQ(plain, lent);
   EXPECT_NE(plain.find(" PAGE 1 "), std::string::npos) << "more than one page expected";
+}
+
+TEST_F(RubyLayout, ACssClassMarksItsSpan) {
+  const auto l =
+      lines("<p>前<span class=\"bouten\">強調</span>後</p>", ".bouten { -epub-text-emphasis-style: sesame }");
+  ASSERT_EQ(l.size(), 1u);
+  EXPECT_EQ(l[0].words, (std::vector<std::string>{"前", "強", "調", "後"}));
+  EXPECT_EQ(l[0].emphasis, (RubyList{{1, 2, "5"}}));
+  EXPECT_TRUE(l[0].ruby.empty());
+}
+
+TEST_F(RubyLayout, AMultiWordRubyBaseInAMarkedSpanKeepsItsSpace) {
+  const auto l = lines("<p><span class=\"bouten\">強<ruby>New York<rt>ニューヨーク</rt></ruby>調</span></p>",
+                       ".bouten { -epub-text-emphasis-style: sesame }");
+  ASSERT_EQ(l.size(), 1u);
+  EXPECT_EQ(l[0].words, (std::vector<std::string>{"強", "New", " ", "York", "調"}));
+  EXPECT_EQ(l[0].ruby, (RubyList{{1, 3, "ニューヨーク"}}));
+  EXPECT_EQ(l[0].emphasis, (RubyList{{0, 1, "5"}, {4, 1, "5"}}));
+}
+
+TEST_F(RubyLayout, ALongMarkedSpanKeepsItsMarkAcrossTheSplit) {
+  // 160 characters pass the 96-token split: every line of the span is one run over all its tokens.
+  const auto l = lines("<p><span class=\"bouten\">" + hanRun(160) + "</span></p>",
+                       ".bouten { -epub-text-emphasis-style: sesame }");
+  size_t words = 0;
+  size_t marked = 0;
+  for (const auto& line : l) {
+    words += line.words.size();
+    ASSERT_EQ(line.emphasis.size(), 1u);
+    EXPECT_EQ(std::get<0>(line.emphasis[0]), 0u);
+    EXPECT_EQ(std::get<1>(line.emphasis[0]), line.words.size());
+    marked += std::get<1>(line.emphasis[0]);
+  }
+  EXPECT_EQ(words, 160u);
+  EXPECT_EQ(marked, 160u);
+}
+
+TEST_F(RubyLayout, AnInternalLinkKeepsItsOwnMark) {
+  const auto l = lines("<p>前<a class=\"bouten\" href=\"#x\">強調</a>後</p><p id=\"x\">先</p>",
+                       ".bouten { -epub-text-emphasis-style: sesame }");
+  ASSERT_GE(l.size(), 1u);
+  EXPECT_EQ(l[0].words, (std::vector<std::string>{"前", "強", "調", "後"}));
+  EXPECT_EQ(l[0].emphasis, (RubyList{{1, 2, "5"}}));
 }
