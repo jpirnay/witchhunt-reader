@@ -98,6 +98,11 @@ class CharacterSets(unittest.TestCase):
         self.assertNotIn(cjk_subset.REPLACEMENT, ja)  # copied in from Noto Sans, not cut from the source
         self.assertTrue(cjk_subset.CHARSET_GAPS["ko"].isdisjoint(cjk_subset.family_set("ko", self.empty)))
 
+    def test_every_family_keeps_the_css_emphasis_marks(self):
+        marks = {0x2022, 0x25E6, 0x25CF, 0x25CB, 0x25C9, 0x25CE, 0x25B2, 0x25B3, 0xFE45, 0xFE46}
+        for name in cjk_subset.CHARSETS:
+            self.assertLessEqual(marks, cjk_subset.family_set(name, self.empty), name)
+
     def test_an_unknown_charset_fails(self):
         with self.assertRaises(cjk_subset.BuildError):
             cjk_subset.charset("vi", self.empty)
@@ -112,7 +117,7 @@ class CharacterSets(unittest.TestCase):
     @unittest.skipUnless(PINNED_UNIHAN.exists(), "the pinned Unihan is not cached")
     def test_the_real_sets_have_their_measured_sizes(self):
         sizes = {name: len(cjk_subset.family_set(name, PINNED_UNIHAN)) for name in cjk_subset.CHARSETS}
-        self.assertEqual(sizes, {"ja": 7367, "zh-Hans": 9214, "zh-Hant": 14052, "ko": 17304})
+        self.assertEqual(sizes, {"ja": 8496, "zh-Hans": 9219, "zh-Hant": 14057, "ko": 17309})
 
 
 class Build(unittest.TestCase):
