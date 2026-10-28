@@ -176,7 +176,10 @@ with at most 256 bytes of text after tags are removed, that ends with a bold run
 and closing tags), not inside `<i>`, **directly preceded by a cross-reference cue**, and whose bold run is a headword
 of the dictionary (an exact lookup with none of `resolve()`'s fallbacks). **An italic target directly after the
 "↑" cue counts as well** (the maintainer, 2026-10-28): that is how PONS writes its inflected forms, "↑ *look*", also
-after a "pt of **give**" line. The target is read without a `<sup>` homograph number (Oxford's "FAVOUR¹").
+after a "pt of **give**" line. The target is read without a `<sup>` homograph number (Oxford's "FAVOUR¹"). **A cue
+inside an open bracket does not count** (the maintainer, 2026-10-28): an etymology's "(see X)" or "(short for X)" is
+a reference inside an article, not a stub. The text before the cue (tags removed) opens more `(` than it closes, or
+more `[`.
 
 The cues live in the same constant table as B's placeholders, as dictionary notation (my call): *see*, *see also*,
 *↑*, *→*, *another term for*, *variant of*, *variant spelling of*, *pl of*, *pt of*, *pp of*, *abbrev of*,
@@ -190,10 +193,11 @@ as `locate()` compares; a target naming its own entry not counted):
 
 | | Oxford | PONS |
 |---|---|---|
-| Bold target after a cue of the first list | 2,080 (*another term for* 1,343, *see* 350, *variant of* 186, *see also* 84, *abbreviation of* 76, *variant spelling of* 41) | 1,108 (*see* 817, *abbrev of* 84, *pp of* 77, *pt of* 59, *pl of* 49, *see also* 21, *variant of* 1) |
-| Bold target after an inflection cue | 408 (*short for* 135, *past and past participle of* 83, *past of* 76, *past participle of* 55, *archaic spelling of* 38, *plural of* 9, *dialect form of* 8, *superlative of* 2, *comparative of* 1, *past tense of* 1) | 13 (*short for*) |
+| Bold target after a cue of the first list | 1,915 (*another term for* 1,342, *see* 207, *variant of* 185, *abbreviation of* 75, *see also* 65, *variant spelling of* 41) | 1,108 (*see* 817, *abbrev of* 84, *pp of* 77, *pt of* 59, *pl of* 49, *see also* 21, *variant of* 1) |
+| Bold target after an inflection cue | 406 (*short for* 135, *past and past participle of* 83, *past of* 76, *past participle of* 55, *archaic spelling of* 38, *dialect form of* 8, *plural of* 7, *superlative of* 2, *comparative of* 1, *past tense of* 1) | 13 (*short for*) |
 | Italic target after "↑" | 0 | 37,566 (*looked*, *gives*, *gave* among them) |
-| All stubs | 2,488 | 38,687 |
+| All stubs | 2,321 | 38,687 |
+| Left out: the cue inside an open bracket | 167 (*see* 143, *see also* 19, *plural of* 2, *variant of*, *abbreviation of*, *another term for* 1 each) | 0 |
 
 The largest stub measured is 1,045 bytes of HTML.
 
@@ -228,7 +232,7 @@ changed.
     bracket, partial matches, ties, no match, a plain dictionary (B off);
   - C: a stub followed once, a stub pointing to a missing headword (not followed), a long entry that ends in bold
     (not a stub), a chain (one hop only), an italic target after "↑" (followed) and anywhere else (not), an
-    inflection stub giving A its base form;
+    inflection stub giving A its base form, a short article ending "(see X)" (not followed);
   - the context builder: punctuation stops, line ends crossed, paragraph ends not, soft hyphens.
 - **The X4** with the maintainer's Oxford and PONS on the card, a small test EPUB (sentences such as "voted in
   favor of the motion", "took it into account", "she looked it up", "as a matter of fact") and `/test/Alice.epub`:
@@ -241,9 +245,9 @@ changed.
 - Whether one case-insensitive search suffices (5.2).
 - Where the context builder lives, and how it shares code with `CjkLookupRun`.
 - The exact stub size threshold, if 256 bytes of text misses real stubs or catches real entries. Measured with the
-  whole rule: bold stubs at 256 / 384 / 512 bytes number 2,488 / 2,756 / 2,856 in Oxford and 1,121 / 1,133 / 1,139
-  in PONS. The Oxford entries between 256 and 384 bytes are full articles whose etymology ends in "(see X)", so 256
-  stays.
+  whole rule (before the bracket check): bold stubs at 256 / 384 / 512 bytes number 2,488 / 2,756 / 2,856 in Oxford
+  and 1,121 / 1,133 / 1,139 in PONS. The Oxford entries between 256 and 384 bytes are full articles whose etymology
+  ends in "(see X)", so 256 stays.
 - Whether `CMD:ACT:DICT` reports the phrase found (useful for the device run), and in which form.
 
 ## 9. Risks
@@ -255,7 +259,9 @@ changed.
   first word is a headword prefix that the first probe's window shows exists.
 - **Bold used for other things** (Oxford bolds sense numbers and examples' key words): only bold runs with two or
   more words, or one word plus a placeholder, are phrase candidates.
-- **Short articles that end in a cue.** 336 of Oxford's 2,488 stub matches are full articles of under 256 bytes
-  whose etymology ends in "(see X)" or "short for X"; in 167 of them the cue sits inside an open bracket. They are
-  followed as stubs, with their own text kept above X's entry, so nothing is lost but the header changes to X.
-  PONS has none.
+- **Short articles that end in a cue.** Before the bracket check (5.4), 336 of Oxford's stub matches were full
+  articles of under 256 bytes whose etymology ends in a cue. The check leaves out 167 matches, 132 of those articles
+  among them. **204 remain**, mostly an etymology closing "variant of X" (82) or "abbreviation of X" (75) outside
+  brackets. They are followed as stubs, with their own text kept above X's entry: nothing is lost, but the header
+  changes to X. PONS has none. If device screenshots show these jumps doing harm, the next notation step would be a
+  cue that must open the text's last sentence.

@@ -73,12 +73,12 @@ Decided while planning; a reviewer holds each task to them. Each names what it c
 12. **The headword in a phrase.** `∼` and `~` are replaced by the headword inside a token ("∼s" reads "accounts"). The tapped word also matches any token equal to the headword, so *looked* matches Oxford's "look" and *favor* matches PONS's "∼" after C sends it to *favour*.
 13. **Bounds on B.** A bold run is read up to 128 bytes, a reading has at most 12 tokens and 4 placeholders, and at most two "or" groups give readings. A longer run is read as far as it goes, its last partial token dropped. If wrong: an over-long run is matched on its first part only.
 14. **Markup.** B and C run when `sametypesequence` is a single `h`, `x` or `g` (`Dictionary::definitionsHaveMarkup()`, new), as 5.3 says. The styled view stays `h` only.
-15. **C, as measured with the amended rule** (spec 5.4's table: 2,488 Oxford and 38,687 PONS stubs, 37,566 of those the italic "↑" kind):
+15. **C, as measured with the amended rule** (spec 5.4's table: 2,321 Oxford and 38,687 PONS stubs, 37,566 of those the italic "↑" kind):
     - The 256-byte text limit stays. The Oxford entries between 256 and 384 bytes are full articles.
     - Oxford writes its targets in capitals ("another term for FORESTS"). The exact lookup is `locate()` over `.idx`, which folds ASCII case as the index does (no `.syn`, no stems).
     - The `<sup>` homograph number is dropped from the target. Cues are compared ASCII case-insensitively, and a word cue must start a word ("foresee" is no "see").
     - A target that names the stub's own entry is not followed. The header names the followed headword.
-    - The 336 short Oxford articles whose etymology ends in a cue (spec §9) are followed as the spec's rule says (question 1 below).
+    - A cue inside an open bracket does not count (spec 5.4): 167 Oxford matches are left out. The 204 short Oxford articles whose etymology ends in a cue outside brackets are followed, with their own text kept (spec §9).
 16. **The mark** is the phrase's words drawn white on a black box, as the word screen highlights a word. PONS has 6,387 underlined runs of its own, so an underline would not single the phrase out.
     - Styled view: the page where the run's words first appear in order, every lettered piece bold.
     - Plain view: the line where the converter's tracked offset of the run lands.
@@ -95,8 +95,7 @@ Decided while planning; a reviewer holds each task to them. Each names what it c
 - Oxford's inflection cues are in the table (5.4).
 - Flash: up to 4.5 KB; nothing is trimmed (4).
 - The gate's books: the test book and `/test/Alice.epub` (4).
-
-**Open question 1.** 336 of Oxford's stub matches are short full articles whose etymology ends in a cue, "(see X)" or "short for X". In 167 of them the cue sits inside an open bracket. Should a cue inside an open bracket not count? That is one generic check, and 167 fewer false stubs. Until answered, the spec's rule stands.
+- A cue inside an open bracket is no cross-reference (5.4, §9).
 
 ## Branch, PR and gates
 
@@ -563,8 +562,9 @@ The headword is `favour` where a row names none; "same" repeats the row's contex
 // of text outside tags and ends with its target run (only punctuation, whitespace and end tags
 // after it): a bold run not inside <i>, after any cue of the table; or an italic run after the
 // "↑" cue. "After" means the text before the run (tags removed, trailing whitespace trimmed) ends
-// with the cue, compared ASCII case-insensitively, a word cue starting a word. The target is the
-// run's text without its <sup> content, cut to its dictionaryWordBounds().
+// with the cue, compared ASCII case-insensitively, a word cue starting a word, and the text before
+// the cue opens no more ( than it closes, nor [ (a cue inside a bracket is a reference inside an
+// article). The target is the run's text without its <sup> content, cut to dictionaryWordBounds().
 bool crossReferenceTarget(const char* definition, size_t length, char* target, size_t capacity);
 
 // Dictionary.h
@@ -594,6 +594,7 @@ bool readResolved(const DictLocation& location, std::string& definitionOut, Look
 | `TrailingMarksAndEndTagsAreAllowed` (ArticlePhrase) | `"<div>see <b>favour</b>.</div>"` | `"favour"` |
 | `AnItalicTargetAfterTheArrowCounts` (ArticlePhrase) | `"<blockquote>↑ <i>look</i></blockquote>"`; PONS's *gave* shape, `"<blockquote><span><b>gave</b></span> <i>verb</i> <span><i>pt of </i></span><span><b>give</b></span></blockquote><blockquote>↑ <i>give</i></blockquote>"` | `"look"`; `"give"` |
 | `AnItalicTargetElsewhereDoesNot` (ArticlePhrase) | `"<i>see</i> <i>look</i>"`; `"↑ <b>x</b> <i>y</i>"` | false; false |
+| `ACueInsideABracketIsNoCrossReference` (ArticlePhrase) | a short article, `"<div><b>kerb</b> ▪ n. a stone edge.</div><div>ORIGIN from Latin (see <b>curb</b>).</div>"`; the same with `"[short for <b>curb</b>]"`; a stub outside brackets, `"<div><b>kerb</b> ▪ n. <i>see</i> <b>curb</b>.</div>"` | false; false; true, `"curb"` |
 | `NotAStub` (ArticlePhrase) | 300 bytes of text then `"see <b>x</b>"`; `"<i>adj</i> <b>-ious</b>"`; `"<i>see <b>favour</b></i>"`; `"see <b>favour</b> for more"`; `"foresee <b>x</b>"` | false for each |
 | `MarkupFollowsTheSametypesequence` (Dictionary) | `.ifo` with `h`, `x`, `g`; `m`, `hm`, `xh` | `definitionsHaveMarkup()` true, true, true; false, false, false; `definitionsAreHtml()` only for `h` |
 | `ExactResolveTakesNoFallbacks` (Dictionary) | `dog`, `favour`; syn `colour` → `favour`: `resolveExact("dogs")`, `("FAVOUR")`, `("colour")` | false `NotFound`; true, headword `"favour"`; false |
