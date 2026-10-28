@@ -36,7 +36,11 @@ a finding to report, not a number to adjust.
    characters (、。, small kana, ！？) upright and unplaced. No font re-cut, no vertical-form lookup. The per-codepoint
    decision lives in one function (`drawsUpright`), where step 4 places Tu from `getGlyphInk` or a re-cut font.
 3. Section version 104 as written (A3b takes 103 on `feat/cjk-a3b`); renumber at merge.
-4. The X4 (COM5) validates. An X3 run is a question for the maintainer, never a gate.
+4. The X4 (COM5) validates. An X3 run is planned (portrait, NotoSansJP 14 pt, spec 10.1's figures on the branch) as
+   a step of Task 14, not a gate: the maintainer flashes the X3, and it is never reset from here. One touch-board
+   session (X4 Pro or T5S3, whichever the maintainer attaches) closes Task 14: taps, swipes and link targets on
+   vertical pages.
+5. Page Turn Buttons defaults to Follow Book (maintainer, 2026-10-28).
 
 ## Rulings made while planning (each with its cost if wrong)
 
@@ -88,8 +92,10 @@ a finding to report, not a number to adjust.
   so `tapToLogical`, `wasSwipe`, the tap zones and `computeRenderLayout` read the held orientation (the GfxRenderer.h
   comment at `:385-389` already asks this of the input layer).
 - **Strings in `english.yaml` only** (the line-spacing precedent: the release round translates).
-- **Page-turn buttons default to "Follow book".** Only the Left/Right buttons' built-in actions flip; an action the
-  reader assigned explicitly, and the side buttons, do not. Cost: a reader used to fixed buttons sets Fixed once.
+- **What Follow Book flips:** only the Left/Right buttons' built-in actions; an action the reader assigned
+  explicitly, and the side buttons, do not. The built-in tap zones and page swipes mirror; the gesture bindings
+  (ten-page flicks, corners, `TouchGestures::BINDINGS`) keep their directions. Cost: a flick in a vertical book skips
+  the way it does in every other book.
 - **The per-book override row shows only in a book whose language may be set vertically.**
 
 ## Global Constraints
@@ -114,7 +120,12 @@ From the brief and the spec, verbatim where they have it:
   build/test`; goldens are LF (`.gitattributes`).
 - Firmware: `export PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 PYTHONIOENCODING=utf-8`, then
   `"$HOME/.platformio/penv/Scripts/pio.exe" run -e default` (and `-e gh_release`), one pio run at a time, in the
-  background. `x4pro` and `lilygo_t5s3` are left to CI.
+  background. `x4pro` and `lilygo_t5s3` are left to CI, except the one env Task 14's touch session needs.
+- Devices: the X4 on COM5. The X3: the maintainer flashes it; it is never reset from here (no esptool, no RTS pulse,
+  no `CMD:REBOOT`, no `CMD:SLEEP`), and files reach it through its USB Transfer screen over a no-reset serial open.
+  The touch board: whichever the maintainer attaches. The acceptance book is
+  `C:/_development/witchhunt-reader/.idea/annas-arch-91dbd462043f.epub` (1,663,588 B; also on the X3's `/test`),
+  local only, never in the repository.
 - clang-format 21, as CI: `PATH="/c/tmp/cf21/bin:$PATH" bin/clang-format-fix -g`, and `clang-format-21 -style=file -i`
   for new files.
 - New user-facing strings through `tr()`: keys in `lib/I18n/translations/english.yaml` only, each used in code in the
@@ -139,7 +150,7 @@ From the brief and the spec, verbatim where they have it:
    page draw; a tap, a swipe or a Background-B build's `computeRenderLayout` sampled then would see an 800-wide portrait
    screen. The reader must read the held frame. Pinned in Task 12 (the grep step, and no live-orientation read left on
    those paths) and Task 14 (the X4 log shows no `Parameters do not match` after Background-B builds while reading
-   vertically).
+   vertically; on the touch board, taps sent right behind a page turn land in the zone they were aimed at).
 2. **A colophon:** a section whose `html`/`body` says `horizontal-tb` in a ppd-rtl book, under Automatic, stays
    horizontal and still turns right to left. Pinned in Task 3 (`FlowContext.AColophonKeepsTheBooksDirection`) and
    Task 9 (`VerticalLayout.AColophonStaysHorizontalAndTurnsRightToLeft`).
@@ -653,8 +664,11 @@ OPF's `dc:language` a parameter (`ja` by default) and `spineAttrs` for the ppd.
   heading 第一章　夜の森; paragraphs with ruby (`<ruby>冥夜<rt>めいや</rt></ruby>`), small kana (ッ, ゃ, ァ), 、。,
   「」『』（）, ー, ……, ——, ！？, the Latin word Winterfell, 1998, 第13章, × and §, `か\u3099`, an underline span,
   a `text-emphasis: filled sesame` span; a 2 × 2 table with a cell image; a block image (a real 200 × 400 grey PNG
-  written with zlib, so the device decodes it); a `float: left` 80 × 80 image; `<hr/>`.
-- spine 2, the colophon: `<body style="writing-mode: horizontal-tb">` and two short paragraphs.
+  written with zlib, so the device decodes it); a `float: left` 80 × 80 image; `<hr/>`; on the first page, a link to
+  the colophon, `<a href="ch2.xhtml#colophon">奥付</a>` (the target of Task 14's link tap; the golden records how the
+  build lays it out).
+- spine 2, the colophon: `<body style="writing-mode: horizontal-tb">`, `<h2 id="colophon">奥付</h2>` and two short
+  paragraphs.
 
 - [ ] **Step 1:** Write the generator and run it: `python -I test/epubs/make_test_vertical_text.py`.
 - [ ] **Step 2: Write the rule checker** (`VerticalRulesTest.cpp`, parameterised over `test_vertical_text` and
@@ -810,19 +824,26 @@ int reversedFillX(int value, int barX, int barWidth, int minValue, int maxValue)
 - [ ] **Step 1:** Make the edits.
 - [ ] **Step 2: Commit** `docs: vertical text in the guide, the cache formats and the roadmap`.
 
-### Task 14: Firmware builds, flash and RAM, the X4
+### Task 14: Firmware builds, flash and RAM, the X4, the X3 and a touch board
 
-The acceptance book `annas-arch-91dbd462043f.epub` and the control `A Game Of Thrones Book 1 -- Martin, George R_ R_
--- 2011 -- chenjin5.epub` are not under `C:/_development/witchhunt-reader/.idea/` (checked 2026-10-28): the maintainer
-supplies them. Neither goes into the repository. The X4 is on COM5; `tools/devctl.py` and `tools/serial_transfer.py`
-need pyserial (the PlatformIO penv's python has it).
+The acceptance book is `C:/_development/witchhunt-reader/.idea/annas-arch-91dbd462043f.epub` (1,663,588 B), and the
+X3 has it in `/test`. The English control the spec names (A Game of Thrones) is not on hand; until the maintainer
+supplies it, the control is an English book already on the X4's card whose page counts must not move:
+`/test/The Anarchy - Dalrymple, William.epub` (40 spine items). Neither book goes into the repository. The X4 is on
+COM5; `tools/devctl.py` and `tools/serial_transfer.py` need pyserial (the PlatformIO penv's python has it). Uploads to
+the X3 and the touch board go through a no-reset helper in the scratchpad: a subclass of `serial_transfer.py`'s
+`CrossPointSerial` whose `open()` opens `serial.Serial(port, 115200, timeout=3)` with the default lines (as devctl
+does) and calls `_wait_ready(25)`, and whose `close()` sets RTS low, then DTR low, then closes (the tool's own open
+deasserts both, which resets an ESP32-C3).
 
 - [ ] **Step 1: Sizes.** Build `default` and `gh_release` on the branch, and `default` on master `c3c5a6c9e` in a
   sibling worktree (`git worktree add C:/tmp/wt-wm3-base c3c5a6c9e`), one at a time. Record pio's `Flash:` and `RAM:`
   lines for both, and from `.pio/build/default/firmware.map` the sizes of `VerticalOrientation.cpp.o`,
-  `VerticalDraw.cpp.o` and `FlowContext.cpp.o` (`.text`, `.rodata`). State the deltas in the PR.
-- [ ] **Step 2: The control under master.** With master on the X4, open the control book's spine items 5, 20 and 40 at
-  page 1 (`cmd:ACT:READER:/test/<control>@5:1 idle:120000 state`) and record their page counts.
+  `VerticalDraw.cpp.o` and `FlowContext.cpp.o` (`.text`, `.rodata`). State the deltas in the PR. Keep the branch's
+  `.pio/build/default/firmware.bin`: the X3 runs the same C3 binary.
+- [ ] **Step 2: The control under master.** With master on the X4, open the control's spine items 5, 20 and 40 at
+  page 1 (`cmd:ACT:READER:/test/The Anarchy - Dalrymple, William.epub@5:1 idle:120000 state`) and record their page
+  counts.
 - [ ] **Step 3: Back up and flash.** `cmd:GET:*` to a file in the scratchpad; `pio run -e default -t upload
   --upload-port COM5`. Upload `test_vertical_text.epub` and the acceptance book to `/test`. Reader font NotoSansJP 14
   pt (`cmd:SET:fontFamily=NotoSansJP`; if `GET` lists no such family, install it with the Font Manager first).
@@ -847,7 +868,41 @@ need pyserial (the PlatformIO penv's python has it).
   ten minutes in a vertical book with Background-B building: the log has no `Parameters do not match`. If the sleep
   screen shows the current page (`cmd:GET:sleepScreen`), `cmd:SLEEP` in a vertical page and wake the X4 by hand: the
   sleep screen is the page in columns, and the log has no `SLP` `section cache not found ... rebuilding`.
-- [ ] **Step 9: Restore** every changed setting from the backup, verify with `GET`, and flash master back unless the
-  maintainer says otherwise.
-- [ ] **Step 10:** The PR (2-4 KB): what changed, the rulings, the review focus, the sizes, the X4 table (pages v/h,
-  build ms, pre-render ms, heap after a turn) and the screenshots. `x4pro` and `lilygo_t5s3` are left to CI.
+- [ ] **Step 9: Restore the X4:** every changed setting from the backup, verified with `GET`; flash master back unless
+  the maintainer says otherwise.
+- [ ] **Step 10: The X3** (spec 10.1 again, on the branch; not a gate). The maintainer flashes Step 1's
+  `firmware.bin` and names the port. Nothing here resets the X3: no esptool, no RTS pulse, no `CMD:REBOOT`, no
+  `CMD:SLEEP`.
+  - `cmd:GET:*` to a backup file; portrait (`cmd:SET:orientation=0`), NotoSansJP 14 pt, text anti-aliasing on as the
+    spike ran (`cmd:SET:textAntiAliasing=1`), and `cmd:SET:sleepTimeoutMinutes=30` for the session (an idle X3 sleeps
+    and drops off USB).
+  - `cmd:FS:LS:/test` shows the acceptance book at 1,663,588 B. Upload `test_vertical_text.epub`: `cmd:ACT:USB_TRANSFER`,
+    the no-reset helper's `upload()`, then `cmd:BTN:BACK`. Leaving the screen restarts the X3 to Home by design; if it
+    stays silent on USB, the maintainer power-cycles it.
+  - The acceptance book's spine items 9, 39, 22 and 4 under Automatic, then under Off, exactly as Step 4 on the X4:
+    pages, build ms, pre-render ms and cost, arena high-water, `heap` after five turns, a screenshot each, no `Render
+    bounds rejected`. Set against spec 10.1's table: the spike's vertical column against the branch's.
+  - `test_vertical_text.epub` spine 1: screenshots, as Step 7.
+  - Restore every changed setting from the backup and verify with `GET`. The maintainer flashes master back.
+- [ ] **Step 11: The touch board** (one session; the maintainer attaches an X4 Pro or a T5S3). Build its env
+  (`-e x4pro` or `-e lilygo_t5s3`, a cold S3 build of 15-30 min, in the background, the only pio run then) and flash it
+  (`-t upload --upload-port <port>`), or hand the maintainer the `firmware.bin` if they would rather flash it. Back up
+  with `cmd:GET:*`; upload `test_vertical_text.epub` and the acceptance book through the USB Transfer screen and the
+  no-reset helper. Coordinates are the portrait screen's (`cmd:TOUCH`/`cmd:SWIPE`, `docs/serial-test-api.md`): W × H
+  480 × 800 on the X4 Pro, 540 × 960 on the T5S3. In the acceptance book's spine 9 at page 2 under Automatic, each
+  followed by `idle:5000:SCREEN state`:
+  - taps (`cmd:SET:touchReaderCtl=1`): `cmd:TOUCH:<W/6>,<H/2>` turns forward, `cmd:TOUCH:<5W/6>,<H/2>` back;
+  - inverted taps (`touchReaderCtl=3`): the left third turns back;
+  - swipes (`touchReaderCtl=2`): `cmd:SWIPE:<W/4>,<H/2>,<3W/4>,<H/2>` (towards the right) turns forward, the reverse
+    swipe back;
+  - taps right behind a turn: `cmd:BTN:DOWN` then at once `cmd:TOUCH:<W/6>,<H/2>`, with no idle between: the page has
+    moved forward by two (Review Focus 1);
+  - a link target: `test_vertical_text.epub` spine 1 page 1, `shot:` to find 奥付 on the page, `cmd:TOUCH` on it:
+    `check:spine=2/.*`;
+  - the control: `cmd:SET:verticalText=2` (Off) in spine 9: the left third turns back, as in every horizontal book.
+
+  Restore every changed setting from the backup and verify with `GET`; put the board's previous firmware back if the
+  maintainer asks.
+- [ ] **Step 12:** The PR (2-4 KB): what changed, the rulings, the review focus, the sizes, the X4 and X3 tables (pages
+  v/h, build ms, pre-render ms, heap after a turn), the touch session's results and the screenshots. The S3 env not
+  built in Step 11 is left to CI.
