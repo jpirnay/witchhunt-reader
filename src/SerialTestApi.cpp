@@ -25,6 +25,7 @@
 #include <GfxRenderer.h>
 #include <Memory.h>
 #include <ProtectedPaths.h>
+#include <Utf8.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -40,6 +41,7 @@
 #include "SettingsByKey.h"
 #include "TouchUi.h"  // CP_TOUCH_UI
 #include "UiLanguage.h"
+#include "util/CjkLookupRun.h"
 #include "util/Dictionary.h"
 #include "util/IdleGate.h"
 #endif
@@ -358,6 +360,13 @@ void lookUpWord(const std::string_view wordView) {
   std::string definition;
   std::string headword;
   bool found = false;
+  // A word that starts with Han, kana or Hangul takes the prefix search, as the word screen does.
+  const bool cjk = CjkLookupRun::scriptOf(text.c_str(), text.size()) != CjkLookupRun::Script::Other;
+  CjkLookupRun run;
+  if (cjk) run.append(text.c_str(), text.size());
+  DictPrefixMatch match;
+  long searchMs = 0;
+  long exactMs = -1;  // -1: no exact baseline ran
   if (dictionaryName[0] != '\0') {
     // The object carries scan buffers and an inflate window between lookups; on the heap for the
     // length of this command only, and makeUniqueNoThrow so a fragmented heap is an answer, not
@@ -371,11 +380,28 @@ void lookUpWord(const std::string_view wordView) {
       outcome = "index_failed";
     } else {
       Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
-      found = dict->lookup(text.c_str(), definition, headword, &result);
+      if (cjk) {
+        // Run unabortable, so the time is the search's and not a keypress's.
+        const unsigned long searchStart = millis();
+        found = dict->resolvePrefixes(run.text(), match, &result);
+        searchMs = static_cast<long>(millis() - searchStart);
+        if (found) {
+          // The old path for the same headword, after the search so any cache warmth favours it.
+          DictLocation exactLocation;
+          std::string exactHeadword;
+          const unsigned long exactStart = millis();
+          dict->resolve(match.hits[0].headword.c_str(), exactLocation, exactHeadword);
+          exactMs = static_cast<long>(millis() - exactStart);
+          found = dict->readPrefixDefinitions(match, definition, &result);
+          headword = match.hits[0].headword;
+        }
+      } else {
+        found = dict->lookup(text.c_str(), definition, headword, &result);
+      }
       outcome = Dictionary::resultName(result);
     }
   }
-  Dictionary::logLookup(dictionaryName, text.c_str(), outcome, found ? headword.c_str() : nullptr);
+  Dictionary::logLookup(dictionaryName, cjk ? run.text() : text.c_str(), outcome, found ? headword.c_str() : nullptr);
   std::string line = "DICT:result=";
   line += outcome;
   appendField(line, "dict", dictionaryName);
@@ -383,6 +409,32 @@ void lookUpWord(const std::string_view wordView) {
   if (found) {
     appendField(line, "headword", headword);
     appendField(line, "bytes", static_cast<long>(definition.size()));
+  }
+  if (cjk) {
+    long matched = 0;
+    std::string hits;
+    std::string entries;
+    for (uint8_t i = 0; i < match.count; ++i) {
+      if (i > 0) {
+        hits += ',';
+        entries += ',';
+      }
+      hits += match.hits[i].headword;
+      entries += std::to_string(match.hits[i].entryCount);
+    }
+    if (match.count > 0) {
+      const auto* cursor = reinterpret_cast<const unsigned char*>(run.text());
+      const auto* const end = cursor + match.hits[0].runBytes;
+      while (cursor < end && utf8NextCodepoint(&cursor) != 0) ++matched;
+    }
+    appendField(line, "run", run.text());
+    appendField(line, "matched", matched);
+    appendField(line, "hits", hits);
+    appendField(line, "entries", entries);
+    appendField(line, "probes", static_cast<long>(match.probes));
+    appendField(line, "reads", static_cast<long>(match.reads));
+    appendField(line, "ms", searchMs);
+    if (exactMs >= 0) appendField(line, "exact_ms", exactMs);
   }
   reply(line);
 }

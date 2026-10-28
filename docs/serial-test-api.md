@@ -418,6 +418,29 @@ DICT:result=<outcome> dict=<dictionary> word=<word>[ headword=<matched entry> by
 DICT_ERROR:no word
 ```
 
+A word whose first kept character is Han, kana or Hangul takes the prefix search the word screen
+runs on CJK text instead (no synonym or word-form fallbacks), and the reply gains the search's
+findings. The Latin reply is unchanged.
+
+```
+DICT:result=<outcome> dict=<d> word=<w>[ headword=<hits[0]> bytes=<n>] run=<run> matched=<codepoints of hits[0]> hits=<h1,h2,h3> entries=<n1,n2,n3> probes=<n> reads=<n> ms=<t>[ exact_ms=<t>]
+```
+
+Example, with CC-CEDICT:
+
+```
+> CMD:ACT:DICT:大学生活
+< DICT:result=found dict=cedict word=大学生活 headword=大学生 bytes=<n> run=大学生活 matched=3 hits=大学生,大学,大 entries=1,1,1 probes=1 reads=<n> ms=<t> exact_ms=<t>
+```
+
+`run` is the cleaned text searched (at most 12 codepoints). `hits` lists up to three headwords that
+are prefixes of the run, longest first; `entries` is each one's number of same-headword entries;
+`matched` is the codepoint count of `hits[0]`. On a miss `matched=0` and `hits` and `entries` are
+empty. `probes` and `reads` count the index window scans and the file reads. `ms` times the prefix
+search, run without an abort check. `exact_ms` times the plain lookup of `hits[0]`, run after the
+search so cache warmth favours it, and is sent only on a hit. `bytes` is the length of the
+definitions of all the hits, as the word screen shows them.
+
 `<outcome>` is `found`, `not_found`, `low_memory`, `decompress_error`, `read_error`,
 `no_dictionary` (none chosen), `open_failed` or `index_failed`. A dictionary used for the first
 time builds its index first, which can take several seconds; the device does nothing else meanwhile.
