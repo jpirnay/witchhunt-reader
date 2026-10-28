@@ -392,6 +392,15 @@ TEST(CjkLatinGap, TheGapIsAQuarterEmOfTheCjkSide) {
   text.addWord("A", EpdFontFamily::REGULAR, false, /*attachToPrevious=*/true);
   EXPECT_EQ(layout(text, 400)[0].xpos, (X{0, 14, 34}));
 }
+TEST(CjkLatinGap, TheGapIsTheCjkSidesAlsoWhenTheLatinSideIsLarger) {
+  // A at 160 % is 16 px beside 字 at 100 %: the gap is (2 × 10 + 4) / 8 = 3 px, not the 4 px of the larger side.
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.setTypography(withoutGrid("ja"));
+  text.addWord("字", EpdFontFamily::REGULAR);
+  text.addWord("A", EpdFontFamily::REGULAR, false, /*attachToPrevious=*/true, 160);
+  text.addWord("字", EpdFontFamily::REGULAR, false, /*attachToPrevious=*/true);
+  EXPECT_EQ(layout(text, 400)[0].xpos, (X{0, 13, 32}));
+}
 TEST(CjkLatinGap, AFontWithoutCjkGlyphsGetsNoGap) {
   // A Latin reader font has no 一 of its own: no em, so no gap, as no grid and no narrowed mark (A3a).
   EXPECT_EQ(layoutText("字A字", TypographyProfile::forLanguage("ja"), CssTextAlign::Left, 400, false,
