@@ -279,6 +279,41 @@ TEST_F(JpegDownscaleFixture, AFileTheFullDecoderRefusesIsDrawnFromItsDcScans) {
   EXPECT_EQ(refused.px, eighth.px);
 }
 
+// ...but not a decode the card failed: the error is not the file's, and the 1/8 picture would be
+// cached as the box's for good. The placeholder is drawn, nothing is cached, and the next pass
+// decodes again. Reads fail from the middle of prog_420_dc_first.jpg on: the full decode's index
+// reads the whole file and meets them; a 1/8 decode needs only the first scan and would not.
+TEST_F(JpegDownscaleFixture, ACardErrorIsNotRetriedAtAnEighth) {
+  const std::string jpg = JPEG_FIXTURE_DIR "/prog_420_dc_first.jpg";
+  ASSERT_FALSE(decode("prog_420_dc_first.jpg", 150, 104).px.empty()) << "control: it decodes and caches";
+  struct ReadsFailFrom {
+    explicit ReadsFailFrom(const long offset) { FsFile::failReadsFrom = offset; }
+    ~ReadsFailFrom() { FsFile::failReadsFrom = -1; }
+    ReadsFailFrom(const ReadsFailFrom&) = delete;
+    ReadsFailFrom& operator=(const ReadsFailFrom&) = delete;
+  } cut(static_cast<long>(fs::file_size(jpg) / 2));
+  {
+    FsFile file;
+    ASSERT_TRUE(file.openForRead(jpg));
+    ProgressiveJpeg::DecodeOptions options;
+    const auto eighth = ProgressiveJpeg::decodeResized(
+        file, options, 150, 104, [](void*, uint16_t, const uint8_t*, uint16_t) { return true; }, nullptr);
+    file.close();
+    ASSERT_EQ(eighth, ProgressiveJpeg::Result::Ok) << "the 1/8 decode alone gets past the failing reads";
+  }
+  RenderConfig config;
+  config.x = 0;
+  config.y = 0;
+  config.maxWidth = 150;
+  config.maxHeight = 104;
+  config.useExactDimensions = true;
+  config.useDithering = false;
+  config.cachePath = (work / "card_error.pxc").string();
+  JpegToFramebufferConverter converter;
+  EXPECT_TRUE(converter.decodeToFramebuffer(jpg, renderer, config)) << "the placeholder is drawn";
+  EXPECT_FALSE(fs::exists(config.cachePath)) << "a decode the card failed is not cached";
+}
+
 // One decode, both caches (RenderConfig::companionCachePath). The reader's BW-primary decode used
 // to be followed by a second full decode for the grey cache -- 2.35 s each for a progressive
 // diagram on the X3. The merge is only sound as a pure optimisation: the two files must be byte

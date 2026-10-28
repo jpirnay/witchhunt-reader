@@ -1053,14 +1053,25 @@ Result decodeBand(State<C>& st, const Geometry& g, uint8_t* workspace, const Lay
 
 Result probe(FsFile& file, ImageInfo& info, const uint32_t base) {
   info = {};
-  if (!file || !file.seek(base)) return Result::InvalidData;
+  if (!file) return Result::InvalidData;
+  // As in Source::at: a read that fails, or a seek that fails inside the file, is the card's error;
+  // whatever the header then looked like, that is the result.
+  bool ioError = false;
+  auto seekTo = [&](const uint32_t pos) {
+    if (file.seek(pos)) return true;
+    if (pos < file.size()) ioError = true;
+    return false;
+  };
   auto finish = [&](const Result result) {
     file.seek(base);
-    return result;
+    return result != Result::Ok && ioError ? Result::IoError : result;
   };
+  if (!seekTo(base)) return finish(Result::InvalidData);
   auto readByte = [&]() -> int {
     uint8_t value = 0;
-    return file.read(&value, 1) == 1 ? value : -1;
+    const int count = file.read(&value, 1);
+    if (count < 0) ioError = true;
+    return count == 1 ? value : -1;
   };
   if (readByte() != 0xFF || readByte() != 0xD8) return finish(Result::InvalidData);
   for (;;) {
@@ -1080,14 +1091,15 @@ Result probe(FsFile& file, ImageInfo& info, const uint32_t base) {
     const uint16_t length = static_cast<uint16_t>((hi << 8) | lo);
     if (length < 2) return finish(Result::InvalidData);
     if (!isStartOfFrame(marker)) {
-      if (!file.seek(file.position() + length - 2)) return finish(Result::InvalidData);
+      if (!seekTo(static_cast<uint32_t>(file.position() + length - 2))) return finish(Result::InvalidData);
       continue;
     }
     if (marker != 0xC2) return finish(Result::Unsupported);
     uint8_t frame[6 + 3 * MAX_COMPONENTS] = {};
-    if (length < 8 || length - 2U > sizeof(frame) || file.read(frame, length - 2U) != static_cast<int>(length - 2U)) {
-      return finish(Result::Unsupported);
-    }
+    if (length < 8 || length - 2U > sizeof(frame)) return finish(Result::Unsupported);
+    const int got = file.read(frame, length - 2U);
+    if (got < 0) ioError = true;
+    if (got != static_cast<int>(length - 2U)) return finish(Result::Unsupported);
     info.height = static_cast<uint16_t>((frame[1] << 8) | frame[2]);
     info.width = static_cast<uint16_t>((frame[3] << 8) | frame[4]);
     info.componentCount = frame[5];
@@ -1267,6 +1279,10 @@ Result stepSession(Session<C>& ss, const DecodeOptions& options, const uint16_t 
   // An abort stops between index chunks or before a band, where the session is exactly the state
   // the next step would start from: it stays resumable (and checkpointable). Anything else is final.
   if (result != Result::Pending && result != Result::Aborted) {
+    // A read or seek the card failed leaves -1 bytes, which every parser and the bit reader take
+    // for the end of the data: whatever they then refused, the card's error is the cause. Reported
+    // as data, a caller would try the file another way (a converter's 1/8 retry) and keep that.
+    if (result != Result::Ok && ss.st.source.ioError) result = Result::IoError;
     ss.phase = Phase::Done;
     ss.outcome = result;
   }

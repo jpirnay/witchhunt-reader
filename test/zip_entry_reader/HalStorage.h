@@ -168,6 +168,9 @@ class HalFile : public Print {
   // error inside the file, where SdFat's seekSet fails when the FAT read of its cluster-chain walk
   // does. -1 turns it off.
   static inline long failSeekAt = -1;
+  // Every seek to this offset or past it fails. stdio seeks past the end of a file; SdFat's seekSet
+  // fails there. Set to a file's size, it models the card. -1 turns it off.
+  static inline long failSeeksFrom = -1;
   // Test instrumentation: when set, every seek within a file appends its target offset, so a test
   // can fail each offset a pass seeks to in turn.
   static inline std::vector<size_t>* seekLog = nullptr;
@@ -215,6 +218,7 @@ class HalFile : public Print {
     }
     if (fp_ && seekLog) seekLog->push_back(pos);
     if (failSeekAt >= 0 && static_cast<long>(pos) == failSeekAt) return false;
+    if (failSeeksFrom >= 0 && static_cast<long>(pos) >= failSeeksFrom) return false;
     return fp_ && fseek(fp_, static_cast<long>(pos), SEEK_SET) == 0;
   }
   bool seekSet(size_t pos) { return seek(pos); }

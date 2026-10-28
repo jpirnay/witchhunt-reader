@@ -47,7 +47,8 @@ struct ImageInfo {
 };
 
 // Reads marker segments through SOF and rewinds the file. Unsupported for anything
-// decode() would refuse on geometry alone (non-SOF2, precision, luma not at full sampling).
+// decode() would refuse on geometry alone (non-SOF2, precision, luma not at full sampling);
+// IoError when the card fails a read, or a seek inside the file.
 // `base`: where the JPEG starts in the file -- 0 for a file of its own, the entry's data offset for
 // an image stored uncompressed in a ZIP and read in place. Every offset is relative to it.
 Result probe(FsFile& file, ImageInfo& info, uint32_t base = 0);
@@ -104,7 +105,8 @@ struct DecodeOptions {
 
 // Every failure is reported before the first band is emitted unless the entropy data itself is
 // corrupt or the card fails a read or seek (IoError), so a caller can fall back to another decoder
-// on Unsupported / OutOfMemory.
+// on Unsupported / OutOfMemory. Once the card has failed one, the result is IoError whatever the
+// data then looked like: not a reason to decode the file another way.
 Result decode(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user);
 
 // One output row of decodeResized(): `width` gray pixels at row `y`. False stops the decode.

@@ -681,8 +681,9 @@ TEST(ProgressiveJpeg, ACheckpointResumesWithOrWithoutTheReadWindows) {
 // fails there when the FAT read of its cluster-chain walk does, and the banded decode seeks all the
 // time. Taken for the end, it cut the scan index short or padded a scan with zero bits, and the
 // decode could still report Ok: a wrong picture, cached like a whole one. Every offset a decode
-// seeks to is failed in turn: no run may report Ok, and the rows it emitted before the failure are
-// the clean decode's.
+// seeks to is failed in turn: each run reports an I/O error, whatever the data it was left with
+// looked like (a converter retries other failures at 1/8 and caches what that draws), and the rows
+// it emitted before the failure are the clean decode's.
 struct SeekFault {
   explicit SeekFault(const long offset) { FsFile::failSeekAt = offset; }
   ~SeekFault() { FsFile::failSeekAt = -1; }
@@ -738,22 +739,21 @@ TEST(ProgressiveJpeg, ASeekTheCardFailsInsideTheFileIsAnError) {
       std::sort(offsets.begin(), offsets.end());
       offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
       int failed = 0;
-      int ioErrors = 0;
       for (const size_t offset : offsets) {
         if (offset >= fileSize) continue;  // past the end a seek fails by design: the end of the data
         const SeekFault fault(static_cast<long>(offset));
         Capture faulted;
         const auto result = run(faulted);
         ++failed;
-        ioErrors += result == ProgressiveJpeg::Result::IoError;
-        EXPECT_NE(result, ProgressiveJpeg::Result::Ok) << "the seek to " << offset << " failed";
+        EXPECT_EQ(result, ProgressiveJpeg::Result::IoError)
+            << "the seek to " << offset << " failed: " << ProgressiveJpeg::resultName(result);
         const std::vector<uint8_t>& rows = faulted.image.px;
         EXPECT_TRUE(rows.size() <= clean.image.px.size() &&
                     std::equal(rows.begin(), rows.end(), clean.image.px.begin()))
             << "the rows before the failed seek to " << offset << " are the clean decode's";
       }
-      std::printf("[ pjpeg    ] %s 1/%d %s: %d seek offsets failed in turn, %d of them I/O errors\n", jpg, 1 << shift,
-                  windows ? "windows" : "shared", failed, ioErrors);
+      std::printf("[ pjpeg    ] %s 1/%d %s: %d seek offsets failed in turn\n", jpg, 1 << shift,
+                  windows ? "windows" : "shared", failed);
       EXPECT_GT(failed, 0);
     }
   }
@@ -973,6 +973,63 @@ TEST(ProgressiveJpeg, AnEighthReadsNothingPastTheScanThatCompletesLumaDc) {
                   static_cast<unsigned>(clean.stats.bytesRead), bytes.size(), limit);
     }
   }
+}
+
+struct SeeksFailFrom {
+  explicit SeeksFailFrom(const long offset) { FsFile::failSeeksFrom = offset; }
+  ~SeeksFailFrom() { FsFile::failSeeksFrom = -1; }
+  SeeksFailFrom(const SeeksFailFrom&) = delete;
+  SeeksFailFrom& operator=(const SeeksFailFrom&) = delete;
+};
+
+// A seek at or past the end of the file fails on the card (SdFat's seekSet refuses a position past
+// the size; the stub fails at the size too): that is the end of the data, which the bit reader
+// pads like libjpeg, not the card's error. A file cut inside its first scan makes the index and
+// the scan's bit reader both run into its end; with those seeks failing it decodes exactly as when
+// they succeed and read nothing.
+TEST(ProgressiveJpeg, ASeekAtOrPastTheEndIsTheEndOfTheData) {
+  const std::vector<uint8_t> whole = readBytes(fixture("prog_full_420.jpg"));
+  const std::vector<ScanSpan> scans = scansOf(whole);
+  ASSERT_FALSE(scans.empty());
+  const size_t cutAt = (scans[0].dataStart + scans[0].dataEnd) / 2;
+  const std::string path =
+      writeTemp("cut_in_first_scan.jpg", std::vector<uint8_t>(whole.begin(), whole.begin() + cutAt));
+  for (const int shift : {0, 3}) {
+    for (const bool windows : {false, true}) {
+      SCOPED_TRACE(std::string("1/") + std::to_string(1 << shift) + (windows ? ", read windows" : ", shared buffer"));
+      std::vector<uint8_t> readWindows(ProgressiveJpeg::scanWindowBytes());
+      const auto run = [&](Capture& capture) {
+        FsFile file;
+        EXPECT_TRUE(file.openForRead(path));
+        ProgressiveJpeg::DecodeOptions options;
+        options.scaleShift = static_cast<uint8_t>(shift);
+        if (windows) {
+          options.readWindows = readWindows.data();
+          options.readWindowsSize = readWindows.size();
+        }
+        const auto result = ProgressiveJpeg::decode(file, options, Capture::accept, &capture);
+        file.close();
+        return result;
+      };
+      Capture readsNothing;
+      const auto expected = run(readsNothing);  // stdio: those seeks succeed, the reads after them return 0
+      Capture failing;
+      ProgressiveJpeg::Result result;
+      size_t atOrPastTheEnd = 0;
+      {
+        const SeekLog log;
+        const SeeksFailFrom end(static_cast<long>(cutAt));
+        result = run(failing);
+        for (const size_t offset : log.offsets) atOrPastTheEnd += offset >= cutAt;
+      }
+      EXPECT_GT(atOrPastTheEnd, 0u) << "the decode sought the end of the file";
+      EXPECT_NE(result, ProgressiveJpeg::Result::IoError) << ProgressiveJpeg::resultName(result);
+      EXPECT_EQ(result, expected) << ProgressiveJpeg::resultName(result);
+      EXPECT_FALSE(failing.image.px.empty());
+      EXPECT_TRUE(failing.image.px == readsNothing.image.px);
+    }
+  }
+  std::remove(path.c_str());
 }
 
 // Smaller output keeps fewer coefficients per block: the working set has to shrink with it.

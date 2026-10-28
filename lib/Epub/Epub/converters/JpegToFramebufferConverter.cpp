@@ -1949,11 +1949,13 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
               static_cast<unsigned>(sizeof(park::Header) + park::sinkBytes(ctx) + progressive.checkpointSize()),
               imagePath.c_str());
     }
-    if (!aborted && !progressiveSink.emitted && tjpgScale != 3 && result != ProgressiveJpeg::Result::Ok) {
+    if (!aborted && !progressiveSink.emitted && tjpgScale != 3 && result != ProgressiveJpeg::Result::Ok &&
+        result != ProgressiveJpeg::Result::IoError) {
       // Refused before its first row: nothing is drawn or cached yet, so the decode can start over
       // on the same context from the DC scans alone -- a 1/8 session holds no AC scan or table, the
       // usual reason a file is refused (more of them than a full session has room for). The
-      // workspace taken for the finer scale is larger than the 1/8 one.
+      // workspace taken for the finer scale is larger than the 1/8 one. Not after a card error: it
+      // is not the file's, and the 1/8 picture would be cached as the box's for good.
       LOG_ERR("JPG", "Progressive JPEG full decode failed (%s), trying the 1/8 resize: %s",
               ProgressiveJpeg::resultName(result), imagePath.c_str());
       ctx.scaledSrcWidth = destWidth;
