@@ -397,6 +397,32 @@ TEST_F(RubyLayout, ACssClassMarksItsSpan) {
   EXPECT_TRUE(l[0].ruby.empty());
 }
 
+TEST_F(RubyLayout, AMultiWordRubyBaseInAMarkedSpanKeepsItsSpace) {
+  const auto l = lines("<p><span class=\"bouten\">強<ruby>New York<rt>ニューヨーク</rt></ruby>調</span></p>",
+                       ".bouten { -epub-text-emphasis-style: sesame }");
+  ASSERT_EQ(l.size(), 1u);
+  EXPECT_EQ(l[0].words, (std::vector<std::string>{"強", "New", " ", "York", "調"}));
+  EXPECT_EQ(l[0].ruby, (RubyList{{1, 3, "ニューヨーク"}}));
+  EXPECT_EQ(l[0].emphasis, (RubyList{{0, 1, "5"}, {4, 1, "5"}}));
+}
+
+TEST_F(RubyLayout, ALongMarkedSpanKeepsItsMarkAcrossTheSplit) {
+  // 160 characters pass the 96-token split: every line of the span is one run over all its tokens.
+  const auto l = lines("<p><span class=\"bouten\">" + hanRun(160) + "</span></p>",
+                       ".bouten { -epub-text-emphasis-style: sesame }");
+  size_t words = 0;
+  size_t marked = 0;
+  for (const auto& line : l) {
+    words += line.words.size();
+    ASSERT_EQ(line.emphasis.size(), 1u);
+    EXPECT_EQ(std::get<0>(line.emphasis[0]), 0u);
+    EXPECT_EQ(std::get<1>(line.emphasis[0]), line.words.size());
+    marked += std::get<1>(line.emphasis[0]);
+  }
+  EXPECT_EQ(words, 160u);
+  EXPECT_EQ(marked, 160u);
+}
+
 TEST_F(RubyLayout, AnInternalLinkKeepsItsOwnMark) {
   const auto l = lines("<p>前<a class=\"bouten\" href=\"#x\">強調</a>後</p><p id=\"x\">先</p>",
                        ".bouten { -epub-text-emphasis-style: sesame }");

@@ -708,7 +708,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       ".f { -webkit-writing-mode: vertical-lr; -webkit-text-orientation: upright; text-combine-upright: digits 3; "
       "direction: rtl; unicode-bidi: isolate-override; text-align: end; }\n"
       ".g { writing-mode: vertical-rl; }\n"  // a rule with nothing else is kept
-      ".h { text-emphasis-style: none; }\n";
+      ".h { text-emphasis-style: none; }\n"
+      ".i { writing-mode: vertical-rl; text-emphasis: filled triangle; }\n";  // the flow word and a mark in one record
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   std::string cssPath;
@@ -718,8 +719,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   ASSERT_TRUE(compileCache(parser, cssPath));
 
   const std::vector<std::pair<std::string, std::string>> probes = {
-      {"p", "a"},    {"p", "b"},    {"div", "c"}, {"span", "a"},  {"p", "none"},
-      {"span", "d"}, {"span", "e"}, {"div", "f"}, {"html", "g"}, {"span", "h"}};
+      {"p", "a"},    {"p", "b"},   {"div", "c"},  {"span", "a"}, {"p", "none"}, {"span", "d"},
+      {"span", "e"}, {"div", "f"}, {"html", "g"}, {"span", "h"}, {"span", "i"}};
   auto resolveAll = [&](CssParser& p) {
     std::vector<CssStyle> out;
     for (const auto& pr : probes) out.push_back(p.resolveStyle(pr.first, pr.second));
@@ -750,6 +751,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       << "text-emphasis-style did not survive the disk cache";
   EXPECT_TRUE(heapStyles[9].hasTextEmphasis() && heapStyles[9].textEmphasis == 0)
       << "an explicit text-emphasis-style: none did not survive the disk cache";
+  EXPECT_EQ(CssWritingMode::VerticalRl, heapStyles[10].writingMode);
+  EXPECT_EQ(heapStyles[10].textEmphasis, TextEmphasis::Triangle) << "a mark beside the flow word did not survive";
 
   BuildArena arena(64 * 1024);
   ASSERT_TRUE(arena.valid());

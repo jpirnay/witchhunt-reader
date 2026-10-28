@@ -158,6 +158,23 @@ TEST(CjkEmphasis, RubyWinsOverEmphasisOnTheSameBase) {
   EXPECT_EQ(r.markCalls(utf8(0x2022)).size(), 1u);
 }
 
+TEST(CjkEmphasis, AMultiWordRubyBaseKeepsItsSpaceAndTheMarksBesideIt) {
+  ParsedText text(false, false, leftAligned());
+  for (const char* word : {"強", "New", "York", "調"}) {
+    text.addWord(word, EpdFontFamily::REGULAR, false, false, 100, 0, 0, Sesame);
+  }
+  ASSERT_TRUE(text.addRubyGroup(1, 2, "ニューヨーク"));
+  Result r;
+  layout(text, 400, r);
+  ASSERT_EQ(r.lines.size(), 1u);
+  EXPECT_EQ(r.lines[0].words, (std::vector<std::string>{"強", "New", " ", "York", "調"}));
+  // The group covers the base's space; the marks stay on 強 and 調, none on the base.
+  EXPECT_EQ(
+      r.lines[0].records,
+      (std::vector<Record>{{0, 1, Kind::Emphasis, Sesame}, {1, 3, Kind::Ruby, 0}, {4, 1, Kind::Emphasis, Sesame}}));
+  EXPECT_EQ(r.markCalls(kSesameGlyph).size(), 2u);
+}
+
 TEST(CjkEmphasis, AFaceWithoutTheMarkDrawsASquare) {
   ParsedText text(false, false, leftAligned());
   text.addWord("強調", EpdFontFamily::REGULAR, false, false, 100, 0, 0, Sesame);
