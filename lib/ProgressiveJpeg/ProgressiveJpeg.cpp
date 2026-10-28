@@ -1289,7 +1289,9 @@ Result stepSession(Session<C>& ss, const DecodeOptions& options, const uint16_t 
   return result;
 }
 
-constexpr uint32_t CHECKPOINT_MAGIC = 0x31434A50;  // "PJC1"
+// "PJC3": bumped with every session layout change, which sessionBytes alone may not notice. Not
+// PJC2: that is the damage handling's layout (archive/progressive-jpeg), another session.
+constexpr uint32_t CHECKPOINT_MAGIC = 0x33434A50;
 struct CheckpointHeader {
   uint32_t magic;
   uint32_t sessionBytes;   // sizeof(Session): another firmware's layout, or another kind, is refused, not misread
