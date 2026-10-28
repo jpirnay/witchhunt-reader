@@ -600,6 +600,88 @@ TEST(ProgressiveJpeg, ACheckpointResumesWithOrWithoutTheReadWindows) {
   std::remove(ckpt.c_str());
 }
 
+// A seek the card fails inside the file is a failed read, not the end of the data. SdFat's seekSet
+// fails there when the FAT read of its cluster-chain walk does, and the banded decode seeks all the
+// time. Taken for the end, it cut the scan index short or padded a scan with zero bits, and the
+// decode could still report Ok: a wrong picture, cached like a whole one. Every offset a decode
+// seeks to is failed in turn: no run may report Ok, and the rows it emitted before the failure are
+// the clean decode's.
+struct SeekFault {
+  explicit SeekFault(const long offset) { FsFile::failSeekAt = offset; }
+  ~SeekFault() { FsFile::failSeekAt = -1; }
+  SeekFault(const SeekFault&) = delete;
+  SeekFault& operator=(const SeekFault&) = delete;
+};
+
+struct SeekLog {
+  std::vector<size_t> offsets;
+  SeekLog() { FsFile::seekLog = &offsets; }
+  ~SeekLog() { FsFile::seekLog = nullptr; }
+  SeekLog(const SeekLog&) = delete;
+  SeekLog& operator=(const SeekLog&) = delete;
+};
+
+TEST(ProgressiveJpeg, ASeekTheCardFailsInsideTheFileIsAnError) {
+  const char* const jpg = "prog_full_420.jpg";
+  const auto fileSize = static_cast<size_t>(std::filesystem::file_size(fixture(jpg)));
+  ProgressiveJpeg::ImageInfo info;
+  {
+    FsFile file;
+    ASSERT_TRUE(file.openForRead(fixture(jpg)));
+    ASSERT_EQ(ProgressiveJpeg::probe(file, info), ProgressiveJpeg::Result::Ok);
+    file.close();
+  }
+  for (const int shift : {0, 3}) {
+    for (const bool windows : {false, true}) {
+      SCOPED_TRACE(std::string("1/") + std::to_string(1 << shift) + (windows ? ", read windows" : ", shared buffer"));
+      std::vector<uint8_t> workspace(ProgressiveJpeg::workspaceBytes(info, static_cast<uint8_t>(shift)));
+      std::vector<uint8_t> readWindows(ProgressiveJpeg::scanWindowBytes());
+      const auto run = [&](Capture& capture) {
+        FsFile file;
+        EXPECT_TRUE(file.openForRead(fixture(jpg)));
+        ProgressiveJpeg::DecodeOptions options;
+        options.scaleShift = static_cast<uint8_t>(shift);
+        options.workspace = workspace.data();
+        options.workspaceSize = workspace.size();
+        if (windows) {
+          options.readWindows = readWindows.data();
+          options.readWindowsSize = readWindows.size();
+        }
+        const auto result = ProgressiveJpeg::decode(file, options, Capture::accept, &capture);
+        file.close();
+        return result;
+      };
+      Capture clean;
+      std::vector<size_t> offsets;
+      {
+        const SeekLog log;
+        ASSERT_EQ(run(clean), ProgressiveJpeg::Result::Ok);
+        offsets = log.offsets;
+      }
+      std::sort(offsets.begin(), offsets.end());
+      offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
+      int failed = 0;
+      int ioErrors = 0;
+      for (const size_t offset : offsets) {
+        if (offset >= fileSize) continue;  // past the end a seek fails by design: the end of the data
+        const SeekFault fault(static_cast<long>(offset));
+        Capture faulted;
+        const auto result = run(faulted);
+        ++failed;
+        ioErrors += result == ProgressiveJpeg::Result::IoError;
+        EXPECT_NE(result, ProgressiveJpeg::Result::Ok) << "the seek to " << offset << " failed";
+        const std::vector<uint8_t>& rows = faulted.image.px;
+        EXPECT_TRUE(rows.size() <= clean.image.px.size() &&
+                    std::equal(rows.begin(), rows.end(), clean.image.px.begin()))
+            << "the rows before the failed seek to " << offset << " are the clean decode's";
+      }
+      std::printf("[ pjpeg    ] %s 1/%d %s: %d seek offsets failed in turn, %d of them I/O errors\n", jpg, 1 << shift,
+                  windows ? "windows" : "shared", failed, ioErrors);
+      EXPECT_GT(failed, 0);
+    }
+  }
+}
+
 // Smaller output keeps fewer coefficients per block: the working set has to shrink with it.
 TEST(ProgressiveJpeg, WorkspaceShrinksWithScale) {
   ProgressiveJpeg::ImageInfo info;

@@ -96,7 +96,8 @@ struct DecodeOptions {
 };
 
 // Every failure is reported before the first band is emitted unless the entropy data itself is
-// corrupt, so a caller can fall back to another decoder on Unsupported / OutOfMemory.
+// corrupt or the card fails a read or seek (IoError), so a caller can fall back to another decoder
+// on Unsupported / OutOfMemory.
 Result decode(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user);
 
 struct Session;

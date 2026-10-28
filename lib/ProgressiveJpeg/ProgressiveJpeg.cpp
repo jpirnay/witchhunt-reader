@@ -107,11 +107,16 @@ struct Source {
     }
   }
 
-  // -1 past the end of the file (or on a read error, which sets ioError). A seek past the end
-  // fails on SdFat: that is end of data too, which the bit reader pads with zeros like libjpeg.
+  // -1 past the end of the file, or on a failed read or seek (those set ioError). A seek past the
+  // end fails on SdFat: that is end of data too, which the bit reader pads with zeros like libjpeg.
+  // One that fails inside the file is the card's error -- seekSet fails when the FAT read of its
+  // cluster-chain walk does -- never the end of the data.
   int at(const uint32_t pos) {
     if (pos - start >= length) {
-      if (!file->seek(base + pos)) return -1;
+      if (!file->seek(base + pos)) {
+        if (base + pos < file->size()) ioError = true;
+        return -1;
+      }
       const int count = file->read(data, capacity);
       ++reads;
       if (count > 0) bytesRead += static_cast<uint32_t>(count);

@@ -164,6 +164,13 @@ class HalFile : public Print {
   // record (a ZIP entry's data) even when the reader visits later offsets first (the central
   // directory at the end of the archive). -1 turns it off.
   static inline long failReadAt = -1;
+  // The same for seeks: every seek to exactly this offset fails, seeks elsewhere do not -- a card
+  // error inside the file, where SdFat's seekSet fails when the FAT read of its cluster-chain walk
+  // does. -1 turns it off.
+  static inline long failSeekAt = -1;
+  // Test instrumentation: when set, every seek within a file appends its target offset, so a test
+  // can fail each offset a pass seeks to in turn.
+  static inline std::vector<size_t>* seekLog = nullptr;
   // Test instrumentation: bytes delivered by read(), across all files. Lets a test bound how much
   // a pass reads, where wall-clock time on a host says little about SD cost.
   static inline size_t bytesRead = 0;
@@ -206,6 +213,8 @@ class HalFile : public Print {
       next_ = pos / kDirEntryBytes;
       return true;
     }
+    if (fp_ && seekLog) seekLog->push_back(pos);
+    if (failSeekAt >= 0 && static_cast<long>(pos) == failSeekAt) return false;
     return fp_ && fseek(fp_, static_cast<long>(pos), SEEK_SET) == 0;
   }
   bool seekSet(size_t pos) { return seek(pos); }
