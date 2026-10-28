@@ -909,27 +909,39 @@ TEST(JpegThumbSession, RefusesWhatOnlyTheResizedEighthTakes) {
 
 // A cover the heap leaves only the 1/8 decode for, in a box larger than the 1/8 picture: the row
 // pipeline would enlarge it a source pixel per output pixel -- 8x8 blocks. It is resampled
-// bilinearly (ProgressiveJpeg::decodeResized), exactly as when not even the 1/8 workspace fits.
+// bilinearly (ProgressiveJpeg::decodeResized), exactly as when not even the 1/8 workspace fits,
+// whatever the picture's size: progressive_tall_3200.jpg is taller than the 3072 rows the
+// baseline path takes.
 TEST(JpegToBmpConverter, AnEnlargedEighthIsResizedAsWhenNothingFits) {
-  FsFile file;
-  ASSERT_TRUE(file.openForRead(fixture("prog_full_420.jpg")));
-  ProgressiveJpeg::ImageInfo info;
-  ASSERT_EQ(ProgressiveJpeg::probe(file, info), ProgressiveJpeg::Result::Ok);
-  const auto convertAt = [&](const uint32_t freeHeap) {
-    FreeHeapScope squeezed(freeHeap);
-    file.seek(0);
-    MemoryPrint out;
-    const JpegToBmpConverter::BmpTarget target[1] = {{&out, 90, 60}};  // needs 1/2 of 203x141
-    EXPECT_TRUE(JpegToBmpConverter::jpegFileTo1BitBmpStreamsWithSizes(file, target, 1));
-    return out.buf;
+  struct Case {
+    const char* jpg;
+    int width;  // a box that needs 1/2
+    int height;
   };
-  const auto eighth = static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 3));
-  const auto quarter = static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 2));
-  const auto onlyTheEighth = convertAt(quarter + 16 * 1024 - 1);  // 1/8 fits beside the row pipeline's 16 KB
-  const auto nothing = convertAt(eighth + 16 * 1024 - 1);         // not even 1/8
-  file.close();
-  ASSERT_FALSE(onlyTheEighth.empty());
-  EXPECT_EQ(onlyTheEighth, nothing);
+  for (const Case& c : {Case{"prog_full_420.jpg", 90, 60}, Case{"progressive_tall_3200.jpg", 32, 1600}}) {
+    SCOPED_TRACE(c.jpg);
+    FsFile file;
+    ASSERT_TRUE(file.openForRead(fixture(c.jpg)));
+    ProgressiveJpeg::ImageInfo info;
+    ASSERT_EQ(ProgressiveJpeg::probe(file, info), ProgressiveJpeg::Result::Ok);
+    const auto convertAt = [&](const uint32_t freeHeap) {
+      FreeHeapScope squeezed(freeHeap);
+      file.seek(0);
+      MemoryPrint out;
+      const JpegToBmpConverter::BmpTarget target[1] = {{&out, c.width, c.height}};
+      EXPECT_TRUE(JpegToBmpConverter::jpegFileTo1BitBmpStreamsWithSizes(file, target, 1));
+      return out.buf;
+    };
+    const auto eighth = static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 3));
+    const auto quarter = static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 2));
+    const auto onlyTheEighth = convertAt(quarter + 16 * 1024 - 1);  // 1/8 fits beside the row pipeline's 16 KB
+    const auto nothing = convertAt(eighth + 16 * 1024 - 1);         // not even 1/8
+    file.close();
+    ASSERT_GE(onlyTheEighth.size(), 26u);
+    EXPECT_EQ(le32(onlyTheEighth, 18), c.width);
+    EXPECT_EQ(le32(onlyTheEighth, 22), -c.height);
+    EXPECT_EQ(onlyTheEighth, nothing);
+  }
 }
 
 // A cover left to the 1/8 decode resized reads through the decoder's windows from the region too,

@@ -25,6 +25,9 @@ Fixtures:
   progressive_wide.jpg   Progressive, 1920x16 (240 DC columns) with a horizontal gradient.
                      Same overflow on the COLUMN axis: at 382 output columns it wrapped
                      from column 275 on.
+  progressive_tall_3200.jpg  Progressive, 64x3200, a vertical gradient. A cover only the 1/8
+                     decode fits for is resized from it whatever its size: taller than the
+                     3072 rows the baseline path takes, it must still convert.
   thin_lines_gray.jpg    Baseline grayscale, 600x32, white with a 1-px black vertical
                      line every 7 px (x = 3, 10, 17, ...). Downscaled to 420 wide, the
                      residual 0.7 scale runs at 1/1 DCT, and nearest-neighbour sampling
@@ -130,6 +133,13 @@ d = ImageDraw.Draw(im)
 for x in range(W):
     d.line([(x, 0), (x, H - 1)], fill=int(255 * x / (W - 1)))
 save_progressive(im, "progressive_wide.jpg")
+
+W, H = 64, 3200                                   # taller than the baseline path's 3072 rows
+im = Image.new("L", (W, H))
+d = ImageDraw.Draw(im)
+for y in range(H):
+    d.line([(0, y), (W, y)], fill=int(255 * y / (H - 1)))
+save_progressive(im, "progressive_tall_3200.jpg")
 
 # --- thin_lines_gray.jpg : 1-px strokes a point-sampling downscale drops ---
 W, H = 600, 32

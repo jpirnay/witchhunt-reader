@@ -371,11 +371,7 @@ static bool convertResized(FsFile& jpegFile, Print& sink, int targetWidth, int t
                            uint8_t* workspace, const size_t workspaceSize, BuildArena* scratch) {
   // One row per write is one file call per row (see BufferedPrint); coalesce them.
   BufferedPrint bmpOut(sink);
-  constexpr int MAX_IMAGE_WIDTH = 2048;
-  constexpr int MAX_IMAGE_HEIGHT = 3072;
-  if (image.width == 0 || image.height == 0 || image.width > MAX_IMAGE_WIDTH || image.height > MAX_IMAGE_HEIGHT) {
-    return false;
-  }
+  if (image.width == 0 || image.height == 0) return false;
 
   int outWidth = image.width;
   int outHeight = image.height;
@@ -386,6 +382,9 @@ static bool convertResized(FsFile& jpegFile, Print& sink, int targetWidth, int t
     outWidth = std::max(1, static_cast<int>(image.width * scale));
     outHeight = std::max(1, static_cast<int>(image.height * scale));
   }
+  // The resize emits rows at a 16-bit size: a crop-fill of an extreme aspect ratio past it would
+  // be cut short, and a BMP with too few rows reported complete.
+  if (outWidth > UINT16_MAX || outHeight > UINT16_MAX) return false;
 
   int outCropX = 0;
   int outCropY = 0;
