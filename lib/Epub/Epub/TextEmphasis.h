@@ -32,18 +32,26 @@ constexpr uint32_t markCodepoint(const uint8_t mark) {
 }
 
 // Whether a character gets a mark: not a space, a control character or punctuation (ASCII and Latin-1 punctuation,
-// U+2010-205E, a CjkPunctuation class).
+// U+2010-205E, the supplemental, vertical, small-form and halfwidth punctuation, a CjkPunctuation class or the CJK
+// marks outside one). CSS Text Decoration 3 and JLREQ skip punctuation.
 inline bool takesMark(const uint32_t cp) {
   if (cp <= 0x20 || (cp >= 0x7F && cp <= 0xA0)) return false;  // controls, space, no-break space
   // Latin-1 punctuation: ¡ § « ¶ · » ¿
   if (cp == 0xA1 || cp == 0xA7 || cp == 0xAB || cp == 0xB6 || cp == 0xB7 || cp == 0xBB || cp == 0xBF) return false;
+  if (cp == 0xAD) return false;  // soft hyphen: TextBlock strips it before drawing
   if (cp < 0x7F) {
     const bool alnum = (cp >= '0' && cp <= '9') || (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z');
     return alnum;
   }
   if (cp >= 0x2000 && cp <= 0x200F) return false;  // spaces and format characters
   if (cp >= 0x2010 && cp <= 0x205E) return false;  // general punctuation
+  if (cp >= 0x2E00 && cp <= 0x2E7F) return false;  // supplemental punctuation: ⸺ ⸻
   if (cp == 0x3000) return false;                  // ideographic space
+  if (cp >= 0xFE10 && cp <= 0xFE19) return false;  // vertical forms
+  if (cp >= 0xFE50 && cp <= 0xFE6B) return false;  // small forms
+  if (cp >= 0xFF61 && cp <= 0xFF65) return false;  // halfwidth ｡｢｣､･
+  // The CJK marks no CjkPunctuation class holds: 〃 〜 〰 〽 ゠ －
+  if (cp == 0x3003 || cp == 0x301C || cp == 0x3030 || cp == 0x303D || cp == 0x30A0 || cp == 0xFF0D) return false;
   return CjkPunctuation::classOf(cp) == CjkPunctuation::Class::None;
 }
 

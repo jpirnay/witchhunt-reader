@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "Epub/ParsedText.h"
@@ -157,7 +158,7 @@ TEST(CjkEmphasis, RubyWinsOverEmphasisOnTheSameBase) {
   EXPECT_EQ(r.markCalls(utf8(0x2022)).size(), 1u);
 }
 
-TEST(CjkEmphasis, AFaceWithoutTheMarkDrawsADot) {
+TEST(CjkEmphasis, AFaceWithoutTheMarkDrawsASquare) {
   ParsedText text(false, false, leftAligned());
   text.addWord("強調", EpdFontFamily::REGULAR, false, false, 100, 0, 0, Sesame);
   Result r;
@@ -241,4 +242,23 @@ TEST(TextEmphasisMarks, KanaAndKanjiTakeAMarkCjkPunctuationDoesNot) {
     EXPECT_TRUE(TextEmphasis::takesMark(cp)) << std::hex << cp;
   for (const uint32_t cp : {0x3002u, 0x3001u, 0x300Cu, 0x300Du})
     EXPECT_FALSE(TextEmphasis::takesMark(cp)) << std::hex << cp;
+}
+
+TEST(TextEmphasisMarks, OtherCjkPunctuationAndTheSoftHyphenTakeNone) {
+  EXPECT_FALSE(TextEmphasis::takesMark(0xAD));
+  for (const uint32_t cp : {0x3003u, 0x301Cu, 0x3030u, 0x303Du, 0x30A0u, 0xFF0Du})  // 〃 〜 〰 〽 ゠ －
+    EXPECT_FALSE(TextEmphasis::takesMark(cp)) << std::hex << cp;
+  // Halfwidth ｡｢｣､･, supplemental punctuation (⸺ ⸻), the vertical forms and the small forms.
+  const std::pair<uint32_t, uint32_t> blocks[] = {
+      {0xFF61, 0xFF65}, {0x2E00, 0x2E7F}, {0xFE10, 0xFE19}, {0xFE50, 0xFE6B}};
+  for (const auto& [first, last] : blocks) {
+    for (uint32_t cp = first; cp <= last; ++cp) EXPECT_FALSE(TextEmphasis::takesMark(cp)) << std::hex << cp;
+  }
+}
+
+TEST(TextEmphasisMarks, LettersBesideThatPunctuationKeepTheirMark) {
+  // 々 〆 ゝ ァ ー, halfwidth ｦ ｱ, fullwidth Ａ ａ ０, and the first CJK radical after the supplemental punctuation.
+  for (const uint32_t cp :
+       {0x3005u, 0x3006u, 0x309Du, 0x30A1u, 0x30FCu, 0xFF66u, 0xFF71u, 0xFF21u, 0xFF41u, 0xFF10u, 0x2E80u})
+    EXPECT_TRUE(TextEmphasis::takesMark(cp)) << std::hex << cp;
 }
