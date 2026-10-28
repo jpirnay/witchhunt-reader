@@ -24,6 +24,28 @@ struct DictLocation {
   bool readError = false;
 };
 
+// One headword found at the start of a run of CJK text, with every .idx entry it has. StarDict's
+// order puts entries with byte-equal headwords next to each other, so they are a run in the .idx:
+// where it starts and how long it is are all a reader needs to read them all.
+struct DictPrefixHit {
+  DictLocation location;   // the run's FIRST entry, in .idx order
+  uint8_t runBytes = 0;    // bytes of the run of text it covers, a codepoint boundary
+  std::string headword;    // the .idx headword, also for a .syn hit; SSO up to 15 bytes (5 CJK chars)
+  uint32_t idxStart = 0;   // byte offset in .idx of that first entry
+  uint8_t entryCount = 0;  // entries in the run, at most DictPrefixMatch::MAX_ENTRIES_PER_HIT
+};
+
+// What Dictionary::resolvePrefixes() found. ~140 bytes; a member or stack local, never on the heap.
+struct DictPrefixMatch {
+  static constexpr uint8_t MAX_HITS = 3;
+  static constexpr uint8_t MAX_ENTRIES_PER_HIT = 8;  // more same-headword entries are not listed
+  DictPrefixHit hits[MAX_HITS];                      // longest first
+  uint8_t count = 0;
+  bool aborted = false;  // gave up between probes because the AbortCheck said so: no verdict
+  uint8_t probes = 0;    // window scans made, .idx and .syn together
+  uint16_t reads = 0;    // file reads made: scan-buffer refills plus sidecar sample reads
+};
+
 // Slim StarDict reader: exact-match lookup with a synonym and mini stemming
 // fallback.
 //
@@ -116,6 +138,22 @@ class Dictionary {
   // caller that already resolved does not search the index twice.
   bool readResolved(const DictLocation& location, std::string& definitionOut, LookupResult* outResult = nullptr);
 
+  using AbortCheck = bool (*)();
+  // The search of spec 5.2 for a lookup that starts on CJK text. `run` is searched as given: the
+  // caller has cleaned it (CjkLookupRun). Up to MAX_HITS headwords that are prefixes of `run`,
+  // longest first, at most one per length, each with its whole run of same-headword entries, each
+  // run listed once. None of resolve()'s fallbacks. Only the first MAX_PREFIX_RUN_BYTES of `run`
+  // are searched, cut back to a codepoint boundary.
+  // abortCheck (optional) is asked before every probe after the first; when it says yes the
+  // search returns false with matchOut.aborted set, count 0 and *outResult NotFound. outResult as
+  // for resolve(): Found, NotFound, LowMemory (no scan buffers), ReadError (no verdict reached).
+  bool resolvePrefixes(const char* run, DictPrefixMatch& matchOut, LookupResult* outResult = nullptr,
+                       AbortCheck abortCheck = nullptr);
+
+  // The longest run resolvePrefixes() searches: CjkLookupRun's longest, 12 codepoints of up to 4
+  // bytes. A stack buffer of this size holds each probe's target.
+  static constexpr size_t MAX_PREFIX_RUN_BYTES = 48;
+
   static std::string cleanWord(const char* word);
 
   // A short fixed name for a lookup outcome ("found", "not_found", ...), for log lines and the
@@ -185,6 +223,8 @@ class Dictionary {
     int readWord(char* out, size_t outSize);
     // Read exactly n bytes. False on EOF/error.
     bool readBytes(void* dst, size_t n);
+    // File reads made since attach(), for DictPrefixMatch::reads.
+    uint32_t reads() const { return refills; }
 
    private:
     bool refill();
@@ -196,6 +236,7 @@ class Dictionary {
     int filled = 0;           // valid bytes in buf
     int cursor = 0;           // read position within buf
     bool posDirty = true;     // the handle needs a seek before the next refill
+    uint32_t refills = 0;     // file reads refill() has issued
   };
 
   // The .idx / .qidx handles shared by every locate() call in one lookup. A
@@ -213,6 +254,7 @@ class Dictionary {
     ScanReader idxScan;
     ScanReader synScan;
     SampleWindow idxWindow;  // cached descent over .qidx/.idx
+    SampleWindow synWindow;  // the same over .sidx/.syn, for resolvePrefixes()'s .syn probes
     uint32_t idxSize = 0;
     uint32_t sampleCount = 0;  // 0 when the sidecar is absent, stale or empty
     uint32_t entryCount = 0;   // .idx entries the sidecar was built over; 0 = unknown
@@ -242,11 +284,68 @@ class Dictionary {
   // 0 — scan source from the start — when sampleCount is 0 or a sample is
   // unreadable. `window`, when given, both short-circuits the descent for a
   // target inside the last resolved window and records the new one. Clobbers
-  // wordBuf.
+  // wordBuf. With strictlyBelow, the last sample whose word is < target instead,
+  // and `window` is neither read nor recorded: a window bounds a <= descent.
   uint32_t bisectSamples(HalFile& sidecar, ScanReader& source, uint32_t sampleCount, const char* target,
-                         SampleWindow* window);
+                         SampleWindow* window, bool strictlyBelow = false);
+
+  // readSampleOffset(), counted in sampleReads.
+  bool readSample(HalFile& sidecar, uint32_t sampleIndex, uint32_t* out);
 
   DictLocation locate(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
+
+  // resolvePrefixes() stops a file's window scans at this many once the file has a hit. Before its
+  // first hit there is no cap: one could call a run absent whose match lies a few windows down.
+  static constexpr uint8_t PREFIX_PROBES_PER_FILE = 3;
+
+  // A prefix hit as collectPrefixes() records it. A .syn hit carries the synonym as its headword
+  // and no location until followSynonym() turns it into the .idx run that `ordinal` names.
+  struct PrefixCandidate {
+    DictPrefixHit hit;
+    uint32_t ordinal = 0;  // .syn only: the .idx entry the synonym points at
+  };
+
+  // One file's hits, longest first, at most one per length.
+  struct PrefixHits {
+    PrefixCandidate items[DictPrefixMatch::MAX_HITS];
+    uint8_t count = 0;
+    bool hasLength(uint8_t runBytes) const;
+    // The slot for a new hit of runBytes, in length order: the shortest is dropped when all
+    // MAX_HITS are taken; nullptr when they are all longer.
+    PrefixCandidate* insert(uint8_t runBytes);
+  };
+
+  // What the probes of one resolvePrefixes() call share.
+  struct PrefixSearch {
+    const char* run = nullptr;
+    uint8_t runBytes = 0;  // of `run` searched, at most MAX_PREFIX_RUN_BYTES
+    AbortCheck abortCheck = nullptr;
+    uint8_t probes = 0;
+    bool aborted = false;
+    bool failed = false;  // a probe could not read what it needed: a miss is no verdict
+    // Before each probe: counts it, or sets `aborted` and returns false when it is not the first
+    // and abortCheck says to give up.
+    bool beginProbe();
+  };
+
+  // One file's half of resolvePrefixes() (spec 5.2): a window scan per probe, each probe's target
+  // a shorter prefix of the run than the last, until the run's prefixes in that file are all seen
+  // or enough of them are. An .idx hit whose first entry opens a window past byte 0 gets
+  // locateRun(): its run may begin in the window before.
+  void collectPrefixes(LookupSession& session, bool synonyms, PrefixSearch& search, PrefixHits& out);
+
+  // The .idx run of hit.headword from its first entry: the last sample strictly below the
+  // headword, then forward to the first byte-equal entry, counting it and those that follow.
+  // Sets location, idxStart and entryCount; false, leaving the hit alone, when it is not found.
+  bool locateRun(LookupSession& session, DictPrefixHit& hit);
+
+  // A .syn hit as the .idx run its ordinal names: locateByOrdinal() gives the headword, whose
+  // entry may lie in the middle of its run, and locateRun() finds the run's start.
+  bool followSynonym(LookupSession& session, PrefixCandidate& candidate);
+
+  // Longest first, one hit per length with the .idx hit on a tie; then a hit whose first entry a
+  // longer kept hit already has is dropped; at most MAX_HITS.
+  static void mergePrefixHits(PrefixHits& idx, PrefixHits& syn, DictPrefixMatch& matchOut);
 
   // Resolve an ordinal (the N-th .idx entry, 0-based) to its .dict location via
   // the .qidx samples. Used to follow a .syn synonym back to its headword.
@@ -300,4 +399,7 @@ class Dictionary {
   // Shared scan buffer: lookups are single-threaded and this avoids a
   // 256-byte array on the stack of every locate() call.
   char wordBuf[256] = {};
+
+  // Sidecar sample reads (readSample()) since resolvePrefixes() started, for DictPrefixMatch::reads.
+  uint32_t sampleReads = 0;
 };
