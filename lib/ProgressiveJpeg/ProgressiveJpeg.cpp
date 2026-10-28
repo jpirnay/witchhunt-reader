@@ -565,8 +565,9 @@ Result parseScan(State<C>& st, uint32_t p, const uint32_t end) {
   return Result::Ok;
 }
 
-// Walks the whole file once: tables, frame, and every luma scan's entry point. Entropy-coded
-// data has no length field, so each scan is skipped by looking for its terminating marker.
+// Walks the file once, a DC session only up to the scan that completes luma DC: tables, frame, and
+// every luma scan's entry point. Entropy-coded data has no length field, so each scan is skipped by
+// looking for its terminating marker.
 // One pass over the file: every table, the frame and each scan's data offset. Pending when
 // `budget` bytes of entropy data were skipped without reaching the end of the file; call again to
 // resume. UINT32_MAX never pauses (the one-shot decode).
@@ -606,6 +607,13 @@ Result indexStep(State<C>& st, IndexCursor& ic, const DecodeOptions& options, co
         }
       }
       ic.inEntropy = false;
+      // A DC session needs nothing past the scan that makes luma DC final: a luma DC scan at Al = 0,
+      // the first one or the last refinement (every scan it records is a luma DC scan). No later
+      // scan touches luma DC, and what follows is AC data the session skips, so the index ends
+      // here -- a file whose first scan completes DC is read no further than that scan.
+      if constexpr (C::kDcOnly) {
+        if (st.scanCount > 0 && st.scans[st.scanCount - 1].al == 0) break;
+      }
       if (src.at(p) < 0) break;
       continue;
     }

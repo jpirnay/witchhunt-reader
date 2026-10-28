@@ -49,6 +49,11 @@ Fixtures:
                      preview it replaced shows 1/8 resolution, where they all blur away.
   thin_hlines_gray.jpg   The same, transposed (32x600, horizontal lines): lines in the last
                      row of an MCU row need the carry across MCU rows, not just blocks.
+  prog_420_dc_first.jpg  prog_full_420.jpg with its DC first scan (Al = 1) and its DC refinement merged
+                     into one DC scan at Al = 0, every other scan as it was: DC complete in the first
+                     scan, as in the real covers measured, where libjpeg's script completes it 55-80%
+                     into the file. The same coefficients, so prog_full_420.y.pgm is its reference
+                     (asserted below). A 1/8 decode reads it only to the end of that scan.
 
 Progressive cases from the Free-Ink SDK decoder's test matrix (freeink-sdk c51246c8,
 libs/assets/ProgressiveJpeg/test/host/run.py), each with its libjpeg luma as the reference
@@ -92,7 +97,7 @@ save_baseline_420(im, os.path.join(HERE, "contrast_420.jpg"))
 ref = Image.open(os.path.join(HERE, "contrast_420.jpg")).convert("L")
 ref.save(os.path.join(HERE, "contrast_420.gray.pgm"))
 
-# --- progressive_420.jpg : low-frequency regions survive the DC-only preview ---
+# --- progressive_420.jpg : low-frequency regions survive a 1/8 decode ---
 W, H = 96, 64
 im = Image.new("RGB", (W, H), (255, 255, 255))
 d = ImageDraw.Draw(im)
@@ -200,6 +205,166 @@ ImageDraw.Draw(tiny).rectangle([3, 1, 5, 3], fill=(40, 40, 40))
 tiny.save(os.path.join(HERE, "prog_tiny_9x5.jpg"), "JPEG", quality=85, subsampling=2, progressive=True,
           optimize=True)
 save_reference("prog_tiny_9x5.jpg", "prog_tiny_9x5.y.pgm")
+
+
+# --- prog_420_dc_first.jpg: the DC scans of prog_full_420.jpg merged into one at Al = 0 ---
+def jpeg_segments(data):
+    """[(marker, bytes)] after SOI; an SOS carries its entropy-coded data up to the next marker."""
+    out, i = [], 2
+    while i < len(data):
+        marker = data[i + 1]
+        if marker == 0xD9:
+            out.append((marker, data[i:i + 2]))
+            break
+        end = i + 2 + ((data[i + 2] << 8) | data[i + 3])
+        if marker == 0xDA:
+            while not (data[end] == 0xFF and data[end + 1] != 0x00 and not 0xD0 <= data[end + 1] <= 0xD7):
+                end += 1
+        out.append((marker, data[i:end]))
+        i = end
+    return out
+
+
+class EntropyReader:
+    """Bits of entropy-coded data, FF 00 unstuffed."""
+
+    def __init__(self, data):
+        self.data, self.pos, self.acc, self.left = data, 0, 0, 0
+
+    def bit(self):
+        if self.left == 0:
+            self.acc = self.data[self.pos]
+            self.pos += 2 if self.acc == 0xFF else 1
+            self.left = 8
+        self.left -= 1
+        return (self.acc >> self.left) & 1
+
+    def bits(self, count):
+        value = 0
+        for _ in range(count):
+            value = (value << 1) | self.bit()
+        return value
+
+    def symbol(self, table):
+        code, length = 0, 0
+        while (length, code) not in table:
+            assert length < 16, "not a code of the table"
+            code, length = (code << 1) | self.bit(), length + 1
+        return table[(length, code)]
+
+
+class EntropyWriter:
+    """Bits into entropy-coded data, 0xFF stuffed, padded with ones."""
+
+    def __init__(self):
+        self.out, self.acc, self.count = bytearray(), 0, 0
+
+    def bits(self, value, count):
+        for k in range(count - 1, -1, -1):
+            self.acc, self.count = (self.acc << 1) | ((value >> k) & 1), self.count + 1
+            if self.count == 8:
+                self.out += bytes([0xFF, 0x00]) if self.acc == 0xFF else bytes([self.acc])
+                self.acc, self.count = 0, 0
+
+    def data(self):
+        while self.count:
+            self.bits(1, 1)
+        return bytes(self.out)
+
+
+def canonical_codes(counts, symbols):
+    """A Huffman table as {(length, code): symbol} and {symbol: (code, length)}."""
+    decode, encode, code, k = {}, {}, 0, 0
+    for length in range(1, 17):
+        for _ in range(counts[length - 1]):
+            decode[(length, code)] = symbols[k]
+            encode[symbols[k]] = (code, length)
+            code, k = code + 1, k + 1
+        code <<= 1
+    return decode, encode
+
+
+# T.81 Annex K.3 DC tables: every size category of an 8-bit frame.
+K3_LUMA_DC = ([0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0], list(range(12)))
+K3_CHROMA_DC = ([0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0], list(range(12)))
+
+
+def merge_dc_scans(data):
+    """The file with its interleaved DC first scan (Al = 1) and DC refinement (Al = 0) as one
+    interleaved DC scan at Al = 0, with the K.3 DC tables. No restart markers."""
+    segments = jpeg_segments(data)
+    dc_tables, comps, size, first, refine = {}, None, None, None, None
+    for index, (marker, seg) in enumerate(segments):
+        assert marker != 0xDD, "restart markers are not handled"
+        if marker == 0xC2:
+            size = ((seg[5] << 8) | seg[6], (seg[7] << 8) | seg[8])
+            comps = [(seg[10 + 3 * k], seg[11 + 3 * k] >> 4, seg[11 + 3 * k] & 15) for k in range(seg[9])]
+        elif marker == 0xC4:
+            p, end = 4, 2 + ((seg[2] << 8) | seg[3])
+            while p < end:
+                counts = list(seg[p + 1:p + 17])
+                if seg[p] >> 4 == 0:
+                    dc_tables[seg[p] & 15] = canonical_codes(counts, list(seg[p + 17:p + 17 + sum(counts)]))[0]
+                p += 17 + sum(counts)
+        elif marker == 0xDA:
+            n, header_end = seg[4], 2 + ((seg[2] << 8) | seg[3])
+            ss, ah, al = seg[5 + 2 * n], seg[7 + 2 * n] >> 4, seg[7 + 2 * n] & 15
+            if ss == 0 and ah == 0:
+                assert first is None and n == len(comps) and al == 1, "one interleaved DC first scan at Al = 1"
+                tables = {seg[5 + 2 * k]: dc_tables[seg[6 + 2 * k] >> 4] for k in range(n)}
+                first = (index, tables, seg[header_end:])
+            elif ss == 0:
+                assert refine is None and n == len(comps) and al == 0, "one interleaved DC refinement to Al = 0"
+                refine = (index, seg[header_end:])
+    height, width = size
+    hmax, vmax = max(c[1] for c in comps), max(c[2] for c in comps)
+    mcus = -(-width // (8 * hmax)) * -(-height // (8 * vmax))
+    order = [c[0] for c in comps for _ in range(c[1] * c[2])]  # the component of each block of an MCU
+
+    reader, pred, dc = EntropyReader(first[2]), {c[0]: 0 for c in comps}, []
+    for _ in range(mcus):
+        for cid in order:
+            category = reader.symbol(first[1][cid])
+            diff = reader.bits(category)
+            if category and diff < 1 << (category - 1):
+                diff -= (1 << category) - 1
+            pred[cid] += diff
+            dc.append(pred[cid])
+    reader = EntropyReader(refine[1])
+    dc = [(value << 1) | reader.bit() for value in dc]
+
+    k3 = [K3_LUMA_DC, K3_CHROMA_DC]
+    encoders = {cid: canonical_codes(*k3[min(k, 1)])[1] for k, (cid, _, _) in enumerate(comps)}
+    writer, pred = EntropyWriter(), {c[0]: 0 for c in comps}
+    values = iter(dc)
+    for _ in range(mcus):
+        for cid in order:
+            value = next(values)
+            diff, pred[cid] = value - pred[cid], value
+            category = abs(diff).bit_length()
+            writer.bits(*encoders[cid][category])
+            writer.bits(diff if diff >= 0 else diff - 1, category)
+
+    tables = b"".join(bytes([k]) + bytes(t[0]) + bytes(t[1]) for k, t in enumerate(k3[:min(len(comps), 2)]))
+    dht = bytes([0xFF, 0xC4]) + (2 + len(tables)).to_bytes(2, "big") + tables
+    header = bytes([len(comps)]) + b"".join(bytes([cid, min(k, 1) << 4]) for k, (cid, _, _) in enumerate(comps))
+    sos = bytes([0xFF, 0xDA]) + (5 + len(header)).to_bytes(2, "big") + header + bytes([0, 0, 0])
+    out = bytearray(data[:2])
+    for index, (_, seg) in enumerate(segments):
+        if index == first[0]:
+            out += dht + sos + writer.data()
+        elif index != refine[0]:
+            out += seg
+    return bytes(out)
+
+
+with open(os.path.join(HERE, "prog_full_420.jpg"), "rb") as f:
+    merged = merge_dc_scans(f.read())
+with open(os.path.join(HERE, "prog_420_dc_first.jpg"), "wb") as f:
+    f.write(merged)
+# The same coefficients: libjpeg decodes the same picture, so prog_full_420.y.pgm is the reference.
+assert (Image.open(os.path.join(HERE, "prog_420_dc_first.jpg")).convert("RGB").tobytes() ==
+        Image.open(os.path.join(HERE, "prog_full_420.jpg")).convert("RGB").tobytes())
 
 print("Fixtures written to", HERE)
 for f in sorted(os.listdir(HERE)):

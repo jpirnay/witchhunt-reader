@@ -7,7 +7,8 @@
 //
 // Fixtures (fixtures/generate_fixtures.py) use libjpeg's successive-approximation scan script:
 // interleaved DC first + refinement, spectral-selection AC first scans with Al > 0, and AC
-// refinement scans -- every decode path. One of them adds restart markers every 3 units.
+// refinement scans -- every decode path. One of them adds restart markers every 3 units, and
+// prog_420_dc_first.jpg completes DC in its first scan, as real covers do.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -198,6 +199,24 @@ INSTANTIATE_TEST_SUITE_P(FreeInkMatrix, ProgressiveJpegMatchesLibjpeg,
                                                           Case{"prog_gray_rst.jpg", "prog_gray_rst.y.pgm"},
                                                           Case{"prog_tiny_9x5.jpg", "prog_tiny_9x5.y.pgm"}),
                                           testing::Values(0, 1, 2, 3)));
+
+// DC complete in the first scan (an interleaved DC scan at Al = 0, no DC refinement), the layout of
+// the real covers measured. Its coefficients are prog_full_420.jpg's, and so is its reference.
+INSTANTIATE_TEST_SUITE_P(DcInTheFirstScan, ProgressiveJpegMatchesLibjpeg,
+                         testing::Combine(testing::Values(Case{"prog_420_dc_first.jpg", "prog_full_420.y.pgm"}),
+                                          testing::Values(0, 1, 2, 3)));
+
+// The same coefficients in another scan layout decode to the same rows, byte for byte.
+TEST(ProgressiveJpeg, AnotherScanLayoutOfTheSameCoefficientsDecodesAlike) {
+  for (const int shift : {0, 1, 2, 3}) {
+    Capture libjpegScript;
+    Capture dcFirst;
+    ASSERT_EQ(decode("prog_full_420.jpg", shift, libjpegScript), ProgressiveJpeg::Result::Ok);
+    ASSERT_EQ(decode("prog_420_dc_first.jpg", shift, dcFirst), ProgressiveJpeg::Result::Ok);
+    ASSERT_FALSE(dcFirst.image.px.empty());
+    EXPECT_TRUE(dcFirst.image.px == libjpegScript.image.px) << "at 1/" << (1 << shift);
+  }
+}
 
 // decodeResized() at the size of the 1/8 picture over every block: nothing to interpolate, so it is
 // the reduced reference of every block -- the partial ones at the right and bottom edges too, which
@@ -819,7 +838,7 @@ ProgressiveJpeg::Result decodePath(const std::string& path, const int shift, Cap
 }
 
 // A 1/8 session skips every AC scan unread, so nothing in one's header may refuse the picture: the
-// DC-only preview drew such a file. A decode that reads the scan still refuses it.
+// low-heap fallback draws what the DC scans hold. A decode that reads the scan still refuses it.
 TEST(ProgressiveJpeg, AnEighthDoesNotReadTheAcScanHeadersItSkips) {
   const std::vector<uint8_t> whole = readBytes(fixture("prog_full_420.jpg"));
   const std::vector<ScanSpan> scans = scansOf(whole);
@@ -903,7 +922,58 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegEighth,
                                          EighthCase{"progressive_tall.jpg", 11623068769939918297ULL},
                                          EighthCase{"prog_422_rst.jpg", 7783887560982999707ULL},
                                          EighthCase{"prog_420_rst_row.jpg", 5568282327642717411ULL},
-                                         EighthCase{"prog_gray_rst.jpg", 11315821893079572744ULL}));
+                                         EighthCase{"prog_gray_rst.jpg", 11315821893079572744ULL},
+                                         // prog_full_420.jpg's coefficients, DC in the first scan
+                                         EighthCase{"prog_420_dc_first.jpg", 13821861766860504631ULL}));
+
+// A 1/8 decode needs nothing past the scan that makes luma DC final (a luma DC scan at Al = 0), so
+// its index pass ends there and it reads the file no further. With every read that starts past
+// that scan's data failing, the 1/8 decode is still Ok with the same rows, while a 1/4 decode,
+// which needs the AC scans after it, fails. prog_420_dc_first.jpg completes DC in its first scan,
+// as the real covers measured do; libjpeg's script (prog_full_420.jpg) in its DC refinement.
+struct ReadsFailFrom {
+  explicit ReadsFailFrom(const long offset) { FsFile::failReadsFrom = offset; }
+  ~ReadsFailFrom() { FsFile::failReadsFrom = -1; }
+  ReadsFailFrom(const ReadsFailFrom&) = delete;
+  ReadsFailFrom& operator=(const ReadsFailFrom&) = delete;
+};
+
+TEST(ProgressiveJpeg, AnEighthReadsNothingPastTheScanThatCompletesLumaDc) {
+  for (const char* jpg : {"prog_420_dc_first.jpg", "prog_full_420.jpg"}) {
+    SCOPED_TRACE(jpg);
+    const std::vector<uint8_t> bytes = readBytes(fixture(jpg));
+    const std::vector<ScanSpan> scans = scansOf(bytes);
+    const ScanSpan* completing = nullptr;
+    for (const ScanSpan& s : scans) {
+      if (s.firstComponent == 1 && s.ss == 0 && s.al == 0) {
+        completing = &s;
+        break;
+      }
+    }
+    ASSERT_NE(completing, nullptr) << "the fixture's luma DC is complete somewhere";
+    // The index reads the marker that ends the scan's data: its two bytes are the last it needs.
+    const auto limit = static_cast<long>(completing->dataEnd + 2);
+    ASSERT_LT(static_cast<size_t>(limit) + 1024, bytes.size()) << "AC data must follow";
+    for (const bool windows : {false, true}) {
+      SCOPED_TRACE(windows ? "with read windows" : "with the shared buffer");
+      const WindowedRun clean = decodeWith(jpg, 3, windows);
+      ASSERT_EQ(clean.result, ProgressiveJpeg::Result::Ok);
+      WindowedRun eighth;
+      WindowedRun quarter;
+      {
+        const ReadsFailFrom cut(limit);
+        eighth = decodeWith(jpg, 3, windows);
+        quarter = decodeWith(jpg, 2, windows);
+      }
+      EXPECT_EQ(eighth.result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(eighth.result);
+      EXPECT_TRUE(eighth.capture.image.px == clean.capture.image.px);
+      EXPECT_EQ(quarter.result, ProgressiveJpeg::Result::IoError) << "1/4 reads the AC scans that follow";
+      std::printf("[ pjpeg    ] %s %s: 1/8 %u reads / %u bytes of a %zu-byte file, luma DC complete at %ld\n", jpg,
+                  windows ? "windows" : "shared", static_cast<unsigned>(clean.stats.reads),
+                  static_cast<unsigned>(clean.stats.bytesRead), bytes.size(), limit);
+    }
+  }
+}
 
 // Smaller output keeps fewer coefficients per block: the working set has to shrink with it.
 TEST(ProgressiveJpeg, WorkspaceShrinksWithScale) {
@@ -920,7 +990,7 @@ TEST(ProgressiveJpeg, WorkspaceShrinksWithScale) {
 }
 
 // At 1/8 a block is its DC level, so the session holds only what the DC scans need: the decode the
-// converters fall back to when the heap is short costs what the DC-only preview it replaces cost
+// converters fall back to when the heap is short costs what a DC-only preview decoder costs
 // (about 2 KB of state plus a row of blocks), not the 13-16 KB of a full session. Host sizes are
 // 64-bit; the C3's are smaller.
 TEST(ProgressiveJpeg, AnEighthNeedsNoMoreThanTheDcScans) {

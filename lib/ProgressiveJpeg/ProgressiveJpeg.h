@@ -67,7 +67,7 @@ using AbortCallback = bool (*)(void* user);
 
 // Where a decode's time went, for the caller's log. Times need DecodeOptions::clock.
 struct DecodeStats {
-  uint32_t indexMs = 0;  // header + scan index: one pass over the whole file
+  uint32_t indexMs = 0;  // header + scan index: one pass over the file (at 1/8 up to the scan completing luma DC)
   uint32_t bandsMs = 0;  // entropy decode, IDCT and the band callbacks (which include the caller's
                          // resample/dither/cache work)
   uint32_t reads = 0;    // file reads (each a seek + up to 512 bytes, or a window's worth)
@@ -79,7 +79,8 @@ struct DecodeOptions {
   uint32_t base = 0;
   uint8_t scaleShift = 0;  // 0..3: output is floor(width >> s) x floor(height >> s)
   // Polled before every band and every 32 KB while indexing the file (the whole file is read
-  // before the first band): a watchdog feed belongs here. True aborts with Result::Aborted.
+  // before the first band; at 1/8 up to the scan that completes luma DC): a watchdog feed belongs
+  // here. True aborts with Result::Aborted.
   // A Decoder driven in steps polls it the same way within each step.
   AbortCallback shouldAbort = nullptr;
   void* abortUser = nullptr;

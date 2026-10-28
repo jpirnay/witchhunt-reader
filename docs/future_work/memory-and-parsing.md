@@ -84,7 +84,7 @@ What changed: a render lends the secondary buffer to the prewarm's TrueType miss
 
 ## Preempted image decodes still lose work in some cases
 
-**Open.** A lane decode that a page turn preempts parks if it is a JPEG: its caches keep their finished rows in `.part` files, a checkpoint (`RenderConfig::checkpointPath`) holds the decoder state, and the next warm resumes it. Three cases still lose work (X3, 2026-09-27): the first warm of an image extracts it from the EPUB first, and that extraction cannot be interrupted (1.6 s for a 514 KB JPEG); a resume that meets input at once parks again without progress (118–265 ms each); and PNG images and the DC-only progressive preview restart from the beginning. After a preemption the lane waits only the normal `IMAGE_LANE_SETTLE_MS` (300 ms).
+**Open.** A lane decode that a page turn preempts parks if it is a JPEG: its caches keep their finished rows in `.part` files, a checkpoint (`RenderConfig::checkpointPath`) holds the decoder state, and the next warm resumes it. Three cases still lose work (X3, 2026-09-27): the first warm of an image extracts it from the EPUB first, and that extraction cannot be interrupted (1.6 s for a 514 KB JPEG); a resume that meets input at once parks again without progress (118–265 ms each); and PNG images and a progressive JPEG's 1/8 decode resized to its box restart from the beginning. After a preemption the lane waits only the normal `IMAGE_LANE_SETTLE_MS` (300 ms).
 
 **Why it matters.** At a normal reading pace the lane lost large images to page turns again and again before parking existed: one page was started six times while the reader turned a page every 2 s.
 
@@ -93,6 +93,38 @@ What changed: a render lends the secondary buffer to the prewarm's TrueType miss
 **Tried.** Parking (JPEG only). The other candidate, never built: once a page's decode has been preempted twice, retry it only after a longer 1.5 s pause.
 
 **Next step.** From a device log with parking in place, count re-preemptions per page. If parks without progress dominate, require a longer settle after a resume that parks at once. For the extraction, parking the inflate (a 32 KB window) is the candidate.
+
+## A cover that fits only at 1/8 restarts on every key press
+
+**Open.** When a cover's progressive JPEG fits in memory only at 1/8, `JpegThumbSession` refuses it and the one-shot `convertResized` draws it. That conversion is not sliced: a key press aborts it (`CooperativeAbort`), and the next attempt starts again from byte 0. Before `ProgressiveJpegDc` was retired, this case was sliced; a cover that fits at no scale was one-shot before too.
+
+**Why it matters.** Input stays responsive, but a large cover appears only once the reader pauses for one whole conversion. Small covers still finish between key presses.
+
+**Where.** `JpegToBmpConverter.cpp` (`convertResized`, `JpegThumbSession`), `ProgressiveJpeg::decodeResized`.
+
+**Next step.** Make the resized decode steppable in `ProgressiveJpeg`: its resampler state in the session, about 60 lines. Then give `JpegThumbSession` a third mode, with the per-output setup shared with the other two, about 120-150 lines with tests.
+
+## A 1/8 decode of a file with libjpeg's scan script reads its DC refinement
+
+**Open.** A 1/8 decode (the DC-only session, and with it `ProgressiveJpeg::decodeResized`, the low-heap fallback) indexes the file only until luma DC is final. A file whose first scan completes DC, as the real covers measured do, is read no further than that scan: about twice the bytes of the DC-only preview this replaced, as the index and the bands each read that scan once. A file with libjpeg's default script completes DC only in its DC refinement, 55-80% into the file, so its index skips the AC scans before it byte by byte, and through the shared 512-byte buffer its bands alternate between the two DC scans, refilling on every switch: 7-15x the preview's card bytes on the real files measured, up to 30x on small generated ones (host, one 464x670 box: a 530 KB file 1,098 reads / 539 KB against 100 / 51 KB).
+
+**Why it matters.** It is the path the reader takes when only 1/8 fits, and covers when no finer scale does (one decode per output box). On the C3 that could be 1-3 s of SD time for such a file against about 0.15 s before; an estimate from host counts, not a device measurement.
+
+**Where.** `indexStep` (the DC session's early stop), `ProgressiveJpeg::decodeResized`; `convertResized` in `JpegToBmpConverter.cpp`; the resized path of `JpegToFramebufferConverter::decodeToFramebuffer`.
+
+**Next step.** Measure on the device first (Home with heavy covers and little heap: the `Progressive cover read N times` log and the time to the first cover). If it matters, give `decodeResized` a mode, through `DecodeOptions`, that reads the first luma DC scan alone and skips its refinements: the preview's exact I/O, at most one level off (mean 0.1-0.9 against the preview), while sliced 1/8 decodes and their goldens stay as they are.
+
+## A cut or corrupt progressive JPEG draws a placeholder
+
+**Open.** A progressive JPEG whose stream is cut short or corrupt fails as soon as a scan's data does not decode, and the reader draws its framed placeholder (a cover is not converted). A baseline file cut short draws nothing and is decoded again on every pass. Work that changes this is written and tested but parked: the decoder stops a scan where its data is unusable and decodes every row from the scans that remain (a DC scan's blocks after the damage mid grey, as libjpeg leaves them), so a cut or corrupt progressive file draws what it holds; a cut baseline file keeps its rows; and a degraded picture is cached once instead of decoded on every visit (X4: 8 decodes, about 14 s, per visit of such a page).
+
+**Why it is parked.** Nobody has reported a damaged JPEG; the cut extracts it was written for came from the extractor itself (fixed in `Epub::extractItemToFile`). And caching damage makes a false detection permanent: a valid file that trips one of the new rules (the strict RSTn sequence, the padding overrun, a TJpgDec format error on an unusual baseline file) would be kept with grey or white areas for good, since `PixelCache::PXC_MAGIC` is not tied to the rules and cover BMPs are never invalidated.
+
+**Where.** `lib/ProgressiveJpeg` (`BitReader`, `decodeBand`, `indexStep`); `JpegToFramebufferConverter::decodeToFramebuffer`; `JpegToBmpConverter.cpp` (`SinkSet`, `JpegThumbSession::continueSteps`).
+
+**Tried.** The code and its tests (`test/epub_pipeline/JpegPartialDecodeTest.cpp`, the `prog_420_cut.jpg` fixture) are on the maintainer's local branch `fix/progressive-jpeg`. Its review found that once degraded pictures were cached, `Result::Degraded` behaved exactly like `Ok` everywhere, so the completeness tracking that told a file lacking only its EOI from a cut one bought nothing.
+
+**Next step.** If it is ever taken, ship it decoder-only: fold `Degraded` into `Ok` with a `DecodeStats` flag for the logs, drop that completeness tracking, and leave the converters as they are -- they already cache `Ok`, and an I/O error keeps the placeholder. Bump the checkpoint magic with the `Cursor` layout it changes, and note in `PixelCache.h` that a change to the damage rules must bump `PXC_MAGIC`.
 
 ## Per-line and per-cell objects are still on the heap
 
