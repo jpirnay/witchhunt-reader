@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "../TextEmphasis.h"
+
 bool TextBlock::guideDotsEnabled = false;
 
 // 32-bit layout: vptr 4, RenderStyle 12, five scalars and a pad byte 8, arena 4, arenaOwned_ and annotationBytes_ 4,
@@ -624,6 +626,57 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       const int advanced = static_cast<int>(rawBefore * rubyScale + 0.5f);
       renderer.drawTextScaled(font, x + a.x + offset + advanced, rubyY, buf, true, EpdFontFamily::REGULAR, rubyScale);
       rawBefore += renderer.getTextAdvanceX(font, buf, EpdFontFamily::REGULAR);
+    }
+  }
+
+  // The emphasis marks: each character that takes one (TextEmphasis::takesMark) gets the mark glyph at half its
+  // word's size, centred on the character's advance, in the same band as the ruby; the scanning pass draws them too.
+  // A face without the glyph gets a filled square instead. Nothing here allocates.
+  for (uint16_t k = 0; k < annotations; k++) {
+    const Annotation a = annotation(k);
+    if (a.kind != AnnotationKind::Emphasis) continue;
+    const uint32_t markCp = TextEmphasis::markCodepoint(a.mark);
+    if (markCp == 0) continue;
+    char markText[4];
+    markText[0] = static_cast<char>(0xE0 | (markCp >> 12));  // every mark glyph is three bytes (U+0800 and up)
+    markText[1] = static_cast<char>(0x80 | ((markCp >> 6) & 0x3F));
+    markText[2] = static_cast<char>(0x80 | (markCp & 0x3F));
+    markText[3] = '\0';
+    for (uint16_t w = a.firstWord; w < a.firstWord + a.wordCount && w < numWords; w++) {
+      const int font = wordFontId(w, effFontId);
+      const float wordScl = wordScale(w);
+      const float markScale = 0.5f * wordScl;
+      const EpdFontFamily::Style style = wordStyle(w);
+      const int markAscender = renderer.getFontAscenderSizeScaled(font, markScale);
+      const int markY = baseY - markAscender;
+      const bool drawGlyph = scanning || renderer.hasGlyph(font, markCp, EpdFontFamily::REGULAR);
+      const int markWidth =
+          drawGlyph ? renderer.getTextWidthScaled(font, markText, EpdFontFamily::REGULAR, markScale) : 0;
+      const int square = std::max(2, markAscender / 4);
+      const int wordX = xposArr[w] + x;
+      const unsigned char* p = reinterpret_cast<const unsigned char*>(wordText(w));
+      int rawBefore = 0;  // the word's advance so far, unscaled: rounded once per character like the ruby
+      while (*p != 0) {
+        const unsigned char* start = p;
+        const uint32_t cp = utf8NextCodepoint(&p);
+        char buf[5];
+        const size_t len = std::min<size_t>(static_cast<size_t>(p - start), 4);
+        memcpy(buf, start, len);
+        buf[len] = '\0';
+        const int raw = renderer.getTextAdvanceX(font, buf, style);
+        if (TextEmphasis::takesMark(cp)) {
+          const int charX = wordX + (wordScl == 1.0f ? rawBefore : static_cast<int>(rawBefore * wordScl + 0.5f));
+          const int advance = wordScl == 1.0f ? raw : static_cast<int>(raw * wordScl + 0.5f);
+          if (drawGlyph) {
+            renderer.drawTextScaled(font, charX + (advance - markWidth) / 2, markY, markText, true,
+                                    EpdFontFamily::REGULAR, markScale);
+          } else {
+            renderer.fillRect(charX + (advance - square) / 2, markY + (markAscender - square) / 2, square, square,
+                              true);
+          }
+        }
+        rawBefore += raw;
+      }
     }
   }
 }

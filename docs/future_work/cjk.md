@@ -8,7 +8,7 @@ read from the card, and a glyph store that makes room. The font manager installs
 remains for full CJK support:
 - **UI text:** the UI itself is translated; book titles, TOC entries and status-bar chapter names in CJK
   still need the reader's CJK font as a fallback.
-- **Typography:** push-in and the CJK–Latin gap (A3b), and emphasis dots (B2); ruby shipped (B1).
+- **Typography:** push-in and the CJK–Latin gap (A3b). Ruby shipped (B1); emphasis dots in #566 (B2).
 - **The dictionary** on CJK pages.
 - **Small edge cases** the reviews found.
 
@@ -28,7 +28,7 @@ behind CFF.
 | 5b | Synthetic italic (spec section 7.4): families without an italic file draw italic slanted, as KOReader does | shipped (#551) |
 | 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | built (feat/ui-book-text-heap); device check pending ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-a3b-push-in-and-gap.md)) |
-| 8 | Ruby and emphasis dots ([B2](#emphasis-dots-pr-b2)) | B1 shipped (#554); B2 emphasis dots next ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
+| 8 | Ruby and emphasis dots | B1 shipped (#554, review fixes #556); B2 emphasis dots in #566 ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
 | 9 | The dictionary on CJK pages ([below](#dictionary-on-cjk-pages)) | open |
 | 10 | Line spacing: a CJK em-pitch scale, Extra wide and Widest, Book's style, a per-book override ([below](#line-spacing)) | built on `feat/line-spacing` ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md), [plan](../superpowers/plans/2026-10-26-line-spacing.md)) |
 
@@ -97,6 +97,16 @@ Listed here so nobody redoes it.
   - A reading over a word in another font family (publisher fonts on) is placed by that word's ascender, but the band is half the block font's ascender: with a taller family it can rise above the band into the line above. Fix: clamp `rubyY` to the line's top.
   - `room()` takes Latin curly quotes (U+2018, U+2019, U+201C, U+201D) as punctuation a reading may overhang, though `applyPunctuationWidths` leaves them out as narrow Latin glyphs: a pixel or two over an apostrophe. Fix: ask `markClass_` instead of `CjkPunctuation::classOf`.
 
+**#566 (B2): emphasis dots (傍点).**
+- **CSS** (`CssParser`): `text-emphasis-style` and its `-epub-` and `-webkit-` forms, and the `text-emphasis` shorthand. The style is a mark: dot, circle, double circle, triangle or sesame, filled or open; `none` clears it. `CSS_CACHE_VERSION` 31.
+- **Parser to page.** The mark travels as bits of the token boundary (`TokenBoundary::withEmphasis`), through splits and erases, and the parser marks every token of a span, links and a multi-word ruby base's kept space included. A run of tokens with one mark becomes one `Emphasis` annotation on its line, outside ruby groups (ruby wins over a mark on the same base).
+- **Drawing** (`TextBlock`): one mark above each character that takes one (`TextEmphasis::takesMark`: not punctuation, not spaces, not a soft hyphen), centred, at half size, through the ruby box path, with no allocation. A run with no such character gets no record and no band. A wrapped span is marked on both lines.
+- **Taller lines.** A line with a mark gets ruby's band, so marks never touch the line above.
+- **Section version** 102.
+- **Tests.** `test/cjk_layout/CjkEmphasisTest.cpp`, `RubyTextBlock.DrawingMarksAllocatesNothing`, the emphasis cases of `RubyLayoutTest`, the CSS tests, and case 16 of `test_cjk_line_breaking.epub` (the golden shows the `E` records).
+- **Follow-up:** `<em class="sesame_dot">` with `font-style: normal`, Aozora Bunko's own markup, stays italic: the `<i>`/`<em>` tag path sets italic whatever the CSS says (`ChapterHtmlSlimParser::startElement`). Honouring a CSS `font-style: normal` there is a maintainer policy call, since `<b>` deliberately lets the tag decide its weight. Span-based markup (AozoraEpub3's `em-sesame`) is unaffected.
+- **Follow-up:** fullwidth ＃％＆＊／＠＼＿ (U+FF03, FF05, FF06, FF0A, FF0F, FF20, FF3C, FF3F), the CJK Compatibility Forms U+FE30-FE4F and ～ U+FF5E still take a mark, while their ASCII forms and 〜 do not (`TextEmphasis::takesMark`). ＊ in a "＊　＊　＊" break inside a marked span is the likeliest to show.
+
 **Tests and books.**
 - `test/epub_pipeline/CjkRulesTest.cpp`, the rule checker, lays out every line and asserts kinsoku, no hyphen, and no stray space between CJK characters.
 - The books it runs on are in `test/epubs/`:
@@ -130,19 +140,10 @@ Listed here so nobody redoes it.
 2. Extend the rule checker: no line is wider than the text width; a shrunk line could not have been laid out at full widths.
 3. Bump `SECTION_FILE_VERSION` (`lib/Epub/Epub/Section.cpp`).
 
-## Emphasis dots (PR B2)
-
-**Open.** Emphasis dots (傍点, CSS `text-emphasis`): dots or sesame marks above each character of a span, as Aozora Bunko books use them (A3 spec, section 9). They share ruby's storage (`TextBlock` ruby boxes, the flags byte) and its taller line, both shipped with B1.
-
-**Next step.**
-1. Carry out Tasks 8-10 of `docs/superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md`.
-2. Parse `text-emphasis` and draw the marks through the ruby box path.
-3. Bump `SECTION_FILE_VERSION`.
-
 ## A CJK font readers can install
 
 **Shipped** (#550). The font manager installs eight CJK families as `.otf`: NotoSans and NotoSerif in JP, SC, TC and KR,
-1.6 to 7.0 MB each (9.4 MB sans, 16.9 MB serif), drawn by the TTF engine. They are cut by
+1.9 to 7.0 MB each (9.7 MB sans, 17.3 MB serif), drawn by the TTF engine. They are cut by
 `lib/EpdFont/scripts/cjk_subset.py`, listed in `sd-fonts.yaml` and `assets/sd-fonts/fonts-v3.json` (manifest version 3).
 "Download all" leaves them out. The design is `docs/design/cjk-ttf-fonts.md`, sections 4-6.
 
@@ -376,13 +377,14 @@ None of these is visible in the test books. Each is a one-line note of the case 
 
 ## Out of scope so far
 
-These were set aside in the layout spec (section 3) and the A3 spec (section 10), and are candidates once A3b and B2 land:
+These were set aside in the layout spec (section 3) and the A3 spec (section 10), and are candidates once A3b lands:
 - CSS `line-break` / `word-break` parsing;
 - `lang` attributes inside a book: the book's language decides, and there is no detection from the content;
 - last-line grid continuity, and even line height in ruby paragraphs;
 - the special indent of an opening bracket at a paragraph start;
 - hyphenating Latin words inside CJK books;
 - `<rtc>` and ruby below the text;
+- `text-emphasis-position`: Chinese marks below the text (marks are always above);
 - hanging punctuation;
 - upstream's Latin dash split (#3883);
 - vertical text, `writing-mode` and `page-progression-direction`: no longer out of scope, planned in [writing-modes.md](writing-modes.md).

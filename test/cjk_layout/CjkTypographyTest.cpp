@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "Epub/ParsedText.h"
+#include "Epub/TextEmphasis.h"
 #include "Epub/TypographyProfile.h"
 #include "Epub/blocks/TextBlock.h"
 #include "Epub/hyphenation/Hyphenator.h"
@@ -154,13 +155,16 @@ TEST(CjkPunctuationWidths, APageBottomRetryKeepsTheMarksWidths) {
   EXPECT_EQ(lines[2].xpos, (X{0, 10, 15, 25}));
 }
 
-// Live allocations of this test binary, counted by the replacements of the global operator new and delete below.
+// Live allocations of this test binary, and every allocation it made, counted by the replacements of the global
+// operator new and delete below.
 namespace {
 long gLiveAllocations = 0;
-}
+long gAllocations = 0;
+}  // namespace
 void* operator new(const std::size_t size) {
   if (void* p = std::malloc(size ? size : 1)) {
     ++gLiveAllocations;
+    ++gAllocations;
     return p;
   }
   throw std::bad_alloc();
@@ -203,6 +207,20 @@ TEST(RubyTextBlock, DrawingRubyAllocatesNothing) {
   line->render(renderer, kFontId, 0, 100);
   EXPECT_EQ(gLiveAllocations, before);
   EXPECT_EQ(renderer.drawCalls.size(), 5u);
+}
+TEST(RubyTextBlock, DrawingMarksAllocatesNothing) {
+  for (const int font : {kFontId, GfxRenderer::LATIN_FONT}) {  // glyph path, square path
+    const auto line = rubyLine({{0, 2, 0, 0, TextBlock::AnnotationKind::Emphasis, TextEmphasis::Sesame, ""}});
+    GfxRenderer renderer;
+    renderer.drawCalls.reserve(16);
+    renderer.fillRectCalls.reserve(16);
+    const long before = gLiveAllocations;
+    const long made = gAllocations;
+    line->render(renderer, font, 0, 100);
+    EXPECT_EQ(gLiveAllocations, before);
+    EXPECT_EQ(gAllocations, made) << "an allocation freed before render() returns is still one per render";
+    EXPECT_EQ(renderer.drawCalls.size() + renderer.fillRectCalls.size(), 4u);
+  }
 }
 TEST(CjkJustification, AJustifiedCjkLineEndsFlush) {
   // 4 characters on a 47 px line: 7 px over 3 gaps, 2 px each and the last pixel to one of them.

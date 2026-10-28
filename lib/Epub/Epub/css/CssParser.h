@@ -4,6 +4,7 @@
 
 #include <list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -118,7 +119,9 @@ class CssParser {
   //      dropped.
   // v30: `line-height` is persisted, as a multiple of the font size; v29 dropped it from the cache and
   //      stored it relative to a 1.5 base.
-  static constexpr uint8_t CSS_CACHE_VERSION = 30;
+  // v31: `text-emphasis-style` (and `text-emphasis`, with the -epub- and -webkit- prefixes) is persisted: a mark
+  //      in bits 3-6 of the smallCaps byte, defined in bit 2; in the resident pool, extra bit 5 and a mark byte.
+  static constexpr uint8_t CSS_CACHE_VERSION = 31;
   // Bytes before the complex-rule table and the sorted offset index: version(1) + ruleCount(2) +
   // totalSelectorCandidates(4) + unsupportedSelectorSkips(4) + flags(1) + complexTableBytes(2).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 14;
@@ -502,6 +505,9 @@ class CssParser {
   static CssFontStyle interpretFontStyle(std::string_view val);
   static CssFontWeight interpretFontWeight(std::string_view val);
   static CssTextDecoration interpretDecoration(std::string_view val);
+  /** text-emphasis-style / text-emphasis (a colour is ignored): the TextEmphasis mark, 0 for `none`; nullopt for a
+   *  string mark, an unknown keyword or no keyword at all. */
+  static std::optional<uint8_t> parseTextEmphasisStyle(std::string_view value);
   static CssLength interpretLength(std::string_view val);
   /** Returns true only when a numeric length was parsed (e.g. 2em, 50%). False for auto/inherit/initial. */
   static bool tryInterpretLength(std::string_view val, CssLength& out);

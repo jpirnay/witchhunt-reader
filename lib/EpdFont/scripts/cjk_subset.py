@@ -36,6 +36,9 @@ BASE = (
     | set(range(0x2030, 0x205F))
     | set(range(0x3000, 0x3040))
     | {0x30FC}
+    # The CSS text-emphasis marks the reader draws: bullet U+2022 (already in 2010-2027), white bullet, circles,
+    # double circles, triangles and the sesame dots. Noto CJK draws all ten; the region sets name none of them.
+    | {0x2022, 0x25E6, 0x25CF, 0x25CB, 0x25C9, 0x25CE, 0x25B2, 0x25B3, 0xFE45, 0xFE46}
     | set(range(0xFF01, 0xFFA0))
 )
 

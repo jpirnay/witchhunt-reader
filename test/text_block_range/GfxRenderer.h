@@ -71,6 +71,7 @@ class GfxRenderer {
     return static_cast<int>(LINE_HEIGHT * scale + 0.5f);
   }
   void ensureFontReady(int /*fontId*/, const char* /*utf8Text*/) const {}
+  bool hasGlyph(int /*fontId*/, uint32_t /*cp*/, EpdFontFamily::Style /*style*/) const { return true; }
 
   // --- Render surface used by TextBlock ---
   bool isFontCacheScanning() const { return false; }

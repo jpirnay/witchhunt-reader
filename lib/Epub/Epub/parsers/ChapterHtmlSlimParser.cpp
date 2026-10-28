@@ -589,6 +589,7 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
   effectiveSup = false;
   effectiveSub = false;
   effectiveSmallCaps = false;
+  effectiveTextEmphasis_ = 0;
   effectiveInlineMarginLeft = 0;
   effectiveFontFamily_ = 0;
   // Inline font-size composes multiplicatively through the stack (em is relative to
@@ -633,6 +634,9 @@ void ChapterHtmlSlimParser::updateEffectiveInlineStyle() {
     }
     if (entry.hasSmallCaps) {
       effectiveSmallCaps = entry.smallCaps;
+    }
+    if (entry.hasTextEmphasis) {
+      effectiveTextEmphasis_ = entry.textEmphasis;
     }
     if (entry.hasMarginLeft) {
       effectiveInlineMarginLeft = entry.marginLeftPx;
@@ -701,6 +705,13 @@ void ChapterHtmlSlimParser::applyCssEmphasisToEntry(StyleStackEntry& entry, cons
     entry.hasSmallCaps = true;
     entry.smallCaps = cssStyle.smallCaps;
   }
+  applyCssTextEmphasisToEntry(entry, cssStyle);
+}
+
+void ChapterHtmlSlimParser::applyCssTextEmphasisToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) {
+  if (!cssStyle.hasTextEmphasis()) return;
+  entry.hasTextEmphasis = true;
+  entry.textEmphasis = cssStyle.textEmphasis;
 }
 
 // A block's emphasis used to sit in one slot (currentCssStyle) that each nested block overwrote
@@ -713,7 +724,7 @@ void ChapterHtmlSlimParser::pushBlockStyleEntry(const CssStyle& cssStyle) {
   StyleStackEntry entry;
   entry.depth = depth;
   if (!applyCssFontFamilyToEntry(entry, cssStyle) && !cssStyle.hasFontWeight() && !cssStyle.hasFontStyle() &&
-      !cssStyle.hasTextDecoration() && !cssStyle.hasSmallCaps()) {
+      !cssStyle.hasTextDecoration() && !cssStyle.hasSmallCaps() && !cssStyle.hasTextEmphasis()) {
     return;
   }
   applyCssEmphasisToEntry(entry, cssStyle);
@@ -1238,7 +1249,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     // cleared alongside that, so this is belt-and-braces against a future reordering.
     const size_t tokensBefore = currentTableCell->text->size();
     currentTableCell->text->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
-                                    partWordVisibleOffset_);
+                                    partWordVisibleOffset_, 0, effectiveTextEmphasis_);
     // Charge every token the word became against the row budget (a CJK word is one per character).
     // Only a row still headed for the grid accumulates — a degraded cell is drained and freed at </td>.
     if (currentTable && !currentTable->degraded && !currentTable->rowDegraded) {
@@ -1271,7 +1282,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     }
     const bool newFontSlot = (currentTextBlock->fontSlotsUsed() & (1u << fontSlot)) == 0;
     currentTextBlock->addWord(partWordBuffer, fontStyle, false, nextWordContinues, effectiveSizePct,
-                              partWordVisibleOffset_, fontSlot);
+                              partWordVisibleOffset_, fontSlot, effectiveTextEmphasis_);
     // A block laid out in parts has its font already: a family its later words bring in gets its face now.
     if (newFontSlot && wordFontsSize_ != 0) resolveWordFont(fontSlot);
 
@@ -3029,6 +3040,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       // publisher CSS on the link (`a.fn { font-size: 0.7em }`) still wins over the 50% default.
       // applyCssFontSizeToEntry is a no-op unless the link itself carries a font-size.
       applySupSubDefaultSize(entry);
+      applyCssTextEmphasisToEntry(entry, cssStyle);
       applyCssFontSizeToEntry(entry, cssStyle);
       self->inlineStyleStack.push_back(entry);
       self->updateEffectiveInlineStyle();
@@ -3342,6 +3354,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       entry.hasItalic = true;
       entry.italic = cssStyle.fontStyle == CssFontStyle::Italic;
     }
+    applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);
     self->inlineStyleStack.push_back(entry);
     self->updateEffectiveInlineStyle();
@@ -3375,6 +3388,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         entry.strikethrough = true;
       }
     }
+    applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);
     self->inlineStyleStack.push_back(entry);
     self->updateEffectiveInlineStyle();
@@ -3408,6 +3422,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         entry.strikethrough = true;
       }
     }
+    applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);
     self->inlineStyleStack.push_back(entry);
     self->updateEffectiveInlineStyle();
@@ -3426,6 +3441,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       entry.sub = true;
     }
     applySupSubDefaultSize(entry);
+    applyCssTextEmphasisToEntry(entry, cssStyle);
     applyCssFontSizeToEntry(entry, cssStyle);  // explicit CSS font-size overrides the 50% default
     self->inlineStyleStack.push_back(entry);
     self->updateEffectiveInlineStyle();
@@ -3449,7 +3465,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     entry.depth = self->depth;  // Track depth for matching pop
     if (self->applyCssFontFamilyToEntry(entry, cssStyle) || cssStyle.hasFontWeight() || cssStyle.hasFontStyle() ||
         cssStyle.hasTextDecoration() || cssStyle.hasVerticalAlign() || cssStyle.hasSmallCaps() || spanIndent ||
-        cssStyle.hasFontSizeMultiplier() || isSmallTag || isBigTag) {
+        cssStyle.hasFontSizeMultiplier() || cssStyle.hasTextEmphasis() || isSmallTag || isBigTag) {
       // Flush buffer before style change so preceding text gets current style
       if (self->partWordBufferIndex > 0) {
         const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
