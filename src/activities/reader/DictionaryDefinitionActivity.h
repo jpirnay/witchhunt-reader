@@ -14,7 +14,7 @@
 #include "fontIds.h"
 #include "util/ButtonNavigator.h"
 
-// The font dictionary definitions are rendered in -- fixed, and deliberately
+// The font a Latin lookup's definition is rendered in -- fixed, and deliberately
 // NOT the reader's font.
 //
 // A definition is the only text in the firmware that needs the phonetic
@@ -25,6 +25,10 @@
 //
 // The cost is that a reader using Extra Large text still gets a 14pt
 // definition.
+//
+// A lookup that started on CJK text uses the reader's font instead: Noto Sans has
+// no Han, kana or Hangul, and the font that drew the page has the characters
+// (DictionaryWordSelectActivity::definitionFontId() chooses).
 #define DICTIONARY_FONT_ID NOTOSANS_14_FONT_ID
 
 // Paged viewer for one dictionary definition. HTML definitions are laid out
@@ -36,14 +40,18 @@ class DictionaryDefinitionActivity final : public Activity {
   // `dictionaryName` is shown alongside the page counter and is empty when only
   // one dictionary is installed -- which is also when Confirm does nothing, so
   // the name and the ability to switch appear together or not at all.
+  // An empty `headword` draws the header with no title: a CJK definition carries its
+  // headwords in the body, which may be in a script the UI font cannot draw.
+  // `fontId` draws the body: DICTIONARY_FONT_ID, or the reader's font for a CJK lookup.
   explicit DictionaryDefinitionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string headword,
                                         std::string definition, bool htmlDefinition = false,
-                                        std::string dictionaryName = {})
+                                        std::string dictionaryName = {}, int fontId = DICTIONARY_FONT_ID)
       : Activity("DictionaryDefinition", renderer, mappedInput),
         headword(std::move(headword)),
         definition(std::move(definition)),
         htmlDefinition(htmlDefinition),
-        dictionaryName(std::move(dictionaryName)) {}
+        dictionaryName(std::move(dictionaryName)),
+        bodyFontId(fontId) {}
 
   void onEnter() override;
   void onExit() override;
@@ -88,6 +96,8 @@ class DictionaryDefinitionActivity final : public Activity {
   const bool htmlDefinition;
   // Empty when there is nothing to switch to.
   const std::string dictionaryName;
+  // What the body is laid out and drawn in.
+  const int bodyFontId;
   bool canSwitchDictionary() const { return !dictionaryName.empty(); }
   // Styled path: reader-identical Pages laid out from the HTML definition.
   // Empty means the plain-text span path below is active.

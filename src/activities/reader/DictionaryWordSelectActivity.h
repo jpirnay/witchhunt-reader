@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "activities/Activity.h"
+#include "util/CjkLookupRun.h"
 #include "util/Dictionary.h"
 #include "util/DictionaryRegistry.h"
 
@@ -34,7 +35,8 @@ class DictionaryWordSelectActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
 #if SERIAL_TEST_API
-  // " sel=<selected> label=<the selected word's text>"; nothing until the words are built.
+  // " sel=<selected> label=<the selected word's text> spec=<unknown|found|missing> span=<words>
+  // match=<headword>"; nothing until the words are built.
   void appendDebugState(std::string& out) const override;
 #endif
 
@@ -129,6 +131,23 @@ class DictionaryWordSelectActivity final : public Activity {
   // SPECULATIVE_DEBOUNCE_MS. Index search only -- no inflate, no definition
   // buffer -- so it costs a handful of SD reads and no large allocation.
   void speculateForSelection();
+  // The script of word `index`'s first kept codepoint: Han or kana and Hangul take the prefix
+  // search (spec 5.1), anything else the exact lookup.
+  CjkLookupRun::Script scriptAt(int index) const;
+  // Feeds `run` the words from `index` on, in reading order and so across a line end, until it closes.
+  void buildRun(int index, CjkLookupRun& run) const;
+  // Searches `run`, built from `selected`, for its dictionary prefixes and records the outcome as
+  // the speculation for `selected`: the hits, the verdict, and the words the longest hit covers.
+  // False, with the old speculation dropped and nothing recorded, when abortCheck gave up between
+  // probes. `result` gets the search's outcome.
+  bool resolveRun(const CjkLookupRun& run, Dictionary::AbortCheck abortCheck, Dictionary::LookupResult& result);
+  // Confirm's half for a CJK word: the run from `selected`, searched unless the speculation already
+  // has it, then every entry of its matches read into `definition`. Logs the lookup. `ok` is false
+  // when the dictionary could not be opened or indexed.
+  bool lookUpRun(bool ok, std::string& definition, Dictionary::LookupResult& result);
+  // Noto Sans for a Latin lookup, the reader's own font (`fontId`) for one that started on CJK text
+  // (spec 5.3). The one place that chooses; roadmap step 6 replaces it.
+  int definitionFontId(CjkLookupRun::Script script) const;
   // Move to another installed dictionary and look the same word up again.
   // Persists the choice: this IS the dictionary setting, and a reader who
   // switched mid-book means it.
@@ -210,10 +229,15 @@ class DictionaryWordSelectActivity final : public Activity {
   int speculationIdx = -1;  // word `speculation` describes; -1 = none
   DictLocation speculationLocation;
   std::string speculationHeadword;
+  // The CJK speculation's hits for speculationIdx; a Latin word's are the two fields above.
+  DictPrefixMatch speculationMatch;
+  // Words the longest hit covers from speculationIdx; 1 otherwise, and always 1 for a Latin word.
+  uint8_t speculationSpan = 1;
   unsigned long lastMoveMs = 0;
   // Speculation is off for this session: no dictionary, it would not open, or
   // its index still has to be built (a multi-second pass that must stay on the
-  // explicit Confirm, behind its popup, rather than firing while idle).
+  // explicit Confirm, behind its popup, rather than firing while idle). Confirm
+  // turns it back on once it has built the index.
   bool speculationDisabled = false;
   // A verdict arrived for the word the cursor is already on, so the highlight
   // has to be redrawn even though the cursor did not move.

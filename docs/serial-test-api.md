@@ -199,6 +199,7 @@ Reply: one line, `STATE:` followed by `key=value` pairs.
 | `activity` | always | the screen on top (`Home`, `EpubReader`, `Settings`, `DictionaryWordSelect`, ...) |
 | `stack` | always | the screens below it, bottom first, comma-separated (`""` when none) |
 | `sel`, `label` | menus, lists and the dictionary's word screen | the highlighted row (0-based) and its text, or the word under the cursor; `sel=-1` when a tab bar has the focus |
+| `spec`, `span`, `match` | the dictionary's word screen | what the search found for the word under the cursor: `unknown`, `found` or `missing`; how many words the found headword covers (more than 1 only on CJK text); the headword (the longest, on CJK text) |
 | `popup`, `popup_ms` | when a popup is up | its text, and how long ago it was drawn |
 | `book`, `spine`, `page` | EPUB reader | the file, spine item `n/count`, page within that spine item `n/count`; both count from 1 |
 | `font`, `font_pt` | EPUB reader | the font family and point size the book is set in |

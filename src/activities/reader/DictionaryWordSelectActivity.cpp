@@ -1,5 +1,6 @@
 #include "DictionaryWordSelectActivity.h"
 
+#include <CooperativeAbort.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
@@ -487,31 +488,101 @@ void DictionaryWordSelectActivity::speculateForSelection() {
     return;
   }
 
-  char text[WORD_TEXT_CAPACITY];
-  buildWordText(selected, text, sizeof(text), true);
-  Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
-  bool found = dict.resolve(text, speculationLocation, speculationHeadword, &result);
-  // A word broken at a hyphen it already had ("US-Satellitensystems") is a real headword WITH
-  // the hyphen, so the joined form gets a second chance before the word is called absent.
-  if (!found && result == Dictionary::LookupResult::NotFound && isHyphenJoined(selected)) {
-    buildWordText(selected, text, sizeof(text), false);
-    found = dict.resolve(text, speculationLocation, speculationHeadword, &result);
-  }
-  speculationIdx = selected;
-  if (found) {
-    speculation = Speculation::Found;
-  } else if (result == Dictionary::LookupResult::NotFound) {
-    speculation = Speculation::Missing;
+  if (scriptAt(selected) != CjkLookupRun::Script::Other) {
+    // CJK text has no spaces to say where a word ends, so the run from here is searched for the
+    // longest headword it starts with. The search gives way to a press between probes; the word
+    // is then left unresolved, and the next idle tick searches it again once the cursor rests.
+    CjkLookupRun run;
+    buildRun(selected, run);
+    Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
+    if (!resolveRun(run, &CooperativeAbort::shouldAbortLongTask, result)) return;
   } else {
-    // The search did not reach a verdict (IO error). Say nothing rather than
-    // marking a word absent, and let Confirm report the real failure.
-    speculation = Speculation::Unknown;
+    char text[WORD_TEXT_CAPACITY];
+    buildWordText(selected, text, sizeof(text), true);
+    Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
+    bool found = dict.resolve(text, speculationLocation, speculationHeadword, &result);
+    // A word broken at a hyphen it already had ("US-Satellitensystems") is a real headword WITH
+    // the hyphen, so the joined form gets a second chance before the word is called absent.
+    if (!found && result == Dictionary::LookupResult::NotFound && isHyphenJoined(selected)) {
+      buildWordText(selected, text, sizeof(text), false);
+      found = dict.resolve(text, speculationLocation, speculationHeadword, &result);
+    }
+    speculationIdx = selected;
+    speculationSpan = 1;
+    if (found) {
+      speculation = Speculation::Found;
+    } else if (result == Dictionary::LookupResult::NotFound) {
+      speculation = Speculation::Missing;
+    } else {
+      // The search did not reach a verdict (IO error). Say nothing rather than
+      // marking a word absent, and let Confirm report the real failure.
+      speculation = Speculation::Unknown;
+    }
   }
   // Only the highlight style changes, and only when the answer is Missing.
   if (speculation == Speculation::Missing) {
     speculationRepaintPending = true;
     requestUpdate();
   }
+}
+
+CjkLookupRun::Script DictionaryWordSelectActivity::scriptAt(const int index) const {
+  char text[WORD_TEXT_CAPACITY];
+  const size_t length = buildWordText(index, text, sizeof(text), true);
+  return CjkLookupRun::scriptOf(text, length);
+}
+
+void DictionaryWordSelectActivity::buildRun(const int index, CjkLookupRun& run) const {
+  char text[WORD_TEXT_CAPACITY];
+  for (int i = index; i < static_cast<int>(words.size()); i++) {
+    const size_t length = buildWordText(i, text, sizeof(text), true);
+    if (!run.append(text, length)) return;
+  }
+}
+
+bool DictionaryWordSelectActivity::resolveRun(const CjkLookupRun& run, const Dictionary::AbortCheck abortCheck,
+                                              Dictionary::LookupResult& result) {
+  // The search empties speculationMatch before its first probe, so the word the old speculation
+  // described has lost its hits: it must not count as resolved if the cursor goes back to it.
+  speculationIdx = -1;
+  speculation = Speculation::Unknown;
+  const bool found = dict.resolvePrefixes(run.text(), speculationMatch, &result, abortCheck);
+  if (speculationMatch.aborted) return false;
+  speculationIdx = selected;
+  if (found) {
+    speculation = Speculation::Found;
+  } else if (result == Dictionary::LookupResult::NotFound) {
+    speculation = Speculation::Missing;
+  } else {
+    // No verdict (no scan buffers, an IO error): as on the Latin path, Confirm reports it.
+    speculation = Speculation::Unknown;
+  }
+  // A match that ends inside a word covers that word whole.
+  const uint8_t covered = found ? run.wordsCovering(speculationMatch.hits[0].runBytes) : 0;
+  speculationSpan = covered > 0 ? covered : 1;
+  return true;
+}
+
+bool DictionaryWordSelectActivity::lookUpRun(const bool ok, std::string& definition, Dictionary::LookupResult& result) {
+  CjkLookupRun run;
+  buildRun(selected, run);
+  result = Dictionary::LookupResult::NotFound;
+  bool found = false;
+  if (ok) {
+    // Searched here only when the cursor did not rest long enough for a verdict. No abort: the
+    // reader is waiting for this one. Recorded as the speculation, so the span is there on return.
+    if (speculationIdx != selected || speculation == Speculation::Unknown) resolveRun(run, nullptr, result);
+    // A known miss needs no SD access at all.
+    if (speculation == Speculation::Found) found = dict.readPrefixDefinitions(speculationMatch, definition, &result);
+  }
+  Dictionary::logLookup(SETTINGS.dictionaryName, run.text(),
+                        ok ? Dictionary::resultName(result) : "open_or_index_failed",
+                        found ? speculationMatch.hits[0].headword.c_str() : nullptr);
+  return found;
+}
+
+int DictionaryWordSelectActivity::definitionFontId(const CjkLookupRun::Script script) const {
+  return script == CjkLookupRun::Script::Other ? DICTIONARY_FONT_ID : fontId;
 }
 
 const std::vector<DictionaryEntry>& DictionaryWordSelectActivity::installedDictionaries() {
@@ -590,32 +661,42 @@ void DictionaryWordSelectActivity::performLookup() {
   if (ok && dictNeedsIndex) {
     ok = dict.buildIndex(&indexBuildYield, nullptr, &indexResult);
     dictNeedsIndex = !ok;  // a successful build leaves the sidecar fresh; a failed one retries
+    // speculateForSelection() switched itself off for the missing index. With it built, the idle
+    // search runs again without the screen being reopened, and a CJK span can grow.
+    if (ok) speculationDisabled = false;
   }
 
   std::string definition;
+  // Stays empty for a CJK lookup, whose definition opens on its headword lines instead.
   std::string headword;
   Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
   bool found = false;
-  char text[WORD_TEXT_CAPACITY];
-  buildWordText(selected, text, sizeof(text), true);
-  if (ok && speculationIdx == selected && speculation != Speculation::Unknown) {
-    // The index search already ran while the cursor sat here. A hit only has to
-    // read the definition; a known miss needs no SD access at all.
-    if (speculation == Speculation::Found) {
-      headword = speculationHeadword;
-      found = dict.readResolved(speculationLocation, definition, &result);
-    } else {
-      result = Dictionary::LookupResult::NotFound;
-    }
-  } else if (ok) {
-    found = dict.lookup(text, definition, headword, &result);
-    if (!found && result == Dictionary::LookupResult::NotFound && isHyphenJoined(selected)) {
-      buildWordText(selected, text, sizeof(text), false);
+  // Not before the busy repaint: after a dictionary switch, that repaint is what rebuilt the words.
+  const CjkLookupRun::Script script = scriptAt(selected);
+  if (script != CjkLookupRun::Script::Other) {
+    found = lookUpRun(ok, definition, result);
+  } else {
+    char text[WORD_TEXT_CAPACITY];
+    buildWordText(selected, text, sizeof(text), true);
+    if (ok && speculationIdx == selected && speculation != Speculation::Unknown) {
+      // The index search already ran while the cursor sat here. A hit only has to
+      // read the definition; a known miss needs no SD access at all.
+      if (speculation == Speculation::Found) {
+        headword = speculationHeadword;
+        found = dict.readResolved(speculationLocation, definition, &result);
+      } else {
+        result = Dictionary::LookupResult::NotFound;
+      }
+    } else if (ok) {
       found = dict.lookup(text, definition, headword, &result);
+      if (!found && result == Dictionary::LookupResult::NotFound && isHyphenJoined(selected)) {
+        buildWordText(selected, text, sizeof(text), false);
+        found = dict.lookup(text, definition, headword, &result);
+      }
     }
+    Dictionary::logLookup(SETTINGS.dictionaryName, text, ok ? Dictionary::resultName(result) : "open_or_index_failed",
+                          found ? headword.c_str() : nullptr);
   }
-  Dictionary::logLookup(SETTINGS.dictionaryName, text, ok ? Dictionary::resultName(result) : "open_or_index_failed",
-                        found ? headword.c_str() : nullptr);
 
   if (found) {
     popup = Popup::None;
@@ -634,17 +715,18 @@ void DictionaryWordSelectActivity::performLookup() {
     // The page is rebuilt from the same Page when the definition returns.
     RenderLock lock(*this);
     releaseWordArrays();
-    startActivityForResult(std::make_unique<DictionaryDefinitionActivity>(
-                               renderer, mappedInput, std::move(headword), std::move(definition), html,
-                               multiple ? std::string(SETTINGS.dictionaryName) : std::string()),
-                           [this](const ActivityResult& result) {
-                             // The child overdrew the page; the snapshot no longer matches.
-                             snapshotIdx = -1;
-                             if (const auto* switchRequest = std::get_if<DictionarySwitchResult>(&result.data)) {
-                               pendingDictionarySwitch = switchRequest->direction;
-                             }
-                             requestUpdate();
-                           });
+    startActivityForResult(
+        std::make_unique<DictionaryDefinitionActivity>(
+            renderer, mappedInput, std::move(headword), std::move(definition), html,
+            multiple ? std::string(SETTINGS.dictionaryName) : std::string(), definitionFontId(script)),
+        [this](const ActivityResult& result) {
+          // The child overdrew the page; the snapshot no longer matches.
+          snapshotIdx = -1;
+          if (const auto* switchRequest = std::get_if<DictionarySwitchResult>(&result.data)) {
+            pendingDictionarySwitch = switchRequest->direction;
+          }
+          requestUpdate();
+        });
     return;
   }
 
@@ -972,5 +1054,16 @@ void DictionaryWordSelectActivity::appendDebugState(std::string& out) const {
   char text[WORD_TEXT_CAPACITY];
   buildWordText(selected, text, sizeof(text), true);
   appendField(out, "label", text);
+  // The speculation describes the word under the cursor only when it was made for it.
+  const Speculation verdict = speculationIdx == selected ? speculation : Speculation::Unknown;
+  const bool found = verdict == Speculation::Found;
+  appendField(out, "spec", found ? "found" : (verdict == Speculation::Missing ? "missing" : "unknown"));
+  appendField(out, "span", static_cast<long>(found ? speculationSpan : 1));
+  const char* match = "";
+  if (found) {
+    match = scriptAt(selected) != CjkLookupRun::Script::Other ? speculationMatch.hits[0].headword.c_str()
+                                                              : speculationHeadword.c_str();
+  }
+  appendField(out, "match", match);
 }
 #endif  // SERIAL_TEST_API
