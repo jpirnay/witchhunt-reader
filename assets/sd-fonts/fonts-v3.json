@@ -659,8 +659,8 @@
       "files": [
         {
           "name": "NotoSansJP/NotoSansJP-Regular.otf",
-          "size": 1691884,
-          "crc32": 3053310068
+          "size": 1973812,
+          "crc32": 262016459
         }
       ]
     },
@@ -675,8 +675,8 @@
       "files": [
         {
           "name": "NotoSansKR/NotoSansKR-Regular.otf",
-          "size": 2696948,
-          "crc32": 324393524
+          "size": 2697464,
+          "crc32": 1291844187
         }
       ]
     },
@@ -691,8 +691,8 @@
       "files": [
         {
           "name": "NotoSansSC/NotoSansSC-Regular.otf",
-          "size": 2013764,
-          "crc32": 2354036985
+          "size": 2014304,
+          "crc32": 3079188887
         }
       ]
     },
@@ -707,8 +707,8 @@
       "files": [
         {
           "name": "NotoSansTC/NotoSansTC-Regular.otf",
-          "size": 3453724,
-          "crc32": 1020176569
+          "size": 3454208,
+          "crc32": 1208053007
         }
       ]
     },
@@ -761,8 +761,8 @@
       "files": [
         {
           "name": "NotoSerifJP/NotoSerifJP-Regular.otf",
-          "size": 2428192,
-          "crc32": 371628862
+          "size": 2840644,
+          "crc32": 4039930567
         }
       ]
     },
@@ -777,8 +777,8 @@
       "files": [
         {
           "name": "NotoSerifKR/NotoSerifKR-Regular.otf",
-          "size": 7331380,
-          "crc32": 1098364136
+          "size": 7332196,
+          "crc32": 4113809641
         }
       ]
     },
@@ -793,8 +793,8 @@
       "files": [
         {
           "name": "NotoSerifSC/NotoSerifSC-Regular.otf",
-          "size": 2881924,
-          "crc32": 207324588
+          "size": 2882752,
+          "crc32": 199158128
         }
       ]
     },
@@ -809,8 +809,8 @@
       "files": [
         {
           "name": "NotoSerifTC/NotoSerifTC-Regular.otf",
-          "size": 5050816,
-          "crc32": 2995845909
+          "size": 5051596,
+          "crc32": 979283076
         }
       ]
     },

@@ -263,8 +263,10 @@ class ParsedText {
   // break the CJK rules allow (CjkLineBreak.h). attachToPrevious: no whitespace separated it from the
   // previous word in the source.
   // fontSlot: the word's font slot (see setFontSlot), below TextBlock::kMaxWordFonts.
+  // textEmphasis: the word's CSS text-emphasis mark (TextEmphasis), 0 for none; every token of the word carries it.
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
-               uint8_t sizePct = DEFAULT_WORD_SIZE_PCT, uint32_t visibleOffset = 0, uint8_t fontSlot = 0);
+               uint8_t sizePct = DEFAULT_WORD_SIZE_PCT, uint32_t visibleOffset = 0, uint8_t fontSlot = 0,
+               uint8_t textEmphasis = 0);
   // Tokens [firstToken, firstToken + tokenCount) become one ruby group: the first keeps its boundary (a break may
   // come before the group), the rest are glued to it. False when the range is empty, runs past size(), or a token
   // in it already has a role.

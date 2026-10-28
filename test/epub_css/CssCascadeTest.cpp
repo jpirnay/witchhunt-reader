@@ -476,3 +476,19 @@ TEST(CssCascade, InheritBeatsALowerRuleInEveryStore) {
     EXPECT_EQ(style.fontStyle, CssFontStyle::Italic) << storeName(store);
   });
 }
+
+// --- text-emphasis-style ---
+
+TEST(CssCascade, TextEmphasisResolvesAlikeInEveryStore) {
+  const std::vector<std::string> css = {
+      ".em { -epub-text-emphasis-style: filled sesame }\n"
+      "p.em { text-emphasis-style: open dot }\n"};
+  resolveEverywhere(css, {"p", "em"}, [&](const Store store, const CssStyle& style) {
+    EXPECT_TRUE(style.hasTextEmphasis()) << storeName(store);
+    EXPECT_EQ(style.textEmphasis, TextEmphasis::Dot | TextEmphasis::kOpen) << storeName(store);
+  });
+  resolveEverywhere(css, {"span", "em"}, [&](const Store store, const CssStyle& style) {
+    EXPECT_TRUE(style.hasTextEmphasis()) << storeName(store);
+    EXPECT_EQ(style.textEmphasis, TextEmphasis::Sesame) << storeName(store);
+  });
+}

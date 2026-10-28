@@ -54,7 +54,7 @@ directory whole.
 | `book.bin` | EPUB | `BOOK_CACHE_VERSION` (18) | Metadata, spine and TOC: [below](#bookbin) |
 | `fingerprint.bin`, `toc.retry` | EPUB | none | [below](#fingerprintbin-and-tocretry) |
 | `pagelist.bin` | EPUB | none | The printed-page list: [below](#pagelistbin) |
-| `css_rules.cache`, `css_bg.bin`, `css_fonts.bin` | EPUB | `CSS_CACHE_VERSION` (30), `BACKGROUND_IMAGES_FILE_VERSION` (1) | [below](#css_rulescache-css_bgbin-and-css_fontsbin) |
+| `css_rules.cache`, `css_bg.bin`, `css_fonts.bin` | EPUB | `CSS_CACHE_VERSION` (31), `BACKGROUND_IMAGES_FILE_VERSION` (1) | [below](#css_rulescache-css_bgbin-and-css_fontsbin) |
 | `spines/<n>/<spine>_<hash>.bin` | EPUB | `SECTION_FILE_VERSION` | Laid-out pages: [`section.bin`](#sectionbin) |
 | `spines/<n>/html_<spine>.bin` | EPUB | none | The spine item's inflated XHTML, banked by its build for the footnote pass and later builds; checked against the inflated size |
 | `pages.bin` | EPUB | `kFormatVersion` (1) in `SpinePageIndex.cpp`, plus the section version and property hash | Each spine item's page count and size under one render variant (`SpinePageIndex`), to count pages across a chapter split over several files |
@@ -298,7 +298,7 @@ Two small files beside `book.bin` (`lib/Epub/Epub.cpp`).
 
 ## `css_rules.cache`, `css_bg.bin` and `css_fonts.bin`
 
-The book's compiled stylesheets, written by `CssParser` (`lib/Epub/Epub/css/`). `css_rules.cache` starts with a 14-byte header (`u8` version, `u16` rule count, `u32` selector candidates, `u32` unsupported-selector skips, `u8` flags, `u16` complex-table bytes), then the complex-rule table (compound, descendant and child selectors, which the hashed index cannot key; its layout is described at `CssParser::complexTable`), then the sorted `{hash, offset}` index, then the rule records (`u16` selector length, selector, `u16` source order, style payload). A selector declared again after other rules has a record per declaration, so rules of equal specificity can apply in stylesheet order. The version byte is `CssParser::CSS_CACHE_VERSION` (30); the comment above it lists what each version changed. A file with another version is deleted and the CSS compiled again, and the book's section caches go with it. It is compiled into `css_rules.compile.tmp` first.
+The book's compiled stylesheets, written by `CssParser` (`lib/Epub/Epub/css/`). `css_rules.cache` starts with a 14-byte header (`u8` version, `u16` rule count, `u32` selector candidates, `u32` unsupported-selector skips, `u8` flags, `u16` complex-table bytes), then the complex-rule table (compound, descendant and child selectors, which the hashed index cannot key; its layout is described at `CssParser::complexTable`), then the sorted `{hash, offset}` index, then the rule records (`u16` selector length, selector, `u16` source order, style payload). A selector declared again after other rules has a record per declaration, so rules of equal specificity can apply in stylesheet order. The version byte is `CssParser::CSS_CACHE_VERSION` (31); the comment above it lists what each version changed. A file with another version is deleted and the CSS compiled again, and the book's section caches go with it. It is compiled into `css_rules.compile.tmp` first.
 
 `css_bg.bin` sits beside it and holds the CSS background pictures (`CssParser::backgroundImageFor`): the `no-repeat` `background-image` of each rule that sets one. Absent when the book has none.
 
@@ -314,7 +314,7 @@ count x {
 `css_fonts.bin` holds the book's `@font-face` rules (`CssParser::loadFontFaces`, read one at a time by `CssParser::nextFontFace`), in source order, for its embedded fonts: at most `MAX_FONT_FACES` (32). Absent when the book declares none.
 
 ```text
-u8  version             CSS_CACHE_VERSION (30)
+u8  version             CSS_CACHE_VERSION (31)
 then, to the end of the file, one record per face {
     u16 weight          font-weight, 100-900 (normal 400, bold 700)
     u8  italic          1 when font-style is not normal

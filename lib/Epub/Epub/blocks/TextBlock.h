@@ -114,8 +114,8 @@ class TextBlock final : public Block {
     uint8_t pct = 100;
     uint8_t fontSlot = 0;
   };
-  // A box over a run of the line's words, drawn in a band above them: the ruby of a group (Emphasis is filled from the
-  // emphasis dots on).
+  // A box over a run of the line's words, drawn in a band above them: the ruby of a group, or an emphasis run (`mark`;
+  // `x`/`width` 0, unused).
   enum class AnnotationKind : uint8_t { Ruby = 1, Emphasis = 2 };
   static constexpr size_t kMaxAnnotationText = 255;
   struct Annotation {
