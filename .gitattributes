@@ -1,0 +1,3 @@
+# The pipeline tests compare their output byte for byte with these files, and write LF. Without this, a
+# Windows checkout with core.autocrlf=true turns them into CRLF and every MatchesGolden test fails.
+test/epub_pipeline/goldens/*.txt text eol=lf
