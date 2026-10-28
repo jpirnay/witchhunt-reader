@@ -569,8 +569,10 @@ TEST_P(CjkRules, NoHyphenAfterCjkText) {
 TEST_P(CjkRules, LinesSitWhereTheirWidthsPutThem) {
   size_t checked = 0;
   size_t pushedIn = 0;
+  size_t restated = 0;  // lines that could be laid out again: no ruby, not a table cell
   for (const auto& line : lines) {
     if (line.words.empty()) continue;
+    if (line.rubies.empty() && !line.cell) ++restated;
     const LineLayout layout(renderer, line, profile);
     if ((line.align == kAlignLeft || line.align == kAlignRight) && line.rubies.empty()) {
       const TextBounds bounds = textBoundsOf(renderer, line, profile);
@@ -591,21 +593,28 @@ TEST_P(CjkRules, LinesSitWhereTheirWidthsPutThem) {
           << "\"" << right.text << "\" overlaps \"" << left.text << "\" in: " << lineText(line);
     }
   }
-  EXPECT_GT(checked, 0u) << "no line laid out again";
+  // Ruby lines and table cells are checked pair by pair; of the others only a few centred or justified headings are not
+  // laid out again.
+  EXPECT_GE(checked * 4, restated * 3) << "only " << checked << " of " << restated << " lines laid out again";
   if (GetParam().forcesPushIn) EXPECT_GT(pushedIn, 0u) << "no line was pushed in";
 }
 
 // Between Han or kana and a Latin letter or European digit with no space in the source, a Chinese or Japanese book
 // sets a quarter em of the CJK character's size, at least half of it on a line that was pushed in; other books set
 // nothing (spec 5.4). A gap of the space advance or more is the source's own space. A line with a ruby box cannot be
-// laid out again (LinesSitWhereTheirWidthsPutThem), so it may hold any gap a push-in could leave.
+// laid out again (LinesSitWhereTheirWidthsPutThem; the ruby widening of its groups is not restated, so the line's
+// push-in cannot be told apart even for tokens outside the groups), so it may hold any gap a push-in could leave.
 TEST_P(CjkRules, CjkLatinGapsSitWhereTheSpecPutsThem) {
   const int space = renderer.getSpaceWidth(1);
   size_t checked = 0;
   for (const auto& line : lines) {
     if (line.align != kAlignLeft && line.align != kAlignRight) continue;  // a justified line stretches its gaps
-    const bool pushedIn = !line.rubies.empty() || pushInOf(LineLayout(renderer, line, profile), line,
-                                                           textBoundsOf(renderer, line, profile)) != 0;
+    bool pushedIn = !line.rubies.empty();
+    if (line.rubies.empty()) {
+      const int need = pushInOf(LineLayout(renderer, line, profile), line, textBoundsOf(renderer, line, profile));
+      EXPECT_GE(need, 0) << "not where its widths put it: " << lineText(line);
+      pushedIn = need != 0;
+    }
     for (size_t k = 0; k + 1 < line.words.size(); ++k) {
       const uint32_t left = lastCodepoint(line.words[k].text);
       const uint32_t right = firstCodepoint(line.words[k + 1].text);
