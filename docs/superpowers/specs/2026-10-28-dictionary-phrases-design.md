@@ -1,7 +1,9 @@
 # Dictionary phrases: phrase headwords, idioms inside an article, cross-references
 
 Status: design agreed with the maintainer on 2026-10-28; to be built after the work in flight (CJK step 9 and the
-rest of the CJK roadmap). Not scheduled yet.
+rest of the CJK roadmap). Not scheduled yet. Amended the same day with the maintainer's answers to the plan's
+questions: inflection stubs as base forms (5.2, 5.4), Oxford's inflection cues (5.4), the flash budget and the speed
+gate's books (4).
 
 ## 1. Intent and why
 
@@ -25,6 +27,7 @@ their content is copyrighted and must not be committed):
 | Multi-word headwords | 21,309, almost all compounds and names ("bank balance", "Banja Luka"). No idiom and no phrasal verb is a headword ("look up", "give up", "in favour of", "on the other hand" all absent) | 21,409: compounds **and phrasal verbs** ("look up", "give up", "make up for", "put up with"). Idioms are not headwords |
 | Idioms inside the main word's article | yes: a `⧼PHRASES⧽` and a `⧼PHRASAL VERB⧽` section; each phrase is a `<b>…</b>` after a "▫" bullet, with placeholders: "in favour of", "take **something** into account", "on **someone's** account", "call (or **bring**) **someone** to account" | yes, inline: each phrase is a `<b>…</b>`, the headword written as **∼**, placeholders **sb** / **sth**, alternatives in brackets or with a slash: "in ∼ of sth", "to vote in ∼ of sth", "as a ∼ of fact", "to have a ∼ round" |
 | US spelling | no *favor* entry at all (the article says "favour (US favor)") | *favor* is a 179-byte stub: "AM *see* **favour**"; 866 such cross-reference stubs |
+| Inflected forms | mostly no entry (*looked*, *gives*: `resolve()`'s stemmer finds the base); irregular ones are stubs with cues of their own: *gave* is "past of **GIVE**" | entries of their own: *looked*, *gives*, *gave* each end in "↑ *look*" / "↑ *give*", the target in italics; 37,566 such stubs |
 | Format | `sametypesequence=h`, plain `.dict` (58 MB), PocketBookDic conversion | `sametypesequence=h`, plain `.dict` (35 MB), PocketBookDic conversion |
 
 So a phrase search over headwords alone would find PONS's phrasal verbs and nothing of the idioms; the idioms have
@@ -65,8 +68,11 @@ to be found inside the article of the word that was tapped.
   definition's first page on screen. Its median with phrases on stays within 1.5x master's on the X4, over about 50
   words from two English books (about half inside phrases the dictionaries hold, misses included), with Oxford and
   with PONS, timed from the log. Index work alone is not the measure: A does several descents where `resolve()` did
-  one, and that is acceptable as long as the page appears about as fast.
-- **Flash:** about 3 KB for A, B and C together, measured from the map file; more needs the maintainer's yes.
+  one, and that is acceptable as long as the page appears about as fast. The two books (the maintainer, 2026-10-28):
+  a generated, phrase-heavy test book, and `/test/Alice.epub` from the X4's card.
+- **Flash:** at most 4.5 KB in `gh_release` for the whole feature (A, B, C and the two screens), measured from the
+  map file (the maintainer, 2026-10-28; it was about 3 KB before the inflection stubs and the cues of 5.4); more needs
+  the maintainer's yes.
 - The first-hit behaviour of every existing lookup path stays as it is when nothing phrase-like is found: today's
   host tests stay green.
 
@@ -104,6 +110,9 @@ to the earlier start.
 - **The tapped word's base form (my call).** When `resolve()` found the tapped word under another form (*looked* →
   *look*, *gives* → *give*), the starts up to the tapped word are searched again with that form in its place, so
   "she looked up the word" finds PONS's "look up". Only the tapped word is replaced, only when its form differs.
+  **A stub gives the base form too** (the maintainer, 2026-10-28): PONS carries *looked*, *gives* and *gave* as
+  entries of their own (section 2), so `resolve()` finds them as written. When the tapped word's own entry is a stub
+  (5.4), the headword it points to is the base form (*looked* → *look*, *gave* → *give*).
 - **A runs on a miss too (my call).** When the tapped word alone has no entry, Confirm still runs A, so *facto* in
   "de facto" or *hoc* in "ad hoc" finds its phrase. The speculative outline over a missed word does not change (it is
   index-only for the word); only a Confirm pays for A.
@@ -112,6 +121,10 @@ to the earlier start.
   base form, are several descents where the exact lookup did one. Open one lookup session for all of them rather
   than one per `resolvePrefixes` call (the builder: add a session parameter or an overload). The speed gate (section
   4) decides whether that is enough; if it is not, drop starts whose first probe shows no headword with that prefix.
+  **The stub check before A is one extra read**: the tapped word's own entry, when it is small enough to be a stub
+  (at most 2 KB; the largest stub measured is 1,045 bytes), is read before A rather than after it. When A finds
+  nothing, that is the read the lookup makes anyway; when A finds a phrase, the entry is read a second time into the
+  phrase's definition.
 - What is shown: every entry of the phrase headword (step 9's `readPrefixDefinitions`), then the tapped word's own
   entries as today's lookup finds them (with `resolve()`'s fallbacks), in one definition, the phrase first. **When
   the phrase's entries alone fit the styled view's cap (`MAX_STYLED_HTML_BYTES`, 16 KB in
@@ -161,12 +174,28 @@ entry instead (one hop, never a chain), and B then runs on it.
 A **stub** (rule revised after the builder check measured the first one on the maintainer's files): a definition
 with at most 256 bytes of text after tags are removed, that ends with a bold run (nothing after it but punctuation
 and closing tags), not inside `<i>`, **directly preceded by a cross-reference cue**, and whose bold run is a headword
-of the dictionary (an exact lookup with none of `resolve()`'s fallbacks).
+of the dictionary (an exact lookup with none of `resolve()`'s fallbacks). **An italic target directly after the
+"↑" cue counts as well** (the maintainer, 2026-10-28): that is how PONS writes its inflected forms, "↑ *look*", also
+after a "pt of **give**" line. The target is read without a `<sup>` homograph number (Oxford's "FAVOUR¹").
 
 The cues live in the same constant table as B's placeholders, as dictionary notation (my call): *see*, *see also*,
 *↑*, *→*, *another term for*, *variant of*, *variant spelling of*, *pl of*, *pt of*, *pp of*, *abbrev of*,
 *abbreviation of*, and the German dictionaries' *siehe* and *s.*. With them, Oxford's "another term for X" stubs are
-followed too.
+followed too. **Oxford's inflection cues are in the table too** (the maintainer, 2026-10-28): *past of*, *past
+participle of*, *past and past participle of*, *past tense of*, *plural of*, *short for*, *archaic spelling of*,
+*dialect form of*, *comparative of*, *superlative of*.
+
+Measured with the whole rule on the maintainer's files (each stub's target a headword, compared without ASCII case,
+as `locate()` compares; a target naming its own entry not counted):
+
+| | Oxford | PONS |
+|---|---|---|
+| Bold target after a cue of the first list | 2,080 (*another term for* 1,343, *see* 350, *variant of* 186, *see also* 84, *abbreviation of* 76, *variant spelling of* 41) | 1,108 (*see* 817, *abbrev of* 84, *pp of* 77, *pt of* 59, *pl of* 49, *see also* 21, *variant of* 1) |
+| Bold target after an inflection cue | 408 (*short for* 135, *past and past participle of* 83, *past of* 76, *past participle of* 55, *archaic spelling of* 38, *plural of* 9, *dialect form of* 8, *superlative of* 2, *comparative of* 1, *past tense of* 1) | 13 (*short for*) |
+| Italic target after "↑" | 0 | 37,566 (*looked*, *gives*, *gave* among them) |
+| All stubs | 2,488 | 38,687 |
+
+The largest stub measured is 1,045 bytes of HTML.
 
 Why the cue is needed: without it the size-and-last-bold rule caught 9,104 real Oxford entries (it bolds labels and
 derivatives: *skylight* → "n", *mendacious* → "-ious") and 2,593 PONS entries against its 866 real stubs
@@ -198,10 +227,12 @@ changed.
   - B: `∼` and spelled-out headwords, each placeholder, the optional *to*, both alternative forms, an unclosed
     bracket, partial matches, ties, no match, a plain dictionary (B off);
   - C: a stub followed once, a stub pointing to a missing headword (not followed), a long entry that ends in bold
-    (not a stub), a chain (one hop only);
+    (not a stub), a chain (one hop only), an italic target after "↑" (followed) and anywhere else (not), an
+    inflection stub giving A its base form;
   - the context builder: punctuation stops, line ends crossed, paragraph ends not, soft hyphens.
-- **The X4** with the maintainer's Oxford and PONS on the card and a small test EPUB (sentences such as "voted in
-  favor of the motion", "took it into account", "she looked it up", "as a matter of fact"): screenshots of each
+- **The X4** with the maintainer's Oxford and PONS on the card, a small test EPUB (sentences such as "voted in
+  favor of the motion", "took it into account", "she looked it up", "as a matter of fact") and `/test/Alice.epub`:
+  screenshots of each
   definition's first page; the speed gate (section 4); `CMD:STATE` heap on the definition screen against master.
 
 ## 8. Left to the builder
@@ -209,8 +240,10 @@ changed.
 - How the phrase is marked on its page.
 - Whether one case-insensitive search suffices (5.2).
 - Where the context builder lives, and how it shares code with `CjkLookupRun`.
-- The exact stub size threshold, if 256 bytes of text misses real stubs or catches real entries (measure on PONS:
-  866 candidates).
+- The exact stub size threshold, if 256 bytes of text misses real stubs or catches real entries. Measured with the
+  whole rule: bold stubs at 256 / 384 / 512 bytes number 2,488 / 2,756 / 2,856 in Oxford and 1,121 / 1,133 / 1,139
+  in PONS. The Oxford entries between 256 and 384 bytes are full articles whose etymology ends in "(see X)", so 256
+  stays.
 - Whether `CMD:ACT:DICT` reports the phrase found (useful for the device run), and in which form.
 
 ## 9. Risks
@@ -222,3 +255,7 @@ changed.
   first word is a headword prefix that the first probe's window shows exists.
 - **Bold used for other things** (Oxford bolds sense numbers and examples' key words): only bold runs with two or
   more words, or one word plus a placeholder, are phrase candidates.
+- **Short articles that end in a cue.** 336 of Oxford's 2,488 stub matches are full articles of under 256 bytes
+  whose etymology ends in "(see X)" or "short for X"; in 167 of them the cue sits inside an open bracket. They are
+  followed as stubs, with their own text kept above X's entry, so nothing is lost but the header changes to X.
+  PONS has none.

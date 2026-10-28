@@ -26,8 +26,8 @@
 - §3 anti-goals: "Code that branches on the book's or the dictionary's language." "A Latin lookup that becomes noticeably slower, or a cursor move that does more card reads than today." "Steady-state RAM, or transient RAM beyond the existing lookup session and the definition buffer." "Losing the word's own definition: the phrase comes first, the word stays reachable."
 - §3 non-goals: "Japanese, Chinese and Korean: step 9 covers them; this design does not change a CJK lookup." "A new dictionary format, a converter, shipped dictionaries, a new setting."
 - §4: "No steady-state RAM; transient RAM within the lookup session plus a few bytes; stack locals under 256 bytes per function; no allocation in a scan loop. The definition buffer (`MAX_DEFINITION_BYTES`, 64 KB cap) is the only large buffer, and B and C work on it in place."
-- §4, speed gate: "the time from Confirm to the definition's first page on screen. Its median with phrases on stays within 1.5x master's on the X4, over about 50 words from two English books (about half inside phrases the dictionaries hold, misses included), with Oxford and with PONS, timed from the log."
-- §4, flash: "about 3 KB for A, B and C together, measured from the map file; more needs the maintainer's yes."
+- §4, speed gate: "the time from Confirm to the definition's first page on screen. Its median with phrases on stays within 1.5x master's on the X4, over about 50 words from two English books (about half inside phrases the dictionaries hold, misses included), with Oxford and with PONS, timed from the log." The books: "a generated, phrase-heavy test book, and `/test/Alice.epub` from the X4's card".
+- §4, flash: "at most 4.5 KB in `gh_release` for the whole feature (A, B, C and the two screens), measured from the map file … more needs the maintainer's yes."
 - §4: "The first-hit behaviour of every existing lookup path stays as it is when nothing phrase-like is found: today's host tests stay green."
 - §5.1: "It is built only when the lookup runs (Confirm), not while the cursor moves." §5.5: "The word screen's highlight and speculation do not change for Latin text".
 - §5.3: "The placeholder and optional-word lists are one small constant table: dictionary notation, not per-language code. New notations are added there." §5.4: "The cues live in the same constant table as B's placeholders".
@@ -61,7 +61,11 @@ Decided while planning; a reviewer holds each task to them. Each names what it c
 4. **Case for A.** The index is ordered by `asciiCaseCmp`, and the prefix search folds ASCII case, so one search covers ASCII capitals. A second search is made only when the run's first codepoint is a non-ASCII capital (`utf8LowerCodepoint` changes it) whose lowercase has the same byte length. That covers Latin-1, Greek and Cyrillic; `ẞ` is not retried. If wrong: an extra descent on such capitals.
 5. **Pruning.** No probe targets, and no hit records, a run shorter than the shortest hit that could count (`minBytes`: from the start to the tapped word's end, plus two bytes when the start is the tapped word). The results are the same; only short-prefix descents go. This is not the spec's speed fallback, which stays available (Task 11 Step 7). If wrong: none.
 6. **Ties of A.** "Longest" is in bytes; a tie goes to the earlier start, then to the context as written over the base-form one.
-7. **The base form** is `resolve()`'s headword when it differs from the tapped word under ASCII case folding and has no space. A runs on a miss only when the word's own search reached the verdict NotFound; a read failure keeps today's error popup. If wrong: see question 1 below.
+7. **The base form** (spec 5.2 as amended):
+   - `resolve()`'s headword, when it differs from the tapped word under ASCII case folding and has no space;
+   - otherwise, when the word's own entry is at most 2 KB and is a stub (5.4), the headword its target resolves to.
+   
+   That holds for any cue, not only an inflection's (*favor* → *favour* as *looked* → *look*), so the table needs no kind column. A runs on a miss only on a NotFound verdict; a read failure keeps today's error popup. If wrong: a few more descents on spelling-variant stubs.
 8. **The word's entry in A's definition** is the one entry today's lookup finds. `DictLocation` gains the `.idx` offset of its entry (`idxEntry`), so that entry reads like a prefix hit. Cost: 4 bytes in each `DictLocation`.
 9. **The cut for room.** An HTML entry is cut where no tag, entity or UTF-8 sequence is split, and the elements still open are closed. Both dictionaries wrap every article in one element, so a byte cut would fail to parse and drop to plain text. The 16 KB styled cap applies to `sametypesequence=h` only, the one format the styled view lays out; everything else is cut to 64 KB. A cut entry that would keep fewer than 64 bytes of its definition is left out. If wrong: about 350 bytes of flash.
 10. **B's bold runs are read nesting-aware.** Oxford nests the alternative's `<b>` inside the phrase's ("by (or from) all accounts"); the run ends at the `</b>` that closes the outer one. 5.3's unclosed-bracket case stays handled.
@@ -69,36 +73,30 @@ Decided while planning; a reviewer holds each task to them. Each names what it c
 12. **The headword in a phrase.** `∼` and `~` are replaced by the headword inside a token ("∼s" reads "accounts"). The tapped word also matches any token equal to the headword, so *looked* matches Oxford's "look" and *favor* matches PONS's "∼" after C sends it to *favour*.
 13. **Bounds on B.** A bold run is read up to 128 bytes, a reading has at most 12 tokens and 4 placeholders, and at most two "or" groups give readings. A longer run is read as far as it goes, its last partial token dropped. If wrong: an over-long run is matched on its first part only.
 14. **Markup.** B and C run when `sametypesequence` is a single `h`, `x` or `g` (`Dictionary::definitionsHaveMarkup()`, new), as 5.3 says. The styled view stays `h` only.
-15. **C, as measured on the maintainer's files with the spec's cue table:**
-    - It follows 1,098 PONS stubs at the 256-byte text limit (1,108 at 384, 1,114 at 512), so 256 stays.
-    - It follows about 1,880 Oxford stubs. Oxford writes its targets in capitals ("another term for FORESTS"); the exact lookup is `locate()` over `.idx`, which folds ASCII case as the index does (no `.syn`, no stems).
-    - The target is read without its `<sup>` homograph number ("FAVOUR<sup>1</sup>"). That adds 206 Oxford and 8 PONS stubs.
-    - Cues are compared ASCII case-insensitively, and a word cue must start a word ("foresee" is no "see").
+15. **C, as measured with the amended rule** (spec 5.4's table: 2,488 Oxford and 38,687 PONS stubs, 37,566 of those the italic "↑" kind):
+    - The 256-byte text limit stays. The Oxford entries between 256 and 384 bytes are full articles.
+    - Oxford writes its targets in capitals ("another term for FORESTS"). The exact lookup is `locate()` over `.idx`, which folds ASCII case as the index does (no `.syn`, no stems).
+    - The `<sup>` homograph number is dropped from the target. Cues are compared ASCII case-insensitively, and a word cue must start a word ("foresee" is no "see").
     - A target that names the stub's own entry is not followed. The header names the followed headword.
+    - The 336 short Oxford articles whose etymology ends in a cue (spec §9) are followed as the spec's rule says (question 1 below).
 16. **The mark** is the phrase's words drawn white on a black box, as the word screen highlights a word. PONS has 6,387 underlined runs of its own, so an underline would not single the phrase out.
     - Styled view: the page where the run's words first appear in order, every lettered piece bold.
     - Plain view: the line where the converter's tracked offset of the run lands.
     - When the run is not found, page 1 with nothing marked.
 17. **`CMD:ACT:DICT` gains a context form**, `ACT:DICT:<words with the tapped one in [brackets]>`, in dev builds only (`SERIAL_TEST_API`), so it is outside the flash budget. It lets the device run check A, B and C on the real dictionaries without moving the cursor. The bare-word reply does not change.
 18. **Timing lines** are DBG and compiled out of release builds. The speed baseline is this branch at Task 2: master's behaviour plus those lines.
-19. **Flash** is measured on `gh_release` against Task 1's map. "About 3 KB" is read as at most 3,300 bytes; past that, the plan stops for the maintainer's yes (question 3 below).
+19. **Flash** is measured on `gh_release` against Task 1's map. Past 4,500 bytes, the plan stops for the maintainer's yes.
 20. **The test book** is committed in `test/epubs` with its golden, because the pipeline corpus scans that directory.
 21. **Where the context lives** (spec §8). `PhraseContext` is a class of its own beside `CjkLookupRun`: it builds by words and in both directions, the run forward and by codepoints. The two share the edge rule (`isDictionaryEdgePunctuation`, through `dictionaryWordBounds`) and the 48-byte limit. If wrong: a merge later, at no cost now.
 
-## Open questions for the maintainer
+## The maintainer's answers (2026-10-28), now in the spec
 
-Until they are answered, the plan builds the spec as written.
+- PONS's inflected forms: an italic target after "↑" is a stub target, and a stub's target is A's base form (spec 5.2, 5.4).
+- Oxford's inflection cues are in the table (5.4).
+- Flash: up to 4.5 KB; nothing is trimmed (4).
+- The gate's books: the test book and `/test/Alice.epub` (4).
 
-1. **PONS's inflected forms are entries of their own.**
-   - "looked" reads "↑ look" in italics; "gave" reads "pt of give", then "↑ give"; "gives" is an entry too.
-   - So `resolve()` never reports another form, and C's rule (a bold target, nothing after it) does not catch them. Spec 5.2's example, "she looked up the word" reaching PONS's "look up", does not happen. Oxford still finds "look up" inside "look" through B.
-   - Options:
-     - (a) accept, and document it;
-     - (b) when the word is found as written, also try the stemmer's variants as A's base forms (looked → look, but not gave → give; two or three more descents per start, against the speed gate);
-     - (c) let C also take an italic target after "↑", and use a stub's target as A's base form (one small read before A; catches looked, gave and gives).
-2. **Oxford's inflection stubs use cues the table lacks:** "past of" (64), "past participle of" (108), "short for" (135), "archaic spelling of" (38), "plural of" (9) and a few more. That is 364 Oxford and 13 PONS stubs, on top of the ~1,880 and 1,098 the table follows. Add them (one line each)?
-3. **Flash.** The estimate for A, B, C and the two screens is 3.5 to 4.5 KB in `gh_release` (not measured), against "about 3 KB". Is up to 4.5 KB a yes? If not, which goes first: the 16 KB cut with its HTML repair (~0.5 KB), the alternative readings (~0.3 KB), or the styled view's page finder (~0.5 KB; the idiom would then be found only in the plain view)?
-4. **The speed gate's two books.** The plan uses the generated test book and one English book from the card. Is the generated book acceptable as one of the two?
+**Open question 1.** 336 of Oxford's stub matches are short full articles whose etymology ends in a cue, "(see X)" or "short for X". In 167 of them the cue sits inside an open bracket. Should a cue inside an open bracket not count? That is one generic check, and 167 fewer false stubs. Until answered, the spec's rule stands.
 
 ## Branch, PR and gates
 
@@ -150,20 +148,13 @@ Line numbers are those of the two branches named above. Task 1 maps them to mast
   ```
   If master lacks this plan or its spec, check both out from `docs/dictionary-phrases` and commit them: `docs: the dictionary phrases spec and plan`.
 
-- [ ] **Step 3: Map the cited symbols.** For each, `git grep -n` in the worktree, and write file and line into the ledger:
-  - `Dictionary`: `resolvePrefixes`, `readPrefixDefinitions`, `nextPrefixEntry`, `readEntryInto`, `readDefinition`, `readResolved`, `resolve`, `locate`, `locateByOrdinal`, `locateRun`, `collectPrefixes`, `PrefixSearch`, `LookupSession`, `IfoFacts`, `cleanWord`, `edgePunctuationLen`, `MAX_PREFIX_RUN_BYTES`, `MAX_DEFINITION_BYTES`; the structs `DictLocation`, `DictPrefixHit`, `DictPrefixMatch`.
-  - `isDictionaryEdgePunctuation` and `CjkLookupRun` (`CjkLookupRun.cpp`'s `static_assert` against `MAX_PREFIX_RUN_BYTES`).
-  - `DictionaryWordSelectActivity`: `performLookup` and its Latin/CJK split (`scriptAt`), `buildWordText`, `releaseWordArrays`, `speculationLocation`, `speculationHeadword`, `appendDebugState`, `render`'s popup branch.
-  - `DictionaryDefinitionActivity`: the constructor (with step 9's `fontId`), `MAX_STYLED_HTML_BYTES`, `onEnter`, `layoutHtmlPages`, `wrapText`, `drawBody`, `render`.
-  - `buildDictionaryHtmlPages`, `normalizeDictionaryHtml`, `htmlToPlainTextInPlace`, `isHtmlVoidElement` (`lib/SaxParser/SaxParserYxml.cpp`), `lookUpWord` (`SerialTestApi.cpp`, with step 9's CJK branch), the STATE rows `sel, label` and `spec, span, match` in `docs/serial-test-api.md`.
-  
-  A symbol that was renamed is recorded with its new name, and every later task uses that name. If one is gone with no successor, stop and report.
+- [ ] **Step 3: Map the cited symbols.** `git grep -n` every existing symbol a task's **Files** block names, and write its file and line into the ledger. Note in particular step 9's `scriptAt` split in `performLookup`, the definition screen's `fontId` parameter, `lookUpWord`'s CJK branch and the STATE rows `sel, label` and `spec, span, match`. A renamed symbol is recorded with its new name, and every later task uses that name. If one is gone with no successor, stop and report.
 
 - [ ] **Step 4: Configure and run the whole host suite** (Global Constraints). Record each failing test as known. Expected: only Windows-only failures (precedent: two `FirstChapter`, two `LongChapterPageTables`, `KeptReadingState`).
 
 - [ ] **Step 5: Record the flash base.** Build `gh_release` in the background, then `cp .pio/build/gh_release/firmware.map C:/tmp/dictphr/base-gh_release.map` and copy the `Flash:` line into the ledger.
 
-- [ ] **Step 6: Check the device.** Run `python tools/devctl.py --port COM5 cmd:FS:LS:/dictionaries cmd:FS:LS:/test cmd:GET:language cmd:GET:btnShortPower`. Expected: `oxford` and `en-de` are listed. Record the language, the English books under `/test` (for the second gate book), and whether Power opens the word screen (otherwise open it from the reader menu, `cmd:BTN:CONFIRM "select:Dictionary" cmd:BTN:CONFIRM`).
+- [ ] **Step 6: Check the device.** Run `python tools/devctl.py --port COM5 cmd:FS:LS:/dictionaries cmd:FS:LS:/test cmd:GET:language cmd:GET:btnShortPower`. Expected: `oxford`, `en-de` and `/test/Alice.epub` are listed. Record the language, and whether Power opens the word screen (otherwise open it from the reader menu, `cmd:BTN:CONFIRM "select:Dictionary" cmd:BTN:CONFIRM`).
 
 ### Task 2: Timing lines, the test book, and the baseline on the X4
 
@@ -206,7 +197,7 @@ Line numbers are those of the two branches named above. Task 1 maps them to mast
 
 - [ ] **Step 5: Write the gate scripts** in `C:/tmp/dictphr/` (scratch, not committed).
   - **Book 1** is the test book's 25 words: the 13 targets and the 12 others.
-  - **Book 2** is an English book from Task 1 Step 6 (the docs' example is `/test/The Anarchy - Dalrymple, William.epub`, `@20:5`): 25 words on one page, about half inside phrases ("in spite of", "on account of", "at least", compounds). To list the page's words, step `cmd:BTN:RIGHT` + `state` across it once. The ledger records the book, page, words and their `sel`.
+  - **Book 2** is `/test/Alice.epub` (spec §4): 25 words on one page of prose, about half inside phrases ("at any rate", "of course", "in a hurry", compounds). To list the page's words, step `cmd:BTN:RIGHT` + `state` across it once. The ledger records the page, the words and their `sel`.
   - `gate-<book>.txt` (a devctl script) opens the book's page with `cmd:ACT:READER:<book>@<spine>:<page>`, then the word screen. It brings the cursor to the first word with a fixed run of presses (15 × `cmd:BTN:UP`, then 20 × `cmd:BTN:LEFT`, `idle:3000:SCREEN` after each), then `state check:sel=0`. Then, for each word in increasing `sel`: `cmd:BTN:RIGHT idle:3000:SCREEN` up to its `sel`, `wait:1 state check:label=<word>`, `cmd:BTN:CONFIRM idle:20000:SCREEN state`, `cmd:BTN:BACK idle:10000:SCREEN`. Part B keeps `selected` across the definition, so the next word is reached from there.
   - `gate.py <log>` pairs each `Confirm: lookup starts` with the next `Definition on screen` or `Lookup popup on screen` line by their `[ms]` stamps. It prints each word's milliseconds, the median per dictionary, and the `heap=` / `maxblock=` of the STATE that follows each Confirm.
 
@@ -295,7 +286,7 @@ class PhraseContext {
   Run: `cmake -S test -B build/test && cmake --build build/test --target PhraseContextTest`
   Expected: a build error, `PhraseContext.h: No such file or directory`.
 
-- [ ] **Step 3: Implement `dictionaryWordBounds`, move `cleanWord` onto it, then implement `PhraseContext`.** It keeps the text in `char text_[MAX_BYTES + 1]` and `uint8_t start_[MAX_WORDS]`, and prepends the words before the tapped one with `memmove`. `fromBracketedText` feeds the words before the bracket nearest first.
+- [ ] **Step 3: Implement `dictionaryWordBounds`, move `cleanWord` onto it, then implement `PhraseContext`.**
 
 - [ ] **Step 4: Run the new tests, and `cleanWord`'s.**
   Run: `cmake --build build/test --target PhraseContextTest DictionaryTest && ./build/test/dictionary/PhraseContextTest.exe && ./build/test/dictionary/DictionaryTest.exe --gtest_filter='*CleanWord*:*Guillemets*'`
@@ -354,27 +345,9 @@ bool prefixSearch(LookupSession& session, const char* run, uint8_t minBytes, Dic
   Run: `cmake --build build/test --target DictionaryTest`
   Expected: a build error, `'class Dictionary' has no member named 'resolvePhrase'`.
 
-- [ ] **Step 3: Implement.** `prefixSearch` is today's `resolvePrefixes` with `minBytes`. In `collectPrefixes`, a hit needs `len >= search.minBytes`, and the loop also ends when `limit < search.minBytes`. `resolvePrefixes` opens the session and calls `prefixSearch(..., 0, ...)`. `resolvePhrase` is the one loop the tests do not dictate:
-
-```
-resolvePhrase(context, baseForm, matchOut):
-  clear matchOut; if context.words() < 2: NotFound, probes 0
-  open ONE LookupSession (LowMemory / ReadError as resolvePrefixes); best = none (a DictPrefixHit local)
-  for v in [context, context.withTappedWord(baseForm) when baseForm and it succeeds]:   // Ruling 6 order
-    t = v.tapped()
-    for s in 0 .. t:
-      if s == t and t == v.words() - 1: continue                  // no word after it
-      need = v.wordEnd(t) - v.wordStart(s) + (s == t ? 2 : 0)     // Ruling 5
-      for r in [v.text() + v.wordStart(s),
-                the same with its first codepoint lowercased when Ruling 4 applies]:
-        prefixSearch(session, r, need, matchOut, ...)             // matchOut is the scratch
-        for each hit h: end = v.wordStart(s) + h.runBytes
-          counts when end == v.wordEnd(k) for some k                // Ruling 3; need gives k >= t, k > s
-          take it as best when h.runBytes > best.runBytes           // ties stay earlier
-  matchOut = best alone (count 1) or empty; probes, reads summed; a search failure with no best: ReadError
-```
-
-  Keep each frame under 256 bytes: the lowercased run goes in a helper function. A recorded hit's headword over 15 bytes allocates once, where step 9 already assigns it; that is per hit (at most three per probe), not per scanned entry, and stays.
+- [ ] **Step 3: Implement.** `resolvePrefixes` opens the session and calls `prefixSearch(..., 0, ...)`. `resolvePhrase` searches the context as written, then its `withTappedWord(baseForm)` variant, each from start 0 to the tapped word, with `minBytes` per Ruling 5 and the case retry per Ruling 4. Rulings 3 and 6 decide what counts and what wins.
+  - Each frame stays under 256 bytes: `matchOut` serves as the scratch of each search, the best hit is a local `DictPrefixHit`, and the lowercased run goes in a helper.
+  - A recorded hit's headword over 15 bytes allocates once, where step 9 already assigns it. That is per hit (at most three per probe), not per scanned entry, and it stays.
 
 - [ ] **Step 4: Run the whole binary** (the CJK prefix tests must not move).
   Run: `cmake --build build/test --target DictionaryTest && ./build/test/dictionary/DictionaryTest.exe`
@@ -448,12 +421,7 @@ bool readPrefixDefinitions(const DictPrefixMatch& match, std::string& definition
   Run: `cmake --build build/test --target DictHtmlNormalizeTest DictionaryTest`
   Expected: build errors naming `cutDictionaryHtml`, `idxEntry` and `readPrefixDefinitions`' fourth argument.
 
-- [ ] **Step 4: Implement.**
-  - `cutDictionaryHtml`: one forward pass keeps the open-element stack and remembers the best cut point so far.
-  - `readPrefixDefinitions`, styled-cap path:
-    - pass 1 sizes the cut entries by their room;
-    - pass 2 reads `room` bytes of a cut entry, applies the cut (`cutDictionaryHtml` when `htmlDefinitions`), and advances by the new length;
-    - the string is `resize`d down at the end, which does not reallocate.
+- [ ] **Step 4: Implement.** The buffer is still sized once, from pass 1's upper bound. A cut entry is read at its full room, then cut, and the string is `resize`d down at the end, which does not reallocate.
 
 - [ ] **Step 5: Run the three binaries.**
   Run: `cmake --build build/test --target DictHtmlNormalizeTest DictionaryTest && ./build/test/dictionary/DictHtmlNormalizeTest.exe && ./build/test/dictionary/DictionaryTest.exe && ctest --test-dir build/test -R SaxParser`
@@ -515,18 +483,12 @@ bool findArticlePhrase(const char* definition, size_t length, const PhraseContex
   - tokens inside a bracket group not opening with `or` are optional.
 - **Readings.** An `(or …)` / `[or …]` group (to the end of the run when unclosed) gives a reading in which its words replace the token before the group. The base reading drops every such group.
 - **Comparison.** Codepoint by codepoint under `utf8LowerCodepoint`, with `∼` / `~` in a token replaced by the headword. A token's `/` alternatives are tried in turn.
-- **Matching**, per reading, over context words `C`, with tapped index `t`:
-
-```
-anchor a: a literal or optional token with an alternative equal to C[t] or to the headword
-score(a) = 1 + extend(a-1, t-1, -1) + extend(a+1, t+1, +1)
-extend(i, j, d) = max of: 0 (a partial match stops here);
-  token i literal/optional and C[j] equals one of its alternatives: 1 + extend(i+d, j+d, d);
-  token i placeholder: max over k = 1..3 of extend(i+d, j+d*k, d)        (absorbs k words)
-  token i optional: extend(i+d, j, d)                                     (absent)
-a run matches when its best score >= 2; the best match has the highest score, ties to the
-earliest run, then the earliest reading
-```
+- **Score.** Per reading, take a contiguous part of its tokens aligned with contiguous context words, with the tapped word aligned to a literal or optional token. That token may equal the tapped word or the headword (Ruling 12).
+  - A placeholder absorbs one to three words and scores nothing.
+  - An optional token may be absent, and scores when matched.
+  - Every other matched token scores one.
+  
+  A run matches at a score of 2 or more. The best is the highest; ties go to the earliest run, then the earliest reading.
 
 - [ ] **Step 1: Write the failing converter tests** in `HtmlToPlainTextTest.cpp`:
   - `ConvertsACharBufferInPlace`: `char buf[] = "<b>a&amp;b</b> c"`; `htmlToPlainText(buf, strlen(buf))` returns 5, and `buf` starts with `"a&b c"`.
@@ -569,7 +531,7 @@ The headword is `favour` where a row names none; "same" repeats the row's contex
   Run: `cmake -S test -B build/test && cmake --build build/test --target HtmlToPlainTextTest ArticlePhraseTest`
   Expected: build errors naming `htmlToPlainText` and `ArticlePhrase.h`.
 
-- [ ] **Step 4: Implement** the converter core, then `findArticlePhrase` as the rules say. The matcher recurses at most 12 deep; every frame stays under 256 bytes.
+- [ ] **Step 4: Implement** the converter core, then `findArticlePhrase` as the rules say, every frame under 256 bytes.
 
 - [ ] **Step 5: Run both binaries.**
   Run: `cmake --build build/test --target HtmlToPlainTextTest ArticlePhraseTest && ./build/test/dictionary/HtmlToPlainTextTest.exe && ./build/test/dictionary/ArticlePhraseTest.exe`
@@ -598,10 +560,11 @@ The headword is `favour` where a row names none; "same" repeats the row's contex
 ```cpp
 // ArticlePhrase.h
 // Spec 5.4: when `definition` is a cross-reference stub, its target. A stub has at most 256 bytes
-// of text outside tags, ends with a bold run (only punctuation, whitespace and end tags after it)
-// that is not inside <i>, and the text before that run (tags removed, trailing whitespace trimmed)
-// ends with a cue of the notation table, compared ASCII case-insensitively, a word cue starting a
-// word. The target is the run's text without its <sup> content, cut to its dictionaryWordBounds().
+// of text outside tags and ends with its target run (only punctuation, whitespace and end tags
+// after it): a bold run not inside <i>, after any cue of the table; or an italic run after the
+// "↑" cue. "After" means the text before the run (tags removed, trailing whitespace trimmed) ends
+// with the cue, compared ASCII case-insensitively, a word cue starting a word. The target is the
+// run's text without its <sup> content, cut to its dictionaryWordBounds().
 bool crossReferenceTarget(const char* definition, size_t length, char* target, size_t capacity);
 
 // Dictionary.h
@@ -617,7 +580,9 @@ bool readResolved(const DictLocation& location, std::string& definitionOut, Look
                   const std::string* lead = nullptr);
 ```
 
-- The cues, appended to Task 6's table as kind `CrossReferenceCue`, longest first where one is the end of another: `see also, see, ↑, →, another term for, variant spelling of, variant of, pl of, pt of, pp of, abbreviation of, abbrev of, siehe, s.`.
+- The cues, appended to Task 6's table as kind `CrossReferenceCue`, longest first where one is the end of another:
+  - the spec's first list: `see also, see, ↑, →, another term for, variant spelling of, variant of, pl of, pt of, pp of, abbreviation of, abbrev of, siehe, s.`;
+  - Oxford's inflection cues: `past and past participle of, past participle of, past tense of, past of, plural of, short for, archaic spelling of, dialect form of, comparative of, superlative of`.
 
 - [ ] **Step 1: Write the failing tests.**
 
@@ -627,6 +592,8 @@ bool readResolved(const DictLocation& location, std::string& definitionOut, Look
 | `EveryCueInTheTableWorks` (ArticlePhrase) | for each cue `c`: `"<i>" + c + "</i> <b>target</b>."`; `"ANOTHER TERM FOR <b>FORESTS</b>"` | `"target"` each; `"FORESTS"` |
 | `AHomographNumberIsNotPartOfTheTarget` (ArticlePhrase) | `"see <b>favour<sup>1</sup></b>"` | `"favour"` |
 | `TrailingMarksAndEndTagsAreAllowed` (ArticlePhrase) | `"<div>see <b>favour</b>.</div>"` | `"favour"` |
+| `AnItalicTargetAfterTheArrowCounts` (ArticlePhrase) | `"<blockquote>↑ <i>look</i></blockquote>"`; PONS's *gave* shape, `"<blockquote><span><b>gave</b></span> <i>verb</i> <span><i>pt of </i></span><span><b>give</b></span></blockquote><blockquote>↑ <i>give</i></blockquote>"` | `"look"`; `"give"` |
+| `AnItalicTargetElsewhereDoesNot` (ArticlePhrase) | `"<i>see</i> <i>look</i>"`; `"↑ <b>x</b> <i>y</i>"` | false; false |
 | `NotAStub` (ArticlePhrase) | 300 bytes of text then `"see <b>x</b>"`; `"<i>adj</i> <b>-ious</b>"`; `"<i>see <b>favour</b></i>"`; `"see <b>favour</b> for more"`; `"foresee <b>x</b>"` | false for each |
 | `MarkupFollowsTheSametypesequence` (Dictionary) | `.ifo` with `h`, `x`, `g`; `m`, `hm`, `xh` | `definitionsHaveMarkup()` true, true, true; false, false, false; `definitionsAreHtml()` only for `h` |
 | `ExactResolveTakesNoFallbacks` (Dictionary) | `dog`, `favour`; syn `colour` → `favour`: `resolveExact("dogs")`, `("FAVOUR")`, `("colour")` | false `NotFound`; true, headword `"favour"`; false |
@@ -646,7 +613,7 @@ bool readResolved(const DictLocation& location, std::string& definitionOut, Look
   ```bash
   git add src/util/ArticlePhrase.h src/util/ArticlePhrase.cpp src/util/Dictionary.h src/util/Dictionary.cpp \
     test/dictionary/ArticlePhraseTest.cpp test/dictionary/DictionaryTest.cpp
-  git commit -m "feat(dictionary): recognise cross-reference stubs, and read an entry after a lead"
+  git commit -m "feat(dictionary): recognise cross-reference and inflection stubs, and read an entry after a lead"
   ```
 
 ### Task 8: The lookup at Confirm
@@ -673,12 +640,15 @@ struct PhraseLookupResult {
   uint16_t reads = 0;
 };
 // `word` / `wordHeadword`: what the word's own search found (word.found false on a genuine miss).
-// 1. A: dict.resolvePhrase(context, base form per Ruling 7). On a hit: its entries, then the word's
-//    one entry (from word.idxEntry), through readPrefixDefinitions(..., styledCap). Failing that
-//    with LowMemory, go on as if A had found nothing (Review Focus 4).
-// 2. Else, with the word found: its entry (readResolved). On a markup dictionary: when it is a
-//    stub whose target resolveExact() finds at another location, the target is read with the stub
-//    as its lead, once (on failure the stub stays); then B over the definition with the headword.
+// 0. On a markup dictionary, a found word whose entry is at most 2 KB is read first (the spec's
+//    one extra read) and checked for a stub whose target resolveExact() finds at another location.
+// 1. A: dict.resolvePhrase(context, base form per Ruling 7, the stub's target included). On a hit:
+//    the read of step 0 is released; the phrase's entries, then the word's one entry (from
+//    word.idxEntry), through readPrefixDefinitions(..., styledCap). Failing that with LowMemory,
+//    go on as if A had found nothing (Review Focus 4).
+// 2. Else, with the word found: its entry (step 0's, or readResolved now). A stub's target is read
+//    with the stub as its lead, once (on failure the stub stays); then B over the definition with
+//    the headword.
 // False with *outResult the reason when there is nothing to show.
 bool lookUpInContext(Dictionary& dict, const PhraseContext& context, const DictLocation& word,
                      const std::string& wordHeadword, uint32_t styledCap, PhraseLookupResult& out,
@@ -691,7 +661,8 @@ bool lookUpInContext(Dictionary& dict, const PhraseContext& context, const DictL
     - `favour`: `kPons`'s text, made a `const char*` shared with `ArticlePhraseTest` through a small `test/dictionary/PhraseArticles.h`;
     - `give`: `"<div><span>"` + 15,000 × `g` + `"</span></div>"`; `give up`: `"<i>to stop</i>"`;
     - `loop`: `"<i>see</i> <b>nowhere</b>"`; `one`: `"<i>see</i> <b>two</b>"`; `two`: `"<i>see</i> <b>three</b>"`; `three`: `"<i>3</i>"`;
-    - `de facto`: `"<i>really</i>"`; `motion`: `"<i>a proposal</i>"`.
+    - `de facto`: `"<i>really</i>"`; `motion`: `"<i>a proposal</i>"`;
+    - `looked`: `"<blockquote>↑ <i>look</i></blockquote>"`; `look`: `"<i>to see</i>"`; `look up`: `"<i>to search</i>"`.
   - `OxfordLike` (`h`): `favour` as `kOxford`; `account`: `"<div><b>account</b> n.</div><div>▫ <b>take something into account</b> weigh</div>"`.
   - `PlainLike` (`m`): `favour` `"in favour of: backing"`; `favor` `"see favour"`.
   - The helper `bool lookUp(Dictionary&, const char* bracketed, PhraseLookupResult&, Dictionary::LookupResult*)` runs `resolve()` on the tapped word, then `lookUpInContext` with `styledCap` 16384.
@@ -704,6 +675,8 @@ bool lookUpInContext(Dictionary& dict, const PhraseContext& context, const DictL
 | `AChainIsFollowedOneHop` | `"[one] two"` | `headword` `"two"`; `definition` == `one`'s + `two`'s entries |
 | `APhraseHeadwordComesFirst` | `"they [give] up easily"` | `headword` `"give up"`; `phraseHeadword`; `definition` starts `"<p><b>give up</b></p><i>to stop</i><p><b>give</b></p>"`; no `mark` |
 | `TheStemmedFormFindsThePhrase` | `"she [gives] up easily"` | `headword` `"give up"` |
+| `AnInflectionStubGivesTheBaseForm` | `"she [looked] up the word"` | `headword` `"look up"`; `phraseHeadword`; `definition` `"<p><b>look up</b></p><i>to search</i><p><b>looked</b></p><blockquote>↑ <i>look</i></blockquote>"` |
+| `AnInflectionStubIsFollowedWhenNoPhraseFits` | `"she [looked] it up"` | `headword` `"look"`; `followed`; `definition` == the `looked` stub + `"<i>to see</i>"` |
 | `APhraseIsFoundWhenTheWordHasNoEntry` | `"a de [facto] ban"` | `headword` `"de facto"`; `definition` `"<p><b>de facto</b></p><i>really</i>"` |
 | `TheIdiomInsideTheArticleIsMarked` | `OxfordLike`, `"voted in [favour] of the motion"` | `headword` `"favour"`; `definition` == the entry byte for byte; `mark.text` `"in favour of"` |
 | `PlainDictionariesShowTheWordAsToday` | `PlainLike`, `"voted in [favor] of it"` | `definition` `"see favour"`; not `followed`; no `mark` |
@@ -788,10 +761,7 @@ class PhraseWordFinder {
   Run: `cmake --build build/test --target ArticlePhraseTest`
   Expected: a build error naming `PhraseWordFinder`.
 
-- [ ] **Step 3: Implement the finder:**
-  - a bit mask over the phrase's word positions, so that overlapping starts are kept;
-  - the word being assembled in a 64-byte buffer;
-  - a ring of the last 12 word-start piece indices, from which `first()` is read.
+- [ ] **Step 3: Implement the finder.** No allocation: it is fed every word of a definition.
 
 - [ ] **Step 4: Run the binary.**
   Run: `./build/test/dictionary/ArticlePhraseTest.exe` (after building it)
@@ -847,7 +817,7 @@ class PhraseWordFinder {
 - [ ] **Step 3: Run the host suite's dictionary binaries** (no host test covers the screens). Expected: PASS. Then build `default` and `gh_release`. Expected: both `[SUCCESS]`.
 
 - [ ] **Step 4: Measure flash** (spec §4, Ruling 19). Copy `.pio/build/gh_release/firmware.map`, and compare it with `C:/tmp/dictphr/base-gh_release.map`: the `Flash:` delta, plus a per-object `.text` + `.rodata` breakdown from a scratch script over the two maps (the objects of `PhraseContext`, `ArticlePhrase`, `PhraseLookup`, `Dictionary`, `DictHtmlNormalize`, `HtmlToPlainText` and the two activities).
-  Expected: at most 3,300 bytes. Otherwise stop: send the breakdown to the coordinator for the maintainer's decision (open question 3), and continue only on a yes.
+  Expected: at most 4,500 bytes (spec §4). Otherwise stop: send the breakdown to the coordinator for the maintainer's decision, and continue only on a yes.
 
 - [ ] **Step 5: Smoke-test on the X4.** Flash `default`, then run `python tools/devctl.py --port COM5 --log C:/tmp/dictphr/t10.log` with `"cmd:ACT:DICT:voted in [favor] of the motion"`, `"cmd:ACT:DICT:a de [facto] ban"` and `"cmd:ACT:DICT:house"`, once with `en-de` chosen and once with `oxford`.
   Expected:
@@ -880,7 +850,8 @@ class PhraseWordFinder {
 | favor (p2) | "Not found" popup | C then B: `headword=favour`, `xref=favour`, `mark=in ∼ of sth`, the stub's line above the entry |
 | favour (p3, p4) | B: `mark=in favour of` | B: `mark=in ∼ of sth` |
 | account | B: `mark=take something into account` (partial) | B: the `into ∼` phrase |
-| looked (p6, p7) | B in `look`: the "look up" / "look something up" phrase | the `looked` entry alone (open question 1) |
+| looked (p6) | B in `look`: the "look up" phrase | A through the "↑ look" stub: `headword=look up` |
+| looked (p7) | B in `look`: the "look something up" phrase | C: `xref=look`, the "↑ look" line above `look`'s entry |
 | give | B in `give`, on the plain view (the entry is over 16 KB): the "give up" phrase marked on its line | A: `headword=give up`, then `give` cut, styled (`Styled layout starting` in the log) |
 | matter | recorded | B: `mark=as a ∼ of fact` |
 | facto, hoc, balance | A: `de facto`, `ad hoc`, `bank balance` | the same |
@@ -909,7 +880,8 @@ class PhraseWordFinder {
 - [ ] **Step 8: Write the user docs.** The "Phrases" subsection of `docs/dictionary.md`:
   - what Confirm does on a word in a phrase (A, B, C, with the spec's examples);
   - that the word's own entry stays: after the phrase, below the stub's line, or before the marked page;
-  - what it does not do (separable verbs, spelling tables; inflected forms that the dictionary carries as entries of their own, with Step 1's PONS result);
+  - inflected forms: found through the stemmer, or through the dictionary's own stub ("↑ look"), which also gives the phrase search its base form;
+  - what it does not do (separable verbs, spelling tables);
   - where notations are added (the table in `ArticlePhrase.cpp`).
   
   In the definition-screen paragraph: the screen can open on a later page, with the idiom marked.
@@ -939,11 +911,11 @@ class PhraseWordFinder {
 | Spec | Task |
 |---|---|
 | §5.1 the context: three before, 48 bytes, punctuation stops, edges, soft hyphens, built at Confirm | 3, 10 |
-| §5.2 A: every start, two words covering the tapped word, longest then earliest, case, base form, A on a miss, one session | 4, 8 |
+| §5.2 A: every start, two words covering the tapped word, longest then earliest, case, base form (also a stub's), A on a miss, one session, the extra read | 4, 8 |
 | §5.2 what A shows: the phrase's entries, then the word's; the 16 KB cut; never the phrase's | 5, 8 |
 | §5.3 B: reading bold runs, `∼`, placeholders, optional `to`, alternatives, unclosed bracket, matching rules, the table | 6 |
 | §5.3 what B shows: the page and the mark, styled and plain | 9 |
-| §5.4 C: the stub rule, cues in the table, one hop, the stub's line kept | 7, 8 |
+| §5.4 C: the stub rule, the italic target after "↑", both cue lists in the table, one hop, the stub's line kept | 7, 8 |
 | §5.5 header headword for A; the word screen unchanged before Confirm | 8, 10 |
 | §4 speed gate, flash, RAM, first-hit behaviour | 2, 10, 11; every host task's full binary run |
 | §7 host tests (A, B, C, the context) and the X4 run | 3-9, 11 |
