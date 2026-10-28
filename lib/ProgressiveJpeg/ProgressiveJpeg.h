@@ -21,7 +21,8 @@
 // block) and inverted with an n-point IDCT -- libjpeg's reduced-size decoding: a proper low-pass
 // resample of the block, sharper and with less aliasing than a box average of the full decode.
 // Successive-approximation refinement needs to know which coefficients are non-zero across the
-// WHOLE block, so a 64-bit mask per block tracks that for the ones not kept.
+// WHOLE block, so a 64-bit mask per block tracks that for the ones not kept. At 1/8 only the DC
+// coefficient is kept, so the AC scans are not decoded at all.
 //
 // Chroma is decoded only where the bitstream forces it (interleaved DC scans) and discarded.
 namespace ProgressiveJpeg {
