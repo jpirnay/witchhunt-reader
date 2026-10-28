@@ -11,6 +11,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | [book-cache.md](book-cache.md) | Book replacement and deletion that still wipe reading state, TXT/MD caches, cache-clear inconsistencies |
 | [boards-and-touch.md](boards-and-touch.md) | Light sleep with the frontlight, board-name checks still to convert, the T5S3 SD clock, trace scaffolding, the X4 Pro fast-DU shortcut, device validation, touch follow-ups |
 | [display-and-refresh.md](display-and-refresh.md) | Framebuffer baselines, sleep ghosting follow-ups, windowed refresh, busy indicator, pre-render coverage |
+| [dictionary.md](dictionary.md) | The dictionary beyond CJK: phrase lookups (planned, parked), what was considered and not taken |
 | [font-flash.md](font-flash.md) | Remaining flash and speed levers on the font path |
 | [library.md](library.md) | Library: measuring a large card, "Library too large", card-reader changes, silent build failures, interrupted builds, New's covers, author lists, sidecar case, tabs on button-only boards, tests |
 | [list-input-harmonization.md](list-input-harmonization.md) | Screens not yet on ListController, and the cleanup after them |
