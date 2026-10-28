@@ -2914,7 +2914,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=6 truncated=0 cssFallback=0
   LINE y=693 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=10 s=0 z=100 t=煙
    R first=0 count=1 x=6 w=24 t=けむり
- PAGE 5 elements=6 footnotes=0
+ PAGE 5 elements=13 footnotes=0
   LINE y=0 x=0 align=2 mult=1.000 hfid=0 words=3
    W x=158 s=1 z=100 t=14.
    W x=192 s=1 z=100 t=longer
@@ -3006,3 +3006,159 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=6 truncated=0 cssFallback=0
      LN words=2
       W x=22 s=0 z=100 t=短
       W x=38 s=0 z=100 t=い
+  LINE y=285 x=0 align=2 mult=1.000 hfid=0 words=3
+   W x=147 s=1 z=100 t=16.
+   W x=183 s=1 z=100 t=emphasis
+   W x=270 s=1 z=100 t=dots
+  LINE y=309 x=0 align=0 mult=1.000 hfid=0 words=23
+   W x=22 s=0 z=100 t=こ
+   W x=38 s=0 z=100 t=れ
+   W x=54 s=0 z=100 t=は
+   W x=70 s=0 z=100 t=傍
+   W x=86 s=0 z=100 t=点
+   W x=102 s=0 z=100 t=の
+   W x=118 s=0 z=100 t=例
+   W x=134 s=0 z=100 t=で
+   W x=150 s=0 z=100 t=、
+   W x=166 s=0 z=100 t=黒
+   W x=182 s=0 z=100 t=丸
+   W x=198 s=0 z=100 t=と
+   W x=214 s=0 z=100 t=白
+   W x=230 s=0 z=100 t=丸
+   W x=246 s=0 z=100 t=と
+   W x=262 s=0 z=100 t=二
+   W x=278 s=0 z=100 t=重
+   W x=294 s=0 z=100 t=丸
+   W x=310 s=0 z=100 t=も
+   W x=326 s=0 z=100 t=使
+   W x=342 s=0 z=100 t=え
+   W x=358 s=0 z=100 t=る
+   W x=374 s=0 z=100 t=。
+   E first=3 count=2 m=5
+   E first=9 count=2 m=1
+   E first=12 count=2 m=10
+   E first=15 count=3 m=3
+  LINE y=342 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=22 s=0 z=100 t=長
+   W x=38 s=0 z=100 t=い
+   W x=54 s=0 z=100 t=強
+   W x=70 s=0 z=100 t=調
+   W x=86 s=0 z=100 t=は
+   W x=102 s=0 z=100 t=行
+   W x=118 s=0 z=100 t=を
+   W x=134 s=0 z=100 t=ま
+   W x=150 s=0 z=100 t=た
+   W x=166 s=0 z=100 t=ぐ
+   W x=182 s=0 z=100 t=。
+   W x=198 s=0 z=100 t=吾
+   W x=214 s=0 z=100 t=輩
+   W x=230 s=0 z=100 t=は
+   W x=246 s=0 z=100 t=猫
+   W x=262 s=0 z=100 t=で
+   W x=278 s=0 z=100 t=あ
+   W x=294 s=0 z=100 t=る
+   W x=310 s=0 z=100 t=。
+   W x=326 s=0 z=100 t=名
+   W x=342 s=0 z=100 t=前
+   W x=358 s=0 z=100 t=は
+   W x=374 s=0 z=100 t=ま
+   W x=390 s=0 z=100 t=だ
+   W x=406 s=0 z=100 t=無
+   W x=422 s=0 z=100 t=い
+   W x=438 s=0 z=100 t=。
+   E first=11 count=16 m=5
+  LINE y=375 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=ど
+   W x=22 s=0 z=100 t=こ
+   W x=39 s=0 z=100 t=で
+   W x=55 s=0 z=100 t=生
+   W x=72 s=0 z=100 t=れ
+   W x=89 s=0 z=100 t=た
+   W x=105 s=0 z=100 t=か
+   W x=122 s=0 z=100 t=と
+   W x=139 s=0 z=100 t=ん
+   W x=155 s=0 z=100 t=と
+   W x=172 s=0 z=100 t=見
+   W x=189 s=0 z=100 t=当
+   W x=205 s=0 z=100 t=が
+   W x=222 s=0 z=100 t=つ
+   W x=238 s=0 z=100 t=か
+   W x=255 s=0 z=100 t=ぬ
+   W x=271 s=0 z=100 t=。
+   W x=288 s=0 z=100 t=何
+   W x=304 s=0 z=100 t=で
+   W x=321 s=0 z=100 t=も
+   W x=338 s=0 z=100 t=薄
+   W x=354 s=0 z=100 t=暗
+   W x=371 s=0 z=100 t=い
+   W x=388 s=0 z=100 t=じ
+   W x=404 s=0 z=100 t=め
+   W x=421 s=0 z=100 t=じ
+   W x=438 s=0 z=100 t=め
+   E first=0 count=27 m=5
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=27
+   W x=6 s=0 z=100 t=し
+   W x=22 s=0 z=100 t=た
+   W x=39 s=0 z=100 t=所
+   W x=55 s=0 z=100 t=で
+   W x=72 s=0 z=100 t=ニ
+   W x=89 s=0 z=100 t=ャ
+   W x=105 s=0 z=100 t=ー
+   W x=122 s=0 z=100 t=ニ
+   W x=139 s=0 z=100 t=ャ
+   W x=155 s=0 z=100 t=ー
+   W x=172 s=0 z=100 t=泣
+   W x=189 s=0 z=100 t=い
+   W x=205 s=0 z=100 t=て
+   W x=222 s=0 z=100 t=い
+   W x=238 s=0 z=100 t=た
+   W x=255 s=0 z=100 t=事
+   W x=272 s=0 z=100 t=だ
+   W x=288 s=0 z=100 t=け
+   W x=305 s=0 z=100 t=は
+   W x=322 s=0 z=100 t=記
+   W x=338 s=0 z=100 t=憶
+   W x=355 s=0 z=100 t=し
+   W x=372 s=0 z=100 t=て
+   W x=388 s=0 z=100 t=い
+   W x=405 s=0 z=100 t=る
+   W x=421 s=0 z=100 t=。
+   W x=438 s=0 z=100 t=そ
+   E first=0 count=26 m=5
+  LINE y=441 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=6 s=0 z=100 t=の
+   W x=22 s=0 z=100 t=後
+   W x=38 s=0 z=100 t=は
+   W x=54 s=0 z=100 t=普
+   W x=70 s=0 z=100 t=通
+   W x=86 s=0 z=100 t=の
+   W x=102 s=0 z=100 t=文
+   W x=118 s=0 z=100 t=字
+   W x=134 s=0 z=100 t=。
+  LINE y=465 x=0 align=0 mult=1.000 hfid=0 words=25
+   W x=22 s=0 z=100 t=句
+   W x=38 s=0 z=100 t=読
+   W x=54 s=0 z=100 t=点
+   W x=70 s=0 z=100 t=は
+   W x=86 s=0 z=100 t=「
+   W x=102 s=0 z=100 t=強
+   W x=118 s=0 z=100 t=調
+   W x=134 s=0 z=100 t=」
+   W x=150 s=0 z=100 t=の
+   W x=166 s=0 z=100 t=中
+   W x=182 s=0 z=100 t=。
+   W x=198 s=0 z=100 t=そ
+   W x=214 s=0 z=100 t=し
+   W x=230 s=0 z=100 t=て
+   W x=246 s=0 z=100 t=、
+   W x=262 s=0 z=100 t=続
+   W x=278 s=0 z=100 t=く
+   W x=294 s=0 z=100 t=。
+   W x=310 s=0 z=100 t=印
+   W x=326 s=0 z=100 t=は
+   W x=342 s=0 z=100 t=付
+   W x=358 s=0 z=100 t=か
+   W x=374 s=0 z=100 t=な
+   W x=390 s=0 z=100 t=い
+   W x=406 s=0 z=100 t=。
+   E first=4 count=14 m=1

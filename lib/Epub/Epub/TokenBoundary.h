@@ -32,7 +32,7 @@ enum class RubyRole : uint8_t { None = 0, Leader = 1, Follower = 2 };
 struct Boundary {
   bool continues = false;      // glued to the previous token: no space, and no break
   bool noSpaceBefore = false;  // no space either; with continues=false, a breakable CJK gap
-  uint8_t annotation = 0;      // bits 0-1 RubyRole; bits 2-5 the emphasis mark (not used yet)
+  uint8_t annotation = 0;      // bits 0-1 RubyRole; bits 2-5 the emphasis mark (TextEmphasis)
 };
 
 constexpr bool allowsBreak(const Boundary b) { return allowsBreak(b.continues, b.noSpaceBefore); }
@@ -44,6 +44,14 @@ constexpr RubyRole rubyRole(const Boundary b) { return static_cast<RubyRole>(b.a
 
 constexpr Boundary withRubyRole(Boundary b, const RubyRole role) {
   b.annotation = static_cast<uint8_t>((b.annotation & ~0x03) | static_cast<uint8_t>(role));
+  return b;
+}
+
+// The CSS text-emphasis mark of the token (a TextEmphasis shape, or-ed with kOpen): 4 bits, 0 for none.
+constexpr uint8_t emphasisOf(const Boundary b) { return static_cast<uint8_t>((b.annotation >> 2) & 0x0F); }
+
+constexpr Boundary withEmphasis(Boundary b, const uint8_t mark) {
+  b.annotation = static_cast<uint8_t>((b.annotation & ~0x3C) | ((mark & 0x0F) << 2));
   return b;
 }
 
