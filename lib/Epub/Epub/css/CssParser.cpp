@@ -99,8 +99,8 @@ constexpr size_t MAX_SELECTOR_LENGTH = 256;
 constexpr size_t CSS_LENGTH_FIELD_COUNT = 11;
 constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
 // Layout: 4 enum bytes + 11 lengths + display byte + definedBits uint16 + 2 vertAlign bytes + cssFloat byte
-//         + smallCaps byte + fontSizeMultiplier float + fontSize flags byte + block flags byte
-//         (listStyleNone / pageBreakBefore / pageBreakAfter value+defined pairs)
+//         + smallCaps byte (bit 2 = text-emphasis defined, bits 3-6 = its mark; v31) + fontSizeMultiplier float +
+//         fontSize flags byte + block flags byte (listStyleNone / pageBreakBefore / pageBreakAfter value+defined pairs)
 //         + visibility flags byte (colorTransparent / opacityZero / visibilityHidden value+defined pairs; v19)
 //         + fontFamily hash (uint32; defined is bit 2 of the font-size flags byte; v28)
 //         + line-height in ems (float; defined is bit 3 of the font-size flags byte; v30)
@@ -604,6 +604,47 @@ CssFontWeight CssParser::interpretFontWeight(const std::string_view v) {
   return numericWeight >= 700 ? CssFontWeight::Bold : CssFontWeight::Normal;
 }
 
+std::optional<uint8_t> CssParser::parseTextEmphasisStyle(const std::string_view value) {
+  uint8_t shape = TextEmphasis::None;
+  bool open = false;
+  bool filled = false;
+  bool none = false;
+  size_t pos = 0;
+  while (pos < value.size()) {
+    while (pos < value.size() && isCssWhitespace(value[pos])) ++pos;
+    const size_t start = pos;
+    while (pos < value.size() && !isCssWhitespace(value[pos])) ++pos;
+    const std::string_view word = value.substr(start, pos - start);
+    if (word.empty()) break;
+    if (word.front() == '"' || word.front() == '\'') return std::nullopt;  // a string mark
+    if (word == "none") {
+      none = true;
+    } else if (word == "open") {
+      open = true;
+    } else if (word == "filled") {
+      filled = true;
+    } else if (word == "dot") {
+      shape = TextEmphasis::Dot;
+    } else if (word == "circle") {
+      shape = TextEmphasis::Circle;
+    } else if (word == "double-circle") {
+      shape = TextEmphasis::DoubleCircle;
+    } else if (word == "triangle") {
+      shape = TextEmphasis::Triangle;
+    } else if (word == "sesame") {
+      shape = TextEmphasis::Sesame;
+    }
+    // Anything else is the shorthand's colour.
+  }
+  if (none) return static_cast<uint8_t>(0);
+  if (shape == TextEmphasis::None) {
+    // A fill alone names the default shape, a circle in horizontal text.
+    if (!open && !filled) return std::nullopt;
+    shape = TextEmphasis::Circle;
+  }
+  return static_cast<uint8_t>(shape | (open ? TextEmphasis::kOpen : 0));
+}
+
 CssTextDecoration CssParser::interpretDecoration(const std::string_view v) {
   // text-decoration can have multiple space-separated values
   const bool underline = v.find("underline") != std::string_view::npos;
@@ -888,6 +929,13 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
   } else if (propNameBuf == "font-family") {
     style.fontFamily = firstFontFamily(propValueBuf);
     style.defined.fontFamily = 1;
+  } else if (propNameBuf == "text-emphasis-style" || propNameBuf == "text-emphasis" ||
+             propNameBuf == "-epub-text-emphasis-style" || propNameBuf == "-epub-text-emphasis" ||
+             propNameBuf == "-webkit-text-emphasis-style" || propNameBuf == "-webkit-text-emphasis") {
+    if (const auto mark = parseTextEmphasisStyle(propValueBuf)) {
+      style.textEmphasis = *mark;
+      style.defined.textEmphasis = 1;
+    }
   } else if (propNameBuf == "text-decoration" || propNameBuf == "text-decoration-line") {
     // `inherit` names no line, and read as `none` it cancelled an underline the element sits in.
     // It is left unset instead: the element keeps what it inherits.
@@ -1927,9 +1975,12 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   if (!get(&smallCapsVal, 1)) {
     return false;
   }
-  // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset)
+  // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset), bit 2 = text-emphasis
+  // defined, bits 3-6 = its mark (v31)
   style.smallCaps = (smallCapsVal & 0x1) != 0;
   style.defined.smallCaps = (smallCapsVal & 0x2) != 0 ? 1 : 0;
+  style.defined.textEmphasis = (smallCapsVal & 0x4) != 0 ? 1 : 0;
+  style.textEmphasis = style.defined.textEmphasis ? static_cast<uint8_t>((smallCapsVal >> 3) & 0xF) : 0;
   float fontSizeMul = 1.0f;
   uint8_t fontSizeFlags = 0;
   if (!get(&fontSizeMul, sizeof(fontSizeMul)) || !get(&fontSizeFlags, 1)) {
@@ -2035,8 +2086,10 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
   put8(static_cast<uint8_t>(style.verticalAlign));
   put8(static_cast<uint8_t>(style.defined.verticalAlign));
   put8(static_cast<uint8_t>(style.cssFloat));
-  // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset)
+  // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset), bit 2 = text-emphasis
+  // defined, bits 3-6 = its mark (v31)
   uint8_t smallCapsVal = (style.smallCaps ? 0x1 : 0x0) | (style.defined.smallCaps ? 0x2 : 0x0);
+  if (style.defined.textEmphasis) smallCapsVal |= static_cast<uint8_t>(0x4 | ((style.textEmphasis & 0xF) << 3));
   put8(smallCapsVal);
   // font-size multiplier: float + flags byte (bit 0 = defined, bit 1 = relative to the body, v27;
   // bit 2 = font-family defined, v28; bit 3 = line-height defined, v30)
@@ -2381,16 +2434,17 @@ bool CssParser::ensureCacheIndexLoaded() const {
 
 // --- Sparse CssStyle compression for the resident pool ---
 // A style is serialized to a canonical, SPARSE record: only the fields the 'defined' mask
-// flags are written (a real rule sets a handful of 27 properties). Because the encoding is
+// flags are written (a real rule sets a handful of the 34 properties). Because the encoding is
 // canonical, two equivalent styles produce identical bytes, so dedup is a memcmp — and lookup
 // decompresses back to a full CssStyle. Values are copied with memcpy so the byte-packed
 // (unaligned) records are safe to read on the C3.
 
 // Worst case: 4 (mask) + 2 (packed enums) + 1 (extra values) + 2 (the flow word) + 11 lengths * 5 + 2 multipliers * 4
-// + the font-family hash (4) = 76 bytes.
-constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 2 + 11 * 5 + 2 * 4 + 4;
+// + the font-family hash (4) + the text-emphasis mark (1) = 77 bytes.
+constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 2 + 11 * 5 + 2 * 4 + 4 + 1;
 
-// Canonical "which properties are set" mask: 27 defined bits (0-26), then the three boolean
+// Canonical "which properties are set" mask: the defined bits of the first 27 properties (0-26; the extra byte below
+// flags font-family, text-emphasis and the flow properties, which have no defined bit), then the three boolean
 // VALUES of the invisibility properties in bits 27-29 and the high bit of `display` in bit 30 --
 // the uint16 of enum values below is full. (By the CssStyle invariant a defined invisibility
 // property is currently always true, so bits 27-29 mirror bits 24-26; they are carried for
@@ -2418,7 +2472,7 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   // Bit 31 announces a byte of values the uint16 below has no room for, written after it: an
   // explicit `inherit` of font-weight (bit 0) and of font-style (bit 1), a font-size relative to
   // the body (bit 2), a font-family (bit 3: its hash follows the multipliers), a flow property (bit 4: the flow word,
-  // packFlow, follows this byte).
+  // packFlow, follows this byte), a text-emphasis (bit 5: its mark byte follows the hash).
   uint8_t extra = 0;
   if (s.defined.fontWeight && s.fontWeight == CssFontWeight::Inherit) extra |= 0x01;
   if (s.defined.fontStyle && s.fontStyle == CssFontStyle::Inherit) extra |= 0x02;
@@ -2426,6 +2480,7 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   if (s.defined.fontFamily) extra |= 0x08;
   const uint16_t flow = packFlow(s);
   if (flow != 0) extra |= 0x10;
+  if (s.defined.textEmphasis) extra |= 0x20;
   if (extra != 0) mask |= 1u << 31;
   std::memcpy(p, &mask, 4);
   p += 4;
@@ -2479,6 +2534,7 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
     std::memcpy(p, &s.fontFamily, 4);
     p += 4;
   }
+  if (d.textEmphasis) *p++ = s.textEmphasis;
   return static_cast<size_t>(p - out);
 }
 
@@ -2529,6 +2585,7 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
   d.opacityZero = isDefined(25);
   d.visibilityHidden = isDefined(26);
   d.fontFamily = (extra & 0x08) != 0 ? 1 : 0;
+  d.textEmphasis = (extra & 0x20) != 0 ? 1 : 0;
   if (d.colorTransparent) out.colorTransparent = ((mask >> 27) & 1u) != 0;
   if (d.opacityZero) out.opacityZero = ((mask >> 28) & 1u) != 0;
   if (d.visibilityHidden) out.visibilityHidden = ((mask >> 29) & 1u) != 0;
@@ -2574,7 +2631,11 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
     p += 4;
     out.fontSizeRootRelative = (extra & 0x04) != 0;
   }
-  if (d.fontFamily) std::memcpy(&out.fontFamily, p, 4);
+  if (d.fontFamily) {
+    std::memcpy(&out.fontFamily, p, 4);
+    p += 4;
+  }
+  if (d.textEmphasis) out.textEmphasis = *p;
 }
 
 // Stream the whole ruleset into the arena as a sorted {hash, styleOff} index plus a pool of

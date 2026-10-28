@@ -308,6 +308,8 @@ class ChapterHtmlSlimParser final : public Print {
     bool hasSup = false, sup = false;
     bool hasSub = false, sub = false;
     bool hasSmallCaps = false, smallCaps = false;
+    bool hasTextEmphasis = false;  // text-emphasis-style: textEmphasis is a TextEmphasis mark, 0 for none
+    uint8_t textEmphasis = 0;
     bool hasMarginLeft = false;
     int16_t marginLeftPx = 0;  // margin-left in pixels, for span-level poem indents
     // Inline font-size as a percent of the PARENT element's size (em semantics).
@@ -330,6 +332,7 @@ class ChapterHtmlSlimParser final : public Print {
   bool effectiveSup = false;
   bool effectiveSub = false;
   bool effectiveSmallCaps = false;
+  uint8_t effectiveTextEmphasis_ = 0;     // the TextEmphasis mark of the words being flushed; 0 for none
   int16_t effectiveInlineMarginLeft = 0;  // accumulated margin-left from inline span stack
   // Composed inline font-size percent (relative to the block font size) for the
   // words currently being flushed. 100 outside sized spans; clamped to the
@@ -707,9 +710,13 @@ class ChapterHtmlSlimParser final : public Print {
   // Fold an element's CSS vertical-align into an inline style-stack entry. `baseline`
   // explicitly cancels an inherited sup/sub rather than being ignored.
   static void applyVerticalAlignToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
-  // Fold an element's CSS font-weight, font-style, text-decoration and font-variant into an
+  // Fold an element's CSS font-weight, font-style, text-decoration, font-variant and text-emphasis-style into an
   // inline style-stack entry. `text-decoration: none` cancels an inherited underline/strike.
   static void applyCssEmphasisToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
+  // Fold an element's text-emphasis-style into an entry; `none` cancels an inherited mark. The bold, italic,
+  // underline, sup/sub and internal-link paths take only this from the full set above (their own tag decides the
+  // rest).
+  static void applyCssTextEmphasisToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
   // Fold an element's font-family into an entry, while the book has other families; true when it did.
   bool applyCssFontFamilyToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) const;
   // A block's (or heading's) own emphasis, pushed at its depth so the blocks nested inside it

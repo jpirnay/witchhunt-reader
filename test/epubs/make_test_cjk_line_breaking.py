@@ -34,6 +34,9 @@
  14. longer ruby   a reading longer than its base: between Han characters (the base spreads), 御台所 with
                    おだいどころ, two adjacent groups between kana
  15. ruby in table <ruby> in a table cell
+ 16. emphasis dots text-emphasis-style spans: sesame, dot and open circle by class (plain, -epub- and -webkit-
+                   forms) and by style=, a filled double-circle, a span that wraps over several lines, and a span
+                   over 。 and 「」 (the marks skip the punctuation)
 
 Each case paragraph opens with an indented first line (CSS text-indent), so the rule checker tells a
 paragraph's first line from a line the layout broke.
@@ -51,6 +54,9 @@ CSS = """body { margin: 0; padding: 0 }
 p { margin: 0; text-indent: 1em }
 h2 { margin: 1em 0 0 0; text-indent: 0; font-size: 1em }
 td { padding: 0 }
+.sesame { -epub-text-emphasis-style: sesame }
+.dot { text-emphasis-style: dot }
+.circle { -webkit-text-emphasis-style: open circle }
 """
 
 KINSOKU = (
@@ -126,6 +132,16 @@ RUBY_TABLE = (
     "<ruby>長<rt>ながい</rt></ruby>い文章も折り返される。</p></td><td><p>短い</p></td></tr></table>"
 )
 
+# Case 16: emphasis marks by class, by style=, across a line break and over punctuation.
+EMPHASIS = (
+    "<p>これは<span class=\"sesame\">傍点</span>の例で、<span class=\"dot\">黒丸</span>と"
+    "<span class=\"circle\">白丸</span>と<span style=\"text-emphasis-style: filled double-circle\">二重丸</span>"
+    "も使える。</p>\n"
+    "<p>長い強調は行をまたぐ。<span class=\"sesame\">吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。"
+    "何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。</span>その後は普通の文字。</p>\n"
+    "<p>句読点は<span class=\"dot\">「強調」の中。そして、続く。</span>印は付かない。</p>"
+)
+
 CASES = [
     ("1. kinsoku", f"<p>{KINSOKU}</p>\n<p>{KINSOKU}</p>"),
     (
@@ -164,6 +180,7 @@ CASES = [
     ("13. ruby at edges", RUBY_EDGES),
     ("14. longer ruby", RUBY_LONGER),
     ("15. ruby in table", RUBY_TABLE),
+    ("16. emphasis dots", EMPHASIS),
 ]
 
 CHAPTER = """<?xml version="1.0" encoding="UTF-8"?>

@@ -33,7 +33,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 101;  // v101: margins, paddings and image sizes along the
+constexpr uint8_t SECTION_FILE_VERSION = 102;  // v102: CSS text-emphasis marks (傍点) are drawn above each
+                                               // character of their span
+                                               // v101: margins, paddings and image sizes along the
                                                // CSS writing mode, text-align start/end along the
                                                // direction
                                                // v100: the optimal line breaker indents only a
