@@ -33,6 +33,10 @@ class DictionaryWordSelectActivity final : public Activity {
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
+#if SERIAL_TEST_API
+  // " sel=<selected> label=<the selected word's text>"; nothing until the words are built.
+  void appendDebugState(std::string& out) const override;
+#endif
 
  private:
   // The font a piece was drawn with, and what follows from it. A page has one or two of these
@@ -54,9 +58,9 @@ class DictionaryWordSelectActivity final : public Activity {
   // this activity's lifetime.
   //
   // Kept to 16 bytes on purpose. A bionic page carries ~500 of these and the array has to be ONE
-  // contiguous block that stays alive until the definition has been read -- and the definition's
-  // own heap guard is a largest-contiguous-block test (Dictionary.cpp), so every byte here comes
-  // straight off the budget a lookup has to work with.
+  // contiguous block, alive while the cursor moves. It is freed for the definition's stay
+  // (releaseWordArrays) because the definition's own heap guard is a largest-contiguous-block
+  // test, so every byte held here comes straight off the budget a lookup has to work with.
   struct Fragment {
     const char* text;
     int16_t x;
@@ -158,6 +162,10 @@ class DictionaryWordSelectActivity final : public Activity {
   };
   WordTouch consumeWordTouch();
   void performLookup();
+  // Gives the three arrays and the highlight snapshot back to the heap while a definition is
+  // shown; extractWords() builds them again, identically, when the page is drawn on return.
+  // `selected` and the speculation fields stay, so the cursor comes back where it was.
+  void releaseWordArrays();
   bool drawHighlightWithSnapshot();
   void drawHints() const;
 
@@ -173,6 +181,8 @@ class DictionaryWordSelectActivity final : public Activity {
   // page, which only happens inside render(); onEnter() has no framebuffer to
   // scan against. Until then there is nothing to highlight.
   bool wordsExtracted = false;
+  // Set by the first successful extractWords(): a later one is a rebuild, which keeps `selected`.
+  bool wordsBuiltOnce = false;
   int selected = 0;
   uint16_t rowCount = 0;
 
