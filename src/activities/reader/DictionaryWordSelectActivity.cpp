@@ -434,6 +434,10 @@ DictionaryWordSelectActivity::WordTouch DictionaryWordSelectActivity::consumeWor
   if (mappedInput.wasScreenTouchDown(x, y) && hit(x, y)) return WordTouch::Consumed;
   if (!mappedInput.wasScreenTapped(x, y) || !hit(x, y)) return WordTouch::None;
 
+  // The lit match is one target: a tap on any of its characters is a tap on the word it starts
+  // from, which is what a lookup there reads (spec 5.1). A tap elsewhere moves the cursor.
+  if (index > selected && index < selected + spanWordCount()) index = selected;
+
   switch (ListRowTap::apply(index, static_cast<int>(words.size()), selected)) {
     case ListRowTap::Result::Rejected:
       return WordTouch::Consumed;
@@ -507,23 +511,39 @@ void DictionaryWordSelectActivity::speculateForSelection() {
       buildWordText(selected, text, sizeof(text), false);
       found = dict.resolve(text, speculationLocation, speculationHeadword, &result);
     }
-    speculationIdx = selected;
-    speculationSpan = 1;
+    Speculation verdict;
     if (found) {
-      speculation = Speculation::Found;
+      verdict = Speculation::Found;
     } else if (result == Dictionary::LookupResult::NotFound) {
-      speculation = Speculation::Missing;
+      verdict = Speculation::Missing;
     } else {
       // The search did not reach a verdict (IO error). Say nothing rather than
       // marking a word absent, and let Confirm report the real failure.
-      speculation = Speculation::Unknown;
+      verdict = Speculation::Unknown;
     }
+    setSpeculation(selected, verdict, 1);
   }
-  // Only the highlight style changes, and only when the answer is Missing.
-  if (speculation == Speculation::Missing) {
-    speculationRepaintPending = true;
+  // The verdict redraws the highlight only when it changes the box: an outline for a word known
+  // to be absent, or the box grown over the words a CJK match runs on into. Either is this cursor
+  // stop's second refresh (spec 4).
+  if (speculation == Speculation::Missing || spanWordCount() > 1) {
+    {
+      RenderLock lock(*this);
+      speculationRepaintPending = true;
+    }
     requestUpdate();
   }
+}
+
+void DictionaryWordSelectActivity::setSpeculation(const int index, const Speculation verdict, const uint8_t span) {
+  RenderLock lock(*this);
+  speculationIdx = index;
+  speculation = verdict;
+  speculationSpan = span;
+}
+
+int DictionaryWordSelectActivity::spanWordCount() const {
+  return speculationIdx == selected && speculation == Speculation::Found ? speculationSpan : 1;
 }
 
 CjkLookupRun::Script DictionaryWordSelectActivity::scriptAt(const int index) const {
@@ -544,22 +564,21 @@ bool DictionaryWordSelectActivity::resolveRun(const CjkLookupRun& run, const Dic
                                               Dictionary::LookupResult& result) {
   // The search empties speculationMatch before its first probe, so the word the old speculation
   // described has lost its hits: it must not count as resolved if the cursor goes back to it.
-  speculationIdx = -1;
-  speculation = Speculation::Unknown;
+  setSpeculation(-1, Speculation::Unknown, 1);
   const bool found = dict.resolvePrefixes(run.text(), speculationMatch, &result, abortCheck);
   if (speculationMatch.aborted) return false;
-  speculationIdx = selected;
+  Speculation verdict;
   if (found) {
-    speculation = Speculation::Found;
+    verdict = Speculation::Found;
   } else if (result == Dictionary::LookupResult::NotFound) {
-    speculation = Speculation::Missing;
+    verdict = Speculation::Missing;
   } else {
     // No verdict (no scan buffers, an IO error): as on the Latin path, Confirm reports it.
-    speculation = Speculation::Unknown;
+    verdict = Speculation::Unknown;
   }
   // A match that ends inside a word covers that word whole.
   const uint8_t covered = found ? run.wordsCovering(speculationMatch.hits[0].runBytes) : 0;
-  speculationSpan = covered > 0 ? covered : 1;
+  setSpeculation(selected, verdict, covered > 0 ? covered : 1);
   return true;
 }
 
@@ -619,8 +638,7 @@ void DictionaryWordSelectActivity::switchDictionary(const int direction) {
   dictOpenOk = false;
   dictNeedsIndex = false;
   dict.releaseCaches();
-  speculation = Speculation::Unknown;
-  speculationIdx = -1;
+  setSpeculation(-1, Speculation::Unknown, 1);
   speculationDisabled = false;
 
   performLookup();
@@ -849,43 +867,47 @@ void DictionaryWordSelectActivity::loop() {
   speculateForSelection();
 }
 
-// Saves the pixels under words[selected]'s highlight box, then draws the
-// highlight over them. Returns false when the pixels could not be saved (no
-// buffer / oversize box) -- the highlight is drawn regardless, but the next
-// cursor move must do a full repaint.
+// Saves the pixels under the highlight, then draws it over words [selected, selected +
+// spanWordCount()): the selected word, or the CJK match that starts on it. Returns false when
+// the boxes could not all be saved (no buffer, more rows than MAX_SNAPSHOT_RUNS, more pixels
+// than SNAPSHOT_CAPACITY) -- the highlight is drawn regardless, but the next cursor move must do
+// a full repaint.
 bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
-  const Word& word = words[selected];
-  // Fragments up to and including the hyphenated one sit on the word's own row, the rest on
-  // the row below; each run gets its own box, so nothing between the two lines is disturbed.
-  const uint8_t runBounds[MAX_SNAPSHOT_RUNS + 1] = {
-      0, word.hyphenFragment == NO_HYPHEN ? word.fragmentCount : static_cast<uint8_t>(word.hyphenFragment + 1),
-      word.fragmentCount};
+  // `selected` read once, and the span clamped from it: the loop task moves the cursor without
+  // the render lock, and the boxes saved here have to be the ones drawn.
+  const int first = selected;
+  const int spanWords = std::min(spanWordCount(), static_cast<int>(words.size()) - first);
 
   // A word the speculative resolve has already proved absent gets an outline instead of the
   // inverse fill: the cursor is still obviously here, but the reader can see there is nothing
   // to look up without pressing Confirm and waiting for a "Not found" popup. Anything not yet
   // resolved keeps the plain highlight -- absence is only ever claimed on a verdict.
-  const bool knownMissing = speculationIdx == selected && speculation == Speculation::Missing;
+  const bool knownMissing = speculationIdx == first && speculation == Speculation::Missing;
 
   snapshotRunCount = 0;
   size_t used = 0;
   bool saved = snapshot != nullptr;
-  for (uint8_t run = 0; run < MAX_SNAPSHOT_RUNS; run++) {
-    if (runBounds[run] >= runBounds[run + 1]) continue;
-    const Fragment& firstPiece = fragments[word.firstFragment + runBounds[run]];
+  bool overflowed = false;  // a box found no run, or no room, left in the snapshot
+  unsigned rows = 0;
+
+  // One row's box over fragments [begin, end): `draw` false saves the pixels under it, true
+  // draws it.
+  const auto visitBox = [&](const uint16_t begin, const uint16_t end, const bool draw) {
+    if (!draw) rows++;
+    const Fragment& firstPiece = fragments[begin];
     int left = firstPiece.x;
     int top = firstPiece.y;
     int right = firstPiece.x + firstPiece.width;
     int bottom = firstPiece.y + drawStyleOf(firstPiece).height;
-    for (uint8_t f = runBounds[run] + 1; f < runBounds[run + 1]; f++) {
-      const Fragment& piece = fragments[word.firstFragment + f];
+    for (uint16_t f = begin + 1; f < end; f++) {
+      const Fragment& piece = fragments[f];
       left = std::min(left, static_cast<int>(piece.x));
       top = std::min(top, static_cast<int>(piece.y));
       right = std::max(right, piece.x + piece.width);
       bottom = std::max(bottom, piece.y + drawStyleOf(piece).height);
     }
 
-    // The box is the run's exact advance box, grown by 2px so the highlight has
+    // The box is the row's exact advance box, grown by 2px so the highlight has
     // a little air around the glyphs. Clamped to the panel so save, draw and
     // restore all use the same rectangle.
     int hx = left - 2;
@@ -902,22 +924,29 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
     }
     if (hx + hw > renderer.getScreenWidth()) hw = renderer.getScreenWidth() - hx;
     if (hy + hh > renderer.getScreenHeight()) hh = renderer.getScreenHeight() - hy;
-    if (hw <= 0 || hh <= 0) continue;
+    if (hw <= 0 || hh <= 0) return;
 
-    // Runs share the one buffer back to back; a run that no longer fits gives up the
-    // differential path for the whole word rather than restoring half of it.
-    size_t written = 0;
-    if (saved) {
-      // cppcheck-suppress arithOperationsOnVoidPointer ; get() is uint8_t*, cppcheck
-      // mis-deduces the concept-constrained makeUniqueNoThrow<uint8_t[]> return type
-      written = renderer.readFramebufferRegion(hx, hy, hw, hh, snapshot.get() + used, SNAPSHOT_CAPACITY - used);
-      saved = written > 0;
-    }
-    if (saved) {
+    if (!draw) {
+      if (!saved) return;
+      // Boxes share the one buffer back to back. One that finds no run or no room left is still
+      // drawn, but gives up the differential path for the whole highlight rather than restoring
+      // part of it.
+      size_t written = 0;
+      if (snapshotRunCount < MAX_SNAPSHOT_RUNS) {
+        // cppcheck-suppress arithOperationsOnVoidPointer ; get() is uint8_t*, cppcheck
+        // mis-deduces the concept-constrained makeUniqueNoThrow<uint8_t[]> return type
+        written = renderer.readFramebufferRegion(hx, hy, hw, hh, snapshot.get() + used, SNAPSHOT_CAPACITY - used);
+      }
+      if (written == 0) {
+        saved = false;
+        overflowed = true;
+        return;
+      }
       snapshotRuns[snapshotRunCount] = {static_cast<int16_t>(hx), static_cast<int16_t>(hy), static_cast<int16_t>(hw),
                                         static_cast<int16_t>(hh), static_cast<uint16_t>(used)};
       snapshotRunCount++;
       used += written;
+      return;
     }
 
     if (knownMissing) {
@@ -925,8 +954,8 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
     } else {
       renderer.fillRect(hx, hy, hw, hh, true);
     }
-    for (uint8_t f = runBounds[run]; f < runBounds[run + 1]; f++) {
-      const Fragment& piece = fragments[word.firstFragment + f];
+    for (uint16_t f = begin; f < end; f++) {
+      const Fragment& piece = fragments[f];
       const DrawStyle& drawStyle = drawStyleOf(piece);
       char scratch[WORD_TEXT_CAPACITY];
       const char* text = fragmentText(piece, scratch, sizeof(scratch));
@@ -936,11 +965,80 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
         renderer.drawTextScaled(drawStyle.fontId, piece.x, piece.y, text, knownMissing, piece.style, drawStyle.scale);
       }
     }
-  }
+  };
 
+  // The span's fragments are one contiguous range of the array, in reading order, so a row's box
+  // closes where the next piece sits on another row. A fragment is on its word's row, except the
+  // pieces of a hyphen-joined word past its hyphen, which are on the row below.
+  const auto forEachRow = [&](const bool draw) {
+    int boxRow = -1;
+    uint16_t boxBegin = 0;
+    uint16_t boxEnd = 0;
+    for (int w = first; w < first + spanWords; w++) {
+      const Word& word = words[w];
+      for (uint8_t f = 0; f < word.fragmentCount; f++) {
+        const int row = word.row + (word.hyphenFragment != NO_HYPHEN && f > word.hyphenFragment ? 1 : 0);
+        const auto index = static_cast<uint16_t>(word.firstFragment + f);
+        if (row != boxRow) {
+          if (boxRow >= 0) visitBox(boxBegin, boxEnd, draw);
+          boxRow = row;
+          boxBegin = index;
+        }
+        boxEnd = static_cast<uint16_t>(index + 1);
+      }
+    }
+    if (boxRow >= 0) visitBox(boxBegin, boxEnd, draw);
+  };
+
+  // Every box is saved before any is drawn: where line spacing is tight, a row's box can overlap
+  // the one above, and saving it after that one was drawn would put its ink back on the restore.
+  forEachRow(false);
+  forEachRow(true);
+
+  if (overflowed) {
+    LOG_DBG("DICT", "Highlight over %u words takes the full repaint (%u rows)", static_cast<unsigned>(spanWords), rows);
+  }
   if (!saved) snapshotRunCount = 0;
-  snapshotIdx = saved ? selected : -1;
+  snapshotIdx = saved ? first : -1;
   return saved;
+}
+
+// One prewarm per font and style, with every fragment of the span drawn in it: an SD-card font
+// rebuilds a style's cache on each call, so a call per fragment would leave only the last one's
+// glyphs warm. The span is a few words, so the scans stay short.
+void DictionaryWordSelectActivity::prewarmHighlight(FontCacheManager& fcm) const {
+  const int first = selected;
+  const int spanWords = std::min(spanWordCount(), static_cast<int>(words.size()) - first);
+  const Word& last = words[first + spanWords - 1];
+  const uint16_t begin = words[first].firstFragment;
+  const auto end = static_cast<uint16_t>(last.firstFragment + last.fragmentCount);
+  // The prewarm's style bit is the regular/bold/italic index; the flags above it (underline,
+  // sub/superscript, small caps) draw from the same glyphs.
+  const auto styleIndex = [](const Fragment& piece) { return static_cast<uint8_t>(piece.style) & 0x03; };
+  const auto sameFace = [&](const Fragment& a, const Fragment& b) {
+    return drawStyleOf(a).fontId == drawStyleOf(b).fontId && styleIndex(a) == styleIndex(b);
+  };
+
+  for (uint16_t i = begin; i < end; i++) {
+    const Fragment& lead = fragments[i];
+    bool loaded = false;  // by an earlier fragment in the same face
+    for (uint16_t j = begin; j < i && !loaded; j++) loaded = sameFace(fragments[j], lead);
+    if (loaded) continue;
+
+    // A word's whole text, and far more than a CJK run's 12 code points; a face whose text is cut
+    // short loads the rest of its glyphs on demand.
+    char text[WORD_TEXT_CAPACITY];
+    size_t length = 0;
+    for (uint16_t j = i; j < end; j++) {
+      const Fragment& piece = fragments[j];
+      if (!sameFace(piece, lead)) continue;
+      const size_t take = std::min(static_cast<size_t>(piece.length), sizeof(text) - 1 - length);
+      memcpy(text + length, piece.text, take);
+      length += take;
+    }
+    text[length] = '\0';
+    fcm.prewarmCache(drawStyleOf(lead).fontId, text, static_cast<uint8_t>(1u << styleIndex(lead)));
+  }
 }
 
 // Front-button bar. Drawn last on every repaint path, including the
@@ -972,7 +1070,8 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
   // skipping the two-pass page render entirely.
   // `selected != snapshotIdx` is the cursor-moved case; the snapshot is also
   // stale when the cursor stayed put and only the speculation verdict changed,
-  // which is what repaints a word as absent a moment after landing on it.
+  // which is what repaints a word as absent, or grows the box over a CJK match,
+  // a moment after landing on it.
   const bool highlightMoved = !words.empty() && (selected != snapshotIdx || speculationRepaintPending);
   if (popup == Popup::None && snapshotIdx >= 0 && highlightMoved) {
     // displayBuffer() ends with a buffer swap, so the write framebuffer holds
@@ -989,7 +1088,7 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
       // mis-deduces the concept-constrained makeUniqueNoThrow<uint8_t[]> return type
       renderer.writeFramebufferRegion(saved.x, saved.y, saved.width, saved.height, snapshot.get() + saved.offset);
     }
-    // Batch-load just the highlighted word's glyphs before drawing them
+    // Batch-load just the highlight's glyphs before drawing them
     // white-on-black. clearCache() FIRST: prewarmCache() appends into the page
     // slots and deliberately never clears them -- that clear normally happens
     // once per page inside endScanAndPrewarm(), which this path skips. Without
@@ -998,23 +1097,17 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
     // the first lookup fail with "Low heap for N byte definition".
     //
     // Dropping the page's warmed glyphs costs this path nothing: it does not
-    // re-render the page, only the two word boxes and the hints.
+    // re-render the page, only the two highlights and the hints.
     auto* fcm = renderer.getFontCacheManager();
     fcm->clearCache();
-    const Word& word = words[selected];
-    for (uint8_t f = 0; f < word.fragmentCount; f++) {
-      const Fragment& piece = fragments[word.firstFragment + f];
-      char scratch[WORD_TEXT_CAPACITY];
-      fcm->prewarmCache(drawStyleOf(piece).fontId, fragmentText(piece, scratch, sizeof(scratch)),
-                        static_cast<uint8_t>(1u << (static_cast<uint8_t>(piece.style) & 0x03)));
-    }
+    prewarmHighlight(*fcm);
     speculationRepaintPending = false;
     if (drawHighlightWithSnapshot()) {
       drawHints();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
       return;
     }
-    // Snapshot failed (oversize box) -- fall through to a full repaint.
+    // Snapshot failed (a highlight over too many rows or pixels) -- fall through to a full repaint.
   }
 
   renderer.clearScreen();
@@ -1058,7 +1151,7 @@ void DictionaryWordSelectActivity::appendDebugState(std::string& out) const {
   const Speculation verdict = speculationIdx == selected ? speculation : Speculation::Unknown;
   const bool found = verdict == Speculation::Found;
   appendField(out, "spec", found ? "found" : (verdict == Speculation::Missing ? "missing" : "unknown"));
-  appendField(out, "span", static_cast<long>(found ? speculationSpan : 1));
+  appendField(out, "span", static_cast<long>(spanWordCount()));
   const char* match = "";
   if (found) {
     match = scriptAt(selected) != CjkLookupRun::Script::Other ? speculationMatch.hits[0].headword.c_str()
