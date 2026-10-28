@@ -481,16 +481,17 @@ bool stylesEqual(const CssStyle& a, const CssStyle& b) {
          a.textDecoration == b.textDecoration && a.display == b.display && a.verticalAlign == b.verticalAlign &&
          a.listStyleNone == b.listStyleNone && a.pageBreakBefore == b.pageBreakBefore &&
          a.pageBreakAfter == b.pageBreakAfter && a.cssFloat == b.cssFloat && a.smallCaps == b.smallCaps &&
-         a.lineHeightMultiplier == b.lineHeightMultiplier && a.fontSizeMultiplier == b.fontSizeMultiplier &&
+         a.lineHeightEm == b.lineHeightEm && a.fontSizeMultiplier == b.fontSizeMultiplier &&
          a.fontSizeRootRelative == b.fontSizeRootRelative && len(a.textIndent) == len(b.textIndent) &&
          len(a.marginTop) == len(b.marginTop) && len(a.marginBottom) == len(b.marginBottom) &&
          len(a.marginLeft) == len(b.marginLeft) && len(a.marginRight) == len(b.marginRight) &&
          len(a.paddingTop) == len(b.paddingTop) && len(a.paddingBottom) == len(b.paddingBottom) &&
          len(a.paddingLeft) == len(b.paddingLeft) && len(a.paddingRight) == len(b.paddingRight) &&
          len(a.imageHeight) == len(b.imageHeight) && len(a.imageWidth) == len(b.imageWidth) &&
-         a.fontFamily == b.fontFamily && a.textEmphasis == b.textEmphasis && a.colorTransparent == b.colorTransparent &&
-         a.opacityZero == b.opacityZero && a.visibilityHidden == b.visibilityHidden &&
-         definedEqual(a.defined, b.defined);
+         a.fontFamily == b.fontFamily && a.colorTransparent == b.colorTransparent && a.opacityZero == b.opacityZero &&
+         a.visibilityHidden == b.visibilityHidden && a.writingMode == b.writingMode &&
+         a.textOrientation == b.textOrientation && a.textCombine == b.textCombine && a.direction == b.direction &&
+         a.unicodeBidi == b.unicodeBidi && a.textEmphasis == b.textEmphasis && definedEqual(a.defined, b.defined);
 }
 }  // namespace
 
@@ -704,7 +705,10 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       ".c { display: none; }\n"
       ".d { display: inline; }\n"
       ".e { color: transparent; opacity: 0; visibility: hidden; }\n"
-      ".f { text-emphasis-style: none; }\n";
+      ".f { -webkit-writing-mode: vertical-lr; -webkit-text-orientation: upright; text-combine-upright: digits 3; "
+      "direction: rtl; unicode-bidi: isolate-override; text-align: end; }\n"
+      ".g { writing-mode: vertical-rl; }\n"  // a rule with nothing else is kept
+      ".h { text-emphasis-style: none; }\n";
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   std::string cssPath;
@@ -714,7 +718,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   ASSERT_TRUE(compileCache(parser, cssPath));
 
   const std::vector<std::pair<std::string, std::string>> probes = {
-      {"p", "a"}, {"p", "b"}, {"div", "c"}, {"span", "a"}, {"p", "none"}, {"span", "d"}, {"span", "e"}, {"span", "f"}};
+      {"p", "a"},    {"p", "b"},    {"div", "c"}, {"span", "a"},  {"p", "none"},
+      {"span", "d"}, {"span", "e"}, {"div", "f"}, {"html", "g"}, {"span", "h"}};
   auto resolveAll = [&](CssParser& p) {
     std::vector<CssStyle> out;
     for (const auto& pr : probes) out.push_back(p.resolveStyle(pr.first, pr.second));
@@ -731,9 +736,19 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       << "the invisibility flags did not survive the disk cache";
   EXPECT_TRUE(heapStyles[6].defined.colorTransparent && heapStyles[6].defined.opacityZero &&
               heapStyles[6].defined.visibilityHidden);
+  EXPECT_TRUE(heapStyles[0].hasLineHeight()) << "line-height did not survive the disk cache";
+  EXPECT_FLOAT_EQ(1.6f, heapStyles[0].lineHeightEm);
+  const CssStyle& flow = heapStyles[7];
+  EXPECT_EQ(CssWritingMode::VerticalLr, flow.writingMode) << "the flow word did not survive the disk cache";
+  EXPECT_EQ(CssTextOrientation::Upright, flow.textOrientation);
+  EXPECT_EQ(CssTextCombine::Digits3, flow.textCombine);
+  EXPECT_EQ(CssDirection::Rtl, flow.direction);
+  EXPECT_EQ(CssUnicodeBidi::IsolateOverride, flow.unicodeBidi);
+  EXPECT_EQ(CssTextAlign::End, flow.textAlign) << "text-align: end did not survive the disk cache as itself";
+  EXPECT_EQ(CssWritingMode::VerticalRl, heapStyles[8].writingMode) << "a rule with only writing-mode was dropped";
   EXPECT_EQ(heapStyles[0].textEmphasis, TextEmphasis::Sesame | TextEmphasis::kOpen)
       << "text-emphasis-style did not survive the disk cache";
-  EXPECT_TRUE(heapStyles[7].hasTextEmphasis() && heapStyles[7].textEmphasis == 0)
+  EXPECT_TRUE(heapStyles[9].hasTextEmphasis() && heapStyles[9].textEmphasis == 0)
       << "an explicit text-emphasis-style: none did not survive the disk cache";
 
   BuildArena arena(64 * 1024);

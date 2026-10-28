@@ -75,6 +75,10 @@ struct BlockStyle {
   // full int — a uint8_t would truncate the hash and the heading would render nothing.
   int32_t headingFontId = 0;
   int16_t firstLineExtraIndent = 0;  // extra indent on the first line only (combined with CSS text-indent)
+  // The block's computed CSS line-height, a multiple of its font size; 0 when neither it nor an ancestor sets one.
+  // Inherited through the parser's flow stack, so a merge takes the child's: a spent sibling block must not lend its
+  // value. Read only for Book's style line spacing (ChapterHtmlSlimParser::effectiveLineHeight). Parse-time only.
+  float lineHeightEm = 0.0f;
 
   // Float zones: left-floated images that narrow text width on overlapping lines.
   FloatZone floatZones[kMaxFloatZones] = {};
@@ -138,6 +142,7 @@ struct BlockStyle {
     // when the empty <br> block is merged with the following paragraph.
     combinedBlockStyle.fromBrElement = false;
     combinedBlockStyle.keepWithNext = child.keepWithNext;
+    combinedBlockStyle.lineHeightEm = child.lineHeightEm;
     // fontSizeMultiplier: use child's if != 1.0, else parent's
     combinedBlockStyle.fontSizeMultiplier =
         (child.fontSizeMultiplier != 1.0f) ? child.fontSizeMultiplier : fontSizeMultiplier;
@@ -182,6 +187,7 @@ struct BlockStyle {
     if (cssStyle.hasFontSizeMultiplier()) {
       blockStyle.fontSizeMultiplier = cssStyle.fontSizeMultiplier;
     }
+    if (cssStyle.hasLineHeight()) blockStyle.lineHeightEm = cssStyle.lineHeightEm;
     return blockStyle;
   }
 };

@@ -117,9 +117,11 @@ class CssParser {
   //      looked at either, so a book's embedded fonts would stay unknown.
   // v29: `font-family` also keeps the list's generic serif or sans-serif (CssFontFamily), which v28
   //      dropped.
-  // v30: `text-emphasis-style` (and `text-emphasis`, with the -epub- and -webkit- prefixes) is persisted: a mark
-  //      in bits 3-6 of the smallCaps byte, defined in bit 2; in the resident pool, extra bit 4 and a mark byte.
-  static constexpr uint8_t CSS_CACHE_VERSION = 30;
+  // v30: `line-height` is persisted, as a multiple of the font size; v29 dropped it from the cache and
+  //      stored it relative to a 1.5 base.
+  // v31: `text-emphasis-style` (and `text-emphasis`, with the -epub- and -webkit- prefixes) is persisted: a mark
+  //      in bits 3-6 of the smallCaps byte, defined in bit 2; in the resident pool, extra bit 5 and a mark byte.
+  static constexpr uint8_t CSS_CACHE_VERSION = 31;
   // Bytes before the complex-rule table and the sorted offset index: version(1) + ruleCount(2) +
   // totalSelectorCandidates(4) + unsupportedSelectorSkips(4) + flags(1) + complexTableBytes(2).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 14;
@@ -512,6 +514,15 @@ class CssParser {
   /** width:/height: on an image. Returns true when the declaration applies, with `out` holding
    *  either the length or the CssUnit::Auto marker; false for values we ignore. */
   static bool interpretImageSize(std::string_view val, CssLength& out);
+  /** line-height as a multiple of the element's font size; false for normal, the keywords and what is not a length. */
+  static bool interpretLineHeight(std::string_view val, float& em);
+  // How text runs. Each leaves `out` alone and returns false for inherit, unset, revert and values it does not know,
+  // which leaves the property unset: the element takes its parent's value where the property is inherited.
+  static bool interpretWritingMode(std::string_view val, CssWritingMode& out);
+  static bool interpretTextOrientation(std::string_view val, CssTextOrientation& out);
+  static bool interpretTextCombine(std::string_view val, CssTextCombine& out);
+  static bool interpretDirection(std::string_view val, CssDirection& out);
+  static bool interpretUnicodeBidi(std::string_view val, CssUnicodeBidi& out);
 
   // String utilities
   static std::string normalized(const std::string& s);

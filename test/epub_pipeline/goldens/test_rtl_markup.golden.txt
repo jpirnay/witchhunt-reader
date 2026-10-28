@@ -1,0 +1,30 @@
+BOOK title=RTL Markup lang=he spine=1 toc=0 reliableToc=0
+SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=6 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=שלום
+   W x=38 s=0 z=100 t=עולם,
+   W x=84 s=0 z=100 t=התחלה.
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=סוף
+   W x=28 s=0 z=100 t=הפסקה.
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=Left
+   W x=47 s=0 z=100 t=to
+   W x=75 s=0 z=100 t=right
+   W x=128 s=0 z=100 t=inside,
+   W x=191 s=0 z=100 t=start.
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=טקסט
+   W x=46 s=0 z=100 t=אוטומטי
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=מילה
+   W x=43 s=0 z=100 t=bdo
+   W x=75 s=0 z=100 t=text
+   W x=117 s=0 z=100 t=וbdi
+   W x=151 s=0 z=100 t=text
+   W x=193 s=0 z=100 t=וLatin
+   W x=258 s=0 z=100 t=123
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=פסקה
+   W x=40 s=0 z=100 t=רגילה.

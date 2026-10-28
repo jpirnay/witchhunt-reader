@@ -33,9 +33,13 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 101;  // v101: CSS text-emphasis marks (傍点) are drawn above each
+constexpr uint8_t SECTION_FILE_VERSION = 102;  // v102: CSS text-emphasis marks (傍点) are drawn above each
                                                // character of their span
-                                               // v100: taken by the DP line-breaker indent fix
+                                               // v101: margins, paddings and image sizes along the
+                                               // CSS writing mode, text-align start/end along the
+                                               // direction
+                                               // v100: the optimal line breaker indents only a
+                                               // paragraph's first line
                                                // v99: ruby (furigana) is laid out above its base: a line with
                                                // ruby keeps its groups (TextBlock annotations) and is taller
                                                // by half an ascender; <rp> is not laid out.
@@ -358,8 +362,9 @@ uint32_t fnv1a(const uint8_t* data, size_t length) {
 
 uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   uint8_t buffer[96];
-  static_assert(sizeof(buffer) >= 21 + sizeof(uint32_t) + BlockFontFamilies::kMaxFamilies * 3 * sizeof(int32_t),
-                "the settings (21 B) and every family fit");
+  static_assert(sizeof(buffer) >= 21 + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) +
+                                      BlockFontFamilies::kMaxFamilies * 3 * sizeof(int32_t),
+                "the settings (21 B), Book's style line spacing and every family fit");
   size_t offset = 0;
 
   auto append = [&](const void* ptr, size_t size) {
@@ -382,6 +387,10 @@ uint32_t Section::calculatePropertyHash(const BuildParams& p) {
     append(&INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION, sizeof(INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION));
   }
   append(&p.imageRendering, sizeof(p.imageRendering));
+  if (p.bookLineHeightFloor > 0.0f) {
+    append(&p.bookLineHeightFloor, sizeof(p.bookLineHeightFloor));
+    append(&p.lineHeightEmPx, sizeof(p.lineHeightEmPx));
+  }
   // Only what the book's CSS can reach, and only when there is any: a variant without families keeps its old key.
   if (p.embeddedStyle && p.fontFamilies && p.fontFamilies->count != 0) {
     append(&p.fontFamilies->body, sizeof(p.fontFamilies->body));
@@ -1238,6 +1247,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   }
   st.visitor->endExternalPageBreakAnchors();
   st.visitor->setFontSizeLadder(p.fontSizeLadder);
+  st.visitor->setBookLineHeight(p.bookLineHeightFloor, p.lineHeightEmPx);
   if (p.embeddedStyle && p.fontFamilies) st.visitor->setFontFamilies(*p.fontFamilies);
   // Anchors stream to SD as they are found rather than accumulating in the parser; the
   // finalizer below copies the spill into the section file's anchor map. Set before setup(),

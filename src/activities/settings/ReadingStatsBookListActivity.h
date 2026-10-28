@@ -15,6 +15,7 @@
 // (util/ListRowCache.h decides which).
 class ReadingStatsBookListActivity final : public UiListActivity {
  public:
+  bool drawsBookText() const override { return true; }
   explicit ReadingStatsBookListActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
       : UiListActivity("ReadingStatsBookList", renderer, mappedInput) {}
 

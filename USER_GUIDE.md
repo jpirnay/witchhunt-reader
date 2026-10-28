@@ -389,7 +389,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 
 **Spacing** (submenu):
 - **Screen Margin**: Left/right margin in Reading Mode, 5–40 px in 5 px steps.
-- **Line Spacing**: "Tight", "Normal" (default), "Wide"
+- **Line Spacing**: "Tight", "Normal" (default), "Wide", "Extra Wide", "Widest", "Book's Style". For a Chinese, Japanese or Korean book the steps are a fixed distance between lines, whatever the font: 1.5, 1.7, 1.85, 2 and 2.2 times the text size, as the CJK layout guides recommend. For other books they widen the font's own spacing. "Book's Style" uses the book's own line spacing where it sets one, never tighter than "Tight", and "Normal" elsewhere. The reader menu's settings and the quick overrides set it for one book.
 - **Extra Paragraph Spacing**: "ON" adds vertical space between paragraphs; "OFF" uses first-line indentation instead.
 
 **Images** (submenu):

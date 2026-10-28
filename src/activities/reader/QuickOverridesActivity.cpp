@@ -22,7 +22,7 @@ QuickOverridesActivity::QuickOverridesActivity(
     const int8_t initialBionicReadingOverride, const int8_t initialGuideDotsOverride,
     const int8_t initialParagraphAlignmentOverride, const int8_t initialTextAntiAliasingOverride,
     const int8_t initialHyphenationOverride, const int8_t initialFontSizeNormalizationOverride,
-    const int8_t initialInlineFootnotePreviewsOverride)
+    const int8_t initialInlineFootnotePreviewsOverride, const int8_t initialLineSpacingOverride)
     : MenuListActivity("QuickOverrides", renderer, mappedInput),
       pendingEmbeddedStyleOverride(initialEmbeddedStyleOverride),
       pendingImageRenderingOverride(initialImageRenderingOverride),
@@ -35,7 +35,8 @@ QuickOverridesActivity::QuickOverridesActivity(
       pendingTextAntiAliasingOverride(initialTextAntiAliasingOverride),
       pendingHyphenationOverride(initialHyphenationOverride),
       pendingFontSizeNormalizationOverride(initialFontSizeNormalizationOverride),
-      pendingInlineFootnotePreviewsOverride(initialInlineFootnotePreviewsOverride) {
+      pendingInlineFootnotePreviewsOverride(initialInlineFootnotePreviewsOverride),
+      pendingLineSpacingOverride(initialLineSpacingOverride) {
   buildMenuItems();
 }
 
@@ -177,6 +178,21 @@ void QuickOverridesActivity::buildMenuItems() {
         s->pendingParagraphAlignmentOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
       }));
 
+  // Line spacing: default(-1) + the 6 global options
+  menuItems.push_back(SettingInfo::DynamicEnumCtx(
+      StrId::STR_LINE_SPACING,
+      {StrId::STR_DEFAULT_VALUE, StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE,
+       StrId::STR_WIDEST, StrId::STR_BOOK_S_STYLE},
+      self,
+      [](const void* ctx) -> uint8_t {
+        const auto* s = static_cast<const QuickOverridesActivity*>(ctx);
+        return (s->pendingLineSpacingOverride < 0) ? 0 : static_cast<uint8_t>(s->pendingLineSpacingOverride + 1);
+      },
+      [](void* ctx, uint8_t v) {
+        auto* s = static_cast<QuickOverridesActivity*>(ctx);
+        s->pendingLineSpacingOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
+      }));
+
   // Text anti-aliasing: default / on / off
   menuItems.push_back(SettingInfo::DynamicEnumCtx(
       StrId::STR_TEXT_AA, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
@@ -255,6 +271,7 @@ void QuickOverridesActivity::finishWithResult(bool cancelled) {
   payload.hyphenationOverride = pendingHyphenationOverride;
   payload.fontSizeNormalizationOverride = pendingFontSizeNormalizationOverride;
   payload.inlineFootnotePreviewsOverride = pendingInlineFootnotePreviewsOverride;
+  payload.lineSpacingOverride = pendingLineSpacingOverride;
   result.data = std::move(payload);
   setResult(std::move(result));
   finish();

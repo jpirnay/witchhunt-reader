@@ -1,0 +1,153 @@
+BOOK title=Writing Modes lang=ja spine=3 toc=0 reliableToc=0 ppd=rtl
+SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=9 footnotes=0
+  LINE y=0 x=18 align=0 mult=1.000 hfid=0 words=4
+   W x=4 s=0 z=100 t=１
+   W x=26 s=0 z=100 t=第
+   W x=42 s=0 z=100 t=一
+   W x=58 s=0 z=100 t=章
+  LINE y=24 x=18 align=0 mult=1.000 hfid=0 words=6
+   W x=4 s=0 z=100 t=１
+   W x=20 s=0 z=100 t=２
+   W x=42 s=0 z=100 t=第
+   W x=58 s=0 z=100 t=十
+   W x=74 s=0 z=100 t=二
+   W x=90 s=0 z=100 t=章
+  LINE y=48 x=18 align=0 mult=1.000 hfid=0 words=7
+   W x=4 s=0 z=100 t=３
+   W x=20 s=0 z=100 t=４
+   W x=42 s=0 z=100 t=第
+   W x=58 s=0 z=100 t=三
+   W x=74 s=0 z=100 t=十
+   W x=90 s=0 z=100 t=四
+   W x=106 s=0 z=100 t=章
+  LINE y=72 x=50 align=2 mult=1.000 hfid=0 words=3
+   W x=172 s=1 z=100 t=第
+   W x=189 s=1 z=100 t=一
+   W x=206 s=1 z=100 t=章
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=26
+   W x=22 s=0 z=100 t=吾
+   W x=38 s=0 z=100 t=輩
+   W x=54 s=0 z=100 t=は
+   W x=70 s=0 z=100 t=猫
+   W x=86 s=0 z=100 t=で
+   W x=103 s=0 z=100 t=あ
+   W x=119 s=0 z=100 t=る
+   W x=135 s=0 z=100 t=。
+   W x=151 s=0 z=100 t=名
+   W x=167 s=0 z=100 t=前
+   W x=183 s=0 z=100 t=は
+   W x=200 s=0 z=100 t=ま
+   W x=216 s=0 z=100 t=だ
+   W x=232 s=0 z=100 t=無
+   W x=248 s=0 z=100 t=い
+   W x=264 s=0 z=100 t=。
+   W x=281 s=0 z=100 t=ABC
+   W x=308 s=0 z=100 t=ど
+   W x=324 s=0 z=100 t=こ
+   W x=340 s=0 z=100 t=で
+   W x=356 s=0 z=100 t=生
+   W x=373 s=0 z=100 t=れ
+   W x=389 s=0 z=100 t=た
+   W x=405 s=0 z=100 t=か
+   W x=421 s=0 z=100 t=と
+   W x=438 s=0 z=100 t=ん
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=6 s=0 z=100 t=と
+   W x=22 s=0 z=100 t=見
+   W x=38 s=0 z=100 t=当
+   W x=54 s=0 z=100 t=が
+   W x=70 s=0 z=100 t=つ
+   W x=86 s=0 z=100 t=か
+   W x=102 s=0 z=100 t=ぬ
+   W x=118 s=0 z=100 t=。
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=26
+   W x=22 s=0 z=100 t=何
+   W x=38 s=0 z=100 t=で
+   W x=55 s=0 z=100 t=も
+   W x=71 s=0 z=100 t=薄
+   W x=88 s=0 z=100 t=暗
+   W x=105 s=0 z=100 t=い
+   W x=121 s=0 z=100 t=じ
+   W x=138 s=0 z=100 t=め
+   W x=155 s=0 z=100 t=じ
+   W x=171 s=0 z=100 t=め
+   W x=188 s=0 z=100 t=し
+   W x=205 s=0 z=100 t=た
+   W x=221 s=0 z=100 t=所
+   W x=238 s=0 z=100 t=で
+   W x=254 s=0 z=100 t=ニ
+   W x=271 s=0 z=100 t=ャ
+   W x=288 s=0 z=100 t=ー
+   W x=304 s=0 z=100 t=ニ
+   W x=321 s=0 z=100 t=ャ
+   W x=338 s=0 z=100 t=ー
+   W x=354 s=0 z=100 t=泣
+   W x=371 s=0 z=100 t=い
+   W x=388 s=0 z=100 t=て
+   W x=404 s=0 z=100 t=い
+   W x=421 s=0 z=100 t=た
+   W x=438 s=0 z=100 t=事
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=6 s=0 z=100 t=だ
+   W x=22 s=0 z=100 t=け
+   W x=38 s=0 z=100 t=は
+   W x=54 s=0 z=100 t=記
+   W x=70 s=0 z=100 t=憶
+   W x=86 s=0 z=100 t=し
+   W x=102 s=0 z=100 t=て
+   W x=118 s=0 z=100 t=い
+   W x=134 s=0 z=100 t=る
+   W x=150 s=0 z=100 t=。
+  LINE y=210 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=6 s=0 z=100 t=横
+   W x=22 s=0 z=100 t=書
+   W x=38 s=0 z=100 t=き
+   W x=54 s=0 z=100 t=の
+   W x=70 s=0 z=100 t=段
+   W x=86 s=0 z=100 t=落
+   W x=102 s=0 z=100 t=。
+SPINE 1 href=OEBPS/ch2.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=3 footnotes=0
+  LINE y=0 x=18 align=0 mult=1.000 hfid=0 words=4
+   W x=4 s=0 z=100 t=１
+   W x=26 s=0 z=100 t=第
+   W x=42 s=0 z=100 t=一
+   W x=58 s=0 z=100 t=章
+  LINE y=24 x=18 align=0 mult=1.000 hfid=0 words=6
+   W x=4 s=0 z=100 t=１
+   W x=20 s=0 z=100 t=２
+   W x=42 s=0 z=100 t=第
+   W x=58 s=0 z=100 t=十
+   W x=74 s=0 z=100 t=二
+   W x=90 s=0 z=100 t=章
+  LINE y=48 x=18 align=0 mult=1.000 hfid=0 words=7
+   W x=4 s=0 z=100 t=３
+   W x=20 s=0 z=100 t=４
+   W x=42 s=0 z=100 t=第
+   W x=58 s=0 z=100 t=三
+   W x=74 s=0 z=100 t=十
+   W x=90 s=0 z=100 t=四
+   W x=106 s=0 z=100 t=章
+SPINE 2 href=OEBPS/ch3.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=3 footnotes=0
+  LINE y=18 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=6 s=0 z=100 t=１
+   W x=28 s=0 z=100 t=第
+   W x=44 s=0 z=100 t=一
+   W x=60 s=0 z=100 t=章
+  LINE y=60 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=6 s=0 z=100 t=１
+   W x=22 s=0 z=100 t=２
+   W x=44 s=0 z=100 t=第
+   W x=60 s=0 z=100 t=十
+   W x=76 s=0 z=100 t=二
+   W x=92 s=0 z=100 t=章
+  LINE y=102 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=6 s=0 z=100 t=３
+   W x=22 s=0 z=100 t=４
+   W x=44 s=0 z=100 t=第
+   W x=60 s=0 z=100 t=三
+   W x=76 s=0 z=100 t=十
+   W x=92 s=0 z=100 t=四
+   W x=108 s=0 z=100 t=章

@@ -13,8 +13,11 @@
 #include <builtinFonts/cjk_ui_ko_12.h>
 #include <builtinFonts/cjk_ui_zh_10.h>
 #include <builtinFonts/cjk_ui_zh_12.h>
+#include <ttf/TtfFont.h>
 
 #include <cstddef>
+
+#include "activities/RenderLock.h"
 
 namespace {
 
@@ -118,6 +121,13 @@ const EpdFontData* servedFace(const LanguageFaces& row, const size_t size) {
   return row.language == inSlotLanguage ? &inSlot[size] : row.faces[size].data;
 }
 
+// A CJK UI language's own face goes first, so its strings draw alike; any other UI language looks in the book's
+// font before the translations' faces. Book text goes to the book's font first in either (FallbackFaceProvider).
+void orderReaderFace() {
+  const bool afterFirst = facesOf(uiLanguage) != nullptr;
+  for (FallbackFaceProvider& provider : providers) provider.setReaderFaceAfterFirst(afterFirst);
+}
+
 void orderFaces() {
   for (size_t size = 0; size < SIZE_COUNT; ++size) {
     const EpdFontData* order[LANGUAGE_COUNT];
@@ -133,6 +143,38 @@ void orderFaces() {
     }
     providers[size].setStandIn(STAND_IN, &isCjkCharacter);
   }
+  orderReaderFace();
+}
+
+// --- The reader's TrueType font behind the UI faces (setReaderFont) ---
+
+bool primaryAttached[SIZE_COUNT] = {};  // attach(): a provider's primary face is set
+void (*readerFontOpener)() = nullptr;
+TtfFont* readerFont = nullptr;
+const EpdFontData* readerFaces[SIZE_COUNT] = {};
+bool readerFaceTried[SIZE_COUNT] = {};
+
+// The reader font's face at SIZES[size], made the first time UI text needs a glyph the faces before it lack: no
+// memory until then. Only under the RenderLock, which the TTF engine draws under (spec 3.4): a page build may be
+// using it on another task.
+// cppcheck-suppress constParameterCallback ; the signature is FallbackFaceProvider::setReaderFace's
+const EpdFontData* readerFaceAt(void* ctx) {
+  const auto size = reinterpret_cast<uintptr_t>(ctx);
+  if (size >= SIZE_COUNT || !RenderLock::heldByCurrentTask()) return nullptr;
+  if (!readerFont && readerFontOpener) readerFontOpener();  // the first string that needs it opens it
+  if (!readerFont) return nullptr;
+  if (!readerFaceTried[size]) {
+    readerFaceTried[size] = true;
+    // At the em of the CJK UI faces, which their full-width ideographic space spans.
+    const EpdGlyphRef space = EpdFont(LANGUAGES[0].faces[size].data).findGlyph(0x3000);
+    const auto px = static_cast<uint8_t>((space.advanceX + 8) >> 4);
+    const EpdFont* fonts[4] = {};
+    uint32_t servedPpem = 0;
+    if (space && readerFont->nativeFonts(px, fonts, &servedPpem) && servedPpem == (uint32_t{px} << 6) && fonts[0]) {
+      readerFaces[size] = fonts[0]->data;
+    }
+  }
+  return readerFaces[size];
 }
 
 // Feeds inflated glyphs to the slot, checking them against the CRC the generator recorded: a face
@@ -268,8 +310,27 @@ void CjkUiFonts::attach(EpdFont& font, const uint8_t points) {
   }
   EpdFontData& copy = attached[attachedCount++];
   copy = *data;
-  copy.provider = &providers[sizeIndexFor(points)];
+  const size_t size = sizeIndexFor(points);
+  copy.provider = &providers[size];
+  providers[size].setReaderFace(&readerFaceAt, reinterpret_cast<void*>(size));
+  // The face of the provider's own size: the first attached (main.cpp attaches the regular before the bold).
+  if (points == SIZES[size] && !primaryAttached[size]) {
+    providers[size].setPrimaryFace(data);
+    primaryAttached[size] = true;
+  }
   font.data = &copy;
+}
+
+bool CjkUiFonts::hasReaderFont() { return readerFont != nullptr; }
+
+void CjkUiFonts::setReaderFontOpener(void (*open)()) { readerFontOpener = open; }
+
+void CjkUiFonts::setReaderFont(TtfFont* font) {
+  readerFont = font;
+  for (size_t size = 0; size < SIZE_COUNT; ++size) {
+    readerFaces[size] = nullptr;
+    readerFaceTried[size] = false;
+  }
 }
 
 void CjkUiFonts::setLanguage(const Language language) {

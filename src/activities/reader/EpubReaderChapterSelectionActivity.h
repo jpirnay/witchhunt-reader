@@ -22,6 +22,7 @@ class EpubReaderChapterSelectionActivity final : public Activity {
   int getTotalItems() const;
 
  public:
+  bool drawsBookText() const override { return true; }
   explicit EpubReaderChapterSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                               const std::shared_ptr<Epub>& epub, const std::string& epubPath,
                                               const int currentSpineIndex, const int currentTocIndex)

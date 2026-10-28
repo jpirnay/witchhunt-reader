@@ -19,6 +19,9 @@
 // The books set in several font families also run with the families Publisher Fonts lays their blocks out in,
 // Accents (<book>_accents.golden.txt). Off and Body Text are the default golden, and All Text is the Accents one:
 // Body Text and All Text change only the body font ID, which the shim renderer draws alike.
+//
+// The books whose text-align matters also run with the book's own alignment (<book>_bookalign.golden.txt): the default
+// justifies every block, which hides text-align start and end.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -44,7 +47,7 @@ std::string freshCacheDir(const std::string& tag) {
 }
 
 // The render setting a case turns ON; every other one stays as in the default.
-enum class Variant { Default, Normalization, Hyphenation, Bionic, Accents };
+enum class Variant { Default, Normalization, Hyphenation, Bionic, Accents, BookAlignment };
 
 // One corpus book under one variant.
 struct Case {
@@ -62,6 +65,8 @@ const char* variantName(const Variant v) {
       return "bionicReading";
     case Variant::Accents:
       return "publisherFontsAccents";
+    case Variant::BookAlignment:
+      return "booksAlignment";
     case Variant::Default:
       break;
   }
@@ -89,6 +94,10 @@ const char* const kBionicBooks[] = {"test_long_paragraph_spacing", "test_text_re
 
 // Books set in several font families (see test/epubs/make_test_font_families.py).
 const char* const kFontFamilyBooks[] = {"test_font_families"};
+
+// Books whose text-align matters: the default profile justifies everything, the book's own alignment shows start and
+// end resolved along the direction (see test/epubs/make_test_writing_modes.py).
+const char* const kBookAlignmentBooks[] = {"test_rtl_markup"};
 
 // The families as the reader builds them for a 14 pt built-in body (buildBookFontFamilies), with stand-in IDs: the
 // built-in sans-serif's rungs are 2000 + their size, the accent families' native sizes 0x12345600, 0x23456700 and
@@ -129,6 +138,8 @@ std::string variantSuffix(const Case& c) {
       return "_bionic";
     case Variant::Accents:
       return "_accents";
+    case Variant::BookAlignment:
+      return "_bookalign";
     case Variant::Default:
       break;
   }
@@ -141,6 +152,7 @@ std::string runOnce(const Case& c, const std::string& cacheDir) {
   profile.hyphenationEnabled = c.variant == Variant::Hyphenation;
   profile.bionicReadingEnabled = c.variant == Variant::Bionic;
   if (c.variant == Variant::Accents) profile.fontFamilies = &kAccentsFamilies;
+  if (c.variant == Variant::BookAlignment) profile.paragraphAlignment = static_cast<uint8_t>(CssTextAlign::None);
   std::ostringstream dump;
   const bool ok = pipeline_harness::runAndDump(c.epub, cacheDir, profile, dump);
   EXPECT_TRUE(ok) << "pipeline failed for " << c.epub << " (" << variantName(c.variant) << ")\n" << dump.str();
@@ -153,7 +165,7 @@ std::string caseCacheDir(const Case& c, const std::string& tag) {
 }
 
 bool readFile(const fs::path& path, std::string& out) {
-  std::ifstream in(path);
+  std::ifstream in(path, std::ios::binary);
   if (!in) return false;
   std::stringstream bytes;
   bytes << in.rdbuf();
@@ -187,7 +199,7 @@ TEST_P(EpubPipelineTest, MatchesGolden) {
   const fs::path goldenPath = fs::path(GOLDEN_DIR) / (stem(c.epub) + variantSuffix(c) + ".golden.txt");
 
   if (std::getenv("UPDATE_GOLDENS")) {
-    std::ofstream(goldenPath) << dump;
+    std::ofstream(goldenPath, std::ios::binary) << dump;
     GTEST_SKIP() << "golden regenerated: " << goldenPath;
   }
   std::string golden;
@@ -226,6 +238,7 @@ std::vector<Case> corpusCases() {
     if (listed(kHyphenationBooks, stem(path))) cases.push_back(Case{path, Variant::Hyphenation});
     if (listed(kBionicBooks, stem(path))) cases.push_back(Case{path, Variant::Bionic});
     if (listed(kFontFamilyBooks, stem(path))) cases.push_back(Case{path, Variant::Accents});
+    if (listed(kBookAlignmentBooks, stem(path))) cases.push_back(Case{path, Variant::BookAlignment});
   }
   return cases;
 }

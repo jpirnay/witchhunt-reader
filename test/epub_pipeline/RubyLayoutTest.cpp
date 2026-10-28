@@ -280,6 +280,61 @@ TEST_F(RubyLayout, ALongGroupIsKeptWholeAndAnOverlongOneFallsBackInline) {
   EXPECT_EQ(joined(inlined), hanRun(90) + hanRun(140) + "よみ");
 }
 
+TEST_F(RubyLayout, AMultiWordBaseKeepsTheSpaceBetweenItsWords) {
+  const auto plain = lines("<p>See New York now</p>");
+  const auto l = lines("<p>See <ruby>New York<rt>ニューヨーク</rt></ruby> now</p>");
+  ASSERT_EQ(l.size(), 1u);
+  ASSERT_EQ(plain.size(), 1u);
+  std::string text;
+  for (const auto& w : l[0].words) text += w;
+  EXPECT_NE(text.find("New York"), std::string::npos) << "the base reads New York, not NewYork: " << text;
+  // The group spans the base's every token, the space included; "York" sits where it does without ruby.
+  ASSERT_EQ(l[0].ruby.size(), 1u);
+  const auto& [first, count, reading] = l[0].ruby[0];
+  EXPECT_EQ(first, 1u);
+  EXPECT_EQ(l[0].words[first], "New");
+  EXPECT_EQ(l[0].words[first + count - 1], "York");
+  EXPECT_EQ(l[0].x[first + count - 1], plain[0].x[2]);
+}
+
+TEST_F(RubyLayout, APrettyPrintedBaseGetsNoSpaceFromItsMarkup) {
+  const auto l = lines(R"(<p>a<ruby>
+  New York
+  <rt>ニューヨーク</rt>
+</ruby>b</p>)");
+  ASSERT_EQ(l.size(), 1u);
+  std::string text;
+  for (const auto& w : l[0].words) text += w;
+  EXPECT_EQ(text, "aNew Yorkb");
+}
+
+TEST_F(RubyLayout, ALongMonoRubyElementKeepsEveryReadingOverItsBase) {
+  std::string pairs;
+  for (int i = 0; i < 80; ++i) pairs += "字<rt>じ</rt>";
+  const auto l = lines("<p>" + hanRun(90) + "<ruby>" + pairs + "</ruby></p>");
+  size_t groups = 0;
+  for (const auto& line : l) {
+    groups += line.ruby.size();
+    for (const auto& w : line.words) EXPECT_NE(w, "じ") << "a reading drawn inline";
+  }
+  EXPECT_EQ(groups, 80u);
+}
+
+TEST_F(RubyLayout, ReadingsPastTheSsoAreChargedToTheTableRowBudget) {
+  // Each pair costs a word and a group (96 B), and the reading's own heap block (19 B) once it is charged: 12 KB is
+  // passed at about 106 pairs with the blocks and 126 without them.
+  auto tableLines = [&](const int pairs) {
+    std::string cell;
+    for (int i = 0; i < pairs; ++i) cell += "字<rt>おだいどころ</rt>";
+    const auto l = lines("<table><tr><td><ruby>" + cell + "</ruby></td></tr></table>");
+    size_t inTable = 0;
+    for (const auto& line : l) inTable += line.inTable ? 1 : 0;
+    return inTable;
+  };
+  EXPECT_GT(tableLines(90), 0u) << "a cell under the budget stays a table";
+  EXPECT_EQ(tableLines(118), 0u) << "readings over 15 bytes count toward the row budget, as long words do";
+}
+
 TEST_F(RubyLayout, ARubyLineIsTallerByHalfAnAscender) {
   const auto l = lines("<p>前</p><p><ruby>漢<rt>かん</rt></ruby></p><p>後</p>");
   ASSERT_EQ(l.size(), 3u);

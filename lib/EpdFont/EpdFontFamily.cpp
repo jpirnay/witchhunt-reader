@@ -38,6 +38,11 @@ int8_t EpdFontFamily::getKerning(const uint32_t leftCp, const uint32_t rightCp, 
   return getFont(style)->getKerning(leftCp, rightCp);
 }
 
+void EpdFontFamily::beginText(const char* utf8Text, const Style style) const {
+  const EpdFont* font = getFont(style);
+  if (font && font->data->provider) font->data->provider->beginText(utf8Text);
+}
+
 void EpdFontFamily::prefetch(const char* utf8Text, const uint8_t styleMask) const {
   const EpdFont* asked[4] = {};
   uint8_t count = 0;

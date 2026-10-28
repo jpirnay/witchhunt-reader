@@ -47,6 +47,8 @@ struct MenuResult {
   int8_t inlineFootnotePreviewsOverride = -1;
   // Browse Files view (CrossPointSettings::FILE_BROWSER_VIEW), appended like the above.
   uint8_t browserView = 0;
+  // Appended like the above: -1 = default, otherwise CrossPointSettings::LINE_COMPRESSION.
+  int8_t lineSpacingOverride = -1;
 };
 
 struct ChapterResult {

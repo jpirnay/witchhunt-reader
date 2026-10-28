@@ -165,6 +165,31 @@ TEST(ContentOpfParser, ExtractsMetadataManifestAndGuideFields) {
   EXPECT_EQ(parser.guideCoverPageHref, "book/OEBPS/text/cover.xhtml");
 }
 
+// The spine's page-progression-direction, read with or without a cache: rtl, ltr, or Default when it says nothing or
+// says `default`. Values are case-insensitive; a prefixed spine tag counts.
+TEST(ContentOpfParser, ReadsThePageProgressionDirection) {
+  const std::string cacheDir = makeTempDir();
+  ASSERT_FALSE(cacheDir.empty());
+  TempDirGuard dirGuard(cacheDir);
+  const auto progression = [&cacheDir](const std::string& spineTag) {
+    const std::string xml =
+        "<?xml version='1.0' encoding='utf-8'?>"
+        "<package xmlns:opf='http://www.idpf.org/2007/opf' xmlns:dc='http://purl.org/dc/elements/1.1/'>"
+        "<metadata><dc:title>T</dc:title></metadata>"
+        "<manifest><item id='c' href='c.xhtml' media-type='application/xhtml+xml'/></manifest>" +
+        spineTag + "<itemref idref='c'/></" + (spineTag.rfind("<opf:", 0) == 0 ? "opf:spine" : "spine") + "></package>";
+    ContentOpfParser parser(cacheDir, "/book/", xml.size(), nullptr);
+    EXPECT_TRUE(parseOpfXml(parser, xml));
+    return parser.pageProgression;
+  };
+  EXPECT_EQ(PageProgression::Rtl, progression("<spine page-progression-direction='rtl'>"));
+  EXPECT_EQ(PageProgression::Ltr, progression("<spine page-progression-direction='ltr'>"));
+  EXPECT_EQ(PageProgression::Rtl, progression("<spine toc='ncx' page-progression-direction='RTL'>"));
+  EXPECT_EQ(PageProgression::Default, progression("<spine page-progression-direction='default'>"));
+  EXPECT_EQ(PageProgression::Default, progression("<spine>"));
+  EXPECT_EQ(PageProgression::Rtl, progression("<opf:spine page-progression-direction='rtl'>"));
+}
+
 // A cover/metadata load (Epub::loadForCover / loadForMetadata) passes a null cache. It must still
 // resolve the EPUB2 <meta name="cover"> -> manifest image item, and it must NOT build the .items.bin
 // item store: that store exists only to resolve spine idrefs, which a null cache skips entirely.

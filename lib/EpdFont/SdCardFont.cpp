@@ -736,6 +736,38 @@ int8_t SdCardFont::findIdenticalIntervals(const uint8_t styleIdx, const uint8_t*
 
 // --- Load ---
 
+bool SdCardFont::fileMapsCodepoint(const char* path, const uint32_t codepoint, bool* readable) {
+  *readable = false;
+  FsFile file;
+  if (!Storage.openFileForRead("SDCF", path, file)) return false;
+  uint8_t header[HEADER_SIZE];
+  uint8_t toc[STYLE_TOC_ENTRY_SIZE];
+  bool maps = false;
+  if (file.read(header, HEADER_SIZE) == HEADER_SIZE && memcmp(header, CPFONT_MAGIC, 8) == 0 &&
+      readU16(header + 8) == CPFONT_VERSION && header[12] != 0 &&
+      file.read(toc, STYLE_TOC_ENTRY_SIZE) == STYLE_TOC_ENTRY_SIZE && file.seekSet(readU32(toc + 24))) {
+    // The first style's intervals, in pieces, in codepoint order: a family's styles are cut from one character set.
+    uint32_t left = readU32(toc + 4);
+    *readable = true;
+    EpdUnicodeInterval piece[8];
+    while (left > 0 && !maps) {
+      const uint32_t count = left < 8 ? left : 8;
+      const auto bytes = static_cast<int>(count * sizeof(EpdUnicodeInterval));
+      if (file.read(reinterpret_cast<uint8_t*>(piece), bytes) != bytes) {
+        *readable = false;
+        break;
+      }
+      left -= count;
+      for (uint32_t i = 0; i < count && !maps; ++i) {
+        if (piece[i].first > codepoint) left = 0;  // past it
+        maps = piece[i].first <= codepoint && codepoint <= piece[i].last;
+      }
+    }
+  }
+  file.close();
+  return maps;
+}
+
 bool SdCardFont::load(const char* path) {
   freeAll();
   if (strlen(path) >= sizeof(filePath_)) {
@@ -1269,22 +1301,6 @@ bool SdCardFont::allCpsCovered(const PerStyle& s, const uint32_t* codepoints, ui
     if (!found) return false;
   }
   return true;
-}
-
-// Packs a run of 2-bit glyph bytes (4 pixels each, first pixel in the top bits) into the glyph's ink
-// mask (8 pixels a byte, first pixel in the top bit): a pixel is ink when its level is not 0, the
-// rule GfxRenderer's black-and-white pass draws by (draw mask 0x0E, raw {1,2,3}). Writes
-// (inBytes + 1) / 2 bytes. `out` may be `in`: byte j is written after bytes 2j and 2j + 1 are read.
-static void packInkMask(const uint8_t* in, const uint32_t inBytes, uint8_t* out) {
-  const auto nibble = [](const uint8_t b) -> uint8_t {
-    return static_cast<uint8_t>(((b & 0xC0) ? 8 : 0) | ((b & 0x30) ? 4 : 0) | ((b & 0x0C) ? 2 : 0) |
-                                ((b & 0x03) ? 1 : 0));
-  };
-  for (uint32_t j = 0; 2 * j < inBytes; j++) {
-    const uint8_t hi = nibble(in[2 * j]);
-    const uint8_t lo = 2 * j + 1 < inBytes ? nibble(in[2 * j + 1]) : 0;
-    out[j] = static_cast<uint8_t>((hi << 4) | lo);
-  }
 }
 
 int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly,

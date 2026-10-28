@@ -56,7 +56,8 @@ std::string paragraphs(const char* label, const int count, const char* tail = ""
   for (int i = 1; i <= count; ++i) {
     out += "<p>" + std::string(label) + " paragraph " + std::to_string(i) +
            " carries enough ordinary words to give it some weight on the page, and then a second"
-           " clause long enough that a page can end inside it." +
+           " clause long enough that a page can end inside it, which takes the better part of five lines of the"
+           " page, so that the next page opens inside one." +
            (i == 1 ? tail : "") + "</p>\n";
   }
   return out;
@@ -418,9 +419,9 @@ TEST_F(OffsetPushFixture, AMidParagraphPageStartPushesAsATextPoint) {
   ASSERT_TRUE(pos.hasVisibleTextOffset);
 
   const auto ko = ProgressMapper::toKOReader(epub, pos);
-  // "Target paragraph 20 carries ... on the page, and then a " is 97 codepoints: the page opens
-  // on "second".
-  EXPECT_EQ(ko.xpath, "/body/DocFragment[2]/body/section[1]/p[20]/text()[1].97");
+  // "Target paragraph 13 carries ... a second clause long enough that a page can end inside it, " is 154
+  // codepoints: the page opens on "which takes".
+  EXPECT_EQ(ko.xpath, "/body/DocFragment[2]/body/section[1]/p[13]/text()[1].154");
 }
 
 TEST_F(OffsetPushFixture, APageStartingAtAParagraphPushesAsItsFirstCodepoint) {
@@ -430,7 +431,7 @@ TEST_F(OffsetPushFixture, APageStartingAtAParagraphPushesAsItsFirstCodepoint) {
   ASSERT_TRUE(pos.hasVisibleTextOffset);
 
   const auto ko = ProgressMapper::toKOReader(epub, pos);
-  EXPECT_EQ(ko.xpath, "/body/DocFragment[2]/body/section[1]/p[11]/text()[1].0");
+  EXPECT_EQ(ko.xpath, "/body/DocFragment[2]/body/section[1]/p[7]/text()[1].0");
 }
 
 TEST_F(OffsetPushFixture, TheChapterStartPushesAsOffsetZeroOfItsFirstText) {
@@ -461,9 +462,9 @@ TEST_F(OffsetPushFixture, AParagraphAfterAnEntityPushesToTheExactCodepoint) {
   const auto pos = pageWithOffset(*section, kFlatSpine, 1);
   ASSERT_TRUE(pos.hasVisibleTextOffset);
   const auto ko = ProgressMapper::toKOReader(epub, pos);
-  // "Earlier paragraph 9 carries ... on the page, and then a " is 97 codepoints: the page opens
-  // on "second".
-  EXPECT_EQ(ko.xpath, "/body/DocFragment[1]/body/p[9]/text()[1].97");
+  // "Earlier paragraph 7 carries ... a second clause long enough that a page can end inside it, " is 154
+  // codepoints: the page opens on "which takes".
+  EXPECT_EQ(ko.xpath, "/body/DocFragment[1]/body/p[7]/text()[1].154");
 }
 
 // --- Pull by content offset ---------------------------------------------------------------------
