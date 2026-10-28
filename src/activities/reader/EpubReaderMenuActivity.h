@@ -20,6 +20,7 @@
 
 class EpubReaderMenuActivity final : public TabbedUiListActivity {
  public:
+  bool drawsBookText() const override { return true; }
   // Menu actions identified by StrId of the menu item.
   // Used by the parent activity to interpret the result.
   enum class MenuAction {
@@ -59,7 +60,8 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
                                   const int8_t initialGuideDotsOverride, const int8_t initialParagraphAlignmentOverride,
                                   const int8_t initialTextAntiAliasingOverride, const int8_t initialHyphenationOverride,
                                   const int8_t initialFontSizeNormalizationOverride,
-                                  const int8_t initialInlineFootnotePreviewsOverride, const bool hasStarredPages,
+                                  const int8_t initialInlineFootnotePreviewsOverride,
+                                  const int8_t initialLineSpacingOverride, const bool hasStarredPages,
                                   const bool isCurrentPageStarred, const bool hasPrintedPages);
 
   void onExit() override;
@@ -140,6 +142,7 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
   int8_t pendingHyphenationOverride = -1;
   int8_t pendingFontSizeNormalizationOverride = -1;
   int8_t pendingInlineFootnotePreviewsOverride = -1;
+  int8_t pendingLineSpacingOverride = -1;
 
   static constexpr const char* pageTurnLabels[] = {"", "1", "3", "6", "12"};
 

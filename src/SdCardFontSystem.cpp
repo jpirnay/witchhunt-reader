@@ -1,17 +1,24 @@
 #include "SdCardFontSystem.h"
 
+#include <BuildArena.h>
 #include <Epub/BookFonts.h>
 #include <EspNorFlash.h>
 #include <GfxRenderer.h>
+#include <GlyphProvider.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
+#include <SdCardFont.h>
+#include <ttf/TtfFace.h>
 #include <ttf/TtfFamily.h>
 #include <ttf/TtfFont.h>
 
 #include <climits>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 
+#include "CjkUiFonts.h"
 #include "CrossPointSettings.h"
 #include "SdCardFontGlobals.h"
 #include "SerialTestApi.h"
@@ -44,8 +51,26 @@ uint32_t ttfNowMs() { return millis(); }
 // A page's glyph uses count once: in its black-and-white pass, the first of its passes.
 bool ttfCountsDraw() { return ttfRenderer && ttfRenderer->getRenderMode() == GfxRenderer::BW; }
 
+// A render pass's glyph misses outside the reader draw in the secondary framebuffer, lent on the first one that needs
+// a scratch block (glyph_miss::LendScope, ActivityManager) and given back as the frame is about to be pushed
+// (GfxRenderer's before-push hook), or as the pass releases the RenderLock when it pushes nothing. The lend is the
+// screens' black-and-white one (HomeActivity, the font selector): RED is seeded with the displayed frame while the
+// secondary still holds it. The return seeds the secondary from the finished frame and arms the next FAST to diff
+// against RED: the push runs with both buffers (held through it, the X3's HALF was a 2.5 s full refresh), and fast
+// refresh survives. Nothing of the heap is taken.
+std::optional<BuildArena> glyphLend;
+
+void returnGlyphLend() {
+  if (!glyphLend || !ttfRenderer) return;
+  glyph_miss::regionReturned(&*glyphLend);
+  glyphLend.reset();
+  ttfRenderer->returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+  ttfRenderer->setSingleBufferFastDiff(false);
+}
+
 void ttfPassEnded() {
   if (ttfSystem) ttfSystem->releaseTtfMissMemory();
+  returnGlyphLend();
 }
 
 // Lists a TTF family only when the glyph store can install it, in flash mode or, larger, in SD mode.
@@ -58,10 +83,37 @@ bool ttfFamilyFits(const uint32_t* fileBytes, const uint32_t* sdBytes, const uin
 
 }  // namespace
 
-// Free-function resolver used by CrossPointSettings::getReaderFontId().
+BuildArena* lendFramebufferForGlyphs(const size_t bytes) {
+  if (!ttfRenderer || glyphLend || !ttfRenderer->hasSecondaryBuffer()) return nullptr;
+  // Only when the heap needs it: a lend can cost the X3 a slower refresh (a 2.55 s HALF where the chapter list took
+  // 1-1.3 s, and a wait for the last refresh to finish). A miss the heap holds with kLendFloor to spare stays there:
+  // the chapter list, the Library and Book Info (~50 KB free); the reader menu (~39 KB) lends.
+  static constexpr size_t kLendFloor = 24 * 1024;
+  const size_t freeBytes = esp_get_free_heap_size();
+  const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
+  if (freeBytes >= bytes + kLendFloor && largest >= bytes) return nullptr;
+  ttfRenderer->syncRedRamFromFrameBuffer();  // the displayed frame, while the secondary still holds it
+  size_t size = 0;
+  uint8_t* const region = ttfRenderer->borrowSecondaryBuffer(&size);
+  if (!region) return nullptr;
+  glyphLend.emplace(region, size);
+  if (!glyphLend->valid()) {
+    glyphLend.reset();
+    ttfRenderer->returnSecondaryBuffer();
+    return nullptr;
+  }
+  ttfRenderer->setSingleBufferFastDiff(true);
+  LOG_DBG("SDFS", "Lent the secondary framebuffer to the pass's glyph misses (%u bytes, free=%lu)",
+          static_cast<unsigned>(size), static_cast<unsigned long>(esp_get_free_heap_size()));
+  return &*glyphLend;
+}
+
+// Free-function resolver used by CrossPointSettings::getReaderFontId() and the reader.
 // Resolved by the linker — no callback indirection stored in settings.
+// It resolves the family the book's language asks for, the one ensureSdFontLoadedForPath() loaded; a font preview
+// asks SdCardFontSystem::resolveFontId() for the family it shows.
 int resolveSdCardFontId(const char* familyName, uint8_t pointSize) {
-  return sdFontSystem.resolveFontId(familyName, pointSize);
+  return sdFontSystem.resolveFontId(sdFontSystem.effectiveReaderFamily(familyName).c_str(), pointSize);
 }
 
 // --- Font-family dynamic SettingInfo trampolines ---
@@ -326,9 +378,242 @@ ReaderSizeList SdCardFontSystem::sizeListFor(const char* familyName) const {
   return ReaderSizeList::forFamily(sizes, n);
 }
 
+void SdCardFontSystem::setReaderLanguage(const std::string& language) {
+  std::string lang;
+  lang.reserve(language.size());
+  for (const unsigned char ch : language) {
+    if (ch == '_') {
+      lang.push_back('-');
+    } else if (ch >= 'A' && ch <= 'Z') {
+      lang.push_back(static_cast<char>(ch - 'A' + 'a'));
+    } else {
+      lang.push_back(static_cast<char>(ch));
+    }
+  }
+
+  const auto tagIs = [&lang](const char* tag) {
+    const std::string value(tag);
+    return lang == value ||
+           (lang.size() > value.size() && lang.compare(0, value.size(), value) == 0 && lang[value.size()] == '-');
+  };
+
+  ReaderCjkRegion region = ReaderCjkRegion::None;
+  if (tagIs("ja")) {
+    region = ReaderCjkRegion::Japanese;
+  } else if (tagIs("ko")) {
+    region = ReaderCjkRegion::Korean;
+  } else if (lang == "cn" || tagIs("zh-hans") || tagIs("zh-cn") || tagIs("zh-sg") || tagIs("zh-chs")) {
+    region = ReaderCjkRegion::SimplifiedChinese;
+  } else if (tagIs("zh-hant") || tagIs("zh-tw") || tagIs("zh-hk") || tagIs("zh-mo") || tagIs("zh-cht")) {
+    region = ReaderCjkRegion::TraditionalChinese;
+  } else if (tagIs("zh")) {
+    region = ReaderCjkRegion::ChineseAmbiguous;
+  }
+
+  readerCjkRegion_ = region;
+}
+
+void SdCardFontSystem::clearReaderLanguage() {
+  readerCjkRegion_ = ReaderCjkRegion::None;
+  languageFamily_.clear();
+  languageFamilyKey_ = 0;
+}
+
+void SdCardFontSystem::setReaderLanguagePending() { readerCjkRegion_ = ReaderCjkRegion::Pending; }
+
+bool SdCardFontSystem::waitsForReaderLanguage() const {
+  if (readerCjkRegion_ != ReaderCjkRegion::Pending) return false;
+  // The language may give the book a regional sibling, or a Noto CJK family in place of a font without its script,
+  // whenever one is installed.
+  std::string stem;
+  for (const auto& installed : registry_.getFamilies()) {
+    if (familyRegion(installed.name, stem) != ReaderCjkRegion::None) return true;
+  }
+  return false;
+}
+
+bool SdCardFontSystem::familyMapsCodepoint(const SdCardFontFamilyInfo& family, const uint32_t codepoint) {
+  if (family.files.empty()) return true;
+  const SdCardFontFileInfo* regular = &family.files.front();
+  for (const auto& file : family.files) {
+    if (file.style == 0) regular = &file;
+  }
+  if (!family.ttf()) {
+    bool readable = false;
+    const bool maps = SdCardFont::fileMapsCodepoint(regular->path.c_str(), codepoint, &readable);
+    return maps || !readable;
+  }
+  HalFile handle;
+  if (!Storage.openFileForRead("SDFS", regular->path.c_str(), handle)) return true;
+  // The table directory and the cmap, read through a page cache (4 KB, for this call only).
+  auto pages = makeUniqueNoThrow<ttf::SdPageCache>();
+  if (!pages) {
+    handle.close();
+    return true;
+  }
+  ttf::SdRange range;
+  range.file = ttf::fileSource(handle, static_cast<uint32_t>(handle.fileSize()));
+  range.length = range.file.size;
+  range.cache = pages.get();
+  FontBytes bytes(nullptr, 0, &range);
+  const bool maps = ttf::mapsCodepoint(bytes, codepoint);
+  handle.close();
+  return maps || bytes.ioError();
+}
+
+bool SdCardFontSystem::coversCjk(const char* family) {
+  const SdCardFontFamilyInfo* info = family && family[0] != '\0' ? findFamily(family) : nullptr;
+  if (!info || !info->ttf()) return false;
+  const uint32_t files = info->filesKey();
+  const uint32_t key = glyphstore::fnv1a(&files, sizeof files, glyphstore::fnv1a(family, strlen(family)));
+  if (key != cjkFamilyKey_) {
+    cjkFamilyKey_ = key;
+    cjkFamily_ = familyMapsCodepoint(*info, 0x4E00) || familyMapsCodepoint(*info, 0xAC00);  // 一, 가
+  }
+  return cjkFamily_;
+}
+
+bool SdCardFontSystem::openReadOnly(GfxRenderer& renderer, const char* const* familyNames, const uint8_t count,
+                                    const uint8_t pointSize) {
+  const SdCardFontFamilyInfo* families[SdCardFontManager::kMaxTtfFamilies] = {};
+  uint8_t found = 0;
+  for (uint8_t i = 0; i < count && found < SdCardFontManager::kMaxTtfFamilies; ++i) {
+    const SdCardFontFamilyInfo* family = findFamily(familyNames[i]);
+    if (family && family->ttf()) families[found++] = family;
+  }
+  if (found == 0 || families[0] != findFamily(familyNames[0])) return false;
+  return manager_.openTtfFamiliesReadOnly(families, found, renderer, sizeListFor(familyNames[0]).snap(pointSize));
+}
+
+void SdCardFontSystem::selectLanguageFamily(const char* family) {
+  const std::string name = family ? family : "";
+  const auto region = static_cast<uint8_t>(readerCjkRegion_);
+  const uint8_t own = family ? 0 : 1;
+  const uint32_t key =
+      glyphstore::fnv1a(name.data(), name.size(), glyphstore::fnv1a(&region, 1, glyphstore::fnv1a(&own, 1)));
+  if (key == languageFamilyKey_) return;
+  languageFamilyKey_ = key;
+  languageFamily_.clear();
+
+  // A character every font of the region's script has.
+  uint32_t probe = 0;
+  const char* suffix = nullptr;
+  switch (readerCjkRegion_) {
+    case ReaderCjkRegion::Japanese:
+      probe = 0x3042;  // あ
+      suffix = "JP";
+      break;
+    case ReaderCjkRegion::SimplifiedChinese:
+    case ReaderCjkRegion::ChineseAmbiguous:  // as effectiveReaderFamily(): Simplified for a bare "zh"
+      probe = 0x7684;                        // 的
+      suffix = "SC";
+      break;
+    case ReaderCjkRegion::TraditionalChinese:
+      probe = 0x7684;
+      suffix = "TC";
+      break;
+    case ReaderCjkRegion::Korean:
+      probe = 0xAC00;  // 가
+      suffix = "KR";
+      break;
+    case ReaderCjkRegion::None:
+    case ReaderCjkRegion::Pending:
+      return;
+  }
+  if (!family) return;  // the book's own font
+  std::string stem;
+  if (familyRegion(name, stem) != ReaderCjkRegion::None) return;  // a Noto CJK family: effectiveReaderFamily()'s
+  // A built-in reader face has no CJK: fontconvert.py's default intervals leave it out.
+  if (const SdCardFontFamilyInfo* info = name.empty() ? nullptr : findFamily(name.c_str())) {
+    if (familyMapsCodepoint(*info, probe)) return;
+  }
+
+  const bool sansFirst = name.find("Sans") != std::string::npos;
+  for (const char* candidateStem : {sansFirst ? "NotoSans" : "NotoSerif", sansFirst ? "NotoSerif" : "NotoSans"}) {
+    const std::string candidate = std::string(candidateStem) + suffix;
+    if (findFamily(candidate.c_str())) {
+      LOG_INF("SDFS", "Book language draws %s in %s: '%s' has no U+%04lX",
+              name.empty() ? "a built-in font" : name.c_str(), candidate.c_str(), name.c_str(),
+              static_cast<unsigned long>(probe));
+      languageFamily_ = candidate;
+      return;
+    }
+  }
+}
+
+SdCardFontSystem::ReaderCjkRegion SdCardFontSystem::familyRegion(const std::string& family, std::string& stem) {
+  if (family.rfind("NotoSans", 0) == 0) {
+    stem = "NotoSans";
+  } else if (family.rfind("NotoSerif", 0) == 0) {
+    stem = "NotoSerif";
+  } else {
+    return ReaderCjkRegion::None;
+  }
+
+  const std::string suffix = family.substr(stem.size());
+  if (suffix == "JP") return ReaderCjkRegion::Japanese;
+  if (suffix == "SC") return ReaderCjkRegion::SimplifiedChinese;
+  if (suffix == "TC") return ReaderCjkRegion::TraditionalChinese;
+  if (suffix == "KR") return ReaderCjkRegion::Korean;
+  return ReaderCjkRegion::None;
+}
+
+std::string SdCardFontSystem::effectiveReaderFamily(const char* configuredFamily) const {
+  const std::string configured = configuredFamily ? configuredFamily : "";
+  if (configured.empty() || readerCjkRegion_ == ReaderCjkRegion::None || readerCjkRegion_ == ReaderCjkRegion::Pending) {
+    return configured;
+  }
+
+  std::string stem;
+  const ReaderCjkRegion configuredRegion = familyRegion(configured, stem);
+  if (configuredRegion == ReaderCjkRegion::None) return configured;
+
+  ReaderCjkRegion targetRegion = readerCjkRegion_;
+  if (targetRegion == ReaderCjkRegion::ChineseAmbiguous) {
+    // Bare "zh" has no script/region. Preserve an explicit Chinese choice;
+    // otherwise prefer Simplified Chinese, which is the safest default for the corpus.
+    targetRegion = (configuredRegion == ReaderCjkRegion::SimplifiedChinese ||
+                    configuredRegion == ReaderCjkRegion::TraditionalChinese)
+                       ? configuredRegion
+                       : ReaderCjkRegion::SimplifiedChinese;
+  }
+
+  if (targetRegion == configuredRegion) return configured;
+
+  const char* targetSuffix = nullptr;
+  switch (targetRegion) {
+    case ReaderCjkRegion::Japanese:
+      targetSuffix = "JP";
+      break;
+    case ReaderCjkRegion::SimplifiedChinese:
+      targetSuffix = "SC";
+      break;
+    case ReaderCjkRegion::TraditionalChinese:
+      targetSuffix = "TC";
+      break;
+    case ReaderCjkRegion::Korean:
+      targetSuffix = "KR";
+      break;
+    case ReaderCjkRegion::None:
+    case ReaderCjkRegion::Pending:
+    case ReaderCjkRegion::ChineseAmbiguous:
+      return configured;
+  }
+
+  const std::string candidate = stem + targetSuffix;
+  if (!registry_.findFamily(candidate)) {
+    LOG_DBG("SDFS", "Regional CJK sibling %s not installed; keeping %s", candidate.c_str(), configured.c_str());
+    return configured;
+  }
+
+  return candidate;
+}
+
 void SdCardFontSystem::begin(GfxRenderer& renderer) {
   ttfRenderer = &renderer;
   ttfSystem = this;
+  manager_.setUiFontHook(&CjkUiFonts::setReaderFont);
+  GfxRenderer::setBeforePushHook(&returnGlyphLend);
   TtfFont::setHooks({&RenderLock::heldByCurrentTask, &ttfYield, &ttfReclaim, &ttfNowMs, &ttfCountsDraw});
   // A miss's memory on the heap lasts as long as the pass that drew it: whichever task rendered gives it back with
   // RenderLock, and a page drawn from the glyph store needs none of it (TtfFontSet::releaseMissMemory).
@@ -343,7 +628,11 @@ void SdCardFontSystem::begin(GfxRenderer& renderer) {
 }
 
 void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
-  const char* wantedFamily = SETTINGS.sdFontFamilyName;
+  const std::string wantedFamilyName = effectiveReaderFamily(SETTINGS.sdFontFamilyName);
+  const char* wantedFamily = wantedFamilyName.c_str();
+  if (wantedFamilyName != SETTINGS.sdFontFamilyName) {
+    LOG_DBG("SDFS", "Book language selects regional CJK family: %s -> %s", SETTINGS.sdFontFamilyName, wantedFamily);
+  }
   const std::string& currentFamily = manager_.currentFamilyName();
   const uint8_t targetPt = sizeListFor(wantedFamily).snap(SETTINGS.fontPointSize);
 

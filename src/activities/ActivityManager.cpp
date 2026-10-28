@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <BoardConfig.h>  // FREEINK_CAP_USB_MSC
+#include <GlyphProvider.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
 #include <Logging.h>
@@ -159,7 +160,13 @@ void ActivityManager::renderTaskLoop() {
       // on activity transitions like the rest, and every path that displays a page republishes
       // it (with an empty set when the page has no links), so a displayed page always describes
       // itself.
-      currentActivity->render(std::move(lock));
+      {
+        // A screen that draws book text draws its first-sight glyphs in the secondary framebuffer, not on the heap:
+        // black-and-white screens all. The reader keeps it for its grayscale passes and pre-renders.
+        const bool lend = currentActivity->drawsBookText() && !currentActivity->isReaderActivity();
+        const glyph_miss::LendScope glyphLend(lend ? &lendFramebufferForGlyphs : nullptr);
+        currentActivity->render(std::move(lock));
+      }
       // Cleared unconditionally on every exit path of render(): the call cannot throw
       // (-fno-exceptions) and every `return` inside it lands here.
       renderPassActive.store(false, std::memory_order_release);
@@ -333,6 +340,7 @@ void ActivityManager::loop() {
         if (exitingReader && !currentActivity->isReaderActivity()) {
           unloadSdFontIfLoaded();
         }
+        syncBookFonts();
         LOG_DBG("ACT", "Popped from activity stack, new size = %zu", stackActivities.size());
         // Handle result if necessary
         if (currentActivity->resultHandler) {
@@ -404,6 +412,7 @@ void ActivityManager::loop() {
       currentActivity = std::move(pendingActivity);
       refreshWifiActivityFlag();
       noteActivityChanged();
+      syncBookFonts();
 
       lock.unlock();  // onEnter may acquire its own lock
       currentActivity->onEnter();
@@ -439,6 +448,11 @@ void ActivityManager::exitActivity(const RenderLock& lock) {
   }
 }
 
+void ActivityManager::syncBookFonts() {
+  // A reader anywhere on the stack owns the fonts: its menu, TOC and lists borrow from its set.
+  syncUiBookFonts(currentActivity && currentActivity->drawsBookText(), isReaderActivity());
+}
+
 void ActivityManager::refreshWifiActivityFlag() {
   // The whole stack, not just the top: a network activity with a prompt or a picker above it still
   // owns the radio -- it brought it up and takes it down in its own onExit().
@@ -463,6 +477,7 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
     currentActivity = std::move(newActivity);
     refreshWifiActivityFlag();
     noteActivityChanged();
+    syncBookFonts();
     currentActivity->onEnter();
   }
 }

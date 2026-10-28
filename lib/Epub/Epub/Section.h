@@ -189,6 +189,10 @@ class Section {
   struct BuildParams {
     int fontId = 0;
     float lineCompression = 1.0f;
+    // Book's style line spacing (LineSpacing.h): a block's CSS line-height, in ems of lineHeightEmPx, sets its pitch,
+    // never below this compression. 0 = off. Hashed only when on, so the variants without it keep their key.
+    float bookLineHeightFloor = 0.0f;
+    uint16_t lineHeightEmPx = 0;
     bool extraParagraphSpacing = false;
     uint8_t paragraphAlignment = 0;
     uint16_t viewportWidth = 0;

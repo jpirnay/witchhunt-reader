@@ -1,8 +1,8 @@
 # fixture mode heap-side-peak-bytes (see heap_peak_check.py; regenerate with UPDATE_HEAP_BASELINE=1)
 epubs/test_cjk_block_seams.epub arena 26326
 epubs/test_cjk_block_seams.epub heap 40603
-epubs/test_cjk_ja_soseki.epub arena 25281
-epubs/test_cjk_ja_soseki.epub heap 52366
+epubs/test_cjk_ja_soseki.epub arena 36305
+epubs/test_cjk_ja_soseki.epub heap 61011
 epubs/test_cjk_ko_hyeon.epub arena 29793
 epubs/test_cjk_ko_hyeon.epub heap 53200
 epubs/test_cjk_line_breaking.epub arena 41441

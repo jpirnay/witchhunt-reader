@@ -71,6 +71,11 @@ FaceStatus parseFace(FontBytes& bytes, Face* face);
 /// The glyph for `codepoint`, or 0 (the font has none, or the cmap is broken: see bytes.outOfRange()).
 uint16_t glyphIndex(FontBytes& bytes, const Face& face, uint32_t codepoint);
 
+/// Whether the font's Unicode map, the one parseFace() would choose, maps `codepoint`, read from the table directory
+/// and the cmap alone: what a font covers, asked of its file on the card before it is installed. False for a file of
+/// another kind, or without such a map; bytes.ioError() tells a failed card read.
+bool mapsCodepoint(FontBytes& bytes, uint32_t codepoint);
+
 /// The post table's header, which FreeType reads (tt_face_load_post) and which holds italicAngle; SD mode copies only
 /// it.
 constexpr uint32_t kPostHeaderBytes = 32;

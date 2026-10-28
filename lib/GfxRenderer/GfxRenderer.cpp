@@ -1382,6 +1382,8 @@ int GfxRenderer::rawTextWidth(const int fontId, const char* text, const EpdFontF
     return 0;
   }
 
+  family->beginText(text, style);  // the string decides its glyphs' source (GlyphProvider::beginText)
+
   int w = 0, h = 0;
   family->getTextDimensions(text, &w, &h, style);
   return w;
@@ -1398,6 +1400,7 @@ bool GfxRenderer::getTextInkMetrics(const int fontId, const char* text, const Ep
   if (text == nullptr || *text == '\0') return false;
   const EpdFontFamily* const family = findFontFamily(fontId);
   if (!family) return false;
+  family->beginText(text, style);  // the string decides its glyphs' source (GlyphProvider::beginText)
 
   bool any = false;
   uint32_t cp;
@@ -1464,6 +1467,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     return;
   }
   const auto& font = *family;
+  family->beginText(text, style);  // the string decides its glyphs' source (GlyphProvider::beginText)
   const auto renderModeSnapshot = getRenderMode();
 
   uint32_t cp;
@@ -1576,6 +1580,7 @@ void GfxRenderer::drawTextAtScale(const int fontId, const int x, const int y, co
 
   const EpdFontFamily* const family = findFontFamily(fontId);
   if (!family) return;
+  family->beginText(text, style);  // the string decides its glyphs' source (GlyphProvider::beginText)
   const auto& font = *family;
   const auto renderModeSnapshot = getRenderMode();
 
@@ -2815,6 +2820,7 @@ void GfxRenderer::invertScreen() const {
 }
 
 void GfxRenderer::displayWindow(int logX, int logY, int logW, int logH, bool turnOffScreen) const {
+  if (beforePushHook_) beforePushHook_();
   // Translate logical rectangle to physical panel coordinates using the same
   // rotation rules as rotateCoordinates(). Physical (x=source, y=gate row).
   uint16_t physX, physY, physW, physH;
@@ -2913,6 +2919,7 @@ void GfxRenderer::displayBuffer(const HalDisplay::RefreshMode refreshMode) const
     LOG_ERR("GFX", "displayBuffer with released framebuffer ignored");
     return;
   }
+  if (beforePushHook_) beforePushHook_();
   const auto effectiveMode = consumeRefreshOverride(refreshMode);
   noteRefresh(effectiveMode);
 
@@ -2957,6 +2964,8 @@ std::string GfxRenderer::truncatedText(const int fontId, const char* text, const
     fontCacheManager_->recordText(text, fontId, style);
     return text;
   }
+
+  family->beginText(text, style);  // the string decides its glyphs' source (GlyphProvider::beginText)
 
   // SMALL_CAPS scales every metric, which the single-pass walk does not model; a font with no
   // U+2026 has nothing to truncate with. Neither case occurs today, so both take the old loop.
@@ -3220,6 +3229,8 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
     return 0;
   }
 
+  family->beginText(text, style);  // the string decides its glyphs' source (GlyphProvider::beginText)
+
   // A synthesised size measures on its own path, because the two accumulation models differ and
   // this function's whole contract is that measurement and rendering agree EXACTLY.
   //
@@ -3329,6 +3340,8 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
     fontCacheManager_->recordText(text, fontId, style);
     return;
   }
+
+  family->beginText(text, style);  // the string decides its glyphs' source (GlyphProvider::beginText)
 
   const auto& font = *family;
 

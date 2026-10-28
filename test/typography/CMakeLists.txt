@@ -1,5 +1,6 @@
 add_executable(TypographyTest
   TypographyTest.cpp
+  LineSpacingTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/CjkPunctuation.cpp
   ${REPO_ROOT}/lib/Epub/Epub/TypographyProfile.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/HyphenationCommon.cpp

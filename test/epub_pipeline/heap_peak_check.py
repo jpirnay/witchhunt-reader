@@ -30,8 +30,11 @@ def run(dump, epub, cache, arena):
     res = subprocess.run(args, capture_output=True, text=True, env=env, errors="replace")
     m = re.search(r"BENCHMARK pipeline_(ok|FAILED) .*?heap_peak=(\d+)B", res.stderr)
     if not m or m.group(1) != "ok":
-        sys.stderr.write(res.stderr[-4000:])
-        raise SystemExit(f"dump failed for {epub} (arena={arena})")
+        print(f"heap benchmark failed: epub={epub} arena={arena} returncode={res.returncode}", file=sys.stderr, flush=True)
+        print(f"command: {args!r}", file=sys.stderr, flush=True)
+        print("stdout:\n" + res.stdout[-4000:], file=sys.stderr, flush=True)
+        print("stderr:\n" + res.stderr[-4000:], file=sys.stderr, flush=True)
+        raise SystemExit(1)
     peak = int(m.group(2))
     return peak - ARENA if arena else peak
 

@@ -147,7 +147,11 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
   // between the extract and the layout parse. The dump therefore exercises the real ordering.
 
   out << "BOOK title=" << epub->getTitle() << " lang=" << epub->getLanguage() << " spine=" << epub->getSpineItemsCount()
-      << " toc=" << epub->getTocItemsCount() << " reliableToc=" << (epub->hasReliableToc() ? 1 : 0) << "\n";
+      << " toc=" << epub->getTocItemsCount() << " reliableToc=" << (epub->hasReliableToc() ? 1 : 0);
+  // Only when the spine declares it, so a book that does not say keeps the BOOK line it always had.
+  if (epub->pageProgression() == PageProgression::Rtl) out << " ppd=rtl";
+  if (epub->pageProgression() == PageProgression::Ltr) out << " ppd=ltr";
+  out << "\n";
 
   for (int i = 0; i < epub->getSpineItemsCount(); ++i) {
     const auto spineStart = std::chrono::steady_clock::now();
@@ -159,6 +163,8 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
     Section::BuildParams p;
     p.fontId = profile.fontId;
     p.lineCompression = profile.lineCompression;
+    p.bookLineHeightFloor = profile.bookLineHeightFloor;
+    p.lineHeightEmPx = profile.lineHeightEmPx;
     p.extraParagraphSpacing = profile.extraParagraphSpacing;
     p.paragraphAlignment = profile.paragraphAlignment;
     p.viewportWidth = profile.viewportWidth;

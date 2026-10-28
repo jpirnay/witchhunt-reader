@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "EpdFontData.h"
@@ -14,12 +15,30 @@ namespace glyph_miss {
 
 namespace detail {
 inline BuildArena* arena = nullptr;
+inline BuildArena* (*lend)(size_t bytes) = nullptr;
 inline uint32_t starved = 0;
 inline uint32_t drawn = 0;
 }  // namespace detail
 
 /// The region lent to the misses (Scope), or nullptr: they use the heap.
 inline BuildArena* arena() { return detail::arena; }
+
+/// The region a TrueType miss that needs `bytes` draws in: the one lent (Scope), else one LendScope's lender lends now,
+/// for the rest of the scope (asked once, lent or not; it may leave a miss the heap has room for to the heap), else
+/// nullptr: the heap. Only a miss's scratch block asks: lending is worth it for that, not for a built-in font's ring.
+inline BuildArena* lendingArena(const size_t bytes) {
+  if (!detail::arena && detail::lend) {
+    BuildArena* (*const lend)(size_t) = detail::lend;
+    detail::lend = nullptr;
+    detail::arena = lend(bytes);
+  }
+  return detail::arena;
+}
+
+/// The lender gives `region` back before its scope ends: no miss may draw in it any more.
+inline void regionReturned(const BuildArena* region) {
+  if (detail::arena == region) detail::arena = nullptr;
+}
 
 /// Lookups answered with nothing because that memory could not be had, not because the font lacks the glyph: a
 /// layout made while the count moved measured such glyphs as missing, and a page drawn while it moved has gaps.
@@ -44,6 +63,25 @@ class Scope {
  private:
   BuildArena* previous_ = nullptr;
   uint32_t starvedBefore_ = 0;
+};
+
+/// For the scope, a TrueType miss that finds no region lent may have `lend` lend one (lendingArena()), which stays the
+/// misses' until its lender gives it back (regionReturned()) or the scope ends. nullptr: none. Nests.
+class LendScope {
+ public:
+  explicit LendScope(BuildArena* (*lend)(size_t bytes)) : previousLend_(detail::lend), previousArena_(detail::arena) {
+    detail::lend = lend;
+  }
+  ~LendScope() {
+    detail::lend = previousLend_;
+    detail::arena = previousArena_;
+  }
+  LendScope(const LendScope&) = delete;
+  LendScope& operator=(const LendScope&) = delete;
+
+ private:
+  BuildArena* (*previousLend_)(size_t) = nullptr;
+  BuildArena* previousArena_ = nullptr;
 };
 
 }  // namespace glyph_miss
@@ -82,4 +120,9 @@ class GlyphProvider {
   /// `utf8Text` is about to be measured or drawn in this provider's style: a provider that renders glyphs
   /// can prepare the ones it lacks in one batch. Lookups must still work for anything it skipped.
   virtual void prefetch(const char* utf8Text) { (void)utf8Text; }
+
+  /// The renderer starts measuring or drawing the string `utf8Text`: the lookups that follow are its glyphs. Every
+  /// text call of GfxRenderer says so, so a provider may settle per string where its glyphs come from. Unlike
+  /// prefetch(), which a page's layout calls once for its words, this comes with every string drawn.
+  virtual void beginText(const char* utf8Text) { (void)utf8Text; }
 };

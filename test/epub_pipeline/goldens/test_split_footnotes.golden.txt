@@ -121,29 +121,29 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
    W x=303 s=0 z=100 t=Patrician
    W x=384 s=4 z=100 t=[1]
    W x=418 s=2 z=100 t=(The
-  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=2 z=100 t=Patrician
-   W x=92 s=2 z=100 t=had
-   W x=135 s=2 z=100 t=a
-   W x=158 s=2 z=100 t=broad
-   W x=215 s=2 z=100 t=and
-   W x=257 s=2 z=100 t=comprehensive
-   W x=388 s=2 z=100 t=view
-   W x=432 s=2 z=100 t=of
+   W x=87 s=2 z=100 t=had
+   W x=125 s=2 z=100 t=a
+   W x=143 s=2 z=100 t=broad
+   W x=195 s=2 z=100 t=and
+   W x=232 s=2 z=100 t=comprehensive
+   W x=358 s=2 z=100 t=view
+   W x=397 s=2 z=100 t=of
+   W x=425 s=2 z=100 t=the
   LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=10
-   W x=0 s=2 z=100 t=the
-   W x=39 s=2 z=100 t=world,
-   W x=98 s=2 z=100 t=which
-   W x=149 s=2 z=100 t=is
-   W x=172 s=2 z=100 t=to
-   W x=202 s=2 z=100 t=say
-   W x=239 s=2 z=100 t=a
-   W x=259 s=2 z=100 t=short
-   W x=318 s=2 z=100 t=one.)
-   W x=380 s=0 z=100 t=approved
-  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=of
-   W x=28 s=0 z=100 t=licences.
+   W x=0 s=2 z=100 t=world,
+   W x=60 s=2 z=100 t=which
+   W x=112 s=2 z=100 t=is
+   W x=136 s=2 z=100 t=to
+   W x=167 s=2 z=100 t=say
+   W x=205 s=2 z=100 t=a
+   W x=226 s=2 z=100 t=short
+   W x=286 s=2 z=100 t=one.)
+   W x=349 s=0 z=100 t=approved
+   W x=431 s=0 z=100 t=of
+  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=licences.
   FN n=4 href=note4.xhtml#note_4
   FN n=1 href=note1.xhtml#note_1
 SPINE 2 href=OEBPS/note1.xhtml pages=1 truncated=0 cssFallback=0

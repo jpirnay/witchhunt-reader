@@ -35,6 +35,9 @@ class EpdFontFamily {
   /// Asks the provider of each style in `styleMask` (bit i = Style i) to prepare `utf8Text`; each font
   /// once, after the usual fallback to another style. Nothing for fonts without a provider.
   void prefetch(const char* utf8Text, uint8_t styleMask) const;
+  /// Tells the provider of the font drawing `style` that `utf8Text` is measured or drawn next
+  /// (GlyphProvider::beginText).
+  void beginText(const char* utf8Text, Style style) const;
 
  private:
   const EpdFont* regular;

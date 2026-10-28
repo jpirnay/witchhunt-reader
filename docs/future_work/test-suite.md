@@ -76,8 +76,6 @@ rename or move, and small code cleanups it noticed.
   and the static `crc32` in `FlashLangPartition.cpp`, each with its own check-value test.
   `CjkUiFonts.cpp` already borrows the serial one. Next step: one shared implementation and one
   check-value test.
-- `TypographyProfile::direction` is never assigned or read. Remove it, or keep it for RTL (spec
-  section 3).
 - `FirmwareBoardTag.MagicFirstCharIsUnique` checks the test's own copy of the magic. Make it a
   `static_assert` next to `MAGIC_LEN` in `FirmwareBoardTag.cpp` and drop the test.
 
