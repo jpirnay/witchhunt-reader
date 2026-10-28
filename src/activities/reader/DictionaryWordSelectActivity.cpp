@@ -624,15 +624,16 @@ void DictionaryWordSelectActivity::performLookup() {
     // through the chapter parser, which wants every contiguous byte it can get.
     // The session buffers are no use while it is on top, so hand them back.
     dict.releaseCaches();
-    // The word arrays are the other big block held: the render task reads them, hence the lock.
-    // The page is rebuilt from the same Page when the definition returns.
-    {
-      RenderLock lock(*this);
-      releaseWordArrays();
-    }
     // Name the dictionary for the viewer only when there is another to switch
     // to; that is what turns its Confirm button on.
     const bool multiple = installedDictionaries().size() > 1;
+    // The word arrays are the other big block held. The render task reads them, hence the lock,
+    // and the release is the last step before the push: a render queued for this activity would
+    // otherwise find them gone and rebuild them just before the definition opens. The push only
+    // records a pending activity (ActivityManager::pushActivity), so it is safe under the lock.
+    // The page is rebuilt from the same Page when the definition returns.
+    RenderLock lock(*this);
+    releaseWordArrays();
     startActivityForResult(std::make_unique<DictionaryDefinitionActivity>(
                                renderer, mappedInput, std::move(headword), std::move(definition), html,
                                multiple ? std::string(SETTINGS.dictionaryName) : std::string()),

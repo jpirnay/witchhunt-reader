@@ -59,8 +59,7 @@ class DictionaryWordSelectActivity final : public Activity {
   //
   // Kept to 16 bytes on purpose. A bionic page carries ~500 of these and the array has to be ONE
   // contiguous block, alive while the cursor moves. It is freed for the definition's stay
-  // (releaseWordArrays) because the definition's own heap guard is a largest-contiguous-block
-  // test, so every byte held here comes straight off the budget a lookup has to work with.
+  // (releaseWordArrays), so the definition has the heap these arrays held.
   struct Fragment {
     const char* text;
     int16_t x;
