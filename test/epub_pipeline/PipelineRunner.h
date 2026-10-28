@@ -20,6 +20,9 @@ struct Profile {
   const char* name = "default";
   int fontId = 1;
   float lineCompression = 1.0f;
+  // Book's style line spacing (Section::BuildParams); off by default.
+  float bookLineHeightFloor = 0.0f;
+  uint16_t lineHeightEmPx = 0;
   bool extraParagraphSpacing = false;
   uint8_t paragraphAlignment = 0;
   uint16_t viewportWidth = 460;

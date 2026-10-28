@@ -99,15 +99,18 @@ constexpr size_t MAX_SELECTOR_LENGTH = 256;
 constexpr size_t CSS_LENGTH_FIELD_COUNT = 11;
 constexpr size_t CSS_LENGTH_BYTES = sizeof(float) + sizeof(uint8_t);
 // Layout: 4 enum bytes + 11 lengths + display byte + definedBits uint16 + 2 vertAlign bytes + cssFloat byte
-//         + smallCaps byte + fontSizeMultiplier float + fontSize flags byte + block flags byte
-//         (listStyleNone / pageBreakBefore / pageBreakAfter value+defined pairs)
+//         + smallCaps byte (bit 2 = text-emphasis defined, bits 3-6 = its mark; v31) + fontSizeMultiplier float +
+//         fontSize flags byte + block flags byte (listStyleNone / pageBreakBefore / pageBreakAfter value+defined pairs)
 //         + visibility flags byte (colorTransparent / opacityZero / visibilityHidden value+defined pairs; v19)
 //         + fontFamily hash (uint32; defined is bit 2 of the font-size flags byte; v28)
+//         + line-height in ems (float; defined is bit 3 of the font-size flags byte; v30)
+//         + the flow word (uint16: writing-mode, direction, text-combine-upright, text-orientation,
+//           unicode-bidi; packFlow; v30)
 constexpr size_t CSS_FIXED_STYLE_BYTES = 4 * sizeof(uint8_t) + (CSS_LENGTH_FIELD_COUNT * CSS_LENGTH_BYTES) +
                                          sizeof(uint8_t) + sizeof(uint16_t) + 2 * sizeof(uint8_t) + sizeof(uint8_t) +
                                          sizeof(uint8_t) + sizeof(float) + sizeof(uint8_t) + sizeof(uint8_t) +
-                                         sizeof(uint8_t) + sizeof(uint32_t);
-static_assert(CSS_FIXED_STYLE_BYTES == 77,
+                                         sizeof(uint8_t) + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t);
+static_assert(CSS_FIXED_STYLE_BYTES == 83,
               "style payload layout changed — update read/writeCssStylePayload and bump CSS_CACHE_VERSION");
 // A rule record is selectorLen(2) selector order(2) payload; the order sits between selector and
 // payload so a reader that has matched the selector reads the rest in one go (v22).
@@ -565,8 +568,10 @@ std::vector<std::string> CssParser::splitWhitespace(const std::string& s) {
 
 CssTextAlign CssParser::interpretAlignment(const std::string_view v) {
   if (v == "inherit") return CssTextAlign::Inherit;
-  if (v == "left" || v == "start") return CssTextAlign::Left;
-  if (v == "right" || v == "end") return CssTextAlign::Right;
+  if (v == "left") return CssTextAlign::Left;
+  if (v == "right") return CssTextAlign::Right;
+  if (v == "start") return CssTextAlign::Start;  // left or right by the element's direction: CssStyle::resolveLogical
+  if (v == "end") return CssTextAlign::End;
   if (v == "center") return CssTextAlign::Center;
   if (v == "justify") return CssTextAlign::Justify;
 
@@ -597,6 +602,47 @@ CssFontWeight CssParser::interpretFontWeight(const std::string_view v) {
     numericWeight = numericWeight * 10 + (c - '0');
   }
   return numericWeight >= 700 ? CssFontWeight::Bold : CssFontWeight::Normal;
+}
+
+std::optional<uint8_t> CssParser::parseTextEmphasisStyle(const std::string_view value) {
+  uint8_t shape = TextEmphasis::None;
+  bool open = false;
+  bool filled = false;
+  bool none = false;
+  size_t pos = 0;
+  while (pos < value.size()) {
+    while (pos < value.size() && isCssWhitespace(value[pos])) ++pos;
+    const size_t start = pos;
+    while (pos < value.size() && !isCssWhitespace(value[pos])) ++pos;
+    const std::string_view word = value.substr(start, pos - start);
+    if (word.empty()) break;
+    if (word.front() == '"' || word.front() == '\'') return std::nullopt;  // a string mark
+    if (word == "none") {
+      none = true;
+    } else if (word == "open") {
+      open = true;
+    } else if (word == "filled") {
+      filled = true;
+    } else if (word == "dot") {
+      shape = TextEmphasis::Dot;
+    } else if (word == "circle") {
+      shape = TextEmphasis::Circle;
+    } else if (word == "double-circle") {
+      shape = TextEmphasis::DoubleCircle;
+    } else if (word == "triangle") {
+      shape = TextEmphasis::Triangle;
+    } else if (word == "sesame") {
+      shape = TextEmphasis::Sesame;
+    }
+    // Anything else is the shorthand's colour.
+  }
+  if (none) return static_cast<uint8_t>(0);
+  if (shape == TextEmphasis::None) {
+    // A fill alone names the default shape, a circle in horizontal text.
+    if (!open && !filled) return std::nullopt;
+    shape = TextEmphasis::Circle;
+  }
+  return static_cast<uint8_t>(shape | (open ? TextEmphasis::kOpen : 0));
 }
 
 CssTextDecoration CssParser::interpretDecoration(const std::string_view v) {
@@ -667,6 +713,110 @@ bool CssParser::tryInterpretLength(const std::string_view v, CssLength& out) {
   }
 
   out = CssLength{numericValue, unit};
+  return true;
+}
+
+bool CssParser::interpretWritingMode(const std::string_view v, CssWritingMode& out) {
+  // The SVG 1.1 and IE values CSS Writing Modes 3 maps, and the sideways modes by the block direction they share.
+  if (v == "horizontal-tb" || v == "lr" || v == "lr-tb" || v == "rl" || v == "rl-tb" || v == "initial") {
+    out = CssWritingMode::HorizontalTb;
+  } else if (v == "vertical-rl" || v == "tb" || v == "tb-rl" || v == "sideways-rl") {
+    out = CssWritingMode::VerticalRl;
+  } else if (v == "vertical-lr" || v == "tb-lr" || v == "sideways-lr") {
+    out = CssWritingMode::VerticalLr;
+  } else {
+    return false;  // inherit, unset, revert and the unknown: the parent's mode
+  }
+  return true;
+}
+
+bool CssParser::interpretTextOrientation(const std::string_view v, CssTextOrientation& out) {
+  if (v == "mixed" || v == "use-glyph-orientation" || v == "initial") {
+    out = CssTextOrientation::Mixed;
+  } else if (v == "upright") {
+    out = CssTextOrientation::Upright;
+  } else if (v == "sideways" || v == "sideways-right") {
+    out = CssTextOrientation::Sideways;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+bool CssParser::interpretTextCombine(const std::string_view v, CssTextCombine& out) {
+  // text-combine-upright: none | all | digits [2-4]; -webkit-text-combine and -epub-text-combine: horizontal [n];
+  // -ms-text-combine-horizontal takes the unprefixed values.
+  if (v == "none" || v == "initial") {
+    out = CssTextCombine::None;
+    return true;
+  }
+  if (v == "all" || v == "horizontal") {
+    out = CssTextCombine::All;
+    return true;
+  }
+  const auto digits = [&out](const std::string_view count) {
+    const int n = count.empty() ? 2 : (count.size() == 1 ? count[0] - '0' : 0);  // `digits` alone is two
+    if (n < 2 || n > 4) return false;
+    out = static_cast<CssTextCombine>(static_cast<int>(CssTextCombine::Digits2) + n - 2);
+    return true;
+  };
+  if (v == "digits") return digits({});
+  if (v.substr(0, 7) == "digits ") return digits(v.substr(7));
+  if (v.substr(0, 11) == "horizontal ") return digits(v.substr(11));
+  return false;
+}
+
+bool CssParser::interpretDirection(const std::string_view v, CssDirection& out) {
+  if (v == "ltr" || v == "initial") {
+    out = CssDirection::Ltr;
+  } else if (v == "rtl") {
+    out = CssDirection::Rtl;
+  } else {
+    return false;  // auto exists only for the HTML dir attribute
+  }
+  return true;
+}
+
+bool CssParser::interpretUnicodeBidi(std::string_view v, CssUnicodeBidi& out) {
+  if (v.substr(0, 8) == "-webkit-") v.remove_prefix(8);  // the old prefixed values
+  if (v.substr(0, 5) == "-moz-") v.remove_prefix(5);
+  if (v == "normal" || v == "initial") {
+    out = CssUnicodeBidi::Normal;
+  } else if (v == "embed") {
+    out = CssUnicodeBidi::Embed;
+  } else if (v == "isolate") {
+    out = CssUnicodeBidi::Isolate;
+  } else if (v == "bidi-override") {
+    out = CssUnicodeBidi::BidiOverride;
+  } else if (v == "isolate-override") {
+    out = CssUnicodeBidi::IsolateOverride;
+  } else if (v == "plaintext") {
+    out = CssUnicodeBidi::Plaintext;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+bool CssParser::interpretLineHeight(const std::string_view v, float& em) {
+  // A multiple of the element's font size, as CSS has it. px and pt are taken at CSS's 16 px medium, so a book written
+  // in pixels keeps its ratio to the text. Clamped to what a page can sensibly show; zero and below are not a value.
+  CssLength length;
+  if (!tryInterpretLength(v, length)) return false;
+  const size_t unitAt = v.find_first_not_of("0123456789.+-");
+  const std::string_view unit = unitAt == std::string_view::npos ? std::string_view{} : v.substr(unitAt);
+  float value = length.value;
+  if (unit == "%") {
+    value /= 100.0f;
+  } else if (unit == "px") {
+    value /= 16.0f;
+  } else if (unit == "pt") {
+    value /= 12.0f;
+  } else if (!unit.empty() && unit != "em" && unit != "rem") {
+    return false;
+  }
+  if (!(value > 0.0f)) return false;
+  em = std::max(0.5f, std::min(4.0f, value));
   return true;
 }
 
@@ -754,7 +904,20 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
   propValueBuf.resize(stripTrailingImportant(propValueBuf).size());
   if (propValueBuf.empty()) return;
 
-  if (propNameBuf == "text-align") {
+  if (propNameBuf == "writing-mode" || propNameBuf == "-webkit-writing-mode" || propNameBuf == "-epub-writing-mode" ||
+      propNameBuf == "-ms-writing-mode") {
+    interpretWritingMode(propValueBuf, style.writingMode);
+  } else if (propNameBuf == "text-orientation" || propNameBuf == "-webkit-text-orientation" ||
+             propNameBuf == "-epub-text-orientation") {
+    interpretTextOrientation(propValueBuf, style.textOrientation);
+  } else if (propNameBuf == "text-combine-upright" || propNameBuf == "-webkit-text-combine" ||
+             propNameBuf == "-epub-text-combine" || propNameBuf == "-ms-text-combine-horizontal") {
+    interpretTextCombine(propValueBuf, style.textCombine);
+  } else if (propNameBuf == "direction") {
+    interpretDirection(propValueBuf, style.direction);
+  } else if (propNameBuf == "unicode-bidi") {
+    interpretUnicodeBidi(propValueBuf, style.unicodeBidi);
+  } else if (propNameBuf == "text-align") {
     style.textAlign = interpretAlignment(propValueBuf);
     style.defined.textAlign = 1;
   } else if (propNameBuf == "font-style") {
@@ -766,6 +929,13 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
   } else if (propNameBuf == "font-family") {
     style.fontFamily = firstFontFamily(propValueBuf);
     style.defined.fontFamily = 1;
+  } else if (propNameBuf == "text-emphasis-style" || propNameBuf == "text-emphasis" ||
+             propNameBuf == "-epub-text-emphasis-style" || propNameBuf == "-epub-text-emphasis" ||
+             propNameBuf == "-webkit-text-emphasis-style" || propNameBuf == "-webkit-text-emphasis") {
+    if (const auto mark = parseTextEmphasisStyle(propValueBuf)) {
+      style.textEmphasis = *mark;
+      style.defined.textEmphasis = 1;
+    }
   } else if (propNameBuf == "text-decoration" || propNameBuf == "text-decoration-line") {
     // `inherit` names no line, and read as `none` it cancelled an underline the element sits in.
     // It is left unset instead: the element keeps what it inherits.
@@ -934,42 +1104,10 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
       style.defined.pageBreakAfter = 1;
     }
   } else if (propNameBuf == "line-height") {
-    const std::string_view val = propValueBuf;
-    if (val != "normal" && val != "inherit" && val != "initial" && val != "unset") {
-      // Parse unitless, %, or em. Normalise to a multiplier relative to default y_advance.
-      // Base = 1.5 (typical body line-height). Result range clamped to [0.7, 2.0].
-      static constexpr float kBase = 1.5f;
-      float parsed = 0.0f;
-      bool ok = false;
-      if (!val.empty() && val.back() == '%') {
-        const char* p = val.data();
-        char* end = nullptr;
-        float v = std::strtof(p, &end);
-        if (end != p) {
-          parsed = v / 100.0f / kBase;
-          ok = true;
-        }
-      } else if (val.size() > 2 && val.substr(val.size() - 2) == "em") {
-        const char* p = val.data();
-        char* end = nullptr;
-        float v = std::strtof(p, &end);
-        if (end != p) {
-          parsed = v / kBase;
-          ok = true;
-        }
-      } else {
-        const char* p = val.data();
-        char* end = nullptr;
-        float v = std::strtof(p, &end);
-        if (end != p && *end == '\0') {
-          parsed = v / kBase;
-          ok = true;
-        }
-      }
-      if (ok && parsed > 0.0f) {
-        style.lineHeightMultiplier = std::max(0.7f, std::min(2.0f, parsed));
-        style.defined.lineHeight = 1;
-      }
+    float em = 0.0f;
+    if (interpretLineHeight(propValueBuf, em)) {
+      style.lineHeightEm = em;
+      style.defined.lineHeight = 1;
     }
   } else if (propNameBuf == "font-size") {
     const std::string_view val = propValueBuf;
@@ -1091,7 +1229,7 @@ CssStyle CssParser::parseDeclarations(const std::string_view declBlock) {
 void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, const CssStyle& style) {
   // Inspired by crosspoint-reader#2604: a selector with no renderer-supported
   // declarations only consumes scarce rule-map and cache-index capacity.
-  if (!style.defined.anySet()) {
+  if (!style.anyDefined()) {
     return;
   }
 
@@ -1723,6 +1861,25 @@ void CssParser::logResolveStats(const char* context) const {
   (void)s;
 }
 
+namespace {
+// The flow properties (CssStyle's writingMode, direction, textCombine, textOrientation, unicodeBidi), packed the same
+// way in the rule cache's payload and in the arena's records: bits 0-1, 2-3, 4-6, 7-8 and 9-11, each 0 when unset.
+uint16_t packFlow(const CssStyle& s) {
+  return static_cast<uint16_t>(
+      (static_cast<unsigned>(s.writingMode) & 3u) | ((static_cast<unsigned>(s.direction) & 3u) << 2) |
+      ((static_cast<unsigned>(s.textCombine) & 7u) << 4) | ((static_cast<unsigned>(s.textOrientation) & 3u) << 7) |
+      ((static_cast<unsigned>(s.unicodeBidi) & 7u) << 9));
+}
+
+void unpackFlow(const uint16_t flow, CssStyle& s) {
+  s.writingMode = static_cast<CssWritingMode>(flow & 3u);
+  s.direction = static_cast<CssDirection>((flow >> 2) & 3u);
+  s.textCombine = static_cast<CssTextCombine>((flow >> 4) & 7u);
+  s.textOrientation = static_cast<CssTextOrientation>((flow >> 7) & 3u);
+  s.unicodeBidi = static_cast<CssUnicodeBidi>((flow >> 9) & 7u);
+}
+}  // namespace
+
 bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   // Read in one call and taken apart in RAM: a field at a time was ~30 SdFat calls a rule, paid for
   // every rule each time a section build loads the ruleset into its arena.
@@ -1818,9 +1975,12 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   if (!get(&smallCapsVal, 1)) {
     return false;
   }
-  // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset)
+  // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset), bit 2 = text-emphasis
+  // defined, bits 3-6 = its mark (v31)
   style.smallCaps = (smallCapsVal & 0x1) != 0;
   style.defined.smallCaps = (smallCapsVal & 0x2) != 0 ? 1 : 0;
+  style.defined.textEmphasis = (smallCapsVal & 0x4) != 0 ? 1 : 0;
+  style.textEmphasis = style.defined.textEmphasis ? static_cast<uint8_t>((smallCapsVal >> 3) & 0xF) : 0;
   float fontSizeMul = 1.0f;
   uint8_t fontSizeFlags = 0;
   if (!get(&fontSizeMul, sizeof(fontSizeMul)) || !get(&fontSizeFlags, 1)) {
@@ -1832,6 +1992,7 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
     style.defined.fontSizeMultiplier = 1;
   }
   style.defined.fontFamily = (fontSizeFlags & 0x4) != 0 ? 1 : 0;
+  const bool lineHeightDefined = (fontSizeFlags & 0x8) != 0;
   uint8_t blockFlags = 0;
   if (!get(&blockFlags, 1)) {
     return false;
@@ -1852,7 +2013,18 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.opacityZero = (visibilityFlags & 0x08) != 0 ? 1 : 0;
   style.visibilityHidden = (visibilityFlags & 0x10) != 0;
   style.defined.visibilityHidden = (visibilityFlags & 0x20) != 0 ? 1 : 0;
-  return get(&style.fontFamily, sizeof(style.fontFamily));
+  float lineHeightEm = 0.0f;
+  uint16_t flow = 0;
+  if (!get(&style.fontFamily, sizeof(style.fontFamily)) || !get(&lineHeightEm, sizeof(lineHeightEm)) ||
+      !get(&flow, sizeof(flow))) {
+    return false;
+  }
+  unpackFlow(flow, style);
+  if (lineHeightDefined) {
+    style.lineHeightEm = lineHeightEm;
+    style.defined.lineHeight = 1;
+  }
+  return true;
 }
 
 void CssParser::writeCssStylePayload(FsFile& file, const CssStyle& style) {
@@ -1914,14 +2086,17 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
   put8(static_cast<uint8_t>(style.verticalAlign));
   put8(static_cast<uint8_t>(style.defined.verticalAlign));
   put8(static_cast<uint8_t>(style.cssFloat));
-  // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset)
+  // bit 0 = value, bit 1 = defined (distinguishes explicit "normal" from unset), bit 2 = text-emphasis
+  // defined, bits 3-6 = its mark (v31)
   uint8_t smallCapsVal = (style.smallCaps ? 0x1 : 0x0) | (style.defined.smallCaps ? 0x2 : 0x0);
+  if (style.defined.textEmphasis) smallCapsVal |= static_cast<uint8_t>(0x4 | ((style.textEmphasis & 0xF) << 3));
   put8(smallCapsVal);
   // font-size multiplier: float + flags byte (bit 0 = defined, bit 1 = relative to the body, v27;
-  // bit 2 = font-family defined, v28)
+  // bit 2 = font-family defined, v28; bit 3 = line-height defined, v30)
   put(&style.fontSizeMultiplier, sizeof(style.fontSizeMultiplier));
   const uint8_t fontSizeFlags = (style.defined.fontSizeMultiplier ? 0x1 : 0x0) |
-                                (style.fontSizeRootRelative ? 0x2 : 0x0) | (style.defined.fontFamily ? 0x4 : 0x0);
+                                (style.fontSizeRootRelative ? 0x2 : 0x0) | (style.defined.fontFamily ? 0x4 : 0x0) |
+                                (style.defined.lineHeight ? 0x8 : 0x0);
   put8(fontSizeFlags);
   // Block flags byte: value/defined pairs, same convention as smallCaps above.
   const uint8_t blockFlags = (style.listStyleNone ? 0x01 : 0x00) | (style.defined.listStyleNone ? 0x02 : 0x00) |
@@ -1935,6 +2110,9 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
                                   (style.defined.visibilityHidden ? 0x20 : 0x00);
   put8(visibilityFlags);
   put(&style.fontFamily, sizeof(style.fontFamily));
+  put(&style.lineHeightEm, sizeof(style.lineHeightEm));
+  const uint16_t flow = packFlow(style);
+  put(&flow, sizeof(flow));
   return at;
 }
 
@@ -2256,16 +2434,17 @@ bool CssParser::ensureCacheIndexLoaded() const {
 
 // --- Sparse CssStyle compression for the resident pool ---
 // A style is serialized to a canonical, SPARSE record: only the fields the 'defined' mask
-// flags are written (a real rule sets a handful of 27 properties). Because the encoding is
+// flags are written (a real rule sets a handful of the 34 properties). Because the encoding is
 // canonical, two equivalent styles produce identical bytes, so dedup is a memcmp — and lookup
 // decompresses back to a full CssStyle. Values are copied with memcpy so the byte-packed
 // (unaligned) records are safe to read on the C3.
 
-// Worst case: 4 (mask) + 2 (packed enums) + 1 (extra values) + 11 lengths * 5 + 2 multipliers * 4
-// + the font-family hash (4) = 74 bytes.
-constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 11 * 5 + 2 * 4 + 4;
+// Worst case: 4 (mask) + 2 (packed enums) + 1 (extra values) + 2 (the flow word) + 11 lengths * 5 + 2 multipliers * 4
+// + the font-family hash (4) + the text-emphasis mark (1) = 77 bytes.
+constexpr size_t kMaxCompressedStyle = 4 + 2 + 1 + 2 + 11 * 5 + 2 * 4 + 4 + 1;
 
-// Canonical "which properties are set" mask: 27 defined bits (0-26), then the three boolean
+// Canonical "which properties are set" mask: the defined bits of the first 27 properties (0-26; the extra byte below
+// flags font-family, text-emphasis and the flow properties, which have no defined bit), then the three boolean
 // VALUES of the invisibility properties in bits 27-29 and the high bit of `display` in bit 30 --
 // the uint16 of enum values below is full. (By the CssStyle invariant a defined invisibility
 // property is currently always true, so bits 27-29 mirror bits 24-26; they are carried for
@@ -2292,12 +2471,16 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   if (s.defined.display && (static_cast<unsigned>(s.display) & 2u)) mask |= 1u << 30;
   // Bit 31 announces a byte of values the uint16 below has no room for, written after it: an
   // explicit `inherit` of font-weight (bit 0) and of font-style (bit 1), a font-size relative to
-  // the body (bit 2), a font-family (bit 3: its hash follows the multipliers).
+  // the body (bit 2), a font-family (bit 3: its hash follows the multipliers), a flow property (bit 4: the flow word,
+  // packFlow, follows this byte), a text-emphasis (bit 5: its mark byte follows the hash).
   uint8_t extra = 0;
   if (s.defined.fontWeight && s.fontWeight == CssFontWeight::Inherit) extra |= 0x01;
   if (s.defined.fontStyle && s.fontStyle == CssFontStyle::Inherit) extra |= 0x02;
   if (s.defined.fontSizeMultiplier && s.fontSizeRootRelative) extra |= 0x04;
   if (s.defined.fontFamily) extra |= 0x08;
+  const uint16_t flow = packFlow(s);
+  if (flow != 0) extra |= 0x10;
+  if (s.defined.textEmphasis) extra |= 0x20;
   if (extra != 0) mask |= 1u << 31;
   std::memcpy(p, &mask, 4);
   p += 4;
@@ -2317,6 +2500,10 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   std::memcpy(p, &enums, 2);
   p += 2;
   if (extra != 0) *p++ = extra;
+  if (flow != 0) {
+    std::memcpy(p, &flow, 2);
+    p += 2;
+  }
   const auto putLen = [&](bool def, const CssLength& l) {
     if (def) {
       std::memcpy(p, &l.value, 4);
@@ -2336,7 +2523,7 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   putLen(d.imageHeight, s.imageHeight);
   putLen(d.imageWidth, s.imageWidth);
   if (d.lineHeight) {
-    std::memcpy(p, &s.lineHeightMultiplier, 4);
+    std::memcpy(p, &s.lineHeightEm, 4);
     p += 4;
   }
   if (d.fontSizeMultiplier) {
@@ -2347,6 +2534,7 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
     std::memcpy(p, &s.fontFamily, 4);
     p += 4;
   }
+  if (d.textEmphasis) *p++ = s.textEmphasis;
   return static_cast<size_t>(p - out);
 }
 
@@ -2361,6 +2549,12 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
   std::memcpy(&enums, p, 2);
   p += 2;
   const uint8_t extra = ((mask >> 31) & 1u) ? *p++ : 0;
+  if ((extra & 0x10) != 0) {
+    uint16_t flow = 0;
+    std::memcpy(&flow, p, 2);
+    p += 2;
+    unpackFlow(flow, out);
+  }
   const auto isDefined = [&](int index) { return (mask >> index) & 1u; };
   CssPropertyFlags& d = out.defined;
   d.textAlign = isDefined(0);
@@ -2391,6 +2585,7 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
   d.opacityZero = isDefined(25);
   d.visibilityHidden = isDefined(26);
   d.fontFamily = (extra & 0x08) != 0 ? 1 : 0;
+  d.textEmphasis = (extra & 0x20) != 0 ? 1 : 0;
   if (d.colorTransparent) out.colorTransparent = ((mask >> 27) & 1u) != 0;
   if (d.opacityZero) out.opacityZero = ((mask >> 28) & 1u) != 0;
   if (d.visibilityHidden) out.visibilityHidden = ((mask >> 29) & 1u) != 0;
@@ -2428,7 +2623,7 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
   getLen(d.imageHeight, out.imageHeight);
   getLen(d.imageWidth, out.imageWidth);
   if (d.lineHeight) {
-    std::memcpy(&out.lineHeightMultiplier, p, 4);
+    std::memcpy(&out.lineHeightEm, p, 4);
     p += 4;
   }
   if (d.fontSizeMultiplier) {
@@ -2436,7 +2631,11 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
     p += 4;
     out.fontSizeRootRelative = (extra & 0x04) != 0;
   }
-  if (d.fontFamily) std::memcpy(&out.fontFamily, p, 4);
+  if (d.fontFamily) {
+    std::memcpy(&out.fontFamily, p, 4);
+    p += 4;
+  }
+  if (d.textEmphasis) out.textEmphasis = *p;
 }
 
 // Stream the whole ruleset into the arena as a sorted {hash, styleOff} index plus a pool of
@@ -2839,7 +3038,7 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
     applyComplexRules(self, ancestry, cascade, dependsOnAncestors);
   }
 
-  if (!cascade.result.defined.anySet()) {
+  if (!cascade.result.anyDefined()) {
     resolveStats_.misses++;
   }
 

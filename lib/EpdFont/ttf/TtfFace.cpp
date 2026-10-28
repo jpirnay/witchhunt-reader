@@ -270,6 +270,22 @@ uint16_t glyphIndex(FontBytes& bytes, const Face& face, const uint32_t codepoint
   return glyph < face.numGlyphs ? static_cast<uint16_t>(glyph) : 0;
 }
 
+bool mapsCodepoint(FontBytes& bytes, const uint32_t codepoint) {
+  const uint32_t version = bytes.u32(0);
+  if (version != kVersionCff && version != kVersionTrueType && version != kVersionApple) return false;
+  const uint16_t numTables = bytes.u16(4);
+  if (12 + 16 * static_cast<uint64_t>(numTables) > bytes.size()) return false;
+  Table maxp, cmap;
+  Face face;
+  if (!findTable(bytes, numTables, tag("maxp"), 6, &maxp) || !findTable(bytes, numTables, tag("cmap"), 4, &cmap) ||
+      !chooseCmap(bytes, cmap, &face)) {
+    return false;
+  }
+  face.cmapEnd = cmap.offset + cmap.length;
+  face.numGlyphs = bytes.u16(maxp.offset + 4);  // maxp's count, which bounds a TrueType and a CFF font's glyphs alike
+  return glyphIndex(bytes, face, codepoint) != 0;
+}
+
 int32_t unitsToPixels(const Face& face, const uint32_t ppem26_6) {
   return divFix(static_cast<int32_t>(ppem26_6), face.unitsPerEm);
 }

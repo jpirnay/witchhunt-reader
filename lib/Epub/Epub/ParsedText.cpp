@@ -16,6 +16,7 @@
 #include "CjkLineBreak.h"
 #include "CjkPunctuation.h"
 #include "Epub/VisibleText.h"
+#include "TextEmphasis.h"
 #include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
 
@@ -261,7 +262,7 @@ void ParsedText::pushToken(std::string token, const EpdFontFamily::Style style, 
 
 void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
                          const bool attachToPrevious, const uint8_t sizePct, const uint32_t visibleOffset,
-                         uint8_t fontSlot) {
+                         uint8_t fontSlot, const uint8_t textEmphasis) {
   if (word.empty()) return;
   if (fontSlot >= TextBlock::kMaxWordFonts) fontSlot = 0;
   if (wordGrowthRefused_) return;  // the parse is being aborted; see wordGrowthRefused()
@@ -337,15 +338,18 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     }
   }
 
+  // Every token of the word carries the mark: it travels with the token through splits and erases.
   if (cuts.empty()) {
-    pushToken(std::move(word), combinedStyle, boundary, size, visibleOffset, fontSlot);
+    pushToken(std::move(word), combinedStyle, TokenBoundary::withEmphasis(boundary, textEmphasis), size, visibleOffset,
+              fontSlot);
     return;
   }
   size_t start = 0;
   uint32_t offset = visibleOffset;
   for (size_t i = 0; i <= cuts.size(); ++i) {
     const size_t end = i < cuts.size() ? cuts[i].at : word.size();
-    pushToken(word.substr(start, end - start), combinedStyle, boundary, size, offset, fontSlot);
+    pushToken(word.substr(start, end - start), combinedStyle, TokenBoundary::withEmphasis(boundary, textEmphasis), size,
+              offset, fontSlot);
     // The next token starts where this one's visible bytes end (KOSync positions).
     offset += static_cast<uint32_t>(VisibleText::visibleBytes(word.data() + start, static_cast<int>(end - start)));
     if (i < cuts.size()) {
@@ -466,10 +470,13 @@ void ParsedText::layoutAndExtractLines(
   // family renders the glyphs it is handed, so not the other families' text). A ruby is
   // drawn in its leader's font: its text follows that font's words, after a space.
   size_t totalSize = 1;  // reserve room for a possible hyphen fallback
+  bool hasEmphasis = false;
   for (size_t i = 0; i < words.size(); i++) {
     if (i > 0 && TokenBoundary::hasSpace(wordBoundaries[i])) totalSize += 1;
     totalSize += words[i].size();
+    if (TokenBoundary::emphasisOf(wordBoundaries[i]) != 0) hasEmphasis = true;
   }
+  if (hasEmphasis) totalSize += 3 * 15;  // one glyph of each mark, 3 bytes
   for (const std::string& ruby : rubyTexts_) totalSize += 1 + ruby.size();
   for (int slot = -1; slot < TextBlock::kMaxWordFonts; slot++) {
     const int32_t font = slot < 0 ? 0 : fontSlots_[slot].fontId;  // 0: the block's
@@ -481,6 +488,19 @@ void ParsedText::layoutAndExtractLines(
       if (fontSlots_[wordSizes[i].fontSlot].fontId != font) continue;
       if (!allText.empty() && TokenBoundary::hasSpace(wordBoundaries[i])) allText += ' ';
       allText += words[i];
+    }
+    // The mark glyphs of the words in this font, one of each mark.
+    uint32_t marksSeen = 0;
+    for (size_t i = 0; i < words.size(); i++) {
+      const uint8_t mark = TokenBoundary::emphasisOf(wordBoundaries[i]);
+      if (mark == 0 || (marksSeen & (1u << mark)) != 0 || fontSlots_[wordSizes[i].fontSlot].fontId != font) continue;
+      marksSeen |= 1u << mark;
+      const uint32_t cp = TextEmphasis::markCodepoint(mark);
+      if (cp == 0) continue;
+      // The mark glyphs are all in the BMP above U+0800: three bytes.
+      allText += static_cast<char>(0xE0 | (cp >> 12));
+      allText += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+      allText += static_cast<char>(0x80 | (cp & 0x3F));
     }
     for (size_t i = 0, ordinal = 0; i < words.size() && ordinal < rubyTexts_.size(); i++) {
       if (TokenBoundary::rubyRole(wordBoundaries[i]) != TokenBoundary::RubyRole::Leader) continue;
@@ -735,11 +755,32 @@ bool ParsedText::addRubyGroup(const size_t firstToken, const size_t tokenCount, 
   }
   const size_t ordinal = leadersBefore(firstToken);
   if (ordinal > rubyTexts_.size()) return false;
+  // A space inside the base stays, as a glued space token (the form a no-break space takes): the group never breaks,
+  // and the space is drawn and stretched like any other.
+  size_t spaces = 0;
+  for (size_t i = firstToken + 1; i < firstToken + tokenCount; ++i) {
+    if (TokenBoundary::hasSpace(wordBoundaries[i])) ++spaces;
+  }
+  if (spaces != 0 && !reserveWords(spaces)) return false;
   rubyTexts_.insert(rubyTexts_.begin() + ordinal, std::move(text));
   wordBoundaries[firstToken] = TokenBoundary::withRubyRole(wordBoundaries[firstToken], TokenBoundary::RubyRole::Leader);
-  for (size_t i = firstToken + 1; i < firstToken + tokenCount; ++i) {
-    wordBoundaries[i] =
-        TokenBoundary::withRubyRole(TokenBoundary::Boundary{true, false}, TokenBoundary::RubyRole::Follower);
+  constexpr TokenBoundary::Boundary kGluedFollower =
+      TokenBoundary::withRubyRole(TokenBoundary::Boundary{true, false}, TokenBoundary::RubyRole::Follower);
+  size_t end = firstToken + tokenCount;
+  for (size_t i = firstToken + 1; i < end; ++i) {
+    // Every token of the base keeps its word's emphasis mark, the inserted space too.
+    const TokenBoundary::Boundary glued =
+        TokenBoundary::withEmphasis(kGluedFollower, TokenBoundary::emphasisOf(wordBoundaries[i]));
+    if (TokenBoundary::hasSpace(wordBoundaries[i])) {
+      words.insert(words.begin() + i, " ");
+      wordStyles.insert(wordStyles.begin() + i, wordStyles[i]);
+      wordSizes.insert(wordSizes.begin() + i, wordSizes[i]);
+      wordVisibleOffsets.insert(wordVisibleOffsets.begin() + i, wordVisibleOffsets[i]);
+      wordBoundaries.insert(wordBoundaries.begin() + i, glued);
+      ++i;
+      ++end;
+    }
+    wordBoundaries[i] = glued;
   }
   return true;
 }
@@ -1044,8 +1085,11 @@ void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
     dp[i] = MAX_COST;
 
     const int lineIdx = lineIndexForWord[i];
+    // The indent belongs to the line that starts the paragraph (word 0), not to every line planned at lineIdx 0:
+    // without floats lineIndexForWord is all zeros, and beside a float a line can start mid-way through the greedy
+    // first line.
     const int effectivePageWidth =
-        widthForLine(lineIdx, lineHeight, blockStartY, pageWidth) - (lineIdx == 0 ? firstLineIndent : 0);
+        widthForLine(lineIdx, lineHeight, blockStartY, pageWidth) - (i == 0 ? firstLineIndent : 0);
 
     for (size_t j = i; j < totalWordCount; ++j) {
       const int gap = (j > static_cast<size_t>(i)) ? interWordGaps[j] : 0;
@@ -1229,7 +1273,9 @@ void ParsedText::applyBionicReadingTransform() {
 
     // The first span keeps the word's own boundary; every span after it is glued to the one before.
     // A span of a ruby base after the first belongs to the base's group.
-    TokenBoundary::Boundary kGlued{true, false};
+    // Every span keeps the word's emphasis mark.
+    TokenBoundary::Boundary kGlued =
+        TokenBoundary::withEmphasis(TokenBoundary::Boundary{true, false}, TokenBoundary::emphasisOf(originalBoundary));
     if (TokenBoundary::rubyRole(originalBoundary) != TokenBoundary::RubyRole::None) {
       kGlued = TokenBoundary::withRubyRole(kGlued, TokenBoundary::RubyRole::Follower);
     }
@@ -1584,7 +1630,10 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // This lets the backtracking loop keep the entire prefix group ("200 Quadrat-") on one
   // line, while "kilometer" moves to the next line.
   // wordBoundaries[wordIndex] is intentionally left unchanged — the prefix keeps its original attachment.
-  wordBoundaries.insert(wordBoundaries.begin() + wordIndex + 1, TokenBoundary::Boundary{});
+  // The remainder keeps the word's emphasis mark.
+  wordBoundaries.insert(
+      wordBoundaries.begin() + wordIndex + 1,
+      TokenBoundary::withEmphasis(TokenBoundary::Boundary{}, TokenBoundary::emphasisOf(wordBoundaries[wordIndex])));
 
   // Update cached widths to reflect the new prefix/remainder pairing.
   wordWidths[wordIndex] = static_cast<uint16_t>(chosenWidth);
@@ -1796,6 +1845,44 @@ ParsedText::LineProcessResult ParsedText::extractLine(
       }
       xpos += box + gap;
     }
+  }
+
+  // One Emphasis record per run of consecutive tokens with the same mark, outside ruby groups (ruby wins over a mark
+  // on the same base). The records join the ruby boxes in firstWord order; the runs and boxes never overlap.
+  const size_t rubyRecords = lineAnnotations_.size();
+  for (size_t wordIdx = 0; wordIdx < lineWordCount;) {
+    const TokenBoundary::Boundary b = boundaries[lastBreakAt + wordIdx];
+    const uint8_t mark = TokenBoundary::emphasisOf(b);
+    if (mark == 0 || TokenBoundary::rubyRole(b) != TokenBoundary::RubyRole::None) {
+      ++wordIdx;
+      continue;
+    }
+    size_t end = wordIdx + 1;
+    while (end < lineWordCount && TokenBoundary::emphasisOf(boundaries[lastBreakAt + end]) == mark &&
+           TokenBoundary::rubyRole(boundaries[lastBreakAt + end]) == TokenBoundary::RubyRole::None) {
+      ++end;
+    }
+    // A run with no character that takes a mark (only punctuation or spaces) draws nothing: no record, so no band.
+    bool markable = false;
+    for (size_t t = wordIdx; t < end && !markable; ++t) {
+      for (const auto* q = reinterpret_cast<const unsigned char*>(words[lastBreakAt + t].c_str()); *q && !markable;) {
+        markable = TextEmphasis::takesMark(utf8NextCodepoint(&q));
+      }
+    }
+    if (!markable) {
+      wordIdx = end;
+      continue;
+    }
+    TextBlock::Annotation& a = lineAnnotations_.emplace_back();
+    a.firstWord = static_cast<uint16_t>(wordIdx);
+    a.wordCount = static_cast<uint16_t>(end - wordIdx);
+    a.kind = TextBlock::AnnotationKind::Emphasis;
+    a.mark = mark;
+    wordIdx = end;
+  }
+  if (rubyRecords != 0 && lineAnnotations_.size() > rubyRecords) {
+    std::sort(lineAnnotations_.begin(), lineAnnotations_.end(),
+              [](const TextBlock::Annotation& l, const TextBlock::Annotation& r) { return l.firstWord < r.firstWord; });
   }
 
   // Address the line's words in place. The source is left intact so retry paths can still

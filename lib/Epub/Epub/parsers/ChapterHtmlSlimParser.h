@@ -279,6 +279,10 @@ class ChapterHtmlSlimParser final : public Print {
   float mainTextFontSizeBaseline_ = 1.0f;
   bool hasMainTextFontSizeBaseline_ = false;
   float lineCompression;
+  // Book's style line spacing (setBookLineHeight): the compression of one em of line-height, and the least a block
+  // takes. bookPerEm_ 0: off.
+  float bookPerEm_ = 0.0f;
+  float bookFloor_ = 0.0f;
   bool extraParagraphSpacing;
   uint8_t paragraphAlignment;
   uint16_t viewportWidth;
@@ -304,6 +308,8 @@ class ChapterHtmlSlimParser final : public Print {
     bool hasSup = false, sup = false;
     bool hasSub = false, sub = false;
     bool hasSmallCaps = false, smallCaps = false;
+    bool hasTextEmphasis = false;  // text-emphasis-style: textEmphasis is a TextEmphasis mark, 0 for none
+    uint8_t textEmphasis = 0;
     bool hasMarginLeft = false;
     int16_t marginLeftPx = 0;  // margin-left in pixels, for span-level poem indents
     // Inline font-size as a percent of the PARENT element's size (em semantics).
@@ -326,6 +332,7 @@ class ChapterHtmlSlimParser final : public Print {
   bool effectiveSup = false;
   bool effectiveSub = false;
   bool effectiveSmallCaps = false;
+  uint8_t effectiveTextEmphasis_ = 0;     // the TextEmphasis mark of the words being flushed; 0 for none
   int16_t effectiveInlineMarginLeft = 0;  // accumulated margin-left from inline span stack
   // Composed inline font-size percent (relative to the block font size) for the
   // words currently being flushed. 100 outside sized spans; clamped to the
@@ -667,6 +674,26 @@ class ChapterHtmlSlimParser final : public Print {
   CssParser::Ancestry cssAncestry(const std::string& tagName, const std::string& classAttr,
                                   const std::string& idAttr) const;
 
+  // The inherited values layout reads (writing mode, direction, line-height), where an open element changes one: an
+  // element takes the innermost entry above it. Trimmed by depth at every start tag, so an element closed through a
+  // skip path leaves nothing behind. A book nests a change a few levels deep; an entry past the eighth is dropped.
+  struct FlowEntry {
+    int16_t depth = 0;
+    CssWritingMode writingMode = CssWritingMode::Unset;
+    CssDirection direction = CssDirection::Unset;
+    float lineHeightEm = 0.0f;  // 0: no line-height set
+  };
+  static constexpr uint8_t kMaxFlowEntries = 8;
+  FlowEntry flows_[kMaxFlowEntries] = {};
+  uint8_t flowCount_ = 0;
+  FlowEntry elementFlow_;  // the element startElement is resolving, its values computed
+  bool flowLogged_ = false;
+  bool flowOverflowLogged_ = false;
+  // Trims the stack to the element's ancestors, pushes the element when it sets a writing mode, direction or
+  // line-height other than its parent's, and returns its computed values. `depth` is the element's own (startElement
+  // increments it last).
+  FlowEntry enterFlow(const CssStyle& style);
+
   // Default size for superscript/subscript text, percent of the surrounding size.
   // Sup/sub scaling flows through the ordinary per-word size channel (the SUP/SUB
   // style bits only shift the baseline at render time); an explicit CSS font-size
@@ -683,9 +710,13 @@ class ChapterHtmlSlimParser final : public Print {
   // Fold an element's CSS vertical-align into an inline style-stack entry. `baseline`
   // explicitly cancels an inherited sup/sub rather than being ignored.
   static void applyVerticalAlignToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
-  // Fold an element's CSS font-weight, font-style, text-decoration and font-variant into an
+  // Fold an element's CSS font-weight, font-style, text-decoration, font-variant and text-emphasis-style into an
   // inline style-stack entry. `text-decoration: none` cancels an inherited underline/strike.
   static void applyCssEmphasisToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
+  // Fold an element's text-emphasis-style into an entry; `none` cancels an inherited mark. The bold, italic,
+  // underline, sup/sub and internal-link paths take only this from the full set above (their own tag decides the
+  // rest).
+  static void applyCssTextEmphasisToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
   // Fold an element's font-family into an entry, while the book has other families; true when it did.
   bool applyCssFontFamilyToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) const;
   // A block's (or heading's) own emphasis, pushed at its depth so the blocks nested inside it
@@ -996,6 +1027,9 @@ class ChapterHtmlSlimParser final : public Print {
   void setFontFamilies(const BlockFontFamilies& families) { fontFamilies_ = families; }
   // The book's typography (TypographyProfile.h), handed to every block the parser lays out; Latin rules by default.
   void setTypography(const TypographyProfile& typography) { typography_ = typography; }
+  // Book's style line spacing: a block's CSS line-height sets its pitch, a multiple of `emPx`, never below `floor`
+  // (a compression on the font's line height). Off by default, and with a floor of 0.
+  void setBookLineHeight(float floor, uint16_t emPx);
 
  private:
   // Snap a completed block's effective font size (block multiplier, after uniform per-word

@@ -110,6 +110,8 @@ class ActivityManager {
   // on one screen is never reported for the next. Written on the loop task, read from any.
   std::atomic<uint32_t> activityChanges{0};
   void noteActivityChanged() { activityChanges.fetch_add(1, std::memory_order_relaxed); }
+  // The last book's fonts open behind the UI faces while the current activity draws book text (syncUiBookFonts).
+  void syncBookFonts();
   // Counts render passes as they start. A popup drawn in one pass (or between two) is gone once the
   // next pass has redrawn the screen, which is how the serial CMD:STATE tells a popup on screen
   // from one that was.

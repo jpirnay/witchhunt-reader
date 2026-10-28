@@ -25,7 +25,8 @@ namespace {
 // v16: the cover fallbacks (ranked ZIP names, a cover page's largest picture, meta cover pages, cover ids, nav
 //      landmarks); a v15 cache holds a title banner, a logo or no cover for such books
 // v17: a spine record carries its item's ZIP stat (BOOK_SPINE_STAT_BYTES); a v16 record ends at tocIndex
-constexpr uint8_t BOOK_CACHE_VERSION = 17;
+// v18: the spine's page-progression-direction (a byte after the description); a v17 cache does not have it
+constexpr uint8_t BOOK_CACHE_VERSION = 18;
 constexpr char bookBinFile[] = "/book.bin";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";
@@ -327,7 +328,7 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   const uint32_t metadataSize = metadata.title.size() + metadata.author.size() + metadata.language.size() +
                                 metadata.coverItemHref.size() + metadata.textReferenceHref.size() +
                                 metadata.series.size() + metadata.seriesIndex.size() + metadata.description.size() +
-                                sizeof(uint32_t) * 8;
+                                sizeof(uint32_t) * 8 + sizeof(uint8_t) /* pageProgression */;
   const uint32_t lutSize = sizeof(uint32_t) * spineCount + sizeof(uint32_t) * tocCount;
   const uint32_t lutOffset = headerASize + metadataSize;
 
@@ -371,6 +372,7 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   bookWriter.writeString(metadata.series);
   bookWriter.writeString(metadata.seriesIndex);
   bookWriter.writeString(metadata.description);
+  bookWriter.writePod(static_cast<uint8_t>(metadata.pageProgression));
 
   // Scratch entries reused across all read loops below. Their internal
   // std::strings keep the capacity of the longest href/title encountered, so
@@ -728,6 +730,28 @@ bool BookMetadataCache::cacheIsCurrent(const std::string& cachePath) {
   return cache_version::isCurrent(cachePath + bookBinFile, BOOK_CACHE_VERSION);
 }
 
+bool BookMetadataCache::readLanguage(const std::string& cachePath, std::string& language) {
+  FsFile file;
+  if (!Storage.openFileForRead("BMC", cachePath + bookBinFile, file)) return false;
+  // The header as load() reads it, up to the language.
+  uint8_t version = 0;
+  uint32_t lutOffset = 0;
+  uint16_t spineCount = 0;
+  uint16_t tocCount = 0;
+  uint8_t tocReliable = 0;
+  serialization::readPod(file, version);
+  serialization::readPod(file, lutOffset);
+  serialization::readPod(file, spineCount);
+  serialization::readPod(file, tocCount);
+  serialization::readPod(file, tocReliable);
+  std::string skipped;
+  const bool ok = version == BOOK_CACHE_VERSION && serialization::readString(file, skipped) &&  // title
+                  serialization::readString(file, skipped) &&                                   // author
+                  serialization::readString(file, language);
+  file.close();
+  return ok;
+}
+
 bool BookMetadataCache::load() {
   if (!Storage.openFileForRead("BMC", cachePath + bookBinFile, bookFile)) {
     return false;
@@ -756,6 +780,11 @@ bool BookMetadataCache::load() {
   serialization::readString(bookFile, coreMetadata.series);
   serialization::readString(bookFile, coreMetadata.seriesIndex);
   serialization::readString(bookFile, coreMetadata.description);
+  uint8_t pageProgression = 0;
+  serialization::readPod(bookFile, pageProgression);
+  coreMetadata.pageProgression = pageProgression <= static_cast<uint8_t>(PageProgression::Rtl)
+                                     ? static_cast<PageProgression>(pageProgression)
+                                     : PageProgression::Default;
 
   loaded = true;
   LOG_DBG("BMC", "Loaded cache data: %d spine, %d TOC entries", spineCount, tocCount);

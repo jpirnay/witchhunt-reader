@@ -890,6 +890,18 @@ void ReaderActivity::onEnter() {
     probedEpub->clearCacheIfContentChanged();
     firstOpenIndexing = probedEpub->needsFirstOpenIndexing();
   }
+  // The book's language picks the regional sibling of a Noto CJK reader font (SdCardFontSystem). book.bin holds it
+  // from the second open on; a first open learns it from the load below, and such a font waits for it there.
+  std::string cachedLanguage;
+  bool languagePending = false;
+  if (probedEpub && probedEpub->readCachedLanguage(cachedLanguage)) {
+    sdFontSystem.setReaderLanguage(cachedLanguage);
+  } else if (probedEpub) {
+    sdFontSystem.setReaderLanguagePending();
+    languagePending = true;
+  } else {
+    sdFontSystem.clearReaderLanguage();
+  }
 
   // The book's font, loaded here rather than by goToReader(): the activity this one replaces has exited by now. A
   // reader replaced by another kept running its loop until the switch, and its look-ahead build then laid out and
@@ -1029,7 +1041,10 @@ void ReaderActivity::onEnter() {
       onGoBack();
       return;
     }
-    if (bookFontsPending) {
+    // load() also applies the book's metadata sidecar, whose language book.bin does not keep.
+    const bool languageLearned = languagePending || epub->getLanguage() != cachedLanguage;
+    if (languageLearned) sdFontSystem.setReaderLanguage(epub->getLanguage());
+    if (bookFontsPending || languageLearned) {
       RenderLock lock;  // as at the start of onEnter(): a font install draws its popup
       ensureSdFontLoadedForPath(initialBookPath.c_str(), /*waitForBookFonts=*/false);
     }

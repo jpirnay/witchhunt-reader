@@ -35,6 +35,10 @@ BASE = (
     | set(range(0x2010, 0x2028))
     | set(range(0x2030, 0x205F))
     | set(range(0x3000, 0x3040))
+    | {0x30FC}
+    # The CSS text-emphasis marks the reader draws: bullet U+2022 (already in 2010-2027), white bullet, circles,
+    # double circles, triangles and the sesame dots. Noto CJK draws all ten; the region sets name none of them.
+    | {0x2022, 0x25E6, 0x25CF, 0x25CB, 0x25C9, 0x25CE, 0x25B2, 0x25B3, 0xFE45, 0xFE46}
     | set(range(0xFF01, 0xFFA0))
 )
 
@@ -128,7 +132,19 @@ def charset(name: str, unihan_zip: Path) -> set[int]:
             except UnicodeDecodeError:
                 pass
         return (
+            # Keep the proven JIS X 0208 repertoire, then add only CJK
+            # ideographs from JIS X 0213 Plane 1. The full Plane-1 codec
+            # also contains Latin/other characters absent from Noto CJK JP.
             _encodable("euc_jp", _double_byte(0xA1, 0xFE))
+            | {
+                cp
+                for cp in _encodable("euc_jis_2004", _double_byte(0xA1, 0xFE))
+                if (
+                    0x3400 <= cp <= 0x4DBF
+                    or 0x4E00 <= cp <= 0x9FFF
+                    or 0xF900 <= cp <= 0xFAFF
+                )
+            }
             | nec_row13
             | unihan_field(unihan_zip, "kJoyoKanji")
             | unihan_field(unihan_zip, "kJinmeiyoKanji")

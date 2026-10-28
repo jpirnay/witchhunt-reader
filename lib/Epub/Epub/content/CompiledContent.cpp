@@ -109,7 +109,7 @@ void writeStyle(FsFile& f, const CssStyle& s) {
   writePod(f, static_cast<uint8_t>(s.listStyleNone));
   writePod(f, static_cast<uint8_t>(s.pageBreakBefore));
   writePod(f, static_cast<uint8_t>(s.pageBreakAfter));
-  writePod(f, s.lineHeightMultiplier);
+  writePod(f, s.lineHeightEm);
   writePod(f, s.fontSizeMultiplier);
   writePod(f, static_cast<uint8_t>(s.cssFloat));
   writePod(f, static_cast<uint8_t>(s.smallCaps));
@@ -147,7 +147,7 @@ void readStyle(FsFile& f, CssStyle& s) {
   s.pageBreakBefore = e != 0;
   readPod(f, e);
   s.pageBreakAfter = e != 0;
-  readPod(f, s.lineHeightMultiplier);
+  readPod(f, s.lineHeightEm);
   readPod(f, s.fontSizeMultiplier);
   readPod(f, e);
   s.cssFloat = static_cast<CssFloat>(e);
@@ -301,7 +301,7 @@ bool styleEquals(const CssStyle& a, const CssStyle& b) {
          a.textDecoration == b.textDecoration && a.display == b.display && a.verticalAlign == b.verticalAlign &&
          a.listStyleNone == b.listStyleNone && a.pageBreakBefore == b.pageBreakBefore &&
          a.pageBreakAfter == b.pageBreakAfter && a.cssFloat == b.cssFloat && a.smallCaps == b.smallCaps &&
-         a.lineHeightMultiplier == b.lineHeightMultiplier && a.fontSizeMultiplier == b.fontSizeMultiplier &&
+         a.lineHeightEm == b.lineHeightEm && a.fontSizeMultiplier == b.fontSizeMultiplier &&
          lenEq(a.textIndent, b.textIndent) && lenEq(a.marginTop, b.marginTop) &&
          lenEq(a.marginBottom, b.marginBottom) && lenEq(a.marginLeft, b.marginLeft) &&
          lenEq(a.marginRight, b.marginRight) && lenEq(a.paddingTop, b.paddingTop) &&

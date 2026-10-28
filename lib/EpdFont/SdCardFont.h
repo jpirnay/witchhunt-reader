@@ -33,6 +33,10 @@ class SdCardFont {
   // Returns true on success.
   bool load(const char* path);
 
+  // Whether the .cpfont at `path` has a glyph for `codepoint`, read from its first style's intervals without a load:
+  // what a family covers, asked before it is loaded. *readable is false when the file could not be read as a .cpfont.
+  static bool fileMapsCodepoint(const char* path, uint32_t codepoint, bool* readable);
+
   // Load from a flash partition mmap pointer (e.g. from FlashFontPartition::mmap()).
   // fullIntervals and kern/lig tables are read directly from the mmap region — no
   // heap allocation for metadata.  The mmap pointer must remain valid for the

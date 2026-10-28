@@ -41,14 +41,19 @@ void dumpWords(std::ostream& out, const TextBlock& block, const char* indent) {
   }
 }
 
-// One `R` record per ruby group of the line, after its `W` records, at `indent`; a line without annotations prints
-// nothing. It does not match the word-stream pattern, so the "no content dropped" check ignores it.
+// One `R` record per ruby group and one `E` record per emphasis run of the line, after its `W` records, at `indent`;
+// a line without annotations prints nothing. Neither matches the word-stream pattern, so the "no content dropped"
+// check ignores them.
 void dumpAnnotations(std::ostream& out, const TextBlock& block, const char* indent) {
   for (uint16_t a = 0; a < block.annotationCount(); ++a) {
     const TextBlock::Annotation annotation = block.annotation(a);
-    if (annotation.kind != TextBlock::AnnotationKind::Ruby) continue;
-    out << indent << "R first=" << annotation.firstWord << " count=" << annotation.wordCount << " x=" << annotation.x
-        << " w=" << annotation.width << " t=" << annotation.text << "\n";
+    if (annotation.kind == TextBlock::AnnotationKind::Ruby) {
+      out << indent << "R first=" << annotation.firstWord << " count=" << annotation.wordCount << " x=" << annotation.x
+          << " w=" << annotation.width << " t=" << annotation.text << "\n";
+    } else if (annotation.kind == TextBlock::AnnotationKind::Emphasis) {
+      out << indent << "E first=" << annotation.firstWord << " count=" << annotation.wordCount
+          << " m=" << static_cast<int>(annotation.mark) << "\n";
+    }
   }
 }
 
@@ -147,7 +152,11 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
   // between the extract and the layout parse. The dump therefore exercises the real ordering.
 
   out << "BOOK title=" << epub->getTitle() << " lang=" << epub->getLanguage() << " spine=" << epub->getSpineItemsCount()
-      << " toc=" << epub->getTocItemsCount() << " reliableToc=" << (epub->hasReliableToc() ? 1 : 0) << "\n";
+      << " toc=" << epub->getTocItemsCount() << " reliableToc=" << (epub->hasReliableToc() ? 1 : 0);
+  // Only when the spine declares it, so a book that does not say keeps the BOOK line it always had.
+  if (epub->pageProgression() == PageProgression::Rtl) out << " ppd=rtl";
+  if (epub->pageProgression() == PageProgression::Ltr) out << " ppd=ltr";
+  out << "\n";
 
   for (int i = 0; i < epub->getSpineItemsCount(); ++i) {
     const auto spineStart = std::chrono::steady_clock::now();
@@ -159,6 +168,8 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
     Section::BuildParams p;
     p.fontId = profile.fontId;
     p.lineCompression = profile.lineCompression;
+    p.bookLineHeightFloor = profile.bookLineHeightFloor;
+    p.lineHeightEmPx = profile.lineHeightEmPx;
     p.extraParagraphSpacing = profile.extraParagraphSpacing;
     p.paragraphAlignment = profile.paragraphAlignment;
     p.viewportWidth = profile.viewportWidth;

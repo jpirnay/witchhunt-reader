@@ -28,6 +28,23 @@ The rules and measurements these items refer to are in [Memory Allocation Strate
 
 **Next step.** Rebase the branch onto master. `CSS_CACHE_VERSION` is still 21 there, but `SECTION_FILE_VERSION` is 81, so the section bump becomes 81 → 82. Re-run the corpus comparison, then merge.
 
+## A `<br>` that ends a block adds a blank line
+
+**Open.** `<p>Alpha<br/></p><p>Bravo</p>` lays out Bravo a whole line below Alpha (y=48 with the host stub, against 24
+without the `<br>`), whether or not the `<br>` is styled `display: block`. A browser renders no line for a line break
+that ends a block's content.
+
+**Why it matters.** Calibre ends every entry of a converted contents page with `<br class="calibre1"/>` (and styles it
+`display: block`): Hayakawa's 『七王国の玉座』, seen on the X3 on 2026-10-26, sets each contents entry as a line and a
+blank line, about twice the pages it needs.
+
+**Where.** The `<br>` handling in `ChapterHtmlSlimParser::startElement` and the block flush after it;
+`test_br_in_blocks.epub` and `test_br_section_break.epub` pin what `<br>` does today, so a change has to keep their
+deliberate cases (a run of `<br>` as a scene break) apart from a single trailing one.
+
+**Next step.** Drop the empty line a single `<br>` leaves at the end of a block, check both goldens, and compare a
+calibre book's page count before and after.
+
 ## No hint when a chapter was simplified
 
 **Open.** When a fixed capacity changes what a chapter shows (footnotes per page, anchors per chapter, page elements, nesting depth), `ChapterHtmlSlimParser::noteCapOverflow` logs it and the section stores `kStatusSimplified`. The reader only logs "cached simplified" on a cache hit (`EpubReaderActivity`, section load); the reader sees less than the book contains and is not told.

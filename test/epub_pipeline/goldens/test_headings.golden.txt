@@ -17,39 +17,39 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=291 s=0 z=100 t=heading.
    W x=379 s=0 z=100 t=Its
    W x=416 s=0 z=100 t=font
-  LINE y=121 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=121 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=size
-   W x=48 s=0 z=100 t=is
-   W x=78 s=0 z=100 t=the
-   W x=124 s=0 z=100 t=base
-   W x=175 s=0 z=100 t=body
-   W x=224 s=0 z=100 t=size.
-   W x=282 s=0 z=100 t=The
-   W x=324 s=0 z=100 t=heading
-   W x=408 s=0 z=100 t=above
-  LINE y=145 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=should
-   W x=73 s=0 z=100 t=render
-   W x=138 s=0 z=100 t=noticeably
-   W x=240 s=0 z=100 t=larger
-   W x=309 s=0 z=100 t=than
-   W x=366 s=0 z=100 t=this
-   W x=415 s=0 z=100 t=text,
+   W x=39 s=0 z=100 t=is
+   W x=60 s=0 z=100 t=the
+   W x=97 s=0 z=100 t=base
+   W x=139 s=0 z=100 t=body
+   W x=179 s=0 z=100 t=size.
+   W x=228 s=0 z=100 t=The
+   W x=261 s=0 z=100 t=heading
+   W x=336 s=0 z=100 t=above
+   W x=393 s=0 z=100 t=should
+  LINE y=145 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=render
+   W x=61 s=0 z=100 t=noticeably
+   W x=159 s=0 z=100 t=larger
+   W x=224 s=0 z=100 t=than
+   W x=277 s=0 z=100 t=this
+   W x=322 s=0 z=100 t=text,
+   W x=374 s=0 z=100 t=scaled
+   W x=436 s=0 z=100 t=at
   LINE y=169 x=0 align=0 mult=1.000 hfid=0 words=10
-   W x=0 s=0 z=100 t=scaled
-   W x=68 s=0 z=100 t=at
-   W x=104 s=0 z=100 t=1.6
-   W x=145 s=0 z=100 t=times
-   W x=203 s=0 z=100 t=the
-   W x=248 s=0 z=100 t=body
-   W x=296 s=0 z=100 t=font
-   W x=353 s=0 z=100 t=size
-   W x=400 s=0 z=100 t=by
-   W x=428 s=0 z=100 t=the
-  LINE y=193 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=0 s=0 z=100 t=reader's
-   W x=79 s=0 z=100 t=default
-   W x=154 s=0 z=100 t=table.
+   W x=0 s=0 z=100 t=1.6
+   W x=33 s=0 z=100 t=times
+   W x=83 s=0 z=100 t=the
+   W x=120 s=0 z=100 t=body
+   W x=160 s=0 z=100 t=font
+   W x=209 s=0 z=100 t=size
+   W x=248 s=0 z=100 t=by
+   W x=268 s=0 z=100 t=the
+   W x=305 s=0 z=100 t=reader's
+   W x=384 s=0 z=100 t=default
+  LINE y=193 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=table.
   LINE y=231 x=0 align=2 mult=1.400 hfid=0 words=4
    W x=28 s=1 z=100 t=H2
    W x=60 s=1 z=100 t=Heading
@@ -65,32 +65,32 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=296 s=0 z=100 t=h2
    W x=332 s=0 z=100 t=heading.
    W x=428 s=0 z=100 t=The
-  LINE y=330 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=330 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=heading
-   W x=86 s=0 z=100 t=above
-   W x=154 s=0 z=100 t=should
-   W x=232 s=0 z=100 t=appear
-   W x=302 s=0 z=100 t=slightly
-   W x=393 s=0 z=100 t=smaller
-  LINE y=354 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=than
-   W x=57 s=0 z=100 t=the
-   W x=100 s=0 z=100 t=h1
-   W x=130 s=0 z=100 t=but
-   W x=169 s=0 z=100 t=still
-   W x=224 s=0 z=100 t=clearly
-   W x=298 s=0 z=100 t=larger
-   W x=367 s=0 z=100 t=than
-   W x=424 s=0 z=100 t=body
-  LINE y=378 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=0 z=100 t=text,
-   W x=50 s=0 z=100 t=at
-   W x=78 s=0 z=100 t=1.4
-   W x=109 s=0 z=100 t=times
-   W x=159 s=0 z=100 t=the
-   W x=196 s=0 z=100 t=body
-   W x=236 s=0 z=100 t=font
-   W x=285 s=0 z=100 t=size.
+   W x=75 s=0 z=100 t=above
+   W x=132 s=0 z=100 t=should
+   W x=199 s=0 z=100 t=appear
+   W x=258 s=0 z=100 t=slightly
+   W x=338 s=0 z=100 t=smaller
+   W x=410 s=0 z=100 t=than
+  LINE y=354 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=the
+   W x=39 s=0 z=100 t=h1
+   W x=65 s=0 z=100 t=but
+   W x=100 s=0 z=100 t=still
+   W x=151 s=0 z=100 t=clearly
+   W x=221 s=0 z=100 t=larger
+   W x=286 s=0 z=100 t=than
+   W x=339 s=0 z=100 t=body
+   W x=381 s=0 z=100 t=text,
+   W x=433 s=0 z=100 t=at
+  LINE y=378 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=1.4
+   W x=31 s=0 z=100 t=times
+   W x=81 s=0 z=100 t=the
+   W x=118 s=0 z=100 t=body
+   W x=158 s=0 z=100 t=font
+   W x=207 s=0 z=100 t=size.
   LINE y=416 x=0 align=2 mult=1.200 hfid=0 words=6
    W x=44 s=1 z=100 t=H2
    W x=71 s=1 z=100 t=with
@@ -101,53 +101,52 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
   LINE y=445 x=0 align=2 mult=1.200 hfid=0 words=2
    W x=145 s=1 z=100 t=override
    W x=248 s=1 z=100 t=test)
-  LINE y=481 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=481 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=18 s=0 z=100 t=This
-   W x=69 s=0 z=100 t=heading
-   W x=156 s=0 z=100 t=uses
-   W x=212 s=0 z=100 t=class="css-override"
-   W x=417 s=0 z=100 t=which
-  LINE y=505 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=sets
-   W x=50 s=0 z=100 t=font-size:
-   W x=156 s=0 z=100 t=120%.
-   W x=212 s=0 z=100 t=It
-   W x=244 s=0 z=100 t=should
-   W x=318 s=0 z=100 t=render
-   W x=384 s=0 z=100 t=SMALLER
-  LINE y=529 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=than
-   W x=55 s=0 z=100 t=the
-   W x=96 s=0 z=100 t=plain
-   W x=150 s=0 z=100 t=h2
-   W x=179 s=0 z=100 t=above
-   W x=240 s=0 z=100 t=(120%
-   W x=294 s=0 z=100 t=vs
-   W x=325 s=0 z=100 t=1.4x
-   W x=367 s=0 z=100 t=default),
+   W x=58 s=0 z=100 t=heading
+   W x=134 s=0 z=100 t=uses
+   W x=179 s=0 z=100 t=class="css-override"
+   W x=373 s=0 z=100 t=which
+   W x=423 s=0 z=100 t=sets
+  LINE y=505 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=font-size:
+   W x=99 s=0 z=100 t=120%.
+   W x=148 s=0 z=100 t=It
+   W x=173 s=0 z=100 t=should
+   W x=240 s=0 z=100 t=render
+   W x=299 s=0 z=100 t=SMALLER
+   W x=378 s=0 z=100 t=than
+   W x=429 s=0 z=100 t=the
+  LINE y=529 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=plain
+   W x=53 s=0 z=100 t=h2
+   W x=81 s=0 z=100 t=above
+   W x=141 s=0 z=100 t=(120%
+   W x=194 s=0 z=100 t=vs
+   W x=224 s=0 z=100 t=1.4x
+   W x=265 s=0 z=100 t=default),
+   W x=363 s=0 z=100 t=confirming
   LINE y=553 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=confirming
-   W x=116 s=0 z=100 t=that
-   W x=184 s=0 z=100 t=an
-   W x=231 s=0 z=100 t=explicit
-   W x=315 s=0 z=100 t=CSS
-   W x=373 s=0 z=100 t=font-size
-  LINE y=577 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=0 s=0 z=100 t=declaration
-   W x=129 s=0 z=100 t=overrides
-   W x=235 s=0 z=100 t=the
-   W x=291 s=0 z=100 t=reader's
-   W x=389 s=0 z=100 t=default
-  LINE y=601 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=heading
-   W x=75 s=0 z=100 t=multiplier.
-  LINE y=639 x=0 align=2 mult=1.200 hfid=0 words=5
+   W x=0 s=0 z=100 t=that
+   W x=66 s=0 z=100 t=an
+   W x=111 s=0 z=100 t=explicit
+   W x=193 s=0 z=100 t=CSS
+   W x=249 s=0 z=100 t=font-size
+   W x=356 s=0 z=100 t=declaration
+  LINE y=577 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=overrides
+   W x=87 s=0 z=100 t=the
+   W x=124 s=0 z=100 t=reader's
+   W x=203 s=0 z=100 t=default
+   W x=278 s=0 z=100 t=heading
+   W x=353 s=0 z=100 t=multiplier.
+  LINE y=615 x=0 align=2 mult=1.200 hfid=0 words=5
    W x=24 s=1 z=100 t=H3
    W x=53 s=1 z=100 t=Heading
    W x=146 s=1 z=100 t=(default
    W x=259 s=1 z=100 t=multiplier
    W x=379 s=1 z=100 t=1.2x)
-  LINE y=675 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=651 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=This
    W x=68 s=0 z=100 t=paragraph
    W x=172 s=0 z=100 t=follows
@@ -155,42 +154,41 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=296 s=0 z=100 t=h3
    W x=333 s=0 z=100 t=heading.
    W x=429 s=0 z=100 t=The
-  LINE y=699 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=675 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=heading
-   W x=83 s=0 z=100 t=above
-   W x=148 s=0 z=100 t=should
-   W x=223 s=0 z=100 t=be
-   W x=252 s=0 z=100 t=modestly
-   W x=341 s=0 z=100 t=larger
-   W x=412 s=0 z=100 t=than
+   W x=76 s=0 z=100 t=above
+   W x=134 s=0 z=100 t=should
+   W x=202 s=0 z=100 t=be
+   W x=224 s=0 z=100 t=modestly
+   W x=306 s=0 z=100 t=larger
+   W x=370 s=0 z=100 t=than
+   W x=422 s=0 z=100 t=body
+  LINE y=699 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=text,
+   W x=52 s=0 z=100 t=at
+   W x=82 s=0 z=100 t=1.2
+   W x=113 s=0 z=100 t=times
+   W x=165 s=0 z=100 t=the
+   W x=204 s=0 z=100 t=body
+   W x=246 s=0 z=100 t=font
+   W x=297 s=0 z=100 t=size.
+   W x=348 s=0 z=100 t=The
+   W x=383 s=0 z=100 t=size
+   W x=424 s=0 z=100 t=step
   LINE y=723 x=0 align=0 mult=1.000 hfid=0 words=11
-   W x=0 s=0 z=100 t=body
-   W x=42 s=0 z=100 t=text,
-   W x=94 s=0 z=100 t=at
-   W x=124 s=0 z=100 t=1.2
-   W x=155 s=0 z=100 t=times
-   W x=207 s=0 z=100 t=the
-   W x=246 s=0 z=100 t=body
-   W x=288 s=0 z=100 t=font
-   W x=339 s=0 z=100 t=size.
-   W x=390 s=0 z=100 t=The
-   W x=425 s=0 z=100 t=size
- PAGE 1 elements=19 footnotes=0
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=10
-   W x=0 s=0 z=100 t=step
-   W x=44 s=0 z=100 t=between
-   W x=114 s=0 z=100 t=h2
-   W x=143 s=0 z=100 t=and
-   W x=184 s=0 z=100 t=h3
-   W x=214 s=0 z=100 t=is
-   W x=239 s=0 z=100 t=smaller
-   W x=315 s=0 z=100 t=than
-   W x=370 s=0 z=100 t=between
-   W x=440 s=0 z=100 t=h1
-  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=and
-   W x=37 s=0 z=100 t=h2.
-  LINE y=62 x=0 align=2 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=between
+   W x=66 s=0 z=100 t=h2
+   W x=91 s=0 z=100 t=and
+   W x=128 s=0 z=100 t=h3
+   W x=154 s=0 z=100 t=is
+   W x=175 s=0 z=100 t=smaller
+   W x=247 s=0 z=100 t=than
+   W x=298 s=0 z=100 t=between
+   W x=364 s=0 z=100 t=h1
+   W x=388 s=0 z=100 t=and
+   W x=425 s=0 z=100 t=h2.
+ PAGE 1 elements=16 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.000 hfid=0 words=7
    W x=3 s=1 z=100 t=H4
    W x=28 s=1 z=100 t=Heading
    W x=106 s=1 z=100 t=(default
@@ -198,7 +196,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=300 s=1 z=100 t=1.0x,
    W x=354 s=1 z=100 t=bold
    W x=399 s=1 z=100 t=only)
-  LINE y=93 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=31 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=This
    W x=68 s=0 z=100 t=paragraph
    W x=172 s=0 z=100 t=follows
@@ -206,39 +204,38 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=296 s=0 z=100 t=h4
    W x=334 s=0 z=100 t=heading.
    W x=430 s=0 z=100 t=The
-  LINE y=117 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=55 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=heading
-   W x=82 s=0 z=100 t=above
-   W x=146 s=0 z=100 t=should
-   W x=220 s=0 z=100 t=be
-   W x=248 s=0 z=100 t=the
-   W x=292 s=0 z=100 t=same
-   W x=345 s=0 z=100 t=size
-   W x=391 s=0 z=100 t=as
-   W x=425 s=0 z=100 t=body
-  LINE y=141 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=text
-   W x=46 s=0 z=100 t=but
-   W x=83 s=0 z=100 t=bold.
-   W x=138 s=0 z=100 t=From
-   W x=184 s=0 z=100 t=h4
-   W x=215 s=0 z=100 t=through
-   W x=301 s=0 z=100 t=h6
-   W x=334 s=0 z=100 t=the
-   W x=375 s=0 z=100 t=multiplier
-  LINE y=165 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=is
-   W x=28 s=0 z=100 t=1.0x,
-   W x=84 s=0 z=100 t=so
-   W x=118 s=0 z=100 t=the
-   W x=162 s=0 z=100 t=only
-   W x=215 s=0 z=100 t=visual
-   W x=287 s=0 z=100 t=difference
-   W x=387 s=0 z=100 t=is
-   W x=415 s=0 z=100 t=font
-  LINE y=189 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=0 s=0 z=100 t=weight.
-  LINE y=227 x=0 align=2 mult=1.000 hfid=0 words=7
+   W x=76 s=0 z=100 t=above
+   W x=134 s=0 z=100 t=should
+   W x=202 s=0 z=100 t=be
+   W x=224 s=0 z=100 t=the
+   W x=262 s=0 z=100 t=same
+   W x=309 s=0 z=100 t=size
+   W x=349 s=0 z=100 t=as
+   W x=377 s=0 z=100 t=body
+   W x=418 s=0 z=100 t=text
+  LINE y=79 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=but
+   W x=33 s=0 z=100 t=bold.
+   W x=84 s=0 z=100 t=From
+   W x=126 s=0 z=100 t=h4
+   W x=153 s=0 z=100 t=through
+   W x=235 s=0 z=100 t=h6
+   W x=264 s=0 z=100 t=the
+   W x=301 s=0 z=100 t=multiplier
+   W x=391 s=0 z=100 t=is
+   W x=412 s=0 z=100 t=1.0x,
+  LINE y=103 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=so
+   W x=27 s=0 z=100 t=the
+   W x=64 s=0 z=100 t=only
+   W x=110 s=0 z=100 t=visual
+   W x=175 s=0 z=100 t=difference
+   W x=268 s=0 z=100 t=is
+   W x=289 s=0 z=100 t=font
+   W x=338 s=0 z=100 t=weight.
+  LINE y=141 x=0 align=2 mult=1.000 hfid=0 words=7
    W x=3 s=1 z=100 t=H5
    W x=29 s=1 z=100 t=Heading
    W x=107 s=1 z=100 t=(default
@@ -246,45 +243,45 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=301 s=1 z=100 t=1.0x,
    W x=355 s=1 z=100 t=bold
    W x=400 s=1 z=100 t=only)
-  LINE y=258 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=This
-   W x=61 s=0 z=100 t=paragraph
-   W x=158 s=0 z=100 t=follows
-   W x=235 s=0 z=100 t=an
-   W x=268 s=0 z=100 t=h5
-   W x=300 s=0 z=100 t=heading.
-   W x=389 s=0 z=100 t=Like
-   W x=434 s=0 z=100 t=h4
-  LINE y=282 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=0 z=100 t=it
-   W x=27 s=0 z=100 t=should
-   W x=99 s=0 z=100 t=appear
-   W x=163 s=0 z=100 t=at
-   W x=196 s=0 z=100 t=body
-   W x=241 s=0 z=100 t=text
-   W x=288 s=0 z=100 t=size,
-   W x=340 s=0 z=100 t=distinguished
-  LINE y=306 x=0 align=0 mult=1.000 hfid=0 words=11
-   W x=0 s=0 z=100 t=only
-   W x=49 s=0 z=100 t=by
-   W x=72 s=0 z=100 t=its
-   W x=106 s=0 z=100 t=bold
-   W x=150 s=0 z=100 t=weight.
-   W x=223 s=0 z=100 t=On
-   W x=251 s=0 z=100 t=a
-   W x=272 s=0 z=100 t=real
-   W x=319 s=0 z=100 t=e-ink
-   W x=371 s=0 z=100 t=device
-   W x=431 s=0 z=100 t=h4
-  LINE y=330 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=and
-   W x=37 s=0 z=100 t=h5
-   W x=65 s=0 z=100 t=should
-   W x=132 s=0 z=100 t=look
-   W x=179 s=0 z=100 t=identical
-   W x=263 s=0 z=100 t=in
-   W x=286 s=0 z=100 t=size.
-  LINE y=368 x=0 align=2 mult=1.000 hfid=0 words=7
+   W x=58 s=0 z=100 t=paragraph
+   W x=152 s=0 z=100 t=follows
+   W x=226 s=0 z=100 t=an
+   W x=256 s=0 z=100 t=h5
+   W x=285 s=0 z=100 t=heading.
+   W x=371 s=0 z=100 t=Like
+   W x=413 s=0 z=100 t=h4
+   W x=441 s=0 z=100 t=it
+  LINE y=196 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=should
+   W x=69 s=0 z=100 t=appear
+   W x=130 s=0 z=100 t=at
+   W x=160 s=0 z=100 t=body
+   W x=202 s=0 z=100 t=text
+   W x=246 s=0 z=100 t=size,
+   W x=295 s=0 z=100 t=distinguished
+   W x=419 s=0 z=100 t=only
+  LINE y=220 x=0 align=0 mult=1.000 hfid=0 words=12
+   W x=0 s=0 z=100 t=by
+   W x=21 s=0 z=100 t=its
+   W x=53 s=0 z=100 t=bold
+   W x=95 s=0 z=100 t=weight.
+   W x=166 s=0 z=100 t=On
+   W x=192 s=0 z=100 t=a
+   W x=211 s=0 z=100 t=real
+   W x=256 s=0 z=100 t=e-ink
+   W x=306 s=0 z=100 t=device
+   W x=364 s=0 z=100 t=h4
+   W x=392 s=0 z=100 t=and
+   W x=430 s=0 z=100 t=h5
+  LINE y=244 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=should
+   W x=67 s=0 z=100 t=look
+   W x=114 s=0 z=100 t=identical
+   W x=198 s=0 z=100 t=in
+   W x=221 s=0 z=100 t=size.
+  LINE y=282 x=0 align=2 mult=1.000 hfid=0 words=7
    W x=2 s=1 z=100 t=H6
    W x=29 s=1 z=100 t=Heading
    W x=107 s=1 z=100 t=(default
@@ -292,7 +289,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=301 s=1 z=100 t=1.0x,
    W x=355 s=1 z=100 t=bold
    W x=400 s=1 z=100 t=only)
-  LINE y=399 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=313 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=18 s=0 z=100 t=This
    W x=61 s=0 z=100 t=paragraph
    W x=158 s=0 z=100 t=follows
@@ -301,7 +298,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=301 s=0 z=100 t=heading.
    W x=390 s=0 z=100 t=Like
    W x=435 s=0 z=100 t=h4
-  LINE y=423 x=0 align=0 mult=1.000 hfid=0 words=11
+  LINE y=337 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=and
    W x=39 s=0 z=100 t=h5
    W x=69 s=0 z=100 t=it
@@ -313,14 +310,14 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=339 s=0 z=100 t=size
    W x=380 s=0 z=100 t=with
    W x=422 s=0 z=100 t=bold
-  LINE y=447 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=361 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=weight.
    W x=78 s=0 z=100 t=All
    W x=118 s=0 z=100 t=three
    W x=180 s=0 z=100 t=(h4/h5/h6)
    W x=305 s=0 z=100 t=should
    W x=380 s=0 z=100 t=visually
-  LINE y=471 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=385 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=align
    W x=57 s=0 z=100 t=in
    W x=82 s=0 z=100 t=size,
@@ -330,5 +327,5 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=313 s=0 z=100 t=floor
    W x=372 s=0 z=100 t=for
    W x=410 s=0 z=100 t=minor
-  LINE y=495 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=409 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=headings.

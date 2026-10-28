@@ -2,11 +2,24 @@
 
 #include <cstdint>
 
+#include "../TextEmphasis.h"
+
 // Matches order of PARAGRAPH_ALIGNMENT in CrossPointSettings. Inherit is not an alignment: it is
 // the marker for an explicit `inherit`, which must beat a value set lower in the cascade and then
 // leave the element to its parent's alignment (CssStyle::hasTextAlign reports it as unset).
 // Based on the `inherit` patch Leopoldo Pla Sempere (@lpla) posted on crosspoint-reader PR #3891.
-enum class CssTextAlign : uint8_t { Justify = 0, Left = 1, Center = 2, Right = 3, None = 4, Inherit = 5 };
+// Start and End are `text-align: start` and `end`, left or right by the element's direction: CssStyle::resolveLogical
+// turns them into Left or Right before layout reads the alignment.
+enum class CssTextAlign : uint8_t {
+  Justify = 0,
+  Left = 1,
+  Center = 2,
+  Right = 3,
+  None = 4,
+  Inherit = 5,
+  Start = 6,
+  End = 7
+};
 // Auto is not a length: it is the marker for an explicit `width: auto` / `height: auto`, which
 // must beat a length set earlier in the cascade rather than be ignored as unparseable. Only
 // imageWidth/imageHeight carry it (see CssStyle::hasImageWidth/hasImageHeight, which report the
@@ -71,6 +84,15 @@ enum class CssVerticalAlign : uint8_t { Baseline = 0, Super = 1, Sub = 2 };
 // Float options — used to detect inline images beside paragraph text
 enum class CssFloat : uint8_t { None = 0, Left = 1, Right = 2 };
 
+// How text runs, as the element's CSS says it. These properties have no defined bit (the flag word is nearly full):
+// 0 is Unset in each, which tells "not declared" from a declared initial value. Sideways writing modes read as the
+// vertical mode with the same block direction; Auto direction comes only from the HTML dir attribute.
+enum class CssWritingMode : uint8_t { Unset = 0, HorizontalTb, VerticalRl, VerticalLr };
+enum class CssTextOrientation : uint8_t { Unset = 0, Mixed, Upright, Sideways };
+enum class CssTextCombine : uint8_t { Unset = 0, None, All, Digits2, Digits3, Digits4 };
+enum class CssDirection : uint8_t { Unset = 0, Ltr, Rtl, Auto };
+enum class CssUnicodeBidi : uint8_t { Unset = 0, Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext };
+
 // Bitmask for tracking which properties have been explicitly set
 struct CssPropertyFlags {
   uint32_t textAlign : 1;
@@ -104,6 +126,7 @@ struct CssPropertyFlags {
   uint32_t opacityZero : 1;
   uint32_t visibilityHidden : 1;
   uint32_t fontFamily : 1;
+  uint32_t textEmphasis : 1;
 
   CssPropertyFlags()
       : textAlign(0),
@@ -133,14 +156,15 @@ struct CssPropertyFlags {
         colorTransparent(0),
         opacityZero(0),
         visibilityHidden(0),
-        fontFamily(0) {}
+        fontFamily(0),
+        textEmphasis(0) {}
 
   [[nodiscard]] bool anySet() const {
     return textAlign || fontStyle || fontWeight || textDecoration || textIndent || marginTop || marginBottom ||
            marginLeft || marginRight || paddingTop || paddingBottom || paddingLeft || paddingRight || imageHeight ||
            imageWidth || display || verticalAlign || listStyleNone || pageBreakBefore || pageBreakAfter || lineHeight ||
            fontSizeMultiplier || cssFloat || smallCaps || colorTransparent || opacityZero || visibilityHidden ||
-           fontFamily;
+           fontFamily || textEmphasis;
   }
 
   void clearAll() {
@@ -149,7 +173,7 @@ struct CssPropertyFlags {
     paddingTop = paddingBottom = paddingLeft = paddingRight = 0;
     imageHeight = imageWidth = display = verticalAlign = 0;
     listStyleNone = pageBreakBefore = pageBreakAfter = lineHeight = fontSizeMultiplier = cssFloat = 0;
-    smallCaps = colorTransparent = opacityZero = visibilityHidden = fontFamily = 0;
+    smallCaps = colorTransparent = opacityZero = visibilityHidden = fontFamily = textEmphasis = 0;
   }
 };
 
@@ -186,11 +210,17 @@ struct CssStyle {
   CssDisplay display = CssDisplay::Block;                       // display property (Block, Inline or None)
   CssVerticalAlign verticalAlign = CssVerticalAlign::Baseline;  // vertical-align for inline elements
 
-  bool listStyleNone = false;         // true when list-style-type: none / list-style: none
-  bool pageBreakBefore = false;       // true when page-break-before: always (or break-before: page)
-  bool pageBreakAfter = false;        // true when page-break-after: always (or break-after: page)
-  float lineHeightMultiplier = 1.0f;  // normalised line-height multiplier (relative to default y_advance)
-  float fontSizeMultiplier = 1.0f;    // font-size multiplier relative to body em size
+  bool listStyleNone = false;    // true when list-style-type: none / list-style: none
+  bool pageBreakBefore = false;  // true when page-break-before: always (or break-before: page)
+  bool pageBreakAfter = false;   // true when page-break-after: always (or break-after: page)
+  // Three of the five flow properties, in the padding before the floats (see the size check below the struct).
+  CssWritingMode writingMode = CssWritingMode::Unset;
+  CssTextOrientation textOrientation = CssTextOrientation::Unset;
+  CssTextCombine textCombine = CssTextCombine::Unset;
+  // line-height as a multiple of the element's font size, as CSS has it (unitless, em, % and px all end up here);
+  // unset is `normal`, the font's own line height. Not read by layout yet: the reader's line-spacing setting decides.
+  float lineHeightEm = 0.0f;
+  float fontSizeMultiplier = 1.0f;  // font-size multiplier relative to body em size
   // Part of font-size, set with it: true for rem, px, pt and the absolute keywords, whose size is
   // the body's times the multiplier; false for em, % and smaller/larger, which scale the parent's.
   bool fontSizeRootRelative = false;
@@ -209,14 +239,19 @@ struct CssStyle {
   bool colorTransparent = false;
   bool opacityZero = false;
   bool visibilityHidden = false;  // visibility: hidden | collapse
+  // The other two, in the padding before fontFamily.
+  CssDirection direction = CssDirection::Unset;
+  CssUnicodeBidi unicodeBidi = CssUnicodeBidi::Unset;
   // A font-family list as CssFontFamily describes it: its first family's identity and its generic serif or
   // sans-serif; 0 for the reader's font.
   uint32_t fontFamily = 0;
+  // A TextEmphasis mark (Shape | kOpen); 0 is `none`, which is a defined value.
+  uint8_t textEmphasis = 0;
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
 
   // Number of properties applyOver() merges: the size of its `ranks` array.
-  static constexpr int kCascadeProperties = 28;
+  static constexpr int kCascadeProperties = 34;
 
   // Apply properties from another style, only overwriting if the other style
   // has that property explicitly defined.
@@ -318,7 +353,7 @@ struct CssStyle {
       defined.pageBreakAfter = 1;
     }
     if (base.hasLineHeight() && take(defined.lineHeight, 20)) {
-      lineHeightMultiplier = base.lineHeightMultiplier;
+      lineHeightEm = base.lineHeightEm;
       defined.lineHeight = 1;
     }
     if (base.hasFontSizeMultiplier() && take(defined.fontSizeMultiplier, 21)) {
@@ -350,6 +385,15 @@ struct CssStyle {
       fontFamily = base.fontFamily;
       defined.fontFamily = 1;
     }
+    if (base.hasWritingMode() && take(hasWritingMode(), 28)) writingMode = base.writingMode;
+    if (base.hasTextOrientation() && take(hasTextOrientation(), 29)) textOrientation = base.textOrientation;
+    if (base.hasTextCombine() && take(hasTextCombine(), 30)) textCombine = base.textCombine;
+    if (base.hasDirection() && take(hasDirection(), 31)) direction = base.direction;
+    if (base.hasUnicodeBidi() && take(hasUnicodeBidi(), 32)) unicodeBidi = base.unicodeBidi;
+    if (base.hasTextEmphasis() && take(defined.textEmphasis, 33)) {
+      textEmphasis = base.textEmphasis;
+      defined.textEmphasis = 1;
+    }
   }
 
   // An explicit `inherit` is defined (it overrides lower rules in applyOver) but reports as unset:
@@ -377,6 +421,7 @@ struct CssStyle {
   [[nodiscard]] bool hasListStyleNone() const { return defined.listStyleNone; }
   [[nodiscard]] bool hasCssFloat() const { return defined.cssFloat; }
   [[nodiscard]] bool hasSmallCaps() const { return defined.smallCaps; }
+  [[nodiscard]] bool hasTextEmphasis() const { return defined.textEmphasis; }
   [[nodiscard]] bool hasColorTransparent() const { return defined.colorTransparent; }
   [[nodiscard]] bool hasOpacityZero() const { return defined.opacityZero; }
   [[nodiscard]] bool hasVisibilityHidden() const { return defined.visibilityHidden; }
@@ -401,7 +446,71 @@ struct CssStyle {
   [[nodiscard]] bool hasPageBreakBefore() const { return defined.pageBreakBefore; }
   [[nodiscard]] bool hasPageBreakAfter() const { return defined.pageBreakAfter; }
   [[nodiscard]] bool hasLineHeight() const { return defined.lineHeight; }
+  [[nodiscard]] bool hasWritingMode() const { return writingMode != CssWritingMode::Unset; }
+  [[nodiscard]] bool hasTextOrientation() const { return textOrientation != CssTextOrientation::Unset; }
+  [[nodiscard]] bool hasTextCombine() const { return textCombine != CssTextCombine::Unset; }
+  [[nodiscard]] bool hasDirection() const { return direction != CssDirection::Unset; }
+  [[nodiscard]] bool hasUnicodeBidi() const { return unicodeBidi != CssUnicodeBidi::Unset; }
+  // Whether the style says anything at all: a defined bit, or one of the flow properties, which have none.
+  [[nodiscard]] bool anyDefined() const {
+    return defined.anySet() || hasWritingMode() || hasTextOrientation() || hasTextCombine() || hasDirection() ||
+           hasUnicodeBidi();
+  }
   [[nodiscard]] bool hasFontSizeMultiplier() const { return defined.fontSizeMultiplier; }
+
+  // Rewrites what layout reads physically into what the element means logically. Afterwards top, right, bottom and
+  // left are block-start, inline-end, block-end and inline-start, and imageWidth/imageHeight the inline and block size,
+  // as horizontal-tb names them; text-align start and end are left or right. Both arguments are the element's computed
+  // values: the writing mode its CSS was written for, not the one the page is set in (Unset reads as horizontal-tb and
+  // ltr). Line-relative properties (text-align left/right, float, text-indent) need nothing. CSS Writing Modes 3, 6.2.
+  void resolveLogical(const CssWritingMode writingModeIn, const CssDirection directionIn) {
+    if (textAlign == CssTextAlign::Start || textAlign == CssTextAlign::End) {
+      const bool rtl = directionIn == CssDirection::Rtl;  // Auto reads as ltr until the text decides
+      textAlign = (textAlign == CssTextAlign::Start) != rtl ? CssTextAlign::Left : CssTextAlign::Right;
+    }
+    if (writingModeIn != CssWritingMode::VerticalRl && writingModeIn != CssWritingMode::VerticalLr) return;
+    const bool rl = writingModeIn == CssWritingMode::VerticalRl;  // block-start is the right side, else the left
+    struct Side {
+      CssLength length;
+      bool defined;
+    };
+    // top, right, bottom, left in; block-start, inline-end, block-end, inline-start out.
+    const auto turn = [rl](const Side top, const Side right, const Side bottom, const Side left, Side(&out)[4]) {
+      out[0] = rl ? right : left;
+      out[1] = bottom;
+      out[2] = rl ? left : right;
+      out[3] = top;
+    };
+    Side m[4];
+    turn({marginTop, defined.marginTop != 0}, {marginRight, defined.marginRight != 0},
+         {marginBottom, defined.marginBottom != 0}, {marginLeft, defined.marginLeft != 0}, m);
+    marginTop = m[0].length;
+    defined.marginTop = m[0].defined;
+    marginRight = m[1].length;
+    defined.marginRight = m[1].defined;
+    marginBottom = m[2].length;
+    defined.marginBottom = m[2].defined;
+    marginLeft = m[3].length;
+    defined.marginLeft = m[3].defined;
+    Side pd[4];
+    turn({paddingTop, defined.paddingTop != 0}, {paddingRight, defined.paddingRight != 0},
+         {paddingBottom, defined.paddingBottom != 0}, {paddingLeft, defined.paddingLeft != 0}, pd);
+    paddingTop = pd[0].length;
+    defined.paddingTop = pd[0].defined;
+    paddingRight = pd[1].length;
+    defined.paddingRight = pd[1].defined;
+    paddingBottom = pd[2].length;
+    defined.paddingBottom = pd[2].defined;
+    paddingLeft = pd[3].length;
+    defined.paddingLeft = pd[3].defined;
+    // A vertical box's height runs along its lines: the inline size, which layout reads as the width.
+    const CssLength width = imageWidth;
+    const uint32_t widthDefined = defined.imageWidth;
+    imageWidth = imageHeight;
+    defined.imageWidth = defined.imageHeight;
+    imageHeight = width;
+    defined.imageHeight = widthDefined;
+  }
 
   void reset() {
     textAlign = CssTextAlign::Left;
@@ -417,7 +526,7 @@ struct CssStyle {
     listStyleNone = false;
     pageBreakBefore = false;
     pageBreakAfter = false;
-    lineHeightMultiplier = 1.0f;
+    lineHeightEm = 0.0f;
     fontSizeMultiplier = 1.0f;
     fontSizeRootRelative = false;
     cssFloat = CssFloat::None;
@@ -426,6 +535,17 @@ struct CssStyle {
     opacityZero = false;
     visibilityHidden = false;
     fontFamily = 0;
+    writingMode = CssWritingMode::Unset;
+    textOrientation = CssTextOrientation::Unset;
+    textCombine = CssTextCombine::Unset;
+    direction = CssDirection::Unset;
+    unicodeBidi = CssUnicodeBidi::Unset;
+    textEmphasis = 0;
     defined.clearAll();
   }
 };
+
+// The flow properties sit in padding (after pageBreakAfter and after visibilityHidden), so they cost a style nothing;
+// textEmphasis, after fontFamily, is the one field that takes a word of its own (three bytes of it spare). Every member
+// is 4-byte aligned or smaller, so the C3 lays it out as the host does.
+static_assert(sizeof(CssStyle) == 128, "CssStyle grew: the flow properties or textEmphasis no longer fit its padding");

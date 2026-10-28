@@ -62,6 +62,7 @@ class BookInfoActivity final : public Activity {
   void renderDescriptionAndHints();
 
  public:
+  bool drawsBookText() const override { return true; }
   explicit BookInfoActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string filePath)
       : Activity("BookInfo", renderer, mappedInput), filePath(std::move(filePath)) {}
 

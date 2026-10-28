@@ -103,28 +103,28 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=287 s=0 z=100 t=enough
    W x=364 s=0 z=100 t=to
    W x=397 s=0 z=100 t=wrap
-  LINE y=642 x=27 align=0 mult=1.000 hfid=0 words=10
+  LINE y=642 x=27 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=onto
-   W x=55 s=0 z=100 t=a
-   W x=77 s=0 z=100 t=second
-   W x=143 s=0 z=100 t=line,
-   W x=196 s=0 z=100 t=and
-   W x=237 s=0 z=100 t=every
-   W x=293 s=0 z=100 t=line
-   W x=338 s=0 z=100 t=of
-   W x=370 s=0 z=100 t=it
-   W x=396 s=0 z=100 t=has
-  LINE y=666 x=27 align=0 mult=1.000 hfid=0 words=10
-   W x=0 s=0 z=100 t=to
-   W x=28 s=0 z=100 t=start
-   W x=83 s=0 z=100 t=at
-   W x=111 s=0 z=100 t=the
-   W x=148 s=0 z=100 t=same
-   W x=194 s=0 z=100 t=list
-   W x=234 s=0 z=100 t=inset
-   W x=285 s=0 z=100 t=as
-   W x=312 s=0 z=100 t=the
-   W x=349 s=0 z=100 t=first.
+   W x=52 s=0 z=100 t=a
+   W x=71 s=0 z=100 t=second
+   W x=134 s=0 z=100 t=line,
+   W x=184 s=0 z=100 t=and
+   W x=222 s=0 z=100 t=every
+   W x=275 s=0 z=100 t=line
+   W x=317 s=0 z=100 t=of
+   W x=346 s=0 z=100 t=it
+   W x=369 s=0 z=100 t=has
+   W x=409 s=0 z=100 t=to
+  LINE y=666 x=27 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=start
+   W x=55 s=0 z=100 t=at
+   W x=83 s=0 z=100 t=the
+   W x=120 s=0 z=100 t=same
+   W x=166 s=0 z=100 t=list
+   W x=206 s=0 z=100 t=inset
+   W x=257 s=0 z=100 t=as
+   W x=284 s=0 z=100 t=the
+   W x=321 s=0 z=100 t=first.
   LINE y=690 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=10.
    W x=52 s=0 z=100 t=ANCHORED:

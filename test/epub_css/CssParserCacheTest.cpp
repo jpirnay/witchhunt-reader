@@ -472,7 +472,7 @@ bool definedEqual(const CssPropertyFlags& a, const CssPropertyFlags& b) {
          a.pageBreakBefore == b.pageBreakBefore && a.pageBreakAfter == b.pageBreakAfter &&
          a.lineHeight == b.lineHeight && a.fontSizeMultiplier == b.fontSizeMultiplier && a.cssFloat == b.cssFloat &&
          a.smallCaps == b.smallCaps && a.colorTransparent == b.colorTransparent && a.opacityZero == b.opacityZero &&
-         a.visibilityHidden == b.visibilityHidden && a.fontFamily == b.fontFamily;
+         a.visibilityHidden == b.visibilityHidden && a.fontFamily == b.fontFamily && a.textEmphasis == b.textEmphasis;
 }
 
 bool stylesEqual(const CssStyle& a, const CssStyle& b) {
@@ -481,7 +481,7 @@ bool stylesEqual(const CssStyle& a, const CssStyle& b) {
          a.textDecoration == b.textDecoration && a.display == b.display && a.verticalAlign == b.verticalAlign &&
          a.listStyleNone == b.listStyleNone && a.pageBreakBefore == b.pageBreakBefore &&
          a.pageBreakAfter == b.pageBreakAfter && a.cssFloat == b.cssFloat && a.smallCaps == b.smallCaps &&
-         a.lineHeightMultiplier == b.lineHeightMultiplier && a.fontSizeMultiplier == b.fontSizeMultiplier &&
+         a.lineHeightEm == b.lineHeightEm && a.fontSizeMultiplier == b.fontSizeMultiplier &&
          a.fontSizeRootRelative == b.fontSizeRootRelative && len(a.textIndent) == len(b.textIndent) &&
          len(a.marginTop) == len(b.marginTop) && len(a.marginBottom) == len(b.marginBottom) &&
          len(a.marginLeft) == len(b.marginLeft) && len(a.marginRight) == len(b.marginRight) &&
@@ -489,7 +489,9 @@ bool stylesEqual(const CssStyle& a, const CssStyle& b) {
          len(a.paddingLeft) == len(b.paddingLeft) && len(a.paddingRight) == len(b.paddingRight) &&
          len(a.imageHeight) == len(b.imageHeight) && len(a.imageWidth) == len(b.imageWidth) &&
          a.fontFamily == b.fontFamily && a.colorTransparent == b.colorTransparent && a.opacityZero == b.opacityZero &&
-         a.visibilityHidden == b.visibilityHidden && definedEqual(a.defined, b.defined);
+         a.visibilityHidden == b.visibilityHidden && a.writingMode == b.writingMode &&
+         a.textOrientation == b.textOrientation && a.textCombine == b.textCombine && a.direction == b.direction &&
+         a.unicodeBidi == b.unicodeBidi && a.textEmphasis == b.textEmphasis && definedEqual(a.defined, b.defined);
 }
 }  // namespace
 
@@ -697,11 +699,17 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       ".a { text-align: center; font-weight: bold; font-style: italic; text-decoration: underline; "
       "margin: 2em; padding-left: 5px; padding-right: 3px; text-indent: 1.5em; line-height: 1.6; "
       "font-size: 120%; vertical-align: super; float: left; font-variant: small-caps; "
-      "list-style: none; page-break-before: always; page-break-after: always; font-family: 'EB Garamond'; }\n"
+      "list-style: none; page-break-before: always; page-break-after: always; font-family: 'EB Garamond'; "
+      "-epub-text-emphasis-style: open sesame; }\n"
       ".b { margin-top: 3px; text-align: right; font-size: 1.25rem; font-family: serif; }\n"
       ".c { display: none; }\n"
       ".d { display: inline; }\n"
-      ".e { color: transparent; opacity: 0; visibility: hidden; }\n";
+      ".e { color: transparent; opacity: 0; visibility: hidden; }\n"
+      ".f { -webkit-writing-mode: vertical-lr; -webkit-text-orientation: upright; text-combine-upright: digits 3; "
+      "direction: rtl; unicode-bidi: isolate-override; text-align: end; }\n"
+      ".g { writing-mode: vertical-rl; }\n"  // a rule with nothing else is kept
+      ".h { text-emphasis-style: none; }\n"
+      ".i { writing-mode: vertical-rl; text-emphasis: filled triangle; }\n";  // the flow word and a mark in one record
   const std::string cacheDir = makeTempDir();
   ASSERT_FALSE(cacheDir.empty());
   std::string cssPath;
@@ -711,7 +719,8 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
   ASSERT_TRUE(compileCache(parser, cssPath));
 
   const std::vector<std::pair<std::string, std::string>> probes = {
-      {"p", "a"}, {"p", "b"}, {"div", "c"}, {"span", "a"}, {"p", "none"}, {"span", "d"}, {"span", "e"}};
+      {"p", "a"},    {"p", "b"},   {"div", "c"},  {"span", "a"}, {"p", "none"}, {"span", "d"},
+      {"span", "e"}, {"div", "f"}, {"html", "g"}, {"span", "h"}, {"span", "i"}};
   auto resolveAll = [&](CssParser& p) {
     std::vector<CssStyle> out;
     for (const auto& pr : probes) out.push_back(p.resolveStyle(pr.first, pr.second));
@@ -728,6 +737,22 @@ TEST(CssParserArena, ResidentPreservesAllStyleFields) {
       << "the invisibility flags did not survive the disk cache";
   EXPECT_TRUE(heapStyles[6].defined.colorTransparent && heapStyles[6].defined.opacityZero &&
               heapStyles[6].defined.visibilityHidden);
+  EXPECT_TRUE(heapStyles[0].hasLineHeight()) << "line-height did not survive the disk cache";
+  EXPECT_FLOAT_EQ(1.6f, heapStyles[0].lineHeightEm);
+  const CssStyle& flow = heapStyles[7];
+  EXPECT_EQ(CssWritingMode::VerticalLr, flow.writingMode) << "the flow word did not survive the disk cache";
+  EXPECT_EQ(CssTextOrientation::Upright, flow.textOrientation);
+  EXPECT_EQ(CssTextCombine::Digits3, flow.textCombine);
+  EXPECT_EQ(CssDirection::Rtl, flow.direction);
+  EXPECT_EQ(CssUnicodeBidi::IsolateOverride, flow.unicodeBidi);
+  EXPECT_EQ(CssTextAlign::End, flow.textAlign) << "text-align: end did not survive the disk cache as itself";
+  EXPECT_EQ(CssWritingMode::VerticalRl, heapStyles[8].writingMode) << "a rule with only writing-mode was dropped";
+  EXPECT_EQ(heapStyles[0].textEmphasis, TextEmphasis::Sesame | TextEmphasis::kOpen)
+      << "text-emphasis-style did not survive the disk cache";
+  EXPECT_TRUE(heapStyles[9].hasTextEmphasis() && heapStyles[9].textEmphasis == 0)
+      << "an explicit text-emphasis-style: none did not survive the disk cache";
+  EXPECT_EQ(CssWritingMode::VerticalRl, heapStyles[10].writingMode);
+  EXPECT_EQ(heapStyles[10].textEmphasis, TextEmphasis::Triangle) << "a mark beside the flow word did not survive";
 
   BuildArena arena(64 * 1024);
   ASSERT_TRUE(arena.valid());

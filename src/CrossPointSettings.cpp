@@ -1,5 +1,6 @@
 #include "CrossPointSettings.h"
 
+#include <Epub/LineSpacing.h>
 #include <HalStorage.h>
 #include <JsonSettingsIO.h>
 #include <Logging.h>
@@ -223,32 +224,20 @@ bool CrossPointSettings::loadFromFile() {
   return false;
 }
 
+static_assert(CrossPointSettings::TIGHT == static_cast<uint8_t>(LineSpacingStep::Tight) &&
+                  CrossPointSettings::NORMAL == static_cast<uint8_t>(LineSpacingStep::Normal) &&
+                  CrossPointSettings::WIDE == static_cast<uint8_t>(LineSpacingStep::Wide) &&
+                  CrossPointSettings::EXTRA_WIDE == static_cast<uint8_t>(LineSpacingStep::ExtraWide) &&
+                  CrossPointSettings::WIDEST == static_cast<uint8_t>(LineSpacingStep::Widest) &&
+                  CrossPointSettings::FROM_BOOK == static_cast<uint8_t>(LineSpacingStep::FromBook),
+              "the stored line-spacing steps are LineSpacingStep's");
+
 float CrossPointSettings::getReaderLineCompression() const {
-  const int effectiveFontId = getReaderFontId();
-  const int notosansId = getBuiltinReaderFontIdForPoints(NOTOSANS, fontPointSize);
-
-  if (effectiveFontId == notosansId) {
-    switch (lineSpacing) {
-      case TIGHT:
-        return 0.90f;
-      case NORMAL:
-      default:
-        return 0.95f;
-      case WIDE:
-        return 1.0f;
-    }
-  }
-
-  // Bookerly or any SD card font: use the Bookerly-style neutral values.
-  switch (lineSpacing) {
-    case TIGHT:
-      return 0.95f;
-    case NORMAL:
-    default:
-      return 1.0f;
-    case WIDE:
-      return 1.1f;
-  }
+  // Without a book (the dictionary's pages): no CJK pitch, and Book's style reads as Normal.
+  const LineSpacingScale scale = getReaderFontId() == getBuiltinReaderFontIdForPoints(NOTOSANS, fontPointSize)
+                                     ? LineSpacingScale::BuiltinNotoSans
+                                     : LineSpacingScale::Font;
+  return lineSpacingFor(lineSpacing, scale, fontPointSize, 0).compression;
 }
 
 unsigned long CrossPointSettings::getSleepTimeoutMs() const {

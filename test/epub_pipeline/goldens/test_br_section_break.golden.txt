@@ -92,32 +92,32 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
    W x=251 s=1 z=100 t=<br
   LINE y=47 x=0 align=2 mult=1.600 hfid=0 words=1
    W x=61 s=1 z=100 t=class="section-br"/>
-  LINE y=94 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=94 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=18 s=0 z=100 t=PASS:
-   W x=82 s=0 z=100 t=A
-   W x=105 s=0 z=100 t=blank-line
-   W x=210 s=0 z=100 t=gap
-   W x=254 s=0 z=100 t=should
-   W x=330 s=0 z=100 t=appear
-   W x=398 s=0 z=100 t=between
+   W x=75 s=0 z=100 t=A
+   W x=91 s=0 z=100 t=blank-line
+   W x=189 s=0 z=100 t=gap
+   W x=226 s=0 z=100 t=should
+   W x=295 s=0 z=100 t=appear
+   W x=356 s=0 z=100 t=between
+   W x=424 s=0 z=100 t=the
   LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=two
+   W x=36 s=0 z=100 t=sections
+   W x=117 s=0 z=100 t=below,
+   W x=175 s=0 z=100 t=identical
+   W x=261 s=0 z=100 t=to
+   W x=291 s=0 z=100 t=Ch
+   W x=321 s=0 z=100 t=1,
+   W x=343 s=0 z=100 t=even
+   W x=392 s=0 z=100 t=though
+  LINE y=142 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=the
-   W x=43 s=0 z=100 t=two
-   W x=83 s=0 z=100 t=sections
-   W x=168 s=0 z=100 t=below,
-   W x=230 s=0 z=100 t=identical
-   W x=320 s=0 z=100 t=to
-   W x=354 s=0 z=100 t=Ch
-   W x=388 s=0 z=100 t=1,
-   W x=414 s=0 z=100 t=even
-  LINE y=142 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=though
-   W x=74 s=0 z=100 t=the
-   W x=111 s=0 z=100 t=<br>
-   W x=153 s=0 z=100 t=carries
-   W x=218 s=0 z=100 t=a
-   W x=236 s=0 z=100 t=CSS
-   W x=276 s=0 z=100 t=class.
+   W x=37 s=0 z=100 t=<br>
+   W x=79 s=0 z=100 t=carries
+   W x=144 s=0 z=100 t=a
+   W x=162 s=0 z=100 t=CSS
+   W x=202 s=0 z=100 t=class.
   LINE y=167 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=Lorem
    W x=75 s=0 z=100 t=ipsum
@@ -348,18 +348,18 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
    W x=256 s=0 z=100 t=like
    W x=298 s=0 z=100 t=two
    W x=336 s=0 z=100 t=closely-spaced
-  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=lines,
-   W x=67 s=0 z=100 t=not
-   W x=115 s=0 z=100 t=like
-   W x=162 s=0 z=100 t=two
-   W x=205 s=0 z=100 t=paragraphs
-   W x=316 s=0 z=100 t=separated
-   W x=414 s=0 z=100 t=by
-   W x=443 s=0 z=100 t=a
-  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=blank
-   W x=52 s=0 z=100 t=line.
+   W x=60 s=0 z=100 t=not
+   W x=101 s=0 z=100 t=like
+   W x=141 s=0 z=100 t=two
+   W x=177 s=0 z=100 t=paragraphs
+   W x=281 s=0 z=100 t=separated
+   W x=372 s=0 z=100 t=by
+   W x=394 s=0 z=100 t=a
+   W x=414 s=0 z=100 t=blank
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=line.
 SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=9 footnotes=0
   LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=6

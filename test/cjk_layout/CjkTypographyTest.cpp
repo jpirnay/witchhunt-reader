@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "Epub/ParsedText.h"
+#include "Epub/TextEmphasis.h"
 #include "Epub/TypographyProfile.h"
 #include "Epub/blocks/TextBlock.h"
 #include "Epub/hyphenation/Hyphenator.h"
@@ -34,7 +35,8 @@ BlockStyle aligned(const CssTextAlign alignment, const int16_t indent = 0) {
   return bs;
 }
 
-std::vector<Line> layout(ParsedText& text, const uint16_t width, const int fontId = kFontId) {
+std::vector<Line> layout(ParsedText& text, const uint16_t width, const int fontId = kFontId,
+                         const int16_t blockStartY = 0, const int lineHeight = 0) {
   GfxRenderer renderer;
   std::vector<Line> lines;
   text.layoutAndExtractLines(
@@ -48,7 +50,7 @@ std::vector<Line> layout(ParsedText& text, const uint16_t width, const int fontI
         }
         return ParsedText::LineProcessResult::Accepted;
       },
-      /*includeLastLine=*/true);
+      /*includeLastLine=*/true, blockStartY, lineHeight);
   return lines;
 }
 
@@ -153,13 +155,16 @@ TEST(CjkPunctuationWidths, APageBottomRetryKeepsTheMarksWidths) {
   EXPECT_EQ(lines[2].xpos, (X{0, 10, 15, 25}));
 }
 
-// Live allocations of this test binary, counted by the replacements of the global operator new and delete below.
+// Live allocations of this test binary, and every allocation it made, counted by the replacements of the global
+// operator new and delete below.
 namespace {
 long gLiveAllocations = 0;
-}
+long gAllocations = 0;
+}  // namespace
 void* operator new(const std::size_t size) {
   if (void* p = std::malloc(size ? size : 1)) {
     ++gLiveAllocations;
+    ++gAllocations;
     return p;
   }
   throw std::bad_alloc();
@@ -202,6 +207,20 @@ TEST(RubyTextBlock, DrawingRubyAllocatesNothing) {
   line->render(renderer, kFontId, 0, 100);
   EXPECT_EQ(gLiveAllocations, before);
   EXPECT_EQ(renderer.drawCalls.size(), 5u);
+}
+TEST(RubyTextBlock, DrawingMarksAllocatesNothing) {
+  for (const int font : {kFontId, GfxRenderer::LATIN_FONT}) {  // glyph path, square path
+    const auto line = rubyLine({{0, 2, 0, 0, TextBlock::AnnotationKind::Emphasis, TextEmphasis::Sesame, ""}});
+    GfxRenderer renderer;
+    renderer.drawCalls.reserve(16);
+    renderer.fillRectCalls.reserve(16);
+    const long before = gLiveAllocations;
+    const long made = gAllocations;
+    line->render(renderer, font, 0, 100);
+    EXPECT_EQ(gLiveAllocations, before);
+    EXPECT_EQ(gAllocations, made) << "an allocation freed before render() returns is still one per render";
+    EXPECT_EQ(renderer.drawCalls.size() + renderer.fillRectCalls.size(), 4u);
+  }
 }
 TEST(CjkJustification, AJustifiedCjkLineEndsFlush) {
   // 4 characters on a 47 px line: 7 px over 3 gaps, 2 px each and the last pixel to one of them.
@@ -273,4 +292,45 @@ TEST(CjkGrid, ABlockBesideAFloatKeepsItsOwnWidth) {
   text.setTypography(TypographyProfile::forLanguage("ja"));
   text.addWord("一二三四五", EpdFontFamily::REGULAR);
   EXPECT_EQ(layout(text, 47)[0].xpos, (X{0, 10, 20, 30}));
+}
+
+// The optimal line breaker narrows only the paragraph's first line by its indent; every later line plans at the full
+// width (the extraction indents the first line alone). Tokens of 20 px with 5 px gaps: 4 fit 100 px, 3 fit 80.
+namespace {
+size_t lineSize(const std::vector<Line>& lines, const size_t i) { return lines.at(i).words.size(); }
+}  // namespace
+
+TEST(OptimalBreakerIndent, OnlyTheFirstLineGivesUpTheIndent) {
+  ParsedText text(false, false, aligned(CssTextAlign::Left, 20));
+  for (int i = 0; i < 12; ++i) text.addWord("aa", EpdFontFamily::REGULAR);
+  const auto lines = layout(text, 100);
+  ASSERT_GE(lines.size(), 3u);
+  EXPECT_EQ(lineSize(lines, 0), 3u);  // 100 - 20 = 80 px
+  EXPECT_EQ(lineSize(lines, 1), 4u);  // the full 100 px
+  EXPECT_EQ(lineSize(lines, 2), 4u);
+}
+TEST(OptimalBreakerIndent, ACjkParagraphKeepsTheWholeEmGridAfterTheFirstLine) {
+  // 47 px holds 4 ems; the 10 px indent is one em, so the first line takes 3 characters and the rest 4.
+  ParsedText text(false, false, aligned(CssTextAlign::Left, 10));
+  text.setTypography(TypographyProfile::forLanguage("ja"));
+  text.addWord("一二三四五六七八九十一二", EpdFontFamily::REGULAR);
+  const auto lines = layout(text, 47);
+  ASSERT_GE(lines.size(), 3u);
+  EXPECT_EQ(lineSize(lines, 0), 3u);
+  EXPECT_EQ(lineSize(lines, 1), 4u);
+  EXPECT_EQ(lineSize(lines, 2), 4u);
+}
+TEST(OptimalBreakerIndent, BesideAFloatTheFirstLineTakesBothAndLaterLinesOnlyTheFloat) {
+  // A 20 px float over the first two 10 px lines. Line 0: 100 - 20 (float) - 20 (indent) = 60 px, 2 tokens.
+  // Line 1: 80 px, 3 tokens. Line 2 on: 100 px, 4 tokens.
+  BlockStyle beside = aligned(CssTextAlign::Left, 20);
+  beside.floatZoneCount = 1;
+  beside.floatZones[0] = {0, 15, 20, false};
+  ParsedText text(false, false, beside);
+  for (int i = 0; i < 12; ++i) text.addWord("aa", EpdFontFamily::REGULAR);
+  const auto lines = layout(text, 100, kFontId, /*blockStartY=*/0, /*lineHeight=*/10);
+  ASSERT_GE(lines.size(), 4u);
+  EXPECT_EQ(lineSize(lines, 0), 2u);
+  EXPECT_EQ(lineSize(lines, 1), 3u);
+  EXPECT_EQ(lineSize(lines, 2), 4u);
 }

@@ -1,6 +1,6 @@
 BOOK title=Poem Span Indent Test lang=en spine=1 toc=1 reliableToc=1
 SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=20 footnotes=0
+ PAGE 0 elements=18 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=18 s=0 z=100 t=BEFORE
    W x=82 s=0 z=100 t=the
@@ -72,45 +72,43 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=224 s=0 z=100 t=the
    W x=261 s=0 z=100 t=mouse
    W x=318 s=0 z=100 t=to
-  LINE y=288 x=72 align=0 mult=1.000 hfid=0 words=5
+  LINE y=288 x=72 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=the
-   W x=73 s=0 z=100 t=cur,
-   W x=149 s=0 z=100 t=Such
-   W x=233 s=0 z=100 t=a
-   W x=287 s=0 z=100 t=trial,
-  LINE y=312 x=72 align=0 mult=1.000 hfid=0 words=5
-   W x=0 s=0 z=100 t=dear
-   W x=82 s=0 z=100 t=sir,
-   W x=158 s=0 z=100 t=with
-   W x=237 s=0 z=100 t=no
-   W x=305 s=0 z=100 t=jury
-  LINE y=336 x=72 align=0 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=or
-   W x=26 s=0 z=100 t=judge
-  LINE y=360 x=72 align=0 mult=1.000 hfid=0 words=6
+   W x=40 s=0 z=100 t=cur,
+   W x=83 s=0 z=100 t=Such
+   W x=134 s=0 z=100 t=a
+   W x=155 s=0 z=100 t=trial,
+   W x=217 s=0 z=100 t=dear
+   W x=263 s=0 z=100 t=sir,
+   W x=303 s=0 z=100 t=with
+  LINE y=312 x=72 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=no
+   W x=29 s=0 z=100 t=jury
+   W x=69 s=0 z=100 t=or
+   W x=95 s=0 z=100 t=judge
+  LINE y=336 x=72 align=0 mult=1.000 hfid=0 words=6
    W x=36 s=0 z=100 t=L11
    W x=66 s=0 z=100 t=would
    W x=118 s=0 z=100 t=be
    W x=139 s=0 z=100 t=wasting
    W x=210 s=0 z=100 t=our
    W x=247 s=0 z=100 t=breath.
-  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=384 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=216 s=0 z=100 t=INDENTED
    W x=299 s=0 z=100 t=A
    W x=315 s=0 z=100 t=paragraph
    W x=410 s=0 z=100 t=whose
-  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=408 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=own
-   W x=92 s=0 z=100 t=text-indent
-   W x=255 s=0 z=100 t=pushes
-   W x=374 s=0 z=100 t=its
-  LINE y=456 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=first
-   W x=93 s=0 z=100 t=line
-   W x=178 s=0 z=100 t=far
-   W x=258 s=0 z=100 t=in,
-   W x=333 s=0 z=100 t=and
-   W x=414 s=0 z=100 t=which
-  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=simply
-   W x=54 s=0 z=100 t=wraps.
+   W x=39 s=0 z=100 t=text-indent
+   W x=149 s=0 z=100 t=pushes
+   W x=215 s=0 z=100 t=its
+   W x=250 s=0 z=100 t=first
+   W x=303 s=0 z=100 t=line
+   W x=348 s=0 z=100 t=far
+   W x=388 s=0 z=100 t=in,
+   W x=423 s=0 z=100 t=and
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=which
+   W x=49 s=0 z=100 t=simply
+   W x=103 s=0 z=100 t=wraps.

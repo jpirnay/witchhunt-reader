@@ -94,7 +94,7 @@ void census(const std::string& css, std::map<std::string, size_t>& kinds) {
     const std::string group = text.substr(pos, open - pos);
     const std::string body = text.substr(open + 1, close - open - 2);
     pos = close;
-    if (!CssParser::parseInlineStyle(body).defined.anySet()) continue;  // the parser drops these too
+    if (!CssParser::parseInlineStyle(body).anyDefined()) continue;  // the parser drops these too
     size_t start = 0;
     for (size_t i = 0; i <= group.size(); ++i) {
       if (i != group.size() && group[i] != ',') continue;

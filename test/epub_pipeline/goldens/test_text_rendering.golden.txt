@@ -319,33 +319,33 @@ SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
    W x=260 s=0 z=100 t=the
    W x=300 s=0 z=100 t=paragraph
    W x=396 s=0 z=100 t=above.
-  LINE y=427 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=427 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=Finally,
-   W x=83 s=0 z=100 t=a
-   W x=109 s=0 z=100 t=rule
-   W x=160 s=0 z=100 t=near
-   W x=214 s=0 z=100 t=the
-   W x=259 s=0 z=100 t=end
-   W x=301 s=0 z=100 t=of
-   W x=337 s=0 z=100 t=the
-   W x=382 s=0 z=100 t=page
-   W x=434 s=0 z=100 t=to
-  LINE y=451 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=verify
-   W x=66 s=0 z=100 t=it
-   W x=95 s=0 z=100 t=does
-   W x=146 s=0 z=100 t=not
-   W x=192 s=0 z=100 t=cause
-   W x=253 s=0 z=100 t=a
-   W x=278 s=0 z=100 t=spurious
-   W x=363 s=0 z=100 t=page
-   W x=414 s=0 z=100 t=break
-  LINE y=475 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=0 s=0 z=100 t=when
-   W x=44 s=0 z=100 t=there
-   W x=98 s=0 z=100 t=is
-   W x=119 s=0 z=100 t=still
-   W x=168 s=0 z=100 t=room:
+   W x=76 s=0 z=100 t=a
+   W x=95 s=0 z=100 t=rule
+   W x=139 s=0 z=100 t=near
+   W x=186 s=0 z=100 t=the
+   W x=224 s=0 z=100 t=end
+   W x=259 s=0 z=100 t=of
+   W x=288 s=0 z=100 t=the
+   W x=326 s=0 z=100 t=page
+   W x=371 s=0 z=100 t=to
+   W x=400 s=0 z=100 t=verify
+  LINE y=451 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=it
+   W x=24 s=0 z=100 t=does
+   W x=70 s=0 z=100 t=not
+   W x=111 s=0 z=100 t=cause
+   W x=167 s=0 z=100 t=a
+   W x=187 s=0 z=100 t=spurious
+   W x=267 s=0 z=100 t=page
+   W x=313 s=0 z=100 t=break
+   W x=364 s=0 z=100 t=when
+   W x=410 s=0 z=100 t=there
+  LINE y=475 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=is
+   W x=21 s=0 z=100 t=still
+   W x=70 s=0 z=100 t=room:
   LINE y=499 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=Lorem
    W x=75 s=0 z=100 t=ipsum
