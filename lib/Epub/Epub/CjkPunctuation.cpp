@@ -113,8 +113,8 @@ Width traditionalChinese(const Class mark, const Class neighbour, const bool atL
 
 // JLREQ. An opening bracket at a line start, and a mark after 。、 or another opening bracket, sets solid (half).
 // Between a closing and an opening bracket half an em of blank stays; elsewhere a quarter em of a bracket's blank
-// may go on demand. 。 keeps its blank mid-line; 、 may halve. At a line end 。、 and a closing bracket are half or
-// full (push-in decides, PR A3b). ！？ keep their full width but for a quarter on demand; ・：； may halve.
+// may go on demand. 。 and ！？ keep their width mid-line; 、 may halve. At a line end 。、 and a closing bracket are
+// half or full (push-in decides, spec 5.3). ・：； may halve.
 // Before a closing bracket or another of 。、・：；, a mark sets solid.
 Width japanese(const Class mark, const Class neighbour, const bool atLineEdge) {
   switch (mark) {
@@ -146,7 +146,7 @@ Width japanese(const Class mark, const Class neighbour, const bool atLineEdge) {
           return {8, 6};
       }
     case Class::Dividing:
-      return {8, 6};
+      return {8, 8};
     case Class::MiddleDot:
       return {8, 4};
     case Class::FullStop:
@@ -157,10 +157,8 @@ Width japanese(const Class mark, const Class neighbour, const bool atLineEdge) {
         case Class::FullStop:
         case Class::Comma:
           return {4, 4};
-        case Class::IdeographicSpace:
-          return {8, 4};
         default:
-          return {8, 6};
+          return {8, 8};
       }
     case Class::Comma:
       if (atLineEdge) return {8, 4};
@@ -193,6 +191,23 @@ Width widthOf(const Table table, const Class mark, const Class neighbour, const 
     default:
       return simplifiedChinese(mark, neighbour, atLineEdge);
   }
+}
+
+bool isHanOrKana(const uint32_t cp) {
+  return (cp >= 0x3005 && cp <= 0x3007) || (cp >= 0x3041 && cp <= 0x3096) || (cp >= 0x309D && cp <= 0x309F) ||
+         (cp >= 0x30A1 && cp <= 0x30FA) || (cp >= 0x30FC && cp <= 0x30FF) || (cp >= 0x31F0 && cp <= 0x31FF) ||
+         (cp >= 0x3400 && cp <= 0x4DBF) || (cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0xF900 && cp <= 0xFAFF) ||
+         (cp >= 0x20000 && cp <= 0x2A6DF) || (cp >= 0x2A700 && cp <= 0x2B73F);
+}
+
+bool isLatinLetterOrDigit(const uint32_t cp) {
+  return (cp >= '0' && cp <= '9') || (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
+         (cp >= 0x00C0 && cp <= 0x024F && cp != 0x00D7 && cp != 0x00F7) || (cp >= 0x1E00 && cp <= 0x1EFF);
+}
+
+bool takesCjkLatinGap(const uint32_t leftCp, const uint32_t rightCp) {
+  return (isHanOrKana(leftCp) && isLatinLetterOrDigit(rightCp)) ||
+         (isLatinLetterOrDigit(leftCp) && isHanOrKana(rightCp));
 }
 
 }  // namespace CjkPunctuation
