@@ -142,7 +142,7 @@ Listed here so nobody redoes it.
 ## A CJK font readers can install
 
 **Shipped** (#550). The font manager installs eight CJK families as `.otf`: NotoSans and NotoSerif in JP, SC, TC and KR,
-1.6 to 7.0 MB each (9.4 MB sans, 16.9 MB serif), drawn by the TTF engine. They are cut by
+1.9 to 7.0 MB each (9.7 MB sans, 17.3 MB serif), drawn by the TTF engine. They are cut by
 `lib/EpdFont/scripts/cjk_subset.py`, listed in `sd-fonts.yaml` and `assets/sd-fonts/fonts-v3.json` (manifest version 3).
 "Download all" leaves them out. The design is `docs/design/cjk-ttf-fonts.md`, sections 4-6.
 
