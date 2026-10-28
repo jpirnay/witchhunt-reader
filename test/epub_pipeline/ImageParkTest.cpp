@@ -299,7 +299,7 @@ TEST(CoarseProgressiveJpeg, AnEighthForLackOfRoomIsStampedCoarseAndShortOfMemory
   };
   const uint32_t savedHeap = ESP.getFreeHeap();
   // A byte short of the 1/8 workspace and the 20 KB a finer one must leave (JPEG_CACHE_POST_GATE_BYTES +
-  // JPEG_CACHE_HEAP_FLOOR): the 1/8 one asks for no floor, and its cache band fits still.
+  // JPEG_CACHE_HEAP_FLOOR): the 1/8 one, a few KB, asks for no floor, and its cache band fits still.
   const auto coarsest = static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 3));
   const auto finer = static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 2));
   ESP.setFreeHeap(coarsest + 20 * 1024 - 1);

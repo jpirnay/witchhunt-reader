@@ -169,10 +169,10 @@ TEST_F(JpegDownscaleFixture, ProgressiveLinesSurviveTheFullDecoder) {
 }
 
 // With no arena and too little heap for any finer workspace beside its floor, the decode falls back
-// to the 1/8 one (which asks for no floor) rather than fail: a blurred picture beats a placeholder.
-// A 1/8 level averages each 8x8 block, so a 1-px line never gets darker than ~3/4 white there -- no
-// pixel reaches the two darkest levels, which the full decode draws every line with. That is how
-// the test knows which decode ran.
+// to the 1/8 one (a few KB, which asks for no floor) rather than fail: a blurred picture beats a
+// placeholder. A 1/8 level averages each 8x8 block, so a 1-px line never gets darker than ~3/4
+// white there -- no pixel reaches the two darkest levels, which the full decode draws every line
+// with. That is how the test knows which decode ran.
 TEST_F(JpegDownscaleFixture, ProgressiveFallsBackToTheEighthWhenNoFinerWorkspaceFits) {
   FsFile file;
   ASSERT_TRUE(file.openForRead(JPEG_FIXTURE_DIR "/thin_lines_prog.jpg"));
@@ -194,6 +194,47 @@ TEST_F(JpegDownscaleFixture, ProgressiveFallsBackToTheEighthWhenNoFinerWorkspace
 
   ASSERT_EQ(preview.px.size(), static_cast<size_t>(kDstLength) * kDstBreadth) << "the 1/8 decode must still render";
   EXPECT_EQ(darkPixels(preview), 0) << "expected the 1/8 decode, got a finer one";
+}
+
+// The 1/8 workspace is taken from whatever the 16 KB entry gate left while it is at most 4 KB;
+// one that grows past that with the picture's width must leave the 12 KB the gate leaves beside
+// a 4 KB one, or the rest of the decode runs out. With no arena, so the heap serves it.
+TEST_F(JpegDownscaleFixture, AnEighthWorkspaceOverAFewKbLeavesTheHeapItsFloor) {
+  const auto eighthOf = [](const char* name) {
+    FsFile file;
+    EXPECT_TRUE(file.openForRead(std::string(JPEG_FIXTURE_DIR "/") + name));
+    ProgressiveJpeg::ImageInfo info;
+    EXPECT_EQ(ProgressiveJpeg::probe(file, info), ProgressiveJpeg::Result::Ok);
+    file.close();
+    return static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 3));
+  };
+  const auto decodeAt = [&](const char* name, const int width, const int height, const uint32_t freeHeap) {
+    RenderConfig config;
+    config.x = 0;
+    config.y = 0;
+    config.maxWidth = width;
+    config.maxHeight = height;
+    config.useExactDimensions = true;
+    config.useDithering = false;
+    config.cachePath = (work / "eighth.pxc").string();
+    const uint32_t savedHeap = ESP.getFreeHeap();
+    ESP.setFreeHeap(freeHeap);
+    JpegToFramebufferConverter converter;
+    const bool drawn = converter.decodeToFramebuffer(std::string(JPEG_FIXTURE_DIR "/") + name, renderer, config);
+    ESP.setFreeHeap(savedHeap);
+    return drawn;
+  };
+  constexpr uint32_t kGate = 16 * 1024;
+  constexpr uint32_t kFloor = 12 * 1024;
+  const uint32_t narrow = eighthOf("prog_full_420.jpg");
+  ASSERT_LE(narrow, 4u * 1024);
+  EXPECT_TRUE(decodeAt("prog_full_420.jpg", 150, 104, kGate)) << "a few KB: the gate is enough";
+
+  const uint32_t wide = eighthOf("progressive_wide_8000.jpg");  // 8000x16 into 1000x2: 1/8 wanted
+  ASSERT_GT(wide, 4u * 1024);
+  ASSERT_GT(wide + kFloor - 1, kGate) << "past the gate, so only the floor can refuse it";
+  EXPECT_FALSE(decodeAt("progressive_wide_8000.jpg", 1000, 2, wide + kFloor - 1)) << "a byte short of the floor";
+  EXPECT_TRUE(decodeAt("progressive_wide_8000.jpg", 1000, 2, wide + kFloor));
 }
 
 // A 1/8 decode enlarged to the box goes through the bilinear resize of the whole picture

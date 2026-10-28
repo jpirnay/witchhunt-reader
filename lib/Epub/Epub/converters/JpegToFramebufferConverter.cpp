@@ -455,8 +455,17 @@ size_t minFreeHeapForJpeg() {
 
 // Heap that must remain when the progressive workspace cannot come from the scratch arena: the
 // rest of the decode's working set (JPEG_CACHE_POST_GATE_BYTES) plus the floor for everything
-// else. Below it the workspace steps down a scale, down to 1/8, which asks for no floor.
+// else. Below it the workspace steps down a scale, down to 1/8 (PROGRESSIVE_EIGHTH_HEAP_FLOOR).
 constexpr size_t PROGRESSIVE_WORKSPACE_HEAP_FLOOR = JPEG_CACHE_POST_GATE_BYTES + JPEG_CACHE_HEAP_FLOOR;
+
+// The 1/8 workspace is the last resort, so up to PROGRESSIVE_EIGHTH_UNFLOORED_BYTES it takes
+// whatever the entry gate (MIN_FREE_HEAP_FOR_PROGRESSIVE_JPEG) left: a DC-only session (~2.3 KB on
+// the C3) and a row of blocks, 10 B per 16 px at 4:2:0 -- 4 KB is a picture ~2,700 px wide. It
+// grows with the width (a 16,000-px picture's is ~12 KB, which would leave the rest of the decode
+// 4 KB of the gate's 16), so a larger one must leave what the gate leaves beside a 4 KB one.
+constexpr size_t PROGRESSIVE_EIGHTH_UNFLOORED_BYTES = 4 * 1024;
+constexpr size_t PROGRESSIVE_EIGHTH_HEAP_FLOOR =
+    MIN_FREE_HEAP_FOR_PROGRESSIVE_JPEG - PROGRESSIVE_EIGHTH_UNFLOORED_BYTES;
 
 // Arena-aware (via minFreeHeapForJpeg): otherwise a borrowed-framebuffer decode
 // silently drops from Atkinson to Bayer dithering on every image — a visible quality regression
@@ -1604,14 +1613,17 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     jpegScaleDenom = chooseJpegScale(targetScale, tjpgScale);
   } else {
     // A coarser scale keeps fewer coefficients per block: step down until the workspace fits. The
-    // 1/8 one (2-3 KB, a DC-only session) asks the heap for nothing beyond this function's entry
-    // gate (MIN_FREE_HEAP_FOR_PROGRESSIVE_JPEG): the last resort when nothing finer fits.
+    // 1/8 one (a few KB, a DC-only session) asks the heap for little or nothing beyond this
+    // function's entry gate (PROGRESSIVE_EIGHTH_HEAP_FLOOR): the last resort when nothing finer fits.
     chooseJpegScale(targetScale, tjpgScale);
     wantedProgressiveScale = tjpgScale;
     for (; tjpgScale <= 3; ++tjpgScale) {
       progressiveWorkspaceBytes = ProgressiveJpeg::workspaceBytes(progressiveInfo, tjpgScale);
-      progressiveWorkspace = makeUniqueNoThrow<JpegWorkPool>(progressiveWorkspaceBytes,
-                                                             tjpgScale == 3 ? 0 : PROGRESSIVE_WORKSPACE_HEAP_FLOOR);
+      const size_t heapFloor = tjpgScale != 3 ? PROGRESSIVE_WORKSPACE_HEAP_FLOOR
+                               : progressiveWorkspaceBytes > PROGRESSIVE_EIGHTH_UNFLOORED_BYTES
+                                   ? PROGRESSIVE_EIGHTH_HEAP_FLOOR
+                                   : 0;
+      progressiveWorkspace = makeUniqueNoThrow<JpegWorkPool>(progressiveWorkspaceBytes, heapFloor);
       if (progressiveWorkspace && *progressiveWorkspace) break;
       progressiveWorkspace.reset();
     }
