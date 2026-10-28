@@ -506,7 +506,7 @@ TEST_P(ProgressiveJpegCheckpoint, ResumesWithIdenticalRowsFromEveryStep) {
   std::remove(ckpt.c_str());
 }
 
-// 1/8 decodes no AC scan (their cursors never move), so it is checkpointed on its own.
+// 1/8 is a session of another kind, the DC scans alone (a smaller layout), so it is checkpointed too.
 INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegCheckpoint,
                          testing::Combine(testing::Values("prog_full_420.jpg", "prog_full_gray.jpg",
                                                           "prog_full_444_rst.jpg"),

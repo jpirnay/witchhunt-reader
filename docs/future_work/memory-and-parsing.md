@@ -122,7 +122,7 @@ What changed: a render lends the secondary buffer to the prewarm's TrueType miss
 
 **Where.** `lib/ProgressiveJpeg` (`BitReader`, `decodeBand`, `indexStep`); `JpegToFramebufferConverter::decodeToFramebuffer`; `JpegToBmpConverter.cpp` (`SinkSet`, `JpegThumbSession::continueSteps`).
 
-**Tried.** The code and its tests (`test/epub_pipeline/JpegPartialDecodeTest.cpp`, the `prog_420_cut.jpg` fixture) are on the maintainer's local branch `fix/progressive-jpeg`. Its review found that once degraded pictures were cached, `Result::Degraded` behaved exactly like `Ok` everywhere, so the completeness tracking that told a file lacking only its EOI from a cut one bought nothing.
+**Tried.** The code and its tests (`test/epub_pipeline/JpegPartialDecodeTest.cpp`, the `prog_420_cut.jpg` fixture) are on the branch `archive/progressive-jpeg` (b623ca5a1). Its review found that once degraded pictures were cached, `Result::Degraded` behaved exactly like `Ok` everywhere, so the completeness tracking that told a file lacking only its EOI from a cut one bought nothing.
 
 **Next step.** If it is ever taken, ship it decoder-only: fold `Degraded` into `Ok` with a `DecodeStats` flag for the logs, drop that completeness tracking, and leave the converters as they are -- they already cache `Ok`, and an I/O error keeps the placeholder. Bump the checkpoint magic with the `Cursor` layout it changes, and note in `PixelCache.h` that a change to the damage rules must bump `PXC_MAGIC`.
 

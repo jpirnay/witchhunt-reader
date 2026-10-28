@@ -406,8 +406,8 @@ TEST(JpegToBmpConverter, ProgressiveThumbnailMatchesItsBaselineTwin) {
   const double identical = static_cast<double>(same) / prog.size();
   const double meanDiff = static_cast<double>(diff) / prog.size();
   // Measured: full decode 0.877 identical / 0.125 mean level difference (the dither reacts to
-  // +-1 gray differences on a noisy picture); the 1/8 picture resized to the box (a DC-only decode)
-  // scored 0.586 / 0.521.
+  // +-1 gray differences on a noisy picture); the 1/8 decode resized to the box (the heap short of
+  // the 1/4 workspace + 16 KB) scores 0.588 / 0.518.
   EXPECT_GT(identical, 0.80);
   EXPECT_LT(meanDiff, 0.20);
 }
