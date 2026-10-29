@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "Epub/ParsedText.h"
+#include "Epub/TypographyProfile.h"
 #include "Epub/blocks/TextBlock.h"
 #include "Epub/hyphenation/Hyphenator.h"
 #include "GfxRenderer.h"
@@ -715,5 +716,54 @@ TEST(RubyEdges, AWordHyphenatedAfterAGroupStartingALineStaysInside) {
   for (const Line& line : lines) {
     const int right = line.xpos.back() + GfxRenderer::countCodepoints(line.words.back().c_str()) * GfxRenderer::GLYPH_W;
     EXPECT_LE(right, 78) << line.words.back();
+  }
+}
+
+// Push-in takes nothing a ruby needs: a mark between two groups that overhang it keeps their overhangs.
+TEST(RubyPushIn, AMarkUnderTwoOverhangsGivesNothing) {
+  // Each 20 px ruby passes its 10 px base by 5 px a side. Between the groups both overhang 、 by 5 px, half of its
+  // 10 px; elsewhere they push: the first 字 widens to 15 and is drawn 5 px in (the line start), the second to 15
+  // (字 follows). 字、字字字 is 60 px, 70 with the last 字. 、 could give its 5 px mid-line blank and make that 65,
+  // but the two overhangs fill it: pushed in, the rubies would lie 5 px over each other. So the line breaks before
+  // the last 字, and the boxes meet at 20 (Simplified Chinese table, every book's).
+  for (const bool hyphenation : {false, true}) {
+    ParsedText text(false, hyphenation, aligned(CssTextAlign::Left));
+    text.addWord("字、字字字字", EpdFontFamily::REGULAR);
+    ASSERT_TRUE(text.addRubyGroup(0, 1, "かかかか"));
+    ASSERT_TRUE(text.addRubyGroup(2, 1, "かかかか"));
+    const auto lines = layout(text, 65);
+    ASSERT_EQ(wordsOf(lines), (Words{{"字", "、", "字", "字", "字"}, {"字"}})) << hyphenation;
+    EXPECT_EQ(lines[0].xpos, (X{5, 15, 25, 40, 50})) << hyphenation;
+    EXPECT_EQ(boxesOf(lines[0]), (Boxes{{0, 20}, {20, 20}})) << hyphenation;
+  }
+}
+// A mark inside a group gives nothing, mid-line or at the line end: the group's ruby box spans its base at the widths
+// the line holds without push-in. Each ruby here is か, 5 px over a 20 px base, so no base widens.
+TEST(RubyPushIn, AMarkInsideAGroupGivesNothing) {
+  for (const bool hyphenation : {false, true}) {
+    {
+      // Simplified Chinese 字、字字字。 fits 50 px only with 、 at half (CjkPushIn.AMidLineMarkGivesWay...). In the
+      // group over 字、, 、 keeps its 10 px, and the line breaks before 字。.
+      ParsedText text(false, hyphenation, aligned(CssTextAlign::Left));
+      text.addWord("字、字字字。字字", EpdFontFamily::REGULAR);
+      ASSERT_TRUE(text.addRubyGroup(0, 2, "か"));
+      const auto lines = layout(text, 50);
+      ASSERT_EQ(wordsOf(lines), (Words{{"字", "、", "字", "字"}, {"字", "。", "字", "字"}})) << hyphenation;
+      EXPECT_EQ(lines[0].xpos, (X{0, 10, 20, 30})) << hyphenation;
+      EXPECT_EQ(boxesOf(lines[0]), (Boxes{{0, 20}})) << hyphenation;
+    }
+    {
+      // Japanese 字字字字。 fits 45 px only with the line-end 。 at half (CjkPushIn.ALineEndMarkHalves...). In the
+      // group over 字。 it stays full, and the line breaks before the group.
+      TypographyProfile japanese = TypographyProfile::forLanguage("ja");
+      japanese.wholeEmGrid = false;  // a 45 px line, not the 40 of whole ems
+      ParsedText text(false, hyphenation, aligned(CssTextAlign::Left));
+      text.setTypography(japanese);
+      text.addWord("字字字字。字字", EpdFontFamily::REGULAR);
+      ASSERT_TRUE(text.addRubyGroup(3, 2, "か"));
+      const auto lines = layout(text, 45);
+      ASSERT_EQ(wordsOf(lines), (Words{{"字", "字", "字"}, {"字", "。", "字", "字"}})) << hyphenation;
+      EXPECT_EQ(boxesOf(lines[1]), (Boxes{{0, 20}})) << hyphenation;
+    }
   }
 }

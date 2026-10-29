@@ -33,7 +33,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 102;  // v102: CSS text-emphasis marks (傍点) are drawn above each
+constexpr uint8_t SECTION_FILE_VERSION = 103;  // v103: a quarter em between Han or kana and Latin in zh/ja
+                                               // books; lines push CJK punctuation in before breaking
+                                               // earlier
+                                               // v102: CSS text-emphasis marks (傍点) are drawn above each
                                                // character of their span
                                                // v101: margins, paddings and image sizes along the
                                                // CSS writing mode, text-align start/end along the

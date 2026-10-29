@@ -1335,47 +1335,47 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=404 s=0 z=100 t=你
    W x=421 s=0 z=100 t=且
    W x=438 s=0 z=100 t=莫
-  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=27
+  LINE y=480 x=0 align=0 mult=1.000 hfid=0 words=29
    W x=6 s=0 z=100 t=問
    W x=22 s=0 z=100 t=，
-   W x=39 s=0 z=100 t=日
-   W x=56 s=0 z=100 t=后
-   W x=73 s=0 z=100 t=自
-   W x=90 s=0 z=100 t=然
-   W x=107 s=0 z=100 t=明
-   W x=124 s=0 z=100 t=白
-   W x=141 s=0 z=100 t=的
-   W x=157 s=0 z=100 t=。
-   W x=173 s=0 z=100 t=”
-   W x=183 s=0 z=100 t=說
-   W x=200 s=0 z=100 t=著
-   W x=216 s=0 z=100 t=，
-   W x=233 s=0 z=100 t=便
-   W x=251 s=0 z=100 t=袖
-   W x=268 s=0 z=100 t=了
-   W x=285 s=0 z=100 t=這
-   W x=302 s=0 z=100 t=石
-   W x=318 s=0 z=100 t=，
-   W x=335 s=0 z=100 t=同
-   W x=352 s=0 z=100 t=那
-   W x=369 s=0 z=100 t=道
-   W x=386 s=0 z=100 t=人
-   W x=403 s=0 z=100 t=飄
-   W x=420 s=0 z=100 t=然
-   W x=438 s=0 z=100 t=而
-  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=12
-   W x=6 s=0 z=100 t=去
-   W x=22 s=0 z=100 t=，
-   W x=38 s=0 z=100 t=竟
-   W x=54 s=0 z=100 t=不
-   W x=70 s=0 z=100 t=知
-   W x=86 s=0 z=100 t=投
-   W x=102 s=0 z=100 t=奔
+   W x=37 s=0 z=100 t=日
+   W x=53 s=0 z=100 t=后
+   W x=69 s=0 z=100 t=自
+   W x=85 s=0 z=100 t=然
+   W x=101 s=0 z=100 t=明
+   W x=117 s=0 z=100 t=白
+   W x=133 s=0 z=100 t=的
+   W x=149 s=0 z=100 t=。
+   W x=164 s=0 z=100 t=”
+   W x=173 s=0 z=100 t=說
+   W x=189 s=0 z=100 t=著
+   W x=205 s=0 z=100 t=，
+   W x=220 s=0 z=100 t=便
+   W x=236 s=0 z=100 t=袖
+   W x=252 s=0 z=100 t=了
+   W x=268 s=0 z=100 t=這
+   W x=284 s=0 z=100 t=石
+   W x=300 s=0 z=100 t=，
+   W x=314 s=0 z=100 t=同
+   W x=330 s=0 z=100 t=那
+   W x=346 s=0 z=100 t=道
+   W x=362 s=0 z=100 t=人
+   W x=378 s=0 z=100 t=飄
+   W x=394 s=0 z=100 t=然
+   W x=410 s=0 z=100 t=而
+   W x=426 s=0 z=100 t=去
+   W x=442 s=0 z=100 t=，
+  LINE y=504 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=6 s=0 z=100 t=竟
+   W x=22 s=0 z=100 t=不
+   W x=38 s=0 z=100 t=知
+   W x=54 s=0 z=100 t=投
+   W x=70 s=0 z=100 t=奔
+   W x=86 s=0 z=100 t=何
+   W x=102 s=0 z=100 t=方
    W x=118 s=0 z=100 t=何
-   W x=134 s=0 z=100 t=方
-   W x=150 s=0 z=100 t=何
-   W x=166 s=0 z=100 t=舍
-   W x=182 s=0 z=100 t=．
+   W x=134 s=0 z=100 t=舍
+   W x=150 s=0 z=100 t=．
   LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=26
    W x=22 s=0 z=100 t=后
    W x=38 s=0 z=100 t=來

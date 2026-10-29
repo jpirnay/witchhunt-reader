@@ -1,7 +1,8 @@
-// CJK punctuation widths, line-edge widths, flush justification and the whole-em grid (spec sections 5.1, 5.2,
-// 5.5), through the real ParsedText and TextBlock against the fixed-width shim of test/word_size_layout: every
-// codepoint 10 px (so 一 is a 10 px em and every CJK mark is full-width), a space 5 px. The shim draws a CJK
-// opening bracket's ink on the right half of its advance, a closing bracket, 。 and 、 on the left half.
+// CJK punctuation widths, line-edge widths, flush justification, push-in, the CJK-Latin gap and the whole-em grid
+// (spec sections 5.1-5.5), through the real ParsedText and TextBlock against the fixed-width shim of
+// test/word_size_layout: every codepoint 10 px (so 一 is a 10 px em and every CJK mark is full-width), a space 5 px.
+// The shim draws a CJK opening bracket's ink on the right half of its advance, a closing bracket, 。 and 、 on the
+// left half.
 #include <gtest/gtest.h>
 
 #include <cstdlib>
@@ -63,6 +64,22 @@ std::vector<std::vector<std::string>> wordsOf(const std::vector<Line>& lines) {
 using Words = std::vector<std::vector<std::string>>;
 using X = std::vector<int16_t>;
 
+// The language's profile with the whole-em grid off, so a test line is as wide as it asks.
+TypographyProfile withoutGrid(const char* language) {
+  TypographyProfile profile = TypographyProfile::forLanguage(language);
+  profile.wholeEmGrid = false;
+  return profile;
+}
+
+// One paragraph of `text`; `greedy` selects the greedy breaker (hyphenation on), else the optimal one.
+std::vector<Line> layoutText(const char* text, const TypographyProfile& profile, const CssTextAlign alignment,
+                             const uint16_t width, const bool greedy = false, const int fontId = kFontId) {
+  ParsedText paragraph(false, greedy, aligned(alignment));
+  paragraph.setTypography(profile);
+  paragraph.addWord(text, EpdFontFamily::REGULAR);
+  return layout(paragraph, width, fontId);
+}
+
 }  // namespace
 
 TEST(CjkPunctuationWidths, EachMarkIsATokenGluedWhereKinsokuHoldsIt) {
@@ -119,8 +136,8 @@ TEST(CjkPunctuationWidths, TraditionalChineseKeepsItsCentredMarksFullWidth) {
   EXPECT_EQ(layout(text, 400)[0].xpos, (X{0, 10, 20, 30}));
 }
 TEST(CjkPunctuationWidths, JapaneseLetsAFullStopEndingALineStayFull) {
-  // JLREQ: 。 at a line end is half or full, and it stays full unless push-in needs it (PR A3b), so 字。 does not
-  // fit after 字字字.
+  // JLREQ: 。 at a line end is half or full, and full unless push-in needs it. The grid makes the line 40 px, and
+  // 字字字字。 is 45 px even with 。 at half, so 字。 does not fit after 字字字.
   ParsedText text(false, false, aligned(CssTextAlign::Left));
   text.setTypography(TypographyProfile::forLanguage("ja"));
   text.addWord("字字字字。字字", EpdFontFamily::REGULAR);
@@ -333,4 +350,211 @@ TEST(OptimalBreakerIndent, BesideAFloatTheFirstLineTakesBothAndLaterLinesOnlyThe
   EXPECT_EQ(lineSize(lines, 0), 2u);
   EXPECT_EQ(lineSize(lines, 1), 3u);
   EXPECT_EQ(lineSize(lines, 2), 4u);
+}
+
+TEST(CjkLatinGap, AQuarterEmBetweenHanOrKanaAndLatinLettersOrDigits) {
+  // 10 px ems: (2 × 10 + 4) / 8 = 3 px on each side of A and 1.
+  EXPECT_EQ(layoutText("字A字1か", withoutGrid("ja"), CssTextAlign::Left, 400)[0].xpos, (X{0, 13, 26, 39, 52}));
+  EXPECT_EQ(layoutText("字A", withoutGrid("zh"), CssTextAlign::Left, 400)[0].xpos, (X{0, 13}));
+}
+TEST(CjkLatinGap, NoGapAtASpaceAMarkAFullWidthLetterOrInOtherBooks) {
+  const auto xpos = [](const TypographyProfile& profile, const std::vector<const char*>& words) {
+    ParsedText text(false, false, aligned(CssTextAlign::Left));
+    text.setTypography(profile);
+    for (const char* word : words) text.addWord(word, EpdFontFamily::REGULAR);
+    return layout(text, 400)[0].xpos;
+  };
+  EXPECT_EQ(xpos(withoutGrid("ja"), {"字", "A字"}), (X{0, 15, 28}));           // the source's space; the gap after A
+  EXPECT_EQ(xpos(withoutGrid("ja"), {"字「A」字"}), (X{0, 10, 20, 30, 40}));   // next to brackets
+  EXPECT_EQ(xpos(withoutGrid("ja"), {"字ＡＢ字"}), (X{0, 10, 20, 30}));        // full-width letters
+  EXPECT_EQ(xpos(withoutGrid("ja"), {"ｱA"}), (X{0, 10}));                      // half-width katakana
+  EXPECT_EQ(xpos(TypographyProfile::forLanguage("ko"), {"漢A"}), (X{0, 10}));  // Korean books (KLREQ)
+  EXPECT_EQ(xpos(TypographyProfile{}, {"字A字"}), (X{0, 10, 20}));             // other books (spec 5.6)
+}
+TEST(CjkLatinGap, ALineBreakAtTheGapDropsIt) {
+  // 字字字A is 43 px with its gap and fills 43 px; the last 字 would need 13 px more and starts the next line at 0.
+  // The other way round, A starts the next line at 0.
+  for (const bool greedy : {false, true}) {
+    const auto after = layoutText("字字字A字", withoutGrid("ja"), CssTextAlign::Left, 43, greedy);
+    ASSERT_EQ(wordsOf(after), (Words{{"字", "字", "字", "A"}, {"字"}})) << (greedy ? "greedy" : "DP");
+    EXPECT_EQ(after[0].xpos, (X{0, 10, 20, 33}));
+    EXPECT_EQ(after[1].xpos, (X{0}));
+    const auto before = layoutText("字字字字A", withoutGrid("ja"), CssTextAlign::Left, 40, greedy);
+    ASSERT_EQ(wordsOf(before), (Words{{"字", "字", "字", "字"}, {"A"}})) << (greedy ? "greedy" : "DP");
+    EXPECT_EQ(before[1].xpos, (X{0}));
+  }
+}
+TEST(CjkLatinGap, TheGapIsAQuarterEmOfTheCjkSide) {
+  // 字 at 160 % is 16 px: the gaps on both of its sides are (2 × 16 + 4) / 8 = 4 px, though the letters are at 100 %.
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.setTypography(withoutGrid("ja"));
+  text.addWord("A", EpdFontFamily::REGULAR);
+  text.addWord("字", EpdFontFamily::REGULAR, false, /*attachToPrevious=*/true, 160);
+  text.addWord("A", EpdFontFamily::REGULAR, false, /*attachToPrevious=*/true);
+  EXPECT_EQ(layout(text, 400)[0].xpos, (X{0, 14, 34}));
+}
+TEST(CjkLatinGap, TheGapIsTheCjkSidesAlsoWhenTheLatinSideIsLarger) {
+  // A at 160 % is 16 px beside 字 at 100 %: the gap is (2 × 10 + 4) / 8 = 3 px, not the 4 px of the larger side.
+  ParsedText text(false, false, aligned(CssTextAlign::Left));
+  text.setTypography(withoutGrid("ja"));
+  text.addWord("字", EpdFontFamily::REGULAR);
+  text.addWord("A", EpdFontFamily::REGULAR, false, /*attachToPrevious=*/true, 160);
+  text.addWord("字", EpdFontFamily::REGULAR, false, /*attachToPrevious=*/true);
+  EXPECT_EQ(layout(text, 400)[0].xpos, (X{0, 13, 32}));
+}
+TEST(CjkLatinGap, AFontWithoutCjkGlyphsGetsNoGap) {
+  // A Latin reader font has no 一 of its own: no em, so no gap, as no grid and no narrowed mark (A3a).
+  EXPECT_EQ(layoutText("字A字", TypographyProfile::forLanguage("ja"), CssTextAlign::Left, 400, false,
+                       GfxRenderer::LATIN_FONT)[0]
+                .xpos,
+            (X{0, 10, 20}));
+}
+TEST(CjkLatinGap, TheGapStretchesWithJustification) {
+  // 字A字字 is 46 px; the 4 px left on 50 go 1, 1 and 2 to its three gaps (the two CJK-Latin gaps among them), flush.
+  const auto lines = layoutText("字A字字字字", withoutGrid("ja"), CssTextAlign::Justify, 50);
+  ASSERT_EQ(wordsOf(lines), (Words{{"字", "A", "字", "字"}, {"字", "字"}}));
+  EXPECT_EQ(lines[0].xpos, (X{0, 14, 28, 40}));
+}
+
+// Push-in (spec 5.3): a line one token too long first narrows its marks to their minimum widths, then its CJK-Latin
+// gaps, before it breaks earlier.
+TEST(CjkPushIn, ALineEndMarkHalvesSoTheLineHoldsIt) {
+  // Japanese: 字字字字。 is 50 px with 。 full at the line end, 45 with it at its line-end minimum (half): it holds 45
+  // px. The DP pushes it in too: 5 px of 45 cost it 197, against 137,641 for the 15 px hole of 字字字 | 字。字字.
+  for (const bool greedy : {false, true}) {
+    const auto lines = layoutText("字字字字。字字", withoutGrid("ja"), CssTextAlign::Left, 45, greedy);
+    EXPECT_EQ(wordsOf(lines), (Words{{"字", "字", "字", "字", "。"}, {"字", "字"}}))
+        << (greedy ? "greedy breaker" : "DP breaker");
+  }
+}
+TEST(CjkPushIn, AMidLineMarkGivesWayBeforeTheLineBreaksEarlier) {
+  // Simplified Chinese (every book's table): 字、字字字。 is 55 px with the line-end 。 at half; 、 gives its 5 px
+  // blank mid-line, so the line fits 50 px and 、 is drawn 5 px wide. The DP: 122 pushed in, 6,561 for 字、字字.
+  for (const bool greedy : {false, true}) {
+    const auto lines = layoutText("字、字字字。字字", TypographyProfile{}, CssTextAlign::Left, 50, greedy);
+    ASSERT_EQ(wordsOf(lines), (Words{{"字", "、", "字", "字", "字", "。"}, {"字", "字"}}))
+        << (greedy ? "greedy breaker" : "DP breaker");
+    EXPECT_EQ(lines[0].xpos, (X{0, 10, 15, 25, 35, 45})) << (greedy ? "greedy breaker" : "DP breaker");
+  }
+}
+TEST(CjkPushIn, LineEdgeMarksGiveWayFirst) {
+  // Japanese 字、字字。 is 50 px. On 45 the line-end 。 halves and 、 keeps its width (JLREQ 3.8.3: the line-end blank
+  // goes first); on 40 、 halves too. The DP takes the 45 px line pushed in (197 against 137,641 for 字、字), but on 40
+  // it stretches 字、字 at 24,649 against 24,650 pushed in, so that half is greedy only.
+  for (const bool greedy : {false, true}) {
+    const auto wide = layoutText("字、字字。字字", withoutGrid("ja"), CssTextAlign::Left, 45, greedy);
+    ASSERT_EQ(wordsOf(wide), (Words{{"字", "、", "字", "字", "。"}, {"字", "字"}}))
+        << (greedy ? "greedy breaker" : "DP breaker");
+    EXPECT_EQ(wide[0].xpos, (X{0, 10, 20, 30, 40})) << (greedy ? "greedy breaker" : "DP breaker");
+  }
+  const auto narrow = layoutText("字、字字。字字", withoutGrid("ja"), CssTextAlign::Left, 40, true);
+  ASSERT_EQ(wordsOf(narrow), (Words{{"字", "、", "字", "字", "。"}, {"字", "字"}}));
+  EXPECT_EQ(narrow[0].xpos, (X{0, 10, 15, 25, 35}));
+}
+TEST(CjkPushIn, ALineEndMarkIsHalfOrFullNothingInBetween) {
+  // On 48 px the line needs 2 px and the line-end 。 gives its whole 5 (spec 5.2: half or full); justification spreads
+  // the 3 left over, 1 and 2, and the line ends flush with 。 at half width. The DP: 2 pushed in, 278,784 for 字、字.
+  for (const bool greedy : {false, true}) {
+    const auto lines = layoutText("字、字字。字字", withoutGrid("ja"), CssTextAlign::Justify, 48, greedy);
+    ASSERT_EQ(wordsOf(lines), (Words{{"字", "、", "字", "字", "。"}, {"字", "字"}}))
+        << (greedy ? "greedy breaker" : "DP breaker");
+    EXPECT_EQ(lines[0].xpos, (X{0, 10, 21, 33, 43})) << (greedy ? "greedy breaker" : "DP breaker");
+  }
+}
+TEST(CjkPushIn, TheCjkLatinGapGivesWayLast) {
+  // Japanese 字、字A字 is 56 px: 50 of characters and two 3 px gaps. On 49 px 、 gives its 5 px first, then each gap
+  // 1 px (shares of the last 2), down from 3 to 2. The DP stretches 字、字A instead (6 px of 49 cost 361, the 7 px
+  // pushed in 901), so this is greedy only.
+  const auto lines = layoutText("字、字A字字字", withoutGrid("ja"), CssTextAlign::Left, 49, true);
+  ASSERT_EQ(wordsOf(lines), (Words{{"字", "、", "字", "A", "字"}, {"字", "字"}}));
+  EXPECT_EQ(lines[0].xpos, (X{0, 10, 15, 27, 39}));
+}
+TEST(CjkPushIn, APushedInLineFillsItsLineInEveryAlignment) {
+  // The pushed-in line of AMidLineMarkGivesWay... is exactly 50 px: no stretch when justified, no offset when centred
+  // or set right. Placed by its natural 55 px it would start 2 or 5 px left of the margin.
+  for (const bool greedy : {false, true}) {
+    for (const CssTextAlign alignment : {CssTextAlign::Justify, CssTextAlign::Center, CssTextAlign::Right}) {
+      const auto lines = layoutText("字、字字字。字字", TypographyProfile{}, alignment, 50, greedy);
+      ASSERT_EQ(lines.size(), 2u) << (greedy ? "greedy breaker" : "DP breaker");
+      EXPECT_EQ(lines[0].xpos, (X{0, 10, 15, 25, 35, 45}))
+          << static_cast<int>(alignment) << (greedy ? " greedy breaker" : " DP breaker");
+    }
+  }
+  // With CJK-Latin gaps: the line of TheCjkLatinGapGivesWayLast is pushed in to exactly 49 px. The last line, 字A, is
+  // 23 px with its 3 px gap: set right it starts 26 px in, centred 13 (justified, it is the paragraph's last line).
+  // Greedy only, as that test.
+  for (const auto& [alignment, lastX] : std::vector<std::pair<CssTextAlign, X>>{
+           {CssTextAlign::Justify, {0, 13}}, {CssTextAlign::Center, {13, 26}}, {CssTextAlign::Right, {26, 39}}}) {
+    const auto lines = layoutText("字、字A字字A", withoutGrid("ja"), alignment, 49, true);
+    ASSERT_EQ(wordsOf(lines), (Words{{"字", "、", "字", "A", "字"}, {"字", "A"}})) << static_cast<int>(alignment);
+    EXPECT_EQ(lines[0].xpos, (X{0, 10, 15, 27, 39})) << static_cast<int>(alignment);
+    EXPECT_EQ(lines[1].xpos, lastX) << static_cast<int>(alignment);
+  }
+}
+TEST(CjkPushIn, AWordHyphenatedEarlierKeepsTheShrinkInStep) {
+  // 가나다라마바 splits after 가나다라마 (Korean, hyphenation on), inserting a token. The next line, 바 字、字字, is 55
+  // px and fits 50 only with 、 halved: the inserted token must not move 、's shrink onto another token.
+  Hyphenator::setPreferredLanguage("ko");
+  ParsedText text(false, /*hyphenationEnabled=*/true, aligned(CssTextAlign::Left));
+  text.addWord("가나다라마바", EpdFontFamily::REGULAR);
+  text.addWord("字、字字字。字字", EpdFontFamily::REGULAR);
+  const auto lines = layout(text, 50);
+  ASSERT_EQ(wordsOf(lines), (Words{{"가나다라마"}, {"바", "字", "、", "字", "字"}, {"字", "。", "字", "字"}}));
+  EXPECT_EQ(lines[1].xpos, (X{0, 15, 25, 30, 40}));
+}
+TEST(CjkPushIn, TheDpPrefersAsSlightAStretchToAPushIn) {
+  // Simplified Chinese 字、字字字 is 50 px and fits 45 only pushed in; 字、字字 is 40 px, 5 short. Both have a cubic
+  // badness of 13 (5 px of 45): stretched 196, pushed in 197. The DP stretches; the greedy breaker always pushes in.
+  const auto dp = layoutText("字、字字字字字", TypographyProfile{}, CssTextAlign::Left, 45, /*greedy=*/false);
+  ASSERT_EQ(wordsOf(dp), (Words{{"字", "、", "字", "字"}, {"字", "字", "字"}}));
+  EXPECT_EQ(dp[0].xpos, (X{0, 10, 20, 30}));
+  const auto greedy = layoutText("字、字字字字字", TypographyProfile{}, CssTextAlign::Left, 45, true);
+  ASSERT_EQ(wordsOf(greedy), (Words{{"字", "、", "字", "字", "字"}, {"字", "字"}}));
+  EXPECT_EQ(greedy[0].xpos, (X{0, 10, 15, 25, 35}));
+}
+TEST(CjkPushIn, ALastLineThatFitsOnlyPushedInPaysForIt) {
+  // 字、字字字 alone: a last line costs nothing at its natural width only. Pushed in it costs 197 as above, and
+  // 字、字字 | 字 196, so the DP stretches here too.
+  const auto lines = layoutText("字、字字字", TypographyProfile{}, CssTextAlign::Left, 45, /*greedy=*/false);
+  ASSERT_EQ(wordsOf(lines), (Words{{"字", "、", "字", "字"}, {"字"}}));
+}
+TEST(CjkPushIn, ThePenaltyTipsATieTowardTheParagraphWithoutPushIn) {
+  // Simplified Chinese on 220 px, where 10 px of slack still has a badness of 0: 31 characters, 、, 10 characters,
+  // 」』。 and 字字. Breaking after 21 characters (10 px short, cost 1) leaves a second line through 。 of 225 px that
+  // fits only pushed in (cost 2); breaking after 22 (exact, 1) leaves it a character shorter, 215 px (1). Without
+  // the penalty both paragraphs would cost 2, and the DP would keep the first it met: the shorter first line, with
+  // push-in.
+  std::string text;
+  const auto han = [&text](const int count) {
+    for (int k = 0; k < count; ++k) text += "字";
+  };
+  han(31);
+  text += "、";
+  han(10);
+  text += "」』。";
+  han(2);
+  const auto lines = layoutText(text.c_str(), TypographyProfile{}, CssTextAlign::Left, 220, /*greedy=*/false);
+  ASSERT_EQ(lines.size(), 3u);
+  EXPECT_EQ(lineSize(lines, 0), 22u);
+  EXPECT_EQ(lineSize(lines, 1), 23u);
+  EXPECT_EQ(lines[1].xpos.back(), 210);  // 。 at its natural place: nothing gave way
+}
+TEST(CjkPushIn, TheDpCountsWhatTheCjkLatinGapsGive) {
+  // Japanese 字字A字。 is 56 px with its two 3 px gaps and the line-end 。 full; 。 gives 5 and the gaps 2 each, so it
+  // fits 50 px pushed in. The DP takes it (325, against 155,236 for the 17 px hole of 字字A): 。 halves and the
+  // second gap gives the last pixel.
+  for (const bool greedy : {false, true}) {
+    const auto lines = layoutText("字字A字。字字", withoutGrid("ja"), CssTextAlign::Left, 50, greedy);
+    ASSERT_EQ(wordsOf(lines), (Words{{"字", "字", "A", "字", "。"}, {"字", "字"}}))
+        << (greedy ? "greedy breaker" : "DP breaker");
+    EXPECT_EQ(lines[0].xpos, (X{0, 10, 23, 35, 45})) << (greedy ? "greedy breaker" : "DP breaker");
+  }
+}
+TEST(CjkPushIn, APureCjkParagraphWithoutPunctuationLaysOutAsBefore) {
+  // Nothing on these lines can give way: both breakers break and justify as before push-in (spec 5.3).
+  for (const bool greedy : {false, true}) {
+    const auto lines = layoutText("一二三四五六七八九十百千", withoutGrid("ja"), CssTextAlign::Justify, 55, greedy);
+    ASSERT_EQ(wordsOf(lines), (Words{{"一", "二", "三", "四", "五"}, {"六", "七", "八", "九", "十"}, {"百", "千"}}));
+    EXPECT_EQ(lines[0].xpos, (X{0, 11, 22, 33, 45}));
+  }
 }
