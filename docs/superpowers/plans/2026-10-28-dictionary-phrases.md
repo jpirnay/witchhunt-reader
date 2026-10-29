@@ -17,7 +17,7 @@
 **Spec:** `docs/superpowers/specs/2026-10-28-dictionary-phrases-design.md`. Every "(my call)" in it is decided. Task 11 deletes the spec and this plan once their lasting parts are in `docs/dictionary.md`.
 
 **Builds on** (merged into master before Task 1; this plan cites them as they are on their branches):
-- CJK dictionary step 9, `feat/cjk-dictionary` at `1fccfc02f` (Tasks 1-5 of `docs/superpowers/plans/2026-10-23-cjk-dictionary.md` done, Tasks 6-9 to come): `Dictionary::resolvePrefixes`, `DictPrefixMatch`, `readPrefixDefinitions`, `MAX_PREFIX_RUN_BYTES`, `CjkLookupRun`, `isDictionaryEdgePunctuation`; after its Task 7, the word screen's `scriptAt()`, `definitionFontId()` and the definition screen's `fontId` parameter; after its Task 6, the CJK branch of `lookUpWord` in `SerialTestApi.cpp`.
+- CJK dictionary step 9, #574 (`feat/cjk-dictionary`; this plan was written against `1fccfc02f`, before its word-screen, serial and speed-up tasks): `Dictionary::resolvePrefixes`, `DictPrefixMatch`, `readPrefixDefinitions`, `MAX_PREFIX_RUN_BYTES`, `CjkLookupRun`, `isDictionaryEdgePunctuation`; after its Task 7, the word screen's `scriptAt()`, `definitionFontId()` and the definition screen's `fontId` parameter; after its Task 6, the CJK branch of `lookUpWord` in `SerialTestApi.cpp`.
 - Part B, `feat/dict-release-word-arrays` at `9d2906103`: `DictionaryWordSelectActivity::releaseWordArrays()`, the rebuild in `extractWords()`, `appendDebugState()`.
 
 ## Global Constraints
