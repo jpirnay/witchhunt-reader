@@ -488,7 +488,7 @@ struct Case {
   std::string epub;
   std::string language;
   bool mixesLatin = false;    // puts Latin letters or digits against Han or kana with no space
-  bool forcesPushIn = false;  // has lines the greedy breaker (hyphenation on) fits only pushed in
+  bool forcesPushIn = false;  // has the push-in case, a line the greedy breaker (hyphenation on) fits only pushed in
   bool hyphenation = false;
 };
 
@@ -579,10 +579,12 @@ TEST_P(CjkRules, NoHyphenAfterCjkText) {
 // width is not known, are checked pair by pair: no unspaced CJK pair overlaps with each mark at its minimum width.
 TEST_P(CjkRules, LinesSitWhereTheirWidthsPutThem) {
   size_t checked = 0;
-  size_t pushedIn = 0;
-  size_t restated = 0;  // lines that could be laid out again: no ruby, not a table cell
+  size_t restated = 0;        // lines that could be laid out again: no ruby, not a table cell
+  bool inPushInCase = false;  // past the heading of the push-in case, the book's last
+  int pushInCaseNeed = -1;    // the push-in of that case's line with 、
   for (const auto& line : lines) {
     if (line.words.empty()) continue;
+    if (line.words.size() == 2 && line.words[0].text == "18." && line.words[1].text == "push-in") inPushInCase = true;
     if (line.rubies.empty() && !line.cell) ++restated;
     const LineLayout layout(renderer, line, profile);
     if ((line.align == kAlignLeft || line.align == kAlignRight) && line.rubies.empty()) {
@@ -592,7 +594,8 @@ TEST_P(CjkRules, LinesSitWhereTheirWidthsPutThem) {
       EXPECT_GE(need, 0) << "not where its widths put it: " << lineText(line);
       if (need < 0) continue;
       EXPECT_LE(layout.rightAt(need), bounds.right) << "wider than the text width: " << lineText(line);
-      if (need > 0) ++pushedIn;
+      const auto holdsComma = [](const DumpWord& w) { return w.text == "\xE3\x80\x81"; };  // 、
+      if (inPushInCase && std::any_of(line.words.begin(), line.words.end(), holdsComma)) pushInCaseNeed = need;
       continue;
     }
     for (size_t i = 0; i + 1 < line.words.size(); ++i) {
@@ -607,7 +610,10 @@ TEST_P(CjkRules, LinesSitWhereTheirWidthsPutThem) {
   // Ruby lines and table cells are checked pair by pair; of the others only a few centred or justified headings are not
   // laid out again.
   EXPECT_GE(checked * 4, restated * 3) << "only " << checked << " of " << restated << " lines laid out again";
-  if (GetParam().hyphenation && GetParam().forcesPushIn) EXPECT_GT(pushedIn, 0u) << "no line was pushed in";
+  // Case 18's line with 、 is 29 ems at its table widths on 28: the greedy breaker fits it only pushed in.
+  if (GetParam().hyphenation && GetParam().forcesPushIn) {
+    EXPECT_GT(pushInCaseNeed, 0) << "the push-in case's line with 、 was not pushed in";
+  }
 }
 
 // Between Han or kana and a Latin letter or European digit with no space in the source, a Chinese or Japanese book

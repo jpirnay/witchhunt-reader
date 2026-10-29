@@ -137,6 +137,20 @@ int pushInShare(const int cumulativeBefore, const int amount, const int tierNeed
   return ((cumulativeBefore + amount) * tierNeed) / tierTotal - (cumulativeBefore * tierNeed) / tierTotal;
 }
 
+// The DP breaker's Knuth-Plass style badness of a line `amount` px off its width (what a stretched line lacks, what
+// a pushed-in line overran by, never negative): (amount / width)³ × 10000 in integers, at most 10000. Cubic, so it is
+// lenient on a line a little off and strongly penalises a very loose one.
+int cubicBadness(const int amount, const int width) {
+  const long long num = static_cast<long long>(amount) * amount * amount;
+  const long long den = static_cast<long long>(width) * width * width;
+  return den > 0 ? static_cast<int>(std::min(num * 10000LL / den, 10000LL)) : 10000;
+}
+
+// What a line that fits only pushed in costs beyond the demerits of its overrun. Against a line stretched with the
+// same badness, or a paragraph with the same demerits, the one without push-in wins; against a looser one, push-in
+// does. So push-in is taken where it avoids a loose line, not by default (spec 5.3).
+constexpr long long kPushInPenalty = 1;
+
 std::string buildLinePreview(const std::vector<std::string>& words,
                              const std::vector<TokenBoundary::Boundary>& boundaries, const size_t start,
                              const size_t endExclusive, const size_t maxLen = 120) {
@@ -1131,6 +1145,7 @@ void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
 
   for (int i = totalWordCount - 2; i >= 0; --i) {
     int currlen = 0;
+    int shrink = 0;  // what the line's marks and gaps may give mid-line (push-in)
     dp[i] = MAX_COST;
 
     const int lineIdx = lineIndexForWord[i];
@@ -1141,15 +1156,21 @@ void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
         widthForLine(lineIdx, lineHeight, blockStartY, pageWidth) - (i == 0 ? firstLineIndent : 0);
 
     for (size_t j = i; j < totalWordCount; ++j) {
-      const int gap = (j > static_cast<size_t>(i)) ? interWordGaps[j] : 0;
+      const bool firstToken = j == static_cast<size_t>(i);
+      const int gap = firstToken ? 0 : interWordGaps[j];
       currlen += wordWidths[j] + gap;
+      shrink += shrink_[j] + (firstToken ? 0 : gapShrinkBefore(j, gap));
       // The line as drawn: its first and last token at their line-edge widths (CJK punctuation, spec 5.2), with the
-      // overhang of a ruby at either edge held inside. It only grows with j, so the break below holds: a token is
-      // always wider than what a line edge takes off it, and a ruby's end reserve on token j is at most half of token
-      // j + 1, the neighbour it overhangs when the line goes on.
+      // overhang of a ruby at either edge held inside. A line wider than that may still fit pushed in, its marks and
+      // CJK-Latin gaps at their minimum widths (spec 5.3), as the greedy breakers measure it and extractLine lays it
+      // out. That pushed-in width only grows with j, so the break below holds: no mark's mid-line minimum is below
+      // its line-edge minimum (CjkPunctuation.NoMarkIsNarrowerMidLineThanAtALineEdge), a CJK-Latin gap keeps half of
+      // itself, and a ruby's end reserve on token j is at most half of token j + 1, the neighbour it overhangs when
+      // the line goes on, which push-in never takes below half (no minimum is under half a mark, and a mark under two
+      // overhangs keeps them).
       const int lineLen = withEdgeTrims(currlen, i, j);
 
-      if (lineLen > effectivePageWidth) {
+      if (pushedInWidth(currlen, shrink, i, j) > effectivePageWidth) {
         break;
       }
 
@@ -1158,21 +1179,21 @@ void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
         continue;
       }
 
+      // Knuth-Plass style demerits, (1 + badness)², of what the line lacks; the last line has none, however loose.
+      // A line that fits only pushed in, the last one too, pays the demerits of what it overran by and the push-in
+      // penalty: an exact line costs 1, a pushed-in one at least 2, a stretched one with any badness at least 4. A
+      // line with nothing that can give way is never pushed in, so it costs what it did without push-in.
+      const bool pushedIn = lineLen > effectivePageWidth;
+      const bool lastLine = j == totalWordCount - 1;
       int cost;
-      if (j == totalWordCount - 1) {
-        cost = 0;  // Last line — no penalty regardless of looseness
+      if (lastLine && !pushedIn) {
+        cost = 0;
       } else {
-        const int remainingSpace = effectivePageWidth - lineLen;
-        // Knuth-Plass style demerits:
-        //   badness  = (gap/lineWidth)³ × 10000, clamped to [0, 10000]
-        //   demerits = (1 + badness)²
-        // Cubic badness strongly penalises very loose lines while being
-        // lenient on moderately loose ones, producing visually balanced paragraphs.
-        const long long b_num = static_cast<long long>(remainingSpace) * remainingSpace * remainingSpace;
-        const long long b_den = static_cast<long long>(effectivePageWidth) * effectivePageWidth * effectivePageWidth;
-        const int badness = (b_den > 0) ? static_cast<int>(std::min(b_num * 10000LL / b_den, 10000LL)) : 10000;
-        const long long demerits = static_cast<long long>(1 + badness) * (1 + badness);
-        const long long cost_ll = demerits + dp[j + 1];
+        const int badness = pushedIn ? cubicBadness(lineLen - effectivePageWidth, effectivePageWidth)
+                                     : cubicBadness(effectivePageWidth - lineLen, effectivePageWidth);
+        const long long demerits =
+            static_cast<long long>(1 + badness) * (1 + badness) + (pushedIn ? kPushInPenalty : 0);
+        const long long cost_ll = demerits + (lastLine ? 0 : dp[j + 1]);
 
         if (cost_ll > MAX_COST) {
           cost = MAX_COST;
