@@ -422,7 +422,7 @@ int ParsedText::kernBefore(const GfxRenderer& renderer, const int fontId, const 
 }
 
 int ParsedText::naturalGapBefore(const GfxRenderer& renderer, const int fontId, const size_t j) const {
-  const TokenBoundary::Boundary boundary = wordBoundaries[j];
+  const TokenBoundary::Boundary& boundary = wordBoundaries[j];
   if (boundary.continues) return kernBefore(renderer, fontId, j);
   if (boundary.noSpaceBefore) return cjkLatinGapBefore(renderer, fontId, j);
   return spaceBefore(renderer, fontId, j);
@@ -430,7 +430,7 @@ int ParsedText::naturalGapBefore(const GfxRenderer& renderer, const int fontId, 
 
 int ParsedText::cjkLatinGapBefore(const GfxRenderer& renderer, const int fontId, const size_t j) const {
   if (!typography_.cjkLatinGap) return 0;
-  const TokenBoundary::Boundary boundary = wordBoundaries[j];
+  const TokenBoundary::Boundary& boundary = wordBoundaries[j];
   if (boundary.continues || !boundary.noSpaceBefore) return 0;
   const uint32_t left = lastCodepoint(words[j - 1]);
   const uint32_t right = firstCodepoint(words[j]);
@@ -1155,11 +1155,13 @@ void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
     const int effectivePageWidth =
         widthForLine(lineIdx, lineHeight, blockStartY, pageWidth) - (i == 0 ? firstLineIndent : 0);
 
+    const int startTrim = lineStartTrim(i);
+
     for (size_t j = i; j < totalWordCount; ++j) {
       const bool firstToken = j == static_cast<size_t>(i);
       const int gap = firstToken ? 0 : interWordGaps[j];
       currlen += wordWidths[j] + gap;
-      shrink += shrink_[j] + (firstToken ? 0 : gapShrinkBefore(j, gap));
+      shrink += shrink_[j] + (gap > 0 ? gapShrinkBefore(j, gap) : 0);
       // The line as drawn: its first and last token at their line-edge widths (CJK punctuation, spec 5.2), with the
       // overhang of a ruby at either edge held inside. A line wider than that may still fit pushed in, its marks and
       // CJK-Latin gaps at their minimum widths (spec 5.3), as the greedy breakers measure it and extractLine lays it
@@ -1170,9 +1172,10 @@ void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
       // overhangs keeps them). The exception is a mark inside a ruby group: it gives nothing and keeps its table
       // widths, so a base ending in 」 (narrower before 。 than at a line end) whose ruby overhangs a following 。 can
       // narrow the line when 。 joins it. The break then stops one token early: a looser line, never an overfull one.
-      const int lineLen = withEdgeTrims(currlen, i, j);
+      const int lineLen = currlen + startTrim + lineEndTrim(j);
+      const bool pushedIn = lineLen > effectivePageWidth;
 
-      if (pushedInWidth(currlen, shrink, i, j) > effectivePageWidth) {
+      if (pushedIn && pushedInWidth(currlen, shrink, i, j) > effectivePageWidth) {
         break;
       }
 
@@ -1185,7 +1188,6 @@ void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
       // A line that fits only pushed in, the last one too, pays the demerits of what it overran by and the push-in
       // penalty: an exact line costs 1, a pushed-in one at least 2, a stretched one with any badness at least 4. A
       // line with nothing that can give way is never pushed in, so it costs what it did without push-in.
-      const bool pushedIn = lineLen > effectivePageWidth;
       const bool lastLine = j == totalWordCount - 1;
       int cost;
       if (lastLine && !pushedIn) {
@@ -1265,9 +1267,10 @@ size_t ParsedText::computeSingleLineBreakNoHyphen(const GfxRenderer& renderer, c
     const int spacing = isFirstWord ? 0 : naturalGapBefore(renderer, fontId, currentIndex);
 
     const int candidateWidth = spacing + wordWidths[currentIndex];
-    const int candidateShrink = shrink_[currentIndex] + (isFirstWord ? 0 : gapShrinkBefore(currentIndex, spacing));
-    if (pushedInWidth(lineWidth + candidateWidth, lineShrink + candidateShrink, lineStartIndex, currentIndex) <=
-        effectivePageWidth) {
+    const int candidateShrink = shrink_[currentIndex] + (spacing > 0 ? gapShrinkBefore(currentIndex, spacing) : 0);
+    const int candidateLen = withEdgeTrims(lineWidth + candidateWidth, lineStartIndex, currentIndex);
+    if (candidateLen <= effectivePageWidth || pushedInWidth(lineWidth + candidateWidth, lineShrink + candidateShrink,
+                                                            lineStartIndex, currentIndex) <= effectivePageWidth) {
       lineWidth += candidateWidth;
       lineShrink += candidateShrink;
       ++currentIndex;
@@ -1461,11 +1464,12 @@ void ParsedText::computeHyphenatedLineBreaks(
       const bool isFirstWord = currentIndex == lineStart;
       const int spacing = isFirstWord ? 0 : interWordGaps[currentIndex];
       const int candidateWidth = spacing + wordWidths[currentIndex];
-      const int candidateShrink = shrink_[currentIndex] + (isFirstWord ? 0 : gapShrinkBefore(currentIndex, spacing));
+      const int candidateShrink = shrink_[currentIndex] + (spacing > 0 ? gapShrinkBefore(currentIndex, spacing) : 0);
 
       // Word fits on current line, pushed in if need be
-      if (pushedInWidth(lineWidth + candidateWidth, lineShrink + candidateShrink, lineStart, currentIndex) <=
-          effectivePageWidth) {
+      const int candidateLen = withEdgeTrims(lineWidth + candidateWidth, lineStart, currentIndex);
+      if (candidateLen <= effectivePageWidth || pushedInWidth(lineWidth + candidateWidth, lineShrink + candidateShrink,
+                                                              lineStart, currentIndex) <= effectivePageWidth) {
         lineWidth += candidateWidth;
         lineShrink += candidateShrink;
         ++currentIndex;
@@ -1565,10 +1569,11 @@ void ParsedText::computeHyphenatedLineBreaksFromIndex(
       const bool isFirstWord = currentIndex == lineStart;
       const int spacing = isFirstWord ? 0 : interWordGaps[currentIndex];
       const int candidateWidth = spacing + wordWidths[currentIndex];
-      const int candidateShrink = shrink_[currentIndex] + (isFirstWord ? 0 : gapShrinkBefore(currentIndex, spacing));
+      const int candidateShrink = shrink_[currentIndex] + (spacing > 0 ? gapShrinkBefore(currentIndex, spacing) : 0);
 
-      if (pushedInWidth(lineWidth + candidateWidth, lineShrink + candidateShrink, lineStart, currentIndex) <=
-          effectivePageWidth) {
+      const int candidateLen = withEdgeTrims(lineWidth + candidateWidth, lineStart, currentIndex);
+      if (candidateLen <= effectivePageWidth || pushedInWidth(lineWidth + candidateWidth, lineShrink + candidateShrink,
+                                                              lineStart, currentIndex) <= effectivePageWidth) {
         lineWidth += candidateWidth;
         lineShrink += candidateShrink;
         ++currentIndex;
@@ -1976,7 +1981,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
           gap = static_cast<int>(
               spaceBefore(renderer, fontId, lastBreakAt + wordIdx + 1) * wordScale(lastBreakAt + wordIdx) + 0.5f);
         } else {
-          gap = cjkLatinGapBefore(renderer, fontId, lastBreakAt + wordIdx + 1);
+          gap = gapShrinkTotal > 0 ? cjkLatinGapBefore(renderer, fontId, lastBreakAt + wordIdx + 1) : 0;
           gap -= gapGive(wordIdx + 1, gap);
         }
         // Don't stretch the gap before closing punctuation — it looks wrong with

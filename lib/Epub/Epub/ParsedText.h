@@ -255,7 +255,7 @@ class ParsedText {
   // CJK-Latin gap has a width) all but half of it, rounded down, as JLREQ lets a quarter-em gap shrink to 1/8 em; a
   // word space or a glued seam nothing.
   int gapShrinkBefore(const size_t j, const int gapBefore) const {
-    const TokenBoundary::Boundary boundary = wordBoundaries[j];
+    const TokenBoundary::Boundary& boundary = wordBoundaries[j];
     return !boundary.continues && boundary.noSpaceBefore ? gapBefore - gapBefore / 2 : 0;
   }
   // A line's push-in total with its first and last token giving their line-edge shrinks: `shrinkSum` is the line's
