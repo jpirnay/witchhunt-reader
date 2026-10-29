@@ -86,7 +86,7 @@ Where a word starts and ends:
 What it does not do:
 - **No deinflection.** 食べた has no entry of its own and finds 食; 먹었습니다 finds nothing in CC-KEDICT. Each entry is headed by the word it is for, so you can see what was matched.
 - **The other script only where the dictionary has it.** The search covers the dictionary's word index and its `.syn`, and none of the Latin fallbacks above (no stemming, no lowercase retry). CC-CEDICT lists every traditional form as a synonym of its simplified headword, so 學校 finds 学校; a dictionary without them finds nothing for text in the other script.
-- **One headword per synonym.** A synonym that several headwords share shows the first of them only. JMdict files a kana reading as a synonym of each kanji spelling, so はし, a reading of 橋, 箸, 端, 嘴 and four more, shows 嘴.
+- **One headword per synonym.** A synonym that several headwords share shows one of them only; which one is not defined. JMdict files a kana reading as a synonym of each kanji spelling, so はし, a reading of 橋, 箸, 端, 嘴 and four more, showed 嘴.
 - **Characters your reading font lacks.** CC-CEDICT writes each word in both scripts (大学生 / 大學生). A font made for one region (Simplified Chinese, Japanese) lacks some characters of the other and draws them as a box; a font that carries both draws them all. The NotoSansCJK `.cpfont` family carries both scripts but not pinyin's ē, ǎ and ū, which drop out of the reading (dàxuéshēng shows as dàxuéshng); a TrueType family has them.
 - **Greedy matches.** The longest word is not always the one the sentence means: 研究生命 starts with 研究生 (graduate student), not 研究 (research). The shorter matches follow it in the definition.
 

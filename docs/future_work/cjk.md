@@ -342,7 +342,7 @@ CC-KEDICT (`docs/dictionary.md` has the conversions):
   これと言う) and kana synonyms (はま from はまだ) make most of the Japanese misses; the shorter matches in the
   definition soften them.
 - **One headword per synonym.** A `.syn` hit names one `.idx` entry, so a reading several headwords share shows the
-  first: はし shows 嘴 of eight. Listing every ordinal of a hit changes `DictPrefixHit` and the contiguous-entries
+  one of them, and which one is not defined (はし showed 嘴 of eight). Listing every ordinal of a hit changes `DictPrefixHit` and the contiguous-entries
   read.
 - **The other script in the definition.** CC-CEDICT writes each word in both scripts; a single regional CJK font
   draws the other script's missing characters as U+FFFD (學, 書 with a Simplified Chinese font). The NotoSansCJK
@@ -353,6 +353,8 @@ CC-KEDICT (`docs/dictionary.md` has the conversions):
   styled layout and stopped on its retain floor (`DHTML` "Styled definition stopped on free heap", an error line on a
   path that recovers): they fell back to plain text. With the glyphs stored, and with the `.cpfont` family, all three
   laid out styled (110-240 ms for 1.5-2.6 KB entries).
+- **A long CJK definition in an SD-card font, laid out without a prewarm, is untimed.** Only entries of 1.5-2.6 KB
+  were measured.
 - **The headword back in the header** once the UI text fallback (step 6) has merged: `BookTextScope`,
   `CjkUiFonts::readerFontAttached()` and `prefetchBookText()`.
 - **Not run, by the maintainer's decision:** the X3 dense-page measurement and the touch check on the X4 Pro and
