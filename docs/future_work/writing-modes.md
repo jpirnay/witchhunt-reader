@@ -1,6 +1,6 @@
 # Writing modes: right-to-left and vertical text
 
-Status: open items as of 2026-10-26.
+Status: open items as of 2026-10-29.
 
 Hebrew and Arabic books, and vertical Chinese, Japanese and Korean. None of it is built yet; the design and the
 maintainer's decisions are in `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md`:
@@ -21,14 +21,56 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 |---|---|---|
 | 0 | Parse every trigger (`writing-mode`, `text-orientation`, `text-combine-upright`, `direction`, `unicode-bidi`, `start`/`end`, `dir` with `<bdo>`/`<bdi>`, OPF ppd); CSS boxes along the writing mode, `start`/`end` along the direction; `line-height` parsed as CSS means it and kept through the cache; fixture books | shipped (#560) ([plan](../superpowers/plans/2026-10-26-writing-modes-step0.md)) |
 | 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; FlowContext and page progression | open |
-| 2 | Arabic script | open |
+| 2 | Arabic script; before its plan, decide on one shaper for Arabic and the Indic scripts ([below](#complex-shaping-arabic-and-the-indic-scripts)) | open |
 | 3 | Vertical frame (from the spike); the vertical decision and its settings | open |
 | 4 | Vertical typography: baked vertical forms, small kana, tate-chu-yoko (the per-word flag), A3a in vertical | open |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
 
-**Next step.** Line spacing (`cjk.md`, step 10) comes before steps 1-4 (maintainer, 2026-10-26): it reads the
-`line-height` step 0 keeps, and it helps every horizontal CJK book now. It is built on `feat/line-spacing`; step 1
-follows.
+**Next step.** Step 3: its plan is written (`docs/superpowers/plans/2026-10-28-writing-modes-step3.md`, on
+`docs/writing-modes-step3`) and runs once the CJK work in flight has landed. Line spacing (`cjk.md`, step 10), which
+reads the `line-height` step 0 keeps, has shipped.
+
+## Complex shaping: Arabic and the Indic scripts
+
+**Open; planned for after CJK, together with step 2** (maintainer, 2026-10-29: "store that plan for realisation
+after CJK, when we need to do Arabic").
+
+Hindi and the other Indic scripts need complex text shaping: what is drawn is decided by the font's GSUB and GPOS
+tables, not by the characters one by one. CJK did not need it (one glyph per character). Nothing in the firmware
+handles it today: no Devanagari support, the SDK's GSUB reader resolves only ligature lookups (types 4 and 7, for
+fi/fl), and hyphenation patterns exist for ten European languages.
+
+**What a Hindi book looks like today**, in a Devanagari TrueType font: the vowel sign ि drawn after its consonant
+instead of before it, no conjuncts or half forms (क्ष, त्र), the reph (र्) not raised, marks placed by guesswork.
+
+**Why it belongs with step 2.** The spec bakes Arabic's joining forms into the fonts as Unicode presentation forms
+(section 5.6). That cannot work for Indic scripts: Unicode has no presentation forms for conjuncts, which exist only
+as font-specific glyphs. A real shaper would serve Arabic properly as well, so the choice is made once, before step 2
+is planned: one generic shaper for both, or baked Arabic forms now and a shaper later.
+
+**What one generic shaping layer needs** (it would serve Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil,
+Telugu, Kannada, Malayalam, Sinhala, Khmer, Myanmar and Tibetan, and Arabic):
+1. **Per-character tables:** the Unicode Indic syllabic and positional categories, to split text into syllables and
+   place each mark. Data, like the bidi and UAX #50 tables.
+2. **A shaper at section build time** (the placement section 5.3 chose for Arabic): reorder each syllable (pre-base
+   vowel signs, reph); apply the font's GSUB features in the script's order (lookup types 1, 2, 4, 5, 6: single,
+   multiple, ligature, contextual, chained); then GPOS mark attachment (mark-to-base, mark-to-mark) and kerning.
+   HarfBuzz is too large for the C3; a minimal shaper is the route, its flash cost to be measured.
+3. **Storage:** shaped runs as glyph IDs and positions, with the logical text kept beside them for the dictionary,
+   KOSync and search; a section file version bump. The TrueType engine already draws by glyph index.
+4. **Fonts:** Noto Sans and Serif per script in the Font Manager, with GSUB and GPOS kept (the CJK subsets drop them).
+   Bitmap `.cpfont` families cannot be shaped.
+5. **Line breaking:** Hindi separates words with spaces, so today's breakers serve; a break never splits a syllable;
+   the danda (। ॥) ends a sentence; Hindi hyphenation patterns exist (optional).
+6. **UI:** book titles in the library need the same shaping (step 5's visual strings). A Hindi UI translation stays
+   out of scope, as the right-to-left UI does.
+
+Thai and Lao need a further piece: no spaces between words, so line breaking needs a word dictionary (a CJK-like
+problem with a large data cost).
+
+**Next step.** After CJK: a gap analysis and a spike, as the CJK font work had. Shape a Devanagari paragraph on the
+host with the TrueType engine and a minimal shaper, compare it with HarfBuzz as the oracle, measure the flash cost,
+then decide the step-2 question above.
 
 ## Parsed in step 0, read later
 
