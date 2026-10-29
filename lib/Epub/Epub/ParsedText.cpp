@@ -1167,7 +1167,9 @@ void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
       // its line-edge minimum (CjkPunctuation.NoMarkIsNarrowerMidLineThanAtALineEdge), a CJK-Latin gap keeps half of
       // itself, and a ruby's end reserve on token j is at most half of token j + 1, the neighbour it overhangs when
       // the line goes on, which push-in never takes below half (no minimum is under half a mark, and a mark under two
-      // overhangs keeps them).
+      // overhangs keeps them). The exception is a mark inside a ruby group: it gives nothing and keeps its table
+      // widths, so a base ending in 」 (narrower before 。 than at a line end) whose ruby overhangs a following 。 can
+      // narrow the line when 。 joins it. The break then stops one token early: a looser line, never an overfull one.
       const int lineLen = withEdgeTrims(currlen, i, j);
 
       if (pushedInWidth(currlen, shrink, i, j) > effectivePageWidth) {
