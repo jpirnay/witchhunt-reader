@@ -43,7 +43,7 @@ def main():
         sys.exit(__doc__)
     raw = open(sys.argv[1], "rb").read()
     text = raw.decode("utf-8")
-    if text.splitlines()[0] != EXPECTED_FIRST_LINE:
+    if text.splitlines()[:1] != [EXPECTED_FIRST_LINE]:
         sys.exit(f"{sys.argv[1]}: first line is not '{EXPECTED_FIRST_LINE}'")
     runs = runs_of(parse(text))
     out_path = sys.argv[2] if len(sys.argv) == 3 else DEFAULT_OUT
@@ -62,6 +62,7 @@ def main():
         "",
         f"constexpr size_t kVerticalOrientationRunCount = {len(runs)};",
         "",
+        "// clang-format off",
         "constexpr uint32_t kVerticalOrientationRuns[kVerticalOrientationRunCount] = {",
     ]
     row = []
@@ -73,6 +74,7 @@ def main():
     if row:
         lines.append("    " + " ".join(row))
     lines.append("};")
+    lines.append("// clang-format on")
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
 
