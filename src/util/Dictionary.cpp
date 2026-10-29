@@ -1493,7 +1493,10 @@ bool Dictionary::resolvePrefixes(const char* run, DictPrefixMatch& matchOut, Loo
     // Only a longer match could change the answer.
     if (!search.aborted && hasSyn && (matchOut.count == 0 || matchOut.hits[0].runBytes < search.runBytes)) {
       search.indexHits = &matchOut;
-      if (openSynonyms(session)) {
+      // A press during the .idx probe should not also wait for the .syn open.
+      if (abortCheck && abortCheck()) {
+        search.aborted = true;
+      } else if (openSynonyms(session)) {
         block = SampleBlock{};
         block.buf = scanBuf->idx;
         session.idxScan.forget();
@@ -1663,16 +1666,17 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
   for (uint32_t i = 0; i < taken; i++) {
     if (!nextPrefixEntry(session, match, hit, entry, location, ioError)) return fail(LookupResult::ReadError);
     char* const out = &definitionOut[0];
-    if (i > 0 && !html) {
-      memcpy(out + pos, ENTRY_SEPARATOR, sizeof(ENTRY_SEPARATOR) - 1);
-      pos += sizeof(ENTRY_SEPARATOR) - 1;
-    }
     const std::string& headword = match.hits[hit].headword;
+    const uint32_t separator = (i > 0 && !html) ? sizeof(ENTRY_SEPARATOR) - 1 : 0;
     const uint32_t heading = headingBytes(headword, html);
     uint32_t definition = location.size;
     if (i == 0) definition = std::min(definition, MAX_DEFINITION_BYTES - std::min(heading, MAX_DEFINITION_BYTES));
-    // The index changed under us between the passes: refuse rather than write past the buffer.
-    if (static_cast<uint64_t>(pos) + heading + definition > total) return fail(LookupResult::ReadError);
+    // The .idx can change between the passes: check the whole entry before writing any of it.
+    if (static_cast<uint64_t>(pos) + separator + heading + definition > total) return fail(LookupResult::ReadError);
+    if (separator > 0) {
+      memcpy(out + pos, ENTRY_SEPARATOR, separator);
+      pos += separator;
+    }
     pos += writeHeading(out + pos, headword, html);
     if (definition > 0) {
       LookupResult r = LookupResult::ReadError;
@@ -1680,6 +1684,8 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
       pos += definition;
     }
   }
+  // Entries that came out smaller than in pass 1 leave the tail of the buffer unwritten.
+  definitionOut.resize(pos);
   if (outResult) *outResult = LookupResult::Found;
   return true;
 }
