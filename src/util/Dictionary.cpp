@@ -999,6 +999,7 @@ struct Dictionary::PrefixSearch {
   const char* run = nullptr;
   uint8_t runBytes = 0;  // of `run` searched, at most MAX_PREFIX_RUN_BYTES
   AbortCheck abortCheck = nullptr;
+  const DictPrefixMatch* indexHits = nullptr;  // the .idx hits, while the .syn is searched
   uint8_t probes = 0;
   bool aborted = false;
   bool failed = false;  // a probe could not read what it needed: a miss is no verdict
@@ -1067,6 +1068,20 @@ size_t commonPrefixLen(const char* run, const size_t runBytes, const char* word)
   size_t n = 0;
   while (n < runBytes && word[n] != '\0' && foldAsciiCase(word[n]) == foldAsciiCase(run[n])) n++;
   return n;
+}
+
+// True when a .syn hit of at most `maxBytes` of `run` could be kept beside the .idx hits `idx`:
+// one that ends on a codepoint, of a length no .idx hit has (the .idx hit wins a tie), and not
+// shorter than all of a full list.
+bool synonymCouldBeKept(const char* run, const size_t runBytes, const DictPrefixMatch& idx, const size_t maxBytes) {
+  for (size_t len = 1; len <= maxBytes; len++) {
+    if (len < runBytes && isContinuationByte(run[len])) continue;
+    if (idx.count == DictPrefixMatch::MAX_HITS && len < idx.hits[DictPrefixMatch::MAX_HITS - 1].runBytes) continue;
+    bool tied = false;
+    for (uint8_t k = 0; k < idx.count; k++) tied = tied || idx.hits[k].runBytes == len;
+    if (!tied) return true;
+  }
+  return false;
 }
 
 // Hits name the same run (or, from two headwords, the same definition) by their first entry.
@@ -1227,6 +1242,10 @@ void Dictionary::collectPrefixes(LookupSession& session, PrefixSearch& search, H
     if (out.count > 0) limit = std::min<size_t>(limit, out.hits[out.count - 1].runBytes - 1);
     limit = codepointFloor(search.run, limit);
     if (limit == 0 || limit >= targetBytes) return;  // strictly shorter every time, so it ends
+    if constexpr (synonyms) {
+      // The merge would drop every hit the next probe could find.
+      if (!synonymCouldBeKept(search.run, search.runBytes, *search.indexHits, limit)) return;
+    }
     targetBytes = limit;
   }
 }
@@ -1322,6 +1341,7 @@ bool Dictionary::resolvePrefixes(const char* run, DictPrefixMatch& matchOut, Loo
     SynonymHits syn;
     // Only a longer match could change the answer.
     if (!search.aborted && hasSyn && (matchOut.count == 0 || matchOut.hits[0].runBytes < search.runBytes)) {
+      search.indexHits = &matchOut;
       if (openSynonyms(session)) {
         collectPrefixes(session, search, syn);
       } else if (session.synFailed) {

@@ -1248,6 +1248,30 @@ TEST_F(DictionaryTest, PrefixSearchTakesTheWindowsFirstHeadwordFromItsScan) {
   EXPECT_EQ(m.reads, 11);  // 14 with the window record
 }
 
+// The .syn descent for 大学生活 lands past 300 synonyms 大 + one ideograph, so its next target would
+// be 大. A .syn hit of 大's length could only tie with the .idx hit 大, which wins a tie, so that
+// probe is not run; with no .idx hit of that length it is, and finds the synonym.
+TEST_F(DictionaryTest, PrefixSearchSkipsASynonymProbeWhoseHitsTheIndexHitsWouldBeat) {
+  std::vector<SynonymSpec> synonyms;
+  for (int i = 0; i < 300; i++) synonyms.push_back({"大" + cp(0x4E00 + i), "太"});
+  synonyms.push_back({"大", "太"});
+  ASSERT_NO_FATAL_FAILURE(
+      writeDictionary("PrefixSynTied", {{"大", "big"}, {"大学", "university"}, {"太", "too"}}, synonyms));
+  Dictionary tied;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(tied, "PrefixSynTied"));
+  DictPrefixMatch m;
+  ASSERT_TRUE(tied.resolvePrefixes("大学生活", m));
+  EXPECT_EQ(hitsOf(m), (HitList{{"大学", 6}, {"大", 3}}));
+  EXPECT_EQ(m.probes, 2);  // the .idx scan and one .syn scan
+
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("PrefixSynUntied", {{"大学", "university"}, {"太", "too"}}, synonyms));
+  Dictionary untied;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(untied, "PrefixSynUntied"));
+  ASSERT_TRUE(untied.resolvePrefixes("大学生活", m));
+  EXPECT_EQ(hitsOf(m), (HitList{{"大学", 6}, {"太", 3}}));
+  EXPECT_EQ(m.probes, 4);  // the .idx scan, two .syn scans, following 大 to 太
+}
+
 TEST_F(DictionaryTest, LatinDictionaryAnswersACjkRunInOneProbePerFile) {
   const struct {
     const char* fixture;
