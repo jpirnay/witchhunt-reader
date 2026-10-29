@@ -55,11 +55,13 @@ Telugu, Kannada, Malayalam, Sinhala, Khmer, Myanmar and Tibetan, and Arabic):
 2. **A shaper at section build time** (the placement section 5.3 chose for Arabic): reorder each syllable (pre-base
    vowel signs, reph); apply the font's GSUB features in the script's order (lookup types 1, 2, 4, 5, 6: single,
    multiple, ligature, contextual, chained); then GPOS mark attachment (mark-to-base, mark-to-mark) and kerning.
-   HarfBuzz is too large for the C3; a minimal shaper is the route, its flash cost to be measured.
+   Vendored HarfBuzz is too large for the C3 (+216 KB, upstream's closed #3721); upstream's port below is the route.
 3. **Storage:** shaped runs as glyph IDs and positions, with the logical text kept beside them for the dictionary,
    KOSync and search; a section file version bump. The TrueType engine already draws by glyph index.
 4. **Fonts:** Noto Sans and Serif per script in the Font Manager, with GSUB and GPOS kept (the CJK subsets drop them).
-   Bitmap `.cpfont` families cannot be shaped.
+   The TrueType engine shapes in place from the mapped tables, at any size, a reader's own fonts included. Bitmap
+   `.cpfont` families can be shaped too, but only by baking the GSUB closure's glyphs at private-use code points
+   (upstream's way); later, if ever.
 5. **Line breaking:** Hindi separates words with spaces, so today's breakers serve; a break never splits a syllable;
    the danda (। ॥) ends a sentence; Hindi hyphenation patterns exist (optional).
 6. **UI:** book titles in the library need the same shaping (step 5's visual strings). A Hindi UI translation stays
@@ -68,9 +70,36 @@ Telugu, Kannada, Malayalam, Sinhala, Khmer, Myanmar and Tibetan, and Arabic):
 Thai and Lao need a further piece: no spaces between words, so line breaking needs a word dictionary (a CJK-like
 problem with a large data cost).
 
-**Next step.** After CJK: a gap analysis and a spike, as the CJK font work had. Shape a Devanagari paragraph on the
-host with the TrueType engine and a minimal shaper, compare it with HarfBuzz as the oracle, measure the flash cost,
-then decide the step-2 question above.
+### Upstream's shaper (crosspoint-reader #3787)
+
+Looked at on 2026-10-29: "feat: add Indic language support without HarfBuzz", open (head `0fbd1575`, 2026-10-23),
+run as an "Indic beta" on upstream's web flasher since 2026-10-14; users report Kannada and Bengali on the X3 and
+Malayalam on the X4 Pro.
+- **`lib/OtShaper`** (~5.4k lines): a hand port of HarfBuzz 14.5's Indic and Universal (USE) shapers and of its whole
+  GSUB (types 1-8) and GPOS (1-9) engine, with syllable machines and categories generated from HarfBuzz. Scripts:
+  Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam, Sinhala. The author reports
+  33.7M of 33.7M test lines identical to HarfBuzz. Flash +58.4 KB on the C3 (+59,094 B measured on an X3).
+- **Shaping at layout**, the shaped form stored beside the logical text (as section 5.3 plans); titles and UI strings
+  shaped per draw with a run cache. Shaped forms are UTF-8 private-use tokens (glyph U+F0000+gid, advance, offset;
+  4-12 bytes a glyph); mark offsets are whole pixels.
+- **Fonts on the C3:** bitmap `.cpfont` with the GSUB closure rasterised at U+F0000+gid plus a layout font copied into
+  the `spiffs` partition (`FlashBlobCache`); TrueType shaping only on PSRAM boards.
+- **Open objection:** vectors `reserve()` after a heap check only, so a failed allocation aborts instead of falling
+  back (against our nothrow rule).
+
+**What to do with it** (an analysis, not yet a decision): port `OtShaper` with nothrow fixed buffers and its tables
+built from our `FontBytes` views (no table copy, no `spiffs`); take the script tables, the syllable-safe breaks and the
+tests (HarfBuzz oracle, ~4k strings a script, allocation-refusal and corrupt-font tests, the table generators); skip
+`FlashBlobCache` and the bitmap path for now; decide between their tokens and compact glyph records. Key glyph IDs in
+section files on the font's content (their `3b047543`). Attribution: crosspoint #3787 @ `0fbd1575` (MIT) and
+HarfBuzz's MIT notice, which must ship with the port. The engine already has every lookup type, so one shaper for
+Arabic (a joining module plus right-to-left) and the Indic scripts is likely; section 5.6's "hundreds of KB" premise
+for a shaper is out of date.
+
+**Next step.** After CJK, and preferably once #3787 has merged with its allocation fix: port and measure. Run
+`OtShaper` on the host over our `FontBytes` with the Noto Devanagari faces, diff against HarfBuzz with upstream's
+corpus, link it into `default` for the real flash delta, measure its heap on the X3, then decide the step-2 question
+above.
 
 ## Parsed in step 0, read later
 
