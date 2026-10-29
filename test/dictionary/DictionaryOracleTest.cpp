@@ -74,6 +74,9 @@ bool isPrefix(const std::string& w, const std::string& run) {
 
 TEST(DictionaryOracle, RandomDictionaries) {
   constexpr int seeds = 40;
+  // Runs whose longest match came from the .idx or only from the .syn: both paths must be exercised.
+  int idxRuns = 0;
+  int synRuns = 0;
 
   for (int seed = 0; seed < seeds; seed++) {
     std::mt19937 rng(static_cast<uint32_t>(seed) * 2654435761u + 7u);
@@ -171,8 +174,10 @@ TEST(DictionaryOracle, RandomDictionaries) {
         EXPECT_EQ(r, Dictionary::LookupResult::Found) << ctx;
         EXPECT_EQ(m.hits[0].runBytes, best) << ctx;
         if (idxBest == best) {
+          idxRuns++;
           EXPECT_EQ(m.hits[0].headword, run.substr(0, best)) << ctx;
         } else {
+          synRuns++;
           const auto& targets = synTargets[run.substr(0, best)];
           bool ok = false;
           for (size_t t : targets) ok = ok || heads[t].word == m.hits[0].headword;
@@ -183,7 +188,9 @@ TEST(DictionaryOracle, RandomDictionaries) {
       std::set<uint32_t> locs;
       for (uint8_t i = 0; i < m.count; i++) {
         const DictPrefixHit& h = m.hits[i];
-        if (i > 0) EXPECT_LT(h.runBytes, m.hits[i - 1].runBytes) << ctx;
+        if (i > 0) {
+          EXPECT_LT(h.runBytes, m.hits[i - 1].runBytes) << ctx;
+        }
         const auto it = occ.find(h.headword);
         ASSERT_NE(it, occ.end()) << ctx << " unknown headword " << h.headword;
         const size_t first = it->second.front();
@@ -203,6 +210,8 @@ TEST(DictionaryOracle, RandomDictionaries) {
     }
     fs::remove_all(dir);
   }
+  EXPECT_GT(idxRuns, 0);
+  EXPECT_GT(synRuns, 0);
 }
 
 }  // namespace
