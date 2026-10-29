@@ -69,9 +69,54 @@ On the very first lookup with a dictionary (and again whenever the `.idx` or `.s
 3. **Stemming** — still no match: common English word forms are retried automatically: possessives and plurals (`dogs` → `dog`, `stories` → `story`) and verb endings (`walked` → `walk`, `running` → `run`, `making` → `make`). A French elision with no entry of its own is looked up by the word after its apostrophe (`l’histoire` → `histoire`, `qu’après` → `après`); one the dictionary carries (`d'accord`) is found as it is.
 4. **Not found** — a short popup appears and you return to word selection.
 
+### Chinese, Japanese and Korean
+
+Chinese and Japanese are written without spaces, so the word screen steps through them a character at a time (a punctuation mark rides along with the character before it). A lookup that starts on a Han or kana character therefore looks for the longest word the dictionary has at that point rather than the character alone:
+
+1. Put the cursor on the **first character** of the word. On the second character of 大学 the search starts at 学.
+2. After a moment the highlight grows over the longest dictionary word that starts there, with no extra press: on 大 in 大学生活, over 大学生. Moving on before then costs nothing; the search gives way to the button.
+3. **Confirm** shows every entry the dictionary has for that word (CC-CEDICT's 行 three times: xíng, háng and héng), then up to two shorter words that start there too (大学, 大), as far as the 64 KB definition limit allows. Each entry stands under its own word, in your reading font. On a touch board a tap inside the highlight looks it up as well.
+
+Where a word starts and ends:
+- The search reads up to 12 characters from the cursor, across words and line ends, and stops at punctuation (。、「」（）…) or at anything that is not Han or kana. 々, 〆 and the long vowel mark ー count as letters, so コーヒー stays whole.
+- Korean is written with spaces, so a lookup on Hangul takes the word under the cursor and finds the longest entry the word starts with: 학교에서 finds 학교, without the particle.
+- A ruby reading (furigana) is not part of the text: on 吾輩 with わがはい above it, the search reads 吾輩 and on, and the highlight covers the base characters.
+- A word lists at most eight of its entries.
+
+What it does not do:
+- **No deinflection.** 食べた has no entry of its own and finds 食; 먹었습니다 finds nothing in CC-KEDICT. Each entry is headed by the word it is for, so you can see what was matched.
+- **The other script only where the dictionary has it.** The search covers the dictionary's word index and its `.syn`, and none of the Latin fallbacks above (no stemming, no lowercase retry). CC-CEDICT lists every traditional form as a synonym of its simplified headword, so 學校 finds 学校; a dictionary without them finds nothing for text in the other script.
+- **One headword per synonym.** A synonym that several headwords share shows the first of them only. JMdict files a kana reading as a synonym of each kanji spelling, so はし, a reading of 橋, 箸, 端, 嘴 and four more, shows 嘴.
+- **Characters your reading font lacks.** CC-CEDICT writes each word in both scripts (大学生 / 大學生). A font made for one region (Simplified Chinese, Japanese) lacks some characters of the other and draws them as a box; a font that carries both draws them all.
+- **Greedy matches.** The longest word is not always the one the sentence means: 研究生命 starts with 研究生 (graduate student), not 研究 (research). The shorter matches follow it in the definition.
+
+**Where to get them.** None of these ship as StarDict; [PyGlossary](https://github.com/ilius/pyglossary) converts them on a computer. Convert to a plain `.dict` (`dictzip=False`): it needs no 32 KB inflate window, which is hardest to find on a dense CJK page.
+
+| Dictionary | Language | Licence | Source |
+|---|---|---|---|
+| CC-CEDICT | Chinese → English; simplified headwords, traditional forms as synonyms, pinyin | CC BY-SA 4.0 | `cedict_1_0_ts_utf-8_mdbg.txt.gz` from [MDBG](https://www.mdbg.net/chinese/dictionary?page=cc-cedict) |
+| JMdict (JMdict_e) | Japanese → English; kanji headwords (kana for words written in kana), kana readings as synonyms | EDRDG licence (CC BY-SA 4.0) | `JMdict_e.gz` from the [EDRDG](http://ftp.edrdg.org/pub/Nihongo/) |
+| CC-KEDICT | Korean → English | CC BY-SA 3.0 | `kedict.yml` from [mhagiwara/cc-kedict](https://github.com/mhagiwara/cc-kedict) |
+
+```
+pip install pyglossary lxml pyyaml      # without lxml the EDICT2 and JMDict readers are skipped; pyyaml is for CC-KEDICT
+gzip -d cedict_1_0_ts_utf-8_mdbg.txt.gz JMdict_e.gz
+pyglossary cedict_1_0_ts_utf-8_mdbg.txt cedict/cedict.ifo --read-format=EDICT2 --write-format=Stardict --read-options="colorize_tones=False" --write-options="dictzip=False"
+pyglossary JMdict_e jmdict/jmdict.ifo --read-format=JMDict --write-format=Stardict --write-options="dictzip=False"
+pyglossary kedict.yml kedict/kedict.ifo --read-format=cc-kedict --write-format=Stardict --write-options="dictzip=False"
+```
+
+Run the `pyglossary` command (`python -m pyglossary` does not start the converter). The conversions keep the entries of one word apart (CC-CEDICT's 行 is three entries, JMdict's 上 four), and write HTML definitions (`sametypesequence=h`); `colorize_tones=False` keeps CC-CEDICT's pinyin uncoloured. Then install each folder as above. Measured on the X4 (October 2026 releases):
+
+| Dictionary | Words | Synonyms | `.idx` | `.syn` | `.dict` | First open ("Indexing dictionary…") |
+|---|---|---|---|---|---|---|
+| CC-CEDICT | 125,331 | 77,970 | 2.1 MB | 1.1 MB | 56.5 MB | 1.5 s (`.idx` 0.97 s, `.syn` 0.49 s) |
+| JMdict_e | 218,975 | 550,503 | 4.7 MB | 15.8 MB | 62.0 MB | 9.2 s (`.idx` 2.1 s, `.syn` 7.1 s) |
+| CC-KEDICT | 13,669 | none | 0.2 MB | none | 1.8 MB | 0.1 s |
+
 ## The Definition Screen
 
-When a word is found, the definition screen shows the matched headword at the top and the definition text below, with a page counter for long definitions.
+When a word is found, the definition screen shows the matched headword at the top and the definition text below, with a page counter for long definitions. A lookup on Chinese, Japanese or Korean text puts each entry's word in the body instead, above its text; the header keeps the dictionary name and the page counter.
 
 HTML dictionaries that declare `sametypesequence=h` use the EPUB text-layout engine for semantic formatting such as headings, bold, italics, lists, and line breaks. Images and CSS styling are ignored. Definitions that are too large or cannot be laid out within the available memory fall back to plain text.
 
@@ -80,9 +125,9 @@ HTML dictionaries that declare `sametypesequence=h` use the EPUB text-layout eng
 - **Confirm** — look the same word up in the next installed dictionary, cycling through them. Only offered when more than one dictionary is installed; the current one is named to the right of the headword. The choice is remembered, so later lookups use it too.
 - **Back** — return to word selection
 
-Definitions render in Noto Sans at a fixed size rather than in your reading font. That is the one font carrying the phonetic alphabet — a dictionary's pronunciation notation needs about 100 codepoints that no reading font here ships, and putting them in every font and size would cost roughly five times the flash. Any character still missing falls back to the closest available shape (schwa as `e`, the primary-stress mark as an apostrophe) rather than an empty box.
+Definitions of Latin-script words render in Noto Sans at a fixed size rather than in your reading font. That is the one font carrying the phonetic alphabet — a dictionary's pronunciation notation needs about 100 codepoints that no reading font here ships, and putting them in every font and size would cost roughly five times the flash. Any character still missing falls back to the closest available shape (schwa as `e`, the primary-stress mark as an apostrophe) rather than an empty box.
 
-
+A lookup that started on Chinese, Japanese or Korean text renders its definition in your reading font instead: Noto Sans has no Han, kana or Hangul, and the CJK font the book is read in has them, pinyin's tone marks included.
 
 ## Where to find dictionaries
 
@@ -97,3 +142,4 @@ Definitions render in Noto Sans at a fixed size rather than in your reading font
 - [Fictionaries](https://fictionary.gumroad.com/) provides dictionaries for various speculative fiction books and series.
 - [World Factbooks Archive](https://github.com/MilkMp/CIA-World-Factbooks-Archive-1990-2025) provides 36 years of CIA's World Factbook dictionaries in StarDict format.
 - [StarDict-Hebrew](https://github.com/Uri-Tauber/StarDict-Hebrew) Hebrew-English StarDict versions of Babylon dictionaries.
+- Chinese, Japanese and Korean: CC-CEDICT, JMdict and CC-KEDICT, converted with PyGlossary as [Chinese, Japanese and Korean](#chinese-japanese-and-korean) describes.
