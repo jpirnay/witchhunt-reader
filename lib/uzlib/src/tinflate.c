@@ -544,7 +544,7 @@ static int tinf_inflate_uncompressed_block(TINF_DATA *d)
         invlength = uzlib_get_byte(d);
         invlength += 256 * uzlib_get_byte(d);
         /* check length */
-        if (length != (~invlength & 0x0000ffff)) return TINF_DATA_ERROR;
+        if (d->eof || length != (~invlength & 0x0000ffff)) return TINF_DATA_ERROR;
 
         /* increment length to properly return TINF_DONE below, without
            producing data at the same time */
@@ -559,6 +559,10 @@ static int tinf_inflate_uncompressed_block(TINF_DATA *d)
     }
 
     unsigned char c = uzlib_get_byte(d);
+    /* The input ended inside the block (a stream cut short, or a read that failed): its rest is
+       missing, not zeros. Local change: uzlib wrote zeros up to the block's stated length, so a
+       failed read in an archive's last stored block passed as a whole entry of the right size. */
+    if (d->eof) return TINF_DATA_ERROR;
     TINF_PUT(d, c);
     return TINF_OK;
 }
