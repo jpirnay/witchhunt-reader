@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "../epub_pipeline/LogObserver.h"
 #include "EpdFontData.h"
 #include "SdCardFont.h"
 
@@ -178,6 +179,34 @@ class CountingArrays {
   ~CountingArrays() { countingArrays = false; }
 };
 
+std::vector<std::string> sdcfLines;  // "<level> <message>" of every SDCF line while observed
+void keepSdcfLine(const char* level, const char* origin, const char* message) {
+  if (std::strcmp(origin, "SDCF") == 0) sdcfLines.push_back(std::string(level) + " " + message);
+}
+int countLines(const char* level, const char* fragment = "") {
+  int n = 0;
+  for (const auto& line : sdcfLines) n += line.rfind(level, 0) == 0 && line.find(fragment) != std::string::npos;
+  return n;
+}
+
+// The prewarm-retry tests' font: 2000-byte bitmaps, and what a whole prewarm takes in an arena.
+struct RetryFixture {
+  static constexpr uint16_t kBitmap = 2000;
+  std::string path;
+  size_t fullUse = 0;
+  RetryFixture() : path(writeTemp(buildFont(kBitmap, /*kerning=*/false))) {
+    BuildArena probe(64 * 1024);
+    EXPECT_TRUE(probe.valid());
+    SdCardFont font;
+    font.useArena(&probe);
+    EXPECT_TRUE(font.load(path.c_str()));
+    EXPECT_EQ(0, font.prewarm("ABCD", 0x01));
+    fullUse = probe.used();
+  }
+  // An arena size that leaves `room` bytes where the five bitmaps go.
+  size_t arenaBytesWithRoom(const size_t room) const { return fullUse - GLYPHS * kBitmap + room; }
+};
+
 TEST(SdFontArena, ArenaLoadMatchesHeapLoad) {
   const std::string path = writeTemp(buildFont(64, /*kerning=*/true));
   SdCardFont heap;
@@ -217,32 +246,55 @@ TEST(SdFontArena, ArenaModeAllocatesNoHeapArraysAndRewindsClean) {
 TEST(SdFontArena, PrewarmRetrySizesFromTheArenaRoom) {
   // 2000-byte bitmaps: big enough that the retry's 4 KB headroom still leaves room for one glyph,
   // which is what tells arena-based sizing apart from heap-based sizing.
-  constexpr uint16_t kBitmap = 2000;
-  const std::string path = writeTemp(buildFont(kBitmap, /*kerning=*/false));
-
-  size_t fullUse = 0;  // what a whole prewarm takes in an arena
-  {
-    BuildArena probe(64 * 1024);
-    ASSERT_TRUE(probe.valid());
-    SdCardFont font;
-    font.useArena(&probe);
-    ASSERT_TRUE(font.load(path.c_str()));
-    ASSERT_EQ(0, font.prewarm("ABCD", 0x01));
-    fullUse = probe.used();
-  }
-
+  RetryFixture fx;
   // Leave 7,500 bytes where the five bitmaps (10,000) go: the first attempt cannot fit, and
   // (7,500 - 4,096) / 2,000 = 1 glyph fits the retry.
-  BuildArena arena(fullUse - GLYPHS * kBitmap + 7500);
+  BuildArena arena(fx.arenaBytesWithRoom(7500));
   ASSERT_TRUE(arena.valid());
   SdCardFont font;
   font.useArena(&arena);
-  ASSERT_TRUE(font.load(path.c_str()));
+  ASSERT_TRUE(font.load(fx.path.c_str()));
   ESP.setMaxAllocHeap(0);  // the heap has nothing: a heap-sized retry would load no glyph at all
   const int missed = font.prewarm("ABCD", 0x01);
   ESP.setMaxAllocHeap(100 * 1024);
   EXPECT_GT(missed, 0) << "the first attempt was meant not to fit";
   EXPECT_LT(missed, static_cast<int>(GLYPHS)) << "the retry loaded nothing";
+}
+
+TEST(SdFontArena, ARetryThatKeepsGlyphsLogsNoError) {
+  // PrewarmRetrySizesFromTheArenaRoom's arena: the first attempt fails, the retry keeps 1 of the 5 glyphs.
+  RetryFixture fx;
+  BuildArena arena(fx.arenaBytesWithRoom(7500));
+  ASSERT_TRUE(arena.valid());
+  SdCardFont font;
+  font.useArena(&arena);
+  ASSERT_TRUE(font.load(fx.path.c_str()));
+  sdcfLines.clear();
+  setLogObserver(keepSdcfLine);
+  ESP.setMaxAllocHeap(0);
+  font.prewarm("ABCD", 0x01);
+  ESP.setMaxAllocHeap(100 * 1024);
+  setLogObserver(nullptr);
+  EXPECT_EQ(0, countLines("ERR"));
+  EXPECT_EQ(1, countLines("INF", "kept 1 of 5 glyphs"));
+}
+
+TEST(SdFontArena, ARetryThatKeepsNothingLogsOneError) {
+  // 3,000 bytes of room is under the retry's 4,096-byte headroom: not one glyph fits.
+  RetryFixture fx;
+  BuildArena arena(fx.arenaBytesWithRoom(3000));
+  ASSERT_TRUE(arena.valid());
+  SdCardFont font;
+  font.useArena(&arena);
+  ASSERT_TRUE(font.load(fx.path.c_str()));
+  sdcfLines.clear();
+  setLogObserver(keepSdcfLine);
+  ESP.setMaxAllocHeap(0);
+  font.prewarm("ABCD", 0x01);
+  ESP.setMaxAllocHeap(100 * 1024);
+  setLogObserver(nullptr);
+  EXPECT_EQ(1, countLines("ERR"));
+  EXPECT_EQ(1, countLines("ERR", "kept no glyphs"));
 }
 
 TEST(SdFontArena, ArenaTooSmallForTheLoadFailsCleanly) {
