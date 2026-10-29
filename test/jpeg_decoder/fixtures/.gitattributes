@@ -1,0 +1,4 @@
+# Fixtures are compared byte for byte: never convert their line endings. A small .pgm holds no NUL
+# byte, so git would otherwise take it for text.
+*.pgm binary
+*.jpg binary

@@ -18,7 +18,7 @@
 //   Emergency      no decode fits, even with every TrueType family unloaded: the undecoded images are drawn as "not
 //                  enough memory" boxes, the text as usual, and the status bar says the page is degraded
 //
-// A decode that settled for a coarse picture for lack of memory (a progressive JPEG's DC preview, or a coarser scale:
+// A decode that settled for a coarse picture for lack of memory (a progressive JPEG at a coarser scale, down to 1/8:
 // PixelCache::PXC_MAGIC_COARSE) climbs once, to the light step, and only where the workspace its next finer scale
 // needs can be had there (image_scratch::coarseNeedFits): checked before the step, with what the step frees counted,
 // and again before its decode. Never to the heavy step: a picture is drawn either way, and is not worth the TrueType

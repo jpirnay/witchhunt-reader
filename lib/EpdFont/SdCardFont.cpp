@@ -1265,8 +1265,12 @@ int SdCardFont::prewarm(const char* utf8Text, uint8_t styleMask, bool metadataOn
         fit /= 2;
       }
       if (missedForStyle == PREWARM_ARENA_TOO_LARGE) {
+        LOG_ERR("SDCF", "Prewarm style %u kept no glyphs: no block for any of %u", static_cast<unsigned>(si),
+                static_cast<unsigned>(cpCount));
         missedForStyle = static_cast<int>(cpCount);  // nothing resident, same as before
       } else {
+        LOG_INF("SDCF", "Prewarm style %u kept %u of %u glyphs after the arena retry", static_cast<unsigned>(si),
+                static_cast<unsigned>(fit), static_cast<unsigned>(cpCount));
         missedForStyle += static_cast<int>(cpCount - fit);  // the dropped suffix is missing too
       }
     }
@@ -1708,7 +1712,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
 
       s.miniBitmap = allocArray<uint8_t>(totalBitmapSize > 0 ? totalBitmapSize : 1);
       if (!s.miniBitmap) {
-        LOG_ERR("SDCF", "Failed to allocate mini bitmap (%u bytes) for style %u", totalBitmapSize, styleIdx);
+        LOG_DBG("SDCF", "Failed to allocate mini bitmap (%u bytes) for style %u", totalBitmapSize, styleIdx);
         file.close();
         freeArray(mappings);
         freeStyleMiniData(s);

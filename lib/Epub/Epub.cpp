@@ -2144,14 +2144,21 @@ class BufferedExtractSink : public Print {
       : writer_(file, buffer, buffer ? capacity : 0) {}
 
   size_t write(const uint8_t byte) override { return write(&byte, 1); }
-  size_t write(const uint8_t* data, const size_t size) override { return writer_.write(data, size) ? size : 0; }
+  size_t write(const uint8_t* data, const size_t size) override {
+    if (!writer_.write(data, size)) return 0;
+    accepted_ += size;
+    return size;
+  }
 
   // Named drain() rather than flush(): Print::flush() is virtual with a void return, and this
   // one's result decides whether the extract succeeded.
   bool drain() { return writer_.flush(); }
+  // Bytes taken for the file: the extract's size once drain() succeeded.
+  size_t accepted() const { return accepted_; }
 
  private:
   serialization::BufferedFileWriter writer_;
+  size_t accepted_ = 0;
 };
 
 }  // namespace
@@ -2162,6 +2169,14 @@ bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string&
   // (ImageBlock::ensureExtracted), and a truncated JPEG read as "no SOF marker" on every visit
   // of its page -- an image lost until someone deleted the file by hand (X3 2026-09-25).
   const std::string partPath = destPath + ".part";
+  // The size the extract must reach. The stream paths do not guarantee it: the arena path's
+  // inflate stops where the DEFLATE stream ends, whatever the entry's size says. A short file
+  // would be trusted as the entry on every later visit, like the truncated one above.
+  size_t entrySize = 0;
+  if (!getItemSize(itemHref, &entrySize)) {
+    LOG_ERR("EBP", "No entry to extract: %s", itemHref.c_str());
+    return false;
+  }
   FsFile destFile;
   if (!Storage.openFileForWrite("EBP", partPath, destFile)) {
     LOG_ERR("EBP", "Failed to open dest for extract: %s", partPath.c_str());
@@ -2190,11 +2205,17 @@ bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string&
     // Drain before the file is flushed/closed, and let a failed final write fail the extract:
     // a short file would otherwise pass as a complete one and be decoded as garbage.
     if (!sink.drain()) ok = false;
+    if (ok && sink.accepted() != entrySize) {
+      LOG_ERR("EBP", "Extract is %u bytes, entry is %u: %s", static_cast<unsigned>(sink.accepted()),
+              static_cast<unsigned>(entrySize), itemHref.c_str());
+      ok = false;
+    }
   }
   if (writeBlock.valid()) arena->release(writeBlock);
 
   destFile.flush();
-  destFile.close();
+  // A close that fails left the file's size on the card unwritten: as short as a failed write.
+  if (!destFile.close()) ok = false;
   if (!ok) {
     Storage.remove(partPath.c_str());
     return false;

@@ -5575,7 +5575,7 @@ bool EpubReaderActivity::maybeRestartForFragmentedHeap(const uint32_t freeHeap, 
       LOG_ERR("ERS", "Pre-reboot image warm pass: freed primary fb, scratch=%u bytes", scratchSize);
       const bool preRebootForceLoad = forceLoadLargeImages || !SETTINGS.largeImagePlaceholder;
       // Every framebuffer is released here, so this is the one pass with room for the full
-      // progressive workspace: a .pxc written at a coarser scale (or as the DC preview) because
+      // progressive workspace: a .pxc written at a coarser scale (down to 1/8, resized) because
       // the heap was short at the time is decoded again now, not replayed as it is.
       section->warmAllImageCaches(0, 0, preRebootForceLoad, /*monochromeOutput=*/true, /*alsoWarmGrayscale=*/false,
                                   /*redecodeCoarse=*/true);
