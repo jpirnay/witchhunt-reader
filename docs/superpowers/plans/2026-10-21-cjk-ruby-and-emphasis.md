@@ -10,7 +10,7 @@
 
 **Spec:**
 - `docs/superpowers/specs/2026-10-16-cjk-layout-design.md` section 7 (ruby). It is on branch `docs/cjk-layout-design`, commit `7e1136008`, not on master; read it with `git show 7e1136008:docs/superpowers/specs/2026-10-16-cjk-layout-design.md`.
-- `docs/superpowers/specs/2026-10-19-cjk-a3-typography-design.md` section 9 (ruby spacing, emphasis dots).
+- `docs/design/cjk-typography.md` section 9 (ruby spacing, emphasis dots).
 - `docs/future_work/cjk.md`, "Ruby (furigana) (PR B)" (the constraints).
 - Replayed against master `095f7d667` (2026-10-22, after #547 test-suite cleanup, #548 synthetic bold, #549 web bundle identity). First checked against `d2594561d` and `upstream/develop` `f8936ba67` (2026-10-21).
 

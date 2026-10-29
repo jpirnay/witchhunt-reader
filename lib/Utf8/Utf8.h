@@ -4,6 +4,9 @@
 #include <string>
 #define REPLACEMENT_GLYPH 0xFFFD
 
+// Byte length of the UTF-8 sequence lead byte `c` starts; 1 for ASCII and for a byte that starts
+// none (a continuation byte, 0xF8-0xFF), which utf8NextCodepoint() also steps over by one.
+int utf8CodepointLen(unsigned char c);
 uint32_t utf8NextCodepoint(const unsigned char** string);
 // Append `cp` encoded as UTF-8 (one to four bytes).
 void utf8AppendCodepoint(std::string& out, uint32_t cp);

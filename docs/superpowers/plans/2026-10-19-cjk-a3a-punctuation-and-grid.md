@@ -8,7 +8,7 @@
 
 **Tech Stack:** C++17 firmware (PlatformIO, ESP32-C3/S3), host tests with GoogleTest/CMake (`test/`), Python fixture generators (`test/epubs/`).
 
-**Spec:** `docs/superpowers/specs/2026-10-19-cjk-a3-typography-design.md` (this branch). It was built from a prototype (`proto/cjk-a3`, worktree `C:/tmp/wt-cjk-a3-proto`); every code block below is cut from it, and the prototype passes every test this plan names.
+**Spec:** `docs/design/cjk-typography.md` (written in `docs/superpowers/specs/` on this branch; moved by A3b). It was built from a prototype (`proto/cjk-a3`, worktree `C:/tmp/wt-cjk-a3-proto`); every code block below is cut from it, and the prototype passes every test this plan names.
 
 ## Global Constraints
 

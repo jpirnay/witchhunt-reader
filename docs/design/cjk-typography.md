@@ -1,9 +1,6 @@
 # CJK typography (PR A3) and per-language text rules: design
 
-Status (2026-10-19): draft for review.
-
-Working material, like every spec here: when the work merges, lasting parts move to reference docs, open
-items to `docs/future_work/cjk.md`, and this file is deleted.
+Status: Shipped: A3a #520, A3b #575. Design record; the code is the authority.
 
 ## 1. Why
 

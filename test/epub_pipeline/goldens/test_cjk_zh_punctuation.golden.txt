@@ -295,59 +295,59 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=150 s=0 z=100 t=行
    W x=166 s=0 z=100 t=尾
    W x=182 s=0 z=100 t=。
-  LINE y=311 x=0 align=0 mult=1.000 hfid=0 words=23
+  LINE y=311 x=0 align=0 mult=1.000 hfid=0 words=21
    W x=22 s=0 z=100 t=价
    W x=38 s=0 z=100 t=格
    W x=55 s=0 z=100 t=从
-   W x=71 s=0 z=100 t=12
-   W x=85 s=0 z=100 t=元
-   W x=102 s=0 z=100 t=涨
-   W x=118 s=0 z=100 t=到
-   W x=135 s=0 z=100 t=了
-   W x=151 s=0 z=100 t=15
-   W x=168 s=0 z=100 t=元
-   W x=184 s=0 z=100 t=，
-   W x=201 s=0 z=100 t=涨
-   W x=217 s=0 z=100 t=幅
-   W x=234 s=0 z=100 t=是
-   W x=250 s=0 z=100 t=25%
-   W x=275 s=0 z=100 t=。
-   W x=292 s=0 z=100 t=我
-   W x=309 s=0 z=100 t=们
-   W x=325 s=0 z=100 t=用
-   W x=342 s=0 z=100 t=Python
-   W x=404 s=0 z=100 t=写
-   W x=421 s=0 z=100 t=了
-   W x=438 s=0 z=100 t=一
-  LINE y=335 x=0 align=0 mult=1.000 hfid=0 words=25
-   W x=6 s=0 z=100 t=个
-   W x=22 s=0 z=100 t=小
-   W x=38 s=0 z=100 t=程
-   W x=54 s=0 z=100 t=序
-   W x=70 s=0 z=100 t=，
-   W x=87 s=0 z=100 t=统
-   W x=103 s=0 z=100 t=计
-   W x=119 s=0 z=100 t=了
-   W x=136 s=0 z=100 t=2020
-   W x=174 s=0 z=100 t=年
-   W x=190 s=0 z=100 t=到
-   W x=207 s=0 z=100 t=2024
-   W x=242 s=0 z=100 t=年
-   W x=258 s=0 z=100 t=的
-   W x=275 s=0 z=100 t=数
-   W x=291 s=0 z=100 t=据
-   W x=307 s=0 z=100 t=，
-   W x=323 s=0 z=100 t=结
-   W x=340 s=0 z=100 t=果
-   W x=356 s=0 z=100 t=和
-   W x=372 s=0 z=100 t=预
-   W x=389 s=0 z=100 t=想
-   W x=405 s=0 z=100 t=的
-   W x=421 s=0 z=100 t=差
-   W x=438 s=0 z=100 t=不
-  LINE y=359 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=6 s=0 z=100 t=多
-   W x=22 s=0 z=100 t=。
+   W x=76 s=0 z=100 t=12
+   W x=94 s=0 z=100 t=元
+   W x=111 s=0 z=100 t=涨
+   W x=128 s=0 z=100 t=到
+   W x=145 s=0 z=100 t=了
+   W x=166 s=0 z=100 t=15
+   W x=187 s=0 z=100 t=元
+   W x=203 s=0 z=100 t=，
+   W x=219 s=0 z=100 t=涨
+   W x=236 s=0 z=100 t=幅
+   W x=253 s=0 z=100 t=是
+   W x=274 s=0 z=100 t=25%
+   W x=299 s=0 z=100 t=。
+   W x=316 s=0 z=100 t=我
+   W x=333 s=0 z=100 t=们
+   W x=350 s=0 z=100 t=用
+   W x=371 s=0 z=100 t=Python
+   W x=438 s=0 z=100 t=写
+  LINE y=335 x=0 align=0 mult=1.000 hfid=0 words=24
+   W x=6 s=0 z=100 t=了
+   W x=22 s=0 z=100 t=一
+   W x=38 s=0 z=100 t=个
+   W x=55 s=0 z=100 t=小
+   W x=71 s=0 z=100 t=程
+   W x=87 s=0 z=100 t=序
+   W x=103 s=0 z=100 t=，
+   W x=120 s=0 z=100 t=统
+   W x=136 s=0 z=100 t=计
+   W x=152 s=0 z=100 t=了
+   W x=173 s=0 z=100 t=2020
+   W x=215 s=0 z=100 t=年
+   W x=231 s=0 z=100 t=到
+   W x=252 s=0 z=100 t=2024
+   W x=291 s=0 z=100 t=年
+   W x=307 s=0 z=100 t=的
+   W x=324 s=0 z=100 t=数
+   W x=340 s=0 z=100 t=据
+   W x=356 s=0 z=100 t=，
+   W x=372 s=0 z=100 t=结
+   W x=389 s=0 z=100 t=果
+   W x=405 s=0 z=100 t=和
+   W x=421 s=0 z=100 t=预
+   W x=438 s=0 z=100 t=想
+  LINE y=359 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=6 s=0 z=100 t=的
+   W x=22 s=0 z=100 t=差
+   W x=38 s=0 z=100 t=不
+   W x=54 s=0 z=100 t=多
+   W x=70 s=0 z=100 t=。
   LINE y=383 x=0 align=0 mult=1.000 hfid=0 words=26
    W x=22 s=0 z=100 t=　
    W x=38 s=0 z=100 t=段

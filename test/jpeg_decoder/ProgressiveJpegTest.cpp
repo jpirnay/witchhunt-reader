@@ -7,7 +7,8 @@
 //
 // Fixtures (fixtures/generate_fixtures.py) use libjpeg's successive-approximation scan script:
 // interleaved DC first + refinement, spectral-selection AC first scans with Al > 0, and AC
-// refinement scans -- every decode path. One of them adds restart markers every 3 units.
+// refinement scans -- every decode path. One of them adds restart markers every 3 units, and
+// prog_420_dc_first.jpg completes DC in its first scan, as real covers do.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -57,13 +58,14 @@ Gray loadPgm(const std::string& path) {
 // forward-transformed, its top-left n x n coefficients inverted with the n-point IDCT (n = 8 >> s),
 // over the floor(w >> s) x floor(h >> s) output. Edge blocks are padded by replicating the last
 // row/column, which is what the encoder did.
-Gray reducedReference(const Gray& full, const int shift) {
+// `wholeBlocks`: every block, the partial ones at the right and bottom edges too.
+Gray reducedReference(const Gray& full, const int shift, const bool wholeBlocks = false) {
   const int n = 8 >> shift;
   const double pi = 3.14159265358979323846;
   auto c = [](const int k) { return k == 0 ? 0.70710678118654752 : 1.0; };
   Gray out;
-  out.w = full.w >> shift;
-  out.h = full.h >> shift;
+  out.w = wholeBlocks ? (full.w + 7) / 8 * n : full.w >> shift;
+  out.h = wholeBlocks ? (full.h + 7) / 8 * n : full.h >> shift;
   out.px.resize(static_cast<size_t>(out.w) * out.h);
   for (int by = 0; by * 8 < full.h; ++by) {
     for (int bx = 0; bx * 8 < full.w; ++bx) {
@@ -165,6 +167,10 @@ TEST_P(ProgressiveJpegMatchesLibjpeg, AtEveryScale) {
   Capture capture;
   const auto result = decode(c.jpg, shift, capture);
   ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  if (expected.h == 0) {  // floor(h >> s) is 0: a picture shorter than 2^s pixels has no row
+    EXPECT_EQ(capture.bands, 0);
+    return;
+  }
   EXPECT_TRUE(capture.orderOk) << "bands must arrive in order, full width";
   ASSERT_EQ(capture.image.w, expected.w);
   ASSERT_EQ(capture.image.h, expected.h);
@@ -184,6 +190,76 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegMatchesLibjpeg,
                                                           Case{"prog_full_gray.jpg", "prog_full_gray.y.pgm"},
                                                           Case{"prog_full_444_rst.jpg", "prog_full_444_rst.y.pgm"}),
                                           testing::Values(0, 1, 2, 3)));
+
+// The Free-Ink SDK decoder's test matrix (see generate_fixtures.py): 4:2:2 with restarts inside MCU
+// rows, a restart at every MCU row, grayscale with restarts, and an image smaller than one MCU.
+INSTANTIATE_TEST_SUITE_P(FreeInkMatrix, ProgressiveJpegMatchesLibjpeg,
+                         testing::Combine(testing::Values(Case{"prog_422_rst.jpg", "prog_422_rst.y.pgm"},
+                                                          Case{"prog_420_rst_row.jpg", "prog_420_rst_row.y.pgm"},
+                                                          Case{"prog_gray_rst.jpg", "prog_gray_rst.y.pgm"},
+                                                          Case{"prog_tiny_9x5.jpg", "prog_tiny_9x5.y.pgm"}),
+                                          testing::Values(0, 1, 2, 3)));
+
+// DC complete in the first scan (an interleaved DC scan at Al = 0, no DC refinement), the layout of
+// the real covers measured. Its coefficients are prog_full_420.jpg's, and so is its reference.
+INSTANTIATE_TEST_SUITE_P(DcInTheFirstScan, ProgressiveJpegMatchesLibjpeg,
+                         testing::Combine(testing::Values(Case{"prog_420_dc_first.jpg", "prog_full_420.y.pgm"}),
+                                          testing::Values(0, 1, 2, 3)));
+
+// The same coefficients in another scan layout decode to the same rows, byte for byte.
+TEST(ProgressiveJpeg, AnotherScanLayoutOfTheSameCoefficientsDecodesAlike) {
+  for (const int shift : {0, 1, 2, 3}) {
+    Capture libjpegScript;
+    Capture dcFirst;
+    ASSERT_EQ(decode("prog_full_420.jpg", shift, libjpegScript), ProgressiveJpeg::Result::Ok);
+    ASSERT_EQ(decode("prog_420_dc_first.jpg", shift, dcFirst), ProgressiveJpeg::Result::Ok);
+    ASSERT_FALSE(dcFirst.image.px.empty());
+    EXPECT_TRUE(dcFirst.image.px == libjpegScript.image.px) << "at 1/" << (1 << shift);
+  }
+}
+
+// decodeResized() at the size of the 1/8 picture over every block: nothing to interpolate, so it is
+// the reduced reference of every block -- the partial ones at the right and bottom edges too, which
+// a 1/8 decode leaves out (floor(width / 8)). Leaving them out stretched the rest over the box and
+// put every sample up to a block away from where it belongs.
+class ProgressiveJpegResizedIdentity : public testing::TestWithParam<Case> {};
+
+TEST_P(ProgressiveJpegResizedIdentity, IsTheEighthOfEveryBlock) {
+  const Case& c = GetParam();
+  const Gray full = loadPgm(fixture(c.reference));
+  ASSERT_FALSE(full.px.empty());
+  const Gray expected = reducedReference(full, 3, /*wholeBlocks=*/true);
+  ASSERT_TRUE(full.w % 8 != 0 || full.h % 8 != 0) << "the fixture must have a partial block";
+
+  struct Rows {
+    Gray image;
+    static bool take(void* user, uint16_t y, const uint8_t* gray, uint16_t width) {
+      auto& r = *static_cast<Rows*>(user);
+      if (y != r.image.h) return false;
+      r.image.w = width;
+      r.image.px.insert(r.image.px.end(), gray, gray + width);
+      ++r.image.h;
+      return true;
+    }
+  } rows;
+  FsFile file;
+  ASSERT_TRUE(file.openForRead(fixture(c.jpg)));
+  ProgressiveJpeg::DecodeOptions options;
+  const auto result = ProgressiveJpeg::decodeResized(file, options, static_cast<uint16_t>(expected.w),
+                                                     static_cast<uint16_t>(expected.h), Rows::take, &rows);
+  file.close();
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  ASSERT_EQ(rows.image.w, expected.w);
+  ASSERT_EQ(rows.image.h, expected.h);
+  const Diff d = compare(rows.image, expected);
+  EXPECT_LT(d.mean, 0.6) << c.jpg;
+  EXPECT_LE(d.max, 12) << c.jpg;
+}
+
+INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegResizedIdentity,
+                         testing::Values(Case{"prog_full_420.jpg", "prog_full_420.y.pgm"},
+                                         Case{"prog_full_gray.jpg", "prog_full_gray.y.pgm"},
+                                         Case{"prog_full_444_rst.jpg", "prog_full_444_rst.y.pgm"}));
 
 TEST(ProgressiveJpeg, ProbeReportsGeometry) {
   FsFile file;
@@ -430,10 +506,11 @@ TEST_P(ProgressiveJpegCheckpoint, ResumesWithIdenticalRowsFromEveryStep) {
   std::remove(ckpt.c_str());
 }
 
+// 1/8 is a session of another kind, the DC scans alone (a smaller layout), so it is checkpointed too.
 INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegCheckpoint,
                          testing::Combine(testing::Values("prog_full_420.jpg", "prog_full_gray.jpg",
                                                           "prog_full_444_rst.jpg"),
-                                          testing::Values(0, 1)));
+                                          testing::Values(0, 1, 3)));
 
 // A checkpoint only resumes the decode it was taken of.
 TEST(ProgressiveJpeg, ResumeRefusesAForeignCheckpoint) {
@@ -600,6 +677,361 @@ TEST(ProgressiveJpeg, ACheckpointResumesWithOrWithoutTheReadWindows) {
   std::remove(ckpt.c_str());
 }
 
+// A seek the card fails inside the file is a failed read, not the end of the data. SdFat's seekSet
+// fails there when the FAT read of its cluster-chain walk does, and the banded decode seeks all the
+// time. Taken for the end, it cut the scan index short or padded a scan with zero bits, and the
+// decode could still report Ok: a wrong picture, cached like a whole one. Every offset a decode
+// seeks to is failed in turn: each run reports an I/O error, whatever the data it was left with
+// looked like (a converter retries other failures at 1/8 and caches what that draws), and the rows
+// it emitted before the failure are the clean decode's.
+struct SeekFault {
+  explicit SeekFault(const long offset) { FsFile::failSeekAt = offset; }
+  ~SeekFault() { FsFile::failSeekAt = -1; }
+  SeekFault(const SeekFault&) = delete;
+  SeekFault& operator=(const SeekFault&) = delete;
+};
+
+struct SeekLog {
+  std::vector<size_t> offsets;
+  SeekLog() { FsFile::seekLog = &offsets; }
+  ~SeekLog() { FsFile::seekLog = nullptr; }
+  SeekLog(const SeekLog&) = delete;
+  SeekLog& operator=(const SeekLog&) = delete;
+};
+
+TEST(ProgressiveJpeg, ASeekTheCardFailsInsideTheFileIsAnError) {
+  const char* const jpg = "prog_full_420.jpg";
+  const auto fileSize = static_cast<size_t>(std::filesystem::file_size(fixture(jpg)));
+  ProgressiveJpeg::ImageInfo info;
+  {
+    FsFile file;
+    ASSERT_TRUE(file.openForRead(fixture(jpg)));
+    ASSERT_EQ(ProgressiveJpeg::probe(file, info), ProgressiveJpeg::Result::Ok);
+    file.close();
+  }
+  for (const int shift : {0, 3}) {
+    for (const bool windows : {false, true}) {
+      SCOPED_TRACE(std::string("1/") + std::to_string(1 << shift) + (windows ? ", read windows" : ", shared buffer"));
+      std::vector<uint8_t> workspace(ProgressiveJpeg::workspaceBytes(info, static_cast<uint8_t>(shift)));
+      std::vector<uint8_t> readWindows(ProgressiveJpeg::scanWindowBytes());
+      const auto run = [&](Capture& capture) {
+        FsFile file;
+        EXPECT_TRUE(file.openForRead(fixture(jpg)));
+        ProgressiveJpeg::DecodeOptions options;
+        options.scaleShift = static_cast<uint8_t>(shift);
+        options.workspace = workspace.data();
+        options.workspaceSize = workspace.size();
+        if (windows) {
+          options.readWindows = readWindows.data();
+          options.readWindowsSize = readWindows.size();
+        }
+        const auto result = ProgressiveJpeg::decode(file, options, Capture::accept, &capture);
+        file.close();
+        return result;
+      };
+      Capture clean;
+      std::vector<size_t> offsets;
+      {
+        const SeekLog log;
+        ASSERT_EQ(run(clean), ProgressiveJpeg::Result::Ok);
+        offsets = log.offsets;
+      }
+      std::sort(offsets.begin(), offsets.end());
+      offsets.erase(std::unique(offsets.begin(), offsets.end()), offsets.end());
+      int failed = 0;
+      for (const size_t offset : offsets) {
+        if (offset >= fileSize) continue;  // past the end a seek fails by design: the end of the data
+        const SeekFault fault(static_cast<long>(offset));
+        Capture faulted;
+        const auto result = run(faulted);
+        ++failed;
+        EXPECT_EQ(result, ProgressiveJpeg::Result::IoError)
+            << "the seek to " << offset << " failed: " << ProgressiveJpeg::resultName(result);
+        const std::vector<uint8_t>& rows = faulted.image.px;
+        EXPECT_TRUE(rows.size() <= clean.image.px.size() &&
+                    std::equal(rows.begin(), rows.end(), clean.image.px.begin()))
+            << "the rows before the failed seek to " << offset << " are the clean decode's";
+      }
+      std::printf("[ pjpeg    ] %s 1/%d %s: %d seek offsets failed in turn\n", jpg, 1 << shift,
+                  windows ? "windows" : "shared", failed);
+      EXPECT_GT(failed, 0);
+    }
+  }
+}
+
+// ---- altered copies of a fixture, made on the fly -----------------------------------------------
+
+std::vector<uint8_t> readBytes(const std::string& path) {
+  std::vector<uint8_t> bytes;
+  FILE* fp = fopen(path.c_str(), "rb");
+  if (!fp) return bytes;
+  int c;
+  while ((c = fgetc(fp)) != EOF) bytes.push_back(static_cast<uint8_t>(c));
+  fclose(fp);
+  return bytes;
+}
+
+std::string writeTemp(const std::string& name, const std::vector<uint8_t>& bytes) {
+  const std::string path = tempPath(name);
+  FILE* fp = fopen(path.c_str(), "wb");
+  EXPECT_NE(fp, nullptr);
+  if (fp) {
+    fwrite(bytes.data(), 1, bytes.size(), fp);
+    fclose(fp);
+  }
+  return path;
+}
+
+// One scan of a JPEG: its header fields and where its entropy-coded data lies.
+struct ScanSpan {
+  int components = 0;
+  int firstComponent = 0;  // the first component's id
+  int ss = 0, se = 0, ah = 0, al = 0;
+  size_t sosStart = 0;  // its SOS marker
+  size_t dataStart = 0;
+  size_t dataEnd = 0;  // the marker that ends it
+};
+
+std::vector<ScanSpan> scansOf(const std::vector<uint8_t>& d) {
+  std::vector<ScanSpan> scans;
+  size_t i = 2;
+  while (i + 1 < d.size()) {
+    if (d[i] != 0xFF) {
+      ++i;
+      continue;
+    }
+    const uint8_t marker = d[i + 1];
+    if (marker == 0x00 || marker == 0xFF || (marker >= 0xD0 && marker <= 0xD7)) {
+      ++i;
+      continue;
+    }
+    if (!scans.empty() && scans.back().dataEnd == 0) scans.back().dataEnd = i;
+    if (marker == 0xD9 || i + 3 >= d.size()) break;
+    const size_t length = (static_cast<size_t>(d[i + 2]) << 8) | d[i + 3];
+    if (marker == 0xDA) {
+      ScanSpan s;
+      s.components = d[i + 4];
+      s.firstComponent = d[i + 5];
+      const size_t o = i + 5 + 2 * s.components;
+      s.ss = d[o];
+      s.se = d[o + 1];
+      s.ah = d[o + 2] >> 4;
+      s.al = d[o + 2] & 15;
+      s.sosStart = i;
+      s.dataStart = i + 2 + length;
+      scans.push_back(s);
+    }
+    i += 2 + length;
+  }
+  if (!scans.empty() && scans.back().dataEnd == 0) scans.back().dataEnd = d.size();
+  return scans;
+}
+
+ProgressiveJpeg::Result decodePath(const std::string& path, const int shift, Capture& capture) {
+  FsFile file;
+  EXPECT_TRUE(file.openForRead(path));
+  ProgressiveJpeg::DecodeOptions options;
+  options.scaleShift = static_cast<uint8_t>(shift);
+  const auto result = ProgressiveJpeg::decode(file, options, Capture::accept, &capture);
+  file.close();
+  return result;
+}
+
+// A 1/8 session skips every AC scan unread, so nothing in one's header may refuse the picture: the
+// low-heap fallback draws what the DC scans hold. A decode that reads the scan still refuses it.
+TEST(ProgressiveJpeg, AnEighthDoesNotReadTheAcScanHeadersItSkips) {
+  const std::vector<uint8_t> whole = readBytes(fixture("prog_full_420.jpg"));
+  const std::vector<ScanSpan> scans = scansOf(whole);
+  const ScanSpan* ac = nullptr;
+  for (const ScanSpan& s : scans) {
+    if (s.firstComponent == 1 && s.components == 1 && s.ss > 0) {
+      ac = &s;
+      break;
+    }
+  }
+  ASSERT_NE(ac, nullptr) << "the fixture has a luma AC scan";
+  const size_t ns = ac->sosStart + 4;  // FF DA, length, then Ns, Ns x (Cs, Td/Ta), Ss, Se, Ah/Al
+  const size_t spectral = ns + 1 + 2 * ac->components;
+  struct Corruption {
+    const char* name;
+    size_t at;
+    uint8_t value;
+  };
+  const Corruption corruptions[] = {
+      {"Se below Ss", spectral + 1, 0},
+      {"Al above 13", spectral + 2, 0x0E},
+      {"two components in an AC scan", ns, 2},
+      {"an unknown component", ns + 1, 9},
+  };
+  Capture clean;
+  ASSERT_EQ(decode("prog_full_420.jpg", 3, clean), ProgressiveJpeg::Result::Ok);
+  for (const Corruption& c : corruptions) {
+    SCOPED_TRACE(c.name);
+    std::vector<uint8_t> bytes = whole;
+    bytes[c.at] = c.value;
+    const std::string path = writeTemp("bad_ac_header.jpg", bytes);
+    Capture eighth;
+    const auto result = decodePath(path, 3, eighth);
+    EXPECT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+    EXPECT_TRUE(eighth.image.px == clean.image.px);
+    Capture full;
+    EXPECT_EQ(decodePath(path, 0, full), ProgressiveJpeg::Result::InvalidData) << "1/1 decodes the scan";
+    std::remove(path.c_str());
+  }
+}
+
+// At 1/8 a block is one pixel, its DC level: the AC scans cannot change it, so the decode skips
+// them. Rows must stay byte for byte what decoding every scan gave (recorded below from the decoder
+// that still decoded them), and the file must be read less than at 1/4, which still needs them.
+uint64_t fnv1a(const std::vector<uint8_t>& bytes) {
+  uint64_t h = 1469598103934665603ULL;
+  for (const uint8_t b : bytes) h = (h ^ b) * 1099511628211ULL;
+  return h;
+}
+
+struct EighthCase {
+  const char* jpg;
+  uint64_t rowsHash;  // FNV-1a of the 1/8 rows when every scan was decoded
+};
+
+class ProgressiveJpegEighth : public testing::TestWithParam<EighthCase> {};
+
+TEST_P(ProgressiveJpegEighth, SkipsTheAcScansWithTheSameRows) {
+  const EighthCase& c = GetParam();
+  for (const bool windows : {false, true}) {
+    SCOPED_TRACE(windows ? "with read windows" : "with the shared buffer");
+    const WindowedRun eighth = decodeWith(c.jpg, 3, windows);
+    const WindowedRun quarter = decodeWith(c.jpg, 2, windows);
+    ASSERT_EQ(eighth.result, ProgressiveJpeg::Result::Ok);
+    ASSERT_EQ(quarter.result, ProgressiveJpeg::Result::Ok);
+    EXPECT_TRUE(eighth.capture.orderOk);
+    EXPECT_EQ(fnv1a(eighth.capture.image.px), c.rowsHash) << c.jpg;
+    std::printf("[ pjpeg    ] %s %s: 1/8 %u reads / %u bytes, 1/4 %u / %u\n", c.jpg, windows ? "windows" : "shared",
+                static_cast<unsigned>(eighth.stats.reads), static_cast<unsigned>(eighth.stats.bytesRead),
+                static_cast<unsigned>(quarter.stats.reads), static_cast<unsigned>(quarter.stats.bytesRead));
+    EXPECT_LT(eighth.stats.reads, quarter.stats.reads);
+    EXPECT_LT(eighth.stats.bytesRead, quarter.stats.bytesRead);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Fixtures, ProgressiveJpegEighth,
+                         testing::Values(EighthCase{"prog_full_420.jpg", 13821861766860504631ULL},
+                                         EighthCase{"prog_full_gray.jpg", 7087090682878387780ULL},
+                                         EighthCase{"prog_full_444_rst.jpg", 10387207835323122819ULL},
+                                         EighthCase{"thin_lines_prog.jpg", 2001519597461149831ULL},
+                                         EighthCase{"progressive_tall.jpg", 11623068769939918297ULL},
+                                         EighthCase{"prog_422_rst.jpg", 7783887560982999707ULL},
+                                         EighthCase{"prog_420_rst_row.jpg", 5568282327642717411ULL},
+                                         EighthCase{"prog_gray_rst.jpg", 11315821893079572744ULL},
+                                         // prog_full_420.jpg's coefficients, DC in the first scan
+                                         EighthCase{"prog_420_dc_first.jpg", 13821861766860504631ULL}));
+
+// A 1/8 decode needs nothing past the scan that makes luma DC final (a luma DC scan at Al = 0), so
+// its index pass ends there and it reads the file no further. With every read that starts past
+// that scan's data failing, the 1/8 decode is still Ok with the same rows, while a 1/4 decode,
+// which needs the AC scans after it, fails. prog_420_dc_first.jpg completes DC in its first scan,
+// as the real covers measured do; libjpeg's script (prog_full_420.jpg) in its DC refinement.
+struct ReadsFailFrom {
+  explicit ReadsFailFrom(const long offset) { FsFile::failReadsFrom = offset; }
+  ~ReadsFailFrom() { FsFile::failReadsFrom = -1; }
+  ReadsFailFrom(const ReadsFailFrom&) = delete;
+  ReadsFailFrom& operator=(const ReadsFailFrom&) = delete;
+};
+
+TEST(ProgressiveJpeg, AnEighthReadsNothingPastTheScanThatCompletesLumaDc) {
+  for (const char* jpg : {"prog_420_dc_first.jpg", "prog_full_420.jpg"}) {
+    SCOPED_TRACE(jpg);
+    const std::vector<uint8_t> bytes = readBytes(fixture(jpg));
+    const std::vector<ScanSpan> scans = scansOf(bytes);
+    const ScanSpan* completing = nullptr;
+    for (const ScanSpan& s : scans) {
+      if (s.firstComponent == 1 && s.ss == 0 && s.al == 0) {
+        completing = &s;
+        break;
+      }
+    }
+    ASSERT_NE(completing, nullptr) << "the fixture's luma DC is complete somewhere";
+    // The index reads the marker that ends the scan's data: its two bytes are the last it needs.
+    const auto limit = static_cast<long>(completing->dataEnd + 2);
+    ASSERT_LT(static_cast<size_t>(limit) + 1024, bytes.size()) << "AC data must follow";
+    for (const bool windows : {false, true}) {
+      SCOPED_TRACE(windows ? "with read windows" : "with the shared buffer");
+      const WindowedRun clean = decodeWith(jpg, 3, windows);
+      ASSERT_EQ(clean.result, ProgressiveJpeg::Result::Ok);
+      WindowedRun eighth;
+      WindowedRun quarter;
+      {
+        const ReadsFailFrom cut(limit);
+        eighth = decodeWith(jpg, 3, windows);
+        quarter = decodeWith(jpg, 2, windows);
+      }
+      EXPECT_EQ(eighth.result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(eighth.result);
+      EXPECT_TRUE(eighth.capture.image.px == clean.capture.image.px);
+      EXPECT_EQ(quarter.result, ProgressiveJpeg::Result::IoError) << "1/4 reads the AC scans that follow";
+      std::printf("[ pjpeg    ] %s %s: 1/8 %u reads / %u bytes of a %zu-byte file, luma DC complete at %ld\n", jpg,
+                  windows ? "windows" : "shared", static_cast<unsigned>(clean.stats.reads),
+                  static_cast<unsigned>(clean.stats.bytesRead), bytes.size(), limit);
+    }
+  }
+}
+
+struct SeeksFailFrom {
+  explicit SeeksFailFrom(const long offset) { FsFile::failSeeksFrom = offset; }
+  ~SeeksFailFrom() { FsFile::failSeeksFrom = -1; }
+  SeeksFailFrom(const SeeksFailFrom&) = delete;
+  SeeksFailFrom& operator=(const SeeksFailFrom&) = delete;
+};
+
+// A seek at or past the end of the file fails on the card (SdFat's seekSet refuses a position past
+// the size; the stub fails at the size too): that is the end of the data, which the bit reader
+// pads like libjpeg, not the card's error. A file cut inside its first scan makes the index and
+// the scan's bit reader both run into its end; with those seeks failing it decodes exactly as when
+// they succeed and read nothing.
+TEST(ProgressiveJpeg, ASeekAtOrPastTheEndIsTheEndOfTheData) {
+  const std::vector<uint8_t> whole = readBytes(fixture("prog_full_420.jpg"));
+  const std::vector<ScanSpan> scans = scansOf(whole);
+  ASSERT_FALSE(scans.empty());
+  const size_t cutAt = (scans[0].dataStart + scans[0].dataEnd) / 2;
+  const std::string path =
+      writeTemp("cut_in_first_scan.jpg", std::vector<uint8_t>(whole.begin(), whole.begin() + cutAt));
+  for (const int shift : {0, 3}) {
+    for (const bool windows : {false, true}) {
+      SCOPED_TRACE(std::string("1/") + std::to_string(1 << shift) + (windows ? ", read windows" : ", shared buffer"));
+      std::vector<uint8_t> readWindows(ProgressiveJpeg::scanWindowBytes());
+      const auto run = [&](Capture& capture) {
+        FsFile file;
+        EXPECT_TRUE(file.openForRead(path));
+        ProgressiveJpeg::DecodeOptions options;
+        options.scaleShift = static_cast<uint8_t>(shift);
+        if (windows) {
+          options.readWindows = readWindows.data();
+          options.readWindowsSize = readWindows.size();
+        }
+        const auto result = ProgressiveJpeg::decode(file, options, Capture::accept, &capture);
+        file.close();
+        return result;
+      };
+      Capture readsNothing;
+      const auto expected = run(readsNothing);  // stdio: those seeks succeed, the reads after them return 0
+      Capture failing;
+      ProgressiveJpeg::Result result;
+      size_t atOrPastTheEnd = 0;
+      {
+        const SeekLog log;
+        const SeeksFailFrom end(static_cast<long>(cutAt));
+        result = run(failing);
+        for (const size_t offset : log.offsets) atOrPastTheEnd += offset >= cutAt;
+      }
+      EXPECT_GT(atOrPastTheEnd, 0u) << "the decode sought the end of the file";
+      EXPECT_NE(result, ProgressiveJpeg::Result::IoError) << ProgressiveJpeg::resultName(result);
+      EXPECT_EQ(result, expected) << ProgressiveJpeg::resultName(result);
+      EXPECT_FALSE(failing.image.px.empty());
+      EXPECT_TRUE(failing.image.px == readsNothing.image.px);
+    }
+  }
+  std::remove(path.c_str());
+}
+
 // Smaller output keeps fewer coefficients per block: the working set has to shrink with it.
 TEST(ProgressiveJpeg, WorkspaceShrinksWithScale) {
   ProgressiveJpeg::ImageInfo info;
@@ -612,6 +1044,22 @@ TEST(ProgressiveJpeg, WorkspaceShrinksWithScale) {
   EXPECT_GT(full, half);
   EXPECT_GT(half, eighth);
   EXPECT_LT(half, 20u * 1024) << "the Strange Pictures diagrams decode at 1/2; this is their budget";
+}
+
+// At 1/8 a block is its DC level, so the session holds only what the DC scans need: the decode the
+// converters fall back to when the heap is short costs what a DC-only preview decoder costs
+// (about 2 KB of state plus a row of blocks), not the 13-16 KB of a full session. Host sizes are
+// 64-bit; the C3's are smaller.
+TEST(ProgressiveJpeg, AnEighthNeedsNoMoreThanTheDcScans) {
+  ProgressiveJpeg::ImageInfo info;
+  info.width = 1200;
+  info.height = 1600;
+  info.componentCount = 3;
+  info.maxHorizontal = 2;
+  info.maxVertical = 2;
+  const size_t eighth = ProgressiveJpeg::workspaceBytes(info, 3);
+  EXPECT_LT(eighth, 4u * 1024);
+  EXPECT_LT(eighth * 4, ProgressiveJpeg::workspaceBytes(info, 2));
 }
 
 }  // namespace

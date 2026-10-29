@@ -22,7 +22,8 @@ class GfxRenderer;
 // Returns false when the fragment cannot be parsed, when the page budget below
 // would be exceeded, or on low heap; the caller then falls back to the
 // plain-text viewer. pagesOut is left empty on every false return.
-// `fontId` is the caller's choice rather than the reader's setting: the
-// dictionary pins its own font (see DictionaryDefinitionActivity.h).
+// `fontId` is the caller's choice, not read from the settings: Noto Sans for a
+// Latin lookup, the reader's font for one that started on CJK text (see
+// DictionaryDefinitionActivity.h).
 bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definition, int fontId, uint16_t viewportWidth,
                               uint16_t viewportHeight, std::vector<std::unique_ptr<Page>>& pagesOut);

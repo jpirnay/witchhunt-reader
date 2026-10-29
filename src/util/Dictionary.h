@@ -24,6 +24,29 @@ struct DictLocation {
   bool readError = false;
 };
 
+// One headword found at the start of a run of CJK text, with every .idx entry it has. StarDict's
+// order puts entries with byte-equal headwords next to each other, so they are a run in the .idx:
+// where it starts and how long it is are all a reader needs to read them all.
+struct DictPrefixHit {
+  DictLocation location;   // the run's FIRST entry, in .idx order
+  uint8_t runBytes = 0;    // bytes of the run of text it covers, a codepoint boundary
+  uint8_t entryCount = 0;  // entries in the run, at most DictPrefixMatch::MAX_ENTRIES_PER_HIT
+  std::string headword;    // the .idx headword, also for a .syn hit; SSO up to 15 bytes (5 CJK chars)
+  uint32_t idxStart = 0;   // byte offset in .idx of that first entry
+};
+
+// What Dictionary::resolvePrefixes() found. ~140 bytes on the ESP32; a member or stack local, never
+// on the heap.
+struct DictPrefixMatch {
+  static constexpr uint8_t MAX_HITS = 3;
+  static constexpr uint8_t MAX_ENTRIES_PER_HIT = 8;  // more same-headword entries are not listed
+  DictPrefixHit hits[MAX_HITS];                      // longest first
+  uint8_t count = 0;
+  bool aborted = false;  // gave up between probes because the AbortCheck said so: no verdict
+  uint8_t probes = 0;    // window scans made, .idx and .syn together
+  uint16_t reads = 0;    // file reads made: scan-buffer refills plus sidecar sample reads
+};
+
 // Slim StarDict reader: exact-match lookup with a synonym and mini stemming
 // fallback.
 //
@@ -116,6 +139,35 @@ class Dictionary {
   // caller that already resolved does not search the index twice.
   bool readResolved(const DictLocation& location, std::string& definitionOut, LookupResult* outResult = nullptr);
 
+  using AbortCheck = bool (*)();
+  // The search of spec 5.2 for a lookup that starts on CJK text. `run` is searched as given: the
+  // caller has cleaned it (CjkLookupRun). Up to MAX_HITS headwords that are prefixes of `run`,
+  // longest first, at most one per length, each with its whole run of same-headword entries, each
+  // run listed once. None of resolve()'s fallbacks. Only the first MAX_PREFIX_RUN_BYTES of `run`
+  // are searched, cut back to a codepoint boundary.
+  // abortCheck (optional) is asked before every probe after the first; when it says yes the
+  // search returns false with matchOut.aborted set, count 0 and *outResult NotFound. outResult as
+  // for resolve(): Found, NotFound, LowMemory (no scan buffers), ReadError (no verdict reached).
+  bool resolvePrefixes(const char* run, DictPrefixMatch& matchOut, LookupResult* outResult = nullptr,
+                       AbortCheck abortCheck = nullptr);
+
+  // The longest run resolvePrefixes() searches: CjkLookupRun's longest, 12 codepoints of up to 4
+  // bytes (CjkLookupRun.cpp asserts it). A stack buffer of this size holds each probe's target.
+  static constexpr size_t MAX_PREFIX_RUN_BYTES = 48;
+
+  // The definitions of match.hits[0..count), in one string sized once from the index sizes (one
+  // allocation, as readDefinition's). Every entry of every hit, in this order: hit by hit, longest
+  // first; within a hit, its entryCount entries read from .idx at idxStart, in .idx order. So the
+  // longest match's entries all come before the shorter matches. Plain: "headword\n" + definition
+  // per entry (a duplicate headword repeats its line), entries joined by "\n\n". HTML
+  // (definitionsAreHtml()): "<p><b>" + headword with & < > escaped + "</b></p>" + definition per
+  // entry, no separator. At most MAX_DEFINITION_BYTES in all: the very first entry's definition is
+  // cut to fit; every later entry is taken only whole, and at the first one that does not fit, it
+  // and everything after it are left out. Refused with LowMemory, like readDefinition, when
+  // ESP.getMaxAllocHeap() < total + 8 KB; a .dict.dz takes its inflate window first.
+  bool readPrefixDefinitions(const DictPrefixMatch& match, std::string& definitionOut,
+                             LookupResult* outResult = nullptr);
+
   static std::string cleanWord(const char* word);
 
   // A short fixed name for a lookup outcome ("found", "not_found", ...), for log lines and the
@@ -185,6 +237,10 @@ class Dictionary {
     int readWord(char* out, size_t outSize);
     // Read exactly n bytes. False on EOF/error.
     bool readBytes(void* dst, size_t n);
+    // File reads made since attach(), for DictPrefixMatch::reads.
+    uint32_t reads() const { return refills; }
+    // Lets go of the buffer's contents, keeping the position: another reader is to fill it.
+    void forget();
 
    private:
     bool refill();
@@ -196,6 +252,7 @@ class Dictionary {
     int filled = 0;           // valid bytes in buf
     int cursor = 0;           // read position within buf
     bool posDirty = true;     // the handle needs a seek before the next refill
+    uint32_t refills = 0;     // file reads refill() has issued
   };
 
   // The .idx / .qidx handles shared by every locate() call in one lookup. A
@@ -242,11 +299,65 @@ class Dictionary {
   // 0 — scan source from the start — when sampleCount is 0 or a sample is
   // unreadable. `window`, when given, both short-circuits the descent for a
   // target inside the last resolved window and records the new one. Clobbers
-  // wordBuf.
+  // wordBuf. With strictlyBelow, the last sample whose word is < target instead,
+  // and `window` is neither read nor recorded: a window bounds a <= descent.
+  // sampleOut (optional) gets the index of that sample.
   uint32_t bisectSamples(HalFile& sidecar, ScanReader& source, uint32_t sampleCount, const char* target,
-                         SampleWindow* window);
+                         SampleWindow* window, bool strictlyBelow = false, uint32_t* sampleOut = nullptr);
+
+  // bisectSamples() for a target known to sort below the headword at sample `below` (> 0): the
+  // samples just before `below` first (1, 2, 4, ... back), then a bisection of the last step, so a
+  // target a few windows back costs a few steps. sampleOut gets the sample's index.
+  uint32_t gallopSamples(HalFile& sidecar, ScanReader& source, uint32_t sampleCount, uint32_t below, const char* target,
+                         uint32_t& sampleOut);
+
+  // readSampleOffset(), counted in sampleReads; through sampleBlock when it is set.
+  bool readSample(HalFile& sidecar, uint32_t sampleIndex, uint32_t* out);
+
+  // A SCAN_BUF_BYTES block of a sidecar, in a scan buffer resolvePrefixes() has idle: a descent
+  // then reads a few blocks rather than a sample per step.
+  struct SampleBlock {
+    const HalFile* file = nullptr;  // the sidecar `buf` holds a block of; none when nullptr
+    uint8_t* buf = nullptr;
+    uint32_t offset = 0;  // of buf[0] in the file, a multiple of SCAN_BUF_BYTES
+    uint32_t filled = 0;
+  };
 
   DictLocation locate(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
+
+  // resolvePrefixes() stops a file's window scans at this many once the file has a hit. Before its
+  // first hit there is no cap: one could call a run absent whose match lies a few windows down.
+  static constexpr uint8_t PREFIX_PROBES_PER_FILE = 3;
+
+  // What the probes of one resolvePrefixes() call share, and the .syn hits its .syn scans keep
+  // (each its run bytes and ordinal only, until followed). Defined in Dictionary.cpp.
+  struct PrefixSearch;
+  struct SynonymHits;
+
+  // One file's half of resolvePrefixes() (spec 5.2), into `out`: matchOut's hits for .idx, a
+  // SynonymHits for .syn. A window scan per probe, each probe's target a shorter prefix of the
+  // run than the last, until the run's prefixes in that file are all seen or enough of them are.
+  // An .idx hit whose first entry opens a window past byte 0 gets locateRun(): its run may begin
+  // in the window before.
+  template <typename Hits>
+  void collectPrefixes(LookupSession& session, PrefixSearch& search, Hits& out);
+
+  // The .idx run of hit.headword from its first entry: the last sample strictly below the
+  // headword, then forward to the first byte-equal entry, counting it and those that follow.
+  // Sets location, idxStart and entryCount; false, leaving the hit alone, when it is not found.
+  bool locateRun(LookupSession& session, DictPrefixHit& hit);
+
+  // A .syn hit's .idx entry (the `ordinal`-th) and the run of same-headword entries it belongs to,
+  // from one scan of the window it lies in: sets hit's headword, location, idxStart and
+  // entryCount. Only a run that opens its window takes locateRun(), since it may begin in the
+  // window before. False when the entry cannot be read.
+  bool followSynonym(LookupSession& session, uint32_t ordinal, DictPrefixHit& hit);
+
+  // Merges the .syn hits into matchOut's .idx hits: longest first, one hit per length with the
+  // .idx hit on a tie; then a hit whose first entry a longer kept hit already has is dropped; at
+  // most MAX_HITS. Each .syn hit that could still be kept is followed, one probe each, by
+  // followSynonym(): its entry may lie in the middle of its run.
+  void mergeSynonymHits(LookupSession& session, PrefixSearch& search, SynonymHits& syn, DictPrefixMatch& matchOut);
 
   // Resolve an ordinal (the N-th .idx entry, 0-based) to its .dict location via
   // the .qidx samples. Used to follow a .syn synonym back to its headword.
@@ -268,9 +379,19 @@ class Dictionary {
   // buildIndex() so each sidecar is rebuilt only when actually stale.
   bool sidecarIsStale(const std::string& sourcePath, const std::string& sidecarPath, uint32_t magic);
 
-  // Read the definition at location straight into out. On failure returns false
-  // and, if outResult is given, sets it to the specific reason (Decompress /
-  // LowMemory / ReadError).
+  // Read size bytes of the definition at location into dst (room for size bytes). On failure
+  // returns false and, if outResult is given, sets the reason (Decompress / LowMemory / ReadError).
+  // The caller has taken the inflate window of a .dict.dz and checked the heap.
+  bool readEntryInto(const DictLocation& location, uint32_t size, char* dst, LookupResult* outResult);
+
+  // The next .idx entry of match's hits in reading order: hit by hit, each hit's entryCount entries
+  // from its idxStart. `hit` and `entry` are the position of the entry to read, advanced past it.
+  // False when there are none left or the .idx could not be read (`ioError`).
+  bool nextPrefixEntry(LookupSession& session, const DictPrefixMatch& match, uint8_t& hit, uint8_t& entry,
+                       DictLocation& locationOut, bool& ioError);
+
+  // Read the definition at location straight into out. On failure returns false and, if outResult
+  // is given, sets it to the specific reason (Decompress / LowMemory / ReadError).
   bool readDefinition(const DictLocation& location, std::string& out, LookupResult* outResult = nullptr);
   static void stemVariants(const std::string& word, std::vector<std::string>& out);
   // The word after a French elision ("l'histoire" -> "histoire"); empty when
@@ -300,4 +421,9 @@ class Dictionary {
   // Shared scan buffer: lookups are single-threaded and this avoids a
   // 256-byte array on the stack of every locate() call.
   char wordBuf[256] = {};
+
+  // Sidecar sample reads (readSample()) since resolvePrefixes() started, for DictPrefixMatch::reads.
+  uint32_t sampleReads = 0;
+  // Set by resolvePrefixes() for the time of its search; resolve() reads each sample on its own.
+  SampleBlock* sampleBlock = nullptr;
 };

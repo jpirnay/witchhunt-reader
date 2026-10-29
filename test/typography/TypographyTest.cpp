@@ -113,16 +113,87 @@ TEST(CjkPunctuation, TraditionalChineseKeepsCentredMarksFullWidth) {
 
 TEST(CjkPunctuation, JapaneseKeepsTheFullStopAndLetsLineEndsChoose) {
   const Table ja = Table::Japanese;
-  expectWidth(ja, Class::FullStop, Class::None, false, 8, 6);     // 。 keeps its blank mid-line
-  expectWidth(ja, Class::FullStop, Class::Closing, false, 4, 4);  // 。」: solid before the bracket
-  expectWidth(ja, Class::FullStop, Class::None, true, 8, 4);      // half or full at a line end
+  expectWidth(ja, Class::FullStop, Class::None, false, 8, 8);              // 。 keeps its blank mid-line, pushed in too
+  expectWidth(ja, Class::FullStop, Class::IdeographicSpace, false, 8, 8);  // 。　 as well
+  expectWidth(ja, Class::FullStop, Class::Closing, false, 4, 4);           // 。」: solid before the bracket
+  expectWidth(ja, Class::FullStop, Class::None, true, 8, 4);               // half or full at a line end
   expectWidth(ja, Class::Comma, Class::None, true, 8, 4);
   expectWidth(ja, Class::Closing, Class::None, true, 8, 4);
   expectWidth(ja, Class::Opening, Class::None, true, 4, 4);       // a line start sets solid
   expectWidth(ja, Class::Opening, Class::FullStop, false, 4, 4);  // 。「: solid after 。
   expectWidth(ja, Class::Closing, Class::Opening, false, 6, 6);   // 」「
-  expectWidth(ja, Class::Dividing, Class::None, false, 8, 6);     // ！？ keep their width
-  expectWidth(ja, Class::MiddleDot, Class::None, false, 8, 4);    // ・：； may halve
+  expectWidth(ja, Class::Dividing, Class::None, false, 8, 8);     // ！？ keep their width (JLREQ 3.8.3)
+  expectWidth(ja, Class::Dividing, Class::None, true, 8, 8);
+  expectWidth(ja, Class::MiddleDot, Class::None, false, 8, 4);  // ・：； may halve
+}
+
+TEST(CjkPunctuation, NoMarkIsNarrowerMidLineThanAtALineEdge) {
+  // The DP breaker stops widening a line at the first token whose pushed-in width overflows. That holds only if a
+  // line's pushed-in width never drops when a token joins it: the token that was last goes from its line-edge minimum
+  // to its mid-line one, which must be no smaller.
+  for (const Table table : {Table::SimplifiedChinese, Table::TraditionalChinese, Table::Japanese}) {
+    for (int m = 0; m <= static_cast<int>(Class::AmbiguousQuote); ++m) {
+      const auto mark = static_cast<Class>(m);
+      const CjkPunctuation::Width edge = CjkPunctuation::widthOf(table, mark, Class::None, true);
+      EXPECT_LE(edge.minimum, edge.forced);
+      for (int n = 0; n <= static_cast<int>(Class::AmbiguousQuote); ++n) {
+        const CjkPunctuation::Width mid = CjkPunctuation::widthOf(table, mark, static_cast<Class>(n), false);
+        EXPECT_GE(mid.minimum, edge.minimum) << static_cast<int>(table) << " " << m << " " << n;
+        EXPECT_LE(mid.minimum, mid.forced);
+      }
+    }
+  }
+}
+
+TEST(CjkPunctuation, TheCjkLatinGapSitsBetweenHanOrKanaAndLatinLettersOrDigits) {
+  using CjkPunctuation::takesCjkLatinGap;
+  EXPECT_TRUE(takesCjkLatinGap(0x6F22, 'A'));      // 漢A
+  EXPECT_TRUE(takesCjkLatinGap('1', 0x5E74));      // 1年
+  EXPECT_TRUE(takesCjkLatinGap(0x3044, 'i'));      // いi
+  EXPECT_TRUE(takesCjkLatinGap(0x30FC, 'x'));      // ーx
+  EXPECT_TRUE(takesCjkLatinGap(0x3005, 'e'));      // 々e
+  EXPECT_TRUE(takesCjkLatinGap(0x00E9, 0x5B57));   // é字
+  EXPECT_TRUE(takesCjkLatinGap(0x20B9F, 'Z'));     // 𠮟Z, Extension B
+  EXPECT_FALSE(takesCjkLatinGap(0x3002, 'A'));     // 。A: punctuation
+  EXPECT_FALSE(takesCjkLatinGap(0x30FB, 'A'));     // ・A
+  EXPECT_FALSE(takesCjkLatinGap(0xAC00, 'A'));     // 가A: Hangul (KLREQ asks for nothing)
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0xFF21));  // 漢Ａ: a full-width letter sits on the grid
+  EXPECT_FALSE(takesCjkLatinGap(0xFF71, 'A'));     // ｱA: half-width katakana is set like Latin
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x03B1));  // 漢α
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, '%'));
+  EXPECT_FALSE(takesCjkLatinGap(0x00D7, 0x6F22));  // ×漢
+  EXPECT_FALSE(takesCjkLatinGap('A', 'B'));
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x5B57));
+}
+
+TEST(CjkPunctuation, TheCjkLatinGapRangesEndWhereTheyShould) {
+  using CjkPunctuation::takesCjkLatinGap;
+  // Each pair is the last codepoint inside a range and the first outside it, against 'A'.
+  EXPECT_FALSE(takesCjkLatinGap(0x3004, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x3005, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x3007, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0x3008, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x3096, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0x3097, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x30FA, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0x30FB, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x9FFF, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0xA000, 'A'));
+  EXPECT_TRUE(takesCjkLatinGap(0x2A6DF, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0x2A6E0, 'A'));
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x00BF));  // ¿
+  EXPECT_TRUE(takesCjkLatinGap(0x6F22, 0x00C0));   // À
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x00D7));  // ×
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x00F7));  // ÷
+  EXPECT_TRUE(takesCjkLatinGap(0x6F22, 0x024F));   // ɏ
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x0250));  // ɐ: IPA
+  EXPECT_TRUE(takesCjkLatinGap(0x6F22, 0x1EFF));   // ỿ
+  EXPECT_FALSE(takesCjkLatinGap(0x6F22, 0x1F00));  // Greek extended
+  EXPECT_TRUE(takesCjkLatinGap(0x3083, 'A'));      // ゃ
+  EXPECT_TRUE(takesCjkLatinGap(0x30C3, 'A'));      // ッ
+  EXPECT_TRUE(takesCjkLatinGap(0x31F0, 'A'));      // ㇰ, katakana extension
+  EXPECT_TRUE(takesCjkLatinGap('9', 0x30AB));      // 9カ
+  EXPECT_TRUE(takesCjkLatinGap(0x3042, '0'));      // あ0
 }
 
 }  // namespace

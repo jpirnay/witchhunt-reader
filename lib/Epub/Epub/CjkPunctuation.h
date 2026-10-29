@@ -8,6 +8,7 @@
 // and blank on the other; set next to other punctuation or at a line edge, part of that blank goes, as the
 // layout requirements of each language describe (W3C JLREQ, CLREQ). The rules are written from those documents;
 // KOReader's crengine tables (textlang.cpp) were the cross-check, not the source.
+// Section numbers ("spec 5.2") refer to docs/design/cjk-typography.md.
 namespace CjkPunctuation {
 
 // The JLREQ classes of the marks a table adjusts.
@@ -30,7 +31,7 @@ Class classOf(uint32_t cp);
 bool isCurlyQuote(uint32_t cp);
 
 // A width in eighths of the mark's full advance (8: unchanged). `forced` always applies; `minimum` is how far
-// the line may shrink the mark when it needs room (push-in, PR A3b).
+// the line may shrink the mark when it needs room (push-in, spec 5.3).
 struct Width {
   uint8_t forced;
   uint8_t minimum;
@@ -40,5 +41,17 @@ struct Width {
 // at the character AFTER it, as JLREQ's spacing does. `neighbour` is None for text or a space there.
 // `atLineEdge`: a line starts at the opening mark, or ends after the other mark, so the neighbour is the edge.
 Width widthOf(TypographyProfile::Punctuation table, Class mark, Class neighbour, bool atLineEdge);
+
+// The gap between Han or kana and a Latin letter or digit, in eighths of the CJK side's em.
+constexpr uint8_t kCjkLatinGap = 2;
+
+// Ideographs, 々〆〇, and the kana letters with ー; not ・, not half-width katakana, not Hangul.
+bool isHanOrKana(uint32_t cp);
+
+// ASCII letters and digits, and the accented Latin letters; not full-width forms, not Greek or Cyrillic.
+bool isLatinLetterOrDigit(uint32_t cp);
+
+// Whether a gap sits between two adjacent characters: one is Han or kana, the other a Latin letter or digit.
+bool takesCjkLatinGap(uint32_t leftCp, uint32_t rightCp);
 
 }  // namespace CjkPunctuation
