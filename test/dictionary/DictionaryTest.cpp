@@ -1296,6 +1296,26 @@ TEST_F(DictionaryTest, PrefixSearchReadsTheSamplesInBlocks) {
   EXPECT_EQ(m.reads, 11);  // 18 with a read per sample
 }
 
+// 2000 fillers, 大 and 大学 (entries 2000 and 2001), then 300 of 大学 + one ideograph: 9 samples.
+// The descent for 大学生活 lands in the last window (sample 8, 大学 + an ideograph), which holds no
+// match, so the next target is 大学. It sorts below sample 8, and sample 7 is at or below it: one
+// step back finds the window, where a descent from the top took four.
+TEST_F(DictionaryTest, PrefixSearchStepsBackToTheWindowBefore) {
+  std::vector<HeadwordSpec> headwords = asciiFillers(2000);
+  headwords.push_back({"大", "big"});
+  headwords.push_back({"大学", "university"});
+  for (int i = 0; i < 300; i++) headwords.push_back({"大学" + cp(0x4E00 + i), "filler"});
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("PrefixStepBack", headwords));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "PrefixStepBack"));
+
+  DictPrefixMatch m;
+  ASSERT_TRUE(dict.resolvePrefixes("大学生活", m));
+  EXPECT_EQ(hitsOf(m), (HitList{{"大学", 6}, {"大", 3}}));
+  EXPECT_EQ(m.probes, 2);
+  EXPECT_EQ(m.reads, 19);  // 23 with a second descent from the top
+}
+
 // A followed synonym finds its run in the window its entry lies in: 600 fillers (13 bytes each), 银,
 // then two 银行 at entries 601 and 602, samples at bytes 0, 3328 and 6656. The .idx probe of 銀行家:
 // 1 block and 4 refills (银 sorts after 銀, so the scan stops there); the .syn: 1 and 1. Following

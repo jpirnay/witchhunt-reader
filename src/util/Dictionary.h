@@ -301,8 +301,15 @@ class Dictionary {
   // target inside the last resolved window and records the new one. Clobbers
   // wordBuf. With strictlyBelow, the last sample whose word is < target instead,
   // and `window` is neither read nor recorded: a window bounds a <= descent.
+  // sampleOut (optional) gets the index of that sample.
   uint32_t bisectSamples(HalFile& sidecar, ScanReader& source, uint32_t sampleCount, const char* target,
-                         SampleWindow* window, bool strictlyBelow = false);
+                         SampleWindow* window, bool strictlyBelow = false, uint32_t* sampleOut = nullptr);
+
+  // bisectSamples() for a target known to sort below the headword at sample `below` (> 0): the
+  // samples just before `below` first (1, 2, 4, ... back), then a bisection of the last step, so a
+  // target a few windows back costs a few steps. sampleOut gets the sample's index.
+  uint32_t gallopSamples(HalFile& sidecar, ScanReader& source, uint32_t sampleCount, uint32_t below, const char* target,
+                         uint32_t& sampleOut);
 
   // readSampleOffset(), counted in sampleReads; through sampleBlock when it is set.
   bool readSample(HalFile& sidecar, uint32_t sampleIndex, uint32_t* out);

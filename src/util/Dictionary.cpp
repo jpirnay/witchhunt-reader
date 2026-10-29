@@ -471,8 +471,9 @@ bool Dictionary::openSynonyms(LookupSession& session) {
 // both sidecars have the same layout and both sources are sorted word-first, so
 // the descent is identical and only the file pair differs.
 uint32_t Dictionary::bisectSamples(HalFile& sidecar, ScanReader& source, uint32_t sampleCount, const char* target,
-                                   SampleWindow* window, const bool strictlyBelow) {
+                                   SampleWindow* window, const bool strictlyBelow, uint32_t* sampleOut) {
   uint32_t startByte = 0;
+  if (sampleOut) *sampleOut = 0;
   if (sampleCount == 0) return startByte;  // no usable sidecar: scan from the start
   if (strictlyBelow) window = nullptr;
 
@@ -505,6 +506,7 @@ uint32_t Dictionary::bisectSamples(HalFile& sidecar, ScanReader& source, uint32_
     }
   }
   if (!readSample(sidecar, lo, &startByte)) return 0;
+  if (sampleOut) *sampleOut = lo;
 
   // Record the window so the next probe of this lookup can skip the descent.
   // Its bounds are the headword at the window start and the headword at the next
@@ -522,6 +524,53 @@ uint32_t Dictionary::bisectSamples(HalFile& sidecar, ScanReader& source, uint32_
     window->startByte = startByte;
     window->valid = true;
   }
+  return startByte;
+}
+
+uint32_t Dictionary::gallopSamples(HalFile& sidecar, ScanReader& source, const uint32_t sampleCount,
+                                   const uint32_t below, const char* target, uint32_t& sampleOut) {
+  // The headword at sample `index` sorts at or below target; false when it cannot be read.
+  bool readable = true;
+  const auto atOrBelow = [&](const uint32_t index) {
+    uint32_t offset = 0;
+    if (!readSample(sidecar, index, &offset) || !source.seekSet(offset) ||
+        source.readWord(wordBuf, sizeof(wordBuf)) < 0) {
+      readable = false;
+      return false;
+    }
+    return StringUtils::asciiCaseCmp(wordBuf, target) <= 0;
+  };
+
+  // Back from `below` by 1, 2, 4, ... samples to one at or below target; then bisect the last step.
+  uint32_t upper = below;  // its headword sorts above target
+  uint32_t lo = 0;
+  for (uint32_t step = 1;; step *= 2) {
+    const uint32_t at = below > step ? below - step : 0;
+    const bool found = atOrBelow(at);
+    if (!readable) return bisectSamples(sidecar, source, sampleCount, target, nullptr, false, &sampleOut);
+    if (found) {
+      lo = at;
+      break;
+    }
+    upper = at;
+    if (at == 0) break;  // target sorts before the first headword: the scan starts at byte 0
+  }
+  uint32_t hi = upper > lo ? upper - 1 : lo;
+  while (lo < hi) {
+    const uint32_t mid = (lo + hi + 1) / 2;
+    const bool found = atOrBelow(mid);
+    if (!readable) return bisectSamples(sidecar, source, sampleCount, target, nullptr, false, &sampleOut);
+    if (found) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  uint32_t startByte = 0;
+  if (!readSample(sidecar, lo, &startByte)) {
+    return bisectSamples(sidecar, source, sampleCount, target, nullptr, false, &sampleOut);
+  }
+  sampleOut = lo;
   return startByte;
 }
 
@@ -1194,13 +1243,17 @@ void Dictionary::collectPrefixes(LookupSession& session, PrefixSearch& search, H
   char target[MAX_PREFIX_RUN_BYTES + 1];
   size_t targetBytes = search.runBytes;
   uint8_t probesInFile = 0;
+  uint32_t window = 0;  // sample index of the last probe's window
   for (;;) {
     if (!search.beginProbe()) return;
     memcpy(target, search.run, targetBytes);
     target[targetBytes] = '\0';
     // No window record: its bounds would cost a sample read and two refills, and no later target
     // falls inside the window. The scan's first entry is the window's first headword (w0).
-    const uint32_t start = bisectSamples(sidecar, scan, sampleCount, target, nullptr);
+    // A later target sorts before the last window's first headword, often just before it.
+    const uint32_t start = probesInFile == 0
+                               ? bisectSamples(sidecar, scan, sampleCount, target, nullptr, false, &window)
+                               : gallopSamples(sidecar, scan, sampleCount, window, target, window);
     if (!scan.seekSet(start)) {
       search.failed = true;
       return;
