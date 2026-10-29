@@ -329,11 +329,16 @@ class Dictionary {
   // Sets location, idxStart and entryCount; false, leaving the hit alone, when it is not found.
   bool locateRun(LookupSession& session, DictPrefixHit& hit);
 
+  // A .syn hit's .idx entry (the `ordinal`-th) and the run of same-headword entries it belongs to,
+  // from one scan of the window it lies in: sets hit's headword, location, idxStart and
+  // entryCount. Only a run that opens its window takes locateRun(), since it may begin in the
+  // window before. False when the entry cannot be read.
+  bool followSynonym(LookupSession& session, uint32_t ordinal, DictPrefixHit& hit);
+
   // Merges the .syn hits into matchOut's .idx hits: longest first, one hit per length with the
   // .idx hit on a tie; then a hit whose first entry a longer kept hit already has is dropped; at
-  // most MAX_HITS. Each .syn hit that could still be kept is followed, one probe each:
-  // locateByOrdinal() gives its .idx headword, whose entry may lie in the middle of its run, and
-  // locateRun() finds the run's start.
+  // most MAX_HITS. Each .syn hit that could still be kept is followed, one probe each, by
+  // followSynonym(): its entry may lie in the middle of its run.
   void mergeSynonymHits(LookupSession& session, PrefixSearch& search, SynonymHits& syn, DictPrefixMatch& matchOut);
 
   // Resolve an ordinal (the N-th .idx entry, 0-based) to its .dict location via

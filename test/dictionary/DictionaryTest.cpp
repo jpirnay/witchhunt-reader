@@ -1230,7 +1230,7 @@ TEST_F(DictionaryTest, PrefixSearchTakesTheWindowsFirstHeadwordFromItsScan) {
   // The same over a .syn: 600 fillers (9 bytes each), 大學, then 300 of 學 + one ideograph; samples
   // at bytes 0, 2304, 4608 and 7248. The .idx (one sample, 27 bytes): 1 sample read and 1 refill.
   // The .syn: the descent's 3 sample reads and 2 refills, the scan's [4608, 5120) and [5120, 5632).
-  // Following 大學 to 大学: a sample read each for locateByOrdinal and locateRun, the .idx resident.
+  // Following 大學 to 大学: one sample read, the .idx resident.
   std::vector<SynonymSpec> synonyms;
   for (int i = 0; i < 600; i++) {
     char word[16];
@@ -1245,7 +1245,7 @@ TEST_F(DictionaryTest, PrefixSearchTakesTheWindowsFirstHeadwordFromItsScan) {
   ASSERT_TRUE(synDict.resolvePrefixes("大學生", m));
   EXPECT_EQ(hitsOf(m), (HitList{{"大学", 6}, {"大", 3}}));
   EXPECT_EQ(m.probes, 3);  // the .idx scan, the .syn scan, following 大學
-  EXPECT_EQ(m.reads, 11);  // 14 with the window record
+  EXPECT_EQ(m.reads, 10);  // 13 with the window record
 }
 
 // The .syn descent for 大学生活 lands past 300 synonyms 大 + one ideograph, so its next target would
@@ -1270,6 +1270,50 @@ TEST_F(DictionaryTest, PrefixSearchSkipsASynonymProbeWhoseHitsTheIndexHitsWouldB
   ASSERT_TRUE(untied.resolvePrefixes("大学生活", m));
   EXPECT_EQ(hitsOf(m), (HitList{{"大学", 6}, {"太", 3}}));
   EXPECT_EQ(m.probes, 4);  // the .idx scan, two .syn scans, following 大 to 太
+}
+
+// A followed synonym finds its run in the window its entry lies in: 600 fillers (13 bytes each), 银,
+// then two 银行 at entries 601 and 602, samples at bytes 0, 3328 and 6656. The .idx probe of 銀行家:
+// 3 sample reads and 4 refills (银 sorts after 銀, so the scan stops there); the .syn: 1 and 1.
+// Following 銀行 to entry 602: its sample and the 3 refills from byte 6656; the run's first entry
+// (601) is in the buffer. A second descent to the run's start used to cost 3 sample reads and 4
+// refills more.
+TEST_F(DictionaryTest, PrefixSearchFollowsASynonymWithinItsWindow) {
+  std::vector<HeadwordSpec> headwords = asciiFillers(600);
+  headwords.push_back({"银", "silver"});
+  headwords.push_back({"银行", "bank"});
+  headwords.push_back({"银行", "row of silver shops"});
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("PrefixFollowWindow", headwords, {{"銀行", "银行", /*occurrence=*/1}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "PrefixFollowWindow"));
+
+  DictPrefixMatch m;
+  ASSERT_TRUE(dict.resolvePrefixes("銀行家", m));
+  EXPECT_EQ(hitsOf(m), (HitList{{"银行", 6}}));
+  EXPECT_EQ(m.hits[0].entryCount, 2);
+  EXPECT_EQ(definitionAt(dict, m.hits[0].location), "bank");
+  EXPECT_EQ(m.probes, 3);  // the .idx scan, the .syn scan, following 銀行
+  EXPECT_EQ(m.reads, 13);  // 20 with the second descent
+}
+
+// The synonym names the second 行. At 255 fillers that entry opens the window (sample 256), so the
+// run may begin in the window before, and does: the run is still listed from its first entry.
+TEST_F(DictionaryTest, PrefixSearchFollowsASynonymWhoseRunCrossesASample) {
+  for (const int leading : {254, 255, 256}) {
+    std::vector<HeadwordSpec> headwords = asciiFillers(leading);
+    headwords.push_back({"行", "xing: to walk"});
+    headwords.push_back({"行", "hang: a row"});
+    const std::string folder = "PrefixFollowAcross" + std::to_string(leading);
+    ASSERT_NO_FATAL_FAILURE(writeDictionary(folder, headwords, {{"衍", "行", /*occurrence=*/1}}));
+    Dictionary dict;
+    ASSERT_NO_FATAL_FAILURE(openIndexed(dict, folder));
+
+    DictPrefixMatch m;
+    ASSERT_TRUE(dict.resolvePrefixes("衍了", m)) << leading;
+    EXPECT_EQ(hitsOf(m), (HitList{{"行", 3}})) << leading;
+    EXPECT_EQ(m.hits[0].entryCount, 2) << leading;
+    EXPECT_EQ(definitionAt(dict, m.hits[0].location), "xing: to walk") << leading;
+  }
 }
 
 TEST_F(DictionaryTest, LatinDictionaryAnswersACjkRunInOneProbePerFile) {

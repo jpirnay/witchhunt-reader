@@ -1084,6 +1084,13 @@ bool synonymCouldBeKept(const char* run, const size_t runBytes, const DictPrefix
   return false;
 }
 
+// FNV-1a over a headword: tells it from the one before it without keeping that one.
+uint32_t wordHash(const char* word, const size_t len) {
+  uint32_t hash = 2166136261u;
+  for (size_t i = 0; i < len; i++) hash = (hash ^ static_cast<unsigned char>(word[i])) * 16777619u;
+  return hash;
+}
+
 // Hits name the same run (or, from two headwords, the same definition) by their first entry.
 bool sameLocation(const DictLocation& a, const DictLocation& b) { return a.offset == b.offset && a.size == b.size; }
 
@@ -1280,6 +1287,69 @@ bool Dictionary::locateRun(LookupSession& session, DictPrefixHit& hit) {
   return true;
 }
 
+bool Dictionary::followSynonym(LookupSession& session, const uint32_t ordinal, DictPrefixHit& hit) {
+  // The entry's window, as locateByOrdinal() finds it.
+  uint32_t startByte = 0;
+  uint32_t startOrdinal = 0;
+  if (session.sampleCount > 0) {
+    if (session.entryCount != 0 && ordinal >= session.entryCount) return false;  // out of range
+    const uint32_t sampleIndex = std::min(ordinal / SAMPLE_INTERVAL, session.sampleCount - 1);
+    if (readSample(session.qidx, sampleIndex, &startByte)) {
+      startOrdinal = sampleIndex * SAMPLE_INTERVAL;
+    } else {
+      startByte = 0;
+    }
+  }
+  if (!session.idxScan.seekSet(startByte)) return false;
+
+  // Forward to the entry, keeping where the run of byte-equal headwords it belongs to starts: a
+  // headword of another length or hash than the one before it starts a new run. A headword cut
+  // off by wordBuf always does.
+  uint32_t runStart = startByte;
+  uint32_t runOrdinal = startOrdinal;
+  DictLocation runFirst;
+  uint32_t prevHash = 0;
+  int prevLen = -1;
+  uint8_t suffix[8];
+  for (uint32_t e = startOrdinal;; e++) {
+    if (session.idxScan.position() >= session.idxSize) return false;  // ordinal past the last entry
+    const uint32_t entryStart = session.idxScan.position();
+    const int len = session.idxScan.readWord(wordBuf, sizeof(wordBuf));
+    if (len < 0 || !session.idxScan.readBytes(suffix, 8)) return false;
+    const uint32_t hash = wordHash(wordBuf, static_cast<size_t>(len));
+    if (len != prevLen || hash != prevHash || static_cast<size_t>(len) >= sizeof(wordBuf) - 1) {
+      runStart = entryStart;
+      runOrdinal = e;
+      runFirst = idxEntryLocation(suffix);
+    }
+    prevLen = len;
+    prevHash = hash;
+    if (e == ordinal) break;
+  }
+  hit.headword = wordBuf;
+
+  // A run that opens the window may begin in the one before it.
+  if (runOrdinal == startOrdinal && startOrdinal > 0) return locateRun(session, hit);
+
+  // The run's entries up to this one, then those after it.
+  uint32_t entries = ordinal - runOrdinal + 1;
+  while (entries < DictPrefixMatch::MAX_ENTRIES_PER_HIT && session.idxScan.position() < session.idxSize) {
+    if (session.idxScan.readWord(wordBuf, sizeof(wordBuf)) < 0 || !session.idxScan.readBytes(suffix, 8)) break;
+    if (strcmp(wordBuf, hit.headword.c_str()) != 0) break;
+    entries++;
+  }
+  // Equal hashes are no proof: the run's first entry must be the headword byte for byte. The index
+  // is sorted, so every entry between that one and this one then is too.
+  if (runOrdinal != ordinal) {
+    if (!session.idxScan.seekSet(runStart) || session.idxScan.readWord(wordBuf, sizeof(wordBuf)) < 0) return false;
+    if (strcmp(wordBuf, hit.headword.c_str()) != 0) return locateRun(session, hit);
+  }
+  hit.location = runFirst;
+  hit.idxStart = runStart;
+  hit.entryCount = static_cast<uint8_t>(std::min<uint32_t>(entries, DictPrefixMatch::MAX_ENTRIES_PER_HIT));
+  return true;
+}
+
 void Dictionary::mergeSynonymHits(LookupSession& session, PrefixSearch& search, SynonymHits& syn,
                                   DictPrefixMatch& matchOut) {
   // The .idx hit wins a tie, so a .syn hit of a length the .idx found is never followed. Ties go
@@ -1302,8 +1372,7 @@ void Dictionary::mergeSynonymHits(LookupSession& session, PrefixSearch& search, 
     }
     if (!search.beginProbe()) return;
     followed.runBytes = syn.hits[i].runBytes;
-    const DictLocation entry = locateByOrdinal(session, syn.hits[i].ordinal, &followed.headword);
-    if (!entry.found || !locateRun(session, followed)) {
+    if (!followSynonym(session, syn.hits[i].ordinal, followed)) {
       search.failed = true;
       continue;
     }
