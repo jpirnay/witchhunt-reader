@@ -129,6 +129,14 @@ int cjkEm(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::St
   return measureWordWidth(renderer, fontId, "\xE4\xB8\x80", style, false, scale);  // 一
 }
 
+// An item's part of what a push-in tier gives (`tierNeed` of the tier's `tierTotal`), shared in line order by
+// cumulative rounding: `cumulativeBefore` is the sum of the amounts of the tier's items before it. The parts of a
+// tier's items add up to tierNeed exactly, and none is more than its own amount.
+int pushInShare(const int cumulativeBefore, const int amount, const int tierNeed, const int tierTotal) {
+  if (tierTotal == 0) return 0;
+  return ((cumulativeBefore + amount) * tierNeed) / tierTotal - (cumulativeBefore * tierNeed) / tierTotal;
+}
+
 std::string buildLinePreview(const std::vector<std::string>& words,
                              const std::vector<TokenBoundary::Boundary>& boundaries, const size_t start,
                              const size_t endExclusive, const size_t maxLen = 120) {
@@ -815,6 +823,8 @@ void ParsedText::releaseLayoutScratch() {
   std::vector<uint16_t>().swap(wordWidths_);
   std::vector<uint8_t>().swap(markClass_);
   std::vector<int8_t>().swap(edgeTrim_);
+  std::vector<uint8_t>().swap(shrink_);
+  std::vector<uint8_t>().swap(edgeShrink_);
   std::vector<RubyEdge>().swap(rubyEdge_);
   std::vector<size_t>().swap(lineBreakIndices_);
   std::vector<bool>().swap(lineEndsWithHyphenatedWord_);
@@ -953,12 +963,31 @@ void ParsedText::applyRubyWidths(const GfxRenderer& renderer, const int fontId, 
     rubyEdge_[i].start = static_cast<int16_t>(left);
     rubyEdge_[last].end = static_cast<int16_t>(right);
   }
+
+  // Push-in takes nothing a ruby needs. A mark inside a group gives nothing: the group's ruby box is measured on its
+  // base's mid-line widths (addRubyBox). A mark a ruby overhangs keeps the overhangs from both sides mid-line. At a
+  // line edge a ruby overhangs a mark from one side only, by at most half of its mid-line width (room), and no
+  // line-edge minimum is under half a mark, so edgeShrink_ needs no cap.
+  for (size_t n = 0; n < count; ++n) {
+    if (shrink_[n] == 0 && edgeShrink_[n] == 0) continue;
+    if (TokenBoundary::rubyRole(wordBoundaries[n]) != RubyRole::None) {
+      shrink_[n] = 0;
+      edgeShrink_[n] = 0;
+      continue;
+    }
+    int uncovered = widths[n];
+    if (n > 0) uncovered -= rubyEdge_[n - 1].end;
+    if (n + 1 < count) uncovered -= rubyEdge_[n + 1].start;
+    shrink_[n] = static_cast<uint8_t>(std::max(0, std::min<int>(shrink_[n], uncovered)));
+  }
 }
 
 void ParsedText::applyPunctuationWidths(const GfxRenderer& renderer, const int fontId, std::vector<uint16_t>& widths) {
   using CjkPunctuation::Class;
   const size_t count = words.size();
   edgeTrim_.assign(count, 0);
+  shrink_.assign(count, 0);
+  edgeShrink_.assign(count, 0);
 
   // A mark is CJK punctuation only where its font draws it full-width, at least 4/5 of the em of 一 in the same
   // face and size: a curly quote in a Latin font is narrow, and a font without CJK glyphs has no em (cjkEm). Every
@@ -1014,11 +1043,16 @@ void ParsedText::applyPunctuationWidths(const GfxRenderer& renderer, const int f
       neighbour = neighbourClass(i + 1, firstCodepoint(words[i + 1]));
     }
     const int full = widths[i];
-    const int mid = (full * CjkPunctuation::widthOf(table, mark, neighbour, false).forced + 4) / 8;
-    const int edge = (full * CjkPunctuation::widthOf(table, mark, Class::None, true).forced + 4) / 8;
+    const CjkPunctuation::Width midLine = CjkPunctuation::widthOf(table, mark, neighbour, false);
+    const CjkPunctuation::Width lineEdge = CjkPunctuation::widthOf(table, mark, Class::None, true);
+    const int mid = (full * midLine.forced + 4) / 8;
+    const int edge = (full * lineEdge.forced + 4) / 8;
     widths[i] = static_cast<uint16_t>(mid);
     // Half an em at most, so a byte holds it at any size a page can show; clamped all the same.
     edgeTrim_[i] = static_cast<int8_t>(std::clamp(edge - mid, -127, 127));
+    // What push-in may take off the mark, down to the minimum each place allows; half an em at most, as above.
+    shrink_[i] = static_cast<uint8_t>(std::clamp(mid - (full * midLine.minimum + 4) / 8, 0, 255));
+    edgeShrink_[i] = static_cast<uint8_t>(std::clamp(edge - (full * lineEdge.minimum + 4) / 8, 0, 255));
   }
 }
 
@@ -1201,14 +1235,18 @@ size_t ParsedText::computeSingleLineBreakNoHyphen(const GfxRenderer& renderer, c
 
   size_t currentIndex = lineStartIndex;
   int lineWidth = 0;
+  int lineShrink = 0;  // what the line's marks and gaps may give mid-line (push-in)
 
   while (currentIndex < wordWidths.size()) {
     const bool isFirstWord = currentIndex == lineStartIndex;
     const int spacing = isFirstWord ? 0 : naturalGapBefore(renderer, fontId, currentIndex);
 
     const int candidateWidth = spacing + wordWidths[currentIndex];
-    if (withEdgeTrims(lineWidth + candidateWidth, lineStartIndex, currentIndex) <= effectivePageWidth) {
+    const int candidateShrink = shrink_[currentIndex] + (isFirstWord ? 0 : gapShrinkBefore(currentIndex, spacing));
+    if (pushedInWidth(lineWidth + candidateWidth, lineShrink + candidateShrink, lineStartIndex, currentIndex) <=
+        effectivePageWidth) {
       lineWidth += candidateWidth;
+      lineShrink += candidateShrink;
       ++currentIndex;
       continue;
     }
@@ -1387,6 +1425,7 @@ void ParsedText::computeHyphenatedLineBreaks(
   while (currentIndex < wordWidths.size()) {
     const size_t lineStart = currentIndex;
     int lineWidth = 0;
+    int lineShrink = 0;  // what the line's marks and gaps may give mid-line (push-in)
     bool lineEndedWithHyphenation = false;
     int splitPrefixIndex = -1;
     bool splitNeedsInsertedHyphen = false;
@@ -1399,16 +1438,20 @@ void ParsedText::computeHyphenatedLineBreaks(
       const bool isFirstWord = currentIndex == lineStart;
       const int spacing = isFirstWord ? 0 : interWordGaps[currentIndex];
       const int candidateWidth = spacing + wordWidths[currentIndex];
+      const int candidateShrink = shrink_[currentIndex] + (isFirstWord ? 0 : gapShrinkBefore(currentIndex, spacing));
 
-      // Word fits on current line
-      if (withEdgeTrims(lineWidth + candidateWidth, lineStart, currentIndex) <= effectivePageWidth) {
+      // Word fits on current line, pushed in if need be
+      if (pushedInWidth(lineWidth + candidateWidth, lineShrink + candidateShrink, lineStart, currentIndex) <=
+          effectivePageWidth) {
         lineWidth += candidateWidth;
+        lineShrink += candidateShrink;
         ++currentIndex;
         continue;
       }
 
       // Word would overflow — try to split based on hyphenation points. What the line's first token grows by at the
-      // line start (a ruby's overhang held inside it) is no room for the prefix.
+      // line start (a ruby's overhang held inside it) is no room for the prefix. The prefix is measured against the
+      // line at its natural width: a hyphenated line never relies on push-in.
       const int availableWidth = effectivePageWidth - lineWidth - spacing - std::max(0, lineStartTrim(lineStart));
       const bool allowFallbackBreaks = isFirstWord;  // Only for first word on line
 
@@ -1489,6 +1532,7 @@ void ParsedText::computeHyphenatedLineBreaksFromIndex(
   while (currentIndex < wordWidths.size()) {
     const size_t lineStart = currentIndex;
     int lineWidth = 0;
+    int lineShrink = 0;  // what the line's marks and gaps may give mid-line (push-in)
     bool lineEndedWithHyphenation = false;
     int splitPrefixIndex = -1;
     bool splitNeedsInsertedHyphen = false;
@@ -1498,9 +1542,12 @@ void ParsedText::computeHyphenatedLineBreaksFromIndex(
       const bool isFirstWord = currentIndex == lineStart;
       const int spacing = isFirstWord ? 0 : interWordGaps[currentIndex];
       const int candidateWidth = spacing + wordWidths[currentIndex];
+      const int candidateShrink = shrink_[currentIndex] + (isFirstWord ? 0 : gapShrinkBefore(currentIndex, spacing));
 
-      if (withEdgeTrims(lineWidth + candidateWidth, lineStart, currentIndex) <= effectivePageWidth) {
+      if (pushedInWidth(lineWidth + candidateWidth, lineShrink + candidateShrink, lineStart, currentIndex) <=
+          effectivePageWidth) {
         lineWidth += candidateWidth;
+        lineShrink += candidateShrink;
         ++currentIndex;
         continue;
       }
@@ -1656,6 +1703,8 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   wordWidths.insert(wordWidths.begin() + wordIndex + 1, remainderWidth);
   markClass_.insert(markClass_.begin() + wordIndex + 1, static_cast<uint8_t>(CjkPunctuation::Class::None));
   edgeTrim_.insert(edgeTrim_.begin() + wordIndex + 1, 0);
+  shrink_.insert(shrink_.begin() + wordIndex + 1, 0);
+  edgeShrink_.insert(edgeShrink_.begin() + wordIndex + 1, 0);
   // A split word is never a ruby base (refused above): its remainder holds no ruby reserve either.
   if (!rubyEdge_.empty()) rubyEdge_.insert(rubyEdge_.begin() + wordIndex + 1, RubyEdge{});
   if (outInsertedHyphen) {
@@ -1689,20 +1738,37 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     return width;
   };
 
+  // A mark the line's edge acts on: the first token when it opens the line, the last when it closes it.
+  const auto atLineEdge = [&](const size_t wordIdx) {
+    const size_t i = lastBreakAt + wordIdx;
+    return (wordIdx == 0 && opensLine(i)) || (wordIdx + 1 == lineWordCount && closesLine(i));
+  };
+
   int lineWordWidthSum = 0;
   size_t actualGapCount = 0;
   bool cjkGapOnLine = false;
   int totalNaturalGaps = 0;
+  // What push-in may take off the line (spec 5.3), in the order it is taken: the line-edge marks, the other marks, the
+  // CJK-Latin gaps.
+  int edgeShrinkTotal = 0;
+  int markShrinkTotal = 0;
+  int gapShrinkTotal = 0;
 
   for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
     lineWordWidthSum += boxWidth(wordIdx);
+    if (atLineEdge(wordIdx)) {
+      edgeShrinkTotal += edgeShrink_[lastBreakAt + wordIdx];
+    } else {
+      markShrinkTotal += shrink_[lastBreakAt + wordIdx];
+    }
     // Count gaps: each word after the first creates a gap, unless it's a continuation.
     // Gaps before closing punctuation (. , ) » etc.) are excluded from justification
     // distribution so they stay at natural space width.
     const uint32_t firstCp = firstCodepoint(words[lastBreakAt + wordIdx]);
     const TokenBoundary::Boundary boundary = boundaries[lastBreakAt + wordIdx];
     if (wordIdx > 0 && !boundary.continues) {
-      // A word gap or a CJK gap: both stretch when justified, only the word gap has a width.
+      // A word gap or a CJK gap: both stretch when justified. A word gap is a space wide, a CJK gap has no width but
+      // the CJK-Latin gap's.
       const bool beforeClosing = isClosingPunctuation(firstCp);
       if (!beforeClosing) actualGapCount++;
       if (boundary.noSpaceBefore) cjkGapOnLine = true;
@@ -1712,7 +1778,9 @@ ParsedText::LineProcessResult ParsedText::extractLine(
             spaceBefore(renderer, fontId, lastBreakAt + wordIdx) * wordScale(lastBreakAt + wordIdx - 1) + 0.5f);
       } else {
         // The CJK-Latin gap is already scaled to its CJK side.
-        totalNaturalGaps += cjkLatinGapBefore(renderer, fontId, lastBreakAt + wordIdx);
+        const int gap = cjkLatinGapBefore(renderer, fontId, lastBreakAt + wordIdx);
+        totalNaturalGaps += gap;
+        gapShrinkTotal += gapShrinkBefore(lastBreakAt + wordIdx, gap);
       }
     } else if (wordIdx > 0) {
       // Non-breaking space tokens (" " with continues=true) are visible, stretchable spaces —
@@ -1734,9 +1802,20 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   // so relying only on breakIndex would incorrectly disable justification.
   const bool isLastLine = lineBreak == words.size();
 
+  // Push-in: the line gives what its natural width overruns the measure by, as far as it can (an overfull line that
+  // cannot be saved still gives everything). The line-edge marks are half or full, nothing in between (spec 5.2), so
+  // they give all of theirs as soon as the line needs anything; the rest comes from the other marks, then from the
+  // CJK-Latin gaps (JLREQ 3.8.3). What the line-edge marks give beyond the need is spread by justification.
+  const int naturalWidth = lineWordWidthSum + totalNaturalGaps;
+  const int need = std::clamp(naturalWidth - effectivePageWidth, 0, edgeShrinkTotal + markShrinkTotal + gapShrinkTotal);
+  const int edgeGives = need > 0 ? edgeShrinkTotal : 0;
+  const int marksGive = std::min(std::max(0, need - edgeGives), markShrinkTotal);
+  const int gapsGive = std::min(std::max(0, need - edgeGives - marksGive), gapShrinkTotal);
+  const int lineWidth = naturalWidth - edgeGives - marksGive - gapsGive;
+
   // For justified text, compute per-gap extra to distribute remaining space evenly.
   // Cap stretch to effectivePageWidth/8 per gap to prevent rivers in sparse lines.
-  const int spareSpace = effectivePageWidth - lineWordWidthSum - totalNaturalGaps;
+  const int spareSpace = effectivePageWidth - lineWidth;
   const bool justified = blockStyle.alignment == CssTextAlign::Justify && !isLastLine && actualGapCount >= 1;
   const int justifyExtra =
       justified ? std::min(spareSpace / static_cast<int>(actualGapCount), effectivePageWidth / 8) : 0;
@@ -1757,10 +1836,30 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   // may be negative for hanging indents, e.g. margin-left:3em; text-indent:-1em).
   auto xpos = static_cast<int16_t>(lineIndent + gridInset_);
   if (blockStyle.alignment == CssTextAlign::Right) {
-    xpos = gridInset_ + effectivePageWidth - lineWordWidthSum - totalNaturalGaps;
+    xpos = gridInset_ + effectivePageWidth - lineWidth;
   } else if (blockStyle.alignment == CssTextAlign::Center) {
-    xpos = gridInset_ + (effectivePageWidth - lineWordWidthSum - totalNaturalGaps) / 2;
+    xpos = gridInset_ + (effectivePageWidth - lineWidth) / 2;
   }
+
+  // What push-in takes off token wordIdx's box and off the CJK gap before it, called in line order by the x loop
+  // below: a line-edge mark gives all it can, the other marks and the gaps their shares of what their tier gives.
+  int marksBefore = 0;  // the shrinks of the other marks before this one
+  int gapsBefore = 0;   // and of the gaps
+  const auto markGive = [&](const size_t wordIdx) {
+    if (need == 0) return 0;
+    const size_t i = lastBreakAt + wordIdx;
+    if (atLineEdge(wordIdx)) return static_cast<int>(edgeShrink_[i]);
+    const int give = pushInShare(marksBefore, shrink_[i], marksGive, markShrinkTotal);
+    marksBefore += shrink_[i];
+    return give;
+  };
+  const auto gapGive = [&](const size_t wordIdx, const int gap) {
+    if (need == 0) return 0;
+    const int amount = gapShrinkBefore(lastBreakAt + wordIdx, gap);
+    const int give = pushInShare(gapsBefore, amount, gapsGive, gapShrinkTotal);
+    gapsBefore += amount;
+    return give;
+  };
 
   // A narrowed CJK mark is drawn where its ink sits: ink in the right half of its em (an opening bracket) moves
   // left by what the mark lost, centred ink by half of it, ink in the left half stays (spec 5.2).
@@ -1819,7 +1918,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   lineXPos.reserve(lineWordCount);
 
   for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
-    const int box = boxWidth(wordIdx);
+    const int box = boxWidth(wordIdx) - markGive(wordIdx);
     // A base character widened by its ruby is drawn into its share (lead); the line's first token moves in by the
     // ruby overhang its box holds (start).
     int rubyShift = 0;
@@ -1855,6 +1954,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
               spaceBefore(renderer, fontId, lastBreakAt + wordIdx + 1) * wordScale(lastBreakAt + wordIdx) + 0.5f);
         } else {
           gap = cjkLatinGapBefore(renderer, fontId, lastBreakAt + wordIdx + 1);
+          gap -= gapGive(wordIdx + 1, gap);
         }
         // Don't stretch the gap before closing punctuation — it looks wrong with
         // extra space before ".", ")", "»" etc.

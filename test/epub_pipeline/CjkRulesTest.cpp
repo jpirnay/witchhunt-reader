@@ -241,6 +241,17 @@ class LineLayout {
 
   bool startsWithMark() const { return !cls_.empty() && cls_.front() != CjkPunctuation::Class::None; }
 
+  // The line's natural width (each mark at its table width, each CJK-Latin gap a quarter em) when the rules set all of
+  // its gaps; -1 when one is wherever the dump drew it (a word space, which a justified line stretches).
+  int naturalWidth() const {
+    int width = 0;
+    for (size_t k = 0; k < forced_.size(); ++k) {
+      if (k > 0 && gap_[k] == Gap::Dumped) return -1;
+      width += forced_[k] + (gap_[k] == Gap::Quarter ? quarter_[k] : 0);
+    }
+    return width;
+  }
+
   // Token k's box with its mark at its minimum width, wherever the dump drew it: the least room it can take.
   int leftAtMinimum(const size_t k) const { return line_.words[k].x + shift(k, minimum_[k]); }
   int rightAtMinimum(const size_t k) const { return leftAtMinimum(k) + minimum_[k]; }
@@ -477,7 +488,7 @@ struct Case {
   std::string epub;
   std::string language;
   bool mixesLatin = false;    // puts Latin letters or digits against Han or kana with no space
-  bool forcesPushIn = false;  // has lines the push-in must narrow marks on to fit
+  bool forcesPushIn = false;  // has lines the greedy breaker (hyphenation on) fits only pushed in
   bool hyphenation = false;
 };
 
@@ -596,7 +607,7 @@ TEST_P(CjkRules, LinesSitWhereTheirWidthsPutThem) {
   // Ruby lines and table cells are checked pair by pair; of the others only a few centred or justified headings are not
   // laid out again.
   EXPECT_GE(checked * 4, restated * 3) << "only " << checked << " of " << restated << " lines laid out again";
-  if (GetParam().forcesPushIn) EXPECT_GT(pushedIn, 0u) << "no line was pushed in";
+  if (GetParam().hyphenation && GetParam().forcesPushIn) EXPECT_GT(pushedIn, 0u) << "no line was pushed in";
 }
 
 // Between Han or kana and a Latin letter or European digit with no space in the source, a Chinese or Japanese book
@@ -736,8 +747,16 @@ TEST_P(CjkJustifiedRules, JustifiedLinesEndFlushOnAWholeEmGrid) {
     for (const size_t i : indices) {
       const DumpLine& line = lines[i];
       const LineLayout layout(renderer, line, profile);
-      // The line ends at the text width on its last token, or a ruby box that holds the group's overhang inside.
-      bool flush = layout.endsAt(false) == bounds.right || layout.endsAt(true) == bounds.right;
+      // The line ends at the text width on its last token, or a ruby box that holds the group's overhang inside. The
+      // last token is at its line-end width, or at its line-end minimum exactly when the line was pushed in: when its
+      // natural width overruns the text width from where the line starts (a pushed-in opening mark there moves that
+      // start). A line with ruby or a word space, whose natural width the dump does not give, may end either way.
+      const int natural = line.rubies.empty() ? layout.naturalWidth() : -1;
+      const bool endsFull = layout.endsAt(false) == bounds.right;
+      const bool endsAtMinimum = layout.endsAt(true) == bounds.right;
+      bool flush = natural < 0 ? endsFull || endsAtMinimum
+                               : (endsFull && natural <= bounds.right - layout.startAt(0)) ||
+                                     (endsAtMinimum && natural > bounds.right - layout.startAt(1));
       for (const auto& ruby : line.rubies) {
         if (ruby.first + ruby.count == line.words.size() && ruby.x + ruby.w == bounds.right) flush = true;
       }
@@ -762,7 +781,7 @@ std::vector<Case> cjkBooks() {
     bool forcesPushIn;
   };
   std::vector<Case> cases;
-  for (const Book& book : std::vector<Book>{{"test_cjk_line_breaking", "ja", true, false},
+  for (const Book& book : std::vector<Book>{{"test_cjk_line_breaking", "ja", true, true},
                                             {"test_cjk_ja_soseki", "ja", false, false},
                                             {"test_cjk_ko_hyeon", "ko", false, false},
                                             {"test_cjk_zh_honglou", "zh-Hant", false, false},

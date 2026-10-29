@@ -717,3 +717,22 @@ TEST(RubyEdges, AWordHyphenatedAfterAGroupStartingALineStaysInside) {
     EXPECT_LE(right, 78) << line.words.back();
   }
 }
+
+// Push-in takes nothing a ruby needs: a mark between two groups that overhang it keeps their overhangs.
+TEST(RubyPushIn, AMarkUnderTwoOverhangsGivesNothing) {
+  // Each 20 px ruby passes its 10 px base by 5 px a side. Between the groups both overhang 、 by 5 px, half of its
+  // 10 px; elsewhere they push: the first 字 widens to 15 and is drawn 5 px in (the line start), the second to 15
+  // (字 follows). 字、字字字 is 60 px, 70 with the last 字. 、 could give its 5 px mid-line blank and make that 65,
+  // but the two overhangs fill it: pushed in, the rubies would lie 5 px over each other. So the line breaks before
+  // the last 字, and the boxes meet at 20 (Simplified Chinese table, every book's).
+  for (const bool hyphenation : {false, true}) {
+    ParsedText text(false, hyphenation, aligned(CssTextAlign::Left));
+    text.addWord("字、字字字字", EpdFontFamily::REGULAR);
+    ASSERT_TRUE(text.addRubyGroup(0, 1, "かかかか"));
+    ASSERT_TRUE(text.addRubyGroup(2, 1, "かかかか"));
+    const auto lines = layout(text, 65);
+    ASSERT_EQ(wordsOf(lines), (Words{{"字", "、", "字", "字", "字"}, {"字"}})) << hyphenation;
+    EXPECT_EQ(lines[0].xpos, (X{5, 15, 25, 40, 50})) << hyphenation;
+    EXPECT_EQ(boxesOf(lines[0]), (Boxes{{0, 20}, {20, 20}})) << hyphenation;
+  }
+}

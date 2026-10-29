@@ -58,10 +58,14 @@ class ParsedText {
   std::vector<uint16_t> wordWidths_;
   // Each token's CjkPunctuation::Class when it is one full-width mark, and how much wider (> 0) or narrower (< 0) it
   // is at the line edge its mark acts at than mid-line, in pixels: where a line starts at an opening mark, where it
-  // ends after any other. Two bytes a token. Layout scratch in step with wordWidths_: calculateWordWidths fills both,
-  // hyphenateWordAtIndex inserts into both.
+  // ends after any other. Then what push-in (spec 5.3) may take off the mark, in pixels: mid-line, its width there
+  // less its minimum beside the same neighbour (shrink_); at its line edge, its line-edge width less its line-edge
+  // minimum (edgeShrink_); 0 for other tokens. Four bytes a token. Layout scratch in step with wordWidths_:
+  // calculateWordWidths fills all four, hyphenateWordAtIndex inserts into all four.
   std::vector<uint8_t> markClass_;
   std::vector<int8_t> edgeTrim_;
+  std::vector<uint8_t> shrink_;
+  std::vector<uint8_t> edgeShrink_;
   // How a ruby group's tokens sit in their widths (applyRubyWidths), in pixels: `start` on the leader and `end` on
   // the group's last token are the overhang a line edge must hold when the group starts or ends a line; `lead` is
   // how far a base character widened by a longer ruby is drawn into its share (1:2:1 spreading).
@@ -220,9 +224,11 @@ class ParsedText {
   // Fills `out` (cleared first); uses blockStyle.fontSizeMultiplier internally.
   void calculateWordWidths(const GfxRenderer& renderer, int fontId,
                            std::vector<uint16_t>& out);  // uses blockStyle.fontSizeMultiplier internally
-  // Narrows each CJK mark that is a token to its mid-line width and fills markClass_/edgeTrim_.
+  // Narrows each CJK mark that is a token to its mid-line width and fills markClass_, edgeTrim_, shrink_ and
+  // edgeShrink_.
   void applyPunctuationWidths(const GfxRenderer& renderer, int fontId, std::vector<uint16_t>& widths);
-  // Widens the base of each ruby longer than what its neighbours let it overhang, and fills rubyEdge_.
+  // Widens the base of each ruby longer than what its neighbours let it overhang, and fills rubyEdge_; a mark in a
+  // group, or between overhangs, gives push-in only what the rubies leave it (shrink_).
   void applyRubyWidths(const GfxRenderer& renderer, int fontId, std::vector<uint16_t>& widths);
   // The advance of a ruby text over the group led by token `leader`: half the leader's size, its font, regular style,
   // rounded once as TextBlock draws it.
@@ -239,6 +245,31 @@ class ParsedText {
   // A line first..last as drawn: its first and last token at their line-edge widths.
   int withEdgeTrims(const int naturalWidth, const size_t first, const size_t last) const {
     return naturalWidth + lineStartTrim(first) + lineEndTrim(last);
+  }
+  // A mark that is not an opening one: a line's end edge acts on it. An ideographic space or an ambiguous quote passes
+  // too, with nothing to give.
+  bool closesLine(const size_t i) const {
+    return markClass_[i] != static_cast<uint8_t>(CjkPunctuation::Class::None) && !opensLine(i);
+  }
+  // What the gap of `gapBefore` px before token j may give under push-in: at a breakable CJK gap (where only a
+  // CJK-Latin gap has a width) all but half of it, rounded down, as JLREQ lets a quarter-em gap shrink to 1/8 em; a
+  // word space or a glued seam nothing.
+  int gapShrinkBefore(const size_t j, const int gapBefore) const {
+    const TokenBoundary::Boundary boundary = wordBoundaries[j];
+    return !boundary.continues && boundary.noSpaceBefore ? gapBefore - gapBefore / 2 : 0;
+  }
+  // A line's push-in total with its first and last token giving their line-edge shrinks: `shrinkSum` is the line's
+  // mid-line sum, each token's shrink_ and each gap's gapShrinkBefore.
+  int withEdgeShrinks(const int shrinkSum, const size_t first, const size_t last) const {
+    int sum = shrinkSum;
+    if (opensLine(first)) sum += edgeShrink_[first] - shrink_[first];
+    if (closesLine(last)) sum += edgeShrink_[last] - shrink_[last];
+    return sum;
+  }
+  // The line first..last with everything that can give way at its minimum, what a breaker holds against the width
+  // (spec 5.3): `naturalSum` is its mid-line widths and gaps, `shrinkSum` what they may give.
+  int pushedInWidth(const int naturalSum, const int shrinkSum, const size_t first, const size_t last) const {
+    return withEdgeTrims(naturalSum, first, last) - withEdgeShrinks(shrinkSum, first, last);
   }
 
  public:
