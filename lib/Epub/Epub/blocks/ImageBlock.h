@@ -230,7 +230,7 @@ class ImageBlock final : public Block {
   };
 
   // While one of these is live, `image`'s pixel cache is out of the way when it was stamped coarse
-  // (PixelCache::PXC_MAGIC_COARSE: a decode that settled for a lower scale or the DC preview because the heap was
+  // (PixelCache::PXC_MAGIC_COARSE: a decode that settled for a lower scale, down to 1/8, because the heap was
   // short), so a render decodes the image again; at its end the coarse cache comes back unless that decode wrote one
   // in its place. A decode that fails, or stops for input, leaves the coarse picture, never none, and nothing it
   // parked (no pass would resume it). For the variant `monochromeOutput` selects, and with `alsoGrayscale` the

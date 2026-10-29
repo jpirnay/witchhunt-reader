@@ -21,7 +21,8 @@
 // block) and inverted with an n-point IDCT -- libjpeg's reduced-size decoding: a proper low-pass
 // resample of the block, sharper and with less aliasing than a box average of the full decode.
 // Successive-approximation refinement needs to know which coefficients are non-zero across the
-// WHOLE block, so a 64-bit mask per block tracks that for the ones not kept.
+// WHOLE block, so a 64-bit mask per block tracks that for the ones not kept. At 1/8 only the DC
+// coefficient is kept, so the AC scans are not decoded at all.
 //
 // Chroma is decoded only where the bitstream forces it (interleaved DC scans) and discarded.
 namespace ProgressiveJpeg {
@@ -46,7 +47,8 @@ struct ImageInfo {
 };
 
 // Reads marker segments through SOF and rewinds the file. Unsupported for anything
-// decode() would refuse on geometry alone (non-SOF2, precision, luma not at full sampling).
+// decode() would refuse on geometry alone (non-SOF2, precision, luma not at full sampling);
+// IoError when the card fails a read, or a seek inside the file.
 // `base`: where the JPEG starts in the file -- 0 for a file of its own, the entry's data offset for
 // an image stored uncompressed in a ZIP and read in place. Every offset is relative to it.
 Result probe(FsFile& file, ImageInfo& info, uint32_t base = 0);
@@ -66,7 +68,7 @@ using AbortCallback = bool (*)(void* user);
 
 // Where a decode's time went, for the caller's log. Times need DecodeOptions::clock.
 struct DecodeStats {
-  uint32_t indexMs = 0;  // header + scan index: one pass over the whole file
+  uint32_t indexMs = 0;  // header + scan index: one pass over the file (at 1/8 up to the scan completing luma DC)
   uint32_t bandsMs = 0;  // entropy decode, IDCT and the band callbacks (which include the caller's
                          // resample/dither/cache work)
   uint32_t reads = 0;    // file reads (each a seek + up to 512 bytes, or a window's worth)
@@ -78,7 +80,8 @@ struct DecodeOptions {
   uint32_t base = 0;
   uint8_t scaleShift = 0;  // 0..3: output is floor(width >> s) x floor(height >> s)
   // Polled before every band and every 32 KB while indexing the file (the whole file is read
-  // before the first band): a watchdog feed belongs here. True aborts with Result::Aborted.
+  // before the first band; at 1/8 up to the scan that completes luma DC): a watchdog feed belongs
+  // here. True aborts with Result::Aborted.
   // A Decoder driven in steps polls it the same way within each step.
   AbortCallback shouldAbort = nullptr;
   void* abortUser = nullptr;
@@ -93,13 +96,32 @@ struct DecodeOptions {
   // Optional instrumentation: filled when non-null; times only when `clock` (ms) is given too.
   DecodeStats* stats = nullptr;
   uint32_t (*clock)() = nullptr;
+  // At 1/8: a pixel for every block, the partial ones at the right and bottom edges too, so the
+  // output is ceil(width / 8) x ceil(height / 8). Each of those is its block's average, padding
+  // included -- a resampler that maps the picture onto a box wants them all (decodeResized); a
+  // caller that wants the scale's own size (floor, as at every scale) leaves it off.
+  bool wholeBlocks = false;
 };
 
 // Every failure is reported before the first band is emitted unless the entropy data itself is
-// corrupt, so a caller can fall back to another decoder on Unsupported / OutOfMemory.
+// corrupt or the card fails a read or seek (IoError), so a caller can fall back to another decoder
+// on Unsupported / OutOfMemory. Once the card has failed one, the result is IoError whatever the
+// data then looked like: not a reason to decode the file another way.
 Result decode(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user);
 
-struct Session;
+// One output row of decodeResized(): `width` gray pixels at row `y`. False stops the decode.
+using RowCallback = bool (*)(void* user, uint16_t y, const uint8_t* gray, uint16_t width);
+
+// The whole picture at the size of a box: the 1/8 decode (a DC-only session, see workspaceBytes)
+// resampled bilinearly to outputWidth x outputHeight, rows in order. The converters' last resort
+// when the heap holds no finer scale's workspace. A 1/8 level is a whole block's average, so an
+// upscale has to interpolate between them in both axes, or it shows the block grid; a converter's
+// per-band resampler sees one row of blocks at a time and cannot. The source is every block
+// (DecodeOptions::wholeBlocks), mapped corner to corner onto the box. The workspace comes as for
+// decode() (options.scaleShift and wholeBlocks are set here), the resampler's three output rows
+// from the heap. Results as decode()'s.
+Result decodeResized(FsFile& file, const DecodeOptions& options, uint16_t outputWidth, uint16_t outputHeight,
+                     RowCallback callback, void* user);
 
 // decode() in pieces, for a caller that must stay responsive between them (Home's cover pass
 // pauses for a button press and resumes where it stopped instead of starting over). decode() is
@@ -145,7 +167,10 @@ class Decoder {
  private:
   Result claim(FsFile& file, const DecodeOptions& options, BandCallback callback, void* user);
 
-  Session* session_ = nullptr;
+  // The session at the front of the workspace: one for every scan, or at 1/8 one for the DC scans
+  // alone (dcOnly_), which is a fraction of the size.
+  void* session_ = nullptr;
+  bool dcOnly_ = false;
   std::unique_ptr<uint8_t[]> owned_;
   FsFile* file_ = nullptr;
   DecodeOptions options_{};
