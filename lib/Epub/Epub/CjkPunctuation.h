@@ -8,6 +8,7 @@
 // and blank on the other; set next to other punctuation or at a line edge, part of that blank goes, as the
 // layout requirements of each language describe (W3C JLREQ, CLREQ). The rules are written from those documents;
 // KOReader's crengine tables (textlang.cpp) were the cross-check, not the source.
+// Section numbers ("spec 5.2") refer to docs/design/cjk-typography.md.
 namespace CjkPunctuation {
 
 // The JLREQ classes of the marks a table adjusts.

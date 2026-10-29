@@ -12,6 +12,7 @@ class LanguageHyphenator;
 // Rules that follow from the characters alone stay with the characters: CJK line breaking and kinsoku
 // (CjkLineBreak.h) and the Simplified Chinese punctuation widths on CJK punctuation apply in every book. The
 // profile decides what needs the language.
+// Section numbers ("spec 5.4") refer to docs/design/cjk-typography.md.
 struct TypographyProfile {
   // Where lines may break. Informational in this round: CjkLineBreak applies its rules by character.
   enum class Breaking : uint8_t { AtSpaces, BetweenCharacters, KoreanWords };
