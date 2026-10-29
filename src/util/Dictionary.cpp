@@ -1141,7 +1141,6 @@ void Dictionary::collectPrefixes(LookupSession& session, PrefixSearch& search, H
   constexpr bool synonyms = std::is_same<Hits, SynonymHits>::value;
   HalFile& sidecar = synonyms ? session.sidx : session.qidx;
   ScanReader& scan = synonyms ? session.synScan : session.idxScan;
-  SampleWindow& window = synonyms ? session.synWindow : session.idxWindow;
   const uint32_t sampleCount = synonyms ? session.synSampleCount : session.sampleCount;
   const uint32_t fileSize = synonyms ? session.synSize : session.idxSize;
   const size_t suffixBytes = synonyms ? 4 : 8;  // .syn: BE32 ordinal; .idx: BE32 offset, BE32 size
@@ -1153,13 +1152,15 @@ void Dictionary::collectPrefixes(LookupSession& session, PrefixSearch& search, H
     if (!search.beginProbe()) return;
     memcpy(target, search.run, targetBytes);
     target[targetBytes] = '\0';
-    const uint32_t start = bisectSamples(sidecar, scan, sampleCount, target, &window);
-    // A descent that lands past byte 0 records its window, whose first headword (w0) the next
-    // target is cut from; without it the search cannot go on.
-    if ((start != 0 && !window.valid) || !scan.seekSet(start)) {
+    // No window record: its bounds would cost a sample read and two refills, and no later target
+    // falls inside the window. The scan's first entry is the window's first headword (w0).
+    const uint32_t start = bisectSamples(sidecar, scan, sampleCount, target, nullptr);
+    if (!scan.seekSet(start)) {
       search.failed = true;
       return;
     }
+    bool haveW0 = false;
+    size_t w0Common = 0;  // bytes of the run w0 starts with
 
     // The scan stops at the target rather than at the window's end, so no window is scanned twice.
     // Prefixes of the run sort by length, so a later hit of a scan is a longer one.
@@ -1168,6 +1169,10 @@ void Dictionary::collectPrefixes(LookupSession& session, PrefixSearch& search, H
       const uint32_t entryStart = scan.position();
       const int wordLen = scan.readWord(wordBuf, sizeof(wordBuf));
       if (wordLen < 0) break;
+      if (!haveW0) {
+        haveW0 = true;
+        w0Common = commonPrefixLen(search.run, search.runBytes, wordBuf);
+      }
       uint8_t suffix[8];
       if (!scan.readBytes(suffix, suffixBytes)) break;
       if (StringUtils::asciiCaseCmp(wordBuf, target) > 0) break;
@@ -1210,10 +1215,15 @@ void Dictionary::collectPrefixes(LookupSession& session, PrefixSearch& search, H
     if (out.count == DictPrefixMatch::MAX_HITS) return;
     if (out.count > 0 && probesInFile >= PREFIX_PROBES_PER_FILE) return;
     if (start == 0) return;  // nothing sorts before the window
+    // The next target is cut from w0; a window whose first entry could not be read ends the search.
+    if (!haveW0) {
+      search.failed = true;
+      return;
+    }
 
     // Spec 5.2: every prefix of the run that sorts before w0 is a prefix of w0, and shorter than
     // every hit already seen.
-    size_t limit = commonPrefixLen(search.run, search.runBytes, window.low.c_str());
+    size_t limit = w0Common;
     if (out.count > 0) limit = std::min<size_t>(limit, out.hits[out.count - 1].runBytes - 1);
     limit = codepointFloor(search.run, limit);
     if (limit == 0 || limit >= targetBytes) return;  // strictly shorter every time, so it ends

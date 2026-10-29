@@ -1207,6 +1207,47 @@ TEST_F(DictionaryTest, PrefixSearchGivesUpBetweenProbesWhenAsked) {
   EXPECT_EQ(answered.count, 3);
 }
 
+// A probe reads the window's first headword (w0) from its own scan, not from a window record: the
+// record's bounds cost a sample read and two refills (the next sample's headword, then the scan's
+// seek back) that the prefix search never uses, since every later target sorts before w0.
+TEST_F(DictionaryTest, PrefixSearchTakesTheWindowsFirstHeadwordFromItsScan) {
+  // 600 fillers (13 bytes each), 大 大学 大学生, then 300 of 学 + one ideograph: 903 entries, samples
+  // at entries 0, 256, 512 and 768 (bytes 0, 3328, 6656, 10320). The descent reads samples 2 and 3
+  // with one refill each, then sample 2 again for the start; the scan refills from byte 6656 up to
+  // 学一 at 7845: [6656, 7168), [7168, 7680), [7680, 8192). 3 sample reads and 5 refills.
+  std::vector<HeadwordSpec> headwords = asciiFillers(600);
+  for (const char* word : {"大", "大学", "大学生"}) headwords.push_back({word, "filler"});
+  for (int i = 0; i < 300; i++) headwords.push_back({"学" + cp(0x4E00 + i), "filler"});
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("PrefixReadsIdx", headwords));
+  Dictionary idxDict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(idxDict, "PrefixReadsIdx"));
+  DictPrefixMatch m;
+  ASSERT_TRUE(idxDict.resolvePrefixes("大学生活", m));
+  EXPECT_EQ(hitsOf(m), (HitList{{"大学生", 9}, {"大学", 6}, {"大", 3}}));
+  EXPECT_EQ(m.probes, 1);
+  EXPECT_EQ(m.reads, 8);  // 11 with the window record
+
+  // The same over a .syn: 600 fillers (9 bytes each), 大學, then 300 of 學 + one ideograph; samples
+  // at bytes 0, 2304, 4608 and 7248. The .idx (one sample, 27 bytes): 1 sample read and 1 refill.
+  // The .syn: the descent's 3 sample reads and 2 refills, the scan's [4608, 5120) and [5120, 5632).
+  // Following 大學 to 大学: a sample read each for locateByOrdinal and locateRun, the .idx resident.
+  std::vector<SynonymSpec> synonyms;
+  for (int i = 0; i < 600; i++) {
+    char word[16];
+    snprintf(word, sizeof(word), "b%03d", i);
+    synonyms.push_back({word, "大"});
+  }
+  synonyms.push_back({"大學", "大学"});
+  for (int i = 0; i < 300; i++) synonyms.push_back({"學" + cp(0x4E00 + i), "大"});
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("PrefixReadsSyn", {{"大", "big"}, {"大学", "university"}}, synonyms));
+  Dictionary synDict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(synDict, "PrefixReadsSyn"));
+  ASSERT_TRUE(synDict.resolvePrefixes("大學生", m));
+  EXPECT_EQ(hitsOf(m), (HitList{{"大学", 6}, {"大", 3}}));
+  EXPECT_EQ(m.probes, 3);  // the .idx scan, the .syn scan, following 大學
+  EXPECT_EQ(m.reads, 11);  // 14 with the window record
+}
+
 TEST_F(DictionaryTest, LatinDictionaryAnswersACjkRunInOneProbePerFile) {
   const struct {
     const char* fixture;

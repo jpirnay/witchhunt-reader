@@ -268,7 +268,6 @@ class Dictionary {
     ScanReader idxScan;
     ScanReader synScan;
     SampleWindow idxWindow;  // cached descent over .qidx/.idx
-    SampleWindow synWindow;  // the same over .sidx/.syn, for resolvePrefixes()'s .syn probes
     uint32_t idxSize = 0;
     uint32_t sampleCount = 0;  // 0 when the sidecar is absent, stale or empty
     uint32_t entryCount = 0;   // .idx entries the sidecar was built over; 0 = unknown
