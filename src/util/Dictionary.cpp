@@ -135,6 +135,13 @@ void Dictionary::ScanReader::attach(HalFile* f, uint8_t* b, uint32_t size) {
   refills = 0;
 }
 
+void Dictionary::ScanReader::forget() {
+  chunkStart += static_cast<uint32_t>(cursor);
+  filled = 0;
+  cursor = 0;
+  posDirty = true;
+}
+
 bool Dictionary::ScanReader::seekSet(uint32_t offset) {
   if (!file || offset > fileSize) return false;
   // Stay inside the buffer when the target is already resident — the bisect's
@@ -519,8 +526,25 @@ uint32_t Dictionary::bisectSamples(HalFile& sidecar, ScanReader& source, uint32_
 }
 
 bool Dictionary::readSample(HalFile& sidecar, const uint32_t sampleIndex, uint32_t* out) {
-  sampleReads++;
-  return readSampleOffset(sidecar, sampleIndex, out);
+  if (!sampleBlock) {
+    sampleReads++;
+    return readSampleOffset(sidecar, sampleIndex, out);
+  }
+  // Samples are 4-byte aligned after the header, so none straddles two blocks.
+  SampleBlock& block = *sampleBlock;
+  const uint32_t at = static_cast<uint32_t>(SIDECAR_HEADER_BYTES) + sampleIndex * sizeof(uint32_t);
+  if (block.file != &sidecar || at < block.offset || at + sizeof(uint32_t) > block.offset + block.filled) {
+    block.file = nullptr;
+    block.offset = at - at % SCAN_BUF_BYTES;
+    sampleReads++;
+    if (!sidecar.seekSet(block.offset)) return false;
+    const int n = sidecar.read(block.buf, SCAN_BUF_BYTES);
+    if (n < static_cast<int>(at - block.offset + sizeof(uint32_t))) return false;
+    block.filled = static_cast<uint32_t>(n);
+    block.file = &sidecar;
+  }
+  memcpy(out, block.buf + (at - block.offset), sizeof(*out));
+  return true;
 }
 
 // Both files stay open across the stem-variant probes; the buffered readers own
@@ -1405,6 +1429,11 @@ bool Dictionary::resolvePrefixes(const char* run, DictPrefixMatch& matchOut, Loo
       setResult(scanBuf ? LookupResult::ReadError : LookupResult::LowMemory);
       return false;
     }
+    // The sidecar samples are read in blocks, in whichever scan buffer is idle: the .syn one while
+    // the .idx is searched, the .idx one while the .syn is.
+    SampleBlock block;
+    block.buf = scanBuf->syn;
+    sampleBlock = &block;
     // The .idx hits go straight into matchOut; the .syn hits are merged into them.
     collectPrefixes(session, search, matchOut);
     SynonymHits syn;
@@ -1412,12 +1441,20 @@ bool Dictionary::resolvePrefixes(const char* run, DictPrefixMatch& matchOut, Loo
     if (!search.aborted && hasSyn && (matchOut.count == 0 || matchOut.hits[0].runBytes < search.runBytes)) {
       search.indexHits = &matchOut;
       if (openSynonyms(session)) {
+        block = SampleBlock{};
+        block.buf = scanBuf->idx;
+        session.idxScan.forget();
         collectPrefixes(session, search, syn);
+        // The follows scan the .idx again; the .syn is done with.
+        block = SampleBlock{};
+        block.buf = scanBuf->syn;
+        session.synScan.forget();
       } else if (session.synFailed) {
         search.failed = true;
       }
     }
     if (!search.aborted) mergeSynonymHits(session, search, syn, matchOut);
+    sampleBlock = nullptr;
     const uint32_t reads = sampleReads + session.idxScan.reads() + session.synScan.reads();
     matchOut.reads = static_cast<uint16_t>(std::min<uint32_t>(reads, UINT16_MAX));
   }

@@ -239,6 +239,8 @@ class Dictionary {
     bool readBytes(void* dst, size_t n);
     // File reads made since attach(), for DictPrefixMatch::reads.
     uint32_t reads() const { return refills; }
+    // Lets go of the buffer's contents, keeping the position: another reader is to fill it.
+    void forget();
 
    private:
     bool refill();
@@ -302,8 +304,17 @@ class Dictionary {
   uint32_t bisectSamples(HalFile& sidecar, ScanReader& source, uint32_t sampleCount, const char* target,
                          SampleWindow* window, bool strictlyBelow = false);
 
-  // readSampleOffset(), counted in sampleReads.
+  // readSampleOffset(), counted in sampleReads; through sampleBlock when it is set.
   bool readSample(HalFile& sidecar, uint32_t sampleIndex, uint32_t* out);
+
+  // A SCAN_BUF_BYTES block of a sidecar, in a scan buffer resolvePrefixes() has idle: a descent
+  // then reads a few blocks rather than a sample per step.
+  struct SampleBlock {
+    const HalFile* file = nullptr;  // the sidecar `buf` holds a block of; none when nullptr
+    uint8_t* buf = nullptr;
+    uint32_t offset = 0;  // of buf[0] in the file, a multiple of SCAN_BUF_BYTES
+    uint32_t filled = 0;
+  };
 
   DictLocation locate(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
 
@@ -406,4 +417,6 @@ class Dictionary {
 
   // Sidecar sample reads (readSample()) since resolvePrefixes() started, for DictPrefixMatch::reads.
   uint32_t sampleReads = 0;
+  // Set by resolvePrefixes() for the time of its search; resolve() reads each sample on its own.
+  SampleBlock* sampleBlock = nullptr;
 };
