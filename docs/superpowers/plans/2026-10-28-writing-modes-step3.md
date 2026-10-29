@@ -25,8 +25,10 @@ the spike, for step 3"). The prototype is the spike `8f28584a0` (`origin/spike/v
 frame scope, its viewport swap and its column draw into real code; nothing is merged from it. Expected values are
 derived by hand from the host shims (`test/word_size_layout/GfxRenderer.h`: every glyph 10 px, ascender 16;
 `test/epub_pipeline/GfxRenderer.h`: full-width CJK 16 px, others `6 + cp % 7`, ascender 18, line 24, screen 480×800)
-and from the code at master `c3c5a6c9e`; each test's comment carries its derivation. A value that does not reproduce is
-a finding to report, not a number to adjust.
+and from the code at master `c3c5a6c9e`, checked again on 2026-10-29 against master `39fba77f5` (A3b #575, the CJK
+dictionary #569/#570/#574, JPEG #571/#572, LF goldens #567, the writing-modes roadmap #573); line references are
+`39fba77f5`'s, and implementers find code by name. Each test's comment carries its derivation. A value that does not
+reproduce is a finding to report, not a number to adjust.
 
 ## Rulings carried in (controller and maintainer, 2026-10-28)
 
@@ -35,11 +37,13 @@ a finding to report, not a number to adjust.
 2. Punctuation stays rough: Tr characters (brackets, dashes, ……, ー) are drawn sideways through the turned frame, Tu
    characters (、。, small kana, ！？) upright and unplaced. No font re-cut, no vertical-form lookup. The per-codepoint
    decision lives in one function (`drawsUpright`), where step 4 places Tu from `getGlyphInk` or a re-cut font.
-3. Section version 104 as written (A3b takes 103 on `feat/cjk-a3b`); renumber at merge.
+3. Section version 104: master is 103 (A3b #575). Renumber at merge if master passes 103 first.
 4. The X4 (COM5) validates. An X3 run is planned (portrait, NotoSansJP 14 pt, spec 10.1's figures on the branch) as
-   a step of Task 14, not a gate: the maintainer flashes the X3, and it is never reset from here. One touch-board
-   session (X4 Pro or T5S3, whichever the maintainer attaches) closes Task 14: taps, swipes and link targets on
-   vertical pages.
+   a step of Task 14, not a gate. Claude flashes the X3 on COM6 with esptool (`write-flash 0x0` of the branch's
+   `default` `firmware.factory.bin`) and drives it with devctl, never with `CMD:REBOOT` or an RTS pulse; if the X3 is
+   silent, that step stops and is reported (maintainer, 2026-10-29: this supersedes "the maintainer flashes the X3,
+   and it is never reset from here"). One touch-board session (X4 Pro or T5S3, whichever the maintainer attaches)
+   closes Task 14: taps, swipes and link targets on vertical pages.
 5. Page Turn Buttons defaults to Follow Book (maintainer, 2026-10-28).
 
 ## Rulings made while planning (each with its cost if wrong)
@@ -85,12 +89,15 @@ a finding to report, not a number to adjust.
   metrics), a sideways run its horizontal advance. Widths change only for upright characters whose advance is not an em
   (§, ×, ①, emoji). Measure and draw share `verticalTextAdvance`.
 - **The dictionary is not available in vertical text yet** (guard, not mapping). Its word boxes and navigation would
-  need rotated directions, `feat/cjk-dictionary` is rewriting `DictionaryWordSelectActivity`, and CJK word lookup is
-  that branch's subject. The guard sits in `EpubReaderActivity::openDictionary` and the menu, which that branch does
-  not touch. Cost: vertical readers cannot look words up until the follow-up maps the selection through the frame.
+  need rotated directions, and `DictionaryWordSelectActivity` has just been rewritten for CJK word lookup (#569, #570,
+  #574: speculation, the span highlight, `resolveRun`). The guard sits in `EpubReaderActivity::openDictionary` and the
+  menu, which those PRs left as they were (`openDictionary` :2645, the Dictionary row `EpubReaderMenuActivity.cpp:146`;
+  `BTN_DICTIONARY` and the long-tap gesture reach `openDictionary` through `onButtonAction` :7562). Cost: vertical
+  readers cannot look words up until the follow-up maps the selection through the frame.
 - **Off the render task the reader reads the held frame.** A vertical page holds the turned frame for its whole draw,
   so `tapToLogical`, `wasSwipe`, the tap zones and `computeRenderLayout` read the held orientation (the GfxRenderer.h
-  comment at `:385-389` already asks this of the input layer).
+  comment at `:385-389` already asks this of the input layer), and so do `logicalToTap` and the serial `CMD:TOUCH`
+  injector that maps through it, or Task 14's touch session would inject through the turned frame.
 - **Strings in `english.yaml` only** (the line-spacing precedent: the release round translates).
 - **What Follow Book flips:** only the Left/Right buttons' built-in actions; an action the reader assigned
   explicitly, and the side buttons, do not. The built-in tap zones and page swipes mirror; the gesture bindings
@@ -111,18 +118,33 @@ From the brief and the spec, verbatim where they have it:
 - Flash cost measured from the map file and stated in the last task. The UAX #50 table is 264 runs × 4 B = 1,056 B.
 - Host tests from Git Bash only, never PowerShell. Fresh worktree: `git submodule update --init freeink-sdk` first.
   Configure: `cmake -S test -B build/test -G Ninja -DCMAKE_BUILD_TYPE=Release
+  -DGIT_EXECUTABLE="C:/Program Files/Git/cmd/git.exe"
   -DFETCHCONTENT_SOURCE_DIR_SDFAT=C:/tmp/SdFat-2.3.1
   -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=C:/_development/witchhunt-reader/build/test/_deps/googletest-src
-  -DFETCHCONTENT_SOURCE_DIR_ARDUINOJSON=C:/tmp/wt-serial-api/build/test/_deps/arduinojson-src`. Build
-  `cmake --build build/test --target <T> -j 8`, run `ctest --test-dir build/test -R <pattern> --output-on-failure`
+  -DFETCHCONTENT_SOURCE_DIR_ARDUINOJSON=C:/tmp/wt-serial-api/build/test/_deps/arduinojson-src` (CMake reports
+  `GIT_EXECUTABLE` unused while all three sources are given; passing it overrides a stale cache entry, which silently
+  runs old binaries). Build `cmake --build build/test --target <T> -j 8`, run `ctest --test-dir build/test -R <pattern> --output-on-failure`
   (no `-j` beside other worktrees: shared temp fixtures). The whole suite before the PR:
   `cmake --build build/test -j 8 -- -k 0` (`epub_build_inventory` does not build on Windows) and `ctest --test-dir
-  build/test`; goldens are LF (`.gitattributes`).
+  build/test`.
+- Goldens are LF (`.gitattributes`, #567). A worktree checked out before #567 keeps CRLF copies of every golden its
+  merges did not touch, and their `MatchesGolden` cases fail before any change: `git ls-files --eol
+  test/epub_pipeline/goldens | grep w/crlf` must print nothing; if it does, delete those files and `git checkout --
+  test/epub_pipeline/goldens` (done in `C:/tmp/wt-wm3` on 2026-10-29: 51 of 55 were CRLF).
+- On Windows five `EpubPipelineTest` cases fail at master `39fba77f5` with `filesystem error: cannot remove all ...
+  book.bin` (the test's cleanup runs while the book's `book.bin` is still open; Linux CI passes them):
+  `FirstChapter.AGuideTextReferenceWithAFragmentFindsItsChapter`,
+  `FirstChapter.AChaptersZipStatHoldsNoMemoryForTheBook`, `LongChapterPageTables.AChapterFarPastTheReserveBuildsWhole`,
+  `LongChapterPageTables.ARefusedChunkStopsTheBuildWithBothTablesInStep`,
+  `KeptReadingState.AReopenAfterAKeptClearLandsOnTheSavedPageAndBookmark`. "All of `EpubPipelineTest`: pass" means
+  these five fail the same way and nothing else fails (at `39fba77f5`: 945 cases, 934 pass, 6 skip).
 - Firmware: `export PLATFORMIO_CORE_DIR='C:\pio' PYTHONUTF8=1 PYTHONIOENCODING=utf-8`, then
   `"$HOME/.platformio/penv/Scripts/pio.exe" run -e default` (and `-e gh_release`), one pio run at a time, in the
   background. `x4pro` and `lilygo_t5s3` are left to CI, except the one env Task 14's touch session needs.
-- Devices: the X4 on COM5. The X3: the maintainer flashes it; it is never reset from here (no esptool, no RTS pulse,
-  no `CMD:REBOOT`, no `CMD:SLEEP`), and files reach it through its USB Transfer screen over a no-reset serial open.
+- Devices: the X4 on COM5. The X3 on COM6: Claude flashes it with esptool (`write-flash 0x0` of the branch's
+  `default` `firmware.factory.bin`, ruling 4) and drives it with devctl; nothing else resets it (no RTS pulse, no
+  `CMD:REBOOT`, no `CMD:SLEEP`), and files reach it through its USB Transfer screen over a no-reset serial open. If the
+  X3 is silent on USB, its step stops and is reported.
   The touch board: whichever the maintainer attaches. The acceptance book is
   `C:/_development/witchhunt-reader/.idea/annas-arch-91dbd462043f.epub` (1,663,588 B; also on the X3's `/test`),
   local only, never in the repository.
@@ -131,18 +153,23 @@ From the brief and the spec, verbatim where they have it:
 - New user-facing strings through `tr()`: keys in `lib/I18n/translations/english.yaml` only, each used in code in the
   commit that adds it (the build's `scripts/gen_i18n.py` strips unused keys; never run it by hand). Settings follow
   `src/SettingsList.h`'s patterns; per-book overrides follow the line-spacing override (`4d0c4c526`).
-- Caches: `SECTION_FILE_VERSION` 104 (`Section.cpp:36`). `BOOK_CACHE_VERSION` stays 18: step 0 already caches the ppd
-  (`BookMetadataCache.h:30`, `Epub::pageProgression()`). `CSS_CACHE_VERSION` unchanged.
+- Caches: `SECTION_FILE_VERSION` 104 (`Section.cpp:36`; master is 103, A3b #575). `BOOK_CACHE_VERSION` stays 18: step
+  0 already caches the ppd (`BookMetadataCache.h:30`, `Epub::pageProgression()`). `CSS_CACHE_VERSION` unchanged.
 - The UAX #50 data is Unicode 16.0.0's `VerticalOrientation.txt`
   (https://www.unicode.org/Public/16.0.0/ucd/VerticalOrientation.txt, sha256
   `24ac1474554eb55c85ace5c16d551535a8c52cdc2f4c13cf68c3839214339bbe`), under the Unicode License v3. No code from
   matcha-reader (MIT, a second engine) or koreader-tategumi (GPL) is used.
-- Overlaps in flight, handled so: A3b (`feat/cjk-a3b`) changes the four breakers, `extractLine`, `CjkPunctuation`,
-  `CjkRulesTest.cpp`, `CjkTypographyTest.cpp` and `test_cjk_line_breaking`; this plan touches none of them. It edits
-  `ParsedText.cpp` only in `measureWordWidth` (`:104-121`) and `calculateWordWidths` (`:851-860`), and new vertical
-  goldens of books A3b may relayout (`test_writing_modes`, `test_cjk_ja_soseki`): whichever lands second regenerates
-  them with `UPDATE_GOLDENS=1` and says so. `feat/cjk-dictionary` changes `DictionaryWordSelectActivity`, `Dictionary`
-  and `Utf8.h`; this plan touches none of them (the UAX #50 table is a new file, not in `Utf8.h`).
+- What landed while this plan waited (master `39fba77f5`): A3b (#575) changed the four breakers (each tests a line at
+  its pushed-in width: `pushedInWidth`, `withEdgeTrims`, `gapShrinkBefore`), `extractLine` (push-in, the CJK-Latin
+  gap `cjkLatinGapBefore`), `CjkPunctuation`, `CjkRulesTest.cpp`, `CjkTypographyTest.cpp`, `test_cjk_line_breaking`
+  and the goldens of line_breaking, zh_honglou, zh_punctuation and test_writing_modes. This plan touches none of
+  those; in `ParsedText.cpp` it edits `measureWordWidth` (`:104-121`), `calculateWordWidths` (`:890-900`), the split in
+  `hyphenateWordAtIndex` (`:1669`, `:1730`) and `inkShift` in `extractLine` (`:1899`), all in Task 8. Its vertical
+  goldens are new and are made on A3b's layout; no existing golden moves (test_writing_modes's included: the default
+  profile is Off). The CJK dictionary (#569, #570, #574) changed `DictionaryWordSelectActivity`,
+  `DictionaryDefinitionActivity`, `Dictionary`, `SerialTestApi.cpp` (`ACT:DICT`) and `Utf8.h` (`utf8CodepointLen`);
+  this plan touches only `SerialTestApi.cpp`'s `injectContact` (Task 12), and the UAX #50 table is a new file, not in
+  `Utf8.h`.
 
 ## Review Focus
 
@@ -262,7 +289,7 @@ TEST(VerticalOrientation, UprightIsUAndTuSidewaysIsRAndTr) {
 - Modify: `test/word_size_layout/GfxRenderer.h` (the frame surface below; `DrawCall` gains `Orientation frame`, the live
   orientation at the call)
 - Test: `test/vertical_text/VerticalDrawTest.cpp`, `test/vertical_text/AllocationCounter.{h,cpp}` (the global
-  `operator new`/`delete` counter of `CjkTypographyTest.cpp:159-176`, as `long liveAllocations()` and `long
+  `operator new`/`delete` counter of `CjkTypographyTest.cpp:175-193`, as `long liveAllocations()` and `long
   allocations()`), added to `VerticalTextTest`; `test/touch_transform/TurnedFrameTest.cpp`, added to
   `TouchTransformTest` with `${REPO_ROOT}/lib/Epub` on its include path
 
@@ -371,11 +398,12 @@ TEST(VerticalDraw, UprightPiecesDrawInTheReadersFrameRunsInTheTurnedFrame) {
 **Files:**
 - Create: `lib/Epub/Epub/FlowContext.h` (forward-declares `enum class CssWritingMode : uint8_t;`, includes
   `PageProgression.h`), `lib/Epub/Epub/FlowContext.cpp`
-- Modify: `lib/Epub/Epub/TypographyProfile.cpp:60-63` (Korean `verticalAllowed = true`, spec 9.5),
-  `TypographyProfile.h:33` (the comment: FlowContext reads it)
+- Modify: `lib/Epub/Epub/TypographyProfile.cpp:60-65` (the Korean branch: `verticalAllowed = true`, spec 9.5),
+  `TypographyProfile.h:35` (the comment "Nothing reads it yet": FlowContext::requestFor reads it)
 - Test: `test/typography/FlowContextTest.cpp` (added with `FlowContext.cpp` to `TypographyTest` in
-  `test/typography/CMakeLists.txt`); `test/typography/TypographyTest.cpp:13` (the comment) and `:44` (Korean
-  `EXPECT_TRUE`)
+  `test/typography/CMakeLists.txt`); `test/typography/TypographyTest.cpp:13` (the comment, stale on master since A3b:
+  `breaking` and `justify` are not read by layout yet, `cjkLatinGap` is, since #575, and `verticalAllowed` is read by
+  `FlowContext::requestFor`) and `:44` (Korean `EXPECT_TRUE`)
 
 **Interfaces:**
 ```cpp
@@ -459,8 +487,10 @@ struct FlowContext {
   - `VerticalTextBlock.TheSideLineIsOnTheOverSide`: an UNDERLINE word 日本 at (50, 100): one `drawLine` at y 105 (the
     baseline 116, over edge 116 - 9 = 107, less 2) from x 50 to 70; a STRIKETHROUGH word: y 112.
   - `VerticalTextBlock.AWordBoxRunsDownTheColumn`: `wordBox` of Latin日 has width 60.
-  - `VerticalTextBlock.DrawingAColumnAllocatesNothing`: a line with ruby, a sesame run and an underline word; no
-    allocation, live or freed, in `render`.
+  - `VerticalTextBlock.DrawingAColumnAllocatesNothing`: a line with ruby, a sesame run and an underline word, every
+    word at scale 1 (`render`'s ascender cache only grows for a word of another font or scale); the shim's recorders
+    (`drawCalls`, the `drawLine` record, `fillRectCalls`) reserved first, as `VerticalDraw.DrawingAllocatesNothing`
+    reserves `drawCalls`; no allocation, live or freed, in `render`.
   - `VerticalTextBlock.AHorizontalLineDrawsAsBefore`: the same words without `setVertical`: three `drawText` calls in
     the live frame at x 50, 60, 70.
 - [ ] **Step 2: Run; they fail to compile.** `cmake --build build/test --target VerticalTextTest -j 8`
@@ -515,19 +545,20 @@ struct FlowContext {
   VerticalText::Off;`, "the reader's request for the book, Off for a language never set vertically
   (FlowContext::requestFor); hashed only when not Off"; `isVertical()`, `flowContext()` beside `isSimplified()` :331;
   members `VerticalText request_`, `bool vertical_`)
-- Modify: `lib/Epub/Epub/Section.cpp`: `SECTION_FILE_VERSION` 104 at :36 with its line ("v104: a section may be set
-  vertical-rl: the header keeps the vertical-text request and a status bit the outcome; a page keeps its block extent,
-  a line its column bit"); `header` :152-171 (`kVerticalText`, a `u8` after `kImageRendering`); `kStatusVertical = 1
-  << 5` after :190 with its comment; `calculatePropertyHash` :363-404 (the request appended when not Off; the
-  `static_assert` 21 → 22); `writeSectionFileHeader` :624-658 (the byte; its `static_assert`); `loadSectionFile`
-  :660-740 (read, match, the status bit); `runBuildSetup` :1101-1270 (`request_`, `vertical_ = false`;
-  `st.visitor->setVerticalText(p.verticalText, epub->pageProgression())` after `setTypography` :1263); the latches
-  :1641-1650 (`vertical_ = st.visitor->isVertical()`); the status write :1817
+- Modify: `lib/Epub/Epub/Section.cpp`: `SECTION_FILE_VERSION` 104 at :36 with its line, above A3b's v103 line ("v104:
+  a section may be set vertical-rl: the header keeps the vertical-text request and a status bit the outcome; a page
+  keeps its block extent, a line its column bit"); `header` :155-174 (`kVerticalText`, a `u8` after `kImageRendering`);
+  `kStatusVertical = 1 << 5` after `kStatusSimplified` (:193) with its comment; `calculatePropertyHash` :366-407 (the
+  request appended when not Off; the `static_assert` 21 → 22); `writeSectionFileHeader` :627-661 (the byte; its
+  `static_assert`); `loadSectionFile` :663-743 (read, match, the status bit); `runBuildSetup` :1104-1273 (`request_`,
+  `vertical_ = false`; `st.visitor->setVerticalText(p.verticalText, epub->pageProgression())` after `setTypography`
+  :1266); the latches :1644-1653 (`vertical_ = st.visitor->isVertical()`); the status write :1820
 - Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.h` (beside the flow stack :678-695 and `setTypography` :1029),
   `ChapterHtmlSlimParser.cpp`: `decideFrame` called in `startElement` after `resolveLogical` (:2225) for the first
   element that is neither `html` nor `head` (case-insensitively; normally `<body>`; `head`'s children never get there,
-  the skip at :2037 takes them); `emitPage` (:1381, the extent, before `completePageFn`); `addLineToPage`
-  (:4658) and the cell lines (:5435): `setVertical`; `tryStartDropCapCapture` (:1686): false in a vertical section
+  the skip at :2037 takes them; `head` itself reaches :2225 and is skipped only at :2932); `emitPage` (:1382, the
+  extent, before `completePageFn` at :1398); `addLineToPage` (:4658) and the cell lines (:5435): `setVertical`;
+  `tryStartDropCapCapture` (:1686): false in a vertical section
 - Modify: `test/epub_pipeline/PipelineRunner.{h,cpp}` (the header includes `Epub/FlowContext.h`;
   `Profile::verticalText = VerticalText::Off`; ` vertical=1` on the SPINE line when `section.isVertical()`;
   `forEachPage`, sharing one params builder with `runAndDump`, whose dump does not change)
@@ -575,18 +606,19 @@ OPF's `dc:language` a parameter (`ja` by default) and `spineAttrs` for the ppd.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Goldens.** `UPDATE_GOLDENS=1 ctest --test-dir build/test -R EpubPipeline`; `git status` shows exactly
   the three new goldens. Check by hand, and say so in the commit: `test_writing_modes_vertical`'s three spines have
-  `vertical=1` (spine 3 by the ppd), its pages `turned=460`, its lines within x 0-760; the two `_vertical_on` goldens
-  likewise. Then the whole `EpubPipelineTest` without `UPDATE_GOLDENS`: pass.
+  `vertical=1` (spine 3 by the ppd), its pages `turned=460`, its lines within x 0-760, and each line's words where the
+  Off build at 760 × 460 puts them (A3b's layout: the quarter-em gaps beside `ABC`, the 4-px grid inset of a 760-px
+  column); the two `_vertical_on` goldens likewise. Then the whole `EpubPipelineTest` without `UPDATE_GOLDENS`: pass.
 - [ ] **Step 5: Commit** `feat(epub): a section decides its writing mode and lays out in the turned frame (section v104)`.
 
 ### Task 7: Images in the reader's frame
 
 **Files:**
-- Modify: `lib/Epub/Epub/blocks/ImageBlock.h`, `ImageBlock.cpp` (`render` :465, `renderGrayscaleFromCache` :411,
-  `makeCrop` :415, `serialize`/`deserialize` :621-651)
-- Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp`: the `<img>` branch's dimensions (`if (dimsOk) {` :2633)
-  and its `ImageBlock` (:2858); `attachPendingFloatImage` (:1648); `buildImageFromEpubPath` (:5130-5164);
-  `placeImageBlockAsBlock` (:5213: a turned image is placed whole, never sliced); two private helpers,
+- Modify: `lib/Epub/Epub/blocks/ImageBlock.h`, `ImageBlock.cpp` (`render` :459, `renderGrayscaleFromCache` :411,
+  `makeCrop` :415, `serialize`/`deserialize` :621-652)
+- Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp`: the `<img>` branch's dimensions (`if (dimsOk) {` :2631)
+  and its `ImageBlock` (:2857); `attachPendingFloatImage`'s `ImageBlock` (:1648-1650); `buildImageFromEpubPath`
+  (:5130-5164); `placeImageBlockAsBlock` (:5213: a turned image is placed whole, never sliced); two private helpers,
   `void turnIfVertical(ImageDimensions& dims) const` (swaps width and height in a vertical section) and
   `void turnIfVertical(ImageBlock* image) const` (`setTurned()` in a vertical section)
 - Modify: `test/epub_pipeline/PipelineRunner.cpp` (` turned=1` on IMG and CELLIMG lines)
@@ -626,10 +658,15 @@ OPF's `dc:language` a parameter (`ja` by default) and `spineAttrs` for the ppd.
 ### Task 8: The measurement seam
 
 **Files:**
-- Modify: `lib/Epub/Epub/ParsedText.h` (`setVertical`, the member beside `typography_` :133),
-  `lib/Epub/Epub/ParsedText.cpp` (`measureWordWidth` :104-121 gains `const bool vertical = false`: a vertical word is
-  `verticalTextAdvance(renderer, fontId, text, style, scale)` of the same text a horizontal one measures, the
-  one-space token unchanged; `calculateWordWidths` :851-860 passes `vertical_`)
+- Modify: `lib/Epub/Epub/ParsedText.h` (`setVertical`, the member beside `typography_` :137),
+  `lib/Epub/Epub/ParsedText.cpp` (`measureWordWidth` :104-121 gains `const bool vertical = false` after `scale`: a
+  vertical word is `verticalTextAdvance(renderer, fontId, text, style, scale)` of the same text a horizontal one
+  measures, the one-space token unchanged). `vertical_` is passed wherever a token's own text is measured for its box,
+  so a token's width stays its column advance through every pass A3b (#575) added: `calculateWordWidths` :890-900;
+  `hyphenateWordAtIndex`'s prefix (:1669) and remainder (:1730), which replace a split token's width; `extractLine`'s
+  `inkShift` `natural` (:1899), which push-in compares with the token's box. The single-character measures stay
+  horizontal: `cjkEm`'s 一 (:129: the em is the advance of 一 either way), `rubyWidth` (:904) and `applyRubyWidths`'
+  `room` (:931): kana and CJK marks, one em in a CJK font across a line or down a column.
 - Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp`: `setVertical(vertical_)` beside each `setTypography`
   (:2021, :2420, :5357) and, in `decideFrame`, on the current block (the one `setup()` opens at :4319, before
   `<body>`)
@@ -646,8 +683,11 @@ OPF's `dc:language` a parameter (`ja` by default) and `spineAttrs` for the ppd.
   12 (6 + 167 % 7) across a line. Independent of how A2 cuts the text into tokens.
 - [ ] **Step 2: Run; it fails** (the vertical widths are the horizontal ones).
 - [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** all of `EpubPipelineTest`, `CjkLayoutTest`, `WordSizeLayoutTest`. If a `_vertical` golden moves,
-  it moves only where an upright non-em character is; regenerate it and name the character in the commit.
+- [ ] **Step 4: Run** all of `EpubPipelineTest`, `CjkLayoutTest`, `WordSizeLayoutTest`. No golden moves: none of
+  `test_writing_modes`, `test_cjk_ja_soseki` and `test_cjk_ko_hyeon` holds an upright (U or Tu) character whose stub
+  advance is not 16 (their words and ruby checked against UAX #50 on 2026-10-29). Should a `_vertical` golden move
+  anyway, it may move only where an upright non-em character is: regenerate it and name the character in the commit;
+  any other move is a finding to report.
 - [ ] **Step 5: Commit** `feat(epub): a vertical word measures as its column runs`.
 
 ### Task 9: The vertical fixture, its goldens and the rule checker
@@ -666,7 +706,10 @@ OPF's `dc:language` a parameter (`ja` by default) and `spineAttrs` for the ppd.
   a `text-emphasis: filled sesame` span; a 2 × 2 table with a cell image; a block image (a real 200 × 400 grey PNG
   written with zlib, so the device decodes it); a `float: left` 80 × 80 image; `<hr/>`; on the first page, a link to
   the colophon, `<a href="ch2.xhtml#colophon">奥付</a>` (the target of Task 14's link tap; the golden records how the
-  build lays it out).
+  build lays it out). Enough prose for the rule checker's floors below: at least 1,200 characters in paragraphs of 200
+  or more, so that at least 20 of spine 1's columns are broken by the layout (the stub sets 47 characters to the
+  vertical twin's 760-px column: 752 px on the whole-em grid), and at least 10 sideways runs (Winterfell, 1998, 13,
+  「」『』（）, ー, ……, ——).
 - spine 2, the colophon: `<body style="writing-mode: horizontal-tb">`, `<h2 id="colophon">奥付</h2>` and two short
   paragraphs.
 
@@ -678,11 +721,19 @@ OPF's `dc:language` a parameter (`ja` by default) and `spineAttrs` for the ppd.
     recorder at offsets (10, 20); each draw in Portrait is one piece (`nextColumnPiece` takes all its bytes) whose
     first codepoint `drawsUpright`, at x in 0-479 and y in 0-799; each draw in LandscapeCounterClockwise holds only
     codepoints that do not (marks and selectors excepted); no draw in another frame; the orientation is Portrait after
-    each page; over the book at least 100 upright and 10 sideways draws.
+    each page. Each book draws at least 100 upright pieces and at least one sideways one; `test_vertical_text` and
+    `test_cjk_ko_hyeon` (its Western punctuation and digits: 42 runs) at least 10 sideways. Counted from the goldens
+    with UAX #50 on 2026-10-29: upright 1,822, 879 and 128, sideways 5 (its ー; no brackets), 42 and 3 (`ABC` and the
+    two ー of ニャーニャー) in soseki, hyeon and test_writing_modes.
   - `VerticalRules.KinsokuHoldsAtEveryColumnEnd`: over the vertical pages' `PageLine`s in order, for each line whose
-    first word sits at x 0 (a column the layout broke: the books indent every paragraph) next to unspaced CJK, its
-    first codepoint is not `CjkLineBreak::isNoLineStart` and the previous line's last is not `isNoLineEnd`; at least
-    20 columns checked.
+    first word starts less than one em in from its `PageLine` (16 px in the stub: a column the layout broke; every
+    paragraph of these books indents its first line by an em or more, while a broken column starts at the whole-em
+    grid's inset, `ParsedText::gridInset_`, 4 px in a 760-px zh/ja column (760 % 16 / 2) and 0 in Korean, or a few
+    pixels further out where a pushed-in opening mark starts it) next to unspaced CJK, its first codepoint is not
+    `CjkLineBreak::isNoLineStart` and the previous line's last is not `isNoLineEnd`. At least 20 columns checked in
+    `test_vertical_text` and in `test_cjk_ja_soseki` (about 38 at 760 px); none required in `test_writing_modes`
+    (about one of its columns breaks at 760 px) or `test_cjk_ko_hyeon` (its columns break between Hangul words, which
+    are not unspaced CJK). `CjkRules.KinsokuHoldsAtEveryCjkLineBreak` reads the same edge from the horizontal dump.
   - `VerticalRules.EveryLineAndImageOfAVerticalPageIsTurned`: on every page of a `vertical=1` section every `PageLine`
     and table cell line `isVertical()`, every page image and cell image `isTurned()`; on every other page none.
   - `VerticalLayout.AColophonStaysHorizontalAndTurnsRightToLeft` (in `VerticalLayoutTest.cpp`): `test_vertical_text`
@@ -736,14 +787,14 @@ OPF's `dc:language` a parameter (`ja` by default) and `spineAttrs` for the ppd.
 
 **Files:**
 - Modify: `src/components/TapZones.h` (after `zoneFor`), `src/components/SliderGeometry.h`
-- Modify: `src/activities/reader/ReaderUtils.h` (`detectTouchPageTurn` :139-178 gains `const bool rightToLeft = false`
-  and maps through `TapZones::turnFor`/`turnForSwipe`)
+- Modify: `src/activities/reader/ReaderUtils.h` (`detectTouchPageTurn` :135-176 gains `const bool rightToLeft = false`
+  and maps through `TapZones::turnFor`/`turnForSwipe`; `LineReaderActivity` and `XtcReaderActivity` keep the default)
 - Modify: `src/activities/reader/EpubReaderActivity.{h,cpp}`: `std::atomic<bool> pageProgressionRtl_{false}`, stored in
-  `renderContents` (:5682) from `section->flowContext().pageProgressionRtl` before the page draw; in `loop()` (:1056-1090)
+  `renderContents` (:5682) from `section->flowContext().pageProgressionRtl` before the page draw; in `loop()` (:1055-1091)
   the Left and Right buttons' built-in short and long actions swap when it is set and `SETTINGS.pageTurnButtons ==
   PAGE_TURN_FOLLOW_BOOK` (PageBack/PageForward and assigned actions unchanged); `detectTouchPageTurn(renderer,
-  mappedInput, pageProgressionRtl_)`; `renderStatusBar` (:6728) passes it as `fillFromRight`; the percent picker gets
-  it as `reversed`; `appendDebugState` (:6584, under `SERIAL_TEST_API`) adds `flow=vertical-rl|horizontal` and
+  mappedInput, pageProgressionRtl_)` (:1116); `renderStatusBar` (:6699; its `GUI.drawStatusBar` call :6728) passes it
+  as `fillFromRight`; the percent picker gets it as `reversed`; `appendDebugState` (:6584, under `SERIAL_TEST_API`) adds `flow=vertical-rl|horizontal` and
   `progression=rtl|ltr` from `section->flowContext()`
 - Modify: `src/components/themes/BaseTheme.{h,cpp}` (`drawStatusBar` :186/:1110 gains `const bool fillFromRight =
   false`: each bar fills from `barMarginLeft + progressBarMaxWidth - barWidth`)
@@ -784,8 +835,12 @@ int reversedFillX(int value, int barX, int barWidth, int minValue, int maxValue)
 - Modify: `lib/GfxRenderer/GfxRenderer.{h,cpp}`: `getOrientedViewableTRBL(Orientation, int*, int*, int*, int*) const`
   beside :544 (the existing one calls it with `getOrientation()`); `tapToLogical(nx, ny, ...)` (:3043) maps in
   `getHeldOrientation()`, its comment (:410-420) saying so and why (a vertical page holds the turned frame for its
-  whole draw)
+  whole draw); its inverse `logicalToTap(x, y, ...)` (:3054, comment :427-428) likewise, so the two stay inverses
 - Modify: `src/MappedInputManager.cpp:381-383` (`wasSwipe()` in the held orientation)
+- Modify: `src/SerialTestApi.cpp` `injectContact` (:772-803, `CMD:TOUCH`/`CMD:SWIPE`): the on-screen check at :782-783
+  against `getScreenWidth/Height(getHeldOrientation())`. Its live reads and `logicalToTap` would map a contact sent
+  while a vertical page draws through the turned frame, which is what Task 14 Step 11's tap right behind a turn sends
+  (dev builds only, `SERIAL_TEST_API`)
 - Modify: `src/activities/reader/ReaderUtils.h` (`detectTouchPageTurn`, `isTouchMenuTap`: width and height in the held
   orientation)
 - Modify: `src/activities/reader/EpubReaderActivity.cpp`: `computeRenderLayout` (:4058) in the held orientation;
@@ -793,14 +848,15 @@ int reversedFillX(int value, int barX, int barWidth, int minValue, int maxValue)
   recorded as `turnedframe::toReader(...)`; `openDictionary` (:2645): on a vertical section returns with a `LOG_INF`
   (BTN_DICTIONARY lands here too); `openReaderMenu` passes `wordLookupAvailable = !section->isVertical()`;
   `getImageOnlyPageYOffset` (:596): 0 for a vertical page
-- Modify: `src/activities/reader/EpubReaderMenuActivity.{h,cpp}` (`bool wordLookupAvailable`: the Dictionary row at
-  :146 only then)
+- Modify: `src/activities/reader/EpubReaderMenuActivity.{h,cpp}` (`bool wordLookupAvailable`, the constructor's last
+  argument, after Task 10's: the Dictionary row at :146 only then)
 
 - [ ] **Step 1:** Make the changes.
 - [ ] **Step 2: Check** `grep -nE "getOrientation\(\)|getScreen(Width|Height)\(\)" src/MappedInputManager.cpp
-  src/activities/reader/ReaderUtils.h` finds nothing (on master it finds the five live reads these changes replace:
-  `MappedInputManager.cpp:382`, `ReaderUtils.h:159-160` and `:185-186`), and `computeRenderLayout` reads no live
-  orientation.
+  src/activities/reader/ReaderUtils.h` finds nothing (on master `39fba77f5` it finds the five live reads these changes
+  replace: `MappedInputManager.cpp:382`, `ReaderUtils.h:159-160` and `:185-186`), `injectContact` in
+  `src/SerialTestApi.cpp` reads none (on master :782-783, and `logicalToTap`'s live orientation), and
+  `computeRenderLayout` reads no live orientation.
 - [ ] **Step 3: Build** `pio run -e default` (C3: `CP_TOUCH_UI` 0 compiles the touch paths out; CI's S3 builds compile
   them) and run the whole host suite: pass.
 - [ ] **Step 4: Commit** `fix(reader): geometry off the render task reads the held frame; links, images and the
@@ -812,14 +868,24 @@ int reversedFillX(int value, int barX, int barWidth, int minValue, int maxValue)
 - Modify: `docs/file-formats.md` (`section.bin`'s header table :231-253: `verticalText` after `imageRendering`, the
   vertical status bit; under the file layout, the page record's `u16` block extent, a line's column bit (flags bit 2),
   an image's flags byte; the property hash paragraph :216: the request when not Off)
-- Modify: `docs/future_work/writing-modes.md` (step 3 shipped, with the plan link; "Left from the spike, for step 3"
-  removed; "Parsed in step 0, read later": `writing-mode` read, `text-orientation` now step 4 only; what step 4 inherits:
-  the Tu placement in `drawsUpright`, the dictionary through the frame, `text-orientation`/`text-combine-upright`, drop
-  caps, vertical-lr, lone images centred along the block axis)
-- Modify: `docs/future_work/cjk.md:333` (the column pitch: done, it is the line pitch in the turned frame)
+- Modify: `docs/future_work/writing-modes.md` (as on master `39fba77f5`, after #573: the "Status: open items as of"
+  date; the roadmap's step 3 row "shipped (#PR) ([plan](...))", and step 1's row, whose "FlowContext and page
+  progression" step 3 now builds (ruling 1: step 1 reuses them); the "**Next step.**" paragraph under the roadmap,
+  which names step 3 today, says it has shipped and names the next step as the maintainer rules (asked at the
+  pre-flight, 2026-10-29; until answered: "not chosen yet: step 4 continues the vertical work, step 1 starts right to
+  left"; not the "**Next step.**" that closes "Complex shaping: Arabic and the Indic scripts", which stays); "Left from
+  the spike, for step 3" removed; "Parsed in step 0, read later": `writing-mode` read, `text-orientation` now step 4 only,
+  and the OPF `page-progression-direction` row first read by step 3 (page turns; step 1 reuses it); what step 4
+  inherits: the Tu placement in `drawsUpright` (with A3a in vertical: a pushed-in 、。 keeps its horizontal ink, see
+  Task 14 Step 7), the dictionary through the frame, `text-orientation`/`text-combine-upright`, drop caps, vertical-lr,
+  lone images centred along the block axis)
+- Modify: `docs/future_work/cjk.md:386` (Line spacing's "Left for later": the column pitch is done, it is the line
+  pitch in the turned frame)
 - Modify: `USER_GUIDE.md` (3.7.2 Reader: Vertical Text; 3.7.3 Controls: Page Turn Buttons; 4 Reading Mode: a vertical
-  book's pages turn right to left, and the dictionary is not available in vertical text yet)
-- Modify: `docs/serial-test-api.md` (the STATE table: `flow`, `progression`)
+  book's pages turn right to left, and the dictionary is not available in vertical text yet; 5.3 and 5.4, the tap
+  zones and page swipes: mirrored in a book whose pages turn right to left, the gesture bindings not)
+- Modify: `docs/serial-test-api.md` (the STATE table: `flow`, `progression`; "Touch: `TOUCH` and `SWIPE`": coordinates
+  are in the orientation the device is held in, which a vertical page's turned frame does not change)
 
 - [ ] **Step 1:** Make the edits.
 - [ ] **Step 2: Commit** `docs: vertical text in the guide, the cache formats and the roadmap`.
@@ -836,14 +902,16 @@ the X3 and the touch board go through a no-reset helper in the scratchpad: a sub
 does) and calls `_wait_ready(25)`, and whose `close()` sets RTS low, then DTR low, then closes (the tool's own open
 deasserts both, which resets an ESP32-C3).
 
-- [ ] **Step 1: Sizes.** Build `default` and `gh_release` on the branch, and `default` on master `c3c5a6c9e` in a
-  sibling worktree (`git worktree add C:/tmp/wt-wm3-base c3c5a6c9e`), one at a time. Record pio's `Flash:` and `RAM:`
-  lines for both, and from `.pio/build/default/firmware.map` the sizes of `VerticalOrientation.cpp.o`,
-  `VerticalDraw.cpp.o` and `FlowContext.cpp.o` (`.text`, `.rodata`). State the deltas in the PR. Keep the branch's
-  `.pio/build/default/firmware.bin`: the X3 runs the same C3 binary.
-- [ ] **Step 2: The control under master.** With master on the X4, open the control's spine items 5, 20 and 40 at
-  page 1 (`cmd:ACT:READER:/test/The Anarchy - Dalrymple, William.epub@5:1 idle:120000 state`) and record their page
-  counts.
+- [ ] **Step 1: Sizes.** Build `default` and `gh_release` on the branch, and `default` on master in a sibling worktree,
+  one at a time: the master the PR merges into, `39fba77f5` or the newest when this task runs (`git fetch origin`,
+  `git worktree add C:/tmp/wt-wm3-base origin/master`, then `git submodule update --init freeink-sdk` there). Record
+  pio's `Flash:` and `RAM:` lines for both, and from `.pio/build/default/firmware.map` the sizes of
+  `VerticalOrientation.cpp.o`, `VerticalDraw.cpp.o` and `FlowContext.cpp.o` (`.text`, `.rodata`). State the deltas,
+  and the master commit they are against, in the PR. Keep the branch's and the base's
+  `.pio/build/default/firmware.factory.bin`: the X3 is flashed with them (Step 10).
+- [ ] **Step 2: The control under master.** With the base build of Step 1 on the X4 (`pio run -e default -t upload
+  --upload-port COM5` in `C:/tmp/wt-wm3-base`), open the control's spine items 5, 20 and 40 at page 1
+  (`cmd:ACT:READER:/test/The Anarchy - Dalrymple, William.epub@5:1 idle:120000 state`) and record their page counts.
 - [ ] **Step 3: Back up and flash.** `cmd:GET:*` to a file in the scratchpad; `pio run -e default -t upload
   --upload-port COM5`. Upload `test_vertical_text.epub` and the acceptance book to `/test`. Reader font NotoSansJP 14
   pt (`cmd:SET:fontFamily=NotoSansJP`; if `GET` lists no such family, install it with the Font Manager first).
@@ -863,27 +931,37 @@ deasserts both, which resets an ESP32-C3).
   and `cmd:BTN:POWER` (bound to the dictionary on this X4; check `cmd:GET:btnShortPower`) leaves the reader on top.
 - [ ] **Step 7: The fixture.** `test_vertical_text.epub` spine 1 and 2: screenshots (columns, ruby on the right, the
   side line on the right, sideways Latin, upright 、。 unplaced, the table as columns, the images upright); spine 2
-  horizontal with `progression=rtl`.
+  horizontal with `progression=rtl`. Note in the PR, without fixing it, where a 、 or 。 that A3b pushed in (a
+  narrowed box at a column's end, or before a closing bracket) keeps its horizontal ink: drawn upright it can reach
+  half an em past its box, into the next character or past the column's end (ruling 2; A3a in vertical is step 4's,
+  spec 5.4).
 - [ ] **Step 8: The control under the branch.** The same three spine items as Step 2: identical page counts. Read for
   ten minutes in a vertical book with Background-B building: the log has no `Parameters do not match`. If the sleep
   screen shows the current page (`cmd:GET:sleepScreen`), `cmd:SLEEP` in a vertical page and wake the X4 by hand: the
-  sleep screen is the page in columns, and the log has no `SLP` `section cache not found ... rebuilding`.
+  sleep screen is the page in columns, and the log has no `SLP` `section cache not found ... rebuilding`. `CMD:SLEEP`
+  switches USB off until a button is pressed, so this needs the maintainer at the X4 (asked at the pre-flight); without
+  them the sleep check is skipped, Step 9 still runs, and the PR says so.
 - [ ] **Step 9: Restore the X4:** every changed setting from the backup, verified with `GET`; flash master back unless
   the maintainer says otherwise.
-- [ ] **Step 10: The X3** (spec 10.1 again, on the branch; not a gate). The maintainer flashes Step 1's
-  `firmware.bin` and names the port. Nothing here resets the X3: no esptool, no RTS pulse, no `CMD:REBOOT`, no
-  `CMD:SLEEP`.
+- [ ] **Step 10: The X3** (spec 10.1 again, on the branch; not a gate). Flash Step 1's branch
+  `firmware.factory.bin` to the X3 on COM6 with esptool: `PYTHONIOENCODING=utf-8 /c/pio/penv/Scripts/python.exe -m
+  esptool --chip esp32c3 --port COM6 write-flash 0x0 .pio/build/default/firmware.factory.bin` (esptool 5.3 in the
+  `C:\pio` penv). Then drive it with devctl (`--port COM6`). Nothing else resets the X3: no RTS pulse, no
+  `CMD:REBOOT`, no `CMD:SLEEP`. If the X3 is silent on USB after the flash or at any point in the run, stop this step
+  and report it (a silent X3 needs the maintainer's power cycle).
   - `cmd:GET:*` to a backup file; portrait (`cmd:SET:orientation=0`), NotoSansJP 14 pt, text anti-aliasing on as the
     spike ran (`cmd:SET:textAntiAliasing=1`), and `cmd:SET:sleepTimeoutMinutes=30` for the session (an idle X3 sleeps
     and drops off USB).
   - `cmd:FS:LS:/test` shows the acceptance book at 1,663,588 B. Upload `test_vertical_text.epub`: `cmd:ACT:USB_TRANSFER`,
     the no-reset helper's `upload()`, then `cmd:BTN:BACK`. Leaving the screen restarts the X3 to Home by design; if it
-    stays silent on USB, the maintainer power-cycles it.
+    stays silent on USB, stop here and report it (the maintainer power-cycles it).
   - The acceptance book's spine items 9, 39, 22 and 4 under Automatic, then under Off, exactly as Step 4 on the X4:
     pages, build ms, pre-render ms and cost, arena high-water, `heap` after five turns, a screenshot each, no `Render
     bounds rejected`. Set against spec 10.1's table: the spike's vertical column against the branch's.
   - `test_vertical_text.epub` spine 1: screenshots, as Step 7.
-  - Restore every changed setting from the backup and verify with `GET`. The maintainer flashes master back.
+  - Restore every changed setting from the backup and verify with `GET`. Flash master back the same way (Step 1's
+    base `firmware.factory.bin` from `C:/tmp/wt-wm3-base`) unless the maintainer says otherwise, as Step 9 does on
+    the X4.
 - [ ] **Step 11: The touch board** (one session; the maintainer attaches an X4 Pro or a T5S3). Build its env
   (`-e x4pro` or `-e lilygo_t5s3`, a cold S3 build of 15-30 min, in the background, the only pio run then) and flash it
   (`-t upload --upload-port <port>`), or hand the maintainer the `firmware.bin` if they would rather flash it. Back up
