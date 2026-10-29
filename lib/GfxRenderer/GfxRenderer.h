@@ -48,7 +48,8 @@ class GfxRenderer {
   // Selects the absolute plane encoding for the grayscale passes; see
   // setAbsoluteGrayPlanes(). Cleared whenever the mode returns to BW.
   std::atomic<bool> absoluteGrayPlanes;
-  std::atomic<int> orientation;
+  // Mutable: a vertical page switches frames from inside const draw calls (setDrawOrientation).
+  mutable std::atomic<int> orientation;
   // Mirrors `orientation` except across the themes' transient hint-strip flips. See setOrientation.
   std::atomic<int> heldOrientation;
   std::atomic<bool> fadingFix;
@@ -381,7 +382,10 @@ class GfxRenderer {
   // Draw in `o` WITHOUT changing what getHeldOrientation() reports. For furniture that has to sit
   // on a fixed panel edge whichever way the device is held — the button-hint strips flip to
   // Portrait so their boxes land beside the physical buttons, then flip back.
-  void setDrawOrientation(const Orientation o) { orientation.store(static_cast<int>(o), std::memory_order_relaxed); }
+  // const because a vertical page switches frames from inside const draw calls (drawTextVertical).
+  void setDrawOrientation(const Orientation o) const {
+    orientation.store(static_cast<int>(o), std::memory_order_relaxed);
+  }
   // The orientation the reader is actually holding the device in, unaffected by the transient
   // flips above. Render runs on its own task, so anything sampling orientation from OUTSIDE a
   // render pass — the input layer's logical directions above all — must read this instead of
