@@ -8,5 +8,11 @@ correction-bit bookkeeping is the reference behaviour every encoder is tested ag
 The reduced-size inverse DCT (keeping the top-left n x n coefficients and inverting with an
 n-point IDCT) is the approach of libjpeg's scaled decoding.
 
+The low-heap fallback -- the DC scans alone, resized to the output (`decodeResized`) -- continues
+the progressive JPEG preview this firmware had as a separate DC-only decoder, whose idea was
+inspired by the progressive JPEG fallbacks in
+[CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) and
+[FreeInkBook](https://github.com/freeink-project/freeink-sdk).
+
 This is an independent implementation; it contains no libjpeg, libjpeg-turbo, JPEGDEC or
 TJpgDec source code.

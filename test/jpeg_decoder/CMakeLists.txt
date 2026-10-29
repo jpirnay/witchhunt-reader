@@ -2,7 +2,6 @@ add_executable(JpegDecoderTest
   JpegDecoderTest.cpp
   ProgressiveJpegTest.cpp
   Stubs.cpp
-  ${REPO_ROOT}/lib/ProgressiveJpegDc/ProgressiveJpegDc.cpp
   ${REPO_ROOT}/lib/ProgressiveJpeg/ProgressiveJpeg.cpp
   ${REPO_ROOT}/lib/JpegToBmpConverter/JpegToBmpConverter.cpp
   ${REPO_ROOT}/lib/GfxRenderer/BitmapHelpers.cpp
@@ -22,7 +21,6 @@ target_include_directories(JpegDecoderTest PRIVATE
   # BufferedPrint.h
   ${REPO_ROOT}/lib/Serialization
   ${REPO_ROOT}/lib/JpegToBmpConverter
-  ${REPO_ROOT}/lib/ProgressiveJpegDc
   ${REPO_ROOT}/lib/ProgressiveJpeg
   ${REPO_ROOT}/lib/CooperativeAbort
   ${REPO_ROOT}/lib/Memory

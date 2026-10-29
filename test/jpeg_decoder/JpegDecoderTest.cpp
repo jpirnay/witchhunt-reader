@@ -28,7 +28,6 @@
 #include "JpegToBmpConverter.h"
 #include "Print.h"
 #include "ProgressiveJpeg.h"
-#include "ProgressiveJpegDc.h"
 
 #ifndef FIXTURE_DIR
 #define FIXTURE_DIR "."
@@ -244,18 +243,29 @@ TEST(JpegDecoder, GrayscaleOutputIsClamped) {
   EXPECT_LE(meanDiff, 3.0);
 }
 
-TEST(ProgressiveJpegDc, DecodesFirstScanIntoResizedRows) {
+// ---------------------------------------------------------------------------
+// ProgressiveJpeg::decodeResized: the 1/8 decode resampled to a box, the converters' last resort
+// when the heap holds no finer scale's workspace. The 1/8 levels are whole blocks' averages, so it
+// interpolates between them in both axes.
+// ---------------------------------------------------------------------------
+namespace {
+
+ProgressiveJpeg::Result decodeResized(const char* name, const uint16_t width, const uint16_t height,
+                                      ProgressiveRows& capture) {
   FsFile file;
-  ASSERT_TRUE(file.openForRead(fixture("progressive_420.jpg")));
-
-  ProgressiveRows capture;
-  ProgressiveJpegDc::DecodeOptions options;
-  options.outputWidth = 48;
-  options.outputHeight = 32;
-  const auto result = ProgressiveJpegDc::decode(file, options, ProgressiveRows::accept, &capture);
+  EXPECT_TRUE(file.openForRead(fixture(name)));
+  ProgressiveJpeg::DecodeOptions options;
+  const auto result = ProgressiveJpeg::decodeResized(file, options, width, height, ProgressiveRows::accept, &capture);
   file.close();
+  return result;
+}
 
-  ASSERT_EQ(result, ProgressiveJpegDc::Result::Ok) << ProgressiveJpegDc::resultName(result);
+}  // namespace
+
+TEST(ProgressiveJpegResized, DecodesTheEighthIntoResizedRows) {
+  ProgressiveRows capture;
+  const auto result = decodeResized("progressive_420.jpg", 48, 32, capture);
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
   ASSERT_EQ(capture.width, 48);
   ASSERT_EQ(capture.height, 32);
   ASSERT_EQ(capture.pixels.size(), 48u * 32u);
@@ -273,18 +283,11 @@ TEST(ProgressiveJpegDc, DecodesFirstScanIntoResizedRows) {
 // progressive cover scaled to a 540-row thumbnail that meant 194 correct rows followed
 // by 346 copies of one row. Both axes were affected; one test each.
 // ---------------------------------------------------------------------------
-TEST(ProgressiveJpegDc, TallImageDoesNotRepeatRowsPastOverflow) {
-  FsFile file;
-  ASSERT_TRUE(file.openForRead(fixture("progressive_tall.jpg")));
-
+TEST(ProgressiveJpegResized, TallImageDoesNotRepeatRowsPastOverflow) {
   ProgressiveRows capture;
-  ProgressiveJpegDc::DecodeOptions options;
-  options.outputWidth = 8;
-  options.outputHeight = 540;  // 339 DC rows: the wrap began at output row 194
-  const auto result = ProgressiveJpegDc::decode(file, options, ProgressiveRows::accept, &capture);
-  file.close();
-
-  ASSERT_EQ(result, ProgressiveJpegDc::Result::Ok) << ProgressiveJpegDc::resultName(result);
+  // 339 rows at 1/8: the wrap began at output row 194.
+  const auto result = decodeResized("progressive_tall.jpg", 8, 540, capture);
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
   ASSERT_EQ(capture.height, 540);
 
   // The source is a black-to-white gradient top to bottom, so the output has to keep
@@ -296,18 +299,11 @@ TEST(ProgressiveJpegDc, TallImageDoesNotRepeatRowsPastOverflow) {
   EXPECT_GT(row(539), 200);  // reaches white rather than freezing at ~36% grey
 }
 
-TEST(ProgressiveJpegDc, WideImageDoesNotRepeatColumnsPastOverflow) {
-  FsFile file;
-  ASSERT_TRUE(file.openForRead(fixture("progressive_wide.jpg")));
-
+TEST(ProgressiveJpegResized, WideImageDoesNotRepeatColumnsPastOverflow) {
   ProgressiveRows capture;
-  ProgressiveJpegDc::DecodeOptions options;
-  options.outputWidth = 382;  // 240 DC columns: the wrap began at output column 275
-  options.outputHeight = 8;
-  const auto result = ProgressiveJpegDc::decode(file, options, ProgressiveRows::accept, &capture);
-  file.close();
-
-  ASSERT_EQ(result, ProgressiveJpegDc::Result::Ok) << ProgressiveJpegDc::resultName(result);
+  // 240 columns at 1/8: the wrap began at output column 275.
+  const auto result = decodeResized("progressive_wide.jpg", 382, 8, capture);
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
   ASSERT_EQ(capture.width, 382);
 
   // Left-to-right gradient, read across the first output row.
@@ -318,19 +314,20 @@ TEST(ProgressiveJpegDc, WideImageDoesNotRepeatColumnsPastOverflow) {
   EXPECT_GT(col(381), 200);
 }
 
-TEST(ProgressiveJpegDc, RejectsBaselineWithoutEmittingRows) {
-  FsFile file;
-  ASSERT_TRUE(file.openForRead(fixture("contrast_420.jpg")));
-
+TEST(ProgressiveJpegResized, RejectsBaselineWithoutEmittingRows) {
   ProgressiveRows capture;
-  ProgressiveJpegDc::DecodeOptions options;
-  options.outputWidth = 48;
-  options.outputHeight = 32;
-  const auto result = ProgressiveJpegDc::decode(file, options, ProgressiveRows::accept, &capture);
-  file.close();
-
-  EXPECT_EQ(result, ProgressiveJpegDc::Result::Unsupported);
+  EXPECT_EQ(decodeResized("contrast_420.jpg", 48, 32, capture), ProgressiveJpeg::Result::Unsupported);
   EXPECT_TRUE(capture.pixels.empty());
+}
+
+// The resize starts from every block, the partial ones at the right and bottom edges too: a 9x5
+// image is two levels side by side, not nothing (a picture with no whole block row at 1/8).
+TEST(ProgressiveJpegResized, ResizesFromEveryBlockEvenAPartialOne) {
+  ProgressiveRows capture;
+  const auto result = decodeResized("prog_tiny_9x5.jpg", 18, 10, capture);
+  ASSERT_EQ(result, ProgressiveJpeg::Result::Ok) << ProgressiveJpeg::resultName(result);
+  ASSERT_EQ(capture.height, 10);
+  EXPECT_NE(capture.pixels[0], capture.pixels[17]) << "the second, partial block has a level of its own";
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +406,8 @@ TEST(JpegToBmpConverter, ProgressiveThumbnailMatchesItsBaselineTwin) {
   const double identical = static_cast<double>(same) / prog.size();
   const double meanDiff = static_cast<double>(diff) / prog.size();
   // Measured: full decode 0.877 identical / 0.125 mean level difference (the dither reacts to
-  // +-1 gray differences on a noisy picture); the DC preview scored 0.586 / 0.521.
+  // +-1 gray differences on a noisy picture); the 1/8 decode resized to the box (the heap short of
+  // the 1/4 workspace + 16 KB) scores 0.588 / 0.518.
   EXPECT_GT(identical, 0.80);
   EXPECT_LT(meanDiff, 0.20);
 }
@@ -880,10 +878,11 @@ class FreeHeapScope {
   const uint32_t saved_;
 };
 
-// A progressive image only the DC preview takes is not sliced; the caller converts it one-shot.
-// The host heap stub fits every scale's workspace, so the refusal only happens with the heap one
-// byte short of the smallest (1/8) workspace plus the 16 KB the row pipeline is owed.
-TEST(JpegThumbSession, RefusesWhatOnlyTheDcPreviewTakes) {
+// A progressive image no scale's workspace fits is not sliced; the caller converts it one-shot,
+// from its 1/8 decode resized. The host heap stub fits every scale's workspace, so the refusal only
+// happens with the heap one byte short of the smallest (1/8) workspace plus the 16 KB the row
+// pipeline is owed.
+TEST(JpegThumbSession, RefusesWhatOnlyTheResizedEighthTakes) {
   FsFile file;
   ASSERT_TRUE(file.openForRead(fixture("progressive_420.jpg")));
   ProgressiveJpeg::ImageInfo info;
@@ -905,6 +904,80 @@ TEST(JpegThumbSession, RefusesWhatOnlyTheDcPreviewTakes) {
   MemoryPrint roomy;
   const JpegToBmpConverter::BmpTarget roomyTarget[1] = {{&roomy, 40, 28}};
   EXPECT_NE(JpegThumbSession::begin(file, roomyTarget, 1), nullptr);
+  file.close();
+}
+
+// A cover the heap leaves only the 1/8 decode for, in a box larger than the 1/8 picture: the row
+// pipeline would enlarge it a source pixel per output pixel -- 8x8 blocks. It is resampled
+// bilinearly (ProgressiveJpeg::decodeResized), exactly as when not even the 1/8 workspace fits,
+// whatever the picture's size: progressive_tall_3200.jpg is taller than the 3072 rows the
+// baseline path takes.
+TEST(JpegToBmpConverter, AnEnlargedEighthIsResizedAsWhenNothingFits) {
+  struct Case {
+    const char* jpg;
+    int width;  // a box that needs 1/2
+    int height;
+  };
+  for (const Case& c : {Case{"prog_full_420.jpg", 90, 60}, Case{"progressive_tall_3200.jpg", 32, 1600}}) {
+    SCOPED_TRACE(c.jpg);
+    FsFile file;
+    ASSERT_TRUE(file.openForRead(fixture(c.jpg)));
+    ProgressiveJpeg::ImageInfo info;
+    ASSERT_EQ(ProgressiveJpeg::probe(file, info), ProgressiveJpeg::Result::Ok);
+    const auto convertAt = [&](const uint32_t freeHeap) {
+      FreeHeapScope squeezed(freeHeap);
+      file.seek(0);
+      MemoryPrint out;
+      const JpegToBmpConverter::BmpTarget target[1] = {{&out, c.width, c.height}};
+      EXPECT_TRUE(JpegToBmpConverter::jpegFileTo1BitBmpStreamsWithSizes(file, target, 1));
+      return out.buf;
+    };
+    const auto eighth = static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 3));
+    const auto quarter = static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 2));
+    const auto onlyTheEighth = convertAt(quarter + 16 * 1024 - 1);  // 1/8 fits beside the row pipeline's 16 KB
+    const auto nothing = convertAt(eighth + 16 * 1024 - 1);         // not even 1/8
+    file.close();
+    ASSERT_GE(onlyTheEighth.size(), 26u);
+    EXPECT_EQ(le32(onlyTheEighth, 18), c.width);
+    EXPECT_EQ(le32(onlyTheEighth, 22), -c.height);
+    EXPECT_EQ(onlyTheEighth, nothing);
+  }
+}
+
+// A cover left to the 1/8 decode resized reads through the decoder's windows from the region too,
+// as a finer decode does (AProgressiveCoverReadsThroughWindowsFromItsRegion): through the shared
+// 512-byte buffer the index pass reads the whole file in 512-byte pieces, and every DC scan re-reads
+// its data in every band -- once for each output.
+TEST(JpegToBmpConverter, AResizedCoverReadsThroughWindowsFromItsRegion) {
+  FreeHeapScope squeezed(8 * 1024);  // below the row pipeline's 16 KB: no scale fits, the 1/8 resize
+  const CoverReads heap = convertCover("prog_full_420.jpg", nullptr, false);
+  BuildArena arena(64 * 1024);
+  ASSERT_TRUE(arena.valid());
+  const CoverReads lent = convertCover("prog_full_420.jpg", &arena, false);
+  EXPECT_EQ(arena.used(), 0u);
+  EXPECT_GE(arena.highWater(), ProgressiveJpeg::scanWindowBytes()) << "the windows came out of the region";
+  ASSERT_FALSE(heap.large.empty());
+  EXPECT_EQ(lent.large, heap.large);
+  EXPECT_EQ(lent.small, heap.small);
+  std::printf("[ thumbs   ] resized: %zu card calls / %zu bytes without a region, %zu / %zu lent\n", heap.calls,
+              heap.bytes, lent.calls, lent.bytes);
+  EXPECT_LE(lent.calls * 2, heap.calls);
+}
+
+// ...and the sliced conversion leaves such a cover to the one-shot one, which resizes it.
+TEST(JpegThumbSession, LeavesAnEnlargedEighthToTheOneShotConversion) {
+  FsFile file;
+  ASSERT_TRUE(file.openForRead(fixture("prog_full_420.jpg")));
+  ProgressiveJpeg::ImageInfo info;
+  ASSERT_EQ(ProgressiveJpeg::probe(file, info), ProgressiveJpeg::Result::Ok);
+  MemoryPrint out;
+  const JpegToBmpConverter::BmpTarget target[1] = {{&out, 90, 60}};
+  {
+    FreeHeapScope squeezed(static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 2) + 16 * 1024 - 1));
+    EXPECT_EQ(JpegThumbSession::begin(file, target, 1), nullptr);
+  }
+  file.seek(0);
+  EXPECT_NE(JpegThumbSession::begin(file, target, 1), nullptr) << "control: with the heap back it is sliced";
   file.close();
 }
 

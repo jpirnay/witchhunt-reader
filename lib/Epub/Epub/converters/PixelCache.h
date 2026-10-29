@@ -92,8 +92,8 @@ struct PixelCache {
   // v5: progressive JPEGs are fully decoded instead of shown from their 1/8-resolution DC scan.
   static constexpr uint16_t PXC_MAGIC = 0x8005;
   // Same layout, written by a decode that had to settle for less than the requested scale (a
-  // progressive JPEG at a coarser DCT scale, or its DC-only preview) because the heap could not
-  // hold the workspace. Readers replay it like any cache; a warm pass with the framebuffers
+  // progressive JPEG at a coarser DCT scale, down to its 1/8 decode resized) because the heap could
+  // not hold the workspace. Readers replay it like any cache; a warm pass with the framebuffers
   // released, or the reader's memory ladder with memory freed, decodes it again and replaces it
   // when that decode finishes (ImageBlock::CoarseRedecodeScope). Before this the .pxc
   // had no quality key, so a preview-grade image stood in for the book's for good (memory audit
