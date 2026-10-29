@@ -119,7 +119,7 @@ Listed here so nobody redoes it.
 - `CMD:ACT:DICT` reports the run, the hits, their entries, probes, reads and both timings (`docs/serial-test-api.md`).
 - **No version changes.** `gh_release` flash +9,044 B, static RAM +0 B (`firmware_size_history.py`, against master).
 - **Tests.** `test/dictionary/DictionaryTest.cpp` (the prefix search and its read counts, the definitions), `test/dictionary/CjkLookupRunTest.cpp`.
-- **The user's side** is in `docs/dictionary.md` ("Chinese, Japanese and Korean"): how it works, its limits, the PyGlossary conversions, sizes and first-open times. The design spec was deleted once its lasting parts were there; the plan stays (`docs/superpowers/plans/2026-10-23-cjk-dictionary.md`).
+- **The user's side** is in `docs/dictionary.md` ("Chinese, Japanese and Korean"): how it works, its limits, the PyGlossary conversions, sizes and first-open times. The design spec and the plan were deleted once their lasting parts were there.
 
 **Tests and books.**
 - `test/epub_pipeline/CjkRulesTest.cpp`, the rule checker, lays out every line and asserts kinsoku, no hyphen, and no stray space between CJK characters.
