@@ -317,9 +317,11 @@ Without a CJK TrueType family nothing opens, and the boxes (□) stay. Before th
 Shipped in step 9 ([above](#already-shipped)). What remains, measured on the X4 with CC-CEDICT, JMdict_e and
 CC-KEDICT (`docs/dictionary.md` has the conversions):
 
-- **Search time on dictionaries with a large `.syn`.** The maintainer's gate is the median of `ms / exact_ms` over ~50
-  words per book (`CMD:ACT:DICT`), at most 1.5. Hong Lou Meng with CC-CEDICT: 1.46-1.58 across runs (2.69 before
-  the five speed-ups of #<PR 3>). Soseki with JMdict: 1.95 (from 3.66), not met. A CJK search reads both index
+- **Search time on dictionaries with a large `.syn` (follow-up: a JMdict speed-up).** The maintainer's gate is the
+  median of `ms / exact_ms` over 50 words per book (`CMD:ACT:DICT`), at most 1.5. Hong Lou Meng with CC-CEDICT: 1.46
+  (four runs, 1.46-1.47; 2.69 before the five speed-ups of #<PR 3>). Soseki with JMdict: 1.95 (3.66 before them;
+  median 37 ms against 20 ms for the exact lookup), not met; the maintainer accepted it for #<PR 3> (2026-10-29),
+  JMdict being best effort, and a JMdict speed-up is the follow-up. A CJK search reads both index
   files: two descents, two window scans, the `.syn` and `.sidx` opened (6 ms), and a follow per synonym hit; the
   exact lookup of the matched headword reads the `.idx` once. JMdict files every kana reading in its 15.8 MB `.syn` (550,503 entries,
   2,151 samples, ~7 KB windows), so kana text always takes both. Measured costs on the X4: a 4-byte sample read
@@ -335,16 +337,17 @@ CC-KEDICT (`docs/dictionary.md` has the conversions):
 - **Moving the cursor word by word, and a manual range.** The cursor steps one character; the match is always the
   longest. Upstream went with a manual range (#3932).
 - **Greedy matches.** Forward maximum matching over the dictionary's headwords, against a segmenter on the same runs
-  (word boundaries, F1): Hong Lou Meng with CC-CEDICT 0.74 against `jieba` (0.88 without its HMM, 0.90 on the text
-  mapped to simplified), Soseki with JMdict 0.77 against `fugashi` and UniDic. JMdict's long entries (吾輩は猫である,
+  (word boundaries, F1): Hong Lou Meng with CC-CEDICT 0.74 against `jieba` (0.88 without its HMM, 0.90 without it on the
+  text mapped to simplified), Soseki with JMdict 0.77 against `fugashi` and UniDic. JMdict's long entries (吾輩は猫である,
   これと言う) and kana synonyms (はま from はまだ) make most of the Japanese misses; the shorter matches in the
   definition soften them.
 - **One headword per synonym.** A `.syn` hit names one `.idx` entry, so a reading several headwords share shows the
   first: はし shows 嘴 of eight. Listing every ordinal of a hit changes `DictPrefixHit` and the contiguous-entries
   read.
 - **The other script in the definition.** CC-CEDICT writes each word in both scripts; a single regional CJK font
-  draws the other script's missing characters as U+FFFD (學, 書 with a Simplified Chinese font). A fallback face
-  for definition text, as the UI text fallback has, would fix it.
+  draws the other script's missing characters as U+FFFD (學, 書 with a Simplified Chinese font). The NotoSansCJK
+  `.cpfont` family carries both scripts but not pinyin's ē, ǎ, ū (U+0113, U+01CE, U+016B: `SDCF` "onGlyphMiss"), which
+  drop out of the reading (dàxuéshng). A fallback face for definition text, as the UI text fallback has, would fix both.
 - **Styled definitions in a TrueType reader font, first time round.** In a session whose glyph store did not yet
   hold the definitions' glyphs, two of three CC-CEDICT definitions ran the free heap from 60 KB to 16 KB during the
   styled layout and stopped on its retain floor (`DHTML` "Styled definition stopped on free heap", an error line on a

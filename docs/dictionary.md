@@ -87,7 +87,7 @@ What it does not do:
 - **No deinflection.** 食べた has no entry of its own and finds 食; 먹었습니다 finds nothing in CC-KEDICT. Each entry is headed by the word it is for, so you can see what was matched.
 - **The other script only where the dictionary has it.** The search covers the dictionary's word index and its `.syn`, and none of the Latin fallbacks above (no stemming, no lowercase retry). CC-CEDICT lists every traditional form as a synonym of its simplified headword, so 學校 finds 学校; a dictionary without them finds nothing for text in the other script.
 - **One headword per synonym.** A synonym that several headwords share shows the first of them only. JMdict files a kana reading as a synonym of each kanji spelling, so はし, a reading of 橋, 箸, 端, 嘴 and four more, shows 嘴.
-- **Characters your reading font lacks.** CC-CEDICT writes each word in both scripts (大学生 / 大學生). A font made for one region (Simplified Chinese, Japanese) lacks some characters of the other and draws them as a box; a font that carries both draws them all.
+- **Characters your reading font lacks.** CC-CEDICT writes each word in both scripts (大学生 / 大學生). A font made for one region (Simplified Chinese, Japanese) lacks some characters of the other and draws them as a box; a font that carries both draws them all. The NotoSansCJK `.cpfont` family carries both scripts but not pinyin's ē, ǎ and ū, which drop out of the reading (dàxuéshēng shows as dàxuéshng); a TrueType family has them.
 - **Greedy matches.** The longest word is not always the one the sentence means: 研究生命 starts with 研究生 (graduate student), not 研究 (research). The shorter matches follow it in the definition.
 
 **Where to get them.** None of these ship as StarDict; [PyGlossary](https://github.com/ilius/pyglossary) converts them on a computer. Convert to a plain `.dict` (`dictzip=False`): it needs no 32 KB inflate window, which is hardest to find on a dense CJK page.
@@ -127,7 +127,7 @@ HTML dictionaries that declare `sametypesequence=h` use the EPUB text-layout eng
 
 Definitions of Latin-script words render in Noto Sans at a fixed size rather than in your reading font. That is the one font carrying the phonetic alphabet — a dictionary's pronunciation notation needs about 100 codepoints that no reading font here ships, and putting them in every font and size would cost roughly five times the flash. Any character still missing falls back to the closest available shape (schwa as `e`, the primary-stress mark as an apostrophe) rather than an empty box.
 
-A lookup that started on Chinese, Japanese or Korean text renders its definition in your reading font instead: Noto Sans has no Han, kana or Hangul, and the CJK font the book is read in has them, pinyin's tone marks included.
+A lookup that started on Chinese, Japanese or Korean text renders its definition in your reading font instead: Noto Sans has no Han, kana or Hangul, and the CJK font the book is read in has them (pinyin's tone marks too, in a TrueType family; see "Characters your reading font lacks" above).
 
 ## Where to find dictionaries
 
