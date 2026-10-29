@@ -196,9 +196,6 @@ TEST(CjkPunctuation, TheCjkLatinGapRangesEndWhereTheyShould) {
   EXPECT_TRUE(takesCjkLatinGap(0x3042, '0'));      // あ0
 }
 
-}  // namespace
-
-namespace {
 TEST(TypographyProfile, OnlyChineseJapaneseAndKoreanMayBeSetVertically) {
   for (const char* tag : {"ja", "zh", "zh-Hant", "ko-KR"}) {
     EXPECT_TRUE(TypographyProfile::forLanguage(tag).verticalAllowed) << tag;

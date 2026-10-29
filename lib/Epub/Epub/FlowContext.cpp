@@ -2,9 +2,11 @@
 
 #include "css/CssStyle.h"
 
-VerticalText FlowContext::requestFor(const VerticalText setting, const int8_t bookOverride, const bool verticalAllowed) {
+VerticalText FlowContext::requestFor(const VerticalText setting, const int8_t bookOverride,
+                                     const bool verticalAllowed) {
   if (!verticalAllowed) return VerticalText::Off;
-  if (bookOverride >= static_cast<int8_t>(VerticalText::Automatic) && bookOverride <= static_cast<int8_t>(VerticalText::Off)) {
+  if (bookOverride >= static_cast<int8_t>(VerticalText::Automatic) &&
+      bookOverride <= static_cast<int8_t>(VerticalText::Off)) {
     return static_cast<VerticalText>(bookOverride);
   }
   return setting;

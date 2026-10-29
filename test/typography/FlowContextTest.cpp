@@ -17,6 +17,7 @@ TEST(FlowContext, TheRequestIsTheBooksThenTheSettingsThenTheLanguages) {
   EXPECT_EQ(FlowContext::requestFor(kOn, -1, false), kOff);
   EXPECT_EQ(FlowContext::requestFor(kAuto, 1, false), kOff);
   EXPECT_EQ(FlowContext::requestFor(kOn, 7, true), kOn) << "an override outside 0-2 reads as none";
+  EXPECT_EQ(FlowContext::requestFor(kOn, 3, true), kOn) << "3 is the first value past Off";
 }
 
 TEST(FlowContext, OnAndOffDecideOverTheBook) {
