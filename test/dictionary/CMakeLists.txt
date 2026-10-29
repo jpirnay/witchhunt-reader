@@ -102,3 +102,38 @@ target_link_libraries(CjkLookupRunTest PRIVATE
 )
 
 gtest_discover_tests(CjkLookupRunTest)
+
+# A seeded random oracle for the CJK prefix search: 40 generated dictionaries, checked against tables
+# built from their source data. It owns its own SD root, so it needs no lock against DictionaryTest.
+set(DICT_ORACLE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/sdroot_oracle")
+add_executable(DictionaryOracleTest
+  DictionaryOracleTest.cpp
+  ${REPO_ROOT}/src/util/Dictionary.cpp
+  ${REPO_ROOT}/src/util/DictionaryRegistry.cpp
+  ${REPO_ROOT}/src/util/DictZip.cpp
+  ${REPO_ROOT}/lib/Utf8/Utf8.cpp
+  ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
+)
+
+target_include_directories(DictionaryOracleTest PRIVATE
+  ${REPO_ROOT}/test/zip_entry_reader
+  ${REPO_ROOT}/test/shims
+  ${REPO_ROOT}/src/util
+  ${REPO_ROOT}/lib/InflateReader
+  ${REPO_ROOT}/lib/Logging
+  ${REPO_ROOT}/lib/Memory
+  ${REPO_ROOT}/lib/Utf8
+)
+
+target_compile_definitions(DictionaryOracleTest PRIVATE
+  DICTIONARY_ROOT_PREFIX="${DICT_ORACLE_ROOT}"
+  DICT_TEST_ROOT="${DICT_ORACLE_ROOT}"
+)
+
+target_link_libraries(DictionaryOracleTest PRIVATE
+  crosspoint_test_common
+  inflate_reader_host
+  GTest::gtest_main
+)
+
+gtest_discover_tests(DictionaryOracleTest)

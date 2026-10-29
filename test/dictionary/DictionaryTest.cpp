@@ -1465,6 +1465,24 @@ TEST_F(DictionaryTest, PrefixDefinitionsReportLowMemory) {
   EXPECT_TRUE(out.empty());
 }
 
+TEST_F(DictionaryTest, PrefixDefinitionsOfATruncatedDictFileFailWithTheOutputCleared) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("DefsTruncated", kBasic));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "DefsTruncated"));
+  DictPrefixMatch m;
+  ASSERT_TRUE(dict.resolvePrefixes("大学生活", m));
+
+  // The card loses the tail of the .dict after the search: the entries are still named by the index.
+  const fs::path dictFile = kDictRoot / "DefsTruncated" / "words.dict";
+  fs::resize_file(dictFile, 3);
+
+  std::string out = "stale";
+  Dictionary::LookupResult r = Dictionary::LookupResult::Found;
+  EXPECT_FALSE(dict.readPrefixDefinitions(m, out, &r));
+  EXPECT_EQ(r, Dictionary::LookupResult::ReadError);
+  EXPECT_TRUE(out.empty());
+}
+
 TEST_F(DictionaryTest, PrefixDefinitionsOfNoHitsReadNothing) {
   ASSERT_NO_FATAL_FAILURE(writeDictionary("DefsNone", kBasic));
   Dictionary dict;
