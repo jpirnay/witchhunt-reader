@@ -132,6 +132,7 @@ Listed here so nobody redoes it.
 - **The Japanese minimums** (JLREQ). 。 and ！？ keep their full width mid-line under push-in; 、 may halve; at a line end 。、 and a closing bracket are half or full.
 - **Ruby gives nothing to push-in.** A ruby's overhangs and line-edge reserves stay as they are, a mark inside a ruby group does not shrink, and a mark a ruby overhangs shrinks only as far as the overhangs leave it room (`applyRubyWidths`).
 - **Section version** 103.
+- **Measured cost.** Cold section build on the X4 against master: total 0..+2 %, layout (`parse`) +2..+8 %; page turns unchanged.
 - **Tests and books.**
   - `CjkPushIn` and `CjkLatinGap` in `test/cjk_layout/CjkTypographyTest.cpp`, both breakers; the minimums in `test/typography/`.
   - The rule checker lays every line out again from its dump, push-in included (`CjkRulesTest`, `LineLayout`): no line is wider than its text width, a line that shrank could not have kept its natural widths, and a line that was not pushed in holds the CJK–Latin gap exactly.
@@ -139,6 +140,8 @@ Listed here so nobody redoes it.
 - **Follow-up:** guide dots are drawn at Han–Latin gaps. `TextBlock::render` dots every gap of at least the dot size + 2 px, and the CJK–Latin gap is 4-5 px at reading sizes, so a reader with guide dots on sees a dot between 漢字 and iPhone. Guide dots mark word spaces; the gaps between CJK characters are too narrow for one. Next step: dot only the gaps that were a source space.
 - **Follow-up:** a re-flowed line can end with ！ or ？ followed by an ideographic space U+3000 (case 1 of the fixture, "！　"). Typesetting practice sets no space there, and no section-5 rule covers it: a line-end U+3000 after ！？ could be dropped or hung.
 - **Follow-up:** the rule checker's justified line-end check stays either-way (pushed in or not) on lines with ruby, word spaces or glued Latin, about a quarter of the corpus's justified lines. Restating those lines' widths exactly would let the check be strict on every line (`CjkRulesTest`).
+- **Follow-up, Latin scratch:** the four mark vectors (`markClass_`, `edgeTrim_`, `shrink_`, `edgeShrink_`) are allocated for Latin paragraphs too: +524 B on test_table_streaming's peak, from table cells keeping their scratch. The fix: gate all four together on "the block holds a CJK mark", or `releaseLayoutScratch()` after each cell's layout.
+- **Follow-up, the gap's lookups:** `cjkLatinGapBefore` decodes two codepoints at every breakable CJK boundary and calls `cjkEm` per gap. A per-block "has a Han/kana-Latin boundary" flag or a per-(font, style, scale) em cache would remove them.
 
 **Tests and books.**
 - `test/epub_pipeline/CjkRulesTest.cpp`, the rule checker, lays out every line and asserts kinsoku, no hyphen, and no stray space between CJK characters.
