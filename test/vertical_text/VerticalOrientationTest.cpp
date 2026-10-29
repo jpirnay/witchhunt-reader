@@ -70,3 +70,20 @@ TEST(VerticalOrientation, APieceKeepsItsMarksAndNeverSplitsACodepoint) {
   EXPECT_EQ((Pieces{{7, true}}), piecesOf("😀️"));
   EXPECT_TRUE(piecesOf("").empty());
 }
+
+TEST(VerticalOrientation, AClusterLongerThanTheCapIsCutAtACodepoint) {
+  std::string text = "a";
+  for (int i = 0; i < 40; ++i) text += "́";
+  ASSERT_EQ(81u, text.size());
+  const Pieces pieces = piecesOf(text);
+  size_t total = 0;
+  for (const auto& piece : pieces) {
+    EXPECT_LE(piece.first, kMaxColumnRunBytes);
+    total += piece.first;
+    // A boundary is never a UTF-8 continuation byte.
+    if (total < text.size()) {
+      EXPECT_NE(0x80, static_cast<unsigned char>(text[total]) & 0xC0);
+    }
+  }
+  EXPECT_EQ(81u, total);
+}

@@ -31,13 +31,15 @@ bool followsItsCharacter(const uint32_t cp) {
          (cp >= 0xE0100 && cp <= 0xE01EF);
 }
 
-// Bytes of the character at `text` and the marks after it; 0 at the end.
+// Bytes of the character at `text` and the marks after it, at most kMaxColumnRunBytes: a cluster longer than that is
+// cut at the last codepoint that fits and the remaining marks start the next piece. 0 at the end.
 size_t clusterLength(const char* text) {
   const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
   if (utf8NextCodepoint(&p) == 0) return 0;
   for (;;) {
     const unsigned char* next = p;
     if (!followsItsCharacter(utf8NextCodepoint(&next))) break;
+    if (static_cast<size_t>(next - reinterpret_cast<const unsigned char*>(text)) > kMaxColumnRunBytes) break;
     p = next;
   }
   return static_cast<size_t>(p - reinterpret_cast<const unsigned char*>(text));
