@@ -42,15 +42,20 @@ void DictionaryDefinitionActivity::onEnter() {
   // Normalize StarDict multi-type separators so the wrap loop and the C-string
   // font APIs below both see the whole definition.
   std::replace(definition.begin(), definition.end(), '\0', '\n');
-  if (!(htmlDefinition && definition.size() <= MAX_STYLED_HTML_BYTES && layoutHtmlPages())) {
-    htmlToPlainTextInPlace(definition);
-    if (!wrapText()) {
-      // Say so rather than show part of the definition as if it were all of
-      // it. Nothing draws either buffer now, so both go back to the heap.
-      layoutFailed = true;
-      std::vector<Line>().swap(lines);
-      definition.clear();
-      definition.shrink_to_fit();
+  {
+    // Both layouts measure in bodyFontId. For a CJK lookup that is the reader's font, and a
+    // TrueType or CFF face may be measured only under the render lock, which onEnter() runs without.
+    RenderLock lock(*this);
+    if (!(htmlDefinition && definition.size() <= MAX_STYLED_HTML_BYTES && layoutHtmlPages())) {
+      htmlToPlainTextInPlace(definition);
+      if (!wrapText()) {
+        // Say so rather than show part of the definition as if it were all of
+        // it. Nothing draws either buffer now, so both go back to the heap.
+        layoutFailed = true;
+        std::vector<Line>().swap(lines);
+        definition.clear();
+        definition.shrink_to_fit();
+      }
     }
   }
   requestUpdate();
@@ -84,7 +89,7 @@ DictionaryDefinitionActivity::BodyArea DictionaryDefinitionActivity::bodyArea() 
 bool DictionaryDefinitionActivity::layoutHtmlPages() {
   const BodyArea body = bodyArea();
   if (body.width <= 0 || body.height <= 0) return false;
-  if (!buildDictionaryHtmlPages(renderer, definition, DICTIONARY_FONT_ID, static_cast<uint16_t>(body.width),
+  if (!buildDictionaryHtmlPages(renderer, definition, bodyFontId, static_cast<uint16_t>(body.width),
                                 static_cast<uint16_t>(body.height), pages)) {
     return false;
   }
@@ -137,7 +142,7 @@ bool DictionaryDefinitionActivity::wrapText() {
   constexpr size_t MIN_LINE_CAPACITY = 64;
   if (!reserveLines(definition.size() / 32 + 8) && !reserveLines(MIN_LINE_CAPACITY)) return false;
 
-  const int fontId = DICTIONARY_FONT_ID;
+  const int fontId = bodyFontId;
   const BodyArea body = bodyArea();
   const int maxWidth = body.width;
   const int spaceWidth = renderer.getSpaceWidth(fontId);
@@ -349,9 +354,10 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
 
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
 
-  // Header: matched headword left, page counter right.
+  // Header: matched headword left, page counter right. A CJK lookup has no headword here: its
+  // body opens on the headword lines.
   const Rect header = UITheme::getHeaderRect(renderer);
-  GUI.drawHeader(renderer, header, headword.c_str());
+  GUI.drawHeader(renderer, header, headword.empty() ? nullptr : headword.c_str());
 
   // Right of the header: which dictionary this came from, and which page of it.
   // The name only appears when there is more than one installed -- otherwise it
@@ -378,14 +384,14 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
   }
 
   if (layoutFailed) {
-    // No body to page through: the headword stays above the message, and Back
+    // No body to page through: the header stays above the message, and Back
     // (or Confirm, to try another dictionary) still answers below it.
     GUI.drawPopup(renderer, tr(STR_DICT_LOW_MEMORY), /*overlayDisplayedFrame=*/false, PopupShip::Caller);
   } else {
     // Body: two-pass draw inside a prewarm scope (the same pattern the reader's
     // page render uses) so SD-card font glyphs load from the card in one batch
     // instead of one on-demand read per character on every page turn.
-    const int fontId = DICTIONARY_FONT_ID;
+    const int fontId = bodyFontId;
     // The same rectangle the tap-to-page split is resolved against, so what is drawn and what
     // answers a finger cannot drift apart.
     const BodyArea body = bodyArea();

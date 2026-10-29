@@ -199,6 +199,7 @@ Reply: one line, `STATE:` followed by `key=value` pairs.
 | `activity` | always | the screen on top (`Home`, `EpubReader`, `Settings`, `DictionaryWordSelect`, ...) |
 | `stack` | always | the screens below it, bottom first, comma-separated (`""` when none) |
 | `sel`, `label` | menus, lists and the dictionary's word screen | the highlighted row (0-based) and its text, or the word under the cursor; `sel=-1` when a tab bar has the focus |
+| `spec`, `span`, `match` | the dictionary's word screen | what the search found for the word under the cursor: `unknown`, `found` or `missing`; how many words the found headword covers (more than 1 only on CJK text); the headword (the longest, on CJK text) |
 | `popup`, `popup_ms` | when a popup is up | its text, and how long ago it was drawn |
 | `book`, `spine`, `page` | EPUB reader | the file, spine item `n/count`, page within that spine item `n/count`; both count from 1 |
 | `font`, `font_pt` | EPUB reader | the font family and point size the book is set in |
@@ -417,6 +418,31 @@ Looks the word up in the dictionary chosen in the settings, the way the reader's
 DICT:result=<outcome> dict=<dictionary> word=<word>[ headword=<matched entry> bytes=<definition length>]
 DICT_ERROR:no word
 ```
+
+A word whose first kept character is Han, kana or Hangul takes the prefix search the word screen
+runs on CJK text instead (it searches the `.syn` too, but takes none of the word-form fallbacks: no
+stemming, lowercase or elision retries), and the reply gains the search's findings. The Latin reply
+is unchanged.
+
+```
+DICT:result=<outcome> dict=<d> word=<w>[ headword=<hits[0]> bytes=<n>] run=<run> matched=<codepoints of hits[0]> hits=<h1,h2,h3> entries=<n1,n2,n3> probes=<n> reads=<n> ms=<t>[ exact_ms=<t>]
+```
+
+Example, with CC-CEDICT:
+
+```
+> CMD:ACT:DICT:大学生活
+< DICT:result=found dict=cedict word=大学生活 headword=大学生 bytes=2230 run=大学生活 matched=3 hits=大学生,大学,大 entries=1,2,2 probes=3 reads=36 ms=32 exact_ms=22
+```
+
+`run` is the cleaned text searched (at most 12 codepoints). `hits` lists up to three headwords that
+are prefixes of the run, longest first; `entries` is each one's number of same-headword entries, at
+most 8 (`DictPrefixMatch::MAX_ENTRIES_PER_HIT`); `matched` is the codepoint count of `hits[0]`. On
+a miss `matched=0` and `hits` and `entries` are empty. `probes` counts the window scans and the
+synonyms followed, `reads` the file reads (a block of sidecar samples, a scan refill). `ms` times
+the prefix search, run without an abort check. `exact_ms` times the plain lookup of `hits[0]`, run
+after the search so cache warmth favours it, and is sent only on a hit. `bytes` is the length of
+the definitions of all the hits, as the word screen shows them.
 
 `<outcome>` is `found`, `not_found`, `low_memory`, `decompress_error`, `read_error`,
 `no_dictionary` (none chosen), `open_failed` or `index_failed`. A dictionary used for the first

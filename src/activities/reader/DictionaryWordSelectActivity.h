@@ -11,8 +11,11 @@
 #include <vector>
 
 #include "activities/Activity.h"
+#include "util/CjkLookupRun.h"
 #include "util/Dictionary.h"
 #include "util/DictionaryRegistry.h"
+
+class FontCacheManager;
 
 // Word selection over the current reader page: Left/Right step through words in
 // reading order, Up/Down jump rows, Confirm looks the word up and opens
@@ -34,7 +37,8 @@ class DictionaryWordSelectActivity final : public Activity {
   void loop() override;
   void render(RenderLock&&) override;
 #if SERIAL_TEST_API
-  // " sel=<selected> label=<the selected word's text>"; nothing until the words are built.
+  // " sel=<selected> label=<the selected word's text> spec=<unknown|found|missing> span=<words>
+  // match=<headword>"; nothing until the words are built.
   void appendDebugState(std::string& out) const override;
 #endif
 
@@ -129,6 +133,23 @@ class DictionaryWordSelectActivity final : public Activity {
   // SPECULATIVE_DEBOUNCE_MS. Index search only -- no inflate, no definition
   // buffer -- so it costs a handful of SD reads and no large allocation.
   void speculateForSelection();
+  // The script of word `index`'s first kept codepoint: Han or kana and Hangul take the prefix
+  // search (spec 5.1), anything else the exact lookup.
+  CjkLookupRun::Script scriptAt(int index) const;
+  // Feeds `run` the words from `index` on, in reading order and so across a line end, until it closes.
+  void buildRun(int index, CjkLookupRun& run) const;
+  // Searches `run`, built from `selected`, for its dictionary prefixes and records the outcome as
+  // the speculation for `selected`: the hits, the verdict, and the words the longest hit covers.
+  // False, with the old speculation dropped and nothing recorded, when abortCheck gave up between
+  // probes. `result` gets the search's outcome.
+  bool resolveRun(const CjkLookupRun& run, Dictionary::AbortCheck abortCheck, Dictionary::LookupResult& result);
+  // Confirm's half for a CJK word: the run from `selected`, searched unless the speculation already
+  // has it, then every entry of its matches read into `definition`. Logs the lookup. `ok` is false
+  // when the dictionary could not be opened or indexed.
+  bool lookUpRun(bool ok, std::string& definition, Dictionary::LookupResult& result);
+  // Noto Sans for a Latin lookup, the reader's own font (`fontId`) for one that started on CJK text
+  // (spec 5.3). The one place that chooses; roadmap step 6 replaces it.
+  int definitionFontId(CjkLookupRun::Script script) const;
   // Move to another installed dictionary and look the same word up again.
   // Persists the choice: this IS the dictionary setting, and a reader who
   // switched mid-book means it.
@@ -157,7 +178,7 @@ class DictionaryWordSelectActivity final : public Activity {
     None,      // nothing here for touch; the buttons get their turn
     Consumed,  // claimed but deliberately inert (a contact still down)
     Moved,     // the cursor is now on the tapped word
-    Activate,  // the tap landed on the word already selected
+    Activate,  // the tap landed on the word already selected, or inside the match lit from it
   };
   WordTouch consumeWordTouch();
   void performLookup();
@@ -165,7 +186,15 @@ class DictionaryWordSelectActivity final : public Activity {
   // shown; extractWords() builds them again, identically, when the page is drawn on return.
   // `selected` and the speculation fields stay, so the cursor comes back where it was.
   void releaseWordArrays();
+  // Words the highlight covers from `selected`: the span of the CJK match the speculation found
+  // for it, otherwise 1 -- the word alone, which is every Latin word.
+  int spanWordCount() const;
+  // Saves the pixels under the highlight over words [selected, selected + spanWordCount()) and
+  // draws it, one box per row. False when the boxes could not all be saved: the highlight is
+  // drawn regardless, and the next cursor move takes the full repaint.
   bool drawHighlightWithSnapshot();
+  // The fast path's glyph load for the highlight, one batch per font and style.
+  void prewarmHighlight(FontCacheManager& fcm) const;
   void drawHints() const;
 
   std::unique_ptr<Page> page;
@@ -210,30 +239,43 @@ class DictionaryWordSelectActivity final : public Activity {
   int speculationIdx = -1;  // word `speculation` describes; -1 = none
   DictLocation speculationLocation;
   std::string speculationHeadword;
+  // The CJK speculation's hits for speculationIdx; a Latin word's are the two fields above.
+  DictPrefixMatch speculationMatch;
+  // Words the longest hit covers from speculationIdx; 1 otherwise, and always 1 for a Latin word.
+  uint8_t speculationSpan = 1;
+  // Records the speculation for word `index` (-1: none). Under the render lock: the render task
+  // sizes and styles the highlight from these three fields, and a half-written set would draw one
+  // word's span from another. Loop task only -- the render task already holds the lock, and it is
+  // not recursive.
+  void setSpeculation(int index, Speculation verdict, uint8_t span);
   unsigned long lastMoveMs = 0;
   // Speculation is off for this session: no dictionary, it would not open, or
   // its index still has to be built (a multi-second pass that must stay on the
-  // explicit Confirm, behind its popup, rather than firing while idle).
+  // explicit Confirm, behind its popup, rather than firing while idle). Confirm
+  // turns it back on once it has built the index.
   bool speculationDisabled = false;
-  // A verdict arrived for the word the cursor is already on, so the highlight
-  // has to be redrawn even though the cursor did not move.
+  // A verdict that changes the box -- an outline, a span -- arrived for the word the cursor is
+  // already on, so the highlight has to be redrawn even though the cursor did not move. Set
+  // under the render lock, which the render task holds when it clears it.
   bool speculationRepaintPending = false;
 
   Popup popup = Popup::None;
   StrId popupMsg = StrId::STR_DICT_NOT_FOUND;
   unsigned long popupTime = 0;
 
-  // Differential highlight repaint: the pixels under the current highlight box,
-  // so a cursor move restores them and repaints only the two affected boxes
+  // Differential highlight repaint: the pixels under the current highlight,
+  // so a cursor move restores them and repaints only the two affected highlights
   // instead of re-running the full two-pass page render (which also reloads
-  // every SD-font glyph on the page). snapshotIdx is the word whose under-pixels
-  // are saved; -1 means the framebuffer no longer holds a clean page (popup
+  // every SD-font glyph on the page). snapshotIdx is the word the saved
+  // highlight is drawn from; -1 means the framebuffer no longer holds a clean page (popup
   // drawn, sub-activity shown) and the next render must be a full one.
   //
-  // A word covers one rectangle per row it occupies -- two for a hyphen-joined word, whose
-  // halves sit at the end of one line and the start of the next. Saving their bounding box
-  // instead would mean saving both whole lines and everything between them, so the runs are
-  // packed back to back into the one buffer.
+  // The highlight covers one rectangle per row it occupies -- two for a hyphen-joined word, or
+  // for a CJK match that crosses a line end, whose halves sit at the end of one line and the
+  // start of the next. Saving their bounding box instead would mean saving both whole lines and
+  // everything between them, so the runs are packed back to back into the one buffer. A
+  // highlight over more rows or pixels than this holds is drawn without being saved, and the
+  // next move takes the full repaint (spec 4).
   struct SnapshotRun {
     int16_t x;
     int16_t y;

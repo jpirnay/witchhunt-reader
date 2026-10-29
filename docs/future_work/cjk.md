@@ -9,7 +9,8 @@ remains for full CJK support:
 - **UI text:** the UI itself is translated; book titles, TOC entries and status-bar chapter names in CJK
   still need the reader's CJK font as a fallback.
 - **Typography:** push-in and the CJK–Latin gap (A3b). Ruby shipped (B1); emphasis dots in #566 (B2).
-- **The dictionary** on CJK pages.
+- **The dictionary** on CJK pages: shipped; deinflection, word-by-word selection and the search time on
+  two-file dictionaries remain.
 - **Small edge cases** the reviews found.
 
 ## Roadmap
@@ -29,7 +30,7 @@ behind CFF.
 | 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | built (feat/ui-book-text-heap); device check pending ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-a3b-push-in-and-gap.md)) |
 | 8 | Ruby and emphasis dots | B1 shipped (#554, review fixes #556); B2 emphasis dots in #566 ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
-| 9 | The dictionary on CJK pages ([below](#dictionary-on-cjk-pages)) | open |
+| 9 | The dictionary on CJK pages ([what remains](#dictionary-on-cjk-pages)) | shipped (#570, #569, #574) |
 | 10 | Line spacing: a CJK em-pitch scale, Extra wide and Widest, Book's style, a per-book override ([below](#line-spacing)) | built on `feat/line-spacing` ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md), [plan](../superpowers/plans/2026-10-26-line-spacing.md)) |
 
 Synthetic bold comes before the font manager because the CJK families ship in their Regular weight only (spec
@@ -106,6 +107,19 @@ Listed here so nobody redoes it.
 - **Tests.** `test/cjk_layout/CjkEmphasisTest.cpp`, `RubyTextBlock.DrawingMarksAllocatesNothing`, the emphasis cases of `RubyLayoutTest`, the CSS tests, and case 16 of `test_cjk_line_breaking.epub` (the golden shows the `E` records).
 - **Follow-up:** `<em class="sesame_dot">` with `font-style: normal`, Aozora Bunko's own markup, stays italic: the `<i>`/`<em>` tag path sets italic whatever the CSS says (`ChapterHtmlSlimParser::startElement`). Honouring a CSS `font-style: normal` there is a maintainer policy call, since `<b>` deliberately lets the tag decide its weight. Span-based markup (AozoraEpub3's `em-sesame`) is unaffected.
 - **Follow-up:** fullwidth ＃％＆＊／＠＼＿ (U+FF03, FF05, FF06, FF0A, FF0F, FF20, FF3C, FF3F), the CJK Compatibility Forms U+FE30-FE4F and ～ U+FF5E still take a mark, while their ASCII forms and 〜 do not (`TextEmphasis::takesMark`). ＊ in a "＊　＊　＊" break inside a marked span is the likeliest to show.
+
+**#570, #569, #574 (step 9): the dictionary on CJK pages.**
+- **The run** (`CjkLookupRun`). From the cursor's character: up to 12 code points across words and line ends, stopping at the first one that is not unspaced CJK or that `cleanWord` strips as punctuation; 々, 〆, ー and kana kept. On Hangul, the token itself. Each code point remembers its word, so a match length maps back to a span of words.
+- **The search** (`Dictionary::resolvePrefixes`).
+  - Up to three headwords that are prefixes of the run, longest first, from the `.idx` and the `.syn` (a tie goes to the `.idx`), each with its run of same-headword entries (at most 8). None of `resolve()`'s fallbacks. It gives up between probes when a button press is waiting (speculation only).
+  - One descent per index file; a later, shorter target steps back from the window it left (`gallopSamples`). Sidecar samples are read in 512-byte blocks through whichever scan buffer is idle. A probe reads its window's first headword from its own scan, no `.syn` probe runs whose every hit the merge would drop, and a followed synonym finds its run in its own window (`followSynonym`).
+- **Definitions** (`readPrefixDefinitions`). Every entry of the longest match, then the shorter matches, in one buffer sized once within `MAX_DEFINITION_BYTES`. Drawn in the reader's font (`definitionFontId()`), each entry under its headword; the header keeps the dictionary name and page counter. Latin lookups are unchanged.
+- **The word screen.** The highlight grows over the match with no extra press (speculation), Confirm looks it up, and the span is drawn on the differential path (2 runs, 2,048 bytes) or by the full repaint. A tap inside the span looks it up.
+- **#569 (H1):** the word arrays and the snapshot are freed while a definition is open and rebuilt on return (8 ms for 232 words), +9.2 KB free heap at the definition's entry on the X4 with 12 KB of ballast. **#570 (L1):** the prewarm arena retry logs no error when it recovers.
+- `CMD:ACT:DICT` reports the run, the hits, their entries, probes, reads and both timings (`docs/serial-test-api.md`).
+- **No version changes.** `gh_release` flash +9,044 B, static RAM +0 B (`firmware_size_history.py`, against master).
+- **Tests.** `test/dictionary/DictionaryTest.cpp` (the prefix search and its read counts, the definitions), `test/dictionary/CjkLookupRunTest.cpp`.
+- **The user's side** is in `docs/dictionary.md` ("Chinese, Japanese and Korean"): how it works, its limits, the PyGlossary conversions, sizes and first-open times. The design spec and the plan were deleted once their lasting parts were there.
 
 **Tests and books.**
 - `test/epub_pipeline/CjkRulesTest.cpp`, the rule checker, lays out every line and asserts kinsoku, no hyphen, and no stray space between CJK characters.
@@ -300,17 +314,54 @@ Without a CJK TrueType family nothing opens, and the boxes (□) stay. Before th
 
 ## Dictionary on CJK pages
 
-**Open.**
-- **Selection is per token.** On a CJK page that means one character, with no segmentation into words. A Han character looked up in a Latin dictionary finds nothing, and a CJK dictionary needs multi-character words.
-- **Plain definitions.** On a dense CJK page the definition shows as plain text: the styled renderer wants a larger block than is free while the word screen's arrays are held (`DHTML` "Low heap for styled definition").
-- **Noisy logs.** The word screen's full repaints on dense pages log "Failed to allocate mini bitmap" before the arena retry serves them. It works, but it is noise.
+Shipped in step 9 ([above](#already-shipped)). What remains, measured on the X4 with CC-CEDICT, JMdict_e and
+CC-KEDICT (`docs/dictionary.md` has the conversions):
 
-**Where.** `DictionaryWordSelectActivity` (`extractWords`, `performLookup`, `LOOKUP_CONTIGUOUS_BYTES`), `DictionaryDefinitionActivity`, `Dictionary`, `DictZip`.
+- **Search time on dictionaries with a large `.syn` (follow-up: a JMdict speed-up).** The maintainer's gate is the
+  median of `ms / exact_ms` over 50 words per book (`CMD:ACT:DICT`), at most 1.5. Hong Lou Meng with CC-CEDICT: 1.46
+  (four runs, 1.46-1.47; 2.69 before the five speed-ups of #574). Soseki with JMdict: 1.95 (3.66 before them;
+  median 37 ms against 20 ms for the exact lookup), not met; the maintainer accepted it for #574 (2026-10-29),
+  JMdict being best effort, and a JMdict speed-up is the follow-up. A CJK search reads both index
+  files: two descents, two window scans, the `.syn` and `.sidx` opened (6 ms), and a follow per synonym hit; the
+  exact lookup of the matched headword reads the `.idx` once. JMdict files every kana reading in its 15.8 MB `.syn` (550,503 entries,
+  2,151 samples, ~7 KB windows), so kana text always takes both. Measured costs on the X4: a 4-byte sample read
+  0.46 ms, a 512-byte refill 0.47 ms, a sample block 0.65 ms, opening the `.syn` and `.sidx` 6.1 ms, 5.5 ms fixed.
+  What would close the gap needs a sidecar change: a map from each `.qidx` sample to its `.sidx` sample (no second
+  descent, ~6 ms off JMdict's median), or a skip test for runs the `.syn` cannot extend (estimated medians: CC-CEDICT
+  0.89, JMdict 1.75). Against today's lookup of the matched text as the page writes it (夢幻 rather than 梦幻), the
+  estimated medians are ~1.0 (CC-CEDICT) and ~1.55 (JMdict).
+- **Deinflection.** None, by the maintainer's decision: 食べた finds 食, 먹었습니다 finds nothing. The PyGlossary
+  JMdict build's `.syn` holds kana readings, other kanji spellings and "kanji・kana" pairs, no inflected forms, so
+  the `.syn` route does not cover it either. A rule table (kana suffix in, suffix out) would add candidates to the search; it has to be
+  clean-room (Yomitan is GPL-3.0, KOReader AGPL-3.0) and reviewed by someone who reads Japanese.
+- **Moving the cursor word by word, and a manual range.** The cursor steps one character; the match is always the
+  longest. Upstream went with a manual range (#3932).
+- **Greedy matches.** Forward maximum matching over the dictionary's headwords, against a segmenter on the same runs
+  (word boundaries, F1): Hong Lou Meng with CC-CEDICT 0.74 against `jieba` (0.88 without its HMM, 0.90 without it on the
+  text mapped to simplified), Soseki with JMdict 0.77 against `fugashi` and UniDic. JMdict's long entries (吾輩は猫である,
+  これと言う) and kana synonyms (はま from はまだ) make most of the Japanese misses; the shorter matches in the
+  definition soften them.
+- **One headword per synonym.** A `.syn` hit names one `.idx` entry, so a reading several headwords share shows the
+  one of them, and which one is not defined (はし showed 嘴 of eight). Listing every ordinal of a hit changes `DictPrefixHit` and the contiguous-entries
+  read.
+- **The other script in the definition.** CC-CEDICT writes each word in both scripts; a single regional CJK font
+  draws the other script's missing characters as U+FFFD (學, 書 with a Simplified Chinese font). The NotoSansCJK
+  `.cpfont` family carries both scripts but not pinyin's ē, ǎ, ū (U+0113, U+01CE, U+016B: `SDCF` "onGlyphMiss"), which
+  drop out of the reading (dàxuéshng). A fallback face for definition text, as the UI text fallback has, would fix both.
+- **Styled definitions in a TrueType reader font, first time round.** In a session whose glyph store did not yet
+  hold the definitions' glyphs, two of three CC-CEDICT definitions ran the free heap from 60 KB to 16 KB during the
+  styled layout and stopped on its retain floor (`DHTML` "Styled definition stopped on free heap", an error line on a
+  path that recovers): they fell back to plain text. With the glyphs stored, and with the `.cpfont` family, all three
+  laid out styled (110-240 ms for 1.5-2.6 KB entries).
+- **A long CJK definition in an SD-card font, laid out without a prewarm, is untimed.** Only entries of 1.5-2.6 KB
+  were measured.
+- **The headword back in the header** once the UI text fallback (step 6) has merged: `BookTextScope`,
+  `CjkUiFonts::readerFontAttached()` and `prefetchBookText()`.
+- **Not run, by the maintainer's decision:** the X3 dense-page measurement and the touch check on the X4 Pro and
+  T5S3 (spec row 12). The X4 with `CMD:HEAP:HOLD` ballast stood in for the X3.
 
-**Next step.**
-1. Extend a selection across adjacent glued CJK tokens, for example by holding to grow it.
-2. Test with a CJK StarDict dictionary such as CC-CEDICT.
-3. Consider freeing the word arrays before the definition renders.
+**Where.** `Dictionary` (`resolvePrefixes`, `collectPrefixes`, `mergeSynonymHits`, the sidecars),
+`CjkLookupRun`, `DictionaryWordSelectActivity`, `DictionaryDefinitionActivity`, `DictHtmlPages`.
 
 ## Line spacing
 
