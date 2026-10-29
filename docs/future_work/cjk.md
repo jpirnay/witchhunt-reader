@@ -30,7 +30,7 @@ behind CFF.
 | 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | built (feat/ui-book-text-heap); device check pending ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
 | 7 | Push-in and the CJK–Latin gap ([A3b](#push-in-and-the-cjklatin-gap-pr-a3b)) | plan written ([plan](../superpowers/plans/2026-10-21-cjk-a3b-push-in-and-gap.md)) |
 | 8 | Ruby and emphasis dots | B1 shipped (#554, review fixes #556); B2 emphasis dots in #566 ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
-| 9 | The dictionary on CJK pages ([what remains](#dictionary-on-cjk-pages)) | shipped (#570, #569, #<PR 3>) |
+| 9 | The dictionary on CJK pages ([what remains](#dictionary-on-cjk-pages)) | shipped (#570, #569, #574) |
 | 10 | Line spacing: a CJK em-pitch scale, Extra wide and Widest, Book's style, a per-book override ([below](#line-spacing)) | built on `feat/line-spacing` ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md), [plan](../superpowers/plans/2026-10-26-line-spacing.md)) |
 
 Synthetic bold comes before the font manager because the CJK families ship in their Regular weight only (spec
@@ -108,7 +108,7 @@ Listed here so nobody redoes it.
 - **Follow-up:** `<em class="sesame_dot">` with `font-style: normal`, Aozora Bunko's own markup, stays italic: the `<i>`/`<em>` tag path sets italic whatever the CSS says (`ChapterHtmlSlimParser::startElement`). Honouring a CSS `font-style: normal` there is a maintainer policy call, since `<b>` deliberately lets the tag decide its weight. Span-based markup (AozoraEpub3's `em-sesame`) is unaffected.
 - **Follow-up:** fullwidth ＃％＆＊／＠＼＿ (U+FF03, FF05, FF06, FF0A, FF0F, FF20, FF3C, FF3F), the CJK Compatibility Forms U+FE30-FE4F and ～ U+FF5E still take a mark, while their ASCII forms and 〜 do not (`TextEmphasis::takesMark`). ＊ in a "＊　＊　＊" break inside a marked span is the likeliest to show.
 
-**#570, #569, #<PR 3> (step 9): the dictionary on CJK pages.**
+**#570, #569, #574 (step 9): the dictionary on CJK pages.**
 - **The run** (`CjkLookupRun`). From the cursor's character: up to 12 code points across words and line ends, stopping at the first one that is not unspaced CJK or that `cleanWord` strips as punctuation; 々, 〆, ー and kana kept. On Hangul, the token itself. Each code point remembers its word, so a match length maps back to a span of words.
 - **The search** (`Dictionary::resolvePrefixes`).
   - Up to three headwords that are prefixes of the run, longest first, from the `.idx` and the `.syn` (a tie goes to the `.idx`), each with its run of same-headword entries (at most 8). None of `resolve()`'s fallbacks. It gives up between probes when a button press is waiting (speculation only).
@@ -319,8 +319,8 @@ CC-KEDICT (`docs/dictionary.md` has the conversions):
 
 - **Search time on dictionaries with a large `.syn` (follow-up: a JMdict speed-up).** The maintainer's gate is the
   median of `ms / exact_ms` over 50 words per book (`CMD:ACT:DICT`), at most 1.5. Hong Lou Meng with CC-CEDICT: 1.46
-  (four runs, 1.46-1.47; 2.69 before the five speed-ups of #<PR 3>). Soseki with JMdict: 1.95 (3.66 before them;
-  median 37 ms against 20 ms for the exact lookup), not met; the maintainer accepted it for #<PR 3> (2026-10-29),
+  (four runs, 1.46-1.47; 2.69 before the five speed-ups of #574). Soseki with JMdict: 1.95 (3.66 before them;
+  median 37 ms against 20 ms for the exact lookup), not met; the maintainer accepted it for #574 (2026-10-29),
   JMdict being best effort, and a JMdict speed-up is the follow-up. A CJK search reads both index
   files: two descents, two window scans, the `.syn` and `.sidx` opened (6 ms), and a follow per synonym hit; the
   exact lookup of the matched headword reads the `.idx` once. JMdict files every kana reading in its 15.8 MB `.syn` (550,503 entries,
