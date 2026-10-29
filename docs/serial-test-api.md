@@ -420,8 +420,9 @@ DICT_ERROR:no word
 ```
 
 A word whose first kept character is Han, kana or Hangul takes the prefix search the word screen
-runs on CJK text instead (no synonym or word-form fallbacks), and the reply gains the search's
-findings. The Latin reply is unchanged.
+runs on CJK text instead (it searches the `.syn` too, but takes none of the word-form fallbacks: no
+stemming, lowercase or elision retries), and the reply gains the search's findings. The Latin reply
+is unchanged.
 
 ```
 DICT:result=<outcome> dict=<d> word=<w>[ headword=<hits[0]> bytes=<n>] run=<run> matched=<codepoints of hits[0]> hits=<h1,h2,h3> entries=<n1,n2,n3> probes=<n> reads=<n> ms=<t>[ exact_ms=<t>]
@@ -431,16 +432,17 @@ Example, with CC-CEDICT:
 
 ```
 > CMD:ACT:DICT:大学生活
-< DICT:result=found dict=cedict word=大学生活 headword=大学生 bytes=<n> run=大学生活 matched=3 hits=大学生,大学,大 entries=1,1,1 probes=1 reads=<n> ms=<t> exact_ms=<t>
+< DICT:result=found dict=cedict word=大学生活 headword=大学生 bytes=2230 run=大学生活 matched=3 hits=大学生,大学,大 entries=1,2,2 probes=3 reads=36 ms=32 exact_ms=22
 ```
 
 `run` is the cleaned text searched (at most 12 codepoints). `hits` lists up to three headwords that
-are prefixes of the run, longest first; `entries` is each one's number of same-headword entries;
-`matched` is the codepoint count of `hits[0]`. On a miss `matched=0` and `hits` and `entries` are
-empty. `probes` and `reads` count the index window scans and the file reads. `ms` times the prefix
-search, run without an abort check. `exact_ms` times the plain lookup of `hits[0]`, run after the
-search so cache warmth favours it, and is sent only on a hit. `bytes` is the length of the
-definitions of all the hits, as the word screen shows them.
+are prefixes of the run, longest first; `entries` is each one's number of same-headword entries, at
+most 8 (`DictPrefixMatch::MAX_ENTRIES_PER_HIT`); `matched` is the codepoint count of `hits[0]`. On
+a miss `matched=0` and `hits` and `entries` are empty. `probes` counts the window scans and the
+synonyms followed, `reads` the file reads (a block of sidecar samples, a scan refill). `ms` times
+the prefix search, run without an abort check. `exact_ms` times the plain lookup of `hits[0]`, run
+after the search so cache warmth favours it, and is sent only on a hit. `bytes` is the length of
+the definitions of all the hits, as the word screen shows them.
 
 `<outcome>` is `found`, `not_found`, `low_memory`, `decompress_error`, `read_error`,
 `no_dictionary` (none chosen), `open_failed` or `index_failed`. A dictionary used for the first
