@@ -28,7 +28,7 @@ behind CFF.
 | 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | shipped (#550) |
 | 5b | Synthetic italic (spec section 7.4): families without an italic file draw italic slanted, as KOReader does | shipped (#551) |
 | 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | built (feat/ui-book-text-heap); device check pending ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
-| 7 | Push-in and the CJK–Latin gap (A3b) | shipped (#<this PR>) |
+| 7 | Push-in and the CJK–Latin gap (A3b) | shipped (#575) |
 | 8 | Ruby and emphasis dots | B1 shipped (#554, review fixes #556); B2 emphasis dots in #566 ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
 | 9 | The dictionary on CJK pages ([what remains](#dictionary-on-cjk-pages)) | shipped (#570, #569, #574) |
 | 10 | Line spacing: a CJK em-pitch scale, Extra wide and Widest, Book's style, a per-book override ([below](#line-spacing)) | built on `feat/line-spacing` ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md), [plan](../superpowers/plans/2026-10-26-line-spacing.md)) |
@@ -121,7 +121,7 @@ Listed here so nobody redoes it.
 - **Tests.** `test/dictionary/DictionaryTest.cpp` (the prefix search and its read counts, the definitions), `test/dictionary/CjkLookupRunTest.cpp`.
 - **The user's side** is in `docs/dictionary.md` ("Chinese, Japanese and Korean"): how it works, its limits, the PyGlossary conversions, sizes and first-open times. The design spec and the plan were deleted once their lasting parts were there.
 
-**#<this PR> (A3b): push-in and the CJK–Latin gap.**
+**#575 (A3b): push-in and the CJK–Latin gap.**
 - **Push-in** (spec 5.3). A line one token too long first shrinks, in this order: the marks at its two edges, each all or nothing (spec 5.2: "half or full"), then every other mark down to its minimum width, then the CJK–Latin gaps. Only if that is not enough does it break earlier and stretch. Western word spaces do not shrink, so Latin lines do not move.
   - All four breakers test a line at its pushed-in width (`pushedInWidth`): the DP breaker (`computeLineBreaks`) and the three greedy ones, with the quantities `extractLine` uses, so a line a breaker accepts pushed in is one `extractLine` pushes in. `extractLine` takes the need tier by tier, shares each tier in line order, and aligns and justifies the line by its pushed-in width.
   - **The DP cost.** A line that fits only pushed in, the last line too, costs (1 + badness of its overrun)² + 1 (`kPushInPenalty`). An exact line costs 1, a pushed-in one at least 2, a stretched one with any badness at least 4: push-in wins against a loose line (about 1.3 em of slack on 28) and loses to a near-exact one. A paragraph with nothing that can give way breaks as before.

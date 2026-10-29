@@ -1,6 +1,6 @@
 # CJK typography (PR A3) and per-language text rules: design
 
-Status: Shipped: A3a #520, A3b #<this PR>. Design record; the code is the authority.
+Status: Shipped: A3a #520, A3b #575. Design record; the code is the authority.
 
 ## 1. Why
 
