@@ -158,8 +158,20 @@ class GfxRenderer {
   }
 
   // --- Text drawing (no-ops) ---
-  void drawText(int, int, int, const char*, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR) const {}
-  void drawTextScaled(int, int, int, const char*, bool, EpdFontFamily::Style, float) const {}
+  // A test that sets `textDraws` gets each text draw: the frame it was drawn in and where.
+  struct TextDraw {
+    std::string text;
+    Orientation frame;
+    int x;
+    int y;
+  };
+  mutable std::vector<TextDraw>* textDraws = nullptr;
+  void drawText(int, int x, int y, const char* text, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR) const {
+    if (textDraws) textDraws->push_back({text, live_, x, y});
+  }
+  void drawTextScaled(int, int x, int y, const char* text, bool, EpdFontFamily::Style, float) const {
+    if (textDraws) textDraws->push_back({text, live_, x, y});
+  }
   void drawCenteredText(int, int, const char*, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR) const {}
   void drawTextRotated90CW(int, int, int, const char*, bool = true,
                            EpdFontFamily::Style = EpdFontFamily::REGULAR) const {}

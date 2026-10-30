@@ -95,8 +95,9 @@ void dumpTableFragment(std::ostream& out, const PageTableFragment& tbl, const st
 }
 
 void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, const std::string& cacheDir) {
-  out << " PAGE " << pageIndex << " elements=" << page.elements.size() << " footnotes=" << page.footnotes.size()
-      << "\n";
+  out << " PAGE " << pageIndex << " elements=" << page.elements.size() << " footnotes=" << page.footnotes.size();
+  if (page.isVertical()) out << " turned=" << page.verticalBlockExtent;
+  out << "\n";
   for (const auto& el : page.elements) {
     switch (el->getTag()) {
       case TAG_PageLine:

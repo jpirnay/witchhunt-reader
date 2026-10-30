@@ -33,7 +33,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 103;  // v103: a quarter em between Han or kana and Latin in zh/ja
+constexpr uint8_t SECTION_FILE_VERSION = 104;  // v104: a page carries its vertical block extent after its
+                                               // element count
+                                               // v103: a quarter em between Han or kana and Latin in zh/ja
                                                // books; lines push CJK punctuation in before breaking
                                                // earlier
                                                // v102: CSS text-emphasis marks (傍点) are drawn above each
