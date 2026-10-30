@@ -4197,6 +4197,7 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
     return false;
   }
   // Same reason as in renderContents(): pin the page identity before the pass does any work.
+  pinPageProgression();
   lastRenderedSpineIndex_ = currentSpineIndex;
   lastRenderedPageIndex_ = section->currentPage;
   lastRenderedPageCount_ = section->pageCount;
@@ -5342,6 +5343,10 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
   }
 }
 
+void EpubReaderActivity::pinPageProgression() {
+  pageProgressionRtl_.store(section ? section->flowContext().pageProgressionRtl : false);
+}
+
 void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const RenderLayout& layout) {
   if (!section || !section->hasActiveBuild()) {
     // Build finished or was aborted between classifyRenderPass() and here — re-dispatch so the
@@ -5349,6 +5354,8 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
     requestUpdate();
     return;
   }
+  // A cold section is drawn and turned through here before renderContents() has stored the direction.
+  pinPageProgression();
 
   // Draw the requested page if Background-C has already written it. Only for an explicit Page
   // target (other targets resolve at completion). buildDisplayedPage_ records the target we've
@@ -5712,8 +5719,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     lastRenderedSpineIndex_ = currentSpineIndex;
     lastRenderedPageIndex_ = section->currentPage;
     lastRenderedPageCount_ = section->pageCount;
-    pageProgressionRtl_.store(section->flowContext().pageProgressionRtl);
   }
+  pinPageProgression();
   auto* fcm = renderer.getFontCacheManager();
   fcm->resetStats();
 
@@ -6297,6 +6304,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
 
 void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
                                           BuildArena::Block* drawBlock) {
+  pinPageProgression();
   // Draws one page from an in-progress Background-C build: a plain BW render + status bar, no
   // AA and no pre-render arming (those belong to the steady reading state set up by
   // renderNormalPass() once the build completes). Images come from their pixel cache when they
@@ -6630,6 +6638,7 @@ void EpubReaderActivity::appendDebugState(std::string& out) const {
   const FlowContext flow = section->flowContext();
   appendField(out, "flow", flow.vertical ? "vertical-rl" : "horizontal");
   appendField(out, "progression", flow.pageProgressionRtl ? "rtl" : "ltr");
+  appendField(out, "input_progression", pageProgressionRtl_.load() ? "rtl" : "ltr");
 #endif
 }
 

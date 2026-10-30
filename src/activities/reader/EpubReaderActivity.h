@@ -816,6 +816,9 @@ class EpubReaderActivity final : public Activity {
   // Returns true if the page was displayed (render() should return); false if the fast path
   // could not be taken (load failed / image page) and render() must fall through to Normal.
   bool renderBufferDisplayPass(const RenderLayout& layout);
+  // Stores the section's page direction for the buttons, taps and bar; every pass that draws a page calls it, a
+  // building section included (its flow context answers from the live parser).
+  void pinPageProgression();
   // BuildSection pass: construct/load the section cache for currentSpineIndex and resolve the
   // nav target. Returns true if a section is ready to render; false if render() should return
   // (build failed, finished-book handoff, or a requestUpdate retry was posted).
