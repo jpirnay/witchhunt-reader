@@ -118,7 +118,11 @@ class GfxRenderer {
     }
     return true;
   }
-  bool hasGlyph(const int fontId, const uint32_t cp, const EpdFontFamily::Style /*style*/) const {
+  // Set by a test to model a font-cache scan pass; hasGlyphQueries records the hasGlyph queries made while it is set.
+  mutable bool scanning = false;
+  mutable std::vector<std::pair<uint32_t, EpdFontFamily::Style>> hasGlyphQueries;
+  bool hasGlyph(const int fontId, const uint32_t cp, const EpdFontFamily::Style style) const {
+    if (scanning) hasGlyphQueries.emplace_back(cp, style);  // only a scan test pays for the allocation
     return fontId != LATIN_FONT || cp < 0x2E80;
   }
   int getSpaceAdvance(const int fontId, uint32_t /*leftCp*/, uint32_t /*rightCp*/, EpdFontFamily::Style style) const {
@@ -144,7 +148,7 @@ class GfxRenderer {
   void ensureFontReady(const int fontId, const char* utf8Text) const { readyCalls.push_back({fontId, utf8Text}); }
 
   // --- Render surface used by TextBlock ---
-  bool isFontCacheScanning() const { return false; }
+  bool isFontCacheScanning() const { return scanning; }
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const {
     return getTextAdvanceX(fontId, text, style);
   }

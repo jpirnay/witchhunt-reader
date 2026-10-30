@@ -37,6 +37,19 @@ TEST(VerticalDraw, UprightPiecesDrawInTheReadersFrameRunsInTheTurnedFrame) {
   EXPECT_EQ(80, verticalTextAdvance(r, kFontId, "日本Latin語", EpdFontFamily::REGULAR, 1.0f));
 }
 
+// A scan pass draws the text as is, and must also ask for 一 in the word's style: the draw pass measures the column
+// with it, and an unprewarmed glyph is a miss on an SD or TTF font.
+TEST(VerticalDraw, AScanPassRecordsTheEmGlyphInTheWordsStyle) {
+  GfxRenderer r;
+  r.scanning = true;
+  drawTextVertical(r, kFontId, 100, 50, "日本", EpdFontFamily::BOLD, 1.0f);
+  bool askedForOneInBold = false;
+  for (const auto& q : r.hasGlyphQueries) askedForOneInBold |= q.first == 0x4E00 && q.second == EpdFontFamily::BOLD;
+  EXPECT_TRUE(askedForOneInBold);
+  ASSERT_EQ(1u, r.drawCalls.size());
+  EXPECT_EQ("日本", r.drawCalls[0].text);
+}
+
 TEST(VerticalDraw, AScaledColumnRoundsOnceAsLayoutDoes) {
   GfxRenderer r;
   r.setOrientation(GfxRenderer::Portrait);
@@ -70,7 +83,7 @@ TEST(VerticalDraw, ACombiningMarkStaysOnItsBase) {
   GfxRenderer r;
   r.setOrientation(GfxRenderer::Portrait);
   r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
-  const std::string text = "が";
+  const std::string text = "か\u3099";
   drawTextVertical(r, kFontId, 100, 50, text.c_str(), EpdFontFamily::REGULAR, 1.0f);
   ASSERT_EQ(1u, r.drawCalls.size());
   EXPECT_EQ(6u, r.drawCalls[0].text.size());

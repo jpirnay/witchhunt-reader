@@ -64,6 +64,8 @@ int verticalTextAdvance(const GfxRenderer& renderer, const int fontId, const cha
 void drawTextVertical(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
                       const EpdFontFamily::Style style, const float scale) {
   if (renderer.isFontCacheScanning()) {
+    // Record 一 in this style too: the draw below measures with it, and an unprewarmed glyph is a miss on SD/TTF fonts.
+    (void)rawEm(renderer, fontId, style);
     drawIn(renderer, fontId, x, y, text, style, scale);
     return;
   }
@@ -71,9 +73,9 @@ void drawTextVertical(const GfxRenderer& renderer, const int fontId, const int x
   const GfxRenderer::Orientation content = renderer.getOrientation();
   const int readerWidth = renderer.getScreenWidth(reader);
   const int ascender = ascenderOf(renderer, fontId, scale);
-  const int em = columnEm(renderer, fontId, style, scale);
-  const int axis = columnAxis(y + ascender, em);
   const int rawOne = rawEm(renderer, fontId, style);
+  const int em = rawOne > 0 ? scaled(rawOne, scale) : ascender;
+  const int axis = columnAxis(y + ascender, em);
 
   char piece[kMaxColumnRunBytes + 1];
   int rawBefore = 0;

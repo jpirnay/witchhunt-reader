@@ -19,6 +19,7 @@ int verticalTextAdvance(const GfxRenderer& renderer, int fontId, const char* tex
                         float scale);
 
 // Draws `text` down a column. Called in the turned frame (Page::render's scope) with what drawText would get there:
-// x the pen along the column, y the line's top. Allocates nothing; stack under 100 B.
+// x the pen along the column, y the line's top. Allocates nothing; two char[kMaxColumnRunBytes + 1] buffers on the
+// stack, within the 256 B constraint.
 void drawTextVertical(const GfxRenderer& renderer, int fontId, int x, int y, const char* text,
                       EpdFontFamily::Style style, float scale);
