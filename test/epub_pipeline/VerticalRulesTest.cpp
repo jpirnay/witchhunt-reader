@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Epub/CjkLineBreak.h"
@@ -153,34 +154,35 @@ TEST_P(VerticalRules, UprightCharactersAreDrawnInTheReadersFrameAndRunsSideways)
 // or a few pixels further out where a pushed-in opening mark starts it.
 TEST_P(VerticalRules, KinsokuHoldsAtEveryColumnEnd) {
   int checked = 0;
-  const TextBlock* previous = nullptr;
+  // The previous column's text, not its block: the page holding it is freed before the next page loads.
+  std::string previous;
   int previousSpine = -1;
   const bool ok = pipeline_harness::forEachPage(
       epub(), cache(), profileOf(GetParam()), [&](int spine, const Section&, const Page& page, GfxRenderer&) {
         if (!page.isVertical()) {
-          previous = nullptr;
+          previous.clear();
           return;
         }
-        if (spine != previousSpine) previous = nullptr;
+        if (spine != previousSpine) previous.clear();
         previousSpine = spine;
         for (const auto& element : page.elements) {
           if (element->getTag() != TAG_PageLine) {
-            previous = nullptr;  // an image, rule or table sits between the columns
+            previous.clear();  // an image, rule or table sits between the columns
             continue;
           }
           const TextBlock* block = static_cast<const PageLine&>(*element).getBlock();
           if (block->wordCount() == 0) continue;
-          const TextBlock* before = previous;
-          previous = block;
-          if (!before || before->wordCount() == 0 || block->wordXpos(0) >= kEm) continue;
-          const uint32_t end = lastCodepointOf(lineText(*before));
-          const uint32_t start = firstCodepointOf(lineText(*block));
+          const std::string before = std::move(previous);
+          previous = lineText(*block);
+          if (before.empty() || block->wordXpos(0) >= kEm) continue;
+          const uint32_t end = lastCodepointOf(before);
+          const uint32_t start = firstCodepointOf(previous);
           if (!utf8IsUnspacedCjk(end) && !utf8IsUnspacedCjk(start)) continue;
           ++checked;
           EXPECT_FALSE(CjkLineBreak::isNoLineEnd(end))
-              << "column ends with an opening bracket: " << lineText(*before) << " before: " << lineText(*block);
+              << "column ends with an opening bracket: " << before << " before: " << previous;
           EXPECT_FALSE(CjkLineBreak::isNoLineStart(start))
-              << "column starts with closing punctuation: " << lineText(*block) << " after: " << lineText(*before);
+              << "column starts with closing punctuation: " << previous << " after: " << before;
         }
       });
   ASSERT_TRUE(ok);
