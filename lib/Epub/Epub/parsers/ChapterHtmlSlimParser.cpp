@@ -934,6 +934,15 @@ ChapterHtmlSlimParser::FlowEntry ChapterHtmlSlimParser::enterFlow(const CssStyle
   return element;
 }
 
+void ChapterHtmlSlimParser::decideFrame(const CssWritingMode rootMode) {
+  frameDecided_ = true;
+  vertical_ = FlowContext::verticalFor(verticalRequest_, rootMode, pageProgression_);
+  if (vertical_) std::swap(viewportWidth, viewportHeight);
+  LOG_INF("EHP", "Section set %s (request %u, root %u, ppd %u)", vertical_ ? "vertical-rl" : "horizontal-tb",
+          static_cast<unsigned>(verticalRequest_), static_cast<unsigned>(rootMode),
+          static_cast<unsigned>(pageProgression_));
+}
+
 CssParser::Ancestry ChapterHtmlSlimParser::cssAncestry(const std::string& tagName, const std::string& classAttr,
                                                        const std::string& idAttr) const {
   CssParser::Ancestry ancestry;
@@ -1391,6 +1400,9 @@ void ChapterHtmlSlimParser::emitPage() {
   // cap stays on the emitted page).
   deferredPageImage_ = nullptr;
   deferredDropCapLine_ = nullptr;
+  // A vertical page draws in the turned frame across the block extent its columns fill: the reader's viewport width,
+  // which the swap made this parser's height.
+  if (vertical_) currentPage->verticalBlockExtent = viewportHeight;
   // The page is handed over only once both tables have its entry, so this table, the consumer's
   // and completedPageCount move in lockstep or not at all.
   if (pageTableFull_ || !paragraphLutPerPage.push_back({start, xpathParagraphIndex, xpathListItemIndex})) {
@@ -1689,6 +1701,8 @@ bool ChapterHtmlSlimParser::tryStartDropCapCapture(const CssStyle& cssStyle) {
   // reaches the style checks below.
   if (pendingDropCap_.active || deferredDropCapLine_) return false;
   if (currentTable || currentTableCell) return false;
+  // A cap is placed by its horizontal ink metrics, which a column does not have: it stays in its line.
+  if (vertical_) return false;
   if (!currentTextBlock || !currentTextBlock->isEmpty() || partWordBufferIndex > 0) return false;
   if (pendingInlineImage_.active || activeFloatBottom_ > 0 || deferredPageImage_) return false;
   if (currentTextBlock->getBlockStyle().floatZoneCount > 0) return false;
@@ -2223,6 +2237,11 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   applyHtmlDirectionality(cssStyle, name, dirAttr);
   self->elementFlow_ = self->enterFlow(cssStyle);
   cssStyle.resolveLogical(self->elementFlow_.writingMode, self->elementFlow_.direction);
+  // The section's mode, at its first element past <html> and <head> (head's children never get here: the skip above
+  // takes them), before anything is laid out.
+  if (!self->frameDecided_ && strcasecmp(name, "html") != 0 && strcasecmp(name, "head") != 0) {
+    self->decideFrame(self->elementFlow_.writingMode);
+  }
   // line-height is inherited: the element's copy carries the computed value, for every block built from it.
   cssStyle.lineHeightEm = self->elementFlow_.lineHeightEm;
   cssStyle.defined.lineHeight = self->elementFlow_.lineHeightEm > 0.0f;
@@ -4655,6 +4674,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
       }
     }
   }
+  line->setVertical(vertical_);  // a column of a vertical page (TextBlock::render draws it down)
   auto pageLine = makeUniqueNoThrow<PageLine>(std::move(line), xOffset, currentPageNextY);
   if (!pageLine) {
     // Accepted, not a retry: the line is gone either way, and retrying would just fail again.
@@ -5459,7 +5479,12 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
     }
 
     int cellTextHeight = 0;
-    for (const auto& cellLine : cell.lines) cellTextHeight += lineHeight + cellLine->annotationBand(renderer, fontId);
+    for (const auto& cellLine : cell.lines) {
+      // A column of a vertical page's table. Set here, not in the layout callback above: one more capture would take
+      // that std::function past its in-place storage, a heap block per cell.
+      cellLine->setVertical(vertical_);
+      cellTextHeight += lineHeight + cellLine->annotationBand(renderer, fontId);
+    }
     uint16_t contentHeight = static_cast<uint16_t>(cellTextHeight);
     if (cell.image) contentHeight = static_cast<uint16_t>(contentHeight + cell.image->getRenderedHeight());
     // A cell taller than the whole viewport can never be a grid row on any device, so the

@@ -20,6 +20,7 @@
 
 #include "../BlockFontFamilies.h"
 #include "../EpubImageManifest.h"
+#include "../FlowContext.h"
 #include "../FontSizeLadder.h"
 #include "../FootnoteEntry.h"
 #include "../FootnotePreviews.h"
@@ -694,6 +695,16 @@ class ChapterHtmlSlimParser final : public Print {
   // increments it last).
   FlowEntry enterFlow(const CssStyle& style);
 
+  // The section's writing mode (spec 5.1): decided once, at the first element that is neither <html> nor <head>
+  // (normally <body>), from the mode in effect there (its own, else html's), the request and the book's ppd. A
+  // vertical-rl section is laid out as a horizontal page in the turned frame (spec 5.2), so the viewport's width and
+  // height swap there, before any block is laid out: lines run down the reader's height, columns across its width.
+  VerticalText verticalRequest_ = VerticalText::Off;
+  PageProgression pageProgression_ = PageProgression::Default;
+  bool frameDecided_ = false;
+  bool vertical_ = false;
+  void decideFrame(CssWritingMode rootMode);
+
   // Default size for superscript/subscript text, percent of the surrounding size.
   // Sup/sub scaling flows through the ordinary per-word size channel (the SUP/SUB
   // style bits only shift the baseline at render time); an explicit CSS font-size
@@ -1027,6 +1038,14 @@ class ChapterHtmlSlimParser final : public Print {
   void setFontFamilies(const BlockFontFamilies& families) { fontFamilies_ = families; }
   // The book's typography (TypographyProfile.h), handed to every block the parser lays out; Latin rules by default.
   void setTypography(const TypographyProfile& typography) { typography_ = typography; }
+  // The reader's vertical-text request for the book and its page progression, from which the section decides its
+  // writing mode at <body> (decideFrame). Off, horizontal, by default. Set before the parse.
+  void setVerticalText(const VerticalText request, const PageProgression ppd) {
+    verticalRequest_ = request;
+    pageProgression_ = ppd;
+  }
+  // True once the section has been decided vertical-rl: its pages are laid out in the turned frame.
+  bool isVertical() const { return vertical_; }
   // Book's style line spacing: a block's CSS line-height sets its pitch, a multiple of `emPx`, never below `floor`
   // (a compression on the font's line height). Off by default, and with a floor of 0.
   void setBookLineHeight(float floor, uint16_t emPx);

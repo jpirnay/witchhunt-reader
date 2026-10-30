@@ -22,6 +22,9 @@
 //
 // The books whose text-align matters also run with the book's own alignment (<book>_bookalign.golden.txt): the default
 // justifies every block, which hides text-align start and end.
+//
+// The CJK books also run with vertical text requested: Automatic (<book>_vertical.golden.txt), where each section
+// decides from the book, and On (<book>_vertical_on.golden.txt). The default is Off, as for a Latin book.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -47,7 +50,7 @@ std::string freshCacheDir(const std::string& tag) {
 }
 
 // The render setting a case turns ON; every other one stays as in the default.
-enum class Variant { Default, Normalization, Hyphenation, Bionic, Accents, BookAlignment };
+enum class Variant { Default, Normalization, Hyphenation, Bionic, Accents, BookAlignment, Vertical, VerticalOn };
 
 // One corpus book under one variant.
 struct Case {
@@ -67,6 +70,10 @@ const char* variantName(const Variant v) {
       return "publisherFontsAccents";
     case Variant::BookAlignment:
       return "booksAlignment";
+    case Variant::Vertical:
+      return "verticalText";
+    case Variant::VerticalOn:
+      return "verticalTextOn";
     case Variant::Default:
       break;
   }
@@ -98,6 +105,14 @@ const char* const kFontFamilyBooks[] = {"test_font_families"};
 // Books whose text-align matters: the default profile justifies everything, the book's own alignment shows start and
 // end resolved along the direction (see test/epubs/make_test_writing_modes.py).
 const char* const kBookAlignmentBooks[] = {"test_rtl_markup"};
+
+// Books the reader may set vertically, under Automatic (<book>_vertical.golden.txt): each section decides from its CSS
+// writing mode and the book's page progression, and a vertical one is laid out in the turned frame.
+const char* const kVerticalBooks[] = {"test_writing_modes"};
+
+// Books that declare no writing mode, under On (<book>_vertical_on.golden.txt): what an Aozora conversion looks like
+// once the reader turns it vertical.
+const char* const kVerticalOnBooks[] = {"test_cjk_ja_soseki", "test_cjk_ko_hyeon"};
 
 // The families as the reader builds them for a 14 pt built-in body (buildBookFontFamilies), with stand-in IDs: the
 // built-in sans-serif's rungs are 2000 + their size, the accent families' native sizes 0x12345600, 0x23456700 and
@@ -140,6 +155,10 @@ std::string variantSuffix(const Case& c) {
       return "_accents";
     case Variant::BookAlignment:
       return "_bookalign";
+    case Variant::Vertical:
+      return "_vertical";
+    case Variant::VerticalOn:
+      return "_vertical_on";
     case Variant::Default:
       break;
   }
@@ -153,6 +172,8 @@ std::string runOnce(const Case& c, const std::string& cacheDir) {
   profile.bionicReadingEnabled = c.variant == Variant::Bionic;
   if (c.variant == Variant::Accents) profile.fontFamilies = &kAccentsFamilies;
   if (c.variant == Variant::BookAlignment) profile.paragraphAlignment = static_cast<uint8_t>(CssTextAlign::None);
+  if (c.variant == Variant::Vertical) profile.verticalText = VerticalText::Automatic;
+  if (c.variant == Variant::VerticalOn) profile.verticalText = VerticalText::On;
   std::ostringstream dump;
   const bool ok = pipeline_harness::runAndDump(c.epub, cacheDir, profile, dump);
   EXPECT_TRUE(ok) << "pipeline failed for " << c.epub << " (" << variantName(c.variant) << ")\n" << dump.str();
@@ -239,6 +260,8 @@ std::vector<Case> corpusCases() {
     if (listed(kBionicBooks, stem(path))) cases.push_back(Case{path, Variant::Bionic});
     if (listed(kFontFamilyBooks, stem(path))) cases.push_back(Case{path, Variant::Accents});
     if (listed(kBookAlignmentBooks, stem(path))) cases.push_back(Case{path, Variant::BookAlignment});
+    if (listed(kVerticalBooks, stem(path))) cases.push_back(Case{path, Variant::Vertical});
+    if (listed(kVerticalOnBooks, stem(path))) cases.push_back(Case{path, Variant::VerticalOn});
   }
   return cases;
 }

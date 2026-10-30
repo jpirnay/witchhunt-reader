@@ -33,8 +33,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 104;  // v104: a page carries its vertical block extent after its
-                                               // element count
+constexpr uint8_t SECTION_FILE_VERSION = 104;  // v104: a section may be set vertical-rl: the header keeps the
+                                               // vertical-text request and a status bit the outcome; a page
+                                               // keeps its block extent (after its element count), a line
+                                               // its column bit
                                                // v103: a quarter em between Han or kana and Latin in zh/ja
                                                // books; lines push CJK punctuation in before breaking
                                                // earlier
@@ -166,7 +168,8 @@ constexpr uint32_t kHyphenationEnabled = kViewportHeight + sizeof(uint16_t);
 constexpr uint32_t kEmbeddedStyle = kHyphenationEnabled + sizeof(bool);
 constexpr uint32_t kBionicReadingEnabled = kEmbeddedStyle + sizeof(bool);
 constexpr uint32_t kImageRendering = kBionicReadingEnabled + sizeof(bool);
-constexpr uint32_t kParseComplete = kImageRendering + sizeof(uint8_t);
+constexpr uint32_t kVerticalText = kImageRendering + sizeof(uint8_t);
+constexpr uint32_t kParseComplete = kVerticalText + sizeof(uint8_t);
 constexpr uint32_t kPageCount = kParseComplete + sizeof(bool);
 constexpr uint32_t kPageLut = kPageCount + sizeof(uint16_t);
 constexpr uint32_t kAnchorMap = kPageLut + sizeof(uint32_t);
@@ -193,6 +196,10 @@ constexpr uint8_t kStatusCssDegraded = 1 << 3;
 //   chapter, page elements, nesting depth, ...; see ChapterHtmlSlimParser::CapOverflow). Not a
 //   heap condition: deterministic, so nothing rebuilds on it (audit R4).
 constexpr uint8_t kStatusSimplified = 1 << 4;
+//   kStatusVertical: the build set the section vertical-rl (ChapterHtmlSlimParser decides at <body>, from the request
+//   in the header, the book's CSS and its page progression). The request alone does not say: under Automatic it
+//   depends on the chapter.
+constexpr uint8_t kStatusVertical = 1 << 5;
 
 // On-disk paragraph LUT entry: u32 visibleTextOffset + u16 paragraphIndex + u16 listItemIndex.
 // visibleTextOffset is the number of visible bytes (VisibleText.h) of the chapter's source text
@@ -367,9 +374,9 @@ uint32_t fnv1a(const uint8_t* data, size_t length) {
 
 uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   uint8_t buffer[96];
-  static_assert(sizeof(buffer) >= 21 + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) +
+  static_assert(sizeof(buffer) >= 22 + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) +
                                       BlockFontFamilies::kMaxFamilies * 3 * sizeof(int32_t),
-                "the settings (21 B), Book's style line spacing and every family fit");
+                "the settings (22 B), Book's style line spacing and every family fit");
   size_t offset = 0;
 
   auto append = [&](const void* ptr, size_t size) {
@@ -405,6 +412,11 @@ uint32_t Section::calculatePropertyHash(const BuildParams& p) {
       append(&family.bodyFontId, sizeof(family.bodyFontId));
       append(&family.ladder.nativeBase, sizeof(family.ladder.nativeBase));
     }
+  }
+  // Only when the reader may set the book vertically: Off, every Latin book's request, keeps the key it had.
+  if (p.verticalText != VerticalText::Off) {
+    const auto request = static_cast<uint8_t>(p.verticalText);
+    append(&request, sizeof(request));
   }
 
   return fnv1a(buffer, offset);
@@ -630,17 +642,18 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
                                      const uint8_t paragraphAlignment, const uint16_t viewportWidth,
                                      const uint16_t viewportHeight, const bool hyphenationEnabled,
                                      const bool embeddedStyle, const bool bionicReadingEnabled,
-                                     const uint8_t imageRendering) {
+                                     const uint8_t imageRendering, const VerticalText verticalText) {
   if (!file) {
     LOG_DBG("SCT", "File not open for writing header");
     return;
   }
+  const auto verticalTextByte = static_cast<uint8_t>(verticalText);
   static_assert(header::kSize == sizeof(SECTION_FILE_VERSION) + sizeof(fontId) + sizeof(lineCompression) +
                                      sizeof(extraParagraphSpacing) + sizeof(paragraphAlignment) +
                                      sizeof(viewportWidth) + sizeof(viewportHeight) + sizeof(hyphenationEnabled) +
                                      sizeof(embeddedStyle) + sizeof(bionicReadingEnabled) + sizeof(imageRendering) +
-                                     sizeof(bool) + sizeof(pageCount) + sizeof(uint32_t) + sizeof(uint32_t) +
-                                     sizeof(uint32_t) + sizeof(uint32_t),
+                                     sizeof(verticalTextByte) + sizeof(bool) + sizeof(pageCount) + sizeof(uint32_t) +
+                                     sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t),
                 "Header size mismatch");
   serialization::writePod(file, SECTION_FILE_VERSION);
   serialization::writePod(file, fontId);
@@ -653,6 +666,7 @@ void Section::writeSectionFileHeader(const int fontId, const float lineCompressi
   serialization::writePod(file, embeddedStyle);
   serialization::writePod(file, bionicReadingEnabled);
   serialization::writePod(file, imageRendering);
+  serialization::writePod(file, verticalTextByte);
   serialization::writePod(file, false);      // Placeholder for the status byte (patched later)
   serialization::writePod(file, pageCount);  // Placeholder for page count (will be initially 0, patched later)
   serialization::writePod(file, static_cast<uint32_t>(0));  // Placeholder for LUT offset (patched later)
@@ -668,6 +682,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
   tableRowDegraded_ = false;
   cssLowHeapDegraded_ = false;
   simplified_ = false;
+  vertical_ = false;
   embeddedStyleFallback = false;
   uint32_t propertyHash = calculatePropertyHash(p);
   filePath = getSectionFilePath(propertyHash);
@@ -712,6 +727,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
     bool fileEmbeddedStyle;
     bool fileBionicReadingEnabled;
     uint8_t fileImageRendering;
+    uint8_t fileVerticalText;
     uint8_t fileStatus;
     serialization::readPod(file, fileFontId);
     serialization::readPod(file, fileLineCompression);
@@ -723,6 +739,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
     serialization::readPod(file, fileEmbeddedStyle);
     serialization::readPod(file, fileBionicReadingEnabled);
     serialization::readPod(file, fileImageRendering);
+    serialization::readPod(file, fileVerticalText);
     serialization::readPod(file, fileStatus);
 
     const bool embeddedStyleMatches =
@@ -731,7 +748,8 @@ bool Section::loadSectionFile(const BuildParams& p) {
         p.extraParagraphSpacing != fileExtraParagraphSpacing || p.paragraphAlignment != fileParagraphAlignment ||
         p.viewportWidth != fileViewportWidth || p.viewportHeight != fileViewportHeight ||
         p.hyphenationEnabled != fileHyphenationEnabled || !embeddedStyleMatches ||
-        p.bionicReadingEnabled != fileBionicReadingEnabled || p.imageRendering != fileImageRendering) {
+        p.bionicReadingEnabled != fileBionicReadingEnabled || p.imageRendering != fileImageRendering ||
+        static_cast<uint8_t>(p.verticalText) != fileVerticalText) {
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
       clearCache();  // closes file before removal
       return false;
@@ -742,6 +760,8 @@ bool Section::loadSectionFile(const BuildParams& p) {
     tableRowDegraded_ = (fileStatus & kStatusTableRowDegraded) != 0;
     cssLowHeapDegraded_ = (fileStatus & kStatusCssDegraded) != 0;
     simplified_ = (fileStatus & kStatusSimplified) != 0;
+    vertical_ = (fileStatus & kStatusVertical) != 0;
+    request_ = p.verticalText;
   }
 
   serialization::readPod(file, pageCount);
@@ -820,6 +840,7 @@ bool Section::clearCache() {
   tableRowDegraded_ = false;
   cssLowHeapDegraded_ = false;
   simplified_ = false;
+  vertical_ = false;
 
   if (!Storage.exists(filePath.c_str())) {
     LOG_DBG("SCT", "Cache does not exist, no action needed");
@@ -1142,13 +1163,15 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   imageHeaderDegraded_ = false;
   tableRowDegraded_ = false;
   simplified_ = false;
+  request_ = p.verticalText;
+  vertical_ = false;
 
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
     return BuildPhaseResult::Failed;
   }
   writeSectionFileHeader(p.fontId, p.lineCompression, p.extraParagraphSpacing, p.paragraphAlignment, p.viewportWidth,
                          p.viewportHeight, p.hyphenationEnabled, p.embeddedStyle, p.bionicReadingEnabled,
-                         p.imageRendering);
+                         p.imageRendering, p.verticalText);
   st.lut.clear();
   // One u32 per page, appended by the completePageFn below across the whole parse. Pre-sized for
   // the same reason as the parser's paragraph LUT — see estimatePagesForSpine and
@@ -1266,6 +1289,8 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   const TypographyProfile typography = TypographyProfile::forLanguage(epub->getLanguage());
   Hyphenator::setLanguageHyphenator(typography.hyphenator);
   st.visitor->setTypography(typography);
+  // The section decides its writing mode at <body>, before any block is laid out (ChapterHtmlSlimParser::decideFrame).
+  st.visitor->setVerticalText(p.verticalText, epub->pageProgression());
 
   // Inline footnote previews are NOT wired up here: the note text this spine needs may not be
   // in the store yet, and resolving it needs the spine's inflated XHTML — which phase (a) is
@@ -1653,6 +1678,7 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   if (st.visitor->capOverflowFlags() != 0) {
     simplified_ = true;
   }
+  vertical_ = st.visitor->isVertical();
   if (st.cssParser) {
     st.cssParser->logResolveStats(st.localPath.c_str());
     // Latch before Finalize clears the parser (which resets its stats): lowHeapSkips
@@ -1819,10 +1845,10 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
     Storage.remove(filePath.c_str());
     return BuildPhaseResult::Failed;
   }
-  const uint8_t status = (parseComplete ? kStatusParseComplete : 0) |
-                         (imageHeaderDegraded_ ? kStatusImageHeaderDegraded : 0) |
-                         (tableRowDegraded_ ? kStatusTableRowDegraded : 0) |
-                         (cssLowHeapDegraded_ ? kStatusCssDegraded : 0) | (simplified_ ? kStatusSimplified : 0);
+  const uint8_t status =
+      (parseComplete ? kStatusParseComplete : 0) | (imageHeaderDegraded_ ? kStatusImageHeaderDegraded : 0) |
+      (tableRowDegraded_ ? kStatusTableRowDegraded : 0) | (cssLowHeapDegraded_ ? kStatusCssDegraded : 0) |
+      (simplified_ ? kStatusSimplified : 0) | (vertical_ ? kStatusVertical : 0);
   serialization::writePod(file, status);
   serialization::writePod(file, pageCount);
   serialization::writePod(file, lutOffset);
@@ -2242,6 +2268,13 @@ uint16_t Section::estimatedTotalPages() const {
   const uint32_t projected = static_cast<uint32_t>(pageCount) * 100u / static_cast<uint32_t>(pct);
   return projected > pageCount ? static_cast<uint16_t>(projected) : pageCount;
 }
+
+bool Section::isVertical() const {
+  if (buildState_ && buildState_->visitor) return buildState_->visitor->isVertical();
+  return vertical_;
+}
+
+FlowContext Section::flowContext() const { return FlowContext::of(request_, isVertical(), epub->pageProgression()); }
 
 bool Section::activeBuildCssDegraded() const {
   // Read the live CSS resolver's running stats: lowHeapSkips is incremented the moment the
