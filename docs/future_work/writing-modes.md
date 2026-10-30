@@ -22,7 +22,7 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 | 0 | Parse every trigger (`writing-mode`, `text-orientation`, `text-combine-upright`, `direction`, `unicode-bidi`, `start`/`end`, `dir` with `<bdo>`/`<bdi>`, OPF ppd); CSS boxes along the writing mode, `start`/`end` along the direction; `line-height` parsed as CSS means it and kept through the cache; fixture books | shipped (#560) ([plan](../superpowers/plans/2026-10-26-writing-modes-step0.md)) |
 | 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; the horizontal right-to-left case of FlowContext and page progression, which step 3 built for vertical text ([below](#what-step-1-takes-from-step-3)) | open |
 | 2 | Arabic script; before its plan, decide on one shaper for Arabic and the Indic scripts ([below](#complex-shaping-arabic-and-the-indic-scripts)) | open |
-| 3 | Vertical frame (from the spike); the vertical decision and its settings; FlowContext and page progression | shipped (#<this PR>) ([plan](../superpowers/plans/2026-10-28-writing-modes-step3.md)) |
+| 3 | Vertical frame (from the spike); the vertical decision and its settings; FlowContext and page progression | shipped (#577) ([plan](../superpowers/plans/2026-10-28-writing-modes-step3.md)) |
 | 4 | Vertical typography: baked vertical forms, small kana, tate-chu-yoko (the per-word flag), A3a in vertical | open |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
 
