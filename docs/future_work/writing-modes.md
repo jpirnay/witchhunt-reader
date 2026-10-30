@@ -35,8 +35,9 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 Step 3 built `FlowContext` (`lib/Epub/Epub/FlowContext.h`) and the page progression; step 1 adds the horizontal
 right-to-left case to them.
 - **What exists.** `FlowContext::of(request, vertical, ppd)` gives a section its `vertical` and
-  `pageProgressionRtl` (`Section::flowContext()`). The reader's `pageProgressionRtl_` follows it: the Left and
-  Right buttons, the tap zones, the page swipes, the progress bars and the percent picker mirror when it is set.
+  `pageProgressionRtl` (`Section::flowContext()`). The reader's `pageProgressionRtl_` follows it: the tap zones, the page
+  swipes, the progress bars and the percent picker mirror when it is set, and the Left and Right buttons too under
+  Page Turn Buttons = Follow Book (`mirrorsLeftRight`).
 - **What stops a horizontal right-to-left book today.** `FlowContext::requestFor` returns Off for a language that
   is never set vertically (`TypographyProfile::verticalAllowed`: Chinese, Japanese and Korean), and
   `pageProgressionRtlFor` returns false for Off. A Hebrew or Arabic book with OPF
