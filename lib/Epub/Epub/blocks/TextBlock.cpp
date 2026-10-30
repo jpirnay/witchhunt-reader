@@ -13,6 +13,7 @@
 #include <cstring>
 
 #include "../TextEmphasis.h"
+#include "../VerticalDraw.h"
 
 bool TextBlock::guideDotsEnabled = false;
 
@@ -411,7 +412,8 @@ int TextBlock::annotationBand(const GfxRenderer& renderer, const int fontId) con
 
 bool TextBlock::drawsUnscaled() const {
   if (!isValid) return true;  // draws nothing
-  if (renderStyle.fontSizeMultiplier != 1.0f || renderStyle.headingFontId != 0 || sizesPresent || hasAnnotations()) {
+  if (renderStyle.fontSizeMultiplier != 1.0f || renderStyle.headingFontId != 0 || sizesPresent || hasAnnotations() ||
+      vertical_) {
     return false;
   }
   constexpr uint8_t scaledStyles = EpdFontFamily::SUP | EpdFontFamily::SUB | EpdFontFamily::SMALL_CAPS;
@@ -460,8 +462,9 @@ TextBlock::WordBox TextBlock::wordBox(const GfxRenderer& renderer, const uint16_
   // Scaled measurement, not getTextAdvanceX: a book with publisher font sizes
   // gives words a per-word scale, and an unscaled width drifts wider or
   // narrower than the glyphs actually drawn.
-  box.width = static_cast<int16_t>((scale == 1.0f) ? renderer.getTextWidth(font, word, style)
-                                                   : renderer.getTextWidthScaled(font, word, style, scale));
+  box.width = static_cast<int16_t>(vertical_         ? verticalTextAdvance(renderer, font, word, style, scale)
+                                   : (scale == 1.0f) ? renderer.getTextWidth(font, word, style)
+                                                     : renderer.getTextWidthScaled(font, word, style, scale));
   box.height =
       static_cast<int16_t>((scale == 1.0f) ? renderer.getLineHeight(font) : renderer.getLineHeightScaled(font, scale));
   return box;
@@ -505,6 +508,28 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     float scale;
     int ascender;
   };
+  // A vertical line runs every draw down its column at the position the horizontal code computes (VerticalDraw.h).
+  const bool vertical = vertical_;
+  auto drawRun = [&renderer, vertical](const int font, const int px, const int py, const char* text,
+                                       const EpdFontFamily::Style style, const float scale) {
+    if (vertical) {
+      drawTextVertical(renderer, font, px, py, text, style, scale);
+    } else if (scale == 1.0f) {
+      renderer.drawText(font, px, py, text, true, style);
+    } else {
+      renderer.drawTextScaled(font, px, py, text, true, style, scale);
+    }
+  };
+  // How far a piece of text runs along the line at `scale`.
+  auto runWidth = [&renderer, vertical](const int font, const char* text, const EpdFontFamily::Style style,
+                                        const float scale) {
+    if (vertical) return verticalTextAdvance(renderer, font, text, style, scale);
+    return scale == 1.0f ? renderer.getTextWidth(font, text, style)
+                         : renderer.getTextWidthScaled(font, text, style, scale);
+  };
+  // Where the line's baseline-relative marks sit across the column: the over edge, the word's axis, the block's axis.
+  const int baseline = baseY + lineAscender;
+  const int blockEm = vertical ? columnEm(renderer, effFontId, EpdFontFamily::REGULAR, blockScale) : 0;
   std::vector<CachedAscender> ascenderCache;
   auto getOrCacheAscender = [&](const int font, const float s) -> int {
     if (font == effFontId && s == blockScale) return blockAscender;
@@ -536,18 +561,13 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     } else if ((currentStyle & EpdFontFamily::SUB) != 0) {
       wordY += blockAscender / 4;
     }
-    if (scale == 1.0f) {
-      renderer.drawText(font, wordX, wordY, word, true, currentStyle);
-    } else {
-      renderer.drawTextScaled(font, wordX, wordY, word, true, currentStyle, scale);
-    }
+    drawRun(font, wordX, wordY, word, currentStyle, scale);
 
     const bool hasDecoration =
         !scanning && (currentStyle & (EpdFontFamily::UNDERLINE | EpdFontFamily::STRIKETHROUGH)) != 0;
     int lineWidth = 0;
     if (guideDots || hasDecoration) {
-      lineWidth = (scale == 1.0f) ? renderer.getTextWidth(font, word, currentStyle)
-                                  : renderer.getTextWidthScaled(font, word, currentStyle, scale);
+      lineWidth = runWidth(font, word, currentStyle, scale);
     }
 
     if (guideDots) {
@@ -559,7 +579,8 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
           const int dotX = prevWordEndX + (gap - dotSize) / 2;
           // A third of the ascender above the shared baseline -- roughly mid
           // x-height, like a typographic middle dot.
-          const int dotY = baseY + lineAscender - blockAscender / 3 - dotSize / 2;
+          const int dotY = vertical ? columnAxis(baseline, blockEm) - dotSize / 2
+                                    : baseY + lineAscender - blockAscender / 3 - dotSize / 2;
           renderer.fillRect(dotX, dotY, dotSize, dotSize, true);
         }
       }
@@ -568,12 +589,14 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
 
     if (hasDecoration) {
       if ((currentStyle & EpdFontFamily::UNDERLINE) != 0) {
-        const int underlineY = baseY + lineAscender + 3;
+        // Vertical: the side line lies on the over side of the column, off the em box's edge.
+        const int underlineY = vertical ? columnOverEdge(baseline, blockEm) - 2 : baseline + 3;
         renderer.drawLine(wordX, underlineY, wordX + lineWidth, underlineY, 2, true);
       }
 
       if ((currentStyle & EpdFontFamily::STRIKETHROUGH) != 0) {
-        const int strikeY = wordY + ascender / 2 + 4;
+        const int strikeY = vertical ? columnAxis(wordY + ascender, columnEm(renderer, font, currentStyle, scale))
+                                     : wordY + ascender / 2 + 4;
         renderer.drawLine(wordX, strikeY, wordX + lineWidth, strikeY, 2, true);
       }
     }
@@ -624,7 +647,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       nextChar(pos, buf);
       const int offset = spread ? slack * (2 * c + 1) / (2 * chars) : slack / 2;
       const int advanced = static_cast<int>(rawBefore * rubyScale + 0.5f);
-      renderer.drawTextScaled(font, x + a.x + offset + advanced, rubyY, buf, true, EpdFontFamily::REGULAR, rubyScale);
+      drawRun(font, x + a.x + offset + advanced, rubyY, buf, EpdFontFamily::REGULAR, rubyScale);
       rawBefore += renderer.getTextAdvanceX(font, buf, EpdFontFamily::REGULAR);
     }
   }
@@ -650,8 +673,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       const int markAscender = renderer.getFontAscenderSizeScaled(font, markScale);
       const int markY = baseY - markAscender;
       const bool drawGlyph = scanning || renderer.hasGlyph(font, markCp, EpdFontFamily::REGULAR);
-      const int markWidth =
-          drawGlyph ? renderer.getTextWidthScaled(font, markText, EpdFontFamily::REGULAR, markScale) : 0;
+      const int markWidth = drawGlyph ? runWidth(font, markText, EpdFontFamily::REGULAR, markScale) : 0;
       const int square = std::max(2, markAscender / 4);
       const int wordX = xposArr[w] + x;
       const unsigned char* p = reinterpret_cast<const unsigned char*>(wordText(w));
@@ -663,13 +685,13 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
         const size_t len = std::min<size_t>(static_cast<size_t>(p - start), 4);
         memcpy(buf, start, len);
         buf[len] = '\0';
-        const int raw = renderer.getTextAdvanceX(font, buf, style);
+        const int raw = vertical ? verticalTextAdvance(renderer, font, buf, style, 1.0f)
+                                 : renderer.getTextAdvanceX(font, buf, style);
         if (TextEmphasis::takesMark(cp)) {
           const int charX = wordX + (wordScl == 1.0f ? rawBefore : static_cast<int>(rawBefore * wordScl + 0.5f));
           const int advance = wordScl == 1.0f ? raw : static_cast<int>(raw * wordScl + 0.5f);
           if (drawGlyph) {
-            renderer.drawTextScaled(font, charX + (advance - markWidth) / 2, markY, markText, true,
-                                    EpdFontFamily::REGULAR, markScale);
+            drawRun(font, charX + (advance - markWidth) / 2, markY, markText, EpdFontFamily::REGULAR, markScale);
           } else {
             renderer.fillRect(charX + (advance - square) / 2, markY + (markAscender - square) / 2, square, square,
                               true);
@@ -690,12 +712,12 @@ bool TextBlock::serialize(FsFile& file) const {
   // Word data: scalars, then the arena verbatim -- its in-memory layout is
   // exactly the on-disk layout (see TextBlock.h), so one write covers all
   // per-word arrays and the text blob. The flags byte holds the sizes in bit 0
-  // bit 1 says the line has annotations (u16 annotationBytes follows textBytes), and
+  // bit 1 says the line has annotations (u16 annotationBytes follows textBytes), bit 2 that it is vertical, and
   // the word-font count in bits 4-7: a line without word fonts or annotations
   // writes the 0 or 1 it always did.
   serialization::writePod(file, numWords);
-  serialization::writePod(
-      file, static_cast<uint8_t>((sizesPresent ? 1 : 0) | (annotationBytes_ != 0 ? 2 : 0) | wordFontCount << 4));
+  serialization::writePod(file, static_cast<uint8_t>((sizesPresent ? 1 : 0) | (annotationBytes_ != 0 ? 2 : 0) |
+                                                     (vertical_ ? 4 : 0) | wordFontCount << 4));
   serialization::writePod(file, textBytes);
   if (annotationBytes_ != 0) serialization::writePod(file, annotationBytes_);
   if (numWords > 0) {
@@ -739,7 +761,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
   // Sanity checks: cap the arena allocation and reject impossible geometry
   // (every word carries at least its NUL terminator).
   const uint8_t fontCount = flags >> 4;
-  if (wc > 10000 || (flags & 0x0C) != 0 || fontCount > kMaxWordFonts || (fontCount != 0 && wc == 0)) {
+  if (wc > 10000 || (flags & 0x08) != 0 || fontCount > kMaxWordFonts || (fontCount != 0 && wc == 0)) {
     LOG_ERR("TXB", "Deserialization failed: word count %u or flags 0x%02x out of range", wc, flags);
     return nullptr;
   }
@@ -761,6 +783,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
   block->textBytes = textBytes;
   block->sizesPresent = (flags & 1) != 0;
   block->wordFontCount = fontCount;
+  block->vertical_ = (flags & 0x04) != 0;
 
   if (wc > 0) {
     const size_t size = arenaSize(wc, block->sizesPresent, fontCount, textBytes, annotationBytes);

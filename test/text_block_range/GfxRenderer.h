@@ -19,6 +19,16 @@
 
 class GfxRenderer {
  public:
+  enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
+  void setOrientation(const Orientation o) {
+    held = o;
+    live = o;
+  }
+  void setDrawOrientation(const Orientation o) const { live = o; }
+  Orientation getOrientation() const { return live; }
+  Orientation getHeldOrientation() const { return held; }
+  int getScreenWidth(const Orientation o) const { return o == Portrait || o == PortraitInverted ? 480 : 800; }
+
   static constexpr int GLYPH_W = 10;
   static constexpr int SPACE_W = 5;
   static constexpr int ASCENDER = 16;
@@ -31,6 +41,7 @@ class GfxRenderer {
     int y;
     float scale;
     EpdFontFamily::Style style;
+    Orientation frame;  // the live orientation at the call
   };
   mutable std::vector<DrawCall> drawCalls;
 
@@ -83,14 +94,18 @@ class GfxRenderer {
   }
   void drawText(int fontId, int x, int y, const char* text, bool /*black*/ = true,
                 EpdFontFamily::Style style = EpdFontFamily::REGULAR) const {
-    drawCalls.push_back({text, fontId, x, y, 1.0f, style});
+    drawCalls.push_back({text, fontId, x, y, 1.0f, style, live});
   }
   void drawTextScaled(int fontId, int x, int y, const char* text, bool /*black*/, EpdFontFamily::Style style,
                       const float scale) const {
-    drawCalls.push_back({text, fontId, x, y, scale, style});
+    drawCalls.push_back({text, fontId, x, y, scale, style, live});
   }
   void drawLine(int /*x1*/, int /*y1*/, int /*x2*/, int /*y2*/, int /*lineWidth*/, bool /*state*/) const {}
   void fillRect(int x, int y, int width, int height, bool state = true) const {
     fillRectCalls.push_back({x, y, width, height, state});
   }
+
+ private:
+  Orientation held = Portrait;
+  mutable Orientation live = Portrait;
 };

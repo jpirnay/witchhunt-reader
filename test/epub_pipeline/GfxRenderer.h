@@ -44,12 +44,21 @@ class GfxRenderer {
   static constexpr int VIEWABLE_MARGIN_LEFT = 3;
 
   // --- Screen / framebuffer surface (converters, DirectPixelWriter) ---
-  int getScreenWidth() const { return 480; }
-  int getScreenHeight() const { return 800; }
+  void setOrientation(const Orientation o) {
+    held_ = o;
+    live_ = o;
+  }
+  void setDrawOrientation(const Orientation o) const { live_ = o; }
+  Orientation getHeldOrientation() const { return held_; }
+  static int screenWidthIn(const Orientation o) { return o == Portrait || o == PortraitInverted ? 480 : 800; }
+  static int screenHeightIn(const Orientation o) { return o == Portrait || o == PortraitInverted ? 800 : 480; }
+  int getScreenWidth() const { return screenWidthIn(live_); }
+  int getScreenHeight() const { return screenHeightIn(live_); }
+  int getScreenWidth(const Orientation o) const { return screenWidthIn(o); }
   int getDisplayWidth() const { return 480; }
   int getDisplayHeight() const { return 800; }
   uint16_t getDisplayWidthBytes() const { return 60; }
-  Orientation getOrientation() const { return Portrait; }
+  Orientation getOrientation() const { return live_; }
   RenderMode getRenderMode() const { return BW; }
   uint8_t* getWriteTarget() const { return frameBuffer_; }
   int getWriteOriginY() const { return 0; }
@@ -184,6 +193,9 @@ class GfxRenderer {
     cp = 0xFFFD;
     return p + 1;
   }
+
+  Orientation held_ = Portrait;
+  mutable Orientation live_ = Portrait;
 
   // Converters write decoded pixels through getWriteTarget(); give them a real
   // buffer so those paths are memory-safe if exercised.

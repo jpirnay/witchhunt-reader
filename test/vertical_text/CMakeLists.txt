@@ -1,8 +1,11 @@
 add_executable(VerticalTextTest
   VerticalOrientationTest.cpp
   VerticalDrawTest.cpp
+  VerticalTextBlockTest.cpp
   AllocationCounter.cpp
   ${REPO_ROOT}/lib/Epub/Epub/VerticalOrientation.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/blocks/TextBlock.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/CjkPunctuation.cpp
   ${REPO_ROOT}/lib/Epub/Epub/VerticalDraw.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
 )

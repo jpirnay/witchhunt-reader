@@ -57,6 +57,16 @@ class GfxRenderer {
   };
   mutable std::vector<DrawCall> drawCalls;
 
+  struct LineCall {
+    int x1;
+    int y1;
+    int x2;
+    int y2;
+    int width;
+    Orientation frame;  // the live orientation at the call
+  };
+  mutable std::vector<LineCall> drawLineCalls;
+
   struct RectCall {
     int x;
     int y;
@@ -149,7 +159,9 @@ class GfxRenderer {
                       const float scale) const {
     drawCalls.push_back({text, fontId, x, y, scale, style, live});
   }
-  void drawLine(int /*x1*/, int /*y1*/, int /*x2*/, int /*y2*/, int /*lineWidth*/, bool /*state*/) const {}
+  void drawLine(int x1, int y1, int x2, int y2, int lineWidth, bool /*state*/) const {
+    drawLineCalls.push_back({x1, y1, x2, y2, lineWidth, live});
+  }
   void fillRect(int x, int y, int width, int height, bool state = true) const {
     fillRectCalls.push_back({x, y, width, height, state});
   }
