@@ -204,7 +204,7 @@ Reply: one line, `STATE:` followed by `key=value` pairs.
 | `book`, `spine`, `page` | EPUB reader | the file, spine item `n/count`, page within that spine item `n/count`; both count from 1 |
 | `font`, `font_pt` | EPUB reader | the font family and point size the book is set in |
 | `chapter`, `chapter_page`, `percent` | EPUB reader | what the status bar shows: the TOC chapter title, the page within the whole chapter, which can span several spine items (`~` when the total is still an estimate), the book percentage |
-| `flow`, `progression`, `input_progression` | EPUB reader, with a section open | how the section on screen runs and which way its pages turn: `horizontal` or `vertical-rl`; `ltr` or `rtl`; `input_progression` is the direction the buttons, taps and bar use, which must equal `progression` |
+| `flow`, `progression`, `input_progression` | EPUB reader, with a section open | how the section on screen runs and which way its pages turn: `horizontal` or `vertical-rl`; `ltr` or `rtl`; `input_progression` is the direction the buttons, taps and bar use, which equals `progression` once the section's first build pass or page has been drawn (while a cold section's "Indexing" popup is up, about 1 s, it still holds the previous section's direction, or `ltr` in a book just opened) |
 | `heap`, `maxblock` | always | free heap and the largest free block, in bytes |
 
 Everything but `activity`, `stack`, `book`, `spine` and `page` needs the full API. A popup counts as
