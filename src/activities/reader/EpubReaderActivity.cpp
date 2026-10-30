@@ -956,6 +956,9 @@ void EpubReaderActivity::loop() {
   // this file -- on in release builds too).
   serviceBackgroundDebugLog();
 
+  const bool leftRightSwapped =
+      pageProgressionRtl_.load() && SETTINGS.pageTurnButtons == CrossPointSettings::PAGE_TURN_FOLLOW_BOOK;
+
   // Under the RenderLock, which every post and every other writer of one holds. A heap-recovery restart saves the live
   // page under it and keeps it up to the reboot; without it, an older post written beside that save or after it (in
   // the restart's delay(50) or image warm pass) would reopen the book on the older page. Try, never wait: a busy lock
@@ -1063,12 +1066,17 @@ void EpubReaderActivity::loop() {
     // BTN_DEFAULT is the built-in case. The FSM emits no Short for a press that
     // already produced a Long, so the release cannot also turn the page.
     if (ev.type == ButtonEventManager::PressType::Long) {
+      // A right-to-left book under Follow Book turns the other way on Left and Right; the side buttons
+      // (PageBack/PageForward) and assigned actions keep their meaning.
+      const bool leftIsPrev = !leftRightSwapped;
       const bool prevChapter =
           (ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnLongPageBack == BA::BTN_DEFAULT) ||
-          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnLongLeft == BA::BTN_DEFAULT);
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnLongLeft == BA::BTN_DEFAULT && leftIsPrev) ||
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnLongRight == BA::BTN_DEFAULT && !leftIsPrev);
       const bool nextChapter =
           (ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnLongPageForward == BA::BTN_DEFAULT) ||
-          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnLongRight == BA::BTN_DEFAULT);
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnLongRight == BA::BTN_DEFAULT && leftIsPrev) ||
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnLongLeft == BA::BTN_DEFAULT && !leftIsPrev);
       if (prevChapter || nextChapter) {
         onButtonAction(nextChapter ? BA::BTN_NEXT_SECTION : BA::BTN_PREV_SECTION);
         return;
@@ -1081,13 +1089,17 @@ void EpubReaderActivity::loop() {
     // main.cpp dispatches it globally — but the setting is re-checked so a future caller
     // that pushes events directly cannot turn a remapped button into a page turn.
     if (ev.type == ButtonEventManager::PressType::Short) {
+      const bool leftIsPrev = !leftRightSwapped;
       if ((ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnShortPageBack == BA::BTN_DEFAULT) ||
-          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnShortLeft == BA::BTN_DEFAULT)) {
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnShortLeft == BA::BTN_DEFAULT && leftIsPrev) ||
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnShortRight == BA::BTN_DEFAULT &&
+           !leftIsPrev)) {
         buttonPrevTurn = true;
         continue;
       }
       if ((ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnShortPageForward == BA::BTN_DEFAULT) ||
-          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnShortRight == BA::BTN_DEFAULT)) {
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnShortRight == BA::BTN_DEFAULT && leftIsPrev) ||
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnShortLeft == BA::BTN_DEFAULT && !leftIsPrev)) {
         buttonNextTurn = true;
         continue;
       }
@@ -1116,7 +1128,8 @@ void EpubReaderActivity::loop() {
   // are gesture sources the queue does not carry, and both must lose to an
   // explicit button press. Inert on non-touch boards and when the user has set
   // touchReaderControls to Off.
-  const ReaderUtils::TouchPageTurn touchTurn = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
+  const ReaderUtils::TouchPageTurn touchTurn =
+      ReaderUtils::detectTouchPageTurn(renderer, mappedInput, pageProgressionRtl_.load());
   prevTriggered = prevTriggered || touchTurn.prev;
   nextTriggered = nextTriggered || touchTurn.next;
   if (!prevTriggered && !nextTriggered) {
@@ -2762,13 +2775,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         }
       }
       const int initialPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
-      startActivityForResult(
-          std::make_unique<EpubReaderPercentSelectionActivity>(renderer, mappedInput, initialPercent),
-          [this](const ActivityResult& result) {
-            if (!result.isCancelled) {
-              jumpToPercent(std::get<PercentResult>(result.data).percent);
-            }
-          });
+      startActivityForResult(std::make_unique<EpubReaderPercentSelectionActivity>(renderer, mappedInput, initialPercent,
+                                                                                  pageProgressionRtl_.load()),
+                             [this](const ActivityResult& result) {
+                               if (!result.isCancelled) {
+                                 jumpToPercent(std::get<PercentResult>(result.data).percent);
+                               }
+                             });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::GO_TO_PRINTED_PAGE: {
@@ -5709,6 +5722,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     lastRenderedSpineIndex_ = currentSpineIndex;
     lastRenderedPageIndex_ = section->currentPage;
     lastRenderedPageCount_ = section->pageCount;
+    pageProgressionRtl_.store(section->flowContext().pageProgressionRtl);
   }
   auto* fcm = renderer.getFontCacheManager();
   fcm->resetStats();
@@ -6622,6 +6636,9 @@ void EpubReaderActivity::appendDebugState(std::string& out) const {
   appendField(out, "chapter_page", number);
   snprintf(number, sizeof(number), "%.0f", statusBarBookPercent());
   appendField(out, "percent", number);
+  const FlowContext flow = section->flowContext();
+  appendField(out, "flow", flow.vertical ? "vertical-rl" : "horizontal");
+  appendField(out, "progression", flow.pageProgressionRtl ? "rtl" : "ltr");
 #endif
 }
 
@@ -6744,7 +6761,8 @@ void EpubReaderActivity::renderStatusBar() const {
   GUI.drawStatusBar(renderer, bookProgress, chapter.page, chapter.total, title, 0, isStarred, printedPageLabel,
                     /*fillMargin=*/true, /*pageCountApproximate=*/chapter.approximate, syncIndicator,
                     /*lowMemory=*/memoryDegradedPage(currentSpineIndex, section->currentPage) ||
-                        glyphStarvedPage(currentSpineIndex, section->currentPage));
+                        glyphStarvedPage(currentSpineIndex, section->currentPage),
+                    /*fillFromRight=*/pageProgressionRtl_.load());
 
 #if DEBUG_BACKGROUND_WORK
   renderBackgroundDebugOverlay();

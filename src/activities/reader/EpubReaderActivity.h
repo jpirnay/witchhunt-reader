@@ -680,6 +680,9 @@ class EpubReaderActivity final : public Activity {
   // them", not "the render lock covers them". A unique_ptr assigned from one task while another
   // moves it is a double-free waiting to happen.
   std::atomic<bool> finishedBookLaunchPending_{false};
+  // The book on screen turns its pages right to left (spec 5.5): stored by renderContents from the section's flow
+  // context, read by loop() for the buttons, taps and swipes and by the percent picker and the status bar.
+  std::atomic<bool> pageProgressionRtl_{false};
   // Last valid spine/page/pageCount at book-finish time, stashed for onFinishedBookSyncRequested()
   // — see the SyncPositionOverride comment for why currentSpineIndex/section can't be used there.
   int finishedBookSyncSpineIndex_ = 0;

@@ -132,7 +132,8 @@ struct TouchPageTurn {
   unsigned long heldMs;
 };
 
-inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const MappedInputManager& input) {
+inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const MappedInputManager& input,
+                                         const bool rightToLeft = false) {
   TouchPageTurn result{false, false, 0};
   if (!SETTINGS.touchReaderControls || !input.hasTouch()) {
     return result;
@@ -142,10 +143,10 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     // Horizontal swipes turn pages; taps stay free for the centred reader-menu
     // zone. A slow swipe never becomes a long-press chapter skip.
     const auto dir = input.wasSwipe();
-    if (dir == MappedInputManager::SwipeDir::Left) {
-      result.next = true;
-    } else if (dir == MappedInputManager::SwipeDir::Right) {
-      result.prev = true;
+    if (dir == MappedInputManager::SwipeDir::Left || dir == MappedInputManager::SwipeDir::Right) {
+      const TapZones::Turn turn = TapZones::turnForSwipe(dir == MappedInputManager::SwipeDir::Left, rightToLeft);
+      result.prev = turn == TapZones::Turn::Back;
+      result.next = turn == TapZones::Turn::Forward;
     }
     return result;
   }
@@ -164,13 +165,9 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
   if (y < 0 || y >= height) return result;
   const bool inverted = SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
   const TapZones::Zone zone = TapZones::zoneFor(x, y, width, height);
-  if (zone == TapZones::Zone::Left) {
-    result.prev = !inverted;
-    result.next = inverted;
-  } else if (zone == TapZones::Zone::Right) {
-    result.prev = inverted;
-    result.next = !inverted;
-  }
+  const TapZones::Turn turn = TapZones::turnFor(zone, inverted, rightToLeft);
+  result.prev = turn == TapZones::Turn::Back;
+  result.next = turn == TapZones::Turn::Forward;
   result.heldMs = input.lastTouchHeldMs();
   return result;
 }

@@ -191,6 +191,35 @@ TEST(TapZones, DegenerateSizesHaveNoEdgeColumns) {
   EXPECT_NE(EdgeColumn::Right, edgeColumnFor(0, 0, 1, 1));
 }
 
+TEST(TapZones, APageTurnFollowsTheBooksDirection) {
+  using TapZones::Turn;
+  using TapZones::turnFor;
+  EXPECT_EQ(Turn::Back, turnFor(Zone::Left, false, false));
+  EXPECT_EQ(Turn::Forward, turnFor(Zone::Right, false, false));
+  EXPECT_EQ(Turn::Forward, turnFor(Zone::Left, true, false));
+  EXPECT_EQ(Turn::Back, turnFor(Zone::Right, true, false));
+  EXPECT_EQ(Turn::Forward, turnFor(Zone::Left, false, true));
+  EXPECT_EQ(Turn::Back, turnFor(Zone::Right, false, true));
+  EXPECT_EQ(Turn::Back, turnFor(Zone::Left, true, true));
+  EXPECT_EQ(Turn::Forward, turnFor(Zone::Right, true, true));
+  for (const bool inverted : {false, true}) {
+    for (const bool rtl : {false, true}) {
+      EXPECT_EQ(Turn::None, turnFor(Zone::Centre, inverted, rtl));
+      EXPECT_EQ(Turn::None, turnFor(Zone::Top, inverted, rtl));
+      EXPECT_EQ(Turn::None, turnFor(Zone::Bottom, inverted, rtl));
+    }
+  }
+}
+
+TEST(TapZones, ASwipeFollowsIt) {
+  using TapZones::Turn;
+  using TapZones::turnForSwipe;
+  EXPECT_EQ(Turn::Forward, turnForSwipe(true, false));
+  EXPECT_EQ(Turn::Back, turnForSwipe(false, false));
+  EXPECT_EQ(Turn::Back, turnForSwipe(true, true));
+  EXPECT_EQ(Turn::Forward, turnForSwipe(false, true));
+}
+
 }  // namespace
 
 // --- Bounded band split -------------------------------------------------------

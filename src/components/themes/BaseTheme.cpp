@@ -1110,8 +1110,8 @@ void BaseTheme::fillPopupProgress(const GfxRenderer& renderer, const Rect& layou
 void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, const int currentPage,
                               const int pageCount, std::string title, const int paddingBottom, const bool isStarred,
                               const std::string& printedPageLabel, const bool fillMargin,
-                              const bool pageCountApproximate, const SyncIndicator syncIndicator,
-                              const bool lowMemory) const {
+                              const bool pageCountApproximate, const SyncIndicator syncIndicator, const bool lowMemory,
+                              const bool fillFromRight) const {
   // While a section is still being laid out the total page count is a byte-based estimate, shown
   // with a leading "~" so the reader knows it will firm up as the chapter finishes building.
   const char* pageCountPrefix = pageCountApproximate ? "~" : "";
@@ -1137,7 +1137,8 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
     const int extraBottom = (!topEdge && fillMargin) ? orientedMarginBottom - 1 : 0;
     const int y =
         topEdge ? orientedMarginTop + paddingBottom : screenHeight - orientedMarginBottom - paddingBottom - barHeight;
-    renderer.fillRect(barMarginLeft, y, barWidth, barHeight + extraBottom, true);
+    const int barX = fillFromRight ? barMarginLeft + progressBarMaxWidth - barWidth : barMarginLeft;
+    renderer.fillRect(barX, y, barWidth, barHeight + extraBottom, true);
   };
 
   // Draw progress bars first; status items are then placed inside the reserved band for their selected edge.

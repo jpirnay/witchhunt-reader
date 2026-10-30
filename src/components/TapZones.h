@@ -40,6 +40,21 @@ inline Zone zoneFor(const int x, const int y, const int width, const int height)
   return Zone::Centre;
 }
 
+// What a tap or a horizontal swipe does to the page (spec 5.5): the Left column turns back and the Right one forward,
+// swapped by the reader's inverted taps and again for pages that turn right to left; a swipe towards the left turns
+// forward, towards the right back, mirrored the same way.
+enum class Turn : uint8_t { None, Back, Forward };
+
+inline Turn turnFor(const Zone zone, const bool inverted, const bool rightToLeft) {
+  if (zone != Zone::Left && zone != Zone::Right) return Turn::None;
+  const bool forward = (zone == Zone::Right) != (inverted != rightToLeft);
+  return forward ? Turn::Forward : Turn::Back;
+}
+
+inline Turn turnForSwipe(const bool towardsLeft, const bool rightToLeft) {
+  return towardsLeft != rightToLeft ? Turn::Forward : Turn::Back;
+}
+
 // The four corners, for LONG presses only.
 //
 // Kept separate from Zone rather than added to it, and that separation is the whole

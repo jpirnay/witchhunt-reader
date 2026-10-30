@@ -50,4 +50,12 @@ inline int valueForX(const int px, const int barX, const int barWidth, const int
   return minValue + (dx * range + track / 2) / track;
 }
 
+// A bar that runs right to left: a finger at px means what px mirrored about the bar means, and the fill starts at the
+// track's right end.
+inline int mirroredX(const int px, const int barX, const int barWidth) { return 2 * barX + barWidth - 1 - px; }
+
+inline int reversedFillX(const int value, const int barX, const int barWidth, const int minValue, const int maxValue) {
+  return trackX(barX) + trackWidth(barWidth) - fillWidthFor(value, barWidth, minValue, maxValue);
+}
+
 }  // namespace SliderGeometry

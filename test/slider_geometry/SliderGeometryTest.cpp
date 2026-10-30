@@ -86,4 +86,17 @@ TEST(SliderGeometry, ZeroWidthBarIsSafe) {
   EXPECT_EQ(0, SliderGeometry::fillWidthFor(50, 0, kMin, kMax));
 }
 
+TEST(SliderGeometry, AReversedBarMirrorsTheTouchAndTheFill) {
+  using SliderGeometry::mirroredX;
+  const int rightEnd = SliderGeometry::trackX(kBarX) + SliderGeometry::trackWidth(kBarW) - 1;
+  EXPECT_EQ(417, rightEnd);
+  EXPECT_EQ(kMin, valueAt(mirroredX(417, kBarX, kBarW)));
+  EXPECT_EQ(kMax, valueAt(mirroredX(62, kBarX, kBarW)));
+  EXPECT_EQ(62, mirroredX(417, kBarX, kBarW));
+  EXPECT_EQ(89, SliderGeometry::fillWidthFor(25, kBarW, kMin, kMax));
+  EXPECT_EQ(329, SliderGeometry::reversedFillX(25, kBarX, kBarW, kMin, kMax));
+  EXPECT_EQ(418, SliderGeometry::reversedFillX(0, kBarX, kBarW, kMin, kMax));
+  EXPECT_EQ(62, SliderGeometry::reversedFillX(100, kBarX, kBarW, kMin, kMax));
+}
+
 }  // namespace
