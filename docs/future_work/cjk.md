@@ -7,8 +7,8 @@ justification and the whole-em grid (A3a), push-in and the CJK–Latin gap (A3b)
 The font engine is done too: TrueType and CFF (`.otf`) outlines, families too large for flash read from the card, and
 a glyph store that makes room. The font manager installs eight CJK families as `.otf`. What remains for full CJK
 support:
-- **UI text:** the UI itself is translated; book titles, TOC entries and status-bar chapter names in CJK
-  still need the reader's CJK font as a fallback.
+- **UI text:** shipped (#508 the UI faces, #563 book titles, TOC and the status bar in the reader's font); a
+  scratch block for the reader's own passes, the held set's heap and a CJK keyboard remain.
 - **The dictionary** on CJK pages: shipped; deinflection, word-by-word selection and the search time on
   two-file dictionaries remain.
 - **Small edge cases** the reviews found.
@@ -27,11 +27,11 @@ behind CFF.
 | 4 | Synthetic bold (spec section 7): regular-only outline families draw bold, CFF included | shipped (#548) |
 | 5 | The CJK families as `.otf` in the font manager (spec sections 4-6); the bitmap CJK families removed | shipped (#550) |
 | 5b | Synthetic italic (spec section 7.4): families without an italic file draw italic slanted, as KOReader does | shipped (#551) |
-| 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | built (feat/ui-book-text-heap); device check pending ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
+| 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | shipped (#563) ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
 | 7 | Push-in and the CJK–Latin gap (A3b) | shipped (#575) |
 | 8 | Ruby and emphasis dots | B1 shipped (#554, review fixes #556); B2 emphasis dots in #566 ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
 | 9 | The dictionary on CJK pages ([what remains](#dictionary-on-cjk-pages)) | shipped (#570, #569, #574) |
-| 10 | Line spacing: a CJK em-pitch scale, Extra wide and Widest, Book's style, a per-book override ([below](#line-spacing)) | built on `feat/line-spacing` ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md), [plan](../superpowers/plans/2026-10-26-line-spacing.md)) |
+| 10 | Line spacing: a CJK em-pitch scale, Extra wide and Widest, Book's style, a per-book override ([below](#line-spacing)) | shipped (#562) ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md), [plan](../superpowers/plans/2026-10-26-line-spacing.md)) |
 
 Synthetic bold comes before the font manager because the CJK families ship in their Regular weight only (spec
 section 4). Step 6 is what makes a CJK library navigable once a font is installed.
@@ -119,7 +119,7 @@ Listed here so nobody redoes it.
 - `CMD:ACT:DICT` reports the run, the hits, their entries, probes, reads and both timings (`docs/serial-test-api.md`).
 - **No version changes.** `gh_release` flash +9,044 B, static RAM +0 B (`firmware_size_history.py`, against master).
 - **Tests.** `test/dictionary/DictionaryTest.cpp` (the prefix search and its read counts, the definitions), `test/dictionary/CjkLookupRunTest.cpp`.
-- **The user's side** is in `docs/dictionary.md` ("Chinese, Japanese and Korean"): how it works, its limits, the PyGlossary conversions, sizes and first-open times. The design spec and the plan were deleted once their lasting parts were there.
+- **The user's side** is in `docs/dictionary.md` ("Chinese, Japanese and Korean"): how it works, its limits, the PyGlossary conversions, sizes and first-open times. The design spec was deleted once its lasting parts were there; the plan stays (`docs/superpowers/plans/2026-10-23-cjk-dictionary.md`).
 
 **#575 (A3b): push-in and the CJK–Latin gap.**
 - **Push-in** (spec 5.3). A line one token too long first shrinks, in this order: the marks at its two edges, each all or nothing (spec 5.2: "half or full"), then every other mark down to its minimum width, then the CJK–Latin gaps. Only if that is not enough does it break earlier and stretch. Western word spaces do not shrink, so Latin lines do not move.
@@ -260,7 +260,7 @@ Still refused: variable CFF2 fonts and font collections.
 
 ## UI text in CJK
 
-**Partly done** (branch `feat/cjk-ui-fonts`). Chinese, Japanese and Korean UI translations ship with
+**Shipped** (#508 the UI faces, #563 book text). Chinese, Japanese and Korean UI translations ship with
 their own small UI faces: each holds the characters its translation uses, at 10 and 12 pt, attached
 behind every UI face as fallback glyphs (`src/CjkUiFonts.cpp`, `docs/i18n.md`). Wrapped UI text breaks
 between Chinese and Japanese characters. The build fails when a translation uses a character no UI
@@ -367,7 +367,7 @@ CC-KEDICT (`docs/dictionary.md` has the conversions):
 
 ## Line spacing
 
-**Built** on `feat/line-spacing` ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md),
+**Shipped** in #562 ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md),
 [plan](../superpowers/plans/2026-10-26-line-spacing.md)), after an X3 study of a Japanese, a Chinese and a Korean book
 at 1.5, 1.7 and 2.0 em against the old Normal and Wide.
 - **The scale** (maintainer, 2026-10-26). Chinese, Japanese and Korean books get a line pitch in ems: Tight 1.5, Normal

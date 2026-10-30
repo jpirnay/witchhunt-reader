@@ -31,13 +31,13 @@ Flashing is done from the browser — no toolchain or driver install needed. Use
 - Markdown-support
 - WiFi captive portal support
 - Supporting ~~strikethrough~~, superscript / subscript and tables
+- Chinese, Japanese and Korean books (horizontal text): CJK line breaking and punctuation rules, ruby and emphasis dots, CJK fonts from the font manager, CJK titles in the library, dictionary lookups on CJK text
 - Support for used defined actions on double-click / long-click per button 
 - Background preprocessing of sections, so hopefully you will see fewer of the infamous "Indexing" messages
 - A lot of smaller quality of life improvements 
 
 # What this reader doesn't
 * Great UI design is not necessarily/obviously not a forte of mine, so if you look for a polished look and feel, I would recommend going e.g. to [CrossInk](https://github.com/uxjulia/crossink), a great piece of work by uxJulia
-* Support for CJK (Chinese Japanese Korean) - look at https://github.com/aBER0724/crosspoint-reader-cjk
 * Right-to-left rendering support (Hebrew, Arabic) - choose the original [CrossPoint](https://github.com/crosspoint-reader/crosspoint-reader) firmware
 * The most memory efficient reader might still be [MicroReader](https://github.com/CidVonHighwind/microreader) by CidVonHighwind
 
