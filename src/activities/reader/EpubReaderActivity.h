@@ -732,6 +732,9 @@ class EpubReaderActivity final : public Activity {
   int8_t bookGuideDotsOverride = -1;
   int8_t bookInlineFootnotePreviewsOverride = -1;
   int8_t bookLineSpacingOverride = -1;
+  int8_t bookVerticalTextOverride = -1;
+  // Whether the book's language is ever set vertically (TypographyProfile::verticalAllowed); read once in onEnter.
+  bool bookVerticalAllowed_ = false;
 
   // Bookmarks (starred pages)
   BookmarkStore bookmarkStore;
@@ -1160,7 +1163,8 @@ class EpubReaderActivity final : public Activity {
                                 int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride,
                                 int8_t textAntiAliasingOverride, int8_t hyphenationOverride,
                                 int8_t fontSizeNormalizationOverride, int8_t guideDotsOverride,
-                                int8_t inlineFootnotePreviewsOverride, int8_t lineSpacingOverride);
+                                int8_t inlineFootnotePreviewsOverride, int8_t lineSpacingOverride,
+                                int8_t verticalTextOverride);
   void openReaderMenu();
   void openQuickOverrides();
   bool getEffectiveEmbeddedStyle() const;
@@ -1177,6 +1181,9 @@ class EpubReaderActivity final : public Activity {
   // name) when `familyOut` is given.
   int resolveReaderFont(std::string* familyOut) const;
   uint8_t getEffectiveLineSpacingStep() const;
+  // The vertical-text request the book's sections are built with: its override, else the setting; Off for a language
+  // that is never set vertically.
+  VerticalText getEffectiveVerticalText() const;
   LineSpacing getEffectiveLineSpacing() const;
   // The line spacing `epub` is laid out with at `step` (CrossPointSettings::LINE_COMPRESSION) in body font `fontId` at
   // `pointSize`: Chinese, Japanese and Korean books by an em pitch, others by a factor on the font's line height. The

@@ -49,6 +49,8 @@ struct MenuResult {
   uint8_t browserView = 0;
   // Appended like the above: -1 = default, otherwise CrossPointSettings::LINE_COMPRESSION.
   int8_t lineSpacingOverride = -1;
+  // Appended like the above: -1 = default, otherwise CrossPointSettings::VERTICAL_TEXT.
+  int8_t verticalTextOverride = -1;
 };
 
 struct ChapterResult {

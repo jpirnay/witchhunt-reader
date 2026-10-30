@@ -20,13 +20,14 @@ class QuickOverridesActivity final : public MenuListActivity {
                          int8_t initialBionicReadingOverride, int8_t initialGuideDotsOverride,
                          int8_t initialParagraphAlignmentOverride, int8_t initialTextAntiAliasingOverride,
                          int8_t initialHyphenationOverride, int8_t initialFontSizeNormalizationOverride,
-                         int8_t initialInlineFootnotePreviewsOverride, int8_t initialLineSpacingOverride);
+                         int8_t initialInlineFootnotePreviewsOverride, int8_t initialLineSpacingOverride,
+                         int8_t initialVerticalTextOverride, bool verticalAllowed);
 
   void onEnter() override;
   void render(RenderLock&&) override;
 
  private:
-  void buildMenuItems();
+  void buildMenuItems(bool verticalAllowed);
   void finishWithResult(bool cancelled);
 
   void onBackPressed() override;
@@ -48,4 +49,5 @@ class QuickOverridesActivity final : public MenuListActivity {
   int8_t pendingFontSizeNormalizationOverride = -1;
   int8_t pendingInlineFootnotePreviewsOverride = -1;
   int8_t pendingLineSpacingOverride = -1;
+  int8_t pendingVerticalTextOverride = -1;
 };

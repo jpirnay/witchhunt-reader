@@ -280,6 +280,10 @@ class CrossPointSettings {
     FROM_BOOK = 5,
     LINE_COMPRESSION_COUNT
   };
+  // Stored by number, in VerticalText's order (Epub/FlowContext.h).
+  enum VERTICAL_TEXT { VERTICAL_TEXT_AUTOMATIC = 0, VERTICAL_TEXT_ON = 1, VERTICAL_TEXT_OFF = 2, VERTICAL_TEXT_COUNT };
+  // Whether a vertical book's page-turn buttons follow its page progression or keep their usual sides.
+  enum PAGE_TURN_BUTTONS { PAGE_TURN_FOLLOW_BOOK = 0, PAGE_TURN_FIXED = 1, PAGE_TURN_BUTTONS_COUNT };
   enum PARAGRAPH_ALIGNMENT {
     JUSTIFIED = 0,
     LEFT_ALIGN = 1,
@@ -471,6 +475,8 @@ class CrossPointSettings {
   char txtSdFontFamilyName[32] = "";
   uint8_t txtFontPointSize = DEFAULT_FONT_POINT_SIZE;  // persisted as "txtFontSize"
   uint8_t lineSpacing = NORMAL;
+  uint8_t verticalText = VERTICAL_TEXT_AUTOMATIC;
+  uint8_t pageTurnButtons = PAGE_TURN_FOLLOW_BOOK;
   uint8_t paragraphAlignment = JUSTIFIED;
   // Auto-sleep timeout in minutes (0 = never sleep, 1-60).
   uint8_t sleepTimeoutMinutes = 10;

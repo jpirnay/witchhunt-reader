@@ -22,7 +22,8 @@ QuickOverridesActivity::QuickOverridesActivity(
     const int8_t initialBionicReadingOverride, const int8_t initialGuideDotsOverride,
     const int8_t initialParagraphAlignmentOverride, const int8_t initialTextAntiAliasingOverride,
     const int8_t initialHyphenationOverride, const int8_t initialFontSizeNormalizationOverride,
-    const int8_t initialInlineFootnotePreviewsOverride, const int8_t initialLineSpacingOverride)
+    const int8_t initialInlineFootnotePreviewsOverride, const int8_t initialLineSpacingOverride,
+    const int8_t initialVerticalTextOverride, const bool verticalAllowed)
     : MenuListActivity("QuickOverrides", renderer, mappedInput),
       pendingEmbeddedStyleOverride(initialEmbeddedStyleOverride),
       pendingImageRenderingOverride(initialImageRenderingOverride),
@@ -36,8 +37,9 @@ QuickOverridesActivity::QuickOverridesActivity(
       pendingHyphenationOverride(initialHyphenationOverride),
       pendingFontSizeNormalizationOverride(initialFontSizeNormalizationOverride),
       pendingInlineFootnotePreviewsOverride(initialInlineFootnotePreviewsOverride),
-      pendingLineSpacingOverride(initialLineSpacingOverride) {
-  buildMenuItems();
+      pendingLineSpacingOverride(initialLineSpacingOverride),
+      pendingVerticalTextOverride(initialVerticalTextOverride) {
+  buildMenuItems(verticalAllowed);
 }
 
 namespace {
@@ -60,7 +62,7 @@ int8_t threeStateOverrideFromSlot(uint8_t slot) {
 
 }  // namespace
 
-void QuickOverridesActivity::buildMenuItems() {
+void QuickOverridesActivity::buildMenuItems(const bool verticalAllowed) {
   menuItems.reserve(10);
 
   auto* self = this;
@@ -193,6 +195,21 @@ void QuickOverridesActivity::buildMenuItems() {
         s->pendingLineSpacingOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
       }));
 
+  // Vertical text: default / automatic / on / off, for a book whose language is ever set vertically
+  if (verticalAllowed) {
+    menuItems.push_back(SettingInfo::DynamicEnumCtx(
+        StrId::STR_VERTICAL_TEXT,
+        {StrId::STR_DEFAULT_VALUE, StrId::STR_AUTOMATIC, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
+        [](const void* ctx) -> uint8_t {
+          const auto* s = static_cast<const QuickOverridesActivity*>(ctx);
+          return (s->pendingVerticalTextOverride < 0) ? 0 : static_cast<uint8_t>(s->pendingVerticalTextOverride + 1);
+        },
+        [](void* ctx, uint8_t v) {
+          auto* s = static_cast<QuickOverridesActivity*>(ctx);
+          s->pendingVerticalTextOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
+        }));
+  }
+
   // Text anti-aliasing: default / on / off
   menuItems.push_back(SettingInfo::DynamicEnumCtx(
       StrId::STR_TEXT_AA, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
@@ -272,6 +289,7 @@ void QuickOverridesActivity::finishWithResult(bool cancelled) {
   payload.fontSizeNormalizationOverride = pendingFontSizeNormalizationOverride;
   payload.inlineFootnotePreviewsOverride = pendingInlineFootnotePreviewsOverride;
   payload.lineSpacingOverride = pendingLineSpacingOverride;
+  payload.verticalTextOverride = pendingVerticalTextOverride;
   result.data = std::move(payload);
   setResult(std::move(result));
   finish();

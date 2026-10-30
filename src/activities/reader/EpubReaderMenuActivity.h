@@ -61,7 +61,8 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
                                   const int8_t initialTextAntiAliasingOverride, const int8_t initialHyphenationOverride,
                                   const int8_t initialFontSizeNormalizationOverride,
                                   const int8_t initialInlineFootnotePreviewsOverride,
-                                  const int8_t initialLineSpacingOverride, const bool hasStarredPages,
+                                  const int8_t initialLineSpacingOverride, const int8_t initialVerticalTextOverride,
+                                  const bool verticalAllowed, const bool hasStarredPages,
                                   const bool isCurrentPageStarred, const bool hasPrintedPages);
 
   void onExit() override;
@@ -70,7 +71,7 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
   enum class MenuTab : uint8_t { Navigation, Settings, Sync, Tools, Count };
   static constexpr size_t MENU_TAB_COUNT = static_cast<size_t>(MenuTab::Count);
 
-  void buildMenuItems(bool hasFootnotes, bool hasStarredPages, bool hasPrintedPages);
+  void buildMenuItems(bool hasFootnotes, bool hasStarredPages, bool hasPrintedPages, bool verticalAllowed);
   [[nodiscard]] MenuTab activeTab() const { return visibleTabs[selectedTab()]; }
   [[nodiscard]] size_t activeTabIndex() const { return static_cast<size_t>(activeTab()); }
   [[nodiscard]] std::vector<SettingInfo>& activeMenuItems() { return tabMenuItems[activeTabIndex()]; }
@@ -143,6 +144,7 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
   int8_t pendingFontSizeNormalizationOverride = -1;
   int8_t pendingInlineFootnotePreviewsOverride = -1;
   int8_t pendingLineSpacingOverride = -1;
+  int8_t pendingVerticalTextOverride = -1;
 
   static constexpr const char* pageTurnLabels[] = {"", "1", "3", "6", "12"};
 

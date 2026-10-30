@@ -18,6 +18,7 @@
 #include "EpubReaderActivity.h"
 
 #include <CooperativeAbort.h>
+#include <Epub/FlowContext.h>
 #include <Epub/FootnotePreviews.h>
 #include <Epub/FootnoteShape.h>
 #include <Epub/Page.h>
@@ -762,6 +763,8 @@ void EpubReaderActivity::onEnter() {
   bookGuideDotsOverride = currentBook.guideDotsOverride;
   bookInlineFootnotePreviewsOverride = currentBook.inlineFootnotePreviewsOverride;
   bookLineSpacingOverride = currentBook.lineSpacingOverride;
+  bookVerticalTextOverride = currentBook.verticalTextOverride;
+  bookVerticalAllowed_ = TypographyProfile::forLanguage(epub->getLanguage()).verticalAllowed;
   logReaderMemSnapshot("onEnter_after_recent_books");
 
   // Take the scaled-glyph cache now, before any page is laid out. It is never released, and
@@ -1421,6 +1424,7 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   // says "previews on" while showing bare markers. It used to be ANDed with "is the book-level
   // cache ready", which meant the key flipped mid-session and dragged a rebuild behind it.
   p.inlineFootnotePreviews = getEffectiveInlineFootnotePreviews();
+  p.verticalText = getEffectiveVerticalText();
   p.imageRendering = lastRenderStats.imageRendering;
   p.fontSizeLadder = buildReaderFontSizeLadder(p.fontId);
   if (epub) {
@@ -3134,7 +3138,8 @@ void EpubReaderActivity::applyBookReaderOverrides(const int8_t embeddedStyleOver
   applyBookReaderOverrides(embeddedStyleOverride, imageRenderingOverride, fontFamilyOverride, sdFontFamilyOverride,
                            fontSizeOverride, bionicReadingOverride, paragraphAlignmentOverride,
                            bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride,
-                           bookGuideDotsOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride);
+                           bookGuideDotsOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
+                           bookVerticalTextOverride);
 }
 
 void EpubReaderActivity::applyBookReaderOverrides(
@@ -3142,7 +3147,7 @@ void EpubReaderActivity::applyBookReaderOverrides(
     const std::string& sdFontFamilyOverride, const int8_t fontSizeOverride, const int8_t bionicReadingOverride,
     const int8_t paragraphAlignmentOverride, const int8_t textAntiAliasingOverride, const int8_t hyphenationOverride,
     const int8_t fontSizeNormalizationOverride, const int8_t guideDotsOverride,
-    const int8_t inlineFootnotePreviewsOverride, const int8_t lineSpacingOverride) {
+    const int8_t inlineFootnotePreviewsOverride, const int8_t lineSpacingOverride, const int8_t verticalTextOverride) {
   if (!epub) {
     return;
   }
@@ -3168,7 +3173,7 @@ void EpubReaderActivity::applyBookReaderOverrides(
       bookTextAntiAliasingOverride == textAntiAliasingOverride && bookHyphenationOverride == hyphenationOverride &&
       bookFontSizeNormalizationOverride == fontSizeNormalizationOverride &&
       bookInlineFootnotePreviewsOverride == inlineFootnotePreviewsOverride &&
-      bookLineSpacingOverride == lineSpacingOverride;
+      bookLineSpacingOverride == lineSpacingOverride && bookVerticalTextOverride == verticalTextOverride;
 
   if (layoutOverridesUnchanged && bookGuideDotsOverride == guideDotsOverride) {
     return;
@@ -3187,11 +3192,12 @@ void EpubReaderActivity::applyBookReaderOverrides(
   bookGuideDotsOverride = guideDotsOverride;
   bookInlineFootnotePreviewsOverride = inlineFootnotePreviewsOverride;
   bookLineSpacingOverride = lineSpacingOverride;
+  bookVerticalTextOverride = verticalTextOverride;
   RECENT_BOOKS.setReaderOverrides(
       epub->getPath(), bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
       bookSdFontFamilyOverride, bookFontSizeOverride, bookBionicReadingOverride, bookParagraphAlignmentOverride,
       bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride, bookGuideDotsOverride,
-      bookInlineFootnotePreviewsOverride, bookLineSpacingOverride);
+      bookInlineFootnotePreviewsOverride, bookLineSpacingOverride, bookVerticalTextOverride);
 
   if (layoutOverridesUnchanged) {
     // Only guide dots changed: persisted above, and the repaint on resume picks
@@ -3323,6 +3329,16 @@ LineSpacing EpubReaderActivity::lineSpacingForBook(const uint8_t step, const Epu
 
 uint8_t EpubReaderActivity::getEffectiveLineSpacingStep() const {
   return bookLineSpacingOverride >= 0 ? static_cast<uint8_t>(bookLineSpacingOverride) : SETTINGS.lineSpacing;
+}
+
+static_assert(static_cast<uint8_t>(VerticalText::Automatic) == CrossPointSettings::VERTICAL_TEXT_AUTOMATIC &&
+                  static_cast<uint8_t>(VerticalText::On) == CrossPointSettings::VERTICAL_TEXT_ON &&
+                  static_cast<uint8_t>(VerticalText::Off) == CrossPointSettings::VERTICAL_TEXT_OFF,
+              "CrossPointSettings::VERTICAL_TEXT is stored in VerticalText's order");
+
+VerticalText EpubReaderActivity::getEffectiveVerticalText() const {
+  return FlowContext::requestFor(static_cast<VerticalText>(SETTINGS.verticalText), bookVerticalTextOverride,
+                                 bookVerticalAllowed_);
 }
 
 LineSpacing EpubReaderActivity::getEffectiveLineSpacing() const {
@@ -7398,6 +7414,9 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   p.embeddedStyle = effectiveEmbeddedStyle;
   p.bionicReadingEnabled = effectiveBionicReading;
   p.inlineFootnotePreviews = effectiveInlineFootnotePreviews;
+  p.verticalText =
+      FlowContext::requestFor(static_cast<VerticalText>(SETTINGS.verticalText), currentBook.verticalTextOverride,
+                              TypographyProfile::forLanguage(epub->getLanguage()).verticalAllowed);
   p.imageRendering = effectiveImageRendering;
   p.fontSizeLadder = buildReaderFontSizeLadder(effectiveFontId);
   // On the heap: about 0.5 KB with the book's accent families, too much for this frame under a section build.
@@ -7440,14 +7459,16 @@ void EpubReaderActivity::openQuickOverrides() {
           renderer, mappedInput, bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
           bookSdFontFamilyOverride, bookFontSizeOverride, bookBionicReadingOverride, bookGuideDotsOverride,
           bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
-          bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride),
+          bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
+          bookVerticalTextOverride, bookVerticalAllowed_),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyBookReaderOverrides(menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
                                  menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,
                                  menu.paragraphAlignmentOverride, menu.textAntiAliasingOverride,
                                  menu.hyphenationOverride, menu.fontSizeNormalizationOverride, menu.guideDotsOverride,
-                                 menu.inlineFootnotePreviewsOverride, menu.lineSpacingOverride);
+                                 menu.inlineFootnotePreviewsOverride, menu.lineSpacingOverride,
+                                 menu.verticalTextOverride);
       });
 }
 
@@ -7489,7 +7510,8 @@ void EpubReaderActivity::openReaderMenu() {
           bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness, bookBionicReadingOverride,
           bookGuideDotsOverride, bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
           bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
-          !bookmarkStore.isEmpty(), isCurrentPageStarred, hasPrintedPages),
+          bookVerticalTextOverride, bookVerticalAllowed_, !bookmarkStore.isEmpty(), isCurrentPageStarred,
+          hasPrintedPages),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);
@@ -7499,7 +7521,8 @@ void EpubReaderActivity::openReaderMenu() {
                                  menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,
                                  menu.paragraphAlignmentOverride, menu.textAntiAliasingOverride,
                                  menu.hyphenationOverride, menu.fontSizeNormalizationOverride, menu.guideDotsOverride,
-                                 menu.inlineFootnotePreviewsOverride, menu.lineSpacingOverride);
+                                 menu.inlineFootnotePreviewsOverride, menu.lineSpacingOverride,
+                                 menu.verticalTextOverride);
         if (!result.isCancelled) {
           onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
         }
