@@ -17,6 +17,8 @@
 #include <string>
 #include <vector>
 
+#include "CrossPointSettings.h"
+#include "Epub/FlowContext.h"
 #include "activities/settings/SettingInfo.h"
 
 namespace {
@@ -176,4 +178,21 @@ TEST(SettingsGrouping, ExtractedSubmenuRowsRemainFlatWhenPreparedAgain) {
   ASSERT_EQ(items.size(), 2u);
   EXPECT_EQ(items[0].nameId, StrId::STR_GEST_SWIPE_LEFT);
   EXPECT_EQ(items[1].nameId, StrId::STR_GEST_SWIPE_RIGHT);
+}
+
+// The Vertical Text setting is stored by number and handed to FlowContext::requestFor as a VerticalText: a reordering
+// of either enum would silently turn Automatic into On.
+TEST(VerticalTextSetting, IsStoredInVerticalTextsOrder) {
+  EXPECT_EQ(static_cast<uint8_t>(VerticalText::Automatic), CrossPointSettings::VERTICAL_TEXT_AUTOMATIC);
+  EXPECT_EQ(static_cast<uint8_t>(VerticalText::On), CrossPointSettings::VERTICAL_TEXT_ON);
+  EXPECT_EQ(static_cast<uint8_t>(VerticalText::Off), CrossPointSettings::VERTICAL_TEXT_OFF);
+  EXPECT_EQ(CrossPointSettings::VERTICAL_TEXT_COUNT, 3);
+}
+
+TEST(VerticalTextSetting, ABookOverrideInTheStoredRangeResolvesToItsRequest) {
+  for (int8_t o = 0; o < CrossPointSettings::VERTICAL_TEXT_COUNT; ++o) {
+    EXPECT_EQ(FlowContext::requestFor(VerticalText::Off, o, true), static_cast<VerticalText>(o));
+  }
+  EXPECT_EQ(FlowContext::requestFor(VerticalText::On, -1, true), VerticalText::On);
+  EXPECT_EQ(FlowContext::requestFor(VerticalText::On, 1, false), VerticalText::Off);
 }

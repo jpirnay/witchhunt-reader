@@ -280,6 +280,10 @@ class CrossPointSettings {
     FROM_BOOK = 5,
     LINE_COMPRESSION_COUNT
   };
+  // Stored by number, in VerticalText's order (Epub/FlowContext.h).
+  enum VERTICAL_TEXT { VERTICAL_TEXT_AUTOMATIC = 0, VERTICAL_TEXT_ON = 1, VERTICAL_TEXT_OFF = 2, VERTICAL_TEXT_COUNT };
+  // Whether a vertical book's page-turn buttons follow its page progression or keep their usual sides.
+  enum PAGE_TURN_BUTTONS { PAGE_TURN_FOLLOW_BOOK = 0, PAGE_TURN_FIXED = 1, PAGE_TURN_BUTTONS_COUNT };
   enum PARAGRAPH_ALIGNMENT {
     JUSTIFIED = 0,
     LEFT_ALIGN = 1,
@@ -471,6 +475,8 @@ class CrossPointSettings {
   char txtSdFontFamilyName[32] = "";
   uint8_t txtFontPointSize = DEFAULT_FONT_POINT_SIZE;  // persisted as "txtFontSize"
   uint8_t lineSpacing = NORMAL;
+  uint8_t verticalText = VERTICAL_TEXT_AUTOMATIC;
+  uint8_t pageTurnButtons = PAGE_TURN_FOLLOW_BOOK;
   uint8_t paragraphAlignment = JUSTIFIED;
   // Auto-sleep timeout in minutes (0 = never sleep, 1-60).
   uint8_t sleepTimeoutMinutes = 10;
@@ -953,6 +959,28 @@ class CrossPointSettings {
   // bookmarks, the reading light, the touch-navigation switch — and works
   // wherever it is triggered.
   static bool isReaderScopedAction(uint8_t action);
+
+  // The same action with its direction reversed, for a right-to-left book's Left and Right: page back and forward,
+  // ten pages back and forward, previous and next section swap; every other action, and BTN_DEFAULT, is returned
+  // unchanged.
+  static constexpr uint8_t mirroredDirection(const uint8_t action) {
+    switch (action) {
+      case BTN_PAGE_FORWARD:
+        return BTN_PAGE_BACK;
+      case BTN_PAGE_BACK:
+        return BTN_PAGE_FORWARD;
+      case BTN_PAGE_FORWARD_10:
+        return BTN_PAGE_BACK_10;
+      case BTN_PAGE_BACK_10:
+        return BTN_PAGE_FORWARD_10;
+      case BTN_NEXT_SECTION:
+        return BTN_PREV_SECTION;
+      case BTN_PREV_SECTION:
+        return BTN_NEXT_SECTION;
+      default:
+        return action;
+    }
+  }
 
   // Enforce settings whose values depend on others (e.g. sleepScreen=QUICK_RESUME implies
   // quickResumeSleepScreen=ON). Call after any setting mutation that could invalidate the pair.

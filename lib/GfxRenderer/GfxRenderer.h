@@ -48,7 +48,8 @@ class GfxRenderer {
   // Selects the absolute plane encoding for the grayscale passes; see
   // setAbsoluteGrayPlanes(). Cleared whenever the mode returns to BW.
   std::atomic<bool> absoluteGrayPlanes;
-  std::atomic<int> orientation;
+  // Mutable: a vertical page switches frames from inside const draw calls (setDrawOrientation).
+  mutable std::atomic<int> orientation;
   // Mirrors `orientation` except across the themes' transient hint-strip flips. See setOrientation.
   std::atomic<int> heldOrientation;
   std::atomic<bool> fadingFix;
@@ -381,7 +382,10 @@ class GfxRenderer {
   // Draw in `o` WITHOUT changing what getHeldOrientation() reports. For furniture that has to sit
   // on a fixed panel edge whichever way the device is held — the button-hint strips flip to
   // Portrait so their boxes land beside the physical buttons, then flip back.
-  void setDrawOrientation(const Orientation o) { orientation.store(static_cast<int>(o), std::memory_order_relaxed); }
+  // const because a vertical page switches frames from inside const draw calls (drawTextVertical).
+  void setDrawOrientation(const Orientation o) const {
+    orientation.store(static_cast<int>(o), std::memory_order_relaxed);
+  }
   // The orientation the reader is actually holding the device in, unaffected by the transient
   // flips above. Render runs on its own task, so anything sampling orientation from OUTSIDE a
   // render pass — the input layer's logical directions above all — must read this instead of
@@ -406,7 +410,9 @@ class GfxRenderer {
   int getScreenHeight(Orientation orientation) const;
   // Map a touch point from normalized PANEL-NATIVE coordinates (0..1, the frame
   // InputManager reports in, per the BoardConfig touch contract) to LOGICAL
-  // screen pixels under the renderer's live orientation.
+  // screen pixels under the renderer's HELD orientation (not the live one: a vertical page
+  // holds the turned frame as the live one for its whole draw, and a touch is read off the
+  // render task while that draw runs).
   //
   // The renderer is the only authority on the orientation actually on screen —
   // the reader rotates it and restores portrait on exit — so the touch
@@ -424,7 +430,7 @@ class GfxRenderer {
   // the frame the boxes were recorded in is what makes the hit test orientation-independent
   // instead of only correct while the screen happens to be portrait.
   void tapToLogical(Orientation orientation, float nx, float ny, int& outX, int& outY) const;
-  // The inverse, in the live orientation: where on the panel a touch at logical (x, y) lands,
+  // The inverse, in the held orientation: where on the panel a touch at logical (x, y) lands,
   // as the normalized coordinates the touch HAL reports.
   void logicalToTap(int x, int y, float& outNx, float& outNy) const;
   void displayBuffer(HalDisplay::RefreshMode refreshMode = HalDisplay::FAST_REFRESH) const;
@@ -542,6 +548,9 @@ class GfxRenderer {
   // clearScreen() whose frame was never displayed -- so a caller can never wait on it forever.
   bool isComposingFrame(uint32_t maxAgeMs = 2000) const;
   void getOrientedViewableTRBL(int* outTop, int* outRight, int* outBottom, int* outLeft) const;
+  // The same in an EXPLICIT orientation, for geometry that must not follow the live frame (the held one while a
+  // vertical page draws in the turned frame).
+  void getOrientedViewableTRBL(Orientation o, int* outTop, int* outRight, int* outBottom, int* outLeft) const;
 
   // Extra bezel inset the reader has asked for, on top of whatever the board profile declares.
   //

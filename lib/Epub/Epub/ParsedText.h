@@ -135,6 +135,7 @@ class ParsedText {
   BlockStyle blockStyle;
   // The book's typography (TypographyProfile.h): Latin rules until the parser sets the book's.
   TypographyProfile typography_;
+  bool vertical_ = false;  // see setVertical
   bool extraParagraphSpacing;
   bool hyphenationEnabled;
   bool bionicReadingEnabled;
@@ -330,6 +331,8 @@ class ParsedText {
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
   // Survives reset(): it is the book's, not the block's.
   void setTypography(const TypographyProfile& typography) { typography_ = typography; }
+  // Measure words as a column runs them (a vertical section's). Survives reset(): it is the section's.
+  void setVertical(bool vertical) { vertical_ = vertical; }
   // See lineArena_ / beforeLine_. Both survive reset().
   void setLineArena(BuildArena* arena) { lineArena_ = arena; }
   void setBeforeLineHook(std::function<void(uint8_t maxSizePct, bool annotated)> hook) {

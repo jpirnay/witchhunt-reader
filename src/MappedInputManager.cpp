@@ -379,7 +379,7 @@ bool MappedInputManager::decodeSwipe(const touchtransform::Orientation orientati
 }
 
 MappedInputManager::SwipeDir MappedInputManager::wasSwipe() const {
-  return wasSwipeIn(static_cast<touchtransform::Orientation>(renderer.getOrientation()));
+  return wasSwipeIn(static_cast<touchtransform::Orientation>(renderer.getHeldOrientation()));
 }
 
 MappedInputManager::SwipeDir MappedInputManager::wasSwipeIn(const touchtransform::Orientation orientation) const {

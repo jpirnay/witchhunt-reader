@@ -3041,9 +3041,9 @@ static_assert(static_cast<int>(GfxRenderer::Portrait) == touchtransform::Portrai
               "touchtransform::Orientation must mirror GfxRenderer::Orientation");
 
 void GfxRenderer::tapToLogical(const float nx, const float ny, int& outX, int& outY) const {
-  // Read the atomic orientation once so the transform stays self-consistent
-  // even if the reader rotates the screen mid-call.
-  tapToLogical(getOrientation(), nx, ny, outX, outY);
+  // The held frame, read once: touch is read off the render task, and a vertical page holds the turned frame
+  // as the live one for its whole draw.
+  tapToLogical(getHeldOrientation(), nx, ny, outX, outY);
 }
 
 void GfxRenderer::tapToLogical(const Orientation orientation, const float nx, const float ny, int& outX,
@@ -3052,7 +3052,7 @@ void GfxRenderer::tapToLogical(const Orientation orientation, const float nx, co
 }
 
 void GfxRenderer::logicalToTap(const int x, const int y, float& outNx, float& outNy) const {
-  touchtransform::logicalToTap(static_cast<int>(getOrientation()), panelWidth, panelHeight, x, y, outNx, outNy);
+  touchtransform::logicalToTap(static_cast<int>(getHeldOrientation()), panelWidth, panelHeight, x, y, outNx, outNy);
 }
 
 static bool logicalRectToPhysicalBounds(GfxRenderer::Orientation orientation, int lx, int ly, int lw, int lh,
@@ -3720,6 +3720,11 @@ void GfxRenderer::cleanupGrayscaleWithFrameBuffer() const {
 }
 
 void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBottom, int* outLeft) const {
+  getOrientedViewableTRBL(getOrientation(), outTop, outRight, outBottom, outLeft);
+}
+
+void GfxRenderer::getOrientedViewableTRBL(const Orientation o, int* outTop, int* outRight, int* outBottom,
+                                          int* outLeft) const {
   // Bezel overlap comes from the board profile, not from constants here.
   //
   // BoardProfile::viewableInsets exists precisely for this and documents itself
@@ -3730,7 +3735,7 @@ void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBo
   // same {9,3,3,3}, so this is behaviour-identical until a profile says otherwise.
   const BoardConfig::ViewableInsets& in = BoardConfig::ACTIVE.viewableInsets;
   const int top = in.top, right = in.right, bottom = in.bottom, left = in.left;
-  switch (getOrientation()) {
+  switch (o) {
     case Portrait:
       *outTop = top;
       *outRight = right;
@@ -3764,8 +3769,8 @@ void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBo
   if (pad > 0) {
     // Clamped to a quarter of each axis so a future option, or a bad settings file, cannot
     // inset the viewport out of existence.
-    const int maxH = getScreenWidth() / 4;
-    const int maxV = getScreenHeight() / 4;
+    const int maxH = getScreenWidth(o) / 4;
+    const int maxV = getScreenHeight(o) / 4;
     const int padH = pad < maxH ? pad : maxH;
     const int padV = pad < maxV ? pad : maxV;
     *outTop += padV;
@@ -3780,10 +3785,10 @@ void GfxRenderer::getOrientedViewableTRBL(int* outTop, int* outRight, int* outBo
   // top. This logs both halves so the mapping can be checked against the device
   // instead of inferred.
   static int lastKey = -1;
-  const int key = (static_cast<int>(getOrientation()) << 24) | (pad << 20) | (top << 16) | (right << 8) | left;
+  const int key = (static_cast<int>(o) << 24) | (pad << 20) | (top << 16) | (right << 8) | left;
   if (key != lastKey) {
     lastKey = key;
     LOG_INF("GFX", "Viewable insets: profile T%d R%d B%d L%d +pad %d, orientation=%d -> screen T%d R%d B%d L%d", top,
-            right, bottom, left, pad, static_cast<int>(getOrientation()), *outTop, *outRight, *outBottom, *outLeft);
+            right, bottom, left, pad, static_cast<int>(o), *outTop, *outRight, *outBottom, *outLeft);
   }
 }

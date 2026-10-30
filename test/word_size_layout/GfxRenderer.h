@@ -22,6 +22,16 @@
 
 class GfxRenderer {
  public:
+  enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
+  void setOrientation(const Orientation o) {
+    held = o;
+    live = o;
+  }
+  void setDrawOrientation(const Orientation o) const { live = o; }
+  Orientation getOrientation() const { return live; }
+  Orientation getHeldOrientation() const { return held; }
+  int getScreenWidth(const Orientation o) const { return o == Portrait || o == PortraitInverted ? 480 : 800; }
+
   static constexpr int GLYPH_W = 10;
   static constexpr int SPACE_W = 5;
   static constexpr int ASCENDER = 16;
@@ -43,8 +53,19 @@ class GfxRenderer {
     int y;
     float scale;
     EpdFontFamily::Style style;
+    Orientation frame;  // the live orientation at the call
   };
   mutable std::vector<DrawCall> drawCalls;
+
+  struct LineCall {
+    int x1;
+    int y1;
+    int x2;
+    int y2;
+    int width;
+    Orientation frame;  // the live orientation at the call
+  };
+  mutable std::vector<LineCall> drawLineCalls;
 
   struct RectCall {
     int x;
@@ -97,7 +118,11 @@ class GfxRenderer {
     }
     return true;
   }
-  bool hasGlyph(const int fontId, const uint32_t cp, const EpdFontFamily::Style /*style*/) const {
+  // Set by a test to model a font-cache scan pass; hasGlyphQueries records the hasGlyph queries made while it is set.
+  mutable bool scanning = false;
+  mutable std::vector<std::pair<uint32_t, EpdFontFamily::Style>> hasGlyphQueries;
+  bool hasGlyph(const int fontId, const uint32_t cp, const EpdFontFamily::Style style) const {
+    if (scanning) hasGlyphQueries.emplace_back(cp, style);  // only a scan test pays for the allocation
     return fontId != LATIN_FONT || cp < 0x2E80;
   }
   int getSpaceAdvance(const int fontId, uint32_t /*leftCp*/, uint32_t /*rightCp*/, EpdFontFamily::Style style) const {
@@ -123,7 +148,7 @@ class GfxRenderer {
   void ensureFontReady(const int fontId, const char* utf8Text) const { readyCalls.push_back({fontId, utf8Text}); }
 
   // --- Render surface used by TextBlock ---
-  bool isFontCacheScanning() const { return false; }
+  bool isFontCacheScanning() const { return scanning; }
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const {
     return getTextAdvanceX(fontId, text, style);
   }
@@ -132,14 +157,20 @@ class GfxRenderer {
   }
   void drawText(int fontId, int x, int y, const char* text, bool /*black*/ = true,
                 EpdFontFamily::Style style = EpdFontFamily::REGULAR) const {
-    drawCalls.push_back({text, fontId, x, y, 1.0f, style});
+    drawCalls.push_back({text, fontId, x, y, 1.0f, style, live});
   }
   void drawTextScaled(int fontId, int x, int y, const char* text, bool /*black*/, EpdFontFamily::Style style,
                       const float scale) const {
-    drawCalls.push_back({text, fontId, x, y, scale, style});
+    drawCalls.push_back({text, fontId, x, y, scale, style, live});
   }
-  void drawLine(int /*x1*/, int /*y1*/, int /*x2*/, int /*y2*/, int /*lineWidth*/, bool /*state*/) const {}
+  void drawLine(int x1, int y1, int x2, int y2, int lineWidth, bool /*state*/) const {
+    drawLineCalls.push_back({x1, y1, x2, y2, lineWidth, live});
+  }
   void fillRect(int x, int y, int width, int height, bool state = true) const {
     fillRectCalls.push_back({x, y, width, height, state});
   }
+
+ private:
+  Orientation held = Portrait;
+  mutable Orientation live = Portrait;
 };

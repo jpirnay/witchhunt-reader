@@ -146,6 +146,10 @@ class Page {
   // census (memory audit 2026-09, R2); a denser page still grows past this normally.
   static constexpr size_t TYPICAL_ELEMENTS = 32;
   std::vector<FootnoteEntry> footnotes;
+  // A page of a vertical-rl section: the block extent its columns fill, the reader's viewport width; 0 on a
+  // horizontal page. Such a page draws in the turned frame (spec 5.2).
+  uint16_t verticalBlockExtent = 0;
+  bool isVertical() const { return verticalBlockExtent != 0; }
   // Footnote links kept per page. 16 -> 64 (memory audit 2026-09, R4): an endnotes page can
   // carry a link per line, and the 17th used to be dropped without a word. A FootnoteEntry is
   // 128 B, so a full page costs 8 KB on load -- only pages that have that many links pay it.

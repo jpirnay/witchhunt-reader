@@ -21,7 +21,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | [screen-flow.md](screen-flow.md) | Screens that end on a message and wait for Back: one timed return for all of them |
 | [screen-layout.md](screen-layout.md) | Overlaps and layout arithmetic left from the header/body audit, cleanup |
 | [test-suite.md](test-suite.md) | Host test suite: firmware paths with no host test, tests blind to corruption, goldens to extend, renames and moves, small cleanups from the second audit |
-| [writing-modes.md](writing-modes.md) | Right-to-left (Hebrew, Arabic) and vertical (Chinese, Japanese, Korean) text: the roadmap, findings from real books, the spike's leftovers; complex shaping for Arabic and the Indic scripts (Hindi), planned after CJK |
+| [writing-modes.md](writing-modes.md) | Right-to-left (Hebrew, Arabic) and vertical (Chinese, Japanese, Korean) text: the roadmap, findings from real books, what step 4 inherits from vertical text; complex shaping for Arabic and the Indic scripts (Hindi), planned after CJK |
 
 Design records for shipped features, cited from code, are in [../design/](../design/); reference
 documentation is in [../contributing/](../contributing/) and the other files under `docs/`.

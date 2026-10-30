@@ -204,6 +204,7 @@ Reply: one line, `STATE:` followed by `key=value` pairs.
 | `book`, `spine`, `page` | EPUB reader | the file, spine item `n/count`, page within that spine item `n/count`; both count from 1 |
 | `font`, `font_pt` | EPUB reader | the font family and point size the book is set in |
 | `chapter`, `chapter_page`, `percent` | EPUB reader | what the status bar shows: the TOC chapter title, the page within the whole chapter, which can span several spine items (`~` when the total is still an estimate), the book percentage |
+| `flow`, `progression`, `input_progression` | EPUB reader, with a section open | how the section on screen runs and which way its pages turn: `horizontal` or `vertical-rl`; `ltr` or `rtl`; `input_progression` is the direction the buttons, taps and bar use, which equals `progression` once the section's first build pass or page has been drawn (while a cold section's "Indexing" popup is up, about 1 s, it still holds the previous section's direction, or `ltr` in a book just opened) |
 | `heap`, `maxblock` | always | free heap and the largest free block, in bytes |
 
 Everything but `activity`, `stack`, `book`, `spine` and `page` needs the full API. A popup counts as
@@ -465,7 +466,7 @@ build does not carry the touch code at all); `TOUCH_ERROR:not on screen <text>` 
 argument or a point off the screen.
 
 Coordinates are screen pixels as the screen is drawn now: origin top-left, x to the right, in the
-current orientation (the rotated screenshot shows the same frame). The touch is queued where the
+current orientation (the rotated screenshot shows the same frame). That is the orientation the device is held in: a vertical page is drawn in a turned frame, but a touch is not mapped through it, so give the same coordinates as for any other page. The touch is queued where the
 touch controller's own taps and swipes enter, so gestures, list taps and the reader's tap zones read
 it as a finger. Make a swipe at least 60 px long, as a finger's would be. Two limits: screens that
 watch a finger while it is still down (a row lighting up under it) do not see an injected touch,

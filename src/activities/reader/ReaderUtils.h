@@ -132,7 +132,8 @@ struct TouchPageTurn {
   unsigned long heldMs;
 };
 
-inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const MappedInputManager& input) {
+inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const MappedInputManager& input,
+                                         const bool rightToLeft = false) {
   TouchPageTurn result{false, false, 0};
   if (!SETTINGS.touchReaderControls || !input.hasTouch()) {
     return result;
@@ -142,10 +143,10 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     // Horizontal swipes turn pages; taps stay free for the centred reader-menu
     // zone. A slow swipe never becomes a long-press chapter skip.
     const auto dir = input.wasSwipe();
-    if (dir == MappedInputManager::SwipeDir::Left) {
-      result.next = true;
-    } else if (dir == MappedInputManager::SwipeDir::Right) {
-      result.prev = true;
+    if (dir == MappedInputManager::SwipeDir::Left || dir == MappedInputManager::SwipeDir::Right) {
+      const TapZones::Turn turn = TapZones::turnForSwipe(dir == MappedInputManager::SwipeDir::Left, rightToLeft);
+      result.prev = turn == TapZones::Turn::Back;
+      result.next = turn == TapZones::Turn::Forward;
     }
     return result;
   }
@@ -156,21 +157,19 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     return result;
   }
 
-  const int width = renderer.getScreenWidth();
-  const int height = renderer.getScreenHeight();
+  // The held frame: a vertical page draws in the turned one, and this runs on the loop task while it does.
+  const GfxRenderer::Orientation held = renderer.getHeldOrientation();
+  const int width = renderer.getScreenWidth(held);
+  const int height = renderer.getScreenHeight(held);
   // Outer thirds only: the centre column carries the reader-menu tap target
   // (isTouchMenuTap below), so it must not double as a page turn. The vertical
   // bounds keep the menu zone from swallowing the whole centre column.
   if (y < 0 || y >= height) return result;
   const bool inverted = SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
   const TapZones::Zone zone = TapZones::zoneFor(x, y, width, height);
-  if (zone == TapZones::Zone::Left) {
-    result.prev = !inverted;
-    result.next = inverted;
-  } else if (zone == TapZones::Zone::Right) {
-    result.prev = inverted;
-    result.next = !inverted;
-  }
+  const TapZones::Turn turn = TapZones::turnFor(zone, inverted, rightToLeft);
+  result.prev = turn == TapZones::Turn::Back;
+  result.next = turn == TapZones::Turn::Forward;
   result.heldMs = input.lastTouchHeldMs();
   return result;
 }
@@ -182,8 +181,10 @@ inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager
   int x = 0;
   int y = 0;
   if (!input.wasScreenTapped(x, y)) return false;
-  const int width = renderer.getScreenWidth();
-  const int height = renderer.getScreenHeight();
+  // The held frame: a vertical page draws in the turned one, and this runs on the loop task while it does.
+  const GfxRenderer::Orientation held = renderer.getHeldOrientation();
+  const int width = renderer.getScreenWidth(held);
+  const int height = renderer.getScreenHeight(held);
   return TapZones::zoneFor(x, y, width, height) == TapZones::Zone::Centre;
 }
 

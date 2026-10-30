@@ -31,6 +31,9 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/Epub/Epub/parsers/TocNavParser.cpp
   ${REPO_ROOT}/lib/Epub/Epub/parsers/TocNcxParser.cpp
   ${REPO_ROOT}/lib/Epub/Epub/blocks/TextBlock.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/VerticalDraw.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/VerticalOrientation.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/FlowContext.cpp
   ${REPO_ROOT}/lib/Epub/Epub/blocks/ImageBlock.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/HyphenationCommon.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/Hyphenator.cpp
@@ -135,6 +138,10 @@ add_executable(EpubPipelineTest
   PlaceholderOnlyScopeTest.cpp
   PixelCacheWriteTest.cpp
   BufferedPrintTest.cpp
+  VerticalPageTest.cpp
+  ImageOnlyPageTest.cpp
+  VerticalLayoutTest.cpp
+  VerticalRulesTest.cpp
   CoverPipelineTest.cpp
   CoverWrapperTest.cpp
   CoverFallbackTest.cpp

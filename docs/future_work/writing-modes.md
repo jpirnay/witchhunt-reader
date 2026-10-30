@@ -1,9 +1,9 @@
 # Writing modes: right-to-left and vertical text
 
-Status: open items as of 2026-10-29.
+Status: open items as of 2026-10-30.
 
-Hebrew and Arabic books, and vertical Chinese, Japanese and Korean. None of it is built yet; the design and the
-maintainer's decisions are in `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md`:
+Hebrew and Arabic books, and vertical Chinese, Japanese and Korean. Vertical text is built (step 3); right to left
+is not. The design and the maintainer's decisions are in `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md`:
 - right-to-left bidi and Arabic shaping run once per paragraph at build time, and lines are stored in visual order;
 - vertical text is a horizontal layout in a frame turned 90 degrees clockwise, not a second engine;
 - the book decides the writing mode (CSS `writing-mode`, then OPF `page-progression-direction`), with a global setting
@@ -11,7 +11,7 @@ maintainer's decisions are in `docs/superpowers/specs/2026-10-26-rtl-and-vertica
 - no right-to-left UI for now.
 
 The turned frame was tried on the X3 (spec section 10, branch `spike/vertical-frame`): columns, ruby on the right,
-sideways Latin and brackets all came out right, at the horizontal page's speed.
+sideways Latin and brackets all came out right, at the horizontal page's speed. Step 3 built it from that spike.
 
 ## Roadmap
 
@@ -20,15 +20,32 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 | Step | What | State |
 |---|---|---|
 | 0 | Parse every trigger (`writing-mode`, `text-orientation`, `text-combine-upright`, `direction`, `unicode-bidi`, `start`/`end`, `dir` with `<bdo>`/`<bdi>`, OPF ppd); CSS boxes along the writing mode, `start`/`end` along the direction; `line-height` parsed as CSS means it and kept through the cache; fixture books | shipped (#560) ([plan](../superpowers/plans/2026-10-26-writing-modes-step0.md)) |
-| 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; FlowContext and page progression | open |
+| 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; the horizontal right-to-left case of FlowContext and page progression, which step 3 built for vertical text ([below](#what-step-1-takes-from-step-3)) | open |
 | 2 | Arabic script; before its plan, decide on one shaper for Arabic and the Indic scripts ([below](#complex-shaping-arabic-and-the-indic-scripts)) | open |
-| 3 | Vertical frame (from the spike); the vertical decision and its settings | open |
+| 3 | Vertical frame (from the spike); the vertical decision and its settings; FlowContext and page progression | shipped (#577) ([plan](../superpowers/plans/2026-10-28-writing-modes-step3.md)) |
 | 4 | Vertical typography: baked vertical forms, small kana, tate-chu-yoko (the per-word flag), A3a in vertical | open |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
 
-**Next step.** Step 3: its plan is written (`docs/superpowers/plans/2026-10-28-writing-modes-step3.md`, on
-`docs/writing-modes-step3`) and runs once the CJK work in flight has landed. Line spacing (`cjk.md`, step 10), which
-reads the `line-height` step 0 keeps, has shipped.
+**Next step.** Step 3 has shipped. Not chosen yet: step 4 continues the vertical work, step 1 starts right to left
+(asked of the maintainer on 2026-10-29; no answer yet). Line spacing (`cjk.md`, step 10), which reads the
+`line-height` step 0 keeps, has shipped.
+
+## What step 1 takes from step 3
+
+Step 3 built `FlowContext` (`lib/Epub/Epub/FlowContext.h`) and the page progression; step 1 adds the horizontal
+right-to-left case to them.
+- **What exists.** `FlowContext::of(request, vertical, ppd)` gives a section its `vertical` and
+  `pageProgressionRtl` (`Section::flowContext()`). The reader's `pageProgressionRtl_` follows it: the tap zones, the page
+  swipes, the progress bars and the percent picker mirror when it is set, and the Left and Right buttons too under
+  Page Turn Buttons = Follow Book (`mirrorsLeftRight`).
+- **What stops a horizontal right-to-left book today.** `FlowContext::requestFor` returns Off for a language that
+  is never set vertically (`TypographyProfile::verticalAllowed`: Chinese, Japanese and Korean), and
+  `pageProgressionRtlFor` returns false for Off. A Hebrew or Arabic book with OPF
+  `page-progression-direction="rtl"` therefore turns its pages left to right. Step 1 must give
+  `pageProgressionRtlFor` the ppd and the base direction, not only the request. The request is also in the
+  section's property hash and header (Off adds nothing), so a Latin book's cache key stays off the vertical
+  setting; step 1 must not change that for a book that is not set vertically.
+- **A left-to-right ppd** is ignored for a section set vertically (spec 5.5): its pages turn right to left.
 
 ## Complex shaping: Arabic and the Indic scripts
 
@@ -107,12 +124,11 @@ Step 0 parses, caches and tests every trigger; these wait for the step that firs
 
 | What | Kept in | First read by |
 |---|---|---|
-| `writing-mode` (the section's root mode) | `CssStyle::writingMode` | step 3: the vertical decision |
-| `text-orientation` | `CssStyle::textOrientation` | steps 3 and 4: upright or sideways runs |
+| `text-orientation` | `CssStyle::textOrientation` | step 4: upright or sideways runs (step 3 gives every character its UAX #50 class) |
 | `text-combine-upright` | `CssStyle::textCombine` | step 4: tate-chu-yoko, as a per-word flag |
 | `direction`, `dir` (beyond `start`/`end`) | `CssStyle::direction` | step 1: a paragraph's base direction |
 | `unicode-bidi`, `<bdo>`, `<bdi>` | `CssStyle::unicodeBidi` | step 1: embeddings and isolates |
-| OPF `page-progression-direction` | `Epub::pageProgression()` | step 1: page turns (reused by step 3) |
+| OPF `page-progression-direction` | `Epub::pageProgression()` | step 3: the vertical decision and page turns (`FlowContext`); step 1 reuses it |
 | `line-height` | `CssStyle::lineHeightEm` | line spacing (`cjk.md`, step 10) |
 
 ## Found while looking at real books
@@ -129,12 +145,23 @@ images, ~380,000 CJK characters.
 **The control for step 0:** the English original of the same novel (`.idea/A Game Of Thrones Book 1 -- Martin, George
 R_ R_ -- 2011 -- chenjin5.epub`, local only): no `writing-mode` and 160 margin rules, so its page counts must not move.
 
-## Left from the spike, for step 3
+## What step 4 inherits from step 3
 
-The reference run on the acceptance book is spec section 10.1: the same speed per page as horizontal, the same heap
-peaks.
-- **Images:** drawn in the turned frame they are rejected (a portrait image does not fit 792×528) and the placeholder
-  turns sideways; their pixel caches were written at the turned size. Draw in the reader's frame, size with the
-  reader's dimensions.
-- **Decorations:** overlines and side lines land left of the column; in vertical they belong on the right.
-- The dictionary's word boxes, taps and page progression were not touched.
+Step 3 ships vertical text with these limits; step 4 (vertical typography) picks them up.
+- **Punctuation stays rough.** `drawsUpright` (`lib/Epub/Epub/VerticalOrientation.cpp`) is the one place a UAX #50
+  class becomes a drawing: U and Tu characters (、。, small kana, ！？) upright, R and Tr (brackets, dashes, ……, ー)
+  sideways. There are no vertical forms, and Tu marks are not placed in their cell. Step 4 places Tu from
+  `getGlyphInk` or a re-cut font. With A3a in vertical, a 、 or 。 that A3b pushed in (a narrowed box at a
+  column's end, or before a closing bracket) keeps its horizontal ink: drawn upright it can reach half an em past
+  its box.
+- **The dictionary is not available in vertical text.** `EpubReaderActivity::openDictionary` returns on a
+  vertical section and the reader menu does not offer the Dictionary row, so the long-tap dictionary gesture does
+  nothing on a vertical page. Word boxes and the selection's navigation need mapping through the frame.
+- **`text-orientation` and `text-combine-upright`** are parsed and not read: every character takes its UAX #50
+  class (CSS `mixed`), and tate-chu-yoko (the per-word flag) is step 4.
+- **Drop caps are off in a vertical section** (`ChapterHtmlSlimParser::tryStartDropCapCapture`); their ink
+  metrics are horizontal.
+- **`vertical-lr` books are set horizontally** under Automatic; only `vertical-rl` has a turned frame.
+- **A lone image on a vertical page** is not centred along the block axis: a small picture sits at the right edge.
+- **The new settings' labels** (Vertical Text, Automatic, Page Turn Buttons, Follow Book, Fixed) are English in
+  every UI language until a translation pass.

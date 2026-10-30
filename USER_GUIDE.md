@@ -386,6 +386,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 
 **Layout** (submenu):
 - **Paragraph Alignment**: "Justified" (default), "Left", "Center", "Right", "Book Style"
+- **Vertical Text**: Whether a Chinese, Japanese or Korean book is set in vertical columns, read from top to bottom with the columns running from right to left. "Automatic" (default) sets a book vertically when it asks for it: its style declares vertical writing, or it declares no writing mode and turns its pages right to left. A book that declares left-to-right columns (`vertical-lr`) stays horizontal. "ON" sets every Chinese, Japanese or Korean book vertically and "OFF" none. Books in other languages are always set horizontally. The reader menu's settings and the quick overrides set it for one book. A vertical book turns its pages right to left (see **[Reading Mode](#4-reading-mode)**). Limits for now: the dictionary is not available in vertical text; punctuation is rough (no vertical forms, and 、 。 and small kana stand upright without being placed in their cell); drop caps are not used in vertical text.
 
 **Spacing** (submenu):
 - **Screen Margin**: Left/right margin in Reading Mode, 5–40 px in 5 px steps.
@@ -414,6 +415,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 
 - **Remap Front Buttons**: Reassign the physical function of each bottom-edge button.
 - **Button Actions** (submenus — one per logical button: Back, Confirm, Left, Right, Up/Page Back, Down/Page Forward, Power): For each button, independently configure the **Short Press**, **Double Press**, and **Long Press** action. Available actions include: page forward/back, skip 10 pages, go home, sleep, force refresh, force fast refresh, open TOC, open bookmarks, star page, footnotes, next/previous chapter, exit reader, open reader menu, toggle bionic reading, KOReader sync, cycle font size, larger/smaller text, cycle orientation (either direction), quick overrides, toggle touch navigation, ignore, and — on devices with a light — toggle reading light, light brighter and light dimmer — plus light warmer and light cooler on a device with a warm/cool light.
+- **Page Turn Buttons**: "Follow Book" (default) or "Fixed". In a book whose pages turn right to left (a vertical book), Follow Book makes the **Left** and **Right** buttons follow the page: Left shows the next page and Right the previous one. Every direction-bound action you gave to Left or Right (short, double and long press: page back or forward, 10 pages back or forward, previous or next chapter) swaps the same way, and so do the actions of the left and right swipe zones on a touch device. Other actions, and the Up and Down buttons, never change. "Fixed" keeps Left as back and Right as forward in every book. The setting does not touch the taps, page swipes and progress bars below, which follow the page.
 - **Button Actions Overview**: A read-only overview screen showing the current short/double/long press mapping for every button at a glance.
 - **Touch Navigation** *(touch devices only)*: Whether touch does anything outside the reader — list rows, covers, the home menu, the settings tabs, the on-screen button hints. "ON" / "OFF". See **[Touch Controls](#5-touch-controls)**.
 - **Touch Page Turn** *(touch devices only)*: How the reading page turns pages by touch — "Off", "Tap Zones", "Swipe", "Tap Zones (Inverted)". It governs page turns only; the reader menu and the reading light stay reachable either way.
@@ -648,6 +650,9 @@ The role of the volume (side) buttons can be swapped in the **[Controls Settings
 
 If the **Short Power Button Click** setting is set to "Page Turn", you can also turn to the next page by briefly pressing the Power button.
 
+### Books that turn right to left
+A book set vertically (**Vertical Text** in the **[Reader settings](#372-reader)**) is read the way a Japanese book is: its pages turn right to left. With **Page Turn Buttons** on "Follow Book" the Left button shows the next page and the Right button the previous one, and the chapter skips on a long press swap with them. Taps and swipes on a touch device follow the same direction (see **[5.3](#53-the-reading-page-taps-and-holds)** and **[5.4](#54-the-reading-page-swipes)**), the progress bars fill from the right, and the jump-to-percent screen moves from the right as well. The dictionary is not available in vertical text yet: the reader menu does not offer it and the dictionary gesture does nothing.
+
 ### Chapter Navigation
 * **Next Chapter:** Press and **hold** the **Right** (or **Volume Down**) button briefly, then release.
 * **Previous Chapter:** Press and **hold** the **Left** (or **Volume Up**) button briefly, then release.
@@ -775,7 +780,7 @@ height; the middle column is split into three.
 | Hold bottom | Star this page |
 | Hold top | *(nothing)* |
 
-**Touch Page Turn** decides what the two outer columns do:
+**Touch Page Turn** decides what the two outer columns do (in a book whose pages turn right to left, the outer columns swap: the left one shows the next page and the right one the previous):
 
 | Mode | What the page does |
 | --- | --- |
@@ -816,6 +821,8 @@ about 60 px of travel to count as a swipe rather than a tap.
 | Swipe **left** inside the left (back) column | Skip 10 pages back |
 | Swipe **right** inside the right (forward) column | Skip 10 pages forward |
 | Swipe left / right elsewhere | Next / Previous page *(in Swipe mode only)* |
+
+In a book whose pages turn right to left, the page swipes mirror (a swipe towards the right shows the next page) and, with **Page Turn Buttons** on "Follow Book", so do the two ten-page swipes: the swipe inside the left column skips 10 pages forward. The other gestures, including the holds that skip a chapter, are not mirrored.
 
 The left and right edge columns stop short of the top and bottom bands, so a swipe starting
 in a corner cannot mean two things at once. A vertical swipe down the **middle** of the page
@@ -955,7 +962,7 @@ Please note that this firmware is currently in active development. The following
 
 * **Cover Images:** Large cover images embedded into EPUB require several seconds (~10s for ~2000 pixel tall image) to convert for the sleep screen and home screen thumbnail. Uploading the book with **Optimize EPUB** in the web interface's File Manager, or optimizing it there afterwards, resizes them and speeds this up (see [Optimizing EPUBs](./docs/webserver.md#optimizing-epubs)).
 * **Right-to-left scripts (Hebrew, Arabic):** Not currently supported. For BiDi / RTL support, use the original [CrossPoint](https://github.com/crosspoint-reader/crosspoint-reader) firmware.
-* **CJK (Chinese, Japanese, Korean):** books break lines and space punctuation by CJK rules; install your language's font from the **Font Manager**. Book titles, authors and chapter names outside the page still show a box for characters the menu fonts lack, and there is no vertical text, no ruby (furigana) and no CJK keyboard.
+* **CJK (Chinese, Japanese, Korean):** books break lines and space punctuation by CJK rules; install your language's font from the **Font Manager**. Book titles, authors and chapter names outside the page still show a box for characters the menu fonts lack, and there is no CJK keyboard. Vertical text has the limits listed under **Vertical Text** in the **[Reader settings](#372-reader)**.
 
 ---
 

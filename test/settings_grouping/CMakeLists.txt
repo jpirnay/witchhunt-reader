@@ -1,5 +1,6 @@
 add_executable(SettingsGroupingTest
   SettingsGroupingTest.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/FlowContext.cpp
 )
 
 # I18nKeys.h is generated into the build tree (see test/CMakeLists.txt): the real
@@ -11,6 +12,7 @@ target_include_directories(SettingsGroupingTest PRIVATE
   ${REPO_ROOT}/lib/I18n
   ${I18N_GENERATED_DIR}
   ${REPO_ROOT}/lib
+  ${REPO_ROOT}/lib/Epub
   # I18n.h stub, and the stdio-backed HalStorage CrossPointSettings.h pulls in.
   ${REPO_ROOT}/test/epub_pipeline
   ${REPO_ROOT}/test/zip_entry_reader

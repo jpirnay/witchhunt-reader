@@ -356,6 +356,13 @@ inline void buildSettings(const RowSink& emit) {
                          "paragraphAlignment", StrId::STR_CAT_READER)
            .withSubcategory(StrId::STR_MENU_READER_LAYOUT)
            .withSelectorActivity());
+  // Automatic sets a book vertical when its writing mode and language say so; On and Off force it either way for a
+  // language that is set vertically at all.
+  emit(SettingInfo::Enum(StrId::STR_VERTICAL_TEXT, &CrossPointSettings::verticalText,
+                         {StrId::STR_AUTOMATIC, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, "verticalText",
+                         StrId::STR_CAT_READER)
+           .withSubcategory(StrId::STR_MENU_READER_LAYOUT)
+           .withSelectorActivity());
   // Formatting settings
   emit(SettingInfo::Toggle(StrId::STR_EMBEDDED_STYLE, &CrossPointSettings::embeddedStyle, "embeddedStyle",
                            StrId::STR_CAT_READER));
@@ -438,6 +445,8 @@ inline void buildSettings(const RowSink& emit) {
                          StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_BTN_CONFIRM)
            .withSelectorActivity());
+  emit(SettingInfo::Enum(StrId::STR_PAGE_TURN_BUTTONS, &CrossPointSettings::pageTurnButtons,
+                         {StrId::STR_FOLLOW_BOOK, StrId::STR_FIXED}, "pageTurnButtons", StrId::STR_CAT_CONTROLS));
   // Left button: short=previous page, double=ignore, long=chapter back
   emit(SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortLeft,
                          makeBtnActionOptions(StrId::STR_BTN_DEF_PREV_PAGE), "btnShortLeft", StrId::STR_CAT_CONTROLS)

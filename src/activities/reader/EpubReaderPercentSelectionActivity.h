@@ -7,7 +7,7 @@
 class EpubReaderPercentSelectionActivity final : public SliderPickerActivity {
  public:
   explicit EpubReaderPercentSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                              const int initialPercent)
+                                              const int initialPercent, const bool reversed = false)
       : SliderPickerActivity(renderer, mappedInput,
                              SliderPickerActivity::Config{
                                  .titleId = StrId::STR_GO_TO_PERCENT,
@@ -16,5 +16,6 @@ class EpubReaderPercentSelectionActivity final : public SliderPickerActivity {
                                  .maxValue = 100,
                                  .initialValue = initialPercent,
                                  .suffix = "%",
+                                 .reversed = reversed,
                              }) {}
 };

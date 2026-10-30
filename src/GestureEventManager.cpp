@@ -34,7 +34,7 @@ bool GestureEventManager::boundAction(const Gesture gesture, BA& action, const b
   return true;
 }
 
-bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
+bool GestureEventManager::consumeAction(BA& action, const bool inReader, const bool mirrorLeftRight) {
   if (!input.hasTouch()) return false;
   // Nothing bound: do not so much as look at the contact. This is the guarantee
   // that an unconfigured device behaves exactly as it did before gestures
@@ -195,6 +195,9 @@ bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
       break;
   }
   if (swipe != Gesture::Count && boundAction(swipe, action, inReader)) {
+    if (mirrorLeftRight && (swipe == Gesture::SwipeInLeftZone || swipe == Gesture::SwipeInRightZone)) {
+      action = static_cast<BA>(CrossPointSettings::mirroredDirection(action));
+    }
     input.suppressTouchContact();
     return true;
   }
@@ -216,9 +219,10 @@ bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
 // gesture". boundAction() is not defined at all, and that is what makes
 // TouchGestures::BINDINGS (400 B of .rodata) and builtinLabelFor() unreachable --
 // SettingsList's gesture loop being the only other user of either.
-bool GestureEventManager::consumeAction(BA& action, const bool inReader) {
+bool GestureEventManager::consumeAction(BA& action, const bool inReader, const bool mirrorLeftRight) {
   (void)action;
   (void)inReader;
+  (void)mirrorLeftRight;
   return false;
 }
 

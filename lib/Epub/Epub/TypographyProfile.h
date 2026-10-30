@@ -32,7 +32,7 @@ struct TypographyProfile {
   // Text width and first-line indent rounded down to whole ems, so CJK characters sit in columns.
   bool wholeEmGrid = false;
   Direction direction = Direction::LeftToRight;
-  // A book may set this language vertically (CSS writing-mode). Nothing reads it yet.
+  // A book may set this language vertically (CSS writing-mode); FlowContext::requestFor reads it.
   bool verticalAllowed = false;
   // The language is written with the CJK repertoire (Chinese, Japanese, Korean): thousands of Han characters, kana or
   // Hangul syllables rather than an alphabet's hundred-odd letters, whatever its line breaking (Korean breaks at

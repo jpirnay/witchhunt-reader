@@ -9,6 +9,7 @@
 
 #include "BlockFontFamilies.h"
 #include "Epub.h"
+#include "FlowContext.h"
 #include "FontSizeLadder.h"
 #include "SpinePageIndex.h"
 
@@ -75,7 +76,8 @@ class Section {
   void recordPageCount(uint32_t requestedHash) const;
   void writeSectionFileHeader(int fontId, float lineCompression, bool extraParagraphSpacing, uint8_t paragraphAlignment,
                               uint16_t viewportWidth, uint16_t viewportHeight, bool hyphenationEnabled,
-                              bool embeddedStyle, bool bionicReadingEnabled, uint8_t imageRendering);
+                              bool embeddedStyle, bool bionicReadingEnabled, uint8_t imageRendering,
+                              VerticalText verticalText);
   uint32_t onPageComplete(std::unique_ptr<Page> page);
 
   struct TocBoundary {
@@ -93,6 +95,10 @@ class Section {
   // framebuffer needs 52 KB, so it could never come back (X3, 2026-09-25). The first label query
   // runs at render time, after the reader has re-taken the framebuffer.
   mutable bool pageBreakLabelsPending_ = false;
+  // The vertical-text request the section was built or loaded with (BuildParams::verticalText), and whether the build
+  // set it vertical-rl (kStatusVertical): what flowContext() is made of. Here, in the padding before buildState_.
+  VerticalText request_ = VerticalText::Off;
+  bool vertical_ = false;
 
   void buildTocBoundariesFromFile(FsFile& f);
   void buildPageBreakLabelsFromFile(FsFile& f) const;
@@ -203,6 +209,9 @@ class Section {
     bool bionicReadingEnabled = false;
     bool inlineFootnotePreviews = false;
     uint8_t imageRendering = 0;
+    // The reader's request for the book, Off for a language never set vertically (FlowContext::requestFor); hashed
+    // only when not Off, so a horizontal variant keeps its key. Beside imageRendering, in its padding.
+    VerticalText verticalText = VerticalText::Off;
     // Sibling-size ladder derived from the body font (see FontSizeLadder). Not part of the
     // property hash: it is a deterministic function of fontId, which is already hashed.
     // Default (empty) = scale-only fallback, the right behavior for SD fonts.
@@ -329,6 +338,11 @@ class Section {
   // True when the build (or the loaded cache's build) exceeded a fixed-capacity limit and shows
   // less than the book: see ChapterHtmlSlimParser::CapOverflow.
   bool isSimplified() const { return simplified_; }
+  // True when the section is set vertical-rl: the live build's parser while one runs (it decides at <body>), else what
+  // the loaded cache or the last build says.
+  bool isVertical() const;
+  // How the section runs and turns: its request, isVertical() and the book's page progression.
+  FlowContext flowContext() const;
   // True when the last build's inline-footnote resolve pass failed, so some of this spine's
   // notes are missing from the store while the cache claims previews are on. Only meaningful
   // right after a build.

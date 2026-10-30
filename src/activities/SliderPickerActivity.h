@@ -34,6 +34,9 @@ class SliderPickerActivity : public Activity {
     // confirm, and undoes the preview on cancel. Keeping it that way is what makes Back a
     // real cancel rather than a save of whatever the value happened to be.
     std::function<void(int)> onPreview;
+    // A bar that runs right to left (a book whose pages turn that way): the fill and knob grow from the right, Left
+    // steps +1 and Right -1 with the hints swapped to match, and a finger at x means the value at its mirror.
+    bool reversed = false;
   };
 
   explicit SliderPickerActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, Config config)

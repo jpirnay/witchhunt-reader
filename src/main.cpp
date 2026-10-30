@@ -1891,7 +1891,14 @@ void loop() {
     // usable range sits in the bottom third and a 10-point step there is a large
     // visible jump. The brightness slider remains the way to set an exact level.
     constexpr int LIGHT_STEP_PERCENT = 5;
+    // Left and Right on a page that reverses them (activity on top: a right-to-left book under Follow Book) run the
+    // opposite directional action; BTN_DEFAULT is not directional, so the reader's own built-in swap handles it and
+    // nothing swaps twice.
+    const bool mirrorLeftRight = activityManager.currentMirrorsLeftRight();
     auto actionFor = [&](const ButtonEventManager::ButtonEvent& ev) -> uint8_t {
+      const auto mirrored = [&](const uint8_t a) {
+        return mirrorLeftRight ? CrossPointSettings::mirroredDirection(a) : a;
+      };
       switch (ev.button) {
         case B::Back:
           switch (ev.type) {
@@ -1916,21 +1923,21 @@ void loop() {
         case B::Left:
           switch (ev.type) {
             case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortLeft;
+              return mirrored(SETTINGS.btnShortLeft);
             case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoubleLeft;
+              return mirrored(SETTINGS.btnDoubleLeft);
             case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongLeft;
+              return mirrored(SETTINGS.btnLongLeft);
           }
           break;
         case B::Right:
           switch (ev.type) {
             case ButtonEventManager::PressType::Short:
-              return SETTINGS.btnShortRight;
+              return mirrored(SETTINGS.btnShortRight);
             case ButtonEventManager::PressType::Double:
-              return SETTINGS.btnDoubleRight;
+              return mirrored(SETTINGS.btnDoubleRight);
             case ButtonEventManager::PressType::Long:
-              return SETTINGS.btnLongRight;
+              return mirrored(SETTINGS.btnLongRight);
           }
           break;
         case B::PageBack:
@@ -2180,7 +2187,8 @@ void loop() {
     // cannot both run its action and fall through as a page turn.
     {
       BA gestureAction = BA::BTN_DEFAULT;
-      if (gestureEventManager.consumeAction(gestureAction, activityManager.currentIsReaderActivity()) &&
+      if (gestureEventManager.consumeAction(gestureAction, activityManager.currentIsReaderActivity(),
+                                            mirrorLeftRight) &&
           !runAction(gestureAction)) {
         return;
       }

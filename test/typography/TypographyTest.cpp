@@ -10,8 +10,8 @@ namespace {
 using Table = TypographyProfile::Punctuation;
 using CjkPunctuation::Class;
 
-// breaking, justify, cjkLatinGap and verticalAllowed are not read by layout yet (the A3b line-edge work reads
-// them); the asserts on them are the language table's specification, so the first reader gets it right.
+// breaking and justify are not read by layout yet; cjkLatinGap is (since #575) and verticalAllowed is read by
+// FlowContext::requestFor. The asserts are the language table's specification, so the next reader gets it right.
 TEST(TypographyProfile, ChineseAndJapanesePickTheirTablesTheGridAndTheGap) {
   const TypographyProfile ja = TypographyProfile::forLanguage("ja");
   EXPECT_EQ(ja.punctuation, Table::Japanese);
@@ -41,7 +41,7 @@ TEST(TypographyProfile, KoreanKeepsWholeWordsWithoutGridOrGap) {
   EXPECT_EQ(ko.punctuation, Table::SimplifiedChinese);
   EXPECT_FALSE(ko.wholeEmGrid);
   EXPECT_FALSE(ko.cjkLatinGap);
-  EXPECT_FALSE(ko.verticalAllowed);
+  EXPECT_TRUE(ko.verticalAllowed) << "KLREQ sets Korean vertically";
 }
 
 TEST(TypographyProfile, OtherLanguagesKeepLatinRulesAndTheirHyphenation) {
@@ -196,4 +196,12 @@ TEST(CjkPunctuation, TheCjkLatinGapRangesEndWhereTheyShould) {
   EXPECT_TRUE(takesCjkLatinGap(0x3042, '0'));      // あ0
 }
 
+TEST(TypographyProfile, OnlyChineseJapaneseAndKoreanMayBeSetVertically) {
+  for (const char* tag : {"ja", "zh", "zh-Hant", "ko-KR"}) {
+    EXPECT_TRUE(TypographyProfile::forLanguage(tag).verticalAllowed) << tag;
+  }
+  for (const char* tag : {"en", "he", ""}) {
+    EXPECT_FALSE(TypographyProfile::forLanguage(tag).verticalAllowed) << tag;
+  }
+}
 }  // namespace

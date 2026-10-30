@@ -18,9 +18,11 @@
 #include "EpubReaderActivity.h"
 
 #include <CooperativeAbort.h>
+#include <Epub/FlowContext.h>
 #include <Epub/FootnotePreviews.h>
 #include <Epub/FootnoteShape.h>
 #include <Epub/Page.h>
+#include <Epub/TurnedFrame.h>
 #include <Epub/TypographyProfile.h>
 #include <Epub/blocks/ImageBlock.h>
 #include <Epub/blocks/TextBlock.h>
@@ -55,6 +57,7 @@
 #include "EpubReaderPrintedPageInputActivity.h"
 #include "FinishedBookActivity.h"
 #include "GlobalBookmarkIndex.h"
+#include "ImageOnlyPage.h"
 #include "InPlaceBuildGate.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
@@ -593,27 +596,6 @@ class LentSecondary {
   std::optional<BuildArena> arena_;
 };
 
-int getImageOnlyPageYOffset(const Page& page, const int viewportHeight) {
-  if (viewportHeight <= 0 || page.elements.empty()) {
-    return 0;
-  }
-
-  const bool imageOnlyPage = std::all_of(
-      page.elements.begin(), page.elements.end(),
-      [](const std::unique_ptr<PageElement>& element) { return element && element->getTag() == TAG_PageImage; });
-  if (!imageOnlyPage) {
-    return 0;
-  }
-
-  int16_t imgX, imgY, imgW, imgH;
-  if (!page.getImageBoundingBox(imgX, imgY, imgW, imgH) || imgH >= viewportHeight) {
-    return 0;
-  }
-
-  const int centeredTop = (viewportHeight - imgH) / 2;
-  return std::max(0, centeredTop - static_cast<int>(imgY));
-}
-
 }  // namespace
 
 void EpubReaderActivity::onEnter() {
@@ -762,6 +744,8 @@ void EpubReaderActivity::onEnter() {
   bookGuideDotsOverride = currentBook.guideDotsOverride;
   bookInlineFootnotePreviewsOverride = currentBook.inlineFootnotePreviewsOverride;
   bookLineSpacingOverride = currentBook.lineSpacingOverride;
+  bookVerticalTextOverride = currentBook.verticalTextOverride;
+  bookVerticalAllowed_ = TypographyProfile::forLanguage(epub->getLanguage()).verticalAllowed;
   logReaderMemSnapshot("onEnter_after_recent_books");
 
   // Take the scaled-glyph cache now, before any page is laid out. It is never released, and
@@ -953,6 +937,8 @@ void EpubReaderActivity::loop() {
   // this file -- on in release builds too).
   serviceBackgroundDebugLog();
 
+  const bool leftRightSwapped = mirrorsLeftRight();
+
   // Under the RenderLock, which every post and every other writer of one holds. A heap-recovery restart saves the live
   // page under it and keeps it up to the reboot; without it, an older post written beside that save or after it (in
   // the restart's delay(50) or image warm pass) would reopen the book on the older page. Try, never wait: a busy lock
@@ -1060,12 +1046,17 @@ void EpubReaderActivity::loop() {
     // BTN_DEFAULT is the built-in case. The FSM emits no Short for a press that
     // already produced a Long, so the release cannot also turn the page.
     if (ev.type == ButtonEventManager::PressType::Long) {
+      // A right-to-left book under Follow Book turns the other way on Left and Right; the side buttons
+      // (PageBack/PageForward) and assigned actions keep their meaning.
+      const bool leftIsPrev = !leftRightSwapped;
       const bool prevChapter =
           (ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnLongPageBack == BA::BTN_DEFAULT) ||
-          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnLongLeft == BA::BTN_DEFAULT);
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnLongLeft == BA::BTN_DEFAULT && leftIsPrev) ||
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnLongRight == BA::BTN_DEFAULT && !leftIsPrev);
       const bool nextChapter =
           (ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnLongPageForward == BA::BTN_DEFAULT) ||
-          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnLongRight == BA::BTN_DEFAULT);
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnLongRight == BA::BTN_DEFAULT && leftIsPrev) ||
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnLongLeft == BA::BTN_DEFAULT && !leftIsPrev);
       if (prevChapter || nextChapter) {
         onButtonAction(nextChapter ? BA::BTN_NEXT_SECTION : BA::BTN_PREV_SECTION);
         return;
@@ -1078,13 +1069,17 @@ void EpubReaderActivity::loop() {
     // main.cpp dispatches it globally — but the setting is re-checked so a future caller
     // that pushes events directly cannot turn a remapped button into a page turn.
     if (ev.type == ButtonEventManager::PressType::Short) {
+      const bool leftIsPrev = !leftRightSwapped;
       if ((ev.button == MappedInputManager::Button::PageBack && SETTINGS.btnShortPageBack == BA::BTN_DEFAULT) ||
-          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnShortLeft == BA::BTN_DEFAULT)) {
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnShortLeft == BA::BTN_DEFAULT && leftIsPrev) ||
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnShortRight == BA::BTN_DEFAULT &&
+           !leftIsPrev)) {
         buttonPrevTurn = true;
         continue;
       }
       if ((ev.button == MappedInputManager::Button::PageForward && SETTINGS.btnShortPageForward == BA::BTN_DEFAULT) ||
-          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnShortRight == BA::BTN_DEFAULT)) {
+          (ev.button == MappedInputManager::Button::Right && SETTINGS.btnShortRight == BA::BTN_DEFAULT && leftIsPrev) ||
+          (ev.button == MappedInputManager::Button::Left && SETTINGS.btnShortLeft == BA::BTN_DEFAULT && !leftIsPrev)) {
         buttonNextTurn = true;
         continue;
       }
@@ -1113,7 +1108,8 @@ void EpubReaderActivity::loop() {
   // are gesture sources the queue does not carry, and both must lose to an
   // explicit button press. Inert on non-touch boards and when the user has set
   // touchReaderControls to Off.
-  const ReaderUtils::TouchPageTurn touchTurn = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
+  const ReaderUtils::TouchPageTurn touchTurn =
+      ReaderUtils::detectTouchPageTurn(renderer, mappedInput, pageProgressionRtl_.load());
   prevTriggered = prevTriggered || touchTurn.prev;
   nextTriggered = nextTriggered || touchTurn.next;
   if (!prevTriggered && !nextTriggered) {
@@ -1421,6 +1417,7 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   // says "previews on" while showing bare markers. It used to be ANDed with "is the book-level
   // cache ready", which meant the key flipped mid-session and dragged a rebuild behind it.
   p.inlineFootnotePreviews = getEffectiveInlineFootnotePreviews();
+  p.verticalText = getEffectiveVerticalText();
   p.imageRendering = lastRenderStats.imageRendering;
   p.fontSizeLadder = buildReaderFontSizeLadder(p.fontId);
   if (epub) {
@@ -2110,8 +2107,9 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
   // page render writes -- and a decode the lane parks (see RenderConfig::checkpointPath) resumes
   // only for the very same configuration, so a page turn onto the image could never pick it up.
   const RenderLayout layout = computeRenderLayout();
-  const int viewportHeight = std::max(0, renderer.getScreenHeight() - layout.marginTop - layout.marginBottom);
-  const int contentTop = layout.marginTop + getImageOnlyPageYOffset(page, viewportHeight);
+  const int viewportHeight =
+      std::max(0, renderer.getScreenHeight(renderer.getHeldOrientation()) - layout.marginTop - layout.marginBottom);
+  const int contentTop = layout.marginTop + ReaderPageLayout::imageOnlyPageYOffset(page, viewportHeight);
 
   LentSecondary lend(renderer);
   BuildArena* const arena = lend.arena();
@@ -2646,6 +2644,11 @@ void EpubReaderActivity::openDictionary() {
   {
     RenderLock lock(*this);
     if (!section) return;
+    // The picker boxes the page's words in the reader's frame; a vertical page's are in the turned one.
+    if (section->isVertical()) {
+      LOG_INF("ERS", "Dictionary: not on a vertical page");
+      return;
+    }
   }
 
   if (SETTINGS.dictionaryName[0] == '\0') {
@@ -2758,13 +2761,13 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         }
       }
       const int initialPercent = clampPercent(static_cast<int>(bookProgress + 0.5f));
-      startActivityForResult(
-          std::make_unique<EpubReaderPercentSelectionActivity>(renderer, mappedInput, initialPercent),
-          [this](const ActivityResult& result) {
-            if (!result.isCancelled) {
-              jumpToPercent(std::get<PercentResult>(result.data).percent);
-            }
-          });
+      startActivityForResult(std::make_unique<EpubReaderPercentSelectionActivity>(renderer, mappedInput, initialPercent,
+                                                                                  pageProgressionRtl_.load()),
+                             [this](const ActivityResult& result) {
+                               if (!result.isCancelled) {
+                                 jumpToPercent(std::get<PercentResult>(result.data).percent);
+                               }
+                             });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::GO_TO_PRINTED_PAGE: {
@@ -3134,7 +3137,8 @@ void EpubReaderActivity::applyBookReaderOverrides(const int8_t embeddedStyleOver
   applyBookReaderOverrides(embeddedStyleOverride, imageRenderingOverride, fontFamilyOverride, sdFontFamilyOverride,
                            fontSizeOverride, bionicReadingOverride, paragraphAlignmentOverride,
                            bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride,
-                           bookGuideDotsOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride);
+                           bookGuideDotsOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
+                           bookVerticalTextOverride);
 }
 
 void EpubReaderActivity::applyBookReaderOverrides(
@@ -3142,7 +3146,7 @@ void EpubReaderActivity::applyBookReaderOverrides(
     const std::string& sdFontFamilyOverride, const int8_t fontSizeOverride, const int8_t bionicReadingOverride,
     const int8_t paragraphAlignmentOverride, const int8_t textAntiAliasingOverride, const int8_t hyphenationOverride,
     const int8_t fontSizeNormalizationOverride, const int8_t guideDotsOverride,
-    const int8_t inlineFootnotePreviewsOverride, const int8_t lineSpacingOverride) {
+    const int8_t inlineFootnotePreviewsOverride, const int8_t lineSpacingOverride, const int8_t verticalTextOverride) {
   if (!epub) {
     return;
   }
@@ -3168,7 +3172,7 @@ void EpubReaderActivity::applyBookReaderOverrides(
       bookTextAntiAliasingOverride == textAntiAliasingOverride && bookHyphenationOverride == hyphenationOverride &&
       bookFontSizeNormalizationOverride == fontSizeNormalizationOverride &&
       bookInlineFootnotePreviewsOverride == inlineFootnotePreviewsOverride &&
-      bookLineSpacingOverride == lineSpacingOverride;
+      bookLineSpacingOverride == lineSpacingOverride && bookVerticalTextOverride == verticalTextOverride;
 
   if (layoutOverridesUnchanged && bookGuideDotsOverride == guideDotsOverride) {
     return;
@@ -3187,11 +3191,12 @@ void EpubReaderActivity::applyBookReaderOverrides(
   bookGuideDotsOverride = guideDotsOverride;
   bookInlineFootnotePreviewsOverride = inlineFootnotePreviewsOverride;
   bookLineSpacingOverride = lineSpacingOverride;
+  bookVerticalTextOverride = verticalTextOverride;
   RECENT_BOOKS.setReaderOverrides(
       epub->getPath(), bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
       bookSdFontFamilyOverride, bookFontSizeOverride, bookBionicReadingOverride, bookParagraphAlignmentOverride,
       bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride, bookGuideDotsOverride,
-      bookInlineFootnotePreviewsOverride, bookLineSpacingOverride);
+      bookInlineFootnotePreviewsOverride, bookLineSpacingOverride, bookVerticalTextOverride);
 
   if (layoutOverridesUnchanged) {
     // Only guide dots changed: persisted above, and the repaint on resume picks
@@ -3323,6 +3328,16 @@ LineSpacing EpubReaderActivity::lineSpacingForBook(const uint8_t step, const Epu
 
 uint8_t EpubReaderActivity::getEffectiveLineSpacingStep() const {
   return bookLineSpacingOverride >= 0 ? static_cast<uint8_t>(bookLineSpacingOverride) : SETTINGS.lineSpacing;
+}
+
+static_assert(static_cast<uint8_t>(VerticalText::Automatic) == CrossPointSettings::VERTICAL_TEXT_AUTOMATIC &&
+                  static_cast<uint8_t>(VerticalText::On) == CrossPointSettings::VERTICAL_TEXT_ON &&
+                  static_cast<uint8_t>(VerticalText::Off) == CrossPointSettings::VERTICAL_TEXT_OFF,
+              "CrossPointSettings::VERTICAL_TEXT is stored in VerticalText's order");
+
+VerticalText EpubReaderActivity::getEffectiveVerticalText() const {
+  return FlowContext::requestFor(static_cast<VerticalText>(SETTINGS.verticalText), bookVerticalTextOverride,
+                                 bookVerticalAllowed_);
 }
 
 LineSpacing EpubReaderActivity::getEffectiveLineSpacing() const {
@@ -4058,10 +4073,14 @@ void EpubReaderActivity::clampSpineIndex(const int spineCount) {
 EpubReaderActivity::RenderLayout EpubReaderActivity::computeRenderLayout() const {
   // Apply screen viewable areas and additional padding
   int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
-  renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
+  // The held frame: this also runs off the render task, and a vertical page draws in the turned one.
+  const GfxRenderer::Orientation held = renderer.getHeldOrientation();
+  renderer.getOrientedViewableTRBL(held, &orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
                                    &orientedMarginLeft);
   const int statusBarTopHeight = UITheme::getStatusBarTopHeight(automaticPageTurnActive);
   const int statusBarBottomHeight = UITheme::getStatusBarBottomHeight(automaticPageTurnActive);
+  const int screenWidth = renderer.getScreenWidth(held);
+  const int screenHeight = renderer.getScreenHeight(held);
 
   const int bezelLeft = orientedMarginLeft, bezelRight = orientedMarginRight;
   orientedMarginTop += std::max(static_cast<int>(SETTINGS.screenMargin), statusBarTopHeight);
@@ -4078,8 +4097,8 @@ EpubReaderActivity::RenderLayout EpubReaderActivity::computeRenderLayout() const
   if (marginKey != lastMarginKey) {
     lastMarginKey = marginKey;
     LOG_INF("ERS", "Reader margins: bezel L%d R%d + screenMargin %d = L%d R%d (screen %dx%d)", bezelLeft, bezelRight,
-            static_cast<int>(SETTINGS.screenMargin), orientedMarginLeft, orientedMarginRight, renderer.getScreenWidth(),
-            renderer.getScreenHeight());
+            static_cast<int>(SETTINGS.screenMargin), orientedMarginLeft, orientedMarginRight, screenWidth,
+            screenHeight);
   }
 
   RenderLayout layout;
@@ -4087,8 +4106,8 @@ EpubReaderActivity::RenderLayout EpubReaderActivity::computeRenderLayout() const
   layout.marginRight = orientedMarginRight;
   layout.marginBottom = orientedMarginBottom;
   layout.marginLeft = orientedMarginLeft;
-  layout.viewportWidth = renderer.getScreenWidth() - orientedMarginLeft - orientedMarginRight;
-  layout.viewportHeight = renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom;
+  layout.viewportWidth = screenWidth - orientedMarginLeft - orientedMarginRight;
+  layout.viewportHeight = screenHeight - orientedMarginTop - orientedMarginBottom;
   return layout;
 }
 
@@ -4178,6 +4197,7 @@ bool EpubReaderActivity::renderBufferDisplayPass(const RenderLayout& layout) {
     return false;
   }
   // Same reason as in renderContents(): pin the page identity before the pass does any work.
+  pinPageProgression();
   lastRenderedSpineIndex_ = currentSpineIndex;
   lastRenderedPageIndex_ = section->currentPage;
   lastRenderedPageCount_ = section->pageCount;
@@ -5323,6 +5343,10 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
   }
 }
 
+void EpubReaderActivity::pinPageProgression() {
+  pageProgressionRtl_.store(section ? section->flowContext().pageProgressionRtl : false);
+}
+
 void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const RenderLayout& layout) {
   if (!section || !section->hasActiveBuild()) {
     // Build finished or was aborted between classifyRenderPass() and here — re-dispatch so the
@@ -5330,6 +5354,8 @@ void EpubReaderActivity::renderSectionBuildingPass(RenderLock& lock, const Rende
     requestUpdate();
     return;
   }
+  // A cold section is drawn and turned through here before renderContents() has stored the direction.
+  pinPageProgression();
 
   // Draw the requested page if Background-C has already written it. Only for an explicit Page
   // target (other targets resolve at completion). buildDisplayedPage_ records the target we've
@@ -5694,11 +5720,12 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     lastRenderedPageIndex_ = section->currentPage;
     lastRenderedPageCount_ = section->pageCount;
   }
+  pinPageProgression();
   auto* fcm = renderer.getFontCacheManager();
   fcm->resetStats();
 
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom);
-  const int contentTop = orientedMarginTop + getImageOnlyPageYOffset(*page, viewportHeight);
+  const int contentTop = orientedMarginTop + ReaderPageLayout::imageOnlyPageYOffset(*page, viewportHeight);
 
   // Building through a chapter's last pages, Background-B kept the secondary buffer for its build of the next one
   // (recoverSecondaryBufferIfNeeded). A decode now would run on the heap beside that build (LaneBeforeBuild): B gives
@@ -6277,6 +6304,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
 
 void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, const RenderLayout& layout,
                                           BuildArena::Block* drawBlock) {
+  pinPageProgression();
   // Draws one page from an in-progress Background-C build: a plain BW render + status bar, no
   // AA and no pre-render arming (those belong to the steady reading state set up by
   // renderNormalPass() once the build completes). Images come from their pixel cache when they
@@ -6284,8 +6312,9 @@ void EpubReaderActivity::displayBuildPage(RenderLock& lock, const Page& page, co
   // below), so no decode runs on the build's heap and no secondary-buffer release is needed. The lock is released
   // before the waveform wait — exactly like renderContents() — so a C build slice can run on the loop task during the
   // refresh.
-  const int viewportHeight = std::max(0, renderer.getScreenHeight() - layout.marginTop - layout.marginBottom);
-  const int contentTop = layout.marginTop + getImageOnlyPageYOffset(page, viewportHeight);
+  const int viewportHeight =
+      std::max(0, renderer.getScreenHeight(renderer.getHeldOrientation()) - layout.marginTop - layout.marginBottom);
+  const int contentTop = layout.marginTop + ReaderPageLayout::imageOnlyPageYOffset(page, viewportHeight);
 
   // Everything that touches the build's arena -- the font-slot scope below and the caller's
   // page block -- ends inside this brace, BEFORE lock.unlock(): a build slice runs on the loop
@@ -6381,7 +6410,7 @@ uint16_t EpubReaderActivity::renderPageContentOnly(const Page& page, const int o
   fcm->resetStats();
 
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom);
-  const int contentTop = orientedMarginTop + getImageOnlyPageYOffset(page, viewportHeight);
+  const int contentTop = orientedMarginTop + ReaderPageLayout::imageOnlyPageYOffset(page, viewportHeight);
 
   const uint32_t starvedBefore = glyph_miss::starvedCount();
   prewarmPageFonts(page, orientedMarginLeft, contentTop);
@@ -6471,7 +6500,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
                                                 const int orientedMarginRight, const int orientedMarginBottom,
                                                 const int orientedMarginLeft) {
   const int viewportHeight = std::max(0, renderer.getScreenHeight() - orientedMarginTop - orientedMarginBottom);
-  const int contentTop = orientedMarginTop + getImageOnlyPageYOffset(page, viewportHeight);
+  const int contentTop = orientedMarginTop + ReaderPageLayout::imageOnlyPageYOffset(page, viewportHeight);
 
 #if DEBUG_BACKGROUND_WORK
   // This page is being served from the Background-A pre-render buffer (a hit) — set the
@@ -6606,6 +6635,10 @@ void EpubReaderActivity::appendDebugState(std::string& out) const {
   appendField(out, "chapter_page", number);
   snprintf(number, sizeof(number), "%.0f", statusBarBookPercent());
   appendField(out, "percent", number);
+  const FlowContext flow = section->flowContext();
+  appendField(out, "flow", flow.vertical ? "vertical-rl" : "horizontal");
+  appendField(out, "progression", flow.pageProgressionRtl ? "rtl" : "ltr");
+  appendField(out, "input_progression", pageProgressionRtl_.load() ? "rtl" : "ltr");
 #endif
 }
 
@@ -6728,7 +6761,8 @@ void EpubReaderActivity::renderStatusBar() const {
   GUI.drawStatusBar(renderer, bookProgress, chapter.page, chapter.total, title, 0, isStarred, printedPageLabel,
                     /*fillMargin=*/true, /*pageCountApproximate=*/chapter.approximate, syncIndicator,
                     /*lowMemory=*/memoryDegradedPage(currentSpineIndex, section->currentPage) ||
-                        glyphStarvedPage(currentSpineIndex, section->currentPage));
+                        glyphStarvedPage(currentSpineIndex, section->currentPage),
+                    /*fillFromRight=*/pageProgressionRtl_.load());
 
 #if DEBUG_BACKGROUND_WORK
   renderBackgroundDebugOverlay();
@@ -6994,8 +7028,16 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
   }
 
   const int fontId = getEffectiveReaderFontId();
-  const int screenW = renderer.getScreenWidth();
-  const int screenH = renderer.getScreenHeight();
+  // The reader's frame: a vertical page draws in the turned one, and this runs while it does.
+  const GfxRenderer::Orientation held = renderer.getHeldOrientation();
+  const int screenW = renderer.getScreenWidth(held);
+  const int screenH = renderer.getScreenHeight(held);
+  // A vertical page's words are boxed where it draws them, in the turned frame; the targets are recorded in the
+  // reader's.
+  const bool vertical = page.isVertical();
+  const turnedframe::Offsets origin =
+      vertical ? turnedframe::contentOffsets(screenW, marginLeft, contentTop, page.verticalBlockExtent)
+               : turnedframe::Offsets{marginLeft, contentTop};
 
   // The links arrive in page order, so one forward walk resolves them all: whichever word first
   // completes the text of the link we are looking for IS that link. Matching in order rather than
@@ -7049,13 +7091,15 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
       }
       if (!matched) continue;
 
-      const TextBlock::WordBox box =
-          block->wordBox(renderer, i, fontId, line->xPos + marginLeft, line->yPos + contentTop);
-      if (box.width <= 0 || box.height <= 0) {
+      const TextBlock::WordBox contentBox =
+          block->wordBox(renderer, i, fontId, line->xPos + origin.x, line->yPos + origin.y);
+      if (contentBox.width <= 0 || contentBox.height <= 0) {
         markerPos = 0;
         runOpen = false;
         continue;
       }
+      turnedframe::Rect box{contentBox.x, contentBox.y, contentBox.width, contentBox.height};
+      if (vertical) box = turnedframe::toReader(screenW, box);
       if (runOpen) {
         runLeft = std::min(runLeft, static_cast<int>(box.x));
         runTop = std::min(runTop, static_cast<int>(box.y));
@@ -7398,6 +7442,9 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   p.embeddedStyle = effectiveEmbeddedStyle;
   p.bionicReadingEnabled = effectiveBionicReading;
   p.inlineFootnotePreviews = effectiveInlineFootnotePreviews;
+  p.verticalText =
+      FlowContext::requestFor(static_cast<VerticalText>(SETTINGS.verticalText), currentBook.verticalTextOverride,
+                              TypographyProfile::forLanguage(epub->getLanguage()).verticalAllowed);
   p.imageRendering = effectiveImageRendering;
   p.fontSizeLadder = buildReaderFontSizeLadder(effectiveFontId);
   // On the heap: about 0.5 KB with the book's accent families, too much for this frame under a section build.
@@ -7425,7 +7472,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
     return false;
   }
 
-  const int imageOnlyOffset = getImageOnlyPageYOffset(*page, viewportHeight);
+  const int imageOnlyOffset = ReaderPageLayout::imageOnlyPageYOffset(*page, viewportHeight);
   const int renderMarginTop = marginTop + imageOnlyOffset;
   renderer.clearScreen();
   page->render(renderer, effectiveFontId, marginLeft, renderMarginTop);
@@ -7440,14 +7487,16 @@ void EpubReaderActivity::openQuickOverrides() {
           renderer, mappedInput, bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
           bookSdFontFamilyOverride, bookFontSizeOverride, bookBionicReadingOverride, bookGuideDotsOverride,
           bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
-          bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride),
+          bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
+          bookVerticalTextOverride, bookVerticalAllowed_),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyBookReaderOverrides(menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
                                  menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,
                                  menu.paragraphAlignmentOverride, menu.textAntiAliasingOverride,
                                  menu.hyphenationOverride, menu.fontSizeNormalizationOverride, menu.guideDotsOverride,
-                                 menu.inlineFootnotePreviewsOverride, menu.lineSpacingOverride);
+                                 menu.inlineFootnotePreviewsOverride, menu.lineSpacingOverride,
+                                 menu.verticalTextOverride);
       });
 }
 
@@ -7489,7 +7538,8 @@ void EpubReaderActivity::openReaderMenu() {
           bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness, bookBionicReadingOverride,
           bookGuideDotsOverride, bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
           bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
-          !bookmarkStore.isEmpty(), isCurrentPageStarred, hasPrintedPages),
+          bookVerticalTextOverride, bookVerticalAllowed_, !bookmarkStore.isEmpty(), isCurrentPageStarred,
+          hasPrintedPages, /*wordLookupAvailable=*/!(section && section->isVertical())),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);
@@ -7499,7 +7549,8 @@ void EpubReaderActivity::openReaderMenu() {
                                  menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,
                                  menu.paragraphAlignmentOverride, menu.textAntiAliasingOverride,
                                  menu.hyphenationOverride, menu.fontSizeNormalizationOverride, menu.guideDotsOverride,
-                                 menu.inlineFootnotePreviewsOverride, menu.lineSpacingOverride);
+                                 menu.inlineFootnotePreviewsOverride, menu.lineSpacingOverride,
+                                 menu.verticalTextOverride);
         if (!result.isCancelled) {
           onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
         }

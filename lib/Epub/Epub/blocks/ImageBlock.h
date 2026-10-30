@@ -115,10 +115,25 @@ class ImageBlock final : public Block {
   std::unique_ptr<ImageBlock> makeCrop(int16_t srcYOffset, int16_t srcHeight) const;
 
   const std::string& getImagePath() const { return imagePath; }
-  int16_t getWidth() const { return width; }
-  int16_t getHeight() const { return height; }
-  // Rendered height: equals srcHeight when a crop is active, otherwise height.
-  int16_t getRenderedHeight() const { return srcHeight_ > 0 ? srcHeight_ : height; }
+  // The box the image takes on the page (the content frame's width and height).
+  int16_t getWidth() const { return turned_ ? height : width; }
+  int16_t getHeight() const { return turned_ ? width : height; }
+  // Rendered height: equals srcHeight when a crop is active, otherwise the box's height.
+  int16_t getRenderedHeight() const { return srcHeight_ > 0 ? srcHeight_ : getHeight(); }
+
+  // The image of a vertical page: the box it takes on the page, width by height, is the image turned. It is decoded,
+  // cached and drawn upright at height by width in the reader's frame. Swaps the stored size; idempotent.
+  void setTurned() {
+    if (turned_) return;
+    turned_ = true;
+    const int16_t box = width;
+    width = height;
+    height = box;
+  }
+  bool isTurned() const { return turned_; }
+  // The size the image is decoded and drawn at, upright in the reader's frame.
+  int16_t drawnWidth() const { return width; }
+  int16_t drawnHeight() const { return height; }
   const std::string& getAltText() const { return altText; }
 
   bool imageExists() const;
@@ -172,6 +187,7 @@ class ImageBlock final : public Block {
   // Cached isLargeImage() answer: -1 not yet resolved, 0 no, 1 yes. Mutable because the query is
   // const and the answer cannot change for the life of the block.
   mutable int8_t largeImageCached_ = -1;
+  bool turned_ = false;        // setTurned(): width and height are the upright size, not the box
   std::string epubFilePath_;   // source EPUB on SD (empty if already extracted)
   std::string epubEntryPath_;  // internal EPUB entry path (e.g. "OEBPS/images/foo.jpg")
 
@@ -199,6 +215,10 @@ class ImageBlock final : public Block {
 
  private:
   void renderPlaceholder(GfxRenderer& renderer, int x, int y, Placeholder kind) const;
+  // The bodies of render() and renderGrayscaleFromCache(), upright at (x, y) in the live orientation.
+  void renderUpright(GfxRenderer& renderer, int x, int y, bool forceLoad, bool monochromeOutput,
+                     bool alsoCacheOtherVariant);
+  void renderGrayscaleUpright(GfxRenderer& renderer, int x, int y) const;
   static bool placeholderOnly_;
   static Placeholder placeholderOnlyKind_;
   static uint16_t placeholdersDrawn_;

@@ -680,6 +680,9 @@ class EpubReaderActivity final : public Activity {
   // them", not "the render lock covers them". A unique_ptr assigned from one task while another
   // moves it is a double-free waiting to happen.
   std::atomic<bool> finishedBookLaunchPending_{false};
+  // The book on screen turns its pages right to left (spec 5.5): stored by renderContents from the section's flow
+  // context, read by loop() for the buttons, taps and swipes and by the percent picker and the status bar.
+  std::atomic<bool> pageProgressionRtl_{false};
   // Last valid spine/page/pageCount at book-finish time, stashed for onFinishedBookSyncRequested()
   // — see the SyncPositionOverride comment for why currentSpineIndex/section can't be used there.
   int finishedBookSyncSpineIndex_ = 0;
@@ -732,6 +735,9 @@ class EpubReaderActivity final : public Activity {
   int8_t bookGuideDotsOverride = -1;
   int8_t bookInlineFootnotePreviewsOverride = -1;
   int8_t bookLineSpacingOverride = -1;
+  int8_t bookVerticalTextOverride = -1;
+  // Whether the book's language is ever set vertically (TypographyProfile::verticalAllowed); read once in onEnter.
+  bool bookVerticalAllowed_ = false;
 
   // Bookmarks (starred pages)
   BookmarkStore bookmarkStore;
@@ -810,6 +816,9 @@ class EpubReaderActivity final : public Activity {
   // Returns true if the page was displayed (render() should return); false if the fast path
   // could not be taken (load failed / image page) and render() must fall through to Normal.
   bool renderBufferDisplayPass(const RenderLayout& layout);
+  // Stores the section's page direction for the buttons, taps and bar; every pass that draws a page calls it, a
+  // building section included (its flow context answers from the live parser).
+  void pinPageProgression();
   // BuildSection pass: construct/load the section cache for currentSpineIndex and resolve the
   // nav target. Returns true if a section is ready to render; false if render() should return
   // (build failed, finished-book handoff, or a requestUpdate retry was posted).
@@ -1160,7 +1169,8 @@ class EpubReaderActivity final : public Activity {
                                 int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride,
                                 int8_t textAntiAliasingOverride, int8_t hyphenationOverride,
                                 int8_t fontSizeNormalizationOverride, int8_t guideDotsOverride,
-                                int8_t inlineFootnotePreviewsOverride, int8_t lineSpacingOverride);
+                                int8_t inlineFootnotePreviewsOverride, int8_t lineSpacingOverride,
+                                int8_t verticalTextOverride);
   void openReaderMenu();
   void openQuickOverrides();
   bool getEffectiveEmbeddedStyle() const;
@@ -1177,6 +1187,9 @@ class EpubReaderActivity final : public Activity {
   // name) when `familyOut` is given.
   int resolveReaderFont(std::string* familyOut) const;
   uint8_t getEffectiveLineSpacingStep() const;
+  // The vertical-text request the book's sections are built with: its override, else the setting; Off for a language
+  // that is never set vertically.
+  VerticalText getEffectiveVerticalText() const;
   LineSpacing getEffectiveLineSpacing() const;
   // The line spacing `epub` is laid out with at `step` (CrossPointSettings::LINE_COMPRESSION) in body font `fontId` at
   // `pointSize`: Chinese, Japanese and Korean books by an em pitch, others by a factor on the font's line height. The
@@ -1278,6 +1291,9 @@ class EpubReaderActivity final : public Activity {
   // DISP log now says so out loud.
   void startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler) override;
   bool isReaderActivity() const override { return true; }
+  bool mirrorsLeftRight() const override {
+    return pageProgressionRtl_.load() && SETTINGS.pageTurnButtons == CrossPointSettings::PAGE_TURN_FOLLOW_BOOK;
+  }
   // Polled by main.cpp's loop without the render lock; see refreshLoopHints().
   bool preventAutoSleep() override;
   // Auto page turn is reading with no hands on the device: no input arrives, so without this the

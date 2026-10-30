@@ -135,6 +135,7 @@ class TextBlock final : public Block {
   bool sizesPresent = false;
   bool isValid = true;
   uint8_t wordFontCount = 0;  // the line's word fonts (see WordFont); 0 on a line in the block's font alone
+  bool vertical_ = false;     // a line of a vertical-rl page (see setVertical); takes the struct's pad byte
   // The ONLY allocation. Heap by default (nothrow, so OOM yields an invalid block instead of
   // abort() -- bare new is not nothrow with -fno-exceptions). A section build that lends a
   // scratch region (the borrowed secondary framebuffer) hands it in through the range
@@ -247,6 +248,10 @@ class TextBlock final : public Block {
   const RenderStyle& getRenderStyle() const { return renderStyle; }
   bool isEmpty() override { return numWords == 0; }
   bool valid() const { return isValid; }
+  // A line of a vertical-rl page: drawn down its column, in the turned frame Page::render sets up (VerticalDraw.h).
+  // Set by the page's builder; kept in the cache.
+  void setVertical(const bool vertical) { vertical_ = vertical; }
+  bool isVertical() const { return vertical_; }
   uint16_t wordCount() const { return numWords; }
   // NUL-terminated by construction; safe to pass to C APIs directly.
   const char* wordText(const uint16_t i) const { return textArr + textOffArr[i]; }
@@ -288,7 +293,8 @@ class TextBlock final : public Block {
   int annotationBand(const GfxRenderer& renderer, int fontId) const;
   // The same band from what a layout knows before the line exists.
   static int annotationBandFor(const GfxRenderer& renderer, int effFontId, float blockScale, uint8_t maxSizePct);
-  // No word draws scaled: block multiplier 1, no heading font, no word sizes, no SUP/SUB/SMALL_CAPS, no annotations.
+  // No word draws scaled: block multiplier 1, no heading font, no word sizes, no SUP/SUB/SMALL_CAPS, no annotations,
+  // not vertical.
   bool drawsUnscaled() const;
 
   // Screen box of one word, in the same coordinate space render(fontId, x, y)
@@ -298,6 +304,7 @@ class TextBlock final : public Block {
   // shifts smaller words down, and the SUP/SUB offsets all have to agree, or a
   // caller drawing over a word lands beside it. Used by the dictionary's
   // word-selection overlay.
+  // On a vertical line the width is the word's run down its column.
   struct WordBox {
     int16_t x = 0;
     int16_t y = 0;

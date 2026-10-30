@@ -250,6 +250,8 @@ class ActivityManager {
   // but true above. witchling-reader commit babb8050 (syfq91, isCurrentReaderActivity()) made the
   // same split ten days earlier, for the bug syfq91 then reported here as issue #350.
   bool currentIsReaderActivity() const;
+  // The activity on top reverses Left/Right (Activity::mirrorsLeftRight()).
+  bool currentMirrorsLeftRight() const;
   bool skipLoopDelay() const;
 
   // True while the current activity owns the raw serial input stream (see

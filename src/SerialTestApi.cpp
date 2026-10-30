@@ -778,9 +778,12 @@ void injectContact(const std::string_view arg, const size_t count, const char* o
   int xy[4];
   float n[4];
   bool onScreen = SerialCommandGrammar::parseIntList(arg, xy, count);
+  // The reader's frame, as the touch HAL maps it: a vertical page holds the turned frame as the live one while it
+  // draws, and a contact sent then is still a point of the reader's.
+  const GfxRenderer::Orientation held = testRenderer->getHeldOrientation();
   for (size_t i = 0; onScreen && i < count; i += 2) {
-    onScreen = xy[i] >= 0 && xy[i + 1] >= 0 && xy[i] < testRenderer->getScreenWidth() &&
-               xy[i + 1] < testRenderer->getScreenHeight();
+    onScreen = xy[i] >= 0 && xy[i + 1] >= 0 && xy[i] < testRenderer->getScreenWidth(held) &&
+               xy[i + 1] < testRenderer->getScreenHeight(held);
     if (onScreen) testRenderer->logicalToTap(xy[i], xy[i + 1], n[i], n[i + 1]);
   }
   if (!onScreen) {

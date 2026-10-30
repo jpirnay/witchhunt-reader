@@ -131,7 +131,7 @@ TEST(RubyTextBlock, CorruptAnnotationsAreRefused) {
   EXPECT_EQ(restore(wordsPastTheLine), nullptr);
 
   std::string reservedFlag = bytes;
-  reservedFlag[2] = static_cast<char>(reservedFlag[2] | 0x04);
+  reservedFlag[2] = static_cast<char>(reservedFlag[2] | 0x08);
   EXPECT_EQ(restore(reservedFlag), nullptr);
 
   std::string lenPastTheEnd = bytes;

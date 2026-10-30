@@ -747,6 +747,8 @@ bool ActivityManager::isReaderActivity() const {
 
 bool ActivityManager::currentIsReaderActivity() const { return currentActivity && currentActivity->isReaderActivity(); }
 
+bool ActivityManager::currentMirrorsLeftRight() const { return currentActivity && currentActivity->mirrorsLeftRight(); }
+
 bool ActivityManager::skipLoopDelay() const { return currentActivity && currentActivity->skipLoopDelay(); }
 
 bool ActivityManager::currentOwnsSerialInput() const { return currentActivity && currentActivity->ownsSerialInput(); }

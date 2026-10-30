@@ -88,15 +88,17 @@ void dumpTableFragment(std::ostream& out, const PageTableFragment& tbl, const st
       }
       if (cell.image) {
         out << "     CELLIMG w=" << cell.image->getWidth() << " h=" << cell.image->getRenderedHeight()
-            << " src=" << normalizePath(cell.image->getImagePath(), cacheDir) << "\n";
+            << " src=" << normalizePath(cell.image->getImagePath(), cacheDir)
+            << (cell.image->isTurned() ? " turned=1" : "") << "\n";
       }
     }
   }
 }
 
 void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, const std::string& cacheDir) {
-  out << " PAGE " << pageIndex << " elements=" << page.elements.size() << " footnotes=" << page.footnotes.size()
-      << "\n";
+  out << " PAGE " << pageIndex << " elements=" << page.elements.size() << " footnotes=" << page.footnotes.size();
+  if (page.isVertical()) out << " turned=" << page.verticalBlockExtent;
+  out << "\n";
   for (const auto& el : page.elements) {
     switch (el->getTag()) {
       case TAG_PageLine:
@@ -106,7 +108,7 @@ void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, con
         const auto& img = static_cast<const PageImage&>(*el);
         const auto& ib = img.getImageBlock();
         out << "  IMG y=" << img.yPos << " x=" << img.xPos << " w=" << ib.getWidth() << " h=" << ib.getRenderedHeight()
-            << " src=" << normalizePath(ib.getImagePath(), cacheDir) << "\n";
+            << " src=" << normalizePath(ib.getImagePath(), cacheDir) << (ib.isTurned() ? " turned=1" : "") << "\n";
         break;
       }
       case TAG_PageTable:
@@ -120,6 +122,28 @@ void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, con
   for (const auto& fn : page.footnotes) {
     out << "  FN n=" << fn.number << " href=" << fn.href << "\n";
   }
+}
+
+// The section-cache variant `profile` names.
+Section::BuildParams buildParams(const Profile& profile) {
+  Section::BuildParams p;
+  p.fontId = profile.fontId;
+  p.lineCompression = profile.lineCompression;
+  p.bookLineHeightFloor = profile.bookLineHeightFloor;
+  p.lineHeightEmPx = profile.lineHeightEmPx;
+  p.extraParagraphSpacing = profile.extraParagraphSpacing;
+  p.paragraphAlignment = profile.paragraphAlignment;
+  p.viewportWidth = profile.viewportWidth;
+  p.viewportHeight = profile.viewportHeight;
+  p.hyphenationEnabled = profile.hyphenationEnabled;
+  p.fontSizeNormalization = profile.fontSizeNormalization;
+  p.embeddedStyle = profile.embeddedStyle;
+  p.bionicReadingEnabled = profile.bionicReadingEnabled;
+  p.inlineFootnotePreviews = profile.inlineFootnotePreviews;
+  p.imageRendering = profile.imageRendering;
+  p.fontFamilies = profile.fontFamilies;
+  p.verticalText = profile.verticalText;
+  return p;
 }
 
 }  // namespace
@@ -165,22 +189,7 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
       lentArena->reset();
       section.setExternalBuildScratch(lentArena.get());
     }
-    Section::BuildParams p;
-    p.fontId = profile.fontId;
-    p.lineCompression = profile.lineCompression;
-    p.bookLineHeightFloor = profile.bookLineHeightFloor;
-    p.lineHeightEmPx = profile.lineHeightEmPx;
-    p.extraParagraphSpacing = profile.extraParagraphSpacing;
-    p.paragraphAlignment = profile.paragraphAlignment;
-    p.viewportWidth = profile.viewportWidth;
-    p.viewportHeight = profile.viewportHeight;
-    p.hyphenationEnabled = profile.hyphenationEnabled;
-    p.fontSizeNormalization = profile.fontSizeNormalization;
-    p.embeddedStyle = profile.embeddedStyle;
-    p.bionicReadingEnabled = profile.bionicReadingEnabled;
-    p.inlineFootnotePreviews = profile.inlineFootnotePreviews;
-    p.imageRendering = profile.imageRendering;
-    p.fontFamilies = profile.fontFamilies;
+    const Section::BuildParams p = buildParams(profile);
     if (g_buildBracket) g_buildBracket(i, true, lentArena.get());
     const bool built = section.createSectionFile(p, {}, /*skipEviction=*/true);
     if (g_buildBracket) g_buildBracket(i, false, lentArena.get());
@@ -201,7 +210,10 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
     }
     out << "SPINE " << i << " href=" << epub->getSpineItem(i).href << " pages=" << section.pageCount
         << " truncated=" << (section.isTruncatedCache() ? 1 : 0)
-        << " cssFallback=" << (section.isEmbeddedStyleFallback() ? 1 : 0) << "\n";
+        << " cssFallback=" << (section.isEmbeddedStyleFallback() ? 1 : 0);
+    // Only for a section set vertical-rl, so every horizontal one keeps the SPINE line it always had.
+    if (section.isVertical()) out << " vertical=1";
+    out << "\n";
     // The read-back below is harness scaffolding: it deserializes every page purely to print it,
     // which the firmware never does. Left in the profile it dominates the allocation census (and
     // did, on the first run of this instrumentation), so the build is what gets counted.
@@ -224,6 +236,33 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
       // Bench mode only (spineStat is set only by the CLI). The peak is monotonic, so the spine
       // on which this number steps is the spine that set the book's high-water mark.
       std::fprintf(stderr, "BENCHMARK spine_%d peak_so_far=%zu\n", i, heapTrackPeakSoFar());
+    }
+  }
+  return true;
+}
+
+bool forEachPage(const std::string& epubPath, const std::string& cacheDir, const Profile& profile,
+                 const std::function<void(int spine, const Section&, const Page&, GfxRenderer&)>& visit) {
+  // Heap-only builds: refused rather than ignored, so no caller believes it ran a lent-arena build.
+  if (profile.lentArenaBytes != 0) {
+    std::fprintf(stderr, "forEachPage: lentArenaBytes is not supported (heap-only builds)\n");
+    return false;
+  }
+  GfxRenderer renderer;
+  auto epub = std::make_shared<Epub>(epubPath, cacheDir);
+  if (!epub->load(true)) return false;
+  epub->loadImageManifest();
+  const Section::BuildParams p = buildParams(profile);
+  for (int i = 0; i < epub->getSpineItemsCount(); ++i) {
+    Section section(epub, i, renderer);
+    if (!section.createSectionFile(p, {}, /*skipEviction=*/true)) return false;
+    epub->persistImageManifest(nullptr);
+    if (!section.loadSectionFile(p)) return false;
+    for (uint16_t n = 0; n < section.pageCount; ++n) {
+      section.currentPage = n;
+      const auto page = section.loadPageFromSectionFile();
+      if (!page) return false;
+      visit(i, section, *page, renderer);
     }
   }
   return true;

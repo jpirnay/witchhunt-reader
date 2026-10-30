@@ -101,6 +101,9 @@ bool SliderPickerActivity::handleSliderTouch() {
   const int bandTop = barTop(renderer) - bandPad;
   const int bandLeft = barX - bandPad;
   const int bandRight = barX + kBarWidth + bandPad;
+  const auto touchX = [&](const int x, const int left) {
+    return cfg.reversed ? SliderGeometry::mirroredX(x, left, kBarWidth) : x;
+  };
   const auto inBand = [&](const int x, const int y) {
     return y >= bandTop && y < bandTop + kTouchBandHeight && x >= bandLeft && x < bandRight;
   };
@@ -110,12 +113,12 @@ bool SliderPickerActivity::handleSliderTouch() {
   // Held first: a drag is a live contact, and isScreenTouchHeld() has no tap-slop gate, so it
   // reports the finger's position from the moment it lands rather than only on release.
   if (mappedInput.isScreenTouchHeld(x, y) && inBand(x, y)) {
-    setValue(SliderGeometry::valueForX(x, barX, kBarWidth, cfg.minValue, cfg.maxValue));
+    setValue(SliderGeometry::valueForX(touchX(x, barX), barX, kBarWidth, cfg.minValue, cfg.maxValue));
     return true;
   }
   // Then the release edge, which catches a tap too brief to have been seen as held.
   if (mappedInput.wasScreenTapped(x, y) && inBand(x, y)) {
-    setValue(SliderGeometry::valueForX(x, barX, kBarWidth, cfg.minValue, cfg.maxValue));
+    setValue(SliderGeometry::valueForX(touchX(x, barX), barX, kBarWidth, cfg.minValue, cfg.maxValue));
     return true;
   }
   return false;
@@ -148,13 +151,13 @@ void SliderPickerActivity::loop() {
     // side back button ran both arms and moved the value by +10 then -1.
     if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Left) &&
         ev.type == ButtonEventManager::PressType::Short) {
-      adjustValue(-kSmallStep);
+      adjustValue(cfg.reversed ? kSmallStep : -kSmallStep);
       return;
     }
 
     if (MappedInputManager::isDirection(ev.button, MappedInputManager::Direction::Right) &&
         ev.type == ButtonEventManager::PressType::Short) {
-      adjustValue(kSmallStep);
+      adjustValue(cfg.reversed ? -kSmallStep : kSmallStep);
       return;
     }
   }
@@ -187,18 +190,21 @@ void SliderPickerActivity::render(RenderLock&&) {
 
   // Same mapping the hit test inverts — see SliderGeometry.
   const int fillWidth = SliderGeometry::fillWidthFor(value, kBarWidth, cfg.minValue, cfg.maxValue);
+  const int fillX = cfg.reversed ? SliderGeometry::reversedFillX(value, barX, kBarWidth, cfg.minValue, cfg.maxValue)
+                                 : SliderGeometry::trackX(barX);
   if (fillWidth > 0) {
-    renderer.fillRect(barX + SliderGeometry::kTrackInset, barY + 2, fillWidth, kBarHeight - 4);
+    renderer.fillRect(fillX, barY + 2, fillWidth, kBarHeight - 4);
   }
 
-  const int knobX = SliderGeometry::trackX(barX) + fillWidth - 2;
+  const int knobX = (cfg.reversed ? fillX : fillX + fillWidth) - 2;
   renderer.fillRect(knobX, barY - 4, 4, kBarHeight + 8, true);
 
   renderer.drawCenteredText(SMALL_FONT_ID, barY + 30, I18N.get(cfg.hintId), true);
 
   // The slider runs across the screen, so - / + ride logical Left/Right and move to whichever
   // button pair lies on that axis; the coarse step rides logical Up/Down and is unlabelled.
-  const auto hints = mappedInput.mapHints(tr(STR_BACK), tr(STR_SELECT), "-", "+", "", "");
+  const auto hints =
+      mappedInput.mapHints(tr(STR_BACK), tr(STR_SELECT), cfg.reversed ? "+" : "-", cfg.reversed ? "-" : "+", "", "");
   GUI.drawButtonHints(renderer, hints.front.btn1, hints.front.btn2, hints.front.btn3, hints.front.btn4);
   GUI.drawSideButtonHints(renderer, hints.side.up, hints.side.down);
 
