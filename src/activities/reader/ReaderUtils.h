@@ -157,8 +157,10 @@ inline TouchPageTurn detectTouchPageTurn(const GfxRenderer& renderer, const Mapp
     return result;
   }
 
-  const int width = renderer.getScreenWidth();
-  const int height = renderer.getScreenHeight();
+  // The held frame: a vertical page draws in the turned one, and this runs on the loop task while it does.
+  const GfxRenderer::Orientation held = renderer.getHeldOrientation();
+  const int width = renderer.getScreenWidth(held);
+  const int height = renderer.getScreenHeight(held);
   // Outer thirds only: the centre column carries the reader-menu tap target
   // (isTouchMenuTap below), so it must not double as a page turn. The vertical
   // bounds keep the menu zone from swallowing the whole centre column.
@@ -179,8 +181,10 @@ inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager
   int x = 0;
   int y = 0;
   if (!input.wasScreenTapped(x, y)) return false;
-  const int width = renderer.getScreenWidth();
-  const int height = renderer.getScreenHeight();
+  // The held frame: a vertical page draws in the turned one, and this runs on the loop task while it does.
+  const GfxRenderer::Orientation held = renderer.getHeldOrientation();
+  const int width = renderer.getScreenWidth(held);
+  const int height = renderer.getScreenHeight(held);
   return TapZones::zoneFor(x, y, width, height) == TapZones::Zone::Centre;
 }
 

@@ -50,20 +50,18 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
     BOOK_INFO,
   };
 
-  explicit EpubReaderMenuActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title,
-                                  const int currentPage, const int totalPages, const int bookProgressPercent,
-                                  const uint8_t currentOrientation, const bool hasFootnotes,
-                                  const int8_t initialEmbeddedStyleOverride, const int8_t initialImageRenderingOverride,
-                                  const int8_t initialFontFamilyOverride,
-                                  const std::string& initialSdFontFamilyOverride, const int8_t initialFontSizeOverride,
-                                  const uint8_t initialTextDarkness, const int8_t initialBionicReadingOverride,
-                                  const int8_t initialGuideDotsOverride, const int8_t initialParagraphAlignmentOverride,
-                                  const int8_t initialTextAntiAliasingOverride, const int8_t initialHyphenationOverride,
-                                  const int8_t initialFontSizeNormalizationOverride,
-                                  const int8_t initialInlineFootnotePreviewsOverride,
-                                  const int8_t initialLineSpacingOverride, const int8_t initialVerticalTextOverride,
-                                  const bool verticalAllowed, const bool hasStarredPages,
-                                  const bool isCurrentPageStarred, const bool hasPrintedPages);
+  explicit EpubReaderMenuActivity(
+      GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title, const int currentPage,
+      const int totalPages, const int bookProgressPercent, const uint8_t currentOrientation, const bool hasFootnotes,
+      const int8_t initialEmbeddedStyleOverride, const int8_t initialImageRenderingOverride,
+      const int8_t initialFontFamilyOverride, const std::string& initialSdFontFamilyOverride,
+      const int8_t initialFontSizeOverride, const uint8_t initialTextDarkness,
+      const int8_t initialBionicReadingOverride, const int8_t initialGuideDotsOverride,
+      const int8_t initialParagraphAlignmentOverride, const int8_t initialTextAntiAliasingOverride,
+      const int8_t initialHyphenationOverride, const int8_t initialFontSizeNormalizationOverride,
+      const int8_t initialInlineFootnotePreviewsOverride, const int8_t initialLineSpacingOverride,
+      const int8_t initialVerticalTextOverride, const bool verticalAllowed, const bool hasStarredPages,
+      const bool isCurrentPageStarred, const bool hasPrintedPages, const bool wordLookupAvailable);
 
   void onExit() override;
 
@@ -71,7 +69,8 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
   enum class MenuTab : uint8_t { Navigation, Settings, Sync, Tools, Count };
   static constexpr size_t MENU_TAB_COUNT = static_cast<size_t>(MenuTab::Count);
 
-  void buildMenuItems(bool hasFootnotes, bool hasStarredPages, bool hasPrintedPages, bool verticalAllowed);
+  void buildMenuItems(bool hasFootnotes, bool hasStarredPages, bool hasPrintedPages, bool verticalAllowed,
+                      bool wordLookupAvailable);
   [[nodiscard]] MenuTab activeTab() const { return visibleTabs[selectedTab()]; }
   [[nodiscard]] size_t activeTabIndex() const { return static_cast<size_t>(activeTab()); }
   [[nodiscard]] std::vector<SettingInfo>& activeMenuItems() { return tabMenuItems[activeTabIndex()]; }
