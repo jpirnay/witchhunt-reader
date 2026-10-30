@@ -22,9 +22,9 @@ TEST(ButtonActionMirror, AMirrorOfAMirrorIsTheAction) {
 }
 
 TEST(ButtonActionMirror, OtherActionsAreUnchanged) {
-  for (const uint8_t a : {S::BTN_DEFAULT, S::BTN_GO_HOME, S::BTN_OPEN_TOC, S::BTN_READER_MENU, S::BTN_IGNORE,
-                          S::BTN_FONT_SIZE_SMALLER, S::BTN_FONT_SIZE_LARGER, S::BTN_CYCLE_ORIENTATION,
-                          S::BTN_CYCLE_ORIENTATION_BACK}) {
+  for (const uint8_t a :
+       {S::BTN_DEFAULT, S::BTN_GO_HOME, S::BTN_OPEN_TOC, S::BTN_READER_MENU, S::BTN_IGNORE, S::BTN_FONT_SIZE_SMALLER,
+        S::BTN_FONT_SIZE_LARGER, S::BTN_CYCLE_ORIENTATION, S::BTN_CYCLE_ORIENTATION_BACK}) {
     EXPECT_EQ(a, S::mirroredDirection(a)) << int(a);
   }
 }
