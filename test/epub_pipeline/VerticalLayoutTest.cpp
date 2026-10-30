@@ -356,6 +356,31 @@ TEST_F(VerticalLayout, AFailedLoadTakesTheRequestItWasGiven) {
   expectFlow(mismatched, false, true, "a mismatched header, under Automatic");
 }
 
+// The colophon of test_vertical_text sets horizontal-tb on its <body>: it stays horizontal under Automatic, and still
+// turns right to left with the book. Off keeps both sections as they were before the step.
+TEST_F(VerticalLayout, AColophonStaysHorizontalAndTurnsRightToLeft) {
+  auto epub = std::make_shared<Epub>(std::string(CORPUS_DIR) + "/test_vertical_text.epub", (work / "cache").string());
+  ASSERT_TRUE(epub->load(true));
+  ASSERT_EQ(2, epub->getSpineItemsCount());
+  GfxRenderer renderer;
+  const auto flowOf = [&](const int spine, const VerticalText request) {
+    Section section(epub, spine, renderer);
+    EXPECT_TRUE(section.createSectionFile(params(request), {}, /*skipEviction=*/true));
+    return section.flowContext();
+  };
+  const FlowContext chapter = flowOf(0, VerticalText::Automatic);
+  EXPECT_TRUE(chapter.vertical);
+  EXPECT_TRUE(chapter.pageProgressionRtl);
+  const FlowContext colophon = flowOf(1, VerticalText::Automatic);
+  EXPECT_FALSE(colophon.vertical);
+  EXPECT_TRUE(colophon.pageProgressionRtl);
+  for (const int spine : {0, 1}) {
+    const FlowContext off = flowOf(spine, VerticalText::Off);
+    EXPECT_FALSE(off.vertical) << "spine " << spine;
+    EXPECT_FALSE(off.pageProgressionRtl) << "spine " << spine;
+  }
+}
+
 // XHTML names its elements in lower case, but a book written as HTML may not: the section still decides at its body,
 // not at an element of an upper-case head.
 TEST_F(VerticalLayout, AnUppercaseHeadIsNotTheBody) {

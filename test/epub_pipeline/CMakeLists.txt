@@ -140,6 +140,7 @@ add_executable(EpubPipelineTest
   BufferedPrintTest.cpp
   VerticalPageTest.cpp
   VerticalLayoutTest.cpp
+  VerticalRulesTest.cpp
   CoverPipelineTest.cpp
   CoverWrapperTest.cpp
   CoverFallbackTest.cpp
