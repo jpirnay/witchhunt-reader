@@ -938,6 +938,8 @@ void ChapterHtmlSlimParser::decideFrame(const CssWritingMode rootMode) {
   frameDecided_ = true;
   vertical_ = FlowContext::verticalFor(verticalRequest_, rootMode, pageProgression_);
   if (vertical_) std::swap(viewportWidth, viewportHeight);
+  // The block setup() opened before <body> measures as the section does.
+  if (currentTextBlock) currentTextBlock->setVertical(vertical_);
   LOG_INF("EHP", "Section set %s (request %u, root %u, ppd %u)", vertical_ ? "vertical-rl" : "horizontal-tb",
           static_cast<unsigned>(verticalRequest_), static_cast<unsigned>(rootMode),
           static_cast<unsigned>(pageProgression_));
@@ -2033,7 +2035,10 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     currentTextBlock.reset(new (std::nothrow) ParsedText(extraParagraphSpacing, hyphenationEnabled,
                                                          blockStyleWithIndent, bionicReadingEnabled));
   }
-  if (currentTextBlock) currentTextBlock->setTypography(typography_);
+  if (currentTextBlock) {
+    currentTextBlock->setTypography(typography_);
+    currentTextBlock->setVertical(vertical_);
+  }
   wireTextBlock();
   wordsExtractedInBlock = 0;
 }
@@ -2442,6 +2447,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     row.cells.back().text =
         std::unique_ptr<ParsedText>(new ParsedText(false, false));  // no paragraph spacing, no hyphenation in cells
     row.cells.back().text->setTypography(self->typography_);
+    row.cells.back().text->setVertical(self->vertical_);
     self->currentTable->pendingRowBytes += TABLE_BUFFER_BYTES_PER_CELL;
     row.effectiveCols = static_cast<uint8_t>(row.effectiveCols + colSpan);
     // Column overflow: this row cannot be a grid row. Not degraded here — the cell just created is
@@ -5394,6 +5400,7 @@ bool ChapterHtmlSlimParser::degradeRowAtOpenCell(const char* reason) {
   }
   open.text = std::unique_ptr<ParsedText>(new ParsedText(false, false));
   open.text->setTypography(typography_);
+  open.text->setVertical(vertical_);
 
   t.pendingRow.cells.push_back(std::move(open));
   t.pendingRow.effectiveCols = 0;

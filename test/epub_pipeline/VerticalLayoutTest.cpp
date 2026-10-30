@@ -533,3 +533,63 @@ TEST_F(VerticalLayout, AHorizontalImageIsNotTurned) {
   EXPECT_NE(std::string::npos, off.find("w=200 h=400 ")) << off;
   EXPECT_EQ(std::string::npos, off.find("turned")) << off;
 }
+
+namespace {
+struct DumpedWord {
+  int line;
+  int x;
+  std::string text;
+};
+
+// Every W record of the dump with the index of the line it is on.
+std::vector<DumpedWord> dumpedWords(const std::string& dump) {
+  std::vector<DumpedWord> words;
+  std::istringstream in(dump);
+  std::string row;
+  int line = -1;
+  while (std::getline(in, row)) {
+    if (row.rfind("  LINE ", 0) == 0) {
+      ++line;
+    } else if (row.rfind("   W x=", 0) == 0 && line >= 0) {
+      const size_t t = row.find(" t=");
+      if (t == std::string::npos) continue;
+      words.push_back({line, std::stoi(row.substr(7)), row.substr(t + 3)});
+    }
+  }
+  return words;
+}
+
+int occurrences(const std::string& text, const std::string& what) {
+  int count = 0;
+  for (size_t at = text.find(what); at != std::string::npos; at = text.find(what, at + what.size())) ++count;
+  return count;
+}
+}  // namespace
+
+// × and § are upright in a column (one em, 16 in the stub) and 11 and 12 wide across a line.
+TEST_F(VerticalLayout, AnUprightCharacterAdvancesOneEm) {
+  const std::string xhtml = document("<p>あ×い §を×え</p>");
+  pipeline_harness::Profile on = profileOf(VerticalText::On, 460, 760);
+  pipeline_harness::Profile off = profileOf(VerticalText::Off, 760, 460);
+  on.paragraphAlignment = 1;
+  off.paragraphAlignment = 1;
+  const std::vector<DumpedWord> vertical = dumpedWords(dump("", xhtml, on));
+  const std::vector<DumpedWord> horizontal = dumpedWords(dump("", xhtml, off));
+  ASSERT_FALSE(vertical.empty());
+  ASSERT_EQ(horizontal.size(), vertical.size());
+  int shift = 0;
+  int lineOfShift = -1;
+  int moved = 0;
+  for (size_t i = 0; i < vertical.size(); ++i) {
+    ASSERT_EQ(horizontal[i].text, vertical[i].text);
+    ASSERT_EQ(horizontal[i].line, vertical[i].line);
+    if (vertical[i].line != lineOfShift) {
+      lineOfShift = vertical[i].line;
+      shift = 0;
+    }
+    EXPECT_EQ(horizontal[i].x + shift, vertical[i].x) << "word " << i << " " << vertical[i].text;
+    if (shift != 0) ++moved;
+    shift += 5 * occurrences(vertical[i].text, "\xC3\x97") + 4 * occurrences(vertical[i].text, "\xC2\xA7");
+  }
+  EXPECT_GT(moved, 0);
+}

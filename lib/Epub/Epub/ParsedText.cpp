@@ -17,6 +17,7 @@
 #include "CjkPunctuation.h"
 #include "Epub/VisibleText.h"
 #include "TextEmphasis.h"
+#include "VerticalDraw.h"
 #include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
 
@@ -102,19 +103,22 @@ void stripSoftHyphensInPlace(std::string& word) {
 // Uses advance width (sum of glyph advances + kerning) rather than bounding box width so that italic glyph overhangs
 // don't inflate inter-word spacing.
 uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const std::string& word,
-                          const EpdFontFamily::Style style, const bool appendHyphen = false, const float scale = 1.0f) {
+                          const EpdFontFamily::Style style, const bool appendHyphen = false, const float scale = 1.0f,
+                          const bool vertical = false) {
   int raw = 0;
   if (word.size() == 1 && word[0] == ' ' && !appendHyphen) {
     raw = renderer.getSpaceWidth(fontId, style);
   } else {
     const bool hasSoftHyphen = containsSoftHyphen(word);
     if (!hasSoftHyphen && !appendHyphen) {
-      raw = renderer.getTextAdvanceX(fontId, word.c_str(), style);
+      raw = vertical ? verticalTextAdvance(renderer, fontId, word.c_str(), style, 1.0f)
+                     : renderer.getTextAdvanceX(fontId, word.c_str(), style);
     } else {
       std::string sanitized = word;
       if (hasSoftHyphen) stripSoftHyphensInPlace(sanitized);
       if (appendHyphen) sanitized.push_back('-');
-      raw = renderer.getTextAdvanceX(fontId, sanitized.c_str(), style);
+      raw = vertical ? verticalTextAdvance(renderer, fontId, sanitized.c_str(), style, 1.0f)
+                     : renderer.getTextAdvanceX(fontId, sanitized.c_str(), style);
     }
   }
   if (scale == 1.0f) return static_cast<uint16_t>(raw);
@@ -892,7 +896,8 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
   out.reserve(words.size());
 
   for (size_t i = 0; i < words.size(); ++i) {
-    out.push_back(measureWordWidth(renderer, wordFontId(i, fontId), words[i], wordStyles[i], false, wordScale(i)));
+    out.push_back(
+        measureWordWidth(renderer, wordFontId(i, fontId), words[i], wordStyles[i], false, wordScale(i), vertical_));
   }
   applyPunctuationWidths(renderer, fontId, out);
   // After the marks are narrowed: a narrowed mark lends a ruby only its narrowed width.
@@ -1666,7 +1671,8 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
     }
 
     const bool needsHyphen = info.requiresInsertedHyphen;
-    const int prefixWidth = measureWordWidth(renderer, font, word.substr(0, offset), style, needsHyphen, scale);
+    const int prefixWidth =
+        measureWordWidth(renderer, font, word.substr(0, offset), style, needsHyphen, scale, vertical_);
     if (prefixWidth > availableWidth || prefixWidth <= chosenWidth) {
       continue;  // Skip if too wide or not an improvement
     }
@@ -1727,7 +1733,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 
   // Update cached widths to reflect the new prefix/remainder pairing.
   wordWidths[wordIndex] = static_cast<uint16_t>(chosenWidth);
-  const uint16_t remainderWidth = measureWordWidth(renderer, font, remainder, style, false, scale);
+  const uint16_t remainderWidth = measureWordWidth(renderer, font, remainder, style, false, scale, vertical_);
   wordWidths.insert(wordWidths.begin() + wordIndex + 1, remainderWidth);
   markClass_.insert(markClass_.begin() + wordIndex + 1, static_cast<uint8_t>(CjkPunctuation::Class::None));
   edgeTrim_.insert(edgeTrim_.begin() + wordIndex + 1, 0);
@@ -1896,7 +1902,8 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     const auto* p = reinterpret_cast<const unsigned char*>(words[i].c_str());
     const uint32_t cp = utf8NextCodepoint(&p);
     if (cp == 0 || *p != 0 || CjkPunctuation::classOf(cp) == CjkPunctuation::Class::None) return 0;
-    const int natural = measureWordWidth(renderer, wordFontId(i, fontId), words[i], wordStyles[i], false, wordScale(i));
+    const int natural =
+        measureWordWidth(renderer, wordFontId(i, fontId), words[i], wordStyles[i], false, wordScale(i), vertical_);
     if (box >= natural) return 0;
     int inkLeft = 0;
     int inkWidth = 0;
