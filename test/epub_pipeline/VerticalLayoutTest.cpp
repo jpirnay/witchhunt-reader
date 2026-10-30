@@ -15,8 +15,11 @@
 #include "Epub.h"
 #include "Epub/Page.h"
 #include "Epub/Section.h"
+#include "Epub/blocks/ImageBlock.h"
+#include "LogObserver.h"
 #include "PipelineRunner.h"
 #include "StoredZipWriter.h"
+#include "SyntheticBook.h"
 
 namespace fs = std::filesystem;
 
@@ -115,7 +118,7 @@ struct VerticalLayout : testing::Test {
 
   // A one-chapter book of `xhtml` with `css` as its stylesheet, in `language`; `spineAttrs` go on its OPF's <spine>.
   std::string writeBook(const std::string& css, const std::string& xhtml, const std::string& spineAttrs = "",
-                        const std::string& language = "ja") {
+                        const std::string& language = "ja", const std::vector<SyntheticFile>& extra = {}) {
     const int index = books++;
     test_zip::StoredZipWriter zip;
     zip.add("mimetype", "application/epub+zip");
@@ -123,6 +126,12 @@ struct VerticalLayout : testing::Test {
             "<?xml version=\"1.0\"?>\n<container version=\"1.0\" "
             "xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles><rootfile "
             "full-path=\"content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles>\n</container>\n");
+    std::string items;
+    for (size_t i = 0; i < extra.size(); ++i) {
+      items += "<item id=\"x" + std::to_string(i) + "\" href=\"" + extra[i].href + "\" media-type=\"" +
+               extra[i].mediaType + "\"/>\n";
+      zip.add(extra[i].href, extra[i].bytes);
+    }
     zip.add("content.opf",
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
             "version=\"3.0\" unique-identifier=\"id\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
@@ -130,8 +139,8 @@ struct VerticalLayout : testing::Test {
                 language +
                 "</dc:language></metadata>\n<manifest>\n"
                 "<item id=\"c\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
-                "<item id=\"s\" href=\"style.css\" media-type=\"text/css\"/>\n</manifest>\n<spine" +
-                spineAttrs + "><itemref idref=\"c\"/></spine>\n</package>\n");
+                "<item id=\"s\" href=\"style.css\" media-type=\"text/css\"/>\n" +
+                items + "</manifest>\n<spine" + spineAttrs + "><itemref idref=\"c\"/></spine>\n</package>\n");
     zip.add("chapter.xhtml", xhtml);
     zip.add("style.css", std::string(kBaseCss) + css);
     const fs::path path = work / ("book" + std::to_string(index) + ".epub");
@@ -141,8 +150,8 @@ struct VerticalLayout : testing::Test {
 
   // The book built and dumped in a cache of its own.
   std::string dump(const std::string& css, const std::string& xhtml, const pipeline_harness::Profile& profile,
-                   const std::string& spineAttrs = "") {
-    const std::string path = writeBook(css, xhtml, spineAttrs);
+                   const std::string& spineAttrs = "", const std::vector<SyntheticFile>& extra = {}) {
+    const std::string path = writeBook(css, xhtml, spineAttrs, "ja", extra);
     std::ostringstream out;
     EXPECT_TRUE(pipeline_harness::runAndDump(path, path + ".cache", profile, out)) << out.str();
     return out.str();
@@ -406,4 +415,121 @@ TEST_F(VerticalLayout, ADropCapStaysInItsLine) {
   const std::string vertical = dump("", xhtml, profileOf(VerticalText::On));
   EXPECT_TRUE(firstSpineVertical(vertical));
   EXPECT_FALSE(hasLine(parseLines(vertical), "吾")) << "a drop cap's ink metrics are horizontal";
+}
+
+namespace {
+int g_boundsRejected = 0;
+void countBoundsRejected(const char*, const char*, const char* message) {
+  if (std::string(message).find("Render bounds rejected") != std::string::npos) ++g_boundsRejected;
+}
+
+std::vector<SyntheticFile> png(const uint32_t width, const uint32_t height) {
+  return {{"img.png", "image/png", syntheticPngHeader(width, height)}};
+}
+constexpr const char* kImageBody = "<p><img src=\"img.png\" alt=\"\"/></p>";
+}  // namespace
+
+TEST_F(VerticalLayout, APortraitImageIsSizedTurnedIntoTheColumns) {
+  const std::string on = dump("", document(kImageBody), profileOf(VerticalText::On), "", png(200, 400));
+  EXPECT_NE(std::string::npos, on.find("x=180 w=400 h=200 ")) << on;
+  EXPECT_NE(std::string::npos, on.find(" turned=1\n")) << on;
+  const std::string path = writeBook("", document(kImageBody), "", "ja", png(200, 400));
+  int images = 0;
+  EXPECT_TRUE(pipeline_harness::forEachPage(
+      path, path + ".cache", profileOf(VerticalText::On), [&](int, const Section&, const Page& page, GfxRenderer&) {
+        for (const auto& e : page.elements) {
+          if (e->getTag() != TAG_PageImage) continue;
+          const ImageBlock& ib = static_cast<const PageImage&>(*e).getImageBlock();
+          EXPECT_TRUE(ib.isTurned());
+          EXPECT_EQ(200, ib.drawnWidth());
+          EXPECT_EQ(400, ib.drawnHeight());
+          ++images;
+        }
+      }));
+  EXPECT_EQ(1, images);
+}
+
+TEST_F(VerticalLayout, ALandscapeImageIsSizedTurned) {
+  const std::string path = writeBook("", document(kImageBody), "", "ja", png(400, 200));
+  const std::string on = dump("", document(kImageBody), profileOf(VerticalText::On), "", png(400, 200));
+  EXPECT_NE(std::string::npos, on.find("x=280 w=200 h=400 ")) << on;
+  EXPECT_NE(std::string::npos, on.find(" turned=1\n")) << on;
+  int images = 0;
+  EXPECT_TRUE(pipeline_harness::forEachPage(
+      path, path + ".cache", profileOf(VerticalText::On), [&](int, const Section&, const Page& page, GfxRenderer&) {
+        for (const auto& e : page.elements) {
+          if (e->getTag() != TAG_PageImage) continue;
+          const ImageBlock& ib = static_cast<const PageImage&>(*e).getImageBlock();
+          EXPECT_EQ(400, ib.drawnWidth());
+          EXPECT_EQ(200, ib.drawnHeight());
+          ++images;
+        }
+      }));
+  EXPECT_EQ(1, images);
+}
+
+TEST_F(VerticalLayout, AnImageTallerThanThePageIsScaledNotSliced) {
+  const std::string on = dump("", document(kImageBody), profileOf(VerticalText::On), "", png(230, 1520));
+  EXPECT_NE(std::string::npos, on.find("x=0 w=760 h=115 ")) << on;
+  size_t images = 0;
+  for (size_t at = on.find("  IMG "); at != std::string::npos; at = on.find("  IMG ", at + 1)) ++images;
+  EXPECT_EQ(1u, images) << on;
+  const std::string path = writeBook("", document(kImageBody), "", "ja", png(230, 1520));
+  EXPECT_TRUE(pipeline_harness::forEachPage(
+      path, path + ".cache", profileOf(VerticalText::On), [&](int, const Section&, const Page& page, GfxRenderer&) {
+        for (const auto& e : page.elements) {
+          if (e->getTag() != TAG_PageImage) continue;
+          const ImageBlock& ib = static_cast<const PageImage&>(*e).getImageBlock();
+          EXPECT_EQ(115, ib.drawnWidth());
+          EXPECT_EQ(760, ib.drawnHeight());
+        }
+      }));
+}
+
+TEST_F(VerticalLayout, ACellImageIsTurned) {
+  const std::string body = "<table><tr><td><img src=\"img.png\" alt=\"\"/></td></tr></table>";
+  const std::string dumped = dump("", document(body), profileOf(VerticalText::On), "", png(200, 400));
+  EXPECT_NE(std::string::npos, dumped.find("CELLIMG ")) << dumped;
+  EXPECT_NE(std::string::npos, dumped.find(" turned=1\n")) << dumped;
+  const std::string path = writeBook("", document(body), "", "ja", png(200, 400));
+  int cellImages = 0;
+  EXPECT_TRUE(pipeline_harness::forEachPage(
+      path, path + ".cache", profileOf(VerticalText::On), [&](int, const Section&, const Page& page, GfxRenderer&) {
+        for (const auto& e : page.elements) {
+          if (e->getTag() != TAG_PageTable) continue;
+          for (const auto& row : static_cast<const PageTableFragment&>(*e).getRows()) {
+            for (const auto& cell : row.cells) {
+              if (!cell.image) continue;
+              EXPECT_TRUE(cell.image->isTurned());
+              EXPECT_EQ(cell.image->getHeight(), cell.image->drawnWidth());
+              EXPECT_EQ(cell.image->getWidth(), cell.image->drawnHeight());
+              ++cellImages;
+            }
+          }
+        }
+      }));
+  EXPECT_EQ(1, cellImages);
+}
+
+TEST_F(VerticalLayout, ATurnedImageDrawsInsideTheReadersScreen) {
+  const std::string path = writeBook("", document(kImageBody), "", "ja", png(230, 1520));
+  g_boundsRejected = 0;
+  setLogObserver(countBoundsRejected);
+  int pages = 0;
+  const bool ok = pipeline_harness::forEachPage(path, path + ".cache", profileOf(VerticalText::On),
+                                                [&](int, const Section&, const Page& page, GfxRenderer& r) {
+                                                  page.render(r, 1, 10, 20, /*forceLoadLargeImages=*/true);
+                                                  EXPECT_EQ(GfxRenderer::Portrait, r.getOrientation());
+                                                  ++pages;
+                                                });
+  setLogObserver(nullptr);
+  EXPECT_TRUE(ok);
+  EXPECT_GT(pages, 0);
+  EXPECT_EQ(0, g_boundsRejected);
+}
+
+TEST_F(VerticalLayout, AHorizontalImageIsNotTurned) {
+  const std::string off = dump("", document(kImageBody), profileOf(VerticalText::Off), "", png(200, 400));
+  EXPECT_NE(std::string::npos, off.find("w=200 h=400 ")) << off;
+  EXPECT_EQ(std::string::npos, off.find("turned")) << off;
 }

@@ -152,6 +152,7 @@ TEST(LowHeapLoad, LongStoredAltTextIsCutOnLoad) {
     serialization::writeString(out, std::string("OEBPS/img/1.jpg"));
     serialization::writePod(out, static_cast<int16_t>(0));
     serialization::writePod(out, static_cast<int16_t>(120));
+    serialization::writePod(out, static_cast<uint8_t>(0));          // flags
     serialization::writePod(out, static_cast<uint32_t>(0xC0FFEE));  // whatever follows the block
     out.close();
   }

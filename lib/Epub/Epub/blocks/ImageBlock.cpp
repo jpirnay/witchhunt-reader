@@ -11,6 +11,7 @@
 
 #include "../../../../src/fontIds.h"
 #include "../../Epub.h"
+#include "../TurnedFrame.h"
 #include "../converters/DirectPixelWriter.h"
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/PixelCache.h"
@@ -408,7 +409,30 @@ bool ImageBlock::wouldShowPlaceholder(bool forceLoad, bool monochromeOutput) con
   return isLargeImage();
 }
 
+namespace {
+// Runs `draw(readerX, readerY)` with the renderer in the held orientation for a turned block at content-frame (x, y)
+// of a box w by h, and puts the live orientation back.
+template <typename Draw>
+void inReadersFrame(const GfxRenderer& renderer, const int x, const int y, const int w, const int h, Draw draw) {
+  const GfxRenderer::Orientation live = renderer.getOrientation();
+  const GfxRenderer::Orientation held = renderer.getHeldOrientation();
+  const turnedframe::Rect at = turnedframe::toReader(renderer.getScreenWidth(held), {x, y, w, h});
+  renderer.setDrawOrientation(held);
+  draw(at.x, at.y);
+  renderer.setDrawOrientation(live);
+}
+}  // namespace
+
 void ImageBlock::renderGrayscaleFromCache(GfxRenderer& renderer, const int x, const int y) const {
+  if (turned_) {
+    inReadersFrame(renderer, x, y, getWidth(), getHeight(),
+                   [&](const int rx, const int ry) { renderGrayscaleUpright(renderer, rx, ry); });
+    return;
+  }
+  renderGrayscaleUpright(renderer, x, y);
+}
+
+void ImageBlock::renderGrayscaleUpright(GfxRenderer& renderer, const int x, const int y) const {
   renderFromCache(renderer, getGrayscaleCachePath(imagePath), x, y, width, height, srcYOffset_, srcHeight_);
 }
 
@@ -417,6 +441,7 @@ std::unique_ptr<ImageBlock> ImageBlock::makeCrop(const int16_t srcYOffset, const
       std::unique_ptr<ImageBlock>(new ImageBlock(imagePath, width, height, altText, epubFilePath_, epubEntryPath_));
   crop->srcYOffset_ = srcYOffset;
   crop->srcHeight_ = srcHeight;
+  crop->turned_ = turned_;
   return crop;
 }
 
@@ -458,6 +483,17 @@ void ImageBlock::renderPlaceholder(GfxRenderer& renderer, const int x, const int
 
 void ImageBlock::render(GfxRenderer& renderer, const int x, const int y, const bool forceLoad,
                         const bool monochromeOutput, const bool alsoCacheOtherVariant) {
+  if (turned_) {
+    inReadersFrame(renderer, x, y, getWidth(), getHeight(), [&](const int rx, const int ry) {
+      renderUpright(renderer, rx, ry, forceLoad, monochromeOutput, alsoCacheOtherVariant);
+    });
+    return;
+  }
+  renderUpright(renderer, x, y, forceLoad, monochromeOutput, alsoCacheOtherVariant);
+}
+
+void ImageBlock::renderUpright(GfxRenderer& renderer, const int x, const int y, const bool forceLoad,
+                               const bool monochromeOutput, const bool alsoCacheOtherVariant) {
   // The font-prewarm scan pass only accumulates glyphs; an image contributes
   // none, and its DirectPixelWriter output bypasses the renderer's scan-mode
   // suppression, so it would otherwise do a full (discarded) cache render every
@@ -627,6 +663,7 @@ bool ImageBlock::serialize(FsFile& file) {
   serialization::writeString(file, epubEntryPath_);
   serialization::writePod(file, srcYOffset_);
   serialization::writePod(file, srcHeight_);
+  serialization::writePod(file, static_cast<uint8_t>(turned_ ? 1 : 0));  // flags: bit 0 turned
   return true;
 }
 
@@ -643,9 +680,12 @@ std::unique_ptr<ImageBlock> ImageBlock::deserialize(FsFile& file) {
   int16_t srcYOffset = 0, srcHeight = 0;
   serialization::readPod(file, srcYOffset);
   serialization::readPod(file, srcHeight);
+  uint8_t flags = 0;
+  serialization::readPod(file, flags);
   auto block = std::unique_ptr<ImageBlock>(
       new ImageBlock(std::move(path), w, h, std::move(alt), std::move(epubFile), std::move(epubEntry)));
   block->srcYOffset_ = srcYOffset;
   block->srcHeight_ = srcHeight;
+  block->turned_ = (flags & 1) != 0;
   return block;
 }

@@ -36,7 +36,7 @@ namespace {
 constexpr uint8_t SECTION_FILE_VERSION = 104;  // v104: a section may be set vertical-rl: the header keeps the
                                                // vertical-text request and a status bit the outcome; a page
                                                // keeps its block extent (after its element count), a line
-                                               // its column bit
+                                               // its column bit; an image a flags byte (bit 0 turned)
                                                // v103: a quarter em between Han or kana and Latin in zh/ja
                                                // books; lines push CJK punctuation in before breaking
                                                // earlier

@@ -88,7 +88,8 @@ void dumpTableFragment(std::ostream& out, const PageTableFragment& tbl, const st
       }
       if (cell.image) {
         out << "     CELLIMG w=" << cell.image->getWidth() << " h=" << cell.image->getRenderedHeight()
-            << " src=" << normalizePath(cell.image->getImagePath(), cacheDir) << "\n";
+            << " src=" << normalizePath(cell.image->getImagePath(), cacheDir)
+            << (cell.image->isTurned() ? " turned=1" : "") << "\n";
       }
     }
   }
@@ -107,7 +108,7 @@ void dumpPage(std::ostream& out, const Page& page, const uint16_t pageIndex, con
         const auto& img = static_cast<const PageImage&>(*el);
         const auto& ib = img.getImageBlock();
         out << "  IMG y=" << img.yPos << " x=" << img.xPos << " w=" << ib.getWidth() << " h=" << ib.getRenderedHeight()
-            << " src=" << normalizePath(ib.getImagePath(), cacheDir) << "\n";
+            << " src=" << normalizePath(ib.getImagePath(), cacheDir) << (ib.isTurned() ? " turned=1" : "") << "\n";
         break;
       }
       case TAG_PageTable:

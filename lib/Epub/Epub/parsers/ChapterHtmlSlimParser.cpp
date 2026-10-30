@@ -1660,6 +1660,7 @@ void ChapterHtmlSlimParser::attachPendingFloatImage(BlockStyle& bs) {
   auto fullImageBlock =
       makeUniqueNoThrow<ImageBlock>(pendingInlineImage_.cachedPath, imgW, imgH, pendingInlineImage_.alt,
                                     epub->getPath(), pendingInlineImage_.epubEntryPath);
+  turnIfVertical(fullImageBlock.get());
   auto pageImage = fullImageBlock ? makeUniqueNoThrow<PageImage>(std::move(fullImageBlock), imgX, top) : nullptr;
   if (!pageImage) {
     LOG_ERR("EHP", "Float image dropped: allocation failed");
@@ -2652,6 +2653,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
               }
             }
             if (dimsOk) {
+              self->turnIfVertical(dims);
               LOG_TRC("EHP", "Image dimensions: %dx%d", dims.width, dims.height);
               {
                 int displayWidth = 0;
@@ -2883,6 +2885,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                   LOG_ERR("EHP", "Failed to create ImageBlock");
                   return;
                 }
+                self->turnIfVertical(imageBlock.get());
                 int xPos = (self->viewportWidth - displayWidth) / 2;
                 auto pageImage = makeUniqueNoThrow<PageImage>(std::move(imageBlock), xPos, self->currentPageNextY);
                 if (!pageImage) {
@@ -5171,6 +5174,7 @@ std::unique_ptr<ImageBlock> ChapterHtmlSlimParser::buildImageFromEpubPath(
   }
   if (nativeWidth) *nativeWidth = static_cast<uint16_t>(std::min<uint32_t>(dims.width, UINT16_MAX));
   if (nativeHeight) *nativeHeight = static_cast<uint16_t>(std::min<uint32_t>(dims.height, UINT16_MAX));
+  turnIfVertical(dims);
 
   // Scale to fit the cell box, preserving aspect ratio. Never upscale.
   float scale = 1.0f;
@@ -5182,8 +5186,18 @@ std::unique_ptr<ImageBlock> ChapterHtmlSlimParser::buildImageFromEpubPath(
 
   const std::string cachedPath = imageCachePathFor(imageBasePath, resolvedPath);
 
-  return makeUniqueNoThrow<ImageBlock>(cachedPath, static_cast<int16_t>(displayWidth),
-                                       static_cast<int16_t>(displayHeight), alt, epub->getPath(), resolvedPath);
+  auto image = makeUniqueNoThrow<ImageBlock>(cachedPath, static_cast<int16_t>(displayWidth),
+                                             static_cast<int16_t>(displayHeight), alt, epub->getPath(), resolvedPath);
+  turnIfVertical(image.get());
+  return image;
+}
+
+void ChapterHtmlSlimParser::turnIfVertical(ImageDimensions& dims) const {
+  if (vertical_) std::swap(dims.width, dims.height);
+}
+
+void ChapterHtmlSlimParser::turnIfVertical(ImageBlock* image) const {
+  if (vertical_ && image) image->setTurned();
 }
 
 void ChapterHtmlSlimParser::noteBackgroundImage(const char* name, const std::string& classAttr,
@@ -5253,7 +5267,8 @@ void ChapterHtmlSlimParser::placeImageBlockAsBlock(std::unique_ptr<ImageBlock> i
 
   const int xPos = (viewportWidth - displayWidth) / 2;
 
-  if (displayHeight <= viewportHeight) {
+  // A turned image was sized to fit the viewport, and is never sliced.
+  if (displayHeight <= viewportHeight || image->isTurned()) {
     auto pageImage = makeUniqueNoThrow<PageImage>(std::move(image), xPos, currentPageNextY);
     if (!pageImage) {
       LOG_ERR("EHP", "Image dropped: PageImage allocation failed");

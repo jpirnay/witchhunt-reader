@@ -861,6 +861,10 @@ class ChapterHtmlSlimParser final : public Print {
   void placeBackgroundImage(const std::string& resolvedPath);
   // Place an already-built ImageBlock as a centered, full-width block element, page-breaking if needed.
   void placeImageBlockAsBlock(std::unique_ptr<ImageBlock> image);
+  // In a vertical section an image is sized in the content frame as its turned self: native width and height swap
+  // before sizing, and the block it becomes is turned (drawn upright in the reader's frame).
+  void turnIfVertical(ImageDimensions& dims) const;
+  void turnIfVertical(ImageBlock* image) const;
   // Emit currentPage to the consumer while keeping paragraphLutPerPage and completedPageCount
   // in lockstep. Every page break MUST go through this helper; open-coded completePageFn
   // calls risk desynchronising paragraphLutPerPage and failing the size check in Section.cpp.
