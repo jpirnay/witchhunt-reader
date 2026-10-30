@@ -2,8 +2,10 @@
 // Against the pipeline shim: em 16 for a CJK character, ascender 18, a 480 px wide Portrait screen.
 #include <CooperativeAbort.h>
 #include <GfxRenderer.h>
+#include <Serialization.h>
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -41,6 +43,25 @@ Page pageOf(const bool vertical) {
 }
 
 bool alwaysAbort() { return true; }
+
+std::string tempPath(const std::string& name) {
+  const auto dir = std::filesystem::temp_directory_path() / "vertical_page_test";
+  std::filesystem::create_directories(dir);
+  return (dir / name).string();
+}
+
+// serialize() then deserialize() through a file.
+std::unique_ptr<Page> roundTrip(const Page& page, const std::string& name) {
+  const std::string path = tempPath(name);
+  FsFile out;
+  if (!Storage.openFileForWrite("TST", path, out) || !page.serialize(out)) return nullptr;
+  out.close();
+  FsFile in;
+  if (!Storage.openFileForRead("TST", path, in)) return nullptr;
+  auto loaded = Page::deserialize(in);
+  in.close();
+  return loaded;
+}
 
 }  // namespace
 
@@ -99,4 +120,32 @@ TEST(VerticalPage, AHorizontalPageDrawsAsBefore) {
   EXPECT_EQ(10, draws[0].x);
   EXPECT_EQ(20, draws[0].y);
   EXPECT_EQ(GfxRenderer::Portrait, r.getOrientation());
+}
+
+TEST(VerticalPage, TheBlockExtentSurvivesTheSectionFile) {
+  const auto loaded = roundTrip(pageOf(true), "vertical.bin");
+  ASSERT_TRUE(loaded);
+  EXPECT_EQ(460u, loaded->verticalBlockExtent);
+  EXPECT_TRUE(loaded->isVertical());
+  EXPECT_EQ(1u, loaded->elements.size());
+}
+
+TEST(VerticalPage, AHorizontalPageStaysHorizontalThroughTheSectionFile) {
+  const auto loaded = roundTrip(pageOf(false), "horizontal.bin");
+  ASSERT_TRUE(loaded);
+  EXPECT_EQ(0u, loaded->verticalBlockExtent);
+  EXPECT_FALSE(loaded->isVertical());
+  EXPECT_EQ(1u, loaded->elements.size());
+}
+
+TEST(VerticalPage, AFileCutAfterTheElementCountDoesNotLoad) {
+  const std::string path = tempPath("cut.bin");
+  FsFile out;
+  ASSERT_TRUE(Storage.openFileForWrite("TST", path, out));
+  serialization::writePod(out, static_cast<uint16_t>(1));
+  out.close();
+  FsFile in;
+  ASSERT_TRUE(Storage.openFileForRead("TST", path, in));
+  EXPECT_FALSE(Page::deserialize(in));
+  in.close();
 }

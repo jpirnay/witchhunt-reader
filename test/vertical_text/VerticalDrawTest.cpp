@@ -102,20 +102,32 @@ TEST(VerticalDraw, DrawingAllocatesNothing) {
   EXPECT_EQ(live, liveAllocations());
 }
 
-// A sideways run past std::string's small-string buffer: the recorder's copy of the 64 B piece is the one allocation
-// (the 6 B rest fits the buffer); a std::string built per piece in the draw path would add more.
-TEST(VerticalDraw, ALongSidewaysRunAllocatesOnlyTheRecordersCopy) {
+// A sideways run past std::string's small-string buffer: the recorder's copy of the 64 B piece allocates (the 6 B
+// rest fits the buffer). That cost is measured with the same string in a direct drawText; the draw path adds nothing
+// to it, where a std::string built per piece would.
+TEST(VerticalDraw, ALongSidewaysRunAllocatesOnlyWhatTheRecorderDoes) {
+  const std::string run(70, 'a');
+  const std::string piece(64, 'a');
+
+  GfxRenderer baseline;
+  baseline.drawCalls.reserve(16);
+  const long baseLive = liveAllocations();
+  const long baseAll = allocations();
+  baseline.drawText(kFontId, 100, 50, piece.c_str());
+  const long recorderAll = allocations() - baseAll;
+  const long recorderLive = liveAllocations() - baseLive;
+  ASSERT_GT(recorderAll, 0) << "the recorder's copy of a 64 B string must allocate, or this measures nothing";
+
   GfxRenderer r;
   r.setOrientation(GfxRenderer::Portrait);
   r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
   r.drawCalls.reserve(16);
-  const std::string run(70, 'a');
   const long live = liveAllocations();
   const long all = allocations();
   drawTextVertical(r, kFontId, 100, 50, run.c_str(), EpdFontFamily::REGULAR, 1.0f);
   ASSERT_EQ(2u, r.drawCalls.size());
   EXPECT_EQ(64u, r.drawCalls[0].text.size());
   EXPECT_EQ(6u, r.drawCalls[1].text.size());
-  EXPECT_EQ(all + 1, allocations());
-  EXPECT_EQ(live + 1, liveAllocations());
+  EXPECT_EQ(all + recorderAll, allocations());
+  EXPECT_EQ(live + recorderLive, liveAllocations());
 }
