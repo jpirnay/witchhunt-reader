@@ -1288,6 +1288,9 @@ class EpubReaderActivity final : public Activity {
   // DISP log now says so out loud.
   void startActivityForResult(std::unique_ptr<Activity>&& activity, ActivityResultHandler resultHandler) override;
   bool isReaderActivity() const override { return true; }
+  bool mirrorsLeftRight() const override {
+    return pageProgressionRtl_.load() && SETTINGS.pageTurnButtons == CrossPointSettings::PAGE_TURN_FOLLOW_BOOK;
+  }
   // Polled by main.cpp's loop without the render lock; see refreshLoopHints().
   bool preventAutoSleep() override;
   // Auto page turn is reading with no hands on the device: no input arrives, so without this the

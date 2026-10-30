@@ -54,7 +54,8 @@ class GestureEventManager {
   //
   // Outside the reader a gesture bound to a reader-scoped action is left
   // unclaimed rather than swallowed, exactly as the button path does.
-  bool consumeAction(CrossPointSettings::BUTTON_ACTION& action, bool inReader);
+  // mirrorLeftRight: the page reverses Left and Right, so the left/right swipe zones' directional actions swap.
+  bool consumeAction(CrossPointSettings::BUTTON_ACTION& action, bool inReader, bool mirrorLeftRight = false);
 
  private:
   MappedInputManager& input;

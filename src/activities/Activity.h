@@ -73,6 +73,10 @@ class Activity {
   // while the host still owns the sectors.
   virtual bool requiresExclusiveStorageLoop() const { return false; }
   virtual bool isReaderActivity() const { return false; }
+  // This screen's Left and Right buttons and left/right swipe zones mean the opposite of their labels (a right-to-left
+  // book under Follow Book): main.cpp reverses the directional page actions configured on them. Asked of the top
+  // activity only.
+  virtual bool mirrorsLeftRight() const { return false; }
   // Draws book text (titles, authors, file names, chapter names) and only black and white: outside the reader, the
   // last book's font is open read-only behind the UI faces while it is current (syncUiBookFonts), so a script they lack
   // draws; and its passes draw first-sight glyphs in the lent secondary framebuffer (lendFramebufferForGlyphs).

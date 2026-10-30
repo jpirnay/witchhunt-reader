@@ -960,6 +960,28 @@ class CrossPointSettings {
   // wherever it is triggered.
   static bool isReaderScopedAction(uint8_t action);
 
+  // The same action with its direction reversed, for a right-to-left book's Left and Right: page back and forward,
+  // ten pages back and forward, previous and next section swap; every other action, and BTN_DEFAULT, is returned
+  // unchanged.
+  static constexpr uint8_t mirroredDirection(const uint8_t action) {
+    switch (action) {
+      case BTN_PAGE_FORWARD:
+        return BTN_PAGE_BACK;
+      case BTN_PAGE_BACK:
+        return BTN_PAGE_FORWARD;
+      case BTN_PAGE_FORWARD_10:
+        return BTN_PAGE_BACK_10;
+      case BTN_PAGE_BACK_10:
+        return BTN_PAGE_FORWARD_10;
+      case BTN_NEXT_SECTION:
+        return BTN_PREV_SECTION;
+      case BTN_PREV_SECTION:
+        return BTN_NEXT_SECTION;
+      default:
+        return action;
+    }
+  }
+
   // Enforce settings whose values depend on others (e.g. sleepScreen=QUICK_RESUME implies
   // quickResumeSleepScreen=ON). Call after any setting mutation that could invalidate the pair.
   static void normalizeDependentSettings(CrossPointSettings& settings);
