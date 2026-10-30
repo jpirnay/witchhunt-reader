@@ -242,6 +242,11 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
 
 bool forEachPage(const std::string& epubPath, const std::string& cacheDir, const Profile& profile,
                  const std::function<void(int spine, const Section&, const Page&, GfxRenderer&)>& visit) {
+  // Heap-only builds: refused rather than ignored, so no caller believes it ran a lent-arena build.
+  if (profile.lentArenaBytes != 0) {
+    std::fprintf(stderr, "forEachPage: lentArenaBytes is not supported (heap-only builds)\n");
+    return false;
+  }
   GfxRenderer renderer;
   auto epub = std::make_shared<Epub>(epubPath, cacheDir);
   if (!epub->load(true)) return false;

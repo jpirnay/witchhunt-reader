@@ -2,6 +2,7 @@
 // horizontal page in the turned frame (spec 5.2): the viewport's width and height swap, every page keeps the reader's
 // width as its block extent, every line its column bit. The twin test needs no arithmetic: a vertical section at
 // 460 x 760 dumps exactly like the same chapter set horizontally at 760 x 460, but for the markers.
+#include <Arduino.h>
 #include <GfxRenderer.h>
 #include <gtest/gtest.h>
 
@@ -159,16 +160,38 @@ struct VerticalLayout : testing::Test {
     return p;
   }
 
-  static int countVariants(const std::string& dir, const int spineIndex) {
+  // The section files of spine `spineIndex` in its bucket `dir`.
+  static std::vector<fs::path> variants(const std::string& dir, const int spineIndex) {
     const std::string prefix = std::to_string(spineIndex) + "_";
-    int n = 0;
+    std::vector<fs::path> files;
     for (const auto& e : fs::directory_iterator(dir)) {
       const std::string name = e.path().filename().string();
-      if (name.rfind(prefix, 0) == 0 && e.path().extension() == ".bin") ++n;
+      if (name.rfind(prefix, 0) == 0 && e.path().extension() == ".bin") files.push_back(e.path());
     }
-    return n;
+    return files;
+  }
+  static int countVariants(const std::string& dir, const int spineIndex) {
+    return static_cast<int>(variants(dir, spineIndex).size());
+  }
+
+  // Steps a sliced build of `section` under `p` until it is live with a page written, so its parser is past <body>.
+  static bool stepToAPage(Section& section, const Section::BuildParams& p) {
+    // A ticking clock, or the slice budget never runs out and the build ends in one call.
+    const host_clock::Ticking tick(1);
+    for (int i = 0; i < 20000; ++i) {
+      const Section::BuildStep step = section.stepSectionBuild(p, /*budgetMs=*/1);
+      if (section.hasActiveBuild() && section.pageCount > 0) return true;
+      if (step == Section::BuildStep::Done || step == Section::BuildStep::Failed) return false;
+    }
+    return false;
   }
 };
+
+void expectFlow(const Section& section, const bool vertical, const bool rtl, const char* what) {
+  const FlowContext flow = section.flowContext();
+  EXPECT_EQ(vertical, flow.vertical) << what;
+  EXPECT_EQ(rtl, flow.pageProgressionRtl) << what;
+}
 
 }  // namespace
 
@@ -279,6 +302,99 @@ TEST_F(VerticalLayout, TheHeaderKeepsItsRequest) {
   }
   // The request is in the property hash, so Off and Automatic are two files of the spine.
   EXPECT_EQ(2, countVariants(Epub::spineCacheDir(epub->getCachePath(), 0), 0));
+}
+
+// A load that fails leaves the section horizontal under the request it was asked for, and a cleared one is a fresh
+// section's, never the request of a cache it no longer holds. The book turns right to left by its spine, so a
+// horizontal section of it turns right to left under Automatic and left to right under Off.
+TEST_F(VerticalLayout, AFailedLoadTakesTheRequestItWasGiven) {
+  const std::string path = writeBook(kVerticalBodyCss, document(kShortBody, "", " class=\"v\""), kRtl);
+  auto epub = std::make_shared<Epub>(path, path + ".cache");
+  ASSERT_TRUE(epub->load(true));
+  const std::string bucket = Epub::spineCacheDir(epub->getCachePath(), 0);
+  GfxRenderer renderer;
+  const auto build = [&](const VerticalText request) {
+    Section builder(epub, 0, renderer);
+    return builder.createSectionFile(params(request), {}, /*skipEviction=*/true);
+  };
+  ASSERT_TRUE(build(VerticalText::Automatic));
+
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.loadSectionFile(params(VerticalText::Automatic)));
+  expectFlow(section, true, true, "loaded vertical");
+  EXPECT_FALSE(section.loadSectionFile(params(VerticalText::Off))) << "no Off variant on disk";
+  EXPECT_FALSE(section.isVertical());
+  expectFlow(section, false, false, "a missing Off variant");
+  ASSERT_TRUE(section.loadSectionFile(params(VerticalText::Automatic)));
+  section.clearCache();
+  EXPECT_FALSE(section.isVertical());
+  expectFlow(section, false, false, "cleared");
+
+  // A header whose request does not match: the On variant's file (the same pages: the book is vertical either way)
+  // under the Automatic variant's name.
+  ASSERT_TRUE(build(VerticalText::Automatic));
+  const std::vector<fs::path> automatic = variants(bucket, 0);
+  ASSERT_EQ(1u, automatic.size());
+  ASSERT_TRUE(build(VerticalText::On));
+  std::vector<fs::path> both = variants(bucket, 0);
+  ASSERT_EQ(2u, both.size());
+  const fs::path on = both[0] == automatic[0] ? both[1] : both[0];
+  fs::copy_file(on, automatic[0], fs::copy_options::overwrite_existing);
+  Section mismatched(epub, 0, renderer);
+  EXPECT_FALSE(mismatched.loadSectionFile(params(VerticalText::Automatic))) << "the header's request is matched";
+  EXPECT_FALSE(fs::exists(automatic[0])) << "a mismatched cache is removed, for a rebuild";
+  EXPECT_FALSE(mismatched.isVertical());
+  expectFlow(mismatched, false, true, "a mismatched header, under Automatic");
+}
+
+// XHTML names its elements in lower case, but a book written as HTML may not: the section still decides at its body,
+// not at an element of an upper-case head.
+TEST_F(VerticalLayout, AnUppercaseHeadIsNotTheBody) {
+  const std::string xhtml =
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<HTML xmlns=\"http://www.w3.org/1999/xhtml\"><HEAD><TITLE>C</TITLE>"
+      "<LINK rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"/></HEAD><BODY class=\"v\">\n" +
+      std::string(kShortBody) + "\n</BODY></HTML>\n";
+  EXPECT_TRUE(firstSpineVertical(dump(kVerticalBodyCss, xhtml, profileOf(VerticalText::Automatic))));
+}
+
+// While a build runs, the section answers from its parser: vertical once the parser has decided, and never from the
+// cache it loaded before.
+TEST_F(VerticalLayout, ABuildInProgressAnswersFromItsParser) {
+  // Several 1 KB parse slices long, so the build is still live after its first page.
+  auto epub = std::make_shared<Epub>(std::string(CORPUS_DIR) + "/test_cjk_ja_soseki.epub", (work / "cache").string());
+  ASSERT_TRUE(epub->load(true));
+  GfxRenderer renderer;
+  {
+    Section building(epub, 0, renderer);
+    ASSERT_TRUE(stepToAPage(building, params(VerticalText::On)));
+    EXPECT_TRUE(building.isVertical()) << "the live parser decided vertical";
+    // Finished rather than aborted: an abort mid-parse removes the anchor spill the parser still holds open, which
+    // Windows refuses.
+    ASSERT_EQ(Section::BuildStep::Done, building.stepSectionBuild(params(VerticalText::On), /*budgetMs=*/0));
+    EXPECT_TRUE(building.isVertical()) << "the build's outcome";
+  }
+  {
+    Section builder(epub, 0, renderer);
+    ASSERT_TRUE(builder.createSectionFile(params(VerticalText::On), {}, /*skipEviction=*/true));
+  }
+  Section section(epub, 0, renderer);
+  ASSERT_TRUE(section.loadSectionFile(params(VerticalText::On)));
+  ASSERT_TRUE(section.isVertical());
+  ASSERT_TRUE(stepToAPage(section, params(VerticalText::Off)));
+  EXPECT_FALSE(section.isVertical()) << "an Off build in progress is horizontal, whatever was loaded before";
+  ASSERT_EQ(Section::BuildStep::Done, section.stepSectionBuild(params(VerticalText::Off), /*budgetMs=*/0));
+  EXPECT_FALSE(section.isVertical());
+}
+
+// forEachPage builds on the heap alone: it refuses a profile that asks for a lent arena rather than ignore it.
+TEST_F(VerticalLayout, ForEachPageRefusesALentArena) {
+  const std::string path = writeBook("", document(kShortBody));
+  pipeline_harness::Profile lent = profileOf(VerticalText::Off);
+  lent.lentArenaBytes = 64 * 1024;
+  int visits = 0;
+  EXPECT_FALSE(pipeline_harness::forEachPage(path, path + ".cache", lent,
+                                             [&](int, const Section&, const Page&, GfxRenderer&) { ++visits; }));
+  EXPECT_EQ(0, visits);
 }
 
 TEST_F(VerticalLayout, ADropCapStaysInItsLine) {

@@ -71,8 +71,8 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
                 const SpineStatFn& spineStat = {}, const ArenaStatFn& arenaStat = {});
 
 // Compile `epubPath` into `cacheDir` under `profile`, as runAndDump does, and hand every page of every spine, loaded
-// back from its section file, to `visit` with the renderer the build measured with. Heap-only builds:
-// `lentArenaBytes` is not read. Returns false on any pipeline failure.
+// back from its section file, to `visit` with the renderer the build measured with. Heap-only builds: a profile with
+// `lentArenaBytes` set is refused. Returns false then and on any pipeline failure.
 bool forEachPage(const std::string& epubPath, const std::string& cacheDir, const Profile& profile,
                  const std::function<void(int spine, const Section&, const Page&, GfxRenderer&)>& visit);
 

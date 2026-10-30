@@ -682,10 +682,19 @@ bool Section::loadSectionFile(const BuildParams& p) {
   tableRowDegraded_ = false;
   cssLowHeapDegraded_ = false;
   simplified_ = false;
+  // Loaded or not, the section is now held to this request: horizontal under it until a cache or a build says
+  // otherwise, so flowContext() never pairs another request with this outcome.
+  request_ = p.verticalText;
   vertical_ = false;
   embeddedStyleFallback = false;
   uint32_t propertyHash = calculatePropertyHash(p);
   filePath = getSectionFilePath(propertyHash);
+  // A cache that does not load is removed; clearCache() leaves a fresh section's request, so this one's is put back.
+  const auto refuse = [this, &p] {
+    clearCache();  // closes file before removal
+    request_ = p.verticalText;
+    return false;
+  };
 
   bool usingEmbeddedStyleFallback = false;
   if (!Storage.openFileForRead("SCT", filePath, file)) {
@@ -714,8 +723,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
     serialization::readPod(file, version);
     if (version != SECTION_FILE_VERSION) {
       LOG_ERR("SCT", "Deserialization failed: Unknown version %u", version);
-      clearCache();  // closes file before removal
-      return false;
+      return refuse();
     }
 
     int fileFontId;
@@ -751,8 +759,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
         p.bionicReadingEnabled != fileBionicReadingEnabled || p.imageRendering != fileImageRendering ||
         static_cast<uint8_t>(p.verticalText) != fileVerticalText) {
       LOG_ERR("SCT", "Deserialization failed: Parameters do not match");
-      clearCache();  // closes file before removal
-      return false;
+      return refuse();
     }
 
     truncatedCache = (fileStatus & kStatusParseComplete) == 0;
@@ -761,7 +768,6 @@ bool Section::loadSectionFile(const BuildParams& p) {
     cssLowHeapDegraded_ = (fileStatus & kStatusCssDegraded) != 0;
     simplified_ = (fileStatus & kStatusSimplified) != 0;
     vertical_ = (fileStatus & kStatusVertical) != 0;
-    request_ = p.verticalText;
   }
 
   serialization::readPod(file, pageCount);
@@ -769,8 +775,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
   // Sanity check: same upper bound used by TextBlock::deserialize for word count
   if (pageCount > 10000) {
     LOG_ERR("SCT", "Deserialization failed: page count %u exceeds maximum", pageCount);
-    clearCache();
-    return false;
+    return refuse();
   }
 
   // Load LUT into memory (file is now positioned at the lutOffset field)
@@ -779,8 +784,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
   lutFileOffset_ = 0;
   if (!file.seek(lutOffset)) {
     LOG_ERR("SCT", "Deserialization failed: seek to LUT offset %u failed", lutOffset);
-    clearCache();
-    return false;
+    return refuse();
   }
   // 4 bytes a page: a chapter is a few hundred bytes, a book that is one XHTML file several KB in
   // one block, taken as the table's first chunk. Without that block the pages read their offsets
@@ -797,8 +801,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
       serialization::readPod(file, pos);
       if (pos < header::kSize || pos >= lutOffset) {
         LOG_ERR("SCT", "Deserialization failed: LUT entry %u out of range [%u, %u)", pos, header::kSize, lutOffset);
-        clearCache();
-        return false;
+        return refuse();
       }
       if (!lut.push_back(pos)) {
         // Inside the reserved chunk this cannot be refused; if it ever is, read from the file
@@ -840,6 +843,7 @@ bool Section::clearCache() {
   tableRowDegraded_ = false;
   cssLowHeapDegraded_ = false;
   simplified_ = false;
+  request_ = VerticalText::Off;  // a fresh section's, until a load or a build names one
   vertical_ = false;
 
   if (!Storage.exists(filePath.c_str())) {

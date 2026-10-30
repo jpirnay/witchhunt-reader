@@ -695,14 +695,17 @@ class ChapterHtmlSlimParser final : public Print {
   // increments it last).
   FlowEntry enterFlow(const CssStyle& style);
 
-  // The section's writing mode (spec 5.1): decided once, at the first element that is neither <html> nor <head>
-  // (normally <body>), from the mode in effect there (its own, else html's), the request and the book's ppd. A
-  // vertical-rl section is laid out as a horizontal page in the turned frame (spec 5.2), so the viewport's width and
-  // height swap there, before any block is laid out: lines run down the reader's height, columns across its width.
+  // The section's writing mode (spec 5.1): decided once, at the first element outside <html>'s own tag and outside
+  // any <head> (normally <body>), from the mode in effect there (its own, else html's), the request and the book's
+  // ppd. A vertical-rl section is laid out as a horizontal page in the turned frame (spec 5.2), so the viewport's width
+  // and height swap there, before any block is laid out: lines run down the reader's height, columns across its width.
   VerticalText verticalRequest_ = VerticalText::Off;
   PageProgression pageProgression_ = PageProgression::Default;
   bool frameDecided_ = false;
   bool vertical_ = false;
+  // The depth of an open <head>, by any case, until the decision: an upper-case HEAD is not skipped (SKIP_TAGS
+  // matches lower case), so its TITLE and LINK reach the decision and must not take it. -1: none seen.
+  int16_t headDepth_ = -1;
   void decideFrame(CssWritingMode rootMode);
 
   // Default size for superscript/subscript text, percent of the surrounding size.

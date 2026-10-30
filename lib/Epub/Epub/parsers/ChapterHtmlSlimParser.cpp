@@ -2237,10 +2237,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   applyHtmlDirectionality(cssStyle, name, dirAttr);
   self->elementFlow_ = self->enterFlow(cssStyle);
   cssStyle.resolveLogical(self->elementFlow_.writingMode, self->elementFlow_.direction);
-  // The section's mode, at its first element past <html> and <head> (head's children never get here: the skip above
-  // takes them), before anything is laid out.
-  if (!self->frameDecided_ && strcasecmp(name, "html") != 0 && strcasecmp(name, "head") != 0) {
-    self->decideFrame(self->elementFlow_.writingMode);
+  // The section's mode, at its first element outside <html>'s tag and any <head>, before anything is laid out. A
+  // lower-case head's children never get here (the skip above takes them); an upper-case one's do, deeper than it.
+  if (!self->frameDecided_) {
+    if (strcasecmp(name, "head") == 0) {
+      self->headDepth_ = static_cast<int16_t>(self->depth);
+    } else if (strcasecmp(name, "html") != 0 && (self->headDepth_ < 0 || self->depth <= self->headDepth_)) {
+      self->decideFrame(self->elementFlow_.writingMode);
+    }
   }
   // line-height is inherited: the element's copy carries the computed value, for every block built from it.
   cssStyle.lineHeightEm = self->elementFlow_.lineHeightEm;
