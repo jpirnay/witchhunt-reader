@@ -377,13 +377,13 @@ at 1.5, 1.7 and 2.0 em against the old Normal and Wide.
 - **Book's style** reads each block's `line-height`, inherited as CSS has it, floored at Tight. EBPAJ books declare
   1.75; calibre conversions carry 1.2, which the floor lifts to 1.5 em in a CJK book.
 - **A per-book override** in Quick overrides and the reader menu.
+- **Vertical text** (writing-modes step 3): the column pitch is the line pitch in the turned frame, so the same steps set it.
 
 **Left for later.**
 - The TXT and Markdown readers keep the font's line height (maintainer: not in this round).
 - In Book's style, lines that are not a block's (a `<br>` separator's blank line, an `<hr>`'s margin, table rows) keep
   Normal's pitch, and `em` and `%` values are inherited as numbers, which differs from CSS only where a child changes
   font size.
-- In vertical text (writing-modes step 3) the same pitch becomes the column pitch.
 
 ## Page glyph arena follow-ups (after #500)
 
@@ -440,7 +440,7 @@ These were set aside in the layout spec (section 3) and the A3 design (`docs/des
 - `text-emphasis-position`: Chinese marks below the text (marks are always above);
 - hanging punctuation;
 - upstream's Latin dash split (#3883);
-- vertical text, `writing-mode` and `page-progression-direction`: no longer out of scope, planned in [writing-modes.md](writing-modes.md).
+- vertical text, `writing-mode` and `page-progression-direction`: no longer out of scope: vertical text is built (writing-modes step 3), the rest is planned in [writing-modes.md](writing-modes.md).
 
 ## Testing on a device
 

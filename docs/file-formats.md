@@ -213,7 +213,7 @@ if (parsedSize != fileSize) {
 
 One file per spine item and per set of render settings: `spines/<spine / 32>/<spine>_<hash>.bin` in the book's cache directory, `<hash>` being the render settings' property hash in eight hex digits (`Section::getSectionFilePath`, `Epub::spineCacheDir`; 32 is `Epub::SPINE_CACHE_BUCKET_SIZE`). Up to five variants per spine item are kept; past that the oldest by modification date go (`Section::evictOldVariants`). Written and read by `lib/Epub/Epub/Section.cpp`. `SECTION_FILE_VERSION` at the top of that file is bumped on every layout change, so read it there; a number quoted here would go stale within weeks. A file with another version is rejected and rebuilt.
 
-The property hash (`Section::calculatePropertyHash`) covers the header's render settings, font-size normalisation, the inline-footnote-preview setting and, when previews are on, `INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION` (3): a change in how previews expand rebuilds only the sections that show them.
+The property hash (`Section::calculatePropertyHash`) covers the header's render settings, font-size normalisation, the inline-footnote-preview setting and, when previews are on, `INLINE_FOOTNOTE_PREVIEW_LAYOUT_VERSION` (3): a change in how previews expand rebuilds only the sections that show them. It also covers the vertical-text request (`VerticalText`: 0 Automatic, 1 On) when the request is not Off. Off adds nothing, and it is the request of every book in a language that is never set vertically, so those books keep the hash they had.
 
 The file is, in order:
 
@@ -245,12 +245,21 @@ These fields are the `header::*` constants in `Section.cpp`, in file order. The 
 | `embeddedStyle`        | bool    |                                                                         |
 | `bionicReadingEnabled` | bool    |                                                                         |
 | `imageRendering`       | u8      |                                                                         |
-| status                 | u8      | Bit flags: parse complete, and the "degraded" flags for a build that ran short of heap (image, table row, CSS) or hit a fixed capacity (simplified). The `kStatus*` constants in `Section.cpp` name them. Written as a bool by early builds, so a flag-less file still reads correctly |
+| `verticalText`         | u8      | The request the section was built with (`VerticalText`: 0 Automatic, 1 On, 2 Off). A file whose byte differs from the current request is rejected and rebuilt |
+| status                 | u8      | Bit flags: parse complete, and the "degraded" flags for a build that ran short of heap (image, table row, CSS) or hit a fixed capacity (simplified), and bit 5, `kStatusVertical`: the build set the section vertical-rl, which under Automatic depends on the chapter, not on the request alone. The `kStatus*` constants in `Section.cpp` name them. Written as a bool by early builds, so a flag-less file still reads correctly |
 | `pageCount`            | u16     |                                                                         |
 | page LUT offset        | u32     |                                                                         |
 | anchor map offset      | u32     |                                                                         |
 | page break map offset  | u32     |                                                                         |
 | paragraph LUT offset   | u32     |                                                                         |
+
+### Page record
+
+`Page::serialize` writes a `u16` element count, a `u16` `verticalBlockExtent`, the elements (a `u8` tag, then the element), and the footnotes (a `u16` count, then the entries).
+
+- `verticalBlockExtent` is 0 on a horizontal page. On a page of a vertical-rl section it is the block extent the columns fill, the reader's viewport width, and a non-zero value is what marks the page vertical (`Page::isVertical`): the page draws in the turned frame, and its elements are positioned in that frame.
+- A line (`TextBlock::serialize`) has a flags byte: bit 0 the word sizes are stored, bit 1 the line has annotations (ruby), bit 2 the line is vertical (its words run down a column), bit 3 reserved (a file that sets it is rejected), bits 4-7 the number of word fonts.
+- An image (`ImageBlock::serialize`) ends with a flags byte whose bit 0 says the image is turned, as on a vertical page. A turned image stores the size it is decoded and drawn at, upright in the reader's frame; the box it takes on the page is that size with width and height swapped (`ImageBlock::getWidth`, `getHeight`).
 
 ### Paragraph LUT entry
 
