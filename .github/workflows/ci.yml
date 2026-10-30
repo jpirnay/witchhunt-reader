@@ -39,7 +39,9 @@ jobs:
         run: python3 scripts/build_plugin_catalog.py --check
 
   cppcheck:
-    runs-on: ubuntu-latest
+    # Pinned: pioarduino's cppcheck binary links against libpcre.so.3, and Ubuntu 26.04 (ubuntu-latest since
+    # 2026-10-29) no longer ships libpcre3.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
         with:
