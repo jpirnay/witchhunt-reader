@@ -410,6 +410,8 @@ int TextBlock::annotationBand(const GfxRenderer& renderer, const int fontId) con
   return annotationBandFor(renderer, effFontId, renderStyle.fontSizeMultiplier, maxSizePct());
 }
 
+// A vertical line is never unscaled: the ink-only fast path has not been exercised across a mid-line frame switch,
+// and a wrong fast-path page costs more than a missed pre-render.
 bool TextBlock::drawsUnscaled() const {
   if (!isValid) return true;  // draws nothing
   if (renderStyle.fontSizeMultiplier != 1.0f || renderStyle.headingFontId != 0 || sizesPresent || hasAnnotations() ||

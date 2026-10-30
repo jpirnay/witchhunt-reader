@@ -59,21 +59,21 @@ Pieces piecesOf(const std::string& text) {
 TEST(VerticalOrientation, APieceKeepsItsMarksAndNeverSplitsACodepoint) {
   EXPECT_EQ((Pieces{{3, true}, {3, true}}), piecesOf("日本"));
   EXPECT_EQ((Pieces{{5, false}, {3, true}}), piecesOf("Latin語"));
-  EXPECT_EQ((Pieces{{6, true}}), piecesOf("が"));
-  EXPECT_EQ((Pieces{{4, false}}), piecesOf("éa"));
-  EXPECT_EQ((Pieces{{3, true}}), piecesOf("゙"));
+  EXPECT_EQ((Pieces{{6, true}}), piecesOf("か\u3099"));
+  EXPECT_EQ((Pieces{{4, false}}), piecesOf("e\u0301a"));
+  EXPECT_EQ((Pieces{{3, true}}), piecesOf("\u3099"));
   EXPECT_EQ((Pieces{{64, false}, {6, false}}), piecesOf(std::string(70, 'a')));
   std::string accented;
-  for (int i = 0; i < 40; ++i) accented += "é";
+  for (int i = 0; i < 40; ++i) accented += "\u00E9";
   EXPECT_EQ((Pieces{{64, false}, {16, false}}), piecesOf(accented));
-  EXPECT_EQ((Pieces{{63, false}, {3, false}}), piecesOf(std::string(63, 'a') + "é"));
+  EXPECT_EQ((Pieces{{63, false}, {3, false}}), piecesOf(std::string(63, 'a') + "e\u0301"));
   EXPECT_EQ((Pieces{{7, true}}), piecesOf("😀️"));
   EXPECT_TRUE(piecesOf("").empty());
 }
 
 TEST(VerticalOrientation, AClusterLongerThanTheCapIsCutAtACodepoint) {
   std::string text = "a";
-  for (int i = 0; i < 40; ++i) text += "́";
+  for (int i = 0; i < 40; ++i) text += "\u0301";
   ASSERT_EQ(81u, text.size());
   const Pieces pieces = piecesOf(text);
   size_t total = 0;

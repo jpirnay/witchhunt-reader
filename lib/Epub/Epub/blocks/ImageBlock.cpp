@@ -436,6 +436,7 @@ void ImageBlock::renderGrayscaleUpright(GfxRenderer& renderer, const int x, cons
   renderFromCache(renderer, getGrayscaleCachePath(imagePath), x, y, width, height, srcYOffset_, srcHeight_);
 }
 
+// A turned image is never sliced (placeImageBlockAsBlock places it whole), so the copied turned_ is unreachable today.
 std::unique_ptr<ImageBlock> ImageBlock::makeCrop(const int16_t srcYOffset, const int16_t srcHeight) const {
   auto crop =
       std::unique_ptr<ImageBlock>(new ImageBlock(imagePath, width, height, altText, epubFilePath_, epubEntryPath_));
