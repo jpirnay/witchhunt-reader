@@ -101,3 +101,21 @@ TEST(VerticalDraw, DrawingAllocatesNothing) {
   EXPECT_EQ(all, allocations());
   EXPECT_EQ(live, liveAllocations());
 }
+
+// A sideways run past std::string's small-string buffer: the recorder's copy of the 64 B piece is the one allocation
+// (the 6 B rest fits the buffer); a std::string built per piece in the draw path would add more.
+TEST(VerticalDraw, ALongSidewaysRunAllocatesOnlyTheRecordersCopy) {
+  GfxRenderer r;
+  r.setOrientation(GfxRenderer::Portrait);
+  r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
+  r.drawCalls.reserve(16);
+  const std::string run(70, 'a');
+  const long live = liveAllocations();
+  const long all = allocations();
+  drawTextVertical(r, kFontId, 100, 50, run.c_str(), EpdFontFamily::REGULAR, 1.0f);
+  ASSERT_EQ(2u, r.drawCalls.size());
+  EXPECT_EQ(64u, r.drawCalls[0].text.size());
+  EXPECT_EQ(6u, r.drawCalls[1].text.size());
+  EXPECT_EQ(all + 1, allocations());
+  EXPECT_EQ(live + 1, liveAllocations());
+}
