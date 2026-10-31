@@ -408,7 +408,7 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 
 - **Embedded Style**: Use the EPUB's own HTML/CSS styling. "ON" (default) / "OFF"
 - **Hyphenation**: Automatic hyphenation while reading. "ON" / "OFF"
-- **Avoid Widows & Orphans**: End a page early rather than leave a paragraph's first line alone at its foot, or its last line alone at the top of the next page. "ON" (default) / "OFF". With a large font few lines fit on a page, and a page can end up to two lines short; turn it off to fill every page. Headings keep with the text that follows them either way.
+- **Avoid Widows & Orphans**: End a page early rather than leave a paragraph's first line alone at its foot, or its last line alone at the top of the next page. "ON" (default) / "OFF". With a large font few lines fit on a page, and a page can end up to two lines short; turn it off to fill every page. Vertical text always fills its pages; the setting applies to horizontal pages. Headings keep with the text that follows them either way.
 - **Bionic Reading**: Bold the first half of each word to guide the eye. "ON" / "OFF"
 - **Guide Dots**: Draw a small dot centered in the space between words to guide the eye along the line (idea borrowed from [CrossInk](https://github.com/uxjulia/CrossInk)). "ON" / "OFF"
 - **Synthetic TOC Fallback**: Generate a table of contents from headings when the EPUB has an invalid or missing TOC. "ON" / "OFF"

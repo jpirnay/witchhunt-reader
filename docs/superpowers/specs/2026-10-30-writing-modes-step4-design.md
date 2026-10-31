@@ -1,6 +1,6 @@
 # Writing modes step 4: vertical typography (design)
 
-Status: design, for the maintainer's review. Step 3 (#577) shipped vertical text with rough punctuation; this step
+Status: approved by the maintainer on 2026-10-30. Step 3 (#577) shipped vertical text with rough punctuation; this step
 sets it properly. It builds on `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md` (5.4, 5.6,
 section 7 row 4) and the list "What step 4 inherits from step 3" in `docs/future_work/writing-modes.md`, and replaces
 the spec's font re-cut (5.6) with placement on the device.
