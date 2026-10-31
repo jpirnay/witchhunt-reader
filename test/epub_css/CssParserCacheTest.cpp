@@ -968,6 +968,52 @@ TEST(CssParserCache, FinishingTheCompileWritesTheRulesInAFewCalls) {
   std::filesystem::remove(cssPath, rmEc);
 }
 
+// A selector declared in several places has one record per declaration, and a lookup from the card
+// reads them all into one style. A record read only the fields its payload carries, so one without a
+// font-size kept the previous record's, under its own, later order: it could override the size the
+// stylesheet ends on. Which record is read last is the index sort's choice among equal hashes, so the
+// stylesheets vary their size until the sort has shuffled the records. Found by syfq91 (witchling-reader
+// f3e3e1b98), where libc++ sorted an h1 that lost its size.
+TEST(CssParserCache, ARuleWithoutAFontSizeTakesNoneFromTheRuleReadBeforeIt) {
+  for (const int filler : {40, 120, 300}) {  // four runs of filler stay under MAX_RULES (1500)
+    SCOPED_TRACE("filler rules between declarations: " + std::to_string(filler));
+    const std::string cacheDir = makeTempDir();
+    ASSERT_FALSE(cacheDir.empty());
+    std::string css;
+    int n = 0;
+    const auto fill = [&] {
+      for (int i = 0; i < filler; ++i) css += ".f" + std::to_string(n++) + " { text-indent: 1em }\n";
+    };
+    css += "h1 { font-size: 3em }\n";
+    fill();
+    css += "h1 { margin-top: 1em }\n";
+    fill();
+    css += "h1 { font-size: 2em }\n";
+    fill();
+    css += "h1 { margin-bottom: 1em }\n";
+    fill();
+    css += "h1 { text-align: center }\n";
+    std::string cssPath;
+    ASSERT_TRUE(writeTempCssFile(std::vector<uint8_t>(css.begin(), css.end()), cssPath));
+
+    CssParser parser(cacheDir);
+    ASSERT_TRUE(compileCache(parser, cssPath));
+    parser.clear();
+    ASSERT_TRUE(parser.loadFromCache());  // no arena: every h1 record is read from the card
+
+    const CssStyle h1 = parser.resolveStyle("h1", "");
+    ASSERT_TRUE(h1.hasFontSizeMultiplier());
+    EXPECT_FLOAT_EQ(h1.fontSizeMultiplier, 2.0f) << "the last font-size declared is 2em";
+    EXPECT_TRUE(h1.hasMarginTop());
+    EXPECT_TRUE(h1.hasMarginBottom());
+    EXPECT_EQ(h1.textAlign, CssTextAlign::Center);
+
+    removePath(cacheDir);
+    std::error_code rmEc;
+    std::filesystem::remove(cssPath, rmEc);
+  }
+}
+
 // Every section build loads the ruleset into its arena (RESIDENT), and the load read each rule's
 // 77-byte style a field at a time: ~33 SdFat calls a rule, every build -- 3384 calls for the 84
 // rules of the first page of a King's Avatar-shaped book, ~0.06 s on the X3 per 100 rules. One
