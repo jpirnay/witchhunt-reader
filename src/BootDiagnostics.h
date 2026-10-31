@@ -38,8 +38,8 @@ namespace BootDiag {
 // Boot phase trace
 // ---------------------------------------------------------------------------
 
-/// millis() stamp per boot phase.  The wake gesture is only a ~300 ms gate
-/// (getPowerWakeHoldDuration), but the splash lands seconds later because the SD
+/// millis() stamp per boot phase.  The wake gesture is only a 300-400 ms gate
+/// (CrossPointSettings::wakeHoldFor), but the splash lands seconds later because the SD
 /// mount, the config loads, the panel bring-up and the first (non-differential)
 /// waveform all sit between the two.  Without per-phase stamps that gap is invisible
 /// in the log — every phase before Serial.begin() has no output at all — and "the
@@ -57,7 +57,7 @@ enum class BootPhase : uint8_t {
   SetupEntry,      // first statement of setup()
   NvsSettings,     // startup settings read from NVS (precedes the wake gate)
   WakeGate,        // power-button wake gesture decided
-  HwInit,          // system / SPI bus / GPIO / power / tilt brought up
+  HwInit,          // a serial-log build's 250 ms USB wait, then system / SPI bus / GPIO / power / tilt brought up
   SerialUp,        // USB-CDC opened (only when USB is connected; earlier phases log nothing)
   RecoverySettle,  // UP+POWER recovery-combo sample window
   SdMount,         // Storage.begin()
@@ -80,6 +80,12 @@ const char* phaseName(BootPhase phase);
 /// be re-emitted alongside the phase trace and shown on the diagnostics page.
 void setWakeCheck(const HalGPIO::WakeCheck& check);
 const HalGPIO::WakeCheck& wakeCheck();
+
+/// Milliseconds from power-on to the app's start, which millis() does not count: the ROM and the second-stage
+/// bootloader, which checks the whole app image on a power-on (not on a deep-sleep wake). A press that powers the
+/// device up has to last through it before the wake gate even looks. 0 when the reset was not a power-on.
+void setPreAppMs(uint16_t ms);
+uint16_t preAppMs();
 
 /// The whole boot story in two log lines: what the power button was judged to be, and
 /// where the time went.  Re-emitted on every serial (re)connect.

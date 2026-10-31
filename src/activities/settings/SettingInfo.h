@@ -558,9 +558,12 @@ inline void SettingInfo::prepareSubmenus(std::vector<SettingInfo>& items,
   for (size_t s = 0; s < preparedSubmenus.size(); ++s) {
     auto& submenu = preparedSubmenus[s];
 
-    // The placeholder takes a subcategory only when EVERY row behind it agrees on one -- the
-    // shape of "Refresh" or "Front light", where the submenu name and the heading are the same
-    // word and the heading is really about the row itself.
+    // The placeholder takes its first row's subcategory unless another row behind it names a
+    // different one -- the shape of "Refresh", "Front light" or "Reader Font", where the heading
+    // is really about the row that opens the submenu. The first row alone names it there, as a
+    // heading is named everywhere else (and read by the web page): on the row its section starts
+    // at. Requiring EVERY row to name it left those headings below their submenus, over the next
+    // row of the section that stayed in the tab.
     //
     // The gesture rows are the other shape: one submenu holding four groups (swipes, taps, long
     // taps, multi-touch). Inheriting from the first of them put a "Swipes" heading over a row
@@ -568,9 +571,16 @@ inline void SettingInfo::prepareSubmenus(std::vector<SettingInfo>& items,
     // tab with nothing under them once their rows had moved into the submenu. The grouping
     // describes the children, so it belongs to the submenu, not to the row that opens it.
     const StrId first = submenu.items.empty() ? StrId::STR_NONE_OPT : submenu.items.front().subcategory;
-    const bool allAgree = std::all_of(submenu.items.begin(), submenu.items.end(),
-                                      [first](const SettingInfo& child) { return child.subcategory == first; });
-    items[placeholderAt[s]].subcategory = allAgree ? first : StrId::STR_NONE_OPT;
+    const bool noneDisagree =
+        std::all_of(submenu.items.begin(), submenu.items.end(), [first](const SettingInfo& child) {
+          return child.subcategory == first || child.subcategory == StrId::STR_NONE_OPT;
+        });
+    items[placeholderAt[s]].subcategory = noneDisagree ? first : StrId::STR_NONE_OPT;
+    // A heading the placeholder took describes it, so it is not repeated inside the submenu, under the submenu's own
+    // title. Only these copies lose it: the web page reads the rows from forEachSetting().
+    if (noneDisagree) {
+      for (auto& child : submenu.items) child.subcategory = StrId::STR_NONE_OPT;
+    }
 
     auto it = std::find_if(submenuData.begin(), submenuData.end(),
                            [&submenu](const SubmenuData& d) { return d.id == submenu.id; });

@@ -1881,6 +1881,10 @@ void unpackFlow(const uint16_t flow, CssStyle& s) {
 }  // namespace
 
 bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
+  // The payload sets only what its rule declares, and lookupRules reads every record of a selector into
+  // one style: without the reset, a record with no font-size kept the previous record's, under its own
+  // later order (as decompressStyle resets for the arena path). Found by syfq91, witchling-reader f3e3e1b98.
+  style.reset();
   // Read in one call and taken apart in RAM: a field at a time was ~30 SdFat calls a rule, paid for
   // every rule each time a section build loads the ruleset into its arena.
   std::array<uint8_t, CSS_FIXED_STYLE_BYTES> payload;

@@ -485,6 +485,9 @@ class CrossPointSettings {
   // Perform a half refresh on the page immediately following an EPUB page that displayed images.
   uint8_t halfRefreshAfterImagePage = 1;
   uint8_t hyphenationEnabled = 0;
+  // Widow and orphan control: a page ends early rather than leave a paragraph's first or last line alone on it.
+  // Off, every page fills (#579: on a page of ten lines the rule could leave two empty).
+  uint8_t widowOrphanControl = 1;
   // Snap near-body font sizes (within ±10% of the body size) to plain body text, so publisher
   // sizing renders native — both inline wrappers like <span style="font-size:0.92em"> around whole
   // paragraphs and a size stated on the block itself (p.body { font-size: 1.1em }). Default on.
@@ -912,6 +915,20 @@ class CrossPointSettings {
   // asymmetry back, and deliberately not shortened further — the gate's job is to reject a
   // stray pocket press, and the prelude is the only margin left doing that.
   static constexpr uint16_t getPowerWakeHoldDuration() { return 300; }
+
+  // What the wake gate holds a press to. After a power-on reset the prelude is known (`preAppMs`,
+  // BootDiag::setPreAppMs): the press is timed from the moment it powered the device, against the
+  // sleep gesture's own duration. A power-on is every wake of the X3, and of the X4 with its latch
+  // cut, and there the prelude is the bootloader checking the whole app image -- about a second,
+  // which used to come on top of the 300 ms instead of counting toward it. Any other wake is timed
+  // in app time as above.
+  struct WakeHold {
+    uint16_t requiredMs;
+    uint16_t heldBeforeAppMs;  // what the press had lasted when the app started
+  };
+  static constexpr WakeHold wakeHoldFor(const uint16_t preAppMs) {
+    return preAppMs > 0 ? WakeHold{getPowerButtonDuration(), preAppMs} : WakeHold{getPowerWakeHoldDuration(), 0};
+  }
   int getReaderFontId() const;
   int getTxtReaderFontId() const;
   // Pure built-in lookup (family + ladder rung -> font ID), independent of SD-card font selection.
@@ -923,6 +940,11 @@ class CrossPointSettings {
   // even when an SD font is the global default.
   static int getBuiltinReaderFontIdForPoints(const uint8_t family, const uint8_t pt) {
     return getBuiltinReaderFontId(family, builtinRungForPoints(pt));
+  }
+  // The Publisher Fonts (PUBLISHER_FONTS) a book is drawn with: its override (RecentBook::publisherFontsOverride), or
+  // `setting` (publisherFonts) when it has none.
+  static constexpr uint8_t publisherFontsFor(const int8_t bookOverride, const uint8_t setting) {
+    return bookOverride >= 0 && bookOverride < PUBLISHER_FONTS_COUNT ? static_cast<uint8_t>(bookOverride) : setting;
   }
   // Heading sizing: return the built-in fontId `stepUp` sizes taller than `size` for
   // `family`, clamped at the largest size. Steps walk the ascending-pixel ladder

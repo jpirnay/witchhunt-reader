@@ -1001,7 +1001,8 @@ const char* HalGPIO::wakeVerdictName(WakeVerdict verdict) {
   return "?";
 }
 
-HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDurationMs) {
+HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDurationMs,
+                                                    const uint16_t heldBeforeAppMs) {
   // How long the pin must stay HIGH before we conclude the press really ENDED. Long,
   // because concluding it wrongly refuses the wake: a contact bounce mid-hold would return
   // ReleasedEarly and drop the device back into sleep with the user's finger still on the
@@ -1034,23 +1035,29 @@ HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint1
   // immediately, which is also why running this on every boot costs nothing on non-button resets.
   const unsigned long gateStart = millis();
   const auto stamp = [](unsigned long ms) { return static_cast<uint16_t>(ms > UINT16_MAX ? UINT16_MAX : ms); };
+  const auto verdict = [requiredDurationMs](const WakeVerdict v, const uint16_t decidedAtMs, const uint16_t heldMs) {
+    return WakeCheck{v, decidedAtMs, heldMs, requiredDurationMs};
+  };
 
   pinMode(InputManager::POWER_BUTTON_PIN, INPUT_PULLUP);
   if (digitalRead(InputManager::POWER_BUTTON_PIN) != LOW) {
-    return {WakeVerdict::NotPressed, stamp(millis()), 0};
+    return verdict(WakeVerdict::NotPressed, stamp(millis()), 0);
   }
 
   if (gestures.shortAllowed) {
-    return {WakeVerdict::ShortPress, stamp(millis()), stamp(millis() - gateStart)};
+    return verdict(WakeVerdict::ShortPress, stamp(millis()), stamp(millis() - gateStart));
   }
 
   // requiredDurationMs (longHold) is compared against millis() directly — time since app
   // start, NOT time since this call. That is deliberate: the press that caused the wake
   // began before setup() ran, so boot time counts toward the hold rather than being
-  // charged to the user twice. The caveat is that millis() starts at app init and so
-  // excludes the ~200-300 ms bootloader, making the real-world hold needed that much
-  // longer than the configured value. Erring long is the safe direction — the failure
-  // mode being guarded against is a stray tap waking the device.
+  // charged to the user twice. millis() starts at app init, though, and so excludes the
+  // ROM and the bootloader, which the press lasted through as well. Where that time is
+  // known -- a power-on the press itself caused, when the bootloader checks the whole app
+  // image for about a second -- the caller passes it as heldBeforeAppMs and it counts too,
+  // against a correspondingly longer requiredDurationMs (CrossPointSettings::wakeHoldFor()).
+  // Elsewhere the real hold stays longer than the configured value. Erring long is the safe
+  // direction — the failure mode being guarded against is a stray tap waking the device.
   //
   // Watch the first press through to release, classifying it exactly like the awake FSM
   // (ButtonEventManager): held past requiredDurationMs is a long press; released earlier
@@ -1066,13 +1073,13 @@ HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint1
         // The pin went HIGH and is LOW again: either the second click of a double, or the
         // first press bouncing. The gap decides.
         if (gestures.doubleClick && now - releaseSeenAt >= RELEASE_DEBOUNCE_MS) {
-          return {WakeVerdict::DoubleClick, stamp(now), heldMs};
+          return verdict(WakeVerdict::DoubleClick, stamp(now), heldMs);
         }
         releaseSeenAt = 0;  // bounce — still the same press
       }
       lastSeenPressed = now;
-      if (gestures.longHold && now >= requiredDurationMs) {
-        return {WakeVerdict::LongHold, stamp(now), stamp(now - gateStart)};
+      if (gestures.longHold && now + heldBeforeAppMs >= requiredDurationMs) {
+        return verdict(WakeVerdict::LongHold, stamp(now), stamp(now - gateStart));
       }
     } else {
       if (releaseSeenAt == 0) {
@@ -1083,10 +1090,10 @@ HalGPIO::WakeCheck HalGPIO::verifyPowerButtonWakeup(WakeGestures gestures, uint1
       // chance: a second press within the window after this release, handled above.
       if (!gestures.doubleClick) {
         if (releasedFor >= BOUNCE_TOLERANCE_MS) {
-          return {WakeVerdict::ReleasedEarly, stamp(now), heldMs};
+          return verdict(WakeVerdict::ReleasedEarly, stamp(now), heldMs);
         }
       } else if (releasedFor >= DOUBLE_WINDOW_MS) {
-        return {WakeVerdict::NoSecondPress, stamp(now), heldMs};
+        return verdict(WakeVerdict::NoSecondPress, stamp(now), heldMs);
       }
     }
     delay(POLL_INTERVAL_MS);

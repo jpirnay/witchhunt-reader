@@ -321,6 +321,10 @@ inline void buildSettings(const RowSink& emit) {
            .withDynamicOptions(fontSizeOptionCount, fontSizeOptionLabel)
            .withSubmenu(StrId::STR_MENU_READER_FONT)
            .withSelectorActivity());
+  // Next to the size it keeps: text the book sets within 10% of its body size is drawn at that size.
+  emit(SettingInfo::Toggle(StrId::STR_FONT_SIZE_NORMALIZATION, &CrossPointSettings::fontSizeNormalization,
+                           "fontSizeNormalization", StrId::STR_CAT_READER)
+           .withSubmenu(StrId::STR_MENU_READER_FONT));
   emit(SettingInfo::Toggle(StrId::STR_TEXT_AA, &CrossPointSettings::textAntiAliasing, "textAntiAliasing",
                            StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_READER_FONT));
@@ -350,6 +354,16 @@ inline void buildSettings(const RowSink& emit) {
            .withDynamicOptions(txtFontSizeOptionCount, txtFontSizeOptionLabel)
            .withSubmenu(StrId::STR_MENU_TXT_FONT)
            .withSelectorActivity());
+  // The rest of the font section, still under its heading: no subcategory of its own. On the device Font Manager
+  // goes in above it (SettingsActivity::onEnter, at the first row past the font submenus).
+  //
+  // A book's embedded fonts (BookFonts), in the order of CrossPointSettings::PUBLISHER_FONTS: Stage A's toggle stored
+  // 0/1, which stay Off and Body Text. The setting follows crosspoint-reader PR #3934 (Justin Mitchell), reworked for
+  // the TTF engine. They apply only while Embedded Style (Layout, below) is on.
+  emit(SettingInfo::Enum(StrId::STR_PUBLISHER_FONTS, &CrossPointSettings::publisherFonts,
+                         {StrId::STR_OVERLAY_OFF, StrId::STR_PUBLISHER_FONTS_BODY, StrId::STR_PUBLISHER_FONTS_ACCENTS,
+                          StrId::STR_PUBLISHER_FONTS_ALL},
+                         "publisherFonts", StrId::STR_CAT_READER));
   emit(SettingInfo::Enum(StrId::STR_PARA_ALIGNMENT, &CrossPointSettings::paragraphAlignment,
                          {StrId::STR_JUSTIFY, StrId::STR_ALIGN_LEFT, StrId::STR_CENTER, StrId::STR_ALIGN_RIGHT,
                           StrId::STR_BOOK_S_STYLE},
@@ -366,17 +380,10 @@ inline void buildSettings(const RowSink& emit) {
   // Formatting settings
   emit(SettingInfo::Toggle(StrId::STR_EMBEDDED_STYLE, &CrossPointSettings::embeddedStyle, "embeddedStyle",
                            StrId::STR_CAT_READER));
-  // A book's embedded fonts (BookFonts), in the order of CrossPointSettings::PUBLISHER_FONTS: Stage A's toggle stored
-  // 0/1, which stay Off and Body Text. The setting follows crosspoint-reader PR #3934 (Justin Mitchell), reworked for
-  // the TTF engine.
-  emit(SettingInfo::Enum(StrId::STR_PUBLISHER_FONTS, &CrossPointSettings::publisherFonts,
-                         {StrId::STR_OVERLAY_OFF, StrId::STR_PUBLISHER_FONTS_BODY, StrId::STR_PUBLISHER_FONTS_ACCENTS,
-                          StrId::STR_PUBLISHER_FONTS_ALL},
-                         "publisherFonts", StrId::STR_CAT_READER));
   emit(SettingInfo::Toggle(StrId::STR_HYPHENATION, &CrossPointSettings::hyphenationEnabled, "hyphenationEnabled",
                            StrId::STR_CAT_READER));
-  emit(SettingInfo::Toggle(StrId::STR_FONT_SIZE_NORMALIZATION, &CrossPointSettings::fontSizeNormalization,
-                           "fontSizeNormalization", StrId::STR_CAT_READER));
+  emit(SettingInfo::Toggle(StrId::STR_WIDOW_ORPHAN_CONTROL, &CrossPointSettings::widowOrphanControl,
+                           "widowOrphanControl", StrId::STR_CAT_READER));
   // Which StarDict dictionary word lookup uses. An Action rather than an Enum:
   // the options are folders discovered on the SD card at open time, not a fixed
   // list, so the picker has to scan.

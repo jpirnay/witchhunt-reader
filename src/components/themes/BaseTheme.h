@@ -138,7 +138,9 @@ class BaseTheme {
   virtual ~BaseTheme() = default;
 
   // Component drawing methods
-  virtual void drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total) const;
+  // The bar, and its percentage centred below it: a screen does not draw its own. Returns the y below the
+  // percentage, where the screen's next line goes.
+  virtual int drawProgressBar(const GfxRenderer& renderer, Rect rect, size_t current, size_t total) const;
   virtual void drawBatteryLeft(const GfxRenderer& renderer, Rect rect,
                                bool showPercentage = true) const;  // Left aligned (reader mode)
   virtual void drawBatteryRight(const GfxRenderer& renderer, Rect rect,

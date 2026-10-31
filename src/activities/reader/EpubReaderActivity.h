@@ -736,6 +736,7 @@ class EpubReaderActivity final : public Activity {
   int8_t bookInlineFootnotePreviewsOverride = -1;
   int8_t bookLineSpacingOverride = -1;
   int8_t bookVerticalTextOverride = -1;
+  int8_t bookPublisherFontsOverride = -1;
   // Whether the book's language is ever set vertically (TypographyProfile::verticalAllowed); read once in onEnter.
   bool bookVerticalAllowed_ = false;
 
@@ -778,6 +779,10 @@ class EpubReaderActivity final : public Activity {
   // that can show pages while Background-B holds the secondary buffer: one whose FAST refresh
   // needs no host-side previous frame (GfxRenderer::fastRefreshNeedsHostFrame() false, the X3).
   bool nearChapterEndForBuildThrough() const;
+  // `spine` is a later file of the TOC chapter on screen, and the status bar shows the chapter page
+  // counter, which stays an estimate until that file's page count is recorded (ChapterPageSpan).
+  // Background-B builds such a file past the BG_BUILD_LOOKAHEAD_PAGES budget (#580).
+  bool chapterCounterAwaits(int spine) const;
   // Realloc the secondary buffer, evicting rebuildable caches (FDC page slots, CSS
   // resolve caches) that a released build may have planted inside the freed hole and
   // retrying once before reporting failure. Shared by the post-build and opportunistic
@@ -1164,13 +1169,15 @@ class EpubReaderActivity final : public Activity {
   // Wider variant that also covers AA, hyphenation and guide dots. Used by
   // QuickOverridesActivity; the narrower overload above funnels through here,
   // preserving the AA/hyphenation/guide-dots values currently held on this activity.
-  void applyBookReaderOverrides(int8_t embeddedStyleOverride, int8_t imageRenderingOverride, int8_t fontFamilyOverride,
+  // True when the change reopens the book (Publisher Fonts it has not examined yet): this reader is on its way out,
+  // so the caller does nothing more with it.
+  bool applyBookReaderOverrides(int8_t embeddedStyleOverride, int8_t imageRenderingOverride, int8_t fontFamilyOverride,
                                 const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
                                 int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride,
                                 int8_t textAntiAliasingOverride, int8_t hyphenationOverride,
                                 int8_t fontSizeNormalizationOverride, int8_t guideDotsOverride,
                                 int8_t inlineFootnotePreviewsOverride, int8_t lineSpacingOverride,
-                                int8_t verticalTextOverride);
+                                int8_t verticalTextOverride, int8_t publisherFontsOverride);
   void openReaderMenu();
   void openQuickOverrides();
   bool getEffectiveEmbeddedStyle() const;

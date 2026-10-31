@@ -129,6 +129,35 @@ TEST(SettingsGrouping, ASubmenuWhoseRowsAgreeStillHeadsItsOwnRow) {
   EXPECT_EQ(tab[0].nameId, kOther);
   EXPECT_EQ(tab[1].subcategory, kOther);
   EXPECT_EQ(strandedHeadings(tab), 0);
+  EXPECT_EQ(countSeparators(submenuItems(submenus, kOther)), 0) << "the heading was repeated inside the submenu";
+}
+
+// The shape the real lists use for that (Reader Font, Front light, the Back button's actions): only the first row
+// names the heading, which is also how the web page reads a heading -- the row that starts the section. The heading
+// still belongs above the row that opens the submenu. Taking one only when every row named it left the Reader tab's
+// "Reader Font" heading below both font submenus, over Font Manager, the first row of the section still in the tab.
+TEST(SettingsGrouping, ASubmenuWhoseFirstRowAloneNamesAHeadingHeadsItsOwnRow) {
+  std::vector<SettingInfo> tab;
+  tab.push_back(row(StrId::STR_GEST_SWIPE_LEFT, kSubmenu, kGroupA));
+  tab.push_back(row(StrId::STR_GEST_SWIPE_RIGHT, kSubmenu, StrId::STR_NONE_OPT));
+  tab.push_back(row(StrId::STR_GEST_TAP_LEFT, kSubmenu, StrId::STR_NONE_OPT));
+  tab.push_back(row(StrId::STR_GEST_TAP_RIGHT, StrId::STR_NONE_OPT, kGroupA));
+  std::vector<SettingInfo::SubmenuData> submenus;
+  buildLikeTheSettingsScreen(tab, submenus);
+
+  ASSERT_EQ(tab.size(), 3u) << "one heading, the row that opens the submenu, and the row after it";
+  EXPECT_TRUE(tab[0].isSeparator);
+  EXPECT_EQ(tab[0].nameId, kGroupA);
+  EXPECT_FALSE(tab[1].isSeparator);
+  EXPECT_EQ(tab[1].subcategory, kGroupA);
+  EXPECT_EQ(tab[2].nameId, StrId::STR_GEST_TAP_RIGHT) << "the section's next row went under a second heading";
+  EXPECT_EQ(strandedHeadings(tab), 0);
+
+  // The heading went above the row that opens the submenu, so it is not repeated inside, under the submenu's own
+  // title ("Reader Font" over the Reader Font rows, "Button Actions" over the Back button's three presses).
+  const auto& items = submenuItems(submenus, kSubmenu);
+  EXPECT_EQ(countSeparators(items), 0) << "the submenu repeated the heading its row already sits under";
+  EXPECT_EQ(items.size(), 3u);
 }
 
 // Rows that stay in the tab are grouped there exactly as before.
@@ -195,4 +224,27 @@ TEST(VerticalTextSetting, ABookOverrideInTheStoredRangeResolvesToItsRequest) {
   }
   EXPECT_EQ(FlowContext::requestFor(VerticalText::On, -1, true), VerticalText::On);
   EXPECT_EQ(FlowContext::requestFor(VerticalText::On, 1, false), VerticalText::Off);
+}
+
+// A book's Publisher Fonts override beats the setting both ways: a book of its own fonts while they are off, a book in
+// the reader's font while they are on. -1, and anything a hand-edited recent.json leaves out of range, follows it.
+TEST(PublisherFontsSetting, ABookOverrideBeatsTheSetting) {
+  using S = CrossPointSettings;
+  EXPECT_EQ(S::publisherFontsFor(S::PUBLISHER_FONTS_ALL, S::PUBLISHER_FONTS_OFF), S::PUBLISHER_FONTS_ALL);
+  EXPECT_EQ(S::publisherFontsFor(S::PUBLISHER_FONTS_OFF, S::PUBLISHER_FONTS_BODY), S::PUBLISHER_FONTS_OFF);
+  EXPECT_EQ(S::publisherFontsFor(-1, S::PUBLISHER_FONTS_ACCENTS), S::PUBLISHER_FONTS_ACCENTS);
+  EXPECT_EQ(S::publisherFontsFor(S::PUBLISHER_FONTS_COUNT, S::PUBLISHER_FONTS_BODY), S::PUBLISHER_FONTS_BODY);
+}
+
+// A power-on wake (the X3, the X4 with its latch cut) is timed from the press that powered the device, against the
+// sleep gesture's own duration: the ROM and the bootloader it lasted through count. Any other wake can count only app
+// time, against the shorter threshold that stands in for that uncounted start.
+TEST(WakeHold, APowerOnWakeIsTimedFromPowerOnLikeTheSleepGesture) {
+  using S = CrossPointSettings;
+  constexpr auto cold = S::wakeHoldFor(1026);
+  EXPECT_EQ(cold.requiredMs, S::getPowerButtonDuration());
+  EXPECT_EQ(cold.heldBeforeAppMs, 1026);
+  constexpr auto warm = S::wakeHoldFor(0);
+  EXPECT_EQ(warm.requiredMs, S::getPowerWakeHoldDuration());
+  EXPECT_EQ(warm.heldBeforeAppMs, 0);
 }
