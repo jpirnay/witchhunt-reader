@@ -17,6 +17,15 @@
 #include <string>
 #include <vector>
 
+// Where a glyph's ink sits in its advance (the real renderer's GlyphInk).
+struct GlyphInk {
+  int left = 0;
+  int width = 0;
+  int top = 0;
+  int height = 0;
+  int advance = 0;
+};
+
 class GfxRenderer {
  public:
   enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
@@ -83,6 +92,13 @@ class GfxRenderer {
   }
   void ensureFontReady(int /*fontId*/, const char* /*utf8Text*/) const {}
   bool hasGlyph(int /*fontId*/, uint32_t /*cp*/, EpdFontFamily::Style /*style*/) const { return true; }
+  // Every glyph fills its advance and the em box.
+  bool getGlyphInk(int fontId, uint32_t /*cp*/, EpdFontFamily::Style style, GlyphInk& ink) const {
+    ink.left = 0;
+    ink.advance = ink.width = ink.height = getTextAdvanceX(fontId, "x", style);
+    ink.top = (ink.advance * 88 + 50) / 100;
+    return true;
+  }
 
   // --- Render surface used by TextBlock ---
   bool isFontCacheScanning() const { return false; }

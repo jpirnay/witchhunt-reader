@@ -135,7 +135,9 @@ class TextBlock final : public Block {
   bool sizesPresent = false;
   bool isValid = true;
   uint8_t wordFontCount = 0;  // the line's word fonts (see WordFont); 0 on a line in the block's font alone
-  bool vertical_ = false;     // a line of a vertical-rl page (see setVertical); takes the struct's pad byte
+  // Both share the struct's pad byte: a line of a vertical-rl page (see setVertical), and whether its 、。 are centred.
+  bool vertical_ : 1 = false;
+  bool centredMarks_ : 1 = false;
   // The ONLY allocation. Heap by default (nothrow, so OOM yields an invalid block instead of
   // abort() -- bare new is not nothrow with -fno-exceptions). A section build that lends a
   // scratch region (the borrowed secondary framebuffer) hands it in through the range
@@ -252,6 +254,9 @@ class TextBlock final : public Block {
   // Set by the page's builder; kept in the cache.
   void setVertical(const bool vertical) { vertical_ = vertical; }
   bool isVertical() const { return vertical_; }
+  // Traditional Chinese centres 、。 in their column; elsewhere they sit in the top-right corner (VerticalDraw.h).
+  void setCentredMarks(const bool centred) { centredMarks_ = centred; }
+  bool centredMarks() const { return centredMarks_; }
   uint16_t wordCount() const { return numWords; }
   // NUL-terminated by construction; safe to pass to C APIs directly.
   const char* wordText(const uint16_t i) const { return textArr + textOffArr[i]; }

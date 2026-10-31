@@ -1,6 +1,7 @@
 #include "VerticalDraw.h"
 
 #include <GfxRenderer.h>
+#include <Utf8.h>
 
 #include <cstring>
 
@@ -39,7 +40,62 @@ void drawIn(const GfxRenderer& renderer, const int fontId, const int x, const in
   }
 }
 
+// How far an upright piece's ink moves in the reader's frame: right by dx, down by dy.
+struct Shift {
+  int dx = 0;
+  int dy = 0;
+};
+
+// The ink of `cp` at `scale`. False when the font has no glyph of its own (a lookalike or U+FFFD is never placed) or no
+// ink for it.
+bool scaledInk(const GfxRenderer& renderer, const int fontId, const uint32_t cp, const EpdFontFamily::Style style,
+               const float scale, GlyphInk& ink) {
+  if (!renderer.hasGlyph(fontId, cp, style) || !renderer.getGlyphInk(fontId, cp, style, ink)) return false;
+  ink.left = scaled(ink.left, scale);
+  ink.width = scaled(ink.width, scale);
+  ink.top = scaled(ink.top, scale);
+  ink.height = scaled(ink.height, scale);
+  return true;
+}
+
+// The shift a placement gives a piece of advance `adv` in an em cell, from its ink.
+Shift shiftOf(const UprightPlacement placement, const GlyphInk& ink, const int em, const int adv,
+              const bool centredMarks) {
+  Shift shift;
+  if (placement == UprightPlacement::SmallKana) {
+    shift.dx = (em * 10 + 50) / 100;
+    shift.dy = -shift.dx;
+  } else if (placement == UprightPlacement::Reflect) {
+    const int b = (em * 88 + 50) / 100;
+    shift.dx = 2 * (adv / 2) - 2 * ink.left - ink.width;
+    shift.dy = em - 2 * b + 2 * ink.top - ink.height;
+    if (centredMarks) {
+      shift.dx /= 2;
+      shift.dy /= 2;
+    }
+  }
+  return shift;
+}
+
+uint32_t firstCodepoint(const char* text) {
+  const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
+  return utf8NextCodepoint(&p);
+}
+
 }  // namespace
+
+bool columnInk(const GfxRenderer& renderer, const int fontId, const uint32_t cp, const EpdFontFamily::Style style,
+               const bool centredMarks, int& inkStart, int& inkSize, int& cell) {
+  if (!drawsUpright(cp)) return false;
+  GlyphInk ink;
+  if (!scaledInk(renderer, fontId, cp, style, 1.0f, ink)) return false;
+  const int em = columnEm(renderer, fontId, style, 1.0f);
+  const Shift shift = shiftOf(uprightPlacementOf(cp), ink, em, ink.advance, centredMarks);
+  inkStart = (em * 88 + 50) / 100 - ink.top + shift.dy;
+  inkSize = ink.height;
+  cell = em;
+  return true;
+}
 
 int columnEm(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::Style style, const float scale) {
   const int raw = rawEm(renderer, fontId, style);
@@ -62,7 +118,7 @@ int verticalTextAdvance(const GfxRenderer& renderer, const int fontId, const cha
 }
 
 void drawTextVertical(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
-                      const EpdFontFamily::Style style, const float scale) {
+                      const EpdFontFamily::Style style, const float scale, const bool centredMarks) {
   if (renderer.isFontCacheScanning()) {
     // Record 一 in this style too: the draw below measures with it, and an unprewarmed glyph is a miss on SD/TTF fonts.
     (void)rawEm(renderer, fontId, style);
@@ -91,9 +147,16 @@ void drawTextVertical(const GfxRenderer& renderer, const int fontId, const int x
       continue;
     }
     const int adv = scaled(renderer.getTextAdvanceX(fontId, piece, style), scale);
+    Shift shift;
+    const uint32_t cp = firstCodepoint(piece);
+    const UprightPlacement placement = uprightPlacementOf(cp);
+    GlyphInk ink;
+    if (placement != UprightPlacement::None && scaledInk(renderer, fontId, cp, style, scale, ink)) {
+      shift = shiftOf(placement, ink, em, adv, centredMarks);
+    }
     renderer.setDrawOrientation(reader);
-    drawIn(renderer, fontId, readerWidth - 1 - axis - adv / 2, pen + (em * 88 + 50) / 100 - ascender, piece, style,
-           scale);
+    drawIn(renderer, fontId, readerWidth - 1 - axis - adv / 2 + shift.dx,
+           pen + (em * 88 + 50) / 100 - ascender + shift.dy, piece, style, scale);
     renderer.setDrawOrientation(content);
   }
 }
