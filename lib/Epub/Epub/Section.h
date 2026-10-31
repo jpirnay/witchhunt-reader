@@ -205,7 +205,7 @@ class Section {
     uint16_t viewportHeight = 0;
     bool hyphenationEnabled = false;
     // Widow and orphan control (ChapterHtmlSlimParser::keepTogetherBreak), the reader's "Avoid Widows & Orphans".
-    // Hashed only when off, so the variants laid out with it keep their key.
+    // Hashed only when off, so the variants laid out with it keep their key. A vertical section ignores it.
     bool widowOrphanControl = true;
     bool fontSizeNormalization = true;
     bool embeddedStyle = false;
