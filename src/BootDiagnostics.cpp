@@ -28,6 +28,8 @@ uint16_t s_phaseReached = 0;
 static_assert(static_cast<uint8_t>(BootPhase::Count) <= 16, "s_phaseReached mask is 16 bits wide");
 
 HalGPIO::WakeCheck s_wakeCheck;
+// Time from power-on to the app (setPreAppMs); 0 = not a power-on, or not measured.
+uint16_t s_preAppMs = 0;
 
 // Short labels so the whole trace fits one 256-byte ring-buffer entry (Logging.cpp).
 constexpr const char* kPhaseNames[] = {"entry", "nvs",  "gate",  "hw",    "ser",   "recov", "sd",
@@ -291,10 +293,15 @@ void setWakeCheck(const HalGPIO::WakeCheck& check) { s_wakeCheck = check; }
 
 const HalGPIO::WakeCheck& wakeCheck() { return s_wakeCheck; }
 
+void setPreAppMs(const uint16_t ms) { s_preAppMs = ms; }
+
+uint16_t preAppMs() { return s_preAppMs; }
+
 void logSummary() {
-  LOG_INF("BOOT", "Wake gate: %s (decided at %u ms, gate saw the press for %u ms, required %u ms)",
+  LOG_INF("BOOT",
+          "Wake gate: %s (decided at %u ms, gate saw the press for %u ms, required %u ms; %u ms before the app)",
           HalGPIO::wakeVerdictName(s_wakeCheck.verdict), s_wakeCheck.decidedAtMs, s_wakeCheck.heldMs,
-          CrossPointSettings::getPowerWakeHoldDuration());
+          CrossPointSettings::getPowerWakeHoldDuration(), s_preAppMs);
 
   // One "name+costMs" token per reached phase, then the two absolute numbers worth
   // quoting. Deltas rather than absolutes because the cost of a phase is the actionable

@@ -81,6 +81,12 @@ const char* phaseName(BootPhase phase);
 void setWakeCheck(const HalGPIO::WakeCheck& check);
 const HalGPIO::WakeCheck& wakeCheck();
 
+/// Milliseconds from power-on to the app's start, which millis() does not count: the ROM and the second-stage
+/// bootloader, which checks the whole app image on a power-on (not on a deep-sleep wake). A press that powers the
+/// device up has to last through it before the wake gate even looks. 0 when the reset was not a power-on.
+void setPreAppMs(uint16_t ms);
+uint16_t preAppMs();
+
 /// The whole boot story in two log lines: what the power button was judged to be, and
 /// where the time went.  Re-emitted on every serial (re)connect.
 void logSummary();

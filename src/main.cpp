@@ -31,8 +31,11 @@
 #include <builtinFonts/all.h>
 #include <esp_heap_caps.h>
 #include <esp_ota_ops.h>
+#include <esp_private/esp_clk.h>
 #include <hal/usb_serial_jtag_ll.h>
+#include <soc/rtc.h>
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -1079,6 +1082,18 @@ void setup() {
   // bring-up below because that one spends 250 ms in delay(): on a non-self-latching
   // unit the rail must already be held before anything blocks for that long.
   BoardConfig::holdPowerRails();
+
+  // On a power-on reset the RTC timer started with the rail, so it minus millis() is what ran before the app: the ROM
+  // and the second-stage bootloader. Read before anything below can block. The raw counter, not esp_rtc_get_time_us():
+  // that one starts counting at the first calibration, in the app's startup, and drops the ticks before it -- which
+  // are exactly the ones wanted here (it measured 1 ms on an X3 cold boot).
+  if (esp_reset_reason() == ESP_RST_POWERON) {
+    const uint64_t sincePowerOnMs = rtc_time_slowclk_to_us(rtc_time_get(), esp_clk_slowclk_cal_get()) / 1000;
+    const unsigned long appMs = millis();
+    if (sincePowerOnMs > appMs) {
+      BootDiag::setPreAppMs(static_cast<uint16_t>(std::min<uint64_t>(sincePowerOnMs - appMs, UINT16_MAX)));
+    }
+  }
 
 #ifdef ENABLE_SERIAL_LOG
   // Earliest possible Serial setup, and UNCONDITIONAL — see the isUsbConnected()
