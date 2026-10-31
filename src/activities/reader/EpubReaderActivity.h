@@ -779,6 +779,10 @@ class EpubReaderActivity final : public Activity {
   // that can show pages while Background-B holds the secondary buffer: one whose FAST refresh
   // needs no host-side previous frame (GfxRenderer::fastRefreshNeedsHostFrame() false, the X3).
   bool nearChapterEndForBuildThrough() const;
+  // `spine` is a later file of the TOC chapter on screen, and the status bar shows the chapter page
+  // counter, which stays an estimate until that file's page count is recorded (ChapterPageSpan).
+  // Background-B builds such a file past the BG_BUILD_LOOKAHEAD_PAGES budget (#580).
+  bool chapterCounterAwaits(int spine) const;
   // Realloc the secondary buffer, evicting rebuildable caches (FDC page slots, CSS
   // resolve caches) that a released build may have planted inside the freed hole and
   // retrying once before reporting failure. Shared by the post-build and opportunistic
