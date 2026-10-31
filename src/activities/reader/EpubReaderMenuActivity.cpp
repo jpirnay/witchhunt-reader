@@ -84,9 +84,9 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
     const int8_t initialGuideDotsOverride, const int8_t initialParagraphAlignmentOverride,
     const int8_t initialTextAntiAliasingOverride, const int8_t initialHyphenationOverride,
     const int8_t initialFontSizeNormalizationOverride, const int8_t initialInlineFootnotePreviewsOverride,
-    const int8_t initialLineSpacingOverride, const int8_t initialVerticalTextOverride, const bool verticalAllowed,
-    const bool hasStarredPages, const bool isCurrentPageStarred, const bool hasPrintedPages,
-    const bool wordLookupAvailable)
+    const int8_t initialLineSpacingOverride, const int8_t initialVerticalTextOverride,
+    const int8_t initialPublisherFontsOverride, const bool verticalAllowed, const bool hasStarredPages,
+    const bool isCurrentPageStarred, const bool hasPrintedPages, const bool wordLookupAvailable)
     : TabbedUiListActivity("EpubReaderMenu", renderer, mappedInput),
       currentPageStarred(isCurrentPageStarred),
       pendingOrientation(currentOrientation),
@@ -106,6 +106,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
       pendingInlineFootnotePreviewsOverride(initialInlineFootnotePreviewsOverride),
       pendingLineSpacingOverride(initialLineSpacingOverride),
       pendingVerticalTextOverride(initialVerticalTextOverride),
+      pendingPublisherFontsOverride(initialPublisherFontsOverride),
       title(title),
       currentPage(currentPage),
       totalPages(totalPages),
@@ -279,6 +280,24 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
               })
           .withSelectorActivity();
   settingsItems.push_back(std::move(fontSizeSetting));
+
+  // Publisher Fonts: default / off / body text / accents / all text (CrossPointSettings::PUBLISHER_FONTS)
+  settingsItems.push_back(SettingInfo::DynamicEnumCtx(
+                              StrId::STR_PUBLISHER_FONTS,
+                              {StrId::STR_DEFAULT_VALUE, StrId::STR_OVERLAY_OFF, StrId::STR_PUBLISHER_FONTS_BODY,
+                               StrId::STR_PUBLISHER_FONTS_ACCENTS, StrId::STR_PUBLISHER_FONTS_ALL},
+                              self,
+                              [](const void* ctx) -> uint8_t {
+                                const auto* s = static_cast<const EpubReaderMenuActivity*>(ctx);
+                                return (s->pendingPublisherFontsOverride < 0)
+                                           ? 0
+                                           : static_cast<uint8_t>(s->pendingPublisherFontsOverride + 1);
+                              },
+                              [](void* ctx, uint8_t v) {
+                                auto* s = static_cast<EpubReaderMenuActivity*>(ctx);
+                                s->pendingPublisherFontsOverride = (v == 0) ? -1 : static_cast<int8_t>(v - 1);
+                              })
+                              .withSelectorActivity());
 
   // Text darkness. The list is positional -- index IS the stored value -- and
   // Lighter sits last despite being the lightest, because the value is
@@ -509,6 +528,7 @@ void EpubReaderMenuActivity::finishWithAction(MenuAction action) {
   payload.inlineFootnotePreviewsOverride = pendingInlineFootnotePreviewsOverride;
   payload.lineSpacingOverride = pendingLineSpacingOverride;
   payload.verticalTextOverride = pendingVerticalTextOverride;
+  payload.publisherFontsOverride = pendingPublisherFontsOverride;
   setResult(std::move(payload));
   finish();
 }
@@ -554,6 +574,7 @@ void EpubReaderMenuActivity::onBackPressed() {
   payload.inlineFootnotePreviewsOverride = pendingInlineFootnotePreviewsOverride;
   payload.lineSpacingOverride = pendingLineSpacingOverride;
   payload.verticalTextOverride = pendingVerticalTextOverride;
+  payload.publisherFontsOverride = pendingPublisherFontsOverride;
   result.data = std::move(payload);
   setResult(std::move(result));
   finish();
@@ -607,6 +628,10 @@ std::string EpubReaderMenuActivity::getItemValueString(int index) const {
     }
     if (item.nameId == StrId::STR_VERTICAL_TEXT && pendingVerticalTextOverride < 0) {
       const auto label = item.getEnumOptionLabel(static_cast<uint8_t>(SETTINGS.verticalText + 1));
+      if (!label.empty()) return std::string(tr(STR_DEFAULT_VALUE)) + " (" + label + ")";
+    }
+    if (item.nameId == StrId::STR_PUBLISHER_FONTS && pendingPublisherFontsOverride < 0) {
+      const auto label = item.getEnumOptionLabel(static_cast<uint8_t>(SETTINGS.publisherFonts + 1));
       if (!label.empty()) return std::string(tr(STR_DEFAULT_VALUE)) + " (" + label + ")";
     }
     if (item.nameId == StrId::STR_TEXT_AA && pendingTextAntiAliasingOverride < 0) {

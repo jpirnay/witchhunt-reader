@@ -78,6 +78,7 @@ void RecentBooksStore::addBook(const std::string& path, const std::string& title
     newBook.inlineFootnotePreviewsOverride = it->inlineFootnotePreviewsOverride;
     newBook.lineSpacingOverride = it->lineSpacingOverride;
     newBook.verticalTextOverride = it->verticalTextOverride;
+    newBook.publisherFontsOverride = it->publisherFontsOverride;
     recentBooks.erase(it);
   }
 
@@ -297,7 +298,8 @@ bool RecentBooksStore::setReaderOverrides(const std::string& path, const int8_t 
                             sdFontFamilyOverride, fontSizeOverride, static_cast<int8_t>(bionicReadingOverride ? 1 : 0),
                             paragraphAlignmentOverride, it->textAntiAliasingOverride, it->hyphenationOverride,
                             it->fontSizeNormalizationOverride, it->guideDotsOverride,
-                            it->inlineFootnotePreviewsOverride, it->lineSpacingOverride, it->verticalTextOverride);
+                            it->inlineFootnotePreviewsOverride, it->lineSpacingOverride, it->verticalTextOverride,
+                            it->publisherFontsOverride);
 }
 
 bool RecentBooksStore::setReaderOverrides(const std::string& path, const int8_t embeddedStyleOverride,
@@ -307,7 +309,7 @@ bool RecentBooksStore::setReaderOverrides(const std::string& path, const int8_t 
                                           const int8_t textAntiAliasingOverride, const int8_t hyphenationOverride,
                                           const int8_t fontSizeNormalizationOverride, const int8_t guideDotsOverride,
                                           const int8_t inlineFootnotePreviewsOverride, const int8_t lineSpacingOverride,
-                                          const int8_t verticalTextOverride) {
+                                          const int8_t verticalTextOverride, const int8_t publisherFontsOverride) {
   const Hold hold;
   auto it =
       std::find_if(recentBooks.begin(), recentBooks.end(), [&](const RecentBook& book) { return book.path == path; });
@@ -329,6 +331,7 @@ bool RecentBooksStore::setReaderOverrides(const std::string& path, const int8_t 
   it->inlineFootnotePreviewsOverride = inlineFootnotePreviewsOverride;
   it->lineSpacingOverride = lineSpacingOverride;
   it->verticalTextOverride = verticalTextOverride;
+  it->publisherFontsOverride = publisherFontsOverride;
   return saveToFile();
 }
 
