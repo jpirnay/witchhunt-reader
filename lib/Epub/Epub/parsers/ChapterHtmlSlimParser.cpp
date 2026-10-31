@@ -1568,7 +1568,10 @@ bool ChapterHtmlSlimParser::keepTogetherBreak(const int lineHeight, const bool n
     return need > room;
   }
   // Off, the page fills. On a page of ten lines the rule could leave two of them empty (#579).
-  if (!widowOrphanControl_) return false;
+  // A vertical section fills its pages whatever the setting says: the rule was written for Latin
+  // text, a vertical page holds about 9 columns where a horizontal one holds 14 lines, and the
+  // acceptance book's pages stopped after 5 of 9 columns (#577).
+  if (!widowOrphanControl_ || vertical_) return false;
   const int fit = room / lineHeight;  // lines of this height still on the page, this one included
   if (fit <= 0) return false;         // it does not fit at all: the ordinary break
   // Not known yet: the paragraph runs on past this layout pass, so it has lines enough to split.
