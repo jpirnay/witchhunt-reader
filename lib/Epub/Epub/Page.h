@@ -241,6 +241,14 @@ class Page {
     });
   }
 
+  // True when the page has elements and every one is an image.
+  bool isImageOnly() const {
+    return !elements.empty() &&
+           std::all_of(elements.begin(), elements.end(), [](const std::unique_ptr<PageElement>& element) {
+             return element && element->getTag() == TAG_PageImage;
+           });
+  }
+
   // Get bounding box of all images on the page (union of image rects)
   // Returns false if no images. Coordinates are relative to page origin.
   bool getImageBoundingBox(int16_t& outX, int16_t& outY, int16_t& outW, int16_t& outH) const {

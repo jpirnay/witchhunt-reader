@@ -33,7 +33,8 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 105;  // v105: a vertical section keeps no widows or orphans
+constexpr uint8_t SECTION_FILE_VERSION = 105;  // v105: a vertical section keeps no widows or orphans, and an
+                                               // image-only vertical page is centred across its block extent
                                                // v104: a section may be set vertical-rl: the header keeps the
                                                // vertical-text request and a status bit the outcome; a page
                                                // keeps its block extent (after its element count), a line

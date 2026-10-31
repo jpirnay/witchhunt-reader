@@ -32,4 +32,12 @@ TEST(ImageOnlyPage, AVerticalImagePageIsNotMoved) {
   EXPECT_EQ(0, ReaderPageLayout::imageOnlyPageYOffset(page, 700));
 }
 
+TEST(ImageOnlyPage, ThePredicateNeedsOnlyImages) {
+  Page page = imagePage(false);
+  EXPECT_TRUE(page.isImageOnly());
+  page.elements.push_back(std::unique_ptr<PageElement>(new PageHR(0, 0, 10)));
+  EXPECT_FALSE(page.isImageOnly());
+  EXPECT_FALSE(Page().isImageOnly());
+}
+
 }  // namespace

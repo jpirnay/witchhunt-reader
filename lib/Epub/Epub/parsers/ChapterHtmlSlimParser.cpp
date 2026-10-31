@@ -1404,7 +1404,19 @@ void ChapterHtmlSlimParser::emitPage() {
   deferredDropCapLine_ = nullptr;
   // A vertical page draws in the turned frame across the block extent its columns fill: the reader's viewport width,
   // which the swap made this parser's height.
-  if (vertical_) currentPage->verticalBlockExtent = viewportHeight;
+  if (vertical_) {
+    currentPage->verticalBlockExtent = viewportHeight;
+    // A page of images alone is centred across that extent here: the reader's own centring moves a page along its y,
+    // which on a vertical page is along the column, while the block extent is known at build.
+    int16_t imgX, imgY, imgW, imgH;
+    if (currentPage->isImageOnly() && currentPage->getImageBoundingBox(imgX, imgY, imgW, imgH) &&
+        imgH < viewportHeight) {
+      const int shift = (viewportHeight - imgH) / 2 - imgY;
+      if (shift > 0) {
+        for (auto& element : currentPage->elements) element->yPos = static_cast<int16_t>(element->yPos + shift);
+      }
+    }
+  }
   // The page is handed over only once both tables have its entry, so this table, the consumer's
   // and completedPageCount move in lockstep or not at all.
   if (pageTableFull_ || !paragraphLutPerPage.push_back({start, xpathParagraphIndex, xpathListItemIndex})) {
