@@ -326,6 +326,9 @@ jobs:
           pip install zopfli
           python test/web/bundle_identity_test.py
 
+      - name: Check the web bundle's release tag
+        run: python test/web/release_tag_test.py
+
   # This job is used as the PR required actions check, allows for changes to other steps in the future without breaking
   # PR requirements.
   test-status:
