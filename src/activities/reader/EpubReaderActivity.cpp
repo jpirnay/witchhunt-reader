@@ -745,6 +745,7 @@ void EpubReaderActivity::onEnter() {
   bookInlineFootnotePreviewsOverride = currentBook.inlineFootnotePreviewsOverride;
   bookLineSpacingOverride = currentBook.lineSpacingOverride;
   bookVerticalTextOverride = currentBook.verticalTextOverride;
+  bookPublisherFontsOverride = currentBook.publisherFontsOverride;
   bookVerticalAllowed_ = TypographyProfile::forLanguage(epub->getLanguage()).verticalAllowed;
   logReaderMemSnapshot("onEnter_after_recent_books");
 
@@ -3138,17 +3139,18 @@ void EpubReaderActivity::applyBookReaderOverrides(const int8_t embeddedStyleOver
                            fontSizeOverride, bionicReadingOverride, paragraphAlignmentOverride,
                            bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride,
                            bookGuideDotsOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
-                           bookVerticalTextOverride);
+                           bookVerticalTextOverride, bookPublisherFontsOverride);
 }
 
-void EpubReaderActivity::applyBookReaderOverrides(
+bool EpubReaderActivity::applyBookReaderOverrides(
     const int8_t embeddedStyleOverride, const int8_t imageRenderingOverride, const int8_t fontFamilyOverride,
     const std::string& sdFontFamilyOverride, const int8_t fontSizeOverride, const int8_t bionicReadingOverride,
     const int8_t paragraphAlignmentOverride, const int8_t textAntiAliasingOverride, const int8_t hyphenationOverride,
     const int8_t fontSizeNormalizationOverride, const int8_t guideDotsOverride,
-    const int8_t inlineFootnotePreviewsOverride, const int8_t lineSpacingOverride, const int8_t verticalTextOverride) {
+    const int8_t inlineFootnotePreviewsOverride, const int8_t lineSpacingOverride, const int8_t verticalTextOverride,
+    const int8_t publisherFontsOverride) {
   if (!epub) {
-    return;
+    return false;
   }
 
   // Built-in and SD font overrides are mutually exclusive; explicit built-in wins.
@@ -3172,10 +3174,11 @@ void EpubReaderActivity::applyBookReaderOverrides(
       bookTextAntiAliasingOverride == textAntiAliasingOverride && bookHyphenationOverride == hyphenationOverride &&
       bookFontSizeNormalizationOverride == fontSizeNormalizationOverride &&
       bookInlineFootnotePreviewsOverride == inlineFootnotePreviewsOverride &&
-      bookLineSpacingOverride == lineSpacingOverride && bookVerticalTextOverride == verticalTextOverride;
+      bookLineSpacingOverride == lineSpacingOverride && bookVerticalTextOverride == verticalTextOverride &&
+      bookPublisherFontsOverride == publisherFontsOverride;
 
   if (layoutOverridesUnchanged && bookGuideDotsOverride == guideDotsOverride) {
-    return;
+    return false;
   }
 
   bookEmbeddedStyleOverride = embeddedStyleOverride;
@@ -3192,16 +3195,30 @@ void EpubReaderActivity::applyBookReaderOverrides(
   bookInlineFootnotePreviewsOverride = inlineFootnotePreviewsOverride;
   bookLineSpacingOverride = lineSpacingOverride;
   bookVerticalTextOverride = verticalTextOverride;
+  bookPublisherFontsOverride = publisherFontsOverride;
   RECENT_BOOKS.setReaderOverrides(
       epub->getPath(), bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
       bookSdFontFamilyOverride, bookFontSizeOverride, bookBionicReadingOverride, bookParagraphAlignmentOverride,
       bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride, bookGuideDotsOverride,
-      bookInlineFootnotePreviewsOverride, bookLineSpacingOverride, bookVerticalTextOverride);
+      bookInlineFootnotePreviewsOverride, bookLineSpacingOverride, bookVerticalTextOverride,
+      bookPublisherFontsOverride);
 
   if (layoutOverridesUnchanged) {
     // Only guide dots changed: persisted above, and the repaint on resume picks
     // the new value up in render(). No section relayout, no refresh override.
-    return;
+    return false;
+  }
+
+  // Publisher Fonts that apply to the book now and have never examined it: switched on for it, or its own font family
+  // or style turned off. Only an open examines them, under the indexing popup and in the lent framebuffer
+  // (ReaderActivity::onEnter); loaded from here, they would wait (ensureSdFontLoadedForPath) and the book would stay
+  // in its old font until it was next opened. So it is opened again, as a KOReader sync does: onExit saves the page
+  // and its paragraph, which the new layout lands on. Read after the overrides were persisted above, as it reads
+  // them from RECENT_BOOKS. An examination that fails stays pending for only a few attempts (BookFonts::prepare).
+  if (bookFontsPendingForPath(epub->getPath().c_str())) {
+    LOG_INF("ERS", "Publisher Fonts now apply to a book not examined yet: reopening it");
+    activityManager.openBook(epub->getPath());
+    return true;
   }
 
   // A changed override forces a full section relayout (section.reset() below → rebuild with the
@@ -3229,6 +3246,7 @@ void EpubReaderActivity::applyBookReaderOverrides(
   // popup expects its caller to own.
   if (epub) ensureSdFontLoadedForPath(epub->getPath().c_str());
   resetSectionKeepingPosition();
+  return false;
 }
 
 void EpubReaderActivity::resetSectionKeepingPosition() {
@@ -7488,7 +7506,7 @@ void EpubReaderActivity::openQuickOverrides() {
           bookSdFontFamilyOverride, bookFontSizeOverride, bookBionicReadingOverride, bookGuideDotsOverride,
           bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
           bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
-          bookVerticalTextOverride, bookVerticalAllowed_),
+          bookVerticalTextOverride, bookPublisherFontsOverride, bookVerticalAllowed_),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyBookReaderOverrides(menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
@@ -7496,7 +7514,7 @@ void EpubReaderActivity::openQuickOverrides() {
                                  menu.paragraphAlignmentOverride, menu.textAntiAliasingOverride,
                                  menu.hyphenationOverride, menu.fontSizeNormalizationOverride, menu.guideDotsOverride,
                                  menu.inlineFootnotePreviewsOverride, menu.lineSpacingOverride,
-                                 menu.verticalTextOverride);
+                                 menu.verticalTextOverride, menu.publisherFontsOverride);
       });
 }
 
@@ -7538,19 +7556,21 @@ void EpubReaderActivity::openReaderMenu() {
           bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness, bookBionicReadingOverride,
           bookGuideDotsOverride, bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
           bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
-          bookVerticalTextOverride, bookVerticalAllowed_, !bookmarkStore.isEmpty(), isCurrentPageStarred,
-          hasPrintedPages, /*wordLookupAvailable=*/!(section && section->isVertical())),
+          bookVerticalTextOverride, bookPublisherFontsOverride, bookVerticalAllowed_, !bookmarkStore.isEmpty(),
+          isCurrentPageStarred, hasPrintedPages, /*wordLookupAvailable=*/!(section && section->isVertical())),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);
         applyTextDarkness(menu.textDarkness);
         toggleAutoPageTurn(menu.pageTurnOption);
-        applyBookReaderOverrides(menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
-                                 menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,
-                                 menu.paragraphAlignmentOverride, menu.textAntiAliasingOverride,
-                                 menu.hyphenationOverride, menu.fontSizeNormalizationOverride, menu.guideDotsOverride,
-                                 menu.inlineFootnotePreviewsOverride, menu.lineSpacingOverride,
-                                 menu.verticalTextOverride);
+        if (applyBookReaderOverrides(
+                menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
+                menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,
+                menu.paragraphAlignmentOverride, menu.textAntiAliasingOverride, menu.hyphenationOverride,
+                menu.fontSizeNormalizationOverride, menu.guideDotsOverride, menu.inlineFootnotePreviewsOverride,
+                menu.lineSpacingOverride, menu.verticalTextOverride, menu.publisherFontsOverride)) {
+          return;  // the book reopens: an action picked in the same visit goes with this reader
+        }
         if (!result.isCancelled) {
           onReaderMenuConfirm(static_cast<EpubReaderMenuActivity::MenuAction>(menu.action));
         }

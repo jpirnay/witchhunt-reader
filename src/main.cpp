@@ -792,13 +792,18 @@ void ensureSdFontLoaded() { sdFontSystem.ensureLoaded(renderer); }
 void unloadSdFontIfLoaded() { sdFontSystem.unload(renderer); }
 
 namespace {
-// The cache of the EPUB at `path` when Publisher Fonts apply to it, else "": the setting is on, the book's own style
-// is in use, and no font family has been chosen for it, which is how a reader keeps one such book in their own font.
+// The Publisher Fonts the book is drawn with: its own choice, else the setting.
+uint8_t publisherFontsMode(const RecentBook& book) {
+  return CrossPointSettings::publisherFontsFor(book.publisherFontsOverride, SETTINGS.publisherFonts);
+}
+
+// The cache of the EPUB at `path` when Publisher Fonts apply to it, else "": they are on for the book, its own style
+// is in use, and no font family has been chosen for it (a family chosen for a book still beats them).
 std::string publisherFontsCache(const char* path, const RecentBook& book) {
   const bool embeddedStyle =
       book.embeddedStyleOverride >= 0 ? book.embeddedStyleOverride != 0 : SETTINGS.embeddedStyle != 0;
-  if (SETTINGS.publisherFonts == 0 || !embeddedStyle || book.fontFamilyOverride >= 0 ||
-      !book.sdFontFamilyOverride.empty()) {
+  if (publisherFontsMode(book) == CrossPointSettings::PUBLISHER_FONTS_OFF || !embeddedStyle ||
+      book.fontFamilyOverride >= 0 || !book.sdFontFamilyOverride.empty()) {
     return {};
   }
   return Epub::cachePathFor(path, "/.crosspoint");
@@ -842,7 +847,7 @@ bool chooseEpubFonts(const char* path, const bool wait, const bool opening,
   body = sdFontSystem.effectiveReaderFamily(family);
   // The families BookFonts copied out of the book: its body family in place of the reader's font, and its accent
   // families beside whichever draws the body. They load together, the body's first and the most used accent next.
-  sdFontSystem.selectBookFamilies(cachePath, SETTINGS.publisherFonts, body.c_str());
+  sdFontSystem.selectBookFamilies(cachePath, publisherFontsMode(book), body.c_str());
   families[0] = sdFontSystem.bookFamilyName()[0] != '\0' ? sdFontSystem.bookFamilyName() : body.c_str();
   for (uint8_t n = 0; n < BookFonts::kMaxAccents; ++n) families[1 + n] = sdFontSystem.accentFamilyName(n);
   return true;
@@ -850,7 +855,8 @@ bool chooseEpubFonts(const char* path, const bool wait, const bool opening,
 }  // namespace
 
 bool bookFontsPendingForPath(const char* path) {
-  if (!path || !FsHelpers::hasEpubExtension(std::string_view(path)) || SETTINGS.publisherFonts == 0) return false;
+  // No shortcut on the setting being Off: a book can have them on of its own (RecentBook::publisherFontsOverride).
+  if (!path || !FsHelpers::hasEpubExtension(std::string_view(path))) return false;
   const std::string cachePath = publisherFontsCache(path, RECENT_BOOKS.getBookByPath(path));
   return !cachePath.empty() && BookFonts::read(cachePath) == BookFonts::State::Pending;
 }

@@ -938,6 +938,11 @@ class CrossPointSettings {
   static int getBuiltinReaderFontIdForPoints(const uint8_t family, const uint8_t pt) {
     return getBuiltinReaderFontId(family, builtinRungForPoints(pt));
   }
+  // The Publisher Fonts (PUBLISHER_FONTS) a book is drawn with: its override (RecentBook::publisherFontsOverride), or
+  // `setting` (publisherFonts) when it has none.
+  static constexpr uint8_t publisherFontsFor(const int8_t bookOverride, const uint8_t setting) {
+    return bookOverride >= 0 && bookOverride < PUBLISHER_FONTS_COUNT ? static_cast<uint8_t>(bookOverride) : setting;
+  }
   // Heading sizing: return the built-in fontId `stepUp` sizes taller than `size` for
   // `family`, clamped at the largest size. Steps walk the ascending-pixel ladder
   // (PT_10<PT_12<PT_14<PT_16<PT_18), not the FONT_SIZE enum order. `actualStep`

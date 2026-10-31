@@ -803,6 +803,7 @@ bool JsonSettingsIO::saveRecentBooks(const RecentBooksStore& store, const char* 
     obj["inlineFootnotePreviewsOverride"] = book.inlineFootnotePreviewsOverride;
     obj["lineSpacingOverride"] = book.lineSpacingOverride;
     obj["verticalTextOverride"] = book.verticalTextOverride;
+    obj["publisherFontsOverride"] = book.publisherFontsOverride;
   }
 
   String json;
@@ -885,6 +886,8 @@ RecentBooksLoad JsonSettingsIO::loadRecentBooks(RecentBooksStore& store, const c
         clampInt8(obj["lineSpacingOverride"] | -1, -1, CrossPointSettings::LINE_COMPRESSION_COUNT - 1, -1);
     book.verticalTextOverride =
         clampInt8(obj["verticalTextOverride"] | -1, -1, CrossPointSettings::VERTICAL_TEXT_COUNT - 1, -1);
+    book.publisherFontsOverride =
+        clampInt8(obj["publisherFontsOverride"] | -1, -1, CrossPointSettings::PUBLISHER_FONTS_COUNT - 1, -1);
     store.recentBooks.push_back(std::move(book));
   }
 

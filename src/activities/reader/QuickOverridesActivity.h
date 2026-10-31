@@ -7,7 +7,7 @@
 #include "ReaderFontSizes.h"
 
 // Bottom-of-the-toolbox quick-overrides menu: shows only the per-book overrides
-// (font family, size, embedded style, image rendering, bionic, guide dots,
+// (font family, size, Publisher Fonts, embedded style, image rendering, bionic, guide dots,
 // paragraph alignment, line spacing, anti-aliasing, hyphenation). Optimised for snappy in-book toggling:
 // renders in FAST_REFRESH mode and reports back through MenuResult; the parent
 // reader applies the result through its existing applyBookReaderOverrides()
@@ -21,7 +21,8 @@ class QuickOverridesActivity final : public MenuListActivity {
                          int8_t initialParagraphAlignmentOverride, int8_t initialTextAntiAliasingOverride,
                          int8_t initialHyphenationOverride, int8_t initialFontSizeNormalizationOverride,
                          int8_t initialInlineFootnotePreviewsOverride, int8_t initialLineSpacingOverride,
-                         int8_t initialVerticalTextOverride, bool verticalAllowed);
+                         int8_t initialVerticalTextOverride, int8_t initialPublisherFontsOverride,
+                         bool verticalAllowed);
 
   void onEnter() override;
   void render(RenderLock&&) override;
@@ -50,4 +51,5 @@ class QuickOverridesActivity final : public MenuListActivity {
   int8_t pendingInlineFootnotePreviewsOverride = -1;
   int8_t pendingLineSpacingOverride = -1;
   int8_t pendingVerticalTextOverride = -1;
+  int8_t pendingPublisherFontsOverride = -1;
 };
