@@ -1,7 +1,6 @@
 #include "BootDiagnostics.h"
 
 #include <Arduino.h>
-#include <CrossPointSettings.h>
 #include <HalStorage.h>
 #include <Logging.h>
 #include <Preferences.h>
@@ -301,7 +300,7 @@ void logSummary() {
   LOG_INF("BOOT",
           "Wake gate: %s (decided at %u ms, gate saw the press for %u ms, required %u ms; %u ms before the app)",
           HalGPIO::wakeVerdictName(s_wakeCheck.verdict), s_wakeCheck.decidedAtMs, s_wakeCheck.heldMs,
-          CrossPointSettings::getPowerWakeHoldDuration(), s_preAppMs);
+          s_wakeCheck.requiredMs, s_preAppMs);
 
   // One "name+costMs" token per reached phase, then the two absolute numbers worth
   // quoting. Deltas rather than absolutes because the cost of a phase is the actionable

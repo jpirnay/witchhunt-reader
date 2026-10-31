@@ -1060,7 +1060,7 @@ void fillThisBoot(JsonDocument& doc, const BootDiag::Record* records, const uint
   gate["verdict"] = HalGPIO::wakeVerdictName(check.verdict);
   gate["heldMs"] = check.heldMs;
   gate["decidedAtMs"] = check.decidedAtMs;
-  gate["requiredMs"] = CrossPointSettings::getPowerWakeHoldDuration();
+  gate["requiredMs"] = check.requiredMs;
 
   doc["firstPaintMs"] = BootDiag::phaseMs(BootDiag::BootPhase::FirstPaint);
   // Absolute stamps of the phases this boot reached; the page turns them into the per-phase

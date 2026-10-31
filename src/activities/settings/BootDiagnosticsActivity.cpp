@@ -213,7 +213,7 @@ void BootDiagnosticsActivity::render(RenderLock&&) {
 
   const auto& check = BootDiag::wakeCheck();
   snprintf(buf, sizeof(buf), "%s (held %u ms, needs %u ms)", HalGPIO::wakeVerdictName(check.verdict), check.heldMs,
-           CrossPointSettings::getPowerWakeHoldDuration());
+           check.requiredMs);
   drawRow(tr(STR_DIAG_WAKE_GATE), buf);
 
   snprintf(buf, sizeof(buf), "%u ms", BootDiag::phaseMs(BootDiag::BootPhase::FirstPaint));
