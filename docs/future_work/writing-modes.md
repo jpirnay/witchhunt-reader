@@ -23,7 +23,7 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 | 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; the horizontal right-to-left case of FlowContext and page progression, which step 3 built for vertical text ([below](#what-step-1-takes-from-step-3)) | open |
 | 2 | Arabic script; before its plan, decide on one shaper for Arabic and the Indic scripts ([below](#complex-shaping-arabic-and-the-indic-scripts)) | open |
 | 3 | Vertical frame (from the spike); the vertical decision and its settings; FlowContext and page progression | shipped (#577) ([plan](../superpowers/plans/2026-10-28-writing-modes-step3.md)) |
-| 4 | Vertical typography: baked vertical forms, small kana, tate-chu-yoko (the per-word flag), A3a in vertical | open |
+| 4 | Vertical typography: baked vertical forms, small kana, tate-chu-yoko (the per-word flag), A3a in vertical | in progress (PR 1 #<this PR>) |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
 
 **Next step.** Step 3 has shipped. Not chosen yet: step 4 continues the vertical work, step 1 starts right to left
@@ -162,6 +162,5 @@ Step 3 ships vertical text with these limits; step 4 (vertical typography) picks
 - **Drop caps are off in a vertical section** (`ChapterHtmlSlimParser::tryStartDropCapCapture`); their ink
   metrics are horizontal.
 - **`vertical-lr` books are set horizontally** under Automatic; only `vertical-rl` has a turned frame.
-- **A lone image on a vertical page** is not centred along the block axis: a small picture sits at the right edge.
 - **The new settings' labels** (Vertical Text, Automatic, Page Turn Buttons, Follow Book, Fixed) are English in
   every UI language until a translation pass.
