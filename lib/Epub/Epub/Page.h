@@ -249,6 +249,14 @@ class Page {
            });
   }
 
+  // How far down an image-only page's images move to sit centred in `extent`; 0 when the page has other elements, no
+  // image, or an image as tall as the extent.
+  int imageOnlyCentringOffset(const int extent) const {
+    int16_t imgX, imgY, imgW, imgH;
+    if (!isImageOnly() || !getImageBoundingBox(imgX, imgY, imgW, imgH) || imgH >= extent) return 0;
+    return std::max(0, (extent - imgH) / 2 - imgY);
+  }
+
   // Get bounding box of all images on the page (union of image rects)
   // Returns false if no images. Coordinates are relative to page origin.
   bool getImageBoundingBox(int16_t& outX, int16_t& outY, int16_t& outW, int16_t& outH) const {
