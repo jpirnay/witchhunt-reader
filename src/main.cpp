@@ -31,8 +31,11 @@
 #include <builtinFonts/all.h>
 #include <esp_heap_caps.h>
 #include <esp_ota_ops.h>
+#include <esp_private/esp_clk.h>
 #include <hal/usb_serial_jtag_ll.h>
+#include <soc/rtc.h>
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -1086,8 +1089,36 @@ void setup() {
   // unit the rail must already be held before anything blocks for that long.
   BoardConfig::holdPowerRails();
 
+  // On a power-on reset the RTC timer started with the rail, so it minus millis() is what ran before the app: the ROM
+  // and the second-stage bootloader. Read before anything below can block. The raw counter, not esp_rtc_get_time_us():
+  // that one starts counting at the first calibration, in the app's startup, and drops the ticks before it -- which
+  // are exactly the ones wanted here (it measured 1 ms on an X3 cold boot).
+  if (esp_reset_reason() == ESP_RST_POWERON) {
+    const uint64_t sincePowerOnMs = rtc_time_slowclk_to_us(rtc_time_get(), esp_clk_slowclk_cal_get()) / 1000;
+    const unsigned long appMs = millis();
+    if (sincePowerOnMs > appMs) {
+      BootDiag::setPreAppMs(static_cast<uint16_t>(std::min<uint64_t>(sincePowerOnMs - appMs, UINT16_MAX)));
+    }
+  }
+
+  BootDiag::markPhase(BootPhase::SetupEntry);
+  // Load just the settings we need before any other init, so the wake gesture mirrors
+  // whichever press type(s) the user configured to put the device to sleep.
+  SETTINGS.loadStartupFromNvs();
+  BootDiag::markPhase(BootPhase::NvsSettings);
+  // Ahead of the serial bring-up below: its 250 ms delay() used to come first, and a press
+  // released during it found the pin HIGH and was refused, so it lengthened the hold every
+  // wake needs, release builds included. Neither this nor the NVS read logs anything, which
+  // is all the TX timeout below has to come first for.
+  {
+    const auto hold = CrossPointSettings::wakeHoldFor(BootDiag::preAppMs());
+    BootDiag::setWakeCheck(
+        gpio.verifyPowerButtonWakeup(wakeGestureFromSettings(), hold.requiredMs, hold.heldBeforeAppMs));
+  }
+  BootDiag::markPhase(BootPhase::WakeGate);
+
 #ifdef ENABLE_SERIAL_LOG
-  // Earliest possible Serial setup, and UNCONDITIONAL — see the isUsbConnected()
+  // Earliest possible Serial setup after the wake gate, and UNCONDITIONAL — see the isUsbConnected()
   // gate further down, which sizes the transfer buffers but must NOT gate this.
   // A board with no usbDetect pin (T5S3: usbDetect = PIN_UNASSIGNED) can never
   // satisfy that gate from electrical detection, so Serial.begin() never ran
@@ -1102,8 +1133,8 @@ void setup() {
   Serial.begin(115200);
 #endif
 #if defined(ENABLE_SERIAL_LOG) && defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
-  // FIRST STATEMENT IN setup(), AND LOAD-BEARING. Do not move it later or raise
-  // the value.
+  // AHEAD OF THE FIRST LOG LINE IN setup(), AND LOAD-BEARING. Do not move it later, put a
+  // log line above it, or raise the value.
   //
   // HWCDC's default TX timeout is 100 ms, and a log write blocks for it whenever
   // no host is draining the endpoint. On a transport that writes unconditionally
@@ -1120,14 +1151,6 @@ void setup() {
   // CDC_ON_BOOT means the core has already begun Serial, so this is valid here.
   logSerial.setTxTimeoutMs(1);
 #endif
-  BootDiag::markPhase(BootPhase::SetupEntry);
-  // Load just the settings we need before any other init, so the wake gesture mirrors
-  // whichever press type(s) the user configured to put the device to sleep.
-  SETTINGS.loadStartupFromNvs();
-  BootDiag::markPhase(BootPhase::NvsSettings);
-  BootDiag::setWakeCheck(
-      gpio.verifyPowerButtonWakeup(wakeGestureFromSettings(), CrossPointSettings::getPowerWakeHoldDuration()));
-  BootDiag::markPhase(BootPhase::WakeGate);
 
   // print_errors=true: the corrupt block's address and overwritten values go to the
   // boot console (USB-CDC on boot — the same channel the panic dumps reach), giving the
@@ -1287,7 +1310,7 @@ void setup() {
   // answer "why did nothing happen when I pressed power".
   LOG_INF("BOOT", "Wake gate: %s (decided at %u ms, gate saw the press for %u ms, required %u ms)",
           HalGPIO::wakeVerdictName(BootDiag::wakeCheck().verdict), BootDiag::wakeCheck().decidedAtMs,
-          BootDiag::wakeCheck().heldMs, CrossPointSettings::getPowerWakeHoldDuration());
+          BootDiag::wakeCheck().heldMs, BootDiag::wakeCheck().requiredMs);
   LOG_DBG("MAIN", "Wakeup reason: %d, millis=%lu, rawPowerPin=%d", static_cast<int>(wakeupReason), millis(),
           digitalRead(InputManager::POWER_BUTTON_PIN) == LOW);
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS

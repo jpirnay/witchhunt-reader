@@ -912,6 +912,20 @@ class CrossPointSettings {
   // asymmetry back, and deliberately not shortened further — the gate's job is to reject a
   // stray pocket press, and the prelude is the only margin left doing that.
   static constexpr uint16_t getPowerWakeHoldDuration() { return 300; }
+
+  // What the wake gate holds a press to. After a power-on reset the prelude is known (`preAppMs`,
+  // BootDiag::setPreAppMs): the press is timed from the moment it powered the device, against the
+  // sleep gesture's own duration. A power-on is every wake of the X3, and of the X4 with its latch
+  // cut, and there the prelude is the bootloader checking the whole app image -- about a second,
+  // which used to come on top of the 300 ms instead of counting toward it. Any other wake is timed
+  // in app time as above.
+  struct WakeHold {
+    uint16_t requiredMs;
+    uint16_t heldBeforeAppMs;  // what the press had lasted when the app started
+  };
+  static constexpr WakeHold wakeHoldFor(const uint16_t preAppMs) {
+    return preAppMs > 0 ? WakeHold{getPowerButtonDuration(), preAppMs} : WakeHold{getPowerWakeHoldDuration(), 0};
+  }
   int getReaderFontId() const;
   int getTxtReaderFontId() const;
   // Pure built-in lookup (family + ladder rung -> font ID), independent of SD-card font selection.

@@ -464,6 +464,9 @@ class HalGPIO {
     // began before the app did, so the bootloader and everything up to the gate is not
     // counted. Use decidedAtMs for "when the device committed to waking".
     uint16_t heldMs = 0;
+    // The long hold it asked for, counted from where the press is known to have begun (see
+    // verifyPowerButtonWakeup): the app's start, or the power-on that a press itself caused.
+    uint16_t requiredMs = 0;
 
     bool accepted() const {
       return verdict == WakeVerdict::ShortPress || verdict == WakeVerdict::LongHold ||
@@ -476,9 +479,10 @@ class HalGPIO {
 
   // Verify the raw power button was pressed in one of the patterns enabled by `gestures`,
   // mirroring the press type(s) configured to put the device to sleep. requiredDurationMs
-  // is only used by the longHold gesture.
+  // is only used by the longHold gesture, and counts `heldBeforeAppMs` as already held: what
+  // the press lasted before the app started, when that is known (a power-on the press caused).
   // Call as early as possible so cold-boot initialization cannot hide a short press.
-  WakeCheck verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDurationMs);
+  WakeCheck verifyPowerButtonWakeup(WakeGestures gestures, uint16_t requiredDurationMs, uint16_t heldBeforeAppMs = 0);
 
   // Check if USB is connected
   bool isUsbConnected() const;
