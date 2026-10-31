@@ -129,6 +129,35 @@ TEST(SettingsGrouping, ASubmenuWhoseRowsAgreeStillHeadsItsOwnRow) {
   EXPECT_EQ(tab[0].nameId, kOther);
   EXPECT_EQ(tab[1].subcategory, kOther);
   EXPECT_EQ(strandedHeadings(tab), 0);
+  EXPECT_EQ(countSeparators(submenuItems(submenus, kOther)), 0) << "the heading was repeated inside the submenu";
+}
+
+// The shape the real lists use for that (Reader Font, Front light, the Back button's actions): only the first row
+// names the heading, which is also how the web page reads a heading -- the row that starts the section. The heading
+// still belongs above the row that opens the submenu. Taking one only when every row named it left the Reader tab's
+// "Reader Font" heading below both font submenus, over Font Manager, the first row of the section still in the tab.
+TEST(SettingsGrouping, ASubmenuWhoseFirstRowAloneNamesAHeadingHeadsItsOwnRow) {
+  std::vector<SettingInfo> tab;
+  tab.push_back(row(StrId::STR_GEST_SWIPE_LEFT, kSubmenu, kGroupA));
+  tab.push_back(row(StrId::STR_GEST_SWIPE_RIGHT, kSubmenu, StrId::STR_NONE_OPT));
+  tab.push_back(row(StrId::STR_GEST_TAP_LEFT, kSubmenu, StrId::STR_NONE_OPT));
+  tab.push_back(row(StrId::STR_GEST_TAP_RIGHT, StrId::STR_NONE_OPT, kGroupA));
+  std::vector<SettingInfo::SubmenuData> submenus;
+  buildLikeTheSettingsScreen(tab, submenus);
+
+  ASSERT_EQ(tab.size(), 3u) << "one heading, the row that opens the submenu, and the row after it";
+  EXPECT_TRUE(tab[0].isSeparator);
+  EXPECT_EQ(tab[0].nameId, kGroupA);
+  EXPECT_FALSE(tab[1].isSeparator);
+  EXPECT_EQ(tab[1].subcategory, kGroupA);
+  EXPECT_EQ(tab[2].nameId, StrId::STR_GEST_TAP_RIGHT) << "the section's next row went under a second heading";
+  EXPECT_EQ(strandedHeadings(tab), 0);
+
+  // The heading went above the row that opens the submenu, so it is not repeated inside, under the submenu's own
+  // title ("Reader Font" over the Reader Font rows, "Button Actions" over the Back button's three presses).
+  const auto& items = submenuItems(submenus, kSubmenu);
+  EXPECT_EQ(countSeparators(items), 0) << "the submenu repeated the heading its row already sits under";
+  EXPECT_EQ(items.size(), 3u);
 }
 
 // Rows that stay in the tab are grouped there exactly as before.
