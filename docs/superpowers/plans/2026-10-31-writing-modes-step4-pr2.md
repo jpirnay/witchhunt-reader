@@ -166,9 +166,21 @@ column", and Decision 1 with its measurements.
 **Interfaces:**
 - Consumes: Task 2's `columnInk` and the parser's `typography_.punctuation`.
 
-- [ ] **Step 1: Write the failing test.** `VerticalRules.APlacedMarksInkStaysInItsColumnPlace` (TEST_P over the
-  vertical books). For every vertical line, and every word `i` that is one code point with
-  `CjkPunctuation::classOf != None` and `uprightPlacementOf != None`:
+- [ ] **Step 1: Write the tests.**
+  - **The focused one, which must fail first:** `VerticalLayout.ACentredMarkPushedInShiftsByHalf`.
+    - After Task 2's placement, a Japanese 、。 sits in the leading half of its cell, and the horizontal ink rule
+      happens to give the same shift. The case where the rules differ is a Traditional Chinese mark: centred along
+      the column, so it shifts by `removed / 2`, while the shim's horizontal ink (left half) says 0.
+    - Take a push-in case from the A3b tests in `test/cjk_layout` (a line that overflows by a little, so a 。 is
+      narrowed below its natural width).
+    - Lay the same text out vertically in a `lang="zh-Hant"` document, with `VerticalText::On`.
+    - Expect the 。's `x` to be its box start minus `removed / 2`.
+    - Write the derivation in the test's comment.
+    - If no push-in case narrows a 。 under the Traditional Chinese table (`CjkPunctuation.cpp` keeps 、。 at least
+      6/8 em there), use the nearest mark it does narrow, and say which in the report.
+  - **The regression net:** `VerticalRules.APlacedMarksInkStaysInItsColumnPlace` (TEST_P over the vertical books).
+    It may already pass after Task 2; that is expected. For every vertical line, and every word `i` that is one code
+    point with `CjkPunctuation::classOf != None` and `uprightPlacementOf != None`:
   - take `columnInk(...)` with the line's `centredMarks()`;
   - expect `wordXpos(i) + inkStart + inkSize <= wordXpos(i + 1)` when a next word exists, and `<=` the column length
     (the content frame's width) otherwise;
@@ -182,8 +194,8 @@ column", and Decision 1 with its measurements.
     columns of text with 、。，and「」.
   - Regenerate both books with the script, and register the new one with the vertical goldens and the rule checker
     as `test_vertical_text` is.
-- [ ] **Step 3: Run, and see the new check fail** on the vertical book at a narrowed 。 before 」, where `inkShift`
-  still uses horizontal ink.
+- [ ] **Step 3: Run, and see `ACentredMarkPushedInShiftsByHalf` fail.** It gives a shift of 0 while `inkShift`
+  still uses horizontal ink. The rule-checker check passes or fails as it may; report which.
 - [ ] **Step 4: Implement.** In `inkShift`, for a line where `vertical_` is set and `columnInk` succeeds for the code
   point (with `centredMarks` = the profile is Traditional Chinese):
   - use `inkStart`, `inkSize` and `cell` in place of `inkLeft`, `inkWidth` and `advance`, with the same three-way
