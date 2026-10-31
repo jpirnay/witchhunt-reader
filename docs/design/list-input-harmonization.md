@@ -278,8 +278,11 @@ Where upstream has no FUI version, the screen follows the closest upstream patte
 layout stays drawn by the theme (a themed launcher; no memory benefit), with buttons through the
 controller. The Home carousel, cover grid, keyboard and dictionary word select are not lists.
 
-**No SDK additions; follow upstream's workarounds instead:**
-- Chapter levels are indented with leading spaces in the label, as upstream does.
+**No SDK additions; follow upstream's workarounds instead,** with one exception:
+- Chapter levels are indented with `fui::ListItem::indent` (SDK `5bd4a0a`), not with leading spaces
+  in the label as upstream does. Our rows wrap to two lines, and both wrapping paths drop leading
+  spaces, so a wrapped sub-chapter would land on the left margin and read as a top-level entry
+  (#582).
 - The Lyra "value pill" (`highlightValue`) is dropped; values draw in FUI's normal value slot.
 - A page turn's top and selection (R3) are applied app-side under `RenderLock` (setting
   `ListNav::top` and requesting the selection; the build's follow then scrolls the least it must

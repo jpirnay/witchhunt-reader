@@ -88,9 +88,9 @@ way: the **OPDS catalog** and the **OPDS servers** with their settings, **Settin
 **reader menu**, the option lists and pickers they open (fonts, dictionaries, language, keyboard
 layouts, long option lists such as the time zone), the menus (file options, Home's More, clock,
 KOReader sync, weather settings, quick overrides), **File Transfer**'s choice of mode, **Customise
-Status Bar**, the **font manager**, **Reading Stats**' book list, the weather city search results
-and the screen shown when you finish a book. Other lists still behave as their own sections
-describe.
+Status Bar**, the **font manager**, **Reading Stats**' book list, the weather city search results,
+the screen shown when you finish a book and an EPUB's **[table of contents](#6-chapter-selection-screen)**.
+Other lists still behave as their own sections describe.
 
 | Button | Press | Hold |
 | --- | --- | --- |
@@ -951,10 +951,15 @@ For the developer-facing account of how this was built and why each default was 
 
 ## 6. Chapter Selection Screen
 
-Accessible by pressing **Confirm** while inside a book and selecting **Table of Contents**.
+Accessible by pressing **Confirm** while inside a book and selecting **Select Chapter**.
 
-1.  Use **Left** (or **Volume Up**), or **Right** (or **Volume Down**) to highlight the desired chapter.
-2.  Press **Confirm** to jump to that chapter.
+The list opens on the chapter you are reading. Sections are indented under their chapter, and a long
+title wraps onto a second line, keeping its indent; only a title too long for two lines ends in "…".
+
+1.  In an EPUB, move through the list as **[Moving through lists](#moving-through-lists)** describes:
+    **Up / Down** step one entry, hold **Left / Right** to page. XTC and Markdown books still step with
+    **Up / Down** and page with a short **Left / Right**.
+2.  Press **Confirm** to jump to that chapter or section.
 3.  *Alternatively, press **Back** to cancel and return to your current page.*
 
 ---
