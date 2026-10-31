@@ -225,3 +225,13 @@ TEST(VerticalTextSetting, ABookOverrideInTheStoredRangeResolvesToItsRequest) {
   EXPECT_EQ(FlowContext::requestFor(VerticalText::On, -1, true), VerticalText::On);
   EXPECT_EQ(FlowContext::requestFor(VerticalText::On, 1, false), VerticalText::Off);
 }
+
+// A book's Publisher Fonts override beats the setting both ways: a book of its own fonts while they are off, a book in
+// the reader's font while they are on. -1, and anything a hand-edited recent.json leaves out of range, follows it.
+TEST(PublisherFontsSetting, ABookOverrideBeatsTheSetting) {
+  using S = CrossPointSettings;
+  EXPECT_EQ(S::publisherFontsFor(S::PUBLISHER_FONTS_ALL, S::PUBLISHER_FONTS_OFF), S::PUBLISHER_FONTS_ALL);
+  EXPECT_EQ(S::publisherFontsFor(S::PUBLISHER_FONTS_OFF, S::PUBLISHER_FONTS_BODY), S::PUBLISHER_FONTS_OFF);
+  EXPECT_EQ(S::publisherFontsFor(-1, S::PUBLISHER_FONTS_ACCENTS), S::PUBLISHER_FONTS_ACCENTS);
+  EXPECT_EQ(S::publisherFontsFor(S::PUBLISHER_FONTS_COUNT, S::PUBLISHER_FONTS_BODY), S::PUBLISHER_FONTS_BODY);
+}

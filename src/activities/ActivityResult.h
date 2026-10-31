@@ -51,6 +51,8 @@ struct MenuResult {
   int8_t lineSpacingOverride = -1;
   // Appended like the above: -1 = default, otherwise CrossPointSettings::VERTICAL_TEXT.
   int8_t verticalTextOverride = -1;
+  // Appended like the above: -1 = default, otherwise CrossPointSettings::PUBLISHER_FONTS.
+  int8_t publisherFontsOverride = -1;
 };
 
 struct ChapterResult {

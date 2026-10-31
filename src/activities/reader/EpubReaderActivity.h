@@ -736,6 +736,7 @@ class EpubReaderActivity final : public Activity {
   int8_t bookInlineFootnotePreviewsOverride = -1;
   int8_t bookLineSpacingOverride = -1;
   int8_t bookVerticalTextOverride = -1;
+  int8_t bookPublisherFontsOverride = -1;
   // Whether the book's language is ever set vertically (TypographyProfile::verticalAllowed); read once in onEnter.
   bool bookVerticalAllowed_ = false;
 
@@ -1164,13 +1165,15 @@ class EpubReaderActivity final : public Activity {
   // Wider variant that also covers AA, hyphenation and guide dots. Used by
   // QuickOverridesActivity; the narrower overload above funnels through here,
   // preserving the AA/hyphenation/guide-dots values currently held on this activity.
-  void applyBookReaderOverrides(int8_t embeddedStyleOverride, int8_t imageRenderingOverride, int8_t fontFamilyOverride,
+  // True when the change reopens the book (Publisher Fonts it has not examined yet): this reader is on its way out,
+  // so the caller does nothing more with it.
+  bool applyBookReaderOverrides(int8_t embeddedStyleOverride, int8_t imageRenderingOverride, int8_t fontFamilyOverride,
                                 const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,
                                 int8_t bionicReadingOverride, int8_t paragraphAlignmentOverride,
                                 int8_t textAntiAliasingOverride, int8_t hyphenationOverride,
                                 int8_t fontSizeNormalizationOverride, int8_t guideDotsOverride,
                                 int8_t inlineFootnotePreviewsOverride, int8_t lineSpacingOverride,
-                                int8_t verticalTextOverride);
+                                int8_t verticalTextOverride, int8_t publisherFontsOverride);
   void openReaderMenu();
   void openQuickOverrides();
   bool getEffectiveEmbeddedStyle() const;
