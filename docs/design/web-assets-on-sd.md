@@ -88,8 +88,10 @@ Two sources:
 - **The release:** `https://github.com/<repo>/releases/download/<tag>/<asset>`, fetched with
   `HttpDownloader::downloadToFile` (Range chunks on a tight heap) into
   `/.crosspoint/web-download.bin`. The tag is `WEB_BUNDLE_RELEASE_TAG`, set per env by
-  `build_html.py`: the base version for the `*gh_release` envs, the CI tag for the
-  `*gh_release_rc` envs, empty for everything that is never published.
+  `build_html.py`: for the `*gh_release` envs the tag `release.yml` publishes under
+  (`CROSSPOINT_RELEASE_TAG`, falling back to the base version in a local build), the CI tag for the
+  `*gh_release_rc` envs, empty for everything that is never published. The tag need not be the
+  base version: 2.41 went out as `2.41RC`, and the base version sent every download to a 404 (#581).
 - **The card:** `/<asset name>` in the top folder. The setup page uploads a chosen file there
   through the ordinary `/upload`, under the asset's name; a user with a card reader or USB Drive can
   put it there directly. Installed copies are deleted, wrong ones are left for the user to see.

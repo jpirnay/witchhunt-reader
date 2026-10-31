@@ -93,7 +93,11 @@ jobs:
           uv pip install --python ~/.platformio/penv/bin/python "pioarduino==6.1.19"
           ~/.platformio/penv/bin/pio --version
 
+      # The firmware downloads its web bundle from this release, by tag (scripts/build_html.py).
+      # The tag need not be platformio.ini's version: 2.41 was published as "2.41RC" (#581).
       - name: Build CrossPoint
+        env:
+          CROSSPOINT_RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: pio run -e ${{ matrix.env }}
 
       - name: Patch min_chip_rev_full to 0
