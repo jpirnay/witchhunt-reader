@@ -225,3 +225,16 @@ TEST(VerticalTextSetting, ABookOverrideInTheStoredRangeResolvesToItsRequest) {
   EXPECT_EQ(FlowContext::requestFor(VerticalText::On, -1, true), VerticalText::On);
   EXPECT_EQ(FlowContext::requestFor(VerticalText::On, 1, false), VerticalText::Off);
 }
+
+// A power-on wake (the X3, the X4 with its latch cut) is timed from the press that powered the device, against the
+// sleep gesture's own duration: the ROM and the bootloader it lasted through count. Any other wake can count only app
+// time, against the shorter threshold that stands in for that uncounted start.
+TEST(WakeHold, APowerOnWakeIsTimedFromPowerOnLikeTheSleepGesture) {
+  using S = CrossPointSettings;
+  constexpr auto cold = S::wakeHoldFor(1026);
+  EXPECT_EQ(cold.requiredMs, S::getPowerButtonDuration());
+  EXPECT_EQ(cold.heldBeforeAppMs, 1026);
+  constexpr auto warm = S::wakeHoldFor(0);
+  EXPECT_EQ(warm.requiredMs, S::getPowerWakeHoldDuration());
+  EXPECT_EQ(warm.heldBeforeAppMs, 0);
+}
