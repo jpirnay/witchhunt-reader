@@ -1302,7 +1302,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
       W x=33 s=0 z=100 t=行
       W x=49 s=0 z=100 t=二
       W x=65 s=0 z=100 t=列
- PAGE 3 elements=2 footnotes=0 turned=460
+ PAGE 3 elements=4 footnotes=0 turned=460
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=44
    W x=20 s=0 z=100 t=夜
    W x=36 s=0 z=100 t=の
@@ -1392,6 +1392,84 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=644 s=0 z=100 t=あ
    W x=660 s=0 z=100 t=る
    W x=676 s=0 z=100 t=。
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=46
+   W x=20 s=0 z=100 t=小
+   W x=36 s=0 z=100 t=さ
+   W x=52 s=0 z=100 t=な
+   W x=68 s=0 z=100 t=仮
+   W x=84 s=0 z=100 t=名
+   W x=101 s=0 z=100 t=を
+   W x=117 s=0 z=100 t=並
+   W x=133 s=0 z=100 t=べ
+   W x=149 s=0 z=100 t=て
+   W x=165 s=0 z=100 t=お
+   W x=182 s=0 z=100 t=く
+   W x=198 s=0 z=100 t=。
+   W x=214 s=0 z=100 t=ぁ
+   W x=230 s=0 z=100 t=ぃ
+   W x=246 s=0 z=100 t=ぅ
+   W x=262 s=0 z=100 t=ぇ
+   W x=279 s=0 z=100 t=ぉ
+   W x=295 s=0 z=100 t=っ
+   W x=311 s=0 z=100 t=ゃ
+   W x=327 s=0 z=100 t=ゅ
+   W x=344 s=0 z=100 t=ょ
+   W x=360 s=0 z=100 t=ゎ
+   W x=376 s=0 z=100 t=、
+   W x=392 s=0 z=100 t=ァ
+   W x=408 s=0 z=100 t=ィ
+   W x=424 s=0 z=100 t=ゥ
+   W x=441 s=0 z=100 t=ェ
+   W x=457 s=0 z=100 t=ォ
+   W x=473 s=0 z=100 t=ッ
+   W x=489 s=0 z=100 t=ャ
+   W x=505 s=0 z=100 t=ュ
+   W x=522 s=0 z=100 t=ョ
+   W x=538 s=0 z=100 t=。
+   W x=554 s=0 z=100 t=彼
+   W x=570 s=0 z=100 t=は
+   W x=586 s=0 z=100 t=「
+   W x=602 s=0 z=100 t=も
+   W x=618 s=0 z=100 t=う
+   W x=635 s=0 z=100 t=行
+   W x=651 s=0 z=100 t=く
+   W x=667 s=0 z=100 t=。
+   W x=675 s=0 z=100 t=」
+   W x=691 s=0 z=100 t=と
+   W x=707 s=0 z=100 t=言
+   W x=724 s=0 z=100 t=い
+   W x=740 s=0 z=100 t=、
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=30
+   W x=4 s=0 z=100 t=娘
+   W x=20 s=0 z=100 t=は
+   W x=36 s=0 z=100 t=『
+   W x=52 s=0 z=100 t=待
+   W x=68 s=0 z=100 t=っ
+   W x=84 s=0 z=100 t=て
+   W x=100 s=0 z=100 t=、
+   W x=108 s=0 z=100 t=』
+   W x=124 s=0 z=100 t=と
+   W x=140 s=0 z=100 t=呼
+   W x=156 s=0 z=100 t=び
+   W x=172 s=0 z=100 t=と
+   W x=188 s=0 z=100 t=め
+   W x=204 s=0 z=100 t=た
+   W x=220 s=0 z=100 t=（
+   W x=236 s=0 z=100 t=古
+   W x=252 s=0 z=100 t=い
+   W x=268 s=0 z=100 t=本
+   W x=284 s=0 z=100 t=に
+   W x=300 s=0 z=100 t=は
+   W x=316 s=0 z=100 t=そ
+   W x=332 s=0 z=100 t=う
+   W x=348 s=0 z=100 t=書
+   W x=364 s=0 z=100 t=い
+   W x=380 s=0 z=100 t=て
+   W x=396 s=0 z=100 t=あ
+   W x=412 s=0 z=100 t=る
+   W x=428 s=0 z=100 t=、
+   W x=436 s=0 z=100 t=）
+   W x=444 s=0 z=100 t=。
 SPINE 1 href=OEBPS/ch2.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=3 footnotes=0
   LINE y=0 x=0 align=2 mult=1.000 hfid=0 words=2
