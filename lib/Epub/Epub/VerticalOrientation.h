@@ -14,6 +14,13 @@ VerticalOrientation verticalOrientationOf(uint32_t cp);
 // turned frame. No vertical forms and no placement of Tu marks yet.
 bool drawsUpright(uint32_t cp);
 
+// How an upright character is placed inside its cell from its glyph's ink box. Reflect: the comma and full stop,
+// which sit at the lower left of a horizontal cell and go to the upper right of a vertical one. SmallKana: the small
+// kana, which move up and right the same way. None: set as step 3 does.
+enum class UprightPlacement : uint8_t { None, Reflect, SmallKana };
+
+UprightPlacement uprightPlacementOf(uint32_t cp);
+
 // The next piece the vertical draw path sets as one unit: a single upright character, or the longest run of sideways
 // ones up to kMaxColumnRunBytes; either keeps the combining marks (utf8IsCombiningMark, U+3099, U+309A) and variation
 // selectors (U+FE00-FE0F, U+E0100-E01EF) that follow a character, and a run never ends inside such a cluster. Returns

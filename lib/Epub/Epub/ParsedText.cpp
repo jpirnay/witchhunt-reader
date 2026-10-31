@@ -1905,15 +1905,11 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     const int natural =
         measureWordWidth(renderer, wordFontId(i, fontId), words[i], wordStyles[i], false, wordScale(i), vertical_);
     if (box >= natural) return 0;
-    int inkLeft = 0;
-    int inkWidth = 0;
-    int advance = 0;
-    if (!renderer.getGlyphInk(wordFontId(i, fontId), cp, wordStyles[i], inkLeft, inkWidth, advance) || advance <= 0) {
-      return 0;
-    }
+    GlyphInk ink;
+    if (!renderer.getGlyphInk(wordFontId(i, fontId), cp, wordStyles[i], ink) || ink.advance <= 0) return 0;
     const int removed = natural - box;
-    if (2 * inkLeft >= advance) return removed;
-    if (2 * (inkLeft + inkWidth) <= advance) return 0;
+    if (2 * ink.left >= ink.advance) return removed;
+    if (2 * (ink.left + ink.width) <= ink.advance) return 0;
     return removed / 2;
   };
 

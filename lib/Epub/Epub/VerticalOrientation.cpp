@@ -24,6 +24,43 @@ bool drawsUpright(const uint32_t cp) {
   return orientation == VerticalOrientation::U || orientation == VerticalOrientation::Tu;
 }
 
+UprightPlacement uprightPlacementOf(const uint32_t cp) {
+  switch (cp) {
+    case 0x3001:  // ideographic comma and full stop
+    case 0x3002:
+    case 0xFF0C:  // fullwidth comma and full stop
+    case 0xFF0E:
+      return UprightPlacement::Reflect;
+    case 0x3041:  // small hiragana: a i u e o, tu, ya yu yo, wa, ka ke
+    case 0x3043:
+    case 0x3045:
+    case 0x3047:
+    case 0x3049:
+    case 0x3063:
+    case 0x3083:
+    case 0x3085:
+    case 0x3087:
+    case 0x308E:
+    case 0x3095:
+    case 0x3096:
+    case 0x30A1:  // small katakana, the same set
+    case 0x30A3:
+    case 0x30A5:
+    case 0x30A7:
+    case 0x30A9:
+    case 0x30C3:
+    case 0x30E3:
+    case 0x30E5:
+    case 0x30E7:
+    case 0x30EE:
+    case 0x30F5:
+    case 0x30F6:
+      return UprightPlacement::SmallKana;
+    default:
+      return (cp >= 0x31F0 && cp <= 0x31FF) ? UprightPlacement::SmallKana : UprightPlacement::None;  // Ainu extensions
+  }
+}
+
 namespace {
 
 bool followsItsCharacter(const uint32_t cp) {

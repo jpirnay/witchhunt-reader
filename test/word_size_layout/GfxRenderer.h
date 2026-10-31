@@ -20,6 +20,15 @@
 
 #include "Epub/CjkPunctuation.h"
 
+// Where a glyph's ink sits in its advance (the real renderer's GlyphInk).
+struct GlyphInk {
+  int left = 0;
+  int width = 0;
+  int top = 0;
+  int height = 0;
+  int advance = 0;
+};
+
 class GfxRenderer {
  public:
   enum Orientation { Portrait, LandscapeClockwise, PortraitInverted, LandscapeCounterClockwise };
@@ -93,29 +102,38 @@ class GfxRenderer {
   }
   // Where a glyph's ink sits in its advance, as a CJK font draws its marks: an opening bracket on the right half,
   // a closing bracket, 。 and 、 on the left half, the other marks centred; anything else fills its advance.
-  bool getGlyphInk(const int fontId, const uint32_t cp, const EpdFontFamily::Style /*style*/, int& inkLeft,
-                   int& inkWidth, int& adv) const {
-    adv = glyphW(fontId);
-    switch (CjkPunctuation::classOf(cp)) {
+  bool getGlyphInk(const int fontId, const uint32_t cp, const EpdFontFamily::Style /*style*/, GlyphInk& ink) const {
+    const int adv = glyphW(fontId);
+    const CjkPunctuation::Class cls = CjkPunctuation::classOf(cp);
+    switch (cls) {
       case CjkPunctuation::Class::None:
-        inkLeft = 0;
-        inkWidth = adv;
+        ink.left = 0;
+        ink.width = adv;
         break;
       case CjkPunctuation::Class::Opening:
-        inkLeft = (adv + 1) / 2;
-        inkWidth = adv - inkLeft;
+        ink.left = (adv + 1) / 2;
+        ink.width = adv - ink.left;
         break;
       case CjkPunctuation::Class::Closing:
       case CjkPunctuation::Class::FullStop:
       case CjkPunctuation::Class::Comma:
-        inkLeft = 0;
-        inkWidth = adv / 2;
+        ink.left = 0;
+        ink.width = adv / 2;
         break;
       default:
-        inkLeft = adv / 4;
-        inkWidth = adv / 2;
+        ink.left = adv / 4;
+        ink.width = adv / 2;
         break;
     }
+    // Vertically: 、 and 。 sit on the baseline in the lower part of the cell, as a real one does; the rest fill
+    // the whole em box.
+    if (cls == CjkPunctuation::Class::Comma || cls == CjkPunctuation::Class::FullStop) {
+      ink.top = ink.height = (adv * 3 + 5) / 10;
+    } else {
+      ink.top = (adv * 88 + 50) / 100;
+      ink.height = adv;
+    }
+    ink.advance = adv;
     return true;
   }
   // Set by a test to model a font-cache scan pass; hasGlyphQueries records the hasGlyph queries made while it is set.
