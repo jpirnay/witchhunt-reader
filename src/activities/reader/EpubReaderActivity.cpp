@@ -1747,7 +1747,11 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
     const int currentTailPages = (section && section->pageCount > 0)
                                      ? std::max(0, static_cast<int>(section->pageCount) - 1 - section->currentPage)
                                      : 0;
-    if (currentTailPages + backgroundWindowPagesBuilt_ >= BG_BUILD_LOOKAHEAD_PAGES) {
+    // A later file of the chapter on screen is built whatever the runway: the chapter counter is an
+    // estimate ("~") until it is. A long text file followed by a one-page illustration kept the
+    // illustration outside the budget, and the "~" with it, until the chapter's last pages (#580).
+    if (currentTailPages + backgroundWindowPagesBuilt_ >= BG_BUILD_LOOKAHEAD_PAGES &&
+        !chapterCounterAwaits(backgroundBuildSpineIndex_)) {
       return;
     }
   }
@@ -3988,6 +3992,14 @@ bool EpubReaderActivity::nearChapterEndForBuildThrough() const {
   if (renderer.fastRefreshNeedsHostFrame() || !section || section->hasActiveBuild() || section->pageCount == 0)
     return false;
   return static_cast<int>(section->pageCount) - 1 - section->currentPage <= BG_BUILD_THROUGH_PAGES;
+}
+
+bool EpubReaderActivity::chapterCounterAwaits(const int spine) const {
+  if (!epub || !section || spine <= currentSpineIndex || !chapterCounterShown()) return false;
+  if (chapterSpanSpine_ != currentSpineIndex) {
+    refreshChapterSpan();  // resolves chapterBounds_ for the spine on screen
+  }
+  return spine <= chapterBounds_.last;
 }
 
 void EpubReaderActivity::recoverSecondaryBufferIfNeeded() {
