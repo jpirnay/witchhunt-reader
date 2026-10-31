@@ -139,6 +139,7 @@ class KeepTogetherLayout : public testing::Test {
       section.currentPage = p;
       const auto page = section.loadPageFromSectionFile();
       if (!page) continue;
+      if (vertical) EXPECT_TRUE(page->isVertical());
       for (const auto& el : page->elements) {
         if (el->getTag() != TAG_PageLine) continue;
         const TextBlock& block = *static_cast<const PageLine&>(*el).getBlock();
@@ -312,6 +313,7 @@ TEST_P(KeepTogetherFixture, AVerticalParagraphLongerThanAPageStillSplits) {
   EXPECT_EQ(l.pageOf.at(last), 2);
 }
 
+// 9 lines then 1 of 4 fit (as the orphan case above): the page ends the same with the setting on and off.
 TEST_P(KeepTogetherFixture, AVerticalSectionIgnoresTheSetting) {
   vertical = true;
   widowOrphanControl = true;
