@@ -405,14 +405,16 @@ def get_release_tag(pioenv: str, base_version: str) -> str:
     """The GitHub release this build is published under, or "" when it is not.
 
     The firmware downloads its web bundle from that release (src/network/WebAssets.h).
-    The release envs stamp the plain base version, which is the release tag; the RC
-    envs are built for the tag CI created for them. Dev, slim, bench and the board dev
-    envs are never published, so the setup page asks for an upload instead.
+    The release envs stamp the tag release.yml publishes them under, which need not be
+    the base version (2.41 went out as "2.41RC", #581); a local build has no tag and
+    falls back to the base version. The RC envs are built for the tag CI created for
+    them. Dev, slim, bench and the board dev envs are never published, so the setup
+    page asks for an upload instead.
     """
     if pioenv.endswith("gh_release_rc"):
         return os.environ.get("CROSSPOINT_RC_VERSION", "")
     if pioenv.endswith("gh_release"):
-        return base_version
+        return os.environ.get("CROSSPOINT_RELEASE_TAG") or base_version
     return ""
 
 
