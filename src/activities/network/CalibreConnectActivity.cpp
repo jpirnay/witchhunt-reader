@@ -232,11 +232,11 @@ void CalibreConnectActivity::render(RenderLock&&) {
         label = renderer.truncatedText(SMALL_FONT_ID, label.c_str(), textWidth, EpdFontFamily::REGULAR);
       }
       renderer.drawText(SMALL_FONT_ID, textX, y, label.c_str());
-      GUI.drawProgressBar(renderer,
-                          Rect{contentRect.x + metrics.contentSidePadding, y + height + metrics.verticalSpacing,
-                               textWidth, metrics.progressBarHeight},
-                          lastProgressReceived, lastProgressTotal);
-      y += height + metrics.verticalSpacing * 2 + metrics.progressBarHeight;
+      y = GUI.drawProgressBar(renderer,
+                              Rect{contentRect.x + metrics.contentSidePadding, y + height + metrics.verticalSpacing,
+                                   textWidth, metrics.progressBarHeight},
+                              lastProgressReceived, lastProgressTotal) +
+          metrics.verticalSpacing;
     }
 
     if (lastCompleteAt > 0 && (millis() - lastCompleteAt) < 6000) {

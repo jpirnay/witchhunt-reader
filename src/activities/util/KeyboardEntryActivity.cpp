@@ -8,7 +8,6 @@
 #include "KeyboardLayoutSet.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
-#include "components/themes/ButtonGeometry.h"
 #include "components/themes/HeaderLayout.h"
 #include "fontIds.h"
 
@@ -31,10 +30,10 @@ int keyboardKeysHeight(const ThemeMetrics& metrics, const int rows, const bool h
 
 // The screen area outside the button hints. The hints move with the orientation
 // (the top edge upside down, a side in landscape), so every edge below is taken
-// from here rather than from the screen.
-Rect keyboardContentRect(const GfxRenderer& renderer) {
-  return UITheme::getContentRect(renderer, true, ButtonGeometry::sideKeysOnOppositeEdges());
-}
+// from here rather than from the screen. The side column is kept on every board, since every board draws
+// the side hints here: an X4 in landscape had them across the space bar, and in portrait under the tips
+// (found by syfq91, witchling-reader ad9e1d4f2).
+Rect keyboardContentRect(const GfxRenderer& renderer) { return UITheme::getContentRect(renderer, true, true); }
 
 // ---------------------------------------------------------------------------
 // URL layers. A URL layer is the English letter layer with its bottom row
@@ -857,8 +856,6 @@ void KeyboardEntryActivity::render(RenderLock&&) {
 
   const int tipsLh = renderer.getLineHeight(SMALL_FONT_ID);
   const int underlineBottom = inputStartY + inputHeight + lineHeight + metrics.verticalSpacing + 4;
-  auto drawTip = [&](const char* tip, int y) { renderer.drawCenteredText(SMALL_FONT_ID, y, tip, true); };
-
   // Ported from crosspoint-reader PR #3863 ("fix: stable tip positions in keyboard activity",
   // Uri Tauber / @Uri-Tauber). Theirs: the fixed row counts, the cursor-hint reservation, the
   // fit check and "Hold UP to edit entry" as a standing tip. Different here: the double-DEL
@@ -869,17 +866,39 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   // blank while the field is empty, and counting it only once there was text
   // re-centred the whole block, visibly, on the first keystroke and again
   // whenever the field emptied.
+  struct Tip {
+    const char* text;
+    bool drawn;
+  };
+  Tip tips[5];
   int tipCount = 0;
+  const auto addTip = [&](const char* tip, const bool drawn = true) { tips[tipCount++] = {tip, drawn}; };
+  addTip(tr(STR_KB_TIPS));
   if (cursorMode) {
-    tipCount = 1;
-  } else if (urlPanel) {
-    tipCount = 3;
-  } else if (symbols) {
-    tipCount = 2;
+    addTip(tr(STR_KB_HINT_RETURN_KEYBOARD));
   } else {
-    tipCount = 3 + (inputType == InputType::Url ? 1 : 0);
+    addTip(tr(STR_KB_HINT_EDIT_ENTRY));
+    if (urlPanel) {
+      addTip(tr(STR_KB_HINT_EXIT_URL_MODE));
+    } else if (!symbols) {
+      if (inputType == InputType::Url) {
+        addTip(tr(STR_KB_HINT_SECONDARY_CHAR));
+        addTip(tr(STR_KB_HINT_URL_SNIPPETS));
+      } else {
+        addTip(shifted ? tr(STR_KB_HINT_LOWER_SECONDARY) : tr(STR_KB_HINT_UPPER_SECONDARY));
+      }
+    }
+    addTip(tr(STR_KB_HINT_CLEAR_TEXT), !text.empty());
   }
-  const int tipsHeight = (tipCount + 1) * tipsLh;
+  // A tip wraps to the content's width and centres in it, clear of the side hints: a long one (the German
+  // secondary-character tip) ran under them in portrait.
+  std::vector<std::string> tipLines[5];
+  int tipRows = 0;
+  for (int i = 0; i < tipCount; ++i) {
+    tipLines[i] = renderer.wrappedText(SMALL_FONT_ID, tips[i].text, content.width, 2);
+    tipRows += static_cast<int>(tipLines[i].size());
+  }
+  const int tipsHeight = tipRows * tipsLh;
   // In cursor mode the instructions above sit right under the field; start
   // below their rows, reserved even while an empty field hides them.
   const int tipsTop = underlineBottom + (cursorMode ? (isPassword ? 2 : 1) * tipsLh : 0);
@@ -889,41 +908,13 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   // keys; leave it out instead.
   if (kbRect.y - tipsTop >= tipsHeight) {
     int y = tipsTop + (kbRect.y - tipsTop - tipsHeight) / 2;
-    drawTip(tr(STR_KB_TIPS), y);
-    y += tipsLh;
-    if (!cursorMode) {
-      drawTip(tr(STR_KB_HINT_EDIT_ENTRY), y);
-      y += tipsLh;
-    }
-    if (cursorMode) {
-      drawTip(tr(STR_KB_HINT_RETURN_KEYBOARD), y);
-    } else if (urlPanel) {
-      drawTip(tr(STR_KB_HINT_EXIT_URL_MODE), y);
-      y += tipsLh;
-      if (!text.empty()) {
-        drawTip(tr(STR_KB_HINT_CLEAR_TEXT), y);
-      }
-    } else if (symbols) {
-      if (!text.empty()) {
-        drawTip(tr(STR_KB_HINT_CLEAR_TEXT), y);
-      }
-    } else {
-      const char* altCharTip;
-      if (inputType == InputType::Url) {
-        altCharTip = tr(STR_KB_HINT_SECONDARY_CHAR);
-      } else if (shifted) {
-        altCharTip = tr(STR_KB_HINT_LOWER_SECONDARY);
-      } else {
-        altCharTip = tr(STR_KB_HINT_UPPER_SECONDARY);
-      }
-      drawTip(altCharTip, y);
-      y += tipsLh;
-      if (inputType == InputType::Url) {
-        drawTip(tr(STR_KB_HINT_URL_SNIPPETS), y);
+    for (int i = 0; i < tipCount; ++i) {
+      for (const std::string& line : tipLines[i]) {
+        if (tips[i].drawn) {
+          const int lineWidth = renderer.getTextWidth(SMALL_FONT_ID, line.c_str());
+          renderer.drawText(SMALL_FONT_ID, content.x + (content.width - lineWidth) / 2, y, line.c_str(), true);
+        }
         y += tipsLh;
-      }
-      if (!text.empty()) {
-        drawTip(tr(STR_KB_HINT_CLEAR_TEXT), y);
       }
     }
   }

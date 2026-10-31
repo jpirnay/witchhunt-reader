@@ -369,14 +369,13 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 100,
                       ipUrl.c_str());
 
-    const int signalHeight = 22;
-    const int signalWidth = contentRect.width - metrics.contentSidePadding * 2;
-    const int signalY = startY + 120;
-    drawWifiSignalStrength(renderer, contentRect.x + metrics.contentSidePadding, signalY, signalWidth, signalHeight, 0);
-    renderer.drawCenteredText(SMALL_FONT_ID, signalY + signalHeight + 2, tr(STR_HOTSPOT_MODE));
-    TouchExitButton::draw(
-        renderer, mappedInput, contentRect.x + metrics.contentSidePadding,
-        signalY + signalHeight + 2 + renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing * 2, signalWidth);
+    // A hotspot has no signal to show. Its mode is the third line beside the code, and the exit button goes below
+    // the code: both were drawn 120 px down, across it (found by syfq91, witchling-reader 73216b8d2).
+    renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding + QR_CODE_WIDTH + metrics.verticalSpacing, startY + 120,
+                      tr(STR_HOTSPOT_MODE));
+    TouchExitButton::draw(renderer, mappedInput, contentRect.x + metrics.contentSidePadding,
+                          startY + QR_CODE_HEIGHT + metrics.verticalSpacing * 2,
+                          contentRect.width - metrics.contentSidePadding * 2);
   } else {
     startY += metrics.verticalSpacing * 2;
 
