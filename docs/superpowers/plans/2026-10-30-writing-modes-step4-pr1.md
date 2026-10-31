@@ -52,11 +52,12 @@ API (`tools/devctl.py`, `docs/serial-test-api.md`) on the X4.
 
 - [ ] **Step 1: Let the fixture build a vertical section**
 
-In `KeepTogetherLayout`, add a member `bool vertical = false;`. In `layout()`, when it is set, use
-`params.verticalText = VerticalText::On`, `params.viewportWidth = 240`, `params.viewportHeight = 100`: the parser
-swaps them, so the content frame is the same 100 px column by 240 px block extent as the horizontal tests, and every
-count in the file's header comment holds. The words (`aaaaNNN`) are Latin, set sideways with their horizontal
-advance, so each still fills a column of its own.
+In `KeepTogetherLayout`, add a member `bool vertical = false;`. In `buildParams()` (master's #590 added it, beside
+the `widowOrphanControl` member), when it is set, use `params.verticalText = VerticalText::On`,
+`params.viewportWidth = 240`, `params.viewportHeight = 100`: the parser swaps them, so the content frame is the same
+100 px column by 240 px block extent as the horizontal tests, and every count in the file's header comment holds.
+The words (`aaaaNNN`) are Latin, set sideways with their horizontal advance, so each still fills a column of its own.
+Add a header-comment item 9 for the vertical case, after #590's item 8.
 
 - [ ] **Step 2: Write the failing tests** (parameterised over heap and lent arena, like the others)
 
@@ -108,10 +109,14 @@ Expected: `AVerticalSectionLeavesAnOrphan`, `AVerticalSectionLeavesAWidow` and
 
 - [ ] **Step 4: Implement**
 
-In `keepTogetherBreak`, after the `if (style.keepWithNext) { ... }` block, return false for a vertical section, with
-a comment: the rule was written for Latin text; a vertical page holds about 9 columns where a horizontal one holds
-14 lines, and ending it early to keep two columns together cost the acceptance book pages that stopped after 5 of 9
-columns (#577). The heading branch above stays.
+In `keepTogetherBreak`, after the `if (style.keepWithNext) { ... }` block, master (#590) already returns false when
+the reader's "Avoid Widows & Orphans" is off (`if (!widowOrphanControl_) return false;`). Extend that condition to a
+vertical section, `if (!widowOrphanControl_ || vertical_)`, and its comment: a vertical section fills its pages
+whatever the setting says; the rule was written for Latin text, a vertical page holds about 9 columns where a
+horizontal one holds 14 lines, and the acceptance book's pages stopped after 5 of 9 columns (#577). The heading
+branch above stays. Add a fifth test, `AVerticalSectionIgnoresTheSetting`: with `vertical = true` and
+`widowOrphanControl = true` (the default) the orphan case of the first test lays out as with `widowOrphanControl =
+false` (same `pageOf` and `linesOn`).
 
 Bump `SECTION_FILE_VERSION` to 105 in `Section.cpp`. Comment: `// v105: a vertical section keeps no widows or
 orphans` (Task 2 adds its part).

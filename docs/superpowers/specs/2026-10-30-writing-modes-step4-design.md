@@ -37,7 +37,8 @@ Non-goals: vertical glyph forms from the fonts (no re-cut, no GSUB on the device
 - **Widows and orphans off in a vertical section.** `keepTogetherBreak` keeps 2 lines; with 9 columns a page
   (against 14 lines) it ended pages of the acceptance book after 5 of 9 columns. The rule was written for Latin
   text; on a page of 9 columns it costs more than it helps. A vertical section takes 1 for both (a heading's
-  keep-with-next stays). *My call.*
+  keep-with-next stays), whatever the reader's "Avoid Widows & Orphans" setting (#590, which came after this design)
+  says: the setting governs horizontal pages. *My call.*
 - **A lone image on a vertical page is centred along the block axis** (`ReaderPageLayout::imageOnlyPageYOffset`
   returns 0 for a vertical page: a small picture sits at the right edge). *My call.*
 - Section version 105 (vertical pagination changes). Horizontal goldens must not move.
