@@ -1056,6 +1056,9 @@ class ChapterHtmlSlimParser final : public Print {
   // Book's style line spacing: a block's CSS line-height sets its pitch, a multiple of `emPx`, never below `floor`
   // (a compression on the font's line height). Off by default, and with a floor of 0.
   void setBookLineHeight(float floor, uint16_t emPx);
+  // Widow and orphan control (keepTogetherBreak), on by default. Off, a page fills before a paragraph's lines go
+  // over; a heading still keeps with its text.
+  void setWidowOrphanControl(const bool on) { widowOrphanControl_ = on; }
 
  private:
   // Snap a completed block's effective font size (block multiplier, after uniform per-word
@@ -1089,6 +1092,8 @@ class ChapterHtmlSlimParser final : public Print {
   // still fits. A placed line is never moved, so the decision looks ahead instead. `nextLine`
   // asks the same for the line after the one about to be placed.
   bool keepTogetherBreak(int lineHeight, bool nextLine = false) const;
+  // The reader's "Avoid Widows & Orphans" (setWidowOrphanControl). Off, only headings end a page early.
+  bool widowOrphanControl_ = true;
   static constexpr int kOrphans = 2;
   static constexpr int kWidows = 2;
   static constexpr int kKeepWithNextLines = 2;  // body lines a heading keeps room for below it

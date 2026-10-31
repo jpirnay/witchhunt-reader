@@ -1409,6 +1409,7 @@ Section::BuildParams EpubReaderActivity::makeSectionBuildParams() const {
   p.viewportWidth = layout.viewportWidth;
   p.viewportHeight = layout.viewportHeight;
   p.hyphenationEnabled = getEffectiveHyphenation();
+  p.widowOrphanControl = SETTINGS.widowOrphanControl != 0;
   p.fontSizeNormalization = getEffectiveFontSizeNormalization();
   p.embeddedStyle = lastRenderStats.embeddedStyle;
   p.bionicReadingEnabled = getEffectiveBionicReading();
@@ -7456,6 +7457,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
   p.viewportWidth = viewportWidth;
   p.viewportHeight = viewportHeight;
   p.hyphenationEnabled = effectiveHyphenation;
+  p.widowOrphanControl = SETTINGS.widowOrphanControl != 0;
   p.fontSizeNormalization = effectiveFontSizeNormalization;
   p.embeddedStyle = effectiveEmbeddedStyle;
   p.bionicReadingEnabled = effectiveBionicReading;

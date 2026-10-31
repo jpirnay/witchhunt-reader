@@ -21,6 +21,9 @@
 //      its last page gets two lines, also when it is laid out in parts (over 96 words).
 //   7. The build lent an arena (the reader's background build, where the page-fit test runs
 //      before the line exists) lays out the same pages.
+//   8. With the reader's "Avoid Widows & Orphans" off, every page fills (#579: on a page of ten
+//      lines, two-line paragraphs that may not split left whole lines empty). A heading still
+//      keeps with its text, and the chapter is cached apart from the one laid out with the rule.
 //
 // test_keep_together.epub sets shapes 1-5 and its golden pins them in heap mode, the harness
 // default, so those run here in the lent arena only. The rest run in both modes: the book has no
@@ -56,6 +59,18 @@ class KeepTogetherLayout : public testing::Test {
   int books = 0;
   int words = 0;
   bool lentArena = false;
+  bool widowOrphanControl = true;
+  std::shared_ptr<Epub> book;  // the last one laid out
+
+  Section::BuildParams buildParams() const {
+    Section::BuildParams params;
+    params.viewportWidth = 100;
+    params.viewportHeight = 240;
+    params.lineCompression = 1.0f;
+    params.embeddedStyle = true;
+    params.widowOrphanControl = widowOrphanControl;
+    return params;
+  }
 
   void SetUp() override {
     std::string name = testing::UnitTest::GetInstance()->current_test_info()->name();
@@ -65,7 +80,10 @@ class KeepTogetherLayout : public testing::Test {
     fs::remove_all(work);
     fs::create_directories(work);
   }
-  void TearDown() override { fs::remove_all(work); }
+  void TearDown() override {
+    book.reset();  // it holds its cache files open, which Windows will not remove
+    fs::remove_all(work);
+  }
 
   // The next unique one-line word.
   std::string word() {
@@ -94,15 +112,11 @@ class KeepTogetherLayout : public testing::Test {
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>C"
         "</title><link rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"/></head><body>\n" +
         body + "\n</body></html>\n";
-    auto epub = syntheticBookFromDocument(work, books++, doc,
-                                          {{"style.css", "text/css", "p, h2 { margin: 0; text-indent: 0; }"}});
-    Section::BuildParams params;
-    params.viewportWidth = 100;
-    params.viewportHeight = 240;
-    params.lineCompression = 1.0f;
-    params.embeddedStyle = true;
+    book = syntheticBookFromDocument(work, books++, doc,
+                                     {{"style.css", "text/css", "p, h2 { margin: 0; text-indent: 0; }"}});
+    const Section::BuildParams params = buildParams();
     GfxRenderer renderer;
-    Section section(epub, 0, renderer);
+    Section section(book, 0, renderer);
     std::unique_ptr<BuildArena> lent;
     if (lentArena) {
       lent = std::make_unique<BuildArena>(52272);
@@ -216,6 +230,39 @@ TEST_P(KeepTogetherFixture, ParagraphLaidOutInPartsKeepsItsLastLines) {
   EXPECT_EQ(l.linesOn.at(9), 9);
   EXPECT_EQ(l.linesOn.at(10), 2);
   EXPECT_EQ(l.pageOf.at(last), 10);
+}
+
+TEST_P(KeepTogetherFixture, ControlOffFillsThePage) {
+  widowOrphanControl = false;
+  std::string first, last;
+  auto l = layout(fill(9) + para(2, &first, &last));
+  EXPECT_EQ(l.pageOf.at(first), 0) << "the first line may stay alone at the foot of the page";
+  EXPECT_EQ(l.linesOn.at(0), 10);
+  EXPECT_EQ(l.pageOf.at(last), 1);
+  l = layout(fill(8) + para(3, &first));
+  EXPECT_EQ(l.linesOn.at(0), 10) << "a paragraph that cannot split 2/2 splits 2/1";
+  l = layout(fill(7) + para(4, &first, &last));
+  EXPECT_EQ(l.linesOn.at(0), 10) << "the last line may go over alone";
+  EXPECT_EQ(l.linesOn.at(1), 1);
+  EXPECT_EQ(l.pageOf.at(last), 1);
+}
+
+TEST_P(KeepTogetherFixture, ControlOffStillKeepsAHeadingWithItsText) {
+  widowOrphanControl = false;
+  std::string first;
+  const auto l = layout(fill(8) + "<h2>Hdg</h2>" + para(3, &first));
+  EXPECT_EQ(l.pageOf.at("Hdg"), 1);
+  EXPECT_EQ(l.pageOf.at(first), 1);
+}
+
+TEST_P(KeepTogetherFixture, ControlOffIsCachedApart) {
+  layout(fill(9) + para(2));  // cached with the rule on
+  Section::BuildParams params = buildParams();
+  GfxRenderer renderer;
+  Section section(book, 0, renderer);
+  EXPECT_TRUE(section.loadSectionFile(params));
+  params.widowOrphanControl = false;
+  EXPECT_FALSE(section.loadSectionFile(params)) << "pages laid out with the rule were reused without it";
 }
 
 INSTANTIATE_TEST_SUITE_P(HeapAndLentArena, KeepTogetherFixture, testing::Bool(),

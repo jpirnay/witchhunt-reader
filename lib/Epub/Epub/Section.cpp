@@ -374,9 +374,9 @@ uint32_t fnv1a(const uint8_t* data, size_t length) {
 
 uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   uint8_t buffer[96];
-  static_assert(sizeof(buffer) >= 22 + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) +
+  static_assert(sizeof(buffer) >= 23 + sizeof(uint32_t) + sizeof(float) + sizeof(uint16_t) +
                                       BlockFontFamilies::kMaxFamilies * 3 * sizeof(int32_t),
-                "the settings (22 B), Book's style line spacing and every family fit");
+                "the settings (23 B), Book's style line spacing and every family fit");
   size_t offset = 0;
 
   auto append = [&](const void* ptr, size_t size) {
@@ -391,6 +391,10 @@ uint32_t Section::calculatePropertyHash(const BuildParams& p) {
   append(&p.viewportWidth, sizeof(p.viewportWidth));
   append(&p.viewportHeight, sizeof(p.viewportHeight));
   append(&p.hyphenationEnabled, sizeof(p.hyphenationEnabled));
+  // Only when off: the default, on, keeps the key every chapter laid out since widow control has.
+  if (!p.widowOrphanControl) {
+    append(&p.widowOrphanControl, sizeof(p.widowOrphanControl));
+  }
   append(&p.fontSizeNormalization, sizeof(p.fontSizeNormalization));
   append(&p.embeddedStyle, sizeof(p.embeddedStyle));
   append(&p.bionicReadingEnabled, sizeof(p.bionicReadingEnabled));
@@ -1280,6 +1284,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   st.visitor->endExternalPageBreakAnchors();
   st.visitor->setFontSizeLadder(p.fontSizeLadder);
   st.visitor->setBookLineHeight(p.bookLineHeightFloor, p.lineHeightEmPx);
+  st.visitor->setWidowOrphanControl(p.widowOrphanControl);
   if (p.embeddedStyle && p.fontFamilies) st.visitor->setFontFamilies(*p.fontFamilies);
   // Anchors stream to SD as they are found rather than accumulating in the parser; the
   // finalizer below copies the spill into the section file's anchor map. Set before setup(),

@@ -382,6 +382,8 @@ inline void buildSettings(const RowSink& emit) {
                            StrId::STR_CAT_READER));
   emit(SettingInfo::Toggle(StrId::STR_HYPHENATION, &CrossPointSettings::hyphenationEnabled, "hyphenationEnabled",
                            StrId::STR_CAT_READER));
+  emit(SettingInfo::Toggle(StrId::STR_WIDOW_ORPHAN_CONTROL, &CrossPointSettings::widowOrphanControl,
+                           "widowOrphanControl", StrId::STR_CAT_READER));
   // Which StarDict dictionary word lookup uses. An Action rather than an Enum:
   // the options are folders discovered on the SD card at open time, not a fixed
   // list, so the picker has to scan.

@@ -1567,6 +1567,8 @@ bool ChapterHtmlSlimParser::keepTogetherBreak(const int lineHeight, const bool n
                      std::max<int>(style.paddingBottom, 0) + kKeepWithNextLines * bodyLineHeight;
     return need > room;
   }
+  // Off, the page fills. On a page of ten lines the rule could leave two of them empty (#579).
+  if (!widowOrphanControl_) return false;
   const int fit = room / lineHeight;  // lines of this height still on the page, this one included
   if (fit <= 0) return false;         // it does not fit at all: the ordinary break
   // Not known yet: the paragraph runs on past this layout pass, so it has lines enough to split.
