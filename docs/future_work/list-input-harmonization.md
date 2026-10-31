@@ -16,11 +16,11 @@ Starred pages, Global bookmarks and the Wi-Fi network list still use `ButtonNavi
 
 ## The custom painters
 
-The EPUB and XTC chapter lists and the Markdown TOC (`EpubReaderChapterSelectionActivity`, `XtcReaderChapterSelectionActivity`, `MdReaderTocSelectionActivity`) derive from `Activity` and call `ButtonNavigator::onNextList`. Footnotes (`EpubReaderFootnotesActivity`) and the KOReader sync result (`KOReaderSyncActivity`) read button events and draw their rows by hand. The button-remap wizard (`ButtonRemapActivity`) draws with `GUI.drawList`.
+The EPUB chapter list is on `UiListActivity` (#582): rows from a provider, titles wrapped to two lines, levels as `fui::ListItem::indent`. The XTC chapter list and the Markdown TOC (`XtcReaderChapterSelectionActivity`, `MdReaderTocSelectionActivity`) still derive from `Activity`, call `ButtonNavigator::onNextList` and truncate their titles. Footnotes (`EpubReaderFootnotesActivity`) and the KOReader sync result (`KOReaderSyncActivity`) read button events and draw their rows by hand. The button-remap wizard (`ButtonRemapActivity`) draws with `GUI.drawList`.
 
-- Target: all but the remap wizard take input through `ListController` (Footnotes keeps Power for select through `onOtherEvent`) and draw with `fui::list`. Chapter levels are indented with leading spaces in the label, as upstream does. The remap wizard keeps its own input on purpose (it captures whichever button is pressed next) and only moves its rows onto FUI so `drawList` can go.
-- Ruled out: SDK changes. FreeInkUI in our pin matches upstream's, which is what lets upstream screens port without a bump.
-- Next step: port upstream's FUI chapter selectors, then footnotes and the sync result. USER_GUIDE section 6 (chapter selection) changes with it.
+- Target: all but the remap wizard take input through `ListController` (Footnotes keeps Power for select through `onOtherEvent`) and draw with `fui::list`. Chapter levels use `ListItem::indent`, as the EPUB list does: leading spaces, upstream's way, are dropped on a wrapped line. The remap wizard keeps its own input on purpose (it captures whichever button is pressed next) and only moves its rows onto FUI so `drawList` can go.
+- SDK changes stay the exception: `ListItem::indent` (SDK `5bd4a0a`) is the one so far, because no app-side workaround survives wrapping.
+- Next step: the XTC chapter list and the Markdown TOC, as the EPUB list did (USER_GUIDE section 6 then drops its XTC/Markdown sentence), then footnotes and the sync result.
 
 ## Cleanup once the last list has moved
 
