@@ -2107,7 +2107,8 @@ bool Epub::readItemContentsToStreamWithArena(const std::string& itemHref, Print&
   return opened && drainEntry(reader, out, stop, path.c_str());
 }
 
-bool Epub::readSpineItemToStream(const int spineIndex, Print& out, const bool* stop, BuildArena* scratch) const {
+bool Epub::readSpineItemToStream(const int spineIndex, Print& out, const bool* stop, BuildArena* scratch,
+                                 const size_t outputCap) const {
   ZipFile::FileStatSlim stat = {};
   if (!getSpineItemStat(spineIndex, &stat)) {
     LOG_ERR("EBP", "Spine item %d not found", spineIndex);
@@ -2120,7 +2121,7 @@ bool Epub::readSpineItemToStream(const int spineIndex, Print& out, const bool* s
   ZipFile zip(filepath);
   primeZip(zip);
   ZipFile::EntryReader reader(zip, 1024, lent ? arena : nullptr);
-  const bool opened = reader.open(stat);
+  const bool opened = reader.open(stat, outputCap);
   adoptZipDetails(zip);
   char what[24];
   snprintf(what, sizeof(what), "spine item %d", spineIndex);

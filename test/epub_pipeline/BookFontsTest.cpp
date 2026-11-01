@@ -246,6 +246,19 @@ TEST_F(BookFontsTest, OnlyTheHeadOfAChapterIsRead) {
   EXPECT_EQ(family("Roboto"), detect(*epub));
 }
 
+TEST_F(BookFontsTest, AnItemIsReadNoFurtherThanItsCap) {
+  // Inside a long text run or attribute value the parser reports no progress: the read itself stops at the cap.
+  std::string text = "<body><p class='block'>";
+  for (int i = 0; i < 40000; ++i) text += "prose ";  // ~240 KB, one text node
+  text += "</p></body>";
+  const std::string attribute =
+      "<body><img src='data:image/png;base64," + std::string(240 * 1024, 'A') + "'/><p class='indent'>Text.</p></body>";
+  for (const std::string& chapter : {text, attribute}) {
+    const auto epub = book(kProbeCss, {chapter});
+    EXPECT_LE(found(*epub).bytesRead, BookFonts::kProbeMaxItemBytes);
+  }
+}
+
 TEST_F(BookFontsTest, TheBodyIsFoundPastTheSixthSpineItem) {
   std::vector<std::string> chapters(7, "<body><p class='block'>Front matter.</p></body>");
   chapters.push_back(prose("indent", 4 * 1024));

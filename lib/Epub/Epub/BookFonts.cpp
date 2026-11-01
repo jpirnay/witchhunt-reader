@@ -290,6 +290,22 @@ class BodyFontProbe {
   std::string tag_, class_, id_, inline_;
 };
 
+// Passes a read on to `out`, counting its bytes: what was inflated of an item.
+class CountingSink final : public Print {
+ public:
+  explicit CountingSink(Print& out) : out_(out) {}
+  size_t write(const uint8_t c) override { return write(&c, 1); }
+  size_t write(const uint8_t* buf, const size_t n) override {
+    bytes_ += n;
+    return out_.write(buf, n);
+  }
+  size_t bytes() const { return bytes_; }
+
+ private:
+  Print& out_;
+  size_t bytes_ = 0;
+};
+
 // A block of `scratch` holding one parser state for the passes, released when it goes.
 class ParserState {
  public:
@@ -703,16 +719,18 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
     SaxParser parser;
     if (state.get()) parser.setExternalState(state.get(), SaxParser::stateBytes());
     SaxFeedSink sink(parser);
+    CountingSink counted(sink);
     const bool ready = parser.init(probe.get(), &BodyFontProbe::onStart, &BodyFontProbe::onEnd, &BodyFontProbe::onText,
                                    &BodyFontProbe::onDefault, /*htmlVoidTagRepair=*/true);
     if (ready) probe->beginParser(parser, probeWeight256(itemBytes, std::min(itemBytes, cap), count, sampled), cap);
-    // One item that cannot be read is passed over: the others still sample the book.
-    if (!ready || !epub.readSpineItemToStream(i, sink, sink.stopFlag(), scratch)) {
+    // One item that cannot be read is passed over: the others still sample the book. The read stops at the cap
+    // itself: inside a long text run or attribute value (a data: URI) the parser reports no progress to stop on.
+    if (!ready || !epub.readSpineItemToStream(i, counted, sink.stopFlag(), scratch, cap)) {
       LOG_ERR("BKF", "Cannot read spine item %d", i);
       continue;
     }
     ++found.itemsRead;
-    found.bytesRead += static_cast<uint32_t>(parser.byteOffset());
+    found.bytesRead += static_cast<uint32_t>(counted.bytes());
   }
   if (sampled > 0 && found.itemsRead == 0) *failed = true;
   LOG_INF("BKF", "Probe: %u of %d spine items, %lu bytes, %lu ms", static_cast<unsigned>(found.itemsRead), count,

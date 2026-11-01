@@ -114,7 +114,7 @@ struct Found {
   uint32_t bodyStyles[4] = {};
   uint32_t accentStyles[kMaxAccents][4] = {};
   uint16_t itemsRead = 0;  ///< the spine items read (one that cannot be read is passed over)
-  uint32_t bytesRead = 0;  ///< the bytes of them parsed
+  uint32_t bytesRead = 0;  ///< the bytes of them inflated
 };
 /// `sum` plus `bytes` times `weight256` (8 fractional bits: 256 is 1.0), rounded; at most UINT32_MAX.
 uint32_t addWeighted(uint32_t sum, uint32_t bytes, uint32_t weight256);
