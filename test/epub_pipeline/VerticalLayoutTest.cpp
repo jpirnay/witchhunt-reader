@@ -721,6 +721,33 @@ constexpr const char* kCombinedSecondWord = "   C first=1 count=1\n";
 
 int combineRecords(const std::string& dump) { return occurrences(dump, " C first="); }
 
+// The word each body line's C record names, in dump order.
+std::vector<std::string> combinedWords(const std::string& dump) {
+  std::vector<std::string> combined;
+  std::vector<std::string> line;
+  std::istringstream in(dump);
+  std::string row;
+  while (std::getline(in, row)) {
+    if (row.rfind("  LINE ", 0) == 0) {
+      line.clear();
+    } else if (row.rfind("   W x=", 0) == 0 && row.find(" t=") != std::string::npos) {
+      line.push_back(row.substr(row.find(" t=") + 3));
+    } else if (row.rfind("   C first=", 0) == 0) {
+      const size_t first = std::stoul(row.substr(11));
+      combined.push_back(first < line.size() ? line[first] : "?");
+    }
+  }
+  return combined;
+}
+
+// Whether `text` is one of the dump's body words, whole.
+bool hasWord(const std::string& dump, const std::string& text) {
+  for (const DumpedWord& word : dumpedWords(dump)) {
+    if (word.text == text) return true;
+  }
+  return false;
+}
+
 // The PAGE and LINE rows of a dump: where every page breaks and every line sits.
 std::string pagesAndLines(const std::string& dump) {
   std::string rows;
@@ -776,6 +803,23 @@ TEST_F(VerticalLayout, DigitsTwoCombinesOnlyTwoDigits) {
       dump(kCombineCss, document("<p class=\"d2\">第12章と第123章</p>"), profileOf(VerticalText::On));
   EXPECT_EQ(1, combineRecords(dumped)) << dumped;
   EXPECT_EQ(1, occurrences(dumped, kCombinedSecondWord)) << dumped;
+  EXPECT_EQ(std::vector<std::string>{"12"}, combinedWords(dumped)) << dumped;
+}
+
+// A flagged word that does not combine is never hyphenated down a column: a piece of it short enough to combine on a
+// later pass (a page-boundary retry, a continuation) would set it half upright. abcdefgh (12 + 6 + 7 + 8 + 9 + 10 + 11
+// + 12 = 75 px, eight characters) is wider than the 48 px column (60 rounded down to whole ems), so unflagged it is
+// split, with hyphenation and without; flagged it stays whole.
+TEST_F(VerticalLayout, AFlaggedWordIsNeverHyphenatedInAColumn) {
+  for (const bool hyphenation : {false, true}) {
+    pipeline_harness::Profile on = profileOf(VerticalText::On, 460, 60);
+    on.hyphenationEnabled = hyphenation;
+    const std::string flagged = dump(kCombineCss, document("<p>ab <span class=\"tcy\">abcdefgh</span> cd</p>"), on);
+    const std::string plain = dump(kCombineCss, document("<p>ab <span>abcdefgh</span> cd</p>"), on);
+    EXPECT_FALSE(hasWord(plain, "abcdefgh")) << "hyphenation " << hyphenation << "\n" << plain;
+    EXPECT_TRUE(hasWord(flagged, "abcdefgh")) << "hyphenation " << hyphenation << "\n" << flagged;
+    EXPECT_EQ(0, combineRecords(flagged)) << flagged;
+  }
 }
 
 // `all` over five characters, over a run with an upright character in it, or over a run wider than two ems (abcd is

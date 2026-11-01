@@ -1712,8 +1712,11 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   if (availableWidth <= 0 || wordIndex >= words.size()) {
     return false;
   }
-  // A ruby base is never split: its ruby sits over the whole of it. Nor is a combined word, one em wide.
-  if (TokenBoundary::rubyRole(wordBoundaries[wordIndex]) != TokenBoundary::RubyRole::None || combines(wordIndex)) {
+  // A ruby base is never split: its ruby sits over the whole of it. Nor, down a column, is a word the book asks to
+  // combine: combined it is one em; not, a piece of it short enough to combine on a later pass would set it half
+  // upright.
+  if (TokenBoundary::rubyRole(wordBoundaries[wordIndex]) != TokenBoundary::RubyRole::None ||
+      (vertical_ && TokenBoundary::combineRequested(wordBoundaries[wordIndex]))) {
     return false;
   }
 
