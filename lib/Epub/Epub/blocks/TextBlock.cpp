@@ -730,6 +730,23 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       const int markWidth = drawGlyph ? runWidth(font, markText, EpdFontFamily::REGULAR, markScale) : 0;
       const int square = std::max(2, markAscender / 4);
       const int wordX = xposArr[w] + x;
+      if (vertical && isCombined(w)) {
+        // A combined word is one upright block in one em cell: one mark, centred on the cell, if any code point takes
+        // it.
+        bool takes = false;
+        for (const unsigned char* q = reinterpret_cast<const unsigned char*>(wordText(w)); *q != 0 && !takes;) {
+          takes = TextEmphasis::takesMark(utf8NextCodepoint(&q));
+        }
+        if (takes) {
+          const int cell = columnEm(renderer, font, style, wordScl);
+          if (drawGlyph) {
+            drawRun(font, wordX + (cell - markWidth) / 2, markY, markText, EpdFontFamily::REGULAR, markScale);
+          } else {
+            renderer.fillRect(wordX + (cell - square) / 2, markY + (markAscender - square) / 2, square, square, true);
+          }
+        }
+        continue;
+      }
       const unsigned char* p = reinterpret_cast<const unsigned char*>(wordText(w));
       int rawBefore = 0;  // the word's advance so far, unscaled: rounded once per character like the ruby
       while (*p != 0) {

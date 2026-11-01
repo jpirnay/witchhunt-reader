@@ -268,8 +268,29 @@ TEST(VerticalTextBlock, ACombineRecordReservesNoBand) {
 TEST(VerticalTextBlock, ARubyLineStillReservesItsBand) {
   GfxRenderer r;
   turnedPortrait(r);
-  const auto block = line({"漢", "13"}, {0, 10}, EpdFontFamily::REGULAR, {combine(1, 10), ruby(0, 1, 0, 10, "かん")});
+  const auto block = line({"漢", "13"}, {0, 10}, EpdFontFamily::REGULAR, {ruby(0, 1, 0, 10, "かん"), combine(1, 10)});
   EXPECT_EQ(8, block->annotationBand(r, kFontId));
+}
+
+// Sesame over words 0-2, "13" (word 1) combined, ruby on word 0. Em 10, the mark at half size: advance 5. The pen runs
+// down the column from y = 50: the cells are [50, 60), [60, 70), [70, 80). A mark is centred in its cell, so its pen
+// starts at cell + (10 - 5) / 2 = 52, 62, 72, and the shim's upright draw of a 0.5 run lands 4 above it: y = 48,
+// 58, 68. Word 1 gets ONE mark (y = 58, the middle of its cell), not one per digit. All sit in the ruby's band, x =
+// 371.
+TEST(VerticalTextBlock, ACombinedWordTakesOneCentredEmphasisMark) {
+  GfxRenderer r;
+  turnedPortrait(r);
+  const auto block = line({"日", "13", "本"}, {0, 10, 20}, EpdFontFamily::REGULAR,
+                          {sesame(0, 3), ruby(0, 1, 0, 10, "かん"), combine(1, 10)});
+  EXPECT_EQ(8, block->annotationBand(r, kFontId));
+  block->render(r, kFontId, 50, 100);
+  std::vector<int> markY;
+  for (const auto& call : r.drawCalls) {
+    if (call.text != "﹅") continue;  // U+FE45, the sesame dot
+    EXPECT_EQ(371, call.x);
+    markY.push_back(call.y);
+  }
+  EXPECT_EQ((std::vector<int>{48, 58, 68}), markY);
 }
 
 TEST(VerticalTextBlock, TheCombineRecordSurvivesTheCache) {
