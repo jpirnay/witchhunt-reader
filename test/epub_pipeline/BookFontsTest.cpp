@@ -259,6 +259,16 @@ TEST_F(BookFontsTest, AnItemIsReadNoFurtherThanItsCap) {
   }
 }
 
+TEST_F(BookFontsTest, EachKindOfElementIsResolvedOnce) {
+  // A book is the same few elements over and over: the probe resolves an element's CSS once per tag, class and id,
+  // as the chapter parser does, not once per element (each a lookup that can read the card).
+  std::string chapter = "<body>";
+  for (int i = 0; i < 300; ++i) chapter += "<p class='indent'>Prose.</p><p class='block'>More.</p>";
+  const auto epub = book(kProbeCss, {chapter + "</body>"});
+  EXPECT_EQ(family("EBGaramond"), detect(*epub));
+  EXPECT_LE(epub->getCssParser()->getResolveStats().resolveCalls, 10u);  // html, head, title, link, body, two p's
+}
+
 TEST_F(BookFontsTest, TheBodyIsFoundPastTheSixthSpineItem) {
   std::vector<std::string> chapters(7, "<body><p class='block'>Front matter.</p></body>");
   chapters.push_back(prose("indent", 4 * 1024));

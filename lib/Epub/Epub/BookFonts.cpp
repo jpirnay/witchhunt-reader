@@ -151,10 +151,10 @@ class BodyFontProbe {
     self.tag_.assign(name);
     self.class_.assign(classes);
     self.id_.assign(self.css_.hasIdSelectors() ? id : "");
-    frame.take(self.css_.resolveStyle(self.tag_, self.class_, self.id_));
+    frame.take(self.resolved());
     if (inlineStyle) {  // the style attribute has the last word
       self.inline_.assign(inlineStyle);
-      frame.take(CssParser::parseInlineStyle(self.inline_));
+      frame.take(Look::of(CssParser::parseInlineStyle(self.inline_)));
     }
     frame.inBody = frame.inBody || strcasecmp(name, "body") == 0;
     const bool paragraph = strcasecmp(name, "p") == 0 || strcasecmp(name, "div") == 0 || strcasecmp(name, "li") == 0 ||
@@ -216,6 +216,27 @@ class BodyFontProbe {
   // EpdFontFamily's style bits.
   static constexpr uint8_t kBold = 1;
   static constexpr uint8_t kItalic = 2;
+  // What the probe takes of an element's CSS: the font-family, weight and style it defines.
+  struct Look {
+    uint32_t family = 0;
+    bool definesFamily = false;
+    uint8_t defines = 0;  // the style bits it sets (kBold, kItalic)
+    uint8_t style = 0;    // their values
+    static Look of(const CssStyle& css) {
+      Look look;
+      look.definesFamily = css.defined.fontFamily;
+      look.family = css.fontFamily;
+      if (css.hasFontWeight()) {
+        look.defines |= kBold;
+        if (css.fontWeight == CssFontWeight::Bold) look.style |= kBold;
+      }
+      if (css.hasFontStyle()) {
+        look.defines |= kItalic;
+        if (css.fontStyle == CssFontStyle::Italic) look.style |= kItalic;
+      }
+      return look;
+    }
+  };
   struct Frame {
     uint32_t family = 0;           // font-family in effect, inherited
     uint32_t paragraphFamily = 0;  // the family of the paragraph the element is in
@@ -227,12 +248,19 @@ class BodyFontProbe {
     uint8_t style = 0;        // bold and italic in effect, inherited (kBold, kItalic)
     uint8_t firstStyle = 0;   // a block's: the style its text starts in
     uint16_t blockBytes = 0;  // a block's: its text so far, up to kBlockMinBytes
-    void take(const CssStyle& css) {
-      if (css.defined.fontFamily) family = css.fontFamily;
-      if (css.hasFontWeight()) style = (style & ~kBold) | (css.fontWeight == CssFontWeight::Bold ? kBold : 0);
-      if (css.hasFontStyle()) style = (style & ~kItalic) | (css.fontStyle == CssFontStyle::Italic ? kItalic : 0);
+    void take(const Look& look) {
+      if (look.definesFamily) family = look.family;
+      style = static_cast<uint8_t>((style & ~look.defines) | look.style);
     }
   };
+  // Looks resolved, by an FNV-1a hash of tag, class and id, in a direct-mapped table: a book is the same few
+  // elements over and over, and each resolve can read the rules from the card (the chapter parser keeps them
+  // likewise). Two keys that hash alike in all 32 bits would share a look.
+  struct Memo {
+    uint32_t key = 0;  // 0: empty
+    Look look;
+  };
+  static constexpr size_t kMemoSlots = 64;
   struct Usage {
     uint32_t family = 0;
     uint32_t bytes = 0;
@@ -270,6 +298,19 @@ class BodyFontProbe {
     }
   }
 
+  // The look of the element in tag_, class_ and id_, resolved once per key.
+  Look resolved() {
+    uint32_t key = 2166136261u;
+    for (const std::string* part : {&tag_, &class_, &id_}) {
+      for (const char c : *part) key = (key ^ static_cast<uint8_t>(c)) * 16777619u;
+      key = (key ^ 0x1Fu) * 16777619u;  // a separator: "ab"+"c" is not "a"+"bc"
+    }
+    if (key == 0) key = 1;
+    Memo& slot = memo_[key % kMemoSlots];
+    if (slot.key != key) slot = {key, Look::of(css_.resolveStyle(tag_, class_, id_))};
+    return slot.look;
+  }
+
   // Past the item's cap: stops the parser.
   bool stopAtLimit() const {
     if (parser_->byteOffset() < cap_) return false;
@@ -285,6 +326,7 @@ class BodyFontProbe {
   Usages usage_{};                             // text bytes by family, an inline accent's counting for its paragraph's
   std::array<Styled, kMaxFamilies> styled_{};  // text by family identity and style, in the order first seen
   size_t styledCount_ = 0;
+  std::array<Memo, kMemoSlots> memo_{};
   size_t depth_ = 0;
   // resolveStyle()'s arguments, reused so an element costs no allocation once they have grown.
   std::string tag_, class_, id_, inline_;
@@ -695,7 +737,7 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
   *failed = false;
   CssParser* css = epub.getCssParser();
   if (!css) return {};
-  // ~1.3 KB: the frames and the two tables. Not on the stack, which a section build shares.
+  // ~2.3 KB: the frames, the two tables and the memo. Not on the stack, which a section build shares.
   auto probe = makeUniqueNoThrow<BodyFontProbe>(*css);
   if (!probe) {
     LOG_ERR("BKF", "OOM: probe");
