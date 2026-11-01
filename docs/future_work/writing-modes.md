@@ -23,12 +23,12 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 | 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; the horizontal right-to-left case of FlowContext and page progression, which step 3 built for vertical text ([below](#what-step-1-takes-from-step-3)) | open |
 | 2 | Arabic script; before its plan, decide on one shaper for Arabic and the Indic scripts ([below](#complex-shaping-arabic-and-the-indic-scripts)) | open |
 | 3 | Vertical frame (from the spike); the vertical decision and its settings; FlowContext and page progression | shipped (#577) ([plan](../superpowers/plans/2026-10-28-writing-modes-step3.md)) |
-| 4 | Vertical typography: widows and orphans off and lone images centred (PR 1); 、。 and small kana placed from glyph ink, A3a along the column, Traditional Chinese marks (PR 2); tate-chu-yoko (PR 3); the dictionary on vertical pages (PR 4) | in progress: PR 1 #594 ([design](../superpowers/specs/2026-10-30-writing-modes-step4-design.md), [PR 1 plan](../superpowers/plans/2026-10-30-writing-modes-step4-pr1.md)) |
+| 4 | Vertical typography: widows and orphans off and lone images centred (PR 1); 、。 and small kana placed from glyph ink, A3a along the column, Traditional Chinese marks (PR 2); tate-chu-yoko (PR 3); the dictionary on vertical pages (PR 4) | in progress: PR 1 #594, PR 2 #<this PR> ([design](../superpowers/specs/2026-10-30-writing-modes-step4-design.md), [PR 1 plan](../superpowers/plans/2026-10-30-writing-modes-step4-pr1.md), [PR 2 plan](../superpowers/plans/2026-10-31-writing-modes-step4-pr2.md)) |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
 
-**Next step.** Step 4 is in progress (chosen and its design approved by the maintainer on 2026-10-30): PR 1 here,
-PR 2 (placed marks) next. Step 1 (right to left) follows step 4. Line spacing (`cjk.md`, step 10), which reads the
-`line-height` step 0 keeps, has shipped.
+**Next step.** Step 4 is in progress (chosen and its design approved by the maintainer on 2026-10-30): PR 1 and
+PR 2 (placed marks) here, PR 3 (tate-chu-yoko) next. Step 1 (right to left) follows step 4. Line spacing (`cjk.md`,
+step 10), which reads the `line-height` step 0 keeps, has shipped.
 
 ## What step 1 takes from step 3
 
@@ -148,12 +148,14 @@ R_ R_ -- 2011 -- chenjin5.epub`, local only): no `writing-mode` and 160 margin r
 ## What step 4 inherits from step 3
 
 Step 3 ships vertical text with these limits; step 4 (vertical typography) picks them up.
-- **Punctuation stays rough.** `drawsUpright` (`lib/Epub/Epub/VerticalOrientation.cpp`) is the one place a UAX #50
-  class becomes a drawing: U and Tu characters (、。, small kana, ！？) upright, R and Tr (brackets, dashes, ……, ー)
-  sideways. There are no vertical forms, and Tu marks are not placed in their cell. Step 4 places Tu from
-  glyph ink (step 4 PR 2; no font re-cut, design Decision 1). With A3a in vertical, a 、 or 。 that A3b pushed in (a narrowed box at a
-  column's end, or before a closing bracket) keeps its horizontal ink: drawn upright it can reach half an em past
-  its box.
+- **Punctuation stays rough.** Done for 、。 and the small kana by step 4 PR 2. `drawsUpright`
+  (`lib/Epub/Epub/VerticalOrientation.cpp`) is the one place a UAX #50 class becomes a drawing: U and Tu characters
+  (、。, small kana, ！？) upright, R and Tr (brackets, dashes, ……, ー) sideways. `uprightPlacementOf` then places an
+  upright mark from its glyph ink (no font re-cut, design Decision 1): 、。，． go to the top-right corner of their cell,
+  or to its centre in a Traditional Chinese book (line flags bit 3), and the small kana move 0.1 em up and right. A3a
+  reads that placed ink along the column, so a 、 or 。 that A3b pushed in (a narrowed box at a column's end, or before
+  a closing bracket) keeps its ink inside its box. Still rough: there are no vertical forms, and the wave dashes stay
+  rotated, because their vertical form is a mirror image and the renderer cannot mirror a glyph (design: not built).
 - **The dictionary is not available in vertical text.** `EpubReaderActivity::openDictionary` returns on a
   vertical section and the reader menu does not offer the Dictionary row, so the long-tap dictionary gesture does
   nothing on a vertical page. Word boxes and the selection's navigation need mapping through the frame.

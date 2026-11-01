@@ -258,7 +258,7 @@ These fields are the `header::*` constants in `Section.cpp`, in file order. The 
 `Page::serialize` writes a `u16` element count, a `u16` `verticalBlockExtent`, the elements (a `u8` tag, then the element), and the footnotes (a `u16` count, then the entries).
 
 - `verticalBlockExtent` is 0 on a horizontal page. On a page of a vertical-rl section it is the block extent the columns fill, the reader's viewport width, and a non-zero value is what marks the page vertical (`Page::isVertical`): the page draws in the turned frame, and its elements are positioned in that frame.
-- A line (`TextBlock::serialize`) has a flags byte: bit 0 the word sizes are stored, bit 1 the line has annotations (ruby), bit 2 the line is vertical (its words run down a column), bit 3 reserved (a file that sets it is rejected), bits 4-7 the number of word fonts.
+- A line (`TextBlock::serialize`) has a flags byte: bit 0 the word sizes are stored, bit 1 the line has annotations (ruby), bit 2 the line is vertical (its words run down a column), bit 3 its marks are centred (a vertical line built under the Traditional Chinese punctuation profile: 、。，． are drawn centred in their cell, not in its top-right corner), bits 4-7 the number of word fonts.
 - An image (`ImageBlock::serialize`) ends with a flags byte whose bit 0 says the image is turned, as on a vertical page. A turned image stores the size it is decoded and drawn at, upright in the reader's frame; the box it takes on the page is that size with width and height swapped (`ImageBlock::getWidth`, `getHeight`).
 
 ### Paragraph LUT entry
