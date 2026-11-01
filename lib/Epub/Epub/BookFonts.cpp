@@ -750,6 +750,14 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
   // heap, and the lower floor holds, as it does for the chapter the open builds next. An X3's first open has ~48 KB.
   const bool lean = css->leanResolve();
   css->setLeanResolve(true);
+  // And the book's rules in the lent region, as a section build has them: what the memo misses reads no card. Those
+  // reads, not the bytes, were the probe's seconds on an X3. Loaded above the parser state and below every read's
+  // block (BuildArena is LIFO), and dropped before the state's block goes back.
+  const bool resident = scratch != nullptr && scratch->valid();
+  if (resident) {
+    css->setIndexArena(scratch);
+    css->loadFromCache();
+  }
   const unsigned long start = millis();
   Found found;
   // From the first item, not the text reference: a guide that points at the cover would hide the whole book.
@@ -788,6 +796,7 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
     *failed = true;
   }
   css->clearCaches(/*evictEverything=*/true);  // the resolver's caches go back to the heap
+  if (resident) css->setIndexArena(nullptr);
   css->setLeanResolve(lean);
   found.body = probe->family();
   // An accent needs a face to be drawn, of any style (moveNearestToRegular makes it the regular).

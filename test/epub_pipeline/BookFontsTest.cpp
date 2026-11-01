@@ -280,6 +280,33 @@ TEST_F(BookFontsTest, TheProbeResolvesAsLeanAsASectionBuild) {
   EXPECT_EQ(family("EBGaramond"), detect(*epub));  // found() expects no failure
 }
 
+TEST_F(BookFontsTest, WithALentRegionTheRulesAreResolvedFromIt) {
+  // The book's rules in the lent region, as a section build has them: what the memo misses reads no card. A first
+  // open's probe spent seconds on those reads (X3, 2026-11-01).
+  std::string chapter = "<body>";
+  for (int i = 0; i < 50; ++i) {
+    chapter +=
+        "<h1>Head</h1><p class='indent'>Prose, more prose.</p><p class='noindent'>Prose.</p>"
+        "<p class='block'>More.</p><p class='date'>Date</p>";
+  }
+  // The card files the probe opens; each lookup on the card opens the rules file.
+  const auto opens = [&](BuildArena* scratch) {
+    const auto epub = book(kProbeCss, {chapter + "</body>"});
+    const size_t before = FsFile::opens;
+    bool failed = true;
+    const BookFonts::Found families = BookFonts::detectFamilies(*epub, scratch, &failed);
+    EXPECT_FALSE(failed);
+    EXPECT_EQ(family("EBGaramond"), CssFontFamily::identity(families.body));
+    return FsFile::opens - before;
+  };
+  const size_t onHeap = opens(nullptr);
+  BuildArena arena(52 * 1024);
+  ASSERT_TRUE(arena.valid());
+  const size_t inRegion = opens(&arena);
+  EXPECT_LE(inRegion + 4, onHeap);  // the rules file opened once, to load them, not once for each of 5 selectors
+  EXPECT_EQ(0u, arena.used());      // all given back
+}
+
 TEST_F(BookFontsTest, TheBodyIsFoundPastTheSixthSpineItem) {
   std::vector<std::string> chapters(7, "<body><p class='block'>Front matter.</p></body>");
   chapters.push_back(prose("indent", 4 * 1024));
