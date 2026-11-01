@@ -32,7 +32,8 @@ enum class RubyRole : uint8_t { None = 0, Leader = 1, Follower = 2 };
 struct Boundary {
   bool continues = false;      // glued to the previous token: no space, and no break
   bool noSpaceBefore = false;  // no space either; with continues=false, a breakable CJK gap
-  uint8_t annotation = 0;      // bits 0-1 RubyRole; bits 2-5 the emphasis mark (TextEmphasis)
+  // Bits 0-1 RubyRole; bits 2-5 the emphasis mark (TextEmphasis); bit 6 the combine request (text-combine-upright).
+  uint8_t annotation = 0;
 };
 
 constexpr bool allowsBreak(const Boundary b) { return allowsBreak(b.continues, b.noSpaceBefore); }
@@ -52,6 +53,21 @@ constexpr uint8_t emphasisOf(const Boundary b) { return static_cast<uint8_t>((b.
 
 constexpr Boundary withEmphasis(Boundary b, const uint8_t mark) {
   b.annotation = static_cast<uint8_t>((b.annotation & ~0x3C) | ((mark & 0x0F) << 2));
+  return b;
+}
+
+// Whether the book asks for the token to be set upright as one block down a column (CSS text-combine-upright). A
+// request only: ParsedText decides on a vertical line whether the token combines.
+constexpr bool combineRequested(const Boundary b) { return (b.annotation & 0x40) != 0; }
+
+constexpr Boundary withCombineRequested(Boundary b, const bool requested) {
+  b.annotation = static_cast<uint8_t>((b.annotation & ~0x40) | (requested ? 0x40 : 0));
+  return b;
+}
+
+// b with what every token of a word carries from it, `word`'s emphasis mark and combine request; b keeps its ruby role.
+constexpr Boundary withWordMarks(Boundary b, const Boundary word) {
+  b.annotation = static_cast<uint8_t>((b.annotation & ~0x7C) | (word.annotation & 0x7C));
   return b;
 }
 

@@ -231,3 +231,83 @@ TEST(VerticalTextBlock, TheCentredMarksBitSurvivesTheCache) {
 
 // Measured on the host before the bit: sizeof(TextBlock) == 88 (the firmware's 32-bit pin is 52).
 TEST(VerticalTextBlock, TheCentredMarksBitDoesNotGrowTheBlock) { EXPECT_EQ(88u, sizeof(TextBlock)); }
+
+namespace {
+TextBlock::Annotation combine(const uint16_t word, const uint16_t width) {
+  TextBlock::Annotation a;
+  a.firstWord = word;
+  a.wordCount = 1;
+  a.width = width;
+  a.kind = Kind::Combine;
+  return a;
+}
+}  // namespace
+
+// Word 1 "13" is combined: one em in the column (10), drawn as one scaled upright block in the reader's frame.
+TEST(VerticalTextBlock, ACombinedWordDrawsAsOneUprightBlock) {
+  GfxRenderer r;
+  turnedPortrait(r);
+  const auto block = line({"日", "13", "本"}, {0, 10, 20}, EpdFontFamily::REGULAR, {combine(1, 10)});
+  EXPECT_EQ(10, block->wordBox(r, 1, kFontId, 50, 100).width);
+  EXPECT_TRUE(block->isCombined(1));
+  EXPECT_FALSE(block->isCombined(0));
+  block->render(r, kFontId, 50, 100);
+  ASSERT_EQ(3u, r.drawCalls.size());
+  EXPECT_EQ("13", r.drawCalls[1].text);
+  EXPECT_EQ(GfxRenderer::Portrait, r.drawCalls[1].frame);
+  EXPECT_EQ(0.5f, r.drawCalls[1].scale);
+}
+
+TEST(VerticalTextBlock, ACombineRecordReservesNoBand) {
+  GfxRenderer r;
+  turnedPortrait(r);
+  const auto block = line({"日", "13"}, {0, 10}, EpdFontFamily::REGULAR, {combine(1, 10)});
+  EXPECT_EQ(0, block->annotationBand(r, kFontId));
+}
+
+TEST(VerticalTextBlock, ARubyLineStillReservesItsBand) {
+  GfxRenderer r;
+  turnedPortrait(r);
+  const auto block = line({"漢", "13"}, {0, 10}, EpdFontFamily::REGULAR, {ruby(0, 1, 0, 10, "かん"), combine(1, 10)});
+  EXPECT_EQ(8, block->annotationBand(r, kFontId));
+}
+
+// Sesame over words 0-2, "13" (word 1) combined, ruby on word 0. Em 10, the mark at half size: advance 5. The pen runs
+// down the column from y = 50: the cells are [50, 60), [60, 70), [70, 80). A mark is centred in its cell, so its pen
+// starts at cell + (10 - 5) / 2 = 52, 62, 72, and the shim's upright draw of a 0.5 run lands 4 above it: y = 48,
+// 58, 68. Word 1 gets ONE mark (y = 58, the middle of its cell), not one per digit. All sit in the ruby's band, x =
+// 371.
+TEST(VerticalTextBlock, ACombinedWordTakesOneCentredEmphasisMark) {
+  GfxRenderer r;
+  turnedPortrait(r);
+  const auto block = line({"日", "13", "本"}, {0, 10, 20}, EpdFontFamily::REGULAR,
+                          {sesame(0, 3), ruby(0, 1, 0, 10, "かん"), combine(1, 10)});
+  EXPECT_EQ(8, block->annotationBand(r, kFontId));
+  block->render(r, kFontId, 50, 100);
+  std::vector<int> markY;
+  for (const auto& call : r.drawCalls) {
+    if (call.text != "﹅") continue;  // U+FE45, the sesame dot
+    EXPECT_EQ(371, call.x);
+    markY.push_back(call.y);
+  }
+  EXPECT_EQ((std::vector<int>{48, 58, 68}), markY);
+}
+
+TEST(VerticalTextBlock, TheCombineRecordSurvivesTheCache) {
+  const auto block = line({"日", "13"}, {0, 10}, EpdFontFamily::REGULAR, {combine(1, 10)});
+  FsFile file = HalFile::forReadWrite();
+  ASSERT_TRUE(block->serialize(file));
+  ASSERT_TRUE(file.seek(0));
+  std::string bytes(file.size(), '\0');
+  file.read(bytes.data(), bytes.size());
+  FsFile again = HalFile::forReadWrite();
+  again.write(bytes.data(), bytes.size());
+  ASSERT_TRUE(again.seek(0));
+  const auto restored = TextBlock::deserialize(again);
+  ASSERT_NE(nullptr, restored);
+  EXPECT_TRUE(restored->isCombined(1));
+  EXPECT_FALSE(restored->isCombined(0));
+  GfxRenderer r;
+  turnedPortrait(r);
+  EXPECT_EQ(0, restored->annotationBand(r, kFontId));
+}

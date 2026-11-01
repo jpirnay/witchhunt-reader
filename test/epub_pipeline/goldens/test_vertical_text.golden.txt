@@ -1375,7 +1375,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0
    W x=404 s=0 z=100 t=れ
    W x=421 s=0 z=100 t=ら
    W x=438 s=0 z=100 t=れ
- PAGE 3 elements=5 footnotes=0
+ PAGE 3 elements=7 footnotes=1
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=27
    W x=6 s=0 z=100 t=て
    W x=22 s=0 z=100 t=い
@@ -1490,6 +1490,28 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0
    W x=310 s=0 z=100 t=、
    W x=318 s=0 z=100 t=）
    W x=326 s=0 z=100 t=。
+  LINE y=120 x=0 align=2 mult=1.000 hfid=0 words=3
+   W x=205 s=5 z=100 t=13
+   W x=221 s=1 z=100 t=　
+   W x=238 s=1 z=100 t=章
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=16
+   W x=22 s=0 z=100 t=第
+   W x=42 s=0 z=100 t=12
+   W x=59 s=0 z=100 t=夜
+   W x=75 s=0 z=100 t=、
+   W x=91 s=0 z=100 t=123
+   W x=116 s=0 z=100 t=人
+   W x=132 s=0 z=100 t=の
+   W x=148 s=0 z=100 t=旅
+   W x=164 s=0 z=100 t=人
+   W x=180 s=0 z=100 t=が
+   W x=200 s=0 z=100 t=45
+   W x=223 s=0 z=100 t=日
+   W x=239 s=0 z=100 t=歩
+   W x=255 s=0 z=100 t=い
+   W x=271 s=0 z=100 t=た
+   W x=287 s=0 z=100 t=。
+  FN n=13 href=ch2.xhtml
 SPINE 1 href=OEBPS/ch2.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=3 footnotes=0
   LINE y=0 x=0 align=2 mult=1.000 hfid=0 words=2
