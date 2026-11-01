@@ -142,7 +142,9 @@ struct BookFontsTest : testing::Test {
 
   // The body family's identity, as Stage A compared it.
   static uint32_t detect(const Epub& epub) { return CssFontFamily::identity(found(epub).body); }
-  static BookFonts::Found found(const Epub& epub, const std::string& records = {}) {
+  // The families detectFamilies() finds, with the book's own face records unless others are given, as prepare() has.
+  static BookFonts::Found found(const Epub& epub, std::string records = {}) {
+    if (records.empty()) CssParser::loadFontFaces(epub.getCachePath(), records);
     bool failed = true;
     const BookFonts::Found found = BookFonts::detectFamilies(epub, nullptr, &failed, records);
     EXPECT_FALSE(failed);
@@ -342,6 +344,17 @@ TEST_F(BookFontsTest, RulesThatDoNotFitTheRegionAreLookedUpOnTheCard) {
   EXPECT_FALSE(failed);
   EXPECT_EQ(family("EBGaramond"), CssFontFamily::identity(families.body));
   EXPECT_EQ(0u, arena.used());
+}
+
+TEST_F(BookFontsTest, ABookWithoutFacesIsProbedLightly) {
+  // No @font-face: no accent can be copied, so the probe only needs the body's generic family (Accents maps a generic
+  // serif or sans-serif onto a built-in face), which a few heads tell as well as the whole spine.
+  std::vector<std::string> chapters(40, prose("body", 20 * 1024));
+  const auto epub = book("p.body { font-family: Georgia, serif }\nh1 { font-family: sans-serif }\n", chapters);
+  const BookFonts::Found families = found(*epub);
+  EXPECT_EQ(CssFontFamily::kSerif, families.body & CssFontFamily::kGenericMask);
+  EXPECT_EQ(8, families.itemsRead);
+  EXPECT_LE(families.bytesRead, 32u * 1024);
 }
 
 TEST_F(BookFontsTest, TheBodyIsFoundPastTheSixthSpineItem) {

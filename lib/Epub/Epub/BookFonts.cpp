@@ -754,9 +754,12 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
   Found found;
   // From the first item, not the text reference: a guide that points at the cover would hide the whole book.
   const int count = epub.getSpineItemsCount();
-  const int sampled = std::min(count, kProbeMaxItems);
-  size_t cap =
-      std::clamp(kProbeBudgetBytes / static_cast<size_t>(std::max(sampled, 1)), kProbeMinItemBytes, kProbeMaxItemBytes);
+  // A book without faces only needs its body's generic family: a lighter sample (kProbeFacelessItems).
+  const bool faces = !records.empty();
+  const int maxItems = faces ? kProbeMaxItems : kProbeFacelessItems;
+  const size_t budget = faces ? kProbeBudgetBytes : kProbeFacelessBudgetBytes;
+  const int sampled = std::min(count, maxItems);
+  size_t cap = std::clamp(budget / static_cast<size_t>(std::max(sampled, 1)), kProbeMinItemBytes, kProbeMaxItemBytes);
   // And the book's rules in the lent region, as a section build has them: what the memo misses reads no card. Those
   // reads, not the bytes, were the probe's seconds on an X3. In a block of their own above the parser state's and below
   // every read's (BuildArena is LIFO), given back first. Only while each read still fits beside them: a read that left
@@ -779,7 +782,7 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
     }
   }
   for (int k = 0; k < sampled; ++k) {
-    const int i = count <= kProbeMaxItems ? k : static_cast<int>(static_cast<int64_t>(k) * count / kProbeMaxItems);
+    const int i = count <= maxItems ? k : static_cast<int>(static_cast<int64_t>(k) * count / maxItems);
     const size_t itemBytes = epub.getSpineItem(i).zipUncompressedSize;  // 0: not known
     // One SAX pass over the item's head, the parser state in `scratch` when there is room. A malformed document
     // reports what it parsed and counts as read.

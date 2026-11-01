@@ -49,6 +49,11 @@ constexpr size_t kProbeBudgetBytes = 160 * 1024;
 constexpr int kProbeMaxItems = 64;
 constexpr size_t kProbeMinItemBytes = 2 * 1024;
 constexpr size_t kProbeMaxItemBytes = 64 * 1024;
+/// A book without @font-face rules can have no accent copied: the probe only looks for its body's generic family,
+/// which Accents maps onto a built-in face, in this many items' heads and bytes. Most of a first open's probe is the
+/// items it opens (~25 ms each on an X3), so such a book pays about what the old six-chapter probe did.
+constexpr int kProbeFacelessItems = 8;
+constexpr size_t kProbeFacelessBudgetBytes = 32 * 1024;
 /// A block (p, div, li, dd, blockquote, pre, h1-h6) whose text is in one family counts as this much text at least: a
 /// heading at every chapter's start is not out-ranked by a few lines of inline text.
 constexpr uint32_t kBlockMinBytes = 64;
