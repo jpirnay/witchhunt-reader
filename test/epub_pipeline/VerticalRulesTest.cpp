@@ -146,8 +146,9 @@ TEST_P(VerticalRules, UprightCharactersAreDrawnInTheReadersFrameAndRunsSideways)
           if (draw.frame == GfxRenderer::Portrait) {
             const bool isCombined =
                 std::any_of(combined.begin(), combined.end(), [&draw](const turnedframe::Rect& cell) {
-                  return draw.x >= cell.x && draw.x < cell.x + cell.width && draw.y >= cell.y - kEm &&
-                         draw.y < cell.y + cell.height + kEm;
+                  // The draw's top is its baseline less the run's ascender; the baseline lies in [cell.y, cell.y + em).
+                  return draw.x >= cell.x && draw.x < cell.x + cell.width &&
+                         draw.y >= cell.y - r.getFontAscenderSizeScaled(1, draw.scale) && draw.y < cell.y + cell.height;
                 });
             bool pieceIsUpright = false;
             if (!isCombined) {
@@ -338,11 +339,16 @@ TEST_P(VerticalRules, ACombinedWordIsOneUprightDrawInItsCell) {
               ++sameText;
               if (draw.frame != GfxRenderer::Portrait) continue;
               if (draw.x < cell.x || draw.x >= cell.x + cell.width) continue;
-              if (draw.y < cell.y - kEm || draw.y >= cell.y + cell.height + kEm) continue;
+              // The run is shrunk below the word's scale when wider than the em: its own ascender and width count.
+              const int ascender = r.getFontAscenderSizeScaled(box.fontId, draw.scale);
+              if (draw.y < cell.y - ascender || draw.y >= cell.y + cell.height) continue;
               ++inCell;
-              const int baseline = draw.y + r.getFontAscenderSizeScaled(box.fontId, box.scale);
+              const int baseline = draw.y + ascender;
               EXPECT_GE(baseline, cell.y) << where;
               EXPECT_LE(baseline, cell.y + cell.height) << where;
+              const int centre =
+                  draw.x + r.getTextWidthScaled(box.fontId, draw.text.c_str(), box.style, draw.scale) / 2;
+              EXPECT_NEAR(cell.x + cell.width / 2, centre, 1) << "centred on the column axis: " << where;
             }
             EXPECT_EQ(1, inCell) << "one draw in the reader's frame at the word's box: " << where << " (" << sameText
                                  << " draws of that text)";
