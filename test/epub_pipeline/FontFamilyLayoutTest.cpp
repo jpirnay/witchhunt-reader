@@ -44,6 +44,7 @@ struct Line {
   float mult;
   std::vector<TextBlock::WordFont> wordFonts;  // per word; a fontId of 0: the block's font
   std::vector<bool> continues;                 // per word: glued to the word before, no space between
+  std::vector<int16_t> xpos;                   // per word: where it starts on the line
 };
 
 struct FontFamilyLayoutFixture : testing::Test {
@@ -92,6 +93,7 @@ struct FontFamilyLayoutFixture : testing::Test {
         const TextBlock::WordFont* font = block.wordFont(w);
         line.wordFonts.push_back(font ? *font : TextBlock::WordFont{});
         line.continues.push_back(block.wordContinues(w));
+        line.xpos.push_back(block.wordXpos(w));
       }
       lines.push_back(line);
     }
@@ -338,4 +340,26 @@ TEST_F(FontFamilyLayoutFixture, ALetterInAFamilyTheBookLacksStaysInItsWord) {
   for (const TextBlock::WordFont& font : word->wordFonts) EXPECT_EQ(0, font.fontId);
   EXPECT_TRUE(word->continues[1]);
   EXPECT_TRUE(word->continues[2]);
+}
+
+TEST_F(FontFamilyLayoutFixture, TheSpaceAfterAnAccentLetterIsTheBlocksOwn) {
+  // Misery: "Ia<span class='fontj'>n</span> Carmichael". The space is in the text after the span, so it is the
+  // paragraph's space at the paragraph's size, not the hand-written letter's: a script face's wide space, or its size,
+  // read as a double gap after every such word.
+  const BlockFontFamilies families = accents();
+  // Where "Carmichael" starts after the letter, less where the letter starts and its width (taken from the letter glued
+  // to the next word).
+  const auto gapAfter = [&](const char* letterStyle) {
+    const std::string letter = std::string("Ia<span style='") + letterStyle + "'>n</span>";
+    const auto spaced = layout("<p style='text-align: left'>" + letter + " Carmichael</p>", &families);
+    const auto glued = layout("<p style='text-align: left'>" + letter + "Carmichael</p>", &families);
+    EXPECT_EQ(1u, spaced.size());
+    EXPECT_EQ(1u, glued.size());
+    if (spaced.empty() || glued.empty() || spaced[0].xpos.size() != 3 || glued[0].xpos.size() != 3) return -1;
+    const int width = glued[0].xpos[2] - glued[0].xpos[1];
+    return spaced[0].xpos[2] - spaced[0].xpos[1] - width;
+  };
+  const int normal = gapAfter("font-family: Display");
+  ASSERT_GT(normal, 0);
+  EXPECT_EQ(normal, gapAfter("font-family: Display; font-size: 2em"));
 }
