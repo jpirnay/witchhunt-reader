@@ -126,19 +126,29 @@ TEST_P(VerticalRules, UprightCharactersAreDrawnInTheReadersFrameAndRunsSideways)
         page.render(r, 1, 10, 20, /*forceLoadLargeImages=*/true);
         r.textDraws = nullptr;
         EXPECT_EQ(GfxRenderer::Portrait, r.getOrientation()) << "spine " << spine;
-        // A combined word (tate-chu-yoko) is the one upright draw that holds several characters, digits among them.
-        std::vector<std::string> combined;
+        // A combined word (tate-chu-yoko) is the one upright draw that holds several characters, digits among them:
+        // only a draw at a combined word's box, in the reader's frame, is exempt (values copied out of the page).
+        std::vector<turnedframe::Rect> combined;
+        const turnedframe::Offsets origin =
+            turnedframe::contentOffsets(kScreenWidth, 10, 20, static_cast<int>(page.verticalBlockExtent));
         for (const auto& element : page.elements) {
           if (element->getTag() != TAG_PageLine) continue;
-          const TextBlock& block = *static_cast<const PageLine&>(*element).getBlock();
+          const auto& line = static_cast<const PageLine&>(*element);
+          const TextBlock& block = *line.getBlock();
           for (uint16_t i = 0; i < block.wordCount(); ++i) {
-            if (block.isCombined(i)) combined.emplace_back(block.wordText(i));
+            if (!block.isCombined(i)) continue;
+            const TextBlock::WordBox box = block.wordBox(r, i, 1, line.xPos + origin.x, line.yPos + origin.y);
+            combined.push_back(turnedframe::toReader(kScreenWidth, {box.x, box.y, box.width, box.height}));
           }
         }
         for (const GfxRenderer::TextDraw& draw : draws) {
           ASSERT_FALSE(draw.text.empty());
           if (draw.frame == GfxRenderer::Portrait) {
-            const bool isCombined = std::find(combined.begin(), combined.end(), draw.text) != combined.end();
+            const bool isCombined =
+                std::any_of(combined.begin(), combined.end(), [&draw](const turnedframe::Rect& cell) {
+                  return draw.x >= cell.x && draw.x < cell.x + cell.width && draw.y >= cell.y - kEm &&
+                         draw.y < cell.y + cell.height + kEm;
+                });
             bool pieceIsUpright = false;
             if (!isCombined) {
               EXPECT_EQ(draw.text.size(), nextColumnPiece(draw.text.c_str(), pieceIsUpright))

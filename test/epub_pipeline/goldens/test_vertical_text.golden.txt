@@ -1490,27 +1490,10 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0
    W x=310 s=0 z=100 t=、
    W x=318 s=0 z=100 t=）
    W x=326 s=0 z=100 t=。
-  LINE y=120 x=0 align=2 mult=1.000 hfid=0 words=20
-   W x=36 s=5 z=100 t=13
-   W x=58 s=3 z=100 t=(第
-   W x=91 s=3 z=100 t=12
-   W x=110 s=3 z=100 t=夜
-   W x=127 s=3 z=100 t=、
-   W x=144 s=3 z=100 t=123
-   W x=172 s=3 z=100 t=人
-   W x=189 s=3 z=100 t=の
-   W x=206 s=3 z=100 t=旅
-   W x=223 s=3 z=100 t=人
-   W x=240 s=3 z=100 t=が
-   W x=261 s=3 z=100 t=45
-   W x=286 s=3 z=100 t=日
-   W x=303 s=3 z=100 t=歩
-   W x=320 s=3 z=100 t=い
-   W x=337 s=3 z=100 t=た
-   W x=354 s=3 z=100 t=。
-   W x=371 s=3 z=100 t=)
-   W x=390 s=1 z=100 t=　
-   W x=407 s=1 z=100 t=章
+  LINE y=120 x=0 align=2 mult=1.000 hfid=0 words=3
+   W x=205 s=5 z=100 t=13
+   W x=221 s=1 z=100 t=　
+   W x=238 s=1 z=100 t=章
   LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=16
    W x=22 s=0 z=100 t=第
    W x=42 s=0 z=100 t=12
@@ -1528,7 +1511,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0
    W x=255 s=0 z=100 t=い
    W x=271 s=0 z=100 t=た
    W x=287 s=0 z=100 t=。
-  FN n=13 href=#c13
+  FN n=13 href=ch2.xhtml
 SPINE 1 href=OEBPS/ch2.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=3 footnotes=0
   LINE y=0 x=0 align=2 mult=1.000 hfid=0 words=2
