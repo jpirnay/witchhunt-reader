@@ -59,8 +59,9 @@ constexpr size_t kProbeFacelessBudgetBytes = 32 * 1024;
 constexpr uint32_t kBlockMinBytes = 64;
 /// An accent family with less text than kMinFamilyBytes and than kMinFamilyPerMille of the book's (as the probe
 /// estimates them) takes no slot, although one is free: each family loaded costs the reader 2-3 KB of heap. Both, so a
-/// short book keeps its small families.
-constexpr uint32_t kMinFamilyBytes = 256;
+/// short book keeps its small families. A publisher's page of a few short lines (four blocks: 256 bytes with their
+/// minimums, A Million Junes' "next reads" page) is negligible in a novel; eight headings are not.
+constexpr uint32_t kMinFamilyBytes = 512;
 constexpr uint32_t kMinFamilyPerMille = 1;
 /// A family's face for a style is copied when that style has kMinStyleBytes of its text, or kMinStylePercent of it;
 /// the engine draws the others from the faces copied (TtfFont::chooseSynthetic), as the store holds eight styles in

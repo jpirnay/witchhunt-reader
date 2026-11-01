@@ -128,8 +128,8 @@ most of the text is set in, now over the whole spine.
 - A family's score is the sum of its four styles.
 - Candidates: as today, every family but the body's, the reader's (0) and those without a drawable face
   (`pickFaces`); generics are not candidates.
-- **Negligible:** a candidate whose score is below `kMinFamilyBytes` (256) **and** below `kMinFamilyShare` (0.1 %) of
-  the book's estimated text gets no slot. Both, so a short book keeps its small families.
+- **Negligible:** a candidate whose score is below `kMinFamilyBytes` (256; as built 512, section 8) **and** below
+  `kMinFamilyShare` (0.1 %) of the book's estimated text gets no slot. Both, so a short book keeps its small families.
 - The rest in score order, highest first, up to `kMaxAccents`; a family whose faces are all refused gives its place to
   the next, as today. The order is the rank `fonts.bin` stores, and `TtfFontSet` drops families from the end.
 
@@ -231,6 +231,11 @@ Branch `feat/book-fonts-spine-probe`. Sections 4.1-4.6 are built as written, wit
 - **A book without `@font-face` rules is probed lightly**: 8 items spread over the spine, 32 KB at most. No accent
   can be copied; only the body's generic family is wanted. The Anarchy, King's Avatar and Small Gods keep the same
   body on the host.
+- **The family floor is 512 bytes** (was 256). A Million Junes (Emily Henry) sets the publisher's "next reads" page,
+  four short lines on its last spine item, in Shift Light, and nothing else: 256 bytes with the block minimums, which
+  took a slot. At 512 it is left out; eight headings still clear it. Beach Read (Fineprint Pro Light, its chapter
+  numbers, ~11.5 KB), People We Meet on Vacation (Gill Sans Nova, Playland, Helvetica Now Text regular and bold:
+  4 faces of the 11 it declares) and Misery keep their accents.
 - **The read stops at the cap itself** (`EntryReader::open(stat, cap)`): the parser reports no progress inside a long
   text run or a `data:` attribute, so a head could be inflated whole (the final review's finding).
 - **The space after a word in an accent family is the block's** (`ParsedText::spaceSource`). Misery's hand-filled

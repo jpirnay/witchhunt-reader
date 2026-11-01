@@ -885,6 +885,19 @@ TEST_F(BookFontsTest, ANegligibleFamilyTakesNoSlot) {
   EXPECT_EQ(0u, ranked(*epub).accents[0]);
 }
 
+TEST_F(BookFontsTest, AFamilyOnOneShortPageOfALongBookTakesNoSlot) {
+  // A Million Junes: the publisher's "next reads" page, four short blocks (256 bytes with their minimums), is the only
+  // text in its family.
+  std::vector<std::string> chapters(8, prose("body", 50 * 1024));  // ~280 KB of text
+  chapters.push_back(
+      "<body><p class='ad'>What's next on your reading list?</p><p class='ad'>Discover your next "
+      "great read!</p><p class='ad'>Get personalized book picks.</p><p class='ad'>Sign up now.</p>"
+      "</body>");
+  const auto epub = book(faceRules({"Body", "Ad"}) + ".body { font-family: Body }\n.ad { font-family: Ad }\n", chapters,
+                         faceFiles({"Body", "Ad"}));
+  EXPECT_EQ(0u, ranked(*epub).accents[0]);
+}
+
 TEST_F(BookFontsTest, ASmallFamilyInAShortBookKeepsItsSlot) {
   const auto epub =
       book(faceRules({"Body", "Rare"}) + ".body { font-family: Body }\n.rare { font-family: Rare }\n",
