@@ -1,7 +1,8 @@
 # Book fonts: a probe across the whole spine, ranked by text, with fewer faces
 
-Status: design, 2026-10-31. Builds on the TTF spec's Stage B (`2026-10-13-ttf-fonts-design.md`, 11.1) and touches
-`BookFonts` only: no glyph store, engine, layout or section format change.
+Status: shipped 2026-11-01; section 8 is what was built and measured. Builds on the TTF spec's Stage B
+(`docs/superpowers/specs/2026-10-13-ttf-fonts-design.md`, 11.1) and touches `BookFonts`, and, for the space after a
+word in an accent family, `ParsedText::spaceSource`: no glyph store, engine or section format change.
 
 ## 1. Why
 
@@ -210,3 +211,40 @@ A book with a large spine for the probe's time.
 - Negligible families take no slot even when one is free (heap over fidelity, as asked).
 - Bold italic only beside both bold and italic.
 - An unreadable item is skipped; only nothing read, OOM or low-heap CSS skips fail the examination (4.1).
+
+## 8. As built (2026-11-01)
+
+Branch `feat/book-fonts-spine-probe`. Sections 4.1-4.6 are built as written, with these changes found on the devices:
+
+- **Budget 160 KB, 2 KB minimum per item** (was 512 KB and 8 KB). The probe's time was not its bytes: on an X3 the
+  first build read 270 KB in ~2.4 s and a 99 KB read took ~3.0 s. Four real books (The Anarchy, Misery, King's
+  Avatar, Small Gods) found the same body and accents at every budget from 96 KB to 512 KB on the host.
+- **CSS resolved as a section build resolves it.** The cost was the CSS rule lookups on the card. The probe now
+  memoises the three properties it needs per tag, class and id (a 64-slot direct-mapped table; The Anarchy made 2,749
+  resolves for 78 distinct element kinds), runs the resolver lean (no hot rule cache, 24 KB floor; the hot cache
+  grew on the heap and pushed an X3 under the 40 KB floor, which failed every examination there), and loads the book's
+  rules into the lent region before the first read (BuildArena is LIFO: above the parser state, below every read's
+  block, dropped before the state's block goes back).
+- **The read stops at the cap itself** (`EntryReader::open(stat, cap)`): the parser reports no progress inside a long
+  text run or a `data:` attribute, so a head could be inflated whole (the final review's finding).
+- **The space after a word in an accent family is the block's** (`ParsedText::spaceSource`). Misery's hand-filled
+  letters end many words ("Ia‹n› Carmichael"); the space took JamesHandscript's wide space at 0.9 em and read as a
+  double gap. Not visible before: those letters were never in their own face.
+
+Measured on an X3 (Publisher Fonts Accents, Bookerly 14 pt, the first-open window between "Lent secondary framebuffer
+for first-open indexing" and "Returned ..."), master dd986fffc against the branch:
+
+| Book | master | branch | probe |
+|------|--------|--------|-------|
+| The Anarchy (40 items, no `@font-face`) | 1,824 / 1,823 ms | 2,473 / 2,461 ms (+0.64 s) | 1,048 ms, 98,845 B |
+| Misery (20 items, 8 families) | 3,918 ms | 3,474 ms (-0.44 s) | 486 ms, 64,761 B |
+
+The X4 was measured before the speed-ups only (master 1,047 / 1,031 ms, the first branch build 2,774 / 2,797 ms; its
+probe ~140 KB/s); it was not available afterwards. The remaining probe cost is ~25 ms a spine item (opening the entry,
+setting up the inflate), not bytes.
+
+Misery on the X3: `Probe: 20 of 20 spine items, 64761 bytes, 486 ms`, `Left out TradeBio: 192 bytes of text (est.)`,
+body Garamond3LTStd (styles 0x7), accents AmericanTypewriterStd (0x1), JamesHandscript (0x1),
+ITCGaramondStd-BkNarrow (0x5: regular and italic); master chose GoudyReg and ITCGaramondStd-BkCond. The typed
+manuscript (part02a) draws in AmericanTypewriterStd with the hand-filled n's in JamesHandscript inside their words;
+~48 KB free in the book.

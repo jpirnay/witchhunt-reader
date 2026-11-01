@@ -11,8 +11,8 @@ counts to estimate the whole book, and tallies text per (family, style); `examin
 
 **Tech Stack:** C++17 (ESP32-C3 firmware, PlatformIO), host gtest suite (CMake + Ninja, MSYS2 UCRT64 gcc).
 
-**Spec:** `docs/superpowers/specs/2026-10-31-book-fonts-spine-probe-design.md` (read it first; section numbers below
-are its).
+**Spec:** `docs/design/book-fonts-probe.md` (read it first; section numbers below are its; section 8 records what was
+built, which departs from the budget and constants below after the device runs).
 
 ## Global Constraints
 
