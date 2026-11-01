@@ -1431,9 +1431,9 @@ void ParsedText::applyBionicReadingTransform() {
 
     // The first span keeps the word's own boundary; every span after it is glued to the one before.
     // A span of a ruby base after the first belongs to the base's group.
-    // Every span keeps the word's emphasis mark.
+    // Every span keeps the word's emphasis mark and combine request.
     TokenBoundary::Boundary kGlued =
-        TokenBoundary::withEmphasis(TokenBoundary::Boundary{true, false}, TokenBoundary::emphasisOf(originalBoundary));
+        TokenBoundary::withWordMarks(TokenBoundary::Boundary{true, false}, originalBoundary);
     if (TokenBoundary::rubyRole(originalBoundary) != TokenBoundary::RubyRole::None) {
       kGlued = TokenBoundary::withRubyRole(kGlued, TokenBoundary::RubyRole::Follower);
     }
