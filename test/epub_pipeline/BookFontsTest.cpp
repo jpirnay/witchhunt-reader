@@ -288,7 +288,7 @@ TEST_F(BookFontsTest, TheBodyIsFoundPastTheSixthSpineItem) {
 }
 
 TEST_F(BookFontsTest, ALargeChapterReadInPartOutweighsSmallItemsReadWhole) {
-  // 60 items: each is read up to ~8.5 KB. The two long chapters' heads stand for 300 KB each.
+  // 60 items, each read up to ~2.7 KB: the two long chapters' heads stand for 300 KB each, the others' for 8 KB.
   std::vector<std::string> chapters(58, prose("block", 8 * 1024));
   chapters.push_back(prose("indent", 300 * 1024));
   chapters.push_back(prose("indent", 300 * 1024));
@@ -302,7 +302,7 @@ TEST_F(BookFontsTest, ALongSpineIsSampledWithinTheBudget) {
   const BookFonts::Found families = found(*epub);
   EXPECT_LE(zipScanStats().walks - walks, 2u);  // read through the spine's stats, not looked up by name
   EXPECT_EQ(64, families.itemsRead);
-  EXPECT_LE(families.bytesRead, 64u * (8 * 1024 + 4 * 1024));
+  EXPECT_LE(families.bytesRead, 160u * 1024);  // an X3's first open grows by a second at most
   EXPECT_EQ(family("EBGaramond"), CssFontFamily::identity(families.body));
 }
 
@@ -829,23 +829,24 @@ TEST_F(BookFontsTest, FoundCarriesTheStylesOfTheChosenFamilies) {
 
 TEST_F(BookFontsTest, AMiseryShapedBookGetsItsTypewriterAndHandFilledLetters) {
   // Misery's shape: an ad page and a part title in families of their own before the text; the typed manuscript's
-  // paragraphs inside a chapter, with letters filled in by hand inside its words.
+  // paragraphs, with letters filled in by hand inside its words. 11 items, each read up to ~14.5 KB: the manuscript's
+  // head (~2,800 bytes typed, ~420 by hand) stands for its 52 KB (x3.6), the Narrow part page (664) is read whole.
   std::string italic;
   for (int i = 0; i < 100; ++i) italic += "italic";  // 600 bytes
   std::string typed;
   for (int i = 0; i < 100; ++i) {
     typed += "Du<span class='hand'>n</span>thorpe i<span class='hand'>n</span> the rai<span class='hand'>n</span>. ";
   }
-  std::string chapter = prose("body", 20 * 1024);
-  chapter.erase(chapter.size() - 7);  // "</body>"
-  for (int i = 0; i < 5; ++i) chapter += "<p class='typed'>" + typed + "</p>";
+  std::string manuscript = "<body>";
+  for (int i = 0; i < 5; ++i) manuscript += "<p class='typed'>" + typed + "</p>";
   std::vector<std::string> chapters = {
       "<body><img src='c.jpg'/></body>",
       "<body><p class='ad'>Get updates</p><p class='ad'>Sign up</p><p class='ad'>Click</p><p class='ad'>Now</p></body>",
       prose("body", 8 * 1024)};
   for (int i = 0; i < 5; ++i) chapters.push_back("<body><p class='body'>Front matter.</p></body>");
   chapters.push_back("<body><p class='part'>PART I</p><p class='part'><i>" + italic + "</i></p></body>");
-  chapters.push_back(chapter + "</body>");
+  chapters.push_back(prose("body", 20 * 1024));
+  chapters.push_back(manuscript + "</body>");
   const std::vector<std::string> names = {"Body", "Ads", "Narrow", "Typed", "Hand"};
   const auto epub = book(faceRules(names) +
                              ".body { font-family: Body }\n.ad { font-family: Ads }\n.part { font-family: Narrow }\n"

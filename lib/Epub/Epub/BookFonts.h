@@ -42,10 +42,12 @@ constexpr size_t kMaxFaceBytes = 24 * 1024 * 1024;
 /// prepare() reads the head of every spine item, from the first, or of kProbeMaxItems spread evenly over a longer
 /// spine: about kProbeBudgetBytes in all, each head kProbeBudgetBytes over the items read, between
 /// kProbeMinItemBytes and kProbeMaxItemBytes. What a head holds stands for its whole item, and the items read for the
-/// spine: a book's front matter, the first few items, is no sample of its text.
-constexpr size_t kProbeBudgetBytes = 512 * 1024;
+/// spine: a book's front matter, the first few items, is no sample of its text. The budget is the first open's time:
+/// an X3 probes ~110 KB a second, and an ordinary novel's open may grow by a second at most. Four real books (Misery
+/// among them) found the same families with 96 KB as with 512 KB.
+constexpr size_t kProbeBudgetBytes = 160 * 1024;
 constexpr int kProbeMaxItems = 64;
-constexpr size_t kProbeMinItemBytes = 8 * 1024;
+constexpr size_t kProbeMinItemBytes = 2 * 1024;
 constexpr size_t kProbeMaxItemBytes = 64 * 1024;
 /// A block (p, div, li, dd, blockquote, pre, h1-h6) whose text is in one family counts as this much text at least: a
 /// heading at every chapter's start is not out-ranked by a few lines of inline text.
