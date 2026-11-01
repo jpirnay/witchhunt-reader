@@ -231,3 +231,62 @@ TEST(VerticalTextBlock, TheCentredMarksBitSurvivesTheCache) {
 
 // Measured on the host before the bit: sizeof(TextBlock) == 88 (the firmware's 32-bit pin is 52).
 TEST(VerticalTextBlock, TheCentredMarksBitDoesNotGrowTheBlock) { EXPECT_EQ(88u, sizeof(TextBlock)); }
+
+namespace {
+TextBlock::Annotation combine(const uint16_t word, const uint16_t width) {
+  TextBlock::Annotation a;
+  a.firstWord = word;
+  a.wordCount = 1;
+  a.width = width;
+  a.kind = Kind::Combine;
+  return a;
+}
+}  // namespace
+
+// Word 1 "13" is combined: one em in the column (10), drawn as one scaled upright block in the reader's frame.
+TEST(VerticalTextBlock, ACombinedWordDrawsAsOneUprightBlock) {
+  GfxRenderer r;
+  turnedPortrait(r);
+  const auto block = line({"日", "13", "本"}, {0, 10, 20}, EpdFontFamily::REGULAR, {combine(1, 10)});
+  EXPECT_EQ(10, block->wordBox(r, 1, kFontId, 50, 100).width);
+  EXPECT_TRUE(block->isCombined(1));
+  EXPECT_FALSE(block->isCombined(0));
+  block->render(r, kFontId, 50, 100);
+  ASSERT_EQ(3u, r.drawCalls.size());
+  EXPECT_EQ("13", r.drawCalls[1].text);
+  EXPECT_EQ(GfxRenderer::Portrait, r.drawCalls[1].frame);
+  EXPECT_EQ(0.5f, r.drawCalls[1].scale);
+}
+
+TEST(VerticalTextBlock, ACombineRecordReservesNoBand) {
+  GfxRenderer r;
+  turnedPortrait(r);
+  const auto block = line({"日", "13"}, {0, 10}, EpdFontFamily::REGULAR, {combine(1, 10)});
+  EXPECT_EQ(0, block->annotationBand(r, kFontId));
+}
+
+TEST(VerticalTextBlock, ARubyLineStillReservesItsBand) {
+  GfxRenderer r;
+  turnedPortrait(r);
+  const auto block = line({"漢", "13"}, {0, 10}, EpdFontFamily::REGULAR, {combine(1, 10), ruby(0, 1, 0, 10, "かん")});
+  EXPECT_EQ(8, block->annotationBand(r, kFontId));
+}
+
+TEST(VerticalTextBlock, TheCombineRecordSurvivesTheCache) {
+  const auto block = line({"日", "13"}, {0, 10}, EpdFontFamily::REGULAR, {combine(1, 10)});
+  FsFile file = HalFile::forReadWrite();
+  ASSERT_TRUE(block->serialize(file));
+  ASSERT_TRUE(file.seek(0));
+  std::string bytes(file.size(), '\0');
+  file.read(bytes.data(), bytes.size());
+  FsFile again = HalFile::forReadWrite();
+  again.write(bytes.data(), bytes.size());
+  ASSERT_TRUE(again.seek(0));
+  const auto restored = TextBlock::deserialize(again);
+  ASSERT_NE(nullptr, restored);
+  EXPECT_TRUE(restored->isCombined(1));
+  EXPECT_FALSE(restored->isCombined(0));
+  GfxRenderer r;
+  turnedPortrait(r);
+  EXPECT_EQ(0, restored->annotationBand(r, kFontId));
+}

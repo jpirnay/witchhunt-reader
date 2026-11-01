@@ -42,6 +42,20 @@ bool anyBandRecord(const uint8_t* record, const uint16_t count) {
   return false;
 }
 
+// The word the next Combine record at or after record index `from` names (`from` is left past it); UINT16_MAX when
+// none is left. Records are in word order, so one walk serves a whole line.
+uint16_t nextCombinedWord(const uint8_t* records, const uint16_t count, uint16_t& from) {
+  for (; from < count; from++) {
+    const uint8_t* record = records + from * kAnnotationRecordBytes;
+    if (record[8] != static_cast<uint8_t>(TextBlock::AnnotationKind::Combine)) continue;
+    uint16_t firstWord = 0;
+    memcpy(&firstWord, record, 2);
+    from++;
+    return firstWord;
+  }
+  return UINT16_MAX;
+}
+
 uint8_t packStyle(const EpdFontFamily::Style style, const bool continues) {
   return static_cast<uint8_t>((static_cast<uint8_t>(style) & ~TextBlock::WORD_CONTINUES_BIT) |
                               (continues ? TextBlock::WORD_CONTINUES_BIT : 0));
@@ -344,6 +358,7 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
       record += kAnnotationRecordBytes;
     }
     annotationBytes_ = static_cast<uint16_t>(annotationBytes);
+    annotationBand_ = anyBandRecord(base + o.annotations + kAnnotationHeaderBytes, n);
   }
   bindArenaPointers();
 }
@@ -386,6 +401,18 @@ TextBlock::Annotation TextBlock::annotation(const uint16_t i) const {
   return a;
 }
 
+bool TextBlock::isCombined(const uint16_t wordIdx) const {
+  if (annotationBytes_ == 0) return false;
+  const uint8_t* records = annotationRegion() + kAnnotationHeaderBytes;
+  const uint16_t count = annotationCount();
+  uint16_t from = 0;
+  for (uint16_t word = nextCombinedWord(records, count, from); word != UINT16_MAX;
+       word = nextCombinedWord(records, count, from)) {
+    if (word == wordIdx) return true;
+  }
+  return false;
+}
+
 bool TextBlock::annotationsValid() const {
   if (annotationBytes_ < kAnnotationHeaderBytes + kAnnotationRecordBytes) return false;
   const uint16_t count = annotationCount();
@@ -415,7 +442,7 @@ int TextBlock::annotationBandFor(const GfxRenderer& renderer, const int effFontI
 }
 
 int TextBlock::annotationBand(const GfxRenderer& renderer, const int fontId) const {
-  if (annotationBytes_ == 0 || !anyBandRecord(annotationRegion() + kAnnotationHeaderBytes, annotationCount())) return 0;
+  if (!annotationBand_) return 0;
   const int effFontId = renderStyle.headingFontId != 0 ? renderStyle.headingFontId : fontId;
   return annotationBandFor(renderer, effFontId, renderStyle.fontSizeMultiplier, maxSizePct());
 }
@@ -474,9 +501,11 @@ TextBlock::WordBox TextBlock::wordBox(const GfxRenderer& renderer, const uint16_
   // Scaled measurement, not getTextAdvanceX: a book with publisher font sizes
   // gives words a per-word scale, and an unscaled width drifts wider or
   // narrower than the glyphs actually drawn.
-  box.width = static_cast<int16_t>(vertical_         ? verticalTextAdvance(renderer, font, word, style, scale)
-                                   : (scale == 1.0f) ? renderer.getTextWidth(font, word, style)
-                                                     : renderer.getTextWidthScaled(font, word, style, scale));
+  // A combined word is one em down the column, however many characters it holds.
+  box.width = static_cast<int16_t>(vertical_ && isCombined(i) ? columnEm(renderer, font, style, scale)
+                                   : vertical_                ? verticalTextAdvance(renderer, font, word, style, scale)
+                                   : (scale == 1.0f)          ? renderer.getTextWidth(font, word, style)
+                                                              : renderer.getTextWidthScaled(font, word, style, scale));
   box.height =
       static_cast<int16_t>((scale == 1.0f) ? renderer.getLineHeight(font) : renderer.getLineHeightScaled(font, scale));
   return box;
@@ -524,8 +553,11 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   const bool vertical = vertical_;
   const bool centredMarks = centredMarks_;
   auto drawRun = [&renderer, vertical, centredMarks](const int font, const int px, const int py, const char* text,
-                                                     const EpdFontFamily::Style style, const float scale) {
-    if (vertical) {
+                                                     const EpdFontFamily::Style style, const float scale,
+                                                     const bool combined = false) {
+    if (vertical && combined) {
+      drawCombinedVertical(renderer, font, px, py, text, style, scale);
+    } else if (vertical) {
       drawTextVertical(renderer, font, px, py, text, style, scale, centredMarks);
     } else if (scale == 1.0f) {
       renderer.drawText(font, px, py, text, true, style);
@@ -535,7 +567,8 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   };
   // How far a piece of text runs along the line at `scale`.
   auto runWidth = [&renderer, vertical](const int font, const char* text, const EpdFontFamily::Style style,
-                                        const float scale) {
+                                        const float scale, const bool combined = false) {
+    if (vertical && combined) return columnEm(renderer, font, style, scale);
     if (vertical) return verticalTextAdvance(renderer, font, text, style, scale);
     return scale == 1.0f ? renderer.getTextWidth(font, text, style)
                          : renderer.getTextWidthScaled(font, text, style, scale);
@@ -553,7 +586,15 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     ascenderCache.push_back({font, s, ascender});
     return ascender;
   };
+  // The Combine records are in word order: one walk finds each combined word as the loop reaches it.
+  const uint8_t* const records = annotationBytes_ != 0 ? annotationRegion() + kAnnotationHeaderBytes : nullptr;
+  const uint16_t recordCount = annotationCount();
+  uint16_t recordCursor = 0;
+  uint16_t nextCombined = UINT16_MAX;
+  if (vertical && records != nullptr) nextCombined = nextCombinedWord(records, recordCount, recordCursor);
   for (uint16_t i = 0; i < numWords; i++) {
+    while (nextCombined < i) nextCombined = nextCombinedWord(records, recordCount, recordCursor);
+    const bool combined = nextCombined == i;
     const char* word = wordText(i);
     const int wordX = xposArr[i] + x;
     const EpdFontFamily::Style currentStyle = wordStyle(i);
@@ -574,13 +615,13 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     } else if ((currentStyle & EpdFontFamily::SUB) != 0) {
       wordY += blockAscender / 4;
     }
-    drawRun(font, wordX, wordY, word, currentStyle, scale);
+    drawRun(font, wordX, wordY, word, currentStyle, scale, combined);
 
     const bool hasDecoration =
         !scanning && (currentStyle & (EpdFontFamily::UNDERLINE | EpdFontFamily::STRIKETHROUGH)) != 0;
     int lineWidth = 0;
     if (guideDots || hasDecoration) {
-      lineWidth = runWidth(font, word, currentStyle, scale);
+      lineWidth = runWidth(font, word, currentStyle, scale, combined);
     }
 
     if (guideDots) {
@@ -842,6 +883,8 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
       LOG_ERR("TXB", "Deserialization failed: corrupt annotations");
       return nullptr;
     }
+    block->annotationBand_ = annotationBytes != 0 && anyBandRecord(block->annotationRegion() + kAnnotationHeaderBytes,
+                                                                   block->annotationCount());
   }
 
   // Style: the render slice only (see serialize).

@@ -139,6 +139,7 @@ class TextBlock final : public Block {
   // Both share the struct's pad byte: a line of a vertical-rl page (see setVertical), and whether its 、。 are centred.
   bool vertical_ : 1 = false;
   bool centredMarks_ : 1 = false;
+  bool annotationBand_ : 1 = false;  // a Ruby or Emphasis record exists: the line reserves the band above its base
   // The ONLY allocation. Heap by default (nothrow, so OOM yields an invalid block instead of
   // abort() -- bare new is not nothrow with -fno-exceptions). A section build that lends a
   // scratch region (the borrowed secondary framebuffer) hands it in through the range
@@ -295,6 +296,8 @@ class TextBlock final : public Block {
   uint16_t annotationCount() const;
   Annotation annotation(uint16_t i) const;
   bool hasAnnotations() const { return annotationBytes_ != 0; }
+  // Whether word `wordIdx` is set upright as one block (a Combine record, tate-chu-yoko).
+  bool isCombined(uint16_t wordIdx) const;
   // Half the line's ascender when the line has a ruby or an emphasis run, else 0: the band above the base the ruby is
   // drawn in.
   int annotationBand(const GfxRenderer& renderer, int fontId) const;
