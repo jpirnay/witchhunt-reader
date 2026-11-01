@@ -9,7 +9,7 @@ class BuildArena;
 class Epub;
 
 /// A book's embedded fonts (the Publisher Fonts setting), made ready for the TTF engine: found once per book from
-/// its CSS and the text of its first chapters, and copied out of the EPUB as plain TrueType or CFF files to
+/// its CSS and a sample of its spine's text, and copied out of the EPUB as plain TrueType or CFF files to
 /// `<book cache>/fonts/`, where they load like a `.ttf` family on the card.
 ///
 /// The body text's family, and up to kMaxAccents accent families, ranked by the blocks (headings, a dedication, a
@@ -36,11 +36,14 @@ constexpr uint8_t kMaxAccents = 3;
 /// extracted from the book once, behind the open's popup, and kept on the card. A full CJK face, as books embed them,
 /// is 8-20 MB; one over this is taken for an error rather than minutes of extraction.
 constexpr size_t kMaxFaceBytes = 24 * 1024 * 1024;
-/// prepare() reads at most this much of each chapter, and at most kProbeChapters chapters from the text start.
-constexpr size_t kProbeChapterBytes = 64 * 1024;
-constexpr int kProbeChapters = 6;
-/// prepare() stops reading chapters once it has seen this much text.
-constexpr uint32_t kProbeEnoughText = 16 * 1024;
+/// prepare() reads the head of every spine item, from the first, or of kProbeMaxItems spread evenly over a longer
+/// spine: about kProbeBudgetBytes in all, each head kProbeBudgetBytes over the items read, between
+/// kProbeMinItemBytes and kProbeMaxItemBytes. What a head holds stands for its whole item, and the items read for the
+/// spine: a book's front matter, the first few items, is no sample of its text.
+constexpr size_t kProbeBudgetBytes = 512 * 1024;
+constexpr int kProbeMaxItems = 64;
+constexpr size_t kProbeMinItemBytes = 8 * 1024;
+constexpr size_t kProbeMaxItemBytes = 64 * 1024;
 
 enum class State : uint8_t {
   Pending,  ///< not examined yet (or by another kVersion), or the last attempts failed for a passing reason
@@ -82,16 +85,23 @@ State prepare(const Epub& epub, BuildArena* scratch);
 
 struct Found {
   /// The body family: the family most of the text is set in (CssStyle::fontFamily; families compare by identity),
-  /// an inline accent's text counting for its paragraph's, over the first kProbeChapterBytes of up to
-  /// kProbeChapters chapters from the text start (fewer once kProbeEnoughText has been seen). 0 for the reader's font.
+  /// an inline accent's text counting for its paragraph's, over the spine items' heads prepare() reads, each weighted
+  /// to the book (probeWeight256). 0 for the reader's font.
   uint32_t body = 0;
   /// The accent families' identities: the families blocks (p, div, li, dd, blockquote, pre, h1-h6) are set in,
   /// other than the body's, among those `records` (CssParser::loadFontFaces) has a regular face of, the one the most
   /// blocks are set in first; 0 past the last. A block is set in its text's family when all of its text is in one,
   /// else in its own.
   uint32_t accents[kMaxAccents] = {};
+  uint16_t itemsRead = 0;  ///< the spine items read (one that cannot be read is passed over)
+  uint32_t bytesRead = 0;  ///< the bytes of them parsed
 };
-/// `*failed` is set when a chapter could not be read.
+/// `sum` plus `bytes` times `weight256` (8 fractional bits: 256 is 1.0), rounded; at most UINT32_MAX.
+uint32_t addWeighted(uint32_t sum, uint32_t bytes, uint32_t weight256);
+/// The weight of what was read of a spine item, in 8 fractional bits: the item's size over the bytes read of it (1
+/// when its size is not known), times the spine's items over those read. At most UINT32_MAX.
+uint32_t probeWeight256(size_t itemBytes, size_t readBytes, int spineCount, int sampledCount);
+/// `*failed` is set when no spine item could be read, or the probe had not the memory to decide.
 Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, std::string_view records = {});
 
 /// The IDPF obfuscation key (EPUB OCF): the SHA-1 of the package's unique identifier with its XML white space

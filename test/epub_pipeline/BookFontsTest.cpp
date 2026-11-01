@@ -19,6 +19,7 @@
 #include "Epub/css/CssParser.h"
 #include "SaxParser/SaxParser.h"
 #include "StoredZipWriter.h"
+#include "ZipFile.h"
 
 namespace fs = std::filesystem;
 
@@ -66,13 +67,13 @@ struct BookFontsTest : testing::Test {
     std::string bytes;
   };
 
+  static constexpr const char* kIdentifiers = "<dc:identifier id=\"uid\">urn:isbn:978-0-00-000000-2</dc:identifier>";
+
   // One stylesheet, chapters in spine order (kMissing: listed, but not in the archive), any extra files;
-  // identifiers as the OPF should carry them.
+  // identifiers as the OPF should carry them, and its guide.
   std::shared_ptr<Epub> book(const std::string& css, const std::vector<std::string>& chapters,
-                             const std::vector<File>& extra = {},
-                             const std::string& identifiers =
-                                 "<dc:identifier id=\"uid\">urn:isbn:978-0-00-000000-2"
-                                 "</dc:identifier>") {
+                             const std::vector<File>& extra = {}, const std::string& identifiers = kIdentifiers,
+                             const std::string& guide = {}) {
     test_zip::StoredZipWriter zip;
     zip.add("mimetype", "application/epub+zip");
     zip.add("META-INF/container.xml",
@@ -100,7 +101,7 @@ struct BookFontsTest : testing::Test {
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
             "version=\"3.0\" unique-identifier=\"uid\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">" +
                 identifiers + "<dc:title>Fonts</dc:title><dc:language>en</dc:language></metadata><manifest>" +
-                manifest + "</manifest><spine>" + spine + "</spine></package>\n");
+                manifest + "</manifest><spine>" + spine + "</spine>" + guide + "</package>\n");
     zip.add("OEBPS/Styles/style.css", css);
     const std::string path = (work / ("book" + std::to_string(books++) + ".epub")).string();
     zip.write(path);
@@ -129,7 +130,29 @@ const char* kProbeCss =
     ".date, h1 { font-family: YatraOne, sans-serif; }\n"
     ".block { font-family: Roboto, sans-serif; }\n";
 
+// A chapter body of `<p class='cls'>` paragraphs, at least `bytes` of markup.
+std::string prose(const char* cls, const size_t bytes) {
+  std::string body = "<body>";
+  while (body.size() < bytes) {
+    body += std::string("<p class='") + cls + "'>Narrative prose, the kind a chapter is made of.</p>";
+  }
+  return body + "</body>";
+}
+
 }  // namespace
+
+TEST(BookFontsWeights, AddWeightedRoundsAndSaturates) {
+  EXPECT_EQ(200u, BookFonts::addWeighted(0, 100, 512));
+  EXPECT_EQ(5u, BookFonts::addWeighted(0, 3, 384));  // 4.5 rounds up
+  EXPECT_EQ(UINT32_MAX, BookFonts::addWeighted(UINT32_MAX - 10, 100, 256));
+  EXPECT_EQ(UINT32_MAX, BookFonts::addWeighted(0, 1u << 30, 1u << 20));
+}
+
+TEST(BookFontsWeights, AWeightScalesAnItemReadInPartAndASubsampledSpine) {
+  EXPECT_EQ(6400u, BookFonts::probeWeight256(200 * 1024, 8 * 1024, 1, 1));
+  EXPECT_EQ(256u, BookFonts::probeWeight256(0, 8 * 1024, 1, 1));  // size unknown: as read
+  EXPECT_EQ(512u, BookFonts::probeWeight256(4096, 4096, 128, 64));
+}
 
 TEST(BookFontsKeys, TheIdpfKeyHashesTheIdentifierWithoutWhiteSpace) {
   uint8_t key[20];
@@ -191,7 +214,8 @@ TEST_F(BookFontsTest, DivParagraphsCountAndTheCountRunsAcrossChapters) {
   EXPECT_EQ(family("EBGaramond"), detect(*epub));
 }
 
-TEST_F(BookFontsTest, OnlyTheFirst64KbOfAChapterIsRead) {
+TEST_F(BookFontsTest, OnlyTheHeadOfAChapterIsRead) {
+  // One item: the probe reads its first 64 KB (kProbeMaxItemBytes).
   std::string chapter = "<body><p class='block'>First ";
   for (size_t i = 0; i < 12000; ++i) chapter += "prose ";  // ~72 KB
   chapter += "</p>";
@@ -200,6 +224,57 @@ TEST_F(BookFontsTest, OnlyTheFirst64KbOfAChapterIsRead) {
   chapter += "</body>";
   const auto epub = book(kProbeCss, {chapter});
   EXPECT_EQ(family("Roboto"), detect(*epub));
+}
+
+TEST_F(BookFontsTest, TheBodyIsFoundPastTheSixthSpineItem) {
+  std::vector<std::string> chapters(7, "<body><p class='block'>Front matter.</p></body>");
+  chapters.push_back(prose("indent", 4 * 1024));
+  const auto epub = book(kProbeCss, chapters);
+  EXPECT_EQ(family("EBGaramond"), detect(*epub));
+}
+
+TEST_F(BookFontsTest, ALargeChapterReadInPartOutweighsSmallItemsReadWhole) {
+  // 60 items: each is read up to ~8.5 KB. The two long chapters' heads stand for 300 KB each.
+  std::vector<std::string> chapters(58, prose("block", 8 * 1024));
+  chapters.push_back(prose("indent", 300 * 1024));
+  chapters.push_back(prose("indent", 300 * 1024));
+  const auto epub = book(kProbeCss, chapters);
+  EXPECT_EQ(family("EBGaramond"), detect(*epub));
+}
+
+TEST_F(BookFontsTest, ALongSpineIsSampledWithinTheBudget) {
+  const auto epub = book(kProbeCss, std::vector<std::string>(100, prose("indent", 20 * 1024)));
+  const size_t walks = zipScanStats().walks;
+  const BookFonts::Found families = found(*epub);
+  EXPECT_LE(zipScanStats().walks - walks, 2u);  // read through the spine's stats, not looked up by name
+  EXPECT_EQ(64, families.itemsRead);
+  EXPECT_LE(families.bytesRead, 64u * (8 * 1024 + 4 * 1024));
+  EXPECT_EQ(family("EBGaramond"), CssFontFamily::identity(families.body));
+}
+
+TEST_F(BookFontsTest, AnUnreadableItemIsSkipped) {
+  const std::string chapter = prose("indent", 2 * 1024);
+  const auto epub =
+      book(kProbeCss, {chapter, kMissing, chapter}, {{"OEBPS/Fonts/g.ttf", "font/ttf", kTrueType}});
+  EXPECT_EQ(family("EBGaramond"), detect(*epub));  // found() expects no failure
+  EXPECT_EQ(BookFonts::State::Family, BookFonts::prepare(*epub, nullptr));
+}
+
+TEST_F(BookFontsTest, TheTextReferenceDoesNotHideEarlierItems) {
+  const std::string chapter = prose("indent", 4 * 1024);
+  const auto epub =
+      book(kProbeCss, {chapter, chapter, "<body><p class='block'>A short page.</p></body>"}, {}, kIdentifiers,
+           "<guide><reference type='text' title='Start' href='Text/c2.xhtml'/></guide>");
+  ASSERT_EQ(2, epub->getSpineIndexForTextReference());
+  EXPECT_EQ(family("EBGaramond"), detect(*epub));
+}
+
+TEST_F(BookFontsTest, ABinarySpineItemIsNoText) {
+  std::string binary = "<body>";
+  for (int i = 0; i < 2048; ++i) binary += static_cast<char>(i & 0xFF);
+  binary += "</body>";
+  const auto epub = book(kProbeCss, {binary, prose("indent", 2 * 1024)});
+  EXPECT_EQ(family("EBGaramond"), detect(*epub));  // found() expects no failure
 }
 
 TEST_F(BookFontsTest, AnEmbeddedTrueTypeBodyIsCopiedWithItsBoldFace) {

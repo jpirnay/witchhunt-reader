@@ -60,16 +60,13 @@ class BodyFontProbe {
  public:
   explicit BodyFontProbe(CssParser& css) : css_(css) {}
 
-  // A chapter: the element frames start over; the counts carry on.
-  void beginParser(SaxParser& parser) {
+  // A spine item, read up to `cap` bytes, its counts weighted by `weight256` (probeWeight256): the element frames
+  // start over; the counts carry on.
+  void beginParser(SaxParser& parser, const uint32_t weight256, const size_t cap) {
     parser_ = &parser;
     depth_ = 0;
-  }
-
-  uint32_t textBytes() const {
-    uint32_t total = 0;
-    for (const Usage& u : usage_) total += u.bytes;
-    return total;
+    weight256_ = weight256;
+    cap_ = cap;
   }
   // The family with the most text (by identity: a family named with and without a generic fallback is one), with
   // the generic fallback most of that text names; 0 (the reader's font) without any.
@@ -157,7 +154,7 @@ class BodyFontProbe {
     if (index >= kMaxDepth) return;
     const Frame& frame = self.frames_[index];
     if (frame.block != static_cast<int8_t>(index) || frame.textState == 0) return;
-    count(self.blocks_, CssFontFamily::identity(frame.textState == 1 ? frame.textFamily : frame.family), 1);
+    self.count(self.blocks_, CssFontFamily::identity(frame.textState == 1 ? frame.textFamily : frame.family), 1);
   }
 
   static void onText(void* ctx, const char* text, const int len) {
@@ -166,7 +163,7 @@ class BodyFontProbe {
     const Frame& frame = self.frames_[self.depth_ - 1];
     const auto bytes = static_cast<uint32_t>(VisibleText::visibleBytes(text, len));
     if (!frame.inBody || bytes == 0) return;
-    count(self.usage_, frame.inParagraph ? frame.paragraphFamily : frame.family, bytes);
+    self.count(self.usage_, frame.inParagraph ? frame.paragraphFamily : frame.family, bytes);
     if (frame.block < 0) return;
     Frame& block = self.frames_[frame.block];
     if (block.textState == 0) {
@@ -205,26 +202,28 @@ class BodyFontProbe {
   };
   using Usages = std::array<Usage, kMaxFamilies>;
 
-  // Adds `n` to `family`'s count; a family past the table's room is not counted.
-  static void count(Usages& usages, const uint32_t family, const uint32_t n) {
+  // Adds `n`, weighted, to `family`'s count; a family past the table's room is not counted.
+  void count(Usages& usages, const uint32_t family, const uint32_t n) {
     for (Usage& u : usages) {
       if (u.bytes == 0 || u.family == family) {
         u.family = family;
-        u.bytes += n;
+        u.bytes = addWeighted(u.bytes, n, weight256_);
         return;
       }
     }
   }
 
-  // Past kProbeChapterBytes of the chapter: stops the parser.
+  // Past the item's cap: stops the parser.
   bool stopAtLimit() const {
-    if (parser_->byteOffset() < kProbeChapterBytes) return false;
+    if (parser_->byteOffset() < cap_) return false;
     parser_->stop();
     return true;
   }
 
   CssParser& css_;
   SaxParser* parser_ = nullptr;
+  uint32_t weight256_ = 256;
+  size_t cap_ = 0;
   std::array<Frame, kMaxDepth> frames_{};
   Usages usage_{};   // text bytes by family, an inline accent's counting for its paragraph's
   Usages blocks_{};  // blocks by family identity
@@ -562,6 +561,18 @@ std::string familyDir(const std::string& cachePath, const int accent) {
   return dir;
 }
 
+uint32_t addWeighted(const uint32_t sum, const uint32_t bytes, const uint32_t weight256) {
+  const uint64_t total = sum + (static_cast<uint64_t>(bytes) * weight256 + 128) / 256;
+  return static_cast<uint32_t>(std::min<uint64_t>(total, UINT32_MAX));
+}
+
+uint32_t probeWeight256(const size_t itemBytes, const size_t readBytes, const int spineCount, const int sampledCount) {
+  const bool sized = itemBytes != 0 && readBytes != 0;
+  const uint64_t weight = 256ull * (sized ? itemBytes : 1) * static_cast<uint64_t>(std::max(spineCount, 1)) /
+                          ((sized ? readBytes : 1) * static_cast<uint64_t>(std::max(sampledCount, 1)));
+  return static_cast<uint32_t>(std::min<uint64_t>(weight, UINT32_MAX));
+}
+
 Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const std::string_view records) {
   *failed = false;
   CssParser* css = epub.getCssParser();
@@ -575,23 +586,32 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
   }
   const ParserState state(scratch);
   css->resetResolveStats();
+  Found found;
+  // From the first item, not the text reference: a guide that points at the cover would hide the whole book.
   const int count = epub.getSpineItemsCount();
-  const int first = std::max(0, epub.getSpineIndexForTextReference());
-  for (int i = first; i < count && i < first + kProbeChapters && probe->textBytes() < kProbeEnoughText; ++i) {
-    // One SAX pass over the chapter, the parser state in `scratch` when there is room. A malformed document
+  const int sampled = std::min(count, kProbeMaxItems);
+  const size_t cap = std::clamp(kProbeBudgetBytes / static_cast<size_t>(std::max(sampled, 1)), kProbeMinItemBytes,
+                                kProbeMaxItemBytes);
+  for (int k = 0; k < sampled; ++k) {
+    const int i = count <= kProbeMaxItems ? k : static_cast<int>(static_cast<int64_t>(k) * count / kProbeMaxItems);
+    const size_t itemBytes = epub.getSpineItem(i).zipUncompressedSize;  // 0: not known
+    // One SAX pass over the item's head, the parser state in `scratch` when there is room. A malformed document
     // reports what it parsed and counts as read.
     SaxParser parser;
     if (state.get()) parser.setExternalState(state.get(), SaxParser::stateBytes());
     SaxFeedSink sink(parser);
     const bool ready = parser.init(probe.get(), &BodyFontProbe::onStart, &BodyFontProbe::onEnd, &BodyFontProbe::onText,
                                    &BodyFontProbe::onDefault, /*htmlVoidTagRepair=*/true);
-    if (ready) probe->beginParser(parser);
-    if (!ready || !epub.readItemContentsToStream(epub.getSpineItem(i).href, sink, 1024, sink.stopFlag(), scratch)) {
-      LOG_ERR("BKF", "Cannot read chapter %d", i);
-      *failed = true;
-      break;
+    if (ready) probe->beginParser(parser, probeWeight256(itemBytes, std::min(itemBytes, cap), count, sampled), cap);
+    // One item that cannot be read is passed over: the others still sample the book.
+    if (!ready || !epub.readSpineItemToStream(i, sink, sink.stopFlag(), scratch)) {
+      LOG_ERR("BKF", "Cannot read spine item %d", i);
+      continue;
     }
+    ++found.itemsRead;
+    found.bytesRead += static_cast<uint32_t>(parser.byteOffset());
   }
+  if (sampled > 0 && found.itemsRead == 0) *failed = true;
   // Short of heap, the resolver skips the rules it would read from the card: the families found would be
   // wrong, so this counts as a failed attempt rather than an answer.
   if (css->getResolveStats().lowHeapSkips != 0 && !css->isArenaResident()) {
@@ -599,7 +619,6 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
     *failed = true;
   }
   css->clearCaches(/*evictEverything=*/true);  // the resolver's caches go back to the heap
-  Found found;
   found.body = probe->family();
   // An accent needs a face to be drawn (pickFaces makes its nearest the regular).
   probe->accents(

@@ -323,6 +323,10 @@ class Epub {
   // the region lent to load() does; else the heap.
   bool readItemContentsToStream(const std::string& itemHref, Print& out, size_t chunkSize, const bool* stop = nullptr,
                                 BuildArena* scratch = nullptr) const;
+  // The same for a spine item, opened through its stat (getSpineItemStat): no lookup by name, which walks the
+  // central directory, for a caller that reads many of them.
+  bool readSpineItemToStream(int spineIndex, Print& out, const bool* stop = nullptr,
+                             BuildArena* scratch = nullptr) const;
   // Where the OPF package document sits inside the book, read from META-INF/container.xml without
   // loading anything else: for handing the OPF out as it is, sidecar or not (the web interface's
   // Details dialog reads a book's own metadata from it).
@@ -442,6 +446,8 @@ class Epub {
   // Drain one ZIP entry into `out` through an arena-backed EntryReader.
   bool readItemContentsToStreamWithArena(const std::string& itemHref, Print& out, BuildArena* arena,
                                          const bool* stop) const;
+  // Drains an opened reader into `out` until the entry ends or `*stop` is set; `what` names it in the log.
+  static bool drainEntry(ZipFile::EntryReader& reader, Print& out, const bool* stop, const char* what);
   // Set for the duration of load() / a cover session: readItemContentsToStream takes its inflate
   // ring from here when the region has room, else from the heap as before. Not owned.
   BuildArena* loadScratch_ = nullptr;
