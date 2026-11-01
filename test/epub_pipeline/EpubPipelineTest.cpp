@@ -108,7 +108,7 @@ const char* const kBookAlignmentBooks[] = {"test_rtl_markup"};
 
 // Books the reader may set vertically, under Automatic (<book>_vertical.golden.txt): each section decides from its CSS
 // writing mode and the book's page progression, and a vertical one is laid out in the turned frame.
-const char* const kVerticalBooks[] = {"test_writing_modes", "test_vertical_text"};
+const char* const kVerticalBooks[] = {"test_writing_modes", "test_vertical_text", "test_vertical_text_zh_hant"};
 
 // Books that declare no writing mode, under On (<book>_vertical_on.golden.txt): what an Aozora conversion looks like
 // once the reader turns it vertical.

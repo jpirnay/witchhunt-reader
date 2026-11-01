@@ -21,5 +21,15 @@ int verticalTextAdvance(const GfxRenderer& renderer, int fontId, const char* tex
 // Draws `text` down a column. Called in the turned frame (Page::render's scope) with what drawText would get there:
 // x the pen along the column, y the line's top. Allocates nothing; two char[kMaxColumnRunBytes + 1] buffers on the
 // stack, within the 256 B constraint.
+//
+// An upright 、。 or small kana is placed in its column as a vertical font does (VerticalOrientation.h): a mark
+// reflected into the top-right corner of its cell, or halfway there when `centredMarks` (Traditional Chinese), a small
+// kana moved up and right. A font without the glyph draws it unplaced.
 void drawTextVertical(const GfxRenderer& renderer, int fontId, int x, int y, const char* text,
-                      EpdFontFamily::Style style, float scale);
+                      EpdFontFamily::Style style, float scale, bool centredMarks);
+
+// Where the ink of the upright code point `cp` lands along the column as drawn (at scale 1), from the cell's leading
+// edge (the pen): `inkStart` and `inkSize`; `cell` is the em. False for a sideways code point or when the font has no
+// glyph.
+bool columnInk(const GfxRenderer& renderer, int fontId, uint32_t cp, EpdFontFamily::Style style, bool centredMarks,
+               int& inkStart, int& inkSize, int& cell);

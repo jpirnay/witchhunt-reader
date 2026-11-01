@@ -22,6 +22,16 @@ class SdCardFont;
 // 0 = transparent, 1-16 = gray levels (white to black)
 enum Color : uint8_t { Clear = 0x00, White = 0x01, LightGray = 0x05, DarkGray = 0x0A, Black = 0x10 };
 
+// Where a glyph's ink sits in its advance, in pixels at the size the font draws: `left` from the pen to the ink's
+// left edge and `width` across; `top` from the baseline up to the ink's top and `height` down from there.
+struct GlyphInk {
+  int left = 0;
+  int width = 0;
+  int top = 0;
+  int height = 0;
+  int advance = 0;
+};
+
 class GfxRenderer {
  public:
   enum RenderMode { BW, GRAYSCALE_LSB, GRAYSCALE_MSB };
@@ -668,11 +678,10 @@ class GfxRenderer {
   int getKerning(int fontId, uint32_t leftCp, uint32_t rightCp, EpdFontFamily::Style style) const;
   int getTextAdvanceX(int fontId, const char* text, EpdFontFamily::Style style) const;
   /// Where codepoint `cp`'s ink sits in its advance, in pixels at the size `fontId` draws (its base scale applied,
-  /// as getTextAdvanceX does): the ink starts `inkLeft` from the pen and is `inkWidth` wide. It is the glyph drawn
-  /// for `cp`, so a fallback's when the font has none; false when there is no glyph at all. Layout places narrowed
-  /// CJK punctuation by it (CjkPunctuation.h).
-  bool getGlyphInk(int fontId, uint32_t cp, EpdFontFamily::Style style, int& inkLeft, int& inkWidth,
-                   int& advance) const;
+  /// as getTextAdvanceX does). It is the glyph drawn for `cp`, so a fallback's when the font has none; false when
+  /// there is no glyph at all. Layout places narrowed CJK punctuation by the horizontal half (CjkPunctuation.h), and
+  /// a vertical column places the comma, full stop and small kana by the vertical half.
+  bool getGlyphInk(int fontId, uint32_t cp, EpdFontFamily::Style style, GlyphInk& ink) const;
   /// Whether `fontId` has a glyph of its own for `cp`, not a lookalike or U+FFFD (which getGlyphInk and every
   /// measure fall back to). Layout asks it for 一 before treating a font as a CJK font.
   bool hasGlyph(int fontId, uint32_t cp, EpdFontFamily::Style style) const;

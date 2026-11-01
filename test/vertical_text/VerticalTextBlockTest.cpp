@@ -206,3 +206,28 @@ TEST(VerticalTextBlock, TheVerticalBitSurvivesTheCache) {
     EXPECT_EQ(2, restored->wordCount());
   }
 }
+
+// The centred-marks bit is bit 3 of the flags byte. A line without it, as the code before wrote it, reads false.
+TEST(VerticalTextBlock, TheCentredMarksBitSurvivesTheCache) {
+  for (const bool centred : {true, false}) {
+    const auto block = line({"日", "本"}, {0, 10});
+    block->setCentredMarks(centred);
+    FsFile file = HalFile::forReadWrite();
+    ASSERT_TRUE(block->serialize(file));
+    ASSERT_TRUE(file.seek(0));
+    std::string bytes(file.size(), '\0');
+    file.read(bytes.data(), bytes.size());
+    EXPECT_EQ(centred ? 12 : 4, bytes[2]);
+
+    FsFile again = HalFile::forReadWrite();
+    again.write(bytes.data(), bytes.size());
+    ASSERT_TRUE(again.seek(0));
+    const auto restored = TextBlock::deserialize(again);
+    ASSERT_NE(nullptr, restored);
+    EXPECT_EQ(centred, restored->centredMarks());
+    EXPECT_TRUE(restored->isVertical());
+  }
+}
+
+// Measured on the host before the bit: sizeof(TextBlock) == 88 (the firmware's 32-bit pin is 52).
+TEST(VerticalTextBlock, TheCentredMarksBitDoesNotGrowTheBlock) { EXPECT_EQ(88u, sizeof(TextBlock)); }

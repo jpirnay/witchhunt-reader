@@ -1,9 +1,11 @@
 // The vertical rules (spec 7), checked on every page the host pipeline lays out for the vertical books: each upright
 // character is drawn in the reader's frame and each sideways run through the turned one, kinsoku holds at the end of
-// every column the layout broke, and every line and image of a vertical section is turned.
+// every column the layout broke, every line and image of a vertical section is turned, and a placed 、。 keeps its ink
+// in its own place down the column.
 //
-// The books run through forEachPage: Automatic for the two that decide by themselves (test_vertical_text,
-// test_writing_modes), On for the two Aozora-style books that declare no mode.
+// The books run through forEachPage: Automatic for the three that decide by themselves (test_vertical_text, its
+// Traditional Chinese sibling test_vertical_text_zh_hant, test_writing_modes), On for the two Aozora-style books that
+// declare no mode.
 #include <GfxRenderer.h>
 #include <Utf8.h>
 #include <gtest/gtest.h>
@@ -16,8 +18,10 @@
 #include <vector>
 
 #include "Epub/CjkLineBreak.h"
+#include "Epub/CjkPunctuation.h"
 #include "Epub/Page.h"
 #include "Epub/Section.h"
+#include "Epub/VerticalDraw.h"
 #include "Epub/VerticalOrientation.h"
 #include "Epub/blocks/ImageBlock.h"
 #include "PipelineRunner.h"
@@ -31,6 +35,7 @@ struct Book {
   VerticalText request;
   int minSideways;  // sideways draws a book must hold
   int minColumns;   // kinsoku columns a book must check; 0 where its columns are not unspaced CJK or too few break
+  int minPlacedMarks = 0;  // placed 、。 a book must check; 0 where it sets none
 };
 
 // The stub's em: a CJK character is 16 px wide, so a first word less than 16 px in is a column the layout broke.
@@ -227,12 +232,59 @@ TEST_P(VerticalRules, EveryLineAndImageOfAVerticalPageIsTurned) {
   EXPECT_GT(lines, 0);
 }
 
+// A placed mark (a 、。，． drawn upright, VerticalOrientation.h) puts its ink where columnInk says, from its token's
+// start down the column: it must end by the next token's start, or by the column's end (the content frame's width in
+// the turned frame) where it closes the column, and must not start before the token before it. A mark push-in narrows
+// is drawn back by what its ink needs (ParsedText's ink shift), so the check holds for narrowed marks too.
+//
+// Page lines only: a table cell's column is the cell's, not the frame's. columnInk is the ink at scale 1, so a mark
+// drawn at another size is left out; the books set their marks at the body size.
+TEST_P(VerticalRules, APlacedMarksInkStaysInItsColumnPlace) {
+  const int columnLength = profileOf(GetParam()).viewportHeight;
+  int checked = 0;
+  const bool ok = pipeline_harness::forEachPage(
+      epub(), cache(), profileOf(GetParam()), [&](int spine, const Section&, const Page& page, GfxRenderer& r) {
+        if (!page.isVertical()) return;
+        for (const auto& element : page.elements) {
+          if (element->getTag() != TAG_PageLine) continue;
+          const TextBlock& block = *static_cast<const PageLine&>(*element).getBlock();
+          if (block.getRenderStyle().fontSizeMultiplier != 1.0f) continue;
+          for (uint16_t i = 0; i < block.wordCount(); ++i) {
+            const std::vector<uint32_t> cps = codepointsOf(block.wordText(i));
+            if (cps.size() != 1 || CjkPunctuation::classOf(cps[0]) == CjkPunctuation::Class::None ||
+                uprightPlacementOf(cps[0]) == UprightPlacement::None || block.wordSizePct(i) != 100 ||
+                block.wordFont(i) != nullptr) {
+              continue;
+            }
+            int inkStart = 0;
+            int inkSize = 0;
+            int cell = 0;
+            if (!columnInk(r, 1, cps[0], block.wordStyle(i), block.centredMarks(), inkStart, inkSize, cell)) continue;
+            ++checked;
+            const int start = block.wordXpos(i) + inkStart;
+            const int end = start + inkSize;
+            const std::string where = "spine " + std::to_string(spine) + ", " + block.wordText(i) + " in " +
+                                      lineText(block) + " at " + std::to_string(block.wordXpos(i));
+            if (i + 1 < block.wordCount()) {
+              EXPECT_LE(end, block.wordXpos(i + 1)) << "ink past the next token: " << where;
+            } else {
+              EXPECT_LE(element->xPos + end, columnLength) << "ink past the column's end: " << where;
+            }
+            if (i > 0) EXPECT_GE(start, block.wordXpos(i - 1)) << "ink before the token before: " << where;
+          }
+        }
+      });
+  ASSERT_TRUE(ok);
+  EXPECT_GE(checked, GetParam().minPlacedMarks) << "only " << checked << " placed marks checked";
+}
+
 namespace {
 
 std::vector<Book> verticalBooks() {
-  return {{"test_vertical_text", VerticalText::Automatic, 10, 20},
-          {"test_writing_modes", VerticalText::Automatic, 1, 0},
-          {"test_cjk_ja_soseki", VerticalText::On, 1, 20},
+  return {{"test_vertical_text", VerticalText::Automatic, 10, 20, 100},
+          {"test_vertical_text_zh_hant", VerticalText::Automatic, 10, 20, 100},
+          {"test_writing_modes", VerticalText::Automatic, 1, 0, 1},
+          {"test_cjk_ja_soseki", VerticalText::On, 1, 20, 50},
           {"test_cjk_ko_hyeon", VerticalText::On, 10, 0}};
 }
 

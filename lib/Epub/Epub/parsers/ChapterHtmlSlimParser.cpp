@@ -1404,7 +1404,15 @@ void ChapterHtmlSlimParser::emitPage() {
   deferredDropCapLine_ = nullptr;
   // A vertical page draws in the turned frame across the block extent its columns fill: the reader's viewport width,
   // which the swap made this parser's height.
-  if (vertical_) currentPage->verticalBlockExtent = viewportHeight;
+  if (vertical_) {
+    currentPage->verticalBlockExtent = viewportHeight;
+    // A page of images alone is centred across that extent here: the reader's own centring moves a page along its y,
+    // which on a vertical page is along the column, while the block extent is known at build.
+    const int shift = currentPage->imageOnlyCentringOffset(viewportHeight);
+    if (shift > 0) {
+      for (auto& element : currentPage->elements) element->yPos = static_cast<int16_t>(element->yPos + shift);
+    }
+  }
   // The page is handed over only once both tables have its entry, so this table, the consumer's
   // and completedPageCount move in lockstep or not at all.
   if (pageTableFull_ || !paragraphLutPerPage.push_back({start, xpathParagraphIndex, xpathListItemIndex})) {
@@ -1568,7 +1576,10 @@ bool ChapterHtmlSlimParser::keepTogetherBreak(const int lineHeight, const bool n
     return need > room;
   }
   // Off, the page fills. On a page of ten lines the rule could leave two of them empty (#579).
-  if (!widowOrphanControl_) return false;
+  // A vertical section fills its pages whatever the setting says: the rule was written for Latin
+  // text, a vertical page holds about 9 columns where a horizontal one holds 14 lines, and the
+  // acceptance book's pages stopped after 5 of 9 columns (#577).
+  if (!widowOrphanControl_ || vertical_) return false;
   const int fit = room / lineHeight;  // lines of this height still on the page, this one included
   if (fit <= 0) return false;         // it does not fit at all: the ordinary break
   // Not known yet: the paragraph runs on past this layout pass, so it has lines enough to split.
@@ -4690,6 +4701,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
     }
   }
   line->setVertical(vertical_);  // a column of a vertical page (TextBlock::render draws it down)
+  line->setCentredMarks(vertical_ && typography_.punctuation == TypographyProfile::Punctuation::TraditionalChinese);
   auto pageLine = makeUniqueNoThrow<PageLine>(std::move(line), xOffset, currentPageNextY);
   if (!pageLine) {
     // Accepted, not a retry: the line is gone either way, and retrying would just fail again.
@@ -5511,6 +5523,8 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
       // A column of a vertical page's table. Set here, not in the layout callback above: one more capture would take
       // that std::function past its in-place storage, a heap block per cell.
       cellLine->setVertical(vertical_);
+      cellLine->setCentredMarks(vertical_ &&
+                                typography_.punctuation == TypographyProfile::Punctuation::TraditionalChinese);
       cellTextHeight += lineHeight + cellLine->annotationBand(renderer, fontId);
     }
     uint16_t contentHeight = static_cast<uint16_t>(cellTextHeight);

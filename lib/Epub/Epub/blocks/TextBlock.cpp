@@ -512,10 +512,11 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   };
   // A vertical line runs every draw down its column at the position the horizontal code computes (VerticalDraw.h).
   const bool vertical = vertical_;
-  auto drawRun = [&renderer, vertical](const int font, const int px, const int py, const char* text,
-                                       const EpdFontFamily::Style style, const float scale) {
+  const bool centredMarks = centredMarks_;
+  auto drawRun = [&renderer, vertical, centredMarks](const int font, const int px, const int py, const char* text,
+                                                     const EpdFontFamily::Style style, const float scale) {
     if (vertical) {
-      drawTextVertical(renderer, font, px, py, text, style, scale);
+      drawTextVertical(renderer, font, px, py, text, style, scale, centredMarks);
     } else if (scale == 1.0f) {
       renderer.drawText(font, px, py, text, true, style);
     } else {
@@ -714,12 +715,13 @@ bool TextBlock::serialize(FsFile& file) const {
   // Word data: scalars, then the arena verbatim -- its in-memory layout is
   // exactly the on-disk layout (see TextBlock.h), so one write covers all
   // per-word arrays and the text blob. The flags byte holds the sizes in bit 0
-  // bit 1 says the line has annotations (u16 annotationBytes follows textBytes), bit 2 that it is vertical, and
-  // the word-font count in bits 4-7: a line without word fonts or annotations
+  // bit 1 says the line has annotations (u16 annotationBytes follows textBytes), bit 2 that it is vertical,
+  // bit 3 that its marks are centred, and the word-font count in bits 4-7: a line without word fonts or annotations
   // writes the 0 or 1 it always did.
   serialization::writePod(file, numWords);
-  serialization::writePod(file, static_cast<uint8_t>((sizesPresent ? 1 : 0) | (annotationBytes_ != 0 ? 2 : 0) |
-                                                     (vertical_ ? 4 : 0) | wordFontCount << 4));
+  serialization::writePod(
+      file, static_cast<uint8_t>((sizesPresent ? 1 : 0) | (annotationBytes_ != 0 ? 2 : 0) | (vertical_ ? 4 : 0) |
+                                 (centredMarks_ ? 8 : 0) | wordFontCount << 4));
   serialization::writePod(file, textBytes);
   if (annotationBytes_ != 0) serialization::writePod(file, annotationBytes_);
   if (numWords > 0) {
@@ -763,7 +765,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
   // Sanity checks: cap the arena allocation and reject impossible geometry
   // (every word carries at least its NUL terminator).
   const uint8_t fontCount = flags >> 4;
-  if (wc > 10000 || (flags & 0x08) != 0 || fontCount > kMaxWordFonts || (fontCount != 0 && wc == 0)) {
+  if (wc > 10000 || fontCount > kMaxWordFonts || (fontCount != 0 && wc == 0)) {
     LOG_ERR("TXB", "Deserialization failed: word count %u or flags 0x%02x out of range", wc, flags);
     return nullptr;
   }
@@ -786,6 +788,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
   block->sizesPresent = (flags & 1) != 0;
   block->wordFontCount = fontCount;
   block->vertical_ = (flags & 0x04) != 0;
+  block->centredMarks_ = (flags & 0x08) != 0;
 
   if (wc > 0) {
     const size_t size = arenaSize(wc, block->sizesPresent, fontCount, textBytes, annotationBytes);

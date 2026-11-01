@@ -130,10 +130,6 @@ TEST(RubyTextBlock, CorruptAnnotationsAreRefused) {
   wordsPastTheLine[kRecord + 2] = 3;  // wordCount 3: firstWord 0 + 3 > 2 words
   EXPECT_EQ(restore(wordsPastTheLine), nullptr);
 
-  std::string reservedFlag = bytes;
-  reservedFlag[2] = static_cast<char>(reservedFlag[2] | 0x08);
-  EXPECT_EQ(restore(reservedFlag), nullptr);
-
   std::string lenPastTheEnd = bytes;
   lenPastTheEnd[kRecord + 9] = static_cast<char>(200);
   EXPECT_EQ(restore(lenPastTheEnd), nullptr);
