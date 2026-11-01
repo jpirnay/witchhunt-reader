@@ -1287,7 +1287,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=2 truncated=0 cssFallback=0 vertical=1
    W x=662 s=0 z=100 t=寫
    W x=678 s=0 z=100 t=著
    W x=699 s=0 z=100 t=Taipei
-   W x=744 s=0 z=100 t=。
+   W x=742 s=0 z=100 t=。
   LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=42
    W x=4 s=0 z=100 t=信
    W x=20 s=0 z=100 t=裡
