@@ -70,8 +70,8 @@ block (one of the store's 8) that an accent family needed.
 
 ## 3. Constraints
 
-- ESP32-C3, no PSRAM. The probe object is on the heap (`makeUniqueNoThrow`), about 1.3 KB today; the parser state and
-  the inflate ring live in the lent framebuffer (`BuildArena`) at first open.
+- ESP32-C3, no PSRAM. The probe object is on the heap (`makeUniqueNoThrow`), about 1.3 KB today (as built ~2.3 KB,
+  with its CSS memo); the parser state and the inflate ring live in the lent framebuffer (`BuildArena`) at first open.
 - `prepare` runs once per book and `kVersion`, behind the first open's popup (`ReaderActivity.cpp`, `bookFontsPending`).
 - `fonts.bin` keeps its layout: body family, 3 accent identities, names (docs/file-formats.md).
 - The resolver and CSS: `css_.resolveStyle(tag, class, id)` per element as today.
@@ -85,7 +85,8 @@ block (one of the store's 8) that an accent family needed.
 - **At most `kProbeMaxItems` (64) items.** With more, an evenly spaced subset: item `floor(k * count / kProbeMaxItems)`
   for k = 0..63.
 - **A per-item cap** of `clamp(kProbeBudgetBytes / sampledItems, 8 KB, 64 KB)` of inflated markup, with
-  `kProbeBudgetBytes` 512 KB. The cap is enforced as today, through the SAX parser's byte offset (`stopAtLimit`).
+  `kProbeBudgetBytes` 512 KB (as built: 160 KB and 2 KB, and the read itself stops at the cap; section 8). The cap is
+  enforced as today, through the SAX parser's byte offset (`stopAtLimit`).
   *Misery*: 20 items, 25.6 KB a chapter, 141 KB read in all (four chapters capped, the rest whole).
 - `kProbeChapters`, `kProbeChapterBytes` and `kProbeEnoughText` go.
 - **An item that cannot be read is skipped**, logged, and the probe goes on: with 64 items from all over the spine,
@@ -205,7 +206,7 @@ A book with a large spine for the probe's time.
 ## 7. Calls made in this design (the author's, not asked)
 
 - The probe samples heads of every item from spine 0 with a 512 KB budget and 64-item cap, as a starting point for
-  the 1 s limit the user set.
+  the 1 s limit the user set (160 KB as built, section 8).
 - Ranking by weighted text with a 64-byte block minimum (not pure text, not block counts).
 - Floors: family 256 B and 0.1 % (both must fail); style 256 B or 1 % (either keeps it).
 - Negligible families take no slot even when one is free (heap over fidelity, as asked).
@@ -223,8 +224,13 @@ Branch `feat/book-fonts-spine-probe`. Sections 4.1-4.6 are built as written, wit
   memoises the three properties it needs per tag, class and id (a 64-slot direct-mapped table; The Anarchy made 2,749
   resolves for 78 distinct element kinds), runs the resolver lean (no hot rule cache, 24 KB floor; the hot cache
   grew on the heap and pushed an X3 under the 40 KB floor, which failed every examination there), and loads the book's
-  rules into the lent region before the first read (BuildArena is LIFO: above the parser state, below every read's
-  block, dropped before the state's block goes back).
+  rules into the lent region before the first read (BuildArena is LIFO: in a block above the parser state's and below
+  every read's, given back first). Only while each read still fits beside them: a head is read shorter to fit (down to
+  2 KB), past that, or when the rules do not load, they stay on the card (the second review's finding: a read that
+  left the region took up to 32 KB of an X3's ~48 KB heap).
+- **A book without `@font-face` rules is probed lightly**: 8 items spread over the spine, 32 KB at most. No accent
+  can be copied; only the body's generic family is wanted. The Anarchy, King's Avatar and Small Gods keep the same
+  body on the host.
 - **The read stops at the cap itself** (`EntryReader::open(stat, cap)`): the parser reports no progress inside a long
   text run or a `data:` attribute, so a head could be inflated whole (the final review's finding).
 - **The space after a word in an accent family is the block's** (`ParsedText::spaceSource`). Misery's hand-filled
@@ -236,14 +242,15 @@ for first-open indexing" and "Returned ..."), master dd986fffc against the branc
 
 | Book | master | branch | probe |
 |------|--------|--------|-------|
-| The Anarchy (40 items, no `@font-face`) | 1,824 / 1,823 ms | 2,473 / 2,461 ms (+0.64 s) | 1,048 ms, 98,845 B |
-| Misery (20 items, 8 families) | 3,918 ms | 3,474 ms (-0.44 s) | 486 ms, 64,761 B |
+| The Anarchy (40 items, no `@font-face`) | 1,824 / 1,823 ms | 1,631 / 1,620 ms (-0.2 s) | 235 ms, 8 items, 19,088 B |
+| Misery (20 items, 8 families) | 3,918 ms | 3,476 ms (-0.44 s) | 513 ms, 20 items, 64,761 B |
 
-The X4 was measured before the speed-ups only (master 1,047 / 1,031 ms, the first branch build 2,774 / 2,797 ms; its
-probe ~140 KB/s); it was not available afterwards. The remaining probe cost is ~25 ms a spine item (opening the entry,
-setting up the inflate), not bytes.
+Before the light probe for books without faces, The Anarchy read all 40 heads (98,845 B) in 1,048 ms: 2,473 /
+2,461 ms (+0.64 s). The X4 was measured before the speed-ups only (master 1,047 / 1,031 ms, the first branch build
+2,774 / 2,797 ms; its probe ~140 KB/s); it was not available afterwards. The remaining probe cost is ~25 ms a spine
+item (opening the entry, setting up the inflate), not bytes.
 
-Misery on the X3: `Probe: 20 of 20 spine items, 64761 bytes, 486 ms`, `Left out TradeBio: 192 bytes of text (est.)`,
+Misery on the X3: `Probe: 20 of 20 spine items, 64761 bytes, 513 ms`, `Left out TradeBio: 192 bytes of text (est.)`,
 body Garamond3LTStd (styles 0x7), accents AmericanTypewriterStd (0x1), JamesHandscript (0x1),
 ITCGaramondStd-BkNarrow (0x5: regular and italic); master chose GoudyReg and ITCGaramondStd-BkCond. The typed
 manuscript (part02a) draws in AmericanTypewriterStd with the hand-filled n's in JamesHandscript inside their words;
