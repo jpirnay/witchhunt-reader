@@ -53,9 +53,12 @@ constexpr size_t kAdobeBytes = 1024;
 // chapter uses) and centred or right-aligned text passed over. Headings, tables and hidden text left out
 // changed one book.
 //
-// The same pass counts the blocks each family is set in, for the accent families: what #3934 (Justin Mitchell) draws
-// in its "Ignore Body Font" mode, the book's families other than the body's, here ranked by blocks, as the reader
-// lays a block out in one family (ChapterHtmlSlimParser::resolveBlockFont).
+// The same pass counts the text each family is set in, by style, for the accent families: what #3934 (Justin
+// Mitchell) draws in its "Ignore Body Font" mode, the book's families other than the body's, here ranked by their
+// text. Inline text counts for its own family, as the reader gives a word in another family its face (a letter filled
+// in by hand inside a typed word); a block whose text is in one family counts as kBlockMinBytes at least, as a heading
+// is drawn in its family at every chapter's start. Counting blocks instead ranked an ad page's four lines above a
+// typed manuscript, and inline families not at all.
 class BodyFontProbe {
  public:
   explicit BodyFontProbe(CssParser& css) : css_(css) {}
@@ -87,21 +90,32 @@ class BodyFontProbe {
     }
     return best->family;
   }
-  // The accent families (Publisher Fonts' Accents): of the families blocks are set in, other than `body`'s and the
-  // reader's, those `usable` takes, the one the most blocks are set in first; their identities, 0 past the last.
+  // The accent families (Publisher Fonts' Accents) into `found`: of the families text is set in, other than the body's
+  // and the reader's, those `usable` takes and whose text is not negligible, the one with the most text first (the
+  // first seen on a tie); their identities, 0 past the last. With the styles of the body's text and theirs.
   template <typename Usable>
-  void accents(const uint32_t body, Usable usable, uint32_t (&out)[kMaxAccents]) const {
-    for (uint32_t& accent : out) {
-      uint32_t bestBlocks = 0;
-      accent = 0;
-      for (const Usage& u : blocks_) {
-        if (u.bytes <= bestBlocks || u.family == 0 || u.family == CssFontFamily::identity(body) ||
-            std::find(out, out + kMaxAccents, u.family) != out + kMaxAccents || !usable(u.family)) {
+  void accents(Usable usable, Found& found) const {
+    const uint32_t body = CssFontFamily::identity(found.body);
+    uint64_t total = 0;
+    for (size_t i = 0; i < styledCount_; ++i) total += score(styled_[i]);
+    for (size_t i = 0; i < styledCount_; ++i) {
+      if (styled_[i].family == body) std::copy_n(styled_[i].bytes, 4, found.bodyStyles);
+    }
+    for (int n = 0; n < kMaxAccents; ++n) {
+      const Styled* best = nullptr;
+      for (size_t i = 0; i < styledCount_; ++i) {
+        const Styled& s = styled_[i];
+        const uint32_t bytes = score(s);
+        if ((best && bytes <= score(*best)) || s.family == 0 || s.family == body ||
+            std::find(found.accents, found.accents + n, s.family) != found.accents + n ||
+            (bytes < kMinFamilyBytes && uint64_t{bytes} * 1000 < total * kMinFamilyPerMille) || !usable(s.family)) {
           continue;
         }
-        accent = u.family;
-        bestBlocks = u.bytes;
+        best = &s;
       }
+      if (!best) break;
+      found.accents[n] = best->family;
+      std::copy_n(best->bytes, 4, found.accentStyles[n]);
     }
   }
 
@@ -124,6 +138,10 @@ class BodyFontProbe {
     }
     Frame& frame = self.frames_[index];
     frame = index == 0 ? Frame{} : self.frames_[index - 1];
+    // Bold and italic as the chapter parser reads them; a CSS weight or style the element defines has the last word.
+    const bool heading = (name[0] | 0x20) == 'h' && name[1] >= '1' && name[1] <= '6' && name[2] == '\0';
+    if (heading || strcasecmp(name, "b") == 0 || strcasecmp(name, "strong") == 0) frame.style |= kBold;
+    if (strcasecmp(name, "i") == 0 || strcasecmp(name, "em") == 0) frame.style |= kItalic;
     self.tag_.assign(name);
     self.class_.assign(classes);
     self.id_.assign(self.css_.hasIdSelectors() ? id : "");
@@ -140,10 +158,10 @@ class BodyFontProbe {
       frame.inParagraph = true;
     }
     // A block, which the reader lays out in one family: its text's when all of it is in one, else its own.
-    if (paragraph || strcasecmp(name, "blockquote") == 0 || strcasecmp(name, "pre") == 0 ||
-        ((name[0] | 0x20) == 'h' && name[1] >= '1' && name[1] <= '6' && name[2] == '\0')) {
+    if (paragraph || heading || strcasecmp(name, "blockquote") == 0 || strcasecmp(name, "pre") == 0) {
       frame.block = static_cast<int8_t>(index);
       frame.textState = 0;
+      frame.blockBytes = 0;
     }
   }
 
@@ -153,8 +171,9 @@ class BodyFontProbe {
     const size_t index = --self.depth_;
     if (index >= kMaxDepth) return;
     const Frame& frame = self.frames_[index];
-    if (frame.block != static_cast<int8_t>(index) || frame.textState == 0) return;
-    self.count(self.blocks_, CssFontFamily::identity(frame.textState == 1 ? frame.textFamily : frame.family), 1);
+    // A short block in one family: its shortfall to kBlockMinBytes, in the style its text starts in.
+    if (frame.block != static_cast<int8_t>(index) || frame.textState != 1 || frame.blockBytes >= kBlockMinBytes) return;
+    self.addText(frame.textFamily, frame.firstStyle, kBlockMinBytes - frame.blockBytes);
   }
 
   static void onText(void* ctx, const char* text, const int len) {
@@ -164,14 +183,18 @@ class BodyFontProbe {
     const auto bytes = static_cast<uint32_t>(VisibleText::visibleBytes(text, len));
     if (!frame.inBody || bytes == 0) return;
     self.count(self.usage_, frame.inParagraph ? frame.paragraphFamily : frame.family, bytes);
+    const uint32_t family = CssFontFamily::identity(frame.family);
+    self.addText(family, frame.style, bytes);
     if (frame.block < 0) return;
     Frame& block = self.frames_[frame.block];
     if (block.textState == 0) {
-      block.textFamily = frame.family;
+      block.textFamily = family;
+      block.firstStyle = frame.style;
       block.textState = 1;
-    } else if (block.textFamily != frame.family) {
+    } else if (block.textFamily != family) {
       block.textState = 2;
     }
+    block.blockBytes = static_cast<uint16_t>(std::min<uint32_t>(block.blockBytes + bytes, kBlockMinBytes));
   }
 
   // An entity the parser passes through (&nbsp; and the like) is one character of text. Without this handler
@@ -184,23 +207,51 @@ class BodyFontProbe {
   static constexpr size_t kMaxDepth = 24;
   // Every face's family, and none; a family named with and without a generic fallback counts twice.
   static constexpr size_t kMaxFamilies = CssParser::MAX_FONT_FACES + 4;
+  // EpdFontFamily's style bits.
+  static constexpr uint8_t kBold = 1;
+  static constexpr uint8_t kItalic = 2;
   struct Frame {
     uint32_t family = 0;           // font-family in effect, inherited
     uint32_t paragraphFamily = 0;  // the family of the paragraph the element is in
-    uint32_t textFamily = 0;       // a block's: the family of its text so far
+    uint32_t textFamily = 0;       // a block's: the family (identity) of its text so far
     bool inBody = false;
     bool inParagraph = false;
-    int8_t block = -1;      // the frame of the block the element is in
-    uint8_t textState = 0;  // a block's: 0 no text yet, 1 all of it in textFamily, 2 in several families
-    void take(const CssStyle& style) {
-      if (style.defined.fontFamily) family = style.fontFamily;
+    int8_t block = -1;       // the frame of the block the element is in
+    uint8_t textState = 0;   // a block's: 0 no text yet, 1 all of it in textFamily, 2 in several families
+    uint8_t style = 0;       // bold and italic in effect, inherited (kBold, kItalic)
+    uint8_t firstStyle = 0;  // a block's: the style its text starts in
+    uint16_t blockBytes = 0;  // a block's: its text so far, up to kBlockMinBytes
+    void take(const CssStyle& css) {
+      if (css.defined.fontFamily) family = css.fontFamily;
+      if (css.hasFontWeight()) style = (style & ~kBold) | (css.fontWeight == CssFontWeight::Bold ? kBold : 0);
+      if (css.hasFontStyle()) style = (style & ~kItalic) | (css.fontStyle == CssFontStyle::Italic ? kItalic : 0);
     }
   };
   struct Usage {
     uint32_t family = 0;
-    uint32_t bytes = 0;  // or blocks
+    uint32_t bytes = 0;
   };
   using Usages = std::array<Usage, kMaxFamilies>;
+  // A family's text (by identity), by style.
+  struct Styled {
+    uint32_t family = 0;
+    uint32_t bytes[4] = {};
+  };
+
+  static uint32_t score(const Styled& s) {
+    uint64_t total = 0;
+    for (const uint32_t bytes : s.bytes) total += bytes;
+    return static_cast<uint32_t>(std::min<uint64_t>(total, UINT32_MAX));
+  }
+
+  // Adds `n`, weighted, to `family`'s text in `style`; a family past the table's room is not counted.
+  void addText(const uint32_t family, const uint8_t style, const uint32_t n) {
+    size_t i = 0;
+    while (i < styledCount_ && styled_[i].family != family) ++i;
+    if (i == styled_.size()) return;
+    if (i == styledCount_) styled_[styledCount_++].family = family;
+    styled_[i].bytes[style] = addWeighted(styled_[i].bytes[style], n, weight256_);
+  }
 
   // Adds `n`, weighted, to `family`'s count; a family past the table's room is not counted.
   void count(Usages& usages, const uint32_t family, const uint32_t n) {
@@ -225,8 +276,9 @@ class BodyFontProbe {
   uint32_t weight256_ = 256;
   size_t cap_ = 0;
   std::array<Frame, kMaxDepth> frames_{};
-  Usages usage_{};   // text bytes by family, an inline accent's counting for its paragraph's
-  Usages blocks_{};  // blocks by family identity
+  Usages usage_{};  // text bytes by family, an inline accent's counting for its paragraph's
+  std::array<Styled, kMaxFamilies> styled_{};  // text by family identity and style, in the order first seen
+  size_t styledCount_ = 0;
   size_t depth_ = 0;
   // resolveStyle()'s arguments, reused so an element costs no allocation once they have grown.
   std::string tag_, class_, id_, inline_;
@@ -622,13 +674,12 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
   found.body = probe->family();
   // An accent needs a face to be drawn (pickFaces makes its nearest the regular).
   probe->accents(
-      found.body,
       [records](const uint32_t family) {
         CssParser::FontFace faces[4];
         pickFaces(records, family, faces);
         return !faces[0].name.empty();
       },
-      found.accents);
+      found);
   return found;
 }
 

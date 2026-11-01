@@ -114,6 +114,26 @@ struct BookFontsTest : testing::Test {
   static constexpr const char* kMissing = "(missing)";
   static uint32_t family(const char* name) { return CssParser::fontFamilyHash(name); }
 
+  // `@font-face` rules for `families`, each with a face of its own name in the book (faceFiles), all one file.
+  static std::string faceRules(const std::vector<std::string>& families) {
+    std::string css;
+    for (const std::string& name : families) {
+      css += "@font-face { font-family: " + name + "; src: url(../Fonts/" + name + ".ttf); }\n";
+    }
+    return css;
+  }
+  static std::vector<File> faceFiles(const std::vector<std::string>& families) {
+    std::vector<File> files;
+    for (const std::string& name : families) files.push_back({"OEBPS/Fonts/" + name + ".ttf", "font/ttf", kTrueType});
+    return files;
+  }
+  // The families found, with the book's face records as prepare() has them.
+  static BookFonts::Found ranked(const Epub& epub) {
+    std::string records;
+    EXPECT_TRUE(CssParser::loadFontFaces(epub.getCachePath(), records));
+    return found(epub, records);
+  }
+
   // The body family's identity, as Stage A compared it.
   static uint32_t detect(const Epub& epub) { return CssFontFamily::identity(found(epub).body); }
   static BookFonts::Found found(const Epub& epub, const std::string& records = {}) {
@@ -549,15 +569,15 @@ TEST_F(BookFontsTest, TheGenericOfMostOfTheBodyTextIsTheBodys) {
   EXPECT_EQ(family("Body") | CssFontFamily::kSansSerif, found(*epub).body);
 }
 
-TEST_F(BookFontsTest, TheAccentIsTheFamilyTheMostOtherBlocksAreSetIn) {
+TEST_F(BookFontsTest, TheAccentIsTheFamilyWithTheMostOtherText) {
   const auto epub = book(kAccentCss, {kAccentChapter},
                          {{"OEBPS/Fonts/b.ttf", "font/ttf", kTrueType},
                           {"OEBPS/Fonts/d.ttf", "font/ttf", kInter},
                           {"OEBPS/Fonts/s.ttf", "font/ttf", kNotoSans}});
   std::string records;
   ASSERT_TRUE(CssParser::loadFontFaces(epub->getCachePath(), records));
-  // Display: three headings. Script: the dedication and the heading set in its span; the inline aside is its
-  // body paragraph's.
+  // Display: three headings, 64 bytes each at least (192). Script: the dedication and the heading set in its span,
+  // 64 each, and the inline aside's 12 (140).
   const BookFonts::Found families = found(*epub, records);
   EXPECT_EQ(family("Body") | CssFontFamily::kSerif, families.body);
   EXPECT_EQ(family("Display"), families.accents[0]);
@@ -584,7 +604,7 @@ TEST_F(BookFontsTest, TheAccentIsTheFamilyTheMostOtherBlocksAreSetIn) {
 }
 
 TEST_F(BookFontsTest, AHeadingSetInASpanCountsForTheSpansFamily) {
-  // Script has two blocks only because the span heading counts for it: with one more Display heading gone, it wins.
+  // The span heading counts for Script (140 with it), not Display (64 without Two and Three).
   std::string chapter = kAccentChapter;
   chapter.replace(chapter.find("<h2>Two</h2><h2>Three</h2>"), 26, "");
   const auto epub = book(kAccentCss, {chapter},
@@ -607,7 +627,7 @@ TEST_F(BookFontsTest, AnAccentWithOnlyABoldFaceIsDrawnInIt) {
   std::string records;
   ASSERT_TRUE(CssParser::loadFontFaces(epub->getCachePath(), records));
   const BookFonts::Found families = found(*epub, records);
-  EXPECT_EQ(family("Display"), families.accents[0]);  // set in the most blocks, as with a regular face
+  EXPECT_EQ(family("Display"), families.accents[0]);  // the most text, as with a regular face
   EXPECT_EQ(family("Script"), families.accents[1]);
   // Its one face is copied as the regular, once: the bold falls back to it.
   ASSERT_EQ(BookFonts::State::Family, BookFonts::prepare(*epub, nullptr));
@@ -656,8 +676,8 @@ TEST_F(BookFontsTest, AnAccentIsCopiedWhenTheBodyIsNotEmbedded) {
 
 namespace {
 
-// Four families besides the body, ranked by their blocks: Display (three), Script (two), Code (one), Rare (one,
-// later in the book).
+// Four families besides the body, ranked by their text: Display (three headings, 192), Script (142), Code (75), Rare
+// (64, later in the book).
 const char* kFourAccentCss =
     "@font-face { font-family: Body; src: url(../Fonts/b.ttf); }\n"
     "@font-face { font-family: Display; src: url(../Fonts/d.ttf); }\n"
@@ -675,7 +695,7 @@ const char* kFourAccentChapter =
 
 }  // namespace
 
-TEST_F(BookFontsTest, TheAccentFamiliesAreRankedByTheirBlocksAndTheFirstThreeCopied) {
+TEST_F(BookFontsTest, TheAccentFamiliesAreRankedByTheirTextAndTheFirstThreeCopied) {
   const auto epub = book(kFourAccentCss, {kFourAccentChapter},
                          {{"OEBPS/Fonts/b.ttf", "font/ttf", kTrueType},
                           {"OEBPS/Fonts/d.ttf", "font/ttf", kInter},
@@ -687,7 +707,7 @@ TEST_F(BookFontsTest, TheAccentFamiliesAreRankedByTheirBlocksAndTheFirstThreeCop
   const BookFonts::Found families = found(*epub, records);
   EXPECT_EQ(family("Display"), families.accents[0]);
   EXPECT_EQ(family("Script"), families.accents[1]);
-  // Code and Rare have a block each; Code's came first, and the inline code counts for its paragraph.
+  // Code: the code block's 64 and the inline code's 11; Rare: its block's 64.
   EXPECT_EQ(family("Code"), families.accents[2]);
 
   ASSERT_EQ(BookFonts::State::Family, BookFonts::prepare(*epub, nullptr));
@@ -704,4 +724,106 @@ TEST_F(BookFontsTest, TheAccentFamiliesAreRankedByTheirBlocksAndTheFirstThreeCop
   EXPECT_EQ(kNotoSans, readFile(fs::path(BookFonts::familyDir(epub->getCachePath(), 1)) / "0.ttf"));
   EXPECT_EQ(kTrueTypeBold, readFile(fs::path(BookFonts::familyDir(epub->getCachePath(), 2)) / "0.ttf"));
   EXPECT_FALSE(fs::exists(BookFonts::familyDir(epub->getCachePath(), 3)));  // Rare: past kMaxAccents
+}
+
+// ---- Ranked by their text ---------------------------------------------------------------------------------
+
+TEST_F(BookFontsTest, AnInlineOnlyFamilyIsAnAccent) {
+  std::string chapter = "<body>";
+  for (int i = 0; i < 20; ++i) {
+    chapter += "<p>";
+    for (int j = 0; j < 5; ++j) chapter += "Du<span class='hand'>n</span>thorpe ";
+    chapter += "</p>";
+  }
+  const auto epub = book(faceRules({"Body", "Hand"}) + "p { font-family: Body }\n.hand { font-family: Hand }\n",
+                         {chapter + "</body>"}, faceFiles({"Body", "Hand"}));
+  EXPECT_EQ(family("Hand"), ranked(*epub).accents[0]);  // in no block of its own
+}
+
+TEST_F(BookFontsTest, TheAccentWithMoreTextOutranksOneWithMoreShortBlocks) {
+  std::string chapter = prose("body", 4 * 1024);
+  chapter.erase(chapter.size() - 7);                                       // "</body>"
+  for (int i = 0; i < 12; ++i) chapter += "<p class='ad'>Buy it now</p>";  // 12 blocks of 10 bytes: 768
+  std::string epigraph;
+  for (int i = 0; i < 100; ++i) epigraph += "words ";
+  for (int i = 0; i < 2; ++i) chapter += "<p class='epi'>" + epigraph + "</p>";  // 2 blocks of 600 bytes
+  const auto epub = book(faceRules({"Body", "Ads", "Epigraph"}) +
+                             ".body { font-family: Body }\n.ad { font-family: Ads }\n.epi { font-family: Epigraph }\n",
+                         {chapter + "</body>"}, faceFiles({"Body", "Ads", "Epigraph"}));
+  const BookFonts::Found families = ranked(*epub);
+  EXPECT_EQ(family("Epigraph"), families.accents[0]);
+  EXPECT_EQ(family("Ads"), families.accents[1]);
+}
+
+TEST_F(BookFontsTest, HeadingsAcrossChaptersOutrankAFewInlineWords) {
+  // Display: ten 8-byte headings, 64 each. Script: twenty 20-byte spans.
+  const std::string chapter =
+      "<body><h2>Chapter.</h2><p>Body prose with <span class='script'>twenty bytes of text</span> in it and "
+      "<span class='script'>twenty bytes of text</span> again, as the body text of a chapter goes on.</p></body>";
+  const auto epub = book(faceRules({"Body", "Display", "Script"}) +
+                             "p { font-family: Body }\nh2 { font-family: Display }\n.script { font-family: Script }\n",
+                         std::vector<std::string>(10, chapter), faceFiles({"Body", "Display", "Script"}));
+  const BookFonts::Found families = ranked(*epub);
+  EXPECT_EQ(family("Display"), families.accents[0]);
+  EXPECT_EQ(family("Script"), families.accents[1]);
+}
+
+TEST_F(BookFontsTest, ANegligibleFamilyTakesNoSlot) {
+  std::vector<std::string> chapters(8, prose("body", 50 * 1024));  // ~280 KB of text
+  chapters.push_back("<body><p class='rare'>Rare</p></body>");
+  const auto epub = book(faceRules({"Body", "Rare"}) + ".body { font-family: Body }\n.rare { font-family: Rare }\n",
+                         chapters, faceFiles({"Body", "Rare"}));
+  EXPECT_EQ(0u, ranked(*epub).accents[0]);
+}
+
+TEST_F(BookFontsTest, ASmallFamilyInAShortBookKeepsItsSlot) {
+  const auto epub = book(faceRules({"Body", "Rare"}) + ".body { font-family: Body }\n.rare { font-family: Rare }\n",
+                         {prose("body", 2 * 1024), "<body><p class='rare'>Rare</p></body>"},
+                         faceFiles({"Body", "Rare"}));
+  EXPECT_EQ(family("Rare"), ranked(*epub).accents[0]);
+}
+
+TEST_F(BookFontsTest, FoundCarriesTheStylesOfTheChosenFamilies) {
+  // Each block's 5 bytes and its 59-byte shortfall to 64, in its first run's style; one item, read whole.
+  const auto epub = book(faceRules({"Body"}) + "p { font-family: Body }\n",
+                         {"<body><p>Plain</p><p><i>Slant</i></p><p><b>Heavy</b></p></body>"}, faceFiles({"Body"}));
+  const BookFonts::Found families = ranked(*epub);
+  ASSERT_EQ(family("Body"), CssFontFamily::identity(families.body));
+  EXPECT_EQ(64u, families.bodyStyles[0]);
+  EXPECT_EQ(64u, families.bodyStyles[1]);  // bold
+  EXPECT_EQ(64u, families.bodyStyles[2]);  // italic
+  EXPECT_EQ(0u, families.bodyStyles[3]);
+}
+
+TEST_F(BookFontsTest, AMiseryShapedBookGetsItsTypewriterAndHandFilledLetters) {
+  // Misery's shape: an ad page and a part title in families of their own before the text; the typed manuscript's
+  // paragraphs inside a chapter, with letters filled in by hand inside its words.
+  std::string italic;
+  for (int i = 0; i < 100; ++i) italic += "italic";  // 600 bytes
+  std::string typed;
+  for (int i = 0; i < 100; ++i) {
+    typed += "Du<span class='hand'>n</span>thorpe i<span class='hand'>n</span> the rai<span class='hand'>n</span>. ";
+  }
+  std::string chapter = prose("body", 20 * 1024);
+  chapter.erase(chapter.size() - 7);  // "</body>"
+  for (int i = 0; i < 5; ++i) chapter += "<p class='typed'>" + typed + "</p>";
+  std::vector<std::string> chapters = {
+      "<body><img src='c.jpg'/></body>",
+      "<body><p class='ad'>Get updates</p><p class='ad'>Sign up</p><p class='ad'>Click</p><p class='ad'>Now</p></body>",
+      prose("body", 8 * 1024)};
+  for (int i = 0; i < 5; ++i) chapters.push_back("<body><p class='body'>Front matter.</p></body>");
+  chapters.push_back("<body><p class='part'>PART I</p><p class='part'><i>" + italic + "</i></p></body>");
+  chapters.push_back(chapter + "</body>");
+  const std::vector<std::string> names = {"Body", "Ads", "Narrow", "Typed", "Hand"};
+  const auto epub = book(faceRules(names) +
+                             ".body { font-family: Body }\n.ad { font-family: Ads }\n.part { font-family: Narrow }\n"
+                             ".typed { font-family: Typed }\n.hand { font-family: Hand }\n",
+                         chapters, faceFiles(names));
+  const BookFonts::Found families = ranked(*epub);
+  EXPECT_EQ(family("Body"), CssFontFamily::identity(families.body));
+  EXPECT_EQ(family("Typed"), families.accents[0]);
+  EXPECT_EQ(family("Hand"), families.accents[1]);
+  EXPECT_EQ(family("Narrow"), families.accents[2]);  // Ads, 4 short blocks, out-ranked
+  EXPECT_EQ(64u, families.accentStyles[2][0]);        // PART I
+  EXPECT_EQ(600u, families.accentStyles[2][2]);       // its italic line
 }

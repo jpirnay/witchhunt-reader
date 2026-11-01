@@ -12,8 +12,9 @@ class Epub;
 /// its CSS and a sample of its spine's text, and copied out of the EPUB as plain TrueType or CFF files to
 /// `<book cache>/fonts/`, where they load like a `.ttf` family on the card.
 ///
-/// The body text's family, and up to kMaxAccents accent families, ranked by the blocks (headings, a dedication, a
-/// code block) set in them. The glyph store holds them together, or the accent families beside a TrueType reader
+/// The body text's family, and up to kMaxAccents accent families, ranked by the text set in them (headings, a
+/// dedication, a typed letter, words inside a paragraph). The glyph store holds them together, or the accent families
+/// beside a TrueType reader
 /// font (TTF spec, section 11.1). What is refused, so the book keeps the reader's font (or, for an accent family,
 /// the next one takes its place): a family that is generic or not embedded; WOFF, WOFF2 and font collections;
 /// fonts encrypted rather than obfuscated; faces over kMaxFaceBytes. TrueType and CFF (`OTTO`) faces are taken.
@@ -44,6 +45,14 @@ constexpr size_t kProbeBudgetBytes = 512 * 1024;
 constexpr int kProbeMaxItems = 64;
 constexpr size_t kProbeMinItemBytes = 8 * 1024;
 constexpr size_t kProbeMaxItemBytes = 64 * 1024;
+/// A block (p, div, li, dd, blockquote, pre, h1-h6) whose text is in one family counts as this much text at least: a
+/// heading at every chapter's start is not out-ranked by a few lines of inline text.
+constexpr uint32_t kBlockMinBytes = 64;
+/// An accent family with less text than kMinFamilyBytes and than kMinFamilyPerMille of the book's (as the probe
+/// estimates them) takes no slot, although one is free: each family loaded costs the reader 2-3 KB of heap. Both, so a
+/// short book keeps its small families.
+constexpr uint32_t kMinFamilyBytes = 256;
+constexpr uint32_t kMinFamilyPerMille = 1;
 
 enum class State : uint8_t {
   Pending,  ///< not examined yet (or by another kVersion), or the last attempts failed for a passing reason
@@ -88,11 +97,15 @@ struct Found {
   /// an inline accent's text counting for its paragraph's, over the spine items' heads prepare() reads, each weighted
   /// to the book (probeWeight256). 0 for the reader's font.
   uint32_t body = 0;
-  /// The accent families' identities: the families blocks (p, div, li, dd, blockquote, pre, h1-h6) are set in,
-  /// other than the body's, among those `records` (CssParser::loadFontFaces) has a regular face of, the one the most
-  /// blocks are set in first; 0 past the last. A block is set in its text's family when all of its text is in one,
-  /// else in its own.
+  /// The accent families' identities: the families text is set in, inline text included, other than the body's,
+  /// among those `records` (CssParser::loadFontFaces) has a face of, the one with the most text first; 0 past the last.
+  /// A block whose text is in one family counts as kBlockMinBytes of it at least. A family with negligible text
+  /// (kMinFamilyBytes, kMinFamilyPerMille) is left out.
   uint32_t accents[kMaxAccents] = {};
+  /// The body family's text and each accent family's, by style (EpdFontFamily numbering: bit 0 bold, bit 1 italic),
+  /// as the accents are ranked by it.
+  uint32_t bodyStyles[4] = {};
+  uint32_t accentStyles[kMaxAccents][4] = {};
   uint16_t itemsRead = 0;  ///< the spine items read (one that cannot be read is passed over)
   uint32_t bytesRead = 0;  ///< the bytes of them parsed
 };
