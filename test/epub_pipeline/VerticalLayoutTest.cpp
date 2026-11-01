@@ -6,6 +6,7 @@
 #include <GfxRenderer.h>
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <sstream>
@@ -452,7 +453,35 @@ std::vector<SyntheticFile> png(const uint32_t width, const uint32_t height) {
   return {{"img.png", "image/png", syntheticPngHeader(width, height)}};
 }
 constexpr const char* kImageBody = "<p><img src=\"img.png\" alt=\"\"/></p>";
+
+// The y= of the first "  IMG " record in a dump, -1 when there is none.
+int firstImageY(const std::string& dump) {
+  const size_t at = dump.find("  IMG y=");
+  return at == std::string::npos ? -1 : std::atoi(dump.c_str() + at + 8);
+}
 }  // namespace
+
+// The 200 x 400 image is a 400 x 200 box in the turned frame; alone on a page 460 wide it moves to (460 - 200) / 2.
+TEST_F(VerticalLayout, ALoneImageIsCentredAcrossAVerticalPage) {
+  const std::string on = dump("", document(kImageBody), profileOf(VerticalText::On), "", png(200, 400));
+  EXPECT_NE(std::string::npos, on.find("IMG y=130 x=180 w=400 h=200 ")) << on;
+}
+
+// Beside text an image keeps its place in the flow: the same block position as on the horizontal page.
+TEST_F(VerticalLayout, AnImageBesideTextKeepsItsPlace) {
+  const std::string body = std::string("<p>本文</p>") + kImageBody;
+  const int on = firstImageY(dump("", document(body), profileOf(VerticalText::On), "", png(200, 400)));
+  const int off = firstImageY(dump("", document(body), profileOf(VerticalText::Off), "", png(200, 400)));
+  EXPECT_GT(on, 0);
+  EXPECT_EQ(off, on);
+}
+
+// An image as wide as the block extent stays where it is (the acceptance book's full-page maps).
+TEST_F(VerticalLayout, AnImageSpanningThePageIsNotMoved) {
+  const std::string on = dump("", document(kImageBody), profileOf(VerticalText::On), "", png(460, 400));
+  EXPECT_EQ(0, firstImageY(on)) << on;
+  EXPECT_NE(std::string::npos, on.find(" h=460 ")) << on;
+}
 
 TEST_F(VerticalLayout, APortraitImageIsSizedTurnedIntoTheColumns) {
   const std::string on = dump("", document(kImageBody), profileOf(VerticalText::On), "", png(200, 400));

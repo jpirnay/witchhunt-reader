@@ -1057,7 +1057,7 @@ class ChapterHtmlSlimParser final : public Print {
   // (a compression on the font's line height). Off by default, and with a floor of 0.
   void setBookLineHeight(float floor, uint16_t emPx);
   // Widow and orphan control (keepTogetherBreak), on by default. Off, a page fills before a paragraph's lines go
-  // over; a heading still keeps with its text.
+  // over; a heading still keeps with its text. A vertical section ignores it and always fills.
   void setWidowOrphanControl(const bool on) { widowOrphanControl_ = on; }
 
  private:
@@ -1092,7 +1092,8 @@ class ChapterHtmlSlimParser final : public Print {
   // still fits. A placed line is never moved, so the decision looks ahead instead. `nextLine`
   // asks the same for the line after the one about to be placed.
   bool keepTogetherBreak(int lineHeight, bool nextLine = false) const;
-  // The reader's "Avoid Widows & Orphans" (setWidowOrphanControl). Off, only headings end a page early.
+  // The reader's "Avoid Widows & Orphans" (setWidowOrphanControl). Off, only headings end a page early. A vertical
+  // section ignores it.
   bool widowOrphanControl_ = true;
   static constexpr int kOrphans = 2;
   static constexpr int kWidows = 2;

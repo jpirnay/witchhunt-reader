@@ -24,6 +24,9 @@
 //   8. With the reader's "Avoid Widows & Orphans" off, every page fills (#579: on a page of ten
 //      lines, two-line paragraphs that may not split left whole lines empty). A heading still
 //      keeps with its text, and the chapter is cached apart from the one laid out with the rule.
+//   9. A vertical section (the viewport is swapped, so the frame is the same 100 px column by
+//      240 px block extent) fills its pages whatever the setting says; a heading still keeps
+//      with its text.
 //
 // test_keep_together.epub sets shapes 1-5 and its golden pins them in heap mode, the harness
 // default, so those run here in the lent arena only. The rest run in both modes: the book has no
@@ -60,6 +63,7 @@ class KeepTogetherLayout : public testing::Test {
   int words = 0;
   bool lentArena = false;
   bool widowOrphanControl = true;
+  bool vertical = false;
   std::shared_ptr<Epub> book;  // the last one laid out
 
   Section::BuildParams buildParams() const {
@@ -69,6 +73,11 @@ class KeepTogetherLayout : public testing::Test {
     params.lineCompression = 1.0f;
     params.embeddedStyle = true;
     params.widowOrphanControl = widowOrphanControl;
+    if (vertical) {
+      params.verticalText = VerticalText::On;
+      params.viewportWidth = 240;
+      params.viewportHeight = 100;
+    }
     return params;
   }
 
@@ -130,6 +139,7 @@ class KeepTogetherLayout : public testing::Test {
       section.currentPage = p;
       const auto page = section.loadPageFromSectionFile();
       if (!page) continue;
+      if (vertical) EXPECT_TRUE(page->isVertical());
       for (const auto& el : page->elements) {
         if (el->getTag() != TAG_PageLine) continue;
         const TextBlock& block = *static_cast<const PageLine&>(*el).getBlock();
@@ -263,6 +273,58 @@ TEST_P(KeepTogetherFixture, ControlOffIsCachedApart) {
   EXPECT_TRUE(section.loadSectionFile(params));
   params.widowOrphanControl = false;
   EXPECT_FALSE(section.loadSectionFile(params)) << "pages laid out with the rule were reused without it";
+}
+
+// 9 lines then 1 of 4 fit: the horizontal rule would move the paragraph; a vertical page fills.
+TEST_P(KeepTogetherFixture, AVerticalSectionLeavesAnOrphan) {
+  vertical = true;
+  std::string first;
+  const auto l = layout(fill(9) + para(4, &first));
+  EXPECT_EQ(l.pageOf.at(first), 0) << "the column fits: a vertical page fills it";
+  EXPECT_EQ(l.linesOn.at(0), 10);
+}
+
+// 7 lines then 3 of 4 fit: the horizontal rule stops at 2, leaving two for the next page.
+TEST_P(KeepTogetherFixture, AVerticalSectionLeavesAWidow) {
+  vertical = true;
+  std::string first, last;
+  const auto l = layout(fill(7) + para(4, &first, &last));
+  EXPECT_EQ(l.linesOn.at(0), 10);
+  EXPECT_EQ(l.linesOn.at(1), 1);
+  EXPECT_EQ(l.pageOf.at(last), 1);
+}
+
+// The h2 is 34 px at 192..226 with no room for two lines below (keep-with-next, unchanged).
+TEST_P(KeepTogetherFixture, AVerticalHeadingStillMovesWithWhatFollows) {
+  vertical = true;
+  std::string first;
+  const auto l = layout(fill(8) + "<h2>Hdg</h2>" + para(3, &first));
+  EXPECT_EQ(l.pageOf.at("Hdg"), 1);
+  EXPECT_EQ(l.pageOf.at(first), 1);
+}
+
+// 1 + 10 + 10 lines of 21 on pages 0-2.
+TEST_P(KeepTogetherFixture, AVerticalParagraphLongerThanAPageStillSplits) {
+  vertical = true;
+  std::string first, last;
+  const auto l = layout(fill(9) + para(21, &first, &last));
+  EXPECT_EQ(l.linesOn.at(0), 10);
+  EXPECT_EQ(l.pageOf.at(first), 0);
+  EXPECT_EQ(l.pageOf.at(last), 2);
+}
+
+// 9 lines then 1 of 4 fit (as the orphan case above): the page ends the same with the setting on and off.
+TEST_P(KeepTogetherFixture, AVerticalSectionIgnoresTheSetting) {
+  vertical = true;
+  widowOrphanControl = true;
+  std::string first;
+  const auto on = layout(fill(9) + para(4, &first));
+  const int onPage = on.pageOf.at(first);
+  const int onLines = on.linesOn.at(0);
+  widowOrphanControl = false;
+  const auto off = layout(fill(9) + para(4, &first));
+  EXPECT_EQ(off.pageOf.at(first), onPage);
+  EXPECT_EQ(off.linesOn.at(0), onLines);
 }
 
 INSTANTIATE_TEST_SUITE_P(HeapAndLentArena, KeepTogetherFixture, testing::Bool(),

@@ -23,11 +23,11 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 | 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; the horizontal right-to-left case of FlowContext and page progression, which step 3 built for vertical text ([below](#what-step-1-takes-from-step-3)) | open |
 | 2 | Arabic script; before its plan, decide on one shaper for Arabic and the Indic scripts ([below](#complex-shaping-arabic-and-the-indic-scripts)) | open |
 | 3 | Vertical frame (from the spike); the vertical decision and its settings; FlowContext and page progression | shipped (#577) ([plan](../superpowers/plans/2026-10-28-writing-modes-step3.md)) |
-| 4 | Vertical typography: baked vertical forms, small kana, tate-chu-yoko (the per-word flag), A3a in vertical | open |
+| 4 | Vertical typography: widows and orphans off and lone images centred (PR 1); 、。 and small kana placed from glyph ink, A3a along the column, Traditional Chinese marks (PR 2); tate-chu-yoko (PR 3); the dictionary on vertical pages (PR 4) | in progress: PR 1 #594 ([design](../superpowers/specs/2026-10-30-writing-modes-step4-design.md), [PR 1 plan](../superpowers/plans/2026-10-30-writing-modes-step4-pr1.md)) |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
 
-**Next step.** Step 3 has shipped. Not chosen yet: step 4 continues the vertical work, step 1 starts right to left
-(asked of the maintainer on 2026-10-29; no answer yet). Line spacing (`cjk.md`, step 10), which reads the
+**Next step.** Step 4 is in progress (chosen and its design approved by the maintainer on 2026-10-30): PR 1 here,
+PR 2 (placed marks) next. Step 1 (right to left) follows step 4. Line spacing (`cjk.md`, step 10), which reads the
 `line-height` step 0 keeps, has shipped.
 
 ## What step 1 takes from step 3
@@ -151,7 +151,7 @@ Step 3 ships vertical text with these limits; step 4 (vertical typography) picks
 - **Punctuation stays rough.** `drawsUpright` (`lib/Epub/Epub/VerticalOrientation.cpp`) is the one place a UAX #50
   class becomes a drawing: U and Tu characters (、。, small kana, ！？) upright, R and Tr (brackets, dashes, ……, ー)
   sideways. There are no vertical forms, and Tu marks are not placed in their cell. Step 4 places Tu from
-  `getGlyphInk` or a re-cut font. With A3a in vertical, a 、 or 。 that A3b pushed in (a narrowed box at a
+  glyph ink (step 4 PR 2; no font re-cut, design Decision 1). With A3a in vertical, a 、 or 。 that A3b pushed in (a narrowed box at a
   column's end, or before a closing bracket) keeps its horizontal ink: drawn upright it can reach half an em past
   its box.
 - **The dictionary is not available in vertical text.** `EpubReaderActivity::openDictionary` returns on a
@@ -162,6 +162,5 @@ Step 3 ships vertical text with these limits; step 4 (vertical typography) picks
 - **Drop caps are off in a vertical section** (`ChapterHtmlSlimParser::tryStartDropCapCapture`); their ink
   metrics are horizontal.
 - **`vertical-lr` books are set horizontally** under Automatic; only `vertical-rl` has a turned frame.
-- **A lone image on a vertical page** is not centred along the block axis: a small picture sits at the right edge.
 - **The new settings' labels** (Vertical Text, Automatic, Page Turn Buttons, Follow Book, Fixed) are English in
   every UI language until a translation pass.

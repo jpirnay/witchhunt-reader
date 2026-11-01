@@ -1,6 +1,6 @@
 BOOK title=Vertical Text lang=ja spine=2 toc=0 reliableToc=0 ppd=rtl
 SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
- PAGE 0 elements=17 footnotes=1 turned=460
+ PAGE 0 elements=18 footnotes=1 turned=460
   LINE y=0 x=0 align=2 mult=1.000 hfid=0 words=6
    W x=320 s=1 z=100 t=第
    W x=337 s=1 z=100 t=一
@@ -619,9 +619,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=116 s=0 z=100 t=ん
    W x=132 s=0 z=100 t=だ
    W x=148 s=0 z=100 t=。
-  FN n=奥付 href=ch2.xhtml#colophon
- PAGE 1 elements=16 footnotes=0 turned=460
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=45
+  LINE y=417 x=0 align=0 mult=1.000 hfid=0 words=45
    W x=20 s=0 z=100 t=こ
    W x=36 s=0 z=100 t=の
    W x=52 s=4 z=100 t=下
@@ -669,7 +667,9 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=740 s=0 z=100 t=。
    E first=12 count=8 m=5
    E first=22 count=8 m=1
-  LINE y=33 x=0 align=0 mult=1.000 hfid=0 words=45
+  FN n=奥付 href=ch2.xhtml#colophon
+ PAGE 1 elements=15 footnotes=0 turned=460
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=45
    W x=4 s=0 z=100 t=読
    W x=20 s=0 z=100 t=む
    W x=37 s=0 z=100 t=者
@@ -715,12 +715,12 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=706 s=0 z=100 t=聞
    W x=723 s=0 z=100 t=こ
    W x=740 s=0 z=100 t=え
-  LINE y=57 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=4 s=0 z=100 t=て
    W x=20 s=0 z=100 t=い
    W x=36 s=0 z=100 t=た
    W x=52 s=0 z=100 t=。
-  LINE y=81 x=0 align=0 mult=1.000 hfid=0 words=43
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=43
    W x=20 s=0 z=100 t=夜
    W x=36 s=0 z=100 t=が
    W x=53 s=0 z=100 t=明
@@ -764,7 +764,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=707 s=0 z=100 t=し
    W x=724 s=0 z=100 t=た
    W x=740 s=0 z=100 t=。
-  LINE y=105 x=0 align=0 mult=1.000 hfid=0 words=45
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=45
    W x=4 s=0 z=100 t=旅
    W x=20 s=0 z=100 t=人
    W x=37 s=0 z=100 t=は
@@ -810,14 +810,14 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=706 s=0 z=100 t=い
    W x=723 s=0 z=100 t=煙
    W x=740 s=0 z=100 t=を
-  LINE y=129 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=4 s=0 z=100 t=上
    W x=20 s=0 z=100 t=げ
    W x=36 s=0 z=100 t=て
    W x=52 s=0 z=100 t=い
    W x=68 s=0 z=100 t=た
    W x=84 s=0 z=100 t=。
-  LINE y=153 x=0 align=0 mult=1.000 hfid=0 words=45
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=45
    W x=20 s=0 z=100 t=峠
    W x=36 s=0 z=100 t=の
    W x=53 s=0 z=100 t=茶
@@ -863,7 +863,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=706 s=0 z=100 t=た
    W x=723 s=0 z=100 t=茶
    W x=740 s=0 z=100 t=碗
-  LINE y=177 x=0 align=0 mult=1.000 hfid=0 words=45
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=45
    W x=4 s=0 z=100 t=に
    W x=20 s=0 z=100 t=熱
    W x=37 s=0 z=100 t=い
@@ -909,7 +909,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=706 s=0 z=100 t=窓
    W x=723 s=0 z=100 t=の
    W x=740 s=0 z=100 t=外
-  LINE y=201 x=0 align=0 mult=1.000 hfid=0 words=44
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=44
    W x=4 s=0 z=100 t=に
    W x=20 s=0 z=100 t=は
    W x=36 s=0 z=100 t=、
@@ -954,7 +954,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=706 s=0 z=100 t=の
    W x=723 s=0 z=100 t=古
    W x=740 s=0 z=100 t=い
-  LINE y=225 x=0 align=0 mult=1.000 hfid=0 words=46
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=46
    W x=4 s=0 z=100 t=祭
    W x=20 s=0 z=100 t=り
    W x=36 s=0 z=100 t=や
@@ -1001,7 +1001,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=707 s=0 z=100 t=ず
    W x=724 s=0 z=100 t=き
    W x=740 s=0 z=100 t=、
-  LINE y=249 x=0 align=0 mult=1.000 hfid=0 words=13
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=13
    W x=4 s=0 z=100 t=茶
    W x=20 s=0 z=100 t=を
    W x=36 s=0 z=100 t=ゆ
@@ -1015,7 +1015,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=164 s=0 z=100 t=し
    W x=180 s=0 z=100 t=た
    W x=196 s=0 z=100 t=。
-  LINE y=273 x=0 align=0 mult=1.000 hfid=0 words=44
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=44
    W x=20 s=0 z=100 t=日
    W x=36 s=0 z=100 t=が
    W x=53 s=0 z=100 t=傾
@@ -1060,7 +1060,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=706 s=0 z=100 t=が
    W x=723 s=0 z=100 t=見
    W x=740 s=0 z=100 t=え
-  LINE y=297 x=0 align=0 mult=1.000 hfid=0 words=45
+  LINE y=264 x=0 align=0 mult=1.000 hfid=0 words=45
    W x=4 s=0 z=100 t=た
    W x=20 s=0 z=100 t=。
    W x=36 s=0 z=100 t=足
@@ -1106,7 +1106,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=707 s=0 z=100 t=吸
    W x=724 s=0 z=100 t=い
    W x=740 s=0 z=100 t=、
-  LINE y=321 x=0 align=0 mult=1.000 hfid=0 words=44
+  LINE y=288 x=0 align=0 mult=1.000 hfid=0 words=44
    W x=4 s=0 z=100 t=こ
    W x=20 s=0 z=100 t=れ
    W x=37 s=0 z=100 t=ま
@@ -1151,7 +1151,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=706 s=0 z=100 t=た
    W x=723 s=0 z=100 t=言
    W x=740 s=0 z=100 t=葉
-  LINE y=345 x=0 align=0 mult=1.000 hfid=0 words=44
+  LINE y=312 x=0 align=0 mult=1.000 hfid=0 words=44
    W x=4 s=0 z=100 t=の
    W x=20 s=0 z=100 t=一
    W x=37 s=0 z=100 t=つ
@@ -1196,7 +1196,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=4 truncated=0 cssFallback=0 vertical=1
    W x=706 s=0 z=100 t=の
    W x=723 s=0 z=100 t=吠
    W x=740 s=0 z=100 t=え
-  LINE y=369 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=336 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=4 s=0 z=100 t=る
    W x=20 s=0 z=100 t=声
    W x=36 s=0 z=100 t=が
