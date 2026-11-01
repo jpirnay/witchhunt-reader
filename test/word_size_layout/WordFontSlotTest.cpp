@@ -69,7 +69,7 @@ ParsedText threeWords(const TextBlock::WordFont& slot1) {
 
 }  // namespace
 
-TEST(WordFontSlots, AWordInASlotIsMeasuredAndSpacedInItsFont) {
+TEST(WordFontSlots, AWordInASlotIsMeasuredInItsFontAndSpacedInTheBlocks) {
   GfxRenderer renderer;
   ParsedText text = threeWords({kWide, 1.0f});
   const auto lines = layout(text, renderer, 400);
@@ -77,12 +77,25 @@ TEST(WordFontSlots, AWordInASlotIsMeasuredAndSpacedInItsFont) {
   const TextBlock& line = *lines[0];
   EXPECT_EQ(0, line.wordXpos(0));
   EXPECT_EQ(20 + GfxRenderer::SPACE_W, line.wordXpos(1));  // aa, then aa's space
-  // bb is two wide glyphs, and the space after it is bb's font's.
-  EXPECT_EQ(line.wordXpos(1) + 2 * GfxRenderer::WIDE_GLYPH_W + GfxRenderer::WIDE_SPACE_W, line.wordXpos(2));
+  // bb is two wide glyphs; the space after it is the block's, as cc's is: a span ends with its word, the space is in
+  // the text around it (ParsedText::spaceSource).
+  EXPECT_EQ(line.wordXpos(1) + 2 * GfxRenderer::WIDE_GLYPH_W + GfxRenderer::SPACE_W, line.wordXpos(2));
   EXPECT_EQ(nullptr, line.wordFont(0));
   ASSERT_NE(nullptr, line.wordFont(1));
   EXPECT_EQ(kWide, line.wordFont(1)->fontId);
   EXPECT_EQ(nullptr, line.wordFont(2));
+}
+
+TEST(WordFontSlots, TheSpaceBetweenTwoWordsOfASlotIsTheSlotsFont) {
+  // A span of several words: the spaces inside it are its own.
+  GfxRenderer renderer;
+  ParsedText text(false, false, noIndentStyle());
+  text.addWord("bb", kRegular, false, false, /*sizePct=*/100, 0, /*fontSlot=*/1);
+  text.addWord("cc", kRegular, false, false, /*sizePct=*/100, 0, /*fontSlot=*/1);
+  text.setFontSlot(1, {kWide, 1.0f});
+  const auto lines = layout(text, renderer, 400);
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_EQ(2 * GfxRenderer::WIDE_GLYPH_W + GfxRenderer::WIDE_SPACE_W, lines[0]->wordXpos(1));
 }
 
 TEST(WordFontSlots, TheSlotsScaleStandsInForTheBlocksAndComposesWithTheWordsSize) {
