@@ -145,7 +145,7 @@ TEST_P(VerticalRules, UprightCharactersAreDrawnInTheReadersFrameAndRunsSideways)
           ASSERT_FALSE(draw.text.empty());
           if (draw.frame == GfxRenderer::Portrait) {
             const bool isCombined =
-                std::any_of(combined.begin(), combined.end(), [&draw](const turnedframe::Rect& cell) {
+                std::any_of(combined.begin(), combined.end(), [&draw, &r](const turnedframe::Rect& cell) {
                   // The draw's top is its baseline less the run's ascender; the baseline lies in [cell.y, cell.y + em).
                   return draw.x >= cell.x && draw.x < cell.x + cell.width &&
                          draw.y >= cell.y - r.getFontAscenderSizeScaled(1, draw.scale) && draw.y < cell.y + cell.height;

@@ -806,6 +806,31 @@ TEST_F(VerticalLayout, DigitsTwoCombinesOnlyTwoDigits) {
   EXPECT_EQ(std::vector<std::string>{"12"}, combinedWords(dumped)) << dumped;
 }
 
+// A ruby group whose base combines. The base is one em (24) down the column and the four kana (8 px each, 32) are
+// wider, so applyRubyWidths widens the base's share to 32 and centres the em in it: the word sits 8 in from the group's
+// x. The base's xpos is what the ruby record follows: the box (w = 32) sits 8 before the base, and the base is one em
+// (24) wide though the annotation is wider. Alone: box 4, base 12, next word 36. After a character (x = 4, one em) the
+// base is 28, the box 20 (28 - 8) and the next word 52 (28 + 24): the record moved with the word, 16 right of alone.
+TEST_F(VerticalLayout, ACombinedWordCanBeARubyBase) {
+  const pipeline_harness::Profile on = profileOf(VerticalText::On);
+  const std::string alone =
+      dump(kCombineCss, document("<p><ruby><span class=\"tcy\">12</span><rt>じゅうに</rt></ruby>後</p>"), on);
+  const std::string after =
+      dump(kCombineCss, document("<p>前<ruby><span class=\"tcy\">12</span><rt>じゅうに</rt></ruby>後</p>"), on);
+  EXPECT_EQ(std::vector<std::string>{"12"}, combinedWords(alone)) << alone;
+  EXPECT_EQ(std::vector<std::string>{"12"}, combinedWords(after)) << after;
+  EXPECT_EQ(1, occurrences(alone, "   R first=0 count=1 x=4 w=32 ")) << alone;
+  EXPECT_EQ(1, occurrences(after, "   R first=1 count=1 x=20 w=32 ")) << after;
+  const std::vector<DumpedWord> first = dumpedWords(alone);
+  const std::vector<DumpedWord> second = dumpedWords(after);
+  ASSERT_EQ(2u, first.size()) << alone;
+  ASSERT_EQ(3u, second.size()) << after;
+  EXPECT_EQ(12, first[0].x);
+  EXPECT_EQ(36, first[1].x);
+  EXPECT_EQ(28, second[1].x);
+  EXPECT_EQ(52, second[2].x);
+}
+
 // A flagged word that does not combine is never hyphenated down a column: a piece of it short enough to combine on a
 // later pass (a page-boundary retry, a continuation) would set it half upright. abcdefgh (12 + 6 + 7 + 8 + 9 + 10 + 11
 // + 12 = 75 px, eight characters) is wider than the 48 px column (60 rounded down to whole ems), so unflagged it is
