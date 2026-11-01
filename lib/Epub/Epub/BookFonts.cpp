@@ -92,14 +92,20 @@ class BodyFontProbe {
   }
   // The accent families (Publisher Fonts' Accents) into `found`: of the families text is set in, other than the body's
   // and the reader's, those `usable` takes and whose text is not negligible, the one with the most text first (the
-  // first seen on a tie); their identities, 0 past the last. With the styles of the body's text and theirs.
-  template <typename Usable>
-  void accents(Usable usable, Found& found) const {
+  // first seen on a tie); their identities, 0 past the last. With the styles of the body's text and theirs. Each
+  // usable family left out as negligible goes to `leftOut` with its text.
+  template <typename Usable, typename LeftOut>
+  void accents(Usable usable, LeftOut leftOut, Found& found) const {
     const uint32_t body = CssFontFamily::identity(found.body);
     uint64_t total = 0;
     for (size_t i = 0; i < styledCount_; ++i) total += score(styled_[i]);
+    const auto negligible = [total](const uint32_t bytes) {
+      return bytes < kMinFamilyBytes && uint64_t{bytes} * 1000 < total * kMinFamilyPerMille;
+    };
     for (size_t i = 0; i < styledCount_; ++i) {
-      if (styled_[i].family == body) std::copy_n(styled_[i].bytes, 4, found.bodyStyles);
+      const Styled& s = styled_[i];
+      if (s.family == body) std::copy_n(s.bytes, 4, found.bodyStyles);
+      if (s.family != 0 && s.family != body && negligible(score(s)) && usable(s.family)) leftOut(s.family, score(s));
     }
     for (int n = 0; n < kMaxAccents; ++n) {
       const Styled* best = nullptr;
@@ -107,8 +113,8 @@ class BodyFontProbe {
         const Styled& s = styled_[i];
         const uint32_t bytes = score(s);
         if ((best && bytes <= score(*best)) || s.family == 0 || s.family == body ||
-            std::find(found.accents, found.accents + n, s.family) != found.accents + n ||
-            (bytes < kMinFamilyBytes && uint64_t{bytes} * 1000 < total * kMinFamilyPerMille) || !usable(s.family)) {
+            std::find(found.accents, found.accents + n, s.family) != found.accents + n || negligible(bytes) ||
+            !usable(s.family)) {
           continue;
         }
         best = &s;
@@ -216,10 +222,10 @@ class BodyFontProbe {
     uint32_t textFamily = 0;       // a block's: the family (identity) of its text so far
     bool inBody = false;
     bool inParagraph = false;
-    int8_t block = -1;       // the frame of the block the element is in
-    uint8_t textState = 0;   // a block's: 0 no text yet, 1 all of it in textFamily, 2 in several families
-    uint8_t style = 0;       // bold and italic in effect, inherited (kBold, kItalic)
-    uint8_t firstStyle = 0;  // a block's: the style its text starts in
+    int8_t block = -1;        // the frame of the block the element is in
+    uint8_t textState = 0;    // a block's: 0 no text yet, 1 all of it in textFamily, 2 in several families
+    uint8_t style = 0;        // bold and italic in effect, inherited (kBold, kItalic)
+    uint8_t firstStyle = 0;   // a block's: the style its text starts in
     uint16_t blockBytes = 0;  // a block's: its text so far, up to kBlockMinBytes
     void take(const CssStyle& css) {
       if (css.defined.fontFamily) family = css.fontFamily;
@@ -276,7 +282,7 @@ class BodyFontProbe {
   uint32_t weight256_ = 256;
   size_t cap_ = 0;
   std::array<Frame, kMaxDepth> frames_{};
-  Usages usage_{};  // text bytes by family, an inline accent's counting for its paragraph's
+  Usages usage_{};                             // text bytes by family, an inline accent's counting for its paragraph's
   std::array<Styled, kMaxFamilies> styled_{};  // text by family identity and style, in the order first seen
   size_t styledCount_ = 0;
   size_t depth_ = 0;
@@ -417,6 +423,14 @@ void pickFaces(std::string_view records, const uint32_t family, CssParser::FontF
   }
 }
 
+// The name the book declares `family` under, its first face's, for the log.
+std::string_view familyName(std::string_view records, const uint32_t family) {
+  for (CssParser::FontFace face; CssParser::nextFontFace(records, face);) {
+    if (face.family == family) return face.name;
+  }
+  return "?";
+}
+
 // A family without a regular face to copy (a script declared italic only, a display face bold only, an italic that
 // carries the family's text) draws in its nearest: that face becomes the regular, and the styles it leaves fall back
 // to it. Moved, not copied, so the store holds it once.
@@ -510,7 +524,8 @@ uint8_t examine(const Epub& epub, BuildArena* scratch, std::string& records, Fam
     for (uint8_t style = 0; style < 4; ++style) present |= picked[style].name.empty() ? 0 : 1u << style;
     if (present == 0) continue;  // not embedded
     // The faces of styles with little text are not copied: the engine draws those styles from the others.
-    const uint8_t kept = keptStyles(accent ? families.accentStyles[i] : families.bodyStyles, present);
+    const uint32_t (&scores)[4] = accent ? families.accentStyles[i] : families.bodyStyles;
+    const uint8_t kept = keptStyles(scores, present);
     for (uint8_t style = 0; style < 4; ++style) {
       if ((kept & (1u << style)) == 0) picked[style] = CssParser::FontFace{};
     }
@@ -533,8 +548,11 @@ uint8_t examine(const Epub& epub, BuildArena* scratch, std::string& records, Fam
       if (copy == Copy::Failed) return kCodeFailed;
       continue;
     }
-    LOG_INF("BKF", "%s font %.*s", accent ? "Accent" : "Body", static_cast<int>(picked[0].name.size()),
-            picked[0].name.data());
+    LOG_INF("BKF", "%s font %.*s: %lu bytes of text (est.), styles 0x%x", accent ? "Accent" : "Body",
+            static_cast<int>(picked[0].name.size()), picked[0].name.data(),
+            static_cast<unsigned long>(
+                std::min<uint64_t>(uint64_t{scores[0]} + scores[1] + scores[2] + scores[3], UINT32_MAX)),
+            kept);
     if (accent) {
       found.accents[accents++] = families.accents[i];
       names.push_back('\0');
@@ -670,12 +688,13 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
   }
   const ParserState state(scratch);
   css->resetResolveStats();
+  const unsigned long start = millis();
   Found found;
   // From the first item, not the text reference: a guide that points at the cover would hide the whole book.
   const int count = epub.getSpineItemsCount();
   const int sampled = std::min(count, kProbeMaxItems);
-  const size_t cap = std::clamp(kProbeBudgetBytes / static_cast<size_t>(std::max(sampled, 1)), kProbeMinItemBytes,
-                                kProbeMaxItemBytes);
+  const size_t cap =
+      std::clamp(kProbeBudgetBytes / static_cast<size_t>(std::max(sampled, 1)), kProbeMinItemBytes, kProbeMaxItemBytes);
   for (int k = 0; k < sampled; ++k) {
     const int i = count <= kProbeMaxItems ? k : static_cast<int>(static_cast<int64_t>(k) * count / kProbeMaxItems);
     const size_t itemBytes = epub.getSpineItem(i).zipUncompressedSize;  // 0: not known
@@ -696,6 +715,8 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
     found.bytesRead += static_cast<uint32_t>(parser.byteOffset());
   }
   if (sampled > 0 && found.itemsRead == 0) *failed = true;
+  LOG_INF("BKF", "Probe: %u of %d spine items, %lu bytes, %lu ms", static_cast<unsigned>(found.itemsRead), count,
+          static_cast<unsigned long>(found.bytesRead), millis() - start);
   // Short of heap, the resolver skips the rules it would read from the card: the families found would be
   // wrong, so this counts as a failed attempt rather than an answer.
   if (css->getResolveStats().lowHeapSkips != 0 && !css->isArenaResident()) {
@@ -710,6 +731,11 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
         CssParser::FontFace faces[4];
         pickFaces(records, family, faces);
         return std::any_of(std::begin(faces), std::end(faces), [](const auto& face) { return !face.name.empty(); });
+      },
+      [records](const uint32_t family, const uint32_t bytes) {
+        const std::string_view name = familyName(records, family);
+        LOG_INF("BKF", "Left out %.*s: %lu bytes of text (est.)", static_cast<int>(name.size()), name.data(),
+                static_cast<unsigned long>(bytes));
       },
       found);
   return found;

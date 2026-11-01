@@ -28,7 +28,9 @@ namespace BookFonts {
 /// @font-face rules is probed too, for its body's generic family.
 /// v5: up to kMaxAccents accent families, in fonts/accent<n>/.
 /// v6: CFF faces are copied too (they were refused), so a book examined as having none is examined again.
-constexpr uint8_t kVersion = 6;
+/// v7: the probe reads the whole spine and ranks families by their text; a face whose style has little text is not
+/// copied.
+constexpr uint8_t kVersion = 7;
 /// Accent families copied at most: the glyph store's eight style blocks hold a body of four styles and three
 /// one-style families, and its face table (32 faces) a book's body sizes and a few of each.
 constexpr uint8_t kMaxAccents = 3;

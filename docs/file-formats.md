@@ -63,7 +63,7 @@ directory whole.
 | `img_<hash><ext>`, `<image>.1bit.pxc`, `<image>.bayer.pxc` | EPUB | `PixelCache::PXC_MAGIC` | Images extracted from the book (`<hash>` is FNV-1a 64 of the entry), and their dithered pixel caches: `u16` magic, `u16` width, `u16` height, 2-bit pixels |
 | `cover.img` | EPUB | none | The cover image's bytes, extracted once (or copied from a cover sidecar) |
 | `linkstack.bin` | EPUB | `EpubLinkBackStack::kVersion` (1) | The link Back stack: [below](#linkstackbin) |
-| `fonts.bin`, `fonts/<style>.ttf`, `fonts/accent<n>/<style>.ttf` | EPUB | `BookFonts::kVersion` (6) | The book's embedded body and accent fonts (Publisher Fonts): [below](#fontsbin) |
+| `fonts.bin`, `fonts/<style>.ttf`, `fonts/accent<n>/<style>.ttf` | EPUB | `BookFonts::kVersion` (7) | The book's embedded body and accent fonts (Publisher Fonts): [below](#fontsbin) |
 | `kosync_push.bin` | EPUB | `LastPush::kVersion` (1) | Our last KOReader push: [below](#kosync_pushbin) |
 | `koreader_docid.txt`, `koreader_syncmethod.txt` | EPUB | none | The KOReader document id, after the file size and fingerprint it was computed for, and the match method learned for the book |
 | `index.bin` | TXT, Markdown | `CACHE_VERSION`: TXT 2 (magic `TXTI`), Markdown 11 (`MKDI`) | Page offsets under the current layout. `SleepActivity` checks the TXT magic and version too |
@@ -388,10 +388,10 @@ An empty stack is stored as no file. The file is written when the reader closes 
 
 ## `fonts.bin`
 
-What `BookFonts::prepare` (`lib/Epub/Epub/BookFonts.*`) found when the Publisher Fonts setting first met the book: the family its body text is set in, whether it embeds it, and up to three accent families (the embedded families other blocks are set in, the one the most blocks are set in first), with where the copies are. Written once per book, last, after the font files; the next open trusts it.
+What `BookFonts::prepare` (`lib/Epub/Epub/BookFonts.*`) found when the Publisher Fonts setting first met the book: the family its body text is set in, whether it embeds it, and up to three accent families (the embedded families other text is set in, inline text included, the one with the most text first; a family with negligible text gets none), with where the copies are. A sample of the whole spine decides it: the head of every item, of 64 spread over a longer spine, each weighted to the item and the spine. Written once per book, last, after the font files; the next open trusts it.
 
 ```text
-u8  version             BookFonts::kVersion (6)
+u8  version             BookFonts::kVersion (7)
 u8  code                0 none: the book's body keeps the reader's font
                         1 family: its body family is in fonts/
                         2 + n: n failed attempts (a read failed); examined again at the next open, given up at 3
@@ -403,7 +403,7 @@ u32 accents[3]          the accent families' identities (BookFonts::kMaxAccents)
                         accent family, '\0' and its name; to the end of the file
 ```
 
-The body family's files sit in `fonts/`, accent family n's in `fonts/accent<n>/` (`accent0` to `accent2`), one per style, named `<style>.ttf` (0 regular, 1 bold, 2 italic, 3 bold italic): plain TrueType or CFF (`OTTO`) files under the same `.ttf` names, any IDPF or Adobe font obfuscation undone; font discovery reads the content, not the name. An accent family whose faces are refused (WOFF, WOFF2, a collection, encrypted) gives its place to the next. The reader loads each directory as it loads a `.ttf` family directory on the card. A file of another version, or none, means the book has not been examined; `prepare` then removes the whole `fonts/` directory first.
+The body family's files sit in `fonts/`, accent family n's in `fonts/accent<n>/` (`accent0` to `accent2`), one per style whose text warrants a face (`BookFonts::keptStyles`; the engine draws the other styles from these), named `<style>.ttf` (0 regular, 1 bold, 2 italic, 3 bold italic): plain TrueType or CFF (`OTTO`) files under the same `.ttf` names, any IDPF or Adobe font obfuscation undone; font discovery reads the content, not the name. An accent family whose faces are refused (WOFF, WOFF2, a collection, encrypted) gives its place to the next. The reader loads each directory as it loads a `.ttf` family directory on the card. A file of another version, or none, means the book has not been examined; `prepare` then removes the whole `fonts/` directory first.
 
 ## `kosync_push.bin`
 

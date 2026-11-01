@@ -274,17 +274,15 @@ TEST_F(BookFontsTest, ALongSpineIsSampledWithinTheBudget) {
 
 TEST_F(BookFontsTest, AnUnreadableItemIsSkipped) {
   const std::string chapter = prose("indent", 2 * 1024);
-  const auto epub =
-      book(kProbeCss, {chapter, kMissing, chapter}, {{"OEBPS/Fonts/g.ttf", "font/ttf", kTrueType}});
+  const auto epub = book(kProbeCss, {chapter, kMissing, chapter}, {{"OEBPS/Fonts/g.ttf", "font/ttf", kTrueType}});
   EXPECT_EQ(family("EBGaramond"), detect(*epub));  // found() expects no failure
   EXPECT_EQ(BookFonts::State::Family, BookFonts::prepare(*epub, nullptr));
 }
 
 TEST_F(BookFontsTest, TheTextReferenceDoesNotHideEarlierItems) {
   const std::string chapter = prose("indent", 4 * 1024);
-  const auto epub =
-      book(kProbeCss, {chapter, chapter, "<body><p class='block'>A short page.</p></body>"}, {}, kIdentifiers,
-           "<guide><reference type='text' title='Start' href='Text/c2.xhtml'/></guide>");
+  const auto epub = book(kProbeCss, {chapter, chapter, "<body><p class='block'>A short page.</p></body>"}, {},
+                         kIdentifiers, "<guide><reference type='text' title='Start' href='Text/c2.xhtml'/></guide>");
   ASSERT_EQ(2, epub->getSpineIndexForTextReference());
   EXPECT_EQ(family("EBGaramond"), detect(*epub));
 }
@@ -777,9 +775,9 @@ TEST_F(BookFontsTest, ANegligibleFamilyTakesNoSlot) {
 }
 
 TEST_F(BookFontsTest, ASmallFamilyInAShortBookKeepsItsSlot) {
-  const auto epub = book(faceRules({"Body", "Rare"}) + ".body { font-family: Body }\n.rare { font-family: Rare }\n",
-                         {prose("body", 2 * 1024), "<body><p class='rare'>Rare</p></body>"},
-                         faceFiles({"Body", "Rare"}));
+  const auto epub =
+      book(faceRules({"Body", "Rare"}) + ".body { font-family: Body }\n.rare { font-family: Rare }\n",
+           {prose("body", 2 * 1024), "<body><p class='rare'>Rare</p></body>"}, faceFiles({"Body", "Rare"}));
   EXPECT_EQ(family("Rare"), ranked(*epub).accents[0]);
 }
 
@@ -824,8 +822,8 @@ TEST_F(BookFontsTest, AMiseryShapedBookGetsItsTypewriterAndHandFilledLetters) {
   EXPECT_EQ(family("Typed"), families.accents[0]);
   EXPECT_EQ(family("Hand"), families.accents[1]);
   EXPECT_EQ(family("Narrow"), families.accents[2]);  // Ads, 4 short blocks, out-ranked
-  EXPECT_EQ(64u, families.accentStyles[2][0]);        // PART I
-  EXPECT_EQ(600u, families.accentStyles[2][2]);       // its italic line
+  EXPECT_EQ(64u, families.accentStyles[2][0]);       // PART I
+  EXPECT_EQ(600u, families.accentStyles[2][2]);      // its italic line
 }
 
 // ---- The faces copied: those whose style carries text -----------------------------------------------------
