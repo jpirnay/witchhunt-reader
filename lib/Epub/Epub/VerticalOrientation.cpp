@@ -82,23 +82,23 @@ size_t clusterLength(const char* text) {
   return static_cast<size_t>(p - reinterpret_cast<const unsigned char*>(text));
 }
 
-uint32_t firstCodepoint(const char* text) {
-  const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
+}  // namespace
+
+uint32_t firstCodepointOf(const char* utf8) {
+  const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8);
   return utf8NextCodepoint(&p);
 }
-
-}  // namespace
 
 size_t nextColumnPiece(const char* text, bool& upright) {
   const size_t first = clusterLength(text);
   if (first == 0) return 0;
-  upright = drawsUpright(firstCodepoint(text));
+  upright = drawsUpright(firstCodepointOf(text));
   if (upright) return first;
 
   size_t length = first;
   for (;;) {
     const char* at = text + length;
-    if (drawsUpright(firstCodepoint(at))) break;
+    if (drawsUpright(firstCodepointOf(at))) break;
     const size_t next = clusterLength(at);
     if (next == 0 || length + next > kMaxColumnRunBytes) break;
     length += next;

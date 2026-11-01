@@ -77,11 +77,6 @@ Shift shiftOf(const UprightPlacement placement, const GlyphInk& ink, const int e
   return shift;
 }
 
-uint32_t firstCodepoint(const char* text) {
-  const unsigned char* p = reinterpret_cast<const unsigned char*>(text);
-  return utf8NextCodepoint(&p);
-}
-
 }  // namespace
 
 bool columnInk(const GfxRenderer& renderer, const int fontId, const uint32_t cp, const EpdFontFamily::Style style,
@@ -148,7 +143,7 @@ void drawTextVertical(const GfxRenderer& renderer, const int fontId, const int x
     }
     const int adv = scaled(renderer.getTextAdvanceX(fontId, piece, style), scale);
     Shift shift;
-    const uint32_t cp = firstCodepoint(piece);
+    const uint32_t cp = firstCodepointOf(piece);
     const UprightPlacement placement = uprightPlacementOf(cp);
     GlyphInk ink;
     if (placement != UprightPlacement::None && scaledInk(renderer, fontId, cp, style, scale, ink)) {
