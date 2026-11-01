@@ -41,7 +41,7 @@ class BuildArena;  // lib/Memory -- optional page-scoped storage for the arena b
 //   offset):
 //                                 u16 count, then count records of 10 B (u16 firstWord, u16 wordCount, s16 x, u16
 //                                 width, u8 kind, u8 len), then the ruby texts back to back, len bytes each, no NUL.
-//                                 For an Emphasis record len is the mark and no text follows.
+//                                 For an Emphasis record len is the mark and no text follows; for a Combine record 0.
 //
 // Lines without annotations cost nothing: the idea of crosspoint-reader #2772 (Uri Tauber) and #2735 (William Floyd),
 // which drop empty ruby vectors; here the bytes are not written at all.
@@ -115,8 +115,9 @@ class TextBlock final : public Block {
     uint8_t fontSlot = 0;
   };
   // A box over a run of the line's words, drawn in a band above them: the ruby of a group, or an emphasis run (`mark`;
-  // `x`/`width` 0, unused).
-  enum class AnnotationKind : uint8_t { Ruby = 1, Emphasis = 2 };
+  // `x`/`width` 0, unused). A Combine record is a word of a vertical line set upright as one block (tate-chu-yoko):
+  // `x` and `width` its cell, one em; it takes no band.
+  enum class AnnotationKind : uint8_t { Ruby = 1, Emphasis = 2, Combine = 3 };
   static constexpr size_t kMaxAnnotationText = 255;
   struct Annotation {
     uint16_t firstWord = 0;  // the line's word index
@@ -294,7 +295,8 @@ class TextBlock final : public Block {
   uint16_t annotationCount() const;
   Annotation annotation(uint16_t i) const;
   bool hasAnnotations() const { return annotationBytes_ != 0; }
-  // Half the line's ascender when the line has annotations, else 0: the band above the base the ruby is drawn in.
+  // Half the line's ascender when the line has a ruby or an emphasis run, else 0: the band above the base the ruby is
+  // drawn in.
   int annotationBand(const GfxRenderer& renderer, int fontId) const;
   // The same band from what a layout knows before the line exists.
   static int annotationBandFor(const GfxRenderer& renderer, int effFontId, float blockScale, uint8_t maxSizePct);

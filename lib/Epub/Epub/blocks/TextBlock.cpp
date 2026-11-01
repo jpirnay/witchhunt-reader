@@ -29,7 +29,17 @@ constexpr size_t kAnnotationHeaderBytes = 2;   // u16 count
 
 bool knownKind(const uint8_t kind) {
   return kind == static_cast<uint8_t>(TextBlock::AnnotationKind::Ruby) ||
-         kind == static_cast<uint8_t>(TextBlock::AnnotationKind::Emphasis);
+         kind == static_cast<uint8_t>(TextBlock::AnnotationKind::Emphasis) ||
+         kind == static_cast<uint8_t>(TextBlock::AnnotationKind::Combine);
+}
+
+// Whether one of the `count` records at `record` is drawn in the band above the line: a ruby or an emphasis run. A
+// combined word is drawn in its own cell.
+bool anyBandRecord(const uint8_t* record, const uint16_t count) {
+  for (uint16_t j = 0; j < count; j++, record += kAnnotationRecordBytes) {
+    if (record[8] != static_cast<uint8_t>(TextBlock::AnnotationKind::Combine)) return true;
+  }
+  return false;
 }
 
 uint8_t packStyle(const EpdFontFamily::Style style, const bool continues) {
@@ -405,7 +415,7 @@ int TextBlock::annotationBandFor(const GfxRenderer& renderer, const int effFontI
 }
 
 int TextBlock::annotationBand(const GfxRenderer& renderer, const int fontId) const {
-  if (annotationBytes_ == 0) return 0;
+  if (annotationBytes_ == 0 || !anyBandRecord(annotationRegion() + kAnnotationHeaderBytes, annotationCount())) return 0;
   const int effFontId = renderStyle.headingFontId != 0 ? renderStyle.headingFontId : fontId;
   return annotationBandFor(renderer, effFontId, renderStyle.fontSizeMultiplier, maxSizePct());
 }
@@ -494,7 +504,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     lineAscender = renderer.getFontAscenderSizeScaled(effFontId, blockScale * (maxSizePct() / 100.0f));
   }
   // The base sits below the band the line's ruby is drawn in.
-  const int baseY = y + (hasAnnotations() ? annotationBandFor(renderer, effFontId, blockScale, maxSizePct()) : 0);
+  const int baseY = y + annotationBand(renderer, fontId);
   // Guide dots (see setGuideDots): one dot centered in each inter-word gap.
   // Sized and vertically anchored off the block's base metrics, not per-word
   // scales, so the dot row stays level across inline size changes.

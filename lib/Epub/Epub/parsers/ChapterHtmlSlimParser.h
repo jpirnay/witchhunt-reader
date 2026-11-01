@@ -311,6 +311,8 @@ class ChapterHtmlSlimParser final : public Print {
     bool hasSmallCaps = false, smallCaps = false;
     bool hasTextEmphasis = false;  // text-emphasis-style: textEmphasis is a TextEmphasis mark, 0 for none
     uint8_t textEmphasis = 0;
+    bool hasTextCombine = false;  // text-combine-upright: textCombine is a CssTextCombine, None for none
+    uint8_t textCombine = 0;
     bool hasMarginLeft = false;
     int16_t marginLeftPx = 0;  // margin-left in pixels, for span-level poem indents
     // Inline font-size as a percent of the PARENT element's size (em semantics).
@@ -334,6 +336,7 @@ class ChapterHtmlSlimParser final : public Print {
   bool effectiveSub = false;
   bool effectiveSmallCaps = false;
   uint8_t effectiveTextEmphasis_ = 0;     // the TextEmphasis mark of the words being flushed; 0 for none
+  uint8_t effectiveTextCombine_ = 0;      // their CssTextCombine; Unset (0) or None for none
   int16_t effectiveInlineMarginLeft = 0;  // accumulated margin-left from inline span stack
   // Composed inline font-size percent (relative to the block font size) for the
   // words currently being flushed. 100 outside sized spans; clamped to the
@@ -724,13 +727,17 @@ class ChapterHtmlSlimParser final : public Print {
   // Fold an element's CSS vertical-align into an inline style-stack entry. `baseline`
   // explicitly cancels an inherited sup/sub rather than being ignored.
   static void applyVerticalAlignToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
-  // Fold an element's CSS font-weight, font-style, text-decoration, font-variant and text-emphasis-style into an
-  // inline style-stack entry. `text-decoration: none` cancels an inherited underline/strike.
+  // Fold an element's CSS font-weight, font-style, text-decoration, font-variant, text-emphasis-style and
+  // text-combine-upright into an inline style-stack entry. `text-decoration: none` cancels an inherited
+  // underline/strike.
   static void applyCssEmphasisToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
   // Fold an element's text-emphasis-style into an entry; `none` cancels an inherited mark. The bold, italic,
-  // underline, sup/sub and internal-link paths take only this from the full set above (their own tag decides the
-  // rest).
+  // underline, sup/sub and internal-link paths take only this and the one below from the full set above (their own
+  // tag decides the rest).
   static void applyCssTextEmphasisToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
+  // Fold an element's text-combine-upright into an entry; `none` cancels an inherited one. ParsedText decides, on a
+  // vertical line, whether a word that asks to combine does.
+  static void applyCssTextCombineToEntry(StyleStackEntry& entry, const CssStyle& cssStyle);
   // Fold an element's font-family into an entry, while the book has other families; true when it did.
   bool applyCssFontFamilyToEntry(StyleStackEntry& entry, const CssStyle& cssStyle) const;
   // A block's (or heading's) own emphasis, pushed at its depth so the blocks nested inside it
