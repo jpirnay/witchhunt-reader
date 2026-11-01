@@ -162,8 +162,15 @@ class ParsedText {
     const int32_t slotFont = fontSlots_[wordSizes[i].fontSlot].fontId;
     return slotFont != 0 ? slotFont : fontId;
   }
-  // The space before words[j] (j > 0), unscaled, in the font of the word before it; and the kerning across a glued
-  // boundary there, none between words in two fonts.
+  // The word whose font, size and style the space before words[j] (j > 0) takes: the word before it, unless the word
+  // after it is in the block's font and the one before is not. A word in another family ends where its run does
+  // ("Ia<span class='hand'>n</span> Carmichael"): the space is in the text around it, the block's.
+  size_t spaceSource(const int fontId, const size_t j) const {
+    const int right = wordFontId(j, fontId);
+    return right == fontId && wordFontId(j - 1, fontId) != right ? j : j - 1;
+  }
+  // The space before words[j] (j > 0), unscaled (its scale is spaceSource()'s word's), in spaceSource()'s font; and
+  // the kerning across a glued boundary there, none between words in two fonts.
   int spaceBefore(const GfxRenderer& renderer, int fontId, size_t j) const;
   int kernBefore(const GfxRenderer& renderer, int fontId, size_t j) const;
   // Returns the available line width at a given 0-based line index, accounting

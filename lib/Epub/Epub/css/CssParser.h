@@ -309,6 +309,7 @@ class CssParser {
     arenaLoadAttempted_ = false;
   }
   void setLeanResolve(bool enable) { leanResolve_ = enable; }
+  bool leanResolve() const { return leanResolve_; }
 
   // Background images. The renderer cannot paint behind text, so an element's background picture
   // reaches the page as a picture of its own, placed after the element's content (see

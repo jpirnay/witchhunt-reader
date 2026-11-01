@@ -9,11 +9,12 @@ class BuildArena;
 class Epub;
 
 /// A book's embedded fonts (the Publisher Fonts setting), made ready for the TTF engine: found once per book from
-/// its CSS and the text of its first chapters, and copied out of the EPUB as plain TrueType or CFF files to
+/// its CSS and a sample of its spine's text, and copied out of the EPUB as plain TrueType or CFF files to
 /// `<book cache>/fonts/`, where they load like a `.ttf` family on the card.
 ///
-/// The body text's family, and up to kMaxAccents accent families, ranked by the blocks (headings, a dedication, a
-/// code block) set in them. The glyph store holds them together, or the accent families beside a TrueType reader
+/// The body text's family, and up to kMaxAccents accent families, ranked by the text set in them (headings, a
+/// dedication, a typed letter, words inside a paragraph). The glyph store holds them together, or the accent families
+/// beside a TrueType reader
 /// font (TTF spec, section 11.1). What is refused, so the book keeps the reader's font (or, for an accent family,
 /// the next one takes its place): a family that is generic or not embedded; WOFF, WOFF2 and font collections;
 /// fonts encrypted rather than obfuscated; faces over kMaxFaceBytes. TrueType and CFF (`OTTO`) faces are taken.
@@ -27,7 +28,9 @@ namespace BookFonts {
 /// @font-face rules is probed too, for its body's generic family.
 /// v5: up to kMaxAccents accent families, in fonts/accent<n>/.
 /// v6: CFF faces are copied too (they were refused), so a book examined as having none is examined again.
-constexpr uint8_t kVersion = 6;
+/// v7: the probe reads the whole spine and ranks families by their text; a face whose style has little text is not
+/// copied.
+constexpr uint8_t kVersion = 7;
 /// Accent families copied at most: the glyph store's eight style blocks hold a body of four styles and three
 /// one-style families, and its face table (32 faces) a book's body sizes and a few of each.
 constexpr uint8_t kMaxAccents = 3;
@@ -36,11 +39,35 @@ constexpr uint8_t kMaxAccents = 3;
 /// extracted from the book once, behind the open's popup, and kept on the card. A full CJK face, as books embed them,
 /// is 8-20 MB; one over this is taken for an error rather than minutes of extraction.
 constexpr size_t kMaxFaceBytes = 24 * 1024 * 1024;
-/// prepare() reads at most this much of each chapter, and at most kProbeChapters chapters from the text start.
-constexpr size_t kProbeChapterBytes = 64 * 1024;
-constexpr int kProbeChapters = 6;
-/// prepare() stops reading chapters once it has seen this much text.
-constexpr uint32_t kProbeEnoughText = 16 * 1024;
+/// prepare() reads the head of every spine item, from the first, or of kProbeMaxItems spread evenly over a longer
+/// spine: about kProbeBudgetBytes in all, each head kProbeBudgetBytes over the items read, between
+/// kProbeMinItemBytes and kProbeMaxItemBytes. What a head holds stands for its whole item, and the items read for the
+/// spine: a book's front matter, the first few items, is no sample of its text. The budget is the first open's time:
+/// an X3 probes ~110 KB a second, and an ordinary novel's open may grow by a second at most. Four real books (Misery
+/// among them) found the same families with 96 KB as with 512 KB.
+constexpr size_t kProbeBudgetBytes = 160 * 1024;
+constexpr int kProbeMaxItems = 64;
+constexpr size_t kProbeMinItemBytes = 2 * 1024;
+constexpr size_t kProbeMaxItemBytes = 64 * 1024;
+/// A book without @font-face rules can have no accent copied: the probe only looks for its body's generic family,
+/// which Accents maps onto a built-in face, in this many items' heads and bytes. Most of a first open's probe is the
+/// items it opens (~25 ms each on an X3), so such a book pays about what the old six-chapter probe did.
+constexpr int kProbeFacelessItems = 8;
+constexpr size_t kProbeFacelessBudgetBytes = 32 * 1024;
+/// A block (p, div, li, dd, blockquote, pre, h1-h6) whose text is in one family counts as this much text at least: a
+/// heading at every chapter's start is not out-ranked by a few lines of inline text.
+constexpr uint32_t kBlockMinBytes = 64;
+/// An accent family with less text than kMinFamilyBytes and than kMinFamilyPerMille of the book's (as the probe
+/// estimates them) takes no slot, although one is free: each family loaded costs the reader 2-3 KB of heap. Both, so a
+/// short book keeps its small families. A publisher's page of a few short lines (four blocks: 256 bytes with their
+/// minimums, A Million Junes' "next reads" page) is negligible in a novel; eight headings are not.
+constexpr uint32_t kMinFamilyBytes = 512;
+constexpr uint32_t kMinFamilyPerMille = 1;
+/// A family's face for a style is copied when that style has kMinStyleBytes of its text, or kMinStylePercent of it;
+/// the engine draws the others from the faces copied (TtfFont::chooseSynthetic), as the store holds eight styles in
+/// all (keptStyles()).
+constexpr uint32_t kMinStyleBytes = 256;
+constexpr uint32_t kMinStylePercent = 1;
 
 enum class State : uint8_t {
   Pending,  ///< not examined yet (or by another kVersion), or the last attempts failed for a passing reason
@@ -82,16 +109,32 @@ State prepare(const Epub& epub, BuildArena* scratch);
 
 struct Found {
   /// The body family: the family most of the text is set in (CssStyle::fontFamily; families compare by identity),
-  /// an inline accent's text counting for its paragraph's, over the first kProbeChapterBytes of up to
-  /// kProbeChapters chapters from the text start (fewer once kProbeEnoughText has been seen). 0 for the reader's font.
+  /// an inline accent's text counting for its paragraph's, over the spine items' heads prepare() reads, each weighted
+  /// to the book (probeWeight256). 0 for the reader's font.
   uint32_t body = 0;
-  /// The accent families' identities: the families blocks (p, div, li, dd, blockquote, pre, h1-h6) are set in,
-  /// other than the body's, among those `records` (CssParser::loadFontFaces) has a regular face of, the one the most
-  /// blocks are set in first; 0 past the last. A block is set in its text's family when all of its text is in one,
-  /// else in its own.
+  /// The accent families' identities: the families text is set in, inline text included, other than the body's,
+  /// among those `records` (CssParser::loadFontFaces) has a face of, the one with the most text first; 0 past the last.
+  /// A block whose text is in one family counts as kBlockMinBytes of it at least. A family with negligible text
+  /// (kMinFamilyBytes, kMinFamilyPerMille) is left out.
   uint32_t accents[kMaxAccents] = {};
+  /// The body family's text and each accent family's, by style (EpdFontFamily numbering: bit 0 bold, bit 1 italic),
+  /// as the accents are ranked by it.
+  uint32_t bodyStyles[4] = {};
+  uint32_t accentStyles[kMaxAccents][4] = {};
+  uint16_t itemsRead = 0;  ///< the spine items read (one that cannot be read is passed over)
+  uint32_t bytesRead = 0;  ///< the bytes of them inflated
 };
-/// `*failed` is set when a chapter could not be read.
+/// `sum` plus `bytes` times `weight256` (8 fractional bits: 256 is 1.0), rounded; at most UINT32_MAX.
+uint32_t addWeighted(uint32_t sum, uint32_t bytes, uint32_t weight256);
+/// The weight of what was read of a spine item, in 8 fractional bits: the item's size over the bytes read of it (1
+/// when its size is not known), times the spine's items over those read. At most UINT32_MAX.
+uint32_t probeWeight256(size_t itemBytes, size_t readBytes, int spineCount, int sampledCount);
+/// The styles (bit n: EpdFontFamily style n) whose faces prepare() copies, of the `present` ones, by their text
+/// (`scores`): the one with the most text, the regular first on a tie, then italic, bold, bold italic; another
+/// with kMinStyleBytes, or kMinStylePercent of the family's text; bold italic only beside bold and italic, as its
+/// file alone would stop the engine from emboldening the regular and slanting it.
+uint8_t keptStyles(const uint32_t (&scores)[4], uint8_t present);
+/// `*failed` is set when no spine item could be read, or the probe had not the memory to decide.
 Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, std::string_view records = {});
 
 /// The IDPF obfuscation key (EPUB OCF): the SHA-1 of the package's unique identifier with its XML white space

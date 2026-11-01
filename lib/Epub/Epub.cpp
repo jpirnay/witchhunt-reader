@@ -2104,21 +2104,52 @@ bool Epub::readItemContentsToStreamWithArena(const std::string& itemHref, Print&
   if (!found) LOG_ERR("EBP", "Entry not found: %s", path.c_str());
   const bool opened = found && reader.open(stat);
   adoptZipDetails(zip);
-  if (!opened) return false;
+  return opened && drainEntry(reader, out, stop, path.c_str());
+}
 
+bool Epub::readSpineItemToStream(const int spineIndex, Print& out, const bool* stop, BuildArena* scratch,
+                                 const size_t outputCap) const {
+  ZipFile::FileStatSlim stat = {};
+  if (!getSpineItemStat(spineIndex, &stat)) {
+    LOG_ERR("EBP", "Spine item %d not found", spineIndex);
+    return false;
+  }
+  // The read buffer and the inflate ring in a lent region when it has room for this read, a capped one's ring sized to
+  // the cap (EntryReader::open(stat, cap)); else the heap.
+  BuildArena* const arena = scratch != nullptr ? scratch : loadScratch_;
+  const size_t readBytes = outputCap != 0 && (stat.uncompressedSize == 0 || stat.uncompressedSize > outputCap)
+                               ? outputCap
+                               : stat.uncompressedSize;
+  const bool lent =
+      arena != nullptr && arena->valid() && arena->capacity() - arena->used() >= spineReadScratchBytes(readBytes);
+  ZipFile zip(filepath);
+  primeZip(zip);
+  ZipFile::EntryReader reader(zip, 1024, lent ? arena : nullptr);
+  const bool opened = reader.open(stat, outputCap);
+  adoptZipDetails(zip);
+  char what[24];
+  snprintf(what, sizeof(what), "spine item %d", spineIndex);
+  return opened && drainEntry(reader, out, stop, what);
+}
+
+size_t Epub::spineReadScratchBytes(const size_t readBytes) {
+  return 1024 + InflateReader::ringSizeFor(readBytes) + 2 * alignof(std::max_align_t);
+}
+
+bool Epub::drainEntry(ZipFile::EntryReader& reader, Print& out, const bool* stop, const char* what) {
   // Staging buffer on the stack rather than from the arena: the reader holds an arena block
   // until close(), and a nested block would have to be released before it (BuildArena is LIFO).
-  // 512 B is nothing against the ~8 KB task stack, and this runs once per image, ever.
+  // 512 B is nothing against the ~8 KB task stack.
   uint8_t buffer[512];
   bool done = false;
   while (!done) {
     size_t produced = 0;
     if (!reader.step(buffer, sizeof(buffer), &produced, &done)) {
-      LOG_ERR("EBP", "Arena extract failed mid-stream: %s", path.c_str());
+      LOG_ERR("EBP", "Extract failed mid-stream: %s", what);
       return false;
     }
     if (produced > 0 && out.write(buffer, produced) != produced) {
-      LOG_ERR("EBP", "Failed to write all extracted bytes: %s", path.c_str());
+      LOG_ERR("EBP", "Failed to write all extracted bytes: %s", what);
       return false;
     }
     if (stop && *stop) return true;

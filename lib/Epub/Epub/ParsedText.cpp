@@ -415,8 +415,9 @@ int ParsedText::widthForLine(const int lineIndex, const int lineHeight, const in
 }
 
 int ParsedText::spaceBefore(const GfxRenderer& renderer, const int fontId, const size_t j) const {
-  return renderer.getSpaceAdvance(wordFontId(j - 1, fontId), lastCodepoint(words[j - 1]), firstCodepoint(words[j]),
-                                  wordStyles[j - 1]);
+  const size_t source = spaceSource(fontId, j);
+  return renderer.getSpaceAdvance(wordFontId(source, fontId), lastCodepoint(words[j - 1]), firstCodepoint(words[j]),
+                                  wordStyles[source]);
 }
 
 int ParsedText::kernBefore(const GfxRenderer& renderer, const int fontId, const size_t j) const {
@@ -1807,9 +1808,10 @@ ParsedText::LineProcessResult ParsedText::extractLine(
       if (!beforeClosing) actualGapCount++;
       if (boundary.noSpaceBefore) cjkGapOnLine = true;
       if (TokenBoundary::hasSpace(boundary)) {
-        // Inter-word gaps scale with the preceding word's effective size, matching wordStyles usage.
-        totalNaturalGaps += static_cast<int>(
-            spaceBefore(renderer, fontId, lastBreakAt + wordIdx) * wordScale(lastBreakAt + wordIdx - 1) + 0.5f);
+        // Inter-word gaps scale with the effective size of the word whose space it is (spaceSource).
+        const size_t j = lastBreakAt + wordIdx;
+        totalNaturalGaps +=
+            static_cast<int>(spaceBefore(renderer, fontId, j) * wordScale(spaceSource(fontId, j)) + 0.5f);
       } else {
         // The CJK-Latin gap is already scaled to its CJK side.
         const int gap = cjkLatinGapBefore(renderer, fontId, lastBreakAt + wordIdx);
@@ -1993,8 +1995,8 @@ ParsedText::LineProcessResult ParsedText::extractLine(
         const uint32_t nextFirstCp = firstCodepoint(words[lastBreakAt + wordIdx + 1]);
         // A CJK gap has no natural width but the CJK-Latin gap; it takes the justification share below.
         if (TokenBoundary::hasSpace(boundaries[lastBreakAt + wordIdx + 1])) {
-          gap = static_cast<int>(
-              spaceBefore(renderer, fontId, lastBreakAt + wordIdx + 1) * wordScale(lastBreakAt + wordIdx) + 0.5f);
+          const size_t j = lastBreakAt + wordIdx + 1;
+          gap = static_cast<int>(spaceBefore(renderer, fontId, j) * wordScale(spaceSource(fontId, j)) + 0.5f);
         } else {
           gap = gapShrinkTotal > 0 ? cjkLatinGapBefore(renderer, fontId, lastBreakAt + wordIdx + 1) : 0;
           gap -= gapGive(wordIdx + 1, gap);

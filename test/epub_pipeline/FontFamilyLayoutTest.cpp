@@ -43,6 +43,8 @@ struct Line {
   int32_t fontId;  // 0: the body face
   float mult;
   std::vector<TextBlock::WordFont> wordFonts;  // per word; a fontId of 0: the block's font
+  std::vector<bool> continues;                 // per word: glued to the word before, no space between
+  std::vector<int16_t> xpos;                   // per word: where it starts on the line
 };
 
 struct FontFamilyLayoutFixture : testing::Test {
@@ -90,6 +92,8 @@ struct FontFamilyLayoutFixture : testing::Test {
         line.text += block.wordText(w);
         const TextBlock::WordFont* font = block.wordFont(w);
         line.wordFonts.push_back(font ? *font : TextBlock::WordFont{});
+        line.continues.push_back(block.wordContinues(w));
+        line.xpos.push_back(block.wordXpos(w));
       }
       lines.push_back(line);
     }
@@ -309,4 +313,53 @@ TEST_F(FontFamilyLayoutFixture, ADropCapInAnotherFamilyHasThatFamilysFace) {
   ASSERT_TRUE(cap);
   EXPECT_EQ(0, cap->fontId);
   EXPECT_FLOAT_EQ(3.0f, cap->mult);
+}
+
+TEST_F(FontFamilyLayoutFixture, AHandFilledLetterInsideAWordHasTheAccentFace) {
+  // Misery's typed manuscript: a letter filled in by hand inside a typed word.
+  const BlockFontFamilies families = accents();
+  const auto lines = layout("<p>Du<span class='dedication'>n</span>thorpe</p>", &families);
+  const Line* word = find(lines, "Du n thorpe");  // three pieces, glued
+  ASSERT_TRUE(word);
+  ASSERT_EQ(3u, word->wordFonts.size());
+  EXPECT_EQ(0, word->wordFonts[0].fontId);
+  EXPECT_EQ(kAccentBody, word->wordFonts[1].fontId);
+  EXPECT_EQ(0, word->wordFonts[2].fontId);
+  EXPECT_TRUE(word->continues[1]);
+  EXPECT_TRUE(word->continues[2]);
+}
+
+TEST_F(FontFamilyLayoutFixture, ALetterInAFamilyTheBookLacksStaysInItsWord) {
+  // A family the book has no slot for (negligible, or past kMaxAccents): the letter keeps the block's font, and the
+  // word stays one word.
+  const BlockFontFamilies families = accents();
+  const auto lines = layout("<p>Du<span class='georgia'>n</span>thorpe</p>", &families);
+  const Line* word = find(lines, "Du n thorpe");
+  ASSERT_TRUE(word);
+  ASSERT_EQ(3u, word->wordFonts.size());
+  for (const TextBlock::WordFont& font : word->wordFonts) EXPECT_EQ(0, font.fontId);
+  EXPECT_TRUE(word->continues[1]);
+  EXPECT_TRUE(word->continues[2]);
+}
+
+TEST_F(FontFamilyLayoutFixture, TheSpaceAfterAnAccentLetterIsTheBlocksOwn) {
+  // Misery: "Ia<span class='fontj'>n</span> Carmichael". The space is in the text after the span, so it is the
+  // paragraph's space at the paragraph's size, not the hand-written letter's: a script face's wide space, or its size,
+  // read as a double gap after every such word.
+  const BlockFontFamilies families = accents();
+  // Where "Carmichael" starts after the letter, less where the letter starts and its width (taken from the letter glued
+  // to the next word).
+  const auto gapAfter = [&](const char* letterStyle) {
+    const std::string letter = std::string("Ia<span style='") + letterStyle + "'>n</span>";
+    const auto spaced = layout("<p style='text-align: left'>" + letter + " Carmichael</p>", &families);
+    const auto glued = layout("<p style='text-align: left'>" + letter + "Carmichael</p>", &families);
+    EXPECT_EQ(1u, spaced.size());
+    EXPECT_EQ(1u, glued.size());
+    if (spaced.empty() || glued.empty() || spaced[0].xpos.size() != 3 || glued[0].xpos.size() != 3) return -1;
+    const int width = glued[0].xpos[2] - glued[0].xpos[1];
+    return spaced[0].xpos[2] - spaced[0].xpos[1] - width;
+  };
+  const int normal = gapAfter("font-family: Display");
+  ASSERT_GT(normal, 0);
+  EXPECT_EQ(normal, gapAfter("font-family: Display; font-size: 2em"));
 }
