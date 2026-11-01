@@ -87,3 +87,20 @@ TEST(VerticalOrientation, AClusterLongerThanTheCapIsCutAtACodepoint) {
   }
   EXPECT_EQ(81u, total);
 }
+
+TEST(VerticalOrientation, PlacementClasses) {
+  for (const uint32_t cp : {0x3001u, 0x3002u, 0xFF0Cu, 0xFF0Eu}) {
+    EXPECT_EQ(UprightPlacement::Reflect, uprightPlacementOf(cp)) << std::hex << cp;
+  }
+  std::vector<uint32_t> small = {0x3041, 0x3043, 0x3045, 0x3047, 0x3049, 0x3063, 0x3083, 0x3085,
+                                 0x3087, 0x308E, 0x3095, 0x3096, 0x30A1, 0x30A3, 0x30A5, 0x30A7,
+                                 0x30A9, 0x30C3, 0x30E3, 0x30E5, 0x30E7, 0x30EE, 0x30F5, 0x30F6};
+  for (uint32_t cp = 0x31F0; cp <= 0x31FF; cp++) small.push_back(cp);
+  for (const uint32_t cp : small) {
+    EXPECT_EQ(UprightPlacement::SmallKana, uprightPlacementOf(cp)) << std::hex << cp;
+  }
+  for (const uint32_t cp :
+       {0x4E00u, 0x3042u, 0x300Cu, 0x30FCu, 0xFF01u, static_cast<uint32_t>('a'), 0x3040u, 0x3200u}) {
+    EXPECT_EQ(UprightPlacement::None, uprightPlacementOf(cp)) << std::hex << cp;
+  }
+}

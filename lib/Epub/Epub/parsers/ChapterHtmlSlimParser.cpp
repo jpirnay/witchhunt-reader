@@ -4701,6 +4701,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
     }
   }
   line->setVertical(vertical_);  // a column of a vertical page (TextBlock::render draws it down)
+  line->setCentredMarks(vertical_ && typography_.punctuation == TypographyProfile::Punctuation::TraditionalChinese);
   auto pageLine = makeUniqueNoThrow<PageLine>(std::move(line), xOffset, currentPageNextY);
   if (!pageLine) {
     // Accepted, not a retry: the line is gone either way, and retrying would just fail again.
@@ -5522,6 +5523,8 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
       // A column of a vertical page's table. Set here, not in the layout callback above: one more capture would take
       // that std::function past its in-place storage, a heap block per cell.
       cellLine->setVertical(vertical_);
+      cellLine->setCentredMarks(vertical_ &&
+                                typography_.punctuation == TypographyProfile::Punctuation::TraditionalChinese);
       cellTextHeight += lineHeight + cellLine->annotationBand(renderer, fontId);
     }
     uint16_t contentHeight = static_cast<uint16_t>(cellTextHeight);

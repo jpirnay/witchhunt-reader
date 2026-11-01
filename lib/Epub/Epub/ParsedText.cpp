@@ -1896,24 +1896,32 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   };
 
   // A narrowed CJK mark is drawn where its ink sits: ink in the right half of its em (an opening bracket) moves
-  // left by what the mark lost, centred ink by half of it, ink in the left half stays (spec 5.2).
+  // left by what the mark lost, centred ink by half of it, ink in the left half stays (spec 5.2). Down a column the
+  // ink of an upright mark is where the draw places it (columnInk: a 、。 in its cell's corner, centred in Traditional
+  // Chinese); a sideways one is turned, so its ink across is its ink along the column.
+  const bool centredMarks = typography_.punctuation == TypographyProfile::Punctuation::TraditionalChinese;
   const auto inkShift = [&](const size_t wordIdx, const int box) {
     const size_t i = lastBreakAt + wordIdx;
     const auto* p = reinterpret_cast<const unsigned char*>(words[i].c_str());
     const uint32_t cp = utf8NextCodepoint(&p);
     if (cp == 0 || *p != 0 || CjkPunctuation::classOf(cp) == CjkPunctuation::Class::None) return 0;
-    const int natural =
-        measureWordWidth(renderer, wordFontId(i, fontId), words[i], wordStyles[i], false, wordScale(i), vertical_);
+    const int font = wordFontId(i, fontId);
+    const int natural = measureWordWidth(renderer, font, words[i], wordStyles[i], false, wordScale(i), vertical_);
     if (box >= natural) return 0;
-    int inkLeft = 0;
-    int inkWidth = 0;
-    int advance = 0;
-    if (!renderer.getGlyphInk(wordFontId(i, fontId), cp, wordStyles[i], inkLeft, inkWidth, advance) || advance <= 0) {
-      return 0;
+    int inkStart = 0;
+    int inkSize = 0;
+    int cell = 0;
+    if (!vertical_ || !columnInk(renderer, font, cp, wordStyles[i], centredMarks, inkStart, inkSize, cell)) {
+      GlyphInk ink;
+      if (!renderer.getGlyphInk(font, cp, wordStyles[i], ink)) return 0;
+      inkStart = ink.left;
+      inkSize = ink.width;
+      cell = ink.advance;
     }
+    if (cell <= 0) return 0;
     const int removed = natural - box;
-    if (2 * inkLeft >= advance) return removed;
-    if (2 * (inkLeft + inkWidth) <= advance) return 0;
+    if (2 * inkStart >= cell) return removed;
+    if (2 * (inkStart + inkSize) <= cell) return 0;
     return removed / 2;
   };
 

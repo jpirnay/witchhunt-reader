@@ -11,8 +11,16 @@ enum class VerticalOrientation : uint8_t { R = 0, U = 1, Tu = 2, Tr = 3 };
 VerticalOrientation verticalOrientationOf(uint32_t cp);
 
 // The one place a class becomes a drawing: U and Tu upright in the reader's frame, R and Tr sideways through the
-// turned frame. No vertical forms and no placement of Tu marks yet.
+// turned frame. No vertical forms; uprightPlacementOf (below) says which upright marks the draw moves within their
+// cell: 、。，． and the small kana.
 bool drawsUpright(uint32_t cp);
+
+// How an upright character is placed inside its cell from its glyph's ink box. Reflect: the comma and full stop,
+// which sit at the lower left of a horizontal cell and go to the upper right of a vertical one. SmallKana: the small
+// kana, which move up and right the same way. None: set as step 3 does.
+enum class UprightPlacement : uint8_t { None, Reflect, SmallKana };
+
+UprightPlacement uprightPlacementOf(uint32_t cp);
 
 // The next piece the vertical draw path sets as one unit: a single upright character, or the longest run of sideways
 // ones up to kMaxColumnRunBytes; either keeps the combining marks (utf8IsCombiningMark, U+3099, U+309A) and variation
@@ -20,3 +28,6 @@ bool drawsUpright(uint32_t cp);
 // the piece's length in bytes (0 at the end of `text`), and whether it is upright.
 constexpr size_t kMaxColumnRunBytes = 64;
 size_t nextColumnPiece(const char* text, bool& upright);
+
+// The first code point of a UTF-8 string; 0 for an empty one.
+uint32_t firstCodepointOf(const char* utf8);

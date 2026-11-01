@@ -647,3 +647,68 @@ TEST_F(VerticalLayout, AnUprightCharacterAdvancesOneEm) {
   }
   EXPECT_GT(moved, 0);
 }
+
+namespace {
+struct LaidOutLine {
+  bool vertical = false;
+  bool centredMarks = false;
+  std::vector<std::string> words;
+  std::vector<int16_t> xpos;
+};
+
+// The body lines of the book at `path` under `profile`, copied out of each page before the harness frees it.
+std::vector<LaidOutLine> laidOutLines(const std::string& path, const std::string& cache,
+                                      const pipeline_harness::Profile& profile) {
+  std::vector<LaidOutLine> lines;
+  EXPECT_TRUE(
+      pipeline_harness::forEachPage(path, cache, profile, [&](int, const Section&, const Page& page, GfxRenderer&) {
+        for (const auto& element : page.elements) {
+          if (element->getTag() != TAG_PageLine) continue;
+          const TextBlock& block = *static_cast<const PageLine&>(*element).getBlock();
+          LaidOutLine& line = lines.emplace_back();
+          line.vertical = block.isVertical();
+          line.centredMarks = block.centredMarks();
+          for (uint16_t i = 0; i < block.wordCount(); ++i) {
+            line.words.emplace_back(block.wordText(i));
+            line.xpos.push_back(block.wordXpos(i));
+          }
+        }
+      }));
+  return lines;
+}
+}  // namespace
+
+// Traditional Chinese centres 、。 in their cell down a column (the draw's halfway reflection), so a mark push-in
+// narrows is drawn back by half of what it lost, as a centred mark is across a line (spec 5.2).
+//
+// The case of CjkPushIn's mid-line marks, in the stub's 16 px em on a 7 em column (112 px, no grid inset):
+// 字、字、字、字。 is 8 em, 128 px. The greedy breaker (hyphenation on) fits it pushed in, as CjkPushIn's greedy cases;
+// the DP would stretch 字、字、字、 at the same badness. The 16 px it needs come from the line-end 。 first (16 to 12,
+// the Traditional Chinese minimum of 6/8 em), then 4 from each 、 (mid-line, before 字, also down to 6/8): every mark
+// is 12 px and lost 4. The 。's box starts at 4 x 16 + 3 x 12 = 100, each 、's at 16, 44 and 72.
+//
+// Down the column the stub's 、 and 。 ink (5 px tall, `top` 5 above the baseline, which is 14 into the cell) is
+// reflected halfway towards the cell's top-right corner: dy = (16 - 2 x 14 + 2 x 5 - 5) / 2 = -7 / 2 = -3, so the ink
+// runs 14 - 5 - 3 = 6 to 11 of the 16 px cell (columnInk), across its centre: each mark moves back by 4 / 2 = 2, the
+// 。 to 98. Across a line the ink is the left half, 0 to 8, which stays: the horizontal twin keeps 100.
+TEST_F(VerticalLayout, ACentredMarkPushedInShiftsByHalf) {
+  const std::string path =
+      writeBook("", document("<p>字、字、字、字。字</p>", " xml:lang=\"zh-Hant\" lang=\"zh-Hant\""), "", "zh-Hant");
+  pipeline_harness::Profile on = profileOf(VerticalText::On, 460, 112);
+  pipeline_harness::Profile off = profileOf(VerticalText::Off, 112, 460);
+  on.hyphenationEnabled = true;
+  off.hyphenationEnabled = true;
+
+  const std::vector<LaidOutLine> vertical = laidOutLines(path, path + ".on", on);
+  ASSERT_EQ(2u, vertical.size());
+  EXPECT_TRUE(vertical[0].vertical);
+  EXPECT_TRUE(vertical[0].centredMarks);
+  ASSERT_EQ((std::vector<std::string>{"字", "、", "字", "、", "字", "、", "字", "。"}), vertical[0].words);
+  EXPECT_EQ((std::vector<int16_t>{0, 14, 28, 42, 56, 70, 84, 98}), vertical[0].xpos);
+
+  const std::vector<LaidOutLine> horizontal = laidOutLines(path, path + ".off", off);
+  ASSERT_EQ(2u, horizontal.size());
+  EXPECT_FALSE(horizontal[0].vertical);
+  ASSERT_EQ(vertical[0].words, horizontal[0].words);
+  EXPECT_EQ((std::vector<int16_t>{0, 16, 28, 44, 56, 72, 84, 100}), horizontal[0].xpos);
+}
