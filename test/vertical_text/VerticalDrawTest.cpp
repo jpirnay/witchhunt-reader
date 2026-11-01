@@ -110,7 +110,7 @@ TEST(VerticalDraw, DrawingAllocatesNothing) {
   r.drawCalls.reserve(16);
   const long live = liveAllocations();
   const long all = allocations();
-  drawTextVertical(r, kFontId, 100, 50, "日本Latin語", EpdFontFamily::REGULAR, 1.0f, false);
+  drawTextVertical(r, kFontId, 100, 50, "日。っLatin語", EpdFontFamily::REGULAR, 1.0f, false);
   EXPECT_EQ(all, allocations());
   EXPECT_EQ(live, liveAllocations());
 }
