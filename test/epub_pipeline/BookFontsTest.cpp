@@ -269,6 +269,17 @@ TEST_F(BookFontsTest, EachKindOfElementIsResolvedOnce) {
   EXPECT_LE(epub->getCssParser()->getResolveStats().resolveCalls, 10u);  // html, head, title, link, body, two p's
 }
 
+TEST_F(BookFontsTest, TheProbeResolvesAsLeanAsASectionBuild) {
+  // Its memo stands in for the resolver's hot rule cache, as the chapter parser's does: heap between the lean floor
+  // (24 KB) and the full one (40 KB), as an X3's first open has it, is enough to decide.
+  const auto epub = book(kProbeCss, {prose("indent", 2 * 1024)});
+  struct Heap {
+    Heap() { ESP.setFreeHeap(32 * 1024); }
+    ~Heap() { ESP.setFreeHeap(200 * 1024); }
+  } heap;
+  EXPECT_EQ(family("EBGaramond"), detect(*epub));  // found() expects no failure
+}
+
 TEST_F(BookFontsTest, TheBodyIsFoundPastTheSixthSpineItem) {
   std::vector<std::string> chapters(7, "<body><p class='block'>Front matter.</p></body>");
   chapters.push_back(prose("indent", 4 * 1024));

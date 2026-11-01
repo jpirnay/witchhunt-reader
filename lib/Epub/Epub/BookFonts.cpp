@@ -746,6 +746,10 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
   }
   const ParserState state(scratch);
   css->resetResolveStats();
+  // Lean, as a section build resolves: the probe's memo stands in for the hot rule cache, which would only grow on the
+  // heap, and the lower floor holds, as it does for the chapter the open builds next. An X3's first open has ~48 KB.
+  const bool lean = css->leanResolve();
+  css->setLeanResolve(true);
   const unsigned long start = millis();
   Found found;
   // From the first item, not the text reference: a guide that points at the cover would hide the whole book.
@@ -784,6 +788,7 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
     *failed = true;
   }
   css->clearCaches(/*evictEverything=*/true);  // the resolver's caches go back to the heap
+  css->setLeanResolve(lean);
   found.body = probe->family();
   // An accent needs a face to be drawn, of any style (moveNearestToRegular makes it the regular).
   probe->accents(
