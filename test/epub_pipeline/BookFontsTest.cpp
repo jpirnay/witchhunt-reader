@@ -303,7 +303,7 @@ TEST_F(BookFontsTest, AnEmbeddedTrueTypeBodyIsCopiedWithItsBoldFace) {
       "@font-face { font-family: 'Ubuntu Book'; font-weight: bold; src: url(../Fonts/ub.ttf); }\n"
       "@font-face { font-family: 'Ubuntu Book'; font-weight: 600; src: url(../Fonts/semi.ttf); }\n"
       "body { font-family: 'Ubuntu Book', serif }\n",
-      {"<body><p>Body text.</p></body>"},
+      {"<body><p>Body text with <b>bold words</b>.</p></body>"},  // the bold face is copied for its text
       {{"OEBPS/Fonts/u.ttf", "font/ttf", kTrueType},
        {"OEBPS/Fonts/ub.ttf", "font/ttf", kTrueTypeBold},
        {"OEBPS/Fonts/semi.ttf", "font/ttf", kTrueType}});
@@ -826,4 +826,50 @@ TEST_F(BookFontsTest, AMiseryShapedBookGetsItsTypewriterAndHandFilledLetters) {
   EXPECT_EQ(family("Narrow"), families.accents[2]);  // Ads, 4 short blocks, out-ranked
   EXPECT_EQ(64u, families.accentStyles[2][0]);        // PART I
   EXPECT_EQ(600u, families.accentStyles[2][2]);       // its italic line
+}
+
+// ---- The faces copied: those whose style carries text -----------------------------------------------------
+
+// Scores and masks are indexed by EpdFontFamily style: 0 regular, 1 bold, 2 italic, 3 bold italic; 0b0101 is
+// regular and italic.
+TEST(BookFontsStyles, TheFacesKeptAreThoseWithText) {
+  EXPECT_EQ(0b0101, BookFonts::keptStyles({427731, 121, 32091, 6}, 0b1111));  // Misery's body: R, I
+  EXPECT_EQ(0b0101, BookFonts::keptStyles({362, 0, 1471, 0}, 0b0101));        // BkNarrow: both
+  EXPECT_EQ(0b0100, BookFonts::keptStyles({10, 0, 2000, 0}, 0b0101));         // italic alone
+  EXPECT_EQ(0b0101, BookFonts::keptStyles({5000, 10, 3000, 900}, 0b1111));    // bold italic goes with bold
+  EXPECT_EQ(0b0001, BookFonts::keptStyles({0, 0, 0, 0}, 0b1111));             // no text: the regular alone
+  EXPECT_EQ(0b0010, BookFonts::keptStyles({0, 0, 0, 0}, 0b0010));             // a bold-only family: its bold
+  EXPECT_EQ(0b0011, BookFonts::keptStyles({50, 10, 0, 0}, 0b0011));           // a short book keeps its bold
+}
+
+TEST_F(BookFontsTest, ABoldUsedForAFewWordsIsNotCopied) {
+  std::string chapter = prose("body", 30 * 1024);
+  chapter.insert(chapter.size() - 7, "<p class='body'>Prose with <b>two words</b> in bold.</p>");
+  const auto epub = book(
+      "@font-face { font-family: Body; src: url(../Fonts/b.ttf); }\n"
+      "@font-face { font-family: Body; font-weight: bold; src: url(../Fonts/bb.ttf); }\n.body { font-family: Body }\n",
+      {chapter}, {{"OEBPS/Fonts/b.ttf", "font/ttf", kTrueType}, {"OEBPS/Fonts/bb.ttf", "font/ttf", kTrueTypeBold}});
+  ASSERT_EQ(BookFonts::State::Family, BookFonts::prepare(*epub, nullptr));
+  const fs::path dir = BookFonts::familyDir(epub->getCachePath());
+  EXPECT_EQ(kTrueType, readFile(dir / "0.ttf"));
+  EXPECT_FALSE(fs::exists(dir / "1.ttf"));  // drawn emboldened from the regular
+}
+
+TEST_F(BookFontsTest, AnItalicDominantAccentKeepsItsItalicAsItsRegular) {
+  std::string italic;
+  for (int i = 0; i < 250; ++i) italic += "<p class='part'><i>An italic line of a part title page.</i></p>";
+  std::vector<std::string> chapters = {prose("body", 20 * 1024), "<body><p class='part'>PART</p>" + italic + "</body>"};
+  const auto epub = book(
+      "@font-face { font-family: Body; src: url(../Fonts/b.ttf); }\n"
+      "@font-face { font-family: Narrow; src: url(../Fonts/n.ttf); }\n"
+      "@font-face { font-family: Narrow; font-style: italic; src: url(../Fonts/ni.ttf); }\n"
+      ".body { font-family: Body }\n.part { font-family: Narrow }\n",
+      chapters,
+      {{"OEBPS/Fonts/b.ttf", "font/ttf", kTrueType},
+       {"OEBPS/Fonts/n.ttf", "font/ttf", kTrueType},
+       {"OEBPS/Fonts/ni.ttf", "font/ttf", kNotoSans}});
+  ASSERT_EQ(BookFonts::State::Family, BookFonts::prepare(*epub, nullptr));
+  const fs::path dir = BookFonts::familyDir(epub->getCachePath(), 0);
+  EXPECT_EQ(kNotoSans, readFile(dir / "0.ttf"));  // PART's 64 bytes are under 1 % of its 9 KB
+  EXPECT_FALSE(fs::exists(dir / "2.ttf"));
 }

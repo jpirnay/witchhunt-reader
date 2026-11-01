@@ -53,6 +53,11 @@ constexpr uint32_t kBlockMinBytes = 64;
 /// short book keeps its small families.
 constexpr uint32_t kMinFamilyBytes = 256;
 constexpr uint32_t kMinFamilyPerMille = 1;
+/// A family's face for a style is copied when that style has kMinStyleBytes of its text, or kMinStylePercent of it;
+/// the engine draws the others from the faces copied (TtfFont::chooseSynthetic), as the store holds eight styles in
+/// all (keptStyles()).
+constexpr uint32_t kMinStyleBytes = 256;
+constexpr uint32_t kMinStylePercent = 1;
 
 enum class State : uint8_t {
   Pending,  ///< not examined yet (or by another kVersion), or the last attempts failed for a passing reason
@@ -114,6 +119,11 @@ uint32_t addWeighted(uint32_t sum, uint32_t bytes, uint32_t weight256);
 /// The weight of what was read of a spine item, in 8 fractional bits: the item's size over the bytes read of it (1
 /// when its size is not known), times the spine's items over those read. At most UINT32_MAX.
 uint32_t probeWeight256(size_t itemBytes, size_t readBytes, int spineCount, int sampledCount);
+/// The styles (bit n: EpdFontFamily style n) whose faces prepare() copies, of the `present` ones, by their text
+/// (`scores`): the one with the most text, the regular first on a tie, then italic, bold, bold italic; another
+/// with kMinStyleBytes, or kMinStylePercent of the family's text; bold italic only beside bold and italic, as its
+/// file alone would stop the engine from emboldening the regular and slanting it.
+uint8_t keptStyles(const uint32_t (&scores)[4], uint8_t present);
 /// `*failed` is set when no spine item could be read, or the probe had not the memory to decide.
 Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, std::string_view records = {});
 

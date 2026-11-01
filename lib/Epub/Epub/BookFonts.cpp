@@ -415,9 +415,12 @@ void pickFaces(std::string_view records, const uint32_t family, CssParser::FontF
     CssParser::FontFace& best = out[style];
     if (best.name.empty() || std::abs(face.weight - target) < std::abs(best.weight - target)) best = face;
   }
-  // A family without a normal face (a script declared italic only, a display face bold only) draws in its nearest
-  // face: that face becomes the regular, and the styles it leaves fall back to it. Moved, not copied, so the store
-  // holds it once.
+}
+
+// A family without a regular face to copy (a script declared italic only, a display face bold only, an italic that
+// carries the family's text) draws in its nearest: that face becomes the regular, and the styles it leaves fall back
+// to it. Moved, not copied, so the store holds it once.
+void moveNearestToRegular(CssParser::FontFace (&out)[4]) {
   if (out[0].name.empty()) {
     for (const uint8_t style : {2, 1, 3}) {
       if (out[style].name.empty()) continue;
@@ -503,7 +506,15 @@ uint8_t examine(const Epub& epub, BuildArena* scratch, std::string& records, Fam
     const bool accent = i >= 0;
     CssParser::FontFace picked[4];
     pickFaces(records, accent ? families.accents[i] : CssFontFamily::identity(families.body), picked);
-    if (picked[0].name.empty()) continue;  // not embedded
+    uint8_t present = 0;
+    for (uint8_t style = 0; style < 4; ++style) present |= picked[style].name.empty() ? 0 : 1u << style;
+    if (present == 0) continue;  // not embedded
+    // The faces of styles with little text are not copied: the engine draws those styles from the others.
+    const uint8_t kept = keptStyles(accent ? families.accentStyles[i] : families.bodyStyles, present);
+    for (uint8_t style = 0; style < 4; ++style) {
+      if ((kept & (1u << style)) == 0) picked[style] = CssParser::FontFace{};
+    }
+    moveNearestToRegular(picked);
     const std::string dir = familyDir(epub.getCachePath(), accent ? accents : -1);
     Storage.mkdir(dir.c_str());
     std::string dest = dir + "/0.ttf";  // the style's digit goes in place of the 0
@@ -625,6 +636,27 @@ uint32_t probeWeight256(const size_t itemBytes, const size_t readBytes, const in
   return static_cast<uint32_t>(std::min<uint64_t>(weight, UINT32_MAX));
 }
 
+uint8_t keptStyles(const uint32_t (&scores)[4], const uint8_t present) {
+  constexpr uint8_t kOrder[4] = {0, 2, 1, 3};  // ties go to the regular, then italic, bold, bold italic
+  int primary = -1;
+  uint64_t total = 0;
+  for (const uint8_t style : kOrder) {
+    total += scores[style];
+    if ((present & (1u << style)) != 0 && (primary < 0 || scores[style] > scores[primary])) primary = style;
+  }
+  if (primary < 0) return 0;
+  uint8_t kept = static_cast<uint8_t>(1u << primary);
+  for (uint8_t style = 0; style < 4; ++style) {
+    const uint32_t score = scores[style];
+    if ((present & (1u << style)) != 0 &&
+        (score >= kMinStyleBytes || (score > 0 && uint64_t{score} * 100 >= total * kMinStylePercent))) {
+      kept |= static_cast<uint8_t>(1u << style);
+    }
+  }
+  if (primary != 3 && (kept & 0b0110) != 0b0110) kept &= static_cast<uint8_t>(~0b1000u);
+  return kept;
+}
+
 Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const std::string_view records) {
   *failed = false;
   CssParser* css = epub.getCssParser();
@@ -672,12 +704,12 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
   }
   css->clearCaches(/*evictEverything=*/true);  // the resolver's caches go back to the heap
   found.body = probe->family();
-  // An accent needs a face to be drawn (pickFaces makes its nearest the regular).
+  // An accent needs a face to be drawn, of any style (moveNearestToRegular makes it the regular).
   probe->accents(
       [records](const uint32_t family) {
         CssParser::FontFace faces[4];
         pickFaces(records, family, faces);
-        return !faces[0].name.empty();
+        return std::any_of(std::begin(faces), std::end(faces), [](const auto& face) { return !face.name.empty(); });
       },
       found);
   return found;
