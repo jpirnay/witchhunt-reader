@@ -750,21 +750,34 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
   // heap, and the lower floor holds, as it does for the chapter the open builds next. An X3's first open has ~48 KB.
   const bool lean = css->leanResolve();
   css->setLeanResolve(true);
-  // And the book's rules in the lent region, as a section build has them: what the memo misses reads no card. Those
-  // reads, not the bytes, were the probe's seconds on an X3. Loaded above the parser state and below every read's
-  // block (BuildArena is LIFO), and dropped before the state's block goes back.
-  const bool resident = scratch != nullptr && scratch->valid();
-  if (resident) {
-    css->setIndexArena(scratch);
-    css->loadFromCache();
-  }
   const unsigned long start = millis();
   Found found;
   // From the first item, not the text reference: a guide that points at the cover would hide the whole book.
   const int count = epub.getSpineItemsCount();
   const int sampled = std::min(count, kProbeMaxItems);
-  const size_t cap =
+  size_t cap =
       std::clamp(kProbeBudgetBytes / static_cast<size_t>(std::max(sampled, 1)), kProbeMinItemBytes, kProbeMaxItemBytes);
+  // And the book's rules in the lent region, as a section build has them: what the memo misses reads no card. Those
+  // reads, not the bytes, were the probe's seconds on an X3. In a block of their own above the parser state's and below
+  // every read's (BuildArena is LIFO), given back first. Only while each read still fits beside them: a read that left
+  // the region would take its inflate ring, up to 32 KB, from the heap. A head is read shorter to fit, down to
+  // kProbeMinItemBytes; past that, or when they do not load, the rules stay on the card, looked up there.
+  BuildArena::Block rules;
+  bool resident = scratch != nullptr && scratch->valid();
+  if (resident) {
+    rules = scratch->reserveBlock();
+    css->setIndexArena(scratch);
+    const size_t room = css->loadFromCache() ? scratch->capacity() - scratch->used() : 0;
+    while (cap > kProbeMinItemBytes && Epub::spineReadScratchBytes(cap) > room) {
+      cap = std::max(cap / 2, kProbeMinItemBytes);
+    }
+    if (Epub::spineReadScratchBytes(cap) > room) {
+      css->setIndexArena(nullptr);
+      css->clearCaches(/*evictEverything=*/true);  // the views into the region go
+      scratch->release(rules);
+      resident = false;
+    }
+  }
   for (int k = 0; k < sampled; ++k) {
     const int i = count <= kProbeMaxItems ? k : static_cast<int>(static_cast<int64_t>(k) * count / kProbeMaxItems);
     const size_t itemBytes = epub.getSpineItem(i).zipUncompressedSize;  // 0: not known
@@ -795,8 +808,9 @@ Found detectFamilies(const Epub& epub, BuildArena* scratch, bool* failed, const 
     LOG_ERR("BKF", "Low heap: the probe missed CSS rules");
     *failed = true;
   }
-  css->clearCaches(/*evictEverything=*/true);  // the resolver's caches go back to the heap
   if (resident) css->setIndexArena(nullptr);
+  css->clearCaches(/*evictEverything=*/true);  // the resolver's caches go back to the heap, the views into the region
+  if (resident) scratch->release(rules);
   css->setLeanResolve(lean);
   found.body = probe->family();
   // An accent needs a face to be drawn, of any style (moveNearestToRegular makes it the regular).

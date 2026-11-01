@@ -52,6 +52,7 @@ std::string obfuscated(std::string font, const uint8_t* key, const size_t keyLen
 struct BookFontsTest : testing::Test {
   fs::path work;
   int books = 0;
+  bool deflated = false;  // the chapters as DEFLATE entries, read through an inflate ring, as real books have them
 
   void SetUp() override {
     work = fs::temp_directory_path() /
@@ -87,10 +88,15 @@ struct BookFontsTest : testing::Test {
       manifest += "<item id=\"" + id + "\" href=\"Text/" + id + ".xhtml\" media-type=\"application/xhtml+xml\"/>\n";
       spine += "<itemref idref=\"" + id + "\"/>";
       if (chapters[i] == kMissing) continue;
-      zip.add("OEBPS/Text/" + id + ".xhtml",
-              "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head>"
-              "<title>T</title><link rel=\"stylesheet\" href=\"../Styles/style.css\" type=\"text/css\"/></head>" +
-                  chapters[i] + "</html>\n");
+      const std::string xhtml =
+          "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head>"
+          "<title>T</title><link rel=\"stylesheet\" href=\"../Styles/style.css\" type=\"text/css\"/></head>" +
+          chapters[i] + "</html>\n";
+      if (deflated) {
+        zip.addDeflateStoredBlocks("OEBPS/Text/" + id + ".xhtml", xhtml, 16 * 1024);
+      } else {
+        zip.add("OEBPS/Text/" + id + ".xhtml", xhtml);
+      }
     }
     for (size_t i = 0; i < extra.size(); ++i) {
       manifest += "<item id=\"x" + std::to_string(i) + "\" href=\"" + extra[i].href.substr(6) + "\" media-type=\"" +
@@ -305,6 +311,37 @@ TEST_F(BookFontsTest, WithALentRegionTheRulesAreResolvedFromIt) {
   const size_t inRegion = opens(&arena);
   EXPECT_LE(inRegion + 4, onHeap);  // the rules file opened once, to load them, not once for each of 5 selectors
   EXPECT_EQ(0u, arena.used());      // all given back
+}
+
+TEST_F(BookFontsTest, TheReadsStayInTheLentRegionBesideTheRules) {
+  // Room for the parser state, the rules and ~20 KB: a whole 32 KB ring does not fit beside them, so the heads are
+  // read shorter rather than from the heap (up to 32 KB of it, on an X3 with ~48 KB free).
+  BuildArena arena(SaxParser::stateBytes() + 20 * 1024);
+  ASSERT_TRUE(arena.valid());
+  const std::string chapter = prose("indent", 100 * 1024);
+  deflated = true;
+  const auto epub = book(kProbeCss, {chapter, chapter});
+  bool failed = true;
+  const BookFonts::Found families = BookFonts::detectFamilies(*epub, &arena, &failed);
+  EXPECT_FALSE(failed);
+  EXPECT_EQ(family("EBGaramond"), CssFontFamily::identity(families.body));
+  EXPECT_GT(arena.highWater(), SaxParser::stateBytes() + 8 * 1024);  // a ring came from the region
+  EXPECT_EQ(0u, arena.used());
+}
+
+TEST_F(BookFontsTest, RulesThatDoNotFitTheRegionAreLookedUpOnTheCard) {
+  // Room for the parser state alone: the rules do not load into the region, and the lookups go to the card as they
+  // did before the rules moved there, rather than resolving to nothing.
+  std::string css = kProbeCss;
+  for (int i = 0; i < 100; ++i) css += ".unused" + std::to_string(i) + " { margin: 0 }\n";
+  BuildArena arena(SaxParser::stateBytes() + 128);
+  ASSERT_TRUE(arena.valid());
+  const auto epub = book(css, {prose("indent", 2 * 1024)});
+  bool failed = true;
+  const BookFonts::Found families = BookFonts::detectFamilies(*epub, &arena, &failed);
+  EXPECT_FALSE(failed);
+  EXPECT_EQ(family("EBGaramond"), CssFontFamily::identity(families.body));
+  EXPECT_EQ(0u, arena.used());
 }
 
 TEST_F(BookFontsTest, TheBodyIsFoundPastTheSixthSpineItem) {

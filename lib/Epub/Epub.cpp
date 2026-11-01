@@ -2114,10 +2114,14 @@ bool Epub::readSpineItemToStream(const int spineIndex, Print& out, const bool* s
     LOG_ERR("EBP", "Spine item %d not found", spineIndex);
     return false;
   }
-  // The read buffer and the inflate ring in a lent region when it has room, as readItemContentsToStream does; else
-  // the heap.
+  // The read buffer and the inflate ring in a lent region when it has room for this read, a capped one's ring sized to
+  // the cap (EntryReader::open(stat, cap)); else the heap.
   BuildArena* const arena = scratch != nullptr ? scratch : loadScratch_;
-  const bool lent = arena != nullptr && arena->valid() && arena->capacity() - arena->used() >= streamScratchBytes();
+  const size_t readBytes = outputCap != 0 && (stat.uncompressedSize == 0 || stat.uncompressedSize > outputCap)
+                               ? outputCap
+                               : stat.uncompressedSize;
+  const bool lent =
+      arena != nullptr && arena->valid() && arena->capacity() - arena->used() >= spineReadScratchBytes(readBytes);
   ZipFile zip(filepath);
   primeZip(zip);
   ZipFile::EntryReader reader(zip, 1024, lent ? arena : nullptr);
@@ -2126,6 +2130,10 @@ bool Epub::readSpineItemToStream(const int spineIndex, Print& out, const bool* s
   char what[24];
   snprintf(what, sizeof(what), "spine item %d", spineIndex);
   return opened && drainEntry(reader, out, stop, what);
+}
+
+size_t Epub::spineReadScratchBytes(const size_t readBytes) {
+  return 1024 + InflateReader::ringSizeFor(readBytes) + 2 * alignof(std::max_align_t);
 }
 
 bool Epub::drainEntry(ZipFile::EntryReader& reader, Print& out, const bool* stop, const char* what) {
