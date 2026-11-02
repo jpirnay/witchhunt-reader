@@ -21,6 +21,7 @@
 #endif
 
 class GfxRenderer;
+class Page;
 
 namespace SerialTestApi {
 
@@ -66,6 +67,25 @@ bool takeReloadRefusal();
 // nor in the reading stats, whose caps (10 and 100 books) a test run would otherwise fill, pushing the reader's own
 // books out.
 bool isTestBook(std::string_view path);
+
+// CMD:PAGE: the EPUB reader's page on screen, as the reader hands it over (Activity::sendPageOnScreen): loaded from
+// its section, with where it is drawn. sendPage() writes it out element by element while the reader holds it, on the
+// loop task under RenderLock(ExclusiveActivityAccess): its words are measured as they are drawn.
+struct PageOnScreen {
+  const Page* page = nullptr;
+  int fontId = 0;  // the reader's font, as Page::render takes it
+  // Where the page's element positions count from, in the frame the page draws in: the screen's, or the turned one on
+  // a vertical-rl page (what TextBlock::wordBox is given).
+  int originX = 0;
+  int originY = 0;
+  // 1-based, as CMD:STATE reports them: spine item `spine` of `spineCount`, page `pageNumber` of `pageCount`.
+  int spine = 0;
+  int spineCount = 0;
+  int pageNumber = 0;
+  int pageCount = 0;
+  bool verticalFlow = false;  // the section runs vertical-rl
+};
+void sendPage(const PageOnScreen& onScreen);
 #else
 inline void begin(GfxRenderer&) {}
 inline void service() {}

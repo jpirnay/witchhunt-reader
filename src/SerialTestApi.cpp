@@ -21,8 +21,10 @@
 #include "util/SerialCommandGrammar.h"
 
 #if SERIAL_TEST_API
+#include <Epub/Page.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalSystem.h>
 #include <Memory.h>
 #include <ProtectedPaths.h>
 #include <Utf8.h>
@@ -930,6 +932,165 @@ void cmdTtf(const std::string_view arg) {
   reply(line);
 }
 
+// ---- Bulk output and long commands: PAGE, FS:PUT, GET, HASH -----------------------------------
+
+// The one buffer the bulk commands share, all on the loop task and never two at once: a chunk of FS:PUT, GET and
+// HASH, and a line of CMD:PAGE. A static: 4 KB on the loop task's 8 KB stack is too much, and on the heap it would
+// be a 4 KB block taken and given back around every command.
+constexpr size_t kWireChunk = 4096;
+alignas(4) uint8_t wireBuffer[kWireChunk];
+
+// A reply line put together in wireBuffer and written in one go, so that a line another task prints (the display
+// driver writes its own) can only land between two lines, never inside one. A line longer than the buffer, a word
+// of thousands of bytes, goes out in pieces.
+class WireLine {
+ public:
+  void add(std::string_view text) {
+    while (!text.empty()) {
+      if (length_ == kWireChunk) flush();
+      const size_t n = std::min(text.size(), kWireChunk - length_);
+      memcpy(wireBuffer + length_, text.data(), n);
+      length_ += n;
+      text.remove_prefix(n);
+    }
+  }
+  // A few short fields.
+  __attribute__((format(printf, 2, 3))) void addf(const char* format, ...) {
+    char fields[96];
+    va_list args;
+    va_start(args, format);
+    const int n = vsnprintf(fields, sizeof(fields), format, args);
+    va_end(args);
+    if (n > 0) add(std::string_view(fields, std::min(static_cast<size_t>(n), sizeof(fields) - 1)));
+  }
+  // `text` as CMD:PAGE writes a word (SerialCommandGrammar::escapeTextUnit), without the quotes.
+  void addEscaped(const std::string_view text) {
+    size_t pos = 0;
+    while (pos < text.size()) {
+      if (kWireChunk - length_ < SerialCommandGrammar::kMaxEscapedUnit) flush();
+      length_ += SerialCommandGrammar::escapeTextUnit(text, pos, reinterpret_cast<char*>(wireBuffer) + length_);
+    }
+  }
+  // Ends the line and writes it. False when the host stopped reading.
+  bool end() {
+    add("\n");
+    flush();
+    return ok_;
+  }
+
+ private:
+  void flush() {
+    if (ok_ && length_ > 0) ok_ = writeAll(wireBuffer, length_, kReplyStallMs);
+    length_ = 0;
+  }
+  size_t length_ = 0;
+  bool ok_ = true;
+};
+
+// Holds LOG_* lines back from the wire while it lives, as the USB Transfer screen does (Logging's mute: they still
+// reach the crash ring), so none cuts into a binary payload or a dump; then puts back what was, since the transfer
+// screen keeps the mute on for its whole session.
+class LogHold {
+ public:
+  LogHold() : wasMuted_(isSerialWireMuted()) { setSerialWireMuted(true); }
+  ~LogHold() { setSerialWireMuted(wasMuted_); }
+  LogHold(const LogHold&) = delete;
+  LogHold& operator=(const LogHold&) = delete;
+
+ private:
+  bool wasMuted_;
+};
+
+// A file command holds the loop task for as long as the file takes. Every 100 ms it feeds the task watchdog and lets
+// the other tasks run, the idle task the watchdog also watches among them, as SDCardManager's long reads do.
+class LongWork {
+ public:
+  void breathe() {
+    if (millis() - lastMs_ < 100) return;
+    HalSystem::feedWatchdog();
+    delay(1);
+    lastMs_ = millis();
+  }
+
+ private:
+  unsigned long lastMs_ = millis();
+};
+
+// ---- PAGE -----------------------------------------------------------------------------------
+
+const char* alignName(const CssTextAlign align) {
+  switch (align) {
+    case CssTextAlign::Justify:
+      return "justify";
+    case CssTextAlign::Left:
+      return "left";
+    case CssTextAlign::Center:
+      return "center";
+    case CssTextAlign::Right:
+      return "right";
+    case CssTextAlign::None:
+      return "none";
+    case CssTextAlign::Inherit:
+      return "inherit";
+    case CssTextAlign::Start:
+      return "start";
+    case CssTextAlign::End:
+      return "end";
+  }
+  return "unknown";
+}
+
+// One PAGE_W line: word `j` of a line, as stored and where it is drawn. The one place a word line is written: the
+// right-to-left work adds the word's display form and logical position here (disp="..." lidx=<n>) once a TextBlock
+// carries them.
+bool sendPageWord(const uint16_t j, const TextBlock::WordBox& box, const unsigned style, const bool glue,
+                  const std::string_view text) {
+  WireLine line;
+  line.addf("PAGE_W:%u x=%d w=%d style=%u glue=%d text=\"", static_cast<unsigned>(j), box.x, box.width, style,
+            glue ? 1 : 0);
+  line.addEscaped(text);
+  line.add("\"");
+  return line.end();
+}
+
+// PAGE_LINE and its words. False when the host stopped reading.
+bool sendPageLine(const size_t index, const TextBlock* block, const int x, const int y, const int fontId,
+                  LongWork& work) {
+  const uint16_t words = block && block->valid() ? block->wordCount() : 0;
+  WireLine line;
+  line.addf("PAGE_LINE:%u x=%d y=%d words=%u align=%s vertical=%d", static_cast<unsigned>(index), x, y,
+            static_cast<unsigned>(words), block ? alignName(block->getRenderStyle().alignment) : "left",
+            block && block->isVertical() ? 1 : 0);
+  if (!line.end()) return false;
+  for (uint16_t j = 0; j < words; ++j) {
+    // Measured as TextBlock::render draws it: the same font, scale and position. A glyph the font does not hold yet
+    // is loaded for it, so a page whose glyphs all have to come from the card takes seconds.
+    const TextBlock::WordBox box = block->wordBox(*testRenderer, j, fontId, x, y);
+    work.breathe();
+    if (!sendPageWord(j, box, static_cast<unsigned>(block->wordStyle(j)), block->wordContinues(j),
+                      std::string_view(block->wordText(j), block->wordTextLen(j)))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void cmdPage(std::string_view /*arg*/) {
+  if (!testRenderer) {
+    reply("PAGE_ERROR:no renderer");
+    return;
+  }
+  const char* error = nullptr;
+  {
+    // No render pass while the page is read and measured: the reader's section file and font caches are the render
+    // task's, and a pass's console line (the display driver's own) must not land inside the dump.
+    RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
+    const LogHold hold;
+    error = activityManager.sendPageOnScreen();
+  }
+  if (error) reply("PAGE_ERROR:", error);
+}
+
 // ---- FS -------------------------------------------------------------------------------------
 
 // CMD:FS:LS:<folder> lists a folder, one "FS:<d|f> <bytes> <name>" line an entry and FS_END:<count>; CMD:FS:RM:<path>
@@ -1021,6 +1182,7 @@ constexpr Command kCommands[] = {
     {"IDLE", &cmdIdle},       {"EVENTS", &cmdEvents}, {"GET", &cmdGet},     {"SET", &cmdSet},
     {"LOG", &cmdLog},         {"TOUCH", &cmdTouch},   {"SWIPE", &cmdSwipe}, {"SLEEP", &cmdSleep},
     {"REBOOT", &cmdReboot},   {"HEAP", &cmdHeap},     {"TTF", &cmdTtf},     {"FS", &cmdFs},
+    {"PAGE", &cmdPage},
 #endif
 };
 
@@ -1219,6 +1381,48 @@ PowerRequest takePowerRequest() {
   const PowerRequest request = powerRequest;
   powerRequest = PowerRequest::None;
   return request;
+}
+
+void sendPage(const PageOnScreen& onScreen) {
+  const Page& page = *onScreen.page;
+  const size_t count = page.elements.size();
+  WireLine start;
+  start.addf("PAGE_START:spine=%d/%d page=%d/%d flow=%s elements=%u", onScreen.spine, onScreen.spineCount,
+             onScreen.pageNumber, onScreen.pageCount, onScreen.verticalFlow ? "vertical-rl" : "horizontal",
+             static_cast<unsigned>(count));
+  if (!start.end()) return;
+  // One element at a time, straight from the page: nothing here grows with it.
+  LongWork work;
+  for (size_t i = 0; i < count; ++i) {
+    const PageElement& element = *page.elements[i];
+    const int x = element.xPos + onScreen.originX;
+    const int y = element.yPos + onScreen.originY;
+    WireLine line;
+    switch (element.getTag()) {
+      case TAG_PageLine:
+        if (!sendPageLine(i, static_cast<const PageLine&>(element).getBlock(), x, y, onScreen.fontId, work)) return;
+        continue;
+      case TAG_PageImage: {
+        const ImageBlock& image = static_cast<const PageImage&>(element).getImageBlock();
+        line.addf("PAGE_IMAGE:%u x=%d y=%d w=%d h=%d", static_cast<unsigned>(i), x, y, image.getWidth(),
+                  image.getRenderedHeight());
+        break;
+      }
+      case TAG_PageTable:
+        line.addf("PAGE_EL:%u table", static_cast<unsigned>(i));
+        break;
+      case TAG_PageHR:
+        line.addf("PAGE_EL:%u hr", static_cast<unsigned>(i));
+        break;
+      default:
+        line.addf("PAGE_EL:%u tag%u", static_cast<unsigned>(i), static_cast<unsigned>(element.getTag()));
+        break;
+    }
+    if (!line.end()) return;
+  }
+  WireLine end;
+  end.addf("PAGE_END:%u", static_cast<unsigned>(count));
+  end.end();
 }
 #endif  // SERIAL_TEST_API
 

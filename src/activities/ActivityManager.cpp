@@ -775,6 +775,12 @@ const char* ActivityManager::currentActivityName() const {
   return currentActivity ? currentActivity->getName().c_str() : "none";
 }
 
+#if SERIAL_TEST_API
+const char* ActivityManager::sendPageOnScreen() {
+  return currentActivity ? currentActivity->sendPageOnScreen() : "not in the reader";
+}
+#endif
+
 const char* ActivityManager::busyReason(const bool includeBackground) {
   if (pendingAction != PendingAction::None) return "transition";
   // A press the loop has not taken in yet, or one the classifier is still deciding about. Not
