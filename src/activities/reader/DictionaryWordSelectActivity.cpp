@@ -285,6 +285,20 @@ class LentLookupScratch {
   std::optional<BuildArena> arena_;
 };
 
+// A lookup in the lent framebuffer keeps the font caches unless the heap lacks a definition-sized block
+// (LENT_LOOKUP_DEFINITION_BYTES), so a longer definition, or a CJK result of several entries, can still be refused
+// for low memory by the read's own nothrow gate. Then the caches go and the caller reads once more, still in the lend.
+// True when it should. `retryable` is false off the lend and once the caches have gone, and is cleared here, so a
+// lookup retries at most once. The reads assign the definition, so a retry never appends to a refused one.
+bool dropFontCachesToRetry(GfxRenderer& renderer, bool& retryable, const bool found,
+                           const Dictionary::LookupResult result) {
+  if (!retryable || found || result != Dictionary::LookupResult::LowMemory) return false;
+  retryable = false;
+  renderer.releaseFontCaches();
+  LOG_INF("DICT", "Definition refused for low memory: released the font caches, reading it once more");
+  return true;
+}
+
 }  // namespace
 
 void DictionaryWordSelectActivity::onEnter() {
@@ -808,7 +822,8 @@ bool DictionaryWordSelectActivity::resolveRun(const CjkLookupRun& run, const Dic
   return true;
 }
 
-bool DictionaryWordSelectActivity::lookUpRun(const bool ok, std::string& definition, Dictionary::LookupResult& result) {
+bool DictionaryWordSelectActivity::lookUpRun(const bool ok, bool& retryable, std::string& definition,
+                                             Dictionary::LookupResult& result) {
   CjkLookupRun run;
   buildRun(selected, run);
   result = Dictionary::LookupResult::NotFound;
@@ -818,7 +833,12 @@ bool DictionaryWordSelectActivity::lookUpRun(const bool ok, std::string& definit
     // reader is waiting for this one. Recorded as the speculation, so the span is there on return.
     if (speculationIdx != selected || speculation == Speculation::Unknown) resolveRun(run, nullptr, result);
     // A known miss needs no SD access at all.
-    if (speculation == Speculation::Found) found = dict.readPrefixDefinitions(speculationMatch, definition, &result);
+    if (speculation == Speculation::Found) {
+      found = dict.readPrefixDefinitions(speculationMatch, definition, &result);
+      if (dropFontCachesToRetry(renderer, retryable, found, result)) {
+        found = dict.readPrefixDefinitions(speculationMatch, definition, &result);
+      }
+    }
   }
   Dictionary::logLookup(SETTINGS.dictionaryName, run.text(),
                         ok ? Dictionary::resultName(result) : "open_or_index_failed",
@@ -902,8 +922,12 @@ void DictionaryWordSelectActivity::performLookup() {
   // heap lacks the block this lookup still asks of it, let the cache go -- glyphs load on demand
   // after. With the lend that is only the definition text.
   const size_t heapBlockBytes = lent.active() ? LENT_LOOKUP_DEFINITION_BYTES : LOOKUP_CONTIGUOUS_BYTES;
+  // A lent lookup that kept the caches may still need them gone for a long definition: see
+  // dropFontCachesToRetry().
+  bool retryable = lent.active();
   if (!heapHasBlockFor(heapBlockBytes)) {
     renderer.releaseFontCaches();
+    retryable = false;
     LOG_INF("DICT", "Released the font caches for the lookup: no %u byte block for the %s",
             static_cast<unsigned>(heapBlockBytes), lent.active() ? "definition" : "inflate window");
   }
@@ -926,7 +950,7 @@ void DictionaryWordSelectActivity::performLookup() {
   // Not before the busy repaint: after a dictionary switch, that repaint is what rebuilt the words.
   const CjkLookupRun::Script script = scriptAt(selected);
   if (script != CjkLookupRun::Script::Other) {
-    found = lookUpRun(ok, definition, result);
+    found = lookUpRun(ok, retryable, definition, result);
   } else {
     char text[WORD_TEXT_CAPACITY];
     buildWordText(selected, text, sizeof(text), true);
@@ -936,6 +960,9 @@ void DictionaryWordSelectActivity::performLookup() {
       if (speculation == Speculation::Found) {
         headword = speculationHeadword;
         found = dict.readResolved(speculationLocation, definition, &result);
+        if (dropFontCachesToRetry(renderer, retryable, found, result)) {
+          found = dict.readResolved(speculationLocation, definition, &result);
+        }
       } else {
         result = Dictionary::LookupResult::NotFound;
       }
@@ -943,6 +970,10 @@ void DictionaryWordSelectActivity::performLookup() {
       found = dict.lookup(text, definition, headword, &result);
       if (!found && result == Dictionary::LookupResult::NotFound && isHyphenJoined(selected)) {
         buildWordText(selected, text, sizeof(text), false);
+        found = dict.lookup(text, definition, headword, &result);
+      }
+      // `text` holds the spelling the last search used.
+      if (dropFontCachesToRetry(renderer, retryable, found, result)) {
         found = dict.lookup(text, definition, headword, &result);
       }
     }

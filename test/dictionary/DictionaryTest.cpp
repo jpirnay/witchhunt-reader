@@ -1682,6 +1682,57 @@ TEST_F(DictionaryTest, PrefixDefinitionsReportLowMemory) {
   EXPECT_TRUE(out.empty());
 }
 
+// What the word screen's retry on the lent path relies on (DictionaryWordSelectActivity::performLookup): a read
+// refused for low memory keeps the arena bound and nothing in it, and the same read made again into the same string,
+// once the font caches have gone, gives exactly the definition: nothing is appended to what the string held.
+TEST_F(DictionaryTest, AReadRefusedForLowMemoryInALentArenaReadsWholeOnTheRetry) {
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, provision("zipped", "ZippedRetry")));
+  std::vector<uint8_t> lent(kLentFramebufferBytes);
+  BuildArena arena(lent.data(), lent.size());
+  ASSERT_TRUE(dict.useInflateArena(&arena));
+  const size_t bound = arena.used();
+  DictLocation location;
+  std::string headword;
+  ASSERT_TRUE(dict.resolve("longword", location, headword));
+  DictPrefixMatch match;
+  ASSERT_TRUE(dict.resolvePrefixes("longword", match));
+
+  std::string viaLookup = "stale";
+  std::string viaLocation = "stale";
+  std::string viaPrefix = "stale";
+  Dictionary::LookupResult lookupResult = Dictionary::LookupResult::Found;
+  Dictionary::LookupResult locationResult = Dictionary::LookupResult::Found;
+  Dictionary::LookupResult prefixResult = Dictionary::LookupResult::Found;
+  const auto savedContig = ESP.getMaxAllocHeap();
+  ESP.setMaxAllocHeap(1024);  // no block for the definition text
+  const bool lookupFirst = dict.lookup("longword", viaLookup, headword, &lookupResult);
+  const bool locationFirst = dict.readResolved(location, viaLocation, &locationResult);
+  const bool prefixFirst = dict.readPrefixDefinitions(match, viaPrefix, &prefixResult);
+  ESP.setMaxAllocHeap(savedContig);
+  EXPECT_FALSE(lookupFirst);
+  EXPECT_FALSE(locationFirst);
+  EXPECT_FALSE(prefixFirst);
+  EXPECT_EQ(lookupResult, Dictionary::LookupResult::LowMemory);
+  EXPECT_EQ(locationResult, Dictionary::LookupResult::LowMemory);
+  EXPECT_EQ(prefixResult, Dictionary::LookupResult::LowMemory);
+  EXPECT_EQ(arena.used(), bound);
+
+  // The retry: the same calls, into the same strings.
+  ASSERT_TRUE(dict.lookup("longword", viaLookup, headword));
+  ASSERT_TRUE(dict.readResolved(location, viaLocation));
+  ASSERT_TRUE(dict.readPrefixDefinitions(match, viaPrefix));
+  EXPECT_EQ(viaLookup, expectedDefinition("longword"));
+  EXPECT_EQ(viaLocation, expectedDefinition("longword"));
+  std::string once;
+  ASSERT_TRUE(dict.readPrefixDefinitions(match, once));
+  EXPECT_EQ(viaPrefix, once);
+  EXPECT_EQ(viaPrefix.rfind("longword\n" + expectedDefinition("longword"), 0), 0u);
+
+  dict.useInflateArena(nullptr);
+  EXPECT_EQ(arena.used(), 0u);
+}
+
 TEST_F(DictionaryTest, PrefixDefinitionsOfATruncatedDictFileFailWithTheOutputCleared) {
   ASSERT_NO_FATAL_FAILURE(writeDictionary("DefsTruncated", kBasic));
   Dictionary dict;

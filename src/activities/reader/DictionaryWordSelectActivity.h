@@ -159,8 +159,9 @@ class DictionaryWordSelectActivity final : public Activity {
   bool resolveRun(const CjkLookupRun& run, Dictionary::AbortCheck abortCheck, Dictionary::LookupResult& result);
   // Confirm's half for a CJK word: the run from `selected`, searched unless the speculation already
   // has it, then every entry of its matches read into `definition`. Logs the lookup. `ok` is false
-  // when the dictionary could not be opened or indexed.
-  bool lookUpRun(bool ok, std::string& definition, Dictionary::LookupResult& result);
+  // when the dictionary could not be opened or indexed. `retryable`: a read refused for low memory
+  // is made once more after the font caches go (dropFontCachesToRetry in the .cpp).
+  bool lookUpRun(bool ok, bool& retryable, std::string& definition, Dictionary::LookupResult& result);
   // Noto Sans for a Latin lookup, the reader's own font (`fontId`) for one that started on CJK text
   // (spec 5.3). The one place that chooses; roadmap step 6 replaces it.
   int definitionFontId(CjkLookupRun::Script script) const;
