@@ -2381,6 +2381,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     // heading sizing rather than destroying the block: text can still arrive before the next
     // block tag opens, and flushPartWordBuffer drops words when there is no block to take them.
     self->clearSpentBlockHeadingStyle();
+    self->clearSpentBlockDirection(self->depth);  // and its direction, for the same reason
     self->applyPendingPageBreak();
     self->currentTable = std::unique_ptr<BufferedTable>(new BufferedTable());
     self->currentTable->depth = 1;
@@ -3347,6 +3348,8 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       if (!self->flushPartWordBuffer()) return;
     }
     self->makePages();
+    // makePages() keeps the drained block for the next paragraph to merge into (see the <table> handler).
+    self->clearSpentBlockDirection(self->depth);
     self->applyPendingPageBreak();
     if (!self->currentPage) {
       self->currentPage.reset(new Page());
@@ -4163,6 +4166,8 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
     self->flushTableFragment(self->currentTable->packer);
     self->currentTable.reset();
     self->nextWordContinues = false;
+    // The block a caption drained holds the table's direction: what follows the table takes the one around it.
+    self->clearSpentBlockDirection(self->depth);
   }
 
   // Leaving bold tag
@@ -4235,6 +4240,9 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
         style.alignment = (self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
                               ? CssTextAlign::Justify
                               : static_cast<CssTextAlign>(self->paragraphAlignment);
+        // The direction too: the closed element's is not the next paragraph's (a caption's, or that of a <div dir>
+        // whose last child was a rule). It takes the one around the element, as clearSpentBlockDirection gives.
+        style.direction = self->directionAround(self->depth);
         self->currentTextBlock->setBlockStyle(style);
       }
     }
@@ -4838,6 +4846,11 @@ void ChapterHtmlSlimParser::clearSpentBlockHeadingStyle() {
   spent.headingFontId = 0;
   spent.fontResolved = false;
   spent.keepWithNext = false;
+}
+
+void ChapterHtmlSlimParser::clearSpentBlockDirection(const int elementDepth) {
+  if (!currentTextBlock || !currentTextBlock->isEmpty()) return;
+  currentTextBlock->getBlockStyle().direction = directionAround(elementDepth);
 }
 
 void ChapterHtmlSlimParser::makePages() {

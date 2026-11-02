@@ -539,6 +539,37 @@ TEST_F(BidiLayout, AParagraphInADrainedBlockDecidesItsDirectionAnew) {
   EXPECT_EQ("", latin->order);
 }
 
+// What drains a block and keeps it for the next paragraph to merge into: a rule, a table, a table with a caption.
+const char* const kDrainingElements[] = {
+    "<hr/>",
+    "<table><tr><td>x</td></tr></table>",
+    "<table><caption>Cap</caption><tr><td>x</td></tr></table>",
+};
+
+TEST_F(BidiLayout, AParagraphAfterARuleTakesItsContainersDirection) {
+  // An English book: the paragraph after the element sets no direction, and neither does anything around it.
+  for (const char* element : kDrainingElements) {
+    for (const std::string& before : {std::string("<p dir=\"rtl\">א</p>"), std::string("<div dir=\"rtl\"><p>א</p>")}) {
+      const std::string close = before.rfind("<div", 0) == 0 ? "</div>" : "";
+      const auto lines =
+          parseLines(dump("", document(before + element + close + "<p>Alpha bravo</p>"), bookAlignment()));
+      const Line* latin = lineWith(lines, "Alpha bravo");
+      ASSERT_NE(nullptr, latin) << element;
+      EXPECT_EQ(0, latin->firstWordX) << before << element << close;
+    }
+  }
+}
+
+TEST_F(BidiLayout, AParagraphAfterARuleInARightToLeftContainerStaysRightToLeft) {
+  for (const char* element : kDrainingElements) {
+    const auto lines = parseLines(
+        dump("", document(std::string("<div dir=\"rtl\"><p>א</p>") + element + "<p>ב</p></div>"), bookAlignment()));
+    const Line* second = lineWith(lines, "ב");
+    ASSERT_NE(nullptr, second) << element;
+    EXPECT_EQ(460 - 11, second->firstWordX) << element;  // ב is 11 px, at the right edge
+  }
+}
+
 TEST_F(BidiLayout, TheBidiWorkspaceIsGoneWhenTheBuildEnds) {
   // One held before the build goes too: the build ends by releasing it (deviation 1).
   std::string visual;

@@ -702,6 +702,15 @@ class ChapterHtmlSlimParser final : public Print {
   [[nodiscard]] CssDirection blockDirection(const CssStyle& style) const {
     return style.unicodeBidi == CssUnicodeBidi::Plaintext ? CssDirection::Auto : elementFlow_.direction;
   }
+  // The direction the element at `elementDepth` sits in: its nearest ancestor's computed one, which the flow stack
+  // holds (an entry for every ancestor that changes a flow value); Unset when none sets one. At a start tag or after
+  // endElement's depth step, `depth` is the element's own.
+  [[nodiscard]] CssDirection directionAround(const int elementDepth) const {
+    for (int i = flowCount_ - 1; i >= 0; --i) {
+      if (flows_[i].depth < elementDepth) return flows_[i].direction;
+    }
+    return CssDirection::Unset;
+  }
   // The direction the parser knows: right to left from dir or CSS, or (unset or auto) from the book's language. The
   // side a float:left cap, a hanging indent or a gutter calls its start.
   [[nodiscard]] bool startSideIsRight() const {
@@ -788,6 +797,11 @@ class ChapterHtmlSlimParser final : public Print {
     lastTextCodepoint_ = 0;
   }
   void clearSpentBlockHeadingStyle();
+  // The empty block a rule or a table drains and keeps, or a closing block leaves, hands the next paragraph the
+  // direction around the element at `elementDepth`, not the spent paragraph's: the next paragraph merges into it
+  // (startNewTextBlock), and the merge takes the parent's direction when the child sets none
+  // (BlockStyle::getCombinedBlockStyle).
+  void clearSpentBlockDirection(int elementDepth);
   // Depth of the header/block element whose start tag set up the current text block, or -1 once
   // that element has closed. A <br> inside it splits the element into more blocks, which keep its
   // font size; after it has closed, what it leaves behind must not lend that size to a sibling.
