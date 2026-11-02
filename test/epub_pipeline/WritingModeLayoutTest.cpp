@@ -593,6 +593,18 @@ TEST_F(BidiLayout, AParagraphAfterARuleInARightToLeftContainerStaysRightToLeft) 
   }
 }
 
+TEST_F(BidiLayout, ABlockOfOnlyControlsLeavesNoDirectionBehind) {
+  // The LRI and PDI paragraph needs no bidi, so its controls are dropped and nothing is left to lay out; <hr> drains
+  // the block and keeps it, and the right-to-left paragraph merges into it.
+  const auto lines = parseLines(
+      dump("", document("<p>Alpha</p><p>&#x2066;&#x2069;</p><hr/><p dir=\"rtl\">שלום עולם</p>"), bookAlignment()));
+  const Line* hebrew = lineWith(lines, "עולם שלום");
+  ASSERT_NE(nullptr, hebrew);
+  ASSERT_EQ(2u, hebrew->words.size());
+  EXPECT_EQ(390, hebrew->words[0].x);
+  EXPECT_EQ(428, hebrew->words[1].x);
+}
+
 TEST_F(BidiLayout, TheBidiWorkspaceIsGoneWhenTheBuildEnds) {
   // One held before the build goes too: the build ends by releasing it (deviation 1).
   std::string visual;

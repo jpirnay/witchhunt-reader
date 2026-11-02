@@ -562,7 +562,12 @@ void ParsedText::layoutAndExtractLines(
   // Whether the paragraph needs bidi and which way it runs, before anything reads its words or its alignment. A pass
   // without bidi drops its controls first, so the snapshot below is of the text that is laid out.
   decideBidi();
-  if (words.empty()) return;  // the block held nothing but bidi controls
+  if (words.empty()) {
+    // The block held nothing but bidi controls. Its paragraph ends here as at the end of any last pass below: the
+    // parser may merge the next one into the block, which then decides its own direction.
+    if (includeLastLine && !preserveSource) forgetBidiParagraph();
+    return;
+  }
   resolveAlignment(rtl());
   // Upstream's flip: a right-to-left paragraph sets a left alignment the book did not ask for (the reader's) right.
   if (rtl() && blockStyle.alignment == CssTextAlign::Left && !blockStyle.textAlignDefined) {
