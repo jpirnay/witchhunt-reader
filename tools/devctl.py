@@ -17,6 +17,17 @@ them all and exits non-zero if any failed).
   expect:<regex>:<sec>  read until an output line matches (re.search), fail otherwise
   select:<regex>[:<n>]  press Down, waiting for each, until STATE's label matches (re.fullmatch); at most n
                         presses (default 40). The label is checked first, so a row already selected takes none.
+  page:<out.txt>        CMD:PAGE, write the reader's page dump (its PAGE_ lines) to the file, print a summary
+  put:<local>:<remote>  upload a file (CMD:FS:PUT), checked by its CRC32
+  get:<remote>:<local>  download a file (CMD:FS:GET), checked by its CRC32
+  hash:<remote>[=<local>]  CMD:FS:HASH; with a local file, fail unless both size and CRC32 match it
+  mkdir:<remote>        CMD:FS:MKDIR (with the folders above it)
+  mv:<from>:<to>        CMD:FS:MV (rename or move on the card)
+
+Card paths (<remote>) start with '/' and hold no ':' (FAT names cannot), so a local path may carry a
+drive letter: put:C:/books/a.epub:/test/a.epub splits at its last ':', get:/test/a.epub:C:/tmp/a.epub
+at its first. hash: splits at the first '=', so a card path with '=' in it cannot be compared there
+(use cmd:FS:HASH:<path>). Local paths may be given as Git Bash writes them (/c/tmp/a.epub).
 
 A --script file holds one step per line; blank lines and lines starting with # are skipped.
 Every line the device prints goes to --log with a timestamp. Needs pyserial, and Pillow for shot:.
@@ -31,6 +42,7 @@ import os
 import re
 import sys
 import time
+import zlib
 
 try:
     import serial  # pyserial
@@ -40,10 +52,13 @@ except ImportError:
 # First words of every reply the firmware sends to a command (see docs/serial-test-api.md).
 REPLY = re.compile(
     r"^(BTN_|ACT_|STATE:|CMD_ERROR|GET:|GET_END|GET_ERROR|SET_|LOG_|TOUCH_|SWIPE_|SLEEP_OK|REBOOT_OK|"
-    r"EVENTS_|IDLE|DICT|HELP:|BOOTLOG_|HEAP_|TTF:|TTF_|FS:|FS_)"
+    r"EVENTS_|IDLE|DICT|HELP:|BOOTLOG_|HEAP_|TTF:|TTF_|FS:|FS_|PAGE_)"
 )
 # Commands that answer with several lines, and the line that ends them.
-MULTI_LINE = {"GET:*": re.compile(r"^GET_END"), "FS:LS:": re.compile(r"^FS_END")}
+MULTI_LINE = {"GET:*": re.compile(r"^GET_END"), "FS:LS:": re.compile(r"^FS_END"), "PAGE": re.compile(r"^PAGE_END")}
+# A file the device reads through for its CRC32 before it answers (FS:GET, FS:HASH): seconds a megabyte, and then
+# some.
+FILE_READ_TIMEOUT = 300
 FAILED = re.compile(r"_ERROR|_TIMEOUT|^CMD_ERROR")
 
 
@@ -128,6 +143,15 @@ class Device:
             self.ser = self._open()
             return b""
 
+    def _read_some(self):
+        """What has arrived, or the next byte within the port's timeout. A read of a fixed size waits out the whole
+        timeout for bytes that are not coming, which an upload paid on every chunk's acknowledgement."""
+        try:
+            waiting = self.ser.in_waiting
+        except (serial.SerialException, OSError):
+            waiting = 0
+        return self._read(min(max(waiting, 1), 65536))
+
     def read_line(self, deadline):
         while time.time() < deadline:
             nl = self.buf.find(b"\n")
@@ -136,7 +160,7 @@ class Device:
                 text = line.decode("utf-8", errors="replace").rstrip("\r")
                 self.note(text)
                 return text
-            self.buf += self._read(4096)
+            self.buf += self._read_some()
         return None
 
     def read_exact(self, size, deadline):
@@ -144,6 +168,27 @@ class Device:
             self.buf += self._read(min(65536, size - len(self.buf)))
         data, self.buf = self.buf[:size], self.buf[size:]
         return data
+
+    def read_bulk(self, size, idle):
+        """`size` raw bytes; gives up when none come for `idle` seconds. Gathered in a bytearray: a payload of
+        megabytes added to a bytes object piece by piece is copied over and over."""
+        out = bytearray(self.buf[:size])
+        self.buf = self.buf[size:]
+        deadline = time.time() + idle
+        while len(out) < size and time.time() < deadline:
+            piece = self._read(min(65536, size - len(out)))
+            if piece:
+                out += piece
+                deadline = time.time() + idle
+        return bytes(out)
+
+    def reply(self, timeout):
+        """The next reply line (see REPLY); log lines are skipped. None after `timeout` seconds."""
+        deadline = time.time() + timeout
+        while (line := self.read_line(deadline)) is not None:
+            if REPLY.match(line):
+                return line
+        return None
 
     def drain(self):
         """Log and drop the lines already received, so a late reply to an earlier command (one that
@@ -200,11 +245,133 @@ class Device:
                 return line
         return "no reply"
 
+    def page(self, path):
+        """CMD:PAGE into `path`, one PAGE_ line a line. Returns None, or what went wrong."""
+        self.send("PAGE")
+        lines = []
+        deadline = time.time() + 30
+        while (line := self.read_line(deadline)) is not None:
+            if not line.startswith("PAGE_"):
+                continue  # a log line
+            lines.append(line)
+            if line.startswith(("PAGE_END", "PAGE_ERROR")):
+                break
+        if not lines or not lines[-1].startswith("PAGE_END"):
+            return lines[-1] if lines else "no reply"
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(lines) + "\n")
+        start = split_fields(lines[0][len("PAGE_START:"):])
+        text_lines = sum(line.startswith("PAGE_LINE:") for line in lines)
+        words = sum(line.startswith("PAGE_W:") for line in lines)
+        images = sum(line.startswith("PAGE_IMAGE:") for line in lines)
+        print(f"page spine={start.get('spine')} page={start.get('page')} flow={start.get('flow')}: "
+              f"{start.get('elements')} elements ({text_lines} lines, {images} images), {words} words -> {path}")
+        return None
+
+    def put(self, local, remote):
+        """CMD:FS:PUT: the file in the chunks the device asks for, each acknowledged before the next."""
+        with open(local, "rb") as f:
+            data = f.read()
+        crc = zlib.crc32(data) & 0xFFFFFFFF
+        self.send(f"FS:PUT:{remote}:{len(data)}:{crc:08x}")
+        started = time.time()
+        line = self.reply(20)
+        if not line or not line.startswith("FS_PUT_READY:"):
+            return line or "no reply"
+        chunk = int(line.split(":", 1)[1])
+        sent = 0
+        while sent < len(data):
+            piece = data[sent:sent + chunk]
+            self.ser.write(piece)
+            sent += len(piece)
+            ack = self.reply(15)
+            if ack != f"FS_PUT_ACK:{sent}":
+                return ack or f"no FS_PUT_ACK:{sent}"
+        done = self.reply(20)
+        if not done or not done.startswith("FS_OK:put"):
+            return done or "no FS_OK"
+        seconds = time.time() - started
+        print(f"{done} ({len(data) / 1024 / max(seconds, 0.001):.0f} KB/s)")
+        return None
+
+    def get(self, remote, local):
+        """CMD:FS:GET into `local`, written only when its size and CRC32 match what the device announced."""
+        self.send(f"FS:GET:{remote}")
+        line = self.reply(FILE_READ_TIMEOUT)
+        if not line or not line.startswith("FS_GET_START:"):
+            return line or "no reply"
+        started = time.time()
+        _, size, crc = line.split(":")
+        size, crc = int(size), int(crc, 16)
+        data = self.read_bulk(size, 20)
+        if len(data) != size:
+            return f"short file: {len(data)} of {size} bytes"
+        end = self.reply(20)
+        if end != "FS_GET_END":
+            return end or "no FS_GET_END"
+        if zlib.crc32(data) & 0xFFFFFFFF != crc:
+            return f"crc mismatch: got {zlib.crc32(data) & 0xFFFFFFFF:08x}, the device sent {crc:08x}"
+        with open(local, "wb") as f:
+            f.write(data)
+        seconds = time.time() - started
+        print(f"{remote} -> {local}: {size} bytes, crc {crc:08x} ({size / 1024 / max(seconds, 0.001):.0f} KB/s)")
+        return None
+
+    def hash(self, remote, local=None):
+        """CMD:FS:HASH, compared with `local` when given."""
+        self.send(f"FS:HASH:{remote}")
+        line = self.reply(FILE_READ_TIMEOUT)
+        print(line if line else f"NO REPLY to FS:HASH:{remote}")
+        if not line or not line.startswith("FS_HASH:"):
+            return line or "no reply"
+        crc, size, _ = line[len("FS_HASH:"):].split(" ", 2)
+        if local is None:
+            return None
+        with open(local, "rb") as f:
+            data = f.read()
+        mine = f"{zlib.crc32(data) & 0xFFFFFFFF:08x}"
+        if (crc, int(size)) != (mine, len(data)):
+            return f"differs from {local}: crc {mine}, {len(data)} bytes"
+        print(f"matches {local}")
+        return None
+
 
 def idle_timeout(arg):
     """Seconds to wait for the reply to CMD:IDLE<arg>: the device's own timeout and some slack."""
     first = arg.split(":")[0] if arg else ""
     return (int(first) if first.isdigit() else 10000) / 1000 + 5
+
+
+def file_step(device, kind, rest):
+    """page:, put:, get:, hash:, mkdir:, mv:. Returns None, or what went wrong. A card path starts with '/' and holds
+    no ':', so the step splits where a local path's drive letter cannot confuse it (see the module doc)."""
+    if kind == "page":
+        return device.page(native_path(rest)) if rest else "expected page:<out.txt>"
+    if kind == "put":
+        local, _, remote = rest.rpartition(":")
+        if not local or not remote.startswith("/"):
+            return "expected put:<local>:/<remote>"
+        return device.put(native_path(local), remote)
+    if kind == "get":
+        remote, _, local = rest.partition(":")
+        if not remote.startswith("/") or not local:
+            return "expected get:/<remote>:<local>"
+        return device.get(remote, native_path(local))
+    if kind == "hash":
+        remote, _, local = rest.partition("=")
+        if not remote.startswith("/"):
+            return "expected hash:/<remote>[=<local>]"
+        return device.hash(remote, native_path(local) if local else None)
+    if kind == "mkdir":
+        command = f"FS:MKDIR:{rest}"
+    else:
+        source, _, target = rest.partition(":")
+        if not source.startswith("/") or not target.startswith("/"):
+            return "expected mv:/<from>:/<to>"
+        command = f"FS:MV:{source}:{target}"
+    reply = device.command(command)
+    print(reply if reply else f"NO REPLY to {command}")
+    return None if reply and reply.startswith("FS_OK:") else (reply or "no reply")
 
 
 def run(device, steps, rotate, keep_going=False):
@@ -262,6 +429,11 @@ def run(device, steps, rotate, keep_going=False):
                 device.command("IDLE:5000", timeout=idle_timeout("5000"))
             if not ok:
                 print(f"NOT SELECTED: {pattern} (last label {fields.get('label')!r})")
+        elif kind in ("page", "put", "get", "hash", "mkdir", "mv"):
+            error = file_step(device, kind, rest)
+            if error:
+                print(f"{kind.upper()} FAILED: {error}")
+            ok = error is None
         elif kind == "wait":
             end = time.time() + float(rest)
             while device.read_line(end) is not None:
