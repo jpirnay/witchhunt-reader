@@ -1,6 +1,8 @@
 #include "SerialCommandGrammar.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <iterator>
 
 namespace SerialCommandGrammar {
 
@@ -172,6 +174,147 @@ bool parseLanguage(const std::string_view text, const char* const* codes, const 
   if (!parseInt(text, number) || number < 0 || static_cast<size_t>(number) >= count) return false;
   index = static_cast<size_t>(number);
   return true;
+}
+
+namespace {
+
+// A decimal byte count that fits a FAT32 file: digits only, 0 .. 4294967295.
+bool parseSize32(const std::string_view text, uint32_t& out) {
+  if (text.empty() || text.size() > 10) return false;
+  uint64_t value = 0;
+  for (const char c : text) {
+    if (c < '0' || c > '9') return false;
+    value = value * 10 + static_cast<uint64_t>(c - '0');
+  }
+  if (value > 0xFFFFFFFFull) return false;
+  out = static_cast<uint32_t>(value);
+  return true;
+}
+
+// 1 to 8 hex digits, any case.
+bool parseHex32(const std::string_view text, uint32_t& out) {
+  if (text.empty() || text.size() > 8) return false;
+  uint32_t value = 0;
+  for (const char c : text) {
+    uint32_t digit = 0;
+    if (c >= '0' && c <= '9') {
+      digit = static_cast<uint32_t>(c - '0');
+    } else if (c >= 'a' && c <= 'f') {
+      digit = static_cast<uint32_t>(c - 'a' + 10);
+    } else if (c >= 'A' && c <= 'F') {
+      digit = static_cast<uint32_t>(c - 'A' + 10);
+    } else {
+      return false;
+    }
+    value = (value << 4) | digit;
+  }
+  out = value;
+  return true;
+}
+
+}  // namespace
+
+bool parseFsPath(const std::string_view arg, std::string_view& path) {
+  if (arg.empty() || arg.front() != '/' || arg.find(':') != std::string_view::npos) return false;
+  path = arg;
+  return true;
+}
+
+bool parseFsPut(const std::string_view arg, std::string_view& path, uint32_t& size, uint32_t& crc) {
+  const size_t crcColon = arg.rfind(':');
+  if (crcColon == std::string_view::npos || crcColon == 0) return false;
+  const size_t sizeColon = arg.rfind(':', crcColon - 1);
+  if (sizeColon == std::string_view::npos) return false;
+  uint32_t parsedSize = 0;
+  uint32_t parsedCrc = 0;
+  if (!parseSize32(arg.substr(sizeColon + 1, crcColon - sizeColon - 1), parsedSize) ||
+      !parseHex32(arg.substr(crcColon + 1), parsedCrc) || !parseFsPath(arg.substr(0, sizeColon), path)) {
+    return false;
+  }
+  size = parsedSize;
+  crc = parsedCrc;
+  return true;
+}
+
+bool parseFsMove(const std::string_view arg, std::string_view& from, std::string_view& to) {
+  const size_t colon = arg.find(':');
+  if (colon == std::string_view::npos) return false;
+  return parseFsPath(arg.substr(0, colon), from) && parseFsPath(arg.substr(colon + 1), to);
+}
+
+namespace {
+
+// The characters CMD:PAGE writes as \u{XXXX} although they are valid UTF-8: controls, and the marks
+// that take no room on the page, so a bidi control or a zero-width space shows in the dump.
+bool escapedCodepoint(const uint32_t cp) {
+  return cp < 0x20 || (cp >= 0x7F && cp <= 0x9F) || cp == 0xAD || cp == 0x61C || (cp >= 0x200B && cp <= 0x200F) ||
+         (cp >= 0x2028 && cp <= 0x202E) || (cp >= 0x2060 && cp <= 0x2069) || cp == 0xFEFF;
+}
+
+// The length of the valid UTF-8 sequence at the start of `text`, and its codepoint; 0 when the first
+// byte starts none (RFC 3629: no overlong forms, no surrogates, nothing above U+10FFFF).
+size_t decodeUtf8(const std::string_view text, uint32_t& cp) {
+  const auto byte = [&text](const size_t i) { return static_cast<uint8_t>(text[i]); };
+  const uint8_t lead = byte(0);
+  if (lead < 0x80) {
+    cp = lead;
+    return 1;
+  }
+  size_t length = 0;
+  uint8_t low = 0x80;  // the range the second byte must fall in
+  uint8_t high = 0xBF;
+  if (lead >= 0xC2 && lead <= 0xDF) {
+    length = 2;
+    cp = lead & 0x1F;
+  } else if (lead >= 0xE0 && lead <= 0xEF) {
+    length = 3;
+    cp = lead & 0x0F;
+    if (lead == 0xE0) low = 0xA0;   // overlong
+    if (lead == 0xED) high = 0x9F;  // a surrogate
+  } else if (lead >= 0xF0 && lead <= 0xF4) {
+    length = 4;
+    cp = lead & 0x07;
+    if (lead == 0xF0) low = 0x90;   // overlong
+    if (lead == 0xF4) high = 0x8F;  // above U+10FFFF
+  } else {
+    return 0;
+  }
+  if (text.size() < length || byte(1) < low || byte(1) > high) return 0;
+  for (size_t i = 1; i < length; ++i) {
+    if ((byte(i) & 0xC0) != 0x80) return 0;
+    cp = (cp << 6) | (byte(i) & 0x3F);
+  }
+  return length;
+}
+
+}  // namespace
+
+size_t escapeTextUnit(const std::string_view text, size_t& pos, char* out) {
+  constexpr char kHex[] = "0123456789ABCDEF";
+  const std::string_view rest = text.substr(pos);
+  uint32_t cp = 0;
+  const size_t length = decodeUtf8(rest, cp);
+  if (length == 0) {
+    const auto b = static_cast<uint8_t>(rest[0]);
+    pos += 1;
+    const char escape[] = {'\\', 'x', '{', kHex[b >> 4], kHex[b & 0x0F], '}'};
+    std::copy(std::begin(escape), std::end(escape), out);
+    return sizeof(escape);
+  }
+  pos += length;
+  if (escapedCodepoint(cp)) {
+    const char escape[] = {
+        '\\', 'u', '{', kHex[(cp >> 12) & 0x0F], kHex[(cp >> 8) & 0x0F], kHex[(cp >> 4) & 0x0F], kHex[cp & 0x0F], '}'};
+    std::copy(std::begin(escape), std::end(escape), out);
+    return sizeof(escape);
+  }
+  if (cp == '"' || cp == '\\') {
+    out[0] = '\\';
+    out[1] = static_cast<char>(cp);
+    return 2;
+  }
+  std::copy(rest.begin(), rest.begin() + static_cast<std::ptrdiff_t>(length), out);
+  return length;
 }
 
 void appendField(std::string& out, const char* key, const std::string_view value) {

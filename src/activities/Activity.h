@@ -131,6 +131,11 @@ class Activity {
   // build, a cover decode. A full CMD:IDLE waits for it too. Not skipLoopDelay(): the transfer
   // screens hold that for their whole life.
   virtual bool hasPendingBackgroundWork() { return false; }
+  // For the serial CMD:PAGE: hands the page on screen to SerialTestApi::sendPage() and returns nullptr, or returns
+  // why it could not ("no page"; "busy" while it may still change on its own; "no memory" when sendPage() found no
+  // block for its scratch). Called on the loop task under RenderLock(ExclusiveActivityAccess). Only the EPUB reader
+  // has a page.
+  virtual const char* sendPageOnScreen() { return "not in the reader"; }
 #endif
 
   // Called while this activity is buried on the stack, before a download that needs the heap in

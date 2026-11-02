@@ -4,7 +4,8 @@ The firmware can be driven and observed over its USB serial port. A host (a pers
 a script, or an AI agent) sends one text line per command and gets one reply line back: press a
 button, open a screen or a book at a given page, read or change a setting, look a word up in the
 dictionary, wait until the device has finished drawing and building, ask what is on screen, take a
-screenshot. This page explains what the commands do, how to use them, and how to add one.
+screenshot or the reader's page as text, copy files to and from the card. This page explains what
+the commands do, how to use them, and how to add one.
 
 - [Why it exists](#why-it-exists)
 - [Which builds have it](#which-builds-have-it)
@@ -15,6 +16,7 @@ screenshot. This page explains what the commands do, how to use them, and how to
   - [Screens: `ACT`](#screens-act)
   - [What is on screen: `STATE`](#what-is-on-screen-state)
   - [Screenshots: `SCREENSHOT`](#screenshots-screenshot)
+  - [The page as text: `PAGE`](#the-page-as-text-page)
   - [Waiting: `IDLE`](#waiting-idle)
   - [Events: `EVENTS`](#events-events)
   - [Settings: `GET` and `SET`](#settings-get-and-set)
@@ -62,8 +64,11 @@ first commands: `BTN` (the six front and side keys, `:LONG`), `ACT` (`HOME`, `RE
 page), `SCREENSHOT`, `BOOTLOG` and `HELP`. Anything else gets `CMD_ERROR:unknown command`, and
 `CMD:HELP` lists what the build in hand has.
 
-The full set costs about 10.4 KB of flash and 280 B of RAM on the X4 build (the basic commands
-about 3 KB more than before this API). A new command belongs inside `#if SERIAL_TEST_API`.
+The full set costs about 19.4 KB of flash and 280 B of RAM on the X4 build: `PAGE` and the file
+commands brought 9 KB of the flash and no RAM, since their 2 KB scratch comes from the heap for the
+length of a command (the basic commands are about 3 KB more than before this API). A new command
+belongs inside `#if SERIAL_TEST_API`, and should hold no static buffer: `.bss` lowers every heap
+figure a development build reports.
 
 ## Connecting
 
@@ -102,9 +107,11 @@ Anything that does not start with `CMD:` is ignored, so a stray key in a termina
 The firmware reads one command per pass of its main loop (a pass takes about 10 ms when idle) and
 answers with one line that starts with a fixed prefix for that command: `BTN_OK`, `STATE:...`,
 `SET_ERROR:...`. Errors always end in `_ERROR:<reason>`; an unknown command gets
-`CMD_ERROR:unknown command <text>`. The two replies that are not a single line are `CMD:GET:*`
-(one line per setting, then `GET_END:<count>`) and `CMD:SCREENSHOT` (binary frame between two
-lines).
+`CMD_ERROR:unknown command <text>`. The replies that are not a single line are `CMD:GET:*` (one
+line per setting, then `GET_END:<count>`), `CMD:FS:LS` (one line per entry, then `FS_END`),
+`CMD:PAGE` (one line per element and word, then `PAGE_END`), and the three that carry bytes:
+`CMD:SCREENSHOT` (binary data between two lines) and the two exchanges `CMD:FS:PUT` and
+`CMD:FS:GET` (the file goes in pieces, each acknowledged by the side that takes it).
 
 A reply means the command was **accepted**, not that its effect is finished: after `BTN_OK` the
 press is queued and the screen has not been redrawn yet. Use [`CMD:IDLE`](#waiting-idle) to wait for
@@ -259,6 +266,93 @@ image.save("screen.png")
 `tools/devctl.py` (option `--rotate`) and `scripts/debugging_monitor.py` decode the frame for you.
 Replies, event lines and the frame are all written by the main loop, so they never cut into each
 other.
+
+### The page as text: `PAGE`
+
+```
+CMD:PAGE
+```
+
+The EPUB reader's page on screen as text: every element in the page's order, and every word of a
+line as the page stores it, with where it is drawn. It is for checks a screenshot cannot make
+reliably, such as the order of right-to-left words, a bidi control or zero-width mark in a word, or
+which words are glued together.
+
+Reply:
+
+```
+PAGE_START:spine=<n>/<count> page=<n>/<count> flow=<horizontal|vertical-rl> elements=<k>
+PAGE_LINE:<i> x=<x> y=<y> words=<n> align=<left|right|center|justify> vertical=<0|1>
+PAGE_W:<j> x=<x> w=<width> style=<n> glue=<0|1> text="<escaped>"
+...                                   (one PAGE_W per word of the line, then the next element)
+PAGE_IMAGE:<i> x=<x> y=<y> w=<w> h=<h>
+PAGE_EL:<i> <table|hr>
+PAGE_END:<k> starved=<n>
+```
+
+or `PAGE_ERROR:<reason>`.
+
+- `spine` and `page` count from 1, as `STATE` reports them; `flow` is the section's, as `STATE`'s
+  `flow`. `<i>` numbers the elements from 0, `<j>` the words of a line from 0.
+- Coordinates are pixels where the page is drawn, in the frame it is drawn in: the screen as the
+  device is held (origin top-left), or, on a `vertical-rl` page, the turned frame its columns are
+  drawn in. A line's `x`/`y` is the origin its words are placed from. A word's `x` and `w` are its
+  box as drawn, from `TextBlock::wordBox`: the same font, scale and position `TextBlock::render`
+  uses. On a vertical line `w` is the word's run down its column.
+- `style` holds the word's `EpdFontFamily::Style` bits: 1 bold, 2 italic, 4 underline,
+  8 strikethrough, 16 superscript, 32 subscript, 64 small caps.
+- `glue=1`: the word continues the one before it with no space between them (a word split into
+  styled runs, punctuation attached to a word). It is the stored continues bit, so on word 0 it is
+  whatever layout gave the line's first token.
+- `align` is the alignment the line stores, its block's (`start`, `end`, `none` or `inherit` would
+  show the value a block kept if one ever reached a laid-out line). So the last line of a justified
+  paragraph says `justify` although it is drawn ragged, as justified text ends; its words' `x` show
+  where they are. `vertical=1` marks a line of a vertical-rl page.
+- A table is `PAGE_EL:<i> table` (its cells are not listed), a rule `PAGE_EL:<i> hr`.
+- `starved` counts the glyph lookups during the dump that the heap had no room for
+  (`glyph_miss::starvedCount()`). Such a glyph is measured as missing, so with `starved` above 0
+  some `w=` are not what the panel shows: free some heap and ask again before trusting the widths.
+
+The text is written in double quotes:
+
+- printable UTF-8 as it is, with `"` and `\` escaped by a backslash;
+- the C0 controls, DEL, the C1 controls and the marks that take no room on the page, U+00AD,
+  U+061C, U+200B to U+200F, U+2028 to U+202E, U+2060 to U+2069 and U+FEFF (the bidi controls among
+  them), as `\u{XXXX}` (four upper-case hex digits);
+- a byte that is not part of a valid UTF-8 sequence as `\x{XX}`.
+
+So an RLM after a Hebrew word reads `text="שלום\u{200F}"`, and the line is plain UTF-8 whatever the
+book holds.
+
+Errors: `not in the reader` (another screen is on top, the reader's own menu included), `no page`
+(no section loaded, or the page could not be read), `busy` (the section on screen is still being
+built, or a page turn is on its way to the panel: wait with `CMD:IDLE:...:SCREEN`, which waits for
+both), `no memory` (the heap had no 2 KB block for the command's scratch).
+
+How it works: the reader keeps no page in memory between draws, so the command loads the page on
+screen from its section file, as a redraw does, and writes it out element by element; nothing it
+adds grows with the page (no text is copied per word). It waits for a render pass in flight to end
+and holds the next one off while it runs, since the page's words are measured with the reader's
+fonts. On a page in an SD-card or TrueType font that is not drawn at that moment, the measuring
+loads the glyphs it needs, which can take a moment. Log lines are held back from the wire during the
+dump, as on the USB Transfer screen.
+
+```
+> CMD:PAGE
+< PAGE_START:spine=3/40 page=5/12 flow=horizontal elements=27
+< PAGE_LINE:0 x=26 y=47 words=9 align=justify vertical=0
+< PAGE_W:0 x=26 w=31 style=0 glue=0 text="The"
+< PAGE_W:1 x=63 w=59 style=2 glue=0 text="Anarchy"
+...
+< PAGE_END:27 starved=0
+```
+
+`tools/devctl.py page:<out.txt>` writes the dump to a file and prints a one-line summary.
+
+**Reserved fields.** A TextBlock holds one form of each word today. When the right-to-left work
+gives it a display form and a logical position, `PAGE_W` gains `disp="..."` (the word as drawn,
+escaped the same way) and `lidx=<n>` (its logical index); both are written by one function
+(`sendPageWord` in `src/SerialTestApi.cpp`). A host should ignore fields it does not know.
 
 ### Waiting: `IDLE`
 
@@ -577,7 +671,17 @@ reclaim: writes simply resume and no event arrives. Development builds only.
 ```
 CMD:FS:LS:<folder>
 CMD:FS:RM:<path>
+CMD:FS:PUT:<path>:<size>:<crc32hex>
+CMD:FS:GET:<path>
+CMD:FS:HASH:<path>
+CMD:FS:MKDIR:<folder>
+CMD:FS:MV:<from>:<to>
 ```
+
+Every path is a path on the card and starts with `/`. A FAT name cannot hold `:`, so the fields
+around one are never in doubt. An unknown verb, or a path that does not start with `/`, gets
+`FS_ERROR:expected LS, RM, PUT, GET, HASH, MKDIR or MV, then :/<path>`; a verb with the wrong
+arguments gets `FS_ERROR:expected <its form>`.
 
 `LS` lists a folder, one line an entry, then the count:
 
@@ -587,16 +691,127 @@ FS:f 32946 cjk_store_fill.epub
 FS_END:2
 ```
 
-`RM` removes a file, or a folder with everything in it: `FS_OK:removed <path>`. Errors: `FS_ERROR:expected
-LS:/<folder> or RM:/<path>`, `FS_ERROR:protected <path>`, `FS_ERROR:not found <path>`, `FS_ERROR:not a folder
-<path>`, `FS_ERROR:could not remove <path>`.
+`RM` removes a file, or a folder with everything in it: `FS_OK:removed <path>`. Errors: `FS_ERROR:protected
+<path>`, `FS_ERROR:not found <path>`, `FS_ERROR:not a folder <path>`, `FS_ERROR:could not remove <path>`.
 
-Both work while the reader runs, without the USB Transfer screen and the restart that leaving it costs: deleting a
-book's section cache (`/.crosspoint/epub_<hash>/spines/...`) forces a cold build of a chapter, and a font folder
-under `/.crosspoint/fonts` can be looked at or removed between runs. Hidden folders can be reached; the credential
-stores (`wifi.json`, `opds.json`, `koreader.json`), a dot-named item itself (`/.crosspoint` cannot be removed) and
-any path spelled with an 8.3 alias are refused (`lib/FsHelpers/ProtectedPaths.h`). Removing what an open book is
-using is not guarded: do it from Home. Development builds only.
+`PUT` uploads a file, from any screen:
+
+```
+> CMD:FS:PUT:/test/fonts/NotoSansHebrew.ttf:41380:5d1e09f3
+< FS_PUT_READY:2048
+> <2048 bytes>
+< FS_PUT_ACK:2048
+> <2048 bytes>
+< FS_PUT_ACK:4096
+  ...
+> <the last 420 bytes>
+< FS_PUT_ACK:41380
+< FS_OK:put /test/fonts/NotoSansHebrew.ttf 41380
+```
+
+- `<size>` is decimal, up to 4294967295 (what a FAT32 file holds); `<crc32hex>` is the file's zlib
+  CRC32 (Python's `zlib.crc32`) in 1 to 8 hex digits.
+- Before the host sends a byte the path is checked, as for `RM`: `FS_ERROR:protected <path>` (a
+  credential store, a dot-named item, an 8.3 alias), `FS_ERROR:no parent folder <path>` (make it
+  with `MKDIR` first), `FS_ERROR:is a folder <path>`, `FS_ERROR:no memory <path>` (no 2 KB block on
+  the heap for the command's scratch), `FS_ERROR:could not create <path>`.
+- Then `FS_PUT_READY:<chunk>`. The host sends the file in pieces of `<chunk>` bytes, the last one
+  shorter, and waits for `FS_PUT_ACK:<bytes so far>` after each: the device writes the piece to the
+  card before it answers. Take the size from the reply rather than assuming it. It is 2048, half the
+  device's USB receive queue (4096 bytes): the receive interrupt drops whatever the queue cannot
+  hold, without a sign, so a piece as large as the queue would lose any byte that came with it (a
+  CRLF a host adds, a retry, a second program on the port) and the upload would only end in a CRC
+  mismatch. Never send ahead of the acknowledgement. An empty file is sent as no piece at all:
+  `FS_PUT_READY`, then `FS_OK` straight away.
+- The data goes to `<path>.part`. At `<size>` bytes the CRC32 decides: on a match the `.part`
+  takes the place of the file at `<path>`, if one is there, the way every transfer of the firmware
+  replaces a file (`lib/FsHelpers/FileReplace.h`: the old file steps aside as `<path>.old` and goes
+  only once the new one is in place), and the reply is `FS_OK:put <path> <size>`. Otherwise the
+  `.part` is removed and the reply is `FS_ERROR:crc mismatch <path>`; the old file is untouched.
+- `FS_ERROR:timeout <path>`: no byte came for 5 s. `FS_ERROR:no space <path>`: the card is full.
+  `FS_ERROR:write failed <path>`: a write failed with room left. `FS_ERROR:could not replace
+  <path>`: the old file could not be set aside; when an earlier replace left `<path>.old` behind,
+  every later `PUT` to that path answers this until `FS:RM` removes the `.old` (the device log names
+  it). Each removes the `.part`.
+- While it receives, log lines are held back from the wire, as on the USB Transfer screen, and the
+  main loop does nothing else: no button is read until the upload ends. The size has no limit but
+  the card; allow about a second per 100 to 250 KB (see Speed below).
+
+`GET` downloads one, a piece at a time, each acknowledged by the host:
+
+```
+> CMD:FS:GET:/test/fonts/NotoSansHebrew.ttf
+< FS_GET_START:41380:5d1e09f3:2048
+< <2048 bytes>
+> 0x06
+< <2048 bytes>
+> 0x06
+  ...
+< <the last 420 bytes>
+> 0x06
+< FS_GET_END
+```
+
+- `FS_GET_START:<size>:<crc32hex>:<piece>`, then the file in pieces of `<piece>` bytes (2048), the
+  last one shorter. After each piece the device waits for one byte from the host: `0x06` (ACK, the
+  transfer protocol's) sends the next, any other byte cancels (`FS_ERROR:cancelled <path>`), and
+  none for 15 s ends it (`FS_ERROR:transfer stalled <path>`). An empty file is `FS_GET_START` and
+  `FS_GET_END` with nothing between.
+- Check what arrives against the size and the CRC. A piece that does not arrive whole within a few
+  seconds lost bytes on the way: cancel, read up to the device's `FS_ERROR:cancelled`, and ask
+  again (`tools/devctl.py get:...:<retries>` does).
+- Why it is paced: an unpaced stream lost data no side could see. On the X4, a host that stopped
+  reading for half a second once a megabyte lost whole 64-byte USB packets at every pause, and an
+  ordinary host 2 downloads in 14, while the device's writes had all returned their full count and
+  it sent `FS_GET_END` as if every byte had gone. It happened on the USB Transfer screen too, with
+  its 1 s TX timeout; `SCREENSHOT`'s 48 KB fit the host's buffers and showed no loss. The transfer
+  protocol's download is paced the same way for the same reason. With one piece in flight, the
+  device's TX buffer never fills and the host is never more than a piece behind. To check it on a
+  device, download a file of a few MB with the host pausing, several times, and compare:
+  `python3 tools/devctl.py --read-pause 0.5 get:/test/r4m.bin:/tmp/r4m.bin hash:/test/r4m.bin=/tmp/r4m.bin`
+  (after a `put:` of the same file).
+- The device reads the file once for its CRC32 before it starts, so a large file takes a moment to
+  answer. A read that fails halfway still sends the rest of the promised bytes, as zeros, and then
+  `FS_ERROR:read failed <path>` instead of `FS_GET_END`.
+- Errors before the data: `FS_ERROR:protected <path>` (the same rules as `RM`: the credential stores
+  never leave the device), `FS_ERROR:not found <path>`, `FS_ERROR:not a file <path>`,
+  `FS_ERROR:no memory <path>`, `FS_ERROR:read failed <path>`.
+- While the bytes go out, log lines are held back and the screen is not redrawn (the display driver
+  prints a line of its own after a refresh, which would land in the data), so a download of several
+  megabytes freezes the screen for as long as it takes.
+
+`HASH` checks a file without reading it back: `FS_HASH:<crc32hex> <size> <path>`, or the errors of
+`GET`. It reads the whole file, at the card's speed.
+
+`PUT`, `GET`, `HASH` and `PAGE` each take a 2 KB block from the heap for the length of the command
+and give it back when it ends, so between commands they hold nothing and the heap figures of a
+development build are those of a build without them.
+
+`MKDIR` makes a folder and any folders above it that are missing: `FS_OK:mkdir <folder>`, also when
+it is there already. `FS_ERROR:not a folder <path>` when a file has that name, `FS_ERROR:protected
+<path>`, `FS_ERROR:could not create <path>`.
+
+`MV` renames or moves a file or a folder: `FS_OK:moved <from> <to>`. Errors: `FS_ERROR:protected
+<path>` (either side, the same rules as `RM`), `FS_ERROR:not found <from>`, `FS_ERROR:exists <to>`
+(nothing is replaced; FAT compares names without case, so a rename that only changes the case is
+refused too), `FS_ERROR:no parent folder <to>`, `FS_ERROR:into itself <to>` (a folder onto itself
+or into its own subtree), `FS_ERROR:could not move <from>`.
+
+**Speed.** Both directions move one 2 KB piece at a time, each acknowledged, and
+`tools/devctl.py` prints the rate it got. On the X4 an upload of 1 MB ran at about 210 KB/s (10 KB
+at about 100 KB/s), close to the USB Transfer screen's 119 to 170 KB/s. Unpaced, a download ran at
+500 to 740 KB/s; the acknowledgement per piece costs a round trip per 2 KB, so expect less, not yet
+measured. A download starts after the CRC pass, which reads the file at the card's speed (1.15 s for
+1 MB on the X4).
+
+All of them work while the reader runs, without the USB Transfer screen and the restart that leaving it costs:
+deleting a book's section cache (`/.crosspoint/epub_<hash>/spines/...`) forces a cold build of a chapter, a font
+folder under `/.crosspoint/fonts` can be looked at or removed between runs, and the web bundle, test fonts and
+dictionaries go onto the card with `PUT`. Hidden folders can be reached; the credential stores (`wifi.json`,
+`opds.json`, `koreader.json`), a dot-named item itself (`/.crosspoint` cannot be removed or moved) and any path
+spelled with an 8.3 alias are refused (`lib/FsHelpers/ProtectedPaths.h`). Removing, replacing or moving what an
+open book is using is not guarded: do it from Home. On the USB Transfer screen a command line is at most 127 bytes.
+Development builds only.
 
 ### Other: `BOOTLOG`, `HELP`
 
@@ -683,12 +898,21 @@ screenshot -> page.png
 ...
 ```
 
-Steps: `cmd:<TEXT>` (send `CMD:<TEXT>`, fail on an error reply; `GET:*` and `FS:LS:` print every line of
-their reply), `state` and `check:<key>=<regex>` (test a field of the last `STATE`), `idle[:<ms>[:SCREEN]]`,
+Steps: `cmd:<TEXT>` (send `CMD:<TEXT>`, fail on an error reply; `GET:*`, `FS:LS:` and `PAGE` print every line
+of their reply), `state` and `check:<key>=<regex>` (test a field of the last `STATE`), `idle[:<ms>[:SCREEN]]`,
 `shot:<file.png>`, `wait:<seconds>`, `expect:<regex>:<seconds>` (wait for a log line), `select:<regex>[:<n>]` (press
-Down, waiting for each press to land, until the selected row's label matches; at most n presses, 40 by default).
+Down, waiting for each press to land, until the selected row's label matches; at most n presses, 40 by default),
+`page:<out.txt>` (the `PAGE` dump into a file, with a one-line summary; it fails when the dump is not whole: an
+element or a word missing, out of order or garbled, as bytes lost on the link would leave it), `put:<local>:<remote>`
+and `get:<remote>:<local>[:<retries>]` (a file each way, checked by its size and CRC32; the rate is printed; a `get:`
+that fails says how many bytes came and with which CRC, cancels, and tries again up to `<retries>` times),
+`hash:<remote>[=<local>]` (with a local file, fail unless size and CRC32 match), `mkdir:<remote>`, `mv:<from>:<to>`. A
+card path starts with `/` and holds no `:`, so `put:` splits at its last `:` and `get:` at its first (and at a
+trailing `:<digits>`, the retry count), and a local path may carry a drive letter (`put:C:/books/a.epub:/test/a.epub`);
+`hash:` splits at the first `=`.
 `--script FILE` reads one step per line (`#` comments), `--keep-going` runs all steps and reports every failure,
-`--rotate` sets the screenshot rotation. Paths may be given as Git Bash writes them (`/c/tmp/page.png`); output is
+`--rotate` sets the screenshot rotation, `--read-pause S` makes `get:` stop reading for S seconds after every MB, as a
+slow host would (a test of the pacing above). Paths may be given as Git Bash writes them (`/c/tmp/page.png`); output is
 UTF-8 whatever the console, and the port is closed without resetting the device even when a step fails. A script
 file makes a reusable regression check:
 

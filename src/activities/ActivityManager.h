@@ -15,6 +15,7 @@
 #include "CrossPointSettings.h"
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
+#include "SerialTestApi.h"  // SERIAL_TEST_API
 #include "TouchUi.h"
 #include "activities/browser/OpdsBackTo.h"
 #include "activities/home/LibraryTab.h"
@@ -278,6 +279,11 @@ class ActivityManager {
   // (Activity::hasPendingBackgroundWork()). `includeBackground` false asks only whether the screen
   // has settled. Loop task only.
   const char* busyReason(bool includeBackground);
+#if SERIAL_TEST_API
+  // For the serial CMD:PAGE: Activity::sendPageOnScreen() of the activity on top. Loop task, under
+  // RenderLock(ExclusiveActivityAccess).
+  const char* sendPageOnScreen();
+#endif
 
   // True when a reader-scoped `action` configured on `button` goes to the activity on top instead
   // of falling through as the raw press: always for the reader itself, and for another screen only

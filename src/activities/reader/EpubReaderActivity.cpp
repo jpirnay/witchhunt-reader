@@ -6704,6 +6704,36 @@ bool EpubReaderActivity::hasPendingBackgroundWork() {
            : !secondaryBorrowed_ && renderer.hasSecondaryBuffer());
   return imageLaneCanRun && (imageWarmCleanSpine_ != currentSpineIndex || imageWarmCleanPage_ != section->currentPage);
 }
+
+const char* EpubReaderActivity::sendPageOnScreen() {
+  if (!epub || !section) return "no page";
+  // A section still being built, or a page turn on its way to the panel: what is on screen is about to change.
+  if (readerPhase_ != ReaderPhase::READING || section->hasActiveBuild() || usePreRenderedBuffer) return "busy";
+  if (section->currentPage < 0 || section->currentPage >= section->pageCount) return "no page";
+  // The reader keeps no page in memory between draws: loaded as a redraw of the page on screen loads it
+  // (restoreCurrentPageToBufferIfPreRendered), for the length of the dump.
+  const std::unique_ptr<Page> page = section->loadPageFromSectionFile();
+  if (!page) return "no page";
+  // Where renderPageContentOnly() draws it and publishPageLinkTargets() boxes its words.
+  const RenderLayout layout = computeRenderLayout();
+  const int contentTop = layout.marginTop + ReaderPageLayout::imageOnlyPageYOffset(*page, layout.viewportHeight);
+  const int screenW = renderer.getScreenWidth(renderer.getHeldOrientation());
+  const turnedframe::Offsets origin =
+      page->isVertical()
+          ? turnedframe::contentOffsets(screenW, layout.marginLeft, contentTop, page->verticalBlockExtent)
+          : turnedframe::Offsets{layout.marginLeft, contentTop};
+  SerialTestApi::PageOnScreen onScreen;
+  onScreen.page = page.get();
+  onScreen.fontId = getEffectiveReaderFontId();
+  onScreen.originX = origin.x;
+  onScreen.originY = origin.y;
+  onScreen.spine = currentSpineIndex + 1;
+  onScreen.spineCount = epub->getSpineItemsCount();
+  onScreen.pageNumber = section->currentPage + 1;
+  onScreen.pageCount = section->pageCount;
+  onScreen.verticalFlow = section->flowContext().vertical;
+  return SerialTestApi::sendPage(onScreen) ? nullptr : "no memory";
+}
 #endif  // SERIAL_TEST_API
 
 void EpubReaderActivity::restoreCurrentPageToBufferIfPreRendered() {
