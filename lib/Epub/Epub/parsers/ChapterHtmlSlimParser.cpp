@@ -4237,9 +4237,7 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
       const bool preserveForBrClose = style.fromBrElement && strcmp(name, "br") == 0;
       if (!preserveForBrClose) {
         style.textAlignDefined = false;
-        style.alignment = (self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
-                              ? CssTextAlign::Justify
-                              : static_cast<CssTextAlign>(self->paragraphAlignment);
+        style.alignment = self->readerAlignment();
         // The direction too: the closed element's is not the next paragraph's (a caption's, or that of a <div dir>
         // whose last child was a rule). It takes the one around the element, as clearSpentBlockDirection gives.
         style.direction = self->directionAround(self->depth);
@@ -4850,7 +4848,9 @@ void ChapterHtmlSlimParser::clearSpentBlockHeadingStyle() {
 
 void ChapterHtmlSlimParser::clearSpentBlockDirection(const int elementDepth) {
   if (!currentTextBlock || !currentTextBlock->isEmpty()) return;
-  currentTextBlock->getBlockStyle().direction = directionAround(elementDepth);
+  BlockStyle& spent = currentTextBlock->getBlockStyle();
+  spent.direction = directionAround(elementDepth);
+  if (!spent.textAlignDefined) spent.alignment = readerAlignment();
 }
 
 void ChapterHtmlSlimParser::makePages() {

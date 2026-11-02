@@ -711,6 +711,12 @@ class ChapterHtmlSlimParser final : public Print {
     }
     return CssDirection::Unset;
   }
+  // The alignment of a block the book sets no text-align for: the reader's, Justify under the book's own.
+  [[nodiscard]] CssTextAlign readerAlignment() const {
+    return paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None)
+               ? CssTextAlign::Justify
+               : static_cast<CssTextAlign>(paragraphAlignment);
+  }
   // The direction the parser knows: right to left from dir or CSS, or (unset or auto) from the book's language. The
   // side a float:left cap, a hanging indent or a gutter calls its start.
   [[nodiscard]] bool startSideIsRight() const {
@@ -800,7 +806,9 @@ class ChapterHtmlSlimParser final : public Print {
   // The empty block a rule or a table drains and keeps, or a closing block leaves, hands the next paragraph the
   // direction around the element at `elementDepth`, not the spent paragraph's: the next paragraph merges into it
   // (startNewTextBlock), and the merge takes the parent's direction when the child sets none
-  // (BlockStyle::getCombinedBlockStyle).
+  // (BlockStyle::getCombinedBlockStyle). The same goes for what the spent direction did to an alignment the book did
+  // not set (a right-to-left paragraph turns the reader's Left to Right): it is the reader's again, as the close-tag
+  // reset of an empty block leaves it.
   void clearSpentBlockDirection(int elementDepth);
   // Depth of the header/block element whose start tag set up the current text block, or -1 once
   // that element has closed. A <br> inside it splits the element into more blocks, which keep its

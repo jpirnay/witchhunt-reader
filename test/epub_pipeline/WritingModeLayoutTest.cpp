@@ -546,27 +546,50 @@ const char* const kDrainingElements[] = {
     "<table><caption>Cap</caption><tr><td>x</td></tr></table>",
 };
 
+// The book's alignment, and the reader's Left (which a right-to-left paragraph turns Right): with each, the paragraph
+// after the element sets no text-align, so its alignment comes from the block it merges into.
+struct AlignmentCase {
+  const char* name;
+  pipeline_harness::Profile profile;
+  int paragraphAlign;  // what a paragraph without text-align is laid out at
+};
+std::vector<AlignmentCase> alignmentCases() {
+  pipeline_harness::Profile userLeft;
+  userLeft.paragraphAlignment = static_cast<uint8_t>(CssTextAlign::Left);
+  return {{"book alignment", bookAlignment(), static_cast<int>(CssTextAlign::Justify)},
+          {"reader's Left", userLeft, kLeft}};
+}
+
 TEST_F(BidiLayout, AParagraphAfterARuleTakesItsContainersDirection) {
   // An English book: the paragraph after the element sets no direction, and neither does anything around it.
-  for (const char* element : kDrainingElements) {
-    for (const std::string& before : {std::string("<p dir=\"rtl\">א</p>"), std::string("<div dir=\"rtl\"><p>א</p>")}) {
-      const std::string close = before.rfind("<div", 0) == 0 ? "</div>" : "";
-      const auto lines =
-          parseLines(dump("", document(before + element + close + "<p>Alpha bravo</p>"), bookAlignment()));
-      const Line* latin = lineWith(lines, "Alpha bravo");
-      ASSERT_NE(nullptr, latin) << element;
-      EXPECT_EQ(0, latin->firstWordX) << before << element << close;
+  for (const AlignmentCase& alignment : alignmentCases()) {
+    for (const char* element : kDrainingElements) {
+      for (const std::string& before :
+           {std::string("<p dir=\"rtl\">א</p>"), std::string("<div dir=\"rtl\"><p>א</p>")}) {
+        const std::string close = before.rfind("<div", 0) == 0 ? "</div>" : "";
+        const auto lines =
+            parseLines(dump("", document(before + element + close + "<p>Alpha bravo</p>"), alignment.profile));
+        const Line* latin = lineWith(lines, "Alpha bravo");
+        ASSERT_NE(nullptr, latin) << element;
+        EXPECT_EQ(0, latin->firstWordX) << alignment.name << ": " << before << element << close;
+        EXPECT_EQ(alignment.paragraphAlign, latin->align) << alignment.name << ": " << before << element << close;
+      }
     }
   }
 }
 
 TEST_F(BidiLayout, AParagraphAfterARuleInARightToLeftContainerStaysRightToLeft) {
-  for (const char* element : kDrainingElements) {
-    const auto lines = parseLines(
-        dump("", document(std::string("<div dir=\"rtl\"><p>א</p>") + element + "<p>ב</p></div>"), bookAlignment()));
-    const Line* second = lineWith(lines, "ב");
-    ASSERT_NE(nullptr, second) << element;
-    EXPECT_EQ(460 - 11, second->firstWordX) << element;  // ב is 11 px, at the right edge
+  for (const AlignmentCase& alignment : alignmentCases()) {
+    for (const char* element : kDrainingElements) {
+      const auto lines = parseLines(
+          dump("", document(std::string("<div dir=\"rtl\"><p>א</p>") + element + "<p>ב</p></div>"), alignment.profile));
+      const Line* second = lineWith(lines, "ב");
+      ASSERT_NE(nullptr, second) << element;
+      EXPECT_EQ(460 - 11, second->firstWordX) << alignment.name << ": " << element;  // ב is 11 px, at the right edge
+      // The reader's Left turns Right again, in this paragraph's own right-to-left layout.
+      EXPECT_EQ(alignment.paragraphAlign == kLeft ? kRight : alignment.paragraphAlign, second->align)
+          << alignment.name << ": " << element;
+    }
   }
 }
 
