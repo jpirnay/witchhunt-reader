@@ -185,7 +185,8 @@ bool applyBidiVisualImpl(const char* utf8, std::string& out, int paragraphLevel)
   for (int i = 0; i < count; i++) {
     const uint32_t cp = visualLine[i].wc;  // witchhunt: deviation 2 - visualLine instead of shaped
     if (filtered(cp)) continue;
-    // witchhunt: deviation 3 - upstream's divine-name match (#3834) is removed here; it is done in logical order.
+    // witchhunt: deviation 3 - upstream's divine-name match (#3834) is removed here; lib/TextShaping's Hebrew
+    // module matches it in logical order instead.
     if (!isTransparentMark(cp)) {
       utf8AppendCodepoint(cp, out);
       continue;
@@ -231,6 +232,7 @@ void releaseWorkspace() {
   const std::lock_guard<std::mutex> lock(bidiMutex);
   bidiWorkspace.reset();
 }
+
 bool computeVisualWordOrder(const std::vector<std::string>& words, bool paragraphIsRtl,
                             std::vector<uint16_t>& visualOrder) {
   visualOrder.clear();
