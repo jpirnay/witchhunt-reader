@@ -1,5 +1,6 @@
 #include "DictionaryWordSelectActivity.h"
 
+#include <BuildArena.h>
 #include <CooperativeAbort.h>
 #include <Epub/PageFrameScope.h>
 #include <Epub/TurnedFrame.h>
@@ -18,6 +19,7 @@
 #include <climits>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <variant>
 
 #include "CrossPointSettings.h"
@@ -221,6 +223,64 @@ const char* columnEmText(const GfxRenderer& renderer, const int fontId, const Ep
   if ((flags & DRAW_VERTICAL) == 0 || !renderer.hasGlyph(fontId, kColumnEmCodepoint, style)) return "";
   return kColumnEmUtf8;
 }
+
+// The secondary framebuffer, lent to one lookup so that a .dict.dz inflates in it (Dictionary::useInflateArena): the
+// 32 KB window, its ~4 KB working state and the chunk table. On the heap they need a 36 KB block, and over a CJK page
+// the window took the only one and left the state nowhere (X3, 2026-11-02: "DICTZIP OOM: chunk scratch" with a
+// 36.8 KB largest block). The lend is LentCoverScratch's (FinishedBookActivity) and the font selector's: the write
+// buffer brought up to the frame on the panel, RED RAM seeded with it on the X4, and FAST kept while the region is
+// away. Nothing draws while it is lent and it goes back before the next screen draws, so giving it back cannot fail.
+// With no buffer to lend, a plain .dict, or an arena too small, nothing stays lent and the lookup takes the heap.
+class LentLookupScratch {
+ public:
+  LentLookupScratch(Activity& activity, GfxRenderer& renderer, Dictionary& dict)
+      : activity_(activity), renderer_(renderer), dict_(dict) {
+    if (!dict_.isCompressed()) return;
+    [[maybe_unused]] const char* where = "on the heap, no framebuffer to lend";  // for the log
+    size_t size = 0;
+    if (renderer_.hasSecondaryBuffer()) {
+      RenderLock lock(activity_);
+      renderer_.syncWriteBufferFromDisplayed();
+      renderer_.syncRedRamFromFrameBuffer();
+      uint8_t* const region = renderer_.borrowSecondaryBuffer(&size);
+      if (region != nullptr) {
+        arena_.emplace(region, size);
+        renderer_.setSingleBufferFastDiff(true);
+      }
+    }
+    // Outside the render lock: binding reads the .dz header from the card.
+    if (arena_ && !dict_.useInflateArena(&*arena_)) {
+      giveBack();
+      where = "on the heap, the lent framebuffer is too small";
+    } else if (arena_) {
+      where = "in the lent framebuffer";
+    }
+    LOG_DBG("DICT", "Lookup inflates %s (%u bytes lent, %u taken; free=%lu largest=%lu)", where,
+            static_cast<unsigned>(size), static_cast<unsigned>(arena_ ? arena_->used() : 0),
+            static_cast<unsigned long>(ESP.getFreeHeap()), static_cast<unsigned long>(ESP.getMaxAllocHeap()));
+  }
+
+  ~LentLookupScratch() { giveBack(); }
+  LentLookupScratch(const LentLookupScratch&) = delete;
+  LentLookupScratch& operator=(const LentLookupScratch&) = delete;
+
+  // Before anything is drawn: the return seeds the secondary from the write buffer as it is then. Not under the
+  // activity's render lock, which this takes.
+  void giveBack() {
+    if (!arena_) return;
+    dict_.useInflateArena(nullptr);  // the window, the state and the table leave the region first
+    RenderLock lock(activity_);
+    arena_.reset();
+    renderer_.returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+    renderer_.setSingleBufferFastDiff(false);
+  }
+
+ private:
+  Activity& activity_;
+  GfxRenderer& renderer_;
+  Dictionary& dict_;
+  std::optional<BuildArena> arena_;
+};
 
 }  // namespace
 
@@ -822,8 +882,9 @@ void DictionaryWordSelectActivity::performLookup() {
   requestUpdateAndWait();  // paint the page + busy popup before blocking on SD
 
   // A found word is inflated through dictzip's 32 KB window (DictZip::Scratch), one contiguous
-  // block taken at the session's first hit. On a CJK page the font cache holds most of the heap;
-  // the page and the busy popup are drawn, so let the cache go -- glyphs load on demand after.
+  // block, which the lend below takes off the heap when it can; the definition text is a heap
+  // string either way. On a CJK page the font cache holds most of the heap; the page and the busy
+  // popup are drawn, so let the cache go -- glyphs load on demand after.
   if (!heapHasBlockFor(LOOKUP_CONTIGUOUS_BYTES)) {
     renderer.releaseFontCaches();
     LOG_INF("DICT", "Released the font caches for the lookup");
@@ -836,6 +897,10 @@ void DictionaryWordSelectActivity::performLookup() {
     requestUpdate();
     return;
   }
+
+  // The secondary framebuffer for the window, its state and the chunk table, from here until the
+  // outcome is known: the page and the busy popup are on screen, and nothing draws until then.
+  LentLookupScratch lent(*this, renderer, dict);
 
   bool ok = dictOpenOk;
   Dictionary::IndexResult indexResult = Dictionary::IndexResult::Ok;
@@ -878,6 +943,8 @@ void DictionaryWordSelectActivity::performLookup() {
     Dictionary::logLookup(SETTINGS.dictionaryName, text, ok ? Dictionary::resultName(result) : "open_or_index_failed",
                           found ? headword.c_str() : nullptr);
   }
+  // Before the definition or a popup is drawn, and before the render lock below.
+  lent.giveBack();
 
   if (found) {
     popup = Popup::None;
