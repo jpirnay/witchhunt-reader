@@ -1,6 +1,6 @@
 # Writing modes step 1: right to left, bidi and Hebrew (design)
 
-Status: approved by the maintainer on 2026-11-02 (decisions 0-6 are the maintainer's; a builder check ran first). It builds
+Status: approved by the maintainer on 2026-11-02 (decisions 0-8 are the maintainer's; a builder check ran first). It builds
 on `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md` (5.1, 5.3, 5.5, 5.7, section 7 row 1)
 and "What step 1 takes from step 3" in `docs/future_work/writing-modes.md`. Decisions 1-4 replace part of the spec's
 5.3 and its 5.6 for Arabic.
@@ -52,6 +52,11 @@ Non-goals:
      Hebrew paragraph that opens with an English term stays Hebrew.
    - This replaces upstream's probe, which calls a paragraph right to left when one of its first 3 words starts with
      a Hebrew letter.
+7. **The divine name's mark is the Hebrew geresh U+05F3, not U+0027.** U+0027 has no direction, so on a whole-line
+   pass it drifts in a left-to-right paragraph. The geresh is a Hebrew letter-class mark (R) and stays with the name.
+8. **Isolates are ordered on their own.** PR 2's line pass orders each isolate's content by itself, at its own
+   direction, and gives the outer pass one neutral (U+FFFC, class ON) in its place. That is UAX #9 BD13's effect.
+   minibidi itself stays as it is.
 
 **My calls** (Claude's, for the maintainer to check; each is explained where it appears):
 - deviations 4, 5 and 8 (the class table, CSS bidi controls as inserted characters, controls alone needing bidi);
@@ -108,6 +113,9 @@ The baseline is crosspoint-reader `develop` @ `e8299b5f` (2026-11-02).
      classes. It also keeps `isTransparentMark`, which tests NSM, to Hebrew and Arabic. With the UCD's classes,
      Indic vowel signs and U+3099/309A would move onto the overlay path in every book.
    - The Hebrew presentation forms (U+FB1D-FB4F) get their R and NSM classes.
+   - Taken as the UCD has them, for the code points upstream lacks: the Hebrew block U+0590-05FF (U+05A2, 05BA,
+     05C5 to 05C7 and 05EF), the ligatures U+FB00-FB17, the superscripts and subscripts U+2070-209F, and the
+     letterlike symbols and number forms U+2100-218F.
 5. **CSS bidi controls.** Step 0 parses `unicode-bidi`, inline `dir`, `<bdo>` and `<bdi>`; upstream has no
    equivalent. Each becomes the UAX #9 control characters CSS defines, inserted into the logical text at the
    element's edges: LRE/RLE, LRO/RLO, LRI/RLI/FSI and PDF/PDI.
@@ -116,6 +124,10 @@ The baseline is crosspoint-reader `develop` @ `e8299b5f` (2026-11-02).
    (below).
 8. **Controls alone make a paragraph need bidi:** a literal or inserted control, so `<bdo dir="rtl">` on Latin text
    works. The line pass runs the full `do_bidi` on a line with a control, with no strong-class shortcut.
+9. **L4 runs before L2** in `do_bidi` (mirroring while the line is still in logical order). Upstream's order tests
+   the logical levels against the reordered line and mirrors the wrong characters on an asymmetric line.
+10. **`applyBidiVisual` treats U+FFFD as an ordinary code point** and stops only on NUL, so a token with a bad byte is
+    not truncated. `startsWithRtl`, `detectParagraphLevel` and `computeVisualWordOrder` are as upstream has them.
 
 ## How a paragraph is laid out
 
@@ -175,7 +187,7 @@ lookup.
 A small library that turns a token's logical text into the code points (step 1) or glyphs (step 2) it is drawn
 with, with one module per script:
 - **Step 1:** the Hebrew module, which is the divine-name rule. It matches יהוה in logical order, skipping marks,
-  and gives ה' (he, then U+0027, as upstream does).
+  and gives ה' (he, then the geresh U+05F3; upstream draws U+0027).
 - **Step 2a:** Indic, the #3787 port. It gives shaped glyph runs.
 - **Step 2b:** Arabic joining, on the same engine.
 
@@ -241,7 +253,7 @@ with, with one module per script:
   new one).
 - Nothrow everywhere: a failed workspace allocation lays out the paragraph without bidi and logs it, as upstream's
   `false` returns do.
-- No resident memory: the 3 KB workspace lives during a section build only.
+- No resident memory: the 1.5 KB workspace lives during a section build only.
 - Measured and reported on the X3 and the X4:
   - flash on `default` and `gh_release`;
   - build heap;
@@ -266,7 +278,7 @@ Things no planned test covers outright that would bite a reader first:
 
 - **Paragraph-level resolution.** Levels are resolved per line, so an isolate or embedding that crosses a line break
   loses its opener's neutral context on the next line. The line pass prepends the open controls, which covers what
-  readers see.
+  readers see. An isolate that stays on one line is handled (decision 8).
 - **GPOS mark placement for niqqud.** The anchors serve. The shaper can take it later.
 - Ruby in right-to-left text; Hebrew hyphenation; Syriac, Thaana and N'Ko.
 
