@@ -92,10 +92,13 @@ void expectWellFormed(const BidiLine::Line& line, const std::vector<std::string>
   EXPECT_EQ(line.reordered, reordered);
 }
 
-BidiLine::Line lay(const std::vector<std::string>& words, const uint8_t level,
-                   const BidiLine::OpenControls& open = {}) {
+// `glued` lists the tokens without a word space before them (TokenBoundary::hasSpace false); the rest have one.
+BidiLine::Line lay(const std::vector<std::string>& words, const uint8_t level, const BidiLine::OpenControls& open = {},
+                   const std::vector<size_t>& glued = {}) {
   std::vector<BidiLine::Token> tokens;
-  for (const auto& w : words) tokens.push_back({w, true});
+  for (size_t t = 0; t < words.size(); t++) {
+    tokens.push_back({words[t], std::find(glued.begin(), glued.end(), t) == glued.end()});
+  }
   BidiLine::Line line;
   EXPECT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), open, level, scratch(), line));
   expectWellFormed(line, words);
@@ -276,6 +279,48 @@ TEST(BidiLine, MarksDoNotCountTowardTheLimit) {
       EXPECT_EQ(piece.gapBefore, Gap::Space);
     }
   }
+}
+
+TEST(BidiLine, GluedTokensMeetWithoutASpace) {
+  EXPECT_EQ(render(lay({"abc", "(שלום)"}, 0, {}, {1})), "t0:abc G t1:(םולש)");
+  EXPECT_EQ(render(lay({"abc", "(שלום)"}, 1, {}, {1})), "t1:(םולש) G t0:abc");
+  EXPECT_EQ(render(lay({"שלום", "עולם", "abc"}, 1, {}, {1})), "t2:abc S2 t1:םלוע G t0:םולש");
+}
+
+TEST(BidiLine, TheLimitIsCountedInSlots) {
+  // 25 words of 4 letters, one of 3 and 25 spaces: 128 slots, still the line pass. One letter more is 129.
+  auto words = repeated("אבגד", 25);
+  words.push_back("אבג");
+  const auto fits = lay(words, 1);
+  EXPECT_FALSE(fits.fallback);
+  EXPECT_EQ(fits.pieces.size(), 26u);
+  words.back() = "אבגד";
+  EXPECT_TRUE(lay(words, 1).fallback);
+}
+
+TEST(BidiLine, TheLimitIsCountedInUnitsToo) {
+  // One letter with 383 points is one slot and 384 units, still the line pass; one point more falls back.
+  std::string pointed = "ש";
+  for (int i = 0; i < 383; i++) pointed += u(0x05B0 + i % 8);
+  const auto fits = lay({pointed}, 1);
+  EXPECT_FALSE(fits.fallback);
+  ASSERT_EQ(fits.pieces.size(), 1u);
+  EXPECT_EQ(displayOf(fits, fits.pieces[0]), pointed);  // a lone letter is its own visual order
+  const auto over = lay({pointed + u(0x05B0)}, 1);
+  EXPECT_TRUE(over.fallback);
+  EXPECT_EQ(over.pieces.size(), 1u);
+}
+
+TEST(BidiLine, TheFallbackKeepsAGluedNeighboursGlue) {
+  // 27 words: 133 slots. Token 6 is glued to token 5, so they meet without a space on the reversed line.
+  const auto line = lay(repeated("אבגד", 27), 1, {}, {6});
+  EXPECT_TRUE(line.fallback);
+  std::string expected;
+  for (int t = 26; t >= 0; t--) {
+    if (t < 26) expected += t + 1 == 6 ? " G " : " S" + std::to_string(t + 1) + " ";
+    expected += "t" + std::to_string(t) + ":דגבא";
+  }
+  EXPECT_EQ(render(line), expected);
 }
 
 TEST(BidiLine, ALineOverTheLimitFallsBackToUpstreamsOrder) {
