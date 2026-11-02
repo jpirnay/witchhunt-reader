@@ -67,12 +67,11 @@ size_t matchNameAt(const char* text, size_t len, size_t start) {
   return skipMarks(text, len, pos);
 }
 
-}  // namespace
-
-bool shape(const char* text, size_t len, TextShaping::Unit* units, size_t capacity, size_t& count) {
-  if (len > UINT16_MAX) return false;  // clusters are 16-bit; no token is this long
-  size_t n = 0;
-  bool replaced = false;
+// Walks the token once. Counts the units the result needs and whether a name was found; when `out` is not null
+// it also writes them (the caller has checked the count against the capacity).
+void walk(const char* text, size_t len, TextShaping::Unit* out, size_t& units, bool& found) {
+  units = 0;
+  found = false;
   size_t pos = 0;
   while (pos < len) {
     const size_t at = pos;
@@ -81,19 +80,31 @@ bool shape(const char* text, size_t len, TextShaping::Unit* units, size_t capaci
     const size_t matchEnd = (cp == YOD) ? matchNameAt(text, len, at) : 0;
     const auto cluster = static_cast<uint16_t>(at);
     if (matchEnd != 0) {
-      if (n + 2 > capacity) return false;
-      units[n++] = {HE, cluster};
-      units[n++] = {GERESH, cluster};
-      replaced = true;
+      if (out != nullptr) {
+        out[units] = {HE, cluster};
+        out[units + 1] = {GERESH, cluster};
+      }
+      units += 2;
+      found = true;
       pos = matchEnd;
     } else {
-      if (n + 1 > capacity) return false;
-      units[n++] = {cp, cluster};
+      if (out != nullptr) out[units] = {cp, cluster};
+      units += 1;
       pos = next;
     }
   }
-  if (!replaced) return false;
-  count = n;
+}
+
+}  // namespace
+
+bool shape(const char* text, size_t len, TextShaping::Unit* units, size_t capacity, size_t& count) {
+  if (len > UINT16_MAX) return false;  // clusters are 16-bit; no token is this long
+  size_t needed = 0;
+  bool found = false;
+  walk(text, len, nullptr, needed, found);  // decide first: a false result must leave the buffer untouched
+  if (!found || needed > capacity) return false;
+  walk(text, len, units, needed, found);
+  count = needed;
   return true;
 }
 

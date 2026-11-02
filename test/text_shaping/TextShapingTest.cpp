@@ -91,10 +91,24 @@ TEST(TextShapingTest, TwoNamesInOneToken) {
   EXPECT_EQ(out, (Pairs{{0x05D4, 0}, {0x0027, 0}, {0x05BE, 8}, {0x05D4, 10}, {0x0027, 10}}));
 }
 
-TEST(TextShapingTest, ABufferTooSmallDrawsAsIs) {
-  const std::string s = utf8({YOD, HE, VAV, HE});
-  TextShaping::Unit units[1];
+namespace {
+// Fills a buffer with a sentinel, runs shape, and checks a false result touched neither count nor units.
+void expectUntouched(const std::string& s, size_t capacity) {
+  constexpr uint32_t kSentinel = 0xDEADBEEF;
+  TextShaping::Unit units[4];
+  for (auto& u : units) u = {kSentinel, 0xABCD};
   size_t count = 7;
-  EXPECT_FALSE(TextShaping::shape(s.data(), s.size(), units, 1, count));
+  EXPECT_FALSE(TextShaping::shape(s.data(), s.size(), units, capacity, count));
   EXPECT_EQ(count, 7u);
+  for (const auto& u : units) {
+    EXPECT_EQ(u.cp, kSentinel);
+    EXPECT_EQ(u.cluster, 0xABCD);
+  }
+}
+}  // namespace
+
+TEST(TextShapingTest, ABufferTooSmallDrawsAsIs) { expectUntouched(utf8({YOD, HE, VAV, HE, 0x002E}), 2); }
+
+TEST(TextShapingTest, AHebrewWordWithoutTheNameLeavesTheBufferAlone) {
+  expectUntouched(utf8({0x05E9, 0x05DC, 0x05D5, 0x05DD}), 4);
 }
