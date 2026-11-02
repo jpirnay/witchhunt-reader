@@ -441,4 +441,18 @@ TEST(BidiLine, AnArenaLendsTheWorkspaceAndScratch) {
 
   const BidiLine::ArenaWorkspace none(nullptr);
   EXPECT_EQ(none.scratch(), nullptr);
+
+  // A scope that ends while a newer block is still open cannot release (logged); it still unbinds the workspace.
+  BuildArena nested(16 * 1024);
+  BuildArena::Block newer;
+  {
+    const BidiLine::ArenaWorkspace lent(&nested);
+    ASSERT_NE(lent.scratch(), nullptr);
+    newer = nested.reserveBlock();
+  }
+  EXPECT_EQ(nested.releaseFailures(), 1u);
+  EXPECT_TRUE(nested.release(newer));
+  ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), line));
+  EXPECT_TRUE(BidiUtils::heapWorkspaceHeld());
+  BidiUtils::releaseWorkspace();
 }

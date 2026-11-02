@@ -1,5 +1,6 @@
 #include "BidiLine.h"
 
+#include <Logging.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -579,10 +580,7 @@ bool layoutLine(const Token* tokens, const size_t count, const OpenControls& ope
     return true;
   }
   if (slots == 0) return true;
-  if (!orderSlots(scratch, slots, level)) {
-    out.clear();
-    return false;
-  }
+  if (!orderSlots(scratch, slots, level)) return false;  // out is still clear
   if (!buildPieces(tokens, count, scratch, slots, out)) fallbackLine(tokens, count, open, level, scratch, out);
   return true;
 }
@@ -612,7 +610,10 @@ ArenaWorkspace::ArenaWorkspace(BuildArena* arena) {
 ArenaWorkspace::~ArenaWorkspace() {
   if (arena_ == nullptr) return;
   BidiUtils::bindWorkspace(nullptr);
-  arena_->release(block_);
+  if (!arena_->release(block_)) {
+    LOG_ERR("BIDI", "Line pass block not the arena's newest; its %zu bytes stay held",
+            BidiUtils::kWorkspaceBytes + sizeof(Scratch));
+  }
 }
 
 }  // namespace BidiLine
