@@ -693,11 +693,11 @@ FS_END:2
 
 ```
 > CMD:FS:PUT:/test/fonts/NotoSansHebrew.ttf:41380:5d1e09f3
-< FS_PUT_READY:4096
-> <4096 bytes>
+< FS_PUT_READY:2048
+> <2048 bytes>
+< FS_PUT_ACK:2048
+> <2048 bytes>
 < FS_PUT_ACK:4096
-> <4096 bytes>
-< FS_PUT_ACK:8192
   ...
 > <the last 420 bytes>
 < FS_PUT_ACK:41380
@@ -709,10 +709,14 @@ FS_END:2
 - Before the host sends a byte the path is checked, as for `RM`: `FS_ERROR:protected <path>` (a
   credential store, a dot-named item, an 8.3 alias), `FS_ERROR:no parent folder <path>` (make it
   with `MKDIR` first), `FS_ERROR:is a folder <path>`, `FS_ERROR:could not create <path>`.
-- Then `FS_PUT_READY:<chunk>`. The host sends the file in pieces of `<chunk>` bytes (4096), the
-  last one shorter, and waits for `FS_PUT_ACK:<bytes so far>` after each: the device writes the
-  piece to the card before it answers. An empty file is sent as no piece at all: `FS_PUT_READY`,
-  then `FS_OK` straight away.
+- Then `FS_PUT_READY:<chunk>`. The host sends the file in pieces of `<chunk>` bytes, the last one
+  shorter, and waits for `FS_PUT_ACK:<bytes so far>` after each: the device writes the piece to the
+  card before it answers. Take the size from the reply rather than assuming it. It is 2048, half the
+  device's USB receive queue (4096 bytes): the receive interrupt drops whatever the queue cannot
+  hold, without a sign, so a piece as large as the queue would lose any byte that came with it (a
+  CRLF a host adds, a retry, a second program on the port) and the upload would only end in a CRC
+  mismatch. Never send ahead of the acknowledgement. An empty file is sent as no piece at all:
+  `FS_PUT_READY`, then `FS_OK` straight away.
 - The data goes to `<path>.part`. At `<size>` bytes the CRC32 decides: on a match the `.part`
   takes the place of the file at `<path>`, if one is there, the way every transfer of the firmware
   replaces a file (`lib/FsHelpers/FileReplace.h`: the old file steps aside as `<path>.old` and goes
@@ -754,7 +758,7 @@ it is there already. `FS_ERROR:not a folder <path>` when a file has that name, `
 refused too), `FS_ERROR:no parent folder <to>`, `FS_ERROR:into itself <to>` (a folder into its own
 subtree), `FS_ERROR:could not move <from>`.
 
-**Speed.** An upload moves one 4 KB piece at a time: received, written to the card, acknowledged.
+**Speed.** An upload moves one 2 KB piece at a time: received, written to the card, acknowledged.
 `tools/devctl.py` prints the rate it got. Its own side keeps up with about 45 MB/s against a device
 that answers at once, so the device sets the pace; not yet measured on one, expect the order of the
 USB Transfer screen, which works the same way with 2 KB pieces and moved 119 to 170 KB/s on the X3

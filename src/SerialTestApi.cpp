@@ -939,8 +939,11 @@ void cmdTtf(const std::string_view arg) {
 
 // ---- Bulk output and long commands: PAGE, FS:PUT, GET, HASH -----------------------------------
 
-// The bulk commands' piece: a chunk of FS:PUT, GET and HASH, or a line of CMD:PAGE.
-constexpr size_t kWireChunk = 4096;
+// The bulk commands' piece: a chunk of FS:PUT, GET and HASH, or a line of CMD:PAGE. Half the HWCDC receive queue
+// (4096, main.cpp setup()), so a stray byte or two that comes with an upload's piece before its acknowledgement (a
+// host's CRLF, a retry) still fits: the receive interrupt drops what the queue cannot hold, without a word, and a
+// piece as large as the queue would leave only a CRC mismatch to show for it.
+constexpr size_t kWireChunk = 2048;
 
 // The scratch a bulk command works in, from the heap for the length of that one command (the four run on the loop
 // task, never two at once) and given back on every way out of it. Not a static, which would lower every heap figure
