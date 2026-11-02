@@ -907,6 +907,11 @@ int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
     }
   }
 
+  /* ── L4: mirror characters in RTL runs ── */
+  // witchhunt: deviation 9 (L4 before L2: mirror in logical order)
+  for (i = 0; i < count; i++)
+    if (levels[i] & 1) line[i].wc = mirror(line[i].wc);
+
   /* ── L2: reverse from highest level down to lowest odd ── */
   uchar max_level = (uchar)paragraphLevel, min_odd = 255;
   for (i = 0; i < count; i++) {
@@ -914,10 +919,6 @@ int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
     if ((levels[i] & 1) && levels[i] < min_odd) min_odd = levels[i];
   }
   for (int level = max_level; level >= (int)min_odd; level--) flip_runs(line, levels, level, count);
-
-  /* ── L4: mirror characters in RTL runs ── */
-  for (i = 0; i < count; i++)
-    if (levels[i] & 1) line[i].wc = mirror(line[i].wc);
 
   return paragraphLevel;
 }
