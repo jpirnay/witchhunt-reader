@@ -2,7 +2,13 @@
 
 #include <EpdFontFamily.h>
 
+#include <cstdint>
+
 class GfxRenderer;
+
+// The glyph a column is measured against: 一, and its UTF-8.
+constexpr uint32_t kColumnEmCodepoint = 0x4E00;
+constexpr char kColumnEmUtf8[] = "\xE4\xB8\x80";
 
 // The em of vertical drawing for fontId at scale: the advance of 一, else the ascender (a font without CJK).
 int columnEm(const GfxRenderer& renderer, int fontId, EpdFontFamily::Style style, float scale);

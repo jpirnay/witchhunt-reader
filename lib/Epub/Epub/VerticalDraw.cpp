@@ -9,15 +9,12 @@
 
 namespace {
 
-constexpr uint32_t kIdeographOne = 0x4E00;
-constexpr char kIdeographOneUtf8[] = "\xE4\xB8\x80";
-
 int scaled(const int raw, const float scale) { return scale == 1.0f ? raw : static_cast<int>(raw * scale + 0.5f); }
 
 // The advance of 一 unscaled; 0 in a font that has none.
 int rawEm(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::Style style) {
-  if (!renderer.hasGlyph(fontId, kIdeographOne, style)) return 0;
-  return renderer.getTextAdvanceX(fontId, kIdeographOneUtf8, style);
+  if (!renderer.hasGlyph(fontId, kColumnEmCodepoint, style)) return 0;
+  return renderer.getTextAdvanceX(fontId, kColumnEmUtf8, style);
 }
 
 // How far a piece runs down the column, unscaled.

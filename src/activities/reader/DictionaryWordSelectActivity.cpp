@@ -181,9 +181,8 @@ void drawPiece(const GfxRenderer& renderer, const int fontId, const int x, const
 // beside the text when the font has it. Its UTF-8, for the highlight's prewarm to load too; "" when not needed.
 const char* columnEmText(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::Style style,
                          const uint8_t flags) {
-  constexpr uint32_t IDEOGRAPH_ONE = 0x4E00;
-  if ((flags & DRAW_VERTICAL) == 0 || !renderer.hasGlyph(fontId, IDEOGRAPH_ONE, style)) return "";
-  return "\xE4\xB8\x80";
+  if ((flags & DRAW_VERTICAL) == 0 || !renderer.hasGlyph(fontId, kColumnEmCodepoint, style)) return "";
+  return kColumnEmUtf8;
 }
 
 }  // namespace
