@@ -33,7 +33,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 107;  // v107: a vertical line's Combine annotation record (tate-chu-yoko),
+constexpr uint8_t SECTION_FILE_VERSION = 108;  // v108: right-to-left lines: a word's display form and the line's
+                                               // logical order (the TextBlock bidi region, flagged by the word
+                                               // count's top bit)
+                                               // v107: a vertical line's Combine annotation record (tate-chu-yoko),
                                                // which reserves no band
                                                // v106: a vertical line's flags bit 3 says its marks are
                                                // centred (Traditional Chinese); placed marks shift ink
