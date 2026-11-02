@@ -286,7 +286,7 @@ PAGE_W:<j> x=<x> w=<width> style=<n> glue=<0|1> text="<escaped>"
 ...                                   (one PAGE_W per word of the line, then the next element)
 PAGE_IMAGE:<i> x=<x> y=<y> w=<w> h=<h>
 PAGE_EL:<i> <table|hr>
-PAGE_END:<k>
+PAGE_END:<k> starved=<n>
 ```
 
 or `PAGE_ERROR:<reason>`.
@@ -307,6 +307,9 @@ or `PAGE_ERROR:<reason>`.
   value a block kept if one ever reached a laid-out line). `vertical=1` marks a line of a
   vertical-rl page.
 - A table is `PAGE_EL:<i> table` (its cells are not listed), a rule `PAGE_EL:<i> hr`.
+- `starved` counts the glyph lookups during the dump that the heap had no room for
+  (`glyph_miss::starvedCount()`). Such a glyph is measured as missing, so with `starved` above 0
+  some `w=` are not what the panel shows: free some heap and ask again before trusting the widths.
 
 The text is written in double quotes:
 
@@ -339,7 +342,7 @@ dump, as on the USB Transfer screen.
 < PAGE_W:0 x=26 w=31 style=0 glue=0 text="The"
 < PAGE_W:1 x=63 w=59 style=2 glue=0 text="Anarchy"
 ...
-< PAGE_END:27
+< PAGE_END:27 starved=0
 ```
 
 `tools/devctl.py page:<out.txt>` writes the dump to a file and prints a one-line summary.

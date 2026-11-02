@@ -25,6 +25,7 @@
 #include <FileReplace.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <GlyphProvider.h>
 #include <HalPowerManager.h>
 #include <HalSystem.h>
 #include <Memory.h>
@@ -1200,8 +1201,9 @@ bool receiveChunk(uint8_t* scratch, const size_t len, LongWork& work) {
 }
 
 // Why an upload's write came up short: a full card, or the card failing. Asked only then, since counting the free
-// clusters reads the whole FAT.
+// clusters reads the whole FAT; the watchdog is fed first, as the upload's own waits do.
 const char* writeFailure(const uint32_t stillToWrite) {
+  HalSystem::feedWatchdog();
   return Storage.sdFreeBytes() < stillToWrite ? "FS_ERROR:no space " : "FS_ERROR:write failed ";
 }
 
@@ -1772,6 +1774,8 @@ void sendPage(const PageOnScreen& onScreen) {
   if (!pageScratch) return;  // only cmdPage() asks the reader for its page, with its scratch taken
   const Page& page = *onScreen.page;
   const size_t count = page.elements.size();
+  // A glyph the heap had no room for is measured as missing: the dump's widths are then not the panel's.
+  const uint32_t starvedBefore = glyph_miss::starvedCount();
   WireLine start(pageScratch);
   start.addf("PAGE_START:spine=%d/%d page=%d/%d flow=%s elements=%u", onScreen.spine, onScreen.spineCount,
              onScreen.pageNumber, onScreen.pageCount, onScreen.verticalFlow ? "vertical-rl" : "horizontal",
@@ -1807,7 +1811,8 @@ void sendPage(const PageOnScreen& onScreen) {
     if (!line.end()) return;
   }
   WireLine end(pageScratch);
-  end.addf("PAGE_END:%u", static_cast<unsigned>(count));
+  end.addf("PAGE_END:%u starved=%lu", static_cast<unsigned>(count),
+           static_cast<unsigned long>(glyph_miss::starvedCount() - starvedBefore));
   end.end();
 }
 #endif  // SERIAL_TEST_API
