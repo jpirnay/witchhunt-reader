@@ -93,6 +93,19 @@ class Dictionary {
   // the viewer may lay them out through the EPUB rendering pipeline.
   bool definitionsAreHtml() const { return htmlDefinitions; }
 
+  // True when the definitions are in a .dict.dz: reading one inflates it
+  // through dictzip's 32KB window (see useInflateArena()).
+  bool isCompressed() const { return isOpen() && !hasPlainDict; }
+
+  // Lend the lookups that follow `arena` (the display's lent secondary
+  // framebuffer) for the .dict.dz inflate window, its working state and the
+  // chunk table, in place of the heap; they are taken from it here. nullptr
+  // ends the lend and hands every byte back; the arena must outlive it. False,
+  // with nothing taken and the lookups on the heap as before, for a closed or
+  // plain dictionary, or an arena too small (DictZip::Scratch::ensure). Either
+  // way a window held on the heap is let go.
+  bool useInflateArena(BuildArena* arena);
+
   // True when the .qidx sidecar (or the .sidx sidecar of a present .syn) is
   // missing or stale — call buildIndex() first so the UI can show an
   // "Indexing…" message for the slow first pass.
@@ -204,6 +217,9 @@ class Dictionary {
   // for the .idx scan and the same again for .syn. Allocated once per session,
   // not once per lookup, so a lookup adds nothing to the heap's fragmentation.
   bool ensureScanBuffers();
+
+  // dzScratch, from the lent arena while useInflateArena() has one, else from the heap.
+  bool ensureInflateScratch();
 
   // The window of the sampled index one descent resolved to, remembered so the
   // stem-variant probes that follow can skip the descent entirely.
@@ -416,7 +432,8 @@ class Dictionary {
     uint8_t syn[SCAN_BUF_BYTES];
   };
   std::unique_ptr<ScanBuffers> scanBuf;
-  DictZip::Scratch dzScratch;  // inflate window + cached .dz chunk table
+  DictZip::Scratch dzScratch;          // inflate window + cached .dz chunk table
+  BuildArena* inflateArena = nullptr;  // lent by useInflateArena(); dzScratch is bound to it
 
   // Shared scan buffer: lookups are single-threaded and this avoids a
   // 256-byte array on the stack of every locate() call.
