@@ -69,6 +69,17 @@ Non-goals:
    - Noto Naskh Arabic and Noto Sans Arabic (2, PR 4).
    - The reason: #3787's beta has readers in Kannada, Bengali and Malayalam, so a Devanagari-only start would leave
      them out.
+   - **Refined by the maintainer, 2026-11-02, after measure-first item 3**
+     (`2026-11-02-writing-modes-step2-measurements.md`). The first recipe missed on two counts, and two rules were
+     added:
+     - **The merge drops `vhea` and `vmtx`.** Noto Serif Bengali and Noto Serif Tamil have both tables and Noto Serif
+       has neither. fontTools' `vhea` merge raised on the missing table, so those two families did not merge. Our
+       engine never sets Indic text vertically, so the tables carry nothing we draw.
+     - **Latin letters A-Z and a-z always come from Noto Sans or Noto Serif.** Space, digits, punctuation and
+       everything else the script font maps come from the script font. This keeps Latin looking the same in every
+       family. #3787's "no Latin" claim held for letters in 42 of the 44 script files, but not for Noto Sans
+       Sinhala, which maps all 52 letters (Noto Sans's now replace them). 34 of the 40 Indic files map 39 ASCII code
+       points (space, the digits and the punctuation), and those stay the script font's.
 7. **Deviation 1 is offered upstream.** Once our port works, the maintainer posts a short comment on #3787 from the
    maintainer's account: what the nothrow fixed-capacity buffers change and why (the `reserve()` after a heap check
    aborts under `-fno-exceptions`), with a link to our code. The plan carries it as the last task of PR 1.
@@ -351,14 +362,28 @@ reserved and rejected on load (`TextBlock::bidiValid`, commit `bcee36c96`). Step
 - **Font Manager families** (decision 6): 22 TrueType families with GSUB, GPOS and GDEF kept, made by
   `build-sd-fonts.py` with the pinned fontTools, `inDownloadAll: false`, the manifest regenerated with `--manifest`
   (the CJK re-cut trap):
-  - Noto's Indic TTFs carry no Latin letters or ASCII punctuation (#3787's description, not checked here), and a
-    TrueType family has no fallback font. So each family is the script's font merged with Noto's Latin: a Sans with
-    Noto Sans, a Serif and Naskh with Noto Serif;
+  - A TrueType family has no fallback font, so each family is the script's font merged with Noto's Latin: a Sans
+    with Noto Sans, a Serif and Naskh with Noto Serif. #3787's description says Noto's Indic TTFs carry no Latin.
+    Measured (item 3), that holds for letters except in Noto Sans Sinhala, but most of the files map the ASCII
+    space, digits and punctuation.
+  - The recipe (decision 6, refined 2026-11-02):
+    - the script font's cmap loses A-Z and a-z. Its glyphs stay, so its glyph IDs and its own shaping do not change;
+      only Noto Sans Sinhala maps any;
+    - Noto's Latin is a `fontTools.subset` of U+0020-007E, U+00A0-024F, U+2000-206F, U+20A0-20CF, U+2122 and U+FFFD,
+      less every code point the script font still maps. So the Latin letters always come from Noto Sans or Serif,
+      and everything else the script font maps comes from it;
+    - `fontTools.merge`, the script font first (its glyph order, names and cmap win), with `vhea` and `vmtx`
+      dropped;
+    - measured consequence: Latin text in a merged family takes the script font's word space and punctuation. The
+      space's width differs from Noto's in 14 of the 22 families (221-500 units against 260), and the punctuation's
+      widths in most of them;
   - PR 3, 20 families: Noto Sans and Noto Serif Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu,
     Kannada, Malayalam and Sinhala;
   - PR 4, 2 families: Noto Naskh Arabic and Noto Sans Arabic;
   - regular and bold files; italic is the engine's slant (spec 7.4);
-  - the merge is checked by the HarfBuzz oracle: the merged font shapes the corpus as the script's own font does.
+  - the merge is checked by the HarfBuzz oracle in two ways. The merged font must shape the script's corpus as the
+    script's own font does. Each Latin line, restricted to its runs of A-Z and a-z, must shape as in Noto Sans or
+    Serif itself.
 - **Glyph IDs in section files** are safe against a replaced file already: a TrueType family's font IDs come from its
   identity (each file's name, size and modification time, and `kRenderVersion`: `ttf::familyIdentity`, then
   `SdCardFontManager::computeFontId`), and the section's property hash holds the font ID. That is the job #3787's
@@ -587,7 +612,8 @@ The pass lines:
 3. **The fonts of decision 6.** The fontTools merge of Noto's Latin into each of the 22 fonts: that it keeps GSUB,
    GPOS and GDEF whole (the oracle against the script's own font), each merged style's size, whether each family fits
    the glyph store in flash mode or goes to SD mode (`ttf::fitsStore`) with its `CPac` counted, and whether Noto's
-   Indic TTFs really carry no Latin (#3787's claim) (pass line).
+   Indic TTFs really carry no Latin (#3787's claim) (pass line). Since decision 6's refinement (2026-11-02) the merge
+   drops `vhea` and `vmtx`, and the Latin check compares the Latin letters' runs with Noto Sans or Serif itself.
 4. **On the X3 (PR 2):** `CPac`'s size and the install time of a merged Devanagari and a merged Bengali family; the
    time of one `Plan::build` and of one word's shaping with the tables read from mapped flash.
 5. **In the pipeline dump (PR 3):** a resident Indic page's bytes with records, against the same page with tokens'

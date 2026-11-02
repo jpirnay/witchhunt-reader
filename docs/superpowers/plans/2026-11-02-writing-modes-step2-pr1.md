@@ -333,14 +333,23 @@ PR 1 does not start. 1 KB is 1,024 B throughout.
     - each `NotoSans<X>` with Noto Sans;
     - each `NotoSerif<X>` with Noto Serif;
     - `NotoNaskhArabic` with Noto Serif, and `NotoSansArabic` with Noto Sans.
+  - The recipe is decision 6 as the maintainer refined it on 2026-11-02, after the first run of this task: Latin
+    letters from the Latin font, the rest from the script font, and `vhea`/`vmtx` dropped. The first recipe's figures
+    stay in the measurements file, marked superseded.
+  - **The script font:** A-Z and a-z leave its cmap, in every subtable. Its glyphs stay, so its glyph IDs and its own
+    shaping are unchanged. Only Noto Sans Sinhala maps any; the other files go into the merge as they are.
   - **Noto's Latin** is a `fontTools.subset` of the Latin font:
     - The ranges kept: U+0020-007E, U+00A0-024F, U+2000-206F, U+20A0-20CF, U+2122 and U+FFFD, less every code point
-      the script font maps.
+      the script font maps other than A-Z and a-z. So the Latin letters always come from the Latin font. Space,
+      digits, punctuation and everything else the script font maps come from the script font.
     - The options: `layout_features='*'`, `glyph_names=True`, `notdef_outline=True`, `name_IDs='*'`, `hinting=False`.
   - **upem:** if the subset's differs from the script font's, scale the subset with
     `fontTools.ttLib.scaleUpem.scale_upem`, and record it.
-  - **The merge:** `fontTools.merge.Merger().merge([script, latin])`. The script font goes first, so its glyph order,
-    cmap and names win. A merge that raises is recorded, and that family misses.
+  - **The merge:** `fontTools.merge.Merger(options=Options(drop_tables=["vhea", "vmtx"])).merge([script, latin])`.
+    - The script font goes first, so its glyph order, cmap and names win.
+    - `vhea` and `vmtx` are dropped: Noto Serif Bengali and Noto Serif Tamil have them, Noto Serif does not, and
+      fontTools' `vhea` merge raises on the missing table.
+    - A merge that raises is recorded, and that family misses.
   - **Sizes:** for each merged style, record its bytes, GDEF's bytes and `CPac`'s.
     - `CPac` = 16 + the sum, over GSUB and GPOS, of (28 × lookups + 24 × subtables). That is upstream's format
       (`docs/file-formats.md` of #3787), counted on the merged font.
@@ -350,11 +359,19 @@ PR 1 does not start. 1 KB is 1,024 B throughout.
       use `corpus/<script>.txt` with the languages of Task 1. Arabic uses `corpus/arabic.txt` with direction rtl,
       script `Arab`, and no language, `ar`, `fa` and `ur`.
     - Glyph IDs, advances and offsets must be equal on every line.
-  - **Latin kept whole:** three lines are shaped by the subset and by the merged font, and must match in glyph names
-    (with any `#n` suffix the merge adds stripped), advances and offsets. The lines:
-    - `The quick brown fox jumps over the lazy dog.`
-    - `AVATAR Wave fi fl ffi`
-    - `“Quotes” — 1,234.56 (x) [y] {z} €`
+  - **Latin kept whole:** each line of the Latin corpus, restricted to Latin letters, shapes identically in the
+    merged family and in Noto Sans or Serif itself.
+    - A line is cut into its longest runs of A-Z and a-z. Each run is shaped by the merged font and by the Latin font
+      file (HarfBuzz, 2133/33, script and direction guessed).
+    - They must match in glyph names, advances and offsets. Each merged glyph's name is mapped back through the
+      merger's own renaming (`fontTools.merge.cmap.computeMegaGlyphOrder`, which adds `.n` to a duplicate name).
+      A glyph of the script font's part never matches.
+    - The first recipe's check compared whole lines with the subset. It could not hold: the subset leaves out the
+      script font's code points, the space among them.
+    - The Latin corpus:
+      - `The quick brown fox jumps over the lazy dog.`
+      - `AVATAR Wave fi fl ffi`
+      - `“Quotes” — 1,234.56 (x) [y] {z} €`
 - [ ] **Step 3: The fit, in the scratch worktree.**
   - Configure that tree's host tests as under Global Constraints, then build `TtfFontTest` only, with
     `Step2MergedFamiliesProbe.cpp` added to it.
@@ -376,8 +393,8 @@ PR 1 does not start. 1 KB is 1,024 B throughout.
 - [ ] **Step 5: Record item 3.**
   - One table row per family and style: bytes, GDEF, `CPac`, flash bytes, SD bytes, mode, both oracle results, and
     the Latin counts.
-  - Pass: all 22 families merged, every oracle line equal in both checks, and every family fitting in flash or SD
-    mode.
+  - Pass: all 22 families merged; both checks hold, every corpus line equal against the script's own font and every
+    Latin letter run equal against the Latin font; and every family fits in flash or SD mode.
 
 ### Task 4: The gate
 
