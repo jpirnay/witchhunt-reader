@@ -889,6 +889,77 @@ Noto Sans Sinhala's Latin letters with its own) was a design question the recipe
 answered it on 2026-11-02 (decision 6's refinement, above): letters from Noto Sans or Serif, the rest from the script
 font.
 
+## PR 1: the engine re-measured
+
+Task 9 ran the same oracle, probe, C3 size check and scratch flash build on this branch's engine (`lib/OtShaper` with
+deviation 1: nothrow fixed storage, the `Buffer` bound to caller memory with `setStorage`), at `e82bb5181`. The
+workspace logs are `logs/oracle-ours.log`, `logs/probe-ours.md`, `logs/sizeof-c3-ours.log` and
+`logs/pio-ours-{default,gh_release}.log`. The probe is kept as a host tool, `test/ot_shaper_port/OtShaperProbe.cpp`
+(target `ot_shaper_probe`, byte-identical to `tools/OtShaperProbe.cpp`; under `__has_include("OtFixedVector.h")` it
+binds each `Buffer` to `Buffer::bytesFor(4096)` bytes before first use).
+
+**Oracle.** `tools/oracle.sh bin/ot_shape_cli_ours.exe logs/oracle-ours.log`, built with the design's flags
+(`-std=c++20 -O2 -fno-exceptions -static`, `-Ilib/OtShaper -Ilib/Utf8 -Ilib/Memory`).
+
+| Engine | Runs | Runs N/N | Summary lines |
+|---|---:|---:|---|
+| upstream (Task 1) | 216 | 216 | `logs/oracle-upstream.log` |
+| ours | 216 | 216 | `logs/oracle-ours.log`: all 216 `<font>: N/N lines identical` lines equal Task 1's |
+
+**The probe, side by side** (the same 44 entries and arguments as Task 1). Counts come from the first run; times from a
+second run on a quieter machine (host builds from another worktree may still have run). The counts of the two runs are
+equal.
+
+| | upstream | ours | |
+|---|---|---|---|
+| builds | link, no diagnostics | link, no diagnostics | equal |
+| Plans (48 rows): `build`, GSUB/GPOS lookups, GSUB/GPOS stages | all ok | all ok, same figures | equal |
+| Shaping (44 rows): lines, max code points, max glyphs, max glyphs - code points | e.g. Devanagari 20,522 / 7 / 10 / 3 | same on all 44 | equal |
+| Shaping: lines failed, either flag | 0 / 0 | 0 / 0 | equal |
+| Allocations in the shaping loop | 8-16 a font (480 over the 44) | **0** | ours lower |
+| Heap peak in the shaping loop | up to 2,416 B | **0** | ours lower |
+| Allocations in `Plan::build` | 25 (`computed`), 19 (`stored`), all throwing | **5, 3**, 0 throwing | ours lower |
+| `Plan::memoryBytes` | 13,708 B (Devanagari `computed`) | 13,828 B | **ours higher, +120 B on all 48 rows** |
+| `Plan::build` heap peak | 15,997 B (Devanagari `computed`) | 16,468 B | **ours higher, +427 to +471 B on all 48 rows** |
+| `Plan::build` time (mean of the 48 rows) | 19.9 us | 22.8 us | ours 15% slower (Devanagari `computed`: 51.6 us) |
+| Shaping time per line (mean of the 44 means) | 4.0 us | 4.7 us | ours 18% slower |
+| Shaping time per line, slowest line | 135.2 us | 112.5 us | not a trend |
+
+**The rulings (controller), stated plainly.** The `Plan::build` heap peak above upstream's is accepted, and it departs
+from the plan's expectation that it be no higher than upstream's.
+- `memoryBytes` is +120 B on the host because `sizeof(Plan)` grew (376 to 496 B).
+- The rest of the excess (about 350 B on the host) is the builder's fixed worst-case scratch block (`MAX_FEATURES` 64,
+  2 x `MAX_STAGES` pauses), where upstream `reserve()`d exact counts. It lives during one build only.
+- A build peaks at 3-21 KB, so the excess is +2-3%. In exchange the allocations fall from 25 to 5, none throwing, and
+  the shaping loop allocates nothing.
+
+**The sizes on the C3** (`riscv32-esp-elf-g++ -std=gnu++2a -Os -fno-exceptions -fsyntax-only`, `-Ilib/Memory` added):
+
+| Type | upstream | ours |
+|---|---:|---:|
+| `GlyphInfo` | 20 | 20 |
+| `GlyphPosition` | 20 | 20 |
+| `Buffer` | 1,248 | 1,272 |
+| `Face` | 120 | 120 |
+| `Plan` | 232 | 292 |
+| `PlannedLookup` | 8 | 8 |
+| `Stage` | 4 | 4 |
+
+On the host: `Buffer` 1,296 to 1,344 B, `Plan` 376 to 496 B, the rest equal.
+
+**The engine's flash, by the scratch build.** The same recipe as item 2 (master `55589ef59`, SDK `5bd4a0a`,
+`src/OtShaperFlashProbe.cpp` linking the engine through a never-run call), with this branch's `lib/OtShaper` and the
+three `lib/Utf8/Indic*` files copied in by `git archive HEAD`. The delta is against the item 2 master baseline.
+
+| Env | Flash, master | Flash, upstream's engine | Flash, ours | Delta, upstream | Delta, ours | RAM, master | RAM, ours | Delta |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `default` | 6,161,905 | 6,214,173 | 6,209,481 | +52,268 | **+47,576** | 57,776 | 57,800 | +24 |
+| `gh_release` | 6,039,675 | 6,091,675 | 6,087,079 | +52,000 | +47,404 | 57,272 | 57,296 | +24 |
+
+Our engine links 4,692 B (`default`) and 4,596 B (`gh_release`) less than upstream's, with the same static RAM. E
+drops from 52,268 B to 47,576 B, so item 2's pass lines hold with more room: E + A = 62,936 B against 92,160 B, and the
+free-slot line 6,553,600 - (6,209,481 + 15,360 + 20,480) = 308,279 B against 256,000 B (still provisional on P2).
+
 ## The gate
 
 | Item | Pass line | Measured | Result |
