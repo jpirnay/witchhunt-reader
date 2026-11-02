@@ -1476,17 +1476,18 @@ void fsMove(const std::string_view arg) {
     }
     folder = item.isDirectory();
   }
+  // A folder moved into itself would hang off its own subtree, out of reach; onto itself it is there already, which
+  // says more than "exists". Checked first for that. FAT compares names without case.
+  if (folder && (ProtectedPaths::equalsIgnoreCase(to, from) || ProtectedPaths::startsWithIgnoreCase(to, from + "/"))) {
+    reply("FS_ERROR:into itself ", to);
+    return;
+  }
   if (Storage.exists(to.c_str())) {
     reply("FS_ERROR:exists ", to);
     return;
   }
   if (!isFolder(parentOf(to))) {
     reply("FS_ERROR:no parent folder ", to);
-    return;
-  }
-  // A folder moved into itself would hang off its own subtree, out of reach. FAT compares names without case.
-  if (folder && ProtectedPaths::startsWithIgnoreCase(to, from + "/")) {
-    reply("FS_ERROR:into itself ", to);
     return;
   }
   if (!Storage.rename(from.c_str(), to.c_str())) {

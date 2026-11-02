@@ -790,8 +790,8 @@ it is there already. `FS_ERROR:not a folder <path>` when a file has that name, `
 `MV` renames or moves a file or a folder: `FS_OK:moved <from> <to>`. Errors: `FS_ERROR:protected
 <path>` (either side, the same rules as `RM`), `FS_ERROR:not found <from>`, `FS_ERROR:exists <to>`
 (nothing is replaced; FAT compares names without case, so a rename that only changes the case is
-refused too), `FS_ERROR:no parent folder <to>`, `FS_ERROR:into itself <to>` (a folder into its own
-subtree), `FS_ERROR:could not move <from>`.
+refused too), `FS_ERROR:no parent folder <to>`, `FS_ERROR:into itself <to>` (a folder onto itself
+or into its own subtree), `FS_ERROR:could not move <from>`.
 
 **Speed.** Both directions move one 2 KB piece at a time, each acknowledged, and
 `tools/devctl.py` prints the rate it got. On the X4 an upload of 1 MB ran at about 210 KB/s (10 KB
