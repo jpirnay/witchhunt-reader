@@ -5,6 +5,7 @@
 #include "lib/EpdFont/EpdFont.h"
 #include "lib/EpdFont/EpdFontData.h"
 #include "lib/EpdFont/EpdFontFamily.h"
+#include "lib/EpdFont/MarkOverlay.h"
 #include "lib/EpdFont/SmallCaps.h"
 
 // ============================================================================
@@ -598,4 +599,15 @@ TEST(CombiningMark, NativeAnchorsKeepTheirHeight) {
   using combiningMark::Anchor;
   EXPECT_EQ(combiningMark::raiseAboveBase(Anchor::CenterNative, 20, 4, 18), 0);
   EXPECT_EQ(combiningMark::raiseAboveBase(Anchor::CenterRaised, 20, 4, 18), 3);
+}
+
+TEST(CombiningMark, OverlaysItsBaseForLatinHebrewAndArabicMarksOnly) {
+  EXPECT_TRUE(overlaysItsBase(0x05B8));   // qamats
+  EXPECT_TRUE(overlaysItsBase(0x0651));   // shadda
+  EXPECT_TRUE(overlaysItsBase(0xFB1E));   // Hebrew point judeo-spanish varika
+  EXPECT_TRUE(overlaysItsBase(0x0301));   // acute, utf8IsCombiningMark
+  EXPECT_FALSE(overlaysItsBase(0x094D));  // Devanagari virama
+  EXPECT_FALSE(overlaysItsBase(0x3099));  // kana voiced mark
+  EXPECT_FALSE(overlaysItsBase(0x05D0));  // alef
+  EXPECT_FALSE(overlaysItsBase(0x0041));  // A
 }

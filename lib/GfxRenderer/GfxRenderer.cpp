@@ -1,12 +1,12 @@
 #include "GfxRenderer.h"
 
-#include <BidiUtils.h>
 #include <BoardConfig.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
 #include <GlyphProvider.h>
 #include <HalGPIO.h>
 #include <Logging.h>
+#include <MarkOverlay.h>
 #include <Memory.h>
 #include <SdCardFont.h>
 #include <SmallCaps.h>
@@ -132,13 +132,6 @@ void GfxRenderer::insertFont(const int fontId, EpdFontFamily font) {
 // Bits needed for a w x h 1-bit mask, plus one guard byte: bitmapExtract() reads
 // two bytes when a chunk straddles a byte boundary, so the final chunk of the
 // last row may touch one byte past the packed size.
-// Marks drawn over the letter before them: the Latin and CJK combining blocks, and the Hebrew and Arabic
-// marks (niqqud, harakat) the bidi pass treats as transparent. The range test keeps Latin and CJK text off
-// BidiUtils.
-static bool overlaysItsBase(const uint32_t cp) {
-  return utf8IsCombiningMark(cp) || (cp >= 0x0591 && cp <= 0x08FF ? BidiUtils::isTransparentMark(cp) : cp == 0xFB1E);
-}
-
 static inline uint16_t scaledGlyphMaskBytes(const int w, const int h) {
   return static_cast<uint16_t>((static_cast<int>(w) * h + 7) / 8 + 1);
 }

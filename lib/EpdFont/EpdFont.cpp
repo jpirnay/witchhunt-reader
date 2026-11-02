@@ -6,6 +6,7 @@
 
 #include "GlyphFallback.h"
 #include "GlyphProvider.h"
+#include "MarkOverlay.h"
 #include "SmallCaps.h"
 
 // Scale a 12.4 fixed-point advance by the small-caps factor, rounding to nearest.
@@ -33,7 +34,7 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
   uint32_t cp;
   uint32_t prevCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&string)))) {
-    const bool isCombining = utf8IsCombiningMark(cp);
+    const bool isCombining = overlaysItsBase(cp);
 
     // No ligatures under small caps, as EpdFontFamily::applyLigatures() for the renderer.
     if (!isCombining && !useSmallCaps) {

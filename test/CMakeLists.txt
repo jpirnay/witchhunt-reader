@@ -36,17 +36,27 @@ FetchContent_MakeAvailable(googletest)
 
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+# What EpdFont.cpp needs to tell a mark that overlays its letter (lib/EpdFont/MarkOverlay.h): minibidi and BidiUtils.
+# Every target that compiles EpdFont.cpp lists these.
+set(BIDI_MARK_SOURCES
+  ${REPO_ROOT}/lib/MiniBidi/minibidi.c
+  ${REPO_ROOT}/lib/MiniBidi/BidiUtils.cpp
+)
+set(BIDI_MARK_INCLUDES
+  ${REPO_ROOT}/lib/MiniBidi
+  ${REPO_ROOT}/lib/Memory
+)
+
 # The bidi line pass (lib/Epub/Epub/BidiLine) and what it runs on: minibidi, BidiUtils and the shaping layer. Every
 # target that lays out text through ParsedText lists these, so they are set before the subdirectories.
 set(BIDI_LAYOUT_SOURCES
-  ${REPO_ROOT}/lib/MiniBidi/minibidi.c
-  ${REPO_ROOT}/lib/MiniBidi/BidiUtils.cpp
+  ${BIDI_MARK_SOURCES}
   ${REPO_ROOT}/lib/TextShaping/TextShaping.cpp
   ${REPO_ROOT}/lib/TextShaping/HebrewShaper.cpp
   ${REPO_ROOT}/lib/Epub/Epub/BidiLine.cpp
 )
 set(BIDI_LAYOUT_INCLUDES
-  ${REPO_ROOT}/lib/MiniBidi
+  ${BIDI_MARK_INCLUDES}
   ${REPO_ROOT}/lib/TextShaping
 )
 
