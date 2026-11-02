@@ -1,6 +1,9 @@
 #include "DictionaryWordSelectActivity.h"
 
 #include <CooperativeAbort.h>
+#include <Epub/PageFrameScope.h>
+#include <Epub/TurnedFrame.h>
+#include <Epub/VerticalDraw.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
@@ -90,6 +93,99 @@ bool startsOnWordByte(const char* text) {
 // Fed to the watchdog while the index pass streams a multi-megabyte .idx.
 void indexBuildYield(void*) { vTaskDelay(1); }
 
+// DrawStyle::flags: how a vertical line draws a piece (VerticalDraw.h), as TextBlock::render draws it.
+constexpr uint8_t DRAW_VERTICAL = 0x01;       // down its column
+constexpr uint8_t DRAW_CENTRED_MARKS = 0x02;  // the line's 、。 centred in their cells (Traditional Chinese)
+constexpr uint8_t DRAW_COMBINED = 0x04;       // the word set upright as one block (tate-chu-yoko)
+
+// The flags of a piece of `word`, from its line and from the word.
+uint8_t drawFlags(const TextBlock& block, const uint16_t word) {
+  if (!block.isVertical()) return 0;
+  return static_cast<uint8_t>(DRAW_VERTICAL | (block.centredMarks() ? DRAW_CENTRED_MARKS : 0) |
+                              (block.isCombined(word) ? DRAW_COMBINED : 0));
+}
+
+// Where the page's lines are measured from: the reader's margins, or on a vertical page the turned frame's origin, the
+// one Page::render draws them from (PageFrameScope).
+turnedframe::Offsets pageOrigin(const GfxRenderer& renderer, const Page& page, const int marginLeft,
+                                const int marginTop) {
+  if (!page.isVertical()) return {marginLeft, marginTop};
+  const int readerWidth = renderer.getScreenWidth(renderer.getHeldOrientation());
+  return turnedframe::contentOffsets(readerWidth, marginLeft, marginTop, page.verticalBlockExtent);
+}
+
+// How far a piece cut out of a token runs along its line: its width, or down the column on a vertical line.
+int pieceWidth(const GfxRenderer& renderer, const TextBlock::WordBox& geometry, const char* piece,
+               const bool vertical) {
+  if (vertical) return verticalTextAdvance(renderer, geometry.fontId, piece, geometry.style, geometry.scale);
+  return (geometry.scale == 1.0f) ? renderer.getTextWidth(geometry.fontId, piece, geometry.style)
+                                  : renderer.getTextWidthScaled(geometry.fontId, piece, geometry.style, geometry.scale);
+}
+
+// How far the pen moves past that piece: its advance, not its ink width. A vertical line's run down the column is both.
+int pieceAdvance(const GfxRenderer& renderer, const TextBlock::WordBox& geometry, const char* piece,
+                 const bool vertical) {
+  if (vertical) return verticalTextAdvance(renderer, geometry.fontId, piece, geometry.style, geometry.scale);
+  const int advance = renderer.getTextAdvanceX(geometry.fontId, piece, geometry.style);
+  return (geometry.scale == 1.0f) ? advance : static_cast<int>(advance * geometry.scale + 0.5f);
+}
+
+// The middle of a row, where the first selection starts: across the screen, or down it on a vertical page, whose rows
+// are columns (a content x is a reader y).
+int rowMiddle(const GfxRenderer& renderer, const bool vertical) {
+  return vertical ? renderer.getScreenHeight(renderer.getHeldOrientation()) / 2 : renderer.getScreenWidth() / 2;
+}
+
+// The logical directions that move the cursor. A vertical page reads down the column and on into the next one, which
+// lies to the left: Up and Down step through the words, Left goes to the next column and Right to the previous one.
+struct CursorKeys {
+  MappedInputManager::Direction previousWord;
+  MappedInputManager::Direction nextWord;
+  MappedInputManager::Direction previousRow;
+  MappedInputManager::Direction nextRow;
+};
+
+CursorKeys cursorKeys(const bool vertical) {
+  using Direction = MappedInputManager::Direction;
+  if (vertical) return {Direction::Up, Direction::Down, Direction::Right, Direction::Left};
+  return {Direction::Left, Direction::Right, Direction::Up, Direction::Down};
+}
+
+// The fragments' point under a reader point: the point itself, or on a vertical page the turned frame's.
+turnedframe::Point contentPoint(const bool vertical, const int readerWidth, const int x, const int y) {
+  return vertical ? turnedframe::toContentPoint(readerWidth, x, y) : turnedframe::Point{x, y};
+}
+
+// The reader's rectangle over a box of fragments: the box itself, or on a vertical page the turned frame's box turned
+// back.
+turnedframe::Rect readerBox(const bool vertical, const int readerWidth, const turnedframe::Rect box) {
+  return vertical ? turnedframe::toReader(readerWidth, box) : box;
+}
+
+// Draws a piece as the page draws it, in `black` or white. Called in the page's frame: on a vertical line (x, y) is the
+// pen down the column and the line's top, as drawTextVertical takes them.
+void drawPiece(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
+               const EpdFontFamily::Style style, const float scale, const uint8_t flags, const bool black) {
+  if ((flags & DRAW_COMBINED) != 0) {
+    drawCombinedVertical(renderer, fontId, x, y, text, style, scale, black);
+  } else if ((flags & DRAW_VERTICAL) != 0) {
+    drawTextVertical(renderer, fontId, x, y, text, style, scale, (flags & DRAW_CENTRED_MARKS) != 0, black);
+  } else if (scale == 1.0f) {
+    renderer.drawText(fontId, x, y, text, black, style);
+  } else {
+    renderer.drawTextScaled(fontId, x, y, text, black, style, scale);
+  }
+}
+
+// A vertical piece measures its column against 一 in its own style (VerticalDraw.cpp), which the page's scan records
+// beside the text when the font has it. Its UTF-8, for the highlight's prewarm to load too; "" when not needed.
+const char* columnEmText(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::Style style,
+                         const uint8_t flags) {
+  constexpr uint32_t IDEOGRAPH_ONE = 0x4E00;
+  if ((flags & DRAW_VERTICAL) == 0 || !renderer.hasGlyph(fontId, IDEOGRAPH_ONE, style)) return "";
+  return "\xE4\xB8\x80";
+}
+
 }  // namespace
 
 void DictionaryWordSelectActivity::onEnter() {
@@ -113,18 +209,18 @@ void DictionaryWordSelectActivity::releaseWordArrays() {
 // after the font cache has been prewarmed for this page: the boxes come from
 // TextBlock::wordBox, which measures the text, and measuring an SD-card font
 // before the prewarm loads every glyph from the card one overflow slot at a time.
-// Index of `geometry`'s (font, scale, line height) in the side table, adding it if new. The
+// Index of `geometry`'s (font, scale, line height) and `flags` in the side table, adding it if new. The
 // table has one or two entries on a normal page, so the linear scan never runs long; the 255th
 // distinct style reuses the last slot rather than overflowing the one-byte index.
-uint8_t DictionaryWordSelectActivity::internDrawStyle(const TextBlock::WordBox& geometry) {
+uint8_t DictionaryWordSelectActivity::internDrawStyle(const TextBlock::WordBox& geometry, const uint8_t flags) {
   for (size_t i = 0; i < drawStyles.size(); i++) {
     if (drawStyles[i].fontId == geometry.fontId && drawStyles[i].scale == geometry.scale &&
-        drawStyles[i].height == geometry.height) {
+        drawStyles[i].height == geometry.height && drawStyles[i].flags == flags) {
       return static_cast<uint8_t>(i);
     }
   }
   if (drawStyles.size() >= UINT8_MAX) return static_cast<uint8_t>(drawStyles.size() - 1);
-  drawStyles.push_back({geometry.scale, geometry.fontId, geometry.height});
+  drawStyles.push_back({geometry.scale, geometry.fontId, geometry.height, flags});
   return static_cast<uint8_t>(drawStyles.size() - 1);
 }
 
@@ -195,11 +291,14 @@ void DictionaryWordSelectActivity::extractWords() {
     }
   }
 
+  // The boxes are in the frame the page draws in, so a vertical page's are the turned frame's.
+  const turnedframe::Offsets origin = pageOrigin(renderer, *page, marginLeft, marginTop);
   for (const auto& element : page->elements) {
     if (element->getTag() != TAG_PageLine) continue;
     const auto* line = static_cast<const PageLine*>(element.get());
     const auto& block = line->getBlock();
     if (!block || !block->valid()) continue;
+    const bool vertical = block->isVertical();
 
     bool rowHasWords = false;
     bool openGroup = false;           // words.back() is a group still being extended
@@ -224,7 +323,7 @@ void DictionaryWordSelectActivity::extractWords() {
     // Adds one piece of a token. `mayGlue` is false for every piece after a dash cut: a dash
     // between two words is a word boundary even though layout kept the pair in one token.
     auto addFragment = [&](const char* text, const size_t length, const int x, const int width,
-                           const TextBlock::WordBox& geometry, const bool mayGlue) {
+                           const TextBlock::WordBox& geometry, const uint8_t flags, const bool mayGlue) {
       const bool glued = mayGlue && openGroup && previousEmitted && fragmentSourceWord > 0 &&
                          block->wordContinues(fragmentSourceWord) && words.back().fragmentCount < UINT8_MAX;
       if (!glued) closeGroup();
@@ -236,7 +335,7 @@ void DictionaryWordSelectActivity::extractWords() {
       fragment.text = text;
       fragment.length = static_cast<uint16_t>(length);
       fragment.style = geometry.style;
-      fragment.drawStyle = internDrawStyle(geometry);
+      fragment.drawStyle = internDrawStyle(geometry, flags);
       fragments.push_back(fragment);
       previousEmitted = true;
 
@@ -265,7 +364,7 @@ void DictionaryWordSelectActivity::extractWords() {
       const char* text = block->wordText(i);
       const size_t textLength = block->wordTextLen(i);
       const TextBlock::WordBox geometry =
-          block->wordBox(renderer, i, fontId, line->xPos + marginLeft, line->yPos + marginTop);
+          block->wordBox(renderer, i, fontId, line->xPos + origin.x, line->yPos + origin.y);
       // A token with no ink of its own -- the visible space that holds a no-break group
       // together -- is not part of any word, and it separates the words on either side of it.
       if (geometry.width <= 0 || geometry.height <= 0) {
@@ -278,11 +377,13 @@ void DictionaryWordSelectActivity::extractWords() {
         continue;
       }
 
+      const uint8_t flags = drawFlags(*block, i);
       // The common case: one whole token, measured once by wordBox and used in place.
       // Cutting needs a NUL-terminated copy to measure, so a token too long for the scratch
-      // buffer is left whole -- those are never the dash-joined pairs this is for.
-      if (textLength >= WORD_TEXT_CAPACITY || nextDashSplit(text, textLength, 0) == 0) {
-        addFragment(text, textLength, geometry.x, geometry.width, geometry, /*mayGlue=*/true);
+      // buffer is left whole -- those are never the dash-joined pairs this is for. Nor is a
+      // combined word cut: it is one cell, drawn as one block.
+      if ((flags & DRAW_COMBINED) != 0 || textLength >= WORD_TEXT_CAPACITY || nextDashSplit(text, textLength, 0) == 0) {
+        addFragment(text, textLength, geometry.x, geometry.width, geometry, flags, /*mayGlue=*/true);
         continue;
       }
 
@@ -297,19 +398,14 @@ void DictionaryWordSelectActivity::extractWords() {
         char part[WORD_TEXT_CAPACITY];
         memcpy(part, text + partStart, partLength);
         part[partLength] = '\0';
-        const int partWidth = (geometry.scale == 1.0f)
-                                  ? renderer.getTextWidth(geometry.fontId, part, geometry.style)
-                                  : renderer.getTextWidthScaled(geometry.fontId, part, geometry.style, geometry.scale);
+        const int partWidth = pieceWidth(renderer, geometry, part, vertical);
         if (partWidth > 0) {
-          addFragment(text + partStart, partLength, partX, partWidth, geometry, firstPart);
+          addFragment(text + partStart, partLength, partX, partWidth, geometry, flags, firstPart);
           firstPart = false;
         }
 
-        if (partEnd < textLength) {
-          // Advance, not ink width: the next piece starts where this one's pen ends.
-          const int advance = renderer.getTextAdvanceX(geometry.fontId, part, geometry.style);
-          partX += (geometry.scale == 1.0f) ? advance : static_cast<int>(advance * geometry.scale + 0.5f);
-        }
+        // The next piece starts where this one's pen ends.
+        if (partEnd < textLength) partX += pieceAdvance(renderer, geometry, part, vertical);
         partStart = partEnd;
       }
     }
@@ -328,7 +424,7 @@ void DictionaryWordSelectActivity::extractWords() {
     if (!rebuild) {
       // Start on the middle row's word nearest mid-screen instead of top-left: any
       // word on the page is then at most half a page of moves away.
-      const int initial = closestInRow(rowCount / 2, renderer.getScreenWidth() / 2);
+      const int initial = closestInRow(rowCount / 2, rowMiddle(renderer, page->isVertical()));
       if (initial >= 0) selected = initial;
     } else if (selected >= static_cast<int>(words.size())) {
       // Same page, same metrics: the rebuild gives the same words, so this only guards a drift.
@@ -391,7 +487,7 @@ size_t DictionaryWordSelectActivity::buildWordText(const int index, char* buf, c
   return length;
 }
 
-// Index of the word in `row` whose horizontal center is closest to centerX;
+// Index of the word in `row` whose center along the row is closest to centerX;
 // -1 when the row has no words.
 int DictionaryWordSelectActivity::closestInRow(const uint16_t row, const int centerX) const {
   int best = -1;
@@ -425,8 +521,12 @@ DictionaryWordSelectActivity::WordTouch DictionaryWordSelectActivity::consumeWor
   int x = 0;
   int y = 0;
   int index = -1;
+  // A touch is in the reader's frame; the boxes are in the page's.
+  const bool vertical = page->isVertical();
+  const int readerWidth = renderer.getScreenWidth(renderer.getHeldOrientation());
   const auto hit = [&](const int px, const int py) {
-    index = wordAt(px, py);
+    const turnedframe::Point at = contentPoint(vertical, readerWidth, px, py);
+    index = wordAt(at.x, at.y);
     return index >= 0;
   };
 
@@ -842,17 +942,19 @@ void DictionaryWordSelectActivity::loop() {
     requestUpdate();
   } else if (touch == WordTouch::None) {
     // The cursor travels over the page as the reader sees it, so it follows the logical
-    // directions: whichever button pair lies across the screen picks the neighbouring word, and
-    // whichever runs up and down it changes line.
-    if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Left) && selected > 0) {
+    // directions: whichever button pair lies along the line picks the neighbouring word, and
+    // whichever runs across it changes line -- across the screen and up and down it, or on a
+    // vertical page the other way round.
+    const CursorKeys keys = cursorKeys(page->isVertical());
+    if (mappedInput.wasLogicalPressed(keys.previousWord) && selected > 0) {
       selected--;
       requestUpdate();
-    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Right) && hasNextWord) {
+    } else if (mappedInput.wasLogicalPressed(keys.nextWord) && hasNextWord) {
       selected++;
       requestUpdate();
-    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Up)) {
+    } else if (mappedInput.wasLogicalPressed(keys.previousRow)) {
       moveVertical(-1);
-    } else if (mappedInput.wasLogicalPressed(MappedInputManager::Direction::Down)) {
+    } else if (mappedInput.wasLogicalPressed(keys.nextRow)) {
       moveVertical(1);
     }
   }
@@ -884,6 +986,10 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
   // resolved keeps the plain highlight -- absence is only ever claimed on a verdict.
   const bool knownMissing = speculationIdx == first && speculation == Speculation::Missing;
 
+  // The boxes are saved, drawn and restored in the reader's frame; a vertical page's fragments are in the turned one.
+  const bool vertical = page->isVertical();
+  const int readerWidth = renderer.getScreenWidth(renderer.getHeldOrientation());
+
   snapshotRunCount = 0;
   size_t used = 0;
   bool saved = snapshot != nullptr;
@@ -907,13 +1013,14 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
       bottom = std::max(bottom, piece.y + drawStyleOf(piece).height);
     }
 
-    // The box is the row's exact advance box, grown by 2px so the highlight has
+    // The box is the row's exact advance box, in the reader's frame, grown by 2px so the highlight has
     // a little air around the glyphs. Clamped to the panel so save, draw and
     // restore all use the same rectangle.
-    int hx = left - 2;
-    int hy = top - 2;
-    int hw = right - left + 4;
-    int hh = bottom - top + 4;
+    const turnedframe::Rect box = readerBox(vertical, readerWidth, {left, top, right - left, bottom - top});
+    int hx = box.x - 2;
+    int hy = box.y - 2;
+    int hw = box.width + 4;
+    int hh = box.height + 4;
     if (hx < 0) {
       hw += hx;
       hx = 0;
@@ -954,16 +1061,18 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
     } else {
       renderer.fillRect(hx, hy, hw, hh, true);
     }
+    // The text in the page's frame, the turned one on a vertical page: the scope switches to it and back. Its offsets
+    // go unused; the fragments already hold where the page drew them.
+    int frameX = marginLeft;
+    int frameY = marginTop;
+    const PageFrameScope frame(renderer, *page, frameX, frameY);
     for (uint16_t f = begin; f < end; f++) {
       const Fragment& piece = fragments[f];
       const DrawStyle& drawStyle = drawStyleOf(piece);
       char scratch[WORD_TEXT_CAPACITY];
       const char* text = fragmentText(piece, scratch, sizeof(scratch));
-      if (drawStyle.scale == 1.0f) {
-        renderer.drawText(drawStyle.fontId, piece.x, piece.y, text, knownMissing, piece.style);
-      } else {
-        renderer.drawTextScaled(drawStyle.fontId, piece.x, piece.y, text, knownMissing, piece.style, drawStyle.scale);
-      }
+      drawPiece(renderer, drawStyle.fontId, piece.x, piece.y, text, piece.style, drawStyle.scale, drawStyle.flags,
+                knownMissing);
     }
   };
 
@@ -1026,9 +1135,11 @@ void DictionaryWordSelectActivity::prewarmHighlight(FontCacheManager& fcm) const
     if (loaded) continue;
 
     // A word's whole text, and far more than a CJK run's 12 code points; a face whose text is cut
-    // short loads the rest of its glyphs on demand.
+    // short loads the rest of its glyphs on demand. A vertical face's column em goes first, so it is never cut.
     char text[WORD_TEXT_CAPACITY];
-    size_t length = 0;
+    const char* em = columnEmText(renderer, drawStyleOf(lead).fontId, lead.style, drawStyleOf(lead).flags);
+    size_t length = strlen(em);
+    memcpy(text, em, length);
     for (uint16_t j = i; j < end; j++) {
       const Fragment& piece = fragments[j];
       if (!sameFace(piece, lead)) continue;

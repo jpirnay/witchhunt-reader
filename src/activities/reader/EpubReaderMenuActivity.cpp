@@ -146,7 +146,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   }
   // Always offered, even with no dictionary configured: choosing it then opens
   // the picker, which is more useful than hiding the feature from the person
-  // who has not found the setting yet. Not on a vertical page, whose words the picker cannot box.
+  // who has not found the setting yet.
   if (wordLookupAvailable) {
     navigationItems.push_back(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::None));
   }
