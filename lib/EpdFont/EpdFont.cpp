@@ -57,7 +57,9 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
     const int glyphTop = folded ? static_cast<int>(glyph.top * smallCaps::SCALE) : glyph.top;
     const int glyphHeight = folded ? static_cast<int>(glyph.height * smallCaps::SCALE + 0.5f) : glyph.height;
 
-    const int raiseBy = isCombining ? combiningMark::raiseAboveBase(glyphTop, glyphHeight, lastBaseTop) : 0;
+    const int raiseBy =
+        isCombining ? combiningMark::raiseAboveBase(combiningMark::anchorFor(cp), glyphTop, glyphHeight, lastBaseTop)
+                    : 0;
 
     if (!isCombining && prevCp != 0) {
       auto kernFP = static_cast<int32_t>(getKerning(prevCp, cp));  // 4.4 fixed-point kern
@@ -65,9 +67,9 @@ void EpdFont::getTextBounds(const char* string, const int startX, const int star
       lastBaseX += fp4::toPixel(prevAdvanceFP + kernFP);
     }
 
-    const int glyphBaseX =
-        isCombining ? combiningMark::centerOver(lastBaseX, lastBaseLeft, lastBaseWidth, glyphLeft, glyphWidth)
-                    : lastBaseX;
+    const int glyphBaseX = isCombining ? combiningMark::anchorOver(combiningMark::anchorFor(cp), lastBaseX,
+                                                                   lastBaseLeft, lastBaseWidth, glyphLeft, glyphWidth)
+                                       : lastBaseX;
     const int glyphBaseY = startY - raiseBy;
 
     *minX = std::min(*minX, glyphBaseX + glyphLeft);

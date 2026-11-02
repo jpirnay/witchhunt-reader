@@ -1,5 +1,6 @@
 #include "GfxRenderer.h"
 
+#include <BidiUtils.h>
 #include <BoardConfig.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -131,6 +132,13 @@ void GfxRenderer::insertFont(const int fontId, EpdFontFamily font) {
 // Bits needed for a w x h 1-bit mask, plus one guard byte: bitmapExtract() reads
 // two bytes when a chunk straddles a byte boundary, so the final chunk of the
 // last row may touch one byte past the packed size.
+// Marks drawn over the letter before them: the Latin and CJK combining blocks, and the Hebrew and Arabic
+// marks (niqqud, harakat) the bidi pass treats as transparent. The range test keeps Latin and CJK text off
+// BidiUtils.
+static bool overlaysItsBase(const uint32_t cp) {
+  return utf8IsCombiningMark(cp) || (cp >= 0x0591 && cp <= 0x08FF ? BidiUtils::isTransparentMark(cp) : cp == 0xFB1E);
+}
+
 static inline uint16_t scaledGlyphMaskBytes(const int w, const int h) {
   return static_cast<uint16_t>((static_cast<int>(w) * h + 7) / 8 + 1);
 }
@@ -1473,12 +1481,13 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   uint32_t cp;
   uint32_t prevCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    if (utf8IsCombiningMark(cp)) {
+    if (overlaysItsBase(cp)) {
       const EpdGlyphRef combiningGlyph = font.getGlyph(cp, style);
       if (!combiningGlyph) continue;
-      const int raiseBy = combiningMark::raiseAboveBase(combiningGlyph.top, combiningGlyph.height, lastBaseTop);
-      const int combiningX =
-          combiningMark::centerOver(lastBaseX, lastBaseLeft, lastBaseWidth, combiningGlyph.left, combiningGlyph.width);
+      const int raiseBy = combiningMark::raiseAboveBase(combiningMark::anchorFor(cp), combiningGlyph.top,
+                                                        combiningGlyph.height, lastBaseTop);
+      const int combiningX = combiningMark::anchorOver(combiningMark::anchorFor(cp), lastBaseX, lastBaseLeft,
+                                                       lastBaseWidth, combiningGlyph.left, combiningGlyph.width);
       renderCharImpl<TextRotation::None>(*this, renderModeSnapshot, font, cp, combiningX, yPos - raiseBy, black, style);
       continue;
     }
@@ -3179,7 +3188,7 @@ int GfxRenderer::scaledTextAdvanceX(const EpdFontFamily& font, const char* text,
   uint32_t prevCp = 0;
   int32_t cursorFP = 0;  // 12.4 fixed-point, exactly as the draw cursor
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    if (utf8IsCombiningMark(cp)) continue;
+    if (overlaysItsBase(cp)) continue;
     cp = font.applyLigatures(cp, text, style);
     const bool folded = (style & EpdFontFamily::SMALL_CAPS) != 0 && smallCaps::fold(cp);
     const float effScale = folded ? scale * smallCaps::SCALE : scale;
@@ -3253,7 +3262,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
   const auto& font = *family;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    if (utf8IsCombiningMark(cp)) {
+    if (overlaysItsBase(cp)) {
       continue;
     }
     cp = font.applyLigatures(cp, text, style);
@@ -3357,13 +3366,15 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
   uint32_t cp;
   uint32_t prevCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    if (utf8IsCombiningMark(cp)) {
+    if (overlaysItsBase(cp)) {
       const EpdGlyphRef combiningGlyph = font.getGlyph(cp, style);
       if (!combiningGlyph) continue;
-      const int raiseBy = combiningMark::raiseAboveBase(combiningGlyph.top, combiningGlyph.height, lastBaseTop);
+      const int raiseBy = combiningMark::raiseAboveBase(combiningMark::anchorFor(cp), combiningGlyph.top,
+                                                        combiningGlyph.height, lastBaseTop);
       const int combiningX = x - raiseBy;
-      const int combiningY = combiningMark::centerOverRotated90CW(lastBaseY, lastBaseLeft, lastBaseWidth,
-                                                                  combiningGlyph.left, combiningGlyph.width);
+      const int combiningY =
+          combiningMark::anchorOverRotated90CW(combiningMark::anchorFor(cp), lastBaseY, lastBaseLeft, lastBaseWidth,
+                                               combiningGlyph.left, combiningGlyph.width);
       renderCharImpl<TextRotation::Rotated90CW>(*this, getRenderMode(), font, cp, combiningX, combiningY, black, style);
       continue;
     }

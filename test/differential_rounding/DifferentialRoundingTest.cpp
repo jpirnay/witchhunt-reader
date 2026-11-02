@@ -575,3 +575,27 @@ TEST(SmallCapsLigatures, FamilyFormsNoLigatureUnderSmallCaps) {
   EXPECT_EQ(family.applyLigatures('f', rest, smallCapsBold), static_cast<uint32_t>('f'));
   EXPECT_STREQ(rest, "i");
 }
+
+TEST(CombiningMark, AnchorForTheNiqqudWhoseIdentityIsPosition) {
+  using combiningMark::Anchor;
+  EXPECT_EQ(combiningMark::anchorFor(0x05BC), Anchor::CenterNative);
+  EXPECT_EQ(combiningMark::anchorFor(0x05BA), Anchor::CenterNative);
+  EXPECT_EQ(combiningMark::anchorFor(0x05C1), Anchor::RightNative);
+  EXPECT_EQ(combiningMark::anchorFor(0x05B9), Anchor::LeftNative);
+  EXPECT_EQ(combiningMark::anchorFor(0x05C2), Anchor::LeftNative);
+  EXPECT_EQ(combiningMark::anchorFor(0x0301), Anchor::CenterRaised);
+  EXPECT_EQ(combiningMark::anchorFor(0x05B8), Anchor::CenterRaised);
+}
+
+TEST(CombiningMark, AnchorOverPlacesTheMarkBitmap) {
+  using combiningMark::Anchor;
+  EXPECT_EQ(combiningMark::anchorOver(Anchor::CenterRaised, 100, 1, 10, 2, 4), 102);
+  EXPECT_EQ(combiningMark::anchorOver(Anchor::RightNative, 100, 1, 10, 2, 4), 105);
+  EXPECT_EQ(combiningMark::anchorOver(Anchor::LeftNative, 100, 1, 10, 2, 4), 99);
+}
+
+TEST(CombiningMark, NativeAnchorsKeepTheirHeight) {
+  using combiningMark::Anchor;
+  EXPECT_EQ(combiningMark::raiseAboveBase(Anchor::CenterNative, 20, 4, 18), 0);
+  EXPECT_EQ(combiningMark::raiseAboveBase(Anchor::CenterRaised, 20, 4, 18), 3);
+}
