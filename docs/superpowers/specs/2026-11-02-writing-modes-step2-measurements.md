@@ -893,10 +893,11 @@ font.
 
 Task 9 ran the same oracle, probe, C3 size check and scratch flash build on this branch's engine (`lib/OtShaper` with
 deviation 1: nothrow fixed storage, the `Buffer` bound to caller memory with `setStorage`), at `e82bb5181`. The
-workspace logs are `logs/oracle-ours.log`, `logs/probe-ours.md`, `logs/sizeof-c3-ours.log` and
-`logs/pio-ours-{default,gh_release}.log`. The probe is kept as a host tool, `test/ot_shaper_port/OtShaperProbe.cpp`
-(target `ot_shaper_probe`, byte-identical to `tools/OtShaperProbe.cpp`; under `__has_include("OtFixedVector.h")` it
-binds each `Buffer` to `Buffer::bytesFor(4096)` bytes before first use).
+workspace logs are `logs/oracle-ours.log`, `logs/probe-ours.md` (counts), `logs/probe-ours-run2.md` (times),
+`logs/sizeof-c3-ours.log` and `logs/pio-ours-{default,gh_release}.log`. The probe is kept as a host tool,
+`test/ot_shaper_port/OtShaperProbe.cpp` (target `ot_shaper_probe`; `tools/OtShaperProbe.cpp` formatted with clang-format
+21, as CI formats every tracked C++ file under `test/`, and copied back so the two stay identical; under
+`__has_include("OtFixedVector.h")` it binds each `Buffer` to `Buffer::bytesFor(4096)` bytes before first use).
 
 **Oracle.** `tools/oracle.sh bin/ot_shape_cli_ours.exe logs/oracle-ours.log`, built with the design's flags
 (`-std=c++20 -O2 -fno-exceptions -static`, `-Ilib/OtShaper -Ilib/Utf8 -Ilib/Memory`).
@@ -906,9 +907,11 @@ binds each `Buffer` to `Buffer::bytesFor(4096)` bytes before first use).
 | upstream (Task 1) | 216 | 216 | `logs/oracle-upstream.log` |
 | ours | 216 | 216 | `logs/oracle-ours.log`: all 216 `<font>: N/N lines identical` lines equal Task 1's |
 
-**The probe, side by side** (the same 44 entries and arguments as Task 1). Counts come from the first run; times from a
-second run on a quieter machine (host builds from another worktree may still have run). The counts of the two runs are
-equal.
+**The probe, side by side** (the same 44 entries and arguments as Task 1). Counts come from the first run
+(`probe-ours.md`), which overlapped the oracle; the counts of the second run (`probe-ours-run2.md`) are equal. The times
+are from that second run, set against Task 1's upstream run: upstream was not run again beside ours, and host builds from
+another worktree may still have run during the second run. The time differences below are therefore indicative only and
+may move either way on a quiet machine; no time bar is set by the design or the plan.
 
 | | upstream | ours | |
 |---|---|---|---|
@@ -930,8 +933,10 @@ from the plan's expectation that it be no higher than upstream's.
 - `memoryBytes` is +120 B on the host because `sizeof(Plan)` grew (376 to 496 B).
 - The rest of the excess (about 350 B on the host) is the builder's fixed worst-case scratch block (`MAX_FEATURES` 64,
   2 x `MAX_STAGES` pauses), where upstream `reserve()`d exact counts. It lives during one build only.
-- A build peaks at 3-21 KB, so the excess is +2-3%. In exchange the allocations fall from 25 to 5, none throwing, and
-  the shaping loop allocates nothing.
+- A build peaks at 3.3-27.2 KB (Tamil `stored` to Bengali `.ttf`). The excess is a near-constant +427 to +471 B, so
+  about +2% on the large plans (Devanagari `computed` +2.9%) and +12-17% on the smallest (Tamil `.layout`: `stored`
+  2,817 to 3,288 B, `computed` 3,433 to 3,904 B). In exchange the allocations fall from 25 to 5, none throwing, and the
+  shaping loop allocates nothing.
 
 **The sizes on the C3** (`riscv32-esp-elf-g++ -std=gnu++2a -Os -fno-exceptions -fsyntax-only`, `-Ilib/Memory` added):
 
@@ -949,7 +954,9 @@ On the host: `Buffer` 1,296 to 1,344 B, `Plan` 376 to 496 B, the rest equal.
 
 **The engine's flash, by the scratch build.** The same recipe as item 2 (master `55589ef59`, SDK `5bd4a0a`,
 `src/OtShaperFlashProbe.cpp` linking the engine through a never-run call), with this branch's `lib/OtShaper` and the
-three `lib/Utf8/Indic*` files copied in by `git archive HEAD`. The delta is against the item 2 master baseline.
+three `lib/Utf8/Indic*` files copied in by `git archive HEAD`. The scratch worktree had been removed after item 2; it was
+recreated at that exact commit and SDK, so item 2's master baseline stands without a rebuild, and the delta is against
+it.
 
 | Env | Flash, master | Flash, upstream's engine | Flash, ours | Delta, upstream | Delta, ours | RAM, master | RAM, ours | Delta |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|

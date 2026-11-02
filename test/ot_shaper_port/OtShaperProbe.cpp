@@ -146,7 +146,7 @@ struct Window {
   }
 };
 
-const char* const SCRIPTS[] = {"devanagari", "bengali", "gurmukhi", "gujarati", "oriya",
+const char* const SCRIPTS[] = {"devanagari", "bengali", "gurmukhi", "gujarati",  "oriya",
                                "tamil",      "telugu",  "kannada",  "malayalam", "sinhala"};
 constexpr int SCRIPT_COUNT = sizeof(SCRIPTS) / sizeof(SCRIPTS[0]);
 
@@ -206,7 +206,9 @@ bool readCorpus(const std::string& path, std::vector<std::vector<uint32_t>>* out
   if (!readFile(path, &bytes)) return false;
   std::vector<std::string> seen;
   size_t start = 0;
-  const auto isSpace = [](const char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f'; };
+  const auto isSpace = [](const char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
+  };
   while (start <= bytes.size()) {
     size_t end = start;
     while (end < bytes.size() && bytes[end] != '\n') end++;
@@ -304,7 +306,8 @@ void printSizes() {
 void printFaces(const std::vector<Entry>& entries) {
   std::printf("## Faces\n\n");
   std::printf(
-      "Face::init best of 100, a Face copy best of 1,000 (and its mean over the 1,000), steady_clock microseconds.\n\n");
+      "Face::init best of 100, a Face copy best of 1,000 (and its mean over the 1,000), steady_clock "
+      "microseconds.\n\n");
   std::printf("| Font | CPac (B) | init with CPac (us) | init without CPac (us) | copy best (us) | copy mean (us) |\n");
   std::printf("|---|---:|---:|---:|---:|---:|\n");
   for (const Entry& e : entries) {
@@ -329,8 +332,8 @@ void printFaces(const std::vector<Entry>& entries) {
       total += us;
       if (us < best) best = us;
     }
-    std::printf("| %s | %u | %s | %.2f | %.3f | %.4f |\n", e.name.c_str(),
-                e.tables[ot::FaceTables::CPAC].length(), with, withoutUs, best, total / 1000);
+    std::printf("| %s | %u | %s | %.2f | %.3f | %.4f |\n", e.name.c_str(), e.tables[ot::FaceTables::CPAC].length(),
+                with, withoutUs, best, total / 1000);
   }
   std::printf("\n");
 }
