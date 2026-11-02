@@ -143,7 +143,8 @@ bool appendForm(const std::string_view token, const OpenControls& open, const ui
 // --- layoutLine: the logical sequence -----------------------------------------------------------------------------
 
 // Fills units and slots: the open controls, then each token's units with a separator before each spaced token after
-// the first. A transparent mark that follows a unit of its own token (not a control) is folded onto that unit's slot.
+// the first. A transparent mark or a joiner that follows a unit of its own token (not a control) is folded onto that
+// unit's slot.
 // False when the line is over kMaxCodepoints slots or kMaxUnits units.
 bool collect(const Token* tokens, const size_t count, const OpenControls& open, Scratch& s, size_t& slotCount) {
   size_t units = 0;
