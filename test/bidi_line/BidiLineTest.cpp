@@ -232,6 +232,18 @@ TEST(BidiLine, NiqqudFollowsItsLetter) {
   EXPECT_EQ(decode(displayOf(line, line.pieces[0])), kPointedShalomDrawn);
 }
 
+TEST(BidiLine, AMarkAfterAJoinerStaysOnItsBase) {
+  // alef, ZWJ, qamats, bet, right to left: the qamats follows the alef it was written on, and the ZWJ is not drawn.
+  const std::string word = "א" + u(0x200D) + u(0x05B8) + "ב";
+  const CP drawn = {0x05D1, 0x05D0, 0x05B8};
+  const auto line = lay({word}, 1);
+  ASSERT_EQ(line.pieces.size(), 1u);
+  EXPECT_EQ(decode(displayOf(line, line.pieces[0])), drawn);
+  const auto own = form(word, 1);
+  ASSERT_TRUE(own.has_value());
+  EXPECT_EQ(decode(*own), drawn);
+}
+
 TEST(BidiLine, TheDivineNameIsDrawnAsHeAndGeresh) {
   const auto line = lay({"יהוה"}, 1);
   ASSERT_EQ(line.pieces.size(), 1u);

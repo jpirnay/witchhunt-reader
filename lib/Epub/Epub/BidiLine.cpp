@@ -22,6 +22,13 @@ bool isInitiator(const uint32_t cp) { return cp >= LRI && cp <= FSI; }
 // What a drawn form holds: no control, no soft hyphen, and no joiner (applyBidiVisual drops ZWJ and ZWNJ).
 bool isDrawn(const uint32_t cp) { return !isControl(cp) && cp != SOFT_HYPHEN && cp != ZWNJ && cp != ZWJ; }
 
+bool isJoiner(const uint32_t cp) { return cp == ZWNJ || cp == ZWJ; }
+
+// What takes no slot of its own after a unit of its token: a transparent mark (W1 gives it its base's type and level)
+// and a joiner (BN: X9 removes it, and deviation 12 gives it the preceding level). Both stay next to their base, and a
+// mark after a joiner then still follows the joiner's base.
+bool ridesOnItsBase(const uint32_t cp) { return BidiUtils::isTransparentMark(cp) || isJoiner(cp); }
+
 // Decodes the code point at text[pos], never reading past len, by utf8NextCodepoint's rule (a bad or missing
 // continuation byte consumes the bytes read so far; an overlong, surrogate or out-of-range value, or a byte that
 // starts nothing, consumes one), as HebrewShaper does, so the units match what the rest of the pipeline decodes.
@@ -90,22 +97,23 @@ bool appendForm(const std::string_view token, const OpenControls& open, const ui
   size_t shapedCount = 0;
   const bool shaped = TextShaping::shape(token.data(), token.size(), s.units, kMaxUnits, shapedCount);
 
-  // The bidi input: the embeddings and overrides opened inside the isolate (or all of them), then the code points.
+  // The bidi input: the embeddings and overrides opened inside the isolate (or all of them), then the code points
+  // without their joiners (BN, which X9 removes; leaving them out keeps a mark after a joiner on its base).
   size_t n = 0;
   for (size_t i = static_cast<size_t>(isolate + 1); i < open.count; i++) s.passCp[n++] = open.cps[i];
   bool fits = true;
-  if (shaped) {
-    fits = n + shapedCount <= kMaxCodepoints;
-    for (size_t k = 0; fits && k < shapedCount; k++) s.passCp[n++] = s.units[k].cp;
-  } else {
-    size_t pos = 0;
-    while (fits && pos < token.size()) {
-      if (n == kMaxCodepoints) {
-        fits = false;
-        break;
-      }
-      s.passCp[n++] = decodeAt(token.data(), token.size(), pos);
+  const auto add = [&](const uint32_t cp) {
+    if (isJoiner(cp)) return;
+    if (n == kMaxCodepoints) {
+      fits = false;
+      return;
     }
+    s.passCp[n++] = cp;
+  };
+  if (shaped) {
+    for (size_t k = 0; fits && k < shapedCount; k++) add(s.units[k].cp);
+  } else {
+    for (size_t pos = 0; fits && pos < token.size();) add(decodeAt(token.data(), token.size(), pos));
   }
 
   const size_t start = dest.size();
@@ -172,8 +180,7 @@ bool collect(const Token* tokens, const size_t count, const OpenControls& open, 
       }
     }
     for (size_t u = first; u < units; u++) {
-      const bool ridesOnBase =
-          u > first && BidiUtils::isTransparentMark(s.units[u].cp) && !isControl(s.units[u - 1].cp);
+      const bool ridesOnBase = u > first && ridesOnItsBase(s.units[u].cp) && !isControl(s.units[u - 1].cp);
       if (!ridesOnBase && !addSlot(u, token)) return false;
     }
   }
