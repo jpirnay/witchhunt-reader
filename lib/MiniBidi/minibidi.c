@@ -57,6 +57,26 @@ uchar bidi_class(ucschar ch) {
     else
       return lookup[k].type;
   }
+
+  // witchhunt: deviation 4 - a second table for the scripts the firmware draws (generated; NSM reads as L in the
+  // left-to-right blocks).
+  static const struct {
+    ucschar first, last;
+    uchar type;
+  } lookupExt[] = {
+#include "bidiclasses_ext.t"
+  };
+
+  i = -1, j = lengthof(lookupExt);
+  while (j - i > 1) {
+    int k = (i + j) / 2;
+    if (ch < lookupExt[k].first)
+      j = k;
+    else if (ch > lookupExt[k].last)
+      i = k;
+    else
+      return lookupExt[k].type;
+  }
   return ON; /* correct UAX#9 fallback for unlisted characters */
 }
 
