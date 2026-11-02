@@ -132,8 +132,9 @@ class Activity {
   // screens hold that for their whole life.
   virtual bool hasPendingBackgroundWork() { return false; }
   // For the serial CMD:PAGE: hands the page on screen to SerialTestApi::sendPage() and returns nullptr, or returns
-  // why there is none to hand ("no page"; "busy" while it may still change on its own). Called on the loop task
-  // under RenderLock(ExclusiveActivityAccess). Only the EPUB reader has a page.
+  // why it could not ("no page"; "busy" while it may still change on its own; "no memory" when sendPage() found no
+  // block for its scratch). Called on the loop task under RenderLock(ExclusiveActivityAccess). Only the EPUB reader
+  // has a page.
   virtual const char* sendPageOnScreen() { return "not in the reader"; }
 #endif
 

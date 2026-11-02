@@ -6732,8 +6732,7 @@ const char* EpubReaderActivity::sendPageOnScreen() {
   onScreen.pageNumber = section->currentPage + 1;
   onScreen.pageCount = section->pageCount;
   onScreen.verticalFlow = section->flowContext().vertical;
-  SerialTestApi::sendPage(onScreen);
-  return nullptr;
+  return SerialTestApi::sendPage(onScreen) ? nullptr : "no memory";
 }
 #endif  // SERIAL_TEST_API
 

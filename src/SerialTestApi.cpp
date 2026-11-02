@@ -961,9 +961,6 @@ class WireScratch {
   std::unique_ptr<uint8_t[]> block_;
 };
 
-// CMD:PAGE's scratch while the reader holds its page for sendPage(); null otherwise.
-uint8_t* pageScratch = nullptr;
-
 // A reply line put together in a scratch block and written in one go, so that a line another task prints (the
 // display driver writes its own) can only land between two lines, never inside one. A line longer than the block, a
 // word of thousands of bytes, goes out in pieces.
@@ -1086,9 +1083,9 @@ const char* alignName(const CssTextAlign align) {
 // One PAGE_W line: word `j` of a line, as stored and where it is drawn. The one place a word line is written: the
 // right-to-left work adds the word's display form and logical position here (disp="..." lidx=<n>) once a TextBlock
 // carries them.
-bool sendPageWord(const uint16_t j, const TextBlock::WordBox& box, const unsigned style, const bool glue,
-                  const std::string_view text) {
-  WireLine line(pageScratch);
+bool sendPageWord(uint8_t* scratch, const uint16_t j, const TextBlock::WordBox& box, const unsigned style,
+                  const bool glue, const std::string_view text) {
+  WireLine line(scratch);
   line.addf("PAGE_W:%u x=%d w=%d style=%u glue=%d text=\"", static_cast<unsigned>(j), box.x, box.width, style,
             glue ? 1 : 0);
   line.addEscaped(text);
@@ -1097,10 +1094,10 @@ bool sendPageWord(const uint16_t j, const TextBlock::WordBox& box, const unsigne
 }
 
 // PAGE_LINE and its words. False when the host stopped reading.
-bool sendPageLine(const size_t index, const TextBlock* block, const int x, const int y, const int fontId,
-                  LongWork& work) {
+bool sendPageLine(uint8_t* scratch, const size_t index, const TextBlock* block, const int x, const int y,
+                  const int fontId, LongWork& work) {
   const uint16_t words = block && block->valid() ? block->wordCount() : 0;
-  WireLine line(pageScratch);
+  WireLine line(scratch);
   line.addf("PAGE_LINE:%u x=%d y=%d words=%u align=%s vertical=%d", static_cast<unsigned>(index), x, y,
             static_cast<unsigned>(words), block ? alignName(block->getRenderStyle().alignment) : "left",
             block && block->isVertical() ? 1 : 0);
@@ -1110,7 +1107,7 @@ bool sendPageLine(const size_t index, const TextBlock* block, const int x, const
     // is loaded for it, so a page whose glyphs all have to come from the card takes seconds.
     const TextBlock::WordBox box = block->wordBox(*testRenderer, j, fontId, x, y);
     work.breathe();
-    if (!sendPageWord(j, box, static_cast<unsigned>(block->wordStyle(j)), block->wordContinues(j),
+    if (!sendPageWord(scratch, j, box, static_cast<unsigned>(block->wordStyle(j)), block->wordContinues(j),
                       std::string_view(block->wordText(j), block->wordTextLen(j)))) {
       return false;
     }
@@ -1123,20 +1120,13 @@ void cmdPage(std::string_view /*arg*/) {
     reply("PAGE_ERROR:no renderer");
     return;
   }
-  const WireScratch scratch;
-  if (!scratch) {
-    reply("PAGE_ERROR:no memory");
-    return;
-  }
   const char* error = nullptr;
   {
     // No render pass while the page is read and measured: the reader's section file and font caches are the render
     // task's, and a pass's console line (the display driver's own) must not land inside the dump.
     RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
     const LogHold hold;
-    pageScratch = scratch.get();
     error = activityManager.sendPageOnScreen();
-    pageScratch = nullptr;
   }
   if (error) reply("PAGE_ERROR:", error);
 }
@@ -1770,27 +1760,32 @@ PowerRequest takePowerRequest() {
   return request;
 }
 
-void sendPage(const PageOnScreen& onScreen) {
-  if (!pageScratch) return;  // only cmdPage() asks the reader for its page, with its scratch taken
+bool sendPage(const PageOnScreen& onScreen) {
+  const WireScratch scratch;
+  if (!scratch) return false;
   const Page& page = *onScreen.page;
   const size_t count = page.elements.size();
   // A glyph the heap had no room for is measured as missing: the dump's widths are then not the panel's.
   const uint32_t starvedBefore = glyph_miss::starvedCount();
-  WireLine start(pageScratch);
+  WireLine start(scratch.get());
   start.addf("PAGE_START:spine=%d/%d page=%d/%d flow=%s elements=%u", onScreen.spine, onScreen.spineCount,
              onScreen.pageNumber, onScreen.pageCount, onScreen.verticalFlow ? "vertical-rl" : "horizontal",
              static_cast<unsigned>(count));
-  if (!start.end()) return;
+  // A host that stopped reading is no error to report: nobody would read it.
+  if (!start.end()) return true;
   // One element at a time, straight from the page: nothing here grows with it.
   LongWork work;
   for (size_t i = 0; i < count; ++i) {
     const PageElement& element = *page.elements[i];
     const int x = element.xPos + onScreen.originX;
     const int y = element.yPos + onScreen.originY;
-    WireLine line(pageScratch);
+    WireLine line(scratch.get());
     switch (element.getTag()) {
       case TAG_PageLine:
-        if (!sendPageLine(i, static_cast<const PageLine&>(element).getBlock(), x, y, onScreen.fontId, work)) return;
+        if (!sendPageLine(scratch.get(), i, static_cast<const PageLine&>(element).getBlock(), x, y, onScreen.fontId,
+                          work)) {
+          return true;
+        }
         continue;
       case TAG_PageImage: {
         const ImageBlock& image = static_cast<const PageImage&>(element).getImageBlock();
@@ -1808,12 +1803,13 @@ void sendPage(const PageOnScreen& onScreen) {
         line.addf("PAGE_EL:%u tag%u", static_cast<unsigned>(i), static_cast<unsigned>(element.getTag()));
         break;
     }
-    if (!line.end()) return;
+    if (!line.end()) return true;
   }
-  WireLine end(pageScratch);
+  WireLine end(scratch.get());
   end.addf("PAGE_END:%u starved=%lu", static_cast<unsigned>(count),
            static_cast<unsigned long>(glyph_miss::starvedCount() - starvedBefore));
   end.end();
+  return true;
 }
 #endif  // SERIAL_TEST_API
 

@@ -85,7 +85,8 @@ struct PageOnScreen {
   int pageCount = 0;
   bool verticalFlow = false;  // the section runs vertical-rl
 };
-void sendPage(const PageOnScreen& onScreen);
+// False, with nothing written, when the heap had no block for the dump's scratch (2 KB, for its length only).
+bool sendPage(const PageOnScreen& onScreen);
 #else
 inline void begin(GfxRenderer&) {}
 inline void service() {}
