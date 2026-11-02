@@ -1,5 +1,4 @@
-#include <algorithm>
-#include <vector>
+#include <algorithm>  // witchhunt: deviation 1 - no <vector>: Buffer::indices is a FixedVector
 
 #include "OtShaperInternal.h"
 #include "OtSyllableMachines.h"

@@ -2,7 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>  // witchhunt: deviation 1
+#include <memory>  // witchhunt: deviation 1 - in place of <vector>
 
 #include "OtBuffer.h"
 #include "OtCategories.h"

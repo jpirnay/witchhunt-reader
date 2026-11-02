@@ -296,6 +296,7 @@ class PlanBuilder {
   PlanBuilder(Plan& plan, const Face& face) : plan_(plan), face_(face) {}
 
   bool build(const Script script, const uint32_t* languageTags) {
+    plan_.listsFit_ = true;  // witchhunt: deviation 1
     plan_.script = script;
     for (int t = GSUB; t <= GPOS; t++) {
       TableSystem& ts = systems_[t];
@@ -378,7 +379,7 @@ class PlanBuilder {
       return NOT_FOUND;
     };
 
-    features_.clear();
+    features_.clear();  // witchhunt: deviation 1 - bound by bindScratch(), no reservation
     plan_.globalMask = GLOBAL_BIT_MASK;
     unsigned nextBit = FIRST_FEATURE_BIT;
     for (const FeatureBuilder::Info& info : builder.infos) {
@@ -427,7 +428,8 @@ class PlanBuilder {
         return featureIndex == NOT_FOUND ? Table() : featureTable(layout, substitution, featureIndex);
       };
 
-      // Reserve for every lookup the features list, so the list never grows.
+      // witchhunt: deviation 1 - room in one block (allocateLists()) for every
+      // lookup the features list, so the list never grows.
       size_t total = featureLookups(systems_[t].requiredIndex).u16(2);
       for (const FeatureMap& m : features_) total += featureLookups(m.index[t]).u16(2);
       if (total > MAX_PLANNED_LOOKUPS) return false;

@@ -4,13 +4,13 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <new>
-#include <string>
 #include <type_traits>
 #include <vector>
+
+#include "OtShaperTestHelpers.h"
 
 // Deviation 1 for the plans: Plan::build and Plan::load take their blocks
 // nothrow, a refused block fails the plan cleanly or leaves its table
@@ -125,75 +125,30 @@ class Armed {
   Armed& operator=(const Armed&) = delete;
 };
 
+using ottest::readFixture;
+using ottest::scriptOf;
+
 // The shaping buffer, over static storage: shaping itself allocates nothing.
 uint8_t gStorage[ot::Buffer::bytesFor(256)];
 ot::Buffer gBuffer;
 
-// A word's code points, decoded into fixed storage.
-struct Word {
-  uint32_t cps[64];
-  unsigned count = 0;
-};
-
-Word decode(const char* utf8) {
-  Word w;
-  const auto* p = reinterpret_cast<const unsigned char*>(utf8);
-  while (*p && w.count < 64) {
-    uint32_t cp = *p;
-    const int n = cp < 0x80 ? 1 : (cp >> 5) == 6 ? 2 : (cp >> 4) == 14 ? 3 : 4;
-    cp = n == 1 ? cp : n == 2 ? cp & 0x1F : n == 3 ? cp & 0x0F : cp & 0x07;
-    for (int k = 1; k < n && p[k]; k++) cp = (cp << 6) | (p[k] & 0x3F);
-    w.cps[w.count++] = cp;
-    p += n;
-  }
-  return w;
-}
-
+// Shapes a word into gBuffer, decoded into fixed storage. A word of more
+// code points than that storage takes is a test failure, not a truncation.
 bool shapeInto(const ot::Face& face, const ot::Plan& plan, const char* utf8) {
-  ot::Scale scale;
-  scale.set(kFixturePpem26_6, (kFixturePpem26_6 + 32) >> 6, face.upem());
-  const Word w = decode(utf8);
-  return ot::shape(face, scale, plan, w.cps, w.count, gBuffer);
+  constexpr size_t MAX_WORD = 64;
+  uint32_t cps[MAX_WORD];
+  const size_t count = ottest::decodeUtf8(utf8, cps, MAX_WORD);
+  if (count > MAX_WORD) {
+    ADD_FAILURE() << "a word of " << count << " code points, past " << MAX_WORD << ": " << utf8;
+    return false;
+  }
+  return ottest::shapeRun(face, plan, cps, static_cast<unsigned>(count), gBuffer);
 }
 
-// The shaped run: glyph IDs, advances and offsets; empty when shaping fails.
+// The shaped run; empty when shaping fails.
 std::vector<int32_t> shaped(const ot::Face& face, const ot::Plan& plan, const char* utf8) {
-  std::vector<int32_t> out;
-  if (!shapeInto(face, plan, utf8)) return out;
-  for (unsigned i = 0; i < gBuffer.len(); i++) {
-    const ot::GlyphPosition& p = gBuffer.pos[i];
-    out.insert(out.end(),
-               {static_cast<int32_t>(gBuffer.info[i].codepoint), p.xAdvance, p.yAdvance, p.xOffset, p.yOffset});
-  }
-  return out;
-}
-
-std::vector<uint8_t> readFixture(const char* name) {
-  std::vector<uint8_t> bytes;
-  if (FILE* f = std::fopen((std::string(SHAPING_FIXTURE_DIR) + "/" + name).c_str(), "rb")) {
-    uint8_t buf[4096];
-    size_t n;
-    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) bytes.insert(bytes.end(), buf, buf + n);
-    std::fclose(f);
-  }
-  return bytes;
-}
-
-bool scriptOf(const std::string& name, ot::Script* out) {
-  static const struct {
-    const char* name;
-    ot::Script script = ot::Script::Devanagari;
-  } all[] = {{"Bengali", ot::Script::Bengali},
-             {"Devanagari", ot::Script::Devanagari},
-             {"Tamil", ot::Script::Tamil},
-             {"Sinhala", ot::Script::Sinhala}};
-  for (const auto& e : all) {
-    if (name == e.name) {
-      *out = e.script;
-      return true;
-    }
-  }
-  return false;
+  if (!shapeInto(face, plan, utf8)) return {};
+  return ottest::glyphsOf(gBuffer);
 }
 
 // The fixture's tables; `asStored` keeps CPac and CPpl, else both are dropped
@@ -288,6 +243,8 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
     std::vector<std::vector<int32_t>> expected;
     size_t blocks = 0;
     size_t fullBytes = 0;
+    int filtered[2] = {};  // the tables with lookups, in the order their filter blocks come
+    size_t filteredCount = 0;
     {
       ot::Plan plan;
       {
@@ -296,10 +253,16 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
         blocks = gAlloc.nothrow;
       }
       fullBytes = plan.memoryBytes();
-      // A filter block per table with lookups: 5 when both have them, as in
-      // every fixture.
-      const size_t perTable = 3 + (plan.lookups[ot::GSUB].size() > 0) + (plan.lookups[ot::GPOS].size() > 0);
-      EXPECT_EQ(blocks, perTable) << fx.script;
+      for (const int t : {ot::GSUB, ot::GPOS}) {
+        if (plan.lookups[t].size() > 0) filtered[filteredCount++] = t;
+      }
+      // A filter block per table with lookups. Every fixture has lookups in
+      // both tables, so k below reaches both filter blocks.
+      EXPECT_EQ(filteredCount, 2u) << fx.script;
+      EXPECT_EQ(blocks, 3 + filteredCount) << fx.script;
+      for (size_t i = 0; i < filteredCount; i++) {
+        EXPECT_TRUE(plan.settings(filtered[i], 0).hasDigest) << fx.script << " table " << filtered[i];
+      }
       for (size_t w = 0; w < fx.count; w++) {
         expected.push_back(shaped(font.face, plan, fx.words[w].utf8));
         ASSERT_FALSE(expected.back().empty()) << fx.script << " word " << w;
@@ -322,7 +285,14 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
           EXPECT_EQ(gAlloc.liveNothrowBytes, 0u) << fx.script << " refused " << k;
         } else {
           EXPECT_TRUE(built) << fx.script << " refused " << k;
-          EXPECT_LT(plan.memoryBytes(), fullBytes) << fx.script << " refused " << k;  // that table's filters
+          EXPECT_LT(plan.memoryBytes(), fullBytes) << fx.script << " refused " << k;
+          // The refused table runs unfiltered; the other keeps its filters.
+          const int refusedTable = filtered[k - 3];
+          for (size_t i = 0; i < filteredCount; i++) {
+            const int t = filtered[i];
+            EXPECT_EQ(plan.settings(t, 0).hasDigest, t != refusedTable)
+                << fx.script << " refused " << k << " table " << t;
+          }
           for (size_t w = 0; w < fx.count; w++) {
             EXPECT_EQ(shaped(font.face, plan, fx.words[w].utf8), expected[w])
                 << fx.script << " refused " << k << " word " << w;

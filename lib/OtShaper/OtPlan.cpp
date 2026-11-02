@@ -107,6 +107,7 @@ bool Plan::load(const Face& face, const Script s, const uint32_t* languageTags) 
 }
 
 bool Plan::read(const Face& face, const Script s, const uint32_t* languageTags) {
+  listsFit_ = true;  // witchhunt: deviation 1
   const Table& compiled = face.compiledPlans();
   if (compiled.u16(0) != cppl::VERSION) return false;
   const uint32_t gsubKey = selectLanguageSystem(face.layout(GSUB), s, languageTags).key;

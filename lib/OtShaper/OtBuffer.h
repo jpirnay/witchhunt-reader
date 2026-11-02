@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #include "OtFace.h"
-#include "OtFixedVector.h"  // witchhunt: deviation 1
+#include "OtFixedVector.h"  // witchhunt: deviation 1 - in place of <vector>
 
 namespace ot {
 
