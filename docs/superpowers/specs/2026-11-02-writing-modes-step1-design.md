@@ -1,6 +1,6 @@
 # Writing modes step 1: right to left, bidi and Hebrew (design)
 
-Status: draft for the maintainer, 2026-11-02 (decisions 0-6 are the maintainer's; a builder check has run). It builds
+Status: approved by the maintainer on 2026-11-02 (decisions 0-6 are the maintainer's; a builder check ran first). It builds
 on `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md` (5.1, 5.3, 5.5, 5.7, section 7 row 1)
 and "What step 1 takes from step 3" in `docs/future_work/writing-modes.md`. Decisions 1-4 replace part of the spec's
 5.3 and its 5.6 for Arabic.
