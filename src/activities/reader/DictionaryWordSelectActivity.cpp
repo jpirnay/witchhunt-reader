@@ -264,6 +264,9 @@ class LentLookupScratch {
   LentLookupScratch(const LentLookupScratch&) = delete;
   LentLookupScratch& operator=(const LentLookupScratch&) = delete;
 
+  // Whether the lookup inflates in the lent framebuffer; false once given back.
+  bool active() const { return arena_.has_value(); }
+
   // Before anything is drawn: the return seeds the secondary from the write buffer as it is then. Not under the
   // activity's render lock, which this takes.
   void giveBack() {
@@ -881,15 +884,6 @@ void DictionaryWordSelectActivity::performLookup() {
   popupMsg = dictNeedsIndex ? StrId::STR_DICT_INDEXING : StrId::STR_DICT_LOOKING_UP;
   requestUpdateAndWait();  // paint the page + busy popup before blocking on SD
 
-  // A found word is inflated through dictzip's 32 KB window (DictZip::Scratch), one contiguous
-  // block, which the lend below takes off the heap when it can; the definition text is a heap
-  // string either way. On a CJK page the font cache holds most of the heap; the page and the busy
-  // popup are drawn, so let the cache go -- glyphs load on demand after.
-  if (!heapHasBlockFor(LOOKUP_CONTIGUOUS_BYTES)) {
-    renderer.releaseFontCaches();
-    LOG_INF("DICT", "Released the font caches for the lookup");
-  }
-
   // The dictionary switch arrives here with the arrays released: the repaint above rebuilt them.
   // A refused rebuild left the popup extractWords() set and nothing to look up.
   if (words.empty()) {
@@ -901,6 +895,18 @@ void DictionaryWordSelectActivity::performLookup() {
   // The secondary framebuffer for the window, its state and the chunk table, from here until the
   // outcome is known: the page and the busy popup are on screen, and nothing draws until then.
   LentLookupScratch lent(*this, renderer, dict);
+
+  // A found word in a .dict.dz inflates through dictzip's 32 KB window (DictZip::Scratch), one
+  // contiguous block: from the lent framebuffer when it could be lent, else from the heap. On a CJK
+  // page the font cache holds most of the heap; the page and the busy popup are drawn, so when the
+  // heap lacks the block this lookup still asks of it, let the cache go -- glyphs load on demand
+  // after. With the lend that is only the definition text.
+  const size_t heapBlockBytes = lent.active() ? LENT_LOOKUP_DEFINITION_BYTES : LOOKUP_CONTIGUOUS_BYTES;
+  if (!heapHasBlockFor(heapBlockBytes)) {
+    renderer.releaseFontCaches();
+    LOG_INF("DICT", "Released the font caches for the lookup: no %u byte block for the %s",
+            static_cast<unsigned>(heapBlockBytes), lent.active() ? "definition" : "inflate window");
+  }
 
   bool ok = dictOpenOk;
   Dictionary::IndexResult indexResult = Dictionary::IndexResult::Ok;
