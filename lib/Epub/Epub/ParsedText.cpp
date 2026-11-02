@@ -481,6 +481,8 @@ int ParsedText::naturalGapBefore(const GfxRenderer& renderer, const int fontId, 
   return spaceBefore(renderer, fontId, j);
 }
 
+bool ParsedText::stretchesGapBefore(const size_t j) const { return !isClosingPunctuation(firstCodepoint(words[j])); }
+
 int ParsedText::cjkLatinGapBefore(const GfxRenderer& renderer, const int fontId, const size_t j) const {
   if (!typography_.cjkLatinGap) return 0;
   const TokenBoundary::Boundary& boundary = wordBoundaries[j];
@@ -2007,13 +2009,15 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
   const auto form = [&](const size_t v) {
     return std::string_view(display + pieces[v].displayBegin, pieces[v].displayLength);
   };
+  // The token whose word space comes before piece v (a Space gap): at least 1, since a fallback line names a word's own
+  // token for a space between pieces that are not neighbours.
+  const auto spaceToken = [&](const size_t v) { return std::max<size_t>(first + pieces[v].spaceToken, 1); };
   // The gap before piece v, unstretched: a word space is the space before its token, scaled as the space source's; a
   // glued pair kerns across the code points that face each other on the line, in the left piece's font and scale.
   const auto gapBefore = [&](const size_t v) {
     const BidiLine::Piece& piece = pieces[v];
     if (piece.gapBefore == BidiLine::Gap::Space) {
-      // At least 1: a fallback line names a word's own token for a space between pieces that are not neighbours.
-      const size_t j = std::max<size_t>(first + piece.spaceToken, 1);
+      const size_t j = spaceToken(v);
       return static_cast<int>(spaceBefore(renderer, fontId, j) * wordScale(spaceSource(fontId, j)) + 0.5f);
     }
     if (piece.gapBefore != BidiLine::Gap::Glued) return 0;
@@ -2025,7 +2029,11 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
         renderer.getKerning(font, lastCodepoint(form(v - 1)), firstCodepoint(form(v).data()), wordStyles[left]);
     return static_cast<int>(kern * wordScale(left) + 0.5f);
   };
-  // A word space stretches when the line is justified, and so does a piece drawn as a space (a no-break space).
+  // A word space stretches when the line is justified, unless closing punctuation follows it, as on the ordinary path;
+  // and so does a piece drawn as a space (a no-break space).
+  const auto stretchesBefore = [&](const size_t v) {
+    return pieces[v].gapBefore == BidiLine::Gap::Space && stretchesGapBefore(spaceToken(v));
+  };
   const auto isSpace = [&](const size_t v) { return form(v) == " "; };
 
   // Each piece's exact width: its form, in its token's font, style and scale. Held in the x scratch until placed.
@@ -2040,7 +2048,7 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
         measureWordWidth(renderer, wordFontId(i, fontId), form(v).data(), wordStyles[i], wordScale(i), vertical_);
     xs.push_back(static_cast<int16_t>(width));
     natural += width + (v > 0 ? gapBefore(v) : 0);
-    if (pieces[v].gapBefore == BidiLine::Gap::Space) ++gaps;
+    if (stretchesBefore(v)) ++gaps;
     if (isSpace(v)) ++gaps;
   }
 
@@ -2082,7 +2090,7 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
   for (size_t v = 0; v < count; ++v) {
     const BidiLine::Piece& piece = pieces[v];
     const size_t i = first + piece.token;
-    if (v > 0) x += gapBefore(v) + (piece.gapBefore == BidiLine::Gap::Space ? extra : 0);
+    if (v > 0) x += gapBefore(v) + (stretchesBefore(v) ? extra : 0);
     const int width = xs[v];
     xs[v] = static_cast<int16_t>(x);
     x += width + (isSpace(v) ? extra : 0);
@@ -2181,14 +2189,12 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     }
     // Count gaps: each word after the first creates a gap, unless it's a continuation.
     // Gaps before closing punctuation (. , ) » etc.) are excluded from justification
-    // distribution so they stay at natural space width.
-    const uint32_t firstCp = firstCodepoint(words[lastBreakAt + wordIdx]);
+    // distribution so they stay at natural space width (stretchesGapBefore).
     const TokenBoundary::Boundary boundary = boundaries[lastBreakAt + wordIdx];
     if (wordIdx > 0 && !boundary.continues) {
       // A word gap or a CJK gap: both stretch when justified. A word gap is a space wide, a CJK gap has no width but
       // the CJK-Latin gap's.
-      const bool beforeClosing = isClosingPunctuation(firstCp);
-      if (!beforeClosing) actualGapCount++;
+      if (stretchesGapBefore(lastBreakAt + wordIdx)) actualGapCount++;
       if (boundary.noSpaceBefore) cjkGapOnLine = true;
       if (TokenBoundary::hasSpace(boundary)) {
         // Inter-word gaps scale with the effective size of the word whose space it is (spaceSource).
@@ -2375,7 +2381,6 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     } else {
       int gap = 0;
       if (wordIdx + 1 < lineWordCount) {
-        const uint32_t nextFirstCp = firstCodepoint(words[lastBreakAt + wordIdx + 1]);
         // A CJK gap has no natural width but the CJK-Latin gap; it takes the justification share below.
         if (TokenBoundary::hasSpace(boundaries[lastBreakAt + wordIdx + 1])) {
           const size_t j = lastBreakAt + wordIdx + 1;
@@ -2386,8 +2391,8 @@ ParsedText::LineProcessResult ParsedText::extractLine(
         }
         // Don't stretch the gap before closing punctuation — it looks wrong with
         // extra space before ".", ")", "»" etc.
-        const bool nextIsClosing = isClosingPunctuation(nextFirstCp);
-        if (blockStyle.alignment == CssTextAlign::Justify && !isLastLine && !nextIsClosing) {
+        if (blockStyle.alignment == CssTextAlign::Justify && !isLastLine &&
+            stretchesGapBefore(lastBreakAt + wordIdx + 1)) {
           gap += gapExtra();
         }
       }

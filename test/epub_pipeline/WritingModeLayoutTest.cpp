@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "Epub/blocks/BlockStyle.h"
+#include "GfxRenderer.h"
 #include "LogObserver.h"
 #include "PipelineRunner.h"
 #include "StoredZipWriter.h"
@@ -487,6 +488,26 @@ TEST_F(BidiLayout, AJustifiedRightToLeftLineFillsTheMeasure) {
   ASSERT_EQ(8u, lines[1].words.size());
   EXPECT_EQ(472, lines[1].words.back().x + 32);
   EXPECT_EQ(174, lines[1].words.front().x);
+}
+
+TEST_F(BidiLayout, AJustifiedBidiLineDoesNotStretchTheGapBeforeClosingPunctuation) {
+  // Two left-to-right paragraphs alike but for their first word: the Hebrew one is laid out by the line pass, the Latin
+  // one by the ordinary path. Justified, neither stretches the space before a closing mark (here a spaced em dash).
+  const std::string tail =
+      " alpha \xE2\x80\x94 bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa";
+  const GfxRenderer renderer;
+  for (const std::string& first : {std::string(kShalom), std::string("Shalom")}) {
+    const auto lines = parseLines(dump("", document("<p dir=\"ltr\">" + first + tail + "</p>")));
+    ASSERT_GE(lines.size(), 2u) << first;
+    const std::vector<Word>& words = lines[0].words;
+    ASSERT_GE(words.size(), 4u) << first;
+    ASSERT_EQ("\xE2\x80\x94", words[2].text) << first;
+    const auto end = [&](const size_t i) {
+      return words[i].x + renderer.getTextAdvanceX(1, words[i].text.c_str(), EpdFontFamily::REGULAR);
+    };
+    EXPECT_GT(words[3].x - end(2), 6) << first << ": the line is stretched";
+    EXPECT_EQ(6, words[2].x - end(1)) << first << ": the space before the dash keeps its width";
+  }
 }
 
 TEST_F(BidiLayout, ALineOverTheBidiLimitStillRunsRightToLeft) {

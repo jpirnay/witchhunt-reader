@@ -245,6 +245,9 @@ class ParsedText {
   // multiply it by wordScale. 0 unless the profile sets it and the boundary is a breakable CJK gap between
   // Han or kana and a Latin letter or digit.
   int cjkLatinGapBefore(const GfxRenderer& renderer, int fontId, size_t j) const;
+  // Whether justification stretches the gap before words[j]: not before closing punctuation (. , ) » and the like),
+  // which keeps its natural width. Both line paths ask it.
+  bool stretchesGapBefore(size_t j) const;
   // Room in all five per-word vectors for `additional` more tokens; false (and wordGrowthRefused_)
   // when the heap cannot hold the growth.
   bool reserveWords(size_t additional);
