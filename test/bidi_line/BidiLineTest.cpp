@@ -8,8 +8,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <initializer_list>
 #include <memory>
+#include <new>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -135,7 +137,16 @@ std::optional<std::string> form(const std::string_view token, const uint8_t leve
 
 const CP kPointedShalomDrawn = {0x05DD, 0x05D5, 0x05B9, 0x05DC, 0x05E9, 0x05B8, 0x05C1};
 
+// While set, BidiUtils' heap workspace (the one nothrow allocation of its size) is refused.
+bool refuseWorkspace = false;
+
 }  // namespace
+
+// malloc-backed, as libstdc++'s own; its operator delete frees with std::free.
+void* operator new(const size_t bytes, const std::nothrow_t&) noexcept {
+  if (refuseWorkspace && bytes == BidiUtils::kWorkspaceBytes) return nullptr;
+  return std::malloc(bytes == 0 ? 1 : bytes);
+}
 
 TEST(BidiLine, AMixedLineInARightToLeftParagraph) {
   const auto line = lay({"שלום", "(world)", "1998."}, 1);
@@ -396,6 +407,28 @@ TEST(BidiLine, DropControlsLeavesTheText) {
   for (const uint32_t cp : {0x200Cu, 0x200Du, 0x00ADu, 0x0020u, 0x05D0u}) {
     EXPECT_FALSE(BidiLine::isControl(cp)) << std::hex << cp;
   }
+}
+
+TEST(BidiLine, WithoutAWorkspaceTheCallerLaysTheLineOutWithoutBidi) {
+  BidiUtils::releaseWorkspace();
+  refuseWorkspace = true;
+  const auto layOut = [](const std::vector<std::string>& words, BidiLine::Line& line) {
+    std::vector<BidiLine::Token> tokens;
+    for (const auto& w : words) tokens.push_back({w, true});
+    return BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), line);
+  };
+  BidiLine::Line line;
+  EXPECT_FALSE(layOut({"שלום", "(world)", "1998."}, line));
+  EXPECT_TRUE(line.pieces.empty());
+  EXPECT_FALSE(layOut(repeated("אבגד", 26), line));  // past the limit too
+  EXPECT_TRUE(line.pieces.empty());
+  EXPECT_TRUE(line.display.empty());
+  EXPECT_FALSE(line.fallback);
+  EXPECT_EQ(form("שלום", 1), std::nullopt);  // its form is its text
+  refuseWorkspace = false;
+  EXPECT_TRUE(layOut(repeated("אבגד", 26), line));
+  EXPECT_TRUE(line.fallback);
+  BidiUtils::releaseWorkspace();
 }
 
 TEST(BidiLine, AnArenaLendsTheWorkspaceAndScratch) {

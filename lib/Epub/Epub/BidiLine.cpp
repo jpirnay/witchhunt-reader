@@ -431,12 +431,18 @@ bool buildPieces(const Token* tokens, const size_t count, Scratch& s, const size
 // One piece per token with a drawn form, in computeVisualWordOrder's order over the tokens without their transparent
 // marks; when it declines, reversed at level 1 and as is at level 0. Its corners are upstream's: past 128 code points
 // it declines too, so a right-to-left line reverses an embedded Latin phrase's words, and minibidi sees isolates as
-// embeddings.
-void fallbackLine(const Token* tokens, const size_t count, const OpenControls& open, const uint8_t paragraphLevel,
+// embeddings. False (out cleared) when BidiUtils has no workspace, as for a line that fits.
+bool fallbackLine(const Token* tokens, const size_t count, const OpenControls& open, const uint8_t paragraphLevel,
                   Scratch& s, Line& out) {
   out.clear();
+  // computeVisualWordOrder and the forms need the workspace too, and say nothing when it is missing: ask orderLine,
+  // which refuses one code point only for that.
+  const uint32_t probe = SEPARATOR;
+  uint16_t probeVisual = 0;
+  uint32_t probeDrawn = 0;
+  if (!BidiUtils::orderLine(&probe, 1, 0, &probeVisual, &probeDrawn)) return false;
   out.fallback = true;
-  if (count == 0) return;
+  if (count == 0) return true;
 
   // The words without their marks (computeVisualWordOrder takes std::string words, about the line's bytes) and the
   // order with its inverse (4 bytes a token), in the Line's buffers: only a fallback line longer than any before
@@ -510,6 +516,7 @@ void fallbackLine(const Token* tokens, const size_t count, const OpenControls& o
     piece.gapBefore = neighbours && !tokens[later].spaceBefore ? Gap::Glued : Gap::Space;
     if (neighbours && piece.gapBefore == Gap::Space) piece.spaceToken = later;
   }
+  return true;
 }
 
 }  // namespace
@@ -575,14 +582,10 @@ bool layoutLine(const Token* tokens, const size_t count, const OpenControls& ope
   out.clear();
   const uint8_t level = paragraphLevel & 1;
   size_t slots = 0;
-  if (!collect(tokens, count, open, scratch, slots)) {
-    fallbackLine(tokens, count, open, level, scratch, out);
-    return true;
-  }
+  if (!collect(tokens, count, open, scratch, slots)) return fallbackLine(tokens, count, open, level, scratch, out);
   if (slots == 0) return true;
   if (!orderSlots(scratch, slots, level)) return false;  // out is still clear
-  if (!buildPieces(tokens, count, scratch, slots, out)) fallbackLine(tokens, count, open, level, scratch, out);
-  return true;
+  return buildPieces(tokens, count, scratch, slots, out) || fallbackLine(tokens, count, open, level, scratch, out);
 }
 
 bool tokenForm(const std::string_view token, const OpenControls& open, const uint8_t paragraphLevel, Scratch& scratch,

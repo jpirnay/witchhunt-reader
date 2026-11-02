@@ -94,7 +94,8 @@ struct Scratch {
 static_assert(kMaxCodepoints <= 128, "slots and spans are indexed by uint8_t");
 
 // Lays one line out: pieces in visual order, each with its bytes, its drawn form and the gap before it. False (out
-// cleared) only when BidiUtils has no workspace: the caller lays the line out without bidi. `paragraphLevel` is 0 or 1.
+// cleared) only when BidiUtils has no workspace, for a line past the limit too: the caller lays the line out without
+// bidi. `paragraphLevel` is 0 or 1.
 // Tokens are fewer than 65,535 and each shorter than 64 KB; a line past 256 pieces (only a fallback line can be one)
 // has no exact readingIndex.
 bool layoutLine(const Token* tokens, size_t count, const OpenControls& open, uint8_t paragraphLevel, Scratch& scratch,
