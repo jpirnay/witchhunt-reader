@@ -44,8 +44,10 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
 - **Decision 6, both halves:**
   - in a right-to-left book, the base is RTL iff the paragraph's first pass has an R or AL code point;
   - in any other book, iff it has R or AL and no L;
-  - a paragraph with no letter of either direction is LTR in both. Read literally, "unless it has no
-    left-to-right letter" would turn every `* * *` of every Latin book RTL and move Latin goldens.
+  - a paragraph with no letter of either direction takes the book's direction (the profile's default direction),
+    as the spec's "How a paragraph is laid out" step 1 says. So `* * *` or `1948` is right to left in a Hebrew book
+    and left to right in a Latin one, and no Latin golden moves. (Controller's ruling, 2026-11-02. The literal
+    "unless it has no left-to-right letter" would turn every `* * *` of every Latin book RTL.)
 - **`dir="auto"` and block `unicode-bidi: plaintext`:** the first strong letter of the first pass's tokens, else the
   book's direction.
 - **The workspace is lent per call:**
@@ -861,7 +863,8 @@ Each book's floors are in its parameter, as `VerticalRules`' are, listed as 460 
 - [ ] **Step 3:** Refresh: `git status` shows exactly the two new goldens. Check by hand, and say so in the commit:
   - every Hebrew line ends at the right margin, less its indent;
   - the list markers and the table are on the right;
-  - the English paragraph and "* * *" start at x 0;
+  - the English paragraph starts at x 0;
+  - "* * *" has no letter, so it takes the book's direction: it ends at the right margin, less its indent;
   - spine 2 is left to right with reversed Hebrew pieces, except its `dir="rtl"` paragraph;
   - "יְהוָה" has WD "׳ה".
 - [ ] **Step 4: Run** all of `EpubPipelineTest` without `UPDATE_GOLDENS`: pass (the corpus-wide LUT and determinism
