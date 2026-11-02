@@ -11,6 +11,9 @@ namespace {
 
 std::vector<int> contents(const ot::FixedVector<int>& v) { return std::vector<int>(v.begin(), v.end()); }
 
+// The element just past a 4-element binding: a refused growth must leave it.
+constexpr int SENTINEL = -12345;
+
 }  // namespace
 
 TEST(FixedVector, BindsEmpty) {
@@ -26,7 +29,7 @@ TEST(FixedVector, BindsEmpty) {
 }
 
 TEST(FixedVector, PushBackFillsThenRefuses) {
-  int storage[4];
+  int storage[5] = {0, 0, 0, 0, SENTINEL};
   bool ok = true;
   ot::FixedVector<int> v;
   v.bind(storage, 4, &ok);
@@ -35,11 +38,12 @@ TEST(FixedVector, PushBackFillsThenRefuses) {
   EXPECT_FALSE(v.push_back(5));
   EXPECT_EQ(v.size(), 4u);
   EXPECT_EQ(contents(v), (std::vector<int>{1, 2, 3, 4}));
+  EXPECT_EQ(storage[4], SENTINEL);
   EXPECT_FALSE(ok);
 }
 
 TEST(FixedVector, InsertShiftsTheTail) {
-  int storage[4];
+  int storage[5] = {0, 0, 0, 0, SENTINEL};
   bool ok = true;
   ot::FixedVector<int> v;
   v.bind(storage, 4, &ok);
@@ -50,6 +54,7 @@ TEST(FixedVector, InsertShiftsTheTail) {
 
   EXPECT_EQ(v.insert(v.begin(), 8), nullptr);
   EXPECT_EQ(contents(v), (std::vector<int>{1, 9, 2, 3}));
+  EXPECT_EQ(storage[4], SENTINEL);
   EXPECT_FALSE(ok);
 }
 
@@ -65,7 +70,7 @@ TEST(FixedVector, EraseShiftsTheTailDown) {
 }
 
 TEST(FixedVector, ResizeValueInitialises) {
-  int storage[4] = {-1, -1, -1, -1};
+  int storage[5] = {-1, -1, -1, -1, SENTINEL};
   bool ok = true;
   ot::FixedVector<int> v;
   v.bind(storage, 4, &ok);
@@ -78,11 +83,12 @@ TEST(FixedVector, ResizeValueInitialises) {
 
   EXPECT_FALSE(v.resize(5));
   EXPECT_EQ(v.size(), 1u);
+  EXPECT_EQ(storage[4], SENTINEL);
   EXPECT_FALSE(ok);
 }
 
 TEST(FixedVector, AssignFills) {
-  int storage[4];
+  int storage[5] = {0, 0, 0, 0, SENTINEL};
   bool ok = true;
   ot::FixedVector<int> v;
   v.bind(storage, 4, &ok);
@@ -92,26 +98,36 @@ TEST(FixedVector, AssignFills) {
 
   EXPECT_FALSE(v.assign(5, 1));
   EXPECT_EQ(contents(v), (std::vector<int>{5, 5, 5}));
+  EXPECT_EQ(storage[4], SENTINEL);
   EXPECT_FALSE(ok);
 }
 
 TEST(FixedVector, SwapExchangesBindings) {
-  int storageA[4], storageB[4];
-  bool ok = true;
+  int storageA[4], storageB[3];
+  bool okA = true, okB = true;
   ot::FixedVector<int> a, b;
-  a.bind(storageA, 4, &ok);
-  b.bind(storageB, 4, &ok);
+  a.bind(storageA, 4, &okA);
+  b.bind(storageB, 3, &okB);
   a.push_back(1);
   a.push_back(2);
   b.push_back(3);
   a.swap(b);
   EXPECT_EQ(a.data(), storageB);
   EXPECT_EQ(a.size(), 1u);
+  EXPECT_EQ(a.capacity(), 3u);
   EXPECT_EQ(b.data(), storageA);
   EXPECT_EQ(b.size(), 2u);
+  EXPECT_EQ(b.capacity(), 4u);
   EXPECT_EQ(contents(a), (std::vector<int>{3}));
   EXPECT_EQ(contents(b), (std::vector<int>{1, 2}));
-  EXPECT_TRUE(ok);
+
+  // The flags went with the bindings: a growth past `a` clears B's flag.
+  EXPECT_TRUE(a.resize(3));
+  EXPECT_FALSE(a.push_back(4));
+  EXPECT_FALSE(okB);
+  EXPECT_TRUE(okA);
+  EXPECT_FALSE(b.resize(5));
+  EXPECT_FALSE(okA);
 }
 
 TEST(FixedVector, MoveLeavesTheSourceUnbound) {

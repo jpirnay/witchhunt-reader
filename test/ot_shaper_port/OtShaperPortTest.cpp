@@ -245,6 +245,31 @@ TEST(OtShaperBuffer, SetStorageLaysTheArraysInsideTheBlock) {
   }
 }
 
+// A growth past the storage fails the run through the Buffer's own
+// `successful`, whichever array refuses it.
+TEST(OtShaperBuffer, AGrowthPastTheStorageClearsSuccessful) {
+  BoundBuffer bound(4);
+  ot::Buffer& buffer = bound.buffer;
+  ASSERT_TRUE(buffer.prepare(4));
+  for (int i = 0; i < 5; i++) buffer.info.push_back(ot::GlyphInfo{});
+  EXPECT_FALSE(buffer.successful);
+  EXPECT_EQ(buffer.len(), 4u);
+
+  ASSERT_TRUE(buffer.prepare(4));
+  ASSERT_TRUE(buffer.successful);
+  for (int i = 0; i < 5; i++) buffer.scratch.push_back(ot::GlyphInfo{});
+  EXPECT_FALSE(buffer.successful);
+  EXPECT_EQ(buffer.scratch.size(), 4u);
+
+  ASSERT_TRUE(buffer.prepare(4));
+  EXPECT_FALSE(buffer.pos.assign(5, ot::GlyphPosition{}));
+  EXPECT_FALSE(buffer.successful);
+
+  ASSERT_TRUE(buffer.prepare(4));
+  EXPECT_FALSE(buffer.indices.resize(5));
+  EXPECT_FALSE(buffer.successful);
+}
+
 TEST(OtShaperBuffer, NoStorageShapesNothing) {
   FixtureFont devanagari;
   ASSERT_TRUE(loadFixture("NotoSansDevanagari-Regular.layout", ot::Script::Devanagari, &devanagari));
@@ -332,6 +357,10 @@ TEST(OtShaperBuffer, TheNextRunUndoesASwap) {
   EXPECT_TRUE(shapeWith(bengali, utf32("েদের"), buffer));
   EXPECT_TRUE(buffer.hasBrokenSyllable);
   EXPECT_NE(buffer.info.data(), infoStart);
+  // The next prepare() lays the arrays over the block in order again.
+  ASSERT_TRUE(buffer.prepare(16));
+  EXPECT_EQ(buffer.info.data(), infoStart);
+  EXPECT_EQ(buffer.scratch.data(), infoStart + 256);
 
   EXPECT_TRUE(shapeWith(bengali, word, buffer));
   EXPECT_EQ(glyphsOf(buffer), expected);
