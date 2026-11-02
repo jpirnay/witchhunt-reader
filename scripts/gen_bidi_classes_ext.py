@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Generate lib/MiniBidi/bidiclasses_ext.t from Unicode's DerivedBidiClass.txt (UAX #9).
+
+Usage: python -I scripts/gen_bidi_classes_ext.py <DerivedBidiClass.txt> [<out.t>]
+
+lib/MiniBidi/bidiclasses.t (upstream's, verbatim) covers Latin, Cyrillic, Hebrew, Arabic and the bidi controls. This
+table adds the scripts the firmware draws, for the code points upstream does not list. The file's @missing defaults
+apply first, then its explicit ranges. In the left-to-right blocks NSM reads as L: a combining mark there (virama,
+dakuten) stays with its base letter and must not take part in the reordering of an RTL run. ON runs are not emitted;
+bidi_class() falls back to ON.
+"""
+import re
+import sys
+
+EXPECTED_FIRST_LINE = "# DerivedBidiClass-17.0.0.txt"
+CODEPOINTS = 0x110000
+DEFAULT_OUT = "lib/MiniBidi/bidiclasses_ext.t"
+UPSTREAM_TABLE = "lib/MiniBidi/bidiclasses.t"
+
+# Blocks whose NSM reads as L.
+LTR_BLOCKS = [
+    (0x0370, 0x03FF), (0x1F00, 0x1FFF),  # Greek
+    (0x0530, 0x058F),  # Armenian
+    (0x0900, 0x097F), (0x0980, 0x09FF), (0x0A00, 0x0A7F), (0x0A80, 0x0AFF), (0x0B00, 0x0B7F),
+    (0x0B80, 0x0BFF), (0x0C00, 0x0C7F), (0x0C80, 0x0CFF), (0x0D00, 0x0D7F), (0x0D80, 0x0DFF),
+    (0xA8E0, 0xA8FF),  # Indic
+    (0x10A0, 0x10FF), (0x1C90, 0x1CBF), (0x2D00, 0x2D2F),  # Georgian
+    (0x1200, 0x139F), (0x2D80, 0x2DDF), (0xAB00, 0xAB2F),  # Ethiopic
+    (0x1100, 0x11FF), (0x3130, 0x318F), (0xA960, 0xA97F), (0xAC00, 0xD7AF), (0xD7B0, 0xD7FF),  # Hangul
+    (0x3000, 0x303F), (0x3040, 0x309F), (0x30A0, 0x30FF), (0x3100, 0x312F), (0x3190, 0x31FF),
+    (0x3200, 0x32FF), (0x3300, 0x33FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF),
+    (0xFE10, 0xFE1F), (0xFE30, 0xFE4F), (0xFF00, 0xFFEF), (0x20000, 0x2FFFF), (0x30000, 0x3FFFF),  # CJK, kana
+]
+
+# Blocks with the file's classes as they are.
+FILE_BLOCKS = [
+    (0x0590, 0x05FF),  # Hebrew: the points and letters upstream lacks (05A2, 05BA, 05C5-05C7, 05EF)
+    (0xFB00, 0xFB17),  # Latin and Armenian ligatures
+    (0x2070, 0x209F),  # superscripts and subscripts
+    (0x2100, 0x218F),  # letterlike symbols, number forms
+    (0xFB1D, 0xFB4F),  # Hebrew presentation forms
+    (0x2000, 0x206F),  # General Punctuation
+    (0x20A0, 0x20CF),  # Currency Symbols
+    (0x2212, 0x2213),  # minus sign, minus-or-plus sign
+]
+
+LONG_NAMES = {
+    "Left_To_Right": "L",
+    "Right_To_Left": "R",
+    "Arabic_Letter": "AL",
+    "European_Terminator": "ET",
+    "Boundary_Neutral": "BN",
+}
+
+MISSING = re.compile(r"^#\s*@missing:\s*([0-9A-Fa-f]+)\.\.([0-9A-Fa-f]+);\s*(\w+)")
+
+
+def parse(text):
+    classes = ["L"] * CODEPOINTS
+    for line in text.splitlines():  # @missing defaults first
+        m = MISSING.match(line)
+        if m:
+            for cp in range(int(m.group(1), 16), int(m.group(2), 16) + 1):
+                classes[cp] = LONG_NAMES[m.group(3)]
+    for line in text.splitlines():
+        body = line.split("#", 1)[0].strip()
+        if not body:
+            continue
+        span, name = (part.strip() for part in body.split(";"))
+        first, _, last = span.partition("..")
+        lo = int(first, 16)
+        hi = int(last or first, 16)
+        for cp in range(lo, hi + 1):
+            classes[cp] = name
+    return classes
+
+
+def upstream_ranges(text):
+    return [(int(a, 16), int(b, 16)) for a, b in re.findall(r"^\{0x([0-9A-Fa-f]+),\s*0x([0-9A-Fa-f]+),", text, re.M)]
+
+
+def build(classes, upstream):
+    wanted = {}
+    for lo, hi in LTR_BLOCKS:
+        for cp in range(lo, hi + 1):
+            wanted[cp] = "L" if classes[cp] == "NSM" else classes[cp]
+    for lo, hi in FILE_BLOCKS:
+        for cp in range(lo, hi + 1):
+            wanted[cp] = classes[cp]
+    for lo, hi in upstream:
+        for cp in range(lo, hi + 1):
+            wanted.pop(cp, None)
+    runs = []  # [first, last, class]
+    for cp in sorted(wanted):
+        cls = wanted[cp]
+        if cls == "ON":
+            continue
+        if runs and runs[-1][1] + 1 == cp and runs[-1][2] == cls:
+            runs[-1][1] = cp
+        else:
+            runs.append([cp, cp, cls])
+    return runs
+
+
+def check(runs, upstream):
+    for (_, last, _), (first, _, _) in zip(runs, runs[1:]):
+        if first <= last:
+            sys.exit(f"runs not strictly ascending at 0x{first:X}")
+    for lo, hi in upstream:
+        for first, last, _ in runs:
+            if first <= hi and lo <= last:
+                sys.exit(f"run 0x{first:X}-0x{last:X} overlaps upstream's 0x{lo:X}-0x{hi:X}")
+
+
+def main():
+    if len(sys.argv) not in (2, 3):
+        sys.exit(__doc__)
+    text = open(sys.argv[1], "rb").read().decode("utf-8")
+    if text.splitlines()[:1] != [EXPECTED_FIRST_LINE]:
+        sys.exit(f"{sys.argv[1]}: first line is not '{EXPECTED_FIRST_LINE}'")
+    out_path = sys.argv[2] if len(sys.argv) == 3 else DEFAULT_OUT
+    upstream = upstream_ranges(open(UPSTREAM_TABLE, encoding="utf-8").read())
+    runs = build(parse(text), upstream)
+    check(runs, upstream)
+
+    lines = [
+        "/* Generated by scripts/gen_bidi_classes_ext.py from DerivedBidiClass-17.0.0.txt; do not edit.",
+        " * Copyright Unicode, Inc.; used under the Unicode License v3 (https://www.unicode.org/license.txt).",
+        " *",
+        " * Bidi classes for the scripts the firmware draws, for the code points bidiclasses.t does not list.",
+        " * NSM reads as L in the left-to-right blocks. ON is not listed: bidi_class() falls back to it.",
+        " * Sorted ascending by first (binary search). */",
+    ]
+    lines += [f"{{0x{first:04X}, 0x{last:04X}, {cls}}}," for first, last, cls in runs]
+    with open(out_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+if __name__ == "__main__":
+    main()
