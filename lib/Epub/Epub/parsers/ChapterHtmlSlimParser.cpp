@@ -3939,9 +3939,10 @@ void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
   while (!self->streamFailed && !self->backgroundImageScopes_.empty() &&
          self->backgroundImageScopes_.back().depth >= self->depth) {
     const std::string path = std::move(self->backgroundImageScopes_.back().path);
+    const int elementDepth = self->backgroundImageScopes_.back().depth;
     self->backgroundImageScopes_.pop_back();
     self->brRunInBackground_ = 0;
-    self->placeBackgroundImage(path);
+    self->placeBackgroundImage(path, elementDepth);
   }
 }
 
@@ -5289,10 +5290,12 @@ void ChapterHtmlSlimParser::noteBackgroundImage(const char* name, const std::str
   backgroundImageScopes_.push_back({depth, std::move(resolved)});
 }
 
-void ChapterHtmlSlimParser::placeBackgroundImage(const std::string& resolvedPath) {
+void ChapterHtmlSlimParser::placeBackgroundImage(const std::string& resolvedPath, const int elementDepth) {
   // The element's text first: the picture follows everything it held.
   if (partWordBufferIndex > 0 && !flushPartWordBuffer()) return;
   if (currentTextBlock && !currentTextBlock->isEmpty()) makePages();
+  // That drained the block after the element's close-tag reset had run: the next paragraph merges into it.
+  clearSpentBlockDirection(elementDepth);
   applyPendingPageBreak();
   uint16_t nativeWidth = 0;
   uint16_t nativeHeight = 0;

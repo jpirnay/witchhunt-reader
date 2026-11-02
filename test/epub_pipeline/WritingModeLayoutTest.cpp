@@ -593,6 +593,22 @@ TEST_F(BidiLayout, AParagraphAfterARuleInARightToLeftContainerStaysRightToLeft) 
   }
 }
 
+TEST_F(BidiLayout, AParagraphAfterABackgroundPictureTakesItsContainersDirection) {
+  // The picture is placed once its element closes, after the element's text: that drains the block and keeps it.
+  const std::vector<SyntheticFile> picture = {{"pic.png", "image/png", syntheticPngHeader(200, 150)}};
+  for (const AlignmentCase& alignment : alignmentCases()) {
+    const std::string out =
+        dump("", document("<p dir=\"rtl\" style=\"background: url(pic.png) no-repeat\">א</p><p>Alpha bravo</p>"),
+             alignment.profile, picture);
+    EXPECT_NE(std::string::npos, out.find("  IMG ")) << out;
+    const auto lines = parseLines(out);
+    const Line* latin = lineWith(lines, "Alpha bravo");
+    ASSERT_NE(nullptr, latin) << alignment.name;
+    EXPECT_EQ(0, latin->firstWordX) << alignment.name;
+    EXPECT_EQ(alignment.paragraphAlign, latin->align) << alignment.name;
+  }
+}
+
 TEST_F(BidiLayout, ABlockOfOnlyControlsLeavesNoDirectionBehind) {
   // The LRI and PDI paragraph needs no bidi, so its controls are dropped and nothing is left to lay out; <hr> drains
   // the block and keeps it, and the right-to-left paragraph merges into it.

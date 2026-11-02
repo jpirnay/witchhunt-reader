@@ -899,7 +899,8 @@ class ChapterHtmlSlimParser final : public Print {
   // picture when the element closes. See BackgroundImageScope.
   void noteBackgroundImage(const char* name, const std::string& classAttr, const std::string& idAttr,
                            const std::string& styleAttr);
-  void placeBackgroundImage(const std::string& resolvedPath);
+  // `elementDepth`: the depth of the element whose picture it is.
+  void placeBackgroundImage(const std::string& resolvedPath, int elementDepth);
   // Place an already-built ImageBlock as a centered, full-width block element, page-breaking if needed.
   void placeImageBlockAsBlock(std::unique_ptr<ImageBlock> image);
   // In a vertical section an image is sized in the content frame as its turned self: native width and height swap
