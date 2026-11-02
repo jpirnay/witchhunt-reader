@@ -4,6 +4,9 @@ The gated phase of the design (`2026-11-02-writing-modes-step2-design.md`, "Meas
 plan's Tasks 1-4 (`docs/superpowers/plans/2026-11-02-writing-modes-step2-pr1.md`). These figures replace the design's
 estimates for the rows they measure; the design's own table is not edited. 1 KB is 1,024 B throughout.
 
+Item 3 ran twice. The first recipe missed, the maintainer refined decision 6 the same day, and the re-run with the
+refined recipe is the item's result. The first run is kept, marked superseded.
+
 The workspace is `C:/tmp/wm2-measure` (durable: Task 9 runs the oracle and the probe again from it). Scratch firmware
 builds ran in a detached worktree of master at `55589ef59`.
 
@@ -499,9 +502,196 @@ alignment. The runtime planner, `OtPlanBuild.cpp`, is the largest single object 
 
 ## Item 3: the merged fonts of decision 6
 
+**Decision 6, refined by the maintainer (2026-11-02).** The first run of this item, recorded below as "The first
+recipe (superseded)", missed: two families did not merge, and the Latin line check could not hold. The maintainer then
+added two rules to decision 6, and the plan's Task 3 now carries them:
+- the merge drops `vhea` and `vmtx`, since our engine never sets Indic text vertically;
+- Latin letters A-Z and a-z always come from Noto Sans or Noto Serif, so Latin looks the same in every family.
+  Space, digits, punctuation and everything else the script font maps come from the script font. Noto Sans Sinhala's
+  own Latin letters are therefore replaced by Noto Sans's.
+
+The Latin check is redefined to match: each Latin line, restricted to Latin letters, must shape identically in the
+merged family and in Noto Sans or Serif itself. The check against the script's own font stays.
+
+### The refined recipe
+
+**How.** `tools/merge_families.py dl/fonts merged corpus logs/fonts.md` (rewritten for the refined recipe; the first
+recipe's script is kept as `tools/merge_families_first_recipe.py`). For each of the 22 families, regular with regular
+and bold with bold:
+- the script font: A-Z and a-z leave every cmap subtable. Its glyphs stay, so its glyph IDs and its own shaping do not
+  change. Only Noto Sans Sinhala maps any letters (52); the other 42 files go into the merge as they are;
+- Noto's Latin: the `fontTools.subset` of the first recipe, less every code point the script font maps other than
+  A-Z and a-z;
+- upem: all 1,000, so nothing was scaled;
+- the merge: `fontTools.merge.Merger(options=Options(drop_tables=["vhea", "vmtx"])).merge([script, latin])`, the
+  script font first;
+- the sizes, the `.sizes` files and `CPac`, counted as before.
+
+The checks:
+- **Equal against the script's own font:** as in the first recipe. HarfBuzz 14.5.0 at 2133/33, every line of the
+  script's corpus, with no language and each of the script's languages; Arabic uses `corpus/arabic.txt`, rtl, `Arab`,
+  with none, `ar`, `fa` and `ur`. Glyph IDs, advances and offsets must be equal.
+- **Latin kept whole:** each of the three Latin lines is cut into its longest runs of A-Z and a-z, 18 runs. Each run
+  is shaped by the merged font and by the Latin font file itself (Noto Sans or Serif, script and direction guessed).
+  The glyph names (each merged glyph's name mapped back through the merger's renaming), advances and offsets must be
+  equal. A glyph of the script font's part never matches.
+
+**Results.**
+- **22 of 22 families merged**, both styles. Noto Serif Bengali and Noto Serif Tamil lost `vhea` and `vmtx`; no other
+  script file has them, and no merged file keeps them.
+- In every merged style, all 52 letters map to the Latin font's glyphs.
+  - In Noto Sans Sinhala they are Noto Sans's (`A.1` and so on in the merged order, since its own `A` keeps the
+    name).
+  - Its own Latin glyphs stay in the file, out of the cmap: 167,108 B (Regular) against 161,628 B in the first recipe.
+- The other 19 families' merged styles (38) have the first recipe's sizes, glyph counts and lookup counts. Noto
+  Serif Bengali's and Noto Serif Tamil's are the sizes of the first run's supplementary merge.
+- **Equal against the script's own font: 1,531,416 of 1,531,416 lines**, 112 runs (the 22 families, both styles, each
+  language).
+- **Latin kept whole: 792 of 792 letter runs equal** (18 in each of the 44 styles): the kerning (`AVATAR`'s three `A`s
+  take three advances) and the ligatures (`fi`, `fl`, `f_f_i`) are Noto Sans's or Serif's own.
+- **The fit:** every family fits the X3's store **in flash mode**, 22 of 22 (`Step2MergedFamiliesProbe` in a fresh
+  scratch tree of master `f27a7fb96`, whose only change against `55589ef59` is `docs/serial-test-api.md`). The
+  largest is still Noto Serif Devanagari: two styles of 311,580 B and 295,780 B, with a log of 1,376,256 B left.
+  `ttf::fitsStore` agreed with `planLayout` for every family.
+
+**One row per family and style:**
+
+| Family | Style | bytes | GDEF | CPac | flash bytes | SD bytes | mode | equal against the script's font | Latin letter runs equal | script font's Latin: letters / 52, U+0020-007E / 95 |
+|---|---|---:|---:|---:|---:|---:|---|---|---|---|
+| NotoSansDevanagari | Regular | 262,000 | 652 | 18,244 | 280,244 | 125,132 | flash | 20,522 of 20,522 lines x 5 (none, hi, mr, ne, sa) | 18 of 18 | 0 / 39 |
+| NotoSansDevanagari | Bold | 261,660 | 674 | 18,244 | 279,904 | 126,180 | flash | 20,522 of 20,522 lines x 5 (none, hi, mr, ne, sa) | 18 of 18 | 0 / 39 |
+| NotoSerifDevanagari | Regular | 293,268 | 940 | 18,312 | 311,580 | 134,548 | flash | 20,522 of 20,522 lines x 5 (none, hi, mr, ne, sa) | 18 of 18 | 0 / 39 |
+| NotoSerifDevanagari | Bold | 277,700 | 922 | 18,080 | 295,780 | 119,964 | flash | 20,522 of 20,522 lines x 5 (none, hi, mr, ne, sa) | 18 of 18 | 0 / 39 |
+| NotoSansBengali | Regular | 189,700 | 1,638 | 37,368 | 227,068 | 106,452 | flash | 14,852 of 14,852 lines x 3 (none, bn, as) | 18 of 18 | 0 / 7 |
+| NotoSansBengali | Bold | 188,856 | 1,660 | 37,368 | 226,224 | 107,440 | flash | 14,852 of 14,852 lines x 3 (none, bn, as) | 18 of 18 | 0 / 7 |
+| NotoSerifBengali | Regular | 275,992 | 378 | 6,672 | 282,664 | 66,860 | flash | 14,852 of 14,852 lines x 3 (none, bn, as) | 18 of 18 | 0 / 39 |
+| NotoSerifBengali | Bold | 275,220 | 360 | 6,672 | 281,892 | 68,572 | flash | 14,852 of 14,852 lines x 3 (none, bn, as) | 18 of 18 | 0 / 39 |
+| NotoSansGurmukhi | Regular | 112,068 | 330 | 2,744 | 114,812 | 30,424 | flash | 14,545 of 14,545 lines x 2 (none, pa) | 18 of 18 | 0 / 39 |
+| NotoSansGurmukhi | Bold | 112,300 | 352 | 2,744 | 115,044 | 30,668 | flash | 14,545 of 14,545 lines x 2 (none, pa) | 18 of 18 | 0 / 39 |
+| NotoSerifGurmukhi | Regular | 119,984 | 370 | 2,092 | 122,076 | 28,624 | flash | 14,545 of 14,545 lines x 2 (none, pa) | 18 of 18 | 0 / 39 |
+| NotoSerifGurmukhi | Bold | 119,952 | 352 | 2,092 | 122,044 | 28,612 | flash | 14,545 of 14,545 lines x 2 (none, pa) | 18 of 18 | 0 / 39 |
+| NotoSansGujarati | Regular | 233,576 | 990 | 9,372 | 242,948 | 84,444 | flash | 14,668 of 14,668 lines x 2 (none, gu) | 18 of 18 | 0 / 1 |
+| NotoSansGujarati | Bold | 232,076 | 1,012 | 9,372 | 241,448 | 84,712 | flash | 14,668 of 14,668 lines x 2 (none, gu) | 18 of 18 | 0 / 1 |
+| NotoSerifGujarati | Regular | 184,656 | 638 | 6,748 | 191,404 | 50,024 | flash | 14,668 of 14,668 lines x 2 (none, gu) | 18 of 18 | 0 / 39 |
+| NotoSerifGujarati | Bold | 181,952 | 620 | 6,748 | 188,700 | 48,952 | flash | 14,668 of 14,668 lines x 2 (none, gu) | 18 of 18 | 0 / 39 |
+| NotoSansOriya | Regular | 208,252 | 698 | 12,876 | 221,128 | 72,132 | flash | 14,891 of 14,891 lines x 2 (none, or) | 18 of 18 | 0 / 39 |
+| NotoSansOriya | Bold | 207,608 | 720 | 12,876 | 220,484 | 72,568 | flash | 14,891 of 14,891 lines x 2 (none, or) | 18 of 18 | 0 / 39 |
+| NotoSerifOriya | Regular | 234,340 | 528 | 5,640 | 239,980 | 55,092 | flash | 14,891 of 14,891 lines x 2 (none, or) | 18 of 18 | 0 / 39 |
+| NotoSerifOriya | Bold | 233,424 | 510 | 5,640 | 239,064 | 54,828 | flash | 14,891 of 14,891 lines x 2 (none, or) | 18 of 18 | 0 / 39 |
+| NotoSansTamil | Regular | 124,036 | 356 | 2,424 | 126,460 | 35,116 | flash | 11,203 of 11,203 lines x 2 (none, ta) | 18 of 18 | 0 / 39 |
+| NotoSansTamil | Bold | 124,352 | 378 | 2,424 | 126,776 | 35,388 | flash | 11,203 of 11,203 lines x 2 (none, ta) | 18 of 18 | 0 / 39 |
+| NotoSerifTamil | Regular | 136,444 | 534 | 2,008 | 138,452 | 34,668 | flash | 11,203 of 11,203 lines x 2 (none, ta) | 18 of 18 | 0 / 39 |
+| NotoSerifTamil | Bold | 136,704 | 516 | 2,008 | 138,712 | 34,804 | flash | 11,203 of 11,203 lines x 2 (none, ta) | 18 of 18 | 0 / 39 |
+| NotoSansTelugu | Regular | 244,660 | 834 | 7,928 | 252,588 | 67,280 | flash | 15,680 of 15,680 lines x 2 (none, te) | 18 of 18 | 0 / 39 |
+| NotoSansTelugu | Bold | 245,460 | 856 | 7,928 | 253,388 | 67,912 | flash | 15,680 of 15,680 lines x 2 (none, te) | 18 of 18 | 0 / 39 |
+| NotoSerifTelugu | Regular | 277,972 | 566 | 7,516 | 285,488 | 59,608 | flash | 15,680 of 15,680 lines x 2 (none, te) | 18 of 18 | 0 / 39 |
+| NotoSerifTelugu | Bold | 275,948 | 548 | 7,516 | 283,464 | 60,312 | flash | 15,680 of 15,680 lines x 2 (none, te) | 18 of 18 | 0 / 39 |
+| NotoSansKannada | Regular | 211,800 | 772 | 12,404 | 224,204 | 79,588 | flash | 14,916 of 14,916 lines x 2 (none, kn) | 18 of 18 | 0 / 39 |
+| NotoSansKannada | Bold | 210,656 | 794 | 12,404 | 223,060 | 79,896 | flash | 14,916 of 14,916 lines x 2 (none, kn) | 18 of 18 | 0 / 39 |
+| NotoSerifKannada | Regular | 219,364 | 420 | 7,760 | 227,124 | 76,264 | flash | 14,916 of 14,916 lines x 2 (none, kn) | 18 of 18 | 0 / 39 |
+| NotoSerifKannada | Bold | 183,900 | 376 | 7,660 | 191,560 | 42,936 | flash | 14,916 of 14,916 lines x 2 (none, kn) | 18 of 18 | 0 / 39 |
+| NotoSansMalayalam | Regular | 153,404 | 286 | 5,408 | 158,812 | 43,228 | flash | 17,630 of 17,630 lines x 2 (none, ml) | 18 of 18 | 0 / 39 |
+| NotoSansMalayalam | Bold | 152,484 | 308 | 5,408 | 157,892 | 43,600 | flash | 17,630 of 17,630 lines x 2 (none, ml) | 18 of 18 | 0 / 39 |
+| NotoSerifMalayalam | Regular | 156,744 | 342 | 5,224 | 161,968 | 39,192 | flash | 17,630 of 17,630 lines x 2 (none, ml) | 18 of 18 | 0 / 39 |
+| NotoSerifMalayalam | Bold | 155,548 | 324 | 5,224 | 160,772 | 39,220 | flash | 17,630 of 17,630 lines x 2 (none, ml) | 18 of 18 | 0 / 39 |
+| NotoSansSinhala | Regular | 167,108 | 316 | 4,432 | 171,540 | 36,688 | flash | 13,157 of 13,157 lines x 2 (none, si) | 18 of 18 | 52 / 91 |
+| NotoSansSinhala | Bold | 165,724 | 338 | 4,432 | 170,156 | 37,052 | flash | 13,157 of 13,157 lines x 2 (none, si) | 18 of 18 | 52 / 91 |
+| NotoSerifSinhala | Regular | 279,896 | 576 | 5,292 | 285,188 | 48,912 | flash | 13,157 of 13,157 lines x 2 (none, si) | 18 of 18 | 0 / 39 |
+| NotoSerifSinhala | Bold | 275,784 | 558 | 5,292 | 281,076 | 49,004 | flash | 13,157 of 13,157 lines x 2 (none, si) | 18 of 18 | 0 / 39 |
+| NotoNaskhArabic | Regular | 252,656 | 652 | 5,084 | 257,740 | 63,264 | flash | 577 of 577 lines x 4 (none, ar, fa, ur) | 18 of 18 | 0 / 15 |
+| NotoNaskhArabic | Bold | 252,444 | 634 | 5,084 | 257,528 | 63,328 | flash | 577 of 577 lines x 4 (none, ar, fa, ur) | 18 of 18 | 0 / 15 |
+| NotoSansArabic | Regular | 227,748 | 534 | 5,036 | 232,784 | 64,464 | flash | 577 of 577 lines x 4 (none, ar, fa, ur) | 18 of 18 | 0 / 16 |
+| NotoSansArabic | Bold | 227,976 | 556 | 5,036 | 233,012 | 64,924 | flash | 577 of 577 lines x 4 (none, ar, fa, ur) | 18 of 18 | 0 / 16 |
+
+**The merges** (lookups, glyph counts, what the recipe changed in the script font):
+
+| Family | Style | Latin | upem (script / Latin) | scaled | dropped from the script font | letters out of the script cmap | script glyphs | Latin subset glyphs (code points) | merged glyphs | letters from the Latin font | merged bytes | GDEF (B) | GSUB lookups / subtables | GPOS lookups / subtables | CPac (B) | result |
+|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| NotoSansDevanagari | Regular | NotoSans | 1000 / 1000 | no | none | 0 | 845 | 858 (618) | 1,703 | 52 | 262,000 | 652 | 193 / 461 | 32 / 36 | 18,244 | merged |
+| NotoSansDevanagari | Bold | NotoSans | 1000 / 1000 | no | none | 0 | 845 | 858 (618) | 1,703 | 52 | 261,660 | 674 | 193 / 461 | 32 / 36 | 18,244 | merged |
+| NotoSerifDevanagari | Regular | NotoSerif | 1000 / 1000 | no | none | 0 | 997 | 834 (618) | 1,831 | 52 | 293,268 | 940 | 246 / 403 | 32 / 35 | 18,312 | merged |
+| NotoSerifDevanagari | Bold | NotoSerif | 1000 / 1000 | no | none | 0 | 997 | 834 (618) | 1,831 | 52 | 277,700 | 922 | 246 / 403 | 28 / 30 | 18,080 | merged |
+| NotoSansBengali | Regular | NotoSans | 1000 / 1000 | no | none | 0 | 418 | 969 (656) | 1,387 | 52 | 189,700 | 1,638 | 243 / 698 | 251 / 282 | 37,368 | merged |
+| NotoSansBengali | Bold | NotoSans | 1000 / 1000 | no | none | 0 | 418 | 969 (656) | 1,387 | 52 | 188,856 | 1,660 | 243 / 698 | 251 / 282 | 37,368 | merged |
+| NotoSerifBengali | Regular | NotoSerif | 1000 / 1000 | no | vhea, vmtx | 0 | 714 | 834 (618) | 1,548 | 52 | 275,992 | 378 | 93 / 117 | 23 / 25 | 6,672 | merged |
+| NotoSerifBengali | Bold | NotoSerif | 1000 / 1000 | no | vhea, vmtx | 0 | 714 | 834 (618) | 1,548 | 52 | 275,220 | 360 | 93 / 117 | 23 / 25 | 6,672 | merged |
+| NotoSansGurmukhi | Regular | NotoSans | 1000 / 1000 | no | none | 0 | 282 | 858 (618) | 1,140 | 52 | 112,068 | 330 | 36 / 37 | 10 / 23 | 2,744 | merged |
+| NotoSansGurmukhi | Bold | NotoSans | 1000 / 1000 | no | none | 0 | 282 | 858 (618) | 1,140 | 52 | 112,300 | 352 | 36 / 37 | 10 / 23 | 2,744 | merged |
+| NotoSerifGurmukhi | Regular | NotoSerif | 1000 / 1000 | no | none | 0 | 294 | 834 (618) | 1,128 | 52 | 119,984 | 370 | 30 / 30 | 9 / 11 | 2,092 | merged |
+| NotoSerifGurmukhi | Bold | NotoSerif | 1000 / 1000 | no | none | 0 | 294 | 834 (618) | 1,128 | 52 | 119,952 | 352 | 30 / 30 | 9 / 11 | 2,092 | merged |
+| NotoSansGujarati | Regular | NotoSans | 1000 / 1000 | no | none | 0 | 780 | 981 (667) | 1,761 | 52 | 233,576 | 990 | 146 / 185 | 15 / 17 | 9,372 | merged |
+| NotoSansGujarati | Bold | NotoSans | 1000 / 1000 | no | none | 0 | 780 | 981 (667) | 1,761 | 52 | 232,076 | 1,012 | 146 / 185 | 15 / 17 | 9,372 | merged |
+| NotoSerifGujarati | Regular | NotoSerif | 1000 / 1000 | no | none | 0 | 456 | 834 (618) | 1,290 | 52 | 184,656 | 638 | 86 / 150 | 13 / 15 | 6,748 | merged |
+| NotoSerifGujarati | Bold | NotoSerif | 1000 / 1000 | no | none | 0 | 456 | 834 (618) | 1,290 | 52 | 181,952 | 620 | 86 / 150 | 13 / 15 | 6,748 | merged |
+| NotoSansOriya | Regular | NotoSans | 1000 / 1000 | no | none | 0 | 627 | 859 (619) | 1,486 | 52 | 208,252 | 698 | 198 / 254 | 23 / 24 | 12,876 | merged |
+| NotoSansOriya | Bold | NotoSans | 1000 / 1000 | no | none | 0 | 627 | 859 (619) | 1,486 | 52 | 207,608 | 720 | 198 / 254 | 23 / 24 | 12,876 | merged |
+| NotoSerifOriya | Regular | NotoSerif | 1000 / 1000 | no | none | 0 | 690 | 835 (619) | 1,525 | 52 | 234,340 | 528 | 78 / 111 | 14 / 16 | 5,640 | merged |
+| NotoSerifOriya | Bold | NotoSerif | 1000 / 1000 | no | none | 0 | 690 | 835 (619) | 1,525 | 52 | 233,424 | 510 | 78 / 111 | 14 / 16 | 5,640 | merged |
+| NotoSansTamil | Regular | NotoSans | 1000 / 1000 | no | none | 0 | 244 | 856 (616) | 1,100 | 52 | 124,036 | 356 | 34 / 38 | 10 / 11 | 2,424 | merged |
+| NotoSansTamil | Bold | NotoSans | 1000 / 1000 | no | none | 0 | 244 | 856 (616) | 1,100 | 52 | 124,352 | 378 | 34 / 38 | 10 / 11 | 2,424 | merged |
+| NotoSerifTamil | Regular | NotoSerif | 1000 / 1000 | no | vhea, vmtx | 0 | 222 | 834 (616) | 1,056 | 52 | 136,444 | 534 | 28 / 30 | 8 / 11 | 2,008 | merged |
+| NotoSerifTamil | Bold | NotoSerif | 1000 / 1000 | no | vhea, vmtx | 0 | 222 | 834 (616) | 1,056 | 52 | 136,704 | 516 | 28 / 30 | 8 / 11 | 2,008 | merged |
+| NotoSansTelugu | Regular | NotoSans | 1000 / 1000 | no | none | 0 | 961 | 858 (618) | 1,819 | 52 | 244,660 | 834 | 110 / 118 | 38 / 39 | 7,928 | merged |
+| NotoSansTelugu | Bold | NotoSans | 1000 / 1000 | no | none | 0 | 961 | 858 (618) | 1,819 | 52 | 245,460 | 856 | 110 / 118 | 38 / 39 | 7,928 | merged |
+| NotoSerifTelugu | Regular | NotoSerif | 1000 / 1000 | no | none | 0 | 743 | 834 (618) | 1,577 | 52 | 277,972 | 566 | 106 / 112 | 35 / 36 | 7,516 | merged |
+| NotoSerifTelugu | Bold | NotoSerif | 1000 / 1000 | no | none | 0 | 743 | 834 (618) | 1,577 | 52 | 275,948 | 548 | 106 / 112 | 35 / 36 | 7,516 | merged |
+| NotoSansKannada | Regular | NotoSans | 1000 / 1000 | no | none | 0 | 657 | 858 (618) | 1,515 | 52 | 211,800 | 772 | 214 / 227 | 15 / 22 | 12,404 | merged |
+| NotoSansKannada | Bold | NotoSans | 1000 / 1000 | no | none | 0 | 657 | 858 (618) | 1,515 | 52 | 210,656 | 794 | 214 / 227 | 15 / 22 | 12,404 | merged |
+| NotoSerifKannada | Regular | NotoSerif | 1000 / 1000 | no | none | 0 | 419 | 834 (618) | 1,253 | 52 | 219,364 | 420 | 84 / 90 | 58 / 67 | 7,760 | merged |
+| NotoSerifKannada | Bold | NotoSerif | 1000 / 1000 | no | none | 0 | 419 | 834 (618) | 1,253 | 52 | 183,900 | 376 | 84 / 90 | 57 / 64 | 7,660 | merged |
+| NotoSansMalayalam | Regular | NotoSans | 1000 / 1000 | no | none | 0 | 365 | 858 (618) | 1,223 | 52 | 153,404 | 286 | 86 / 90 | 14 / 18 | 5,408 | merged |
+| NotoSansMalayalam | Bold | NotoSans | 1000 / 1000 | no | none | 0 | 365 | 858 (618) | 1,223 | 52 | 152,484 | 308 | 86 / 90 | 14 / 18 | 5,408 | merged |
+| NotoSerifMalayalam | Regular | NotoSerif | 1000 / 1000 | no | none | 0 | 355 | 834 (618) | 1,189 | 52 | 156,744 | 342 | 82 / 86 | 14 / 19 | 5,224 | merged |
+| NotoSerifMalayalam | Bold | NotoSerif | 1000 / 1000 | no | none | 0 | 355 | 834 (618) | 1,189 | 52 | 155,548 | 324 | 82 / 86 | 14 / 19 | 5,224 | merged |
+| NotoSansSinhala | Regular | NotoSans | 1000 / 1000 | no | none | 52 | 371 | 861 (621) | 1,232 | 52 | 167,108 | 316 | 60 / 74 | 18 / 19 | 4,432 | merged |
+| NotoSansSinhala | Bold | NotoSans | 1000 / 1000 | no | none | 52 | 371 | 861 (621) | 1,232 | 52 | 165,724 | 338 | 60 / 74 | 18 / 19 | 4,432 | merged |
+| NotoSerifSinhala | Regular | NotoSerif | 1000 / 1000 | no | none | 0 | 645 | 836 (620) | 1,481 | 52 | 279,896 | 576 | 92 / 92 | 9 / 10 | 5,292 | merged |
+| NotoSerifSinhala | Bold | NotoSerif | 1000 / 1000 | no | none | 0 | 645 | 836 (620) | 1,481 | 52 | 275,784 | 558 | 92 / 92 | 9 / 10 | 5,292 | merged |
+| NotoNaskhArabic | Regular | NotoSerif | 1000 / 1000 | no | none | 0 | 1,415 | 870 (646) | 2,285 | 52 | 252,656 | 652 | 65 / 77 | 26 / 28 | 5,084 | merged |
+| NotoNaskhArabic | Bold | NotoSerif | 1000 / 1000 | no | none | 0 | 1,415 | 870 (646) | 2,285 | 52 | 252,444 | 634 | 65 / 77 | 26 / 28 | 5,084 | merged |
+| NotoSansArabic | Regular | NotoSans | 1000 / 1000 | no | none | 0 | 1,399 | 893 (645) | 2,292 | 52 | 227,748 | 534 | 64 / 74 | 27 / 29 | 5,036 | merged |
+| NotoSansArabic | Bold | NotoSans | 1000 / 1000 | no | none | 0 | 1,399 | 893 (645) | 2,292 | 52 | 227,976 | 556 | 64 / 74 | 27 / 29 | 5,036 | merged |
+
+**Latin in the script fonts** (the inputs, unchanged by the refinement): #3787's "no Latin" claim holds for letters in
+42 of the 44 script files, not for Noto Sans Sinhala (all 52 letters, 91 of the 95 code points U+0020-007E).
+- 34 of the 40 Indic files map the same 39 of the 95: space, the digits and the punctuation
+  ``!"#%'()*+,-./:;<=>?[\]^_{|}~``.
+- Noto Sans Bengali maps 7 (space `! ? [ ] { }`), Noto Sans Gujarati 1 (space), Noto Naskh Arabic 15 and Noto Sans
+  Arabic 16.
+- Each file's counts are in the last column of the table above.
+
+**A consequence of the second rule, for the design to know:** Latin text in a merged family takes the script font's
+word space and punctuation, and their widths differ from Noto's in many families. The space is 260 units in Noto Sans
+and Noto Serif. Measured in the Regular files (font units, upem 1,000):
+- it is 260 units in 8 of the 22 script fonts;
+- in the other 14 it ranges from 221 (Noto Naskh Arabic) to 500 (Noto Serif Sinhala), with 390 in Noto Sans Sinhala
+  and 400 in Noto Serif Oriya;
+- the punctuation and digits differ too: in Noto Sans Devanagari and Gurmukhi every one the font maps but `,` and `.`
+  has another advance than Noto Sans's, and in Noto Sans and Serif Oriya every one does.
+
+Nothing in the pass lines checks this; it is how the rule draws.
+
+**The in-place clause.** Item 3 has nothing to measure for it. The gate keys on the book's language with a TrueType
+set (`InPlaceBuildGate::admitsResident`: `cjkTrueType = r.cjkRepertoire && r.trueTypeSet`, the repertoire from
+`TypographyProfile::forLanguage(...).cjkRepertoire`), not on a family's mode. PR 3 extends that rule to the shaped
+scripts (the design's "The X4's in-place build").
+
+**Verdict: item 3 passes** with the refined recipe:
+- all 22 families merged;
+- both checks hold: 1,531,416 of 1,531,416 lines equal against the script's own font, and 792 of 792 Latin letter
+  runs equal against the Latin font;
+- every family fits the X3's store, all 22 in flash mode.
+
+### The first recipe (superseded)
+
+The first run, as Task 3 first stood: the Latin subset less every code point the script font maps, and a plain
+`Merger().merge`. Its outputs were renamed afterwards: `merged-first-recipe/`, `latin-first-recipe/`, and the
+`*-first-recipe.md` logs; its supplementary merges stay in `merged-alt/`.
+
 **How.** `tools/arabic_sample.py corpus` wrote `corpus/arabic.txt`: 141 Arabic letters in four positions each, the
 four lam-alef pairs, beh with each of U+064B-0652 and with shadda + fatha, and beh ZWNJ beh, 577 strings after the
-one duplicate (beh beh) went. Then `tools/merge_families.py dl/fonts merged corpus logs/fonts.md` ran the plan's
+one duplicate (beh beh) went. Then `tools/merge_families.py dl/fonts merged corpus logs/fonts.md` (now
+`tools/merge_families_first_recipe.py`, writing `merged-first-recipe`) ran the plan's
 recipe for each of the 22 families, regular with regular and bold with bold:
 - Noto's Latin: a `fontTools.subset` of Noto Sans or Noto Serif (U+0020-007E, U+00A0-024F, U+2000-206F, U+20A0-20CF,
   U+2122, U+FFFD, less every code point the script font maps), with `layout_features='*'`, `glyph_names=True`,
@@ -515,7 +705,8 @@ Two departures from the plan's wording, neither changing what is measured:
 - fontTools 4.63 renames a duplicate glyph name with a `.n` suffix (`computeMegaGlyphOrder`: `.notdef.1`), not `#n`.
   The Latin check maps each subset glyph's name through the merger's own renaming instead of stripping a suffix,
   which is exact.
-- `Merger.merge` opens its inputs twice, so the Latin subsets are written to files (`C:/tmp/wm2-measure/latin/`).
+- `Merger.merge` opens its inputs twice, so the Latin subsets are written to files
+  (`C:/tmp/wm2-measure/latin-first-recipe/`).
 
 **Latin in the script fonts.** #3787's claim that Noto's Indic TTFs carry no Latin holds for letters in 42 of the 44
 script files, not for Noto Sans Sinhala, and not for the ASCII punctuation and digits:
@@ -582,14 +773,15 @@ table). The recipe records them as misses.
 | NotoSansArabic | Regular | NotoSans | 1000 / 1000 | no | 1,399 | 893 (645) | 2,292 | 227,748 | 534 | 64 / 74 | 27 / 29 | 5,036 | merged |
 | NotoSansArabic | Bold | NotoSans | 1000 / 1000 | no | 1,399 | 893 (645) | 2,292 | 227,976 | 556 | 64 / 74 | 27 / 29 | 5,036 | merged |
 
-**The fit** (`Step2MergedFamiliesProbe.cpp` in the scratch tree's `TtfFontTest`, `STEP2_MERGED=C:/tmp/wm2-measure/merged`):
-each style probed as `ShippedFamiliesTest` does (`MemoryFile`, `ttf::probeFile`); flash bytes = the file + `CPac`
-padded to 4; SD bytes = `sdBytes` + 16 + GDEF padded to 4 + 16 + `CPac` padded to 4; `glyphstore::planLayout` with both
-styles in `kModeFlash`, else both in `kModeSd`, on the X3's font area (3,473,408 B) with 32 free map pages; and
-`ttf::fitsStore` agreed with it for every family. Every family that merged fits **in flash mode**, the largest
+**The fit** (`Step2MergedFamiliesProbe.cpp` in the scratch tree's `TtfFontTest`,
+`STEP2_MERGED=C:/tmp/wm2-measure/merged-first-recipe`): each style probed as `ShippedFamiliesTest` does
+(`MemoryFile`, `ttf::probeFile`); flash bytes = the file + `CPac` padded to 4; SD bytes = `sdBytes` + 16 + GDEF
+padded to 4 + 16 + `CPac` padded to 4; `glyphstore::planLayout` with both styles in `kModeFlash`, else both in
+`kModeSd`, on the X3's font area (3,473,408 B) with 32 free map pages; and `ttf::fitsStore` agreed with it for every
+family. Every family that merged fits **in flash mode**, the largest
 (Noto Serif Devanagari) with two styles of 311,580 B and 295,780 B, and a log of 1,376,256 B left.
 
-**One row per family and style:**
+**One row per family and style (first recipe):**
 
 | Family | Style | bytes | GDEF | CPac | flash bytes | SD bytes | mode | oracle vs the script's font | Latin lines (3) | Latin runs | script font's Latin: letters / 52, U+0020-007E / 95 |
 |---|---|---:|---:|---:|---:|---:|---|---|---|---|---|
@@ -681,18 +873,21 @@ set (`InPlaceBuildGate::admitsResident`: `cjkTrueType = r.cjkRepertoire && r.tru
 `TypographyProfile::forLanguage(...).cjkRepertoire`), not on a family's mode. PR 3 extends that rule to the shaped
 scripts (the design's "The X4's in-place build").
 
-**Verdict: item 3 misses**, on two of its three conditions:
+**Verdict of the first run: item 3 missed**, on two of its three conditions:
 - 20 of the 22 families merged, not 22: Noto Serif Bengali and Noto Serif Tamil raise in fontTools' `vhea` merge.
 - The oracle against the script's own font is equal on every line (1,397,492 of 1,397,492), but the Latin line check
   is equal on 0 of 120, because every script font maps the space (and most map the ASCII digits and punctuation),
   which the recipe takes from the script font.
 - Every merged family fits the X3's store in flash mode (20 of 20; the two supplementary merges as well).
 
-What the supplementary runs suggest for the design's reopening (not measured as the plan's recipe): dropping `vhea` and
-`vmtx` from the merge makes both failed families merge, with their oracle equal and both fitting in flash mode; and the
-Latin check holds run by run, so a line check that excludes, or expects, the script font's own code points would pass.
+What the supplementary runs suggested for the design's reopening (not measured as the plan's recipe): dropping `vhea`
+and `vmtx` from the merge makes both failed families merge, with their oracle equal and both fitting in flash mode;
+and the Latin check holds run by run, so a line check that excludes, or expects, the script font's own code points
+would pass.
 Whether the merged families should draw Latin text's space, digits and punctuation with the script font's glyphs (and
-Noto Sans Sinhala's Latin letters with its own) is a design question the recipe currently answers "yes".
+Noto Sans Sinhala's Latin letters with its own) was a design question the recipe then answered "yes". The maintainer
+answered it on 2026-11-02 (decision 6's refinement, above): letters from Noto Sans or Serif, the rest from the script
+font.
 
 ## The gate
 
@@ -701,12 +896,16 @@ Noto Sans Sinhala's Latin letters with its own) is a design question the recipe 
 | 1 | 0 differences from HarfBuzz on upstream's corpus under our compiler and flags | 216 of 216 runs N/N; 3,436,140 lines, 0 mismatches | **pass** |
 | 2 | E + A <= 92,160 B | E = 52,268 B; E + A = 67,628 B | **pass** |
 | 2 | 6,553,600 - (`default` with the call + A + P2) >= 256,000 B | 303,587 B free (with P2 = 20,480 B, provisional: step 1 PR 2 has no figure yet) | **pass (provisional)** |
-| 3 | all 22 families merged | 20 of 22: Noto Serif Bengali and Noto Serif Tamil raise in fontTools' `vhea` merge | **miss** |
-| 3 | every oracle line equal, in both checks | against the script's own font: 1,397,492 of 1,397,492 lines (102 runs); Latin kept whole: 0 of 120 lines, every one differing where the script font serves the space | **miss** |
-| 3 | every family fits, in flash or SD mode | the 20 merged families: all in flash mode; the 2 unmerged have no files to fit | **miss** (2 families untested) |
+| 3 | all 22 families merged | 22 of 22 (decision 6 refined: `vhea`/`vmtx` dropped) | **pass** |
+| 3 | both checks hold | equal against the script's own font: 1,531,416 of 1,531,416 lines (112 runs); Latin kept whole: 792 of 792 letter runs equal against Noto Sans/Serif | **pass** |
+| 3 | every family fits, in flash or SD mode | 22 of 22, all in flash mode | **pass** |
 
-**Item 1 passes, item 2 passes (its free-slot line provisional on P2), item 3 misses.** By the plan, a miss in item 3
-lets Phase 0 finish, and PR 1 does not start: the design reopens on decision 6 (the merged fonts).
+**Item 1 passes, item 2 passes (its free-slot line provisional on P2), item 3 passes with decision 6 as refined.**
+By the plan's Task 4, PR 1 can start with Task 5.
+
+The first run of item 3, with the first recipe, missed: 20 of 22 families merged (Noto Serif Bengali and Noto Serif
+Tamil raised in fontTools' `vhea` merge), and the Latin line check held on 0 of 120 lines. The maintainer refined
+decision 6 on 2026-11-02, the plan's Task 3 followed, and item 3 was run again (above).
 
 **Estimate -> measured**, for the design's rows ("Memory, flash and time") this phase measured:
 
@@ -716,7 +915,7 @@ lets Phase 0 finish, and PR 1 does not start: the design reopens on decision 6 (
 | A face per style | about 120 B | 120 B on the C3 (224 B on the host) | C3 sizes |
 | A plan (face x script x language) | 8 B a planned lookup plus stages: about 1.5 KB for Devanagari (at most 185 lookups), 2.1 KB for Bengali (260) | with `CPac`: 1,000 B (Devanagari fixture, 69 lookups planned) and 1,328 B (Bengali, 110) on the host, so about 856 B and 1,184 B on the C3; a build peaks 2,289 B higher on the host (the planner's scratch) | probe; the C3 figures derived |
 | Runtime lookup filters, avoided by `CPac` | up to 17.5 KB (Devanagari), 27.1 KB (Bengali), 1.0 KB (Tamil), 3.5 KB (Sinhala) a face | 12,708 B, 17,168 B, 616 B, 1,844 B (the fixtures); on the 40 TTFs the TrueType route's whole plan holds 1,204-24,448 B | probe |
-| `CPac` | about 16 KB (Devanagari), 25 KB (Bengali), 0.9 KB (Tamil), 3.0 KB (Sinhala) a style | the fixtures: 16,044 B, 25,056 B, 892 B, 3,056 B; the 40 merged styles: 2,092-37,368 B (Noto Sans Devanagari 18,244, Noto Sans Bengali 37,368, Noto Sans Tamil 2,424, Noto Sans Sinhala 4,120), the Latin font's lookups counted too | fixtures' tables; merged fonts counted |
-| The 22 hosted families | file sizes of the merged fonts unknown | 112,068-293,268 B a style (20 families); every one fits the X3's store in flash mode | merge + fit |
+| `CPac` | about 16 KB (Devanagari), 25 KB (Bengali), 0.9 KB (Tamil), 3.0 KB (Sinhala) a style | the fixtures: 16,044 B, 25,056 B, 892 B, 3,056 B; the 44 merged styles (refined recipe): 2,008-37,368 B (Noto Sans Devanagari 18,244, Noto Sans Bengali 37,368, Noto Sans Tamil 2,424, Noto Sans Sinhala 4,432), the Latin font's lookups counted too | fixtures' tables; merged fonts counted |
+| The 22 hosted families | file sizes of the merged fonts unknown | 112,068-293,268 B a style (22 families, refined recipe); every one fits the X3's store in flash mode | merge + fit |
 | Flash | 55-75 KB for PRs 1-3 | the engine alone (upstream's, with the runtime planner, linked by a never-run call): 52,268 B (51.0 KB) on `default`, 52,000 B on `gh_release`; with A, 67,628 B (66.0 KB) | scratch build |
 | Static RAM | upstream +224 B | +24 B on `default` and `gh_release` | scratch build |
