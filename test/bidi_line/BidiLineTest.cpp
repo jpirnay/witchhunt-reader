@@ -309,6 +309,25 @@ TEST(BidiLine, ALongLeftToRightLineKeepsItsOrder) {
   EXPECT_EQ(render(line), expected);
 }
 
+TEST(BidiLine, AFallbackLineReusesItsCopies) {
+  // Words past the short-string buffer, on a line past the limit: the second line allocates no new copies.
+  const std::vector<std::string> words = repeated("אבגדהוזחטי", 26);
+  std::vector<BidiLine::Token> tokens;
+  for (const auto& w : words) tokens.push_back({w, true});
+  BidiLine::Line line;
+  ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), line));
+  ASSERT_TRUE(line.fallback);
+  ASSERT_EQ(line.fallbackWords.size(), 26u);
+  const void* const order = line.fallbackOrder.data();
+  const void* const firstWord = line.fallbackWords.front().data();
+  const void* const lastWord = line.fallbackWords.back().data();
+  ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), line));
+  EXPECT_EQ(line.fallbackOrder.data(), order);
+  EXPECT_EQ(line.fallbackWords.front().data(), firstWord);
+  EXPECT_EQ(line.fallbackWords.back().data(), lastWord);
+  expectWellFormed(line, words);
+}
+
 TEST(BidiLine, AFirstLineReservesForItsTokensNotTheWorstCase) {
   // 3 tokens of 10 bytes: about 3 pieces and 33 bytes of forms, not 4 bytes a code point and a piece a slot.
   const auto line = lay({"abcdefghij", "klmnopqrst", "uvwxyzabcd"}, 1);

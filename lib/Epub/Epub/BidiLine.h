@@ -62,6 +62,11 @@ struct Line {
   bool reordered = false;  // a readingIndex differs from its visual index
   bool fallback = false;   // over kMaxCodepoints slots or kMaxUnits units
   void clear();            // keeps capacity
+
+  // The fallback's working copies (its words without their marks, and their order with its inverse), kept with their
+  // capacity across lines; not part of the result.
+  std::vector<std::string> fallbackWords;
+  std::vector<uint16_t> fallbackOrder;
 };
 
 // The pass's working memory: plain arrays, no constructor work, so a build's arena can hold it (ArenaWorkspace).

@@ -437,26 +437,27 @@ void fallbackLine(const Token* tokens, const size_t count, const OpenControls& o
   out.fallback = true;
   if (count == 0) return;
 
-  // The line's only allocations, on a line past the limit only: the words (about the line's bytes) and the order
-  // with its inverse (4 bytes a token). computeVisualWordOrder takes std::string words.
-  std::vector<uint16_t> order;
-  order.reserve(2 * count);
-  {
-    std::vector<std::string> words;
-    words.reserve(count);
-    for (size_t t = 0; t < count; t++) {
-      const std::string_view text = tokens[t].text;
-      std::string& stripped = words.emplace_back();
-      stripped.reserve(text.size());
-      for (size_t pos = 0; pos < text.size();) {
-        const size_t at = pos;
-        if (!BidiUtils::isTransparentMark(decodeAt(text.data(), text.size(), pos))) {
-          stripped.append(text.data() + at, pos - at);
-        }
+  // The words without their marks (computeVisualWordOrder takes std::string words, about the line's bytes) and the
+  // order with its inverse (4 bytes a token), in the Line's buffers: only a fallback line longer than any before
+  // allocates.
+  std::vector<std::string>& words = out.fallbackWords;
+  std::vector<uint16_t>& order = out.fallbackOrder;
+  reserveAtLeast(words, count);
+  words.resize(count);
+  for (size_t t = 0; t < count; t++) {
+    const std::string_view text = tokens[t].text;
+    std::string& stripped = words[t];
+    stripped.clear();
+    stripped.reserve(text.size());
+    for (size_t pos = 0; pos < text.size();) {
+      const size_t at = pos;
+      if (!BidiUtils::isTransparentMark(decodeAt(text.data(), text.size(), pos))) {
+        stripped.append(text.data() + at, pos - at);
       }
     }
-    if (!BidiUtils::computeVisualWordOrder(words, paragraphLevel == 1, order)) order.clear();
   }
+  reserveAtLeast(order, 2 * count);
+  if (!BidiUtils::computeVisualWordOrder(words, paragraphLevel == 1, order)) order.clear();
   if (order.size() != count) {
     order.clear();
     for (size_t v = 0; v < count; v++) order.push_back(static_cast<uint16_t>(paragraphLevel == 1 ? count - 1 - v : v));
