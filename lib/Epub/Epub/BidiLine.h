@@ -11,10 +11,11 @@
 #include <vector>
 
 // The bidi line pass (design decisions 5 and 8): one UAX #9 pass over a whole line turns its tokens into pieces in
-// visual order. A piece is a maximal run of one token's characters, so a word whose characters land apart is split
-// into glued pieces. Isolates are ordered on their own; transparent marks ride on their base; past kMaxCodepoints
-// slots the line takes upstream's result (#2541's computeVisualWordOrder with per-word forms). Pure: no renderer and
-// no fonts; a line that fits allocates nothing beyond the Line's own buffers, whose capacity the caller keeps.
+// visual order. A piece is a run of one token's characters that is unbroken both on the line and in the text, so a
+// word whose characters land apart is split into glued pieces. Isolates are ordered on their own; transparent marks
+// ride on their base; past kMaxCodepoints slots the line takes upstream's result (#2541's computeVisualWordOrder with
+// per-word forms). Pure: no renderer and no fonts; a line that fits allocates nothing beyond the Line's own buffers,
+// whose capacity the caller keeps.
 namespace BidiLine {
 
 inline constexpr size_t kMaxCodepoints = BidiUtils::kMaxLineCodepoints;  // slots: marks ride on their base

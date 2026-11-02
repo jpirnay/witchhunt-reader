@@ -191,6 +191,20 @@ TEST(BidiLine, AnIsolateOpenAtTheLineStartIsOrderedOnItsOwn) {
   EXPECT_EQ(render(lay({"שלום" + u(PDI), "1998"}, 0)), "t1:1998 S1 t0:םולש");
 }
 
+TEST(BidiLine, AnIsolateInsideAWordCutsItWhereItsTextBreaks) {
+  // see x<bdi>אב cd</bdi> more: "x" and "cd" meet on the line with "אב" between them in the text, so they are two
+  // pieces, and the line keeps the line pass.
+  const auto line = lay({"see", "x" + u(FSI) + "אבcd", "ef" + u(PDI), "more"}, 0);
+  EXPECT_FALSE(line.fallback);
+  EXPECT_EQ(render(line), "t0:see S1 t1:x G t1:cd S2 t2:ef G t1:בא S3 t3:more");
+}
+
+TEST(BidiLine, EmbeddingsInsideAWordCutItWhereItsTextBreaks) {
+  const auto line = lay({"a" + u(RLE) + "א" + u(LRE) + "b", "c" + u(PDF) + u(PDF)}, 0);
+  EXPECT_FALSE(line.fallback);
+  EXPECT_EQ(render(line), "t0:a G t0:b S1 t1:c G t0:א");
+}
+
 TEST(BidiLine, AnFsiTakesItsDirectionFromOutsideItsNestedIsolates) {
   // The FSI's first strong letter outside its nested LRI is Hebrew, so its content runs right to left around the LRI.
   EXPECT_EQ(render(lay({u(FSI) + u(LRI) + "abc" + u(PDI), "אבג" + u(PDI), "x"}, 0)), "t1:גבא S1 t0:abc S2 t2:x");

@@ -273,11 +273,66 @@ void closeRun(Line& out, bool& runOpen) {
   runOpen = false;
 }
 
-// Walks the visual order into pieces, then gives each its bytes and its reading index. False when a piece's bytes
-// cannot hold its units (a shaped cluster split across pieces): the caller falls back.
+constexpr uint8_t kNoRank = 0xFF;
+
+// Marks where the walk must cut a run of one token's slots so that each piece holds characters adjacent in the text
+// too: each slot gets its rank among the drawn slots in logical order, and each run (as the walk meets them) is cut
+// into the longest prefixes whose ranks form an interval. A run like `(שלום)` jumps about and stays whole; an isolate
+// or embedding that carries part of a word away leaves the rest in two pieces.
+void markCuts(Scratch& s, const size_t slots, uint8_t* const rankOf, uint8_t* const cutBefore, uint16_t* const run) {
+  size_t rank = 0;
+  for (size_t slot = 0; slot < slots; slot++) {
+    cutBefore[slot] = 0;
+    rankOf[slot] = kNoRank;
+    const size_t u0 = s.slotUnit[slot];
+    if (s.slotToken[slot] == kNoToken || s.units[u0].cluster == kNoCluster) continue;  // open controls, separators
+    bool drawsAnything = false;
+    for (size_t u = u0; u < s.slotUnit[slot + 1] && !drawsAnything; u++) drawsAnything = isDrawn(s.units[u].cp);
+    if (drawsAnything) rankOf[slot] = static_cast<uint8_t>(rank++);
+  }
+  size_t length = 0;
+  uint16_t runToken = kNoToken;
+  const auto cutRun = [&] {
+    for (size_t i = 0; i < length;) {
+      size_t end = i;
+      uint8_t lo = rankOf[run[i]];
+      uint8_t hi = lo;
+      for (size_t j = i + 1; j < length; j++) {
+        lo = std::min(lo, rankOf[run[j]]);
+        hi = std::max(hi, rankOf[run[j]]);
+        if (static_cast<size_t>(hi - lo) == j - i) end = j;
+      }
+      if (i > 0) cutBefore[run[i]] = 1;
+      i = end + 1;
+    }
+    length = 0;
+  };
+  for (size_t i = 0; i < slots; i++) {
+    const size_t slot = s.order[i];
+    const uint16_t token = s.slotToken[slot];
+    if (token == kNoToken) continue;
+    if (s.units[s.slotUnit[slot]].cluster == kNoCluster) {  // a separator ends the run
+      cutRun();
+      continue;
+    }
+    if (rankOf[slot] == kNoRank) continue;  // controls and U+00AD join no run
+    if (length > 0 && runToken != token) cutRun();
+    runToken = token;
+    run[length++] = static_cast<uint16_t>(slot);
+  }
+  cutRun();
+}
+
+// Walks the visual order into pieces, then gives each its bytes and its reading index. False only when a shaped
+// cluster's units land in two pieces: the caller falls back.
 bool buildPieces(const Token* tokens, Scratch& s, const size_t slots, Line& out) {
   out.pieces.reserve(slots);
   out.display.reserve(4 * s.slotUnit[slots] + slots);
+  // Free once the slots are ordered.
+  uint8_t* const rankOf = s.expanded;
+  uint8_t* const cutBefore = s.openSpans;
+  markCuts(s, slots, rankOf, cutBefore, s.passEntry);
+
   bool runOpen = false;
   bool spacePending = false;
   uint16_t spaceToken = 0;
@@ -293,11 +348,9 @@ bool buildPieces(const Token* tokens, Scratch& s, const size_t slots, Line& out)
       spacePending = true;
       continue;
     }
-    bool drawsAnything = false;
-    for (size_t u = u0; u < u1 && !drawsAnything; u++) drawsAnything = isDrawn(s.units[u].cp);
-    if (!drawsAnything) continue;  // controls and U+00AD join no run
+    if (rankOf[slot] == kNoRank) continue;  // controls and U+00AD join no run
 
-    if (!runOpen || out.pieces.back().token != token) {
+    if (!runOpen || out.pieces.back().token != token || cutBefore[slot]) {
       closeRun(out, runOpen);
       Piece piece{};
       piece.token = token;
@@ -341,7 +394,7 @@ bool buildPieces(const Token* tokens, Scratch& s, const size_t slots, Line& out)
     const bool last = r + 1 == n || out.pieces[s.pieceRank[r + 1]].token != piece.token;
     const uint16_t next =
         last ? static_cast<uint16_t>(tokens[piece.token].text.size()) : out.pieces[s.pieceRank[r + 1]].begin;
-    if (piece.end >= next) return false;  // a byte of this piece lies in the next one's range
+    if (piece.end >= next) return false;  // a shaped cluster shared with the next piece
     if (first) piece.begin = 0;
     piece.end = next;
     piece.readingIndex = static_cast<uint8_t>(r);
