@@ -40,11 +40,10 @@ std::vector<uint32_t> decode(const std::string& utf8) {
 
 // Runs the shared bidi+shape pipeline with auto-detected paragraph direction
 // and returns the visual-order codepoints.
-// witchhunt: deviation 2 - applyBidiVisual() no longer shapes; this helper tests the shaped variant.
 std::vector<uint32_t> shapeVisual(const std::vector<uint32_t>& logical) {
   const std::string in = encode(logical);
   std::string out;
-  if (!BidiUtils::applyBidiVisualShaped(in.c_str(), out, /*paragraphLevel=*/-1)) {
+  if (!BidiUtils::applyBidiVisualShaped(/* witchhunt: deviation 2 */ in.c_str(), out, /*paragraphLevel=*/-1)) {
     return decode(in);  // pipeline declined: unchanged text
   }
   return decode(out);
