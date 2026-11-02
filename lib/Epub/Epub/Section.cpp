@@ -1,5 +1,6 @@
 #include "Section.h"
 
+#include <BidiUtils.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <HeapFit.h>
@@ -1005,6 +1006,8 @@ struct Section::BuildState {
     // page block (when it holds one) is nested above it: the parser goes first.
     visitor.reset();
     if (chunkBlock.valid()) arena->release(chunkBlock);
+    // The line pass's workspace lives for the build alone (deviation 1): a heap one is freed, a lent one unbound.
+    BidiUtils::releaseWorkspace();
   }
   bool parseStarted = false;
   // Two-phase sliced parse, latched at the first parse call (so a build started in the

@@ -2,12 +2,19 @@ BOOK title=RTL Markup lang=he spine=1 toc=0 reliableToc=0
 SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=6 footnotes=0
   LINE y=0 x=0 align=3 mult=1.000 hfid=0 words=3
-   W x=326 s=0 z=100 t=שלום
-   W x=364 s=0 z=100 t=עולם,
-   W x=410 s=0 z=100 t=התחלה.
+   W x=326 s=0 z=100 t=התחלה.
+    WD t=.הלחתה
+   W x=382 s=0 z=100 t=עולם,
+    WD t=,םלוע
+   W x=428 s=0 z=100 t=שלום
+    WD t=םולש
+   O order=2,1,0
   LINE y=24 x=0 align=1 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=סוף
-   W x=28 s=0 z=100 t=הפסקה.
+   W x=0 s=0 z=100 t=הפסקה.
+    WD t=.הקספה
+   W x=57 s=0 z=100 t=סוף
+    WD t=ףוס
+   O order=1,0
   LINE y=48 x=0 align=1 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=Left
    W x=47 s=0 z=100 t=to
@@ -15,16 +22,27 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
    W x=128 s=0 z=100 t=inside,
    W x=191 s=0 z=100 t=start.
   LINE y=72 x=0 align=1 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=טקסט
-   W x=46 s=0 z=100 t=אוטומטי
-  LINE y=96 x=0 align=3 mult=1.000 hfid=0 words=7
-   W x=181 s=0 z=100 t=מילה
-   W x=224 s=0 z=100 t=bdo
-   W x=256 s=0 z=100 t=text
-   W x=298 s=0 z=100 t=וbdi
-   W x=332 s=0 z=100 t=text
-   W x=374 s=0 z=100 t=וLatin
-   W x=439 s=0 z=100 t=123
-  LINE y=120 x=0 align=3 mult=1.000 hfid=0 words=2
-   W x=365 s=0 z=100 t=פסקה
-   W x=405 s=0 z=100 t=רגילה.
+   W x=0 s=0 z=100 t=אוטומטי
+    WD t=יטמוטוא
+   W x=76 s=0 z=100 t=טקסט
+    WD t=טסקט
+   O order=1,0
+  LINE y=96 x=0 align=3 mult=1.000 hfid=0 words=9
+   W x=181 s=0 z=100 t=Latin
+   W x=238 s=0 z=100 t=123
+   W x=259 s=0 z=100 t=ו
+   W x=273 s=0 z=100 t=bdi
+   W x=299 s=0 z=100 t=text
+   W x=335 s=0 z=100 t=ו
+   W x=349 s=0 z=100 t=bdo
+   W x=381 s=0 z=100 t=text
+   W x=423 s=0 z=100 t=מילה
+    WD t=הלימ
+   O order=7,8,6,4,5,3,1,2,0
+  LINE y=120 x=0 align=3 mult=1.000 hfid=0 words=3
+   W x=365 s=0 z=100 t=רגילה
+    WD t=הליגר
+   W x=416 s=0 z=100 t=פסקה
+    WD t=הקספ
+   W x=450 s=0 z=100 t=.
+   O order=1,0,2

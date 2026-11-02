@@ -15,6 +15,7 @@ add_executable(CjkLayoutTest
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/LiangHyphenation.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/HyphenationCommon.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
+  ${BIDI_LAYOUT_SOURCES}
 )
 
 # Include order matters: test/word_size_layout's GfxRenderer.h shim must win over the
@@ -29,6 +30,7 @@ target_include_directories(CjkLayoutTest PRIVATE
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/Serialization
+  ${BIDI_LAYOUT_INCLUDES}
 )
 
 target_link_libraries(CjkLayoutTest PRIVATE

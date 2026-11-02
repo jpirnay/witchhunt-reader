@@ -60,6 +60,8 @@ set(PIPELINE_SOURCES
   ${REPO_ROOT}/lib/PngToBmpConverter/PngToBmpConverter.cpp
   ${REPO_ROOT}/lib/PngDecoder/PngStreamDecoder.cpp
   ${REPO_ROOT}/lib/TJpgDec/src/tjpgd.c
+  # ParsedText's bidi line pass
+  ${BIDI_LAYOUT_SOURCES}
 )
 
 set(PIPELINE_INCLUDES
@@ -91,6 +93,7 @@ set(PIPELINE_INCLUDES
   ${REPO_ROOT}/lib/PngDecoder
   ${REPO_ROOT}/lib/ProgressiveJpeg
   ${REPO_ROOT}/lib/TJpgDec/src
+  ${BIDI_LAYOUT_INCLUDES}
 )
 
 add_executable(EpubPipelineTest

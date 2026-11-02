@@ -7,6 +7,7 @@
 // horizontal book whose CSS names the same logical sides physically. The position tests derive their values from the
 // host stub's metrics (GfxRenderer.h: ascender 18, the em layout resolves lengths against; line height 24) and block
 // margins collapsing to the larger of two (ChapterHtmlSlimParser, the margin-top collapse before a block's first line).
+#include <BidiUtils.h>
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -24,15 +25,24 @@ namespace fs = std::filesystem;
 
 namespace {
 
+struct Word {
+  int x = 0;
+  std::string text;     // its logical text (t=)
+  std::string display;  // its WD form, what a right-to-left line draws for it; empty when it has none
+};
+
 struct Line {
   int y = 0;
   int x = 0;
   int align = 0;
   int firstWordX = -1;  // the first word's x
   std::string text;     // the line's words joined by single spaces
+  std::vector<Word> words;
+  std::string order;  // the O record's positions ("1,0"); empty when the line reads in stored order
 };
 
-// The dump's text lines, in order (PipelineRunner's "LINE y= x= align=" with its "W ... t=" words).
+// The dump's text lines, in order (PipelineRunner's "LINE y= x= align=" with its "W ... t=" words, each word's "WD t="
+// form and the line's "O order=").
 std::vector<Line> parseLines(const std::string& dump) {
   std::vector<Line> lines;
   std::istringstream in(dump);
@@ -45,9 +55,16 @@ std::vector<Line> parseLines(const std::string& dump) {
     } else if (row.rfind("   W ", 0) == 0 && !lines.empty()) {
       const size_t t = row.find(" t=");
       if (t == std::string::npos) continue;
-      if (lines.back().text.empty()) std::sscanf(row.c_str(), "   W x=%d", &lines.back().firstWordX);
+      Word& word = lines.back().words.emplace_back();
+      std::sscanf(row.c_str(), "   W x=%d", &word.x);
+      word.text = row.substr(t + 3);
+      if (lines.back().text.empty()) lines.back().firstWordX = word.x;
       if (!lines.back().text.empty()) lines.back().text += ' ';
-      lines.back().text += row.substr(t + 3);
+      lines.back().text += word.text;
+    } else if (row.rfind("    WD t=", 0) == 0 && !lines.empty() && !lines.back().words.empty()) {
+      lines.back().words.back().display = row.substr(9);
+    } else if (row.rfind("   O order=", 0) == 0 && !lines.empty()) {
+      lines.back().order = row.substr(11);
     }
   }
   return lines;
@@ -360,6 +377,176 @@ TEST_F(BidiLayout, ARightToLeftParagraphTakesNoDropCap) {
                "hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor "
                "whiskey xray yankee zulu alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo</p>")));
   EXPECT_NE(nullptr, lineWith(latin, "A"));
+}
+
+// The host stub's advances (GfxRenderer.h: 6 + cp % 7 px a character) give שלום 32, עולם 32, "(world)" 66, ".1998" 36,
+// He 17 and said 35; a space is 6. The default viewport is 460 px wide.
+constexpr const char* kShalom = "שלום";
+constexpr const char* kShalomDrawn = "םולש";  // its letters in visual order
+constexpr const char* kOlam = "עולם";
+constexpr const char* kOlamDrawn = "םלוע";
+constexpr const char* kMixedRtl = "<p dir=\"rtl\">שלום (world) 1998.</p>";
+
+void expectWord(const Word& word, const int x, const std::string& text, const std::string& display) {
+  EXPECT_EQ(x, word.x) << text;
+  EXPECT_EQ(text, word.text);
+  EXPECT_EQ(display, word.display) << text;
+}
+
+std::string repeated(const char* word, const int count) {
+  std::string out;
+  for (int i = 0; i < count; ++i) {
+    if (i > 0) out += ' ';
+    out += word;
+  }
+  return out;
+}
+
+TEST_F(BidiLayout, ARightToLeftLineRunsFromTheRightEdge) {
+  const auto lines = parseLines(dump("", document("<p dir=\"rtl\">שלום עולם</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0].words.size());
+  // Stored left to right: 460 - (32 + 6 + 32) is where the second word in reading order starts.
+  expectWord(lines[0].words[0], 390, kOlam, kOlamDrawn);
+  expectWord(lines[0].words[1], 428, kShalom, kShalomDrawn);
+  EXPECT_EQ("1,0", lines[0].order);
+}
+
+TEST_F(BidiLayout, AMixedLineInARightToLeftParagraph) {
+  const auto lines = parseLines(dump("", document(kMixedRtl), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(3u, lines[0].words.size());
+  // The period of 1998. is drawn on its left, and the parentheses, mirrored, still read (world).
+  expectWord(lines[0].words[0], 314, "1998.", ".1998");
+  expectWord(lines[0].words[1], 356, "(world)", "");
+  expectWord(lines[0].words[2], 428, kShalom, kShalomDrawn);
+  EXPECT_EQ("2,1,0", lines[0].order);
+}
+
+TEST_F(BidiLayout, AMixedLineInALeftToRightParagraph) {
+  const auto lines = parseLines(dump("", document("<p dir=\"ltr\">He said שלום.</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(3u, lines[0].words.size());
+  // The line is resolved as a whole (decision 5): the period ends the English sentence, right of the Hebrew word.
+  expectWord(lines[0].words[0], 0, "He", "");
+  expectWord(lines[0].words[1], 23, "said", "");
+  expectWord(lines[0].words[2], 64, "שלום.", "םולש.");
+  EXPECT_EQ("", lines[0].order);
+}
+
+TEST_F(BidiLayout, TheFirstLineIndentGoesOnTheRight) {
+  const auto lines =
+      parseLines(dump("", document("<p dir=\"rtl\" style=\"text-indent: 2em\">שלום עולם</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0].words.size());
+  // The line ends 2em (36 px) short of the right edge.
+  EXPECT_EQ(354, lines[0].words[0].x);
+  EXPECT_EQ(392, lines[0].words[1].x);
+}
+
+TEST_F(BidiLayout, AHangingIndentHangsIntoTheRightInset) {
+  const auto lines = parseLines(dump(
+      "", document("<p dir=\"rtl\" style=\"margin-right: 2em; text-indent: -1em\">שלום עולם</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0].words.size());
+  // The block is 424 px wide, 460 less its 36 px right margin; its first line hangs 18 px out of it on the right.
+  EXPECT_EQ(0, lines[0].x);
+  EXPECT_EQ(372, lines[0].words[0].x);
+  EXPECT_EQ(410, lines[0].words[1].x);
+}
+
+TEST_F(BidiLayout, ARightToLeftParagraphTurnsTheUsersLeftAlignmentRight) {
+  pipeline_harness::Profile userLeft;
+  userLeft.paragraphAlignment = static_cast<uint8_t>(CssTextAlign::Left);
+  const auto user = parseLines(dump("", document("<p dir=\"rtl\">שלום</p>"), userLeft));
+  ASSERT_EQ(1u, user.size());
+  EXPECT_EQ(kRight, user[0].align);
+  EXPECT_EQ(428, user[0].firstWordX);
+  // The book's own text-align: left stays left.
+  const auto book =
+      parseLines(dump("", document("<p dir=\"rtl\" style=\"text-align: left\">שלום</p>"), bookAlignment()));
+  ASSERT_EQ(1u, book.size());
+  EXPECT_EQ(kLeft, book[0].align);
+  EXPECT_EQ(0, book[0].firstWordX);
+}
+
+TEST_F(BidiLayout, AJustifiedRightToLeftLineFillsTheMeasure) {
+  // 472 px, so that 12 words (12 × 32 + 11 × 6 = 450 px) leave 22 px, 2 for each gap. At 460 the remainder of the
+  // share would stay undistributed at the line's left, as it stays at the right of a left-to-right line.
+  pipeline_harness::Profile justified;
+  justified.viewportWidth = 472;
+  const auto lines = parseLines(dump("", document("<p dir=\"rtl\">" + repeated(kShalom, 20) + "</p>"), justified));
+  ASSERT_EQ(2u, lines.size());
+  ASSERT_EQ(12u, lines[0].words.size());
+  EXPECT_EQ(0, lines[0].words.front().x);
+  EXPECT_EQ(472, lines[0].words.back().x + 32);
+  for (size_t i = 1; i < lines[0].words.size(); ++i) {
+    EXPECT_EQ(32 + 6 + 2, lines[0].words[i].x - lines[0].words[i - 1].x) << i;
+  }
+  // The last line is not stretched: it ends at the right edge, 8 × 32 + 7 × 6 = 298 px long.
+  ASSERT_EQ(8u, lines[1].words.size());
+  EXPECT_EQ(472, lines[1].words.back().x + 32);
+  EXPECT_EQ(174, lines[1].words.front().x);
+}
+
+TEST_F(BidiLayout, ALineOverTheBidiLimitStillRunsRightToLeft) {
+  // 30 words and their 29 spaces are 149 slots, past the line pass's 128: the line takes upstream's per-word order.
+  pipeline_harness::Profile wide;
+  wide.viewportWidth = 1400;
+  const auto lines = parseLines(dump("", document("<p dir=\"rtl\">" + repeated(kShalom, 30) + "</p>"), wide));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(30u, lines[0].words.size());
+  // 1400 - (30 × 32 + 29 × 6) = 266.
+  std::string order;
+  for (int k = 0; k < 30; ++k) {
+    expectWord(lines[0].words[k], 266 + 38 * k, kShalom, kShalomDrawn);
+    order += (k == 0 ? "" : ",") + std::to_string(29 - k);
+  }
+  EXPECT_EQ(order, lines[0].order);
+}
+
+TEST_F(BidiLayout, ALentArenaBuildLaysOutAsAHeapBuild) {
+  // With a lent arena the line pass borrows its workspace from it between a page's lines; at 16 KB the arena may have
+  // no room and it takes the heap. Either way the book lays out as a heap build does.
+  const std::string corpus = (fs::path(CORPUS_DIR) / "test_rtl_markup.epub").string();
+  const std::string mixed = writeBook("", document(kMixedRtl));
+  int run = 0;
+  for (const std::string& book : {corpus, mixed}) {
+    std::string heap;
+    for (const size_t lent : {size_t{0}, size_t{49152}, size_t{16384}}) {
+      pipeline_harness::Profile profile = bookAlignment();
+      profile.lentArenaBytes = lent;
+      const fs::path cache = work / ("cache" + std::to_string(run++));
+      std::ostringstream out;
+      EXPECT_TRUE(pipeline_harness::runAndDump(book, cache.string(), profile, out)) << out.str();
+      if (lent == 0) {
+        heap = out.str();
+        EXPECT_NE(std::string::npos, heap.find(" WD t=")) << heap;
+      } else {
+        EXPECT_EQ(heap, out.str()) << book << ", lent " << lent;
+      }
+    }
+  }
+}
+
+TEST_F(BidiLayout, AParagraphInADrainedBlockDecidesItsDirectionAnew) {
+  // <hr> lays the block out and keeps it, empty, and the next paragraph merges into it rather than resetting it.
+  const auto lines =
+      parseLines(dump("", document("<p dir=\"rtl\">שלום</p><hr/><p dir=\"ltr\">Alpha bravo</p>"), bookAlignment()));
+  const Line* latin = lineWith(lines, "Alpha bravo");
+  ASSERT_NE(nullptr, latin);
+  EXPECT_EQ(0, latin->firstWordX);
+  EXPECT_EQ("", latin->order);
+}
+
+TEST_F(BidiLayout, TheBidiWorkspaceIsGoneWhenTheBuildEnds) {
+  // One held before the build goes too: the build ends by releasing it (deviation 1).
+  std::string visual;
+  ASSERT_TRUE(BidiUtils::applyBidiVisual("שלום", visual, 1));
+  ASSERT_TRUE(BidiUtils::heapWorkspaceHeld());
+  const std::string out = dump("", document(kMixedRtl), bookAlignment());
+  EXPECT_NE(std::string::npos, out.find(" WD t=")) << out;
+  EXPECT_FALSE(BidiUtils::heapWorkspaceHeld());
 }
 
 // ---- The spine's page progression ----

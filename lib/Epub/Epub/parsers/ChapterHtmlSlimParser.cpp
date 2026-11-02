@@ -4380,7 +4380,10 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
   initializeFontSizeBaseline();
 
   auto paragraphAlignmentBlockStyle = BlockStyle();
-  paragraphAlignmentBlockStyle.textAlignDefined = true;
+  // The block carries the reader's alignment, not the book's CSS, so the flag stays false, as on the close-tag reset of
+  // an empty block (endElement). The chapter's first paragraph merges into this block and takes the flag: set, it kept
+  // a right-to-left paragraph from turning the reader's Left to Right (ParsedText::layoutAndExtractLines).
+  paragraphAlignmentBlockStyle.textAlignDefined = false;
   // Resolve None sentinel to Justify for initial block (no CSS context yet)
   const auto align = (this->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None))
                          ? CssTextAlign::Justify
