@@ -143,11 +143,13 @@ class TextBlock final : public Block {
   bool sizesPresent = false;
   bool isValid = true;
   uint8_t wordFontCount = 0;  // the line's word fonts (see WordFont); 0 on a line in the block's font alone
-  // All share the struct's pad byte: a line of a vertical-rl page (see setVertical), and whether its 、。 are centred.
+  // Four bits in the struct's pad byte: a line of a vertical-rl page (see setVertical), whether its 、。 are centred,
+  // whether it has a Ruby or Emphasis record (it reserves the band above its base), and whether the arena is ours to
+  // free (see arena).
   bool vertical_ : 1 = false;
   bool centredMarks_ : 1 = false;
-  bool annotationBand_ : 1 = false;  // a Ruby or Emphasis record exists: the line reserves the band above its base
-  bool arenaOwned_ : 1 = false;      // the arena is ours to free (see arena)
+  bool annotationBand_ : 1 = false;
+  bool arenaOwned_ : 1 = false;
   // The ONLY allocation. Heap by default (nothrow, so OOM yields an invalid block instead of
   // abort() -- bare new is not nothrow with -fno-exceptions). A section build that lends a
   // scratch region (the borrowed secondary framebuffer) hands it in through the range
@@ -299,12 +301,12 @@ class TextBlock final : public Block {
     return end - textOffArr[i] - 1;  // exclude the NUL
   }
   // What word i is drawn as: its display form (a right-to-left word's characters in visual order), else its text.
-  // NUL-terminated.
+  // NUL-terminated. A line without the bidi region (every Latin and CJK line) is answered inline, with no call.
   const char* wordDrawText(const uint16_t i) const {
-    const char* form = displayForm(i);
+    const char* form = bidiBytes_ != 0 ? displayForm(i) : nullptr;
     return form != nullptr ? form : wordText(i);
   }
-  bool hasDisplayForm(const uint16_t i) const { return displayForm(i) != nullptr; }
+  bool hasDisplayForm(const uint16_t i) const { return bidiBytes_ != 0 && displayForm(i) != nullptr; }
   // Word i's place in reading order; i when the line has no logical order (it reads in stored order).
   uint8_t logicalPosition(uint16_t i) const;
   bool hasLogicalOrder() const { return bidiBytes_ != 0 && (bidiRegion()[0] & kBidiLogicalOrder) != 0; }

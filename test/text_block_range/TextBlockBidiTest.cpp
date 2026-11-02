@@ -71,6 +71,30 @@ RegionAt regionOf(const std::string& bytes) {
   return at;
 }
 
+// A serialised line without annotations, given `region` as its bidi region by hand: the word count's bit 15 set and
+// the header's region size written, inserted after the text size when the line had no region.
+std::string withRegion(std::string bytes, const std::string& region) {
+  const bool had = (static_cast<uint8_t>(bytes[1]) & 0x80) != 0;
+  const RegionAt old =
+      had ? regionOf(bytes) : RegionAt{bytes.size() - kStyleTrailerBytes, bytes.size() - kStyleTrailerBytes};
+  bytes.replace(old.begin, old.end - old.begin, region);
+  const auto size = static_cast<uint16_t>(region.size());
+  if (had) {
+    memcpy(bytes.data() + 5, &size, sizeof(size));
+  } else {
+    bytes.insert(5, reinterpret_cast<const char*>(&size), sizeof(size));
+  }
+  bytes[1] = static_cast<char>(static_cast<uint8_t>(bytes[1]) | 0x80);
+  return bytes;
+}
+
+// An order-only region: the parts byte, then `order`.
+std::string orderRegion(const std::vector<uint8_t>& order) {
+  std::string region(1, '\x02');
+  region.append(order.begin(), order.end());
+  return region;
+}
+
 }  // namespace
 
 TEST(TextBlockBidi, AFormIsKeptOnlyWhereItDiffers) {
@@ -218,6 +242,58 @@ TEST(TextBlockBidi, ACorruptRegionFailsTheRead) {
   const uint16_t none = 0xFFFF;
   memcpy(noForm.data() + region.begin + 1 + 2, &none, sizeof(none));
   EXPECT_EQ(nullptr, readBack(noForm));
+
+  std::string unterminated = bytes;  // the forms' final NUL, before the two order bytes, rewritten to 'x'
+  ASSERT_EQ('\0', unterminated[region.end - 3]);
+  unterminated[region.end - 3] = 'x';
+  EXPECT_EQ(nullptr, readBack(unterminated));
+}
+
+// Regions built by hand on a two-word line. Its parts say how long it is: one byte for the parts, 2 per word and the
+// texts for the forms, one per word for the order.
+TEST(TextBlockBidi, ARegionWhoseSizesDoNotAddUpFailsTheRead) {
+  const std::string plain = bytesOf(*line({"abc", "def"}));
+  ASSERT_FALSE(plain.empty());
+  const auto exact = readBack(withRegion(plain, orderRegion({1, 0})));  // 1 + 2 bytes: what the helper builds reads
+  ASSERT_NE(nullptr, exact);
+  EXPECT_EQ(1, exact->logicalPosition(0));
+
+  // One byte longer: an order-only region has no texts, so the spare byte is a size that does not add up, though the
+  // last two bytes are still an order.
+  EXPECT_EQ(nullptr, readBack(withRegion(plain, std::string("\x02\x00\x01\x00", 4))));
+
+  // One byte shorter than forms and order need at the least (1 + 4 + 2 with no texts): parts, word 0 none, word 1 at
+  // offset 0x0100, and the order {1, 0} sharing its last byte with that offset.
+  EXPECT_EQ(nullptr, readBack(withRegion(plain, std::string("\x03\xFF\xFF\x00\x01\x00", 6))));
+}
+
+// A byte numbers at most 255 words: a 256-word line's order fails the read, though it is a permutation.
+TEST(TextBlockBidi, AnOrderOnALineOf256WordsFailsTheRead) {
+  for (const size_t words : {255u, 256u}) {
+    const std::string plain = bytesOf(*line(std::vector<std::string_view>(words, "a")));
+    ASSERT_FALSE(plain.empty());
+    std::vector<uint8_t> reversed(words);
+    for (size_t i = 0; i < words; i++) reversed[i] = static_cast<uint8_t>(words - 1 - i);
+    const auto restored = readBack(withRegion(plain, orderRegion(reversed)));
+    if (words == 255) {
+      ASSERT_NE(nullptr, restored);
+      EXPECT_EQ(254, restored->logicalPosition(0));
+    } else {
+      EXPECT_EQ(nullptr, restored);
+    }
+  }
+}
+
+// The word count's bit 15 promises a region: none (a size of 0), or one on a line of no words, fails the read.
+TEST(TextBlockBidi, TheRegionBitWithoutARegionFailsTheRead) {
+  EXPECT_EQ(nullptr, readBack(withRegion(bytesOf(*line({"abc", "def"})), "")));
+
+  const TextBlock empty(std::vector<std::string>{}, std::vector<int16_t>{}, std::vector<EpdFontFamily::Style>{});
+  ASSERT_TRUE(empty.valid());
+  const std::string emptyBytes = bytesOf(empty);
+  ASSERT_FALSE(emptyBytes.empty());
+  ASSERT_NE(nullptr, readBack(emptyBytes));
+  EXPECT_EQ(nullptr, readBack(withRegion(emptyBytes, orderRegion({0}))));
 }
 
 TEST(TextBlockBidi, RenderDrawsTheForm) {
