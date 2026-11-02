@@ -2,7 +2,13 @@
 
 #include <EpdFontFamily.h>
 
+#include <cstdint>
+
 class GfxRenderer;
+
+// The glyph a column is measured against: 一, and its UTF-8.
+constexpr uint32_t kColumnEmCodepoint = 0x4E00;
+constexpr char kColumnEmUtf8[] = "\xE4\xB8\x80";
 
 // The em of vertical drawing for fontId at scale: the advance of 一, else the ascender (a font without CJK).
 int columnEm(const GfxRenderer& renderer, int fontId, EpdFontFamily::Style style, float scale);
@@ -26,10 +32,17 @@ int verticalTextAdvance(const GfxRenderer& renderer, int fontId, const char* tex
 // reflected into the top-right corner of its cell, or halfway there when `centredMarks` (Traditional Chinese), a small
 // kana moved up and right. A font without the glyph draws it unplaced.
 void drawTextVertical(const GfxRenderer& renderer, int fontId, int x, int y, const char* text,
-                      EpdFontFamily::Style style, float scale, bool centredMarks);
+                      EpdFontFamily::Style style, float scale, bool centredMarks, bool black = true);
 
 // Where the ink of the upright code point `cp` lands along the column as drawn (at scale 1), from the cell's leading
 // edge (the pen): `inkStart` and `inkSize`; `cell` is the em. False for a sideways code point or when the font has no
 // glyph.
 bool columnInk(const GfxRenderer& renderer, int fontId, uint32_t cp, EpdFontFamily::Style style, bool centredMarks,
                int& inkStart, int& inkSize, int& cell);
+
+// Draws `text` upright as one block in a column cell (tate-chu-yoko), called as drawTextVertical is: x the pen along
+// the column, y the line's top. A run wider than the em is shrunk to it; the block is centred across the column and,
+// along it, the em box it fills is centred in the cell [pen, pen + em]. A scan pass draws it plainly. Allocates
+// nothing.
+void drawCombinedVertical(const GfxRenderer& renderer, int fontId, int x, int y, const char* text,
+                          EpdFontFamily::Style style, float scale, bool black = true);

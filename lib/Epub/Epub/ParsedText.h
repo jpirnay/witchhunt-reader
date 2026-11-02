@@ -41,6 +41,8 @@ class ParsedText {
   static constexpr uint8_t MIN_WORD_SIZE_PCT = 30;
   static constexpr uint8_t MAX_WORD_SIZE_PCT = 250;
   static constexpr uint8_t DEFAULT_WORD_SIZE_PCT = 100;
+  // The smallest scale a combined word is drawn at to fit one em: a run wider than two ems stays sideways.
+  static constexpr float kMinCombineScale = 0.5f;
 
  private:
   std::vector<std::string> words;
@@ -66,6 +68,10 @@ class ParsedText {
   std::vector<int8_t> edgeTrim_;
   std::vector<uint8_t> shrink_;
   std::vector<uint8_t> edgeShrink_;
+  // Whether each token combines (combines()): 1 for a token set upright as one block down its column, else 0. Layout
+  // scratch in step with wordWidths_ like markClass_; empty on a horizontal line and in a block with no token that
+  // asks to combine.
+  std::vector<uint8_t> combined_;
   // How a ruby group's tokens sit in their widths (applyRubyWidths), in pixels: `start` on the leader and `end` on
   // the group's last token are the overhang a line edge must hold when the group starts or ends a line; `lead` is
   // how far a base character widened by a longer ruby is drawn into its share (1:2:1 spreading).
@@ -232,6 +238,10 @@ class ParsedText {
   // Fills `out` (cleared first); uses blockStyle.fontSizeMultiplier internally.
   void calculateWordWidths(const GfxRenderer& renderer, int fontId,
                            std::vector<uint16_t>& out);  // uses blockStyle.fontSizeMultiplier internally
+  // Fills combined_ for a vertical line (see combines()); clears it otherwise.
+  void decideCombined(const GfxRenderer& renderer, int fontId);
+  // Whether token i, which asks to combine, may: see combines().
+  bool fitsCombined(const GfxRenderer& renderer, int fontId, size_t i) const;
   // Narrows each CJK mark that is a token to its mid-line width and fills markClass_, edgeTrim_, shrink_ and
   // edgeShrink_.
   void applyPunctuationWidths(const GfxRenderer& renderer, int fontId, std::vector<uint16_t>& widths);
@@ -308,9 +318,11 @@ class ParsedText {
   // previous word in the source.
   // fontSlot: the word's font slot (see setFontSlot), below TextBlock::kMaxWordFonts.
   // textEmphasis: the word's CSS text-emphasis mark (TextEmphasis), 0 for none; every token of the word carries it.
+  // textCombine: the word's CSS text-combine-upright (a CssTextCombine). Under `all` every token of the word asks to
+  // combine, under `digits N` a token of 1 to N ASCII digits and nothing else; see combines().
   void addWord(std::string word, EpdFontFamily::Style fontStyle, bool underline = false, bool attachToPrevious = false,
                uint8_t sizePct = DEFAULT_WORD_SIZE_PCT, uint32_t visibleOffset = 0, uint8_t fontSlot = 0,
-               uint8_t textEmphasis = 0);
+               uint8_t textEmphasis = 0, uint8_t textCombine = 0);
   // Tokens [firstToken, firstToken + tokenCount) become one ruby group: the first keeps its boundary (a break may
   // come before the group), the rest are glued to it. False when the range is empty, runs past size(), or a token
   // in it already has a role.
@@ -355,6 +367,11 @@ class ParsedText {
   }
   bool isEmpty() const { return words.empty(); }
   bool isContinuation() const { return isContinuation_; }
+  // Whether words[wordIdx] is set upright as one block, one em down its column (tate-chu-yoko). On a vertical line
+  // only, for a token that asks to (addWord's textCombine) and is the whole of its flagged run (no flagged neighbour
+  // without a space between), of at most 4 code points with none drawn upright, and no wider than the em at
+  // kMinCombineScale. Decided by each layout pass where it measures the words; false on a horizontal line.
+  bool combines(const size_t wordIdx) const { return wordIdx < combined_.size() && combined_[wordIdx] != 0; }
 
   // CONSUMES ITS SOURCE by default: every word it lays out is erased from `words` (and the
   // parallel per-word vectors) before returning, so the vector shrinks as the paragraph drains.

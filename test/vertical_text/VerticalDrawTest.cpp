@@ -222,3 +222,85 @@ TEST(VerticalDraw, ColumnInkIsWhereTheDrawPutsIt) {
   EXPECT_EQ(10, size);
   EXPECT_FALSE(columnInk(r, kFontId, 'a', EpdFontFamily::REGULAR, false, start, size, cell));
 }
+
+// A combined run (tate-chu-yoko): upright in the reader's frame, shrunk to the em when wider, centred on the axis.
+// Line top 50, ascender 16: baseline 66, axis 66 - 4 = 62, em 10. "13" is 20 wide, so the scale is 10 / 20 = 0.5; the
+// scaled width is 10 and the scaled em 5, the ascender at 0.5 is 8. Across: 479 - 62 - 10 / 2 = 412. Along: baseline
+// = 100 + (10 - 5) / 2 + (5 * 88 + 50) / 100 = 100 + 2 + 4 = 106, top = 106 - 8 = 98.
+TEST(VerticalDraw, ACombinedPairIsCentredUpright) {
+  GfxRenderer r;
+  r.setOrientation(GfxRenderer::Portrait);
+  r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
+  drawCombinedVertical(r, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, 1.0f);
+  ASSERT_EQ(1u, r.drawCalls.size());
+  expectCall(r.drawCalls[0], "13", GfxRenderer::Portrait, 412, 98);
+  EXPECT_EQ(0.5f, r.drawCalls[0].scale);
+  EXPECT_EQ(GfxRenderer::LandscapeCounterClockwise, r.getOrientation());
+}
+
+// "7" is 10 wide, the em: no scaling, centred at 479 - 62 - 5 = 412, top = 100 + 9 - 16 = 93.
+TEST(VerticalDraw, ANarrowRunIsNotScaled) {
+  GfxRenderer r;
+  r.setOrientation(GfxRenderer::Portrait);
+  r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
+  drawCombinedVertical(r, kFontId, 100, 50, "7", EpdFontFamily::REGULAR, 1.0f);
+  ASSERT_EQ(1u, r.drawCalls.size());
+  expectCall(r.drawCalls[0], "7", GfxRenderer::Portrait, 412, 93);
+  EXPECT_EQ(1.0f, r.drawCalls[0].scale);
+}
+
+TEST(VerticalDraw, AWhiteColumnDrawsWhite) {
+  GfxRenderer black;
+  black.setOrientation(GfxRenderer::Portrait);
+  black.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
+  drawTextVertical(black, kFontId, 100, 50, "日a", EpdFontFamily::REGULAR, 1.0f, false);
+  GfxRenderer white;
+  white.setOrientation(GfxRenderer::Portrait);
+  white.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
+  drawTextVertical(white, kFontId, 100, 50, "日a", EpdFontFamily::REGULAR, 1.0f, false, false);
+  ASSERT_EQ(black.drawCalls.size(), white.drawCalls.size());
+  ASSERT_FALSE(white.drawCalls.empty());
+  for (size_t i = 0; i < white.drawCalls.size(); ++i) {
+    EXPECT_TRUE(black.drawCalls[i].black);
+    EXPECT_FALSE(white.drawCalls[i].black);
+    EXPECT_EQ(black.drawCalls[i].x, white.drawCalls[i].x);
+    EXPECT_EQ(black.drawCalls[i].y, white.drawCalls[i].y);
+  }
+}
+
+TEST(VerticalDraw, AWhiteCombinedRunDrawsWhite) {
+  GfxRenderer black;
+  black.setOrientation(GfxRenderer::Portrait);
+  black.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
+  drawCombinedVertical(black, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, 1.0f);
+  GfxRenderer white;
+  white.setOrientation(GfxRenderer::Portrait);
+  white.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
+  drawCombinedVertical(white, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, 1.0f, false);
+  ASSERT_EQ(1u, black.drawCalls.size());
+  ASSERT_EQ(1u, white.drawCalls.size());
+  EXPECT_TRUE(black.drawCalls[0].black);
+  EXPECT_FALSE(white.drawCalls[0].black);
+  EXPECT_EQ(black.drawCalls[0].x, white.drawCalls[0].x);
+  EXPECT_EQ(black.drawCalls[0].y, white.drawCalls[0].y);
+}
+
+TEST(VerticalDraw, AScanPassDrawsACombinedRunPlainly) {
+  GfxRenderer r;
+  r.scanning = true;
+  drawCombinedVertical(r, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, 1.0f);
+  ASSERT_EQ(1u, r.drawCalls.size());
+  EXPECT_EQ("13", r.drawCalls[0].text);
+}
+
+TEST(VerticalDraw, CombinedDrawingAllocatesNothing) {
+  GfxRenderer r;
+  r.setOrientation(GfxRenderer::Portrait);
+  r.setDrawOrientation(GfxRenderer::LandscapeCounterClockwise);
+  r.drawCalls.reserve(16);
+  const long live = liveAllocations();
+  const long all = allocations();
+  drawCombinedVertical(r, kFontId, 100, 50, "13", EpdFontFamily::REGULAR, 1.0f);
+  EXPECT_EQ(all, allocations());
+  EXPECT_EQ(live, liveAllocations());
+}
