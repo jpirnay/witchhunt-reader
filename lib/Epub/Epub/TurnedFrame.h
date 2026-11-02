@@ -26,6 +26,16 @@ constexpr Rect toReader(const int readerWidth, const Rect content) {
   return {readerWidth - content.y - content.height, content.x, content.height, content.width};
 }
 
+struct Point {
+  int x;
+  int y;
+};
+
+// The inverse of toReader for a point: the content point under the reader's (readerX, readerY).
+constexpr Point toContentPoint(const int readerWidth, const int readerX, const int readerY) {
+  return {readerY, readerWidth - 1 - readerX};
+}
+
 struct Offsets {
   int x;
   int y;

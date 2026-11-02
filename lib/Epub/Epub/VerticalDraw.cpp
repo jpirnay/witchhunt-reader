@@ -32,11 +32,11 @@ int ascenderOf(const GfxRenderer& renderer, const int fontId, const float scale)
 }
 
 void drawIn(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
-            const EpdFontFamily::Style style, const float scale) {
+            const EpdFontFamily::Style style, const float scale, const bool black) {
   if (scale == 1.0f) {
-    renderer.drawText(fontId, x, y, text, true, style);
+    renderer.drawText(fontId, x, y, text, black, style);
   } else {
-    renderer.drawTextScaled(fontId, x, y, text, true, style, scale);
+    renderer.drawTextScaled(fontId, x, y, text, black, style, scale);
   }
 }
 
@@ -113,11 +113,11 @@ int verticalTextAdvance(const GfxRenderer& renderer, const int fontId, const cha
 }
 
 void drawTextVertical(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
-                      const EpdFontFamily::Style style, const float scale, const bool centredMarks) {
+                      const EpdFontFamily::Style style, const float scale, const bool centredMarks, const bool black) {
   if (renderer.isFontCacheScanning()) {
     // Record 一 in this style too: the draw below measures with it, and an unprewarmed glyph is a miss on SD/TTF fonts.
     (void)rawEm(renderer, fontId, style);
-    drawIn(renderer, fontId, x, y, text, style, scale);
+    drawIn(renderer, fontId, x, y, text, style, scale, black);
     return;
   }
   const GfxRenderer::Orientation reader = renderer.getHeldOrientation();
@@ -138,7 +138,7 @@ void drawTextVertical(const GfxRenderer& renderer, const int fontId, const int x
     const int pen = x + scaled(rawBefore, scale);
     rawBefore += rawColumnAdvance(renderer, fontId, piece, upright, style, rawOne);
     if (!upright) {
-      drawIn(renderer, fontId, pen, y, piece, style, scale);
+      drawIn(renderer, fontId, pen, y, piece, style, scale, black);
       continue;
     }
     const int adv = scaled(renderer.getTextAdvanceX(fontId, piece, style), scale);
@@ -151,16 +151,16 @@ void drawTextVertical(const GfxRenderer& renderer, const int fontId, const int x
     }
     renderer.setDrawOrientation(reader);
     drawIn(renderer, fontId, readerWidth - 1 - axis - adv / 2 + shift.dx,
-           pen + (em * 88 + 50) / 100 - ascender + shift.dy, piece, style, scale);
+           pen + (em * 88 + 50) / 100 - ascender + shift.dy, piece, style, scale, black);
     renderer.setDrawOrientation(content);
   }
 }
 
 void drawCombinedVertical(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
-                          const EpdFontFamily::Style style, const float scale) {
+                          const EpdFontFamily::Style style, const float scale, const bool black) {
   if (renderer.isFontCacheScanning()) {
     (void)rawEm(renderer, fontId, style);
-    drawIn(renderer, fontId, x, y, text, style, scale);
+    drawIn(renderer, fontId, x, y, text, style, scale, black);
     return;
   }
   const GfxRenderer::Orientation reader = renderer.getHeldOrientation();
@@ -181,6 +181,6 @@ void drawCombinedVertical(const GfxRenderer& renderer, const int fontId, const i
 
   renderer.setDrawOrientation(reader);
   drawIn(renderer, fontId, readerWidth - 1 - axis - runWidth / 2,
-         x + (em - runEm) / 2 + (runEm * 88 + 50) / 100 - runAscender, text, style, runScale);
+         x + (em - runEm) / 2 + (runEm * 88 + 50) / 100 - runAscender, text, style, runScale, black);
   renderer.setDrawOrientation(content);
 }

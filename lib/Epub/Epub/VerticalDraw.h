@@ -26,7 +26,7 @@ int verticalTextAdvance(const GfxRenderer& renderer, int fontId, const char* tex
 // reflected into the top-right corner of its cell, or halfway there when `centredMarks` (Traditional Chinese), a small
 // kana moved up and right. A font without the glyph draws it unplaced.
 void drawTextVertical(const GfxRenderer& renderer, int fontId, int x, int y, const char* text,
-                      EpdFontFamily::Style style, float scale, bool centredMarks);
+                      EpdFontFamily::Style style, float scale, bool centredMarks, bool black = true);
 
 // Where the ink of the upright code point `cp` lands along the column as drawn (at scale 1), from the cell's leading
 // edge (the pen): `inkStart` and `inkSize`; `cell` is the em. False for a sideways code point or when the font has no
@@ -39,4 +39,4 @@ bool columnInk(const GfxRenderer& renderer, int fontId, uint32_t cp, EpdFontFami
 // along it, the em box it fills is centred in the cell [pen, pen + em]. A scan pass draws it plainly. Allocates
 // nothing.
 void drawCombinedVertical(const GfxRenderer& renderer, int fontId, int x, int y, const char* text,
-                          EpdFontFamily::Style style, float scale);
+                          EpdFontFamily::Style style, float scale, bool black = true);
