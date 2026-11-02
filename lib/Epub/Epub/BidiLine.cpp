@@ -222,7 +222,7 @@ bool orderRange(Scratch& s, const size_t from, const size_t to, size_t child, co
       const Scratch::Span& span = s.spans[entry & ~kChild];
       for (size_t slot = span.begin; slot <= span.end; slot++) s.expanded[k++] = s.order[slot];
     } else {
-      s.drawn[entry] = s.passDrawn[v];
+      s.units[s.slotUnit[entry]].cp = s.passDrawn[v];  // the base as drawn, mirrored; read once, by this pass
       s.expanded[k++] = static_cast<uint8_t>(entry);
     }
   }
@@ -387,8 +387,7 @@ bool buildPieces(const Token* tokens, const size_t count, Scratch& s, const size
       runOpen = true;
     }
     Piece& piece = out.pieces.back();
-    if (isDrawn(s.units[u0].cp)) utf8AppendCodepoint(out.display, s.drawn[slot]);
-    for (size_t u = u0 + 1; u < u1; u++) {
+    for (size_t u = u0; u < u1; u++) {  // the base (mirrored by its pass), then its marks
       if (isDrawn(s.units[u].cp)) utf8AppendCodepoint(out.display, s.units[u].cp);
     }
     for (size_t u = u0; u < u1; u++) {
@@ -399,7 +398,8 @@ bool buildPieces(const Token* tokens, const size_t count, Scratch& s, const size
   closeRun(out, runOpen);
 
   // Each token's pieces by first byte: the first begins at 0, each ends where the next begins, the last at the
-  // token's end. The same order ranks them for reading.
+  // token's end. The same order ranks them for reading. Pieces are at most the slots, and the pass arrays are free.
+  uint16_t* const pieceRank = s.passVisual;
   const size_t n = out.pieces.size();
   const auto before = [&](const size_t a, const size_t b) {
     const Piece& pa = out.pieces[a];
@@ -408,20 +408,20 @@ bool buildPieces(const Token* tokens, const size_t count, Scratch& s, const size
   };
   for (size_t r = 0; r < n; r++) {
     size_t j = r;
-    for (; j > 0 && before(r, s.pieceRank[j - 1]); j--) s.pieceRank[j] = s.pieceRank[j - 1];
-    s.pieceRank[j] = static_cast<uint8_t>(r);
+    for (; j > 0 && before(r, pieceRank[j - 1]); j--) pieceRank[j] = pieceRank[j - 1];
+    pieceRank[j] = static_cast<uint16_t>(r);
   }
   for (size_t r = 0; r < n; r++) {
-    Piece& piece = out.pieces[s.pieceRank[r]];
-    const bool first = r == 0 || out.pieces[s.pieceRank[r - 1]].token != piece.token;
-    const bool last = r + 1 == n || out.pieces[s.pieceRank[r + 1]].token != piece.token;
+    Piece& piece = out.pieces[pieceRank[r]];
+    const bool first = r == 0 || out.pieces[pieceRank[r - 1]].token != piece.token;
+    const bool last = r + 1 == n || out.pieces[pieceRank[r + 1]].token != piece.token;
     const uint16_t next =
-        last ? static_cast<uint16_t>(tokens[piece.token].text.size()) : out.pieces[s.pieceRank[r + 1]].begin;
+        last ? static_cast<uint16_t>(tokens[piece.token].text.size()) : out.pieces[pieceRank[r + 1]].begin;
     if (piece.end >= next) return false;  // a shaped cluster shared with the next piece
     if (first) piece.begin = 0;
     piece.end = next;
     piece.readingIndex = static_cast<uint8_t>(r);
-    if (s.pieceRank[r] != r) out.reordered = true;
+    if (pieceRank[r] != r) out.reordered = true;
   }
   return true;
 }

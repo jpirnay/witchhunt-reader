@@ -69,7 +69,8 @@ struct Line {
   std::vector<uint16_t> fallbackOrder;
 };
 
-// The pass's working memory: plain arrays, no constructor work, so a build's arena can hold it (ArenaWorkspace).
+// The pass's working memory: plain arrays, no constructor work, so a build's arena can hold it (ArenaWorkspace). The
+// arrays below `order` serve the ordering; once the slots are ordered, the pieces reuse them (named where they do).
 struct Scratch {
   // A span from an isolate initiator to its matching PDI, or to the line's end.
   struct Span {
@@ -77,19 +78,19 @@ struct Scratch {
     uint8_t end;    // the PDI's slot, or the line's last slot
     bool closed;    // a PDI ends it
   };
-  TextShaping::Unit units[kMaxUnits];     // the logical sequence; open controls and separators have no cluster
+  // The logical sequence; open controls and separators have no cluster. Once its pass has ordered it, a slot's base
+  // unit holds the code point drawn for it (mirrored).
+  TextShaping::Unit units[kMaxUnits];
   uint16_t slotUnit[kMaxCodepoints + 1];  // slot s holds units [slotUnit[s], slotUnit[s + 1]): a base and its marks
   uint16_t slotToken[kMaxCodepoints];     // the slot's token; a separator's is the token it precedes
-  uint32_t drawn[kMaxCodepoints];         // per slot: its base as drawn (mirrored)
   uint8_t order[kMaxCodepoints];          // the slots in visual order; a span's order sits on its own slots
-  uint8_t expanded[kMaxCodepoints];       // one span's order while its children are expanded
+  uint8_t expanded[kMaxCodepoints];       // one span's order while its children are expanded; then each slot's rank
   uint32_t passCp[kMaxCodepoints];        // one span's outer sequence: its direct bases, U+FFFC per child span
-  uint16_t passEntry[kMaxCodepoints];     // each entry's slot, or a flag above the slots with its child span
-  uint16_t passVisual[kMaxCodepoints];    // orderLine's visual order of the pass
+  uint16_t passEntry[kMaxCodepoints];     // each entry's slot, or a flag above the slots; then one run's slots
+  uint16_t passVisual[kMaxCodepoints];    // orderLine's visual order of the pass; then the pieces in reading order
   uint32_t passDrawn[kMaxCodepoints];     // and what it draws there
   Span spans[kMaxCodepoints];             // in the order they open
-  uint8_t openSpans[kMaxCodepoints];      // the spans open while the slots are read
-  uint8_t pieceRank[kMaxCodepoints];      // the pieces by (token, first byte)
+  uint8_t openSpans[kMaxCodepoints];      // the spans open while the slots are read; then where a run is cut
 };
 static_assert(kMaxCodepoints <= 128, "slots and spans are indexed by uint8_t");
 
