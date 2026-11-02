@@ -337,6 +337,8 @@ Things no planned test covers outright that would bite a reader first:
 - **A direction settled on the first pass only.** Decision 6 reads the tokens of a paragraph's first layout pass, its
   first 96. A Hebrew book's paragraph that opens with a long quote without Hebrew stays left to right for good, and
   the converse in an English book. Rare.
+- **The divine name glued to a mark-only token** (a cantillation mark in a span of its own) falls back to upstream's
+  word order until step 2: the mark pulls the name's geresh away from its he. Step 2's shaping context fixes it.
 - **GPOS mark placement for niqqud.** The anchors serve. The shaper can take it later.
 - Ruby in right-to-left text; Hebrew hyphenation; Syriac, Thaana and N'Ko.
 

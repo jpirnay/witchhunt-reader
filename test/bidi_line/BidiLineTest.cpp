@@ -266,6 +266,17 @@ TEST(BidiLine, TheDivineNameIsDrawnAsHeAndGeresh) {
   EXPECT_EQ(decode(displayOf(line, line.pieces[0])), (CP{0x05F3, 0x05D4}));
 }
 
+TEST(BidiLine, ANameGluedToALeadingMarkFallsBackForNow) {
+  // A coloured-cantillation edition can set a mark in a span of its own: here a token holding only U+0591, glued to
+  // the divine name. Leading its token, the mark keeps a slot, and orderLine's mark grouping draws the base before it,
+  // the name's geresh, which pulls the geresh away from its he. A shaped cluster in two pieces sends the line to the
+  // fallback, upstream's word order. Step 2's shaping context (RunContext, which sees the glued neighbours) is where
+  // this gets fixed. Exempting leading marks from orderLine's grouping would regress the style split instead, where a
+  // point in a span of its own must still follow its letter.
+  const auto line = lay({"וַיֹּאמֶר", "יְהוָה", u(0x0591), "אֶל", "מֹשֶׁה"}, 1, {}, {2});
+  EXPECT_TRUE(line.fallback);
+}
+
 TEST(BidiLine, MarksDoNotCountTowardTheLimit) {
   // 17 words of 7 code points (4 letters, 3 marks) and 16 spaces: 135 code points, 84 slots.
   const auto line = lay(repeated("שָׁלוֹם", 17), 1);
