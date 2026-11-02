@@ -21,6 +21,10 @@ class FontCacheManager;
 // reading order, Up/Down jump rows, Confirm looks the word up and opens
 // DictionaryDefinitionActivity, Back returns to the reader.
 //
+// A vertical page is a horizontal page in the turned frame (TurnedFrame.h): its words are boxed there, a row is a
+// column, and the frame is mapped only at the edges -- a tap in, the highlight's boxes out, its text redrawn in the
+// turned frame. Up/Down then step through the words, down the column, and Left/Right change column.
+//
 // Owns the Page it draws, so the reader can hand over the page it already has
 // laid out instead of the overlay reloading it.
 class DictionaryWordSelectActivity final : public Activity {
@@ -53,9 +57,13 @@ class DictionaryWordSelectActivity final : public Activity {
     // the highlight box and none of the glyphs inside it.
     int fontId;
     int16_t height;
+    // How a vertical line draws the piece (the DRAW_* bits in the .cpp): down its column, with its marks centred, or
+    // the word set upright as one block. 0 on a horizontal line.
+    uint8_t flags;
   };
 
-  // Screen box of one PIECE of a selectable word. Layout hands the page words already
+  // Screen box of one PIECE of a selectable word, in the frame the page draws in: the turned one on a vertical page,
+  // where x runs down the column and y across it. Layout hands the page words already
   // fragmented: bionic reading splits "reading" into a bold "read" and a plain "ing",
   // hyphenation splits it across two lines as "read-" and "ing", and attached punctuation
   // arrives as its own token. `text` points into the owned Page's TextBlock arena, valid for
@@ -91,7 +99,7 @@ class DictionaryWordSelectActivity final : public Activity {
     // below.
     uint8_t hyphenFragment;
     uint16_t row;
-    // Horizontal extent on `row` -- the part of the word the cursor navigates by. A
+    // Extent along `row` (down the column on a vertical page) -- the part of the word the cursor navigates by. A
     // hyphen-joined word's tail on the next row is highlighted but does not steer navigation.
     int16_t x;
     int16_t width;
@@ -110,7 +118,7 @@ class DictionaryWordSelectActivity final : public Activity {
   // mid-scan would hold the old and the new block at once, which is what actually destroys the
   // contiguous run a definition needs. Returns tokens; sets `wordEstimate` to the group count.
   size_t countPageTokens(size_t& wordEstimate) const;
-  uint8_t internDrawStyle(const TextBlock::WordBox& geometry);
+  uint8_t internDrawStyle(const TextBlock::WordBox& geometry, uint8_t flags);
   // Fuse each line-final word ending in a hyphen with the first word of the line below.
   // Layout does not record that it hyphenated (the flag never reaches the page cache), so the
   // shape of the break is the evidence: a word that ends the line on '-' with a word starting

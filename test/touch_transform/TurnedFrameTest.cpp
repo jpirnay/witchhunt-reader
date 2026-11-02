@@ -44,3 +44,13 @@ TEST(TurnedFrame, ARectAndAPageOrigin) {
   EXPECT_EQ(20, offsets.x);
   EXPECT_EQ(10, offsets.y);
 }
+
+TEST(TurnedFrame, AContentPointMapsBackToTheReadersPoint) {
+  const turnedframe::Point points[] = {{0, 0}, {5, 7}, {100, 20}, {799, 479}, {300, 0}};
+  for (const turnedframe::Point& p : points) {
+    const turnedframe::Rect cell = turnedframe::toReader(480, {p.x, p.y, 1, 1});
+    const turnedframe::Point back = turnedframe::toContentPoint(480, cell.x, cell.y);
+    EXPECT_EQ(p.x, back.x);
+    EXPECT_EQ(p.y, back.y);
+  }
+}

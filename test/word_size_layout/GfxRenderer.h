@@ -63,6 +63,7 @@ class GfxRenderer {
     float scale;
     EpdFontFamily::Style style;
     Orientation frame;  // the live orientation at the call
+    bool black;
   };
   mutable std::vector<DrawCall> drawCalls;
 
@@ -173,13 +174,13 @@ class GfxRenderer {
   int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, const float scale) const {
     return static_cast<int>(getTextAdvanceX(fontId, text, style) * scale + 0.5f);
   }
-  void drawText(int fontId, int x, int y, const char* text, bool /*black*/ = true,
+  void drawText(int fontId, int x, int y, const char* text, bool black = true,
                 EpdFontFamily::Style style = EpdFontFamily::REGULAR) const {
-    drawCalls.push_back({text, fontId, x, y, 1.0f, style, live});
+    drawCalls.push_back({text, fontId, x, y, 1.0f, style, live, black});
   }
-  void drawTextScaled(int fontId, int x, int y, const char* text, bool /*black*/, EpdFontFamily::Style style,
+  void drawTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
                       const float scale) const {
-    drawCalls.push_back({text, fontId, x, y, scale, style, live});
+    drawCalls.push_back({text, fontId, x, y, scale, style, live, black});
   }
   void drawLine(int x1, int y1, int x2, int y2, int lineWidth, bool /*state*/) const {
     drawLineCalls.push_back({x1, y1, x2, y2, lineWidth, live});
