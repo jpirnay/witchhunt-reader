@@ -136,6 +136,17 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
   return scaledWidth(textAdvance(renderer, fontId, sanitized.c_str(), style, vertical), scale);
 }
 
+// Every bidi control is E2 80 xx, E2 81 xx or D8 9C in UTF-8: a token without those lead bytes holds none.
+bool mayHoldBidiControl(const std::string_view token) { return token.find_first_of("\xE2\xD8") != std::string::npos; }
+
+// `token` without its bidi controls, into `out` (the caller's reused string). False, `out` unspecified, when it holds
+// none.
+bool withoutControls(const std::string& token, std::string& out) {
+  if (!mayHoldBidiControl(token)) return false;
+  out.assign(token);
+  return BidiLine::dropControls(out);
+}
+
 // Whether `form` is `text` as TextBlock stores it, its soft hyphens left out.
 bool formIsText(const std::string& text, const std::string_view form) {
   size_t at = 0;
@@ -534,8 +545,7 @@ void ParsedText::forgetBidiParagraph() {
 void ParsedText::dropBidiControls() {
   for (size_t i = 0; i < words.size();) {
     std::string& word = words[i];
-    // Every bidi control is E2 80 xx, E2 81 xx or D8 9C in UTF-8: a token without those lead bytes holds none.
-    if (word.find_first_of("\xE2\xD8") == std::string::npos || !BidiLine::dropControls(word) || !word.empty() ||
+    if (!mayHoldBidiControl(word) || !BidiLine::dropControls(word) || !word.empty() ||
         TokenBoundary::rubyRole(wordBoundaries[i]) != TokenBoundary::RubyRole::None) {
       ++i;
       continue;
@@ -1056,6 +1066,9 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
         // A combined word is one em down its column, whatever its glyphs' advances.
         out.push_back(static_cast<uint16_t>(columnEm(renderer, font, wordStyles[i], wordScale(i))));
       } else if (scratch != nullptr && BidiLine::tokenForm(words[i], open, level_, *scratch, tokenForm_)) {
+        out.push_back(measureWordWidth(renderer, font, tokenForm_, wordStyles[i], false, wordScale(i), vertical_));
+      } else if (bidi_ && scratch == nullptr && withoutControls(words[i], tokenForm_)) {
+        // No scratch (logged): the block is laid out without bidi, and its controls are not drawn.
         out.push_back(measureWordWidth(renderer, font, tokenForm_, wordStyles[i], false, wordScale(i), vertical_));
       } else {
         out.push_back(measureWordWidth(renderer, font, words[i], wordStyles[i], false, wordScale(i), vertical_));
@@ -2118,6 +2131,44 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
   return maxPct;
 }
 
+void ParsedText::viewWithoutControls(const size_t first, const size_t count, TextBlock::WordRange& range) {
+  // The copies go to bidiLine_.display, which the pass that did not run leaves free. Reserved whole first: no
+  // reallocation below, so the views into it stay valid.
+  std::string& copies = bidiLine_.display;
+  copies.clear();
+  size_t bytes = 0;
+  for (size_t t = 0; t < count; ++t) bytes += words[first + t].size() + 1;
+  copies.reserve(bytes);
+  pieceWords_.clear();
+  pieceStyles_.clear();
+  pieceSizes_.clear();
+  pieceBoundaries_.clear();
+  pieceWords_.reserve(count);
+  pieceStyles_.reserve(count);
+  pieceSizes_.reserve(count);
+  pieceBoundaries_.reserve(count);
+  for (size_t t = 0; t < count; ++t) {
+    const size_t i = first + t;
+    if (withoutControls(words[i], tokenForm_)) {
+      const size_t at = copies.size();
+      copies += tokenForm_;
+      copies.push_back('\0');
+      pieceWords_.emplace_back(copies.data() + at, tokenForm_.size());
+    } else {
+      pieceWords_.emplace_back(words[i]);
+    }
+    pieceStyles_.push_back(wordStyles[i]);
+    pieceSizes_.push_back(wordSizes[i]);
+    pieceBoundaries_.push_back(wordBoundaries[i]);
+  }
+  range.words = nullptr;
+  range.wordViews = pieceWords_.data();
+  range.styles = &pieceStyles_;
+  range.sizes = &pieceSizes_;
+  range.boundaries = &pieceBoundaries_;
+  range.first = 0;
+}
+
 void ParsedText::stepOpenControls(const size_t first, const size_t end) {
   if (!bidi_) return;
   for (size_t i = first; i < end && i < words.size(); ++i) openControls_.advance(words[i]);
@@ -2140,18 +2191,23 @@ ParsedText::LineProcessResult ParsedText::extractLine(
 
   // A line of a paragraph that needs bidi: one UAX #9 pass over its tokens (decision 5). Its pieces are placed in
   // visual order, unless the line is its tokens as they stand in a left-to-right paragraph: that takes the path below.
-  if (bidi_ && layOutBidiLine(lastBreakAt, lineWordCount) && !bidiLineIsPlain(lastBreakAt, lineWordCount)) {
-    const int effectivePageWidth =
-        widthForLine(static_cast<int>(breakIndex), lineHeight, blockStartY, pageWidth) - lineIndent;
-    TextBlock::WordRange range;
-    const uint8_t maxPct =
-        placeBidiLine(renderer, fontId, lastBreakAt, effectivePageWidth, lineIndent, lineBreak == words.size(), range);
-    if (range.count == 0) {  // only controls: nothing to draw
-      stepOpenControls(lastBreakAt, lineBreak);
-      return LineProcessResult::Accepted;
+  // So does a line the pass could not run on (no workspace or scratch, logged), without its bidi controls.
+  bool withoutBidi = false;
+  if (bidi_) {
+    withoutBidi = !layOutBidiLine(lastBreakAt, lineWordCount);
+    if (!withoutBidi && !bidiLineIsPlain(lastBreakAt, lineWordCount)) {
+      const int effectivePageWidth =
+          widthForLine(static_cast<int>(breakIndex), lineHeight, blockStartY, pageWidth) - lineIndent;
+      TextBlock::WordRange range;
+      const uint8_t maxPct = placeBidiLine(renderer, fontId, lastBreakAt, effectivePageWidth, lineIndent,
+                                           lineBreak == words.size(), range);
+      if (range.count == 0) {  // only controls: nothing to draw
+        stepOpenControls(lastBreakAt, lineBreak);
+        return LineProcessResult::Accepted;
+      }
+      return emitLine(range, maxPct, false, lastBreakAt, lineBreak, processLine, lineEndsWithHyphenatedWord,
+                      suppressHyphenationRetry);
     }
-    return emitLine(range, maxPct, false, lastBreakAt, lineBreak, processLine, lineEndsWithHyphenatedWord,
-                    suppressHyphenationRetry);
   }
 
   // Calculate total word width for this line, count actual word gaps,
@@ -2467,6 +2523,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   range.first = lastBreakAt;
   range.count = lineWordCount;
   range.annotations = &lineAnnotations_;
+  if (withoutBidi) viewWithoutControls(lastBreakAt, lineWordCount, range);
 
   uint8_t maxPct = 100;
   bool band = false;

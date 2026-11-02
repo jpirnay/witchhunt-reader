@@ -188,6 +188,10 @@ class ParsedText {
   // loop does: fills lineXPosScratch_, the piece vectors and `range`. Returns the line's largest word size percent.
   uint8_t placeBidiLine(const GfxRenderer& renderer, int fontId, size_t first, int effectivePageWidth, int lineIndent,
                         bool isLastLine, TextBlock::WordRange& range);
+  // Points `range` (set up for tokens [first, first + count)) at those tokens without their bidi controls, as a pass
+  // that needs no bidi has them: for a line the line pass could not run on. Views, with the copies in
+  // bidiLine_.display.
+  void viewWithoutControls(size_t first, size_t count, TextBlock::WordRange& range);
   // Steps openControls_ over the tokens [first, end) of a line that was accepted.
   void stepOpenControls(size_t first, size_t end);
 

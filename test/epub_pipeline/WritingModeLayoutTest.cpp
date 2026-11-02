@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "../book_metadata_cache/AllocationRefusal.h"
+#include "Epub/ParsedText.h"
 #include "Epub/blocks/BlockStyle.h"
 #include "GfxRenderer.h"
 #include "LogObserver.h"
@@ -640,6 +642,43 @@ TEST_F(BidiLayout, ABlockOfOnlyControlsLeavesNoDirectionBehind) {
   ASSERT_EQ(2u, hebrew->words.size());
   EXPECT_EQ(390, hebrew->words[0].x);
   EXPECT_EQ(428, hebrew->words[1].x);
+}
+
+int gBidiErrors = 0;
+void countBidiErrors(const char* level, const char* origin, const char* /*message*/) {
+  if (std::string(origin) == "BIDI" && std::string(level) == "ERR") ++gBidiErrors;
+}
+
+TEST(BidiFallback, ALineThePassCannotRunOnIsLaidOutWithoutItsControls) {
+  // No workspace (1.5 KB) and no scratch (5.9 KB) can be had: the line is laid out without bidi, logged, and as a pass
+  // that needs no bidi lays it out, its RLE and PDF dropped from the text, the drawn form and the widths.
+  BlockStyle style;
+  style.direction = CssDirection::Rtl;
+  style.textIndent = 0;
+  style.textIndentDefined = true;
+  ParsedText text(false, false, style);
+  text.addWord("\xE2\x80\xAB\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D\xE2\x80\xAC", EpdFontFamily::REGULAR);  // RLE שלום PDF
+  text.addWord(kOlam, EpdFontFamily::REGULAR);
+  const GfxRenderer renderer;
+  std::vector<std::unique_ptr<TextBlock>> lines;
+  BidiUtils::releaseWorkspace();
+  gBidiErrors = 0;
+  setLogObserver(countBidiErrors);
+  {
+    const AllocationRefusal refusal(1024);
+    text.layoutAndExtractLines(renderer, 1, 460, [&](std::unique_ptr<TextBlock> line, bool, bool) {
+      lines.push_back(std::move(line));
+      return ParsedText::LineProcessResult::Accepted;
+    });
+  }
+  setLogObserver(nullptr);
+  EXPECT_GT(gBidiErrors, 0);
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0]->wordCount());
+  EXPECT_STREQ(kShalom, lines[0]->wordText(0));
+  EXPECT_STREQ(kShalom, lines[0]->wordDrawText(0));
+  EXPECT_EQ(0, lines[0]->wordXpos(0));
+  EXPECT_EQ(32 + 6, lines[0]->wordXpos(1));  // שלום measured without its controls
 }
 
 TEST_F(BidiLayout, TheBidiWorkspaceIsGoneWhenTheBuildEnds) {
