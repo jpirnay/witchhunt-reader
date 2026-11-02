@@ -1,5 +1,6 @@
 #include "DictionaryWordSelectActivity.h"
 
+#include <BuildArena.h>
 #include <CooperativeAbort.h>
 #include <Epub/PageFrameScope.h>
 #include <Epub/TurnedFrame.h>
@@ -18,6 +19,7 @@
 #include <climits>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <variant>
 
 #include "CrossPointSettings.h"
@@ -220,6 +222,81 @@ const char* columnEmText(const GfxRenderer& renderer, const int fontId, const Ep
                          const uint8_t flags) {
   if ((flags & DRAW_VERTICAL) == 0 || !renderer.hasGlyph(fontId, kColumnEmCodepoint, style)) return "";
   return kColumnEmUtf8;
+}
+
+// The secondary framebuffer, lent to one lookup so that a .dict.dz inflates in it (Dictionary::useInflateArena): the
+// 32 KB window, its ~4 KB working state and the chunk table. On the heap they need a 36 KB block, and over a CJK page
+// the window took the only one and left the state nowhere (X3, 2026-11-02: "DICTZIP OOM: chunk scratch" with a
+// 36.8 KB largest block). The lend is LentCoverScratch's (FinishedBookActivity) and the font selector's: the write
+// buffer brought up to the frame on the panel, RED RAM seeded with it on the X4, and FAST kept while the region is
+// away. Nothing draws while it is lent and it goes back before the next screen draws, so giving it back cannot fail.
+// With no buffer to lend, a plain .dict, or an arena too small, nothing stays lent and the lookup takes the heap.
+class LentLookupScratch {
+ public:
+  LentLookupScratch(Activity& activity, GfxRenderer& renderer, Dictionary& dict)
+      : activity_(activity), renderer_(renderer), dict_(dict) {
+    if (!dict_.isCompressed()) return;
+    [[maybe_unused]] const char* where = "on the heap, no framebuffer to lend";  // for the log
+    size_t size = 0;
+    if (renderer_.hasSecondaryBuffer()) {
+      RenderLock lock(activity_);
+      renderer_.syncWriteBufferFromDisplayed();
+      renderer_.syncRedRamFromFrameBuffer();
+      uint8_t* const region = renderer_.borrowSecondaryBuffer(&size);
+      if (region != nullptr) {
+        arena_.emplace(region, size);
+        renderer_.setSingleBufferFastDiff(true);
+      }
+    }
+    // Outside the render lock: binding reads the .dz header from the card.
+    if (arena_ && !dict_.useInflateArena(&*arena_)) {
+      giveBack();
+      where = "on the heap, the lent framebuffer is too small";
+    } else if (arena_) {
+      where = "in the lent framebuffer";
+    }
+    LOG_DBG("DICT", "Lookup inflates %s (%u bytes lent, %u taken; free=%lu largest=%lu)", where,
+            static_cast<unsigned>(size), static_cast<unsigned>(arena_ ? arena_->used() : 0),
+            static_cast<unsigned long>(ESP.getFreeHeap()), static_cast<unsigned long>(ESP.getMaxAllocHeap()));
+  }
+
+  ~LentLookupScratch() { giveBack(); }
+  LentLookupScratch(const LentLookupScratch&) = delete;
+  LentLookupScratch& operator=(const LentLookupScratch&) = delete;
+
+  // Whether the lookup inflates in the lent framebuffer; false once given back.
+  bool active() const { return arena_.has_value(); }
+
+  // Before anything is drawn: the return seeds the secondary from the write buffer as it is then. Not under the
+  // activity's render lock, which this takes.
+  void giveBack() {
+    if (!arena_) return;
+    dict_.useInflateArena(nullptr);  // the window, the state and the table leave the region first
+    RenderLock lock(activity_);
+    arena_.reset();
+    renderer_.returnSecondaryBuffer();  // cannot fail: the region never entered the heap
+    renderer_.setSingleBufferFastDiff(false);
+  }
+
+ private:
+  Activity& activity_;
+  GfxRenderer& renderer_;
+  Dictionary& dict_;
+  std::optional<BuildArena> arena_;
+};
+
+// A lookup in the lent framebuffer keeps the font caches unless the heap lacks a definition-sized block
+// (LENT_LOOKUP_DEFINITION_BYTES), so a longer definition, or a CJK result of several entries, can still be refused
+// for low memory by the read's own nothrow gate. Then the caches go and the caller reads once more, still in the lend.
+// True when it should. `retryable` is false off the lend and once the caches have gone, and is cleared here, so a
+// lookup retries at most once. The reads assign the definition, so a retry never appends to a refused one.
+bool dropFontCachesToRetry(GfxRenderer& renderer, bool& retryable, const bool found,
+                           const Dictionary::LookupResult result) {
+  if (!retryable || found || result != Dictionary::LookupResult::LowMemory) return false;
+  retryable = false;
+  renderer.releaseFontCaches();
+  LOG_INF("DICT", "Definition refused for low memory: released the font caches, reading it once more");
+  return true;
 }
 
 }  // namespace
@@ -745,7 +822,8 @@ bool DictionaryWordSelectActivity::resolveRun(const CjkLookupRun& run, const Dic
   return true;
 }
 
-bool DictionaryWordSelectActivity::lookUpRun(const bool ok, std::string& definition, Dictionary::LookupResult& result) {
+bool DictionaryWordSelectActivity::lookUpRun(const bool ok, bool& retryable, std::string& definition,
+                                             Dictionary::LookupResult& result) {
   CjkLookupRun run;
   buildRun(selected, run);
   result = Dictionary::LookupResult::NotFound;
@@ -755,7 +833,12 @@ bool DictionaryWordSelectActivity::lookUpRun(const bool ok, std::string& definit
     // reader is waiting for this one. Recorded as the speculation, so the span is there on return.
     if (speculationIdx != selected || speculation == Speculation::Unknown) resolveRun(run, nullptr, result);
     // A known miss needs no SD access at all.
-    if (speculation == Speculation::Found) found = dict.readPrefixDefinitions(speculationMatch, definition, &result);
+    if (speculation == Speculation::Found) {
+      found = dict.readPrefixDefinitions(speculationMatch, definition, &result);
+      if (dropFontCachesToRetry(renderer, retryable, found, result)) {
+        found = dict.readPrefixDefinitions(speculationMatch, definition, &result);
+      }
+    }
   }
   Dictionary::logLookup(SETTINGS.dictionaryName, run.text(),
                         ok ? Dictionary::resultName(result) : "open_or_index_failed",
@@ -821,20 +904,32 @@ void DictionaryWordSelectActivity::performLookup() {
   popupMsg = dictNeedsIndex ? StrId::STR_DICT_INDEXING : StrId::STR_DICT_LOOKING_UP;
   requestUpdateAndWait();  // paint the page + busy popup before blocking on SD
 
-  // A found word is inflated through dictzip's 32 KB window (DictZip::Scratch), one contiguous
-  // block taken at the session's first hit. On a CJK page the font cache holds most of the heap;
-  // the page and the busy popup are drawn, so let the cache go -- glyphs load on demand after.
-  if (!heapHasBlockFor(LOOKUP_CONTIGUOUS_BYTES)) {
-    renderer.releaseFontCaches();
-    LOG_INF("DICT", "Released the font caches for the lookup");
-  }
-
   // The dictionary switch arrives here with the arrays released: the repaint above rebuilt them.
   // A refused rebuild left the popup extractWords() set and nothing to look up.
   if (words.empty()) {
     if (popup == Popup::Busy) popup = Popup::None;
     requestUpdate();
     return;
+  }
+
+  // The secondary framebuffer for the window, its state and the chunk table, from here until the
+  // outcome is known: the page and the busy popup are on screen, and nothing draws until then.
+  LentLookupScratch lent(*this, renderer, dict);
+
+  // A found word in a .dict.dz inflates through dictzip's 32 KB window (DictZip::Scratch), one
+  // contiguous block: from the lent framebuffer when it could be lent, else from the heap. On a CJK
+  // page the font cache holds most of the heap; the page and the busy popup are drawn, so when the
+  // heap lacks the block this lookup still asks of it, let the cache go -- glyphs load on demand
+  // after. With the lend that is only the definition text.
+  const size_t heapBlockBytes = lent.active() ? LENT_LOOKUP_DEFINITION_BYTES : LOOKUP_CONTIGUOUS_BYTES;
+  // A lent lookup that kept the caches may still need them gone for a long definition: see
+  // dropFontCachesToRetry().
+  bool retryable = lent.active();
+  if (!heapHasBlockFor(heapBlockBytes)) {
+    renderer.releaseFontCaches();
+    retryable = false;
+    LOG_INF("DICT", "Released the font caches for the lookup: no %u byte block for the %s",
+            static_cast<unsigned>(heapBlockBytes), lent.active() ? "definition" : "inflate window");
   }
 
   bool ok = dictOpenOk;
@@ -855,7 +950,7 @@ void DictionaryWordSelectActivity::performLookup() {
   // Not before the busy repaint: after a dictionary switch, that repaint is what rebuilt the words.
   const CjkLookupRun::Script script = scriptAt(selected);
   if (script != CjkLookupRun::Script::Other) {
-    found = lookUpRun(ok, definition, result);
+    found = lookUpRun(ok, retryable, definition, result);
   } else {
     char text[WORD_TEXT_CAPACITY];
     buildWordText(selected, text, sizeof(text), true);
@@ -865,6 +960,9 @@ void DictionaryWordSelectActivity::performLookup() {
       if (speculation == Speculation::Found) {
         headword = speculationHeadword;
         found = dict.readResolved(speculationLocation, definition, &result);
+        if (dropFontCachesToRetry(renderer, retryable, found, result)) {
+          found = dict.readResolved(speculationLocation, definition, &result);
+        }
       } else {
         result = Dictionary::LookupResult::NotFound;
       }
@@ -874,10 +972,16 @@ void DictionaryWordSelectActivity::performLookup() {
         buildWordText(selected, text, sizeof(text), false);
         found = dict.lookup(text, definition, headword, &result);
       }
+      // `text` holds the spelling the last search used.
+      if (dropFontCachesToRetry(renderer, retryable, found, result)) {
+        found = dict.lookup(text, definition, headword, &result);
+      }
     }
     Dictionary::logLookup(SETTINGS.dictionaryName, text, ok ? Dictionary::resultName(result) : "open_or_index_failed",
                           found ? headword.c_str() : nullptr);
   }
+  // Before the definition or a popup is drawn, and before the render lock below.
+  lent.giveBack();
 
   if (found) {
     popup = Popup::None;

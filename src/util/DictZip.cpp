@@ -1,12 +1,14 @@
 #include "DictZip.h"
 
 #include <Arduino.h>  // ESP.getMaxAllocHeap for the pre-reserve heap guard
+#include <BuildArena.h>
 #include <InflateReader.h>
 #include <Logging.h>
 #include <Memory.h>
 
 #include <cstddef>
 #include <cstring>
+#include <new>
 #include <string>
 
 namespace DictZip {
@@ -16,8 +18,8 @@ namespace {
 // chunk length that still allows ~460MB of uncompressed dictionary data.
 constexpr uint16_t MAX_CHUNK_COUNT = 8192;
 
-// Slack required above the chunk table before reserving it, so a table that
-// would only just fit is refused rather than left to abort inside reserve().
+// Slack required above a heap chunk table before allocating it, so a table that
+// would only just fit is refused rather than left to take the heap's last block.
 constexpr size_t CHUNK_TABLE_HEAP_HEADROOM_BYTES = 1024;
 
 bool readLe16(HalFile& file, uint16_t* out) {
@@ -78,12 +80,18 @@ int chunkReadCb(uzlib_uncomp* u) {
 struct ScratchState {
   ChunkSource src;
   uint8_t discard[DISCARD_BUF_BYTES] = {};
-  Info info;             // chunk table, cached across lookups against one file
-  std::string infoPath;  // path `info` was parsed from; empty when unparsed
+  Info info;  // chunk table, cached across lookups against one file
+  // Path `info` was parsed from; nullptr when unparsed. In heapPath, or in arena mode in the arena.
+  const char* infoPath = nullptr;
+  std::string heapPath;
+  // Arena mode: the block holding the window and this state, and the one above it holding the table and its path,
+  // which a re-parse gives back first.
+  BuildArena::Block scratchBlock;
+  BuildArena::Block infoBlock;
 };
 
 Scratch::Scratch() = default;
-Scratch::~Scratch() = default;
+Scratch::~Scratch() { release(); }
 
 bool Scratch::ensure() {
   if (state) return true;
@@ -101,19 +109,99 @@ bool Scratch::ensure() {
     LOG_ERR("DICTZIP", "OOM: chunk scratch");
     return false;
   }
-  window = std::move(ring);
-  state = std::move(s);
+  ownedWindow = std::move(ring);
+  ownedState = std::move(s);
+  window = ownedWindow.get();
+  state = ownedState.get();
   return true;
+}
+
+bool Scratch::ensure(BuildArena& from, const char* path, ExtractError* outError) {
+  if (outError) *outError = ExtractError::None;
+  if (state && arena == &from) return true;
+  release();
+
+  [[maybe_unused]] const size_t freeBytes = from.capacity() - from.used();  // for the log
+  BuildArena::Block block = from.reserveBlock();
+  // The window first, as on the heap; the arena packs the two back to back.
+  auto* ring = static_cast<uint8_t*>(from.alloc(InflateReader::ringSizeFor(0)));
+  void* stateBytes = ring ? from.alloc(sizeof(ScratchState), alignof(ScratchState)) : nullptr;
+  ExtractError error = ExtractError::LowMemory;
+  if (stateBytes) {
+    window = ring;
+    state = new (stateBytes) ScratchState();
+    arena = &from;
+    state->scratchBlock = std::move(block);
+    // The chunk table now, not at the first extraction, so that an arena too small for it refuses here too, while
+    // the caller can still choose the heap.
+    HalFile file;
+    error = ExtractError::ReadError;
+    if (Storage.openFileForRead("DICTZIP", path, file) && loadInfo(file, path, &error)) return true;
+    release();
+  } else {
+    from.release(block);
+  }
+  LOG_DBG("DICTZIP", "Not bound to the arena (%u bytes free, scratch %u): error %d", static_cast<unsigned>(freeBytes),
+          static_cast<unsigned>(sizeof(ScratchState)), static_cast<int>(error));
+  if (outError) *outError = error;
+  return false;
 }
 
 void Scratch::release() {
   // State holds the InflateReader, whose ring is `window` — drop it first so no
   // reader outlives the buffer it points at.
-  state.reset();
-  window.reset();
+  if (arena) {
+    dropInfo();
+    BuildArena::Block block = std::move(state->scratchBlock);
+    state->~ScratchState();  // placed in the arena: nothing of it is on the heap after dropInfo()
+    state = nullptr;
+    window = nullptr;
+    arena->release(block);  // the window and the state
+    arena = nullptr;
+    return;
+  }
+  state = nullptr;
+  window = nullptr;
+  ownedState.reset();
+  ownedWindow.reset();
 }
 
-bool parse(HalFile& file, Info* info, ExtractError* outError) {
+void Scratch::dropInfo() {
+  state->info = {};
+  state->infoPath = nullptr;
+  state->heapPath.clear();
+  if (arena && state->infoBlock.valid()) arena->release(state->infoBlock);
+}
+
+bool Scratch::loadInfo(HalFile& file, const char* path, ExtractError* outError) {
+  ScratchState& s = *state;
+  if (s.infoPath && strcmp(s.infoPath, path) == 0) return true;
+  dropInfo();
+  if (arena) s.infoBlock = arena->reserveBlock();
+  // parse() reports its own cause: a header/table read failure is ReadError,
+  // a malformed/unsupported .dz is Decompress, no room for the table LowMemory.
+  if (!parse(file, &s.info, outError, arena)) {
+    dropInfo();
+    return false;
+  }
+  if (arena) {
+    const size_t pathBytes = strlen(path) + 1;
+    auto* copy = arena->allocArray<char>(pathBytes);
+    if (!copy) {
+      dropInfo();
+      if (outError) *outError = ExtractError::LowMemory;
+      return false;
+    }
+    memcpy(copy, path, pathBytes);
+    s.infoPath = copy;
+  } else {
+    s.heapPath = path;
+    s.infoPath = s.heapPath.c_str();
+  }
+  return true;
+}
+
+bool parse(HalFile& file, Info* info, ExtractError* outError, BuildArena* tableArena) {
   // Classify each failure: a header/table read that comes up short is a
   // ReadError (IO / truncated file); a value that doesn't make sense as dictzip
   // is a Decompress (malformed/unsupported .dz).
@@ -148,8 +236,8 @@ bool parse(HalFile& file, Info* info, ExtractError* outError) {
     if (subHeader[0] == 'R' && subHeader[1] == 'A') {
       // Reject a second RA table rather than break: breaking would leave
       // extraRead < xlen and trip the check below for valid files carrying other
-      // FEXTRA subfields after the RA one. Re-entering would push_back past the
-      // reserve() below, and that growth aborts under -fno-exceptions.
+      // FEXTRA subfields after the RA one. Re-entering would take a second
+      // table below on top of the first.
       if (foundRa) return fail(ExtractError::Decompress);
       if (subLen < 6) return fail(ExtractError::Decompress);
 
@@ -164,22 +252,30 @@ bool parse(HalFile& file, Info* info, ExtractError* outError) {
       if (subLen != static_cast<uint16_t>(6 + chunkCount * 2)) return fail(ExtractError::Decompress);
 
       info->chunkLength = chunkLen;
-      // vector reserve() aborts under -fno-exceptions if it can't allocate;
-      // refuse up front so a fragmented heap surfaces LowMemory instead of
-      // crashing. chunkCount <= MAX_CHUNK_COUNT caps this at ~32KB.
-      const size_t chunkTableBytes = (static_cast<size_t>(chunkCount) + 1) * sizeof(uint32_t);
-      if (ESP.getMaxAllocHeap() < chunkTableBytes + CHUNK_TABLE_HEAP_HEADROOM_BYTES)
-        return fail(ExtractError::LowMemory);
-      info->chunkOffsets.reserve(static_cast<size_t>(chunkCount) + 1);
-      info->chunkOffsets.push_back(0);
+      // chunkCount <= MAX_CHUNK_COUNT caps the table at ~32KB. In an arena it
+      // takes what is left there; on the heap it is refused up front, with
+      // headroom, so a fragmented heap surfaces LowMemory with room to spare.
+      const size_t entries = static_cast<size_t>(chunkCount) + 1;
+      const size_t chunkTableBytes = entries * sizeof(uint32_t);
+      uint32_t* table = nullptr;
+      if (tableArena) {
+        table = tableArena->allocArray<uint32_t>(entries);
+      } else if (ESP.getMaxAllocHeap() >= chunkTableBytes + CHUNK_TABLE_HEAP_HEADROOM_BYTES) {
+        info->ownedOffsets = makeUniqueNoThrow<uint32_t[]>(entries);
+        table = info->ownedOffsets.get();
+      }
+      if (!table) return fail(ExtractError::LowMemory);
+      table[0] = 0;
       uint32_t cumulative = 0;
       for (uint16_t i = 0; i < chunkCount; i++) {
         uint16_t compLen = 0;
         if (!readLe16(file, &compLen)) return fail(ExtractError::ReadError);
         extraRead += 2;
         cumulative += compLen;
-        info->chunkOffsets.push_back(cumulative);
+        table[i + 1] = cumulative;
       }
+      info->chunkOffsets = table;
+      info->chunkOffsetCount = static_cast<uint32_t>(entries);
       foundRa = true;
     } else {
       if (!file.seekSet(file.position() + subLen)) return fail(ExtractError::ReadError);
@@ -279,6 +375,7 @@ bool extractEntry(const char* path, uint32_t offset, uint32_t size, uint8_t* des
   if (outError) *outError = ExtractError::None;
   if (size == 0) return true;
   if (!dest) return fail(ExtractError::ReadError);
+  // Takes the heap only when the scratch holds nothing yet: one bound to an arena is ready.
   if (!scratch.ensure()) return fail(ExtractError::LowMemory);
   ScratchState& state = *scratch.state;
 
@@ -287,16 +384,7 @@ bool extractEntry(const char* path, uint32_t offset, uint32_t size, uint8_t* des
 
   // The chunk table is identical for every lookup against one dictionary; parse
   // it once per session rather than once per word.
-  if (state.infoPath != path) {
-    state.infoPath.clear();
-    // parse() reports its own cause: a header/table read failure is ReadError,
-    // a malformed/unsupported .dz is Decompress.
-    if (!parse(file, &state.info, outError)) {
-      state.info = {};
-      return false;
-    }
-    state.infoPath = path;
-  }
+  if (!scratch.loadInfo(file, path, outError)) return false;
   const Info& info = state.info;
 
   // Reject ranges outside the uncompressed data (offset/size come from the
@@ -306,11 +394,11 @@ bool extractEntry(const char* path, uint32_t offset, uint32_t size, uint8_t* des
 
   const uint32_t startChunk = offset / info.chunkLength;
   const uint32_t endChunk = (offset + size - 1) / info.chunkLength;
-  if (endChunk + 1 >= info.chunkOffsets.size()) return fail(ExtractError::ReadError);
+  if (endChunk + 1 >= info.chunkOffsetCount) return fail(ExtractError::ReadError);
 
   uint32_t remaining = size;
   uint8_t* out = dest;
-  const uint32_t lastChunk = static_cast<uint32_t>(info.chunkOffsets.size() - 2);
+  const uint32_t lastChunk = info.chunkOffsetCount - 2;
   for (uint32_t chunk = startChunk; chunk <= endChunk; chunk++) {
     uint32_t chunkOutSize = info.chunkLength;
     if (chunk == lastChunk) chunkOutSize = info.totalSize - chunk * info.chunkLength;
@@ -322,7 +410,7 @@ bool extractEntry(const char* path, uint32_t offset, uint32_t size, uint8_t* des
 
     const uint32_t compOffset = info.dataOffset + info.chunkOffsets[chunk];
     const uint32_t compSize = info.chunkOffsets[chunk + 1] - info.chunkOffsets[chunk];
-    if (!extractChunkSlice(file, scratch.window.get(), state, compOffset, compSize, localOffset, take, out, outError))
+    if (!extractChunkSlice(file, scratch.window, state, compOffset, compSize, localOffset, take, out, outError))
       return false;
 
     remaining -= take;

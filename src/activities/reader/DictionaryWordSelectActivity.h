@@ -108,8 +108,14 @@ class DictionaryWordSelectActivity final : public Activity {
   // Longest word handed to the dictionary, joined across fragments. Headwords far shorter
   // than this; the buffer is a stack local, so it stays well inside the task stack budget.
   static constexpr size_t WORD_TEXT_CAPACITY = 128;
-  // Largest block a lookup may need: dictzip's 32 KB inflate window plus its ~3 KB chunk scratch.
+  // Largest block a lookup may need on the heap: dictzip's 32 KB inflate window plus its ~3 KB
+  // chunk scratch, when they cannot be had from the lent framebuffer. Below it the font caches go.
   static constexpr size_t LOOKUP_CONTIGUOUS_BYTES = 36 * 1024;
+  // The same gate for a lookup that inflates in the lent framebuffer, whose only large heap block
+  // is the definition text. A floor, not the largest definition: readDefinition() and
+  // readPrefixDefinitions() keep their own nothrow gate (size + 8 KB, Dictionary.cpp), so a longer
+  // definition is refused as low memory, never an abort.
+  static constexpr size_t LENT_LOOKUP_DEFINITION_BYTES = 16 * 1024;
 
   enum class Popup : uint8_t { None, Busy, NotFound, Error };
 
@@ -153,8 +159,9 @@ class DictionaryWordSelectActivity final : public Activity {
   bool resolveRun(const CjkLookupRun& run, Dictionary::AbortCheck abortCheck, Dictionary::LookupResult& result);
   // Confirm's half for a CJK word: the run from `selected`, searched unless the speculation already
   // has it, then every entry of its matches read into `definition`. Logs the lookup. `ok` is false
-  // when the dictionary could not be opened or indexed.
-  bool lookUpRun(bool ok, std::string& definition, Dictionary::LookupResult& result);
+  // when the dictionary could not be opened or indexed. `retryable`: a read refused for low memory
+  // is made once more after the font caches go (dropFontCachesToRetry in the .cpp).
+  bool lookUpRun(bool ok, bool& retryable, std::string& definition, Dictionary::LookupResult& result);
   // Noto Sans for a Latin lookup, the reader's own font (`fontId`) for one that started on CJK text
   // (spec 5.3). The one place that chooses; roadmap step 6 replaces it.
   int definitionFontId(CjkLookupRun::Script script) const;

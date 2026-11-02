@@ -7,6 +7,8 @@
 // .dict and one with a real dictzip .dict.dz, so the compressed path can be
 // asserted against the uncompressed one rather than against hand-copied bytes.
 
+#include <BuildArena.h>
+#include <InflateReader.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -18,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "../book_metadata_cache/AllocationRefusal.h"
 #include "Dictionary.h"
 #include "DictionaryRegistry.h"
 #include "StringUtils.h"
@@ -774,6 +777,220 @@ TEST_F(DictionaryTest, CorruptCompressedDataFailsWithoutClaimingAMiss) {
       << "unexpected result " << static_cast<int>(result);
 }
 
+// --- dictzip in a lent arena --------------------------------------------------
+//
+// The word screen lends a lookup the secondary framebuffer, so that a .dict.dz inflates there instead of taking its
+// 32 KB window and working state from a heap that may not hold them both. A buffer the size of the X4's framebuffer,
+// the smaller panel's, stands in for the lent block.
+
+constexpr size_t kLentFramebufferBytes = 48000;
+
+std::string zippedDictPath(const std::string& folder) {
+  return (kDictRoot / folder / "zipped.dict.dz").generic_string();
+}
+
+// The operator-new blocks `fn` takes, as the binary's replacement allocator counts them (AllocationRefusal.cpp).
+template <typename Fn>
+size_t heapBlocksTakenBy(Fn&& fn) {
+  const size_t before = heapAllocations();
+  fn();
+  return heapAllocations() - before;
+}
+
+std::string extractToString(const std::string& path, const uint32_t offset, const uint32_t size,
+                            DictZip::Scratch& scratch) {
+  std::string out(size, '\0');
+  if (!DictZip::extractEntry(path.c_str(), offset, size, reinterpret_cast<uint8_t*>(&out[0]), scratch))
+    return "<failed>";
+  return out;
+}
+
+TEST_F(DictionaryTest, DictZipScratchInALentArenaInflatesTheSameBytes) {
+  const std::string path = zippedDictPath(provision("zipped", "ZippedArena"));
+  std::vector<uint8_t> lent(kLentFramebufferBytes);
+  BuildArena arena(lent.data(), lent.size());
+  DictZip::Scratch scratch;
+  DictZip::ExtractError error = DictZip::ExtractError::Decompress;
+  ASSERT_TRUE(scratch.ensure(arena, path.c_str(), &error));
+  EXPECT_EQ(error, DictZip::ExtractError::None);
+  EXPECT_TRUE(scratch.ready());
+  // The window alone is 32 KB; the working state, the chunk table and its path are taken above it.
+  EXPECT_GT(arena.used(), InflateReader::ringSizeFor(0));
+
+  // As CompressedDictionaryMatchesThePlainOneByteForByte: chunk starts, middles and boundaries, then a definition
+  // across several chunks.
+  std::vector<IndexEntry> probes;
+  for (size_t i = 0; i < plainEntries.size(); i += 29) probes.push_back(plainEntries[i]);
+  const auto longword =
+      std::find_if(plainEntries.begin(), plainEntries.end(), [](const IndexEntry& e) { return e.word == "longword"; });
+  ASSERT_NE(longword, plainEntries.end());
+  ASSERT_GT(longword->size, 4096u * 3);
+  probes.push_back(*longword);
+  for (const IndexEntry& entry : probes) {
+    EXPECT_EQ(extractToString(path, entry.offset, entry.size, scratch), plainDictBlob.substr(entry.offset, entry.size))
+        << entry.word;
+  }
+
+  scratch.release();
+  EXPECT_FALSE(scratch.ready());
+  EXPECT_EQ(arena.used(), 0u);
+  EXPECT_EQ(arena.releaseFailures(), 0u);
+}
+
+TEST_F(DictionaryTest, DictZipScratchRefusesAnArenaTooSmallAndLeavesItUntouched) {
+  const std::string path = zippedDictPath(provision("zipped", "ZippedArenaSmall"));
+  const IndexEntry& entry = plainEntries[plainEntries.size() / 2];
+  const std::string expected = plainDictBlob.substr(entry.offset, entry.size);
+
+  // Grown a few bytes at a time from just under the window's size: each arena short of the window, the working
+  // state, the chunk table or its path is refused with nothing left taken in it, and the first to hold them all
+  // serves the extraction.
+  std::vector<uint8_t> lent(kLentFramebufferBytes);
+  bool bound = false;
+  for (size_t capacity = InflateReader::ringSizeFor(0) - 4; capacity <= lent.size() && !bound; capacity += 4) {
+    BuildArena arena(lent.data(), capacity);
+    DictZip::Scratch scratch;
+    DictZip::ExtractError error = DictZip::ExtractError::None;
+    bound = scratch.ensure(arena, path.c_str(), &error);
+    if (!bound) {
+      ASSERT_EQ(error, DictZip::ExtractError::LowMemory) << capacity;
+      ASSERT_FALSE(scratch.ready()) << capacity;
+      ASSERT_EQ(arena.used(), 0u) << capacity;
+      ASSERT_EQ(arena.releaseFailures(), 0u) << capacity;
+      continue;
+    }
+    EXPECT_EQ(extractToString(path, entry.offset, entry.size, scratch), expected) << capacity;
+    scratch.release();
+    EXPECT_EQ(arena.used(), 0u) << capacity;
+  }
+  ASSERT_TRUE(bound);
+
+  // What a caller does with the refusal: the same scratch on the heap.
+  BuildArena tooSmall(lent.data(), 16 * 1024);
+  DictZip::Scratch scratch;
+  ASSERT_FALSE(scratch.ensure(tooSmall, path.c_str()));
+  ASSERT_TRUE(scratch.ensure());
+  EXPECT_EQ(extractToString(path, entry.offset, entry.size, scratch), expected);
+}
+
+TEST_F(DictionaryTest, DictZipScratchInALentArenaTakesNothingFromTheHeap) {
+  const std::string path = zippedDictPath(provision("zipped", "ZippedArenaNoHeap"));
+  const IndexEntry& entry = plainEntries[plainEntries.size() / 3];
+  std::string out(entry.size, '\0');
+  std::vector<uint8_t> lent(kLentFramebufferBytes);
+  BuildArena arena(lent.data(), lent.size());
+  // What opening the file costs the heap by itself on the host, whose file open copies the path into a std::string.
+  // The scratch must add nothing to it.
+  const size_t perOpen = heapBlocksTakenBy([&] {
+    HalFile file;
+    Storage.openFileForRead("TEST", path.c_str(), file);
+  });
+
+  DictZip::Scratch scratch;
+  bool bound = false;
+  bool extracted = false;
+  const size_t liveBefore = heapLiveBytes();
+  const size_t bindBlocks = heapBlocksTakenBy([&] { bound = scratch.ensure(arena, path.c_str()); });
+  const size_t extractBlocks = heapBlocksTakenBy([&] {
+    extracted =
+        DictZip::extractEntry(path.c_str(), entry.offset, entry.size, reinterpret_cast<uint8_t*>(&out[0]), scratch);
+  });
+  const size_t releaseBlocks = heapBlocksTakenBy([&] { scratch.release(); });
+  const size_t liveAfter = heapLiveBytes();
+
+  EXPECT_TRUE(bound);
+  EXPECT_TRUE(extracted);
+  EXPECT_EQ(out, plainDictBlob.substr(entry.offset, entry.size));
+  EXPECT_EQ(bindBlocks, perOpen);
+  EXPECT_EQ(extractBlocks, perOpen);
+  EXPECT_EQ(releaseBlocks, 0u);
+  EXPECT_EQ(liveAfter, liveBefore);
+  EXPECT_EQ(arena.used(), 0u);
+
+  // The count does see a scratch: on the heap it is the window and the state.
+  DictZip::Scratch onHeap;
+  bool heapReady = false;
+  EXPECT_EQ(heapBlocksTakenBy([&] { heapReady = onHeap.ensure(); }), 2u);
+  EXPECT_TRUE(heapReady);
+}
+
+TEST_F(DictionaryTest, LookupsInflateInALentArenaAndGiveItBackWhole) {
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, provision("zipped", "ZippedLent")));
+  ASSERT_TRUE(dict.isCompressed());
+  // A first lookup takes the session's scan buffers, which stay; the window it took on the heap does not.
+  std::string definition;
+  std::string headword;
+  ASSERT_TRUE(dict.lookup("quixotic", definition, headword));
+
+  std::vector<uint8_t> lent(kLentFramebufferBytes);
+  BuildArena arena(lent.data(), lent.size());
+  ASSERT_TRUE(dict.useInflateArena(&arena));
+  EXPECT_GT(arena.used(), InflateReader::ringSizeFor(0));
+
+  // No heap block of 1 KB or more, which the window or the working state would be. The definitions themselves are
+  // still heap strings, so only the short ones are read under the refusal.
+  std::vector<const IndexEntry*> shortEntries;
+  for (size_t i = 0; i < plainEntries.size(); i += 29) {
+    if (plainEntries[i].size < 512) shortEntries.push_back(&plainEntries[i]);
+  }
+  ASSERT_GT(shortEntries.size(), 10u);
+  std::vector<std::string> definitions(shortEntries.size());
+  std::vector<char> found(shortEntries.size(), 0);
+  {
+    const AllocationRefusal refuse(1024);
+    for (size_t i = 0; i < shortEntries.size(); i++) {
+      std::string matched;
+      found[i] = dict.lookup(shortEntries[i]->word.c_str(), definitions[i], matched) ? 1 : 0;
+    }
+  }
+  for (size_t i = 0; i < shortEntries.size(); i++) {
+    const IndexEntry& entry = *shortEntries[i];
+    EXPECT_TRUE(found[i]) << entry.word;
+    EXPECT_EQ(definitions[i], plainDictBlob.substr(entry.offset, entry.size)) << entry.word;
+  }
+  // A definition across several chunks, and the CJK screen's read (readPrefixDefinitions), in the same lend.
+  ASSERT_TRUE(dict.lookup("longword", definition, headword));
+  EXPECT_EQ(definition, expectedDefinition("longword"));
+  DictPrefixMatch match;
+  ASSERT_TRUE(dict.resolvePrefixes("longword", match));
+  ASSERT_TRUE(dict.readPrefixDefinitions(match, definition));
+  EXPECT_EQ(definition.rfind("longword\n" + expectedDefinition("longword"), 0), 0u);
+
+  dict.useInflateArena(nullptr);
+  EXPECT_EQ(arena.used(), 0u);
+  EXPECT_EQ(arena.releaseFailures(), 0u);
+  // Back on the heap.
+  ASSERT_TRUE(dict.lookup("quixotic", definition, headword));
+  EXPECT_EQ(definition, expectedDefinition("quixotic"));
+}
+
+TEST_F(DictionaryTest, APlainDictionaryOrAnArenaTooSmallLeavesTheLookupOnTheHeap) {
+  std::vector<uint8_t> lent(kLentFramebufferBytes);
+
+  Dictionary plain;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(plain, provision("plain", "PlainNotLent")));
+  EXPECT_FALSE(plain.isCompressed());
+  BuildArena plainArena(lent.data(), lent.size());
+  EXPECT_FALSE(plain.useInflateArena(&plainArena));
+  EXPECT_EQ(plainArena.used(), 0u);
+
+  Dictionary zipped;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(zipped, provision("zipped", "ZippedNotLent")));
+  BuildArena tooSmall(lent.data(), 16 * 1024);
+  EXPECT_FALSE(zipped.useInflateArena(&tooSmall));
+  EXPECT_EQ(tooSmall.used(), 0u);
+
+  for (Dictionary* dict : {&plain, &zipped}) {
+    std::string definition;
+    std::string headword;
+    ASSERT_TRUE(dict->lookup("quixotic", definition, headword));
+    EXPECT_EQ(definition, expectedDefinition("quixotic"));
+  }
+  EXPECT_EQ(plainArena.used(), 0u);
+  EXPECT_EQ(tooSmall.used(), 0u);
+}
+
 // --- index scanning edge cases ---------------------------------------------
 
 TEST_F(DictionaryTest, OverlongHeadwordDoesNotDesynchroniseTheScan) {
@@ -1463,6 +1680,57 @@ TEST_F(DictionaryTest, PrefixDefinitionsReportLowMemory) {
   ESP.setMaxAllocHeap(savedContig);
   EXPECT_EQ(r, Dictionary::LookupResult::LowMemory);
   EXPECT_TRUE(out.empty());
+}
+
+// What the word screen's retry on the lent path relies on (DictionaryWordSelectActivity::performLookup): a read
+// refused for low memory keeps the arena bound and nothing in it, and the same read made again into the same string,
+// once the font caches have gone, gives exactly the definition: nothing is appended to what the string held.
+TEST_F(DictionaryTest, AReadRefusedForLowMemoryInALentArenaReadsWholeOnTheRetry) {
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, provision("zipped", "ZippedRetry")));
+  std::vector<uint8_t> lent(kLentFramebufferBytes);
+  BuildArena arena(lent.data(), lent.size());
+  ASSERT_TRUE(dict.useInflateArena(&arena));
+  const size_t bound = arena.used();
+  DictLocation location;
+  std::string headword;
+  ASSERT_TRUE(dict.resolve("longword", location, headword));
+  DictPrefixMatch match;
+  ASSERT_TRUE(dict.resolvePrefixes("longword", match));
+
+  std::string viaLookup = "stale";
+  std::string viaLocation = "stale";
+  std::string viaPrefix = "stale";
+  Dictionary::LookupResult lookupResult = Dictionary::LookupResult::Found;
+  Dictionary::LookupResult locationResult = Dictionary::LookupResult::Found;
+  Dictionary::LookupResult prefixResult = Dictionary::LookupResult::Found;
+  const auto savedContig = ESP.getMaxAllocHeap();
+  ESP.setMaxAllocHeap(1024);  // no block for the definition text
+  const bool lookupFirst = dict.lookup("longword", viaLookup, headword, &lookupResult);
+  const bool locationFirst = dict.readResolved(location, viaLocation, &locationResult);
+  const bool prefixFirst = dict.readPrefixDefinitions(match, viaPrefix, &prefixResult);
+  ESP.setMaxAllocHeap(savedContig);
+  EXPECT_FALSE(lookupFirst);
+  EXPECT_FALSE(locationFirst);
+  EXPECT_FALSE(prefixFirst);
+  EXPECT_EQ(lookupResult, Dictionary::LookupResult::LowMemory);
+  EXPECT_EQ(locationResult, Dictionary::LookupResult::LowMemory);
+  EXPECT_EQ(prefixResult, Dictionary::LookupResult::LowMemory);
+  EXPECT_EQ(arena.used(), bound);
+
+  // The retry: the same calls, into the same strings.
+  ASSERT_TRUE(dict.lookup("longword", viaLookup, headword));
+  ASSERT_TRUE(dict.readResolved(location, viaLocation));
+  ASSERT_TRUE(dict.readPrefixDefinitions(match, viaPrefix));
+  EXPECT_EQ(viaLookup, expectedDefinition("longword"));
+  EXPECT_EQ(viaLocation, expectedDefinition("longword"));
+  std::string once;
+  ASSERT_TRUE(dict.readPrefixDefinitions(match, once));
+  EXPECT_EQ(viaPrefix, once);
+  EXPECT_EQ(viaPrefix.rfind("longword\n" + expectedDefinition("longword"), 0), 0u);
+
+  dict.useInflateArena(nullptr);
+  EXPECT_EQ(arena.used(), 0u);
 }
 
 TEST_F(DictionaryTest, PrefixDefinitionsOfATruncatedDictFileFailWithTheOutputCleared) {
