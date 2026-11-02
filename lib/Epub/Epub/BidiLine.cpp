@@ -330,11 +330,26 @@ void markCuts(Scratch& s, const size_t slots, uint8_t* const rankOf, uint8_t* co
   cutRun();
 }
 
+// Grows a buffer the Line keeps to at least n, geometrically, so lines that grow a little at a time do not reallocate
+// on each one.
+template <typename Buffer>
+void reserveAtLeast(Buffer& buffer, const size_t n) {
+  if (buffer.capacity() < n) buffer.reserve(std::max(n, 2 * buffer.capacity()));
+}
+
+// The line's text bytes, and one more per token: about what its forms and their NULs take.
+size_t formBytes(const Token* tokens, const size_t count) {
+  size_t bytes = 0;
+  for (size_t t = 0; t < count; t++) bytes += tokens[t].text.size() + 1;
+  return bytes;
+}
+
 // Walks the visual order into pieces, then gives each its bytes and its reading index. False only when a shaped
 // cluster's units land in two pieces: the caller falls back.
-bool buildPieces(const Token* tokens, Scratch& s, const size_t slots, Line& out) {
-  out.pieces.reserve(slots);
-  out.display.reserve(4 * s.slotUnit[slots] + slots);
+bool buildPieces(const Token* tokens, const size_t count, Scratch& s, const size_t slots, Line& out) {
+  // About one piece per token, and the forms about the tokens' bytes: a line that holds more grows the buffers once.
+  reserveAtLeast(out.pieces, count);
+  reserveAtLeast(out.display, formBytes(tokens, count));
   // Free once the slots are ordered.
   uint8_t* const rankOf = s.expanded;
   uint8_t* const cutBefore = s.openSpans;
@@ -450,9 +465,8 @@ void fallbackLine(const Token* tokens, const size_t count, const OpenControls& o
   for (size_t v = 0; v < count; v++) order[count + order[v]] = static_cast<uint16_t>(v);  // each token's visual index
 
   // The forms, made in logical order as the open controls follow the text.
-  size_t bytes = 0;
-  for (size_t t = 0; t < count; t++) bytes += tokens[t].text.size() + 1;
-  out.display.reserve(bytes);
+  reserveAtLeast(out.display, formBytes(tokens, count));
+  reserveAtLeast(out.pieces, count);
   out.pieces.resize(count);
   OpenControls at = open;
   for (size_t t = 0; t < count; t++) {
@@ -568,7 +582,7 @@ bool layoutLine(const Token* tokens, const size_t count, const OpenControls& ope
     out.clear();
     return false;
   }
-  if (!buildPieces(tokens, scratch, slots, out)) fallbackLine(tokens, count, open, level, scratch, out);
+  if (!buildPieces(tokens, count, scratch, slots, out)) fallbackLine(tokens, count, open, level, scratch, out);
   return true;
 }
 

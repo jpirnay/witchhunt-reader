@@ -309,6 +309,13 @@ TEST(BidiLine, ALongLeftToRightLineKeepsItsOrder) {
   EXPECT_EQ(render(line), expected);
 }
 
+TEST(BidiLine, AFirstLineReservesForItsTokensNotTheWorstCase) {
+  // 3 tokens of 10 bytes: about 3 pieces and 33 bytes of forms, not 4 bytes a code point and a piece a slot.
+  const auto line = lay({"abcdefghij", "klmnopqrst", "uvwxyzabcd"}, 1);
+  EXPECT_LE(line.pieces.capacity(), 3u);
+  EXPECT_LT(line.display.capacity(), 66u);
+}
+
 TEST(BidiLine, TheOpenControlsFollowTheText) {
   BidiLine::OpenControls open;
   open.advance(u(RLI) + "abc");
