@@ -4,7 +4,7 @@
 
 // A vertical-rl page is laid out as a horizontal page in a frame one 90-degree step from the reader's (spec 5.2):
 // inline runs down, block runs leftward, so a content point (x, y) is the reader point (readerWidth - 1 - y, x).
-// Orientations in GfxRenderer::Orientation's order; Page.cpp static_asserts that they agree.
+// Orientations in GfxRenderer::Orientation's order; PageFrameScope.h static_asserts that they agree.
 namespace turnedframe {
 
 enum Orientation : int { Portrait = 0, LandscapeClockwise = 1, PortraitInverted = 2, LandscapeCounterClockwise = 3 };

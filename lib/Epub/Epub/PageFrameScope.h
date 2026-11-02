@@ -6,10 +6,10 @@
 #include "TurnedFrame.h"
 
 // The turned frame's orientation numbers are the renderer's.
-static_assert(turnedframe::Portrait == GfxRenderer::Portrait);
-static_assert(turnedframe::LandscapeClockwise == GfxRenderer::LandscapeClockwise);
-static_assert(turnedframe::PortraitInverted == GfxRenderer::PortraitInverted);
-static_assert(turnedframe::LandscapeCounterClockwise == GfxRenderer::LandscapeCounterClockwise);
+static_assert(turnedframe::Portrait == static_cast<int>(GfxRenderer::Portrait));
+static_assert(turnedframe::LandscapeClockwise == static_cast<int>(GfxRenderer::LandscapeClockwise));
+static_assert(turnedframe::PortraitInverted == static_cast<int>(GfxRenderer::PortraitInverted));
+static_assert(turnedframe::LandscapeCounterClockwise == static_cast<int>(GfxRenderer::LandscapeCounterClockwise));
 
 // A vertical page's draw scope: the reader's offsets become the content frame's, the renderer draws in that frame, and
 // the orientation found on entry is back on every exit. A horizontal page takes none of it.
