@@ -898,7 +898,8 @@ Steps: `cmd:<TEXT>` (send `CMD:<TEXT>`, fail on an error reply; `GET:*`, `FS:LS:
 of their reply), `state` and `check:<key>=<regex>` (test a field of the last `STATE`), `idle[:<ms>[:SCREEN]]`,
 `shot:<file.png>`, `wait:<seconds>`, `expect:<regex>:<seconds>` (wait for a log line), `select:<regex>[:<n>]` (press
 Down, waiting for each press to land, until the selected row's label matches; at most n presses, 40 by default),
-`page:<out.txt>` (the `PAGE` dump into a file, with a one-line summary), `put:<local>:<remote>`
+`page:<out.txt>` (the `PAGE` dump into a file, with a one-line summary; it fails when the dump is not whole: an
+element or a word missing, out of order or garbled, as bytes lost on the link would leave it), `put:<local>:<remote>`
 and `get:<remote>:<local>[:<retries>]` (a file each way, checked by its size and CRC32; the rate is printed; a `get:`
 that fails says how many bytes came and with which CRC, cancels, and tries again up to `<retries>` times),
 `hash:<remote>[=<local>]` (with a local file, fail unless size and CRC32 match), `mkdir:<remote>`, `mv:<from>:<to>`. A

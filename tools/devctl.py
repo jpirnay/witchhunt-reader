@@ -17,7 +17,8 @@ them all and exits non-zero if any failed).
   expect:<regex>:<sec>  read until an output line matches (re.search), fail otherwise
   select:<regex>[:<n>]  press Down, waiting for each, until STATE's label matches (re.fullmatch); at most n
                         presses (default 40). The label is checked first, so a row already selected takes none.
-  page:<out.txt>        CMD:PAGE, write the reader's page dump (its PAGE_ lines) to the file, print a summary
+  page:<out.txt>        CMD:PAGE, write the reader's page dump (its PAGE_ lines) to the file, print a summary;
+                        fails when the dump is not whole (a line or a word missing, out of order or garbled)
   put:<local>:<remote>  upload a file (CMD:FS:PUT), checked by its CRC32
   get:<remote>:<local>[:<n>]  download a file (CMD:FS:GET), acknowledging each piece, checked by its size and
                         CRC32; after a failure, tried again up to n times (default 0)
@@ -104,6 +105,52 @@ def split_fields(text):
                 i += 1
         fields[key] = "".join(value)
     return fields
+
+
+PAGE_LINE_FORMS = {
+    "PAGE_LINE": re.compile(r"(\d+) x=-?\d+ y=-?\d+ words=(\d+) align=\w+ vertical=[01]"),
+    "PAGE_W": re.compile(r'(\d+) x=-?\d+ w=-?\d+ style=\d+ glue=[01] text="(?:[^"\\]|\\.)*"( .*)?'),
+    "PAGE_IMAGE": re.compile(r"(\d+) x=-?\d+ y=-?\d+ w=-?\d+ h=-?\d+"),
+    "PAGE_EL": re.compile(r"(\d+) \w+"),
+}
+
+
+def check_page(lines):
+    """None when a CMD:PAGE dump is whole, else what is wrong with it. The dump has no checksum, but its shape gives a
+    lost packet away: every element numbered in turn, a line's words all there and numbered, PAGE_END's count."""
+    start = re.fullmatch(r"PAGE_START:spine=\S+ page=\S+ flow=\S+ elements=(\d+)", lines[0])
+    if not start:
+        return f"bad first line {lines[0]!r}"
+    elements = int(start.group(1))
+    element = 0
+    words_left = 0
+    word = 0
+    for line in lines[1:-1]:
+        kind, _, rest = line.partition(":")
+        form = PAGE_LINE_FORMS.get(kind)
+        match = form.fullmatch(rest) if form else None
+        if not match:
+            return f"garbled line {line[:60]!r}"
+        if kind == "PAGE_W":
+            if words_left == 0 or int(match.group(1)) != word:
+                return f"word out of place in element {element - 1}: {line[:60]!r}"
+            word += 1
+            words_left -= 1
+            continue
+        if words_left:
+            return f"element {element - 1} lacks {words_left} words"
+        if int(match.group(1)) != element:
+            return f"element {match.group(1)} where {element} was due"
+        element += 1
+        if kind == "PAGE_LINE":
+            words_left = int(match.group(2))
+            word = 0
+    if words_left:
+        return f"element {element - 1} lacks {words_left} words"
+    end = re.fullmatch(r"PAGE_END:(\d+)( .*)?", lines[-1])
+    if not end or int(end.group(1)) != elements or element != elements:
+        return f"{element} elements of {elements}, ended by {lines[-1]!r}"
+    return None
 
 
 class Device:
@@ -272,6 +319,9 @@ class Device:
             return f"no PAGE_END after {len(lines)} lines (the last {lines[-1][:60]!r})"
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines) + "\n")
+        damage = check_page(lines)
+        if damage:
+            return f"the dump is not whole ({damage}; bytes lost on the link?), written to {path} as it came"
         start = split_fields(lines[0][len("PAGE_START:"):])
         text_lines = sum(line.startswith("PAGE_LINE:") for line in lines)
         words = sum(line.startswith("PAGE_W:") for line in lines)
