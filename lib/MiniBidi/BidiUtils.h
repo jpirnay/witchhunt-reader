@@ -42,7 +42,8 @@ inline constexpr size_t kWorkspaceBytes = 1536;  // BIDI_MAX_LINE bidi_chars; st
 // Orders cps[0..count) (logical) at paragraphLevel (0 or 1; no autodetection) with one do_bidi in the shared
 // workspace. On true: visual[v] is the logical index drawn at visual position v and drawn[v] the code point drawn
 // there (mirrored by L4); each run of transparent marks follows its base, as applyBidiVisual emits it. False, the
-// outputs untouched, for count 0, count > kMaxLineCodepoints, or no workspace.
+// outputs untouched, for count 0, count > kMaxLineCodepoints, or no workspace. Unlike applyBidiVisual it drops
+// nothing: ZWJ, ZWNJ and the explicit controls stay in `drawn`, so the caller filters what it does not draw.
 bool orderLine(const uint32_t* cps, size_t count, int paragraphLevel, uint16_t* visual, uint32_t* drawn);
 
 // witchhunt: deviation 11
@@ -56,7 +57,8 @@ int strongLevel(uint32_t cp);
 
 // witchhunt: deviation 1
 // While bound, `buffer` (kWorkspaceBytes, 4-aligned) is the shared workspace and nothing is allocated; nullptr
-// unbinds. A heap workspace allocated earlier stays until releaseWorkspace().
+// unbinds. A heap workspace allocated earlier stays until releaseWorkspace(). The buffer must outlive the binding:
+// unbind (or releaseWorkspace()) before freeing or reusing it.
 void bindWorkspace(void* buffer);
 
 // witchhunt: deviation 11
