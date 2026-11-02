@@ -33,7 +33,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 106;  // v106: a vertical line's flags bit 3 says its marks are
+constexpr uint8_t SECTION_FILE_VERSION = 107;  // v107: a vertical line's Combine annotation record (tate-chu-yoko),
+                                               // which reserves no band
+                                               // v106: a vertical line's flags bit 3 says its marks are
                                                // centred (Traditional Chinese); placed marks shift ink
                                                // v105: a vertical section keeps no widows or orphans, and an
                                                // image-only vertical page is centred across its block extent

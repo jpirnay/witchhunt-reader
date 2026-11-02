@@ -712,3 +712,192 @@ TEST_F(VerticalLayout, ACentredMarkPushedInShiftsByHalf) {
   ASSERT_EQ(vertical[0].words, horizontal[0].words);
   EXPECT_EQ((std::vector<int16_t>{0, 16, 28, 44, 56, 72, 84, 100}), horizontal[0].xpos);
 }
+
+namespace {
+// Tate-chu-yoko: `all` on one class, `digits 2` on another.
+constexpr const char* kCombineCss = ".tcy { text-combine-upright: all } .d2 { text-combine-upright: digits 2 }\n";
+// The Combine record of a line's second word.
+constexpr const char* kCombinedSecondWord = "   C first=1 count=1\n";
+
+int combineRecords(const std::string& dump) { return occurrences(dump, " C first="); }
+
+// The word each body line's C record names, in dump order.
+std::vector<std::string> combinedWords(const std::string& dump) {
+  std::vector<std::string> combined;
+  std::vector<std::string> line;
+  std::istringstream in(dump);
+  std::string row;
+  while (std::getline(in, row)) {
+    if (row.rfind("  LINE ", 0) == 0) {
+      line.clear();
+    } else if (row.rfind("   W x=", 0) == 0 && row.find(" t=") != std::string::npos) {
+      line.push_back(row.substr(row.find(" t=") + 3));
+    } else if (row.rfind("   C first=", 0) == 0) {
+      const size_t first = std::stoul(row.substr(11));
+      combined.push_back(first < line.size() ? line[first] : "?");
+    }
+  }
+  return combined;
+}
+
+// Whether `text` is one of the dump's body words, whole.
+bool hasWord(const std::string& dump, const std::string& text) {
+  for (const DumpedWord& word : dumpedWords(dump)) {
+    if (word.text == text) return true;
+  }
+  return false;
+}
+
+// The PAGE and LINE rows of a dump: where every page breaks and every line sits.
+std::string pagesAndLines(const std::string& dump) {
+  std::string rows;
+  std::istringstream in(dump);
+  std::string row;
+  while (std::getline(in, row)) {
+    if (row.rfind(" PAGE ", 0) == 0 || row.rfind("  LINE ", 0) == 0) rows += row + "\n";
+  }
+  return rows;
+}
+}  // namespace
+
+// A run the book sets upright is one em down its column, as one upright character is: no CJK-Latin gap on either
+// side. Sideways, 13 runs its horizontal advance, 6 + 8 in the stub (6 + cp % 7), with a quarter-em gap (16 / 4) on
+// each side.
+TEST_F(VerticalLayout, AFlaggedNumberIsCombinedAndTakesOneEm) {
+  const pipeline_harness::Profile on = profileOf(VerticalText::On);
+  const std::string combined = dump(kCombineCss, document("<p>前<a class=\"tcy\">13</a>後</p>"), on);
+  const std::string sideways = dump(kCombineCss, document("<p>前<a>13</a>後</p>"), on);
+  EXPECT_EQ(1, occurrences(combined, kCombinedSecondWord)) << combined;
+  EXPECT_EQ(0, combineRecords(sideways)) << sideways;
+
+  const std::vector<DumpedWord> upright = dumpedWords(combined);
+  ASSERT_EQ(3u, upright.size()) << combined;
+  EXPECT_EQ("13", upright[1].text);
+  EXPECT_EQ(upright[0].x + 16, upright[1].x);
+  EXPECT_EQ(upright[1].x + 16, upright[2].x) << combined;
+
+  const std::vector<DumpedWord> run = dumpedWords(sideways);
+  ASSERT_EQ(3u, run.size()) << sideways;
+  EXPECT_EQ(run[0].x + 16 + 4, run[1].x);
+  EXPECT_EQ(run[1].x + 6 + 8 + 4, run[2].x) << sideways;
+}
+
+// The acceptance book's chapter numbers are internal links, which take their own path through the parser. Without
+// inline previews, so the note's text (x) does not follow the link.
+TEST_F(VerticalLayout, AnInternalLinkCombines) {
+  pipeline_harness::Profile on = profileOf(VerticalText::On);
+  on.inlineFootnotePreviews = false;
+  const std::string dumped =
+      dump(kCombineCss, document("<p>第<a href=\"#n\" class=\"tcy\">10</a>章</p>\n<p id=\"n\">x</p>"), on);
+  EXPECT_EQ(1, combineRecords(dumped)) << dumped;
+  EXPECT_EQ(1, occurrences(dumped, kCombinedSecondWord)) << dumped;
+  const std::vector<DumpedWord> words = dumpedWords(dumped);
+  ASSERT_GE(words.size(), 3u) << dumped;
+  EXPECT_EQ("10", words[1].text);
+  EXPECT_EQ(words[1].x + 16, words[2].x) << dumped;
+}
+
+// `digits 2` on the paragraph reaches its words: 12 combines; 123 is a digit too many, and the kanji are no digits.
+TEST_F(VerticalLayout, DigitsTwoCombinesOnlyTwoDigits) {
+  const std::string dumped =
+      dump(kCombineCss, document("<p class=\"d2\">第12章と第123章</p>"), profileOf(VerticalText::On));
+  EXPECT_EQ(1, combineRecords(dumped)) << dumped;
+  EXPECT_EQ(1, occurrences(dumped, kCombinedSecondWord)) << dumped;
+  EXPECT_EQ(std::vector<std::string>{"12"}, combinedWords(dumped)) << dumped;
+}
+
+// A ruby group whose base combines. The base is one em (24) down the column and the four kana (8 px each, 32) are
+// wider, so applyRubyWidths widens the base's share to 32 and centres the em in it: the word sits 8 in from the group's
+// x. The base's xpos is what the ruby record follows: the box (w = 32) sits 8 before the base, and the base is one em
+// (24) wide though the annotation is wider. Alone: box 4, base 12, next word 36. After a character (x = 4, one em) the
+// base is 28, the box 20 (28 - 8) and the next word 52 (28 + 24): the record moved with the word, 16 right of alone.
+TEST_F(VerticalLayout, ACombinedWordCanBeARubyBase) {
+  const pipeline_harness::Profile on = profileOf(VerticalText::On);
+  const std::string alone =
+      dump(kCombineCss, document("<p><ruby><span class=\"tcy\">12</span><rt>じゅうに</rt></ruby>後</p>"), on);
+  const std::string after =
+      dump(kCombineCss, document("<p>前<ruby><span class=\"tcy\">12</span><rt>じゅうに</rt></ruby>後</p>"), on);
+  EXPECT_EQ(std::vector<std::string>{"12"}, combinedWords(alone)) << alone;
+  EXPECT_EQ(std::vector<std::string>{"12"}, combinedWords(after)) << after;
+  EXPECT_EQ(1, occurrences(alone, "   R first=0 count=1 x=4 w=32 ")) << alone;
+  EXPECT_EQ(1, occurrences(after, "   R first=1 count=1 x=20 w=32 ")) << after;
+  const std::vector<DumpedWord> first = dumpedWords(alone);
+  const std::vector<DumpedWord> second = dumpedWords(after);
+  ASSERT_EQ(2u, first.size()) << alone;
+  ASSERT_EQ(3u, second.size()) << after;
+  EXPECT_EQ(12, first[0].x);
+  EXPECT_EQ(36, first[1].x);
+  EXPECT_EQ(28, second[1].x);
+  EXPECT_EQ(52, second[2].x);
+}
+
+// A flagged word that does not combine is never hyphenated down a column: a piece of it short enough to combine on a
+// later pass (a page-boundary retry, a continuation) would set it half upright. abcdefgh (12 + 6 + 7 + 8 + 9 + 10 + 11
+// + 12 = 75 px, eight characters) is wider than the 48 px column (60 rounded down to whole ems), so unflagged it is
+// split, with hyphenation and without; flagged it stays whole.
+TEST_F(VerticalLayout, AFlaggedWordIsNeverHyphenatedInAColumn) {
+  for (const bool hyphenation : {false, true}) {
+    pipeline_harness::Profile on = profileOf(VerticalText::On, 460, 60);
+    on.hyphenationEnabled = hyphenation;
+    const std::string flagged = dump(kCombineCss, document("<p>ab <span class=\"tcy\">abcdefgh</span> cd</p>"), on);
+    const std::string plain = dump(kCombineCss, document("<p>ab <span>abcdefgh</span> cd</p>"), on);
+    EXPECT_FALSE(hasWord(plain, "abcdefgh")) << "hyphenation " << hyphenation << "\n" << plain;
+    EXPECT_TRUE(hasWord(flagged, "abcdefgh")) << "hyphenation " << hyphenation << "\n" << flagged;
+    EXPECT_EQ(0, combineRecords(flagged)) << flagged;
+  }
+}
+
+// `all` over five characters, over a run with an upright character in it, or over a run wider than two ems (abcd is
+// 12 + 6 + 7 + 8 = 33 px against an em of 16 in the stub) sets the run as without the flag. Four narrow digits (1234,
+// 6 + 7 + 8 + 9 = 30 px) do combine.
+TEST_F(VerticalLayout, AllOverLongOrUprightTextDoesNotCombine) {
+  const pipeline_harness::Profile on = profileOf(VerticalText::On);
+  for (const char* const run : {"abcde", "第1", "abcd"}) {
+    const std::string flagged =
+        dump(kCombineCss, document("<p>前<span class=\"tcy\">" + std::string(run) + "</span>後</p>"), on);
+    const std::string plain = dump(kCombineCss, document("<p>前<span>" + std::string(run) + "</span>後</p>"), on);
+    EXPECT_EQ(0, combineRecords(flagged)) << flagged;
+    EXPECT_EQ(plain, flagged) << run;
+  }
+  EXPECT_EQ(1, combineRecords(dump(kCombineCss, document("<p>前<span class=\"tcy\">1234</span>後</p>"), on)));
+}
+
+// A combined word reserves no annotation band: its line is as tall as without it, so the lines after it and the page
+// break stay where they were. 48 px across holds two 24 px lines, so a band on the second line would push it onto a
+// page of its own. With a lent arena the parser's page-fit test also runs before the line exists (beforeLine_).
+TEST_F(VerticalLayout, ACombinedWordReservesNoBand) {
+  const std::string flagged = document("<p>本</p>\n<p>前<a class=\"tcy\">13</a>後</p>\n<p>次</p>");
+  const std::string plain = document("<p>本</p>\n<p>前<a>13</a>後</p>\n<p>次</p>");
+  for (const size_t lent : {size_t{0}, size_t{64 * 1024}}) {
+    for (const uint16_t across : {uint16_t{460}, uint16_t{48}}) {
+      pipeline_harness::Profile on = profileOf(VerticalText::On, across);
+      on.lentArenaBytes = lent;
+      const std::string combined = dump(kCombineCss, flagged, on);
+      const std::string sideways = dump(kCombineCss, plain, on);
+      EXPECT_EQ(1, occurrences(combined, kCombinedSecondWord)) << combined;
+      EXPECT_EQ(pagesAndLines(sideways), pagesAndLines(combined)) << "lent " << lent << ", across " << across;
+      if (across == 48) {
+        EXPECT_EQ(2, occurrences(sideways, " PAGE ")) << sideways;
+      }
+    }
+  }
+}
+
+// On a horizontal page the flag changes nothing: the book without the classes dumps byte-identical, with bionic
+// reading too. foo<span class="tcy">ba</span>r: a span that only asks to combine is no style run there, so the word is
+// not cut in three; <b class="tcy">: the flag that rides on the bold run does not keep bionic reading off the word.
+TEST_F(VerticalLayout, HorizontalIgnoresTheFlag) {
+  const std::string flagged = document(
+      "<p>前<a class=\"tcy\">13</a>後</p>\n<p class=\"d2\">第12章と第123章</p>\n"
+      "<p>foo<span class=\"tcy\">ba</span>r x<b class=\"tcy\">abcd</b>y</p>");
+  const std::string plain = document(
+      "<p>前<a>13</a>後</p>\n<p>第12章と第123章</p>\n"
+      "<p>foo<span>ba</span>r x<b>abcd</b>y</p>");
+  for (const bool bionic : {false, true}) {
+    pipeline_harness::Profile off = profileOf(VerticalText::Off);
+    off.bionicReadingEnabled = bionic;
+    const std::string combined = dump(kCombineCss, flagged, off);
+    EXPECT_EQ(0, combineRecords(combined)) << combined;
+    EXPECT_EQ(dump(kCombineCss, plain, off), combined) << "bionic " << bionic;
+  }
+}

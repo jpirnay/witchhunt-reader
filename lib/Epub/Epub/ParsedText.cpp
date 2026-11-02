@@ -18,6 +18,7 @@
 #include "Epub/VisibleText.h"
 #include "TextEmphasis.h"
 #include "VerticalDraw.h"
+#include "VerticalOrientation.h"
 #include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
 
@@ -123,6 +124,22 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
   }
   if (scale == 1.0f) return static_cast<uint16_t>(raw);
   return static_cast<uint16_t>(raw * scale + 0.5f);
+}
+
+// The most code points a combined word may have (tate-chu-yoko): a longer run stays sideways.
+constexpr int kMaxCombinedCodepoints = 4;
+
+// Whether text-combine-upright `mode` (a CssTextCombine) asks for `token` to combine: every token under `all`; under
+// `digits N` a token of 1 to N ASCII digits and nothing else. The rest of the rule is layout's (ParsedText::combines).
+bool combineRequestedFor(const uint8_t mode, const std::string_view token) {
+  const auto combine = static_cast<CssTextCombine>(mode);
+  if (combine == CssTextCombine::All) return true;
+  if (combine != CssTextCombine::Digits2 && combine != CssTextCombine::Digits3 && combine != CssTextCombine::Digits4) {
+    return false;
+  }
+  const size_t maxDigits = 2 + (mode - static_cast<uint8_t>(CssTextCombine::Digits2));
+  return !token.empty() && token.size() <= maxDigits &&
+         std::all_of(token.begin(), token.end(), [](const char c) { return c >= '0' && c <= '9'; });
 }
 
 // The em of CJK text in this face and size: the advance of 一. 0 when the face has no 一 of its own: a Latin font
@@ -288,7 +305,7 @@ void ParsedText::pushToken(std::string token, const EpdFontFamily::Style style, 
 
 void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle, const bool underline,
                          const bool attachToPrevious, const uint8_t sizePct, const uint32_t visibleOffset,
-                         uint8_t fontSlot, const uint8_t textEmphasis) {
+                         uint8_t fontSlot, const uint8_t textEmphasis, const uint8_t textCombine) {
   if (word.empty()) return;
   if (fontSlot >= TextBlock::kMaxWordFonts) fontSlot = 0;
   if (wordGrowthRefused_) return;  // the parse is being aborted; see wordGrowthRefused()
@@ -364,18 +381,24 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     }
   }
 
-  // Every token of the word carries the mark: it travels with the token through splits and erases.
+  // Every token of the word carries the mark, and the combine request where the word's mode asks for the token: both
+  // travel with the token through splits and erases.
+  const auto marked = [&](const TokenBoundary::Boundary b, const std::string_view token) {
+    return TokenBoundary::withCombineRequested(TokenBoundary::withEmphasis(b, textEmphasis),
+                                               combineRequestedFor(textCombine, token));
+  };
   if (cuts.empty()) {
-    pushToken(std::move(word), combinedStyle, TokenBoundary::withEmphasis(boundary, textEmphasis), size, visibleOffset,
-              fontSlot);
+    const TokenBoundary::Boundary only = marked(boundary, word);
+    pushToken(std::move(word), combinedStyle, only, size, visibleOffset, fontSlot);
     return;
   }
   size_t start = 0;
   uint32_t offset = visibleOffset;
   for (size_t i = 0; i <= cuts.size(); ++i) {
     const size_t end = i < cuts.size() ? cuts[i].at : word.size();
-    pushToken(word.substr(start, end - start), combinedStyle, TokenBoundary::withEmphasis(boundary, textEmphasis), size,
-              offset, fontSlot);
+    std::string token = word.substr(start, end - start);
+    const TokenBoundary::Boundary tokenBoundary = marked(boundary, token);
+    pushToken(std::move(token), combinedStyle, tokenBoundary, size, offset, fontSlot);
     // The next token starts where this one's visible bytes end (KOSync positions).
     offset += static_cast<uint32_t>(VisibleText::visibleBytes(word.data() + start, static_cast<int>(end - start)));
     if (i < cuts.size()) {
@@ -437,8 +460,11 @@ int ParsedText::cjkLatinGapBefore(const GfxRenderer& renderer, const int fontId,
   if (!typography_.cjkLatinGap) return 0;
   const TokenBoundary::Boundary& boundary = wordBoundaries[j];
   if (boundary.continues || !boundary.noSpaceBefore) return 0;
-  const uint32_t left = lastCodepoint(words[j - 1]);
-  const uint32_t right = firstCodepoint(words[j]);
+  // A combined word sets as one upright character, as unspaced CJK does: 一 stands for it, so it takes no gap beside
+  // CJK, the only neighbour a combined run of Latin letters or digits meets across a CJK gap.
+  constexpr uint32_t kIdeographOne = 0x4E00;
+  const uint32_t left = combines(j - 1) ? kIdeographOne : lastCodepoint(words[j - 1]);
+  const uint32_t right = combines(j) ? kIdeographOne : firstCodepoint(words[j]);
   if (!CjkPunctuation::takesCjkLatinGap(left, right)) return 0;
   // The gap is a quarter of the CJK character's em, in its own face and size.
   const size_t k = CjkPunctuation::isHanOrKana(left) ? j - 1 : j;
@@ -810,9 +836,8 @@ bool ParsedText::addRubyGroup(const size_t firstToken, const size_t tokenCount, 
       TokenBoundary::withRubyRole(TokenBoundary::Boundary{true, false}, TokenBoundary::RubyRole::Follower);
   size_t end = firstToken + tokenCount;
   for (size_t i = firstToken + 1; i < end; ++i) {
-    // Every token of the base keeps its word's emphasis mark, the inserted space too.
-    const TokenBoundary::Boundary glued =
-        TokenBoundary::withEmphasis(kGluedFollower, TokenBoundary::emphasisOf(wordBoundaries[i]));
+    // Every token of the base keeps its word's emphasis mark and combine request, the inserted space too.
+    const TokenBoundary::Boundary glued = TokenBoundary::withWordMarks(kGluedFollower, wordBoundaries[i]);
     if (TokenBoundary::hasSpace(wordBoundaries[i])) {
       words.insert(words.begin() + i, " ");
       wordStyles.insert(wordStyles.begin() + i, wordStyles[i]);
@@ -844,6 +869,7 @@ void ParsedText::releaseLayoutScratch() {
   std::vector<int8_t>().swap(edgeTrim_);
   std::vector<uint8_t>().swap(shrink_);
   std::vector<uint8_t>().swap(edgeShrink_);
+  std::vector<uint8_t>().swap(combined_);
   std::vector<RubyEdge>().swap(rubyEdge_);
   std::vector<size_t>().swap(lineBreakIndices_);
   std::vector<bool>().swap(lineEndsWithHyphenatedWord_);
@@ -896,13 +922,50 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
   out.clear();
   out.reserve(words.size());
 
+  decideCombined(renderer, fontId);
   for (size_t i = 0; i < words.size(); ++i) {
-    out.push_back(
-        measureWordWidth(renderer, wordFontId(i, fontId), words[i], wordStyles[i], false, wordScale(i), vertical_));
+    const int font = wordFontId(i, fontId);
+    // A combined word is one em down its column, whatever its glyphs' advances.
+    out.push_back(combines(i)
+                      ? static_cast<uint16_t>(columnEm(renderer, font, wordStyles[i], wordScale(i)))
+                      : measureWordWidth(renderer, font, words[i], wordStyles[i], false, wordScale(i), vertical_));
   }
   applyPunctuationWidths(renderer, fontId, out);
   // After the marks are narrowed: a narrowed mark lends a ruby only its narrowed width.
   applyRubyWidths(renderer, fontId, out);
+}
+
+void ParsedText::decideCombined(const GfxRenderer& renderer, const int fontId) {
+  combined_.clear();
+  if (!vertical_) return;
+  const auto flagged = std::find_if(wordBoundaries.begin(), wordBoundaries.end(),
+                                    [](const TokenBoundary::Boundary b) { return TokenBoundary::combineRequested(b); });
+  if (flagged == wordBoundaries.end()) return;
+  combined_.assign(words.size(), 0);
+  for (size_t i = static_cast<size_t>(flagged - wordBoundaries.begin()); i < words.size(); ++i) {
+    combined_[i] = fitsCombined(renderer, fontId, i) ? 1 : 0;
+  }
+}
+
+bool ParsedText::fitsCombined(const GfxRenderer& renderer, const int fontId, const size_t i) const {
+  const auto flagged = [&](const size_t k) { return TokenBoundary::combineRequested(wordBoundaries[k]); };
+  if (!flagged(i)) return false;
+  // The flagged run is this token alone: a run the CJK rules cut into tokens (第1), or one spread over two elements,
+  // is more than one block.
+  if (i > 0 && flagged(i - 1) && !TokenBoundary::hasSpace(wordBoundaries[i])) return false;
+  if (i + 1 < words.size() && flagged(i + 1) && !TokenBoundary::hasSpace(wordBoundaries[i + 1])) return false;
+  int codepoints = 0;
+  for (const auto* p = reinterpret_cast<const unsigned char*>(words[i].c_str()); *p;) {
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (cp == 0x00AD) continue;  // a soft hyphen is not drawn
+    if (++codepoints > kMaxCombinedCodepoints || drawsUpright(cp)) return false;
+  }
+  if (codepoints == 0) return false;
+  // Set side by side across the column, the run fits the em at no less than kMinCombineScale.
+  const int font = wordFontId(i, fontId);
+  const int across = measureWordWidth(renderer, font, words[i], wordStyles[i], false, wordScale(i));
+  const int em = columnEm(renderer, font, wordStyles[i], wordScale(i));
+  return em > 0 && static_cast<float>(across) * kMinCombineScale <= static_cast<float>(em);
 }
 
 int ParsedText::rubyWidth(const GfxRenderer& renderer, const int fontId, const size_t leader,
@@ -1351,6 +1414,16 @@ void ParsedText::applyBionicReadingTransform() {
     const TextBlock::WordSize originalSize = wordSizes[i];
     const uint32_t originalOffset = wordVisibleOffsets[i];
 
+    // A run the book asks to set upright down a column stays one token: a bold prefix would cut it.
+    if (vertical_ && TokenBoundary::combineRequested(originalBoundary)) {
+      transformedSuffix.push_back(std::move(source));
+      transformedSuffixStyles.push_back(originalStyle);
+      transformedSuffixBoundaries.push_back(originalBoundary);
+      transformedSuffixSizes.push_back(originalSize);
+      transformedSuffixOffsets.push_back(originalOffset);
+      continue;
+    }
+
     const auto spans = tokenizeBionicWord(source);
     if (spans.empty()) {
       continue;
@@ -1358,9 +1431,9 @@ void ParsedText::applyBionicReadingTransform() {
 
     // The first span keeps the word's own boundary; every span after it is glued to the one before.
     // A span of a ruby base after the first belongs to the base's group.
-    // Every span keeps the word's emphasis mark.
+    // Every span keeps the word's emphasis mark and combine request.
     TokenBoundary::Boundary kGlued =
-        TokenBoundary::withEmphasis(TokenBoundary::Boundary{true, false}, TokenBoundary::emphasisOf(originalBoundary));
+        TokenBoundary::withWordMarks(TokenBoundary::Boundary{true, false}, originalBoundary);
     if (TokenBoundary::rubyRole(originalBoundary) != TokenBoundary::RubyRole::None) {
       kGlued = TokenBoundary::withRubyRole(kGlued, TokenBoundary::RubyRole::Follower);
     }
@@ -1639,8 +1712,11 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   if (availableWidth <= 0 || wordIndex >= words.size()) {
     return false;
   }
-  // A ruby base is never split: its ruby sits over the whole of it.
-  if (TokenBoundary::rubyRole(wordBoundaries[wordIndex]) != TokenBoundary::RubyRole::None) {
+  // A ruby base is never split: its ruby sits over the whole of it. Nor, down a column, is a word the book asks to
+  // combine: combined it is one em; not, a piece of it short enough to combine on a later pass would set it half
+  // upright.
+  if (TokenBoundary::rubyRole(wordBoundaries[wordIndex]) != TokenBoundary::RubyRole::None ||
+      (vertical_ && TokenBoundary::combineRequested(wordBoundaries[wordIndex]))) {
     return false;
   }
 
@@ -1727,10 +1803,9 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // This lets the backtracking loop keep the entire prefix group ("200 Quadrat-") on one
   // line, while "kilometer" moves to the next line.
   // wordBoundaries[wordIndex] is intentionally left unchanged — the prefix keeps its original attachment.
-  // The remainder keeps the word's emphasis mark.
-  wordBoundaries.insert(
-      wordBoundaries.begin() + wordIndex + 1,
-      TokenBoundary::withEmphasis(TokenBoundary::Boundary{}, TokenBoundary::emphasisOf(wordBoundaries[wordIndex])));
+  // The remainder keeps the word's emphasis mark and combine request.
+  wordBoundaries.insert(wordBoundaries.begin() + wordIndex + 1,
+                        TokenBoundary::withWordMarks(TokenBoundary::Boundary{}, wordBoundaries[wordIndex]));
 
   // Update cached widths to reflect the new prefix/remainder pairing.
   wordWidths[wordIndex] = static_cast<uint16_t>(chosenWidth);
@@ -1740,6 +1815,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   edgeTrim_.insert(edgeTrim_.begin() + wordIndex + 1, 0);
   shrink_.insert(shrink_.begin() + wordIndex + 1, 0);
   edgeShrink_.insert(edgeShrink_.begin() + wordIndex + 1, 0);
+  if (!combined_.empty()) combined_.insert(combined_.begin() + wordIndex + 1, 0);  // a split word did not combine
   // A split word is never a ruby base (refused above): its remainder holds no ruby reserve either.
   if (!rubyEdge_.empty()) rubyEdge_.insert(rubyEdge_.begin() + wordIndex + 1, RubyEdge{});
   if (outInsertedHyphen) {
@@ -2013,8 +2089,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   }
 
   // One Emphasis record per run of consecutive tokens with the same mark, outside ruby groups (ruby wins over a mark
-  // on the same base). The records join the ruby boxes in firstWord order; the runs and boxes never overlap.
-  const size_t rubyRecords = lineAnnotations_.size();
+  // on the same base). The runs and the ruby boxes never overlap.
   for (size_t wordIdx = 0; wordIdx < lineWordCount;) {
     const TokenBoundary::Boundary b = boundaries[lastBreakAt + wordIdx];
     const uint8_t mark = TokenBoundary::emphasisOf(b);
@@ -2045,9 +2120,24 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     a.mark = mark;
     wordIdx = end;
   }
-  if (rubyRecords != 0 && lineAnnotations_.size() > rubyRecords) {
-    std::sort(lineAnnotations_.begin(), lineAnnotations_.end(),
-              [](const TextBlock::Annotation& l, const TextBlock::Annotation& r) { return l.firstWord < r.firstWord; });
+  // One Combine record per combined word: its cell, one em from where it is drawn (TextBlock sets it upright there).
+  for (size_t wordIdx = 0; !combined_.empty() && wordIdx < lineWordCount; ++wordIdx) {
+    const size_t i = lastBreakAt + wordIdx;
+    if (!combines(i)) continue;
+    TextBlock::Annotation& a = lineAnnotations_.emplace_back();
+    a.firstWord = static_cast<uint16_t>(wordIdx);
+    a.wordCount = 1;
+    a.x = lineXPos[wordIdx];
+    a.width = static_cast<uint16_t>(columnEm(renderer, wordFontId(i, fontId), wordStyles[i], wordScale(i)));
+    a.kind = TextBlock::AnnotationKind::Combine;
+  }
+  // The records go in firstWord order (a ruby box or an emphasis run and a combined word may start at the same word:
+  // then by kind). Each kind is in order already.
+  const auto inLineOrder = [](const TextBlock::Annotation& l, const TextBlock::Annotation& r) {
+    return l.firstWord != r.firstWord ? l.firstWord < r.firstWord : l.kind < r.kind;
+  };
+  if (!std::is_sorted(lineAnnotations_.begin(), lineAnnotations_.end(), inLineOrder)) {
+    std::sort(lineAnnotations_.begin(), lineAnnotations_.end(), inLineOrder);
   }
 
   // Address the line's words in place. The source is left intact so retry paths can still
@@ -2074,7 +2164,11 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     for (size_t wordIdx = 0; wordIdx < lineWordCount; wordIdx++) {
       maxPct = std::max(maxPct, wordSizes[lastBreakAt + wordIdx].pct);
     }
-    beforeLine_(maxPct, !lineAnnotations_.empty());
+    // Only a ruby or an emphasis run is drawn in the band above the line: a combined word is drawn in its cell.
+    const bool band = std::any_of(lineAnnotations_.begin(), lineAnnotations_.end(), [](const TextBlock::Annotation& a) {
+      return a.kind != TextBlock::AnnotationKind::Combine;
+    });
+    beforeLine_(maxPct, band);
   }
 
   // TextBlock flattens the range into its arena on construct; on arena OOM the

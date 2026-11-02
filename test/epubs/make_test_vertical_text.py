@@ -60,6 +60,8 @@ p { margin: 0; text-indent: 1em }
 h2 { margin: 0; text-indent: 0; font-size: 1em }
 td { padding: 0 }
 .ul { text-decoration: underline }
+.tcy { text-combine-upright: all }
+.d2 { text-combine-upright: digits 2 }
 """
 
 
@@ -118,6 +120,8 @@ SPINE1 = (
     "忘れられていた一つの約束を思い出すことになる。それはまた別の夜の話である。</p>\n"
     "<p>小さな仮名を並べておく。ぁぃぅぇぉっゃゅょゎ、ァィゥェォッャュョ。彼は「もう行く。」と言い、娘は"
     "『待って、』と呼びとめた（古い本にはそう書いてある、）。</p>\n"
+    '<h2><a href="ch2.xhtml" class="tcy">13</a>　章</h2>\n'
+    '<p>第<span class="tcy">12</span>夜、<span class="d2">123</span>人の旅人が<span class="d2">45</span>日歩いた。</p>\n'
 )
 
 SPINE2 = (

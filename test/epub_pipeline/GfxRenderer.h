@@ -182,13 +182,14 @@ class GfxRenderer {
     Orientation frame;
     int x;
     int y;
+    float scale;
   };
   mutable std::vector<TextDraw>* textDraws = nullptr;
   void drawText(int, int x, int y, const char* text, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR) const {
-    if (textDraws) textDraws->push_back({text, live_, x, y});
+    if (textDraws) textDraws->push_back({text, live_, x, y, 1.0f});
   }
-  void drawTextScaled(int, int x, int y, const char* text, bool, EpdFontFamily::Style, float) const {
-    if (textDraws) textDraws->push_back({text, live_, x, y});
+  void drawTextScaled(int, int x, int y, const char* text, bool, EpdFontFamily::Style, float scale) const {
+    if (textDraws) textDraws->push_back({text, live_, x, y, scale});
   }
   void drawCenteredText(int, int, const char*, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR) const {}
   void drawTextRotated90CW(int, int, int, const char*, bool = true,

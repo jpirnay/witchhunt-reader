@@ -33,3 +33,10 @@ void drawTextVertical(const GfxRenderer& renderer, int fontId, int x, int y, con
 // glyph.
 bool columnInk(const GfxRenderer& renderer, int fontId, uint32_t cp, EpdFontFamily::Style style, bool centredMarks,
                int& inkStart, int& inkSize, int& cell);
+
+// Draws `text` upright as one block in a column cell (tate-chu-yoko), called as drawTextVertical is: x the pen along
+// the column, y the line's top. A run wider than the em is shrunk to it; the block is centred across the column and,
+// along it, the em box it fills is centred in the cell [pen, pen + em]. A scan pass draws it plainly. Allocates
+// nothing.
+void drawCombinedVertical(const GfxRenderer& renderer, int fontId, int x, int y, const char* text,
+                          EpdFontFamily::Style style, float scale);

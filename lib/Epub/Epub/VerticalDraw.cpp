@@ -155,3 +155,32 @@ void drawTextVertical(const GfxRenderer& renderer, const int fontId, const int x
     renderer.setDrawOrientation(content);
   }
 }
+
+void drawCombinedVertical(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
+                          const EpdFontFamily::Style style, const float scale) {
+  if (renderer.isFontCacheScanning()) {
+    (void)rawEm(renderer, fontId, style);
+    drawIn(renderer, fontId, x, y, text, style, scale);
+    return;
+  }
+  const GfxRenderer::Orientation reader = renderer.getHeldOrientation();
+  const GfxRenderer::Orientation content = renderer.getOrientation();
+  const int readerWidth = renderer.getScreenWidth(reader);
+  const int ascender = ascenderOf(renderer, fontId, scale);
+  const int rawOne = rawEm(renderer, fontId, style);
+  const int em = rawOne > 0 ? scaled(rawOne, scale) : ascender;
+  const int axis = columnAxis(y + ascender, em);
+
+  // A run wider than the em is shrunk to it, on top of the line's own scale.
+  const int rawWidth = renderer.getTextAdvanceX(fontId, text, style);
+  const int width = scaled(rawWidth, scale);
+  const float runScale = width > em && em > 0 ? scale * static_cast<float>(em) / static_cast<float>(width) : scale;
+  const int runWidth = scaled(rawWidth, runScale);
+  const int runEm = rawOne > 0 ? scaled(rawOne, runScale) : ascenderOf(renderer, fontId, runScale);
+  const int runAscender = ascenderOf(renderer, fontId, runScale);
+
+  renderer.setDrawOrientation(reader);
+  drawIn(renderer, fontId, readerWidth - 1 - axis - runWidth / 2,
+         x + (em - runEm) / 2 + (runEm * 88 + 50) / 100 - runAscender, text, style, runScale);
+  renderer.setDrawOrientation(content);
+}
