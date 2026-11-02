@@ -474,6 +474,14 @@ int ParsedText::cjkLatinGapBefore(const GfxRenderer& renderer, const int fontId,
   return (em * CjkPunctuation::kCjkLatinGap + 4) / 8;
 }
 
+void ParsedText::resolveAlignment(const bool rtl) {
+  if (blockStyle.alignment == CssTextAlign::Start) {
+    blockStyle.alignment = rtl ? CssTextAlign::Right : CssTextAlign::Left;
+  } else if (blockStyle.alignment == CssTextAlign::End) {
+    blockStyle.alignment = rtl ? CssTextAlign::Left : CssTextAlign::Right;
+  }
+}
+
 void ParsedText::layoutAndExtractLines(
     const GfxRenderer& renderer, const int bodyFontId, const uint16_t viewportWidth,
     const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,
@@ -481,6 +489,7 @@ void ParsedText::layoutAndExtractLines(
   if (words.empty()) {
     return;
   }
+  resolveAlignment(false);  // Task 6 passes the paragraph's direction
 
   // preserveSource: take a snapshot now and put it back on the way out, so the caller sees the
   // text exactly as it handed it over. Suppressing the trailing erase alone is not enough --

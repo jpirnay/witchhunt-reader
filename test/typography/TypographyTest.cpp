@@ -44,6 +44,19 @@ TEST(TypographyProfile, KoreanKeepsWholeWordsWithoutGridOrGap) {
   EXPECT_TRUE(ko.verticalAllowed) << "KLREQ sets Korean vertically";
 }
 
+TEST(TypographyProfile, HebrewArabicPersianUrduAndYiddishRunRightToLeft) {
+  for (const char* tag : {"he", "he-IL", "HE", "iw", "yi", "ar", "ar-EG", "fa", "ur"}) {
+    const TypographyProfile p = TypographyProfile::forLanguage(tag);
+    EXPECT_EQ(TypographyProfile::Direction::RightToLeft, p.direction) << tag;
+    EXPECT_EQ(nullptr, p.hyphenator) << tag;
+    EXPECT_FALSE(p.verticalAllowed) << tag;
+    EXPECT_FALSE(p.cjkRepertoire) << tag;
+  }
+  for (const char* tag : {"en", "de", "ja", "hy"}) {
+    EXPECT_EQ(TypographyProfile::Direction::LeftToRight, TypographyProfile::forLanguage(tag).direction) << tag;
+  }
+}
+
 TEST(TypographyProfile, OtherLanguagesKeepLatinRulesAndTheirHyphenation) {
   const TypographyProfile en = TypographyProfile::forLanguage("en-US");
   EXPECT_EQ(en.breaking, TypographyProfile::Breaking::AtSpaces);

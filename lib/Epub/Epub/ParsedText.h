@@ -45,6 +45,10 @@ class ParsedText {
   static constexpr float kMinCombineScale = 0.5f;
 
  private:
+  // Start and End (text-align: start / end, kept for the layout while the direction is unset or auto) become Left or
+  // Right: Start is the right side in a right-to-left paragraph, End the left. Idempotent.
+  void resolveAlignment(bool rtl);
+
   std::vector<std::string> words;
   // Per-line x positions, reused across every line this block produces. Deliberately a member and
   // not a local: as a local it was a fresh heap allocation for EVERY rendered line, whose whole

@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "Epub/blocks/BlockStyle.h"
 #include "LogObserver.h"
 #include "PipelineRunner.h"
 #include "StoredZipWriter.h"
@@ -27,7 +28,8 @@ struct Line {
   int y = 0;
   int x = 0;
   int align = 0;
-  std::string text;  // the line's words joined by single spaces
+  int firstWordX = -1;  // the first word's x
+  std::string text;     // the line's words joined by single spaces
 };
 
 // The dump's text lines, in order (PipelineRunner's "LINE y= x= align=" with its "W ... t=" words).
@@ -43,6 +45,7 @@ std::vector<Line> parseLines(const std::string& dump) {
     } else if (row.rfind("   W ", 0) == 0 && !lines.empty()) {
       const size_t t = row.find(" t=");
       if (t == std::string::npos) continue;
+      if (lines.back().text.empty()) std::sscanf(row.c_str(), "   W x=%d", &lines.back().firstWordX);
       if (!lines.back().text.empty()) lines.back().text += ' ';
       lines.back().text += row.substr(t + 3);
     }
@@ -87,7 +90,7 @@ struct WritingModeLayout : testing::Test {
 
   // A one-chapter book of `xhtml` with `css` as its stylesheet; `spineAttrs` go on its OPF's <spine>.
   std::string writeBook(const std::string& css, const std::string& xhtml, const std::vector<SyntheticFile>& extra = {},
-                        const std::string& spineAttrs = "") {
+                        const std::string& spineAttrs = "", const std::string& lang = "en") {
     const int index = books++;
     std::vector<SyntheticFile> files = extra;
     files.push_back({"style.css", "text/css", std::string(kBaseCss) + css});
@@ -105,8 +108,10 @@ struct WritingModeLayout : testing::Test {
     zip.add("content.opf",
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
             "version=\"3.0\" unique-identifier=\"id\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">"
-            "<dc:identifier id=\"id\">wm</dc:identifier><dc:title>WM</dc:title><dc:language>en</dc:language>"
-            "</metadata>\n<manifest>\n" +
+            "<dc:identifier id=\"id\">wm</dc:identifier><dc:title>WM</dc:title><dc:language>" +
+                lang +
+                "</dc:language>"
+                "</metadata>\n<manifest>\n" +
                 manifest + "</manifest>\n<spine" + spineAttrs + "><itemref idref=\"c\"/></spine>\n</package>\n");
     zip.add("chapter.xhtml", xhtml);
     for (const auto& file : files) zip.add(file.href, file.bytes);
@@ -118,8 +123,9 @@ struct WritingModeLayout : testing::Test {
   // The book built and dumped in a cache of its own.
   std::string dump(const std::string& css, const std::string& xhtml,
                    const pipeline_harness::Profile& profile = pipeline_harness::Profile{},
-                   const std::vector<SyntheticFile>& extra = {}, const std::string& spineAttrs = "") {
-    const std::string path = writeBook(css, xhtml, extra, spineAttrs);
+                   const std::vector<SyntheticFile>& extra = {}, const std::string& spineAttrs = "",
+                   const std::string& lang = "en") {
+    const std::string path = writeBook(css, xhtml, extra, spineAttrs, lang);
     std::ostringstream out;
     EXPECT_TRUE(pipeline_harness::runAndDump(path, path + ".cache", profile, out)) << out.str();
     return out.str();
@@ -313,6 +319,47 @@ TEST_F(WritingModeLayout, DirHoldsWithoutTheBooksCss) {
   for (const std::string& message : ehp)
     sawRtl = sawRtl || message.find("Text runs horizontal, rtl") != std::string::npos;
   EXPECT_TRUE(sawRtl);
+}
+
+TEST_F(WritingModeLayout, TextAlignStartStillIndentsALatinParagraph) {
+  // Start is kept for the layout now; an unset direction resolves it to Left, which still takes the indent.
+  const auto lines = parseLines(dump(".s { text-align: start; text-indent: 1em }\n",
+                                     document("<p class=\"s\">Alpha bravo</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_EQ(kLeft, lines[0].align);
+  EXPECT_EQ(18, lines[0].firstWordX);
+}
+
+TEST(BlockStyle, TheChildsDirectionWinsElseTheParents) {
+  BlockStyle parent;
+  parent.direction = CssDirection::Rtl;
+  BlockStyle child;
+  EXPECT_EQ(CssDirection::Rtl, parent.getCombinedBlockStyle(child).direction);
+  child.direction = CssDirection::Ltr;
+  EXPECT_EQ(CssDirection::Ltr, parent.getCombinedBlockStyle(child).direction);
+}
+
+// ---- Right to left ----
+
+using BidiLayout = WritingModeLayout;
+
+TEST_F(BidiLayout, ARightToLeftParagraphTakesNoDropCap) {
+  const std::string hebrew =
+      "לום עולם זהו טקסט ארוך מספיק כדי לשבור את השורה הראשונה לכמה שורות מלאות ועוד מילים כדי שהפסקה "
+      "תמשיך עוד ועוד ועוד ועוד ועוד ועוד ועוד ועוד ועוד ועוד ועוד ועוד ועוד ועוד";
+  const std::string cap = "<span style=\"float: left; font-size: 3em\">ש</span>";
+  const std::string shin = "ש";
+  const auto withDir = parseLines(dump("", document("<p dir=\"rtl\">" + cap + hebrew + "</p>")));
+  EXPECT_EQ(nullptr, lineWith(withDir, shin));
+  const auto inHebrewBook =
+      parseLines(dump("", document("<p>" + cap + hebrew + "</p>"), pipeline_harness::Profile{}, {}, "", "he"));
+  EXPECT_EQ(nullptr, lineWith(inHebrewBook, shin));
+  const auto latin = parseLines(dump(
+      "",
+      document("<p><span style=\"float: left; font-size: 3em\">A</span>lpha bravo charlie delta echo foxtrot golf "
+               "hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor "
+               "whiskey xray yankee zulu alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo</p>")));
+  EXPECT_NE(nullptr, lineWith(latin, "A"));
 }
 
 // ---- The spine's page progression ----

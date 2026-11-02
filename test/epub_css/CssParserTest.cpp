@@ -414,11 +414,13 @@ TEST(CssLogical, StartAndEndFollowTheDirection) {
     s.resolveLogical(CssWritingMode::Unset, d);
     return s.textAlign;
   };
-  EXPECT_EQ(CssTextAlign::Left, align(CssTextAlign::Start, CssDirection::Unset));
+  EXPECT_EQ(CssTextAlign::Start, align(CssTextAlign::Start, CssDirection::Unset));  // the layout resolves it
   EXPECT_EQ(CssTextAlign::Right, align(CssTextAlign::Start, CssDirection::Rtl));
   EXPECT_EQ(CssTextAlign::Left, align(CssTextAlign::End, CssDirection::Rtl));
   EXPECT_EQ(CssTextAlign::Right, align(CssTextAlign::End, CssDirection::Ltr));
-  EXPECT_EQ(CssTextAlign::Left, align(CssTextAlign::Start, CssDirection::Auto));  // until the text decides
+  EXPECT_EQ(CssTextAlign::Start, align(CssTextAlign::Start, CssDirection::Auto));  // until the text decides
+  EXPECT_EQ(CssTextAlign::End, align(CssTextAlign::End, CssDirection::Unset));
+  EXPECT_EQ(CssTextAlign::End, align(CssTextAlign::End, CssDirection::Auto));
   EXPECT_EQ(CssTextAlign::Center, align(CssTextAlign::Center, CssDirection::Rtl));
 }
 

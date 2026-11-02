@@ -1732,6 +1732,8 @@ bool ChapterHtmlSlimParser::tryStartDropCapCapture(const CssStyle& cssStyle) {
   if (currentTable || currentTableCell) return false;
   // A cap is placed by its horizontal ink metrics, which a column does not have: it stays in its line.
   if (vertical_) return false;
+  // A float: left cap would cut the paragraph's first letter, the rightmost one, and float it on the left.
+  if (startSideIsRight()) return false;
   if (!currentTextBlock || !currentTextBlock->isEmpty() || partWordBufferIndex > 0) return false;
   if (pendingInlineImage_.active || activeFloatBottom_ > 0 || deferredPageImage_) return false;
   if (currentTextBlock->getBlockStyle().floatZoneCount > 0) return false;
@@ -2474,6 +2476,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         std::unique_ptr<ParsedText>(new ParsedText(false, false));  // no paragraph spacing, no hyphenation in cells
     row.cells.back().text->setTypography(self->typography_);
     row.cells.back().text->setVertical(self->vertical_);
+    row.cells.back().text->getBlockStyle().direction = self->blockDirection(cssStyle);
     self->currentTable->pendingRowBytes += TABLE_BUFFER_BYTES_PER_CELL;
     row.effectiveCols = static_cast<uint8_t>(row.effectiveCols + colSpan);
     // Column overflow: this row cannot be a grid row. Not degraded here — the cell just created is
@@ -3135,6 +3138,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   const float emSize = static_cast<float>(self->renderer.getFontAscenderSize(self->fontId));
   auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
       cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
+  userAlignmentBlockStyle.direction = self->blockDirection(cssStyle);
   // As in CSS, a list's own padding-left replaces the default and its margin-left adds to it.
   if (isList && !cssStyle.hasPaddingLeft()) {
     userAlignmentBlockStyle.paddingLeft = static_cast<int16_t>(emSize * LIST_DEFAULT_PADDING_EM);
@@ -3214,6 +3218,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->currentBlockSizeFromRoot_ = cssStyle.hasFontSizeMultiplier() && cssStyle.fontSizeRootRelative;
     auto headerBlockStyle = BlockStyle::fromCssStyle(cssStyle, emSize, CssTextAlign::Center, self->viewportWidth);
     self->addAncestorInsets(headerBlockStyle, emSize);
+    headerBlockStyle.direction = self->blockDirection(cssStyle);
     headerBlockStyle.textAlignDefined = true;
     headerBlockStyle.keepWithNext = true;
     if (self->embeddedStyle && cssStyle.hasTextAlign() &&
@@ -3279,6 +3284,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       BlockStyle brStyle;
       brStyle.alignment = currentStyle.alignment;
       brStyle.textAlignDefined = currentStyle.textAlignDefined;
+      brStyle.direction = currentStyle.direction;  // the block it splits
       // The horizontal inset is the enclosing block's, not the <br>'s: a <br> splits one
       // paragraph into several blocks, and all of them sit inside the same containing block.
       // (Vertical margins are deliberately not carried — they would repeat per line.)

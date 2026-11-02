@@ -697,6 +697,18 @@ class ChapterHtmlSlimParser final : public Print {
   // line-height other than its parent's, and returns its computed values. `depth` is the element's own (startElement
   // increments it last).
   FlowEntry enterFlow(const CssStyle& style);
+  // The direction a block built for `style` records: Auto for unicode-bidi: plaintext, else the element's computed one
+  // (elementFlow_, so call it while startElement resolves the element).
+  [[nodiscard]] CssDirection blockDirection(const CssStyle& style) const {
+    return style.unicodeBidi == CssUnicodeBidi::Plaintext ? CssDirection::Auto : elementFlow_.direction;
+  }
+  // The direction the parser knows: right to left from dir or CSS, or (unset or auto) from the book's language. The
+  // side a float:left cap, a hanging indent or a gutter calls its start.
+  [[nodiscard]] bool startSideIsRight() const {
+    return elementFlow_.direction == CssDirection::Rtl ||
+           ((elementFlow_.direction == CssDirection::Unset || elementFlow_.direction == CssDirection::Auto) &&
+            typography_.direction == TypographyProfile::Direction::RightToLeft);
+  }
 
   // The section's writing mode (spec 5.1): decided once, at the first element outside <html>'s own tag and outside
   // any <head> (normally <body>), from the mode in effect there (its own, else html's), the request and the book's
