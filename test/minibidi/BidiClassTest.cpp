@@ -53,3 +53,19 @@ TEST(BidiClassTest, IsTransparentMark) {
   EXPECT_TRUE(BidiUtils::isTransparentMark(0xFB1E));
   EXPECT_TRUE(BidiUtils::isTransparentMark(0x05B0));
 }
+
+TEST(BidiClassTest, HebrewPointsUpstreamLacks) {
+  EXPECT_EQ(bidi_class(0x05C7), NSM);
+  EXPECT_EQ(bidi_class(0x05BA), NSM);
+  EXPECT_EQ(bidi_class(0x05A2), NSM);
+  EXPECT_EQ(bidi_class(0x05C5), NSM);
+  EXPECT_EQ(bidi_class(0x05C6), R);
+  EXPECT_EQ(bidi_class(0x05EF), R);
+  EXPECT_TRUE(BidiUtils::isTransparentMark(0x05C7));
+}
+
+TEST(BidiClassTest, LigaturesScriptsAndLetterlikeSymbols) {
+  EXPECT_EQ(bidi_class(0xFB01), L);
+  EXPECT_EQ(bidi_class(0x2074), EN);
+  EXPECT_EQ(bidi_class(0x2160), L);
+}
