@@ -10,6 +10,30 @@
 
 #include "HalSpiBus.h"
 
+namespace {
+const char* displayControllerName(BoardConfig::DisplayController controller) {
+  switch (controller) {
+    case BoardConfig::DisplayController::SSD1677:
+      return "SSD1677";
+    case BoardConfig::DisplayController::UC8253:
+      return "UC8253";
+    case BoardConfig::DisplayController::ED2208:
+      return "ED2208";
+    case BoardConfig::DisplayController::LgfxEpd:
+      return "LgfxEpd";
+    case BoardConfig::DisplayController::IT8951:
+      return "IT8951";
+    case BoardConfig::DisplayController::UC8279:
+      return "UC8279";
+    case BoardConfig::DisplayController::UC8179:
+      return "UC8179";
+    case BoardConfig::DisplayController::UC8279C:
+      return "UC8279C";
+  }
+  return "unknown";
+}
+}  // namespace
+
 // Global HalDisplay instance, bracketed by static-init heap probes (slots 0/1).
 static BootHeapProbe s_probePreDisplay(0);
 HalDisplay display;
@@ -49,6 +73,25 @@ HalDisplay::HalDisplay()
 HalDisplay::~HalDisplay() {}
 
 void HalDisplay::begin(bool seamless) {
+  const BoardConfig::BoardProfile& profile = BoardConfig::ACTIVE;
+  const BoardConfig::DisplayPins& pins = profile.display;
+  LOG_DBG("DISP",
+          "Profile=%s controller=%s framebuffer=%ux%u SPI=%luHz (0=driver default) pins SCLK=%d MOSI=%d CS=%d DC=%d "
+          "RST=%d BUSY=%d mirror=%d/%d",
+          profile.name, displayControllerName(profile.displayController), profile.displayWidth, profile.displayHeight,
+          static_cast<unsigned long>(profile.displaySpiHz), pins.sclk, pins.mosi, pins.cs, pins.dc, pins.rst, pins.busy,
+          profile.orientation.mirrorX, profile.orientation.mirrorY);
+  LOG_DBG("DISP",
+          "Touch profile: controller=%u SDA=%d SCL=%d addr=0x%02X IRQ=%d reset/power=%d; env capability=%d bus=%u "
+          "SDA=%d SCL=%d addr=0x%02X",
+          static_cast<unsigned>(profile.touch.controller), profile.touch.sda, profile.touch.scl,
+          profile.touch.i2cAddress, profile.touch.irq, profile.touch.reset, FREEINK_CAP_TEMP_HUMIDITY,
+          profile.sensors.i2cBus, profile.sensors.i2cSda, profile.sensors.i2cScl, profile.sensors.tempHumidityAddr);
+  if (profile.board == BoardConfig::Board::MurphyM3) {
+    LOG_DBG("DISP", "Murphy M3 geometry map: framebuffer=%ux%u, UC8253 controller RAM=240x416, 90-degree rotation",
+            profile.displayWidth, profile.displayHeight);
+  }
+
 #if !FREEINK_MCU_C3
   // Resolve which panel controller this unit actually carries, before
   // einkDisplay.begin() picks a driver from it.
@@ -97,6 +140,11 @@ void HalDisplay::begin(bool seamless) {
     HalSpiBus::Lock spiLock;
     einkDisplay.begin();
   }
+  LOG_DBG("DISP", "Runtime framebuffer=%ux%u stride=%u bytes buffer=%lu bytes", einkDisplay.getDisplayWidth(),
+          einkDisplay.getDisplayHeight(), einkDisplay.getDisplayWidthBytes(),
+          static_cast<unsigned long>(einkDisplay.getBufferSize()));
+  LOG_DBG("DISP", "Controller after init=%s variant=0x%02X", displayControllerName(profile.displayController),
+          profile.displayControllerVariant);
 
   // Request resync after specific wakeup events to ensure clean display state.
   // Skip when seamless=true so the current panel content is preserved (Quick Resume).
