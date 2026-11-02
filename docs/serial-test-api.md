@@ -64,10 +64,11 @@ first commands: `BTN` (the six front and side keys, `:LONG`), `ACT` (`HOME`, `RE
 page), `SCREENSHOT`, `BOOTLOG` and `HELP`. Anything else gets `CMD_ERROR:unknown command`, and
 `CMD:HELP` lists what the build in hand has.
 
-The full set costs about 19 KB of flash and 4.3 KB of RAM on the X4 build: `PAGE` and the file
-commands brought 8.6 KB of the flash and 4 KB of the RAM, the one buffer they share (the basic
-commands are about 3 KB more than before this API). A new command belongs inside
-`#if SERIAL_TEST_API`.
+The full set costs about 19.4 KB of flash and 280 B of RAM on the X4 build: `PAGE` and the file
+commands brought 9 KB of the flash and no RAM, since their 2 KB scratch comes from the heap for the
+length of a command (the basic commands are about 3 KB more than before this API). A new command
+belongs inside `#if SERIAL_TEST_API`, and should hold no static buffer: `.bss` lowers every heap
+figure a development build reports.
 
 ## Connecting
 
@@ -325,7 +326,7 @@ book holds.
 Errors: `not in the reader` (another screen is on top, the reader's own menu included), `no page`
 (no section loaded, or the page could not be read), `busy` (the section on screen is still being
 built, or a page turn is on its way to the panel: wait with `CMD:IDLE:...:SCREEN`, which waits for
-both).
+both), `no memory` (the heap had no 2 KB block for the command's scratch).
 
 How it works: the reader keeps no page in memory between draws, so the command loads the page on
 screen from its section file, as a redraw does, and writes it out element by element; nothing it
@@ -711,7 +712,8 @@ FS_END:2
   CRC32 (Python's `zlib.crc32`) in 1 to 8 hex digits.
 - Before the host sends a byte the path is checked, as for `RM`: `FS_ERROR:protected <path>` (a
   credential store, a dot-named item, an 8.3 alias), `FS_ERROR:no parent folder <path>` (make it
-  with `MKDIR` first), `FS_ERROR:is a folder <path>`, `FS_ERROR:could not create <path>`.
+  with `MKDIR` first), `FS_ERROR:is a folder <path>`, `FS_ERROR:no memory <path>` (no 2 KB block on
+  the heap for the command's scratch), `FS_ERROR:could not create <path>`.
 - Then `FS_PUT_READY:<chunk>`. The host sends the file in pieces of `<chunk>` bytes, the last one
   shorter, and waits for `FS_PUT_ACK:<bytes so far>` after each: the device writes the piece to the
   card before it answers. Take the size from the reply rather than assuming it. It is 2048, half the
@@ -727,7 +729,9 @@ FS_END:2
   `.part` is removed and the reply is `FS_ERROR:crc mismatch <path>`; the old file is untouched.
 - `FS_ERROR:timeout <path>`: no byte came for 5 s. `FS_ERROR:no space <path>`: the card is full.
   `FS_ERROR:write failed <path>`: a write failed with room left. `FS_ERROR:could not replace
-  <path>`: the old file could not be set aside. Each removes the `.part`.
+  <path>`: the old file could not be set aside; when an earlier replace left `<path>.old` behind,
+  every later `PUT` to that path answers this until `FS:RM` removes the `.old` (the device log names
+  it). Each removes the `.part`.
 - While it receives, log lines are held back from the wire, as on the USB Transfer screen, and the
   main loop does nothing else: no button is read until the upload ends. The size has no limit but
   the card; allow about a second per 100 to 250 KB (see Speed below).
@@ -744,12 +748,17 @@ The device reads the file once for its CRC32 before it starts, so a large file t
 answer; check what arrives against the CRC. A read that fails halfway still sends the rest of the
 promised bytes, as zeros, and then `FS_ERROR:read failed <path>` instead of `FS_GET_END`. Errors
 before the data: `FS_ERROR:protected <path>` (the same rules as `RM`: the credential stores never
-leave the device), `FS_ERROR:not found <path>`, `FS_ERROR:not a file <path>`, `FS_ERROR:read failed
-<path>`. While the bytes go out, log lines are held back and the screen is not redrawn (the display
-driver prints a line of its own after a refresh, which would land in the data).
+leave the device), `FS_ERROR:not found <path>`, `FS_ERROR:not a file <path>`, `FS_ERROR:no memory
+<path>`, `FS_ERROR:read failed <path>`. While the bytes go out, log lines are held back and the
+screen is not redrawn (the display driver prints a line of its own after a refresh, which would land
+in the data), so a download of several megabytes freezes the screen for as long as it takes.
 
 `HASH` checks a file without reading it back: `FS_HASH:<crc32hex> <size> <path>`, or the errors of
 `GET`. It reads the whole file, at the card's speed.
+
+`PUT`, `GET`, `HASH` and `PAGE` each take a 2 KB block from the heap for the length of the command
+and give it back when it ends, so between commands they hold nothing and the heap figures of a
+development build are those of a build without them.
 
 `MKDIR` makes a folder and any folders above it that are missing: `FS_OK:mkdir <folder>`, also when
 it is there already. `FS_ERROR:not a folder <path>` when a file has that name, `FS_ERROR:protected
