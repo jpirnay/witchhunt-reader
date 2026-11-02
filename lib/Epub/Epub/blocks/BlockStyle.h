@@ -80,7 +80,7 @@ struct BlockStyle {
   // value. Read only for Book's style line spacing (ChapterHtmlSlimParser::effectiveLineHeight). Parse-time only.
   float lineHeightEm = 0.0f;
   // The paragraph's computed direction: Ltr or Rtl from dir or CSS, Auto for dir="auto" or unicode-bidi: plaintext on
-  // the block, Unset when nothing sets one (Task 7 decides it from the text or the book). Parse-time only, NOT
+  // the block, Unset when nothing sets one (the layout then decides it from the text or the book). Parse-time only, NOT
   // serialised; a merge takes the child's when set, else the parent's.
   CssDirection direction = CssDirection::Unset;
 
