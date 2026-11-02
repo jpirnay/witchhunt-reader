@@ -304,9 +304,10 @@ or `PAGE_ERROR:<reason>`.
 - `glue=1`: the word continues the one before it with no space between them (a word split into
   styled runs, punctuation attached to a word). It is the stored continues bit, so on word 0 it is
   whatever layout gave the line's first token.
-- `align` is the line's alignment as laid out (`start`, `end`, `none` or `inherit` would show the
-  value a block kept if one ever reached a laid-out line). `vertical=1` marks a line of a
-  vertical-rl page.
+- `align` is the alignment the line stores, its block's (`start`, `end`, `none` or `inherit` would
+  show the value a block kept if one ever reached a laid-out line). So the last line of a justified
+  paragraph says `justify` although it is drawn ragged, as justified text ends; its words' `x` show
+  where they are. `vertical=1` marks a line of a vertical-rl page.
 - A table is `PAGE_EL:<i> table` (its cells are not listed), a rule `PAGE_EL:<i> hr`.
 - `starved` counts the glyph lookups during the dump that the heap had no room for
   (`glyph_miss::starvedCount()`). Such a glyph is measured as missing, so with `starved` above 0
@@ -765,7 +766,10 @@ FS_END:2
   it sent `FS_GET_END` as if every byte had gone. It happened on the USB Transfer screen too, with
   its 1 s TX timeout; `SCREENSHOT`'s 48 KB fit the host's buffers and showed no loss. The transfer
   protocol's download is paced the same way for the same reason. With one piece in flight, the
-  device's TX buffer never fills and the host is never more than a piece behind.
+  device's TX buffer never fills and the host is never more than a piece behind. To check it on a
+  device, download a file of a few MB with the host pausing, several times, and compare:
+  `python3 tools/devctl.py --read-pause 0.5 get:/test/r4m.bin:/tmp/r4m.bin hash:/test/r4m.bin=/tmp/r4m.bin`
+  (after a `put:` of the same file).
 - The device reads the file once for its CRC32 before it starts, so a large file takes a moment to
   answer. A read that fails halfway still sends the rest of the promised bytes, as zeros, and then
   `FS_ERROR:read failed <path>` instead of `FS_GET_END`.
