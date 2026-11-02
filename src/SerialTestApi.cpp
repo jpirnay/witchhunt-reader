@@ -939,22 +939,38 @@ void cmdTtf(const std::string_view arg) {
 
 // ---- Bulk output and long commands: PAGE, FS:PUT, GET, HASH -----------------------------------
 
-// The one buffer the bulk commands share, all on the loop task and never two at once: a chunk of FS:PUT, GET and
-// HASH, and a line of CMD:PAGE. A static: 4 KB on the loop task's 8 KB stack is too much, and on the heap it would
-// be a 4 KB block taken and given back around every command.
+// The bulk commands' piece: a chunk of FS:PUT, GET and HASH, or a line of CMD:PAGE.
 constexpr size_t kWireChunk = 4096;
-alignas(4) uint8_t wireBuffer[kWireChunk];
 
-// A reply line put together in wireBuffer and written in one go, so that a line another task prints (the display
-// driver writes its own) can only land between two lines, never inside one. A line longer than the buffer, a word
-// of thousands of bytes, goes out in pieces.
+// The scratch a bulk command works in, from the heap for the length of that one command (the four run on the loop
+// task, never two at once) and given back on every way out of it. Not a static, which would lower every heap figure
+// of a development build by its size whether a bulk command ever ran or not; not the stack, the loop task's is 8 KB.
+class WireScratch {
+ public:
+  WireScratch() : block_(makeUniqueNoThrow<uint8_t[]>(kWireChunk)) {
+    if (!block_) LOG_ERR("SER", "No %u-byte block for the command", static_cast<unsigned>(kWireChunk));
+  }
+  uint8_t* get() const { return block_.get(); }
+  explicit operator bool() const { return static_cast<bool>(block_); }
+
+ private:
+  std::unique_ptr<uint8_t[]> block_;
+};
+
+// CMD:PAGE's scratch while the reader holds its page for sendPage(); null otherwise.
+uint8_t* pageScratch = nullptr;
+
+// A reply line put together in a scratch block and written in one go, so that a line another task prints (the
+// display driver writes its own) can only land between two lines, never inside one. A line longer than the block, a
+// word of thousands of bytes, goes out in pieces.
 class WireLine {
  public:
+  explicit WireLine(uint8_t* buffer) : buffer_(buffer) {}
   void add(std::string_view text) {
     while (!text.empty()) {
       if (length_ == kWireChunk) flush();
       const size_t n = std::min(text.size(), kWireChunk - length_);
-      memcpy(wireBuffer + length_, text.data(), n);
+      memcpy(buffer_ + length_, text.data(), n);
       length_ += n;
       text.remove_prefix(n);
     }
@@ -973,7 +989,7 @@ class WireLine {
     size_t pos = 0;
     while (pos < text.size()) {
       if (kWireChunk - length_ < SerialCommandGrammar::kMaxEscapedUnit) flush();
-      length_ += SerialCommandGrammar::escapeTextUnit(text, pos, reinterpret_cast<char*>(wireBuffer) + length_);
+      length_ += SerialCommandGrammar::escapeTextUnit(text, pos, reinterpret_cast<char*>(buffer_) + length_);
     }
   }
   // Ends the line and writes it. False when the host stopped reading.
@@ -985,9 +1001,10 @@ class WireLine {
 
  private:
   void flush() {
-    if (ok_ && length_ > 0) ok_ = writeAll(wireBuffer, length_, kReplyStallMs);
+    if (ok_ && length_ > 0) ok_ = writeAll(buffer_, length_, kReplyStallMs);
     length_ = 0;
   }
+  uint8_t* buffer_;
   size_t length_ = 0;
   bool ok_ = true;
 };
@@ -1025,7 +1042,7 @@ class LongWork {
 constexpr unsigned long kStreamStallMs = 15000;
 
 // A short protocol line (FS_PUT_READY, FS_PUT_ACK, FS_GET_START) in one write, as WireLine writes its lines, from a
-// buffer of its own: wireBuffer may hold data.
+// buffer of its own: the command's scratch may hold data.
 __attribute__((format(printf, 1, 2))) void replyWhole(const char* format, ...) {
   char line[64];
   va_list args;
@@ -1067,7 +1084,7 @@ const char* alignName(const CssTextAlign align) {
 // carries them.
 bool sendPageWord(const uint16_t j, const TextBlock::WordBox& box, const unsigned style, const bool glue,
                   const std::string_view text) {
-  WireLine line;
+  WireLine line(pageScratch);
   line.addf("PAGE_W:%u x=%d w=%d style=%u glue=%d text=\"", static_cast<unsigned>(j), box.x, box.width, style,
             glue ? 1 : 0);
   line.addEscaped(text);
@@ -1079,7 +1096,7 @@ bool sendPageWord(const uint16_t j, const TextBlock::WordBox& box, const unsigne
 bool sendPageLine(const size_t index, const TextBlock* block, const int x, const int y, const int fontId,
                   LongWork& work) {
   const uint16_t words = block && block->valid() ? block->wordCount() : 0;
-  WireLine line;
+  WireLine line(pageScratch);
   line.addf("PAGE_LINE:%u x=%d y=%d words=%u align=%s vertical=%d", static_cast<unsigned>(index), x, y,
             static_cast<unsigned>(words), block ? alignName(block->getRenderStyle().alignment) : "left",
             block && block->isVertical() ? 1 : 0);
@@ -1102,13 +1119,20 @@ void cmdPage(std::string_view /*arg*/) {
     reply("PAGE_ERROR:no renderer");
     return;
   }
+  const WireScratch scratch;
+  if (!scratch) {
+    reply("PAGE_ERROR:no memory");
+    return;
+  }
   const char* error = nullptr;
   {
     // No render pass while the page is read and measured: the reader's section file and font caches are the render
     // task's, and a pass's console line (the display driver's own) must not land inside the dump.
     RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
     const LogHold hold;
+    pageScratch = scratch.get();
     error = activityManager.sendPageOnScreen();
+    pageScratch = nullptr;
   }
   if (error) reply("PAGE_ERROR:", error);
 }
@@ -1134,14 +1158,15 @@ bool isFolder(const std::string& path) {
 // "/a/b" -> "/a", "/a" -> "/".
 std::string parentOf(const std::string& path) { return path.substr(0, std::max<size_t>(path.rfind('/'), 1)); }
 
-// The zlib CRC32 of `size` bytes of `file`, read from where it stands. False on a short read.
-bool crcOfFile(HalFile& file, const uint32_t size, uint32_t& crc) {
+// The zlib CRC32 of `size` bytes of `file`, read from where it stands into `scratch` (kWireChunk bytes). False on a
+// short read.
+bool crcOfFile(HalFile& file, const uint32_t size, uint8_t* scratch, uint32_t& crc) {
   LongWork work;
   crc = 0;
   for (uint32_t done = 0; done < size;) {
     const size_t want = std::min<uint32_t>(size - done, kWireChunk);
-    if (file.read(wireBuffer, want) != static_cast<int>(want)) return false;
-    crc = serialtransfer::crc32Update(crc, wireBuffer, want);
+    if (file.read(scratch, want) != static_cast<int>(want)) return false;
+    crc = serialtransfer::crc32Update(crc, scratch, want);
     done += want;
     work.breathe();
   }
@@ -1151,15 +1176,15 @@ bool crcOfFile(HalFile& file, const uint32_t size, uint32_t& crc) {
 // The upload's idle limit: no byte for this long ends it.
 constexpr unsigned long kPutIdleMs = 5000;
 
-// Reads `len` bytes of an upload into wireBuffer. Waits with delay(1) while none have arrived: a busy wait starves
-// the C3's USB-CDC receive. False when none came for kPutIdleMs.
-bool receiveChunk(const size_t len, LongWork& work) {
+// Reads `len` bytes of an upload into `scratch`. Waits with delay(1) while none have arrived: a busy wait starves the
+// C3's USB-CDC receive. False when none came for kPutIdleMs.
+bool receiveChunk(uint8_t* scratch, const size_t len, LongWork& work) {
   size_t got = 0;
   unsigned long lastByteMs = millis();
   while (got < len) {
     const int ready = logSerial.available();
     if (ready > 0) {
-      got += logSerial.read(wireBuffer + got, std::min(len - got, static_cast<size_t>(ready)));
+      got += logSerial.read(scratch + got, std::min(len - got, static_cast<size_t>(ready)));
       lastByteMs = millis();
     } else if (millis() - lastByteMs >= kPutIdleMs) {
       return false;
@@ -1201,6 +1226,12 @@ void fsPut(const std::string_view arg) {
     reply("FS_ERROR:is a folder ", path);
     return;
   }
+  // Taken before the .part is made, so a refusal leaves nothing behind.
+  const WireScratch scratch;
+  if (!scratch) {
+    reply("FS_ERROR:no memory ", path);
+    return;
+  }
   const std::string part = path + ".part";
   HalFile file;
   if (!Storage.openFileForWrite("SER", part, file)) {
@@ -1220,12 +1251,12 @@ void fsPut(const std::string_view arg) {
     uint32_t crc = 0;
     while (received < size) {
       const size_t want = std::min<uint32_t>(size - received, kWireChunk);
-      if (!receiveChunk(want, work)) {
+      if (!receiveChunk(scratch.get(), want, work)) {
         error = "FS_ERROR:timeout ";
         break;
       }
-      crc = serialtransfer::crc32Update(crc, wireBuffer, want);
-      if (file.write(wireBuffer, want) != want) {
+      crc = serialtransfer::crc32Update(crc, scratch.get(), want);
+      if (file.write(scratch.get(), want) != want) {
         error = writeFailure(size - received);
         break;
       }
@@ -1271,10 +1302,15 @@ void fsGet(const std::string_view arg) {
     reply("FS_ERROR:not a file ", path);
     return;
   }
+  const WireScratch scratch;
+  if (!scratch) {
+    reply("FS_ERROR:no memory ", path);
+    return;
+  }
   const HalPowerManager::Lock fullSpeed;
   const auto size = static_cast<uint32_t>(file.fileSize());
   uint32_t crc = 0;
-  if (!crcOfFile(file, size, crc) || !file.seek(0)) {
+  if (!crcOfFile(file, size, scratch.get(), crc) || !file.seek(0)) {
     reply("FS_ERROR:read failed ", path);
     return;
   }
@@ -1289,10 +1325,10 @@ void fsGet(const std::string_view arg) {
     for (uint32_t sent = 0; sent < size;) {
       const size_t want = std::min<uint32_t>(size - sent, kWireChunk);
       // A read that fails still sends its share, zeros, so the host's count of bytes holds; the line after says so.
-      if (readOk && file.read(wireBuffer, want) != static_cast<int>(want)) readOk = false;
-      if (!readOk) memset(wireBuffer, 0, want);
+      if (readOk && file.read(scratch.get(), want) != static_cast<int>(want)) readOk = false;
+      if (!readOk) memset(scratch.get(), 0, want);
       // Up to 15 s for a slow host: longer than the task watchdog allows unfed.
-      if (!writeAll(wireBuffer, want, kStreamStallMs, &HalSystem::feedWatchdog)) {
+      if (!writeAll(scratch.get(), want, kStreamStallMs, &HalSystem::feedWatchdog)) {
         reply("FS_ERROR:transfer stalled ", path);
         return;
       }
@@ -1329,10 +1365,15 @@ void fsHash(const std::string_view arg) {
     reply("FS_ERROR:not a file ", path);
     return;
   }
+  const WireScratch scratch;
+  if (!scratch) {
+    reply("FS_ERROR:no memory ", path);
+    return;
+  }
   const HalPowerManager::Lock fullSpeed;
   const auto size = static_cast<uint32_t>(file.fileSize());
   uint32_t crc = 0;
-  if (!crcOfFile(file, size, crc)) {
+  if (!crcOfFile(file, size, scratch.get(), crc)) {
     reply("FS_ERROR:read failed ", path);
     return;
   }
@@ -1725,9 +1766,10 @@ PowerRequest takePowerRequest() {
 }
 
 void sendPage(const PageOnScreen& onScreen) {
+  if (!pageScratch) return;  // only cmdPage() asks the reader for its page, with its scratch taken
   const Page& page = *onScreen.page;
   const size_t count = page.elements.size();
-  WireLine start;
+  WireLine start(pageScratch);
   start.addf("PAGE_START:spine=%d/%d page=%d/%d flow=%s elements=%u", onScreen.spine, onScreen.spineCount,
              onScreen.pageNumber, onScreen.pageCount, onScreen.verticalFlow ? "vertical-rl" : "horizontal",
              static_cast<unsigned>(count));
@@ -1738,7 +1780,7 @@ void sendPage(const PageOnScreen& onScreen) {
     const PageElement& element = *page.elements[i];
     const int x = element.xPos + onScreen.originX;
     const int y = element.yPos + onScreen.originY;
-    WireLine line;
+    WireLine line(pageScratch);
     switch (element.getTag()) {
       case TAG_PageLine:
         if (!sendPageLine(i, static_cast<const PageLine&>(element).getBlock(), x, y, onScreen.fontId, work)) return;
@@ -1761,7 +1803,7 @@ void sendPage(const PageOnScreen& onScreen) {
     }
     if (!line.end()) return;
   }
-  WireLine end;
+  WireLine end(pageScratch);
   end.addf("PAGE_END:%u", static_cast<unsigned>(count));
   end.end();
 }
