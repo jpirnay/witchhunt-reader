@@ -258,8 +258,8 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
       }
       // A filter block per table with lookups. Every fixture has lookups in
       // both tables, so k below reaches both filter blocks.
-      EXPECT_EQ(filteredCount, 2u) << fx.script;
-      EXPECT_EQ(blocks, 3 + filteredCount) << fx.script;
+      ASSERT_EQ(filteredCount, 2u) << fx.script;
+      ASSERT_EQ(blocks, 3 + filteredCount) << fx.script;
       for (size_t i = 0; i < filteredCount; i++) {
         EXPECT_TRUE(plan.settings(filtered[i], 0).hasDigest) << fx.script << " table " << filtered[i];
       }
