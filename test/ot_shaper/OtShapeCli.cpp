@@ -70,6 +70,8 @@ int main(int argc, char** argv) {
   ot::Plan plans[10];
   bool built[10] = {};
   ot::Buffer buffer;
+  static uint8_t storage[ot::Buffer::bytesFor(4096)];  // witchhunt: deviation 1 - past 2040 code points: FAIL
+  buffer.setStorage(storage, sizeof(storage));         // witchhunt: deviation 1
   std::string line;
   while (std::getline(std::cin, line)) {
     const std::vector<uint32_t> cps = decodeUtf8(line);

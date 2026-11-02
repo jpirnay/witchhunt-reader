@@ -22,7 +22,7 @@ namespace ot {
 // Shapes one run of a single script (plus the joiners, dandas and dotted
 // circle any Indic run may contain) into buffer.info[].codepoint glyph IDs
 // and buffer.pos[] advances/offsets in scaled units. Returns false when the
-// run could not be shaped: the heap check refused the buffer's reservation
+// run could not be shaped: the buffer's storage cannot take it (maxRunLength())  // witchhunt: deviation 1
 // (buffer.successful stays true), or the font's lookups failed the run by
 // growing it past its limit, nesting too deep or running too long.
 //

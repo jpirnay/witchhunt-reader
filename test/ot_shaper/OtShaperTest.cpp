@@ -75,6 +75,8 @@ std::vector<int32_t> shapeWord(const ot::Face& face, const ot::Plan& plan, const
   ot::Scale scale;
   scale.set(2133, 33, face.upem());
   ot::Buffer buffer;
+  static uint8_t storage[ot::Buffer::bytesFor(256)];  // witchhunt: deviation 1
+  buffer.setStorage(storage, sizeof(storage));        // witchhunt: deviation 1
   const std::vector<uint32_t> cps = utf32(word);
   std::vector<int32_t> out;
   if (!ot::shape(face, scale, plan, cps.data(), static_cast<unsigned>(cps.size()), buffer, {before, after, partial})) {
@@ -401,6 +403,8 @@ TEST(OtShaperRobustness, DropsExtensionLookupsThatMixSubtableTypes) {
     ot::Face face;
     EXPECT_TRUE(initWithGsub(face, font, gsub));
     ot::Buffer buffer;
+    uint8_t storage[ot::Buffer::bytesFor(8)];     // witchhunt: deviation 1
+    buffer.setStorage(storage, sizeof(storage));  // witchhunt: deviation 1
     EXPECT_TRUE(buffer.prepare(8));
     for (int i = 0; i < 3; i++) {
       ot::GlyphInfo g{};

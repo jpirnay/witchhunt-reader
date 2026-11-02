@@ -1,5 +1,6 @@
 add_executable(OtShaperPortTest
   OtShaperPortTest.cpp
+  FixedVectorTest.cpp
   ${OT_SHAPER_SOURCES}
 )
 target_include_directories(OtShaperPortTest PRIVATE ${OT_SHAPER_INCLUDE_DIR} ${REPO_ROOT}/test/complex_shaper)

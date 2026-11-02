@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "OtFace.h"
+#include "OtFixedVector.h"  // witchhunt: deviation 1
 
 namespace ot {
 
@@ -31,7 +32,7 @@ constexpr bool isMark(const uint8_t cat) { return cat >= SPACING_MARK && cat <= 
 }  // namespace gc
 
 // Asked before the shaper takes heap memory that depends on the font or the
-// text (plan filters, buffer growth): whether `bytes` more may be allocated.
+// text (plan lists and filters): whether `bytes` more may be allocated.  // witchhunt: deviation 1
 // The default allows any size. Global; set it once, before shaping.
 using HeapCheck = bool (*)(size_t bytes);
 void setHeapCheck(HeapCheck check);
@@ -144,18 +145,18 @@ constexpr unsigned MAX_CONTEXT_LENGTH = 64;
 // buffer: substitutions edit the one array in place, so "before idx" is the
 // output HarfBuzz would have produced so far.
 //
-// A Buffer is meant to be reused: shape() reserves `info`, `pos` and the
-// scratch arrays once for the run's maximum length, and nothing grows while
-// a run is shaped (operations that would exceed the reservation fail the run
-// instead of reallocating).
+// witchhunt: deviation 1 - a Buffer is meant to be reused over storage its
+// owner binds once (setStorage()): shape() lays `info`, `pos` and the scratch
+// arrays over that block for each run, and nothing is allocated while a run
+// is shaped (operations that would exceed the run's maximum length fail it).
 struct Buffer {
-  std::vector<GlyphInfo> info;
-  std::vector<GlyphPosition> pos;
+  FixedVector<GlyphInfo> info;     // witchhunt: deviation 1
+  FixedVector<GlyphPosition> pos;  // witchhunt: deviation 1
   // Scratch for passes that rebuild the glyph string (normalization, vowel
   // constraints, dotted circles); swapped with `info`.
-  std::vector<GlyphInfo> scratch;
+  FixedVector<GlyphInfo> scratch;  // witchhunt: deviation 1
   // Scratch for the USE syllable machine: indices of the glyphs it reads.
-  std::vector<uint16_t> indices;
+  FixedVector<uint16_t> indices;  // witchhunt: deviation 1
   unsigned idx = 0;
   // Most glyphs a run may grow to while shaping (see shape()).
   unsigned maxLength = 0;
@@ -175,11 +176,23 @@ struct Buffer {
   // Match positions per nesting level (row 0: the top-level lookup).
   uint16_t matchStack[MAX_NESTING_LEVEL + 1][MAX_CONTEXT_LENGTH];
 
+  // witchhunt: deviation 1 - the storage. A slot is a GlyphInfo in `info` and
+  // one in `scratch`, a GlyphPosition and an index; bytesFor() adds room to
+  // align the block's start. setStorage() binds the arrays, empty, to as many
+  // slots as the block holds (a null block or 0 bytes: none); the block must
+  // outlive the Buffer's use of it.
+  static constexpr size_t SLOT_BYTES = 2 * sizeof(GlyphInfo) + sizeof(GlyphPosition) + sizeof(uint16_t);  // 62
+  static constexpr size_t bytesFor(unsigned slots) { return slots * SLOT_BYTES + alignof(GlyphInfo) - 1; }
+  void setStorage(void* block, size_t bytes);
+  Buffer() = default;
+  Buffer(const Buffer&) = delete;  // its arrays' flag is its own `successful`
+  Buffer& operator=(const Buffer&) = delete;
+
   unsigned len() const { return static_cast<unsigned>(info.size()); }
   GlyphInfo& cur() { return info[idx]; }
 
-  // Clears the run state and reserves room for `maxGlyphs`; false when the
-  // reservation could not be made.
+  // witchhunt: deviation 1 - clears the run state and binds the arrays afresh
+  // over the storage; false when `maxGlyphs` slots do not fit it.
   bool prepare(unsigned maxGlyphs);
 
   uint8_t allocateLigId();
@@ -193,6 +206,12 @@ struct Buffer {
   void moveGlyph(unsigned from, unsigned to);
   void reverseRange(unsigned start, unsigned end);
   void refreshDigest();
+
+ private:
+  // witchhunt: deviation 1 - setStorage()'s block, aligned, and its slots.
+  void bindStorage();
+  GlyphInfo* storage_ = nullptr;
+  size_t slots_ = 0;
 };
 
 }  // namespace ot

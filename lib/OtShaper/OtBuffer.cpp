@@ -70,15 +70,36 @@ bool Buffer::prepare(const unsigned maxGlyphs) {
   hasDefaultIgnorables = hasBrokenSyllable = hasGposAttachment = false;
   digest = Digest();
   if (maxGlyphs > UINT16_MAX + 1u) return false;  // `indices` holds glyph positions as uint16_t
-  if (info.capacity() >= maxGlyphs) return true;
-  const size_t bytes =
-      static_cast<size_t>(maxGlyphs) * (2 * sizeof(GlyphInfo) + sizeof(GlyphPosition) + sizeof(uint16_t));
-  if (!heapAvailable(bytes)) return false;
-  info.reserve(maxGlyphs);
-  scratch.reserve(maxGlyphs);
-  pos.reserve(maxGlyphs);
-  indices.reserve(maxGlyphs);
-  return true;
+  bindStorage();                                  // witchhunt: deviation 1 - undoes a swap of `info` and `scratch`
+  return maxGlyphs <= slots_;                     // witchhunt: deviation 1
+}
+
+// witchhunt: deviation 1 - the arrays over the caller's block, end to end:
+// `info`, `scratch`, `pos`, `indices`, each `slots_` long.
+void Buffer::setStorage(void* const block, const size_t bytes) {
+  static_assert(alignof(GlyphPosition) <= alignof(GlyphInfo) && alignof(uint16_t) <= alignof(GlyphPosition));
+  static_assert(sizeof(GlyphInfo) % alignof(GlyphPosition) == 0 && sizeof(GlyphPosition) % alignof(uint16_t) == 0);
+  storage_ = nullptr;
+  slots_ = 0;
+  if (block && bytes) {
+    const size_t misalignment = reinterpret_cast<uintptr_t>(block) % alignof(GlyphInfo);
+    const size_t skip = misalignment ? alignof(GlyphInfo) - misalignment : 0;
+    if (bytes > skip) {
+      storage_ = reinterpret_cast<GlyphInfo*>(static_cast<uint8_t*>(block) + skip);
+      slots_ = (bytes - skip) / SLOT_BYTES;
+    }
+  }
+  bindStorage();
+}
+
+void Buffer::bindStorage() {
+  GlyphInfo* const scratchStart = storage_ + slots_;
+  auto* const posStart = reinterpret_cast<GlyphPosition*>(scratchStart + slots_);
+  auto* const indicesStart = reinterpret_cast<uint16_t*>(posStart + slots_);
+  info.bind(storage_, slots_, &successful);
+  scratch.bind(scratchStart, slots_, &successful);
+  pos.bind(posStart, slots_, &successful);
+  indices.bind(indicesStart, slots_, &successful);
 }
 
 uint8_t Buffer::allocateLigId() {

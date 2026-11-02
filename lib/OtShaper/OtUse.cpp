@@ -64,7 +64,7 @@ void useSetupSyllables(const Plan& plan, Buffer& buffer) {
   const unsigned len = buffer.len();
   // The machine skips CGJ-category characters (ZWJ among them), and a ZWNJ
   // that a mark follows.
-  std::vector<uint16_t>& index = buffer.indices;
+  FixedVector<uint16_t>& index = buffer.indices;  // witchhunt: deviation 1
   index.clear();
   for (unsigned i = 0; i < len; i++) {
     const GlyphInfo& g = buffer.info[i];

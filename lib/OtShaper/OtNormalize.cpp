@@ -249,7 +249,7 @@ class Normalizer {
 
   // Second round: marks in combining-class order (a stable sort).
   void reorderMarks() {
-    std::vector<GlyphInfo>& info = buffer_.info;
+    FixedVector<GlyphInfo>& info = buffer_.info;  // witchhunt: deviation 1
     const unsigned len = buffer_.len();
     for (unsigned i = 0; i < len; i++) {
       if (info[i].combiningClass() == 0) continue;
@@ -268,8 +268,8 @@ class Normalizer {
   // Third round: recompose marks onto their starter when nothing between
   // them blocks it and the font maps the composition.
   void recompose() {
-    const std::vector<GlyphInfo>& info = buffer_.info;
-    std::vector<GlyphInfo>& out = buffer_.scratch;
+    const FixedVector<GlyphInfo>& info = buffer_.info;  // witchhunt: deviation 1
+    FixedVector<GlyphInfo>& out = buffer_.scratch;      // witchhunt: deviation 1
     out.clear();
     unsigned starter = 0;
     out.push_back(info[0]);
