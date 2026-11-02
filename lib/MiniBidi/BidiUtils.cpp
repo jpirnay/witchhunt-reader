@@ -134,7 +134,7 @@ bool applyBidiVisualImpl(const char* utf8, std::string& out, int paragraphLevel)
     }
 
     const uint32_t cp = utf8NextCodepoint(&p);
-    if (!cp || cp == REPLACEMENT_GLYPH) break;
+    if (!cp) break;  // witchhunt: deviation 10 (U+FFFD is an ordinary code point; only NUL stops the loop)
     line[count].origwc = line[count].wc = cp;
     line[count].index = static_cast<uint16_t>(count);
     line[count].joiners = 0;

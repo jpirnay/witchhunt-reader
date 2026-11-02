@@ -104,3 +104,22 @@ TEST(BidiUtils, ComputeVisualWordOrderKeepsAnEmbeddedLatinRun) {
   ASSERT_TRUE(BidiUtils::computeVisualWordOrder(words, false, order));
   EXPECT_EQ(order, (std::vector<uint16_t>{0, 2, 1, 3}));
 }
+
+TEST(BidiUtils, L4MirrorsInLogicalOrderBeforeTheLineIsReordered) {
+  // "(1999)," in a right-to-left paragraph
+  EXPECT_EQ(visual({'(', '1', '9', '9', '9', ')', ','}, 1), (CP{',', '(', '1', '9', '9', '9', ')'}));
+  EXPECT_EQ(visual({'1', '9', '9', '9', ')'}, 1), (CP{'(', '1', '9', '9', '9'}));
+  EXPECT_EQ(visual({'(', 0x05E9, 0x05DC, 0x05D5, 0x05DD, ')', ' ', 'a', 'b', 'c'}, 1),
+            (CP{'a', 'b', 'c', ' ', '(', 0x05DD, 0x05D5, 0x05DC, 0x05E9, ')'}));
+}
+
+TEST(BidiUtils, QamatsQatanStaysAfterItsBase) {
+  EXPECT_EQ(visual({0x05DB, 0x05BC, 0x05C7, 0x05DC}, 1), (CP{0x05DC, 0x05DB, 0x05BC, 0x05C7}));
+}
+
+TEST(BidiUtils, AMalformedByteDoesNotTruncateTheToken) {
+  const std::string in = std::string(encode({0x05E9})) + "\xFF" + encode({0x05DC});
+  std::string out;
+  ASSERT_TRUE(BidiUtils::applyBidiVisual(in.c_str(), out, 1));
+  EXPECT_EQ(decode(out), (CP{0x05DC, 0xFFFD, 0x05E9}));
+}
