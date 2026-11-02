@@ -799,10 +799,11 @@ or into its own subtree), `FS_ERROR:could not move <from>`.
 
 **Speed.** Both directions move one 2 KB piece at a time, each acknowledged, and
 `tools/devctl.py` prints the rate it got. On the X4 an upload of 1 MB ran at about 210 KB/s (10 KB
-at about 100 KB/s), close to the USB Transfer screen's 119 to 170 KB/s. Unpaced, a download ran at
-500 to 740 KB/s; the acknowledgement per piece costs a round trip per 2 KB, so expect less, not yet
-measured. A download starts after the CRC pass, which reads the file at the card's speed (1.15 s for
-1 MB on the X4).
+at about 100 KB/s), and on the X3 at 239 to 259 KB/s, close to the USB Transfer screen's 119 to 170
+KB/s. A paced download of 4 MB ran at 370 to 390 KB/s on the X4 (about 320 KB/s with the host pausing
+its reads), and of 1 MB at 435 to 494 KB/s on the X3; unpaced it had run at 500 to 740 KB/s. A
+download starts after the CRC pass, which reads the file at the card's speed (1.15 s for 1 MB on the
+X4, 3.8 s for 4 MB on the X3).
 
 All of them work while the reader runs, without the USB Transfer screen and the restart that leaving it costs:
 deleting a book's section cache (`/.crosspoint/epub_<hash>/spines/...`) forces a cold build of a chapter, a font
