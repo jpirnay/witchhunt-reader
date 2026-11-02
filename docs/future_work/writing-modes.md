@@ -23,13 +23,13 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 | 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; the horizontal right-to-left case of FlowContext and page progression, which step 3 built for vertical text ([below](#what-step-1-takes-from-step-3)) | open |
 | 2 | Arabic script; before its plan, decide on one shaper for Arabic and the Indic scripts ([below](#complex-shaping-arabic-and-the-indic-scripts)) | open |
 | 3 | Vertical frame (from the spike); the vertical decision and its settings; FlowContext and page progression | shipped (#577) ([plan](../superpowers/plans/2026-10-28-writing-modes-step3.md)) |
-| 4 | Vertical typography: widows and orphans off and lone images centred (PR 1); 、。 and small kana placed from glyph ink, A3a along the column, Traditional Chinese marks (PR 2); tate-chu-yoko (PR 3); the dictionary on vertical pages (PR 4) | in progress: PR 1 #594 and PR 2 #595 shipped, PR 3 #597 ([design](../superpowers/specs/2026-10-30-writing-modes-step4-design.md), [PR 1 plan](../superpowers/plans/2026-10-30-writing-modes-step4-pr1.md), [PR 2 plan](../superpowers/plans/2026-10-31-writing-modes-step4-pr2.md), [PR 3 plan](../superpowers/plans/2026-11-01-writing-modes-step4-pr3.md)) |
+| 4 | Vertical typography: widows and orphans off and lone images centred (PR 1); 、。 and small kana placed from glyph ink, A3a along the column, Traditional Chinese marks (PR 2); tate-chu-yoko (PR 3); the dictionary on vertical pages (PR 4) | in progress: PR 1 #594 and PR 2 #595 shipped, PR 3 #597, PR 4 #<this PR>; done once PR 3 and PR 4 merge ([design](../superpowers/specs/2026-10-30-writing-modes-step4-design.md), [PR 1 plan](../superpowers/plans/2026-10-30-writing-modes-step4-pr1.md), [PR 2 plan](../superpowers/plans/2026-10-31-writing-modes-step4-pr2.md), [PR 3 plan](../superpowers/plans/2026-11-01-writing-modes-step4-pr3.md), [PR 4 plan](../superpowers/plans/2026-11-02-writing-modes-step4-pr4.md)) |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
 
-**Next step.** Step 4 is in progress (chosen and its design approved by the maintainer on 2026-10-30): PR 1 and
-PR 2 (placed marks) have shipped, PR 3 (tate-chu-yoko) is here, PR 4 (the dictionary on vertical pages) is next.
-Step 1 (right to left) follows step 4. Line spacing (`cjk.md`, step 10), which reads the `line-height` step 0
-keeps, has shipped.
+**Next step.** Step 4 (chosen and its design approved by the maintainer on 2026-10-30) is done once PR 3
+(tate-chu-yoko) and PR 4 (the dictionary on vertical pages, here) merge; PR 1 and PR 2 (placed marks) have shipped.
+Step 1 (bidi and Hebrew) is next. Line spacing (`cjk.md`, step 10), which reads the `line-height` step 0 keeps, has
+shipped.
 
 ## What step 1 takes from step 3
 
@@ -157,9 +157,6 @@ Step 3 ships vertical text with these limits; step 4 (vertical typography) picks
   reads that placed ink along the column, so a 、 or 。 that A3b pushed in (a narrowed box at a column's end, or before
   a closing bracket) keeps its ink inside its box. Still rough: there are no vertical forms, and the wave dashes stay
   rotated, because their vertical form is a mirror image and the renderer cannot mirror a glyph (design: not built).
-- **The dictionary is not available in vertical text.** `EpubReaderActivity::openDictionary` returns on a
-  vertical section and the reader menu does not offer the Dictionary row, so the long-tap dictionary gesture does
-  nothing on a vertical page. Word boxes and the selection's navigation need mapping through the frame.
 - **`text-orientation`** is parsed and not read: every character takes its UAX #50 class (CSS `mixed`).
   `text-combine-upright` is read since step 4 PR 3.
 - **Drop caps are off in a vertical section** (`ChapterHtmlSlimParser::tryStartDropCapCapture`); their ink
