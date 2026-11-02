@@ -86,7 +86,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
     const int8_t initialFontSizeNormalizationOverride, const int8_t initialInlineFootnotePreviewsOverride,
     const int8_t initialLineSpacingOverride, const int8_t initialVerticalTextOverride,
     const int8_t initialPublisherFontsOverride, const bool verticalAllowed, const bool hasStarredPages,
-    const bool isCurrentPageStarred, const bool hasPrintedPages, const bool wordLookupAvailable)
+    const bool isCurrentPageStarred, const bool hasPrintedPages)
     : TabbedUiListActivity("EpubReaderMenu", renderer, mappedInput),
       currentPageStarred(isCurrentPageStarred),
       pendingOrientation(currentOrientation),
@@ -111,11 +111,11 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
       currentPage(currentPage),
       totalPages(totalPages),
       bookProgressPercent(bookProgressPercent) {
-  buildMenuItems(hasFootnotes, hasStarredPages, hasPrintedPages, verticalAllowed, wordLookupAvailable);
+  buildMenuItems(hasFootnotes, hasStarredPages, hasPrintedPages, verticalAllowed);
 }
 
 void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPages, bool hasPrintedPages,
-                                            bool verticalAllowed, bool wordLookupAvailable) {
+                                            bool verticalAllowed) {
   auto& navigationItems = tabMenuItems[static_cast<size_t>(MenuTab::Navigation)];
   auto& settingsItems = tabMenuItems[static_cast<size_t>(MenuTab::Settings)];
   auto& syncItems = tabMenuItems[static_cast<size_t>(MenuTab::Sync)];
@@ -147,9 +147,7 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   // Always offered, even with no dictionary configured: choosing it then opens
   // the picker, which is more useful than hiding the feature from the person
   // who has not found the setting yet.
-  if (wordLookupAvailable) {
-    navigationItems.push_back(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::None));
-  }
+  navigationItems.push_back(SettingInfo::Action(StrId::STR_DICTIONARY, SettingAction::None));
 
   auto* self = this;
   // Orientation: straightforward 0-3 cycle

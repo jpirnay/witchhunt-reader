@@ -7566,7 +7566,7 @@ void EpubReaderActivity::openReaderMenu() {
           bookGuideDotsOverride, bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
           bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
           bookVerticalTextOverride, bookPublisherFontsOverride, bookVerticalAllowed_, !bookmarkStore.isEmpty(),
-          isCurrentPageStarred, hasPrintedPages, /*wordLookupAvailable=*/true),
+          isCurrentPageStarred, hasPrintedPages),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);
