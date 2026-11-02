@@ -92,6 +92,7 @@ void Buffer::setStorage(void* const block, const size_t bytes) {
   bindStorage();
 }
 
+// witchhunt: deviation 1 - the four arrays, empty, over the storage.
 void Buffer::bindStorage() {
   GlyphInfo* const scratchStart = storage_ + slots_;
   auto* const posStart = reinterpret_cast<GlyphPosition*>(scratchStart + slots_);

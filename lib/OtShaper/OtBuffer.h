@@ -192,7 +192,8 @@ struct Buffer {
   GlyphInfo& cur() { return info[idx]; }
 
   // witchhunt: deviation 1 - clears the run state and binds the arrays afresh
-  // over the storage; false when `maxGlyphs` slots do not fit it.
+  // over the storage. False when `maxGlyphs` passes UINT16_MAX + 1 (refused
+  // before binding) or the storage's slots; `successful` stays true.
   bool prepare(unsigned maxGlyphs);
 
   uint8_t allocateLigId();
@@ -207,8 +208,9 @@ struct Buffer {
   void reverseRange(unsigned start, unsigned end);
   void refreshDigest();
 
+  // witchhunt: deviation 1 - setStorage()'s block, aligned, and its slots;
+  // bindStorage() lays the four arrays over it, empty.
  private:
-  // witchhunt: deviation 1 - setStorage()'s block, aligned, and its slots.
   void bindStorage();
   GlyphInfo* storage_ = nullptr;
   size_t slots_ = 0;

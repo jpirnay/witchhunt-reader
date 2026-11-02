@@ -33,8 +33,8 @@ namespace ot {
 bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_t* codepoints, unsigned count,
            Buffer& buffer, const RunContext& context = {});
 
-// The longest run shape() can take without growing the buffer's reservation,
-// so without consulting the heap check.
+// witchhunt: deviation 1 - the longest run shape() can take in the buffer's
+// storage (setStorage()); a longer one fails with buffer.successful still true.
 unsigned maxRunLength(const Buffer& buffer);
 
 // The OpenType language systems to try for a BCP 47 language tag (the
