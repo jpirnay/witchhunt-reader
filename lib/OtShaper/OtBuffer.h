@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 
 #include "OtFace.h"
 #include "OtFixedVector.h"  // witchhunt: deviation 1

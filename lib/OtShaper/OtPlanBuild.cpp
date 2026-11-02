@@ -1,4 +1,7 @@
+#include <Memory.h>  // witchhunt: deviation 1
+
 #include <algorithm>
+#include <memory>  // witchhunt: deviation 1
 
 #include "OtPlan.h"
 #include "OtSort.h"
@@ -14,6 +17,12 @@ constexpr unsigned MAX_BITS = 8;  // HB_OT_MAP_MAX_BITS
 // Feature bits start where HarfBuzz's do (it keeps three glyph flags below
 // them), so fonts run out of mask bits exactly as they would in HarfBuzz.
 constexpr unsigned FIRST_FEATURE_BIT = 4;
+// witchhunt: deviation 1 - the builder's scratch (PlanBuilder::bindScratch):
+// the most features a shaper requests (USE asks for 47) and stages a table
+// takes (Indic's GSUB has 17). Fixed and independent of the font, so the
+// block asks no heap check.
+constexpr size_t MAX_FEATURES = 64;
+constexpr size_t MAX_STAGES = 32;
 
 // Feature flags (hb_ot_map_feature_flags_t).
 namespace ff {
@@ -113,8 +122,8 @@ class FeatureBuilder {
     unsigned stage[2];
   };
 
-  std::vector<Info> infos;
-  std::vector<Pause> pauses[2];
+  FixedVector<Info> infos;       // witchhunt: deviation 1
+  FixedVector<Pause> pauses[2];  // witchhunt: deviation 1
   unsigned currentStage[2] = {0, 0};
   bool isSimple = true;  // no shaper features: HarfBuzz sorts only after merging
 
@@ -298,6 +307,7 @@ class PlanBuilder {
     chooseShaper();
 
     FeatureBuilder b;
+    if (!bindScratch(b)) return false;  // witchhunt: deviation 1
     collectDefaultFeatures(b);
     if (plan_.shaper == ShaperKind::Indic) {
       b.isSimple = false;
@@ -314,6 +324,7 @@ class PlanBuilder {
     mapFeatures(b, requiredStage);
     b.pause(GSUB, Pause::None);
     b.pause(GPOS, Pause::None);
+    if (!scratchFits_) return false;  // witchhunt: deviation 1 - before planLookups() reads `pauses`
     if (!planLookups(b, requiredStage)) return false;
 
     uint32_t masks[MF_COUNT];
@@ -322,6 +333,7 @@ class PlanBuilder {
     static constexpr uint32_t WOULD_TAGS[Plan::WS_COUNT] = {tag("rphf"), tag("pref"), tag("blwf"), tag("pstf"),
                                                             tag("vatu")};
     for (int i = 0; i < Plan::WS_COUNT; i++) plan_.wouldStage[i] = gsubStage(WOULD_TAGS[i]);
+    if (!plan_.listsFit_) return false;  // witchhunt: deviation 1
     plan_.finish(face_);
     return true;
   }
@@ -367,7 +379,6 @@ class PlanBuilder {
     };
 
     features_.clear();
-    features_.reserve(builder.infos.size());
     plan_.globalMask = GLOBAL_BIT_MASK;
     unsigned nextBit = FIRST_FEATURE_BIT;
     for (const FeatureBuilder::Info& info : builder.infos) {
@@ -421,11 +432,10 @@ class PlanBuilder {
       for (const FeatureMap& m : features_) total += featureLookups(m.index[t]).u16(2);
       if (total > MAX_PLANNED_LOOKUPS) return false;
       if (!heapAvailable(total * sizeof(PlannedLookup) + builder.currentStage[t] * sizeof(Stage))) return false;
-      std::vector<PlannedLookup>& list = plan_.lookups[t];
+      if (!plan_.allocateLists(t, total, builder.currentStage[t])) return false;  // witchhunt: deviation 1
+      FixedVector<PlannedLookup>& list = plan_.lookups[t];                        // witchhunt: deviation 1
       list.clear();
-      list.reserve(total);
       plan_.stages[t].clear();
-      plan_.stages[t].reserve(builder.currentStage[t]);
 
       const auto addLookups = [&](const unsigned featureIndex, const uint32_t mask, const uint8_t flags) {
         const Table feature = featureLookups(featureIndex);
@@ -485,10 +495,33 @@ class PlanBuilder {
     return stage;
   }
 
+  // witchhunt: deviation 1 - the scratch, one block for the build, freed with
+  // the builder: `b`'s infos and pauses and features_, bound empty with
+  // scratchFits_ as their flag. False when the block is refused.
+  bool bindScratch(FeatureBuilder& b) {
+    static_assert(alignof(FeatureMap) <= alignof(FeatureBuilder::Info));
+    static_assert(sizeof(FeatureBuilder::Info) % alignof(FeatureMap) == 0);
+    scratch_ = makeUniqueNoThrow<uint8_t[]>(SCRATCH_BYTES);
+    if (!scratch_) return false;
+    b.infos.bind(reinterpret_cast<FeatureBuilder::Info*>(scratch_.get()), MAX_FEATURES, &scratchFits_);
+    features_.bind(reinterpret_cast<FeatureMap*>(scratch_.get() + FEATURES_AT), MAX_FEATURES, &scratchFits_);
+    auto* const pauses = reinterpret_cast<Pause*>(scratch_.get() + PAUSES_AT);
+    for (int t = GSUB; t <= GPOS; t++) b.pauses[t].bind(pauses + t * MAX_STAGES, MAX_STAGES, &scratchFits_);
+    return true;
+  }
+
   Plan& plan_;
   const Face& face_;
   TableSystem systems_[2];
-  std::vector<FeatureMap> features_;
+  FixedVector<FeatureMap> features_;  // witchhunt: deviation 1
+
+  // witchhunt: deviation 1 - the scratch's layout (about 3.1 KB), its block
+  // and its flag.
+  static constexpr size_t FEATURES_AT = MAX_FEATURES * sizeof(FeatureBuilder::Info);
+  static constexpr size_t PAUSES_AT = FEATURES_AT + MAX_FEATURES * sizeof(FeatureMap);
+  static constexpr size_t SCRATCH_BYTES = PAUSES_AT + 2 * MAX_STAGES * sizeof(Pause);
+  std::unique_ptr<uint8_t[]> scratch_;
+  bool scratchFits_ = true;
 };
 
 bool Plan::build(const Face& face, const Script script, const uint32_t* languageTags) {

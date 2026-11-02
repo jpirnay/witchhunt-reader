@@ -253,12 +253,13 @@ Digest lookupDigest(const Face& face, const int table, const uint32_t lookupInde
   return digest;
 }
 
-void appendSubtableDigests(const Face& face, const int table, const uint32_t lookupIndex, std::vector<uint8_t>& out) {
+// witchhunt: deviation 1 - `out` is a FixedVector; a record that does not fit ends the walk.
+void appendSubtableDigests(const Face& face, const int table, const uint32_t lookupIndex, FixedVector<uint8_t>& out) {
   const Table lookup = face.lookup(table, lookupIndex);
   for (uint16_t i = 0; i < Face::subtableCount(lookup); i++) {
     Digest d;
     layout::collectCoverage(layout::subtableCoverage(table, lookup.u16(0), lookup.offset16(6 + 2 * i)), d);
-    out.resize(out.size() + DIGEST_BYTES);
+    if (!out.resize(out.size() + DIGEST_BYTES)) return;  // witchhunt: deviation 1
     writeDigest(d, out.data() + out.size() - DIGEST_BYTES);
   }
 }

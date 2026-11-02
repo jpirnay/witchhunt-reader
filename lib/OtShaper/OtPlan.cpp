@@ -1,5 +1,7 @@
 #include "OtPlan.h"
 
+#include <Memory.h>  // witchhunt: deviation 1
+
 namespace ot {
 
 namespace {
@@ -142,7 +144,7 @@ bool Plan::read(const Face& face, const Script s, const uint32_t* languageTags) 
     if (lookupCount > MAX_PLANNED_LOOKUPS || !body.has(at, bytes)) return false;
     if (!heapAvailable(lookupCount * sizeof(PlannedLookup) + stageCount * sizeof(Stage))) return false;
     stages[t].clear();
-    stages[t].reserve(stageCount);
+    if (!allocateLists(t, lookupCount, stageCount)) return false;  // witchhunt: deviation 1 - both lists
     for (uint16_t i = 0; i < stageCount; i++, at += cppl::STAGE_BYTES) {
       const Stage stage{body.u16(at), static_cast<Pause>(body.u8(at + 2))};
       const uint16_t previous = stages[t].empty() ? 0 : stages[t].back().lastLookup;
@@ -153,13 +155,13 @@ bool Plan::read(const Face& face, const Script s, const uint32_t* languageTags) 
       stages[t].push_back(stage);
     }
     lookups[t].clear();
-    lookups[t].reserve(lookupCount);
     for (uint16_t i = 0; i < lookupCount; i++, at += cppl::LOOKUP_BYTES) {
       const uint16_t index = body.u16(at);
       if (index >= face.lookupCount(t)) return false;
       lookups[t].push_back(PlannedLookup{index, body.u8(at + 2), body.u32(at + 4)});
     }
   }
+  if (!listsFit_) return false;  // witchhunt: deviation 1
   finish(face);
   return true;
 }
@@ -194,9 +196,7 @@ void Plan::finish(const Face& face) {
 // on the heap when the heap check allows (else lookups run unfiltered).
 void Plan::buildFilters(const Face& face) {
   for (int t = GSUB; t <= GPOS; t++) {
-    lookupDigests_[t].clear();
-    subtableStarts_[t].clear();
-    subtableDigests_[t].clear();
+    allocateFilters(t, 0, 0);  // witchhunt: deviation 1 - frees the table's computed filters (upstream clear()s them)
     fontFilters_[t] = face.filters(t);
     if (fontFilters_[t]) continue;
     // 64-bit: planned lookups may share one lookup of 65535 subtables.
@@ -204,15 +204,57 @@ void Plan::buildFilters(const Face& face) {
     for (const PlannedLookup& lookup : lookups[t]) subtables += Face::subtableCount(face.lookup(t, lookup.index));
     const uint64_t bytes = (lookups[t].size() + subtables) * DIGEST_BYTES + lookups[t].size() * sizeof(uint32_t);
     if (bytes > UINT32_MAX || !heapAvailable(static_cast<size_t>(bytes))) continue;
+    if (!allocateFilters(t, lookups[t].size(), static_cast<size_t>(subtables))) continue;  // witchhunt: deviation 1
     lookupDigests_[t].resize(lookups[t].size() * DIGEST_BYTES);
-    subtableStarts_[t].reserve(lookups[t].size());
-    subtableDigests_[t].reserve(static_cast<size_t>(subtables) * DIGEST_BYTES);
     for (size_t i = 0; i < lookups[t].size(); i++) {
       writeDigest(lookupDigest(face, t, lookups[t][i].index), lookupDigests_[t].data() + i * DIGEST_BYTES);
       subtableStarts_[t].push_back(static_cast<uint32_t>(subtableDigests_[t].size() / DIGEST_BYTES));
       appendSubtableDigests(face, t, lookups[t][i].index, subtableDigests_[t]);
     }
+    if (!filtersFit_) allocateFilters(t, 0, 0);  // witchhunt: deviation 1 - a refused growth: unfiltered
   }
+}
+
+// witchhunt: deviation 1 - one block for a table's lists, `lookupCount`
+// planned lookups then `stageCount` stages, bound empty with listsFit_ as
+// their flag. False when the block is refused, with nothing bound.
+bool Plan::allocateLists(const int table, const size_t lookupCount, const size_t stageCount) {
+  static_assert(alignof(Stage) <= alignof(PlannedLookup) && sizeof(PlannedLookup) % alignof(Stage) == 0);
+  listBlock_[table].reset();
+  lookups[table].bind(nullptr, 0, &listsFit_);
+  stages[table].bind(nullptr, 0, &listsFit_);
+  const size_t bytes = lookupCount * sizeof(PlannedLookup) + stageCount * sizeof(Stage);
+  if (bytes == 0) return true;
+  listBlock_[table] = makeUniqueNoThrow<uint8_t[]>(bytes);
+  if (!listBlock_[table]) return false;
+  auto* const lookupStart = reinterpret_cast<PlannedLookup*>(listBlock_[table].get());
+  lookups[table].bind(lookupStart, lookupCount, &listsFit_);
+  stages[table].bind(reinterpret_cast<Stage*>(lookupStart + lookupCount), stageCount, &listsFit_);
+  return true;
+}
+
+// witchhunt: deviation 1 - one block for a table's computed filters, for
+// `lookupCount` planned lookups of `subtableCount` subtables in all: the
+// subtable starts, then the lookup digests and the subtable digests, bound
+// empty with filtersFit_ as their flag. False, with nothing bound, when there
+// is nothing to filter (no lookups: it only frees) or the block is refused.
+bool Plan::allocateFilters(const int table, const size_t lookupCount, const size_t subtableCount) {
+  filterBlock_[table].reset();
+  subtableStarts_[table].bind(nullptr, 0);
+  lookupDigests_[table].bind(nullptr, 0);
+  subtableDigests_[table].bind(nullptr, 0);
+  if (lookupCount == 0) return false;
+  const size_t startBytes = lookupCount * sizeof(uint32_t);
+  const size_t lookupBytes = lookupCount * DIGEST_BYTES;
+  const size_t subtableBytes = subtableCount * DIGEST_BYTES;
+  filterBlock_[table] = makeUniqueNoThrow<uint8_t[]>(startBytes + lookupBytes + subtableBytes);
+  if (!filterBlock_[table]) return false;
+  uint8_t* const block = filterBlock_[table].get();
+  filtersFit_ = true;
+  subtableStarts_[table].bind(reinterpret_cast<uint32_t*>(block), lookupCount, &filtersFit_);
+  lookupDigests_[table].bind(block + startBytes, lookupBytes, &filtersFit_);
+  subtableDigests_[table].bind(block + startBytes + lookupBytes, subtableBytes, &filtersFit_);
+  return true;
 }
 
 LookupSettings Plan::settings(const int table, const size_t i) const {

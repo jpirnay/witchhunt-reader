@@ -2,11 +2,12 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <vector>
+#include <memory>  // witchhunt: deviation 1
 
 #include "OtBuffer.h"
 #include "OtCategories.h"
 #include "OtFace.h"
+#include "OtFixedVector.h"  // witchhunt: deviation 1
 #include "OtLayout.h"
 
 // How one font shapes one script in one language: which lookups run, in
@@ -91,10 +92,13 @@ class Plan {
   // (zero-terminated, up to three). False when the font has more lookups
   // than a plan takes or the heap check refuses the plan's memory; a plan
   // that failed to build or load is empty, and shapes nothing.
+  // witchhunt: deviation 1 - also false when the builder's scratch or a list
+  // block is refused (a refused filter block leaves its table unfiltered).
   bool build(const Face& face, Script script, const uint32_t* languageTags);
   // The same plan, read from the font's CPpl table, where the .cpfont
   // converter stored it. False when the font has none for this script and
   // language, or it is malformed.
+  // witchhunt: deviation 1 - also false when a list block is refused.
   bool load(const Face& face, Script script, const uint32_t* languageTags);
 
   // Lookup settings (flags, mask, filters) of planned lookup `i` of `table`.
@@ -106,8 +110,8 @@ class Plan {
   ShaperKind shaper = ShaperKind::Default;
   uint32_t chosenScript = 0;  // the GSUB script tag the plan follows
   uint32_t globalMask = 0;
-  std::vector<PlannedLookup> lookups[2];
-  std::vector<Stage> stages[2];
+  FixedVector<PlannedLookup> lookups[2];  // witchhunt: deviation 1
+  FixedVector<Stage> stages[2];           // witchhunt: deviation 1
   bool applyGpos = false;
   bool fallbackGlyphClasses = false;  // no GDEF classes: guess them from Unicode
   bool zeroMarks = false;             // shaper zeroes mark advances
@@ -153,9 +157,23 @@ class Plan {
   // Lookup filters: the font's CPac records, or computed here (per planned
   // lookup its digest and where its subtable digests start).
   const FilterRecords* fontFilters_[2] = {nullptr, nullptr};
-  std::vector<uint8_t> lookupDigests_[2];
-  std::vector<uint32_t> subtableStarts_[2];
-  std::vector<uint8_t> subtableDigests_[2];
+  FixedVector<uint8_t> lookupDigests_[2];    // witchhunt: deviation 1
+  FixedVector<uint32_t> subtableStarts_[2];  // witchhunt: deviation 1
+  FixedVector<uint8_t> subtableDigests_[2];  // witchhunt: deviation 1
+
+  // witchhunt: deviation 1 - the arrays above live in blocks the plan owns,
+  // each from makeUniqueNoThrow right after the heap check: per table one for
+  // the lists and one for the computed filters. Each allocate*() frees the
+  // table's old block first, and binds its arrays empty (false: bound to
+  // nothing). A plan is move-only, and `*this = Plan()` frees the blocks. A
+  // flag cleared by a refused growth is checked once the arrays are filled;
+  // build() and load() bind them afresh, so a moved plan's flags never matter.
+  bool allocateLists(int table, size_t lookupCount, size_t stageCount);       // binds lookups[table], stages[table]
+  bool allocateFilters(int table, size_t lookupCount, size_t subtableCount);  // binds the three filter arrays
+  std::unique_ptr<uint8_t[]> listBlock_[2];
+  std::unique_ptr<uint8_t[]> filterBlock_[2];
+  bool listsFit_ = true;    // cleared by a refused growth of lookups[] or stages[]
+  bool filtersFit_ = true;  // cleared by a refused growth of a filter array; allocateFilters() sets it
 };
 
 // The script and language system a plan follows in one layout table

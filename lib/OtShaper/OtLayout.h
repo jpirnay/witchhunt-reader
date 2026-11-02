@@ -1,10 +1,10 @@
 #pragma once
 
 #include <cstdint>
-#include <vector>
 
 #include "OtBuffer.h"
 #include "OtFace.h"
+#include "OtFixedVector.h"  // witchhunt: deviation 1
 
 // Applying GSUB and GPOS lookups (see OtLayoutInternal.h for how the work is
 // split across files).
@@ -34,7 +34,9 @@ struct LookupSettings {
 // start at.
 Digest lookupDigest(const Face& face, int table, uint32_t lookupIndex);
 // Appends the same digest for each subtable of the lookup, as records.
-void appendSubtableDigests(const Face& face, int table, uint32_t lookupIndex, std::vector<uint8_t>& out);
+// witchhunt: deviation 1 - into a FixedVector: it stops at the first record
+// that does not fit, and writes nothing past `out`'s size.
+void appendSubtableDigests(const Face& face, int table, uint32_t lookupIndex, FixedVector<uint8_t>& out);
 
 // Applies one GSUB or GPOS lookup across the buffer. GPOS requires buffer.pos
 // to be sized.

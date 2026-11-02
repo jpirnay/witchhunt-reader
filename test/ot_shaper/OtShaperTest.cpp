@@ -103,7 +103,10 @@ TEST(OtShaperFilters, ConverterFiltersMatchWhatTheShaperComputes) {
         const ot::Digest computed = ot::lookupDigest(face, t, i);
         const ot::Digest stored = ot::readDigest(r->lookupDigests + ot::DIGEST_BYTES * i);
         EXPECT_EQ(0, std::memcmp(computed.masks, stored.masks, sizeof(computed.masks))) << fx.file << " lookup " << i;
-        std::vector<uint8_t> subtables;
+        // witchhunt: deviation 1 - a FixedVector over room for the lookup's subtable records.
+        std::vector<uint8_t> room(ot::Face::subtableCount(face.lookup(t, i)) * ot::DIGEST_BYTES);
+        ot::FixedVector<uint8_t> subtables;
+        subtables.bind(room.data(), room.size());
         ot::appendSubtableDigests(face, t, i, subtables);
         EXPECT_EQ(r->firstSubtable(i), subtable);
         EXPECT_EQ(0, std::memcmp(subtables.data(), r->subtableDigests + ot::DIGEST_BYTES * subtable, subtables.size()));
