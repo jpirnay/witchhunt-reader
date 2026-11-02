@@ -8,7 +8,8 @@
 namespace HebrewShaper {
 
 // Same contract as TextShaping::shape. Replaces each yod-he-vav-he (non-spacing marks may sit between the
-// letters and after the last he) with he + geresh (U+0027), both carrying the cluster of the yod.
+// letters and after the last he) with he + geresh (U+05F3; upstream draws U+0027), both carrying the cluster of
+// the yod.
 bool shape(const char* text, size_t len, TextShaping::Unit* units, size_t capacity, size_t& count);
 
 }  // namespace HebrewShaper

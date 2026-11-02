@@ -8,37 +8,43 @@ namespace {
 constexpr uint32_t YOD = 0x05D9;
 constexpr uint32_t HE = 0x05D4;
 constexpr uint32_t VAV = 0x05D5;
-constexpr uint32_t GERESH = 0x0027;
+constexpr uint32_t GERESH = 0x05F3;
 
-// Decodes the code point at text[pos], never reading past len; a malformed byte is one U+FFFD. Advances pos.
+// Decodes the code point at text[pos], never reading past len, with the same rule as utf8NextCodepoint (a bad or
+// missing continuation byte consumes the bytes read so far; an overlong, surrogate or out-of-range value, or a
+// lead byte that starts nothing, consumes one) so the units match what the rest of the pipeline decodes.
 uint32_t decodeAt(const char* text, size_t len, size_t& pos) {
   const auto b0 = static_cast<uint8_t>(text[pos]);
-  size_t n = 1;
-  uint32_t cp = b0;
-  if (b0 >= 0xF0 && b0 < 0xF8) {
-    n = 4;
-    cp = b0 & 0x07;
-  } else if (b0 >= 0xE0 && b0 < 0xF0) {
-    n = 3;
-    cp = b0 & 0x0F;
-  } else if (b0 >= 0xC0 && b0 < 0xE0) {
+  if (b0 < 0x80) {
+    pos++;
+    return b0;
+  }
+  size_t n = 0;
+  uint32_t cp = 0;
+  if ((b0 >> 5) == 0x6) {
     n = 2;
     cp = b0 & 0x1F;
-  } else if (b0 >= 0x80) {
-    pos++;
-    return 0xFFFD;
-  }
-  if (pos + n > len) {
+  } else if ((b0 >> 4) == 0xE) {
+    n = 3;
+    cp = b0 & 0x0F;
+  } else if ((b0 >> 3) == 0x1E) {
+    n = 4;
+    cp = b0 & 0x07;
+  } else {
     pos++;
     return 0xFFFD;
   }
   for (size_t i = 1; i < n; i++) {
-    const auto b = static_cast<uint8_t>(text[pos + i]);
-    if ((b & 0xC0) != 0x80) {
-      pos++;
+    if (pos + i >= len || (static_cast<uint8_t>(text[pos + i]) & 0xC0) != 0x80) {
+      pos += i;
       return 0xFFFD;
     }
-    cp = (cp << 6) | (b & 0x3F);
+    cp = (cp << 6) | (static_cast<uint8_t>(text[pos + i]) & 0x3F);
+  }
+  const bool overlong = (n == 2 && cp < 0x80) || (n == 3 && cp < 0x800) || (n == 4 && cp < 0x10000);
+  if (overlong || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF) {
+    pos++;
+    return 0xFFFD;
   }
   pos += n;
   return cp;
