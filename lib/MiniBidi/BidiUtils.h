@@ -23,7 +23,14 @@ bool isTransparentMark(uint32_t cp);
 
 // paragraphLevel: -1 = auto-detect, 0 = LTR, 1 = RTL
 // On failure (including workspace OOM), returns false and leaves out unchanged.
+// witchhunt: deviation 2 - Arabic letters are reordered but not shaped (no do_shape, no lam-alef ligature).
 bool applyBidiVisual(const char* utf8, std::string& out, int paragraphLevel = -1);
+
+// witchhunt: deviation 2 - upstream's behaviour, with Arabic contextual shaping (do_shape). Unused in step 1.
+bool applyBidiVisualShaped(const char* utf8, std::string& out, int paragraphLevel = -1);
+
+// witchhunt: deviation 1 - frees the shared workspace; the next call allocates it again.
+void releaseWorkspace();
 
 // Returns false with empty visualOrder when no order is produced, including OOM.
 bool computeVisualWordOrder(const std::vector<std::string>& words, bool paragraphIsRtl,
