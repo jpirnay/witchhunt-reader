@@ -22,11 +22,14 @@
 
 #if SERIAL_TEST_API
 #include <Epub/Page.h>
+#include <FileReplace.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalPowerManager.h>
 #include <HalSystem.h>
 #include <Memory.h>
 #include <ProtectedPaths.h>
+#include <SerialTransfer/SerialTransferProtocol.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
@@ -59,8 +62,9 @@ using SerialCommandGrammar::appendField;
 // logSerial.write() returns short when the USB-CDC TX ring stays full past its timeout (1 ms
 // outside a transfer), so every line is written in a loop until the host has taken it. Yields
 // rather than spins: a tight loop on the C3 starves the USB-CDC task being waited on. Gives up
-// after `stallMs` without progress (the host stopped reading).
-bool writeAll(const uint8_t* data, const size_t len, const unsigned long stallMs) {
+// after `stallMs` without progress (the host stopped reading). `waiting` runs on each wait: a long stream feeds the
+// task watchdog there.
+bool writeAll(const uint8_t* data, const size_t len, const unsigned long stallMs, void (*waiting)() = nullptr) {
   size_t sent = 0;
   unsigned long lastProgressMs = millis();
   while (sent < len) {
@@ -71,6 +75,7 @@ bool writeAll(const uint8_t* data, const size_t len, const unsigned long stallMs
       continue;
     }
     if (millis() - lastProgressMs > stallMs) return false;
+    if (waiting) waiting();
     delay(1);
   }
   return true;
@@ -1016,6 +1021,23 @@ class LongWork {
   unsigned long lastMs_ = millis();
 };
 
+// A stream to the host waits as long for it as SCREENSHOT's frame does (SerialTransferDevice's 15 s).
+constexpr unsigned long kStreamStallMs = 15000;
+
+// A short protocol line (FS_PUT_READY, FS_PUT_ACK, FS_GET_START) in one write, as WireLine writes its lines, from a
+// buffer of its own: wireBuffer may hold data.
+__attribute__((format(printf, 1, 2))) void replyWhole(const char* format, ...) {
+  char line[64];
+  va_list args;
+  va_start(args, format);
+  const int n = vsnprintf(line, sizeof(line) - 1, format, args);
+  va_end(args);
+  if (n <= 0) return;
+  const size_t length = std::min(static_cast<size_t>(n), sizeof(line) - 2);
+  line[length] = '\n';
+  writeAll(reinterpret_cast<const uint8_t*>(line), length + 1, kReplyStallMs);
+}
+
 // ---- PAGE -----------------------------------------------------------------------------------
 
 const char* alignName(const CssTextAlign align) {
@@ -1093,15 +1115,334 @@ void cmdPage(std::string_view /*arg*/) {
 
 // ---- FS -------------------------------------------------------------------------------------
 
+// The card path a file command names, as its replies show it: normalisePath drops the leading slash (the root becomes
+// ""); the replies and the root check want it back.
+std::string cardPath(const std::string_view spelled) { return "/" + FsHelpers::normalisePath(std::string(spelled)); }
+
+// What FS:RM refuses, for every command that reads, writes, makes or moves an item: the root, the credential stores,
+// a dot-named item itself, a path spelled with an 8.3 alias (ProtectedPaths). Hidden folders can be walked through.
+bool refusedItem(const std::string& path) {
+  const auto refuseAlias = [](std::string_view, std::string_view) { return true; };
+  return path == "/" || ProtectedPaths::isProtectedPath(path, ProtectedPaths::Target::Item, true, refuseAlias);
+}
+
+bool isFolder(const std::string& path) {
+  const HalFile item = Storage.open(path.c_str());
+  return item && item.isDirectory();
+}
+
+// "/a/b" -> "/a", "/a" -> "/".
+std::string parentOf(const std::string& path) { return path.substr(0, std::max<size_t>(path.rfind('/'), 1)); }
+
+// The zlib CRC32 of `size` bytes of `file`, read from where it stands. False on a short read.
+bool crcOfFile(HalFile& file, const uint32_t size, uint32_t& crc) {
+  LongWork work;
+  crc = 0;
+  for (uint32_t done = 0; done < size;) {
+    const size_t want = std::min<uint32_t>(size - done, kWireChunk);
+    if (file.read(wireBuffer, want) != static_cast<int>(want)) return false;
+    crc = serialtransfer::crc32Update(crc, wireBuffer, want);
+    done += want;
+    work.breathe();
+  }
+  return true;
+}
+
+// The upload's idle limit: no byte for this long ends it.
+constexpr unsigned long kPutIdleMs = 5000;
+
+// Reads `len` bytes of an upload into wireBuffer. Waits with delay(1) while none have arrived: a busy wait starves
+// the C3's USB-CDC receive. False when none came for kPutIdleMs.
+bool receiveChunk(const size_t len, LongWork& work) {
+  size_t got = 0;
+  unsigned long lastByteMs = millis();
+  while (got < len) {
+    const int ready = logSerial.available();
+    if (ready > 0) {
+      got += logSerial.read(wireBuffer + got, std::min(len - got, static_cast<size_t>(ready)));
+      lastByteMs = millis();
+    } else if (millis() - lastByteMs >= kPutIdleMs) {
+      return false;
+    } else {
+      delay(1);
+    }
+    work.breathe();
+  }
+  return true;
+}
+
+// Why an upload's write came up short: a full card, or the card failing. Asked only then, since counting the free
+// clusters reads the whole FAT.
+const char* writeFailure(const uint32_t stillToWrite) {
+  return Storage.sdFreeBytes() < stillToWrite ? "FS_ERROR:no space " : "FS_ERROR:write failed ";
+}
+
+// CMD:FS:PUT:<path>:<size>:<crc32hex>. The path is checked before the host sends a byte; then the data comes in
+// kWireChunk pieces, each written to <path>.part and acknowledged before the next is sent, and at <size> bytes the
+// CRC decides: the .part takes the target's place (FileReplace, which never loses the old file), or goes.
+void fsPut(const std::string_view arg) {
+  std::string_view spelled;
+  uint32_t size = 0;
+  uint32_t wantCrc = 0;
+  if (!SerialCommandGrammar::parseFsPut(arg, spelled, size, wantCrc)) {
+    reply("FS_ERROR:expected PUT:/<path>:<size>:<crc32hex>");
+    return;
+  }
+  const std::string path = cardPath(spelled);
+  if (refusedItem(path)) {
+    reply("FS_ERROR:protected ", path);
+    return;
+  }
+  if (!isFolder(parentOf(path))) {
+    reply("FS_ERROR:no parent folder ", path);
+    return;
+  }
+  if (isFolder(path)) {
+    reply("FS_ERROR:is a folder ", path);
+    return;
+  }
+  const std::string part = path + ".part";
+  HalFile file;
+  if (!Storage.openFileForWrite("SER", part, file)) {
+    reply("FS_ERROR:could not create ", path);
+    return;
+  }
+
+  const HalPowerManager::Lock fullSpeed;
+  LongWork work;
+  const char* error = nullptr;
+  {
+    const LogHold hold;
+    // The CRLF of a host that ends its lines so: the line reader stops at the CR, and the LF is no data.
+    while (logSerial.available() > 0 && (logSerial.peek() == '\r' || logSerial.peek() == '\n')) logSerial.read();
+    replyWhole("FS_PUT_READY:%u", static_cast<unsigned>(kWireChunk));
+    uint32_t received = 0;
+    uint32_t crc = 0;
+    while (received < size) {
+      const size_t want = std::min<uint32_t>(size - received, kWireChunk);
+      if (!receiveChunk(want, work)) {
+        error = "FS_ERROR:timeout ";
+        break;
+      }
+      crc = serialtransfer::crc32Update(crc, wireBuffer, want);
+      if (file.write(wireBuffer, want) != want) {
+        error = writeFailure(size - received);
+        break;
+      }
+      received += want;
+      replyWhole("FS_PUT_ACK:%lu", static_cast<unsigned long>(received));
+    }
+    if (!error && crc != wantCrc) error = "FS_ERROR:crc mismatch ";
+  }
+  // Closed (its last sector and the directory entry written) before the .part is renamed or removed.
+  file.flush();
+  if (!file.close() && !error) error = "FS_ERROR:write failed ";
+  if (!error && !FileReplace::replace(part.c_str(), path.c_str())) error = "FS_ERROR:could not replace ";
+  if (error) {
+    Storage.remove(part.c_str());
+    reply(error, path);
+    return;
+  }
+  std::string line = "FS_OK:put " + path;
+  line += ' ';
+  line += std::to_string(size);
+  reply(line);
+}
+
+// CMD:FS:GET:<path>: FS_GET_START:<size>:<crc32hex>, the file's bytes, FS_GET_END. The CRC takes a read of its own
+// first, so the host can check what it got.
+void fsGet(const std::string_view arg) {
+  std::string_view spelled;
+  if (!SerialCommandGrammar::parseFsPath(arg, spelled)) {
+    reply("FS_ERROR:expected GET:/<path>");
+    return;
+  }
+  const std::string path = cardPath(spelled);
+  if (refusedItem(path)) {
+    reply("FS_ERROR:protected ", path);
+    return;
+  }
+  HalFile file = Storage.open(path.c_str());
+  if (!file) {
+    reply("FS_ERROR:not found ", path);
+    return;
+  }
+  if (file.isDirectory()) {
+    reply("FS_ERROR:not a file ", path);
+    return;
+  }
+  const HalPowerManager::Lock fullSpeed;
+  const auto size = static_cast<uint32_t>(file.fileSize());
+  uint32_t crc = 0;
+  if (!crcOfFile(file, size, crc) || !file.seek(0)) {
+    reply("FS_ERROR:read failed ", path);
+    return;
+  }
+  bool readOk = true;
+  {
+    // No render pass while the bytes go out: the display driver prints a line of its own after a refresh, and in
+    // the payload that would be data.
+    RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
+    const LogHold hold;
+    replyWhole("FS_GET_START:%lu:%08lx", static_cast<unsigned long>(size), static_cast<unsigned long>(crc));
+    LongWork work;
+    for (uint32_t sent = 0; sent < size;) {
+      const size_t want = std::min<uint32_t>(size - sent, kWireChunk);
+      // A read that fails still sends its share, zeros, so the host's count of bytes holds; the line after says so.
+      if (readOk && file.read(wireBuffer, want) != static_cast<int>(want)) readOk = false;
+      if (!readOk) memset(wireBuffer, 0, want);
+      // Up to 15 s for a slow host: longer than the task watchdog allows unfed.
+      if (!writeAll(wireBuffer, want, kStreamStallMs, &HalSystem::feedWatchdog)) {
+        reply("FS_ERROR:transfer stalled ", path);
+        return;
+      }
+      sent += want;
+      work.breathe();
+    }
+  }
+  if (readOk) {
+    reply("FS_GET_END");
+  } else {
+    reply("FS_ERROR:read failed ", path);
+  }
+}
+
+// CMD:FS:HASH:<path>: FS_HASH:<crc32hex> <size> <path>, to check a file against a copy on the host without reading
+// it back.
+void fsHash(const std::string_view arg) {
+  std::string_view spelled;
+  if (!SerialCommandGrammar::parseFsPath(arg, spelled)) {
+    reply("FS_ERROR:expected HASH:/<path>");
+    return;
+  }
+  const std::string path = cardPath(spelled);
+  if (refusedItem(path)) {
+    reply("FS_ERROR:protected ", path);
+    return;
+  }
+  HalFile file = Storage.open(path.c_str());
+  if (!file) {
+    reply("FS_ERROR:not found ", path);
+    return;
+  }
+  if (file.isDirectory()) {
+    reply("FS_ERROR:not a file ", path);
+    return;
+  }
+  const HalPowerManager::Lock fullSpeed;
+  const auto size = static_cast<uint32_t>(file.fileSize());
+  uint32_t crc = 0;
+  if (!crcOfFile(file, size, crc)) {
+    reply("FS_ERROR:read failed ", path);
+    return;
+  }
+  char head[40];
+  snprintf(head, sizeof(head), "FS_HASH:%08lx %lu ", static_cast<unsigned long>(crc), static_cast<unsigned long>(size));
+  reply(head, path);
+}
+
+// CMD:FS:MKDIR:<folder>: makes it and the folders above it; FS_OK as well when it is there already.
+void fsMkdir(const std::string_view arg) {
+  std::string_view spelled;
+  if (!SerialCommandGrammar::parseFsPath(arg, spelled)) {
+    reply("FS_ERROR:expected MKDIR:/<folder>");
+    return;
+  }
+  const std::string path = cardPath(spelled);
+  if (path != "/" && refusedItem(path)) {
+    reply("FS_ERROR:protected ", path);
+    return;
+  }
+  {
+    const HalFile item = Storage.open(path.c_str());
+    if (item && !item.isDirectory()) {
+      reply("FS_ERROR:not a folder ", path);
+      return;
+    }
+    if (item) {
+      reply("FS_OK:mkdir ", path);
+      return;
+    }
+  }
+  if (!Storage.mkdir(path.c_str(), true)) {
+    reply("FS_ERROR:could not create ", path);
+    return;
+  }
+  reply("FS_OK:mkdir ", path);
+}
+
+// CMD:FS:MV:<from>:<to>: renames or moves a file or a folder; never onto something that is there.
+void fsMove(const std::string_view arg) {
+  std::string_view fromSpelled;
+  std::string_view toSpelled;
+  if (!SerialCommandGrammar::parseFsMove(arg, fromSpelled, toSpelled)) {
+    reply("FS_ERROR:expected MV:/<from>:/<to>");
+    return;
+  }
+  const std::string from = cardPath(fromSpelled);
+  const std::string to = cardPath(toSpelled);
+  if (refusedItem(from)) {
+    reply("FS_ERROR:protected ", from);
+    return;
+  }
+  if (refusedItem(to)) {
+    reply("FS_ERROR:protected ", to);
+    return;
+  }
+  bool folder = false;
+  {
+    const HalFile item = Storage.open(from.c_str());
+    if (!item) {
+      reply("FS_ERROR:not found ", from);
+      return;
+    }
+    folder = item.isDirectory();
+  }
+  if (Storage.exists(to.c_str())) {
+    reply("FS_ERROR:exists ", to);
+    return;
+  }
+  if (!isFolder(parentOf(to))) {
+    reply("FS_ERROR:no parent folder ", to);
+    return;
+  }
+  // A folder moved into itself would hang off its own subtree, out of reach. FAT compares names without case.
+  if (folder && ProtectedPaths::startsWithIgnoreCase(to, from + "/")) {
+    reply("FS_ERROR:into itself ", to);
+    return;
+  }
+  if (!Storage.rename(from.c_str(), to.c_str())) {
+    reply("FS_ERROR:could not move ", from);
+    return;
+  }
+  std::string line = "FS_OK:moved " + from;
+  line += ' ';
+  line += to;
+  reply(line);
+}
+
 // CMD:FS:LS:<folder> lists a folder, one "FS:<d|f> <bytes> <name>" line an entry and FS_END:<count>; CMD:FS:RM:<path>
 // removes a file, or a folder with everything in it. Hidden folders can be reached (the caches under /.crosspoint);
-// the credential stores, a dot-named item itself and any path spelled by an 8.3 alias cannot.
+// the credential stores, a dot-named item itself and any path spelled by an 8.3 alias cannot. PUT, GET, HASH, MKDIR
+// and MV are above.
 void cmdFs(const std::string_view arg) {
   std::string_view verb;
   std::string_view rest;
   splitHead(arg, verb, rest);
+  struct Verb {
+    const char* name;
+    void (*run)(std::string_view rest);
+  };
+  static constexpr Verb kVerbs[] = {
+      {"PUT", &fsPut}, {"GET", &fsGet}, {"HASH", &fsHash}, {"MKDIR", &fsMkdir}, {"MV", &fsMove}};
+  for (const Verb& entry : kVerbs) {
+    if (verb == entry.name) {
+      entry.run(rest);
+      return;
+    }
+  }
   if ((verb != "LS" && verb != "RM") || rest.empty() || rest.front() != '/') {
-    reply("FS_ERROR:expected LS:/<folder> or RM:/<path>");
+    reply("FS_ERROR:expected LS, RM, PUT, GET, HASH, MKDIR or MV, then :/<path>");
     return;
   }
   // normalisePath drops the leading slash (the root becomes ""); the replies and the root check want it back.
