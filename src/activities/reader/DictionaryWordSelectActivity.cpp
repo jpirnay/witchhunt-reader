@@ -46,6 +46,43 @@ bool isSelectableToken(const char* text, const size_t length) {
   return false;
 }
 
+bool isBlank(const uint32_t cp) { return cp == 0x20 || cp == 0xA0 || cp == 0x202F || cp == 0x3000; }
+
+// The byte length of the blank code point (see isBlank) that starts at `at` in `text`; 0 when there is none. Only
+// the 1-3 byte forms are decoded: every blank is among them.
+size_t blankLengthAt(const char* text, const size_t length, const size_t at) {
+  const auto* p = reinterpret_cast<const uint8_t*>(text);
+  if (p[at] < 0x80) return isBlank(p[at]) ? 1 : 0;
+  if ((p[at] & 0xE0) == 0xC0 && at + 1 < length) return isBlank(((p[at] & 0x1Fu) << 6) | (p[at + 1] & 0x3Fu)) ? 2 : 0;
+  if ((p[at] & 0xF0) == 0xE0 && at + 2 < length) {
+    return isBlank(((p[at] & 0x0Fu) << 12) | ((p[at + 1] & 0x3Fu) << 6) | (p[at + 2] & 0x3Fu)) ? 3 : 0;
+  }
+  return 0;
+}
+
+// The range [begin, end) of `text` without blank code points at either end. A vertical token measures by the pen's
+// advance, where a blank counts its whole em (a horizontal one by its ink, which is none): a U+3000 glued to a word, or
+// inside a token, would box an em of nothing.
+void trimBlanks(const char* text, const size_t length, size_t& begin, size_t& end) {
+  begin = 0;
+  end = length;
+  while (begin < end) {
+    const size_t n = blankLengthAt(text, end, begin);
+    if (n == 0) break;
+    begin += n;
+  }
+  while (end > begin) {
+    size_t n = 0;
+    for (size_t back = 1; back <= 3 && back <= end - begin && n == 0; back++) {
+      const size_t at = end - back;
+      const size_t found = blankLengthAt(text, end, at);
+      if (found == back) n = found;
+    }
+    if (n == 0) break;
+    end -= n;
+  }
+}
+
 // Word bytes for the purpose of finding a dash that joins two words.
 bool isWordByte(const uint8_t c) { return c >= 0x80 || std::isalnum(c) != 0; }
 
@@ -377,34 +414,61 @@ void DictionaryWordSelectActivity::extractWords() {
       }
 
       const uint8_t flags = drawFlags(*block, i);
+      // A vertical token's box is its text without the blanks at its ends (trimBlanks); a token of blanks only is
+      // skipped as a zero-width one is. A combined word is one cell and is left whole.
+      const char* tokenText = text;
+      size_t tokenLength = textLength;
+      int tokenX = geometry.x;
+      int tokenWidth = geometry.width;
+      if (vertical && (flags & DRAW_COMBINED) == 0 && textLength < WORD_TEXT_CAPACITY) {
+        size_t begin = 0;
+        size_t end = textLength;
+        trimBlanks(text, textLength, begin, end);
+        if (begin >= end) {
+          previousEmitted = false;
+          continue;
+        }
+        if (begin > 0 || end < textLength) {
+          char measure[WORD_TEXT_CAPACITY];
+          memcpy(measure, text, begin);
+          measure[begin] = '\0';
+          tokenX += pieceAdvance(renderer, geometry, measure, vertical);
+          memcpy(measure, text + begin, end - begin);
+          measure[end - begin] = '\0';
+          tokenWidth = pieceWidth(renderer, geometry, measure, vertical);
+          tokenText = text + begin;
+          tokenLength = end - begin;
+        }
+      }
       // The common case: one whole token, measured once by wordBox and used in place.
       // Cutting needs a NUL-terminated copy to measure, so a token too long for the scratch
       // buffer is left whole -- those are never the dash-joined pairs this is for. Nor is a
       // combined word cut: it is one cell, drawn as one block.
-      if ((flags & DRAW_COMBINED) != 0 || textLength >= WORD_TEXT_CAPACITY || nextDashSplit(text, textLength, 0) == 0) {
-        addFragment(text, textLength, geometry.x, geometry.width, geometry, flags, /*mayGlue=*/true);
+      if ((flags & DRAW_COMBINED) != 0 || tokenLength >= WORD_TEXT_CAPACITY ||
+          nextDashSplit(tokenText, tokenLength, 0) == 0) {
+        addFragment(tokenText, tokenLength, tokenX, tokenWidth, geometry, flags, /*mayGlue=*/true);
         continue;
       }
 
       size_t partStart = 0;
-      int partX = geometry.x;
+      int partX = tokenX;
       bool firstPart = true;
-      while (partStart < textLength) {
-        size_t partEnd = nextDashSplit(text, textLength, partStart);
-        if (partEnd == 0) partEnd = textLength;
+      while (partStart < tokenLength) {
+        size_t partEnd = nextDashSplit(tokenText, tokenLength, partStart);
+        if (partEnd == 0) partEnd = tokenLength;
         const size_t partLength = partEnd - partStart;
 
         char part[WORD_TEXT_CAPACITY];
-        memcpy(part, text + partStart, partLength);
+        memcpy(part, tokenText + partStart, partLength);
         part[partLength] = '\0';
         const int partWidth = pieceWidth(renderer, geometry, part, vertical);
         if (partWidth > 0) {
-          addFragment(text + partStart, partLength, partX, partWidth, geometry, flags, firstPart);
+          addFragment(tokenText + partStart, partLength, partX, partWidth, geometry, flags, firstPart);
           firstPart = false;
         }
 
         // The next piece starts where this one's pen ends.
-        if (partEnd < textLength) partX += pieceAdvance(renderer, geometry, part, vertical);
+        if (partEnd < tokenLength) partX += pieceAdvance(renderer, geometry, part, vertical);
         partStart = partEnd;
       }
     }
