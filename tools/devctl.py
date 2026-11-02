@@ -108,7 +108,7 @@ def split_fields(text):
 
 
 PAGE_LINE_FORMS = {
-    "PAGE_LINE": re.compile(r"(\d+) x=-?\d+ y=-?\d+ words=(\d+) align=\w+ vertical=[01]"),
+    "PAGE_LINE": re.compile(r"(\d+) x=-?\d+ y=-?\d+ words=(\d+) align=\w+ vertical=[01]( .*)?"),
     "PAGE_W": re.compile(r'(\d+) x=-?\d+ w=-?\d+ style=\d+ glue=[01] text="(?:[^"\\]|\\.)*"( .*)?'),
     "PAGE_IMAGE": re.compile(r"(\d+) x=-?\d+ y=-?\d+ w=-?\d+ h=-?\d+"),
     "PAGE_EL": re.compile(r"(\d+) \w+"),
@@ -361,7 +361,9 @@ class Device:
         failure, tried again up to `retries` times."""
         for attempt in range(retries + 1):
             error = self._get_once(remote, local)
-            if error is None or attempt == retries:
+            # Only a damaged transfer is worth repeating; the device's own refusals (not found, protected, no
+            # memory, ...) come back the same every time.
+            if error is None or attempt == retries or error.startswith("FS_ERROR:") and "stalled" not in error:
                 return error
             print(f"GET {remote}: {error}; trying again ({attempt + 1} of {retries})")
         return None
@@ -374,7 +376,10 @@ class Device:
         fields = line.split(":")
         if len(fields) != 4:
             return f"expected FS_GET_START:<size>:<crc32hex>:<piece>, got {line!r}"
-        size, crc, piece = int(fields[1]), int(fields[2], 16), int(fields[3])
+        try:
+            size, crc, piece = int(fields[1]), int(fields[2], 16), int(fields[3])
+        except ValueError:
+            return f"bad FS_GET_START {line!r}"
         started = time.time()
         data = bytearray()
         next_pause = 1 << 20
