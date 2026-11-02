@@ -110,8 +110,8 @@ answers with one line that starts with a fixed prefix for that command: `BTN_OK`
 `CMD_ERROR:unknown command <text>`. The replies that are not a single line are `CMD:GET:*` (one
 line per setting, then `GET_END:<count>`), `CMD:FS:LS` (one line per entry, then `FS_END`),
 `CMD:PAGE` (one line per element and word, then `PAGE_END`), and the three that carry bytes:
-`CMD:SCREENSHOT` and `CMD:FS:GET` (binary data between two lines) and `CMD:FS:PUT` (an exchange:
-the host sends the file in chunks, each acknowledged).
+`CMD:SCREENSHOT` (binary data between two lines) and the two exchanges `CMD:FS:PUT` and
+`CMD:FS:GET` (the file goes in pieces, each acknowledged by the side that takes it).
 
 A reply means the command was **accepted**, not that its effect is finished: after `BTN_OK` the
 press is queued and the screen has not been redrawn yet. Use [`CMD:IDLE`](#waiting-idle) to wait for
@@ -736,22 +736,45 @@ FS_END:2
   main loop does nothing else: no button is read until the upload ends. The size has no limit but
   the card; allow about a second per 100 to 250 KB (see Speed below).
 
-`GET` downloads one:
+`GET` downloads one, a piece at a time, each acknowledged by the host:
 
 ```
-FS_GET_START:<size>:<crc32hex>
-<size bytes of the file>
-FS_GET_END
+> CMD:FS:GET:/test/fonts/NotoSansHebrew.ttf
+< FS_GET_START:41380:5d1e09f3:2048
+< <2048 bytes>
+> 0x06
+< <2048 bytes>
+> 0x06
+  ...
+< <the last 420 bytes>
+> 0x06
+< FS_GET_END
 ```
 
-The device reads the file once for its CRC32 before it starts, so a large file takes a moment to
-answer; check what arrives against the CRC. A read that fails halfway still sends the rest of the
-promised bytes, as zeros, and then `FS_ERROR:read failed <path>` instead of `FS_GET_END`. Errors
-before the data: `FS_ERROR:protected <path>` (the same rules as `RM`: the credential stores never
-leave the device), `FS_ERROR:not found <path>`, `FS_ERROR:not a file <path>`, `FS_ERROR:no memory
-<path>`, `FS_ERROR:read failed <path>`. While the bytes go out, log lines are held back and the
-screen is not redrawn (the display driver prints a line of its own after a refresh, which would land
-in the data), so a download of several megabytes freezes the screen for as long as it takes.
+- `FS_GET_START:<size>:<crc32hex>:<piece>`, then the file in pieces of `<piece>` bytes (2048), the
+  last one shorter. After each piece the device waits for one byte from the host: `0x06` (ACK, the
+  transfer protocol's) sends the next, any other byte cancels (`FS_ERROR:cancelled <path>`), and
+  none for 15 s ends it (`FS_ERROR:transfer stalled <path>`). An empty file is `FS_GET_START` and
+  `FS_GET_END` with nothing between.
+- Check what arrives against the size and the CRC. A piece that does not arrive whole within a few
+  seconds lost bytes on the way: cancel, read up to the device's `FS_ERROR:cancelled`, and ask
+  again (`tools/devctl.py get:...:<retries>` does).
+- Why it is paced: an unpaced stream lost data no side could see. On the X4, a host that stopped
+  reading for half a second once a megabyte lost whole 64-byte USB packets at every pause, and an
+  ordinary host 2 downloads in 14, while the device's writes had all returned their full count and
+  it sent `FS_GET_END` as if every byte had gone. It happened on the USB Transfer screen too, with
+  its 1 s TX timeout; `SCREENSHOT`'s 48 KB fit the host's buffers and showed no loss. The transfer
+  protocol's download is paced the same way for the same reason. With one piece in flight, the
+  device's TX buffer never fills and the host is never more than a piece behind.
+- The device reads the file once for its CRC32 before it starts, so a large file takes a moment to
+  answer. A read that fails halfway still sends the rest of the promised bytes, as zeros, and then
+  `FS_ERROR:read failed <path>` instead of `FS_GET_END`.
+- Errors before the data: `FS_ERROR:protected <path>` (the same rules as `RM`: the credential stores
+  never leave the device), `FS_ERROR:not found <path>`, `FS_ERROR:not a file <path>`,
+  `FS_ERROR:no memory <path>`, `FS_ERROR:read failed <path>`.
+- While the bytes go out, log lines are held back and the screen is not redrawn (the display driver
+  prints a line of its own after a refresh, which would land in the data), so a download of several
+  megabytes freezes the screen for as long as it takes.
 
 `HASH` checks a file without reading it back: `FS_HASH:<crc32hex> <size> <path>`, or the errors of
 `GET`. It reads the whole file, at the card's speed.
@@ -770,12 +793,12 @@ it is there already. `FS_ERROR:not a folder <path>` when a file has that name, `
 refused too), `FS_ERROR:no parent folder <to>`, `FS_ERROR:into itself <to>` (a folder into its own
 subtree), `FS_ERROR:could not move <from>`.
 
-**Speed.** An upload moves one 2 KB piece at a time: received, written to the card, acknowledged.
-`tools/devctl.py` prints the rate it got. Its own side keeps up with about 45 MB/s against a device
-that answers at once, so the device sets the pace; not yet measured on one, expect the order of the
-USB Transfer screen, which works the same way with 2 KB pieces and moved 119 to 170 KB/s on the X3
-and X4. A download is not acknowledged piece by piece; it comes after the CRC pass, which reads the
-file at the card's speed.
+**Speed.** Both directions move one 2 KB piece at a time, each acknowledged, and
+`tools/devctl.py` prints the rate it got. On the X4 an upload of 1 MB ran at about 210 KB/s (10 KB
+at about 100 KB/s), close to the USB Transfer screen's 119 to 170 KB/s. Unpaced, a download ran at
+500 to 740 KB/s; the acknowledgement per piece costs a round trip per 2 KB, so expect less, not yet
+measured. A download starts after the CRC pass, which reads the file at the card's speed (1.15 s for
+1 MB on the X4).
 
 All of them work while the reader runs, without the USB Transfer screen and the restart that leaving it costs:
 deleting a book's section cache (`/.crosspoint/epub_<hash>/spines/...`) forces a cold build of a chapter, a font
@@ -875,13 +898,16 @@ Steps: `cmd:<TEXT>` (send `CMD:<TEXT>`, fail on an error reply; `GET:*`, `FS:LS:
 of their reply), `state` and `check:<key>=<regex>` (test a field of the last `STATE`), `idle[:<ms>[:SCREEN]]`,
 `shot:<file.png>`, `wait:<seconds>`, `expect:<regex>:<seconds>` (wait for a log line), `select:<regex>[:<n>]` (press
 Down, waiting for each press to land, until the selected row's label matches; at most n presses, 40 by default),
-`page:<out.txt>` (the `PAGE` dump into a file, with a one-line summary), `put:<local>:<remote>` and
-`get:<remote>:<local>` (a file each way, checked by its CRC32; the rate is printed), `hash:<remote>[=<local>]` (with a
-local file, fail unless size and CRC32 match), `mkdir:<remote>`, `mv:<from>:<to>`. A card path starts with `/` and
-holds no `:`, so `put:` splits at its last `:` and `get:` at its first, and a local path may carry a drive letter
-(`put:C:/books/a.epub:/test/a.epub`); `hash:` splits at the first `=`.
+`page:<out.txt>` (the `PAGE` dump into a file, with a one-line summary), `put:<local>:<remote>`
+and `get:<remote>:<local>[:<retries>]` (a file each way, checked by its size and CRC32; the rate is printed; a `get:`
+that fails says how many bytes came and with which CRC, cancels, and tries again up to `<retries>` times),
+`hash:<remote>[=<local>]` (with a local file, fail unless size and CRC32 match), `mkdir:<remote>`, `mv:<from>:<to>`. A
+card path starts with `/` and holds no `:`, so `put:` splits at its last `:` and `get:` at its first (and at a
+trailing `:<digits>`, the retry count), and a local path may carry a drive letter (`put:C:/books/a.epub:/test/a.epub`);
+`hash:` splits at the first `=`.
 `--script FILE` reads one step per line (`#` comments), `--keep-going` runs all steps and reports every failure,
-`--rotate` sets the screenshot rotation. Paths may be given as Git Bash writes them (`/c/tmp/page.png`); output is
+`--rotate` sets the screenshot rotation, `--read-pause S` makes `get:` stop reading for S seconds after every MB, as a
+slow host would (a test of the pacing above). Paths may be given as Git Bash writes them (`/c/tmp/page.png`); output is
 UTF-8 whatever the console, and the port is closed without resetting the device even when a step fails. A script
 file makes a reusable regression check:
 

@@ -19,7 +19,8 @@ them all and exits non-zero if any failed).
                         presses (default 40). The label is checked first, so a row already selected takes none.
   page:<out.txt>        CMD:PAGE, write the reader's page dump (its PAGE_ lines) to the file, print a summary
   put:<local>:<remote>  upload a file (CMD:FS:PUT), checked by its CRC32
-  get:<remote>:<local>  download a file (CMD:FS:GET), checked by its CRC32
+  get:<remote>:<local>[:<n>]  download a file (CMD:FS:GET), acknowledging each piece, checked by its size and
+                        CRC32; after a failure, tried again up to n times (default 0)
   hash:<remote>[=<local>]  CMD:FS:HASH; with a local file, fail unless both size and CRC32 match it
   mkdir:<remote>        CMD:FS:MKDIR (with the folders above it)
   mv:<from>:<to>        CMD:FS:MV (rename or move on the card)
@@ -59,6 +60,12 @@ MULTI_LINE = {"GET:*": re.compile(r"^GET_END"), "FS:LS:": re.compile(r"^FS_END")
 # A file the device reads through for its CRC32 before it answers (FS:GET, FS:HASH): seconds a megabyte, and then
 # some.
 FILE_READ_TIMEOUT = 300
+# FS:GET sends a piece only once the host has acknowledged the one before (the transfer protocol's ACK byte); any
+# other byte cancels. A piece the device has ready arrives in milliseconds, so one still short after this many
+# seconds lost bytes on the way.
+GET_ACK = b"\x06"
+GET_CANCEL = b"\x18"
+GET_PIECE_IDLE = 5
 FAILED = re.compile(r"_ERROR|_TIMEOUT|^CMD_ERROR")
 
 
@@ -105,6 +112,7 @@ class Device:
         self.log = open(log_path, "a", encoding="utf-8", errors="replace") if log_path else None
         self.t0 = time.time()
         self.buf = b""
+        self.read_pause = 0.0  # --read-pause: seconds get: waits after every MB, as a slow host would
         self.ser = self._open()
 
     def note(self, line):
@@ -256,8 +264,12 @@ class Device:
             lines.append(line)
             if line.startswith(("PAGE_END", "PAGE_ERROR")):
                 break
-        if not lines or not lines[-1].startswith("PAGE_END"):
-            return lines[-1] if lines else "no reply"
+        if not lines:
+            return "no reply"
+        if lines[-1].startswith("PAGE_ERROR"):
+            return lines[-1]
+        if not lines[-1].startswith("PAGE_END"):
+            return f"no PAGE_END after {len(lines)} lines (the last {lines[-1][:60]!r})"
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(lines) + "\n")
         start = split_fields(lines[0][len("PAGE_START:"):])
@@ -294,28 +306,62 @@ class Device:
         print(f"{done} ({len(data) / 1024 / max(seconds, 0.001):.0f} KB/s)")
         return None
 
-    def get(self, remote, local):
-        """CMD:FS:GET into `local`, written only when its size and CRC32 match what the device announced."""
+    def get(self, remote, local, retries=0):
+        """CMD:FS:GET into `local`, written only when its size and CRC32 match what the device announced; after a
+        failure, tried again up to `retries` times."""
+        for attempt in range(retries + 1):
+            error = self._get_once(remote, local)
+            if error is None or attempt == retries:
+                return error
+            print(f"GET {remote}: {error}; trying again ({attempt + 1} of {retries})")
+        return None
+
+    def _get_once(self, remote, local):
         self.send(f"FS:GET:{remote}")
         line = self.reply(FILE_READ_TIMEOUT)
         if not line or not line.startswith("FS_GET_START:"):
             return line or "no reply"
+        fields = line.split(":")
+        if len(fields) != 4:
+            return f"expected FS_GET_START:<size>:<crc32hex>:<piece>, got {line!r}"
+        size, crc, piece = int(fields[1]), int(fields[2], 16), int(fields[3])
         started = time.time()
-        _, size, crc = line.split(":")
-        size, crc = int(size), int(crc, 16)
-        data = self.read_bulk(size, 20)
-        if len(data) != size:
-            return f"short file: {len(data)} of {size} bytes"
+        data = bytearray()
+        next_pause = 1 << 20
+        while len(data) < size:
+            want = min(piece, size - len(data))
+            got = self.read_bulk(want, GET_PIECE_IDLE)
+            data += got
+            if len(got) < want:
+                return self._abandon_get(f"short piece at byte {len(data) - len(got)}: {len(got)} of {want} bytes "
+                                         f"({len(data)} of {size} received)", got)
+            self.ser.write(GET_ACK)  # the device sends the next piece only now
+            if self.read_pause and len(data) >= next_pause:
+                time.sleep(self.read_pause)  # a slow host, for testing: the next piece waits in the host's buffer
+                next_pause += 1 << 20
         end = self.reply(20)
+        mine = zlib.crc32(data) & 0xFFFFFFFF
         if end != "FS_GET_END":
-            return end or "no FS_GET_END"
-        if zlib.crc32(data) & 0xFFFFFFFF != crc:
-            return f"crc mismatch: got {zlib.crc32(data) & 0xFFFFFFFF:08x}, the device sent {crc:08x}"
+            return f"{end or 'no FS_GET_END'} (received {len(data)} of {size} bytes, crc {mine:08x})"
+        if mine != crc:
+            return f"crc mismatch: received {len(data)} of {size} bytes, crc {mine:08x}, the device sent {crc:08x}"
         with open(local, "wb") as f:
             f.write(data)
         seconds = time.time() - started
         print(f"{remote} -> {local}: {size} bytes, crc {crc:08x} ({size / 1024 / max(seconds, 0.001):.0f} KB/s)")
         return None
+
+    def _abandon_get(self, reason, piece):
+        """A piece came up short. If the device stopped with an error, it is in the piece; otherwise it waits for an
+        acknowledgement that will not come: cancel, and read up to its answer, so the next command starts clean."""
+        at = piece.find(b"FS_ERROR:")
+        if at >= 0:
+            told = piece[at:].split(b"\n", 1)[0].decode("utf-8", errors="replace").rstrip("\r")
+            self.note(told)
+            return f"{reason}; the device said {told}"
+        self.ser.write(GET_CANCEL)
+        answer = self.reply(GET_PIECE_IDLE)
+        return f"{reason}; cancelled ({answer or 'no answer'})"
 
     def hash(self, remote, local=None):
         """CMD:FS:HASH, compared with `local` when given."""
@@ -354,9 +400,14 @@ def file_step(device, kind, rest):
         return device.put(native_path(local), remote)
     if kind == "get":
         remote, _, local = rest.partition(":")
+        # A trailing ":<n>" is the retry count; a Windows file name cannot hold ':', so it cannot be part of the path.
+        retries = 0
+        head, _, tail = local.rpartition(":")
+        if head and tail.isdigit():
+            local, retries = head, int(tail)
         if not remote.startswith("/") or not local:
-            return "expected get:/<remote>:<local>"
-        return device.get(remote, native_path(local))
+            return "expected get:/<remote>:<local>[:<retries>]"
+        return device.get(remote, native_path(local), retries)
     if kind == "hash":
         remote, _, local = rest.partition("=")
         if not remote.startswith("/"):
@@ -468,6 +519,9 @@ def main():
                          "upright in portrait; 0 keeps the panel's native frame)")
     ap.add_argument("--script", default=None, help="read steps from this file, one per line")
     ap.add_argument("--keep-going", action="store_true", help="run every step even after one failed")
+    ap.add_argument("--read-pause", type=float, default=0.0,
+                    help="get: stops reading this many seconds after every MB, as a slow host would (a test of the "
+                         "device's pacing)")
     ap.add_argument("steps", nargs="*")
     args = ap.parse_args()
 
@@ -481,6 +535,7 @@ def main():
     # Labels, chapter titles and popups may be in any script: a console's code page must not stop the run.
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     device = Device(args.port, native_path(args.log) if args.log else None)
+    device.read_pause = args.read_pause
     try:
         ok = run(device, steps, args.rotate, args.keep_going)
     finally:

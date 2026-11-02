@@ -1167,6 +1167,12 @@ bool crcOfFile(HalFile& file, const uint32_t size, uint8_t* scratch, uint32_t& c
   return true;
 }
 
+// The CRLF of a host that ends its lines so, before an upload's data or a download's acknowledgements: the line
+// reader stops at the CR, and the LF is neither.
+void dropLineEnds() {
+  while (logSerial.available() > 0 && (logSerial.peek() == '\r' || logSerial.peek() == '\n')) logSerial.read();
+}
+
 // The upload's idle limit: no byte for this long ends it.
 constexpr unsigned long kPutIdleMs = 5000;
 
@@ -1239,8 +1245,7 @@ void fsPut(const std::string_view arg) {
   const char* error = nullptr;
   {
     const LogHold hold;
-    // The CRLF of a host that ends its lines so: the line reader stops at the CR, and the LF is no data.
-    while (logSerial.available() > 0 && (logSerial.peek() == '\r' || logSerial.peek() == '\n')) logSerial.read();
+    dropLineEnds();
     replyWhole("FS_PUT_READY:%u", static_cast<unsigned>(kWireChunk));
     uint32_t received = 0;
     uint32_t crc = 0;
@@ -1275,8 +1280,34 @@ void fsPut(const std::string_view arg) {
   reply(line);
 }
 
-// CMD:FS:GET:<path>: FS_GET_START:<size>:<crc32hex>, the file's bytes, FS_GET_END. The CRC takes a read of its own
-// first, so the host can check what it got.
+// The host's go-ahead for FS:GET's next piece: the byte the transfer protocol acknowledges a piece with. Any other
+// byte cancels the download.
+constexpr uint8_t kGetAck = 0x06;
+
+enum class HostAnswer : uint8_t { Ack, Cancel, None };
+
+// Waits for the host to take a piece: its ACK, another byte (a cancel), or nothing for kStreamStallMs. Waits with
+// delay(1), as an upload does, so the USB-CDC receive gets to run.
+HostAnswer awaitHostAck(LongWork& work) {
+  const unsigned long start = millis();
+  while (millis() - start < kStreamStallMs) {
+    if (logSerial.available() > 0) return logSerial.read() == kGetAck ? HostAnswer::Ack : HostAnswer::Cancel;
+    delay(1);
+    work.breathe();
+  }
+  return HostAnswer::None;
+}
+
+// CMD:FS:GET:<path>: FS_GET_START:<size>:<crc32hex>:<piece>, then the file in pieces of <piece> bytes (the last one
+// shorter), each sent only once the host has acknowledged the one before with kGetAck, then FS_GET_END. The CRC
+// takes a read of its own first, so the host can check what it got.
+//
+// Paced because an unpaced stream loses data the host never sees go: on the X4, a host that stopped reading for half a
+// second lost whole 64-byte USB packets of the stream, every time, and a normal one 2 GETs in 14. HWCDC had accepted
+// every byte (the writes returned their full count and FS_GET_END followed), so nothing on this side could tell; it
+// happened on the USB Transfer screen too, with its 1 s TX timeout. The transfer protocol's download paces itself the
+// same way, for the same reason (SerialTransferProtocol::handleDownload). With one piece in flight, the TX ring never
+// fills and the host is never behind by more than a piece.
 void fsGet(const std::string_view arg) {
   std::string_view spelled;
   if (!SerialCommandGrammar::parseFsPath(arg, spelled)) {
@@ -1315,7 +1346,9 @@ void fsGet(const std::string_view arg) {
     // the payload that would be data.
     RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
     const LogHold hold;
-    replyWhole("FS_GET_START:%lu:%08lx", static_cast<unsigned long>(size), static_cast<unsigned long>(crc));
+    dropLineEnds();
+    replyWhole("FS_GET_START:%lu:%08lx:%u", static_cast<unsigned long>(size), static_cast<unsigned long>(crc),
+               static_cast<unsigned>(kWireChunk));
     LongWork work;
     for (uint32_t sent = 0; sent < size;) {
       const size_t want = std::min<uint32_t>(size - sent, kWireChunk);
@@ -1328,7 +1361,16 @@ void fsGet(const std::string_view arg) {
         return;
       }
       sent += want;
-      work.breathe();
+      switch (awaitHostAck(work)) {
+        case HostAnswer::Ack:
+          break;
+        case HostAnswer::Cancel:
+          reply("FS_ERROR:cancelled ", path);
+          return;
+        case HostAnswer::None:
+          reply("FS_ERROR:transfer stalled ", path);
+          return;
+      }
     }
   }
   if (readOk) {
