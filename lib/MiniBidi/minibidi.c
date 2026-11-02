@@ -907,6 +907,19 @@ int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
     }
   }
 
+  /* witchhunt: deviation 12 - a character X9 removed (RLE, LRE, RLO, LRO, PDF, BN) takes the level of the preceding
+   * retained character, or the paragraph level when there is none (UAX #9 section 5.2, "Retaining BNs and Explicit
+   * Formatting Characters"), so it never splits a run in L2. To be offered upstream. */
+  {
+    uchar prev = (uchar)paragraphLevel;
+    for (i = 0; i < count; i++) {
+      if (skip[i])
+        levels[i] = prev;
+      else
+        prev = levels[i];
+    }
+  }
+
   /* ── L4: mirror characters in RTL runs ── */
   // witchhunt: deviation 9 (L4 before L2: mirror in logical order)
   for (i = 0; i < count; i++)
