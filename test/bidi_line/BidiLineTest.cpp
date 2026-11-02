@@ -1,0 +1,392 @@
+// BidiLineTest: the line pass (BidiLine::layoutLine) that turns one line's tokens into pieces in visual order, the
+// controls open across lines, a token's own drawn form, and the workspace a build's arena lends.
+//
+// A line is rendered as `t<token>:<display>` items, left to right, joined by ` S<n> ` for a word space (token n's)
+// and ` G ` for a glued boundary. Expected values were checked against minibidi on 2026-11-02.
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <initializer_list>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "BidiLine.h"
+#include "BidiUtils.h"
+#include "BuildArena.h"
+#include "Utf8.h"
+
+namespace {
+
+using BidiLine::Gap;
+using CP = std::vector<uint32_t>;
+
+constexpr uint32_t LRM = 0x200E, LRE = 0x202A, RLE = 0x202B, PDF = 0x202C, LRO = 0x202D, RLO = 0x202E;
+constexpr uint32_t LRI = 0x2066, RLI = 0x2067, FSI = 0x2068, PDI = 0x2069;
+
+// The controls are spelled out rather than written into the literals, so the source holds no invisible characters.
+std::string u(const uint32_t cp) {
+  std::string utf8;
+  utf8AppendCodepoint(cp, utf8);
+  return utf8;
+}
+
+BidiLine::Scratch& scratch() {
+  static const std::unique_ptr<BidiLine::Scratch> s = std::make_unique<BidiLine::Scratch>();
+  return *s;
+}
+
+BidiLine::OpenControls openWith(const std::initializer_list<uint32_t> cps) {
+  BidiLine::OpenControls open;
+  for (const uint32_t cp : cps) open.cps[open.count++] = cp;
+  return open;
+}
+
+CP openCps(const BidiLine::OpenControls& open) { return CP(open.cps, open.cps + open.count); }
+
+CP decode(const std::string_view utf8) {
+  const std::string copy(utf8);
+  CP cps;
+  auto* p = reinterpret_cast<const unsigned char*>(copy.c_str());
+  while (*p) cps.push_back(utf8NextCodepoint(&p));
+  return cps;
+}
+
+std::string_view displayOf(const BidiLine::Line& line, const BidiLine::Piece& piece) {
+  return std::string_view(line.display).substr(piece.displayBegin, piece.displayLength);
+}
+
+// What every line must hold, whatever its content: each form is followed by a NUL; a token's pieces, in logical order,
+// cover its bytes exactly; the reading indices are a permutation, and `reordered` says whether it is the identity.
+void expectWellFormed(const BidiLine::Line& line, const std::vector<std::string>& words) {
+  std::vector<const BidiLine::Piece*> logical;
+  for (const auto& piece : line.pieces) {
+    ASSERT_LT(piece.token, words.size());
+    ASSERT_LT(piece.displayBegin + piece.displayLength, line.display.size());
+    EXPECT_EQ(line.display[piece.displayBegin + piece.displayLength], '\0');
+    logical.push_back(&piece);
+  }
+  std::sort(logical.begin(), logical.end(), [](const BidiLine::Piece* a, const BidiLine::Piece* b) {
+    return a->token != b->token ? a->token < b->token : a->begin < b->begin;
+  });
+  bool reordered = false;
+  for (size_t r = 0; r < logical.size(); r++) {
+    const BidiLine::Piece& piece = *logical[r];
+    EXPECT_EQ(piece.readingIndex, r);
+    if (piece.readingIndex != static_cast<size_t>(&piece - line.pieces.data())) reordered = true;
+    const bool first = r == 0 || logical[r - 1]->token != piece.token;
+    const bool last = r + 1 == logical.size() || logical[r + 1]->token != piece.token;
+    const size_t begin = first ? 0 : logical[r - 1]->end;
+    EXPECT_EQ(piece.begin, begin) << "token " << piece.token;
+    if (last) {
+      EXPECT_EQ(piece.end, words[piece.token].size()) << "token " << piece.token;
+    }
+    EXPECT_LT(piece.begin, piece.end);
+  }
+  EXPECT_EQ(line.reordered, reordered);
+}
+
+BidiLine::Line lay(const std::vector<std::string>& words, const uint8_t level,
+                   const BidiLine::OpenControls& open = {}) {
+  std::vector<BidiLine::Token> tokens;
+  for (const auto& w : words) tokens.push_back({w, true});
+  BidiLine::Line line;
+  EXPECT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), open, level, scratch(), line));
+  expectWellFormed(line, words);
+  return line;
+}
+
+std::string render(const BidiLine::Line& line) {
+  std::string out;
+  for (const auto& piece : line.pieces) {
+    if (piece.gapBefore == Gap::Space) out += " S" + std::to_string(piece.spaceToken) + " ";
+    if (piece.gapBefore == Gap::Glued) out += " G ";
+    out += "t" + std::to_string(piece.token) + ":" + std::string(displayOf(line, piece));
+  }
+  return out;
+}
+
+std::vector<int> readings(const BidiLine::Line& line) {
+  std::vector<int> r;
+  for (const auto& piece : line.pieces) r.push_back(piece.readingIndex);
+  return r;
+}
+
+std::vector<int> tokensOf(const BidiLine::Line& line) {
+  std::vector<int> t;
+  for (const auto& piece : line.pieces) t.push_back(piece.token);
+  return t;
+}
+
+std::vector<std::string> repeated(const std::string& text, const size_t n) { return std::vector<std::string>(n, text); }
+
+// The form tokenForm makes, or nothing when it returns false; checks that a false leaves `out` as it was.
+std::optional<std::string> form(const std::string_view token, const uint8_t level,
+                                const BidiLine::OpenControls& open = {}) {
+  std::string out = "untouched";
+  if (BidiLine::tokenForm(token, open, level, scratch(), out)) return out;
+  EXPECT_EQ(out, "untouched");
+  return std::nullopt;
+}
+
+const CP kPointedShalomDrawn = {0x05DD, 0x05D5, 0x05B9, 0x05DC, 0x05E9, 0x05B8, 0x05C1};
+
+}  // namespace
+
+TEST(BidiLine, AMixedLineInARightToLeftParagraph) {
+  const auto line = lay({"שלום", "(world)", "1998."}, 1);
+  EXPECT_EQ(render(line), "t2:.1998 S2 t1:(world) S1 t0:םולש");
+  EXPECT_EQ(readings(line), (std::vector<int>{2, 1, 0}));
+  EXPECT_TRUE(line.reordered);
+  EXPECT_FALSE(line.fallback);
+}
+
+TEST(BidiLine, AMixedLineInALeftToRightParagraph) {
+  const auto line = lay({"He", "said", "שלום."}, 0);
+  EXPECT_EQ(render(line), "t0:He S1 t1:said S2 t2:םולש.");
+  EXPECT_FALSE(line.reordered);
+  ASSERT_EQ(line.pieces.size(), 3u);
+  EXPECT_EQ(line.pieces[2].begin, 0u);
+  EXPECT_EQ(line.pieces[2].end, 9u);
+}
+
+TEST(BidiLine, BracketsAroundHebrewInEnglish) {
+  const auto line = lay({"The", "word", "(שלום)", "means"}, 0);
+  EXPECT_EQ(render(line), "t0:The S1 t1:word S2 t2:(םולש) S3 t3:means");
+}
+
+TEST(BidiLine, TheMarkupParagraphOfTestRtlMarkup) {
+  const auto line = lay({"מילה", u(FSI) + u(LRO) + "bdo", "text" + u(PDF) + u(PDI), "ו" + u(FSI) + "bdi",
+                         "text" + u(PDI), "ו" + u(LRI) + "Latin", "123" + u(PDI)},
+                        1);
+  EXPECT_EQ(render(line), "t5:Latin S6 t6:123 G t5:ו S5 t3:bdi S4 t4:text G t3:ו S3 t1:bdo S2 t2:text S1 t0:הלימ");
+  EXPECT_EQ(readings(line), (std::vector<int>{7, 8, 6, 4, 5, 3, 1, 2, 0}));
+  ASSERT_EQ(line.pieces.size(), 9u);
+  const BidiLine::Piece& vav = line.pieces[2];  // "ו" and its LRI
+  const BidiLine::Piece& latin = line.pieces[0];
+  EXPECT_EQ(vav.token, 5);
+  EXPECT_EQ(vav.begin, 0u);
+  EXPECT_EQ(vav.end, 5u);
+  EXPECT_EQ(latin.token, 5);
+  EXPECT_EQ(latin.begin, 5u);
+  EXPECT_EQ(latin.end, 10u);
+}
+
+TEST(BidiLine, AnIsolateKeepsItsNeighboursOutside) {
+  EXPECT_EQ(render(lay({u(RLI) + "שלום" + u(PDI) + ":", "3", "posts"}, 0)), "t0:םולש: S1 t1:3 S2 t2:posts");
+}
+
+TEST(BidiLine, AnEmbeddingLetsItsNeighboursIn) {
+  const auto line = lay({u(RLE) + "שלום" + u(PDF) + ":", "3", "posts"}, 0);
+  EXPECT_EQ(render(line), "t1:3 S1 t0::םולש S2 t2:posts");
+  EXPECT_EQ(readings(line), (std::vector<int>{1, 0, 2}));
+}
+
+TEST(BidiLine, AnIsolateOpenAtTheLineStartIsOrderedOnItsOwn) {
+  EXPECT_EQ(render(lay({"שלום" + u(PDI), "1998"}, 0, openWith({RLI}))), "t0:םולש S1 t1:1998");
+  EXPECT_EQ(render(lay({"שלום" + u(PDI), "1998"}, 0)), "t1:1998 S1 t0:םולש");
+}
+
+TEST(BidiLine, AnFsiTakesItsDirectionFromOutsideItsNestedIsolates) {
+  // The FSI's first strong letter outside its nested LRI is Hebrew, so its content runs right to left around the LRI.
+  EXPECT_EQ(render(lay({u(FSI) + u(LRI) + "abc" + u(PDI), "אבג" + u(PDI), "x"}, 0)), "t1:גבא S1 t0:abc S2 t2:x");
+}
+
+TEST(BidiLine, AnOverrideOpenAtTheLineStartStillHolds) {
+  EXPECT_EQ(render(lay({"ghi" + u(PDF), "jkl"}, 0, openWith({RLO}))), "t0:ihg S1 t1:jkl");
+}
+
+TEST(BidiLine, ALeftToRightMarkKeepsPlusSignsWithTheirLetter) {
+  EXPECT_EQ(render(lay({"C++" + u(LRM), "שלום"}, 1)), "t1:םולש S1 t0:C++");
+  EXPECT_EQ(render(lay({"C++", "שלום"}, 1)), "t1:םולש S1 t0:++C");
+}
+
+TEST(BidiLine, ALoneControlTokenGivesNoPiece) { EXPECT_EQ(render(lay({"abc", u(LRI), "def"}, 0)), "t0:abc S2 t2:def"); }
+
+TEST(BidiLine, TwoSeparatorsWithNoPieceBetweenAreTheLaterTokensGap) {
+  // Right to left the separators are met the other way round; the gap is still the logically later token's.
+  EXPECT_EQ(render(lay({"אבג", u(RLI), "דהו"}, 1)), "t2:והד S2 t0:גבא");
+}
+
+TEST(BidiLine, NiqqudFollowsItsLetter) {
+  const auto line = lay({"שָׁלוֹם"}, 1);
+  ASSERT_EQ(line.pieces.size(), 1u);
+  EXPECT_EQ(decode(displayOf(line, line.pieces[0])), kPointedShalomDrawn);
+}
+
+TEST(BidiLine, TheDivineNameIsDrawnAsHeAndGeresh) {
+  const auto line = lay({"יהוה"}, 1);
+  ASSERT_EQ(line.pieces.size(), 1u);
+  EXPECT_EQ(line.pieces[0].begin, 0u);
+  EXPECT_EQ(line.pieces[0].end, 8u);
+  EXPECT_EQ(decode(displayOf(line, line.pieces[0])), (CP{0x05F3, 0x05D4}));
+}
+
+TEST(BidiLine, MarksDoNotCountTowardTheLimit) {
+  // 17 words of 7 code points (4 letters, 3 marks) and 16 spaces: 135 code points, 84 slots.
+  const auto line = lay(repeated("שָׁלוֹם", 17), 1);
+  EXPECT_FALSE(line.fallback);
+  ASSERT_EQ(line.pieces.size(), 17u);
+  for (size_t v = 0; v < 17; v++) {
+    const BidiLine::Piece& piece = line.pieces[v];
+    EXPECT_EQ(piece.token, 16 - v);
+    EXPECT_EQ(decode(displayOf(line, piece)), kPointedShalomDrawn);
+    if (v > 0) {
+      EXPECT_EQ(piece.gapBefore, Gap::Space);
+    }
+  }
+}
+
+TEST(BidiLine, ALineOverTheLimitFallsBackToUpstreamsOrder) {
+  // 26 words of 4 letters and 25 spaces: 129 slots.
+  const auto line = lay(repeated("אבגד", 26), 1);
+  EXPECT_TRUE(line.fallback);
+  EXPECT_TRUE(line.reordered);
+  std::string expected;
+  for (int t = 25; t >= 0; t--) {
+    if (t < 25) expected += " S" + std::to_string(t + 1) + " ";
+    expected += "t" + std::to_string(t) + ":דגבא";
+  }
+  EXPECT_EQ(render(line), expected);
+}
+
+TEST(BidiLine, TheFallbackReversesAnEmbeddedLatinPhrase) {
+  // Upstream's corner, pinned so that a change shows: computeVisualWordOrder declines past 128 code points too.
+  auto words = repeated("אבגד", 24);
+  words.push_back("hello");
+  words.push_back("world");
+  const auto line = lay(words, 1);  // 131 slots
+  EXPECT_TRUE(line.fallback);
+  std::vector<int> expected;
+  for (int t = 25; t >= 0; t--) expected.push_back(t);
+  EXPECT_EQ(tokensOf(line), expected);
+}
+
+TEST(BidiLine, ALongLeftToRightLineKeepsItsOrder) {
+  std::vector<std::string> words;
+  for (int i = 0; i < 13; i++) {
+    words.push_back("abcd");
+    words.push_back("אבגד");
+  }
+  const auto line = lay(words, 0);  // 129 slots
+  EXPECT_TRUE(line.fallback);
+  EXPECT_FALSE(line.reordered);
+  std::string expected;
+  for (int t = 0; t < 26; t++) {
+    if (t > 0) expected += " S" + std::to_string(t) + " ";
+    expected += "t" + std::to_string(t) + (t % 2 == 0 ? ":abcd" : ":דגבא");
+  }
+  EXPECT_EQ(render(line), expected);
+}
+
+TEST(BidiLine, TheOpenControlsFollowTheText) {
+  BidiLine::OpenControls open;
+  open.advance(u(RLI) + "abc");
+  EXPECT_EQ(openCps(open), (CP{RLI}));
+  open.advance("def" + u(PDI));
+  EXPECT_EQ(openCps(open), CP{});
+
+  open.advance(u(RLE) + "x" + u(LRI) + "y");
+  EXPECT_EQ(openCps(open), (CP{RLE, LRI}));
+  open.advance(u(PDF));  // a PDF does not close an isolate
+  EXPECT_EQ(openCps(open), (CP{RLE, LRI}));
+  open.advance(u(PDI));
+  EXPECT_EQ(openCps(open), (CP{RLE}));
+  open.advance(u(PDF));
+  EXPECT_EQ(openCps(open), CP{});
+
+  BidiLine::OpenControls none;
+  none.advance(u(PDI));
+  EXPECT_EQ(openCps(none), CP{});
+
+  BidiLine::OpenControls deep;
+  for (int i = 0; i < 10; i++) deep.advance(u(RLE));
+  EXPECT_EQ(deep.count, 8);
+  EXPECT_EQ(deep.overflow, 2);
+  for (int i = 0; i < 2; i++) deep.advance(u(PDF));
+  EXPECT_EQ(deep.count, 8);
+  EXPECT_EQ(deep.overflow, 0);
+  for (int i = 0; i < 8; i++) deep.advance(u(PDF));
+  EXPECT_EQ(deep.count, 0);
+}
+
+TEST(BidiLine, ATokensOwnFormIsMadeAtItsOwnDirection) {
+  EXPECT_EQ(form("abc(שלום)", 1), "abc(םולש)");
+  EXPECT_EQ(form("שלום", 0), "םולש");
+  EXPECT_EQ(form("abc", 1), std::nullopt);
+  const auto name = form("יהוה", 1);
+  ASSERT_TRUE(name.has_value());
+  EXPECT_EQ(decode(*name), (CP{0x05F3, 0x05D4}));
+  EXPECT_EQ(form("abc", 0, openWith({RLO})), "cba");
+  EXPECT_EQ(form("C++" + u(LRM), 1), "C++");
+
+  // An open isolate gives the level and is never prepended (prepending the RLI gives ")םולש abc(", the review's B4).
+  EXPECT_EQ(form("abc(שלום)", 0, openWith({RLI})), "(םולש)abc");
+  EXPECT_EQ(form("abc", 0, openWith({RLI, RLO})), "cba");
+  EXPECT_EQ(form("abc", 0, openWith({RLO, LRI})), std::nullopt);  // the override outside the isolate stays outside
+}
+
+TEST(BidiLine, DropControlsLeavesTheText) {
+  std::string text = "a" + u(LRM) + "b" + u(RLI) + "c" + u(PDF) + "d";
+  EXPECT_TRUE(BidiLine::dropControls(text));
+  EXPECT_EQ(text, "abcd");
+  std::string plain = "abc";
+  EXPECT_FALSE(BidiLine::dropControls(plain));
+  EXPECT_EQ(plain, "abc");
+
+  for (const uint32_t cp : {LRM, 0x200Fu, 0x061Cu, LRE, RLE, PDF, LRO, RLO, LRI, RLI, FSI, PDI}) {
+    EXPECT_TRUE(BidiLine::isControl(cp)) << std::hex << cp;
+  }
+  for (const uint32_t cp : {0x200Cu, 0x200Du, 0x00ADu, 0x0020u, 0x05D0u}) {
+    EXPECT_FALSE(BidiLine::isControl(cp)) << std::hex << cp;
+  }
+}
+
+TEST(BidiLine, AnArenaLendsTheWorkspaceAndScratch) {
+  BidiUtils::releaseWorkspace();
+  const std::vector<std::string> words = {"שלום", "(world)", "1998."};
+  std::vector<BidiLine::Token> tokens;
+  for (const auto& w : words) tokens.push_back({w, true});
+
+  BuildArena arena(16 * 1024);
+  ASSERT_TRUE(arena.valid());
+  ASSERT_NE(arena.alloc(100), nullptr);  // something the build already holds
+  const size_t before = arena.used();
+  {
+    const BidiLine::ArenaWorkspace lent(&arena);
+    ASSERT_NE(lent.scratch(), nullptr);
+    EXPECT_GT(arena.used(), before);
+    BidiLine::Line line;
+    ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, *lent.scratch(), line));
+    EXPECT_EQ(render(line), "t2:.1998 S2 t1:(world) S1 t0:םולש");
+    EXPECT_FALSE(BidiUtils::heapWorkspaceHeld());
+  }
+  EXPECT_EQ(arena.used(), before);
+
+  // The binding ended with the scope: the next pass allocates the heap workspace.
+  BidiLine::Line line;
+  ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), line));
+  EXPECT_TRUE(BidiUtils::heapWorkspaceHeld());
+  BidiUtils::releaseWorkspace();
+
+  BuildArena small(1024);  // not even the workspace fits
+  {
+    const BidiLine::ArenaWorkspace lent(&small);
+    EXPECT_EQ(lent.scratch(), nullptr);
+  }
+  EXPECT_EQ(small.used(), 0u);
+
+  BuildArena medium(4 * 1024);  // the workspace fits, the scratch does not
+  {
+    const BidiLine::ArenaWorkspace lent(&medium);
+    EXPECT_EQ(lent.scratch(), nullptr);
+    EXPECT_EQ(medium.used(), 0u);
+  }
+
+  const BidiLine::ArenaWorkspace none(nullptr);
+  EXPECT_EQ(none.scratch(), nullptr);
+}

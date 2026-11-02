@@ -36,6 +36,20 @@ FetchContent_MakeAvailable(googletest)
 
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+# The bidi line pass (lib/Epub/Epub/BidiLine) and what it runs on: minibidi, BidiUtils and the shaping layer. Every
+# target that lays out text through ParsedText lists these, so they are set before the subdirectories.
+set(BIDI_LAYOUT_SOURCES
+  ${REPO_ROOT}/lib/MiniBidi/minibidi.c
+  ${REPO_ROOT}/lib/MiniBidi/BidiUtils.cpp
+  ${REPO_ROOT}/lib/TextShaping/TextShaping.cpp
+  ${REPO_ROOT}/lib/TextShaping/HebrewShaper.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/BidiLine.cpp
+)
+set(BIDI_LAYOUT_INCLUDES
+  ${REPO_ROOT}/lib/MiniBidi
+  ${REPO_ROOT}/lib/TextShaping
+)
+
 add_library(crosspoint_test_common INTERFACE)
 target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}
@@ -218,6 +232,7 @@ add_subdirectory(default_ignorable)
 add_subdirectory(minibidi)
 add_subdirectory(minibidi_arabic)
 add_subdirectory(text_shaping)
+add_subdirectory(bidi_line)
 add_subdirectory(utf8_compose)
 add_subdirectory(utf8_lower)
 add_subdirectory(adaptive_tone)
