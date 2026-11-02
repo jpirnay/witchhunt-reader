@@ -5,6 +5,12 @@ on `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md` (5.
 and "What step 1 takes from step 3" in `docs/future_work/writing-modes.md`. Decisions 1-4 replace part of the spec's
 5.3 and its 5.6 for Arabic.
 
+Amended on 2026-11-02 after a review of the PR 2 plan, by the maintainer's decisions:
+- deviation 12 (removed controls no longer split runs);
+- transparent marks not counted toward `BIDI_MAX_LINE`;
+- the reader's title strings in visual order (PR 3).
+Deviation 11 names the line pass's entry points, and the memory and stack figures are corrected.
+
 ## Intent
 
 A Hebrew book should read as a printed one:
@@ -22,7 +28,8 @@ step also builds the place where step 2's joint shaper (Arabic and the Indic scr
 Non-goals:
 - Arabic joining: Arabic letters are reordered in step 1 but drawn unjoined until step 2.
 - A right-to-left UI (spec decision 4).
-- Visual strings for titles, the TOC and the library; bidi in TXT and MD (step 5).
+- Visual strings for the TOC, the library's other text and the rest of the UI; bidi in TXT and MD (step 5). The
+  status bar's chapter title and the Home and Library book titles are the exception (PR 3, "The reader").
 - Bidi inside a vertical section, which stays as steps 3 and 4 left it.
 
 ## Decisions (maintainer, 2026-11-02)
@@ -56,14 +63,16 @@ Non-goals:
    pass it drifts in a left-to-right paragraph. The geresh is a Hebrew letter-class mark (R) and stays with the name.
 8. **Isolates are ordered on their own.** PR 2's line pass orders each isolate's content by itself, at its own
    direction, and gives the outer pass one neutral (U+FFFC, class ON) in its place. That is UAX #9 BD13's effect.
-   minibidi itself stays as it is.
+   minibidi itself stays as it is. (Its isolate handling does; deviation 12 changes how it levels removed
+   embedding controls.)
 
 **My calls** (Claude's, for the maintainer to check; each is explained where it appears):
 - deviations 4, 5 and 8 (the class table, CSS bidi controls as inserted characters, controls alone needing bidi);
 - literal bidi controls kept only in paragraphs that need bidi;
 - the logical-order region on reordered lines, and words split into pieces only in the line's stored copy;
 - widths for line breaking from each word's own visual form, then exact widths for the pieces;
-- `BIDI_MAX_LINE` kept at upstream's 128, with upstream's fallback past it;
+- `BIDI_MAX_LINE` kept at upstream's 128, with upstream's fallback past it. Since the review it is counted without
+  transparent marks (the maintainer's decision);
 - page progression from the book's direction, so a CJK book set to Vertical Text Off still turns left to right;
 - the default list indent on the start side;
 - table columns mirrored in right-to-left tables;
@@ -100,7 +109,8 @@ The baseline is crosspoint-reader `develop` @ `e8299b5f` (2026-11-02).
 1. **Placement.** BidiUtils runs at layout and never in the renderer. Upstream's renderer hooks are not ported:
    `resolveVisualText`, `appendShapedRtlTokens`, and the `BidiBaseDir` parameters on `drawText` and
    `getTextWidth`. Neither are the per-draw glyph-cache prewarm of shaped forms, nor the resident workspace. The
-   workspace is released when a section build ends.
+   workspace is released when a section build ends. During a build with a lent arena the line pass borrows the
+   workspace from it for each call (`bindWorkspace`); otherwise the workspace is allocated on first use.
 2. **`applyBidiVisual` does not call `do_shape`** (decision 2), so the linker drops the shaping code and tables
    until step 2.
 3. **The divine-name match moves** out of `applyBidiVisual`'s emission loop, where it matches in visual order, into
@@ -128,6 +138,19 @@ The baseline is crosspoint-reader `develop` @ `e8299b5f` (2026-11-02).
    the logical levels against the reordered line and mirrors the wrong characters on an asymmetric line.
 10. **`applyBidiVisual` treats U+FFFD as an ordinary code point** and stops only on NUL, so a token with a bad byte is
     not truncated. `startsWithRtl`, `detectParagraphLevel` and `computeVisualWordOrder` are as upstream has them.
+11. **The line pass's entry points.** BidiUtils gains:
+    - `orderLine`: one `do_bidi` over a caller's code points at a given level, giving the visual order and the drawn,
+      mirrored code points, each run of marks after its base as `applyBidiVisual` emits them;
+    - `hasRtlClass` and `strongLevel`, for the layout's tests;
+    - `bindWorkspace` and `heapWorkspaceHeld`.
+    Upstream's functions are unchanged.
+12. **Removed controls keep their run** (maintainer, 2026-11-02, after the review). In `do_bidi`, after L1, each
+    character X9 removed (RLE, LRE, RLO, LRO, PDF, BN) takes the level of the preceding retained character, or the
+    paragraph level when there is none (UAX #9 §5.2).
+    - Upstream gives a PDF the level after its pop, so it splits the run in L2: `RLE שלום PDF : 3 posts` draws
+      `םולש3 : posts` instead of `3 :םולש posts`.
+    - Every CSS `unicode-bidi: embed` or `bidi-override` span (deviation 5) would mis-order the neutrals after it.
+    - It is to be offered upstream.
 
 ## How a paragraph is laid out
 
@@ -140,21 +163,31 @@ all of it, so its layout and its section bytes are what they are today.
    - Otherwise decision 6, decided on the tokens of the first layout pass, and kept across the parser's 96-token flush.
 2. **Widths for breaking.**
    - The shaping layer runs on each token's logical text (below).
-   - Then `applyBidiVisual` gives the token's own visual form at its own direction, with the controls open at the
-     token's start prepended. That form is measured. This is the width upstream measures.
+   - Then `applyBidiVisual` gives the token's own visual form at its own direction, with the embeddings and
+     overrides open at the token's start prepended. That form is measured. This is the width upstream measures.
+   - An isolate open at the token's start is never prepended, because minibidi has no isolating run sequences. It
+     gives the token's level instead (LRI left to right, RLI right to left, FSI the token's first strong letter).
+     Only the embeddings and overrides opened inside it are prepended.
 3. **Break lines** with the four breakers as they are. Hyphenation runs on Latin tokens only. Hebrew has no hyphenator.
 4. **The line pass** (decision 5):
    - `do_bidi` runs once over the line's characters at the paragraph's level. Tokens are joined with a space where they
      are not glued, and the controls open at the line's start are prepended.
    - Each character carries its token and byte offset.
+   - Transparent marks ride on their base. Each `isTransparentMark` code point after a base of its own token is
+     folded onto it and takes no slot, then comes back right after its base in logical order. W1 gives a mark its
+     base's type and level anyway. A pointed line so needs about half the slots.
    - In the visual result, each maximal run of one token's characters becomes one piece: a glued word in the
      TextBlock.
    - A piece's text is its characters in logical order. Its display form is its characters in visual order: mirrored
      (L4), marks after their base as upstream emits them, controls dropped.
    - Pieces are measured exactly. Gaps, kerning and justification are recomputed in visual order, as upstream's
      reordered loop does.
-   - A line over `BIDI_MAX_LINE` (128 code points) falls back to upstream's result: `computeVisualWordOrder` with
-     per-word display forms. A pure right-to-left line still comes out right.
+   - A line over `BIDI_MAX_LINE` (128 slots: code points other than folded marks) falls back to upstream's result:
+     `computeVisualWordOrder` with per-word display forms, over the words without their marks. A pure right-to-left
+     line still comes out right. Two corners stay as upstream has them:
+     - `computeVisualWordOrder` declines past 128 slots too, so a right-to-left fallback line reverses every word, an
+       embedded Latin phrase's included;
+     - it sees isolates as embeddings.
 5. **Alignment and indent.**
    - `text-align: start` and `end` resolve against the paragraph's base direction at layout time, because decision 6
      may only settle it there (step 0 resolves them in the parser).
@@ -224,13 +257,23 @@ with, with one module per script:
 - **Bionic reading** on Hebrew words: the bold logical prefix lands on the right. It needs a check, not new code:
   our bionic split is two glued tokens, which the line pass orders. #4230's fix belongs to upstream's in-token split.
 - **Tables** in a right-to-left table run their columns right to left, as upstream does.
+- **Drop caps:** a right-to-left paragraph takes none. A book's `float: left` cap would cut the first, rightmost
+  letter and float it on the left (PR 2).
+- **The reader's title strings** (maintainer, 2026-11-02, after the review). The status bar's chapter title and the
+  book titles on Home and in the Library are drawn in logical order today, so a Hebrew title shows mirrored on every
+  page.
+  - Each gets its visual form once, when it is set: one `applyBidiVisual` pass at the title's own direction, kept
+    with the string.
+  - Nothing is reordered per draw, so deviation 1 holds.
+  - The rest of the UI stays out of scope (step 5).
 - **Hebrew faces:**
   - Two new Font Manager families, Noto Sans Hebrew and Noto Serif Hebrew: Latin from Noto Sans/Serif, and Hebrew
     (U+0590-05FF, U+FB1D-FB4F) from Noto Sans/Serif Hebrew. The converter takes a second source per style for those
     ranges.
   - New names, not a re-cut of Noto Extended: the flash font cache is keyed on family and size, so a re-cut family
     would show garbled text to anyone who has it cached (the open stale-entry bug, which stays its own fix).
-  - The built-in faces get no Hebrew: titles wait for step 5.
+  - The built-in faces get no Hebrew. The title strings above are drawn in the face that draws them today: in visual
+    order wherever that face has the letters, and with missing glyphs where it does not, until step 5's faces.
 
 ## The pieces, one PR each, in this order
 
@@ -241,10 +284,12 @@ with, with one module per script:
    - The paragraph pipeline and line pass, the CSS controls, the kept literal controls, and the two TextBlock regions
      with v108.
    - The renderer's marks, the profile tags, list indents, and the table column order.
+   - Deviation 12, marks that take no slot, and no drop cap in right-to-left paragraphs.
    - A fixture book and a rule checker.
    - Reader-visible: Hebrew paragraphs read right, but pages still turn left to right.
 3. **Reading a Hebrew book.**
    - Page progression, the logical-order consumers, the bionic check and the Hebrew faces.
+   - The status bar's chapter title and the Home and Library book titles in visual order, made once when each is set.
    - The docs: `USER_GUIDE.md`, `docs/future_work/writing-modes.md`, and a reference page for bidi.
 
 ## Constraints
@@ -253,7 +298,16 @@ with, with one module per script:
   new one).
 - Nothrow everywhere: a failed workspace allocation lays out the paragraph without bidi and logs it, as upstream's
   `false` returns do.
-- No resident memory: the 1.5 KB workspace lives during a section build only.
+- No resident memory:
+  - the 1.5 KB workspace and the line pass's scratch (about 6 KB: 384 code points' units, 128 slots of order) live
+    during a section build only;
+  - on a build with a lent arena both are borrowed from it per call;
+  - piece texts and display forms are views, so a bidi line allocates no per-line strings.
+- Stack: `do_bidi` takes about 1.3 KB (`types`, `levels` and `skip` 384 B, its `DirStatusStack` about 391 B,
+  `openers[63]` 504 B), and `computeVisualWordOrder` 512 B more.
+  - Both run on the 8 KB Arduino loop task, under the parser's deepest frames.
+  - PR 2 records the loop task's stack high-water on a Hebrew book on both boards.
+  - If it is thin, the first three arrays and the `DirStatusStack` move into the lent workspace.
 - Measured and reported on the X3 and the X4:
   - flash on `default` and `gh_release`;
   - build heap;
@@ -271,7 +325,8 @@ Things no planned test covers outright that would bite a reader first:
    round. The fixture pins each mark's side to what a browser shows.
 2. **A long paragraph** whose direction decision 6 settles, split by the 96-token flush. Every pass must keep it.
 3. **Two footnote markers on one right-to-left line,** and the QR text of a mixed page.
-4. **A line over 128 code points** (landscape, small font), on the fallback.
+4. **A long line** (landscape, small font): a pointed line stays on the line pass because marks take no slot; a line
+   over 128 slots takes the fallback.
 5. **KOSync** on a Hebrew book with literal LRM or RLM. Its offsets must match those of a build without this step.
 
 ## Left out, on purpose
@@ -279,6 +334,9 @@ Things no planned test covers outright that would bite a reader first:
 - **Paragraph-level resolution.** Levels are resolved per line, so an isolate or embedding that crosses a line break
   loses its opener's neutral context on the next line. The line pass prepends the open controls, which covers what
   readers see. An isolate that stays on one line is handled (decision 8).
+- **A direction settled on the first pass only.** Decision 6 reads the tokens of a paragraph's first layout pass, its
+  first 96. A Hebrew book's paragraph that opens with a long quote without Hebrew stays left to right for good, and
+  the converse in an English book. Rare.
 - **GPOS mark placement for niqqud.** The anchors serve. The shaper can take it later.
 - Ruby in right-to-left text; Hebrew hyphenation; Syriac, Thaana and N'Ko.
 

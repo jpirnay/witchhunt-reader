@@ -8,11 +8,13 @@ and tables start on the right, and CSS and HTML bidi markup becomes control char
 pages still turn left to right.
 
 **Architecture:**
-- `BidiUtils` gains the entry points the line pass needs and a workspace a build can lend (deviation 11, new).
+- `BidiUtils` gains the entry points the line pass needs and a workspace a build can lend (deviation 11). minibidi's
+  `do_bidi` stops X9-removed controls from splitting runs (deviation 12).
 - A new pure unit, `lib/Epub/Epub/BidiLine`, turns one line's tokens into pieces in visual order:
   - isolates are ordered on their own (decision 8);
   - a piece is a run of one token's characters (decision 5);
-  - it gives the controls open at the line's start, and past 128 code points upstream's fallback.
+  - transparent marks ride on their base, so only bases count toward the 128-slot limit;
+  - it gives the controls open at the line's start, and past 128 slots upstream's fallback.
 - `ParsedText` decides per paragraph whether it needs bidi and its base direction (decision 6). It measures tokens by
   their own visual form, breaks lines as today, and positions a bidi line's pieces in visual order. Its own arrays
   stay logical.
@@ -26,15 +28,36 @@ generator, PlatformIO firmware (ESP32-C3).
 item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #599) built `lib/MiniBidi` and
 `lib/TextShaping`. This plan implements:
 - decisions 1, 5, 6 and 8;
-- deviations 1 (the workspace), 5, 6, 7 and 8, and the new deviation 11;
+- deviations 1 (the workspace), 5, 6, 7 and 8, and the new deviations 11 and 12;
 - "How a paragraph is laid out", "Storage and drawing";
 - from "The reader": the profile tags, lists and tables.
+
+## The review and the maintainer's decisions (2026-11-02)
+
+The 2026-11-02 review of the draft (its sections 1 and 4) probed minibidi with small harnesses. The maintainer
+decided:
+- **Deviation 12, in Task 1.** X9-removed controls (RLE, LRE, RLO, LRO, PDF) take the level of the preceding retained
+  character after L1 (UAX #9 §5.2). Today a PDF keeps a level of its own and splits the run: `RLE שלום PDF : 3 posts`
+  comes out `םולש3 : posts`, not `3 :םולש posts`. It will also be offered upstream.
+- **Marks do not count toward `BIDI_MAX_LINE`** (Task 2). `isTransparentMark` code points are folded onto their base
+  before `orderLine`, and dropped from the words `computeVisualWordOrder` counts. A pointed line needs about half the
+  slots.
+- **PR 3** gives the status bar's chapter title and the Home and Library book titles a visual form when they are set.
+  That is in the spec only, not in this plan.
+
+The review's other findings are in the tasks that own the code:
+- `tokenForm` maps an open isolate to a level instead of prepending its initiator, and the fallback's isolate corner
+  is documented (Task 2, finding 1.2);
+- bidi lines allocate no per-line strings: piece texts and forms are views (Tasks 3 and 6), measured with `--bench`
+  (Task 11, finding 4.4);
+- the loop task's stack high-water is recorded, and the remedy named if it is thin (Task 12, finding 4.5);
+- right-to-left paragraphs take no drop cap (Task 5, finding 4.6).
 
 ## Calls this plan makes (the spec leaves them open)
 
 - **One PR, not 2a/2b.** The parts share one fixture, one rule checker and one format bump. A split would bump
   `SECTION_FILE_VERSION` twice and refresh the RTL goldens twice. Stacked PRs have bitten this repo twice (#398,
-  #584).
+  #584). One commit per task; Task 3 (the region and v108) is reviewable on its own.
 - **"Needs bidi" means a right-to-left base, or a code point of class R, AL, RLE, RLO, RLI or FSI** (minibidi's
   `is_rtl_class`; RLM and ALM are R and AL).
   - LRE, LRO, LRI, PDF, PDI and LRM alone cannot reorder a left-to-right paragraph. They are dropped like the marks.
@@ -42,8 +65,8 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
     paragraph that does not need bidi still drops them" then has content.
   - `<bdo dir="rtl">` on Latin text still works (RLO), as deviation 8 wants.
 - **Decision 6, both halves:**
-  - in a right-to-left book, the base is RTL iff the paragraph's first pass has an R or AL code point;
-  - in any other book, iff it has R or AL and no L;
+  - in a right-to-left book, the base is RTL when the paragraph's first pass has an R or AL code point;
+  - in any other book, when it has R or AL and no L;
   - a paragraph with no letter of either direction takes the book's direction (the profile's default direction),
     as the spec's "How a paragraph is laid out" step 1 says. So `* * *` or `1948` is right to left in a Hebrew book
     and left to right in a Latin one, and no Latin golden moves. (Controller's ruling, 2026-11-02. The literal
@@ -52,7 +75,7 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
   book's direction.
 - **The workspace is lent per call:**
   - On a build with a lent arena (the borrowed framebuffer), each line pass and each width pass reserves a block for
-    the 1.5 KB workspace and the pass's 4.5 KB scratch, binds it and releases it before the line is materialised.
+    the 1.5 KB workspace and the pass's 6 KB scratch, binds it and releases it before the line is materialised.
     LIFO always holds.
   - Otherwise the workspace is allocated on first use and released when the build ends. The scratch is a
     `ParsedText` heap member, dropped with the layout scratch.
@@ -103,8 +126,15 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
   - the scratch is released with `ParsedText::releaseLayoutScratch`;
   - `TextBlock` stays 52 B on the firmware (`static_assert`, `TextBlock.cpp:22`) and 88 B on the host
     (`VerticalTextBlock.TheCentredMarksBitDoesNotGrowTheBlock`).
-- **`BIDI_MAX_LINE` stays 128.** Past it a line takes upstream's result, `computeVisualWordOrder` with per-word forms.
-- **Every deviation is named in the spec:** Task 1 adds deviation 11 and extends deviation 1's text.
+- **No per-line heap churn on bidi lines.** The piece vectors keep their capacity; piece texts and forms are views
+  into the tokens and into `BidiLine::Line::display`; `tokenForm` writes into one reused string.
+- **Stack:** `do_bidi` takes about 1.3 KB (`types`/`levels`/`skip` 384 B, the `DirStatusStack` about 391 B,
+  `openers[63]` 504 B), and `computeVisualWordOrder` 512 B more. Both run on the 8 KB loop task under the parser's
+  deepest frames; Task 12 measures it.
+- **`BIDI_MAX_LINE` stays 128, counted in slots** (code points other than transparent marks). Past it a line takes
+  upstream's result, `computeVisualWordOrder` with per-word forms.
+- **Every deviation is named in the spec:** deviations 11 and 12 and deviation 1's lending are in it since the
+  review. Task 1 checks that the text matches what was built.
 - **Never declare** a local `std::string word(...)` with parentheses: Arduino's `word()` macro breaks firmware builds.
   Brace-init or another name.
 - **Host tests from Git Bash:**
@@ -138,23 +168,33 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
    heap).
 3. **A paragraph past the 96-token flush.** Its base direction and its open controls must hold for every pass. Pinned
    in Task 2 (`TheOpenControlsFollowTheText`) and Task 7 (`TheDirectionHoldsAcrossTheLongBlockSplit`).
-4. **Vocalised Hebrew in landscape:** every mark is a code point, so lines pass 128 code points and take the
-   fallback. Pinned in Task 6 (`ALineOverTheBidiLimitStillRunsRightToLeft`) and Task 11 (the rules again at 1,600 px).
+4. **Long lines in landscape.**
+   - A pointed line must stay on the line pass through its marks.
+   - A line past 128 bases takes upstream's fallback. There an embedded Latin phrase's words reverse when
+     `computeVisualWordOrder` declines (upstream's corner).
+   Pinned in Task 2 (`MarksDoNotCountTowardTheLimit`, `ALineOverTheLimitFallsBackToUpstreamsOrder`), Task 6
+   (`ALineOverTheBidiLimitStillRunsRightToLeft`) and Task 11 (the rules again at 1,600 px).
 5. **KOSync with literal LRM/RLM, and with inserted controls.** The page offsets must equal master's. Pinned in Task 8
    (`KeptBidiMarksLeaveTheContentOffsetsAsTheyWere`, `ABidiControlCountsNothingWhereAWordIsSplit`) and Task 9
    (`InsertedControlsCountNowhere`).
 
 ---
 
-### Task 1: BidiUtils, the line pass's entry points and a lendable workspace
+### Task 1: BidiUtils, the line pass's entry points, a lendable workspace, and removed controls that keep their run
 
 **Files:**
 - Modify: `lib/MiniBidi/BidiUtils.h`, `lib/MiniBidi/BidiUtils.cpp`
+- Modify: `lib/MiniBidi/minibidi.c` (`do_bidi`, between L1 at ~888-908 and L4 at ~910)
 - Modify: `test/minibidi/BidiUtilsTest.cpp`
-- Modify: `docs/superpowers/specs/2026-11-02-writing-modes-step1-design.md` (deviations 1 and 11)
+- Check: `docs/superpowers/specs/2026-11-02-writing-modes-step1-design.md` (deviations 1, 11 and 12)
 
 **Interfaces:**
 - Consumes: PR 1's `BidiUtils` (shared workspace under `bidiMutex`, `getWorkspace()`, `releaseWorkspace()`).
+- Deviation 12, in `do_bidi` after L1 and before L4, marked `// witchhunt: deviation 12`:
+  - each character with `skip[i]` (RLE, LRE, RLO, LRO, PDF, BN after X9) takes the level of the preceding retained
+    character, or the paragraph level when there is none (UAX #9 §5.2, "Retaining BNs and Explicit Formatting
+    Characters");
+  - so a removed control never splits a run in L2. Isolate handling is unchanged (decision 8 orders isolates).
 - Produces (namespace `BidiUtils`, each declaration marked `// witchhunt: deviation 11` or `1`):
   ```cpp
   inline constexpr size_t kMaxLineCodepoints = 128;  // BIDI_MAX_LINE, for callers without minibidi.h
@@ -199,17 +239,26 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
     - true for "שלום", "\u202Eabc" (RLO), "\u2067abc" (RLI), "\u2068abc" (FSI), "\u200F", "\u061C" and "\uFB20";
     - false for "abc", "日本", "\u2066abc" (LRI), "\u200Eabc" (LRM), "“q”" and "，".
   - `StrongLevelOfLettersAndNeutrals`: 'a' 0, 05D0 1, 0627 1, 200E 0, 200F 1, 4E00 0, '1' -1, ' ' -1.
+  - Deviation 12. The values were probed against the patched `minibidi.c` on 2026-11-02; unpatched, the first one
+    gives {0, 4, 3, 2, 1, 5, 8, 7, 6, 9, …}:
+    - `RemovedControlsDoNotSplitARun`: RLE שלום PDF ": 3 posts", that is {202B, 05E9, 05DC, 05D5, 05DD, 202C, 003A,
+      0020, 0033, 0020, 0070, 006F, 0073, 0074, 0073}, at 0 → visual {0, 8, 7, 6, 5, 4, 3, 2, 1, 9, 10, 11, 12, 13, 14}.
+      Drawn without the controls, that is "3 :םולש posts".
+    - `AnEmbeddingInsideARightToLeftLine`: {05E9, 05DC, 05D5, 05DD, 0020, 202A, 0061, 0062, 0063, 202C, 0020,
+      05E9, 05DC, 05D5, 05DD} at 1 → visual {14, 13, 12, 11, 10, 6, 7, 8, 9, 5, 4, 3, 2, 1, 0}.
+    - `AnOverrideStillReversesItsText`: {0061, 0062, 0020, 202E, 0064, 0065, 0066, 202C, 0020, 0067, 0068} at 0 →
+      visual {0, 1, 2, 3, 7, 6, 5, 4, 8, 9, 10}.
 - [ ] **Step 2: Run them:** `cmake --build build/test -j 6 --target BidiUtilsTest` fails to compile (the names are
-  undeclared).
-- [ ] **Step 3: Implement** them in `BidiUtils.cpp`. `getWorkspace()` returns the bound buffer when one is bound,
-  else the heap one (allocated on first use, as now). Add `static_assert(sizeof(BidiWorkspace) == kWorkspaceBytes)`.
-- [ ] **Step 4: Run** `BidiUtilsTest`, `BidiClassTest`, `MiniBidiArabicTest` and `TextShapingTest`: all pass.
-- [ ] **Step 5: The spec.**
-  - Add to "The deviations, all of them":
-    `11. **The line pass's entry points.** BidiUtils gains orderLine (one do_bidi over a caller's code points at a given level: the visual order and the drawn, mirrored code points, each run of marks after its base as applyBidiVisual emits them), hasRtlClass and strongLevel for the layout's tests, bindWorkspace and heapWorkspaceHeld. Upstream's functions are unchanged.`
-  - Extend deviation 1 with
-    `During a build with a lent arena the line pass borrows the workspace from it for each call (bindWorkspace); otherwise the workspace is allocated on first use.`
-- [ ] **Step 6: Commit** `feat(bidi): orderLine and a workspace a section build can lend (deviation 11)`.
+  undeclared). With stub declarations, the deviation 12 cases fail.
+- [ ] **Step 3: Implement** them in `BidiUtils.cpp`, and deviation 12 in `minibidi.c`:
+  - `getWorkspace()` returns the bound buffer when one is bound, else the heap one (allocated on first use, as now);
+  - add `static_assert(sizeof(BidiWorkspace) == kWorkspaceBytes)`.
+- [ ] **Step 4: Run** `BidiUtilsTest`, `BidiClassTest`, `MiniBidiArabicTest` and `TextShapingTest`: all pass. An
+  upstream expectation that deviation 12 changes is a finding: report it, do not edit the test.
+- [ ] **Step 5: The spec.** Deviations 11 and 12 and deviation 1's lending sentence are in it since the review. Check
+  their text against what was built, and correct the spec, not the code, where the names differ.
+- [ ] **Step 6: Commit** `feat(bidi): orderLine, a workspace a build can lend, and removed controls that keep their run (deviations 11, 12)`.
+  The body says deviation 12 is to be offered upstream.
 
 ### Task 2: BidiLine, one line's tokens to pieces in visual order
 
@@ -228,7 +277,7 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
   `computeVisualWordOrder`, `isTransparentMark`; `BuildArena` (`lib/Memory`).
 - Produces (namespace `BidiLine`):
   ```cpp
-  inline constexpr size_t kMaxCodepoints = BidiUtils::kMaxLineCodepoints;
+  inline constexpr size_t kMaxCodepoints = BidiUtils::kMaxLineCodepoints;  // slots: marks ride on their base
   inline constexpr uint8_t kMaxOpenControls = 8;
   bool isControl(uint32_t cp);      // U+200E, 200F, 061C, 202A-202E, 2066-2069
   bool dropControls(std::string& text);  // removes them; true when it removed any
@@ -252,20 +301,26 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
   };
   struct Line {
     std::vector<Piece> pieces;        // visual order, left to right
-    std::string display;              // drawn forms: visual order, mirrored, marks after base, no controls or U+00AD
+    std::string display;              // drawn forms: visual order, mirrored, marks after base, no controls or U+00AD;
+                                      // each followed by a NUL, so a form's view measures as a C string
     bool reordered = false;           // a readingIndex differs from its visual index
-    bool fallback = false;            // over kMaxCodepoints
+    bool fallback = false;            // over kMaxCodepoints slots or kMaxUnits units
     void clear();                     // keeps capacity
   };
-  struct Scratch {  // plain arrays of kMaxCodepoints entries: cps, owning token, byte offset, visual, drawn,
-                    // shaped units, an isolate's outer pass, isolate spans; about 4.5 KB
+  inline constexpr size_t kMaxUnits = 3 * kMaxCodepoints;  // code points a line may hold, marks included
+  struct Scratch {  // plain arrays: kMaxUnits units (code point, owning token, cluster byte offset) and, per slot,
+                    // its first unit, visual, drawn, an isolate's outer pass; isolate spans; about 6 KB
   };
   // False (out cleared) only when BidiUtils has no workspace: the caller lays the line out without bidi.
   bool layoutLine(const Token* tokens, size_t count, const OpenControls& open, uint8_t paragraphLevel,
                   Scratch& scratch, Line& out);
-  // A token's own drawn form, which breaking measures: TextShaping::shape, then applyBidiVisual at
-  // detectParagraphLevel(token, paragraphLevel) with open's controls prepended, then dropControls and U+00AD
-  // dropped. False, out untouched, when that is the token's text byte for byte.
+  // A token's own drawn form, which breaking measures: TextShaping::shape, then applyBidiVisual, then dropControls
+  // and U+00AD dropped. No isolate initiator is ever prepended (minibidi has no isolating run sequences).
+  // - With an isolate open, the token is formed at that isolate's level: the innermost of `open`'s LRI 0, RLI 1, or
+  //   FSI detectParagraphLevel(token, 0). Only the embeddings and overrides opened inside that isolate are prepended.
+  // - With none open: at detectParagraphLevel(token, paragraphLevel), with every open embedding and override
+  //   prepended.
+  // False, out untouched, when the form is the token's text byte for byte. `out` is the caller's reused string.
   bool tokenForm(std::string_view token, const OpenControls& open, uint8_t paragraphLevel, Scratch& scratch,
                  std::string& out);
   // Lends a block of `arena` holding the workspace and a Scratch for one scope; unbinds and releases it on
@@ -284,7 +339,14 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
    - A token's units are `TextShaping::shape`'s when it returns true; else its code points, stepping like
      `utf8NextCodepoint`.
    - Each unit records its token and its cluster byte offset; a separator records the token it precedes.
-   - Glued tokens and CJK gaps get no separator. Over `kMaxCodepoints`, go to 5.
+   - Glued tokens and CJK gaps get no separator.
+   - **Marks ride on their base.** An `isTransparentMark` unit that follows a unit of the same token (not a control or
+     a separator) takes no slot: it is folded onto that base, after the marks already on it. W1 would give it the
+     base's type and level anyway, and L2 keeps the two adjacent.
+     - When the visual order is read, a base is followed by its marks in logical order, which is where
+       `applyBidiVisual` emits them.
+     - A mark first in a token or after a control keeps a slot of its own.
+   - Over `kMaxCodepoints` slots or `kMaxUnits` units, go to 5.
 2. **Isolates (decision 8).** An initiator (U+2066-2068) spans to its matching PDI, or to the line's end. Spans are
    handled innermost first. For a span, and last for the line:
    - build its outer sequence: its direct characters, with one U+FFFC per child span;
@@ -306,10 +368,17 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
    visual index.
 5. **Fallback** (`fallback = true`, upstream's result):
    - one piece per token, its display `tokenForm` (or the token's text);
-   - the order is `computeVisualWordOrder(tokens, paragraphLevel == 1)`; when that returns false, reversed for level
-     1 and identity for 0;
+   - the order is `computeVisualWordOrder` over the tokens with their transparent marks dropped (copies, so its own
+     128 limit counts slots), at `paragraphLevel == 1`; when that returns false, reversed for level 1 and identity
+     for 0;
    - visual neighbours that are logical neighbours keep the later one's glue (`Glued` when it is glued, else
      `Space`); any other pair is `Space`, with the right-hand piece's token.
+   - **The corners, accepted as upstream's:**
+     - `computeVisualWordOrder` declines past 128 slots too, so a right-to-left fallback line reverses all its words,
+       an embedded Latin phrase's included ("world hello");
+     - it runs `do_bidi` over tokens that may hold literal or inserted isolates, which minibidi treats like
+       embeddings.
+     - Both need a line past 128 slots. The fallback's copies are its only allocation and happen only on such a line.
 
 - [ ] **Step 1: Write the failing tests** in `test/bidi_line/BidiLineTest.cpp`.
   - A helper renders a `Line` as `t<token>:<display>` items joined by ` S<n> ` for `Space(n)` and ` G ` for `Glued`.
@@ -326,6 +395,8 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
     - token 5's pieces are bytes [0, 5) ("ו" and its LRI) and [5, 10).
   - `AnIsolateKeepsItsNeighboursOutside`: {"\u2067שלום\u2069:", "3", "posts"} at 0 →
     `t0:םולש: S1 t1:3 S2 t2:posts`.
+  - `AnEmbeddingLetsItsNeighboursIn` (needs deviation 12): the same with RLE … PDF (U+202B, U+202C) in place of the
+    RLI and PDI, at 0 → `t1:3 S1 t0::םולש S2 t2:posts`; readings {1, 0, 2}.
   - `AnIsolateOpenAtTheLineStartIsOrderedOnItsOwn`: {"שלום\u2069", "1998"} at 0 with open {RLI} →
     `t0:םולש S1 t1:1998`. With open {} it is `t1:1998 S1 t0:םולש`.
   - `AnOverrideOpenAtTheLineStartStillHolds`: {"ghi\u202C", "jkl"} at 0 with open {RLO} → `t0:ihg S1 t1:jkl`.
@@ -334,8 +405,12 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
   - `ALoneControlTokenGivesNoPiece`: {"abc", "\u2066", "def"} at 0 → `t0:abc S2 t2:def`.
   - `NiqqudFollowsItsLetter`: {"שָׁלוֹם"} at 1 → display {05DD, 05D5, 05B9, 05DC, 05E9, 05B8, 05C1}.
   - `TheDivineNameIsDrawnAsHeAndGeresh`: {"יהוה"} at 1 → one piece, bytes [0, 8), display {05F3, 05D4}.
-  - `ALineOverTheLimitFallsBackToUpstreamsOrder`: 26 × "אבגד" at 1 (129 code points) → fallback; pieces tokens
-    25…0; each display "דגבא"; every gap `Space`.
+  - `MarksDoNotCountTowardTheLimit`: 17 × "שָׁלוֹם" at 1 (135 code points, 84 slots) → not fallback; pieces tokens
+    16…0, each display {05DD, 05D5, 05B9, 05DC, 05E9, 05B8, 05C1}, every gap `Space`.
+  - `ALineOverTheLimitFallsBackToUpstreamsOrder`: 26 × "אבגד" at 1 (129 slots) → fallback; pieces tokens 25…0; each
+    display "דגבא"; every gap `Space`.
+  - `TheFallbackReversesAnEmbeddedLatinPhrase` (upstream's corner, pinned so that a change shows): 24 × "אבגד",
+    "hello", "world" at 1 (131 slots) → fallback; pieces tokens 25, 24, 23…0.
   - `ALongLeftToRightLineKeepsItsOrder`: 13 × {"abcd", "אבגד"} at 0 → fallback; identity order; the Hebrew pieces
     display "דגבא".
   - `TheOpenControlsFollowTheText`: from {}:
@@ -346,7 +421,11 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
   - `ATokensOwnFormIsMadeAtItsOwnDirection` (`tokenForm`):
     - "abc(שלום)" at 1 → "abc(םולש)"; "שלום" at 0 → "םולש";
     - "abc" at 1 → false; "יהוה" at 1 → {05F3, 05D4};
-    - "abc" with open {RLO} at 0 → "cba"; "C++\u200E" at 1 → "C++".
+    - "abc" with open {RLO} at 0 → "cba"; "C++\u200E" at 1 → "C++";
+    - an open isolate gives the level and is never prepended:
+      - "abc(שלום)" with open {RLI} at 0 → "(םולש)abc". Prepending the RLI gives ")םולש abc(", the review's probe B4.
+      - "abc" with open {RLI, RLO} at 0 → "cba";
+      - "abc" with open {RLO, LRI} at 0 → false (the override outside the isolate does not reach it).
   - `DropControlsLeavesTheText`: "a\u200Eb\u2067c\u202Cd" → "abcd", true; "abc" → false.
   - `AnArenaLendsTheWorkspaceAndScratch`:
     - a 16 KB `BuildArena` → `scratch()` non-null; `heapWorkspaceHeld()` stays false through a `layoutLine`;
@@ -372,17 +451,19 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
 - Create: `test/text_block_range/TextBlockBidiTest.cpp` (added to `TextBlockRangeTest`)
 
 **Interfaces:**
-- Produces:
-  - `WordRange::displayForms` (`const std::vector<std::string>*`, indexed like `words`; null or an empty string:
-    none);
-  - `WordRange::logicalOrder` (`const std::vector<uint8_t>*`, indexed from the line's first word; null or empty:
-    reading order is stored order);
+- Produces: views, so a bidi line builds no per-line strings (review 4.4; the arena copies the bytes anyway).
+  - `WordRange::wordViews` (`const std::string_view*`, `count` entries, from index 0, with `first` 0): when set, it
+    is used in place of `words`; `styles`, `sizes` and `boundaries` then point at the per-line vectors too. The range constructor reads each word through one `std::string_view` accessor whichever the source,
+    so the soft-hyphen strip and the arena fill have one path.
+  - `WordRange::displayForms` (`const std::string_view*`, `count` entries; null, or an empty view for a word: none).
+  - `WordRange::logicalOrder` (`const uint8_t*`, `count` entries; null: reading order is stored order).
   - `const char* wordDrawText(uint16_t i) const` (the display form, else the text; NUL-terminated);
   - `bool hasDisplayForm(uint16_t i) const`;
   - `uint8_t logicalPosition(uint16_t i) const` (i when there is no order);
   - `bool hasLogicalOrder() const`.
 - **The bidi region** follows the annotation region, read with memcpy:
-  - `u8 parts`: bit 0 display forms, bit 1 logical order;
+  - `u8 parts`: bit 0 display forms, bit 1 logical order; bits 2-7 reserved, so that step 2's glyph records need no
+    new header (rejected until then);
   - [display: `u16 offset[wordCount]` into the texts that follow, `0xFFFF` for none; then the forms, each
     NUL-terminated];
   - [order: `u8 position[wordCount]`].
@@ -408,8 +489,9 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
 
 - [ ] **Step 1: Write the failing tests** in `TextBlockBidiTest.cpp`, with the shim's recorder and
   `HalFile::forReadWrite`:
-  - `AFormIsKeptOnlyWhereItDiffers`: words {"abc", "שלום"}, forms {"abc", "םולש"} → `hasDisplayForm(0)` false,
+  - `AFormIsKeptOnlyWhereItDiffers`: word views {"abc", "שלום"}, forms {"abc", "םולש"} → `hasDisplayForm(0)` false,
     `(1)` true, `wordDrawText(1) == "םולש"`, `wordText(1) == "שלום"`.
+  - `WordViewsMatchTheVectorRange`: the same words as `std::string`s and as views give the same serialised bytes.
   - `ASoftHyphenatedWordDrawnAsItsTextHasNoForm`: "ab\xC2\xADc" with form "abc" → none.
   - `TheLogicalOrderIsKeptOnlyWhenItReorders`: {1, 0} → kept, positions 1 and 0; {0, 1} → `hasLogicalOrder()` false.
   - `ALineWithoutTheRegionKeepsItsBytes`: words {"abc", "def"} with forms {"abc", "def"} and order {0, 1} serialise to
@@ -480,10 +562,13 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
 - Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.cpp`:
   - every BlockStyle built for an element: `userAlignmentBlockStyle` ~3136, `headerBlockStyle` ~3215;
   - the `<br>` block's style ~3280, which takes its block's direction;
-  - the table cell's text, ~2472, on its `getBlockStyle()`.
+  - the table cell's text, ~2472, on its `getBlockStyle()`;
+  - `tryStartDropCapCapture` 1727-1740 (review 4.6).
+- Modify: `ChapterHtmlSlimParser.h` (`startSideIsRight`, `blockDirection`)
 - Modify: `lib/Epub/Epub/ParsedText.h/.cpp` (`resolveAlignment`, called at the top of `layoutAndExtractLines`)
 - Test: `test/typography/TypographyTest.cpp`, `test/epub_css/CssParserTest.cpp:409-423`,
-  `test/epub_pipeline/WritingModeLayoutTest.cpp`
+  `test/epub_pipeline/WritingModeLayoutTest.cpp` (`writeBook`/`dump` take a trailing `lang = "en"`; a
+  "---- Right to left ----" section opens)
 
 **Interfaces:**
 - Produces:
@@ -495,6 +580,10 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
     parent's.
   - `ChapterHtmlSlimParser::blockDirection(const CssStyle&) const`: `Auto` when `cssStyle.unicodeBidi` is
     Plaintext, else `elementFlow_.direction`.
+  - `bool ChapterHtmlSlimParser::startSideIsRight() const`: the direction the parser knows. It is `elementFlow_.direction == Rtl`, or
+    Unset/Auto with `typography_.direction == RightToLeft`. Task 10 uses it too.
+  - `tryStartDropCapCapture` refuses when `startSideIsRight()`, beside its `vertical_` refusal. A `float: left` cap
+    would cut the paragraph's first, rightmost letter and float it on the left.
   - `resolveLogical` resolves `text-align: start/end` only for a direction of Ltr or Rtl. Unset and Auto keep Start
     and End for the layout.
   - `void ParsedText::resolveAlignment(bool rtl)` (private): Start → (rtl ? Right : Left), End → (rtl ? Left :
@@ -511,6 +600,10 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
   - `WritingModeLayout.TextAlignStartStillIndentsALatinParagraph` (book alignment):
     `.s { text-align: start; text-indent: 1em }` with `<p class="s">Alpha bravo</p>` → `align=1`, first word
     `x=18`.
+  - `BidiLayout.ARightToLeftParagraphTakesNoDropCap`, after `VerticalLayout.ADropCapStaysInItsLine`:
+    - `<p dir="rtl"><span style="float: left; font-size: 3em">ש</span>לום עולם …</p>` → no line whose text is "ש";
+    - the same in a `he` book without `dir` → none either;
+    - `<p><span style="float: left; font-size: 3em">A</span>lpha bravo …</p>` in an `en` book → the line "A" exists.
 - [ ] **Step 2: Run** `TypographyTest`, `CssParserTest`, `EpubPipelineTest`: the new expectations fail.
 - [ ] **Step 3: Implement.** Set `direction` from `blockDirection(cssStyle)` at the listed sites.
 - [ ] **Step 4: Run** the three targets and `CjkLayoutTest`, `WordSizeLayoutTest`: pass. Every golden is unchanged.
@@ -528,10 +621,8 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
 - Modify: `lib/Epub/Epub/Section.cpp` (`BuildState::~BuildState` ~993: `BidiUtils::releaseWorkspace()`)
 - Modify: `test/epub_pipeline/CMakeLists.txt` (`PIPELINE_SOURCES`/`PIPELINE_INCLUDES`),
   `test/cjk_layout/CMakeLists.txt`, `test/word_size_layout/CMakeLists.txt` (`BIDI_LAYOUT_SOURCES`/`_INCLUDES`)
-- Modify: `test/epub_pipeline/WritingModeLayoutTest.cpp`:
-  - `writeBook`/`dump` take a trailing `lang = "en"`;
-  - `parseLines` keeps each word's `x`, `t` and `WD` form and the line's `O` order;
-  - a "---- Right to left ----" section.
+- Modify: `test/epub_pipeline/WritingModeLayoutTest.cpp` (`parseLines` keeps each word's `x`, `t` and `WD` form and
+  the line's `O` order)
 - Goldens: `test_rtl_markup.golden.txt`, `test_rtl_markup_bookalign.golden.txt`
 
 **Interfaces:**
@@ -540,8 +631,12 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
   - `bool bidi_` (the block needs bidi; sticky across passes), `uint8_t level_`, `bool levelDecided_`;
   - `BidiLine::OpenControls openControls_` (at the next line's start); `std::unique_ptr<BidiLine::Scratch> bidiScratch_`;
   - `BidiLine::Line bidiLine_`;
-  - the per-line piece vectors `pieceWords_`, `pieceForms_`, `pieceStyles_`, `pieceSizes_`, `pieceBoundaries_`,
-    `pieceOrder_`.
+  - the per-line piece vectors, whose capacity survives the lines:
+    - `pieceWords_` and `pieceForms_` (`std::vector<std::string_view>`): views into the tokens and into
+      `bidiLine_.display`, handed to Task 3's `wordViews` and `displayForms`;
+    - `pieceStyles_`, `pieceSizes_`, `pieceBoundaries_` and `pieceOrder_`, PODs.
+    - No `std::string` is built per piece or per line.
+  - `std::string tokenForm_`, the one string every `tokenForm` call writes into.
   - `reset()` clears the flags and the controls; `releaseLayoutScratch()` frees the scratch and the piece vectors;
     `preserveSource` saves and restores `openControls_`.
   - `bool rtl() const { return bidi_ && level_ == 1; }`.
@@ -556,7 +651,8 @@ item 2. PR 1 (`docs/superpowers/plans/2026-11-02-writing-modes-step1-pr1.md`, #5
   `-(rtl() ? rightInset() : leftInset())`.
 
 **Widths** (`calculateWordWidths`): in a bidi block, inside one `ArenaWorkspace(lineArena_)`, walk a copy of
-`openControls_` over the tokens. Each token whose `tokenForm` returns true is measured by that form. Hyphenation
+`openControls_` over the tokens. Each token whose `tokenForm` (into `tokenForm_`) returns true is measured by that
+form. Hyphenation
 needs no change: `isAlphabetic` is Latin and Cyrillic only, so the patterns offer no break inside a Hebrew word, and
 an overlong one still takes the fallback split.
 
@@ -567,7 +663,8 @@ an overlong one still takes the fallback split.
 - When the line is not reordered, has one piece per token with no form different from its text, and `!rtl()`: the
   existing path, unchanged.
 - Otherwise position the pieces in visual order:
-  - widths `measureWordWidth` of each piece's form in its token's font, style and scale;
+  - widths: each piece's form measured in its token's font, style and scale, through a `const char*` overload of
+    `measureWordWidth` (a form has no soft hyphen, so nothing is copied);
   - a `Space` gap is `spaceBefore(j) × wordScale(spaceSource(j))` for `j = lastBreakAt + spaceToken`, and is
     justifiable;
   - a `Glued` gap is the kerning between the two forms' facing code points in the left piece's font when both share
@@ -635,10 +732,11 @@ an overlong one still takes the fallback split.
 - The level, decided on the block's first pass (`!isContinuation_`), whether or not that pass needs bidi, and kept:
   - Ltr 0, Rtl 1;
   - Auto: the first `strongLevel ≥ 0` over the pass's tokens in order, else the book's direction;
-  - Unset in a right-to-left book: 1 iff the pass has an R/AL code point;
+  - Unset in a right-to-left book: 1, unless the pass has an L letter and no R/AL one;
   - Unset otherwise: 1 iff it has R/AL and no L.
-  - For Unset, a pass with no `hasRtlClass` token decides 0 without scanning for L. A later pass that first needs
-    bidi uses the level decided on the first.
+  - So a pass with no letter of either direction takes the book's direction (the controller's ruling).
+  - In a left-to-right book, a pass with no `hasRtlClass` token decides 0 without scanning for L.
+  - A later pass that first needs bidi uses the level decided on the first.
   - Task 6's needs-bidi test now reads `level_ == 1` where it read `direction == Rtl`, so an Auto paragraph that falls
     back to a right-to-left book's direction is laid out right to left.
   - `resolveAlignment` then reads it.
@@ -650,6 +748,9 @@ an overlong one still takes the fallback split.
     first word x 0; no WD, no O.
   - `BidiLayout.AnEnglishBookQuotingHebrewStaysLeftToRight` (en): `<p>He said שלום.</p>` → x 0, 23, 64.
   - `BidiLayout.AHebrewOnlyParagraphInAnEnglishBookTurnsRightToLeft` (en): `<p>שלום עולם</p>` → x 390, 428.
+  - `BidiLayout.ALetterlessParagraphTakesTheBooksDirection` (stub "*" is 6 px):
+    - he: `<p>* * *</p>` → x 430, 442, 454; `O order=2,1,0`;
+    - en: x 0, 12, 24; no O.
   - `WritingModeLayout.DirAutoTakesTheFirstStrongLetter`: `<p class="s" dir="auto">שלום</p>` → align=3;
     `<p class="s" dir="auto">abc שלום</p>` → align=1.
   - `BidiLayout.StartAndEndFollowTheDecidedDirection` (he): `.s`/`.e` on "שלום" → 3 and 1;
@@ -754,6 +855,9 @@ an overlong one still takes the fallback split.
   - `BidiLayout.UnicodeBidiInCss`: `.o { unicode-bidi: bidi-override; direction: rtl }` and
     `.e { unicode-bidi: embed; direction: rtl }` on spans around "def" → texts "\u202Edef\u202C" (WD "fed") and
     "\u202Bdef\u202C" (WD "def").
+  - `BidiLayout.AnEmbeddingLetsItsNeighboursIn` (deviation 12 in the page; widths ":םולש" 40):
+    `<p dir="ltr"><span class="e">שלום</span>: 3 posts</p>` → (0, "3"), (14, "‫שלום‬:", WD ":םולש"),
+    (60, "posts"); `O order=1,0,2`. `ABdiKeepsAUserNameApart` above is the isolate's contrast.
   - `BidiLayout.AnLtrSpanInAnEnglishBookChangesNothing` (en): `<p>abc <span dir="ltr">def</span> ghi</p>` → words
     "abc", "def", "ghi" at 0, 31, 64; no WD.
   - `BidiLayout.AnIsolateAcrossALineBreakKeepsItsOrder`: viewport 200,
@@ -772,14 +876,12 @@ an overlong one still takes the fallback split.
 
 **Files:**
 - Modify: `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.h/.cpp`:
-  - `startSideIsRight()`;
   - the list padding at 3138-3141;
   - `BufferedTable::rtl`, set at ~2383;
   - `layoutTableRow` 5461-5572, which reverses `out.cells` after the padding loop when `rtl`.
 
 **Interfaces:**
-- Produces: `bool ChapterHtmlSlimParser::startSideIsRight() const`: `elementFlow_.direction == Rtl`, or Unset/Auto
-  with `typography_.direction == RightToLeft`.
+- Consumes: `startSideIsRight()` (Task 5).
 - A list without its own start-side padding (`hasPaddingRight()` when right, else `hasPaddingLeft()`) gets
   `LIST_DEFAULT_PADDING_EM` on that side.
 
@@ -869,7 +971,14 @@ Each book's floors are in its parameter, as `VerticalRules`' are, listed as 460 
   - "יְהוָה" has WD "׳ה".
 - [ ] **Step 4: Run** all of `EpubPipelineTest` without `UPDATE_GOLDENS`: pass (the corpus-wide LUT and determinism
   tests take the new book too).
-- [ ] **Step 5: Commit** `test(epub): a Hebrew fixture, its goldens, and the bidi rule checker`.
+- [ ] **Step 5: Allocations (review 4.4).** Build `epub_pipeline_dump`, then run
+  `build/test/epub_pipeline/epub_pipeline_dump.exe test/epubs/<book>.epub --bench` for `test_bidi_text` and for
+  `test_long_paragraph_spacing` (Latin, long paragraphs).
+  - Record `allocs=` and the page count of each.
+  - `test_bidi_text`'s allocations per page must be within 25 % of the Latin book's.
+  - A larger gap is a finding to fix before the PR: read the `alloc_site` lines for a per-line or per-piece source.
+- [ ] **Step 6: Commit** `test(epub): a Hebrew fixture, its goldens, and the bidi rule checker`. The body gives
+  the counts and the allocations.
 
 ### Task 12: Sizes, the devices, the roadmap and the PR
 
@@ -901,17 +1010,28 @@ e8299b5f:<path>` into the scratchpad, never the repository.
     - Genesis' niqqud on its letters (dagesh inside, shin and sin dots on their arms, holam left);
     - the divine name as ה׳; lists numbered and the table run on the right; the hanging indent on the right;
     - spine 2's English with reversed Hebrew pieces.
-  - Set landscape (`cmd:SET:orientation=1`) at the smallest font size, and show spine 1's long paragraph (fallback
-    lines) still reading right.
+  - Set landscape (`cmd:SET:orientation=1`) at the smallest font size, and show:
+    - Genesis still on the line pass, its marks riding on their letters;
+    - spine 1's long paragraph (fallback lines, if any pass 128 bases) still reading right.
+  - **The loop task's stack (review 4.5).** Build `default` once more with
+    `PLATFORMIO_BUILD_FLAGS=-DENABLE_BOOT_HEAP_DIAGNOSTICS`, for the branch and for the base.
+    - Open `test_bidi_text` spine 1 from a cold cache (delete its spine files over USB transfer first).
+    - Read `loopTask stack high-water=` from the `[MEM]` lines once the section is built, on both boards.
+    - Record the branch's figure against the base's.
+    - Under 1,536 B free, stop and report. The remedy, then a deviation 13: `do_bidi`'s `types`, `levels`, `skip`
+      and its `DirStatusStack` (about 775 B) move into the `BidiWorkspace` the arena lends. `kWorkspaceBytes` grows
+      from 1,536 to about 2,312, and the loop task's stack loses them.
   - From the log: `createSectionFile spine=… arena: cap=… highWater=` and the `HEAP` lines (build heap); no
     `BIDI Failed to allocate`.
   - `heap` from STATE after five page turns.
   - An English book's page counts at spine items 5, 20 and 40 equal the base build's.
   - Restore the settings from the backup, and flash the base back unless told otherwise.
 - [ ] **Step 4: Say in the PR what the runs cannot show yet** (PR 3): pages turning right to left; the dictionary,
-  footnote overlay and QR text in reading order (they read stored order until then); the Font Manager's Hebrew
-  families; Hebrew in the built-in faces; bionic on Hebrew.
+  footnote overlay and QR text in reading order (they read stored order until then); the status bar's chapter title
+  and the Home and Library titles in visual order; the Font Manager's Hebrew families; Hebrew in the built-in faces;
+  bionic on Hebrew.
 - [ ] **Step 5: The PR** (2-4 KB), titled `feat(writing-modes): right-to-left lines, bidi and Hebrew layout (step 1 PR 2)`.
-  It holds: what changed; deviation 11; the calls above; the review focus; the sizes; the device table (build heap,
-  heap after a turn, page counts); the screenshots (orphan assets branch).
+  It holds: what changed; deviations 11 and 12 (12 to be offered upstream); the calls above; the review focus; the
+  sizes; the device table (build heap, heap after a turn, the loop task's stack, page counts); the screenshots
+  (orphan assets branch).
 - [ ] **Step 6: Commit** the roadmap edit: `docs(writing-modes): step 1 PR 2 is #<n>`.
