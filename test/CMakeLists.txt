@@ -36,6 +36,10 @@ FetchContent_MakeAvailable(googletest)
 
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+file(GLOB OT_SHAPER_SOURCES ${REPO_ROOT}/lib/OtShaper/*.cpp)
+# lib/Memory is ours: makeUniqueNoThrow (Task 8) lives there.
+set(OT_SHAPER_INCLUDE_DIR ${REPO_ROOT}/lib/OtShaper ${REPO_ROOT}/lib/Memory)
+
 add_library(crosspoint_test_common INTERFACE)
 target_include_directories(crosspoint_test_common INTERFACE
   ${REPO_ROOT}
@@ -218,6 +222,8 @@ add_subdirectory(default_ignorable)
 add_subdirectory(minibidi)
 add_subdirectory(minibidi_arabic)
 add_subdirectory(text_shaping)
+add_subdirectory(indic_text)
+add_subdirectory(ot_shaper)
 add_subdirectory(utf8_compose)
 add_subdirectory(utf8_lower)
 add_subdirectory(adaptive_tone)
