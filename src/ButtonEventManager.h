@@ -45,6 +45,9 @@ class ButtonEventManager {
     // When the key went down for this gesture, on the sampler's clock (the second press of a
     // Double). A list times a double-tap from it: the loop may handle the event much later.
     unsigned long pressMs = 0;
+    // Synthetic Back actions bypass global action lookup so they reach the activity's built-in
+    // Back handling rather than recursively invoking the selected Back action.
+    bool bypassActionMapping = false;
   };
 
   // Timing constants (milliseconds)

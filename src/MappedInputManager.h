@@ -112,7 +112,10 @@ class MappedInputManager {
   [[nodiscard]] static Button frontStripPrevious() { return buttonFor(frontStripDirections().previous); }
   [[nodiscard]] static Button frontStripNext() { return buttonFor(frontStripDirections().next); }
 
-  void update() const { gpio.update(); }
+  void update() const {
+    syntheticPressedMask_ = 0;
+    gpio.update();
+  }
   bool wasPressed(Button button) const;
   bool wasReleased(Button button) const;
   bool isPressed(Button button) const;
@@ -264,6 +267,11 @@ class MappedInputManager {
   // every long-press-only action is out of reach on a board with no nav buttons.
   // `atMs` dates it (see HalGPIO::injectPress); 0 means now.
   void injectRawPress(uint8_t rawButtonIndex, bool longPress = false, uint32_t atMs = 0) const;
+  // Synthesize a logical one-frame press without asserting a raw hardware pin.
+  // Used by the assignable Back action on boards without a physical Back key.
+  void injectLogicalPress(Button button) const {
+    syntheticPressedMask_ |= static_cast<uint16_t>(1u << static_cast<uint8_t>(button));
+  }
   // When the touch event this cycle happened, on the sampler's clock; 0 if there was none.
   uint32_t lastTouchEventAtMs() const;
 
@@ -275,6 +283,7 @@ class MappedInputManager {
 
  private:
   HalGPIO& gpio;
+  mutable uint16_t syntheticPressedMask_ = 0;
   // Live orientation authority for the touch transform — see the constructor.
   const GfxRenderer& renderer;
   static ScreenOrientation (*orientationProvider)();

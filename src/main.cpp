@@ -1683,7 +1683,7 @@ void loop() {
   const unsigned long loopStartTime = millis();
   static unsigned long lastMemPrint = 0;
 
-  gpio.update();
+  mappedInputManager.update();
   buttonEventManager.update();
 
   if (activityManager.requiresExclusiveStorageLoop()) {
@@ -2053,6 +2053,11 @@ void loop() {
         case BA::BTN_GO_HOME:
           activityManager.goHome();
           break;
+        case BA::BTN_BACK:
+          mappedInputManager.injectLogicalPress(B::Back);
+          buttonEventManager.pushEventFront(
+              {B::Back, ButtonEventManager::PressType::Short, millis(), /*bypassActionMapping=*/true});
+          break;
         case BA::BTN_SLEEP:
           enterDeepSleep(/*fromTimeout=*/false, BootDiag::SleepTrigger::ButtonAction);
           // enterDeepSleep() never returns; report it anyway rather than relying
@@ -2187,6 +2192,10 @@ void loop() {
     std::vector<ButtonEventManager::ButtonEvent> defaultEvents;
     defaultEvents.reserve(8);
     while (buttonEventManager.consumeEvent(ev)) {
+      if (ev.bypassActionMapping) {
+        defaultEvents.push_back(ev);
+        continue;
+      }
       const uint8_t action = actionFor(ev);
       // Fall through to the activity when the event has no global effect here: either an
       // explicit Default mapping, or a reader-scoped action while not in the reader -- unless the

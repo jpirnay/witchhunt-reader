@@ -15,6 +15,8 @@ class CrossPointSettings {
   // Static instance
   static CrossPointSettings instance;
 
+  void applyDeviceButtonDefaults();
+
  public:
   // Delete copy constructor and assignment
   CrossPointSettings(const CrossPointSettings&) = delete;
@@ -614,6 +616,11 @@ class CrossPointSettings {
   static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 3;
   uint8_t gestureDefaultsVersion = GESTURE_DEFAULTS_VERSION;
 
+  // Tracks button-action enum ordering and board-specific keymap defaults.
+  // Older settings keep explicit custom actions, while old built-in Confirm
+  // double/long entries inherit Murphy's Back/Sleep defaults.
+  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 1;
+
   // --- Gesture actions (touch boards) ---------------------------------------
   // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
   // fields above, and with the same meaning for BTN_DEFAULT: leave this input
@@ -838,6 +845,9 @@ class CrossPointSettings {
     // rotation gestures are a PAIR — turning two fingers one way and then back
     // must undo, not advance three more steps.
     BTN_CYCLE_ORIENTATION_BACK,
+    // Send a normal Back press to the current activity. This is distinct from
+    // Go Home and is useful as a selectable action on boards without a Back key.
+    BTN_BACK,
     // --- Board-gated actions MUST stay at the end of this enum ---------------
     // SettingsList builds each button's option list positionally: index i in the
     // list is action value i. Actions it drops on boards that cannot perform them

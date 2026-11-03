@@ -127,7 +127,7 @@ inline void buildSettings(const RowSink& emit) {
   // separate only for legibility.
   const std::vector<StrId> extraActionOptions = {
       StrId::STR_BTN_ACT_FONT_SIZE_SMALLER, StrId::STR_BTN_ACT_FONT_SIZE_LARGER, StrId::STR_BTN_ACT_TOGGLE_TOUCH_UI,
-      StrId::STR_BTN_ACT_CYCLE_ORIENTATION_BACK};
+      StrId::STR_BTN_ACT_CYCLE_ORIENTATION_BACK, StrId::STR_BACK};
   // The ONLY conditional block, and correspondingly the LAST entries of
   // BUTTON_ACTION. Dropping them on a board with no light therefore leaves every
   // other action's numeric value untouched, so a settings file written on a lit
@@ -439,7 +439,8 @@ inline void buildSettings(const RowSink& emit) {
                          makeBtnActionOptions(StrId::STR_BTN_DEF_GO_HOME), "btnLongBack", StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_BTN_BACK)
            .withSelectorActivity());
-  // Confirm button: short=reader menu, double=ignore, long=KOReader sync
+  // Confirm's built-in defaults are reader menu / ignore / KOReader sync. Murphy
+  // overrides double and long to Back and Sleep because those keys are absent.
   emit(SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortConfirm,
                          {StrId::STR_BTN_DEF_READER_MENU}, "btnShortConfirm", StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_BTN_CONFIRM));
