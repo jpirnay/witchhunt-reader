@@ -302,7 +302,7 @@ class CrossPointSettings {
   enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, LYRA_CAROUSEL = 3 };
 
   // Size of the menu/chrome text. Each step rebinds the three logical UI font IDs one rung up
-  // the Inter ladder (applyUiFontScale() in main.cpp) and adds the matching number of pixels to
+  // the device's UI font ladder (applyUiFontScale() in main.cpp) and adds the matching pixels to
   // every metric that has to hold a line of UI text (UiFontLadder::applyTo() in UiFontScale.h).
   //
   // Deliberately does NOT touch the reader's own font or its status bar: those feed the text

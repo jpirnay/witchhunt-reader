@@ -37,7 +37,7 @@ LanguagePackExtension& packExtension();
 void setDecompressor(FontDecompressor* decompressor);
 
 /// Give `font`, a built-in 1-bit UI face of `points` size, the CJK faces. It takes the largest CJK
-/// size not above its own, or the smallest: 8 and 10 pt draw CJK at 10 pt, 12 and 14 pt at 12 pt.
+/// size not above its own, or the smallest: 6, 8 and 10 pt draw CJK at 10 pt, 12 and 14 pt at 12 pt.
 /// Repoints font.data at a RAM copy that carries the provider -- the generated table is const flash.
 /// Call once per face at startup, before anything draws with it.
 void attach(EpdFont& font, uint8_t points);

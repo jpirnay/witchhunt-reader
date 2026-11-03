@@ -3,7 +3,7 @@
 Shared by build_cjk_ui_fonts.py, which decides what goes into the CJK UI faces, and
 scripts/gen_i18n.py, which refuses a translation that uses a character no UI font has. A
 missing glyph draws nothing in the Inter faces, which have no U+FFFD, and a replacement box in
-Noto Sans 8, which has one: either way the label is wrong.
+Noto Sans 6/8, which has one: either way the label is wrong.
 
 The answer comes from the headers that are actually compiled, never from the source fonts:
 fontconvert.py drops every requested codepoint the font has no glyph for, so only the
@@ -17,7 +17,10 @@ from pathlib import Path
 # UI font ladder (applyUiFontScale() in src/main.cpp). A string can land in any of them, so a
 # character counts as covered only when ALL of them have it.
 UI_FACE_HEADERS = (
+    "notosans_6_regular",
     "notosans_8_regular",
+    "inter_ui_8_regular",
+    "inter_ui_8_bold",
     "inter_ui_10_regular",
     "inter_ui_10_bold",
     "inter_ui_12_regular",

@@ -20,6 +20,11 @@
 #include <builtinFonts/bookerly_18_bolditalic.h>
 #include <builtinFonts/bookerly_18_italic.h>
 #include <builtinFonts/bookerly_18_regular.h>
+#if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
+#include <builtinFonts/inter_ui_8_bold.h>
+#include <builtinFonts/inter_ui_8_regular.h>
+#include <builtinFonts/notosans_6_regular.h>
+#endif
 #include <builtinFonts/inter_ui_10_bold.h>
 #include <builtinFonts/inter_ui_10_regular.h>
 #include <builtinFonts/inter_ui_12_bold.h>

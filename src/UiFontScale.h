@@ -42,10 +42,17 @@ struct Step {
   int body;   // UI_10_FONT_ID — list rows, values, button hints
   int title;  // UI_12_FONT_ID — headers, titles of rows that have a subtitle
 };
+#if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
+inline constexpr Step STEPS[] = {
+    {17, 20, 25},  // DEFAULT: notosans_6,  inter_ui_8,  inter_ui_10
+    {23, 25, 30},  // LARGE:   notosans_8,  inter_ui_10, inter_ui_12
+};
+#else
 inline constexpr Step STEPS[] = {
     {23, 25, 30},  // DEFAULT: notosans_8,  inter_ui_10, inter_ui_12
     {25, 30, 35},  // LARGE:   inter_ui_10, inter_ui_12, inter_ui_14
 };
+#endif
 inline constexpr size_t STEP_COUNT = std::size(STEPS);
 
 // Extra pixels each slot occupies at `step` relative to step 0. All three are zero at step 0, so
