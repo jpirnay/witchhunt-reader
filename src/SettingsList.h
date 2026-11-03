@@ -23,6 +23,7 @@
 #include "activities/reader/KOReaderAutoSync.h"
 #include "activities/settings/SettingInfo.h"
 #include "activities/settings/TimezoneOptions.h"
+#include "components/themes/PanelMetrics.h"
 
 // Shared settings list used by both the device settings UI and the web settings API.
 //
@@ -219,10 +220,12 @@ inline void buildSettings(const RowSink& emit) {
            .withSubcategory(StrId::STR_MENU_DISP_BATTERY));
   // --- User interface ---
   // One heading for the four rows: headings stick, so the rows after UI Theme sit under it.
-  emit(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
-                         {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                          StrId::STR_THEME_LYRA_CAROUSEL},
-                         "uiTheme", StrId::STR_CAT_DISPLAY)
+  // Carousel's fixed 340x540 centre tile is bigger than a compact panel; a stored choice falls back
+  // to Lyra in CrossPointSettings::loadFromFile().
+  std::vector<StrId> themes = {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED};
+  if (!PanelMetrics::COMPACT) themes.push_back(StrId::STR_THEME_LYRA_CAROUSEL);
+  emit(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme, std::move(themes), "uiTheme",
+                         StrId::STR_CAT_DISPLAY)
            .withSelectorActivity()
            .withSubcategory(StrId::STR_MENU_DISP_UI));
   emit(SettingInfo::Enum(StrId::STR_UI_FONT_SIZE, &CrossPointSettings::uiFontSize,

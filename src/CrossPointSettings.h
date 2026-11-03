@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "components/themes/PanelMetrics.h"
+
 class CrossPointSettings {
  private:
   // Private constructor for singleton
@@ -157,7 +159,7 @@ class CrossPointSettings {
 
   /// Reader sizes are stored as POINT SIZES: fontPointSize, txtFontPointSize and a book's
   /// fontSizeOverride. FONT_SIZE survives only as the built-in ladder, i.e. which faces exist.
-  static constexpr uint8_t DEFAULT_FONT_POINT_SIZE = 14;
+  static constexpr uint8_t DEFAULT_FONT_POINT_SIZE = PanelMetrics::capped(14, 10);
   /// Bounds for a stored point size. A book's override is an int8_t with -1 for "follow the
   /// default", which caps it at 127. No .cpfont comes near that: the converter refuses a line
   /// height over 255 px, about 100 pt at 150 DPI. 1 is what SdCardFontRegistry::parseFilename()
@@ -490,7 +492,8 @@ class CrossPointSettings {
 #endif
   // Perform a half refresh on the page immediately following an EPUB page that displayed images.
   uint8_t halfRefreshAfterImagePage = 1;
-  uint8_t hyphenationEnabled = 0;
+  // A 240 px column leaves wide gaps without it.
+  uint8_t hyphenationEnabled = PanelMetrics::COMPACT ? 1 : 0;
   // Widow and orphan control: a page ends early rather than leave a paragraph's first or last line alone on it.
   // Off, every page fills (#579: on a page of ten lines the rule could leave two empty).
   uint8_t widowOrphanControl = 1;
