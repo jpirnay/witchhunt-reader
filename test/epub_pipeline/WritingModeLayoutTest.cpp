@@ -911,6 +911,20 @@ TEST_F(BidiLayout, AMarkBetweenLatinAndCjkKeepsTheirGap) {
   }
 }
 
+TEST_F(BidiLayout, AStrayByteAfterAMarkIsReadAsItsReplacement) {
+  // The parser takes any byte: a stray continuation byte after an LRM makes the token E2 80 8E 80, which a backward
+  // scan for the token's last character reads as one sequence. The word glued on after it is set as after the
+  // replacement character a well-formed book would hold there.
+  const auto stray = parseLines(dump("", document("<p>&#x200E;\x80<i>x</i></p>")));
+  const auto twin = parseLines(dump("", document("<p>&#x200E;&#xFFFD;<i>x</i></p>")));
+  ASSERT_EQ(1u, stray.size());
+  ASSERT_EQ(1u, twin.size());
+  ASSERT_EQ(2u, stray[0].words.size());
+  ASSERT_EQ(twin[0].words.size(), stray[0].words.size());
+  for (size_t i = 0; i < twin[0].words.size(); ++i) EXPECT_EQ(twin[0].words[i].x, stray[0].words[i].x) << i;
+  EXPECT_EQ("x", stray[0].words[1].text);
+}
+
 TEST_F(BidiLayout, AMarkInAHebrewParagraphIsKeptAndNotDrawn) {
   // C++ is 24 px: the LRM keeps its pluses on its right, and draws as nothing.
   const auto lines = parseLines(dump("", document("<p dir=\"rtl\">C++&#x200E; שלום</p>"), bookAlignment()));

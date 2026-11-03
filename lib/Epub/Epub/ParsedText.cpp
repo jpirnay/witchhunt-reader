@@ -69,15 +69,20 @@ uint32_t firstCodepoint(const char* word) {
 }
 uint32_t firstCodepoint(const std::string& word) { return firstCodepoint(word.c_str()); }
 
-// Returns the last codepoint of a word by scanning backward for the start of the last UTF-8 sequence.
-uint32_t lastCodepoint(const std::string_view word) {
-  if (word.empty()) return 0;
-  // UTF-8 continuation bytes start with 10xxxxxx; scan backward to find the leading byte.
+// Where the last UTF-8 sequence of a non-empty word starts: UTF-8 continuation bytes start with 10xxxxxx, so the scan
+// goes back over every one of them to the leading byte.
+size_t lastSequenceStart(const std::string_view word) {
   size_t i = word.size() - 1;
   while (i > 0 && (static_cast<uint8_t>(word[i]) & 0xC0) == 0x80) {
     --i;
   }
-  const auto* ptr = reinterpret_cast<const unsigned char*>(word.data() + i);
+  return i;
+}
+
+// Returns the last codepoint of a word by scanning backward for the start of the last UTF-8 sequence.
+uint32_t lastCodepoint(const std::string_view word) {
+  if (word.empty()) return 0;
+  const auto* ptr = reinterpret_cast<const unsigned char*>(word.data() + lastSequenceStart(word));
   return utf8NextCodepoint(&ptr);
 }
 
@@ -97,7 +102,9 @@ uint32_t lastCodepointPastControls(std::string_view word) {
   while (!word.empty()) {
     const uint32_t cp = lastCodepoint(word);
     if (!BidiLine::isUncountedControl(cp)) return cp;
-    word.remove_suffix(cp == 0x061C ? 2 : 3);  // U+061C is 2 bytes in UTF-8, the other such controls 3
+    // Cut at the control's lead byte, where the scan found it: in malformed text the stray continuation bytes after a
+    // control go with it, so what it spans is not a fixed 2 or 3 bytes.
+    word = word.substr(0, lastSequenceStart(word));
   }
   return 0;
 }
