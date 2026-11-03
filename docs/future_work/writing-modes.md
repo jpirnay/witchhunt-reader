@@ -102,7 +102,7 @@ Malayalam on the X4 Pro.
 - **Fonts on the C3:** bitmap `.cpfont` with the GSUB closure rasterised at U+F0000+gid plus a layout font copied into
   the `spiffs` partition (`FlashBlobCache`); TrueType shaping only on PSRAM boards.
 - **Open objection:** vectors `reserve()` after a heap check only, so a failed allocation aborts instead of falling
-  back (against our nothrow rule).
+  back (against our nothrow rule). Our port resolves it with nothrow fixed storage (step 2's deviation 1).
 
 **What to do with it** (an analysis, not yet a decision): port `OtShaper` with nothrow fixed buffers and its tables
 built from our `FontBytes` views (no table copy, no `spiffs`); take the script tables, the syllable-safe breaks and the
@@ -113,8 +113,8 @@ HarfBuzz's MIT notice, which must ship with the port. The engine already has eve
 Arabic (a joining module plus right-to-left) and the Indic scripts is likely; section 5.6's "hundreds of KB" premise
 for a shaper is out of date.
 
-**Next step.** The shaper is being ported in step 2 and was measured first (the measurements file); the allocation
-fix is offered upstream (decision 7).
+**Next step.** The shaper is being ported in step 2 and was measured first (the measurements file); once PR 1 merges,
+the allocation fix is offered upstream in a comment on #3787 (decision 7).
 
 ## Parsed in step 0, read later
 

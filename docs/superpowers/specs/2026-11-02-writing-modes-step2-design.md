@@ -181,7 +181,9 @@ region, the `ClipSelectionActivity` change, and the tests `flash_blob_cache` and
 1. **Nothrow storage.** `Buffer`'s `info`, `pos`, `scratch` and `indices`, `Plan`'s and `PlanBuilder`'s vectors and
    `appendSubtableDigests`' output become one fixed-capacity view type with the same member names and the calls
    upstream makes of them (`push_back`, `erase`, `resize`, `assign`, `swap`, `size`, `capacity`, `data`), bound to
-   memory the caller hands in. `Buffer::prepare` binds instead of `reserve()`ing. Growth past the capacity fails the
+   memory allocated nothrow: the buffer's arrays to a block the caller hands in (`Buffer::setStorage`), a plan's lists
+   and filters to blocks the plan allocates once their sizes are known, the planner's lists to one small block it
+   allocates. `Buffer::prepare` binds instead of `reserve()`ing. Growth past the capacity fails the
    run, as `canGrow` already does; the caller lays the token out unshaped. This is the roadmap's open objection
    (`reserve()` after a heap check, so a failed allocation aborts under `-fno-exceptions`); it is offered upstream on
    #3787 once our port works (decision 7). The limits stay upstream's: `MAX_NESTING_LEVEL` 8, `MAX_CONTEXT_LENGTH` 64, a run's growth factor 2 + 16,
