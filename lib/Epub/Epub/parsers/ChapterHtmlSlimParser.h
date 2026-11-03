@@ -105,8 +105,9 @@ class ChapterHtmlSlimParser final : public Print {
   // leave one char at end for null pointer
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
   int partWordBufferIndex = 0;
-  // partWordBuffer holds bidi controls (BidiLine::isControl) and nothing else. They are held for the next word, which
-  // they open: no word of their own, no visible offset (consumeText), and dropped where their block ends.
+  // partWordBuffer holds bidi controls that count nowhere (BidiLine::isUncountedControl) and nothing else. They are
+  // held for the next word, which they open: no word of their own, no visible offset (consumeText), and dropped where
+  // their block ends.
   bool partWordControlsOnly_ = false;
   // partWordBuffer holds a word's text, not just controls held for one.
   bool partWordHasText() const { return partWordBufferIndex > 0 && !partWordControlsOnly_; }

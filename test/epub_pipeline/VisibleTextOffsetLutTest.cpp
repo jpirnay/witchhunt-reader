@@ -347,6 +347,30 @@ TEST_F(SyntheticLutFixture, KeptBidiMarksLeaveTheContentOffsetsAsTheyWere) {
   }
 }
 
+TEST_F(SyntheticLutFixture, LiteralIsolatesCountAsText) {
+  // A literal LRI and PDI are text, not controls kept uncounted: each page starts at its first paragraph's LRI, and a
+  // position at that paragraph's start is on the page. A paragraph is one line of 29 visible bytes, 23 of letters and a
+  // period and 3 for each isolate, so every page opens on one.
+  constexpr uint32_t kPlainBytes = 23;
+  constexpr uint32_t kParagraphBytes = 29;
+  std::string isolated;
+  std::string plain;
+  for (int i = 0; i < 120; ++i) {
+    isolated += "<p>&#x2066;שלום עולם טוב.&#x2069;</p>\n";
+    plain += "<p>שלום עולם טוב.</p>\n";
+  }
+  const auto withIsolates = build(book(isolated));
+  const auto without = build(book(plain));
+  ASSERT_GT(without->pageCount, 1);
+  ASSERT_EQ(withIsolates->pageCount, without->pageCount);
+  for (uint16_t page = 0; page < without->pageCount; ++page) {
+    const uint32_t paragraphStart = *without->getVisibleTextOffsetForPage(page) / kPlainBytes * kParagraphBytes;
+    EXPECT_EQ(*withIsolates->getVisibleTextOffsetForPage(page), paragraphStart) << "page " << page;
+    EXPECT_EQ(withIsolates->getPageForVisibleTextOffset(paragraphStart), std::optional<uint16_t>(page))
+        << "page " << page;
+  }
+}
+
 TEST_F(SyntheticLutFixture, EmptyPageStartsWhereTheNextElementDoes) {
   // A top margin taller than the page pushes the opening paragraph's first line off page 0, which
   // goes out with nothing on it. That happens while the paragraph is laid out, after its text was

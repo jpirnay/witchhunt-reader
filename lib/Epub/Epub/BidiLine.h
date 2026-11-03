@@ -3,6 +3,7 @@
 #include <BidiUtils.h>
 #include <BuildArena.h>
 #include <TextShaping.h>
+#include <Utf8.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +25,11 @@ inline constexpr size_t kMaxUnits = 3 * kMaxCodepoints;  // code points a line m
 
 // U+200E, 200F, 061C, 202A-202E, 2066-2069: the marks, embeddings, overrides and isolates.
 bool isControl(uint32_t cp);
+
+// U+200E, 200F, 061C and 202A-202E, the controls that are default-ignorable too (utf8IsDefaultIgnorable). The parser
+// keeps them for the pass, but they count nowhere: in no content offset (KOSync), and in no parse-time read of a word's
+// first or last character. The isolates are not default-ignorable there, and count as the text they always were.
+inline bool isUncountedControl(const uint32_t cp) { return isControl(cp) && utf8IsDefaultIgnorable(cp); }
 
 // Removes them; true when it removed any.
 bool dropControls(std::string& text);

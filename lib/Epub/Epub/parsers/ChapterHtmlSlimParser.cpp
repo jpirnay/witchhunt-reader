@@ -412,12 +412,13 @@ int defaultIgnorableLen(const char* s, const int i, const int len) {
   return 0;
 }
 
-// Length in bytes of the bidi control (BidiLine::isControl) starting at s[i], or 0 if there isn't one. Each is U+061C
-// (D8 9C) or a 3-byte sequence led by E2; one that runs past `len` is not matched, as in defaultIgnorableLen.
-static int bidiControlLen(const char* s, const int i, const int len) {
+// Length in bytes of the bidi control that counts nowhere (BidiLine::isUncountedControl) starting at s[i], or 0 if
+// there isn't one. Each is U+061C (D8 9C) or a 3-byte sequence led by E2; one that runs past `len` is not matched, as
+// in defaultIgnorableLen. A literal isolate (U+2066-2069) is text.
+static int uncountedControlLen(const char* s, const int i, const int len) {
   const auto b0 = static_cast<uint8_t>(s[i]);
   if (b0 != 0xE2 && b0 != 0xD8) return 0;
-  return BidiLine::isControl(codepointAt(s + i, len - i)) ? (b0 == 0xE2 ? 3 : 2) : 0;
+  return BidiLine::isUncountedControl(codepointAt(s + i, len - i)) ? (b0 == 0xE2 ? 3 : 2) : 0;
 }
 
 // The most bytes of controls held for one word: eight, as many as the line pass keeps open
@@ -3830,11 +3831,11 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
       continue;
     }
 
-    // A bidi control stays in the word for the line pass (BidiLine), which draws it as nothing; a paragraph that needs
-    // no bidi drops it at layout (ParsedText). It counts nowhere: no word's visible offset starts at it, no CJK run
-    // counts it (kCjkRunCodepoints), and controls with no text after them are held for the next word
-    // (partWordControlsOnly_).
-    if (const int controlLen = bidiControlLen(s, i, len); controlLen > 0) {
+    // A mark, embedding or override stays in the word for the line pass (BidiLine), which draws it as nothing; a
+    // paragraph that needs no bidi drops it at layout (ParsedText). It counts nowhere (BidiLine::isUncountedControl):
+    // no word's visible offset starts at it, no CJK run counts it (kCjkRunCodepoints), and controls with no text after
+    // them are held for the next word (partWordControlsOnly_). A literal isolate takes the text path below.
+    if (const int controlLen = uncountedControlLen(s, i, len); controlLen > 0) {
       if (!self->keepBidiControl(s + i, controlLen)) return;
       i += controlLen - 1;
       if (source) off += controlLen - 1;

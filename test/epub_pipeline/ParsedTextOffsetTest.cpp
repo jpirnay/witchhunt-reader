@@ -79,6 +79,13 @@ TEST(ParsedTextOffset, ABidiControlCountsNothingWhereAWordIsSplit) {
   EXPECT_EQ(lineOffsets(text, 20), (std::vector<uint32_t>{100, 103}));
 }
 
+TEST(ParsedTextOffset, ALiteralIsolateCountsWhereAWordIsSplit) {
+  // An isolate is text to the offsets: 本 starts after 日 and the LRI, 6 bytes on.
+  ParsedText text(/*extraParagraphSpacing=*/false);
+  text.addWord("日\xE2\x81\xA6本", EpdFontFamily::REGULAR, false, false, ParsedText::DEFAULT_WORD_SIZE_PCT, 100);
+  EXPECT_EQ(lineOffsets(text, 20), (std::vector<uint32_t>{100, 106}));
+}
+
 TEST(ParsedTextOffset, ResetForgetsTheOffsets) {
   ParsedText text = tenWords();
   text.reset(BlockStyle());

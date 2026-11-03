@@ -139,8 +139,9 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
 // Every bidi control is E2 80 xx, E2 81 xx or D8 9C in UTF-8: a token without those lead bytes holds none.
 bool mayHoldBidiControl(const std::string_view token) { return token.find_first_of("\xE2\xD8") != std::string::npos; }
 
-// VisibleText::visibleBytes of the `len` bytes at `text`, less every bidi control's: a control counts nowhere, so the
-// offsets of a split word's parts are those of the word without its controls (KOSync positions).
+// VisibleText::visibleBytes of the `len` bytes at `text`, less those of every control that counts nowhere
+// (BidiLine::isUncountedControl): the offsets of a split word's parts are those of the word without them (KOSync
+// positions). A literal isolate counts as text.
 size_t visibleBytesOutsideControls(const char* text, const int len) {
   size_t count = VisibleText::visibleBytes(text, len);
   if (!mayHoldBidiControl(std::string_view(text, static_cast<size_t>(len)))) return count;
@@ -149,7 +150,7 @@ size_t visibleBytesOutsideControls(const char* text, const int len) {
     const int bytes = lead == 0xE2 ? 3 : lead == 0xD8 ? 2 : 0;
     if (bytes == 0 || i + bytes > len) continue;
     const auto* p = reinterpret_cast<const unsigned char*>(text + i);
-    if (!BidiLine::isControl(utf8NextCodepoint(&p))) continue;
+    if (!BidiLine::isUncountedControl(utf8NextCodepoint(&p))) continue;
     count -= static_cast<size_t>(bytes);  // no byte of a control is whitespace
     i += bytes - 1;
   }
