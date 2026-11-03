@@ -1506,7 +1506,15 @@ void setup() {
   // this bridges the two, and is queried live so it can never go stale.
   // See MappedInputManager::buttonFor and issue #87.
   MappedInputManager::setOrientationProvider([] {
-    switch (renderer.getHeldOrientation()) {
+    const auto held = renderer.getHeldOrientation();
+    // Landscape swaps the key roles because a physical strip then stands vertically. A virtual strip
+    // has no such place to stand, and swapping turned the real Up and Down keys into Left and Right:
+    // Rename and Delete on the Starred Pages list, with nothing on screen to say so.
+    if (HalCapabilities::frontStripIsVirtual() && (held == GfxRenderer::Orientation::LandscapeClockwise ||
+                                                   held == GfxRenderer::Orientation::LandscapeCounterClockwise)) {
+      return MappedInputManager::ScreenOrientation::Portrait;
+    }
+    switch (held) {
       case GfxRenderer::Orientation::LandscapeClockwise:
         return MappedInputManager::ScreenOrientation::LandscapeClockwise;
       case GfxRenderer::Orientation::PortraitInverted:

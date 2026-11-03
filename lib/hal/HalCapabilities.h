@@ -165,6 +165,10 @@ inline bool hasBackAndConfirmButtons() {
 // arrangement rather than a yes/no capability.
 inline BoardConfig::InputStyle inputStyle() { return BoardConfig::ACTIVE.inputStyle; }
 
+// The front strip's Left and Right are touch targets on the panel rather than keys in the case, so
+// they turn with the screen while the real keys stay Up and Down (Murphy).
+inline bool frontStripIsVirtual() { return inputStyle() == BoardConfig::InputStyle::DigitalFiveKey; }
+
 // True when the SD card is reached over SPI, false when the board drives the
 // slot through the native SDMMC peripheral (X4 Pro, X4 Classic).
 //
