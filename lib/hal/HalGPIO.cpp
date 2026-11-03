@@ -9,6 +9,7 @@
 #include <XteinkDetect.h>
 #include <driver/usb_serial_jtag.h>
 #include <esp_sleep.h>
+#include <soc/soc_caps.h>
 
 // Global HalGPIO instance
 HalGPIO gpio;
@@ -1234,7 +1235,11 @@ bool HalGPIO::canDetectUsbElectrically() const {
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
   const auto wakeupCause = esp_sleep_get_wakeup_cause();
   const auto resetReason = esp_reset_reason();
+#if SOC_PM_SUPPORT_EXT1_WAKEUP
   const uint64_t ext1WakeMask = wakeupCause == ESP_SLEEP_WAKEUP_EXT1 ? esp_sleep_get_ext1_wakeup_status() : 0ULL;
+#else
+  constexpr uint64_t ext1WakeMask = 0;  // no EXT1 wake source on the C3, and no such function to link
+#endif
 
   // X3: a POWERON reset can come from either a power-button press (battery-latch
   // MOSFET closes) OR from USB VBUS supplying power to the MCU through a path
