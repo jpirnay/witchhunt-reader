@@ -1429,9 +1429,10 @@ bool ChapterHtmlSlimParser::keepBidiControl(const char* bytes, const int length)
 }
 
 bool ChapterHtmlSlimParser::addNoBreakSpace(const uint32_t offset) {
-  // Controls held for the next word wait out the space: " " stays the token ParsedText knows as a no-break space.
+  // Controls held for the next word wait out the space: " " stays the token ParsedText knows as a no-break space. The
+  // copy takes kMaxHeldControlBytes at most, whatever the buffer holds.
   char held[kMaxHeldControlBytes];
-  const int heldBytes = partWordControlsOnly_ ? partWordBufferIndex : 0;
+  const int heldBytes = partWordControlsOnly_ ? std::min(partWordBufferIndex, kMaxHeldControlBytes) : 0;
   if (heldBytes > 0) {
     memcpy(held, partWordBuffer, static_cast<size_t>(heldBytes));
     partWordBufferIndex = 0;
