@@ -39,6 +39,7 @@ class KeyboardEntryActivity : public Activity {
         maxLength(maxLength),
         inputType(inputType) {}
 
+  bool keepsConfirmGestures() const override { return true; }
   void onEnter() override;
   void onExit() override;
   void loop() override;

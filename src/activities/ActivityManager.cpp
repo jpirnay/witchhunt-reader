@@ -821,6 +821,10 @@ const char* ActivityManager::busyReason(const bool includeBackground) {
   return nullptr;
 }
 
+bool ActivityManager::currentKeepsConfirmGestures() const {
+  return currentActivity && currentActivity->keepsConfirmGestures();
+}
+
 bool ActivityManager::currentTakesButtonAction(const CrossPointSettings::BUTTON_ACTION action,
                                                const MappedInputManager::Button button) const {
   if (currentIsReaderActivity()) return true;

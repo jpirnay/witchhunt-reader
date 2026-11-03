@@ -2234,9 +2234,12 @@ void loop() {
       const uint8_t action = actionFor(ev);
       // Fall through to the activity when the event has no global effect here: either an
       // explicit Default mapping, or a reader-scoped action while not in the reader -- unless the
-      // screen on top takes that action from this button (Activity::takesButtonAction()).
-      if (action == BA::BTN_DEFAULT || (isReaderScopedAction(action) && !activityManager.currentTakesButtonAction(
-                                                                            static_cast<BA>(action), ev.button))) {
+      // screen on top takes that action from this button (Activity::takesButtonAction()) -- or a
+      // Confirm the screen keeps for itself (Activity::keepsConfirmGestures()).
+      const bool keptByScreen = ev.button == B::Confirm && activityManager.currentKeepsConfirmGestures();
+      if (keptByScreen || action == BA::BTN_DEFAULT ||
+          (isReaderScopedAction(action) &&
+           !activityManager.currentTakesButtonAction(static_cast<BA>(action), ev.button))) {
         defaultEvents.push_back(ev);
         continue;
       }

@@ -166,6 +166,10 @@ class Activity {
   // screen's own use of the button wins (see main.cpp) -- which leaves a button it has no use for
   // doing nothing. A paginated screen opened from the reader opts in for the page turns on such a
   // button, so a Power button set to turn pages turns its pages too.
+  // Every Confirm press means something on this screen, so a double or long press stays with it
+  // whatever action the button is bound to. Two quick presses on a key type a letter twice, and a
+  // global Back bound there threw away the text in hand.
+  virtual bool keepsConfirmGestures() const { return false; }
   virtual bool takesButtonAction(CrossPointSettings::BUTTON_ACTION, MappedInputManager::Button) const { return false; }
 
   // A manual force refresh (a button or gesture bound to Force Refresh) while this activity is on
