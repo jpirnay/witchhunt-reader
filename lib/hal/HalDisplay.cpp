@@ -376,6 +376,7 @@ bool psramArenaLent = false;  // read and written under the SPI bus lock, as the
 // region back on seeing it, and reporting true left the arena out for good. The panel paths that
 // care about the buffer itself ask einkDisplay directly.
 bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuffer() && !psramArenaLent; }
+bool HalDisplay::keepsPreviousFrame() const { return einkDisplay.hasSecondaryBuffer(); }
 
 // The four buffer-ownership transitions below all take the SPI bus lock, for two reasons that
 // both trace back to them running on the LOOP task (reader background builds) while the render

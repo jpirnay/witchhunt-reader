@@ -110,6 +110,9 @@ class HalDisplay {
 
   // Returns true when the secondary (previous-frame) buffer is allocated.
   bool hasSecondaryBuffer() const;
+  // The display itself still holds its previous frame, which a PSRAM arena lend leaves in place
+  // even though hasSecondaryBuffer() is false. For code that wants that frame, not the lend state.
+  bool keepsPreviousFrame() const;
 
   // Borrow/return variant of release/realloc: the display drops to the same
   // single-buffer mode, but the block stays owned by the display and is lent to
