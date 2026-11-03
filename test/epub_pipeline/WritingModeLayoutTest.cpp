@@ -877,6 +877,34 @@ TEST_F(BidiLayout, AWordOfMarksInAnEnglishParagraphChangesNothingAroundIt) {
   }
 }
 
+TEST_F(BidiLayout, AMarkAtASourceLineBreakInCjkTextLeavesItJoined) {
+  // A line break between unspaced CJK in the source vanishes. The mark before or after it is no character the text on
+  // either side ends or starts with.
+  const pipeline_harness::Profile profile;
+  const std::string joined = dump("", document("<p>日本\n語</p>"), profile, {}, "", "ja");
+  for (const char* marked : {"<p>日本&#x200E;\n語</p>", "<p>日本\n&#x200E;語</p>"}) {
+    EXPECT_EQ(joined, dump("", document(marked), profile, {}, "", "ja")) << marked;
+  }
+}
+
+TEST_F(BidiLayout, AMarkAfterADashKeepsTheBreakAfterIt) {
+  // The dash still ends the text before <i>: the word after it is not glued on, and the line may break there.
+  EXPECT_EQ(dump("", document("<p>foo—<i>bar</i></p>")), dump("", document("<p>foo—&#x200E;<i>bar</i></p>")));
+}
+
+TEST_F(BidiLayout, AMarkBetweenLatinAndCjkKeepsTheirGap) {
+  // Glued across a tag, Latin and CJK meet at a breakable gap; a mark on either side of the tag changes nothing.
+  const pipeline_harness::Profile profile;
+  const std::pair<const char*, const char*> cases[] = {
+      {"<p>abc<b>&#x200E;日本</b></p>", "<p>abc<b>日本</b></p>"},
+      {"<p><b>日本&#x200E;</b>abc</p>", "<p><b>日本</b>abc</p>"},
+  };
+  for (const auto& [marked, plain] : cases) {
+    EXPECT_EQ(dump("", document(plain), profile, {}, "", "ja"), dump("", document(marked), profile, {}, "", "ja"))
+        << marked;
+  }
+}
+
 TEST_F(BidiLayout, AMarkInAHebrewParagraphIsKeptAndNotDrawn) {
   // C++ is 24 px: the LRM keeps its pluses on its right, and draws as nothing.
   const auto lines = parseLines(dump("", document("<p dir=\"rtl\">C++&#x200E; שלום</p>"), bookAlignment()));

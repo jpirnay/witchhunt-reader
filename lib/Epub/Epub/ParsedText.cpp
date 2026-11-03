@@ -81,6 +81,27 @@ uint32_t lastCodepoint(const std::string_view word) {
   return utf8NextCodepoint(&ptr);
 }
 
+// firstCodepoint and lastCodepoint past the controls that count nowhere (BidiLine::isUncountedControl), for the reads
+// addWord makes before the paragraph's pass: one that needs no bidi drops those controls, and what it lays out must
+// not depend on them.
+uint32_t firstCodepointPastControls(const char* word) {
+  const auto* ptr = reinterpret_cast<const unsigned char*>(word);
+  while (true) {
+    const uint32_t cp = utf8NextCodepoint(&ptr);
+    if (cp == 0) return 0;
+    if (cp != 0x00AD && !BidiLine::isUncountedControl(cp)) return cp;
+  }
+}
+
+uint32_t lastCodepointPastControls(std::string_view word) {
+  while (!word.empty()) {
+    const uint32_t cp = lastCodepoint(word);
+    if (!BidiLine::isUncountedControl(cp)) return cp;
+    word.remove_suffix(cp == 0x061C ? 2 : 3);  // U+061C is 2 bytes in UTF-8, the other such controls 3
+  }
+  return 0;
+}
+
 bool containsSoftHyphen(const std::string& word) { return word.find(SOFT_HYPHEN_UTF8) != std::string::npos; }
 
 // True when every codepoint of `text` but a soft hyphen (TextBlock strips them) is unspaced CJK: TextBlock's test for
@@ -472,8 +493,8 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   TokenBoundary::Boundary boundary{attachToPrevious, false};
   // A glued " " is the parser's no-break space (U+00A0 / U+202F): no break on either side of it.
   if (attachToPrevious && !words.empty() && words.back() != " " && word != " ") {
-    const uint32_t left = lastCodepoint(words.back());
-    const uint32_t right = firstCodepoint(word);
+    const uint32_t left = lastCodepointPastControls(words.back());
+    const uint32_t right = firstCodepointPastControls(word.c_str());
     if ((utf8IsCjkBreakable(left) || utf8IsCjkBreakable(right)) && CjkLineBreak::isGapBetween(left, right)) {
       boundary = TokenBoundary::Boundary{false, true};
     }

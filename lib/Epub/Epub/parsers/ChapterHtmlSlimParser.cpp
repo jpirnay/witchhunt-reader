@@ -335,13 +335,27 @@ static uint32_t codepointAt(const char* s, const int avail) {
   return utf8NextCodepoint(&p);
 }
 
-// The last codepoint of the `len` bytes at s, which end on a sequence boundary (0 when len is 0).
-static uint32_t lastCodepointOf(const char* s, const int len) {
-  if (len <= 0) return 0;
-  int i = len - 1;
-  for (int back = 0; back < 3 && i > 0 && (static_cast<uint8_t>(s[i]) & 0xC0) == 0x80; ++back) --i;
-  const auto* p = reinterpret_cast<const unsigned char*>(s + i);
-  return utf8NextCodepoint(&p);
+// The first and the last codepoint of the `len` bytes at s, which end on a sequence boundary, past the controls that
+// count nowhere (BidiLine::isUncountedControl) at either end; 0 when there is none. The parse-time reads of a word's
+// edges see what they saw when the parser dropped those controls: a pass that needs no bidi drops them still.
+static uint32_t firstCodepointOf(const char* s, const int len) {
+  for (int at = 0; at < len; at += utf8CodepointLen(static_cast<uint8_t>(s[at]))) {
+    const uint32_t cp = codepointAt(s + at, len - at);
+    if (!BidiLine::isUncountedControl(cp)) return cp;
+  }
+  return 0;
+}
+
+static uint32_t lastCodepointOf(const char* s, int len) {
+  while (len > 0) {
+    int i = len - 1;
+    for (int back = 0; back < 3 && i > 0 && (static_cast<uint8_t>(s[i]) & 0xC0) == 0x80; ++back) --i;
+    const auto* p = reinterpret_cast<const unsigned char*>(s + i);
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (!BidiLine::isUncountedControl(cp)) return cp;
+    len = i;
+  }
+  return 0;
 }
 
 // An upper bound on the tokens ParsedText::addWord makes of `word`: its codepoint count when it has a
@@ -438,8 +452,9 @@ bool hasAttributeToken(const char* value, const char* token) {
   return false;
 }
 
-// Returns true if the trailing UTF-8 codepoint in [buf, buf+len) is a dash that allows
-// a line break opportunity after it. Inline-tag boundaries like "gone—<i>Umbriel</i>"
+// Returns true if the trailing UTF-8 codepoint in [buf, buf+len), read past any control that
+// counts nowhere (lastCodepointOf), is a dash that allows a line break opportunity after it.
+// Inline-tag boundaries like "gone—<i>Umbriel</i>"
 // would otherwise glue the dash to the following word via nextWordContinues, making the
 // dash unbreakable; callers use this to skip setting that flag when the buffered text
 // already ends at a natural break point.
@@ -449,14 +464,7 @@ bool hasAttributeToken(const char* value, const char* token) {
 // by definition. Minus sign (U+2212) is excluded because it's mathematical, not a word
 // separator.
 bool bufferEndsWithBreakableDash(const char* buf, const int len) {
-  if (len <= 0) return false;
-  int start = len - 1;
-  while (start > 0 && (static_cast<uint8_t>(buf[start]) & 0xC0) == 0x80) {
-    --start;
-  }
-  const auto* ptr = reinterpret_cast<const unsigned char*>(buf + start);
-  const uint32_t cp = utf8NextCodepoint(&ptr);
-  switch (cp) {
+  switch (lastCodepointOf(buf, len)) {
     case '-':
     case 0x2010:  // HYPHEN
     case 0x2012:  // FIGURE DASH
@@ -1256,7 +1264,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
       // when a quote meets unspaced CJK (lastTextCodepoint_ is still the previous word's last
       // character): the word is glued to the previous one, and ParsedText turns the seam into a CJK
       // gap where the rules allow a break there.
-      const uint32_t first = codepointAt(partWordBuffer, partWordBufferIndex);
+      const uint32_t first = firstCodepointOf(partWordBuffer, partWordBufferIndex);
       if (utf8IsUnspacedCjk(first) || (isQuotationMark(first) && utf8IsUnspacedCjk(lastTextCodepoint_))) {
         nextWordContinues = true;
       }
