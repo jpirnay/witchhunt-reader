@@ -211,6 +211,10 @@ inline float uiScale() { return BoardConfig::ACTIVE.uiScale; }
 // HALF on a menu.
 inline bool clearsGhostsOnEveryScreen() { return BoardConfig::isMurphyM3(); }
 
+// The panel can show gray at all. Murphy's cannot: its UC8253 driver has no gray waveforms and
+// ignores a gray pass (Uc8253MurphyDriver::displayGray), so a setting for one means nothing there.
+inline bool panelShowsGray() { return !BoardConfig::isMurphyM3(); }
+
 // A frontlight is present (PWM or PM1-driven).
 inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight(); }
 

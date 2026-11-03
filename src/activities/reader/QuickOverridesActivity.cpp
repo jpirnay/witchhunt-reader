@@ -1,6 +1,7 @@
 #include "QuickOverridesActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <HalDisplay.h>
 #include <I18n.h>
 
@@ -227,15 +228,17 @@ void QuickOverridesActivity::buildMenuItems(const bool verticalAllowed) {
   }
 
   // Text anti-aliasing: default / on / off
-  menuItems.push_back(SettingInfo::DynamicEnumCtx(
-      StrId::STR_TEXT_AA, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
-      [](const void* ctx) -> uint8_t {
-        return threeStateSlotFromOverride(
-            static_cast<const QuickOverridesActivity*>(ctx)->pendingTextAntiAliasingOverride);
-      },
-      [](void* ctx, uint8_t v) {
-        static_cast<QuickOverridesActivity*>(ctx)->pendingTextAntiAliasingOverride = threeStateOverrideFromSlot(v);
-      }));
+  if (HalCapabilities::panelShowsGray()) {
+    menuItems.push_back(SettingInfo::DynamicEnumCtx(
+        StrId::STR_TEXT_AA, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
+        [](const void* ctx) -> uint8_t {
+          return threeStateSlotFromOverride(
+              static_cast<const QuickOverridesActivity*>(ctx)->pendingTextAntiAliasingOverride);
+        },
+        [](void* ctx, uint8_t v) {
+          static_cast<QuickOverridesActivity*>(ctx)->pendingTextAntiAliasingOverride = threeStateOverrideFromSlot(v);
+        }));
+  }
 
   // Hyphenation: default / on / off
   menuItems.push_back(SettingInfo::DynamicEnumCtx(

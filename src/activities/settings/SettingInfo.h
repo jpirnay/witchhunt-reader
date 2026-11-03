@@ -35,6 +35,8 @@ enum class SettingRequires : uint8_t {
   // B0 allows keying on the display controller — with a comment saying why,
   // which is this one.
   SelectableGrayscaleLut,
+  // The panel shows gray at all, so anti-aliasing is a real choice.
+  GrayscalePanel,
   // A PWM frontlight/backlight the firmware can drive (BoardConfig frontlight
   // config, or the PM1 PWM path). Answered through HalFrontlight so a board
   // whose light is probed at runtime reports honestly. Named ReadingLight, not

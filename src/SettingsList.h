@@ -330,7 +330,8 @@ inline void buildSettings(const RowSink& emit) {
            .withSubmenu(StrId::STR_MENU_READER_FONT));
   emit(SettingInfo::Toggle(StrId::STR_TEXT_AA, &CrossPointSettings::textAntiAliasing, "textAntiAliasing",
                            StrId::STR_CAT_READER)
-           .withSubmenu(StrId::STR_MENU_READER_FONT));
+           .withSubmenu(StrId::STR_MENU_READER_FONT)
+           .requiring(SettingRequires::GrayscalePanel));
   // X3-only fast AA LUT toggle. Swaps the 53-frame OEM grayscale waveform
   // (~2.4 s panel time, X4-accurate grays) for the 7-frame community LUT
   // (~130 ms, mid-tones slightly darker). See freeink-sdk
@@ -771,7 +772,10 @@ inline bool boardHas(const SettingRequires capability) {
     case SettingRequires::SelectableGrayscaleLut:
       // SSD1677 develops grayscale from a factory waveform, so there is no
       // LUT to swap and the fast/OEM trade-off does not exist there.
-      return BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677;
+      return HalCapabilities::panelShowsGray() &&
+             BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677;
+    case SettingRequires::GrayscalePanel:
+      return HalCapabilities::panelShowsGray();
     case SettingRequires::ReadingLight:
       // Asked of the HAL rather than the board profile: the EEGO A4's I2C
       // light is only present after begin() gets an ACK, so the profile alone
@@ -805,6 +809,7 @@ inline bool boardKeeps(const SettingRequires capability) {
     case SettingRequires::Nothing:
     case SettingRequires::TiltSensor:
     case SettingRequires::SelectableGrayscaleLut:
+    case SettingRequires::GrayscalePanel:
     case SettingRequires::ReadingLight:
     case SettingRequires::WarmLight:
     case SettingRequires::SunlightFadingPanel:
