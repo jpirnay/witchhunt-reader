@@ -483,7 +483,11 @@ class CrossPointSettings {
   // Auto-sleep timeout in minutes (0 = never sleep, 1-60).
   uint8_t sleepTimeoutMinutes = 10;
   // Full-refresh frequency in pages (0 = never full-refresh, 1-60).
+#if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
+  uint8_t refreshFrequencyPages = 5;
+#else
   uint8_t refreshFrequencyPages = 15;
+#endif
   // Perform a half refresh on the page immediately following an EPUB page that displayed images.
   uint8_t halfRefreshAfterImagePage = 1;
   uint8_t hyphenationEnabled = 0;

@@ -204,6 +204,13 @@ inline bool upKeyIsBootStrap() {
 // touch boards. Read by ThemeMetrics in touch phase 5.
 inline float uiScale() { return BoardConfig::ACTIVE.uiScale; }
 
+// FAST ghosts badly enough on this panel that the UI cannot rely on each screen's own cleaning:
+// every activity change gets a HALF and every screen follows the refresh frequency setting, the
+// way the reader's pages do (ActivityManager::armGhostClearingRefresh()). Not the same question as
+// the SDK's ghostsUnderFastRefresh(), which is true on the X3 too and only asks for the occasional
+// HALF on a menu.
+inline bool clearsGhostsOnEveryScreen() { return BoardConfig::isMurphyM3(); }
+
 // A frontlight is present (PWM or PM1-driven).
 inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight(); }
 

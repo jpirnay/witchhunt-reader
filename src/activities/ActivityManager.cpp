@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <BoardConfig.h>  // FREEINK_CAP_USB_MSC
 #include <GlyphProvider.h>
+#include <HalCapabilities.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
 #include <Logging.h>
@@ -160,6 +161,7 @@ void ActivityManager::renderTaskLoop() {
       // on activity transitions like the rest, and every path that displays a page republishes
       // it (with an empty set when the page has no links), so a displayed page always describes
       // itself.
+      armGhostClearingRefresh();
       {
         // A screen that draws book text draws its first-sight glyphs in the secondary framebuffer, not on the heap:
         // black-and-white screens all. The reader keeps it for its grayscale passes and pre-renders.
@@ -217,6 +219,27 @@ void ActivityManager::renderTaskLoop() {
       xTaskNotify(waiter, 1, eIncrement);
     }
   }
+}
+
+// For a panel that ghosts badly under FAST (HalCapabilities::clearsGhostsOnEveryScreen()). Here
+// rather than in the activities because every screen passes through this one point, so a screen
+// cannot be forgotten, and arming beats whatever mode its render() asks for.
+//  - The first frame after any activity change gets a HALF. That is entering and leaving alike:
+//    leaving an activity is the first frame of whatever comes next, on a push, pop or replace.
+//  - A non-reader screen gets a HALF every refreshFrequencyPages frames, counted like the reader
+//    counts pages (N-1 FAST, then the HALF), so a list ghosts no more than a book does. The
+//    reader runs that same cadence itself (ReaderUtils), and counting it here too would double it.
+// The override stays armed through a pass that ships nothing, so it lands on the next real frame.
+void ActivityManager::armGhostClearingRefresh() {
+  if (!HalCapabilities::clearsGhostsOnEveryScreen()) return;
+  const uint32_t changes = activityChanges.load(std::memory_order_relaxed);
+  const bool activityChanged = changes != activityChangesRendered;
+  activityChangesRendered = changes;
+
+  const int frequency = SETTINGS.getRefreshFrequency();
+  const bool cadenceDue = frequency > 0 && !currentActivity->isReaderActivity() &&
+                          renderer.ghostClearingHalfWorthwhile(static_cast<uint8_t>(frequency - 1));
+  if (activityChanged || cadenceDue) renderer.setNextDisplayRefreshMode(HalDisplay::HALF_REFRESH);
 }
 
 void ActivityManager::loop() {
