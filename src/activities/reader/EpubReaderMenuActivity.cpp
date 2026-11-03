@@ -1,6 +1,7 @@
 #include "EpubReaderMenuActivity.h"
 
 #include <GfxRenderer.h>
+#include <HalCapabilities.h>
 #include <I18n.h>
 
 #include "KOReaderCredentialStore.h"
@@ -391,15 +392,17 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   }
 
   // Text anti-aliasing: default / on / off (mirrors QuickOverrides)
-  settingsItems.push_back(SettingInfo::DynamicEnumCtx(
-      StrId::STR_TEXT_AA, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
-      [](const void* ctx) -> uint8_t {
-        return threeStateSlotFromOverride(
-            static_cast<const EpubReaderMenuActivity*>(ctx)->pendingTextAntiAliasingOverride);
-      },
-      [](void* ctx, uint8_t v) {
-        static_cast<EpubReaderMenuActivity*>(ctx)->pendingTextAntiAliasingOverride = threeStateOverrideFromSlot(v);
-      }));
+  if (HalCapabilities::panelShowsGray()) {
+    settingsItems.push_back(SettingInfo::DynamicEnumCtx(
+        StrId::STR_TEXT_AA, {StrId::STR_DEFAULT_VALUE, StrId::STR_STATE_ON, StrId::STR_STATE_OFF}, self,
+        [](const void* ctx) -> uint8_t {
+          return threeStateSlotFromOverride(
+              static_cast<const EpubReaderMenuActivity*>(ctx)->pendingTextAntiAliasingOverride);
+        },
+        [](void* ctx, uint8_t v) {
+          static_cast<EpubReaderMenuActivity*>(ctx)->pendingTextAntiAliasingOverride = threeStateOverrideFromSlot(v);
+        }));
+  }
 
   // Hyphenation: default / on / off (mirrors QuickOverrides)
   settingsItems.push_back(SettingInfo::DynamicEnumCtx(

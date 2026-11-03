@@ -31,6 +31,7 @@
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <GlyphProvider.h>
+#include <HalCapabilities.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
@@ -3292,6 +3293,7 @@ uint8_t EpubReaderActivity::getEffectiveImageRendering() const {
 }
 
 bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
+  if (!HalCapabilities::panelShowsGray()) return false;  // a book's stored override included
   if (bookTextAntiAliasingOverride >= 0) {
     return bookTextAntiAliasingOverride != 0;
   }
