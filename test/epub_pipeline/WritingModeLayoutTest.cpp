@@ -10,7 +10,9 @@
 #include <BidiUtils.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -305,12 +307,15 @@ TEST_F(WritingModeLayout, StartAndEndFollowCssDirection) {
   EXPECT_EQ(kLeft, lines[1].align);   // the author's CSS beats the attribute
 }
 
-TEST_F(WritingModeLayout, DirAutoReadsAsLtrForNow) {
-  // Auto is decided from the text (UAX #9 P2/P3), which the right-to-left step brings; until then it reads as ltr.
-  const auto lines = parseLines(dump(
-      kStartEndCss, document("<p class=\"s\" dir=\"auto\">\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D</p>"), bookAlignment()));
-  ASSERT_EQ(1u, lines.size());
-  EXPECT_EQ(kLeft, lines[0].align);
+TEST_F(WritingModeLayout, DirAutoTakesTheFirstStrongLetter) {
+  // Auto is decided from the text (UAX #9 P2/P3): the first letter that has a direction gives the paragraph its own.
+  const auto hebrew = parseLines(dump(kStartEndCss, document("<p class=\"s\" dir=\"auto\">שלום</p>"), bookAlignment()));
+  ASSERT_EQ(1u, hebrew.size());
+  EXPECT_EQ(kRight, hebrew[0].align);
+  const auto latinFirst =
+      parseLines(dump(kStartEndCss, document("<p class=\"s\" dir=\"auto\">abc שלום</p>"), bookAlignment()));
+  ASSERT_EQ(1u, latinFirst.size());
+  EXPECT_EQ(kLeft, latinFirst[0].align);
 }
 
 TEST_F(WritingModeLayout, AnInlineBdoLeavesTheBlockAlone) {
@@ -711,6 +716,108 @@ TEST_F(BidiLayout, TheBidiWorkspaceIsGoneWhenTheBuildEnds) {
   const std::string out = dump("", document(kMixedRtl), bookAlignment());
   EXPECT_NE(std::string::npos, out.find(" WD t=")) << out;
   EXPECT_FALSE(BidiUtils::heapWorkspaceHeld());
+}
+
+// ---- The direction of a paragraph without dir (decision 6) ----
+
+TEST_F(BidiLayout, AHebrewBooksParagraphRunsRightToLeftWhenItHasAHebrewLetter) {
+  const auto lines = parseLines(dump("", document("<p>Wiki שלום</p>"), bookAlignment(), {}, "", "he"));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0].words.size());
+  // Wiki (29 px) reads first, at the right edge: 460 - 29 = 431, and שלום a space to its left.
+  expectWord(lines[0].words[0], 393, kShalom, kShalomDrawn);
+  expectWord(lines[0].words[1], 431, "Wiki", "");
+  EXPECT_EQ("1,0", lines[0].order);
+}
+
+TEST_F(BidiLayout, AHebrewBooksParagraphWithoutAHebrewLetterRunsLeftToRight) {
+  const auto lines = parseLines(dump("", document("<p>Only English, 2024.</p>"), bookAlignment(), {}, "", "he"));
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_EQ(0, lines[0].firstWordX);
+  for (const Word& word : lines[0].words) EXPECT_EQ("", word.display) << word.text;
+  EXPECT_EQ("", lines[0].order);
+}
+
+TEST_F(BidiLayout, AnEnglishBookQuotingHebrewStaysLeftToRight) {
+  const auto lines = parseLines(dump("", document("<p>He said שלום.</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(3u, lines[0].words.size());
+  expectWord(lines[0].words[0], 0, "He", "");
+  expectWord(lines[0].words[1], 23, "said", "");
+  expectWord(lines[0].words[2], 64, "שלום.", "םולש.");
+  EXPECT_EQ("", lines[0].order);
+}
+
+TEST_F(BidiLayout, AHebrewOnlyParagraphInAnEnglishBookTurnsRightToLeft) {
+  const auto lines = parseLines(dump("", document("<p>שלום עולם</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0].words.size());
+  expectWord(lines[0].words[0], 390, kOlam, kOlamDrawn);
+  expectWord(lines[0].words[1], 428, kShalom, kShalomDrawn);
+  EXPECT_EQ("1,0", lines[0].order);
+}
+
+TEST_F(BidiLayout, ALetterlessParagraphTakesTheBooksDirection) {
+  // Each * is 6 px, as is each space: the line is 30 px long.
+  const auto hebrew = parseLines(dump("", document("<p>* * *</p>"), bookAlignment(), {}, "", "he"));
+  ASSERT_EQ(1u, hebrew.size());
+  ASSERT_EQ(3u, hebrew[0].words.size());
+  EXPECT_EQ(430, hebrew[0].words[0].x);
+  EXPECT_EQ(442, hebrew[0].words[1].x);
+  EXPECT_EQ(454, hebrew[0].words[2].x);
+  EXPECT_EQ("2,1,0", hebrew[0].order);
+  const auto english = parseLines(dump("", document("<p>* * *</p>"), bookAlignment(), {}, "", "en"));
+  ASSERT_EQ(1u, english.size());
+  ASSERT_EQ(3u, english[0].words.size());
+  EXPECT_EQ(0, english[0].words[0].x);
+  EXPECT_EQ(12, english[0].words[1].x);
+  EXPECT_EQ(24, english[0].words[2].x);
+  EXPECT_EQ("", english[0].order);
+}
+
+TEST_F(BidiLayout, StartAndEndFollowTheDecidedDirection) {
+  const auto lines = parseLines(
+      dump(kStartEndCss, document("<p class=\"s\">שלום</p><p class=\"e\">שלום</p><p class=\"s\">Only English</p>"),
+           bookAlignment(), {}, "", "he"));
+  ASSERT_EQ(3u, lines.size());
+  EXPECT_EQ(kRight, lines[0].align);
+  EXPECT_EQ(kLeft, lines[1].align);
+  EXPECT_EQ(kLeft, lines[2].align);
+}
+
+TEST_F(BidiLayout, PlaintextOnABlockTakesTheFirstStrongLetter) {
+  const auto lines = parseLines(dump(std::string(kStartEndCss) + ".pt { unicode-bidi: plaintext }\n",
+                                     document("<p class=\"pt s\">שלום</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_EQ(kRight, lines[0].align);
+}
+
+TEST_F(BidiLayout, TheDirectionHoldsAcrossTheLongBlockSplit) {
+  // 121 tokens, past the 96-token flush: the passes after the first hold Hebrew words only, and keep its direction.
+  const std::string body = "<p>Wiki " + repeated(kShalom, 120) + "</p>";
+  const GfxRenderer renderer;
+  const auto width = [&](const Word& word) {
+    const std::string& drawn = word.display.empty() ? word.text : word.display;
+    return renderer.getTextAdvanceX(1, drawn.c_str(), EpdFontFamily::REGULAR);
+  };
+  for (const std::string& lang : {std::string("he"), std::string("en")}) {
+    const auto lines = parseLines(dump("", document(body), pipeline_harness::Profile{}, {}, "", lang));
+    ASSERT_GT(lines.size(), 8u) << lang;
+    for (size_t i = 0; i < lines.size(); ++i) {
+      ASSERT_FALSE(lines[i].words.empty()) << lang << " line " << i;
+      int left = std::numeric_limits<int>::max();
+      int right = std::numeric_limits<int>::min();
+      for (const Word& word : lines[i].words) {
+        left = std::min(left, word.x);
+        right = std::max(right, word.x + width(word));
+      }
+      if (lang == "he") {
+        EXPECT_EQ(460, right) << lang << " line " << i;
+      } else {
+        EXPECT_EQ(0, left) << lang << " line " << i;
+      }
+    }
+  }
 }
 
 // ---- The spine's page progression ----

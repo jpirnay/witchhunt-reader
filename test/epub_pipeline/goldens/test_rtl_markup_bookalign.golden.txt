@@ -21,10 +21,10 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
    W x=75 s=0 z=100 t=right
    W x=128 s=0 z=100 t=inside,
    W x=191 s=0 z=100 t=start.
-  LINE y=72 x=0 align=1 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=אוטומטי
+  LINE y=72 x=0 align=3 mult=1.000 hfid=0 words=2
+   W x=344 s=0 z=100 t=אוטומטי
     WD t=יטמוטוא
-   W x=76 s=0 z=100 t=טקסט
+   W x=420 s=0 z=100 t=טקסט
     WD t=טסקט
    O order=1,0
   LINE y=96 x=0 align=3 mult=1.000 hfid=0 words=9
@@ -39,10 +39,9 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
    W x=423 s=0 z=100 t=מילה
     WD t=הלימ
    O order=7,8,6,4,5,3,1,2,0
-  LINE y=120 x=0 align=3 mult=1.000 hfid=0 words=3
-   W x=365 s=0 z=100 t=רגילה
-    WD t=הליגר
-   W x=416 s=0 z=100 t=פסקה
+  LINE y=120 x=0 align=3 mult=1.000 hfid=0 words=2
+   W x=365 s=0 z=100 t=רגילה.
+    WD t=.הליגר
+   W x=426 s=0 z=100 t=פסקה
     WD t=הקספ
-   W x=450 s=0 z=100 t=.
-   O order=1,0,2
+   O order=1,0

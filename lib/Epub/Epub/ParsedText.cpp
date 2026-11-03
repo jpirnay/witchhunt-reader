@@ -139,6 +139,50 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
 // Every bidi control is E2 80 xx, E2 81 xx or D8 9C in UTF-8: a token without those lead bytes holds none.
 bool mayHoldBidiControl(const std::string_view token) { return token.find_first_of("\xE2\xD8") != std::string::npos; }
 
+// The level (BidiUtils::strongLevel: 0 for a letter of class L, 1 for R or AL) of the first letter in `tokens`, read in
+// order, that has a direction of its own; -1 when none has.
+int firstStrongLevel(const std::vector<std::string>& tokens) {
+  for (const std::string& token : tokens) {
+    const auto* p = reinterpret_cast<const unsigned char*>(token.c_str());
+    while (*p != 0) {
+      const int level = BidiUtils::strongLevel(utf8NextCodepoint(&p));
+      if (level >= 0) return level;
+    }
+  }
+  return -1;
+}
+
+// The level of a paragraph laid out from `tokens` (design decision 6). The markup's ltr or rtl decides; auto
+// (dir="auto" or unicode-bidi: plaintext on the block) takes the first letter with a direction (UAX #9 P2/P3).
+// Otherwise the book's language does (`bookLevel`), unless every letter with a direction runs the other way: a Hebrew
+// book's English paragraph runs left to right, an English book's Hebrew one right to left, and a paragraph with letters
+// of both directions, or with none, runs the book's way. `rtlClass`: whether a token has a code point of class R, AL,
+// RLE, RLO, RLI or FSI (BidiUtils::hasRtlClass); without one no letter runs right to left.
+uint8_t paragraphLevel(const std::vector<std::string>& tokens, const CssDirection direction, const uint8_t bookLevel,
+                       const bool rtlClass) {
+  if (direction == CssDirection::Ltr) return 0;
+  if (direction == CssDirection::Rtl) return 1;
+  if (direction == CssDirection::Auto) {
+    const int first = firstStrongLevel(tokens);
+    return first >= 0 ? static_cast<uint8_t>(first) : bookLevel;
+  }
+  // No right-to-left letter can turn a left-to-right book's paragraph: its letters are not read.
+  if (bookLevel == 0 && !rtlClass) return 0;
+  bool otherWay = false;
+  for (const std::string& token : tokens) {
+    const auto* p = reinterpret_cast<const unsigned char*>(token.c_str());
+    while (*p != 0) {
+      const int level = BidiUtils::strongLevel(utf8NextCodepoint(&p));
+      if (level < 0) continue;
+      if (level == bookLevel) return bookLevel;
+      // A left-to-right letter in a right-to-left book where no right-to-left one can follow.
+      if (!rtlClass) return 0;
+      otherWay = true;
+    }
+  }
+  return otherWay ? static_cast<uint8_t>(1 - bookLevel) : bookLevel;
+}
+
 // `token` without its bidi controls, into `out` (the caller's reused string). False, `out` unspecified, when it holds
 // none.
 bool withoutControls(const std::string& token, std::string& out) {
@@ -521,16 +565,17 @@ void ParsedText::resolveAlignment(const bool rtl) {
 }
 
 void ParsedText::decideBidi() {
+  // bidi_ is only set here, once the level is decided.
   if (!bidi_) {
-    bidi_ = blockStyle.direction == CssDirection::Rtl ||
-            std::any_of(words.begin(), words.end(),
-                        [](const std::string& w) { return BidiUtils::hasRtlClass(w.data(), w.size()); });
-  }
-  if (!levelDecided_) {
-    // Only a right-to-left direction from the markup turns the paragraph right to left; an unset or auto one is left
-    // to right for now.
-    level_ = blockStyle.direction == CssDirection::Rtl ? 1 : 0;
-    levelDecided_ = true;
+    const bool rtlClass = std::any_of(words.begin(), words.end(),
+                                      [](const std::string& w) { return BidiUtils::hasRtlClass(w.data(), w.size()); });
+    if (!levelDecided_) {
+      // On the paragraph's first pass, whether or not it needs bidi; the passes after the long-block split keep it.
+      const uint8_t bookLevel = typography_.direction == TypographyProfile::Direction::RightToLeft ? 1 : 0;
+      level_ = paragraphLevel(words, blockStyle.direction, bookLevel, rtlClass);
+      levelDecided_ = true;
+    }
+    bidi_ = level_ == 1 || rtlClass;
   }
   if (!bidi_) dropBidiControls();
 }
