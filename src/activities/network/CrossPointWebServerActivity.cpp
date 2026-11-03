@@ -318,7 +318,7 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
 
 namespace {}  // namespace
 
-// The same information on a screen too small for renderServerRunning(): no sub-header, tight spacing,
+// What someone needs from renderServerRunning() on a screen too small for it: no sub-header, tight spacing,
 // and a hotspot's two codes side by side with its addresses on full-width lines under them, since
 // an SSID or IP someone has to type cannot be cut short. Each code takes the room the text leaves
 // it, so no size here belongs to a particular panel.
@@ -375,12 +375,15 @@ void CrossPointWebServerActivity::renderServerRunningCompact() const {
     y += lineHeight + gap;
 
     const std::string url = "http://" + connectedIP + "/";
-    const int code = std::max(0, std::min({width, QR_CODE_WIDTH, bottom - y - lineHeight - gap}));
+    const std::string hostnameUrl = std::string(tr(STR_OR_HTTP_PREFIX)) + ServerSession::HOSTNAME + ".local/";
+    const int code = std::max(0, std::min({width, QR_CODE_WIDTH, bottom - y - 2 * (lineHeight + gap)}));
     QrUtils::drawQrCode(renderer, Rect{contentRect.x + (contentRect.width - code) / 2, y, code, code}, url);
     y += code + gap;
 
-    renderer.drawCenteredText(SMALL_FONT_ID, y, renderer.truncatedText(SMALL_FONT_ID, url.c_str(), width).c_str());
-    y += lineHeight + gap;
+    for (const std::string& line : {url, hostnameUrl}) {
+      renderer.drawCenteredText(SMALL_FONT_ID, y, renderer.truncatedText(SMALL_FONT_ID, line.c_str(), width).c_str());
+      y += lineHeight + gap;
+    }
   }
 
   TouchExitButton::draw(renderer, mappedInput, left, y, width);
