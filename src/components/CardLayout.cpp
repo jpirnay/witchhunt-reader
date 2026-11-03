@@ -41,6 +41,12 @@ void CardLayout::card(const char* title, const std::function<void(Body&)>& bodyF
 void CardLayout::Body::rowLR(const char* label, const std::string& value) {
   layout.renderer_.drawText(UI_10_FONT_ID, layout.innerLeft_, innerY, label, true, EpdFontFamily::BOLD);
   const int vw = layout.renderer_.getTextWidth(UI_10_FONT_ID, value.c_str());
+  constexpr int kLabelGap = 4;  // the value stays whole; a long label gives way to it
+  const int labelWidth = layout.innerRight_ - vw - kLabelGap - layout.innerLeft_;
+  layout.renderer_.drawText(
+      UI_10_FONT_ID, layout.innerLeft_, innerY,
+      layout.renderer_.truncatedText(UI_10_FONT_ID, label, labelWidth, EpdFontFamily::BOLD).c_str(), true,
+      EpdFontFamily::BOLD);
   layout.renderer_.drawText(UI_10_FONT_ID, layout.innerRight_ - vw, innerY, value.c_str());
   innerY += layout.rowStep_;
 }

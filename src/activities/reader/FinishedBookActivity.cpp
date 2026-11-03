@@ -807,10 +807,14 @@ void FinishedBookActivity::drawChrome() {
   const int lineGap = renderer.getLineHeight(UI_10_FONT_ID);
 
   int y = header.y + header.height + metrics.verticalSpacing;
-  renderer.drawText(UI_10_FONT_ID, textX, y, tr(STR_FINISHED_BOOK_HEADER_LINE1), true, EpdFontFamily::REGULAR);
-  y += lineGap + 4;
-  renderer.drawText(UI_10_FONT_ID, textX, y, tr(STR_FINISHED_BOOK_HEADER_LINE2), true, EpdFontFamily::REGULAR);
-  y += lineGap + 4;
+  const int textWidth = content.width - metrics.contentSidePadding * 2;
+  for (const char* text : {tr(STR_FINISHED_BOOK_HEADER_LINE1), tr(STR_FINISHED_BOOK_HEADER_LINE2)}) {
+    for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, text, textWidth, 3)) {
+      renderer.drawText(UI_10_FONT_ID, textX, y, line.c_str(), true, EpdFontFamily::REGULAR);
+      y += lineGap;
+    }
+    y += 4;
+  }
 
   coverW_ = 0;
   coverH_ = 0;

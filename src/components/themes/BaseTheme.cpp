@@ -1043,7 +1043,10 @@ Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, cons
   if (overlayDisplayedFrame) renderer.syncWriteBufferFromDisplayed();
   constexpr int margin = 15;
   constexpr int y = 60;
-  const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, message, EpdFontFamily::BOLD);
+  // The box has to stay on the panel, or it loses its frame and both ends of the message.
+  const std::string fitted =
+      renderer.truncatedText(UI_12_FONT_ID, message, renderer.getScreenWidth() - (margin + 2) * 2, EpdFontFamily::BOLD);
+  const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, fitted.c_str(), EpdFontFamily::BOLD);
   const int textHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int w = textWidth + margin * 2;
   const int h = textHeight + margin * 2;
@@ -1054,7 +1057,7 @@ Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message, cons
 
   const int textX = x + (w - textWidth) / 2;
   const int textY = y + margin - 2;
-  renderer.drawText(UI_12_FONT_ID, textX, textY, message, true, EpdFontFamily::BOLD);
+  renderer.drawText(UI_12_FONT_ID, textX, textY, fitted.c_str(), true, EpdFontFamily::BOLD);
   shipPopup(renderer, ship);
   return Rect{x, y, w, h};
 }

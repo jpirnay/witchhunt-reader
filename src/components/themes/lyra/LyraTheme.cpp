@@ -752,8 +752,10 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     drawPart(authorLines, CardTextFit::Author, UI_10_FONT_ID, EpdFontFamily::REGULAR);
     drawPart(seriesLines, CardTextFit::Series, UI_10_FONT_ID, EpdFontFamily::REGULAR);
     if (!statusLine.empty()) {
-      renderer.drawText(UI_10_FONT_ID, textX, blockY + fit.tops[CardTextFit::Status], statusLine.c_str(), true,
-                        EpdFontFamily::BOLD);
+      renderer.drawText(
+          UI_10_FONT_ID, textX, blockY + fit.tops[CardTextFit::Status],
+          renderer.truncatedText(UI_10_FONT_ID, statusLine.c_str(), textWidth, EpdFontFamily::BOLD).c_str(), true,
+          EpdFontFamily::BOLD);
     }
     drawPart(historyLines, CardTextFit::History, FIT_SMALL_FONT_ID, EpdFontFamily::REGULAR);
   } else {
@@ -826,7 +828,8 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
       }
     }
 
-    renderer.drawText(UI_12_FONT_ID, textX, textY, label, true);
+    renderer.drawText(UI_12_FONT_ID, textX, textY,
+                      renderer.truncatedText(UI_12_FONT_ID, label, tileRect.x + tileRect.width - textX).c_str(), true);
   }
 
   TapTargets::homeMenu().record(menuTargets);
@@ -840,7 +843,10 @@ Rect LyraTheme::drawPopup(const GfxRenderer& renderer, const char* message, cons
   if (overlayDisplayedFrame) renderer.syncWriteBufferFromDisplayed();
   constexpr int y = 132;
   constexpr int outline = 2;
-  const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, message, EpdFontFamily::REGULAR);
+  // The box has to stay on the panel, or it loses its frame and both ends of the message.
+  const std::string fitted = renderer.truncatedText(
+      UI_12_FONT_ID, message, renderer.getScreenWidth() - (popupMarginX + outline) * 2, EpdFontFamily::REGULAR);
+  const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, fitted.c_str(), EpdFontFamily::REGULAR);
   const int textHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int w = textWidth + popupMarginX * 2;
   const int h = textHeight + popupMarginY * 2;
@@ -852,7 +858,7 @@ Rect LyraTheme::drawPopup(const GfxRenderer& renderer, const char* message, cons
 
   const int textX = x + (w - textWidth) / 2;
   const int textY = y + popupMarginY - 2;
-  renderer.drawText(UI_12_FONT_ID, textX, textY, message, false, EpdFontFamily::REGULAR);
+  renderer.drawText(UI_12_FONT_ID, textX, textY, fitted.c_str(), false, EpdFontFamily::REGULAR);
   shipPopup(renderer, ship);
 
   return Rect{x, y, w, h};

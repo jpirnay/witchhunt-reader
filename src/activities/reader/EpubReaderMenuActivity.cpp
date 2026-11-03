@@ -10,6 +10,7 @@
 #include "activities/settings/SettingActionDispatch.h"
 #include "components/UITheme.h"
 #include "components/themes/HeaderLayout.h"
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
@@ -802,10 +803,12 @@ void EpubReaderMenuActivity::drawChrome() {
                    std::to_string(totalPages) + std::string(tr(STR_PAGES_SEPARATOR));
   }
   progressLine += std::string(tr(STR_BOOK_PREFIX)) + std::to_string(bookProgressPercent) + "%";
-  // Centred in the content rect, as the title is, rather than on the screen.
+  // Centred in the content rect, as the title is, rather than on the screen. A compact panel has
+  // no room for this line at body size.
+  const int progressFont = PanelMetrics::COMPACT ? SMALL_FONT_ID : UI_10_FONT_ID;
   const int progressX =
-      contentRect.x + (contentRect.width - renderer.getTextWidth(UI_10_FONT_ID, progressLine.c_str())) / 2;
-  renderer.drawText(UI_10_FONT_ID, progressX, progressLineY(renderer, contentRect), progressLine.c_str());
+      contentRect.x + (contentRect.width - renderer.getTextWidth(progressFont, progressLine.c_str())) / 2;
+  renderer.drawText(progressFont, progressX, progressLineY(renderer, contentRect), progressLine.c_str());
 }
 
 const char* EpubReaderMenuActivity::footerConfirmLabel() const {

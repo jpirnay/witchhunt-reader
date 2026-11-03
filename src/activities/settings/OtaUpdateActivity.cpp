@@ -166,11 +166,14 @@ void OtaUpdateActivity::render(RenderLock&&) {
         (std::to_string(updater.getProcessedSize()) + " / " + std::to_string(updater.getTotalSize())).c_str());
   } else if (state == NO_UPDATE) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_NO_UPDATE), true, EpdFontFamily::BOLD);
+    const int textWidth = contentRect.width - metrics.contentSidePadding * 2;
+    const std::string current = std::string(tr(STR_CURRENT_VERSION)) + CROSSPOINT_VERSION;
+    const std::string latest = std::string(tr(STR_NEW_VERSION)) + updater.getLatestVersion();
     renderer.drawText(UI_10_FONT_ID, contentRect.x + metrics.contentSidePadding, top + height + metrics.verticalSpacing,
-                      (std::string(tr(STR_CURRENT_VERSION)) + CROSSPOINT_VERSION).c_str());
+                      renderer.truncatedText(UI_10_FONT_ID, current.c_str(), textWidth).c_str());
     renderer.drawText(UI_10_FONT_ID, contentRect.x + metrics.contentSidePadding,
                       top + height * 2 + metrics.verticalSpacing * 2,
-                      (std::string(tr(STR_NEW_VERSION)) + updater.getLatestVersion()).c_str());
+                      renderer.truncatedText(UI_10_FONT_ID, latest.c_str(), textWidth).c_str());
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   } else if (state == FAILED) {
