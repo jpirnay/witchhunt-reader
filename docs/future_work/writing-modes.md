@@ -21,7 +21,7 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 |---|---|---|
 | 0 | Parse every trigger (`writing-mode`, `text-orientation`, `text-combine-upright`, `direction`, `unicode-bidi`, `start`/`end`, `dir` with `<bdo>`/`<bdi>`, OPF ppd); CSS boxes along the writing mode, `start`/`end` along the direction; `line-height` parsed as CSS means it and kept through the cache; fixture books | shipped (#560) ([plan](../superpowers/plans/2026-10-26-writing-modes-step0.md)) |
 | 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; the horizontal right-to-left case of FlowContext and page progression, which step 3 built for vertical text ([below](#what-step-1-takes-from-step-3)) | in progress: PR 1 #599 (the library: bidi core, shaping layer, Hebrew divine-name rule; PR 2 is layout and drawing) ([design](../superpowers/specs/2026-11-02-writing-modes-step1-design.md), [PR 1 plan](../superpowers/plans/2026-11-02-writing-modes-step1-pr1.md)) |
-| 2 | Arabic script; before its plan, decide on one shaper for Arabic and the Indic scripts ([below](#complex-shaping-arabic-and-the-indic-scripts)) | open |
+| 2 | Arabic script; before its plan, decide on one shaper for Arabic and the Indic scripts ([below](#complex-shaping-arabic-and-the-indic-scripts)) | in progress: PR 1 #<n> (the engine: crosspoint-reader #3787's OtShaper, nothrow) ([design](../superpowers/specs/2026-11-02-writing-modes-step2-design.md), [measurements](../superpowers/specs/2026-11-02-writing-modes-step2-measurements.md), [PR 1 plan](../superpowers/plans/2026-11-02-writing-modes-step2-pr1.md)) |
 | 3 | Vertical frame (from the spike); the vertical decision and its settings; FlowContext and page progression | shipped (#577) ([plan](../superpowers/plans/2026-10-28-writing-modes-step3.md)) |
 | 4 | Vertical typography: widows and orphans off and lone images centred (PR 1); 、。 and small kana placed from glyph ink, A3a along the column, Traditional Chinese marks (PR 2); tate-chu-yoko (PR 3); the dictionary on vertical pages (PR 4) | shipped (#594, #595, #597, #598) ([design](../superpowers/specs/2026-10-30-writing-modes-step4-design.md), [PR 1 plan](../superpowers/plans/2026-10-30-writing-modes-step4-pr1.md), [PR 2 plan](../superpowers/plans/2026-10-31-writing-modes-step4-pr2.md), [PR 3 plan](../superpowers/plans/2026-11-01-writing-modes-step4-pr3.md), [PR 4 plan](../superpowers/plans/2026-11-02-writing-modes-step4-pr4.md)) |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
@@ -113,10 +113,7 @@ HarfBuzz's MIT notice, which must ship with the port. The engine already has eve
 Arabic (a joining module plus right-to-left) and the Indic scripts is likely; section 5.6's "hundreds of KB" premise
 for a shaper is out of date.
 
-**Next step.** After CJK, and preferably once #3787 has merged with its allocation fix: port and measure. Run
-`OtShaper` on the host over our `FontBytes` with the Noto Devanagari faces, diff against HarfBuzz with upstream's
-corpus, link it into `default` for the real flash delta, measure its heap on the X3, then decide the step-2 question
-above.
+**Next step.** The shaper is being ported in step 2 and was measured first (the measurements file); the allocation fix is offered upstream (decision 7).
 
 ## Parsed in step 0, read later
 
