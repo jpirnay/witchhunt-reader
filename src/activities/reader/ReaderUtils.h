@@ -9,6 +9,7 @@
 
 #include "MappedInputManager.h"
 #include "components/TapZones.h"
+#include "components/themes/PanelMetrics.h"
 
 namespace ReaderUtils {
 
@@ -201,6 +202,9 @@ inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager
 inline bool isTouchMenuGesture(const GfxRenderer& renderer, const MappedInputManager& input) {
   return (input.hasTouch() && input.wasMenuGesture()) || isTouchMenuTap(renderer, input);
 }
+
+// Where a reader's one-line message goes. A fixed 300 is below the bottom of a landscape 240 px panel.
+inline int messageY(const GfxRenderer& renderer) { return PanelMetrics::capped(300, renderer.getScreenHeight() / 2); }
 
 inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
   const int freq = SETTINGS.getRefreshFrequency();

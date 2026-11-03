@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <string>
 
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 
 CardLayout::CardLayout(GfxRenderer& renderer, Rect contentRect, int startY, const CardLayoutConfig& cfg)
@@ -39,7 +40,6 @@ void CardLayout::card(const char* title, const std::function<void(Body&)>& bodyF
 }
 
 void CardLayout::Body::rowLR(const char* label, const std::string& value) {
-  layout.renderer_.drawText(UI_10_FONT_ID, layout.innerLeft_, innerY, label, true, EpdFontFamily::BOLD);
   const int vw = layout.renderer_.getTextWidth(UI_10_FONT_ID, value.c_str());
   constexpr int kLabelGap = 4;  // the value stays whole; a long label gives way to it
   const int labelWidth = layout.innerRight_ - vw - kLabelGap - layout.innerLeft_;
@@ -110,7 +110,7 @@ void CardLayout::Body::statGrid(const std::array<std::pair<std::string, const ch
   const int cellW = layout.innerWidth_ / 4;
   // Leave a small horizontal breathing room inside each cell so wrapped
   // labels don't kiss the vertical divider on the next cell over.
-  constexpr int kLabelPadX = 4;
+  constexpr int kLabelPadX = PanelMetrics::capped(4, 1);
   const int labelMaxW = std::max(0, cellW - kLabelPadX * 2);
 
   // Pre-wrap so we can compute the row's vertical extent before drawing the

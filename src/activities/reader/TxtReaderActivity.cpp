@@ -228,7 +228,8 @@ void TxtReaderActivity::render(RenderLock&&) {
 
   if (pageOffsets.empty()) {
     renderer.clearScreen();
-    renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_FILE), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, ReaderUtils::messageY(renderer), tr(STR_EMPTY_FILE), true,
+                              EpdFontFamily::BOLD);
     renderer.displayBuffer();
     return;
   }

@@ -9,6 +9,7 @@
 #include "activities/network/SignalStrengthWidget.h"
 #include "components/TouchExitButton.h"
 #include "components/UITheme.h"
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 
 // Unlike CrossPointWebServerActivity we keep rendering live progress UI, so the primary
@@ -209,9 +210,11 @@ void CalibreConnectActivity::render(RenderLock&&) {
                                    : shownLink == WifiLinkWatch::Link::Gone       ? tr(STR_WIFI_CONN_FAILED)
                                                                                   : rssiLabel(currentRssi);
     renderer.drawText(SMALL_FONT_ID, textX, y + signalHeight + 2, signalText.c_str());
-    y += signalHeight + lineHeightSmall + metrics.verticalSpacing * 3;
+    // A compact panel needs these gaps for the upload's progress bar at the foot of the stack.
+    const int blockGap = PanelMetrics::COMPACT ? metrics.verticalSpacing : metrics.verticalSpacing * 3;
+    y += signalHeight + lineHeightSmall + blockGap;
     const int belowExit = TouchExitButton::draw(renderer, mappedInput, textX, y, textWidth);
-    if (belowExit != y) y = belowExit + metrics.verticalSpacing * 3;
+    if (belowExit != y) y = belowExit + blockGap;
 
     renderer.drawText(UI_12_FONT_ID, textX, y, tr(STR_CALIBRE_SETUP), true, EpdFontFamily::BOLD);
     y += heightText12 + metrics.verticalSpacing * 2;
@@ -221,7 +224,7 @@ void CalibreConnectActivity::render(RenderLock&&) {
     renderer.drawText(SMALL_FONT_ID, textX, y + height * 2, tr(STR_CALIBRE_INSTRUCTION_3));
     renderer.drawText(SMALL_FONT_ID, textX, y + height * 3, tr(STR_CALIBRE_INSTRUCTION_4));
 
-    y += height * 3 + metrics.verticalSpacing * 4;
+    y += height * 3 + (PanelMetrics::COMPACT ? height + metrics.verticalSpacing : metrics.verticalSpacing * 4);
     renderer.drawText(UI_12_FONT_ID, textX, y, tr(STR_CALIBRE_STATUS), true, EpdFontFamily::BOLD);
     y += heightText12 + metrics.verticalSpacing * 2;
 

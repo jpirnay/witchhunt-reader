@@ -19,6 +19,7 @@
 #include "components/BookProgressPresentation.h"
 #include "components/CardLayout.h"
 #include "components/UITheme.h"
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 
 namespace {
@@ -103,7 +104,7 @@ void ReadingStatsActivity::render(RenderLock&&) {
 
   const int startY = contentRect.y + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
   CardLayout::Config cfg;
-  cfg.outerMarginX = metrics.verticalSpacing * 2;
+  cfg.outerMarginX = PanelMetrics::capped(metrics.verticalSpacing * 2, 4);
   CardLayout layout(renderer, contentRect, startY, cfg);
 
   auto& tracker = globalReadingSessionTracker();
@@ -193,7 +194,10 @@ void ReadingStatsActivity::render(RenderLock&&) {
       constexpr int kTitleGap = 8;
       const int innerLeft = b.innerLeft();
       const int innerRight = b.innerRight();
+      // The cards do not page, so the list stops where the screen does.
+      const int bottom = contentRect.y + contentRect.height - metrics.verticalSpacing;
       for (const auto& bk : topBooks_) {
+        if (b.currentY() + b.rowStep() > bottom) break;
         const std::string time = formatReadingDuration(bk.totalSeconds);
         const int timeWidth = renderer.getTextWidth(UI_10_FONT_ID, time.c_str());
         renderer.drawText(UI_10_FONT_ID, innerRight - timeWidth, b.currentY(), time.c_str());

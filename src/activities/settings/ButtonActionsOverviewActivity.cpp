@@ -11,6 +11,7 @@
 #include "SettingInfo.h"
 #include "SettingsList.h"
 #include "components/UITheme.h"
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 
 namespace {
@@ -99,7 +100,7 @@ void ButtonActionsOverviewActivity::render(RenderLock&&) {
 
   const int fontId = UI_10_FONT_ID;
   const int lineH = renderer.getLineHeight(fontId);
-  const int rowStep = lineH + 4;
+  const int rowStep = lineH + PanelMetrics::capped(4, 1);  // seven rows have to fit a 240 px landscape panel
   const int padX = metrics.verticalSpacing * 2;
 
   // 4-column layout: button label, short, double, long.
