@@ -217,7 +217,7 @@ void LyraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
     int truncatedSubtitleWidth = renderer.getTextWidth(SMALL_FONT_ID, truncatedSubtitle.c_str());
     renderer.drawText(SMALL_FONT_ID,
                       rect.x + rect.width - LyraMetrics::values.contentSidePadding - truncatedSubtitleWidth,
-                      rect.y + 50, truncatedSubtitle.c_str(), true);
+                      rect.y + LyraMetrics::values.batteryBarHeight + 10, truncatedSubtitle.c_str(), true);
   }
 }
 
@@ -403,7 +403,7 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
-  constexpr int buttonWidth = 80;
+  const int buttonWidth = HintLayout::bottomBase(pageWidth, 80);
   constexpr int smallButtonHeight = 15;
   // Read live rather than from the constexpr table: the strip grows with the UI font size.
   const int buttonHeight = UITheme::getInstance().getMetrics().buttonHintsHeight;
@@ -481,6 +481,7 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 }
 
 void LyraTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, const char* downBtn) const {
+  if (LyraMetrics::values.sideButtonHintsWidth == 0) return;  // no side column on this panel
   // Panel coordinates and the inverted mirroring, for the reasons spelled out in
   // BaseTheme::drawSideButtonHints — including why LandscapeCounterClockwise draws inverted too.
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();

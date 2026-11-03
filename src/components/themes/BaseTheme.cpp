@@ -273,7 +273,7 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
-  constexpr int buttonWidth = 106;
+  const int buttonWidth = HintLayout::bottomBase(pageWidth, 106);
   // Read live rather than from the constexpr table: the strip grows with the UI font size.
   const int buttonHeight = UITheme::getInstance().getMetrics().buttonHintsHeight;
   const int buttonY = buttonHeight;  // Distance from bottom
@@ -325,6 +325,7 @@ void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 }
 
 void BaseTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, const char* downBtn) const {
+  if (BaseMetrics::values.sideButtonHintsWidth == 0) return;  // no side column on this panel
   // Like drawButtonHints: the geometry below is written in PANEL coordinates, so each box stays
   // beside the button it names whichever way the device is held. The side buttons sit on the
   // panel's right edge (BTN_UP nearest the top) — which is the edge getContentRect() reserves in
@@ -606,7 +607,16 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
     auto truncatedTitle = renderer.truncatedText(UI_12_FONT_ID, title,
                                                  rect.width - padding * 2 - BaseMetrics::values.contentSidePadding * 2,
                                                  EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_12_FONT_ID, rect.y + 5, truncatedTitle.c_str(), true, EpdFontFamily::BOLD);
+    if (PanelMetrics::COMPACT) {
+      // Centred where it fits, but a narrow panel has the battery text in the title's way.
+      const int titleWidth = renderer.getTextWidth(UI_12_FONT_ID, truncatedTitle.c_str(), EpdFontFamily::BOLD);
+      const int centredX = rect.x + (rect.width - titleWidth) / 2;
+      const int clearOfBattery = rect.x + rect.width - maxBatteryWidth - titleWidth;
+      renderer.drawText(UI_12_FONT_ID, std::max(rect.x, std::min(centredX, clearOfBattery)), rect.y + 5,
+                        truncatedTitle.c_str(), true, EpdFontFamily::BOLD);
+    } else {
+      renderer.drawCenteredText(UI_12_FONT_ID, rect.y + 5, truncatedTitle.c_str(), true, EpdFontFamily::BOLD);
+    }
   }
 
   // The band has no room for a second line, so the subtitle goes in the line kept for it at the foot

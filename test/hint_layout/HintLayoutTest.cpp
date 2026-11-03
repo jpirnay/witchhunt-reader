@@ -113,6 +113,15 @@ void expectTunedLayoutKept(const int screenWidth, const int base, const int (&tu
 
 // Labels that fit the tuned boxes leave every box exactly where it was measured to sit,
 // including the Classic layout's 1 px overlaps.
+TEST(HintLayoutBottom, TheTunedBoxGivesWayOnlyWhenFourWouldNotFit) {
+  EXPECT_EQ(HintLayout::bottomBase(240, 80), 60);   // Murphy, Lyra: 4 x 80 ran 80 px off the panel
+  EXPECT_EQ(HintLayout::bottomBase(240, 106), 60);  // Murphy, Classic
+  EXPECT_EQ(HintLayout::bottomBase(480, 80), 80);   // X4
+  EXPECT_EQ(HintLayout::bottomBase(480, 106), 106);
+  EXPECT_EQ(HintLayout::bottomBase(528, 106), 106);  // X3
+  EXPECT_EQ(HintLayout::bottomBase(540, 80), 80);    // T5S3
+}
+
 TEST(HintLayoutBottom, FittingLabelsKeepTheTunedLayout) {
   expectTunedLayoutKept(480, 80, kLyraX4);
   expectTunedLayoutKept(528, 80, kLyraX3);

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "components/themes/HintLayout.h"
+#include "components/themes/PanelMetrics.h"
 
 class GfxRenderer;
 class Epub;
@@ -89,6 +90,31 @@ struct ThemeMetrics {
   int headerSubtitleLine = 0;
 };
 
+// A theme's table as this panel needs it: unchanged except on a compact one (PanelMetrics.h).
+// Sized for 240 px and Murphy's fonts: a body line is 20 px, a title line 25, a small line 17.
+constexpr ThemeMetrics forPanel(ThemeMetrics m) {
+  using PanelMetrics::capped;
+  m.batteryBarHeight = capped(m.batteryBarHeight, 20);
+  m.headerHeight = capped(m.headerHeight, 52);  // Lyra: the bar, its 3 px gap, a title line, the rule
+  m.verticalSpacing = capped(m.verticalSpacing, 6);
+  m.contentSidePadding = capped(m.contentSidePadding, 8);
+  m.listRowHeight = capped(m.listRowHeight, 30);
+  m.listWithSubtitleRowHeight = capped(m.listWithSubtitleRowHeight, 60);  // a title and two small lines
+  m.menuRowHeight = capped(m.menuRowHeight, 36);
+  m.menuSpacing = capped(m.menuSpacing, 4);
+  m.tabBarHeight = capped(m.tabBarHeight, 30);
+  m.homeTopPadding = capped(m.homeTopPadding, 28);  // clear of the battery line
+  m.homeCoverHeight = capped(m.homeCoverHeight, 154);
+  m.homeCoverTileHeight = capped(m.homeCoverTileHeight, 170);
+  m.homeRecentBooksCount = capped(m.homeRecentBooksCount, 2);  // three covers leave each a 66 px tile
+  m.buttonHintsHeight = capped(m.buttonHintsHeight, 30);
+  // No side column: the boxes are placed for the X4's keys, and it cost a list 16 % of its width.
+  m.sideButtonHintsWidth = capped(m.sideButtonHintsWidth, 0);
+  m.keyboardKeyHeight = capped(m.keyboardKeyHeight, 34);
+  m.headerSubtitleLine = capped(m.headerSubtitleLine, 18);
+  return m;
+}
+
 enum UIIcon { Folder, Text, Image, Book, File, Recent, Settings, Transfer, Library, Weather, Stats, Ellipsis };
 
 enum class HomeNavigation { Linear, Carousel };
@@ -97,38 +123,38 @@ enum class HomeNavigation { Linear, Carousel };
 // Additional themes can inherit from this and override methods as needed
 
 namespace BaseMetrics {
-constexpr ThemeMetrics values = {.batteryWidth = 15,
-                                 .batteryHeight = 12,
-                                 .topPadding = 5,
-                                 .batteryBarHeight = 20,
-                                 .headerHeight = 45,
-                                 .verticalSpacing = 10,
-                                 .contentSidePadding = 20,
-                                 .listRowHeight = 30,
-                                 .listWithSubtitleRowHeight = 65,
-                                 .menuRowHeight = 45,
-                                 .menuSpacing = 8,
-                                 .tabSpacing = 10,
-                                 .tabBarHeight = 50,
-                                 .scrollBarWidth = 4,
-                                 .scrollBarRightOffset = 5,
-                                 .homeTopPadding = 40,
-                                 .homeCoverHeight = 400,
-                                 .homeCoverTileHeight = 400,
-                                 .homeRecentBooksCount = 1,
-                                 .buttonHintsHeight = 40,
-                                 .sideButtonHintsWidth = 30,
-                                 .progressBarHeight = 16,
-                                 .progressBarMarginTop = 1,
-                                 .statusBarHorizontalMargin = 5,
-                                 .statusBarVerticalMargin = 19,
-                                 .keyboardKeyWidth = 22,
-                                 .keyboardKeyHeight = 40,
-                                 .keyboardKeySpacing = 0,
-                                 .keyboardCenteredText = false,
-                                 .keyboardVerticalOffset = -13,
-                                 .keyboardTextFieldWidthPercent = 85,
-                                 .headerSubtitleLine = 23};
+constexpr ThemeMetrics values = forPanel({.batteryWidth = 15,
+                                          .batteryHeight = 12,
+                                          .topPadding = 5,
+                                          .batteryBarHeight = 20,
+                                          .headerHeight = 45,
+                                          .verticalSpacing = 10,
+                                          .contentSidePadding = 20,
+                                          .listRowHeight = 30,
+                                          .listWithSubtitleRowHeight = 65,
+                                          .menuRowHeight = 45,
+                                          .menuSpacing = 8,
+                                          .tabSpacing = 10,
+                                          .tabBarHeight = 50,
+                                          .scrollBarWidth = 4,
+                                          .scrollBarRightOffset = 5,
+                                          .homeTopPadding = 40,
+                                          .homeCoverHeight = 400,
+                                          .homeCoverTileHeight = 400,
+                                          .homeRecentBooksCount = 1,
+                                          .buttonHintsHeight = 40,
+                                          .sideButtonHintsWidth = 30,
+                                          .progressBarHeight = 16,
+                                          .progressBarMarginTop = 1,
+                                          .statusBarHorizontalMargin = 5,
+                                          .statusBarVerticalMargin = 19,
+                                          .keyboardKeyWidth = 22,
+                                          .keyboardKeyHeight = 40,
+                                          .keyboardKeySpacing = 0,
+                                          .keyboardCenteredText = false,
+                                          .keyboardVerticalOffset = -13,
+                                          .keyboardTextFieldWidthPercent = 85,
+                                          .headerSubtitleLine = 23});
 }
 
 enum class SyncIndicator : uint8_t { None, Active, Failed };

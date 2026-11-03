@@ -38,6 +38,10 @@ inline constexpr int BOTTOM_LABEL_PADDING = 4;
 inline constexpr int BOTTOM_MIN_GAP = 4;
 inline constexpr int BOTTOM_EDGE_MARGIN = 4;
 
+// The tuned box, unless four of them would not fit the panel: then an equal share of it. Without
+// this a 240 px panel kept 80 px boxes, and the last one started off-screen.
+constexpr int bottomBase(const int screenWidth, const int tuned) { return std::min(tuned, screenWidth / BOTTOM_COUNT); }
+
 namespace detail {
 inline int gapAfter(const int base, const int (&tuned)[BOTTOM_COUNT], const int i) {
   return std::min(BOTTOM_MIN_GAP, tuned[i + 1] - tuned[i] - base);

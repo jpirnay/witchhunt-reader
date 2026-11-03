@@ -11,7 +11,8 @@ fui::TabBarProps props(UiAppHost::UiScreen& screen, const fui::TabItem* tabs, co
   props.count = count;
   props.action = action;
   props.inputMask = fui::InputTouch;
-  props.text = screen.theme().bodyText;
+  // Four tabs share 60 px on a compact panel, where a body-size "Controls" does not fit.
+  props.text = PanelMetrics::COMPACT ? screen.theme().smallText : screen.theme().bodyText;
   props.tabInset = fui::Insets{};
   props.contentInset = fui::Insets{};
 

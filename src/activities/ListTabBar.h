@@ -1,11 +1,12 @@
 #pragma once
 
 #include "components/UiAppHost.h"
+#include "components/themes/PanelMetrics.h"
 
 // The text tab bar the tabbed screens share: Settings, the reader menu and the Library.
 namespace ListTabBar {
 
-constexpr int16_t HEIGHT = 54;
+constexpr int16_t HEIGHT = static_cast<int16_t>(PanelMetrics::capped(54, 34));
 
 // Props for `count` tabs (the caller's array, alive until the bar is drawn); a tap on one fires
 // `action` with that tab's value. The selected tab is filled while the bar holds focus and a dithered
