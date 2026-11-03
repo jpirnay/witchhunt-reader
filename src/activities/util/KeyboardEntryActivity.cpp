@@ -9,6 +9,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "components/themes/HeaderLayout.h"
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 
 namespace fui = freeink::ui;
@@ -16,15 +17,25 @@ namespace fui = freeink::ui;
 namespace {
 
 constexpr fui::ActionId ACTION_KEY = 1;
-constexpr int KEYBOARD_MIN_GAP = 6;
+constexpr int KEYBOARD_MIN_GAP = PanelMetrics::capped(6, 2);
 constexpr int KEYBOARD_PANEL_PADDING = 4;
 constexpr int BUTTON_KEY_HEIGHT = 42;
 constexpr int BUTTON_KEYBOARD_HINT_GAP = 4;
 
 int keyboardGap(const ThemeMetrics& metrics) { return std::max(metrics.keyboardKeySpacing, KEYBOARD_MIN_GAP); }
 
-int keyboardKeysHeight(const ThemeMetrics& metrics, const int rows, const bool hasTouch) {
-  const int keyHeight = hasTouch ? metrics.keyboardKeyHeight : BUTTON_KEY_HEIGHT;
+// A compact panel held sideways: field and keys share 240 px. The digit row goes, since the symbols
+// layer has the digits, the keys get shorter, and the field moves up under the header.
+bool isShortPanel(const Rect& content) { return PanelMetrics::COMPACT && content.height < 300; }
+constexpr int SHORT_PANEL_KEY_HEIGHT = 28;
+
+int inputTop(const Rect& content, const ThemeMetrics& metrics) {
+  const int bodyTop = HeaderLayout::body(content, metrics).y;
+  return isShortPanel(content) ? bodyTop : bodyTop + metrics.verticalSpacing * 4 + metrics.keyboardVerticalOffset;
+}
+
+int keyboardKeysHeight(const ThemeMetrics& metrics, const int rows, const bool hasTouch, const bool shortPanel) {
+  const int keyHeight = shortPanel ? SHORT_PANEL_KEY_HEIGHT : hasTouch ? metrics.keyboardKeyHeight : BUTTON_KEY_HEIGHT;
   return rows * keyHeight + (rows > 1 ? (rows - 1) * keyboardGap(metrics) : 0) + KEYBOARD_PANEL_PADDING * 2;
 }
 
@@ -121,14 +132,15 @@ void KeyboardEntryActivity::onExit() { Activity::onExit(); }
 
 const fui::KeyboardLayout& KeyboardEntryActivity::buildLayer(fui::KeyboardLayoutBuffer& buffer) const {
   if (symbols) return fui::buildKeyboardLayout(buffer, layoutId, shifted, true);
+  const bool numberRow = !isShortPanel(keyboardContentRect(renderer));
   if (inputType != InputType::Url) {
-    return fui::buildKeyboardLayout(buffer, layoutId, shifted, false, /*numberRow=*/true, showLangKey);
+    return fui::buildKeyboardLayout(buffer, layoutId, shifted, false, numberRow, showLangKey);
   }
   if (urlPanel) return URL_SNIPPET_LAYOUT;
   // The English layer with a digit row, its bottom row swapped for the URL one.
   // The rows live in `buffer`, so the swap edits this build and nothing shared.
   const fui::KeyboardLayout& layer =
-      fui::buildKeyboardLayout(buffer, fui::KeyboardLayoutId::QwertyEn, shifted, false, /*numberRow=*/true);
+      fui::buildKeyboardLayout(buffer, fui::KeyboardLayoutId::QwertyEn, shifted, false, numberRow);
   buffer.rows[layer.rowCount - 1] = fui::KeyboardRow{URL_BOTTOM, sizeof(URL_BOTTOM) / sizeof(URL_BOTTOM[0]), 0};
   return layer;
 }
@@ -402,8 +414,7 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
-  const int inputStartY =
-      HeaderLayout::body(content, metrics).y + metrics.verticalSpacing * 4 + metrics.keyboardVerticalOffset;
+  const int inputStartY = inputTop(content, metrics);
 
   const int effectiveMargin = (content.width - content.width * metrics.keyboardTextFieldWidthPercent / 100) / 2;
   const int toggleGap = inputType == InputType::Password ? 4 : 0;
@@ -481,7 +492,7 @@ fui::Rect KeyboardEntryActivity::keyboardRect(const int rows) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect content = keyboardContentRect(renderer);
   const bool hasTouch = mappedInput.hasTouch();
-  const int height = keyboardKeysHeight(metrics, rows, hasTouch);
+  const int height = keyboardKeysHeight(metrics, rows, hasTouch, isShortPanel(content));
   const int hintGap = hasTouch ? metrics.verticalSpacing - metrics.keyboardVerticalOffset : BUTTON_KEYBOARD_HINT_GAP;
   const int bottom = content.y + content.height;
   const int y = bottom - height - hintGap;
@@ -692,8 +703,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, HeaderLayout::header(content, metrics), title.c_str());
 
   const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
-  const int inputStartY =
-      HeaderLayout::body(content, metrics).y + metrics.verticalSpacing * 4 + metrics.keyboardVerticalOffset;
+  const int inputStartY = inputTop(content, metrics);
   int inputHeight = 0;
 
   std::string displayText = displayTextForCurrentState();
@@ -850,7 +860,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   const fui::KeyboardLayout& layout = buildLayer(renderLayer);
   const bool hasTouch = mappedInput.hasTouch();
   const fui::Rect kbRect = keyboardRect(layout.rowCount);
-  const int keysHeight = keyboardKeysHeight(metrics, layout.rowCount, hasTouch);
+  const int keysHeight = keyboardKeysHeight(metrics, layout.rowCount, hasTouch, isShortPanel(content));
   const fui::Rect keysRect{kbRect.x, static_cast<int16_t>(kbRect.y + (kbRect.height - keysHeight) / 2), kbRect.width,
                            static_cast<int16_t>(keysHeight)};
 
@@ -927,7 +937,9 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   interactions.beginPublishCycle();
   fui::GfxRendererTarget target(renderer);
   target.setFont(fui::GfxRendererTarget::FONT_SMALL, SMALL_FONT_ID);
-  target.setFont(fui::GfxRendererTarget::FONT_BODY, UI_12_FONT_ID);
+  // Ten keys share a compact panel's 240 px: at the usual size a wide letter does not fit its key
+  // and the widget shows an ellipsis in its place.
+  target.setFont(fui::GfxRendererTarget::FONT_BODY, PanelMetrics::COMPACT ? UI_10_FONT_ID : UI_12_FONT_ID);
   const fui::DeviceContext device = target.deviceContext();
   const fui::InputSnapshot noInput{};
   fui::Frame<56> frame(target, device, noInput, interactions);
@@ -945,6 +957,14 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   props.labelText.font = fui::GfxRendererTarget::FONT_BODY;
   props.altText.font = fui::GfxRendererTarget::FONT_SMALL;
   props.gap = props.rowGap = static_cast<int16_t>(keyboardGap(metrics));
+  if (PanelMetrics::COMPACT) {
+    // Every default here is sized for keys twice this wide. The digit offset alone left a digit 5 px.
+    props.keyPadding = fui::Insets{2, 1, 2, 1};
+    props.digitLabelOffsetX = -2;
+    props.altHintRightPadding = 2;
+    props.altLabelGap = 0;
+    props.controlText.font = fui::GfxRendererTarget::FONT_SMALL;
+  }
   if (urlPanel) props.uniformKeyWidth = false;  // shortcut rows stretch independently
   if (!hasTouch) props.background = fui::Paint::none();
   frame.target().fill(kbRect, props.background);
