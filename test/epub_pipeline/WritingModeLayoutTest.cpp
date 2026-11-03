@@ -473,6 +473,18 @@ TEST_F(BidiLayout, ARightToLeftParagraphTurnsTheUsersLeftAlignmentRight) {
   EXPECT_EQ(0, book[0].firstWordX);
 }
 
+TEST_F(BidiLayout, ACentredRightToLeftLineSitsInTheMiddle) {
+  const auto lines =
+      parseLines(dump("", document("<p dir=\"rtl\" style=\"text-align: center\">שלום עולם</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_EQ(static_cast<int>(CssTextAlign::Center), lines[0].align);
+  ASSERT_EQ(2u, lines[0].words.size());
+  // (460 - 70) / 2, in visual order: the second word in reading order is on the left.
+  expectWord(lines[0].words[0], 195, kOlam, kOlamDrawn);
+  expectWord(lines[0].words[1], 233, kShalom, kShalomDrawn);
+  EXPECT_EQ("1,0", lines[0].order);
+}
+
 TEST_F(BidiLayout, AJustifiedRightToLeftLineFillsTheMeasure) {
   // 472 px, so that 12 words (12 × 32 + 11 × 6 = 450 px) leave 22 px, 2 for each gap. At 460 the remainder of the
   // share would stay undistributed at the line's left, as it stays at the right of a left-to-right line.
@@ -528,11 +540,17 @@ TEST_F(BidiLayout, ALineOverTheBidiLimitStillRunsRightToLeft) {
   EXPECT_EQ(order, lines[0].order);
 }
 
+// Whether a heap workspace was held at any measurement since it was last cleared (GfxRenderer::onTextAdvance).
+bool gHeapWorkspaceSeen = false;
+void noteHeapWorkspace() { gHeapWorkspaceSeen = gHeapWorkspaceSeen || BidiUtils::heapWorkspaceHeld(); }
+
 TEST_F(BidiLayout, ALentArenaBuildLaysOutAsAHeapBuild) {
-  // With a lent arena the line pass borrows its workspace from it between a page's lines; at 16 KB the arena may have
-  // no room and it takes the heap. Either way the book lays out as a heap build does.
+  // With a lent arena the line pass borrows its workspace from it between a page's lines; at 16 KB the arena has no
+  // room and it takes the heap. Either way the book lays out as a heap build does. Which one ran shows in whether a
+  // heap workspace is held while the build measures: never at 48 KB, as in every heap build at 16 KB and without one.
   const std::string corpus = (fs::path(CORPUS_DIR) / "test_rtl_markup.epub").string();
   const std::string mixed = writeBook("", document(kMixedRtl));
+  GfxRenderer::onTextAdvance = noteHeapWorkspace;
   int run = 0;
   for (const std::string& book : {corpus, mixed}) {
     std::string heap;
@@ -541,7 +559,10 @@ TEST_F(BidiLayout, ALentArenaBuildLaysOutAsAHeapBuild) {
       profile.lentArenaBytes = lent;
       const fs::path cache = work / ("cache" + std::to_string(run++));
       std::ostringstream out;
+      BidiUtils::releaseWorkspace();
+      gHeapWorkspaceSeen = false;
       EXPECT_TRUE(pipeline_harness::runAndDump(book, cache.string(), profile, out)) << out.str();
+      EXPECT_EQ(lent != 49152, gHeapWorkspaceSeen) << book << ", lent " << lent;
       if (lent == 0) {
         heap = out.str();
         EXPECT_NE(std::string::npos, heap.find(" WD t=")) << heap;
@@ -550,6 +571,7 @@ TEST_F(BidiLayout, ALentArenaBuildLaysOutAsAHeapBuild) {
       }
     }
   }
+  GfxRenderer::onTextAdvance = nullptr;
 }
 
 TEST_F(BidiLayout, AParagraphInADrainedBlockDecidesItsDirectionAnew) {
