@@ -230,6 +230,8 @@ void ActivityManager::renderTaskLoop() {
 //    counts pages (N-1 FAST, then the HALF), so a list ghosts no more than a book does. The
 //    reader runs that same cadence itself (ReaderUtils), and counting it here too would double it.
 // The override stays armed through a pass that ships nothing, so it lands on the next real frame.
+// It also replaces a FULL a screen asked for, which costs nothing on the one panel this is for: its
+// driver has a single waveform for every mode but FAST.
 void ActivityManager::armGhostClearingRefresh() {
   if (!HalCapabilities::clearsGhostsOnEveryScreen()) return;
   const uint32_t changes = activityChanges.load(std::memory_order_relaxed);

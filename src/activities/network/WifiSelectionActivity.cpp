@@ -26,6 +26,7 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 #include "network/MacFormat.h"
 #include "network/WifiApChoice.h"
@@ -1147,7 +1148,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
   snprintf(countStr, sizeof(countStr), tr(STR_NETWORKS_FOUND), realNetworkCount);
   GUI.drawHeader(renderer, header, tr(STR_WIFI_NETWORKS), countStr);
   // A compact captive-portal page spends the sub-header's height on its code instead.
-  if (state != WifiSelectionState::CAPTIVE_PORTAL || !QrUtils::compactLayout(renderer)) {
+  if (state != WifiSelectionState::CAPTIVE_PORTAL || !PanelMetrics::COMPACT) {
     GUI.drawSubHeader(renderer, Rect{header.x, header.y + header.height, header.width, metrics.tabBarHeight},
                       cachedMacAddress.c_str());
   }
@@ -1322,7 +1323,7 @@ void WifiSelectionActivity::renderCaptivePortal() const {
   const int lh12 = renderer.getLineHeight(UI_12_FONT_ID);
   const int lh10 = renderer.getLineHeight(UI_10_FONT_ID);
   const int lhSmall = renderer.getLineHeight(SMALL_FONT_ID);
-  const bool compact = QrUtils::compactLayout(renderer);
+  constexpr bool compact = PanelMetrics::COMPACT;
   const int sp = compact ? QrUtils::compactSpacing() : metrics.verticalSpacing;
   constexpr int QR_SIZE = 320;
 

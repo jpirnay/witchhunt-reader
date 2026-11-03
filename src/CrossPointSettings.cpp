@@ -11,7 +11,6 @@
 #include <string>
 
 #include "SdCardFontGlobals.h"
-#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 
 // Font ID 0 is reserved as the SD card font "not found" sentinel
@@ -226,8 +225,7 @@ bool CrossPointSettings::loadFromFile() {
       bool result = JsonSettingsIO::loadSettings(*this, json.c_str(), &resave);
       if (result) {
         enforceFixedShortActions(*this);
-        if (PanelMetrics::COMPACT && uiTheme == LYRA_CAROUSEL) uiTheme = LYRA;  // not offered there: SettingsList.h
-        saveStartupToNvs();                                                     // Ensure NVS is in sync on boot
+        saveStartupToNvs();  // Ensure NVS is in sync on boot
         if (resave) {
           if (saveToFile()) {
             LOG_DBG("CPS", "Resaved settings to update format");

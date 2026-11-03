@@ -907,7 +907,7 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     const int rowStep = PanelMetrics::capped(25, renderer.getLineHeight(UI_10_FONT_ID));
     const int blockGap = PanelMetrics::capped(35, rowStep + 4);
     // On a compact panel held sideways the chapter names give way to the three options.
-    const bool shortPanel = PanelMetrics::COMPACT && contentRect.height < 300;
+    const bool shortPanel = PanelMetrics::isShort(contentRect.height);
     const auto drawRow = [&](const int rowY, const char* text, const bool black = true) {
       renderer.drawText(UI_10_FONT_ID, textX, rowY, renderer.truncatedText(UI_10_FONT_ID, text, textWidth).c_str(),
                         black);

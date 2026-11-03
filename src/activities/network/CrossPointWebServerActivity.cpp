@@ -17,6 +17,7 @@
 #include "activities/network/SignalStrengthWidget.h"
 #include "components/TouchExitButton.h"
 #include "components/UITheme.h"
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 #include "util/QrUtils.h"
 
@@ -392,7 +393,7 @@ void CrossPointWebServerActivity::renderServerRunningCompact() const {
 }
 
 void CrossPointWebServerActivity::renderServerRunning() const {
-  if (QrUtils::compactLayout(renderer)) {
+  if (PanelMetrics::COMPACT) {
     renderServerRunningCompact();
     return;
   }

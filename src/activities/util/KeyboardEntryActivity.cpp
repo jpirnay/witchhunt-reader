@@ -26,12 +26,12 @@ int keyboardGap(const ThemeMetrics& metrics) { return std::max(metrics.keyboardK
 
 // A compact panel held sideways: field and keys share 240 px. The digit row goes, since the symbols
 // layer has the digits, the keys get shorter, and the field moves up under the header.
-bool isShortPanel(const Rect& content) { return PanelMetrics::COMPACT && content.height < 300; }
 constexpr int SHORT_PANEL_KEY_HEIGHT = 28;
 
 int inputTop(const Rect& content, const ThemeMetrics& metrics) {
   const int bodyTop = HeaderLayout::body(content, metrics).y;
-  return isShortPanel(content) ? bodyTop : bodyTop + metrics.verticalSpacing * 4 + metrics.keyboardVerticalOffset;
+  return PanelMetrics::isShort(content.height) ? bodyTop
+                                               : bodyTop + metrics.verticalSpacing * 4 + metrics.keyboardVerticalOffset;
 }
 
 int keyboardKeysHeight(const ThemeMetrics& metrics, const int rows, const bool hasTouch, const bool shortPanel) {
@@ -132,7 +132,7 @@ void KeyboardEntryActivity::onExit() { Activity::onExit(); }
 
 const fui::KeyboardLayout& KeyboardEntryActivity::buildLayer(fui::KeyboardLayoutBuffer& buffer) const {
   if (symbols) return fui::buildKeyboardLayout(buffer, layoutId, shifted, true);
-  const bool numberRow = !isShortPanel(keyboardContentRect(renderer));
+  const bool numberRow = !PanelMetrics::isShort(keyboardContentRect(renderer).height);
   if (inputType != InputType::Url) {
     return fui::buildKeyboardLayout(buffer, layoutId, shifted, false, numberRow, showLangKey);
   }
@@ -492,7 +492,7 @@ fui::Rect KeyboardEntryActivity::keyboardRect(const int rows) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect content = keyboardContentRect(renderer);
   const bool hasTouch = mappedInput.hasTouch();
-  const int height = keyboardKeysHeight(metrics, rows, hasTouch, isShortPanel(content));
+  const int height = keyboardKeysHeight(metrics, rows, hasTouch, PanelMetrics::isShort(content.height));
   const int hintGap = hasTouch ? metrics.verticalSpacing - metrics.keyboardVerticalOffset : BUTTON_KEYBOARD_HINT_GAP;
   const int bottom = content.y + content.height;
   const int y = bottom - height - hintGap;
@@ -860,7 +860,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   const fui::KeyboardLayout& layout = buildLayer(renderLayer);
   const bool hasTouch = mappedInput.hasTouch();
   const fui::Rect kbRect = keyboardRect(layout.rowCount);
-  const int keysHeight = keyboardKeysHeight(metrics, layout.rowCount, hasTouch, isShortPanel(content));
+  const int keysHeight = keyboardKeysHeight(metrics, layout.rowCount, hasTouch, PanelMetrics::isShort(content.height));
   const fui::Rect keysRect{kbRect.x, static_cast<int16_t>(kbRect.y + (kbRect.height - keysHeight) / 2), kbRect.width,
                            static_cast<int16_t>(keysHeight)};
 

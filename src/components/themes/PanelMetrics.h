@@ -18,4 +18,7 @@ inline constexpr bool COMPACT = false;
 
 constexpr int capped(const int tuned, const int limit) { return COMPACT && tuned > limit ? limit : tuned; }
 
+// A compact panel held sideways: too short for a stack that fits it upright.
+constexpr bool isShort(const int contentHeight) { return COMPACT && contentHeight < 300; }
+
 }  // namespace PanelMetrics
