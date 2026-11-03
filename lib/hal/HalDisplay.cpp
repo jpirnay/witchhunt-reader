@@ -364,7 +364,18 @@ bool HalDisplay::reallocSecondaryBuffer() {
   return ok;
 }
 
-bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuffer(); }
+namespace {
+// Room for everything the lent framebuffer holds on the big panels (48 KB) several times over, and
+// about 3 % of the PSRAM.
+constexpr size_t PSRAM_ARENA_BYTES = 256 * 1024;
+bool psramArenaLent = false;  // read and written under the SPI bus lock, as the lend itself is
+}  // namespace
+
+// False while the PSRAM arena is out, though the display's own buffer is still there. "No secondary
+// buffer" is how every borrower tells a lend is in progress: the reader's recovery only gives the
+// region back on seeing it, and reporting true left the arena out for good. The panel paths that
+// care about the buffer itself ask einkDisplay directly.
+bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuffer() && !psramArenaLent; }
 
 // The four buffer-ownership transitions below all take the SPI bus lock, for two reasons that
 // both trace back to them running on the LOOP task (reader background builds) while the render
@@ -382,6 +393,20 @@ bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuf
 // uncontended on the normal path — this costs nothing when nothing else is on the bus.
 uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
   HalSpiBus::Lock spiLock;
+  if (HalCapabilities::lendsPsramArena()) {
+    // Allocated on first use and kept: PSRAM has the room, and a block that never goes back to the
+    // heap cannot fragment it. If it cannot be had, the framebuffer below is still a valid answer.
+    static uint8_t* const arena =
+        static_cast<uint8_t*>(heap_caps_malloc(PSRAM_ARENA_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (arena) {
+      if (psramArenaLent) return nullptr;  // one borrower at a time, as with the framebuffer
+      psramArenaLent = true;
+      if (size) *size = PSRAM_ARENA_BYTES;
+      LOG_INF("FBUF", "borrowSecondary -> PSRAM arena (size=%lu)", static_cast<unsigned long>(PSRAM_ARENA_BYTES));
+      return arena;
+    }
+    LOG_ERR("FBUF", "No PSRAM arena; lending the framebuffer");
+  }
   uint8_t* buf = einkDisplay.borrowSecondaryBuffer(size);
   LOG_INF("FBUF", "borrowSecondary -> %d (size=%lu hasSecondary=%d)", buf ? 1 : 0,
           static_cast<unsigned long>(buf && size ? *size : 0), einkDisplay.hasSecondaryBuffer() ? 1 : 0);
@@ -390,6 +415,11 @@ uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
 
 bool HalDisplay::returnSecondaryBuffer() {
   HalSpiBus::Lock spiLock;
+  if (psramArenaLent) {
+    psramArenaLent = false;
+    LOG_INF("FBUF", "returnSecondary -> PSRAM arena");
+    return true;
+  }
   const bool ok = einkDisplay.returnSecondaryBuffer();
   LOG_INF("FBUF", "returnSecondary -> %d (hasSecondary=%d)", ok ? 1 : 0, einkDisplay.hasSecondaryBuffer() ? 1 : 0);
   return ok;
