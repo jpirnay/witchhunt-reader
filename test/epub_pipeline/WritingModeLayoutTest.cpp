@@ -826,7 +826,8 @@ TEST_F(BidiLayout, TheDirectionHoldsAcrossTheLongBlockSplit) {
 constexpr const char* kLrm = "\xE2\x80\x8E";
 constexpr const char* kRlm = "\xE2\x80\x8F";
 
-TEST_F(BidiLayout, AMarkInAnEnglishParagraphIsDroppedAsBefore) {
+TEST_F(BidiLayout, AnLrmInAnEnglishParagraphIsDroppedAsBefore) {
+  // An LRM is a left-to-right letter's class: the paragraph needs no bidi, and drops it.
   const std::string out = dump("", document("<p>abc&#x200E; def</p>"));
   const auto lines = parseLines(out);
   ASSERT_EQ(1u, lines.size());
@@ -834,6 +835,26 @@ TEST_F(BidiLayout, AMarkInAnEnglishParagraphIsDroppedAsBefore) {
   expectWord(lines[0].words[0], 0, "abc", "");
   expectWord(lines[0].words[1], 31, "def", "");
   EXPECT_EQ(dump("", document("<p>abc def</p>")), out);
+}
+
+TEST_F(BidiLayout, AnRlmInAnEnglishParagraphIsLaidOutByUax9) {
+  // An RLM is a right-to-left letter's class: the paragraph needs bidi, and UAX #9 lays it out, the mark drawn as
+  // nothing. After "see" (27 px) it makes the number and the space before it a right-to-left run, so 12 sits against
+  // "see" and the space follows it. Without a number to turn, the line keeps its places, each mark in a drawn form.
+  const auto number = parseLines(dump("", document("<p>see&#x200F; 12 items here</p>")));
+  ASSERT_EQ(1u, number.size());
+  ASSERT_EQ(4u, number[0].words.size());
+  expectWord(number[0].words[0], 0, std::string("see") + kRlm, "see");
+  expectWord(number[0].words[1], 27, "12", "");
+  expectWord(number[0].words[2], 46, "items", "");
+  expectWord(number[0].words[3], 96, "here", "");
+  EXPECT_EQ("", number[0].order);
+  const auto words = parseLines(dump("", document("<p>abc&#x200F; def</p>")));
+  ASSERT_EQ(1u, words.size());
+  ASSERT_EQ(2u, words[0].words.size());
+  expectWord(words[0].words[0], 0, std::string("abc") + kRlm, "abc");
+  expectWord(words[0].words[1], 31, "def", "");
+  EXPECT_EQ("", words[0].order);
 }
 
 TEST_F(BidiLayout, AWordOfMarksInAnEnglishParagraphChangesNothingAroundIt) {
