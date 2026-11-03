@@ -71,6 +71,14 @@ TEST(ParsedTextOffset, ConsumedWordsTakeTheirOffsetsWithThem) {
   EXPECT_EQ(text.firstWordVisibleOffset(), std::optional<uint32_t>(allLines.back()));
 }
 
+TEST(ParsedTextOffset, ABidiControlCountsNothingWhereAWordIsSplit) {
+  // 日 and 本 are 16 px each, so 20 px splits the word between them. Its LRM is no visible text of the word's: 本
+  // starts where it would without the mark, 3 bytes after 日.
+  ParsedText text(/*extraParagraphSpacing=*/false);
+  text.addWord("日\xE2\x80\x8E本", EpdFontFamily::REGULAR, false, false, ParsedText::DEFAULT_WORD_SIZE_PCT, 100);
+  EXPECT_EQ(lineOffsets(text, 20), (std::vector<uint32_t>{100, 103}));
+}
+
 TEST(ParsedTextOffset, ResetForgetsTheOffsets) {
   ParsedText text = tenWords();
   text.reset(BlockStyle());

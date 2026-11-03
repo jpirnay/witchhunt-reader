@@ -15,6 +15,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../book_metadata_cache/AllocationRefusal.h"
@@ -818,6 +819,69 @@ TEST_F(BidiLayout, TheDirectionHoldsAcrossTheLongBlockSplit) {
       }
     }
   }
+}
+
+// ---- Literal controls in the text ----
+
+constexpr const char* kLrm = "\xE2\x80\x8E";
+constexpr const char* kRlm = "\xE2\x80\x8F";
+
+TEST_F(BidiLayout, AMarkInAnEnglishParagraphIsDroppedAsBefore) {
+  const std::string out = dump("", document("<p>abc&#x200E; def</p>"));
+  const auto lines = parseLines(out);
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0].words.size());
+  expectWord(lines[0].words[0], 0, "abc", "");
+  expectWord(lines[0].words[1], 31, "def", "");
+  EXPECT_EQ(dump("", document("<p>abc def</p>")), out);
+}
+
+TEST_F(BidiLayout, AWordOfMarksInAnEnglishParagraphChangesNothingAroundIt) {
+  // A word of marks is held for the next word. It glues that word to nothing, waits out a no-break space, leaves a drop
+  // cap its place and ends with its table cell: each paragraph lays out byte for byte as without the mark.
+  const std::string capText =
+      "lpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo "
+      "sierra tango uniform victor whiskey xray yankee zulu alpha bravo charlie delta echo foxtrot golf hotel india";
+  const std::string cap = "<span style=\"float: left; font-size: 3em\">A</span>";
+  const std::pair<std::string, std::string> cases[] = {
+      {"<p>abc &#x200E;<i>def</i></p>", "<p>abc <i>def</i></p>"},
+      {"<p>abc <b>&#x200E;</b>def</p>", "<p>abc <b></b>def</p>"},
+      {"<p>abc &#x200E;&#xA0;def</p>", "<p>abc &#xA0;def</p>"},
+      {"<p>&#x200E;" + cap + capText + "</p>", "<p>" + cap + capText + "</p>"},
+      {"<table><tr><td>abc &#x200F;</td><td>def</td></tr></table>",
+       "<table><tr><td>abc </td><td>def</td></tr></table>"},
+  };
+  for (const auto& [marked, plain] : cases) {
+    EXPECT_EQ(dump("", document(plain)), dump("", document(marked))) << marked;
+  }
+}
+
+TEST_F(BidiLayout, AMarkInAHebrewParagraphIsKeptAndNotDrawn) {
+  // C++ is 24 px: the LRM keeps its pluses on its right, and draws as nothing.
+  const auto lines = parseLines(dump("", document("<p dir=\"rtl\">C++&#x200E; שלום</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0].words.size());
+  expectWord(lines[0].words[0], 398, kShalom, kShalomDrawn);
+  expectWord(lines[0].words[1], 436, std::string("C++") + kLrm, "C++");
+}
+
+TEST_F(BidiLayout, AWordOfMarksJoinsTheNextWord) {
+  const auto lines = parseLines(dump("", document("<p dir=\"rtl\">שלום &#x200F; עולם</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0].words.size());
+  EXPECT_EQ(std::string(kRlm) + kOlam, lines[0].words[0].text);
+  EXPECT_EQ(kOlamDrawn, lines[0].words[0].display);
+  EXPECT_EQ(kShalom, lines[0].words[1].text);
+}
+
+TEST_F(BidiLayout, AMarkEndingAParagraphLeavesTheNextOneClean) {
+  const auto lines =
+      parseLines(dump("", document("<p dir=\"rtl\">שלום &#x200F;</p><p dir=\"rtl\">עולם</p>"), bookAlignment()));
+  ASSERT_EQ(2u, lines.size());
+  ASSERT_EQ(1u, lines[0].words.size());
+  EXPECT_EQ(kShalom, lines[0].words[0].text);
+  ASSERT_EQ(1u, lines[1].words.size());
+  EXPECT_EQ(kOlam, lines[1].words[0].text);
 }
 
 // ---- The spine's page progression ----

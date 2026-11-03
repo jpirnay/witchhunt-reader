@@ -325,6 +325,28 @@ TEST_F(SyntheticLutFixture, RubyAndRpTextCountTowardTheContentOffsets) {
   EXPECT_EQ(lines, static_cast<uint32_t>(kParagraphs));
 }
 
+TEST_F(SyntheticLutFixture, KeptBidiMarksLeaveTheContentOffsetsAsTheyWere) {
+  // The RLM opening each right-to-left paragraph stays in its first word for the line pass, but no word's offset starts
+  // at it. Each page then starts where it did when the parser dropped the mark: past 3 bytes for every paragraph up to
+  // its first. A paragraph is one line of 23 visible bytes ("שלום" + "עולם" + "טוב."), so every page opens on one.
+  constexpr uint32_t kParagraphBytes = 23;
+  std::string marked;
+  std::string plain;
+  for (int i = 0; i < 120; ++i) {
+    marked += "<p>&#x200F;שלום עולם טוב.</p>\n";
+    plain += "<p>שלום עולם טוב.</p>\n";
+  }
+  const auto withMarks = build(book(marked));
+  const auto without = build(book(plain));
+  ASSERT_GT(without->pageCount, 1);
+  ASSERT_EQ(withMarks->pageCount, without->pageCount);
+  for (uint16_t page = 0; page < without->pageCount; ++page) {
+    const uint32_t start = *without->getVisibleTextOffsetForPage(page);
+    EXPECT_EQ(*withMarks->getVisibleTextOffsetForPage(page), start + 3 * (1 + start / kParagraphBytes))
+        << "page " << page;
+  }
+}
+
 TEST_F(SyntheticLutFixture, EmptyPageStartsWhereTheNextElementDoes) {
   // A top margin taller than the page pushes the opening paragraph's first line off page 0, which
   // goes out with nothing on it. That happens while the paragraph is laid out, after its text was

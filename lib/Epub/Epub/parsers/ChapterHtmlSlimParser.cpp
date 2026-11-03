@@ -18,6 +18,7 @@
 #include <utility>
 
 #include "../../Epub.h"
+#include "../BidiLine.h"
 #include "../HashUtils.h"
 #include "../Page.h"
 #include "../converters/ImageDecoderFactory.h"
@@ -410,6 +411,18 @@ int defaultIgnorableLen(const char* s, const int i, const int len) {
 
   return 0;
 }
+
+// Length in bytes of the bidi control (BidiLine::isControl) starting at s[i], or 0 if there isn't one. Each is U+061C
+// (D8 9C) or a 3-byte sequence led by E2; one that runs past `len` is not matched, as in defaultIgnorableLen.
+static int bidiControlLen(const char* s, const int i, const int len) {
+  const auto b0 = static_cast<uint8_t>(s[i]);
+  if (b0 != 0xE2 && b0 != 0xD8) return 0;
+  return BidiLine::isControl(codepointAt(s + i, len - i)) ? (b0 == 0xE2 ? 3 : 2) : 0;
+}
+
+// The most bytes of controls held for one word: eight, as many as the line pass keeps open
+// (BidiLine::kMaxOpenControls). A longer run is cut there, so a buffer of held controls always has room for the word.
+constexpr int kMaxHeldControlBytes = 3 * BidiLine::kMaxOpenControls;
 
 bool hasAttributeToken(const char* value, const char* token) {
   if (!value || !token) return false;
@@ -1190,9 +1203,12 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   partWordLastWasCjk_ = false;
   if (streamFailed) {
     partWordBufferIndex = 0;
+    partWordControlsOnly_ = false;
     nextWordContinues = false;
     return false;
   }
+  // Nothing but bidi controls: no word yet. They stay in the buffer and open the next one.
+  if (partWordControlsOnly_) return true;
   // What this places ahead of the word (its list marker, a pending float) stands before the word,
   // wherever in the chunk the flush happens. A table row degraded here pins its own offsets.
   const PinnedPlacement atWord(*this, partWordVisibleOffset_);
@@ -1386,6 +1402,46 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   }
   partWordBufferIndex = 0;
   nextWordContinues = false;
+  return true;
+}
+
+bool ChapterHtmlSlimParser::keepBidiControl(const char* bytes, const int length) {
+  if (partWordControlsOnly_) {
+    if (partWordBufferIndex + length > kMaxHeldControlBytes) return true;  // the run is cut there
+  } else if (partWordBufferIndex + length > MAX_WORD_SIZE) {
+    // A full word goes out first, the next chunk glued to it, as at the overflow in consumeText.
+    if (!flushPartWordBuffer()) return false;
+    nextWordContinues = true;
+  }
+  if (partWordBufferIndex == 0) partWordControlsOnly_ = true;
+  memcpy(partWordBuffer + partWordBufferIndex, bytes, static_cast<size_t>(length));
+  partWordBufferIndex += length;
+  return true;
+}
+
+bool ChapterHtmlSlimParser::addNoBreakSpace(const uint32_t offset) {
+  // Controls held for the next word wait out the space: " " stays the token ParsedText knows as a no-break space.
+  char held[kMaxHeldControlBytes];
+  const int heldBytes = partWordControlsOnly_ ? partWordBufferIndex : 0;
+  if (heldBytes > 0) {
+    memcpy(held, partWordBuffer, static_cast<size_t>(heldBytes));
+    partWordBufferIndex = 0;
+    partWordControlsOnly_ = false;
+  } else if (partWordBufferIndex > 0 && !flushPartWordBuffer()) {
+    return false;
+  }
+  partWordBuffer[0] = ' ';
+  partWordBuffer[1] = '\0';
+  partWordBufferIndex = 1;
+  partWordVisibleOffset_ = offset;
+  nextWordContinues = true;  // Attach space to previous word (no break).
+  if (!flushPartWordBuffer()) return false;
+  nextWordContinues = true;  // Next real word attaches to this space (no break).
+  if (heldBytes > 0) {
+    memcpy(partWordBuffer, held, static_cast<size_t>(heldBytes));
+    partWordBufferIndex = heldBytes;
+    partWordControlsOnly_ = true;
+  }
   return true;
 }
 
@@ -1734,7 +1790,7 @@ bool ChapterHtmlSlimParser::tryStartDropCapCapture(const CssStyle& cssStyle) {
   if (vertical_) return false;
   // A float: left cap would cut the paragraph's first letter, the rightmost one, and float it on the left.
   if (startSideIsRight()) return false;
-  if (!currentTextBlock || !currentTextBlock->isEmpty() || partWordBufferIndex > 0) return false;
+  if (!currentTextBlock || !currentTextBlock->isEmpty() || partWordHasText()) return false;
   if (pendingInlineImage_.active || activeFloatBottom_ > 0 || deferredPageImage_) return false;
   if (currentTextBlock->getBlockStyle().floatZoneCount > 0) return false;
 
@@ -1974,6 +2030,7 @@ void ChapterHtmlSlimParser::addAncestorInsets(BlockStyle& style, const float emS
 
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
+  dropHeldBidiControls();                               // they end with the paragraph they were held in
   nextWordContinues = false;                            // New block = new paragraph, no continuation
   if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the open ruby's bases are in the block left behind
   endCjkSegment();
@@ -3004,7 +3061,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // groups go to a table cell's own text, the split waits a bounded number of tokens, stray <rt>/<rtc> text stays
   // inline, and <rp> stays visible text for KOSync.
   if (self->rubyDepth_ < 0 && strcmp(name, "ruby") == 0) {
-    if (self->partWordBufferIndex > 0) {
+    if (self->partWordHasText()) {
       const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
       if (!self->flushPartWordBuffer()) return;
       if (!endsAtDashBreak) self->nextWordContinues = true;
@@ -3017,7 +3074,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   } else if (self->rubyDepth_ >= 0 && strcmp(name, "rtc") == 0) {
     self->rtcDepth_ = self->depth;
   } else if (self->rubyDepth_ >= 0 && self->rtcDepth_ < 0 && self->rtDepth_ < 0 && strcmp(name, "rt") == 0) {
-    if (self->partWordBufferIndex > 0) {
+    if (self->partWordHasText()) {
       const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
       if (!self->flushPartWordBuffer()) return;
       if (!endsAtDashBreak) self->nextWordContinues = true;
@@ -3062,7 +3119,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
 
     if (isInternalLink) {
       // Flush buffer before style change
-      if (self->partWordBufferIndex > 0) {
+      if (self->partWordHasText()) {
         const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
         if (!self->flushPartWordBuffer()) return;
         if (!endsAtDashBreak) {
@@ -3377,7 +3434,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   } else if (matches(name, UNDERLINE_TAGS, NUM_UNDERLINE_TAGS) ||
              matches(name, STRIKETHROUGH_TAGS, NUM_STRIKETHROUGH_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
-    if (self->partWordBufferIndex > 0) {
+    if (self->partWordHasText()) {
       const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
       if (!self->flushPartWordBuffer()) return;
       if (!endsAtDashBreak) {
@@ -3429,7 +3486,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->updateEffectiveInlineStyle();
   } else if (matches(name, BOLD_TAGS, NUM_BOLD_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
-    if (self->partWordBufferIndex > 0) {
+    if (self->partWordHasText()) {
       const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
       if (!self->flushPartWordBuffer()) return;
       if (!endsAtDashBreak) {
@@ -3464,7 +3521,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->updateEffectiveInlineStyle();
   } else if (matches(name, ITALIC_TAGS, NUM_ITALIC_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
-    if (self->partWordBufferIndex > 0) {
+    if (self->partWordHasText()) {
       const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
       if (!self->flushPartWordBuffer()) return;
       if (!endsAtDashBreak) {
@@ -3498,7 +3555,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->inlineStyleStack.push_back(entry);
     self->updateEffectiveInlineStyle();
   } else if (strcmp(name, "sup") == 0 || strcmp(name, "sub") == 0) {
-    if (self->partWordBufferIndex > 0) {
+    if (self->partWordHasText()) {
       if (!self->flushPartWordBuffer()) return;
       self->nextWordContinues = true;
     }
@@ -3540,7 +3597,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         cssStyle.hasFontSizeMultiplier() || cssStyle.hasTextEmphasis() ||
         (self->vertical_ && cssStyle.hasTextCombine()) || isSmallTag || isBigTag) {
       // Flush buffer before style change so preceding text gets current style
-      if (self->partWordBufferIndex > 0) {
+      if (self->partWordHasText()) {
         const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
         if (!self->flushPartWordBuffer()) return;
         if (!endsAtDashBreak) {
@@ -3735,7 +3792,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
         ++self->partWordCjkCodepoints_;
         self->partWordLastWasCjk_ = false;
       }
-      if (self->partWordBufferIndex == 0) self->partWordVisibleOffset_ = byteOff;
+      self->notePartWordText(byteOff);
       self->partWordBuffer[self->partWordBufferIndex++] = s[i];
       continue;
     }
@@ -3770,6 +3827,17 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
         self->cjkSegmentBreakPending_ = true;
       }
       // Skip the whitespace char
+      continue;
+    }
+
+    // A bidi control stays in the word for the line pass (BidiLine), which draws it as nothing; a paragraph that needs
+    // no bidi drops it at layout (ParsedText). It counts nowhere: no word's visible offset starts at it, no CJK run
+    // counts it (kCjkRunCodepoints), and controls with no text after them are held for the next word
+    // (partWordControlsOnly_).
+    if (const int controlLen = bidiControlLen(s, i, len); controlLen > 0) {
+      if (!self->keepBidiControl(s + i, controlLen)) return;
+      i += controlLen - 1;
+      if (source) off += controlLen - 1;
       continue;
     }
 
@@ -3808,19 +3876,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     //   standalone word for hyphenation purposes, so Liang patterns can produce
     //   "200 Quadrat-" / "kilometer" instead of the unusable "200" / "Quadratkilometer".
     if (static_cast<uint8_t>(s[i]) == 0xC2 && i + 1 < len && static_cast<uint8_t>(s[i + 1]) == 0xA0) {
-      if (self->partWordBufferIndex > 0) {
-        if (!self->flushPartWordBuffer()) return;
-      }
-
-      self->partWordBuffer[0] = ' ';
-      self->partWordBuffer[1] = '\0';
-      self->partWordBufferIndex = 1;
-      self->partWordVisibleOffset_ = byteOff;
-      self->nextWordContinues = true;  // Attach space to previous word (no break).
-      if (!self->flushPartWordBuffer()) return;
-
-      self->nextWordContinues = true;  // Next real word attaches to this space (no break).
-
+      if (!self->addNoBreakSpace(byteOff)) return;
       i++;  // Skip the second byte (0xA0)
       if (source) off++;
       continue;
@@ -3829,19 +3885,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     // U+202F (narrow no-break space) — identical logic to U+00A0 above.
     if (static_cast<uint8_t>(s[i]) == 0xE2 && i + 2 < len && static_cast<uint8_t>(s[i + 1]) == 0x80 &&
         static_cast<uint8_t>(s[i + 2]) == 0xAF) {
-      if (self->partWordBufferIndex > 0) {
-        if (!self->flushPartWordBuffer()) return;
-      }
-
-      self->partWordBuffer[0] = ' ';
-      self->partWordBuffer[1] = '\0';
-      self->partWordBufferIndex = 1;
-      self->partWordVisibleOffset_ = byteOff;
-      self->nextWordContinues = true;
-      if (!self->flushPartWordBuffer()) return;
-
-      self->nextWordContinues = true;
-
+      if (!self->addNoBreakSpace(byteOff)) return;
       i += 2;  // Skip the remaining two bytes (0x80 0xAF)
       if (source) off += 2;
       continue;
@@ -3909,7 +3953,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
       }
     }
 
-    if (self->partWordBufferIndex == 0) self->partWordVisibleOffset_ = byteOff;
+    self->notePartWordText(byteOff);
     self->partWordBuffer[self->partWordBufferIndex++] = s[i];
   }
 }
@@ -3985,6 +4029,7 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
 
   if (self->currentTable && self->currentTable->depth > 1 && strcmp(name, "table") == 0) {
     self->partWordBufferIndex = 0;
+    self->partWordControlsOnly_ = false;
     self->currentTable->depth -= 1;
     self->depth -= 1;
     LOG_DBG("EHP", "nested table end, depth now %d", self->currentTable->depth);
@@ -3992,7 +4037,7 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
   }
 
   // Flush buffer with current style BEFORE any style changes
-  if (self->partWordBufferIndex > 0) {
+  if (self->partWordHasText()) {
     // Flush if style will change OR if we're closing a block/structural element
     const bool isInlineTag = !headerOrBlockTag && !closesBlockSpan && !tableStructuralTag &&
                              !matches(name, IMAGE_TAGS, NUM_IMAGE_TAGS) && self->depth != 1;
@@ -4012,6 +4057,8 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
       }
     }
   }
+  // Controls held for a word end with their block, a table cell's included.
+  if (headerOrBlockTag || closesBlockSpan || tableStructuralTag) self->dropHeldBidiControls();
   // An element that is not inline formatting is a word boundary (INLINE_FORMATTING_TAGS). After the
   // flush above, which records the last character of the element's own text.
   if (!matches(name, INLINE_FORMATTING_TAGS, NUM_INLINE_FORMATTING_TAGS)) self->endCjkSegment();

@@ -105,6 +105,29 @@ class ChapterHtmlSlimParser final : public Print {
   // leave one char at end for null pointer
   char partWordBuffer[MAX_WORD_SIZE + 1] = {};
   int partWordBufferIndex = 0;
+  // partWordBuffer holds bidi controls (BidiLine::isControl) and nothing else. They are held for the next word, which
+  // they open: no word of their own, no visible offset (consumeText), and dropped where their block ends.
+  bool partWordControlsOnly_ = false;
+  // partWordBuffer holds a word's text, not just controls held for one.
+  bool partWordHasText() const { return partWordBufferIndex > 0 && !partWordControlsOnly_; }
+  // The byte at `offset` is text of the word in partWordBuffer: the word's first such byte sets its visible offset.
+  void notePartWordText(const uint32_t offset) {
+    if (partWordHasText()) return;
+    partWordVisibleOffset_ = offset;
+    partWordControlsOnly_ = false;
+  }
+  // Puts the bidi control in the `length` bytes at `bytes` in partWordBuffer (consumeText). False when the stream
+  // failed.
+  bool keepBidiControl(const char* bytes, int length);
+  // Drops controls held for a word that did not come: they end with their block.
+  void dropHeldBidiControls() {
+    if (!partWordControlsOnly_) return;
+    partWordBufferIndex = 0;
+    partWordControlsOnly_ = false;
+  }
+  // A no-break space (U+00A0 or U+202F) at `offset`, a token of its own glued to both neighbours (consumeText). False
+  // when the stream failed.
+  bool addNoBreakSpace(uint32_t offset);
   // The tokens partWordBuffer's CJK run will become: its CJK codepoints, plus one for each run of
   // non-CJK characters after the first CJK codepoint. consumeText flushes the run at
   // kCjkRunCodepoints of them.

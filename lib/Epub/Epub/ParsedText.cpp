@@ -139,6 +139,23 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
 // Every bidi control is E2 80 xx, E2 81 xx or D8 9C in UTF-8: a token without those lead bytes holds none.
 bool mayHoldBidiControl(const std::string_view token) { return token.find_first_of("\xE2\xD8") != std::string::npos; }
 
+// VisibleText::visibleBytes of the `len` bytes at `text`, less every bidi control's: a control counts nowhere, so the
+// offsets of a split word's parts are those of the word without its controls (KOSync positions).
+size_t visibleBytesOutsideControls(const char* text, const int len) {
+  size_t count = VisibleText::visibleBytes(text, len);
+  if (!mayHoldBidiControl(std::string_view(text, static_cast<size_t>(len)))) return count;
+  for (int i = 0; i < len; ++i) {
+    const auto lead = static_cast<uint8_t>(text[i]);
+    const int bytes = lead == 0xE2 ? 3 : lead == 0xD8 ? 2 : 0;
+    if (bytes == 0 || i + bytes > len) continue;
+    const auto* p = reinterpret_cast<const unsigned char*>(text + i);
+    if (!BidiLine::isControl(utf8NextCodepoint(&p))) continue;
+    count -= static_cast<size_t>(bytes);  // no byte of a control is whitespace
+    i += bytes - 1;
+  }
+  return count;
+}
+
 // The level (BidiUtils::strongLevel: 0 for a letter of class L, 1 for R or AL) of the first letter in `tokens`, read in
 // order, that has a direction of its own; -1 when none has.
 int firstStrongLevel(const std::vector<std::string>& tokens) {
@@ -480,7 +497,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     const TokenBoundary::Boundary tokenBoundary = marked(boundary, token);
     pushToken(std::move(token), combinedStyle, tokenBoundary, size, offset, fontSlot);
     // The next token starts where this one's visible bytes end (KOSync positions).
-    offset += static_cast<uint32_t>(VisibleText::visibleBytes(word.data() + start, static_cast<int>(end - start)));
+    offset += static_cast<uint32_t>(visibleBytesOutsideControls(word.data() + start, static_cast<int>(end - start)));
     if (i < cuts.size()) {
       // A CJK break is a breakable zero-width gap; a mark's other edges are glued (no space, no break).
       boundary = cuts[i].breakable ? TokenBoundary::Boundary{false, true} : TokenBoundary::Boundary{true, false};
@@ -1972,7 +1989,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
       wordVisibleOffsets.begin() + wordIndex + 1,
       wordVisibleOffsets[wordIndex] +
           static_cast<uint32_t>(
-              VisibleText::visibleBytes(words[wordIndex].data(), static_cast<int>(words[wordIndex].size())) -
+              visibleBytesOutsideControls(words[wordIndex].data(), static_cast<int>(words[wordIndex].size())) -
               (chosenNeedsHyphen ? 1 : 0)));
 
   // Continuation flag handling after splitting a word into prefix + remainder.
