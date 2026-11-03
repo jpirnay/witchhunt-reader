@@ -52,6 +52,7 @@ class CrossPointWebServerActivity final : public Activity {
   bool buffersReleased = false;
 
   void renderServerRunning() const;
+  void renderServerRunningCompact() const;
 
   void onNetworkModeSelected(NetworkMode mode);
   void onWifiSelectionComplete(bool connected);

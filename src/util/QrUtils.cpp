@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "Logging.h"
+#include "components/UITheme.h"
 
 namespace {
 
@@ -34,6 +35,13 @@ int versionForByteLen(size_t len) {
 }
 
 }  // namespace
+
+bool QrUtils::compactLayout(const GfxRenderer& renderer) {
+  constexpr int kSmallestFullSide = 320;
+  return std::min(renderer.getScreenWidth(), renderer.getScreenHeight()) < kSmallestFullSide;
+}
+
+int QrUtils::compactSpacing() { return std::max(2, UITheme::getInstance().getMetrics().verticalSpacing / 4); }
 
 bool QrUtils::drawQrCode(const GfxRenderer& renderer, const Rect& bounds, const std::string& textPayload) {
   bool truncated = false;

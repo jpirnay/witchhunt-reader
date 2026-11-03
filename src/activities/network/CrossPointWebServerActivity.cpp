@@ -5,7 +5,9 @@
 #include <I18n.h>
 #include <WiFi.h>
 
+#include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <new>
 
 #include "MappedInputManager.h"
@@ -301,16 +303,11 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
     const auto& metrics = UITheme::getInstance().getMetrics();
     const Rect contentRect = UITheme::getContentRect(renderer, true, false);
 
-    GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
-                   isApMode ? tr(STR_HOTSPOT_MODE) : tr(STR_FILE_TRANSFER), nullptr);
-
     if (state == WebServerActivityState::SERVER_RUNNING) {
-      GUI.drawSubHeader(
-          renderer,
-          Rect{contentRect.x, metrics.topPadding + metrics.headerHeight, contentRect.width, metrics.tabBarHeight},
-          connectedSSID.c_str());
       renderServerRunning();
     } else {
+      GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
+                     isApMode ? tr(STR_HOTSPOT_MODE) : tr(STR_FILE_TRANSFER), nullptr);
       const auto height = renderer.getLineHeight(UI_10_FONT_ID);
       const auto top = contentRect.y + (contentRect.height - height) / 2;
       renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_STARTING_HOTSPOT));
@@ -321,7 +318,82 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
 
 namespace {}  // namespace
 
+// The same information on a screen too small for renderServerRunning(): no sub-header, tight spacing,
+// and a hotspot's two codes side by side with its addresses on full-width lines under them, since
+// an SSID or IP someone has to type cannot be cut short. Each code takes the room the text leaves
+// it, so no size here belongs to a particular panel.
+void CrossPointWebServerActivity::renderServerRunningCompact() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const Rect contentRect = UITheme::getContentRect(renderer, true, false);
+  const int gap = QrUtils::compactSpacing();
+  const int lineHeight = renderer.getLineHeight(SMALL_FONT_ID);
+  const int left = contentRect.x + metrics.contentSidePadding;
+  const int width = std::max(0, contentRect.width - metrics.contentSidePadding * 2);
+  // The exit button sits at the end of the stack; everything above it shares what remains.
+  const int bottom = contentRect.y + contentRect.height - metrics.menuRowHeight - gap;
+
+  GUI.drawHeader(renderer, Rect{contentRect.x, metrics.topPadding, contentRect.width, metrics.headerHeight},
+                 isApMode ? tr(STR_HOTSPOT_MODE) : tr(STR_FILE_TRANSFER), nullptr);
+  int y = metrics.topPadding + metrics.headerHeight + gap;
+
+  if (isApMode) {
+    constexpr int kHintLines = 3;
+    const int columnGap = metrics.verticalSpacing;
+    const int columnWidth = std::max(0, (width - columnGap) / 2);
+    const std::string hostnameUrl = std::string("http://") + ServerSession::HOSTNAME + ".local/";
+    const std::string details[] = {connectedSSID, hostnameUrl, tr(STR_OR_HTTP_PREFIX) + connectedIP + "/"};
+    const int detailsHeight = static_cast<int>(std::size(details)) * (lineHeight + gap);
+    const int codeY = y + kHintLines * lineHeight + gap;
+    const int code = std::max(0, std::min(columnWidth, bottom - codeY - gap - detailsHeight));
+
+    const auto drawColumn = [&](const int x, const char* hint, const std::string& payload) {
+      int lineY = y;
+      for (const auto& line : renderer.wrappedText(SMALL_FONT_ID, hint, columnWidth, kHintLines)) {
+        const int lineWidth = renderer.getTextWidth(SMALL_FONT_ID, line.c_str());
+        renderer.drawText(SMALL_FONT_ID, x + (columnWidth - lineWidth) / 2, lineY, line.c_str());
+        lineY += lineHeight;
+      }
+      QrUtils::drawQrCode(renderer, Rect{x + (columnWidth - code) / 2, codeY, code, code}, payload);
+    };
+    drawColumn(left, tr(STR_CONNECT_WIFI_HINT), std::string("WIFI:T:nopass;S:") + connectedSSID + ";;");
+    drawColumn(left + columnWidth + columnGap, tr(STR_OPEN_URL_HINT), hostnameUrl);
+
+    y = codeY + code + gap;
+    for (const auto& detail : details) {
+      renderer.drawCenteredText(SMALL_FONT_ID, y, renderer.truncatedText(SMALL_FONT_ID, detail.c_str(), width).c_str());
+      y += lineHeight + gap;
+    }
+  } else {
+    const int signalWidth = width / 3;
+    const std::string network = renderer.truncatedText(
+        SMALL_FONT_ID, (std::string(tr(STR_NETWORK_PREFIX)) + connectedSSID).c_str(), width - signalWidth - gap);
+    renderer.drawText(SMALL_FONT_ID, left, y, network.c_str());
+    drawWifiSignalStrength(renderer, left + width - signalWidth, y, signalWidth, lineHeight, currentRssi);
+    y += lineHeight + gap;
+
+    renderer.drawCenteredText(SMALL_FONT_ID, y, tr(STR_OPEN_URL_HINT), true);
+    y += lineHeight + gap;
+
+    const std::string url = "http://" + connectedIP + "/";
+    const int code = std::max(0, std::min({width, QR_CODE_WIDTH, bottom - y - lineHeight - gap}));
+    QrUtils::drawQrCode(renderer, Rect{contentRect.x + (contentRect.width - code) / 2, y, code, code}, url);
+    y += code + gap;
+
+    renderer.drawCenteredText(SMALL_FONT_ID, y, renderer.truncatedText(SMALL_FONT_ID, url.c_str(), width).c_str());
+    y += lineHeight + gap;
+  }
+
+  TouchExitButton::draw(renderer, mappedInput, left, y, width);
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+}
+
 void CrossPointWebServerActivity::renderServerRunning() const {
+  if (QrUtils::compactLayout(renderer)) {
+    renderServerRunningCompact();
+    return;
+  }
+
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
 
