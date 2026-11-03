@@ -113,7 +113,8 @@ HarfBuzz's MIT notice, which must ship with the port. The engine already has eve
 Arabic (a joining module plus right-to-left) and the Indic scripts is likely; section 5.6's "hundreds of KB" premise
 for a shaper is out of date.
 
-**Next step.** The shaper is being ported in step 2 and was measured first (the measurements file); the allocation fix is offered upstream (decision 7).
+**Next step.** The shaper is being ported in step 2 and was measured first (the measurements file); the allocation
+fix is offered upstream (decision 7).
 
 ## Parsed in step 0, read later
 
