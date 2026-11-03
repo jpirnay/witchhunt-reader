@@ -86,7 +86,8 @@ void Buffer::setStorage(void* const block, const size_t bytes) {
     const size_t skip = misalignment ? alignof(GlyphInfo) - misalignment : 0;
     if (bytes > skip) {
       storage_ = reinterpret_cast<GlyphInfo*>(static_cast<uint8_t*>(block) + skip);
-      slots_ = (bytes - skip) / SLOT_BYTES;
+      // prepare() refuses more glyphs than `indices` can number.
+      slots_ = std::min<size_t>((bytes - skip) / SLOT_BYTES, UINT16_MAX + 1u);
     }
   }
   bindStorage();

@@ -193,6 +193,18 @@ TEST(OtShaperBuffer, SetStorageLaysTheArraysInsideTheBlock) {
   }
 }
 
+// prepare() refuses more than 65,536 glyphs (`indices` is uint16_t), so a
+// larger block binds only that many slots and maxRunLength() names no run
+// that prepare() would then refuse.
+TEST(OtShaperBuffer, ABlockPastTheIndexLimitBindsAtMostItsSlots) {
+  constexpr unsigned LIMIT = UINT16_MAX + 1u;
+  BoundBuffer bound(LIMIT + 100);
+  EXPECT_EQ(bound.buffer.info.capacity(), LIMIT);
+  EXPECT_EQ(bound.buffer.indices.capacity(), LIMIT);
+  EXPECT_EQ(ot::maxRunLength(bound.buffer), (LIMIT - 16) / 2);
+  EXPECT_TRUE(bound.buffer.prepare(LIMIT));
+}
+
 // A growth past the storage fails the run through the Buffer's own
 // `successful`, whichever array refuses it.
 TEST(OtShaperBuffer, AGrowthPastTheStorageClearsSuccessful) {
