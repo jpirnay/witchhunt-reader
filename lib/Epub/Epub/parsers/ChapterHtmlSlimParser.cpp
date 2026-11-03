@@ -437,6 +437,7 @@ static int uncountedControlLen(const char* s, const int i, const int len) {
 
 // The most bytes of controls held for one word: eight, as many as the line pass keeps open
 // (BidiLine::kMaxOpenControls). A longer run is cut there, so a buffer of held controls always has room for the word.
+// Only the closers of the markup's controls go in past it (closeBidiEdges).
 constexpr int kMaxHeldControlBytes = 3 * BidiLine::kMaxOpenControls;
 
 bool hasAttributeToken(const char* value, const char* token) {
@@ -1257,20 +1258,22 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   // flush the buffer — route to table cell text when inside a <td>/<th>
   partWordBuffer[partWordBufferIndex] = '\0';
   // The CJK segment-break decisions are made here, where the word is whole: a SAX chunk may end
-  // inside a codepoint, so consumeText can see half a character.
+  // inside a codepoint, so consumeText can see half a character. They read the word's text, without the controls
+  // around it (partWordTextBegin_).
   if (partWordBufferIndex > 0) {
     if (cjkSegmentBreakPending_) {
       // The line break before this word vanishes when the text on both sides is unspaced CJK, or
       // when a quote meets unspaced CJK (lastTextCodepoint_ is still the previous word's last
       // character): the word is glued to the previous one, and ParsedText turns the seam into a CJK
       // gap where the rules allow a break there.
-      const uint32_t first = firstCodepointOf(partWordBuffer, partWordBufferIndex);
+      const uint32_t first =
+          firstCodepointOf(partWordBuffer + partWordTextBegin_, partWordTextEnd() - partWordTextBegin_);
       if (utf8IsUnspacedCjk(first) || (isQuotationMark(first) && utf8IsUnspacedCjk(lastTextCodepoint_))) {
         nextWordContinues = true;
       }
       cjkSegmentBreakPending_ = false;
     }
-    lastTextCodepoint_ = lastCodepointOf(partWordBuffer, partWordBufferIndex);
+    lastTextCodepoint_ = lastCodepointOf(partWordBuffer, partWordTextEnd());
   }
   // A word with CJK characters becomes up to one token per character, reserved at once. Charged only
   // after addWord, a run that takes the row past its budget would first double the cell's word lists
@@ -1428,11 +1431,87 @@ bool ChapterHtmlSlimParser::keepBidiControl(const char* bytes, const int length)
   return true;
 }
 
+void ChapterHtmlSlimParser::appendBidiControl(const uint32_t cp) {
+  if (partWordHasText() && partWordBufferIndex + 3 > MAX_WORD_SIZE) {
+    // A full word goes out first, the next chunk glued to it, as at the overflow in consumeText.
+    if (!flushPartWordBuffer()) return;
+    nextWordContinues = true;
+  }
+  if (partWordBufferIndex == 0) partWordControlsOnly_ = true;
+  partWordBuffer[partWordBufferIndex++] = static_cast<char>(0xE0 | (cp >> 12));
+  partWordBuffer[partWordBufferIndex++] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+  partWordBuffer[partWordBufferIndex++] = static_cast<char>(0x80 | (cp & 0x3F));
+}
+
+void ChapterHtmlSlimParser::openBidiEdge(const CssStyle& style, const bool inlineElement) {
+  // Where the element's text is not laid out, it has no text to bracket.
+  if (skipTextUntilDepth <= depth || rtDepth_ >= 0 || svgDepth > 0 || pendingDropCap_.active ||
+      (currentTable && currentTable->depth > 1)) {
+    return;
+  }
+  // CSS Writing Modes 3, 2.4.2. `rtl` and `ltr` are the computed direction; isolate's FSI takes auto or none.
+  constexpr uint32_t kLre = 0x202A, kRle = 0x202B, kPdf = 0x202C, kLro = 0x202D, kRlo = 0x202E;
+  constexpr uint32_t kLri = 0x2066, kRli = 0x2067, kFsi = 0x2068, kPdi = 0x2069;
+  const CssDirection direction = elementFlow_.direction;
+  const bool rtl = direction == CssDirection::Rtl;
+  uint32_t openers[2] = {};
+  BidiEdge edge;
+  edge.depth = static_cast<int16_t>(depth);
+  uint8_t openerCount = 0;
+  const auto set = [&](const std::initializer_list<uint32_t> open, const std::initializer_list<uint32_t> close) {
+    for (const uint32_t cp : open) openers[openerCount++] = cp;
+    for (const uint32_t cp : close) edge.closers[edge.count++] = cp;
+  };
+  switch (style.unicodeBidi) {
+    case CssUnicodeBidi::Embed:
+      if (inlineElement) set({rtl ? kRle : kLre}, {kPdf});
+      break;
+    case CssUnicodeBidi::Isolate:
+      if (inlineElement) {
+        set({direction == CssDirection::Ltr ? kLri : rtl ? kRli : kFsi}, {kPdi});
+      }
+      break;
+    case CssUnicodeBidi::BidiOverride:
+      set({rtl ? kRlo : kLro}, {kPdf});
+      break;
+    case CssUnicodeBidi::IsolateOverride:
+      if (inlineElement) {
+        set({kFsi, rtl ? kRlo : kLro}, {kPdf, kPdi});
+      } else {
+        set({rtl ? kRlo : kLro}, {kPdf});
+      }
+      break;
+    case CssUnicodeBidi::Plaintext:
+      if (inlineElement) set({kFsi}, {kPdi});
+      break;
+    default:
+      break;
+  }
+  if (openerCount == 0) return;
+  // Nested past the stack, or past the room a run of held controls has (a word's text takes any), the element inserts
+  // nothing: a missing level is better than an opener no closer ends.
+  if (bidiEdgeCount_ == kMaxFlowEntries) return;
+  if (!partWordHasText() && partWordBufferIndex + 3 * openerCount > kMaxHeldControlBytes) return;
+  for (uint8_t i = 0; i < openerCount; ++i) appendBidiControl(openers[i]);
+  bidiEdges_[bidiEdgeCount_++] = edge;
+}
+
+void ChapterHtmlSlimParser::closeBidiEdges(const int elementDepth) {
+  // A closer always goes in, past kMaxHeldControlBytes too: its opener is in the paragraph, and the run of held
+  // controls stays bounded, as no opener goes in past it and each open edge closes once.
+  while (bidiEdgeCount_ > 0 && bidiEdges_[bidiEdgeCount_ - 1].depth >= elementDepth) {
+    const BidiEdge& edge = bidiEdges_[--bidiEdgeCount_];
+    for (uint8_t i = 0; i < edge.count; ++i) appendBidiControl(edge.closers[i]);
+  }
+}
+
 bool ChapterHtmlSlimParser::addNoBreakSpace(const uint32_t offset) {
   // Controls held for the next word wait out the space: " " stays the token ParsedText knows as a no-break space. The
-  // copy takes kMaxHeldControlBytes at most, whatever the buffer holds.
-  char held[kMaxHeldControlBytes];
-  const int heldBytes = partWordControlsOnly_ ? std::min(partWordBufferIndex, kMaxHeldControlBytes) : 0;
+  // copy takes all a held run can be, kMaxHeldControlBytes and the closers of the open elements' markup, which go in
+  // past it (closeBidiEdges), whatever the buffer holds.
+  constexpr int kMaxHeldBytes = kMaxHeldControlBytes + 2 * 3 * kMaxFlowEntries;
+  char held[kMaxHeldBytes];
+  const int heldBytes = partWordControlsOnly_ ? std::min(partWordBufferIndex, kMaxHeldBytes) : 0;
   if (heldBytes > 0) {
     memcpy(held, partWordBuffer, static_cast<size_t>(heldBytes));
     partWordBufferIndex = 0;
@@ -1443,6 +1522,8 @@ bool ChapterHtmlSlimParser::addNoBreakSpace(const uint32_t offset) {
   partWordBuffer[0] = ' ';
   partWordBuffer[1] = '\0';
   partWordBufferIndex = 1;
+  partWordTextBegin_ = 0;
+  partWordTextEnd_ = 1;
   partWordVisibleOffset_ = offset;
   nextWordContinues = true;  // Attach space to previous word (no break).
   if (!flushPartWordBuffer()) return false;
@@ -3074,7 +3155,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // inline, and <rp> stays visible text for KOSync.
   if (self->rubyDepth_ < 0 && strcmp(name, "ruby") == 0) {
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
+      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
       if (!self->flushPartWordBuffer()) return;
       if (!endsAtDashBreak) self->nextWordContinues = true;
     }
@@ -3087,7 +3168,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->rtcDepth_ = self->depth;
   } else if (self->rubyDepth_ >= 0 && self->rtcDepth_ < 0 && self->rtDepth_ < 0 && strcmp(name, "rt") == 0) {
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
+      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
       if (!self->flushPartWordBuffer()) return;
       if (!endsAtDashBreak) self->nextWordContinues = true;
     }
@@ -3132,7 +3213,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (isInternalLink) {
       // Flush buffer before style change
       if (self->partWordHasText()) {
-        const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
+        const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
         if (!self->flushPartWordBuffer()) return;
         if (!endsAtDashBreak) {
           self->nextWordContinues = true;
@@ -3176,6 +3257,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       applyCssFontSizeToEntry(entry, cssStyle);
       self->inlineStyleStack.push_back(entry);
       self->updateEffectiveInlineStyle();
+      self->openBidiEdge(cssStyle, /*inlineElement=*/true);
 
       // Skip the rest of CSS resolution — the styling this <a> needs is applied above
       self->depth += 1;
@@ -3447,7 +3529,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
              matches(name, STRIKETHROUGH_TAGS, NUM_STRIKETHROUGH_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
+      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
       if (!self->flushPartWordBuffer()) return;
       if (!endsAtDashBreak) {
         self->nextWordContinues = true;
@@ -3499,7 +3581,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   } else if (matches(name, BOLD_TAGS, NUM_BOLD_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
+      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
       if (!self->flushPartWordBuffer()) return;
       if (!endsAtDashBreak) {
         self->nextWordContinues = true;
@@ -3534,7 +3616,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   } else if (matches(name, ITALIC_TAGS, NUM_ITALIC_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
+      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
       if (!self->flushPartWordBuffer()) return;
       if (!endsAtDashBreak) {
         self->nextWordContinues = true;
@@ -3610,7 +3692,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         (self->vertical_ && cssStyle.hasTextCombine()) || isSmallTag || isBigTag) {
       // Flush buffer before style change so preceding text gets current style
       if (self->partWordHasText()) {
-        const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
+        const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
         if (!self->flushPartWordBuffer()) return;
         if (!endsAtDashBreak) {
           self->nextWordContinues = true;
@@ -3642,6 +3724,15 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       self->inlineStyleStack.push_back(entry);
       self->updateEffectiveInlineStyle();
     }
+  }
+
+  // The element's bidi markup goes into its text, after any flush above and once its block, if it opens one, has
+  // started (deviation 5). A block the parser does not open (html, body, a list, a table) inserts nothing.
+  if (opensBlockSpan || matches(name, HEADER_TAGS, NUM_HEADER_TAGS) ||
+      (matches(name, BLOCK_TAGS, NUM_BLOCK_TAGS) && strcmp(name, "br") != 0)) {
+    self->openBidiEdge(cssStyle, /*inlineElement=*/false);
+  } else if (matches(name, INLINE_FORMATTING_TAGS, NUM_INLINE_FORMATTING_TAGS)) {
+    self->openBidiEdge(cssStyle, /*inlineElement=*/true);
   }
 
   // Unprocessed tag, just increasing depth and continue forward
@@ -3804,8 +3895,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
         ++self->partWordCjkCodepoints_;
         self->partWordLastWasCjk_ = false;
       }
-      self->notePartWordText(byteOff);
-      self->partWordBuffer[self->partWordBufferIndex++] = s[i];
+      self->appendPartWordText(s[i], byteOff);
       continue;
     }
 
@@ -3957,6 +4047,8 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
           self->partWordBuffer[j] = saved[j];
         }
         self->partWordBufferIndex = overflow;
+        self->partWordTextBegin_ = 0;
+        self->partWordTextEnd_ = overflow;
         // The saved bytes were counted at their own positions; synthetic text never advanced.
         self->partWordVisibleOffset_ = source ? byteOff - static_cast<uint32_t>(overflow) : byteOff;
       } else {
@@ -3965,8 +4057,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
       }
     }
 
-    self->notePartWordText(byteOff);
-    self->partWordBuffer[self->partWordBufferIndex++] = s[i];
+    self->appendPartWordText(s[i], byteOff);
   }
 }
 
@@ -4007,6 +4098,9 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
   if (self->streamFailed) {
     return;
   }
+
+  // The element's bidi closers end its text, in the word they follow, before any flush below takes that word.
+  self->closeBidiEdges(self->depth - 1);
 
   if (self->rtDepth_ >= 0 && self->rtDepth_ == self->depth - 1 && strcmp(name, "rt") == 0) {
     self->closeRt();  // then the generic close below: it ends the element's scopes like any inline element's
@@ -4060,7 +4154,7 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
                              matches(name, IMAGE_TAGS, NUM_IMAGE_TAGS) || self->depth == 1;
 
     if (shouldFlush) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordBufferIndex);
+      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
       if (!self->flushPartWordBuffer()) return;
       // If closing an inline element, the next word fragment continues the same visual word —
       // unless the buffered text ended at a dash that should allow a line break (em/en dash, etc.).

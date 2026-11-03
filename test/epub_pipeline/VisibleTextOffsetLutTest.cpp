@@ -371,6 +371,25 @@ TEST_F(SyntheticLutFixture, LiteralIsolatesCountAsText) {
   }
 }
 
+TEST_F(SyntheticLutFixture, InsertedControlsCountNowhere) {
+  // The span's RLI and PDI are markup the parser puts in the text, not source text: every page starts where it does
+  // without the span.
+  std::string spanned;
+  std::string plain;
+  for (int i = 0; i < 120; ++i) {
+    spanned += "<p><span dir=\"rtl\">שלום</span> עולם טוב.</p>\n";
+    plain += "<p>שלום עולם טוב.</p>\n";
+  }
+  const auto withSpans = build(book(spanned));
+  const auto without = build(book(plain));
+  ASSERT_GT(without->pageCount, 1);
+  ASSERT_EQ(withSpans->pageCount, without->pageCount);
+  for (uint16_t page = 0; page < without->pageCount; ++page) {
+    EXPECT_EQ(withSpans->getVisibleTextOffsetForPage(page), without->getVisibleTextOffsetForPage(page))
+        << "page " << page;
+  }
+}
+
 TEST_F(SyntheticLutFixture, EmptyPageStartsWhereTheNextElementDoes) {
   // A top margin taller than the page pushes the opening paragraph's first line off page 0, which
   // goes out with nothing on it. That happens while the paragraph is laid out, after its text was

@@ -29,13 +29,19 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
    O order=1,0
   LINE y=96 x=0 align=3 mult=1.000 hfid=0 words=9
    W x=181 s=0 z=100 t=Latin
-   W x=238 s=0 z=100 t=123
-   W x=259 s=0 z=100 t=ו
+   W x=238 s=0 z=100 t=123⁩
+    WD t=123
+   W x=259 s=0 z=100 t=ו⁦
+    WD t=ו
    W x=273 s=0 z=100 t=bdi
-   W x=299 s=0 z=100 t=text
-   W x=335 s=0 z=100 t=ו
-   W x=349 s=0 z=100 t=bdo
-   W x=381 s=0 z=100 t=text
+   W x=299 s=0 z=100 t=text⁩
+    WD t=text
+   W x=335 s=0 z=100 t=ו⁨
+    WD t=ו
+   W x=349 s=0 z=100 t=⁨‭bdo
+    WD t=bdo
+   W x=381 s=0 z=100 t=text‬⁩
+    WD t=text
    W x=423 s=0 z=100 t=מילה
     WD t=הלימ
    O order=7,8,6,4,5,3,1,2,0

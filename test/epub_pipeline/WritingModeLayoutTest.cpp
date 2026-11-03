@@ -953,6 +953,299 @@ TEST_F(BidiLayout, AMarkEndingAParagraphLeavesTheNextOneClean) {
   EXPECT_EQ(kOlam, lines[1].words[0].text);
 }
 
+// ---- Bidi markup in the text (deviation 5) ----
+
+// dir, <bdo>, <bdi> and unicode-bidi become the controls CSS Writing Modes 3 (2.4.2) gives them, in the text at the
+// element's edges. The host stub's widths: מילה 37, Latin 51, 123 21, סוף 22, abc 25, fed 27, ghi 29, "םולש:" 40, 3 8,
+// posts 46.
+const std::string kRle = "\xE2\x80\xAB";
+const std::string kPdf = "\xE2\x80\xAC";
+const std::string kRlo = "\xE2\x80\xAE";
+const std::string kLri = "\xE2\x81\xA6";
+const std::string kRli = "\xE2\x81\xA7";
+const std::string kFsi = "\xE2\x81\xA8";
+const std::string kPdi = "\xE2\x81\xA9";
+constexpr const char* kEmbedCss =
+    ".o { unicode-bidi: bidi-override; direction: rtl } .e { unicode-bidi: embed; direction: rtl }\n";
+
+// How many times `needle` occurs in `text`.
+size_t occurrences(const std::string& text, const std::string& needle) {
+  size_t count = 0;
+  for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + needle.size())) ++count;
+  return count;
+}
+
+TEST_F(BidiLayout, AnInlineDirSpanBecomesAnIsolate) {
+  const auto lines =
+      parseLines(dump("", document("<p dir=\"rtl\">מילה <span dir=\"ltr\">Latin 123</span> סוף</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(4u, lines[0].words.size());
+  expectWord(lines[0].words[0], 311, "סוף", "ףוס");
+  expectWord(lines[0].words[1], 339, kLri + "Latin", "Latin");
+  expectWord(lines[0].words[2], 396, "123" + kPdi, "123");
+  expectWord(lines[0].words[3], 423, "מילה", "הלימ");
+  EXPECT_EQ("3,1,2,0", lines[0].order);
+}
+
+TEST_F(BidiLayout, AnIsolateKeepsANumberAfterItOutside) {
+  // Without the isolate, 123 would join abc's left-to-right run; isolated, abc is a neutral and the number reads after
+  // it, on its left.
+  const auto lines =
+      parseLines(dump("", document("<p dir=\"rtl\">שלום <span dir=\"ltr\">abc</span> 123</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(3u, lines[0].words.size());
+  expectWord(lines[0].words[0], 370, "123", "");
+  expectWord(lines[0].words[1], 397, kLri + "abc" + kPdi, "abc");
+  expectWord(lines[0].words[2], 428, kShalom, kShalomDrawn);
+  EXPECT_EQ("2,1,0", lines[0].order);
+}
+
+TEST_F(BidiLayout, ABdoOverridesLatinText) {
+  const auto lines =
+      parseLines(dump("", document("<p dir=\"ltr\">abc <bdo dir=\"rtl\">def</bdo> ghi</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(3u, lines[0].words.size());
+  expectWord(lines[0].words[0], 0, "abc", "");
+  expectWord(lines[0].words[1], 31, kFsi + kRlo + "def" + kPdf + kPdi, "fed");
+  expectWord(lines[0].words[2], 64, "ghi", "");
+}
+
+TEST_F(BidiLayout, ABdiKeepsAUserNameApart) {
+  const auto lines = parseLines(dump("", document("<p dir=\"ltr\"><bdi>שלום</bdi>: 3 posts</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(3u, lines[0].words.size());
+  expectWord(lines[0].words[0], 0, kFsi + kShalom + kPdi + ":", "םולש:");
+  expectWord(lines[0].words[1], 46, "3", "");
+  expectWord(lines[0].words[2], 60, "posts", "");
+  EXPECT_EQ("", lines[0].order);
+}
+
+TEST_F(BidiLayout, UnicodeBidiInCss) {
+  const auto lines = parseLines(dump(
+      kEmbedCss, document("<p><span class=\"o\">def</span></p><p><span class=\"e\">def</span></p>"), bookAlignment()));
+  ASSERT_EQ(2u, lines.size());
+  ASSERT_EQ(1u, lines[0].words.size());
+  EXPECT_EQ(kRlo + "def" + kPdf, lines[0].words[0].text);
+  EXPECT_EQ("fed", lines[0].words[0].display);
+  ASSERT_EQ(1u, lines[1].words.size());
+  EXPECT_EQ(kRle + "def" + kPdf, lines[1].words[0].text);
+  EXPECT_EQ("def", lines[1].words[0].display);
+}
+
+TEST_F(BidiLayout, AnEmbeddingLetsItsNeighboursIn) {
+  // Deviation 12: the PDF takes the level of the Hebrew before it, so the colon joins the right-to-left run and the
+  // number reads before it. ABdiKeepsAUserNameApart is the isolate's contrast.
+  const auto lines = parseLines(
+      dump(kEmbedCss, document("<p dir=\"ltr\"><span class=\"e\">שלום</span>: 3 posts</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(3u, lines[0].words.size());
+  expectWord(lines[0].words[0], 0, "3", "");
+  expectWord(lines[0].words[1], 14, kRle + kShalom + kPdf + ":", ":םולש");
+  expectWord(lines[0].words[2], 60, "posts", "");
+  EXPECT_EQ("1,0,2", lines[0].order);
+}
+
+TEST_F(BidiLayout, AnLtrSpanInAnEnglishBookChangesNothing) {
+  // An LRI is no right-to-left class: the paragraph needs no bidi and drops the isolate.
+  const std::string out = dump("", document("<p>abc <span dir=\"ltr\">def</span> ghi</p>"));
+  const auto lines = parseLines(out);
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(3u, lines[0].words.size());
+  expectWord(lines[0].words[0], 0, "abc", "");
+  expectWord(lines[0].words[1], 31, "def", "");
+  expectWord(lines[0].words[2], 64, "ghi", "");
+  EXPECT_EQ(dump("", document("<p>abc <span>def</span> ghi</p>")), out);
+}
+
+TEST_F(BidiLayout, AnLtrSpanLeavesTheBreaksAtItsEdgesAsTheyWere) {
+  // The parser's reads of a word's edges look past the controls it inserted: a dash before a tag still allows a break
+  // after it, and a source line break between CJK characters still vanishes, as without the dir.
+  const pipeline_harness::Profile profile;
+  const std::pair<const char*, const char*> latin[] = {
+      {"<p><span dir=\"ltr\">foo\xE2\x80\x94</span><i>bar</i></p>", "<p><span>foo\xE2\x80\x94</span><i>bar</i></p>"},
+      {"<p><i dir=\"ltr\">foo\xE2\x80\x94</i>bar</p>", "<p><i>foo\xE2\x80\x94</i>bar</p>"},
+  };
+  for (const auto& [marked, plain] : latin) {
+    EXPECT_EQ(dump("", document(plain), profile), dump("", document(marked), profile)) << marked;
+  }
+  const std::pair<const char*, const char*> cjk[] = {
+      {"<p><span dir=\"ltr\">日本</span>\n語</p>", "<p><span>日本</span>\n語</p>"},
+      {"<p>日本\n<span dir=\"ltr\">語</span></p>", "<p>日本\n<span>語</span></p>"},
+  };
+  for (const auto& [marked, plain] : cjk) {
+    EXPECT_EQ(dump("", document(plain), profile, {}, "", "ja"), dump("", document(marked), profile, {}, "", "ja"))
+        << marked;
+  }
+}
+
+TEST_F(BidiLayout, AnIsolateAcrossALineBreakKeepsItsOrder) {
+  // 210 px: the first line ends after "three", and the second holds the span's last four words and עולם. The isolate
+  // opened on the first line runs on: its words read left to right, and the Hebrew after it reads on their left.
+  pipeline_harness::Profile narrow = bookAlignment();
+  narrow.viewportWidth = 210;
+  const char* const span[] = {"one", "two", "three", "four", "five", "six", "seven"};
+  const std::string out = dump(
+      "", document("<p dir=\"rtl\">שלום <span dir=\"ltr\">one two three four five six seven</span> עולם</p>"), narrow);
+  const auto lines = parseLines(out);
+  ASSERT_GE(lines.size(), 2u) << out;
+  const auto drawn = [](const Word& word) { return word.display.empty() ? word.text : word.display; };
+  const Line* last = nullptr;
+  for (const Line& line : lines) {
+    for (const Word& word : line.words) {
+      if (word.text == kOlam) last = &line;
+    }
+  }
+  ASSERT_NE(nullptr, last);
+  int olamX = -1;
+  std::vector<std::pair<int, int>> spanWords;  // source index, x
+  for (const Word& word : last->words) {
+    if (word.text == kOlam) olamX = word.x;
+    for (int i = 0; i < 7; ++i) {
+      if (drawn(word) == span[i]) spanWords.emplace_back(i, word.x);
+    }
+  }
+  ASSERT_GE(spanWords.size(), 2u) << out;
+  for (size_t i = 1; i < spanWords.size(); ++i) {
+    EXPECT_GT(spanWords[i].first, spanWords[i - 1].first) << "visual order " << i;
+  }
+  EXPECT_LT(olamX, spanWords.front().second);
+}
+
+TEST_F(BidiLayout, DirAutoSkipsAnIsolatedName) {
+  // UAX #9 P2: the first letter with a direction outside every isolate decides an auto paragraph, not a name in a bdi.
+  const auto ltr = parseLines(dump("", document("<p dir=\"auto\"><bdi>שלום</bdi> abc</p>"), bookAlignment()));
+  ASSERT_EQ(1u, ltr.size());
+  ASSERT_EQ(2u, ltr[0].words.size());
+  expectWord(ltr[0].words[0], 0, kFsi + kShalom + kPdi, kShalomDrawn);
+  expectWord(ltr[0].words[1], 38, "abc", "");
+  EXPECT_EQ("", ltr[0].order);
+  const auto rtl = parseLines(dump("", document("<p dir=\"auto\"><bdi>abc</bdi> שלום</p>"), bookAlignment()));
+  ASSERT_EQ(1u, rtl.size());
+  ASSERT_EQ(2u, rtl[0].words.size());
+  expectWord(rtl[0].words[0], 397, kShalom, kShalomDrawn);
+  expectWord(rtl[0].words[1], 435, kFsi + "abc" + kPdi, "abc");
+  EXPECT_EQ("1,0", rtl[0].order);
+}
+
+TEST_F(BidiLayout, ABlockTakesOnlyTheOverride) {
+  // A block's isolate is its paragraph's direction (no control); its override is an RLO over its text.
+  const auto lines = parseLines(
+      dump("", document("<p dir=\"rtl\" style=\"unicode-bidi: bidi-override\">abc def</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0].words.size());
+  expectWord(lines[0].words[0], 402, "def" + kPdf, "fed");
+  expectWord(lines[0].words[1], 435, kRlo + "abc", "cba");
+  EXPECT_EQ("1,0", lines[0].order);
+}
+
+TEST_F(BidiLayout, AHiddenElementInsertsNothing) {
+  // Hidden, or with its text transparent, an element lays out no text, and leaves no control for the next word.
+  const pipeline_harness::Profile profile = bookAlignment();
+  const std::pair<const char*, const char*> cases[] = {
+      {"<p dir=\"rtl\">שלום <span dir=\"ltr\" hidden=\"\">abc</span> עולם</p>",
+       "<p dir=\"rtl\">שלום <span hidden=\"\">abc</span> עולם</p>"},
+      {"<p dir=\"rtl\">שלום <span style=\"color: transparent\"><span dir=\"ltr\">abc</span></span> עולם</p>",
+       "<p dir=\"rtl\">שלום <span style=\"color: transparent\"><span>abc</span></span> עולם</p>"},
+  };
+  for (const auto& [marked, plain] : cases) {
+    EXPECT_EQ(dump("", document(plain), profile), dump("", document(marked), profile)) << marked;
+  }
+}
+
+TEST_F(BidiLayout, AnElementPastTheHeldControlsCapInsertsNothing) {
+  // Four nested bdo open 24 bytes of controls at the word's start, as many as are held for one word: the fifth inserts
+  // neither its opener nor its closer, so the word stays balanced.
+  const std::string bdo = "<bdo dir=\"rtl\">";
+  std::string body = "<p>x ";
+  for (int i = 0; i < 5; ++i) body += bdo;
+  body += "abc";
+  for (int i = 0; i < 5; ++i) body += "</bdo>";
+  body += " y</p>";
+  const auto lines = parseLines(dump("", document(body)));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(3u, lines[0].words.size());
+  std::string expected;
+  for (int i = 0; i < 4; ++i) expected += kFsi + kRlo;
+  expected += "abc";
+  for (int i = 0; i < 4; ++i) expected += kPdf + kPdi;
+  EXPECT_EQ(expected, lines[0].words[1].text);
+  EXPECT_EQ("cba", lines[0].words[1].display);
+}
+
+TEST_F(BidiLayout, ACloserGoesInPastTheHeldControlsCap) {
+  // The RLI and seven RLMs fill the held run (an eighth is cut), and the span's PDI still closes it, across a no-break
+  // space too: a closer is never dropped.
+  std::string marks;
+  for (int i = 0; i < 8; ++i) marks += "&#x200F;";
+  std::string held = kRli;
+  for (int i = 0; i < 7; ++i) held += kRlm;
+  held += kPdi;
+  for (const char* between : {"", "&#xA0;"}) {
+    const auto lines =
+        parseLines(dump("", document("<p>x <span dir=\"rtl\">" + marks + "</span>" + between + "abc y</p>")));
+    ASSERT_EQ(1u, lines.size()) << between;
+    const Word* abc = nullptr;
+    for (const Word& word : lines[0].words) {
+      if (word.text.size() > 3 && word.text.compare(word.text.size() - 3, 3, "abc") == 0) abc = &word;
+    }
+    ASSERT_NE(nullptr, abc) << between;
+    EXPECT_EQ(held + "abc", abc->text) << between;
+  }
+}
+
+TEST_F(BidiLayout, AParagraphEndSpendsTheOpenMarkup) {
+  // An isolate open where its paragraph ends closes with it: the paragraph after a line break or a block inside the
+  // span gets no PDI for an isolate it does not hold.
+  const std::pair<const char*, size_t> cases[] = {
+      {"<p dir=\"rtl\">שלום <span dir=\"ltr\">abc<br/>def</span> עולם</p>", 2},
+      {"<div><span dir=\"rtl\">abc<p>def</p>ghi</span></div>", 2},
+  };
+  for (const auto& [body, lineCount] : cases) {
+    const std::string out = dump("", document(body), bookAlignment());
+    const auto lines = parseLines(out);
+    ASSERT_EQ(lineCount, lines.size()) << out;
+    for (size_t i = 0; i < lines.size(); ++i) {
+      std::string text;
+      for (const Word& word : lines[i].words) text += word.text;
+      // The span's opener goes out with its first line's paragraph.
+      EXPECT_EQ(i == 0 ? 1u : 0u, occurrences(text, kLri) + occurrences(text, kRli)) << body << " line " << i;
+      EXPECT_EQ(0u, occurrences(text, kPdi)) << body << " line " << i;
+    }
+  }
+}
+
+TEST_F(BidiLayout, ACellDrainedUnderAWordKeepsItsIsolateClosed) {
+  // 253 words leave the cell 16 bytes short of its row budget (ChapterHtmlSlimParser), so the CJK word opening the span
+  // drains the cell's text so far as a paragraph before the word goes in. The word takes its RLI into the cell's fresh
+  // text, and the span's PDI follows it there: no paragraph ended under the word. (The RLI is a token of its own, cut
+  // before 日 by the CJK rules; it draws nothing, so the dump lists no word for it.)
+  std::string cell;
+  for (int i = 0; i < 253; ++i) cell += "word ";
+  const auto lines = parseLines(
+      dump("", document("<table><tr><td>" + cell + "<span dir=\"rtl\">日本 more</span> end</td></tr></table>"),
+           bookAlignment()));
+  ASSERT_FALSE(lines.empty());
+  std::string last;
+  for (const Word& word : lines.back().words) last += word.text + " ";
+  EXPECT_EQ("日 本 more" + kPdi + " end ", last);
+}
+
+TEST_F(BidiLayout, AnElementNestedPastTheStackInsertsNothing) {
+  // Eight elements open their isolates; a ninth inside them inserts neither its opener nor its closer.
+  std::string body = "<p>";
+  for (int i = 0; i < 9; ++i) body += "w <span dir=\"rtl\">";
+  body += "z";
+  for (int i = 0; i < 9; ++i) body += "</span>";
+  body += " end</p>";
+  const auto lines = parseLines(dump("", document(body)));
+  std::string all;
+  for (const Line& line : lines) {
+    for (const Word& word : line.words) all += word.text;
+  }
+  EXPECT_EQ(8u, occurrences(all, kRli));
+  EXPECT_EQ(8u, occurrences(all, kPdi));
+}
+
 // ---- The spine's page progression ----
 
 TEST_F(WritingModeLayout, ThePageProgressionSurvivesBookBin) {

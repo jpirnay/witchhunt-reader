@@ -186,13 +186,22 @@ size_t visibleBytesOutsideControls(const char* text, const int len) {
 }
 
 // The level (BidiUtils::strongLevel: 0 for a letter of class L, 1 for R or AL) of the first letter in `tokens`, read in
-// order, that has a direction of its own; -1 when none has.
+// order, that has a direction of its own, outside every isolate (UAX #9 P2: from an LRI, RLI or FSI to its matching
+// PDI, or to the end); -1 when none has.
 int firstStrongLevel(const std::vector<std::string>& tokens) {
+  int isolates = 0;
   for (const std::string& token : tokens) {
     const auto* p = reinterpret_cast<const unsigned char*>(token.c_str());
     while (*p != 0) {
-      const int level = BidiUtils::strongLevel(utf8NextCodepoint(&p));
-      if (level >= 0) return level;
+      const uint32_t cp = utf8NextCodepoint(&p);
+      if (cp >= 0x2066 && cp <= 0x2068) {
+        ++isolates;
+      } else if (cp == 0x2069) {
+        if (isolates > 0) --isolates;
+      } else if (isolates == 0) {
+        const int level = BidiUtils::strongLevel(cp);
+        if (level >= 0) return level;
+      }
     }
   }
   return -1;

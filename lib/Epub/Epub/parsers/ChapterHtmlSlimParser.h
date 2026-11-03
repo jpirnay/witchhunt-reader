@@ -111,17 +111,37 @@ class ChapterHtmlSlimParser final : public Print {
   bool partWordControlsOnly_ = false;
   // partWordBuffer holds a word's text, not just controls held for one.
   bool partWordHasText() const { return partWordBufferIndex > 0 && !partWordControlsOnly_; }
-  // The byte at `offset` is text of the word in partWordBuffer: the word's first such byte sets its visible offset.
-  void notePartWordText(const uint32_t offset) {
-    if (partWordHasText()) return;
-    partWordVisibleOffset_ = offset;
-    partWordControlsOnly_ = false;
+  // partWordBuffer's text without the controls held before it and those put in after its last byte:
+  // [partWordTextBegin_, partWordTextEnd_), valid while partWordHasText(). The parse-time reads of a word's first and
+  // last character look there: a pass that needs no bidi drops the controls, and what it lays out must not depend on
+  // them.
+  int partWordTextBegin_ = 0;
+  int partWordTextEnd_ = 0;
+  // partWordTextEnd_ within the buffer, which a word cut at a split character ends short of.
+  int partWordTextEnd() const {
+    return partWordTextEnd_ < partWordBufferIndex ? partWordTextEnd_ : partWordBufferIndex;
+  }
+  // Appends `byte`, text of the word in partWordBuffer from `offset`: the word's first such byte sets its visible
+  // offset.
+  void appendPartWordText(const char byte, const uint32_t offset) {
+    if (!partWordHasText()) {
+      partWordVisibleOffset_ = offset;
+      partWordControlsOnly_ = false;
+      partWordTextBegin_ = partWordBufferIndex;
+    }
+    partWordBuffer[partWordBufferIndex++] = byte;
+    partWordTextEnd_ = partWordBufferIndex;
   }
   // Puts the bidi control in the `length` bytes at `bytes` in partWordBuffer (consumeText). False when the stream
   // failed.
   bool keepBidiControl(const char* bytes, int length);
-  // Drops controls held for a word that did not come: they end with their block.
+  // Drops controls held for a word that did not come: they end with their block. So does the open elements' bidi
+  // markup (bidiEdges_), spent here. Not with a word in hand: a table cell drained under its flush goes on in fresh
+  // text, where the word takes its opener (a closer whose opener went out with the drained text does nothing there,
+  // UAX #9 X6a and X7).
   void dropHeldBidiControls() {
+    if (partWordHasText()) return;
+    for (uint8_t i = 0; i < bidiEdgeCount_; ++i) bidiEdges_[i].count = 0;
     if (!partWordControlsOnly_) return;
     partWordBufferIndex = 0;
     partWordControlsOnly_ = false;
@@ -721,6 +741,28 @@ class ChapterHtmlSlimParser final : public Print {
   // line-height other than its parent's, and returns its computed values. `depth` is the element's own (startElement
   // increments it last).
   FlowEntry enterFlow(const CssStyle& style);
+
+  // The open elements whose bidi markup put controls in the text (design deviation 5), innermost last: what each puts
+  // in at its end tag. An element nested past the eighth, or whose opener a run of held controls has no room for
+  // (kMaxHeldControlBytes), inserts nothing, neither opener nor closer. Where a paragraph ends, the open ones are spent
+  // (count 0): the next paragraph gets no closer whose opener it does not hold.
+  struct BidiEdge {
+    int16_t depth = 0;
+    uint32_t closers[2] = {};  // in the order they go in
+    uint8_t count = 0;
+  };
+  BidiEdge bidiEdges_[kMaxFlowEntries] = {};
+  uint8_t bidiEdgeCount_ = 0;
+  // Puts the controls the element opening now asks for (CSS Writing Modes 3, 2.4.2: its unicode-bidi and computed
+  // direction, elementFlow_) at the start of its text, and pushes the edge with their closers. An inline element takes
+  // them all; one laid out as its own block (`inlineElement` false) only an override, as its other values set its
+  // paragraph's direction. Nothing where its text is not laid out (an rt's, a nested table's, a transparent run's).
+  void openBidiEdge(const CssStyle& style, bool inlineElement);
+  // At the end tag of the element at `elementDepth`: its closers go in, and those of any edge left deeper.
+  void closeBidiEdges(int elementDepth);
+  // Puts the 3-byte control `cp` in partWordBuffer, flushing a full word first. It counts nowhere: no visible offset is
+  // taken at it, and on an empty buffer it is held for the next word (partWordControlsOnly_).
+  void appendBidiControl(uint32_t cp);
   // The direction a block built for `style` records: Auto for unicode-bidi: plaintext, else the element's computed one
   // (elementFlow_, so call it while startElement resolves the element).
   [[nodiscard]] CssDirection blockDirection(const CssStyle& style) const {
