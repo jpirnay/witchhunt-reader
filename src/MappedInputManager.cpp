@@ -164,7 +164,10 @@ bool MappedInputManager::wasPressed(const Button button) const {
          (syntheticPressedMask_ & static_cast<uint16_t>(1u << static_cast<uint8_t>(button))) != 0;
 }
 
-bool MappedInputManager::wasReleased(const Button button) const { return mapButton(button, &HalGPIO::wasReleased); }
+bool MappedInputManager::wasReleased(const Button button) const {
+  return mapButton(button, &HalGPIO::wasReleased) ||
+         (syntheticPressedMask_ & static_cast<uint16_t>(1u << static_cast<uint8_t>(button))) != 0;
+}
 
 bool MappedInputManager::isPressed(const Button button) const {
   return mapButton(button, &HalGPIO::isPressed) ||
@@ -178,7 +181,7 @@ bool MappedInputManager::hasPendingPress(const Button button) const {
 
 bool MappedInputManager::wasAnyPressed() const { return gpio.wasAnyPressed() || syntheticPressedMask_ != 0; }
 
-bool MappedInputManager::wasAnyReleased() const { return gpio.wasAnyReleased(); }
+bool MappedInputManager::wasAnyReleased() const { return gpio.wasAnyReleased() || syntheticPressedMask_ != 0; }
 
 unsigned long MappedInputManager::getHeldTime() const { return gpio.getHeldTime(); }
 
