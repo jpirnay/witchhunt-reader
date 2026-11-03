@@ -859,7 +859,9 @@ TEST_F(BidiLayout, AnRlmInAnEnglishParagraphIsLaidOutByUax9) {
 
 TEST_F(BidiLayout, AWordOfMarksInAnEnglishParagraphChangesNothingAroundIt) {
   // A word of marks is held for the next word. It glues that word to nothing, waits out a no-break space, leaves a drop
-  // cap its place and ends with its table cell: each paragraph lays out byte for byte as without the mark.
+  // cap its place, and ends with its table cell or where a table or a picture empties its block: each paragraph lays
+  // out byte for byte as without the mark.
+  const std::vector<SyntheticFile> picture = {{"pic.png", "image/png", syntheticPngHeader(200, 150)}};
   const std::string capText =
       "lpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo "
       "sierra tango uniform victor whiskey xray yankee zulu alpha bravo charlie delta echo foxtrot golf hotel india";
@@ -871,9 +873,13 @@ TEST_F(BidiLayout, AWordOfMarksInAnEnglishParagraphChangesNothingAroundIt) {
       {"<p>&#x200E;" + cap + capText + "</p>", "<p>" + cap + capText + "</p>"},
       {"<table><tr><td>abc &#x200F;</td><td>def</td></tr></table>",
        "<table><tr><td>abc </td><td>def</td></tr></table>"},
+      {"<div>abc &#x200F;<table><tr><td>def</td></tr></table></div>",
+       "<div>abc <table><tr><td>def</td></tr></table></div>"},
+      {"<div>&#x200F;<img src=\"pic.png\" alt=\"\"/>def</div>", "<div><img src=\"pic.png\" alt=\"\"/>def</div>"},
   };
+  const pipeline_harness::Profile profile;
   for (const auto& [marked, plain] : cases) {
-    EXPECT_EQ(dump("", document(plain)), dump("", document(marked))) << marked;
+    EXPECT_EQ(dump("", document(plain), profile, picture), dump("", document(marked), profile, picture)) << marked;
   }
 }
 

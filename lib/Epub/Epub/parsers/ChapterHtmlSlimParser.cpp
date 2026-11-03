@@ -2436,6 +2436,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (self->partWordBufferIndex > 0) {
       if (!self->flushPartWordBuffer()) return;
     }
+    self->dropHeldBidiControls();  // the paragraph before the table ends here
     if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
       self->makePages();
     }
@@ -2932,6 +2933,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
                 if (self->partWordBufferIndex > 0) {
                   if (!self->flushPartWordBuffer()) return;
                 }
+                self->dropHeldBidiControls();  // the paragraph before the image ends here
                 if (self->currentTextBlock && !self->currentTextBlock->isEmpty()) {
                   const BlockStyle parentBlockStyle = self->currentTextBlock->getBlockStyle();
                   self->startNewTextBlock(parentBlockStyle);
