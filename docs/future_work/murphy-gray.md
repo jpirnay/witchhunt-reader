@@ -37,7 +37,9 @@ bar leaves went from 4.2 to 2.5 points below a row that never held it (`tools/mu
 four moves each, one panel). Patches agree, and 24 frames overshoots on black that FAST drew. VSL at
 -15 V barely helped, and a VSL touch on `WW` made things much worse.
 
-**The refresh counter.** Whether it can go back up is a judgement for real use.
+**The refresh counter.** The driver no longer promotes FAST to a full refresh on its own, so the
+setting means what it says, and "Never" means no periodic full refresh at all. It had capped every
+setting at 9 while the log still said FAST. Ghosting over runs longer than 9 has not been measured.
 
 **HALF may leave more than FAST.** The same band read 5.7 points below the untouched row after the next
 HALF, on both FAST builds. Not like for like: by then the row had also been toggled four more times. But a
