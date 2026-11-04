@@ -11,6 +11,7 @@
 #include <BookDetails.h>
 #include <CooperativeAbort.h>
 #include <FileBrowserModel.h>
+#include <HalStorage.h>
 #include <LibraryFreshness.h>
 #include <LibraryOrder.h>
 #include <RecentBooksStore.h>
@@ -366,6 +367,34 @@ TEST_F(FileBrowserModelTest, SearchingEverywhereHoldsOneFolderPerLevel) {
   EXPECT_EQ(model.entryName(0), "An Author Called Somebody 599/the one.epub");
   // 600 queued paths were ~70 KB.
   EXPECT_LT(window.peakAbove() - listing, 8 * 1024);
+}
+
+// A subfolder opened by path is searched for in its parent from the first entry: 27 ms apiece, 40 s
+// in a folder of 1,800. The entry the listing hands out already is that folder.
+TEST_F(FileBrowserModelTest, CountingBooksOpensOnlyTheFolderAskedAboutByPath) {
+  file("A/one.epub");
+  file("A/B/two.epub");
+  file("C/three.epub");
+  file("C/cover.jpg");
+  HalFile::folderOpens = 0;
+
+  EXPECT_EQ(FileBrowserModel::countBooksBelow(root), 3);
+
+  EXPECT_EQ(HalFile::folderOpens, 1u);
+}
+
+TEST_F(FileBrowserModelTest, SearchingEverywhereOpensOnlyTheFolderAskedAboutByPath) {
+  file("A/match one.epub");
+  file("A/B/match two.epub");
+  file("C/match three.epub");
+  FileBrowserModel model;
+  model.setPath(root);
+  HalFile::folderOpens = 0;
+
+  model.searchEverywhere("match");
+
+  EXPECT_EQ(model.entryCount(), 3u);
+  EXPECT_EQ(HalFile::folderOpens, 1u);
 }
 
 // Eight folders down, as far as the folder counts and the book index look.

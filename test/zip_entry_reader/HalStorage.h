@@ -37,7 +37,8 @@ class HalFile : public Print {
         entryDate_(o.entryDate_),
         entryTime_(o.entryTime_),
         entries_(std::move(o.entries_)),
-        next_(o.next_) {
+        next_(o.next_),
+        dirPath_(std::move(o.dirPath_)) {
     o.fp_ = nullptr;
     o.hasImpl_ = false;
     o.isDir_ = false;
@@ -57,6 +58,7 @@ class HalFile : public Print {
       entryTime_ = o.entryTime_;
       entries_ = std::move(o.entries_);
       next_ = o.next_;
+      dirPath_ = std::move(o.dirPath_);
       o.fp_ = nullptr;
       o.hasImpl_ = false;
       o.isDir_ = false;
@@ -138,6 +140,7 @@ class HalFile : public Print {
     std::error_code ec;
     if (!std::filesystem::is_directory(path, ec) || ec) return false;
     isDir_ = true;
+    dirPath_ = path;
     for (const auto& e : std::filesystem::directory_iterator(path, ec)) {
       DirEntry entry{e.path().filename().string(), e.is_directory()};
       if (!entry.isDir) {
@@ -182,6 +185,8 @@ class HalFile : public Print {
   // directory walk there.
   static inline size_t calls = 0;
   static inline size_t opens = 0;
+  // Folders opened by path: on the device each one searches its parent from the first entry.
+  static inline size_t folderOpens = 0;
   // And flushes: on the device a sync writes the file's data and its directory entry out to the card.
   static inline size_t flushes = 0;
 
@@ -296,12 +301,14 @@ class HalFile : public Print {
   bool getCreateDateTime(uint16_t* pdate, uint16_t* ptime) { return getModifyDateTime(pdate, ptime); }
   bool isDirectory() const { return isDir_; }
   void rewindDirectory() { next_ = 0; }
-  // One entry per call, exhausted-directory returns a falsy handle. Only the
-  // name and the directory flag are populated — that is all a scan reads.
+  // One entry per call, exhausted-directory returns a falsy handle. A folder's
+  // entry can be listed in turn, as SdFat's can; a file's carries what a scan
+  // reads, and no open stream.
   HalFile openNextFile() {
     HalFile f;
     if (next_ >= entries_.size()) return f;
     const DirEntry& e = entries_[next_++];
+    if (e.isDir) f.openDir(dirPath_ + "/" + e.name);
     f.hasImpl_ = true;
     f.hasName_ = true;
     f.name_ = e.name;
@@ -359,6 +366,7 @@ class HalFile : public Print {
   uint16_t entryTime_ = 0;
   std::vector<DirEntry> entries_;
   size_t next_ = 0;
+  std::string dirPath_;
 };
 
 using FsFile = HalFile;
@@ -421,6 +429,7 @@ class HalStorage {
     HalFile f;
     std::error_code ec;
     if (std::filesystem::is_directory(path, ec) && !ec) {
+      ++HalFile::folderOpens;
       f.openDir(path);
     } else {
       f.openForRead(path);
