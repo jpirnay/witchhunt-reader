@@ -233,7 +233,8 @@ black driven repeatedly lifts several points less than the Test 2 table says.
 white through FAST beside a strip that never changes, and `./cam.py strip` reports the difference.
 `--settled` draws the black with a full refresh first, which is what UI black is, and `--dwell` leaves
 it up. Check `./cam.py still baseline-white <shot>` after each run: a bumped camera reads as a result.
-The numbers are in `docs/future_work/murphy-gray.md`.
+`./ui_ghost.py <tag> --port <port>` measures the same thing on a real Settings list with the reader on
+the device. The numbers are in `docs/future_work/murphy-gray.md`.
 
 **Still open.** Long-term DC behaviour. The BMP viewer has not been run. A book with a stored
 `textAntiAliasingOverride` of 0 stays B/W, whatever the setting says.
