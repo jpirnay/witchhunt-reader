@@ -9,6 +9,7 @@
 #include <XteinkDetect.h>
 #include <driver/usb_serial_jtag.h>
 #include <esp_sleep.h>
+#include <soc/soc_caps.h>
 
 // Global HalGPIO instance
 HalGPIO gpio;
@@ -353,6 +354,55 @@ static const char* buttonTraceName(uint8_t idx) {
       return "?";
   }
 }
+
+#if FREEINK_DEVICE_MURPHY
+// Passive discovery for the reported fourth/left Murphy key. These pins are
+// unused by the M3 profile. Do not change their mode or pulls while probing:
+// some board revisions may route them to circuitry not represented in the SDK.
+static void traceMurphyUnassignedButtonPins(const uint32_t now) {
+  constexpr int8_t candidatePins[] = {11, 38, 47};
+  struct PinTrace {
+    int raw = -1;
+    int stable = -1;
+    uint32_t changedAt = 0;
+    bool initialized = false;
+  };
+  static PinTrace traces[sizeof(candidatePins) / sizeof(candidatePins[0])];
+  static bool announced = false;
+  static uint32_t lastSummaryAt = 0;
+  if (!announced) {
+    LOG_INF("BTN", "passive unknown-key GPIO probe: 11,38,47 (no pin-mode or pull changes)");
+    announced = true;
+  }
+
+  if (now - lastSummaryAt >= 2000) {
+    LOG_INF("BTN", "unmapped GPIO levels 11=%d 38=%d 47=%d", digitalRead(11), digitalRead(38), digitalRead(47));
+    lastSummaryAt = now;
+  }
+
+  for (size_t i = 0; i < sizeof(candidatePins) / sizeof(candidatePins[0]); ++i) {
+    const int pin = candidatePins[i];
+    const int level = digitalRead(pin);
+    PinTrace& trace = traces[i];
+    if (!trace.initialized) {
+      trace.raw = trace.stable = level;
+      trace.changedAt = now;
+      trace.initialized = true;
+      LOG_INF("BTN", "GPIO%d baseline=%d", pin, level);
+      continue;
+    }
+    if (level != trace.raw) {
+      trace.raw = level;
+      trace.changedAt = now;
+    }
+    if (trace.raw != trace.stable && now - trace.changedAt >= 40) {
+      trace.stable = trace.raw;
+      LOG_INF("BTN", "unmapped GPIO%d stable level=%d (%s)", pin, trace.stable,
+              trace.stable == LOW ? "LOW/pressed candidate" : "HIGH/released candidate");
+    }
+  }
+}
+#endif
 #endif
 
 void HalGPIO::sampleOnce() {
@@ -369,6 +419,10 @@ void HalGPIO::sampleOnce() {
     HalI2cBus::Lock i2cLock;
     inputMgr.update();
   }
+
+#if defined(BUTTON_TRACE) && BUTTON_TRACE && FREEINK_DEVICE_MURPHY
+  traceMurphyUnassignedButtonPins(millis());
+#endif
 
   uint8_t live = 0;
   uint8_t pressed = 0;
@@ -549,6 +603,19 @@ void HalGPIO::sampleOnce() {
   }
 
   if (pressed != 0 || released != 0) {
+    const auto& pins = BoardConfig::ACTIVE.input;
+    const auto rawLevel = [](const int8_t pin) { return pin >= 0 ? digitalRead(pin) : -1; };
+    static bool buttonPinMapLogged = false;
+    if (!buttonPinMapLogged) {
+      LOG_INF("BTN", "pin map back=%d confirm=%d left=%d right=%d up=%d down=%d power=%d (raw 0=LOW, 1=HIGH)",
+              static_cast<int>(pins.back), static_cast<int>(pins.confirm), static_cast<int>(pins.left),
+              static_cast<int>(pins.right), static_cast<int>(pins.up), static_cast<int>(pins.down),
+              static_cast<int>(pins.power));
+      buttonPinMapLogged = true;
+    }
+    LOG_INF("BTN", "GPIO levels back=%d confirm=%d left=%d right=%d up=%d down=%d power=%d", rawLevel(pins.back),
+            rawLevel(pins.confirm), rawLevel(pins.left), rawLevel(pins.right), rawLevel(pins.up), rawLevel(pins.down),
+            rawLevel(pins.power));
     for (uint8_t i = 0; i <= BTN_POWER; i++) {
       const bool down = (pressed & (1u << i)) != 0;
       const bool up = (released & (1u << i)) != 0;
@@ -1168,6 +1235,11 @@ bool HalGPIO::canDetectUsbElectrically() const {
 HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
   const auto wakeupCause = esp_sleep_get_wakeup_cause();
   const auto resetReason = esp_reset_reason();
+#if SOC_PM_SUPPORT_EXT1_WAKEUP
+  const uint64_t ext1WakeMask = wakeupCause == ESP_SLEEP_WAKEUP_EXT1 ? esp_sleep_get_ext1_wakeup_status() : 0ULL;
+#else
+  constexpr uint64_t ext1WakeMask = 0;  // no EXT1 wake source on the C3, and no such function to link
+#endif
 
   // X3: a POWERON reset can come from either a power-button press (battery-latch
   // MOSFET closes) OR from USB VBUS supplying power to the MCU through a path
@@ -1191,8 +1263,12 @@ HalGPIO::WakeupReason HalGPIO::getWakeupReason() const {
   }
 
   const bool usbConnected = isUsbConnected();
-  LOG_DBG("GPIO", "getWakeupReason: wakeupCause=%d, resetReason=%d, usbConnected=%d", static_cast<int>(wakeupCause),
-          static_cast<int>(resetReason), usbConnected);
+  LOG_DBG(
+      "GPIO",
+      "getWakeupReason: wakeupCause=%d, resetReason=%d, usbConnected=%d ext1WakeMask=0x%llX powerPin=%d rawPower=%d",
+      static_cast<int>(wakeupCause), static_cast<int>(resetReason), usbConnected,
+      static_cast<unsigned long long>(ext1WakeMask), InputManager::POWER_BUTTON_PIN,
+      InputManager::POWER_BUTTON_PIN >= 0 ? digitalRead(InputManager::POWER_BUTTON_PIN) : -1);
 
   // A GPIO deep-sleep wake means POWER_BUTTON_PIN was pulled LOW, which is a button press by
   // definition — whatever the power source. This clause used to also require usbConnected, on the

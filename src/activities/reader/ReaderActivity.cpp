@@ -928,7 +928,8 @@ void ReaderActivity::onEnter() {
     {
       RenderLock lock(*this);
       renderer.clearScreen();
-      renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_LOADING), true, EpdFontFamily::BOLD);
+      renderer.drawCenteredText(UI_12_FONT_ID, ReaderUtils::messageY(renderer), tr(STR_LOADING), true,
+                                EpdFontFamily::BOLD);
       renderer.displayBuffer();
     }
 

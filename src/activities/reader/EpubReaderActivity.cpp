@@ -31,6 +31,7 @@
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <GlyphProvider.h>
+#include <HalCapabilities.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
@@ -3292,6 +3293,7 @@ uint8_t EpubReaderActivity::getEffectiveImageRendering() const {
 }
 
 bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
+  if (!HalCapabilities::panelShowsGray()) return false;  // a book's stored override included
   if (bookTextAntiAliasingOverride >= 0) {
     return bookTextAntiAliasingOverride != 0;
   }
@@ -5209,7 +5211,8 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
 
   if (section->pageCount == 0) {
     LOG_DBG("ERS", "No pages to render");
-    renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_CHAPTER), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, ReaderUtils::messageY(renderer), tr(STR_EMPTY_CHAPTER), true,
+                              EpdFontFamily::BOLD);
     renderStatusBar();
     renderer.displayBuffer();
     automaticPageTurnActive = false;
@@ -5218,7 +5221,8 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
 
   if (section->currentPage < 0 || section->currentPage >= section->pageCount) {
     LOG_DBG("ERS", "Page out of bounds: %d (max %d)", section->currentPage, section->pageCount);
-    renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_OUT_OF_BOUNDS), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, ReaderUtils::messageY(renderer), tr(STR_OUT_OF_BOUNDS), true,
+                              EpdFontFamily::BOLD);
     renderStatusBar();
     renderer.displayBuffer();
     automaticPageTurnActive = false;
@@ -5283,7 +5287,8 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
       LOG_ERR("ERS", "Page %d unreadable after rebuild (spine %d); giving up on this page", section->currentPage,
               currentSpineIndex);
       TapTargets::readerLinks().invalidate();
-      renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_CHAPTER), true, EpdFontFamily::BOLD);
+      renderer.drawCenteredText(UI_12_FONT_ID, ReaderUtils::messageY(renderer), tr(STR_EMPTY_CHAPTER), true,
+                                EpdFontFamily::BOLD);
       renderStatusBar();
       renderer.displayBuffer();
       return;

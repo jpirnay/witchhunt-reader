@@ -71,8 +71,13 @@ constexpr uint32_t STAND_IN = 0x25A1;
 // and must never draw ink.
 bool isCjkCharacter(const uint32_t cp) { return utf8IsCjkBreakable(cp) && cp != 0x3000 && !utf8IsDefaultIgnorable(cp); }
 
-// The UI faces main.cpp attaches: notosans_8 and Inter 10/12/14 in regular and bold.
+// The UI faces main.cpp attaches: notosans_8 and Inter 10/12/14 in regular and bold, plus
+// notosans_6 and Inter 8 in Murphy's firmware.
+#if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
+constexpr size_t MAX_ATTACHED = 10;  // Murphy also attaches Noto Sans 6 and Inter 8 regular/bold.
+#else
 constexpr size_t MAX_ATTACHED = 7;
+#endif
 EpdFontData attached[MAX_ATTACHED];
 size_t attachedCount = 0;
 

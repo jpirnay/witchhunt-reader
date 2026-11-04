@@ -217,7 +217,7 @@ void LyraTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
     int truncatedSubtitleWidth = renderer.getTextWidth(SMALL_FONT_ID, truncatedSubtitle.c_str());
     renderer.drawText(SMALL_FONT_ID,
                       rect.x + rect.width - LyraMetrics::values.contentSidePadding - truncatedSubtitleWidth,
-                      rect.y + 50, truncatedSubtitle.c_str(), true);
+                      rect.y + LyraMetrics::values.batteryBarHeight + 10, truncatedSubtitle.c_str(), true);
   }
 }
 
@@ -403,7 +403,7 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 
   const int pageWidth = renderer.getScreenWidth();
   const int pageHeight = renderer.getScreenHeight();
-  constexpr int buttonWidth = 80;
+  const int buttonWidth = HintLayout::bottomBase(pageWidth, 80);
   constexpr int smallButtonHeight = 15;
   // Read live rather than from the constexpr table: the strip grows with the UI font size.
   const int buttonHeight = UITheme::getInstance().getMetrics().buttonHintsHeight;
@@ -481,6 +481,7 @@ void LyraTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const c
 }
 
 void LyraTheme::drawSideButtonHints(GfxRenderer& renderer, const char* upBtn, const char* downBtn) const {
+  if (LyraMetrics::values.sideButtonHintsWidth == 0) return;  // no side column on this panel
   // Panel coordinates and the inverted mirroring, for the reasons spelled out in
   // BaseTheme::drawSideButtonHints — including why LandscapeCounterClockwise draws inverted too.
   const GfxRenderer::Orientation orig_orientation = renderer.getOrientation();
@@ -751,8 +752,10 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     drawPart(authorLines, CardTextFit::Author, UI_10_FONT_ID, EpdFontFamily::REGULAR);
     drawPart(seriesLines, CardTextFit::Series, UI_10_FONT_ID, EpdFontFamily::REGULAR);
     if (!statusLine.empty()) {
-      renderer.drawText(UI_10_FONT_ID, textX, blockY + fit.tops[CardTextFit::Status], statusLine.c_str(), true,
-                        EpdFontFamily::BOLD);
+      renderer.drawText(
+          UI_10_FONT_ID, textX, blockY + fit.tops[CardTextFit::Status],
+          renderer.truncatedText(UI_10_FONT_ID, statusLine.c_str(), textWidth, EpdFontFamily::BOLD).c_str(), true,
+          EpdFontFamily::BOLD);
     }
     drawPart(historyLines, CardTextFit::History, FIT_SMALL_FONT_ID, EpdFontFamily::REGULAR);
   } else {
@@ -825,7 +828,8 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
       }
     }
 
-    renderer.drawText(UI_12_FONT_ID, textX, textY, label, true);
+    renderer.drawText(UI_12_FONT_ID, textX, textY,
+                      renderer.truncatedText(UI_12_FONT_ID, label, tileRect.x + tileRect.width - textX).c_str(), true);
   }
 
   TapTargets::homeMenu().record(menuTargets);
@@ -839,7 +843,10 @@ Rect LyraTheme::drawPopup(const GfxRenderer& renderer, const char* message, cons
   if (overlayDisplayedFrame) renderer.syncWriteBufferFromDisplayed();
   constexpr int y = 132;
   constexpr int outline = 2;
-  const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, message, EpdFontFamily::REGULAR);
+  // The box has to stay on the panel, or it loses its frame and both ends of the message.
+  const std::string fitted = renderer.truncatedText(
+      UI_12_FONT_ID, message, renderer.getScreenWidth() - (popupMarginX + outline) * 2, EpdFontFamily::REGULAR);
+  const int textWidth = renderer.getTextWidth(UI_12_FONT_ID, fitted.c_str(), EpdFontFamily::REGULAR);
   const int textHeight = renderer.getLineHeight(UI_12_FONT_ID);
   const int w = textWidth + popupMarginX * 2;
   const int h = textHeight + popupMarginY * 2;
@@ -851,7 +858,7 @@ Rect LyraTheme::drawPopup(const GfxRenderer& renderer, const char* message, cons
 
   const int textX = x + (w - textWidth) / 2;
   const int textY = y + popupMarginY - 2;
-  renderer.drawText(UI_12_FONT_ID, textX, textY, message, false, EpdFontFamily::REGULAR);
+  renderer.drawText(UI_12_FONT_ID, textX, textY, fitted.c_str(), false, EpdFontFamily::REGULAR);
   shipPopup(renderer, ship);
 
   return Rect{x, y, w, h};

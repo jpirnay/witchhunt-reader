@@ -25,17 +25,16 @@ SYNTH_FONT_SIZES=(20 22 24 26)
 SYNTH_FONT_MASTER=18
 
 UI_FONT_STYLES=("Regular" "Bold")
-UI_FONT_SIZES=(10 12 14)
-# The UI faces that get an ID of their own. 14 pt is deliberately absent: the
-# larger UI size does not add a third logical font, it REBINDS UI_10/UI_12 to the
-# 14 pt families at startup (see applyUiFontScale in main.cpp), so every call site
-# keeps asking for the same two IDs whatever the setting says.
+UI_FONT_SIZES=(8 10 12 14)
+# The UI faces that get a logical ID of their own. 8 pt and 14 pt are deliberately
+# absent: Murphy uses Inter 8/10/12 for its Normal roles and 10/12/14 for Large;
+# the IDs remain UI_10/UI_12 on every board. Its Noto Sans 6 pt Small face is not an ID.
 UI_ID_FONT_SIZES=(10 12)
 
 # The CJK UI faces (build_cjk_ui_fonts.py): one subset face per CJK translation per size,
 # holding only the characters that translation uses, attached behind the UI faces above as
 # fallback glyphs (src/CjkUiFonts.cpp). A UI face takes the largest CJK size not above its own,
-# or the smallest: 8 and 10 pt UI text draws CJK at 10 pt, 12 and 14 pt at 12 pt. A Han or kana
-# character fills its em box where a Latin letter does not, so CJK at 12 pt sits well beside
-# Latin at 14 pt; a 14 pt CJK size would cost ~125 KB of flash for the large UI step alone.
+# or the smallest: Murphy's 6/8 pt and all boards' 10 pt UI text draw CJK at 10 pt; 12/14 pt draw
+# CJK at 12 pt. A Han or kana character fills its em box where a Latin letter does not, so CJK at
+# 12 pt sits well beside Latin at 14 pt; a 14 pt CJK size would cost ~125 KB of flash for Large.
 CJK_UI_FONT_SIZES=(10 12)

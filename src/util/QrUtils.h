@@ -15,4 +15,7 @@ static constexpr size_t MAX_QR_CAPACITY = 2953;
 // Returns true if the payload was truncated to fit the QR capacity.
 bool drawQrCode(const GfxRenderer& renderer, const Rect& bounds, const std::string& textPayload);
 
+// The gap between the lines of a compact QR page.
+int compactSpacing();
+
 }  // namespace QrUtils

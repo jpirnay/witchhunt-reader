@@ -26,6 +26,7 @@
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 #include "network/MacFormat.h"
 #include "network/WifiApChoice.h"
@@ -1146,8 +1147,11 @@ void WifiSelectionActivity::render(RenderLock&&) {
   char countStr[64];
   snprintf(countStr, sizeof(countStr), tr(STR_NETWORKS_FOUND), realNetworkCount);
   GUI.drawHeader(renderer, header, tr(STR_WIFI_NETWORKS), countStr);
-  GUI.drawSubHeader(renderer, Rect{header.x, header.y + header.height, header.width, metrics.tabBarHeight},
-                    cachedMacAddress.c_str());
+  // A compact captive-portal page spends the sub-header's height on its code instead.
+  if (state != WifiSelectionState::CAPTIVE_PORTAL || !PanelMetrics::COMPACT) {
+    GUI.drawSubHeader(renderer, Rect{header.x, header.y + header.height, header.width, metrics.tabBarHeight},
+                      cachedMacAddress.c_str());
+  }
 
   switch (state) {
     case WifiSelectionState::AUTO_CONNECTING:
@@ -1319,7 +1323,8 @@ void WifiSelectionActivity::renderCaptivePortal() const {
   const int lh12 = renderer.getLineHeight(UI_12_FONT_ID);
   const int lh10 = renderer.getLineHeight(UI_10_FONT_ID);
   const int lhSmall = renderer.getLineHeight(SMALL_FONT_ID);
-  const int sp = metrics.verticalSpacing;
+  constexpr bool compact = PanelMetrics::COMPACT;
+  const int sp = compact ? QrUtils::compactSpacing() : metrics.verticalSpacing;
   constexpr int QR_SIZE = 320;
 
   // Pre-compute wrapped hint and URL lines so we can vertically centre everything
@@ -1337,9 +1342,9 @@ void WifiSelectionActivity::renderCaptivePortal() const {
   // portal URL -- instead of the stack growing up over the header: centred alone, its title landed
   // on the sub-header there.
   const Rect header = UITheme::getHeaderRect(renderer);
-  const int contentTop = header.y + header.height + metrics.tabBarHeight;
+  const int contentTop = header.y + header.height + (compact ? 0 : metrics.tabBarHeight);
   const int room = contentRect.y + contentRect.height - contentTop;
-  const int qrSize = std::max(0, std::min(QR_SIZE, room - textHeight));
+  const int qrSize = std::max(0, std::min({QR_SIZE, maxWidth, room - textHeight}));
   int y = contentTop + std::max(0, (room - textHeight - qrSize) / 2);
 
   renderer.drawCenteredText(UI_12_FONT_ID, y, tr(STR_CAPTIVE_PORTAL_DETECTED), true, EpdFontFamily::BOLD);

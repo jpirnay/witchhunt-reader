@@ -479,7 +479,9 @@ class GfxRenderer {
   // after a framebuffer release, a reader exit -- are armed through setNextDisplayRefreshMode(),
   // and consumeRefreshOverride() replaces the requested mode outright, so they are unreachable
   // from here and cannot be suppressed.
-  bool ghostClearingHalfWorthwhile() const { return fastRefreshesSinceFull_ >= GHOST_CLEARING_FAST_BUDGET; }
+  bool ghostClearingHalfWorthwhile(const uint8_t fastRefreshBudget = GHOST_CLEARING_FAST_BUDGET) const {
+    return fastRefreshesSinceFull_ >= fastRefreshBudget;
+  }
   // Make the write framebuffer match the currently displayed frame. Call before
   // a partial repaint that patches a few regions and re-displays without
   // re-rendering the full frame: displayBuffer() ends with swapBuffers(), so
@@ -496,6 +498,7 @@ class GfxRenderer {
   bool releaseSecondaryBuffer() const { return display.releaseSecondaryBuffer(); }
   bool reallocSecondaryBuffer() const { return display.reallocSecondaryBuffer(); }
   bool hasSecondaryBuffer() const { return display.hasSecondaryBuffer(); }
+  bool keepsPreviousFrame() const { return display.keepsPreviousFrame(); }
   // Borrow/return variant of release/realloc: the block never enters the heap,
   // so nothing can allocate inside it and the return cannot fail. See
   // FreeInkDisplay::borrowSecondaryBuffer.

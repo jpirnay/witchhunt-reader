@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "components/themes/PanelMetrics.h"
+
 namespace CoverGridLayout {
 
 Layout compute(const Input& in) {
@@ -53,7 +55,9 @@ Placement place(const Screen& screen) {
   p.cells = compute({.contentWidth = screen.contentWidth,
                      .contentHeight = screen.contentBottom - p.top - screen.verticalSpacing,
                      .bottomReserve = 0,
-                     .maxCellHeight = kMaxCellHeight,
+                     // The full-size cell is one row and one column on a compact panel. Capped, the
+                     // rule in compute() that adds a row takes over and leaves room for columns.
+                     .maxCellHeight = PanelMetrics::capped(kMaxCellHeight, 120),
                      .maxCellWidth = kMaxCellWidth});
   return p;
 }

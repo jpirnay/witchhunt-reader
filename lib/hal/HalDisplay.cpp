@@ -10,6 +10,30 @@
 
 #include "HalSpiBus.h"
 
+namespace {
+const char* displayControllerName(BoardConfig::DisplayController controller) {
+  switch (controller) {
+    case BoardConfig::DisplayController::SSD1677:
+      return "SSD1677";
+    case BoardConfig::DisplayController::UC8253:
+      return "UC8253";
+    case BoardConfig::DisplayController::ED2208:
+      return "ED2208";
+    case BoardConfig::DisplayController::LgfxEpd:
+      return "LgfxEpd";
+    case BoardConfig::DisplayController::IT8951:
+      return "IT8951";
+    case BoardConfig::DisplayController::UC8279:
+      return "UC8279";
+    case BoardConfig::DisplayController::UC8179:
+      return "UC8179";
+    case BoardConfig::DisplayController::UC8279C:
+      return "UC8279C";
+  }
+  return "unknown";
+}
+}  // namespace
+
 // Global HalDisplay instance, bracketed by static-init heap probes (slots 0/1).
 static BootHeapProbe s_probePreDisplay(0);
 HalDisplay display;
@@ -49,6 +73,25 @@ HalDisplay::HalDisplay()
 HalDisplay::~HalDisplay() {}
 
 void HalDisplay::begin(bool seamless) {
+  const BoardConfig::BoardProfile& profile = BoardConfig::ACTIVE;
+  const BoardConfig::DisplayPins& pins = profile.display;
+  LOG_DBG("DISP",
+          "Profile=%s controller=%s framebuffer=%ux%u SPI=%luHz (0=driver default) pins SCLK=%d MOSI=%d CS=%d DC=%d "
+          "RST=%d BUSY=%d mirror=%d/%d",
+          profile.name, displayControllerName(profile.displayController), profile.displayWidth, profile.displayHeight,
+          static_cast<unsigned long>(profile.displaySpiHz), pins.sclk, pins.mosi, pins.cs, pins.dc, pins.rst, pins.busy,
+          profile.orientation.mirrorX, profile.orientation.mirrorY);
+  LOG_DBG("DISP",
+          "Touch profile: controller=%u SDA=%d SCL=%d addr=0x%02X IRQ=%d reset/power=%d; env capability=%d bus=%u "
+          "SDA=%d SCL=%d addr=0x%02X",
+          static_cast<unsigned>(profile.touch.controller), profile.touch.sda, profile.touch.scl,
+          profile.touch.i2cAddress, profile.touch.irq, profile.touch.reset, FREEINK_CAP_TEMP_HUMIDITY,
+          profile.sensors.i2cBus, profile.sensors.i2cSda, profile.sensors.i2cScl, profile.sensors.tempHumidityAddr);
+  if (profile.board == BoardConfig::Board::MurphyM3) {
+    LOG_DBG("DISP", "Murphy M3 geometry map: framebuffer=%ux%u, UC8253 controller RAM=240x416, 90-degree rotation",
+            profile.displayWidth, profile.displayHeight);
+  }
+
 #if !FREEINK_MCU_C3
   // Resolve which panel controller this unit actually carries, before
   // einkDisplay.begin() picks a driver from it.
@@ -97,6 +140,11 @@ void HalDisplay::begin(bool seamless) {
     HalSpiBus::Lock spiLock;
     einkDisplay.begin();
   }
+  LOG_DBG("DISP", "Runtime framebuffer=%ux%u stride=%u bytes buffer=%lu bytes", einkDisplay.getDisplayWidth(),
+          einkDisplay.getDisplayHeight(), einkDisplay.getDisplayWidthBytes(),
+          static_cast<unsigned long>(einkDisplay.getBufferSize()));
+  LOG_DBG("DISP", "Controller after init=%s variant=0x%02X", displayControllerName(profile.displayController),
+          profile.displayControllerVariant);
 
   // Request resync after specific wakeup events to ensure clean display state.
   // Skip when seamless=true so the current panel content is preserved (Quick Resume).
@@ -316,7 +364,19 @@ bool HalDisplay::reallocSecondaryBuffer() {
   return ok;
 }
 
-bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuffer(); }
+namespace {
+// Room for everything the lent framebuffer holds on the big panels (48 KB) several times over, and
+// about 3 % of the PSRAM.
+constexpr size_t PSRAM_ARENA_BYTES = 256 * 1024;
+bool psramArenaLent = false;  // read and written under the SPI bus lock, as the lend itself is
+}  // namespace
+
+// False while the PSRAM arena is out, though the display's own buffer is still there. "No secondary
+// buffer" is how every borrower tells a lend is in progress: the reader's recovery only gives the
+// region back on seeing it, and reporting true left the arena out for good. The panel paths that
+// care about the buffer itself ask einkDisplay directly.
+bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuffer() && !psramArenaLent; }
+bool HalDisplay::keepsPreviousFrame() const { return einkDisplay.hasSecondaryBuffer(); }
 
 // The four buffer-ownership transitions below all take the SPI bus lock, for two reasons that
 // both trace back to them running on the LOOP task (reader background builds) while the render
@@ -334,6 +394,20 @@ bool HalDisplay::hasSecondaryBuffer() const { return einkDisplay.hasSecondaryBuf
 // uncontended on the normal path — this costs nothing when nothing else is on the bus.
 uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
   HalSpiBus::Lock spiLock;
+  if (HalCapabilities::lendsPsramArena()) {
+    // Allocated on first use and kept: PSRAM has the room, and a block that never goes back to the
+    // heap cannot fragment it. If it cannot be had, the framebuffer below is still a valid answer.
+    static uint8_t* const arena =
+        static_cast<uint8_t*>(heap_caps_malloc(PSRAM_ARENA_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (arena) {
+      if (psramArenaLent) return nullptr;  // one borrower at a time, as with the framebuffer
+      psramArenaLent = true;
+      if (size) *size = PSRAM_ARENA_BYTES;
+      LOG_INF("FBUF", "borrowSecondary -> PSRAM arena (size=%lu)", static_cast<unsigned long>(PSRAM_ARENA_BYTES));
+      return arena;
+    }
+    LOG_ERR("FBUF", "No PSRAM arena; lending the framebuffer");
+  }
   uint8_t* buf = einkDisplay.borrowSecondaryBuffer(size);
   LOG_INF("FBUF", "borrowSecondary -> %d (size=%lu hasSecondary=%d)", buf ? 1 : 0,
           static_cast<unsigned long>(buf && size ? *size : 0), einkDisplay.hasSecondaryBuffer() ? 1 : 0);
@@ -342,6 +416,11 @@ uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
 
 bool HalDisplay::returnSecondaryBuffer() {
   HalSpiBus::Lock spiLock;
+  if (psramArenaLent) {
+    psramArenaLent = false;
+    LOG_INF("FBUF", "returnSecondary -> PSRAM arena");
+    return true;
+  }
   const bool ok = einkDisplay.returnSecondaryBuffer();
   LOG_INF("FBUF", "returnSecondary -> %d (hasSecondary=%d)", ok ? 1 : 0, einkDisplay.hasSecondaryBuffer() ? 1 : 0);
   return ok;

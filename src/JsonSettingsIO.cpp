@@ -1,6 +1,7 @@
 #include "JsonSettingsIO.h"
 
 #include <ArduinoJson.h>
+#include <BoardConfig.h>
 #include <HalStorage.h>
 #include <HeapFit.h>
 #include <Logging.h>
@@ -270,6 +271,8 @@ bool JsonSettingsIO::saveSettings(const CrossPointSettings& s, const char* path)
   // Stamps which generation of gesture defaults this file was written against.
   // See CrossPointSettings::GESTURE_DEFAULTS_VERSION.
   doc["gestureDefaultsV"] = s.gestureDefaultsVersion;
+  // See CrossPointSettings::BUTTON_ACTIONS_VERSION.
+  doc["buttonActionsV"] = CrossPointSettings::BUTTON_ACTIONS_VERSION;
   // Which meaning the fontSize / txtFontSize values below carry (point sizes since version 2).
   // See CrossPointSettings::FONT_SIZE_ORDER_VERSION.
   doc["fontSizeOrderV"] = CrossPointSettings::FONT_SIZE_ORDER_VERSION;
@@ -330,6 +333,9 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
   // which is exactly the case for every file written before the stamp existed.
   const bool staleGestureDefaults =
       doc["gestureDefaultsV"].as<int>() < static_cast<int>(CrossPointSettings::GESTURE_DEFAULTS_VERSION);
+  const bool staleButtonActions =
+      doc["buttonActionsV"].as<int>() < static_cast<int>(CrossPointSettings::BUTTON_ACTIONS_VERSION);
+  if (staleButtonActions && needsResave) *needsResave = true;
   // Cannot match on a board with no digitiser: the loop below walks the FILTERED
   // settings list, which carries no gesture rows there, so no gesture key ever
   // reaches this. Gated rather than left to be evaluated and always fail, because
@@ -345,6 +351,11 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
     (void)key;
 #endif
     return false;
+  };
+  const auto isButtonActionKey = [](const char* key) {
+    if (key == nullptr) return false;
+    return std::strncmp(key, "btnShort", 8) == 0 || std::strncmp(key, "btnDouble", 9) == 0 ||
+           std::strncmp(key, "btnLong", 7) == 0 || std::strncmp(key, "gest", 4) == 0;
   };
 
   forEachPersistedSetting([&](const SettingInfo& info) {
@@ -397,6 +408,25 @@ bool JsonSettingsIO::loadSettings(CrossPointSettings& s, const char* json, bool*
         return;
       }
       uint8_t v = doc[info.key] | fieldDefault;
+      if (staleButtonActions && isButtonActionKey(info.key) && !doc[info.key].isNull()) {
+        const bool isConfirmDoubleOrLong =
+            std::strcmp(info.key, "btnDoubleConfirm") == 0 || std::strcmp(info.key, "btnLongConfirm") == 0;
+        if (BoardConfig::isMurphyM3() && isConfirmDoubleOrLong && v == CrossPointSettings::BTN_DEFAULT) {
+          // On Murphy the Confirm double/long defaults replace missing Back and
+          // Power keys. Keep explicit custom mappings, but migrate the old
+          // built-in values to the board's keymap defaults.
+          s.*field = fieldDefault;
+          return;
+        }
+
+        // BTN_BACK was added immediately before the board-gated light actions.
+        // Shift persisted light-action IDs so they retain their meaning.
+        const uint8_t previousFirstLightAction =
+            static_cast<uint8_t>(static_cast<uint8_t>(CrossPointSettings::BTN_LIGHT_TOGGLE) - 1u);
+        const uint8_t previousActionCount =
+            static_cast<uint8_t>(static_cast<uint8_t>(CrossPointSettings::BUTTON_ACTION_COUNT) - 1u);
+        if (v >= previousFirstLightAction && v < previousActionCount) ++v;
+      }
       if (info.persistPtr) {
         // A slider's range is its own; anything past it falls back rather than driving the
         // hardware (or the sleep timer) somewhere the UI would never have offered.

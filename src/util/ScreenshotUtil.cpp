@@ -48,7 +48,7 @@ void ScreenshotUtil::service(GfxRenderer& renderer, void (*sendToHost)(const uin
   // redraw -- and that copy cannot be trusted while a pre-render is pending: a buffer handed back
   // after a Background-B borrow is seeded from the write buffer, pre-rendered page and all, which
   // is how a capture came out as the next page without its status bar.
-  if (renderer.hasSecondaryBuffer()) renderer.syncWriteBufferFromDisplayed();
+  if (renderer.keepsPreviousFrame()) renderer.syncWriteBufferFromDisplayed();
   activityManager.prepareFramebufferForCapture();
   if (target == Target::Host) {
     sendToHost(renderer.getFrameBuffer(), renderer.getBufferSize(), renderer.getDisplayWidth(),
