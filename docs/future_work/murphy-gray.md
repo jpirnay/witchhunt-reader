@@ -11,9 +11,20 @@ white. Gray that stays black takes 15 frames toward black that nothing pays back
 `Uc8253MurphyDriver::writeOldPlane()` adds. A short session cannot show what thousands of pages do.
 Next: read for some weeks, then compare a clean white and black with the shots kept from the lab.
 
-**BMP viewer.** It uses the same gray pass as sleep covers, which work, but has not been run.
+**Image midtones.** BMP, JPG and PNG all show in one gray pass, and Confirm's gray and B/W toggle works.
+But images come out dark. The 4-level dither assumes light gray at 67 %, and ours is 50-58 %. Measured on
+an even step ramp, in percent of white:
 
-**Temperature.** The waveforms were measured around 20-25 °C. The OTP is blank, so the controller has
+| Ramp | 14 | 29 | 43 | 57 | 71 | 86 |
+|---|---|---|---|---|---|---|
+| BMP, gray | 9 | 23 | 36 | 52 | 64 | 88 |
+| JPG or PNG, gray | 7 | 20 | 30 | 41 | 55 | 73 |
+| JPG, B/W | 3 | 21 | 40 | 57 | 77 | 92 |
+
+JPG and PNG also read 8-15 points below BMP on a soft test image. Light gray at 5 frames instead of 4 would
+be about 70 %, but it changes text as well, so that needs reading, not just a ramp.
+
+**Temperature.** The waveforms were measured at room temperature, which was not recorded. The OTP is blank, so the controller has
 no temperature ranges to fall back on, and the driver does not read the sensor.
 
 **Stored overrides.** A book with `textAntiAliasingOverride` 0 stays B/W whatever the setting says. Books
@@ -39,12 +50,24 @@ four moves each, one panel). Patches agree, and 24 frames overshoots on black th
 
 **The refresh counter.** The driver no longer promotes FAST to a full refresh on its own, so the
 setting means what it says, and "Never" means no periodic full refresh at all. It had capped every
-setting at 9 while the log still said FAST. Ghosting over runs longer than 9 has not been measured.
+setting at 9 while the log still said FAST. At 20 the UI and the reader looked fine by eye. Ghosting over
+runs longer than 9 has not been measured.
 
-**HALF may leave more than FAST.** The same band read 5.7 points below the untouched row after the next
-HALF, on both FAST builds. Not like for like: by then the row had also been toggled four more times. But a
-HALF from black reads 94-97 %, and its white gets the same 15 frames of VSL, so it may under-drive white in
-the same way. If so, more HALFs do not clear this ghost, and `MURPHY_LUT_21_DEFAULT` is the place to look.
+**HALF stays as the manufacturer set it.** HALF leaves more ghost than FAST, and more VSL on `WW` in
+`MURPHY_LUT_21_DEFAULT` would clean better at no cost in time, as its last 16 frames idle. But that whitens
+the background, and every FAST after it then lands short of the new white. So the two have to be judged as
+a pair. Points below an untouched patch, three interleaved `./lab.py t8` runs on a blank panel:
+
+| HALF + FAST | After FAST | After HALF |
+|---|---|---|
+| **Unchanged + 20 frames** | **-0.5** | -2.4 |
+| 5 extra + 20 | -1.8 | -1.5 |
+| 10 extra + 20 | -2.2 | -1.1 |
+| 10 extra + 25 | -1.3 | -1.3 |
+
+FAST runs far more often than HALF, and on a real list 10 extra frames came out as a net loss, so HALF was
+left alone. If the ghost after HALF ever matters more, 10 extra + 25 is the balanced choice, at 100 ms more
+per FAST.
 
 **DC.** 20 frames against 15 nets 5 toward white per round trip in frames, though nominally 20 x 12.6 V
 about balances 15 x 16.6 V. The true centre is unknown with no factory VCOM.
