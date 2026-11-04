@@ -1435,6 +1435,7 @@ TEST_F(BidiLayout, ATableInALeftToRightBookKeepsItsColumnOrder) {
   EXPECT_EQ("A", cellText(cells[0]));
 }
 
+// Guards the cell's own direction (its text's block style carries the td's dir), which the table work must not lose.
 TEST_F(BidiLayout, ACellsOwnDirectionReachesItsText) {
   const auto cells =
       firstRowCells(dump("", document("<table><tr><td dir=\"rtl\">שלום עולם</td></tr></table>"), bookAlignment()));
@@ -1446,6 +1447,7 @@ TEST_F(BidiLayout, ACellsOwnDirectionReachesItsText) {
   EXPECT_EQ(400, cells[0].words[1].x);
 }
 
+// Guards the same through the paragraph fallback (emitCellAsParagraph lays out the cell's own text).
 TEST_F(BidiLayout, ACellLaidOutAsAParagraphKeepsItsOwnDirection) {
   // A rowspan takes the table out of the grid; its cells become paragraphs. Latin words stay in reading order in a
   // right-to-left line, so only the cell's dir can put the line against the right edge (ending 18 px short of it, the
