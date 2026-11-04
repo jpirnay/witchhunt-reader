@@ -975,6 +975,16 @@ size_t occurrences(const std::string& text, const std::string& needle) {
   return count;
 }
 
+// Each line's word positions, for layouts whose words may carry other styles or controls.
+std::vector<std::vector<int>> positions(const std::vector<Line>& lines) {
+  std::vector<std::vector<int>> out;
+  for (const Line& line : lines) {
+    out.emplace_back();
+    for (const Word& word : line.words) out.back().push_back(word.x);
+  }
+  return out;
+}
+
 TEST_F(BidiLayout, AnInlineDirSpanBecomesAnIsolate) {
   const auto lines =
       parseLines(dump("", document("<p dir=\"rtl\">מילה <span dir=\"ltr\">Latin 123</span> סוף</p>"), bookAlignment()));
@@ -1198,11 +1208,12 @@ TEST_F(BidiLayout, ACloserGoesInPastTheHeldControlsCap) {
 }
 
 TEST_F(BidiLayout, AParagraphEndSpendsTheOpenMarkup) {
-  // An isolate open where its paragraph ends closes with it: the paragraph after a line break or a block inside the
-  // span gets no PDI for an isolate it does not hold.
+  // An isolate open where its paragraph ends closes with it: a block inside the span is a paragraph of its own (CSS
+  // wraps no block in an inline's isolate), and it gets no PDI for an isolate it does not hold. ("ghi" joins the inner
+  // block's line, as text after a </p> does.)
   const std::pair<const char*, size_t> cases[] = {
-      {"<p dir=\"rtl\">שלום <span dir=\"ltr\">abc<br/>def</span> עולם</p>", 2},
       {"<div><span dir=\"rtl\">abc<p>def</p>ghi</span></div>", 2},
+      {"<div dir=\"rtl\">שלום <span dir=\"ltr\">one 1.<p dir=\"rtl\">mid</p>two 2.</span> עולם</div>", 2},
   };
   for (const auto& [body, lineCount] : cases) {
     const std::string out = dump("", document(body), bookAlignment());
@@ -1216,6 +1227,50 @@ TEST_F(BidiLayout, AParagraphEndSpendsTheOpenMarkup) {
       EXPECT_EQ(0u, occurrences(text, kPdi)) << body << " line " << i;
     }
   }
+}
+
+TEST_F(BidiLayout, AnIsolateGoesOnAfterALineBreak) {
+  // A <br> or a <pre> newline splits the block, not the elements open in it: their markup opens the next block's text
+  // again, so each lays out as its twin, which closes the element before the break and opens it anew after it. Without
+  // that, the second line's period is torn off "2" and the override stops at the break.
+  const pipeline_harness::Profile profile = bookAlignment();
+  const std::pair<const char*, const char*> cases[] = {
+      {"<p dir=\"rtl\">שלום <span dir=\"ltr\">one 1.<br/>two 2.</span> עולם</p>",
+       "<p dir=\"rtl\">שלום <span dir=\"ltr\">one 1.</span><br/><span dir=\"ltr\">two 2.</span> עולם</p>"},
+      {"<p dir=\"rtl\" style=\"unicode-bidi: bidi-override\">abc def<br/>ghi jkl</p>",
+       "<p dir=\"rtl\"><span style=\"unicode-bidi: bidi-override\">abc def</span><br/>"
+       "<span style=\"unicode-bidi: bidi-override\">ghi jkl</span></p>"},
+      {"<pre dir=\"rtl\">שלום <span dir=\"ltr\">one 1.\ntwo 2.</span> עולם</pre>",
+       "<pre dir=\"rtl\">שלום <span dir=\"ltr\">one 1.</span>\n<span dir=\"ltr\">two 2.</span> עולם</pre>"},
+  };
+  for (const auto& [marked, twin] : cases) {
+    const std::string out = dump("", document(marked), profile);
+    const auto lines = parseLines(out);
+    ASSERT_EQ(2u, lines.size()) << out;
+    EXPECT_EQ(positions(parseLines(dump("", document(twin), profile))), positions(lines)) << out;
+  }
+}
+
+TEST_F(BidiLayout, AnEdgeWithoutRoomAfterALineBreakIsSpent) {
+  // Three bdo and three spans open 27 bytes of controls again after the break, past the 24 a held run takes: the
+  // innermost span's LRI does not fit, so that span is spent there and closes nothing, and the line stays balanced.
+  std::string body = "<p>";
+  for (int i = 0; i < 3; ++i) body += "a <bdo dir=\"rtl\">";
+  for (int i = 0; i < 3; ++i) body += "b <span dir=\"ltr\">";
+  body += "c<br/>d";
+  for (int i = 0; i < 3; ++i) body += "</span>";
+  for (int i = 0; i < 3; ++i) body += "</bdo>";
+  body += " e</p>";
+  const std::string out = dump("", document(body));
+  const auto lines = parseLines(out);
+  ASSERT_EQ(2u, lines.size()) << out;
+  std::string second;
+  for (const Word& word : lines[1].words) second += word.text;
+  EXPECT_EQ(3u, occurrences(second, kFsi)) << out;
+  EXPECT_EQ(3u, occurrences(second, kRlo));
+  EXPECT_EQ(2u, occurrences(second, kLri));
+  EXPECT_EQ(3u, occurrences(second, kPdf));
+  EXPECT_EQ(5u, occurrences(second, kPdi));
 }
 
 TEST_F(BidiLayout, ACellDrainedUnderAWordKeepsItsIsolateClosed) {
@@ -1248,16 +1303,6 @@ TEST_F(BidiLayout, AnElementNestedPastTheStackInsertsNothing) {
   }
   EXPECT_EQ(8u, occurrences(all, kRli));
   EXPECT_EQ(8u, occurrences(all, kPdi));
-}
-
-// Each line's word positions, for layouts whose words may carry other styles or controls.
-std::vector<std::vector<int>> positions(const std::vector<Line>& lines) {
-  std::vector<std::vector<int>> out;
-  for (const Line& line : lines) {
-    out.emplace_back();
-    for (const Word& word : line.words) out.back().push_back(word.x);
-  }
-  return out;
 }
 
 TEST_F(BidiLayout, ACloserEndsTheWordANestedEndTagSentOut) {

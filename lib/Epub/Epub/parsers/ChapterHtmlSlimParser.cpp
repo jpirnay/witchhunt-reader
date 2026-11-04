@@ -1461,12 +1461,10 @@ void ChapterHtmlSlimParser::openBidiEdge(const CssStyle& style, const bool inlin
   constexpr uint32_t kLri = 0x2066, kRli = 0x2067, kFsi = 0x2068, kPdi = 0x2069;
   const CssDirection direction = elementFlow_.direction;
   const bool rtl = direction == CssDirection::Rtl;
-  uint32_t openers[2] = {};
   BidiEdge edge;
   edge.depth = static_cast<int16_t>(depth);
-  uint8_t openerCount = 0;
   const auto set = [&](const std::initializer_list<uint32_t> open, const std::initializer_list<uint32_t> close) {
-    for (const uint32_t cp : open) openers[openerCount++] = cp;
+    for (const uint32_t cp : open) edge.openers[edge.openerCount++] = static_cast<uint16_t>(cp);
     for (const uint32_t cp : close) edge.closers[edge.count++] = cp;
   };
   switch (style.unicodeBidi) {
@@ -1494,12 +1492,12 @@ void ChapterHtmlSlimParser::openBidiEdge(const CssStyle& style, const bool inlin
     default:
       break;
   }
-  if (openerCount == 0) return;
+  if (edge.openerCount == 0) return;
   // Nested past the stack, or past the room a run of held controls has (a word's text takes any), the element inserts
   // nothing: a missing level is better than an opener no closer ends.
   if (bidiEdgeCount_ == kMaxFlowEntries) return;
-  if (!partWordHasText() && partWordBufferIndex + 3 * openerCount > kMaxHeldControlBytes) return;
-  for (uint8_t i = 0; i < openerCount; ++i) appendBidiControl(openers[i]);
+  if (!partWordHasText() && partWordBufferIndex + 3 * edge.openerCount > kMaxHeldControlBytes) return;
+  for (uint8_t i = 0; i < edge.openerCount; ++i) appendBidiControl(edge.openers[i]);
   bidiEdges_[bidiEdgeCount_++] = edge;
 }
 
@@ -2144,6 +2142,22 @@ void ChapterHtmlSlimParser::addAncestorInsets(BlockStyle& style, const float emS
   // element's contribution to [0, cap], so the capped total can never fall below the padding.
   style.marginLeft = static_cast<int16_t>(std::min(left, cap) - style.paddingLeft);
   style.marginRight = static_cast<int16_t>(std::min(right, cap) - style.paddingRight);
+}
+
+void ChapterHtmlSlimParser::startNewTextBlockWithinElements(const BlockStyle& blockStyle) {
+  static_assert(kMaxFlowEntries <= 8, "one bit of `live` per edge");
+  uint8_t live = 0;  // bit i: edge i still had its closers to put in
+  for (uint8_t i = 0; i < bidiEdgeCount_; ++i) {
+    if (bidiEdges_[i].count > 0) live = static_cast<uint8_t>(live | (1u << i));
+  }
+  startNewTextBlock(blockStyle);  // spends them, as at any block's start
+  for (uint8_t i = 0; i < bidiEdgeCount_; ++i) {
+    BidiEdge& edge = bidiEdges_[i];
+    if ((live & (1u << i)) == 0) continue;
+    if (partWordHasText() || partWordBufferIndex + 3 * edge.openerCount > kMaxHeldControlBytes) break;
+    for (uint8_t j = 0; j < edge.openerCount; ++j) appendBidiControl(edge.openers[j]);
+    edge.count = edge.openerCount;  // every element closes what it opens, control for control
+  }
 }
 
 // start a new text block if needed
@@ -3481,7 +3495,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         brStyle.keepWithNext = currentStyle.keepWithNext;
       }
       brStyle.fromBrElement = true;
-      self->startNewTextBlock(brStyle);
+      self->startNewTextBlockWithinElements(brStyle);
     } else {
       self->pushBlockStyleEntry(cssStyle);
       self->currentBlockSizeFromRoot_ = cssStyle.hasFontSizeMultiplier() && cssStyle.fontSizeRootRelative;
@@ -3942,7 +3956,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
         }
         // A float the new block takes stands before the next byte of this chunk.
         const PinnedPlacement atNextByte(*self, off);
-        self->startNewTextBlock(self->currentTextBlock->getBlockStyle());
+        self->startNewTextBlockWithinElements(self->currentTextBlock->getBlockStyle());
         self->nextWordContinues = false;
         continue;
       }
@@ -4192,8 +4206,10 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
       }
     }
   }
-  // Controls held for a word end with their block, a table cell's included.
-  if (headerOrBlockTag || closesBlockSpan || tableStructuralTag) self->dropHeldBidiControls();
+  // Controls held for a word end with their block, a table cell's included. Not at a </br>: the <br> holds no text, and
+  // what is held now opens the block it started (startNewTextBlockWithinElements).
+  const bool closesBr = strcmp(name, "br") == 0;
+  if ((headerOrBlockTag && !closesBr) || closesBlockSpan || tableStructuralTag) self->dropHeldBidiControls();
   // An element that is not inline formatting is a word boundary (INLINE_FORMATTING_TAGS). After the
   // flush above, which records the last character of the element's own text.
   if (!matches(name, INLINE_FORMATTING_TAGS, NUM_INLINE_FORMATTING_TAGS)) self->endCjkSegment();

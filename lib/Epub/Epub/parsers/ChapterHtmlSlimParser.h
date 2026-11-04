@@ -749,14 +749,21 @@ class ChapterHtmlSlimParser final : public Print {
   // The open elements whose bidi markup put controls in the text (design deviation 5), innermost last: what each puts
   // in at its end tag. An element nested past the eighth, or whose opener a run of held controls has no room for
   // (kMaxHeldControlBytes), inserts nothing, neither opener nor closer. Where a paragraph ends, the open ones are spent
-  // (count 0): the next paragraph gets no closer whose opener it does not hold.
+  // (count 0): the next paragraph gets no closer whose opener it does not hold. Where a <br> or a <pre> newline starts
+  // the next block within the same elements, they open its text again (startNewTextBlockWithinElements).
   struct BidiEdge {
     int16_t depth = 0;
+    uint8_t count = 0;  // closers still to go in; 0 once spent
+    uint8_t openerCount = 0;
+    uint16_t openers[2] = {};  // in the order they went in
     uint32_t closers[2] = {};  // in the order they go in
-    uint8_t count = 0;
   };
   BidiEdge bidiEdges_[kMaxFlowEntries] = {};
   uint8_t bidiEdgeCount_ = 0;
+  // startNewTextBlock for a <br> or a <pre> newline, which splits a block, not the elements open in it: the open
+  // elements' markup goes on, outermost first, at the new block's start. An edge whose openers the held run has no room
+  // for is spent, and every edge inside it with it.
+  void startNewTextBlockWithinElements(const BlockStyle& blockStyle);
   // Puts the controls the element opening now asks for (CSS Writing Modes 3, 2.4.2: its unicode-bidi and computed
   // direction, elementFlow_) at the start of its text, and pushes the edge with their closers. An inline element takes
   // them all; one laid out as its own block (`inlineElement` false) only an override, as its other values set its
