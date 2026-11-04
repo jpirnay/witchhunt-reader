@@ -403,24 +403,35 @@ def base_frame(black_pixels):
     return frame
 
 
-def overlay_bank(light, dark):
-    """White-base pixels go light through KW, black-base pixels go dark through WK, the rest idle."""
+def overlay_bank(light, dark, light_b=None):
+    """White-base pixels go light through KW, black-base pixels go dark through WK, the rest idle.
+
+    `light_b` is a second light level on the spare KK slot, for comparing two in one refresh.
+    """
     light_table, dark_table = nudge("white", light), nudge("black", dark)
-    idle = rest_like(light_table, dark_table)
-    return make_bank(idle, light_table, dark_table, idle)
+    tables = [light_table, dark_table]
+    if light_b is not None:
+        tables.append(nudge("white", light_b))
+    idle = rest_like(*tables)
+    return make_bank(idle, light_table, dark_table, tables[2] if light_b is not None else idle)
 
 
-def show_overlay(lab, levels, light, dark, cfg, label):
-    """Levels 0-3 (white to black) as a B/W base, then one nudge. Same flow as the X3."""
+def show_overlay(lab, levels, light, dark, cfg, label, light_b=None, turned=False):
+    """Levels 0-3 (white to black) as a B/W base, then one nudge. Same flow as the X3.
+
+    With `light_b`, the lower half as seen uses it. `turned` says the page was rotated, which puts
+    that half at the start of the frame.
+    """
     base = base_frame([level >= 2 for level in levels])
     lab.push("prod", PRODUCTION_BANK, base, f"{label}: B/W base", journal=False)
     frame = Frame(WW)
+    half = len(levels) // 2
     for index, level in enumerate(levels):
         if level == 1:
-            frame.slots[index] = KW
+            frame.slots[index] = KK if light_b is not None and (index < half) == turned else KW
         elif level == 2:
             frame.slots[index] = WK
-    lab.push(cfg, overlay_bank(light, dark), frame, f"{label}: nudge")
+    lab.push(cfg, overlay_bank(light, dark, light_b), frame, f"{label}: nudge")
 
 
 def show_onepass(lab, levels, light, dark, cfg, label):
@@ -458,11 +469,12 @@ SAMPLE_TEXT = (
 )
 
 
-def text_levels(font_path, size, rotate=False, split=False):
+def text_levels(font_path, size, rotate=False, split=False, keep_gray=False):
     """A text page as levels 0-3, using FreeType's antialiasing through Pillow.
 
-    With `split`, the same text fills both halves: four levels above, 1-bit below. Two refreshes of
-    one page can only be compared from memory, and this puts them side by side.
+    With `split`, the same text fills both halves: four levels above, 1-bit below, or four levels in
+    both with `keep_gray`. Two refreshes can only be compared from memory, and this puts them side
+    by side.
     """
     from PIL import Image, ImageDraw, ImageFont
 
@@ -485,7 +497,7 @@ def text_levels(font_path, size, rotate=False, split=False):
     levels = bytearray(min(value // 64, 3) for value in image.tobytes())
     if split:
         upper = levels[: half * WIDTH]
-        levels[half * WIDTH :] = bytes(3 if level >= 2 else 0 for level in upper)
+        levels[half * WIDTH :] = upper if keep_gray else bytes(3 if level >= 2 else 0 for level in upper)
     if rotate:
         levels.reverse()
     return levels
@@ -497,8 +509,11 @@ def show_page(lab, levels, args, label):
         return
     if args.mode == "swapped":  # the plane mix-up the findings describe
         levels = bytearray((0, 2, 1, 3)[level] for level in levels)
-    show = show_onepass if args.mode == "onepass" else show_overlay
-    show(lab, levels, args.light, args.dark, args.cfg, label)
+    if args.mode == "onepass":
+        show_onepass(lab, levels, args.light, args.dark, args.cfg, label)
+    else:
+        light_b = getattr(args, "light_b", None)
+        show_overlay(lab, levels, args.light, args.dark, args.cfg, label, light_b, getattr(args, "rotate", False))
 
 
 FRAME_RATES = [*range(5, 85, 5), *range(85, 125, 5), *range(130, 201, 10)]
@@ -603,6 +618,7 @@ def main():
             page.add_argument("--size", type=int, default=16)
             page.add_argument("--rotate", action="store_true", help="turn the page 180 degrees")
             page.add_argument("--split", action="store_true", help="four levels in one half, 1-bit in the other")
+            page.add_argument("--light-b", type=int, help="overlay: a second light level for the lower half")
     args = parser.parse_args()
 
     if args.step == "parse-otp":
@@ -636,7 +652,11 @@ def main():
             test2_wedge(lab, args.source, args.cfg)
         elif args.step in ("fine", "text"):
             lab.arm()
-            levels = fine_levels() if args.step == "fine" else text_levels(args.font, args.size, args.rotate, args.split)
+            if args.step == "fine":
+                levels = fine_levels()
+            else:
+                compare = args.light_b is not None
+                levels = text_levels(args.font, args.size, args.rotate, args.split or compare, compare)
             show_page(lab, levels, args, f"{args.step} {args.mode}")
             photo(f"t3-{args.step}-{args.mode}-l{args.light}-d{args.dark}")
     except LabError as error:

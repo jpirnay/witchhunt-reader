@@ -190,6 +190,18 @@ class Steps(Bench):
         self.assertEqual(self.lab.refreshes, 2)
         self.assertEqual(self.lab.journal(), [])
 
+    def test_two_light_levels_share_one_nudge(self):
+        self.lab.arm()
+        pixels = lab.WIDTH * lab.HEIGHT
+        for turned, first_half_slot in ((False, lab.KW), (True, lab.KK)):
+            bank = lab.overlay_bank(1, 3, 2)
+            self.assertEqual(lab.describe(bank[lab.KK]), "VSL2 VSH2")
+            pushed = []
+            self.lab.push = lambda cfg, bank, frame, label, journal=True: pushed.append(frame)
+            lab.show_overlay(self.lab, bytearray([1]) * pixels, 1, 3, "prod", "page", 2, turned)
+            self.assertEqual(pushed[-1].slots[0], first_half_slot)
+            self.assertNotEqual(pushed[-1].slots[-1], first_half_slot)
+
     def test_onepass_is_one_refresh_and_balanced(self):
         self.lab.arm()
         levels = bytearray([0, 1, 2, 3]) * (lab.WIDTH * lab.HEIGHT // 4)
