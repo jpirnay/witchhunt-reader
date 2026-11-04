@@ -15,7 +15,7 @@ Landscape needed one fix that was not about size. A virtual front strip now keep
 (`HalCapabilities::frontStripIsVirtual()`, in the orientation provider in `main.cpp`), because rotating them turned
 the physical Up and Down keys into Rename and Delete on the Starred Pages list.
 
-`borrowSecondaryBuffer()` lends a 256 KB PSRAM block on Murphy and the X4 Pro (`HalCapabilities::lendsPsramArena()`).
+`borrowSecondaryBuffer()` lends a 256 KB PSRAM block on every S3 board (`HalCapabilities::keepsSecondaryBuffer()`).
 Murphy's 12,480 byte framebuffer was too small for a ZIP entry's inflate ring, so unopened books got no cover.
 
 **Open, most useful first:**

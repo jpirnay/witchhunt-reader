@@ -4429,8 +4429,7 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     LOG_INF("ERS", "Index start mem (before fb release%s): free=%lu contig=%lu", escalated ? ", C-failure latch" : "",
             esp_get_free_heap_size(),
             static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
-    renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
-    released = true;
+    released = renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
     LOG_INF("ERS", "Index start mem (after fb release): free=%lu contig=%lu", esp_get_free_heap_size(),
             static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   }
@@ -4454,8 +4453,7 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     // blocking foreground path has always relied on.
     LOG_INF("ERS", "In-place section build failed; retrying with secondary buffer released (free=%lu)",
             esp_get_free_heap_size());
-    renderer.releaseSecondaryBuffer();
-    released = true;
+    released = renderer.releaseSecondaryBuffer();
     const uint32_t retryStart = millis();
     createOk = runCreate();
     LOG_INF("ERS", "createSectionFile retry returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - retryStart,
@@ -4474,8 +4472,7 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
             static_cast<unsigned long>(buildScratch_->releaseFailures()),
             static_cast<unsigned long>(esp_get_free_heap_size()));
     handBackBorrow();
-    renderer.releaseSecondaryBuffer();
-    released = true;
+    released = renderer.releaseSecondaryBuffer();
     const uint32_t retryStart = millis();
     createOk = runCreate();
     LOG_INF("ERS", "createSectionFile released retry returned %d in %ums (free=%lu)", createOk ? 1 : 0,
@@ -5694,8 +5691,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     warmLend.emplace(renderer);
     if (!warmLend->arena()) {
       warmLend.reset();
-      renderer.releaseSecondaryBuffer();
-      releasedSecondaryForWarm = true;
+      releasedSecondaryForWarm = renderer.releaseSecondaryBuffer();
       LOG_DBG("ERS", "Released secondary buffer for image warm pass (nothing to lend)");
     }
   }
