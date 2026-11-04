@@ -38,6 +38,9 @@ jobs:
           - env: lilygo_gh_release
             label: LilyGo T5S3
             asset: firmware-lilygo.bin
+          - env: murphy_gh_release
+            label: Murphy M3
+            asset: firmware-murphy.bin
     steps:
       - uses: actions/checkout@v6
         with:
