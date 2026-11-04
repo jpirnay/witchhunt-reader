@@ -276,15 +276,15 @@ class Lab:
         if int(reply.split("=")[1]) != sum(dtm1) + sum(dtm2):
             raise LabError("frame checksum mismatch")
 
-    def push(self, cfg, bank, frame, label, journal=True):
+    def push(self, cfg, bank, frame, label, journal=True, go="GO"):
         """One refresh. Anything with a net drive goes in the journal for `undo`."""
         dtm1, dtm2 = frame.planes()
-        self._send(cfg, bank, dtm1, dtm2, label)
+        self._send(cfg, bank, dtm1, dtm2, label, go)
         used = set(frame.slots)
         if journal and any(net_drive(bank[slot]) for slot in used):
             self.journal_add(cfg, bank, dtm1, dtm2, label)
 
-    def _send(self, cfg, bank, dtm1, dtm2, label):
+    def _send(self, cfg, bank, dtm1, dtm2, label, go="GO"):
         print(f"{label}:")
         for name, slot in (("VCOM", VCOM), ("WW", WW), ("KW", KW), ("WK", WK), ("KK", KK)):
             print(f"  {name:4} net {net_drive(bank[slot]):+4}  {describe(bank[slot])}")
@@ -292,7 +292,7 @@ class Lab:
         for slot, table in enumerate(bank):
             self.command(f"LUT {slot} {table.hex()}")
         self.send_frame(dtm1, dtm2)
-        reply, _ = self.command("GO")
+        reply, _ = self.command(go)
         self.refreshes += 1
         print(f"  {reply}")
 
@@ -504,6 +504,34 @@ def test4_patches(lab, gray_aware, light=2, dark=3, hold=False):
     photo(f"t4-fast-{label}")
 
 
+# The reader's gray bank (freeink-sdk lut/Uc8253MurphyLuts.h), slot for slot. Every gray pixel starts
+# black there, and the planes are the renderer's masks: (LSB, MSB) 00 rests, 01 light, 11 and 10 dark.
+READER_GRAY_BANK = [
+    lut((REST, 8)),
+    lut((VSH, 3), (VSL, 3)),  # WW (1,1) dark
+    lut((VSH, 4), (VSL, 4)),  # KW (0,1) light
+    lut((VSH, 3), (VSL, 3)),  # WK (1,0) dark
+    lut((REST, 8)),  # KK (0,0) rests
+]
+
+
+def test_handover(lab, warm, swap_planes=False):
+    """The reader's nudge after a black base, with and without a reset in between.
+
+    Rows top to bottom: rests (black), light, dark through LUT 21, dark through LUT 23. A warm
+    refresh finds DTM1 and DTM2 trading roles after the refresh before it, so `swap_planes` sends
+    each plane's bits through the other.
+    """
+    lab.arm()
+    lab.clean("black")
+    frame = Frame(KK)
+    lab.push("prod", PRODUCTION_BANK, frame, "black base", journal=False, go="GOH" if warm else "GO")
+    for row, slot in enumerate((KK, WK, WW, KW) if swap_planes else (KK, KW, WW, WK)):
+        frame.rect(0, row * 104, WIDTH, 104, slot)
+    lab.push("prod", READER_GRAY_BANK, frame, "reader nudge", go="GOW" if warm else "GO")
+    photo(f"t5-{'warm' if warm else 'cold'}", "top to bottom: black, light, dark, dark")
+
+
 def page_levels(font_path, size, page):
     """A different page each time: the sample text starts `page` words further on."""
     words = SAMPLE_TEXT.split()
@@ -699,6 +727,9 @@ def main():
     t2 = steps.add_parser("t2", help="Test 2: frame-count wedge")
     t2.add_argument("source", choices=("white", "black"))
     t2.add_argument("--cfg", choices=sorted(CONFIGS), default="prod")
+    t5 = steps.add_parser("t5", help="Test 5: the reader's nudge, with or without a reset before it")
+    t5.add_argument("handover", choices=("cold", "warm"))
+    t5.add_argument("--swap-planes", action="store_true", help="exchange DTM1 and DTM2")
     t4 = steps.add_parser("t4", help="Test 4: gray patches through a FAST page turn")
     t4.add_argument("--aware", action="store_true", help="mark gray pixels as changed")
     t4.add_argument("--hold", action="store_true", help="stop while the patches are gray")
@@ -750,6 +781,8 @@ def main():
             test1_slots(lab)
         elif args.step == "t2":
             test2_wedge(lab, args.source, args.cfg)
+        elif args.step == "t5":
+            test_handover(lab, args.handover == "warm", args.swap_planes)
         elif args.step == "t4":
             import cam
 

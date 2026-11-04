@@ -212,8 +212,25 @@ Result on our unit, 2026-11-04, a real book at the production refresh cycle of o
 redraw of the same page by 0.9 of a 105 range, with no structure. The reader menu and a cover image
 work, and an idle minute refreshes nothing. No errors, and heap ended where it started.
 
-**Still open.** Long-term DC behaviour. Sleep covers and the BMP viewer have not been run. A book with a
-stored `textAntiAliasingOverride` of 0 stays B/W, whatever the setting says.
+The user judged the text better than 1-bit, and sleep covers show gray.
+
+`./lab.py t5 cold`, `t5 warm` and `t5 warm --swap-planes` test skipping the reset before the nudge,
+with the reader's slots and bytes. Rows are black, light, dark through LUT 21, dark through LUT 23:
+
+| Handover | Light | Dark | Dark |
+|---|---|---|---|
+| Cold | 49-52 | 30-33 | 33-35 |
+| Warm | 27-28 | 28-29 | 54-56 |
+| Warm, planes swapped | 48-49 | 28-29 | 31-32 |
+
+So a refresh leaves DTM1 and DTM2 trading roles until the next reset. The datasheet does not say this,
+and it may be why the manufacturer asks for a reset before every refresh and why the bench saw its
+mid-tones inverted. With the swap in the driver, the gray landed 330 ms after the page instead of
+590 ms, and real pages matched a cold build within a point on row means. Levels also carry history:
+black driven repeatedly lifts several points less than the Test 2 table says.
+
+**Still open.** Long-term DC behaviour. The BMP viewer has not been run. A book with a stored
+`textAntiAliasingOverride` of 0 stays B/W, whatever the setting says.
 
 ## Protocol
 

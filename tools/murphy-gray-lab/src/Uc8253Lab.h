@@ -34,6 +34,13 @@ struct Bank {
 
 enum class Clean : uint8_t { White, Black };
 
+// How a refresh treats the controller around it.
+enum class Handover : uint8_t {
+  Cold,  // reset and full init first, power off after: what the Murphy driver does for a page
+  Hold,  // the same, but stay powered for a Warm refresh to follow
+  Warm   // no reset, no init: LUTs, planes and refresh on a controller left running by Hold
+};
+
 // Which read handshake the controller answers. The SDK has two, and the datasheet describes a
 // third. REV has a known answer, so the lab tries them all rather than guessing.
 enum class ReadMode : uint8_t {
@@ -58,14 +65,14 @@ class Panel {
 
   // Drive the panel. `waveformMs` is how long BUSY held for the refresh itself.
   bool clean(Clean target, uint32_t* waveformMs);
-  bool refresh(const PanelConfig& cfg, const Bank& bank, const uint8_t* dtm1, const uint8_t* dtm2,
-               uint32_t* waveformMs);
+  bool refresh(const PanelConfig& cfg, const Bank& bank, const uint8_t* dtm1, const uint8_t* dtm2, uint32_t* waveformMs,
+               Handover handover = Handover::Cold);
 
  private:
   void reset();
   bool initController(const PanelConfig& cfg);
   void loadBank(const Bank& bank);
-  bool finishRefresh(uint32_t* waveformMs);
+  bool finishRefresh(uint32_t* waveformMs, bool powerOff = true);
   void command(uint8_t cmd);
   void data(uint8_t value);
   void dataBytes(const uint8_t* bytes, size_t length);
@@ -77,6 +84,7 @@ class Panel {
   bool waitReady(const char* stage, uint32_t timeoutMs);
 
   ReadMode readMode_ = ReadMode::HeldSample;
+  bool held_ = false;  // a Hold refresh left the controller running
   const char* error_ = nullptr;
 };
 

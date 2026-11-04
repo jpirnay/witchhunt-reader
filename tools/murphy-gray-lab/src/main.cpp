@@ -148,12 +148,12 @@ void commandFrame() {
   Serial.println(sum);
 }
 
-void commandGo() {
+void commandGo(Handover handover) {
   if (lutsLoaded != (1u << kLutSlots) - 1) return fail("LUTs not loaded");
   if (!frameLoaded) return fail("frame not loaded");
   const uint32_t start = millis();
   uint32_t waveformMs = 0;
-  const bool done = panel.refresh(config, bank, dtm1, dtm2, &waveformMs);
+  const bool done = panel.refresh(config, bank, dtm1, dtm2, &waveformMs, handover);
   reportRefresh(done, waveformMs, start);
 }
 
@@ -192,11 +192,12 @@ void handle(char* line) {
     commandLut(args);
   } else if (!strcmp(line, "FRAME")) {
     commandFrame();
-  } else if (!strcmp(line, "GO") || !strcmp(line, "W") || !strcmp(line, "K")) {
-    // The three commands that move ink.
+  } else if (!strcmp(line, "GO") || !strcmp(line, "GOH") || !strcmp(line, "GOW") || !strcmp(line, "W") ||
+             !strcmp(line, "K")) {
+    // The commands that move ink.
     if (!armed) return fail("not armed");
     if (line[0] == 'G') {
-      commandGo();
+      commandGo(line[2] == 'H' ? Handover::Hold : line[2] == 'W' ? Handover::Warm : Handover::Cold);
     } else {
       commandClean(line[0] == 'W' ? Clean::White : Clean::Black);
     }

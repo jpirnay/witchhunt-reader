@@ -160,12 +160,13 @@ void Panel::loadBank(const Bank& bank) {
   }
 }
 
-bool Panel::finishRefresh(uint32_t* waveformMs) {
+bool Panel::finishRefresh(uint32_t* waveformMs, bool powerOff) {
   const uint32_t start = millis();
   command(kCmdRefresh);
   delay(1);  // Good Display sample: BUSY needs at least 200 us to assert
   const bool ok = waitReady("refresh", kBusyTimeoutMs);
   if (waveformMs) *waveformMs = millis() - start;
+  if (!powerOff) return ok;
   command(kCmdPowerOff);
   // Keep the first failure: a refresh timeout must not be overwritten by a clean power off.
   const char* refreshError = error_;
@@ -176,6 +177,7 @@ bool Panel::finishRefresh(uint32_t* waveformMs) {
 
 // DDX=01: {NEW,OLD} 11 selects WW, so 0xFF is white. Good Display's clear screen writes 0xFF too.
 bool Panel::clean(Clean target, uint32_t* waveformMs) {
+  held_ = false;
   if (!initController(kProductionConfig)) return false;
   loadBank(kProductionBank);
   const uint8_t fill = target == Clean::White ? 0xFF : 0x00;
@@ -185,20 +187,29 @@ bool Panel::clean(Clean target, uint32_t* waveformMs) {
 }
 
 bool Panel::refresh(const PanelConfig& cfg, const Bank& bank, const uint8_t* dtm1, const uint8_t* dtm2,
-                    uint32_t* waveformMs) {
+                    uint32_t* waveformMs, Handover handover) {
   const char* rejected = checkConfig(cfg);
   for (uint8_t slot = 0; slot < kLutSlots && !rejected; slot++) rejected = checkLut(slot, bank.lut[slot]);
+  if (!rejected && handover == Handover::Warm && !held_) rejected = "warm refresh needs a Hold first";
   if (rejected) {
     error_ = rejected;
     return false;
   }
-  if (!initController(cfg)) return false;
+  if (handover == Handover::Warm) {
+    error_ = nullptr;
+  } else if (!initController(cfg)) {
+    return false;
+  }
+  held_ = false;
   loadBank(bank);
   command(kCmdDtm1);
   dataBytes(dtm1, kPlaneBytes);
   command(kCmdDtm2);
   dataBytes(dtm2, kPlaneBytes);
-  return finishRefresh(waveformMs);
+  const bool hold = handover == Handover::Hold;
+  const bool done = finishRefresh(waveformMs, !hold);
+  held_ = hold && done;
+  return done;
 }
 
 void Panel::startRead(ReadMode mode, uint8_t cmd) {

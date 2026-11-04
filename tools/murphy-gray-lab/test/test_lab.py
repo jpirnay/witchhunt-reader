@@ -333,6 +333,45 @@ class Links(unittest.TestCase):
         self.assertEqual(dry.journal(), [])
 
 
+class Handover(Bench):
+    def setUp(self):
+        super().setUp()
+        self.lab.arm()
+        self.frame = lab.Frame(lab.KK)
+
+    def send(self, go):
+        self.lab.push("prod", lab.READER_GRAY_BANK, self.frame, "page", journal=False, go=go)
+
+    def test_warm_skips_init_and_keeps_the_refresh_order(self):
+        self.send("GOH")
+        self.send("GOW")
+        rows = [row[0] for row in self.bus()]
+        cut = rows.index("12") + 1
+        self.assertNotIn("02", rows[:cut], "Hold must leave the controller powered")
+        warm = rows[cut:]
+        self.assertEqual(warm, ["20", "21", "22", "23", "24", "10", "13", "12", "02"])
+
+    def test_warm_needs_a_hold_first(self):
+        with self.assertRaisesRegex(lab.LabError, "Hold"):
+            self.send("GOW")
+        self.send("GO")
+        with self.assertRaisesRegex(lab.LabError, "Hold"):
+            self.send("GOW")
+
+    def test_a_hold_is_good_for_one_warm_refresh(self):
+        self.send("GOH")
+        self.send("GOW")
+        with self.assertRaisesRegex(lab.LabError, "Hold"):
+            self.send("GOW")
+
+    def test_reader_bank_is_balanced_and_matches_the_sdk_bytes(self):
+        self.assertEqual(lab.describe(lab.READER_GRAY_BANK[lab.KW]), "VSH4 VSL4")
+        self.assertEqual(lab.describe(lab.READER_GRAY_BANK[lab.WW]), "VSH3 VSL3")
+        self.assertEqual(lab.READER_GRAY_BANK[lab.WW][:7], bytes([1, 0x43, 0x83, 0, 0, 1, 1]))
+        self.assertEqual(lab.READER_GRAY_BANK[lab.KW][:7], bytes([1, 0x44, 0x84, 0, 0, 1, 1]))
+        self.assertTrue(all(lab.net_drive(table) == 0 for table in lab.READER_GRAY_BANK))
+
+
 class Failure(Bench):
     def test_busy_timeout_stops_the_step_and_is_named(self):
         self.close()
