@@ -160,12 +160,14 @@ uint8_t MappedInputManager::rawIndex(const Button button) const {
 }
 
 bool MappedInputManager::wasPressed(const Button button) const {
-  return mapButton(button, &HalGPIO::wasPressed) ||
+  const bool waits = confirmWaitsForGesture_ && button == Button::Confirm;
+  return (!waits && mapButton(button, &HalGPIO::wasPressed)) ||
          (syntheticPressedMask_ & static_cast<uint16_t>(1u << static_cast<uint8_t>(button))) != 0;
 }
 
 bool MappedInputManager::wasReleased(const Button button) const {
-  return mapButton(button, &HalGPIO::wasReleased) ||
+  const bool waits = confirmWaitsForGesture_ && button == Button::Confirm;
+  return (!waits && mapButton(button, &HalGPIO::wasReleased)) ||
          (syntheticPressedMask_ & static_cast<uint16_t>(1u << static_cast<uint8_t>(button))) != 0;
 }
 

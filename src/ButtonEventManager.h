@@ -48,6 +48,9 @@ class ButtonEventManager {
     // Synthetic Back actions bypass global action lookup so they reach the activity's built-in
     // Back handling rather than recursively invoking the selected Back action.
     bool bypassActionMapping = false;
+    // A screen that polls leaves its events in the queue, so main.cpp meets this one again every
+    // frame. Set once it has passed the press on to those screens.
+    bool offeredToPolling = false;
   };
 
   // Timing constants (milliseconds)

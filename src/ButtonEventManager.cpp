@@ -80,7 +80,9 @@ ButtonEventManager::PressLog ButtonEventManager::pressLog(const Button button) c
 
 void ButtonEventManager::pushEvent(const Button button, const PressType type, const unsigned long pressMs) {
   const int next = (eventTail + 1) % EVENT_BUF;
-  if (next == eventHead) return;  // buffer full, drop oldest not possible — just drop newest
+  // Full means a screen that polls has left its events here. A press that waits on this queue to
+  // reach that screen must not be the one given up (MappedInputManager::setConfirmWaitsForGesture).
+  if (next == eventHead) eventHead = (eventHead + 1) % EVENT_BUF;
   eventBuf[eventTail] = {button, type, pressMs};
   eventTail = next;
 }

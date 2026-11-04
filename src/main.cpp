@@ -2223,6 +2223,10 @@ void loop() {
       return true;
     };
 
+    const bool confirmWaits =
+        buttonEventManager.hasDoubleAction(B::Confirm) && !activityManager.currentKeepsConfirmGestures();
+    mappedInputManager.setConfirmWaitsForGesture(confirmWaits);
+
     ButtonEventManager::ButtonEvent ev;
     std::vector<ButtonEventManager::ButtonEvent> defaultEvents;
     defaultEvents.reserve(8);
@@ -2247,6 +2251,10 @@ void loop() {
     }
 
     for (auto it = defaultEvents.rbegin(); it != defaultEvents.rend(); ++it) {
+      if (confirmWaits && it->button == B::Confirm && !it->offeredToPolling) {
+        mappedInputManager.injectLogicalPress(B::Confirm);
+        it->offeredToPolling = true;
+      }
       buttonEventManager.pushEventFront(*it);
     }
 

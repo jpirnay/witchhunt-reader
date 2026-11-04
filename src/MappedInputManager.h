@@ -272,6 +272,11 @@ class MappedInputManager {
   void injectLogicalPress(Button button) const {
     syntheticPressedMask_ |= static_cast<uint16_t>(1u << static_cast<uint8_t>(button));
   }
+  // With a double action on Confirm, a screen polling it would act on the first tap: Weather opened
+  // its settings, the screen change dropped the gesture, and the double press never became Back.
+  // While this is set the real key stays hidden from wasPressed() and wasReleased(), and main.cpp
+  // hands the press on as a logical one once ButtonEventManager has classified it.
+  void setConfirmWaitsForGesture(const bool waits) const { confirmWaitsForGesture_ = waits; }
   // When the touch event this cycle happened, on the sampler's clock; 0 if there was none.
   uint32_t lastTouchEventAtMs() const;
 
@@ -284,6 +289,7 @@ class MappedInputManager {
  private:
   HalGPIO& gpio;
   mutable uint16_t syntheticPressedMask_ = 0;
+  mutable bool confirmWaitsForGesture_ = false;
   // Live orientation authority for the touch transform — see the constructor.
   const GfxRenderer& renderer;
   static ScreenOrientation (*orientationProvider)();
