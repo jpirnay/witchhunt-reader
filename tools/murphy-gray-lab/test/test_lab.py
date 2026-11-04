@@ -313,7 +313,7 @@ class FastPageTurn(unittest.TestCase):
         self.assertEqual(self.slots(0, 0, True), lab.WW)
         self.assertEqual(self.slots(3, 3, True), lab.KK)
 
-    def test_fast_bank_matches_production(self):
+    def test_fast_bank_is_the_manufacturers(self):
         self.assertEqual(lab.describe(lab.FAST_BANK[lab.KW]), "VSL15 rest1")
         self.assertEqual(lab.describe(lab.FAST_BANK[lab.WK]), "VSH15 rest1")
         self.assertEqual(lab.describe(lab.FAST_BANK[lab.KK]), "rest15 VSH1")
