@@ -47,7 +47,7 @@ on the line pass.
     lines, a dir="rtl" paragraph runs right to left, and a <bdi> opens a paragraph.
   - Spine 3, the two notes the markers point at.
 
-Regenerate with:  python -I test/epubs/make_test_writing_modes.py  (a Python on classic zlib; see write())
+Regenerate with:  python -I test/epubs/make_test_writing_modes.py  (CPython 3.12; see write())
 then refresh goldens: UPDATE_GOLDENS=1 ctest -R EpubPipeline
 """
 
@@ -196,7 +196,8 @@ def write(name, files):
         for path, data, method in files:
             # A fixed date keeps a regenerated book byte-identical, and a fixed system (Unix, as the first books were
             # written on) keeps it so on Windows. The deflated bytes are zlib's: zlib-ng (Python 3.14's) writes
-            # others, so regenerate with a Python on classic zlib, or only the new book's bytes are comparable.
+            # others, so regenerate with CPython 3.12: with 3.14 the old books' bytes change too, not only the new
+            # one's.
             info = zipfile.ZipInfo(path, date_time=(2026, 10, 26, 0, 0, 0))
             info.create_system = 3
             info.compress_type = method

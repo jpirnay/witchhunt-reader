@@ -3,10 +3,10 @@
 // word is drawn right to left while Latin letters and digits keep their order, and two note markers on one line are
 // read in order.
 //
-// The books run through forEachPage: test_bidi_text at 460 px and at 1,600 px, where its 111-token paragraph's lines
-// pass BidiLine::kMaxCodepoints slots and take upstream's fallback, and test_rtl_markup. Every rule walks every page
-// line and every table cell line. forEachPage frees each page when its callback returns, so a rule copies what it
-// needs (text, numbers) inside the callback and keeps no pointer into a page.
+// The books run through forEachPage: test_bidi_text at 460 px and at 1,600 px, and test_rtl_markup. At 1,600 px only a
+// paragraph of 128 or more slots (BidiLine::kMaxCodepoints) takes upstream's fallback, and the mark rule does not
+// reach it. Every rule walks every page line and every table cell line. forEachPage frees each page when its callback
+// returns, so a rule copies what it needs (text, numbers) inside the callback and keeps no pointer into a page.
 #include <BidiUtils.h>
 #include <TextShaping.h>
 #include <Utf8.h>
