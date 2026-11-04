@@ -236,7 +236,12 @@ it up. Check `./cam.py still baseline-white <shot>` after each run: a bumped cam
 `./ui_ghost.py <tag> --port <port>` measures the same thing on a real Settings list with the reader on
 the device. The numbers are in `docs/future_work/murphy-gray.md`.
 
-**Still open.** Long-term DC behaviour. The BMP viewer has not been run. A book with a stored
+**Test 7 and 8: HALF.** `./lab.py t7 <h0|h5|h10|h15>` measures how well a HALF cleans a patch with a
+history, and `./lab.py t8 <half> <fast> <name>` runs a HALF and a FAST together. Use t8 to judge any
+waveform change: a better HALF can make every FAST after it worse, and t7 alone will not show that. Do
+this on a blank panel, not in the reader: text sets off the webcam's autofocus, which shifts the scene.
+
+**Still open.** Long-term DC behaviour. A book with a stored
 `textAntiAliasingOverride` of 0 stays B/W, whatever the setting says.
 
 ## Protocol
