@@ -153,9 +153,6 @@ class ParsedText {
   bool levelDecided_ = false;  // level_ is decided on the paragraph's first pass and kept
   // The embeddings, overrides and isolates the text before the next line leaves open. Steps over each accepted line.
   BidiLine::OpenControls openControls_;
-  // The pass's working memory when the build lends no arena for it (BidiLine::ArenaWorkspace): made on first use and
-  // kept for the whole build; only releaseLayoutScratch() frees it.
-  std::unique_ptr<BidiLine::Scratch> bidiScratch_;
   // The line being laid out: its tokens, its pieces in visual order, and what its TextBlock is made from. The texts are
   // views into `words`, the forms into bidiLine_.display: TextBlock copies both into its arena, so a line builds no
   // string. All keep their capacity across lines.
@@ -176,7 +173,8 @@ class ParsedText {
   void forgetBidiParagraph();
   // Drops the bidi controls from every token, and the tokens left empty (but a ruby group's).
   void dropBidiControls();
-  // The scratch for one pass: the lent arena's (`workspace`), else bidiScratch_. Null, logged, when neither can be had.
+  // The scratch for one pass: the lent arena's (`workspace`), else the build's one BidiLine::heapScratch(). Null,
+  // logged, when neither can be had.
   BidiLine::Scratch* bidiScratchFor(const BidiLine::ArenaWorkspace& workspace);
   // Runs the line pass over tokens [first, first + count) into bidiLine_, with the workspace borrowed from lineArena_
   // for the pass alone. False, logged, when it could not run: the line is then laid out without bidi.

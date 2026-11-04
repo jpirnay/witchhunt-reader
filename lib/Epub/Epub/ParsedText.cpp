@@ -1106,9 +1106,8 @@ void ParsedText::releaseLayoutScratch() {
   std::vector<int16_t>().swap(lineXPosScratch_);
   std::string().swap(allText_);
   std::vector<TextBlock::Annotation>().swap(lineAnnotations_);
-  // The line pass's: its working memory, the line and its pieces. The paragraph's direction and its open controls are
-  // its state, not scratch, and stay.
-  bidiScratch_.reset();
+  // The line pass's: the line and its pieces. The paragraph's direction and its open controls are its state, not
+  // scratch, and stay. Its working memory is the build's (BidiLine::heapScratch), not this text's.
   std::vector<BidiLine::Piece>().swap(bidiLine_.pieces);
   std::string().swap(bidiLine_.display);
   std::vector<std::string>().swap(bidiLine_.fallbackWords);
@@ -2078,15 +2077,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 }
 
 BidiLine::Scratch* ParsedText::bidiScratchFor(const BidiLine::ArenaWorkspace& workspace) {
-  if (workspace.scratch() != nullptr) return workspace.scratch();
-  if (!bidiScratch_) {
-    bidiScratch_ = makeUniqueNoThrow<BidiLine::Scratch>();
-    if (!bidiScratch_) {
-      LOG_ERR("BIDI", "No %u B for the line pass: laid out without bidi",
-              static_cast<unsigned>(sizeof(BidiLine::Scratch)));
-    }
-  }
-  return bidiScratch_.get();
+  return workspace.scratch() != nullptr ? workspace.scratch() : BidiLine::heapScratch();
 }
 
 bool ParsedText::layOutBidiLine(const size_t first, const size_t count) {

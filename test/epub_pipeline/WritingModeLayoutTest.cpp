@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "../book_metadata_cache/AllocationRefusal.h"
+#include "Epub/BidiLine.h"
 #include "Epub/ParsedText.h"
 #include "Epub/blocks/BlockStyle.h"
 #include "GfxRenderer.h"
@@ -716,6 +717,16 @@ TEST_F(BidiLayout, TheBidiWorkspaceIsGoneWhenTheBuildEnds) {
   ASSERT_TRUE(BidiUtils::heapWorkspaceHeld());
   const std::string out = dump("", document(kMixedRtl), bookAlignment());
   EXPECT_NE(std::string::npos, out.find(" WD t=")) << out;
+  EXPECT_FALSE(BidiUtils::heapWorkspaceHeld());
+}
+
+TEST_F(BidiLayout, TheLinePassScratchIsGoneWhenTheBuildEnds) {
+  // One held before the build goes too: the build ends by releasing it, and the paragraphs share it.
+  ASSERT_NE(nullptr, BidiLine::heapScratch());
+  ASSERT_TRUE(BidiLine::heapScratchHeld());
+  const std::string out = dump("", document(kMixedRtl), bookAlignment());
+  EXPECT_NE(std::string::npos, out.find(" WD t=")) << out;
+  EXPECT_FALSE(BidiLine::heapScratchHeld());
   EXPECT_FALSE(BidiUtils::heapWorkspaceHeld());
 }
 

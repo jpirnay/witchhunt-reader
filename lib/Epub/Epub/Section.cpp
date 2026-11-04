@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "BidiLine.h"
 #include "Epub/css/CssParser.h"
 #include "FootnotePreviews.h"
 #include "Page.h"
@@ -1006,8 +1007,9 @@ struct Section::BuildState {
     // page block (when it holds one) is nested above it: the parser goes first.
     visitor.reset();
     if (chunkBlock.valid()) arena->release(chunkBlock);
-    // The line pass's workspace lives for the build alone (deviation 1): a heap one is freed, a lent one unbound.
-    BidiUtils::releaseWorkspace();
+    // The line pass's memory lives for the build alone (deviation 1): the heap Scratch and workspace are freed, a lent
+    // workspace unbound.
+    BidiLine::releaseBuildMemory();
   }
   bool parseStarted = false;
   // Two-phase sliced parse, latched at the first parse call (so a build started in the

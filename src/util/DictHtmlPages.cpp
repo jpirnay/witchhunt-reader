@@ -1,6 +1,7 @@
 #include "DictHtmlPages.h"
 
 #include <Arduino.h>
+#include <Epub/BidiLine.h>
 #include <Epub/parsers/ChapterHtmlSlimParser.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -140,6 +141,8 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
     parsed = parser->finalize() && streamed && parser->streamSucceeded();
     if (!parsed) LOG_ERR("DHTML", "Definition is not parseable as XHTML; falling back to plain text");
   }
+  // No Section build ends here, so nothing else frees the line pass's heap memory (a right-to-left article made it).
+  BidiLine::releaseBuildMemory();
 
   if (!parsed || resourceLimitHit || pagesOut.empty()) {
     pagesOut.clear();

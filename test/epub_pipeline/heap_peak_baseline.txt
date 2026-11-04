@@ -21,3 +21,7 @@ fixtures/moby-dick.epub arena 54651
 fixtures/moby-dick.epub heap 62872
 fixtures/test_large_css.epub arena 26457
 fixtures/test_large_css.epub heap 36275
+epubs/test_bidi_text.epub arena 28053
+epubs/test_bidi_text.epub heap 61440
+epubs/test_rtl_markup.epub arena 25232
+epubs/test_rtl_markup.epub heap 43684

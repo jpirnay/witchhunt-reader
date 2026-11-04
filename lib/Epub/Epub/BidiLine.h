@@ -120,7 +120,7 @@ bool tokenForm(std::string_view token, const OpenControls& open, uint8_t paragra
                std::string& out);
 
 // Lends a block of `arena` holding the workspace and a Scratch for one scope; unbinds and releases it on destruction.
-// scratch() is null with no arena or no room (the caller then uses its own heap Scratch). Its block nests LIFO with
+// scratch() is null with no arena or no room (the caller then uses heapScratch()). Its block nests LIFO with
 // the arena's other blocks: the scope ends before anything below it is released. One at a time: its end unbinds the
 // workspace, whoever bound it.
 class ArenaWorkspace {
@@ -137,5 +137,17 @@ class ArenaWorkspace {
   BuildArena::Block block_;
   Scratch* scratch_ = nullptr;
 };
+
+// The build's one heap Scratch, for a pass the arena lends no room for. The line pass runs one line at a time on the
+// loop task, so every paragraph, cell and list item of a build shares it. Made on first use; null, logged, when there
+// is no room (the line is then laid out without bidi). Held until releaseBuildMemory().
+Scratch* heapScratch();
+
+// Ends a build's line-pass memory: frees the heap Scratch and the BidiUtils workspace (which getWorkspace() makes
+// again on demand). For whoever ran the parser: a section build's end, a dictionary article's pages.
+void releaseBuildMemory();
+
+// Whether the heap Scratch is held (for tests).
+bool heapScratchHeld();
 
 }  // namespace BidiLine
