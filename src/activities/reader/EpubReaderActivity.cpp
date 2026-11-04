@@ -31,6 +31,7 @@
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <GlyphProvider.h>
+#include <HalCapabilities.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
@@ -3292,6 +3293,7 @@ uint8_t EpubReaderActivity::getEffectiveImageRendering() const {
 }
 
 bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
+  if (!HalCapabilities::panelShowsGray()) return false;  // a book's stored override included
   if (bookTextAntiAliasingOverride >= 0) {
     return bookTextAntiAliasingOverride != 0;
   }
@@ -5209,7 +5211,8 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
 
   if (section->pageCount == 0) {
     LOG_DBG("ERS", "No pages to render");
-    renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_CHAPTER), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, ReaderUtils::messageY(renderer), tr(STR_EMPTY_CHAPTER), true,
+                              EpdFontFamily::BOLD);
     renderStatusBar();
     renderer.displayBuffer();
     automaticPageTurnActive = false;
@@ -5218,7 +5221,8 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
 
   if (section->currentPage < 0 || section->currentPage >= section->pageCount) {
     LOG_DBG("ERS", "Page out of bounds: %d (max %d)", section->currentPage, section->pageCount);
-    renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_OUT_OF_BOUNDS), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_12_FONT_ID, ReaderUtils::messageY(renderer), tr(STR_OUT_OF_BOUNDS), true,
+                              EpdFontFamily::BOLD);
     renderStatusBar();
     renderer.displayBuffer();
     automaticPageTurnActive = false;
@@ -5283,7 +5287,8 @@ void EpubReaderActivity::renderNormalPass(RenderLock& lock, const RenderLayout& 
       LOG_ERR("ERS", "Page %d unreadable after rebuild (spine %d); giving up on this page", section->currentPage,
               currentSpineIndex);
       TapTargets::readerLinks().invalidate();
-      renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_CHAPTER), true, EpdFontFamily::BOLD);
+      renderer.drawCenteredText(UI_12_FONT_ID, ReaderUtils::messageY(renderer), tr(STR_EMPTY_CHAPTER), true,
+                                EpdFontFamily::BOLD);
       renderStatusBar();
       renderer.displayBuffer();
       return;
@@ -6703,6 +6708,36 @@ bool EpubReaderActivity::hasPendingBackgroundWork() {
            ? LaneBeforeBuild::decodeWhileBuilding(backgroundImageYields_) == LaneBeforeBuild::Decode::TakeFromBuild
            : !secondaryBorrowed_ && renderer.hasSecondaryBuffer());
   return imageLaneCanRun && (imageWarmCleanSpine_ != currentSpineIndex || imageWarmCleanPage_ != section->currentPage);
+}
+
+const char* EpubReaderActivity::sendPageOnScreen() {
+  if (!epub || !section) return "no page";
+  // A section still being built, or a page turn on its way to the panel: what is on screen is about to change.
+  if (readerPhase_ != ReaderPhase::READING || section->hasActiveBuild() || usePreRenderedBuffer) return "busy";
+  if (section->currentPage < 0 || section->currentPage >= section->pageCount) return "no page";
+  // The reader keeps no page in memory between draws: loaded as a redraw of the page on screen loads it
+  // (restoreCurrentPageToBufferIfPreRendered), for the length of the dump.
+  const std::unique_ptr<Page> page = section->loadPageFromSectionFile();
+  if (!page) return "no page";
+  // Where renderPageContentOnly() draws it and publishPageLinkTargets() boxes its words.
+  const RenderLayout layout = computeRenderLayout();
+  const int contentTop = layout.marginTop + ReaderPageLayout::imageOnlyPageYOffset(*page, layout.viewportHeight);
+  const int screenW = renderer.getScreenWidth(renderer.getHeldOrientation());
+  const turnedframe::Offsets origin =
+      page->isVertical()
+          ? turnedframe::contentOffsets(screenW, layout.marginLeft, contentTop, page->verticalBlockExtent)
+          : turnedframe::Offsets{layout.marginLeft, contentTop};
+  SerialTestApi::PageOnScreen onScreen;
+  onScreen.page = page.get();
+  onScreen.fontId = getEffectiveReaderFontId();
+  onScreen.originX = origin.x;
+  onScreen.originY = origin.y;
+  onScreen.spine = currentSpineIndex + 1;
+  onScreen.spineCount = epub->getSpineItemsCount();
+  onScreen.pageNumber = section->currentPage + 1;
+  onScreen.pageCount = section->pageCount;
+  onScreen.verticalFlow = section->flowContext().vertical;
+  return SerialTestApi::sendPage(onScreen) ? nullptr : "no memory";
 }
 #endif  // SERIAL_TEST_API
 

@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "components/themes/PanelMetrics.h"
+
 class CrossPointSettings {
  private:
   // Private constructor for singleton
@@ -14,6 +16,8 @@ class CrossPointSettings {
 
   // Static instance
   static CrossPointSettings instance;
+
+  void applyDeviceButtonDefaults();
 
  public:
   // Delete copy constructor and assignment
@@ -155,7 +159,7 @@ class CrossPointSettings {
 
   /// Reader sizes are stored as POINT SIZES: fontPointSize, txtFontPointSize and a book's
   /// fontSizeOverride. FONT_SIZE survives only as the built-in ladder, i.e. which faces exist.
-  static constexpr uint8_t DEFAULT_FONT_POINT_SIZE = 14;
+  static constexpr uint8_t DEFAULT_FONT_POINT_SIZE = PanelMetrics::capped(14, 10);
   /// Bounds for a stored point size. A book's override is an int8_t with -1 for "follow the
   /// default", which caps it at 127. No .cpfont comes near that: the converter refuses a line
   /// height over 255 px, about 100 pt at 150 DPI. 1 is what SdCardFontRegistry::parseFilename()
@@ -300,7 +304,7 @@ class CrossPointSettings {
   enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, LYRA_CAROUSEL = 3 };
 
   // Size of the menu/chrome text. Each step rebinds the three logical UI font IDs one rung up
-  // the Inter ladder (applyUiFontScale() in main.cpp) and adds the matching number of pixels to
+  // the device's UI font ladder (applyUiFontScale() in main.cpp) and adds the matching pixels to
   // every metric that has to hold a line of UI text (UiFontLadder::applyTo() in UiFontScale.h).
   //
   // Deliberately does NOT touch the reader's own font or its status bar: those feed the text
@@ -435,7 +439,11 @@ class CrossPointSettings {
   uint8_t statusBarBattery = 1;
   // Text rendering settings
   uint8_t extraParagraphSpacing = 1;
+#if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
+  uint8_t textAntiAliasing = 0;  // the panel has no gray: the pass would only cost time
+#else
   uint8_t textAntiAliasing = 1;
+#endif
   // X3-only: when on, the AA refresh uses the 7-frame community grayscale LUT
   // (~130 ms panel time) instead of the OEM 53-frame LUT (~2.4 s). Mid-tones
   // run slightly darker than X4. Matches what papyrix-reader has shipped since
@@ -481,10 +489,15 @@ class CrossPointSettings {
   // Auto-sleep timeout in minutes (0 = never sleep, 1-60).
   uint8_t sleepTimeoutMinutes = 10;
   // Full-refresh frequency in pages (0 = never full-refresh, 1-60).
+#if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
+  uint8_t refreshFrequencyPages = 5;
+#else
   uint8_t refreshFrequencyPages = 15;
+#endif
   // Perform a half refresh on the page immediately following an EPUB page that displayed images.
   uint8_t halfRefreshAfterImagePage = 1;
-  uint8_t hyphenationEnabled = 0;
+  // A 240 px column leaves wide gaps without it.
+  uint8_t hyphenationEnabled = PanelMetrics::COMPACT ? 1 : 0;
   // Widow and orphan control: a page ends early rather than leave a paragraph's first or last line alone on it.
   // Off, every page fills (#579: on a page of ten lines the rule could leave two empty).
   uint8_t widowOrphanControl = 1;
@@ -613,6 +626,11 @@ class CrossPointSettings {
   //    is enough for the lot.
   static constexpr uint8_t GESTURE_DEFAULTS_VERSION = 3;
   uint8_t gestureDefaultsVersion = GESTURE_DEFAULTS_VERSION;
+
+  // Tracks button-action enum ordering and board-specific keymap defaults.
+  // Older settings keep explicit custom actions, while old built-in Confirm
+  // double/long entries inherit Murphy's Back/Sleep defaults.
+  static constexpr uint8_t BUTTON_ACTIONS_VERSION = 1;
 
   // --- Gesture actions (touch boards) ---------------------------------------
   // One BUTTON_ACTION per gesture, exactly like the per-button short/double/long
@@ -838,6 +856,9 @@ class CrossPointSettings {
     // rotation gestures are a PAIR — turning two fingers one way and then back
     // must undo, not advance three more steps.
     BTN_CYCLE_ORIENTATION_BACK,
+    // Send a normal Back press to the current activity. This is distinct from
+    // Go Home and is useful as a selectable action on boards without a Back key.
+    BTN_BACK,
     // --- Board-gated actions MUST stay at the end of this enum ---------------
     // SettingsList builds each button's option list positionally: index i in the
     // list is action value i. Actions it drops on boards that cannot perform them

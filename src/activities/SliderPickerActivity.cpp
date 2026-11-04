@@ -3,6 +3,8 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <algorithm>
+
 #include "MappedInputManager.h"
 #include "activities/ActivityResult.h"
 #include "components/SliderGeometry.h"
@@ -18,7 +20,7 @@ constexpr int kLargeStep = 10;
 // must agree to the pixel or the knob lands somewhere other than the fingertip. Derived rather
 // than recorded: it depends only on the content rect, the title's line height and a few constants,
 // so both tasks can compute it and there is no snapshot to go stale.
-constexpr int kBarWidth = 360;
+constexpr int kMaxBarWidth = 360;
 constexpr int kBarHeight = 16;
 // Below the top of the body under the title: the value line, then the bar.
 constexpr int kValueOffset = 40;
@@ -29,9 +31,14 @@ constexpr int kBarOffset = 90;
 // most annoying, so the band is centred on the bar and padded to at least that.
 constexpr int kTouchBandHeight = 56;
 
+int barWidth(const GfxRenderer& renderer) {
+  const int padding = UITheme::getInstance().getMetrics().contentSidePadding;
+  return std::min(kMaxBarWidth, UITheme::getContentRect(renderer, true, false).width - padding * 2);
+}
+
 int barLeft(const GfxRenderer& renderer) {
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
-  return contentRect.x + (contentRect.width - kBarWidth) / 2;
+  return contentRect.x + (contentRect.width - barWidth(renderer)) / 2;
 }
 
 // The title and everything under it, measured from the top of the content area this screen's hint
@@ -97,12 +104,13 @@ bool SliderPickerActivity::handleSliderTouch() {
   // target, and a contact just past either end reads as "go to that end" rather than as a miss
   // (SliderGeometry::valueForX clamps). Horizontal slack matches the vertical padding so the
   // band is a comfortable rectangle rather than a hairline.
+  const int barW = barWidth(renderer);
   const int bandPad = (kTouchBandHeight - kBarHeight) / 2;
   const int bandTop = barTop(renderer) - bandPad;
   const int bandLeft = barX - bandPad;
-  const int bandRight = barX + kBarWidth + bandPad;
+  const int bandRight = barX + barW + bandPad;
   const auto touchX = [&](const int x, const int left) {
-    return cfg.reversed ? SliderGeometry::mirroredX(x, left, kBarWidth) : x;
+    return cfg.reversed ? SliderGeometry::mirroredX(x, left, barW) : x;
   };
   const auto inBand = [&](const int x, const int y) {
     return y >= bandTop && y < bandTop + kTouchBandHeight && x >= bandLeft && x < bandRight;
@@ -113,12 +121,12 @@ bool SliderPickerActivity::handleSliderTouch() {
   // Held first: a drag is a live contact, and isScreenTouchHeld() has no tap-slop gate, so it
   // reports the finger's position from the moment it lands rather than only on release.
   if (mappedInput.isScreenTouchHeld(x, y) && inBand(x, y)) {
-    setValue(SliderGeometry::valueForX(touchX(x, barX), barX, kBarWidth, cfg.minValue, cfg.maxValue));
+    setValue(SliderGeometry::valueForX(touchX(x, barX), barX, barW, cfg.minValue, cfg.maxValue));
     return true;
   }
   // Then the release edge, which catches a tap too brief to have been seen as held.
   if (mappedInput.wasScreenTapped(x, y) && inBand(x, y)) {
-    setValue(SliderGeometry::valueForX(touchX(x, barX), barX, kBarWidth, cfg.minValue, cfg.maxValue));
+    setValue(SliderGeometry::valueForX(touchX(x, barX), barX, barW, cfg.minValue, cfg.maxValue));
     return true;
   }
   return false;
@@ -185,12 +193,13 @@ void SliderPickerActivity::render(RenderLock&&) {
 
   const int barX = barLeft(renderer);
   const int barY = barTop(renderer);
+  const int barW = barWidth(renderer);
 
-  renderer.drawRect(barX, barY, kBarWidth, kBarHeight);
+  renderer.drawRect(barX, barY, barW, kBarHeight);
 
   // Same mapping the hit test inverts — see SliderGeometry.
-  const int fillWidth = SliderGeometry::fillWidthFor(value, kBarWidth, cfg.minValue, cfg.maxValue);
-  const int fillX = cfg.reversed ? SliderGeometry::reversedFillX(value, barX, kBarWidth, cfg.minValue, cfg.maxValue)
+  const int fillWidth = SliderGeometry::fillWidthFor(value, barW, cfg.minValue, cfg.maxValue);
+  const int fillX = cfg.reversed ? SliderGeometry::reversedFillX(value, barX, barW, cfg.minValue, cfg.maxValue)
                                  : SliderGeometry::trackX(barX);
   if (fillWidth > 0) {
     renderer.fillRect(fillX, barY + 2, fillWidth, kBarHeight - 4);

@@ -56,6 +56,29 @@ bool parseLogLevel(std::string_view text, uint8_t& level);
 bool parseLanguage(std::string_view text, const char* const* codes, const char* const* names, size_t count,
                    size_t& index);
 
+// The file commands' arguments (CMD:FS:...). A FAT name cannot hold ':', so a ':' always separates
+// fields, and every card path starts with '/'.
+//
+// CMD:FS:GET, HASH and MKDIR: one card path. False when it does not start with '/' or holds a ':'.
+bool parseFsPath(std::string_view arg, std::string_view& path);
+// CMD:FS:PUT:<path>:<size>:<crc32hex>: the last two fields are the size (decimal, 0 to 4294967295, what
+// a FAT32 file can hold) and the zlib CRC32 (1 to 8 hex digits, any case); the path is all before them.
+bool parseFsPut(std::string_view arg, std::string_view& path, uint32_t& size, uint32_t& crc);
+// CMD:FS:MV:<from>:<to>: two card paths and the one ':' between them.
+bool parseFsMove(std::string_view arg, std::string_view& from, std::string_view& to);
+
+// CMD:PAGE writes a word's text in double quotes, one unit at a time: a UTF-8 character, or a byte
+// that starts none. escapeTextUnit() writes the unit of `text` at `pos` to `out`, which has room for
+// kMaxEscapedUnit bytes, moves `pos` past it and returns the bytes written:
+//  - printable UTF-8 as it is, '"' and '\' with a backslash before them;
+//  - the C0 controls, DEL, the C1 controls and the invisible marks a reader of the text would want to
+//    see -- U+00AD, U+061C, U+200B-U+200F, U+2028-U+202E, U+2060-U+2069 and U+FEFF, the bidi
+//    controls among them -- as \u{XXXX};
+//  - a byte that is not part of a valid UTF-8 sequence (overlong, a surrogate, above U+10FFFF, cut
+//    short) as \x{XX}, and the next unit starts at the byte after it.
+inline constexpr size_t kMaxEscapedUnit = 8;  // "\u{XXXX}"
+size_t escapeTextUnit(std::string_view text, size_t& pos, char* out);
+
 // Appends " <key>=<value>" to a CMD:STATE line. A value that holds a space, a quote, a backslash or
 // an '=' is written in double quotes with '"' and '\' escaped by a backslash, so a host can split
 // the line on spaces outside quotes; control characters (a newline in a popup's text) become

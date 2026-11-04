@@ -21,10 +21,16 @@
 #include "util/SerialCommandGrammar.h"
 
 #if SERIAL_TEST_API
+#include <Epub/Page.h>
+#include <FileReplace.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <GlyphProvider.h>
+#include <HalPowerManager.h>
+#include <HalSystem.h>
 #include <Memory.h>
 #include <ProtectedPaths.h>
+#include <SerialTransfer/SerialTransferProtocol.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
@@ -57,8 +63,9 @@ using SerialCommandGrammar::appendField;
 // logSerial.write() returns short when the USB-CDC TX ring stays full past its timeout (1 ms
 // outside a transfer), so every line is written in a loop until the host has taken it. Yields
 // rather than spins: a tight loop on the C3 starves the USB-CDC task being waited on. Gives up
-// after `stallMs` without progress (the host stopped reading).
-bool writeAll(const uint8_t* data, const size_t len, const unsigned long stallMs) {
+// after `stallMs` without progress (the host stopped reading). `waiting` runs on each wait: a long stream feeds the
+// task watchdog there.
+bool writeAll(const uint8_t* data, const size_t len, const unsigned long stallMs, void (*waiting)() = nullptr) {
   size_t sent = 0;
   unsigned long lastProgressMs = millis();
   while (sent < len) {
@@ -69,6 +76,7 @@ bool writeAll(const uint8_t* data, const size_t len, const unsigned long stallMs
       continue;
     }
     if (millis() - lastProgressMs > stallMs) return false;
+    if (waiting) waiting();
     delay(1);
   }
   return true;
@@ -930,17 +938,590 @@ void cmdTtf(const std::string_view arg) {
   reply(line);
 }
 
+// ---- Bulk output and long commands: PAGE, FS:PUT, GET, HASH -----------------------------------
+
+// The bulk commands' piece: a chunk of FS:PUT, GET and HASH, or a line of CMD:PAGE. Half the HWCDC receive queue
+// (4096, main.cpp setup()), so a stray byte or two that comes with an upload's piece before its acknowledgement (a
+// host's CRLF, a retry) still fits: the receive interrupt drops what the queue cannot hold, without a word, and a
+// piece as large as the queue would leave only a CRC mismatch to show for it.
+constexpr size_t kWireChunk = 2048;
+
+// The scratch a bulk command works in, from the heap for the length of that one command (the four run on the loop
+// task, never two at once) and given back on every way out of it. Not a static, which would lower every heap figure
+// of a development build by its size whether a bulk command ever ran or not; not the stack, the loop task's is 8 KB.
+class WireScratch {
+ public:
+  WireScratch() : block_(makeUniqueNoThrow<uint8_t[]>(kWireChunk)) {
+    if (!block_) LOG_ERR("SER", "No %u-byte block for the command", static_cast<unsigned>(kWireChunk));
+  }
+  uint8_t* get() const { return block_.get(); }
+  explicit operator bool() const { return static_cast<bool>(block_); }
+
+ private:
+  std::unique_ptr<uint8_t[]> block_;
+};
+
+// A reply line put together in a scratch block and written in one go, so that a line another task prints (the
+// display driver writes its own) can only land between two lines, never inside one. A line longer than the block, a
+// word of thousands of bytes, goes out in pieces.
+class WireLine {
+ public:
+  explicit WireLine(uint8_t* buffer) : buffer_(buffer) {}
+  void add(std::string_view text) {
+    while (!text.empty()) {
+      if (length_ == kWireChunk) flush();
+      const size_t n = std::min(text.size(), kWireChunk - length_);
+      memcpy(buffer_ + length_, text.data(), n);
+      length_ += n;
+      text.remove_prefix(n);
+    }
+  }
+  // A few short fields.
+  __attribute__((format(printf, 2, 3))) void addf(const char* format, ...) {
+    char fields[96];
+    va_list args;
+    va_start(args, format);
+    const int n = vsnprintf(fields, sizeof(fields), format, args);
+    va_end(args);
+    if (n > 0) add(std::string_view(fields, std::min(static_cast<size_t>(n), sizeof(fields) - 1)));
+  }
+  // `text` as CMD:PAGE writes a word (SerialCommandGrammar::escapeTextUnit), without the quotes.
+  void addEscaped(const std::string_view text) {
+    size_t pos = 0;
+    while (pos < text.size()) {
+      if (kWireChunk - length_ < SerialCommandGrammar::kMaxEscapedUnit) flush();
+      length_ += SerialCommandGrammar::escapeTextUnit(text, pos, reinterpret_cast<char*>(buffer_) + length_);
+    }
+  }
+  // Ends the line and writes it. False when the host stopped reading.
+  bool end() {
+    add("\n");
+    flush();
+    return ok_;
+  }
+
+ private:
+  void flush() {
+    if (ok_ && length_ > 0) ok_ = writeAll(buffer_, length_, kReplyStallMs);
+    length_ = 0;
+  }
+  uint8_t* buffer_;
+  size_t length_ = 0;
+  bool ok_ = true;
+};
+
+// Holds LOG_* lines back from the wire while it lives, as the USB Transfer screen does (Logging's mute: they still
+// reach the crash ring), so none cuts into a binary payload or a dump; then puts back what was, since the transfer
+// screen keeps the mute on for its whole session.
+class LogHold {
+ public:
+  LogHold() : wasMuted_(isSerialWireMuted()) { setSerialWireMuted(true); }
+  ~LogHold() { setSerialWireMuted(wasMuted_); }
+  LogHold(const LogHold&) = delete;
+  LogHold& operator=(const LogHold&) = delete;
+
+ private:
+  bool wasMuted_;
+};
+
+// A file command holds the loop task for as long as the file takes. Every 100 ms it feeds the task watchdog and lets
+// the other tasks run, the idle task the watchdog also watches among them, as SDCardManager's long reads do.
+class LongWork {
+ public:
+  void breathe() {
+    if (millis() - lastMs_ < 100) return;
+    HalSystem::feedWatchdog();
+    delay(1);
+    lastMs_ = millis();
+  }
+
+ private:
+  unsigned long lastMs_ = millis();
+};
+
+// A stream to the host waits as long for it as SCREENSHOT's frame does (SerialTransferDevice's 15 s).
+constexpr unsigned long kStreamStallMs = 15000;
+
+// A short protocol line (FS_PUT_READY, FS_PUT_ACK, FS_GET_START) in one write, as WireLine writes its lines, from a
+// buffer of its own: the command's scratch may hold data.
+__attribute__((format(printf, 1, 2))) void replyWhole(const char* format, ...) {
+  char line[64];
+  va_list args;
+  va_start(args, format);
+  const int n = vsnprintf(line, sizeof(line) - 1, format, args);
+  va_end(args);
+  if (n <= 0) return;
+  const size_t length = std::min(static_cast<size_t>(n), sizeof(line) - 2);
+  line[length] = '\n';
+  writeAll(reinterpret_cast<const uint8_t*>(line), length + 1, kReplyStallMs);
+}
+
+// ---- PAGE -----------------------------------------------------------------------------------
+
+const char* alignName(const CssTextAlign align) {
+  switch (align) {
+    case CssTextAlign::Justify:
+      return "justify";
+    case CssTextAlign::Left:
+      return "left";
+    case CssTextAlign::Center:
+      return "center";
+    case CssTextAlign::Right:
+      return "right";
+    case CssTextAlign::None:
+      return "none";
+    case CssTextAlign::Inherit:
+      return "inherit";
+    case CssTextAlign::Start:
+      return "start";
+    case CssTextAlign::End:
+      return "end";
+  }
+  return "unknown";
+}
+
+// One PAGE_W line: word `j` of a line, as stored and where it is drawn. The one place a word line is written: the
+// right-to-left work adds the word's display form and logical position here (disp="..." lidx=<n>) once a TextBlock
+// carries them.
+bool sendPageWord(uint8_t* scratch, const uint16_t j, const TextBlock::WordBox& box, const unsigned style,
+                  const bool glue, const std::string_view text) {
+  WireLine line(scratch);
+  line.addf("PAGE_W:%u x=%d w=%d style=%u glue=%d text=\"", static_cast<unsigned>(j), box.x, box.width, style,
+            glue ? 1 : 0);
+  line.addEscaped(text);
+  line.add("\"");
+  return line.end();
+}
+
+// PAGE_LINE and its words. False when the host stopped reading.
+bool sendPageLine(uint8_t* scratch, const size_t index, const TextBlock* block, const int x, const int y,
+                  const int fontId, LongWork& work) {
+  const uint16_t words = block && block->valid() ? block->wordCount() : 0;
+  WireLine line(scratch);
+  line.addf("PAGE_LINE:%u x=%d y=%d words=%u align=%s vertical=%d", static_cast<unsigned>(index), x, y,
+            static_cast<unsigned>(words), block ? alignName(block->getRenderStyle().alignment) : "left",
+            block && block->isVertical() ? 1 : 0);
+  if (!line.end()) return false;
+  for (uint16_t j = 0; j < words; ++j) {
+    // Measured as TextBlock::render draws it: the same font, scale and position. A glyph the font does not hold yet
+    // is loaded for it, so a page whose glyphs all have to come from the card takes seconds.
+    const TextBlock::WordBox box = block->wordBox(*testRenderer, j, fontId, x, y);
+    work.breathe();
+    if (!sendPageWord(scratch, j, box, static_cast<unsigned>(block->wordStyle(j)), block->wordContinues(j),
+                      std::string_view(block->wordText(j), block->wordTextLen(j)))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void cmdPage(std::string_view /*arg*/) {
+  if (!testRenderer) {
+    reply("PAGE_ERROR:no renderer");
+    return;
+  }
+  const char* error = nullptr;
+  {
+    // No render pass while the page is read and measured: the reader's section file and font caches are the render
+    // task's, and a pass's console line (the display driver's own) must not land inside the dump.
+    RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
+    const LogHold hold;
+    error = activityManager.sendPageOnScreen();
+  }
+  if (error) reply("PAGE_ERROR:", error);
+}
+
 // ---- FS -------------------------------------------------------------------------------------
+
+// The card path a file command names, as its replies show it: normalisePath drops the leading slash (the root becomes
+// ""); the replies and the root check want it back.
+std::string cardPath(const std::string_view spelled) { return "/" + FsHelpers::normalisePath(std::string(spelled)); }
+
+// What FS:RM refuses, for every command that reads, writes, makes or moves an item: the root, the credential stores,
+// a dot-named item itself, a path spelled with an 8.3 alias (ProtectedPaths). Hidden folders can be walked through.
+bool refusedItem(const std::string& path) {
+  const auto refuseAlias = [](std::string_view, std::string_view) { return true; };
+  return path == "/" || ProtectedPaths::isProtectedPath(path, ProtectedPaths::Target::Item, true, refuseAlias);
+}
+
+bool isFolder(const std::string& path) {
+  const HalFile item = Storage.open(path.c_str());
+  return item && item.isDirectory();
+}
+
+// "/a/b" -> "/a", "/a" -> "/".
+std::string parentOf(const std::string& path) { return path.substr(0, std::max<size_t>(path.rfind('/'), 1)); }
+
+// The zlib CRC32 of `size` bytes of `file`, read from where it stands into `scratch` (kWireChunk bytes). False on a
+// short read.
+bool crcOfFile(HalFile& file, const uint32_t size, uint8_t* scratch, uint32_t& crc) {
+  LongWork work;
+  crc = 0;
+  for (uint32_t done = 0; done < size;) {
+    const size_t want = std::min<uint32_t>(size - done, kWireChunk);
+    if (file.read(scratch, want) != static_cast<int>(want)) return false;
+    crc = serialtransfer::crc32Update(crc, scratch, want);
+    done += want;
+    work.breathe();
+  }
+  return true;
+}
+
+// The CRLF of a host that ends its lines so, before an upload's data or a download's acknowledgements: the line
+// reader stops at the CR, and the LF is neither.
+void dropLineEnds() {
+  while (logSerial.available() > 0 && (logSerial.peek() == '\r' || logSerial.peek() == '\n')) logSerial.read();
+}
+
+// The upload's idle limit: no byte for this long ends it.
+constexpr unsigned long kPutIdleMs = 5000;
+
+// Reads `len` bytes of an upload into `scratch`. Waits with delay(1) while none have arrived: a busy wait starves the
+// C3's USB-CDC receive. False when none came for kPutIdleMs.
+bool receiveChunk(uint8_t* scratch, const size_t len, LongWork& work) {
+  size_t got = 0;
+  unsigned long lastByteMs = millis();
+  while (got < len) {
+    const int ready = logSerial.available();
+    if (ready > 0) {
+      got += logSerial.read(scratch + got, std::min(len - got, static_cast<size_t>(ready)));
+      lastByteMs = millis();
+    } else if (millis() - lastByteMs >= kPutIdleMs) {
+      return false;
+    } else {
+      delay(1);
+    }
+    work.breathe();
+  }
+  return true;
+}
+
+// Why an upload's write came up short: a full card, or the card failing. Asked only then, since counting the free
+// clusters reads the whole FAT; the watchdog is fed first, as the upload's own waits do.
+const char* writeFailure(const uint32_t stillToWrite) {
+  HalSystem::feedWatchdog();
+  return Storage.sdFreeBytes() < stillToWrite ? "FS_ERROR:no space " : "FS_ERROR:write failed ";
+}
+
+// CMD:FS:PUT:<path>:<size>:<crc32hex>. The path is checked before the host sends a byte; then the data comes in
+// kWireChunk pieces, each written to <path>.part and acknowledged before the next is sent, and at <size> bytes the
+// CRC decides: the .part takes the target's place (FileReplace, which never loses the old file), or goes.
+void fsPut(const std::string_view arg) {
+  std::string_view spelled;
+  uint32_t size = 0;
+  uint32_t wantCrc = 0;
+  if (!SerialCommandGrammar::parseFsPut(arg, spelled, size, wantCrc)) {
+    reply("FS_ERROR:expected PUT:/<path>:<size>:<crc32hex>");
+    return;
+  }
+  const std::string path = cardPath(spelled);
+  if (refusedItem(path)) {
+    reply("FS_ERROR:protected ", path);
+    return;
+  }
+  if (!isFolder(parentOf(path))) {
+    reply("FS_ERROR:no parent folder ", path);
+    return;
+  }
+  if (isFolder(path)) {
+    reply("FS_ERROR:is a folder ", path);
+    return;
+  }
+  // Taken before the .part is made, so a refusal leaves nothing behind.
+  const WireScratch scratch;
+  if (!scratch) {
+    reply("FS_ERROR:no memory ", path);
+    return;
+  }
+  const std::string part = path + ".part";
+  HalFile file;
+  if (!Storage.openFileForWrite("SER", part, file)) {
+    reply("FS_ERROR:could not create ", path);
+    return;
+  }
+
+  const HalPowerManager::Lock fullSpeed;
+  LongWork work;
+  const char* error = nullptr;
+  {
+    const LogHold hold;
+    dropLineEnds();
+    replyWhole("FS_PUT_READY:%u", static_cast<unsigned>(kWireChunk));
+    uint32_t received = 0;
+    uint32_t crc = 0;
+    while (received < size) {
+      const size_t want = std::min<uint32_t>(size - received, kWireChunk);
+      if (!receiveChunk(scratch.get(), want, work)) {
+        error = "FS_ERROR:timeout ";
+        break;
+      }
+      crc = serialtransfer::crc32Update(crc, scratch.get(), want);
+      if (file.write(scratch.get(), want) != want) {
+        error = writeFailure(size - received);
+        break;
+      }
+      received += want;
+      replyWhole("FS_PUT_ACK:%lu", static_cast<unsigned long>(received));
+    }
+    if (!error && crc != wantCrc) error = "FS_ERROR:crc mismatch ";
+  }
+  // Closed (its last sector and the directory entry written) before the .part is renamed or removed.
+  file.flush();
+  if (!file.close() && !error) error = "FS_ERROR:write failed ";
+  if (!error && !FileReplace::replace(part.c_str(), path.c_str())) error = "FS_ERROR:could not replace ";
+  if (error) {
+    Storage.remove(part.c_str());
+    reply(error, path);
+    return;
+  }
+  std::string line = "FS_OK:put " + path;
+  line += ' ';
+  line += std::to_string(size);
+  reply(line);
+}
+
+// The host's go-ahead for FS:GET's next piece: the byte the transfer protocol acknowledges a piece with. Any other
+// byte cancels the download.
+constexpr uint8_t kGetAck = 0x06;
+
+enum class HostAnswer : uint8_t { Ack, Cancel, None };
+
+// Waits for the host to take a piece: its ACK, another byte (a cancel), or nothing for kStreamStallMs. Waits with
+// delay(1), as an upload does, so the USB-CDC receive gets to run.
+HostAnswer awaitHostAck(LongWork& work) {
+  const unsigned long start = millis();
+  while (millis() - start < kStreamStallMs) {
+    if (logSerial.available() > 0) return logSerial.read() == kGetAck ? HostAnswer::Ack : HostAnswer::Cancel;
+    delay(1);
+    work.breathe();
+  }
+  return HostAnswer::None;
+}
+
+// CMD:FS:GET:<path>: FS_GET_START:<size>:<crc32hex>:<piece>, then the file in pieces of <piece> bytes (the last one
+// shorter), each sent only once the host has acknowledged the one before with kGetAck, then FS_GET_END. The CRC
+// takes a read of its own first, so the host can check what it got.
+//
+// Paced because an unpaced stream loses data the host never sees go: on the X4, a host that stopped reading for half a
+// second lost whole 64-byte USB packets of the stream, every time, and a normal one 2 GETs in 14. HWCDC had accepted
+// every byte (the writes returned their full count and FS_GET_END followed), so nothing on this side could tell; it
+// happened on the USB Transfer screen too, with its 1 s TX timeout. The transfer protocol's download paces itself the
+// same way, for the same reason (SerialTransferProtocol::handleDownload). With one piece in flight, the TX ring never
+// fills and the host is never behind by more than a piece.
+void fsGet(const std::string_view arg) {
+  std::string_view spelled;
+  if (!SerialCommandGrammar::parseFsPath(arg, spelled)) {
+    reply("FS_ERROR:expected GET:/<path>");
+    return;
+  }
+  const std::string path = cardPath(spelled);
+  if (refusedItem(path)) {
+    reply("FS_ERROR:protected ", path);
+    return;
+  }
+  HalFile file = Storage.open(path.c_str());
+  if (!file) {
+    reply("FS_ERROR:not found ", path);
+    return;
+  }
+  if (file.isDirectory()) {
+    reply("FS_ERROR:not a file ", path);
+    return;
+  }
+  const WireScratch scratch;
+  if (!scratch) {
+    reply("FS_ERROR:no memory ", path);
+    return;
+  }
+  const HalPowerManager::Lock fullSpeed;
+  const auto size = static_cast<uint32_t>(file.fileSize());
+  uint32_t crc = 0;
+  if (!crcOfFile(file, size, scratch.get(), crc) || !file.seek(0)) {
+    reply("FS_ERROR:read failed ", path);
+    return;
+  }
+  bool readOk = true;
+  {
+    // No render pass while the bytes go out: the display driver prints a line of its own after a refresh, and in
+    // the payload that would be data.
+    RenderLock lock{RenderLock::ExclusiveActivityAccess{}};
+    const LogHold hold;
+    dropLineEnds();
+    replyWhole("FS_GET_START:%lu:%08lx:%u", static_cast<unsigned long>(size), static_cast<unsigned long>(crc),
+               static_cast<unsigned>(kWireChunk));
+    LongWork work;
+    for (uint32_t sent = 0; sent < size;) {
+      const size_t want = std::min<uint32_t>(size - sent, kWireChunk);
+      // A read that fails still sends its share, zeros, so the host's count of bytes holds; the line after says so.
+      if (readOk && file.read(scratch.get(), want) != static_cast<int>(want)) readOk = false;
+      if (!readOk) memset(scratch.get(), 0, want);
+      // Up to 15 s for a slow host: longer than the task watchdog allows unfed.
+      if (!writeAll(scratch.get(), want, kStreamStallMs, &HalSystem::feedWatchdog)) {
+        reply("FS_ERROR:transfer stalled ", path);
+        return;
+      }
+      sent += want;
+      switch (awaitHostAck(work)) {
+        case HostAnswer::Ack:
+          break;
+        case HostAnswer::Cancel:
+          reply("FS_ERROR:cancelled ", path);
+          return;
+        case HostAnswer::None:
+          reply("FS_ERROR:transfer stalled ", path);
+          return;
+      }
+    }
+  }
+  if (readOk) {
+    reply("FS_GET_END");
+  } else {
+    reply("FS_ERROR:read failed ", path);
+  }
+}
+
+// CMD:FS:HASH:<path>: FS_HASH:<crc32hex> <size> <path>, to check a file against a copy on the host without reading
+// it back.
+void fsHash(const std::string_view arg) {
+  std::string_view spelled;
+  if (!SerialCommandGrammar::parseFsPath(arg, spelled)) {
+    reply("FS_ERROR:expected HASH:/<path>");
+    return;
+  }
+  const std::string path = cardPath(spelled);
+  if (refusedItem(path)) {
+    reply("FS_ERROR:protected ", path);
+    return;
+  }
+  HalFile file = Storage.open(path.c_str());
+  if (!file) {
+    reply("FS_ERROR:not found ", path);
+    return;
+  }
+  if (file.isDirectory()) {
+    reply("FS_ERROR:not a file ", path);
+    return;
+  }
+  const WireScratch scratch;
+  if (!scratch) {
+    reply("FS_ERROR:no memory ", path);
+    return;
+  }
+  const HalPowerManager::Lock fullSpeed;
+  const auto size = static_cast<uint32_t>(file.fileSize());
+  uint32_t crc = 0;
+  if (!crcOfFile(file, size, scratch.get(), crc)) {
+    reply("FS_ERROR:read failed ", path);
+    return;
+  }
+  char head[40];
+  snprintf(head, sizeof(head), "FS_HASH:%08lx %lu ", static_cast<unsigned long>(crc), static_cast<unsigned long>(size));
+  reply(head, path);
+}
+
+// CMD:FS:MKDIR:<folder>: makes it and the folders above it; FS_OK as well when it is there already.
+void fsMkdir(const std::string_view arg) {
+  std::string_view spelled;
+  if (!SerialCommandGrammar::parseFsPath(arg, spelled)) {
+    reply("FS_ERROR:expected MKDIR:/<folder>");
+    return;
+  }
+  const std::string path = cardPath(spelled);
+  if (path != "/" && refusedItem(path)) {
+    reply("FS_ERROR:protected ", path);
+    return;
+  }
+  {
+    const HalFile item = Storage.open(path.c_str());
+    if (item && !item.isDirectory()) {
+      reply("FS_ERROR:not a folder ", path);
+      return;
+    }
+    if (item) {
+      reply("FS_OK:mkdir ", path);
+      return;
+    }
+  }
+  if (!Storage.mkdir(path.c_str(), true)) {
+    reply("FS_ERROR:could not create ", path);
+    return;
+  }
+  reply("FS_OK:mkdir ", path);
+}
+
+// CMD:FS:MV:<from>:<to>: renames or moves a file or a folder; never onto something that is there.
+void fsMove(const std::string_view arg) {
+  std::string_view fromSpelled;
+  std::string_view toSpelled;
+  if (!SerialCommandGrammar::parseFsMove(arg, fromSpelled, toSpelled)) {
+    reply("FS_ERROR:expected MV:/<from>:/<to>");
+    return;
+  }
+  const std::string from = cardPath(fromSpelled);
+  const std::string to = cardPath(toSpelled);
+  if (refusedItem(from)) {
+    reply("FS_ERROR:protected ", from);
+    return;
+  }
+  if (refusedItem(to)) {
+    reply("FS_ERROR:protected ", to);
+    return;
+  }
+  bool folder = false;
+  {
+    const HalFile item = Storage.open(from.c_str());
+    if (!item) {
+      reply("FS_ERROR:not found ", from);
+      return;
+    }
+    folder = item.isDirectory();
+  }
+  // A folder moved into itself would hang off its own subtree, out of reach; onto itself it is there already, which
+  // says more than "exists". Checked first for that. FAT compares names without case.
+  if (folder && (ProtectedPaths::equalsIgnoreCase(to, from) || ProtectedPaths::startsWithIgnoreCase(to, from + "/"))) {
+    reply("FS_ERROR:into itself ", to);
+    return;
+  }
+  if (Storage.exists(to.c_str())) {
+    reply("FS_ERROR:exists ", to);
+    return;
+  }
+  if (!isFolder(parentOf(to))) {
+    reply("FS_ERROR:no parent folder ", to);
+    return;
+  }
+  if (!Storage.rename(from.c_str(), to.c_str())) {
+    reply("FS_ERROR:could not move ", from);
+    return;
+  }
+  std::string line = "FS_OK:moved " + from;
+  line += ' ';
+  line += to;
+  reply(line);
+}
 
 // CMD:FS:LS:<folder> lists a folder, one "FS:<d|f> <bytes> <name>" line an entry and FS_END:<count>; CMD:FS:RM:<path>
 // removes a file, or a folder with everything in it. Hidden folders can be reached (the caches under /.crosspoint);
-// the credential stores, a dot-named item itself and any path spelled by an 8.3 alias cannot.
+// the credential stores, a dot-named item itself and any path spelled by an 8.3 alias cannot. PUT, GET, HASH, MKDIR
+// and MV are above.
 void cmdFs(const std::string_view arg) {
   std::string_view verb;
   std::string_view rest;
   splitHead(arg, verb, rest);
+  struct Verb {
+    const char* name;
+    void (*run)(std::string_view rest);
+  };
+  static constexpr Verb kVerbs[] = {
+      {"PUT", &fsPut}, {"GET", &fsGet}, {"HASH", &fsHash}, {"MKDIR", &fsMkdir}, {"MV", &fsMove}};
+  for (const Verb& entry : kVerbs) {
+    if (verb == entry.name) {
+      entry.run(rest);
+      return;
+    }
+  }
   if ((verb != "LS" && verb != "RM") || rest.empty() || rest.front() != '/') {
-    reply("FS_ERROR:expected LS:/<folder> or RM:/<path>");
+    reply("FS_ERROR:expected LS, RM, PUT, GET, HASH, MKDIR or MV, then :/<path>");
     return;
   }
   // normalisePath drops the leading slash (the root becomes ""); the replies and the root check want it back.
@@ -1021,6 +1602,7 @@ constexpr Command kCommands[] = {
     {"IDLE", &cmdIdle},       {"EVENTS", &cmdEvents}, {"GET", &cmdGet},     {"SET", &cmdSet},
     {"LOG", &cmdLog},         {"TOUCH", &cmdTouch},   {"SWIPE", &cmdSwipe}, {"SLEEP", &cmdSleep},
     {"REBOOT", &cmdReboot},   {"HEAP", &cmdHeap},     {"TTF", &cmdTtf},     {"FS", &cmdFs},
+    {"PAGE", &cmdPage},
 #endif
 };
 
@@ -1219,6 +1801,58 @@ PowerRequest takePowerRequest() {
   const PowerRequest request = powerRequest;
   powerRequest = PowerRequest::None;
   return request;
+}
+
+bool sendPage(const PageOnScreen& onScreen) {
+  const WireScratch scratch;
+  if (!scratch) return false;
+  const Page& page = *onScreen.page;
+  const size_t count = page.elements.size();
+  // A glyph the heap had no room for is measured as missing: the dump's widths are then not the panel's.
+  const uint32_t starvedBefore = glyph_miss::starvedCount();
+  WireLine start(scratch.get());
+  start.addf("PAGE_START:spine=%d/%d page=%d/%d flow=%s elements=%u", onScreen.spine, onScreen.spineCount,
+             onScreen.pageNumber, onScreen.pageCount, onScreen.verticalFlow ? "vertical-rl" : "horizontal",
+             static_cast<unsigned>(count));
+  // A host that stopped reading is no error to report: nobody would read it.
+  if (!start.end()) return true;
+  // One element at a time, straight from the page: nothing here grows with it.
+  LongWork work;
+  for (size_t i = 0; i < count; ++i) {
+    const PageElement& element = *page.elements[i];
+    const int x = element.xPos + onScreen.originX;
+    const int y = element.yPos + onScreen.originY;
+    WireLine line(scratch.get());
+    switch (element.getTag()) {
+      case TAG_PageLine:
+        if (!sendPageLine(scratch.get(), i, static_cast<const PageLine&>(element).getBlock(), x, y, onScreen.fontId,
+                          work)) {
+          return true;
+        }
+        continue;
+      case TAG_PageImage: {
+        const ImageBlock& image = static_cast<const PageImage&>(element).getImageBlock();
+        line.addf("PAGE_IMAGE:%u x=%d y=%d w=%d h=%d", static_cast<unsigned>(i), x, y, image.getWidth(),
+                  image.getRenderedHeight());
+        break;
+      }
+      case TAG_PageTable:
+        line.addf("PAGE_EL:%u table", static_cast<unsigned>(i));
+        break;
+      case TAG_PageHR:
+        line.addf("PAGE_EL:%u hr", static_cast<unsigned>(i));
+        break;
+      default:
+        line.addf("PAGE_EL:%u tag%u", static_cast<unsigned>(i), static_cast<unsigned>(element.getTag()));
+        break;
+    }
+    if (!line.end()) return true;
+  }
+  WireLine end(scratch.get());
+  end.addf("PAGE_END:%u starved=%lu", static_cast<unsigned>(count),
+           static_cast<unsigned long>(glyph_miss::starvedCount() - starvedBefore));
+  end.end();
+  return true;
 }
 #endif  // SERIAL_TEST_API
 

@@ -92,6 +92,8 @@ for size in ${UI_FONT_SIZES[@]}; do
 done
 
 python fontconvert.py notosans_8_regular 8 ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf > ../builtinFonts/notosans_8_regular.h
+# Murphy uses a dedicated 6 pt face for the Small UI role at its Normal size setting.
+python fontconvert.py notosans_6_regular 6 ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf > ../builtinFonts/notosans_6_regular.h
 
 # The CJK UI faces hold each CJK translation's characters that the UI faces above lack, so they
 # come after them. The script dedupes and verifies by itself; the pass below repeats that over the

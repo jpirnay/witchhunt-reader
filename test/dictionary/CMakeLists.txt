@@ -5,6 +5,9 @@ add_executable(DictionaryTest
   ${REPO_ROOT}/src/util/DictZip.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
+  # Counts operator-new blocks, so the lent-arena tests can show a dictzip lookup takes none of its scratch from the
+  # heap; and refuses large ones on request.
+  ${REPO_ROOT}/test/book_metadata_cache/AllocationRefusal.cpp
 )
 
 target_include_directories(DictionaryTest PRIVATE

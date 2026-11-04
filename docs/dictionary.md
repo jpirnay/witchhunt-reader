@@ -28,7 +28,7 @@ Keep the folder name to 31 characters or fewer: the reader remembers the chosen 
 
 Folders containing more than one dictionary (multiple `.idx` stems) are skipped as ambiguous, as are folders holding an `.idx` with no matching `.dict`/`.dict.dz` next to it -- a dictionary that would only fail once you tried to use it.
 
-If you can, decompress `.dict.dz` to `.dict` on your computer (`dictunzip yourdict.dict.dz`). A `.dict.dz` lookup needs a 32 KB contiguous inflate window, and that is the one allocation on this path a fragmented reading heap cannot always supply; a plain `.dict` needs none of it and is read directly.
+If you can, decompress `.dict.dz` to `.dict` on your computer (`dictunzip yourdict.dict.dz`). A `.dict.dz` lookup inflates through a 32 KB window. The word screen takes it, with its working state and the file's chunk table, from the display's second framebuffer, lent for the length of the lookup; where that buffer cannot be lent, the window needs 32 KB in one piece from a reading heap that cannot always supply it. A plain `.dict` needs none of it and is read directly.
 
 ## Install from the Web Interface
 
@@ -90,7 +90,7 @@ What it does not do:
 - **Characters your reading font lacks.** CC-CEDICT writes each word in both scripts (大学生 / 大學生). A font made for one region (Simplified Chinese, Japanese) lacks some characters of the other and draws them as a box; a font that carries both draws them all. The NotoSansCJK `.cpfont` family carries both scripts but not pinyin's ē, ǎ and ū, which drop out of the reading (dàxuéshēng shows as dàxuéshng); a TrueType family has them.
 - **Greedy matches.** The longest word is not always the one the sentence means: 研究生命 starts with 研究生 (graduate student), not 研究 (research). The shorter matches follow it in the definition.
 
-**Where to get them.** None of these ship as StarDict; [PyGlossary](https://github.com/ilius/pyglossary) converts them on a computer. Convert to a plain `.dict` (`dictzip=False`): it needs no 32 KB inflate window, which is hardest to find on a dense CJK page.
+**Where to get them.** None of these ship as StarDict; [PyGlossary](https://github.com/ilius/pyglossary) converts them on a computer. Convert to a plain `.dict` (`dictzip=False`): it needs no 32 KB inflate window, which is hardest to find on a dense CJK page when the framebuffer cannot be lent.
 
 | Dictionary | Language | Licence | Source |
 |---|---|---|---|

@@ -23,6 +23,7 @@
 #include "activities/reader/KOReaderAutoSync.h"
 #include "activities/settings/SettingInfo.h"
 #include "activities/settings/TimezoneOptions.h"
+#include "components/themes/PanelMetrics.h"
 
 // Shared settings list used by both the device settings UI and the web settings API.
 //
@@ -95,6 +96,14 @@ struct RowSink {
   void operator()(SettingInfo&& row) const { take(visitor, row); }
 };
 
+// Carousel's fixed 340x540 centre tile is bigger than a compact panel. A stored choice is out of
+// range here, so loading turns it into the field's default.
+inline std::vector<StrId> uiThemeChoices() {
+  std::vector<StrId> themes = {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED};
+  if (!PanelMetrics::COMPACT) themes.push_back(StrId::STR_THEME_LYRA_CAROUSEL);
+  return themes;
+}
+
 // Every settings row in order, built one at a time and handed to `emit`. Nothing here holds the
 // list: see forEachSetting().
 inline void buildSettings(const RowSink& emit) {
@@ -127,7 +136,7 @@ inline void buildSettings(const RowSink& emit) {
   // separate only for legibility.
   const std::vector<StrId> extraActionOptions = {
       StrId::STR_BTN_ACT_FONT_SIZE_SMALLER, StrId::STR_BTN_ACT_FONT_SIZE_LARGER, StrId::STR_BTN_ACT_TOGGLE_TOUCH_UI,
-      StrId::STR_BTN_ACT_CYCLE_ORIENTATION_BACK};
+      StrId::STR_BTN_ACT_CYCLE_ORIENTATION_BACK, StrId::STR_BACK};
   // The ONLY conditional block, and correspondingly the LAST entries of
   // BUTTON_ACTION. Dropping them on a board with no light therefore leaves every
   // other action's numeric value untouched, so a settings file written on a lit
@@ -219,10 +228,8 @@ inline void buildSettings(const RowSink& emit) {
            .withSubcategory(StrId::STR_MENU_DISP_BATTERY));
   // --- User interface ---
   // One heading for the four rows: headings stick, so the rows after UI Theme sit under it.
-  emit(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
-                         {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                          StrId::STR_THEME_LYRA_CAROUSEL},
-                         "uiTheme", StrId::STR_CAT_DISPLAY)
+  emit(SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme, uiThemeChoices(), "uiTheme",
+                         StrId::STR_CAT_DISPLAY)
            .withSelectorActivity()
            .withSubcategory(StrId::STR_MENU_DISP_UI));
   emit(SettingInfo::Enum(StrId::STR_UI_FONT_SIZE, &CrossPointSettings::uiFontSize,
@@ -327,7 +334,8 @@ inline void buildSettings(const RowSink& emit) {
            .withSubmenu(StrId::STR_MENU_READER_FONT));
   emit(SettingInfo::Toggle(StrId::STR_TEXT_AA, &CrossPointSettings::textAntiAliasing, "textAntiAliasing",
                            StrId::STR_CAT_READER)
-           .withSubmenu(StrId::STR_MENU_READER_FONT));
+           .withSubmenu(StrId::STR_MENU_READER_FONT)
+           .requiring(SettingRequires::GrayscalePanel));
   // X3-only fast AA LUT toggle. Swaps the 53-frame OEM grayscale waveform
   // (~2.4 s panel time, X4-accurate grays) for the 7-frame community LUT
   // (~130 ms, mid-tones slightly darker). See freeink-sdk
@@ -439,7 +447,8 @@ inline void buildSettings(const RowSink& emit) {
                          makeBtnActionOptions(StrId::STR_BTN_DEF_GO_HOME), "btnLongBack", StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_BTN_BACK)
            .withSelectorActivity());
-  // Confirm button: short=reader menu, double=ignore, long=KOReader sync
+  // Confirm's built-in defaults are reader menu / ignore / KOReader sync. Murphy
+  // overrides double and long to Back and Sleep because those keys are absent.
   emit(SettingInfo::Enum(StrId::STR_BTN_SHORT_PRESS, &CrossPointSettings::btnShortConfirm,
                          {StrId::STR_BTN_DEF_READER_MENU}, "btnShortConfirm", StrId::STR_CAT_CONTROLS)
            .withSubmenu(StrId::STR_BTN_CONFIRM));
@@ -767,7 +776,10 @@ inline bool boardHas(const SettingRequires capability) {
     case SettingRequires::SelectableGrayscaleLut:
       // SSD1677 develops grayscale from a factory waveform, so there is no
       // LUT to swap and the fast/OEM trade-off does not exist there.
-      return BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677;
+      return HalCapabilities::panelShowsGray() &&
+             BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677;
+    case SettingRequires::GrayscalePanel:
+      return HalCapabilities::panelShowsGray();
     case SettingRequires::ReadingLight:
       // Asked of the HAL rather than the board profile: the EEGO A4's I2C
       // light is only present after begin() gets an ACK, so the profile alone
@@ -801,6 +813,7 @@ inline bool boardKeeps(const SettingRequires capability) {
     case SettingRequires::Nothing:
     case SettingRequires::TiltSensor:
     case SettingRequires::SelectableGrayscaleLut:
+    case SettingRequires::GrayscalePanel:
     case SettingRequires::ReadingLight:
     case SettingRequires::WarmLight:
     case SettingRequires::SunlightFadingPanel:

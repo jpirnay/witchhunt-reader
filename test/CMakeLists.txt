@@ -59,6 +59,9 @@ set(BIDI_LAYOUT_INCLUDES
   ${BIDI_MARK_INCLUDES}
   ${REPO_ROOT}/lib/TextShaping
 )
+file(GLOB OT_SHAPER_SOURCES ${REPO_ROOT}/lib/OtShaper/*.cpp)
+# lib/Memory is ours: makeUniqueNoThrow (Task 8) lives there.
+set(OT_SHAPER_INCLUDE_DIR ${REPO_ROOT}/lib/OtShaper ${REPO_ROOT}/lib/Memory)
 
 add_library(crosspoint_test_common INTERFACE)
 target_include_directories(crosspoint_test_common INTERFACE
@@ -243,6 +246,9 @@ add_subdirectory(minibidi)
 add_subdirectory(minibidi_arabic)
 add_subdirectory(text_shaping)
 add_subdirectory(bidi_line)
+add_subdirectory(indic_text)
+add_subdirectory(ot_shaper)
+add_subdirectory(ot_shaper_port)
 add_subdirectory(utf8_compose)
 add_subdirectory(utf8_lower)
 add_subdirectory(adaptive_tone)

@@ -21,12 +21,14 @@
 #include "KOReaderSyncMetadata.h"
 #include "KOReaderSyncWorker.h"
 #include "MappedInputManager.h"
+#include "ReaderUtils.h"
 #include "SilentRestart.h"
 #include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "components/UITheme.h"
 #include "components/themes/ListTouchBand.h"
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 
 namespace {
@@ -877,8 +879,10 @@ void KOReaderSyncActivity::render(RenderLock&&) {
   renderer.drawCenteredText(UI_12_FONT_ID, 15 + contentRect.y, tr(STR_KOREADER_SYNC), true, EpdFontFamily::BOLD);
 
   if (state == NO_CREDENTIALS) {
-    renderer.drawCenteredText(UI_10_FONT_ID, 280, tr(STR_NO_CREDENTIALS_MSG), true, EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, 320, tr(STR_KOREADER_SETUP_HINT));
+    const int messageY = ReaderUtils::messageY(renderer);
+    renderer.drawCenteredText(UI_10_FONT_ID, PanelMetrics::capped(280, messageY - 20), tr(STR_NO_CREDENTIALS_MSG), true,
+                              EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, PanelMetrics::capped(320, messageY + 20), tr(STR_KOREADER_SETUP_HINT));
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -895,41 +899,69 @@ void KOReaderSyncActivity::render(RenderLock&&) {
   }
 
   if (state == SHOWING_RESULT) {
-    // Show comparison
-    renderer.drawCenteredText(UI_10_FONT_ID, 120, tr(STR_PROGRESS_FOUND), true, EpdFontFamily::BOLD);
+    // Show comparison. The rows flow down the screen; on the panels they were laid out for the gaps
+    // below come to the fixed positions they always had (first row 120, options 350).
+    const auto& metrics = UITheme::getInstance().getMetrics();
+    const int textX = contentRect.x + metrics.contentSidePadding;
+    const int textWidth = contentRect.width - metrics.contentSidePadding * 2;
+    const int rowStep = PanelMetrics::capped(25, renderer.getLineHeight(UI_10_FONT_ID));
+    const int blockGap = PanelMetrics::capped(35, rowStep + 4);
+    // On a compact panel held sideways the chapter names give way to the three options.
+    const bool shortPanel = PanelMetrics::isShort(contentRect.height);
+    const auto drawRow = [&](const int rowY, const char* text, const bool black = true) {
+      renderer.drawText(UI_10_FONT_ID, textX, rowY, renderer.truncatedText(UI_10_FONT_ID, text, textWidth).c_str(),
+                        black);
+    };
+
+    int y = PanelMetrics::capped(120, contentRect.y + 45);
+    renderer.drawCenteredText(UI_10_FONT_ID, y, tr(STR_PROGRESS_FOUND), true, EpdFontFamily::BOLD);
+    y += PanelMetrics::capped(40, rowStep + 4);
 
     // Get chapter names from TOC
     const std::string& remoteChapter = remoteChapterLabel;
     const std::string& localChapter = localChapterLabel;
 
     // Remote progress - chapter and page
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 160, tr(STR_REMOTE_LABEL), true);
-    char remoteChapterStr[128];
-    snprintf(remoteChapterStr, sizeof(remoteChapterStr), "  %s", remoteChapter.c_str());
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 185, remoteChapterStr);
+    drawRow(y, tr(STR_REMOTE_LABEL));
+    if (!shortPanel) {
+      char remoteChapterStr[128];
+      snprintf(remoteChapterStr, sizeof(remoteChapterStr), "  %s", remoteChapter.c_str());
+      y += rowStep;
+      drawRow(y, remoteChapterStr);
+    }
     char remotePageStr[64];
     snprintf(remotePageStr, sizeof(remotePageStr), tr(STR_PAGE_OVERALL_FORMAT), remotePosition.pageNumber + 1,
              remoteProgress.percentage * 100);
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 210, remotePageStr);
+    y += rowStep;
+    drawRow(y, remotePageStr);
 
-    if (!remoteProgress.device.empty()) {
+    // Its row is kept on the tuned panels whether or not there is a device to name.
+    if (!shortPanel && !remoteProgress.device.empty()) {
       char deviceStr[64];
       snprintf(deviceStr, sizeof(deviceStr), tr(STR_DEVICE_FROM_FORMAT), remoteProgress.device.c_str());
-      renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 235, deviceStr);
+      y += rowStep;
+      drawRow(y, deviceStr);
+    } else if (!PanelMetrics::COMPACT) {
+      y += rowStep;
     }
 
     // Local progress - chapter and page
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 270, tr(STR_LOCAL_LABEL), true);
-    char localChapterStr[128];
-    snprintf(localChapterStr, sizeof(localChapterStr), "  %s", localChapter.c_str());
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 295, localChapterStr);
+    y += blockGap;
+    drawRow(y, tr(STR_LOCAL_LABEL));
+    if (!shortPanel) {
+      char localChapterStr[128];
+      snprintf(localChapterStr, sizeof(localChapterStr), "  %s", localChapter.c_str());
+      y += rowStep;
+      drawRow(y, localChapterStr);
+    }
     char localPageStr[64];
     snprintf(localPageStr, sizeof(localPageStr), tr(STR_PAGE_TOTAL_OVERALL_FORMAT), currentPage + 1, totalPagesInSpine,
              localProgress.percentage * 100);
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, 320, localPageStr);
+    y += rowStep;
+    drawRow(y, localPageStr);
 
-    const int optionY = 350;
-    const int optionHeight = 30;
+    const int optionHeight = PanelMetrics::capped(30, rowStep + 4);
+    const int optionY = y + optionHeight;
 
     // The three options published for touch. Only this state draws them -- every other state of
     // this screen is a progress or result message with nothing to choose -- and the recorders are
@@ -941,14 +973,13 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     if (selectedOption == 0) {
       renderer.fillRect(contentRect.x, optionY - 2, contentRect.width - 1, optionHeight);
     }
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, optionY, tr(STR_APPLY_REMOTE), selectedOption != 0);
+    drawRow(optionY, tr(STR_APPLY_REMOTE), selectedOption != 0);
 
     // Upload option
     if (selectedOption == 1) {
       renderer.fillRect(contentRect.x, optionY + optionHeight - 2, contentRect.width - 1, optionHeight);
     }
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, optionY + optionHeight, tr(STR_UPLOAD_LOCAL),
-                      selectedOption != 1);
+    drawRow(optionY + optionHeight, tr(STR_UPLOAD_LOCAL), selectedOption != 1);
 
     // Conflict policy. Offered here because this screen is the only place the choice is ever
     // felt: a user who has just been asked is the one best placed to say "stop asking".
@@ -958,8 +989,7 @@ void KOReaderSyncActivity::render(RenderLock&&) {
     char behaviorStr[96];
     snprintf(behaviorStr, sizeof(behaviorStr), "%s: %s", tr(STR_KO_SYNC_CONFLICT),
              smartSyncEnabled() ? tr(STR_KO_SMART_SYNC) : tr(STR_KO_ASK_EVERY_TIME));
-    renderer.drawText(UI_10_FONT_ID, contentRect.x + 20, optionY + 2 * optionHeight, behaviorStr,
-                      selectedOption != OPTION_SYNC_BEHAVIOR);
+    drawRow(optionY + 2 * optionHeight, behaviorStr, selectedOption != OPTION_SYNC_BEHAVIOR);
 
     // Bottom button hints
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
@@ -969,7 +999,8 @@ void KOReaderSyncActivity::render(RenderLock&&) {
   }
 
   if (state == UPLOAD_COMPLETE) {
-    renderer.drawCenteredText(UI_10_FONT_ID, 300, tr(STR_UPLOAD_SUCCESS), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, ReaderUtils::messageY(renderer), tr(STR_UPLOAD_SUCCESS), true,
+                              EpdFontFamily::BOLD);
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -978,7 +1009,8 @@ void KOReaderSyncActivity::render(RenderLock&&) {
   }
 
   if (state == APPLY_COMPLETE) {
-    renderer.drawCenteredText(UI_10_FONT_ID, 300, tr(STR_PULL_SUCCESS), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, ReaderUtils::messageY(renderer), tr(STR_PULL_SUCCESS), true,
+                              EpdFontFamily::BOLD);
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -987,7 +1019,8 @@ void KOReaderSyncActivity::render(RenderLock&&) {
   }
 
   if (state == SYNC_COMPLETE) {
-    renderer.drawCenteredText(UI_10_FONT_ID, 300, tr(STR_ALREADY_IN_SYNC), true, EpdFontFamily::BOLD);
+    renderer.drawCenteredText(UI_10_FONT_ID, ReaderUtils::messageY(renderer), tr(STR_ALREADY_IN_SYNC), true,
+                              EpdFontFamily::BOLD);
 
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

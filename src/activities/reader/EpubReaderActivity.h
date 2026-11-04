@@ -1328,6 +1328,7 @@ class EpubReaderActivity final : public Activity {
 #if SERIAL_TEST_API
   bool hasPendingScreenWork() override;
   bool hasPendingBackgroundWork() override;
+  const char* sendPageOnScreen() override;
 #endif
   bool shouldSkipPeriodicUpdate() const override;
   void onButtonAction(CrossPointSettings::BUTTON_ACTION action) override;

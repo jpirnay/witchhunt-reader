@@ -1,5 +1,6 @@
 #include "CrossPointSettings.h"
 
+#include <BoardConfig.h>
 #include <Epub/LineSpacing.h>
 #include <HalStorage.h>
 #include <JsonSettingsIO.h>
@@ -39,6 +40,18 @@ static_assert(SMALL_FONT_ID != 0, "Font ID collision with sentinel");
 
 // Initialize the static instance
 CrossPointSettings CrossPointSettings::instance;
+
+void CrossPointSettings::applyDeviceButtonDefaults() {
+  btnDoubleConfirm = BTN_DEFAULT;
+  btnLongConfirm = BTN_DEFAULT;
+
+  const auto& input = BoardConfig::ACTIVE.input;
+  if (!BoardConfig::isMurphyM3() || input.confirm < 0) return;
+
+  if (input.back < 0) btnDoubleConfirm = BTN_BACK;
+  const bool hasDedicatedPower = input.power >= 0 && input.power != input.confirm;
+  if (!hasDedicatedPower) btnLongConfirm = BTN_SLEEP;
+}
 
 namespace {
 constexpr char SETTINGS_FILE_JSON[] = "/.crosspoint/settings.json";
@@ -200,6 +213,10 @@ bool CrossPointSettings::saveToFile() const {
 }
 
 bool CrossPointSettings::loadFromFile() {
+  // Board-specific keymap defaults must be applied after hardware profile
+  // selection and before JSON is read, so missing/legacy values inherit them.
+  applyDeviceButtonDefaults();
+
   // Try JSON first
   if (Storage.exists(SETTINGS_FILE_JSON)) {
     String json = Storage.readFile(SETTINGS_FILE_JSON);

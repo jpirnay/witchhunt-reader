@@ -170,6 +170,7 @@ Arena instances:
 | Cover and indexing passes | lent framebuffer | the framebuffer size | the pass | `HomeActivity`, `FileBrowserActivity::lendForBackgroundWork`, `ReaderActivity` |
 | Library index build | lent framebuffer | the framebuffer size | one build step | `LibraryBuilder::step` (join, publish, author lookup), `LibraryOrder::sortBySeries` |
 | Font selector previews | lent framebuffer | the framebuffer size | one preview font | `FontSelectionActivity::lendPreviewArena`, `SdCardFont::useArena` |
+| Dictzip lookup | lent framebuffer | the framebuffer size | one dictionary lookup | `LentLookupScratch` (`DictionaryWordSelectActivity`), `Dictionary::useInflateArena` |
 | TrueType miss memory | a build's arena, lent | the scratch block and page cache (§9.7) | one glyph lookup | `glyph_miss::Scope`: `Section::stepSectionBuild`, `EpubReaderActivity::displayBuildPage`, the ladder's light relief |
 
 In the lent region the CSS ruleset is resident in the arena (`CssParser::setIndexArena`), the SAX
@@ -473,6 +474,11 @@ Borrow (the lent region becomes an arena):
 - The font selector's previews (`FontSelectionActivity::lendPreviewArena`): each uncached preview
   loads its SD font into the lent region (`SdCardFont::useArena`), one block per font, rewound
   after the font is unloaded. With nothing to lend, previews load on the heap.
+- The word screen's lookups in a `.dict.dz` (`DictionaryWordSelectActivity`, `LentLookupScratch`):
+  the 32 KB inflate window, its working state and the chunk table (`DictZip::Scratch` in arena
+  mode), lent once the busy popup is drawn and given back before the definition draws. The chunk
+  table is parsed again for every lookup. With nothing to lend, or a region too small for the
+  table, they take the heap for the dictionary session as before.
 
 Release (the block goes back to the heap):
 

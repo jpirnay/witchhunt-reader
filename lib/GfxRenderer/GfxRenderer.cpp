@@ -1426,8 +1426,15 @@ bool GfxRenderer::getTextInkMetrics(const int fontId, const char* text, const Ep
 
 void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* text, const bool black,
                                    const EpdFontFamily::Style style) const {
-  const int x = (getScreenWidth() - getTextWidth(fontId, text, style)) / 2;
-  drawText(fontId, x, y, text, black, style);
+  const int screenWidth = getScreenWidth();
+  const int textWidth = getTextWidth(fontId, text, style);
+  if (textWidth > screenWidth) {
+    // Centred, an over-long line loses both ends and reads as neither word. Keep the start.
+    const std::string fitted = truncatedText(fontId, text, screenWidth, style);
+    drawText(fontId, (screenWidth - getTextWidth(fontId, fitted.c_str(), style)) / 2, y, fitted.c_str(), black, style);
+    return;
+  }
+  drawText(fontId, (screenWidth - textWidth) / 2, y, text, black, style);
 }
 
 void GfxRenderer::drawText(const int fontId, const int x, const int y, const char* text, const bool black,

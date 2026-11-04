@@ -3,6 +3,7 @@
 // the stdio storage shim.
 
 #include <BuildArena.h>
+#include <HalStorage.h>
 #include <LibraryBuilder.h>
 #include <LibraryFormat.h>
 #include <LibraryIndexReader.h>
@@ -178,6 +179,19 @@ TEST_F(LibraryBuilderTest, FoldersThatHoldNoBooksAreLeftOutAtAnyDepthEvenWhenHid
   LibraryIndexReader index;
   ASSERT_TRUE(index.open(indexPath()));
   EXPECT_EQ(index.header().bookCount, 1);
+}
+
+// A subfolder opened by path is searched for in its parent from the first entry: 27 ms apiece, 40 s
+// in a folder of 1,800. The entry the listing hands out already is that folder.
+TEST_F(LibraryBuilderTest, OnlyTheRootIsOpenedByPath) {
+  file("A/one.epub");
+  file("A/B/two.epub");
+  file("C/three.epub");
+  HalFile::folderOpens = 0;
+
+  ASSERT_EQ(build(config()), LibraryBuilder::Phase::Done);
+
+  EXPECT_EQ(HalFile::folderOpens, 1u);
 }
 
 TEST_F(LibraryBuilderTest, ABookThatCannotBeReadNowStaysPendingAndIsAskedAgain) {

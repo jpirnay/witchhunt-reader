@@ -20,6 +20,7 @@
 #include "activities/NetworkMemoryTrim.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
+#include "components/themes/PanelMetrics.h"
 #include "fontIds.h"
 
 namespace {
@@ -467,8 +468,9 @@ void WeatherActivity::render(RenderLock&&) {
   // In LandscapeClockwise, physical bottom buttons are at the logical LEFT edge
   const int contentX = metrics.buttonHintsHeight;
   const int contentWidth = pageWidth - contentX;
-  constexpr int leftPanelWidth = 220;
-  constexpr int graphHeight = 240;
+  const int leftPanelWidth = PanelMetrics::capped(220, 150);
+  // A landscape compact panel is 240 px tall in all: the forecast takes it, and the graph goes.
+  const int graphHeight = PanelMetrics::capped(240, 0);
   const int topSectionHeight = pageHeight - graphHeight;
 
   // Draw current conditions (left panel, offset by button hints)
@@ -477,11 +479,13 @@ void WeatherActivity::render(RenderLock&&) {
   // Draw daily forecast (right of current conditions)
   renderDailyForecast(contentX + leftPanelWidth, 0, contentWidth - leftPanelWidth, topSectionHeight);
 
-  // Separator line
-  renderer.drawLine(contentX, topSectionHeight, pageWidth, topSectionHeight);
+  if (graphHeight > 0) {
+    // Separator line
+    renderer.drawLine(contentX, topSectionHeight, pageWidth, topSectionHeight);
 
-  // Draw hourly graph
-  renderHourlyGraph(contentX, topSectionHeight + 1, contentWidth, graphHeight - 1);
+    // Draw hourly graph
+    renderHourlyGraph(contentX, topSectionHeight + 1, contentWidth, graphHeight - 1);
+  }
 
   // Button hints
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_WEATHER_SETTINGS_SHORT), tr(STR_WEATHER_REFRESH), "");
@@ -601,6 +605,8 @@ void WeatherActivity::renderDailyForecast(int x, int y, int w, int h) {
 
   const char* unitSuffix = WEATHER_SETTINGS.getTempUnit() == WeatherTempUnit::CELSIUS ? "C" : "F";
   int numDays = static_cast<int>(weatherData.daily.size());
+  // Only as many days as hold their icon: a week across a compact panel gave cards 22 px wide.
+  if (PanelMetrics::COMPACT) numDays = std::min(numDays, std::max(1, w / (WEATHER_ICON_SIZE + 8)));
 
   if (numDays <= 0) return;
 
@@ -715,8 +721,9 @@ void WeatherActivity::renderDailyForecast(int x, int y, int w, int h) {
       char moonBuf[48];
       snprintf(moonBuf, sizeof(moonBuf), "%s %3d%%", phaseName, phasePercent);
 
-      int moonWidth = renderer.getTextWidth(FIT_SMALL_FONT_ID, moonBuf);
-      renderer.drawText(FIT_SMALL_FONT_ID, cardX + (cardWidth - moonWidth) / 2, textY, moonBuf);
+      auto truncMoon = renderer.truncatedText(FIT_SMALL_FONT_ID, moonBuf, cardWidth - 8);
+      int moonWidth = renderer.getTextWidth(FIT_SMALL_FONT_ID, truncMoon.c_str());
+      renderer.drawText(FIT_SMALL_FONT_ID, cardX + (cardWidth - moonWidth) / 2, textY, truncMoon.c_str());
 
       textY += 14;
     }

@@ -165,6 +165,10 @@ inline bool hasBackAndConfirmButtons() {
 // arrangement rather than a yes/no capability.
 inline BoardConfig::InputStyle inputStyle() { return BoardConfig::ACTIVE.inputStyle; }
 
+// The front strip's Left and Right are touch targets on the panel rather than keys in the case, so
+// they turn with the screen while the real keys stay Up and Down (Murphy).
+inline bool frontStripIsVirtual() { return inputStyle() == BoardConfig::InputStyle::DigitalFiveKey; }
+
 // True when the SD card is reached over SPI, false when the board drives the
 // slot through the native SDMMC peripheral (X4 Pro, X4 Classic).
 //
@@ -203,6 +207,25 @@ inline bool upKeyIsBootStrap() {
 // Chrome scale factor for finger-sized targets. 1.0 on button boards, 1.2 on the
 // touch boards. Read by ThemeMetrics in touch phase 5.
 inline float uiScale() { return BoardConfig::ACTIVE.uiScale; }
+
+// FAST ghosts badly enough on this panel that the UI cannot rely on each screen's own cleaning:
+// every activity change gets a HALF and every screen follows the refresh frequency setting, the
+// way the reader's pages do (ActivityManager::armGhostClearingRefresh()). Not the same question as
+// the SDK's ghostsUnderFastRefresh(), which is true on the X3 too and only asks for the occasional
+// HALF on a menu.
+inline bool clearsGhostsOnEveryScreen() { return BoardConfig::isMurphyM3(); }
+
+// The panel can show gray at all. Murphy's cannot: its UC8253 driver has no gray waveforms and
+// ignores a gray pass (Uc8253MurphyDriver::displayGray), so a setting for one means nothing there.
+inline bool panelShowsGray() { return !BoardConfig::isMurphyM3(); }
+
+// borrowSecondaryBuffer() hands out a dedicated block of PSRAM rather than the secondary framebuffer,
+// so a borrower gets far more room and the display never drops to one buffer for it. Needed on
+// Murphy, whose 12,480 byte framebuffer cannot hold a ZIP entry's 32 KB inflate ring: it failed as
+// out of memory with 8 MB free, and no unopened book ever got a cover. Named boards rather than
+// every PSRAM build because it changes how each one's panel is driven during a lend: the T5S3 has
+// not been through it.
+inline bool lendsPsramArena() { return BoardConfig::isMurphyM3() || BoardConfig::isX4Pro(); }
 
 // A frontlight is present (PWM or PM1-driven).
 inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight(); }

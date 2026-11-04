@@ -167,8 +167,13 @@ void SystemInformationActivity::render(RenderLock&&) {
   auto drawRow = [&](const char* label, const std::string& value) {
     breakIfShort(rowStep);
     if (layoutPage == page_) {
-      renderer.drawText(UI_10_FONT_ID, leftX, y, label, true, EpdFontFamily::BOLD);
-      renderer.drawText(UI_10_FONT_ID, valueX, y, value.c_str());
+      const int labelWidth = valueX - leftX - 4;
+      const int valueWidth = contentRect.x + contentRect.width - valueX;
+      renderer.drawText(UI_10_FONT_ID, leftX, y,
+                        renderer.truncatedText(UI_10_FONT_ID, label, labelWidth, EpdFontFamily::BOLD).c_str(), true,
+                        EpdFontFamily::BOLD);
+      renderer.drawText(UI_10_FONT_ID, valueX, y,
+                        renderer.truncatedText(UI_10_FONT_ID, value.c_str(), valueWidth).c_str());
     }
     y += rowStep;
   };

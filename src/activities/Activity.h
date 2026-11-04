@@ -131,6 +131,11 @@ class Activity {
   // build, a cover decode. A full CMD:IDLE waits for it too. Not skipLoopDelay(): the transfer
   // screens hold that for their whole life.
   virtual bool hasPendingBackgroundWork() { return false; }
+  // For the serial CMD:PAGE: hands the page on screen to SerialTestApi::sendPage() and returns nullptr, or returns
+  // why it could not ("no page"; "busy" while it may still change on its own; "no memory" when sendPage() found no
+  // block for its scratch). Called on the loop task under RenderLock(ExclusiveActivityAccess). Only the EPUB reader
+  // has a page.
+  virtual const char* sendPageOnScreen() { return "not in the reader"; }
 #endif
 
   // Called while this activity is buried on the stack, before a download that needs the heap in
@@ -166,6 +171,10 @@ class Activity {
   // screen's own use of the button wins (see main.cpp) -- which leaves a button it has no use for
   // doing nothing. A paginated screen opened from the reader opts in for the page turns on such a
   // button, so a Power button set to turn pages turns its pages too.
+  // Every Confirm press means something on this screen, so a double or long press stays with it
+  // whatever action the button is bound to. Two quick presses on a key type a letter twice, and a
+  // global Back bound there threw away the text in hand.
+  virtual bool keepsConfirmGestures() const { return false; }
   virtual bool takesButtonAction(CrossPointSettings::BUTTON_ACTION, MappedInputManager::Button) const { return false; }
 
   // A manual force refresh (a button or gesture bound to Force Refresh) while this activity is on

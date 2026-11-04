@@ -1,9 +1,12 @@
 // The argument grammar of the serial test commands (docs/serial-test-api.md): what a host may send
-// after CMD:BTN, CMD:ACT:READER, CMD:SET, CMD:TOUCH/SWIPE and CMD:LOG, and how CMD:STATE writes its
-// key=value pairs so a host can split them again.
+// after CMD:BTN, CMD:ACT:READER, CMD:SET, CMD:TOUCH/SWIPE, CMD:LOG and CMD:FS, how CMD:STATE writes its
+// key=value pairs so a host can split them again, how CMD:PAGE escapes a word's text, and the CRC32
+// the file commands check.
 
+#include <SerialTransfer/SerialTransferProtocol.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -253,4 +256,167 @@ TEST(SerialCommandGrammar, NonAsciiTextIsLeftAlone) {
   std::string line;
   SerialCommandGrammar::appendField(line, "label", "Übertragung");
   EXPECT_EQ(line, " label=Übertragung");
+}
+
+// ---- CMD:FS:PUT, GET, HASH, MKDIR, MV ----------------------------------------------------------
+
+TEST(SerialFsGrammar, PutTakesTheLastTwoFieldsOffAPathWithSpaces) {
+  std::string_view path;
+  uint32_t size = 0;
+  uint32_t crc = 0;
+  ASSERT_TRUE(SerialCommandGrammar::parseFsPut("/test/My Book - Vol 1.epub:123456:cbf43926", path, size, crc));
+  EXPECT_EQ(path, "/test/My Book - Vol 1.epub");
+  EXPECT_EQ(size, 123456u);
+  EXPECT_EQ(crc, 0xCBF43926u);
+  ASSERT_TRUE(SerialCommandGrammar::parseFsPut("/empty.txt:0:0", path, size, crc)) << "an empty file";
+  EXPECT_EQ(size, 0u);
+  EXPECT_EQ(crc, 0u);
+  ASSERT_TRUE(SerialCommandGrammar::parseFsPut("/big.bin:4294967295:FFFFFFFF", path, size, crc)) << "any case";
+  EXPECT_EQ(size, 4294967295u);
+  EXPECT_EQ(crc, 0xFFFFFFFFu);
+  ASSERT_TRUE(SerialCommandGrammar::parseFsPut("/a.bin:7:1a", path, size, crc)) << "fewer than 8 digits";
+  EXPECT_EQ(crc, 0x1Au);
+}
+
+TEST(SerialFsGrammar, PutRefusesMissingFieldsABadSizeAndBadHex) {
+  std::string_view path;
+  uint32_t size = 0;
+  uint32_t crc = 0;
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("", path, size, crc));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin", path, size, crc)) << "no size, no CRC";
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin:12", path, size, crc)) << "no CRC";
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin::cbf43926", path, size, crc)) << "an empty size";
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin:12:", path, size, crc)) << "an empty CRC";
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut(":12:cbf43926", path, size, crc)) << "no path";
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("a.bin:12:cbf43926", path, size, crc)) << "a path starts with /";
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin:-1:cbf43926", path, size, crc));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin:+5:cbf43926", path, size, crc));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin:1e3:cbf43926", path, size, crc));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin:4294967296:cbf43926", path, size, crc))
+      << "a FAT32 file stays below 4 GiB";
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin:99999999999999999999:0", path, size, crc));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin:12:cbf4392g", path, size, crc)) << "not hex";
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin:12:0x1234", path, size, crc));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin:12:123456789", path, size, crc)) << "nine digits";
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPut("/a.bin:12: cbf43926", path, size, crc));
+}
+
+TEST(SerialFsGrammar, APathStartsWithASlashAndHoldsNoColon) {
+  std::string_view path;
+  ASSERT_TRUE(SerialCommandGrammar::parseFsPath("/test/The Anarchy - Dalrymple, William.epub", path));
+  EXPECT_EQ(path, "/test/The Anarchy - Dalrymple, William.epub");
+  ASSERT_TRUE(SerialCommandGrammar::parseFsPath("/", path));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPath("", path));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPath("test/a.epub", path));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsPath("/a.bin:/b.bin", path)) << "':' cannot be in a FAT name";
+}
+
+TEST(SerialFsGrammar, MoveTakesTwoPathsAroundOneColon) {
+  std::string_view from;
+  std::string_view to;
+  ASSERT_TRUE(SerialCommandGrammar::parseFsMove("/test/old name.epub:/books/new name.epub", from, to));
+  EXPECT_EQ(from, "/test/old name.epub");
+  EXPECT_EQ(to, "/books/new name.epub");
+  EXPECT_FALSE(SerialCommandGrammar::parseFsMove("", from, to));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsMove("/a.epub", from, to)) << "no target";
+  EXPECT_FALSE(SerialCommandGrammar::parseFsMove("/a.epub:", from, to));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsMove(":/b.epub", from, to));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsMove("/a.epub:b.epub", from, to)) << "both are card paths";
+  EXPECT_FALSE(SerialCommandGrammar::parseFsMove("a.epub:/b.epub", from, to));
+  EXPECT_FALSE(SerialCommandGrammar::parseFsMove("/a:/b:/c", from, to)) << "':' cannot be in a FAT name";
+}
+
+// ---- CMD:PAGE's text="..." --------------------------------------------------------------------
+
+namespace {
+
+// The whole of `text` escaped, one unit at a time, as the device writes a word.
+std::string escaped(const std::string_view text) {
+  std::string out;
+  size_t pos = 0;
+  char unit[SerialCommandGrammar::kMaxEscapedUnit];
+  while (pos < text.size()) {
+    const size_t before = pos;
+    const size_t n = SerialCommandGrammar::escapeTextUnit(text, pos, unit);
+    EXPECT_GT(pos, before) << "every call moves on";
+    EXPECT_LE(n, SerialCommandGrammar::kMaxEscapedUnit);
+    out.append(unit, n);
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST(PageTextEscape, AsciiAndHebrewAreWrittenAsTheyAre) {
+  EXPECT_EQ(escaped("Hello, world."), "Hello, world.");
+  // שלום, and a Hebrew word with points (U+05B8 qamats, U+05BC dagesh): marks are printable text.
+  EXPECT_EQ(escaped("\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D"), "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D");
+  EXPECT_EQ(escaped("\xD7\xA9\xD6\xB8\xD7\x9C\xD7\x95\xD6\xBC\xD7\x9D"),
+            "\xD7\xA9\xD6\xB8\xD7\x9C\xD7\x95\xD6\xBC\xD7\x9D");
+  EXPECT_EQ(escaped("\xF0\x9F\x98\x80"), "\xF0\x9F\x98\x80") << "a four-byte character";
+}
+
+TEST(PageTextEscape, BidiControlsAndInvisibleMarksBecomeCodepoints) {
+  EXPECT_EQ(escaped("\xE2\x80\x8F"), "\\u{200F}") << "RLM";
+  EXPECT_EQ(escaped("a\xE2\x80\x8Ez"), "a\\u{200E}z") << "LRM";
+  EXPECT_EQ(escaped("\xD8\x9C"), "\\u{061C}") << "ALM";
+  EXPECT_EQ(escaped("\xE2\x80\xAB\xD7\x90\xE2\x80\xAC"), "\\u{202B}\xD7\x90\\u{202C}") << "RLE, PDF";
+  EXPECT_EQ(escaped("\xE2\x81\xA6x\xE2\x81\xA9"), "\\u{2066}x\\u{2069}") << "LRI, PDI";
+  EXPECT_EQ(escaped("\xE2\x80\x8B\xE2\x80\x8D\xE2\x81\xA0"), "\\u{200B}\\u{200D}\\u{2060}") << "ZWSP, ZWJ, WJ";
+  EXPECT_EQ(escaped("\xEF\xBB\xBF"), "\\u{FEFF}") << "BOM";
+  EXPECT_EQ(escaped("hy\xC2\xADphen"), "hy\\u{00AD}phen") << "soft hyphen";
+  EXPECT_EQ(escaped("\xE2\x80\xA8\xE2\x80\xA9"), "\\u{2028}\\u{2029}") << "line and paragraph separators";
+}
+
+TEST(PageTextEscape, ControlCharactersBecomeCodepoints) {
+  EXPECT_EQ(escaped(std::string_view("\x00", 1)), "\\u{0000}");
+  EXPECT_EQ(escaped("\x01"), "\\u{0001}");
+  EXPECT_EQ(escaped("a\tb\n"), "a\\u{0009}b\\u{000A}");
+  EXPECT_EQ(escaped("\x7F"), "\\u{007F}") << "DEL";
+  EXPECT_EQ(escaped("\xC2\x85"), "\\u{0085}") << "a C1 control";
+}
+
+TEST(PageTextEscape, AQuoteAndABackslashTakeABackslash) {
+  EXPECT_EQ(escaped(R"(say "hi")"), R"(say \"hi\")");
+  EXPECT_EQ(escaped(R"(C:\books)"), R"(C:\\books)");
+}
+
+TEST(PageTextEscape, InvalidBytesAreWrittenOneByOneAsHex) {
+  EXPECT_EQ(escaped("\xFF"), "\\x{FF}");
+  EXPECT_EQ(escaped("a\xD7"), "a\\x{D7}") << "a sequence cut short at the end";
+  EXPECT_EQ(escaped("\xD7Z"), "\\x{D7}Z") << "a lead byte without its continuation";
+  EXPECT_EQ(escaped("\x80"), "\\x{80}") << "a lone continuation byte";
+  EXPECT_EQ(escaped("\xC0\x80"), "\\x{C0}\\x{80}") << "overlong";
+  EXPECT_EQ(escaped("\xE0\x80\xAF"), "\\x{E0}\\x{80}\\x{AF}") << "overlong";
+  EXPECT_EQ(escaped("\xED\xA0\x80"), "\\x{ED}\\x{A0}\\x{80}") << "a surrogate";
+  EXPECT_EQ(escaped("\xF4\x90\x80\x80"), "\\x{F4}\\x{90}\\x{80}\\x{80}") << "above U+10FFFF";
+}
+
+TEST(PageTextEscape, TheNeighboursOfTheEscapedRangesStayText) {
+  EXPECT_EQ(escaped("\xE2\x80\x8A"), "\xE2\x80\x8A") << "U+200A hair space";
+  EXPECT_EQ(escaped("\xE2\x80\x90"), "\xE2\x80\x90") << "U+2010 hyphen";
+  EXPECT_EQ(escaped("\xE2\x80\xAF"), "\xE2\x80\xAF") << "U+202F narrow no-break space";
+  EXPECT_EQ(escaped("\xE2\x81\xAA"), "\xE2\x81\xAA") << "U+206A";
+  EXPECT_EQ(escaped("\xC2\xA0\xC2\xAC"), "\xC2\xA0\xC2\xAC") << "U+00A0, U+00AC";
+  EXPECT_EQ(escaped("\xD8\x9B\xD8\x9D"), "\xD8\x9B\xD8\x9D") << "U+061B, U+061D";
+}
+
+// ---- The CRC32 the FS commands use: serialtransfer::crc32Update, zlib's ----------------------
+
+TEST(SerialFsCrc, MatchesZlibCrc32FedInFourKilobyteChunks) {
+  using serialtransfer::crc32Update;
+  const std::string fox = "The quick brown fox jumps over the lazy dog";
+  // zlib.crc32(b"The quick brown fox jumps over the lazy dog")
+  EXPECT_EQ(crc32Update(0, reinterpret_cast<const uint8_t*>(fox.data()), fox.size()), 0x414FA339u);
+  const std::string shalom = "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D";
+  // zlib.crc32("שלום".encode())
+  EXPECT_EQ(crc32Update(0, reinterpret_cast<const uint8_t*>(shalom.data()), shalom.size()), 0xA098974Du);
+  // zlib.crc32(bytes(i & 0xff for i in range(10000))), fed as FS:PUT receives it: 4096, 4096, 1808.
+  std::vector<uint8_t> data(10000);
+  for (size_t i = 0; i < data.size(); ++i) data[i] = static_cast<uint8_t>(i & 0xFF);
+  uint32_t crc = 0;
+  for (size_t at = 0; at < data.size(); at += 4096) {
+    crc = crc32Update(crc, data.data() + at, std::min<size_t>(4096, data.size() - at));
+  }
+  EXPECT_EQ(crc, 0xD1FFC4FCu);
 }

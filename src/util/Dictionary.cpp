@@ -261,6 +261,20 @@ void Dictionary::releaseCaches() {
   dzScratch.release();
 }
 
+bool Dictionary::useInflateArena(BuildArena* const arena) {
+  dzScratch.release();
+  inflateArena = nullptr;
+  if (!arena || !isCompressed()) return false;
+  // Bound now rather than at the first hit, so that an arena too small says so before the lookup starts.
+  if (!dzScratch.ensure(*arena, buildPath(".dict.dz"))) return false;
+  inflateArena = arena;
+  return true;
+}
+
+bool Dictionary::ensureInflateScratch() {
+  return inflateArena ? dzScratch.ensure(*inflateArena, buildPath(".dict.dz")) : dzScratch.ensure();
+}
+
 bool Dictionary::ensureScanBuffers() {
   if (scanBuf) return true;
   scanBuf = makeUniqueNoThrow<ScanBuffers>();
@@ -737,8 +751,9 @@ bool Dictionary::readDefinition(const DictLocation& location, std::string& out, 
   // Take the inflate window BEFORE the definition buffer: it is the larger of
   // the two and both come out of the same free run, so asking for it second is
   // what leaves it a few bytes short on a fragmented heap. After the first
-  // lookup of a session this is already held and costs nothing.
-  if (!hasPlainDict && !dzScratch.ensure()) {
+  // lookup of a session this is already held and costs nothing, and in a lent
+  // arena it takes nothing from the heap.
+  if (!hasPlainDict && !ensureInflateScratch()) {
     LOG_ERR("DICT", "Low heap for the dictzip inflate window");
     return fail(LookupResult::LowMemory);
   }
@@ -1647,7 +1662,7 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
   if (taken == 0) return fail(LookupResult::ReadError);
 
   // The inflate window before the buffer, as readDefinition does: it is the larger of the two.
-  if (!hasPlainDict && !dzScratch.ensure()) {
+  if (!hasPlainDict && !ensureInflateScratch()) {
     LOG_INF("DICT", "Low heap for the dictzip inflate window");
     return fail(LookupResult::LowMemory);
   }

@@ -384,3 +384,23 @@ TEST(CoverGridLayout, RowStepsOnAnEmptyGridAreHarmless) {
   EXPECT_EQ(CoverGridLayout::rowBelow(0, 0, 3), 0);
   EXPECT_EQ(CoverGridLayout::rowAbove(0, 0, 0), 0);
 }
+
+// Murphy's Library body with the compact cap place() applies there. At the full-size cap the same
+// space is one cell a page.
+TEST(CoverGridLayout, ACompactPanelGetsAGridRatherThanOneTile) {
+  const CoverGridLayout::Layout full = CoverGridLayout::compute({.contentWidth = 240,
+                                                                 .contentHeight = 285,
+                                                                 .bottomReserve = 0,
+                                                                 .maxCellHeight = CoverGridLayout::kMaxCellHeight,
+                                                                 .maxCellWidth = CoverGridLayout::kMaxCellWidth});
+  EXPECT_EQ(full.cols * full.rows, 1);
+
+  const CoverGridLayout::Layout compact = CoverGridLayout::compute({.contentWidth = 240,
+                                                                    .contentHeight = 285,
+                                                                    .bottomReserve = 0,
+                                                                    .maxCellHeight = 120,
+                                                                    .maxCellWidth = CoverGridLayout::kMaxCellWidth});
+  EXPECT_EQ(compact.rows, 2);
+  EXPECT_EQ(compact.cols, 3);
+  EXPECT_EQ(compact.cellHeight, CoverGridLayout::kMinCellHeight);
+}
