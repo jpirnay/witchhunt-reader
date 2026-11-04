@@ -11,21 +11,9 @@ white. Gray that stays black takes 15 frames toward black that nothing pays back
 `Uc8253MurphyDriver::writeOldPlane()` adds. A short session cannot show what thousands of pages do.
 Next: read for some weeks, then compare a clean white and black with the shots kept from the lab.
 
-**Image midtones.** BMP, JPG and PNG all show in one gray pass, and Confirm's gray and B/W toggle works.
-But images come out dark. The 4-level dither assumes light gray at 67 %, and ours is 50-58 %. Measured on
-an even step ramp, in percent of white:
-
-| Ramp | 14 | 29 | 43 | 57 | 71 | 86 |
-|---|---|---|---|---|---|---|
-| BMP, gray | 9 | 23 | 36 | 52 | 64 | 88 |
-| JPG or PNG, gray | 7 | 20 | 30 | 41 | 55 | 73 |
-| JPG, B/W | 3 | 21 | 40 | 57 | 77 | 92 |
-
-JPG and PNG also read 8-15 points below BMP on a soft test image. Light gray at 5 frames instead of 4 would
-be about 70 %, but it changes text as well, so that needs reading, not just a ramp.
-
-**Temperature.** The waveforms were measured at room temperature, which was not recorded. The OTP is blank, so the controller has
-no temperature ranges to fall back on, and the driver does not read the sensor.
+**Temperature.** The waveforms were measured at room temperature, which was not recorded. The OTP is
+blank, so the controller has no temperature ranges to fall back on, and the driver does not read the
+sensor.
 
 **Stored overrides.** A book with `textAntiAliasingOverride` 0 stays B/W whatever the setting says. Books
 opened on a Murphy before gray may carry one, which is how the first reader test came out B/W.
@@ -39,6 +27,21 @@ to white would drive the whole background one way on every page.
 Three levels fit: rest, to white, to black, and one gray such as VSL 4, VSH 8, VSL 4, which nets to zero
 and takes 16 frames, as long as FAST. The reader already has a one-push path for it
 (`supportsGrayFrame()`). Text darkness Lighter shows roughly how one gray looks. Not built, not measured.
+
+## Images
+
+BMP, JPG and PNG all show in one gray pass, and Confirm's gray and B/W toggle works. Midtones come out dark:
+the 4-level dither assumes light gray at 67 %, and ours is 50-58 %. Measured on an even step ramp, in percent
+of white:
+
+| Ramp | 14 | 29 | 43 | 57 | 71 | 86 |
+|---|---|---|---|---|---|---|
+| BMP, gray | 9 | 23 | 36 | 52 | 64 | 88 |
+| JPG or PNG, gray | 7 | 20 | 30 | 41 | 55 | 73 |
+| JPG, B/W | 3 | 21 | 40 | 57 | 77 | 92 |
+
+JPG and PNG also read 8-15 points below BMP on a soft test image. This was left as it is. Light gray at 5
+frames instead of 4 would be about 70 %, but it would change text as well. Not tried.
 
 ## UI ghosting
 
@@ -71,3 +74,9 @@ per FAST.
 
 **DC.** 20 frames against 15 nets 5 toward white per round trip in frames, though nominally 20 x 12.6 V
 about balances 15 x 16.6 V. The true centre is unknown with no factory VCOM.
+
+## Upstream
+
+Offered to Free-Ink/freeink-sdk, all open: gray as #174, the FAST change and the limit removal as #176 (stacked
+on #174), and the lent block as #175. Until they merge, the firmware pins our fork. HALF was not offered, as it
+did not change. #175 is not in use here: the firmware still lends its block from `HalDisplay`.
