@@ -18,7 +18,9 @@
 # it; it is never rebased or force-pushed, so every SHA this file has ever
 # pinned stays reachable from it (the one older pin no branch contained is kept
 # by the tag archive/pin-feddc4e86). The pin may trail the branch, never leave
-# it. Upstream PR branches are still cut from Free-Ink main and merged back here.
+# it, and CI enforces that (scripts/check_sdk_pin.sh): land SDK commits on the
+# branch first, then pin them. Upstream PR branches are still cut from Free-Ink
+# main and merged back here.
 #
 # The name only matters to `git submodule update --remote`, which is NOT what a
 # normal checkout runs -- but when it was `main`, that command silently reset

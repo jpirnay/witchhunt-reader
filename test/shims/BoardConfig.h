@@ -35,6 +35,9 @@
 #ifndef FREEINK_DEVICE_M5
 #define FREEINK_DEVICE_M5 0
 #endif
+#ifndef FREEINK_MURPHY_GRAY
+#define FREEINK_MURPHY_GRAY 0
+#endif
 #ifndef FREEINK_DEVICE_MURPHY
 #define FREEINK_DEVICE_MURPHY 0
 #endif

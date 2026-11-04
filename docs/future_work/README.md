@@ -16,6 +16,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | [library.md](library.md) | Library: measuring a large card, "Library too large", card-reader changes, silent build failures, interrupted builds, New's covers, author lists, sidecar case, tabs on button-only boards, tests |
 | [list-input-harmonization.md](list-input-harmonization.md) | Screens not yet on ListController, and the cleanup after them |
 | [memory-and-parsing.md](memory-and-parsing.md) | Nested-table text, case-blind class and id selectors, a block-ending `<br>`'s blank line, the simplified-chapter hint, the image lane and Background-B, heap transients, preempted decodes, progressive JPEGs at 1/8 (covers that restart, the I/O of libjpeg's script), damaged JPEGs (parked) |
+| [murphy-gray.md](murphy-gray.md) | Murphy M3: what is still open about gray, UI ghosting, why HALF and image midtones stay as they are, what is offered upstream |
 | [murphy-small-screen.md](murphy-small-screen.md) | Murphy M3: fixed sizes and layouts that assume a panel larger than 240x416, with the central root causes first |
 | [opds-and-kosync.md](opds-and-kosync.md) | Gutenberg's repeated OpenSearch fetch and truncated-field warning, KOSync redirect gate and log labels |
 | [reader-state.md](reader-state.md) | Mark as read vs. a pending page save, menu actions after a layout change, sync mid-build, dead override overloads |

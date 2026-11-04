@@ -333,6 +333,14 @@ jobs:
       - name: Check the web bundle's release tag
         run: python test/web/release_tag_test.py
 
+  sdk-pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check the SDK pin is on the fork's long-lived branch
+        run: scripts/check_sdk_pin.sh
+
   # This job is used as the PR required actions check, allows for changes to other steps in the future without breaking
   # PR requirements.
   test-status:
@@ -343,6 +351,7 @@ jobs:
       - web-tests
       - clang-format
       - cppcheck
+      - sdk-pin
     if: always()
     runs-on: ubuntu-latest
     steps:
