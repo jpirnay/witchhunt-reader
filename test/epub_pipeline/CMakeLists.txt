@@ -145,6 +145,7 @@ add_executable(EpubPipelineTest
   ImageOnlyPageTest.cpp
   VerticalLayoutTest.cpp
   VerticalRulesTest.cpp
+  BidiRulesTest.cpp
   CoverPipelineTest.cpp
   CoverWrapperTest.cpp
   CoverFallbackTest.cpp
