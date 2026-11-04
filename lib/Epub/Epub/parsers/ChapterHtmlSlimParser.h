@@ -1087,7 +1087,8 @@ class ChapterHtmlSlimParser final : public Print {
   size_t write(const uint8_t* buffer, size_t size) override;
 
   ParsedText::LineProcessResult addLineToPage(std::unique_ptr<TextBlock> line, bool lineEndsWithHyphenatedWord,
-                                              bool suppressHyphenationRetry, uint32_t lineVisibleOffset);
+                                              bool suppressHyphenationRetry, uint32_t lineVisibleOffset,
+                                              uint32_t lineTokenCount);
   // Anchors reach the section cache through the spill file, not through this vector: see
   // setAnchorSpillPath. Non-empty only when the spill could not be opened, in which case these
   // are all the anchors there are and the finalizer writes them itself.

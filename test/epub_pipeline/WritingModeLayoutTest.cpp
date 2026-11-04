@@ -1471,6 +1471,42 @@ TEST_F(BidiLayout, ACellLaidOutAsAParagraphKeepsItsOwnDirection) {
   EXPECT_EQ(405, lines[0].words[1].x);
 }
 
+// A footnote is listed on the page that holds its marker. The page is found by counting the tokens each line consumed;
+// a bidi line stores pieces, and a parenthesised Latin phrase in a Hebrew paragraph stores more of them than it has
+// tokens, so counting the stored words ran ahead and put a marker opening a page on the page before.
+TEST_F(BidiLayout, AFootnoteIsListedOnThePageHoldingItsMarker) {
+  const std::string phrase = "(hello world)";
+  pipeline_harness::Profile profile;
+  profile.viewportHeight = 90;
+  profile.inlineFootnotePreviews = false;
+  int pagesWithMarker = 0;
+  int sweeps = 0;
+  for (int at = 0; at < 60; at += 2) {
+    // Two split phrases ahead of the marker, then a plain Hebrew word every other token.
+    std::string text = phrase + " " + phrase;
+    for (int i = 0; i < 60; ++i) {
+      if (i == at) text += " <a epub:type=\"noteref\" href=\"#n1\">1</a>";
+      text += i % 5 == 4 ? std::string(" ") + phrase : std::string(" ") + kShalom;
+    }
+    const std::string out = dump("", document("<p dir=\"rtl\">" + text + "</p><p id=\"n1\">note</p>"), profile);
+    // The dump's pages, each cut at its " PAGE " header: the marker word is a W line whose text is "1".
+    size_t from = out.find(" PAGE ");
+    ASSERT_NE(std::string::npos, from) << out;
+    ASSERT_NE(std::string::npos, out.find(" PAGE 1 ")) << "the book must break across pages at 90 px";
+    while (from != std::string::npos) {
+      const size_t next = out.find("\n PAGE ", from + 1);
+      const std::string page = out.substr(from, next == std::string::npos ? std::string::npos : next - from);
+      const bool hasMarker = page.find(" t=1\n") != std::string::npos;
+      const bool hasNote = page.find("  FN n=1 ") != std::string::npos;
+      EXPECT_EQ(hasMarker, hasNote) << "marker after " << at << " words, page: " << page.substr(0, 40);
+      if (hasMarker) ++pagesWithMarker;
+      from = next == std::string::npos ? next : next + 1;
+    }
+    ++sweeps;
+  }
+  EXPECT_EQ(sweeps, pagesWithMarker);
+}
+
 TEST_F(WritingModeLayout, ThePageProgressionSurvivesBookBin) {
   const std::string path = writeBook("", document("<p>Alpha</p>"), {}, " page-progression-direction=\"rtl\"");
   const std::string cache = path + ".cache";

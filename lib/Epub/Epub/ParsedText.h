@@ -138,6 +138,10 @@ class ParsedText {
   // The first word's offset of the line most recently handed to processLine. Read by the parser's
   // line callbacks, which only get the TextBlock.
   uint32_t lastLineVisibleOffset_ = 0;
+  // The tokens the line most recently handed to processLine consumed: its token range, plus those of controls-only
+  // lines before it that never reached processLine. A bidi line stores pieces, so wordCount() is not this.
+  uint32_t lastLineTokenCount_ = 0;
+  uint32_t controlsOnlyTokens_ = 0;  // tokens of controls-only lines not yet charged to a handed-over line
   // The ruby text of each Leader token (TokenBoundary::RubyRole) of the block, in token order: the n-th Leader owns the
   // n-th text. Moves with the tokens through every erase, snapshot and reset.
   std::vector<std::string> rubyTexts_;
@@ -434,6 +438,7 @@ class ParsedText {
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
   uint32_t lastLineVisibleOffset() const { return lastLineVisibleOffset_; }
+  uint32_t lastLineTokenCount() const { return lastLineTokenCount_; }
   const LinePlace& linePlace() const { return linePlace_; }
   std::optional<uint32_t> firstWordVisibleOffset() const {
     if (wordVisibleOffsets.empty()) return std::nullopt;

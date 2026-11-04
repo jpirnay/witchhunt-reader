@@ -674,6 +674,7 @@ void ParsedText::layoutAndExtractLines(
   // Whether the paragraph needs bidi and which way it runs, before anything reads its words or its alignment. A pass
   // without bidi drops its controls first, so the snapshot below is of the text that is laid out.
   decideBidi();
+  controlsOnlyTokens_ = 0;
   if (words.empty()) {
     // The block held nothing but bidi controls. Its paragraph ends here as at the end of any last pass below: the
     // parser may merge the next one into the block, which then decides its own direction.
@@ -2281,6 +2282,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
   lastLineVisibleOffset_ = lastBreakAt < wordVisibleOffsets.size() ? wordVisibleOffsets[lastBreakAt] : 0;
   const size_t lineWordCount = lineBreak - lastBreakAt;
+  lastLineTokenCount_ = static_cast<uint32_t>(lineWordCount) + controlsOnlyTokens_;
 
   // Apply indent only to line 0 of the layout pass; firstLineIndent is already
   // 0 for continuation flushes (computed once in layoutAndExtractLines).
@@ -2299,6 +2301,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
       const uint8_t maxPct = placeBidiLine(renderer, fontId, lastBreakAt, effectivePageWidth, lineIndent,
                                            lineBreak == words.size(), range);
       if (range.count == 0) {  // only controls: nothing to draw
+        controlsOnlyTokens_ += static_cast<uint32_t>(lineWordCount);
         stepOpenControls(lastBreakAt, lineBreak);
         return LineProcessResult::Accepted;
       }
@@ -2650,11 +2653,15 @@ ParsedText::LineProcessResult ParsedText::emitLine(
   auto block = makeUniqueNoThrow<TextBlock>(range, lineXPosScratch_, blockStyle, lineArena_);
   if (!block || !block->valid()) {
     LOG_ERR("PTX", "Dropping line: TextBlock arena allocation failed");
+    controlsOnlyTokens_ = 0;
     stepOpenControls(first, end);
     return LineProcessResult::Accepted;
   }
   const LineProcessResult result = processLine(std::move(block), lineEndsWithHyphenatedWord, suppressHyphenationRetry);
   // A line the parser asks to lay out again is the same text: the controls step when it is accepted.
-  if (result == LineProcessResult::Accepted) stepOpenControls(first, end);
+  if (result == LineProcessResult::Accepted) {
+    stepOpenControls(first, end);
+    controlsOnlyTokens_ = 0;
+  }
   return result;
 }

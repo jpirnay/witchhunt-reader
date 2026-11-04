@@ -1403,7 +1403,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
           [this](std::unique_ptr<TextBlock> textBlock, const bool lineEndsWithHyphenatedWord,
                  const bool suppressHyphenationRetry) {
             return addLineToPage(std::move(textBlock), lineEndsWithHyphenatedWord, suppressHyphenationRetry,
-                                 currentTextBlock->lastLineVisibleOffset());
+                                 currentTextBlock->lastLineVisibleOffset(), currentTextBlock->lastLineTokenCount());
           },
           false, static_cast<int16_t>(currentPageNextY), splitLineHeight);
       if (pendingBases <= currentTextBlock->size()) rubyGroupStart_ = currentTextBlock->size() - pendingBases;
@@ -4870,7 +4870,8 @@ int ChapterHtmlSlimParser::effectiveLineHeight(const BlockStyle& bs) const {
 ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_ptr<TextBlock> line,
                                                                    const bool lineEndsWithHyphenatedWord,
                                                                    const bool suppressHyphenationRetry,
-                                                                   const uint32_t lineVisibleOffset) {
+                                                                   const uint32_t lineVisibleOffset,
+                                                                   const uint32_t lineTokenCount) {
   // Spacing (insets, float zones) lives on the ParsedText that produced this line,
   // not on the line itself: a TextBlock only keeps the render slice, because by the
   // time a line is resident the spacing has already been baked into its xpos/y here.
@@ -4918,7 +4919,7 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
   const bool isFirstLineOfBlock = (wordsExtractedInBlock == 0);
 
   // Track cumulative words to assign footnotes to the page containing their anchor
-  wordsExtractedInBlock += line->wordCount();
+  wordsExtractedInBlock += lineTokenCount;
   auto footnoteIt = pendingFootnotes.begin();
   while (footnoteIt != pendingFootnotes.end() && footnoteIt->first <= wordsExtractedInBlock) {
     if (!currentPage->addFootnote(footnoteIt->second.number, footnoteIt->second.href)) {
@@ -5142,7 +5143,7 @@ void ChapterHtmlSlimParser::makePages() {
       [this](std::unique_ptr<TextBlock> textBlock, const bool lineEndsWithHyphenatedWord,
              const bool suppressHyphenationRetry) {
         return addLineToPage(std::move(textBlock), lineEndsWithHyphenatedWord, suppressHyphenationRetry,
-                             currentTextBlock->lastLineVisibleOffset());
+                             currentTextBlock->lastLineVisibleOffset(), currentTextBlock->lastLineTokenCount());
       },
       /*includeLastLine=*/true, static_cast<int16_t>(currentPageNextY), lineHeightForFloat);
 
@@ -5869,7 +5870,8 @@ bool ChapterHtmlSlimParser::emitCellAsParagraph(BufferedTableCell& cell, const b
     text->layoutAndExtractLines(
         renderer, fontId, viewportWidth,
         [this, &text](std::unique_ptr<TextBlock> tb, bool lineEndsWithHyphen, bool suppressRetry) {
-          return addLineToPage(std::move(tb), lineEndsWithHyphen, suppressRetry, text->lastLineVisibleOffset());
+          return addLineToPage(std::move(tb), lineEndsWithHyphen, suppressRetry, text->lastLineVisibleOffset(),
+                               text->lastLineTokenCount());
         });
   }
   text.reset();  // free the words before the image decode below needs contiguous heap
