@@ -32,6 +32,7 @@ CONFIGS = {
     "prod": bytes([0x3B, 0x0D, 0x0F, 0xD7, 0x09]),  # Murphy production
     "recipe": bytes([0x3B, 0x0D, 0x03, 0xDF, 0x09]),  # the bench recipe
     "oem-alt": bytes([0x3F, 0x03, 0x00, 0xD7, 0x09]),  # OEM alternate init: symmetric rails
+    "vsl15": bytes([0x3F, 0x0D, 0x0F, 0xD7, 0x09]),  # production with VSL at -15 V, as VSH is
 }
 
 
@@ -144,6 +145,29 @@ FAST_BANK = [
     _recipe_lut((1, 0x4F, 0x01, 0, 0, 1, 1)),
     _recipe_lut((1, 0x0F, 0x41, 0, 0, 1, 1)),
 ]
+
+
+def fast_variant(white_frames=15, white_touch=0):
+    """FAST with more drive to white. `white_frames` replaces KW's 15, and `white_touch` adds that
+    many frames of VSL to WW, the way KK already gets one frame of VSH."""
+    kw = lut((VSL, white_frames), (REST, 1))
+    wk = lut((VSH, 15), (REST, 1))
+    kk = lut((REST, 15), (VSH, 1))
+    ww = lut((REST, 15), (VSL, white_touch)) if white_touch else lut((REST, 16))
+    return make_bank(ww, kw, wk, kk)
+
+
+# name: (config, FAST bank)
+FAST_VARIANTS = {
+    "prod": ("prod", FAST_BANK),
+    "kw18": ("prod", fast_variant(18)),
+    "kw20": ("prod", fast_variant(20)),
+    "kw24": ("prod", fast_variant(24)),
+    "vsl15": ("vsl15", FAST_BANK),
+    "vsl15-kw20": ("vsl15", fast_variant(20)),
+    "touch1": ("prod", fast_variant(white_touch=1)),
+    "touch2": ("prod", fast_variant(white_touch=2)),
+}
 
 
 class Frame:
@@ -539,11 +563,51 @@ def page_levels(font_path, size, page):
     return text_levels(font_path, size, text=text)
 
 
-def test4_pages(lab, font_path, size, pages, mode, light=2, dark=3):
+def test6_patch(lab, variant, cycles):
+    """A patch goes white, black, white through FAST, beside a strip that never changes.
+
+    The difference between them is the ghost a B/W screen leaves. `cycles` repeats it, as screens do.
+    """
+    cfg, bank = FAST_VARIANTS[variant]
+    lab.arm()
+    lab.clean("white")
+    lab.clean("white")
+    white = bytearray(WIDTH * HEIGHT)
+    patch = bytearray(WIDTH * HEIGHT)
+    for y in range(HEIGHT):
+        patch[y * WIDTH : y * WIDTH + PATCH_WIDTH] = bytes([3]) * PATCH_WIDTH
+    for cycle in range(cycles):
+        lab.push(cfg, bank, fast_frame(white, patch, False), f"{variant}: to black {cycle + 1}", journal=False)
+        lab.push(cfg, bank, fast_frame(patch, white, False), f"{variant}: to white {cycle + 1}", journal=False)
+    photo(f"t6-{variant}-c{cycles}", "the whole panel should be one even white")
+
+
+def test6_settled(lab, variant, dwell):
+    """The same, but for black the way UI black really is: drawn by a full refresh, then left a while.
+
+    Test 2 showed black that was driven hard lifts less, so a brief FAST black can flatter a variant.
+    """
+    cfg, bank = FAST_VARIANTS[variant]
+    lab.arm()
+    lab.clean("white")
+    lab.clean("white")
+    white = bytearray(WIDTH * HEIGHT)
+    patch = bytearray(WIDTH * HEIGHT)
+    for y in range(HEIGHT):
+        patch[y * WIDTH : y * WIDTH + PATCH_WIDTH] = bytes([3]) * PATCH_WIDTH
+    lab.push("prod", PRODUCTION_BANK, base_frame([level >= 2 for level in patch]), "full refresh black", journal=False)
+    if dwell:
+        time.sleep(dwell)
+    lab.push(cfg, bank, fast_frame(patch, white, False), f"{variant}: to white", journal=False)
+    photo(f"t6-settled-{variant}", "the whole panel should be one even white")
+
+
+def test4_pages(lab, font_path, size, pages, mode, light=2, dark=3, variant="prod"):
     """Turn pages through FAST as the reader would, then a blank page, and leave any ghost showing.
 
     bw is 1-bit as today, plain adds gray with an unchanged FAST, aware marks gray as changed.
     """
+    fast_cfg, fast_bank = FAST_VARIANTS[variant]
     lab.arm()
     lab.clean("white")
     blank = bytearray(WIDTH * HEIGHT)
@@ -552,7 +616,7 @@ def test4_pages(lab, font_path, size, pages, mode, light=2, dark=3):
         target = blank if page is None else page_levels(font_path, size, page)
         if mode == "bw":
             target = bytearray(3 if level >= 2 else 0 for level in target)
-        lab.push("prod", FAST_BANK, fast_frame(shown, target, mode == "aware"), f"page {page}", journal=False)
+        lab.push(fast_cfg, fast_bank, fast_frame(shown, target, mode == "aware"), f"page {page}", journal=False)
         if mode != "bw" and page is not None:
             frame = Frame(WW)
             for index, level in enumerate(target):
@@ -738,6 +802,12 @@ def main():
     t4p.add_argument("--font", required=True)
     t4p.add_argument("--size", type=int, default=16)
     t4p.add_argument("--pages", type=int, default=5)
+    t4p.add_argument("--variant", choices=sorted(FAST_VARIANTS), default="prod")
+    t6 = steps.add_parser("t6", help="Test 6: a patch through FAST beside a clean strip")
+    t6.add_argument("variant", choices=sorted(FAST_VARIANTS))
+    t6.add_argument("--cycles", type=int, default=1)
+    t6.add_argument("--settled", action="store_true", help="black from a full refresh, not from FAST")
+    t6.add_argument("--dwell", type=int, default=0, help="seconds the settled black stays up")
     for name, help_text in (("fine", "Test 3: pixel-scale patterns"), ("text", "Test 3: a text page")):
         page = steps.add_parser(name, help=help_text)
         page.add_argument("--light", type=int, required=True, help="frames that land light gray")
@@ -789,7 +859,12 @@ def main():
             lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
             test4_patches(lab, args.aware, hold=args.hold)
         elif args.step == "t4-pages":
-            test4_pages(lab, args.font, args.size, args.pages, args.mode)
+            test4_pages(lab, args.font, args.size, args.pages, args.mode, variant=args.variant)
+        elif args.step == "t6":
+            if args.settled:
+                test6_settled(lab, args.variant, args.dwell)
+            else:
+                test6_patch(lab, args.variant, args.cycles)
         elif args.step in ("fine", "text"):
             lab.arm()
             if args.step == "fine":

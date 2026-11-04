@@ -236,10 +236,15 @@ def main():
     shoot = steps.add_parser("shot", help="capture and save a shot")
     shoot.add_argument("name")
     steps.add_parser("calibrate", help="find the panel, from shots baseline-white and marks")
+    still = steps.add_parser("still", help="has the scene moved since a shot? Exits 1 if it has")
+    still.add_argument("reference")
+    still.add_argument("name")
     fine = steps.add_parser("fine", help="mean level of each pattern in a `lab.py fine` shot")
     fine.add_argument("name")
     patches = steps.add_parser("patches", help="each `lab.py t4` patch against its clean strip")
     patches.add_argument("name")
+    strip = steps.add_parser("strip", help="the patch against the strip beside it, in a `lab.py t6` shot")
+    strip.add_argument("name")
     ghost = steps.add_parser("ghost", help="how far a blank-page shot is from even")
     ghost.add_argument("name")
     ghost.add_argument("--against", default="baseline-white", help="the clean shot to compare with")
@@ -284,14 +289,36 @@ def main():
             patch = level(image, white, black, inset((0, row * 104, 200, 104), 14))
             strip = level(image, white, black, inset((200, row * 104, 40, 104), 12))
             print(f"{name:15} patch {patch:6.1f}  clean strip {strip:6.1f}  ghost {patch - strip:+6.1f}")
+    elif args.step == "still":
+        # Everything outside the panel should be identical. A bump shows up along every edge in the
+        # frame, and it silently turns each later number into a reading of the wrong region.
+        one = Image.open(SHOTS / f"{args.reference}.png").convert("L")
+        two = Image.open(SHOTS / f"{args.name}.png").convert("L")
+        frame = [(0, 0, CAM_W, 90), (0, 90, 560, CAM_H), (1360, 90, CAM_W, CAM_H), (560, 950, 1360, CAM_H)]
+        moved = max(ImageStat.Stat(ImageChops.difference(one.crop(b), two.crop(b))).mean[0] for b in frame)
+        print(f"scene difference outside the panel: {moved:.2f} ({'moved' if moved > 1.5 else 'still'})")
+        return 1 if moved > 1.5 else 0
+    elif args.step == "strip":
+        camera = load_camera()
+        white, black = load_rectified("baseline-white", camera), load_rectified("baseline-black", camera)
+        image = load_rectified(args.name, camera)
+        rows = range(0, PANEL_H, 104)
+        patch = [level(image, white, black, inset((120, y, 72, 104), 12)) for y in rows]
+        beside = [level(image, white, black, inset((204, y, 32, 104), 8)) for y in rows]
+        gaps = [a - b for a, b in zip(patch, beside)]
+        print(f"{args.name}: patch {statistics.mean(patch):.1f}  strip {statistics.mean(beside):.1f}  "
+              f"ghost {statistics.mean(gaps):+.1f}  rows {[round(g, 1) for g in gaps]}")
     elif args.step == "ghost":
         # Text rows against the gaps between them: blur cannot hide a whole line of old text.
         camera = load_camera()
         image, clean = load_rectified(args.name, camera), load_rectified(args.against, camera)
         black = load_rectified("baseline-black", camera)
         rows = [level(image, clean, black, (20, y, 200, 2)) for y in range(16, 400, 2)]
-        print(f"{args.name}: mean {statistics.mean(rows):.1f}, row spread {max(rows) - min(rows):.1f}, "
-              f"stddev {statistics.pstdev(rows):.2f}")
+        # Lines of text are about 20 panel rows apart: take out anything slower, such as room light.
+        window = 24
+        fine = [v - statistics.mean(rows[max(0, i - window) : i + window + 1]) for i, v in enumerate(rows)]
+        print(f"{args.name}: mean {statistics.mean(rows):.1f}, line-scale stddev {statistics.pstdev(fine):.2f}, "
+              f"peak {max(map(abs, fine)):.1f}")
     elif args.step == "bands":
         camera = load_camera()
         white, black = load_rectified("baseline-white", camera), load_rectified("baseline-black", camera)
