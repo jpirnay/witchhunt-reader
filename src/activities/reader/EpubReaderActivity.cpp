@@ -664,10 +664,8 @@ void EpubReaderActivity::onEnter() {
       currentSpineIndex = record->spineIndex;
       // A Page target even when the paragraph is known: a Page target is shown the moment its
       // page is built (Background-C), and the paragraph only matters after a relayout.
-      navTarget = NavigationTarget::makePage(record->page);
-      navTarget.restoreParagraph = record->paragraph.value_or(0);
-      navTarget.cachedSpineIdx = currentSpineIndex;
-      navTarget.cachedPageCount = record->pageCount;
+      navTarget = NavigationTarget::makeSavedPage(currentSpineIndex, record->page, record->pageCount,
+                                                  record->paragraph.value_or(0));
       hadSavedProgress = true;
       LOG_DBG("ERS", "Loaded cache: %d, %d (paragraph %d)", currentSpineIndex, record->page,
               record->paragraph ? *record->paragraph : -1);
@@ -7186,10 +7184,10 @@ void EpubReaderActivity::restoreSavedPosition() {
     LOG_DBG("ERS", "Restoring position [%d]: spine %d, page %d, paragraph %d", footnoteDepth, pos.spineIndex,
             pos.pageNumber, pos.hasParagraph ? pos.paragraphIndex : -1);
     currentSpineIndex = pos.spineIndex;
-    navTarget = pos.hasParagraph ? NavigationTarget::makeParagraph(pos.paragraphIndex, pos.pageNumber)
-                                 : NavigationTarget::makePage(pos.pageNumber);
-    navTarget.cachedPageCount = pos.pageCount;
-    navTarget.cachedSpineIdx = pos.spineIndex;
+    // The saved page, not its paragraph: the chapter is normally still laid out as it was when the
+    // link was followed, and then the page is exact (makeSavedPage, issue #604).
+    navTarget = NavigationTarget::makeSavedPage(pos.spineIndex, pos.pageNumber, pos.pageCount,
+                                                pos.hasParagraph ? pos.paragraphIndex : 0);
     section.reset();
   }
   requestUpdate();

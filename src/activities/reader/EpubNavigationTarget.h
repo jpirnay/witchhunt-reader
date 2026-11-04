@@ -39,7 +39,8 @@ struct EpubNavigationTarget {
   // when the lookup misses. Only meaningful for Kind::Paragraph / Kind::ListItem /
   // Kind::VisibleOffset / Kind::Anchor — for Kind::Page the `page` field is the baseline.
   int fallbackPage = 0;
-  // Kind::Page restored from progress.bin: the paragraph LUT index of the saved page (0 = none).
+  // Kind::Page restored from a saved position (makeSavedPage): the paragraph LUT index of the saved
+  // page (0 = none).
   // Used only once the chapter turns out to have been laid out anew (its page count differs from
   // cachedPageCount), in place of rescaling the page number. Otherwise the saved page stands: it
   // is exact, while the paragraph resolves to the page where that paragraph STARTS, a page early
@@ -103,6 +104,24 @@ struct EpubNavigationTarget {
     t.kind = Kind::VisibleOffset;
     t.visibleOffset = offset;
     t.fallbackPage = fallback;
+    return t;
+  }
+  // A position the reader saved to come back to: progress.bin on a reopen, a link Back entry on
+  // Back. The page stands while the chapter still has `pageCount` pages; only a chapter laid out
+  // anew lands on `paragraph` (relaidOutRestorePage), or on the page rescaled by page count when
+  // there is none. `paragraph` 0 = none, `pageCount` 0 = unknown.
+  //
+  // One factory for both, because they had drifted apart: the Back stack went straight to the
+  // paragraph, which maps to the first page that paragraph index covers -- the page where a long
+  // paragraph starts, or, where only some of a chapter's paragraphs are counted (body-child <p>s,
+  // see Section::getParagraphIndexForPage), the first of a run of pages that share one index. Back
+  // from a note landed pages before the one the reader had left (issue #604).
+  static EpubNavigationTarget makeSavedPage(const int spineIndex, const int page, const int pageCount,
+                                            const uint16_t paragraph) {
+    EpubNavigationTarget t = makePage(page);
+    t.restoreParagraph = paragraph;
+    t.cachedSpineIdx = spineIndex;
+    t.cachedPageCount = pageCount;
     return t;
   }
 
