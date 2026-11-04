@@ -332,13 +332,15 @@ def recipe_bands():
     return frame
 
 
-def test1(lab, source, repeats):
+def test1(lab, source, again=False):
+    """One run of the recipe. A phone needs the frame to stay up, so each run is its own step."""
     lab.arm()
-    lab.clean(source)
-    for run in range(1, repeats + 1):
-        lab.push("recipe", RECIPE_BANK, recipe_bands(), f"recipe bands from {source}, run {run}")
-        photo(f"t1-from-{source}-run{run}", "top to bottom: white, light, dark, black")
-    print("\nRun `undo` when this source is done.")
+    if not again:
+        lab.clean(source)
+    run = 2 if again else 1
+    lab.push("recipe", RECIPE_BANK, recipe_bands(), f"recipe bands from {source}, run {run}")
+    photo(f"t1-from-{source}-run{run}", "top to bottom: white, light, dark, black")
+    print("\nNext: `t1 %s --again`, or `undo` when this source is done." % source if not again else "\nNext: `undo`.")
 
 
 def test1_slots(lab):
@@ -563,7 +565,7 @@ def main():
     steps.add_parser("undo", help="cancel journalled drive, then clean white")
     t1 = steps.add_parser("t1", help="Test 1: the recipe from a known start")
     t1.add_argument("source", choices=("white", "black"))
-    t1.add_argument("--repeats", type=int, default=2)
+    t1.add_argument("--again", action="store_true", help="run on top of what is there, no clean first")
     steps.add_parser("t1-slots", help="Test 1: same bytes in LUT 22 and 23")
     t2 = steps.add_parser("t2", help="Test 2: frame-count wedge")
     t2.add_argument("source", choices=("white", "black"))
@@ -602,7 +604,7 @@ def main():
             lab.arm()
             lab.undo()
         elif args.step == "t1":
-            test1(lab, args.source, args.repeats)
+            test1(lab, args.source, args.again)
         elif args.step == "t1-slots":
             test1_slots(lab)
         elif args.step == "t2":

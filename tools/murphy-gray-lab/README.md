@@ -79,12 +79,26 @@ Reads the revision and dumps the OTP to `~/.local/state/murphy-gray-lab/`. `CHIP
 rails and waveforms for 17 temperature ranges. An SDK comment says UC8253 has no 0xA2 read while the
 UC8253c datasheet lists one, so an empty dump is a possible answer, and the tests go on without it.
 
+Result on our unit, 2026-11-04: the read works, in all three modes and with the rails on or off, and
+`CHIP_REV` is 0x09. The OTP is blank apart from the chip ID at 0x14 and 0x1014 and UltraChip's trim at
+0x1FF0, with no 0xA5 check code in either bank. So this module has no stored waveforms and no factory
+VCOM, and the vendor's OTP-mode sample could not run on it. Every waveform on this panel comes from
+the host.
+
+**Baseline.** Before the first experimental waveform, photograph a clean `white` and a clean `black`.
+They are what "white got darker" is measured against.
+
 **Test 1: does a level depend on what was on the panel?** About 16 refreshes, 5 photos.
 
 ```sh
-./lab.py t1 black && ./lab.py undo
-./lab.py t1 white && ./lab.py undo
-./lab.py t1-slots && ./lab.py undo
+./lab.py t1 black            # photo
+./lab.py t1 black --again    # photo
+./lab.py undo
+./lab.py t1 white            # photo
+./lab.py t1 white --again    # photo
+./lab.py undo
+./lab.py t1-slots            # photo
+./lab.py undo
 ```
 
 Prediction: four bands from black, while the light band vanishes from white. If both starts match,

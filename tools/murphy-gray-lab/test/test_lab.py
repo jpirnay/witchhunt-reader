@@ -175,7 +175,8 @@ class Steps(Bench):
         self.assertEqual([row[0] for row in self.bus()].count("12"), 4)
 
     def test_recipe_is_journalled_and_undo_mirrors_it(self):
-        lab.test1(self.lab, "black", 2)
+        lab.test1(self.lab, "black")
+        lab.test1(self.lab, "black", again=True)
         self.assertEqual(len(self.lab.journal()), 2)
         self.lab.undo()
         self.assertEqual(self.lab.journal(), [])
@@ -200,7 +201,7 @@ class Steps(Bench):
         self.assertEqual(set(levels), {0, 1, 2, 3})
 
     def test_no_step_can_reach_the_otp_write_commands(self):
-        lab.test1(self.lab, "white", 1)
+        lab.test1(self.lab, "white")
         lab.test2_wedge(self.lab, "black", "oem-alt")
         lab.read_info(self.lab)
         commands = {row[0] for row in self.bus()}
@@ -233,7 +234,8 @@ class Links(unittest.TestCase):
     def test_dry_run_gets_through_every_step_without_a_journal(self):
         dry = lab.Lab(lab.DryLink(), self.tmp.name, dry_run=True)
         levels = bytearray([0, 1, 2, 3]) * (lab.WIDTH * lab.HEIGHT // 4)
-        lab.test1(dry, "white", 2)
+        lab.test1(dry, "white")
+        lab.test1(dry, "white", again=True)
         lab.test1_slots(dry)
         lab.test2_wedge(dry, "black", "oem-alt")
         lab.show_overlay(dry, levels, 2, 3, "prod", "page")
