@@ -123,7 +123,8 @@ class ChapterHtmlSlimParser final : public Print {
   }
   // Where the last word went (flushPartWordBuffer), while nothing but tags and controls has come since: no whitespace,
   // no text, no new block. A bidi closer arriving then ends that word (closeBidiEdges), as it does when no nested end
-  // tag sent the word out first.
+  // tag sent the word out first. It may outlive its target (a drained cell): it is only compared with the live
+  // wordTarget() and read when they are equal, and every flush into a target and every new block resets it.
   ParsedText* flushedWordTarget_ = nullptr;
   // Appends `byte`, text of the word in partWordBuffer from `offset`: the word's first such byte sets its visible
   // offset.
