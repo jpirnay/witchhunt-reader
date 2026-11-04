@@ -138,8 +138,8 @@ class ArenaWorkspace {
   Scratch* scratch_ = nullptr;
 };
 
-// The build's one heap Scratch, for a pass the arena lends no room for. The line pass runs one line at a time on the
-// loop task, so every paragraph, cell and list item of a build shares it. Made on first use; null, logged, when there
+// The build's one heap Scratch, for a pass the arena lends no room for. The line pass runs one line at a time under
+// RenderLock, so every paragraph, cell and list item of a build shares it. Made on first use; null, logged, when there
 // is no room (the line is then laid out without bidi). Held until releaseBuildMemory().
 Scratch* heapScratch();
 

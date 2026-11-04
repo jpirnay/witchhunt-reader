@@ -313,7 +313,7 @@ with, with one module per script:
   - piece texts and display forms are views, so a bidi line allocates no per-line strings.
 - Stack: `do_bidi` takes about 1.3 KB (`types`, `levels` and `skip` 384 B, its `DirStatusStack` about 391 B,
   `openers[63]` 504 B), and `computeVisualWordOrder` 512 B more.
-  - Both run on the 8 KB Arduino loop task, under the parser's deepest frames.
+  - Both run on the 16 KB Arduino loop task, under the parser's deepest frames.
   - PR 2 records the loop task's stack high-water on a Hebrew book on both boards.
   - If it is thin, the first three arrays and the `DirStatusStack` move into the lent workspace.
 - Measured and reported on the X3 and the X4:

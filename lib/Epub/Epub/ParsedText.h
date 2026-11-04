@@ -369,7 +369,8 @@ class ParsedText {
         hyphenationEnabled(hyphenationEnabled),
         bionicReadingEnabled(bionicReadingEnabled) {}
   ~ParsedText() = default;
-  // Movable, not copyable: it owns the line pass's scratch.
+  // Movable, not copyable: it owns its word vectors and buffers. The line pass's scratch is the build's
+  // (BidiLine::heapScratch), not its own.
   ParsedText(ParsedText&&) = default;
   ParsedText& operator=(ParsedText&&) = default;
 

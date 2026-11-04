@@ -1,6 +1,5 @@
 #include "Section.h"
 
-#include <BidiUtils.h>
 #include <FsHelpers.h>
 #include <HalStorage.h>
 #include <HeapFit.h>
