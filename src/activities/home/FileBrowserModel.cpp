@@ -345,10 +345,8 @@ int FileBrowserModel::countBooksBelow(const std::string& dirPath) {
       continue;
     }
     entry.getName(name, sizeof(name));
-    const bool isDir = entry.isDirectory();
-    entry.close();
     if (!isBookListableName(name)) continue;
-    if (!isDir) {
+    if (!entry.isDirectory()) {
       if (isReadableBook(std::string_view{name})) {
         ++level.books;
         ++counted;
@@ -365,10 +363,10 @@ int FileBrowserModel::countBooksBelow(const std::string& dirPath) {
       level.complete = false;  // deeper than we look: this total is a lower bound
       continue;
     }
-    auto sub = Storage.open(child.c_str());
-    if (!sub || !sub.isDirectory()) continue;
-    sub.rewindDirectory();
-    levels.push_back(Level{std::move(sub), std::move(child)});
+    // The entry already is this folder. Opening it by path would search its parent from the first
+    // entry, which in a folder of 1,800 subfolders costs 27 ms each.
+    entry.rewindDirectory();
+    levels.push_back(Level{std::move(entry), std::move(child)});
   }
 }
 
@@ -611,7 +609,6 @@ void FileBrowserModel::searchEverywhere(const std::string& query) {
     }
     entry.getName(name, sizeof(name));
     const bool isDir = entry.isDirectory();
-    entry.close();
     // "." and ".." always; anything else beginning with a dot only when the browser is
     // showing hidden files, so a search sees exactly what browsing would.
     if (name[0] == '.') {
@@ -623,13 +620,8 @@ void FileBrowserModel::searchEverywhere(const std::string& query) {
     child += name;
     if (isDir) {
       if (!acceptEntry(name, true) || static_cast<int>(levels.size()) > MAX_DEPTH) continue;
-      auto sub = Storage.open(child.c_str());
-      if (!sub || !sub.isDirectory()) {
-        if (sub) sub.close();
-        continue;
-      }
-      sub.rewindDirectory();
-      levels.push_back(Level{std::move(sub), std::move(child)});
+      entry.rewindDirectory();  // the entry is the folder: see countBooksBelow()
+      levels.push_back(Level{std::move(entry), std::move(child)});
       continue;
     }
     if (!acceptEntry(name, false)) continue;

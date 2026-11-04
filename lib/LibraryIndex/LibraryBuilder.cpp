@@ -171,10 +171,10 @@ void LibraryBuilder::walkStep() {
       newestFolderDate_ = std::max(newestFolderDate_, packDate(entry));
       if (levels_.size() > MAX_DEPTH) continue;
       std::string child = childPath(level.path, name_);
-      HalFile sub = Storage.open(child.c_str());
-      if (!sub || !sub.isDirectory()) continue;
-      sub.rewindDirectory();
-      levels_.push_back(Level{std::move(sub), std::move(child)});  // reserved: `level` stays valid
+      // The entry already is this folder. Opening it by path would search its parent from the first
+      // entry, which in a folder of 1,800 subfolders costs 27 ms each.
+      entry.rewindDirectory();
+      levels_.push_back(Level{std::move(entry), std::move(child)});  // reserved: `level` stays valid
       continue;
     }
     if (config_.isBook == nullptr || !config_.isBook(name_)) continue;

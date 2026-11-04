@@ -1,6 +1,7 @@
 // Whether a folder holds a book anywhere below it: the Library's Books tab leaves out the folders
 // that do not. Runs over a real directory tree through the stdio storage shim.
 #include <FolderSearch.h>
+#include <HalStorage.h>
 #include <gtest/gtest.h>
 
 #include <cstring>
@@ -148,6 +149,19 @@ TEST_F(FolderSearchTest, GivingUpKeepsTheFolder) {
   memo.stop = true;
   EXPECT_TRUE(FolderSearch::anyBelow(at("Empty"), rules(&memo)));
   EXPECT_TRUE(memo.foundNone.empty());
+}
+
+// A subfolder opened by path is searched for in its parent from the first entry: 27 ms apiece, 40 s
+// in a folder of 1,800. The entry the listing hands out already is that folder.
+TEST_F(FolderSearchTest, OnlyTheFolderAskedAboutIsOpenedByPath) {
+  file("A/notes.txt");
+  file("A/B/notes.txt");
+  file("C/notes.txt");
+  HalFile::folderOpens = 0;
+
+  EXPECT_FALSE(FolderSearch::anyBelow(root_, rules()));
+
+  EXPECT_EQ(HalFile::folderOpens, 1u);
 }
 
 TEST_F(FolderSearchTest, AFolderThatIsNotThereHasNone) { EXPECT_FALSE(FolderSearch::anyBelow(at("Missing"), rules())); }
