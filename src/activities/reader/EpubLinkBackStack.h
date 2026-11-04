@@ -12,9 +12,10 @@
 // showing, which for a followed link is the destination, and without the stack Back on it closed
 // the book. An entry keeps the whole position the reader recorded -- paragraph anchor and page
 // count as well as the page -- and is restored by the same path as one that never left memory
-// (EpubReaderActivity::restoreSavedPosition): through the paragraph, else the page rescaled by the
-// page count. So a stack saved under one layout still finds its place after a font or settings
-// change, or under a firmware whose section layout version moved.
+// (EpubReaderActivity::restoreSavedPosition, EpubNavigationTarget::makeSavedPage): on its page while
+// the chapter keeps its page count, else through the paragraph, else the page rescaled by the page
+// count. So a stack saved under one layout still finds its place after a font or settings change,
+// or under a firmware whose section layout version moved.
 //
 // Ported from crosspoint-reader PR #3764 ("fix: reopen on the viewed page after following a link",
 // suhsoohong / @suhsoohong): theirs is the idea of persisting the stack and the rule that a full
