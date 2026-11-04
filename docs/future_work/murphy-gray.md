@@ -1,10 +1,10 @@
 # Murphy M3: gray
 
-Four-level gray runs in `env:murphy_gray`, off everywhere else. How it was found and the measurements
-are in [tools/murphy-gray-lab/README.md](../../tools/murphy-gray-lab/README.md). All of it comes from
-one panel, at room temperature.
+Murphy builds have four-level gray, through `-DFREEINK_MURPHY_GRAY` in `[murphy_board]`. How it was found
+and the measurements are in [tools/murphy-gray-lab/README.md](../../tools/murphy-gray-lab/README.md). All
+of it comes from one panel, at room temperature.
 
-## Before it can be the default
+## Still open
 
 **Long-term DC.** A fringe pixel does the ordinary cycle, white to black, a net-zero nudge, black to
 white. Gray that stays black takes 15 frames toward black that nothing pays back, through the marks

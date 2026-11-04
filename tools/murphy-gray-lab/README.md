@@ -198,7 +198,7 @@ new baselines, marks and `calibrate`.
 Held for 10 minutes, gray moved at most 1.4 points against the clean strip beside it. Absolute levels
 sagged by up to 5, and the clean white strip sagged with them.
 
-**Test 5: the reader, in `env:murphy_gray`** (branch `feat/murphy-gray`, SDK `feat/murphy-gray`).
+**Test 5: the reader**, with `-DFREEINK_MURPHY_GRAY`.
 
 The lab differs from the reader in one way that matters. `overlay` here keeps light pixels white and
 nudges them down. GfxRenderer's B/W pass draws every antialiased pixel black, so the reader lifts both
