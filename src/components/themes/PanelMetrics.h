@@ -10,7 +10,11 @@
 // exactly the numbers in their tables.
 namespace PanelMetrics {
 
-#if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
+// cppcheck reads one board's build, and would call every branch on this value dead on the others.
+// Left unknown to it, both sides of those branches get checked.
+#if defined(CPPCHECK_ANALYSIS)
+extern const bool COMPACT;
+#elif defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
 inline constexpr bool COMPACT = true;
 #else
 inline constexpr bool COMPACT = false;
