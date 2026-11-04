@@ -136,8 +136,8 @@ PRODUCTION_BANK = [
 ]
 
 
-# Murphy production FAST: what the reader turns pages with. Unchanged pixels rest, changed pixels get
-# 15 frames. It is what a gray page has to survive.
+# FAST as the manufacturer gave it, 15 frames each way. Unchanged pixels rest. The driver now gives
+# black to white 20 frames, the `kw20` variant, and this stays as the reference to measure against.
 FAST_BANK = [
     _recipe_lut((1, 0x0F, 0x01, 0, 0, 1, 1)),
     _recipe_lut((1, 0x0F, 0x01, 0, 0, 1, 1)),
