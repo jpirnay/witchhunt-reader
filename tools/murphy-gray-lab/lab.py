@@ -163,11 +163,25 @@ FAST_VARIANTS = {
     "kw18": ("prod", fast_variant(18)),
     "kw20": ("prod", fast_variant(20)),
     "kw24": ("prod", fast_variant(24)),
+    "kw25": ("prod", fast_variant(25)),
     "vsl15": ("vsl15", FAST_BANK),
     "vsl15-kw20": ("vsl15", fast_variant(20)),
     "touch1": ("prod", fast_variant(white_touch=1)),
     "touch2": ("prod", fast_variant(white_touch=2)),
 }
+
+
+def half_variant(extra_white):
+    """HALF with more drive to white. In a full refresh only WW and KK fire, and WW idles for its last
+    16 frames while KK finishes, so frames can move there without making the refresh any longer."""
+    if not extra_white:
+        return PRODUCTION_BANK
+    bank = list(PRODUCTION_BANK)
+    bank[WW] = lut((VSH, 15), (VSL, 15), (VSL, extra_white), (REST, 16 - extra_white))
+    return bank
+
+
+HALF_VARIANTS = {"h0": half_variant(0), "h5": half_variant(5), "h10": half_variant(10), "h15": half_variant(15)}
 
 
 class Frame:
@@ -602,6 +616,75 @@ def test6_settled(lab, variant, dwell):
     photo(f"t6-settled-{variant}", "the whole panel should be one even white")
 
 
+def test7_clean(lab, variant, toggles, cleaner="half"):
+    """How well one refresh cleans a patch with a history, beside a strip without one.
+
+    Every full refresh here uses the bank under test, as a device would. `cleaner` makes the last
+    refresh a HALF or a FAST, so the two compare like for like from the same history.
+    """
+    bank = HALF_VARIANTS[variant]
+    fast_cfg, fast = FAST_VARIANTS["kw20"]
+    white = bytearray(WIDTH * HEIGHT)
+    patch = bytearray(WIDTH * HEIGHT)
+    for y in range(HEIGHT):
+        patch[y * WIDTH : y * WIDTH + PATCH_WIDTH] = bytes([3]) * PATCH_WIDTH
+
+    def full(levels, label):
+        lab.push("prod", bank, base_frame([level >= 2 for level in levels]), label, journal=False)
+
+    lab.arm()
+    full(white, "white")
+    full(white, "white")
+    full(patch, "patch black")
+    shown = patch
+    for toggle in range(toggles):
+        target = white if shown is patch else patch
+        lab.push(fast_cfg, fast, fast_frame(shown, target, False), f"toggle {toggle + 1}", journal=False)
+        shown = target
+    if shown is not patch:  # always leave from black
+        lab.push(fast_cfg, fast, fast_frame(shown, patch, False), "back to black", journal=False)
+    if cleaner == "half":
+        full(white, f"{variant}: clean")
+    else:
+        lab.push(fast_cfg, fast, fast_frame(patch, white, False), "FAST: clean", journal=False)
+    photo(f"t7-{variant}-{cleaner}-t{toggles}", "the whole panel should be one even white")
+
+
+def test8_pair(lab, half, fast, name):
+    """A HALF and a FAST as a pair, the way a screen uses them.
+
+    A HALF that whitens the background moves the target FAST has to reach, so neither can be judged
+    alone: a better HALF can make every FAST after it worse. The background settles under the HALF,
+    then a patch leaves black through FAST, and again through HALF after a few toggles.
+    """
+    bank = HALF_VARIANTS[half]
+    cfg, fast_bank = FAST_VARIANTS[fast]
+    white = bytearray(WIDTH * HEIGHT)
+    patch = bytearray(WIDTH * HEIGHT)
+    for y in range(HEIGHT):
+        patch[y * WIDTH : y * WIDTH + PATCH_WIDTH] = bytes([3]) * PATCH_WIDTH
+
+    def full(levels, label):
+        lab.push("prod", bank, base_frame([level >= 2 for level in levels]), label, journal=False)
+
+    def turn(old, new, label):
+        lab.push(cfg, fast_bank, fast_frame(old, new, False), label, journal=False)
+
+    lab.arm()
+    for _ in range(3):
+        full(white, "settle the background")
+    full(patch, "patch black")
+    turn(patch, white, "FAST to white")
+    if lab.camera:
+        lab.camera(f"{name}-fast")
+    turn(white, patch, "toggle")
+    turn(patch, white, "toggle")
+    turn(white, patch, "toggle")
+    full(white, "HALF to white")
+    if lab.camera:
+        lab.camera(f"{name}-half")
+
+
 def test4_pages(lab, font_path, size, pages, mode, light=2, dark=3, variant="prod"):
     """Turn pages through FAST as the reader would, then a blank page, and leave any ghost showing.
 
@@ -794,6 +877,14 @@ def main():
     t5 = steps.add_parser("t5", help="Test 5: the reader's nudge, with or without a reset before it")
     t5.add_argument("handover", choices=("cold", "warm"))
     t5.add_argument("--swap-planes", action="store_true", help="exchange DTM1 and DTM2")
+    t7 = steps.add_parser("t7", help="Test 7: how well a refresh cleans a patch with a history")
+    t7.add_argument("variant", choices=sorted(HALF_VARIANTS))
+    t7.add_argument("--toggles", type=int, default=0, help="FAST flips of the patch before cleaning")
+    t7.add_argument("--cleaner", choices=("half", "fast"), default="half")
+    t8 = steps.add_parser("t8", help="Test 8: a HALF and a FAST together, in one still scene")
+    t8.add_argument("half", choices=sorted(HALF_VARIANTS))
+    t8.add_argument("fast", choices=sorted(FAST_VARIANTS))
+    t8.add_argument("name")
     t4 = steps.add_parser("t4", help="Test 4: gray patches through a FAST page turn")
     t4.add_argument("--aware", action="store_true", help="mark gray pixels as changed")
     t4.add_argument("--hold", action="store_true", help="stop while the patches are gray")
@@ -860,6 +951,13 @@ def main():
             test4_patches(lab, args.aware, hold=args.hold)
         elif args.step == "t4-pages":
             test4_pages(lab, args.font, args.size, args.pages, args.mode, variant=args.variant)
+        elif args.step == "t8":
+            import cam
+
+            lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
+            test8_pair(lab, args.half, args.fast, args.name)
+        elif args.step == "t7":
+            test7_clean(lab, args.variant, args.toggles, args.cleaner)
         elif args.step == "t6":
             if args.settled:
                 test6_settled(lab, args.variant, args.dwell)

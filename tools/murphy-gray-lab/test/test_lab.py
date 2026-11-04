@@ -395,10 +395,37 @@ class Handover(Bench):
         self.assertTrue(all(lab.net_drive(table) == 0 for table in lab.READER_GRAY_BANK))
 
 
+class HalfVariants(unittest.TestCase):
+    def test_extra_white_fits_the_idle_frames_so_the_refresh_is_no_longer(self):
+        for name, bank in lab.HALF_VARIANTS.items():
+            with self.subTest(name):
+                self.assertEqual(lab.total_frames(bank[lab.WW]), lab.total_frames(lab.PRODUCTION_BANK[lab.WW]))
+                self.assertEqual(bank[lab.KK], lab.PRODUCTION_BANK[lab.KK])
+
+    def test_white_gets_the_extra_frames_toward_white(self):
+        self.assertEqual(lab.net_drive(lab.HALF_VARIANTS["h0"][lab.WW]), 0)
+        self.assertEqual(lab.net_drive(lab.HALF_VARIANTS["h10"][lab.WW]), -10)
+
+
 class FastPatch(Bench):
     def test_every_variant_runs_through_the_firmware_rules(self):
         for name in lab.FAST_VARIANTS:
             lab.test6_patch(self.lab, name, 1)
+        self.assertEqual(self.lab.journal(), [])
+
+    def test_every_half_variant_runs_through_the_firmware_rules(self):
+        for name in lab.HALF_VARIANTS:
+            lab.test7_clean(self.lab, name, 4)
+            lab.test7_clean(self.lab, name, 0, "fast")
+        self.assertEqual(self.lab.journal(), [])
+
+
+class Pairs(Bench):
+    def test_a_pair_runs_inside_the_firmware_rules_and_takes_two_shots(self):
+        shots = []
+        self.lab.camera = shots.append
+        lab.test8_pair(self.lab, "h5", "kw20", "pair")
+        self.assertEqual(shots, ["pair-fast", "pair-half"])
         self.assertEqual(self.lab.journal(), [])
 
 

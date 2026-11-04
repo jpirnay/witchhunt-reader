@@ -1,6 +1,6 @@
 # Murphy M3: fixed sizes that assume a bigger panel
 
-Audit of `feat/murphy-support`, 2026-11-03. The M3 is a 416x240 1-bit panel; the UI runs Portrait, so the
+Audit of `feat/murphy-support`, 2026-11-03. The M3 is a 416x240 panel, 1-bit at the time and four-level gray since ([murphy-gray.md](murphy-gray.md)); the UI runs Portrait, so the
 logical screen is 240x416. Abbreviations: **P** = Portrait 240x416, **L** = Landscape 416x240. Paths are
 relative to the repo root.
 
@@ -186,9 +186,9 @@ Default menu on Murphy is 5 rows (Library, Stats, File Transfer, Weather, Settin
 | S2 | `CoverGridLayout.h:25,35-36,41`, `.cpp:17-44` | cell max 242, min 96, margin 10 | Library covers view: usable 213 px at width 202 gives 1 column, 1 row, cell 182x167: one book per page. Adapts safely, but cover view is close to useless. R1 + R3 give about 240x260, still 1-2 per page. | Accept, or default list view on Murphy |
 | S3 | `FinishedBookActivity.cpp:56-57,192` | `kThumbWidth/Height` = 196x240 | Shares no file with the grid thumb here (180x165, the code comment says it only matches on X3/X4), and draws at 72 px tall: extra thumb per book plus 1-bit resampling. | Local |
 | S3 | `SleepActivity.cpp:762-800` | custom sleep BMPs | Display-size covers are generated correctly. User BMPs made for 480x800 get scaled, i.e. a dithered 1-bit image resampled. | Accept |
-| S3 | `CrossPointSettings.h:440`, `EpubReaderActivity.cpp:5776`, `TxtReaderActivity.cpp:304` | `textAntiAliasing = 1`, no capability gate | Murphy driver overrides no gray methods, so `copyGrayscaleLsb/Msb` are empty (`PanelDriver.h:159-166`). The reader still renders the AA planes, which wastes extra page renders per turn. | Central R9, or gate on capability |
-| S3 | `PanelDriver.h:221` | `grayLevels()` default 4 | A 1-bit panel reports 4 levels, so BMP viewer and sleep paths believe in grayscale. Should return 2 for Murphy, in the SDK. | SDK, local |
 | S3 | `GfxRenderer.cpp:2157` | `drawIcon` portrait-only transform | L: `physY = 416 - w - x` is past 240 for most x, icon silently dropped. All boards, no current L caller with row icons. | Leave |
+
+Two rows are gone since gray landed: the reader's AA planes now reach the panel, and `grayLevels()` of 4 is true. A build without `FREEINK_MURPHY_GRAY` hides the settings through `HalCapabilities::panelShowsGray()`.
 
 **Checked, fine (do not re-audit):**
 - Framebuffer and BW chunk sizes come from the profile (`MAX_FRAMEBUFFER_BYTES`, `GfxRenderer.cpp:117-118`). No static array sized by a panel constant in `src/` or `lib/`.
