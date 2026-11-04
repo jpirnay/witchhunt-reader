@@ -121,6 +121,10 @@ class ChapterHtmlSlimParser final : public Print {
   int partWordTextEnd() const {
     return partWordTextEnd_ < partWordBufferIndex ? partWordTextEnd_ : partWordBufferIndex;
   }
+  // Where the last word went (flushPartWordBuffer), while nothing but tags and controls has come since: no whitespace,
+  // no text, no new block. A bidi closer arriving then ends that word (closeBidiEdges), as it does when no nested end
+  // tag sent the word out first.
+  ParsedText* flushedWordTarget_ = nullptr;
   // Appends `byte`, text of the word in partWordBuffer from `offset`: the word's first such byte sets its visible
   // offset.
   void appendPartWordText(const char byte, const uint32_t offset) {

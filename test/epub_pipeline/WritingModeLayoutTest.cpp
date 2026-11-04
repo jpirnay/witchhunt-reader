@@ -1246,6 +1246,58 @@ TEST_F(BidiLayout, AnElementNestedPastTheStackInsertsNothing) {
   EXPECT_EQ(8u, occurrences(all, kPdi));
 }
 
+// Each line's word positions, for layouts whose words may carry other styles or controls.
+std::vector<std::vector<int>> positions(const std::vector<Line>& lines) {
+  std::vector<std::vector<int>> out;
+  for (const Line& line : lines) {
+    out.emplace_back();
+    for (const Word& word : line.words) out.back().push_back(word.x);
+  }
+  return out;
+}
+
+TEST_F(BidiLayout, ACloserEndsTheWordANestedEndTagSentOut) {
+  // A nested element's end tag sends the isolate's last word out before the isolate's own end tag comes. Its closer
+  // still ends that word, with a mark held after it: the space after the element stays outside the isolate. Each lays
+  // out as its twin, whose closer is in the word when it goes out.
+  const pipeline_harness::Profile profile = bookAlignment();
+  const std::pair<const char*, const char*> cases[] = {
+      {"<p dir=\"ltr\"><bdi><b>שלום</b></bdi> 3 posts</p>", "<p dir=\"ltr\"><b><bdi>שלום</bdi></b> 3 posts</p>"},
+      {"<p dir=\"ltr\">by <bdi><i>שלום</i></bdi> 3 posts</p>", "<p dir=\"ltr\">by <i><bdi>שלום</bdi></i> 3 posts</p>"},
+      {"<p dir=\"rtl\">שלום <span dir=\"ltr\"><b>abc</b></span> 123</p>",
+       "<p dir=\"rtl\">שלום <b><span dir=\"ltr\">abc</span></b> 123</p>"},
+      {"<p dir=\"rtl\">שלום <span dir=\"ltr\"><b>abc</b>&#x200E;</span> 123</p>",
+       "<p dir=\"rtl\">שלום <b><span dir=\"ltr\">abc&#x200E;</span></b> 123</p>"},
+      {"<p dir=\"rtl\">שלום <span dir=\"ltr\">abc <a href=\"#n\">x</a></span> 123</p><p id=\"n\">n</p>",
+       "<p dir=\"rtl\">שלום <span dir=\"ltr\">abc x</span> 123</p><p id=\"n\">n</p>"},
+  };
+  for (const auto& [marked, twin] : cases) {
+    const std::string out = dump("", document(marked), profile);
+    EXPECT_EQ(positions(parseLines(dump("", document(twin), profile))), positions(parseLines(out))) << out;
+  }
+}
+
+TEST_F(BidiLayout, ASpaceBeforeTheEndTagStaysInTheIsolate) {
+  // The space is the span's: its PDI follows it, opening 123, as the source has it.
+  const auto lines =
+      parseLines(dump("", document("<p dir=\"rtl\">שלום <span dir=\"ltr\">abc </span>123</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(3u, lines[0].words.size());
+  EXPECT_EQ(kPdi + "123", lines[0].words[0].text);
+  EXPECT_EQ(kLri + "abc", lines[0].words[1].text);
+}
+
+TEST_F(BidiLayout, ARubysCloserEndsItsBase) {
+  // The base goes out at <rt>; the ruby's PDI still ends it, and 123 after the space stays outside the isolate.
+  const auto lines = parseLines(
+      dump("", document("<p dir=\"rtl\">שלום <ruby dir=\"ltr\">abc<rt>x</rt></ruby> 123</p>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  std::string texts;
+  for (const Word& word : lines[0].words) texts += "[" + word.text + "]";
+  EXPECT_NE(std::string::npos, texts.find("[" + kLri + "abc" + kPdi + "]")) << texts;
+  EXPECT_NE(std::string::npos, texts.find("[123]")) << texts;
+}
+
 // ---- The spine's page progression ----
 
 TEST_F(WritingModeLayout, ThePageProgressionSurvivesBookBin) {

@@ -1066,6 +1066,12 @@ bool ParsedText::addRubyGroup(const size_t firstToken, const size_t tokenCount, 
   return true;
 }
 
+bool ParsedText::appendControlToLastToken(const std::string_view control) {
+  if (words.empty() || words.back() == " ") return false;
+  words.back().append(control.data(), control.size());
+  return true;
+}
+
 bool ParsedText::appendRubyText(const std::string_view text) {
   if (rubyTexts_.empty()) return false;
   // Capped like addRubyGroup's text: only what whole characters leave room for is appended.

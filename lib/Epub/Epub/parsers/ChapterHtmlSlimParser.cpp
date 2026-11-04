@@ -1414,6 +1414,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   }
   partWordBufferIndex = 0;
   nextWordContinues = false;
+  flushedWordTarget_ = wordTarget();
   return true;
 }
 
@@ -1431,6 +1432,13 @@ bool ChapterHtmlSlimParser::keepBidiControl(const char* bytes, const int length)
   return true;
 }
 
+// The 3 UTF-8 bytes of the bidi control `cp` (U+202A-202E or U+2066-2069) at `out`.
+static void encodeBidiControl(const uint32_t cp, char* const out) {
+  out[0] = static_cast<char>(0xE0 | (cp >> 12));
+  out[1] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+  out[2] = static_cast<char>(0x80 | (cp & 0x3F));
+}
+
 void ChapterHtmlSlimParser::appendBidiControl(const uint32_t cp) {
   if (partWordHasText() && partWordBufferIndex + 3 > MAX_WORD_SIZE) {
     // A full word goes out first, the next chunk glued to it, as at the overflow in consumeText.
@@ -1438,9 +1446,8 @@ void ChapterHtmlSlimParser::appendBidiControl(const uint32_t cp) {
     nextWordContinues = true;
   }
   if (partWordBufferIndex == 0) partWordControlsOnly_ = true;
-  partWordBuffer[partWordBufferIndex++] = static_cast<char>(0xE0 | (cp >> 12));
-  partWordBuffer[partWordBufferIndex++] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-  partWordBuffer[partWordBufferIndex++] = static_cast<char>(0x80 | (cp & 0x3F));
+  encodeBidiControl(cp, partWordBuffer + partWordBufferIndex);
+  partWordBufferIndex += 3;
 }
 
 void ChapterHtmlSlimParser::openBidiEdge(const CssStyle& style, const bool inlineElement) {
@@ -1497,11 +1504,31 @@ void ChapterHtmlSlimParser::openBidiEdge(const CssStyle& style, const bool inlin
 }
 
 void ChapterHtmlSlimParser::closeBidiEdges(const int elementDepth) {
+  if (bidiEdgeCount_ == 0 || bidiEdges_[bidiEdgeCount_ - 1].depth < elementDepth) return;
+  // The closers end the word they follow. When a nested element's end tag sent that word out already and only tags and
+  // controls came since (flushedWordTarget_), they go onto its last token, with any controls held after it, rather
+  // than open the next word past a space the element does not hold. A no-break space ending the word stays its own
+  // token, and the closers are held for the word glued after it.
+  ParsedText* const ended = !partWordHasText() && flushedWordTarget_ != nullptr && flushedWordTarget_ == wordTarget()
+                                ? flushedWordTarget_
+                                : nullptr;
+  if (ended != nullptr && partWordControlsOnly_ &&
+      ended->appendControlToLastToken(std::string_view(partWordBuffer, static_cast<size_t>(partWordBufferIndex)))) {
+    partWordBufferIndex = 0;
+    partWordControlsOnly_ = false;
+  }
   // A closer always goes in, past kMaxHeldControlBytes too: its opener is in the paragraph, and the run of held
   // controls stays bounded, as no opener goes in past it and each open edge closes once.
   while (bidiEdgeCount_ > 0 && bidiEdges_[bidiEdgeCount_ - 1].depth >= elementDepth) {
     const BidiEdge& edge = bidiEdges_[--bidiEdgeCount_];
-    for (uint8_t i = 0; i < edge.count; ++i) appendBidiControl(edge.closers[i]);
+    for (uint8_t i = 0; i < edge.count; ++i) {
+      char closer[3];
+      encodeBidiControl(edge.closers[i], closer);
+      if (ended == nullptr || partWordBufferIndex > 0 ||
+          !ended->appendControlToLastToken(std::string_view(closer, sizeof(closer)))) {
+        appendBidiControl(edge.closers[i]);
+      }
+    }
   }
 }
 
@@ -2122,6 +2149,7 @@ void ChapterHtmlSlimParser::addAncestorInsets(BlockStyle& style, const float emS
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   dropHeldBidiControls();                               // they end with the paragraph they were held in
+  flushedWordTarget_ = nullptr;                         // and no closer ends a word of that paragraph
   nextWordContinues = false;                            // New block = new paragraph, no continuation
   if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the open ruby's bases are in the block left behind
   endCjkSegment();
@@ -3922,8 +3950,9 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
       if (self->partWordBufferIndex > 0) {
         if (!self->flushPartWordBuffer()) return;
       }
-      // Whitespace is a real word boundary — reset continuation state
+      // Whitespace is a real word boundary — reset continuation state. A closer after it no longer ends the last word.
       self->nextWordContinues = false;
+      self->flushedWordTarget_ = nullptr;
       // A line break right after unspaced CJK text or a quote may vanish: the next character decides.
       if (s[i] == '\n' && (utf8IsUnspacedCjk(self->lastTextCodepoint_) || isQuotationMark(self->lastTextCodepoint_))) {
         self->cjkSegmentBreakPending_ = true;

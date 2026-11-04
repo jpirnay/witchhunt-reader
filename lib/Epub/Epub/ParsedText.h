@@ -401,6 +401,10 @@ class ParsedText {
   bool addRubyGroup(size_t firstToken, size_t tokenCount, std::string text);
   // An <rt> with no new base: appended to the block's last group. False when the block has none.
   bool appendRubyText(std::string_view text);
+  // A bidi control the parser puts in after the word it ends had gone out (a closer at an end tag after a nested
+  // element's), appended to the last token. It counts nowhere, so the token's offset stays. False, nothing appended,
+  // when there is no token or the last is a no-break space (" ", which must stay that token).
+  bool appendControlToLastToken(std::string_view control);
   // The face the words in `slot` are laid out in; a fontId of 0 (every slot after reset()) is the block's font. The
   // parser fills the slots its block's words use once it knows the block's font (see fontSlotsUsed).
   void setFontSlot(const uint8_t slot, const TextBlock::WordFont& font) {
