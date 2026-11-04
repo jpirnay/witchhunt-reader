@@ -323,6 +323,17 @@ def photo(name, note=""):
     print(f"\nPHOTO {name}" + (f": {note}" if note else ""))
 
 
+def show_marks(lab):
+    """The frame cam.py finds the panel from. Production bank, so no net drive."""
+    from cam import CALIB_MARKS, CALIB_ORIENT, CALIB_SIZE
+
+    lab.arm()
+    frame = Frame(WW)
+    for x, y in (*CALIB_MARKS, CALIB_ORIENT):
+        frame.rect(x, y, CALIB_SIZE, CALIB_SIZE, KK)
+    lab.push("prod", PRODUCTION_BANK, frame, "calibration marks", journal=False)
+
+
 def recipe_bands():
     """The recipe's four levels as horizontal bands: white, light, dark, black."""
     frame = Frame()
@@ -447,14 +458,20 @@ SAMPLE_TEXT = (
 )
 
 
-def text_levels(font_path, size, rotate=False):
-    """A text page as levels 0-3, using FreeType's antialiasing through Pillow."""
+def text_levels(font_path, size, rotate=False, split=False):
+    """A text page as levels 0-3, using FreeType's antialiasing through Pillow.
+
+    With `split`, the same text fills both halves: four levels above, 1-bit below. Two refreshes of
+    one page can only be compared from memory, and this puts them side by side.
+    """
     from PIL import Image, ImageDraw, ImageFont
 
     font = ImageFont.truetype(font_path, size)
     image = Image.new("L", (WIDTH, HEIGHT), 0)
     draw = ImageDraw.Draw(image)
-    y, line = 8, ""
+    half = HEIGHT // 2
+    bottom = half if split else HEIGHT
+    y, line = 6, ""
     for word in SAMPLE_TEXT.split() * 3:
         trial = f"{line} {word}".strip()
         if draw.textlength(trial, font=font) > WIDTH - 16:
@@ -463,11 +480,15 @@ def text_levels(font_path, size, rotate=False):
             line = word
         else:
             line = trial
-        if y > HEIGHT - size * 2:
+        if y > bottom - size * 1.6:
             break
+    levels = bytearray(min(value // 64, 3) for value in image.tobytes())
+    if split:
+        upper = levels[: half * WIDTH]
+        levels[half * WIDTH :] = bytes(3 if level >= 2 else 0 for level in upper)
     if rotate:
-        image = image.rotate(180)
-    return bytearray(min(value // 64, 3) for value in image.tobytes())
+        levels.reverse()
+    return levels
 
 
 def show_page(lab, levels, args, label):
@@ -563,6 +584,7 @@ def main():
     steps.add_parser("white", help="clean white")
     steps.add_parser("black", help="clean black")
     steps.add_parser("undo", help="cancel journalled drive, then clean white")
+    steps.add_parser("marks", help="calibration marks for cam.py")
     t1 = steps.add_parser("t1", help="Test 1: the recipe from a known start")
     t1.add_argument("source", choices=("white", "black"))
     t1.add_argument("--again", action="store_true", help="run on top of what is there, no clean first")
@@ -580,6 +602,7 @@ def main():
             page.add_argument("--font", required=True)
             page.add_argument("--size", type=int, default=16)
             page.add_argument("--rotate", action="store_true", help="turn the page 180 degrees")
+            page.add_argument("--split", action="store_true", help="four levels in one half, 1-bit in the other")
     args = parser.parse_args()
 
     if args.step == "parse-otp":
@@ -600,6 +623,8 @@ def main():
         elif args.step in ("white", "black"):
             lab.arm()
             lab.clean(args.step)
+        elif args.step == "marks":
+            show_marks(lab)
         elif args.step == "undo":
             lab.arm()
             lab.undo()
@@ -611,7 +636,7 @@ def main():
             test2_wedge(lab, args.source, args.cfg)
         elif args.step in ("fine", "text"):
             lab.arm()
-            levels = fine_levels() if args.step == "fine" else text_levels(args.font, args.size, args.rotate)
+            levels = fine_levels() if args.step == "fine" else text_levels(args.font, args.size, args.rotate, args.split)
             show_page(lab, levels, args, f"{args.step} {args.mode}")
             photo(f"t3-{args.step}-{args.mode}-l{args.light}-d{args.dark}")
     except LabError as error:

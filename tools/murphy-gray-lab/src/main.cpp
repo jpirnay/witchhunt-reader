@@ -211,6 +211,8 @@ void setup() {
   // Off for photographs, and a constant if it were left floating.
   pinMode(kPinFrontlight, OUTPUT);
   digitalWrite(kPinFrontlight, LOW);
+  // A frame arrives as one burst, and the default USB receive buffer loses part of it.
+  Serial.setRxBufferSize(2 * kPlaneBytes + 1024);
   Serial.begin(115200);
   panel.begin();
 }

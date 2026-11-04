@@ -22,6 +22,7 @@ class FakeSerial {
  public:
   void begin(unsigned long) {}
   void setTimeout(uint32_t) {}
+  void setRxBufferSize(size_t) {}
   int available();
   int read();
   size_t readBytes(char* out, size_t length);

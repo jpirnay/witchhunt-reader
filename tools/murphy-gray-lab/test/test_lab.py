@@ -14,6 +14,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
+import cam  # noqa: E402
 import lab  # noqa: E402
 
 FAKE = os.environ.get("FAKE_DEVICE", "")
@@ -206,6 +207,54 @@ class Steps(Bench):
         lab.read_info(self.lab)
         commands = {row[0] for row in self.bus()}
         self.assertFalse(commands & OTP_WRITE_COMMANDS)
+
+
+class Camera(unittest.TestCase):
+    """The panel sits upside down in front of the webcam, so that case has to keep working."""
+
+    def marks_image(self, place):
+        from PIL import Image, ImageDraw
+
+        white = Image.new("L", (cam.CAM_W, cam.CAM_H), 200)
+        marks = white.copy()
+        draw = ImageDraw.Draw(marks)
+        for mark in (*cam.CALIB_MARKS, cam.CALIB_ORIENT):
+            x0, y0 = place(mark[0], mark[1])
+            x1, y1 = place(mark[0] + cam.CALIB_SIZE, mark[1] + cam.CALIB_SIZE)
+            draw.rectangle((min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)), fill=40)
+        return white, marks
+
+    def assert_maps(self, place):
+        white, marks = self.marks_image(place)
+        camera = cam.calibrate(white, marks)
+        a, b, c, d, e, f, g, h = camera["coefficients"]
+        for x, y in ((0, 0), (240, 0), (0, 416), (120, 208)):
+            scale = g * x + h * y + 1
+            got = ((a * x + b * y + c) / scale, (d * x + e * y + f) / scale)
+            want = place(x, y)
+            self.assertAlmostEqual(got[0], want[0], delta=8)
+            self.assertAlmostEqual(got[1], want[1], delta=8)
+
+    def test_upright(self):
+        self.assert_maps(lambda x, y: (600 + 2.2 * x, 100 + 2.2 * y))
+
+    def test_upside_down(self):
+        self.assert_maps(lambda x, y: (1200 - 2.2 * x, 1000 - 2.2 * y))
+
+
+class TextPage(unittest.TestCase):
+    FONT = HERE.parents[2] / "lib/EpdFont/builtinFonts/source/Bookerly/Bookerly-Regular.ttf"
+
+    def test_split_has_grays_in_one_half_only(self):
+        levels = lab.text_levels(str(self.FONT), 16, split=True)
+        half = lab.WIDTH * lab.HEIGHT // 2
+        self.assertEqual(set(levels[:half]), {0, 1, 2, 3})
+        self.assertEqual(set(levels[half:]), {0, 3})
+
+    def test_rotate_turns_the_page(self):
+        plain = lab.text_levels(str(self.FONT), 16, split=True)
+        turned = lab.text_levels(str(self.FONT), 16, rotate=True, split=True)
+        self.assertEqual(bytes(plain), bytes(reversed(turned)))
 
 
 class SplitLink:

@@ -55,13 +55,24 @@ back with `$ESPTOOL ... write-flash 0 <file>`.
 `bash test/run.sh` runs the host tests. They build this firmware for the PC with a simulated
 controller behind the bus, so they prove what goes over the wire and nothing about the panel.
 
-## Photographs
+## Camera
 
-Phone on a stand, same spot and same light for the whole session, frontlight off (the firmware
-holds it off). Turn off HDR and lock focus and exposure if the camera allows it. Test 1 and Test 2
-frames contain full white and full black, so values can be normalised within each photo.
+`cam.py` drives a fixed USB webcam, with exposure, white balance and gain locked. `cam.py calibrate`
+finds the panel from `lab.py marks`, so the panel can sit at any rotation. Levels are measured per
+region against the same region in the `baseline-white` and `baseline-black` shots, so glare and uneven
+light cancel: 0 % is black, 100 % is white, on a scale close to perceived lightness.
 
-`lab.py` prints `PHOTO <name>` when a frame is ready. Name the photos after it.
+```sh
+./cam.py sweep                  # choose an exposure, then MURPHY_EXPOSURE=<value> if not 1000
+./lab.py white;  ./cam.py shot baseline-white
+./lab.py black;  ./cam.py shot baseline-black
+./lab.py marks;  ./cam.py shot marks;  ./cam.py calibrate
+./cam.py bands <shot> --count 8 --width 200
+./cam.py fine <shot>
+```
+
+A webcam at this distance gives about 2.25 camera pixels per panel pixel. That is plenty for levels
+and for the mean of a fine pattern, but it cannot judge text: that needs eyes.
 
 ## The tests
 
@@ -117,15 +128,30 @@ the bench's "slot asymmetry" came from each stripe's history.
 Pass: light lands at 55-80 % and dark at 20-45 % of the black-to-white range, within 5 points over
 three runs. If the curve jumps inside one frame, the next levers are 100 and 200 Hz, then VDHR.
 
+Result on our unit, 2026-11-04, production voltages and VCOM, all waveforms net zero:
+
+| Frames | 1 | 2 | 3 | 4 | 6 | 8 | 12 | 16 |
+|---|---|---|---|---|---|---|---|---|
+| VSH from white | 81 | 54 | 31 | 15 | 4 | 1 | -1 | -1 |
+| VSL from black | 0 | 13 | 35 | 58 | 80 | 88 | 94 | 98 |
+
+Run to run within 0.7 points, and drift over 60 s at most 0.6. The recipe in Test 1 gave three levels,
+not four: its light band is white, and its dark band sits at 16 %. Test 1's white start and `t1-slots`
+were skipped, as they would only have added net drive. A single clean white from black reads 94-97 %
+and settles at 96-99 % with or without the recipe, so that dip is normal for the production bank.
+
 **Test 3: pixel scale and real text.** This is where the bench failed.
 
 ```sh
-./lab.py fine --light N --dark M
-./lab.py text --font <file.ttf> --size 16 --light N --dark M --mode bw
-./lab.py text --font <file.ttf> --size 16 --light N --dark M --mode overlay
-./lab.py text --font <file.ttf> --size 16 --light N --dark M --mode onepass
-./lab.py text --font <file.ttf> --size 16 --light N --dark M --mode swapped
+./lab.py fine --light 2 --dark 3
+./lab.py text --font <file.ttf> --light 2 --dark 3 --mode overlay --split
+./lab.py text --font <file.ttf> --light 2 --dark 3 --mode swapped --split
+./lab.py text --font <file.ttf> --light 6 --dark 3 --mode onepass --split
 ```
+
+`--light` and `--dark` are frame counts from the table above. In `overlay` and `swapped`, light is VSH
+from white and dark is VSL from black. In `onepass` both are VSL from black. `--split` puts the same
+text in both halves, four levels in one and 1-bit in the other, so they can be compared directly.
 
 `overlay` is the X3 flow: a B/W page, then a short nudge. `onepass` resets every pixel to a rail
 first, so it does not care what was there. `swapped` deliberately swaps the mid-tones, which shows
@@ -133,6 +159,10 @@ whether the bench's quilt was plane order. Use `--rotate` if the page comes out 
 
 Pass: better than `bw` at reading distance, with no quilt. If not, stop: AA stays off and the
 reason goes in `docs/future_work`.
+
+Result so far, 2026-11-04: fine patterns land where the table predicts. Measured means for 1, 2 and
+4 px checkers were 79, 78, 78 for 2 frames on white (predicted 77) and 14, 16, 18 for 3 frames on
+black (predicted 17.5). So gray holds at pixel scale, and the bench's quilt is not a panel limit.
 
 **Test 4: stability and recovery**, and **Test 5: firmware behind a build flag**, come after that.
 Neither is built yet, because both depend on which of `overlay` and `onepass` wins.
