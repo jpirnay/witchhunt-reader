@@ -117,6 +117,10 @@ From the datasheets:
   a clean sync on the next push.
 - Track greys left on the glass by a gray waveform. Restoring controller RAM does not clear them;
   only a waveform that drives every pixel does (`_grayOnGlass` in `Uc8253X3Driver`).
+- On a UC8253, a refresh leaves DTM1 and DTM2 trading roles until the next reset, which the datasheet
+  does not say. Planes written after a refresh with no reset in between have to go through the other
+  register, or the two selectors that differ between the planes trade places
+  (`Uc8253MurphyDriver::displayGray`, measured with `tools/murphy-gray-lab`).
 - In `displayGrayscaleBase()`, treat a Half or Full fallback as a floor, not a hint (`Uc8179Driver`).
 - Link the driver in `BoardConfig.h` (`FREEINK_DRIVER_*`), select it in
   `FreeInkDisplay::selectDriver()`, and add the controller to `displayControllerName()` in
