@@ -104,8 +104,9 @@ jobs:
         run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
 
   build:
-    # The C3 boards (X3/X4), the X4 Pro and the S3 LilyGo T5S3 are separate
-    # binaries built from different toolchains, so each gets its own leg.
+    # The C3 boards (X3/X4), the X4 Pro, the S3 LilyGo T5S3 and 
+    # the S3 Murphy are separate binaries built from different toolchains, 
+    # so each gets its own leg.
     # fail-fast is off so a break on one board still reports the others' result.
     #
     # Asset names match what the firmware's own OTA check asks GitHub for (see
@@ -132,6 +133,9 @@ jobs:
           - env: lilygo_t5s3
             label: LilyGo T5S3
             asset: firmware-lilygo.bin
+          - env: murphy
+            label: Murphy M3
+            asset: firmware-murphy.bin
     steps:
       - uses: actions/checkout@v6
         with:

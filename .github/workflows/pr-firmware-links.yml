@@ -77,6 +77,7 @@ jobs:
               { name: 'firmware.bin', device: 'X3 / X4' },
               { name: 'firmware-x4pro.bin', device: 'X4 Pro' },
               { name: 'firmware-lilygo.bin', device: 'LilyGo T5S3' },
+              { name: 'firmware-murphy.bin', device: 'Murphy M3' },
             ];
             const { data: artifactResponse } =
               await github.rest.actions.listWorkflowRunArtifacts({
