@@ -20,7 +20,8 @@ Murphy's 12,480 byte framebuffer was too small for a ZIP entry's inflate ring, s
 
 **Open, most useful first:**
 - Library: the first open after a boot blocks the loop for 43 s on a card with a folder of 999+ books (X4 Pro, with or
-  without the arena). Input is dead for that time. Later visits are fast.
+  without the arena). A key press aborts the count; serial commands wait for it. Later visits are fast. Not a Murphy
+  problem: `fix/library-folder-walk` takes it to 2.4 s.
 - XTC: a page encoded for another panel is cropped (`XtcReaderActivity.cpp`, 480x800 shows its top-left quarter). Needs
   a 2:1 reduction and a test file.
 - KOReader Sync's comparison screen was reflowed but never seen: it needs credentials and a server. Its arithmetic
