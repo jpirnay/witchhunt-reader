@@ -269,6 +269,33 @@ class TextPage(unittest.TestCase):
         self.assertEqual(bytes(plain), bytes(reversed(turned)))
 
 
+class FastPageTurn(unittest.TestCase):
+    def slots(self, old, new, aware):
+        frame = lab.fast_frame(bytearray([old]) * (lab.WIDTH * lab.HEIGHT), bytearray([new]) * (lab.WIDTH * lab.HEIGHT), aware)
+        return frame.slots[0]
+
+    def test_plain_fast_only_sees_black_and_white(self):
+        self.assertEqual(self.slots(1, 0, False), lab.WW)  # gray stays: this is the ghost
+        self.assertEqual(self.slots(2, 3, False), lab.KK)
+        self.assertEqual(self.slots(0, 3, False), lab.WK)
+        self.assertEqual(self.slots(3, 0, False), lab.KW)
+
+    def test_gray_aware_drives_gray_to_the_new_rail(self):
+        self.assertEqual(self.slots(1, 0, True), lab.KW)
+        self.assertEqual(self.slots(2, 0, True), lab.KW)
+        self.assertEqual(self.slots(1, 3, True), lab.WK)
+        self.assertEqual(self.slots(2, 3, True), lab.WK)
+
+    def test_gray_aware_leaves_clean_pixels_alone(self):
+        self.assertEqual(self.slots(0, 0, True), lab.WW)
+        self.assertEqual(self.slots(3, 3, True), lab.KK)
+
+    def test_fast_bank_matches_production(self):
+        self.assertEqual(lab.describe(lab.FAST_BANK[lab.KW]), "VSL15 rest1")
+        self.assertEqual(lab.describe(lab.FAST_BANK[lab.WK]), "VSH15 rest1")
+        self.assertEqual(lab.describe(lab.FAST_BANK[lab.KK]), "rest15 VSH1")
+
+
 class SplitLink:
     """A serial port whose read timeout fired in the middle of a line."""
 

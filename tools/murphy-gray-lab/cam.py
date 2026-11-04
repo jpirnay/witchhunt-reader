@@ -11,6 +11,7 @@ import argparse
 import fcntl
 import json
 import os
+import statistics
 import struct
 import subprocess
 import sys
@@ -37,6 +38,7 @@ CTRL_DYNAMIC_RATE = 0x009A0903
 AUTO_EXPOSURE_MANUAL = 1
 POWER_LINE_50HZ = 1
 
+EXPOSURE = int(os.environ.get("MURPHY_EXPOSURE", "1000"))
 STATE = Path(os.path.expanduser("~/.local/state/murphy-gray-lab"))
 SHOTS = STATE / "shots"
 CAMERA_FILE = STATE / "camera.json"
@@ -228,7 +230,7 @@ def inset(box, margin):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--device", default="/dev/video0")
-    parser.add_argument("--exposure", type=int, default=int(os.environ.get("MURPHY_EXPOSURE", "1000")))
+    parser.add_argument("--exposure", type=int, default=EXPOSURE)
     steps = parser.add_subparsers(dest="step", required=True)
     steps.add_parser("sweep", help="panel brightness at several exposures")
     shoot = steps.add_parser("shot", help="capture and save a shot")
@@ -236,6 +238,11 @@ def main():
     steps.add_parser("calibrate", help="find the panel, from shots baseline-white and marks")
     fine = steps.add_parser("fine", help="mean level of each pattern in a `lab.py fine` shot")
     fine.add_argument("name")
+    patches = steps.add_parser("patches", help="each `lab.py t4` patch against its clean strip")
+    patches.add_argument("name")
+    ghost = steps.add_parser("ghost", help="how far a blank-page shot is from even")
+    ghost.add_argument("name")
+    ghost.add_argument("--against", default="baseline-white", help="the clean shot to compare with")
     bands = steps.add_parser("bands", help="level of each horizontal band in a shot")
     bands.add_argument("name")
     bands.add_argument("--count", type=int, default=4)
@@ -268,6 +275,23 @@ def main():
                 checker = level(image, white, black, inset((8, row, 104, 48), 8))
                 lines = level(image, white, black, inset((128, row, 104, 48), 8))
                 print(f"{label}, {scale} px: checker {checker:5.1f}  lines {lines:5.1f}")
+    elif args.step == "patches":
+        camera = load_camera()
+        white, black = load_rectified("baseline-white", camera), load_rectified("baseline-black", camera)
+        image = load_rectified(args.name, camera)
+        names = ("light to white", "light to black", "dark to white", "dark to black")
+        for row, name in enumerate(names):
+            patch = level(image, white, black, inset((0, row * 104, 200, 104), 14))
+            strip = level(image, white, black, inset((200, row * 104, 40, 104), 12))
+            print(f"{name:15} patch {patch:6.1f}  clean strip {strip:6.1f}  ghost {patch - strip:+6.1f}")
+    elif args.step == "ghost":
+        # Text rows against the gaps between them: blur cannot hide a whole line of old text.
+        camera = load_camera()
+        image, clean = load_rectified(args.name, camera), load_rectified(args.against, camera)
+        black = load_rectified("baseline-black", camera)
+        rows = [level(image, clean, black, (20, y, 200, 2)) for y in range(16, 400, 2)]
+        print(f"{args.name}: mean {statistics.mean(rows):.1f}, row spread {max(rows) - min(rows):.1f}, "
+              f"stddev {statistics.pstdev(rows):.2f}")
     elif args.step == "bands":
         camera = load_camera()
         white, black = load_rectified("baseline-white", camera), load_rectified("baseline-black", camera)

@@ -135,6 +135,17 @@ PRODUCTION_BANK = [
 ]
 
 
+# Murphy production FAST: what the reader turns pages with. Unchanged pixels rest, changed pixels get
+# 15 frames. It is what a gray page has to survive.
+FAST_BANK = [
+    _recipe_lut((1, 0x0F, 0x01, 0, 0, 1, 1)),
+    _recipe_lut((1, 0x0F, 0x01, 0, 0, 1, 1)),
+    _recipe_lut((1, 0x8F, 0x01, 0, 0, 1, 1)),
+    _recipe_lut((1, 0x4F, 0x01, 0, 0, 1, 1)),
+    _recipe_lut((1, 0x0F, 0x41, 0, 0, 1, 1)),
+]
+
+
 class Frame:
     """Which LUT register each pixel takes."""
 
@@ -217,6 +228,7 @@ class Lab:
         self.journal_path = self.state_dir / "journal.json"
         self.refreshes = 0
         self.pending_line = b""
+        self.camera = None  # called with a shot name, when a step needs one mid-way
 
     def command(self, line, timeout=30):
         """Send one line. Returns (final OK text, the lines before it)."""
@@ -443,6 +455,86 @@ def show_onepass(lab, levels, light, dark, cfg, label):
     lab.push(cfg, bank, frame, label)
 
 
+def fast_frame(old_levels, new_levels, gray_aware):
+    """A FAST page turn. Only the B/W of each page reaches the planes, as in the reader.
+
+    A pixel left gray sits between the rails while the planes call it white or black. With
+    `gray_aware` it is marked as changed whatever the planes would say, so it gets the full drive
+    to where the new page wants it, at no cost in time.
+    """
+    frame = Frame(WW)
+    for index, (old, new) in enumerate(zip(old_levels, new_levels)):
+        was_black, is_black = old >= 2, new >= 2
+        if gray_aware and old in (1, 2):
+            was_black = not is_black
+        frame.slots[index] = {(0, 0): WW, (1, 0): KW, (0, 1): WK, (1, 1): KK}[was_black, is_black]
+    return frame
+
+
+PATCH_WIDTH = 200  # the rest of each row is a strip that was never gray
+
+
+def patch_levels():
+    """Every way gray can leave: light and dark, each going to white and to black.
+
+    Rows of (patch before, new level). The strip starts at the new level, so it stays clean and
+    shows what the patch should have become.
+    """
+    before, after = bytearray(WIDTH * HEIGHT), bytearray(WIDTH * HEIGHT)
+    for row, (gray, target) in enumerate(((1, 0), (1, 3), (2, 0), (2, 3))):
+        for y in range(row * 104, (row + 1) * 104):
+            start = y * WIDTH
+            before[start : start + PATCH_WIDTH] = bytes([gray]) * PATCH_WIDTH
+            before[start + PATCH_WIDTH : start + WIDTH] = bytes([target]) * (WIDTH - PATCH_WIDTH)
+            after[start : start + WIDTH] = bytes([target]) * WIDTH
+    return before, after
+
+
+def test4_patches(lab, gray_aware, light=2, dark=3, hold=False):
+    lab.arm()
+    before, after = patch_levels()
+    show_overlay(lab, before, light, dark, "prod", "gray patches")
+    photo("t4-gray")
+    if lab.camera:
+        lab.camera("t4-gray")
+    if hold:  # leave the gray up, to watch it over minutes
+        return
+    label = "gray-aware" if gray_aware else "plain"
+    lab.push("prod", FAST_BANK, fast_frame(before, after, gray_aware), f"FAST, {label}", journal=False)
+    photo(f"t4-fast-{label}")
+
+
+def page_levels(font_path, size, page):
+    """A different page each time: the sample text starts `page` words further on."""
+    words = SAMPLE_TEXT.split()
+    text = " ".join(words[page * 7 :] + words[: page * 7])
+    return text_levels(font_path, size, text=text)
+
+
+def test4_pages(lab, font_path, size, pages, mode, light=2, dark=3):
+    """Turn pages through FAST as the reader would, then a blank page, and leave any ghost showing.
+
+    bw is 1-bit as today, plain adds gray with an unchanged FAST, aware marks gray as changed.
+    """
+    lab.arm()
+    lab.clean("white")
+    blank = bytearray(WIDTH * HEIGHT)
+    shown = blank
+    for page in [*range(pages), None]:
+        target = blank if page is None else page_levels(font_path, size, page)
+        if mode == "bw":
+            target = bytearray(3 if level >= 2 else 0 for level in target)
+        lab.push("prod", FAST_BANK, fast_frame(shown, target, mode == "aware"), f"page {page}", journal=False)
+        if mode != "bw" and page is not None:
+            frame = Frame(WW)
+            for index, level in enumerate(target):
+                if level in (1, 2):
+                    frame.slots[index] = KW if level == 1 else WK
+            lab.push("prod", overlay_bank(light, dark), frame, f"page {page} nudge")
+        shown = target
+    photo(f"t4-pages-{mode}", "the page should be blank: anything visible is ghost")
+
+
 def fine_levels():
     """Gray at pixel scale: 1, 2 and 4 px checkers and lines, on white above and on black below."""
     levels = bytearray(WIDTH * HEIGHT)
@@ -469,7 +561,7 @@ SAMPLE_TEXT = (
 )
 
 
-def text_levels(font_path, size, rotate=False, split=False, keep_gray=False):
+def text_levels(font_path, size, rotate=False, split=False, keep_gray=False, text=SAMPLE_TEXT):
     """A text page as levels 0-3, using FreeType's antialiasing through Pillow.
 
     With `split`, the same text fills both halves: four levels above, 1-bit below, or four levels in
@@ -484,7 +576,7 @@ def text_levels(font_path, size, rotate=False, split=False, keep_gray=False):
     half = HEIGHT // 2
     bottom = half if split else HEIGHT
     y, line = 6, ""
-    for word in SAMPLE_TEXT.split() * 3:
+    for word in text.split() * 3:
         trial = f"{line} {word}".strip()
         if draw.textlength(trial, font=font) > WIDTH - 16:
             draw.text((8, y), line, font=font, fill=255)
@@ -607,6 +699,14 @@ def main():
     t2 = steps.add_parser("t2", help="Test 2: frame-count wedge")
     t2.add_argument("source", choices=("white", "black"))
     t2.add_argument("--cfg", choices=sorted(CONFIGS), default="prod")
+    t4 = steps.add_parser("t4", help="Test 4: gray patches through a FAST page turn")
+    t4.add_argument("--aware", action="store_true", help="mark gray pixels as changed")
+    t4.add_argument("--hold", action="store_true", help="stop while the patches are gray")
+    t4p = steps.add_parser("t4-pages", help="Test 4: pages through FAST, ending blank")
+    t4p.add_argument("mode", choices=("bw", "plain", "aware"))
+    t4p.add_argument("--font", required=True)
+    t4p.add_argument("--size", type=int, default=16)
+    t4p.add_argument("--pages", type=int, default=5)
     for name, help_text in (("fine", "Test 3: pixel-scale patterns"), ("text", "Test 3: a text page")):
         page = steps.add_parser(name, help=help_text)
         page.add_argument("--light", type=int, required=True, help="frames that land light gray")
@@ -650,6 +750,13 @@ def main():
             test1_slots(lab)
         elif args.step == "t2":
             test2_wedge(lab, args.source, args.cfg)
+        elif args.step == "t4":
+            import cam
+
+            lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
+            test4_patches(lab, args.aware, hold=args.hold)
+        elif args.step == "t4-pages":
+            test4_pages(lab, args.font, args.size, args.pages, args.mode)
         elif args.step in ("fine", "text"):
             lab.arm()
             if args.step == "fine":

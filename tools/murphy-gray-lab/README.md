@@ -164,8 +164,40 @@ Result so far, 2026-11-04: fine patterns land where the table predicts. Measured
 4 px checkers were 79, 78, 78 for 2 frames on white (predicted 77) and 14, 16, 18 for 3 frames on
 black (predicted 17.5). So gray holds at pixel scale, and the bench's quilt is not a panel limit.
 
-**Test 4: stability and recovery**, and **Test 5: firmware behind a build flag**, come after that.
-Neither is built yet, because both depend on which of `overlay` and `onepass` wins.
+**Test 4: does gray survive a real page turn?** The reader turns pages with FAST, and FAST rests any
+pixel the planes call unchanged, so gray left around letters would stay. The planes are only
+selector bits, so `--aware` marks each gray pixel as changed, which gives it the full drive to the
+new page's rail at no cost in time.
+
+```sh
+./lab.py t4; ./cam.py shot t4-fast-plain; ./cam.py patches t4-fast-plain
+./lab.py t4 --aware; ./cam.py shot t4-fast-gray-aware; ./cam.py patches t4-fast-gray-aware
+./lab.py t4-pages aware --font <file.ttf> --pages 20; ./cam.py shot t4-pages; ./cam.py ghost t4-pages
+```
+
+`t4-pages` turns text pages through FAST and ends on a blank page, so anything visible is ghost. The
+modes are `bw` (today), `plain` and `aware`.
+
+Result on our unit, 2026-11-04, light 2 and dark 3:
+
+| Gray leaving through FAST | Plain ghost | Aware ghost |
+|---|---|---|
+| Light to white | -38.3 | +2.4 |
+| Light to black | -1.0 | +0.2 |
+| Dark to white | +0.9 | 0.0 |
+| Dark to black | +15.1 | -1.4 |
+
+Blank page after 5 text pages, line-scale stddev with slow gradients removed: 0.38 noise floor, 0.56
+1-bit today, 0.54 aware, 1.86 plain. Plain leaves readable text. A FAST page took 1.0 s and the nudge
+0.8 s after it, so the page is readable as fast as today.
+
+Compare shots taken close together. Room light moved these numbers by several points over minutes,
+always as a smooth gradient, and `cam.py ghost` reports that as spread. Moving the camera at all means
+new baselines, marks and `calibrate`.
+
+**Still open.** Aware adds net drive: a light pixel returning to white takes 15 frames toward white
+that nothing pays back, which only a long test or a balanced cleanup can answer. Test 5, the firmware
+behind a build flag, is not built.
 
 ## Protocol
 
