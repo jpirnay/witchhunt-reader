@@ -2576,6 +2576,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->applyPendingPageBreak();
     self->currentTable = std::unique_ptr<BufferedTable>(new BufferedTable());
     self->currentTable->depth = 1;
+    self->currentTable->rtl = self->startSideIsRight();
     if (atts != nullptr) {
       for (int i = 0; atts[i]; i += 2) {
         if (strcmp(atts[i], "border") == 0 && strcmp(atts[i + 1], "0") == 0) {
@@ -3333,9 +3334,14 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
       cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
   userAlignmentBlockStyle.direction = self->blockDirection(cssStyle);
-  // As in CSS, a list's own padding-left replaces the default and its margin-left adds to it.
-  if (isList && !cssStyle.hasPaddingLeft()) {
-    userAlignmentBlockStyle.paddingLeft = static_cast<int16_t>(emSize * LIST_DEFAULT_PADDING_EM);
+  // As in CSS, a list's own padding on its start side replaces the default and its margin there adds to it.
+  if (isList) {
+    const int16_t listPadding = static_cast<int16_t>(emSize * LIST_DEFAULT_PADDING_EM);
+    if (self->startSideIsRight()) {
+      if (!cssStyle.hasPaddingRight()) userAlignmentBlockStyle.paddingRight = listPadding;
+    } else if (!cssStyle.hasPaddingLeft()) {
+      userAlignmentBlockStyle.paddingLeft = listPadding;
+    }
   }
 
   // This element's own inset is what its children inherit; capture it before the ancestors are
@@ -5791,6 +5797,9 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
     out.cells.emplace_back();
     ++col;
   }
+  // The grid is placed left to right; a right-to-left row reads its first cell on the right (padding cells, which
+  // follow the last, land on the left).
+  if (currentTable->rtl) std::reverse(out.cells.begin(), out.cells.end());
 
   if (maxContentHeight == 0) maxContentHeight = static_cast<uint16_t>(lineHeight);
   out.height = static_cast<uint16_t>(maxContentHeight + 2 * TABLE_CELL_PADDING);

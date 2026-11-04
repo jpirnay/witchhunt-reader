@@ -1349,6 +1349,115 @@ TEST_F(BidiLayout, ARubysCloserEndsItsBase) {
 
 // ---- The spine's page progression ----
 
+// ---- Lists and tables on the start side ----
+
+struct DumpedCell {
+  int span = 1;
+  std::vector<Word> words;
+};
+
+// The grid cells of the dump's first table row, in stored (left to right) order, with their lines' words.
+std::vector<DumpedCell> firstRowCells(const std::string& dump) {
+  std::vector<DumpedCell> cells;
+  std::istringstream in(dump);
+  std::string row;
+  while (std::getline(in, row)) {
+    if (row.rfind("    CELL ", 0) == 0) {
+      DumpedCell& cell = cells.emplace_back();
+      std::sscanf(row.c_str(), "    CELL %*d hdr=%*d span=%d", &cell.span);
+    } else if (row.rfind("      W x=", 0) == 0 && !cells.empty()) {
+      Word& word = cells.back().words.emplace_back();
+      std::sscanf(row.c_str(), "      W x=%d", &word.x);
+      word.text = row.substr(row.find(" t=") + 3);
+    }
+  }
+  return cells;
+}
+
+std::string cellText(const DumpedCell& cell) {
+  std::string out;
+  for (const Word& word : cell.words) out += word.text;
+  return out;
+}
+
+TEST_F(BidiLayout, AListIsIndentedOnTheRight) {
+  const auto bullets = parseLines(dump("", document("<ul><li>שלום</li></ul>", " dir=\"rtl\""), bookAlignment()));
+  ASSERT_EQ(1u, bullets.size());
+  EXPECT_EQ(0, bullets[0].x);
+  ASSERT_EQ(2u, bullets[0].words.size());
+  expectWord(bullets[0].words[0], 370, kShalom, kShalomDrawn);
+  expectWord(bullets[0].words[1], 408, "\xE2\x80\xA2", "");
+
+  const auto numbers = parseLines(dump("", document("<ol><li>שלום</li></ol>", " dir=\"rtl\""), bookAlignment()));
+  ASSERT_EQ(1u, numbers.size());
+  ASSERT_EQ(2u, numbers[0].words.size());
+  expectWord(numbers[0].words[0], 361, kShalom, kShalomDrawn);
+  expectWord(numbers[0].words[1], 399, "1.", ".1");
+}
+
+TEST_F(BidiLayout, AListInAHebrewBookWithoutDirIsIndentedOnTheRight) {
+  const auto lines = parseLines(dump("", document("<ul><li>שלום</li></ul>"), bookAlignment(), {}, "", "he"));
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_EQ(0, lines[0].x);
+}
+
+TEST_F(BidiLayout, AListInALeftToRightBookKeepsItsLeftIndent) {
+  const auto lines = parseLines(dump("", document("<ul><li>Alpha</li></ul>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_EQ(27, lines[0].x);
+}
+
+TEST_F(BidiLayout, ARightToLeftTableRunsItsColumnsRightToLeft) {
+  const std::string row = "<table><tr><td>א</td><td>ב</td><td>ג</td></tr></table>";
+  auto cells = firstRowCells(dump("", document(row), bookAlignment(), {}, "", "he"));
+  ASSERT_EQ(3u, cells.size());
+  EXPECT_EQ("ג", cellText(cells[0]));
+  EXPECT_EQ("ב", cellText(cells[1]));
+  EXPECT_EQ("א", cellText(cells[2]));
+
+  cells = firstRowCells(
+      dump("", document("<table><tr><td colspan=\"2\">אב</td><td>ג</td></tr></table>"), bookAlignment(), {}, "", "he"));
+  ASSERT_EQ(2u, cells.size());
+  EXPECT_EQ("ג", cellText(cells[0]));
+  EXPECT_EQ(1, cells[0].span);
+  EXPECT_EQ("אב", cellText(cells[1]));
+  EXPECT_EQ(2, cells[1].span);
+
+  cells = firstRowCells(dump("", document("<table dir=\"ltr\"><tr><td>א</td><td>ב</td><td>ג</td></tr></table>"),
+                             bookAlignment(), {}, "", "he"));
+  ASSERT_EQ(3u, cells.size());
+  EXPECT_EQ("א", cellText(cells[0]));
+}
+
+TEST_F(BidiLayout, ATableInALeftToRightBookKeepsItsColumnOrder) {
+  const auto cells = firstRowCells(dump("", document("<table><tr><td>A</td><td>B</td></tr></table>"), bookAlignment()));
+  ASSERT_EQ(2u, cells.size());
+  EXPECT_EQ("A", cellText(cells[0]));
+}
+
+TEST_F(BidiLayout, ACellsOwnDirectionReachesItsText) {
+  const auto cells =
+      firstRowCells(dump("", document("<table><tr><td dir=\"rtl\">שלום עולם</td></tr></table>"), bookAlignment()));
+  ASSERT_EQ(1u, cells.size());
+  ASSERT_EQ(2u, cells[0].words.size());
+  // The cell's inner width is 460 less its two 5 px paddings; the line ends at its right edge less the cell's default
+  // 1em (18 px) first-line indent, which a left-to-right cell takes on its left.
+  EXPECT_EQ(362, cells[0].words[0].x);
+  EXPECT_EQ(400, cells[0].words[1].x);
+}
+
+TEST_F(BidiLayout, ACellLaidOutAsAParagraphKeepsItsOwnDirection) {
+  // A rowspan takes the table out of the grid; its cells become paragraphs. Latin words stay in reading order in a
+  // right-to-left line, so only the cell's dir can put the line against the right edge (ending 18 px short of it, the
+  // first-line indent), where a left-to-right cell starts it at 18.
+  const auto lines = parseLines(
+      dump("", document("<table><tr><td rowspan=\"2\" dir=\"rtl\">alpha beta</td></tr></table>"), bookAlignment()));
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0].words.size());
+  EXPECT_EQ(348, lines[0].words[0].x);
+  EXPECT_EQ(405, lines[0].words[1].x);
+}
+
 TEST_F(WritingModeLayout, ThePageProgressionSurvivesBookBin) {
   const std::string path = writeBook("", document("<p>Alpha</p>"), {}, " page-progression-direction=\"rtl\"");
   const std::string cache = path + ".cache";

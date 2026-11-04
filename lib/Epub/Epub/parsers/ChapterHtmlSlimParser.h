@@ -442,6 +442,9 @@ class ChapterHtmlSlimParser final : public Print {
     uint16_t contentWidth = 0;
     int depth = 0;          // nesting depth; > 1 means we're inside a nested table
     bool hasBorder = true;  // false when border="0" on the <table> element
+    // The table runs right to left (its element's direction, else the book's): its columns are laid out from the
+    // right, the first cell of a row being the rightmost.
+    bool rtl = false;
     // This table can never be a grid (nested table, rowspan, low heap): every cell from here on
     // is emitted as a paragraph at </td>. Latched -- degrading is one-way.
     bool degraded = false;
