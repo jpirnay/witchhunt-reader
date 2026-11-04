@@ -31,18 +31,29 @@ and takes 16 frames, as long as FAST. The reader already has a one-push path for
 
 ## FAST under-drives white
 
-Not measured as such: this is read from the Test 2 curves and the LUTs, and it may be why B/W UI
-screens ghost under FAST, which is why their refresh counter came down.
+B/W UI screens ghost under FAST, which is why their refresh counter came down. FAST gives black to white
+and white to black the same 15 frames, but they are far from equal: VSH reaches 15 % in 4 frames and
+about 1 % in 8, while VSL needs 16 for 98 %. So black is driven twice as long as it needs, white lands
+short, and `WW` rests, so nothing corrects it.
 
-FAST gives black to white and white to black the same 15 frames, but they are far from equal. VSH reaches
-15 % in 4 frames and about 1 % in 8, while VSL needs 16 frames for 98 %, so at 15 white lands a few
-points short and black is driven about twice as long as it needs. `WW` then rests, so nothing corrects
-it. The recipe's 32 frames of VSL read 103 % of the clean white, so HALF does not reach full white either:
-one HALF from black read 94-97 %, a second 96-99 %.
+Measured with `lab.py t6`, one panel, production voltages. Ghost is a patch that went black and back,
+minus a strip beside it that never changed, in points of the black-to-white range. Text is the line-scale
+stddev of a blank page after five text pages, with a noise floor of 0.07.
 
-The timing matches the vendor's own LUT, which runs at +-15 V with VCOM near 0. The Murphy runs at
-VSL -14.2 V and VCOM -1.6 V, nominally +16.6 V against -12.6 V across the ink.
+| `KW` frames | Black from FAST | Black from a full refresh | After 60 s | Text | FAST waveform |
+|---|---|---|---|---|---|
+| 15, today | -0.7, -0.5 | -1.5, -2.4 | -2.3 | 0.42, 0.44 | 363 ms |
+| 18 | | -0.8, -1.4 | | | |
+| 20 | +0.7, then +0.3 | -0.5, -1.0 | -0.8 | 0.22 | 463 ms |
+| 24 | +1.2, then +0.5 | 0.0, -0.6 | | 0.18 | 543 ms |
 
-Next: with the lab, measure the blank page after `t4-pages bw` for `KW` at 20 and 24 frames, for VSL at
-0x3F, and for a small VSL touch on `WW` like the VSH one `KK` already has. Nominally 20 frames of VSL also
-balances 15 of VSH in volt-frames, but the true centre is unknown with no factory VCOM.
+Black from a full refresh lifts less, so it is the case that matters: UI black is drawn that way.
+
+20 frames looks like the right trade: under a point of ghost either way, for 100 ms. VSL at -15 V alone
+barely helped (text 0.34), and with 20 frames it added nothing. A VSL touch on `WW` made things much worse
+(-3.4 to -4.9): it keeps whitening the background, which raises the contrast with anything that moved.
+
+Not done. `MURPHY_LUT_22_FAST` would go to 20 frames, with the VCOM LUT stretched to match. Then measure
+real UI screens, and see whether their refresh counter can go back up. 20 frames against 15 nets 5 toward
+white per round trip in frames, though nominally 20 x 12.6 V about balances 15 x 16.6 V. The true centre
+is unknown with no factory VCOM.
