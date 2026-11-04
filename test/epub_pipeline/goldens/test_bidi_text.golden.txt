@@ -9,7 +9,7 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=2 truncated=0 cssFallback=0
    W x=303 s=1 z=100 t=פרק
     WD t=קרפ
    O order=2,1,0
-  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=51 s=0 z=100 t=הביתה.
     WD t=.התיבה
    W x=112 s=0 z=100 t=הלך
@@ -20,15 +20,17 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=2 truncated=0 cssFallback=0
     WD t=,1998
    W x=212 s=0 z=100 t=בשנת
     WD t=תנשב
-   W x=256 s=0 z=100 t=world)
-    WD t=(world
-   W x=316 s=0 z=100 t=(hello
-    WD t=hello)
+   W x=256 s=0 z=100 t=)
+    WD t=(
+   W x=267 s=0 z=100 t=hello
+   W x=324 s=0 z=100 t=world
+   W x=367 s=0 z=100 t=(
+    WD t=)
    W x=385 s=0 z=100 t=אמר
     WD t=רמא
    W x=417 s=0 z=100 t=הוא
     WD t=אוה
-   O order=8,7,6,5,4,3,2,1,0
+   O order=10,9,8,7,6,5,3,4,2,1,0
   LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=74 s=0 z=100 t=בלבד.
     WD t=.דבלב

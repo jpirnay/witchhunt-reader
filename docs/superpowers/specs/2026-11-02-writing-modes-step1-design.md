@@ -151,6 +151,14 @@ The baseline is crosspoint-reader `develop` @ `e8299b5f` (2026-11-02).
       `םולש3 : posts` instead of `3 :םולש posts`.
     - Every CSS `unicode-bidi: embed` or `bidi-override` span (deviation 5) would mis-order the neutrals after it.
     - It is to be offered upstream.
+13. **A bracket pair resolves only its brackets** (UAX #9 N0). In `do_bidi`, N0 sets the two brackets of a pair to the
+    pair's direction and leaves the neutrals inside to N1/N2; upstream sets every neutral between them to the pair's
+    direction too.
+    - Upstream draws `(hello world)` in a right-to-left paragraph as `(world hello)`: the space between two Latin
+      words became R.
+    - The rule's NSM sentence is added: characters that were NSM before W1 and directly follow a changed bracket take
+      its new type.
+    - It is to be offered upstream.
 
 ## How a paragraph is laid out
 

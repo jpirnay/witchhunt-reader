@@ -830,8 +830,16 @@ int do_bidi(bool autodir, int paragraphLevel, bidi_char* line, int count) {
 
         types[open_pos] = dir;
         types[i] = dir;
-        for (int m = open_pos + 1; m < i; m++)
-          if (is_NI(types[m])) types[m] = dir;
+        // witchhunt: deviation 13 - only the two brackets change (UAX #9 N0); the neutrals inside are left to N1/N2.
+        // Upstream also set every neutral between them to dir. Characters that were NSM before W1 and directly follow
+        // a changed bracket take its new type.
+        for (int b = 0; b < 2; b++) {                                      // witchhunt: deviation 13
+          for (int m = (b ? i : open_pos) + 1; m < count; m++) {           // witchhunt: deviation 13
+            if (skip[m]) continue;                                         // witchhunt: deviation 13
+            if (bidi_class(line[m].wc) != NSM || !is_NI(types[m])) break;  // witchhunt: deviation 13
+            types[m] = dir;                                                // witchhunt: deviation 13
+          }
+        }
       }
     }
 #undef BRACKET_STACK

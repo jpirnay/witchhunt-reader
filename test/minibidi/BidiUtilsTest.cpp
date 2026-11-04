@@ -265,3 +265,29 @@ TEST(BidiUtils, AnOverrideStillReversesItsText) {
   ASSERT_TRUE(r.ok);
   EXPECT_EQ(r.visual, (Idx{0, 1, 2, 3, 7, 6, 5, 4, 8, 9, 10}));
 }
+
+// UAX #9 N0 sets the two brackets of a pair and nothing else; the neutrals inside are N1's and N2's.
+TEST(BidiUtils, ABracketPairLeavesTheSpaceInsideToN1) {
+  // alef mem resh, " (hello world) ", bet in a right-to-left paragraph: the space between the two Latin words has L on
+  // both sides, so it is left to right and "hello world" keeps its order inside the mirrored brackets.
+  const CP in{0x05D0, 0x05DE, 0x05E8, ' ', '(', 'h', 'e', 'l', 'l',   'o',
+              ' ',    'w',    'o',    'r', 'l', 'd', ')', ' ', 0x05D1};
+  EXPECT_EQ(visual(in, 1), (CP{0x05D1, ' ', '(', 'h', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', ')', ' ',
+                               0x05E8, 0x05DE, 0x05D0}));
+}
+
+TEST(BidiUtils, ABracketPairOfOppositeTextInContextTakesTheContext) {
+  // UAX #9 N0 c: the pair holds only text opposite to the embedding direction, and the strong text before it is that
+  // direction too ("book(s)" after the L of "book"), so both brackets are L and are not mirrored.
+  const CP in{0x05D0, ' ', 'b', 'o', 'o', 'k', '(', 's', ')', ' ', 0x05D1};
+  EXPECT_EQ(visual(in, 1), (CP{0x05D1, ' ', 'b', 'o', 'o', 'k', '(', 's', ')', ' ', 0x05D0}));
+}
+
+TEST(BidiUtils, AnNsmAfterAChangedBracketTakesItsType) {
+  // UAX #9 N0: a character whose original class was NSM, directly after a bracket N0 changed, takes the bracket's new
+  // type. The closing bracket of "book(s)" becomes L, so the accent after it is L, level 2, and stays in the Latin run.
+  const CP in{0x05D0, ' ', 'b', 'o', 'o', 'k', '(', 's', ')', 0x0301, ' ', 0x05D1};
+  const auto r = order(in, 1);
+  ASSERT_TRUE(r.ok);
+  EXPECT_EQ(r.visual, (Idx{11, 10, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0}));
+}
