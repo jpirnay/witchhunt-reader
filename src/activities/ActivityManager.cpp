@@ -222,8 +222,8 @@ void ActivityManager::renderTaskLoop() {
 }
 
 // For a panel that ghosts badly under FAST (HalCapabilities::clearsGhostsOnEveryScreen()). Here
-// rather than in the activities because every screen passes through this one point, so a screen
-// cannot be forgotten, and arming beats whatever mode its render() asks for.
+// rather than in the activities because every render() passes through this one point, and arming
+// beats whatever mode it asks for. A screen that paints outside render() has to call this itself.
 //  - The first frame after any activity change gets a HALF. That is entering and leaving alike:
 //    leaving an activity is the first frame of whatever comes next, on a push, pop or replace.
 //  - A non-reader screen gets a HALF every refreshFrequencyPages frames, counted like the reader
@@ -235,8 +235,7 @@ void ActivityManager::renderTaskLoop() {
 void ActivityManager::armGhostClearingRefresh() {
   if (!HalCapabilities::clearsGhostsOnEveryScreen()) return;
   const uint32_t changes = activityChanges.load(std::memory_order_relaxed);
-  const bool activityChanged = changes != activityChangesRendered;
-  activityChangesRendered = changes;
+  const bool activityChanged = activityChangesRendered.exchange(changes, std::memory_order_relaxed) != changes;
 
   const int frequency = SETTINGS.getRefreshFrequency();
   const bool cadenceDue = frequency > 0 && !currentActivity->isReaderActivity() &&
