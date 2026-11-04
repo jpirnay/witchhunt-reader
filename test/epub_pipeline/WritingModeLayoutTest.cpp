@@ -1079,13 +1079,15 @@ TEST_F(BidiLayout, AnLtrSpanLeavesTheBreaksAtItsEdgesAsTheyWere) {
 }
 
 TEST_F(BidiLayout, AnIsolateAcrossALineBreakKeepsItsOrder) {
-  // 210 px: the first line ends after "three", and the second holds the span's last four words and עולם. The isolate
-  // opened on the first line runs on: its words read left to right, and the Hebrew after it reads on their left.
+  // 210 px: the first line holds "one two three four", the second "five six seven." and עולם. The isolate opened on
+  // the first line runs on into the second (the line pass opens it again at the line's start): its words read left to
+  // right, its period stays with "seven", and the Hebrew after it reads on their left. Without the isolate the period
+  // sits between Latin and Hebrew in a right-to-left paragraph and is drawn on its own, left of "five".
   pipeline_harness::Profile narrow = bookAlignment();
   narrow.viewportWidth = 210;
-  const char* const span[] = {"one", "two", "three", "four", "five", "six", "seven"};
+  const char* const span[] = {"one", "two", "three", "four", "five", "six", "seven."};
   const std::string out = dump(
-      "", document("<p dir=\"rtl\">שלום <span dir=\"ltr\">one two three four five six seven</span> עולם</p>"), narrow);
+      "", document("<p dir=\"rtl\">שלום <span dir=\"ltr\">one two three four five six seven.</span> עולם</p>"), narrow);
   const auto lines = parseLines(out);
   ASSERT_GE(lines.size(), 2u) << out;
   const auto drawn = [](const Word& word) { return word.display.empty() ? word.text : word.display; };
@@ -1100,11 +1102,13 @@ TEST_F(BidiLayout, AnIsolateAcrossALineBreakKeepsItsOrder) {
   std::vector<std::pair<int, int>> spanWords;  // source index, x
   for (const Word& word : last->words) {
     if (word.text == kOlam) olamX = word.x;
+    EXPECT_NE(".", drawn(word)) << out;
     for (int i = 0; i < 7; ++i) {
       if (drawn(word) == span[i]) spanWords.emplace_back(i, word.x);
     }
   }
   ASSERT_GE(spanWords.size(), 2u) << out;
+  EXPECT_EQ(6, spanWords.back().first) << out;  // "seven." whole, the line's last span word
   for (size_t i = 1; i < spanWords.size(); ++i) {
     EXPECT_GT(spanWords[i].first, spanWords[i - 1].first) << "visual order " << i;
   }
