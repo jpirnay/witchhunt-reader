@@ -269,6 +269,29 @@ class TextPage(unittest.TestCase):
         self.assertEqual(bytes(plain), bytes(reversed(turned)))
 
 
+class FastVariants(unittest.TestCase):
+    def test_production_shape_is_reproduced(self):
+        bank = lab.fast_variant()
+        for slot in (lab.KW, lab.WK, lab.KK):
+            self.assertEqual(lab.describe(bank[slot]), lab.describe(lab.FAST_BANK[slot]))
+        self.assertEqual(lab.total_frames(bank[lab.VCOM]), 16)
+
+    def test_longer_white_stretches_the_vcom_lut(self):
+        bank = lab.fast_variant(24)
+        self.assertEqual(lab.describe(bank[lab.KW]), "VSL24 rest1")
+        self.assertEqual(lab.total_frames(bank[lab.VCOM]), 25)
+
+    def test_touch_mirrors_the_black_one(self):
+        self.assertEqual(lab.describe(lab.fast_variant(white_touch=1)[lab.WW]), "rest15 VSL1")
+
+    def test_every_variant_is_inside_the_rules(self):
+        for name, (cfg, bank) in lab.FAST_VARIANTS.items():
+            with self.subTest(name):
+                self.assertIn(cfg, lab.CONFIGS)
+                self.assertTrue(all(abs(lab.net_drive(table)) <= 32 for table in bank))
+                self.assertTrue(all(lab.total_frames(table) <= 96 for table in bank))
+
+
 class FastPageTurn(unittest.TestCase):
     def slots(self, old, new, aware):
         frame = lab.fast_frame(bytearray([old]) * (lab.WIDTH * lab.HEIGHT), bytearray([new]) * (lab.WIDTH * lab.HEIGHT), aware)
@@ -370,6 +393,13 @@ class Handover(Bench):
         self.assertEqual(lab.READER_GRAY_BANK[lab.WW][:7], bytes([1, 0x43, 0x83, 0, 0, 1, 1]))
         self.assertEqual(lab.READER_GRAY_BANK[lab.KW][:7], bytes([1, 0x44, 0x84, 0, 0, 1, 1]))
         self.assertTrue(all(lab.net_drive(table) == 0 for table in lab.READER_GRAY_BANK))
+
+
+class FastPatch(Bench):
+    def test_every_variant_runs_through_the_firmware_rules(self):
+        for name in lab.FAST_VARIANTS:
+            lab.test6_patch(self.lab, name, 1)
+        self.assertEqual(self.lab.journal(), [])
 
 
 class Failure(Bench):

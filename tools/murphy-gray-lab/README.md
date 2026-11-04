@@ -229,6 +229,12 @@ mid-tones inverted. With the swap in the driver, the gray landed 330 ms after th
 590 ms, and real pages matched a cold build within a point on row means. Levels also carry history:
 black driven repeatedly lifts several points less than the Test 2 table says.
 
+**Test 6: how much does FAST ghost, and what helps?** `./lab.py t6 <variant>` takes a patch white, black,
+white through FAST beside a strip that never changes, and `./cam.py strip` reports the difference.
+`--settled` draws the black with a full refresh first, which is what UI black is, and `--dwell` leaves
+it up. Check `./cam.py still baseline-white <shot>` after each run: a bumped camera reads as a result.
+The numbers are in `docs/future_work/murphy-gray.md`.
+
 **Still open.** Long-term DC behaviour. The BMP viewer has not been run. A book with a stored
 `textAntiAliasingOverride` of 0 stays B/W, whatever the setting says.
 
