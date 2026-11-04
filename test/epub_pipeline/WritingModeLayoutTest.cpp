@@ -690,7 +690,7 @@ TEST(BidiFallback, ALineThePassCannotRunOnIsLaidOutWithoutItsControls) {
   text.addWord(kOlam, EpdFontFamily::REGULAR);
   const GfxRenderer renderer;
   std::vector<std::unique_ptr<TextBlock>> lines;
-  BidiUtils::releaseWorkspace();
+  BidiLine::releaseBuildMemory();  // the Scratch too: one an earlier test left held would hide the null-scratch branch
   gBidiErrors = 0;
   setLogObserver(countBidiErrors);
   {

@@ -11,7 +11,9 @@
 namespace BidiLine {
 namespace {
 
-// The build's heap Scratch (heapScratch): the loop task alone runs the line pass, so it needs no lock.
+// The build's heap Scratch (heapScratch): builds and the dictionary pages run under RenderLock, one line pass at a
+// time, so it needs no lock.
+bool heapScratchRefusalLogged = false;  // logged once until releaseBuildMemory()
 std::unique_ptr<Scratch> heapScratchStore;
 
 constexpr uint32_t LRE = 0x202A, RLE = 0x202B, PDF = 0x202C, LRO = 0x202D, RLO = 0x202E;
@@ -628,7 +630,8 @@ ArenaWorkspace::~ArenaWorkspace() {
 Scratch* heapScratch() {
   if (!heapScratchStore) {
     heapScratchStore = makeUniqueNoThrow<Scratch>();
-    if (!heapScratchStore) {
+    if (!heapScratchStore && !heapScratchRefusalLogged) {
+      heapScratchRefusalLogged = true;
       LOG_ERR("BIDI", "No %u B for the line pass: laid out without bidi", static_cast<unsigned>(sizeof(Scratch)));
     }
   }
@@ -637,6 +640,7 @@ Scratch* heapScratch() {
 
 void releaseBuildMemory() {
   heapScratchStore.reset();
+  heapScratchRefusalLogged = false;
   BidiUtils::releaseWorkspace();
 }
 

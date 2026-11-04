@@ -79,6 +79,11 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
   const char* limitReason = nullptr;
   size_t retainedElements = 0;
   bool parsed = false;
+  // No Section build ends here, so nothing else frees the line pass's heap memory (a right-to-left article made it).
+  // Declared before the parser's block: it runs on every exit, after the parser is gone.
+  struct ReleaseBidiMemory {
+    ~ReleaseBidiMemory() { BidiLine::releaseBuildMemory(); }
+  } releaseBidiMemory;
   {
     // Heap-allocated as Section does -- the parser object is far too large for a
     // stack local. A null epub is safe here because imageRendering=2 suppresses
@@ -141,8 +146,6 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
     parsed = parser->finalize() && streamed && parser->streamSucceeded();
     if (!parsed) LOG_ERR("DHTML", "Definition is not parseable as XHTML; falling back to plain text");
   }
-  // No Section build ends here, so nothing else frees the line pass's heap memory (a right-to-left article made it).
-  BidiLine::releaseBuildMemory();
 
   if (!parsed || resourceLimitHit || pagesOut.empty()) {
     pagesOut.clear();
