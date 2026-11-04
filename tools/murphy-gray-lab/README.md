@@ -195,9 +195,25 @@ Compare shots taken close together. Room light moved these numbers by several po
 always as a smooth gradient, and `cam.py ghost` reports that as spread. Moving the camera at all means
 new baselines, marks and `calibrate`.
 
-**Still open.** Aware adds net drive: a light pixel returning to white takes 15 frames toward white
-that nothing pays back, which only a long test or a balanced cleanup can answer. Test 5, the firmware
-behind a build flag, is not built.
+Held for 10 minutes, gray moved at most 1.4 points against the clean strip beside it. Absolute levels
+sagged by up to 5, and the clean white strip sagged with them.
+
+**Test 5: the reader, in `env:murphy_gray`** (branch `feat/murphy-gray`, SDK `feat/murphy-gray`).
+
+The lab differs from the reader in one way that matters. `overlay` here keeps light pixels white and
+nudges them down. GfxRenderer's B/W pass draws every antialiased pixel black, so the reader lifts both
+grays from black: light is 4 frames (58 %) and dark 3 (35 %), on the VSL curve above. That also removes
+most of the DC concern, because a fringe pixel goes white to black, takes a net-zero nudge, and goes
+black to white on the next page, which is the ordinary cycle. Only gray that stays black takes unpaid
+drive, through the gray-aware FAST.
+
+Result on our unit, 2026-11-04, a real book at the production refresh cycle of one HALF in five:
+20 pages took 20 nudges, about 0.55 s each after a 0.72 s FAST. The last page differed from a clean
+redraw of the same page by 0.9 of a 105 range, with no structure. The reader menu and a cover image
+work, and an idle minute refreshes nothing. No errors, and heap ended where it started.
+
+**Still open.** Long-term DC behaviour. Sleep covers and the BMP viewer have not been run. A book with a
+stored `textAntiAliasingOverride` of 0 stays B/W, whatever the setting says.
 
 ## Protocol
 
