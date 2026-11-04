@@ -3769,12 +3769,15 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   }
 
   // The element's bidi markup goes into its text, after any flush above and once its block, if it opens one, has
-  // started (deviation 5). A block the parser does not open (html, body, a list, a table) inserts nothing.
-  if (opensBlockSpan || matches(name, HEADER_TAGS, NUM_HEADER_TAGS) ||
-      (matches(name, BLOCK_TAGS, NUM_BLOCK_TAGS) && strcmp(name, "br") != 0)) {
-    self->openBidiEdge(cssStyle, /*inlineElement=*/false);
-  } else if (matches(name, INLINE_FORMATTING_TAGS, NUM_INLINE_FORMATTING_TAGS)) {
-    self->openBidiEdge(cssStyle, /*inlineElement=*/true);
+  // started (deviation 5). A block the parser does not open (html, body, a list, a table) inserts nothing. Most
+  // elements have no unicode-bidi: they pay one comparison, not the tag lists.
+  if (cssStyle.unicodeBidi != CssUnicodeBidi::Unset && cssStyle.unicodeBidi != CssUnicodeBidi::Normal) {
+    if (opensBlockSpan || matches(name, HEADER_TAGS, NUM_HEADER_TAGS) ||
+        (matches(name, BLOCK_TAGS, NUM_BLOCK_TAGS) && strcmp(name, "br") != 0)) {
+      self->openBidiEdge(cssStyle, /*inlineElement=*/false);
+    } else if (matches(name, INLINE_FORMATTING_TAGS, NUM_INLINE_FORMATTING_TAGS)) {
+      self->openBidiEdge(cssStyle, /*inlineElement=*/true);
+    }
   }
 
   // Unprocessed tag, just increasing depth and continue forward
