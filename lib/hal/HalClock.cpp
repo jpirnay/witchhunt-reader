@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 
 #include "HalI2cBus.h"
 
@@ -147,6 +148,9 @@ static constexpr char NVS_TEMP_KEY[] = "lasttemp";
 // device can reboot many times between sleeps (every reflash does), and each of
 // those boots would otherwise report the same ever-staler figure.
 static constexpr char NVS_SLEEP_KEY[] = "sleepmark";
+// The POSIX TZ rule in force, kept here as well as in the settings because the settings file is on
+// the card: see applyStoredTimezone().
+static constexpr char NVS_TZ_KEY[] = "tzrule";
 
 static void nvsWrite(time_t epoch) {
   Preferences prefs;
@@ -245,6 +249,29 @@ static time_t nvsReadSyncTime() {
     prefs.end();
   }
   return syncEpoch;
+}
+
+static void nvsWriteTimezone(const char* posixTz) {
+  Preferences prefs;
+  if (prefs.begin(NVS_NAMESPACE, false)) {
+    prefs.putString(NVS_TZ_KEY, posixTz);
+    prefs.end();
+  }
+}
+
+// Bring back the rule the last boot ran under, so the clock is on local time before the card can
+// be written. FAT stores local time with no zone, so a file written while TZ is unset carries UTC
+// for good, and the zone cannot come from the settings at that point: they are on that same card.
+// Boots that have never recorded a rule keep UTC until timezones::applyToClock() runs.
+static void applyStoredTimezone() {
+  char rule[64] = {};  // the longest rule in the table is 30 characters
+  Preferences prefs;
+  if (!prefs.begin(NVS_NAMESPACE, true)) return;
+  const bool found = prefs.isKey(NVS_TZ_KEY) && prefs.getString(NVS_TZ_KEY, rule, sizeof(rule)) > 0;
+  prefs.end();
+  if (!found) return;
+  setenv("TZ", rule, 1);
+  tzset();
 }
 
 // ---- internal helpers -----------------------------------------------------
@@ -537,9 +564,14 @@ static void capture(bool lpContinuous) {
 namespace HalClock {
 
 void applyTimezone(const char* posixTz) {
-  if (posixTz == nullptr || posixTz[0] == ' ') return;
+  if (posixTz == nullptr || posixTz[0] == '\0') return;
+  // The usual case at boot, restore() having got here first: one flash write per change of zone,
+  // not one per boot.
+  const char* current = getenv("TZ");
+  if (current != nullptr && strcmp(current, posixTz) == 0) return;
   setenv("TZ", posixTz, 1);
   tzset();
+  nvsWriteTimezone(posixTz);
   LOG_DBG("CLK", "Timezone applied: %s", posixTz);
 }
 
@@ -847,6 +879,8 @@ void saveBeforeSleep(bool keepLpAlive) {
 }
 
 void restore() {
+  applyStoredTimezone();
+
   // Claim any pending sleep marker up front, exactly once per boot. Only the
   // branches below whose wall clock came from a source that ran THROUGH the
   // sleep can turn it into a duration; the rest just consume it so a later boot

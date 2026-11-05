@@ -47,7 +47,8 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer = 
 /// reordered table in this file silently move every user to a different timezone. Call it
 /// through timezones::applyToClock() rather than directly.
 ///
-/// A null or empty string is ignored, leaving the current zone in place.
+/// A null or empty string is ignored, leaving the current zone in place. A rule that changes the
+/// zone is also remembered in NVS, for restore() to apply on the next boot.
 void applyTimezone(const char* posixTz);
 
 /// Call just before deep sleep.  Snapshots the current system time to RTC
@@ -58,7 +59,11 @@ void saveBeforeSleep(bool keepLpAlive);
 /// Call on boot to seed the system clock from the best available stored
 /// value.  When RTC memory is valid (deep-sleep wake) and the LP timer was
 /// running, the restored time includes elapsed-time correction.  Falls back
-/// to NVS for cold boot (stale, but better than nothing).
+/// to NVS for cold boot (stale, but better than nothing).  Also applies the
+/// timezone rule the last boot ran under.
+///
+/// Call it before anything can write to the card: a file is dated by the clock
+/// at that moment, and FAT keeps no zone to correct it with afterwards.
 void restore();
 
 /// Returns the current best-effort wall-clock epoch, or 0 if the clock was
