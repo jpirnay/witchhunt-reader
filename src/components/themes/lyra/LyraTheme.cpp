@@ -815,8 +815,7 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
 
     if (rowIcon != nullptr) {
       UIIcon icon = rowIcon(i);
-      // A compact panel's rows can be shorter than the big icon, which would run into its neighbours.
-      int iconSize = rowHeight >= mainMenuIconSize ? mainMenuIconSize : listIconSize;
+      int iconSize = mainMenuIconSize;
       const uint8_t* iconBitmap = iconForName(icon, iconSize);
       if (iconBitmap == nullptr) {
         // Some icons only have 24px variants; fall back so they still render.
