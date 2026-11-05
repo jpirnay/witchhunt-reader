@@ -435,6 +435,19 @@ static int uncountedControlLen(const char* s, const int i, const int len) {
   return BidiLine::isUncountedControl(codepointAt(s + i, len - i)) ? (b0 == 0xE2 ? 3 : 2) : 0;
 }
 
+// Deviation 8: a lone ZWJ or ZWNJ stays in the text after a letter of a script the shaper reads it in (a half form, a
+// chillu, a cluster kept apart); after anything else it is dropped with the other default-ignorables. The Indic blocks
+// so far; the Arabic ones come with their shaping.
+static bool keepsJoinerAfter(const uint32_t cp) { return cp >= 0x0900 && cp <= 0x0DFF; }
+
+// U+200C or U+200D when the 3 bytes at s[i] are one, else 0 (also when the sequence runs past `len`: characterData
+// completes a split one before consumeText sees it).
+static uint32_t joinerAt(const char* s, const int i, const int len) {
+  if (static_cast<uint8_t>(s[i]) != 0xE2 || i + 2 >= len || static_cast<uint8_t>(s[i + 1]) != 0x80) return 0;
+  const auto last = static_cast<uint8_t>(s[i + 2]);
+  return last == 0x8C || last == 0x8D ? 0x2000u | (last & 0x3Fu) : 0;  // 0x8C is U+200C, 0x8D is U+200D
+}
+
 // The most bytes of controls held for one word: eight, as many as the line pass keeps open
 // (BidiLine::kMaxOpenControls). A longer run is cut there, so a buffer of held controls always has room for the word.
 // Only the closers of the markup's controls go in past it (closeBidiEdges).
@@ -1530,6 +1543,30 @@ void ChapterHtmlSlimParser::closeBidiEdges(const int elementDepth) {
   }
 }
 
+bool ChapterHtmlSlimParser::releaseHeldJoiner(const uint32_t offset) {
+  const uint32_t joiner = heldJoiner_;
+  heldJoiner_ = 0;
+  if (partWordBufferIndex + 3 > MAX_WORD_SIZE) {
+    if (!flushPartWordBuffer()) return false;
+    nextWordContinues = true;  // the word goes on in the next token: glued, no space
+  }
+  // E2 80 8C or E2 80 8D. The first byte sets the word's offset only when the joiner opens it: at the code point after.
+  appendPartWordText('\xE2', offset);
+  appendPartWordText('\x80', offset);
+  appendPartWordText(joiner == 0x200D ? '\x8D' : '\x8C', offset);
+  return true;
+}
+
+void ChapterHtmlSlimParser::settleHeldJoiner() {
+  if (heldJoiner_ == 0) return;
+  const uint32_t joiner = heldJoiner_;
+  heldJoiner_ = 0;
+  if (!partWordHasText() || partWordBufferIndex + 3 > MAX_WORD_SIZE) return;
+  appendPartWordText('\xE2', partWordVisibleOffset_);
+  appendPartWordText('\x80', partWordVisibleOffset_);
+  appendPartWordText(joiner == 0x200D ? '\x8D' : '\x8C', partWordVisibleOffset_);
+}
+
 bool ChapterHtmlSlimParser::addNoBreakSpace(const uint32_t offset) {
   // Controls held for the next word wait out the space: " " stays the token ParsedText knows as a no-break space. The
   // copy takes all a held run can be, kMaxHeldControlBytes and the closers of the open elements' markup, which go in
@@ -2162,6 +2199,9 @@ void ChapterHtmlSlimParser::startNewTextBlockWithinElements(const BlockStyle& bl
 
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
+  heldJoiner_ = 0;  // the paragraph before is flushed already: a joiner still held has no word to end
+  joinerLookBehind_ = 0;
+  droppingJoinerRun_ = false;
   dropHeldBidiControls();                               // they end with the paragraph they were held in
   flushedWordTarget_ = nullptr;                         // and no closer ends a word of that paragraph
   nextWordContinues = false;                            // New block = new paragraph, no continuation
@@ -3790,12 +3830,50 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   self->depth += 1;
 }
 
-void ChapterHtmlSlimParser::characterData(void* userData, const char* s, const int len) {
+void ChapterHtmlSlimParser::characterData(void* userData, const char* s, int len) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
   const bool source = self->xpathBodyDepth >= 0 && self->nonVisibleTextDepth_ == 0;
-  const uint32_t base = self->visibleTextOffset_;
+  uint32_t base = self->visibleTextOffset_;
   if (source) {
     self->visibleTextOffset_ += static_cast<uint32_t>(VisibleText::visibleBytes(s, len));
+  }
+
+  // A 3-byte sequence the last chunk ended inside is completed from this one and read whole, so a letter or a joiner
+  // (deviation 8) is never read in halves. Bytes that do not complete it (malformed text) go on as they came.
+  if (self->splitTailLen_ > 0) {
+    const int have = self->splitTailLen_;
+    const int need = 3 - have;
+    int take = 0;
+    while (take < need && take < len && (static_cast<uint8_t>(s[take]) & 0xC0) == 0x80) ++take;
+    if (take == len && take < need) {  // the chunk ends inside it again
+      memcpy(self->splitTail_ + have, s, static_cast<size_t>(take));
+      self->splitTailLen_ = static_cast<uint8_t>(have + take);
+      return;
+    }
+    char whole[3];
+    memcpy(whole, self->splitTail_, static_cast<size_t>(have));
+    memcpy(whole + have, s, static_cast<size_t>(take));
+    self->splitTailLen_ = 0;
+    consumeText(userData, whole, have + take, self->splitTailOffset_, source);
+    s += take;
+    len -= take;
+    if (source) base += static_cast<uint32_t>(take);
+  }
+
+  // The chunk's own end: a lead byte of a 3-byte sequence (E0: the Indic blocks; E2: the joiners) with its sequence cut
+  // off waits for the next chunk.
+  int tail = 0;
+  if (len >= 1 && (static_cast<uint8_t>(s[len - 1]) == 0xE0 || static_cast<uint8_t>(s[len - 1]) == 0xE2)) {
+    tail = 1;
+  } else if (len >= 2 && (static_cast<uint8_t>(s[len - 2]) == 0xE0 || static_cast<uint8_t>(s[len - 2]) == 0xE2) &&
+             (static_cast<uint8_t>(s[len - 1]) & 0xC0) == 0x80) {
+    tail = 2;
+  }
+  if (tail > 0) {
+    len -= tail;
+    memcpy(self->splitTail_, s + len, static_cast<size_t>(tail));
+    self->splitTailLen_ = static_cast<uint8_t>(tail);
+    self->splitTailOffset_ = source ? base + static_cast<uint32_t>(VisibleText::visibleBytes(s, len)) : base;
   }
   consumeText(userData, s, len, base, source);
 }
@@ -3934,6 +4012,9 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     // All multi-byte UTF-8 sequences start with a byte >= 0x80, so this
     // path is safe to take without any further multi-byte checks.
     if (c > 0x20 && c < 0x80) {
+      if (self->heldJoiner_ != 0 && !self->releaseHeldJoiner(byteOff)) return;
+      self->droppingJoinerRun_ = false;
+      self->joinerLookBehind_ = c;
       if (self->partWordBufferIndex >= MAX_WORD_SIZE) {
         // Buffer is full — flush before appending. Pure ASCII means no
         // partial multi-byte sequence can be at the boundary. The next chunk continues the same
@@ -3951,6 +4032,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     }
 
     if (isWhitespace(s[i])) {
+      self->endJoinerContext();  // a chillu's joiner goes last in the word before the space
       // Inside <pre>: treat \n as a hard line break.
       if (s[i] == '\n' && self->preUntilDepth < self->depth) {
         if (self->partWordBufferIndex > 0) {
@@ -3995,6 +4077,23 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
       continue;
     }
 
+    // A ZWJ or ZWNJ after a shaped-script letter waits for the next code point (releaseHeldJoiner, settleHeldJoiner),
+    // which says whether it is alone: a second one drops both and the rest of the run. It counts nowhere, like the
+    // controls above. After anything else it goes with the default-ignorables below.
+    if (const uint32_t joiner = joinerAt(s, i, len); joiner != 0) {
+      if (self->droppingJoinerRun_) {
+        // the run goes on
+      } else if (self->heldJoiner_ != 0) {
+        self->heldJoiner_ = 0;
+        self->droppingJoinerRun_ = true;
+      } else if (keepsJoinerAfter(self->joinerLookBehind_)) {
+        self->heldJoiner_ = joiner;
+      }
+      i += 2;
+      if (source) off += 2;
+      continue;
+    }
+
     // Drop Default_Ignorable formatting controls before they can become text.
     //
     // Unlike the no-break spaces below these produce NO token at all: they are not word
@@ -4030,6 +4129,8 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     //   standalone word for hyphenation purposes, so Liang patterns can produce
     //   "200 Quadrat-" / "kilometer" instead of the unusable "200" / "Quadratkilometer".
     if (static_cast<uint8_t>(s[i]) == 0xC2 && i + 1 < len && static_cast<uint8_t>(s[i + 1]) == 0xA0) {
+      self->endJoinerContext();
+      self->joinerLookBehind_ = 0x00A0;
       if (!self->addNoBreakSpace(byteOff)) return;
       i++;  // Skip the second byte (0xA0)
       if (source) off++;
@@ -4039,6 +4140,8 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     // U+202F (narrow no-break space) — identical logic to U+00A0 above.
     if (static_cast<uint8_t>(s[i]) == 0xE2 && i + 2 < len && static_cast<uint8_t>(s[i + 1]) == 0x80 &&
         static_cast<uint8_t>(s[i + 2]) == 0xAF) {
+      self->endJoinerContext();
+      self->joinerLookBehind_ = 0x202F;
       if (!self->addNoBreakSpace(byteOff)) return;
       i += 2;  // Skip the remaining two bytes (0x80 0xAF)
       if (source) off += 2;
@@ -4064,6 +4167,9 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     // across SAX chunks (cp 0) is not counted.
     if (c >= 0xC0) {
       const uint32_t cp = codepointAt(s + i, len - i);
+      if (self->heldJoiner_ != 0 && !self->releaseHeldJoiner(byteOff)) return;
+      self->droppingJoinerRun_ = false;
+      if (cp != 0) self->joinerLookBehind_ = cp;
       if (utf8IsCjkBreakable(cp)) {
         if (self->partWordCjkCodepoints_ >= kCjkRunCodepoints) {
           if (!self->flushPartWordBuffer()) return;
@@ -4193,6 +4299,9 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
     LOG_DBG("EHP", "nested table end, depth now %d", self->currentTable->depth);
     return;
   }
+
+  // A block's or a cell's end ends its word, and a joiner held at it (a chillu's) goes in last.
+  if (headerOrBlockTag || closesBlockSpan || tableStructuralTag || self->depth == 1) self->endJoinerContext();
 
   // Flush buffer with current style BEFORE any style changes
   if (self->partWordHasText()) {

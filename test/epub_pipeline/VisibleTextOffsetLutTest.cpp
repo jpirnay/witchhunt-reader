@@ -390,6 +390,31 @@ TEST_F(SyntheticLutFixture, InsertedControlsCountNowhere) {
   }
 }
 
+// A guard, not a RED test: a kept joiner moves nothing the LUT holds, and before the change there was none to keep.
+TEST_F(SyntheticLutFixture, KeptJoinersMoveNoPageStart) {
+  // A kept joiner is in the source, so VisibleText counts its 3 bytes; no word's offset starts at it. Each paragraph is
+  // one line of 24 visible bytes (क् 6, the ZWJ 3, ष 3, "कमल।" 12), so every page opens on a paragraph, at its index
+  // times 24; the page breaks are those of the same book without the joiner (21 bytes a paragraph).
+  constexpr uint32_t kPlainBytes = 21;
+  constexpr uint32_t kParagraphBytes = 24;
+  std::string joined;
+  std::string plain;
+  for (int i = 0; i < 120; ++i) {
+    joined +=
+        "<p>क्\xE2\x80\x8D"
+        "ष कमल।</p>\n";
+    plain += "<p>क्ष कमल।</p>\n";
+  }
+  const auto withJoiners = build(book(joined));
+  const auto without = build(book(plain));
+  ASSERT_GT(without->pageCount, 1);
+  ASSERT_EQ(withJoiners->pageCount, without->pageCount);
+  for (uint16_t page = 0; page < without->pageCount; ++page) {
+    const uint32_t paragraph = *without->getVisibleTextOffsetForPage(page) / kPlainBytes;
+    EXPECT_EQ(*withJoiners->getVisibleTextOffsetForPage(page), paragraph * kParagraphBytes) << "page " << page;
+  }
+}
+
 TEST_F(SyntheticLutFixture, EmptyPageStartsWhereTheNextElementDoes) {
   // A top margin taller than the page pushes the opening paragraph's first line off page 0, which
   // goes out with nothing on it. That happens while the paragraph is laid out, after its text was

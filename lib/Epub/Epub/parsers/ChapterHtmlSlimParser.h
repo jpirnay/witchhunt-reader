@@ -163,6 +163,28 @@ class ChapterHtmlSlimParser final : public Print {
   bool partWordLastWasCjk_ = false;
   // The last codepoint of the last word flushed, kept across whitespace (set by flushPartWordBuffer).
   uint32_t lastTextCodepoint_ = 0;
+  // Deviation 8. The last text code point consumeText took, kept across calls and inline element edges (0 after
+  // whitespace and at a block's start); and a ZWJ or ZWNJ held after a shaped-script letter until the next code point
+  // says whether it is alone.
+  uint32_t joinerLookBehind_ = 0;
+  uint32_t heldJoiner_ = 0;         // 0, U+200C or U+200D
+  bool droppingJoinerRun_ = false;  // a second joiner came: it, the held one and the rest of the run go
+  // Puts the held joiner into the word buffer ahead of the text code point at `offset`, which sets the word's offset if
+  // the joiner opens it. A word with no room for it is flushed first. False when the stream failed.
+  bool releaseHeldJoiner(uint32_t offset);
+  // Ends the held joiner's wait at a word's end: it goes last in a word that has text, else it goes.
+  void settleHeldJoiner();
+  // The joiner's context ends with the text: a block's or a table cell's end, a block's start.
+  void endJoinerContext() {
+    settleHeldJoiner();
+    joinerLookBehind_ = 0;
+    droppingJoinerRun_ = false;
+  }
+  // The start of a 3-byte sequence (E0 or E2 lead) a SAX chunk ended inside, with the visible offset of its first byte;
+  // characterData completes it from the next chunk, so a letter or joiner is never read in halves.
+  char splitTail_[2] = {};
+  uint8_t splitTailLen_ = 0;
+  uint32_t splitTailOffset_ = 0;
   // A whitespace run with a line break in it followed unspaced CJK text or a quotation mark
   // (lastTextCodepoint_). If the next word starts with unspaced CJK, or with a quote after unspaced
   // CJK (flushPartWordBuffer decides), the run vanishes instead of becoming a space (CSS Text 3
