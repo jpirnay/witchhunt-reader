@@ -9,6 +9,7 @@
 
 class FontDecompressor;
 class SdCardFont;
+struct GlyphRun;
 
 class FontCacheManager {
  public:
@@ -38,9 +39,15 @@ class FontCacheManager {
   void logStats(const char* label = "render");
   void resetStats();
 
+  // The glyph-ID prefetch of one font's `style`: `ids[0..count)` go to its provider in one batch
+  // (EpdFontFamily::prefetchGlyphs). Nothing for a font that draws no glyph keys.
+  void prewarmGlyphs(int fontId, const uint16_t* ids, size_t count, EpdFontFamily::Style style);
+
   // Scan-mode API: called by GfxRenderer::drawText() during scan pass
   bool isScanning() const;
   void recordText(const char* text, int fontId, EpdFontFamily::Style style);
+  // The same for a shaped run (GfxRenderer::drawGlyphRun): its glyph IDs, prewarmed by ID after the texts.
+  void recordGlyphs(const GlyphRun& run, int fontId, EpdFontFamily::Style style);
 
   // The FontDecompressor pointer, needed by GfxRenderer::getGlyphBitmap()
   FontDecompressor* getDecompressor() const { return fontDecompressor_; }
@@ -108,8 +115,12 @@ class FontCacheManager {
   // only the glyphs actually drawn in that style. Sharing one text buffer across styles warmed
   // the WHOLE page into every style that appeared — one italic word cost a full ~4-5 KB italic
   // slot, and a bionic page held 4 full slots (~20-26 KB of page buffers instead of ~5-8 KB).
+  //
+  // A shaped run's glyphs are kept per base style the same way, as glyph IDs: little-endian u16s,
+  // two bytes an ID.
   struct ScanEntry {
     std::string textByStyle[4];
+    std::string glyphsByStyle[4];
   };
   std::map<int, ScanEntry> scanByFont_;
 };

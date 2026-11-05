@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include "GlyphRun.h"
+
 namespace {
 
 // Appends the first `take` bytes of `text` as small caps draw them: each lowercase letter as the
@@ -129,6 +131,13 @@ void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t st
   }
 }
 
+void FontCacheManager::prewarmGlyphs(const int fontId, const uint16_t* ids, const size_t count,
+                                     const EpdFontFamily::Style style) {
+  if (!ids || count == 0) return;
+  // Only a TrueType family draws glyph keys; an SD or built-in font under the ID is not asked (prefetchGlyphs).
+  if (const EpdFontFamily* family = findFamily(fontId)) family->prefetchGlyphs(ids, count, style);
+}
+
 void FontCacheManager::logStats(const char* label) {
   if (fontDecompressor_) fontDecompressor_->logStats(label);
   for (auto& [id, font] : sdCardFonts_) {
@@ -179,6 +188,33 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
   }
 }
 
+void FontCacheManager::recordGlyphs(const GlyphRun& run, const int fontId, const EpdFontFamily::Style style) {
+  // Bounded and grown as recordText's text is: a page's distinct glyphs fit in far less than 512, and IDs past the
+  // cap are not prewarmed but looked up as they are drawn. 1 KB a style at most, held only until the prewarm.
+  constexpr size_t SCAN_GLYPHS_PER_STYLE = 512;
+  constexpr size_t SCAN_GLYPH_GROWTH_STEP = 128;
+  if (run.count == 0) return;
+  std::string& ids = scanByFont_[fontId].glyphsByStyle[static_cast<uint8_t>(style) & 0x03];
+  const size_t held = ids.size() / 2;
+  if (held >= SCAN_GLYPHS_PER_STYLE) return;
+  const size_t take = std::min<size_t>(run.count, SCAN_GLYPHS_PER_STYLE - held);
+  if (2 * (held + take) > ids.capacity()) {
+    const size_t want = 2 * std::min(SCAN_GLYPHS_PER_STYLE, (held + take + SCAN_GLYPH_GROWTH_STEP - 1) /
+                                                                SCAN_GLYPH_GROWTH_STEP * SCAN_GLYPH_GROWTH_STEP);
+    // The same guard as recordText's: a std::string reserve the heap cannot meet aborts the device, and libstdc++
+    // grows one to at least twice its old capacity. Without the block the IDs go unscanned and load on demand.
+    if (!heapHasBlockFor(std::max(want, 2 * ids.capacity()) + 1)) return;
+    ids.reserve(want);
+  }
+  size_t added = 0;
+  forEachGlyph(run, 0, false, [&ids, &added, take](const GlyphRecord& record, int) {
+    if (added == take) return;
+    ids.push_back(static_cast<char>(record.glyph & 0xFF));  // within the capacity reserved for `take`
+    ids.push_back(static_cast<char>(record.glyph >> 8));
+    ++added;
+  });
+}
+
 // --- PrewarmScope implementation ---
 
 FontCacheManager::PrewarmScope::PrewarmScope(FontCacheManager& manager) : manager_(&manager) {
@@ -218,6 +254,19 @@ void FontCacheManager::PrewarmScope::endScanAndPrewarm() {
 
   for (const auto& item : order) {
     manager_->prewarmCache(item.fontId, item.text->c_str(), static_cast<uint8_t>(1u << item.style));
+  }
+
+  // Then each shaped run's glyphs, by ID, in the style they were drawn in. The list's bytes are little-endian u16s,
+  // which on these targets is the array prefetchGlyphs reads; a std::string's buffer is aligned for one (operator
+  // new's, or the short-string buffer beside its pointer and length), and an unaligned one is skipped, not read.
+  static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the scan's glyph IDs are little-endian u16s in memory");
+  for (const auto& kv : manager_->scanByFont_) {
+    for (uint8_t i = 0; i < 4; i++) {
+      const std::string& ids = kv.second.glyphsByStyle[i];
+      if (ids.size() < 2 || reinterpret_cast<uintptr_t>(ids.data()) % alignof(uint16_t) != 0) continue;
+      manager_->prewarmGlyphs(kv.first, reinterpret_cast<const uint16_t*>(ids.data()), ids.size() / 2,
+                              static_cast<EpdFontFamily::Style>(i));
+    }
   }
 
   manager_->scanByFont_.clear();

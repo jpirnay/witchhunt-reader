@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "GlyphKey.h"
 #include "ScaledGlyphResample.h"
 
 namespace {
@@ -72,4 +73,26 @@ TEST(ScaledGlyphShrink, AnEdgeAcrossAPixelIsGrey) {
   ASSERT_FALSE(grey.empty()) << "no anti-aliasing levels";
   for (const auto& [x, y] : black) EXPECT_LT(x, 2) << "black at column " << x;
   for (const auto& [x, y] : grey) EXPECT_EQ(x, 2) << "grey at column " << x;
+}
+
+// A shaped run's glyph keys share the mask cache with code points. Its key keeps them apart: glyph 0x41 and 'A' have
+// the same 16 bits, and one's mask must never be served for the other.
+TEST(ScaledGlyphResample, AGlyphKeyHasACacheKeyOfItsOwn) {
+  constexpr ScaledGlyphKey glyph = scaledGlyphKeyOf(glyph_key::of(0x41));
+  EXPECT_EQ(0x41, glyph.id);
+  EXPECT_EQ(1, glyph.kind);
+  EXPECT_TRUE(glyph.cacheable);
+  constexpr ScaledGlyphKey letter = scaledGlyphKeyOf('A');
+  EXPECT_EQ(0x41, letter.id);
+  EXPECT_EQ(0, letter.kind);
+  EXPECT_TRUE(letter.cacheable);
+
+  EXPECT_EQ(0xFFFF, scaledGlyphKeyOf(glyph_key::kLast).id);  // the last glyph key, and the last BMP code point
+  EXPECT_EQ(1, scaledGlyphKeyOf(glyph_key::kLast).kind);
+  EXPECT_EQ(0xFFFF, scaledGlyphKeyOf(0xFFFF).id);
+  EXPECT_EQ(0, scaledGlyphKeyOf(0xFFFF).kind);
+
+  EXPECT_FALSE(scaledGlyphKeyOf(0x1F600).cacheable);  // above the BMP
+  EXPECT_FALSE(scaledGlyphKeyOf(0x10FFFF).cacheable);
+  EXPECT_FALSE(scaledGlyphKeyOf(glyph_key::kLast + 1).cacheable);
 }

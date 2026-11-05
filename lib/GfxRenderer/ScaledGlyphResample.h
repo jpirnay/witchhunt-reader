@@ -2,8 +2,25 @@
 
 // Glyph resampling for text drawn at a scale (GfxRenderer's renderCharAtScale): pure, so the host tests
 // include it directly.
+#include <GlyphKey.h>
+
 #include <algorithm>
 #include <cstdint>
+
+/// The scaled-mask cache's key for `cp`: a BMP code point (kind 0) or a glyph key's ID (kind 1); not cacheable for
+/// anything else (a code point above the BMP renders uncached). The kind keeps a glyph ID from matching the code
+/// point with the same 16 bits.
+struct ScaledGlyphKey {
+  uint16_t id;
+  uint8_t kind;
+  bool cacheable;
+};
+
+constexpr ScaledGlyphKey scaledGlyphKeyOf(const uint32_t cp) {
+  if (cp <= 0xFFFF) return {static_cast<uint16_t>(cp), 0, true};
+  if (glyph_key::is(cp)) return {glyph_key::glyphOf(cp), 1, true};
+  return {0, 0, false};
+}
 
 // Resample one glyph to `scale`, reporting every destination pixel that must be drawn to
 // `emit(dstX, dstY)`. Single source of truth for both consumers: the cache builder (which

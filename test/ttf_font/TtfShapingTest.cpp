@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -15,6 +16,7 @@
 #include "ExpectedGlyphRuns.h"
 #include "GlyphKey.h"
 #include "GlyphProvider.h"
+#include "GlyphRun.h"
 #include "GlyphStoreFormat.h"
 #include "MovingNorFlash.h"
 #include "OtShaperTestHelpers.h"
@@ -1047,4 +1049,139 @@ TEST_F(TtfShapingFace, ABitmapFontHasNoShapingFace) {
   uint32_t ppem = 7;
   EXPECT_EQ(nullptr, family.shapingFace(EpdFontFamily::REGULAR, &ppem));
   EXPECT_EQ(7u, ppem);
+}
+
+// --- A shaped run drawn by glyph ID ---
+
+namespace {
+
+constexpr int kCanvasWidth = 400;
+constexpr int kCanvasHeight = 120;
+constexpr int kRunX = 20;
+constexpr int kBaseline = 80;
+
+// A 2-bit canvas, an ink level (0-3) a byte. A glyph composites by keeping the darker level, so a mark drawn over its
+// base shows in both.
+struct Canvas {
+  std::vector<uint8_t> levels = std::vector<uint8_t>(kCanvasWidth * kCanvasHeight, 0);
+  bool clipped = false;  // a glyph reached past the canvas: the comparison would miss those pixels
+
+  // A glyph's 2-bit bitmap (rows back to back, four pixels a byte, the first in the high bits) at (x0, y0).
+  void draw(const std::vector<uint8_t>& bitmap, const int width, const int height, const int x0, const int y0) {
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        const int pos = y * width + x;
+        const uint8_t level = (bitmap[pos >> 2] >> ((3 - (pos & 3)) * 2)) & 0x3;
+        if (level == 0) continue;
+        if (x0 + x < 0 || y0 + y < 0 || x0 + x >= kCanvasWidth || y0 + y >= kCanvasHeight) {
+          clipped = true;
+          continue;
+        }
+        uint8_t& at = levels[(y0 + y) * kCanvasWidth + x0 + x];
+        at = std::max(at, level);
+      }
+    }
+  }
+};
+
+// The records of the oracle's run (GlyphRun.h).
+std::vector<uint8_t> recordsOf(const ExpectedRun& run) {
+  std::vector<uint8_t> bytes(run.count * 6u);
+  size_t at = 0;
+  for (unsigned i = 0; i < run.count; ++i) {
+    GlyphRecord record;
+    record.glyph = run.glyphs[i].gid;
+    record.advance = run.glyphs[i].advance12_4;
+    record.dx = run.glyphs[i].dx;
+    record.dy = run.glyphs[i].dy;
+    size_t written = 0;
+    EXPECT_TRUE(glyph_run::encode(record, bytes.data() + at, bytes.size() - at, &written)) << i;
+    at += written;
+  }
+  bytes.resize(at);
+  return bytes;
+}
+
+class TtfGlyphRun : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    subset[kRegular].bytes = readFixture(kSubsetFiles[kRegular]);
+    subset[kBold].bytes = readFixture(kSubsetFiles[kBold]);
+    ASSERT_FALSE(subset[kRegular].bytes.empty());
+    ASSERT_FALSE(subset[kBold].bytes.empty());
+  }
+  void TearDown() override { TtfFont::setHooks({}); }
+
+  // What the rasterizer draws for glyph `gid` of `style`'s file at `ppem`, rendered once.
+  const Reference& referenceOf(const uint8_t style, const uint32_t ppem, const uint16_t gid) {
+    const uint64_t key = uint64_t{style} << 48 | uint64_t{ppem} << 16 | gid;
+    auto it = references.find(key);
+    if (it == references.end()) it = references.emplace(key, referenceByGlyph(subset[style].bytes, gid, ppem)).first;
+    return it->second;
+  }
+
+  MemoryFile subset[4];
+  int busy = 0;
+  std::map<uint64_t, Reference> references;
+};
+
+}  // namespace
+
+// The walk drawGlyphRun drives (forEachGlyph, the unscaled pen) and the lookup it draws with (findGlyphKey) put the
+// oracle's glyphs where HarfBuzz puts them. GfxRenderer.cpp does not build on the host; the blit is renderCharImpl's,
+// which every line draw already uses, so the canvas composites the looked-up glyph's bitmap at its metrics.
+TEST_F(TtfGlyphRun, AGlyphRunDrawsTheOraclesGlyphsAtItsPositions) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  ASSERT_EQ(1867u, font.bodyPpem());
+  const EpdFont* native[4] = {};
+  uint32_t nativePpem = 0;
+  ASSERT_TRUE(font.nativeFonts(40, native, &nativePpem));
+  ASSERT_EQ(2560u, nativePpem);
+  const EpdFontFamily body(font.font(kRegular), font.font(kBold));
+  const EpdFontFamily large(native[kRegular], native[kBold]);
+
+  int runsDrawn = 0;
+  for (const uint8_t style : {kRegular, kBold}) {
+    for (const uint32_t ppem : {1867u, 2560u}) {
+      const RunSet& runs = runSetOf(kSubsetFiles[style], ppem);
+      const EpdFontFamily& family = ppem == 1867u ? body : large;
+      const auto fontStyle = static_cast<EpdFontFamily::Style>(style);
+      for (size_t r = 0; r < runs.count; ++r) {
+        const ExpectedRun& expected = runs.runs[r];
+        const std::vector<uint8_t> records = recordsOf(expected);
+        const GlyphRun run{records.data(), expected.count, static_cast<uint16_t>(records.size())};
+
+        Canvas drawn;
+        forEachGlyph(run, kRunX, false, [&](const GlyphRecord& record, const int penX) {
+          const EpdGlyphRef glyph = family.findGlyphKey(glyph_key::of(record.glyph), fontStyle);
+          ASSERT_TRUE(static_cast<bool>(glyph)) << "glyph " << record.glyph;
+          drawn.draw(bitmapOf(font, style, glyph.sdRecord), glyph.width, glyph.height, penX + record.dx + glyph.left,
+                     kBaseline + record.dy - glyph.top);
+        });
+
+        Canvas reference;
+        int pen = kRunX;
+        for (unsigned i = 0; i < expected.count; ++i) {
+          const RunGlyph& g = expected.glyphs[i];
+          const Reference& ref = referenceOf(style, ppem, g.gid);
+          reference.draw(ref.bitmap, ref.metrics.width, ref.metrics.height, pen + g.dx + ref.metrics.left,
+                         kBaseline + g.dy - ref.metrics.top);
+          pen += fp4::toPixel(g.advance12_4);
+        }
+
+        const char* const where = runs.file;
+        EXPECT_FALSE(reference.clipped) << where << " at " << ppem << ", run " << r;
+        EXPECT_TRUE(std::any_of(reference.levels.begin(), reference.levels.end(), [](const uint8_t l) { return l; }))
+            << where << " at " << ppem << ", run " << r << ": no ink";
+        EXPECT_TRUE(reference.levels == drawn.levels)
+            << where << " at " << ppem << ", run " << r << ": " << expected.utf8;
+        EXPECT_EQ(pen, kRunX + glyphRunAdvance(run, false)) << where << " at " << ppem << ", run " << r;
+        ++runsDrawn;
+      }
+    }
+  }
+  EXPECT_EQ(4 * 16, runsDrawn);
 }

@@ -55,6 +55,7 @@ target_include_directories(TtfFontTest PRIVATE
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/Utf8
   ${OT_SHAPER_INCLUDE_DIR}
+  ${REPO_ROOT}/lib/GfxRenderer  # last: only for GlyphRun.h, the records a shaped run is drawn from
 )
 
 target_compile_definitions(TtfFontTest PRIVATE

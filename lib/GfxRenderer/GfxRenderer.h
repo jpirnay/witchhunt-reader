@@ -5,6 +5,7 @@
 
 class FontCacheManager;
 class SdCardFont;
+struct GlyphRun;
 
 #include <atomic>
 #include <cstring>
@@ -145,8 +146,8 @@ class GfxRenderer {
   // serialises behind RenderLock — the same lock that protects the framebuffer
   // these masks are blitted into.
   //
-  // Keyed by (font, codepoint, scale, sel), NOT by EpdGlyph address: SD-card
-  // fonts rebuild their glyph array every page and serve overflow codepoints
+  // Keyed by (font, codepoint or glyph ID, scale, sel), NOT by EpdGlyph address:
+  // SD-card fonts rebuild their glyph array every page and serve overflow codepoints
   // from an 8-entry ring, so the same address means different glyphs over time.
   // The resampled pixels are a pure function of this key, which makes it both
   // stable and exact. Style is deliberately absent: EpdFontFamily::getData() and
@@ -155,11 +156,12 @@ class GfxRenderer {
   struct ScaledGlyphEntry {
     const void* fontData;  // EpdFontData for the style (stable per font object)
     uint32_t scaleBits;    // exact float bits of the scale factor (no quantisation)
-    uint16_t cp;           // codepoint; above the BMP renders uncached (see alloc)
+    uint16_t id;           // scaledGlyphKeyOf's id: a BMP codepoint or a glyph key's glyph ID
     uint16_t offset;       // byte offset into scaledGlyphArena_
     uint8_t sel;           // the drawMask the glyph was resampled for
     uint8_t w;
     uint8_t h;
+    uint8_t kind;  // scaledGlyphKeyOf's kind: 0 codepoint, 1 glyph ID; the 16th byte on the C3
   };
   // Keeps the documented budget honest if a field is ever added.
   static_assert(sizeof(ScaledGlyphEntry) <= 16, "scaled-glyph entry grew; update the cache budget comment");
@@ -702,6 +704,20 @@ class GfxRenderer {
   std::vector<std::string> wrappedText(int fontId, const char* text, int maxWidth, int maxLines,
                                        EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
 
+  /// Draws a shaped run at (x, y), y the line's top as drawText takes it. Each record's glyph comes by ID from
+  /// `fontId`'s `style` (findGlyphKey: no fallbacks) and is drawn at the pen plus its offset; the pen moves by the
+  /// record's advance. No kerning, ligatures or tracking. `scale` is drawTextScaled's: the glyphs are drawn at it
+  /// times the font's base scale, through renderCharAtScale's path (sup/sub keep its dark threshold); the records'
+  /// advances and offsets are in drawn pixels already, so SUP/SUB halve nothing here. A record whose glyph the font
+  /// lacks draws nothing but still moves the pen. A font that draws no glyph keys draws nothing (logged once).
+  /// While the page is scanned, records the run's glyph IDs instead (FontCacheManager::recordGlyphs).
+  void drawGlyphRun(int fontId, int x, int y, const GlyphRun& run, bool black = true,
+                    EpdFontFamily::Style style = EpdFontFamily::REGULAR, float scale = 1.0f) const;
+  /// How far drawGlyphRun's pen moves: glyphRunAdvance, accumulated when scale x the base scale is not 1.
+  int glyphRunWidth(int fontId, const GlyphRun& run, float scale = 1.0f) const;
+  /// The glyph-ID prefetch for a section build's warm step: the run's glyphs, 64 at a time (128 B on the stack).
+  void prefetchGlyphRun(int fontId, const GlyphRun& run, EpdFontFamily::Style style) const;
+
   // Helper for drawing rotated text (90 degrees clockwise, for side buttons)
   void drawTextRotated90CW(int fontId, int x, int y, const char* text, bool black = true,
                            EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
@@ -1039,7 +1055,9 @@ class GfxRenderer {
   // pipeline lives in free functions in GfxRenderer.cpp; treat as internal.
   // find returns the cached mask for an exact key match, alloc reserves a zeroed
   // mask of w*h bits for the caller to fill, or nullptr when the glyph is too
-  // large to cache or the arena could not be allocated.
+  // large to cache or the arena could not be allocated. `cp` is a codepoint or a
+  // glyph key (GlyphKey.h); scaledGlyphKeyOf makes the entry's (id, kind) of it,
+  // and one it cannot key renders uncached.
   const uint8_t* findScaledGlyphMask(const void* fontData, uint32_t cp, float scale, uint8_t sel, int w, int h) const;
   uint8_t* allocScaledGlyphMask(const void* fontData, uint32_t cp, float scale, uint8_t sel, int w, int h) const;
 

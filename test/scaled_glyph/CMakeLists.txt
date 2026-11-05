@@ -4,6 +4,7 @@ add_executable(ScaledGlyphResampleTest
 
 target_include_directories(ScaledGlyphResampleTest PRIVATE
   ${REPO_ROOT}/lib/GfxRenderer
+  ${REPO_ROOT}/lib/EpdFont
 )
 
 target_link_libraries(ScaledGlyphResampleTest PRIVATE
