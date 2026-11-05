@@ -390,7 +390,40 @@ TEST_F(SyntheticLutFixture, InsertedControlsCountNowhere) {
   }
 }
 
-// A guard, not a RED test: a kept joiner moves nothing the LUT holds, and before the change there was none to keep.
+TEST_F(SyntheticLutFixture, AKeptJoinerCountsNothingInTheNextTokensOffset) {
+  // The word is split at an inline edge, 66 glued letters (the width of a line) in the first token and the joiner,
+  // ष and two more letters in the second, which the line breaker puts at a line's start. A page opens on that line in
+  // some paragraphs, and its offset is where the first token ends: the joiner's 3 bytes are no visible text of the
+  // word's, as where visibleBytesOutsideControls splits it. A paragraph is 60 one-byte words, 65 letters and a virama
+  // (198 bytes), the joiner, ष and two letters (12 bytes), and 100 one-byte words.
+  constexpr uint32_t kBefore = 60;
+  constexpr uint32_t kSecondToken = kBefore + 198;
+  constexpr uint32_t kParagraphBytes = kBefore + 198 + 12 + 100;
+  std::string before;
+  for (uint32_t i = 0; i < kBefore; ++i) before += "w ";
+  std::string after;
+  for (int i = 0; i < 100; ++i) after += "w ";
+  std::string letters;
+  for (int i = 0; i < 65; ++i) letters += "क";
+  std::string joined;
+  for (int i = 0; i < 40; ++i) {
+    joined += "<p>" + before + letters +
+              "्<b>\xE2\x80\x8D"
+              "षकक</b> " +
+              after + "</p>\n";
+  }
+  const auto section = build(book(joined));
+  ASSERT_GT(section->pageCount, 1);
+  int atSecondToken = 0;
+  for (uint16_t page = 0; page < section->pageCount; ++page) {
+    const uint32_t within = *section->getVisibleTextOffsetForPage(page) % kParagraphBytes;
+    EXPECT_TRUE(within == 0 || within == kSecondToken) << "page " << page << " opens " << within << " bytes in";
+    if (within == kSecondToken) ++atSecondToken;
+  }
+  EXPECT_GT(atSecondToken, 0);
+}
+
+// A guard, not a RED test: pins that a kept joiner moves no page start the LUT holds.
 TEST_F(SyntheticLutFixture, KeptJoinersMoveNoPageStart) {
   // A kept joiner is in the source, so VisibleText counts its 3 bytes; no word's offset starts at it. Each paragraph is
   // one line of 24 visible bytes (क् 6, the ZWJ 3, ष 3, "कमल।" 12), so every page opens on a paragraph, at its index

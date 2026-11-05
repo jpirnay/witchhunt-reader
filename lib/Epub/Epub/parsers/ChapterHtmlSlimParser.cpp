@@ -1543,10 +1543,10 @@ void ChapterHtmlSlimParser::closeBidiEdges(const int elementDepth) {
   }
 }
 
-bool ChapterHtmlSlimParser::releaseHeldJoiner(const uint32_t offset) {
+bool ChapterHtmlSlimParser::releaseHeldJoiner(const uint32_t offset, const int nextLen) {
   const uint32_t joiner = heldJoiner_;
   heldJoiner_ = 0;
-  if (partWordBufferIndex + 3 > MAX_WORD_SIZE) {
+  if (partWordBufferIndex + 3 + nextLen > MAX_WORD_SIZE) {
     if (!flushPartWordBuffer()) return false;
     nextWordContinues = true;  // the word goes on in the next token: glued, no space
   }
@@ -1561,10 +1561,26 @@ void ChapterHtmlSlimParser::settleHeldJoiner() {
   if (heldJoiner_ == 0) return;
   const uint32_t joiner = heldJoiner_;
   heldJoiner_ = 0;
-  if (!partWordHasText() || partWordBufferIndex + 3 > MAX_WORD_SIZE) return;
-  appendPartWordText('\xE2', partWordVisibleOffset_);
-  appendPartWordText('\x80', partWordVisibleOffset_);
-  appendPartWordText(joiner == 0x200D ? '\x8D' : '\x8C', partWordVisibleOffset_);
+  const char bytes[3] = {'\xE2', '\x80', joiner == 0x200D ? '\x8D' : '\x8C'};
+  if (partWordHasText()) {
+    if (partWordBufferIndex + 3 > MAX_WORD_SIZE) return;
+    for (const char byte : bytes) appendPartWordText(byte, partWordVisibleOffset_);
+    return;
+  }
+  // The word went out at an inline end (</b>) and only tags and controls came since: the joiner ends its last token,
+  // ahead of any controls held after it. It counts nowhere, so the token's offset stays.
+  ParsedText* const ended =
+      flushedWordTarget_ != nullptr && flushedWordTarget_ == wordTarget() ? flushedWordTarget_ : nullptr;
+  if (ended == nullptr) return;
+  ended->appendControlToLastToken(std::string_view(bytes, sizeof(bytes)));
+}
+
+void ChapterHtmlSlimParser::deliverSplitTail() {
+  if (splitTailLen_ == 0) return;
+  const int length = splitTailLen_;
+  splitTailLen_ = 0;
+  const bool source = xpathBodyDepth >= 0 && nonVisibleTextDepth_ == 0;
+  consumeText(this, splitTail_, length, splitTailOffset_, source);
 }
 
 bool ChapterHtmlSlimParser::addNoBreakSpace(const uint32_t offset) {
@@ -2199,12 +2215,10 @@ void ChapterHtmlSlimParser::startNewTextBlockWithinElements(const BlockStyle& bl
 
 // start a new text block if needed
 void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
-  heldJoiner_ = 0;  // the paragraph before is flushed already: a joiner still held has no word to end
-  joinerLookBehind_ = 0;
-  droppingJoinerRun_ = false;
-  dropHeldBidiControls();                               // they end with the paragraph they were held in
-  flushedWordTarget_ = nullptr;                         // and no closer ends a word of that paragraph
-  nextWordContinues = false;                            // New block = new paragraph, no continuation
+  endJoinerContext();            // a joiner still held ends the paragraph before: its word is flushed already
+  dropHeldBidiControls();        // they end with the paragraph they were held in
+  flushedWordTarget_ = nullptr;  // and no closer ends a word of that paragraph
+  nextWordContinues = false;     // New block = new paragraph, no continuation
   if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the open ruby's bases are in the block left behind
   endCjkSegment();
   // Base style for the new block — normally the incoming blockStyle, but when falling
@@ -2303,6 +2317,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
 
 void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const char** atts) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
+  self->deliverSplitTail();  // the text before the tag is whole: a sequence it left cut is malformed
   if (VisibleText::isNonVisibleTag(name)) self->nonVisibleTextDepth_++;
 
   if (self->streamFailed) {
@@ -4012,7 +4027,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     // All multi-byte UTF-8 sequences start with a byte >= 0x80, so this
     // path is safe to take without any further multi-byte checks.
     if (c > 0x20 && c < 0x80) {
-      if (self->heldJoiner_ != 0 && !self->releaseHeldJoiner(byteOff)) return;
+      if (self->heldJoiner_ != 0 && !self->releaseHeldJoiner(byteOff, 1)) return;
       self->droppingJoinerRun_ = false;
       self->joinerLookBehind_ = c;
       if (self->partWordBufferIndex >= MAX_WORD_SIZE) {
@@ -4078,19 +4093,22 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     }
 
     // A ZWJ or ZWNJ after a shaped-script letter waits for the next code point (releaseHeldJoiner, settleHeldJoiner),
-    // which says whether it is alone: a second one drops both and the rest of the run. It counts nowhere, like the
-    // controls above. After anything else it goes with the default-ignorables below.
+    // which says whether it is alone: a second one drops both and the rest of the run. In such a position it counts
+    // nowhere in the token offsets (a kept one is in the word, and no offset starts at it), so the text after it sits
+    // where a split of the word would put it (visibleBytesOutsideControls). After anything else it goes with the
+    // default-ignorables below.
     if (const uint32_t joiner = joinerAt(s, i, len); joiner != 0) {
+      const bool afterScript = keepsJoinerAfter(self->joinerLookBehind_);
       if (self->droppingJoinerRun_) {
         // the run goes on
       } else if (self->heldJoiner_ != 0) {
         self->heldJoiner_ = 0;
         self->droppingJoinerRun_ = true;
-      } else if (keepsJoinerAfter(self->joinerLookBehind_)) {
+      } else if (afterScript) {
         self->heldJoiner_ = joiner;
       }
       i += 2;
-      if (source) off += 2;
+      off = afterScript ? byteOff : off + (source ? 2 : 0);
       continue;
     }
 
@@ -4167,7 +4185,7 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     // across SAX chunks (cp 0) is not counted.
     if (c >= 0xC0) {
       const uint32_t cp = codepointAt(s + i, len - i);
-      if (self->heldJoiner_ != 0 && !self->releaseHeldJoiner(byteOff)) return;
+      if (self->heldJoiner_ != 0 && !self->releaseHeldJoiner(byteOff, c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2)) return;
       self->droppingJoinerRun_ = false;
       if (cp != 0) self->joinerLookBehind_ = cp;
       if (utf8IsCjkBreakable(cp)) {
@@ -4237,6 +4255,7 @@ void ChapterHtmlSlimParser::defaultHandlerExpand(void* userData, const char* s, 
 
 void ChapterHtmlSlimParser::endElement(void* userData, const char* name) {
   auto* self = static_cast<ChapterHtmlSlimParser*>(userData);
+  self->deliverSplitTail();
   endElementBody(self, name);
   // A background picture goes in once its element has closed: after the element's own text and,
   // for a table, after the grid </table> has just emitted. Out here because the body returns from
@@ -4256,6 +4275,14 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
   if (self->streamFailed) {
     return;
   }
+
+  const bool headerOrBlockTag = isHeaderOrBlock(name);
+  const bool tableStructuralTag = isTableStructuralTag(name);
+  const bool closesBlockSpan = self->blockSpan_.depth == self->depth - 1;
+
+  // A block's or a cell's end ends its word, and a joiner held at it (a chillu's) goes in last: ahead of the closers
+  // below, which stay at the word's end.
+  if (headerOrBlockTag || closesBlockSpan || tableStructuralTag || self->depth == 1) self->endJoinerContext();
 
   // The element's bidi closers end its text, in the word they follow, before any flush below takes that word.
   self->closeBidiEdges(self->depth - 1);
@@ -4287,9 +4314,6 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
 
   const bool styleWillChange =
       willPopStyleStack || willClearBold || willClearItalic || willClearUnderline || willClearStrikethrough;
-  const bool headerOrBlockTag = isHeaderOrBlock(name);
-  const bool tableStructuralTag = isTableStructuralTag(name);
-  const bool closesBlockSpan = self->blockSpan_.depth == self->depth - 1;
 
   if (self->currentTable && self->currentTable->depth > 1 && strcmp(name, "table") == 0) {
     self->partWordBufferIndex = 0;
@@ -4299,9 +4323,6 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
     LOG_DBG("EHP", "nested table end, depth now %d", self->currentTable->depth);
     return;
   }
-
-  // A block's or a cell's end ends its word, and a joiner held at it (a chillu's) goes in last.
-  if (headerOrBlockTag || closesBlockSpan || tableStructuralTag || self->depth == 1) self->endJoinerContext();
 
   // Flush buffer with current style BEFORE any style changes
   if (self->partWordHasText()) {

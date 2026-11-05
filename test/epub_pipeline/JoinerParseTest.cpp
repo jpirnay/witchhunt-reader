@@ -83,7 +83,36 @@ TEST_F(Joiners, AChilluJoinerAtAWordsEndIsKept) {
 
 TEST_F(Joiners, AChilluJoinerAtABlocksEndIsKept) { EXPECT_EQ(wordsOf("<p>അവന്" + kZwj + "</p>"), Words{"അവന്" + kZwj}); }
 
-// A guard, not a RED test: every joiner was dropped before, and these still are.
+// A chillu's joiner stays with its word when the word is flushed before the joiner settles: at a <br/>, at a block
+// child, and at an inline element's end followed by a space or by the block's end.
+TEST_F(Joiners, AChilluJoinerSurvivesTheFlushOfItsWord) {
+  const Words verse = {"അവന്" + kZwj, "വന്നു"};
+  EXPECT_EQ(wordsOf("<p>അവന്" + kZwj + "<br/>വന്നു</p>"), verse);
+  EXPECT_EQ(wordsOf("<div>അവന്" + kZwj + "<p>വന്നു</p></div>"), verse);
+  EXPECT_EQ(wordsOf("<p><b>അവന്" + kZwj + "</b> വന്നു</p>"), verse);
+  EXPECT_EQ(wordsOf("<p><b>അവന്" + kZwj + "</b></p>"), Words{"അവന്" + kZwj});
+}
+
+// A stray lead byte at a text's end is that text's, not the next text's.
+TEST_F(Joiners, AMalformedTailStaysInItsOwnText) {
+  EXPECT_EQ(wordsOf("<p>voil\xE0</p><p>Il</p>"), (Words{"voil\xE0", "Il"}));
+  EXPECT_EQ(wordsOf("<p>voil\xE2\x80</p><p>Il</p>"), (Words{"voil\xE2\x80", "Il"}));
+}
+
+// A joiner and the letter after it are never parted by the word buffer's limit.
+TEST_F(Joiners, AJoinerStaysWithTheLetterAfterItAtTheBufferLimit) {
+  // 2 + 65 * 3 = 197 bytes in the word buffer (limit 200) when the joiner comes; the joiner and ष need 6 more.
+  std::string word = "ab";
+  for (int i = 0; i < 65; ++i) word += "क";
+  const Words words = wordsOf("<p>" + word + kZwj + "ष</p>");
+  ASSERT_GE(words.size(), 2u);
+  EXPECT_EQ(words.back(), kZwj + "ष");
+  std::string all;
+  for (const std::string& w : words) all += w;
+  EXPECT_EQ(all, word + kZwj + "ष");
+}
+
+// A guard, not a RED test: this pins that a joiner after anything but a letter of the shaped blocks is dropped.
 TEST_F(Joiners, AJoinerAfterAnythingElseIsDropped) {
   EXPECT_EQ(wordsOf("<p>a" + kZwj + "b</p>"), Words{"ab"});
   EXPECT_EQ(wordsOf("<p>1" + kZwj + "</p>"), Words{"1"});
@@ -101,17 +130,26 @@ TEST_F(Joiners, ARunOfJoinersIsDroppedWhole) {
 // The SAX parser flushes its text every 256 bytes, so the filler puts the cut before, inside and after the virama and
 // the joiner (as TextNodeRules.ACodepointSplitAtTheChunkBoundaryStillLandsExactly sweeps it).
 TEST_F(Joiners, AJoinerSplitFromItsLetterByAChunkBoundaryIsKept) {
-  for (int n = 80; n <= 92; ++n) {
-    std::string filler;
-    for (int i = 0; i < n; ++i) filler += "क";
-    EXPECT_EQ(textOf("<p>" + filler + "्" + kZwj + "ष</p>"), filler + "्" + kZwj + "ष") << "n=" << n;
-    EXPECT_EQ(textOf("<p>" + filler + "्" + kZwj + kZwj + "ष</p>"), filler + "्ष") << "n=" << n;
+  // The ASCII prefix of 0 to 2 bytes moves the cut through every byte of the 3-byte sequences, the 1- and 2-byte
+  // tails included.
+  for (int prefixLen = 0; prefixLen <= 2; ++prefixLen) {
+    const std::string prefix(static_cast<size_t>(prefixLen), 'a');
+    for (int n = 80; n <= 92; ++n) {
+      std::string filler = prefix;
+      for (int i = 0; i < n; ++i) filler += "क";
+      EXPECT_EQ(textOf("<p>" + filler + "्" + kZwj + "ष</p>"), filler + "्" + kZwj + "ष")
+          << "prefix=" << prefixLen << " n=" << n;
+      EXPECT_EQ(textOf("<p>" + filler + "्" + kZwj + kZwj + "ष</p>"), filler + "्ष")
+          << "prefix=" << prefixLen << " n=" << n;
+    }
   }
 }
 
 TEST_F(Joiners, AJoinerAtAnInlineElementsEdgeIsKept) {
-  EXPECT_EQ(textOf("<p>क्<b>" + kZwj + "ष</b></p>"), "क्" + kZwj + "ष");
-  EXPECT_EQ(textOf("<p>क्" + kZwj + "<b>ष</b></p>"), "क्" + kZwj + "ष");
+  // The joiner waits across the edge and opens the next token, ahead of the letter it precedes.
+  const Words split = {"क्", kZwj + "ष"};
+  EXPECT_EQ(wordsOf("<p>क्<b>" + kZwj + "ष</b></p>"), split);
+  EXPECT_EQ(wordsOf("<p>क्" + kZwj + "<b>ष</b></p>"), split);
   // A second joiner across the edge still drops both.
-  EXPECT_EQ(textOf("<p>क्" + kZwj + "<b>" + kZwj + "ष</b></p>"), "क्ष");
+  EXPECT_EQ(wordsOf("<p>क्" + kZwj + "<b>" + kZwj + "ष</b></p>"), (Words{"क्", "ष"}));
 }

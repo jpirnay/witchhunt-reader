@@ -169,11 +169,15 @@ class ChapterHtmlSlimParser final : public Print {
   uint32_t joinerLookBehind_ = 0;
   uint32_t heldJoiner_ = 0;         // 0, U+200C or U+200D
   bool droppingJoinerRun_ = false;  // a second joiner came: it, the held one and the rest of the run go
-  // Puts the held joiner into the word buffer ahead of the text code point at `offset`, which sets the word's offset if
-  // the joiner opens it. A word with no room for it is flushed first. False when the stream failed.
-  bool releaseHeldJoiner(uint32_t offset);
-  // Ends the held joiner's wait at a word's end: it goes last in a word that has text, else it goes.
+  // Puts the held joiner into the word buffer ahead of the text code point at `offset` (`nextLen` bytes), which sets
+  // the word's offset if the joiner opens it. A word with no room for the joiner and that code point is flushed first,
+  // so the two stay together. False when the stream failed.
+  bool releaseHeldJoiner(uint32_t offset, int nextLen);
+  // Ends the held joiner's wait at a word's end: it goes last in the word in the buffer; when an inline end sent that
+  // word out already and no space came since, onto its last token; else it goes.
   void settleHeldJoiner();
+  // Hands on, as text, a split-sequence tail that never got its rest (malformed text), at an element's edge.
+  void deliverSplitTail();
   // The joiner's context ends with the text: a block's or a table cell's end, a block's start.
   void endJoinerContext() {
     settleHeldJoiner();
