@@ -4,6 +4,9 @@
 #include <WiFi.h>
 #include <base64.h>
 
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -25,6 +28,35 @@ bool equalsIgnoreCaseAscii(const std::string& a, const std::string& b) {
   }
   return true;
 }
+// Not allowed on a request line as it is. A URL reaches this client as a plugin or a feed wrote it,
+// so a space or a UTF-8 byte would make a request the server refuses, and a line break would end the
+// request line and start a header of the URL's own.
+bool unsafeOnRequestLine(const unsigned char c) {
+  return c <= 0x20 || c >= 0x7F || strchr("\"<>\\^`{|}", c) != nullptr;
+}
+
+bool isHexDigit(const char c) { return isxdigit(static_cast<unsigned char>(c)) != 0; }
+
+// What is already escaped stays as it is, so nothing is escaped twice. Ported from crosspoint-reader
+// (encodeUnsafeUrlChars, #2475 by Justin Mitchell; #4196 by Arthur Tazhitdinov added control bytes
+// for plugins), moved here so every request goes through it.
+std::string escapedForRequestLine(const std::string& path) {
+  std::string out;
+  out.reserve(path.size());
+  for (size_t i = 0; i < path.size(); i++) {
+    const auto c = static_cast<unsigned char>(path[i]);
+    const bool escaped = c == '%' && i + 2 < path.size() && isHexDigit(path[i + 1]) && isHexDigit(path[i + 2]);
+    if (escaped || (c != '%' && !unsafeOnRequestLine(c))) {
+      out += static_cast<char>(c);
+    } else {
+      char encoded[4];
+      snprintf(encoded, sizeof(encoded), "%%%02X", c);
+      out += encoded;
+    }
+  }
+  return out;
+}
+
 }  // namespace
 
 bool SecureHttpClient::parseUrl(const std::string& in, Url& out) {
@@ -44,7 +76,12 @@ bool SecureHttpClient::parseUrl(const std::string& in, Url& out) {
     out.host = hostPort;
     out.port = out.scheme == "https" ? 443 : 80;
   }
-  return !out.host.empty() && (out.scheme == "http" || out.scheme == "https");
+  // No escape exists for a host, and it goes on the Host line as it stands.
+  const bool hostIsClean = std::none_of(out.host.begin(), out.host.end(), [](const char c) {
+    const auto byte = static_cast<unsigned char>(c);
+    return byte <= 0x20 || byte >= 0x7F;
+  });
+  return !out.host.empty() && hostIsClean && (out.scheme == "http" || out.scheme == "https");
 }
 
 bool SecureHttpClient::isHttps(const std::string& url) {
@@ -181,7 +218,7 @@ bool SecureHttpClient::sendRequest(const char* method, const Url& u, const uint8
   const uint16_t defPort = u.https() ? 443 : 80;
   const std::string hostHeader = (u.port == defPort) ? u.host : (u.host + ":" + std::to_string(u.port));
 
-  std::string req = std::string(method) + " " + u.path + " HTTP/1.1\r\n";
+  std::string req = std::string(method) + " " + escapedForRequestLine(u.path) + " HTTP/1.1\r\n";
   req += "Host: " + hostHeader + "\r\n";
   req += "User-Agent: " + _userAgent + "\r\n";
   // Keep-alive so a Session can reuse the handshake across files.
