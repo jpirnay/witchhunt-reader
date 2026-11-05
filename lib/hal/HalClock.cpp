@@ -5,7 +5,7 @@
 #include <HalGPIO.h>
 #include <Logging.h>
 #include <Preferences.h>
-#include <Rtc.h>  // SDK driver, used for the PCF8563 family (DS3231 is handled inline below)
+#include <Rtc.h>  // SDK driver, used for every RTC but the DS3231, which is handled inline below
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <Wire.h>  // Needed for I2C communication with the RTC
@@ -252,12 +252,21 @@ static time_t nvsReadSyncTime() {
 static bool initExternalRTC();
 static float readExternalTemp();
 
-// The SDK RTC driver, for the PCF8563 family only. Function-local so it is
-// constructed on first use rather than during static init, where the I2C bus is
-// not up yet. Only reached when rtcType() == Pcf8563.
+// The SDK RTC driver. Function-local so it is constructed on first use rather than
+// during static init, where the I2C bus is not up yet. Only reached when
+// rtcUsesSdkDriver().
 static freeink::Rtc& externalRtc() {
   static freeink::Rtc rtc;
   return rtc;
+}
+
+// Every RTC but the DS3231, which predates the driver and stays inline (the X3's
+// device-validated path). By exclusion on purpose: hasHardwareRtc() is true for any type a
+// profile declares and takes the LP-timer fallback away, so a type left out here would leave
+// that board with no clock at all across a sleep.
+static bool rtcUsesSdkDriver() {
+  const auto type = HalCapabilities::rtcType();
+  return type != BoardConfig::RtcType::None && type != BoardConfig::RtcType::Ds3231;
 }
 
 static float readChipTemperatureC() {
@@ -281,15 +290,15 @@ static bool initExternalRTC() {
   if (initialized) return exists;
   initialized = true;
 
-  // Two families, two drivers. The DS3231 is probed and driven inline below.
-  // The PCF8563 family (T5S3's PCF8563TS, X4 Pro's BM8563 -- both at 0x51) is
-  // register-incompatible with it and would return garbage if driven with DS3231
-  // offsets, so it goes through the SDK's Rtc lib, which already implements it.
+  // Two drivers. The DS3231 is probed and driven inline below. The others (T5S3's
+  // PCF8563TS, X4 Pro's BM8563, Murphy's RX8010SJ) are register-incompatible with it
+  // and would return garbage if driven with DS3231 offsets, so they go through the
+  // SDK's Rtc lib, which already implements them.
   // Dispatching on rtcType rather than hasHardwareRtc() is what keeps those apart.
-  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+  if (rtcUsesSdkDriver()) {
     HalI2cBus::Lock i2cLock;
     exists = externalRtc().begin();
-    LOG_INF("CLK", exists ? "PCF8563 RTC found via SDK driver." : "No PCF8563 RTC found.");
+    LOG_INF("CLK", exists ? "Hardware RTC found via SDK driver." : "No hardware RTC found.");
     return exists;
   }
   if (HalCapabilities::rtcType() != BoardConfig::RtcType::Ds3231) {
@@ -312,12 +321,12 @@ static bool initExternalRTC() {
 }
 
 // Write full date+time to the external RTC (DS3231: all 7 registers inline;
-// PCF8563 family: delegated to the SDK driver). Both are operated in UTC.
+// the others: delegated to the SDK driver). All are operated in UTC.
 static void writeExternalRTC(time_t t) {
   struct tm timeinfo;
   gmtime_r(&t, &timeinfo);  // DS3231 is usually operated in UTC
 
-  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+  if (rtcUsesSdkDriver()) {
     freeink::Rtc::DateTime dt;
     dt.year = static_cast<uint16_t>(timeinfo.tm_year + 1900);
     dt.month = static_cast<uint8_t>(timeinfo.tm_mon + 1);
@@ -347,9 +356,9 @@ static void writeExternalRTC(time_t t) {
 // Read time from the external RTC. Returns 0 when the time cannot be trusted --
 // the callers treat 0 as "no usable RTC time", so a stopped oscillator must not
 // surface as a valid timestamp. The SDK driver already reports that case by
-// returning false on the PCF8563's VL flag.
+// returning false on the chip's oscillator-stop flag.
 static time_t readExternalRTC() {
-  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+  if (rtcUsesSdkDriver()) {
     freeink::Rtc::DateTime dt;
     HalI2cBus::Lock i2cLock;
     if (!externalRtc().now(dt)) return 0;
