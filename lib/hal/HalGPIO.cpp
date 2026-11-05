@@ -354,55 +354,6 @@ static const char* buttonTraceName(uint8_t idx) {
       return "?";
   }
 }
-
-#if FREEINK_DEVICE_MURPHY
-// Passive discovery for the reported fourth/left Murphy key. These pins are
-// unused by the M3 profile. Do not change their mode or pulls while probing:
-// some board revisions may route them to circuitry not represented in the SDK.
-static void traceMurphyUnassignedButtonPins(const uint32_t now) {
-  constexpr int8_t candidatePins[] = {11, 38, 47};
-  struct PinTrace {
-    int raw = -1;
-    int stable = -1;
-    uint32_t changedAt = 0;
-    bool initialized = false;
-  };
-  static PinTrace traces[sizeof(candidatePins) / sizeof(candidatePins[0])];
-  static bool announced = false;
-  static uint32_t lastSummaryAt = 0;
-  if (!announced) {
-    LOG_INF("BTN", "passive unknown-key GPIO probe: 11,38,47 (no pin-mode or pull changes)");
-    announced = true;
-  }
-
-  if (now - lastSummaryAt >= 2000) {
-    LOG_INF("BTN", "unmapped GPIO levels 11=%d 38=%d 47=%d", digitalRead(11), digitalRead(38), digitalRead(47));
-    lastSummaryAt = now;
-  }
-
-  for (size_t i = 0; i < sizeof(candidatePins) / sizeof(candidatePins[0]); ++i) {
-    const int pin = candidatePins[i];
-    const int level = digitalRead(pin);
-    PinTrace& trace = traces[i];
-    if (!trace.initialized) {
-      trace.raw = trace.stable = level;
-      trace.changedAt = now;
-      trace.initialized = true;
-      LOG_INF("BTN", "GPIO%d baseline=%d", pin, level);
-      continue;
-    }
-    if (level != trace.raw) {
-      trace.raw = level;
-      trace.changedAt = now;
-    }
-    if (trace.raw != trace.stable && now - trace.changedAt >= 40) {
-      trace.stable = trace.raw;
-      LOG_INF("BTN", "unmapped GPIO%d stable level=%d (%s)", pin, trace.stable,
-              trace.stable == LOW ? "LOW/pressed candidate" : "HIGH/released candidate");
-    }
-  }
-}
-#endif
 #endif
 
 void HalGPIO::sampleOnce() {
@@ -419,10 +370,6 @@ void HalGPIO::sampleOnce() {
     HalI2cBus::Lock i2cLock;
     inputMgr.update();
   }
-
-#if defined(BUTTON_TRACE) && BUTTON_TRACE && FREEINK_DEVICE_MURPHY
-  traceMurphyUnassignedButtonPins(millis());
-#endif
 
   uint8_t live = 0;
   uint8_t pressed = 0;
