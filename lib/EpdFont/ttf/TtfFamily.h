@@ -51,8 +51,9 @@ struct LayoutCounts {
 };
 
 /// The most read calls counting one table takes. A real table fits it (its lookups packed, a 128-byte window of
-/// headers serving a dozen or more of them: about 4,096 / 16 windows and 64 pieces of offsets at the most); one that
-/// does not has its headers scattered, which only a crafted font does. It then counts as capped.
+/// headers serving a dozen or more of them: about 4,096 / 16 windows, 64 pieces of offsets and a window again after
+/// each piece at the most); one that does not has its headers scattered, which only a crafted font does. It then counts
+/// as capped.
 constexpr uint32_t kMaxCountingReads = 512;
 
 /// Counts the lookups of the GSUB or GPOS table at `offset`, `length` bytes, of `file`, reading the LookupList in small

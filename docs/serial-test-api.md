@@ -674,10 +674,14 @@ of UTF-8. With the body family's regular style at the body size it builds the sh
 the text's first Indic run (from its first Indic letter, at most 48 code points) and prefetches that run's glyphs:
 
 ```
-TTF_SHAPE:script=Devanagari cpac=61440 init_us=410 repoint_us=95 plan_us=18300 plan_bytes=1480 shape_us=6200 glyphs=6 width=71 stored=5
+TTF_SHAPE:script=Devanagari cpac=18244 init_us=410 repoint_us=95 plan_us=18300 plan_bytes=1480 shape_us=6200 glyphs=6 width=71 stored=5
 ```
 
-`cpac` is the length of the CPac table the regular face uses, in either mode (0 when the face has no filters);
+(An illustration: `cpac` is what the merged Noto Sans Devanagari Regular reserves; the timings are not measured.)
+
+`cpac` is the length of the CPac the regular face reads, in either mode: the room the install reserved, which equals
+the table for a well-formed font (0 when the face has no filters, as for a font whose layout names no script the
+shaper handles);
 `init_us` the first `current()` of the shaping face, which builds it; `repoint_us` the `current()` after the
 mapping was moved to another flash-mode style's block (forced first, untimed), so it times a real re-point (-1 when
 the family has no other style, reads the card, or the mapping did not move); `plan_us` and `plan_bytes` the plan's build and

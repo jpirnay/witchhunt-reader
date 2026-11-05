@@ -17,6 +17,7 @@ struct GlyphRun;
 
 #include "Bitmap.h"
 #include "FontLookup.h"
+#include "ScaledGlyphResample.h"
 #include "TextWrap.h"
 
 // Color representation: uint8_t mapped to 4x4 Bayer matrix dithering levels
@@ -153,16 +154,9 @@ class GfxRenderer {
   // stable and exact. Style is deliberately absent: EpdFontFamily::getData() and
   // getGlyph() both resolve through getFont(style), so the EpdFontData pointer
   // already identifies the variant.
-  struct ScaledGlyphEntry {
-    const void* fontData;  // EpdFontData for the style (stable per font object)
-    uint32_t scaleBits;    // exact float bits of the scale factor (no quantisation)
-    uint16_t id;           // scaledGlyphKeyOf's id: a BMP codepoint or a glyph key's glyph ID
-    uint16_t offset;       // byte offset into scaledGlyphArena_
-    uint8_t sel;           // the drawMask the glyph was resampled for
-    uint8_t w;
-    uint8_t h;
-    uint8_t kind;  // scaledGlyphKeyOf's kind: 0 codepoint, 1 glyph ID; the 16th byte on the C3
-  };
+  //
+  // The entry and its match (scaledGlyphEntryMatches) live in ScaledGlyphResample.h, so the host tests check them.
+  using ScaledGlyphEntry = ::ScaledGlyphEntry;
   // Keeps the documented budget honest if a field is ever added.
   static_assert(sizeof(ScaledGlyphEntry) <= 16, "scaled-glyph entry grew; update the cache budget comment");
   // Sized from measurement, not guesswork: a page of this corpus needs 45-58

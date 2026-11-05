@@ -281,7 +281,7 @@ class TtfFontSet {
   static constexpr uint8_t kRingSlots = 8;
   /// The ring's bitmaps together, at most: a native size's glyphs are large.
   static constexpr uint32_t kRingBudgetBytes = 8192;
-  /// Missing glyphs one prefetch() call renders at most; the rest render as they are looked up.
+  /// Missing glyphs one prefetch() or glyph-ID prefetch call renders at most; the rest render as they are looked up.
   static constexpr uint8_t kPrefetchGlyphs = 64;
 
   /// One family's files by style (size 0: the family has no such style).

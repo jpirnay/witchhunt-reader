@@ -207,10 +207,7 @@ const uint8_t* GfxRenderer::findScaledGlyphMask(const void* fontData, const uint
   const uint32_t bits = floatBits(scale);
   for (uint8_t i = 0; i < scaledGlyphCount_; i++) {
     const ScaledGlyphEntry& e = scaledGlyphEntries_[i];
-    if (e.fontData == fontData && e.id == key.id && e.kind == key.kind && e.scaleBits == bits && e.sel == sel &&
-        e.w == w && e.h == h) {
-      return scaledGlyphArena_.get() + e.offset;
-    }
+    if (scaledGlyphEntryMatches(e, fontData, key, bits, sel, w, h)) return scaledGlyphArena_.get() + e.offset;
   }
   return nullptr;
 }

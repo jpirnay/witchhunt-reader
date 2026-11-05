@@ -166,16 +166,18 @@ bool countLookupsAfter(const FileSource& file, const uint32_t offset, const uint
   // list is crafted (a real one packs its lookups, a window serving a dozen or more): the table counts as capped, so
   // its font reserves no CPac, which costs only the computed filters (slower, never wrong).
   uint32_t reads = 2;
-  uint8_t raw[2 * 64];     // 128 B: the list's offsets, 64 at a time
-  uint16_t offsets[64];    // 128 B: the same, decoded and sorted
-  uint8_t window[128];     // 128 B: the lookup headers read so far
-  uint32_t windowAt = 0;   // the list offset window[0] holds
-  uint32_t windowEnd = 0;  // the list offset past window's last byte (== windowAt: nothing read yet)
+  // One buffer, two uses: a piece of the list's offsets, decoded into `offsets` before anything else is read into it,
+  // then the window of lookup headers. 256 B of buffers in all.
+  uint8_t raw[128];        // 128 B: 64 of the list's offsets, then the lookup headers read so far
+  uint16_t offsets[64];    // 128 B: the piece, decoded and sorted
+  uint32_t windowAt = 0;   // the list offset raw[0] holds as a window
+  uint32_t windowEnd = 0;  // the list offset past the window's last byte (== windowAt: no window held)
   for (uint32_t first = 0; first < listed; first += 64) {
     const uint32_t n = std::min<uint32_t>(64, listed - first);
     if (++reads > kMaxCountingReads) break;
     if (!file.read(file.ctx, offset + listAt + 2 + 2 * first, raw, 2 * n)) return false;
     for (uint32_t i = 0; i < n; ++i) offsets[i] = be16(raw + 2 * i);
+    windowEnd = windowAt;  // the piece took the window's bytes
     // In offset order, so lookups packed one after another share a window.
     std::sort(offsets, offsets + n);
     for (uint32_t i = 0; i < n; ++i) {
@@ -183,13 +185,13 @@ bool countLookupsAfter(const FileSource& file, const uint32_t offset, const uint
       if (at == 0 || at >= listLength || listLength - at < 8) continue;  // under 8 bytes, no subtable fits
       if (at < windowAt || at + 6 > windowEnd) {
         // A window from this header on, as much as the list holds (at least the 8 bytes checked above).
-        const uint32_t len = std::min<uint32_t>(sizeof window, listLength - at);
+        const uint32_t len = std::min<uint32_t>(sizeof raw, listLength - at);
         if (++reads > kMaxCountingReads) break;
-        if (!file.read(file.ctx, offset + listAt + at, window, len)) return false;
+        if (!file.read(file.ctx, offset + listAt + at, raw, len)) return false;
         windowAt = at;
         windowEnd = at + len;
       }
-      subtables += std::min<uint32_t>(be16(window + (at - windowAt) + 4), (listLength - at - 6) / 2);
+      subtables += std::min<uint32_t>(be16(raw + (at - windowAt) + 4), (listLength - at - 6) / 2);
       // Past the cap the rest need not be read.
       if (subtables > kCpacMaxSubtables) {
         out->capped = true;

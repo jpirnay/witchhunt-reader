@@ -786,13 +786,15 @@ Bytes fontWithGsub(const Bytes& gsub) {
   return buildFont(font);
 }
 
-// `count` lookups of one subtable each, behind the list's offsets.
-Bytes gsubOfSimpleLookups(const uint32_t count) {
+// `count` lookups of `subtables` subtables each (null offsets, never read), packed in order behind the list's offsets.
+Bytes gsubOfSimpleLookups(const uint32_t count, const uint32_t subtables = 1) {
   std::vector<uint16_t> offsets;
   Bytes body;
+  const uint32_t lookupBytes = 6 + 2 * subtables;
   for (uint32_t i = 0; i < count; ++i) {
-    offsets.push_back(static_cast<uint16_t>(2 + 2 * count + 8 * i));
-    for (const uint32_t word : {1u, 0u, 1u, 0u}) put16(body, word);  // type 1, flags 0, one subtable (never read)
+    offsets.push_back(static_cast<uint16_t>(2 + 2 * count + lookupBytes * i));
+    for (const uint32_t word : {1u, 0u, subtables}) put16(body, word);  // type 1, flags 0
+    for (uint32_t s = 0; s < subtables; ++s) put16(body, 0);
   }
   return gsubWith(count, offsets, body);
 }
@@ -1145,6 +1147,17 @@ TEST(TtfFamily, ALookupListWithBadOffsetsCountsAsTheFaceReadsIt) {
   // Headers within a window of each other share a read: well under the 204 lookups' one each (49 measured; each piece
   // of 64 offsets, sorted, still spans the body).
   EXPECT_LT(file.reads, 80u);
+}
+
+TEST(TtfFamily, EachPieceOfOffsetsReadsItsHeadersAfresh) {
+  // 200 lookups of 10 bytes, packed in order. The first piece of 64 offsets ends in a window that holds lookup 64's
+  // header too; the count reads offsets and headers through one buffer, so the next piece, read over that window,
+  // must not be taken for lookup 64's header.
+  MemoryFile file{fontWithGsub(gsubOfSimpleLookups(200, 2))};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  EXPECT_EQ(0, probed.style);
+  EXPECT_EQ(16u + 28u * 200 + 24u * 400, probed.cpacBytes);
+  EXPECT_EQ(writerBytes(file.bytes), probed.cpacBytes);
 }
 
 TEST(TtfFamily, ACraftedScatteredLookupListHitsTheReadBudget) {

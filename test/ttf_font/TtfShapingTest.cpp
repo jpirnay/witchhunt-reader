@@ -340,6 +340,28 @@ TEST_F(TtfGlyphKeys, PrefetchGlyphsStoresTheRunInABatch) {
   EXPECT_EQ(used, set->stats().logUsed);
 }
 
+TEST_F(TtfGlyphKeys, APrefetchRendersAtMostSixtyFourNewGlyphs) {
+  // A page's scan hands over up to 512 IDs a style in one call. One call renders the first 64 the store does not hold
+  // (TtfFontSet::kPrefetchGlyphs), in one batch; the others render one by one as they are drawn.
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  const EpdFontFamily family(font.font(kRegular));
+  constexpr uint16_t kAsked = 100;
+  ASSERT_GT(glyphCountOf(subset[kRegular].bytes), kAsked);
+  ASSERT_EQ(64u, TtfFontSet::kPrefetchGlyphs);
+  std::vector<uint16_t> ids;
+  for (uint16_t gid = 1; gid <= kAsked; ++gid) ids.push_back(gid);
+
+  family.prefetchGlyphs(ids.data(), ids.size(), EpdFontFamily::REGULAR);
+  EXPECT_EQ(64u, font.renders());
+  for (uint16_t gid = 1; gid <= 64; ++gid) ASSERT_NE(nullptr, font.glyph(kRegular, glyph_key::of(gid))) << gid;
+  EXPECT_EQ(64u, font.renders());  // the batch's: store hits
+  for (uint16_t gid = 65; gid <= kAsked; ++gid) ASSERT_NE(nullptr, font.glyph(kRegular, glyph_key::of(gid))) << gid;
+  EXPECT_EQ(uint32_t{kAsked}, font.renders());  // the rest, as drawn
+}
+
 TEST_F(TtfGlyphKeys, AFontThatDrawsNoGlyphKeysIsNotAsked) {
   CountingProvider provider;
   EpdFontData data{};

@@ -211,6 +211,9 @@ TEST(FontCacheManager, AFontThatDrawsNoGlyphKeysRecordsNoIds) {
   EXPECT_EQ(0, scan.regularProvider.prefetches);
 }
 
+// The scan keeps 512 distinct IDs a style and hands them to the provider in one call; IDs past them are looked up as
+// they are drawn. What the provider renders of the 512 is its own cap: a TrueType font renders the first 64 it lacks
+// and leaves the rest to the draw (TtfGlyphKeys.APrefetchRendersAtMostSixtyFourNewGlyphs).
 TEST(FontCacheManager, GlyphIdsPastTheCapAreLeftToTheDraw) {
   GlyphScan scan;
   std::vector<uint16_t> first;

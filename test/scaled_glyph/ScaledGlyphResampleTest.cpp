@@ -96,3 +96,37 @@ TEST(ScaledGlyphResample, AGlyphKeyHasACacheKeyOfItsOwn) {
   EXPECT_FALSE(scaledGlyphKeyOf(0x10FFFF).cacheable);
   EXPECT_FALSE(scaledGlyphKeyOf(glyph_key::kLast + 1).cacheable);
 }
+
+// The cache's own match (GfxRenderer's find): an entry stored for 'A' never serves glyph 0x41 of the same font at the
+// same scale, size and drawMask, nor one stored for glyph 0x41 'A'.
+TEST(ScaledGlyphResample, AGlyphKeyAndACodePointNeverShareAnEntry) {
+  const int fontData = 0;                  // stands for one style's EpdFontData
+  constexpr uint32_t kScale = 0x3FC00000;  // 1.5f
+  const auto storedFor = [&](const ScaledGlyphKey& key) {
+    ScaledGlyphEntry e{};
+    e.fontData = &fontData;
+    e.scaleBits = kScale;
+    e.id = key.id;
+    e.kind = key.kind;
+    e.sel = 3;
+    e.w = 10;
+    e.h = 12;
+    return e;
+  };
+  const ScaledGlyphKey letter = scaledGlyphKeyOf('A');
+  const ScaledGlyphKey glyph = scaledGlyphKeyOf(glyph_key::of(0x41));
+  ASSERT_EQ(letter.id, glyph.id);
+  EXPECT_TRUE(scaledGlyphEntryMatches(storedFor(letter), &fontData, letter, kScale, 3, 10, 12));
+  EXPECT_TRUE(scaledGlyphEntryMatches(storedFor(glyph), &fontData, glyph, kScale, 3, 10, 12));
+  EXPECT_FALSE(scaledGlyphEntryMatches(storedFor(letter), &fontData, glyph, kScale, 3, 10, 12));
+  EXPECT_FALSE(scaledGlyphEntryMatches(storedFor(glyph), &fontData, letter, kScale, 3, 10, 12));
+  // Every other part of the key tells entries apart too.
+  const int otherFont = 0;
+  const ScaledGlyphEntry e = storedFor(letter);
+  EXPECT_FALSE(scaledGlyphEntryMatches(e, &otherFont, letter, kScale, 3, 10, 12));
+  EXPECT_FALSE(scaledGlyphEntryMatches(e, &fontData, scaledGlyphKeyOf('B'), kScale, 3, 10, 12));
+  EXPECT_FALSE(scaledGlyphEntryMatches(e, &fontData, letter, kScale + 1, 3, 10, 12));
+  EXPECT_FALSE(scaledGlyphEntryMatches(e, &fontData, letter, kScale, 1, 10, 12));
+  EXPECT_FALSE(scaledGlyphEntryMatches(e, &fontData, letter, kScale, 3, 11, 12));
+  EXPECT_FALSE(scaledGlyphEntryMatches(e, &fontData, letter, kScale, 3, 10, 13));
+}

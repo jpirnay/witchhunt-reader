@@ -4,7 +4,9 @@
 #include <OtShaper.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <vector>
 
@@ -596,6 +598,57 @@ TEST(OtFilterWriter, MoreSubtablesThanTheCapGiveNoTable) {
   EXPECT_EQ(bytesFor(kCap), 16u + 28u + 24u * kCap);  // at the cap: written
   EXPECT_EQ(bytesFor(kCap + 1), 0u);                  // one past: none
   EXPECT_EQ(bytesFor(UINT16_MAX), 0u);
+}
+
+// A GSUB of one Extension lookup declaring `subtables` subtables, all at one ExtensionSubst that extends a SingleSubst
+// of glyph 5.
+static std::vector<uint8_t> extensionGsubOf(const uint16_t subtables) {
+  std::vector<uint8_t> bytes;
+  const auto u16 = [&bytes](const std::initializer_list<uint16_t> words) {
+    for (const uint16_t w : words) {
+      bytes.push_back(static_cast<uint8_t>(w >> 8));
+      bytes.push_back(static_cast<uint8_t>(w));
+    }
+  };
+  u16({1, 0, 0, 0, 10});   // header: v1.0, no scripts or features, lookups at 10
+  u16({1, 4});             // 10: LookupList, one lookup at 14
+  u16({7, 0, subtables});  // 14: an Extension lookup
+  const uint16_t shared = static_cast<uint16_t>(6 + 2 * subtables);
+  for (uint32_t i = 0; i < subtables; i++) u16({shared});
+  u16({1, 1, 0, 8});  // ExtensionSubst extending type 1, at 8
+  u16({1, 6, 1});     // SingleSubstFormat1, coverage at 6
+  u16({1, 1, 5});     // Coverage, glyph 5
+  return bytes;
+}
+
+TEST(OtFilterWriter, AnExtensionLookupAtTheSubtableCapIsWrittenWhole) {
+  // One Extension lookup of 16,384 subtables, the cap: Face::lookup() checks every one of them, so the writer reads
+  // the lookup once for all its subtable digests (once a subtable, it took 16,384 times that). Each digest is the one
+  // coverage's, glyph 5.
+  constexpr uint32_t kCap = ot::FilterTableWriter::kMaxSubtables;
+  const std::vector<uint8_t> font = readFixture("NotoSansTamil-Regular.layout");
+  const std::vector<uint8_t> gsub = extensionGsubOf(static_cast<uint16_t>(kCap));
+  ot::Face face;
+  ASSERT_TRUE(initWithGsub(face, font, gsub));
+  ASSERT_EQ(ot::Face::subtableCount(face.lookup(ot::GSUB, 0)), kCap);
+  ot::FilterTableWriter writer(face);
+  const std::vector<uint8_t> cpac = writeAll(writer);
+  ASSERT_EQ(cpac.size(), writer.bytes());
+  const auto u32 = [](const uint8_t* p) {
+    return static_cast<uint32_t>(p[0]) << 24 | static_cast<uint32_t>(p[1]) << 16 | static_cast<uint32_t>(p[2]) << 8 |
+           p[3];
+  };
+  ASSERT_EQ(u32(cpac.data() + 8), kCap);  // GSUB's subtables
+  // GSUB: header 16, the lookup's digest, its first-subtable index, then the subtable digests, each the lookup's.
+  const uint8_t* const lookupDigest = cpac.data() + 16;
+  const uint8_t* const digests = lookupDigest + ot::DIGEST_BYTES + 4;
+  ASSERT_LE(static_cast<size_t>(digests - cpac.data()) + size_t{kCap} * ot::DIGEST_BYTES, cpac.size());
+  EXPECT_FALSE(std::all_of(lookupDigest, lookupDigest + ot::DIGEST_BYTES, [](const uint8_t b) { return b == 0; }));
+  uint32_t differing = 0;
+  for (uint32_t i = 0; i < kCap; i++) {
+    if (std::memcmp(digests + size_t{i} * ot::DIGEST_BYTES, lookupDigest, ot::DIGEST_BYTES) != 0) differing++;
+  }
+  EXPECT_EQ(differing, 0u);
 }
 
 TEST(OtShaperHelpers, DecodeUtf8StopsAtATruncatedSequence) {

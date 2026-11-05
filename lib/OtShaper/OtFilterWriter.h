@@ -55,6 +55,7 @@ class FilterTableWriter {
   uint32_t lookup_ = 0;   // subtable steps: the lookup `within_` counts in
   uint32_t within_ = 0;   // subtable steps: subtables of `lookup_` done
   uint32_t running_ = 0;  // index steps: subtables of the lookups before this one
+  Table lookupView_;      // subtable steps: Face::lookup() of `lookup_`, read when `lookup_` advances
 };
 
 }  // namespace ot

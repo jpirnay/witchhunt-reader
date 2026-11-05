@@ -86,13 +86,17 @@ bool FilterTableWriter::nextRecord() {
       running_ += Face::subtableCount(face_.lookup(table, index_));
       recLen_ = 4;
     } else {
-      // The lookup holding subtable `index_`: lookups without subtables (dropped ones too) are passed over.
-      while (lookup_ < lookups_[table] && within_ >= Face::subtableCount(face_.lookup(table, lookup_))) {
+      // The lookup holding subtable `index_`: lookups without subtables (dropped ones too) are passed over. Each is
+      // read once, as Face::lookup() checks every subtable of an Extension lookup: once a subtable would cost the
+      // square of its subtables.
+      if (index_ == 0) lookupView_ = face_.lookup(table, 0);
+      while (lookup_ < lookups_[table] && within_ >= Face::subtableCount(lookupView_)) {
         lookup_++;
         within_ = 0;
+        lookupView_ = face_.lookup(table, lookup_);
       }
       if (lookup_ >= lookups_[table]) return false;
-      writeDigest(subtableDigest(face_, table, lookup_, static_cast<uint16_t>(within_)), rec_);
+      writeDigest(subtableDigest(table, lookupView_, static_cast<uint16_t>(within_)), rec_);
       within_++;
       recLen_ = DIGEST_BYTES;
     }

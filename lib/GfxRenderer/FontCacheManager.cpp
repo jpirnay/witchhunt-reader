@@ -134,7 +134,9 @@ void FontCacheManager::prewarmCache(int fontId, const char* utf8Text, uint8_t st
 void FontCacheManager::prewarmGlyphs(const int fontId, const uint16_t* ids, const size_t count,
                                      const EpdFontFamily::Style style) {
   if (!ids || count == 0) return;
-  // Only a TrueType family draws glyph keys; an SD or built-in font under the ID is not asked (prefetchGlyphs).
+  // Only a TrueType family draws glyph keys; an SD or built-in font under the ID is not asked (prefetchGlyphs). One
+  // call: the TrueType font renders the first 64 the store does not hold (TtfFontSet::kPrefetchGlyphs) in one batch,
+  // and the rest one by one as they are drawn, as a text prefetch leaves them.
   if (const EpdFontFamily* family = findFamily(fontId)) family->prefetchGlyphs(ids, count, style);
 }
 
@@ -190,7 +192,8 @@ void FontCacheManager::recordText(const char* text, int fontId, EpdFontFamily::S
 
 void FontCacheManager::recordGlyphs(const GlyphRun& run, const int fontId, const EpdFontFamily::Style style) {
   // Each distinct ID once, so a page's glyphs fit in far less than 512; IDs past the cap are not prewarmed but looked
-  // up as they are drawn. 1 KB a style at most, held only until the prewarm.
+  // up as they are drawn. 1 KB a style at most, held only until the prewarm. What the prewarm then renders is the
+  // font's to cap (prewarmGlyphs(): a TrueType font's first 64 it lacks).
   static constexpr size_t SCAN_GLYPHS_PER_STYLE = 512;
   static constexpr size_t SCAN_GLYPH_GROWTH_STEP = 128;
   if (run.count == 0) return;

@@ -40,8 +40,9 @@ class FontCacheManager {
   void logStats(const char* label = "render");
   void resetStats();
 
-  // The glyph-ID prefetch of one font's `style`: `ids[0..count)` go to its provider in one batch
-  // (EpdFontFamily::prefetchGlyphs). Nothing for a font that draws no glyph keys.
+  // The glyph-ID prefetch of one font's `style`: `ids[0..count)` go to its provider in one call
+  // (EpdFontFamily::prefetchGlyphs). Nothing for a font that draws no glyph keys. A TrueType font renders the first
+  // 64 it lacks in one batch (TtfFontSet::kPrefetchGlyphs); the rest load one by one as they are drawn.
   void prewarmGlyphs(int fontId, const uint16_t* ids, size_t count, EpdFontFamily::Style style);
 
   // Scan-mode API: called by GfxRenderer::drawText() during scan pass
