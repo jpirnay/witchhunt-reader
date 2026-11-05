@@ -52,6 +52,7 @@
 #include "util/FontDownloadRules.h"
 #include "util/FontManifestReader.h"
 #include "util/PluginLocations.h"
+#include "util/UrlUtils.h"
 
 // Log free heap + max contiguous block at a named point.
 #define LOG_WEB_MEM(tag)                                                                             \
@@ -463,6 +464,20 @@ void CrossPointWebServer::begin() {
 
   LOG_DBG("WEB", "[MEM] Free heap after WebServer allocation: %d bytes", ESP.getFreeHeap());
 
+  // Sends the OS's captive-portal checks to the home page, so joining the hotspot opens it (see
+  // https://en.wikipedia.org/wiki/Captive_portal#Detection). Middleware because WebDAV claims every
+  // GET, so an unmatched check never reaches onNotFound. Checks are GET or HEAD; another method's body
+  // is already handled by now. Ported from crosspoint-reader (#4211 by Arthur Tazhitdinov).
+  if (apMode) {
+    server->addMiddleware([](WebServer& s, Middleware::Callback next) {
+      const bool check = s.method() == HTTP_GET || s.method() == HTTP_HEAD;
+      if (!check || !UrlUtils::isForeignHost(s.header("Host").c_str())) return next();
+      s.sendHeader("Location", "http://" + WiFi.softAPIP().toString() + "/", true);
+      s.send(302, "text/plain", "");
+      return true;
+    });
+  }
+
   // Setup routes
   LOG_DBG("WEB", "Setting up routes...");
   // Ownership passes to the WebServer, which deletes the handler when stopped.
@@ -557,11 +572,11 @@ void CrossPointWebServer::begin() {
   server->onNotFound([this] { handleNotFound(); });
   LOG_DBG("WEB", "[MEM] Free heap after route setup: %d bytes", ESP.getFreeHeap());
 
-  // Collect the WebDAV headers, If-None-Match for the bundle's ETags (WebAssets::serve()) and
-  // Referer for the upload log, then register the handler. collectHeaders() replaces the list, so
-  // it is called once.
-  const char* collectedHeaders[] = {"Depth",      "Destination", "Overwrite",     "If",
-                                    "Lock-Token", "Timeout",     "If-None-Match", "Referer"};
+  // Collect the WebDAV headers, If-None-Match for the bundle's ETags (WebAssets::serve()), Referer
+  // for the upload log and Host for the captive-portal check, then register the handler.
+  // collectHeaders() replaces the list, so it is called once.
+  const char* collectedHeaders[] = {"Depth",   "Destination",   "Overwrite", "If",  "Lock-Token",
+                                    "Timeout", "If-None-Match", "Referer",   "Host"};
   server->collectHeaders(collectedHeaders, sizeof(collectedHeaders) / sizeof(collectedHeaders[0]));
   // Ownership passes to the WebServer, which deletes the handler when stopped.
   // On OOM the HTTP server still comes up; only WebDAV is unavailable.

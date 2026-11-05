@@ -1139,6 +1139,11 @@ The device can operate in two network modes:
 ### Access Point Mode (AP)
 - Device creates its own WiFi hotspot
 - Default IP is typically `192.168.4.1`
+- The hotspot's DNS answers every name with the device's IP. A `GET` or `HEAD`
+  request whose `Host` is any other domain name (not an IP address, a `.local`
+  name or a single-label name such as `crosspoint`) gets
+  `302 Location: http://<AP IP>/`, so phones and computers can open the home
+  page as a captive portal. Other methods are not redirected.
 - `mode` field in `/api/status` returns `"AP"`
 - `rssi` field returns `0`
 
