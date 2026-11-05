@@ -631,6 +631,14 @@ void ParsedText::decideBidi() {
       levelDecided_ = true;
     }
     bidi_ = level_ == 1 || rtlClass;
+    if (bidi_ && !bidiState_) {
+      bidiState_ = makeUniqueNoThrow<BidiState>();
+      if (!bidiState_) {
+        // As when the line pass has no workspace: the text is laid out without bidi, and its controls are not drawn.
+        LOG_ERR("BIDI", "OOM: bidi state (%u B): pass laid out without bidi", static_cast<unsigned>(sizeof(BidiState)));
+        bidi_ = false;
+      }
+    }
   }
   if (!bidi_) dropBidiControls();
 }
@@ -639,7 +647,7 @@ void ParsedText::forgetBidiParagraph() {
   bidi_ = false;
   level_ = 0;
   levelDecided_ = false;
-  openControls_ = {};
+  if (bidiState_) bidiState_->openControls = {};
 }
 
 void ParsedText::dropBidiControls() {
@@ -714,7 +722,7 @@ void ParsedText::layoutAndExtractLines(
     savedRubyTexts = rubyTexts_;
     savedIsContinuation = isContinuation_;
     savedBionicWatermark = bionicTransformedUpTo_;
-    savedOpenControls = openControls_;
+    if (bidiState_) savedOpenControls = bidiState_->openControls;
   }
 
   // Heading blocks lay out (and below render) with a taller real font instead of scaling the
@@ -823,7 +831,7 @@ void ParsedText::layoutAndExtractLines(
 
   std::vector<uint16_t>& wordWidths = wordWidths_;
   // The bidi controls open at the pass's first token: the retry below measures from there again.
-  const BidiLine::OpenControls passControls = openControls_;
+  const BidiLine::OpenControls passControls = bidiState_ ? bidiState_->openControls : BidiLine::OpenControls{};
   calculateWordWidths(renderer, fontId, wordWidths, passControls);
 
   // A span indent gives way before the line does. Poems draw their shape with margin-left on each
@@ -1008,7 +1016,7 @@ void ParsedText::layoutAndExtractLines(
     rubyTexts_ = std::move(savedRubyTexts);
     isContinuation_ = savedIsContinuation;
     bionicTransformedUpTo_ = savedBionicWatermark;
-    openControls_ = savedOpenControls;
+    if (bidiState_) bidiState_->openControls = savedOpenControls;
   }
 }
 
@@ -1108,19 +1116,25 @@ void ParsedText::releaseLayoutScratch() {
   std::string().swap(allText_);
   std::vector<TextBlock::Annotation>().swap(lineAnnotations_);
   // The line pass's: the line and its pieces. The paragraph's direction and its open controls are its state, not
-  // scratch, and stay. Its working memory is the build's (BidiLine::heapScratch), not this text's.
-  std::vector<BidiLine::Piece>().swap(bidiLine_.pieces);
-  std::string().swap(bidiLine_.display);
-  std::vector<std::string>().swap(bidiLine_.fallbackWords);
-  std::vector<uint16_t>().swap(bidiLine_.fallbackOrder);
-  std::vector<BidiLine::Token>().swap(bidiTokens_);
-  std::vector<std::string_view>().swap(pieceWords_);
-  std::vector<std::string_view>().swap(pieceForms_);
-  std::vector<EpdFontFamily::Style>().swap(pieceStyles_);
-  std::vector<TextBlock::WordSize>().swap(pieceSizes_);
-  std::vector<TokenBoundary::Boundary>().swap(pieceBoundaries_);
-  std::vector<uint8_t>().swap(pieceOrder_);
-  std::string().swap(tokenForm_);
+  // scratch: a paragraph in progress that needs bidi keeps them, and otherwise the whole box goes. Its working memory
+  // is the build's (BidiLine::heapScratch), not this text's.
+  if (bidiState_ && !bidi_) {
+    bidiState_.reset();
+  } else if (bidiState_) {
+    BidiState& state = *bidiState_;
+    std::vector<BidiLine::Piece>().swap(state.line.pieces);
+    std::string().swap(state.line.display);
+    std::vector<std::string>().swap(state.line.fallbackWords);
+    std::vector<uint16_t>().swap(state.line.fallbackOrder);
+    std::vector<BidiLine::Token>().swap(state.tokens);
+    std::vector<std::string_view>().swap(state.pieceWords);
+    std::vector<std::string_view>().swap(state.pieceForms);
+    std::vector<EpdFontFamily::Style>().swap(state.pieceStyles);
+    std::vector<TextBlock::WordSize>().swap(state.pieceSizes);
+    std::vector<TokenBoundary::Boundary>().swap(state.pieceBoundaries);
+    std::vector<uint8_t>().swap(state.pieceOrder);
+    std::string().swap(state.tokenForm);
+  }
   // The word vectors carry the paragraph in progress: an empty block gives them back whole; a
   // block mid-paragraph keeps them AS THEY ARE. This used to shrink_to_fit them, and a slice
   // yields inside a paragraph almost always (the 1 KB feed chunk ends mid-<p>), so every yield
@@ -1171,11 +1185,13 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
       if (combines(i)) {
         // A combined word is one em down its column, whatever its glyphs' advances.
         out.push_back(static_cast<uint16_t>(columnEm(renderer, font, wordStyles[i], wordScale(i))));
-      } else if (scratch != nullptr && BidiLine::tokenForm(words[i], open, level_, *scratch, tokenForm_)) {
-        out.push_back(measureWordWidth(renderer, font, tokenForm_, wordStyles[i], false, wordScale(i), vertical_));
-      } else if (bidi_ && scratch == nullptr && withoutControls(words[i], tokenForm_)) {
+      } else if (scratch != nullptr && BidiLine::tokenForm(words[i], open, level_, *scratch, bidiState_->tokenForm)) {
+        out.push_back(
+            measureWordWidth(renderer, font, bidiState_->tokenForm, wordStyles[i], false, wordScale(i), vertical_));
+      } else if (bidi_ && scratch == nullptr && withoutControls(words[i], bidiState_->tokenForm)) {
         // No scratch (logged): the block is laid out without bidi, and its controls are not drawn.
-        out.push_back(measureWordWidth(renderer, font, tokenForm_, wordStyles[i], false, wordScale(i), vertical_));
+        out.push_back(
+            measureWordWidth(renderer, font, bidiState_->tokenForm, wordStyles[i], false, wordScale(i), vertical_));
       } else {
         out.push_back(measureWordWidth(renderer, font, words[i], wordStyles[i], false, wordScale(i), vertical_));
       }
@@ -2082,29 +2098,31 @@ BidiLine::Scratch* ParsedText::bidiScratchFor(const BidiLine::ArenaWorkspace& wo
 }
 
 bool ParsedText::layOutBidiLine(const size_t first, const size_t count) {
-  bidiTokens_.clear();
-  bidiTokens_.reserve(count);
+  BidiState& state = *bidiState_;
+  state.tokens.clear();
+  state.tokens.reserve(count);
   for (size_t t = 0; t < count; ++t) {
-    bidiTokens_.push_back({words[first + t], TokenBoundary::hasSpace(wordBoundaries[first + t])});
+    state.tokens.push_back({words[first + t], TokenBoundary::hasSpace(wordBoundaries[first + t])});
   }
   // The workspace is the pass's alone: its scope ends here, before the line is materialised (beforeLine_ may close the
   // page's arena block, and the line's TextBlock takes its bytes above it).
   const BidiLine::ArenaWorkspace workspace(lineArena_);
   BidiLine::Scratch* const scratch = bidiScratchFor(workspace);
   if (scratch == nullptr) return false;
-  if (BidiLine::layoutLine(bidiTokens_.data(), count, openControls_, level_, *scratch, bidiLine_)) return true;
+  if (BidiLine::layoutLine(state.tokens.data(), count, state.openControls, level_, *scratch, state.line)) return true;
   LOG_ERR("BIDI", "No workspace for the line pass: line laid out without bidi");
   return false;
 }
 
 bool ParsedText::bidiLineIsPlain(const size_t first, const size_t count) const {
-  const std::vector<BidiLine::Piece>& pieces = bidiLine_.pieces;
-  if (rtl() || bidiLine_.reordered || pieces.size() != count) return false;
+  const BidiState& state = *bidiState_;
+  const std::vector<BidiLine::Piece>& pieces = state.line.pieces;
+  if (rtl() || state.line.reordered || pieces.size() != count) return false;
   for (size_t v = 0; v < count; ++v) {
     const BidiLine::Piece& piece = pieces[v];
     if (piece.token != v ||
         !formIsText(words[first + v],
-                    std::string_view(bidiLine_.display).substr(piece.displayBegin, piece.displayLength))) {
+                    std::string_view(state.line.display).substr(piece.displayBegin, piece.displayLength))) {
       return false;
     }
   }
@@ -2114,9 +2132,10 @@ bool ParsedText::bidiLineIsPlain(const size_t first, const size_t count) const {
 uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId, const size_t first,
                                   const int effectivePageWidth, const int lineIndent, const bool isLastLine,
                                   TextBlock::WordRange& range) {
-  const std::vector<BidiLine::Piece>& pieces = bidiLine_.pieces;
+  BidiState& state = *bidiState_;
+  const std::vector<BidiLine::Piece>& pieces = state.line.pieces;
   const size_t count = pieces.size();
-  const char* const display = bidiLine_.display.c_str();
+  const char* const display = state.line.display.c_str();
   const auto form = [&](const size_t v) {
     return std::string_view(display + pieces[v].displayBegin, pieces[v].displayLength);
   };
@@ -2185,18 +2204,18 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
 
   // The pieces as the line stores them, in visual order: each its token's bytes, style and size, glued unless a word
   // space comes before it, drawn as its form.
-  pieceWords_.clear();
-  pieceForms_.clear();
-  pieceStyles_.clear();
-  pieceSizes_.clear();
-  pieceBoundaries_.clear();
-  pieceOrder_.clear();
-  pieceWords_.reserve(count);
-  pieceForms_.reserve(count);
-  pieceStyles_.reserve(count);
-  pieceSizes_.reserve(count);
-  pieceBoundaries_.reserve(count);
-  pieceOrder_.reserve(count);
+  state.pieceWords.clear();
+  state.pieceForms.clear();
+  state.pieceStyles.clear();
+  state.pieceSizes.clear();
+  state.pieceBoundaries.clear();
+  state.pieceOrder.clear();
+  state.pieceWords.reserve(count);
+  state.pieceForms.reserve(count);
+  state.pieceStyles.reserve(count);
+  state.pieceSizes.reserve(count);
+  state.pieceBoundaries.reserve(count);
+  state.pieceOrder.reserve(count);
   uint8_t maxPct = 100;
   for (size_t v = 0; v < count; ++v) {
     const BidiLine::Piece& piece = pieces[v];
@@ -2206,23 +2225,23 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
     xs[v] = static_cast<int16_t>(x);
     x += width + (isSpace(v) ? extra : 0);
 
-    pieceWords_.push_back(std::string_view(words[i]).substr(piece.begin, piece.end - piece.begin));
-    pieceForms_.push_back(form(v));
-    pieceStyles_.push_back(wordStyles[i]);
-    pieceSizes_.push_back(wordSizes[i]);
-    pieceBoundaries_.push_back(TokenBoundary::Boundary{piece.gapBefore != BidiLine::Gap::Space, false});
-    pieceOrder_.push_back(piece.readingIndex);
+    state.pieceWords.push_back(std::string_view(words[i]).substr(piece.begin, piece.end - piece.begin));
+    state.pieceForms.push_back(form(v));
+    state.pieceStyles.push_back(wordStyles[i]);
+    state.pieceSizes.push_back(wordSizes[i]);
+    state.pieceBoundaries.push_back(TokenBoundary::Boundary{piece.gapBefore != BidiLine::Gap::Space, false});
+    state.pieceOrder.push_back(piece.readingIndex);
     maxPct = std::max(maxPct, wordSizes[i].pct);
   }
 
   range = TextBlock::WordRange{};
-  range.wordViews = pieceWords_.data();
-  range.displayForms = pieceForms_.data();
+  range.wordViews = state.pieceWords.data();
+  range.displayForms = state.pieceForms.data();
   // A logical order numbers its words in a byte: a longer (fallback) line has none.
-  range.logicalOrder = bidiLine_.reordered && count <= TextBlock::kMaxOrderedWords ? pieceOrder_.data() : nullptr;
-  range.styles = &pieceStyles_;
-  range.sizes = &pieceSizes_;
-  range.boundaries = &pieceBoundaries_;
+  range.logicalOrder = state.line.reordered && count <= TextBlock::kMaxOrderedWords ? state.pieceOrder.data() : nullptr;
+  range.styles = &state.pieceStyles;
+  range.sizes = &state.pieceSizes;
+  range.boundaries = &state.pieceBoundaries;
   range.fontTable = fontSlots_;
   range.first = 0;
   range.count = count;
@@ -2230,46 +2249,47 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
 }
 
 void ParsedText::viewWithoutControls(const size_t first, const size_t count, TextBlock::WordRange& range) {
-  // The copies go to bidiLine_.display, which the pass that did not run leaves free. Reserved whole first: no
+  BidiState& state = *bidiState_;
+  // The copies go to state.line.display, which the pass that did not run leaves free. Reserved whole first: no
   // reallocation below, so the views into it stay valid.
-  std::string& copies = bidiLine_.display;
+  std::string& copies = state.line.display;
   copies.clear();
   size_t bytes = 0;
   for (size_t t = 0; t < count; ++t) bytes += words[first + t].size() + 1;
   copies.reserve(bytes);
-  pieceWords_.clear();
-  pieceStyles_.clear();
-  pieceSizes_.clear();
-  pieceBoundaries_.clear();
-  pieceWords_.reserve(count);
-  pieceStyles_.reserve(count);
-  pieceSizes_.reserve(count);
-  pieceBoundaries_.reserve(count);
+  state.pieceWords.clear();
+  state.pieceStyles.clear();
+  state.pieceSizes.clear();
+  state.pieceBoundaries.clear();
+  state.pieceWords.reserve(count);
+  state.pieceStyles.reserve(count);
+  state.pieceSizes.reserve(count);
+  state.pieceBoundaries.reserve(count);
   for (size_t t = 0; t < count; ++t) {
     const size_t i = first + t;
-    if (withoutControls(words[i], tokenForm_)) {
+    if (withoutControls(words[i], state.tokenForm)) {
       const size_t at = copies.size();
-      copies += tokenForm_;
+      copies += state.tokenForm;
       copies.push_back('\0');
-      pieceWords_.emplace_back(copies.data() + at, tokenForm_.size());
+      state.pieceWords.emplace_back(copies.data() + at, state.tokenForm.size());
     } else {
-      pieceWords_.emplace_back(words[i]);
+      state.pieceWords.emplace_back(words[i]);
     }
-    pieceStyles_.push_back(wordStyles[i]);
-    pieceSizes_.push_back(wordSizes[i]);
-    pieceBoundaries_.push_back(wordBoundaries[i]);
+    state.pieceStyles.push_back(wordStyles[i]);
+    state.pieceSizes.push_back(wordSizes[i]);
+    state.pieceBoundaries.push_back(wordBoundaries[i]);
   }
   range.words = nullptr;
-  range.wordViews = pieceWords_.data();
-  range.styles = &pieceStyles_;
-  range.sizes = &pieceSizes_;
-  range.boundaries = &pieceBoundaries_;
+  range.wordViews = state.pieceWords.data();
+  range.styles = &state.pieceStyles;
+  range.sizes = &state.pieceSizes;
+  range.boundaries = &state.pieceBoundaries;
   range.first = 0;
 }
 
 void ParsedText::stepOpenControls(const size_t first, const size_t end) {
   if (!bidi_) return;
-  for (size_t i = first; i < end && i < words.size(); ++i) openControls_.advance(words[i]);
+  for (size_t i = first; i < end && i < words.size(); ++i) bidiState_->openControls.advance(words[i]);
 }
 
 ParsedText::LineProcessResult ParsedText::extractLine(

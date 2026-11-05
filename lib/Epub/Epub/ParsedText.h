@@ -155,20 +155,28 @@ class ParsedText {
   bool bidi_ = false;
   uint8_t level_ = 0;          // the paragraph's level: 0 left to right, 1 right to left
   bool levelDecided_ = false;  // level_ is decided on the paragraph's first pass and kept
-  // The embeddings, overrides and isolates the text before the next line leaves open. Steps over each accepted line.
-  BidiLine::OpenControls openControls_;
-  // The line being laid out: its tokens, its pieces in visual order, and what its TextBlock is made from. The texts are
-  // views into `words`, the forms into bidiLine_.display: TextBlock copies both into its arena, so a line builds no
-  // string. All keep their capacity across lines.
-  BidiLine::Line bidiLine_;
-  std::vector<BidiLine::Token> bidiTokens_;
-  std::vector<std::string_view> pieceWords_;
-  std::vector<std::string_view> pieceForms_;
-  std::vector<EpdFontFamily::Style> pieceStyles_;
-  std::vector<TextBlock::WordSize> pieceSizes_;
-  std::vector<TokenBoundary::Boundary> pieceBoundaries_;
-  std::vector<uint8_t> pieceOrder_;
-  std::string tokenForm_;  // the one string every BidiLine::tokenForm call writes into
+  // What only a paragraph that needs bidi uses. Boxed, so a paragraph or table cell without bidi carries one pointer
+  // instead (a 64-bit host's ParsedText was 360 B larger with these inline). decideBidi() makes it for the first pass
+  // that needs bidi, and bidi_ is never set without it. reset() keeps it for the next paragraph; releaseLayoutScratch()
+  // frees it when no paragraph in progress needs bidi.
+  struct BidiState {
+    // The embeddings, overrides and isolates the text before the next line leaves open. Steps over each accepted
+    // line.
+    BidiLine::OpenControls openControls;
+    // The line being laid out: its tokens, its pieces in visual order, and what its TextBlock is made from. The texts
+    // are views into `words`, the forms into line.display: TextBlock copies both into its arena, so a line builds no
+    // string. All keep their capacity across lines.
+    BidiLine::Line line;
+    std::vector<BidiLine::Token> tokens;
+    std::vector<std::string_view> pieceWords;
+    std::vector<std::string_view> pieceForms;
+    std::vector<EpdFontFamily::Style> pieceStyles;
+    std::vector<TextBlock::WordSize> pieceSizes;
+    std::vector<TokenBoundary::Boundary> pieceBoundaries;
+    std::vector<uint8_t> pieceOrder;
+    std::string tokenForm;  // the one string every BidiLine::tokenForm call writes into
+  };
+  std::unique_ptr<BidiState> bidiState_;
   bool rtl() const { return bidi_ && level_ == 1; }
   // Whether this pass needs bidi, and the paragraph's level; a pass that does not drops the controls
   // (dropBidiControls).
@@ -180,21 +188,22 @@ class ParsedText {
   // The scratch for one pass: the lent arena's (`workspace`), else the build's one BidiLine::heapScratch(). Null,
   // logged, when neither can be had.
   BidiLine::Scratch* bidiScratchFor(const BidiLine::ArenaWorkspace& workspace);
-  // Runs the line pass over tokens [first, first + count) into bidiLine_, with the workspace borrowed from lineArena_
-  // for the pass alone. False, logged, when it could not run: the line is then laid out without bidi.
+  // Runs the line pass over tokens [first, first + count) into bidiState_->line, with the workspace borrowed from
+  // lineArena_ for the pass alone. False, logged, when it could not run: the line is then laid out without bidi.
   bool layOutBidiLine(size_t first, size_t count);
-  // Whether bidiLine_ is the line's tokens as they stand: in order, one piece each, each drawn as its text. Such a line
-  // of a left-to-right paragraph is laid out by the ordinary path.
+  // Whether bidiState_->line is the line's tokens as they stand: in order, one piece each, each drawn as its text. Such
+  // a line of a left-to-right paragraph is laid out by the ordinary path.
   bool bidiLineIsPlain(size_t first, size_t count) const;
-  // Places bidiLine_'s pieces of the line that starts at token `first` in visual order, as upstream #1700's reordered
-  // loop does: fills lineXPosScratch_, the piece vectors and `range`. Returns the line's largest word size percent.
+  // Places bidiState_->line's pieces of the line that starts at token `first` in visual order, as upstream #1700's
+  // reordered loop does: fills lineXPosScratch_, the piece vectors and `range`. Returns the line's largest word size
+  // percent.
   uint8_t placeBidiLine(const GfxRenderer& renderer, int fontId, size_t first, int effectivePageWidth, int lineIndent,
                         bool isLastLine, TextBlock::WordRange& range);
   // Points `range` (set up for tokens [first, first + count)) at those tokens without their bidi controls, as a pass
   // that needs no bidi has them: for a line the line pass could not run on. Views, with the copies in
-  // bidiLine_.display.
+  // bidiState_->line.display.
   void viewWithoutControls(size_t first, size_t count, TextBlock::WordRange& range);
-  // Steps openControls_ over the tokens [first, end) of a line that was accepted.
+  // Steps bidiState_->openControls over the tokens [first, end) of a line that was accepted.
   void stepOpenControls(size_t first, size_t end);
 
   LinePlace linePlace_;
@@ -300,13 +309,13 @@ class ParsedText {
       int firstLineIndent, int16_t blockStartY = 0, int lineHeight = 0);
   // Hands a laid-out line of tokens [first, end) over: the page-fit hook first (beforeLine_, with the line's largest
   // word size and whether it takes the annotation band), then its TextBlock, then processLine. A line whose block
-  // cannot be had is dropped and counts as accepted. An accepted line steps openControls_.
+  // cannot be had is dropped and counts as accepted. An accepted line steps bidiState_->openControls.
   LineProcessResult emitLine(
       const TextBlock::WordRange& range, uint8_t maxSizePct, bool band, size_t first, size_t end,
       const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,
       bool lineEndsWithHyphenatedWord, bool suppressHyphenationRetry);
   // Fills `out` (cleared first); uses blockStyle.fontSizeMultiplier internally. `passControls`: the bidi controls open
-  // at the first token, the pass's start (openControls_ steps on as the pass's lines are accepted).
+  // at the first token, the pass's start (bidiState_->openControls steps on as the pass's lines are accepted).
   void calculateWordWidths(const GfxRenderer& renderer, int fontId, std::vector<uint16_t>& out,
                            const BidiLine::OpenControls& passControls);
   // Fills combined_ for a vertical line (see combines()); clears it otherwise.
