@@ -40,6 +40,9 @@ class UiListActivity : public Activity, protected UiAppHost {
   virtual int listCount() const = 0;
   virtual void buildScreen(UiScreen& screen) = 0;
   virtual void activateIndex(int index) = 0;
+  // A long touch on a row. A list that declares one sets InputLongPress on its rows too.
+  [[nodiscard]] virtual bool rowsTakeLongPress() const { return false; }
+  virtual void onRowLongPress(int /*index*/) {}
   virtual freeink::ui::ListNav& activeNav() { return nav; }
   virtual bool handleCustomInput() { return false; }
   virtual void onBackButton() { finish(); }

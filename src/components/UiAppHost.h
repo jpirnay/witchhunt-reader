@@ -33,10 +33,9 @@ class UiAppHost {
   // only routed on its press and release edges, so a slider knob jumps to where the finger
   // landed and then to where it lifted, with nothing in between.
   //
-  // Upstream (crosspoint-reader bbca4886) also carries a `withLongPress` flag here. It is left
-  // out rather than accepted-and-ignored: touchSnapshotFrom() in this fork has no long-press
-  // path for it to forward, so the parameter would be a promise the code does not keep.
-  TouchRoute routeTouch(const MappedInputManager& input, bool routeHeld = false);
+  // `withLongPress` offers a long press to InputLongPress elements, the moment it fires. Only an
+  // element that takes it claims the contact: anywhere else it stays the tap it would have been.
+  TouchRoute routeTouch(const MappedInputManager& input, bool routeHeld = false, bool withLongPress = false);
   void closeRouting() { uiReady = false; }
 
   freeink::ui::GfxRendererTarget uiTarget;
