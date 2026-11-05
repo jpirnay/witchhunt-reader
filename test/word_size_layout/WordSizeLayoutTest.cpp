@@ -312,6 +312,96 @@ TEST(WordContinuation, JustifiedNonBreakingSpaceStretchesLikeAWordGap) {
   EXPECT_EQ(line.wordXpos(4) - line.wordXpos(3) - kWord - GfxRenderer::SPACE_W, wordGapStretch);
 }
 
+// "bbbb&nbsp; cccc" (how Word writes a double space): the parser glues the " " token to bbbb, but the
+// whitespace after it ends the glue, so cccc comes after a real word gap. The " " has no glued word
+// behind it and takes no stretch of its own, so the line must not hold a share back for it.
+TEST(WordContinuation, JustifiedSpaceBeforeAWordGapLeavesTheLineFlush) {
+  GfxRenderer renderer;
+  BlockStyle style = noIndentStyle();
+  style.alignment = CssTextAlign::Justify;
+  ParsedText text(false, false, style);
+  text.addWord("aaaa", EpdFontFamily::REGULAR);
+  text.addWord("bbbb", EpdFontFamily::REGULAR);
+  text.addWord(" ", EpdFontFamily::REGULAR, /*underline=*/false, /*attachToPrevious=*/true);
+  text.addWord("cccc", EpdFontFamily::REGULAR);
+  text.addWord("dddd", EpdFontFamily::REGULAR);
+  text.addWord("eeee", EpdFontFamily::REGULAR);
+
+  // aaaa bbbb_ cccc dddd is 180 px wide, eeee would need 45 more: the three word gaps share 21 px.
+  constexpr int kWidth = 201;
+  const auto result = layout(text, renderer, kWidth);
+  ASSERT_EQ(result.lines.size(), 2u);
+  const TextBlock& line = *result.lines[0];
+  ASSERT_EQ(line.wordCount(), 5);
+  constexpr int kWord = 4 * GfxRenderer::GLYPH_W;
+  EXPECT_EQ(line.wordXpos(4) + kWord, kWidth);
+}
+
+// The same " " where the line breaks after it: nothing follows it on the line, so nothing stretches there.
+TEST(WordContinuation, JustifiedSpaceEndingALineTakesNoShare) {
+  GfxRenderer renderer;
+  BlockStyle style = noIndentStyle();
+  style.alignment = CssTextAlign::Justify;
+  ParsedText text(false, false, style);
+  text.addWord("aaaa", EpdFontFamily::REGULAR);
+  text.addWord("bbbb", EpdFontFamily::REGULAR);
+  text.addWord(" ", EpdFontFamily::REGULAR, /*underline=*/false, /*attachToPrevious=*/true);
+  text.addWord("cccccccccc", EpdFontFamily::REGULAR);
+
+  // aaaa bbbb_ is 90 px wide and the last word does not fit beside it: the one word gap takes all 11 px.
+  const auto result = layout(text, renderer, 101);
+  ASSERT_EQ(result.lines.size(), 2u);
+  const TextBlock& line = *result.lines[0];
+  ASSERT_EQ(line.wordCount(), 3);
+  constexpr int kWord = 4 * GfxRenderer::GLYPH_W;
+  EXPECT_EQ(line.wordXpos(1), kWord + GfxRenderer::SPACE_W + 11);
+}
+
+// A line of a bidi paragraph is placed piece by piece, and has the same rule: a " " piece at the end of the line
+// stretches nothing, so the word gaps share all of what the line lacks. Here it ends the line on the right.
+TEST(WordContinuation, JustifiedBidiLineGivesNoShareToASpaceAtItsRightEnd) {
+  GfxRenderer renderer;
+  BlockStyle style = noIndentStyle();
+  style.alignment = CssTextAlign::Justify;
+  ParsedText text(false, false, style);
+  text.addWord("aaaa", EpdFontFamily::REGULAR);
+  text.addWord("\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D", EpdFontFamily::REGULAR);  // a Hebrew word: the paragraph needs bidi
+  text.addWord("bbbb", EpdFontFamily::REGULAR);
+  text.addWord(" ", EpdFontFamily::REGULAR, /*underline=*/false, /*attachToPrevious=*/true);
+  text.addWord("cccccccccccc", EpdFontFamily::REGULAR);
+
+  // aaaa, the Hebrew word, bbbb_ is 135 px wide: the two word gaps share 16 px.
+  const auto result = layout(text, renderer, 151);
+  ASSERT_EQ(result.lines.size(), 2u);
+  const TextBlock& line = *result.lines[0];
+  ASSERT_EQ(line.wordCount(), 4);
+  constexpr int kWord = 4 * GfxRenderer::GLYPH_W;
+  EXPECT_EQ(line.wordXpos(1), kWord + GfxRenderer::SPACE_W + 8);
+  EXPECT_EQ(line.wordXpos(2), 2 * kWord + 2 * (GfxRenderer::SPACE_W + 8));
+}
+
+// In a right-to-left paragraph the " " that ends the line stands at its left end, the first piece placed.
+TEST(WordContinuation, JustifiedBidiLineGivesNoShareToASpaceAtItsLeftEnd) {
+  GfxRenderer renderer;
+  BlockStyle style = noIndentStyle();
+  style.alignment = CssTextAlign::Justify;
+  style.direction = CssDirection::Rtl;
+  ParsedText text(false, false, style);
+  text.addWord("\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D", EpdFontFamily::REGULAR);
+  text.addWord("\xD7\xA2\xD7\x95\xD7\x9C\xD7\x9D", EpdFontFamily::REGULAR);
+  text.addWord(" ", EpdFontFamily::REGULAR, /*underline=*/false, /*attachToPrevious=*/true);
+  text.addWord("\xD7\x90\xD7\x91\xD7\x92\xD7\x93\xD7\x94\xD7\x95\xD7\x96\xD7\x97\xD7\x98\xD7\x99",
+               EpdFontFamily::REGULAR);
+
+  // The two words and the space are 90 px wide: the one word gap takes all 11 px, and the line starts at the left edge.
+  const auto result = layout(text, renderer, 101);
+  ASSERT_EQ(result.lines.size(), 2u);
+  const TextBlock& line = *result.lines[0];
+  ASSERT_EQ(line.wordCount(), 3);
+  EXPECT_EQ(line.wordXpos(0), 0);                     // the space
+  EXPECT_EQ(line.wordXpos(1), GfxRenderer::SPACE_W);  // the second word, right after it
+}
+
 // At a page bottom the parser refuses a line that ends hyphenated; layout re-lays that line without
 // hyphenation (computeSingleLineBreakNoHyphen) and the rest with it (computeHyphenatedLineBreaksFromIndex).
 // Both must back up over glued tokens instead of breaking before them. The goldens run the retry

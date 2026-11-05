@@ -2555,6 +2555,12 @@ struct TtfFontTestAccess {
   static void chooseAgain(TtfFont& font) { font.chooseSynthetic(); }
   static bool draws(const TtfFont& font, const uint8_t style) { return font.draws(style); }
   static uint8_t source(const TtfFont& font, const uint8_t style) { return font.source_[style]; }
+  /// What firmware that drew nothing for U+FFFD left in the store: `cp` marked as not in the font.
+  static bool markMissing(TtfFont& font, const uint8_t style, const uint32_t cp) {
+    uint32_t key = 0;
+    return font.storeKey(font.body_, style, cp, &key) &&
+           font.set_.store_.markNoGlyph(key) == FlashGlyphStore::Commit::Stored;
+  }
 };
 
 TEST_F(TtfFontTest, ChoosingSyntheticStylesAgainGivesTheSameChoice) {
@@ -3010,4 +3016,161 @@ TEST_F(TtfFontSetTest, SyntheticItalicInSdModeIsDrawnFromTheRegularFile) {
   EXPECT_EQ(10u, font.renders());  // stored by the batch
   expectDrawnAs(reference(serif[kRegular].bytes, 0x3042, 14), font, kRegular, font.glyph(kRegular, 0x3042));
   expectWrittenOnce(chip);
+}
+
+// --- A character the font has not got, in a font without U+FFFD ---
+
+namespace {
+constexpr uint32_t kHan = 0x4E2D;  // 中, in neither of the fonts below
+constexpr uint32_t kReplacement = 0xFFFD;
+
+// The two kinds of outline, each a real font that does not map U+FFFD.
+constexpr const char* kTrueTypeWithoutReplacement = "Inter/Inter-Regular.ttf";
+constexpr const char* kCffWithoutReplacement = "OpenDyslexic/OpenDyslexic-Regular.otf";
+
+/// A family of one style: its glyph 0 a box, glyph 1 'a'. No U+FFFD.
+Font boxedFont() {
+  Font built;
+  built.glyphs.resize(2);
+  built.glyphs[0].contours = {rect(50, 0, 450, 700)};
+  built.glyphs[1].contours = {rect(100, 0, 300, 400)};
+  built.cmap = {{'a', 1}};
+  return built;
+}
+}  // namespace
+
+class TtfFontNotdefTest : public TtfFontTest {
+ protected:
+  /// The family `path`, regular only, loaded.
+  Loaded openOnly(const char* path) {
+    files[kRegular].bytes = readFont(path);
+    for (int s = 1; s < 4; ++s) files[s].bytes.clear();
+    return open();
+  }
+
+  /// The font must have what the tests below need of it: no U+FFFD, not `kHan`, a .notdef with a shape.
+  void expectNotMapped(const std::vector<uint8_t>& file) {
+    FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+    ttf::Face face;
+    ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+    ASSERT_EQ(0u, ttf::glyphIndex(bytes, face, kReplacement));
+    ASSERT_EQ(0u, ttf::glyphIndex(bytes, face, kHan));
+  }
+
+  void expectNotdefStandsIn(const Loaded& font) {
+    const Reference box = reference(files[kRegular].bytes, kReplacement, 14);  // glyph 0: U+FFFD is not mapped
+    ASSERT_GT(box.metrics.advanceX, 0u);
+    ASSERT_GT(box.metrics.width, 0u);  // a shape, so the character shows
+    const EpdFontFamily family(font->font(0), font->font(1), font->font(2), font->font(3));
+    const EpdGlyphRef drawn = family.getGlyph(kHan, EpdFontFamily::REGULAR);
+    ASSERT_TRUE(static_cast<bool>(drawn));
+    EXPECT_EQ(box.metrics.advanceX, drawn.advanceX);
+    EXPECT_EQ(box.metrics.width, drawn.width);
+    EXPECT_EQ(box.metrics.height, drawn.height);
+    expectDrawnAs(box, *font, kRegular, font->glyph(kRegular, kReplacement));
+  }
+};
+
+TEST_F(TtfFontNotdefTest, TrueTypeDrawsItsNotdefForAMissingCharacter) {
+  const auto font = openOnly(kTrueTypeWithoutReplacement);
+  ASSERT_NE(nullptr, font);
+  expectNotMapped(files[kRegular].bytes);
+  expectNotdefStandsIn(font);
+}
+
+TEST_F(TtfFontNotdefTest, CffDrawsItsNotdefForAMissingCharacter) {
+  const auto font = openOnly(kCffWithoutReplacement);
+  ASSERT_NE(nullptr, font);
+  expectNotMapped(files[kRegular].bytes);
+  expectNotdefStandsIn(font);
+}
+
+// The missing character itself stays marked: only U+FFFD stands in. Glyph 0 is never served under its own codepoint, or
+// a character the font lacks would count as one it has (hasGlyph) and the lookalike below would never be tried.
+TEST_F(TtfFontNotdefTest, TheMissingCharacterItselfStaysMissing) {
+  const auto font = openOnly(kTrueTypeWithoutReplacement);
+  ASSERT_NE(nullptr, font);
+  EXPECT_EQ(nullptr, font->glyph(kRegular, kHan));
+  const EpdFontFamily family(font->font(0), font->font(1), font->font(2), font->font(3));
+  EXPECT_FALSE(family.hasGlyph(kHan, EpdFontFamily::REGULAR));
+}
+
+// A close relative comes before the box: a transcription stays readable (GlyphFallback.h).
+TEST_F(TtfFontNotdefTest, ALookalikeComesBeforeTheNotdef) {
+  useBuiltFont(boxedFont());
+  const auto font = open();
+  ASSERT_NE(nullptr, font);
+  const EpdFontFamily family(font->font(0), font->font(1), font->font(2), font->font(3));
+  const EpdGlyphRef relative = family.getGlyph(0x0251, EpdFontFamily::REGULAR);  // ɑ, drawn as a
+  const EpdGlyphRef letter = family.getGlyph('a', EpdFontFamily::REGULAR);
+  ASSERT_TRUE(static_cast<bool>(relative));
+  EXPECT_EQ(letter.advanceX, relative.advanceX);
+  EXPECT_EQ(letter.width, relative.width);
+  EXPECT_EQ(letter.height, relative.height);
+}
+
+// A font with a U+FFFD of its own keeps drawing it.
+TEST_F(TtfFontNotdefTest, AFontsOwnReplacementGlyphIsDrawnNotItsNotdef) {
+  const auto font = open();  // Bookerly maps U+FFFD
+  ASSERT_NE(nullptr, font);
+  const std::vector<uint8_t>& file = files[kRegular].bytes;
+  FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+  ttf::Face face;
+  ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+  ASSERT_NE(0u, ttf::glyphIndex(bytes, face, kReplacement));
+  expectDrawnAs(reference(file, kReplacement, 14), *font, kRegular, font->glyph(kRegular, kReplacement));
+}
+
+// Stored once, like any glyph: a page of missing characters is one render.
+TEST_F(TtfFontNotdefTest, TheNotdefIsStoredAndFoundAgain) {
+  const auto font = openOnly(kTrueTypeWithoutReplacement);
+  ASSERT_NE(nullptr, font);
+  ASSERT_NE(nullptr, font->glyph(kRegular, kReplacement));
+  const uint32_t renders = font->renders();
+  const uint32_t writes = flash.programCalls();
+  ASSERT_NE(nullptr, font->glyph(kRegular, kReplacement));
+  EXPECT_EQ(renders, font->renders());
+  EXPECT_EQ(writes, flash.programCalls());
+}
+
+// A text that holds U+FFFD itself, as a badly converted book does: prefetch takes the same way.
+TEST_F(TtfFontNotdefTest, PrefetchDrawsTheNotdefForAReplacementCharacterInTheText) {
+  const auto font = openOnly(kTrueTypeWithoutReplacement);
+  ASSERT_NE(nullptr, font);
+  font->prefetch(kRegular, "a\xEF\xBF\xBD");
+  const uint32_t renders = font->renders();
+  EXPECT_EQ(2u, renders);
+  expectDrawnAs(reference(files[kRegular].bytes, kReplacement, 14), *font, kRegular,
+                font->glyph(kRegular, kReplacement));
+  EXPECT_EQ(renders, font->renders());  // the batch stored it
+}
+
+// A store from firmware that drew nothing here holds U+FFFD's mark for good: a slot is never programmed twice, and
+// find() stops at it. The box still draws, from the ring, and costs no flash: a record behind the mark could never be
+// found, so one written for each draw would only fill the log.
+TEST_F(TtfFontNotdefTest, AnOlderStoresMarkDoesNotHideTheNotdefAndCostsNoWrites) {
+  const auto font = openOnly(kTrueTypeWithoutReplacement);
+  ASSERT_NE(nullptr, font);
+  ASSERT_TRUE(TtfFontTestAccess::markMissing(*font, kRegular, kReplacement));
+  const uint32_t writes = flash.programCalls();
+  const Reference box = reference(files[kRegular].bytes, kReplacement, 14);
+  expectDrawnAs(box, *font, kRegular, font->glyph(kRegular, kReplacement));
+  expectDrawnAs(box, *font, kRegular, font->glyph(kRegular, kReplacement));
+  EXPECT_EQ(writes, flash.programCalls());
+}
+
+// In SD mode the .notdef's outline is read from the card like any other. A failed read is transient: U+FFFD must not be
+// marked as not in the font, or the box would be gone until the store is wiped.
+TEST_F(TtfFontSetTest, ACardReadErrorDrawingTheNotdefIsAskedAgain) {
+  SimNorFlash chip{42 * kPage};  // as in TheBodyStaysInFlashModeWhileTheAccentFamilyGoesToTheCard
+  const auto set = openFamilies(chip, {files, accent}, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& inter = *set->font(1);  // does not map U+FFFD
+  ASSERT_TRUE(inter.readsCard());
+  accent[kRegular].failReads = true;
+  EXPECT_EQ(nullptr, inter.glyph(kRegular, kReplacement));
+  accent[kRegular].failReads = false;
+  expectDrawnAs(reference(accent[kRegular].bytes, kReplacement, 14), inter, kRegular,
+                inter.glyph(kRegular, kReplacement));
+  EXPECT_FALSE(set->ringMode());
 }

@@ -2160,11 +2160,12 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
     return static_cast<int>(kern * wordScale(left) + 0.5f);
   };
   // A word space stretches when the line is justified, unless closing punctuation follows it, as on the ordinary path;
-  // and so does a piece drawn as a space (a no-break space).
+  // and so does a piece drawn as a space (a no-break space), between two pieces: at an end of the line its share would
+  // only hold the line in from the margin.
   const auto stretchesBefore = [&](const size_t v) {
     return pieces[v].gapBefore == BidiLine::Gap::Space && stretchesGapBefore(spaceToken(v));
   };
-  const auto isSpace = [&](const size_t v) { return form(v) == " "; };
+  const auto stretchesAfter = [&](const size_t v) { return v > 0 && v + 1 < count && form(v) == " "; };
 
   // Each piece's exact width: its form, in its token's font, style and scale. Held in the x scratch until placed.
   std::vector<int16_t>& xs = lineXPosScratch_;
@@ -2179,7 +2180,7 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
     xs.push_back(static_cast<int16_t>(width));
     natural += width + (v > 0 ? gapBefore(v) : 0);
     if (stretchesBefore(v)) ++gaps;
-    if (isSpace(v)) ++gaps;
+    if (stretchesAfter(v)) ++gaps;
   }
 
   // Justified, the gaps share what the line lacks, at most an eighth of the measure each; the remainder stays where the
@@ -2223,7 +2224,7 @@ uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId,
     if (v > 0) x += gapBefore(v) + (stretchesBefore(v) ? extra : 0);
     const int width = xs[v];
     xs[v] = static_cast<int16_t>(x);
-    x += width + (isSpace(v) ? extra : 0);
+    x += width + (stretchesAfter(v) ? extra : 0);
 
     state.pieceWords.push_back(std::string_view(words[i]).substr(piece.begin, piece.end - piece.begin));
     state.pieceForms.push_back(form(v));
@@ -2346,6 +2347,15 @@ ParsedText::LineProcessResult ParsedText::extractLine(
     return (wordIdx == 0 && opensLine(i)) || (wordIdx + 1 == lineWordCount && closesLine(i));
   };
 
+  // A no-break space (a " " token glued to the word before it) stretches like a word gap, as long as a word is glued to
+  // it. Otherwise a word gap follows it, which stretches for itself, or the line ends there and nothing stretches. The
+  // gap count and the x loop below both ask here, so a justified line gives out exactly the shares it counted. Ported
+  // from crosspoint-reader PR #4142 (Uri Tauber).
+  const auto isStretchableSpace = [&](const size_t wordIdx) {
+    const size_t i = lastBreakAt + wordIdx;
+    return words[i] == " " && boundaries[i].continues && wordIdx + 1 < lineWordCount && boundaries[i + 1].continues;
+  };
+
   int lineWordWidthSum = 0;
   size_t actualGapCount = 0;
   bool cjkGapOnLine = false;
@@ -2384,11 +2394,8 @@ ParsedText::LineProcessResult ParsedText::extractLine(
         gapShrinkTotal += gapShrinkBefore(lastBreakAt + wordIdx, gap);
       }
     } else if (wordIdx > 0) {
-      // Non-breaking space tokens (" " with continues=true) are visible, stretchable spaces —
-      // count them as justifiable gaps so justifyExtra is distributed to them too.
-      if (words[lastBreakAt + wordIdx] == " ") {
-        actualGapCount++;
-      }
+      // Non-breaking space tokens are visible spaces: count them as justifiable gaps so justifyExtra reaches them too.
+      if (isStretchableSpace(wordIdx)) actualGapCount++;
       // Cross-boundary kerning for continuation words (e.g. nonbreaking spaces, attached punctuation)
       totalNaturalGaps += static_cast<int>(
           kernBefore(renderer, fontId, lastBreakAt + wordIdx) * wordScale(lastBreakAt + wordIdx - 1) + 0.5f);
@@ -2549,8 +2556,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
       advance += static_cast<int>(
           kernBefore(renderer, fontId, lastBreakAt + wordIdx + 1) * wordScale(lastBreakAt + wordIdx) + 0.5f);
       // Non-breaking space tokens are stretchable — expand them during justification like normal spaces.
-      if (words[lastBreakAt + wordIdx] == " " && boundaries[lastBreakAt + wordIdx].continues &&
-          blockStyle.alignment == CssTextAlign::Justify && !isLastLine) {
+      if (isStretchableSpace(wordIdx) && blockStyle.alignment == CssTextAlign::Justify && !isLastLine) {
         advance += gapExtra();
       }
       xpos += advance;

@@ -8,7 +8,11 @@ add_executable(SdFontArenaTest
   ${REPO_ROOT}/test/epub_pipeline/LoggingImpl.cpp
 )
 
-target_compile_definitions(SdFontArenaTest PRIVATE ENABLE_SERIAL_LOG=1 LOG_LEVEL=2)
+target_compile_definitions(SdFontArenaTest PRIVATE
+  ENABLE_SERIAL_LOG=1
+  LOG_LEVEL=2
+  SD_FONTS_DIR="${REPO_ROOT}/assets/sd-fonts"
+)
 
 target_include_directories(SdFontArenaTest PRIVATE
   ${BIDI_MARK_INCLUDES}
