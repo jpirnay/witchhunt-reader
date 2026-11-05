@@ -1829,6 +1829,17 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
   // read, so they read together as plain text.
   if (inlineTypes) htmlDefinitions = false;
 
+  // The inflate window before the buffer, as readDefinition does: it is the larger of the two.
+  if (!hasPlainDict && !ensureInflateScratch()) {
+    LOG_INF("DICT", "Low heap for the dictzip inflate window");
+    return fail(LookupResult::LowMemory);
+  }
+  // What the joined text may take. A word with several entries must not end up with none where one
+  // alone would have been read, so an entry past this is left out, as one past the cap is.
+  const uint32_t maxAlloc = ESP.getMaxAllocHeap();
+  const uint32_t room = maxAlloc > DEFINITION_HEAP_HEADROOM_BYTES ? maxAlloc - DEFINITION_HEAP_HEADROOM_BYTES : 0;
+  const uint32_t budget = std::min(MAX_DEFINITION_BYTES, room);
+
   // Pass 1: which entries fit, and how many bytes they take. The first entry's definition is cut
   // to what is left of the cap; a later entry is taken whole or not at all, and the first that
   // does not fit ends the list.
@@ -1847,7 +1858,7 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
       uint32_t definition = location.size;
       if (taken == 0) {
         definition = std::min(definition, MAX_DEFINITION_BYTES - std::min(heading, MAX_DEFINITION_BYTES));
-      } else if (static_cast<uint64_t>(total) + separator + heading + definition > MAX_DEFINITION_BYTES) {
+      } else if (static_cast<uint64_t>(total) + separator + heading + definition > budget) {
         break;
       }
       total += separator + heading + definition;
@@ -1857,12 +1868,7 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
   }
   if (taken == 0) return fail(LookupResult::ReadError);
 
-  // The inflate window before the buffer, as readDefinition does: it is the larger of the two.
-  if (!hasPlainDict && !ensureInflateScratch()) {
-    LOG_INF("DICT", "Low heap for the dictzip inflate window");
-    return fail(LookupResult::LowMemory);
-  }
-  if (ESP.getMaxAllocHeap() < total + DEFINITION_HEAP_HEADROOM_BYTES) {
+  if (total > room) {
     LOG_INF("DICT", "Low heap for %lu bytes of definitions", static_cast<unsigned long>(total));
     return fail(LookupResult::LowMemory);
   }

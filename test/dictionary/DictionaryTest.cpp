@@ -1874,7 +1874,7 @@ TEST_F(DictionaryTest, TooLittleHeapForEveryEntryStillShowsTheFirst) {
   const bool found = dict.lookup("bank", definition, headword);
   ESP.setMaxAllocHeap(saved);
   EXPECT_TRUE(found);
-  EXPECT_EQ(definition, big + "1");
+  EXPECT_EQ(definition, "bank\n" + big + "1");
 }
 
 TEST_F(DictionaryTest, ASynonymOfSeveralHeadwordsShowsThemAll) {
@@ -1900,6 +1900,28 @@ TEST_F(DictionaryTest, APrefixHitOnASynonymOfSeveralHeadwordsListsThemAll) {
   std::string definition;
   ASSERT_TRUE(dict.readPrefixDefinitions(m, definition));
   EXPECT_EQ(definition, "端\nedge\n\n橋\nbridge\n\n箸\nchopsticks");
+}
+
+// Found on the X3: a word that shows one entry must not come back with none because it has several.
+// Short of heap for them all, the entries that fit are read and the rest left out.
+TEST_F(DictionaryTest, ShortOfHeapForEveryEntryTheOnesThatFitAreRead) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SynTight", {{"橋", "bridge"}, {"箸", "chopsticks"}, {"端", "edge"}},
+                                          {{"はし", "端"}, {"はし", "橋"}, {"はし", "箸"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SynTight"));
+  DictPrefixMatch m;
+  ASSERT_TRUE(dict.resolvePrefixes("はしを", m));
+
+  const auto saved = ESP.getMaxAllocHeap();
+  ESP.setMaxAllocHeap(8 * 1024 + 10);  // the headroom, and room for "端\nedge" alone
+  std::string definition;
+  Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
+  const bool found = dict.readPrefixDefinitions(m, definition, &result);
+  ESP.setMaxAllocHeap(saved);
+
+  EXPECT_TRUE(found);
+  EXPECT_EQ(result, Dictionary::LookupResult::Found);
+  EXPECT_EQ(definition, "端\nedge");
 }
 
 TEST_F(DictionaryTest, TwoSynonymRecordsIntoOneRunListItOnce) {
