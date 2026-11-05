@@ -1876,4 +1876,121 @@ TEST_F(DictionaryTest, TooLittleHeapForEveryEntryStillShowsTheFirst) {
   EXPECT_EQ(definition, big + "1");
 }
 
+TEST_F(DictionaryTest, ASynonymOfSeveralHeadwordsShowsThemAll) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SynMany",
+                                          {{"color", "a hue"}, {"shade", "a dark area"}, {"zebra", "striped"}},
+                                          {{"colour", "color"}, {"colour", "shade"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SynMany"));
+  EXPECT_EQ(lookedUp(dict, "colour"), "color\na hue\n\nshade\na dark area");
+  EXPECT_EQ(resolveThenRead(dict, "colour"), "color\na hue\n\nshade\na dark area");
+}
+
+// JMdict files a kana reading as a synonym of each kanji spelling (docs/dictionary.md).
+TEST_F(DictionaryTest, APrefixHitOnASynonymOfSeveralHeadwordsListsThemAll) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SynKana", {{"橋", "bridge"}, {"箸", "chopsticks"}, {"端", "edge"}},
+                                          {{"はし", "端"}, {"はし", "橋"}, {"はし", "箸"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SynKana"));
+  DictPrefixMatch m;
+  ASSERT_TRUE(dict.resolvePrefixes("はしを", m));
+  ASSERT_EQ(m.count, 1);
+  EXPECT_EQ(m.hits[0].runBytes, 6);
+  std::string definition;
+  ASSERT_TRUE(dict.readPrefixDefinitions(m, definition));
+  EXPECT_EQ(definition, "端\nedge\n\n橋\nbridge\n\n箸\nchopsticks");
+}
+
+TEST_F(DictionaryTest, TwoSynonymRecordsIntoOneRunListItOnce) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SynSameRun", {{"银行", "bank"}, {"银行", "row of shops"}, {"钱", "money"}},
+                                          {{"銀行", "银行", 0}, {"銀行", "银行", 1}, {"銀行", "钱"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SynSameRun"));
+  DictPrefixMatch m;
+  ASSERT_TRUE(dict.resolvePrefixes("銀行", m));
+  std::string definition;
+  ASSERT_TRUE(dict.readPrefixDefinitions(m, definition));
+  EXPECT_EQ(definition, "银行\nbank\n\n银行\nrow of shops\n\n钱\nmoney");
+}
+
+TEST_F(DictionaryTest, ASynonymTargetAnotherHitListsIsListedOnce) {
+  ASSERT_NO_FATAL_FAILURE(
+      writeDictionary("SynOverlap", {{"大", "big"}, {"學", "study"}}, {{"大學", "學"}, {"大學", "大"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SynOverlap"));
+  DictPrefixMatch m;
+  ASSERT_TRUE(dict.resolvePrefixes("大學", m));
+  EXPECT_EQ(hitsOf(m), (HitList{{"學", 6}, {"大", 3}}));
+  std::string definition;
+  ASSERT_TRUE(dict.readPrefixDefinitions(m, definition));
+  EXPECT_EQ(definition, "學\nstudy\n\n大\nbig");
+}
+
+// .sidx sample 1 opens at record 256: at 254 fillers the word's records end before it, at 255 they straddle it.
+TEST_F(DictionaryTest, ASynonymsRecordsAreAllFoundAcrossASample) {
+  for (const int leading : {254, 255, 256}) {
+    std::vector<SynonymSpec> synonyms;
+    for (int i = 0; i < leading; i++) synonyms.push_back({"a" + std::to_string(1000 + i), "橋"});
+    synonyms.push_back({"はし", "端"});
+    synonyms.push_back({"はし", "箸"});
+    const std::string folder = "SynAcross" + std::to_string(leading);
+    ASSERT_NO_FATAL_FAILURE(
+        writeDictionary(folder, {{"橋", "bridge"}, {"箸", "chopsticks"}, {"端", "edge"}}, synonyms));
+    Dictionary dict;
+    ASSERT_NO_FATAL_FAILURE(openIndexed(dict, folder));
+    DictPrefixMatch m;
+    ASSERT_TRUE(dict.resolvePrefixes("はしを", m)) << leading;
+    std::string definition;
+    ASSERT_TRUE(dict.readPrefixDefinitions(m, definition)) << leading;
+    EXPECT_EQ(definition, "端\nedge\n\n箸\nchopsticks") << leading;
+    EXPECT_EQ(lookedUp(dict, "はし"), "端\nedge\n\n箸\nchopsticks") << leading;
+  }
+}
+
+TEST_F(DictionaryTest, ASynonymListsAtMostEightEntries) {
+  std::vector<HeadwordSpec> headwords;
+  std::vector<SynonymSpec> synonyms;
+  for (int i = 0; i < 10; i++) {
+    headwords.push_back({"word" + std::to_string(i), "meaning" + std::to_string(i)});
+    synonyms.push_back({"あ", "word" + std::to_string(i)});
+  }
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SynCap", headwords, synonyms));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SynCap"));
+  const std::string definition = lookedUp(dict, "あ");
+  EXPECT_NE(definition.find("meaning7"), std::string::npos);
+  EXPECT_EQ(definition.find("meaning8"), std::string::npos);
+}
+
+// The word screen keeps one DictPrefixMatch across searches: the next word must not inherit a synonym's records.
+TEST_F(DictionaryTest, AReusedMatchForgetsTheSynonymItHeld) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SynReused", {{"橋", "bridge"}, {"箸", "chopsticks"}, {"端", "edge"}},
+                                          {{"はし", "端"}, {"はし", "橋"}, {"はし", "箸"}}));
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "SynReused"));
+  DictPrefixMatch m;
+  ASSERT_TRUE(dict.resolvePrefixes("はしを", m));
+  ASSERT_TRUE(dict.resolvePrefixes("箸を", m));
+  std::string definition;
+  ASSERT_TRUE(dict.readPrefixDefinitions(m, definition));
+  EXPECT_EQ(definition, "箸\nchopsticks");
+}
+
+// The search is the gate on JMdict (docs/future_work/cjk.md): more targets must not cost it a read.
+TEST_F(DictionaryTest, ASynonymsOtherTargetsCostTheSearchNothing) {
+  const std::vector<HeadwordSpec> headwords = {{"橋", "bridge"}, {"箸", "chopsticks"}, {"端", "edge"}};
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SynCostOne", headwords, {{"はし", "端"}}));
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("SynCostThree", headwords, {{"はし", "端"}, {"はし", "橋"}, {"はし", "箸"}}));
+  Dictionary one;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(one, "SynCostOne"));
+  Dictionary three;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(three, "SynCostThree"));
+  DictPrefixMatch a;
+  DictPrefixMatch b;
+  ASSERT_TRUE(one.resolvePrefixes("はしを", a));
+  ASSERT_TRUE(three.resolvePrefixes("はしを", b));
+  EXPECT_EQ(a.probes, b.probes);
+  EXPECT_EQ(a.reads, b.reads);
+}
+
 }  // namespace

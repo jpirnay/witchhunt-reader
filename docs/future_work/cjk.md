@@ -343,9 +343,6 @@ CC-KEDICT (`docs/dictionary.md` has the conversions):
   text mapped to simplified), Soseki with JMdict 0.77 against `fugashi` and UniDic. JMdict's long entries (吾輩は猫である,
   これと言う) and kana synonyms (はま from はまだ) make most of the Japanese misses; the shorter matches in the
   definition soften them.
-- **One headword per synonym.** A `.syn` hit names one `.idx` entry, so a reading several headwords share shows the
-  one of them, and which one is not defined (はし showed 嘴 of eight). Listing every ordinal of a hit changes `DictPrefixHit` and the contiguous-entries
-  read.
 - **The other script in the definition.** CC-CEDICT writes each word in both scripts; a single regional CJK font
   draws the other script's missing characters as U+FFFD (學, 書 with a Simplified Chinese font). The NotoSansCJK
   `.cpfont` family carries both scripts but not pinyin's ē, ǎ, ū (U+0113, U+01CE, U+016B: `SDCF` "onGlyphMiss"), which

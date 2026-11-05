@@ -2,7 +2,8 @@
 // fillers, CJK near misses that push headwords across the sample windows, 4-byte codepoints, runs of
 // duplicate headwords and byte-equal synonyms, then checks 30 queries against tables built from the
 // source data: the longest hit is right, every hit is a real prefix, entryCount is min(8, occurrences),
-// the location is the run's first entry, and no two hits share a location.
+// the location is the run's first entry, no two hits share a location, and the definitions read are
+// exactly those a model of the listing rules predicts, for a run and for a whole word.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -72,11 +73,48 @@ bool isPrefix(const std::string& w, const std::string& run) {
   return !w.empty() && w.size() <= run.size() && run.compare(0, w.size(), w) == 0;
 }
 
+// What a read must list, built from the source data alone: a word's run from its first entry, a
+// synonym's targets in .syn order, at most 8 entries a hit, each run once.
+struct ListingModel {
+  const std::vector<H>& heads;
+  const std::map<std::string, std::vector<size_t>>& occ;
+  const std::map<std::string, std::vector<size_t>>& synTargets;
+  std::set<size_t> listed;  // run first entries
+  std::string text;
+
+  // False when the run is already listed.
+  bool addRun(const std::string& headword, const size_t room, size_t& taken) {
+    const std::vector<size_t>& positions = occ.at(headword);
+    if (!listed.insert(positions.front()).second) return false;
+    taken = std::min<size_t>({positions.size(), 8, room});
+    for (size_t k = 0; k < taken; k++) {
+      if (!text.empty()) text += "\n\n";
+      text += headword + "\n" + heads[positions[k]].def;
+    }
+    return true;
+  }
+
+  void addHit(const std::string& headword, const std::string* synonym) {
+    size_t room = 8;
+    size_t taken = 0;
+    if (!synonym) {
+      addRun(headword, room, taken);
+      return;
+    }
+    const std::vector<size_t>& targets = synTargets.at(*synonym);
+    for (size_t i = 0; i < std::min<size_t>(targets.size(), 8) && room > 0; i++) {
+      if (addRun(heads[targets[i]].word, room, taken)) room -= taken;
+    }
+  }
+};
+
 TEST(DictionaryOracle, RandomDictionaries) {
   constexpr int seeds = 40;
   // Runs whose longest match came from the .idx or only from the .syn: both paths must be exercised.
   int idxRuns = 0;
   int synRuns = 0;
+  int listings = 0;     // definitions compared with the model, by the prefix search
+  int wordLookups = 0;  // and by a lookup of a whole word
 
   for (int seed = 0; seed < seeds; seed++) {
     std::mt19937 rng(static_cast<uint32_t>(seed) * 2654435761u + 7u);
@@ -209,11 +247,48 @@ TEST(DictionaryOracle, RandomDictionaries) {
           for (size_t t : st->second) viaSyn = viaSyn || heads[t].word == h.headword;
         EXPECT_TRUE(viaIdx || viaSyn) << ctx << " hit " << h.headword << "/" << int(h.runBytes);
       }
+
+      // Every entry of every hit, each run once.
+      if (found) {
+        ListingModel model{heads, occ, synTargets, {}, {}};
+        for (uint8_t i = 0; i < m.count; i++) {
+          const DictPrefixHit& h = m.hits[i];
+          const std::string covered = run.substr(0, h.runBytes);
+          model.addHit(h.headword, h.synCount > 0 ? &covered : nullptr);
+        }
+        std::string definition;
+        ASSERT_TRUE(d.readPrefixDefinitions(m, definition)) << ctx;
+        EXPECT_EQ(definition, model.text) << ctx;
+        listings++;
+      }
+    }
+
+    // A whole word reads the same way, whichever way it is found. One entry reads bare.
+    const auto expectLookup = [&](const std::string& word, const std::string& headword, const std::string* synonym) {
+      DictEntries entries;
+      std::string matched;
+      ASSERT_TRUE(d.resolve(word.c_str(), entries, matched)) << folder << " word=" << word;
+      ListingModel model{heads, occ, synTargets, {}, {}};
+      model.addHit(headword, synonym);
+      std::string definition;
+      ASSERT_TRUE(d.readResolved(entries, definition)) << folder << " word=" << word;
+      EXPECT_EQ(definition, entries.hasSeveral() ? model.text : heads[occ.at(matched).front()].def)
+          << folder << " word=" << word;
+      wordLookups++;
+    };
+    const std::string longVowel = cp(0x30FC);  // cleanWord() may take it for an edge mark
+    for (const auto& [w, positions] : occ) {
+      if (w.find(longVowel) == std::string::npos && w[0] != 'a') expectLookup(w, w, nullptr);
+    }
+    for (const auto& [w, targets] : synTargets) {
+      if (w.find(longVowel) == std::string::npos && occ.count(w) == 0) expectLookup(w, heads[targets.front()].word, &w);
     }
     fs::remove_all(dir);
   }
   EXPECT_GT(idxRuns, 0);
   EXPECT_GT(synRuns, 0);
+  EXPECT_GT(listings, 0);
+  EXPECT_GT(wordLookups, 0);
 }
 
 }  // namespace

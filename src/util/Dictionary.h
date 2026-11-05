@@ -27,10 +27,20 @@ struct DictLocation {
 // Every .idx entry a headword has. StarDict's order puts entries with byte-equal headwords next to
 // each other, so they are a run in the .idx: where it starts and how long it is are all a reader
 // needs to read them all.
+//
+// A word found through the .syn may have several records, each naming a headword of its own. They
+// are next to each other in the .syn in the same way, so a search notes where they start and reads
+// no further: only the reader follows them, off the search's clock.
 struct DictEntries {
-  DictLocation location;   // the run's FIRST entry, in .idx order
-  uint32_t idxStart = 0;   // byte offset in .idx of that first entry
-  uint8_t entryCount = 0;  // entries in the run, at most DictPrefixMatch::MAX_ENTRIES_PER_HIT
+  DictLocation location;        // the run's FIRST entry, in .idx order
+  uint32_t idxStart = 0;        // byte offset in .idx of that first entry
+  uint32_t synStart = 0;        // a .syn hit: byte offset in .syn of the first record seen
+  uint8_t entryCount = 0;       // entries in the run, at most DictPrefixMatch::MAX_ENTRIES_PER_HIT
+  uint8_t synCount = 0;         // a .syn hit: its records from synStart, at most MAX_ENTRIES_PER_HIT
+  bool synOpensWindow = false;  // those records open a .sidx window: more may lie in the one before
+
+  // True when reading this takes more than the one entry `location` names.
+  bool hasSeveral() const { return entryCount > 1 || synCount > 1 || synOpensWindow; }
 };
 
 // One headword found at the start of a run of CJK text, with every .idx entry it has.
@@ -39,7 +49,7 @@ struct DictPrefixHit : DictEntries {
   std::string headword;  // the .idx headword, also for a .syn hit; SSO up to 15 bytes (5 CJK chars)
 };
 
-// What Dictionary::resolvePrefixes() found. ~140 bytes on the ESP32; a member or stack local, never
+// What Dictionary::resolvePrefixes() found. ~150 bytes on the ESP32; a member or stack local, never
 // on the heap.
 struct DictPrefixMatch {
   static constexpr uint8_t MAX_HITS = 3;
@@ -182,8 +192,10 @@ class Dictionary {
 
   // The definitions of match.hits[0..count), in one string sized once from the index sizes (one
   // allocation, as readDefinition's). Every entry of every hit, in this order: hit by hit, longest
-  // first; within a hit, its entryCount entries read from .idx at idxStart, in .idx order. So the
-  // longest match's entries all come before the shorter matches. Plain: "headword\n" + definition
+  // first; within a hit, its entryCount entries read from .idx at idxStart, in .idx order, then the
+  // runs its other .syn records name, in .syn order. A hit lists at most MAX_ENTRIES_PER_HIT
+  // entries and each run is listed once, where it first comes up. So the longest match's entries
+  // all come before the shorter matches. Plain: "headword\n" + definition
   // per entry (a duplicate headword repeats its line), entries joined by "\n\n". HTML
   // (definitionsAreHtml()): "<p><b>" + headword with & < > escaped + "</b></p>" + definition per
   // entry, no separator. At most MAX_DEFINITION_BYTES in all: the very first entry's definition is
@@ -360,9 +372,12 @@ class Dictionary {
   static constexpr uint8_t PREFIX_PROBES_PER_FILE = 3;
 
   // What the probes of one resolvePrefixes() call share, and the .syn hits its .syn scans keep
-  // (each its run bytes and ordinal only, until followed). Defined in Dictionary.cpp.
+  // (each its run bytes, ordinal and records only, until followed). Defined in Dictionary.cpp.
   struct PrefixSearch;
   struct SynonymHits;
+
+  // The .idx runs one read lists, each once, in the order they are read. Defined in Dictionary.cpp.
+  struct EntryPlan;
 
   // One file's half of resolvePrefixes() (spec 5.2), into `out`: matchOut's hits for .idx, a
   // SynonymHits for .syn. A window scan per probe, each probe's target a shorter prefix of the
@@ -372,16 +387,27 @@ class Dictionary {
   template <typename Hits>
   void collectPrefixes(LookupSession& session, PrefixSearch& search, Hits& out);
 
-  // The .idx run of `headword` from its first entry: the last sample strictly below the headword,
-  // then forward to the first byte-equal entry, counting it and those that follow. Sets `entries`;
-  // false, leaving it alone, when it is not found.
+  // The run of byte-equal `word` entries in a sorted file, from its first entry: the last sample
+  // strictly below the word, then forward to the first byte-equal entry, counting it and those that
+  // follow, at most MAX_ENTRIES_PER_HIT. startOut gets the first entry's byte offset and firstSuffix
+  // its suffixBytes bytes. False when there is no such entry.
+  bool findRun(HalFile& sidecar, ScanReader& scan, uint32_t sampleCount, uint32_t fileSize, size_t suffixBytes,
+               const char* word, uint32_t& startOut, uint8_t& countOut, uint8_t* firstSuffix);
+
+  // The .idx run of `headword` from its first entry. Sets `entries`; false, leaving it alone, when
+  // it is not found.
   bool locateRun(LookupSession& session, const char* headword, DictEntries& entries);
 
   // A .syn hit's .idx entry (the `ordinal`-th) and the run of same-headword entries it belongs to,
-  // from one scan of the window it lies in: sets hit's headword, location, idxStart and
+  // from one scan of the window it lies in: sets headword and entries' location, idxStart and
   // entryCount. Only a run that opens its window takes locateRun(), since it may begin in the
   // window before. False when the entry cannot be read.
-  bool followSynonym(LookupSession& session, uint32_t ordinal, DictPrefixHit& hit);
+  bool followSynonym(LookupSession& session, uint32_t ordinal, DictEntries& entries, std::string& headword);
+
+  // Adds `entries` to `plan`: its run, then the runs of its other .syn records, followed here so a
+  // search does not pay for them. At most MAX_ENTRIES_PER_HIT entries. A record that cannot be
+  // followed is left out.
+  void planEntries(LookupSession& session, const DictEntries& entries, EntryPlan& plan);
 
   // Merges the .syn hits into matchOut's .idx hits: longest first, one hit per length with the
   // .idx hit on a tie; then a hit whose first entry a longer kept hit already has is dropped; at
@@ -389,13 +415,13 @@ class Dictionary {
   // followSynonym(): its entry may lie in the middle of its run.
   void mergeSynonymHits(LookupSession& session, PrefixSearch& search, SynonymHits& syn, DictPrefixMatch& matchOut);
 
-  // Resolve an ordinal (the N-th .idx entry, 0-based) to its .dict location via
-  // the .qidx samples. Used to follow a .syn synonym back to its headword.
-  DictLocation locateByOrdinal(LookupSession& session, uint32_t ordinal, std::string* matchedHeadwordOut);
-
-  // Bisect the .syn/.sidx synonym index for target; on a hit follow its ordinal
-  // through locateByOrdinal(). Returns not-found when no .syn exists.
-  DictEntries locateSynonym(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
+  // Bisect the .syn/.sidx synonym index for target; on a hit follow its first
+  // record through followSynonym() and note the rest. Returns not-found when no
+  // .syn exists.
+  //
+  // Ported from crosspoint-reader PR #3980 (Phạm Bình An): every record of a
+  // synonym, not the first. Reworked so a search reads none of the others.
+  DictEntries locateSynonym(LookupSession& session, const char* target, std::string& headwordOut);
 
   // One streaming pass over sourcePath writing a sampled-offset sidecar. Each
   // source entry is a NUL-terminated word followed by suffixBytes fixed bytes
@@ -414,11 +440,11 @@ class Dictionary {
   // The caller has taken the inflate window of a .dict.dz and checked the heap.
   bool readEntryInto(const DictLocation& location, uint32_t size, char* dst, LookupResult* outResult);
 
-  // The next .idx entry of match's hits in reading order: hit by hit, each hit's entryCount entries
-  // from its idxStart. `hit` and `entry` are the position of the entry to read, advanced past it.
-  // False when there are none left or the .idx could not be read (`ioError`).
-  bool nextPrefixEntry(LookupSession& session, const DictPrefixMatch& match, uint8_t& hit, uint8_t& entry,
-                       DictLocation& locationOut, bool& ioError);
+  // The next .idx entry of `plan` in reading order, its headword left in wordBuf. `run` and `entry`
+  // are the position of the entry to read, advanced past it. False when there are none left or the
+  // .idx could not be read (`ioError`).
+  bool nextPlannedEntry(LookupSession& session, const EntryPlan& plan, uint8_t& run, uint8_t& entry,
+                        DictLocation& locationOut, bool& ioError);
 
   // Read the definition at location straight into out. On failure returns false and, if outResult
   // is given, sets it to the specific reason (Decompress / LowMemory / ReadError).
