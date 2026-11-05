@@ -4,7 +4,7 @@ This firmware is based on the [crosspoint-reader](https://github.com/crosspoint-
 
 It supports the following devices:
 - ESP32C3-based Xteink X4 and X3.
-- ESP32S3-based Xteink X4Pro, LilyGo T5S3 Pro
+- ESP32S3-based Xteink X4Pro, LilyGo T5S3 Pro, Murphy M3
 
 # Installation
 
