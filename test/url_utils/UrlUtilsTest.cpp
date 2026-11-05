@@ -131,3 +131,37 @@ TEST(UrlUtils, EnsureProtocolRepairsBeforeItPrepends) {
   ASSERT_EQ(UrlUtils::ensureProtocol("http:/example.com"), "http://example.com");
   ASSERT_EQ(UrlUtils::ensureProtocol("https://example.com"), "https://example.com");
 }
+
+// Cases from crosspoint-reader #4211 (Arthur Tazhitdinov).
+TEST(IsForeignHost, CaptivePortalChecksAreForeign) {
+  EXPECT_TRUE(UrlUtils::isForeignHost("connectivitycheck.gstatic.com"));
+  EXPECT_TRUE(UrlUtils::isForeignHost("www.google.com"));
+  EXPECT_TRUE(UrlUtils::isForeignHost("captive.apple.com"));
+  EXPECT_TRUE(UrlUtils::isForeignHost("www.msftconnecttest.com"));
+  EXPECT_TRUE(UrlUtils::isForeignHost("detectportal.firefox.com:80"));
+}
+
+TEST(IsForeignHost, ReaderAddressesAreNotForeign) {
+  EXPECT_FALSE(UrlUtils::isForeignHost("192.168.4.1"));
+  EXPECT_FALSE(UrlUtils::isForeignHost("192.168.4.1:80"));
+  EXPECT_FALSE(UrlUtils::isForeignHost("crosspoint.local"));
+  EXPECT_FALSE(UrlUtils::isForeignHost("CrossPoint.LOCAL:8080"));
+  EXPECT_FALSE(UrlUtils::isForeignHost("[fe80::1]:80"));
+}
+
+TEST(IsForeignHost, MissingHostIsNotForeign) {
+  EXPECT_FALSE(UrlUtils::isForeignHost(nullptr));
+  EXPECT_FALSE(UrlUtils::isForeignHost(""));
+  EXPECT_FALSE(UrlUtils::isForeignHost(":80"));
+}
+
+TEST(IsForeignHost, SingleLabelNamesAreTheReader) {
+  EXPECT_FALSE(UrlUtils::isForeignHost("crosspoint"));
+  EXPECT_FALSE(UrlUtils::isForeignHost("crosspoint:80"));
+}
+
+TEST(IsForeignHost, LocalSuffixMustBeWhole) {
+  EXPECT_TRUE(UrlUtils::isForeignHost("notlocal.com"));
+  EXPECT_TRUE(UrlUtils::isForeignHost("example.localhost"));
+  EXPECT_FALSE(UrlUtils::isForeignHost(".local"));
+}

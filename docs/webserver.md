@@ -75,7 +75,8 @@ The reader shows the address of its web interface, and a QR code for it:
   `http://192.168.1.42/`, and below it `http://crosspoint.local/`, which works on most computers and
   on iPhones and iPads.
 - **In hotspot mode:** first a QR code that joins your phone to the **CrossPoint-Reader** network,
-  then one for the address, `http://crosspoint.local/` or `http://192.168.4.1/`.
+  then one for the address, `http://crosspoint.local/` or `http://192.168.4.1/`. Some
+  phones and computers open the home page by themselves after joining.
 
 A bar shows the Wi-Fi signal; a stronger signal makes uploads faster.
 

@@ -3658,8 +3658,7 @@
           const put = await fetch('/api/book/replace?path=' + encodeURIComponent(it.path) +
             '&keep=' + (report.spineChanged ? '0' : '1'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/epub+zip' },
-            body: optimized
+            body: uploadForm(optimized)
           });
           if (!put.ok) {
             let message = 'the reader answered ' + put.status;

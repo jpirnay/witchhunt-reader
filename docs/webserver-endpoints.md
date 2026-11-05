@@ -857,11 +857,10 @@ curl "http://crosspoint.local/api/book/opf?path=/Books/mybook.epub"
 ### POST `/api/book/replace` - Swap In an Optimized Copy of a Book
 
 What the File Manager's in-place **Optimize** uses: it downloads a book, optimizes it in the
-browser and sends the result here as the raw request body (any content type except
-`multipart/form-data`).
+browser and sends the result here as a `multipart/form-data` file.
 
 ```bash
-curl -X POST -H 'Content-Type: application/epub+zip' --data-binary @optimized.epub \
+curl -X POST -F "file=@optimized.epub" \
   "http://crosspoint.local/api/book/replace?path=%2FBooks%2Fbook.epub&keep=1"
 # -> {"ok":true,"path":"/Books/book.epub","backup":"/Books/book.epub.bak","keptOlderBackup":false,"keptReadingState":true}
 ```
@@ -879,7 +878,7 @@ file is replaced. Reading stats follow the file name, so they always stay.
 | ------ | ----- |
 | 400    | No such EPUB, a refused path, or the upload was cut off |
 | 413    | Body over 512 MB |
-| 415    | A `multipart/form-data` body |
+| 415    | Not a `multipart/form-data` body, or one with no file in it |
 | 500    | Could not write the new file, set the original aside, or swap the new one in |
 
 ### Installing and managing plugins
@@ -892,14 +891,14 @@ component.
 | Endpoint | Does |
 | --- | --- |
 | `POST /api/plugins/begin?name=` | Starts an install: an empty staging folder `<name>.new` |
-| `POST /api/plugins/file?name=&file=` | One file into the staging folder; the raw request body is the file (binary-safe, at most 512 KB) |
+| `POST /api/plugins/file?name=&file=` | One file into the staging folder; the file is sent as `multipart/form-data` (binary-safe, at most 512 KB) |
 | `POST /api/plugins/commit?name=` | Replaces the installed plugin with the staging folder in one rename; `400` without a `plugin.js` |
 | `POST /api/plugins/remove?name=` | Removes the plugin from every plugins folder; `404` if there is none |
 | `POST /api/plugins/enable?name=&on=0` | Switches the plugin off (a `disabled` file in its folder); `on=1` switches it back on |
 
 ```bash
 curl -X POST "http://crosspoint.local/api/plugins/begin?name=my-plugin"
-curl -X POST -H "Content-Type: application/octet-stream" --data-binary @plugin.js \
+curl -X POST -F "file=@plugin.js" \
   "http://crosspoint.local/api/plugins/file?name=my-plugin&file=plugin.js"
 curl -X POST "http://crosspoint.local/api/plugins/commit?name=my-plugin"
 ```
@@ -978,21 +977,18 @@ judged as an item under [Protected paths](#protected-paths), as `/upload` judges
 
 ### POST `/api/plugin-fs` - Write a Small File
 
-Writes one small file, with the raw request body as its contents. `/upload`
-already does this; it exists for compatibility with plugins written against the
+Writes one small file, sent as `multipart/form-data`. `/upload` already does this; it exists for compatibility with plugins written against the
 upstream API.
 
 ```bash
-curl -X POST --data-binary @cover.jpg \
+curl -X POST -F "file=@cover.jpg" \
   "http://crosspoint.local/api/plugin-fs?plugin=my-plugin&path=%2FBooks%2Fbook.jpg"
 # -> {"ok":true,"path":"/Books/book.jpg"}
 ```
 
-The body is streamed to the card as it arrives, so binary files arrive intact,
-with any content type except `multipart/form-data` (which the web server parses
-as a form; send the bytes themselves). It is written to `<path>.part` and renamed
-over `path` at the end, so a body that is too large or cut off never replaces an
-existing file. Capped at 64KB, to keep it to small files; bulk transfers belong
+The file is streamed to the card as it arrives, so binary files arrive intact.
+It is written to `<path>.part` and renamed over `path` at the end, so a file that
+is too large or cut off never replaces an existing one. Capped at 64KB, to keep it to small files; bulk transfers belong
 in `/upload`. `path` passes the same check as `dest` above.
 
 | Status | Cause                                   |
@@ -1143,6 +1139,11 @@ The device can operate in two network modes:
 ### Access Point Mode (AP)
 - Device creates its own WiFi hotspot
 - Default IP is typically `192.168.4.1`
+- The hotspot's DNS answers every name with the device's IP. A `GET` or `HEAD`
+  request whose `Host` is any other domain name (not an IP address, a `.local`
+  name or a single-label name such as `crosspoint`) gets
+  `302 Location: http://<AP IP>/`, so phones and computers can open the home
+  page as a captive portal. Other methods are not redirected.
 - `mode` field in `/api/status` returns `"AP"`
 - `rssi` field returns `0`
 

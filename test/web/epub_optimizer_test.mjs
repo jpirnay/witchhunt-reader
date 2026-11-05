@@ -1001,7 +1001,9 @@ async function optimizeInPlace(books) {
       return { ok: true, status: 200, blob: async () => new w.Blob([new w.Uint8Array(book.bytes)]) };
     }
     if (u.pathname === '/api/book/replace') {
-      sent.push({ path: u.searchParams.get('path'), keep: u.searchParams.get('keep'), bytes: new Uint8Array(await blobBytes(opts.body)) });
+      // The file route takes multipart: the query names the target, the form carries the book.
+      if (!(opts.body instanceof w.FormData)) throw new w.TypeError('/api/book/replace takes a form');
+      sent.push({ path: u.searchParams.get('path'), keep: u.searchParams.get('keep'), bytes: new Uint8Array(await blobBytes(opts.body.get('file'))) });
       return { ok: true, status: 200, json: async () => ({ ok: true }) };
     }
     throw new w.TypeError('unexpected request ' + url);

@@ -1,5 +1,6 @@
 #include "FolderWalk.h"
 
+#include <FsHelpers.h>
 #include <HalStorage.h>
 #include <HalSystem.h>
 #include <Logging.h>
@@ -11,8 +12,6 @@
 namespace FolderWalk {
 namespace {
 
-// A long file name is up to 255 UTF-16 units, so up to 765 bytes of UTF-8.
-constexpr size_t NAME_BUFFER_BYTES = 768;
 // Levels the walk holds before its stack of positions grows; a deeper tree still walks.
 constexpr size_t RESERVED_LEVELS = 16;
 
@@ -29,9 +28,10 @@ bool eachFile(const std::string& dir, const FileVisitor visit, void* ctx) {
     if (!root || !root.isDirectory()) return false;
   }
   // Heap, not stack: the visitor runs below this frame.
-  auto name = makeUniqueNoThrow<char[]>(NAME_BUFFER_BYTES);
+  auto name = makeUniqueNoThrow<char[]>(FsHelpers::MAX_FILE_NAME_BYTES);
   if (!name) {
-    LOG_ERR("FWK", "OOM: %u byte name buffer for %s", static_cast<unsigned>(NAME_BUFFER_BYTES), dir.c_str());
+    LOG_ERR("FWK", "OOM: %u byte name buffer for %s", static_cast<unsigned>(FsHelpers::MAX_FILE_NAME_BYTES),
+            dir.c_str());
     return false;
   }
 
@@ -47,7 +47,7 @@ bool eachFile(const std::string& dir, const FileVisitor visit, void* ctx) {
     } else {
       for (HalFile entry = folder.openNextFile(); entry; entry = folder.openNextFile()) {
         HalSystem::feedWatchdog();
-        entry.getName(name.get(), NAME_BUFFER_BYTES);
+        entry.getName(name.get(), FsHelpers::MAX_FILE_NAME_BYTES);
         const bool isFolder = entry.isDirectory();
         entry.close();
         if (isFolder) {

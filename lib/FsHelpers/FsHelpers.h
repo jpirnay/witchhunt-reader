@@ -8,6 +8,10 @@
 
 namespace FsHelpers {
 
+// What getName() needs for any name on the card: a long file name is up to 255 UTF-16 units, so up to
+// 765 bytes of UTF-8. A smaller buffer gets an empty name back for one that does not fit.
+constexpr size_t MAX_FILE_NAME_BYTES = 768;
+
 std::string decodeUriEscapes(const std::string& path);
 // Out-parameter overload: decodes into `out`, reusing its capacity (for per-entry loops).
 void decodeUriEscapes(std::string_view path, std::string& out);

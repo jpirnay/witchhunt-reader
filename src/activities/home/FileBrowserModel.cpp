@@ -178,9 +178,15 @@ size_t FileBrowserModel::readDirectory(const size_t keep, const uint32_t heapFlo
   // card where the firmware did not see it (LibraryFreshness::checkListedEntry).
   const bool checkForUnseen = mode == Mode::Books && depthOf(basepath) <= INDEXED_DEPTH;
   size_t accepted = 0;
-  char name[500];
+  const auto nameBuffer = makeUniqueNoThrow<char[]>(FsHelpers::MAX_FILE_NAME_BYTES);
+  if (!nameBuffer) {
+    LOG_ERR("FBR", "OOM: name buffer for %s", basepath.c_str());
+    root.close();
+    return 0;
+  }
+  char* const name = nameBuffer.get();
   for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
-    file.getName(name, sizeof(name));
+    file.getName(name, FsHelpers::MAX_FILE_NAME_BYTES);
     const bool isDir = file.isDirectory();
     if (!acceptEntry(name, isDir)) {
       file.close();
@@ -319,7 +325,12 @@ int FileBrowserModel::countBooksBelow(const std::string& dirPath) {
     levels.push_back(Level{std::move(root), dirPath});
   }
   int counted = 0;  // every book found so far, for the cap
-  char name[500];
+  const auto nameBuffer = makeUniqueNoThrow<char[]>(FsHelpers::MAX_FILE_NAME_BYTES);
+  if (!nameBuffer) {
+    LOG_ERR("FBR", "OOM: name buffer for %s", dirPath.c_str());
+    return -1;
+  }
+  char* const name = nameBuffer.get();
   while (true) {
     if (CooperativeAbort::shouldAbortLongTask()) return -1;  // the levels close their directories
     if (counted > MAX_COUNTED_BOOKS) {
@@ -344,7 +355,7 @@ int FileBrowserModel::countBooksBelow(const std::string& dirPath) {
       HalSystem::feedWatchdog();
       continue;
     }
-    entry.getName(name, sizeof(name));
+    entry.getName(name, FsHelpers::MAX_FILE_NAME_BYTES);
     if (!isBookListableName(name)) continue;
     if (!entry.isDirectory()) {
       if (isReadableBook(std::string_view{name})) {
@@ -598,7 +609,12 @@ void FileBrowserModel::searchEverywhere(const std::string& query) {
     levels.push_back(Level{std::move(root), basepath});
   }
 
-  char name[500];
+  const auto nameBuffer = makeUniqueNoThrow<char[]>(FsHelpers::MAX_FILE_NAME_BYTES);
+  if (!nameBuffer) {
+    LOG_ERR("FBR", "OOM: name buffer for %s", basepath.c_str());
+    return;
+  }
+  char* const name = nameBuffer.get();
   while (!levels.empty() && deepResults.size() < MAX_DEEP_RESULTS) {
     Level& level = levels.back();
     auto entry = level.dir.openNextFile();
@@ -607,7 +623,7 @@ void FileBrowserModel::searchEverywhere(const std::string& query) {
       levels.pop_back();
       continue;
     }
-    entry.getName(name, sizeof(name));
+    entry.getName(name, FsHelpers::MAX_FILE_NAME_BYTES);
     const bool isDir = entry.isDirectory();
     // "." and ".." always; anything else beginning with a dot only when the browser is
     // showing hidden files, so a search sees exactly what browsing would.

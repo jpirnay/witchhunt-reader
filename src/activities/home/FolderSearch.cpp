@@ -1,6 +1,8 @@
 #include "FolderSearch.h"
 
+#include <FsHelpers.h>
 #include <HalStorage.h>
+#include <Memory.h>
 
 #include <vector>
 
@@ -25,7 +27,9 @@ bool anyBelow(const std::string& dirPath, const Rules& rules) {
     root.rewindDirectory();
     levels.push_back(Level{std::move(root), dirPath});
   }
-  char name[500];
+  const auto nameBuffer = makeUniqueNoThrow<char[]>(FsHelpers::MAX_FILE_NAME_BYTES);
+  if (!nameBuffer) return false;
+  char* const name = nameBuffer.get();
   while (true) {
     if (rules.stop != nullptr && rules.stop(rules.user)) return true;  // the levels close their directories
     Level& level = levels.back();
@@ -39,7 +43,7 @@ bool anyBelow(const std::string& dirPath, const Rules& rules) {
       levels.back().complete = levels.back().complete && complete;
       continue;
     }
-    entry.getName(name, sizeof(name));
+    entry.getName(name, FsHelpers::MAX_FILE_NAME_BYTES);
     if (rules.listable != nullptr && !rules.listable(name)) continue;
     if (!entry.isDirectory()) {
       if (rules.wanted != nullptr && rules.wanted(name)) return true;
