@@ -390,14 +390,14 @@ TEST_F(SyntheticLutFixture, InsertedControlsCountNowhere) {
   }
 }
 
-TEST_F(SyntheticLutFixture, AKeptJoinerCountsNothingInTheNextTokensOffset) {
+TEST_F(SyntheticLutFixture, ATokenAfterAKeptJoinerKeepsItsSourceOffset) {
   // The word is split at an inline edge, 66 glued letters (the width of a line) in the first token and the joiner,
   // ष and two more letters in the second, which the line breaker puts at a line's start. A page opens on that line in
-  // some paragraphs, and its offset is where the first token ends: the joiner's 3 bytes are no visible text of the
-  // word's, as where visibleBytesOutsideControls splits it. A paragraph is 60 one-byte words, 65 letters and a virama
+  // some paragraphs, and its offset is ष's position in the source, as VisibleText counts it: the joiner's 3 bytes are
+  // counted between the tokens, as the mappers count them. A paragraph is 60 one-byte words, 65 letters and a virama
   // (198 bytes), the joiner, ष and two letters (12 bytes), and 100 one-byte words.
   constexpr uint32_t kBefore = 60;
-  constexpr uint32_t kSecondToken = kBefore + 198;
+  constexpr uint32_t kSecondToken = kBefore + 198 + 3;
   constexpr uint32_t kParagraphBytes = kBefore + 198 + 12 + 100;
   std::string before;
   for (uint32_t i = 0; i < kBefore; ++i) before += "w ";

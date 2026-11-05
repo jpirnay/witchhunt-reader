@@ -4093,22 +4093,20 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
     }
 
     // A ZWJ or ZWNJ after a shaped-script letter waits for the next code point (releaseHeldJoiner, settleHeldJoiner),
-    // which says whether it is alone: a second one drops both and the rest of the run. In such a position it counts
-    // nowhere in the token offsets (a kept one is in the word, and no offset starts at it), so the text after it sits
-    // where a split of the word would put it (visibleBytesOutsideControls). After anything else it goes with the
+    // which says whether it is alone: a second one drops both and the rest of the run. Its bytes are source text, so
+    // the offsets of what follows count them; no token's offset starts at it. After anything else it goes with the
     // default-ignorables below.
     if (const uint32_t joiner = joinerAt(s, i, len); joiner != 0) {
-      const bool afterScript = keepsJoinerAfter(self->joinerLookBehind_);
       if (self->droppingJoinerRun_) {
         // the run goes on
       } else if (self->heldJoiner_ != 0) {
         self->heldJoiner_ = 0;
         self->droppingJoinerRun_ = true;
-      } else if (afterScript) {
+      } else if (keepsJoinerAfter(self->joinerLookBehind_)) {
         self->heldJoiner_ = joiner;
       }
       i += 2;
-      off = afterScript ? byteOff : off + (source ? 2 : 0);
+      if (source) off += 2;
       continue;
     }
 
