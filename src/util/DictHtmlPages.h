@@ -11,6 +11,7 @@
 #include <vector>
 
 class GfxRenderer;
+class LanguageHyphenator;
 
 // Lay out a StarDict HTML definition through the EPUB chapter parser, yielding
 // the same styled, paginated Pages the reader renders.
@@ -25,5 +26,9 @@ class GfxRenderer;
 // `fontId` is the caller's choice, not read from the settings: Noto Sans for a
 // Latin lookup, the reader's font for one that started on CJK text (see
 // DictionaryDefinitionActivity.h).
+// `hyphenator` is installed for the layout and the one before it put back (ScopedLanguageHyphenator): the open book's
+// language's patterns, or null for none. Only a section build installs patterns otherwise, so the definition would
+// hyphenate by the last book built.
 bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definition, int fontId, uint16_t viewportWidth,
-                              uint16_t viewportHeight, std::vector<std::unique_ptr<Page>>& pagesOut);
+                              uint16_t viewportHeight, const LanguageHyphenator* hyphenator,
+                              std::vector<std::unique_ptr<Page>>& pagesOut);

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <Epub/BidiLine.h>
+#include <Epub/hyphenation/Hyphenator.h>
 #include <Epub/parsers/ChapterHtmlSlimParser.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -57,7 +58,7 @@ bool heapAllowsStyledRetain() {
 
 bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definition, const int fontId,
                               const uint16_t viewportWidth, const uint16_t viewportHeight,
-                              std::vector<std::unique_ptr<Page>>& pagesOut) {
+                              const LanguageHyphenator* hyphenator, std::vector<std::unique_ptr<Page>>& pagesOut) {
   pagesOut.clear();
   if (definition.empty()) return false;
   if (!heapAllowsStyledLayout()) {
@@ -85,6 +86,8 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
     ~ReleaseBidiMemory() { BidiLine::releaseBuildMemory(); }
   } releaseBidiMemory;
   {
+    // For the parser's lifetime, which is the layout: the last section build installed its own book's patterns.
+    const ScopedLanguageHyphenator scopedHyphenator(hyphenator);
     // Heap-allocated as Section does -- the parser object is far too large for a
     // stack local. A null epub is safe here because imageRendering=2 suppresses
     // <img> entirely, and every path that dereferences epub sits behind either
