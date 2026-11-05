@@ -1993,4 +1993,70 @@ TEST_F(DictionaryTest, ASynonymsOtherTargetsCostTheSearchNothing) {
   EXPECT_EQ(a.reads, b.reads);
 }
 
+// One inline field: its type letter, its text, the NUL that ends it.
+std::string field(const char type, const std::string& text) { return type + text + std::string(1, '\0'); }
+
+// --- the .ifo is read as lines, all of it -------------------------------------
+
+const std::string kLongDescription = "description=" + std::string(3000, 'd') + "\n";
+
+TEST_F(DictionaryTest, AKeyPastALongDescriptionIsSeen) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("IfoLate", {{"bank", "<b>side</b>"}}));
+  writeWholeFile(kDictRoot / "IfoLate" / "words.ifo",
+                 "StarDict's dict ifo file\n" + kLongDescription + "sametypesequence=h\n");
+  Dictionary dict;
+  ASSERT_TRUE(dict.open("IfoLate"));
+  EXPECT_TRUE(dict.definitionsAreHtml());
+}
+
+TEST_F(DictionaryTest, AFixedTypeKeyPastALongDescriptionKeepsEntriesWhole) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("IfoLateFixed", {{"bank", field('m', "not a field")}}));
+  writeWholeFile(kDictRoot / "IfoLateFixed" / "words.ifo",
+                 "StarDict's dict ifo file\n" + kLongDescription + "sametypesequence=m\n");
+  Dictionary dict;
+  ASSERT_NO_FATAL_FAILURE(openIndexed(dict, "IfoLateFixed"));
+  EXPECT_EQ(lookedUp(dict, "bank"), field('m', "not a field"));
+}
+
+TEST_F(DictionaryTest, SixtyFourBitOffsetsPastALongDescriptionAreRefused) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("IfoLateWide", {{"bank", "side"}}));
+  writeWholeFile(kDictRoot / "IfoLateWide" / "words.ifo",
+                 "StarDict's dict ifo file\nsametypesequence=m\n" + kLongDescription + "idxoffsetbits=64\n");
+  Dictionary dict;
+  EXPECT_FALSE(dict.open("IfoLateWide"));
+}
+
+TEST_F(DictionaryTest, AKeyNamedInsideADescriptionIsNoKey) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("IfoQuoted", {{"bank", "side"}}));
+  writeWholeFile(kDictRoot / "IfoQuoted" / "words.ifo",
+                 "StarDict's dict ifo file\ndescription=set sametypesequence=h\nsametypesequence=m\n");
+  Dictionary dict;
+  ASSERT_TRUE(dict.open("IfoQuoted"));
+  EXPECT_FALSE(dict.definitionsAreHtml());
+}
+
+TEST_F(DictionaryTest, SpacesAroundAnIfoKeysEqualsSignAreIgnored) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("IfoSpaces", {{"bank", "side"}}));
+  writeWholeFile(kDictRoot / "IfoSpaces" / "words.ifo", "StarDict's dict ifo file\nsametypesequence = h\n");
+  Dictionary dict;
+  ASSERT_TRUE(dict.open("IfoSpaces"));
+  EXPECT_TRUE(dict.definitionsAreHtml());
+}
+
+TEST_F(DictionaryTest, AnIfoKeyOnALastLineWithNoLineEndIsSeen) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("IfoNoEnd", {{"bank", "side"}}));
+  writeWholeFile(kDictRoot / "IfoNoEnd" / "words.ifo", "StarDict's dict ifo file\nsametypesequence=h");
+  Dictionary dict;
+  ASSERT_TRUE(dict.open("IfoNoEnd"));
+  EXPECT_TRUE(dict.definitionsAreHtml());
+}
+
+TEST_F(DictionaryTest, AnIfoWithWindowsLineEndsReadsTheSame) {
+  ASSERT_NO_FATAL_FAILURE(writeDictionary("IfoCrlf", {{"bank", "side"}}));
+  writeWholeFile(kDictRoot / "IfoCrlf" / "words.ifo", "StarDict's dict ifo file\r\nsametypesequence=h\r\n");
+  Dictionary dict;
+  ASSERT_TRUE(dict.open("IfoCrlf"));
+  EXPECT_TRUE(dict.definitionsAreHtml());
+}
+
 }  // namespace

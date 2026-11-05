@@ -101,31 +101,56 @@ bool takesRunEntry(const char* word, const char* target, bool havePick, bool& ex
   return exact || !havePick;
 }
 
-// Facts read from the .ifo at open time. Only the first 2KB is scanned — .ifo
-// headers are tiny and both keys always appear early when present.
+// Facts read from the .ifo at open time.
 struct IfoFacts {
   bool offsets64 = false;        // idxoffsetbits=64 (unsupported)
   bool htmlDefinitions = false;  // sametypesequence=h (definitions are HTML)
 };
 
+// One line of the .ifo, `length` bytes with room for a NUL after them: a key only when it opens the
+// line, so a description that names one does not set it.
+void readIfoLine(IfoFacts& facts, char* const line, size_t length) {
+  while (length > 0 && (line[length - 1] == '\r' || line[length - 1] == ' ')) length--;
+  line[length] = '\0';
+  char* const eq = strchr(line, '=');
+  if (!eq) return;
+  char* keyEnd = eq;
+  while (keyEnd > line && keyEnd[-1] == ' ') keyEnd--;
+  *keyEnd = '\0';
+  const char* value = eq + 1;
+  while (*value == ' ') value++;
+  if (strcmp(line, "idxoffsetbits") == 0) {
+    facts.offsets64 = strtol(value, nullptr, 10) == 64;
+  } else if (strcmp(line, "sametypesequence") == 0) {
+    // Only the single-field sequence "h" is treated as HTML; multi-type
+    // entries keep the plain-text viewing path.
+    facts.htmlDefinitions = strcmp(value, "h") == 0;
+  }
+}
+
+// All of it, a line at a time: a key may follow a description of any length. The keys wanted are
+// short, so the rest of a long line is dropped.
 IfoFacts readIfoFacts(const std::string& ifoPath) {
   IfoFacts facts;
   HalFile ifo;
   if (!Storage.openFileForRead("DICT", ifoPath, ifo)) return facts;
-  char buf[2048];
-  const int n = ifo.read(buf, sizeof(buf) - 1);
-  if (n <= 0) return facts;
-  buf[n] = '\0';
-  const char* line = strstr(buf, "idxoffsetbits");
-  const char* eq = line ? strchr(line, '=') : nullptr;
-  facts.offsets64 = eq && strtol(eq + 1, nullptr, 10) == 64;
-  line = strstr(buf, "sametypesequence");
-  eq = line ? strchr(line, '=') : nullptr;
-  if (eq) {
-    // Only the single-field sequence "h" is treated as HTML; multi-type
-    // entries keep the plain-text viewing path.
-    facts.htmlDefinitions = eq[1] == 'h' && (eq[2] == '\0' || eq[2] == '\r' || eq[2] == '\n');
+  char chunk[128];
+  char line[65];
+  size_t length = 0;
+  for (;;) {
+    const int n = ifo.read(chunk, sizeof(chunk));
+    if (n < 0) return IfoFacts{};
+    if (n == 0) break;
+    for (int i = 0; i < n; i++) {
+      if (chunk[i] == '\n') {
+        readIfoLine(facts, line, length);
+        length = 0;
+      } else if (length < sizeof(line) - 1) {
+        line[length++] = chunk[i];
+      }
+    }
   }
+  readIfoLine(facts, line, length);  // a last line with no line end
   return facts;
 }
 
