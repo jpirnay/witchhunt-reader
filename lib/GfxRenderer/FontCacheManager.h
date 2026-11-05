@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <vector>
 
 class FontDecompressor;
 class SdCardFont;
@@ -116,11 +117,11 @@ class FontCacheManager {
   // the WHOLE page into every style that appeared — one italic word cost a full ~4-5 KB italic
   // slot, and a bionic page held 4 full slots (~20-26 KB of page buffers instead of ~5-8 KB).
   //
-  // A shaped run's glyphs are kept per base style the same way, as glyph IDs: little-endian u16s,
-  // two bytes an ID.
+  // A shaped run's glyphs are kept per base style the same way, as glyph IDs, each held once:
+  // in the order first drawn.
   struct ScanEntry {
     std::string textByStyle[4];
-    std::string glyphsByStyle[4];
+    std::vector<uint16_t> glyphsByStyle[4];
   };
   std::map<int, ScanEntry> scanByFont_;
 };

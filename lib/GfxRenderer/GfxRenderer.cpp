@@ -1587,6 +1587,10 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   }
 }
 
+// Whether a total scale draws on the unscaled blitter: within 1% of 1 the resample is not worth its blur. One
+// definition for drawTextScaled and for glyph runs, so a shaped run and its unshaped fallback agree.
+static bool drawsUnscaled(const float total) { return total > 0.99f && total < 1.01f; }
+
 // Public entry: `scale` is the CSS/heading residual, compounded with the font's base scale so a
 // heading at 1.6em inside synthesised 24 pt body text is ONE resample at 1.2 x 1.6, not two.
 void GfxRenderer::drawTextScaled(const int fontId, const int x, const int y, const char* text, const bool black,
@@ -1595,7 +1599,7 @@ void GfxRenderer::drawTextScaled(const int fontId, const int x, const int y, con
   // first version of this wrapper returned instead, which silently changed behaviour for any
   // caller passing 0 to mean unscaled.
   const float total = (scale <= 0.0f ? 1.0f : scale) * fontBaseScale(fontId);
-  if (total > 0.99f && total < 1.01f) {
+  if (drawsUnscaled(total)) {
     // Exactly 1 after compounding: the unscaled blitter is both faster and sharper. Only reachable
     // when the font's base is 1, so drawText() cannot bounce back here.
     drawText(fontId, x, y, text, black, style);
@@ -1658,7 +1662,7 @@ void GfxRenderer::drawTextAtScale(const int fontId, const int x, const int y, co
 }
 
 // The scale a glyph run is drawn at: drawTextScaled's residual (a non-positive one meaning none) times the font's base
-// scale. At 1 the run takes drawText's blitter and pen, at anything else drawTextAtScale's.
+// scale. Unscaled (drawsUnscaled) the run takes drawText's blitter and pen, at anything else drawTextAtScale's.
 static float glyphRunScale(const float scale, const float base) { return (scale <= 0.0f ? 1.0f : scale) * base; }
 
 void GfxRenderer::drawGlyphRun(const int fontId, const int x, const int y, const GlyphRun& run, const bool black,
@@ -1666,7 +1670,7 @@ void GfxRenderer::drawGlyphRun(const int fontId, const int x, const int y, const
   if (run.count == 0) return;
 
   if (fontCacheManager_ && fontCacheManager_->isScanning()) {
-    fontCacheManager_->recordGlyphs(run, fontId, style);
+    fontCacheManager_->recordGlyphs(run, fontId, style);  // records only for a font that draws glyph keys
     return;
   }
 
@@ -1687,7 +1691,7 @@ void GfxRenderer::drawGlyphRun(const int fontId, const int x, const int y, const
   }
 
   const float total = glyphRunScale(scale, fontBaseScale(fontId));
-  const bool scaled = total != 1.0f;
+  const bool scaled = !drawsUnscaled(total);
   // drawText's baseline at 1 (where its base scale is 1 too), drawTextAtScale's otherwise.
   const int ascender = rawFontAscenderSize(fontId);
   const int yPos = y + (scaled ? static_cast<int>(ascender * total + 0.5f) : ascender);
@@ -1727,7 +1731,7 @@ void GfxRenderer::drawGlyphRun(const int fontId, const int x, const int y, const
 }
 
 int GfxRenderer::glyphRunWidth(const int fontId, const GlyphRun& run, const float scale) const {
-  return glyphRunAdvance(run, glyphRunScale(scale, fontBaseScale(fontId)) != 1.0f);
+  return glyphRunAdvance(run, !drawsUnscaled(glyphRunScale(scale, fontBaseScale(fontId))));
 }
 
 void GfxRenderer::prefetchGlyphRun(const int fontId, const GlyphRun& run, const EpdFontFamily::Style style) const {

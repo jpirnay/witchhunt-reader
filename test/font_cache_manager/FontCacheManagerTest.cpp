@@ -181,6 +181,36 @@ TEST(FontCacheManager, AScannedGlyphRunIsPrewarmedByGlyphId) {
   EXPECT_EQ(0, scan.regularProvider.prefetches);
 }
 
+TEST(FontCacheManager, AGlyphIsHeldOncePerStyleHoweverOftenItIsDrawn) {
+  GlyphScan scan;
+  const EncodedRun word = encodedRun({200, 26, 513});
+  {
+    auto scope = scan.manager.createPrewarmScope();
+    for (int i = 0; i < 200; ++i) scan.manager.recordGlyphs(word.run(), 7, EpdFontFamily::REGULAR);
+    scope.endScanAndPrewarm();
+  }
+  EXPECT_EQ(1, scan.regularProvider.prefetches);
+  EXPECT_EQ((std::vector<uint16_t>{200, 26, 513}), scan.regularProvider.glyphs);
+}
+
+// A font that draws no glyph keys is not scanned for IDs: its provider is never asked for any.
+TEST(FontCacheManager, AFontThatDrawsNoGlyphKeysRecordsNoIds) {
+  GlyphScan scan;
+  CountingProvider plain;
+  EpdFontData plainData{};
+  plainData.provider = &plain;
+  const EpdFont plainFont(&plainData);
+  scan.fontMap.emplace(8, EpdFontFamily(&plainFont));
+  const EncodedRun word = encodedRun({200, 26, 513});
+  {
+    auto scope = scan.manager.createPrewarmScope();
+    scan.manager.recordGlyphs(word.run(), 8, EpdFontFamily::REGULAR);
+    scope.endScanAndPrewarm();
+  }
+  EXPECT_EQ(0, plain.prefetches);
+  EXPECT_EQ(0, scan.regularProvider.prefetches);
+}
+
 TEST(FontCacheManager, GlyphIdsPastTheCapAreLeftToTheDraw) {
   GlyphScan scan;
   std::vector<uint16_t> first;
