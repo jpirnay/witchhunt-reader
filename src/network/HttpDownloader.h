@@ -34,15 +34,15 @@ class HttpDownloader {
   };
 
   /**
-   * TLS verification posture for an https transfer, chosen by each caller: Verified (the default),
-   * Strict, Unverified or VerifiedThenUnverified. See lib/SecureNet/include/TlsPolicy.h.
+   * TLS verification posture for an https transfer: VerifiedThenUnverified (the default), Verified,
+   * Strict or Unverified. See lib/SecureNet/include/TlsPolicy.h.
    *
-   * Verified has no "verify, then retry unverified" middle: an on-path attacker presenting a bad
-   * certificate was simply accepted on that retry, which authenticated nothing while paying for the
-   * chain verification twice. Reaching a private-CA or self-signed server is the user's explicit
-   * "Skip HTTPS validation" choice instead. VerifiedThenUnverified brings the retry back for
-   * requests that carry no credentials only, where it leaks nothing: an unverified feed is no
-   * worse than the plain http many catalogs are served over.
+   * A URL that must not be reached unverified says so by naming Verified or Strict. Everything else
+   * falls back, which is safe for a password because the fallback is refused for a request with
+   * credentials (planTls()). What it does not do is authenticate the server: an on-path attacker
+   * who presents a bad certificate gets the retry, so anything fetched this way is no better than
+   * plain http. Reaching a private-CA or self-signed server with credentials stays the user's
+   * explicit "Skip HTTPS validation" choice.
    */
   using TlsPolicy = crosspoint::TlsPolicy;
 
@@ -78,7 +78,7 @@ class HttpDownloader {
    * Fetch text content from a URL with optional credentials.
    */
   static bool fetchUrl(const std::string& url, std::string& outContent, const std::string& username = "",
-                       const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
+                       const std::string& password = "", TlsPolicy tls = TlsPolicy::VerifiedThenUnverified);
 
   /**
    * Stream fetch. Returns the DownloadError rather than a bool so a caller can tell a refused
@@ -86,7 +86,7 @@ class HttpDownloader {
    * is true on success.
    */
   static DownloadError fetchUrl(const std::string& url, Stream& stream, const std::string& username = "",
-                                const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
+                                const std::string& password = "", TlsPolicy tls = TlsPolicy::VerifiedThenUnverified);
 
   static bool fetchUrl(const std::string& url, const DataCallback& onData, const std::string& username = "",
                        const std::string& password = "");
@@ -135,7 +135,8 @@ class HttpDownloader {
    */
   static DownloadError downloadToFile(const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, const std::string& username = "",
-                                      const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified,
+                                      const std::string& password = "",
+                                      TlsPolicy tls = TlsPolicy::VerifiedThenUnverified,
                                       const RedirectFilter& redirectAllowed = {});
 
   /**
@@ -145,5 +146,6 @@ class HttpDownloader {
    */
   static DownloadError downloadToFile(Session& session, const std::string& url, const std::string& destPath,
                                       ProgressCallback progress = nullptr, const std::string& username = "",
-                                      const std::string& password = "", TlsPolicy tls = TlsPolicy::Verified);
+                                      const std::string& password = "",
+                                      TlsPolicy tls = TlsPolicy::VerifiedThenUnverified);
 };

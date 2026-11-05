@@ -277,7 +277,8 @@ bool HttpDownloader::fetchUrl(const std::string& url, const DataCallback& onData
   }
   Sink sink;
   sink.write = [&onData](const uint8_t* data, size_t len) { return onData(data, len); };
-  const DownloadError result = runGetDispatch(url, username, password, sink, TlsPolicy::Verified, redirectAllowed);
+  const DownloadError result =
+      runGetDispatch(url, username, password, sink, TlsPolicy::VerifiedThenUnverified, redirectAllowed);
   if (result == OK) {
     return true;
   }
