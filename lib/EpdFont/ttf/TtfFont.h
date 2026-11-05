@@ -394,6 +394,7 @@ class TtfFontSet {
 
  private:
   friend class TtfFont;
+  friend struct TtfFontTestAccess;  // host tests: what an older firmware left in the store
   class MissScope;
 
   struct Pending {

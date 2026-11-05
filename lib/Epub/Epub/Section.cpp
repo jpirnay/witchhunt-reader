@@ -35,7 +35,8 @@
 
 namespace {
 constexpr uint8_t SECTION_FILE_VERSION = 109;  // v109: a no-break space with no word glued to it takes no share of a
-                                               // justified line, so word positions change
+                                               // justified line, and a TTF without U+FFFD gives a missing character
+                                               // its .notdef's advance: word positions change
                                                // v108: right-to-left lines: a word's display form and the line's
                                                // logical order (the TextBlock bidi region, flagged by the word
                                                // count's top bit)
