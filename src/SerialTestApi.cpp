@@ -395,10 +395,10 @@ void lookUpWord(const std::string_view wordView) {
         searchMs = static_cast<long>(millis() - searchStart);
         if (found) {
           // The old path for the same headword, after the search so any cache warmth favours it.
-          DictLocation exactLocation;
+          DictEntries exactEntries;
           std::string exactHeadword;
           const unsigned long exactStart = millis();
-          dict->resolve(match.hits[0].headword.c_str(), exactLocation, exactHeadword);
+          dict->resolve(match.hits[0].headword.c_str(), exactEntries, exactHeadword);
           exactMs = static_cast<long>(millis() - exactStart);
           found = dict->readPrefixDefinitions(match, definition, &result);
           headword = match.hits[0].headword;

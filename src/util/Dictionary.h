@@ -24,15 +24,19 @@ struct DictLocation {
   bool readError = false;
 };
 
-// One headword found at the start of a run of CJK text, with every .idx entry it has. StarDict's
-// order puts entries with byte-equal headwords next to each other, so they are a run in the .idx:
-// where it starts and how long it is are all a reader needs to read them all.
-struct DictPrefixHit {
+// Every .idx entry a headword has. StarDict's order puts entries with byte-equal headwords next to
+// each other, so they are a run in the .idx: where it starts and how long it is are all a reader
+// needs to read them all.
+struct DictEntries {
   DictLocation location;   // the run's FIRST entry, in .idx order
-  uint8_t runBytes = 0;    // bytes of the run of text it covers, a codepoint boundary
-  uint8_t entryCount = 0;  // entries in the run, at most DictPrefixMatch::MAX_ENTRIES_PER_HIT
-  std::string headword;    // the .idx headword, also for a .syn hit; SSO up to 15 bytes (5 CJK chars)
   uint32_t idxStart = 0;   // byte offset in .idx of that first entry
+  uint8_t entryCount = 0;  // entries in the run, at most DictPrefixMatch::MAX_ENTRIES_PER_HIT
+};
+
+// One headword found at the start of a run of CJK text, with every .idx entry it has.
+struct DictPrefixHit : DictEntries {
+  uint8_t runBytes = 0;  // bytes of the run of text it covers, a codepoint boundary
+  std::string headword;  // the .idx headword, also for a .syn hit; SSO up to 15 bytes (5 CJK chars)
 };
 
 // What Dictionary::resolvePrefixes() found. ~140 bytes on the ESP32; a member or stack local, never
@@ -145,12 +149,20 @@ class Dictionary {
   // Cheap enough to run speculatively while the user is still choosing a word,
   // which pre-pays the search for the lookup that follows and lets the UI say
   // in advance that a word has no entry. Feed the result to readResolved().
-  bool resolve(const char* word, DictLocation& locationOut, std::string& matchedHeadwordOut,
+  bool resolve(const char* word, DictEntries& entriesOut, std::string& matchedHeadwordOut,
                LookupResult* outResult = nullptr);
 
-  // Read the definition for a location resolve() returned. Separated so a
-  // caller that already resolved does not search the index twice.
-  bool readResolved(const DictLocation& location, std::string& definitionOut, LookupResult* outResult = nullptr);
+  // Read the definition of what resolve() returned. Separated so a caller that
+  // already resolved does not search the index twice. One entry reads as it is;
+  // several read as readPrefixDefinitions() joins them, each under its headword.
+  // When there is no heap for them all, the first entry alone: a dictionary that
+  // splits a word by part of speech must not lose a lookup that one entry would
+  // have answered.
+  //
+  // Ported from crosspoint-reader PR #4110 (Phạm Bình An, Uri Tauber): every
+  // same-headword .idx entry, not the first. Reworked onto the run reader the CJK
+  // search uses, keeping the exact-case pick upstream's locateAll() gives up.
+  bool readResolved(const DictEntries& entries, std::string& definitionOut, LookupResult* outResult = nullptr);
 
   using AbortCheck = bool (*)();
   // The search of spec 5.2 for a lookup that starts on CJK text. `run` is searched as given: the
@@ -339,7 +351,9 @@ class Dictionary {
     uint32_t filled = 0;
   };
 
-  DictLocation locate(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
+  // The entries of the headword target finds: the one spelled exactly like it, else the first of
+  // its case variants; only that spelling's run. headwordOut gets the headword on a hit.
+  DictEntries locate(LookupSession& session, const char* target, std::string& headwordOut);
 
   // resolvePrefixes() stops a file's window scans at this many once the file has a hit. Before its
   // first hit there is no cap: one could call a run absent whose match lies a few windows down.
@@ -358,10 +372,10 @@ class Dictionary {
   template <typename Hits>
   void collectPrefixes(LookupSession& session, PrefixSearch& search, Hits& out);
 
-  // The .idx run of hit.headword from its first entry: the last sample strictly below the
-  // headword, then forward to the first byte-equal entry, counting it and those that follow.
-  // Sets location, idxStart and entryCount; false, leaving the hit alone, when it is not found.
-  bool locateRun(LookupSession& session, DictPrefixHit& hit);
+  // The .idx run of `headword` from its first entry: the last sample strictly below the headword,
+  // then forward to the first byte-equal entry, counting it and those that follow. Sets `entries`;
+  // false, leaving it alone, when it is not found.
+  bool locateRun(LookupSession& session, const char* headword, DictEntries& entries);
 
   // A .syn hit's .idx entry (the `ordinal`-th) and the run of same-headword entries it belongs to,
   // from one scan of the window it lies in: sets hit's headword, location, idxStart and
@@ -381,7 +395,7 @@ class Dictionary {
 
   // Bisect the .syn/.sidx synonym index for target; on a hit follow its ordinal
   // through locateByOrdinal(). Returns not-found when no .syn exists.
-  DictLocation locateSynonym(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
+  DictEntries locateSynonym(LookupSession& session, const char* target, std::string* matchedHeadwordOut);
 
   // One streaming pass over sourcePath writing a sampled-offset sidecar. Each
   // source entry is a NUL-terminated word followed by suffixBytes fixed bytes

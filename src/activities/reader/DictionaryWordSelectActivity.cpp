@@ -744,12 +744,12 @@ void DictionaryWordSelectActivity::speculateForSelection() {
     char text[WORD_TEXT_CAPACITY];
     buildWordText(selected, text, sizeof(text), true);
     Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
-    bool found = dict.resolve(text, speculationLocation, speculationHeadword, &result);
+    bool found = dict.resolve(text, speculationEntries, speculationHeadword, &result);
     // A word broken at a hyphen it already had ("US-Satellitensystems") is a real headword WITH
     // the hyphen, so the joined form gets a second chance before the word is called absent.
     if (!found && result == Dictionary::LookupResult::NotFound && isHyphenJoined(selected)) {
       buildWordText(selected, text, sizeof(text), false);
-      found = dict.resolve(text, speculationLocation, speculationHeadword, &result);
+      found = dict.resolve(text, speculationEntries, speculationHeadword, &result);
     }
     Speculation verdict;
     if (found) {
@@ -959,9 +959,9 @@ void DictionaryWordSelectActivity::performLookup() {
       // read the definition; a known miss needs no SD access at all.
       if (speculation == Speculation::Found) {
         headword = speculationHeadword;
-        found = dict.readResolved(speculationLocation, definition, &result);
+        found = dict.readResolved(speculationEntries, definition, &result);
         if (dropFontCachesToRetry(renderer, retryable, found, result)) {
-          found = dict.readResolved(speculationLocation, definition, &result);
+          found = dict.readResolved(speculationEntries, definition, &result);
         }
       } else {
         result = Dictionary::LookupResult::NotFound;

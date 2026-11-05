@@ -60,6 +60,15 @@ uint32_t readBe32(const uint8_t* p) {
          (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
 }
 
+// The .dict location an .idx entry's suffix (BE32 offset, BE32 size) names.
+DictLocation idxEntryLocation(const uint8_t* suffix) {
+  DictLocation location;
+  location.offset = readBe32(suffix);
+  location.size = readBe32(suffix + 4);
+  location.found = true;
+  return location;
+}
+
 // Word characters for cleaning: ASCII alphanumerics plus any UTF-8
 // continuation/lead byte, so accented words keep their edges.
 bool isWordByte(unsigned char c) { return c >= 0x80 || std::isalnum(c) != 0; }
@@ -612,8 +621,8 @@ bool Dictionary::readSample(HalFile& sidecar, const uint32_t sampleIndex, uint32
 
 // Both files stay open across the stem-variant probes; the buffered readers own
 // their handles' positions, so a shared handle carries no stale state.
-DictLocation Dictionary::locate(LookupSession& session, const char* target, std::string* matchedHeadwordOut) {
-  DictLocation result;
+DictEntries Dictionary::locate(LookupSession& session, const char* target, std::string& headwordOut) {
+  DictEntries result;
 
   // Bisect the sampled offsets to the last sample whose headword <= target.
   const uint32_t startByte =
@@ -626,10 +635,12 @@ DictLocation Dictionary::locate(LookupSession& session, const char* target, std:
   // a descent that lands inside the run starts at or before it.
   if (!session.idxScan.seekSet(startByte)) {
     LOG_ERR("DICT", "Index seek to %lu failed", static_cast<unsigned long>(startByte));
-    result.readError = true;
+    result.location.readError = true;
     return result;
   }
+  bool exactPick = false;
   while (session.idxScan.position() < session.idxSize) {
+    const uint32_t entryStart = session.idxScan.position();
     // Not flagged as readError: readWord returns -1 for EOF and IO error alike,
     // so a short tail can't be told from a truncated .idx. Treat it as the end
     // of the index rather than risk reporting a read failure for what is really
@@ -638,17 +649,30 @@ DictLocation Dictionary::locate(LookupSession& session, const char* target, std:
     uint8_t suffix[8];
     if (!session.idxScan.readBytes(suffix, 8)) break;
 
+    // Only the pick's byte-equal entries are its run: "polish" is not "Polish". A word with one
+    // entry pays for this with the next entry's read, nearly always from the buffer.
+    if (result.location.found && strcmp(wordBuf, headwordOut.c_str()) == 0) {
+      if (result.entryCount < DictPrefixMatch::MAX_ENTRIES_PER_HIT) result.entryCount++;
+      continue;
+    }
+    if (exactPick) break;
+
     const int cmp = StringUtils::asciiCaseCmp(wordBuf, target);
     if (cmp > 0) break;
     if (cmp < 0) continue;
     bool exact = false;
-    if (takesRunEntry(wordBuf, target, result.found, exact)) {
-      result.offset = readBe32(suffix);
-      result.size = readBe32(suffix + 4);
-      result.found = true;
-      if (matchedHeadwordOut) *matchedHeadwordOut = wordBuf;
+    if (takesRunEntry(wordBuf, target, result.location.found, exact)) {
+      result.location = idxEntryLocation(suffix);
+      result.entryCount = 1;
+      result.idxStart = entryStart;
+      headwordOut = wordBuf;
+      exactPick = exact;
     }
-    if (exact) break;
+  }
+  // A run that opens the window may begin in the one before it. On a read error the run keeps what
+  // its window holds.
+  if (result.location.found && startByte != 0 && result.idxStart == startByte) {
+    locateRun(session, headwordOut.c_str(), result);
   }
   return result;
 }
@@ -694,10 +718,10 @@ DictLocation Dictionary::locateByOrdinal(LookupSession& session, uint32_t ordina
   return result;
 }
 
-DictLocation Dictionary::locateSynonym(LookupSession& session, const char* target, std::string* matchedHeadwordOut) {
-  DictLocation result;
+DictEntries Dictionary::locateSynonym(LookupSession& session, const char* target, std::string* matchedHeadwordOut) {
+  DictEntries result;
   if (!openSynonyms(session)) {
-    result.readError = session.synFailed;  // false when there is simply no .syn
+    result.location.readError = session.synFailed;  // false when there is simply no .syn
     return result;
   }
 
@@ -712,7 +736,7 @@ DictLocation Dictionary::locateSynonym(LookupSession& session, const char* targe
   // is done, because locateByOrdinal() reuses wordBuf.
   if (!session.synScan.seekSet(startByte)) {
     LOG_ERR("DICT", "Synonym seek to %lu failed", static_cast<unsigned long>(startByte));
-    result.readError = true;
+    result.location.readError = true;
     return result;
   }
   bool havePick = false;
@@ -732,7 +756,10 @@ DictLocation Dictionary::locateSynonym(LookupSession& session, const char* targe
     }
     if (exact) break;
   }
-  if (havePick) return locateByOrdinal(session, pickedOrdinal, matchedHeadwordOut);
+  if (havePick) {
+    result.location = locateByOrdinal(session, pickedOrdinal, matchedHeadwordOut);
+    result.entryCount = 1;
+  }
   return result;
 }
 
@@ -978,20 +1005,20 @@ void Dictionary::stemVariants(const std::string& word, std::vector<std::string>&
   }
 }
 
-bool Dictionary::resolve(const char* word, DictLocation& locationOut, std::string& matchedHeadwordOut,
+bool Dictionary::resolve(const char* word, DictEntries& entriesOut, std::string& matchedHeadwordOut,
                          LookupResult* outResult) {
   const auto setResult = [outResult](LookupResult r) {
     if (outResult) *outResult = r;
   };
   setResult(LookupResult::NotFound);
-  locationOut = {};
+  entriesOut = {};
   const std::string cleaned = cleanWord(word);
   if (cleaned.empty() || !isOpen()) return false;
 
   // One set of open handles for the exact-match probe, the synonym probe and
   // every stem variant, scoped so .idx/.qidx (and .syn/.sidx) close before
   // readDefinition() opens the data file.
-  DictLocation location;
+  DictEntries entries;
   bool searchFailed = false;
   {
     LookupSession session;
@@ -1006,19 +1033,19 @@ bool Dictionary::resolve(const char* word, DictLocation& locationOut, std::strin
     // (alternate spellings and irregular forms, which take precedence over the
     // English-only stemmer and are language-agnostic), then stem variants.
     const auto probe = [&](const std::string& target) {
-      DictLocation found = locate(session, target.c_str(), &matchedHeadwordOut);
-      searchFailed = searchFailed || found.readError;
-      if (!found.found && hasSyn) {
+      DictEntries found = locate(session, target.c_str(), matchedHeadwordOut);
+      searchFailed = searchFailed || found.location.readError;
+      if (!found.location.found && hasSyn) {
         found = locateSynonym(session, target.c_str(), &matchedHeadwordOut);
-        searchFailed = searchFailed || found.readError;
+        searchFailed = searchFailed || found.location.readError;
       }
-      if (!found.found) {
+      if (!found.location.found) {
         std::vector<std::string> variants;
         stemVariants(target, variants);
         for (const auto& variant : variants) {
-          found = locate(session, variant.c_str(), &matchedHeadwordOut);
-          searchFailed = searchFailed || found.readError;
-          if (found.found) break;
+          found = locate(session, variant.c_str(), matchedHeadwordOut);
+          searchFailed = searchFailed || found.location.readError;
+          if (found.location.found) break;
         }
       }
       return found;
@@ -1035,15 +1062,15 @@ bool Dictionary::resolve(const char* word, DictLocation& locationOut, std::strin
     // (Anton Lijcklama à Nijeholt, @alycklama), reworked onto the shared
     // utf8LowerCodepoint() instead of a German-only fold or a Unicode table.
     const auto probeCased = [&](const std::string& target) {
-      DictLocation found = probe(target);
-      if (!found.found) {
+      DictEntries found = probe(target);
+      if (!found.location.found) {
         const std::string lowered = utf8ToLower(target);
         if (lowered != target) found = probe(lowered);
       }
       return found;
     };
 
-    location = probeCased(cleaned);
+    entries = probeCased(cleaned);
 
     // A French elision ("l'histoire", "qu’après") is no headword, the word
     // after its apostrophe is. Tried after the whole word, which some
@@ -1051,32 +1078,32 @@ bool Dictionary::resolve(const char* word, DictLocation& locationOut, std::strin
     // for the whole one: "d'avant-garde" splits into "avant" and "garde", not
     // into a "d'avant" no probe would find.
     std::string bare;
-    if (!location.found) {
+    if (!entries.location.found) {
       bare = elisionRemainder(cleaned);
-      if (!bare.empty()) location = probeCased(bare);
+      if (!bare.empty()) entries = probeCased(bare);
     }
 
     // Still nothing, and the word is a hyphenated compound: look up its parts.
     // The compound itself is tried first and often wins -- "mother-in-law" and
     // "well-being" are headwords -- but "multi-billionaire" usually is not, and
     // returning the definition of "billionaire" beats returning nothing.
-    if (!location.found) {
+    if (!entries.location.found) {
       std::vector<std::string> parts;
       hyphenParts(bare.empty() ? cleaned : bare, parts);
       for (const auto& part : parts) {
-        location = probeCased(part);
-        if (location.found) break;
+        entries = probeCased(part);
+        if (entries.location.found) break;
       }
     }
   }
-  if (!location.found) {
+  if (!entries.location.found) {
     // A search that never reached a verdict (couldn't open or seek .idx) is a
     // read failure, not a miss. Otherwise the word is genuinely not in the
     // dictionary.
     if (searchFailed) setResult(LookupResult::ReadError);
     return false;
   }
-  locationOut = location;
+  entriesOut = entries;
   setResult(LookupResult::Found);  // found in the INDEX; reading it may still fail
   return true;
 }
@@ -1116,15 +1143,6 @@ struct Dictionary::SynonymHits {
 };
 
 namespace {
-
-// The .dict location an .idx entry's suffix (BE32 offset, BE32 size) names.
-DictLocation idxEntryLocation(const uint8_t* suffix) {
-  DictLocation location;
-  location.offset = readBe32(suffix);
-  location.size = readBe32(suffix + 4);
-  location.found = true;
-  return location;
-}
 
 // Byte compares, ASCII-folded as asciiCaseCmp orders the index.
 unsigned char foldAsciiCase(const char c) {
@@ -1321,7 +1339,8 @@ void Dictionary::collectPrefixes(LookupSession& session, PrefixSearch& search, H
         for (uint8_t i = 0; i < out.count; i++) {
           if (out.hits[i].idxStart != start) continue;
           if (!search.beginProbe()) return;
-          locateRun(session, out.hits[i]);  // on a read error the hit keeps what its window holds
+          // On a read error the hit keeps what its window holds.
+          locateRun(session, out.hits[i].headword.c_str(), out.hits[i]);
         }
       }
     }
@@ -1349,33 +1368,33 @@ void Dictionary::collectPrefixes(LookupSession& session, PrefixSearch& search, H
   }
 }
 
-bool Dictionary::locateRun(LookupSession& session, DictPrefixHit& hit) {
-  const uint32_t start = bisectSamples(session.qidx, session.idxScan, session.sampleCount, hit.headword.c_str(),
-                                       nullptr, /*strictlyBelow=*/true);
+bool Dictionary::locateRun(LookupSession& session, const char* const headword, DictEntries& entries) {
+  const uint32_t start = bisectSamples(session.qidx, session.idxScan, session.sampleCount, headword, nullptr,
+                                       /*strictlyBelow=*/true);
   if (!session.idxScan.seekSet(start)) return false;
 
-  uint8_t entries = 0;
+  uint8_t count = 0;
   DictLocation first;
   uint32_t firstStart = 0;
-  while (entries < DictPrefixMatch::MAX_ENTRIES_PER_HIT && session.idxScan.position() < session.idxSize) {
+  while (count < DictPrefixMatch::MAX_ENTRIES_PER_HIT && session.idxScan.position() < session.idxSize) {
     const uint32_t entryStart = session.idxScan.position();
     if (session.idxScan.readWord(wordBuf, sizeof(wordBuf)) < 0) break;
     uint8_t suffix[8];
     if (!session.idxScan.readBytes(suffix, 8)) break;
-    if (strcmp(wordBuf, hit.headword.c_str()) == 0) {
-      if (entries == 0) {
+    if (strcmp(wordBuf, headword) == 0) {
+      if (count == 0) {
         first = idxEntryLocation(suffix);
         firstStart = entryStart;
       }
-      entries++;
-    } else if (entries > 0 || StringUtils::asciiCaseCmp(wordBuf, hit.headword.c_str()) > 0) {
+      count++;
+    } else if (count > 0 || StringUtils::asciiCaseCmp(wordBuf, headword) > 0) {
       break;  // past the run, or past where it would be
     }
   }
-  if (entries == 0) return false;
-  hit.location = first;
-  hit.idxStart = firstStart;
-  hit.entryCount = entries;
+  if (count == 0) return false;
+  entries.location = first;
+  entries.idxStart = firstStart;
+  entries.entryCount = count;
   return true;
 }
 
@@ -1421,7 +1440,7 @@ bool Dictionary::followSynonym(LookupSession& session, const uint32_t ordinal, D
   hit.headword = wordBuf;
 
   // A run that opens the window may begin in the one before it.
-  if (runOrdinal == startOrdinal && startOrdinal > 0) return locateRun(session, hit);
+  if (runOrdinal == startOrdinal && startOrdinal > 0) return locateRun(session, hit.headword.c_str(), hit);
 
   // The run's entries up to this one, then those after it.
   uint32_t entries = ordinal - runOrdinal + 1;
@@ -1434,7 +1453,7 @@ bool Dictionary::followSynonym(LookupSession& session, const uint32_t ordinal, D
   // is sorted, so every entry between that one and this one then is too.
   if (runOrdinal != ordinal) {
     if (!session.idxScan.seekSet(runStart) || session.idxScan.readWord(wordBuf, sizeof(wordBuf)) < 0) return false;
-    if (strcmp(wordBuf, hit.headword.c_str()) != 0) return locateRun(session, hit);
+    if (strcmp(wordBuf, hit.headword.c_str()) != 0) return locateRun(session, hit.headword.c_str(), hit);
   }
   hit.location = runFirst;
   hit.idxStart = runStart;
@@ -1565,34 +1584,35 @@ const char* htmlEscape(const char c) {
   }
 }
 
-uint32_t headingBytes(const std::string& headword, const bool html) {
-  if (!html) return static_cast<uint32_t>(headword.size()) + 1;
+uint32_t headingBytes(const char* headword, const bool html) {
+  if (!html) return static_cast<uint32_t>(strlen(headword)) + 1;
   uint32_t bytes = sizeof(HTML_HEAD_OPEN) - 1 + sizeof(HTML_HEAD_CLOSE) - 1;
-  for (const char c : headword) bytes += htmlEscape(c) ? static_cast<uint32_t>(strlen(htmlEscape(c))) : 1;
+  for (const char* c = headword; *c; c++) bytes += htmlEscape(*c) ? static_cast<uint32_t>(strlen(htmlEscape(*c))) : 1;
   return bytes;
 }
 
 // Writes the heading at dst; returns the bytes written (headingBytes()).
-uint32_t writeHeading(char* dst, const std::string& headword, const bool html) {
+uint32_t writeHeading(char* dst, const char* headword, const bool html) {
   char* p = dst;
   if (html) {
     memcpy(p, HTML_HEAD_OPEN, sizeof(HTML_HEAD_OPEN) - 1);
     p += sizeof(HTML_HEAD_OPEN) - 1;
-    for (const char c : headword) {
-      const char* escaped = htmlEscape(c);
+    for (const char* c = headword; *c; c++) {
+      const char* escaped = htmlEscape(*c);
       if (escaped) {
         const size_t n = strlen(escaped);
         memcpy(p, escaped, n);
         p += n;
       } else {
-        *p++ = c;
+        *p++ = *c;
       }
     }
     memcpy(p, HTML_HEAD_CLOSE, sizeof(HTML_HEAD_CLOSE) - 1);
     p += sizeof(HTML_HEAD_CLOSE) - 1;
   } else {
-    memcpy(p, headword.data(), headword.size());
-    p += headword.size();
+    const size_t n = strlen(headword);
+    memcpy(p, headword, n);
+    p += n;
     *p++ = '\n';
   }
   return static_cast<uint32_t>(p - dst);
@@ -1646,7 +1666,8 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
     bool ioError = false;
     DictLocation location;
     while (nextPrefixEntry(session, match, hit, entry, location, ioError)) {
-      const uint32_t heading = headingBytes(match.hits[hit].headword, html);
+      // The headword as the .idx has it, which nextPrefixEntry() left in wordBuf.
+      const uint32_t heading = headingBytes(wordBuf, html);
       const uint32_t separator = (taken > 0 && !html) ? sizeof(ENTRY_SEPARATOR) - 1 : 0;
       uint32_t definition = location.size;
       if (taken == 0) {
@@ -1681,9 +1702,8 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
   for (uint32_t i = 0; i < taken; i++) {
     if (!nextPrefixEntry(session, match, hit, entry, location, ioError)) return fail(LookupResult::ReadError);
     char* const out = &definitionOut[0];
-    const std::string& headword = match.hits[hit].headword;
     const uint32_t separator = (i > 0 && !html) ? sizeof(ENTRY_SEPARATOR) - 1 : 0;
-    const uint32_t heading = headingBytes(headword, html);
+    const uint32_t heading = headingBytes(wordBuf, html);
     uint32_t definition = location.size;
     if (i == 0) definition = std::min(definition, MAX_DEFINITION_BYTES - std::min(heading, MAX_DEFINITION_BYTES));
     // The .idx can change between the passes: check the whole entry before writing any of it.
@@ -1692,7 +1712,7 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
       memcpy(out + pos, ENTRY_SEPARATOR, separator);
       pos += separator;
     }
-    pos += writeHeading(out + pos, headword, html);
+    pos += writeHeading(out + pos, wordBuf, html);
     if (definition > 0) {
       LookupResult r = LookupResult::ReadError;
       if (!readEntryInto(location, definition, out + pos, &r)) return fail(r);
@@ -1705,10 +1725,24 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
   return true;
 }
 
-bool Dictionary::readResolved(const DictLocation& location, std::string& definitionOut, LookupResult* outResult) {
+bool Dictionary::readResolved(const DictEntries& entries, std::string& definitionOut, LookupResult* outResult) {
+  if (entries.entryCount > 1) {
+    DictPrefixMatch match;
+    match.count = 1;
+    static_cast<DictEntries&>(match.hits[0]) = entries;
+    LookupResult result = LookupResult::ReadError;
+    if (readPrefixDefinitions(match, definitionOut, &result)) {
+      if (outResult) *outResult = result;
+      return true;
+    }
+    if (result != LookupResult::LowMemory) {
+      if (outResult) *outResult = result;
+      return false;
+    }
+  }
   // Propagates the precise failure reason from readDefinition (decompression /
   // low memory / read error) so the caller can name it.
-  if (readDefinition(location, definitionOut, outResult)) {
+  if (readDefinition(entries.location, definitionOut, outResult)) {
     if (outResult) *outResult = LookupResult::Found;
     return true;
   }
@@ -1717,9 +1751,9 @@ bool Dictionary::readResolved(const DictLocation& location, std::string& definit
 
 bool Dictionary::lookup(const char* word, std::string& definitionOut, std::string& matchedHeadwordOut,
                         LookupResult* outResult) {
-  DictLocation location;
-  if (!resolve(word, location, matchedHeadwordOut, outResult)) return false;
-  return readResolved(location, definitionOut, outResult);
+  DictEntries entries;
+  if (!resolve(word, entries, matchedHeadwordOut, outResult)) return false;
+  return readResolved(entries, definitionOut, outResult);
 }
 
 const char* Dictionary::resultName(const LookupResult result) {

@@ -69,6 +69,8 @@ On the very first lookup with a dictionary (and again whenever the `.idx` or `.s
 3. **Stemming** — still no match: common English word forms are retried automatically: possessives and plurals (`dogs` → `dog`, `stories` → `story`) and verb endings (`walked` → `walk`, `running` → `run`, `making` → `make`). A French elision with no entry of its own is looked up by the word after its apostrophe (`l’histoire` → `histoire`, `qu’après` → `après`); one the dictionary carries (`d'accord`) is found as it is.
 4. **Not found** — a short popup appears and you return to word selection.
 
+A word the dictionary lists more than once, one entry per part of speech for example, shows all of them, up to eight, each under its own word. Only the spelling that matched counts: `polish` does not bring in `Polish`.
+
 ### Chinese, Japanese and Korean
 
 Chinese and Japanese are written without spaces, so the word screen steps through them a character at a time (a punctuation mark rides along with the character before it). A lookup that starts on a Han or kana character therefore looks for the longest word the dictionary has at that point rather than the character alone:

@@ -196,7 +196,9 @@ TEST(DictionaryOracle, RandomDictionaries) {
         const size_t first = it->second.front();
         EXPECT_EQ(h.entryCount, std::min<size_t>(8, it->second.size())) << ctx << " hit " << h.headword;
         std::string def;
-        ASSERT_TRUE(d.readResolved(h.location, def)) << ctx;
+        DictEntries firstEntry;
+        firstEntry.location = h.location;
+        ASSERT_TRUE(d.readResolved(firstEntry, def)) << ctx;
         EXPECT_EQ(def, heads[first].def) << ctx << " hit " << h.headword << " not at its run's first entry";
         EXPECT_TRUE(locs.insert(h.location.offset).second) << ctx << " duplicate location";
         const std::string covered = run.substr(0, h.runBytes);
