@@ -50,10 +50,16 @@ struct LayoutCounts {
   bool capped = false;
 };
 
+/// The most read calls counting one table takes. A real table fits it (its lookups packed, a 128-byte window of
+/// headers serving a dozen or more of them: about 4,096 / 16 windows and 64 pieces of offsets at the most); one that
+/// does not has its headers scattered, which only a crafted font does. It then counts as capped.
+constexpr uint32_t kMaxCountingReads = 512;
+
 /// Counts the lookups of the GSUB or GPOS table at `offset`, `length` bytes, of `file`, reading the LookupList in small
-/// pieces: its offsets 64 at a time, then each lookup's 6-byte header. A table past the caps stops counting there
-/// (`capped`); a major version other than 1 and a null or out-of-table offset count as the Face does (no lookups, a
-/// lookup of no subtables). False: a read failed.
+/// pieces: its offsets 64 at a time, then the lookups' 6-byte headers in the order of their offsets, one read serving
+/// every header within 128 bytes of its first. A table past the caps, or past kMaxCountingReads read calls, stops
+/// counting there (`capped`); a major version other than 1 and a null or out-of-table offset count as the Face does (no
+/// lookups, a lookup of no subtables). False: a read failed.
 bool countLookups(const FileSource& file, uint32_t offset, uint32_t length, LayoutCounts* out);
 
 /// The room a CPac takes: 16 + 28 a lookup + 24 a subtable; 0 without lookups, or when either table is capped. At
@@ -124,8 +130,9 @@ class SdBlock {
  public:
   /// Reads `file`'s table directory, and a CFF file's CFF table (CffBlock::plan()). NoBlock when it is no TrueType or
   /// OpenType CFF file the engine draws, or a table it would copy lies outside the file; Transient when a read fails
-  /// or, for a CFF file, there is no memory to plan with. `file` must outlive the block.
-  SdPlan plan(const FileSource& file);
+  /// or, for a CFF file, there is no memory to plan with. `file` must outlive the block. `knownCpacBytes`: the CPac
+  /// room the caller already counted for `file` (filterTableBytes()), so it is not counted again.
+  SdPlan plan(const FileSource& file, const uint32_t* knownCpacBytes = nullptr);
   /// The block's bytes: its directory, tables and CPac room.
   uint32_t bytes() const { return bytes_; }
   /// Where the CPac room is in the block, and its size (0: none, cpacAt() is then 0 as well).

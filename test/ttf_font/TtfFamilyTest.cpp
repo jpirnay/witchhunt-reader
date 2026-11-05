@@ -242,27 +242,26 @@ TEST(TtfFamily, AReadErrorIsRefused) {
   EXPECT_EQ(-1, ttf::probeFile(file.source()).style);
 }
 
-TEST(TtfFamily, TheProbeReadsOnlyTheDirectoryAndHead) {
+TEST(TtfFamily, TheProbeCountsLookupsInCoalescedReads) {
   MemoryFile file{readFont("NotoSans/NotoSans-Regular.ttf")};
   ASSERT_EQ(0, ttf::probeFile(file.source()).style);
   const uint32_t probeReads = file.reads;
-  // The header, the directory 8 records at a time, head and OS/2 (6 reads), and the CPac room's count: per table its
-  // header and LookupList count, the lookups' offsets 64 at a time and each lookup's header.
-  const auto find = [&](const char* name) {
-    const size_t at = findRecord(file.bytes, name);
-    return std::pair<uint32_t, uint32_t>{static_cast<uint32_t>(file.bytes[at + 8]) << 24 | file.bytes[at + 9] << 16 |
-                                             file.bytes[at + 10] << 8 | file.bytes[at + 11],
-                                         static_cast<uint32_t>(file.bytes[at + 12]) << 24 | file.bytes[at + 13] << 16 |
-                                             file.bytes[at + 14] << 8 | file.bytes[at + 15]};
-  };
+  // The header, the directory 8 records at a time, head and OS/2 (about 6 reads), then per table its header and
+  // LookupList count, the lookups' offsets 64 at a time and a window of headers. The lookups are packed, so a window
+  // serves many: well under a read per lookup (about 311 reads when each header was read alone). Measured: 44.
   uint32_t lookups = 0;
   for (const char* table : {"GSUB", "GPOS"}) {
+    const size_t at = findRecord(file.bytes, table);
+    const uint32_t offset = static_cast<uint32_t>(file.bytes[at + 8]) << 24 | file.bytes[at + 9] << 16 |
+                            file.bytes[at + 10] << 8 | file.bytes[at + 11];
+    const uint32_t length = static_cast<uint32_t>(file.bytes[at + 12]) << 24 | file.bytes[at + 13] << 16 |
+                            file.bytes[at + 14] << 8 | file.bytes[at + 15];
     ttf::LayoutCounts counts;
-    ASSERT_TRUE(ttf::countLookups(file.source(), find(table).first, find(table).second, &counts));
+    ASSERT_TRUE(ttf::countLookups(file.source(), offset, length, &counts));
     lookups += counts.lookups;
   }
-  EXPECT_GT(lookups, 0u);
-  EXPECT_LE(probeReads, 6u + 2u * 2u + (lookups / 64 + 2u) + lookups + 8u);  // 8: the directory read once more
+  EXPECT_GT(lookups, 100u);
+  EXPECT_LE(probeReads, 50u);
 }
 
 TEST(TtfFamily, AFileSourceReadsThroughSeekAndRead) {
@@ -581,7 +580,7 @@ TEST(TtfSdBlock, IsTheFontButForItsOutlines) {
   ttf::SdBlock block;
   ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
   // Its eleven tables the engine reads, post's header among them, GDEF and the room for its CPac, 4-byte aligned
-  // behind a 14-record directory; glyf is 208,484 bytes at 58,840 in the file. (176,404 before GDEF and the CPac.)
+  // behind a 14-record directory; glyf is 208,484 bytes at 58,840 in the file.
   EXPECT_EQ(184864u, block.bytes());
   const glyphstore::SdOutlines outlines = block.outlines();
   EXPECT_EQ(block.bytes(), outlines.fontOffset);
@@ -870,15 +869,18 @@ TEST(TtfFamily, TheCffBlockKeepsItsCffTableLast) {
   ASSERT_TRUE(cff.found);
   EXPECT_EQ(probed.cpacBytes, cpac.length);
   EXPECT_LE(cpac.offset + cpac.length, cff.offset);
-  // The rebuilt table ends the block and runs past it (the charstring data stays on the card); no other starts later.
+  // The rebuilt table ends the block and its charstring data runs past it (it stays on the card); no other starts
+  // later.
   EXPECT_LT(cff.offset, block.bytes());
+  EXPECT_GT(cff.length, block.outlines().length);
+  EXPECT_EQ(block.bytes(), cff.offset + (cff.length - block.outlines().length));
   EXPECT_GT(cff.offset + cff.length, block.bytes());
   const uint32_t tables = static_cast<uint32_t>(image[4] << 8 | image[5]);
   for (uint32_t i = 0; i < tables; ++i) EXPECT_LE(read32(image, 12 + 16 * i + 8), cff.offset) << "table " << i;
 }
 
 TEST(TtfFamily, AHostileLookupListIsCountedBounded) {
-  // 65,535 lookups declared, every offset past the table: no CPac, and no walk of the list.
+  // 65,535 lookups declared, past the cap: no CPac, and the list is not walked after its count.
   {
     MemoryFile file{fontWithGsub(gsubWith(65535, std::vector<uint16_t>(65535, 0xFFFF), {}))};
     const ttf::FileProbe probed = ttf::probeFile(file.source());
@@ -918,17 +920,93 @@ TEST(TtfFamily, AHostileLookupListIsCountedBounded) {
   }
 }
 
+TEST(TtfFamily, ALookupListWithBadOffsetsCountsAsTheFaceReadsIt) {
+  // 200 plain lookups, listed out of order among four that the Face reads as lookups of no subtables or of fewer than
+  // they declare: a null offset, one past the list, one declaring 50 subtables with room for 6, and one with under 8
+  // bytes left to the table's end.
+  constexpr uint32_t kPlain = 200;
+  constexpr uint32_t kLookups = kPlain + 4;
+  const uint32_t bodyAt = 2 + 2 * kLookups;
+  Bytes body;
+  for (uint32_t i = 0; i < kPlain; ++i) {
+    for (const uint32_t word : {1u, 0u, 1u, 0u}) put16(body, word);  // type 1, flags 0, one subtable (never read)
+  }
+  const uint32_t tooMany = bodyAt + static_cast<uint32_t>(body.size());
+  for (const uint32_t word : {1u, 0u, 50u, 0u, 0u, 0u}) put16(body, word);  // 6 bytes of header, room for 3 offsets
+  const uint32_t nearEnd = bodyAt + static_cast<uint32_t>(body.size());
+  for (const uint32_t word : {1u, 0u, 1u}) put16(body, word);
+  body.push_back(0);  // 7 bytes to the end
+  std::vector<uint16_t> offsets;
+  for (uint32_t i = 0; i < kPlain; ++i) {
+    offsets.push_back(static_cast<uint16_t>(bodyAt + 8 * ((i * 7) % kPlain)));  // out of order, each once
+    if (i == 20) offsets.push_back(0);
+    if (i == 60) offsets.push_back(0xFFFF);
+    if (i == 100) offsets.push_back(static_cast<uint16_t>(tooMany));
+    if (i == 140) offsets.push_back(static_cast<uint16_t>(nearEnd));
+  }
+  ASSERT_EQ(kLookups, offsets.size());
+  MemoryFile file{fontWithGsub(gsubWith(kLookups, offsets, body))};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  EXPECT_EQ(0, probed.style);
+  EXPECT_GT(probed.cpacBytes, 0u);
+  EXPECT_EQ(writerBytes(file.bytes), probed.cpacBytes);
+  // Headers within a window of each other share a read: well under the 204 lookups' one each (49 measured; each piece
+  // of 64 offsets, sorted, still spans the body).
+  EXPECT_LT(file.reads, 80u);
+}
+
+TEST(TtfFamily, ACraftedScatteredLookupListHitsTheReadBudget) {
+  // 4,096 lookups whose offsets, piece by piece, name the same 64 places 256 bytes apart: every header lies in a
+  // window of its own. Counted whole they would give a CPac; past the budget the table counts as capped.
+  constexpr uint32_t kLookups = 4096;
+  const uint32_t bodyAt = 2 + 2 * kLookups;
+  Bytes body;
+  body.resize(64 * 256, 0);
+  std::vector<uint16_t> offsets;
+  for (uint32_t i = 0; i < kLookups; ++i) offsets.push_back(static_cast<uint16_t>(bodyAt + 256 * (i % 64)));
+  for (uint32_t k = 0; k < 64; ++k) {
+    Bytes lookup;
+    for (const uint32_t word : {1u, 0u, 1u}) put16(lookup, word);
+    std::copy(lookup.begin(), lookup.end(), body.begin() + 256 * k);
+  }
+  MemoryFile file{fontWithGsub(gsubWith(kLookups, offsets, body))};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  EXPECT_EQ(0, probed.style);
+  EXPECT_EQ(0u, probed.cpacBytes);
+  EXPECT_EQ(file.bytes.size(), probed.flashBytes);
+  // The budget, and the probe's own reads: the directory, head and OS/2.
+  EXPECT_LE(file.reads, ttf::kMaxCountingReads + 10u);
+  EXPECT_GT(file.reads, ttf::kMaxCountingReads);
+  // Counted one by one, the same table would be a CPac.
+  EXPECT_GT(writerBytes(file.bytes), 0u);
+}
+
 TEST(TtfFamily, ACardReadFailingWhileCountingIsTransient) {
   MemoryFile file{fontWithGsub(gsubOfSimpleLookups(300))};
   ttf::SdBlock block;
   ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
   EXPECT_EQ(0, ttf::probeFile(file.source()).style);
-  // Reads stop at the LookupList (GSUB's header, then the list 10 bytes in).
-  file.readsTo = recordOf(file.bytes, "GSUB").offset + 10;
-  EXPECT_EQ(ttf::SdPlan::Transient, block.plan(file.source()));
-  EXPECT_EQ(-1, ttf::probeFile(file.source()).style);
+  // Reads of GSUB past its 10-byte header (the LookupList) fail; head, which the probe reads before counting, is
+  // outside GSUB, so it is the count that fails.
+  const DirRecord head = recordOf(file.bytes, "head");
+  const DirRecord gsub = recordOf(file.bytes, "GSUB");
+  ASSERT_TRUE(head.offset >= gsub.offset + gsub.length || head.offset + 54 <= gsub.offset + 10);
+  struct Cut {
+    MemoryFile* file;
+    uint32_t from;
+    uint32_t to;
+  } cut{&file, gsub.offset + 10, gsub.offset + gsub.length};
+  const ttf::FileSource cutSource{static_cast<uint32_t>(file.bytes.size()),
+                                  [](void* ctx, const uint32_t offset, void* dst, const uint32_t len) {
+                                    const Cut& c = *static_cast<Cut*>(ctx);
+                                    if (offset < c.to && uint64_t{offset} + len > c.from) return false;
+                                    return MemoryFile::read(c.file, offset, dst, len);
+                                  },
+                                  &cut, file.stamp};
+  EXPECT_EQ(ttf::SdPlan::Transient, block.plan(cutSource));
+  EXPECT_EQ(-1, ttf::probeFile(cutSource).style);
   uint32_t room = 0;
-  EXPECT_FALSE(ttf::filterTableBytes(file.source(), &room));
+  EXPECT_FALSE(ttf::filterTableBytes(cutSource, &room));
 }
 
 TEST(TtfSdBlock, AFileWithoutTheOutlinesOfItsKindHasNone) {

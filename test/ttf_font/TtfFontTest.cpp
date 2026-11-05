@@ -1626,9 +1626,9 @@ TEST_F(TtfFontSetTest, MoreStylesThanTheStoreHoldsAreRefusedBeforeAnyErase) {
 namespace {
 
 constexpr uint32_t kPage = glyphstore::kPageBytes;
-// Bookerly's four styles take 38 of a font area's pages in flash mode (the whole files and their CPac room: 7, 7, 8
-// and 8 pages, the largest mapped once more; 35 before the CPac), 19 in SD mode (their tables, 3 pages each): on 24
-// pages only SD mode fits.
+// Bookerly's four styles take 38 of a font area's pages in flash mode (each whole file and the CPac room the probe
+// reserves for it: 7, 7, 8 and 8 pages, the largest mapped once more), 19 in SD mode (their tables, 3 pages each): on
+// 24 pages only SD mode fits.
 constexpr uint32_t kSdOnlyBytes = 24 * kPage;
 
 void expectWrittenOnce(const SimNorFlash& chip) {
@@ -2488,7 +2488,7 @@ TEST_F(TtfFontSetTest, APlanWithoutMemoryInAnInstallErasesNothingAndAsksForNoFew
   expectWrittenOnce(chip);
 }
 
-TEST_F(TtfFontTest, AProbeThatCannotPlanForNowLeavesACffFamilyListed) {
+TEST_F(TtfFontTest, ACffFileWithoutMemoryToPlanStaysListedAndOneWhoseLayoutCannotBeCountedIsNot) {
   // Discovery plans a CFF file's block to learn its size. Without the memory this once, the size is not known: the
   // family stays listed for its load to decide, rather than be dropped as too large until the next scan. With the
   // card failing past the file's first sector, the layout tables cannot be counted (the CPac room): not a font for now.
