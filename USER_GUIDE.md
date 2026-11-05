@@ -94,14 +94,18 @@ on the left, **Volume Down** on the right, and **Power** and **Reset** on the to
 
 ### Xteink X4 Pro
 
-There are three keys and a touch-sensitive **Home key**. There is no Back or Confirm key: the Home
-key does both.
+**Up** is on the left edge, **Down** and the small **Power** key on the right, and a small **Reset**
+key on the top edge. The touch-sensitive **Home key** below the screen does the work of Back and
+Confirm, which have no keys of their own.
+
+<img src="docs/images/devices/xteink-x4pro.svg" width="320" alt="Xteink X4 Pro. Left edge: Up. Right edge: Power near the top, with Down below it, level with Up. Top edge, at the right: Reset. Round Home key below the screen.">
 
 | Key | Press | Hold |
 | --- | --- | --- |
 | **Power** | Twice quickly: reading light on or off | Turn on, or sleep |
 | **Home key** | Works as **Confirm**: open the selected row. In a book: open the reader menu | Works as **Back**: go back, leave a book |
 | **Up** / **Down** | In a book: previous / next page. In a list: move up / down | In a book: previous / next chapter. In a list: jump to the first / last row |
+| **Reset** | Restart the device | |
 
 To reach the Home screen, hold the **Back** box on the screen.
 
