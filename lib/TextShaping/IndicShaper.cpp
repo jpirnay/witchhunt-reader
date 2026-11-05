@@ -2,8 +2,8 @@
 
 #include "TextShaping.h"
 
-// Ported from crosspoint-reader PR #3787 ("feat: add Indic language support without HarfBuzz", SSafayet / @SSafayet):
-// scanRun in lib/EpdFont/ComplexShaper.cpp, over a bounded view and listing every run of a token.
+// Ours (this repo's), with scanRuns ported from crosspoint-reader PR #3787 ("feat: add Indic language support without
+// HarfBuzz", SSafayet / @SSafayet): scanRun in lib/EpdFont/ComplexShaper.cpp, over a bounded view, listing every run.
 namespace IndicShaper {
 
 size_t scanRuns(std::string_view text, Run* out) {

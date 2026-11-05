@@ -285,6 +285,36 @@ TEST(IndicReorderBounded, TwiceTheBytesHoldsTheForm) {
   EXPECT_EQ(buffer[written], '\0');
 }
 
+TEST(IndicReorderBounded, ThreeTimesTheBytesHoldsStackedSinhalaSigns) {
+  // U+0DDD becomes a pre sign and two post signs: 3 bytes in, 9 out.
+  constexpr uint32_t SINHALA_KA = 0x0D9A, SINHALA_KOMBUVA_AA_HAL = 0x0DDD, SINHALA_KOMBUVA = 0x0DD9,
+                     SINHALA_AELA = 0x0DCF, SINHALA_AL = 0x0DCA;
+  for (const int signs : {1, 2}) {
+    std::string in = cps({SINHALA_KA});
+    std::string expected;
+    for (int i = 0; i < signs; i++) {
+      in += cps({SINHALA_KOMBUVA_AA_HAL});
+      expected += cps({SINHALA_KOMBUVA});
+    }
+    expected += cps({SINHALA_KA});
+    for (int i = 0; i < signs; i++) expected += cps({SINHALA_AELA, SINHALA_AL});
+
+    std::string buffer(3 * in.size() + 1, 'x');
+    size_t written = 0;
+    ASSERT_TRUE(indicReorderForDisplay(in.data(), in.size(), buffer.data(), buffer.size(), &written));
+    EXPECT_EQ(std::string(buffer.data(), written), expected);
+    EXPECT_EQ(buffer[written], '\0');
+
+    // Twice the bytes does not hold two stacked signs: refused, never cut.
+    if (signs == 2) {
+      std::string small(2 * in.size() + 1, 'x');
+      written = 777;
+      EXPECT_FALSE(indicReorderForDisplay(in.data(), in.size(), small.data(), small.size(), &written));
+      EXPECT_EQ(written, 777u);
+    }
+  }
+}
+
 TEST(IndicReorderBounded, TooLittleRoomIsRefusedNotCut) {
   const std::string in = cps({KA, I});
   char out[16];

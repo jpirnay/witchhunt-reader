@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "IndicReorderSink.h"  // witchhunt: deviation 9
 #include "IndicScripts.h"
 #include "Utf8.h"
 
@@ -134,62 +135,10 @@ static_assert(rulesMatchScripts(), "kRules is out of step with indic::SCRIPTS");
 
 using Cursor = const unsigned char*;
 
-// witchhunt: deviation 9 - every read is bounded by `end`, so a view that is not NUL-terminated is safe: the code point
-// at `p` (0 at the end), `p` moved past it.
-uint32_t next(Cursor& p, const Cursor end) {
-  if (p >= end) return 0;
-  unsigned char padded[5] = {};
-  const size_t n = static_cast<size_t>(end - p) < 4 ? static_cast<size_t>(end - p) : 4;
-  memcpy(padded, p, n);
-  Cursor cursor = padded;
-  const uint32_t cp = utf8NextCodepoint(&cursor);
-  p += cursor == padded ? 1 : cursor - padded;
-  return cp;
-}
-
-uint32_t peek(Cursor p, const Cursor end) { return next(p, end); }  // witchhunt: deviation 9
-
-// The output of a reordering: the std::string form of upstream, or a bounded buffer.
-struct StringOut {  // witchhunt: deviation 9
-  std::string& s;
-  void append(const char* data, size_t n) { s.append(data, n); }
-  void appendCodepoint(uint32_t cp) { utf8AppendCodepoint(cp, s); }
-};
-
-struct BoundedOut {  // witchhunt: deviation 9
-  char* buffer;
-  size_t room;  // bytes, one of them kept for the NUL
-  size_t used = 0;
-  bool full = false;
-  void append(const char* data, size_t n) {
-    if (full || n > room - 1 - used) {
-      full = true;
-      return;
-    }
-    memcpy(buffer + used, data, n);
-    used += n;
-  }
-  void appendCodepoint(uint32_t cp) {
-    char encoded[4];
-    size_t n = 0;
-    if (cp < 0x80) {
-      encoded[n++] = static_cast<char>(cp);
-    } else if (cp < 0x800) {
-      encoded[n++] = static_cast<char>(0xC0 | (cp >> 6));
-      encoded[n++] = static_cast<char>(0x80 | (cp & 0x3F));
-    } else if (cp < 0x10000) {
-      encoded[n++] = static_cast<char>(0xE0 | (cp >> 12));
-      encoded[n++] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-      encoded[n++] = static_cast<char>(0x80 | (cp & 0x3F));
-    } else {
-      encoded[n++] = static_cast<char>(0xF0 | (cp >> 18));
-      encoded[n++] = static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
-      encoded[n++] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-      encoded[n++] = static_cast<char>(0x80 | (cp & 0x3F));
-    }
-    append(encoded, n);
-  }
-};
+using indic_reorder::BoundedOut;  // witchhunt: deviation 9
+using indic_reorder::next;        // witchhunt: deviation 9
+using indic_reorder::peek;        // witchhunt: deviation 9
+using indic_reorder::StringOut;   // witchhunt: deviation 9
 
 const ScriptRules* rulesFor(const uint32_t cp) {
   const indic::ScriptInfo* script = indic::scriptOf(cp);
@@ -258,9 +207,9 @@ Cursor tailEnd(Cursor p, const Cursor end) {          // witchhunt: deviation 9
 }
 
 // Copies [begin, end), composing nukta letters. Sets `changed` when it does.
-template <typename Out>  // witchhunt: deviation 9
-void appendCluster(const ScriptRules& rules, Cursor begin, const Cursor end, Out& out,
-                   bool& changed) {  // witchhunt: deviation 9
+template <typename Out>                                                                 // witchhunt: deviation 9
+void appendCluster(const ScriptRules& rules, Cursor begin, const Cursor end, Out& out,  // witchhunt: deviation 9
+                   bool& changed) {                                                     // witchhunt: deviation 9
   while (begin < end) {
     const Cursor start = begin;
     const uint32_t cp = next(begin, end);  // witchhunt: deviation 9
@@ -275,19 +224,19 @@ void appendCluster(const ScriptRules& rules, Cursor begin, const Cursor end, Out
   }
 }
 
-// The text [begin, end) reordered into `out`; true when anything changed.
-template <typename Out>  // witchhunt: deviation 9
-bool reorderInto(const Cursor begin, const Cursor end, Out& out) {
+// The text [begin, end) reordered into `out`; true when anything changed. witchhunt: deviation 9
+template <typename Out>                                             // witchhunt: deviation 9
+bool reorderInto(const Cursor begin, const Cursor end, Out& out) {  // witchhunt: deviation 9
   bool changed = false;
 
-  Cursor p = begin;
-  while (p < end) {
-    const uint32_t cp = peek(p, end);
+  Cursor p = begin;                    // witchhunt: deviation 9
+  while (p < end) {                    // witchhunt: deviation 9
+    const uint32_t cp = peek(p, end);  // witchhunt: deviation 9
     const ScriptRules* rules = rulesFor(cp);
     if (rules == nullptr || !isConsonant(*rules, cp)) {
       const Cursor start = p;
-      next(p, end);
-      out.append(reinterpret_cast<const char*>(start), p - start);
+      next(p, end);                                                 // witchhunt: deviation 9
+      out.append(reinterpret_cast<const char*>(start), p - start);  // witchhunt: deviation 9
       continue;
     }
 
@@ -296,31 +245,32 @@ bool reorderInto(const Cursor begin, const Cursor end, Out& out) {
     Cursor clusterBegin = p;
     {
       Cursor q = p;
-      if (next(q, end) == rules->ra && indic::isVirama(next(q, end)) && isConsonant(*rules, peek(q, end))) {
-        out.append(reinterpret_cast<const char*>(p), q - p);
+      if (next(q, end) == rules->ra && indic::isVirama(next(q, end)) &&  // witchhunt: deviation 9
+          isConsonant(*rules, peek(q, end))) {                           // witchhunt: deviation 9
+        out.append(reinterpret_cast<const char*>(p), q - p);             // witchhunt: deviation 9
         clusterBegin = q;
       }
     }
 
-    const Cursor clusterStop = clusterEnd(*rules, clusterBegin, end);
-    const Cursor tailStop = tailEnd(clusterStop, end);
+    const Cursor clusterStop = clusterEnd(*rules, clusterBegin, end);  // witchhunt: deviation 9
+    const Cursor tailStop = tailEnd(clusterStop, end);                 // witchhunt: deviation 9
 
     for (Cursor t = clusterStop; t < tailStop;) {
-      if (const PreBaseVowel* vowel = preBaseVowel(*rules, next(t, end))) {
-        out.appendCodepoint(vowel->pre);
+      if (const PreBaseVowel* vowel = preBaseVowel(*rules, next(t, end))) {  // witchhunt: deviation 9
+        out.appendCodepoint(vowel->pre);                                     // witchhunt: deviation 9
         changed = true;
       }
     }
     appendCluster(*rules, clusterBegin, clusterStop, out, changed);
     for (Cursor t = clusterStop; t < tailStop;) {
-      const uint32_t sign = next(t, end);
+      const uint32_t sign = next(t, end);  // witchhunt: deviation 9
       const PreBaseVowel* vowel = preBaseVowel(*rules, sign);
       if (vowel == nullptr) {
-        out.appendCodepoint(sign);
+        out.appendCodepoint(sign);  // witchhunt: deviation 9
         continue;
       }
       for (const uint32_t post : vowel->post) {
-        if (post != 0) out.appendCodepoint(post);
+        if (post != 0) out.appendCodepoint(post);  // witchhunt: deviation 9
       }
     }
     p = tailStop;
@@ -335,22 +285,25 @@ bool indicReorderForDisplay(const char* text, std::string& out) {
 
   out.clear();
   out.reserve(strlen(text) + 8);
-  StringOut sink{out};  // witchhunt: deviation 9
-  const Cursor begin = reinterpret_cast<Cursor>(text);
+  StringOut sink{out};                                    // witchhunt: deviation 9
+  const Cursor begin = reinterpret_cast<Cursor>(text);    // witchhunt: deviation 9
   return reorderInto(begin, begin + strlen(text), sink);  // witchhunt: deviation 9
-}
+}  // witchhunt: deviation 9
 
-// witchhunt: deviation 9
-bool indicReorderForDisplay(const char* text, size_t len, char* out, size_t room, size_t* written) {
-  if (text == nullptr || out == nullptr || room == 0) return false;
-  const auto* bytes = reinterpret_cast<const unsigned char*>(text);
-  bool holdsIndic = false;
-  for (size_t i = 0; i + 3 <= len && !holdsIndic; i++) holdsIndic = indic::startsIndic(bytes + i);
-  if (!holdsIndic) return false;
+// witchhunt: deviation 9 - the bounded form; see IndicReorder.h.
+bool indicReorderForDisplay(const char* text, size_t len, char* out, size_t room,  // witchhunt: deviation 9
+                            size_t* written) {                                     // witchhunt: deviation 9
+  if (text == nullptr || out == nullptr || room == 0) return false;                // witchhunt: deviation 9
+  const auto* bytes = reinterpret_cast<const unsigned char*>(text);                // witchhunt: deviation 9
+  bool holdsIndic = false;                                                         // witchhunt: deviation 9
+  for (size_t i = 0; i + 3 <= len && !holdsIndic; i++) {                           // witchhunt: deviation 9
+    holdsIndic = indic::startsIndic(bytes + i);                                    // witchhunt: deviation 9
+  }  // witchhunt: deviation 9
+  if (!holdsIndic) return false;  // witchhunt: deviation 9
 
-  BoundedOut sink{out, room};
-  if (!reorderInto(bytes, bytes + len, sink) || sink.full) return false;
-  out[sink.used] = '\0';
-  *written = sink.used;
-  return true;
-}
+  BoundedOut sink{out, room};                                             // witchhunt: deviation 9
+  if (!reorderInto(bytes, bytes + len, sink) || sink.full) return false;  // witchhunt: deviation 9
+  out[sink.used] = '\0';                                                  // witchhunt: deviation 9
+  *written = sink.used;                                                   // witchhunt: deviation 9
+  return true;                                                            // witchhunt: deviation 9
+}  // witchhunt: deviation 9

@@ -6,8 +6,8 @@
 
 #include "IndicScripts.h"
 
-// The Indic shaping module's text rules (ours; the run scan is ported from crosspoint-reader PR #3787, "feat: add Indic
-// language support without HarfBuzz", SSafayet / @SSafayet).
+// Ours (this repo's): the Indic shaping module's text rules. The run scan is ported from crosspoint-reader PR #3787
+// ("feat: add Indic language support without HarfBuzz", SSafayet / @SSafayet).
 namespace IndicShaper {
 
 // One run of a token, upstream's scanRun: one script's letters with the shared code points around them (dandas, Vedic
