@@ -38,6 +38,10 @@ struct FakeFault {
 };
 
 struct FakeNet {
+  static std::set<std::string>& unresolvable() {  // names a lookup fails for
+    static std::set<std::string> s;
+    return s;
+  }
   static std::deque<FakeReply>& replies() {  // scripted replies, used before the resource
     static std::deque<FakeReply> r;
     return r;
@@ -82,6 +86,7 @@ struct FakeNet {
     return h;
   }
   static void reset() {
+    unresolvable().clear();
     unverifiable().clear();
     handshakes().clear();
     replies().clear();

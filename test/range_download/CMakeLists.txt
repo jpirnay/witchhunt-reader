@@ -4,6 +4,8 @@
 add_executable(RangeDownloadTest
   RangeDownloadTest.cpp
   CredentialRedirectTest.cpp
+  UrlOnTheWireTest.cpp
+  DeadHostTest.cpp
   HttpsSchemeTest.cpp
   TlsHopTest.cpp
   ${REPO_ROOT}/lib/SecureNet/src/RangeDownload.cpp
