@@ -381,6 +381,37 @@ constexpr size_t MAX_RELAY_BYTES = 4u * 1024u * 1024u;
 
 }  // namespace
 
+namespace {
+
+// NetworkClient::write gives up after ten seconds without progress and returns a short count, but
+// WebServer ignores it and goes on to the next chunk, so a client that stops reading a chunked reply
+// held the server, and the whole device with it, for ten seconds a chunk. Closing the client makes
+// the later writes fail at once. Ported from crosspoint-reader (#4285 by Arthur Tazhitdinov).
+class CrossPointHttpServer final : public WebServer {
+ public:
+  explicit CrossPointHttpServer(const uint16_t port) : WebServer(port) {}
+
+ protected:
+  size_t _currentClientWrite(const char* b, const size_t l) override {
+    return closeIfStalled(l, WebServer::_currentClientWrite(b, l));
+  }
+  size_t _currentClientWrite_P(PGM_P b, const size_t l) override {
+    return closeIfStalled(l, WebServer::_currentClientWrite_P(b, l));
+  }
+
+ private:
+  size_t closeIfStalled(const size_t wanted, const size_t sent) {
+    if (sent < wanted && _currentClient.connected()) {
+      LOG_ERR("WEB", "Client stalled after %u of %u bytes, closing it", static_cast<unsigned>(sent),
+              static_cast<unsigned>(wanted));
+      _currentClient.stop();
+    }
+    return sent;
+  }
+};
+
+}  // namespace
+
 CrossPointWebServer::CrossPointWebServer() {}
 
 CrossPointWebServer::~CrossPointWebServer() { stop(); }
@@ -411,7 +442,7 @@ void CrossPointWebServer::begin() {
   LOG_DBG("WEB", "Creating web server on port %d...", port);
   // Nothrow: the build is -fno-exceptions, so a bare `new` would abort() on a
   // fragmented heap instead of letting the check below report the failure.
-  server = makeUniqueNoThrow<WebServer>(port);
+  server = makeUniqueNoThrow<CrossPointHttpServer>(port);
   if (!server) {
     LOG_ERR("WEB", "Failed to create WebServer!");
     return;
