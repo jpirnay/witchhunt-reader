@@ -21,16 +21,22 @@
 #include "util/SerialCommandGrammar.h"
 
 #if SERIAL_TEST_API
+#include <EpdFontFamily.h>
 #include <Epub/Page.h>
 #include <FileReplace.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <GlyphKey.h>
 #include <GlyphProvider.h>
+#include <GlyphRun.h>
 #include <HalPowerManager.h>
 #include <HalSystem.h>
+#include <IndicScripts.h>
 #include <Memory.h>
+#include <OtShaper.h>
 #include <ProtectedPaths.h>
 #include <SerialTransfer/SerialTransferProtocol.h>
+#include <ShapingFace.h>
 #include <Utf8.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
@@ -906,11 +912,196 @@ void appendStats(std::string& line, const TtfFontSet& set) {
   appendField(line, "draws", static_cast<long>(s.drawsCounted));
 }
 
+// What CMD:TTF:SHAPE measured for one word.
+struct ShapeReport {
+  const char* error = nullptr;
+  const char* script = "";
+  uint32_t cpac = 0;
+  uint32_t initUs = 0;
+  long repointUs = -1;
+  uint32_t planUs = 0;
+  uint32_t planBytes = 0;
+  uint32_t shapeUs = 0;
+  unsigned glyphs = 0;
+  int width = 0;
+  unsigned stored = 0;
+};
+
+constexpr unsigned kShapeRunCodepoints = 48;  // the run: the word from its first Indic letter
+constexpr unsigned kShapeSlots = 112;         // the shaper's buffer: room to grow past the run
+
+// Rounds a 26.6 value to whole pixels, halves away from zero.
+int roundPixels(const int32_t v) { return v >= 0 ? (v + 32) / 64 : -((-v + 32) / 64); }
+
+// Shapes the first Indic run of `text` with the body family's regular style at the body size, as a section build
+// would, and times each step. Every block it makes is freed on return, the plan before the caller lets go of the
+// shaping faces. Under RenderLock.
+void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, const std::string_view text,
+               ShapeReport& r) {
+  const auto utf8 = makeUniqueNoThrow<char[]>(text.size() + 1);         // <= 193 B: the text, NUL-ended
+  const auto cps = makeUniqueNoThrow<uint32_t[]>(kShapeRunCodepoints);  // 192 B: the run's code points
+  const auto glyphs = makeUniqueNoThrow<uint16_t[]>(kShapeSlots);       // 224 B: the run's glyph IDs
+  const auto records = makeUniqueNoThrow<uint8_t[]>(6 * kShapeSlots);   // 672 B: six bytes a record, at most
+  auto plan = makeUniqueNoThrow<ot::Plan>();                            // ~1-2 KB: one script's lookups
+  auto buffer = makeUniqueNoThrow<ot::Buffer>();                        // 1,272 B: the shaper's state
+  const auto storage = makeUniqueNoThrow<uint8_t[]>(ot::Buffer::bytesFor(kShapeSlots));  // 6,947 B: its arrays
+  if (!utf8 || !cps || !glyphs || !records || !plan || !buffer || !storage) {
+    r.error = "no memory";
+    return;
+  }
+  memcpy(utf8.get(), text.data(), text.size());
+
+  unsigned count = 0;
+  const indic::ScriptInfo* script = nullptr;
+  for (const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8.get());
+       *p && count < kShapeRunCodepoints;) {
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (!script) script = indic::scriptOf(cp);
+    if (script) cps[count++] = cp;
+  }
+  if (!script) {
+    r.error = "no Indic letter";
+    return;
+  }
+  r.script = script->name;
+
+  ShapingFace* const face = font.shapingFace(0);
+  const EpdFont* const regular = font.font(0);
+  if (!face || !regular) {
+    r.error = "no shaping face";
+    return;
+  }
+  r.cpac = font.cpacBytes(0);
+  uint32_t start = micros();
+  const ot::Face* otFace = face->current();
+  r.initUs = micros() - start;
+  if (!otFace) {
+    r.error = "no shaping face";
+    return;
+  }
+
+  // Another flash-mode style's glyph moves the mapping the face was read at: the next current() re-points it.
+  if (!set.readsCard()) {
+    for (uint8_t style = 1; style < 4; ++style) {
+      ShapingFace* const other = font.shapingFace(style);
+      if (!other || other == face) continue;
+      font.glyph(style, cps[0]);
+      start = micros();
+      face->current();
+      r.repointUs = static_cast<long>(micros() - start);
+      break;
+    }
+  }
+
+  char tag[16] = {};  // the language, at most 15 characters
+  memcpy(tag, language.data(), language.size());
+  otFace = face->current();
+  start = micros();
+  const bool planned =
+      otFace && plan->build(*otFace, static_cast<ot::Script>(indic::indexOf(*script)), ot::languageTagsFor(tag));
+  r.planUs = micros() - start;
+  if (!planned) {
+    r.error = "plan failed";
+    return;
+  }
+  r.planBytes = static_cast<uint32_t>(plan->memoryBytes());
+
+  buffer->setStorage(storage.get(), ot::Buffer::bytesFor(kShapeSlots));
+  const uint32_t ppem = font.bodyPpem();
+  ot::Scale scale;
+  scale.set(static_cast<int32_t>(ppem), (ppem + 32) >> 6, otFace->upem());
+  otFace = face->current();
+  start = micros();
+  const bool shaped = otFace && ot::shape(*otFace, scale, *plan, cps.get(), count, *buffer);
+  r.shapeUs = micros() - start;
+  if (!shaped) {
+    r.error = "shape failed";
+    return;
+  }
+
+  // The run as a section stores it, and the glyphs it needs, each once.
+  size_t bytes = 0;
+  unsigned distinct = 0;
+  for (unsigned i = 0; i < buffer->len(); ++i) {
+    const ot::GlyphInfo& info = buffer->info[i];
+    const ot::GlyphPosition& pos = buffer->pos[i];
+    GlyphRecord record;
+    record.glyph = static_cast<uint16_t>(info.codepoint);
+    record.advance = static_cast<int16_t>(std::clamp<int32_t>((pos.xAdvance + 2) >> 2, -16384, 16383));
+    record.dx = static_cast<int8_t>(std::clamp<int32_t>(roundPixels(pos.xOffset), -128, 127));
+    record.dy = static_cast<int8_t>(std::clamp<int32_t>(-roundPixels(pos.yOffset), -128, 127));
+    size_t written = 0;
+    if (info.codepoint > 0xFFFF ||
+        !glyph_run::encode(record, records.get() + bytes, 6 * kShapeSlots - bytes, &written)) {
+      r.error = "shape failed";
+      return;
+    }
+    bytes += written;
+    if (std::find(glyphs.get(), glyphs.get() + distinct, record.glyph) == glyphs.get() + distinct) {
+      glyphs[distinct++] = record.glyph;
+    }
+  }
+  r.glyphs = buffer->len();
+  r.width = glyphRunAdvance(GlyphRun{records.get(), static_cast<uint16_t>(buffer->len()), static_cast<uint16_t>(bytes)},
+                            false);
+
+  // The store holds a glyph when asking for it is a hit: the lookups after the prefetch count their hits.
+  const EpdFontFamily family(regular);
+  family.prefetchGlyphs(glyphs.get(), distinct, EpdFontFamily::REGULAR);
+  const uint32_t hitsBefore = font.storeHits();
+  for (unsigned i = 0; i < distinct; ++i) {
+    family.findGlyphKey(glyph_key::of(glyphs[i]), EpdFontFamily::REGULAR);
+  }
+  r.stored = font.storeHits() - hitsBefore;
+}
+
+// CMD:TTF:SHAPE:<bcp47>:<text>: one word shaped on the device, to time the steps a section build repeats.
+void cmdTtfShape(const std::string_view arg) {
+  std::string_view language;
+  std::string_view text;
+  if (!SerialCommandGrammar::parseTtfShape(arg, language, text)) {
+    reply("TTF_ERROR:expected SHAPE:<language>:<text of 1-192 bytes>");
+    return;
+  }
+  ShapeReport report;
+  {
+    RenderLock lock;  // the glyph store and the shaping faces are the render task's; the reply goes out after
+    TtfFontSet* set = sdFontSystem.ttfSet();
+    TtfFont* font = set ? set->font(0) : nullptr;
+    if (!font) {
+      report.error = "no TrueType family loaded";
+    } else {
+      shapeWord(*set, *font, language, text, report);
+      set->releaseShapingFaces();  // after the plan, which read the face's tables
+    }
+  }
+  if (report.error) {
+    reply("TTF_ERROR:", report.error);
+    return;
+  }
+  std::string line = std::string("TTF_SHAPE:script=") + report.script;
+  appendField(line, "cpac", static_cast<long>(report.cpac));
+  appendField(line, "init_us", static_cast<long>(report.initUs));
+  appendField(line, "repoint_us", report.repointUs);
+  appendField(line, "plan_us", static_cast<long>(report.planUs));
+  appendField(line, "plan_bytes", static_cast<long>(report.planBytes));
+  appendField(line, "shape_us", static_cast<long>(report.shapeUs));
+  appendField(line, "glyphs", static_cast<long>(report.glyphs));
+  appendField(line, "width", static_cast<long>(report.width));
+  appendField(line, "stored", static_cast<long>(report.stored));
+  reply(line);
+}
+
 // CMD:TTF: what the loaded TrueType set and its glyph store hold. CMD:TTF:FULL: the store acts as if it had just filled
 // up (TtfFontSet::markFull): the next safe point reclaims the oldest segment, so that can be watched at any size.
+// CMD:TTF:SHAPE: see cmdTtfShape.
 void cmdTtf(const std::string_view arg) {
+  if (arg.substr(0, 6) == "SHAPE:") {
+    cmdTtfShape(arg);
+    return;
+  }
   if (!arg.empty() && arg != "FULL") {
-    reply("TTF_ERROR:expected FULL, got ", arg);
+    reply("TTF_ERROR:expected FULL or SHAPE:<language>:<text>, got ", arg);
     return;
   }
   const TtfFontSet::StoreEvents events = TtfFontSet::storeEvents();
@@ -934,6 +1125,7 @@ void cmdTtf(const std::string_view arg) {
     appendField(line, "rebuilds", static_cast<long>(events.rebuilds));
     appendField(line, "dropped", static_cast<long>(events.dropped));
     appendField(line, "last_room_ms", static_cast<long>(events.lastRoomMs));
+    appendField(line, "last_install_ms", static_cast<long>(events.lastInstallMs));
   }
   reply(line);
 }

@@ -326,6 +326,28 @@ TEST(SerialFsGrammar, MoveTakesTwoPathsAroundOneColon) {
   EXPECT_FALSE(SerialCommandGrammar::parseFsMove("/a:/b:/c", from, to)) << "':' cannot be in a FAT name";
 }
 
+TEST(SerialCommandGrammar, TtfShapeTakesALanguageAndAWord) {
+  std::string_view language;
+  std::string_view text;
+  ASSERT_TRUE(SerialCommandGrammar::parseTtfShape("SHAPE:hi:\xE0\xA4\xB9\xE0\xA4\xBF", language, text));
+  EXPECT_EQ(language, "hi");
+  EXPECT_EQ(text, "\xE0\xA4\xB9\xE0\xA4\xBF");
+  ASSERT_TRUE(SerialCommandGrammar::parseTtfShape("SHAPE::\xE0\xA4\x95\xE0\xA4\xBF", language, text));
+  EXPECT_TRUE(language.empty());
+  EXPECT_EQ(text, "\xE0\xA4\x95\xE0\xA4\xBF");
+  ASSERT_TRUE(SerialCommandGrammar::parseTtfShape("SHAPE:zh-Hant-TW:x", language, text));
+  EXPECT_EQ(language, "zh-Hant-TW");
+  EXPECT_FALSE(SerialCommandGrammar::parseTtfShape("SHAPE:hi:", language, text)) << "no text";
+  EXPECT_FALSE(SerialCommandGrammar::parseTtfShape("SHAPE:h!:x", language, text)) << "not a language tag";
+  EXPECT_FALSE(SerialCommandGrammar::parseTtfShape("SHAPE:abcdefghijklmnop:x", language, text)) << "16 characters";
+  EXPECT_FALSE(SerialCommandGrammar::parseTtfShape("SHAPE:hi", language, text)) << "no second colon";
+  EXPECT_FALSE(SerialCommandGrammar::parseTtfShape("FULL", language, text));
+  const std::string longest = "SHAPE:hi:" + std::string(192, 'a');
+  EXPECT_TRUE(SerialCommandGrammar::parseTtfShape(longest, language, text));
+  EXPECT_EQ(text.size(), 192u);
+  EXPECT_FALSE(SerialCommandGrammar::parseTtfShape(longest + "a", language, text)) << "193 bytes";
+}
+
 // ---- CMD:PAGE's text="..." --------------------------------------------------------------------
 
 namespace {

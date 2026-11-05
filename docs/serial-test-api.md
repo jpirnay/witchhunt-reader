@@ -639,12 +639,13 @@ for the image lane's tries) the "not enough memory" boxes, `REFUSE=2,1` an accen
 ```
 CMD:TTF
 CMD:TTF:FULL
+CMD:TTF:SHAPE:<bcp47>:<text>
 ```
 
 Reply to `CMD:TTF`, the loaded TrueType families and their glyph store:
 
 ```
-TTF:families=1 names=NotoSansTC sd=1 log_used=80800 log_size=1835008 slots=512 ring=0 pending=0 renders=540 hits=2210 segments=7 free=5 live_slots=498 draws=1830 fills=0 wipes=1 last_wipe_ms=1312 rooms=2 rebuilds=0 dropped=140 last_room_ms=96
+TTF:families=1 names=NotoSansTC sd=1 log_used=80800 log_size=1835008 slots=512 ring=0 pending=0 renders=540 hits=2210 segments=7 free=5 live_slots=498 draws=1830 fills=0 wipes=1 last_wipe_ms=1312 rooms=2 rebuilds=0 dropped=140 last_room_ms=96 last_install_ms=8120
 ```
 
 `names` lists the set's families in its order (the body's first, then a book's accent families); `sd=1` when one
@@ -657,7 +658,7 @@ page's black-and-white pass); it stays 0 until the store keeps use counts: once 
 step or chapter open (from the set's load when the log already is), or from `CMD:TTF:FULL`. `fills`, `wipes` and `last_wipe_ms` count since boot, whichever set was loaded; so do
 `rooms` (`makeRoom` calls that did work: a segment reclaimed or the index rebuilt; a wipe counts only in `wipes`,
 except a rebuild whose journal is full, which becomes one), `rebuilds`, `dropped` (glyphs
-the reclaims dropped) and `last_room_ms`. With no TrueType family loaded the set's fields are replaced by `none`:
+the reclaims dropped), `last_room_ms` and `last_install_ms` (the last install of a set, from its plan to its header; 0 before the first). With no TrueType family loaded the set's fields are replaced by `none`:
 `TTF:none fills=0 wipes=0 last_wipe_ms=0 rooms=0 rebuilds=0 dropped=0 last_room_ms=0`.
 
 `CMD:TTF:FULL` makes the store act as if it had just filled up: `TTF_OK:full`, or `TTF_ERROR:no TrueType family
@@ -665,6 +666,27 @@ loaded`. New glyphs are drawn without being stored, exactly as when the log runs
 time, or a chapter or book open) reclaims the oldest segment, so what a full store does can be tested at any size
 without reading until it fills. Watch for `EVT:TTF_ROOM`. With fewer than two live segments there is nothing to
 reclaim: writes simply resume and no event arrives. Development builds only.
+
+`CMD:TTF:SHAPE:<bcp47>:<text>` shapes one word on the device, to time what a section build repeats. The language is
+empty or 1-15 of `A-Za-z0-9-` (`hi`, `bn`; empty selects the script's default language system), the text 1-192 bytes
+of UTF-8. With the body family's regular style at the body size it builds the shaping face and one plan, then shapes
+the text's first Indic run (from its first Indic letter, at most 48 code points) and prefetches that run's glyphs:
+
+```
+TTF_SHAPE:script=Devanagari cpac=61440 init_us=410 repoint_us=95 plan_us=18300 plan_bytes=1480 shape_us=6200 glyphs=6 width=71 stored=5
+```
+
+`cpac` is the CPac room after the regular file in its flash-mode block (0 in SD mode, where the block holds it
+inside its directory); `init_us` the first `current()` of the shaping face, which builds it; `repoint_us` the
+`current()` after a glyph of another flash-mode style was looked up (-1 when the family has no other style, or reads
+the card; a glyph the store already answers does not move the mapping); `plan_us` and `plan_bytes` the plan's build and
+the heap it holds; `shape_us` the shaping; `glyphs` the run's glyphs and `width` its advance in pixels, from the
+compact records a section stores; `stored` how many of the run's distinct glyphs the store then holds, after the
+prefetch. Errors: `TTF_ERROR:no TrueType family loaded`, `no Indic letter`, `no shaping face`, `plan failed`,
+`shape failed`, `no memory`. Every block it makes is freed before the reply, the shaping faces with them.
+
+It measures one plan and one word, not a section (the design's measure-first item 4). Development builds only: the
+shaper is linked into `default`, not into a release build.
 
 ### Files on the card: `FS`
 

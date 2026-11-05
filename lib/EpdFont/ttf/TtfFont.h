@@ -121,6 +121,9 @@ class TtfFont {
   /// maps them, shaped in place. Made on first ask and kept until TtfFontSet::releaseShapingFaces(); nullptr for a
   /// style the family does not draw, or without the memory.
   ShapingFace* shapingFace(uint8_t style);
+  /// The CPac room after the file that draws `style` in its flash-mode block, in bytes; 0 for a style the family does
+  /// not draw, one read from the card (its block holds the CPac inside its directory) or a block without the room.
+  uint32_t cpacBytes(uint8_t style) const;
 
  private:
   friend class TtfFontSet;
