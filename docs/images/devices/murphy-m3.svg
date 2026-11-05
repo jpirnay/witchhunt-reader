@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" width="480" height="560" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="Murphy M3: keys">
+<title>Murphy M3: keys</title>
+<rect width="480" height="560" rx="10" fill="#ffffff"/>
+<rect x="140" y="70" width="200" height="400" rx="20" fill="#eeeeee" stroke="#222222" stroke-width="2"/>
+<rect x="156" y="88" width="168" height="362" rx="3" fill="#ffffff" stroke="#999999"/>
+<text x="240.0" y="269.0" text-anchor="middle" fill="#999999" font-size="15">Screen</text>
+<rect x="339" y="140.0" width="8" height="20" rx="2" fill="#333333"/>
+<line x1="347" y1="150.0" x2="364" y2="150.0" stroke="#333333" stroke-width="1"/>
+<text x="368" y="154.0" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Up</text>
+<rect x="339" y="180.0" width="8" height="20" rx="2" fill="#333333"/>
+<line x1="347" y1="190.0" x2="364" y2="190.0" stroke="#333333" stroke-width="1"/>
+<text x="368" y="194.0" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Down</text>
+<rect x="339" y="220.0" width="8" height="20" rx="2" fill="#333333"/>
+<line x1="347" y1="230.0" x2="364" y2="230.0" stroke="#333333" stroke-width="1"/>
+<text x="368" y="234.0" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Confirm</text>
+<text x="368" y="251.0" text-anchor="start" fill="#222222" font-size="13">twice: Back</text>
+<text x="368" y="268.0" text-anchor="start" fill="#222222" font-size="13">hold: sleep</text>
+<rect x="133" y="400.0" width="8" height="20" rx="2" fill="#c62828"/>
+<line x1="133" y1="410.0" x2="116" y2="410.0" stroke="#c62828" stroke-width="1"/>
+<text x="112" y="414.0" text-anchor="end" fill="#c62828" font-size="15" font-weight="700">Reset</text>
+<text x="112" y="431.0" text-anchor="end" fill="#c62828" font-size="13">do not press</text>
+</svg>

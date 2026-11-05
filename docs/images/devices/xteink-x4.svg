@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" width="480" height="560" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="Xteink X4: keys">
+<title>Xteink X4: keys</title>
+<rect width="480" height="560" rx="10" fill="#ffffff"/>
+<rect x="140" y="70" width="200" height="400" rx="20" fill="#eeeeee" stroke="#222222" stroke-width="2"/>
+<rect x="156" y="88" width="168" height="320" rx="3" fill="#ffffff" stroke="#999999"/>
+<text x="240.0" y="248.0" text-anchor="middle" fill="#999999" font-size="15">Screen</text>
+<rect x="339" y="140.17543859649123" width="8" height="35.08771929824561" rx="2" fill="#333333"/>
+<line x1="347" y1="157.71929824561403" x2="364" y2="157.71929824561403" stroke="#333333" stroke-width="1"/>
+<text x="368" y="161.71929824561403" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Power</text>
+<text x="368" y="178.71929824561403" text-anchor="start" fill="#222222" font-size="13">hold: on / sleep</text>
+<rect x="339" y="224.8859649122807" width="8" height="34.08771929824561" rx="2" fill="#333333"/>
+<line x1="347" y1="241.9298245614035" x2="364" y2="241.9298245614035" stroke="#333333" stroke-width="1"/>
+<text x="368" y="245.9298245614035" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Up</text>
+<rect x="339" y="259.97368421052636" width="8" height="34.08771929824561" rx="2" fill="#333333"/>
+<line x1="347" y1="277.01754385964915" x2="364" y2="277.01754385964915" stroke="#333333" stroke-width="1"/>
+<text x="368" y="281.01754385964915" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Down</text>
+<rect x="339" y="357.719298245614" width="8" height="17.543859649122805" rx="2" fill="#333333"/>
+<line x1="347" y1="366.49122807017545" x2="364" y2="366.49122807017545" stroke="#333333" stroke-width="1"/>
+<text x="368" y="370.49122807017545" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Reset</text>
+<rect x="174.8" y="432" width="58.0" height="18" rx="6" fill="#333333"/>
+<line x1="203.768115942029" y1="435" x2="203.768115942029" y2="447" stroke="#ffffff" stroke-width="1"/>
+<rect x="241.4" y="432" width="58.0" height="18" rx="6" fill="#333333"/>
+<line x1="270.4347826086956" y1="435" x2="270.4347826086956" y2="447" stroke="#ffffff" stroke-width="1"/>
+<line x1="189.2753623188406" y1="450" x2="126.0" y2="484" stroke="#333333" stroke-width="1"/>
+<text x="126.0" y="500" text-anchor="middle" fill="#222222" font-size="15" font-weight="700">Back</text>
+<line x1="218.2608695652174" y1="450" x2="202.0" y2="484" stroke="#333333" stroke-width="1"/>
+<text x="202.0" y="500" text-anchor="middle" fill="#222222" font-size="15" font-weight="700">Confirm</text>
+<line x1="255.94202898550725" y1="450" x2="278.0" y2="484" stroke="#333333" stroke-width="1"/>
+<text x="278.0" y="500" text-anchor="middle" fill="#222222" font-size="15" font-weight="700">Left</text>
+<line x1="284.92753623188406" y1="450" x2="354.0" y2="484" stroke="#333333" stroke-width="1"/>
+<text x="354.0" y="500" text-anchor="middle" fill="#222222" font-size="15" font-weight="700">Right</text>
+</svg>

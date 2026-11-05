@@ -3,6 +3,12 @@
 Welcome to **Witch Reader** firmware. This guide outlines the hardware controls, navigation, and reading features of the device.
 
 - [Witch Reader User Guide](#witch-reader-user-guide)
+  - [Quick Start](#quick-start)
+    - [Xteink X3 and X4](#xteink-x3-and-x4)
+    - [Xteink X4 Pro](#xteink-x4-pro)
+    - [LilyGo T5 S3 Pro](#lilygo-t5-s3-pro)
+    - [Murphy M3](#murphy-m3)
+    - [On a touch screen](#on-a-touch-screen)
   - [1. Hardware Overview](#1-hardware-overview)
     - [Button Layout](#button-layout)
     - [Moving through lists](#moving-through-lists)
@@ -18,7 +24,7 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
     - [3.6 File Transfer Screen](#36-file-transfer-screen)
       - [3.6.1 Calibre Wireless Transfers](#361-calibre-wireless-transfers)
       - [3.6.2 USB Transfer (over the cable)](#362-usb-transfer-over-the-cable)
-      - [3.6.3 USB Drive (X4 Pro and LilyGo T5 S3)](#363-usb-drive-x4-pro-and-lilygo-t5-s3)
+      - [3.6.3 USB Drive (X4 Pro, LilyGo T5 S3 and Murphy M3)](#363-usb-drive-x4-pro-lilygo-t5-s3-and-murphy-m3)
       - [3.6.4 OPDS Catalogs](#364-opds-catalogs)
     - [3.7 Settings](#37-settings)
       - [3.7.1 Display](#371-display)
@@ -49,27 +55,155 @@ Welcome to **Witch Reader** firmware. This guide outlines the hardware controls,
   - [8. Troubleshooting Issues \& Escaping Bootloop](#8-troubleshooting-issues--escaping-bootloop)
 
 
+## Quick Start
+
+New to the reader? These are the steps to your first book, and what the keys do on your device.
+
+1. **Add books.** Copy them to the SD card, in any folder. Later you can also send them over Wi-Fi
+   or USB with **[File Transfer](#36-file-transfer-screen)**.
+2. **Turn the device on** with the key listed for your device below. The **Home** screen opens.
+3. **Open a book.** Choose **Library**, move to a book, and open it.
+4. **Read.** Turn the pages. Open the reader menu for the table of contents, bookmarks and
+   per-book settings.
+5. **Leave the book** with **Back**. Your place is saved.
+6. **Put the device to sleep** with the same key that turned it on. If you forget, it sleeps by
+   itself after 10 minutes.
+
+The labels along the bottom of the screen always show what each button does at that moment. To
+change what a button does, see **[Controls](#373-controls)**.
+
+In the tables, **hold** means about a second, and a little less for Power and the Home key.
+
+### Xteink X3 and X4
+
+Every button is a real key. On both, the four front buttons are two double keys: **Back** and
+**Confirm**, then **Left** and **Right**. The X4 has all its side keys on the right edge. The X3 has
+**Up** on the left, **Down** on the right, and **Power** and **Reset** on the top edge.
+
+<img src="docs/images/devices/xteink-x4.svg" width="320" alt="Xteink X4. Below the screen, left to right: a double key for Back and Confirm, and a double key for Left and Right. Right edge, top to bottom: Power, a double key for Up and Down, Reset."> <img src="docs/images/devices/xteink-x3.svg" width="320" alt="Xteink X3. Below the screen, left to right: a double key for Back and Confirm, and a double key for Left and Right. Up on the left edge and Down on the right edge, near the top. Reset and Power on the top edge, with Reset to the left.">
+
+*The X4 (left) and the X3 (right). Like the other drawings here, these show where the keys are, not the device's exact shape.*
+
+| Key | Press | Hold |
+| --- | --- | --- |
+| **Power** | | Turn on, or sleep |
+| **Back** | Go back, leave a book | Go to the Home screen |
+| **Confirm** | Open the selected row. In a book: open the reader menu | |
+| **Left** / **Right** | In a book: previous / next page. In a list: what the label says | In a book: previous / next chapter. In a list: page back / forward |
+| **Up** / **Down** | In a book: previous / next page. In a list: move up / down | In a book: previous / next chapter. In a list: jump to the first / last row |
+| **Reset** | Restart the device | |
+
+### Xteink X4 Pro
+
+**Up** is on the left edge, **Down** and the small **Power** key on the right, and a small **Reset**
+key on the top edge. The touch-sensitive **Home key** below the screen does the work of Back and
+Confirm, which have no keys of their own.
+
+<img src="docs/images/devices/xteink-x4pro.svg" width="320" alt="Xteink X4 Pro. Left edge: Up. Right edge: Power near the top, with Down below it, level with Up. Top edge, at the right: Reset. Round Home key below the screen.">
+
+| Key | Press | Hold |
+| --- | --- | --- |
+| **Power** | Twice quickly: reading light on or off | Turn on, or sleep |
+| **Home key** | Works as **Confirm**: open the selected row. In a book: open the reader menu | Works as **Back**: go back, leave a book |
+| **Up** / **Down** | In a book: previous / next page. In a list: move up / down | In a book: previous / next chapter. In a list: jump to the first / last row |
+| **Reset** | Restart the device | |
+
+To reach the Home screen, hold the **Back** box on the screen.
+
+### LilyGo T5 S3 Pro
+
+The reader uses two keys on the left edge and a touch-sensitive **Home key** below the screen. There
+is no Up, Back or Confirm key.
+
+<img src="docs/images/devices/lilygo-t5s3.svg" width="320" alt="LilyGo T5 S3 Pro. Left edge: Power, marked BOOT, with Down, marked IO48, below it. Home key below the screen. Right edge, level with those two: the RST button with the PWR button below it, both marked do not press.">
+
+| Key | Press | Hold |
+| --- | --- | --- |
+| **Power** (marked BOOT) | Twice quickly: reading light on or off | Turn on, or sleep |
+| **Home key** | Works as **Confirm**: open the selected row. In a book: open the reader menu | Works as **Back**: go back, leave a book |
+| **Down** (marked IO48) | In a book: next page. In a list: move down | In a book: next chapter. In a list: jump to the last row |
+
+> [!WARNING]
+> **Do not press the reset (RST) and power (PWR) buttons on the right edge.** They have no function
+> in the reader, and pressing them can do harm. The reader cannot see the power button, and the
+> reset button restarts the device at once, so neither gives it the chance to save first. To turn
+> the device off, hold the **BOOT** key on the left. Use the reset button only if the device has
+> frozen.
+
+To turn back a page, tap the left side of the screen. To move up a list, tap the **Up** box at the
+side of the screen, or swipe. To reach the Home screen, hold the **Back** box on the screen.
+
+### Murphy M3
+
+There are only three keys that the reader can use, and none of them is Power or Back. **Confirm**
+does those jobs too. All three are on the right edge: **Up**, **Down**, then **Confirm**.
+
+<img src="docs/images/devices/murphy-m3.svg" width="320" alt="Murphy M3. Right edge, top to bottom: Up, Down, Confirm. Left edge, near the bottom: the Reset button, marked do not press.">
+
+| Key | Press | Press twice quickly | Hold |
+| --- | --- | --- | --- |
+| **Confirm** (the lowest key) | Open the selected row. In a book: open the reader menu | **Back**: go back, leave a book | **Sleep**. While asleep, hold it briefly to wake |
+| **Up** / **Down** | In a book: previous / next page. In a list: move up / down | | In a book: previous / next chapter. In a list: jump to the first / last row |
+
+> [!WARNING]
+> **Do not press the reset button on the left edge.** It has no function in the reader, and pressing
+> it can do harm. It restarts the device at once, so the reader gets no chance to save first. Use it
+> only if the device has frozen.
+
+- **Back**, **Left** and **Right** exist only as the boxes on the screen. Tap a box to press that
+  button, and hold it to hold the button. To reach the Home screen, hold the **Back** box.
+- Holding the Confirm box (the second one, labelled **Select** or **Open**) is the same as holding
+  Confirm, so it puts the device to sleep.
+- A press of Confirm takes effect after a short pause, because the device waits to see if a second
+  press follows.
+- A new screen takes about a second to appear. The press has registered, so there is no need to
+  press again.
+
+Double and long Confirm can be changed under **Settings → Controls → Button Actions**.
+
+### On a touch screen
+
+On the **X4 Pro**, the **LilyGo T5 S3** and the **Murphy M3**, a finger does most of what the keys do.
+
+| Where | Touch | What it does |
+| --- | --- | --- |
+| In a list | Tap a row | Highlight it. Tap it again to open it |
+| In a list | Swipe up / down | Move a page |
+| In the Library | Hold a row or cover | Open its options |
+| Anywhere | Tap a box at the edge of the screen | Press the button it names. Hold it to hold the button |
+| Anywhere | Swipe down from the top edge | Open the reading light |
+| In a book | Tap the left / right side | Previous / next page |
+| In a book | Tap the middle | Open the reader menu |
+
+There is much more in **[Touch Controls](#5-touch-controls)**.
+
+---
+
 ## 1. Hardware Overview
 
-Four devices are supported: the **Xteink X3** and **Xteink X4** (buttons only), and the
-**Xteink X4 Pro** and **LilyGo T5 S3 Pro** (buttons and a touchscreen).
+Five devices are supported: the **Xteink X3** and **Xteink X4** (buttons only), and the
+**Xteink X4 Pro**, **LilyGo T5 S3 Pro** and **Murphy M3** (buttons and a touchscreen).
 
 ### Button Layout
 
-On the **X3 and X4**, the firmware uses the manufacturer's own button layout by default:
+On the **X3 and X4**, the firmware uses the manufacturer's own button layout by default.
+**[Quick Start](#quick-start)** has a drawing of each device:
 
-| Location        | Buttons                                              |
-| --------------- | ---------------------------------------------------- |
-| **Bottom Edge** | **Back**, **Confirm**, **Left**, **Right**           |
-| **Right Side**  | **Power**, **Volume Up**, **Volume Down**, **Reset** |
+| Location | X4 | X3 |
+| --- | --- | --- |
+| **Bottom Edge** | **Back**, **Confirm**, **Left**, **Right** | **Back**, **Confirm**, **Left**, **Right** |
+| **Right Side** | **Power**, **Up**, **Down**, **Reset** | **Down** |
+| **Left Side** | | **Up** |
+| **Top Edge** | | **Power**, **Reset** |
 
-The **X4 Pro** and **LilyGo T5 S3** have far fewer keys, and make up the difference with the
-touchscreen:
+The **X4 Pro**, **LilyGo T5 S3** and **Murphy M3** have far fewer keys, and make up the difference
+with the touchscreen:
 
 | Device | Physical keys | Back / Confirm |
 | --- | --- | --- |
 | **X4 Pro** | Up, Down, Power | Capacitive Home key — **tap** for Confirm, **hold** for Back |
 | **LilyGo T5 S3** | Down, Power | Capacitive Home key — **tap** for Confirm, **hold** for Back |
+| **Murphy M3** | Confirm, Up, Down | **Confirm** key, and **press twice** for Back. **Hold** Confirm to sleep: there is no Power key |
 
 The T5 S3 has no **Up** key at all. On lists that follow **[Moving through lists](#moving-through-lists)**
 the side **Up** box stands in for it, and any list pages backward with a swipe — see
@@ -117,8 +251,8 @@ A button action you set yourself under **Settings → Controls** comes first: gi
 Right press an action of its own and holding it no longer pages, and a short-press action on the
 page-turn keys (Up/Down) runs as well as the move.
 
-On the **X4 Pro** and the **LilyGo T5 S3**, tap a hint box to press that button and hold the box
-to hold it. A held **«** or **»** box pages once rather than over and over, so swipe to move through
+On the **X4 Pro**, the **LilyGo T5 S3** and the **Murphy M3**, tap a hint box to press that button
+and hold the box to hold it. A held **«** or **»** box pages once rather than over and over, so swipe to move through
 a long list quickly. Lists that work this way always show the side boxes **Up** and **Down**, so the
 T5 S3, which has no Up key, can always move up.
 
@@ -137,7 +271,7 @@ other. **Back** answers **Cancel** and carries its hint, and the two front butto
 two.
 
 ### Taking a Screenshot
-When the Power Button and Volume Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`.
+When the Power Button and Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`.
 
 Alternatively, while reading a book, press the **Confirm** button to open the reader menu and select **Take screenshot**.
 
@@ -149,6 +283,8 @@ Alternatively, while reading a book, press the **Confirm** button to open the re
 
 To turn the device on or off, **press and hold the Power button for approximately half a second**.
 In the **[Controls Settings](#373-controls)** you can configure the power button to turn the device off with a short press instead of a long one.
+
+The **Murphy M3** has no Power key: hold **Confirm** for about a second to sleep, and hold it briefly to wake.
 
 To reboot the device (for example after a firmware update or if it's frozen), press and release the Reset button, and then quickly press and hold the Power button for a few seconds.
 
@@ -294,9 +430,9 @@ Full credit to CidVonHighwind for the original protocol and tooling. While a tra
 
 **Open this screen first, then connect.** Opening the USB port from a computer briefly resets the device (a hardware quirk of the ESP32-C3's USB port). As long as you've opened the **USB Transfer** screen first, the device automatically returns to this screen after that reset, so the transfer just works — press **Back** when you're done. (If you connect while on another screen, the device will simply reboot to Home; open USB Transfer and reconnect.)
 
-### 3.6.3 USB Drive (X4 Pro and LilyGo T5 S3)
+### 3.6.3 USB Drive (X4 Pro, LilyGo T5 S3 and Murphy M3)
 
-On the **Xteink X4 Pro** and the **LilyGo T5 S3**, *File Transfer* offers **USB Drive** in place of USB Transfer. The reader appears on your computer as an ordinary USB stick, so you can copy books on and off — and reorganise folders, or clear caches — with your normal file manager. No plugin, no protocol, no WiFi.
+On the **Xteink X4 Pro**, the **LilyGo T5 S3** and the **Murphy M3**, *File Transfer* offers **USB Drive** in place of USB Transfer. The reader appears on your computer as an ordinary USB stick, so you can copy books on and off — and reorganise folders, or clear caches — with your normal file manager. No plugin, no protocol, no WiFi.
 
 Choose **File Transfer → USB Drive**, then connect the cable. The screen says *USB Drive Connected* once your computer has it mounted; give it up to half a minute the first time.
 
@@ -583,7 +719,7 @@ A synced position lands on the exact page, in both directions, when the page sta
 
 **On Closing a Book** sends your position to the server when you close a book: "Always", only after a session of at least a set number of pages, or "Never".
 
-On the **X4 Pro** and the **LilyGo T5 S3**, sync can also run in the background. That is useful if you read on more than one device and rarely close a book. These options sit in the **Automatic Sync** submenu of the KOReader Sync settings, and all of them are off by default:
+On the **X4 Pro**, the **LilyGo T5 S3** and the **Murphy M3**, sync can also run in the background. That is useful if you read on more than one device and rarely close a book. These options sit in the **Automatic Sync** submenu of the KOReader Sync settings, and all of them are off by default:
 
 - **Receive → On Wake**: Fetch the position from the server when the device wakes.
 - **Send → While Reading**: Send your position every set number of pages, or "Never".
@@ -646,10 +782,10 @@ Once you have opened a book, the button layout changes to facilitate reading.
 ### Page Turning
 | Action            | Buttons                              |
 | ----------------- | ------------------------------------ |
-| **Previous Page** | Press **Left** _or_ **Volume Up**    |
-| **Next Page**     | Press **Right** _or_ **Volume Down** |
+| **Previous Page** | Press **Left** _or_ **Up**    |
+| **Next Page**     | Press **Right** _or_ **Down** |
 
-The role of the volume (side) buttons can be swapped in the **[Controls Settings](#373-controls)**.
+The role of the side buttons (**Up** and **Down**) can be swapped in the **[Controls Settings](#373-controls)**.
 
 If the **Short Power Button Click** setting is set to "Page Turn", you can also turn to the next page by briefly pressing the Power button.
 
@@ -657,8 +793,8 @@ If the **Short Power Button Click** setting is set to "Page Turn", you can also 
 A book set vertically (**Vertical Text** in the **[Reader settings](#372-reader)**) is read the way a Japanese book is: its pages turn right to left. With **Page Turn Buttons** on "Follow Book" the Left button shows the next page and the Right button the previous one, and the chapter skips on a long press swap with them. Taps and swipes on a touch device follow the same direction (see **[5.3](#53-the-reading-page-taps-and-holds)** and **[5.4](#54-the-reading-page-swipes)**), the progress bars fill from the right, and the jump-to-percent screen moves from the right as well. The dictionary's word screen follows the columns: **Up** and **Down** move along the column, word by word and on into the next column, **Left** moves to the next column (the one to its left) and **Right** to the previous one (see [Dictionary](./docs/dictionary.md#looking-up-a-word)).
 
 ### Chapter Navigation
-* **Next Chapter:** Press and **hold** the **Right** (or **Volume Down**) button briefly, then release.
-* **Previous Chapter:** Press and **hold** the **Left** (or **Volume Up**) button briefly, then release.
+* **Next Chapter:** Press and **hold** the **Right** (or **Down**) button briefly, then release.
+* **Previous Chapter:** Press and **hold** the **Left** (or **Up**) button briefly, then release.
 
 This feature can be disabled in the **[Controls Settings](#373-controls)** to help avoid changing chapters by mistake.
 
@@ -682,7 +818,7 @@ What is not supported: Chinese, Japanese, Korean, Vietnamese, Hebrew, Arabic, Gr
 
 ## 5. Touch Controls
 
-*Applies to the touch devices only — the **LilyGo T5 S3 Pro** and the **Xteink X4 Pro**.
+*Applies to the touch devices only — the **LilyGo T5 S3 Pro**, the **Xteink X4 Pro** and the **Murphy M3**.
 The X3 and X4 have no digitiser, nothing in this section appears in their Settings, and
 the code behind it is not even built into their firmware.*
 
@@ -904,13 +1040,14 @@ Brighter**, **Light Dimmer**, and on a warm/cool device **Light Warmer** and **L
 
 ### 5.7 Per-device differences
 
-| | X4 Pro | LilyGo T5 S3 |
-| --- | --- | --- |
-| Physical keys | Up, Down, Power | Down, Power |
-| Back / Confirm | Home key: hold / tap | Home key: hold / tap |
-| Top edge, swipe down | Reading light | Reading light |
-| Bottom edge, swipe up | Reader menu | Reader menu |
-| Right edge, swipe up/down | Light warmer / cooler | *(free — single-channel light)* |
+| | X4 Pro | LilyGo T5 S3 | Murphy M3 |
+| --- | --- | --- | --- |
+| Physical keys | Up, Down, Power | Down, Power | Confirm, Up, Down |
+| Back / Confirm | Home key: hold / tap | Home key: hold / tap | Confirm key: press twice / press |
+| Top edge, swipe down | Reading light | Reading light | Reading light |
+| Bottom edge, swipe up | Reader menu | Reader menu | Reader menu |
+| Right edge, swipe up/down | Light warmer / cooler | *(free — single-channel light)* | *(free — single-channel light)* |
+| Two-finger gestures | Yes | Yes | No |
 
 On a touch device **without** a reading light the two vertical edges swap roles: the top edge
 becomes the reader menu, there being no light panel to put there, and the bottom edge returns
