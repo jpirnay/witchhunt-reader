@@ -3318,13 +3318,16 @@ void CrossPointWebServer::handleRelay() {
     server->send(502, "application/json", "{\"error\":\"fetch failed\"}");
     return;
   }
-  server->sendContent("");  // terminate the chunked response
   if (!ok || overLimit) {
     LOG_ERR("WEB", "Relay truncated after %u bytes%s: %s", static_cast<unsigned>(total),
             overLimit ? " (size limit)" : "", url.c_str());
-  } else {
-    LOG_DBG("WEB", "Relay served %u bytes", static_cast<unsigned>(total));
+    // No final chunk: with one, the browser takes what arrived for the whole body. From
+    // crosspoint-reader #4289 (Arthur Tazhitdinov).
+    server->client().stop();
+    return;
   }
+  server->sendContent("");  // terminate the chunked response
+  LOG_DBG("WEB", "Relay served %u bytes", static_cast<unsigned>(total));
 }
 
 // POST /api/fetch?plugin=<name>&url=<url>&dest=<sd path>
