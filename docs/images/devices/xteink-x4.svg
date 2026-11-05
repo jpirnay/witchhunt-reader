@@ -4,29 +4,29 @@
 <rect x="140" y="70" width="200" height="400" rx="20" fill="#eeeeee" stroke="#222222" stroke-width="2"/>
 <rect x="156" y="88" width="168" height="320" rx="3" fill="#ffffff" stroke="#999999"/>
 <text x="240.0" y="248.0" text-anchor="middle" fill="#999999" font-size="15">Screen</text>
-<rect x="339" y="117.0" width="8" height="34" rx="2" fill="#333333"/>
-<line x1="347" y1="134.0" x2="364" y2="134.0" stroke="#333333" stroke-width="1"/>
-<text x="368" y="138.0" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Power</text>
-<text x="368" y="155.0" text-anchor="start" fill="#222222" font-size="13">hold: on / sleep</text>
-<rect x="339" y="213.0" width="8" height="34" rx="2" fill="#333333"/>
-<line x1="347" y1="230.0" x2="364" y2="230.0" stroke="#333333" stroke-width="1"/>
-<text x="368" y="234.0" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Volume Up</text>
-<rect x="339" y="257.0" width="8" height="34" rx="2" fill="#333333"/>
-<line x1="347" y1="274.0" x2="364" y2="274.0" stroke="#333333" stroke-width="1"/>
-<text x="368" y="278.0" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Volume Down</text>
-<rect x="339" y="341.0" width="8" height="18" rx="2" fill="#333333"/>
-<line x1="347" y1="350.0" x2="364" y2="350.0" stroke="#333333" stroke-width="1"/>
-<text x="368" y="354.0" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Reset</text>
-<rect x="156.0" y="432" width="37.5" height="18" rx="4" fill="#333333"/>
-<line x1="174.75" y1="450" x2="126.0" y2="484" stroke="#333333" stroke-width="1"/>
+<rect x="339" y="140.17543859649123" width="8" height="35.08771929824561" rx="2" fill="#333333"/>
+<line x1="347" y1="157.71929824561403" x2="364" y2="157.71929824561403" stroke="#333333" stroke-width="1"/>
+<text x="368" y="161.71929824561403" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Power</text>
+<text x="368" y="178.71929824561403" text-anchor="start" fill="#222222" font-size="13">hold: on / sleep</text>
+<rect x="339" y="224.8859649122807" width="8" height="34.08771929824561" rx="2" fill="#333333"/>
+<line x1="347" y1="241.9298245614035" x2="364" y2="241.9298245614035" stroke="#333333" stroke-width="1"/>
+<text x="368" y="245.9298245614035" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Volume Up</text>
+<rect x="339" y="259.97368421052636" width="8" height="34.08771929824561" rx="2" fill="#333333"/>
+<line x1="347" y1="277.01754385964915" x2="364" y2="277.01754385964915" stroke="#333333" stroke-width="1"/>
+<text x="368" y="281.01754385964915" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Volume Down</text>
+<rect x="339" y="357.719298245614" width="8" height="17.543859649122805" rx="2" fill="#333333"/>
+<line x1="347" y1="366.49122807017545" x2="364" y2="366.49122807017545" stroke="#333333" stroke-width="1"/>
+<text x="368" y="370.49122807017545" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Reset</text>
+<rect x="174.8" y="432" width="58.0" height="18" rx="6" fill="#333333"/>
+<line x1="203.768115942029" y1="435" x2="203.768115942029" y2="447" stroke="#ffffff" stroke-width="1"/>
+<rect x="241.4" y="432" width="58.0" height="18" rx="6" fill="#333333"/>
+<line x1="270.4347826086956" y1="435" x2="270.4347826086956" y2="447" stroke="#ffffff" stroke-width="1"/>
+<line x1="189.2753623188406" y1="450" x2="126.0" y2="484" stroke="#333333" stroke-width="1"/>
 <text x="126.0" y="500" text-anchor="middle" fill="#222222" font-size="15" font-weight="700">Back</text>
-<rect x="199.5" y="432" width="37.5" height="18" rx="4" fill="#333333"/>
-<line x1="218.25" y1="450" x2="202.0" y2="484" stroke="#333333" stroke-width="1"/>
+<line x1="218.2608695652174" y1="450" x2="202.0" y2="484" stroke="#333333" stroke-width="1"/>
 <text x="202.0" y="500" text-anchor="middle" fill="#222222" font-size="15" font-weight="700">Confirm</text>
-<rect x="243.0" y="432" width="37.5" height="18" rx="4" fill="#333333"/>
-<line x1="261.75" y1="450" x2="278.0" y2="484" stroke="#333333" stroke-width="1"/>
+<line x1="255.94202898550725" y1="450" x2="278.0" y2="484" stroke="#333333" stroke-width="1"/>
 <text x="278.0" y="500" text-anchor="middle" fill="#222222" font-size="15" font-weight="700">Left</text>
-<rect x="286.5" y="432" width="37.5" height="18" rx="4" fill="#333333"/>
-<line x1="305.25" y1="450" x2="354.0" y2="484" stroke="#333333" stroke-width="1"/>
+<line x1="284.92753623188406" y1="450" x2="354.0" y2="484" stroke="#333333" stroke-width="1"/>
 <text x="354.0" y="500" text-anchor="middle" fill="#222222" font-size="15" font-weight="700">Right</text>
 </svg>
