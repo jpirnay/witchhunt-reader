@@ -104,7 +104,10 @@ class Dictionary {
   void releaseCaches();
 
   // True when the .ifo declares sametypesequence=h — definitions are HTML and
-  // the viewer may lay them out through the EPUB rendering pipeline.
+  // the viewer may lay them out through the EPUB rendering pipeline. With no
+  // sametypesequence each entry names its own types, so this speaks for the
+  // definition last read: true when it held type h alone, and never for
+  // several entries read together.
   bool definitionsAreHtml() const { return htmlDefinitions; }
 
   // True when the definitions are in a .dict.dz: reading one inflates it
@@ -462,6 +465,7 @@ class Dictionary {
   bool hasPlainDict = false;
   bool hasSyn = false;  // a <stem>.syn synonym index exists next to the .idx
   bool htmlDefinitions = false;
+  bool inlineTypes = false;  // the .ifo has no sametypesequence: entries name their own types
 
   // Session-scoped buffers, taken on first use and freed by releaseCaches().
   // One allocation, two named halves. Previously a single array indexed by hand

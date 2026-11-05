@@ -105,6 +105,8 @@ bool takesRunEntry(const char* word, const char* target, bool havePick, bool& ex
 struct IfoFacts {
   bool offsets64 = false;        // idxoffsetbits=64 (unsupported)
   bool htmlDefinitions = false;  // sametypesequence=h (definitions are HTML)
+  bool fixedTypes = false;       // sametypesequence has a value
+  bool inlineTypes = false;      // a readable .ifo without it: entries name their own types
 };
 
 // One line of the .ifo, `length` bytes with room for a NUL after them: a key only when it opens the
@@ -125,6 +127,7 @@ void readIfoLine(IfoFacts& facts, char* const line, size_t length) {
     // Only the single-field sequence "h" is treated as HTML; multi-type
     // entries keep the plain-text viewing path.
     facts.htmlDefinitions = strcmp(value, "h") == 0;
+    facts.fixedTypes = *value != '\0';
   }
 }
 
@@ -137,10 +140,12 @@ IfoFacts readIfoFacts(const std::string& ifoPath) {
   char chunk[128];
   char line[65];
   size_t length = 0;
+  bool anyBytes = false;
   for (;;) {
     const int n = ifo.read(chunk, sizeof(chunk));
     if (n < 0) return IfoFacts{};
     if (n == 0) break;
+    anyBytes = true;
     for (int i = 0; i < n; i++) {
       if (chunk[i] == '\n') {
         readIfoLine(facts, line, length);
@@ -151,7 +156,68 @@ IfoFacts readIfoFacts(const std::string& ifoPath) {
     }
   }
   readIfoLine(facts, line, length);  // a last line with no line end
+  facts.inlineTypes = anyBytes && !facts.fixedTypes;
   return facts;
+}
+
+// Walks the fields of an entry that names its own types, as StarDict's format has them: a type
+// letter, then for a lowercase one text up to a NUL, for an uppercase one a BE32 size and that much
+// binary data. onText(type, offset, length) is called for each text. `cut` says the entry was cut
+// at the definition cap, so its last field may have no end. False when it is not such an entry.
+template <typename OnText>
+bool walkInlineFields(const char* const entry, const uint32_t size, const bool cut, OnText onText) {
+  uint32_t at = 0;
+  while (at < size) {
+    const char type = entry[at++];
+    if (type >= 'A' && type <= 'Z') {
+      if (size - at < sizeof(uint32_t)) return cut;
+      const uint32_t bytes = readBe32(reinterpret_cast<const uint8_t*>(entry + at));
+      at += sizeof(uint32_t);
+      if (bytes > size - at) return cut;
+      at += bytes;
+    } else if (type >= 'a' && type <= 'z') {
+      const auto* const end = static_cast<const char*>(memchr(entry + at, '\0', size - at));
+      if (!end && !cut) return false;
+      const uint32_t length = end ? static_cast<uint32_t>(end - (entry + at)) : size - at;
+      onText(type, at, length);
+      at += length + (end ? 1 : 0);
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Takes an entry's fields down to their text, in place: every text field on a line of its own,
+// binary data left out. A field gives up its type byte and its NUL and gets at most one line end
+// back, so the text only ever moves down and no second buffer is needed. Returns the bytes left, 0
+// when the entry holds no text. An entry that does not parse all the way is left as it is, because
+// a converter that drops the key from a dictionary of bare text would otherwise cost every
+// definition its first letter. `html` is true when the text is all of type h: as for a fixed
+// sequence, several types take the plain path.
+//
+// Ported from crosspoint-reader PR #4270 (Uri Tauber). Theirs refuses an entry that does not parse,
+// and turns text fields into escaped HTML in a second buffer as large as the definition.
+uint32_t decodeInlineEntry(char* const entry, const uint32_t size, const bool cut, bool& html) {
+  bool anyText = false;
+  bool allHtml = true;
+  const bool parsed = walkInlineFields(entry, size, cut, [&](const char type, uint32_t, const uint32_t length) {
+    if (length == 0) return;
+    anyText = true;
+    allHtml = allHtml && type == 'h';
+  });
+  html = parsed && anyText && allHtml;
+  if (!parsed) return size;
+  if (!anyText) return 0;
+
+  uint32_t written = 0;
+  walkInlineFields(entry, size, cut, [&](char, const uint32_t at, const uint32_t length) {
+    if (length == 0) return;
+    if (written > 0) entry[written++] = '\n';
+    memmove(entry + written, entry + at, length);
+    written += length;
+  });
+  return written;
 }
 
 }  // namespace
@@ -258,6 +324,7 @@ bool Dictionary::open(const char* folderName) {
   basePath.clear();
   hasSyn = false;
   htmlDefinitions = false;
+  inlineTypes = false;
   std::string resolved;
   if (!DictionaryRegistry::resolveBasePath(folderName, resolved)) {
     LOG_ERR("DICT", "No dictionary found in folder '%s'", folderName ? folderName : "");
@@ -280,6 +347,7 @@ bool Dictionary::open(const char* folderName) {
   }
   hasSyn = Storage.exists((resolved + ".syn").c_str());
   htmlDefinitions = ifo.htmlDefinitions;
+  inlineTypes = ifo.inlineTypes;
 
   // A previously open dictionary's cached chunk table describes a different
   // file; the buffers themselves are content-free and stay.
@@ -790,6 +858,14 @@ bool Dictionary::readDefinition(const DictLocation& location, std::string& out, 
   if (!readEntryInto(location, size, &out[0], outResult)) {
     out.clear();
     return false;
+  }
+  if (inlineTypes) {
+    const uint32_t kept = decodeInlineEntry(&out[0], size, location.size > size, htmlDefinitions);
+    if (kept == 0) {
+      out.clear();
+      return fail(LookupResult::NotFound);
+    }
+    out.resize(kept);
   }
   return true;
 }
@@ -1749,6 +1825,10 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
   EntryPlan plan;
   for (uint8_t i = 0; i < match.count; i++) planEntries(session, match.hits[i], plan);
 
+  // Entries that name their own types may differ, and each heading is written before its entry is
+  // read, so they read together as plain text.
+  if (inlineTypes) htmlDefinitions = false;
+
   // Pass 1: which entries fit, and how many bytes they take. The first entry's definition is cut
   // to what is left of the cap; a later entry is taken whole or not at all, and the first that
   // does not fit ends the list.
@@ -1797,7 +1877,8 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
   for (uint32_t i = 0; i < taken; i++) {
     if (!nextPlannedEntry(session, plan, run, entry, location, ioError)) return fail(LookupResult::ReadError);
     char* const out = &definitionOut[0];
-    const uint32_t separator = (i > 0 && !html) ? sizeof(ENTRY_SEPARATOR) - 1 : 0;
+    const uint32_t entryStart = pos;
+    const uint32_t separator = (pos > 0 && !html) ? sizeof(ENTRY_SEPARATOR) - 1 : 0;
     const uint32_t heading = headingBytes(wordBuf, html);
     uint32_t definition = location.size;
     if (i == 0) definition = std::min(definition, MAX_DEFINITION_BYTES - std::min(heading, MAX_DEFINITION_BYTES));
@@ -1811,9 +1892,18 @@ bool Dictionary::readPrefixDefinitions(const DictPrefixMatch& match, std::string
     if (definition > 0) {
       LookupResult r = LookupResult::ReadError;
       if (!readEntryInto(location, definition, out + pos, &r)) return fail(r);
+      if (inlineTypes) {
+        bool entryHtml = false;
+        definition = decodeInlineEntry(out + pos, definition, location.size > definition, entryHtml);
+        if (definition == 0) {
+          pos = entryStart;  // no text under its heading: nothing to show of it
+          continue;
+        }
+      }
       pos += definition;
     }
   }
+  if (pos == 0) return fail(LookupResult::NotFound);
   // Entries that came out smaller than in pass 1 leave the tail of the buffer unwritten.
   definitionOut.resize(pos);
   if (outResult) *outResult = LookupResult::Found;
