@@ -43,6 +43,20 @@ void EpdFontFamily::beginText(const char* utf8Text, const Style style) const {
   if (font && font->data->provider) font->data->provider->beginText(utf8Text);
 }
 
+bool EpdFontFamily::drawsGlyphKeys(const Style style) const {
+  const EpdFont* font = getFont(style);
+  return font && font->data->provider && font->data->provider->drawsGlyphKeys();
+}
+
+EpdGlyphRef EpdFontFamily::findGlyphKey(const uint32_t key, const Style style) const {
+  if (!drawsGlyphKeys(style)) return EpdGlyphRef{};
+  return getFont(style)->findGlyph(key);
+}
+
+void EpdFontFamily::prefetchGlyphs(const uint16_t* glyphs, const size_t count, const Style style) const {
+  if (drawsGlyphKeys(style)) getFont(style)->data->provider->prefetchGlyphs(glyphs, count);
+}
+
 void EpdFontFamily::prefetch(const char* utf8Text, const uint8_t styleMask) const {
   const EpdFont* asked[4] = {};
   uint8_t count = 0;

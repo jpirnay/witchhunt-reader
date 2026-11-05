@@ -1,5 +1,6 @@
 #include "TtfOpenType.h"
 
+#include <GlyphKey.h>
 #include <Gpos.h>
 #include <Gsub.h>
 #include <KernTable.h>
@@ -46,6 +47,11 @@ int32_t Kerning::pair(FontBytes& bytes, const Face& face, const uint16_t left, c
 }
 
 uint16_t Ligatures::glyphFor(FontBytes& bytes, const Face& face, const uint32_t codepoint) const {
+  // A glyph key names the glyph itself; one past the font's glyphs names none.
+  if (glyph_key::is(codepoint)) {
+    const uint16_t glyph = glyph_key::glyphOf(codepoint);
+    return glyph < face.numGlyphs ? glyph : 0;
+  }
   if (codepoint >= kFirst && codepoint < kFirst + 5 && glyphs[codepoint - kFirst] != 0) {
     return glyphs[codepoint - kFirst];
   }

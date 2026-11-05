@@ -131,6 +131,10 @@ class TtfFont {
       return owner->ownsBitmap(glyph, bitmap);
     }
     void prefetch(const char* utf8Text) override { owner->prefetch(*size, style, utf8Text); }
+    bool drawsGlyphKeys() const override { return true; }
+    void prefetchGlyphs(const uint16_t* glyphs, const size_t count) override {
+      owner->prefetchGlyphs(*size, style, glyphs, count);
+    }
     int8_t kerning(const uint32_t leftCp, const uint32_t rightCp) override {
       return owner->kerning(*size, style, leftCp, rightCp);
     }
@@ -210,6 +214,10 @@ class TtfFont {
   const EpdGlyph* glyph(Size& size, uint8_t style, uint32_t codepoint);
   int8_t kerning(const Size& size, uint8_t drawn, uint32_t left, uint32_t right);
   void prefetch(Size& size, uint8_t style, const char* utf8Text);
+  // The glyph-ID prefetch: prefetch()'s rules for the glyph keys of `glyphs`.
+  void prefetchGlyphs(Size& size, uint8_t style, const uint16_t* glyphs, size_t count);
+  // Renders the first `count` of the set's pending glyphs in one batch, in glyph order, and stores them.
+  void renderPending(const Size& size, uint8_t style, uint8_t count, FontBytes& bytes);
   const EpdGlyph* render(const Size& size, uint8_t style, uint32_t codepoint, bool haveKey, uint32_t key);
   ttf::Status load(FontBytes& bytes, const ttf::Face& face, uint16_t index, const Size& size, uint8_t style,
                    EpdGlyph* metrics);

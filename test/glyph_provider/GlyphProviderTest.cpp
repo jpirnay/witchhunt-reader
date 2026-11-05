@@ -198,6 +198,15 @@ TEST(GlyphProvider, PrefetchAsksOnlyTheStylesInTheMask) {
   EXPECT_EQ(std::vector<std::string>{"Wolf"}, boldProvider.prefetched);
 }
 
+TEST(GlyphProvider, ByDefaultAProviderDrawsNoGlyphKeysAndPrefetchesNoGlyphs) {
+  FakeProvider provider;
+  const uint16_t glyphs[] = {3, 4};
+  EXPECT_FALSE(provider.drawsGlyphKeys());
+  provider.prefetchGlyphs(glyphs, 2);
+  EXPECT_TRUE(provider.asked.empty());
+  EXPECT_TRUE(provider.prefetched.empty());
+}
+
 TEST(GlyphProvider, PrefetchSkipsFontsWithoutAProvider) {
   FakeProvider boldProvider;
   const EpdFontData builtIn{};  // a built-in font has no provider

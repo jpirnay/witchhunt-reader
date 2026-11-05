@@ -125,4 +125,15 @@ class GlyphProvider {
   /// text call of GfxRenderer says so, so a provider may settle per string where its glyphs come from. Unlike
   /// prefetch(), which a page's layout calls once for its words, this comes with every string drawn.
   virtual void beginText(const char* utf8Text) { (void)utf8Text; }
+
+  /// True when this provider draws the keys of glyph_key (GlyphKey.h): a key from 0x110000 names a glyph by its ID.
+  /// Anything else must not be asked for one.
+  virtual bool drawsGlyphKeys() const { return false; }
+
+  /// The glyph-ID prefetch: prepare the glyphs `glyphs[0..count)` it lacks in one batch, as prefetch() does for text.
+  /// Lookups must still work for anything it skipped.
+  virtual void prefetchGlyphs(const uint16_t* glyphs, size_t count) {
+    (void)glyphs;
+    (void)count;
+  }
 };

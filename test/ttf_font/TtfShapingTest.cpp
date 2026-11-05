@@ -9,6 +9,10 @@
 #include <memory>
 #include <vector>
 
+#include "EpdFontFamily.h"
+#include "ExpectedGlyphRuns.h"
+#include "GlyphKey.h"
+#include "GlyphProvider.h"
 #include "GlyphStoreFormat.h"
 #include "SimNorFlash.h"
 #include "TtfBuilder.h"
@@ -177,7 +181,174 @@ class TtfShapingInstall : public ::testing::Test {
   int busy = 0;
 };
 
+// The glyph IDs: of a code point, and how many the file has.
+uint16_t gidOf(const std::vector<uint8_t>& file, const uint32_t cp) {
+  FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+  ttf::Face face;
+  EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+  return ttf::glyphIndex(bytes, face, cp);
+}
+
+uint16_t glyphCountOf(const std::vector<uint8_t>& file) {
+  FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+  ttf::Face face;
+  EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+  return face.numGlyphs;
+}
+
+// What the rasterizer draws for glyph `gid` at `ppem` (26.6), by index.
+Reference referenceByGlyph(const std::vector<uint8_t>& file, const uint16_t gid, const uint32_t ppem) {
+  FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
+  ttf::Face face;
+  EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
+  ttf::Rasterizer rasterizer;
+  EXPECT_TRUE(rasterizer.allocate(
+      ttf::planScratch(face, static_cast<uint32_t>(TtfFont::kMaxNativePx) << 6, ttf::kPoolBytesFlash)));
+  Reference ref;
+  EXPECT_EQ(ttf::Status::Ok, rasterizer.render(bytes, face, gid, ppem, &ref.metrics));
+  ref.bitmap.assign(rasterizer.output(), rasterizer.output() + ref.metrics.dataLength);
+  return ref;
+}
+
+int lockChecks = 0;
+bool countedLock() {
+  ++lockChecks;
+  return true;
+}
+
+// A provider that counts what it is asked and draws no glyph keys.
+class CountingProvider final : public GlyphProvider {
+ public:
+  int missed = 0;
+  const EpdGlyph* missGlyph(const uint32_t) override {
+    ++missed;
+    return nullptr;
+  }
+};
+
+class TtfGlyphKeys : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    subset[kRegular].bytes = readFixture("NotoSansDevanagari-Shaping-Regular.ttf");
+    ASSERT_FALSE(subset[kRegular].bytes.empty());
+    lockChecks = 0;
+    TtfFont::Hooks hooks;
+    hooks.renderLockHeld = countedLock;
+    TtfFont::setHooks(hooks);
+  }
+  void TearDown() override { TtfFont::setHooks({}); }
+
+  MemoryFile subset[4];
+  int busy = 0;
+};
+
 }  // namespace
+
+TEST_F(TtfGlyphKeys, AGlyphKeyDrawsThatGlyph) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  const uint16_t gid = gidOf(subset[kRegular].bytes, 0x0915);
+  ASSERT_NE(0, gid);
+  expectDrawnAs(reference(subset[kRegular].bytes, 0x0915, 14), font, kRegular,
+                font.glyph(kRegular, glyph_key::of(gid)));
+  const uint32_t renders = font.renders();
+  EXPECT_NE(nullptr, font.glyph(kRegular, glyph_key::of(gid)));
+  EXPECT_EQ(renders, font.renders());
+}
+
+TEST_F(TtfGlyphKeys, AKeyPastTheFontsGlyphsIsMissingOnce) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  const uint32_t key = glyph_key::of(glyphCountOf(subset[kRegular].bytes));
+  EXPECT_EQ(nullptr, font.glyph(kRegular, key));
+  EXPECT_EQ(nullptr, font.glyph(kRegular, key));
+  EXPECT_EQ(1, lockChecks);  // the font was asked once; the second answer is the store's
+  EXPECT_EQ(0u, font.renders());
+}
+
+TEST_F(TtfGlyphKeys, ASyntheticBoldKeyDrawsEmboldened) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);  // the Regular alone: Bold is synthesized
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  const uint16_t gid = gidOf(subset[kRegular].bytes, 0x0915);
+  expectDrawnAs(emboldenedAt(subset[kRegular].bytes, 0x0915, ttf::ppemFromPoints(14)), font, kBold,
+                font.glyph(kBold, glyph_key::of(gid)));
+}
+
+TEST_F(TtfGlyphKeys, KeysDrawInRingMode) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  ASSERT_TRUE(set->markFull());
+  ASSERT_TRUE(font.ringMode());
+  const ExpectedRun& run = kRegular1867Runs[0];  // हिन्दी
+  ASSERT_GT(run.count, 0);
+  for (uint8_t i = 0; i < run.count; ++i) {
+    const uint16_t gid = run.glyphs[i].gid;
+    expectDrawnAs(referenceByGlyph(subset[kRegular].bytes, gid, ttf::ppemFromPoints(14)), font, kRegular,
+                  font.glyph(kRegular, glyph_key::of(gid)));
+  }
+  EXPECT_TRUE(font.ringMode());
+}
+
+TEST_F(TtfGlyphKeys, PrefetchGlyphsStoresTheRunInABatch) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  const EpdFontFamily family(font.font(kRegular));
+  const ExpectedRun& run = kRegular1867Runs[0];  // हिन्दी
+  std::vector<uint16_t> gids;
+  for (uint8_t i = 0; i < run.count; ++i) gids.push_back(run.glyphs[i].gid);
+  ASSERT_TRUE(family.drawsGlyphKeys());
+
+  family.prefetchGlyphs(gids.data(), gids.size(), EpdFontFamily::REGULAR);
+  EXPECT_EQ(gids.size(), font.renders());  // each once
+  const uint32_t hits = font.storeHits();
+  for (const uint16_t gid : gids) {
+    expectDrawnAs(referenceByGlyph(subset[kRegular].bytes, gid, ttf::ppemFromPoints(14)), font, kRegular,
+                  font.glyph(kRegular, glyph_key::of(gid)));
+  }
+  EXPECT_EQ(hits + gids.size(), font.storeHits());  // the lookups after it are hits
+  EXPECT_EQ(gids.size(), font.renders());
+
+  family.prefetchGlyphs(gids.data(), gids.size(), EpdFontFamily::REGULAR);
+  EXPECT_EQ(gids.size(), font.renders());  // nothing new
+
+  const ExpectedRun& other = kRegular1867Runs[1];  // पत्रिका: glyphs the first run lacks
+  std::vector<uint16_t> more;
+  for (uint8_t i = 0; i < other.count; ++i) more.push_back(other.glyphs[i].gid);
+  ASSERT_TRUE(set->markFull());
+  const uint32_t used = set->stats().logUsed;
+  family.prefetchGlyphs(more.data(), more.size(), EpdFontFamily::REGULAR);
+  EXPECT_EQ(gids.size(), font.renders());  // ring mode: nothing rendered, nothing written
+  EXPECT_EQ(used, set->stats().logUsed);
+}
+
+TEST_F(TtfGlyphKeys, AFontThatDrawsNoGlyphKeysIsNotAsked) {
+  CountingProvider provider;
+  EpdFontData data{};
+  data.provider = &provider;
+  const EpdFont font(&data);
+  const EpdFontFamily family(&font);
+  EXPECT_FALSE(family.drawsGlyphKeys());
+  EXPECT_FALSE(static_cast<bool>(family.findGlyphKey(glyph_key::of(5))));
+  EXPECT_EQ(0, provider.missed);
+
+  const EpdFontData builtIn{};  // no provider
+  const EpdFont plain(&builtIn);
+  const EpdFontFamily builtInFamily(&plain);
+  EXPECT_FALSE(builtInFamily.drawsGlyphKeys());
+  EXPECT_FALSE(static_cast<bool>(builtInFamily.findGlyphKey(glyph_key::of(5))));
+  const uint16_t glyphs[] = {5};
+  builtInFamily.prefetchGlyphs(glyphs, 1, EpdFontFamily::REGULAR);  // nothing to ask
+}
 
 TEST_F(TtfShapingInstall, TheInstallWritesEachBlocksCpacAfterItsFile) {
   SimNorFlash chip{kFlashBytes};

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <GlyphKey.h>
+
 #include <cstddef>
 #include <cstdint>
 
@@ -113,8 +115,9 @@ constexpr uint32_t kSparePages = 2;
 constexpr uint32_t kExpectedRecordFlash = 100;
 constexpr uint32_t kExpectedRecordSd = 250;
 
-/// Glyph key: code point (21 bits), style (2), face-table index (5), which says the family and the size. Bits
-/// 28-31 stay zero, so a key is never the erased value.
+/// Glyph key: code point (21 bits; or a glyph_key, which fits them), style (2), face-table index (5), which says the
+/// family and the size. Bits 28-31 stay zero, so a key is never the erased value.
+static_assert(glyph_key::kLast <= 0x1FFFFFu, "a glyph key fits the key's 21 code point bits");
 constexpr uint32_t makeKey(const uint32_t codepoint, const uint8_t style, const uint8_t faceIndex) {
   return (codepoint & 0x1FFFFFu) | (static_cast<uint32_t>(style & 0x3u) << 21) |
          (static_cast<uint32_t>(faceIndex & 0x1Fu) << 23);

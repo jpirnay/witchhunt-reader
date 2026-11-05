@@ -38,6 +38,13 @@ class EpdFontFamily {
   /// Tells the provider of the font drawing `style` that `utf8Text` is measured or drawn next
   /// (GlyphProvider::beginText).
   void beginText(const char* utf8Text, Style style) const;
+  /// Whether the font drawing `style` takes glyph keys (its provider says drawsGlyphKeys()).
+  bool drawsGlyphKeys(Style style = REGULAR) const;
+  /// The glyph `key` (glyph_key) names, from the font drawing `style`, without fallbacks; invalid, asking nothing,
+  /// when that font draws no glyph keys.
+  EpdGlyphRef findGlyphKey(uint32_t key, Style style = REGULAR) const;
+  /// The glyph-ID prefetch: the font drawing `style` renders the glyphs it lacks in one batch, if it draws keys.
+  void prefetchGlyphs(const uint16_t* glyphs, size_t count, Style style) const;
 
  private:
   const EpdFont* regular;

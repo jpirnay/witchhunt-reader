@@ -1,5 +1,6 @@
 #include "TtfFont.h"
 
+#include <GlyphKey.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <OtFace.h>
@@ -1228,7 +1229,47 @@ void TtfFont::prefetch(Size& size, const uint8_t style, const char* utf8Text) {
     }
     pending[count++] = {cp, index};
   }
+  renderPending(size, style, count, bytes);
+}
+
+void TtfFont::prefetchGlyphs(Size& size, const uint8_t style, const uint16_t* glyphs, const size_t count) {
+  TtfFontSet& set = set_;
+  if (!glyphs || !draws(style) || set.ringMode_) return;
+  uint32_t key = 0;
+  if (!storeKey(size, style, 0, &key)) return;
+  checkLock();
+  FontBytes bytes;
+  if (!fontBytes(style, &bytes)) return;
+  const Style& drawn = *styleAt(style);
+  FlashGlyphStore& store = set.store_;
+  TtfFontSet::Pending* const pending = set.pending_;
+
+  // The glyphs not stored yet, each once, as prefetch() collects a text's.
+  uint8_t found = 0;
+  for (size_t i = 0; i < count && found < TtfFontSet::kPrefetchGlyphs; ++i) {
+    const uint32_t cp = glyph_key::of(glyphs[i]);
+    key = glyphstore::makeKey(cp, style, size.index);
+    if (store.find(key, nullptr) != Lookup::NotStored) continue;
+    if (std::any_of(pending, pending + found, [cp](const TtfFontSet::Pending& p) { return p.codepoint == cp; })) {
+      continue;
+    }
+    const uint16_t index = drawn.ligatures.glyphFor(bytes, drawn.face, cp);
+    if (index == 0) {
+      if (!bytes.ioError()) set.noteCommit(store.markNoGlyph(key));
+      if (set.ringMode_) return;
+      continue;
+    }
+    pending[found++] = {cp, index};
+  }
+  renderPending(size, style, found, bytes);
+}
+
+void TtfFont::renderPending(const Size& size, const uint8_t style, const uint8_t count, FontBytes& bytes) {
   if (count == 0) return;
+  TtfFontSet& set = set_;
+  const ttf::Face& face = styleAt(style)->face;
+  FlashGlyphStore& store = set.store_;
+  TtfFontSet::Pending* const pending = set.pending_;
   // Glyphs to draw, in what the set's first miss makes (spec 5.3). Without it the lookups ask again, one by one.
   const TtfFontSet::MissScope miss(set);
   if (!miss.ready()) return;
@@ -1240,7 +1281,7 @@ void TtfFont::prefetch(Size& size, const uint8_t style, const char* utf8Text) {
   GlyphBatch batch(set.rasterizer_.output(), set.batchCapacity());
   for (uint8_t i = 0; i < count && !set.ringMode_; ++i) {
     const TtfFontSet::Pending& p = pending[i];
-    key = glyphstore::makeKey(p.codepoint, style, size.index);
+    const uint32_t key = glyphstore::makeKey(p.codepoint, style, size.index);
     EpdGlyph metrics{};
     const ttf::Status loaded = load(bytes, face, p.glyph, size, style, &metrics);
     if (loaded != ttf::Status::Ok) {
