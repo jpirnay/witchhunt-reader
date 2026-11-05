@@ -658,7 +658,8 @@ page's black-and-white pass); it stays 0 until the store keeps use counts: once 
 step or chapter open (from the set's load when the log already is), or from `CMD:TTF:FULL`. `fills`, `wipes` and `last_wipe_ms` count since boot, whichever set was loaded; so do
 `rooms` (`makeRoom` calls that did work: a segment reclaimed or the index rebuilt; a wipe counts only in `wipes`,
 except a rebuild whose journal is full, which becomes one), `rebuilds`, `dropped` (glyphs
-the reclaims dropped), `last_room_ms` and `last_install_ms` (the last install of a set, from its plan to its header; 0 before the first). With no TrueType family loaded the set's fields are replaced by `none`:
+the reclaims dropped), `last_room_ms`, and `last_install_ms`. The last is the most recent install of a set, from its plan to its header;
+it is 0 before the first. With no TrueType family loaded the set's fields are replaced by `none`:
 `TTF:none fills=0 wipes=0 last_wipe_ms=0 rooms=0 rebuilds=0 dropped=0 last_room_ms=0`.
 
 `CMD:TTF:FULL` makes the store act as if it had just filled up: `TTF_OK:full`, or `TTF_ERROR:no TrueType family
@@ -676,10 +677,10 @@ the text's first Indic run (from its first Indic letter, at most 48 code points)
 TTF_SHAPE:script=Devanagari cpac=61440 init_us=410 repoint_us=95 plan_us=18300 plan_bytes=1480 shape_us=6200 glyphs=6 width=71 stored=5
 ```
 
-`cpac` is the CPac room after the regular file in its flash-mode block (0 in SD mode, where the block holds it
-inside its directory); `init_us` the first `current()` of the shaping face, which builds it; `repoint_us` the
-`current()` after a glyph of another flash-mode style was looked up (-1 when the family has no other style, or reads
-the card; a glyph the store already answers does not move the mapping); `plan_us` and `plan_bytes` the plan's build and
+`cpac` is the length of the CPac table the regular face uses, in either mode (0 when the face has no filters);
+`init_us` the first `current()` of the shaping face, which builds it; `repoint_us` the `current()` after the
+mapping was moved to another flash-mode style's block (forced first, untimed), so it times a real re-point (-1 when
+the family has no other style, reads the card, or the mapping did not move); `plan_us` and `plan_bytes` the plan's build and
 the heap it holds; `shape_us` the shaping; `glyphs` the run's glyphs and `width` its advance in pixels, from the
 compact records a section stores; `stored` how many of the run's distinct glyphs the store then holds, after the
 prefetch. Errors: `TTF_ERROR:no TrueType family loaded`, `no Indic letter`, `no shaping face`, `plan failed`,

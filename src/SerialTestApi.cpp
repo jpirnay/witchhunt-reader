@@ -971,7 +971,6 @@ void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, 
     r.error = "no shaping face";
     return;
   }
-  r.cpac = font.cpacBytes(0);
   uint32_t start = micros();
   const ot::Face* otFace = face->current();
   r.initUs = micros() - start;
@@ -980,15 +979,18 @@ void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, 
     return;
   }
 
-  // Another flash-mode style's glyph moves the mapping the face was read at: the next current() re-points it.
+  r.cpac = face->cpacBytes();
+
+  // Mapping another flash-mode style's block unmaps this one's: the next current() re-points the face. The move is
+  // forced untimed, then timed; -1 when no other style moved it.
   if (!set.readsCard()) {
     for (uint8_t style = 1; style < 4; ++style) {
       ShapingFace* const other = font.shapingFace(style);
-      if (!other || other == face) continue;
-      font.glyph(style, cps[0]);
+      if (!other || other == face || !other->current()) continue;
       start = micros();
       face->current();
-      r.repointUs = static_cast<long>(micros() - start);
+      const uint32_t elapsed = micros() - start;
+      if (face->repointed()) r.repointUs = static_cast<long>(elapsed);
       break;
     }
   }

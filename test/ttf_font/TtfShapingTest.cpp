@@ -986,6 +986,53 @@ TEST_F(TtfShapingFace, AFaceRepointedAfterAnotherStyleMappedShapesAlike) {
   EXPECT_EQ(before, regular->current());
 }
 
+TEST_F(TtfShapingFace, MappingAnotherStylesBlockMakesTheNextCallRepoint) {
+  SimNorFlash chip{kFlashBytes};
+  MovingNorFlash moving(chip);
+  const auto set = load(moving, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  ShapingFace* regular = font.shapingFace(kRegular);
+  ShapingFace* bold = font.shapingFace(kBold);
+  ASSERT_NE(nullptr, regular);
+  ASSERT_NE(nullptr, bold);
+  ASSERT_NE(nullptr, regular->current());
+  EXPECT_FALSE(regular->repointed());  // built, not re-pointed
+  ASSERT_NE(nullptr, regular->current());
+  EXPECT_FALSE(regular->repointed());   // nothing else mapped: no move
+  ASSERT_NE(nullptr, bold->current());  // maps the Bold block, unmapping the Regular's
+  ASSERT_NE(nullptr, regular->current());
+  EXPECT_TRUE(regular->repointed());
+  ASSERT_NE(nullptr, regular->current());
+  EXPECT_FALSE(regular->repointed());
+}
+
+TEST_F(TtfShapingFace, TheFacesCpacIsTheWritersTableInFlashMode) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  ShapingFace* face = set->font(0)->shapingFace(kRegular);
+  ASSERT_NE(nullptr, face);
+  ASSERT_NE(nullptr, face->current());
+  const std::vector<uint8_t> table = writerTable(subset[kRegular].bytes);
+  ASSERT_GT(table.size(), 0u);
+  EXPECT_EQ(table.size(), face->cpacBytes());
+}
+
+TEST_F(TtfShapingFace, TheFacesCpacIsTheWritersTableInSdMode) {
+  SimNorFlash chip{26 * kPage};
+  const auto set = loadSdMode(chip);
+  ASSERT_NE(nullptr, set);
+  const glyphstore::StyleInfo& info = headerOf(chip).styles[kAccentFirstBlock + kRegular];
+  ASSERT_EQ(glyphstore::kModeSd, info.mode);
+  ShapingFace* face = set->font(1)->shapingFace(kRegular);
+  ASSERT_NE(nullptr, face);
+  ASSERT_NE(nullptr, face->current());
+  const std::vector<uint8_t> table = writerTable(chipBytes(chip, info.offset, info.size));
+  ASSERT_GT(table.size(), 0u);
+  EXPECT_EQ(table.size(), face->cpacBytes());
+}
+
 TEST_F(TtfShapingFace, ABlockWhoseCpacFailsValidationShapesWithComputedFilters) {
   SimNorFlash chip{kFlashBytes};
   const auto set = load(chip, {subset}, kIdentityA, busy);

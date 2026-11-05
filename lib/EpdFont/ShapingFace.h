@@ -17,6 +17,11 @@ class ShapingFace {
   /// before each Plan::build and each ot::shape: a glyph lookup in another flash-mode style moves the mapping.
   const ot::Face* current();
 
+  /// Whether the last current() re-pointed the face because its mapping had moved.
+  bool repointed() const { return repointed_; }
+  /// The length of the CPac table the face uses, 0 when it has no filters; known once current() built the face.
+  uint32_t cpacBytes() const { return cpacBytes_; }
+
  protected:
   virtual const uint8_t* map() = 0;                                   // the block's base now; nullptr: unmapped
   virtual bool tables(const uint8_t* base, ot::FaceTables* out) = 0;  // the views over the block at `base`
@@ -24,5 +29,7 @@ class ShapingFace {
  private:
   ot::Face face_;
   const uint8_t* base_ = nullptr;
+  uint32_t cpacBytes_ = 0;
   enum class State : uint8_t { Unbuilt, Built, Refused } state_ = State::Unbuilt;
+  bool repointed_ = false;
 };

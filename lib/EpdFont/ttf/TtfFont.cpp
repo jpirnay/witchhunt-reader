@@ -1093,12 +1093,6 @@ ShapingFace* TtfFont::shapingFace(const uint8_t style) {
   return file.shaping.get();
 }
 
-uint32_t TtfFont::cpacBytes(const uint8_t style) const {
-  const Style* const file = styleAt(style);
-  if (!file || !file->present || file->onCard) return 0;
-  return glyphstore::cpacRoomOf(file->fileBytes, file->bytes).bytes;
-}
-
 void TtfFont::releaseShapingFaces() {
   for (uint8_t s = 0; s < styleCount_; ++s) styles_[s].shaping.reset();
 }
