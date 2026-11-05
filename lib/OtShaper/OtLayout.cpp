@@ -264,6 +264,17 @@ void appendSubtableDigests(const Face& face, const int table, const uint32_t loo
   }
 }
 
+Digest subtableDigest(const Face& face, const int table, const uint32_t lookupIndex,      // witchhunt: deviation 4
+                      const uint16_t subtable) {                                          // witchhunt: deviation 4
+  Digest d;                                                                               // witchhunt: deviation 4
+  const Table lookup = face.lookup(table, lookupIndex);                                   // witchhunt: deviation 4
+  if (subtable >= Face::subtableCount(lookup)) return d;                                  // witchhunt: deviation 4
+  const Table coverage =                                                                  // witchhunt: deviation 4
+      layout::subtableCoverage(table, lookup.u16(0), lookup.offset16(6 + 2 * subtable));  // witchhunt: deviation 4
+  layout::collectCoverage(coverage, d);                                                   // witchhunt: deviation 4
+  return d;                                                                               // witchhunt: deviation 4
+}  // witchhunt: deviation 4
+
 void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int table, const uint32_t lookupIndex,
                  const LookupSettings& settings) {
   if (!buffer.len() || !settings.mask) return;

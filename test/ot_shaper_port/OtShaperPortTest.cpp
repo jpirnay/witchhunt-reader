@@ -1,4 +1,5 @@
 #include <ExpectedShaping.h>
+#include <OtFilterWriter.h>
 #include <OtShaper.h>
 #include <gtest/gtest.h>
 
@@ -390,6 +391,165 @@ TEST(OtFaceRebase, TheFilterRecordsMoveButTheirAddressStays) {
   face.rebase(a.data(), b.data());
   EXPECT_EQ(face.filters(ot::GSUB), before);
   EXPECT_EQ(before->lookupDigests, b.data() + (digests - a.data()));
+}
+
+// The CPac table written from a face (deviation 4): byte for byte what the converter wrote, in any piece size, and
+// what Face::init() reads back.
+namespace {
+
+// The whole table in one call.
+std::vector<uint8_t> writeAll(ot::FilterTableWriter& writer) {
+  std::vector<uint8_t> out(writer.bytes());
+  EXPECT_EQ(writer.write(out.data(), static_cast<uint32_t>(out.size())), out.size());
+  return out;
+}
+
+// A GSUB of two lookups: an Extension lookup whose two subtables extend types 1 and 4 (HarfBuzz drops it), then a
+// SingleSubst lookup of one subtable.
+std::vector<uint8_t> mixedExtensionGsub() {
+  std::vector<uint8_t> bytes;
+  const auto u16 = [&bytes](const std::initializer_list<uint16_t> words) {
+    for (const uint16_t w : words) {
+      bytes.push_back(static_cast<uint8_t>(w >> 8));
+      bytes.push_back(static_cast<uint8_t>(w));
+    }
+  };
+  u16({1, 0, 0, 0, 10});   // header: v1.0, no scripts or features, lookups at 10
+  u16({2, 6, 48});         // 10: LookupList, lookups at 16 and 58
+  u16({7, 0, 2, 10, 30});  // 16: Extension lookup, subtables at 26 and 46
+  u16({1, 1, 0, 8});       // 26: ExtensionSubst extending type 1, at 34
+  u16({1, 6, 1});          // 34: SingleSubstFormat1, coverage at 40
+  u16({1, 1, 5});          // 40: Coverage, glyph 5
+  u16({1, 4, 0, 8});       // 46: ExtensionSubst extending type 4, at 54
+  u16({0, 0});             // 54: an empty extended subtable
+  u16({1, 0, 1, 8});       // 58: SingleSubst lookup, one subtable at 66
+  u16({1, 6, 1});          // 66: SingleSubstFormat1, coverage at 72
+  u16({1, 1, 5});          // 72: Coverage, glyph 5
+  return bytes;
+}
+
+}  // namespace
+
+TEST(OtFilterWriter, WritesTheConvertersTableByteForByte) {
+  for (const ShapingFixture& fx : kShapingFixtures) {
+    const std::vector<uint8_t> font = readFixture(fx.layoutFile);
+    ASSERT_FALSE(font.empty()) << fx.layoutFile;
+    ot::FaceTables tables;
+    ASSERT_TRUE(ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables));
+    const ot::Table converter = tables[ot::FaceTables::CPAC];
+    ASSERT_FALSE(converter.empty()) << fx.layoutFile;
+    tables[ot::FaceTables::CPAC] = ot::Table();
+    ot::Face face;
+    ASSERT_TRUE(face.init(tables));
+
+    ot::FilterTableWriter writer(face);
+    ASSERT_EQ(writer.bytes(), converter.length()) << fx.layoutFile;
+    const std::vector<uint8_t> written = writeAll(writer);
+    EXPECT_EQ(std::memcmp(written.data(), converter.data(), written.size()), 0) << fx.layoutFile;
+  }
+}
+
+TEST(OtFilterWriter, PiecesOfAnySizeGiveTheSameBytes) {
+  const std::vector<uint8_t> font = readFixture(kShapingFixtures[0].layoutFile);
+  ot::FaceTables tables;
+  ASSERT_TRUE(ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables));
+  tables[ot::FaceTables::CPAC] = ot::Table();
+  ot::Face face;
+  ASSERT_TRUE(face.init(tables));
+  ot::FilterTableWriter whole(face);
+  const std::vector<uint8_t> expected = writeAll(whole);
+
+  for (const uint32_t piece : {1u, 7u, 24u, 4096u}) {
+    ot::FilterTableWriter writer(face);
+    std::vector<uint8_t> out;
+    std::vector<uint8_t> buffer(piece);
+    for (uint32_t n; (n = writer.write(buffer.data(), piece)) > 0;) {
+      ASSERT_LE(n, piece);
+      out.insert(out.end(), buffer.begin(), buffer.begin() + n);
+    }
+    EXPECT_EQ(out, expected) << "pieces of " << piece;
+    EXPECT_EQ(writer.write(buffer.data(), piece), 0u) << "pieces of " << piece;
+  }
+}
+
+TEST(OtFilterWriter, TheTableItWritesIsTheOneTheFaceReads) {
+  size_t words = 0;
+  for (const ShapingFixture& fx : kShapingFixtures) {
+    ot::Script script = ot::Script::Devanagari;
+    ASSERT_TRUE(scriptOf(fx.script, &script)) << fx.script;
+    const std::vector<uint8_t> font = readFixture(fx.layoutFile);
+    ot::FaceTables tables;
+    ASSERT_TRUE(ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables));
+    tables[ot::FaceTables::CPAC] = ot::Table();
+    tables[ot::FaceTables::CPPL] = ot::Table();
+    ot::Face bare;
+    ASSERT_TRUE(bare.init(tables));
+    ot::FilterTableWriter writer(bare);
+    const std::vector<uint8_t> cpac = writeAll(writer);
+
+    tables[ot::FaceTables::CPAC] = ot::Table(cpac.data(), static_cast<uint32_t>(cpac.size()));
+    ot::Face face;
+    ASSERT_TRUE(face.init(tables));
+    EXPECT_NE(face.filters(ot::GSUB), nullptr) << fx.script;
+    EXPECT_NE(face.filters(ot::GPOS), nullptr) << fx.script;
+    for (size_t w = 0; w < fx.count; w++) {
+      const ExpectedShaping& word = fx.words[w];
+      ot::Plan plan;
+      ASSERT_TRUE(plan.build(face, script, ot::languageTagsFor(word.language))) << word.utf8;
+      std::vector<StoredGlyph> expected;
+      for (unsigned i = 0; i < word.count; i++) {
+        const ExpectedGlyph& g = word.glyphs[i];
+        expected.push_back({g.gid, g.advance12_4, g.dx, g.dy});
+      }
+      EXPECT_EQ(shapeAsStored(face, plan, word.utf8), expected) << fx.script << " word " << w << ": " << word.utf8;
+      words++;
+    }
+  }
+  EXPECT_EQ(words, 56u);
+}
+
+TEST(OtFilterWriter, AFaceWithoutLookupsHasNoTable) {
+  const std::vector<uint8_t> font = readFixture("NotoSansTamil-Regular.layout");
+  ot::FaceTables tables;
+  ASSERT_TRUE(ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables));
+  tables[ot::FaceTables::CPAC] = ot::Table();
+  tables[ot::FaceTables::GSUB_TABLE] = ot::Table();
+  tables[ot::FaceTables::GPOS_TABLE] = ot::Table();
+  ot::Face face;
+  ASSERT_TRUE(face.init(tables));
+  ot::FilterTableWriter writer(face);
+  EXPECT_EQ(writer.bytes(), 0u);
+  uint8_t out[8];
+  EXPECT_EQ(writer.write(out, sizeof(out)), 0u);
+}
+
+TEST(OtFilterWriter, AnExtensionLookupMixingTypesHasNoSubtables) {
+  const std::vector<uint8_t> font = readFixture("NotoSansTamil-Regular.layout");
+  const std::vector<uint8_t> gsub = mixedExtensionGsub();
+  ot::Face bare;
+  ASSERT_TRUE(initWithGsub(bare, font, gsub));
+  ASSERT_EQ(bare.lookupCount(ot::GSUB), 2u);
+  ASSERT_TRUE(bare.lookup(ot::GSUB, 0).empty());  // dropped
+  ot::FilterTableWriter writer(bare);
+  const std::vector<uint8_t> cpac = writeAll(writer);
+
+  const uint32_t gpos = bare.lookupCount(ot::GPOS);
+  // GSUB: header 16, two lookup digests, then the first-subtable indices.
+  const uint8_t* starts = cpac.data() + 16 + 2 * ot::DIGEST_BYTES;
+  const auto u32 = [](const uint8_t* p) { return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]; };
+  EXPECT_EQ(u32(starts), 0);
+  EXPECT_EQ(u32(starts + 4), 0);
+  // Header: one subtable in GSUB.
+  EXPECT_EQ(u32(cpac.data() + 8), 1);
+  EXPECT_GT(gpos, 0u);
+
+  ot::FaceTables tables;
+  ASSERT_TRUE(ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables));
+  tables[ot::FaceTables::GSUB_TABLE] = ot::Table(gsub.data(), static_cast<uint32_t>(gsub.size()));
+  tables[ot::FaceTables::CPAC] = ot::Table(cpac.data(), static_cast<uint32_t>(cpac.size()));
+  ot::Face face;
+  ASSERT_TRUE(face.init(tables));
+  EXPECT_NE(face.filters(ot::GSUB), nullptr);
 }
 
 TEST(OtShaperHelpers, DecodeUtf8StopsAtATruncatedSequence) {

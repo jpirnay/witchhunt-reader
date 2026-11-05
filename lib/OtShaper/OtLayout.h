@@ -38,6 +38,9 @@ Digest lookupDigest(const Face& face, int table, uint32_t lookupIndex);
 // that does not fit, and writes nothing past `out`'s size.
 void appendSubtableDigests(const Face& face, int table, uint32_t lookupIndex, FixedVector<uint8_t>& out);
 
+// The glyphs one subtable can start at: a record of appendSubtableDigests().  // witchhunt: deviation 4
+Digest subtableDigest(const Face& face, int table, uint32_t lookupIndex, uint16_t subtable);  // witchhunt: deviation 4
+
 // Applies one GSUB or GPOS lookup across the buffer. GPOS requires buffer.pos
 // to be sized.
 void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, int table, uint32_t lookupIndex,
