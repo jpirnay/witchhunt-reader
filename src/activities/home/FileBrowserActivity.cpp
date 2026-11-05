@@ -581,6 +581,11 @@ bool FileBrowserActivity::handleCoverTouch() {
   };
   int px = 0;
   int py = 0;
+  if (rowsTakeLongPress() && mappedInput.peekScreenLongPress(px, py) && hit(px, py)) {
+    mappedInput.suppressTouchContact();
+    onRowLongPress(index);
+    return true;
+  }
   // Down is claimed but not acted on, so the same contact cannot also be read by anything else.
   if (mappedInput.wasScreenTouchDown(px, py) && hit(px, py)) return true;
   if (!(mappedInput.wasScreenTapped(px, py) && hit(px, py))) return false;
@@ -930,6 +935,15 @@ void FileBrowserActivity::activateSelected(const bool longPress) {
   activityManager.replaceWithReader(std::move(fullPath), returnHint(entry));
 }
 
+// Touch only: a long Confirm keeps its own meaning, and the Options press works as before.
+bool FileBrowserActivity::rowsTakeLongPress() const { return model.getMode() != Mode::PickFolder; }
+
+void FileBrowserActivity::onRowLongPress(const int index) {
+  app.clearTapFlash();
+  nav.selected = index;
+  openContextMenu();
+}
+
 void FileBrowserActivity::activateIndex(const int index) {
   app.clearTapFlash();
   nav.selected = index;
@@ -1096,6 +1110,7 @@ void FileBrowserActivity::buildScreen(UiScreen& screen) {
   if (coversView()) return;
 
   auto props = listProps(screen);
+  if (rowsTakeLongPress()) props.inputMask |= freeink::ui::InputLongPress;
   props.count = static_cast<uint16_t>(listCount());
   // A filename may wrap; a Details row is a title over a subtitle at a fixed two-line height.
   const bool details = detailsView();

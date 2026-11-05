@@ -168,6 +168,8 @@ class MappedInputManager {
   bool wasScreenTouchPressed(int& x, int& y) const;
   bool wasScreenTouchDown(int& x, int& y) const;
   bool peekScreenLongPressIn(touchtransform::Orientation orientation, int& x, int& y) const;
+  // Same, in the live frame: for something drawn in whatever orientation the screen is in.
+  bool peekScreenLongPress(int& x, int& y) const;
   // Ignore the rest of this contact — its continued hold and its release edge.
   // For a caller that has acted on a tap or swipe and must stop the same contact
   // reaching the screen underneath as well.
