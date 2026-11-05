@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 
 // Indic syllable reordering for fonts rendered without OpenType shaping.
@@ -19,3 +20,9 @@
 // Returns false, leaving `out` unspecified, when `text` needs no reordering
 // (the common case: no Indic block bytes, found by a byte scan).
 bool indicReorderForDisplay(const char* text, std::string& out);
+
+// witchhunt: deviation 9 - the same form into `out` (`room` bytes, NUL-terminated), allocating nothing: true when the
+// form differs from the text and fits; false, `out` unspecified, otherwise. Room for 2 * len + 1 bytes always holds
+// the form: a two-part vowel at most doubles its bytes. `text` is `len` bytes and need not be NUL-terminated; `written`
+// is set (the form's length, without the NUL) only when true.
+bool indicReorderForDisplay(const char* text, size_t len, char* out, size_t room, size_t* written);

@@ -134,7 +134,62 @@ static_assert(rulesMatchScripts(), "kRules is out of step with indic::SCRIPTS");
 
 using Cursor = const unsigned char*;
 
-uint32_t peek(Cursor p) { return utf8NextCodepoint(&p); }
+// witchhunt: deviation 9 - every read is bounded by `end`, so a view that is not NUL-terminated is safe: the code point
+// at `p` (0 at the end), `p` moved past it.
+uint32_t next(Cursor& p, const Cursor end) {
+  if (p >= end) return 0;
+  unsigned char padded[5] = {};
+  const size_t n = static_cast<size_t>(end - p) < 4 ? static_cast<size_t>(end - p) : 4;
+  memcpy(padded, p, n);
+  Cursor cursor = padded;
+  const uint32_t cp = utf8NextCodepoint(&cursor);
+  p += cursor == padded ? 1 : cursor - padded;
+  return cp;
+}
+
+uint32_t peek(Cursor p, const Cursor end) { return next(p, end); }  // witchhunt: deviation 9
+
+// The output of a reordering: the std::string form of upstream, or a bounded buffer.
+struct StringOut {  // witchhunt: deviation 9
+  std::string& s;
+  void append(const char* data, size_t n) { s.append(data, n); }
+  void appendCodepoint(uint32_t cp) { utf8AppendCodepoint(cp, s); }
+};
+
+struct BoundedOut {  // witchhunt: deviation 9
+  char* buffer;
+  size_t room;  // bytes, one of them kept for the NUL
+  size_t used = 0;
+  bool full = false;
+  void append(const char* data, size_t n) {
+    if (full || n > room - 1 - used) {
+      full = true;
+      return;
+    }
+    memcpy(buffer + used, data, n);
+    used += n;
+  }
+  void appendCodepoint(uint32_t cp) {
+    char encoded[4];
+    size_t n = 0;
+    if (cp < 0x80) {
+      encoded[n++] = static_cast<char>(cp);
+    } else if (cp < 0x800) {
+      encoded[n++] = static_cast<char>(0xC0 | (cp >> 6));
+      encoded[n++] = static_cast<char>(0x80 | (cp & 0x3F));
+    } else if (cp < 0x10000) {
+      encoded[n++] = static_cast<char>(0xE0 | (cp >> 12));
+      encoded[n++] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+      encoded[n++] = static_cast<char>(0x80 | (cp & 0x3F));
+    } else {
+      encoded[n++] = static_cast<char>(0xF0 | (cp >> 18));
+      encoded[n++] = static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+      encoded[n++] = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+      encoded[n++] = static_cast<char>(0x80 | (cp & 0x3F));
+    }
+    append(encoded, n);
+  }
+};
 
 const ScriptRules* rulesFor(const uint32_t cp) {
   const indic::ScriptInfo* script = indic::scriptOf(cp);
@@ -169,71 +224,69 @@ bool isSyllableTail(const uint32_t cp) {
 }
 
 // Advances past one consonant and an optional nukta.
-Cursor skipConsonant(Cursor p) {
-  utf8NextCodepoint(&p);
+Cursor skipConsonant(Cursor p, const Cursor end) {  // witchhunt: deviation 9
+  next(p, end);                                     // witchhunt: deviation 9
   Cursor q = p;
-  return indic::isNukta(utf8NextCodepoint(&q)) ? q : p;
+  return indic::isNukta(next(q, end)) ? q : p;  // witchhunt: deviation 9
 }
 
 // End of the consonant cluster starting at `p`: C[N] (H [ZWJ] C[N])* [H [ZWJ|ZWNJ]],
 // where a bare H only continues the cluster in scripts whose virama joins.
-Cursor clusterEnd(const ScriptRules& rules, Cursor p) {
-  p = skipConsonant(p);
-  while (indic::isVirama(peek(p))) {
+Cursor clusterEnd(const ScriptRules& rules, Cursor p, const Cursor end) {  // witchhunt: deviation 9
+  p = skipConsonant(p, end);                                               // witchhunt: deviation 9
+  while (indic::isVirama(peek(p, end))) {                                  // witchhunt: deviation 9
     Cursor q = p;
-    utf8NextCodepoint(&q);
+    next(q, end);  // witchhunt: deviation 9
     Cursor afterJoiner = q;
-    const bool zwj = utf8NextCodepoint(&afterJoiner) == indic::ZWJ;
+    const bool zwj = next(afterJoiner, end) == indic::ZWJ;  // witchhunt: deviation 9
     if (!zwj) afterJoiner = q;
-    if ((zwj || rules.viramaJoins) && isConsonant(rules, peek(afterJoiner))) {
-      p = skipConsonant(afterJoiner);
+    if ((zwj || rules.viramaJoins) && isConsonant(rules, peek(afterJoiner, end))) {  // witchhunt: deviation 9
+      p = skipConsonant(afterJoiner, end);                                           // witchhunt: deviation 9
       continue;
     }
     // Syllable-final virama, optionally with an explicit joiner.
-    const uint32_t joiner = peek(q);
-    if (joiner == indic::ZWJ || joiner == indic::ZWNJ) utf8NextCodepoint(&q);
+    const uint32_t joiner = peek(q, end);                             // witchhunt: deviation 9
+    if (joiner == indic::ZWJ || joiner == indic::ZWNJ) next(q, end);  // witchhunt: deviation 9
     return q;
   }
   return p;
 }
 
-Cursor tailEnd(Cursor p) {
-  while (isSyllableTail(peek(p))) utf8NextCodepoint(&p);
+Cursor tailEnd(Cursor p, const Cursor end) {          // witchhunt: deviation 9
+  while (isSyllableTail(peek(p, end))) next(p, end);  // witchhunt: deviation 9
   return p;
 }
 
 // Copies [begin, end), composing nukta letters. Sets `changed` when it does.
-void appendCluster(const ScriptRules& rules, Cursor begin, const Cursor end, std::string& out, bool& changed) {
+template <typename Out>  // witchhunt: deviation 9
+void appendCluster(const ScriptRules& rules, Cursor begin, const Cursor end, Out& out,
+                   bool& changed) {  // witchhunt: deviation 9
   while (begin < end) {
     const Cursor start = begin;
-    const uint32_t cp = utf8NextCodepoint(&begin);
+    const uint32_t cp = next(begin, end);  // witchhunt: deviation 9
     if (const uint32_t composed = composeNukta(rules, cp);
-        composed != 0 && begin < end && indic::isNukta(peek(begin))) {
-      utf8NextCodepoint(&begin);
-      utf8AppendCodepoint(composed, out);
+        composed != 0 && begin < end && indic::isNukta(peek(begin, end))) {  // witchhunt: deviation 9
+      next(begin, end);                                                      // witchhunt: deviation 9
+      out.appendCodepoint(composed);                                         // witchhunt: deviation 9
       changed = true;
       continue;
     }
-    out.append(reinterpret_cast<const char*>(start), begin - start);
+    out.append(reinterpret_cast<const char*>(start), begin - start);  // witchhunt: deviation 9
   }
 }
 
-}  // namespace
-
-bool indicReorderForDisplay(const char* text, std::string& out) {
-  if (text == nullptr || !indic::containsIndic(text)) return false;
-
-  out.clear();
-  out.reserve(strlen(text) + 8);
+// The text [begin, end) reordered into `out`; true when anything changed.
+template <typename Out>  // witchhunt: deviation 9
+bool reorderInto(const Cursor begin, const Cursor end, Out& out) {
   bool changed = false;
 
-  Cursor p = reinterpret_cast<Cursor>(text);
-  while (*p) {
-    const uint32_t cp = peek(p);
+  Cursor p = begin;
+  while (p < end) {
+    const uint32_t cp = peek(p, end);
     const ScriptRules* rules = rulesFor(cp);
     if (rules == nullptr || !isConsonant(*rules, cp)) {
       const Cursor start = p;
-      utf8NextCodepoint(&p);
+      next(p, end);
       out.append(reinterpret_cast<const char*>(start), p - start);
       continue;
     }
@@ -243,35 +296,61 @@ bool indicReorderForDisplay(const char* text, std::string& out) {
     Cursor clusterBegin = p;
     {
       Cursor q = p;
-      if (utf8NextCodepoint(&q) == rules->ra && indic::isVirama(utf8NextCodepoint(&q)) &&
-          isConsonant(*rules, peek(q))) {
+      if (next(q, end) == rules->ra && indic::isVirama(next(q, end)) && isConsonant(*rules, peek(q, end))) {
         out.append(reinterpret_cast<const char*>(p), q - p);
         clusterBegin = q;
       }
     }
 
-    const Cursor clusterStop = clusterEnd(*rules, clusterBegin);
-    const Cursor tailStop = tailEnd(clusterStop);
+    const Cursor clusterStop = clusterEnd(*rules, clusterBegin, end);
+    const Cursor tailStop = tailEnd(clusterStop, end);
 
     for (Cursor t = clusterStop; t < tailStop;) {
-      if (const PreBaseVowel* vowel = preBaseVowel(*rules, utf8NextCodepoint(&t))) {
-        utf8AppendCodepoint(vowel->pre, out);
+      if (const PreBaseVowel* vowel = preBaseVowel(*rules, next(t, end))) {
+        out.appendCodepoint(vowel->pre);
         changed = true;
       }
     }
     appendCluster(*rules, clusterBegin, clusterStop, out, changed);
     for (Cursor t = clusterStop; t < tailStop;) {
-      const uint32_t sign = utf8NextCodepoint(&t);
+      const uint32_t sign = next(t, end);
       const PreBaseVowel* vowel = preBaseVowel(*rules, sign);
       if (vowel == nullptr) {
-        utf8AppendCodepoint(sign, out);
+        out.appendCodepoint(sign);
         continue;
       }
       for (const uint32_t post : vowel->post) {
-        if (post != 0) utf8AppendCodepoint(post, out);
+        if (post != 0) out.appendCodepoint(post);
       }
     }
     p = tailStop;
   }
   return changed;
+}
+
+}  // namespace
+
+bool indicReorderForDisplay(const char* text, std::string& out) {
+  if (text == nullptr || !indic::containsIndic(text)) return false;
+
+  out.clear();
+  out.reserve(strlen(text) + 8);
+  StringOut sink{out};  // witchhunt: deviation 9
+  const Cursor begin = reinterpret_cast<Cursor>(text);
+  return reorderInto(begin, begin + strlen(text), sink);  // witchhunt: deviation 9
+}
+
+// witchhunt: deviation 9
+bool indicReorderForDisplay(const char* text, size_t len, char* out, size_t room, size_t* written) {
+  if (text == nullptr || out == nullptr || room == 0) return false;
+  const auto* bytes = reinterpret_cast<const unsigned char*>(text);
+  bool holdsIndic = false;
+  for (size_t i = 0; i + 3 <= len && !holdsIndic; i++) holdsIndic = indic::startsIndic(bytes + i);
+  if (!holdsIndic) return false;
+
+  BoundedOut sink{out, room};
+  if (!reorderInto(bytes, bytes + len, sink) || sink.full) return false;
+  out[sink.used] = '\0';
+  *written = sink.used;
+  return true;
 }
