@@ -33,6 +33,7 @@
 #include "FontInstaller.h"
 #include "GlobalBookmarkIndex.h"
 #include "HttpFileStreamer.h"
+#include "MultipartRoute.h"
 #include "OpdsServerStore.h"
 #include "ReadingStats.h"
 #include "SdCardFontGlobals.h"
@@ -427,6 +428,15 @@ void CrossPointWebServer::begin() {
 
   // Setup routes
   LOG_DBG("WEB", "Setting up routes...");
+  // Ownership passes to the WebServer, which deletes the handler when stopped.
+  const auto addMultipartRoute = [this](const char* path, MultipartRoute::Action finished,
+                                        MultipartRoute::Action part) {
+    if (auto route = makeUniqueNoThrow<MultipartRoute>(path, std::move(finished), std::move(part))) {
+      server->addHandler(route.release());
+    } else {
+      LOG_ERR("WEB", "OOM: route %s not available", path);
+    }
+  };
   server->on("/", HTTP_GET, [this] { handleWelcomePage(); });
   // The pages come from the SD card (WebAssets.h); this one, in flash, installs them.
   server->on("/setup", HTTP_GET, [this] { handleWebSetupPage(); });
@@ -446,7 +456,7 @@ void CrossPointWebServer::begin() {
   server->on("/download", HTTP_GET, [this] { handleDownload(); });
 
   // Upload endpoint with special handling for multipart form data
-  server->on("/upload", HTTP_POST, [this] { handleUploadPost(upload); }, [this] { handleUpload(upload); });
+  addMultipartRoute("/upload", [this] { handleUploadPost(upload); }, [this] { handleUpload(upload); });
 
   // Create folder endpoint
   server->on("/mkdir", HTTP_POST, [this] { handleCreateFolder(); });
@@ -475,7 +485,7 @@ void CrossPointWebServer::begin() {
   server->on("/api/fonts", HTTP_GET, [this] { handleFontList(); });
   server->on("/api/fonts/manifest", HTTP_GET, [this] { handleFontManifest(); });
   server->on("/api/fonts/download", HTTP_POST, [this] { handleFontDownload(); });
-  server->on("/api/fonts/upload", HTTP_POST, [this] { handleFontUpload(); }, [this] { handleFontUploadData(); });
+  addMultipartRoute("/api/fonts/upload", [this] { handleFontUpload(); }, [this] { handleFontUploadData(); });
   server->on("/api/fonts/delete", HTTP_POST, [this] { handleFontDelete(); });
 
   // Singular, so it cannot be mistaken for the /dictionaries folder on the card.
@@ -492,13 +502,13 @@ void CrossPointWebServer::begin() {
   server->on("/plugin", HTTP_GET, [this] { handlePluginFile(); });
   server->on("/api/relay", HTTP_GET, [this] { handleRelay(); });
   server->on("/api/fetch", HTTP_POST, [this] { handleFetchToSd(); });
-  server->on("/api/plugin-fs", HTTP_POST, [this] { handlePluginFs(); }, [this] { handlePluginFsData(); });
+  addMultipartRoute("/api/plugin-fs", [this] { handlePluginFs(); }, [this] { handlePluginFsData(); });
   server->on("/plugins", HTTP_GET, [this] { handlePluginsPage(); });
   server->on("/api/book/opf", HTTP_GET, [this] { handleBookOpf(); });
-  server->on("/api/book/replace", HTTP_POST, [this] { handleBookReplace(); }, [this] { handleBookReplaceData(); });
+  addMultipartRoute("/api/book/replace", [this] { handleBookReplace(); }, [this] { handleBookReplaceData(); });
   server->on("/api/plugins/begin", HTTP_POST, [this] { handlePluginInstallBegin(); });
-  server->on(
-      "/api/plugins/file", HTTP_POST, [this] { handlePluginInstallFile(); }, [this] { handlePluginInstallFileData(); });
+  addMultipartRoute(
+      "/api/plugins/file", [this] { handlePluginInstallFile(); }, [this] { handlePluginInstallFileData(); });
   server->on("/api/plugins/commit", HTTP_POST, [this] { handlePluginInstallCommit(); });
   server->on("/api/plugins/remove", HTTP_POST, [this] { handlePluginRemove(); });
   server->on("/api/plugins/enable", HTTP_POST, [this] { handlePluginEnable(); });
@@ -3327,11 +3337,10 @@ void CrossPointWebServer::handleFetchToSd() {
   sendJson(server.get(), 200, doc);
 }
 
-// ---- Raw request bodies --------------------------------------------------------------------------
+// ---- Files that replace a target once whole --------------------------------------------------------
 
-void CrossPointWebServer::RawFileUpload::start(const String& target, const size_t maxBytes) {
+void CrossPointWebServer::StagedUpload::start(const String& target, const size_t maxBytes) {
   if (file) file.close();  // left by a request the client dropped mid-body
-  started = true;
   status = 0;
   error = "";
   written = 0;
@@ -3349,32 +3358,32 @@ void CrossPointWebServer::RawFileUpload::start(const String& target, const size_
   }
 }
 
-void CrossPointWebServer::RawFileUpload::fail(const int httpStatus, const char* message) {
+void CrossPointWebServer::StagedUpload::fail(const int httpStatus, const char* message) {
   status = httpStatus;
   error = message;
   if (file) file.close();
   if (!temp.isEmpty()) Storage.remove(temp.c_str());
 }
 
-void CrossPointWebServer::RawFileUpload::feed(const HTTPRaw& raw) {
-  switch (raw.status) {
-    case RAW_START:  // start() handles it, once the caller knows the target
+void CrossPointWebServer::StagedUpload::feed(const HTTPUpload& up) {
+  switch (up.status) {
+    case UPLOAD_FILE_START:  // start() handles it, once the caller knows the target
       return;
-    case RAW_WRITE:
+    case UPLOAD_FILE_WRITE:
       if (status != 0) return;
-      if (written + raw.currentSize > cap) {
+      if (written + up.currentSize > cap) {
         fail(413, "file too large");
         return;
       }
-      if (file.write(raw.buf, raw.currentSize) != raw.currentSize) {
-        LOG_ERR("WEB", "raw upload short write at %u B to %s", static_cast<unsigned>(written), temp.c_str());
+      if (file.write(up.buf, up.currentSize) != up.currentSize) {
+        LOG_ERR("WEB", "staged upload short write at %u B to %s", static_cast<unsigned>(written), temp.c_str());
         fail(500, "short write");
         return;
       }
-      written += raw.currentSize;
+      written += up.currentSize;
       HalSystem::feedWatchdog();
       return;
-    case RAW_END:
+    case UPLOAD_FILE_END:
       if (status != 0) return;
       // close() writes the last cached sector and the directory entry: a failure there leaves the
       // file cut short. The file it replaces steps aside until the new one is in its place, and
@@ -3385,19 +3394,13 @@ void CrossPointWebServer::RawFileUpload::feed(const HTTPRaw& raw) {
         fail(500, "could not replace file");
       }
       return;
-    case RAW_ABORTED:
+    case UPLOAD_FILE_ABORTED:
       fail(400, "upload interrupted");
       return;
   }
 }
 
-bool CrossPointWebServer::RawFileUpload::answerFailure(WebServer& server) {
-  if (!started) {
-    // A multipart body is parsed as a form and never streams; every other content type does.
-    server.send(415, "application/json", "{\"error\":\"send the file as the raw request body\"}");
-    return true;
-  }
-  started = false;
+bool CrossPointWebServer::StagedUpload::answerFailure(WebServer& server) {
   if (status == 0) return false;
   JsonDocument err;
   err["error"] = error;
@@ -3405,33 +3408,34 @@ bool CrossPointWebServer::RawFileUpload::answerFailure(WebServer& server) {
   return true;
 }
 
-// POST /api/plugin-fs?plugin=<name>&path=<sd path>  (raw body = file contents)
+// POST /api/plugin-fs?plugin=<name>&path=<sd path>  (multipart: the file)
 //
 // Writes one small file to the card. /upload already does this, so this exists
 // for compatibility with plugins written against the upstream API rather than
 // because the web UI needs it - hence the modest cap, which keeps it to the
 // small-file job it advertises and leaves bulk transfers to /upload. The body streams through
-// rawUpload, never held whole, so it needs no low-memory gate.
+// stagedUpload, never held whole, so it needs no low-memory gate.
 void CrossPointWebServer::handlePluginFs() {
-  if (rawUpload.answerFailure(*server)) return;
-  LOG_DBG("WEB", "plugin-fs wrote %u bytes to %s", static_cast<unsigned>(rawUpload.written), rawUpload.path.c_str());
-  clearBookCacheIfNeeded(rawUpload.path);
+  if (stagedUpload.answerFailure(*server)) return;
+  LOG_DBG("WEB", "plugin-fs wrote %u bytes to %s", static_cast<unsigned>(stagedUpload.written),
+          stagedUpload.path.c_str());
+  clearBookCacheIfNeeded(stagedUpload.path);
   JsonDocument doc;
   doc["ok"] = true;
-  doc["path"] = rawUpload.path.c_str();
+  doc["path"] = stagedUpload.path.c_str();
   sendJson(server.get(), 200, doc);
 }
 
 void CrossPointWebServer::handlePluginFsData() {
-  const HTTPRaw& raw = server->raw();
-  if (raw.status == RAW_START) {
+  const HTTPUpload& up = server->upload();
+  if (up.status == UPLOAD_FILE_START) {
     tolerateUploadStalls(*server);
     const String plugin = server->arg("plugin");
-    rawUpload.start(isSafePathComponent(plugin) ? pluginWriteTarget(server->arg("path")) : String(),
-                    PLUGIN_FS_MAX_BYTES);
+    stagedUpload.start(isSafePathComponent(plugin) ? pluginWriteTarget(server->arg("path")) : String(),
+                       PLUGIN_FS_MAX_BYTES);
     return;
   }
-  rawUpload.feed(raw);
+  stagedUpload.feed(up);
 }
 
 // ---- The Plugins page ----------------------------------------------------------------------------
@@ -3485,7 +3489,7 @@ void CrossPointWebServer::handleBookOpf() const {
   out.finish();
 }
 
-// POST /api/book/replace?path=<book.epub>[&keep=1]  (raw body = the new book)
+// POST /api/book/replace?path=<book.epub>[&keep=1]  (multipart: the new book)
 //
 // The File Manager's in-place optimize: it downloads a book, optimizes it in the browser and sends
 // it back here. The new file is written beside the book and swapped in only once complete. The
@@ -3514,9 +3518,9 @@ void dropLayoutCache(const String& bookPath) {
 }  // namespace
 
 void CrossPointWebServer::handleBookReplace() {
-  const String path = bookReplacePath;  // validated in handleBookReplaceData(); rawUpload.path is <path>.new
+  const String path = bookReplacePath;  // validated in handleBookReplaceData(); stagedUpload.path is <path>.new
   bookReplacePath = "";
-  if (rawUpload.answerFailure(*server)) return;
+  if (stagedUpload.answerFailure(*server)) return;
   const String fresh = path + ".new";
   const String backup = path + ".bak";
   // The upload wrote <path>.new.part and renamed it to <path>.new; now <path> itself moves.
@@ -3550,7 +3554,7 @@ void CrossPointWebServer::handleBookReplace() {
     clearBookCacheIfNeeded(path);
     GLOBAL_BOOKMARKS.removeBySourcePath(path.c_str());
   }
-  LOG_DBG("WEB", "Replaced %s (%u B, %s)", path.c_str(), static_cast<unsigned>(rawUpload.written),
+  LOG_DBG("WEB", "Replaced %s (%u B, %s)", path.c_str(), static_cast<unsigned>(stagedUpload.written),
           keep ? "reading state kept" : "reading state reset");
 
   JsonDocument doc;
@@ -3563,15 +3567,15 @@ void CrossPointWebServer::handleBookReplace() {
 }
 
 void CrossPointWebServer::handleBookReplaceData() {
-  const HTTPRaw& raw = server->raw();
-  if (raw.status == RAW_START) {
+  const HTTPUpload& up = server->upload();
+  if (up.status == UPLOAD_FILE_START) {
     tolerateUploadStalls(*server);
     const String target = bookReplaceTarget(server->arg("path"));
     bookReplacePath = target;
-    rawUpload.start(target.isEmpty() ? target : target + ".new", BOOK_REPLACE_MAX_BYTES);
+    stagedUpload.start(target.isEmpty() ? target : target + ".new", BOOK_REPLACE_MAX_BYTES);
     return;
   }
-  rawUpload.feed(raw);
+  stagedUpload.feed(up);
 }
 
 void CrossPointWebServer::handlePluginInstallBegin() const {
@@ -3591,24 +3595,24 @@ void CrossPointWebServer::handlePluginInstallBegin() const {
 }
 
 void CrossPointWebServer::handlePluginInstallFile() {
-  if (rawUpload.answerFailure(*server)) return;
-  LOG_DBG("WEB", "plugin file %s (%u B)", rawUpload.path.c_str(), static_cast<unsigned>(rawUpload.written));
+  if (stagedUpload.answerFailure(*server)) return;
+  LOG_DBG("WEB", "plugin file %s (%u B)", stagedUpload.path.c_str(), static_cast<unsigned>(stagedUpload.written));
   server->send(200, "application/json", "{\"ok\":true}");
 }
 
 void CrossPointWebServer::handlePluginInstallFileData() {
-  const HTTPRaw& raw = server->raw();
-  if (raw.status == RAW_START) {
+  const HTTPUpload& up = server->upload();
+  if (up.status == UPLOAD_FILE_START) {
     tolerateUploadStalls(*server);
     // Flat files only: /plugin serves single path components, so a nested one could never load.
     const String name = server->arg("name");
     const String fileName = server->arg("file");
     const std::string staging = pluginStagingDir(name);
     const bool valid = isSafePathComponent(name) && isSafePathComponent(fileName) && Storage.exists(staging.c_str());
-    rawUpload.start(valid ? String((staging + "/" + fileName.c_str()).c_str()) : String(), PLUGIN_FILE_MAX_BYTES);
+    stagedUpload.start(valid ? String((staging + "/" + fileName.c_str()).c_str()) : String(), PLUGIN_FILE_MAX_BYTES);
     return;
   }
-  rawUpload.feed(raw);
+  stagedUpload.feed(up);
 }
 
 void CrossPointWebServer::handlePluginInstallCommit() const {

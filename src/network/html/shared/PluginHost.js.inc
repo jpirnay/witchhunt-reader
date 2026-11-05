@@ -105,7 +105,7 @@ async function loadPlugins(mount) {
         writeFile: async (path, data) => {
           const r = await fetch('/api/plugin-fs?plugin=' + encodeURIComponent(p.name) +
             '&path=' + encodeURIComponent(path),
-            { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: data });
+            { method: 'POST', body: uploadForm(data) });
           if (!r.ok) throw new Error('plugin-fs ' + r.status + ': ' + (await r.text().catch(() => '')));
           return r.json();
         },
