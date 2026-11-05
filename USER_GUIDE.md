@@ -143,6 +143,7 @@ On the **X4 Pro**, the **LilyGo T5 S3** and the **Murphy M3**, a finger does mos
 | --- | --- | --- |
 | In a list | Tap a row | Highlight it. Tap it again to open it |
 | In a list | Swipe up / down | Move a page |
+| In the Library | Hold a row or cover | Open its options |
 | Anywhere | Tap a box at the edge of the screen | Press the button it names. Hold it to hold the button |
 | Anywhere | Swipe down from the top edge | Open the reading light |
 | In a book | Tap the left / right side | Previous / next page |
