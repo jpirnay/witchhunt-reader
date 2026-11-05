@@ -3350,6 +3350,10 @@ ShapingFace* GfxRenderer::shapingFace(const int fontId, const EpdFontFamily::Sty
   return family ? family->shapingFace(style, ppem26_6) : nullptr;
 }
 
+void GfxRenderer::releaseShapingFaces() {
+  if (shapingFaceRelease_) shapingFaceRelease_();
+}
+
 int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style style) const {
   const EpdFontFamily* const family = findFontFamily(fontId);
   if (!family) {

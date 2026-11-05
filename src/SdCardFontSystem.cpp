@@ -68,6 +68,11 @@ void returnGlyphLend() {
   ttfRenderer->setSingleBufferFastDiff(false);
 }
 
+// A section build's end: every shaping face, and the plans each keeps, go back to the heap (ShapingFace).
+void ttfReleaseShapingFaces() {
+  if (ttfSystem && ttfSystem->ttfSet()) ttfSystem->ttfSet()->releaseShapingFaces();
+}
+
 void ttfPassEnded() {
   if (ttfSystem) ttfSystem->releaseTtfMissMemory();
   returnGlyphLend();
@@ -614,6 +619,7 @@ void SdCardFontSystem::begin(GfxRenderer& renderer) {
   ttfSystem = this;
   manager_.setUiFontHook(&CjkUiFonts::setReaderFont);
   GfxRenderer::setBeforePushHook(&returnGlyphLend);
+  GfxRenderer::setShapingFaceRelease(&ttfReleaseShapingFaces);
   TtfFont::setHooks({&RenderLock::heldByCurrentTask, &ttfYield, &ttfReclaim, &ttfNowMs, &ttfCountsDraw});
   // A miss's memory on the heap lasts as long as the pass that drew it: whichever task rendered gives it back with
   // RenderLock, and a page drawn from the glyph store needs none of it (TtfFontSet::releaseMissMemory).
