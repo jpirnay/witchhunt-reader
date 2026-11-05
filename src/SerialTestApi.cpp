@@ -1066,6 +1066,8 @@ void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, 
   for (unsigned i = 0; i < distinct; ++i) {
     family.findGlyphKey(glyph_key::of(glyphs[i]), EpdFontFamily::REGULAR);
   }
+  // The lookups above count their hits in the same store, so the two reads differ.
+  // cppcheck-suppress duplicateExpression
   r.stored = font.storeHits() - hitsBefore;
 }
 
