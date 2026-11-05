@@ -1,6 +1,7 @@
 #include "TtfFamily.h"
 
 #include <Memory.h>
+#include <OtPlan.h>
 
 #include <algorithm>
 #include <cstring>
@@ -134,14 +135,19 @@ bool isOutlineFontFileName(const char* name) {
   return (first == 't' || first == 'o') && (ext[1] | 0x20) == 't' && (ext[2] | 0x20) == 'f';
 }
 
-bool countLookups(const FileSource& file, const uint32_t offset, const uint32_t length, LayoutCounts* out) {
+namespace {
+
+// A GSUB's or GPOS's header: u16 major and minor version, then the u16 offsets of its ScriptList (4), FeatureList (6)
+// and LookupList (8).
+constexpr uint32_t kLayoutHeaderBytes = 10;
+
+// countLookups() of a table whose header (`header`, kLayoutHeaderBytes) was read already.
+bool countLookupsAfter(const FileSource& file, const uint32_t offset, const uint32_t length,
+                       const uint8_t (&header)[kLayoutHeaderBytes], LayoutCounts* out) {
   *out = {};
   // As Face reads the table: a major version of 1, the LookupList at u16 offset 8, each lookup at a u16 offset of the
   // list; a null or out-of-table offset is a lookup of no subtables, and a lookup declares at most the subtables that
   // fit its table. The lookups are as many as the list declares, whatever fits.
-  if (!inFile(file, offset, length) || length < 10) return true;
-  uint8_t header[10];
-  if (!file.read(file.ctx, offset, header, sizeof header)) return false;
   const uint32_t listAt = be16(header + 8);
   if (be16(header) != 1 || listAt == 0 || listAt >= length) return true;
   const uint32_t listLength = length - listAt;
@@ -201,7 +207,73 @@ bool countLookups(const FileSource& file, const uint32_t offset, const uint32_t 
   return true;
 }
 
+}  // namespace
+
+bool countLookups(const FileSource& file, const uint32_t offset, const uint32_t length, LayoutCounts* out) {
+  *out = {};
+  if (!inFile(file, offset, length) || length < kLayoutHeaderBytes) return true;  // a table Face does not read
+  uint8_t header[kLayoutHeaderBytes];
+  if (!file.read(file.ctx, offset, header, sizeof header)) return false;
+  return countLookupsAfter(file, offset, length, header, out);
+}
+
 namespace {
+
+// The first read of a GSUB or GPOS takes this much of its start: the header and, where fonts put it, the ScriptList
+// right behind it (its count and 19 records), so a font's scripts usually cost one read a table.
+constexpr uint32_t kScriptWindowBytes = 128;
+// Reads of a ScriptList past the first, 21 records each: 187 records in all behind the header, 168 elsewhere, more
+// scripts than OpenType has. A longer list names none here, which costs its font only the computed filters (slower,
+// never wrong).
+constexpr uint32_t kMaxScriptReads = 8;
+
+// A script whose fonts get a CPac: one the shaper handles (ot::isShapedScriptTag(): the Indic tags, old and new, and
+// Sinhala's), and Arabic, whose joining shaper comes next (deviation 11), so its fonts need no second install then.
+bool isShapedTag(const uint32_t scriptTag) { return ot::isShapedScriptTag(scriptTag) || scriptTag == tag("arab"); }
+
+// Whether the ScriptList of the GSUB or GPOS table at `offset`, `length` bytes, names a script whose fonts get a CPac
+// (isShapedTag()). Read as Face reads it: a major version of 1, the list at u16 offset 4, its u16 count, then 6-byte
+// records of a tag and an offset, as many as fit the table. The first read takes the table's first kScriptWindowBytes,
+// so `header` gets the table's header from it too. A table Face does not read names none. False: a read failed.
+bool namesShapedScript(const FileSource& file, const uint32_t offset, const uint32_t length,
+                       uint8_t (&header)[kLayoutHeaderBytes], bool* names) {
+  *names = false;
+  uint8_t window[kScriptWindowBytes];  // 128 B: the table's bytes [windowAt, windowEnd)
+  uint32_t windowAt = 0;
+  uint32_t windowEnd = std::min(kScriptWindowBytes, length);
+  if (!file.read(file.ctx, offset, window, windowEnd)) return false;
+  std::memcpy(header, window, sizeof header);
+  const uint32_t listAt = be16(window + 4);
+  if (be16(window) != 1 || listAt == 0 || listAt >= length || length - listAt < 2) return true;
+  // The `n` bytes at `at` of the table, from the window, else from a window read from `at` on; nullptr past the read
+  // budget or when a read failed (`failed`).
+  bool failed = false;
+  uint32_t reads = 0;
+  const auto bytesAt = [&](const uint32_t at, const uint32_t n) -> const uint8_t* {
+    if (at < windowAt || at + n > windowEnd) {
+      if (++reads > kMaxScriptReads) return nullptr;
+      windowAt = at;
+      windowEnd = at + std::min(kScriptWindowBytes, length - at);
+      if (!file.read(file.ctx, offset + at, window, windowEnd - windowAt)) {
+        failed = true;
+        return nullptr;
+      }
+    }
+    return window + (at - windowAt);
+  };
+  const uint8_t* count = bytesAt(listAt, 2);
+  if (!count) return !failed;
+  const uint32_t scripts = std::min<uint32_t>(be16(count), (length - listAt - 2) / 6);
+  for (uint32_t i = 0; i < scripts; ++i) {
+    const uint8_t* scriptTag = bytesAt(listAt + 2 + 6 * i, 4);
+    if (!scriptTag) return !failed;
+    if (isShapedTag(be32(scriptTag))) {
+      *names = true;
+      return true;
+    }
+  }
+  return true;
+}
 
 // The first GSUB and the first GPOS record of a directory, the ones parseFace() and SdBlock read.
 struct LayoutRecords {
@@ -215,11 +287,28 @@ struct LayoutRecords {
       record[k] = found;
     }
   }
-  // The CPac room of the two tables; false: a read failed.
+  // Table k (GSUB, GPOS) as Face could read it: present, in the file, with room for its header.
+  bool readable(const FileSource& file, const int k) const {
+    return seen[k] && inFile(file, record[k].offset, record[k].length) && record[k].length >= kLayoutHeaderBytes;
+  }
+  // The CPac room of the two tables: 0 unless one of them names a script whose fonts get a CPac (namesShapedScript()),
+  // for no other font shapes from its filters. The lookups are counted only then. False: a read failed.
   bool cpacBytes(const FileSource& file, uint32_t* bytes) const {
+    *bytes = 0;
+    uint8_t headers[2][kLayoutHeaderBytes] = {};
+    bool headerRead[2] = {false, false};
+    bool shapes = false;
+    for (int k = 0; k < 2 && !shapes; ++k) {
+      if (!readable(file, k)) continue;
+      if (!namesShapedScript(file, record[k].offset, record[k].length, headers[k], &shapes)) return false;
+      headerRead[k] = true;
+    }
+    if (!shapes) return true;
     LayoutCounts counts[2];
     for (int k = 0; k < 2; ++k) {
-      if (seen[k] && !countLookups(file, record[k].offset, record[k].length, &counts[k])) return false;
+      if (!readable(file, k)) continue;
+      if (!headerRead[k] && !file.read(file.ctx, record[k].offset, headers[k], kLayoutHeaderBytes)) return false;
+      if (!countLookupsAfter(file, record[k].offset, record[k].length, headers[k], &counts[k])) return false;
     }
     *bytes = cpacBytesFor(counts[0], counts[1]);
     return true;

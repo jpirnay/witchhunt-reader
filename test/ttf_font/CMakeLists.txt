@@ -28,7 +28,8 @@ add_executable(TtfFontTest
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfFace.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfRasterizer.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/third_party/freetype/ftgrays.c
-  # the CPac writer the tests compare the probe's room with (TtfFamily.cpp itself stays free of it)
+  # the shaper's engine: the install writes each block's CPac with it (TtfFont.cpp), the probe reserves a room only
+  # for a font naming one of its scripts (TtfFamily.cpp), and the tests compare that room with its writer
   ${OT_SHAPER_SOURCES}
   ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp
   ${BIDI_MARK_SOURCES}

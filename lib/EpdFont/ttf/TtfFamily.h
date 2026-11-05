@@ -79,8 +79,11 @@ constexpr uint32_t flashBlockBytes(const uint32_t fileBytes, const uint32_t cpac
   return bytes <= UINT32_MAX ? static_cast<uint32_t>(bytes) : UINT32_MAX;
 }
 
-/// The CPac room of one file: its directory's GSUB and GPOS, counted. False: a read failed. The probe, SdBlock::plan
-/// and the install's flash-mode sizes all count through it.
+/// The CPac room of one file: its directory's GSUB and GPOS, counted (cpacBytesFor()), when the ScriptList of either
+/// names a script the shaper handles (an Indic tag of ot::isShapedScriptTag(), old or new, or `arab`); 0 for every
+/// other font (Latin, CJK, Hebrew), which never shapes, so its flash-mode block is the file alone. The ScriptList costs
+/// a read a table where it follows the table's header, as fonts lay it out. False: a read failed. The probe,
+/// SdBlock::plan and the install's flash-mode sizes all count through it.
 bool filterTableBytes(const FileSource& file, uint32_t* bytes);
 
 /// What discovery learns from a TrueType or OpenType CFF file, in a few small reads.
@@ -97,7 +100,7 @@ struct FileProbe {
   /// can have none (SdPlan::NoBlock): its family installs in flash mode only. kSdBytesUnknown for one whose block could
   /// not be planned for now (SdPlan::Transient).
   uint32_t sdBytes = 0;
-  /// The room of the CPac the install writes for this file (filterTableBytes()); 0: none.
+  /// The room of the CPac the install writes for this file (filterTableBytes()); 0: none, a font that does not shape.
   uint32_t cpacBytes = 0;
   /// What its flash-mode block takes: flashBlockBytes(file size, cpacBytes).
   uint32_t flashBytes = 0;
@@ -121,7 +124,7 @@ bool assignStyles(const FileProbe* files, size_t count, int (&out)[4]);
 /// block from the file on the card. A TrueType file's: cmap, head, hhea, hmtx, loca, maxp, OS/2, GPOS, GSUB, kern, post
 /// (its header) and GDEF, whichever it has, its glyf record pointing past the block. An OpenType CFF file's (spec 9.4):
 /// cmap, head, hhea, hmtx, maxp, OS/2, GPOS, GSUB, kern, post (its header) and GDEF, then its CFF table rebuilt
-/// (CffBlock), ending the block with the CharStrings INDEX's offsets; their data lies past it. A font with lookups also
+/// (CffBlock), ending the block with the CharStrings INDEX's offsets; their data lies past it. A font that shapes also
 /// has room for its CPac (filterTableBytes()) as a made table of the directory, after every copied table and before the
 /// outline table; source() reads it erased (0xFF), the install writes it. The block is never held in memory:
 /// source() serves any range of it, the directory made here and the tables read from the file, so an install copies it,
@@ -191,8 +194,8 @@ bool fitsStore(const uint32_t* fileBytes, const uint32_t* sdBytes, uint8_t count
 /// glyphs or a no-glyph marker for them must go.
 /// 3: synthetic italic (spec 7.4): a family with neither a bold nor an italic file stored its bold italic emboldened
 /// and upright under the bold-italic bits, which now draw slanted.
-/// 4: shaping tables at install (writing modes step 2): every block ends with its `CPac`, an SD-mode block holds GDEF,
-/// and keys from 0x110000 are glyph IDs.
+/// 4: shaping tables at install (writing modes step 2): the block of a font that shapes ends with its `CPac`, an
+/// SD-mode block holds GDEF, and keys from 0x110000 are glyph IDs.
 constexpr uint8_t kRenderVersion = 4;
 
 /// One style's file as the card lists it.

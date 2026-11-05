@@ -44,6 +44,11 @@ enum class Script : uint8_t {
   Sinhala
 };
 
+// witchhunt: deviation 4 - whether a GSUB or GPOS script tag is one a plan
+// tries for a script above (OtPlan.cpp's SCRIPT_TAGS, old and new tags): the
+// install writes a CPac only for a font whose layout names one.
+bool isShapedScriptTag(uint32_t scriptTag);
+
 // Most lookups a plan takes per table; fonts with more are not shaped.
 constexpr size_t MAX_PLANNED_LOOKUPS = 4096;
 

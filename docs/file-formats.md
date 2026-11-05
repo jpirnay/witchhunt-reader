@@ -568,14 +568,14 @@ produces; a power cut leaves at worst bytes nothing references.
 | `pairOffset` | 64 KB | Kerning pairs: `{u32 left << 16 \| right, u32 pairStyle << 16 \| i16 font units}` |
 | `logOffset` | whole pages | The log, a ring of equal segments (`segmentBytes` each, a whole number of 4 KB sectors; 4 to 64 of them): each opens with a 16-byte `SegmentHeader`, then glyph records, append only: `u32 key`, the 16-byte `EpdGlyph`, the 2-bit bitmap, padded to 4 bytes |
 
-- **A style block's mode.** Flash mode: the style's whole TTF file, `StyleInfo::fileSize` bytes, then from
-  `align4(fileSize)` to the block's end its `CPac` ([below](#cpac-in-a-style-block)); a block the file's size has
-  none. SD mode (a family too large for flash mode, or beside others that fill the font area): a font of its own made
+- **A style block's mode.** Flash mode: the style's whole TTF file, `StyleInfo::fileSize` bytes, then, for a font
+  that shapes, from `align4(fileSize)` to the block's end its `CPac` ([below](#cpac-in-a-style-block)); a block the
+  file's size has none, as every other font's. SD mode (a family too large for flash mode, or beside others that fill the font area): a font of its own made
   of the file's tables but `glyf` (`cmap`, `head`, `hhea`, `hmtx`, `loca`, `maxp`, `OS/2`, `GPOS`, `GSUB`, `kern`,
   the first 32 bytes of `post`, and `GDEF`, whichever it has), each 4-byte aligned behind a table directory whose
   `glyf` record points past the block (`SdOutlines::fontOffset`); the outlines are read from the file on the card
-  there (`SdOutlines::fileOffset`, `length`). Its `CPac` is a made table of that directory (checksum 0), after every
-  copied table and before the outline table (an OpenType CFF file's rebuilt `CFF ` table ends the block). An SD-mode
+  there (`SdOutlines::fileOffset`, `length`). A shaping font's `CPac` is a made table of that directory (checksum 0),
+  after every copied table and before the outline table (an OpenType CFF file's rebuilt `CFF ` table ends the block). An SD-mode
   `StyleInfo` also holds the file's stamp (`FileSource::stamp`: FNV-1a over its path and modification time); a file
   that no longer matches its stamp and size installs the set again. Flash-mode blocks map one at a time, the SD-mode
   ones together.
@@ -630,8 +630,8 @@ Version 1 held one family: four style blocks, and a size table of bare ppems wit
 Version 2 had the mode in the `Geometry`, the store's, and a table map in each `StyleInfo` (1,240 B headers).
 Version 3 moved the mode into each `StyleInfo`, with the SD-mode outlines. Its log was one append-only run, emptied
 by a wipe when full, and a slot's value was the bare `dataOffset`; version 4 has the ring of segments, the packed
-slot value and the journal. Version 5 ends each style block with its `CPac` (writing modes step 2), keeps `GDEF` in an
-SD-mode block, and sets `StyleInfo::fileSize` in both modes.
+slot value and the journal. Version 5 ends the style block of a font that shapes with its `CPac` (writing modes step
+2), keeps `GDEF` in an SD-mode block, and sets `StyleInfo::fileSize` in both modes.
 An older header reads as not installed, so the first load installs the set over it.
 
 ### `CPac` in a style block
@@ -657,8 +657,16 @@ A digest record is HarfBuzz's set digest: three 64-bit masks (bit `(glyph >> shi
 as little-endian `u64`s so the device can copy them into memory as they are. A table is 16 + 28 a lookup + 24 a
 subtable bytes. A face uses it only when every count and first-subtable index matches its own lookups.
 
-- **The room.** The probe (`ttf::filterTableBytes`) counts each file's GSUB and GPOS lookups and the subtables they
-  declare, and reserves that much; none past 4,096 lookups or 16,384 subtables in a table, or past its read budget.
+- **Which fonts carry one.** Only a font that can shape: one whose GSUB or GPOS `ScriptList` names a script the
+  shaper handles, an Indic tag of `lib/OtShaper`'s own list (`ot::isShapedScriptTag`: the old, new and v3 tags of
+  Devanagari to Malayalam, such as `deva`, `dev2` and `dev3`, and Sinhala's `sinh`), or `arab` for the Arabic shaper
+  to come. Every other font (Latin,
+  CJK, Hebrew) reserves no room and has no `CPac`: its flash-mode block is the file alone, its SD-mode block has no
+  `CPac` record. The probe reads each layout table's first 128 bytes, its header and (as fonts lay it out) its
+  `ScriptList` with it, and at most 8 more reads of a longer or a distant list; one past them names no script.
+- **The room.** For such a font, the probe (`ttf::filterTableBytes`) counts each file's GSUB and GPOS lookups and the
+  subtables they declare, and reserves that much; none past 4,096 lookups or 16,384 subtables in a table, or past its
+  read budget.
 - **Writing it.** The install copies a block's bytes before the room, maps them, and makes an `ot::Face` over their
   tables (flash mode: the file's; SD mode: the block's directory, whose `CPac` record lies past them).
   `ot::FilterTableWriter` then writes the table into the room a piece at a time; SD mode's rebuilt `CFF ` table is

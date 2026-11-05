@@ -178,7 +178,7 @@ class TtfFont {
     bool onCard = false;  // SD mode: the block holds the tables, `sd` the outlines on the card
     uint8_t block = 0;    // the store's style block
     uint32_t bytes = 0;   // the block's
-    // The file's (StyleInfo::fileSize). A flash-mode block is the file, then its CPac: the engine reads this much.
+    // The file's (StyleInfo::fileSize). A flash-mode block is the file, then any CPac: the engine reads this much.
     uint32_t fileBytes = 0;
     ttf::SdRange sd;
     ttf::Face face;

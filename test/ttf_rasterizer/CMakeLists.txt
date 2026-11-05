@@ -40,6 +40,8 @@ add_executable(TtfRasterizerTest
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfFace.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfRasterizer.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/third_party/freetype/ftgrays.c
+  # the shaper's script tags, which TtfFamily.cpp's CPac room is reserved by (ot::isShapedScriptTag)
+  ${OT_SHAPER_SOURCES}
   ${REPO_ROOT}/test/zip_entry_reader/LoggingStub.cpp
 )
 
@@ -51,6 +53,7 @@ target_include_directories(TtfRasterizerTest PRIVATE
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/bench
+  ${OT_SHAPER_INCLUDE_DIR}
 )
 
 target_compile_definitions(TtfRasterizerTest PRIVATE

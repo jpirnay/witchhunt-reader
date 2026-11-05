@@ -151,15 +151,16 @@ Font boxes() {
   return font;
 }
 
-// A GPOS of `count` lookups, a pair adjustment subtable each (A kerns B).
-Bytes gposOf(const uint16_t count) {
+// A GPOS of `count` lookups, a pair adjustment subtable each (A kerns B), under `script` alone: by default dev2, a
+// script the shaper handles, so its font gets a CPac.
+Bytes gposOf(const uint16_t count, const char* script = "dev2") {
   LayoutLookup lookup;
   PairSubtable pairs;
   pairs.pairs = {{1, {{2, -100}}}};
   lookup.pairSubtables = {pairs};
   LayoutFeature kern{"kern", {}};
   for (uint16_t i = 0; i < count; ++i) kern.lookups.push_back(i);
-  return layoutTable({{"latn", {0}}}, {kern}, std::vector<LayoutLookup>(count, lookup));
+  return layoutTable({{script, {0}}}, {kern}, std::vector<LayoutLookup>(count, lookup));
 }
 
 uint32_t timeNow = 0;
@@ -382,6 +383,35 @@ TEST_F(TtfShapingInstall, TheInstallWritesEachBlocksCpacAfterItsFile) {
   EXPECT_EQ(0u, chip.reprograms());
 }
 
+TEST_F(TtfShapingInstall, ALatinFamilyInstallsWithoutACpac) {
+  // Bookerly has lookups, but its layout names no script the shaper handles: each flash-mode block is its file alone,
+  // as before CPac, and nothing is written past it.
+  MemoryFile bookerly[4];
+  bookerly[0].bytes = readFont("Bookerly/Bookerly-Regular.ttf");
+  bookerly[1].bytes = readFont("Bookerly/Bookerly-Bold.ttf");
+  bookerly[2].bytes = readFont("Bookerly/Bookerly-Italic.ttf");
+  bookerly[3].bytes = readFont("Bookerly/Bookerly-BoldItalic.ttf");
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {bookerly}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  ASSERT_FALSE(set->font(0)->readsCard());
+  const glyphstore::Header header = headerOf(chip);
+  ASSERT_EQ(4, header.geometry.styleCount);
+  for (uint8_t s = 0; s < 4; ++s) {
+    const glyphstore::StyleInfo& block = header.styles[s];
+    EXPECT_EQ(glyphstore::kModeFlash, block.mode) << int{s};
+    EXPECT_EQ(bookerly[s].bytes.size(), block.fileSize) << int{s};
+    EXPECT_EQ(block.fileSize, block.size) << int{s};
+    EXPECT_EQ(bookerly[s].bytes, chipBytes(chip, block.offset, block.size)) << int{s};
+    const uint32_t end = block.offset + block.size;
+    EXPECT_TRUE(erased(chipBytes(chip, end, glyphstore::alignUp(end, kSector) - end))) << int{s};
+    EXPECT_GT(writerTable(bookerly[s].bytes).size(), 0u) << int{s};  // a table it would take, never reserved
+  }
+  expectDrawnAs(reference(bookerly[0].bytes, 'g', 14), *set->font(0), kRegular, set->font(0)->glyph(kRegular, 'g'));
+  EXPECT_EQ(0u, chip.violations());
+  EXPECT_EQ(0u, chip.reprograms());
+}
+
 TEST_F(TtfShapingInstall, AnSdModeBlocksCpacIsATableOfItsDirectory) {
   // Bookerly as the body on 26 pages: whole it does not fit, so every family's tables go to the card, the subset's
   // with them (TtfFontSetTest.ABodyTooLargeForFlashModeTakesTheAccentFamiliesToTheCardWithIt).
@@ -399,6 +429,11 @@ TEST_F(TtfShapingInstall, AnSdModeBlocksCpacIsATableOfItsDirectory) {
   ASSERT_TRUE(set->font(1)->readsCard());
   const glyphstore::Header header = headerOf(chip);
   ASSERT_EQ(5, header.geometry.styleCount);
+  for (uint8_t s = 0; s < 4; ++s) {  // Bookerly's blocks: its tables, no CPac record
+    const glyphstore::StyleInfo& latin = header.styles[s];
+    ASSERT_EQ(glyphstore::kModeSd, latin.mode) << int{s};
+    EXPECT_FALSE(recordOf(chipBytes(chip, latin.offset, latin.size), "CPac").found) << int{s};
+  }
   const glyphstore::StyleInfo& style = header.styles[4];
   ASSERT_EQ(glyphstore::kModeSd, style.mode);
   EXPECT_EQ(accent[kRegular].bytes.size(), style.fileSize);
@@ -497,10 +532,11 @@ TEST_F(TtfShapingInstall, AKeptBlockWithATornCpacIsWrittenAgain) {
 }
 
 TEST_F(TtfShapingInstall, AFamilyThatFitsWholeOnlyWithoutItsCpacGoesToTheCard) {
-  // A file 8 bytes short of a page, with a GPOS of 10 lookups: its CPac (536 B) takes its block to a second page.
+  // A file 8 bytes short of a page, with a GPOS of 10 lookups under arab, which the joining shaper will read: its CPac
+  // (536 B) takes its block to a second page.
   constexpr uint32_t kFileBytes = kPage - 8;
   Font font = boxes();
-  font.extraTables = {{"GPOS", gposOf(10)}};
+  font.extraTables = {{"GPOS", gposOf(10, "arab")}};
   const Bytes unpadded = buildFont(font);
   ASSERT_LT(unpadded.size() + 16, kFileBytes);
   font.extraTables.push_back({"zzzz", Bytes(kFileBytes - unpadded.size() - 16, 0)});  // its record, then its bytes
@@ -592,7 +628,8 @@ TEST_F(TtfShapingInstall, ACpacThatDoesNotFitItsRoomIsLeftErased) {
     std::copy(lookup.begin(), lookup.end(), body.begin() + 256 * k);
   }
   Bytes gsub;
-  for (const uint32_t word : {1u, 0u, 0u, 0u, 10u}) put16(gsub, word);  // no scripts or features; lookups at 10
+  for (const uint32_t word : {1u, 0u, 10u, 0u, 18u}) put16(gsub, word);  // scripts at 10, no features, lookups at 18
+  for (const uint32_t word : {1u, uint32_t{'d' << 8 | 'e'}, uint32_t{'v' << 8 | '2'}, 0u}) put16(gsub, word);  // dev2
   put16(gsub, kLookups);
   for (uint32_t i = 0; i < kLookups; ++i) put16(gsub, bodyAt + 256 * (i % 64));
   gsub.insert(gsub.end(), body.begin(), body.end());

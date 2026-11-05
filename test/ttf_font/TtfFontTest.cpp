@@ -629,9 +629,8 @@ TEST_F(TtfFontTest, ADrawnStoredGlyphIsCounted) {
 }
 
 TEST_F(TtfFontTest, UseCountsAreTakenAtTheNextMakeRoomNotInTheDraw) {
-  // A five-segment log (17 free mapping pages, Bookerly's largest block, its file and CPac, taking 8): with two live,
-  // the free ones are within one of the target, so counts are wanted.
-  flash.setFreePages(17);
+  // A five-segment log: with two live, the free ones are within one of the target, so counts are wanted.
+  flash.setFreePages(16);
   const auto font = open(kIdentityA, TtfFont::kMaxPointSize);
   ASSERT_NE(nullptr, font);
   uint32_t cp = 0x21;
@@ -654,7 +653,7 @@ TEST_F(TtfFontTest, UseCountsAreTakenAtTheNextMakeRoomNotInTheDraw) {
 }
 
 TEST_F(TtfFontTest, ASetLoadedOverAStoreNearFullCountsItsFirstDraws) {
-  flash.setFreePages(17);  // a five-segment log, as above
+  flash.setFreePages(16);
   {
     const auto first = open(kIdentityA, TtfFont::kMaxPointSize);
     ASSERT_NE(nullptr, first);
@@ -1569,9 +1568,8 @@ TEST_F(TtfFontSetTest, MoreStylesThanTheStoreHoldsAreRefusedBeforeAnyErase) {
 namespace {
 
 constexpr uint32_t kPage = glyphstore::kPageBytes;
-// Bookerly's four styles take 38 of a font area's pages in flash mode (each whole file and the CPac room the probe
-// reserves for it: 7, 7, 8 and 8 pages, the largest mapped once more), 19 in SD mode (their tables, 3 pages each): on
-// 24 pages only SD mode fits.
+// Bookerly's four styles take 35 of a font area's pages in flash mode (the whole files), 19 in SD mode (their tables,
+// 3 pages each): on 24 pages only SD mode fits.
 constexpr uint32_t kSdOnlyBytes = 24 * kPage;
 
 void expectWrittenOnce(const SimNorFlash& chip) {
@@ -1608,7 +1606,8 @@ TEST_F(TtfFontSetTest, AFamilyTooLargeForFlashModeIsDrawnFromTheCardAsFlashModeD
     EXPECT_GT(set->sdPageReads(), 0u);
   }
   // The next boot draws them from the store: neither rendered again nor read from the card, but for the table
-  // directory the open compares with the block's, and the lookups of GSUB and GPOS counted for the block's CPac room.
+  // directory the open compares with the block's, and the heads of GSUB and GPOS, whose script lists say the block has
+  // no CPac room.
   for (MemoryFile& file : files) file.offsets.clear();
   const auto set = openFamilies(chip, {files}, busy);
   ASSERT_NE(nullptr, set);
@@ -1628,9 +1627,9 @@ TEST_F(TtfFontSetTest, AFamilyTooLargeForFlashModeIsDrawnFromTheCardAsFlashModeD
   const auto gsub = layoutTable("GSUB");
   const auto gpos = layoutTable("GPOS");
   for (const uint32_t offset : files[kBold].offsets) {
-    const bool counted =
+    const bool layout =
         (offset >= gsub.first && offset < gsub.second) || (offset >= gpos.first && offset < gpos.second);
-    EXPECT_TRUE(offset < directoryEnd || counted) << offset;
+    EXPECT_TRUE(offset < directoryEnd || layout) << offset;
   }
   expectWrittenOnce(chip);
 }
@@ -1714,10 +1713,10 @@ TEST_F(TtfFontSetTest, AFileRewrittenInPlaceAtTheSameSizeAndTimeInstallsTheSetAg
 }
 
 TEST_F(TtfFontSetTest, AnAccentStaysWholeWhenNothingWithMoreOnTheCardFits) {
-  // 49 pages and 17 free mapping pages: both families whole (42 pages, each file with its CPac) fit with a 4-page log,
-  // which the 8-page rule would refuse; but Inter's tables, mapped beside Bookerly's largest style, go past the mapping
-  // budget. Whole beats left out.
-  SimNorFlash tight{49 * kPage, 17};
+  // 47 pages and 17 free mapping pages: both families whole fit with a 4-page log, which the 8-page rule would
+  // refuse; but Inter's tables, mapped beside Bookerly's largest style, pass the mapping budget. Whole beats left
+  // out.
+  SimNorFlash tight{47 * kPage, 17};
   const auto set = openFamilies(tight, {files, accent}, busy);
   ASSERT_NE(nullptr, set);
   EXPECT_EQ(2, set->familyCount());
@@ -1737,9 +1736,9 @@ TEST_F(TtfFontSetTest, ACardReadErrorDrawsTheGlyphAsMissingAndAsksAgain) {
 }
 
 TEST_F(TtfFontSetTest, TheBodyStaysInFlashModeWhileTheAccentFamilyGoesToTheCard) {
-  // 44 pages: Bookerly's and Inter's whole files, each with its CPac (42 pages and a header), leave no room for a log;
-  // Bookerly whole and Inter's tables (6 pages) leave 7.
-  SimNorFlash chip{44 * kPage};
+  // 42 pages: Bookerly's and Inter's whole files (40 pages and a header) leave no room for a log; Bookerly whole
+  // and Inter's tables (6 pages) leave 7.
+  SimNorFlash chip{42 * kPage};
   {
     const auto set = openFamilies(chip, {files, accent}, busy);
     ASSERT_NE(nullptr, set);
@@ -1764,14 +1763,14 @@ TEST_F(TtfFontSetTest, TheBodyStaysInFlashModeWhileTheAccentFamilyGoesToTheCard)
 }
 
 TEST_F(TtfFontSetTest, AnAccentFamilyKeepsFlashModeOnlyWhileTheLogKeepsEightPages) {
-  // 49 pages: both families whole leave a log of 4 pages (the least the planner allows), Inter on the card one of
-  // 9. The accent goes to the card; the body stays whole.
-  SimNorFlash tight{49 * kPage};
+  // 47 pages: both families whole leave a log of 4 pages (the least the planner allows), Inter on the card one of
+  // 10. The accent goes to the card; the body stays whole.
+  SimNorFlash tight{47 * kPage};
   const auto set = openFamilies(tight, {files, accent}, busy);
   ASSERT_NE(nullptr, set);
   EXPECT_FALSE(set->font(0)->readsCard());
   EXPECT_TRUE(set->font(1)->readsCard());
-  // The test's 53 pages leave both whole a log of 8: both stay in flash mode, as before SD mode.
+  // The test's 53 pages leave both whole a log of 9: both stay in flash mode, as before SD mode.
   const auto roomy = openFamilies(flash, {files, accent}, busy);
   ASSERT_NE(nullptr, roomy);
   EXPECT_FALSE(roomy->font(0)->readsCard());
@@ -1796,8 +1795,7 @@ TEST_F(TtfFontSetTest, AnSdModeBlockThatHoldsItsTablesIsKept) {
   // layout puts there, the SD-mode ones included, and only Ubuntu's tables are written.
   SimNorFlash chip{46 * kPage};
   ASSERT_NE(nullptr, openFamilies(chip, {files, accent}, busy));
-  // Past Bookerly's four blocks, each its file and its CPac: 7, 7, 8 and 8 pages.
-  const uint32_t interAt = glyphstore::kHeaderRegionBytes + (7 + 7 + 8 + 8) * kPage;
+  const uint32_t interAt = glyphstore::kHeaderRegionBytes + 4 * 7 * kPage;
   const uint32_t before = erasesBetween(chip, glyphstore::kHeaderRegionBytes, interAt + 6 * kPage);
   MemoryFile ubuntu[4];
   ubuntu[kRegular].bytes = readFont("Ubuntu/Ubuntu-Regular.ttf");
@@ -1843,8 +1841,9 @@ TEST_F(TtfFontSetTest, APowerCutInAnSdModeInstallIsInstalledWholeAtTheNextLoad) 
 
 TEST_F(TtfFontSetTest, AWholeReaderFontAndThreeAccentFamiliesOnTheCardFitTogether) {
   // The X4 case of phase 3: Bookerly whole as the reader's font, and a book's three accent families (Inter in two
-  // styles, Noto Sans Italic, Ubuntu Bold). Whole, they need 59 of the font area's 53 pages, and phase 3 left two of
-  // them out; with their tables on the card all four load, eight style blocks.
+  // styles, Noto Sans Italic, Ubuntu Bold). Whole, they need 57 of the font area's 53 pages (Noto Sans Italic's block
+  // with its CPac, as it shapes Devanagari), and phase 3 left two of them out; with their tables on the card all four
+  // load, eight style blocks.
   MemoryFile script[4];
   MemoryFile code[4];
   script[kRegular].bytes = readFont("NotoSans/NotoSans-Italic.ttf");
@@ -2435,7 +2434,8 @@ TEST_F(TtfFontSetTest, APlanWithoutMemoryInAnInstallErasesNothingAndAsksForNoFew
 TEST_F(TtfFontTest, ACffFileWithoutMemoryToPlanStaysListedAndOneWhoseLayoutCannotBeCountedIsNot) {
   // Discovery plans a CFF file's block to learn its size. Without the memory this once, the size is not known: the
   // family stays listed for its load to decide, rather than be dropped as too large until the next scan. With the
-  // card failing past the file's first sector, the layout tables cannot be counted (the CPac room): not a font for now.
+  // card failing past the file's first sector, the layout tables' script lists cannot be read (whether it has a CPac
+  // room): not a font for now.
   MemoryFile cjk;
   cjk.bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
   const uint32_t fileBytes = static_cast<uint32_t>(cjk.bytes.size());

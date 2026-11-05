@@ -11,8 +11,8 @@
 ///   4 KB         state sector: the face table, then the wipe word, then the journal of index rebuilds; a wipe
 ///                erases it last
 ///   64 KB        style blocks, each starting on a 64 KB page so one maps alone (flash mode: the whole
-///                TTF, then its CPac; SD mode: its tables and its CPac behind a directory of their own), every
-///                family's styles in the set's order, the SD-mode blocks after every flash-mode one
+///                TTF, then the CPac of a font that shapes; SD mode: its tables and that CPac behind a directory of
+///                their own), every family's styles in the set's order, the SD-mode blocks after every flash-mode one
 ///   indexOffset  glyph index: Slot {key, glyphSlotValue(its segment's epoch, the record's dataOffset), or
 ///                kNoGlyph}, open addressing
 ///   pairOffset   kerning pair index: Slot {left << 16 | right, pairStyle(family, style) << 16 | font units}
@@ -37,10 +37,10 @@ constexpr uint32_t kMagic = 0x54545043;  // "CPTT"
 /// installed and is installed over.
 /// 4: the log is a ring of segments, each opened by a SegmentHeader; a glyph slot's value packs its segment's epoch
 /// with the record's offset; the state sector keeps a journal of index rebuilds.
-/// 5: a style block ends with its `CPac` (writing modes step 2), an SD-mode block holds GDEF, and
-/// `StyleInfo::fileSize` is set in both modes.
+/// 5: the style block of a font that shapes ends with its `CPac` (writing modes step 2), an SD-mode block holds GDEF,
+/// and `StyleInfo::fileSize` is set in both modes.
 constexpr uint16_t kFormatVersion = 5;
-constexpr uint8_t kModeFlash = 0;  ///< a style block holds the style's whole TTF, then its CPac
+constexpr uint8_t kModeFlash = 0;  ///< a style block holds the style's whole TTF, then its CPac if it has one
 constexpr uint8_t kModeSd = 1;     ///< it holds the tables; the outlines are read from the TTF file on the SD card
 /// Style blocks of every family together: two families of four, or a body of four and four one-style accent
 /// families. A family has at least its regular style, so a set has at most this many families.
@@ -178,8 +178,8 @@ struct SdOutlines {
 };
 
 /// A style block's header record. A block ends with its CPac, the shaper's lookup filters (docs/file-formats.md), when
-/// its font has lookups: in flash mode from align4(fileSize) to `size`, unless `size` is fileSize (no CPac); in SD
-/// mode as a table of the block's directory.
+/// its font shapes (ttf::filterTableBytes()): in flash mode from align4(fileSize) to `size`, unless `size` is fileSize
+/// (no CPac); in SD mode as a table of the block's directory.
 struct StyleInfo {
   uint32_t offset;  ///< partition offset of the style block
   uint32_t size;    ///< bytes of style data in the block
@@ -259,8 +259,8 @@ inline uint32_t fnv1a(const void* data, const size_t len, uint32_t hash = 216613
 }
 
 /// What the caller knows before an install: per style block, every family's styles in the set's order, its mode and
-/// its bytes (flash mode: the TTF file and its CPac; SD mode: its tables and their directory, the CPac among them).
-/// SD-mode blocks follow every flash-mode one, so they map together.
+/// its bytes (flash mode: the TTF file and its CPac, if any; SD mode: its tables and their directory, any CPac among
+/// them). SD-mode blocks follow every flash-mode one, so they map together.
 struct PlanInput {
   uint8_t styleCount;
   uint8_t styleMode[kMaxStyles];
