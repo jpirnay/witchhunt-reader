@@ -2,6 +2,7 @@
 #include <OtShaper.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -35,6 +36,8 @@ struct AllocCounts {
   size_t throwing = 0;
   size_t nothrow = 0;
   size_t liveNothrowBytes = 0;
+  size_t peakNothrowBytes = 0;  // the most liveNothrowBytes held while armed
+  size_t sizes[8] = {};         // the size of each armed nothrow call, by index
 };
 AllocCounts gAlloc;
 
@@ -54,7 +57,9 @@ void* countedAllocate(const size_t size, size_t align, const bool throwing) {
     if (throwing) {
       gAlloc.throwing++;
     } else {
-      if (gAlloc.nothrow++ == gAlloc.refuseAt) return nullptr;
+      const size_t index = gAlloc.nothrow++;
+      if (index < sizeof(gAlloc.sizes) / sizeof(gAlloc.sizes[0])) gAlloc.sizes[index] = size;
+      if (index == gAlloc.refuseAt) return nullptr;
       counted = true;
     }
   }
@@ -67,7 +72,10 @@ void* countedAllocate(const size_t size, size_t align, const bool throwing) {
   const uintptr_t user =
       (reinterpret_cast<uintptr_t>(base) + HEADER + align - 1) & ~(static_cast<uintptr_t>(align) - 1);
   *reinterpret_cast<Header*>(user - HEADER) = Header{base, size, counted};
-  if (counted) gAlloc.liveNothrowBytes += size;
+  if (counted) {
+    gAlloc.liveNothrowBytes += size;
+    if (gAlloc.liveNothrowBytes > gAlloc.peakNothrowBytes) gAlloc.peakNothrowBytes = gAlloc.liveNothrowBytes;
+  }
   return reinterpret_cast<void*>(user);
 }
 
@@ -118,6 +126,8 @@ class Armed {
     gAlloc.refuseAt = refuseAt;
     gAlloc.throwing = 0;
     gAlloc.nothrow = 0;
+    gAlloc.peakNothrowBytes = gAlloc.liveNothrowBytes;
+    for (size_t& s : gAlloc.sizes) s = 0;
     gAlloc.armed = true;
   }
   ~Armed() { gAlloc.armed = false; }
@@ -300,6 +310,37 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
         }
       }
       EXPECT_EQ(gAlloc.liveNothrowBytes, 0u) << fx.script << " refused " << k;
+    }
+  }
+}
+
+// The computed route allocates the scratch, GSUB's and GPOS's lists, then the
+// two filters; the scratch is freed before the first filter, so the peak is
+// the lists plus the larger of the scratch and the two filters. With CPac in
+// the font there are no filters and the peak is all three blocks.
+TEST(OtShaperAlloc, TheComputedRouteFreesTheScratchBeforeTheFilters) {
+  for (const ShapingFixture& fx : kShapingFixtures) {
+    for (const bool asStored : {false, true}) {
+      FixtureFace font;
+      ASSERT_TRUE(openFixture(fx, asStored, &font)) << fx.script;
+      ot::Plan plan;
+      size_t calls = 0;
+      size_t peak = 0;
+      size_t sizes[8] = {};
+      {
+        const Armed armed;
+        ASSERT_TRUE(plan.build(font.face, font.script, noLanguage())) << fx.script;
+        calls = gAlloc.nothrow;
+        peak = gAlloc.peakNothrowBytes;
+        std::copy(std::begin(gAlloc.sizes), std::end(gAlloc.sizes), std::begin(sizes));
+      }
+      if (asStored) {
+        EXPECT_EQ(calls, 3u) << fx.script;
+        EXPECT_EQ(peak, sizes[0] + sizes[1] + sizes[2]) << fx.script;
+      } else {
+        EXPECT_EQ(calls, 5u) << fx.script;
+        EXPECT_EQ(peak, sizes[1] + sizes[2] + std::max(sizes[0], sizes[3] + sizes[4])) << fx.script;
+      }
     }
   }
 }
