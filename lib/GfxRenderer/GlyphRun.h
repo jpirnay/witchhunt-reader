@@ -1,6 +1,7 @@
 #pragma once
-// Compact glyph records a section stores for a shaped run, and the pen walk over them. Little-endian on every target;
-// fields are read and written byte by byte, never through a cast pointer, because records sit unaligned in a buffer.
+// Ours (writing modes step 2, decision 4), not upstream's: the compact glyph records a section stores for a shaped run,
+// and the pen walk over them. Little-endian on every target; fields are read and written byte by byte, never through a
+// cast pointer, because records sit unaligned in a buffer.
 
 #include <EpdFontData.h>
 

@@ -118,8 +118,8 @@ class TtfFont {
   void prefetch(uint8_t style, const char* utf8Text) { prefetch(body_, style, utf8Text); }
 
   /// The shaping face of the file that draws `style` (a synthetic style's source's): its tables where the glyph store
-  /// maps them, shaped in place. Made on first ask and kept until TtfFontSet::releaseShapingFaces(); nullptr for a
-  /// style the family does not draw, or without the memory.
+  /// maps them, shaped in place. Made on first ask and kept until TtfFontSet::releaseShapingFaces() or the set's next
+  /// load; nullptr for a style the family does not draw, or without the memory. Under RenderLock.
   ShapingFace* shapingFace(uint8_t style);
 
  private:

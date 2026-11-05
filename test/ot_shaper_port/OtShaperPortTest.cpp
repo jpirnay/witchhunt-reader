@@ -537,11 +537,14 @@ TEST(OtFilterWriter, AnExtensionLookupMixingTypesHasNoSubtables) {
   const uint32_t gpos = bare.lookupCount(ot::GPOS);
   // GSUB: header 16, two lookup digests, then the first-subtable indices.
   const uint8_t* starts = cpac.data() + 16 + 2 * ot::DIGEST_BYTES;
-  const auto u32 = [](const uint8_t* p) { return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]; };
-  EXPECT_EQ(u32(starts), 0);
-  EXPECT_EQ(u32(starts + 4), 0);
+  const auto u32 = [](const uint8_t* p) {
+    return static_cast<uint32_t>(p[0]) << 24 | static_cast<uint32_t>(p[1]) << 16 | static_cast<uint32_t>(p[2]) << 8 |
+           p[3];
+  };
+  EXPECT_EQ(u32(starts), 0u);
+  EXPECT_EQ(u32(starts + 4), 0u);
   // Header: one subtable in GSUB.
-  EXPECT_EQ(u32(cpac.data() + 8), 1);
+  EXPECT_EQ(u32(cpac.data() + 8), 1u);
   EXPECT_GT(gpos, 0u);
 
   ot::FaceTables tables;
@@ -598,6 +601,41 @@ TEST(OtFilterWriter, MoreSubtablesThanTheCapGiveNoTable) {
   EXPECT_EQ(bytesFor(kCap), 16u + 28u + 24u * kCap);  // at the cap: written
   EXPECT_EQ(bytesFor(kCap + 1), 0u);                  // one past: none
   EXPECT_EQ(bytesFor(UINT16_MAX), 0u);
+}
+
+// A GSUB of `lookups` lookups of no subtables.
+static std::vector<uint8_t> gsubWithLookups(const uint16_t lookups) {
+  std::vector<uint8_t> bytes;
+  const auto u16 = [&bytes](const std::initializer_list<uint16_t> words) {
+    for (const uint16_t w : words) {
+      bytes.push_back(static_cast<uint8_t>(w >> 8));
+      bytes.push_back(static_cast<uint8_t>(w));
+    }
+  };
+  u16({1, 0, 0, 0, 10});  // header: v1.0, no scripts or features, lookups at 10
+  u16({lookups});         // 10: LookupList
+  for (uint32_t i = 0; i < lookups; i++) u16({static_cast<uint16_t>(2 + 2 * lookups + 6 * i)});
+  for (uint32_t i = 0; i < lookups; i++) u16({1, 0, 0});  // SingleSubst, no flags, no subtables
+  return bytes;
+}
+
+TEST(OtFilterWriter, MoreLookupsThanTheCapGiveNoTable) {
+  const std::vector<uint8_t> font = readFixture("NotoSansTamil-Regular.layout");
+  ot::FaceTables tables;
+  ASSERT_TRUE(ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables));
+  tables[ot::FaceTables::CPAC] = ot::Table();
+  tables[ot::FaceTables::GPOS_TABLE] = ot::Table();
+  const auto bytesFor = [&](const uint16_t lookups) {
+    const std::vector<uint8_t> gsub = gsubWithLookups(lookups);
+    tables[ot::FaceTables::GSUB_TABLE] = ot::Table(gsub.data(), static_cast<uint32_t>(gsub.size()));
+    ot::Face face;
+    EXPECT_TRUE(face.init(tables));
+    EXPECT_EQ(face.lookupCount(ot::GSUB), lookups);
+    return ot::FilterTableWriter(face).bytes();
+  };
+  constexpr uint32_t kCap = ot::FilterTableWriter::kMaxLookups;
+  EXPECT_EQ(bytesFor(kCap), 16u + 28u * kCap);  // at the cap: written
+  EXPECT_EQ(bytesFor(kCap + 1), 0u);            // one past: none
 }
 
 // A GSUB of one Extension lookup declaring `subtables` subtables, all at one ExtensionSubst that extends a SingleSubst

@@ -165,7 +165,8 @@ def header_text(fonts: dict) -> str:
         "  const ExpectedRun* runs;",
         "  size_t count;",
         "};",
-        "",        "// clang-format off",
+        "",
+        "// clang-format off",
     ]
     sets = []
     for style, (file, data) in fonts.items():

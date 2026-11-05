@@ -264,6 +264,8 @@ void appendSubtableDigests(const Face& face, const int table, const uint32_t loo
   }
 }
 
+// witchhunt: deviation 4 - appendSubtableDigests()' record for one subtable, computed the same way: keep the two in
+// step, as the CPac the install writes must hold the digests a plan would compute.
 Digest subtableDigest(const int table, const Table& lookup, const uint16_t subtable) {    // witchhunt: deviation 4
   Digest d;                                                                               // witchhunt: deviation 4
   if (subtable >= Face::subtableCount(lookup)) return d;                                  // witchhunt: deviation 4

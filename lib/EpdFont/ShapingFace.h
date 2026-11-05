@@ -6,7 +6,8 @@
 
 /// One TrueType file's shaping tables for a section build (writing modes step 2, deviations 3 and 12): an ot::Face
 /// over the tables where the glyph store maps them, nothing copied. Made by a font's provider on first ask
-/// (GlyphProvider::shapingFace) and kept until the font set's releaseShapingFaces(); plans built on it go first.
+/// (GlyphProvider::shapingFace) and kept until the font set's releaseShapingFaces() or its next load (a reload or an
+/// install opens the styles again, which frees every face); plans built on it go first.
 class ShapingFace {
  public:
   virtual ~ShapingFace() = default;
@@ -15,6 +16,9 @@ class ShapingFace {
   /// (Face::init, CPac validated); a later one whose mapping moved re-points it (Face::rebase). nullptr when the
   /// block cannot be mapped now (asked again next time) or init() refused the tables (never again). Call it
   /// before each Plan::build and each ot::shape: a glyph lookup in another flash-mode style moves the mapping.
+  /// Only under RenderLock, as it maps the glyph store as a glyph lookup does. The face lives until the font set's
+  /// releaseShapingFaces() or its next load (TtfFontSet::load()), so every ot::Plan built on it, which points at its
+  /// filter records, must be freed before either.
   const ot::Face* current();
 
   /// Whether the last current() re-pointed the face because its mapping had moved.

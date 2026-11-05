@@ -686,6 +686,8 @@ class GfxRenderer {
   bool hasGlyph(int fontId, uint32_t cp, EpdFontFamily::Style style) const;
   /// The face a shaper reads for `fontId`'s `style` (the TrueType file that draws it, a synthetic style's source),
   /// and the pixels per em (26.6) its glyphs are drawn at before the font's base scale; nullptr for every other font.
+  /// Under RenderLock, as ShapingFace::current() is; the face is freed by TtfFontSet::releaseShapingFaces() and by
+  /// the font set's next load, so the plans built on it go first.
   ShapingFace* shapingFace(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6) const;
   int getFontAscenderSize(int fontId) const;
   int getLineHeight(int fontId) const;

@@ -229,10 +229,12 @@ bool countedLock() {
 class CountingProvider final : public GlyphProvider {
  public:
   int missed = 0;
+  int prefetches = 0;
   const EpdGlyph* missGlyph(const uint32_t) override {
     ++missed;
     return nullptr;
   }
+  void prefetchGlyphs(const uint16_t*, const size_t) override { ++prefetches; }
 };
 
 class TtfGlyphKeys : public ::testing::Test {
@@ -371,6 +373,9 @@ TEST_F(TtfGlyphKeys, AFontThatDrawsNoGlyphKeysIsNotAsked) {
   EXPECT_FALSE(family.drawsGlyphKeys());
   EXPECT_FALSE(static_cast<bool>(family.findGlyphKey(glyph_key::of(5))));
   EXPECT_EQ(0, provider.missed);
+  const uint16_t ids[] = {5, 6};
+  family.prefetchGlyphs(ids, 2, EpdFontFamily::REGULAR);
+  EXPECT_EQ(0, provider.prefetches);  // the glyph-ID prefetch is not passed on either
 
   const EpdFontData builtIn{};  // no provider
   const EpdFont plain(&builtIn);
@@ -534,7 +539,7 @@ TEST_F(TtfShapingInstall, AKeptBlockWithATornCpacIsWrittenAgain) {
   const glyphstore::StyleInfo whole = header.styles[1];
   const std::vector<uint8_t> table = writerTable(subset[kRegular].bytes);
   ASSERT_GE(table.size(), 64u);
-  const uint32_t tableAt = torn.offset + glyphstore::align4(torn.fileSize);
+  const uint32_t tableAt = torn.offset + glyphstore::cpacRoomOf(torn.fileSize, torn.size).at;
   std::fill_n(chip.raw() + tableAt + table.size() - 64, 64, 0xFF);
   ASSERT_TRUE(chip.erase(0, kSector));
   const uint32_t firstSector = torn.offset / kSector;
@@ -1144,6 +1149,26 @@ TEST_F(TtfShapingFace, ALoadedSetHoldsNoFaceUntilAsked) {
   EXPECT_EQ(loaded, heapBytesHeld);
   EXPECT_NE(nullptr, set->font(0)->shapingFace(kRegular));  // made again when asked
   EXPECT_EQ(loaded + faceBytes, heapBytesHeld);
+}
+
+TEST_F(TtfShapingFace, AFaceIsMappedAndFreedUnderTheRenderLock) {
+  // current() maps the glyph store, and releaseShapingFaces() frees what plans read: both are RenderLock's, as a glyph
+  // lookup is, and say so once when it is not held.
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  ShapingFace* face = set->font(0)->shapingFace(kRegular);
+  ASSERT_NE(nullptr, face);
+  lockChecks = 0;
+  TtfFont::Hooks hooks;
+  hooks.renderLockHeld = countedLock;
+  TtfFont::setHooks(hooks);
+  ASSERT_NE(nullptr, face->current());
+  EXPECT_EQ(1, lockChecks);
+  ASSERT_NE(nullptr, face->current());
+  EXPECT_EQ(2, lockChecks);  // every mapping, not only the first
+  set->releaseShapingFaces();
+  EXPECT_EQ(3, lockChecks);
 }
 
 TEST_F(TtfShapingFace, ABitmapFontHasNoShapingFace) {

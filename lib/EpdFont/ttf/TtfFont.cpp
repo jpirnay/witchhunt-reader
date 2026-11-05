@@ -168,7 +168,9 @@ Held holdsBlock(NorFlash& flash, const uint32_t offset, const ttf::FileSource& s
 bool writeCpac(NorFlash& flash, FlashGlyphStore& store, const uint8_t block, const uint32_t offset,
                const CpacRoom& room, InstallWork& work) {
   if (room.bytes == 0) {
-    LOG_INF("TTF", "style block %u: CPac 0 of 0 B", block);
+    // Not a CPac left erased: the probe reserved no room (a font that names no script the shaper handles, has no
+    // lookups, or has more than the caps), so the block is its tables alone.
+    LOG_INF("TTF", "style block %u: no CPac room reserved, none written", block);
     return true;
   }
   const uint8_t* mapped = flash.map(offset, room.at);
@@ -663,6 +665,7 @@ uint32_t TtfFontSet::missMemoryBytes() const {
 }
 
 void TtfFontSet::releaseShapingFaces() {
+  checkLock();  // a section build's plans read the faces under it, and go first
   for (uint8_t f = 0; f < count_; ++f) fonts_[f]->releaseShapingFaces();
 }
 
@@ -1071,7 +1074,10 @@ class TtfFont::FileShapingFace final : public ShapingFace {
   FileShapingFace(FlashGlyphStore& store, const Style& style) : store_(store), style_(style) {}
 
  protected:
-  const uint8_t* map() override { return store_.mapStyle(style_.block); }
+  const uint8_t* map() override {
+    checkLock();  // the store's mappings are RenderLock's, as a glyph lookup's are
+    return store_.mapStyle(style_.block);
+  }
   bool tables(const uint8_t* base, ot::FaceTables* out) override {
     return ttf::shapingTables(base, style_.bytes, style_.onCard ? 0 : style_.fileBytes, out);
   }

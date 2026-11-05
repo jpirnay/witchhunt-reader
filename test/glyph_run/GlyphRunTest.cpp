@@ -1,4 +1,4 @@
-// Compact glyph records of a shaped run: the byte layout and the two pen rules.
+// Ours (writing modes step 2): the compact glyph records of a shaped run, their byte layout and the two pen rules.
 #include <GlyphRun.h>
 #include <gtest/gtest.h>
 
@@ -178,4 +178,79 @@ TEST(GlyphRun, AMarkSitsAtThePenPlusItsOffset) {
   EXPECT_EQ(seen[1].pen, 8);
   EXPECT_EQ(seen[1].pen + seen[1].rec.dx, 3);
   EXPECT_EQ(seen[1].rec.dy, -3);
+}
+
+TEST(GlyphRun, AnOffsetCutOffAfterItsFlagIsNotRead) {
+  // A record whose flag says an offset follows, with 4 or 5 of its 6 bytes left (a run cut short, a section read back
+  // from the card): decode refuses it and reads nothing past them, so the walk stops before it. The buffer holds all
+  // six, so a decode that read on would return the offset.
+  GlyphRecord r;
+  r.glyph = 3;
+  r.advance = 32;
+  r.dx = 2;
+  r.dy = -1;
+  const auto bytes = encodeAll({r});
+  ASSERT_EQ(bytes.size(), 6u);
+  ASSERT_NE(bytes[3] & 0x80, 0);
+  for (const size_t left : {size_t{4}, size_t{5}}) {
+    GlyphRecord back;
+    size_t read = 99;
+    EXPECT_FALSE(glyph_run::decode(bytes.data(), left, &back, &read)) << left;
+    EXPECT_EQ(read, 99u) << left;
+    GlyphRun run;
+    run.records = bytes.data();
+    run.count = 1;
+    run.bytes = static_cast<uint16_t>(left);
+    int visits = 0;
+    forEachGlyph(run, 0, false, [&](const GlyphRecord&, int) { visits++; });
+    EXPECT_EQ(visits, 0) << left;
+    EXPECT_EQ(glyphRunAdvance(run, false), 0) << left;
+  }
+  GlyphRecord back;
+  size_t read = 0;
+  ASSERT_TRUE(glyph_run::decode(bytes.data(), 6, &back, &read));  // whole, it is read
+  EXPECT_EQ(read, 6u);
+  EXPECT_EQ(back.dx, 2);
+}
+
+TEST(GlyphRun, TheFieldsEdgesRoundTrip) {
+  // 16383 and -16384, 12.4: 1023.9375 and -1024 px, the most the 15-bit field holds either way.
+  for (const int v : {glyph_run::kMaxAdvance, glyph_run::kMinAdvance}) {
+    GlyphRecord r;
+    r.glyph = 0xFFFF;
+    r.advance = static_cast<int16_t>(v);
+    uint8_t out[4] = {};
+    size_t n = 0;
+    ASSERT_TRUE(glyph_run::encode(r, out, sizeof(out), &n)) << v;
+    EXPECT_EQ(n, 4u) << v;
+    EXPECT_EQ(out[3] & 0x80, 0) << v;  // no offset follows, whatever the advance's sign
+    GlyphRecord back;
+    size_t read = 0;
+    ASSERT_TRUE(glyph_run::decode(out, sizeof(out), &back, &read)) << v;
+    EXPECT_EQ(back.advance, v);
+    EXPECT_EQ(back.glyph, 0xFFFF);
+  }
+  EXPECT_EQ(glyph_run::kMaxAdvance, 16383);
+  EXPECT_EQ(glyph_run::kMinAdvance, -16384);
+}
+
+TEST(GlyphRun, ANegativeAdvanceRoundsAsToPixelDoes) {
+  // fp4::toPixel rounds half up: -8 (-0.5 px) moves the pen by 0, -9 by -1, and so does the walk.
+  EXPECT_EQ(fp4::toPixel(-8), 0);
+  EXPECT_EQ(fp4::toPixel(-9), -1);
+  for (const int16_t advance : {int16_t{-8}, int16_t{-9}}) {
+    GlyphRecord a;
+    a.advance = advance;
+    const auto bytes = encodeAll({a, a});
+    const auto seen = walk(bytes, 2, 10, false);
+    ASSERT_EQ(seen.size(), 2u);
+    EXPECT_EQ(seen[0].pen, 10);
+    EXPECT_EQ(seen[1].pen, 10 + fp4::toPixel(advance)) << advance;
+    GlyphRun run;
+    run.records = bytes.data();
+    run.count = 2;
+    run.bytes = static_cast<uint16_t>(bytes.size());
+    EXPECT_EQ(glyphRunAdvance(run, false), 2 * fp4::toPixel(advance)) << advance;
+    EXPECT_EQ(glyphRunAdvance(run, true), fp4::toPixel(2 * advance)) << advance;  // -16: -1, -18: -1
+  }
 }
