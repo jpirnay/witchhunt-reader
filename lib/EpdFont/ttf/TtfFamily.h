@@ -191,7 +191,9 @@ bool fitsStore(const uint32_t* fileBytes, const uint32_t* sdBytes, uint8_t count
 /// glyphs or a no-glyph marker for them must go.
 /// 3: synthetic italic (spec 7.4): a family with neither a bold nor an italic file stored its bold italic emboldened
 /// and upright under the bold-italic bits, which now draw slanted.
-constexpr uint8_t kRenderVersion = 3;
+/// 4: shaping tables at install (writing modes step 2): every block ends with its `CPac`, an SD-mode block holds GDEF,
+/// and keys from 0x110000 are glyph IDs.
+constexpr uint8_t kRenderVersion = 4;
 
 /// One style's file as the card lists it.
 struct FileStamp {

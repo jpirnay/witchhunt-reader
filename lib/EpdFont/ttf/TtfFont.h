@@ -50,7 +50,8 @@ class TtfFont {
     /// Frees what the app can spare when a miss's memory does not fit the heap (the built-in fonts' page caches),
     /// before the miss asks once more. True when it freed something.
     bool (*reclaim)() = nullptr;
-    /// Milliseconds since boot, to time a wipe (TtfFontSet::storeEvents()); without it wipes are counted untimed.
+    /// Milliseconds since boot, to time a wipe, a room and an install (TtfFontSet::storeEvents()); without it they are
+    /// counted untimed.
     uint32_t (*nowMs)() = nullptr;
     /// Whether a glyph drawn now counts as a use for the store's reclaims: the app answers true in the renderer's
     /// black-and-white pass, the first of a page's passes. Null counts every draw.
@@ -161,7 +162,9 @@ class TtfFont {
     bool present = false;
     bool onCard = false;  // SD mode: the block holds the tables, `sd` the outlines on the card
     uint8_t block = 0;    // the store's style block
-    uint32_t bytes = 0;
+    uint32_t bytes = 0;   // the block's
+    // The file's (StyleInfo::fileSize). A flash-mode block is the file, then its CPac: the engine reads this much.
+    uint32_t fileBytes = 0;
     ttf::SdRange sd;
     ttf::Face face;
     ttf::Kerning kerning;
@@ -331,8 +334,9 @@ class TtfFontSet {
   };
   Stats stats() const;
 
-  /// How often a store filled up, was wiped and made room since boot, every set's, and how long the last wipe and the
-  /// last room took (0 without the nowMs hook). Read from any task: the serial test API polls it for its EVT: lines.
+  /// How often a store filled up, was wiped and made room since boot, every set's, and how long the last wipe, the
+  /// last room and the last install took (0 without the nowMs hook). Read from any task: the serial test API polls it
+  /// for its EVT: lines.
   struct StoreEvents {
     uint32_t fills = 0;
     uint32_t wipes = 0;
@@ -341,6 +345,7 @@ class TtfFontSet {
     uint32_t rebuilds = 0;  ///< index rebuilds they ran
     uint32_t dropped = 0;   ///< glyphs their reclaims dropped
     uint32_t lastRoomMs = 0;
+    uint32_t lastInstallMs = 0;  ///< the last install's, from its plan to its header
   };
   static StoreEvents storeEvents();
   /// New glyphs are drawn without being stored until room is made (or the next wipe).

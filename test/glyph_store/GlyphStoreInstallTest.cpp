@@ -37,6 +37,13 @@ StyleInfo sdStyle(const uint32_t stamp = 0xCAFE) {
   return info;
 }
 
+// A flash-mode style's record: its file's size, the block's 4 KB by default (no CPac).
+StyleInfo flashStyle(const uint32_t fileSize = 4096) {
+  StyleInfo info{};
+  info.fileSize = fileSize;
+  return info;
+}
+
 }  // namespace
 
 TEST_F(GlyphStoreInstall, ABlankChipIsNotInstalled) { EXPECT_EQ(OpenResult::NotInstalled, store.open(kIdentityA)); }
@@ -73,7 +80,7 @@ TEST_F(GlyphStoreInstall, StyleDataIsReadableThroughTheMapping) {
 
 TEST_F(GlyphStoreInstall, UntilFinishTheStoreIsNotInstalled) {
   const Layout layout = smallLayout();
-  ASSERT_TRUE(store.beginInstall(layout, kIdentityA, nullptr));
+  ASSERT_TRUE(store.beginInstall(layout, kIdentityA, styleInfos(layout).data()));
   const std::vector<uint8_t> data(layout.styleSize[0], 0x11);
   ASSERT_TRUE(store.writeStyleData(0, 0, data.data(), static_cast<uint32_t>(data.size())));
   {
@@ -85,7 +92,7 @@ TEST_F(GlyphStoreInstall, UntilFinishTheStoreIsNotInstalled) {
 }
 
 TEST_F(GlyphStoreInstall, AnInstallAbandonedByOpenCannotBeFinishedLater) {
-  ASSERT_TRUE(store.beginInstall(smallLayout(), kIdentityA, nullptr));
+  ASSERT_TRUE(store.beginInstall(smallLayout(), kIdentityA, styleInfos(smallLayout()).data()));
   EXPECT_EQ(OpenResult::NotInstalled, store.open(kIdentityA));
   EXPECT_FALSE(store.finishInstall());  // the half-done install was dropped, not left to write a stale header
 }
@@ -96,7 +103,7 @@ TEST(GlyphStoreInstallCut, ACutAnywhereInTheHeaderWriteReadsAsNotInstalled) {
     for (uint32_t cut = 0; cut < sizeof(Header); ++cut) {
       SimNorFlash flash(kFlashBytes);
       FlashGlyphStore store(flash);
-      ASSERT_TRUE(store.beginInstall(layout, kIdentityA, nullptr));
+      ASSERT_TRUE(store.beginInstall(layout, kIdentityA, styleInfos(layout).data()));
       flash.partialCut(partial);
       flash.cutAfterSteps(cut);
       EXPECT_FALSE(store.finishInstall());
@@ -128,12 +135,12 @@ TEST_F(GlyphStoreInstall, OpenFailsCleanlyWhenTheRegionsCannotBeMapped) {
 TEST_F(GlyphStoreInstall, ALayoutOutsideTheChipIsRefused) {
   Layout tooLong = smallLayout();
   tooLong.geometry.logSize = kFlashBytes;  // runs past the end
-  EXPECT_FALSE(store.beginInstall(tooLong, kIdentityA, nullptr));
+  EXPECT_FALSE(store.beginInstall(tooLong, kIdentityA, styleInfos(tooLong).data()));
   Layout overlapping = smallLayout();
   overlapping.styleSize[0] = 70000;  // into the index
-  EXPECT_FALSE(store.beginInstall(overlapping, kIdentityA, nullptr));
+  EXPECT_FALSE(store.beginInstall(overlapping, kIdentityA, styleInfos(overlapping).data()));
   Layout tinyIndex = smallLayout(kMaxProbe - 1);  // a probe could wrap onto itself
-  EXPECT_FALSE(store.beginInstall(tinyIndex, kIdentityA, nullptr));
+  EXPECT_FALSE(store.beginInstall(tinyIndex, kIdentityA, styleInfos(tinyIndex).data()));
   EXPECT_EQ(0u, flash.eraseCalls());
   EXPECT_EQ(0u, flash.programCalls());
 }
@@ -155,10 +162,47 @@ TEST_F(GlyphStoreInstall, AnSdModeStyleNeedsItsOutlinesInItsFileAndPastItsBlock)
 }
 
 TEST_F(GlyphStoreInstall, SdModeBlocksComeAfterEveryFlashModeBlock) {
-  StyleInfo info[kMaxStyles] = {sdStyle(), sdStyle()};
-  EXPECT_FALSE(store.beginInstall(twoStyleLayout(kModeSd, kModeFlash), kIdentityA, info));
-  EXPECT_FALSE(store.beginInstall(twoStyleLayout(kModeFlash, 2), kIdentityA, info));  // no such mode
-  EXPECT_TRUE(store.beginInstall(twoStyleLayout(kModeFlash, kModeSd), kIdentityA, info));
+  const StyleInfo sdFirst[kMaxStyles] = {sdStyle(), flashStyle()};
+  const StyleInfo flashFirst[kMaxStyles] = {flashStyle(), sdStyle()};
+  EXPECT_FALSE(store.beginInstall(twoStyleLayout(kModeSd, kModeFlash), kIdentityA, sdFirst));
+  EXPECT_FALSE(store.beginInstall(twoStyleLayout(kModeFlash, 2), kIdentityA, flashFirst));  // no such mode
+  EXPECT_TRUE(store.beginInstall(twoStyleLayout(kModeFlash, kModeSd), kIdentityA, flashFirst));
+}
+
+TEST_F(GlyphStoreInstall, AFlashModeStyleKeepsItsFileSize) {
+  // A file of 3,999 bytes, its CPac from 4,000 to the block's end.
+  const Layout layout = smallLayout();
+  const StyleInfo info[kMaxStyles] = {flashStyle(3999)};
+  ASSERT_TRUE(store.beginInstall(layout, kIdentityA, info));
+  const std::vector<uint8_t> data(layout.styleSize[0], 0x5A);
+  ASSERT_TRUE(store.writeStyleData(0, 0, data.data(), static_cast<uint32_t>(data.size())));
+  ASSERT_TRUE(store.finishInstall());
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  StyleInfo read{};
+  ASSERT_TRUE(store.styleInfo(0, read));
+  EXPECT_EQ(kModeFlash, read.mode);
+  EXPECT_EQ(3999u, read.fileSize);
+  EXPECT_EQ(4096u, read.size);
+  EXPECT_EQ(0u, read.fileStamp);  // flash mode takes the file's size alone
+}
+
+TEST_F(GlyphStoreInstall, AFlashModeFileLargerThanItsBlockIsRefused) {
+  ASSERT_TRUE(install(store, smallLayout()));
+  const uint32_t erases = flash.eraseCalls();
+  const uint32_t programs = flash.programCalls();
+  Layout layout = smallLayout();
+  layout.styleSize[0] = 4095;
+  // No file; one past the block; and one whose CPac would start past the block's end (4,094 aligns to 4,096).
+  for (const uint32_t fileSize : {0u, 4096u, 4094u}) {
+    const StyleInfo info[kMaxStyles] = {flashStyle(fileSize)};
+    EXPECT_FALSE(store.beginInstall(layout, kIdentityA, info)) << fileSize;
+  }
+  EXPECT_EQ(erases, flash.eraseCalls());  // refused before anything is erased
+  EXPECT_EQ(programs, flash.programCalls());
+  EXPECT_EQ(OpenResult::Ready, store.open(kIdentityA));  // the store installed before is still there
+  // A file the block's size has no CPac, aligned or not.
+  const StyleInfo whole[kMaxStyles] = {flashStyle(4095)};
+  EXPECT_TRUE(store.beginInstall(layout, kIdentityA, whole));
 }
 
 TEST_F(GlyphStoreInstall, SdModeMapsAllStylesTogether) {
@@ -194,7 +238,7 @@ TEST_F(GlyphStoreInstall, AFlashModeStyleMapsAloneBesideTheSdModeOnes) {
   layout.styleOffset[2] = layout.styleOffset[1] + 4096;
   layout.styleSize[2] = 4096;
   layout.styleMode[2] = kModeSd;
-  StyleInfo info[kMaxStyles] = {{}, {}, sdStyle()};
+  StyleInfo info[kMaxStyles] = {flashStyle(), flashStyle(), sdStyle()};
   ASSERT_TRUE(install(store, layout, kIdentityA, info));
   ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
   // The SD-mode tables map at open, beside the regions and before any flash-mode block: they stay, and a flash-mode
@@ -312,13 +356,15 @@ TEST_F(GlyphStoreInstall, APlanForALargePartitionInstalls) {
 TEST_F(GlyphStoreInstall, ALayoutWithBadSegmentsIsRefused) {
   SimNorFlash big(5u << 20);  // room for every log below, so only its segment count or size refuses it
   FlashGlyphStore store(big);
+  const auto infos = styleInfos(smallLayout());  // every layout below has smallLayout()'s style
+  const StyleInfo* const info = infos.data();
   for (const uint32_t segment : {0u, 1000u, 24576u /* does not divide 64 KB */, 32768u /* 2 segments */}) {
-    EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 65536, segment), kIdentityA, nullptr)) << segment;
+    EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 65536, segment), kIdentityA, info)) << segment;
   }
   // 65 segments: one past kMaxSegments.
-  EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 65 * kSectorBytes, kSectorBytes), kIdentityA, nullptr));
+  EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 65 * kSectorBytes, kSectorBytes), kIdentityA, info));
   // The log stays under kMaxLogBytes: 64 segments of 64 KB are exactly 4 MiB, 63 are not.
-  EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 64 * kPageBytes, kPageBytes), kIdentityA, nullptr));
-  EXPECT_TRUE(store.beginInstall(smallLayout(1024, 512, 63 * kPageBytes, kPageBytes), kIdentityA, nullptr));
-  EXPECT_TRUE(store.beginInstall(smallLayout(1024, 512, 64 * kSectorBytes, kSectorBytes), kIdentityA, nullptr));
+  EXPECT_FALSE(store.beginInstall(smallLayout(1024, 512, 64 * kPageBytes, kPageBytes), kIdentityA, info));
+  EXPECT_TRUE(store.beginInstall(smallLayout(1024, 512, 63 * kPageBytes, kPageBytes), kIdentityA, info));
+  EXPECT_TRUE(store.beginInstall(smallLayout(1024, 512, 64 * kSectorBytes, kSectorBytes), kIdentityA, info));
 }

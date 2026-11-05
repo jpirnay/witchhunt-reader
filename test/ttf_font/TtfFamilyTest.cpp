@@ -309,11 +309,11 @@ TEST(TtfFamily, TheIdentityChangesWithAnyFileDetail) {
 }
 
 TEST(TtfFamily, TheIdentityChangesWithTheRenderVersion) {
-  // Spec 7.4: a store #548 wrote holds a regular-only family's bold italic upright; at version 3 it is installed again.
+  // Writing modes step 2: a store written before holds no CPac in its style blocks; at version 4 it is installed again.
   const ttf::FileStamp styles[4] = {{"Lit-Regular.ttf", 450048, 0x5A21, 0x6400}};
-  EXPECT_EQ(3, ttf::kRenderVersion);
-  EXPECT_EQ(identityAt(styles, 3), identityOf(styles));
-  EXPECT_NE(identityAt(styles, 2), identityOf(styles));
+  EXPECT_EQ(4, ttf::kRenderVersion);
+  EXPECT_EQ(identityAt(styles, 4), identityOf(styles));
+  EXPECT_NE(identityAt(styles, 3), identityOf(styles));
 }
 
 TEST(TtfFamily, TheIdentityIsSixteenIndependentBytes) {

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -46,10 +47,25 @@ inline glyphstore::Layout smallLayout(const uint32_t indexSlots = 1024, const ui
 
 inline uint8_t styleByte(const uint8_t style, const uint32_t i) { return static_cast<uint8_t>(i * 7 + style * 13 + 1); }
 
-/// Installs `layout` under `identity`, every style filled with styleByte().
+/// The records beginInstall() takes, one per block: a flash-mode block is a file the block's size (no CPac); an
+/// SD-mode block takes `sdInfo`'s record, or none without it (which beginInstall() refuses).
+inline std::array<glyphstore::StyleInfo, glyphstore::kMaxStyles> styleInfos(
+    const glyphstore::Layout& layout, const glyphstore::StyleInfo* sdInfo = nullptr) {
+  std::array<glyphstore::StyleInfo, glyphstore::kMaxStyles> info{};
+  for (uint8_t s = 0; s < layout.geometry.styleCount && s < glyphstore::kMaxStyles; ++s) {
+    if (layout.styleMode[s] != glyphstore::kModeFlash) {
+      if (sdInfo) info[s] = sdInfo[s];
+      continue;
+    }
+    info[s].fileSize = layout.styleSize[s];
+  }
+  return info;
+}
+
+/// Installs `layout` under `identity`, every style filled with styleByte(). `sdInfo`: the SD-mode blocks' records.
 inline bool install(FlashGlyphStore& store, const glyphstore::Layout& layout, const uint8_t* identity = kIdentityA,
                     const glyphstore::StyleInfo* sdInfo = nullptr) {
-  if (!store.beginInstall(layout, identity, sdInfo)) return false;
+  if (!store.beginInstall(layout, identity, styleInfos(layout, sdInfo).data())) return false;
   for (uint8_t s = 0; s < layout.geometry.styleCount; ++s) {
     std::vector<uint8_t> data(layout.styleSize[s]);
     for (uint32_t i = 0; i < data.size(); ++i) data[i] = styleByte(s, i);
