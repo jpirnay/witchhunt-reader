@@ -132,16 +132,32 @@ bool startsOnWordByte(const char* text) {
 // Fed to the watchdog while the index pass streams a multi-megabyte .idx.
 void indexBuildYield(void*) { vTaskDelay(1); }
 
-// DrawStyle::flags: how a vertical line draws a piece (VerticalDraw.h), as TextBlock::render draws it.
+// DrawStyle::flags: how TextBlock::render draws a piece of a vertical line (VerticalDraw.h), or a shaped word.
 constexpr uint8_t DRAW_VERTICAL = 0x01;       // down its column
 constexpr uint8_t DRAW_CENTRED_MARKS = 0x02;  // the line's 、。 centred in their cells (Traditional Chinese)
 constexpr uint8_t DRAW_COMBINED = 0x04;       // the word set upright as one block (tate-chu-yoko)
+constexpr uint8_t DRAW_GLYPHS = 0x08;         // a shaped word, drawn as its glyph run (TextBlock::glyphForm)
 
-// The flags of a piece of `word`, from its line and from the word.
+// The flags of a piece of `word`, from its line and from the word. A vertical line has no shaped words.
 uint8_t drawFlags(const TextBlock& block, const uint16_t word) {
-  if (!block.isVertical()) return 0;
+  if (!block.isVertical()) return block.hasGlyphForm(word) ? DRAW_GLYPHS : 0;
   return static_cast<uint8_t>(DRAW_VERTICAL | (block.centredMarks() ? DRAW_CENTRED_MARKS : 0) |
                               (block.isCombined(word) ? DRAW_COMBINED : 0));
+}
+
+// The run a shaped piece is drawn as: the glyph form of the word whose text the piece points at (a shaped word is one
+// whole piece, never cut). A fragment keeps that text and no more, so the word is found again on the page, by a walk
+// over its words for each shaped piece a highlight draws; count 0 when none is found.
+GlyphRun glyphFormOf(const Page& page, const char* text) {
+  for (const auto& element : page.elements) {
+    if (element->getTag() != TAG_PageLine) continue;
+    const TextBlock* block = static_cast<const PageLine*>(element.get())->getBlock();
+    if (!block || !block->valid()) continue;
+    for (uint16_t i = 0; i < block->wordCount(); i++) {
+      if (block->wordText(i) == text) return block->glyphForm(i);
+    }
+  }
+  return {};
 }
 
 // Where the page's lines are measured from: the reader's margins, or on a vertical page the turned frame's origin, the
@@ -201,11 +217,15 @@ turnedframe::Rect readerBox(const bool vertical, const int readerWidth, const tu
   return vertical ? turnedframe::toReader(readerWidth, box) : box;
 }
 
-// Draws a piece as the page draws it, in `black` or white. Called in the page's frame: on a vertical line (x, y) is the
-// pen down the column and the line's top, as drawTextVertical takes them.
+// Draws a piece as the page draws it, in `black` or white: a shaped word as its run (`glyphs`, count 0 for any other
+// piece). Called in the page's frame: on a vertical line (x, y) is the pen down the column and the line's top, as
+// drawTextVertical takes them.
 void drawPiece(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
-               const EpdFontFamily::Style style, const float scale, const uint8_t flags, const bool black) {
-  if ((flags & DRAW_COMBINED) != 0) {
+               const GlyphRun& glyphs, const EpdFontFamily::Style style, const float scale, const uint8_t flags,
+               const bool black) {
+  if (glyphs.count != 0) {
+    renderer.drawGlyphRun(fontId, x, y, glyphs, black, style, scale);
+  } else if ((flags & DRAW_COMBINED) != 0) {
     drawCombinedVertical(renderer, fontId, x, y, text, style, scale, black);
   } else if ((flags & DRAW_VERTICAL) != 0) {
     drawTextVertical(renderer, fontId, x, y, text, style, scale, (flags & DRAW_CENTRED_MARKS) != 0, black);
@@ -520,8 +540,8 @@ void DictionaryWordSelectActivity::extractWords() {
       // The common case: one whole token, measured once by wordBox and used in place.
       // Cutting needs a NUL-terminated copy to measure, so a token too long for the scratch
       // buffer is left whole -- those are never the dash-joined pairs this is for. Nor is a
-      // combined word cut: it is one cell, drawn as one block.
-      if ((flags & DRAW_COMBINED) != 0 || tokenLength >= WORD_TEXT_CAPACITY ||
+      // combined word cut: it is one cell, drawn as one block; nor a shaped word, one glyph run.
+      if ((flags & (DRAW_COMBINED | DRAW_GLYPHS)) != 0 || tokenLength >= WORD_TEXT_CAPACITY ||
           nextDashSplit(tokenText, tokenLength, 0) == 0) {
         addFragment(tokenText, tokenLength, tokenX, tokenWidth, geometry, flags, /*mayGlue=*/true);
         continue;
@@ -1238,8 +1258,9 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
       const DrawStyle& drawStyle = drawStyleOf(piece);
       char scratch[WORD_TEXT_CAPACITY];
       const char* text = fragmentText(piece, scratch, sizeof(scratch));
-      drawPiece(renderer, drawStyle.fontId, piece.x, piece.y, text, piece.style, drawStyle.scale, drawStyle.flags,
-                knownMissing);
+      const GlyphRun glyphs = (drawStyle.flags & DRAW_GLYPHS) != 0 ? glyphFormOf(*page, piece.text) : GlyphRun{};
+      drawPiece(renderer, drawStyle.fontId, piece.x, piece.y, text, glyphs, piece.style, drawStyle.scale,
+                drawStyle.flags, knownMissing);
     }
   };
 

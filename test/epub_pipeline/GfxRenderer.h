@@ -20,6 +20,7 @@
 #include <Arduino.h>
 #include <EpdFontFamily.h>
 #include <GlyphProvider.h>
+#include <GlyphRun.h>
 #include <Utf8.h>
 
 #include <cmath>
@@ -193,6 +194,24 @@ class GfxRenderer {
   }
   void drawTextScaled(int, int x, int y, const char* text, bool, EpdFontFamily::Style, float scale) const {
     if (textDraws) textDraws->push_back({text, live_, x, y, scale});
+  }
+  // A shaped run, measured as the real renderer's glyphRunWidth measures it (the records' pen, accumulated outside
+  // drawTextScaled's unscaled window; this stub's fonts have a base scale of 1). A test that sets `glyphRunDraws` gets
+  // each run draw.
+  struct GlyphRunDraw {
+    int fontId;
+    int x;
+    int y;
+    uint16_t count;
+    float scale;
+  };
+  mutable std::vector<GlyphRunDraw>* glyphRunDraws = nullptr;
+  void drawGlyphRun(const int fontId, const int x, const int y, const GlyphRun& run, bool = true,
+                    EpdFontFamily::Style = EpdFontFamily::REGULAR, const float scale = 1.0f) const {
+    if (glyphRunDraws) glyphRunDraws->push_back({fontId, x, y, run.count, scale});
+  }
+  int glyphRunWidth(int, const GlyphRun& run, const float scale = 1.0f) const {
+    return glyphRunAdvance(run, scale < 0.99f || scale > 1.01f);
   }
   void drawCenteredText(int, int, const char*, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR) const {}
   void drawTextRotated90CW(int, int, int, const char*, bool = true,

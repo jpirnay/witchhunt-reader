@@ -1,6 +1,7 @@
 add_executable(TextBlockRangeTest
   TextBlockRangeTest.cpp
   TextBlockBidiTest.cpp
+  TextBlockGlyphTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/blocks/TextBlock.cpp
   ${REPO_ROOT}/lib/Epub/Epub/VerticalDraw.cpp
   ${REPO_ROOT}/lib/Epub/Epub/VerticalOrientation.cpp
@@ -10,7 +11,7 @@ add_executable(TextBlockRangeTest
 
 # Include order matters: this directory's GfxRenderer.h shim must win over the
 # real lib/GfxRenderer (which drags in HalDisplay); lib/GfxRenderer is therefore
-# deliberately absent from the include path.
+# listed last, for GlyphRun.h only.
 target_include_directories(TextBlockRangeTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${REPO_ROOT}/test/shims
@@ -20,6 +21,7 @@ target_include_directories(TextBlockRangeTest PRIVATE
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/Serialization
+  ${REPO_ROOT}/lib/GfxRenderer
 )
 
 target_link_libraries(TextBlockRangeTest PRIVATE

@@ -10,7 +10,8 @@ add_executable(VerticalTextTest
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
 )
 
-# Same include order as test/cjk_layout: the word_size_layout GfxRenderer.h shim must win over lib/GfxRenderer.
+# Same include order as test/cjk_layout: the word_size_layout GfxRenderer.h shim must win over lib/GfxRenderer, listed
+# last for GlyphRun.h only.
 target_include_directories(VerticalTextTest PRIVATE
   ${REPO_ROOT}/test/word_size_layout
   ${REPO_ROOT}/test/shims
@@ -20,6 +21,7 @@ target_include_directories(VerticalTextTest PRIVATE
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/Serialization
+  ${REPO_ROOT}/lib/GfxRenderer
 )
 
 target_link_libraries(VerticalTextTest PRIVATE

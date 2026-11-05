@@ -18,7 +18,7 @@ add_executable(WordSizeLayoutTest
 
 # Include order matters: this directory's GfxRenderer.h shim must win over the
 # real lib/GfxRenderer (which drags in HalDisplay); lib/GfxRenderer is therefore
-# deliberately absent from the include path.
+# listed last, for GlyphRun.h only.
 target_include_directories(WordSizeLayoutTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${REPO_ROOT}/test/shims
@@ -29,6 +29,7 @@ target_include_directories(WordSizeLayoutTest PRIVATE
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/Serialization
   ${BIDI_LAYOUT_INCLUDES}
+  ${REPO_ROOT}/lib/GfxRenderer
 )
 
 target_link_libraries(WordSizeLayoutTest PRIVATE

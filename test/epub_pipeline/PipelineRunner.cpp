@@ -27,10 +27,24 @@ std::string normalizePath(const std::string& path, const std::string& cacheDir) 
   return std::regex_replace(p, std::regex("epub_[0-9]+"), "epub_<hash>");
 }
 
+// A shaped word's glyph form: ` WG n=<count>`, then ` g=<glyph>:<advance>` per record (its advance in 12.4 pixels)
+// and `:<dx>,<dy>` after a record with an offset.
+void dumpGlyphForm(std::ostream& out, const GlyphRun& run, const char* indent) {
+  out << indent << " WG n=" << run.count;
+  forEachGlyph(run, 0, false, [&out](const GlyphRecord& record, int) {
+    out << " g=" << record.glyph << ":" << record.advance;
+    if (record.dx != 0 || record.dy != 0) {
+      out << ":" << static_cast<int>(record.dx) << "," << static_cast<int>(record.dy);
+    }
+  });
+  out << "\n";
+}
+
 // One `W` record per word, at `indent`. Kept to a single shape so the word-stream extraction used
 // to verify "no content was dropped" (`\bW x=\S+ s=\S+ z=\S+ t=(.*)`) sees table cells and ordinary
-// paragraphs alike. A word in a font of its own (TextBlock::WordFont) is followed by a `WF` record, and a word with a
-// display form (what a right-to-left line draws for it) by a `WD` record; neither matches the pattern.
+// paragraphs alike. A word in a font of its own (TextBlock::WordFont) is followed by a `WF` record, a word with a
+// display form (what a right-to-left line draws for it) by a `WD` record, and a shaped word by a `WG` record (its glyph
+// form); none matches the pattern.
 void dumpWords(std::ostream& out, const TextBlock& block, const char* indent) {
   for (uint16_t w = 0; w < block.wordCount(); ++w) {
     out << indent << "W x=" << block.wordXpos(w) << " s=" << static_cast<int>(block.wordStyle(w))
@@ -40,6 +54,7 @@ void dumpWords(std::ostream& out, const TextBlock& block, const char* indent) {
           << "\n";
     }
     if (block.hasDisplayForm(w)) out << indent << " WD t=" << block.wordDrawText(w) << "\n";
+    if (block.hasGlyphForm(w)) dumpGlyphForm(out, block.glyphForm(w), indent);
   }
 }
 

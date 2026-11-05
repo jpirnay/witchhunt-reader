@@ -62,7 +62,8 @@ class DictionaryWordSelectActivity final : public Activity {
     int fontId;
     int16_t height;
     // How a vertical line draws the piece (the DRAW_* bits in the .cpp): down its column, with its marks centred, or
-    // the word set upright as one block. 0 on a horizontal line.
+    // the word set upright as one block. On a horizontal line, whether the piece is a shaped word drawn as its glyph
+    // run; 0 for any other.
     uint8_t flags;
   };
 

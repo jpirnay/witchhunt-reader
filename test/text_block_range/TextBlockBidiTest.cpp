@@ -232,7 +232,7 @@ TEST(TextBlockBidi, ACorruptRegionFailsTheRead) {
   memcpy(outside.data() + region.begin + 1 + 2, &offset, sizeof(offset));
   EXPECT_EQ(nullptr, readBack(outside));
 
-  for (const uint8_t parts : {0x00, 0x04, 0x07}) {  // none, or a reserved bit
+  for (const uint8_t parts : {0x00, 0x04, 0x07}) {  // none, or the glyph forms' bit with no glyph form
     std::string reserved = bytes;
     reserved[region.begin] = static_cast<char>(parts);
     EXPECT_EQ(nullptr, readBack(reserved)) << "parts " << static_cast<int>(parts);

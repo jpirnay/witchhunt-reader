@@ -1,7 +1,7 @@
 #pragma once
 // Host-test shim for GfxRenderer — resolves ahead of lib/GfxRenderer/GfxRenderer.h
 // via include-path order (this directory is listed before lib/GfxRenderer, which is
-// deliberately NOT on the include path of the WordSizeLayoutTest target).
+// on the include path last, for GlyphRun.h only).
 //
 // Implements exactly the measurement/draw surface that ParsedText.cpp and
 // TextBlock.cpp use, with deterministic fixed-width metrics:
@@ -10,9 +10,10 @@
 //   - ascender is ASCENDER, scaled variants multiply and round
 //   - font WIDE_FONT (a word font of another family) has WIDE_GLYPH_W, WIDE_SPACE_W and WIDE_ASCENDER instead
 // drawText/drawTextScaled calls are recorded so tests can assert baseline
-// alignment and per-word scales.
+// alignment and per-word scales; drawGlyphRun calls likewise.
 
 #include <EpdFontFamily.h>
+#include <GlyphRun.h>
 
 #include <cstdint>
 #include <string>
@@ -85,6 +86,15 @@ class GfxRenderer {
     bool state;
   };
   mutable std::vector<RectCall> fillRectCalls;
+
+  struct GlyphRunDraw {
+    int fontId;
+    int x;
+    int y;
+    uint16_t count;
+    float scale;
+  };
+  mutable std::vector<GlyphRunDraw> glyphRunDraws;
 
   static int countCodepoints(const char* text) {
     int count = 0;
@@ -181,6 +191,15 @@ class GfxRenderer {
   void drawTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
                       const float scale) const {
     drawCalls.push_back({text, fontId, x, y, scale, style, live, black});
+  }
+  // A shaped run: drawn as the real renderer's drawGlyphRun is called, measured as its glyphRunWidth measures (the
+  // records' pen, accumulated outside drawTextScaled's unscaled window; this stub's fonts have a base scale of 1).
+  void drawGlyphRun(const int fontId, const int x, const int y, const GlyphRun& run, bool /*black*/ = true,
+                    EpdFontFamily::Style /*style*/ = EpdFontFamily::REGULAR, const float scale = 1.0f) const {
+    glyphRunDraws.push_back({fontId, x, y, run.count, scale});
+  }
+  int glyphRunWidth(int /*fontId*/, const GlyphRun& run, const float scale = 1.0f) const {
+    return glyphRunAdvance(run, scale < 0.99f || scale > 1.01f);
   }
   void drawLine(int x1, int y1, int x2, int y2, int lineWidth, bool /*state*/) const {
     drawLineCalls.push_back({x1, y1, x2, y2, lineWidth, live});
