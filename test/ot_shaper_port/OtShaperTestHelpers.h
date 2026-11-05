@@ -26,10 +26,11 @@ inline size_t decodeUtf8(const char* utf8, uint32_t* out, const size_t capacity)
     uint32_t cp = *p;
     const int n = cp < 0x80 ? 1 : (cp >> 5) == 6 ? 2 : (cp >> 4) == 14 ? 3 : 4;
     cp = n == 1 ? cp : n == 2 ? cp & 0x1F : n == 3 ? cp & 0x0F : cp & 0x07;
-    for (int k = 1; k < n && p[k]; k++) cp = (cp << 6) | (p[k] & 0x3F);
+    int k = 1;
+    for (; k < n && p[k]; k++) cp = (cp << 6) | (p[k] & 0x3F);  // witchhunt: carried item 4
     if (count < capacity) out[count] = cp;
     count++;
-    p += n;
+    p += k;  // witchhunt: carried item 4 - the bytes read, so a truncated sequence ends at its NUL
   }
   return count;
 }

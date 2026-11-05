@@ -325,3 +325,76 @@ TEST(OtShaperBuffer, TheNextRunUndoesASwap) {
   EXPECT_TRUE(shapeWith(bengali, word, buffer));
   EXPECT_EQ(glyphsOf(buffer), expected);
 }
+
+// A face re-pointed at a copy of its bytes (deviation 12) shapes as a fresh
+// one does, the old bytes poisoned.
+namespace {
+
+void checkMovedFace(const bool withFilters) {
+  size_t words = 0;
+  for (const ShapingFixture& fx : kShapingFixtures) {
+    ot::Script script = ot::Script::Devanagari;
+    ASSERT_TRUE(scriptOf(fx.script, &script)) << fx.script;
+    std::vector<uint8_t> a = readFixture(fx.layoutFile);
+    ASSERT_FALSE(a.empty()) << fx.layoutFile;
+    const std::vector<uint8_t> b = a;
+    ot::FaceTables tables;
+    ASSERT_TRUE(ot::tablesFromSfnt(a.data(), static_cast<uint32_t>(a.size()), &tables));
+    if (!withFilters) tables[ot::FaceTables::CPAC] = ot::Table();
+    tables[ot::FaceTables::CPPL] = ot::Table();
+    ot::Face face;
+    ASSERT_TRUE(face.init(tables));
+    std::vector<ot::Plan> plans(fx.count);
+    for (size_t w = 0; w < fx.count; w++) {
+      ASSERT_TRUE(plans[w].build(face, script, ot::languageTagsFor(fx.words[w].language))) << fx.words[w].utf8;
+    }
+    // Moved: B is the live copy, A is gone.
+    std::vector<uint8_t> moved = b;
+    face.rebase(a.data(), moved.data());
+    std::fill(a.begin(), a.end(), static_cast<uint8_t>(0xA5));
+    for (size_t w = 0; w < fx.count; w++) {
+      const ExpectedShaping& word = fx.words[w];
+      std::vector<StoredGlyph> expected;
+      for (unsigned i = 0; i < word.count; i++) {
+        const ExpectedGlyph& g = word.glyphs[i];
+        expected.push_back({g.gid, g.advance12_4, g.dx, g.dy});
+      }
+      EXPECT_EQ(shapeAsStored(face, plans[w], word.utf8), expected) << fx.script << " word " << w << ": " << word.utf8;
+      words++;
+    }
+  }
+  EXPECT_EQ(words, 56u);
+}
+
+}  // namespace
+
+TEST(OtFaceRebase, AMovedFaceShapesAsAFreshOne) {
+  checkMovedFace(true);
+  checkMovedFace(false);
+}
+
+TEST(OtFaceRebase, TheFilterRecordsMoveButTheirAddressStays) {
+  std::vector<uint8_t> a = readFixture(kShapingFixtures[0].layoutFile);
+  ASSERT_FALSE(a.empty());
+  std::vector<uint8_t> b = a;
+  ot::FaceTables tables;
+  ASSERT_TRUE(ot::tablesFromSfnt(a.data(), static_cast<uint32_t>(a.size()), &tables));
+  tables[ot::FaceTables::CPPL] = ot::Table();
+  ot::Face face;
+  ASSERT_TRUE(face.init(tables));
+  const ot::FilterRecords* before = face.filters(ot::GSUB);
+  ASSERT_NE(before, nullptr);
+  const uint8_t* digests = before->lookupDigests;
+  ASSERT_GE(digests, a.data());
+  ASSERT_LT(digests, a.data() + a.size());
+  face.rebase(a.data(), b.data());
+  EXPECT_EQ(face.filters(ot::GSUB), before);
+  EXPECT_EQ(before->lookupDigests, b.data() + (digests - a.data()));
+}
+
+TEST(OtShaperHelpers, DecodeUtf8StopsAtATruncatedSequence) {
+  const char s[] = "\xE0\xA4\0A";
+  uint32_t out[4] = {};
+  EXPECT_EQ(ottest::decodeUtf8(s, out, 4), 1u);
+  EXPECT_EQ(ottest::decodeUtf8("\xF0\x9F", nullptr, 0), 1u);
+}

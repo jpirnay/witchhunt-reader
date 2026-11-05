@@ -163,6 +163,33 @@ bool Face::init(const FaceTables& tables) {
   return true;
 }
 
+// witchhunt: deviation 12
+namespace {
+Table moved(const Table& t, const uint8_t* from, const uint8_t* to) {
+  return t.empty() ? t : Table(to + (t.data() - from), t.length());
+}
+const uint8_t* movedPointer(const uint8_t* p, const uint8_t* from, const uint8_t* to) {
+  return p ? to + (p - from) : p;
+}
+}  // namespace
+
+// witchhunt: deviation 12
+void Face::rebase(const uint8_t* from, const uint8_t* to) {
+  cmapSubtable_ = moved(cmapSubtable_, from, to);
+  hmtx_ = moved(hmtx_, from, to);
+  glyphClassDef_ = moved(glyphClassDef_, from, to);
+  markAttachClassDef_ = moved(markAttachClassDef_, from, to);
+  markGlyphSets_ = moved(markGlyphSets_, from, to);
+  gsub_ = moved(gsub_, from, to);
+  gpos_ = moved(gpos_, from, to);
+  for (FilterRecords& f : filters_) {
+    f.lookupDigests = movedPointer(f.lookupDigests, from, to);
+    f.subtableStarts = moved(f.subtableStarts, from, to);
+    f.subtableDigests = movedPointer(f.subtableDigests, from, to);
+  }
+  compiledPlans_ = moved(compiledPlans_, from, to);
+}
+
 // CPac (docs/file-formats.md): u16 version (1), u16 reserved, u16 lookup
 // count per table (GSUB, GPOS), u32 subtable count per table, then per table
 // the lookup digests, the u32 first-subtable index per lookup and the
