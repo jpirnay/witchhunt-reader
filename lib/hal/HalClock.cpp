@@ -554,10 +554,6 @@ static double computeCorrectedElapsedSec(uint64_t lpNow, float tempNow) {
 /// `lpContinuous`: will the LP timer keep running until the next restore()? See the flag.
 static void capture(bool lpContinuous) {
   rtcEpoch = time(nullptr);
-  // Update DS3231 only when the current time is authoritative.
-  if (initExternalRTC() && !clockApproximate) {
-    writeExternalRTC(rtcEpoch);
-  }
   rtcLpTimeUs = esp_clk_rtc_time();
   rtcSlowCal = esp_clk_slowclk_cal_get();
   rtcTemperatureC = readChipTemperatureC();
@@ -808,7 +804,7 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
     }
   }
 
-  // NTP sync yields authoritative time; allow DS3231 to be updated.
+  // NTP sync yields authoritative time.
   clockApproximate = false;
   clockStaleRestore = false;
   // true, not false: nothing is going to sleep here. What follows a sync is either a reboot --
@@ -825,6 +821,16 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
   // (NTP drift: interval=2689s error=-1217.000s), which in turn drove rtcDriftScale to its 0.1
   // floor -- the drift learner was measuring reboot count, not temperature.
   capture(true);
+  // The hardware RTC is written here and in applyClientTime(), where a new time arrives, and
+  // nowhere else. capture() used to write it at every sleep as well, but on those boards the system
+  // clock came from the chip in the first place, so that only fed its own rounding back into it:
+  // restore() floors the chip's reading to a second, time() floors again, and writing the seconds
+  // register restarts the chip's sub-second count. It cost about a second per sleep (1.3 s on an
+  // X3, 1.4 s on a Murphy; that X3 sat 57 s behind), where a DS3231 left alone loses about a minute
+  // a year.
+  if (initExternalRTC()) {
+    writeExternalRTC(rtcEpoch);
+  }
   nvsWriteSyncTime(rtcEpoch);
 
   float currentTemp = rtcTemperatureC;
