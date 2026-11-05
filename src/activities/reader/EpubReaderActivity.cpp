@@ -2683,8 +2683,10 @@ void EpubReaderActivity::openDictionary() {
   // the overlay wants the heap a completed look-ahead section is sitting on.
   suspendBackgroundWork();
   startActivityForResult(
+      // The book's patterns, as its section build installs them: a styled definition hyphenates by them.
       std::make_unique<DictionaryWordSelectActivity>(renderer, mappedInput, std::move(page), effectiveFontId,
-                                                     layout.marginLeft, layout.marginTop),
+                                                     layout.marginLeft, layout.marginTop,
+                                                     TypographyProfile::forLanguage(epub->getLanguage()).hyphenator),
       [this](const ActivityResult&) {
         resumeBackgroundWork();
         requestUpdate();

@@ -1002,7 +1002,7 @@ void DictionaryWordSelectActivity::performLookup() {
     releaseWordArrays();
     startActivityForResult(
         std::make_unique<DictionaryDefinitionActivity>(
-            renderer, mappedInput, std::move(headword), std::move(definition), html,
+            renderer, mappedInput, std::move(headword), std::move(definition), hyphenator, html,
             multiple ? std::string(SETTINGS.dictionaryName) : std::string(), definitionFontId(script)),
         [this](const ActivityResult& result) {
           // The child overdrew the page; the snapshot no longer matches.
