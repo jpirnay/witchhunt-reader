@@ -439,7 +439,7 @@ class CrossPointSettings {
   uint8_t statusBarBattery = 1;
   // Text rendering settings
   uint8_t extraParagraphSpacing = 1;
-#if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY
+#if defined(FREEINK_DEVICE_MURPHY) && FREEINK_DEVICE_MURPHY && !FREEINK_MURPHY_GRAY
   uint8_t textAntiAliasing = 0;  // the panel has no gray: the pass would only cost time
 #else
   uint8_t textAntiAliasing = 1;

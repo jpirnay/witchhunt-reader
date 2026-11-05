@@ -243,7 +243,7 @@ CrossPointPosition ProgressMapper::toCrossPoint(const std::shared_ptr<Epub>& epu
     }
     // Extract paragraph index from XPath for direct page lookup via section cache.
     // Done regardless of whether the heavy XPath resolver succeeded — the paragraph
-    // LUT lookup later (in EpubReaderActivity::NavigationTarget::resolveInto) snaps
+    // LUT lookup later (in EpubNavigationTarget::resolveInto) snaps
     // to the precise page, so even without intra resolution we get an exact landing.
     uint16_t pIndex = 0;
     if (ChapterXPathIndexer::tryExtractParagraphIndexFromXPath(koPos.xpath, pIndex)) {

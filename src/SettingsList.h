@@ -776,8 +776,7 @@ inline bool boardHas(const SettingRequires capability) {
     case SettingRequires::SelectableGrayscaleLut:
       // SSD1677 develops grayscale from a factory waveform, so there is no
       // LUT to swap and the fast/OEM trade-off does not exist there.
-      return HalCapabilities::panelShowsGray() &&
-             BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677;
+      return HalCapabilities::panelShowsGray() && HalCapabilities::hasSelectableGrayscaleLut();
     case SettingRequires::GrayscalePanel:
       return HalCapabilities::panelShowsGray();
     case SettingRequires::ReadingLight:

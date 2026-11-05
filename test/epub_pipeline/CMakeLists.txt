@@ -109,6 +109,7 @@ add_executable(EpubPipelineTest
   FootnotePreviewStoreTest.cpp
   FootnoteResolveSliceTest.cpp
   ParagraphAnchorTest.cpp
+  SavedPositionRestoreTest.cpp
   KeptReadingStateTest.cpp
   ParsedTextOffsetTest.cpp
   LowHeapLoadTest.cpp
@@ -158,6 +159,8 @@ add_executable(EpubPipelineTest
   # A book's embedded body font (Publisher Fonts): the probe and the extraction. Its SHA-1 comes from
   # test/shims/wolfssl, standing in for wolfCrypt.
   ${REPO_ROOT}/lib/Epub/Epub/BookFonts.cpp
+  # The reader's navigation target: resolves a saved position against a built Section.
+  ${REPO_ROOT}/src/activities/reader/EpubNavigationTarget.cpp
   # lib/KOReaderSync position mapping: needs only the Epub and the SAX parser, not the network.
   ${REPO_ROOT}/lib/KOReaderSync/ProgressMapper.cpp
   ${REPO_ROOT}/lib/KOReaderSync/ChapterXPathIndexer.cpp

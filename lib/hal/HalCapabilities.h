@@ -120,7 +120,8 @@ inline bool panelNeedsHalfRefreshSettle() {
 // waveform trade-off is a real choice. SSD1677 uses a factory waveform and has
 // nothing to swap. Mirrors SettingRequires::SelectableGrayscaleLut.
 inline bool hasSelectableGrayscaleLut() {
-  return BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677;
+  // Murphy is a UC8253 too, but it has one gray waveform and no second one to pick.
+  return BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677 && !BoardConfig::isMurphyM3();
 }
 
 // The panel visibly fades in direct sunlight unless it is powered down between
@@ -215,9 +216,10 @@ inline float uiScale() { return BoardConfig::ACTIVE.uiScale; }
 // HALF on a menu.
 inline bool clearsGhostsOnEveryScreen() { return BoardConfig::isMurphyM3(); }
 
-// The panel can show gray at all. Murphy's cannot: its UC8253 driver has no gray waveforms and
-// ignores a gray pass (Uc8253MurphyDriver::displayGray), so a setting for one means nothing there.
-inline bool panelShowsGray() { return !BoardConfig::isMurphyM3(); }
+// The panel can show gray at all. Murphy's only can in a build with -DFREEINK_MURPHY_GRAY: without
+// it the UC8253 driver has no gray waveforms and ignores a gray pass
+// (Uc8253MurphyDriver::displayGray), so a setting for one means nothing there.
+inline bool panelShowsGray() { return !BoardConfig::isMurphyM3() || FREEINK_MURPHY_GRAY; }
 
 // borrowSecondaryBuffer() hands out a dedicated block of PSRAM rather than the secondary framebuffer,
 // so a borrower gets far more room and the display never drops to one buffer for it. Needed on
