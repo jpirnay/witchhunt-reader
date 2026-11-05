@@ -6,6 +6,7 @@ enable_language(C)
 add_executable(FallbackFaceProviderTest
   FallbackFaceProviderTest.cpp
   ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp
+  ${BIDI_MARK_SOURCES}
   ${REPO_ROOT}/lib/EpdFont/FallbackFaceProvider.cpp
   ${REPO_ROOT}/lib/EpdFont/FontDecompressor.cpp
   ${REPO_ROOT}/lib/EpdFont/GlyphFallback.cpp
@@ -15,6 +16,7 @@ add_executable(FallbackFaceProviderTest
 )
 
 target_include_directories(FallbackFaceProviderTest PRIVATE
+  ${BIDI_MARK_INCLUDES}
   ${REPO_ROOT}/test/font_group_stream
   ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/lib/EpdFont

@@ -36,6 +36,29 @@ FetchContent_MakeAvailable(googletest)
 
 set(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+# What EpdFont.cpp needs to tell a mark that overlays its letter (lib/EpdFont/MarkOverlay.h): minibidi and BidiUtils.
+# Every target that compiles EpdFont.cpp lists these.
+set(BIDI_MARK_SOURCES
+  ${REPO_ROOT}/lib/MiniBidi/minibidi.c
+  ${REPO_ROOT}/lib/MiniBidi/BidiUtils.cpp
+)
+set(BIDI_MARK_INCLUDES
+  ${REPO_ROOT}/lib/MiniBidi
+  ${REPO_ROOT}/lib/Memory
+)
+
+# The bidi line pass (lib/Epub/Epub/BidiLine) and what it runs on: minibidi, BidiUtils and the shaping layer. Every
+# target that lays out text through ParsedText lists these, so they are set before the subdirectories.
+set(BIDI_LAYOUT_SOURCES
+  ${BIDI_MARK_SOURCES}
+  ${REPO_ROOT}/lib/TextShaping/TextShaping.cpp
+  ${REPO_ROOT}/lib/TextShaping/HebrewShaper.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/BidiLine.cpp
+)
+set(BIDI_LAYOUT_INCLUDES
+  ${BIDI_MARK_INCLUDES}
+  ${REPO_ROOT}/lib/TextShaping
+)
 file(GLOB OT_SHAPER_SOURCES ${REPO_ROOT}/lib/OtShaper/*.cpp)
 # lib/Memory is ours: makeUniqueNoThrow (Task 8) lives there.
 set(OT_SHAPER_INCLUDE_DIR ${REPO_ROOT}/lib/OtShaper ${REPO_ROOT}/lib/Memory)
@@ -222,6 +245,7 @@ add_subdirectory(default_ignorable)
 add_subdirectory(minibidi)
 add_subdirectory(minibidi_arabic)
 add_subdirectory(text_shaping)
+add_subdirectory(bidi_line)
 add_subdirectory(indic_text)
 add_subdirectory(ot_shaper)
 add_subdirectory(ot_shaper_port)

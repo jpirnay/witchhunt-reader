@@ -1,5 +1,6 @@
 add_executable(TextBlockRangeTest
   TextBlockRangeTest.cpp
+  TextBlockBidiTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/blocks/TextBlock.cpp
   ${REPO_ROOT}/lib/Epub/Epub/VerticalDraw.cpp
   ${REPO_ROOT}/lib/Epub/Epub/VerticalOrientation.cpp

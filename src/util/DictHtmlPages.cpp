@@ -1,6 +1,7 @@
 #include "DictHtmlPages.h"
 
 #include <Arduino.h>
+#include <Epub/BidiLine.h>
 #include <Epub/hyphenation/Hyphenator.h>
 #include <Epub/parsers/ChapterHtmlSlimParser.h>
 #include <Logging.h>
@@ -79,6 +80,11 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
   const char* limitReason = nullptr;
   size_t retainedElements = 0;
   bool parsed = false;
+  // No Section build ends here, so nothing else frees the line pass's heap memory (a right-to-left article made it).
+  // Declared before the parser's block: it runs on every exit, after the parser is gone.
+  struct ReleaseBidiMemory {
+    ~ReleaseBidiMemory() { BidiLine::releaseBuildMemory(); }
+  } releaseBidiMemory;
   {
     // For the parser's lifetime, which is the layout: the last section build installed its own book's patterns.
     const ScopedLanguageHyphenator scopedHyphenator(hyphenator);

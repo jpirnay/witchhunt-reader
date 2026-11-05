@@ -119,7 +119,7 @@ class HalDisplay {
   // the caller as scratch — it never enters the heap, so nothing can allocate
   // inside it and returnSecondaryBuffer() cannot fail. See FreeInkDisplay.
   //
-  // Where HalCapabilities::lendsPsramArena() says so, the region is a block of PSRAM instead and the
+  // Where HalCapabilities::keepsSecondaryBuffer() says so, the region is a block of PSRAM instead and the
   // display stays double-buffered, but callers see the same contract: one borrower at a time, a
   // second borrow gets nullptr, and hasSecondaryBuffer() is false until the region comes back.
   // Everything a borrower does around the call for the framebuffer's sake (seeding RED,

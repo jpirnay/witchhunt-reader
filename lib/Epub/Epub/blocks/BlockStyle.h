@@ -79,6 +79,10 @@ struct BlockStyle {
   // Inherited through the parser's flow stack, so a merge takes the child's: a spent sibling block must not lend its
   // value. Read only for Book's style line spacing (ChapterHtmlSlimParser::effectiveLineHeight). Parse-time only.
   float lineHeightEm = 0.0f;
+  // The paragraph's computed direction: Ltr or Rtl from dir or CSS, Auto for dir="auto" or unicode-bidi: plaintext on
+  // the block, Unset when nothing sets one (the layout then decides it from the text or the book). Parse-time only, NOT
+  // serialised; a merge takes the child's when set, else the parent's.
+  CssDirection direction = CssDirection::Unset;
 
   // Float zones: left-floated images that narrow text width on overlapping lines.
   FloatZone floatZones[kMaxFloatZones] = {};
@@ -143,6 +147,7 @@ struct BlockStyle {
     combinedBlockStyle.fromBrElement = false;
     combinedBlockStyle.keepWithNext = child.keepWithNext;
     combinedBlockStyle.lineHeightEm = child.lineHeightEm;
+    combinedBlockStyle.direction = child.direction != CssDirection::Unset ? child.direction : direction;
     // fontSizeMultiplier: use child's if != 1.0, else parent's
     combinedBlockStyle.fontSizeMultiplier =
         (child.fontSizeMultiplier != 1.0f) ? child.fontSizeMultiplier : fontSizeMultiplier;

@@ -63,6 +63,10 @@ TypographyProfile TypographyProfile::forLanguage(const std::string& tag) {
     p.breaking = Breaking::KoreanWords;
     p.verticalAllowed = true;
     p.cjkRepertoire = true;
+  } else if (hasPrimary(t, "he") || hasPrimary(t, "iw") || hasPrimary(t, "yi") || hasPrimary(t, "ar") ||
+             hasPrimary(t, "fa") || hasPrimary(t, "ur")) {
+    p.direction = Direction::RightToLeft;
+    p.hyphenator = nullptr;
   }
   return p;
 }

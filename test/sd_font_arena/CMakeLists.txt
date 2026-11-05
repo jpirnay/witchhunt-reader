@@ -2,6 +2,7 @@ add_executable(SdFontArenaTest
   SdFontArenaTest.cpp
   ${REPO_ROOT}/lib/EpdFont/SdCardFont.cpp
   ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp
+  ${BIDI_MARK_SOURCES}
   ${REPO_ROOT}/lib/EpdFont/GlyphFallback.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
   ${REPO_ROOT}/test/epub_pipeline/LoggingImpl.cpp
@@ -10,6 +11,7 @@ add_executable(SdFontArenaTest
 target_compile_definitions(SdFontArenaTest PRIVATE ENABLE_SERIAL_LOG=1 LOG_LEVEL=2)
 
 target_include_directories(SdFontArenaTest PRIVATE
+  ${BIDI_MARK_INCLUDES}
   ${REPO_ROOT}/test/zip_entry_reader  # stdio-backed HalStorage.h; shadows test/shims stub
   ${REPO_ROOT}/lib/EpdFont
   ${REPO_ROOT}/lib/Memory

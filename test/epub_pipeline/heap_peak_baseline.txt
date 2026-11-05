@@ -1,4 +1,6 @@
 # fixture mode heap-side-peak-bytes (see heap_peak_check.py; regenerate with UPDATE_HEAP_BASELINE=1)
+epubs/test_bidi_text.epub arena 34224
+epubs/test_bidi_text.epub heap 67611
 epubs/test_cjk_block_seams.epub arena 26326
 epubs/test_cjk_block_seams.epub heap 40603
 epubs/test_cjk_ja_soseki.epub arena 36305
@@ -15,9 +17,11 @@ epubs/test_jpeg_images.epub arena 28136
 epubs/test_jpeg_images.epub heap 47396
 epubs/test_jpeg_metadata_heavy.epub arena 26424
 epubs/test_jpeg_metadata_heavy.epub heap 61462
+epubs/test_rtl_markup.epub arena 26596
+epubs/test_rtl_markup.epub heap 49201
 epubs/test_table_streaming.epub arena 35805
 epubs/test_table_streaming.epub heap 56778
 fixtures/moby-dick.epub arena 54651
-fixtures/moby-dick.epub heap 62872
+fixtures/moby-dick.epub heap 72320
 fixtures/test_large_css.epub arena 26457
 fixtures/test_large_css.epub heap 36275

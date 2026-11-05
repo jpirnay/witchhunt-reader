@@ -6,6 +6,7 @@ enable_language(C)
 add_executable(UiFontCompressionTest
   UiFontCompressionTest.cpp
   ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp
+  ${BIDI_MARK_SOURCES}
   ${REPO_ROOT}/lib/EpdFont/FontDecompressor.cpp
   ${REPO_ROOT}/lib/EpdFont/GlyphFallback.cpp
   ${REPO_ROOT}/lib/InflateReader/InflateReader.cpp
@@ -13,6 +14,7 @@ add_executable(UiFontCompressionTest
   ${REPO_ROOT}/test/uzlib_lzcopy/UzlibChksumStubs.cpp
 )
 target_include_directories(UiFontCompressionTest PRIVATE
+  ${BIDI_MARK_INCLUDES}
   ${REPO_ROOT}/test/font_group_stream
   ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/lib/EpdFont
