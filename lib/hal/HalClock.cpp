@@ -5,7 +5,7 @@
 #include <HalGPIO.h>
 #include <Logging.h>
 #include <Preferences.h>
-#include <Rtc.h>  // SDK driver, used for the PCF8563 family (DS3231 is handled inline below)
+#include <Rtc.h>  // SDK driver, used for every RTC but the DS3231, which is handled inline below
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <Wire.h>  // Needed for I2C communication with the RTC
@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 
 #include "HalI2cBus.h"
 
@@ -147,6 +148,9 @@ static constexpr char NVS_TEMP_KEY[] = "lasttemp";
 // device can reboot many times between sleeps (every reflash does), and each of
 // those boots would otherwise report the same ever-staler figure.
 static constexpr char NVS_SLEEP_KEY[] = "sleepmark";
+// The POSIX TZ rule in force, kept here as well as in the settings because the settings file is on
+// the card: see applyStoredTimezone().
+static constexpr char NVS_TZ_KEY[] = "tzrule";
 
 static void nvsWrite(time_t epoch) {
   Preferences prefs;
@@ -247,17 +251,49 @@ static time_t nvsReadSyncTime() {
   return syncEpoch;
 }
 
+static void nvsWriteTimezone(const char* posixTz) {
+  Preferences prefs;
+  if (prefs.begin(NVS_NAMESPACE, false)) {
+    prefs.putString(NVS_TZ_KEY, posixTz);
+    prefs.end();
+  }
+}
+
+// Bring back the rule the last boot ran under, so the clock is on local time before the card can
+// be written. FAT stores local time with no zone, so a file written while TZ is unset carries UTC
+// for good, and the zone cannot come from the settings at that point: they are on that same card.
+// Boots that have never recorded a rule keep UTC until timezones::applyToClock() runs.
+static void applyStoredTimezone() {
+  char rule[64] = {};  // the longest rule in the table is 30 characters
+  Preferences prefs;
+  if (!prefs.begin(NVS_NAMESPACE, true)) return;
+  const bool found = prefs.isKey(NVS_TZ_KEY) && prefs.getString(NVS_TZ_KEY, rule, sizeof(rule)) > 0;
+  prefs.end();
+  if (!found) return;
+  setenv("TZ", rule, 1);
+  tzset();
+}
+
 // ---- internal helpers -----------------------------------------------------
 
 static bool initExternalRTC();
 static float readExternalTemp();
 
-// The SDK RTC driver, for the PCF8563 family only. Function-local so it is
-// constructed on first use rather than during static init, where the I2C bus is
-// not up yet. Only reached when rtcType() == Pcf8563.
+// The SDK RTC driver. Function-local so it is constructed on first use rather than
+// during static init, where the I2C bus is not up yet. Only reached when
+// rtcUsesSdkDriver().
 static freeink::Rtc& externalRtc() {
   static freeink::Rtc rtc;
   return rtc;
+}
+
+// Every RTC but the DS3231, which predates the driver and stays inline (the X3's
+// device-validated path). By exclusion on purpose: hasHardwareRtc() is true for any type a
+// profile declares and takes the LP-timer fallback away, so a type left out here would leave
+// that board with no clock at all across a sleep.
+static bool rtcUsesSdkDriver() {
+  const auto type = HalCapabilities::rtcType();
+  return type != BoardConfig::RtcType::None && type != BoardConfig::RtcType::Ds3231;
 }
 
 static float readChipTemperatureC() {
@@ -281,15 +317,15 @@ static bool initExternalRTC() {
   if (initialized) return exists;
   initialized = true;
 
-  // Two families, two drivers. The DS3231 is probed and driven inline below.
-  // The PCF8563 family (T5S3's PCF8563TS, X4 Pro's BM8563 -- both at 0x51) is
-  // register-incompatible with it and would return garbage if driven with DS3231
-  // offsets, so it goes through the SDK's Rtc lib, which already implements it.
+  // Two drivers. The DS3231 is probed and driven inline below. The others (T5S3's
+  // PCF8563TS, X4 Pro's BM8563, Murphy's RX8010SJ) are register-incompatible with it
+  // and would return garbage if driven with DS3231 offsets, so they go through the
+  // SDK's Rtc lib, which already implements them.
   // Dispatching on rtcType rather than hasHardwareRtc() is what keeps those apart.
-  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+  if (rtcUsesSdkDriver()) {
     HalI2cBus::Lock i2cLock;
     exists = externalRtc().begin();
-    LOG_INF("CLK", exists ? "PCF8563 RTC found via SDK driver." : "No PCF8563 RTC found.");
+    LOG_INF("CLK", exists ? "Hardware RTC found via SDK driver." : "No hardware RTC found.");
     return exists;
   }
   if (HalCapabilities::rtcType() != BoardConfig::RtcType::Ds3231) {
@@ -312,12 +348,12 @@ static bool initExternalRTC() {
 }
 
 // Write full date+time to the external RTC (DS3231: all 7 registers inline;
-// PCF8563 family: delegated to the SDK driver). Both are operated in UTC.
+// the others: delegated to the SDK driver). All are operated in UTC.
 static void writeExternalRTC(time_t t) {
   struct tm timeinfo;
   gmtime_r(&t, &timeinfo);  // DS3231 is usually operated in UTC
 
-  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+  if (rtcUsesSdkDriver()) {
     freeink::Rtc::DateTime dt;
     dt.year = static_cast<uint16_t>(timeinfo.tm_year + 1900);
     dt.month = static_cast<uint8_t>(timeinfo.tm_mon + 1);
@@ -347,9 +383,9 @@ static void writeExternalRTC(time_t t) {
 // Read time from the external RTC. Returns 0 when the time cannot be trusted --
 // the callers treat 0 as "no usable RTC time", so a stopped oscillator must not
 // surface as a valid timestamp. The SDK driver already reports that case by
-// returning false on the PCF8563's VL flag.
+// returning false on the chip's oscillator-stop flag.
 static time_t readExternalRTC() {
-  if (HalCapabilities::rtcType() == BoardConfig::RtcType::Pcf8563) {
+  if (rtcUsesSdkDriver()) {
     freeink::Rtc::DateTime dt;
     HalI2cBus::Lock i2cLock;
     if (!externalRtc().now(dt)) return 0;
@@ -471,16 +507,19 @@ static bool rtcValid() {
 /// Returns the corrected elapsed seconds and updates lpNowOut/calNowOut
 /// for the caller to re-baseline.
 static double computeCorrectedElapsedSec(uint64_t lpNow, float tempNow) {
-  uint32_t calNow = esp_clk_slowclk_cal_get();
-  uint64_t elapsedUs;
-  if (rtcSlowCal != 0 && calNow != 0) {
-    // rtcLpTimeUs was computed with rtcSlowCal; convert it to the
-    // current calibration basis so the subtraction is consistent.
-    uint64_t lpThenCorrected = (uint64_t)((double)rtcLpTimeUs * calNow / rtcSlowCal);
-    elapsedUs = lpNow - lpThenCorrected;
-  } else {
-    elapsedUs = lpNow - rtcLpTimeUs;
-  }
+  // A plain difference, deliberately not rescaled for a calibration change. esp_clk_rtc_time() is
+  // not ticks x current calibration: IDF converts each stretch of ticks with the calibration in
+  // force at the time and keeps the running total in RTC memory, and esp_clk_slowclk_cal_set()
+  // folds the old stretch in first, so the value stays monotonic across a boot's recalibration.
+  //
+  // This used to multiply the whole stored total by calNow / rtcSlowCal, re-weighting everything
+  // since power-on by one boot's calibration wobble. On a Murphy, one restart 8 s after an NTP sync
+  // overshot lpNow by 1071 s: the subtraction wrapped to raw=18446744072638.230s, restore() threw
+  // the correction away and the clock stepped back to the capture epoch. Where it did not wrap, the
+  // error went into the clock unnoticed, in either direction: that Murphy also ended up 7 min fast.
+  //
+  // Both callers have already established lpNow > rtcLpTimeUs, so this cannot wrap.
+  const uint64_t elapsedUs = lpNow - rtcLpTimeUs;
 
   // Use the full temperature delta between the average over the interval
   // and the calibration reference (which is the capture-time temperature).
@@ -515,10 +554,6 @@ static double computeCorrectedElapsedSec(uint64_t lpNow, float tempNow) {
 /// `lpContinuous`: will the LP timer keep running until the next restore()? See the flag.
 static void capture(bool lpContinuous) {
   rtcEpoch = time(nullptr);
-  // Update DS3231 only when the current time is authoritative.
-  if (initExternalRTC() && !clockApproximate) {
-    writeExternalRTC(rtcEpoch);
-  }
   rtcLpTimeUs = esp_clk_rtc_time();
   rtcSlowCal = esp_clk_slowclk_cal_get();
   rtcTemperatureC = readChipTemperatureC();
@@ -534,9 +569,14 @@ static void capture(bool lpContinuous) {
 namespace HalClock {
 
 void applyTimezone(const char* posixTz) {
-  if (posixTz == nullptr || posixTz[0] == ' ') return;
+  if (posixTz == nullptr || posixTz[0] == '\0') return;
+  // The usual case at boot, restore() having got here first: one flash write per change of zone,
+  // not one per boot.
+  const char* current = getenv("TZ");
+  if (current != nullptr && strcmp(current, posixTz) == 0) return;
   setenv("TZ", posixTz, 1);
   tzset();
+  nvsWriteTimezone(posixTz);
   LOG_DBG("CLK", "Timezone applied: %s", posixTz);
 }
 
@@ -764,7 +804,7 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
     }
   }
 
-  // NTP sync yields authoritative time; allow DS3231 to be updated.
+  // NTP sync yields authoritative time.
   clockApproximate = false;
   clockStaleRestore = false;
   // true, not false: nothing is going to sleep here. What follows a sync is either a reboot --
@@ -781,6 +821,16 @@ bool syncNtp(char* errorBuf, size_t errorBufSize, const char* preferredServer) {
   // (NTP drift: interval=2689s error=-1217.000s), which in turn drove rtcDriftScale to its 0.1
   // floor -- the drift learner was measuring reboot count, not temperature.
   capture(true);
+  // The hardware RTC is written here and in applyClientTime(), where a new time arrives, and
+  // nowhere else. capture() used to write it at every sleep as well, but on those boards the system
+  // clock came from the chip in the first place, so that only fed its own rounding back into it:
+  // restore() floors the chip's reading to a second, time() floors again, and writing the seconds
+  // register restarts the chip's sub-second count. It cost about a second per sleep (1.3 s on an
+  // X3, 1.4 s on a Murphy; that X3 sat 57 s behind), where a DS3231 left alone loses about a minute
+  // a year.
+  if (initExternalRTC()) {
+    writeExternalRTC(rtcEpoch);
+  }
   nvsWriteSyncTime(rtcEpoch);
 
   float currentTemp = rtcTemperatureC;
@@ -844,6 +894,8 @@ void saveBeforeSleep(bool keepLpAlive) {
 }
 
 void restore() {
+  applyStoredTimezone();
+
   // Claim any pending sleep marker up front, exactly once per boot. Only the
   // branches below whose wall clock came from a source that ran THROUGH the
   // sleep can turn it into a duration; the rest just consume it so a later boot

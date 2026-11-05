@@ -1430,6 +1430,12 @@ void setup() {
     BootDiag::markPhase(BootPhase::RecoverySettle);
   }
 
+  // Before the card, because a file is dated by the clock at the moment it is written. This used
+  // to run after the first paint, so the boot record, the crash report and the resume path's state
+  // save all went out with no clock or no zone: dated 1980 after a cold boot, UTC after a warm one.
+  // After the early sleep paths above, which must not spend NVS writes on a boot they abandon.
+  HalClock::restore();
+
   // SD Card Initialization
   // We need 6 open files concurrently when parsing a new chapter
   if (!Storage.begin()) {
@@ -1615,7 +1621,6 @@ void setup() {
   // kind, which is what makes the gap back to `gate` the number that matters.
   BootDiag::markPhase(BootPhase::FirstPaint);
 
-  HalClock::restore();
   // Split checkpoints: two boots of the same firmware differed by 14780 B of free heap and, far
   // more importantly, by largest8 65524 vs 26612 at after_activity_route — and the only thing
   // that differed was the reading-stats file (1 book / 110 s vs 36 books / 100788 s). Boot min
