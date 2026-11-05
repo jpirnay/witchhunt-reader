@@ -7,6 +7,7 @@
 
 #include "KeyboardLayoutSet.h"
 #include "MappedInputManager.h"
+#include "PasswordMask.h"
 #include "components/UITheme.h"
 #include "components/themes/HeaderLayout.h"
 #include "components/themes/PanelMetrics.h"
@@ -224,12 +225,7 @@ bool KeyboardEntryActivity::syncSelectionToValue(const int16_t value) {
   return false;
 }
 
-size_t KeyboardEntryActivity::utf8Prev(const std::string& s, size_t pos) {
-  if (pos == 0) return 0;
-  pos--;
-  while (pos > 0 && (static_cast<uint8_t>(s[pos]) & 0xC0) == 0x80) pos--;
-  return pos;
-}
+size_t KeyboardEntryActivity::utf8Prev(const std::string& s, const size_t pos) { return utf8PrevCharStart(s, pos); }
 
 size_t KeyboardEntryActivity::utf8Next(const std::string& s, size_t pos) {
   if (pos >= s.length()) return s.length();
@@ -344,27 +340,14 @@ bool KeyboardEntryActivity::clearAllOrAltOnSelected() {
 }
 
 std::string KeyboardEntryActivity::displayTextForCurrentState() const {
-  std::string displayText = text;
   if (inputType != InputType::Password || passwordVisible) {
-    return displayText;
+    return text;
   }
 
-  // Masking is per byte so displayText keeps text's length and every index
-  // means the same thing in both. A non-ASCII password character therefore
-  // shows as two or three stars; passwords are rarely anything but ASCII.
-  size_t revealPos;
-  if (cursorMode) {
-    revealPos = text.length();  // no reveal in displayText; the block draws the actual char
-  } else {
-    // Only what was just typed (typedEnd): never a character of the value the field opened with.
-    revealPos = (cursorPos > 0 && cursorPos == typedEnd) ? cursorPos - 1 : std::string::npos;
-  }
-  for (size_t i = 0; i < displayText.length(); i++) {
-    if (i != revealPos) {
-      displayText[i] = '*';
-    }
-  }
-  return displayText;
+  // Only what was just typed (typedEnd): never a character of the value the field opened with. In
+  // cursor mode nothing shows here; the block draws the actual char.
+  const bool reveal = !cursorMode && cursorPos == typedEnd;
+  return maskPassword(text, reveal ? cursorPos : std::string::npos);
 }
 
 int KeyboardEntryActivity::measureRange(std::string& s, const int start, const int end) const {

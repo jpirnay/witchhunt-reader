@@ -781,6 +781,10 @@ bool FontDownloadActivity::handleCustomInput() {
           downloadFamily(downloadingFamilyIndex_);
         }
         requestUpdateAndWait();
+      } else if (families_.count() == 0) {
+        // The font list is what failed, or was lost with a failed stash: Retry fetches it again. From
+        // crosspoint-reader #4253 (Leopoldo Pla Sempere).
+        onWifiSelectionComplete(true);
       } else {
         {
           RenderLock lock(*this);
