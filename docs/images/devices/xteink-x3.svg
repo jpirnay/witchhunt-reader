@@ -13,10 +13,10 @@
 <text x="286.15384615384613" y="52" text-anchor="middle" fill="#222222" font-size="13">hold: on / sleep</text>
 <rect x="133" y="136.66666666666663" width="8" height="62.5" rx="2" fill="#333333"/>
 <line x1="133" y1="167.91666666666663" x2="116" y2="167.91666666666663" stroke="#333333" stroke-width="1"/>
-<text x="112" y="171.91666666666663" text-anchor="end" fill="#222222" font-size="15" font-weight="700">Volume Up</text>
+<text x="112" y="171.91666666666663" text-anchor="end" fill="#222222" font-size="15" font-weight="700">Up</text>
 <rect x="339" y="136.66666666666663" width="8" height="62.5" rx="2" fill="#333333"/>
 <line x1="347" y1="167.91666666666663" x2="364" y2="167.91666666666663" stroke="#333333" stroke-width="1"/>
-<text x="368" y="171.91666666666663" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Volume Down</text>
+<text x="368" y="171.91666666666663" text-anchor="start" fill="#222222" font-size="15" font-weight="700">Down</text>
 <rect x="170.8" y="432" width="61.5" height="18" rx="6" fill="#333333"/>
 <line x1="201.53846153846155" y1="435" x2="201.53846153846155" y2="447" stroke="#ffffff" stroke-width="1"/>
 <rect x="247.7" y="432" width="61.5" height="18" rx="6" fill="#333333"/>

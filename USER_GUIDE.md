@@ -78,9 +78,9 @@ In the tables, **hold** means about a second, and a little less for Power and th
 
 Every button is a real key. On both, the four front buttons are two double keys: **Back** and
 **Confirm**, then **Left** and **Right**. The X4 has all its side keys on the right edge. The X3 has
-**Volume Up** on the left, **Volume Down** on the right, and **Power** and **Reset** on the top edge.
+**Up** on the left, **Down** on the right, and **Power** and **Reset** on the top edge.
 
-<img src="docs/images/devices/xteink-x4.svg" width="320" alt="Xteink X4. Below the screen, left to right: a double key for Back and Confirm, and a double key for Left and Right. Right edge, top to bottom: Power, a double key for Volume Up and Volume Down, Reset."> <img src="docs/images/devices/xteink-x3.svg" width="320" alt="Xteink X3. Below the screen, left to right: a double key for Back and Confirm, and a double key for Left and Right. Volume Up on the left edge and Volume Down on the right edge, near the top. Reset and Power on the top edge, with Reset to the left.">
+<img src="docs/images/devices/xteink-x4.svg" width="320" alt="Xteink X4. Below the screen, left to right: a double key for Back and Confirm, and a double key for Left and Right. Right edge, top to bottom: Power, a double key for Up and Down, Reset."> <img src="docs/images/devices/xteink-x3.svg" width="320" alt="Xteink X3. Below the screen, left to right: a double key for Back and Confirm, and a double key for Left and Right. Up on the left edge and Down on the right edge, near the top. Reset and Power on the top edge, with Reset to the left.">
 
 *The X4 (left) and the X3 (right). Like the other drawings here, these show where the keys are, not the device's exact shape.*
 
@@ -90,7 +90,7 @@ Every button is a real key. On both, the four front buttons are two double keys:
 | **Back** | Go back, leave a book | Go to the Home screen |
 | **Confirm** | Open the selected row. In a book: open the reader menu | |
 | **Left** / **Right** | In a book: previous / next page. In a list: what the label says | In a book: previous / next chapter. In a list: page back / forward |
-| **Volume Up** / **Volume Down** | In a book: previous / next page. In a list: move up / down | In a book: previous / next chapter. In a list: jump to the first / last row |
+| **Up** / **Down** | In a book: previous / next page. In a list: move up / down | In a book: previous / next chapter. In a list: jump to the first / last row |
 | **Reset** | Restart the device | |
 
 ### Xteink X4 Pro
@@ -192,8 +192,8 @@ On the **X3 and X4**, the firmware uses the manufacturer's own button layout by 
 | Location | X4 | X3 |
 | --- | --- | --- |
 | **Bottom Edge** | **Back**, **Confirm**, **Left**, **Right** | **Back**, **Confirm**, **Left**, **Right** |
-| **Right Side** | **Power**, **Volume Up**, **Volume Down**, **Reset** | **Volume Down** |
-| **Left Side** | | **Volume Up** |
+| **Right Side** | **Power**, **Up**, **Down**, **Reset** | **Down** |
+| **Left Side** | | **Up** |
 | **Top Edge** | | **Power**, **Reset** |
 
 The **X4 Pro**, **LilyGo T5 S3** and **Murphy M3** have far fewer keys, and make up the difference
@@ -271,7 +271,7 @@ other. **Back** answers **Cancel** and carries its hint, and the two front butto
 two.
 
 ### Taking a Screenshot
-When the Power Button and Volume Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`.
+When the Power Button and Down button are pressed at the same time, it will take a screenshot and save it in the folder `screenshots/`.
 
 Alternatively, while reading a book, press the **Confirm** button to open the reader menu and select **Take screenshot**.
 
@@ -782,10 +782,10 @@ Once you have opened a book, the button layout changes to facilitate reading.
 ### Page Turning
 | Action            | Buttons                              |
 | ----------------- | ------------------------------------ |
-| **Previous Page** | Press **Left** _or_ **Volume Up**    |
-| **Next Page**     | Press **Right** _or_ **Volume Down** |
+| **Previous Page** | Press **Left** _or_ **Up**    |
+| **Next Page**     | Press **Right** _or_ **Down** |
 
-The role of the volume (side) buttons can be swapped in the **[Controls Settings](#373-controls)**.
+The role of the side buttons (**Up** and **Down**) can be swapped in the **[Controls Settings](#373-controls)**.
 
 If the **Short Power Button Click** setting is set to "Page Turn", you can also turn to the next page by briefly pressing the Power button.
 
@@ -793,8 +793,8 @@ If the **Short Power Button Click** setting is set to "Page Turn", you can also 
 A book set vertically (**Vertical Text** in the **[Reader settings](#372-reader)**) is read the way a Japanese book is: its pages turn right to left. With **Page Turn Buttons** on "Follow Book" the Left button shows the next page and the Right button the previous one, and the chapter skips on a long press swap with them. Taps and swipes on a touch device follow the same direction (see **[5.3](#53-the-reading-page-taps-and-holds)** and **[5.4](#54-the-reading-page-swipes)**), the progress bars fill from the right, and the jump-to-percent screen moves from the right as well. The dictionary's word screen follows the columns: **Up** and **Down** move along the column, word by word and on into the next column, **Left** moves to the next column (the one to its left) and **Right** to the previous one (see [Dictionary](./docs/dictionary.md#looking-up-a-word)).
 
 ### Chapter Navigation
-* **Next Chapter:** Press and **hold** the **Right** (or **Volume Down**) button briefly, then release.
-* **Previous Chapter:** Press and **hold** the **Left** (or **Volume Up**) button briefly, then release.
+* **Next Chapter:** Press and **hold** the **Right** (or **Down**) button briefly, then release.
+* **Previous Chapter:** Press and **hold** the **Left** (or **Up**) button briefly, then release.
 
 This feature can be disabled in the **[Controls Settings](#373-controls)** to help avoid changing chapters by mistake.
 
