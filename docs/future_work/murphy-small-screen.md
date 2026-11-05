@@ -29,8 +29,8 @@ Murphy's 12,480 byte framebuffer was too small for a ZIP entry's inflate ring, s
 - Reading Stats book detail in landscape overflows (`ReadingStatsBookDetailActivity.cpp`), and `QrDisplayActivity` in
   landscape forces a large payload to 1 px modules.
 - Button Actions Overview lists keys Murphy does not have.
-- Arena: the T5S3 is not on it. A background build still yields to a render; with the arena it no longer has to, which
-  would be the next gain (`recoverSecondaryBufferIfNeeded()`).
+- Arena: a background build still yields to a render; with the arena it no longer has to, which would be the next gain
+  (`recoverSecondaryBufferIfNeeded()`).
 
 The QR pages (`CrossPointWebServerActivity`, `WifiSelectionActivity`) were reworked on `QrUtils::compactLayout()`
 and are not covered here. Compact metrics do not make that layout redundant: the full layout puts text beside the
