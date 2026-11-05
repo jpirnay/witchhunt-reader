@@ -9,6 +9,7 @@
 // margins collapsing to the larger of two (ChapterHtmlSlimParser, the margin-top collapse before a block's first line).
 #include <BidiUtils.h>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -105,8 +106,8 @@ struct WritingModeLayout : testing::Test {
   int books = 0;
 
   void SetUp() override {
-    work = fs::temp_directory_path() /
-           (std::string("epub_writing_mode_") + testing::UnitTest::GetInstance()->current_test_info()->name());
+    work = fs::temp_directory_path() / (std::string("epub_writing_mode_") + std::to_string(getpid()) + "_" +
+                                        testing::UnitTest::GetInstance()->current_test_info()->name());
     fs::remove_all(work);
     fs::create_directories(work);
   }
@@ -1520,6 +1521,20 @@ TEST_F(WritingModeLayout, ThePageProgressionSurvivesBookBin) {
     ASSERT_TRUE(reloaded.load(true));
     EXPECT_EQ(PageProgression::Rtl, reloaded.pageProgression());
   }
+}
+
+// "dddd&nbsp; eeee" is how Word writes a double space: the parser glues a space to dddd, and the whitespace after it
+// ends the glue. That space takes no stretch of its own, so a justified line must not hold a share back for it. Stub
+// metrics: a four-letter word is 32 wide, a word gap 6, the glued space 8 (a letter). Eleven words and that space are
+// 420 of the 460, and the next word needs 62 more.
+TEST_F(WritingModeLayout, AJustifiedLineWithADoubledNoBreakSpaceReachesTheMargin) {
+  const std::string body =
+      "<p>aaaa bbbb cccc dddd&#160; eeee ffff gggg hhhh iiii jjjj kkkk lllllll mmmm nnnn oooo pppp</p>";
+  const auto lines = parseLines(dump("", document(body)));
+  ASSERT_GE(lines.size(), 2u);
+  ASSERT_EQ("kkkk", lines[0].words.back().text);
+  // The ten word gaps share the 40 px left, so the last word ends on the margin.
+  EXPECT_EQ(460 - 32, lines[0].words.back().x);
 }
 
 TEST_F(WritingModeLayout, TheDumpNamesADeclaredPageProgressionOnly) {
