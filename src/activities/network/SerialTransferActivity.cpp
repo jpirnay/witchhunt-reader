@@ -7,6 +7,7 @@
 #include <Logging.h>
 
 #include "MappedInputManager.h"
+#include "SerialBuffers.h"
 #include "SerialTestApi.h"
 #include "SilentRestart.h"
 #include "components/UITheme.h"
@@ -50,6 +51,7 @@ void SerialTransferActivity::onStatus(const char* msg) {
 
 void SerialTransferActivity::onEnter() {
   Activity::onEnter();
+  SerialBuffers::arm();
 
   // Mute LOG_* on the wire for the whole session so no stray log byte from a
   // background task can corrupt the binary protocol stream. Logs still reach the
