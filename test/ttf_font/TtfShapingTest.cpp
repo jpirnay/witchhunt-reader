@@ -1400,12 +1400,35 @@ TEST_F(ShapingFacePlans, PastTwoPlansTheLeastRecentGoes) {
   ASSERT_EQ(2, ShapingFace::kMaxPlans);
   ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, none));
   ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, marathi));
-  ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, nepali));  // frees the plan of "": the least recent
+  ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, none));  // "" is now more recent than "mr"
+  EXPECT_EQ(2, face.planBuilds());
+  ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, nepali));  // frees the plan of "mr": the least recent
   EXPECT_EQ(3, face.planBuilds());
   ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, nepali));
-  EXPECT_EQ(3, face.planBuilds());
   ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, none));
-  EXPECT_EQ(4, face.planBuilds());
+  EXPECT_EQ(3, face.planBuilds());  // "" and "ne" are kept
+  ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, marathi));
+  EXPECT_EQ(4, face.planBuilds());  // "mr" was the one freed
+}
+
+TEST_F(ShapingFacePlans, APlanAskedAgainBeforeEachUseIsValidAfterAnEviction) {
+  // The contract: a plan is valid until the next plan() on its face. A caller asks again before each use.
+  FixtureShapingFace face(ottest::readFixture(devanagariFixture().layoutFile));
+  const uint32_t* const languages[] = {ot::languageTagsFor(""), ot::languageTagsFor("mr"), ot::languageTagsFor("ne")};
+  for (int round = 0; round < 2; ++round) {
+    for (const uint32_t* tags : languages) {  // three keys over two slots: each ask evicts one
+      const ot::Plan* const plan = face.plan(ot::Script::Devanagari, tags);
+      ASSERT_NE(nullptr, plan);
+      const std::vector<StoredGlyph> expected = [&] {
+        FixtureShapingFace reference(ottest::readFixture(devanagariFixture().layoutFile));
+        const ot::Plan* const fresh = reference.plan(ot::Script::Devanagari, tags);
+        return fresh ? ottest::shapeAsStored(*reference.current(), *fresh, kLaksha) : std::vector<StoredGlyph>{};
+      }();
+      ASSERT_FALSE(expected.empty());
+      EXPECT_EQ(expected, ottest::shapeAsStored(*face.current(), *plan, kLaksha));
+    }
+  }
+  EXPECT_EQ(6, face.planBuilds());
 }
 
 TEST_F(ShapingFacePlans, APlanBuiltBeforeAMoveShapesAfterIt) {
@@ -1488,18 +1511,33 @@ TEST_F(ShapingFacePlans, AnUnmappedFaceGivesNoPlan) {
 TEST_F(ShapingFacePlans, TheFixtureFaceDropsWhatItsOptionsSay) {
   const std::vector<uint8_t> font = ottest::readFixture(devanagariFixture().layoutFile);
   FixtureShapingFace whole(font);
-  FixtureShapingFace noCpac(font, {.keepCpac = false});
   FixtureShapingFace noLayout(font, {.keepLayout = false});
-  const uint32_t* const tags = ot::languageTagsFor("");
-  const ot::Plan* const wholePlan = whole.plan(ot::Script::Devanagari, tags);
-  ASSERT_NE(nullptr, wholePlan);
-  const std::vector<StoredGlyph> shaped = ottest::shapeAsStored(*whole.current(), *wholePlan, kLaksha);
-  const ot::Plan* const noCpacPlan = noCpac.plan(ot::Script::Devanagari, tags);
-  ASSERT_NE(nullptr, noCpacPlan);
-  EXPECT_EQ(shaped, ottest::shapeAsStored(*noCpac.current(), *noCpacPlan, kLaksha));
+  ASSERT_NE(nullptr, whole.current());
   ASSERT_NE(nullptr, noLayout.current());  // a face without layout still stands
-  const ot::Plan* const noLayoutPlan = noLayout.plan(ot::Script::Devanagari, tags);
-  if (noLayoutPlan) {  // with no lookups to apply, the conjunct stays unshaped
-    EXPECT_NE(shaped, ottest::shapeAsStored(*noLayout.current(), *noLayoutPlan, kLaksha));
-  }
+  EXPECT_GT(whole.current()->lookupCount(ot::GSUB), 0);
+  EXPECT_GT(whole.current()->lookupCount(ot::GPOS), 0);
+  EXPECT_EQ(0, noLayout.current()->lookupCount(ot::GSUB));
+  EXPECT_EQ(0, noLayout.current()->lookupCount(ot::GPOS));
+  EXPECT_EQ(nullptr, noLayout.current()->filters(ot::GSUB));
+  EXPECT_EQ(nullptr, noLayout.current()->filters(ot::GPOS));
+}
+
+TEST_F(ShapingFacePlans, TheFixtureFaceDropsTheCpacOnRequest) {
+  // An SD-mode block of the install: the subset's file with its CPac record.
+  SimNorFlash chip{26 * kPage};
+  const auto set = loadSdMode(chip);
+  ASSERT_NE(nullptr, set);
+  const glyphstore::StyleInfo& info = headerOf(chip).styles[kAccentFirstBlock + kRegular];
+  ASSERT_EQ(glyphstore::kModeSd, info.mode);
+  const std::vector<uint8_t> block = chipBytes(chip, info.offset, info.size);
+  FixtureShapingFace with(block);
+  FixtureShapingFace without(block, {.keepCpac = false});
+  ASSERT_NE(nullptr, with.current());
+  ASSERT_NE(nullptr, without.current());
+  EXPECT_GT(with.cpacBytes(), 0u);
+  EXPECT_NE(nullptr, with.current()->filters(ot::GSUB));
+  EXPECT_NE(nullptr, with.current()->filters(ot::GPOS));
+  EXPECT_EQ(0u, without.cpacBytes());
+  EXPECT_EQ(nullptr, without.current()->filters(ot::GSUB));
+  EXPECT_EQ(nullptr, without.current()->filters(ot::GPOS));
 }

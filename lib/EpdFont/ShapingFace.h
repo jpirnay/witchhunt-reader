@@ -26,6 +26,8 @@ class ShapingFace {
   /// null: the script's default), built on first ask with makeUniqueNoThrow (about 1-2 KB) and kept with the face, by
   /// unique_ptr, never moved: no plan outlives the face it points into. nullptr when the face is not mapped now, the
   /// plan does not build, or there is no memory; asked again, it tries again. Under RenderLock, as current() is.
+  /// The plan is valid until the next plan() on this face (a new key past kMaxPlans frees one) or until the face is
+  /// freed: ask again before each ot::shape rather than holding the pointer.
   const ot::Plan* plan(ot::Script script, const uint32_t* languageTags);
   /// Plans a face keeps; a new one past them frees the one asked for least recently.
   static constexpr uint8_t kMaxPlans = 2;
