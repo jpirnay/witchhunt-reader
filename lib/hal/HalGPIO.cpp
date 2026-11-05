@@ -781,6 +781,19 @@ void HalGPIO::injectTouch(const float nx, const float ny) {
   portEXIT_CRITICAL(&inputMux_);
 }
 
+void HalGPIO::injectLongTouch(const float nx, const float ny) {
+  if (!hasTouch()) return;
+  TouchEvent hold;
+  hold.kind = TouchEvent::Kind::LongPress;
+  hold.nx = nx;
+  hold.ny = ny;
+  hold.atMs = millis();
+  pushTouchEvent(hold);
+  // The lift that ends a real contact: a tap, unless whoever takes the long press suppresses the
+  // contact, which drops it.
+  injectTouch(nx, ny);
+}
+
 void HalGPIO::injectSwipe(const float nx, const float ny, const float nxEnd, const float nyEnd) {
   if (!hasTouch()) return;
   TouchEvent swipe;

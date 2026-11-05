@@ -304,6 +304,7 @@ class HalGPIO {
   // tap zones) reads it as the SDK's own classification. The live "finger is down" queries never
   // see it. No-op on a board without a touch panel.
   void injectTouch(float nx, float ny);
+  void injectLongTouch(float nx, float ny);
   void injectSwipe(float nx, float ny, float nxEnd, float nyEnd);
   // True while something injected (a press or a touch above) has not yet been handed to the loop
   // by update(). The serial CMD:IDLE uses it to know a press it sent has reached the screen.

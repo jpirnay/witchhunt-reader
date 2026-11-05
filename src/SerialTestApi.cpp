@@ -774,10 +774,10 @@ void cmdLog(const std::string_view arg) {
 
 // ---- TOUCH / SWIPE --------------------------------------------------------------------------
 
-// CMD:TOUCH:<x>,<y> (2 numbers) or CMD:SWIPE:<x1>,<y1>,<x2>,<y2> (4): logical screen pixels as drawn
-// now, mapped to the touch HAL's normalized panel coordinates and queued like a contact. Builds
-// for boards without a digitiser (CP_TOUCH_UI 0: X3, X4) only say so.
-void injectContact(const std::string_view arg, const size_t count, const char* ok) {
+// CMD:TOUCH:<x>,<y>[:LONG] (2 numbers) or CMD:SWIPE:<x1>,<y1>,<x2>,<y2> (4): logical screen pixels
+// as drawn now, mapped to the touch HAL's normalized panel coordinates and queued like a contact.
+// Builds for boards without a digitiser (CP_TOUCH_UI 0: X3, X4) only say so.
+void injectContact(const std::string_view arg, const size_t count, const char* ok, const bool longPress = false) {
 #if CP_TOUCH_UI
   if (!gpio.hasTouch() || !testRenderer) {
     reply("TOUCH_ERROR:no touch panel");
@@ -798,10 +798,12 @@ void injectContact(const std::string_view arg, const size_t count, const char* o
     reply("TOUCH_ERROR:not on screen ", arg);
     return;
   }
-  if (count == 2) {
-    gpio.injectTouch(n[0], n[1]);
-  } else {
+  if (count == 4) {
     gpio.injectSwipe(n[0], n[1], n[2], n[3]);
+  } else if (longPress) {
+    gpio.injectLongTouch(n[0], n[1]);
+  } else {
+    gpio.injectTouch(n[0], n[1]);
   }
   noteEffect(Effect::Input);
   reply(ok);
@@ -809,11 +811,21 @@ void injectContact(const std::string_view arg, const size_t count, const char* o
   (void)arg;
   (void)count;
   (void)ok;
+  (void)longPress;
   reply("TOUCH_ERROR:no touch panel");
 #endif
 }
 
-void cmdTouch(const std::string_view arg) { injectContact(arg, 2, "TOUCH_OK"); }
+void cmdTouch(const std::string_view arg) {
+  // BTN's suffix grammar, with the point where the button's name goes.
+  std::string_view point;
+  SerialCommandGrammar::PressKind kind = SerialCommandGrammar::PressKind::Short;
+  if (!SerialCommandGrammar::parseButtonArg(arg, point, kind) || kind == SerialCommandGrammar::PressKind::Double) {
+    reply("TOUCH_ERROR:not on screen ", arg);
+    return;
+  }
+  injectContact(point, 2, "TOUCH_OK", kind == SerialCommandGrammar::PressKind::Long);
+}
 void cmdSwipe(const std::string_view arg) { injectContact(arg, 4, "SWIPE_OK"); }
 
 // ---- HEAP -----------------------------------------------------------------------------------
