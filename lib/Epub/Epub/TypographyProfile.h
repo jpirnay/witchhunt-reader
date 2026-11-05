@@ -20,8 +20,8 @@ struct TypographyProfile {
   enum class Justify : uint8_t { WordSpaces, BetweenCharacters };
   // The punctuation width table (CjkPunctuation.h).
   enum class Punctuation : uint8_t { SimplifiedChinese, TraditionalChinese, Japanese };
-  // Which way characters run inside a line. Only LeftToRight is laid out yet; RightToLeft (Arabic, Hebrew)
-  // will land in the base direction CompiledContent.h reserves.
+  // Which way characters run inside a line: the book's language decides (Hebrew, Arabic, Persian, Urdu, Yiddish run
+  // RightToLeft). A paragraph with no letter of its own, and no dir, takes this.
   enum class Direction : uint8_t { LeftToRight, RightToLeft };
 
   Breaking breaking = Breaking::AtSpaces;

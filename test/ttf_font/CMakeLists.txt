@@ -26,6 +26,7 @@ add_executable(TtfFontTest
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfRasterizer.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/third_party/freetype/ftgrays.c
   ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp
+  ${BIDI_MARK_SOURCES}
   ${REPO_ROOT}/lib/EpdFont/EpdFontFamily.cpp
   ${REPO_ROOT}/lib/EpdFont/GlyphFallback.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
@@ -34,6 +35,7 @@ add_executable(TtfFontTest
 
 # test/shims before lib/hal: the host HalStorage, but the real NorFlash.h.
 target_include_directories(TtfFontTest PRIVATE
+  ${BIDI_MARK_INCLUDES}
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${REPO_ROOT}/test/ttf_rasterizer
   ${REPO_ROOT}/test/glyph_store

@@ -5,6 +5,7 @@
 #include "lib/EpdFont/EpdFont.h"
 #include "lib/EpdFont/EpdFontData.h"
 #include "lib/EpdFont/EpdFontFamily.h"
+#include "lib/EpdFont/MarkOverlay.h"
 #include "lib/EpdFont/SmallCaps.h"
 
 // ============================================================================
@@ -574,4 +575,39 @@ TEST(SmallCapsLigatures, FamilyFormsNoLigatureUnderSmallCaps) {
   const auto smallCapsBold = static_cast<EpdFontFamily::Style>(EpdFontFamily::SMALL_CAPS | EpdFontFamily::BOLD);
   EXPECT_EQ(family.applyLigatures('f', rest, smallCapsBold), static_cast<uint32_t>('f'));
   EXPECT_STREQ(rest, "i");
+}
+
+TEST(CombiningMark, AnchorForTheNiqqudWhoseIdentityIsPosition) {
+  using combiningMark::Anchor;
+  EXPECT_EQ(combiningMark::anchorFor(0x05BC), Anchor::CenterNative);
+  EXPECT_EQ(combiningMark::anchorFor(0x05BA), Anchor::CenterNative);
+  EXPECT_EQ(combiningMark::anchorFor(0x05C1), Anchor::RightNative);
+  EXPECT_EQ(combiningMark::anchorFor(0x05B9), Anchor::LeftNative);
+  EXPECT_EQ(combiningMark::anchorFor(0x05C2), Anchor::LeftNative);
+  EXPECT_EQ(combiningMark::anchorFor(0x0301), Anchor::CenterRaised);
+  EXPECT_EQ(combiningMark::anchorFor(0x05B8), Anchor::CenterRaised);
+}
+
+TEST(CombiningMark, AnchorOverPlacesTheMarkBitmap) {
+  using combiningMark::Anchor;
+  EXPECT_EQ(combiningMark::anchorOver(Anchor::CenterRaised, 100, 1, 10, 2, 4), 102);
+  EXPECT_EQ(combiningMark::anchorOver(Anchor::RightNative, 100, 1, 10, 2, 4), 105);
+  EXPECT_EQ(combiningMark::anchorOver(Anchor::LeftNative, 100, 1, 10, 2, 4), 99);
+}
+
+TEST(CombiningMark, NativeAnchorsKeepTheirHeight) {
+  using combiningMark::Anchor;
+  EXPECT_EQ(combiningMark::raiseAboveBase(Anchor::CenterNative, 20, 4, 18), 0);
+  EXPECT_EQ(combiningMark::raiseAboveBase(Anchor::CenterRaised, 20, 4, 18), 3);
+}
+
+TEST(CombiningMark, OverlaysItsBaseForLatinHebrewAndArabicMarksOnly) {
+  EXPECT_TRUE(overlaysItsBase(0x05B8));   // qamats
+  EXPECT_TRUE(overlaysItsBase(0x0651));   // shadda
+  EXPECT_TRUE(overlaysItsBase(0xFB1E));   // Hebrew point judeo-spanish varika
+  EXPECT_TRUE(overlaysItsBase(0x0301));   // acute, utf8IsCombiningMark
+  EXPECT_FALSE(overlaysItsBase(0x094D));  // Devanagari virama
+  EXPECT_FALSE(overlaysItsBase(0x3099));  // kana voiced mark
+  EXPECT_FALSE(overlaysItsBase(0x05D0));  // alef
+  EXPECT_FALSE(overlaysItsBase(0x0041));  // A
 }

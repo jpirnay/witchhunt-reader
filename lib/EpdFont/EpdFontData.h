@@ -32,28 +32,76 @@ constexpr float toFloat(int32_t fp) { return fp / static_cast<float>(1 << FRAC_B
 
 /// Helpers for positioning Unicode combining marks (U+0300 ff.) over a
 /// preceding base glyph without GPOS anchor tables.
+/// The anchors are ported from crosspoint-reader PR #2541 (932a4728, Husam Younis).
 namespace combiningMark {
 
 constexpr int MIN_GAP_PX = 1;
 
-/// Compute the cursor-X at which to render a combining mark so its bitmap
-/// is visually centered over the base glyph's bitmap.
-constexpr int centerOver(int baseCursorPos, int baseLeft, int baseWidth, int markLeft, int markWidth) {
-  return baseCursorPos + baseLeft + baseWidth / 2 - markWidth / 2 - markLeft;
+/// Placement of a mark relative to its base glyph.  The default heuristic —
+/// centered over the base, raised clear of its top — suits Latin diacritics
+/// and Arabic harakat, but misplaces the Hebrew niqqud whose identity depends
+/// on position: dagesh sits inside the letter body, the shin/sin dots
+/// distinguish the letter by sitting over its right/left arm, and holam hangs
+/// over the left corner.  "Native" anchors keep the glyph's font-designed
+/// height (which may overlap the base) instead of raising it.
+enum class Anchor : uint8_t {
+  CenterRaised,  ///< centered over the base, lifted above its top (default)
+  CenterNative,  ///< centered over the base at font-native height
+  RightNative,   ///< right edges aligned, font-native height
+  LeftNative,    ///< left edges aligned, font-native height
+};
+
+constexpr Anchor anchorFor(const uint32_t cp) {
+  switch (cp) {
+    case 0x05BC:  // dagesh / mapiq / shuruk dot: inside the letter body
+    case 0x05BA:  // holam haser for vav: straight above the vav stem
+      return Anchor::CenterNative;
+    case 0x05C1:  // shin dot: over the letter's right arm
+      return Anchor::RightNative;
+    case 0x05B9:  // holam: above the letter's left corner
+    case 0x05C2:  // sin dot: over the letter's left arm
+      return Anchor::LeftNative;
+    default:
+      return Anchor::CenterRaised;
+  }
 }
 
-/// Rotated-90CW variant of centerOver.  In the rotated coordinate system
+/// Horizontal offset from the base bitmap's left edge to the mark bitmap's
+/// left edge for a given anchor.
+constexpr int anchorShift(const Anchor anchor, const int baseWidth, const int markWidth) {
+  switch (anchor) {
+    case Anchor::LeftNative:
+      return 0;
+    case Anchor::RightNative:
+      return baseWidth - markWidth;
+    default:
+      return baseWidth / 2 - markWidth / 2;
+  }
+}
+
+/// Compute the cursor-X at which to render a combining mark so its bitmap
+/// lands at its anchor position over the base glyph's bitmap.
+constexpr int anchorOver(const Anchor anchor, const int baseCursorPos, const int baseLeft, const int baseWidth,
+                         const int markLeft, const int markWidth) {
+  return baseCursorPos + baseLeft + anchorShift(anchor, baseWidth, markWidth) - markLeft;
+}
+
+/// Rotated-90CW variant of anchorOver.  In the rotated coordinate system
 /// renderCharImpl uses (cursorY - left) instead of (cursorX + left), so
 /// every left/width term inverts sign.
-constexpr int centerOverRotated90CW(int baseCursorPos, int baseLeft, int baseWidth, int markLeft, int markWidth) {
-  return baseCursorPos - baseLeft - baseWidth / 2 + markWidth / 2 + markLeft;
+constexpr int anchorOverRotated90CW(const Anchor anchor, const int baseCursorPos, const int baseLeft,
+                                    const int baseWidth, const int markLeft, const int markWidth) {
+  return baseCursorPos - baseLeft - anchorShift(anchor, baseWidth, markWidth) + markLeft;
 }
 
 /// For combining marks that sit entirely above the baseline, compute how many
 /// pixels to raise the mark so there is at least MIN_GAP_PX between its bottom
 /// edge and the top of the base glyph.  Returns 0 for marks that extend to or
-/// below the baseline (e.g. cedilla, dot-below, ogonek).
-constexpr int raiseAboveBase(int markTop, int markHeight, int baseTop) {
+/// below the baseline (e.g. cedilla, dot-below, ogonek) and for anchors that
+/// keep the font-native height (dagesh must stay inside the letter, the
+/// shin/sin dots touch its arms).
+constexpr int raiseAboveBase(const Anchor anchor, const int markTop, const int markHeight, const int baseTop) {
+  if (anchor != Anchor::CenterRaised) return 0;
   if (markTop - markHeight <= 0) return 0;
   const int gap = markTop - markHeight - baseTop;
   return (gap < MIN_GAP_PX) ? (MIN_GAP_PX - gap) : 0;

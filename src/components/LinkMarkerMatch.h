@@ -28,15 +28,53 @@ inline bool isSpace(const char c) { return c == ' ' || c == '\t' || c == '\n' ||
 // the page-word side normalises by exactly the rule the stored side was normalised by.
 inline bool isWrapper(const char c) { return isSpace(c) || c == '[' || c == ']'; }
 
-// The interior of a page word: the span left after the wrappers come off both ends. Returns false
+// The bidi controls a paragraph that needs bidi keeps in its word text: U+200E, U+200F, U+061C, U+202A-202E and
+// U+2066-2069 (BidiLine::isControl, which this header-only component cannot include). They are not part of what a
+// reader sees as the marker, so both ends of a word and of a marker token skip them, as they skip a bracket. Each is a
+// multi-byte UTF-8 sequence: these return its length at `at` (or ending at `end`), else 0.
+inline size_t bidiControlLenAt(const char* text, const size_t at, const size_t end) {
+  const auto b = [&](const size_t i) { return static_cast<unsigned char>(text[i]); };
+  if (at + 2 <= end && b(at) == 0xD8 && b(at + 1) == 0x9C) return 2;  // U+061C
+  if (at + 3 > end || b(at) != 0xE2) return 0;
+  if (b(at + 1) == 0x80 && (b(at + 2) == 0x8E || b(at + 2) == 0x8F || (b(at + 2) >= 0xAA && b(at + 2) <= 0xAE))) {
+    return 3;  // U+200E, U+200F, U+202A-202E
+  }
+  if (b(at + 1) == 0x81 && b(at + 2) >= 0xA6 && b(at + 2) <= 0xA9) return 3;  // U+2066-2069
+  return 0;
+}
+
+inline size_t bidiControlLenBefore(const char* text, const size_t start, const size_t end) {
+  for (size_t len = 2; len <= 3; ++len) {
+    if (end >= start + len && bidiControlLenAt(text, end - len, end) == len) return len;
+  }
+  return 0;
+}
+
+// The interior of a page word: the span left after the wrappers (and bidi controls) come off both ends. Returns false
 // when nothing is left, which is the right answer for a lone bracket or a run of spaces -- those
 // are not a marker and must not match an empty tail of one.
 inline bool core(const char* text, const size_t len, size_t& start, size_t& end) {
   if (text == nullptr) return false;
   size_t s = 0;
   size_t e = len;
-  while (s < e && isWrapper(text[s])) ++s;
-  while (e > s && isWrapper(text[e - 1])) --e;
+  while (s < e) {
+    if (isWrapper(text[s])) {
+      ++s;
+    } else if (const size_t n = bidiControlLenAt(text, s, e)) {
+      s += n;
+    } else {
+      break;
+    }
+  }
+  while (e > s) {
+    if (isWrapper(text[e - 1])) {
+      --e;
+    } else if (const size_t n = bidiControlLenBefore(text, s, e)) {
+      e -= n;
+    } else {
+      break;
+    }
+  }
   if (s >= e) return false;
   start = s;
   end = e;

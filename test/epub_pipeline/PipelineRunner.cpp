@@ -29,7 +29,8 @@ std::string normalizePath(const std::string& path, const std::string& cacheDir) 
 
 // One `W` record per word, at `indent`. Kept to a single shape so the word-stream extraction used
 // to verify "no content was dropped" (`\bW x=\S+ s=\S+ z=\S+ t=(.*)`) sees table cells and ordinary
-// paragraphs alike. A word in a font of its own (TextBlock::WordFont) is followed by a `WF` record.
+// paragraphs alike. A word in a font of its own (TextBlock::WordFont) is followed by a `WF` record, and a word with a
+// display form (what a right-to-left line draws for it) by a `WD` record; neither matches the pattern.
 void dumpWords(std::ostream& out, const TextBlock& block, const char* indent) {
   for (uint16_t w = 0; w < block.wordCount(); ++w) {
     out << indent << "W x=" << block.wordXpos(w) << " s=" << static_cast<int>(block.wordStyle(w))
@@ -38,7 +39,19 @@ void dumpWords(std::ostream& out, const TextBlock& block, const char* indent) {
       out << indent << " WF fid=" << font->fontId << " mult=" << std::fixed << std::setprecision(3) << font->scale
           << "\n";
     }
+    if (block.hasDisplayForm(w)) out << indent << " WD t=" << block.wordDrawText(w) << "\n";
   }
+}
+
+// The line's logical order, each word's place in reading order, after its words and annotations, at `indent`; a line
+// read in stored order prints nothing.
+void dumpLogicalOrder(std::ostream& out, const TextBlock& block, const char* indent) {
+  if (!block.hasLogicalOrder()) return;
+  out << indent << "O order=";
+  for (uint16_t w = 0; w < block.wordCount(); ++w) {
+    out << (w == 0 ? "" : ",") << static_cast<int>(block.logicalPosition(w));
+  }
+  out << "\n";
 }
 
 // One `R` record per ruby group, one `E` record per emphasis run and one `C` record per combined word of the line,
@@ -67,6 +80,7 @@ void dumpTextLine(std::ostream& out, const PageLine& line) {
       << " words=" << block.wordCount() << "\n";
   dumpWords(out, block, "   ");
   dumpAnnotations(out, block, "   ");
+  dumpLogicalOrder(out, block, "   ");
 }
 
 // Table fragments used to dump as a single `TABLE y= x= h=` line, so every golden was blind to the
@@ -87,6 +101,7 @@ void dumpTableFragment(std::ostream& out, const PageTableFragment& tbl, const st
         out << "     LN words=" << line->wordCount() << "\n";
         dumpWords(out, *line, "      ");
         dumpAnnotations(out, *line, "      ");
+        dumpLogicalOrder(out, *line, "      ");
       }
       if (cell.image) {
         out << "     CELLIMG w=" << cell.image->getWidth() << " h=" << cell.image->getRenderedHeight()

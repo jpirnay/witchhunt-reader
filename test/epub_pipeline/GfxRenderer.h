@@ -97,7 +97,10 @@ class GfxRenderer {
   int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, float scale) const {
     return static_cast<int>(getTextWidth(fontId, text, style) * scale);
   }
+  // Test seam: called on every measurement, so a test can look at state the layout holds mid-build. Null: nothing.
+  inline static void (*onTextAdvance)() = nullptr;
   int getTextAdvanceX(int /*fontId*/, const char* text, EpdFontFamily::Style style) const {
+    if (onTextAdvance != nullptr) onTextAdvance();
     int w = 0;
     for (const uint8_t* p = reinterpret_cast<const uint8_t*>(text); *p;) {
       uint32_t cp;

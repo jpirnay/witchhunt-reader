@@ -104,7 +104,7 @@ const char* const kFontFamilyBooks[] = {"test_font_families"};
 
 // Books whose text-align matters: the default profile justifies everything, the book's own alignment shows start and
 // end resolved along the direction (see test/epubs/make_test_writing_modes.py).
-const char* const kBookAlignmentBooks[] = {"test_rtl_markup"};
+const char* const kBookAlignmentBooks[] = {"test_rtl_markup", "test_bidi_text"};
 
 // Books the reader may set vertically, under Automatic (<book>_vertical.golden.txt): each section decides from its CSS
 // writing mode and the book's page progression, and a vertical one is laid out in the turned frame.

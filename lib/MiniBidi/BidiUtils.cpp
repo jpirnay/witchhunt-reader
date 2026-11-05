@@ -41,11 +41,20 @@ struct BidiWorkspace {
   // scratch).
 };
 
+// witchhunt: deviation 1 - the workspace is exactly BIDI_MAX_LINE bidi_chars, and a build can lend a buffer of that
+// size.
+static_assert(sizeof(BidiWorkspace) == BidiUtils::kWorkspaceBytes, "kWorkspaceBytes must match BidiWorkspace");
+static_assert(BIDI_MAX_LINE == BidiUtils::kMaxLineCodepoints, "kMaxLineCodepoints must match BIDI_MAX_LINE");
+
 // Retained after first use to avoid allocation churn on every RTL token.
 std::unique_ptr<BidiWorkspace> bidiWorkspace;
 
+// witchhunt: deviation 1 - a buffer lent by the caller (bindWorkspace); used instead of the heap one while set.
+BidiWorkspace* boundWorkspace = nullptr;
+
 // Caller holds bidiMutex, including during allocation and subsequent use.
 BidiWorkspace* getWorkspace() {
+  if (boundWorkspace) return boundWorkspace;
   if (!bidiWorkspace) {
     bidiWorkspace = makeUniqueNoThrow<BidiWorkspace>();
     if (!bidiWorkspace) {
@@ -231,6 +240,103 @@ bool applyBidiVisualShaped(const char* utf8, std::string& out, int paragraphLeve
 void releaseWorkspace() {
   const std::lock_guard<std::mutex> lock(bidiMutex);
   bidiWorkspace.reset();
+  boundWorkspace = nullptr;
+}
+
+// witchhunt: deviation 1
+void bindWorkspace(void* buffer) {
+  const std::lock_guard<std::mutex> lock(bidiMutex);
+  boundWorkspace = static_cast<BidiWorkspace*>(buffer);
+}
+
+// witchhunt: deviation 11
+bool heapWorkspaceHeld() {
+  const std::lock_guard<std::mutex> lock(bidiMutex);
+  return static_cast<bool>(bidiWorkspace);
+}
+
+// witchhunt: deviation 11
+int strongLevel(const uint32_t cp) {
+  const uchar cls = bidi_class(cp);
+  if (cls == R || cls == AL) return 1;
+  return cls == L ? 0 : -1;
+}
+
+// witchhunt: deviation 11
+bool hasRtlClass(const char* utf8, const size_t len) {
+  if (!utf8) return false;
+  const auto* const s = reinterpret_cast<const unsigned char*>(utf8);
+  for (size_t i = 0; i < len; i++) {
+    const unsigned char b = s[i];
+    bool candidate = false;
+    if (b >= 0xD6 && b <= 0xDF) {
+      candidate = true;
+    } else if (b == 0xE0) {
+      candidate = i + 1 < len && s[i + 1] >= 0xA0 && s[i + 1] <= 0xA3;
+    } else if (b == 0xE2) {
+      if (i + 2 < len) {
+        const unsigned char b1 = s[i + 1], b2 = s[i + 2];
+        candidate =
+            (b1 == 0x80 && (b2 == 0x8F || b2 == 0xAB || b2 == 0xAE)) || (b1 == 0x81 && (b2 == 0xA7 || b2 == 0xA8));
+      }
+    } else if (b == 0xEF) {
+      candidate = i + 1 < len && s[i + 1] >= 0xAC && s[i + 1] <= 0xBB;
+    }
+    if (!candidate) continue;
+    // Decode from a bounded copy: utf8NextCodepoint reads up to the lead byte's length and a NUL stops it.
+    char tmp[5] = {};
+    for (size_t k = 0; k < 4 && i + k < len; k++) tmp[k] = static_cast<char>(s[i + k]);
+    const auto* p = reinterpret_cast<const unsigned char*>(tmp);
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (cp && is_rtl_class(bidi_class(cp))) return true;
+  }
+  return false;
+}
+
+// witchhunt: deviation 11 - re-states applyBidiVisual's marks-after-base rule (L3) over indices.
+bool orderLine(const uint32_t* cps, const size_t count, const int paragraphLevel, uint16_t* visual, uint32_t* drawn) {
+  if (!cps || !visual || !drawn || count == 0 || count > kMaxLineCodepoints) return false;
+  const std::lock_guard<std::mutex> lock(bidiMutex);
+
+  auto* const workspace = getWorkspace();
+  if (!workspace) return false;
+  bidi_char* const line = workspace->line;
+  const int n = static_cast<int>(count);
+  for (int i = 0; i < n; i++) {
+    line[i].origwc = line[i].wc = cps[i];
+    line[i].index = static_cast<uint16_t>(i);
+    line[i].joiners = 0;
+  }
+  do_bidi(/*autodir=*/false, paragraphLevel & 1, line, n);
+
+  int out = 0;
+  for (int i = 0; i < n; i++) {
+    if (!isTransparentMark(line[i].wc)) {
+      visual[out] = line[i].index;
+      drawn[out++] = line[i].wc;
+      continue;
+    }
+    // A run of marks [i, j): when the run was reversed, its base follows it with a lower logical index; emit the base
+    // first, then the marks in logical order. Otherwise the marks already follow their base.
+    int j = i;
+    while (j < n && isTransparentMark(line[j].wc)) j++;
+    if (j < n && line[j].index < line[i].index) {
+      visual[out] = line[j].index;
+      drawn[out++] = line[j].wc;
+      for (int k = j - 1; k >= i; k--) {
+        visual[out] = line[k].index;
+        drawn[out++] = line[k].wc;
+      }
+      i = j;
+    } else {
+      for (int k = i; k < j; k++) {
+        visual[out] = line[k].index;
+        drawn[out++] = line[k].wc;
+      }
+      i = j - 1;
+    }
+  }
+  return true;
 }
 
 bool computeVisualWordOrder(const std::vector<std::string>& words, bool paragraphIsRtl,
