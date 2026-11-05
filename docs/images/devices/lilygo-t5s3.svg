@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 560" width="480" height="560" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="LilyGo T5 S3 Pro: keys">
+<title>LilyGo T5 S3 Pro: keys</title>
+<rect width="480" height="560" rx="10" fill="#ffffff"/>
+<rect x="140" y="70" width="200" height="400" rx="20" fill="#eeeeee" stroke="#222222" stroke-width="2"/>
+<rect x="156" y="88" width="168" height="320" rx="3" fill="#ffffff" stroke="#999999"/>
+<text x="240.0" y="248.0" text-anchor="middle" fill="#999999" font-size="15">Screen</text>
+<rect x="133" y="277.0" width="8" height="34" rx="2" fill="#333333"/>
+<line x1="133" y1="294.0" x2="116" y2="294.0" stroke="#333333" stroke-width="1"/>
+<text x="112" y="298.0" text-anchor="end" fill="#222222" font-size="15" font-weight="700">Power</text>
+<text x="112" y="315.0" text-anchor="end" fill="#222222" font-size="13">marked BOOT</text>
+<rect x="133" y="329.0" width="8" height="34" rx="2" fill="#333333"/>
+<line x1="133" y1="346.0" x2="116" y2="346.0" stroke="#333333" stroke-width="1"/>
+<text x="112" y="350.0" text-anchor="end" fill="#222222" font-size="15" font-weight="700">Down</text>
+<text x="112" y="367.0" text-anchor="end" fill="#222222" font-size="13">marked IO48</text>
+<rect x="339" y="236.99999999999997" width="8" height="26" rx="2" fill="#c62828"/>
+<line x1="347" y1="249.99999999999997" x2="364" y2="249.99999999999997" stroke="#c62828" stroke-width="1"/>
+<text x="368" y="253.99999999999997" text-anchor="start" fill="#c62828" font-size="15" font-weight="700">PWR</text>
+<text x="368" y="271.0" text-anchor="start" fill="#c62828" font-size="13">do not press</text>
+<rect x="339" y="289.0" width="8" height="26" rx="2" fill="#c62828"/>
+<line x1="347" y1="302.0" x2="364" y2="302.0" stroke="#c62828" stroke-width="1"/>
+<text x="368" y="306.0" text-anchor="start" fill="#c62828" font-size="15" font-weight="700">RST</text>
+<text x="368" y="323.0" text-anchor="start" fill="#c62828" font-size="13">do not press</text>
+<circle cx="240.0" cy="440" r="13" fill="#ffffff" stroke="#333333" stroke-width="2"/>
+<line x1="240.0" y1="453" x2="240.0" y2="482" stroke="#333333" stroke-width="1"/>
+<text x="240.0" y="498" text-anchor="middle" fill="#222222" font-size="15" font-weight="700">Home key</text>
+<text x="240.0" y="515" text-anchor="middle" fill="#222222" font-size="13">tap: Confirm, hold: Back</text>
+</svg>

@@ -76,7 +76,12 @@ In the tables, **hold** means about a second, and a little less for Power and th
 
 ### Xteink X3 and X4
 
-Every button is a real key.
+Every button is a real key. The X4 has all its side keys on the right edge. The X3 has **Volume Up**
+on the left, **Volume Down** on the right, and **Power** and **Reset** on the top edge.
+
+<img src="docs/images/devices/xteink-x4.svg" width="320" alt="Xteink X4. Bottom edge, left to right: Back, Confirm, Left, Right. Right edge, top to bottom: Power, Volume Up, Volume Down, Reset."> <img src="docs/images/devices/xteink-x3.svg" width="320" alt="Xteink X3. Bottom edge, left to right: Back, Confirm, Left, Right. Volume Up on the left edge and Volume Down on the right edge, near the top. Reset and Power on the top edge.">
+
+*The X4 (left) and the X3 (right). Like the other drawings here, these show where the keys are, not the device's exact shape.*
 
 | Key | Press | Hold |
 | --- | --- | --- |
@@ -102,13 +107,23 @@ To reach the Home screen, hold the **Back** box on the screen.
 
 ### LilyGo T5 S3 Pro
 
-There are two keys and a touch-sensitive **Home key**. There is no Up, Back or Confirm key.
+The reader uses two keys on the left edge and a touch-sensitive **Home key** below the screen. There
+is no Up, Back or Confirm key.
+
+<img src="docs/images/devices/lilygo-t5s3.svg" width="320" alt="LilyGo T5 S3 Pro. Left edge: Power, marked BOOT, with Down, marked IO48, below it. Home key below the screen. Right edge: the PWR and RST buttons, marked do not press.">
 
 | Key | Press | Hold |
 | --- | --- | --- |
-| **Power** | Twice quickly: reading light on or off | Turn on, or sleep |
+| **Power** (marked BOOT) | Twice quickly: reading light on or off | Turn on, or sleep |
 | **Home key** | Works as **Confirm**: open the selected row. In a book: open the reader menu | Works as **Back**: go back, leave a book |
-| **Down** | In a book: next page. In a list: move down | In a book: next chapter. In a list: jump to the last row |
+| **Down** (marked IO48) | In a book: next page. In a list: move down | In a book: next chapter. In a list: jump to the last row |
+
+> [!WARNING]
+> **Do not press the power (PWR) and reset (RST) buttons on the right edge.** They have no function
+> in the reader, and pressing them can do harm. The reader cannot see the power button, and the
+> reset button restarts the device at once, so neither gives it the chance to save first. To turn
+> the device off, hold the **BOOT** key on the left. Use the reset button only if the device has
+> frozen.
 
 To turn back a page, tap the left side of the screen. To move up a list, tap the **Up** box at the
 side of the screen, or swipe. To reach the Home screen, hold the **Back** box on the screen.
@@ -116,13 +131,17 @@ side of the screen, or swipe. To reach the Home screen, hold the **Back** box on
 ### Murphy M3
 
 There are only three keys that the reader can use, and none of them is Power or Back. **Confirm**
-does those jobs too. The fourth key, on the left, is wired straight to reset.
+does those jobs too.
 
 | Key | Press | Press twice quickly | Hold |
 | --- | --- | --- | --- |
 | **Confirm** (bottom) | Open the selected row. In a book: open the reader menu | **Back**: go back, leave a book | **Sleep**. While asleep, hold it briefly to wake |
 | **Up** / **Down** | In a book: previous / next page. In a list: move up / down | | In a book: previous / next chapter. In a list: jump to the first / last row |
-| **Left key** | Restart the device at once. Use it only if the device is frozen | | |
+
+> [!WARNING]
+> **Do not press the reset button on the left edge.** It has no function in the reader, and pressing
+> it can do harm. It restarts the device at once, so the reader gets no chance to save first. Use it
+> only if the device has frozen.
 
 - **Back**, **Left** and **Right** exist only as the boxes on the screen. Tap a box to press that
   button, and hold it to hold the button. To reach the Home screen, hold the **Back** box.
@@ -160,12 +179,15 @@ Five devices are supported: the **Xteink X3** and **Xteink X4** (buttons only), 
 
 ### Button Layout
 
-On the **X3 and X4**, the firmware uses the manufacturer's own button layout by default:
+On the **X3 and X4**, the firmware uses the manufacturer's own button layout by default.
+**[Quick Start](#quick-start)** has a drawing of each device:
 
-| Location        | Buttons                                              |
-| --------------- | ---------------------------------------------------- |
-| **Bottom Edge** | **Back**, **Confirm**, **Left**, **Right**           |
-| **Right Side**  | **Power**, **Volume Up**, **Volume Down**, **Reset** |
+| Location | X4 | X3 |
+| --- | --- | --- |
+| **Bottom Edge** | **Back**, **Confirm**, **Left**, **Right** | **Back**, **Confirm**, **Left**, **Right** |
+| **Right Side** | **Power**, **Volume Up**, **Volume Down**, **Reset** | **Volume Down** |
+| **Left Side** | | **Volume Up** |
+| **Top Edge** | | **Power**, **Reset** |
 
 The **X4 Pro**, **LilyGo T5 S3** and **Murphy M3** have far fewer keys, and make up the difference
 with the touchscreen:
