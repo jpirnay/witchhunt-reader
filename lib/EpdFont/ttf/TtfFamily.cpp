@@ -1,6 +1,7 @@
 #include "TtfFamily.h"
 
 #include <Memory.h>
+#include <OtPlan.h>
 
 #include <algorithm>
 #include <cstring>
@@ -34,21 +35,24 @@ constexpr uint32_t kVersionCff = tag("OTTO");
 // `firstOptional`; the others it draws without, as parseFace() takes them absent when their record lies outside the
 // file.
 struct SdTables {
-  uint32_t tags[12];
+  uint32_t tags[13];
   uint8_t count;
   uint8_t outlines;
   uint8_t firstOptional;
 };
-constexpr SdTables kSdTrueType = {{tag("cmap"), tag("head"), tag("hhea"), tag("hmtx"), tag("loca"), tag("maxp"),
-                                   tag("glyf"), tag("OS/2"), tag("GPOS"), tag("GSUB"), tag("kern"), tag("post")},
-                                  12,
-                                  6,
-                                  7};
+constexpr SdTables kSdTrueType = {
+    {tag("cmap"), tag("head"), tag("hhea"), tag("hmtx"), tag("loca"), tag("maxp"), tag("glyf"), tag("OS/2"),
+     tag("GPOS"), tag("GSUB"), tag("kern"), tag("post"), tag("GDEF")},
+    13,
+    6,
+    7};
 constexpr SdTables kSdCff = {{tag("cmap"), tag("head"), tag("hhea"), tag("hmtx"), tag("maxp"), tag("CFF "), tag("OS/2"),
-                              tag("GPOS"), tag("GSUB"), tag("kern"), tag("post")},
-                             11,
+                              tag("GPOS"), tag("GSUB"), tag("kern"), tag("post"), tag("GDEF")},
+                             12,
                              5,
                              6};
+// The made table that holds the lookup filters (ot::FilterTableWriter's): not in the file, so in neither list above.
+constexpr uint32_t kCpacTag = tag("CPac");
 
 // Which of `tables` a record is, or -1, and whether it is its tag's first record: parseFace() reads only that one.
 // `seen` remembers the tags met.
@@ -66,9 +70,10 @@ int sdTable(const SdTables& tables, const uint32_t tableTag, uint16_t& seen) {
 uint32_t sdCopyBytes(const uint32_t tableTag, const uint32_t length) {
   return tableTag == tag("post") ? std::min(length, kPostHeaderBytes) : length;
 }
-// An SD-mode block's bytes: the sfnt header, a record per copied table and one for glyf, then the tables.
-constexpr uint64_t sdBlockBytes(const uint32_t copied, const uint64_t tableBytes) {
-  return 12 + 16 * (copied + 1) + tableBytes;
+// An SD-mode block's bytes: the sfnt header, a record per copied table, one for glyf and one for a CPac of
+// `cpacBytes` (0: none), then the tables and the CPac room.
+constexpr uint64_t sdBlockBytes(const uint32_t copied, const uint64_t tableBytes, const uint32_t cpacBytes) {
+  return 12 + 16 * (copied + 1 + (cpacBytes > 0 ? 1 : 0)) + tableBytes + glyphstore::align4(cpacBytes);
 }
 constexpr uint16_t kMaxDirectory = 256;  // real fonts have under 40 tables; this bounds a hostile directory's reads
 constexpr uint32_t kHeadBytes = 54;
@@ -128,6 +133,204 @@ bool isOutlineFontFileName(const char* name) {
   const char* ext = name + len - 3;
   const int first = ext[0] | 0x20;
   return (first == 't' || first == 'o') && (ext[1] | 0x20) == 't' && (ext[2] | 0x20) == 'f';
+}
+
+namespace {
+
+// A GSUB's or GPOS's header: u16 major and minor version, then the u16 offsets of its ScriptList (4), FeatureList (6)
+// and LookupList (8).
+constexpr uint32_t kLayoutHeaderBytes = 10;
+
+// countLookups() of a table whose header (`header`, kLayoutHeaderBytes) was read already.
+bool countLookupsAfter(const FileSource& file, const uint32_t offset, const uint32_t length,
+                       const uint8_t (&header)[kLayoutHeaderBytes], LayoutCounts* out) {
+  *out = {};
+  // As Face reads the table: a major version of 1, the LookupList at u16 offset 8, each lookup at a u16 offset of the
+  // list; a null or out-of-table offset is a lookup of no subtables, and a lookup declares at most the subtables that
+  // fit its table. The lookups are as many as the list declares, whatever fits.
+  const uint32_t listAt = be16(header + 8);
+  if (be16(header) != 1 || listAt == 0 || listAt >= length) return true;
+  const uint32_t listLength = length - listAt;
+  if (listLength < 2) return true;
+  uint8_t countBytes[2];
+  if (!file.read(file.ctx, offset + listAt, countBytes, sizeof countBytes)) return false;
+  const uint32_t lookups = be16(countBytes);
+  if (lookups > kCpacMaxLookups) {
+    out->capped = true;
+    return true;
+  }
+  out->lookups = lookups;
+  const uint32_t listed = std::min(lookups, (listLength - 2) / 2);
+  uint64_t subtables = 0;
+  // Read calls so far: the two above, then a piece of offsets or a window of headers each. Past kMaxCountingReads the
+  // list is crafted (a real one packs its lookups, a window serving a dozen or more): the table counts as capped, so
+  // its font reserves no CPac, which costs only the computed filters (slower, never wrong).
+  uint32_t reads = 2;
+  // One buffer, two uses: a piece of the list's offsets, decoded into `offsets` before anything else is read into it,
+  // then the window of lookup headers. 256 B of buffers in all.
+  uint8_t raw[128];        // 128 B: 64 of the list's offsets, then the lookup headers read so far
+  uint16_t offsets[64];    // 128 B: the piece, decoded and sorted
+  uint32_t windowAt = 0;   // the list offset raw[0] holds as a window
+  uint32_t windowEnd = 0;  // the list offset past the window's last byte (== windowAt: no window held)
+  for (uint32_t first = 0; first < listed; first += 64) {
+    const uint32_t n = std::min<uint32_t>(64, listed - first);
+    if (++reads > kMaxCountingReads) break;
+    if (!file.read(file.ctx, offset + listAt + 2 + 2 * first, raw, 2 * n)) return false;
+    for (uint32_t i = 0; i < n; ++i) offsets[i] = be16(raw + 2 * i);
+    windowEnd = windowAt;  // the piece took the window's bytes
+    // In offset order, so lookups packed one after another share a window.
+    std::sort(offsets, offsets + n);
+    for (uint32_t i = 0; i < n; ++i) {
+      const uint32_t at = offsets[i];
+      if (at == 0 || at >= listLength || listLength - at < 8) continue;  // under 8 bytes, no subtable fits
+      if (at < windowAt || at + 6 > windowEnd) {
+        // A window from this header on, as much as the list holds (at least the 8 bytes checked above).
+        const uint32_t len = std::min<uint32_t>(sizeof raw, listLength - at);
+        if (++reads > kMaxCountingReads) break;
+        if (!file.read(file.ctx, offset + listAt + at, raw, len)) return false;
+        windowAt = at;
+        windowEnd = at + len;
+      }
+      subtables += std::min<uint32_t>(be16(raw + (at - windowAt) + 4), (listLength - at - 6) / 2);
+      // Past the cap the rest need not be read.
+      if (subtables > kCpacMaxSubtables) {
+        out->capped = true;
+        return true;
+      }
+    }
+    if (reads > kMaxCountingReads) break;
+  }
+  if (reads > kMaxCountingReads) {
+    *out = {};
+    out->capped = true;
+    return true;
+  }
+  out->subtables = static_cast<uint32_t>(subtables);
+  return true;
+}
+
+}  // namespace
+
+bool countLookups(const FileSource& file, const uint32_t offset, const uint32_t length, LayoutCounts* out) {
+  *out = {};
+  if (!inFile(file, offset, length) || length < kLayoutHeaderBytes) return true;  // a table Face does not read
+  uint8_t header[kLayoutHeaderBytes];
+  if (!file.read(file.ctx, offset, header, sizeof header)) return false;
+  return countLookupsAfter(file, offset, length, header, out);
+}
+
+namespace {
+
+// The first read of a GSUB or GPOS takes this much of its start: the header and, where fonts put it, the ScriptList
+// right behind it (its count and 19 records), so a font's scripts usually cost one read a table.
+constexpr uint32_t kScriptWindowBytes = 128;
+// Reads of a ScriptList past the first, 21 records each: 187 records in all behind the header, 168 elsewhere, more
+// scripts than OpenType has. A longer list names none here, which costs its font only the computed filters (slower,
+// never wrong).
+constexpr uint32_t kMaxScriptReads = 8;
+
+// A script whose fonts get a CPac: one the shaper handles (ot::isShapedScriptTag(): the Indic tags, old and new, and
+// Sinhala's), and Arabic, whose joining shaper comes next (deviation 11), so its fonts need no second install then.
+bool isShapedTag(const uint32_t scriptTag) { return ot::isShapedScriptTag(scriptTag) || scriptTag == tag("arab"); }
+
+// Whether the ScriptList of the GSUB or GPOS table at `offset`, `length` bytes, names a script whose fonts get a CPac
+// (isShapedTag()). Read as Face reads it: a major version of 1, the list at u16 offset 4, its u16 count, then 6-byte
+// records of a tag and an offset, as many as fit the table. The first read takes the table's first kScriptWindowBytes,
+// so `header` gets the table's header from it too. A table Face does not read names none. False: a read failed.
+bool namesShapedScript(const FileSource& file, const uint32_t offset, const uint32_t length,
+                       uint8_t (&header)[kLayoutHeaderBytes], bool* names) {
+  *names = false;
+  uint8_t window[kScriptWindowBytes];  // 128 B: the table's bytes [windowAt, windowEnd)
+  uint32_t windowAt = 0;
+  uint32_t windowEnd = std::min(kScriptWindowBytes, length);
+  if (!file.read(file.ctx, offset, window, windowEnd)) return false;
+  std::memcpy(header, window, sizeof header);
+  const uint32_t listAt = be16(window + 4);
+  if (be16(window) != 1 || listAt == 0 || listAt >= length || length - listAt < 2) return true;
+  // The `n` bytes at `at` of the table, from the window, else from a window read from `at` on; nullptr past the read
+  // budget or when a read failed (`failed`).
+  bool failed = false;
+  uint32_t reads = 0;
+  const auto bytesAt = [&](const uint32_t at, const uint32_t n) -> const uint8_t* {
+    if (at < windowAt || at + n > windowEnd) {
+      if (++reads > kMaxScriptReads) return nullptr;
+      windowAt = at;
+      windowEnd = at + std::min(kScriptWindowBytes, length - at);
+      if (!file.read(file.ctx, offset + at, window, windowEnd - windowAt)) {
+        failed = true;
+        return nullptr;
+      }
+    }
+    return window + (at - windowAt);
+  };
+  const uint8_t* count = bytesAt(listAt, 2);
+  if (!count) return !failed;
+  const uint32_t scripts = std::min<uint32_t>(be16(count), (length - listAt - 2) / 6);
+  for (uint32_t i = 0; i < scripts; ++i) {
+    const uint8_t* scriptTag = bytesAt(listAt + 2 + 6 * i, 4);
+    if (!scriptTag) return !failed;
+    if (isShapedTag(be32(scriptTag))) {
+      *names = true;
+      return true;
+    }
+  }
+  return true;
+}
+
+// The first GSUB and the first GPOS record of a directory, the ones parseFace() and SdBlock read.
+struct LayoutRecords {
+  Record record[2] = {};
+  bool seen[2] = {false, false};
+
+  void note(const Record& found) {
+    for (int k = 0; k < 2; ++k) {
+      if (found.tag != (k == 0 ? tag("GSUB") : tag("GPOS")) || seen[k]) continue;
+      seen[k] = true;
+      record[k] = found;
+    }
+  }
+  // Table k (GSUB, GPOS) as Face could read it: present, in the file, with room for its header.
+  bool readable(const FileSource& file, const int k) const {
+    return seen[k] && inFile(file, record[k].offset, record[k].length) && record[k].length >= kLayoutHeaderBytes;
+  }
+  // The CPac room of the two tables: 0 unless one of them names a script whose fonts get a CPac (namesShapedScript()),
+  // for no other font shapes from its filters. The lookups are counted only then. False: a read failed.
+  bool cpacBytes(const FileSource& file, uint32_t* bytes) const {
+    *bytes = 0;
+    uint8_t headers[2][kLayoutHeaderBytes] = {};
+    bool headerRead[2] = {false, false};
+    bool shapes = false;
+    for (int k = 0; k < 2 && !shapes; ++k) {
+      if (!readable(file, k)) continue;
+      if (!namesShapedScript(file, record[k].offset, record[k].length, headers[k], &shapes)) return false;
+      headerRead[k] = true;
+    }
+    if (!shapes) return true;
+    LayoutCounts counts[2];
+    for (int k = 0; k < 2; ++k) {
+      if (!readable(file, k)) continue;
+      if (!headerRead[k] && !file.read(file.ctx, record[k].offset, headers[k], kLayoutHeaderBytes)) return false;
+      if (!countLookupsAfter(file, record[k].offset, record[k].length, headers[k], &counts[k])) return false;
+    }
+    *bytes = cpacBytesFor(counts[0], counts[1]);
+    return true;
+  }
+};
+
+}  // namespace
+
+bool filterTableBytes(const FileSource& file, uint32_t* bytes) {
+  LayoutRecords layout;
+  uint32_t version = 0;
+  const auto visit = [](void* ctx, const Record& record) {
+    static_cast<LayoutRecords*>(ctx)->note(record);
+    return true;
+  };
+  *bytes = 0;
+  const Walk walk = forEachTable(file, &version, visit, &layout);
+  if (walk == Walk::ReadFailed) return false;
+  if (walk == Walk::Refused) return true;
+  return layout.cpacBytes(file, bytes);
 }
 
 bool assignStyles(const FileProbe* files, const size_t count, int (&out)[4]) {
@@ -202,11 +405,13 @@ FileProbe probeFile(const FileSource& file) {
     uint16_t sdSeen = 0;
     uint32_t sdTables = 0;
     uint64_t sdTableBytes = 0;
+    LayoutRecords layout;  ///< GSUB's and GPOS's records, counted once the head is checked
   } scan{file};
   const auto visit = [](void* ctx, const Record& record) {
     Scan& scan = *static_cast<Scan*>(ctx);
     const uint32_t needed = scan.version == kVersionCff ? kRequiredCff : kRequiredTrueType;
     if (record.tag == tag("fvar")) scan.probe.variable = true;
+    scan.layout.note(record);
     const int sd = sdTable(kSdTrueType, record.tag, scan.sdSeen);
     if (sd >= 0 && sd != kSdTrueType.outlines && inFile(scan.file, record.offset, record.length)) {
       ++scan.sdTables;
@@ -241,14 +446,17 @@ FileProbe probeFile(const FileSource& file) {
   if ((scan.found & needed) != needed || (cff && scan.cff2)) return {};
   FileProbe& probe = scan.probe;
   const uint32_t headOffset = scan.headOffset;
-  if (!cff) {
-    // As SdBlock::plan() lays it out, by the same rule (sdTable()).
-    const uint64_t sdBytes = sdBlockBytes(scan.sdTables, scan.sdTableBytes);
-    probe.sdBytes = sdBytes < kSdBytesUnknown ? static_cast<uint32_t>(sdBytes) : UINT32_MAX;
-  }
-
   uint8_t head[kHeadBytes];
   if (!file.read(file.ctx, headOffset, head, sizeof head) || be32(head + 12) != kHeadMagic) return {};
+  // Counted after the head check, so a file refused for it pays nothing; a read failing here is as any other of the
+  // probe's: not a font for now.
+  if (!scan.layout.cpacBytes(file, &probe.cpacBytes)) return {};
+  probe.flashBytes = flashBlockBytes(file.size, probe.cpacBytes);
+  if (!cff) {
+    // As SdBlock::plan() lays it out, by the same rule (sdTable()).
+    const uint64_t sdBytes = sdBlockBytes(scan.sdTables, scan.sdTableBytes, probe.cpacBytes);
+    probe.sdBytes = sdBytes < kSdBytesUnknown ? static_cast<uint32_t>(sdBytes) : UINT32_MAX;
+  }
   probe.style = be16(head + kMacStyleOffset) & 3;
   probe.weight = (probe.style & 1) ? 700 : 400;
   uint8_t weight[2];
@@ -260,7 +468,7 @@ FileProbe probeFile(const FileSource& file) {
     // The rebuilt CFF table's size takes reading the table: the block planned as an install plans it. Without the
     // memory, or with a read failing, its size is not known for now (fitsStore() then lists the family).
     const auto block = makeUniqueNoThrow<SdBlock>();
-    const SdPlan planned = block ? block->plan(file) : SdPlan::Transient;
+    const SdPlan planned = block ? block->plan(file, &probe.cpacBytes) : SdPlan::Transient;
     probe.sdBytes = planned == SdPlan::Ok ? block->bytes() : planned == SdPlan::NoBlock ? UINT32_MAX : kSdBytesUnknown;
   }
   return probe;
@@ -268,13 +476,15 @@ FileProbe probeFile(const FileSource& file) {
 
 // --- SD mode's style block ---
 
-SdPlan SdBlock::plan(const FileSource& file) {
+SdPlan SdBlock::plan(const FileSource& file, const uint32_t* knownCpacBytes) {
   file_ = file;
   seen_ = 0;
   count_ = 0;
   bytes_ = 0;
   outlinesAt_ = 0;
   outlinesLength_ = 0;
+  cpacAt_ = 0;
+  cpacBytes_ = 0;
   const auto visit = [](void* ctx, const Record& record) { return static_cast<SdBlock*>(ctx)->addTable(&record); };
   const Walk walk = forEachTable(file, &version_, visit, this);
   if (walk != Walk::Done) return walk == Walk::ReadFailed ? SdPlan::Transient : SdPlan::NoBlock;
@@ -283,10 +493,17 @@ SdPlan SdBlock::plan(const FileSource& file) {
     const SdPlan table = cff_.plan(file);
     if (table != SdPlan::Ok) return table;
   }
+  uint32_t cpac = 0;
+  if (knownCpacBytes) {
+    cpac = *knownCpacBytes;
+  } else if (!filterTableBytes(file, &cpac)) {
+    return SdPlan::Transient;
+  }
   const SdTables& kept = cff ? kSdCff : kSdTrueType;
-  // The directory, then the tables, each 4-byte aligned, the outline table last: glyf past them all
-  // (sdBlockBytes()), the rebuilt CFF table ending the block, its charstring data past it.
-  uint64_t end = 12 + 16u * count_;
+  // The directory (a record more for the CPac), then the tables, each 4-byte aligned, the CPac room after the last,
+  // the outline table last: glyf past them all (sdBlockBytes()), the rebuilt CFF table ending the block, its
+  // charstring data past it.
+  uint64_t end = 12 + 16u * (count_ + (cpac > 0 ? 1 : 0));
   int outlines = -1;
   for (uint8_t i = 0; i < count_; ++i) {
     if (tables_[i].tag == kept.tags[kept.outlines]) {
@@ -299,6 +516,14 @@ SdPlan SdBlock::plan(const FileSource& file) {
     if (end > UINT32_MAX - file.size) return SdPlan::NoBlock;
   }
   if (outlines < 0) return SdPlan::NoBlock;
+  if (cpac > 0) {
+    cpacAt_ = static_cast<uint32_t>(end);
+    cpacBytes_ = cpac;
+    end += glyphstore::align4(cpac);
+    if (end > UINT32_MAX - file.size) return SdPlan::NoBlock;
+    // A made table: nothing of the file, its checksum the install's to leave 0.
+    tables_[count_++] = {kCpacTag, 0, 0, cpac, cpacAt_};
+  }
   Table& table = tables_[outlines];
   table.blockOffset = static_cast<uint32_t>(end);
   if (cff) {
@@ -365,7 +590,11 @@ bool SdBlock::read(uint32_t offset, uint8_t* dst, uint32_t len) const {
         if (offset >= table.blockOffset && offset - table.blockOffset < table.length) in = &table;
         if (table.blockOffset > offset && table.blockOffset < next) next = table.blockOffset;
       }
-      if (in) {
+      if (in && in->tag == kCpacTag) {
+        // The CPac room reads as erased flash: the install writes the table there.
+        n = std::min(len, in->blockOffset + in->length - offset);
+        std::memset(dst, 0xFF, n);
+      } else if (in) {
         // The CFF table runs past the block (its charstring data), and is made, not copied.
         n = std::min(len, in->blockOffset + in->length - offset);
         const uint32_t at = offset - in->blockOffset;

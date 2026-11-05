@@ -85,6 +85,11 @@ class Face {
   // False when a required table is missing.
   bool init(const FaceTables& tables);
 
+  // witchhunt: deviation 12 - the tables moved: the same bytes, mapped at `to` where init() read them at `from`
+  // (a flash-mode style block mapped again). Every view and the CPac filter records move by `to - from`; no cmap
+  // search, no CPac validation. Every view must lie in the block mapped at `from`.
+  void rebase(const uint8_t* from, const uint8_t* to);
+
   uint16_t upem() const { return upem_; }
   uint32_t glyphCount() const { return glyphCount_; }
 

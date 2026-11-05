@@ -100,6 +100,16 @@ LanguageSystem selectLanguageSystem(const Table& layout, const Script script, co
   return ls;
 }
 
+bool isShapedScriptTag(const uint32_t scriptTag) {  // witchhunt: deviation 4
+  if (scriptTag == 0) return false;                 // witchhunt: deviation 4 - SCRIPT_TAGS pads with 0
+  for (const auto& tags : SCRIPT_TAGS) {            // witchhunt: deviation 4
+    for (const uint32_t t : tags) {                 // witchhunt: deviation 4
+      if (t == scriptTag) return true;              // witchhunt: deviation 4
+    }  // witchhunt: deviation 4
+  }  // witchhunt: deviation 4
+  return false;  // witchhunt: deviation 4
+}  // witchhunt: deviation 4
+
 bool Plan::load(const Face& face, const Script s, const uint32_t* languageTags) {
   if (read(face, s, languageTags)) return true;
   *this = Plan();  // safe to shape with: no lookups, no shaper

@@ -288,4 +288,26 @@ uint32_t Face::lookupProps(const Table& lookup) const {
   return result;
 }
 
+void Face::rebase(const uint8_t* from, const uint8_t* to) {            // witchhunt: deviation 12
+  const auto moved = [from, to](const Table& t) {                      // witchhunt: deviation 12
+    return t.empty() ? t : Table(to + (t.data() - from), t.length());  // witchhunt: deviation 12
+  };  // witchhunt: deviation 12
+  const auto movedPointer = [from, to](const uint8_t* p) {  // witchhunt: deviation 12
+    return p ? to + (p - from) : p;                         // witchhunt: deviation 12
+  };  // witchhunt: deviation 12
+  cmapSubtable_ = moved(cmapSubtable_);                   // witchhunt: deviation 12
+  hmtx_ = moved(hmtx_);                                   // witchhunt: deviation 12
+  glyphClassDef_ = moved(glyphClassDef_);                 // witchhunt: deviation 12
+  markAttachClassDef_ = moved(markAttachClassDef_);       // witchhunt: deviation 12
+  markGlyphSets_ = moved(markGlyphSets_);                 // witchhunt: deviation 12
+  gsub_ = moved(gsub_);                                   // witchhunt: deviation 12
+  gpos_ = moved(gpos_);                                   // witchhunt: deviation 12
+  for (FilterRecords& f : filters_) {                     // witchhunt: deviation 12
+    f.lookupDigests = movedPointer(f.lookupDigests);      // witchhunt: deviation 12
+    f.subtableStarts = moved(f.subtableStarts);           // witchhunt: deviation 12
+    f.subtableDigests = movedPointer(f.subtableDigests);  // witchhunt: deviation 12
+  }  // witchhunt: deviation 12
+  compiledPlans_ = moved(compiledPlans_);  // witchhunt: deviation 12
+}  // witchhunt: deviation 12
+
 }  // namespace ot

@@ -242,6 +242,25 @@ bool parseFsMove(const std::string_view arg, std::string_view& from, std::string
   return parseFsPath(arg.substr(0, colon), from) && parseFsPath(arg.substr(colon + 1), to);
 }
 
+bool parseTtfShape(std::string_view arg, std::string_view& language, std::string_view& text) {
+  constexpr std::string_view kPrefix = "SHAPE:";
+  constexpr size_t kMaxLanguage = 15;
+  if (arg.substr(0, kPrefix.size()) != kPrefix) return false;
+  arg.remove_prefix(kPrefix.size());
+  const size_t colon = arg.find(':');
+  if (colon == std::string_view::npos || colon > kMaxLanguage) return false;
+  const std::string_view tag = arg.substr(0, colon);
+  const std::string_view body = arg.substr(colon + 1);
+  if (body.empty() || body.size() > kMaxTtfShapeText) return false;
+  for (const char c : tag) {
+    const bool alnum = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+    if (!alnum && c != '-') return false;
+  }
+  language = tag;
+  text = body;
+  return true;
+}
+
 namespace {
 
 // The characters CMD:PAGE writes as \u{XXXX} although they are valid UTF-8: controls, and the marks

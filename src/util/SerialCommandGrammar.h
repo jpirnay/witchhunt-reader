@@ -67,6 +67,11 @@ bool parseFsPut(std::string_view arg, std::string_view& path, uint32_t& size, ui
 // CMD:FS:MV:<from>:<to>: two card paths and the one ':' between them.
 bool parseFsMove(std::string_view arg, std::string_view& from, std::string_view& to);
 
+// CMD:TTF's "SHAPE:<bcp47>:<utf8>": the language is empty or 1-15 of [A-Za-z0-9-], the text 1-192 bytes (it may hold
+// ':', so it is all after the second one).
+inline constexpr size_t kMaxTtfShapeText = 192;
+bool parseTtfShape(std::string_view arg, std::string_view& language, std::string_view& text);
+
 // CMD:PAGE writes a word's text in double quotes, one unit at a time: a UTF-8 character, or a byte
 // that starts none. escapeTextUnit() writes the unit of `text` at `pos` to `out`, which has room for
 // kMaxEscapedUnit bytes, moves `pos` past it and returns the bytes written:

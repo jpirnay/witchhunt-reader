@@ -50,7 +50,8 @@ struct Ligatures {
   uint8_t count = 0;
   uint16_t glyphs[5] = {};  // for U+FB00 + i; 0 when the font has no such ligature
 
-  /// The glyph that draws `codepoint`: a ligature's, else the cmap's.
+  /// The glyph that draws `codepoint`: a ligature's, else the cmap's. A glyph key (GlyphKey.h) below the font's glyph
+  /// count gives that glyph; any other key gives 0.
   uint16_t glyphFor(FontBytes& bytes, const Face& face, uint32_t codepoint) const;
 };
 

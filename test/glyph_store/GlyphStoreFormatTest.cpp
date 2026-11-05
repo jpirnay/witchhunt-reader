@@ -87,7 +87,7 @@ TEST(GlyphStoreFormat, HomeSlotStaysInRangeForAnySlotCount) {
 
 TEST(GlyphStoreFormat, HeaderLayoutIsStable) {
   // Bump kFormatVersion when any of these change.
-  EXPECT_EQ(4u, kFormatVersion);
+  EXPECT_EQ(5u, kFormatVersion);
   EXPECT_EQ(316u, sizeof(Header));
   EXPECT_EQ(312u, offsetof(Header, check));
   static_assert(sizeof(SegmentHeader) == kSegmentHeaderBytes, "a segment header is 16 bytes");

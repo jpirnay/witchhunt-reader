@@ -59,7 +59,8 @@ TEST(ShippedOtfFamilies, EachInstallsWithinTheX3StoreAndDraws) {
     EXPECT_EQ(400, probe.weight);
     EXPECT_FALSE(probe.variable);
     const uint32_t bytes = static_cast<uint32_t>(file.bytes.size());
-    EXPECT_TRUE(ttf::fitsStore(&bytes, &probe.sdBytes, 1, kX3FontAreaBytes, 32));
+    EXPECT_EQ(ttf::flashBlockBytes(bytes, probe.cpacBytes), probe.flashBytes);
+    EXPECT_TRUE(ttf::fitsStore(&probe.flashBytes, &probe.sdBytes, 1, kX3FontAreaBytes, 32));
 
     // Installed alone and drawn: a spread of the characters it maps, and U+FFFD, which stands in for those it does not.
     SimNorFlash flash(kX3FontAreaBytes);

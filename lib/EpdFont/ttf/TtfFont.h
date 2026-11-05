@@ -11,6 +11,7 @@
 #include "EpdFontData.h"
 #include "FlashGlyphStore.h"
 #include "GlyphProvider.h"
+#include "ShapingFace.h"
 #include "TtfFace.h"
 #include "TtfFamily.h"
 #include "TtfOpenType.h"
@@ -50,7 +51,8 @@ class TtfFont {
     /// Frees what the app can spare when a miss's memory does not fit the heap (the built-in fonts' page caches),
     /// before the miss asks once more. True when it freed something.
     bool (*reclaim)() = nullptr;
-    /// Milliseconds since boot, to time a wipe (TtfFontSet::storeEvents()); without it wipes are counted untimed.
+    /// Milliseconds since boot, to time a wipe, a room and an install (TtfFontSet::storeEvents()); without it they are
+    /// counted untimed.
     uint32_t (*nowMs)() = nullptr;
     /// Whether a glyph drawn now counts as a use for the store's reclaims: the app answers true in the renderer's
     /// black-and-white pass, the first of a page's passes. Null counts every draw.
@@ -115,10 +117,16 @@ class TtfFont {
   bool ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const;
   void prefetch(uint8_t style, const char* utf8Text) { prefetch(body_, style, utf8Text); }
 
+  /// The shaping face of the file that draws `style` (a synthetic style's source's): its tables where the glyph store
+  /// maps them, shaped in place. Made on first ask and kept until TtfFontSet::releaseShapingFaces() or the set's next
+  /// load; nullptr for a style the family does not draw, or without the memory. Under RenderLock.
+  ShapingFace* shapingFace(uint8_t style);
+
  private:
   friend class TtfFontSet;
   friend struct TtfFontTestAccess;  // host tests: the style choice, run again
   struct Size;
+  class FileShapingFace;
 
   class StyleProvider final : public GlyphProvider {
    public:
@@ -130,8 +138,16 @@ class TtfFont {
       return owner->ownsBitmap(glyph, bitmap);
     }
     void prefetch(const char* utf8Text) override { owner->prefetch(*size, style, utf8Text); }
+    bool drawsGlyphKeys() const override { return true; }
+    void prefetchGlyphs(const uint16_t* glyphs, const size_t count) override {
+      owner->prefetchGlyphs(*size, style, glyphs, count);
+    }
     int8_t kerning(const uint32_t leftCp, const uint32_t rightCp) override {
       return owner->kerning(*size, style, leftCp, rightCp);
+    }
+    ShapingFace* shapingFace(uint32_t* ppem26_6) override {
+      *ppem26_6 = size->ppem;
+      return owner->shapingFace(style);
     }
   };
 
@@ -161,11 +177,15 @@ class TtfFont {
     bool present = false;
     bool onCard = false;  // SD mode: the block holds the tables, `sd` the outlines on the card
     uint8_t block = 0;    // the store's style block
-    uint32_t bytes = 0;
+    uint32_t bytes = 0;   // the block's
+    // The file's (StyleInfo::fileSize). A flash-mode block is the file, then any CPac: the engine reads this much.
+    uint32_t fileBytes = 0;
     ttf::SdRange sd;
     ttf::Face face;
     ttf::Kerning kerning;
     ttf::Ligatures ligatures;  // every size's EpdFontData points at its pairs
+    // Made on the first shapingFace() and freed by releaseShapingFaces(): a loaded family holds none.
+    std::unique_ptr<ShapingFace> shaping;
     // Left codepoints found to kern with nothing. Their pairs are never stored (spec 8.1), yet the space before
     // every word asks for one: one bit each below kUncoveredEnd (Latin), so they read the font once per load.
     static constexpr uint32_t kUncoveredEnd = 0x250;
@@ -196,6 +216,7 @@ class TtfFont {
     return found && found->present;
   }
   StylesResult openStyles(const ttf::FileSource (&files)[4], uint8_t& block, ttf::ScratchPlan* plan);
+  void releaseShapingFaces();
   void chooseSynthetic();
   bool fontBytes(uint8_t style, FontBytes* bytes);
   bool configure(Size& size, uint32_t ppem);
@@ -207,6 +228,10 @@ class TtfFont {
   const EpdGlyph* glyph(Size& size, uint8_t style, uint32_t codepoint);
   int8_t kerning(const Size& size, uint8_t drawn, uint32_t left, uint32_t right);
   void prefetch(Size& size, uint8_t style, const char* utf8Text);
+  // The glyph-ID prefetch: prefetch()'s rules for the glyph keys of `glyphs`.
+  void prefetchGlyphs(Size& size, uint8_t style, const uint16_t* glyphs, size_t count);
+  // Renders the first `count` of the set's pending glyphs in one batch, in glyph order, and stores them.
+  void renderPending(const Size& size, uint8_t style, uint8_t count, FontBytes& bytes);
   const EpdGlyph* render(const Size& size, uint8_t style, uint32_t codepoint, bool haveKey, uint32_t key);
   ttf::Status load(FontBytes& bytes, const ttf::Face& face, uint16_t index, const Size& size, uint8_t style,
                    EpdGlyph* metrics);
@@ -256,7 +281,7 @@ class TtfFontSet {
   static constexpr uint8_t kRingSlots = 8;
   /// The ring's bitmaps together, at most: a native size's glyphs are large.
   static constexpr uint32_t kRingBudgetBytes = 8192;
-  /// Missing glyphs one prefetch() call renders at most; the rest render as they are looked up.
+  /// Missing glyphs one prefetch() or glyph-ID prefetch call renders at most; the rest render as they are looked up.
   static constexpr uint8_t kPrefetchGlyphs = 64;
 
   /// One family's files by style (size 0: the family has no such style).
@@ -331,8 +356,9 @@ class TtfFontSet {
   };
   Stats stats() const;
 
-  /// How often a store filled up, was wiped and made room since boot, every set's, and how long the last wipe and the
-  /// last room took (0 without the nowMs hook). Read from any task: the serial test API polls it for its EVT: lines.
+  /// How often a store filled up, was wiped and made room since boot, every set's, and how long the last wipe, the
+  /// last room and the last install took (0 without the nowMs hook). Read from any task: the serial test API polls it
+  /// for its EVT: lines.
   struct StoreEvents {
     uint32_t fills = 0;
     uint32_t wipes = 0;
@@ -341,6 +367,7 @@ class TtfFontSet {
     uint32_t rebuilds = 0;  ///< index rebuilds they ran
     uint32_t dropped = 0;   ///< glyphs their reclaims dropped
     uint32_t lastRoomMs = 0;
+    uint32_t lastInstallMs = 0;  ///< the last install's, from its plan to its header
   };
   static StoreEvents storeEvents();
   /// New glyphs are drawn without being stored until room is made (or the next wipe).
@@ -360,6 +387,10 @@ class TtfFontSet {
   uint32_t releaseMissMemory();
   /// What releaseMissMemory() would free now.
   uint32_t missMemoryBytes() const;
+
+  /// Frees every family's shaping faces (TtfFont::shapingFace). A section build's end calls it, after its plans, which
+  /// read the faces' tables.
+  void releaseShapingFaces();
 
  private:
   friend class TtfFont;

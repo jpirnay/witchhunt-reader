@@ -967,6 +967,71 @@ Our engine links 4,692 B (`default`) and 4,596 B (`gh_release`) less than upstre
 drops from 52,268 B to 47,576 B, so item 2's pass lines hold with more room: E + A = 62,936 B against 92,160 B, and the
 free-slot line 6,553,600 - (6,209,481 + 15,360 + 20,480) = 308,279 B against 256,000 B (still provisional on P2).
 
+## PR 2: TrueType faces that shape (item 4)
+
+Measured on the X3 (COM6) on 2026-11-05, on the maintainer's card: 18 font families, the merged Noto Sans Devanagari
+and Noto Sans Bengali among them (uploaded to `/.crosspoint/fonts/` with `devctl put:` over the no-reset open). The
+baseline is master at the branch's merge base `2755ef1c9`; the branch is `e8862d563`. Both `default`, flashed with
+esptool. The X4 was not available, so the before/after pages ran on the X3 as well, and the X4's `SHAPE` figures
+(the plan's Step 5) are not measured.
+
+**Before and after.** `/test/ePubTest.epub@3:2` in BookerlyTTF (flash mode) and `/test/test_cjk_zh_honglou.epub@1:1`
+in NotoSansTC (SD mode), at 14 pt: each page after the update is pixel-identical to the baseline's below the status
+bar (the clock differs).
+
+**The reinstall and `CPac`.** Each family installs once on its first open after the update (`kRenderVersion` 4).
+`CPac` only for a font whose GSUB or GPOS names a script the shaper handles (the maintainer's ruling on the final
+review's I1).
+
+| Family | Styles | Mode | `CPac` a style, written (B) | Item 3's count (B) | Install (ms) |
+|---|---|---|---|---|---|
+| BookerlyTTF | 4 | flash | none (no shaped script) | - | 8,404 |
+| NotoSansTC | 1 | SD | none (no shaped script) | - | 9,117 |
+| NotoSansDevanagari (merged) | 2 | flash | 18,244 | 18,244 | 4,497 |
+| NotoSansBengali (merged) | 2 | flash | 37,368 | 37,368 | 6,358 |
+
+**One word shaped** (`CMD:TTF:SHAPE`, the body family's Regular at 14 pt, three runs each: min / median / max in
+microseconds). `init` is the face's first `current()` (`Face::init` with `CPac` validated), `plan` the plan's build
+with its filters stored, `shape` one `ot::shape`; `plan bytes` the plan's heap.
+
+| Word | init | plan | plan bytes | shape | glyphs | width (px) | stored |
+|---|---|---|---|---|---|---|---|
+| हिन्दी (hi) | 717 / 717 / 719 | 1,669 / 1,674 / 1,677 | 980 | 3,727 / 4,168 / 4,199 | 5 | 57 | 5 |
+| प्रार्थना (hi) | 717 / 717 / 717 | 1,669 / 1,670 / 2,014 | 980 | 2,436 / 2,872 / 2,872 | 6 | 68 | 5 |
+| শ্রীঈশ্বরচন্দ্র (bn) | 1,303 / 1,304 / 1,305 | 2,078 / 2,081 / 2,426 | 2,028 | 6,479 / 6,826 / 6,944 | 13 | 127 | 13 |
+| কর্ত্তৃক (bn) | 1,303 / 1,303 / 1,631 | 2,074 / 2,074 / 2,075 | 2,028 | 4,938 / 5,400 / 5,470 | 5 | 69 | 4 |
+
+`repoint_us` was -1 in every run: after the Bold style's block was mapped, the Regular's `current()` found its block
+at the same base, so the face had nothing to re-point. The C3 maps one flash-mode style at a time and gave the
+Regular back the address it had. Deviation 12's re-point is proven on the host (`MovingNorFlash`, which never reuses
+an address); these runs did not need it, so its device cost is not measured.
+
+**Discovery** (from `Display initialized` to `Discovery complete`, 18 families, the same card): 470 ms on the
+baseline, 552 ms on the branch (+82 ms). A font without a shaped script now takes two reads more to probe (its
+GSUB and GPOS script lists: Bookerly-Regular 6 -> 8 read calls, host count); a font with one also counts its
+lookups in coalesced reads (NotoSans-Regular: 44 calls, with a budget of 512 a table).
+
+**Flash and RAM** against the baseline `2755ef1c9`:
+
+| Env | Flash, baseline | Flash, branch | Delta | RAM, baseline | RAM, branch | Delta |
+|---|---|---|---|---|---|---|
+| `gh_release` | 6,074,863 | 6,085,251 | +10,388 | 57,368 | 57,376 | +8 |
+| `default` | 6,198,283 | 6,252,223 | +53,940 | 57,872 | 57,880 | +8 |
+
+- `default`'s delta less `gh_release`'s, 43,552 B, is the shaping engine and `TTF:SHAPE`, which only dev builds link
+  (PR 1 measured the whole engine at 47,576 B). The release build now links the engine's face, table and coverage
+  code for the install's `CPac`.
+- The gate: `gh_release`'s +10,388 B stays under A = 15,360 B, leaving 4,972 B of A for PR 3. The running total for
+  PRs 1-3 on the release build is 10,388 B so far; with E = 47,576 B and the rest of A it is at most 62,936 B, under
+  the 92,160 B pass line.
+
+**Estimate -> measured** for the design's rows this PR measures:
+
+| What | The design's estimate | Measured |
+|---|---|---|
+| `CPac` | about 16 KB (Devanagari), 25 KB (Bengali) a style, flash | 18,244 B and 37,368 B a style, written at install (the merged families' Latin lookups count too); fonts without a shaped script carry none |
+| The reinstall | every installed TrueType family copied again once, one boot after the update; install times not measured | on each family's first open: 8.4 s (BookerlyTTF, 4 styles, flash), 9.1 s (NotoSansTC, SD), 4.5 s and 6.4 s (the merged Devanagari and Bengali, 2 styles each); pages pixel-identical afterwards |
+
 ## The gate
 
 | Item | Pass line | Measured | Result |

@@ -102,8 +102,16 @@ bool validGeometry(const Geometry& g, const uint32_t flashSize) {
          uint64_t{g.logOffset} + g.logSize <= flashSize;
 }
 
+// A flash-mode block holds its file, `fileSize` bytes, then its CPac from align4(fileSize) to the block's end; a block
+// the file's size has none.
+bool validFlashFile(const StyleInfo& style) {
+  if (style.fileSize == 0 || style.fileSize > style.size) return false;
+  return cpacRoomOf(style.fileSize, style.size).at <= style.size;
+}
+
 // The style blocks are sector-aligned, in order, between the state sector and the index, the SD-mode ones after
-// every flash-mode one; an SD-mode style's outlines lie in its file and past its block.
+// every flash-mode one; a flash-mode style's file fits its block; an SD-mode style's outlines lie in its file and past
+// its block.
 bool validStyles(const StyleInfo* styles, const Geometry& g) {
   uint32_t floor = kFirstRegionOffset;
   bool sd = false;
@@ -111,7 +119,7 @@ bool validStyles(const StyleInfo* styles, const Geometry& g) {
     const StyleInfo& style = styles[s];
     if (style.offset < floor || style.offset % kSectorBytes != 0 || style.size == 0) return false;
     if (uint64_t{style.offset} + style.size > g.indexOffset || style.mode > kModeSd) return false;
-    if (style.mode == kModeFlash && sd) return false;
+    if (style.mode == kModeFlash && (sd || !validFlashFile(style))) return false;
     if (style.mode == kModeSd) {
       const SdOutlines& o = style.outlines;
       if (o.fontOffset < style.size || uint64_t{o.fontOffset} + o.length > UINT32_MAX ||
@@ -135,15 +143,13 @@ bool validHeader(const Header& h, const uint32_t flashSize) {
 
 // --- Install ---
 
-bool FlashGlyphStore::beginInstall(const Layout& layout, const uint8_t identity[kIdentityBytes],
-                                   const StyleInfo* sdInfo, const uint8_t keepStyles, bool* noMemory) {
+bool FlashGlyphStore::beginInstall(const Layout& layout, const uint8_t identity[kIdentityBytes], const StyleInfo* info,
+                                   const uint8_t keepStyles, bool* noMemory) {
   close();
   if (noMemory) *noMemory = false;
   const Geometry& g = layout.geometry;
-  bool sd = false;
-  for (uint8_t s = 0; s < g.styleCount && s < kMaxStyles; ++s) sd = sd || layout.styleMode[s] == kModeSd;
-  if (!validGeometry(g, flash_.size()) || (sd && !sdInfo)) {
-    LOG_ERR("GST", "install: the layout does not fit the flash, or SD mode lacks its files");
+  if (!validGeometry(g, flash_.size()) || !info) {
+    LOG_ERR("GST", "install: the layout does not fit the flash, or its styles lack their files");
     return false;
   }
   auto header = makeUniqueNoThrow<Header>();
@@ -159,13 +165,17 @@ bool FlashGlyphStore::beginInstall(const Layout& layout, const uint8_t identity[
   header->geometry = g;
   for (uint8_t s = 0; s < g.styleCount; ++s) {
     StyleInfo& style = header->styles[s];
-    if (layout.styleMode[s] == kModeSd) style = sdInfo[s];
+    if (layout.styleMode[s] == kModeSd) {
+      style = info[s];
+    } else {
+      style.fileSize = info[s].fileSize;
+    }
     style.offset = layout.styleOffset[s];
     style.size = layout.styleSize[s];
     style.mode = layout.styleMode[s];
   }
   if (!validStyles(header->styles, g)) {
-    LOG_ERR("GST", "install: the style blocks or their outlines do not fit");
+    LOG_ERR("GST", "install: the style blocks, their files or their outlines do not fit");
     return false;
   }
 

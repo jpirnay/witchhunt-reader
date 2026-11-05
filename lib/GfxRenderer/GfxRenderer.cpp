@@ -3,6 +3,7 @@
 #include <BoardConfig.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
+#include <GlyphKey.h>
 #include <GlyphProvider.h>
 #include <HalGPIO.h>
 #include <Logging.h>
@@ -20,6 +21,7 @@
 #include <cstring>
 
 #include "FontCacheManager.h"
+#include "GlyphRun.h"
 #include "ScaledGlyphResample.h"
 
 const uint8_t* GfxRenderer::getGlyphBitmap(const EpdFontData* fontData, const EpdGlyphRef& glyph) const {
@@ -200,12 +202,12 @@ bool GfxRenderer::ensureScaledGlyphCache(const int bodyFontId) const {
 const uint8_t* GfxRenderer::findScaledGlyphMask(const void* fontData, const uint32_t cp, const float scale,
                                                 const uint8_t sel, const int w, const int h) const {
   if (!scaledGlyphArena_) return nullptr;
+  const ScaledGlyphKey key = scaledGlyphKeyOf(cp);
+  if (!key.cacheable) return nullptr;  // alloc never stores one
   const uint32_t bits = floatBits(scale);
   for (uint8_t i = 0; i < scaledGlyphCount_; i++) {
     const ScaledGlyphEntry& e = scaledGlyphEntries_[i];
-    if (e.fontData == fontData && e.cp == cp && e.scaleBits == bits && e.sel == sel && e.w == w && e.h == h) {
-      return scaledGlyphArena_.get() + e.offset;
-    }
+    if (scaledGlyphEntryMatches(e, fontData, key, bits, sel, w, h)) return scaledGlyphArena_.get() + e.offset;
   }
   return nullptr;
 }
@@ -214,9 +216,11 @@ uint8_t* GfxRenderer::allocScaledGlyphMask(const void* fontData, const uint32_t 
                                            const uint8_t sel, const int w, const int h) const {
   // Dimensions are stored as uint8 and the mask must stay well under the arena;
   // oversized glyphs render uncached rather than evicting the body-text set.
-  // Codepoints above the BMP are stored in a uint16 key, so they render uncached
-  // too — they are vanishingly rare in body text and never worth widening the key.
-  if (w <= 0 || h <= 0 || w > 255 || h > 255 || cp > 0xFFFF) return nullptr;
+  // Codepoints above the BMP have no uint16 key (scaledGlyphKeyOf), so they render
+  // uncached too — they are vanishingly rare in body text and never worth widening
+  // the key. A glyph key's ID fits it, its kind telling it from a codepoint.
+  const ScaledGlyphKey key = scaledGlyphKeyOf(cp);
+  if (w <= 0 || h <= 0 || w > 255 || h > 255 || !key.cacheable) return nullptr;
   const uint16_t bytes = scaledGlyphMaskBytes(w, h);
   if (bytes > SCALED_GLYPH_MAX_MASK_BYTES) return nullptr;
 
@@ -244,7 +248,8 @@ uint8_t* GfxRenderer::allocScaledGlyphMask(const void* fontData, const uint32_t 
   memset(mask, 0, bytes);
   ScaledGlyphEntry& e = scaledGlyphEntries_[scaledGlyphCount_++];
   e.fontData = fontData;
-  e.cp = static_cast<uint16_t>(cp);
+  e.id = key.id;
+  e.kind = key.kind;
   e.scaleBits = floatBits(scale);
   e.offset = scaledGlyphUsed_;
   e.sel = sel;
@@ -923,19 +928,13 @@ static void renderGlyphFast2Bit(uint8_t* const frameBuffer, const uint8_t* const
   }
 }
 
-// Shared glyph rendering logic for normal and rotated text.
+// Shared glyph rendering logic for normal and rotated text: draws `glyph`, already resolved in the font `fontData`
+// describes, with its pen at (cursorX, cursorY). renderCharImpl resolves a codepoint for it, drawGlyphRun a glyph ID.
 // Coordinate mapping and cursor advance direction are selected at compile time via the template parameter.
 template <TextRotation rotation>
-static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
-                           const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
-                           const bool pixelState, const EpdFontFamily::Style style) {
-  const EpdGlyphRef glyph = fontFamily.getGlyph(cp, style);
-  if (!glyph) {
-    LOG_ERR("GFX", "No glyph for codepoint %d", cp);
-    return;
-  }
-
-  const EpdFontData* fontData = fontFamily.getData(style);
+static void drawResolvedGlyph(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
+                              const EpdFontData* fontData, const EpdGlyphRef& glyph, int cursorX, int cursorY,
+                              const bool pixelState) {
   const bool is2Bit = fontData->is2Bit;
   const uint8_t width = glyph.width;
   const uint8_t height = glyph.height;
@@ -1120,6 +1119,19 @@ static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode 
   }
 }
 
+// Looks `cp` up in `style`, with getGlyph's fallbacks, and draws it (drawResolvedGlyph).
+template <TextRotation rotation>
+static void renderCharImpl(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
+                           const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
+                           const bool pixelState, const EpdFontFamily::Style style) {
+  const EpdGlyphRef glyph = fontFamily.getGlyph(cp, style);
+  if (!glyph) {
+    LOG_ERR("GFX", "No glyph for codepoint %d", cp);
+    return;
+  }
+  drawResolvedGlyph<rotation>(renderer, renderMode, fontFamily.getData(style), glyph, cursorX, cursorY, pixelState);
+}
+
 // Render a glyph at an arbitrary scale factor.
 // Used for heading font-size scaling (e.g. h1=1.6×, h2=1.4×, h3=1.2×) and per-word inline
 // sizes, including superscript/subscript (which carry an explicit size percentage instead
@@ -1182,14 +1194,13 @@ static void captureScaledGlyphPlane(const GfxRenderer& renderer, uint8_t* const 
                         });
 }
 
-static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
-                              const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
-                              const bool pixelState, const EpdFontFamily::Style style, const float scale,
-                              const uint8_t minRaw2Bit = 1) {
-  const EpdGlyphRef glyph = fontFamily.getGlyph(cp, style);
-  if (!glyph) return;
-
-  const EpdFontData* fontData = fontFamily.getData(style);
+// Draws `glyph`, already resolved in the font `fontData` describes, at `scale` with its pen at (cursorX, cursorY).
+// `cacheCp` keys its masks in the scaled-glyph cache: the codepoint it was resolved from, or its glyph key
+// (scaledGlyphKeyOf). renderCharAtScale resolves a codepoint for it, drawGlyphRun a glyph ID.
+static void drawResolvedGlyphAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
+                                     const EpdFontData* fontData, const EpdGlyphRef& glyph, const uint32_t cacheCp,
+                                     int cursorX, int cursorY, const bool pixelState, const float scale,
+                                     const uint8_t minRaw2Bit) {
   const uint8_t* bitmap = renderer.getGlyphBitmap(fontData, glyph);
   if (!bitmap) return;
 
@@ -1222,10 +1233,10 @@ static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMo
     const uint8_t darkness = renderer.getTextDarkness();
     captureScaledGlyphPlane(renderer, renderer.grayCaptureMsb(),
                             drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_MSB, darkness), bitmap, is2Bit, srcW, srcH, dstW,
-                            dstH, scale, baseX, baseY, fontData, cp);
+                            dstH, scale, baseX, baseY, fontData, cacheCp);
     captureScaledGlyphPlane(renderer, renderer.grayCaptureLsb(),
                             drawMaskFor2BitMode(GfxRenderer::GRAYSCALE_LSB, darkness), bitmap, is2Bit, srcW, srcH, dstW,
-                            dstH, scale, baseX, baseY, fontData, cp);
+                            dstH, scale, baseX, baseY, fontData, cacheCp);
   }
 
   // Cached path: resample once per distinct (glyph, scale, sel), then draw every
@@ -1235,9 +1246,9 @@ static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMo
   if (!renderer.isStripActive()) {
     // fontData already identifies the style variant (getData and getGlyph share
     // getFont(style)), so the style bits are not part of the key.
-    const uint8_t* mask = renderer.findScaledGlyphMask(fontData, cp, scale, sel, dstW, dstH);
+    const uint8_t* mask = renderer.findScaledGlyphMask(fontData, cacheCp, scale, sel, dstW, dstH);
     if (!mask) {
-      if (uint8_t* slot = renderer.allocScaledGlyphMask(fontData, cp, scale, sel, dstW, dstH)) {
+      if (uint8_t* slot = renderer.allocScaledGlyphMask(fontData, cacheCp, scale, sel, dstW, dstH)) {
         emitScaledGlyphPixels(bitmap, is2Bit, srcW, srcH, dstW, dstH, scale, drawMask,
                               [slot, dstW](const int dstX, const int dstY) {
                                 const int bit = dstY * dstW + dstX;
@@ -1260,6 +1271,18 @@ static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMo
                         [&renderer, baseX, baseY, writeState](const int dstX, const int dstY) {
                           renderer.drawPixel(baseX + dstX, baseY + dstY, writeState);
                         });
+}
+
+// Looks `cp` up in `style`, with getGlyph's fallbacks, and draws it at `scale` (drawResolvedGlyphAtScale), its
+// masks cached under `cp`.
+static void renderCharAtScale(const GfxRenderer& renderer, GfxRenderer::RenderMode renderMode,
+                              const EpdFontFamily& fontFamily, const uint32_t cp, int cursorX, int cursorY,
+                              const bool pixelState, const EpdFontFamily::Style style, const float scale,
+                              const uint8_t minRaw2Bit = 1) {
+  const EpdGlyphRef glyph = fontFamily.getGlyph(cp, style);
+  if (!glyph) return;
+  drawResolvedGlyphAtScale(renderer, renderMode, fontFamily.getData(style), glyph, cp, cursorX, cursorY, pixelState,
+                           scale, minRaw2Bit);
 }
 
 // IMPORTANT: This function is in critical rendering path and is called for every pixel. Please keep it as simple and
@@ -1561,6 +1584,10 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   }
 }
 
+// Whether a total scale draws on the unscaled blitter: within 1% of 1 the resample is not worth its blur. One
+// definition for drawTextScaled and for glyph runs, so a shaped run and its unshaped fallback agree.
+static bool drawsUnscaled(const float total) { return total > 0.99f && total < 1.01f; }
+
 // Public entry: `scale` is the CSS/heading residual, compounded with the font's base scale so a
 // heading at 1.6em inside synthesised 24 pt body text is ONE resample at 1.2 x 1.6, not two.
 void GfxRenderer::drawTextScaled(const int fontId, const int x, const int y, const char* text, const bool black,
@@ -1569,7 +1596,7 @@ void GfxRenderer::drawTextScaled(const int fontId, const int x, const int y, con
   // first version of this wrapper returned instead, which silently changed behaviour for any
   // caller passing 0 to mean unscaled.
   const float total = (scale <= 0.0f ? 1.0f : scale) * fontBaseScale(fontId);
-  if (total > 0.99f && total < 1.01f) {
+  if (drawsUnscaled(total)) {
     // Exactly 1 after compounding: the unscaled blitter is both faster and sharper. Only reachable
     // when the font's base is 1, so drawText() cannot bounce back here.
     drawText(fontId, x, y, text, black, style);
@@ -1629,6 +1656,96 @@ void GfxRenderer::drawTextAtScale(const int fontId, const int x, const int y, co
     cursorFP += scaledAdvanceFP;
     prevCp = cp;
   }
+}
+
+// The scale a glyph run is drawn at: drawTextScaled's residual (a non-positive one meaning none) times the font's base
+// scale. Unscaled (drawsUnscaled) the run takes drawText's blitter and pen, at anything else drawTextAtScale's.
+static float glyphRunScale(const float scale, const float base) { return (scale <= 0.0f ? 1.0f : scale) * base; }
+
+void GfxRenderer::drawGlyphRun(const int fontId, const int x, const int y, const GlyphRun& run, const bool black,
+                               const EpdFontFamily::Style style, const float scale) const {
+  if (run.count == 0) return;
+
+  if (fontCacheManager_ && fontCacheManager_->isScanning()) {
+    fontCacheManager_->recordGlyphs(run, fontId, style);  // records only for a font that draws glyph keys
+    return;
+  }
+
+  const EpdFontFamily* const family = findFontFamily(fontId);
+  if (!family) {
+    LOG_ERR("GFX", "Font %d not found", fontId);
+    return;
+  }
+  // A run's glyph IDs mean nothing to a font that draws no glyph keys (a .cpfont or built-in face under the ID): it is
+  // not asked, and nothing is drawn. Said once, not for every shaped word of every page.
+  if (!family->drawsGlyphKeys(style)) {
+    static bool refusalLogged = false;
+    if (!refusalLogged) {
+      refusalLogged = true;
+      LOG_ERR("GFX", "Font %d draws no glyph keys: its glyph runs are not drawn", fontId);
+    }
+    return;
+  }
+
+  const float total = glyphRunScale(scale, fontBaseScale(fontId));
+  const bool scaled = !drawsUnscaled(total);
+  // drawText's baseline at 1 (where its base scale is 1 too), drawTextAtScale's otherwise.
+  const int ascender = rawFontAscenderSize(fontId);
+  const int yPos = y + (scaled ? static_cast<int>(ascender * total + 0.5f) : ascender);
+  const EpdFontData* const fontData = family->getData(style);  // findGlyphKey's font (getFont(style))
+  const auto renderModeSnapshot = getRenderMode();
+  const int screenWidth = getScreenWidth();
+  const int screenHeight = getScreenHeight();
+  // Sup/sub glyphs keep drawTextAtScale's crisp dark-shade threshold.
+  const uint8_t minRaw2Bit = (style & (EpdFontFamily::SUP | EpdFontFamily::SUB)) != 0 ? 2 : 1;
+
+  forEachGlyph(run, x, scaled, [&](const GlyphRecord& record, const int penX) {
+    const uint32_t key = glyph_key::of(record.glyph);
+    const EpdGlyphRef glyph = family->findGlyphKey(key, style);
+    if (!glyph) return;  // a glyph the font lacks: nothing drawn, and the pen moves on
+
+    // Skip rasterization for glyphs wholly outside the logical viewport, as drawText does, at the size drawn.
+    const int left = scaled ? static_cast<int>(glyph.left * total + 0.5f) : glyph.left;
+    const int top = scaled ? static_cast<int>(glyph.top * total + 0.5f) : glyph.top;
+    const int width = scaled ? static_cast<int>(glyph.width * total + 0.5f) : glyph.width;
+    const int height = scaled ? static_cast<int>(glyph.height * total + 0.5f) : glyph.height;
+    const int glyphPenX = penX + record.dx;
+    const int glyphPenY = yPos + record.dy;
+    const int glyphX = glyphPenX + left;
+    const int glyphY = glyphPenY - top;
+    if (width <= 0 || height <= 0 || glyphX >= screenWidth || glyphY >= screenHeight || glyphX + width <= 0 ||
+        glyphY + height <= 0) {
+      return;
+    }
+
+    if (scaled) {
+      drawResolvedGlyphAtScale(*this, renderModeSnapshot, fontData, glyph, key, glyphPenX, glyphPenY, black, total,
+                               minRaw2Bit);
+    } else {
+      drawResolvedGlyph<TextRotation::None>(*this, renderModeSnapshot, fontData, glyph, glyphPenX, glyphPenY, black);
+    }
+  });
+}
+
+int GfxRenderer::glyphRunWidth(const int fontId, const GlyphRun& run, const float scale) const {
+  return glyphRunAdvance(run, !drawsUnscaled(glyphRunScale(scale, fontBaseScale(fontId))));
+}
+
+void GfxRenderer::prefetchGlyphRun(const int fontId, const GlyphRun& run, const EpdFontFamily::Style style) const {
+  const EpdFontFamily* const family = findFontFamily(fontId);
+  if (!family || !family->drawsGlyphKeys(style)) return;
+  constexpr size_t kBatch = 64;
+  // 128 B on the stack: a run of any length is handed over a batch at a time, with nothing allocated.
+  uint16_t glyphs[kBatch];
+  size_t count = 0;
+  forEachGlyph(run, 0, false, [&](const GlyphRecord& record, int) {
+    glyphs[count++] = record.glyph;
+    if (count == kBatch) {
+      family->prefetchGlyphs(glyphs, count, style);
+      count = 0;
+    }
+  });
+  if (count > 0) family->prefetchGlyphs(glyphs, count, style);
 }
 
 // The three *Scaled accessors take the CSS/heading residual and compound it with the font's own
@@ -3226,6 +3343,11 @@ bool GfxRenderer::getGlyphInk(const int fontId, const uint32_t cp, const EpdFont
 bool GfxRenderer::hasGlyph(const int fontId, const uint32_t cp, const EpdFontFamily::Style style) const {
   const EpdFontFamily* const family = findFontFamily(fontId);
   return family && family->hasGlyph(cp, style);
+}
+
+ShapingFace* GfxRenderer::shapingFace(const int fontId, const EpdFontFamily::Style style, uint32_t* ppem26_6) const {
+  const EpdFontFamily* const family = findFontFamily(fontId);
+  return family ? family->shapingFace(style, ppem26_6) : nullptr;
 }
 
 int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style style) const {

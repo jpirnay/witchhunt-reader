@@ -2,8 +2,46 @@
 
 // Glyph resampling for text drawn at a scale (GfxRenderer's renderCharAtScale): pure, so the host tests
 // include it directly.
+#include <GlyphKey.h>
+
 #include <algorithm>
 #include <cstdint>
+
+/// The scaled-mask cache's key for `cp`: a BMP code point (kind 0) or a glyph key's ID (kind 1); not cacheable for
+/// anything else (a code point above the BMP renders uncached). The kind keeps a glyph ID from matching the code
+/// point with the same 16 bits.
+struct ScaledGlyphKey {
+  uint16_t id;
+  uint8_t kind;
+  bool cacheable;
+};
+
+constexpr ScaledGlyphKey scaledGlyphKeyOf(const uint32_t cp) {
+  if (cp <= 0xFFFF) return {static_cast<uint16_t>(cp), 0, true};
+  if (glyph_key::is(cp)) return {glyph_key::glyphOf(cp), 1, true};
+  return {0, 0, false};
+}
+
+/// One mask of GfxRenderer's scaled-glyph cache: what it was resampled from and for, and where its bits are (the
+/// cache's budget and why it is keyed so: GfxRenderer.h). 16 B on the C3.
+struct ScaledGlyphEntry {
+  const void* fontData;  // EpdFontData for the style (stable per font object)
+  uint32_t scaleBits;    // exact float bits of the scale factor (no quantisation)
+  uint16_t id;           // scaledGlyphKeyOf's id: a BMP codepoint or a glyph key's glyph ID
+  uint16_t offset;       // byte offset into the cache's arena
+  uint8_t sel;           // the drawMask the glyph was resampled for
+  uint8_t w;
+  uint8_t h;
+  uint8_t kind;  // scaledGlyphKeyOf's kind: 0 codepoint, 1 glyph ID; the 16th byte on the C3
+};
+
+/// Whether `e` holds the mask asked for: the same font data, scale bits, drawMask and size, and the same key, its kind
+/// as well as its id, so glyph ID 0x41 never serves 'A' (their ids are the same 16 bits), nor 'A' glyph ID 0x41.
+constexpr bool scaledGlyphEntryMatches(const ScaledGlyphEntry& e, const void* fontData, const ScaledGlyphKey& key,
+                                       const uint32_t scaleBits, const uint8_t sel, const int w, const int h) {
+  return e.fontData == fontData && e.id == key.id && e.kind == key.kind && e.scaleBits == scaleBits && e.sel == sel &&
+         e.w == w && e.h == h;
+}
 
 // Resample one glyph to `scale`, reporting every destination pixel that must be drawn to
 // `emit(dstX, dstY)`. Single source of truth for both consumers: the cache builder (which

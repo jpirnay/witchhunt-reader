@@ -28,14 +28,16 @@
 
 using namespace ttf_test;
 
+// The bytes the program's news hold now: what a loaded family keeps is the difference across its load. Declared in
+// TtfFontTestUtil.h, for the other test files of this program.
+size_t heapBytesHeld = 0;
+
 namespace {
 // A nothrow array new of exactly this many bytes fails, as the scratch block's does on a heap without room for it.
 size_t refuseArrayBytes = 0;
 // The next nothrow new of one object of exactly this many bytes fails, once: an SD-mode plan's or read's page cache
 // (ttf::CffBlock::planBytes(), readBytes()) on a heap without room for it at that moment.
 size_t refuseNextObjectBytes = 0;
-// The bytes the program's news hold now: what a loaded family keeps is the difference across its load.
-size_t heapBytesHeld = 0;
 
 // A block with its size in front of it (malloc and free underneath, which the sanitizers pair as they pair any other).
 constexpr size_t kSizeHeader = alignof(std::max_align_t);
@@ -92,47 +94,6 @@ constexpr uint8_t kItalic = 2;
 constexpr uint8_t kBoldItalic = 3;
 constexpr uint8_t kIdentityA[glyphstore::kIdentityBytes] = {'f', 'a', 'm', 'i', 'l', 'y', '-', 'A'};
 constexpr uint8_t kIdentityB[glyphstore::kIdentityBytes] = {'f', 'a', 'm', 'i', 'l', 'y', '-', 'B'};
-
-/// What the rasterizer draws for `cp` at `points`, straight from the file: what a stored glyph must equal.
-struct Reference {
-  EpdGlyph metrics{};
-  std::vector<uint8_t> bitmap;
-};
-
-/// The same at a pixels-per-em (26.6).
-Reference referenceAt(const std::vector<uint8_t>& file, const uint32_t cp, const uint32_t ppem) {
-  FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
-  ttf::Face face;
-  EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
-  ttf::Rasterizer rasterizer;
-  EXPECT_TRUE(rasterizer.allocate(
-      ttf::planScratch(face, static_cast<uint32_t>(TtfFont::kMaxNativePx) << 6, ttf::kPoolBytesFlash)));
-  Reference ref;
-  EXPECT_EQ(ttf::Status::Ok, rasterizer.render(bytes, face, ttf::glyphIndex(bytes, face, cp), ppem, &ref.metrics));
-  ref.bitmap.assign(rasterizer.output(), rasterizer.output() + ref.metrics.dataLength);
-  return ref;
-}
-
-Reference reference(const std::vector<uint8_t>& file, const uint32_t cp, const uint8_t points) {
-  return referenceAt(file, cp, ttf::ppemFromPoints(points));
-}
-
-/// What the rasterizer draws for `cp` at a pixels-per-em (26.6), emboldened at the engine's strength: what a glyph of
-/// a synthetic bold style must equal.
-Reference emboldenedAt(const std::vector<uint8_t>& file, const uint32_t cp, const uint32_t ppem) {
-  FontBytes bytes(file.data(), static_cast<uint32_t>(file.size()));
-  ttf::Face face;
-  EXPECT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(bytes, &face));
-  ttf::Rasterizer rasterizer;
-  EXPECT_TRUE(rasterizer.allocate(
-      ttf::planScratch(face, static_cast<uint32_t>(TtfFont::kMaxNativePx) << 6, ttf::kPoolBytesFlash, true)));
-  Reference ref;
-  EXPECT_EQ(ttf::Status::Ok, rasterizer.load(bytes, face, ttf::glyphIndex(bytes, face, cp), ppem, &ref.metrics));
-  EXPECT_EQ(ttf::Status::Ok, rasterizer.embolden(ttf::emboldenStrength(ppem), &ref.metrics));
-  EXPECT_EQ(ttf::Status::Ok, rasterizer.rasterize(rasterizer.output()));
-  ref.bitmap.assign(rasterizer.output(), rasterizer.output() + ref.metrics.dataLength);
-  return ref;
-}
 
 Reference emboldened(const std::vector<uint8_t>& file, const uint32_t cp, const uint8_t points) {
   return emboldenedAt(file, cp, ttf::ppemFromPoints(points));
@@ -191,25 +152,6 @@ Reference drawnAt(const std::vector<uint8_t>& file, const uint32_t cp, const uin
   }
   ADD_FAILURE() << "U+" << std::hex << cp << " draws in no form";
   return ref;
-}
-
-constexpr uint32_t px(const uint32_t pixels) { return pixels << 6; }
-
-/// A glyph's bitmap, wherever TtfFont keeps it: the ring, or the store's log.
-std::vector<uint8_t> bitmapOf(const TtfFont& font, const uint8_t style, const EpdGlyph* glyph) {
-  const uint8_t* bitmap = nullptr;
-  if (!font.ownsBitmap(glyph, bitmap)) bitmap = font.font(style)->data->bitmap + glyph->dataOffset;
-  return bitmap ? std::vector<uint8_t>(bitmap, bitmap + glyph->dataLength) : std::vector<uint8_t>{};
-}
-
-void expectDrawnAs(const Reference& ref, const TtfFont& font, const uint8_t style, const EpdGlyph* glyph) {
-  ASSERT_NE(nullptr, glyph);
-  EXPECT_EQ(ref.metrics.width, glyph->width);
-  EXPECT_EQ(ref.metrics.height, glyph->height);
-  EXPECT_EQ(ref.metrics.left, glyph->left);
-  EXPECT_EQ(ref.metrics.top, glyph->top);
-  EXPECT_EQ(ref.metrics.advanceX, glyph->advanceX);
-  EXPECT_EQ(ref.bitmap, bitmapOf(font, style, glyph));
 }
 
 int yields = 0;
@@ -1664,7 +1606,8 @@ TEST_F(TtfFontSetTest, AFamilyTooLargeForFlashModeIsDrawnFromTheCardAsFlashModeD
     EXPECT_GT(set->sdPageReads(), 0u);
   }
   // The next boot draws them from the store: neither rendered again nor read from the card, but for the table
-  // directory the open compares with the block's.
+  // directory the open compares with the block's, and the heads of GSUB and GPOS, whose script lists say the block has
+  // no CPac room.
   for (MemoryFile& file : files) file.offsets.clear();
   const auto set = openFamilies(chip, {files}, busy);
   ASSERT_NE(nullptr, set);
@@ -1674,7 +1617,20 @@ TEST_F(TtfFontSetTest, AFamilyTooLargeForFlashModeIsDrawnFromTheCardAsFlashModeD
   const std::vector<uint8_t>& bold = files[kBold].bytes;
   const uint32_t directoryEnd = 12 + 16u * static_cast<uint32_t>(bold[4] << 8 | bold[5]);
   ASSERT_FALSE(files[kBold].offsets.empty());
-  for (const uint32_t offset : files[kBold].offsets) EXPECT_LT(offset, directoryEnd);
+  const auto layoutTable = [&bold](const char* name) {
+    const size_t at = findRecord(bold, name);
+    const auto word = [&](const size_t from) {
+      return static_cast<uint32_t>(bold[from]) << 24 | bold[from + 1] << 16 | bold[from + 2] << 8 | bold[from + 3];
+    };
+    return std::pair<uint32_t, uint32_t>{word(at + 8), word(at + 8) + word(at + 12)};
+  };
+  const auto gsub = layoutTable("GSUB");
+  const auto gpos = layoutTable("GPOS");
+  for (const uint32_t offset : files[kBold].offsets) {
+    const bool layout =
+        (offset >= gsub.first && offset < gsub.second) || (offset >= gpos.first && offset < gpos.second);
+    EXPECT_TRUE(offset < directoryEnd || layout) << offset;
+  }
   expectWrittenOnce(chip);
 }
 
@@ -1885,8 +1841,9 @@ TEST_F(TtfFontSetTest, APowerCutInAnSdModeInstallIsInstalledWholeAtTheNextLoad) 
 
 TEST_F(TtfFontSetTest, AWholeReaderFontAndThreeAccentFamiliesOnTheCardFitTogether) {
   // The X4 case of phase 3: Bookerly whole as the reader's font, and a book's three accent families (Inter in two
-  // styles, Noto Sans Italic, Ubuntu Bold). Whole, they need 56 of the font area's 53 pages, and phase 3 left two of
-  // them out; with their tables on the card all four load, eight style blocks.
+  // styles, Noto Sans Italic, Ubuntu Bold). Whole, they need 57 of the font area's 53 pages (Noto Sans Italic's block
+  // with its CPac, as it shapes Devanagari), and phase 3 left two of them out; with their tables on the card all four
+  // load, eight style blocks.
   MemoryFile script[4];
   MemoryFile code[4];
   script[kRegular].bytes = readFont("NotoSans/NotoSans-Italic.ttf");
@@ -2474,22 +2431,21 @@ TEST_F(TtfFontSetTest, APlanWithoutMemoryInAnInstallErasesNothingAndAsksForNoFew
   expectWrittenOnce(chip);
 }
 
-TEST_F(TtfFontTest, AProbeThatCannotPlanForNowLeavesACffFamilyListed) {
-  // Discovery plans a CFF file's block to learn its size. Without the memory this once, or with the card failing
-  // past the file's first sector, the size is not known: the family stays listed for its load to decide, rather than
-  // be dropped as too large until the next scan.
+TEST_F(TtfFontTest, ACffFileWithoutMemoryToPlanStaysListedAndOneWhoseLayoutCannotBeCountedIsNot) {
+  // Discovery plans a CFF file's block to learn its size. Without the memory this once, the size is not known: the
+  // family stays listed for its load to decide, rather than be dropped as too large until the next scan. With the
+  // card failing past the file's first sector, the layout tables' script lists cannot be read (whether it has a CPac
+  // room): not a font for now.
   MemoryFile cjk;
   cjk.bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
   const uint32_t fileBytes = static_cast<uint32_t>(cjk.bytes.size());
   refuseNextObjectBytes = ttf::CffBlock::planBytes();
   const ttf::FileProbe withoutMemory = ttf::probeFile(cjk.source());
+  EXPECT_EQ(0, withoutMemory.style);
+  EXPECT_EQ(ttf::kSdBytesUnknown, withoutMemory.sdBytes);
+  EXPECT_TRUE(ttf::fitsStore(&fileBytes, &withoutMemory.sdBytes, 1, kSdOnlyBytes, 24));
   cjk.readsTo = ttf::SdPageCache::kPageBytes;
-  const ttf::FileProbe withoutReads = ttf::probeFile(cjk.source());
-  for (const ttf::FileProbe& probe : {withoutMemory, withoutReads}) {
-    EXPECT_EQ(0, probe.style);
-    EXPECT_EQ(ttf::kSdBytesUnknown, probe.sdBytes);
-    EXPECT_TRUE(ttf::fitsStore(&fileBytes, &probe.sdBytes, 1, kSdOnlyBytes, 24));
-  }
+  EXPECT_EQ(-1, ttf::probeFile(cjk.source()).style);
   // A file too large for flash mode that can have no block is not listed; one that can, by its size.
   const uint32_t none = UINT32_MAX;
   EXPECT_FALSE(ttf::fitsStore(&fileBytes, &none, 1, kSdOnlyBytes, 24));

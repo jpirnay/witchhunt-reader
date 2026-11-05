@@ -1,7 +1,10 @@
 #include "TtfFont.h"
 
+#include <GlyphKey.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <OtFace.h>
+#include <OtFilterWriter.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -10,6 +13,8 @@
 #include <cstdint>
 #include <cstring>
 #include <new>
+
+#include "TtfShaping.h"
 
 using glyphstore::kIdentityBytes;
 using Commit = FlashGlyphStore::Commit;
@@ -28,6 +33,7 @@ std::atomic<uint32_t> storeRooms{0};
 std::atomic<uint32_t> storeRebuilds{0};
 std::atomic<uint32_t> storeDropped{0};
 std::atomic<uint32_t> lastRoomMs{0};
+std::atomic<uint32_t> lastInstallMs{0};
 
 // What a default-ignorable codepoint draws as: no advance and no ink, as the converter makes them (spec 8.1).
 const EpdGlyph kIgnorable{};
@@ -38,13 +44,44 @@ constexpr uint8_t kMaxFailuresLogged = 16;
 // accent draws a few headings and words, the log every glyph of the books read until a wipe.
 constexpr uint32_t kAccentFlashLogBytes = 8 * glyphstore::kPageBytes;
 
-// What an install holds while it runs: the copy buffer, the SD-mode block being planned or copied, and the SD-mode
-// styles' header records. Freed when it ends.
+// What an install holds while it runs: the copy buffer, the SD-mode block being planned or copied, every style block's
+// header record and CPac room, and the shaping face a block's CPac is written from (120 B on the C3, 224 on the host).
+// Freed when it ends; on the heap, as its buffer alone is 4 KB.
 struct InstallWork {
   uint8_t buffer[kCopyBytes];
   ttf::SdBlock block;
-  glyphstore::StyleInfo sd[glyphstore::kMaxStyles];
+  glyphstore::StyleInfo info[glyphstore::kMaxStyles];
+  uint32_t cpacBytes[glyphstore::kMaxStyles];  // each file's CPac room (ttf::filterTableBytes()), counted once
+  ot::Face face;
 };
+
+// Where a style block's CPac goes: `at` bytes in, `bytes` long (0: none). The block's tables lie in its first `tables`
+// bytes: the file in flash mode; in SD mode the directory and the tables before the room, its CPac record past them.
+struct CpacRoom {
+  uint32_t at = 0;
+  uint32_t bytes = 0;
+  uint32_t tables = 0;
+};
+
+// Makes `face` over the tables of a block mapped at `mapped`, its first `tables` bytes, without their CPac and CPpl
+// records: the face whose lookups the block's CPac filters. No lookups when the tables cannot be read.
+void faceOver(const uint8_t* mapped, const uint32_t tables, ot::Face* face) {
+  *face = ot::Face{};
+  ot::FaceTables found;
+  if (!ot::tablesFromSfnt(mapped, tables, &found)) return;
+  found[ot::FaceTables::CPAC] = ot::Table();
+  found[ot::FaceTables::CPPL] = ot::Table();
+  if (!face->init(found)) *face = ot::Face{};
+}
+
+// The CPac an install writes into a block's room: the writer's table when it fits the room the probe reserved, else
+// none. The probe counts the subtables lookups declare, the writer what Face::lookup() reads, so a crafted font (an
+// Extension lookup mixing types, a second GSUB or GPOS record) can want more than its room, or a room of 0 where the
+// writer would write. Only a whole table is written: without one the room reads erased, which ot::Face's check of the
+// CPac refuses (its version reads 0xFFFF), and the face shapes on filters it computes.
+uint32_t fittingTable(const ot::FilterTableWriter& writer, const uint32_t room) {
+  return writer.bytes() > 0 && writer.bytes() <= room ? writer.bytes() : 0;
+}
 
 // The largest native size whose glyphs all fit EpdGlyphRef's int8 top and left, by the face's bounding box: the
 // pixel size is rounded, and a glyph's edges round outwards, so a pixel is kept in hand.
@@ -77,17 +114,91 @@ void checkLock() {
 // What the flash at a style block's place holds: the block's bytes already, others, or not known (a read failed).
 enum class Held : uint8_t { Same, Differs, Unread };
 
-// Whether the flash at `offset` holds `file` already, compared in halves of the install's copy buffer (the file's
-// beside the flash's); a block that differs stops at its first chunk that does.
-Held holdsFile(const NorFlash& flash, const uint32_t offset, const ttf::FileSource& file, uint8_t* buffer) {
+// Whether the flash at `offset` holds the source's bytes [from, to) already, compared in halves of the install's copy
+// buffer (the source's beside the flash's); a range that differs stops at its first chunk that does.
+Held holdsRange(const NorFlash& flash, const uint32_t offset, const ttf::FileSource& source, const uint32_t from,
+                const uint32_t to, uint8_t* buffer) {
   constexpr uint32_t kHalf = kCopyBytes / 2;
-  for (uint32_t at = 0; at < file.size; at += kHalf) {
-    const uint32_t len = std::min(kHalf, file.size - at);
-    if (!file.read(file.ctx, at, buffer, len) || !flash.read(offset + at, buffer + kHalf, len)) return Held::Unread;
+  for (uint32_t at = from; at < to; at += kHalf) {
+    const uint32_t len = std::min(kHalf, to - at);
+    if (!source.read(source.ctx, at, buffer, len) || !flash.read(offset + at, buffer + kHalf, len)) return Held::Unread;
     if (std::memcmp(buffer, buffer + kHalf, len) != 0) return Held::Differs;
     if (hooks.yield) hooks.yield();
   }
   return Held::Same;
+}
+
+// Whether the flash at `offset` holds a style block as the install writes it from `source`: the source's bytes outside
+// the CPac room, then the room as the install leaves it (fittingTable(), erased past it). The room is worked out again
+// from the flash's copy of the tables, just found to be the source's, mapped as the install maps them, and compared a
+// half buffer at a time. So a CPac torn by a cut before the header was written differs, and the block is written
+// again. One that cannot be mapped differs too: writing it again costs time, never a wrong table.
+Held holdsBlock(NorFlash& flash, const uint32_t offset, const ttf::FileSource& source, const CpacRoom& room,
+                InstallWork& work) {
+  Held held = holdsRange(flash, offset, source, 0, std::min(room.at, source.size), work.buffer);
+  const uint32_t past = room.at + room.bytes;
+  if (held == Held::Same && past < source.size) {
+    held = holdsRange(flash, offset, source, past, source.size, work.buffer);  // SD mode's rebuilt CFF table
+  }
+  if (held != Held::Same || room.bytes == 0) return held;
+  const uint8_t* mapped = flash.map(offset, room.at);
+  if (!mapped) return Held::Differs;
+  faceOver(mapped, room.tables, &work.face);
+  ot::FilterTableWriter writer(work.face);
+  const uint32_t table = fittingTable(writer, room.bytes);
+  constexpr uint32_t kHalf = kCopyBytes / 2;
+  for (uint32_t at = 0; held == Held::Same && at < room.bytes; at += kHalf) {
+    const uint32_t len = std::min(kHalf, room.bytes - at);
+    const uint32_t fromTable = at < table ? writer.write(work.buffer, std::min(len, table - at)) : 0;
+    std::memset(work.buffer + fromTable, 0xFF, len - fromTable);
+    if (!flash.read(offset + room.at + at, work.buffer + kHalf, len)) {
+      held = Held::Unread;
+    } else if (std::memcmp(work.buffer, work.buffer + kHalf, len) != 0) {
+      held = Held::Differs;
+    }
+    if (hooks.yield) hooks.yield();
+  }
+  flash.unmap(mapped);
+  return held;
+}
+
+// Writes style block `block`'s CPac (fittingTable()) into its room, at `offset` in the flash, from the block's tables
+// just copied there, mapped (an install runs with the store closed, so nothing else is mapped), a buffer at a time.
+// One that cannot be mapped is left erased, as one that does not fit. False: a write failed.
+bool writeCpac(NorFlash& flash, FlashGlyphStore& store, const uint8_t block, const uint32_t offset,
+               const CpacRoom& room, InstallWork& work) {
+  if (room.bytes == 0) {
+    // Not a CPac left erased: the probe reserved no room (a font that names no script the shaper handles, has no
+    // lookups, or has more than the caps), so the block is its tables alone.
+    LOG_INF("TTF", "style block %u: no CPac room reserved, none written", block);
+    return true;
+  }
+  const uint8_t* mapped = flash.map(offset, room.at);
+  if (!mapped) {
+    LOG_ERR("TTF", "style block %u: CPac left erased, its %u B of tables cannot be mapped", block,
+            static_cast<unsigned>(room.at));
+    return true;
+  }
+  faceOver(mapped, room.tables, &work.face);
+  ot::FilterTableWriter writer(work.face);
+  const uint32_t table = fittingTable(writer, room.bytes);
+  bool written = true;
+  for (uint32_t done = 0; written && done < table;) {
+    const uint32_t n = writer.write(work.buffer, std::min(kCopyBytes, table - done));
+    if (n == 0) break;
+    written = store.writeStyleData(block, room.at + done, work.buffer, n);
+    done += n;
+    if (hooks.yield) hooks.yield();
+  }
+  flash.unmap(mapped);
+  if (table == 0 && writer.bytes() > 0) {
+    LOG_INF("TTF", "style block %u: CPac of %u B does not fit its %u B room; left erased", block,
+            static_cast<unsigned>(writer.bytes()), static_cast<unsigned>(room.bytes));
+  } else {
+    LOG_INF("TTF", "style block %u: CPac %u of %u B", block, static_cast<unsigned>(table),
+            static_cast<unsigned>(room.bytes));
+  }
+  return written;
 }
 
 }  // namespace
@@ -196,6 +307,7 @@ TtfFont::StylesResult TtfFontSet::openStyles(const Files* families, const uint8_
 
 bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8_t* identity,
                          const std::function<void()>& onBusy) {
+  const uint32_t startMs = hooks.nowMs ? hooks.nowMs() : 0;
   store_.close();  // the plan needs the free mapping pages with nothing of the store mapped
   // Every family's present styles, in the set's order: the store's style blocks.
   const ttf::FileSource* files[glyphstore::kMaxStyles] = {};
@@ -226,6 +338,12 @@ bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8
     failedForNow_ = true;
     return false;
   };
+  // Each file's size, and the room of its CPac: a flash-mode block is the file and then that room, and an SD-mode block
+  // holds the same room.
+  for (uint8_t b = 0; b < styles; ++b) {
+    work->info[b].fileSize = files[b]->size;
+    if (!ttf::filterTableBytes(*files[b], &work->cpacBytes[b])) return stopForNow("counting", familyOf[b], b);
+  }
 
   // Flash mode while the whole set fits; past that the families go to SD mode from the last on, the least used
   // accent first and the body last of all (from family `sdFrom` on, every one is in SD mode). An accent family keeps
@@ -241,21 +359,20 @@ bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8
   bool planned = false;
   for (int sdFrom = count; sdFrom >= 0 && !planned; --sdFrom) {
     for (uint8_t b = 0; b < styles; ++b) {
-      glyphstore::StyleInfo& sd = work->sd[b];
+      glyphstore::StyleInfo& info = work->info[b];
       if (sdFrom == count - 1) {
         // The SD-mode blocks, planned once from each file's table directory, when first wanted.
-        const ttf::SdPlan block = work->block.plan(*files[b]);
+        const ttf::SdPlan block = work->block.plan(*files[b], &work->cpacBytes[b]);
         if (block == ttf::SdPlan::Transient) return stopForNow("planning", familyOf[b], b);
         if (block == ttf::SdPlan::Ok) {
-          sd.size = work->block.bytes();
-          sd.fileStamp = files[b]->stamp;
-          sd.fileSize = files[b]->size;
-          sd.outlines = work->block.outlines();
+          info.size = work->block.bytes();
+          info.fileStamp = files[b]->stamp;
+          info.outlines = work->block.outlines();
         }
       }
       const bool card = familyOf[b] >= sdFrom;
       in.styleMode[b] = card ? glyphstore::kModeSd : glyphstore::kModeFlash;
-      in.styleBytes[b] = card ? sd.size : files[b]->size;
+      in.styleBytes[b] = card ? info.size : ttf::flashBlockBytes(files[b]->size, work->cpacBytes[b]);
     }
     if (!glyphstore::planLayout(in, layout)) continue;
     planned = sdFrom <= 1 || layout.geometry.logSize >= kAccentFlashLogBytes;
@@ -274,48 +391,68 @@ bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8
   }
   if (onBusy) onBusy();
 
-  // A block's bytes as a file: the style's own file in flash mode, else its SD-mode block made from it. Planned
-  // above already, so a plan that fails here failed for now, or the file changed meanwhile: no block to write either
-  // way.
-  const auto blockSource = [&](const uint8_t b, ttf::FileSource* source) {
+  // A block's bytes as a file, and where its CPac goes: the style's own file in flash mode, the CPac after it at
+  // align4(); else its SD-mode block made from it, the CPac a table of its directory, read as erased. Planned above
+  // already, so a plan that fails here failed for now, or the file changed meanwhile: no block to write either way.
+  const auto blockSource = [&](const uint8_t b, ttf::FileSource* source, CpacRoom* room) {
     if (layout.styleMode[b] == glyphstore::kModeFlash) {
       *source = *files[b];
+      const glyphstore::CpacRoom flash =
+          glyphstore::cpacRoomOf(source->size, ttf::flashBlockBytes(source->size, work->cpacBytes[b]));
+      room->bytes = flash.bytes;
+      room->at = flash.at;
+      room->tables = source->size;
       return true;
     }
-    if (work->block.plan(*files[b]) != ttf::SdPlan::Ok) return false;
+    if (work->block.plan(*files[b], &work->cpacBytes[b]) != ttf::SdPlan::Ok) return false;
     *source = work->block.source();
+    room->bytes = work->block.cpacBytes();
+    room->at = room->bytes > 0 ? work->block.cpacAt() : source->size;
+    room->tables = room->at;
     return true;
   };
-  // A style block that holds its bytes already where this layout puts it stays as it is, neither erased nor copied:
-  // a set that keeps its leading families (a TrueType reader font beside another book's accent families, or beside
-  // none) copies only the rest. Reading a kept block costs a fraction of erasing and writing it again. A block that
-  // cannot be read now stops the install before anything is erased, rather than be erased as if it differed.
+  // A style block that holds its bytes already where this layout puts it, its CPac too, stays as it is, neither erased
+  // nor copied: a set that keeps its leading families (a TrueType reader font beside another book's accent families,
+  // or beside none) copies only the rest. Reading a kept block costs a fraction of erasing and writing it again. A
+  // block that cannot be read now stops the install before anything is erased, rather than be erased as if it differed.
   uint8_t kept = 0;
   unsigned onCard = 0;
   for (uint8_t b = 0; b < styles; ++b) {
     ttf::FileSource source;
-    if (!blockSource(b, &source)) return stopForNow("planning", familyOf[b], b);
-    const Held held = holdsFile(flash_, layout.styleOffset[b], source, work->buffer);
+    CpacRoom room;
+    if (!blockSource(b, &source, &room)) return stopForNow("planning", familyOf[b], b);
+    const Held held = holdsBlock(flash_, layout.styleOffset[b], source, room, *work);
     if (held == Held::Unread) return stopForNow("reading", familyOf[b], b);
     if (held == Held::Same) kept |= static_cast<uint8_t>(1u << b);
     onCard += layout.styleMode[b] == glyphstore::kModeSd ? 1 : 0;
   }
   bool noHeaderMemory = false;
-  if (!store_.beginInstall(layout, identity, work->sd, kept, &noHeaderMemory)) {
+  if (!store_.beginInstall(layout, identity, work->info, kept, &noHeaderMemory)) {
     failedForNow_ = noHeaderMemory;  // its header, made before anything is erased
     return false;
   }
+  // Copies the source's bytes [from, to) into block `b`; false when a read (`*read` then false) or a write failed.
+  const auto copy = [&](const uint8_t b, const ttf::FileSource& source, const uint32_t from, const uint32_t to,
+                        bool* read) {
+    for (uint32_t offset = from; offset < to; offset += kCopyBytes) {
+      const uint32_t len = std::min(kCopyBytes, to - offset);
+      *read = source.read(source.ctx, offset, work->buffer, len);
+      const bool written = *read && store_.writeStyleData(b, offset, work->buffer, len);
+      if (hooks.yield) hooks.yield();
+      if (!written) return false;
+    }
+    return true;
+  };
   for (uint8_t b = 0; b < styles; ++b) {
     if ((kept & (1u << b)) != 0) continue;
     ttf::FileSource source;
-    bool read = blockSource(b, &source);
-    bool copied = read;
-    for (uint32_t offset = 0; copied && offset < source.size; offset += kCopyBytes) {
-      const uint32_t len = std::min(kCopyBytes, source.size - offset);
-      read = source.read(source.ctx, offset, work->buffer, len);
-      copied = read && store_.writeStyleData(b, offset, work->buffer, len);
-      if (hooks.yield) hooks.yield();
-    }
+    CpacRoom room;
+    bool read = blockSource(b, &source, &room);
+    // What lies before the room, then the CPac, made from the tables just copied, then what lies past the room (SD
+    // mode's rebuilt CFF table).
+    const bool copied = read && copy(b, source, 0, std::min(room.at, source.size), &read) &&
+                        writeCpac(flash_, store_, b, layout.styleOffset[b], room, *work) &&
+                        copy(b, source, room.at + room.bytes, source.size, &read);
     if (!copied) {
       LOG_ERR("TTF", "install: copying family %u's style block %u failed", familyOf[b], b);
       // The header is still erased: the next load installs again. After a read that failed (memory, the card), the
@@ -325,8 +462,10 @@ bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8
     }
   }
   if (!store_.finishInstall()) return false;
-  LOG_INF("TTF", "%u famil%s installed: %u styles (%d kept, %u in SD mode), log %lu B", count, count == 1 ? "y" : "ies",
-          styles, __builtin_popcount(kept), onCard, static_cast<unsigned long>(layout.geometry.logSize));
+  lastInstallMs = hooks.nowMs ? hooks.nowMs() - startMs : 0;
+  LOG_INF("TTF", "%u famil%s installed: %u styles (%d kept, %u in SD mode), log %lu B, %lu ms", count,
+          count == 1 ? "y" : "ies", styles, __builtin_popcount(kept), onCard,
+          static_cast<unsigned long>(layout.geometry.logSize), static_cast<unsigned long>(lastInstallMs.load()));
   return true;
 }
 
@@ -435,7 +574,7 @@ TtfFontSet::Stats TtfFontSet::stats() const {
 
 TtfFontSet::StoreEvents TtfFontSet::storeEvents() {
   return {storeFills.load(),    storeWipes.load(),   lastWipeMs.load(), storeRooms.load(),
-          storeRebuilds.load(), storeDropped.load(), lastRoomMs.load()};
+          storeRebuilds.load(), storeDropped.load(), lastRoomMs.load(), lastInstallMs.load()};
 }
 
 // --- The set: what only a miss needs ---
@@ -523,6 +662,11 @@ void TtfFontSet::usePages(ttf::SdPageCache* pages) {
 uint32_t TtfFontSet::missMemoryBytes() const {
   return (rasterizer_.allocated() ? rasterizer_.scratchBytes() : 0) +
          (ownedPages_ ? static_cast<uint32_t>(sizeof(ttf::SdPageCache)) : 0) + ringBytes();
+}
+
+void TtfFontSet::releaseShapingFaces() {
+  checkLock();  // a section build's plans read the faces under it, and go first
+  for (uint8_t f = 0; f < count_; ++f) fonts_[f]->releaseShapingFaces();
 }
 
 uint32_t TtfFontSet::releaseMissMemory() {
@@ -664,6 +808,7 @@ TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uin
     style.onCard = false;
     style.sd = {};
     style.face = {};
+    style.shaping.reset();  // its tables may be mapped elsewhere, or be another file's
     style.kerning = ttf::Kerning{};
     style.ligatures = ttf::Ligatures{};
     std::fill_n(style.uncoveredLeft, sizeof style.uncoveredLeft, 0);
@@ -671,6 +816,7 @@ TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uin
     glyphstore::StyleInfo info{};
     if (!set_.store_.styleInfo(style.block, info)) return StylesResult::Failed;
     style.bytes = info.size;
+    style.fileBytes = info.fileSize;
     if (info.mode == glyphstore::kModeSd) {
       // The outlines are read from the file the block was made from, or from none: another file's would not be where
       // its loca says (spec 6.2).
@@ -916,8 +1062,45 @@ bool TtfFont::fontBytes(const uint8_t style, FontBytes* bytes) {
     return false;
   }
   s.sd.cache = set_.sdPages_;  // the set's while a miss has one (usePages())
-  *bytes = s.onCard ? FontBytes(mapped, s.bytes, &s.sd) : FontBytes(mapped, s.bytes);
+  // Flash mode: the file, not the CPac after it. SD mode: the whole block, whose directory places its CPac.
+  *bytes = s.onCard ? FontBytes(mapped, s.bytes, &s.sd) : FontBytes(mapped, s.fileBytes);
   return true;
+}
+
+// A style's shaping tables where its block is mapped now: flash mode maps one block at a time, every family's, so the
+// base is asked for again on every use (ShapingFace::current()).
+class TtfFont::FileShapingFace final : public ShapingFace {
+ public:
+  FileShapingFace(FlashGlyphStore& store, const Style& style) : store_(store), style_(style) {}
+
+ protected:
+  const uint8_t* map() override {
+    checkLock();  // the store's mappings are RenderLock's, as a glyph lookup's are
+    return store_.mapStyle(style_.block);
+  }
+  bool tables(const uint8_t* base, ot::FaceTables* out) override {
+    return ttf::shapingTables(base, style_.bytes, style_.onCard ? 0 : style_.fileBytes, out);
+  }
+
+ private:
+  FlashGlyphStore& store_;
+  const Style& style_;
+};
+
+ShapingFace* TtfFont::shapingFace(const uint8_t style) {
+  if (!draws(style)) return nullptr;
+  checkLock();
+  Style& file = *styleAt(style);
+  if (!file.shaping) {
+    // 130 B on the C3 (the face's views and the mapping it was read at): made for a section build, freed after it.
+    file.shaping = makeUniqueNoThrow<FileShapingFace>(set_.store_, file);
+    if (!file.shaping) LOG_ERR("TTF", "OOM: family %u style %u's shaping face", family_, style);
+  }
+  return file.shaping.get();
+}
+
+void TtfFont::releaseShapingFaces() {
+  for (uint8_t s = 0; s < styleCount_; ++s) styles_[s].shaping.reset();
 }
 
 const EpdGlyph* TtfFont::glyph(Size& size, const uint8_t style, const uint32_t codepoint) {
@@ -1094,7 +1277,47 @@ void TtfFont::prefetch(Size& size, const uint8_t style, const char* utf8Text) {
     }
     pending[count++] = {cp, index};
   }
+  renderPending(size, style, count, bytes);
+}
+
+void TtfFont::prefetchGlyphs(Size& size, const uint8_t style, const uint16_t* glyphs, const size_t count) {
+  TtfFontSet& set = set_;
+  if (!glyphs || !draws(style) || set.ringMode_) return;
+  uint32_t key = 0;
+  if (!storeKey(size, style, 0, &key)) return;
+  checkLock();
+  FontBytes bytes;
+  if (!fontBytes(style, &bytes)) return;
+  const Style& drawn = *styleAt(style);
+  FlashGlyphStore& store = set.store_;
+  TtfFontSet::Pending* const pending = set.pending_;
+
+  // The glyphs not stored yet, each once, as prefetch() collects a text's.
+  uint8_t found = 0;
+  for (size_t i = 0; i < count && found < TtfFontSet::kPrefetchGlyphs; ++i) {
+    const uint32_t cp = glyph_key::of(glyphs[i]);
+    key = glyphstore::makeKey(cp, style, size.index);
+    if (store.find(key, nullptr) != Lookup::NotStored) continue;
+    if (std::any_of(pending, pending + found, [cp](const TtfFontSet::Pending& p) { return p.codepoint == cp; })) {
+      continue;
+    }
+    const uint16_t index = drawn.ligatures.glyphFor(bytes, drawn.face, cp);
+    if (index == 0) {
+      if (!bytes.ioError()) set.noteCommit(store.markNoGlyph(key));
+      if (set.ringMode_) return;
+      continue;
+    }
+    pending[found++] = {cp, index};
+  }
+  renderPending(size, style, found, bytes);
+}
+
+void TtfFont::renderPending(const Size& size, const uint8_t style, const uint8_t count, FontBytes& bytes) {
   if (count == 0) return;
+  TtfFontSet& set = set_;
+  const ttf::Face& face = styleAt(style)->face;
+  FlashGlyphStore& store = set.store_;
+  TtfFontSet::Pending* const pending = set.pending_;
   // Glyphs to draw, in what the set's first miss makes (spec 5.3). Without it the lookups ask again, one by one.
   const TtfFontSet::MissScope miss(set);
   if (!miss.ready()) return;
@@ -1106,7 +1329,7 @@ void TtfFont::prefetch(Size& size, const uint8_t style, const char* utf8Text) {
   GlyphBatch batch(set.rasterizer_.output(), set.batchCapacity());
   for (uint8_t i = 0; i < count && !set.ringMode_; ++i) {
     const TtfFontSet::Pending& p = pending[i];
-    key = glyphstore::makeKey(p.codepoint, style, size.index);
+    const uint32_t key = glyphstore::makeKey(p.codepoint, style, size.index);
     EpdGlyph metrics{};
     const ttf::Status loaded = load(bytes, face, p.glyph, size, style, &metrics);
     if (loaded != ttf::Status::Ok) {

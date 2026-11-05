@@ -5,6 +5,7 @@
 
 class FontCacheManager;
 class SdCardFont;
+struct GlyphRun;
 
 #include <atomic>
 #include <cstring>
@@ -16,6 +17,7 @@ class SdCardFont;
 
 #include "Bitmap.h"
 #include "FontLookup.h"
+#include "ScaledGlyphResample.h"
 #include "TextWrap.h"
 
 // Color representation: uint8_t mapped to 4x4 Bayer matrix dithering levels
@@ -145,22 +147,16 @@ class GfxRenderer {
   // serialises behind RenderLock — the same lock that protects the framebuffer
   // these masks are blitted into.
   //
-  // Keyed by (font, codepoint, scale, sel), NOT by EpdGlyph address: SD-card
-  // fonts rebuild their glyph array every page and serve overflow codepoints
+  // Keyed by (font, codepoint or glyph ID, scale, sel), NOT by EpdGlyph address:
+  // SD-card fonts rebuild their glyph array every page and serve overflow codepoints
   // from an 8-entry ring, so the same address means different glyphs over time.
   // The resampled pixels are a pure function of this key, which makes it both
   // stable and exact. Style is deliberately absent: EpdFontFamily::getData() and
   // getGlyph() both resolve through getFont(style), so the EpdFontData pointer
   // already identifies the variant.
-  struct ScaledGlyphEntry {
-    const void* fontData;  // EpdFontData for the style (stable per font object)
-    uint32_t scaleBits;    // exact float bits of the scale factor (no quantisation)
-    uint16_t cp;           // codepoint; above the BMP renders uncached (see alloc)
-    uint16_t offset;       // byte offset into scaledGlyphArena_
-    uint8_t sel;           // the drawMask the glyph was resampled for
-    uint8_t w;
-    uint8_t h;
-  };
+  //
+  // The entry and its match (scaledGlyphEntryMatches) live in ScaledGlyphResample.h, so the host tests check them.
+  using ScaledGlyphEntry = ::ScaledGlyphEntry;
   // Keeps the documented budget honest if a field is ever added.
   static_assert(sizeof(ScaledGlyphEntry) <= 16, "scaled-glyph entry grew; update the cache budget comment");
   // Sized from measurement, not guesswork: a page of this corpus needs 45-58
@@ -688,6 +684,11 @@ class GfxRenderer {
   /// Whether `fontId` has a glyph of its own for `cp`, not a lookalike or U+FFFD (which getGlyphInk and every
   /// measure fall back to). Layout asks it for 一 before treating a font as a CJK font.
   bool hasGlyph(int fontId, uint32_t cp, EpdFontFamily::Style style) const;
+  /// The face a shaper reads for `fontId`'s `style` (the TrueType file that draws it, a synthetic style's source),
+  /// and the pixels per em (26.6) its glyphs are drawn at before the font's base scale; nullptr for every other font.
+  /// Under RenderLock, as ShapingFace::current() is; the face is freed by TtfFontSet::releaseShapingFaces() and by
+  /// the font set's next load, so the plans built on it go first.
+  ShapingFace* shapingFace(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6) const;
   int getFontAscenderSize(int fontId) const;
   int getLineHeight(int fontId) const;
   std::string truncatedText(int fontId, const char* text, int maxWidth,
@@ -698,6 +699,20 @@ class GfxRenderer {
   /// ellipsis (U+2026).
   std::vector<std::string> wrappedText(int fontId, const char* text, int maxWidth, int maxLines,
                                        EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+
+  /// Draws a shaped run at (x, y), y the line's top as drawText takes it. Each record's glyph comes by ID from
+  /// `fontId`'s `style` (findGlyphKey: no fallbacks) and is drawn at the pen plus its offset; the pen moves by the
+  /// record's advance. No kerning, ligatures or tracking. `scale` is drawTextScaled's: the glyphs are drawn at it
+  /// times the font's base scale, through renderCharAtScale's path (sup/sub keep its dark threshold); the records'
+  /// advances and offsets are in drawn pixels already, so SUP/SUB halve nothing here. A record whose glyph the font
+  /// lacks draws nothing but still moves the pen. A font that draws no glyph keys draws nothing (logged once).
+  /// While the page is scanned, records the run's glyph IDs instead (FontCacheManager::recordGlyphs).
+  void drawGlyphRun(int fontId, int x, int y, const GlyphRun& run, bool black = true,
+                    EpdFontFamily::Style style = EpdFontFamily::REGULAR, float scale = 1.0f) const;
+  /// How far drawGlyphRun's pen moves: glyphRunAdvance, accumulated when scale x the base scale is not 1.
+  int glyphRunWidth(int fontId, const GlyphRun& run, float scale = 1.0f) const;
+  /// The glyph-ID prefetch for a section build's warm step: the run's glyphs, 64 at a time (128 B on the stack).
+  void prefetchGlyphRun(int fontId, const GlyphRun& run, EpdFontFamily::Style style) const;
 
   // Helper for drawing rotated text (90 degrees clockwise, for side buttons)
   void drawTextRotated90CW(int fontId, int x, int y, const char* text, bool black = true,
@@ -1036,7 +1051,9 @@ class GfxRenderer {
   // pipeline lives in free functions in GfxRenderer.cpp; treat as internal.
   // find returns the cached mask for an exact key match, alloc reserves a zeroed
   // mask of w*h bits for the caller to fill, or nullptr when the glyph is too
-  // large to cache or the arena could not be allocated.
+  // large to cache or the arena could not be allocated. `cp` is a codepoint or a
+  // glyph key (GlyphKey.h); scaledGlyphKeyOf makes the entry's (id, kind) of it,
+  // and one it cannot key renders uncached.
   const uint8_t* findScaledGlyphMask(const void* fontData, uint32_t cp, float scale, uint8_t sel, int w, int h) const;
   uint8_t* allocScaledGlyphMask(const void* fontData, uint32_t cp, float scale, uint8_t sel, int w, int h) const;
 

@@ -183,6 +183,8 @@ struct Buffer {
   static constexpr size_t SLOT_BYTES = 2 * sizeof(GlyphInfo) + sizeof(GlyphPosition) + sizeof(uint16_t);  // 62
   static constexpr size_t bytesFor(unsigned slots) { return slots * SLOT_BYTES + alignof(GlyphInfo) - 1; }
   void setStorage(void* block, size_t bytes);
+  // witchhunt: build glue - matchStack is scratch: a level's row is written by the match before it is read.
+  // cppcheck-suppress uninitMemberVar
   Buffer() = default;
   Buffer(const Buffer&) = delete;  // its arrays' flag is its own `successful`
   Buffer& operator=(const Buffer&) = delete;

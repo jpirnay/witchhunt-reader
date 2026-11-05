@@ -121,8 +121,10 @@ void setup() {
                 static_cast<unsigned>(g.logOffset));
 
   FlashGlyphStore store(flash);
+  StyleInfo info[2] = {};  // a record per block: each a file of its size, without a CPac
+  info[0].fileSize = info[1].fileSize = kStyleBytes;
   int64_t t = esp_timer_get_time();
-  bool ok = store.beginInstall(layout, kIdentity, nullptr);
+  bool ok = store.beginInstall(layout, kIdentity, info);
   Serial.printf("BENCH install_erase     %u ms (only sectors that hold data)\n", msSince(t));
   t = esp_timer_get_time();
   for (uint8_t s = 0; ok && s < 2; ++s) {

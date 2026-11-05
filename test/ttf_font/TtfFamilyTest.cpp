@@ -1,4 +1,7 @@
 // What the registry learns from a TTF file before loading it (its style), and the family identity.
+#include <OtFace.h>
+#include <OtFilterWriter.h>
+#include <OtPlan.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -11,6 +14,7 @@
 #include "TtfFace.h"
 #include "TtfFamily.h"
 #include "TtfFontTestUtil.h"
+#include "TtfLayoutBuilder.h"
 #include "TtfTestUtil.h"
 
 using namespace ttf_test;
@@ -240,10 +244,55 @@ TEST(TtfFamily, AReadErrorIsRefused) {
   EXPECT_EQ(-1, ttf::probeFile(file.source()).style);
 }
 
-TEST(TtfFamily, TheProbeReadsOnlyTheDirectoryAndHead) {
+TEST(TtfFamily, TheProbeCountsLookupsInCoalescedReads) {
+  // Noto Sans draws Devanagari too: its GSUB and GPOS name dev2 and deva, so it can shape and its lookups are counted.
   MemoryFile file{readFont("NotoSans/NotoSans-Regular.ttf")};
-  ASSERT_EQ(0, ttf::probeFile(file.source()).style);
-  EXPECT_LE(file.reads, 6u);  // the header, the directory 8 records at a time, head: cheap at discovery
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  ASSERT_EQ(0, probed.style);
+  EXPECT_GT(probed.cpacBytes, 0u);
+  const uint32_t probeReads = file.reads;
+  // The header, the directory 8 records at a time, head and OS/2 (5 reads), then per table its first 128 bytes (its
+  // header, and GSUB's script list behind it), its LookupList count, the lookups' offsets 64 at a time and a window of
+  // headers. The lookups are packed, so a window serves many: well under a read per lookup (about 311 reads when each
+  // header was read alone). Measured: 44.
+  uint32_t lookups = 0;
+  for (const char* table : {"GSUB", "GPOS"}) {
+    const size_t at = findRecord(file.bytes, table);
+    const uint32_t offset = static_cast<uint32_t>(file.bytes[at + 8]) << 24 | file.bytes[at + 9] << 16 |
+                            file.bytes[at + 10] << 8 | file.bytes[at + 11];
+    const uint32_t length = static_cast<uint32_t>(file.bytes[at + 12]) << 24 | file.bytes[at + 13] << 16 |
+                            file.bytes[at + 14] << 8 | file.bytes[at + 15];
+    ttf::LayoutCounts counts;
+    ASSERT_TRUE(ttf::countLookups(file.source(), offset, length, &counts));
+    lookups += counts.lookups;
+  }
+  EXPECT_GT(lookups, 100u);
+  EXPECT_LE(probeReads, 50u);
+}
+
+TEST(TtfFamily, ALatinFontsProbeReadsItsScriptListsAndNoLookups) {
+  // Bookerly's GSUB and GPOS name DFLT, cyrl, grek and latn only: no script the shaper handles, so it reserves no CPac
+  // and its lookups are never counted. The header, the directory 8 records at a time (21 tables: 3 reads), head and
+  // OS/2, which is what the probe read before the CPac (6); then the first 128 bytes of each layout table, its header
+  // and its script list (2).
+  MemoryFile file{readFont("Bookerly/Bookerly-Regular.ttf")};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  ASSERT_EQ(0, probed.style);
+  EXPECT_EQ(0u, probed.cpacBytes);
+  EXPECT_EQ(8u, file.reads);
+  // One read in each layout table, at its start.
+  for (const char* table : {"GSUB", "GPOS"}) {
+    const size_t at = findRecord(file.bytes, table);
+    const uint32_t offset = static_cast<uint32_t>(file.bytes[at + 8]) << 24 | file.bytes[at + 9] << 16 |
+                            file.bytes[at + 10] << 8 | file.bytes[at + 11];
+    const uint32_t length = static_cast<uint32_t>(file.bytes[at + 12]) << 24 | file.bytes[at + 13] << 16 |
+                            file.bytes[at + 14] << 8 | file.bytes[at + 15];
+    std::vector<uint32_t> inside;
+    for (const uint32_t read : file.offsets) {
+      if (read >= offset && read < offset + length) inside.push_back(read);
+    }
+    EXPECT_EQ(std::vector<uint32_t>{offset}, inside) << table;
+  }
 }
 
 TEST(TtfFamily, AFileSourceReadsThroughSeekAndRead) {
@@ -291,11 +340,11 @@ TEST(TtfFamily, TheIdentityChangesWithAnyFileDetail) {
 }
 
 TEST(TtfFamily, TheIdentityChangesWithTheRenderVersion) {
-  // Spec 7.4: a store #548 wrote holds a regular-only family's bold italic upright; at version 3 it is installed again.
+  // Writing modes step 2: a store written before holds no CPac in its style blocks; at version 4 it is installed again.
   const ttf::FileStamp styles[4] = {{"Lit-Regular.ttf", 450048, 0x5A21, 0x6400}};
-  EXPECT_EQ(3, ttf::kRenderVersion);
-  EXPECT_EQ(identityAt(styles, 3), identityOf(styles));
-  EXPECT_NE(identityAt(styles, 2), identityOf(styles));
+  EXPECT_EQ(4, ttf::kRenderVersion);
+  EXPECT_EQ(identityAt(styles, 4), identityOf(styles));
+  EXPECT_NE(identityAt(styles, 3), identityOf(styles));
 }
 
 TEST(TtfFamily, TheIdentityIsSixteenIndependentBytes) {
@@ -561,9 +610,11 @@ TEST(TtfSdBlock, IsTheFontButForItsOutlines) {
   MemoryFile file{readFont("Bookerly/Bookerly-Regular.ttf")};
   ttf::SdBlock block;
   ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
-  // Its eleven tables the engine reads, post's header among them, 4-byte aligned behind a 12-record directory; glyf is
-  // 208,484 bytes at 58,840 in the file.
-  EXPECT_EQ(176404u, block.bytes());
+  // Its eleven tables the engine reads, post's header among them, and GDEF, 4-byte aligned behind a 13-record
+  // directory (no CPac: Bookerly's layout names no script the shaper handles); glyf is 208,484 bytes at 58,840 in the
+  // file.
+  EXPECT_EQ(177004u, block.bytes());
+  EXPECT_EQ(0u, block.cpacBytes());
   const glyphstore::SdOutlines outlines = block.outlines();
   EXPECT_EQ(block.bytes(), outlines.fontOffset);
   EXPECT_EQ(58840u, outlines.fileOffset);
@@ -674,6 +725,495 @@ TEST(TtfSdBlock, AnOptionalTableOutsideTheFileIsLeftOutAsTheFaceLeavesItOut) {
   ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(card, &face));
   EXPECT_EQ(0u, face.gpos);
   EXPECT_TRUE(block.sameAs(image.data(), static_cast<uint32_t>(image.size())));
+}
+
+// --- GDEF and the CPac room in a style block ---
+
+namespace {
+
+// One record of a font's table directory (a file's or a block's).
+struct DirRecord {
+  bool found = false;
+  uint32_t checksum = 0;
+  uint32_t offset = 0;
+  uint32_t length = 0;
+};
+
+uint32_t read32(const Bytes& bytes, const size_t at) {
+  return static_cast<uint32_t>(bytes[at]) << 24 | static_cast<uint32_t>(bytes[at + 1]) << 16 |
+         static_cast<uint32_t>(bytes[at + 2]) << 8 | bytes[at + 3];
+}
+
+DirRecord recordOf(const Bytes& font, const char* name) {
+  const size_t at = findRecord(font, name);
+  if (at == 0) return {};
+  return {true, read32(font, at + 4), read32(font, at + 8), read32(font, at + 12)};
+}
+
+// What ot::FilterTableWriter would write for the font's own GSUB and GPOS.
+uint32_t writerBytes(const Bytes& font) {
+  ot::FaceTables tables;
+  if (!ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables)) return UINT32_MAX;
+  tables[ot::FaceTables::CPAC] = ot::Table();
+  tables[ot::FaceTables::CPPL] = ot::Table();
+  ot::Face face;
+  if (!face.init(tables)) return UINT32_MAX;
+  return ot::FilterTableWriter(face).bytes();
+}
+
+// A GSUB (version 1.0, no features) whose ScriptList names `script` alone (a record with a null offset), and whose
+// LookupList declares `declared` lookups and lists `offsets` (from the list's start), `body` right behind them. With
+// dev2, a script the shaper handles, its lookups are counted for a CPac.
+Bytes gsubWith(const uint32_t declared, const std::vector<uint16_t>& offsets, const Bytes& body,
+               const char* script = "dev2") {
+  Bytes gsub;
+  for (const uint32_t word : {1u, 0u, 10u, 0u, 18u}) put16(gsub, word);  // scripts at 10, lookups at 18
+  put16(gsub, 1);
+  for (int i = 0; i < 4; ++i) gsub.push_back(static_cast<uint8_t>(script[i]));
+  put16(gsub, 0);
+  put16(gsub, declared);
+  for (const uint16_t offset : offsets) put16(gsub, offset);
+  gsub.insert(gsub.end(), body.begin(), body.end());
+  return gsub;
+}
+
+// A built font with `gsub` as its GSUB.
+Bytes fontWithGsub(const Bytes& gsub) {
+  Font font;
+  font.glyphs.resize(1);
+  font.glyphs[0].contours = {rect(0, 0, 64, 64)};
+  font.extraTables = {{"GSUB", gsub}};
+  return buildFont(font);
+}
+
+// `count` lookups of `subtables` subtables each (null offsets, never read), packed in order behind the list's offsets.
+Bytes gsubOfSimpleLookups(const uint32_t count, const uint32_t subtables = 1) {
+  std::vector<uint16_t> offsets;
+  Bytes body;
+  const uint32_t lookupBytes = 6 + 2 * subtables;
+  for (uint32_t i = 0; i < count; ++i) {
+    offsets.push_back(static_cast<uint16_t>(2 + 2 * count + lookupBytes * i));
+    for (const uint32_t word : {1u, 0u, subtables}) put16(body, word);  // type 1, flags 0
+    for (uint32_t s = 0; s < subtables; ++s) put16(body, 0);
+  }
+  return gsubWith(count, offsets, body);
+}
+
+// A lookup declaring `subtables` subtables, with the room for their offsets.
+Bytes lookupDeclaring(const uint32_t subtables) {
+  Bytes lookup;
+  for (const uint32_t word : {1u, 0u, subtables}) put16(lookup, word);
+  lookup.resize(lookup.size() + 2 * subtables, 0);
+  return lookup;
+}
+
+// Renames the first record tagged `from` in the ScriptList of `font`'s `table` to `to`, in place: the same font, its
+// layout now naming another script. False when the list has no such record.
+bool renameScript(Bytes& font, const char* table, const char* from, const char* to) {
+  const DirRecord layout = recordOf(font, table);
+  if (!layout.found) return false;
+  const size_t list = layout.offset + (font[layout.offset + 4] << 8 | font[layout.offset + 5]);
+  const uint32_t scripts = static_cast<uint32_t>(font[list] << 8 | font[list + 1]);
+  for (uint32_t i = 0; i < scripts; ++i) {
+    uint8_t* const tag = font.data() + list + 2 + 6 * i;
+    if (std::memcmp(tag, from, 4) != 0) continue;
+    std::memcpy(tag, to, 4);
+    return true;
+  }
+  return false;
+}
+
+// The CPac room the probe reserves for a built font whose GSUB names `script` alone and has one lookup of one subtable.
+uint32_t roomForScript(const char* script) {
+  MemoryFile file{fontWithGsub(gsubWith(1, {4}, lookupDeclaring(1), script))};
+  return ttf::probeFile(file.source()).cpacBytes;
+}
+
+}  // namespace
+
+TEST(TtfFamily, AnSdModeBlockHoldsGdefAndRoomForCpac) {
+  const Bytes bytes = readFixture("NotoSansDevanagari-Shaping-Regular.ttf");
+  ASSERT_FALSE(bytes.empty());
+  MemoryFile file{bytes};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  ASSERT_EQ(0, probed.style);
+  ttf::SdBlock block;
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
+  const std::vector<uint8_t> image = blockImage(block);
+
+  const DirRecord gdefInFile = recordOf(bytes, "GDEF");
+  const DirRecord gdef = recordOf(image, "GDEF");
+  ASSERT_TRUE(gdefInFile.found);
+  ASSERT_TRUE(gdef.found);
+  EXPECT_EQ(gdefInFile.length, gdef.length);
+  EXPECT_EQ(0, std::memcmp(bytes.data() + gdefInFile.offset, image.data() + gdef.offset, gdef.length));
+
+  const DirRecord cpac = recordOf(image, "CPac");
+  ASSERT_TRUE(cpac.found);
+  EXPECT_GT(probed.cpacBytes, 0u);
+  EXPECT_EQ(probed.cpacBytes, cpac.length);
+  EXPECT_EQ(0u, cpac.checksum);
+  EXPECT_EQ(block.cpacAt(), cpac.offset);
+  EXPECT_EQ(block.cpacBytes(), cpac.length);
+  const glyphstore::SdOutlines outlines = block.outlines();
+  EXPECT_LE(cpac.offset + cpac.length, outlines.fontOffset);
+  EXPECT_EQ(block.bytes(), outlines.fontOffset);
+  // After every other copied table: glyf's record points past the block, and no table starts behind the CPac.
+  const uint32_t tables = static_cast<uint32_t>(image[4] << 8 | image[5]);
+  for (uint32_t i = 0; i < tables; ++i) {
+    const size_t at = 12 + 16 * i;
+    const uint32_t offset = read32(image, at + 8);
+    if (read32(image, at) == 0x43506163u /* CPac */ || offset >= block.bytes()) continue;
+    EXPECT_LT(offset, cpac.offset) << "table " << i;
+  }
+  // The room reads erased: the install writes the table there.
+  EXPECT_TRUE(std::all_of(image.begin() + cpac.offset, image.begin() + cpac.offset + cpac.length,
+                          [](const uint8_t b) { return b == 0xFF; }));
+  EXPECT_EQ(block.bytes(), probed.sdBytes);
+  EXPECT_EQ(ttf::flashBlockBytes(static_cast<uint32_t>(bytes.size()), probed.cpacBytes), probed.flashBytes);
+  EXPECT_GT(probed.flashBytes, bytes.size());
+}
+
+TEST(TtfFamily, TheCpacRoomIsWhatTheWriterWrites) {
+  // Fonts that shape: the subset, and Noto Sans, whose layout names dev2 and deva besides Latin.
+  for (const Bytes& bytes :
+       {readFixture("NotoSansDevanagari-Shaping-Regular.ttf"), readFont("NotoSans/NotoSans-Regular.ttf")}) {
+    ASSERT_FALSE(bytes.empty());
+    const uint32_t written = writerBytes(bytes);
+    EXPECT_GT(written, 0u);
+    MemoryFile file{bytes};
+    uint32_t room = 0;
+    ASSERT_TRUE(ttf::filterTableBytes(file.source(), &room));
+    EXPECT_EQ(written, room);
+    // The counts alone give the same room, whatever table they came from.
+    ttf::LayoutCounts gsub;
+    ttf::LayoutCounts gpos;
+    const DirRecord gsubRecord = recordOf(bytes, "GSUB");
+    const DirRecord gposRecord = recordOf(bytes, "GPOS");
+    ASSERT_TRUE(ttf::countLookups(file.source(), gsubRecord.offset, gsubRecord.length, &gsub));
+    ASSERT_TRUE(ttf::countLookups(file.source(), gposRecord.offset, gposRecord.length, &gpos));
+    EXPECT_EQ(written, ttf::cpacBytesFor(gsub, gpos));
+    EXPECT_EQ(written, 16 + 28 * (gsub.lookups + gpos.lookups) + 24 * (gsub.subtables + gpos.subtables));
+  }
+}
+
+TEST(TtfFamily, TheProbeCapsAreTheWritersCaps) {
+  EXPECT_EQ(ot::FilterTableWriter::kMaxLookups, ttf::kCpacMaxLookups);
+  EXPECT_EQ(ot::FilterTableWriter::kMaxSubtables, ttf::kCpacMaxSubtables);
+}
+
+TEST(TtfFamily, AFontWithoutLookupsReservesNoCpac) {
+  MemoryFile file{builtFont()};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  EXPECT_EQ(0, probed.style);
+  EXPECT_EQ(0u, probed.cpacBytes);
+  EXPECT_EQ(file.bytes.size(), probed.flashBytes);
+  ttf::SdBlock block;
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
+  EXPECT_EQ(0u, block.cpacBytes());
+  EXPECT_EQ(0u, block.cpacAt());
+  EXPECT_EQ(block.bytes(), probed.sdBytes);
+  EXPECT_FALSE(recordOf(blockImage(block), "CPac").found);
+}
+
+TEST(TtfFamily, AFontWhoseLayoutNamesNoShapedScriptReservesNoCpac) {
+  // Latin and CJK faces with lookups (ligatures, kerning) the writer would write a table for: none shapes, so none
+  // reserves a room. The flash-mode block is the file alone and the SD-mode block has no CPac record.
+  const char* const latin[] = {"Bookerly/Bookerly-Regular.ttf", "Bookerly/Bookerly-Bold.ttf",
+                               "Bookerly/Bookerly-Italic.ttf",  "Bookerly/Bookerly-BoldItalic.ttf",
+                               "Inter/Inter-Regular.ttf",       "Ubuntu/Ubuntu-Regular.ttf"};
+  std::vector<Bytes> fonts;
+  for (const char* name : latin) fonts.push_back(readFont(name));
+  fonts.push_back(readFixture("NotoSansJP-TrueType.ttf"));
+  fonts.push_back(readFixture("NotoSansJP-Cff.otf"));
+  for (size_t i = 0; i < fonts.size(); ++i) {
+    ASSERT_FALSE(fonts[i].empty()) << i;
+    EXPECT_GT(writerBytes(fonts[i]), 0u) << i;
+    MemoryFile file{fonts[i]};
+    const ttf::FileProbe probed = ttf::probeFile(file.source());
+    ASSERT_GE(probed.style, 0) << i;
+    EXPECT_EQ(0u, probed.cpacBytes) << i;
+    EXPECT_EQ(fonts[i].size(), probed.flashBytes) << i;
+    ttf::SdBlock block;
+    ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source())) << i;
+    EXPECT_EQ(0u, block.cpacBytes()) << i;
+    EXPECT_EQ(block.bytes(), probed.sdBytes) << i;
+    EXPECT_FALSE(recordOf(blockImage(block), "CPac").found) << i;
+    uint32_t room = 1;
+    ASSERT_TRUE(ttf::filterTableBytes(file.source(), &room)) << i;
+    EXPECT_EQ(0u, room) << i;
+  }
+}
+
+TEST(TtfFamily, OnlyAScriptTheShaperHandlesOrArabicReservesARoom) {
+  // The engine's own tags (old and new, and Sinhala's) and Arabic's, which the joining shaper will read.
+  for (const char* script : {"deva", "dev2", "dev3", "beng", "bng2", "bng3", "guru", "gur2", "gur3", "gujr",
+                             "gjr2", "gjr3", "orya", "ory2", "ory3", "taml", "tml2", "tml3", "telu", "tel2",
+                             "tel3", "knda", "knd2", "knd3", "mlym", "mlm2", "mlm3", "sinh", "arab"}) {
+    EXPECT_EQ(16u + 28u + 24u, roomForScript(script)) << script;
+  }
+  // Whatever else: Latin and the defaults, Hebrew, CJK, and scripts the shaper does not handle.
+  for (const char* script : {"DFLT", "dflt", "latn", "cyrl", "grek", "hebr", "hani", "kana", "hang", "thai", "khmr",
+                             "mymr", "tibt", "syrc", "thaa", "nko "}) {
+    EXPECT_EQ(0u, roomForScript(script)) << script;
+  }
+  // The Indic tags are the engine's own list, not a copy of it.
+  EXPECT_TRUE(ot::isShapedScriptTag(ot::tag("deva")));
+  EXPECT_TRUE(ot::isShapedScriptTag(ot::tag("dev2")));
+  EXPECT_TRUE(ot::isShapedScriptTag(ot::tag("mlm3")));
+  EXPECT_TRUE(ot::isShapedScriptTag(ot::tag("sinh")));
+  EXPECT_FALSE(ot::isShapedScriptTag(0));  // the list's padding
+  EXPECT_FALSE(ot::isShapedScriptTag(ot::tag("latn")));
+}
+
+TEST(TtfFamily, ALatinScriptListReservesNoCpacEvenWithLookups) {
+  // 300 lookups under latn alone: not counted, no room, though the writer would write a table for them.
+  MemoryFile latin{fontWithGsub(gsubWith(1, {4}, lookupDeclaring(300), "latn"))};
+  EXPECT_EQ(0u, ttf::probeFile(latin.source()).cpacBytes);
+  EXPECT_EQ(16u + 28u + 24u * 300, writerBytes(latin.bytes));
+  // The same lookups under arab: the room is the writer's table.
+  MemoryFile arabic{fontWithGsub(gsubWith(1, {4}, lookupDeclaring(300), "arab"))};
+  EXPECT_EQ(writerBytes(arabic.bytes), ttf::probeFile(arabic.source()).cpacBytes);
+  EXPECT_EQ(16u + 28u + 24u * 300, ttf::probeFile(arabic.source()).cpacBytes);
+}
+
+TEST(TtfFamily, AShapedScriptInGposAloneReservesTheRoomOfBoth) {
+  // GSUB under latn, GPOS (one kern lookup of a pair subtable) under dev2: the font shapes, and both tables count.
+  LayoutLookup kern;
+  PairSubtable pairs;
+  pairs.pairs = {{1, {{2, -100}}}};
+  kern.pairSubtables = {pairs};
+  Font font;
+  font.glyphs.resize(3);
+  for (auto& glyph : font.glyphs) glyph.contours = {rect(0, 0, 64, 64)};
+  font.extraTables = {{"GSUB", gsubWith(1, {4}, lookupDeclaring(2), "latn")},
+                      {"GPOS", layoutTable({{"dev2", {0}}}, {{"kern", {0}}}, {kern})}};
+  MemoryFile file{buildFont(font)};
+  const uint32_t room = ttf::probeFile(file.source()).cpacBytes;
+  EXPECT_EQ(16u + 28u * 2 + 24u * 3, room);
+  EXPECT_EQ(writerBytes(file.bytes), room);
+}
+
+TEST(TtfFamily, AScriptListIsReadWhereverItLiesWithinItsBudget) {
+  // 200 records of a script the shaper does not handle, then dev2: the first read holds the header and 19 records, each
+  // later one 21, and the probe reads 8 more at most (187 records).
+  const auto fontNaming = [](const uint32_t devAt) {
+    Bytes gsub;
+    for (const uint32_t word : {1u, 0u, 10u, 0u, 10u + 2 + 6 * 201}) put16(gsub, word);
+    put16(gsub, 201);
+    for (uint32_t i = 0; i <= 200; ++i) {
+      const char* const script = i == devAt ? "dev2" : "zzzz";
+      for (int c = 0; c < 4; ++c) gsub.push_back(static_cast<uint8_t>(script[c]));
+      put16(gsub, 0);
+    }
+    put16(gsub, 1);  // the LookupList: one lookup of one subtable
+    put16(gsub, 4);
+    const Bytes lookup = lookupDeclaring(1);
+    gsub.insert(gsub.end(), lookup.begin(), lookup.end());
+    return fontWithGsub(gsub);
+  };
+  for (const uint32_t devAt : {0u, 18u, 19u, 100u, 186u}) {
+    MemoryFile file{fontNaming(devAt)};
+    EXPECT_EQ(16u + 28u + 24u, ttf::probeFile(file.source()).cpacBytes) << devAt;
+  }
+  MemoryFile past{fontNaming(187)};
+  EXPECT_EQ(0u, ttf::probeFile(past.source()).cpacBytes);
+  // The probe's own reads and the table's first 128 bytes, as for a list of one record, then 8 reads of the list.
+  MemoryFile one{fontWithGsub(gsubWith(1, {4}, lookupDeclaring(1), "zzzz"))};
+  ttf::probeFile(one.source());
+  EXPECT_EQ(one.reads + 8, past.reads);
+}
+
+TEST(TtfFamily, AScriptListPastTheFirstWindowIsReadThere) {
+  // The ScriptList after a LookupList of 300 lookups, far past the table's first 128 bytes: read where it lies.
+  for (const char* script : {"dev2", "latn"}) {
+    const uint32_t lookups = 300;
+    const uint32_t listBytes = 2 + 2 * lookups + 8 * lookups;
+    Bytes gsub;
+    for (const uint32_t word : {1u, 0u, 10u + listBytes, 0u, 10u}) put16(gsub, word);  // lookups at 10, scripts after
+    put16(gsub, lookups);
+    for (uint32_t i = 0; i < lookups; ++i) put16(gsub, 2 + 2 * lookups + 8 * i);
+    for (uint32_t i = 0; i < lookups; ++i) {
+      for (const uint32_t word : {1u, 0u, 1u, 0u}) put16(gsub, word);  // type 1, flags 0, one subtable
+    }
+    put16(gsub, 1);
+    for (int c = 0; c < 4; ++c) gsub.push_back(static_cast<uint8_t>(script[c]));
+    put16(gsub, 0);
+    MemoryFile file{fontWithGsub(gsub)};
+    const uint32_t room = ttf::probeFile(file.source()).cpacBytes;
+    EXPECT_EQ(std::strcmp(script, "dev2") == 0 ? 16u + 28u * lookups + 24u * lookups : 0u, room) << script;
+  }
+}
+
+TEST(TtfFamily, TheCffBlockKeepsItsCffTableLast) {
+  // A CJK CFF font with its DFLT script renamed arab: a CFF font that shapes, so its SD-mode block has a CPac room.
+  Bytes bytes = readFixture("NotoSansJP-Cff.otf");
+  ASSERT_FALSE(bytes.empty());
+  ASSERT_TRUE(renameScript(bytes, "GPOS", "DFLT", "arab"));
+  MemoryFile file{bytes};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  ttf::SdBlock block;
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
+  EXPECT_GT(probed.cpacBytes, 0u);  // its GPOS has kern
+  EXPECT_EQ(block.bytes(), probed.sdBytes);
+  const std::vector<uint8_t> image = blockImage(block);
+  const DirRecord cpac = recordOf(image, "CPac");
+  const DirRecord cff = recordOf(image, "CFF ");
+  ASSERT_TRUE(cpac.found);
+  ASSERT_TRUE(cff.found);
+  EXPECT_EQ(probed.cpacBytes, cpac.length);
+  EXPECT_LE(cpac.offset + cpac.length, cff.offset);
+  // The rebuilt table ends the block and its charstring data runs past it (it stays on the card); no other starts
+  // later.
+  EXPECT_LT(cff.offset, block.bytes());
+  EXPECT_GT(cff.length, block.outlines().length);
+  EXPECT_EQ(block.bytes(), cff.offset + (cff.length - block.outlines().length));
+  EXPECT_GT(cff.offset + cff.length, block.bytes());
+  const uint32_t tables = static_cast<uint32_t>(image[4] << 8 | image[5]);
+  for (uint32_t i = 0; i < tables; ++i) EXPECT_LE(read32(image, 12 + 16 * i + 8), cff.offset) << "table " << i;
+}
+
+TEST(TtfFamily, AHostileLookupListIsCountedBounded) {
+  // 65,535 lookups declared, past the cap: no CPac, and the list is not walked after its count.
+  {
+    MemoryFile file{fontWithGsub(gsubWith(65535, std::vector<uint16_t>(65535, 0xFFFF), {}))};
+    const ttf::FileProbe probed = ttf::probeFile(file.source());
+    EXPECT_EQ(0, probed.style);
+    EXPECT_EQ(0u, probed.cpacBytes);
+    EXPECT_EQ(file.bytes.size(), probed.flashBytes);
+    EXPECT_LT(file.reads, 100u);
+    EXPECT_EQ(0u, writerBytes(file.bytes));
+  }
+  // The most it takes: 4,096 lookups of a subtable each.
+  {
+    MemoryFile file{fontWithGsub(gsubOfSimpleLookups(4096))};
+    const ttf::FileProbe probed = ttf::probeFile(file.source());
+    EXPECT_EQ(16u + 28u * 4096 + 24u * 4096, probed.cpacBytes);
+    EXPECT_EQ(writerBytes(file.bytes), probed.cpacBytes);
+    // One more lookup is past the cap.
+    MemoryFile past{fontWithGsub(gsubOfSimpleLookups(4097))};
+    EXPECT_EQ(0u, ttf::probeFile(past.source()).cpacBytes);
+  }
+  // 4,096 lookups at one lookup that declares 65,535 subtables: the declarations sum past the cap, whatever the
+  // lookups' count.
+  {
+    const uint32_t listBytes = 2 + 2 * 4096;
+    MemoryFile file{fontWithGsub(
+        gsubWith(4096, std::vector<uint16_t>(4096, static_cast<uint16_t>(listBytes)), lookupDeclaring(65535)))};
+    const ttf::FileProbe probed = ttf::probeFile(file.source());
+    EXPECT_EQ(0, probed.style);
+    EXPECT_EQ(0u, probed.cpacBytes);
+    EXPECT_EQ(0u, writerBytes(file.bytes));
+  }
+  // At the subtable cap exactly: still a table; one past: none.
+  for (const uint32_t subtables : {ttf::kCpacMaxSubtables, ttf::kCpacMaxSubtables + 1}) {
+    MemoryFile file{fontWithGsub(gsubWith(1, {4}, lookupDeclaring(subtables)))};
+    const uint32_t room = ttf::probeFile(file.source()).cpacBytes;
+    EXPECT_EQ(writerBytes(file.bytes), room) << subtables;
+    EXPECT_EQ(subtables == ttf::kCpacMaxSubtables ? 16u + 28u + 24u * subtables : 0u, room) << subtables;
+  }
+}
+
+TEST(TtfFamily, ALookupListWithBadOffsetsCountsAsTheFaceReadsIt) {
+  // 200 plain lookups, listed out of order among four that the Face reads as lookups of no subtables or of fewer than
+  // they declare: a null offset, one past the list, one declaring 50 subtables with room for 6, and one with under 8
+  // bytes left to the table's end.
+  constexpr uint32_t kPlain = 200;
+  constexpr uint32_t kLookups = kPlain + 4;
+  const uint32_t bodyAt = 2 + 2 * kLookups;
+  Bytes body;
+  for (uint32_t i = 0; i < kPlain; ++i) {
+    for (const uint32_t word : {1u, 0u, 1u, 0u}) put16(body, word);  // type 1, flags 0, one subtable (never read)
+  }
+  const uint32_t tooMany = bodyAt + static_cast<uint32_t>(body.size());
+  for (const uint32_t word : {1u, 0u, 50u, 0u, 0u, 0u}) put16(body, word);  // 6 bytes of header, room for 3 offsets
+  const uint32_t nearEnd = bodyAt + static_cast<uint32_t>(body.size());
+  for (const uint32_t word : {1u, 0u, 1u}) put16(body, word);
+  body.push_back(0);  // 7 bytes to the end
+  std::vector<uint16_t> offsets;
+  for (uint32_t i = 0; i < kPlain; ++i) {
+    offsets.push_back(static_cast<uint16_t>(bodyAt + 8 * ((i * 7) % kPlain)));  // out of order, each once
+    if (i == 20) offsets.push_back(0);
+    if (i == 60) offsets.push_back(0xFFFF);
+    if (i == 100) offsets.push_back(static_cast<uint16_t>(tooMany));
+    if (i == 140) offsets.push_back(static_cast<uint16_t>(nearEnd));
+  }
+  ASSERT_EQ(kLookups, offsets.size());
+  MemoryFile file{fontWithGsub(gsubWith(kLookups, offsets, body))};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  EXPECT_EQ(0, probed.style);
+  EXPECT_GT(probed.cpacBytes, 0u);
+  EXPECT_EQ(writerBytes(file.bytes), probed.cpacBytes);
+  // Headers within a window of each other share a read: well under the 204 lookups' one each (49 measured; each piece
+  // of 64 offsets, sorted, still spans the body).
+  EXPECT_LT(file.reads, 80u);
+}
+
+TEST(TtfFamily, EachPieceOfOffsetsReadsItsHeadersAfresh) {
+  // 200 lookups of 10 bytes, packed in order. The first piece of 64 offsets ends in a window that holds lookup 64's
+  // header too; the count reads offsets and headers through one buffer, so the next piece, read over that window,
+  // must not be taken for lookup 64's header.
+  MemoryFile file{fontWithGsub(gsubOfSimpleLookups(200, 2))};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  EXPECT_EQ(0, probed.style);
+  EXPECT_EQ(16u + 28u * 200 + 24u * 400, probed.cpacBytes);
+  EXPECT_EQ(writerBytes(file.bytes), probed.cpacBytes);
+}
+
+TEST(TtfFamily, ACraftedScatteredLookupListHitsTheReadBudget) {
+  // 4,096 lookups whose offsets, piece by piece, name the same 64 places 256 bytes apart: every header lies in a
+  // window of its own. Counted whole they would give a CPac; past the budget the table counts as capped.
+  constexpr uint32_t kLookups = 4096;
+  const uint32_t bodyAt = 2 + 2 * kLookups;
+  Bytes body;
+  body.resize(64 * 256, 0);
+  std::vector<uint16_t> offsets;
+  for (uint32_t i = 0; i < kLookups; ++i) offsets.push_back(static_cast<uint16_t>(bodyAt + 256 * (i % 64)));
+  for (uint32_t k = 0; k < 64; ++k) {
+    Bytes lookup;
+    for (const uint32_t word : {1u, 0u, 1u}) put16(lookup, word);
+    std::copy(lookup.begin(), lookup.end(), body.begin() + 256 * k);
+  }
+  MemoryFile file{fontWithGsub(gsubWith(kLookups, offsets, body))};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  EXPECT_EQ(0, probed.style);
+  EXPECT_EQ(0u, probed.cpacBytes);
+  EXPECT_EQ(file.bytes.size(), probed.flashBytes);
+  // The budget, and the probe's own reads: the directory, head and OS/2.
+  EXPECT_LE(file.reads, ttf::kMaxCountingReads + 10u);
+  EXPECT_GT(file.reads, ttf::kMaxCountingReads);
+  // Counted one by one, the same table would be a CPac.
+  EXPECT_GT(writerBytes(file.bytes), 0u);
+}
+
+TEST(TtfFamily, ACardReadFailingWhileCountingIsTransient) {
+  MemoryFile file{fontWithGsub(gsubOfSimpleLookups(300))};
+  ttf::SdBlock block;
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
+  EXPECT_EQ(0, ttf::probeFile(file.source()).style);
+  // Reads of GSUB past its first 128 bytes (its header and its script list, which names dev2, read first) fail, the
+  // LookupList's offsets among them; head, which the probe reads before counting, is outside them, so it is the count
+  // that fails.
+  const DirRecord head = recordOf(file.bytes, "head");
+  const DirRecord gsub = recordOf(file.bytes, "GSUB");
+  ASSERT_GT(gsub.length, 128u);
+  ASSERT_TRUE(head.offset >= gsub.offset + gsub.length || head.offset + 54 <= gsub.offset + 128);
+  struct Cut {
+    MemoryFile* file;
+    uint32_t from;
+    uint32_t to;
+  } cut{&file, gsub.offset + 128, gsub.offset + gsub.length};
+  const ttf::FileSource cutSource{static_cast<uint32_t>(file.bytes.size()),
+                                  [](void* ctx, const uint32_t offset, void* dst, const uint32_t len) {
+                                    const Cut& c = *static_cast<Cut*>(ctx);
+                                    if (offset < c.to && uint64_t{offset} + len > c.from) return false;
+                                    return MemoryFile::read(c.file, offset, dst, len);
+                                  },
+                                  &cut, file.stamp};
+  EXPECT_EQ(ttf::SdPlan::Transient, block.plan(cutSource));
+  EXPECT_EQ(-1, ttf::probeFile(cutSource).style);
+  uint32_t room = 0;
+  EXPECT_FALSE(ttf::filterTableBytes(cutSource, &room));
 }
 
 TEST(TtfSdBlock, AFileWithoutTheOutlinesOfItsKindHasNone) {

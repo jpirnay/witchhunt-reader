@@ -1,5 +1,7 @@
 Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'. Source is a trademark of Adobe in the United States and/or other countries.
 
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari), with no Reserved Font Name.
+
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 
 This license is copied below, and is also available with a FAQ at:

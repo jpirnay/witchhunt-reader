@@ -335,6 +335,11 @@ class PlanBuilder {
                                                             tag("vatu")};
     for (int i = 0; i < Plan::WS_COUNT; i++) plan_.wouldStage[i] = gsubStage(WOULD_TAGS[i]);
     if (!plan_.listsFit_) return false;  // witchhunt: deviation 1
+    features_.bind(nullptr, 0);          // witchhunt: deviation 1 - freed before finish() computes the filters
+    b.infos.bind(nullptr, 0);            // witchhunt: deviation 1
+    b.pauses[GSUB].bind(nullptr, 0);     // witchhunt: deviation 1
+    b.pauses[GPOS].bind(nullptr, 0);     // witchhunt: deviation 1
+    scratch_.reset();                    // witchhunt: deviation 1
     plan_.finish(face_);
     return true;
   }
