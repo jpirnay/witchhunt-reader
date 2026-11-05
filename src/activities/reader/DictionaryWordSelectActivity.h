@@ -16,6 +16,7 @@
 #include "util/DictionaryRegistry.h"
 
 class FontCacheManager;
+class LanguageHyphenator;
 
 // Word selection over the current reader page: Left/Right step through words in
 // reading order, Up/Down jump rows, Confirm looks the word up and opens
@@ -29,13 +30,16 @@ class FontCacheManager;
 // laid out instead of the overlay reloading it.
 class DictionaryWordSelectActivity final : public Activity {
  public:
+  // `hyphenator`: the open book's language's patterns (null for none), handed to the definition it opens.
   explicit DictionaryWordSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                        std::unique_ptr<Page> page, int fontId, int marginLeft, int marginTop)
+                                        std::unique_ptr<Page> page, int fontId, int marginLeft, int marginTop,
+                                        const LanguageHyphenator* hyphenator)
       : Activity("DictionaryWordSelect", renderer, mappedInput),
         page(std::move(page)),
         fontId(fontId),
         marginLeft(marginLeft),
-        marginTop(marginTop) {}
+        marginTop(marginTop),
+        hyphenator(hyphenator) {}
 
   void onEnter() override;
   void loop() override;
@@ -216,6 +220,7 @@ class DictionaryWordSelectActivity final : public Activity {
   const int fontId;
   const int marginLeft;
   const int marginTop;
+  const LanguageHyphenator* const hyphenator;
 
   std::vector<DrawStyle> drawStyles;
   std::vector<Fragment> fragments;

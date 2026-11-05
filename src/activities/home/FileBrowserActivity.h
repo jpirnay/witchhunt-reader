@@ -188,6 +188,8 @@ class FileBrowserActivity final : public UiListActivity {
   int listCount() const override;
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
+  [[nodiscard]] bool rowsTakeLongPress() const override;
+  void onRowLongPress(int index) override;
   bool handleCustomInput() override;
   int indexForActionValue(int16_t value) const override { return static_cast<uint16_t>(value); }
   void drawChrome() override;

@@ -31,6 +31,8 @@
 // (DictionaryWordSelectActivity::definitionFontId() chooses).
 #define DICTIONARY_FONT_ID NOTOSANS_14_FONT_ID
 
+class LanguageHyphenator;
+
 // Paged viewer for one dictionary definition. HTML definitions are laid out
 // through the EPUB chapter parser into styled Pages; anything else (plain text,
 // or HTML too damaged or too large to lay out) is word-wrapped once on entry and
@@ -43,12 +45,15 @@ class DictionaryDefinitionActivity final : public Activity {
   // An empty `headword` draws the header with no title: a CJK definition carries its
   // headwords in the body, which may be in a script the UI font cannot draw.
   // `fontId` draws the body: DICTIONARY_FONT_ID, or the reader's font for a CJK lookup.
+  // `hyphenator`: the open book's language's patterns (null for none), which a styled definition hyphenates by.
   explicit DictionaryDefinitionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string headword,
-                                        std::string definition, bool htmlDefinition = false,
-                                        std::string dictionaryName = {}, int fontId = DICTIONARY_FONT_ID)
+                                        std::string definition, const LanguageHyphenator* hyphenator,
+                                        bool htmlDefinition = false, std::string dictionaryName = {},
+                                        int fontId = DICTIONARY_FONT_ID)
       : Activity("DictionaryDefinition", renderer, mappedInput),
         headword(std::move(headword)),
         definition(std::move(definition)),
+        hyphenator(hyphenator),
         htmlDefinition(htmlDefinition),
         dictionaryName(std::move(dictionaryName)),
         bodyFontId(fontId) {}
@@ -93,6 +98,7 @@ class DictionaryDefinitionActivity final : public Activity {
   // separators) to newlines so C-string APIs see the whole text, and the
   // plain-text path converts it in place, in this same buffer.
   std::string definition;
+  const LanguageHyphenator* const hyphenator;
   const bool htmlDefinition;
   // Empty when there is nothing to switch to.
   const std::string dictionaryName;

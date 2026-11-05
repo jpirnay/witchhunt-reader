@@ -60,6 +60,18 @@ TEST(SerialCommandGrammar, ButtonNamesAndModifiers) {
   EXPECT_EQ(kind, PressKind::Double);
 }
 
+TEST(SerialCommandGrammar, ATouchPointTakesTheSameSuffix) {
+  std::string_view point;
+  PressKind kind = PressKind::Short;
+  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("120,300", point, kind));
+  EXPECT_EQ(point, "120,300");
+  EXPECT_EQ(kind, PressKind::Short);
+  ASSERT_TRUE(SerialCommandGrammar::parseButtonArg("120,300:LONG", point, kind));
+  EXPECT_EQ(point, "120,300");
+  EXPECT_EQ(kind, PressKind::Long);
+  EXPECT_FALSE(SerialCommandGrammar::parseButtonArg("120,300:LONGER", point, kind));
+}
+
 TEST(SerialCommandGrammar, ATypoInTheModifierIsAnErrorNotAShortPress) {
   std::string_view name;
   PressKind kind = PressKind::Short;

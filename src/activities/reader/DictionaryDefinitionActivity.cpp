@@ -90,7 +90,7 @@ bool DictionaryDefinitionActivity::layoutHtmlPages() {
   const BodyArea body = bodyArea();
   if (body.width <= 0 || body.height <= 0) return false;
   if (!buildDictionaryHtmlPages(renderer, definition, bodyFontId, static_cast<uint16_t>(body.width),
-                                static_cast<uint16_t>(body.height), pages)) {
+                                static_cast<uint16_t>(body.height), hyphenator, pages)) {
     return false;
   }
   definition.clear();

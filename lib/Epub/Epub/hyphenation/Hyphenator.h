@@ -42,7 +42,26 @@ class Hyphenator {
   // TypographyProfile holds this, and the section build installs it with setLanguageHyphenator().
   static const LanguageHyphenator* forLanguage(const std::string& lang);
   static void setLanguageHyphenator(const LanguageHyphenator* hyphenator) { cachedHyphenator_ = hyphenator; }
+  // The patterns breakOffsets() uses now: the last installed, null when none is.
+  static const LanguageHyphenator* languageHyphenator() { return cachedHyphenator_; }
 
  private:
   static const LanguageHyphenator* cachedHyphenator_;
+};
+
+// Installs a language's patterns for a layout that is not a section build, and puts back the ones it found. Without
+// it such a layout hyphenates by whatever book the last section build was for, or by nothing when no build has run
+// since boot.
+class ScopedLanguageHyphenator {
+ public:
+  explicit ScopedLanguageHyphenator(const LanguageHyphenator* hyphenator)
+      : previous_(Hyphenator::languageHyphenator()) {
+    Hyphenator::setLanguageHyphenator(hyphenator);
+  }
+  ~ScopedLanguageHyphenator() { Hyphenator::setLanguageHyphenator(previous_); }
+  ScopedLanguageHyphenator(const ScopedLanguageHyphenator&) = delete;
+  ScopedLanguageHyphenator& operator=(const ScopedLanguageHyphenator&) = delete;
+
+ private:
+  const LanguageHyphenator* previous_;
 };

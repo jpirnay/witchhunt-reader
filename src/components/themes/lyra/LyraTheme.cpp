@@ -823,7 +823,7 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
         iconBitmap = iconForName(icon, iconSize);
       }
       if (iconBitmap != nullptr) {
-        renderer.drawIcon(iconBitmap, textX, textY + 3, iconSize, iconSize);
+        renderer.drawIcon(iconBitmap, textX, tileRect.y + (rowHeight - iconSize) / 2, iconSize, iconSize);
         textX += iconSize + hPaddingInSelection + 2;
       }
     }

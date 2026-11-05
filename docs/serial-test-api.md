@@ -551,7 +551,7 @@ Every lookup, from this command or from the reader, also writes a log line:
 ### Touch: `TOUCH` and `SWIPE`
 
 ```
-CMD:TOUCH:<x>,<y>
+CMD:TOUCH:<x>,<y>[:LONG]
 CMD:SWIPE:<x1>,<y1>,<x2>,<y2>
 ```
 
@@ -562,9 +562,12 @@ argument or a point off the screen.
 Coordinates are screen pixels as the screen is drawn now: origin top-left, x to the right, in the
 current orientation (the rotated screenshot shows the same frame). That is the orientation the device is held in: a vertical page is drawn in a turned frame, but a touch is not mapped through it, so give the same coordinates as for any other page. The touch is queued where the
 touch controller's own taps and swipes enter, so gestures, list taps and the reader's tap zones read
-it as a finger. Make a swipe at least 60 px long, as a finger's would be. Two limits: screens that
-watch a finger while it is still down (a row lighting up under it) do not see an injected touch,
-and outside the reader taps only work while the "touch controls" setting is on.
+it as a finger. Make a swipe at least 60 px long, as a finger's would be. `:LONG` is a finger held
+past the long-press threshold: the long press fires at once, and the lift after it is a tap unless
+something took the long press, as on a real contact. Three limits: screens that watch a finger
+while it is still down (a row lighting up under it) do not see an injected touch, outside the
+reader taps only work while the "touch controls" setting is on, and an injected contact enters
+above the touch driver, so it cannot show a fault in the driver itself.
 
 ### Logging: `LOG`
 
