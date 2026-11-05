@@ -135,11 +135,13 @@ side of the screen, or swipe. To reach the Home screen, hold the **Back** box on
 ### Murphy M3
 
 There are only three keys that the reader can use, and none of them is Power or Back. **Confirm**
-does those jobs too.
+does those jobs too. All three are on the right edge: **Up**, **Down**, then **Confirm**.
+
+<img src="docs/images/devices/murphy-m3.svg" width="320" alt="Murphy M3. Right edge, top to bottom: Up, Down, Confirm. Left edge, near the bottom: the Reset button, marked do not press.">
 
 | Key | Press | Press twice quickly | Hold |
 | --- | --- | --- | --- |
-| **Confirm** (bottom) | Open the selected row. In a book: open the reader menu | **Back**: go back, leave a book | **Sleep**. While asleep, hold it briefly to wake |
+| **Confirm** (the lowest key) | Open the selected row. In a book: open the reader menu | **Back**: go back, leave a book | **Sleep**. While asleep, hold it briefly to wake |
 | **Up** / **Down** | In a book: previous / next page. In a list: move up / down | | In a book: previous / next chapter. In a list: jump to the first / last row |
 
 > [!WARNING]
