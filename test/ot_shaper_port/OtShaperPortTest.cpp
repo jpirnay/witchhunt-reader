@@ -1,3 +1,4 @@
+#include <ExpectedGlyphRuns.h>
 #include <ExpectedShaping.h>
 #include <OtFilterWriter.h>
 #include <OtShaper.h>
@@ -21,49 +22,15 @@ static_assert(ot::Buffer::SLOT_BYTES == 62);
 
 namespace {
 
+using ottest::BoundBuffer;
 using ottest::glyphsOf;
+using ottest::readFileIn;
 using ottest::readFixture;
 using ottest::scriptOf;
+using ottest::shapeAsStored;
 using ottest::shapeRun;
+using ottest::StoredGlyph;
 using ottest::utf32;
-
-struct StoredGlyph {
-  uint32_t gid;
-  int advance12_4;
-  int dx;
-  int dy;
-  bool operator==(const StoredGlyph&) const = default;
-};
-
-std::ostream& operator<<(std::ostream& os, const StoredGlyph& g) {
-  return os << "{" << g.gid << "," << g.advance12_4 << "," << g.dx << "," << g.dy << "}";
-}
-
-int roundPixels(const int v) { return v >= 0 ? (v + 32) / 64 : -((-v + 32) / 64); }
-
-// A Buffer over storage of its own, `slots` slots.
-struct BoundBuffer {
-  explicit BoundBuffer(const unsigned slots) : storage(ot::Buffer::bytesFor(slots)) {
-    buffer.setStorage(storage.data(), storage.size());
-  }
-  std::vector<uint8_t> storage;
-  ot::Buffer buffer;
-};
-
-// Shapes `utf8` and converts each glyph to what ExpectedShaping.h stores.
-// Empty when ot::shape fails.
-std::vector<StoredGlyph> shapeAsStored(const ot::Face& face, const ot::Plan& plan, const char* utf8) {
-  BoundBuffer bound(256);
-  ot::Buffer& buffer = bound.buffer;
-  const std::vector<uint32_t> cps = utf32(utf8);
-  std::vector<StoredGlyph> out;
-  if (!shapeRun(face, plan, cps.data(), static_cast<unsigned>(cps.size()), buffer)) return out;
-  for (unsigned i = 0; i < buffer.len(); i++) {
-    out.push_back({buffer.info[i].codepoint, (buffer.pos[i].xAdvance + 2) >> 2, roundPixels(buffer.pos[i].xOffset),
-                   -roundPixels(buffer.pos[i].yOffset)});
-  }
-  return out;
-}
 
 // Every fixture word, built plan against the stored output. `withFilters`
 // keeps CPac (the stored-filters route); CPpl is always dropped.
@@ -156,6 +123,38 @@ std::vector<uint8_t> multipleSubstGsub() {
 TEST(OtShaperReference, BuiltPlansMatchHarfBuzz) { checkAllWords(false); }
 
 TEST(OtShaperReference, StoredFiltersMatchHarfBuzz) { checkAllWords(true); }
+
+// The Noto Sans Devanagari subsets of test/fixtures/fonts, over their own tables, against HarfBuzz's runs for them
+// (lib/EpdFont/scripts/make_shaping_fixtures.py).
+TEST(OtShaperReference, TheTrueTypeSubsetShapesAsHarfBuzz) {
+  size_t runs = 0;
+  for (const RunSet& set : kDevanagariRunSets) {
+    const std::vector<uint8_t> font = readFileIn(TTF_FIXTURE_DIR, set.file);
+    ASSERT_FALSE(font.empty()) << set.file;
+    ot::FaceTables tables;
+    ASSERT_TRUE(ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables)) << set.file;
+    tables[ot::FaceTables::CPAC] = ot::Table();
+    tables[ot::FaceTables::CPPL] = ot::Table();
+    ot::Face face;
+    ASSERT_TRUE(face.init(tables)) << set.file;
+
+    for (size_t r = 0; r < set.count; r++) {
+      const ExpectedRun& run = set.runs[r];
+      ot::Plan plan;
+      ASSERT_TRUE(plan.build(face, ot::Script::Devanagari, ot::languageTagsFor(run.language)))
+          << set.file << " " << run.utf8;
+      std::vector<StoredGlyph> expected;
+      for (unsigned i = 0; i < run.count; i++) {
+        const RunGlyph& g = run.glyphs[i];
+        expected.push_back({g.gid, g.advance12_4, g.dx, g.dy});
+      }
+      EXPECT_EQ(shapeAsStored(face, plan, run.utf8, set.ppem26_6), expected)
+          << set.file << " at " << set.ppem26_6 << ", run " << r << ": " << run.utf8;
+      runs++;
+    }
+  }
+  EXPECT_EQ(runs, 64u);
+}
 
 // Deviation 1: the buffer lives in storage its owner binds. A run's growth
 // is capped at 2n + 16 glyphs (upstream's limit), so S slots take a run of
