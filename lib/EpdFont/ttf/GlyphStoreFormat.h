@@ -150,6 +150,19 @@ constexpr uint32_t recordBytes(const uint32_t dataLength) { return align4(kRecor
 constexpr uint32_t alignUp(const uint32_t n, const uint32_t to) { return (n + to - 1) / to * to; }
 constexpr uint32_t pagesFor(const uint32_t bytes) { return (bytes + kPageBytes - 1) / kPageBytes; }
 
+/// Where a flash-mode block of `blockSize` bytes holds its CPac after a TTF file of `fileSize` bytes: `at`, the
+/// 4-aligned end of the file (the file's end when the block is no larger than it), and the `bytes` from there to the
+/// block's end, 0 when there are none. An `at` past the block's end says the block is too short for its file's
+/// alignment: the one place to work this out, as `blockSize - align4(fileSize)` wraps for such a block.
+struct CpacRoom {
+  uint32_t at;
+  uint32_t bytes;
+};
+constexpr CpacRoom cpacRoomOf(const uint32_t fileSize, const uint32_t blockSize) {
+  const uint32_t at = fileSize < blockSize ? align4(fileSize) : fileSize;
+  return {at, blockSize > at ? blockSize - at : 0};
+}
+
 struct Slot {
   uint32_t key;
   uint32_t value;

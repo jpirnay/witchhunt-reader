@@ -14,6 +14,8 @@
 #include <cstring>
 #include <new>
 
+#include "TtfShaping.h"
+
 using glyphstore::kIdentityBytes;
 using Commit = FlashGlyphStore::Commit;
 using Lookup = FlashGlyphStore::Lookup;
@@ -393,8 +395,10 @@ bool TtfFontSet::install(const Files* families, const uint8_t count, const uint8
   const auto blockSource = [&](const uint8_t b, ttf::FileSource* source, CpacRoom* room) {
     if (layout.styleMode[b] == glyphstore::kModeFlash) {
       *source = *files[b];
-      room->bytes = work->cpacBytes[b];
-      room->at = room->bytes > 0 ? glyphstore::align4(source->size) : source->size;
+      const glyphstore::CpacRoom flash =
+          glyphstore::cpacRoomOf(source->size, ttf::flashBlockBytes(source->size, work->cpacBytes[b]));
+      room->bytes = flash.bytes;
+      room->at = flash.at;
       room->tables = source->size;
       return true;
     }
@@ -658,6 +662,10 @@ uint32_t TtfFontSet::missMemoryBytes() const {
          (ownedPages_ ? static_cast<uint32_t>(sizeof(ttf::SdPageCache)) : 0) + ringBytes();
 }
 
+void TtfFontSet::releaseShapingFaces() {
+  for (uint8_t f = 0; f < count_; ++f) fonts_[f]->releaseShapingFaces();
+}
+
 uint32_t TtfFontSet::releaseMissMemory() {
   missesStarved_ = false;                                                      // the next pass asks the heap again
   if (!rasterizer_.allocated() && !ownedPages_ && ringBytes() == 0) return 0;  // as RenderLock goes back, mostly
@@ -797,6 +805,7 @@ TtfFont::StylesResult TtfFont::openStyles(const ttf::FileSource (&files)[4], uin
     style.onCard = false;
     style.sd = {};
     style.face = {};
+    style.shaping.reset();  // its tables may be mapped elsewhere, or be another file's
     style.kerning = ttf::Kerning{};
     style.ligatures = ttf::Ligatures{};
     std::fill_n(style.uncoveredLeft, sizeof style.uncoveredLeft, 0);
@@ -1053,6 +1062,39 @@ bool TtfFont::fontBytes(const uint8_t style, FontBytes* bytes) {
   // Flash mode: the file, not the CPac after it. SD mode: the whole block, whose directory places its CPac.
   *bytes = s.onCard ? FontBytes(mapped, s.bytes, &s.sd) : FontBytes(mapped, s.fileBytes);
   return true;
+}
+
+// A style's shaping tables where its block is mapped now: flash mode maps one block at a time, every family's, so the
+// base is asked for again on every use (ShapingFace::current()).
+class TtfFont::FileShapingFace final : public ShapingFace {
+ public:
+  FileShapingFace(FlashGlyphStore& store, const Style& style) : store_(store), style_(style) {}
+
+ protected:
+  const uint8_t* map() override { return store_.mapStyle(style_.block); }
+  bool tables(const uint8_t* base, ot::FaceTables* out) override {
+    return ttf::shapingTables(base, style_.bytes, style_.onCard ? 0 : style_.fileBytes, out);
+  }
+
+ private:
+  FlashGlyphStore& store_;
+  const Style& style_;
+};
+
+ShapingFace* TtfFont::shapingFace(const uint8_t style) {
+  if (!draws(style)) return nullptr;
+  checkLock();
+  Style& file = *styleAt(style);
+  if (!file.shaping) {
+    // 130 B on the C3 (the face's views and the mapping it was read at): made for a section build, freed after it.
+    file.shaping = makeUniqueNoThrow<FileShapingFace>(set_.store_, file);
+    if (!file.shaping) LOG_ERR("TTF", "OOM: family %u style %u's shaping face", family_, style);
+  }
+  return file.shaping.get();
+}
+
+void TtfFont::releaseShapingFaces() {
+  for (uint8_t s = 0; s < styleCount_; ++s) styles_[s].shaping.reset();
 }
 
 const EpdGlyph* TtfFont::glyph(Size& size, const uint8_t style, const uint32_t codepoint) {

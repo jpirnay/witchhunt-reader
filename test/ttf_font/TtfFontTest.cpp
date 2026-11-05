@@ -28,14 +28,16 @@
 
 using namespace ttf_test;
 
+// The bytes the program's news hold now: what a loaded family keeps is the difference across its load. Declared in
+// TtfFontTestUtil.h, for the other test files of this program.
+size_t heapBytesHeld = 0;
+
 namespace {
 // A nothrow array new of exactly this many bytes fails, as the scratch block's does on a heap without room for it.
 size_t refuseArrayBytes = 0;
 // The next nothrow new of one object of exactly this many bytes fails, once: an SD-mode plan's or read's page cache
 // (ttf::CffBlock::planBytes(), readBytes()) on a heap without room for it at that moment.
 size_t refuseNextObjectBytes = 0;
-// The bytes the program's news hold now: what a loaded family keeps is the difference across its load.
-size_t heapBytesHeld = 0;
 
 // A block with its size in front of it (malloc and free underneath, which the sanitizers pair as they pair any other).
 constexpr size_t kSizeHeader = alignof(std::max_align_t);

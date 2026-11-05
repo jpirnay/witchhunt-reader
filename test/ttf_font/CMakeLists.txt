@@ -11,6 +11,8 @@ add_executable(TtfFontTest
   ${REPO_ROOT}/lib/EpdFont/SdCardFontRegistry.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfFamily.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfFont.cpp
+  ${REPO_ROOT}/lib/EpdFont/ttf/TtfShaping.cpp
+  ${REPO_ROOT}/lib/EpdFont/ShapingFace.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfOpenType.cpp
   # the SDK's OpenType layout readers TtfOpenType uses (the firmware links them through FreeInkOpenType)
   ${REPO_ROOT}/freeink-sdk/libs/font/FreeInkFont/src/Gpos.cpp
@@ -42,6 +44,8 @@ target_include_directories(TtfFontTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${REPO_ROOT}/test/ttf_rasterizer
   ${REPO_ROOT}/test/glyph_store
+  ${REPO_ROOT}/test/ot_shaper_port
+  ${REPO_ROOT}/test/complex_shaper
   ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/lib/hal
   ${REPO_ROOT}/lib/EpdFont
@@ -57,6 +61,7 @@ target_compile_definitions(TtfFontTest PRIVATE
   TTF_FONT_DIR="${REPO_ROOT}/lib/EpdFont/builtinFonts/source"
   TTF_FIXTURE_DIR="${REPO_ROOT}/test/fixtures/fonts"
   SD_FONTS_DIR="${REPO_ROOT}/assets/sd-fonts"
+  SHAPING_FIXTURE_DIR="${REPO_ROOT}/test/complex_shaper/data"
 )
 
 target_link_libraries(TtfFontTest PRIVATE

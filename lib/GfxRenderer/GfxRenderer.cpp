@@ -3228,6 +3228,11 @@ bool GfxRenderer::hasGlyph(const int fontId, const uint32_t cp, const EpdFontFam
   return family && family->hasGlyph(cp, style);
 }
 
+ShapingFace* GfxRenderer::shapingFace(const int fontId, const EpdFontFamily::Style style, uint32_t* ppem26_6) const {
+  const EpdFontFamily* const family = findFontFamily(fontId);
+  return family ? family->shapingFace(style, ppem26_6) : nullptr;
+}
+
 int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style style) const {
   const EpdFontFamily* const family = findFontFamily(fontId);
   if (!family) {

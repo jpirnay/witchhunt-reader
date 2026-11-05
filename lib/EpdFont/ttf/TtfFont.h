@@ -11,6 +11,7 @@
 #include "EpdFontData.h"
 #include "FlashGlyphStore.h"
 #include "GlyphProvider.h"
+#include "ShapingFace.h"
 #include "TtfFace.h"
 #include "TtfFamily.h"
 #include "TtfOpenType.h"
@@ -116,10 +117,16 @@ class TtfFont {
   bool ownsBitmap(const EpdGlyph* glyph, const uint8_t*& bitmap) const;
   void prefetch(uint8_t style, const char* utf8Text) { prefetch(body_, style, utf8Text); }
 
+  /// The shaping face of the file that draws `style` (a synthetic style's source's): its tables where the glyph store
+  /// maps them, shaped in place. Made on first ask and kept until TtfFontSet::releaseShapingFaces(); nullptr for a
+  /// style the family does not draw, or without the memory.
+  ShapingFace* shapingFace(uint8_t style);
+
  private:
   friend class TtfFontSet;
   friend struct TtfFontTestAccess;  // host tests: the style choice, run again
   struct Size;
+  class FileShapingFace;
 
   class StyleProvider final : public GlyphProvider {
    public:
@@ -137,6 +144,10 @@ class TtfFont {
     }
     int8_t kerning(const uint32_t leftCp, const uint32_t rightCp) override {
       return owner->kerning(*size, style, leftCp, rightCp);
+    }
+    ShapingFace* shapingFace(uint32_t* ppem26_6) override {
+      *ppem26_6 = size->ppem;
+      return owner->shapingFace(style);
     }
   };
 
@@ -173,6 +184,8 @@ class TtfFont {
     ttf::Face face;
     ttf::Kerning kerning;
     ttf::Ligatures ligatures;  // every size's EpdFontData points at its pairs
+    // Made on the first shapingFace() and freed by releaseShapingFaces(): a loaded family holds none.
+    std::unique_ptr<ShapingFace> shaping;
     // Left codepoints found to kern with nothing. Their pairs are never stored (spec 8.1), yet the space before
     // every word asks for one: one bit each below kUncoveredEnd (Latin), so they read the font once per load.
     static constexpr uint32_t kUncoveredEnd = 0x250;
@@ -203,6 +216,7 @@ class TtfFont {
     return found && found->present;
   }
   StylesResult openStyles(const ttf::FileSource (&files)[4], uint8_t& block, ttf::ScratchPlan* plan);
+  void releaseShapingFaces();
   void chooseSynthetic();
   bool fontBytes(uint8_t style, FontBytes* bytes);
   bool configure(Size& size, uint32_t ppem);
@@ -373,6 +387,10 @@ class TtfFontSet {
   uint32_t releaseMissMemory();
   /// What releaseMissMemory() would free now.
   uint32_t missMemoryBytes() const;
+
+  /// Frees every family's shaping faces (TtfFont::shapingFace). A section build's end calls it, after its plans, which
+  /// read the faces' tables.
+  void releaseShapingFaces();
 
  private:
   friend class TtfFont;

@@ -688,6 +688,9 @@ class GfxRenderer {
   /// Whether `fontId` has a glyph of its own for `cp`, not a lookalike or U+FFFD (which getGlyphInk and every
   /// measure fall back to). Layout asks it for 一 before treating a font as a CJK font.
   bool hasGlyph(int fontId, uint32_t cp, EpdFontFamily::Style style) const;
+  /// The face a shaper reads for `fontId`'s `style` (the TrueType file that draws it, a synthetic style's source),
+  /// and the pixels per em (26.6) its glyphs are drawn at before the font's base scale; nullptr for every other font.
+  ShapingFace* shapingFace(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6) const;
   int getFontAscenderSize(int fontId) const;
   int getLineHeight(int fontId) const;
   std::string truncatedText(int fontId, const char* text, int maxWidth,

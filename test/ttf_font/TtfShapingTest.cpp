@@ -1,11 +1,13 @@
 // TrueType faces that shape (writing modes step 2): what the install writes for the shaper, each style block's CPac.
 #include <OtFace.h>
 #include <OtFilterWriter.h>
+#include <OtShaper.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <vector>
 
@@ -14,12 +16,16 @@
 #include "GlyphKey.h"
 #include "GlyphProvider.h"
 #include "GlyphStoreFormat.h"
+#include "MovingNorFlash.h"
+#include "OtShaperTestHelpers.h"
+#include "ShapingFace.h"
 #include "SimNorFlash.h"
 #include "TtfBuilder.h"
 #include "TtfFamily.h"
 #include "TtfFont.h"
 #include "TtfFontTestUtil.h"
 #include "TtfLayoutBuilder.h"
+#include "TtfShaping.h"
 #include "TtfTestUtil.h"
 
 using namespace ttf_test;
@@ -37,7 +43,7 @@ constexpr uint8_t kIdentityB[glyphstore::kIdentityBytes] = {'s', 'h', 'a', 'p', 
 constexpr uint32_t kDevanagari[] = {0x0915, 0x0939, 0x092A};
 
 // The families (each four styles' files, by style) loaded as one set on `chip`, each at 14 pt. Null when it fails.
-std::unique_ptr<TtfFontSet> load(SimNorFlash& chip, const std::vector<MemoryFile*>& families, const uint8_t* identity,
+std::unique_ptr<TtfFontSet> load(NorFlash& chip, const std::vector<MemoryFile*>& families, const uint8_t* identity,
                                  int& busy) {
   auto set = std::make_unique<TtfFontSet>(chip);
   std::vector<std::array<ttf::FileSource, 4>> sources(families.size());
@@ -107,11 +113,11 @@ DirRecord recordOf(const std::vector<uint8_t>& font, const char* name) {
 
 // A flash-mode block's CPac room, from align4(fileSize) to the block's end: `table`, then erased flash.
 void expectRoomHolds(const SimNorFlash& chip, const glyphstore::StyleInfo& style, const std::vector<uint8_t>& table) {
-  const uint32_t at = glyphstore::align4(style.fileSize);
-  ASSERT_GE(style.size, at + table.size());
-  EXPECT_EQ(table, chipBytes(chip, style.offset + at, static_cast<uint32_t>(table.size())));
-  EXPECT_TRUE(erased(chipBytes(chip, style.offset + at + static_cast<uint32_t>(table.size()),
-                               style.size - at - static_cast<uint32_t>(table.size()))));
+  const glyphstore::CpacRoom room = glyphstore::cpacRoomOf(style.fileSize, style.size);
+  ASSERT_GE(room.bytes, table.size());
+  EXPECT_EQ(table, chipBytes(chip, style.offset + room.at, static_cast<uint32_t>(table.size())));
+  EXPECT_TRUE(erased(chipBytes(chip, style.offset + room.at + static_cast<uint32_t>(table.size()),
+                               room.bytes - static_cast<uint32_t>(table.size()))));
 }
 
 // Whether an ot::Face over a flash-mode block, its file's tables and the CPac in its room, takes the CPac's filters.
@@ -119,8 +125,8 @@ bool cpacAccepted(const SimNorFlash& chip, const glyphstore::StyleInfo& style) {
   const std::vector<uint8_t> block = chipBytes(chip, style.offset, style.size);
   ot::FaceTables tables;
   EXPECT_TRUE(ot::tablesFromSfnt(block.data(), style.fileSize, &tables));
-  const uint32_t at = glyphstore::align4(style.fileSize);
-  tables[ot::FaceTables::CPAC] = ot::Table(block.data() + at, style.size - at);
+  const glyphstore::CpacRoom room = glyphstore::cpacRoomOf(style.fileSize, style.size);
+  tables[ot::FaceTables::CPAC] = ot::Table(block.data() + room.at, room.bytes);
   ot::Face face;
   EXPECT_TRUE(face.init(tables));
   return face.filters(ot::GSUB) != nullptr && face.filters(ot::GPOS) != nullptr;
@@ -623,4 +629,422 @@ TEST_F(TtfShapingInstall, TheInstallTimeIsReported) {
   ASSERT_NE(nullptr, load(chip, {subset}, kIdentityA, busy));
   EXPECT_EQ(2, busy);
   EXPECT_GT(TtfFontSet::storeEvents().lastInstallMs, 0u);
+}
+
+// --- The CPac room of a block ---
+
+TEST(GlyphStoreCpacRoom, ARoomIsWhatLiesAfterTheAlignedFile) {
+  using glyphstore::cpacRoomOf;
+  EXPECT_EQ(1000u, cpacRoomOf(1000, 1200).at);
+  EXPECT_EQ(200u, cpacRoomOf(1000, 1200).bytes);
+  EXPECT_EQ(1004u, cpacRoomOf(1001, 1200).at);  // after the file's last byte, 4-aligned
+  EXPECT_EQ(196u, cpacRoomOf(1001, 1200).bytes);
+  EXPECT_EQ(0u, cpacRoomOf(1000, 1000).bytes);  // a block the file's size: no CPac
+  EXPECT_EQ(1000u, cpacRoomOf(1000, 1000).at);
+}
+
+TEST(GlyphStoreCpacRoom, ABlockTooShortToAlignItsFileHasNoRoomAndDoesNotWrap) {
+  using glyphstore::cpacRoomOf;
+  // Exactly an unaligned file: align4(fileSize) is past the block, and size - align4(fileSize) would wrap.
+  EXPECT_EQ(0u, cpacRoomOf(1001, 1001).bytes);
+  EXPECT_LE(cpacRoomOf(1001, 1001).at, 1001u);
+  // Between the file and its alignment: no room, and `at` says the block cannot hold the file's CPac place.
+  EXPECT_EQ(0u, cpacRoomOf(1001, 1003).bytes);
+  EXPECT_GT(cpacRoomOf(1001, 1003).at, 1003u);
+  EXPECT_EQ(0u, cpacRoomOf(1001, 1004).bytes);  // the aligned end exactly: an empty room, inside the block
+  EXPECT_EQ(1004u, cpacRoomOf(1001, 1004).at);
+}
+
+TEST(TtfShapingTables, AnUnalignedFileTheSizeOfItsBlockHasNoCpac) {
+  std::vector<uint8_t> file = readFixture("NotoSansDevanagari-Shaping-Regular.ttf");
+  ASSERT_FALSE(file.empty());
+  while (file.size() % 4 != 1) file.push_back(0);
+  const uint32_t size = static_cast<uint32_t>(file.size());
+  ot::FaceTables tables;
+  ASSERT_TRUE(ttf::shapingTables(file.data(), size, size, &tables));
+  EXPECT_TRUE(tables[ot::FaceTables::CPAC].empty());
+  EXPECT_TRUE(tables[ot::FaceTables::CPPL].empty());
+  EXPECT_FALSE(tables[ot::FaceTables::HEAD].empty());
+  EXPECT_FALSE(ttf::shapingTables(file.data(), size - 1, size, &tables));  // a file larger than its block
+}
+
+// --- ShapingFace over a scripted mapping ---
+
+namespace {
+
+using ottest::StoredGlyph;
+
+std::vector<StoredGlyph> storedOf(const ExpectedRun& run) {
+  std::vector<StoredGlyph> out;
+  for (unsigned i = 0; i < run.count; ++i) {
+    out.push_back({run.glyphs[i].gid, run.glyphs[i].advance12_4, run.glyphs[i].dx, run.glyphs[i].dy});
+  }
+  return out;
+}
+
+const RunSet& runSetOf(const char* file, const uint32_t ppem26_6) {
+  for (const RunSet& set : kDevanagariRunSets) {
+    if (std::strcmp(set.file, file) == 0 && set.ppem26_6 == ppem26_6) return set;
+  }
+  ADD_FAILURE() << file << " at " << ppem26_6;
+  return kDevanagariRunSets[0];
+}
+
+const char* const kSubsetFiles[2] = {"NotoSansDevanagari-Shaping-Regular.ttf", "NotoSansDevanagari-Shaping-Bold.ttf"};
+
+// A plan per run of `set`, built on the face `shaping` gives now.
+std::vector<std::unique_ptr<ot::Plan>> plansOf(ShapingFace& shaping, const RunSet& set) {
+  std::vector<std::unique_ptr<ot::Plan>> plans;
+  const ot::Face* face = shaping.current();
+  EXPECT_NE(nullptr, face);
+  for (size_t r = 0; face && r < set.count; ++r) {
+    plans.push_back(std::make_unique<ot::Plan>());
+    EXPECT_TRUE(plans.back()->build(*face, ot::Script::Devanagari, ot::languageTagsFor(set.runs[r].language))) << r;
+  }
+  return plans;
+}
+
+// Every run of `set` shaped on the face `shaping` gives now, with the plans built before (plansOf), as the oracle says.
+void expectPlansShape(ShapingFace& shaping, const RunSet& set, const std::vector<std::unique_ptr<ot::Plan>>& plans) {
+  ASSERT_EQ(set.count, plans.size());
+  for (size_t r = 0; r < set.count; ++r) {
+    const ot::Face* face = shaping.current();
+    ASSERT_NE(nullptr, face);
+    EXPECT_EQ(storedOf(set.runs[r]), ottest::shapeAsStored(*face, *plans[r], set.runs[r].utf8, set.ppem26_6))
+        << set.file << " at " << set.ppem26_6 << ", run " << r << ": " << set.runs[r].utf8;
+  }
+}
+
+// Every run of `set` shaped through `shaping`, a plan built on its face for each, as the oracle says.
+void expectRunsShape(ShapingFace& shaping, const RunSet& set) {
+  for (size_t r = 0; r < set.count; ++r) {
+    const ot::Face* face = shaping.current();
+    ASSERT_NE(nullptr, face);
+    ot::Plan plan;
+    ASSERT_TRUE(plan.build(*face, ot::Script::Devanagari, ot::languageTagsFor(set.runs[r].language))) << r;
+    EXPECT_EQ(storedOf(set.runs[r]), ottest::shapeAsStored(*face, plan, set.runs[r].utf8, set.ppem26_6))
+        << set.file << " at " << set.ppem26_6 << ", run " << r << ": " << set.runs[r].utf8;
+  }
+}
+
+// A ShapingFace over bytes in memory, its mapping answering from a script of bases.
+class ScriptedFace final : public ShapingFace {
+ public:
+  std::vector<const uint8_t*> bases;  // map()'s answers in turn; the last repeats
+  uint32_t size = 0;
+  bool dropHead = false;
+  int mapCalls = 0;
+  int tablesCalls = 0;
+
+ protected:
+  const uint8_t* map() override {
+    if (bases.empty()) return nullptr;
+    const size_t at = std::min<size_t>(static_cast<size_t>(mapCalls++), bases.size() - 1);
+    return bases[at];
+  }
+  bool tables(const uint8_t* base, ot::FaceTables* out) override {
+    ++tablesCalls;
+    if (!ot::tablesFromSfnt(base, size, out)) return false;
+    out->tables[ot::FaceTables::CPPL] = ot::Table();
+    if (dropHead) out->tables[ot::FaceTables::HEAD] = ot::Table();
+    return true;
+  }
+};
+
+const ShapingFixture& devanagariFixture() {
+  for (const ShapingFixture& fx : kShapingFixtures) {
+    if (std::strcmp(fx.script, "Devanagari") == 0) return fx;
+  }
+  ADD_FAILURE() << "no Devanagari fixture";
+  return kShapingFixtures[0];
+}
+
+}  // namespace
+
+TEST(ShapingFace, TheFirstCallBuildsAndAMoveRepoints) {
+  const ShapingFixture& fx = devanagariFixture();
+  std::vector<uint8_t> a = ottest::readFixture(fx.layoutFile);
+  ASSERT_FALSE(a.empty());
+  std::vector<uint8_t> b = a;
+  ScriptedFace face;
+  face.size = static_cast<uint32_t>(a.size());
+  face.bases = {a.data(), a.data(), b.data()};
+
+  const ot::Face* first = face.current();
+  ASSERT_NE(nullptr, first);
+  std::vector<std::unique_ptr<ot::Plan>> plans;
+  for (size_t w = 0; w < fx.count; ++w) {
+    plans.push_back(std::make_unique<ot::Plan>());
+    ASSERT_TRUE(plans.back()->build(*first, ot::Script::Devanagari, ot::languageTagsFor(fx.words[w].language))) << w;
+  }
+  EXPECT_EQ(first, face.current());  // the same base: nothing moved
+  EXPECT_EQ(first, face.current());  // B: re-pointed, the same face
+  std::fill(a.begin(), a.end(), uint8_t{0xA5});
+  EXPECT_EQ(1, face.tablesCalls);
+  for (size_t w = 0; w < fx.count; ++w) {
+    const ExpectedShaping& word = fx.words[w];
+    std::vector<StoredGlyph> expected;
+    for (unsigned i = 0; i < word.count; ++i) {
+      expected.push_back({word.glyphs[i].gid, word.glyphs[i].advance12_4, word.glyphs[i].dx, word.glyphs[i].dy});
+    }
+    EXPECT_EQ(expected, ottest::shapeAsStored(*face.current(), *plans[w], word.utf8)) << w << ": " << word.utf8;
+  }
+  EXPECT_EQ(1, face.tablesCalls);
+}
+
+TEST(ShapingFace, AnUnmappedBlockGivesNoFaceForNow) {
+  const ShapingFixture& fx = devanagariFixture();
+  std::vector<uint8_t> bytes = ottest::readFixture(fx.layoutFile);
+  ASSERT_FALSE(bytes.empty());
+  ScriptedFace face;
+  face.size = static_cast<uint32_t>(bytes.size());
+  EXPECT_EQ(nullptr, face.current());  // nothing mapped
+  EXPECT_EQ(0, face.tablesCalls);
+  face.bases = {bytes.data()};
+  EXPECT_NE(nullptr, face.current());
+  EXPECT_EQ(1, face.tablesCalls);
+}
+
+TEST(ShapingFace, RefusedTablesAreNotAskedAgain) {
+  const ShapingFixture& fx = devanagariFixture();
+  std::vector<uint8_t> bytes = ottest::readFixture(fx.layoutFile);
+  ASSERT_FALSE(bytes.empty());
+  ScriptedFace face;
+  face.size = static_cast<uint32_t>(bytes.size());
+  face.bases = {bytes.data()};
+  face.dropHead = true;
+  EXPECT_EQ(nullptr, face.current());
+  EXPECT_EQ(nullptr, face.current());
+  EXPECT_EQ(1, face.tablesCalls);
+}
+
+// --- A TrueType family's shaping faces ---
+
+namespace {
+
+class TtfShapingFace : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    subset[kRegular].bytes = readFixture(kSubsetFiles[kRegular]);
+    subset[kBold].bytes = readFixture(kSubsetFiles[kBold]);
+    ASSERT_FALSE(subset[kRegular].bytes.empty());
+    ASSERT_FALSE(subset[kBold].bytes.empty());
+  }
+  void TearDown() override { TtfFont::setHooks({}); }
+
+  // The face of `font`'s `style` through the family API, and the pixels per em it says its glyphs are drawn at.
+  static ShapingFace* faceOf(const TtfFont& font, const uint8_t style, uint32_t* ppem) {
+    const EpdFontFamily family(font.font(kRegular), font.font(kBold));
+    return family.shapingFace(static_cast<EpdFontFamily::Style>(style), ppem);
+  }
+
+  // Both styles of `set`'s family `family` shape as the oracle says at the body size and at a native size of 40 pixels.
+  void expectShapesAsHarfBuzz(TtfFontSet& set, const uint8_t family) {
+    TtfFont& font = *set.font(family);
+    const EpdFont* native[4] = {};
+    ASSERT_TRUE(font.nativeFonts(40, native));
+    for (const uint8_t style : {kRegular, kBold}) {
+      uint32_t ppem = 0;
+      ShapingFace* body = faceOf(font, style, &ppem);
+      ASSERT_NE(nullptr, body);
+      EXPECT_EQ(1867u, ppem);
+      expectRunsShape(*body, runSetOf(kSubsetFiles[style], 1867));
+
+      const EpdFontFamily nativeFamily(native[kRegular], native[kBold]);
+      ShapingFace* big = nativeFamily.shapingFace(static_cast<EpdFontFamily::Style>(style), &ppem);
+      EXPECT_EQ(body, big);  // one face a file, whatever the size
+      EXPECT_EQ(2560u, ppem);
+      ASSERT_NE(nullptr, big);
+      expectRunsShape(*big, runSetOf(kSubsetFiles[style], 2560));
+    }
+  }
+
+  // The Bookerly body on 26 pages, whole it does not fit: every family's tables go to the card, the subset's with
+  // them (AnSdModeBlocksCpacIsATableOfItsDirectory).
+  std::unique_ptr<TtfFontSet> loadSdMode(SimNorFlash& chip) {
+    bookerly[0].bytes = readFont("Bookerly/Bookerly-Regular.ttf");
+    bookerly[1].bytes = readFont("Bookerly/Bookerly-Bold.ttf");
+    bookerly[2].bytes = readFont("Bookerly/Bookerly-Italic.ttf");
+    bookerly[3].bytes = readFont("Bookerly/Bookerly-BoldItalic.ttf");
+    accent[kRegular].bytes = subset[kRegular].bytes;
+    accent[kBold].bytes = subset[kBold].bytes;
+    return load(chip, {bookerly, accent}, kIdentityA, busy);
+  }
+
+  // `set`'s family 1 of loadSdMode(): the blocks of the subset's two styles.
+  static constexpr uint8_t kAccentFirstBlock = 4;
+
+  // Whether the shaping face of `style` takes its filters from the CPac, and shapes alike when it is left out: a face
+  // over the same tables without it, its filters computed.
+  void expectCpacOnlySavesWork(ShapingFace& shaping, const std::vector<uint8_t>& block, const uint32_t fileBytes,
+                               const RunSet& runs) {
+    const ot::Face* with = shaping.current();
+    ASSERT_NE(nullptr, with);
+    EXPECT_NE(nullptr, with->filters(ot::GSUB));
+    EXPECT_NE(nullptr, with->filters(ot::GPOS));
+    ot::FaceTables tables;
+    ASSERT_TRUE(ttf::shapingTables(block.data(), static_cast<uint32_t>(block.size()), fileBytes, &tables));
+    ASSERT_FALSE(tables[ot::FaceTables::CPAC].empty());
+    tables[ot::FaceTables::CPAC] = ot::Table();
+    ot::Face without;
+    ASSERT_TRUE(without.init(tables));
+    EXPECT_EQ(nullptr, without.filters(ot::GSUB));
+    EXPECT_EQ(nullptr, without.filters(ot::GPOS));
+    for (size_t r = 0; r < runs.count; ++r) {
+      const ExpectedRun& run = runs.runs[r];
+      const uint32_t* const language = ot::languageTagsFor(run.language);
+      ot::Plan planWith;
+      ot::Plan planWithout;
+      ASSERT_TRUE(planWith.build(*with, ot::Script::Devanagari, language)) << r;
+      ASSERT_TRUE(planWithout.build(without, ot::Script::Devanagari, language)) << r;
+      const std::vector<StoredGlyph> stored = ottest::shapeAsStored(*with, planWith, run.utf8, runs.ppem26_6);
+      const std::vector<StoredGlyph> computed = ottest::shapeAsStored(without, planWithout, run.utf8, runs.ppem26_6);
+      EXPECT_EQ(computed, stored) << r << ": " << run.utf8;
+      EXPECT_EQ(storedOf(run), stored) << r << ": " << run.utf8;
+    }
+  }
+
+  MemoryFile subset[4];
+  MemoryFile bookerly[4];
+  MemoryFile accent[4];
+  int busy = 0;
+};
+
+}  // namespace
+
+TEST_F(TtfShapingFace, ShapesAsHarfBuzzInFlashMode) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  ASSERT_FALSE(set->font(0)->readsCard());
+  expectShapesAsHarfBuzz(*set, 0);
+  EXPECT_EQ(0u, chip.violations());
+}
+
+TEST_F(TtfShapingFace, ShapesAsHarfBuzzInSdMode) {
+  SimNorFlash chip{26 * kPage};
+  const auto set = loadSdMode(chip);
+  ASSERT_NE(nullptr, set);
+  ASSERT_TRUE(set->font(1)->readsCard());
+  ASSERT_EQ(glyphstore::kModeSd, headerOf(chip).styles[kAccentFirstBlock].mode);
+  expectShapesAsHarfBuzz(*set, 1);
+  EXPECT_EQ(0u, chip.violations());
+}
+
+TEST_F(TtfShapingFace, TheFaceWithAndWithoutCpacShapesAlikeInFlashMode) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  const glyphstore::Header header = headerOf(chip);
+  for (const uint8_t style : {kRegular, kBold}) {
+    const glyphstore::StyleInfo& info = header.styles[style];
+    ASSERT_EQ(glyphstore::kModeFlash, info.mode);
+    ShapingFace* face = set->font(0)->shapingFace(style);
+    ASSERT_NE(nullptr, face);
+    expectCpacOnlySavesWork(*face, chipBytes(chip, info.offset, info.size), info.fileSize,
+                            runSetOf(kSubsetFiles[style], 1867));
+  }
+}
+
+TEST_F(TtfShapingFace, TheFaceWithAndWithoutCpacShapesAlikeInSdMode) {
+  SimNorFlash chip{26 * kPage};
+  const auto set = loadSdMode(chip);
+  ASSERT_NE(nullptr, set);
+  const glyphstore::Header header = headerOf(chip);
+  for (const uint8_t style : {kRegular, kBold}) {
+    const glyphstore::StyleInfo& info = header.styles[kAccentFirstBlock + style];
+    ASSERT_EQ(glyphstore::kModeSd, info.mode);
+    ShapingFace* face = set->font(1)->shapingFace(style);
+    ASSERT_NE(nullptr, face);
+    expectCpacOnlySavesWork(*face, chipBytes(chip, info.offset, info.size), 0, runSetOf(kSubsetFiles[style], 1867));
+  }
+}
+
+TEST_F(TtfShapingFace, AFaceRepointedAfterAnotherStyleMappedShapesAlike) {
+  SimNorFlash chip{kFlashBytes};
+  MovingNorFlash moving(chip);  // every mapping lands at a new address, and an unmapped one is poisoned
+  const auto set = load(moving, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  const RunSet& runs = runSetOf(kSubsetFiles[kRegular], 1867);
+  ShapingFace* regular = font.shapingFace(kRegular);
+  ASSERT_NE(nullptr, regular);
+  const ot::Face* before = regular->current();
+  ASSERT_NE(nullptr, before);
+  const std::vector<std::unique_ptr<ot::Plan>> plans = plansOf(*regular, runs);
+  expectPlansShape(*regular, runs, plans);
+
+  const uint32_t mapsBefore = moving.maps();
+  ASSERT_NE(nullptr, font.glyph(kBold, kDevanagari[0]));  // maps the Bold block: the Regular's is unmapped
+  EXPECT_GT(moving.maps(), mapsBefore);
+
+  const ot::Face* after = regular->current();
+  EXPECT_EQ(before, after);
+  expectPlansShape(*regular, runs, plans);
+  EXPECT_EQ(before, regular->current());
+}
+
+TEST_F(TtfShapingFace, ABlockWhoseCpacFailsValidationShapesWithComputedFilters) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  const glyphstore::StyleInfo info = headerOf(chip).styles[kRegular];
+  const glyphstore::CpacRoom room = glyphstore::cpacRoomOf(info.fileSize, info.size);
+  ASSERT_GE(room.bytes, 16u);
+  uint8_t* const version = chip.raw() + info.offset + room.at;
+  ASSERT_EQ(0, version[0]);
+  ASSERT_EQ(1, version[1]);
+  version[1] = 2;  // no reinstall: the block is as the install left it, bar its CPac's version
+  ShapingFace* face = set->font(0)->shapingFace(kRegular);
+  ASSERT_NE(nullptr, face);
+  const ot::Face* shaping = face->current();
+  ASSERT_NE(nullptr, shaping);
+  EXPECT_EQ(nullptr, shaping->filters(ot::GSUB));
+  EXPECT_EQ(nullptr, shaping->filters(ot::GPOS));
+  expectRunsShape(*face, runSetOf(kSubsetFiles[kRegular], 1867));
+}
+
+TEST_F(TtfShapingFace, ASyntheticStyleSharesItsSourceFilesFace) {
+  SimNorFlash chip{kFlashBytes};
+  MemoryFile regularOnly[4];
+  regularOnly[kRegular].bytes = subset[kRegular].bytes;
+  const auto set = load(chip, {regularOnly}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  ASSERT_TRUE(font.synthetic(kBold));
+  ShapingFace* regular = font.shapingFace(kRegular);
+  ASSERT_NE(nullptr, regular);
+  EXPECT_EQ(regular, font.shapingFace(kBold));
+  uint32_t ppem = 0;
+  EXPECT_EQ(regular, faceOf(font, kBold, &ppem));  // through the synthetic bold's font
+  EXPECT_EQ(1867u, ppem);
+}
+
+TEST_F(TtfShapingFace, ALoadedSetHoldsNoFaceUntilAsked) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  const size_t loaded = heapBytesHeld;
+  ShapingFace* face = set->font(0)->shapingFace(kRegular);
+  ASSERT_NE(nullptr, face);
+  const size_t faceBytes = heapBytesHeld - loaded;
+  EXPECT_GT(faceBytes, 0u);
+  EXPECT_LE(faceBytes, 512u);  // about 130 B on the C3
+  EXPECT_EQ(face, set->font(0)->shapingFace(kRegular));
+  EXPECT_EQ(loaded + faceBytes, heapBytesHeld);  // a second ask holds nothing more
+  set->releaseShapingFaces();
+  EXPECT_EQ(loaded, heapBytesHeld);
+  EXPECT_NE(nullptr, set->font(0)->shapingFace(kRegular));  // made again when asked
+  EXPECT_EQ(loaded + faceBytes, heapBytesHeld);
+}
+
+TEST_F(TtfShapingFace, ABitmapFontHasNoShapingFace) {
+  CountingProvider provider;
+  EpdFontData data{};
+  data.provider = &provider;
+  const EpdFont font(&data);
+  const EpdFontFamily family(&font);
+  uint32_t ppem = 7;
+  EXPECT_EQ(nullptr, family.shapingFace(EpdFontFamily::REGULAR, &ppem));
+  EXPECT_EQ(7u, ppem);
 }

@@ -12,6 +12,9 @@
 #include "TtfFont.h"
 #include "TtfRasterizer.h"
 
+/// The bytes the test program's news hold now (TtfFontTest.cpp replaces operator new and delete to count them).
+extern size_t heapBytesHeld;
+
 namespace ttf_test {
 
 /// A font file read through ttf::FileSource, as the SD card serves it, with an I/O error on demand. Every read's

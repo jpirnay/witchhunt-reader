@@ -6,6 +6,7 @@
 #include "EpdFontData.h"
 
 class BuildArena;
+class ShapingFace;
 
 /// What a provider that renders glyphs needs only for one its font does not hold yet (a TrueType family's scratch
 /// block, and in SD mode its page cache), made for the first such lookup rather than held while nothing misses: where
@@ -135,5 +136,12 @@ class GlyphProvider {
   virtual void prefetchGlyphs(const uint16_t* glyphs, size_t count) {
     (void)glyphs;
     (void)count;
+  }
+
+  /// The shaping face of the file that draws this provider's style (a TrueType font's tables, shaped in place), and
+  /// in `ppem26_6` the pixels per em (26.6) its glyphs are drawn at. nullptr for a provider with no such tables.
+  virtual ShapingFace* shapingFace(uint32_t* ppem26_6) {
+    (void)ppem26_6;
+    return nullptr;
   }
 };

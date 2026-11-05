@@ -106,7 +106,7 @@ bool validGeometry(const Geometry& g, const uint32_t flashSize) {
 // the file's size has none.
 bool validFlashFile(const StyleInfo& style) {
   if (style.fileSize == 0 || style.fileSize > style.size) return false;
-  return style.fileSize == style.size || ((uint64_t{style.fileSize} + 3) & ~uint64_t{3}) <= style.size;
+  return cpacRoomOf(style.fileSize, style.size).at <= style.size;
 }
 
 // The style blocks are sector-aligned, in order, between the state sector and the index, the SD-mode ones after
