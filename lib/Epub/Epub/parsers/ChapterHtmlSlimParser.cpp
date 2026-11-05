@@ -6,6 +6,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <HeapFit.h>
+#include <IndicScripts.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <SaxParser/SaxParser.h>
@@ -3999,7 +4000,12 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
         i += ignorableLen - 1;
         continue;
       }
-      if (self->pendingDropCap_.textLen >= static_cast<int>(sizeof(self->pendingDropCap_.text)) - 1) {
+      // A drop cap draws codepoints one by one, which would split an Indic cluster: the capture is abandoned
+      // at the first such codepoint and its text goes back to the word flow, to be shaped whole.
+      // Ported from crosspoint-reader PR #3787 ("feat: add Indic language support without HarfBuzz", SSafayet /
+      // @SSafayet), commit f0757278.
+      if ((i + 1 < len && indic::startsIndic(reinterpret_cast<const unsigned char*>(s + i))) ||
+          self->pendingDropCap_.textLen >= static_cast<int>(sizeof(self->pendingDropCap_.text)) - 1) {
         overflow = true;
         break;
       }

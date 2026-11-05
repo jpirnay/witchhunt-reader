@@ -148,6 +148,7 @@ add_executable(EpubPipelineTest
   VerticalRulesTest.cpp
   BidiRulesTest.cpp
   JoinerParseTest.cpp
+  IndicRulesTest.cpp
   CoverPipelineTest.cpp
   CoverWrapperTest.cpp
   CoverFallbackTest.cpp

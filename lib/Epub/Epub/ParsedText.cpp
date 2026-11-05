@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <BidiUtils.h>
 #include <GfxRenderer.h>
+#include <IndicScripts.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <Utf8.h>
@@ -1687,6 +1688,18 @@ void ParsedText::applyBionicReadingTransform() {
 
     // A run the book asks to set upright down a column stays one token: a bold prefix would cut it.
     if (vertical_ && TokenBoundary::combineRequested(originalBoundary)) {
+      transformedSuffix.push_back(std::move(source));
+      transformedSuffixStyles.push_back(originalStyle);
+      transformedSuffixBoundaries.push_back(originalBoundary);
+      transformedSuffixSizes.push_back(originalSize);
+      transformedSuffixOffsets.push_back(originalOffset);
+      continue;
+    }
+
+    // Complex-script words never take a focus split: each half would shape on its own.
+    // Ported from crosspoint-reader PR #3787 ("feat: add Indic language support without HarfBuzz", SSafayet /
+    // @SSafayet).
+    if (indic::containsIndic(source.c_str())) {
       transformedSuffix.push_back(std::move(source));
       transformedSuffixStyles.push_back(originalStyle);
       transformedSuffixBoundaries.push_back(originalBoundary);

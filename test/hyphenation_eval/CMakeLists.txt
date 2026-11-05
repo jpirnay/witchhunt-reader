@@ -1,6 +1,7 @@
 add_executable(HyphenationEvaluationTest
   HyphenationEvaluationTest.cpp
   ScopedLanguageHyphenatorTest.cpp
+  IndicFallbackTest.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/Hyphenator.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/LanguageRegistry.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/LiangHyphenation.cpp
