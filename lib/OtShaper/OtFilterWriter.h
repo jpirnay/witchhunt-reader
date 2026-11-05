@@ -19,11 +19,15 @@ namespace ot {
 class FilterTableWriter {
  public:
   // Lookups per table past this get no table at all (the probe stops counting there too).
-  static constexpr uint32_t kMaxLookups = MAX_PLANNED_LOOKUPS;
+  static constexpr uint32_t kMaxLookups = MAX_PLANNED_LOOKUPS;  // witchhunt: deviation 4
+  // Subtables per table (the sum of its lookups' counts) past this get no table at all either: the lookup cap alone
+  // lets 4,096 lookups each declare 65,535 subtables, sharing one offset, for gigabytes of records.
+  static constexpr uint32_t kMaxSubtables = 16384;  // witchhunt: deviation 4
 
   explicit FilterTableWriter(const Face& face);
 
-  // The table's bytes: 16 + 28 a lookup + 24 a subtable; 0 with no lookups, or past kMaxLookups in a table.
+  // The table's bytes: 16 + 28 a lookup + 24 a subtable; 0 with no lookups, or past kMaxLookups or kMaxSubtables in a
+  // table (witchhunt: deviation 4).
   uint32_t bytes() const { return total_; }
 
   // Writes the next min(room, bytes left) bytes to `out` and returns how many; 0 once all are written.

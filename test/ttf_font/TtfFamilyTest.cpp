@@ -1,4 +1,6 @@
 // What the registry learns from a TTF file before loading it (its style), and the family identity.
+#include <OtFace.h>
+#include <OtFilterWriter.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -243,7 +245,24 @@ TEST(TtfFamily, AReadErrorIsRefused) {
 TEST(TtfFamily, TheProbeReadsOnlyTheDirectoryAndHead) {
   MemoryFile file{readFont("NotoSans/NotoSans-Regular.ttf")};
   ASSERT_EQ(0, ttf::probeFile(file.source()).style);
-  EXPECT_LE(file.reads, 6u);  // the header, the directory 8 records at a time, head: cheap at discovery
+  const uint32_t probeReads = file.reads;
+  // The header, the directory 8 records at a time, head and OS/2 (6 reads), and the CPac room's count: per table its
+  // header and LookupList count, the lookups' offsets 64 at a time and each lookup's header.
+  const auto find = [&](const char* name) {
+    const size_t at = findRecord(file.bytes, name);
+    return std::pair<uint32_t, uint32_t>{static_cast<uint32_t>(file.bytes[at + 8]) << 24 | file.bytes[at + 9] << 16 |
+                                             file.bytes[at + 10] << 8 | file.bytes[at + 11],
+                                         static_cast<uint32_t>(file.bytes[at + 12]) << 24 | file.bytes[at + 13] << 16 |
+                                             file.bytes[at + 14] << 8 | file.bytes[at + 15]};
+  };
+  uint32_t lookups = 0;
+  for (const char* table : {"GSUB", "GPOS"}) {
+    ttf::LayoutCounts counts;
+    ASSERT_TRUE(ttf::countLookups(file.source(), find(table).first, find(table).second, &counts));
+    lookups += counts.lookups;
+  }
+  EXPECT_GT(lookups, 0u);
+  EXPECT_LE(probeReads, 6u + 2u * 2u + (lookups / 64 + 2u) + lookups + 8u);  // 8: the directory read once more
 }
 
 TEST(TtfFamily, AFileSourceReadsThroughSeekAndRead) {
@@ -561,9 +580,9 @@ TEST(TtfSdBlock, IsTheFontButForItsOutlines) {
   MemoryFile file{readFont("Bookerly/Bookerly-Regular.ttf")};
   ttf::SdBlock block;
   ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
-  // Its eleven tables the engine reads, post's header among them, 4-byte aligned behind a 12-record directory; glyf is
-  // 208,484 bytes at 58,840 in the file.
-  EXPECT_EQ(176404u, block.bytes());
+  // Its eleven tables the engine reads, post's header among them, GDEF and the room for its CPac, 4-byte aligned
+  // behind a 14-record directory; glyf is 208,484 bytes at 58,840 in the file. (176,404 before GDEF and the CPac.)
+  EXPECT_EQ(184864u, block.bytes());
   const glyphstore::SdOutlines outlines = block.outlines();
   EXPECT_EQ(block.bytes(), outlines.fontOffset);
   EXPECT_EQ(58840u, outlines.fileOffset);
@@ -674,6 +693,242 @@ TEST(TtfSdBlock, AnOptionalTableOutsideTheFileIsLeftOutAsTheFaceLeavesItOut) {
   ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(card, &face));
   EXPECT_EQ(0u, face.gpos);
   EXPECT_TRUE(block.sameAs(image.data(), static_cast<uint32_t>(image.size())));
+}
+
+// --- GDEF and the CPac room in a style block ---
+
+namespace {
+
+// One record of a font's table directory (a file's or a block's).
+struct DirRecord {
+  bool found = false;
+  uint32_t checksum = 0;
+  uint32_t offset = 0;
+  uint32_t length = 0;
+};
+
+uint32_t read32(const Bytes& bytes, const size_t at) {
+  return static_cast<uint32_t>(bytes[at]) << 24 | static_cast<uint32_t>(bytes[at + 1]) << 16 |
+         static_cast<uint32_t>(bytes[at + 2]) << 8 | bytes[at + 3];
+}
+
+DirRecord recordOf(const Bytes& font, const char* name) {
+  const size_t at = findRecord(font, name);
+  if (at == 0) return {};
+  return {true, read32(font, at + 4), read32(font, at + 8), read32(font, at + 12)};
+}
+
+// What ot::FilterTableWriter would write for the font's own GSUB and GPOS.
+uint32_t writerBytes(const Bytes& font) {
+  ot::FaceTables tables;
+  if (!ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables)) return UINT32_MAX;
+  tables[ot::FaceTables::CPAC] = ot::Table();
+  tables[ot::FaceTables::CPPL] = ot::Table();
+  ot::Face face;
+  if (!face.init(tables)) return UINT32_MAX;
+  return ot::FilterTableWriter(face).bytes();
+}
+
+// A GSUB (version 1.0, no scripts or features) whose LookupList declares `declared` lookups and lists `offsets`
+// (from the list's start), `body` right behind them.
+Bytes gsubWith(const uint32_t declared, const std::vector<uint16_t>& offsets, const Bytes& body) {
+  Bytes gsub;
+  for (const uint32_t word : {1u, 0u, 0u, 0u, 10u}) put16(gsub, word);  // lookups at 10
+  put16(gsub, declared);
+  for (const uint16_t offset : offsets) put16(gsub, offset);
+  gsub.insert(gsub.end(), body.begin(), body.end());
+  return gsub;
+}
+
+// A built font with `gsub` as its GSUB.
+Bytes fontWithGsub(const Bytes& gsub) {
+  Font font;
+  font.glyphs.resize(1);
+  font.glyphs[0].contours = {rect(0, 0, 64, 64)};
+  font.extraTables = {{"GSUB", gsub}};
+  return buildFont(font);
+}
+
+// `count` lookups of one subtable each, behind the list's offsets.
+Bytes gsubOfSimpleLookups(const uint32_t count) {
+  std::vector<uint16_t> offsets;
+  Bytes body;
+  for (uint32_t i = 0; i < count; ++i) {
+    offsets.push_back(static_cast<uint16_t>(2 + 2 * count + 8 * i));
+    for (const uint32_t word : {1u, 0u, 1u, 0u}) put16(body, word);  // type 1, flags 0, one subtable (never read)
+  }
+  return gsubWith(count, offsets, body);
+}
+
+// A lookup declaring `subtables` subtables, with the room for their offsets.
+Bytes lookupDeclaring(const uint32_t subtables) {
+  Bytes lookup;
+  for (const uint32_t word : {1u, 0u, subtables}) put16(lookup, word);
+  lookup.resize(lookup.size() + 2 * subtables, 0);
+  return lookup;
+}
+
+}  // namespace
+
+TEST(TtfFamily, AnSdModeBlockHoldsGdefAndRoomForCpac) {
+  const Bytes bytes = readFixture("NotoSansDevanagari-Shaping-Regular.ttf");
+  ASSERT_FALSE(bytes.empty());
+  MemoryFile file{bytes};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  ASSERT_EQ(0, probed.style);
+  ttf::SdBlock block;
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
+  const std::vector<uint8_t> image = blockImage(block);
+
+  const DirRecord gdefInFile = recordOf(bytes, "GDEF");
+  const DirRecord gdef = recordOf(image, "GDEF");
+  ASSERT_TRUE(gdefInFile.found);
+  ASSERT_TRUE(gdef.found);
+  EXPECT_EQ(gdefInFile.length, gdef.length);
+  EXPECT_EQ(0, std::memcmp(bytes.data() + gdefInFile.offset, image.data() + gdef.offset, gdef.length));
+
+  const DirRecord cpac = recordOf(image, "CPac");
+  ASSERT_TRUE(cpac.found);
+  EXPECT_GT(probed.cpacBytes, 0u);
+  EXPECT_EQ(probed.cpacBytes, cpac.length);
+  EXPECT_EQ(0u, cpac.checksum);
+  EXPECT_EQ(block.cpacAt(), cpac.offset);
+  EXPECT_EQ(block.cpacBytes(), cpac.length);
+  const glyphstore::SdOutlines outlines = block.outlines();
+  EXPECT_LE(cpac.offset + cpac.length, outlines.fontOffset);
+  EXPECT_EQ(block.bytes(), outlines.fontOffset);
+  // After every other copied table: glyf's record points past the block, and no table starts behind the CPac.
+  const uint32_t tables = static_cast<uint32_t>(image[4] << 8 | image[5]);
+  for (uint32_t i = 0; i < tables; ++i) {
+    const size_t at = 12 + 16 * i;
+    const uint32_t offset = read32(image, at + 8);
+    if (read32(image, at) == 0x43506163u /* CPac */ || offset >= block.bytes()) continue;
+    EXPECT_LT(offset, cpac.offset) << "table " << i;
+  }
+  // The room reads erased: the install writes the table there.
+  EXPECT_TRUE(std::all_of(image.begin() + cpac.offset, image.begin() + cpac.offset + cpac.length,
+                          [](const uint8_t b) { return b == 0xFF; }));
+  EXPECT_EQ(block.bytes(), probed.sdBytes);
+  EXPECT_EQ(ttf::flashBlockBytes(static_cast<uint32_t>(bytes.size()), probed.cpacBytes), probed.flashBytes);
+  EXPECT_GT(probed.flashBytes, bytes.size());
+}
+
+TEST(TtfFamily, TheCpacRoomIsWhatTheWriterWrites) {
+  for (const Bytes& bytes :
+       {readFixture("NotoSansDevanagari-Shaping-Regular.ttf"), readFont("Bookerly/Bookerly-Regular.ttf")}) {
+    ASSERT_FALSE(bytes.empty());
+    const uint32_t written = writerBytes(bytes);
+    EXPECT_GT(written, 0u);
+    MemoryFile file{bytes};
+    uint32_t room = 0;
+    ASSERT_TRUE(ttf::filterTableBytes(file.source(), &room));
+    EXPECT_EQ(written, room);
+    // The counts alone give the same room, whatever table they came from.
+    ttf::LayoutCounts gsub;
+    ttf::LayoutCounts gpos;
+    const DirRecord gsubRecord = recordOf(bytes, "GSUB");
+    const DirRecord gposRecord = recordOf(bytes, "GPOS");
+    ASSERT_TRUE(ttf::countLookups(file.source(), gsubRecord.offset, gsubRecord.length, &gsub));
+    ASSERT_TRUE(ttf::countLookups(file.source(), gposRecord.offset, gposRecord.length, &gpos));
+    EXPECT_EQ(written, ttf::cpacBytesFor(gsub, gpos));
+    EXPECT_EQ(written, 16 + 28 * (gsub.lookups + gpos.lookups) + 24 * (gsub.subtables + gpos.subtables));
+  }
+}
+
+TEST(TtfFamily, TheProbeCapsAreTheWritersCaps) {
+  EXPECT_EQ(ot::FilterTableWriter::kMaxLookups, ttf::kCpacMaxLookups);
+  EXPECT_EQ(ot::FilterTableWriter::kMaxSubtables, ttf::kCpacMaxSubtables);
+}
+
+TEST(TtfFamily, AFontWithoutLookupsReservesNoCpac) {
+  MemoryFile file{builtFont()};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  EXPECT_EQ(0, probed.style);
+  EXPECT_EQ(0u, probed.cpacBytes);
+  EXPECT_EQ(file.bytes.size(), probed.flashBytes);
+  ttf::SdBlock block;
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
+  EXPECT_EQ(0u, block.cpacBytes());
+  EXPECT_EQ(0u, block.cpacAt());
+  EXPECT_EQ(block.bytes(), probed.sdBytes);
+  EXPECT_FALSE(recordOf(blockImage(block), "CPac").found);
+}
+
+TEST(TtfFamily, TheCffBlockKeepsItsCffTableLast) {
+  const Bytes bytes = readFixture("NotoSansJP-Cff.otf");
+  ASSERT_FALSE(bytes.empty());
+  MemoryFile file{bytes};
+  const ttf::FileProbe probed = ttf::probeFile(file.source());
+  ttf::SdBlock block;
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
+  EXPECT_GT(probed.cpacBytes, 0u);  // its GPOS has kern
+  EXPECT_EQ(block.bytes(), probed.sdBytes);
+  const std::vector<uint8_t> image = blockImage(block);
+  const DirRecord cpac = recordOf(image, "CPac");
+  const DirRecord cff = recordOf(image, "CFF ");
+  ASSERT_TRUE(cpac.found);
+  ASSERT_TRUE(cff.found);
+  EXPECT_EQ(probed.cpacBytes, cpac.length);
+  EXPECT_LE(cpac.offset + cpac.length, cff.offset);
+  // The rebuilt table ends the block and runs past it (the charstring data stays on the card); no other starts later.
+  EXPECT_LT(cff.offset, block.bytes());
+  EXPECT_GT(cff.offset + cff.length, block.bytes());
+  const uint32_t tables = static_cast<uint32_t>(image[4] << 8 | image[5]);
+  for (uint32_t i = 0; i < tables; ++i) EXPECT_LE(read32(image, 12 + 16 * i + 8), cff.offset) << "table " << i;
+}
+
+TEST(TtfFamily, AHostileLookupListIsCountedBounded) {
+  // 65,535 lookups declared, every offset past the table: no CPac, and no walk of the list.
+  {
+    MemoryFile file{fontWithGsub(gsubWith(65535, std::vector<uint16_t>(65535, 0xFFFF), {}))};
+    const ttf::FileProbe probed = ttf::probeFile(file.source());
+    EXPECT_EQ(0, probed.style);
+    EXPECT_EQ(0u, probed.cpacBytes);
+    EXPECT_EQ(file.bytes.size(), probed.flashBytes);
+    EXPECT_LT(file.reads, 100u);
+    EXPECT_EQ(0u, writerBytes(file.bytes));
+  }
+  // The most it takes: 4,096 lookups of a subtable each.
+  {
+    MemoryFile file{fontWithGsub(gsubOfSimpleLookups(4096))};
+    const ttf::FileProbe probed = ttf::probeFile(file.source());
+    EXPECT_EQ(16u + 28u * 4096 + 24u * 4096, probed.cpacBytes);
+    EXPECT_EQ(writerBytes(file.bytes), probed.cpacBytes);
+    // One more lookup is past the cap.
+    MemoryFile past{fontWithGsub(gsubOfSimpleLookups(4097))};
+    EXPECT_EQ(0u, ttf::probeFile(past.source()).cpacBytes);
+  }
+  // 4,096 lookups at one lookup that declares 65,535 subtables: the declarations sum past the cap, whatever the
+  // lookups' count.
+  {
+    const uint32_t listBytes = 2 + 2 * 4096;
+    MemoryFile file{fontWithGsub(
+        gsubWith(4096, std::vector<uint16_t>(4096, static_cast<uint16_t>(listBytes)), lookupDeclaring(65535)))};
+    const ttf::FileProbe probed = ttf::probeFile(file.source());
+    EXPECT_EQ(0, probed.style);
+    EXPECT_EQ(0u, probed.cpacBytes);
+    EXPECT_EQ(0u, writerBytes(file.bytes));
+  }
+  // At the subtable cap exactly: still a table; one past: none.
+  for (const uint32_t subtables : {ttf::kCpacMaxSubtables, ttf::kCpacMaxSubtables + 1}) {
+    MemoryFile file{fontWithGsub(gsubWith(1, {4}, lookupDeclaring(subtables)))};
+    const uint32_t room = ttf::probeFile(file.source()).cpacBytes;
+    EXPECT_EQ(writerBytes(file.bytes), room) << subtables;
+    EXPECT_EQ(subtables == ttf::kCpacMaxSubtables ? 16u + 28u + 24u * subtables : 0u, room) << subtables;
+  }
+}
+
+TEST(TtfFamily, ACardReadFailingWhileCountingIsTransient) {
+  MemoryFile file{fontWithGsub(gsubOfSimpleLookups(300))};
+  ttf::SdBlock block;
+  ASSERT_EQ(ttf::SdPlan::Ok, block.plan(file.source()));
+  EXPECT_EQ(0, ttf::probeFile(file.source()).style);
+  // Reads stop at the LookupList (GSUB's header, then the list 10 bytes in).
+  file.readsTo = recordOf(file.bytes, "GSUB").offset + 10;
+  EXPECT_EQ(ttf::SdPlan::Transient, block.plan(file.source()));
+  EXPECT_EQ(-1, ttf::probeFile(file.source()).style);
+  uint32_t room = 0;
+  EXPECT_FALSE(ttf::filterTableBytes(file.source(), &room));
 }
 
 TEST(TtfSdBlock, AFileWithoutTheOutlinesOfItsKindHasNone) {

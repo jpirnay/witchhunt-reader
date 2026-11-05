@@ -551,6 +551,53 @@ TEST(OtFilterWriter, AnExtensionLookupMixingTypesHasNoSubtables) {
   EXPECT_NE(face.filters(ot::GSUB), nullptr);
 }
 
+// A GSUB of one lookup declaring `subtables` subtables (all at one offset, so the table stays small), padded to hold
+// the offsets the declaration needs.
+static std::vector<uint8_t> gsubWithSubtables(const uint16_t subtables) {
+  std::vector<uint8_t> bytes = {0,
+                                1,
+                                0,
+                                0,
+                                0,
+                                0,
+                                0,
+                                0,
+                                0,
+                                10,  // v1.0, no scripts or features, lookups at 10
+                                0,
+                                1,
+                                0,
+                                4,  // 10: LookupList, one lookup at 4
+                                0,
+                                1,
+                                0,
+                                0,  // 14: lookup type 1, no flags
+                                static_cast<uint8_t>(subtables >> 8),
+                                static_cast<uint8_t>(subtables)};
+  bytes.resize(bytes.size() + 2u * subtables, 0);
+  return bytes;
+}
+
+TEST(OtFilterWriter, MoreSubtablesThanTheCapGiveNoTable) {
+  const std::vector<uint8_t> font = readFixture("NotoSansTamil-Regular.layout");
+  ot::FaceTables tables;
+  ASSERT_TRUE(ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables));
+  tables[ot::FaceTables::CPAC] = ot::Table();
+  tables[ot::FaceTables::GPOS_TABLE] = ot::Table();
+  const auto bytesFor = [&](const uint16_t subtables) {
+    const std::vector<uint8_t> gsub = gsubWithSubtables(subtables);
+    tables[ot::FaceTables::GSUB_TABLE] = ot::Table(gsub.data(), static_cast<uint32_t>(gsub.size()));
+    ot::Face face;
+    EXPECT_TRUE(face.init(tables));
+    EXPECT_EQ(face.lookupCount(ot::GSUB), 1u);
+    return ot::FilterTableWriter(face).bytes();
+  };
+  constexpr uint32_t kCap = ot::FilterTableWriter::kMaxSubtables;
+  EXPECT_EQ(bytesFor(kCap), 16u + 28u + 24u * kCap);  // at the cap: written
+  EXPECT_EQ(bytesFor(kCap + 1), 0u);                  // one past: none
+  EXPECT_EQ(bytesFor(UINT16_MAX), 0u);
+}
+
 TEST(OtShaperHelpers, DecodeUtf8StopsAtATruncatedSequence) {
   const char s[] = "\xE0\xA4\0A";
   uint32_t out[4] = {};

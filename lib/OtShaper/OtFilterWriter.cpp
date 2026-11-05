@@ -30,7 +30,10 @@ FilterTableWriter::FilterTableWriter(const Face& face) : face_(face) {
   for (int t = GSUB; t <= GPOS; t++) {
     lookups_[t] = face.lookupCount(t);
     if (lookups_[t] > kMaxLookups) return;
-    for (uint32_t i = 0; i < lookups_[t]; i++) subtables_[t] += Face::subtableCount(face.lookup(t, i));
+    for (uint32_t i = 0; i < lookups_[t]; i++) {                // witchhunt: deviation 4
+      subtables_[t] += Face::subtableCount(face.lookup(t, i));  // witchhunt: deviation 4
+      if (subtables_[t] > kMaxSubtables) return;                // witchhunt: deviation 4
+    }
   }
   if (lookups_[GSUB] + lookups_[GPOS] == 0) return;
   const uint64_t size =

@@ -1626,8 +1626,9 @@ TEST_F(TtfFontSetTest, MoreStylesThanTheStoreHoldsAreRefusedBeforeAnyErase) {
 namespace {
 
 constexpr uint32_t kPage = glyphstore::kPageBytes;
-// Bookerly's four styles take 35 of a font area's pages in flash mode (the whole files), 19 in SD mode (their tables,
-// 3 pages each): on 24 pages only SD mode fits.
+// Bookerly's four styles take 38 of a font area's pages in flash mode (the whole files and their CPac room: 7, 7, 8
+// and 8 pages, the largest mapped once more; 35 before the CPac), 19 in SD mode (their tables, 3 pages each): on 24
+// pages only SD mode fits.
 constexpr uint32_t kSdOnlyBytes = 24 * kPage;
 
 void expectWrittenOnce(const SimNorFlash& chip) {
@@ -1664,7 +1665,7 @@ TEST_F(TtfFontSetTest, AFamilyTooLargeForFlashModeIsDrawnFromTheCardAsFlashModeD
     EXPECT_GT(set->sdPageReads(), 0u);
   }
   // The next boot draws them from the store: neither rendered again nor read from the card, but for the table
-  // directory the open compares with the block's.
+  // directory the open compares with the block's, and the lookups of GSUB and GPOS counted for the block's CPac room.
   for (MemoryFile& file : files) file.offsets.clear();
   const auto set = openFamilies(chip, {files}, busy);
   ASSERT_NE(nullptr, set);
@@ -1674,7 +1675,20 @@ TEST_F(TtfFontSetTest, AFamilyTooLargeForFlashModeIsDrawnFromTheCardAsFlashModeD
   const std::vector<uint8_t>& bold = files[kBold].bytes;
   const uint32_t directoryEnd = 12 + 16u * static_cast<uint32_t>(bold[4] << 8 | bold[5]);
   ASSERT_FALSE(files[kBold].offsets.empty());
-  for (const uint32_t offset : files[kBold].offsets) EXPECT_LT(offset, directoryEnd);
+  const auto layoutTable = [&bold](const char* name) {
+    const size_t at = findRecord(bold, name);
+    const auto word = [&](const size_t from) {
+      return static_cast<uint32_t>(bold[from]) << 24 | bold[from + 1] << 16 | bold[from + 2] << 8 | bold[from + 3];
+    };
+    return std::pair<uint32_t, uint32_t>{word(at + 8), word(at + 8) + word(at + 12)};
+  };
+  const auto gsub = layoutTable("GSUB");
+  const auto gpos = layoutTable("GPOS");
+  for (const uint32_t offset : files[kBold].offsets) {
+    const bool counted =
+        (offset >= gsub.first && offset < gsub.second) || (offset >= gpos.first && offset < gpos.second);
+    EXPECT_TRUE(offset < directoryEnd || counted) << offset;
+  }
   expectWrittenOnce(chip);
 }
 
@@ -2475,21 +2489,19 @@ TEST_F(TtfFontSetTest, APlanWithoutMemoryInAnInstallErasesNothingAndAsksForNoFew
 }
 
 TEST_F(TtfFontTest, AProbeThatCannotPlanForNowLeavesACffFamilyListed) {
-  // Discovery plans a CFF file's block to learn its size. Without the memory this once, or with the card failing
-  // past the file's first sector, the size is not known: the family stays listed for its load to decide, rather than
-  // be dropped as too large until the next scan.
+  // Discovery plans a CFF file's block to learn its size. Without the memory this once, the size is not known: the
+  // family stays listed for its load to decide, rather than be dropped as too large until the next scan. With the
+  // card failing past the file's first sector, the layout tables cannot be counted (the CPac room): not a font for now.
   MemoryFile cjk;
   cjk.bytes = tooLargeForFlashMode("NotoSerifJP-CffFlat.otf");
   const uint32_t fileBytes = static_cast<uint32_t>(cjk.bytes.size());
   refuseNextObjectBytes = ttf::CffBlock::planBytes();
   const ttf::FileProbe withoutMemory = ttf::probeFile(cjk.source());
+  EXPECT_EQ(0, withoutMemory.style);
+  EXPECT_EQ(ttf::kSdBytesUnknown, withoutMemory.sdBytes);
+  EXPECT_TRUE(ttf::fitsStore(&fileBytes, &withoutMemory.sdBytes, 1, kSdOnlyBytes, 24));
   cjk.readsTo = ttf::SdPageCache::kPageBytes;
-  const ttf::FileProbe withoutReads = ttf::probeFile(cjk.source());
-  for (const ttf::FileProbe& probe : {withoutMemory, withoutReads}) {
-    EXPECT_EQ(0, probe.style);
-    EXPECT_EQ(ttf::kSdBytesUnknown, probe.sdBytes);
-    EXPECT_TRUE(ttf::fitsStore(&fileBytes, &probe.sdBytes, 1, kSdOnlyBytes, 24));
-  }
+  EXPECT_EQ(-1, ttf::probeFile(cjk.source()).style);
   // A file too large for flash mode that can have no block is not listed; one that can, by its size.
   const uint32_t none = UINT32_MAX;
   EXPECT_FALSE(ttf::fitsStore(&fileBytes, &none, 1, kSdOnlyBytes, 24));

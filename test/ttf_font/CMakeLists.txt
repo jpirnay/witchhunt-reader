@@ -25,6 +25,8 @@ add_executable(TtfFontTest
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfFace.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/TtfRasterizer.cpp
   ${REPO_ROOT}/lib/EpdFont/ttf/third_party/freetype/ftgrays.c
+  # the CPac writer the tests compare the probe's room with (TtfFamily.cpp itself stays free of it)
+  ${OT_SHAPER_SOURCES}
   ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp
   ${REPO_ROOT}/lib/EpdFont/EpdFontFamily.cpp
   ${REPO_ROOT}/lib/EpdFont/GlyphFallback.cpp
@@ -45,6 +47,7 @@ target_include_directories(TtfFontTest PRIVATE
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/Memory
   ${REPO_ROOT}/lib/Utf8
+  ${OT_SHAPER_INCLUDE_DIR}
 )
 
 target_compile_definitions(TtfFontTest PRIVATE

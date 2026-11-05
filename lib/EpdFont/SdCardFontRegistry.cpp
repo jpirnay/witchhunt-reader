@@ -123,7 +123,8 @@ void SdCardFontRegistry::addTtfFiles(const char* dirPath, const std::vector<std:
   uint8_t styleCount = 0;
   for (const int file : chosen) {
     if (file < 0) continue;
-    fileBytes[styleCount] = bytes[order[static_cast<size_t>(file)]];
+    // Flash mode copies the file and writes its CPac behind it: the block, not the file, is what must fit.
+    fileBytes[styleCount] = probes[static_cast<size_t>(file)].flashBytes;
     sdBytes[styleCount++] = probes[static_cast<size_t>(file)].sdBytes;
   }
   if (ttfFits_ && !ttfFits_(fileBytes, sdBytes, styleCount)) {
