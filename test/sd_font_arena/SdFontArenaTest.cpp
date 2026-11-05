@@ -7,12 +7,15 @@
 #include <Arduino.h>
 #include <BuildArena.h>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <new>
 #include <string>
 #include <vector>
@@ -102,10 +105,20 @@ std::vector<uint8_t> buildFont(const uint16_t bitmapBytes, const bool kerning, c
   putU32(b, intervalsAt + 16, 0xFFFD);
   putU32(b, intervalsAt + 20, LETTERS);
 
+  // A glyph record holds together (SdCardFont::glyphEntryValid): `side` square where that packs to `bitmapBytes`, else
+  // the first width from there that does, with the height that makes it exact.
+  uint8_t width = side;
+  uint8_t height = side;
+  if (glyphDataBytes(side, side, twoBit) != bitmapBytes) {
+    const uint32_t pixels = bitmapBytes * 8u / (twoBit ? 2u : 1u);
+    while (pixels % width != 0 || pixels / width > 255) ++width;
+    height = static_cast<uint8_t>(pixels / width);
+  }
+
   for (uint32_t g = 0; g < GLYPHS; g++) {
     const size_t at = glyphsAt + g * sizeof(EpdGlyph);
-    b[at] = side;                         // width
-    b[at + 1] = side;                     // height
+    b[at] = width;
+    b[at + 1] = height;
     putU16(b, at + 2, 10 << 4);           // advanceX, 12.4 fixed point
     putU16(b, at + 6, 8);                 // top
     putU16(b, at + 8, bitmapBytes);       // dataLength
@@ -129,9 +142,9 @@ std::vector<uint8_t> buildFont(const uint16_t bitmapBytes, const bool kerning, c
 
 // Named after the running test: ctest -j runs each test in its own process.
 std::string writeTemp(const std::vector<uint8_t>& bytes) {
-  const auto path =
-      std::filesystem::temp_directory_path() /
-      (std::string("sd_font_arena_") + testing::UnitTest::GetInstance()->current_test_info()->name() + ".cpfont");
+  const auto path = std::filesystem::temp_directory_path() /
+                    (std::string("sd_font_arena_") + std::to_string(getpid()) + "_" +
+                     testing::UnitTest::GetInstance()->current_test_info()->name() + ".cpfont");
   FILE* f = std::fopen(path.string().c_str(), "wb");
   EXPECT_NE(f, nullptr);
   std::fwrite(bytes.data(), 1, bytes.size(), f);
@@ -568,4 +581,208 @@ TEST(SdFontArena, AGlyphLongerThanAChunkWithAnOddByteCountPacksWhole) {
     ASSERT_EQ(glyphDataBytes(kSide, kSide, false), i.glyph[g].dataLength) << "glyph " << g;
     expectInkMaskOf(f.bitmap + f.glyph[g].dataOffset, i.bitmap + i.glyph[g].dataOffset, kSide * kSide, g);
   }
+}
+
+// --- Corrupt glyph entries ---
+//
+// A glyph's record names its bitmap, and the draw reads width x height pixels from there whatever the record's length
+// says. A record that does not hold together draws as a missing character does, U+FFFD: on the mmap path a wild offset
+// reads outside the mapping, which faults on the device.
+namespace {
+
+constexpr uint16_t kSide8 = 8;
+constexpr uint16_t kBytes = glyphDataBytes(kSide8, kSide8, false);
+constexpr uint32_t kGlyphB = 1;
+constexpr uint32_t kReplacementGlyph = LETTERS;  // U+FFFD follows the letters
+constexpr uint32_t kFarOffset = 0x7FFFFF00;
+
+size_t glyphRecordAt(const uint32_t glyph) {
+  return HEADER + TOC_ENTRY + INTERVALS * sizeof(EpdUnicodeInterval) + glyph * sizeof(EpdGlyph);
+}
+
+// The font of the tests below: A-D and U+FFFD, 8 x 8, 1-bit, each glyph's pattern its index + 1.
+std::vector<uint8_t> patternedFont() {
+  std::vector<uint8_t> font = buildFont(kBytes, /*kerning=*/false);
+  const size_t bitmaps = font.size() - GLYPHS * kBytes;
+  for (uint32_t g = 0; g < GLYPHS; g++) std::memset(&font[bitmaps + g * kBytes], static_cast<int>(g + 1), kBytes);
+  return font;
+}
+
+std::vector<uint8_t> withBadOffset() {
+  std::vector<uint8_t> font = patternedFont();
+  putU32(font, glyphRecordAt(kGlyphB) + 12, kFarOffset);
+  return font;
+}
+
+std::vector<uint8_t> withBadLength(const uint16_t dataLength) {
+  std::vector<uint8_t> font = patternedFont();
+  putU16(font, glyphRecordAt(kGlyphB) + 8, dataLength);
+  return font;
+}
+
+void expectDrawsNothing(const EpdFont& font, const uint32_t cp) {
+  const EpdGlyphRef glyph = font.getGlyph(cp);
+  ASSERT_TRUE(static_cast<bool>(glyph));
+  EXPECT_EQ(0, glyph.width);
+  EXPECT_EQ(0, glyph.height);
+}
+
+// `cp`'s bitmap, wherever the font keeps it, is the pattern of glyph `index`.
+void expectPattern(const EpdFont& font, const uint32_t cp, const uint32_t index) {
+  const EpdGlyphRef glyph = font.getGlyph(cp);
+  ASSERT_TRUE(static_cast<bool>(glyph));
+  ASSERT_EQ(kSide8, glyph.width);
+  const uint8_t* bitmap = nullptr;
+  if (!glyph.sdRecord || !font.data->provider->ownsBitmap(glyph.sdRecord, bitmap)) {
+    bitmap = font.data->bitmap + epdGlyphBitmapOffset(font.data, glyph);
+  }
+  ASSERT_NE(nullptr, bitmap);
+  for (uint16_t i = 0; i < kBytes; i++) ASSERT_EQ(index + 1, bitmap[i]) << "byte " << i;
+}
+
+}  // namespace
+
+TEST(SdFontCorruptGlyph, AnOffsetPastTheFileDrawsTheReplacementAndCostsTheOthersNothing) {
+  const std::string path = writeTemp(withBadOffset());
+  SdCardFont font;
+  ASSERT_TRUE(font.load(path.c_str()));
+  EXPECT_EQ(0, font.prewarm("ABCD", 0x01));  // one bad record does not cost the page its prewarm
+  const EpdFont& epd = *font.getEpdFont(0);
+  expectPattern(epd, 'B', kReplacementGlyph);
+  expectPattern(epd, 'A', 0);
+  expectPattern(epd, 'C', 2);
+}
+
+TEST(SdFontCorruptGlyph, ALengthShortOfItsPixelsDrawsTheReplacement) {
+  const std::string path = writeTemp(withBadLength(1));
+  SdCardFont font;
+  ASSERT_TRUE(font.load(path.c_str()));
+  EXPECT_EQ(0, font.prewarm("ABCD", 0x01));
+  const EpdFont& epd = *font.getEpdFont(0);
+  expectPattern(epd, 'B', kReplacementGlyph);
+  expectPattern(epd, 'C', 2);
+}
+
+// The glyph loaded on demand, after the page's prewarm, takes the same rule: its buffer is the record's length.
+TEST(SdFontCorruptGlyph, AGlyphMissHoldsTheSameRule) {
+  const std::string path = writeTemp(withBadLength(1));
+  SdCardFont font;
+  ASSERT_TRUE(font.load(path.c_str()));
+  ASSERT_EQ(0, font.prewarm("A", 0x01));
+  expectPattern(*font.getEpdFont(0), 'B', kReplacementGlyph);
+}
+
+TEST(SdFontCorruptGlyph, AGlyphMissPastTheFileDrawsTheReplacement) {
+  const std::string path = writeTemp(withBadOffset());
+  SdCardFont font;
+  ASSERT_TRUE(font.load(path.c_str()));
+  ASSERT_EQ(0, font.prewarm("A", 0x01));
+  expectPattern(*font.getEpdFont(0), 'B', kReplacementGlyph);
+}
+
+// Bitmaps served from the mapping: the record's offset is used as it stands, so it is the only thing between the draw
+// and an address outside the window.
+TEST(SdFontCorruptGlyph, AnOffsetPastTheMappingDrawsTheReplacement) {
+  const std::vector<uint8_t> file = withBadOffset();
+  const std::string path = writeTemp(file);
+  SdCardFont font;
+  ASSERT_TRUE(font.loadFromMmap(file.data(), file.size(), path.c_str()));
+  EXPECT_EQ(0, font.prewarm("ABCD", 0x01));
+  const EpdFont& epd = *font.getEpdFont(0);
+  expectPattern(epd, 'B', kReplacementGlyph);
+  expectPattern(epd, 'A', 0);
+  expectPattern(epd, 'C', 2);
+}
+
+// The mapping's own size is the bound: a record that ends one byte past it is corrupt.
+TEST(SdFontCorruptGlyph, ABitmapEndingOneBytePastTheMappingDrawsTheReplacement) {
+  std::vector<uint8_t> file = patternedFont();
+  const uint32_t bitmaps = static_cast<uint32_t>(file.size()) - GLYPHS * kBytes;
+  putU32(file, glyphRecordAt(kGlyphB) + 12, static_cast<uint32_t>(file.size()) - bitmaps - kBytes + 1);
+  const std::string path = writeTemp(file);
+  SdCardFont font;
+  ASSERT_TRUE(font.loadFromMmap(file.data(), file.size(), path.c_str()));
+  EXPECT_EQ(0, font.prewarm("ABCD", 0x01));
+  expectPattern(*font.getEpdFont(0), 'B', kReplacementGlyph);
+}
+
+// A page's layout comes first, on metadata alone; the draw's prewarm then keeps what it found.
+TEST(SdFontCorruptGlyph, ARecordReplacedForLayoutStaysReplacedForTheDraw) {
+  const std::string path = writeTemp(withBadLength(1));
+  SdCardFont font;
+  ASSERT_TRUE(font.load(path.c_str()));
+  ASSERT_EQ(0, font.prewarm("ABCD", 0x01, /*metadataOnly=*/true));
+  ASSERT_EQ(0, font.prewarm("ABCD", 0x01));
+  expectPattern(*font.getEpdFont(0), 'B', kReplacementGlyph);
+  expectPattern(*font.getEpdFont(0), 'C', 2);
+}
+
+// With no good U+FFFD to stand in, the record draws nothing, and nothing is read.
+TEST(SdFontCorruptGlyph, WithNoGoodReplacementACorruptRecordDrawsNothing) {
+  std::vector<uint8_t> file = withBadOffset();
+  putU32(file, glyphRecordAt(kReplacementGlyph) + 12, kFarOffset);
+  const std::string path = writeTemp(file);
+  SdCardFont font;
+  ASSERT_TRUE(font.loadFromMmap(file.data(), file.size(), path.c_str()));
+  EXPECT_EQ(0, font.prewarm("ABCD", 0x01));
+  expectDrawsNothing(*font.getEpdFont(0), 'B');
+  expectPattern(*font.getEpdFont(0), 'C', 2);
+}
+
+// What is checked is the record as stored: an ink-only prewarm halves a 2-bit glyph's length, which must not read as
+// a record shorter than its pixels.
+TEST(SdFontCorruptGlyph, AnInkOnlyPrewarmKeepsAGoodTwoBitGlyph) {
+  constexpr uint16_t kTwoBitBytes = glyphDataBytes(kSide8, kSide8, true);
+  const std::string path = writeTemp(buildFont(kTwoBitBytes, /*kerning=*/false, /*twoBit=*/true));
+  SdCardFont font;
+  font.setInkOnlyPrewarm(true);
+  ASSERT_TRUE(font.load(path.c_str()));
+  ASSERT_EQ(0, font.prewarm("AB", 0x01));
+  EXPECT_EQ(kSide8, font.getEpdFont(0)->getGlyph('A').width);
+  EXPECT_EQ(kSide8, font.getEpdFont(0)->getGlyph('C').width);  // and on a miss
+}
+
+// A good font, read whole: no record may be taken for corrupt.
+TEST(SdFontCorruptGlyph, AGoodFontLoadsAsBefore) {
+  const std::vector<uint8_t> file = patternedFont();
+  const std::string path = writeTemp(file);
+  SdCardFont font;
+  ASSERT_TRUE(font.load(path.c_str()));
+  ASSERT_EQ(0, font.prewarm("ABCD", 0x01));
+  for (uint32_t g = 0; g < LETTERS; g++) expectPattern(*font.getEpdFont(0), FIRST_CP + g, g);
+  SdCardFont mapped;
+  ASSERT_TRUE(mapped.loadFromMmap(file.data(), file.size(), path.c_str()));
+  ASSERT_EQ(0, mapped.prewarm("ABCD", 0x01));
+  for (uint32_t g = 0; g < LETTERS; g++) expectPattern(*mapped.getEpdFont(0), FIRST_CP + g, g);
+}
+
+// The rule against every font the app offers, from the file and mapped: a record it refused would be a character gone
+// from a good font. Each runs from a temporary copy, as a font's path has a length limit a checkout's may pass.
+TEST(SdFontCorruptGlyph, NoShippedFontHoldsACorruptRecord) {
+  constexpr const char* kSample =
+      " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+      "\xC3\xA4\xC3\xB6\xC3\xBC\xC3\x9F\xC3\xA9\xC3\xB1\xC3\xA7\xE2\x82\xAC\xE2\x80\x94\xE2\x80\x9C\xE2\x80\xA6"
+      "\xE4\xB8\xAD\xE6\x96\x87\xE3\x81\x8B\xED\x95\x9C";  // a Latin page's accents, then 中文か한
+  uint32_t fonts = 0;
+  sdcfLines.clear();
+  setLogObserver(keepSdcfLine);
+  for (const auto& family : std::filesystem::directory_iterator(SD_FONTS_DIR)) {
+    if (!family.is_directory()) continue;
+    for (const auto& entry : std::filesystem::directory_iterator(family.path())) {
+      if (entry.path().extension() != ".cpfont") continue;
+      std::ifstream in(entry.path(), std::ios::binary);
+      const std::vector<uint8_t> file((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+      const std::string path = writeTemp(file);
+      SdCardFont fromCard;
+      ASSERT_TRUE(fromCard.load(path.c_str())) << entry.path();
+      fromCard.prewarm(kSample, 0x0F);
+      SdCardFont mapped;
+      ASSERT_TRUE(mapped.loadFromMmap(file.data(), file.size(), path.c_str())) << entry.path();
+      mapped.prewarm(kSample, 0x0F);
+      ++fonts;
+    }
+  }
+  setLogObserver(nullptr);
+  EXPECT_GE(fonts, 100u);
+  EXPECT_EQ(0, countLines("ERR", "Corrupt glyph"));
 }

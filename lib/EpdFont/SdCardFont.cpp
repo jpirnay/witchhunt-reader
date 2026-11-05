@@ -782,6 +782,8 @@ bool SdCardFont::load(const char* path) {
     LOG_ERR("SDCF", "Failed to open .cpfont: %s", path);
     return false;
   }
+  fileSize_ = static_cast<uint32_t>(file.fileSize());
+  corruptGlyphsLogged_ = 0;
 
   // Read and validate global header
   uint8_t headerBuf[HEADER_SIZE];
@@ -949,6 +951,8 @@ bool SdCardFont::loadFromMmap(const uint8_t* base, size_t size, const char* sdPa
     LOG_ERR("SDCF", "loadFromMmap: invalid pointer or size %u", static_cast<unsigned>(size));
     return false;
   }
+  fileSize_ = static_cast<uint32_t>(size);
+  corruptGlyphsLogged_ = 0;
 
   // Validate magic and version
   if (memcmp(base, CPFONT_MAGIC, 8) != 0) {
@@ -1307,6 +1311,18 @@ bool SdCardFont::allCpsCovered(const PerStyle& s, const uint32_t* codepoints, ui
   return true;
 }
 
+bool SdCardFont::glyphEntryValid(const PerStyle& s, const EpdGlyph& glyph, const uint32_t codepoint) {
+  const uint64_t end = static_cast<uint64_t>(s.bitmapFileOffset) + glyph.dataOffset + glyph.dataLength;
+  if (glyph.dataLength == glyphDataBytes(glyph.width, glyph.height, s.header.is2Bit) && end <= fileSize_) return true;
+  if (corruptGlyphsLogged_ < 3) {
+    corruptGlyphsLogged_++;
+    LOG_ERR("SDCF", "Corrupt glyph for U+%04X in %s (%ux%u, %u bytes at %u): drawn as missing",
+            static_cast<unsigned>(codepoint), filePath_, glyph.width, glyph.height, glyph.dataLength,
+            static_cast<unsigned>(glyph.dataOffset));
+  }
+  return false;
+}
+
 int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly,
                              bool loadKernLigatureData) {
   auto& s = styles_[styleIdx];
@@ -1323,6 +1339,9 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
   //
   // Full (bitmap) prewarms still go through the normal path: bitmaps are not in
   // the mmap region and must be read from SD.
+  //
+  // These records are not checked (glyphEntryValid): layout reads their metrics and no bitmap, so a corrupt one can
+  // only misplace a word, and the draw's full prewarm replaces it.
   if (mmapDataBase_ && metadataOnly) {
     if (s.miniMode == PerStyle::MiniMode::NONE) {
       // First call: wire miniData directly to flash-resident data.
@@ -1651,6 +1670,7 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
     // decodes to a garbage EpdGlyph with a massive advanceX, inflating any word
     // containing that codepoint beyond page width).
     int32_t lastReadIndex = INT32_MIN;
+    bool anyCorrupt = false;
     for (uint32_t i = 0; i < toReadCount; i++) {
       uint32_t mapIdx = readOrder[i];
       int32_t gIdx = mappings[mapIdx].globalIndex;
@@ -1670,6 +1690,20 @@ int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint3
         return static_cast<int>(cpCount);
       }
       lastReadIndex = gIdx;
+      // From here on a set flag means the record is corrupt.
+      needsRead[mapIdx] = !glyphEntryValid(s, s.miniGlyphs[mapIdx], mappings[mapIdx].codepoint);
+      anyCorrupt = anyCorrupt || needsRead[mapIdx];
+    }
+    // A corrupt record takes U+FFFD's, as a character the font lacks draws, and the page keeps its other glyphs. Its
+    // interval stays, so an empty record stands in where there is no good U+FFFD to take: it draws nothing.
+    if (anyCorrupt) {
+      EpdGlyph replacement{};
+      for (uint32_t i = 0; i < validCount; i++) {
+        if (mappings[i].codepoint == REPLACEMENT_GLYPH && !needsRead[i]) replacement = s.miniGlyphs[i];
+      }
+      for (uint32_t i = 0; i < validCount; i++) {
+        if (needsRead[i]) s.miniGlyphs[i] = replacement;
+      }
     }
   }
   freeArray(needsRead);
@@ -1994,6 +2028,10 @@ const EpdGlyph* SdCardFont::onGlyphMiss(void* ctx, uint32_t codepoint) {
     LOG_ERR("SDCF", "Overflow: failed to read glyph metadata for U+%04X style %u", codepoint, styleIdx);
     file.close();
     return nullptr;
+  }
+  if (!self->glyphEntryValid(s, tempGlyph, codepoint)) {
+    file.close();
+    return nullptr;  // as a glyph the font lacks: EpdFont draws U+FFFD for it
   }
 
   // Read bitmap data into temporary (if any)
