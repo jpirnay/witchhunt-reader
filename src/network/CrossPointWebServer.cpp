@@ -2258,7 +2258,8 @@ bool fetchRemoteFontManifest(HttpDownloader::Session& session, FontInstaller& in
                              std::string& outBaseUrl, std::string& outError) {
   static constexpr const char* MANIFEST_TMP = "/fonts_manifest_web.tmp";
 
-  auto result = HttpDownloader::downloadToFile(session, FONT_MANIFEST_URL, MANIFEST_TMP, nullptr);
+  auto result = HttpDownloader::downloadToFile(session, FONT_MANIFEST_URL, MANIFEST_TMP, nullptr, "", "",
+                                               HttpDownloader::TlsPolicy::Verified);
   if (result != HttpDownloader::OK) {
     outError = "Failed to fetch font manifest";
     Storage.remove(MANIFEST_TMP);
@@ -2411,7 +2412,8 @@ bool installRemoteFamily(HttpDownloader::Session& session, const FontCatalog& fa
 
     const std::string url = baseUrl + fileName;
 
-    auto result = HttpDownloader::downloadToFile(session, url, stagedPath, nullptr);
+    auto result =
+        HttpDownloader::downloadToFile(session, url, stagedPath, nullptr, "", "", HttpDownloader::TlsPolicy::Verified);
     if (result != HttpDownloader::OK) {
       // Drop just the failed file; keep already-downloaded siblings.
       Storage.remove(stagedPath);
@@ -3376,7 +3378,8 @@ void CrossPointWebServer::handleFetchToSd() {
 
   LOG_DBG("WEB", "Fetch %s -> %s", url.c_str(), dest.c_str());
   const HttpDownloader::DownloadError result = HttpDownloader::downloadToFile(
-      url, dest.c_str(), nullptr, "", "", HttpDownloader::TlsPolicy::Verified, redirectsWithinAllowlist(plugin));
+      url, dest.c_str(), nullptr, "", "", HttpDownloader::TlsPolicy::VerifiedThenUnverified,
+      redirectsWithinAllowlist(plugin));
   if (result != HttpDownloader::OK) {
     LOG_ERR("WEB", "Fetch to SD failed (%d): %s", static_cast<int>(result), url.c_str());
     server->send(502, "application/json", "{\"error\":\"download failed\"}");

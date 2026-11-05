@@ -115,7 +115,9 @@ bool FontDownloadActivity::fetchAndParseManifest() {
   // is read, so the reader has full heap headroom. The Session is opened later
   // for the per-file download loop, after the font list has been stashed to
   // the card.
-  auto result = HttpDownloader::downloadToFile(FONT_MANIFEST_URL, MANIFEST_TMP, nullptr);
+  // Verified, here and for the files: the manifest's checksums are what protects them.
+  auto result = HttpDownloader::downloadToFile(FONT_MANIFEST_URL, MANIFEST_TMP, nullptr, "", "",
+                                               HttpDownloader::TlsPolicy::Verified);
   if (result != HttpDownloader::OK) {
     LOG_ERR("FONT", "Failed to fetch manifest from %s", FONT_MANIFEST_URL);
     errorMessage_ = "Failed to fetch font list";
@@ -514,7 +516,8 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
     std::string url = baseUrl_ + fileName;
 
     auto result = HttpDownloader::downloadToFile(
-        httpSession_, url, stagedPath, [this](unsigned int downloaded, unsigned int total) {
+        httpSession_, url, stagedPath,
+        [this](unsigned int downloaded, unsigned int total) {
           fileProgress_ = downloaded;
           fileTotal_ = total;
 
@@ -532,7 +535,8 @@ void FontDownloadActivity::downloadFamilyImpl(FontCatalog& family, int familyIdx
           }
 
           return !backPressedDuringTransfer();
-        });
+        },
+        "", "", HttpDownloader::TlsPolicy::Verified);
 
     if (result == HttpDownloader::ABORTED) {
       LOG_INF("FONT", "Download cancelled: %s", fileName);
