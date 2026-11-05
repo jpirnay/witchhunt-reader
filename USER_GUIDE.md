@@ -115,7 +115,7 @@ To reach the Home screen, hold the **Back** box on the screen.
 The reader uses two keys on the left edge and a touch-sensitive **Home key** below the screen. There
 is no Up, Back or Confirm key.
 
-<img src="docs/images/devices/lilygo-t5s3.svg" width="320" alt="LilyGo T5 S3 Pro. Left edge: Power, marked BOOT, with Down, marked IO48, below it. Home key below the screen. Right edge: the PWR and RST buttons, marked do not press.">
+<img src="docs/images/devices/lilygo-t5s3.svg" width="320" alt="LilyGo T5 S3 Pro. Left edge: Power, marked BOOT, with Down, marked IO48, below it. Home key below the screen. Right edge, level with those two: the RST button with the PWR button below it, both marked do not press.">
 
 | Key | Press | Hold |
 | --- | --- | --- |
@@ -124,7 +124,7 @@ is no Up, Back or Confirm key.
 | **Down** (marked IO48) | In a book: next page. In a list: move down | In a book: next chapter. In a list: jump to the last row |
 
 > [!WARNING]
-> **Do not press the power (PWR) and reset (RST) buttons on the right edge.** They have no function
+> **Do not press the reset (RST) and power (PWR) buttons on the right edge.** They have no function
 > in the reader, and pressing them can do harm. The reader cannot see the power button, and the
 > reset button restarts the device at once, so neither gives it the chance to save first. To turn
 > the device off, hold the **BOOT** key on the left. Use the reset button only if the device has
