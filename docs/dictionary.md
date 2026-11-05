@@ -69,6 +69,8 @@ On the very first lookup with a dictionary (and again whenever the `.idx` or `.s
 3. **Stemming** — still no match: common English word forms are retried automatically: possessives and plurals (`dogs` → `dog`, `stories` → `story`) and verb endings (`walked` → `walk`, `running` → `run`, `making` → `make`). A French elision with no entry of its own is looked up by the word after its apostrophe (`l’histoire` → `histoire`, `qu’après` → `après`); one the dictionary carries (`d'accord`) is found as it is.
 4. **Not found** — a short popup appears and you return to word selection.
 
+A word the dictionary lists more than once, one entry per part of speech for example, shows all of them, up to eight, each under its own word. Only the spelling that matched counts: `polish` does not bring in `Polish`. A synonym that names several headwords shows them all the same way, and a headword's own entries come with it.
+
 ### Chinese, Japanese and Korean
 
 Chinese and Japanese are written without spaces, so the word screen steps through them a character at a time (a punctuation mark rides along with the character before it). A lookup that starts on a Han or kana character therefore looks for the longest word the dictionary has at that point rather than the character alone:
@@ -81,12 +83,11 @@ Where a word starts and ends:
 - The search reads up to 12 characters from the cursor, across words and line ends, and stops at punctuation (。、「」（）…) or at anything that is not Han or kana. 々, 〆 and the long vowel mark ー count as letters, so コーヒー stays whole.
 - Korean is written with spaces, so a lookup on Hangul takes the word under the cursor and finds the longest entry the word starts with: 학교에서 finds 학교, without the particle.
 - A ruby reading (furigana) is not part of the text: on 吾輩 with わがはい above it, the search reads 吾輩 and on, and the highlight covers the base characters.
-- A word lists at most eight of its entries.
+- A word lists at most eight entries, those behind a synonym included. JMdict files a kana reading as a synonym of each kanji spelling, so はし, a reading of 橋, 箸, 端, 嘴 and four more, shows all eight.
 
 What it does not do:
 - **No deinflection.** 食べた has no entry of its own and finds 食; 먹었습니다 finds nothing in CC-KEDICT. Each entry is headed by the word it is for, so you can see what was matched.
 - **The other script only where the dictionary has it.** The search covers the dictionary's word index and its `.syn`, and none of the Latin fallbacks above (no stemming, no lowercase retry). CC-CEDICT lists every traditional form as a synonym of its simplified headword, so 學校 finds 学校; a dictionary without them finds nothing for text in the other script.
-- **One headword per synonym.** A synonym that several headwords share shows one of them only; which one is not defined. JMdict files a kana reading as a synonym of each kanji spelling, so はし, a reading of 橋, 箸, 端, 嘴 and four more, showed 嘴.
 - **Characters your reading font lacks.** CC-CEDICT writes each word in both scripts (大学生 / 大學生). A font made for one region (Simplified Chinese, Japanese) lacks some characters of the other and draws them as a box; a font that carries both draws them all. The NotoSansCJK `.cpfont` family carries both scripts but not pinyin's ē, ǎ and ū, which drop out of the reading (dàxuéshēng shows as dàxuéshng); a TrueType family has them.
 - **Greedy matches.** The longest word is not always the one the sentence means: 研究生命 starts with 研究生 (graduate student), not 研究 (research). The shorter matches follow it in the definition.
 
@@ -119,6 +120,8 @@ Run the `pyglossary` command (`python -m pyglossary` does not start the converte
 When a word is found, the definition screen shows the matched headword at the top and the definition text below, with a page counter for long definitions. A lookup on Chinese, Japanese or Korean text puts each entry's word in the body instead, above its text; the header keeps the dictionary name and the page counter.
 
 HTML dictionaries that declare `sametypesequence=h` use the EPUB text-layout engine for semantic formatting such as headings, bold, italics, lists, and line breaks. Images and CSS styling are ignored. Definitions that are too large or cannot be laid out within the available memory fall back to plain text.
+
+A dictionary whose `.ifo` has no `sametypesequence` names each entry's types itself. Each text field then takes a line of its own, and sound and picture fields are left out. An entry that is HTML and nothing else is laid out as above; any other mix, and several entries shown together, read as plain text.
 
 - **Left/Right** or side **Up/Down** — previous / next page
 - **Power** — next or previous page too, when its Short Press is set to page forward or back (Settings → Controls → Button Actions → Power), as in the book
