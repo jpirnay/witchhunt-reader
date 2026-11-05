@@ -221,13 +221,18 @@ inline bool clearsGhostsOnEveryScreen() { return BoardConfig::isMurphyM3(); }
 // (Uc8253MurphyDriver::displayGray), so a setting for one means nothing there.
 inline bool panelShowsGray() { return !BoardConfig::isMurphyM3() || FREEINK_MURPHY_GRAY; }
 
-// borrowSecondaryBuffer() hands out a dedicated block of PSRAM rather than the secondary framebuffer,
-// so a borrower gets far more room and the display never drops to one buffer for it. Needed on
-// Murphy, whose 12,480 byte framebuffer cannot hold a ZIP entry's 32 KB inflate ring: it failed as
-// out of memory with 8 MB free, and no unopened book ever got a cover. Named boards rather than
-// every PSRAM build because it changes how each one's panel is driven during a lend: the T5S3 has
-// not been through it.
-inline bool lendsPsramArena() { return BoardConfig::isMurphyM3() || BoardConfig::isX4Pro(); }
+// Every S3 build: the secondary framebuffer is never given up, because PSRAM has the room. A release
+// frees nothing the heap is short of and takes the previous frame away from FAST: on Murphy that
+// left the old screen up with the new one faint over it. HalDisplay refuses the release, and
+// borrowSecondaryBuffer() hands out a dedicated block of PSRAM instead, which also gives a borrower
+// far more room: Murphy's 12,480 byte framebuffer cannot hold a ZIP entry's 32 KB inflate ring.
+inline bool keepsSecondaryBuffer() {
+#if defined(BOARD_HAS_PSRAM) && BOARD_HAS_PSRAM
+  return true;
+#else
+  return false;
+#endif
+}
 
 // A frontlight is present (PWM or PM1-driven).
 inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight(); }

@@ -15,7 +15,7 @@ Landscape needed one fix that was not about size. A virtual front strip now keep
 (`HalCapabilities::frontStripIsVirtual()`, in the orientation provider in `main.cpp`), because rotating them turned
 the physical Up and Down keys into Rename and Delete on the Starred Pages list.
 
-`borrowSecondaryBuffer()` lends a 256 KB PSRAM block on Murphy and the X4 Pro (`HalCapabilities::lendsPsramArena()`).
+`borrowSecondaryBuffer()` lends a 256 KB PSRAM block on every S3 board (`HalCapabilities::keepsSecondaryBuffer()`).
 Murphy's 12,480 byte framebuffer was too small for a ZIP entry's inflate ring, so unopened books got no cover.
 
 **Open, most useful first:**
@@ -29,8 +29,8 @@ Murphy's 12,480 byte framebuffer was too small for a ZIP entry's inflate ring, s
 - Reading Stats book detail in landscape overflows (`ReadingStatsBookDetailActivity.cpp`), and `QrDisplayActivity` in
   landscape forces a large payload to 1 px modules.
 - Button Actions Overview lists keys Murphy does not have.
-- Arena: the T5S3 is not on it. A background build still yields to a render; with the arena it no longer has to, which
-  would be the next gain (`recoverSecondaryBufferIfNeeded()`).
+- Arena: a background build still yields to a render; with the arena it no longer has to, which would be the next gain
+  (`recoverSecondaryBufferIfNeeded()`).
 
 The QR pages (`CrossPointWebServerActivity`, `WifiSelectionActivity`) were reworked on `QrUtils::compactLayout()`
 and are not covered here. Compact metrics do not make that layout redundant: the full layout puts text beside the
