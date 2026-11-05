@@ -77,9 +77,10 @@ In the tables, **hold** means about a second, and a little less for Power and th
 ### Xteink X3 and X4
 
 Every button is a real key. The X4 has all its side keys on the right edge. The X3 has **Volume Up**
-on the left, **Volume Down** on the right, and **Power** and **Reset** on the top edge.
+on the left, **Volume Down** on the right, and **Power** and **Reset** on the top edge. Its four
+front buttons are two double keys: **Back** and **Confirm**, then **Left** and **Right**.
 
-<img src="docs/images/devices/xteink-x4.svg" width="320" alt="Xteink X4. Bottom edge, left to right: Back, Confirm, Left, Right. Right edge, top to bottom: Power, Volume Up, Volume Down, Reset."> <img src="docs/images/devices/xteink-x3.svg" width="320" alt="Xteink X3. Bottom edge, left to right: Back, Confirm, Left, Right. Volume Up on the left edge and Volume Down on the right edge, near the top. Reset and Power on the top edge.">
+<img src="docs/images/devices/xteink-x4.svg" width="320" alt="Xteink X4. Bottom edge, left to right: Back, Confirm, Left, Right. Right edge, top to bottom: Power, Volume Up, Volume Down, Reset."> <img src="docs/images/devices/xteink-x3.svg" width="320" alt="Xteink X3. Below the screen, left to right: a double key for Back and Confirm, and a double key for Left and Right. Volume Up on the left edge and Volume Down on the right edge, near the top. Reset and Power on the top edge, with Reset to the left.">
 
 *The X4 (left) and the X3 (right). Like the other drawings here, these show where the keys are, not the device's exact shape.*
 
