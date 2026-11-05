@@ -245,6 +245,9 @@ void CrossPointWebServerActivity::showServerScreenAndReleaseBuffers() {
   LOG_DBG("WEBACT", "Free heap before frame buffer release: %d bytes", ESP.getFreeHeap());
   renderer.clearScreen();
   renderServerRunning();
+  // Painted here rather than in render(), and render() ships nothing once the buffers are gone, so
+  // this frame stays up for the whole session with nothing to clean it later.
+  activityManager.armGhostClearingRefresh();
   renderer.displayBuffer();
   buffersReleased = true;
   renderer.releaseFrameBuffers();

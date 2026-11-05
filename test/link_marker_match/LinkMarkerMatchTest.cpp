@@ -131,3 +131,57 @@ TEST(LinkMarkerMatch, BracketsInsideAMultiWordMarker) {
   EXPECT_EQ(runLength("see [4] below", {"see", "[4]", "below"}, done), 3);
   EXPECT_TRUE(done);
 }
+
+// A paragraph that needs bidi keeps its controls in the word text (an inserted isolate pair around a dir="ltr" span, a
+// literal mark): the marker is what is between them. Written as UTF-8 escapes: LRI U+2066 = E2 81 A6, PDI U+2069 =
+// E2 81 A9, RLM U+200F = E2 80 8F, LRM U+200E = E2 80 8E, ALM U+061C = D8 9C.
+TEST(LinkMarkerMatch, ABidiIsolatePairAroundTheNumberIsSkipped) {
+  bool done = false;
+  EXPECT_EQ(runLength("1",
+                      {"\xE2\x81\xA6"
+                       "1"
+                       "\xE2\x81\xA9"},
+                      done),
+            1);
+  EXPECT_TRUE(done);
+}
+
+TEST(LinkMarkerMatch, ATrailingMarkIsSkipped) {
+  bool done = false;
+  EXPECT_EQ(runLength("12", {"12\xE2\x80\x8F"}, done), 1);
+  EXPECT_TRUE(done);
+  done = false;
+  EXPECT_EQ(runLength("12",
+                      {"\xD8\x9C"
+                       "[12]\xE2\x80\x8E"},
+                      done),
+            1);
+  EXPECT_TRUE(done);
+}
+
+TEST(LinkMarkerMatch, AControlOnTheMarkerSideIsSkippedToo) {
+  bool done = false;
+  EXPECT_EQ(runLength("1\xE2\x80\x8F", {"1"}, done), 1);
+  EXPECT_TRUE(done);
+}
+
+TEST(LinkMarkerMatch, AWordOfControlsOnlyDoesNotMatch) {
+  bool done = false;
+  EXPECT_EQ(runLength("1", {"\xE2\x81\xA6\xE2\x81\xA9"}, done), 0);
+  EXPECT_FALSE(done);
+  EXPECT_EQ(runLength("1", {"\xE2\x80\x8F"}, done), 0);
+}
+
+TEST(LinkMarkerMatch, AControlInsideTheNumberOrOutsideTheSetStillBlocks) {
+  bool done = false;
+  EXPECT_EQ(runLength("12",
+                      {"1\xE2\x80\x8F"
+                       "2"},
+                      done),
+            0);
+  EXPECT_EQ(runLength("1",
+                      {"\xE2\x81\xA5"
+                       "1"},
+                      done),
+            0);  // U+2065 is not a control
+}

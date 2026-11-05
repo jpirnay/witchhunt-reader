@@ -17,8 +17,8 @@
 
 bool TextBlock::guideDotsEnabled = false;
 
-// 32-bit layout: vptr 4, RenderStyle 12, five scalars and a pad byte 8, arena 4, arenaOwned_ and annotationBytes_ 4,
-// five views 20.
+// 32-bit layout: vptr 4, RenderStyle 12, five scalars and the flag bits' byte 8, arena 4, annotationBytes_ and
+// bidiBytes_ 4, five views 20.
 static_assert(sizeof(void*) != 4 || sizeof(TextBlock) == 52, "a resident page holds ~28 TextBlocks");
 
 namespace {
@@ -60,6 +60,53 @@ uint8_t packStyle(const EpdFontFamily::Style style, const bool continues) {
   return static_cast<uint8_t>((static_cast<uint8_t>(style) & ~TextBlock::WORD_CONTINUES_BIT) |
                               (continues ? TextBlock::WORD_CONTINUES_BIT : 0));
 }
+
+// Calls `use` with each run of `word` between its soft hyphens, in order: together, the text the arena keeps of it.
+template <typename Use>
+void forEachKeptRun(const std::string_view word, Use&& use) {
+  size_t start = 0;
+  for (size_t pos = word.find(SOFT_HYPHEN_UTF8); pos != std::string_view::npos;
+       pos = word.find(SOFT_HYPHEN_UTF8, start)) {
+    use(word.substr(start, pos - start));
+    start = pos + SOFT_HYPHEN_BYTES;
+  }
+  use(word.substr(start));
+}
+
+// Whether `form` is a display form the line keeps for `word`: not empty, and not the text the arena keeps of the word.
+bool formDiffers(const std::string_view word, const std::string_view form) {
+  if (form.empty()) return false;
+  bool same = true;
+  size_t at = 0;  // never past form.size()
+  forEachKeptRun(word, [&](const std::string_view run) {
+    if (!same) return;
+    if (run.size() > form.size() - at || form.substr(at, run.size()) != run) {
+      same = false;
+      return;
+    }
+    at += run.size();
+  });
+  return !same || at != form.size();
+}
+
+// Whether `order` holds each of 0 .. count - 1 once; count at most 256.
+bool isPermutation(const uint8_t* order, const size_t count) {
+  uint8_t seen[256 / 8] = {};
+  for (size_t i = 0; i < count; i++) {
+    const uint8_t p = order[i];
+    const auto bit = static_cast<uint8_t>(1u << (p & 7));
+    if (p >= count || (seen[p >> 3] & bit) != 0) return false;
+    seen[p >> 3] |= bit;
+  }
+  return true;
+}
+
+bool isIdentity(const uint8_t* order, const size_t count) {
+  for (size_t i = 0; i < count; i++) {
+    if (order[i] != i) return false;
+  }
+  return true;
+}
 }  // namespace
 
 TextBlock::ArenaOffsets TextBlock::arenaOffsets(const uint16_t wordCount, const bool hasSizes, const uint8_t fontCount,
@@ -80,8 +127,8 @@ TextBlock::ArenaOffsets TextBlock::arenaOffsets(const uint16_t wordCount, const 
 }
 
 size_t TextBlock::arenaSize(const uint16_t wordCount, const bool hasSizes, const uint8_t fontCount,
-                            const uint16_t textBytes, const uint16_t annotationBytes) {
-  return arenaOffsets(wordCount, hasSizes, fontCount, textBytes).annotations + annotationBytes;
+                            const uint16_t textBytes, const uint16_t annotationBytes, const uint16_t bidiBytes) {
+  return arenaOffsets(wordCount, hasSizes, fontCount, textBytes).annotations + annotationBytes + bidiBytes;
 }
 
 bool TextBlock::allocArena(const size_t size, BuildArena* scratch) {
@@ -189,27 +236,32 @@ TextBlock::TextBlock(std::vector<std::string> words, std::vector<int16_t> word_x
 TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xpos, const BlockStyle& blockStyle,
                      BuildArena* scratch)
     : renderStyle{blockStyle.fontSizeMultiplier, blockStyle.headingFontId, blockStyle.alignment} {
-  if (range.words == nullptr || range.styles == nullptr) {
+  const std::string_view* views = range.wordViews;
+  if ((range.words == nullptr && views == nullptr) || range.styles == nullptr) {
     LOG_ERR("TXB", "Construction failed: null word range");
     isValid = false;
     return;
   }
-  const std::vector<std::string>& words = *range.words;
   const std::vector<EpdFontFamily::Style>& styleSrc = *range.styles;
   const size_t first = range.first;
   const size_t count = range.count;
+  // Word i of the line, whichever the source: the soft-hyphen strip and the arena fill read it through this alone.
+  auto wordAt = [&range, views, first](const size_t i) -> std::string_view {
+    return views != nullptr ? views[i] : std::string_view((*range.words)[first + i]);
+  };
 
   // Every source array must actually span [first, first + count); xpos is per line so it is
-  // indexed from 0 and only needs `count` entries.
+  // indexed from 0 and only needs `count` entries. Views are the line's own: `first` is 0.
   const bool hasSizeSrc = range.sizes != nullptr && !range.sizes->empty();
   // Optional, and only used when it actually spans the range -- a caller that does not track
   // continuation (or hands over a short vector) just produces space-separated words.
   const std::vector<TokenBoundary::Boundary>* boundariesSrc =
       (range.boundaries != nullptr && first + count <= range.boundaries->size()) ? range.boundaries : nullptr;
-  if (count > 10000 || first + count > words.size() || first + count > styleSrc.size() || word_xpos.size() != count ||
+  const size_t wordSrcSize = views == nullptr ? range.words->size() : first == 0 ? count : 0;
+  if (count > 10000 || first + count > wordSrcSize || first + count > styleSrc.size() || word_xpos.size() != count ||
       (hasSizeSrc && first + count > range.sizes->size())) {
     LOG_ERR("TXB", "Construction failed: range out of bounds (first=%u, count=%u, words=%u, xpos=%u)",
-            static_cast<uint32_t>(first), static_cast<uint32_t>(count), static_cast<uint32_t>(words.size()),
+            static_cast<uint32_t>(first), static_cast<uint32_t>(count), static_cast<uint32_t>(wordSrcSize),
             static_cast<uint32_t>(word_xpos.size()));
     isValid = false;
     return;
@@ -236,6 +288,27 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
       isValid = false;
       return;
     }
+  }
+
+  // The bidi region (see the arena layout): the forms that differ from their words' text, and an order that reorders.
+  // An order must number the line's words once each, in a byte.
+  const uint8_t* orderSrc = range.logicalOrder;
+  if (orderSrc != nullptr && (count > kMaxOrderedWords || !isPermutation(orderSrc, count))) {
+    LOG_ERR("TXB", "Construction failed: bad logical order for %u words", static_cast<uint32_t>(count));
+    isValid = false;
+    return;
+  }
+  const bool keepOrder = orderSrc != nullptr && !isIdentity(orderSrc, count);
+  size_t formBytes = 0;
+  for (size_t i = 0; range.displayForms != nullptr && i < count; i++) {
+    if (formDiffers(wordAt(i), range.displayForms[i])) formBytes += range.displayForms[i].size() + 1;
+  }
+  const size_t bidiBytes =
+      (formBytes == 0 && !keepOrder) ? 0 : 1 + (formBytes != 0 ? 2 * count + formBytes : 0) + (keepOrder ? count : 0);
+  if (bidiBytes > UINT16_MAX) {
+    LOG_ERR("TXB", "Construction failed: bidi region %u bytes exceeds the limit", static_cast<uint32_t>(bidiBytes));
+    isValid = false;
+    return;
   }
 
   // Normalize the all-100% case to no sizes, matching the vector constructor so both paths
@@ -268,13 +341,8 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
   // during the copy below, so reserving their bytes would leave a gap between words.
   size_t totalText = 0;
   for (size_t i = 0; i < count; i++) {
-    const std::string& w = words[first + i];
-    size_t stripped = 0;
-    for (size_t pos = w.find(SOFT_HYPHEN_UTF8); pos != std::string::npos;
-         pos = w.find(SOFT_HYPHEN_UTF8, pos + SOFT_HYPHEN_BYTES)) {
-      stripped += SOFT_HYPHEN_BYTES;
-    }
-    totalText += w.size() - stripped + 1;
+    forEachKeptRun(wordAt(i), [&totalText](const std::string_view run) { totalText += run.size(); });
+    totalText += 1;
   }
   if (totalText > UINT16_MAX) {
     LOG_ERR("TXB", "Construction failed: text size %u exceeds arena limit", static_cast<uint32_t>(totalText));
@@ -286,8 +354,8 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
   }
   textBytes = static_cast<uint16_t>(totalText);
 
-  const size_t size =
-      arenaSize(numWords, sizesPresent, wordFontCount, textBytes, static_cast<uint16_t>(annotationBytes));
+  const size_t size = arenaSize(numWords, sizesPresent, wordFontCount, textBytes,
+                                static_cast<uint16_t>(annotationBytes), static_cast<uint16_t>(bidiBytes));
   if (!allocArena(size, scratch)) {
     LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
     numWords = 0;
@@ -311,17 +379,11 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
     xpos[i] = word_xpos[i];
     styles[i] = packStyle(styleSrc[first + i], boundariesSrc != nullptr && (*boundariesSrc)[first + i].continues);
     // Copy the word one soft-hyphen-free run at a time.
-    const std::string& w = words[first + i];
-    size_t start = 0;
-    for (size_t pos = w.find(SOFT_HYPHEN_UTF8); pos != std::string::npos; pos = w.find(SOFT_HYPHEN_UTF8, start)) {
-      const size_t run = pos - start;
-      memcpy(text + off, w.data() + start, run);
-      off += static_cast<uint16_t>(run);
-      start = pos + SOFT_HYPHEN_BYTES;
-    }
-    const size_t tail = w.size() - start;
-    memcpy(text + off, w.data() + start, tail);
-    off += static_cast<uint16_t>(tail);
+    forEachKeptRun(wordAt(i), [text, &off](const std::string_view run) {
+      if (run.empty()) return;  // an empty view may have no data at all
+      memcpy(text + off, run.data(), run.size());
+      off += static_cast<uint16_t>(run.size());
+    });
     text[off++] = '\0';
   }
   if (sizesPresent) {
@@ -359,6 +421,30 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
     }
     annotationBytes_ = static_cast<uint16_t>(annotationBytes);
     annotationBand_ = anyBandRecord(base + o.annotations + kAnnotationHeaderBytes, n);
+  }
+  if (bidiBytes != 0) {
+    uint8_t* region = base + o.annotations + annotationBytes;
+    region[0] = static_cast<uint8_t>((formBytes != 0 ? kBidiDisplayForms : 0) | (keepOrder ? kBidiLogicalOrder : 0));
+    uint8_t* next = region + 1;
+    if (formBytes != 0) {
+      // The same test as the sizing pass above, so the forms written are the bytes reserved.
+      char* forms = reinterpret_cast<char*>(region + 1 + 2 * count);
+      uint16_t at = 0;
+      for (size_t i = 0; i < count; i++) {
+        const std::string_view form = range.displayForms[i];
+        uint16_t offset = kNoDisplayForm;
+        if (formDiffers(wordAt(i), form)) {
+          offset = at;
+          memcpy(forms + at, form.data(), form.size());
+          at += static_cast<uint16_t>(form.size());
+          forms[at++] = '\0';
+        }
+        memcpy(region + 1 + 2 * i, &offset, sizeof(offset));
+      }
+      next = reinterpret_cast<uint8_t*>(forms) + at;
+    }
+    if (keepOrder) memcpy(next, orderSrc, count);
+    bidiBytes_ = static_cast<uint16_t>(bidiBytes);
   }
   bindArenaPointers();
 }
@@ -433,6 +519,51 @@ bool TextBlock::annotationsValid() const {
   return recordsEnd + textBytesSum == annotationBytes_;
 }
 
+const char* TextBlock::displayForm(const uint16_t i) const {
+  if (bidiBytes_ == 0) return nullptr;
+  const uint8_t* region = bidiRegion();
+  if ((region[0] & kBidiDisplayForms) == 0) return nullptr;
+  uint16_t offset = 0;
+  memcpy(&offset, region + 1 + 2 * static_cast<size_t>(i), sizeof(offset));
+  if (offset == kNoDisplayForm) return nullptr;
+  return reinterpret_cast<const char*>(region + 1 + 2 * static_cast<size_t>(numWords) + offset);
+}
+
+uint8_t TextBlock::logicalPosition(const uint16_t i) const {
+  if (!hasLogicalOrder()) return static_cast<uint8_t>(i);
+  return bidiRegion()[bidiBytes_ - numWords + i];  // the order is the region's last part
+}
+
+bool TextBlock::bidiValid() const {
+  if (bidiBytes_ == 0 || numWords == 0) return false;
+  const uint8_t* region = bidiRegion();
+  const uint8_t parts = region[0];
+  if (parts == 0 || (parts & ~(kBidiDisplayForms | kBidiLogicalOrder)) != 0) return false;  // step 2's are rejected
+  const bool hasForms = (parts & kBidiDisplayForms) != 0;
+  const bool hasOrder = (parts & kBidiLogicalOrder) != 0;
+  const size_t wc = numWords;
+  const size_t fixed = 1 + (hasForms ? 2 * wc : 0) + (hasOrder ? wc : 0);
+  if (fixed > bidiBytes_) return false;
+  const size_t textsSize = bidiBytes_ - fixed;  // the forms
+  if (hasForms) {
+    // The texts end with a NUL, so every form inside them is NUL-terminated inside them.
+    const uint8_t* texts = region + 1 + 2 * wc;
+    if (textsSize == 0 || texts[textsSize - 1] != '\0') return false;
+    bool anyForm = false;
+    for (size_t i = 0; i < wc; i++) {
+      uint16_t offset = 0;
+      memcpy(&offset, region + 1 + 2 * i, sizeof(offset));
+      if (offset == kNoDisplayForm) continue;
+      if (offset >= textsSize) return false;
+      anyForm = true;
+    }
+    if (!anyForm) return false;
+  } else if (textsSize != 0) {
+    return false;
+  }
+  return !hasOrder || (wc <= kMaxOrderedWords && isPermutation(region + bidiBytes_ - wc, wc));
+}
+
 int TextBlock::annotationBandFor(const GfxRenderer& renderer, const int effFontId, const float blockScale,
                                  const uint8_t maxSizePct) {
   const int ascender = (maxSizePct == 100 && blockScale == 1.0f)
@@ -479,7 +610,7 @@ TextBlock::WordBox TextBlock::wordBox(const GfxRenderer& renderer, const uint16_
   }
   const int baseY = y + annotationBand(renderer, fontId);  // the ruby's band is above the base
 
-  const char* word = wordText(i);
+  const char* word = wordDrawText(i);
   const EpdFontFamily::Style style = wordStyle(i);
   const int font = wordFontId(i, effFontId);
   const float scale = wordScale(i);
@@ -595,7 +726,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
   for (uint16_t i = 0; i < numWords; i++) {
     while (nextCombined < i) nextCombined = nextCombinedWord(records, recordCount, recordCursor);
     const bool combined = nextCombined == i;
-    const char* word = wordText(i);
+    const char* word = wordDrawText(i);
     const int wordX = xposArr[i] + x;
     const EpdFontFamily::Style currentStyle = wordStyle(i);
     const int font = wordFontId(i, effFontId);
@@ -691,7 +822,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       rawTotal += renderer.getTextAdvanceX(font, buf, EpdFontFamily::REGULAR);
     }
     for (uint16_t w = a.firstWord; spread && w < a.firstWord + a.wordCount; w++) {
-      const unsigned char* p = reinterpret_cast<const unsigned char*>(wordText(w));
+      const unsigned char* p = reinterpret_cast<const unsigned char*>(wordDrawText(w));
       while (spread && *p != 0) spread = utf8IsUnspacedCjk(utf8NextCodepoint(&p));
     }
     const int slack = a.width - static_cast<int>(rawTotal * rubyScale + 0.5f);
@@ -785,15 +916,17 @@ bool TextBlock::serialize(FsFile& file) const {
   // per-word arrays and the text blob. The flags byte holds the sizes in bit 0
   // bit 1 says the line has annotations (u16 annotationBytes follows textBytes), bit 2 that it is vertical,
   // bit 3 that its marks are centred, and the word-font count in bits 4-7: a line without word fonts or annotations
-  // writes the 0 or 1 it always did.
-  serialization::writePod(file, numWords);
+  // writes the 0 or 1 it always did. The flags byte is full, so the word count's top bit (a line holds at most 10,000
+  // words) says the line has a bidi region: u16 bidiBytes follows the annotation size.
+  serialization::writePod(file, static_cast<uint16_t>(numWords | (bidiBytes_ != 0 ? kBidiWordCountBit : 0)));
   serialization::writePod(
       file, static_cast<uint8_t>((sizesPresent ? 1 : 0) | (annotationBytes_ != 0 ? 2 : 0) | (vertical_ ? 4 : 0) |
                                  (centredMarks_ ? 8 : 0) | wordFontCount << 4));
   serialization::writePod(file, textBytes);
   if (annotationBytes_ != 0) serialization::writePod(file, annotationBytes_);
+  if (bidiBytes_ != 0) serialization::writePod(file, bidiBytes_);
   if (numWords > 0) {
-    const size_t size = arenaSize(numWords, sizesPresent, wordFontCount, textBytes, annotationBytes_);
+    const size_t size = arenaSize(numWords, sizesPresent, wordFontCount, textBytes, annotationBytes_, bidiBytes_);
     if (file.write(arena, size) != size) {
       LOG_ERR("TXB", "Serialization failed: arena write (%u bytes)", static_cast<uint32_t>(size));
       return false;
@@ -818,6 +951,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
   uint8_t flags = 0;
   uint16_t textBytes = 0;
   uint16_t annotationBytes = 0;
+  uint16_t bidiBytes = 0;
   if (file.read(reinterpret_cast<uint8_t*>(&wc), sizeof(wc)) != static_cast<int>(sizeof(wc)) ||
       file.read(&flags, sizeof(flags)) != static_cast<int>(sizeof(flags)) ||
       file.read(reinterpret_cast<uint8_t*>(&textBytes), sizeof(textBytes)) != static_cast<int>(sizeof(textBytes))) {
@@ -827,6 +961,13 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
   if ((flags & 0x02) != 0 && file.read(reinterpret_cast<uint8_t*>(&annotationBytes), sizeof(annotationBytes)) !=
                                  static_cast<int>(sizeof(annotationBytes))) {
     LOG_ERR("TXB", "Deserialization failed: incomplete annotation size");
+    return nullptr;
+  }
+  const bool hasBidi = (wc & kBidiWordCountBit) != 0;
+  wc &= static_cast<uint16_t>(~kBidiWordCountBit);
+  if (hasBidi &&
+      file.read(reinterpret_cast<uint8_t*>(&bidiBytes), sizeof(bidiBytes)) != static_cast<int>(sizeof(bidiBytes))) {
+    LOG_ERR("TXB", "Deserialization failed: incomplete bidi size");
     return nullptr;
   }
 
@@ -845,6 +986,10 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
     LOG_ERR("TXB", "Deserialization failed: bad annotation size %u for %u words", annotationBytes, wc);
     return nullptr;
   }
+  if (hasBidi && (wc == 0 || bidiBytes == 0)) {
+    LOG_ERR("TXB", "Deserialization failed: bad bidi size %u for %u words", bidiBytes, wc);
+    return nullptr;
+  }
 
   std::unique_ptr<TextBlock> block(new (std::nothrow) TextBlock());
   if (!block) {
@@ -859,7 +1004,7 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
   block->centredMarks_ = (flags & 0x08) != 0;
 
   if (wc > 0) {
-    const size_t size = arenaSize(wc, block->sizesPresent, fontCount, textBytes, annotationBytes);
+    const size_t size = arenaSize(wc, block->sizesPresent, fontCount, textBytes, annotationBytes, bidiBytes);
     if (!block->allocArena(size, scratch)) {
       LOG_ERR("TXB", "OOM: arena %u bytes", static_cast<uint32_t>(size));
       return nullptr;
@@ -902,6 +1047,12 @@ std::unique_ptr<TextBlock> TextBlock::deserialize(FsFile& file, BuildArena* scra
     }
     block->annotationBand_ = annotationBytes != 0 && anyBandRecord(block->annotationRegion() + kAnnotationHeaderBytes,
                                                                    block->annotationCount());
+    // The bidi region: known parts whose sizes add up, forms inside the texts, an order that is a permutation.
+    block->bidiBytes_ = bidiBytes;
+    if (bidiBytes != 0 && !block->bidiValid()) {
+      LOG_ERR("TXB", "Deserialization failed: corrupt bidi region");
+      return nullptr;
+    }
   }
 
   // Style: the render slice only (see serialize).

@@ -1,0 +1,638 @@
+BOOK title=Bidi Text lang=he spine=3 toc=0 reliableToc=0
+SPINE 0 href=OEBPS/ch1.xhtml pages=2 truncated=0 cssFallback=0
+ PAGE 0 elements=29 footnotes=2
+  LINE y=0 x=0 align=2 mult=1.600 hfid=0 words=3
+   W x=108 s=1 z=100 t=בדיקה
+    WD t=הקידב
+   W x=203 s=1 z=100 t=ראשון:
+    WD t=:ןושאר
+   W x=303 s=1 z=100 t=פרק
+    WD t=קרפ
+   O order=2,1,0
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=51 s=0 z=100 t=הביתה.
+    WD t=.התיבה
+   W x=112 s=0 z=100 t=הלך
+    WD t=ךלה
+   W x=139 s=0 z=100 t=ואז
+    WD t=זאו
+   W x=172 s=0 z=100 t=1998,
+    WD t=,1998
+   W x=212 s=0 z=100 t=בשנת
+    WD t=תנשב
+   W x=256 s=0 z=100 t=)
+    WD t=(
+   W x=267 s=0 z=100 t=hello
+   W x=324 s=0 z=100 t=world
+   W x=367 s=0 z=100 t=(
+    WD t=)
+   W x=385 s=0 z=100 t=אמר
+    WD t=רמא
+   W x=417 s=0 z=100 t=הוא
+    WD t=אוה
+   O order=10,9,8,7,6,5,3,4,2,1,0
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=74 s=0 z=100 t=בלבד.
+    WD t=.דבלב
+   W x=126 s=0 z=100 t=פרקים
+    WD t=םיקרפ
+   W x=180 s=0 z=100 t=ארבעה
+    WD t=העברא
+   W x=227 s=0 z=100 t=יש
+    WD t=שי
+   W x=252 s=0 z=100 t=The
+   W x=285 s=0 z=100 t=Book
+   W x=332 s=0 z=100 t=of
+   W x=360 s=0 z=100 t=Ruth
+   W x=410 s=0 z=100 t=בספר
+    WD t=רפסב
+   O order=8,7,6,5,1,2,3,4,0
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=107 s=0 z=100 t=ב־14%.
+    WD t=.14%־ב
+   W x=163 s=0 z=100 t=כלומר
+    WD t=רמולכ
+   W x=208 s=0 z=100 t=שקלים,
+    WD t=,םילקש
+   W x=270 s=0 z=100 t=ל־3.50
+    WD t=3.50־ל
+   W x=330 s=0 z=100 t=מ־25
+    WD t=25־מ
+   W x=369 s=0 z=100 t=עלה
+    WD t=הלע
+   W x=397 s=0 z=100 t=המחיר
+    WD t=ריחמה
+   O order=6,5,4,3,2,1,0
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=2 s=0 z=100 t=וְאֵת
+    WD t=תאֵוְ
+   W x=55 s=0 z=100 t=הַשָּׁמַיִם
+    WD t=םיִמַשָּׁהַ
+   W x=159 s=0 z=100 t=אֵת
+    WD t=תאֵ
+   W x=198 s=0 z=100 t=אֱלֹהִים
+    WD t=םיהִלֹאֱ
+   W x=279 s=0 z=100 t=בָּרָא
+    WD t=ארָבָּ
+   W x=341 s=0 z=100 t=בְּרֵאשִׁית
+    WD t=תישִׁארֵבְּ
+   O order=5,4,3,2,1,0
+  LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=4 s=0 z=100 t=וְחֹשֶׁךְ
+    WD t=ךְשֶׁחֹוְ
+   W x=93 s=0 z=100 t=וָבֹהוּ
+    WD t=וּהבֹוָ
+   W x=170 s=0 z=100 t=תֹהוּ
+    WD t=וּהתֹ
+   W x=229 s=0 z=100 t=הָיְתָה
+    WD t=התָיְהָ
+   W x=300 s=0 z=100 t=וְהָאָרֶץ
+    WD t=ץרֶאָהָוְ
+   W x=390 s=0 z=100 t=הָאָרֶץ׃
+    WD t=׃ץרֶאָהָ
+   O order=5,4,3,2,1,0
+  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=3 s=0 z=100 t=עַל־פְּנֵי
+    WD t=ינֵפְּ־לעַ
+   W x=97 s=0 z=100 t=מְרַחֶפֶת
+    WD t=תפֶחֶרַמְ
+   W x=182 s=0 z=100 t=אֱלֹהִים
+    WD t=םיהִלֹאֱ
+   W x=259 s=0 z=100 t=וְרוּחַ
+    WD t=חַוּרוְ
+   W x=320 s=0 z=100 t=תְהוֹם
+    WD t=םוֹהתְ
+   W x=372 s=0 z=100 t=עַל־פְּנֵי
+    WD t=ינֵפְּ־לעַ
+   O order=5,4,3,2,1,0
+  LINE y=182 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=4 s=0 z=100 t=וַיְהִי־אוֹר׃
+    WD t=׃רוֹא־יהִיְוַ
+   W x=120 s=0 z=100 t=אוֹר
+    WD t=רוֹא
+   W x=158 s=0 z=100 t=יְהִי
+    WD t=יהִיְ
+   W x=211 s=0 z=100 t=אֱלֹהִים
+    WD t=םיהִלֹאֱ
+   W x=288 s=0 z=100 t=וַיֹּאמֶר
+    WD t=רמֶאיֹּוַ
+   W x=377 s=0 z=100 t=הַמָּיִם׃
+    WD t=׃םיִמָּהַ
+   O order=5,4,3,2,1,0
+  LINE y=206 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=4 s=0 z=100 t=שִׁיר
+    WD t=רישִׁ
+   W x=54 s=0 z=100 t=לַיהוָה
+    WD t=׳הלַ
+   W x=91 s=0 z=100 t=שִׁירוּ
+    WD t=וּרישִׁ
+   W x=160 s=0 z=100 t=לֵּאמֹר׃
+    WD t=׃רמֹאלֵּ
+   W x=241 s=0 z=100 t=אֶל־מֹשֶׁה
+    WD t=השֶׁמֹ־לאֶ
+   W x=336 s=0 z=100 t=יְהוָה
+    WD t=׳ה
+   W x=359 s=0 z=100 t=וַיְדַבֵּר
+    WD t=רבֵּדַיְוַ
+   O order=6,5,4,3,2,1,0
+  LINE y=230 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=403 s=0 z=100 t=חָדָשׁ׃
+    WD t=׃שׁדָחָ
+  LINE y=254 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=80 s=0 z=100 t=אחוז.
+    WD t=.זוחא
+   W x=133 s=0 z=100 t=‏100
+    WD t=100
+   W x=169 s=0 z=100 t=שפה.
+    WD t=.הפש
+   W x=208 s=0 z=100 t=היא
+    WD t=איה
+   W x=243 s=0 z=100 t=C#‎
+    WD t=C#
+   W x=265 s=0 z=100 t=וגם
+    WD t=םגו
+   W x=300 s=0 z=100 t=פופולרית,
+    WD t=,תירלופופ
+   W x=382 s=0 z=100 t=C++‎
+    WD t=C++
+   W x=412 s=0 z=100 t=השפה
+    WD t=הפשה
+   O order=8,7,6,5,4,3,2,1,0
+  LINE y=278 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=55 s=0 z=100 t=5.
+    WD t=.5
+   W x=81 s=0 z=100 t=כתב
+    WD t=בתכ
+   W x=113 s=0 z=100 t=⁨מנהל⁩
+    WD t=להנמ
+   W x=156 s=0 z=100 t=והמשתמש
+    WD t=שמתשמהו
+   W x=219 s=0 z=100 t=הודעות,
+    WD t=,תועדוה
+   W x=277 s=0 z=100 t=3
+   W x=291 s=0 z=100 t=כתב
+    WD t=בתכ
+   W x=323 s=0 z=100 t=⁨User_123⁩
+    WD t=User_123
+   W x=393 s=0 z=100 t=המשתמש
+    WD t=שמתשמה
+   O order=8,7,6,5,4,3,2,1,0
+  LINE y=302 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=250 s=0 z=100 t=.
+   W x=260 s=0 z=100 t=Latin
+   W x=317 s=0 z=100 t=1-2-3⁩
+    WD t=1-2-3
+   W x=356 s=0 z=100 t=ו⁦
+    WD t=ו
+   W x=370 s=0 z=100 t=⁨‮reversed‬⁩
+    WD t=desrever
+   O order=4,2,3,1,0
+  LINE y=326 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=1 s=2 z=100 t=(ההערה
+    WD t=הרעהה)
+   W x=63 s=4 z=100 t=2
+   W x=70 s=0 z=100 t=שנייה
+    WD t=היינש
+   W x=136 s=0 z=100 t=והערה
+    WD t=הרעהו
+   W x=187 s=2 z=100 t=הראשונה.)
+    WD t=(.הנושארה
+   W x=281 s=2 z=100 t=(ההערה
+    WD t=הרעהה)
+   W x=343 s=4 z=100 t=1
+   W x=349 s=0 z=100 t=ראשונה
+    WD t=הנושאר
+   W x=415 s=0 z=100 t=הערה
+    WD t=הרעה
+   O order=8,7,6,5,4,3,2,1,0
+  LINE y=350 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=288 s=0 z=100 t=שורה.
+    WD t=.הרוש
+   W x=332 s=0 z=100 t=באותה
+    WD t=התואב
+   W x=382 s=2 z=100 t=השנייה.)
+    WD t=(.היינשה
+   O order=2,1,0
+  LINE y=374 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=This
+   W x=59 s=0 z=100 t=paragraph
+   W x=154 s=0 z=100 t=is
+   W x=177 s=0 z=100 t=English
+   W x=255 s=0 z=100 t=only,
+   W x=311 s=0 z=100 t=in
+   W x=336 s=0 z=100 t=a
+   W x=356 s=0 z=100 t=Hebrew
+   W x=410 s=0 z=100 t=book,
+  LINE y=398 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=0 s=0 z=100 t=2024.
+  LINE y=422 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=412 s=0 z=100 t=*
+   W x=424 s=0 z=100 t=*
+   W x=436 s=0 z=100 t=*
+   O order=2,1,0
+  LINE y=446 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=307 s=0 z=100 t=ראשון
+    WD t=ןושאר
+   W x=355 s=0 z=100 t=פריט
+    WD t=טירפ
+   W x=399 s=0 z=100 t=1.
+    WD t=.1
+   O order=2,1,0
+  LINE y=470 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=219 s=0 z=100 t=English
+   W x=295 s=0 z=100 t=עם
+    WD t=םע
+   W x=317 s=0 z=100 t=שני
+    WD t=ינש
+   W x=354 s=0 z=100 t=פריט
+    WD t=טירפ
+   W x=398 s=0 z=100 t=2.
+    WD t=.2
+   O order=4,3,2,1,0
+  LINE y=494 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=357 s=0 z=100 t=נקודה
+    WD t=הדוקנ
+   W x=408 s=0 z=100 t=•
+   O order=1,0
+  TABLE y=518 x=0 w=460 h=71 cols=3 border=1 rows=2
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=107 s=0 z=100 t=ג1
+       WD t=1ג
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=108 s=0 z=100 t=ב1
+       WD t=1ב
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=109 s=0 z=100 t=א1
+       WD t=1א
+   ROW h=34 hdr=0 cells=3
+    CELL 0 hdr=0 span=1 lines=1
+     LN words=1
+      W x=106 s=0 z=100 t=ג2
+       WD t=2ג
+    CELL 1 hdr=0 span=1 lines=1
+     LN words=1
+      W x=107 s=0 z=100 t=ב2
+       WD t=2ב
+    CELL 2 hdr=0 span=1 lines=1
+     LN words=1
+      W x=108 s=0 z=100 t=א2
+       WD t=2א
+  LINE y=589 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=348 s=0 z=100 t=לשמאל
+    WD t=לאמשל
+   W x=397 s=0 z=100 t=יישור
+    WD t=רושיי
+   O order=1,0
+  LINE y=613 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=343 s=0 z=100 t=להתחלה
+    WD t=הלחתהל
+   W x=397 s=0 z=100 t=יישור
+    WD t=רושיי
+   O order=1,0
+  LINE y=637 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=2 s=0 z=100 t=את
+    WD t=תא
+   W x=28 s=0 z=100 t=לראות
+    WD t=תוארל
+   W x=76 s=0 z=100 t=כדי
+    WD t=ידכ
+   W x=109 s=0 z=100 t=אחת
+    WD t=תחא
+   W x=145 s=0 z=100 t=משורה
+    WD t=הרושמ
+   W x=191 s=0 z=100 t=יותר
+    WD t=רתוי
+   W x=233 s=0 z=100 t=שנמשכת
+    WD t=תכשמנש
+   W x=292 s=0 z=100 t=תלויה
+    WD t=היולת
+   W x=343 s=0 z=100 t=הזחה
+    WD t=החזה
+   W x=384 s=0 z=100 t=עם
+    WD t=םע
+   W x=408 s=0 z=100 t=פסקה
+    WD t=הקספ
+   O order=10,9,8,7,6,5,4,3,2,1,0
+  LINE y=661 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=316 s=0 z=100 t=השנייה.
+    WD t=.היינשה
+   W x=389 s=0 z=100 t=השורה
+    WD t=הרושה
+   O order=1,0
+  LINE y=685 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=3 s=0 z=100 t=יכול
+    WD t=לוכי
+   W x=54 s=0 z=100 t=אחד
+    WD t=דחא
+   W x=96 s=0 z=100 t=שכל
+    WD t=לכש
+   W x=134 s=0 z=100 t=חופשית
+    WD t=תישפוח
+   W x=204 s=0 z=100 t=אנציקלופדיה
+    WD t=הידפולקיצנא
+   W x=327 s=0 z=100 t=היא
+    WD t=איה
+   W x=372 s=0 z=100 t=Wikipedia
+   O order=6,5,4,3,2,1,0
+  LINE y=709 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=5 s=0 z=100 t=אנציקלופדיה
+    WD t=הידפולקיצנא
+   W x=127 s=0 z=100 t=היא
+    WD t=איה
+   W x=171 s=0 z=100 t=פעולה.
+    WD t=.הלועפ
+   W x=235 s=0 z=100 t=בשיתוף
+    WD t=ףותישב
+   W x=304 s=0 z=100 t=נכתבת
+    WD t=תבתכנ
+   W x=365 s=0 z=100 t=והיא
+    WD t=איהו
+   W x=417 s=0 z=100 t=לערוך,
+    WD t=,ךורעל
+   O order=6,5,4,3,2,1,0
+  LINE y=733 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=6 s=0 z=100 t=פעולה.
+    WD t=.הלועפ
+   W x=66 s=0 z=100 t=בשיתוף
+    WD t=ףותישב
+   W x=131 s=0 z=100 t=נכתבת
+    WD t=תבתכנ
+   W x=188 s=0 z=100 t=והיא
+    WD t=איהו
+   W x=236 s=0 z=100 t=לערוך,
+    WD t=,ךורעל
+   W x=290 s=0 z=100 t=יכול
+    WD t=לוכי
+   W x=336 s=0 z=100 t=אחד
+    WD t=דחא
+   W x=373 s=0 z=100 t=שכל
+    WD t=לכש
+   W x=406 s=0 z=100 t=חופשית
+    WD t=תישפוח
+   O order=8,7,6,5,4,3,2,1,0
+  FN n=1 href=ch3.xhtml#n1
+  FN n=2 href=ch3.xhtml#n2
+ PAGE 1 elements=11 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=5 s=0 z=100 t=נכתבת
+    WD t=תבתכנ
+   W x=58 s=0 z=100 t=והיא
+    WD t=איהו
+   W x=102 s=0 z=100 t=לערוך,
+    WD t=,ךורעל
+   W x=152 s=0 z=100 t=יכול
+    WD t=לוכי
+   W x=194 s=0 z=100 t=אחד
+    WD t=דחא
+   W x=227 s=0 z=100 t=שכל
+    WD t=לכש
+   W x=256 s=0 z=100 t=חופשית
+    WD t=תישפוח
+   W x=317 s=0 z=100 t=אנציקלופדיה
+    WD t=הידפולקיצנא
+   W x=431 s=0 z=100 t=היא
+    WD t=איה
+   O order=8,7,6,5,4,3,2,1,0
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=יכול
+    WD t=לוכי
+   W x=47 s=0 z=100 t=אחד
+    WD t=דחא
+   W x=85 s=0 z=100 t=שכל
+    WD t=לכש
+   W x=119 s=0 z=100 t=חופשית
+    WD t=תישפוח
+   W x=185 s=0 z=100 t=אנציקלופדיה
+    WD t=הידפולקיצנא
+   W x=304 s=0 z=100 t=היא
+    WD t=איה
+   W x=345 s=0 z=100 t=פעולה.
+    WD t=.הלועפ
+   W x=406 s=0 z=100 t=בשיתוף
+    WD t=ףותישב
+   O order=7,6,5,4,3,2,1,0
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=5 s=0 z=100 t=אנציקלופדיה
+    WD t=הידפולקיצנא
+   W x=127 s=0 z=100 t=היא
+    WD t=איה
+   W x=171 s=0 z=100 t=פעולה.
+    WD t=.הלועפ
+   W x=235 s=0 z=100 t=בשיתוף
+    WD t=ףותישב
+   W x=304 s=0 z=100 t=נכתבת
+    WD t=תבתכנ
+   W x=365 s=0 z=100 t=והיא
+    WD t=איהו
+   W x=417 s=0 z=100 t=לערוך,
+    WD t=,ךורעל
+   O order=6,5,4,3,2,1,0
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=6 s=0 z=100 t=פעולה.
+    WD t=.הלועפ
+   W x=66 s=0 z=100 t=בשיתוף
+    WD t=ףותישב
+   W x=131 s=0 z=100 t=נכתבת
+    WD t=תבתכנ
+   W x=188 s=0 z=100 t=והיא
+    WD t=איהו
+   W x=236 s=0 z=100 t=לערוך,
+    WD t=,ךורעל
+   W x=290 s=0 z=100 t=יכול
+    WD t=לוכי
+   W x=336 s=0 z=100 t=אחד
+    WD t=דחא
+   W x=373 s=0 z=100 t=שכל
+    WD t=לכש
+   W x=406 s=0 z=100 t=חופשית
+    WD t=תישפוח
+   O order=8,7,6,5,4,3,2,1,0
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=5 s=0 z=100 t=נכתבת
+    WD t=תבתכנ
+   W x=58 s=0 z=100 t=והיא
+    WD t=איהו
+   W x=102 s=0 z=100 t=לערוך,
+    WD t=,ךורעל
+   W x=152 s=0 z=100 t=יכול
+    WD t=לוכי
+   W x=194 s=0 z=100 t=אחד
+    WD t=דחא
+   W x=227 s=0 z=100 t=שכל
+    WD t=לכש
+   W x=256 s=0 z=100 t=חופשית
+    WD t=תישפוח
+   W x=317 s=0 z=100 t=אנציקלופדיה
+    WD t=הידפולקיצנא
+   W x=431 s=0 z=100 t=היא
+    WD t=איה
+   O order=8,7,6,5,4,3,2,1,0
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=יכול
+    WD t=לוכי
+   W x=47 s=0 z=100 t=אחד
+    WD t=דחא
+   W x=85 s=0 z=100 t=שכל
+    WD t=לכש
+   W x=119 s=0 z=100 t=חופשית
+    WD t=תישפוח
+   W x=185 s=0 z=100 t=אנציקלופדיה
+    WD t=הידפולקיצנא
+   W x=304 s=0 z=100 t=היא
+    WD t=איה
+   W x=345 s=0 z=100 t=פעולה.
+    WD t=.הלועפ
+   W x=406 s=0 z=100 t=בשיתוף
+    WD t=ףותישב
+   O order=7,6,5,4,3,2,1,0
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=5 s=0 z=100 t=אנציקלופדיה
+    WD t=הידפולקיצנא
+   W x=127 s=0 z=100 t=היא
+    WD t=איה
+   W x=171 s=0 z=100 t=פעולה.
+    WD t=.הלועפ
+   W x=235 s=0 z=100 t=בשיתוף
+    WD t=ףותישב
+   W x=304 s=0 z=100 t=נכתבת
+    WD t=תבתכנ
+   W x=365 s=0 z=100 t=והיא
+    WD t=איהו
+   W x=417 s=0 z=100 t=לערוך,
+    WD t=,ךורעל
+   O order=6,5,4,3,2,1,0
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=2 s=0 z=100 t=היא
+    WD t=איה
+   W x=38 s=0 z=100 t=פעולה.
+    WD t=.הלועפ
+   W x=94 s=0 z=100 t=בשיתוף
+    WD t=ףותישב
+   W x=155 s=0 z=100 t=נכתבת
+    WD t=תבתכנ
+   W x=208 s=0 z=100 t=והיא
+    WD t=איהו
+   W x=252 s=0 z=100 t=לערוך,
+    WD t=,ךורעל
+   W x=302 s=0 z=100 t=יכול
+    WD t=לוכי
+   W x=344 s=0 z=100 t=אחד
+    WD t=דחא
+   W x=377 s=0 z=100 t=שכל
+    WD t=לכש
+   W x=406 s=0 z=100 t=חופשית
+    WD t=תישפוח
+   O order=9,8,7,6,5,4,3,2,1,0
+  LINE y=192 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=6 s=0 z=100 t=נכתבת
+    WD t=תבתכנ
+   W x=64 s=0 z=100 t=והיא
+    WD t=איהו
+   W x=113 s=0 z=100 t=לערוך,
+    WD t=,ךורעל
+   W x=168 s=0 z=100 t=יכול
+    WD t=לוכי
+   W x=215 s=0 z=100 t=אחד
+    WD t=דחא
+   W x=253 s=0 z=100 t=שכל
+    WD t=לכש
+   W x=287 s=0 z=100 t=חופשית
+    WD t=תישפוח
+   W x=353 s=0 z=100 t=אנציקלופדיה
+    WD t=הידפולקיצנא
+   O order=7,6,5,4,3,2,1,0
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=יכול
+    WD t=לוכי
+   W x=47 s=0 z=100 t=אחד
+    WD t=דחא
+   W x=85 s=0 z=100 t=שכל
+    WD t=לכש
+   W x=119 s=0 z=100 t=חופשית
+    WD t=תישפוח
+   W x=185 s=0 z=100 t=אנציקלופדיה
+    WD t=הידפולקיצנא
+   W x=304 s=0 z=100 t=היא
+    WD t=איה
+   W x=345 s=0 z=100 t=פעולה.
+    WD t=.הלועפ
+   W x=406 s=0 z=100 t=בשיתוף
+    WD t=ףותישב
+   O order=7,6,5,4,3,2,1,0
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=207 s=0 z=100 t=פעולה.
+    WD t=.הלועפ
+   W x=262 s=0 z=100 t=בשיתוף
+    WD t=ףותישב
+   W x=322 s=0 z=100 t=נכתבת
+    WD t=תבתכנ
+   W x=374 s=0 z=100 t=והיא
+    WD t=איהו
+   W x=417 s=0 z=100 t=לערוך,
+    WD t=,ךורעל
+   O order=4,3,2,1,0
+SPINE 1 href=OEBPS/ch2.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=5 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=18 s=0 z=100 t=He
+   W x=41 s=0 z=100 t=said
+   W x=82 s=0 z=100 t=שלום.
+    WD t=םולש.
+   W x=130 s=0 z=100 t=and
+   W x=167 s=0 z=100 t=left.
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=The
+   W x=51 s=0 z=100 t=word
+   W x=91 s=0 z=100 t=(שלום)
+    WD t=(םולש)
+   W x=152 s=0 z=100 t=means
+   W x=209 s=0 z=100 t=peace,
+   W x=266 s=0 z=100 t=she
+   W x=302 s=0 z=100 t=said
+   W x=343 s=0 z=100 t=in
+   W x=366 s=0 z=100 t=1998.
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=18 s=0 z=100 t=Hebrew:
+   W x=78 s=0 z=100 t=עולם
+    WD t=םלוע
+   W x=116 s=0 z=100 t=שלום
+    WD t=םולש
+   W x=148 s=0 z=100 t=,
+   W x=162 s=0 z=100 t=and
+   W x=199 s=0 z=100 t=more.
+   O order=0,2,1,3,4,5
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=204 s=0 z=100 t=באנגלית.
+    WD t=.תילגנאב
+   W x=293 s=0 z=100 t=פסקה
+    WD t=הקספ
+   W x=333 s=0 z=100 t=בתוך
+    WD t=ךותב
+   W x=372 s=0 z=100 t=עולם
+    WD t=םלוע
+   W x=410 s=0 z=100 t=שלום
+    WD t=םולש
+   O order=4,3,2,1,0
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=18 s=0 z=100 t=⁨שלום⁩:
+    WD t=םולש:
+   W x=64 s=0 z=100 t=3
+   W x=78 s=0 z=100 t=posts
+SPINE 2 href=OEBPS/ch3.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=2 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=335 s=0 z=100 t=הראשונה.
+    WD t=.הנושארה
+   W x=408 s=0 z=100 t=ההערה
+    WD t=הרעהה
+   O order=1,0
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=335 s=0 z=100 t=השנייה.
+    WD t=.היינשה
+   W x=408 s=0 z=100 t=ההערה
+    WD t=הרעהה
+   O order=1,0

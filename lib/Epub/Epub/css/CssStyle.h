@@ -464,8 +464,10 @@ struct CssStyle {
   // values: the writing mode its CSS was written for, not the one the page is set in (Unset reads as horizontal-tb and
   // ltr). Line-relative properties (text-align left/right, float, text-indent) need nothing. CSS Writing Modes 3, 6.2.
   void resolveLogical(const CssWritingMode writingModeIn, const CssDirection directionIn) {
-    if (textAlign == CssTextAlign::Start || textAlign == CssTextAlign::End) {
-      const bool rtl = directionIn == CssDirection::Rtl;  // Auto reads as ltr until the text decides
+    // Unset and Auto keep Start and End: the layout resolves them once the paragraph's direction is known.
+    if ((textAlign == CssTextAlign::Start || textAlign == CssTextAlign::End) &&
+        (directionIn == CssDirection::Ltr || directionIn == CssDirection::Rtl)) {
+      const bool rtl = directionIn == CssDirection::Rtl;
       textAlign = (textAlign == CssTextAlign::Start) != rtl ? CssTextAlign::Left : CssTextAlign::Right;
     }
     if (writingModeIn != CssWritingMode::VerticalRl && writingModeIn != CssWritingMode::VerticalLr) return;

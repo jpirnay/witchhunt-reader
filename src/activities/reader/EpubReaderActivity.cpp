@@ -4418,6 +4418,12 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     secondaryBufferDegraded_ = false;
     borrowedHere = false;
   };
+  // It may already have been gone, and the restore below owes it back either way. An S3 board
+  // refuses and keeps it, so there is nothing to restore.
+  const auto releaseForBuild = [&]() {
+    renderer.releaseSecondaryBuffer();
+    released = !renderer.hasSecondaryBuffer();
+  };
   if (inPlace) {
     LOG_INF("ERS", "Building section in place (secondary buffer kept): free=%lu contig=%lu", esp_get_free_heap_size(),
             heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT));
@@ -4429,8 +4435,7 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     LOG_INF("ERS", "Index start mem (before fb release%s): free=%lu contig=%lu", escalated ? ", C-failure latch" : "",
             esp_get_free_heap_size(),
             static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
-    renderer.releaseSecondaryBuffer();  // frees ~52 KB for CSS parser + image decoder
-    released = true;
+    releaseForBuild();  // frees ~52 KB for CSS parser + image decoder
     LOG_INF("ERS", "Index start mem (after fb release): free=%lu contig=%lu", esp_get_free_heap_size(),
             static_cast<unsigned long>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT)));
   }
@@ -4454,8 +4459,7 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
     // blocking foreground path has always relied on.
     LOG_INF("ERS", "In-place section build failed; retrying with secondary buffer released (free=%lu)",
             esp_get_free_heap_size());
-    renderer.releaseSecondaryBuffer();
-    released = true;
+    releaseForBuild();
     const uint32_t retryStart = millis();
     createOk = runCreate();
     LOG_INF("ERS", "createSectionFile retry returned %d in %ums (free=%lu)", createOk ? 1 : 0, millis() - retryStart,
@@ -4474,8 +4478,7 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
             static_cast<unsigned long>(buildScratch_->releaseFailures()),
             static_cast<unsigned long>(esp_get_free_heap_size()));
     handBackBorrow();
-    renderer.releaseSecondaryBuffer();
-    released = true;
+    releaseForBuild();
     const uint32_t retryStart = millis();
     createOk = runCreate();
     LOG_INF("ERS", "createSectionFile released retry returned %d in %ums (free=%lu)", createOk ? 1 : 0,
@@ -5694,8 +5697,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     warmLend.emplace(renderer);
     if (!warmLend->arena()) {
       warmLend.reset();
-      renderer.releaseSecondaryBuffer();
-      releasedSecondaryForWarm = true;
+      releasedSecondaryForWarm = renderer.releaseSecondaryBuffer();
       LOG_DBG("ERS", "Released secondary buffer for image warm pass (nothing to lend)");
     }
   }

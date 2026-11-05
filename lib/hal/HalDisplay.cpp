@@ -294,6 +294,8 @@ uint8_t* HalDisplay::getFrameBuffer() const { return einkDisplay.getFrameBuffer(
 void HalDisplay::syncWriteBufferFromActive() const { einkDisplay.syncWriteBufferFromActive(); }
 
 void HalDisplay::releaseBuffers() {
+  // GfxRenderer drops its own pointer either way, so nothing paints until the reboot.
+  if (HalCapabilities::keepsSecondaryBuffer()) return;
   HalSpiBus::Lock spiLock;
   einkDisplay.releaseBuffers();
 }
@@ -313,6 +315,7 @@ static const char* redSyncedLabel(const bool hasRed, const bool synced) {
 }
 
 bool HalDisplay::releaseSecondaryBuffer() {
+  if (HalCapabilities::keepsSecondaryBuffer()) return false;
   HalSpiBus::Lock spiLock;  // see the note above borrowSecondaryBuffer()
   // Double-release guard. releaseSecondaryBuffer() returning false means the
   // secondary buffer was already gone — i.e. a caller released it without
@@ -394,7 +397,7 @@ bool HalDisplay::keepsPreviousFrame() const { return einkDisplay.hasSecondaryBuf
 // uncontended on the normal path — this costs nothing when nothing else is on the bus.
 uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
   HalSpiBus::Lock spiLock;
-  if (HalCapabilities::lendsPsramArena()) {
+  if (HalCapabilities::keepsSecondaryBuffer()) {
     // Allocated on first use and kept: PSRAM has the room, and a block that never goes back to the
     // heap cannot fragment it. If it cannot be had, the framebuffer below is still a valid answer.
     static uint8_t* const arena =

@@ -6,6 +6,7 @@
 #include <GlyphProvider.h>
 #include <HalGPIO.h>
 #include <Logging.h>
+#include <MarkOverlay.h>
 #include <Memory.h>
 #include <SdCardFont.h>
 #include <SmallCaps.h>
@@ -1480,12 +1481,13 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
   uint32_t cp;
   uint32_t prevCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    if (utf8IsCombiningMark(cp)) {
+    if (overlaysItsBase(cp)) {
       const EpdGlyphRef combiningGlyph = font.getGlyph(cp, style);
       if (!combiningGlyph) continue;
-      const int raiseBy = combiningMark::raiseAboveBase(combiningGlyph.top, combiningGlyph.height, lastBaseTop);
-      const int combiningX =
-          combiningMark::centerOver(lastBaseX, lastBaseLeft, lastBaseWidth, combiningGlyph.left, combiningGlyph.width);
+      const int raiseBy = combiningMark::raiseAboveBase(combiningMark::anchorFor(cp), combiningGlyph.top,
+                                                        combiningGlyph.height, lastBaseTop);
+      const int combiningX = combiningMark::anchorOver(combiningMark::anchorFor(cp), lastBaseX, lastBaseLeft,
+                                                       lastBaseWidth, combiningGlyph.left, combiningGlyph.width);
       renderCharImpl<TextRotation::None>(*this, renderModeSnapshot, font, cp, combiningX, yPos - raiseBy, black, style);
       continue;
     }
@@ -3186,7 +3188,7 @@ int GfxRenderer::scaledTextAdvanceX(const EpdFontFamily& font, const char* text,
   uint32_t prevCp = 0;
   int32_t cursorFP = 0;  // 12.4 fixed-point, exactly as the draw cursor
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    if (utf8IsCombiningMark(cp)) continue;
+    if (overlaysItsBase(cp)) continue;
     cp = font.applyLigatures(cp, text, style);
     const bool folded = (style & EpdFontFamily::SMALL_CAPS) != 0 && smallCaps::fold(cp);
     const float effScale = folded ? scale * smallCaps::SCALE : scale;
@@ -3260,7 +3262,7 @@ int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFami
   int32_t prevAdvanceFP = 0;  // 12.4 fixed-point: prev glyph's advance + next kern for snap
   const auto& font = *family;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    if (utf8IsCombiningMark(cp)) {
+    if (overlaysItsBase(cp)) {
       continue;
     }
     cp = font.applyLigatures(cp, text, style);
@@ -3364,13 +3366,15 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
   uint32_t cp;
   uint32_t prevCp = 0;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&text)))) {
-    if (utf8IsCombiningMark(cp)) {
+    if (overlaysItsBase(cp)) {
       const EpdGlyphRef combiningGlyph = font.getGlyph(cp, style);
       if (!combiningGlyph) continue;
-      const int raiseBy = combiningMark::raiseAboveBase(combiningGlyph.top, combiningGlyph.height, lastBaseTop);
+      const int raiseBy = combiningMark::raiseAboveBase(combiningMark::anchorFor(cp), combiningGlyph.top,
+                                                        combiningGlyph.height, lastBaseTop);
       const int combiningX = x - raiseBy;
-      const int combiningY = combiningMark::centerOverRotated90CW(lastBaseY, lastBaseLeft, lastBaseWidth,
-                                                                  combiningGlyph.left, combiningGlyph.width);
+      const int combiningY =
+          combiningMark::anchorOverRotated90CW(combiningMark::anchorFor(cp), lastBaseY, lastBaseLeft, lastBaseWidth,
+                                               combiningGlyph.left, combiningGlyph.width);
       renderCharImpl<TextRotation::Rotated90CW>(*this, getRenderMode(), font, cp, combiningX, combiningY, black, style);
       continue;
     }

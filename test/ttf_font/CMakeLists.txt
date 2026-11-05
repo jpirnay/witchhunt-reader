@@ -28,6 +28,7 @@ add_executable(TtfFontTest
   # the CPac writer the tests compare the probe's room with (TtfFamily.cpp itself stays free of it)
   ${OT_SHAPER_SOURCES}
   ${REPO_ROOT}/lib/EpdFont/EpdFont.cpp
+  ${BIDI_MARK_SOURCES}
   ${REPO_ROOT}/lib/EpdFont/EpdFontFamily.cpp
   ${REPO_ROOT}/lib/EpdFont/GlyphFallback.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
@@ -36,6 +37,7 @@ add_executable(TtfFontTest
 
 # test/shims before lib/hal: the host HalStorage, but the real NorFlash.h.
 target_include_directories(TtfFontTest PRIVATE
+  ${BIDI_MARK_INCLUDES}
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${REPO_ROOT}/test/ttf_rasterizer
   ${REPO_ROOT}/test/glyph_store
