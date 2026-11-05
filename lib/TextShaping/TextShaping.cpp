@@ -1,6 +1,11 @@
 #include "TextShaping.h"
 
+#include <Logging.h>
+#include <Memory.h>
+
+#include <cstdint>
 #include <cstring>
+#include <memory>
 
 #include "BidiUtils.h"
 #include "HebrewShaper.h"
@@ -54,6 +59,48 @@ bool mergesWithPrevious(const GroupToken& previous, const GroupToken& token, boo
   }
   return holdsMarksOnly(token.text) && HebrewShaper::endsWithName(previous.text.data(), previous.text.size());
 }
+
+namespace {
+
+// The build's heap block for shaping calls (buildHeapBlock): builds and the dictionary's pages run under RenderLock,
+// one call at a time, so it needs no lock.
+std::unique_ptr<uint8_t[]> heapBlock;
+size_t heapBlockBytes = 0;
+bool heapBlockRefusalLogged = false;  // logged once until releaseBuildMemory()
+
+// A block grows by at least this much, so a build's tokens of rising length do not free and allocate at each one.
+constexpr size_t kHeapBlockStep = 512;
+
+}  // namespace
+
+void* buildHeapBlock(const size_t bytes) {
+  if (heapBlock && heapBlockBytes >= bytes) return heapBlock.get();
+  // The smaller block goes first, so the larger one can take its room.
+  heapBlock.reset();
+  heapBlockBytes = 0;
+  const size_t grown =
+      bytes > SIZE_MAX - kHeapBlockStep ? bytes : (bytes + kHeapBlockStep - 1) / kHeapBlockStep * kHeapBlockStep;
+  // One shaping call's glyph buffer, its storage, runs, code points and reordered form (IndicShaper::CallMemory, about
+  // 6-8 KB): past any task's stack, and kept for the build so each token does not allocate it again.
+  heapBlock = makeUniqueNoThrow<uint8_t[]>(grown);
+  if (!heapBlock) {
+    if (!heapBlockRefusalLogged) {
+      heapBlockRefusalLogged = true;
+      LOG_ERR("SHP", "No %zu B for a shaping call: its tokens are laid out unshaped", grown);
+    }
+    return nullptr;
+  }
+  heapBlockBytes = grown;
+  return heapBlock.get();
+}
+
+void releaseBuildMemory() {
+  heapBlock.reset();
+  heapBlockBytes = 0;
+  heapBlockRefusalLogged = false;
+}
+
+bool buildMemoryHeld() { return static_cast<bool>(heapBlock); }
 
 bool shape(const char* text, size_t len, Unit* units, size_t capacity, size_t& count) {
   // Hebrew letters and points are U+0590-05FF; the lead byte 0xD7 covers U+05C0-05FF, which holds every letter.

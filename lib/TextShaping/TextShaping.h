@@ -37,4 +37,14 @@ struct GroupToken {
 // - the Hebrew name, always: `token` holds transparent marks only, and `previous` ends with the divine name.
 bool mergesWithPrevious(const GroupToken& previous, const GroupToken& token, bool indicGroup);
 
+// Frees the build's heap block for shaping calls (IndicShaper::CallMemory). A section build's end calls it, as it
+// calls BidiLine::releaseBuildMemory(); the next call makes it again.
+void releaseBuildMemory();
+bool buildMemoryHeld();  // for tests
+
+// The layer's own, for IndicShaper::CallMemory when the arena lends no room: the build's heap block of at least
+// `bytes`, made on first use and grown nothrow (the smaller one freed first), held until releaseBuildMemory(). Null,
+// logged once, when there is no room. Builds and the dictionary's pages run under RenderLock, one call at a time.
+void* buildHeapBlock(size_t bytes);
+
 }  // namespace TextShaping
