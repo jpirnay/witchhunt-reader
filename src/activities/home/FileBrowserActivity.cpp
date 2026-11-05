@@ -627,8 +627,12 @@ bool FileBrowserActivity::removeDirRecursive(const std::string& fullPath) {
   }
   file.close();
 
-  constexpr size_t NAME_BUF = 500;
-  char nameBuf[NAME_BUF];
+  const auto nameBuffer = makeUniqueNoThrow<char[]>(FsHelpers::MAX_FILE_NAME_BYTES);
+  if (!nameBuffer) {
+    LOG_ERR("FBR", "OOM: name buffer for %s", fullPath.c_str());
+    return false;
+  }
+  char* const nameBuf = nameBuffer.get();
 
   // Stack of (path, postOrder): postOrder=true means rmdir this path after its children.
   std::vector<std::pair<std::string, bool>> stack;
@@ -657,7 +661,7 @@ bool FileBrowserActivity::removeDirRecursive(const std::string& fullPath) {
 
     dir.rewindDirectory();
     for (auto entry = dir.openNextFile(); entry; entry = dir.openNextFile()) {
-      entry.getName(nameBuf, NAME_BUF);
+      entry.getName(nameBuf, FsHelpers::MAX_FILE_NAME_BYTES);
       if (strcmp(nameBuf, ".") == 0 || strcmp(nameBuf, "..") == 0) continue;
       std::string entryPath = currentPath;
       if (entryPath.back() != '/') entryPath += '/';

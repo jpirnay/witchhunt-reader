@@ -204,15 +204,21 @@ void clearBookCachesInDirectory(const String& dirPath) {
     if (dir) dir.close();
     return;
   }
-  char name[500];
+  // A name that did not fit would come back empty, and a folder's child would be the folder itself.
+  const auto name = makeUniqueNoThrow<char[]>(FsHelpers::MAX_FILE_NAME_BYTES);
+  if (!name) {
+    LOG_ERR("WEB", "OOM: name buffer for %s", dirPath.c_str());
+    dir.close();
+    return;
+  }
   FsFile entry = dir.openNextFile();
   while (entry) {
     HalSystem::feedWatchdog();
     yield();
-    entry.getName(name, sizeof(name));
+    entry.getName(name.get(), FsHelpers::MAX_FILE_NAME_BYTES);
     String childPath = dirPath;
     if (!childPath.endsWith("/")) childPath += "/";
-    childPath += name;
+    childPath += name.get();
     if (entry.isDirectory()) {
       entry.close();
       clearBookCachesInDirectory(childPath);
@@ -1226,11 +1232,17 @@ void CrossPointWebServer::scanFiles(const char* path, const FileVisitor visitor,
 
   LOG_DBG("WEB", "Scanning files in: %s", path);
 
+  auto name = makeUniqueNoThrow<char[]>(FsHelpers::MAX_FILE_NAME_BYTES);
+  if (!name) {
+    LOG_ERR("WEB", "OOM: name buffer for %s", path);
+    root.close();
+    return;
+  }
+
   FsFile file = root.openNextFile();
-  char name[500];
   while (file) {
-    file.getName(name, sizeof(name));
-    auto fileName = String(name);
+    file.getName(name.get(), FsHelpers::MAX_FILE_NAME_BYTES);
+    auto fileName = String(name.get());
 
     // Dot items only when the user has asked for hidden files; the system folders never.
     // The same rules isProtectedWebPath() enforces, so nothing listed here is refused
@@ -1288,15 +1300,12 @@ void CrossPointWebServer::handleFileListData() const {
   server->send(200, "application/json", "");
   HalSystem::feedWatchdog();
   ChunkedJsonArray out(server.get());
-  char output[512];
-  constexpr size_t outputSize = sizeof(output);
   JsonDocument doc;
 
   struct FileListContext {
     ChunkedJsonArray* out;
-    char* output;
     JsonDocument* doc;
-  } context{&out, output, &doc};
+  } context{&out, &doc};
 
   scanFiles(
       currentPath.c_str(),
@@ -1308,13 +1317,9 @@ void CrossPointWebServer::handleFileListData() const {
         (*ctx.doc)["size"] = info.size;
         (*ctx.doc)["isDirectory"] = info.isDirectory;
         (*ctx.doc)["isEpub"] = info.isEpub;
-
-        const size_t written = serializeJson(*ctx.doc, ctx.output, outputSize);
-        if (written >= outputSize) {
-          LOG_DBG("WEB", "Skipping file entry with oversized JSON for name: %s", info.name.c_str());
-          return;
-        }
-        ctx.out->addEntry(ctx.output, written);
+        // Straight into the reply: through a buffer, a name of ~150 CJK characters did not fit and
+        // was left out of the list. Found by Arthur Tazhitdinov (crosspoint-reader #4285).
+        serializeJson(*ctx.doc, ctx.out->nextEntry());
       },
       &context);
 
