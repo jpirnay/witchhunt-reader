@@ -471,16 +471,19 @@ static bool rtcValid() {
 /// Returns the corrected elapsed seconds and updates lpNowOut/calNowOut
 /// for the caller to re-baseline.
 static double computeCorrectedElapsedSec(uint64_t lpNow, float tempNow) {
-  uint32_t calNow = esp_clk_slowclk_cal_get();
-  uint64_t elapsedUs;
-  if (rtcSlowCal != 0 && calNow != 0) {
-    // rtcLpTimeUs was computed with rtcSlowCal; convert it to the
-    // current calibration basis so the subtraction is consistent.
-    uint64_t lpThenCorrected = (uint64_t)((double)rtcLpTimeUs * calNow / rtcSlowCal);
-    elapsedUs = lpNow - lpThenCorrected;
-  } else {
-    elapsedUs = lpNow - rtcLpTimeUs;
-  }
+  // A plain difference, deliberately not rescaled for a calibration change. esp_clk_rtc_time() is
+  // not ticks x current calibration: IDF converts each stretch of ticks with the calibration in
+  // force at the time and keeps the running total in RTC memory, and esp_clk_slowclk_cal_set()
+  // folds the old stretch in first, so the value stays monotonic across a boot's recalibration.
+  //
+  // This used to multiply the whole stored total by calNow / rtcSlowCal, re-weighting everything
+  // since power-on by one boot's calibration wobble. On a Murphy, one restart 8 s after an NTP sync
+  // overshot lpNow by 1071 s: the subtraction wrapped to raw=18446744072638.230s, restore() threw
+  // the correction away and the clock stepped back to the capture epoch. Where it did not wrap, the
+  // error went into the clock unnoticed, in either direction: that Murphy also ended up 7 min fast.
+  //
+  // Both callers have already established lpNow > rtcLpTimeUs, so this cannot wrap.
+  const uint64_t elapsedUs = lpNow - rtcLpTimeUs;
 
   // Use the full temperature delta between the average over the interval
   // and the calibration reference (which is the capture-time temperature).
