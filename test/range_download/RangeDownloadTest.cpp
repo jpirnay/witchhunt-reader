@@ -20,6 +20,8 @@ namespace {
 constexpr int FAKE_MEMORY_E = -125;  // wolfSSL MEMORY_E
 }  // namespace
 
+bool hostResolves(const char* host) { return FakeNet::unresolvable().count(host) == 0; }
+
 SecureClient::~SecureClient() { stop(); }
 bool SecureClient::tls13Available() { return false; }
 int SecureClient::connect(IPAddress, uint16_t) { return 0; }

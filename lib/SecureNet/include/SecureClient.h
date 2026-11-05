@@ -33,6 +33,12 @@
 
 namespace crosspoint {
 
+// True when `host` (a name or an IP literal) resolves; logs a failure. Asked before connecting
+// because NetworkClient::connect(host) tests hostByName() with `!`, and a failed lookup returns a
+// negative code: it goes on to connect to 0.0.0.0 and waits out the timeout. Ported from
+// Free-Ink/freeink-sdk 7ca28e5 (Arthur Tazhitdinov).
+bool hostResolves(const char* host);
+
 class SecureClient : public Client {
  public:
   SecureClient() = default;

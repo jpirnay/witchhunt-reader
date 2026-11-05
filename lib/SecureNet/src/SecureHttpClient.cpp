@@ -185,7 +185,7 @@ bool SecureHttpClient::ensureConnected(const Url& u, const bool sendsCredentials
     _connectedHttps = true;
   } else {
     _plain.setTimeout(_timeoutMs / 1000);
-    if (!_plain.connect(u.host.c_str(), u.port)) {
+    if (!hostResolves(u.host.c_str()) || !_plain.connect(u.host.c_str(), u.port)) {
       LOG_ERR("HTTP", "http connect failed: %s:%u", u.host.c_str(), u.port);
       return false;
     }
