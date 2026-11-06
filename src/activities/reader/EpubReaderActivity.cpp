@@ -585,9 +585,10 @@ int clampPercent(int percent) {
 // render draw in it.
 class LentSecondary {
  public:
-  explicit LentSecondary(GfxRenderer& renderer) : renderer_(renderer) {
+  // With a `holder`, a build that has the buffer already: the arena is what it leaves free, and nothing is given back.
+  explicit LentSecondary(GfxRenderer& renderer, BuildArena* holder = nullptr) : renderer_(renderer), holder_(holder) {
     size_t size = 0;
-    uint8_t* const block = renderer_.borrowSecondaryBuffer(&size);
+    uint8_t* const block = holder_ ? holder_->freeTail(&size) : renderer_.borrowSecondaryBuffer(&size);
     if (block) arena_.emplace(block, size);
   }
   ~LentSecondary() { giveBack(); }
@@ -598,12 +599,30 @@ class LentSecondary {
   void giveBack() {
     if (!arena_) return;
     arena_.reset();
-    renderer_.returnSecondaryBuffer();
+    if (!holder_) renderer_.returnSecondaryBuffer();
   }
 
  private:
   GfxRenderer& renderer_;
+  BuildArena* holder_;
   std::optional<BuildArena> arena_;
+};
+
+// A block on `arena`, released with the scope; nothing without an arena. Declared before what lives in the block.
+class ScopedArenaBlock {
+ public:
+  explicit ScopedArenaBlock(BuildArena* arena) : arena_(arena) {
+    if (arena_) block_ = arena_->reserveBlock();
+  }
+  ~ScopedArenaBlock() {
+    if (arena_ && !arena_->release(block_)) LOG_ERR("ERS", "Image lane page block not released (out of order)");
+  }
+  ScopedArenaBlock(const ScopedArenaBlock&) = delete;
+  ScopedArenaBlock& operator=(const ScopedArenaBlock&) = delete;
+
+ private:
+  BuildArena* arena_;
+  BuildArena::Block block_;
 };
 
 }  // namespace
@@ -1234,7 +1253,7 @@ void EpubReaderActivity::serviceBackgroundWork() {
   }
   if (currentSectionBuildActive) {
     // A picture on the page being read outranks the pages after it (LaneBeforeBuild).
-    if (!stepOnScreenImagesDuringBuild()) stepCurrentSectionBuild();
+    if (!stepImageLaneDuringBuild()) stepCurrentSectionBuild();
     return;
   }
   // Room in the glyph store comes before Background-B's look-ahead; the section the reader waits on and the AA pass
@@ -2021,46 +2040,42 @@ bool EpubReaderActivity::imageLaneMustWait() const {
 }
 
 bool EpubReaderActivity::imageLaneWarmsGrayscale() const {
-  return getEffectiveTextAntiAliasing() && (!secondaryBufferDegraded_ || backgroundBorrowActive_);
+  // A borrow degrades the buffer only until it goes back: a page is looked at as it will be drawn then.
+  return getEffectiveTextAntiAliasing() && (!secondaryBufferDegraded_ || secondaryBorrowed_);
 }
 
-bool EpubReaderActivity::stepOnScreenImagesDuringBuild() {
+BuildArena* EpubReaderActivity::arenaOfBuildHoldingBuffer() const {
+  const bool held = section && section->hasActiveBuild() && secondaryBorrowed_ && !backgroundBorrowActive_;
+  return held && buildScratch_ && buildScratch_->valid() ? buildScratch_.get() : nullptr;
+}
+
+bool EpubReaderActivity::stepImageLaneDuringBuild() {
   if (RenderLock::peek()) return false;
   RenderLock lock;
   if (!section || !section->hasActiveBuild() || imageProcessingActive_) return false;
-  // The decode writes no framebuffer byte, so a PSRAM arena can use the waveform that shows the page, 1.5 s for the
-  // HALF a new chapter opens with. Anywhere else the lend hands over the frame buffer itself: it needs the bus the
-  // refresh holds, and would wait there with the render lock.
-  if (renderer.isRefreshPending() && !HalCapabilities::keepsSecondaryBuffer()) return false;
-  const int pageIndex = section->currentPage;
-  const bool looked = buildImagesLookedSpine_ == currentSpineIndex && buildImagesLookedPage_ == pageIndex;
-  const bool bufferFree = !secondaryBorrowed_ && !backgroundBorrowActive_ && renderer.hasSecondaryBuffer();
-  if (!LaneBeforeBuild::decodeOnScreenDuringBuild(bufferFree, buildDisplayedPage_ == pageIndex, looked) ||
-      imageLaneMustWait()) {
-    return false;
-  }
-  buildImagesLookedSpine_ = currentSpineIndex;
-  buildImagesLookedPage_ = pageIndex;
-  const auto page = section->loadPageFromActiveBuild(static_cast<uint16_t>(pageIndex));
-  const bool warmGrayscale = imageLaneWarmsGrayscale();
-  if (!page || !page->hasUncachedImages(/*forceLoad=*/true, /*monochromeOutput=*/true, warmGrayscale)) return false;
-  // Full clock: a waveform wait downclocks unless someone holds it up.
-  HalPowerManager::Lock powerLock;
-  warmPageForImageLane(*page, currentSpineIndex, pageIndex, /*onScreen=*/true, warmGrayscale);
-  // The lane asked for a redraw, but the build's pass draws a page only once: this is what lets it draw this one again,
-  // now from its caches.
-  if (!page->hasUncachedImages(/*forceLoad=*/true, /*monochromeOutput=*/true, /*warmGrayscale=*/false)) {
-    buildDisplayedPage_ = -1;
-  }
-  return true;
+  // The decode writes no framebuffer byte, so it can use the waveform that shows the page, 1.5 s for the HALF a new
+  // chapter opens with, where nothing it needs is on the bus the refresh holds. Elsewhere it would wait there, holding
+  // the render lock.
+  // cppcheck-suppress knownConditionTrueFalse ; a constant of each board: always true on a C3 build, not on the X4 Pro
+  if (renderer.isRefreshPending() && !HalCapabilities::decodesThroughRefresh()) return false;
+  return stepImageWarmLocked() == LaneBeforeBuild::Window::Dirty;
 }
 
 LaneBeforeBuild::Window EpubReaderActivity::stepImageWarmLocked() {
   using LaneBeforeBuild::Window;
-  if (!section || section->hasActiveBuild() || section->pageCount == 0) return Window::Closed;
-  // Background-C's borrow, or no buffer at all, closes the lane. B's does not: the lane takes the buffer back from B
-  // for a decode while B has yields left (LaneBeforeBuild), and waits for B's build once it has none.
-  if (backgroundBorrowActive_) {
+  const bool building = section && section->hasActiveBuild();
+  if (!section || (!building && section->pageCount == 0)) return Window::Closed;
+  BuildArena* const buildArena = arenaOfBuildHoldingBuffer();
+  if (building) {
+    // Background-C leaves the lane the page on screen, and what it leaves free of the buffer where it holds that.
+    const bool bufferFree = !secondaryBorrowed_ && renderer.hasSecondaryBuffer();
+    if (!LaneBeforeBuild::decodeOnScreenDuringBuild(buildArena || bufferFree,
+                                                    buildDisplayedPage_ == section->currentPage)) {
+      return Window::Closed;
+    }
+  } else if (backgroundBorrowActive_) {
+    // B's borrow does not close the lane: the lane takes the buffer back from B for a decode while B has yields left
+    // (LaneBeforeBuild), and waits for B's build once it has none.
     if (LaneBeforeBuild::decodeWhileBuilding(backgroundImageYields_) == LaneBeforeBuild::Decode::AfterBuild) {
       return Window::Unknown;
     }
@@ -2068,7 +2083,10 @@ LaneBeforeBuild::Window EpubReaderActivity::stepImageWarmLocked() {
     return Window::Closed;
   }
   const int cur = section->currentPage;
-  if (imageWarmCleanSpine_ == currentSpineIndex && imageWarmCleanPage_ == cur) return Window::Clean;
+  if (imageWarmCleanSpine_ == currentSpineIndex && imageWarmCleanPage_ == cur &&
+      imageWarmCleanDuringBuild_ == building) {
+    return Window::Clean;
+  }
   // When to start. A decode holds the loop for seconds and yields to input only by aborting, so:
   //  - no gesture in flight: the abort hook fires on NEW edges, and a tap whose edges were
   //    already drained (released, waiting out the 300 ms double-click window) would be held for
@@ -2087,21 +2105,31 @@ LaneBeforeBuild::Window EpubReaderActivity::stepImageWarmLocked() {
   // Once the cache exists the image renders directly (wouldShowPlaceholder is false for a cached
   // image). Run 17: the chapter's opening illustration was left as a placeholder and cost 6.3 s
   // when the reader asked for it.
-  // B's borrow degrades the buffer only until B gives it back: the window is looked at as its pages will be drawn
-  // then, grey caches included, so a window found clean while B builds stays clean after it.
+  // Grey caches included while a build holds the buffer: a window found clean then stays clean after it.
   const bool warmGrayscale = imageLaneWarmsGrayscale();
+  const auto rememberClean = [&] {
+    imageWarmCleanSpine_ = currentSpineIndex;
+    imageWarmCleanPage_ = cur;
+    imageWarmCleanDuringBuild_ = building;
+  };
 
   // The window, in reading order: the page on screen first (a placeholder there is what the
   // reader is looking at), then the next kImageWarmLookahead pages of this section. Loading a
   // page is an SD read of a few KB, so the scan checks for input between pages.
-  const int lastPage = static_cast<int>(section->pageCount) - 1;
-  const int windowEnd = cur + kImageWarmLookahead;
+  // During a build the list is the page on screen alone, from what the build has written, its bytes in a block above
+  // the build's cursor. One look: what does not fit beside the build waits for the lane after it, and the build goes
+  // on.
+  if (building) rememberClean();
+  const ScopedArenaBlock pageBlock(buildArena);
+  const int lastPage = building ? cur : static_cast<int>(section->pageCount) - 1;
+  const int windowEnd = building ? cur : cur + kImageWarmLookahead;
   for (int p = cur; p <= std::min(lastPage, windowEnd); ++p) {
     // A page the reader's own ladder just gave up on is not climbed again here: every step was refused a moment ago.
     if (imageWarmGaveUp(currentSpineIndex, p) || memoryDegradedPage(currentSpineIndex, p)) continue;
     if (CooperativeAbort::shouldAbortLongTask()) return Window::Unknown;
     section->currentPage = p;
-    auto page = section->loadPageFromSectionFile();
+    auto page = building ? section->loadPageFromActiveBuild(static_cast<uint16_t>(p), buildArena)
+                         : section->loadPageFromSectionFile();
     section->currentPage = cur;
     if (!page || !page->hasUncachedImages(/*forceLoad=*/true, /*monochromeOutput=*/true, warmGrayscale)) continue;
     // Nothing to lend after all: the lane cannot run, and B must not wait for it.
@@ -2135,8 +2163,7 @@ LaneBeforeBuild::Window EpubReaderActivity::stepImageWarmLocked() {
   }
   // Nothing to warm in the window: remember that until the position changes (or B completes a
   // section the window reaches into -- see the Background-B completion).
-  imageWarmCleanSpine_ = currentSpineIndex;
-  imageWarmCleanPage_ = cur;
+  rememberClean();
   return Window::Clean;
 }
 
@@ -2165,15 +2192,20 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
       std::max(0, renderer.getScreenHeight(renderer.getHeldOrientation()) - layout.marginTop - layout.marginBottom);
   const int contentTop = layout.marginTop + ReaderPageLayout::imageOnlyPageYOffset(page, viewportHeight);
 
-  LentSecondary lend(renderer);
+  const bool building = section && section->hasActiveBuild();
+  LentSecondary lend(renderer, arenaOfBuildHoldingBuffer());
   BuildArena* const arena = lend.arena();
   if (!arena) return false;
+  // Full clock: a waveform wait downclocks unless someone holds it up.
+  HalPowerManager::Lock powerLock;
   const unsigned long t0 = millis();
   imageProcessingActive_ = true;
   CooperativeAbort::clearAborted();
   ImageMemoryLadder::Action ladder;
   {
     image_scratch::ScopedArena scratchScope(arena);
+    // The lane after the build has the whole buffer: what does not fit beside the build is better left to it.
+    image_scratch::ScopedCanWait canWait(building);
     GfxRenderer::ScopedCacheOnlyImageWrites cacheOnly(renderer);
     // Cheaper here than on a page turn: a page whose images the lane decodes is drawn from their caches.
     ladder = warmImagesClimbingLadder(page, layout.marginLeft, contentTop, /*forceLoad=*/true, warmGrayscale, arena,
@@ -2186,7 +2218,7 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
   if (finishLadder(ladder)) return true;
 
   const bool complete = !page.hasUncachedImages(true, true, warmGrayscale);
-  if (!complete && !preempted) noteImageWarmMiss(spine, pageIndex);
+  if (!complete && !preempted && !building) noteImageWarmMiss(spine, pageIndex);  // a build's lane tries nothing twice
   if (preempted) imageWarmPreemptedMs_ = millis();
   // The lazy load: the page on screen showed these images as placeholders, and their caches now
   // exist, so a plain redraw renders them (from the cache, no decode). Not while input waits --
@@ -2194,6 +2226,8 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
   const bool shownNowCached = shownWasUncached && !page.hasUncachedImages(true, true, false);
   const bool inputWaiting = CooperativeAbort::shouldAbortLongTask();
   const bool redraw = shownNowCached && !inputWaiting;
+  if (building && redraw)
+    buildDisplayedPage_ = -1;  // the build's pass draws a page once: this one again, from its caches
   // The page after the one on screen just became pre-renderable. Its pre-render ran when this
   // page was drawn and skipped it for its uncached images (as did the one re-arm, if it has run
   // since), so nothing would try again before the turn. Keyed on the page actually on screen,
@@ -2207,7 +2241,8 @@ bool EpubReaderActivity::warmPageForImageLane(const Page& page, const int spine,
     pendingPreRender = true;
     markStagedForCurrentPage();
   }
-  const char* note = !complete                  ? (preempted ? " -- preempted by input, retries after the next settle"
+  const char* note = !complete                  ? (preempted  ? " -- preempted by input, retries after the next settle"
+                                                   : building ? " -- left for the lane after the build"
                                                    : imageWarmGaveUp(spine, pageIndex) ? " -- incomplete, giving up on this page"
                                                                                        : " -- incomplete, will retry once")
                      : redraw                   ? " -- on screen, redrawing"
@@ -2261,6 +2296,7 @@ ImageMemoryLadder::Action EpubReaderActivity::warmImagesClimbingLadder(const Pag
   // A live build has laid text out with the set, and goes on from where it is.
   in.canUnload =
       !(section && section->hasActiveBuild()) && !(backgroundSection_ && backgroundSection_->hasActiveBuild());
+  in.canRelieve = !(section && section->hasActiveBuild());
   unsigned long reloadMs = 0;
   image_scratch::CoarseNeed coarse;  // what the plain step's coarse pictures need for a finer one
   for (;;) {
@@ -6634,7 +6670,8 @@ bool EpubReaderActivity::hasPendingBackgroundWork() {
       (backgroundBorrowActive_
            ? LaneBeforeBuild::decodeWhileBuilding(backgroundImageYields_) == LaneBeforeBuild::Decode::TakeFromBuild
            : !secondaryBorrowed_ && renderer.hasSecondaryBuffer());
-  return imageLaneCanRun && (imageWarmCleanSpine_ != currentSpineIndex || imageWarmCleanPage_ != section->currentPage);
+  return imageLaneCanRun && (imageWarmCleanSpine_ != currentSpineIndex || imageWarmCleanPage_ != section->currentPage ||
+                             imageWarmCleanDuringBuild_);
 }
 
 const char* EpubReaderActivity::sendPageOnScreen() {

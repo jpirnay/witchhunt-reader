@@ -60,7 +60,7 @@ navigated to and have nothing to read yet — so it has the highest priority.
 runDeferredGrayscalePass();                 // 1. AA of the page just shown (visible quality)
 if (pendingGrayscale_.active) return;        //    AA still owed → nothing else runs
 if (section && section->hasActiveBuild()) {  // 2. the page on screen's images, then Background C
-  if (!stepOnScreenImagesDuringBuild()) stepCurrentSectionBuild();
+  if (!stepImageLaneDuringBuild()) stepCurrentSectionBuild();
   return;
 }
 stepBackgroundSectionBuild();                // 3. Background A re-arm, the image lane, then Background B
@@ -171,17 +171,31 @@ before B; one page per tick.
   the cache unless input is waiting. If the warmed page is the one after the page on screen, the
   lane arms A (see A, *Scheduled*).
 
-### Priority pass — the page on screen during a C build
+### During a C build — the page on screen
 
-The lane itself is closed while C builds, so a page drawn mid-build would keep its placeholder until the whole chapter
-is laid out. `stepOnScreenImagesDuringBuild()` closes that gap: once per page on screen it reads the page from the live
-build (`loadPageFromActiveBuild`) and, if an image has no cache, decodes it between two slices through
-`warmPageForImageLane()`. The redraw comes from the build's own pass (`displayBuildPage`), which draws cached images.
-It keeps the lane's settle and borrows the buffer as the lane does, so it needs the buffer free: an X3 build, which
-always holds it, still makes the picture wait. On a PSRAM board it does not wait for the refresh that shows the page, a
-1.5 s HALF on a new chapter: the decode writes no framebuffer byte, and lending the arena stays outside the SPI bus lock
-the waveform holds. Elsewhere the lend hands over the frame buffer, so the pass waits for the refresh. X4 Pro: the JPEG
-was done before the HALF ended, and the picture on screen 5.2 s after opening the chapter, down from 10 s.
+The lane does not stop for C: a page drawn mid-build would keep its placeholder until the whole chapter is laid out. It
+is the same `stepImageWarmLocked()`, called between two slices by `stepImageLaneDuringBuild()`, and three things differ:
+
+- **The list** is the page on screen alone, read from the live build (`loadPageFromActiveBuild`), looked at once a page.
+- **The scratch** is the lent buffer as ever when it is free. Where C holds it, as an X3 build always does, the lane
+  works in what the build leaves free above its cursor (`BuildArena::freeTail`) and is gone before the next slice:
+  35,844 of 52,272 B on the X3, which holds the 33 KB inflate ring of an extract and a JPEG's 12 KB work pool in turn.
+- **Short of memory** the picture waits for the lane after the build, which has the whole buffer. There is no relief
+  step (the build needs its fonts), no coarse picture (nothing would decode it again), no inflate ring on the heap
+  (`image_scratch::canWait`: on the X3 that left 5 KB free), and no try counted against the page (`kImageWarmMaxTries`).
+
+The redraw comes from the build's own pass (`displayBuildPage`), which draws cached images. Where nothing the decode
+needs is on the bus a refresh holds (`HalCapabilities::decodesThroughRefresh`: a native SDMMC card and a PSRAM arena), the
+lane does not wait for the refresh that shows the page, a 1.5 s HALF on a new chapter. That shows on the X4 Pro. The
+Murphy qualifies, but its driver blocks in `triggerDisplay`, so the lane follows the refresh. The T5S3 does not qualify,
+its card being on SPI; with the wait and without it, its lane started 72 and 74 ms after the refresh ended.
+
+| Board | Scratch beside the build | Picture on screen | Chapter built |
+|---|---|---|---|
+| X4 Pro | PSRAM arena, lent | 5.2 s | 10 s |
+| Murphy | PSRAM arena, lent | 5.0 s | 9.6 s |
+| X3 | the build's free tail | 4.5 s | 8.0 s |
+| T5S3 | PSRAM arena, lent | 8.4 s | 13.9 s |
 
 ## B — next-section pre-build (look-ahead)
 

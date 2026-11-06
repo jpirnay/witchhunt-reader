@@ -25,6 +25,9 @@
 // set's reload, nor the accent family or the restart a failed one costs. Otherwise the coarse picture is drawn, never
 // a box.
 //
+// Beside a live build of the chapter being read the ladder stops at the plain step. That build needs the fonts, and its
+// page waits for nothing: what the decode could not do, the image lane does once the build is over.
+//
 // The decisions alone, apart from the reader, so the host can test them: from how a step's decode went and what is
 // loaded, what comes next.
 namespace ImageMemoryLadder {
@@ -54,6 +57,7 @@ struct Input {
   Decode decode = Decode::Done;
   bool ttfLoaded = false;   // a TrueType set was loaded when the step began
   bool canUnload = false;   // no section build that laid text out with the set is live: HeavyRelief may run
+  bool canRelieve = true;   // no build of the chapter being read is live: a step may free memory for the decode
   bool fontsBack = true;    // what the step freed came back: the set (HeavyRelief)
   uint8_t accents = 0;      // the book's accent families loaded beside the body when the step began
   bool coarseFits = false;  // Decode::Coarse: the light step can make room for the next finer scale's workspace
@@ -65,6 +69,7 @@ constexpr Action next(const Input& in) {
     // the heap is too broken up for it, and a restart's fresh heap loads it.
     return in.accents > 0 ? Action::DropAccent : Action::Restart;
   }
+  if (!in.canRelieve) return Action::Done;
   switch (in.decode) {
     case Decode::Done:
     case Decode::Failed:

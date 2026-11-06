@@ -80,6 +80,24 @@ CoarseNeed takeCoarseNeed();
 // beside; with `freedFirst` more bytes counted as free in both (what a relief step would free).
 bool coarseNeedFits(const CoarseNeed& need, uint32_t freedFirst = 0);
 
+// While set, a decode has a better moment coming, and leaves to it what it cannot do well now: a progressive JPEG short
+// of memory is not published coarse, which would stay (it counts as cached, and only the memory ladder decodes it
+// again), and an extract the arena cannot hold does not put its ring on the heap. Either way the picture stays
+// undecoded and the decode counts as short of memory. Use ScopedCanWait.
+bool canWait();
+void setCanWait(bool canWait);
+
+class ScopedCanWait {
+ public:
+  explicit ScopedCanWait(const bool wait) : previous_(canWait()) { setCanWait(wait); }
+  ~ScopedCanWait() { setCanWait(previous_); }
+  ScopedCanWait(const ScopedCanWait&) = delete;
+  ScopedCanWait& operator=(const ScopedCanWait&) = delete;
+
+ private:
+  bool previous_;
+};
+
 // RAII installer — restores the previous value, so nesting is safe.
 class ScopedArena {
  public:
