@@ -1935,8 +1935,10 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
             backgroundSection_->isTableRowDegraded() || backgroundSection_->isShapingDegraded()) {
           // Memory ran short mid-parse: pages are missing (truncated), CSS lookups were skipped
           // (styles silently absent from the cached pages), the footnote resolve could not
-          // complete (markers left plain in a cache keyed "previews on"), or an image was dropped
-          // to alt text because its header read was refused. Don't hand any of them to the
+          // complete (markers left plain in a cache keyed "previews on"), an image was dropped
+          // to alt text because its header read was refused, or a table row was demoted. Or a
+          // shaped-script run was laid out unshaped (no memory for it, or the font could not
+          // shape it; only the first is the heap's doing). Don't hand any of them to the
           // foreground: its blocking path runs with the secondary buffer released (~52 KB more
           // headroom) and will likely build it clean.
           //
@@ -4503,10 +4505,13 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   // still had to degrade is worth one loud line (the status byte carries it to the next entry,
   // which rebuilds once -- see the cache-hit policy in buildSection).
   if (createOk && (section->isCssLowHeapDegraded() || section->isTableRowDegraded() || section->isShapingDegraded())) {
-    LOG_ERR("ERS", "Blocking build spine=%d came out degraded (%s%s%s); cached with the status bit set",
-            currentSpineIndex, section->isCssLowHeapDegraded() ? "css-skips " : "",
-            section->isTableRowDegraded() ? "table-row-demoted " : "",
-            section->isShapingDegraded() ? "shaping-unshaped" : "");
+    LOG_ERR(
+        "ERS", "Blocking build spine=%d came out degraded (%s%s%s%s%s); cached with the status bit set",
+        currentSpineIndex, section->isCssLowHeapDegraded() ? "css-skips" : "",
+        section->isCssLowHeapDegraded() && section->isTableRowDegraded() ? " " : "",
+        section->isTableRowDegraded() ? "table-row-demoted" : "",
+        (section->isCssLowHeapDegraded() || section->isTableRowDegraded()) && section->isShapingDegraded() ? " " : "",
+        section->isShapingDegraded() ? "shaping-unshaped" : "");
   }
   if (createOk && section->isImageHeaderDegraded()) {
     // A borrowed build's region is idle now (its build state is gone): walk from it directly,
@@ -4752,14 +4757,14 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     section->clearCache();
     cacheHit = false;
   }
-  // A cache whose layout is what the heap allowed rather than what the book says: a table row
-  // written as paragraphs, or elements cached without their styles because the resolver skipped
-  // lookups. Both used to be baked in for good (memory audit 2026-09, F3). Same policy as the
-  // image bit: one rebuild per spine per session, and if that one comes out degraded too the
-  // bit stays set and the chapter is read as it is.
+  // A cache whose layout is not what the book says: a table row written as paragraphs or elements
+  // cached without their styles (the heap allowed no better; memory audit 2026-09, F3), or a
+  // shaped-script run laid out unshaped (no memory for it, or the font could not shape it). All
+  // were once baked in for good. Same policy as the image bit: one rebuild per spine per session,
+  // and if that one comes out degraded too the bit stays set and the chapter is read as it is.
   if (cacheHit && (section->isTableRowDegraded() || section->isShapingDegraded() || section->isCssLowHeapDegraded()) &&
       degradedLayoutRebuildSpine_ != currentSpineIndex) {
-    LOG_INF("ERS", "Section %d: cached %s under low heap; rebuilding once", currentSpineIndex,
+    LOG_INF("ERS", "Section %d: cached %s; rebuilding once", currentSpineIndex,
             section->isTableRowDegraded()  ? "with a table row demoted to paragraphs"
             : section->isShapingDegraded() ? "with a shaped-script run laid out unshaped"
                                            : "with CSS lookups skipped");

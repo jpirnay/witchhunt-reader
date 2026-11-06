@@ -85,13 +85,13 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
   // No Section build ends here, so nothing else frees the line pass's heap memory (a right-to-left article made it)
   // or the shaping pass's and its faces (an Indic one did). Declared before the parser's block: it runs on every
   // exit, after the parser is gone.
-  struct ReleaseBidiMemory {
-    ~ReleaseBidiMemory() {
+  struct ReleaseLayoutMemory {
+    ~ReleaseLayoutMemory() {
       BidiLine::releaseBuildMemory();
       TextShaping::releaseBuildMemory();
       GfxRenderer::releaseShapingFaces();
     }
-  } releaseBidiMemory;
+  } releaseLayoutMemory;
   {
     // For the parser's lifetime, which is the layout: the last section build installed its own book's patterns.
     const ScopedLanguageHyphenator scopedHyphenator(hyphenator);

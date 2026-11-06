@@ -1,7 +1,8 @@
-// The shaping status of a section build (writing modes step 2, PR 3): a shaped-script run laid out unshaped is latched
-// into the section file (kStatusShapingDegraded) so the reader can rebuild once, and a build's end frees the shaping
-// pass's memory and faces. Each case builds a one-chapter Hindi book through the host pipeline, with the Devanagari
-// subset as the face of every font.
+// A shaped-script run laid out unshaped is latched into the section file (kStatusShapingDegraded) so the reader can
+// rebuild once; a clean build lays its words out shaped (glyph forms) and a refused one does not; a clean rebuild on
+// the same Section clears the bit and records the page count; and a build's end frees the shaping pass's memory and
+// faces. Each case builds a one-chapter Hindi book through the host pipeline, with the Devanagari subset as the face
+// of every font.
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -12,6 +13,7 @@
 #include "Epub.h"
 #include "Epub/Page.h"
 #include "Epub/Section.h"
+#include "Epub/blocks/TextBlock.h"
 #include "GfxRenderer.h"
 #include "PipelineRunner.h"
 #include "SyntheticBook.h"
@@ -29,22 +31,49 @@ constexpr const char* kDevanagariFace = "NotoSansDevanagari-Shaping-Regular.ttf"
 constexpr size_t kShapingBlockFrom = 6 * 1024;
 constexpr size_t kShapingBlockTo = 8 * 1024 - 1;
 
-// Words the subset face holds, in paragraphs: hindi, patrika, shri, prarthana, krishna, jnana.
+// Words the subset face holds: hindi, patrika, shri, prarthana, krishna, jnana.
+std::string hindiWords() {
+  return "\xE0\xA4\xB9\xE0\xA4\xBF\xE0\xA4\xA8\xE0\xA5\x8D\xE0\xA4\xA6\xE0\xA5\x80 "
+         "\xE0\xA4\xAA\xE0\xA4\xA4\xE0\xA5\x8D\xE0\xA4\xB0\xE0\xA4\xBF\xE0\xA4\x95\xE0\xA4\xBE "
+         "\xE0\xA4\xB6\xE0\xA5\x8D\xE0\xA4\xB0\xE0\xA5\x80 "
+         "\xE0\xA4\xAA\xE0\xA5\x8D\xE0\xA4\xB0\xE0\xA4\xBE\xE0\xA4\xB0\xE0\xA5\x8D\xE0\xA4\xA5\xE0\xA4\xA8\xE0\xA4\xBE "
+         "\xE0\xA4\x95\xE0\xA5\x83\xE0\xA4\xB7\xE0\xA5\x8D\xE0\xA4\xA3 "
+         "\xE0\xA4\x9C\xE0\xA5\x8D\xE0\xA4\x9E\xE0\xA4\xBE\xE0\xA4\xA8 ";
+}
+
+// Paragraphs of those words.
 std::string hindiBody() {
-  const std::string words =
-      "\xE0\xA4\xB9\xE0\xA4\xBF\xE0\xA4\xA8\xE0\xA5\x8D\xE0\xA4\xA6\xE0\xA5\x80 "
-      "\xE0\xA4\xAA\xE0\xA4\xA4\xE0\xA5\x8D\xE0\xA4\xB0\xE0\xA4\xBF\xE0\xA4\x95\xE0\xA4\xBE "
-      "\xE0\xA4\xB6\xE0\xA5\x8D\xE0\xA4\xB0\xE0\xA5\x80 "
-      "\xE0\xA4\xAA\xE0\xA5\x8D\xE0\xA4\xB0\xE0\xA4\xBE\xE0\xA4\xB0\xE0\xA5\x8D\xE0\xA4\xA5\xE0\xA4\xA8\xE0\xA4\xBE "
-      "\xE0\xA4\x95\xE0\xA5\x83\xE0\xA4\xB7\xE0\xA5\x8D\xE0\xA4\xA3 "
-      "\xE0\xA4\x9C\xE0\xA5\x8D\xE0\xA4\x9E\xE0\xA4\xBE\xE0\xA4\xA8 ";
   std::string body;
   for (int paragraph = 0; paragraph < 6; ++paragraph) {
     body += "<p>";
-    for (int i = 0; i < 12; ++i) body += words;
+    for (int i = 0; i < 12; ++i) body += hindiWords();
     body += "</p>\n";
   }
   return body;
+}
+
+// The words alone, in a table's cell and nowhere else.
+std::string hindiTable() { return "<table><tr><td>" + hindiWords() + hindiWords() + "</td></tr></table>\n"; }
+
+// How many words of the section's pages are laid out as glyphs (a shaped word's form), read back from the file.
+int glyphFormWords(Section& section) {
+  int words = 0;
+  for (uint16_t n = 0; n < section.pageCount; ++n) {
+    section.currentPage = n;
+    const auto page = section.loadPageFromSectionFile();
+    if (!page) return -1;
+    for (const auto& element : page->elements) {
+      if (element->getTag() != TAG_PageLine) continue;
+      const TextBlock& block = *static_cast<const PageLine&>(*element).getBlock();
+      for (uint16_t w = 0; w < block.wordCount(); ++w) words += block.hasGlyphForm(w) ? 1 : 0;
+    }
+  }
+  return words;
+}
+
+// The page counts recorded for the book's one spine under `p`: 0 files when none is.
+int recordedFiles(const Epub& epub, const Section::BuildParams& p) {
+  return Section::indexedPageTotals(epub.getCachePath(), p, epub.getSpineItemsCount(), 0, 0, /*current=*/-1).filesAfter;
 }
 
 Section::BuildParams params() {
@@ -98,11 +127,51 @@ TEST_F(ShapingStatus, ADegradedBuildIsLatchedAndKeptInTheFile) {
   EXPECT_TRUE(built.isShapingDegraded());
   // The band hit the shaping calls and nothing else: the build ran to its end.
   expectOtherwiseComplete(built);
+  // A degraded build records no page count (a load would record it, so this is read first).
+  EXPECT_EQ(recordedFiles(*epub, params()), 0);
 
   Section loaded(epub, 0, renderer);
   ASSERT_TRUE(loaded.loadSectionFile(params()));
   EXPECT_TRUE(loaded.isShapingDegraded());
   expectOtherwiseComplete(loaded);
+  // No word was shaped, so no word has a glyph form.
+  EXPECT_EQ(glyphFormWords(loaded), 0);
+}
+
+TEST_F(ShapingStatus, ADegradedTableCellsRunIsLatched) {
+  const std::shared_ptr<Epub> epub = syntheticBook(work, 0, hindiTable());
+  const pipeline_harness::ShapingFaceScope face(kDevanagariFace);
+  GfxRenderer renderer;
+  Section built(epub, 0, renderer);
+  {
+    const AllocationRefusal refusal(kShapingBlockFrom, kShapingBlockTo);
+    ASSERT_TRUE(built.createSectionFile(params(), {}, /*skipEviction=*/true));
+  }
+  EXPECT_TRUE(built.isShapingDegraded());
+  expectOtherwiseComplete(built);
+}
+
+TEST_F(ShapingStatus, ACleanRebuildOnTheSameSectionClearsTheBit) {
+  const std::shared_ptr<Epub> epub = syntheticBook(work, 0, hindiBody());
+  const pipeline_harness::ShapingFaceScope face(kDevanagariFace);
+  GfxRenderer renderer;
+  Section section(epub, 0, renderer);
+  {
+    const AllocationRefusal refusal(kShapingBlockFrom, kShapingBlockTo);
+    ASSERT_TRUE(section.createSectionFile(params(), {}, /*skipEviction=*/true));
+  }
+  ASSERT_TRUE(section.isShapingDegraded());
+  EXPECT_EQ(recordedFiles(*epub, params()), 0);
+
+  // The reader rebuilds on the Section it already holds.
+  ASSERT_TRUE(section.createSectionFile(params(), {}, /*skipEviction=*/true));
+  EXPECT_FALSE(section.isShapingDegraded());
+  expectOtherwiseComplete(section);
+  EXPECT_EQ(recordedFiles(*epub, params()), 1);
+
+  Section loaded(epub, 0, renderer);
+  ASSERT_TRUE(loaded.loadSectionFile(params()));
+  EXPECT_FALSE(loaded.isShapingDegraded());
 }
 
 TEST_F(ShapingStatus, ACleanBuildIsNotDegraded) {
@@ -118,18 +187,29 @@ TEST_F(ShapingStatus, ACleanBuildIsNotDegraded) {
     Section loaded(epub, 0, renderer);
     ASSERT_TRUE(loaded.loadSectionFile(params()));
     EXPECT_FALSE(loaded.isShapingDegraded());
+    // The face is installed and the words are shaped: they are drawn as glyphs.
+    EXPECT_GT(glyphFormWords(loaded), 0);
   }
 
   // The harness's own run, from a profile.
   pipeline_harness::Profile profile;
   profile.shapingFontFile = kDevanagariFace;
   bool visited = false;
+  int shapedWords = 0;
   ASSERT_TRUE(pipeline_harness::forEachPage((work / "book0.epub").string(), (work / "profile_cache").string(), profile,
-                                            [&](int, const Section& section, const Page&, GfxRenderer&) {
+                                            [&](int, const Section& section, const Page& page, GfxRenderer&) {
                                               visited = true;
                                               EXPECT_FALSE(section.isShapingDegraded());
+                                              for (const auto& element : page.elements) {
+                                                if (element->getTag() != TAG_PageLine) continue;
+                                                const TextBlock& block =
+                                                    *static_cast<const PageLine&>(*element).getBlock();
+                                                for (uint16_t w = 0; w < block.wordCount(); ++w)
+                                                  shapedWords += block.hasGlyphForm(w) ? 1 : 0;
+                                              }
                                             }));
   EXPECT_TRUE(visited);
+  EXPECT_GT(shapedWords, 0);
 }
 
 TEST_F(ShapingStatus, TheBuildsEndFreesTheShapingMemory) {
