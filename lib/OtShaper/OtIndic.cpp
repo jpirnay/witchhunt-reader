@@ -25,7 +25,10 @@ bool isJoiner(const GlyphInfo& info) { return isOneOf(info, JOINER_FLAGS); }
 bool isHalant(const GlyphInfo& info) { return isOneOf(info, flag(icat::H)); }
 bool flagSet(const uint8_t value, const uint64_t flags) { return (flags >> value) & 1; }
 
+}  // namespace
+
 // consonant_position_from_face().
+// witchhunt: deviation 13 - outside the anonymous namespace: Plan::consonantPosition() calls it.
 uint8_t consonantPositionFromFace(const Face& face, const Plan& plan, const uint32_t consonant, const uint32_t virama) {
   const uint32_t glyphs[3] = {virama, consonant, virama};
   if (plan.wouldSubstitute(face, Plan::WS_BLWF, glyphs, 2) ||
@@ -44,6 +47,8 @@ uint8_t consonantPositionFromFace(const Face& face, const Plan& plan, const uint
   }
   return ipos::BASE_C;
 }
+
+namespace {
 
 // The font's virama glyph, 0 when it has none.
 uint32_t viramaGlyph(const Face& face, const Plan& plan) {
@@ -482,7 +487,8 @@ void indicInitialReordering(const Face& face, const Plan& plan, Buffer& buffer) 
   // update_consonant_positions_indic().
   if (const uint32_t virama = viramaGlyph(face, plan)) {
     for (GlyphInfo& g : buffer.info) {
-      if (g.position == ipos::BASE_C) g.position = consonantPositionFromFace(face, plan, g.codepoint, virama);
+      // witchhunt: deviation 13 - consonantPositionFromFace(), remembered by the plan.
+      if (g.position == ipos::BASE_C) g.position = plan.consonantPosition(face, g.codepoint, virama);
     }
   }
   insertDottedCircles(face, buffer, isyl::BROKEN, icat::DOTTEDCIRCLE, icat::Repha, true, ipos::END);

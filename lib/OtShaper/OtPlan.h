@@ -108,6 +108,14 @@ class Plan {
 
   // Lookup settings (flags, mask, filters) of planned lookup `i` of `table`.
   LookupSettings settings(int table, size_t i) const;
+  // witchhunt: deviation 13 - whether planned lookup `i` of `table` may start
+  // at a glyph the buffer holds (`buffer` is its digest): the digest test of
+  // HarfBuzz's apply loop, on the plan's own copy of the lookup's digest, so
+  // a lookup it rejects costs no read of the font.
+  bool mayApply(int table, size_t i, const Digest& buffer) const;
+  // witchhunt: deviation 13 - consonantPositionFromFace() of the glyphs
+  // `consonant` and `virama`, remembered: the walk runs on a miss only.
+  uint8_t consonantPosition(const Face& face, uint32_t consonant, uint32_t virama) const;
   // Heap the plan holds, for memory statistics.
   size_t memoryBytes() const;
 
@@ -138,6 +146,12 @@ class Plan {
   uint32_t useRphfMask = 0;
   uint32_t useTopographicalMasks[4] = {};  // isol, init, medi, fina
 
+  // witchhunt: deviation 13 - a test hook: false makes mayApply() let every
+  // lookup through and consonantPosition() walk on every call, so a test can
+  // shape with the memos and without them. True in every plan the firmware
+  // makes.
+  bool useMemos = true;
+
  private:
   friend class PlanBuilder;
 
@@ -153,32 +167,54 @@ class Plan {
   void setFeatureMasks(const uint32_t* masks);
   // Everything that follows from the lookups, stages and masks: GPOS and
   // mark handling, lookup filters and the shapers' data.
-  void finish(const Face& face);
+  // witchhunt: deviation 13 - false when the lookup digests' block is refused.
+  bool finish(const Face& face);
+  bool copyLookupDigests(const Face& face);  // witchhunt: deviation 13
   void buildFilters(const Face& face);
   void collectWould(WouldFeature feature);
+  const uint8_t* digestRecord(int table, size_t i) const;  // witchhunt: deviation 13 - in lookupDigests_
 
   bool zeroContext_ = false;
   WouldSubstituteLookups would_[WS_COUNT];
-  // Lookup filters: the font's CPac records, or computed here (per planned
-  // lookup its digest and where its subtable digests start).
+  // Subtable filters: the font's CPac records, or computed here (per planned
+  // lookup where its subtable digests start, and the subtable digests).
   const FilterRecords* fontFilters_[2] = {nullptr, nullptr};
-  FixedVector<uint8_t> lookupDigests_[2];    // witchhunt: deviation 1
   FixedVector<uint32_t> subtableStarts_[2];  // witchhunt: deviation 1
   FixedVector<uint8_t> subtableDigests_[2];  // witchhunt: deviation 1
+  // witchhunt: deviation 13 - every planned lookup's digest, GSUB's then
+  // GPOS's in lookups[] order: copied from the font's CPac, else computed.
+  // mayApply(), settings() and wouldSubstitute() read these, never the font's
+  // records, and a plan cannot do without them (the block is refused: the plan
+  // fails), so a would-substitute probe always has the digest HarfBuzz tests
+  // its first glyph against.
+  FixedVector<uint8_t> lookupDigests_;
+
+  // witchhunt: deviation 13 - consonantPosition()'s memo, direct-mapped: one
+  // slot per (consonant ^ virama) % POSITION_SLOTS, keyed by the two glyph IDs
+  // (not code points: locl and ccmp run before initial reordering). It
+  // remembers a pure function of the plan and the font, so the output cannot
+  // change; upstream HarfBuzz (to 15.1.0 and main) walks every time. mutable:
+  // a const plan fills it while it shapes. A plan is used by one section build
+  // at a time, single-threaded under RenderLock. finish() empties it.
+  static constexpr size_t POSITION_SLOTS = 64;
+  mutable uint32_t positionKeys_[POSITION_SLOTS] = {};  // consonant | virama << 16
+  mutable uint8_t positions_[POSITION_SLOTS] = {};      // 0 (ipos::START, never an answer): empty
 
   // witchhunt: deviation 1 - the arrays above live in blocks the plan owns,
   // each from makeUniqueNoThrow right after the heap check: per table one for
-  // the lists and one for the computed filters. Each allocate*() frees the
-  // table's old block first, and binds its arrays empty (false: bound to
-  // nothing). A plan is move-only, and `*this = Plan()` frees the blocks. A
-  // flag cleared by a refused growth is checked once the arrays are filled;
-  // build() and load() bind them afresh, so a moved plan's flags never matter.
+  // the lists and one for the computed filters, and one for the lookup
+  // digests (deviation 13). Each allocate*() frees the table's old block
+  // first, and binds its arrays empty (false: bound to nothing). A plan is
+  // move-only, and `*this = Plan()` frees the blocks. A flag cleared by a
+  // refused growth is checked once the arrays are filled; build() and load()
+  // bind them afresh, so a moved plan's flags never matter.
   bool allocateLists(int table, size_t lookupCount, size_t stageCount);       // binds lookups[table], stages[table]
-  bool allocateFilters(int table, size_t lookupCount, size_t subtableCount);  // binds the three filter arrays
+  bool allocateFilters(int table, size_t lookupCount, size_t subtableCount);  // binds the two filter arrays
   std::unique_ptr<uint8_t[]> listBlock_[2];
   std::unique_ptr<uint8_t[]> filterBlock_[2];
-  bool listsFit_ = true;    // cleared by a refused growth of lookups[] or stages[]
-  bool filtersFit_ = true;  // cleared by a refused growth of a filter array; allocateFilters() sets it
+  std::unique_ptr<uint8_t[]> digestBlock_;  // witchhunt: deviation 13 - lookupDigests_
+  bool listsFit_ = true;                    // cleared by a refused growth of lookups[] or stages[]
+  bool filtersFit_ = true;                  // cleared by a refused growth of a filter array; allocateFilters() sets it
 };
 
 // The script and language system a plan follows in one layout table

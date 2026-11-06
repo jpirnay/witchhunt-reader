@@ -1,17 +1,25 @@
+#include <InflateReader.h>
+#include <OtFilterWriter.h>
 #include <OtShaper.h>
 #include <OtUnicodeData.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
+
+#include "OtShaperInternal.h"
 
 // lib/OtShaper on the .cpfont layout fonts in test/complex_shaper/data. Its
 // output is checked against HarfBuzz glyph for glyph by ComplexShaperTest
 // (and at scale by compare_harfbuzz.py); these tests cover the parts that
 // test cannot see: the precomputed lookup filters and plans, and hostile fonts.
+// The plan's memos are checked on the four Indic fixture books' words, with
+// their subset fonts (test/fixtures/fonts).
 
 namespace {
 
@@ -116,10 +124,32 @@ TEST(OtShaperFilters, ConverterFiltersMatchWhatTheShaperComputes) {
   }
 }
 
-// Allows the plan's lookup lists (one reservation each for GSUB and GPOS)
-// and refuses the lookup filters Plan::build() computes after them.
+// Counts the heap reservations of a build, or allows the first
+// gPlanReservationsLeft and refuses the rest.
+int gReservations = 0;
+bool countReservation(size_t) {
+  gReservations++;
+  return true;
+}
 int gPlanReservationsLeft = 0;
 bool refuseFilterHeap(size_t) { return gPlanReservationsLeft-- > 0; }
+
+// Builds `plan` with every heap reservation allowed but the last two: the
+// GSUB and GPOS filter blocks Plan::build() computes for a face without CPac,
+// after everything a plan cannot do without.
+bool buildWithoutFilterBlocks(ot::Plan& plan, const ot::Face& face, const ot::Script script, const uint32_t* tags) {
+  ot::Plan probe;
+  gReservations = 0;
+  ot::setHeapCheck(countReservation);
+  const bool probed = probe.build(face, script, tags);
+  ot::setHeapCheck(nullptr);
+  if (!probed || gReservations < 2) return false;
+  gPlanReservationsLeft = gReservations - 2;
+  ot::setHeapCheck(refuseFilterHeap);
+  const bool built = plan.build(face, script, tags);
+  ot::setHeapCheck(nullptr);
+  return built;
+}
 
 TEST(OtShaperFilters, ShapingIsTheSameWithStoredComputedOrNoFilters) {
   for (const Fixture& fx : fixtures()) {
@@ -130,11 +160,8 @@ TEST(OtShaperFilters, ShapingIsTheSameWithStoredComputedOrNoFilters) {
     ot::Plan withStored, withComputed, without;
     ASSERT_TRUE(withStored.build(stored, fx.script, ot::languageTagsFor("")));
     ASSERT_TRUE(withComputed.build(computed, fx.script, ot::languageTagsFor("")));
-    gPlanReservationsLeft = 2;
-    ot::setHeapCheck(refuseFilterHeap);
-    const bool builtWithout = without.build(computed, fx.script, ot::languageTagsFor(""));
-    ot::setHeapCheck(nullptr);
-    ASSERT_TRUE(builtWithout);
+    ASSERT_TRUE(buildWithoutFilterBlocks(without, computed, fx.script, ot::languageTagsFor("")));
+    EXPECT_LT(without.memoryBytes(), withComputed.memoryBytes()) << fx.file << ": the filter blocks were not refused";
     for (const char* word : fx.words) {
       const std::vector<int32_t> expected = shapeWord(stored, withStored, word);
       ASSERT_FALSE(expected.empty()) << word;
@@ -465,6 +492,372 @@ TEST(OtShaperLanguage, MapsBcp47TagsToLanguageSystems) {
   EXPECT_EQ(ot::languageTagsFor("xx")[0], 0u);
   EXPECT_EQ(ot::languageTagsFor("")[0], 0u);
   EXPECT_EQ(ot::languageTagsFor(nullptr)[0], 0u);
+}
+
+// --- The plan's memos, on the four Indic fixture books -------------------------
+
+std::vector<uint8_t> readPath(const std::string& path) {
+  std::vector<uint8_t> bytes;
+  if (FILE* f = std::fopen(path.c_str(), "rb")) {
+    uint8_t buf[4096];
+    size_t n;
+    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) bytes.insert(bytes.end(), buf, buf + n);
+    std::fclose(f);
+  }
+  return bytes;
+}
+
+// A book of test/epubs, its subset font in test/fixtures/fonts, and the
+// script's Unicode block.
+struct Book {
+  const char* font;
+  const char* epub;
+  ot::Script script;
+  const char* language;
+  uint32_t block;
+};
+constexpr Book BOOKS[] = {
+    {"NotoSansDevanagari-Book-Regular.ttf", "test_shaped_devanagari.epub", ot::Script::Devanagari, "hi", 0x0900},
+    {"NotoSansBengali-Book-Regular.ttf", "test_shaped_bengali.epub", ot::Script::Bengali, "bn", 0x0980},
+    {"NotoSansTamil-Book-Regular.ttf", "test_shaped_tamil.epub", ot::Script::Tamil, "ta", 0x0B80},
+    {"NotoSansMalayalam-Book-Regular.ttf", "test_shaped_malayalam.epub", ot::Script::Malayalam, "ml", 0x0D00},
+};
+const Book& bengaliBook() { return BOOKS[1]; }
+
+std::vector<uint8_t> fixtureFont(const Book& book) { return readPath(std::string(TTF_FIXTURE_DIR) + "/" + book.font); }
+
+// An entry of a ZIP whose local headers hold the sizes (stored or deflated),
+// as the fixture generators write them; empty when absent or unreadable.
+std::string zipEntry(const std::vector<uint8_t>& zip, const std::string& name) {
+  const auto u16 = [&zip](const size_t at) { return static_cast<uint32_t>(zip[at] | zip[at + 1] << 8); };
+  const auto u32 = [&u16](const size_t at) { return u16(at) | u16(at + 2) << 16; };
+  size_t at = 0;
+  while (at + 30 <= zip.size() && u32(at) == 0x04034B50) {
+    const uint32_t method = u16(at + 8), packed = u32(at + 18), size = u32(at + 22);
+    const size_t data = at + 30 + u16(at + 26) + u16(at + 28);
+    if (data + packed > zip.size()) break;
+    if (std::string(reinterpret_cast<const char*>(&zip[at + 30]), u16(at + 26)) == name) {
+      std::string out(size, '\0');
+      if (method == 0 && packed == size) {
+        std::memcpy(out.data(), &zip[data], size);
+        return out;
+      }
+      InflateReader reader;
+      if (method != 8 || !reader.init(false)) return {};
+      reader.setSource(&zip[data], packed);
+      return reader.read(reinterpret_cast<uint8_t*>(out.data()), size) ? out : std::string();
+    }
+    at = data + packed;
+  }
+  return {};
+}
+
+bool isJoiner(const uint32_t cp) { return cp == 0x200C || cp == 0x200D; }
+
+// The first `limit` runs a book's words shape as: per word of its chapters'
+// bodies (tags dropped, so a sign in a <b> of its own stays in its word), the
+// code points from the first one in U+0900-0DFF on, through those of that
+// range and the joiners, at most MAX_RUN of them.
+constexpr size_t MAX_RUN = 64;
+std::vector<std::vector<uint32_t>> bookRuns(const Book& book, const size_t limit) {
+  const std::vector<uint8_t> zip = readPath(std::string(EPUB_FIXTURE_DIR) + "/" + book.epub);
+  std::vector<std::vector<uint32_t>> runs;
+  for (const char* chapter : {"OEBPS/ch1.xhtml", "OEBPS/ch2.xhtml"}) {
+    const std::string xhtml = zipEntry(zip, chapter);
+    std::string text;
+    bool inTag = false;
+    for (size_t i = xhtml.find("<body"); i < xhtml.size(); i++) {
+      if (xhtml[i] == '<' || xhtml[i] == '>') {
+        inTag = xhtml[i] == '<';
+      } else if (!inTag) {
+        text += xhtml[i];
+      }
+    }
+    size_t start = 0;
+    while (start < text.size() && runs.size() < limit) {
+      const size_t end = std::min(text.find_first_of(" \t\r\n", start), text.size());
+      const std::vector<uint32_t> cps = utf32(text.substr(start, end - start).c_str());
+      std::vector<uint32_t> run;
+      for (const uint32_t cp : cps) {
+        const bool indic = cp >= 0x0900 && cp <= 0x0DFF;
+        if (indic || (!run.empty() && isJoiner(cp))) {
+          if (run.size() < MAX_RUN) run.push_back(cp);
+        } else if (!run.empty()) {
+          break;
+        }
+      }
+      if (!run.empty()) runs.push_back(run);
+      start = end + 1;
+    }
+  }
+  return runs;
+}
+
+// A run shaped as shapeWord() shapes a word: each glyph's ID, advance and
+// offsets, flattened.
+std::vector<int32_t> shapeRun(const ot::Face& face, const ot::Plan& plan, const std::vector<uint32_t>& run) {
+  ot::Scale scale;
+  scale.set(2133, 33, face.upem());
+  ot::Buffer buffer;
+  static uint8_t storage[ot::Buffer::bytesFor(2 * MAX_RUN + 16)];  // witchhunt: deviation 1
+  buffer.setStorage(storage, sizeof(storage));                     // witchhunt: deviation 1
+  std::vector<int32_t> out;
+  if (!ot::shape(face, scale, plan, run.data(), static_cast<unsigned>(run.size()), buffer)) return out;
+  for (unsigned i = 0; i < buffer.len(); i++) {
+    out.insert(out.end(), {static_cast<int32_t>(buffer.info[i].codepoint), buffer.pos[i].xAdvance,
+                           buffer.pos[i].xOffset, buffer.pos[i].yOffset});
+  }
+  return out;
+}
+
+// The face of a TrueType font; with `withCpac`, plus the CPac the install
+// writes into a style's block (FilterTableWriter), as the device has it.
+struct TtfFace {
+  std::vector<uint8_t> font;
+  std::vector<uint8_t> cpac;
+  ot::Face face;
+
+  bool open(std::vector<uint8_t> bytes, const bool withCpac) {
+    font = std::move(bytes);
+    ot::FaceTables tables;
+    if (font.empty() || !ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables)) return false;
+    if (!face.init(tables)) return false;
+    if (!withCpac) return face.filters(ot::GSUB) == nullptr;
+    ot::FilterTableWriter writer(face);
+    cpac.resize(writer.bytes());
+    if (cpac.empty() || writer.write(cpac.data(), static_cast<uint32_t>(cpac.size())) != cpac.size()) return false;
+    tables[ot::FaceTables::CPAC] = ot::Table(cpac.data(), static_cast<uint32_t>(cpac.size()));
+    return face.init(tables) && face.filters(ot::GSUB) != nullptr && face.filters(ot::GPOS) != nullptr;
+  }
+};
+
+// The glyphs initial reordering asks a position for (indicPosition BASE_C:
+// the consonants, and the independent vowels and digits that start there)
+// that the font maps, with their code points.
+struct Consonant {
+  uint32_t cp;
+  uint32_t glyph;
+};
+std::vector<Consonant> consonantsOf(const ot::Face& face, const uint32_t block) {
+  std::vector<Consonant> out;
+  for (uint32_t cp = block; cp < block + 0x80; cp++) {
+    uint32_t glyph;
+    if (ot::charData(cp).indicPosition == ot::ipos::BASE_C && face.nominalGlyph(cp, &glyph)) out.push_back({cp, glyph});
+  }
+  return out;
+}
+
+// The block's viramas (indicCategory H) the font maps: one in each fixture.
+std::vector<uint32_t> viramasOf(const ot::Face& face, const uint32_t block) {
+  std::vector<uint32_t> out;
+  for (uint32_t cp = block; cp < block + 0x80; cp++) {
+    uint32_t glyph;
+    if (ot::charData(cp).indicCategory == ot::icat::H && face.nominalGlyph(cp, &glyph)) out.push_back(glyph);
+  }
+  return out;
+}
+
+// A book's font with its CPac and a plan for the book's language.
+struct BookPlan {
+  TtfFace font;
+  ot::Plan plan;
+
+  bool open(const Book& book, const bool withCpac = true) {
+    return font.open(fixtureFont(book), withCpac) &&
+           plan.build(font.face, book.script, ot::languageTagsFor(book.language));
+  }
+};
+
+// Every consonant the font maps, after its virama and before it, asked twice
+// in a row (the second answer is the memo's) and again once all were asked
+// (over 64 pairs: some slots were taken by others meanwhile). No fixture maps
+// a second virama, so the dotted circle stands in for one: the memo is keyed
+// by both glyphs.
+TEST(OtShaper, ConsonantPositionMemoMatchesTheWalk) {
+  int notBase = 0;  // Tamil has none: its consonants take no below- or post-base forms
+  for (const Book& book : BOOKS) {
+    SCOPED_TRACE(book.font);
+    BookPlan bp;
+    ASSERT_TRUE(bp.open(book));
+    const ot::Face& face = bp.font.face;
+    std::vector<uint32_t> viramas = viramasOf(face, book.block);
+    ASSERT_FALSE(viramas.empty());
+    if (viramas.size() < 2) {
+      uint32_t circle;
+      ASSERT_TRUE(face.nominalGlyph(ot::DOTTED_CIRCLE, &circle));
+      viramas.push_back(circle);
+    }
+    const std::vector<Consonant> consonants = consonantsOf(face, book.block);
+    ASSERT_GE(consonants.size(), 20u);
+    for (int pass = 0; pass < 2; pass++) {
+      for (const Consonant& c : consonants) {
+        for (const uint32_t v : viramas) {
+          const uint8_t walked = ot::consonantPositionFromFace(face, bp.plan, c.glyph, v);
+          for (int ask = 0; ask < 2; ask++) {
+            EXPECT_EQ(bp.plan.consonantPosition(face, c.glyph, v), walked)
+                << std::hex << "U+" << c.cp << std::dec << " glyph " << c.glyph << " virama " << v << " pass " << pass
+                << " ask " << ask;
+          }
+          notBase += pass == 0 && walked != ot::ipos::BASE_C;
+        }
+      }
+    }
+  }
+  EXPECT_GE(notBase, 5) << "the walks answer base everywhere: the memo was not tested";
+}
+
+// The plan's digests are the font's CPac records, and mayApply() rejects a
+// lookup only when the font's digest test would: for every planned lookup,
+// against the digests of the book's first 200 runs, as code points map to
+// glyphs and as they shape.
+TEST(OtShaper, MayApplyRejectsOnlyWhatTheDigestRejects) {
+  for (const Book& book : BOOKS) {
+    SCOPED_TRACE(book.font);
+    BookPlan bp;
+    ASSERT_TRUE(bp.open(book));
+    const std::vector<std::vector<uint32_t>> runs = bookRuns(book, 200);
+    ASSERT_GE(runs.size(), 100u);
+    std::vector<ot::Digest> buffers;
+    for (const std::vector<uint32_t>& run : runs) {
+      ot::Digest mapped, shaped;
+      for (const uint32_t cp : run) {
+        uint32_t glyph;
+        bp.font.face.nominalGlyph(cp, &glyph);
+        mapped.add(glyph);
+      }
+      const std::vector<int32_t> glyphs = shapeRun(bp.font.face, bp.plan, run);
+      ASSERT_FALSE(glyphs.empty());
+      for (size_t g = 0; g < glyphs.size(); g += 4) shaped.add(static_cast<uint32_t>(glyphs[g]));
+      buffers.push_back(mapped);
+      buffers.push_back(shaped);
+    }
+    size_t tests = 0;
+    size_t rejected = 0;
+    for (const int t : {ot::GSUB, ot::GPOS}) {
+      const ot::FilterRecords* const stored = bp.font.face.filters(t);
+      ASSERT_NE(stored, nullptr);
+      for (size_t i = 0; i < bp.plan.lookups[t].size(); i++) {
+        const ot::Digest font = ot::readDigest(stored->lookupDigests + ot::DIGEST_BYTES * bp.plan.lookups[t][i].index);
+        const ot::Digest copy = bp.plan.settings(t, i).digest;
+        EXPECT_EQ(0, std::memcmp(copy.masks, font.masks, sizeof(font.masks))) << "table " << t << " lookup " << i;
+        for (const ot::Digest& buffer : buffers) {
+          tests++;
+          if (bp.plan.mayApply(t, i, buffer)) continue;
+          rejected++;
+          EXPECT_FALSE(font.mayIntersect(buffer)) << "table " << t << " lookup " << i;
+        }
+      }
+    }
+    EXPECT_GT(rejected, 0u) << "of " << tests;
+    std::printf("[ %s ] %zu runs, %zu lookup tests, %zu rejected\n", book.font, runs.size(), tests, rejected);
+  }
+}
+
+// The book's first 200 runs shaped by a plan whose memos are switched off
+// (Plan::useMemos) and by a normal plan, on both routes: the font's CPac and
+// the digests a plan computes without it.
+TEST(OtShaper, TheTwoMemosLeaveEveryGlyphAlone) {
+  for (const Book& book : BOOKS) {
+    for (const bool withCpac : {true, false}) {
+      SCOPED_TRACE(std::string(book.font) + (withCpac ? " with CPac" : " without CPac"));
+      BookPlan bp;
+      ASSERT_TRUE(bp.open(book, withCpac));
+      ot::Plan without;
+      ASSERT_TRUE(without.build(bp.font.face, book.script, ot::languageTagsFor(book.language)));
+      without.useMemos = false;
+      const std::vector<std::vector<uint32_t>> runs = bookRuns(book, 200);
+      ASSERT_GE(runs.size(), 100u);
+      for (size_t r = 0; r < runs.size(); r++) {
+        const std::vector<int32_t> expected = shapeRun(bp.font.face, without, runs[r]);
+        ASSERT_FALSE(expected.empty()) << "run " << r;
+        EXPECT_EQ(shapeRun(bp.font.face, bp.plan, runs[r]), expected) << "run " << r;
+      }
+    }
+  }
+}
+
+// The planned GSUB lookups [first, second) of the stage a would-substitute
+// feature is applied in, as the plan finds them for wouldSubstitute().
+std::pair<size_t, size_t> wouldLookups(const ot::Plan& plan, const ot::Plan::WouldFeature feature) {
+  const unsigned stage = plan.wouldStage[feature];
+  const auto& stages = plan.stages[ot::GSUB];
+  if (stage == ot::Plan::NO_STAGE || stage > stages.size()) return {0, 0};
+  return {stage ? stages[stage - 1].lastLookup : 0,
+          stage < stages.size() ? stages[stage].lastLookup : plan.lookups[ot::GSUB].size()};
+}
+
+// The book's font with each two-glyph format-3 context of its blwf stage
+// reversed, [virama][BA] to [BA][virama]: the order of an old-spec font's
+// below-base rule. HarfBuzz's would_apply tests a format-3 context's glyphs
+// from the second one on and leaves the first to the lookup's digest, so to a
+// plan without that digest a virama would make every consonant below-base.
+// Empty when the stage has no such context.
+std::vector<uint8_t> withBlwfContextsReversed(const Book& book) {
+  std::vector<uint8_t> font = fixtureFont(book);
+  TtfFace bare;
+  ot::Plan plan;
+  if (!bare.open(font, false) || !plan.build(bare.face, book.script, ot::languageTagsFor(book.language))) return {};
+  const std::pair<size_t, size_t> blwf = wouldLookups(plan, ot::Plan::WS_BLWF);
+  int reversed = 0;
+  for (size_t i = blwf.first; i < blwf.second; i++) {
+    const ot::Table lookup = bare.face.lookup(ot::GSUB, plan.lookups[ot::GSUB][i].index);
+    if (lookup.u16(0) != 5) continue;  // a ContextSubst lookup
+    for (uint16_t s = 0; s < ot::Face::subtableCount(lookup); s++) {
+      const ot::Table st = lookup.offset16(6 + 2 * s);
+      if (st.u16(0) != 3 || st.u16(2) != 2) continue;
+      // Format 3: format, glyphCount, seqLookupCount, then the coverage offsets.
+      const size_t coverages = static_cast<size_t>(st.data() - bare.font.data()) + 6;
+      std::swap(font[coverages], font[coverages + 2]);
+      std::swap(font[coverages + 1], font[coverages + 3]);
+      reversed++;
+    }
+  }
+  return reversed ? font : std::vector<uint8_t>();
+}
+
+// F1 of the HarfBuzz triage: a plan whose filter blocks were refused still
+// tests a probe's first glyph against the lookup's digest, as HarfBuzz always
+// does. On the fixture as it is no probe depends on that (its blwf contexts
+// start with the virama, and no context's second glyph is one); with its blwf
+// contexts reversed, without the digest every consonant would be below-base.
+TEST(OtShaper, ABengaliPlanWithoutFiltersPlacesConsonantsAsWithThem) {
+  const Book& book = bengaliBook();
+  const std::vector<uint8_t> fonts[2] = {fixtureFont(book), withBlwfContextsReversed(book)};
+  const char* const names[2] = {"the fixture", "its blwf contexts reversed"};
+  ASSERT_FALSE(fonts[1].empty()) << "no two-glyph format-3 context in the blwf stage";
+  for (int f = 0; f < 2; f++) {
+    SCOPED_TRACE(names[f]);
+    TtfFace stored, bare;
+    ASSERT_TRUE(stored.open(fonts[f], true));
+    ASSERT_TRUE(bare.open(fonts[f], false));
+    const uint32_t* const tags = ot::languageTagsFor(book.language);
+    ot::Plan withFilters, computed, without;
+    ASSERT_TRUE(withFilters.build(stored.face, book.script, tags));
+    ASSERT_TRUE(computed.build(bare.face, book.script, tags));
+    ASSERT_TRUE(buildWithoutFilterBlocks(without, bare.face, book.script, tags));
+    EXPECT_LT(without.memoryBytes(), computed.memoryBytes()) << "the filter blocks were not refused";
+    ASSERT_NE(withFilters.indicConfig, nullptr);
+    uint32_t virama;
+    ASSERT_TRUE(stored.face.nominalGlyph(withFilters.indicConfig->virama, &virama));
+
+    const std::vector<Consonant> consonants = consonantsOf(stored.face, book.block);
+    ASSERT_GE(consonants.size(), 20u);
+    int below = 0;
+    int differ = 0;
+    for (const Consonant& c : consonants) {
+      const unsigned expected = ot::consonantPositionFromFace(stored.face, withFilters, c.glyph, virama);
+      const unsigned fromComputed = ot::consonantPositionFromFace(bare.face, computed, c.glyph, virama);
+      const unsigned fromNone = ot::consonantPositionFromFace(bare.face, without, c.glyph, virama);
+      EXPECT_EQ(fromComputed, expected) << std::hex << "U+" << c.cp << std::dec << " glyph " << c.glyph;
+      EXPECT_EQ(fromNone, expected) << std::hex << "U+" << c.cp << std::dec << " glyph " << c.glyph
+                                    << ": without filters";
+      below += expected == ot::ipos::BELOW_C;
+      differ += fromNone != expected;
+    }
+    EXPECT_GT(below, 0);
+    EXPECT_LT(below, 6) << "of " << consonants.size() << " consonants";
+    EXPECT_EQ(differ, 0) << "of " << consonants.size() << " consonants";
+  }
 }
 
 }  // namespace

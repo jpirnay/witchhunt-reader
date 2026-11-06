@@ -23,7 +23,7 @@ class ShapingFace {
   const ot::Face* current();
 
   /// The plan for `script` in the language system `languageTags` (ot::languageTagsFor's array, compared by address;
-  /// null: the script's default), built on first ask with makeUniqueNoThrow (about 1-2 KB) and kept with the face, by
+  /// null: the script's default), built on first ask with makeUniqueNoThrow (about 1-4 KB) and kept with the face, by
   /// unique_ptr, never moved: no plan outlives the face it points into. nullptr when the face is not mapped now, the
   /// plan does not build, or there is no memory; asked again, it tries again. Under RenderLock, as current() is.
   /// The plan is valid until the next plan() on this face (a new key past kMaxPlans frees one) or until the face is

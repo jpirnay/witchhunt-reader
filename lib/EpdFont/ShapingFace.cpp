@@ -42,7 +42,7 @@ const ot::Plan* ShapingFace::plan(const ot::Script script, const uint32_t* langu
   // The victim is freed before the new build allocates, so a refused build also costs the evicted plan: the room is
   // needed for the new one.
   victim->plan.reset();
-  // One Plan (about 1-2 KB with its lookup lists), kept for the face's life.
+  // One Plan (about 1-4 KB with its lookup lists and its lookups' digests), kept for the face's life.
   auto built = makeUniqueNoThrow<ot::Plan>();
   if (!built || !built->build(*face, script, languageTags)) return nullptr;
   ++planBuilds_;
