@@ -20,10 +20,12 @@
 #include "CjkLineBreak.h"
 #include "CjkPunctuation.h"
 #include "Epub/VisibleText.h"
+#include "HashUtils.h"
 #include "ShapedStore.h"
 #include "TextEmphasis.h"
 #include "VerticalDraw.h"
 #include "VerticalOrientation.h"
+#include "WordShapeCache.h"
 #include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
 
@@ -973,13 +975,35 @@ bool ParsedText::shapeToken(const GfxRenderer& renderer, const int fontId, const
         i > 0 && wordBoundaries[i].continues ? std::string_view(words[i - 1]) : std::string_view();
     const std::string_view after =
         i + 1 < words.size() && wordBoundaries[i + 1].continues ? std::string_view(words[i + 1]) : std::string_view();
-    ++tokensShaped_;
-    if (shapeInto(renderer, fontId, i, text, before, after) == IndicShaper::Outcome::Degraded) {
-      store.abandon();
-      latchShapingDegraded();
-      return false;
+    // A token with no glued neighbour is shaped without context, so its pieces are the same wherever it comes: the
+    // build's word cache may hold them. A glued one is always shaped.
+    const bool cacheable = wordCache_ != nullptr && before.empty() && after.empty() && text.size() <= UINT16_MAX;
+    const uint64_t textHash = cacheable ? HashUtils::fnvHash64(text.data(), text.size()) : 0;
+    const uint32_t cacheKey = cacheable ? WordShapeCache::keyFor(key, typography_.shapingLanguage) : 0;
+    const auto length = static_cast<uint16_t>(text.size());
+    if (cacheable && wordCache_->replay(textHash, length, cacheKey, store)) {
+      store.commit();
+    } else {
+      if (!store.openPieces().empty()) {
+        // The store refused the replay part-way: shaped afresh, as without the cache.
+        store.abandon();
+        if (!store.open(i, text, key)) {
+          latchShapingDegraded();
+          return false;
+        }
+      }
+      ++tokensShaped_;
+      const IndicShaper::Outcome outcome = shapeInto(renderer, fontId, i, text, before, after);
+      if (outcome == IndicShaper::Outcome::Degraded) {
+        store.abandon();
+        latchShapingDegraded();
+        return false;
+      }
+      store.commit();
+      if (cacheable && outcome == IndicShaper::Outcome::Formed) {
+        wordCache_->insert(textHash, length, cacheKey, store, i);
+      }
     }
-    store.commit();
     pieces = store.pieces(i, text, key);
     if (!pieces || pieces->empty()) return false;
     // Warm: the glyph IDs are looked up once, here inside the build's miss scope, so a page drawn later needs no miss

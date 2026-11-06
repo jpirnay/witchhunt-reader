@@ -29,6 +29,7 @@
 // pull Page.h in anyway.
 #include "../Page.h"
 #include "../ParsedText.h"
+#include "../WordShapeCache.h"
 #include "../blocks/ImageBlock.h"
 #include "../blocks/TextBlock.h"
 #include "../css/CssParser.h"
@@ -673,6 +674,10 @@ class ChapterHtmlSlimParser final : public Print {
   // above the section's feed-chunk block and below nothing that outlives the page (a mid-build
   // draw's font-slot scope opens and closes between two slices): strictly LIFO.
   BuildArena::Block pageBlock_;
+  // The build's cache of shaped words, in buildArena_'s free tail (WordShapeCache.h): armed in setup() after the SAX
+  // state is taken, bound to each ParsedText beside its line arena, disarmed at the end of finalize(), before the
+  // section releases the feed-chunk block. Unarmed (no lent arena, or no room for it), every lookup is bypassed.
+  WordShapeCache wordCache_;
 
   // Streaming state for the Print-derived parsing API.
   size_t totalStreamSize = 0;
@@ -1100,6 +1105,9 @@ class ChapterHtmlSlimParser final : public Print {
   // True when a shaped-script run was laid out unshaped (no memory for it, or the font could not shape it).
   // Latched into the section status byte; the reader rebuilds once, as for tableRowDegraded().
   [[nodiscard]] bool shapingDegraded() const { return shapingDegradedAny_; }
+  // The word cache's counters, and the tail it was armed with (0: never armed), for the build's log line.
+  [[nodiscard]] const WordShapeCache::Stats& wordCacheStats() const { return wordCache_.stats(); }
+  [[nodiscard]] size_t wordCacheBytes() const { return wordCache_.bytes(); }
   enum CapOverflow : uint8_t {
     kCapFootnotesPerPage = 1u << 0,   // Page::MAX_FOOTNOTES_PER_PAGE: later links on the page dropped
     kCapAnchorsPerChapter = 1u << 1,  // MAX_ANCHORS_PER_CHAPTER, or no heap for resident ones: ids dropped

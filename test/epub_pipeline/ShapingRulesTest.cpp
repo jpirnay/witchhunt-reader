@@ -10,7 +10,8 @@
 //     times its scale), in the book's language, with the glued tokens kept apart from it (another style or size),
 //     whole, as context: one Glyphs piece over the whole text, with the stored records;
 //  5. every word is drawn inside the page.
-// And a line without Indic text keeps its bytes: the same with the book's face as without one.
+// And a line without Indic text keeps its bytes: the same with the book's face as without one. And the build's word
+// cache changes no line: a long chapter on a lent arena whose tail the parse overwrites dumps the same without it.
 // Each book's counts are printed against floors: glyph words, merged words (the cases' tokens that merge), kept-apart
 // pairs, glyph words glued to punctuation and, in Malayalam, words past one shaping call's code points and words split
 // across lines. No section of the four is laid out degraded.
@@ -24,21 +25,28 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <ostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "Epub.h"
 #include "Epub/Page.h"
 #include "Epub/Section.h"
+#include "Epub/WordShapeCache.h"
 #include "Epub/blocks/TextBlock.h"
 #include "GfxRenderer.h"
 #include "IndicScripts.h"
 #include "IndicShaper.h"
+#include "LogObserver.h"
 #include "PipelineRunner.h"
+#include "StoredZipWriter.h"
 #include "TextShaping.h"
 
 namespace fs = std::filesystem;
@@ -63,6 +71,8 @@ constexpr int kFontId = 1;  // the harness profile's body font
 constexpr uint16_t kViewportWidth = 460;
 constexpr uint32_t kZwnj = 0x200C;
 constexpr uint32_t kZwj = 0x200D;
+// TheWordCacheChangesNoLine's chapter: chapter 2 this many times over.
+constexpr int kLongChapterRepeats = 16;
 
 pipeline_harness::Profile profileOf(const Book& book) {
   pipeline_harness::Profile p;
@@ -459,6 +469,164 @@ TEST_P(ShapingRules, TheCasesAreOnThePages) {
   EXPECT_GE(gluedToPunctuation, book.minGluedToPunctuation);
   EXPECT_GE(pastTheCap, book.minPastTheCap);
   EXPECT_GE(split, book.minSplitWords);
+}
+
+namespace {
+
+// The SCT lines of the builds in progress (Section's arena and word cache lines).
+std::vector<std::string>* gSctLines = nullptr;
+void collectSct(const char*, const char* origin, const char* message) {
+  if (gSctLines != nullptr && std::strcmp(origin, "SCT") == 0) gSctLines->emplace_back(message);
+}
+
+// The first of `lines` holding `marker`, from the marker on; empty when none does.
+std::string lineWith(const std::vector<std::string>& lines, const char* marker) {
+  for (const std::string& line : lines) {
+    const size_t at = line.find(marker);
+    if (at != std::string::npos) return line.substr(at);
+  }
+  return {};
+}
+
+struct WordCacheLine {
+  unsigned bytes = 0, hits = 0, misses = 0, inserts = 0, bypassed = 0, clears = 0;
+};
+
+bool parseWordCacheLine(const std::string& line, WordCacheLine* out) {
+  return std::sscanf(line.c_str(), "word cache: bytes=%u hits=%u misses=%u inserts=%u bypassed=%u clears=%u",
+                     &out->bytes, &out->hits, &out->misses, &out->inserts, &out->bypassed, &out->clears) == 6;
+}
+
+// Restores the word cache's arming however the test leaves.
+struct WordCacheOff {
+  WordCacheOff() { WordShapeCache::setEnabled(false); }
+  ~WordCacheOff() { WordShapeCache::setEnabled(true); }
+};
+
+// A paragraph that sets alone a syllable the book's cases glue between two others, when it shapes otherwise without
+// them as context (rule 4's teeth): the Bengali case's bold হে. Shaped with its neighbours, its form must never be
+// replayed for it alone, so a glued token must stay out of the word cache.
+std::string keptApartAlone(const Book& book) {
+  return std::string(book.name) == "test_shaped_bengali" ? "<p><b>\xE0\xA6\xB9\xE0\xA7\x87</b></p>\n" : "";
+}
+
+// One chapter of the book's chapter 2 `repeats` times over, as the long timing book repeats the declaration
+// (make_test_shaped_indic.py --long): its words come again, with every case of chapter 2 among them, and
+// keptApartAlone() after the first. Written beside `work` with the book's stylesheet and language; the path.
+std::string longChapterBook(const Book& book, const fs::path& work, const int repeats) {
+  const auto item = [&](const char* href) {
+    Epub source(corpusBook(book.name), (work / "source").string());
+    size_t size = 0;
+    uint8_t* bytes = source.readItemContentsToBytes(href, &size, false);
+    std::string out = bytes ? std::string(reinterpret_cast<const char*>(bytes), size) : std::string();
+    free(bytes);
+    return out;
+  };
+  const std::string chapter = item("OEBPS/ch2.xhtml");
+  const std::string css = item("OEBPS/style.css");
+  const size_t open = chapter.find("<body>");
+  const size_t close = chapter.find("</body>");
+  EXPECT_NE(std::string::npos, open);
+  EXPECT_NE(std::string::npos, close);
+  EXPECT_FALSE(css.empty());
+  if (open == std::string::npos || close == std::string::npos) return {};
+  const size_t bodyAt = open + std::strlen("<body>");
+  const std::string body = chapter.substr(bodyAt, close - bodyAt);
+  std::string xhtml = chapter.substr(0, bodyAt);
+  for (int r = 0; r < repeats; ++r) {
+    xhtml += body;
+    // Early, while the cache is as it was armed: right after the first time its glued case is laid out.
+    if (r == 0) xhtml += keptApartAlone(book);
+  }
+  xhtml += chapter.substr(close);
+
+  test_zip::StoredZipWriter zip;
+  zip.add("mimetype", "application/epub+zip");
+  zip.add("META-INF/container.xml",
+          "<?xml version=\"1.0\"?>\n<container version=\"1.0\" "
+          "xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles><rootfile "
+          "full-path=\"content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles>\n</container>\n");
+  zip.add("content.opf",
+          std::string("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" "
+                      "version=\"3.0\" unique-identifier=\"id\">\n<metadata "
+                      "xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"id\">long</dc:identifier>"
+                      "<dc:title>Long</dc:title><dc:language>") +
+              book.language +
+              "</dc:language></metadata>\n<manifest>\n"
+              "<item id=\"c\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
+              "<item id=\"s\" href=\"style.css\" media-type=\"text/css\"/>\n"
+              "</manifest>\n<spine><itemref idref=\"c\"/></spine>\n</package>\n");
+  zip.add("chapter.xhtml", xhtml);
+  zip.add("style.css", css);
+  const fs::path path = work / "long.epub";
+  zip.write(path.string());
+  return path.string();
+}
+
+}  // namespace
+
+// The word cache changes no line. A long chapter laid out on a lent arena sized so that the parse lane's page and call
+// blocks reach the cache's tail and empty it more than once is the same with the cache as with the cache disarmed; and
+// the cache did replay words. Bengali's glued bold syllable, set alone too, keeps a context-shaped form out of it.
+TEST_P(ShapingRules, TheWordCacheChangesNoLine) {
+  const Book& book = GetParam();
+  const std::string path = longChapterBook(book, work, kLongChapterRepeats);
+  ASSERT_FALSE(path.empty());
+  pipeline_harness::Profile profile = profileOf(book);
+  // Pages three times as tall as the harness's: a page block holds three times the lines, and the parse lane rises well
+  // past the room the cache keeps below its tail.
+  profile.viewportHeight = 2280;
+  const auto run = [&](const char* cache, const size_t arenaBytes, std::vector<std::string>* lines) {
+    pipeline_harness::Profile lent = profile;
+    lent.lentArenaBytes = arenaBytes;
+    std::ostringstream out;
+    gSctLines = lines;
+    setLogObserver(collectSct);
+    const bool ok = pipeline_harness::runAndDump(path, (work / cache).string(), lent, out);
+    setLogObserver(nullptr);
+    gSctLines = nullptr;
+    EXPECT_TRUE(ok) << out.str();
+    return out.str();
+  };
+
+  // What the parse holds when the cache arms (the SAX state, the feed chunk, the ruleset), on a roomy arena.
+  std::vector<std::string> probeLines;
+  run("probe", 52272, &probeLines);
+  unsigned cap = 0, highWater = 0, setup = 0, extract = 0, resident = 0, parse = 0;
+  ASSERT_EQ(6, std::sscanf(lineWith(probeLines, "arena: ").c_str(),
+                           "arena: cap=%u highWater=%u lanes(setup=%u extract=%u resident=%u parse=%u", &cap,
+                           &highWater, &setup, &extract, &resident, &parse))
+      << lineWith(probeLines, "arena: ");
+  // An arena the cache arms on, sized from the parse lane: the cache arms with the cursor within `slack` of what the
+  // parse holds (early on a page), and its tail starts kRoomBelow above that, halfway between the arming line and the
+  // lane's peak, so a full page's page and call blocks reach it. Page after page, it is emptied and filled again.
+  ASSERT_GT(parse, WordShapeCache::kRoomBelow + 1024) << "the lane must reach the tail for the test to mean anything";
+  const size_t slack = (parse - WordShapeCache::kRoomBelow) / 2;
+  const size_t arenaBytes = resident + WordShapeCache::kWordCacheBytes + WordShapeCache::kRoomBelow + slack;
+
+  std::vector<std::string> onLines, offLines;
+  const std::string with = run("on", arenaBytes, &onLines);
+  std::string without;
+  {
+    const WordCacheOff off;
+    without = run("off", arenaBytes, &offLines);
+  }
+
+  WordCacheLine on, disarmed;
+  ASSERT_TRUE(parseWordCacheLine(lineWith(onLines, "word cache: "), &on)) << lineWith(onLines, "word cache: ");
+  ASSERT_TRUE(parseWordCacheLine(lineWith(offLines, "word cache: "), &disarmed));
+  std::printf(
+      "[ ShapingRules ] %s: arena %zu B (resident %u, parse lane %u): word cache hits=%u misses=%u "
+      "inserts=%u bypassed=%u clears=%u\n",
+      book.name, arenaBytes, resident, parse, on.hits, on.misses, on.inserts, on.bypassed, on.clears);
+  EXPECT_EQ(WordShapeCache::kWordCacheBytes, on.bytes);
+  EXPECT_GE(on.clears, 2u);  // emptied, armed again, and emptied again
+  EXPECT_GT(on.hits, 0u);
+  EXPECT_EQ(0u, disarmed.bytes);
+  EXPECT_EQ(0u, disarmed.hits);
+  EXPECT_EQ(0u, disarmed.inserts);
+  EXPECT_GT(disarmed.bypassed, 0u);
+  EXPECT_EQ(without, with);
 }
 
 namespace {

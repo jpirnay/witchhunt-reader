@@ -20,6 +20,7 @@
 class GfxRenderer;
 class BuildArena;
 class ShapingFace;
+class WordShapeCache;
 namespace IndicShaper {
 enum class Outcome : uint8_t;
 }
@@ -222,6 +223,9 @@ class ParsedText {
   std::unique_ptr<ShapingState> shapingState_;
   bool shapes_ = false;  // this pass forms Indic words: no bidi, and a token holds U+0900-0DFF
   bool* shapingLatch_ = nullptr;
+  // The build's cache of shaped words (WordShapeCache.h), the parser's; null: every token is shaped. An unglued token
+  // that shapes Formed is looked up there before it is shaped, and stored once it is.
+  WordShapeCache* wordCache_ = nullptr;
   uint32_t tokensShaped_ = 0;
   // The first token the next pass may not merge (keepUnmergedFrom); SIZE_MAX: none. The pass clears it.
   size_t unmergedFrom_ = SIZE_MAX;
@@ -257,8 +261,9 @@ class ParsedText {
   // open entry, in a call block of lineArena_'s (else the build's heap block) released before it returns.
   IndicShaper::Outcome shapeInto(const GfxRenderer& renderer, int fontId, size_t i, std::string_view text,
                                  std::string_view before, std::string_view after);
-  // Token i's pieces, shaped now or found in the store, their glyphs warmed and their widths set, and *width their
-  // sum; false: it is laid out as its code points (and latched when it could not be shaped).
+  // Token i's pieces, found in the store, else replayed from the word cache or shaped now, their glyphs warmed and
+  // their widths set, and *width their sum; false: it is laid out as its code points (and latched when it could not be
+  // shaped).
   bool shapeToken(const GfxRenderer& renderer, int fontId, size_t i, uint16_t* width);
   // The width of words[i]'s first `bytes` bytes and a hyphen when `hyphen`: a candidate the breaker measures, shaped in
   // the store's scratch entry (nothing is kept), or measured as code points when it is not shaped (and latched when it
@@ -511,6 +516,8 @@ class ParsedText {
   // A run laid out as its code points because it could not be shaped (no memory, or the font failed it) sets *latch
   // (Section's kStatusShapingDegraded). Survives reset().
   void setShapingLatch(bool* latch) { shapingLatch_ = latch; }
+  // See wordCache_. The parser sets it beside setLineArena; it survives reset().
+  void setWordCache(WordShapeCache* cache) { wordCache_ = cache; }
   bool shapingStateHeld() const { return shapingState_ != nullptr; }  // for tests
   // Tokens handed to IndicShaper since construction (a candidate prefix the breaker measures is not one): for tests
   // and the build's log.

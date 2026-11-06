@@ -260,6 +260,13 @@ std::span<const ShapedStore::Piece> ShapedStore::openPieces() const {
   return std::span<const Piece>(pieces_.data() + pendStart_, pieces_.size() - pendStart_);
 }
 
+std::span<const ShapedStore::Piece> ShapedStore::committedPieces(const size_t token) const {
+  if (token >= entries_.size()) return {};
+  const Entry& entry = entries_[token];
+  if (!entry.valid || entry.count == 0) return {};
+  return std::span<const Piece>(pieces_.data() + entry.begin, entry.count);
+}
+
 void ShapedStore::setWidth(const size_t token, const size_t piece, const uint16_t width) {
   if (token >= entries_.size() || piece >= entries_[token].count) return;
   pieces_[entries_[token].begin + piece].width = width;

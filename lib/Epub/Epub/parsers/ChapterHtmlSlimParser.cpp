@@ -1756,6 +1756,7 @@ void ChapterHtmlSlimParser::wireTextBlock() {
 
 void ChapterHtmlSlimParser::wireParagraphLines(ParsedText& text) {
   text.setLineArena(buildArena_);
+  text.setWordCache(&wordCache_);
   if (buildArena_) {
     text.setBeforeLineHook([this](const uint8_t maxSizePct, bool annotated) { beforeLineHook(maxSizePct, annotated); });
   } else {
@@ -4754,6 +4755,11 @@ bool ChapterHtmlSlimParser::setup(const size_t totalInflatedSize) {
       saxParser_.setExternalState(state, bytes);
       LOG_DBG("EHP", "SAX parser state (%u bytes) in the build arena", static_cast<unsigned>(bytes));
     }
+    // The word cache takes the arena's free tail, now that what the parse keeps resident is in: from here the cursor
+    // only moves with the parse lane's page, call and walk blocks, which may reach the tail (the cache then empties).
+    if (wordCache_.arm(*buildArena_, WordShapeCache::kWordCacheBytes)) {
+      LOG_DBG("EHP", "Word cache (%u bytes) in the build arena's tail", static_cast<unsigned>(wordCache_.bytes()));
+    }
   }
   if (!saxParser_.init(this, startElement, endElement, characterData, defaultHandlerExpand,
                        /*htmlVoidTagRepair=*/true)) {
@@ -4936,6 +4942,10 @@ bool ChapterHtmlSlimParser::finalize() {
       anchorCount = 0;
     }
   }
+
+  // The last word is laid out. The section drops the feed-chunk block next (and with it everything this parse took
+  // in the arena), and the region's later users own the whole of it: the cache lets go of its tail first.
+  wordCache_.disarm();
 
   return success;
 }
@@ -5877,6 +5887,7 @@ bool ChapterHtmlSlimParser::layoutTableRow(BufferedTableRow& bufRow, const uint8
       // Line bytes from the lent region on an arena build. No page-fit hook: the row is placed as
       // a whole by the caller, inside a block it commits or releases (see the row emission).
       bufCell.text->setLineArena(buildArena_);
+      bufCell.text->setWordCache(&wordCache_);
       bufCell.text->setBeforeLineHook(nullptr);
       bufCell.text->layoutAndExtractLines(
           renderer, fontId, renderInnerWidth,

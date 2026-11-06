@@ -16,6 +16,8 @@
 
 #include "../book_metadata_cache/AllocationRefusal.h"
 #include "Epub/ParsedText.h"
+#include "Epub/ShapedStore.h"
+#include "Epub/WordShapeCache.h"
 #include "Epub/blocks/TextBlock.h"
 #include "FixtureShapingFace.h"
 #include "GfxRenderer.h"
@@ -573,6 +575,106 @@ TEST_F(ShapedLayout, ALatinParagraphMakesNoShapingState) {
   EXPECT_FALSE(text.shapingStateHeld());
   EXPECT_EQ(0u, text.tokensShaped());
   EXPECT_EQ(0, renderer.prefetchedRuns);
+}
+
+// ---- The build's word cache (WordShapeCache) ----
+
+namespace {
+// The lines' bytes, as the section file holds them.
+std::vector<std::string> bytesOfLines(const Lines& lines) {
+  std::vector<std::string> out;
+  for (const auto& line : lines) out.push_back(bytesOf(*line));
+  return out;
+}
+}  // namespace
+
+TEST_F(ShapedLayout, TheWordCacheShapesARepeatedWordOnce) {
+  const std::vector<Word> words = {{kHindi}, {kPatrika}, {kHindi}, {kPrarthana}, {kPatrika}, {kHindi}};
+  ParsedText plain(false, false, noIndentStyle());
+  add(plain, words);
+  const std::vector<std::string> expected = bytesOfLines(layOut(plain, renderer, 200));
+  EXPECT_EQ(6u, plain.tokensShaped());
+  const int prefetched = renderer.prefetchedRuns;
+
+  BuildArena arena(52272);
+  WordShapeCache cache;
+  ASSERT_TRUE(cache.arm(arena, WordShapeCache::kWordCacheBytes));
+  ParsedText text(false, false, noIndentStyle());
+  text.setWordCache(&cache);
+  add(text, words);
+  EXPECT_EQ(expected, bytesOfLines(layOut(text, renderer, 200)));
+  EXPECT_EQ(3u, text.tokensShaped());  // each word once
+  EXPECT_EQ(3u, cache.stats().misses);
+  EXPECT_EQ(3u, cache.stats().inserts);
+  EXPECT_EQ(3u, cache.stats().hits);
+  EXPECT_EQ(2 * prefetched, renderer.prefetchedRuns);  // a replayed word's glyphs are warmed as a shaped one's
+
+  // The next paragraph shapes none of them.
+  text.reset(noIndentStyle());
+  add(text, words);
+  EXPECT_EQ(expected, bytesOfLines(layOut(text, renderer, 200)));
+  EXPECT_EQ(3u, text.tokensShaped());
+  EXPECT_EQ(9u, cache.stats().hits);
+  EXPECT_EQ(0u, cache.stats().bypassed);
+}
+
+TEST_F(ShapedLayout, AGluedTokenIsAlwaysShaped) {
+  // क<b>म</b>ल twice: three tokens kept apart, each shaped with its neighbours as context, so never looked up.
+  const std::vector<Word> words = {{kKa}, {kMa, EpdFontFamily::BOLD, true}, {kLa, EpdFontFamily::REGULAR, true},
+                                   {kKa}, {kMa, EpdFontFamily::BOLD, true}, {kLa, EpdFontFamily::REGULAR, true}};
+  ParsedText plain(false, false, noIndentStyle());
+  add(plain, words);
+  const std::vector<std::string> expected = bytesOfLines(layOut(plain, renderer, 400));
+
+  BuildArena arena(52272);
+  WordShapeCache cache;
+  ASSERT_TRUE(cache.arm(arena, WordShapeCache::kWordCacheBytes));
+  ParsedText text(false, false, noIndentStyle());
+  text.setWordCache(&cache);
+  add(text, words);
+  EXPECT_EQ(expected, bytesOfLines(layOut(text, renderer, 400)));
+  EXPECT_EQ(plain.tokensShaped(), text.tokensShaped());
+  EXPECT_EQ(6u, text.tokensShaped());
+  EXPECT_EQ(0u, cache.stats().hits + cache.stats().misses + cache.stats().bypassed + cache.stats().inserts);
+}
+
+TEST_F(ShapedLayout, AReplayTheStoreRefusesIsShapedAfresh) {
+  BuildArena arena(52272);
+  WordShapeCache cache;
+  ASSERT_TRUE(cache.arm(arena, WordShapeCache::kWordCacheBytes));
+  {
+    ParsedText warm(false, false, noIndentStyle());
+    warm.setWordCache(&cache);
+    add(warm, {{kHindi}});
+    layOut(warm, renderer, 400);
+    ASSERT_EQ(1u, cache.stats().inserts);
+  }
+  // The store's chunks refused: the replay of हिन्दी stops at its first record. It is shaped afresh, which the same
+  // refusal degrades, as it does without the cache: the same lines, the same latch.
+  const auto refusedLayout = [&](WordShapeCache* wordCache, bool* latched, uint32_t* shaped) {
+    ParsedText text(false, false, noIndentStyle());
+    text.setShapingLatch(latched);
+    text.setWordCache(wordCache);
+    add(text, {{kHindi}, {kPatrika}});
+    Lines lines;
+    {
+      const AllocationRefusal refused(ShapedStore::kChunkBytes, ShapedStore::kChunkBytes);
+      lines = layOut(text, renderer, 400);
+    }
+    *shaped = text.tokensShaped();
+    return bytesOfLines(lines);
+  };
+  bool latchedPlain = false, latchedCached = false;
+  uint32_t shapedPlain = 0, shapedCached = 0;
+  const std::vector<std::string> plain = refusedLayout(nullptr, &latchedPlain, &shapedPlain);
+  const std::vector<std::string> cached = refusedLayout(&cache, &latchedCached, &shapedCached);
+  EXPECT_EQ(plain, cached);
+  EXPECT_TRUE(latchedPlain);
+  EXPECT_EQ(latchedPlain, latchedCached);
+  EXPECT_EQ(2u, shapedPlain);
+  EXPECT_EQ(shapedPlain, shapedCached);  // हिन्दी shaped although the cache held it
+  EXPECT_EQ(0u, cache.stats().hits);
+  EXPECT_EQ(3u, cache.stats().misses);  // the warm-up's, the refused replay, पत्रिका
 }
 
 namespace {

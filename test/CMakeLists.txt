@@ -52,8 +52,9 @@ file(GLOB OT_SHAPER_SOURCES ${REPO_ROOT}/lib/OtShaper/*.cpp)
 set(OT_SHAPER_INCLUDE_DIR ${REPO_ROOT}/lib/OtShaper ${REPO_ROOT}/lib/Memory)
 
 # The bidi line pass (lib/Epub/Epub/BidiLine) and what it runs on: minibidi, BidiUtils and the shaping layer, with the
-# Indic module, the engine and the faces it shapes through, and the paragraph store of shaped tokens. Every target that
-# lays out text through ParsedText lists these, so they are set before the subdirectories.
+# Indic module, the engine and the faces it shapes through, the paragraph store of shaped tokens and the build's cache of
+# shaped words. Every target that lays out text through ParsedText lists these, so they are set before the
+# subdirectories.
 set(BIDI_LAYOUT_SOURCES
   ${BIDI_MARK_SOURCES}
   ${REPO_ROOT}/lib/TextShaping/TextShaping.cpp
@@ -64,6 +65,7 @@ set(BIDI_LAYOUT_SOURCES
   ${REPO_ROOT}/lib/EpdFont/ShapingFace.cpp
   ${REPO_ROOT}/lib/Epub/Epub/BidiLine.cpp
   ${REPO_ROOT}/lib/Epub/Epub/ShapedStore.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/WordShapeCache.cpp
 )
 # lib/GfxRenderer last, for GlyphRun.h only: a target's own GfxRenderer.h stub comes before it.
 set(BIDI_LAYOUT_INCLUDES
@@ -291,3 +293,4 @@ add_subdirectory(usb_link_debounce)
 add_subdirectory(vertical_text)
 add_subdirectory(glyph_run)
 add_subdirectory(shaped_store)
+add_subdirectory(word_shape_cache)

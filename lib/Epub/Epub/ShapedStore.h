@@ -50,6 +50,9 @@ class ShapedStore final : public IndicShaper::PieceSink {
   // The open entry's pieces so far (none when no entry is open): a scratch entry's are measured here before abandon().
   // Valid as pieces() is.
   std::span<const Piece> openPieces() const;
+  // Token `token`'s pieces as committed, whatever text and key they were made for: the word cache copies an entry just
+  // committed (WordShapeCache::insert). None when the entry is stale or holds none. Valid as pieces() is.
+  std::span<const Piece> committedPieces(size_t token) const;
   // The entries, in step with the word vectors (the scratch entry is not one).
   size_t size() const { return entries_.size(); }
   void setWidth(size_t token, size_t piece, uint16_t width);
