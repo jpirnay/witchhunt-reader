@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "BuildArena.h"
 
@@ -159,6 +161,53 @@ TEST(BuildArena, AlignsAgainstUnalignedExternalBuffer) {
   ASSERT_NE(p, nullptr);
   EXPECT_EQ(reinterpret_cast<uintptr_t>(p) % 8, 0u);
   EXPECT_GE(p, storage + 1);
+}
+
+TEST(BuildArena, FreeTailStartsAboveTheCursorAndRunsToTheEnd) {
+  BuildArena arena(256);
+  ASSERT_NE(arena.alloc(40, 1), nullptr);
+  size_t bytes = 0;
+  uint8_t* const tail = arena.freeTail(&bytes);
+  ASSERT_NE(tail, nullptr);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(tail) % alignof(std::max_align_t), 0u);
+  EXPECT_LE(bytes, 256u - 40u);
+  EXPECT_GT(bytes, 256u - 40u - alignof(std::max_align_t));
+}
+
+TEST(BuildArena, ASecondArenaOnTheFreeTailLeavesTheOwnerAsItWas) {
+  BuildArena owner(256);
+  auto* const kept = static_cast<uint8_t*>(owner.alloc(32, 1));
+  ASSERT_NE(kept, nullptr);
+  memset(kept, 0x5A, 32);
+  BuildArena::Block block = owner.reserveBlock();
+  ASSERT_NE(owner.alloc(16, 1), nullptr);
+  const size_t used = owner.used();
+  const size_t highWater = owner.highWater();
+  {
+    size_t bytes = 0;
+    uint8_t* const tail = owner.freeTail(&bytes);
+    BuildArena lodger(tail, bytes);
+    auto* const p = static_cast<uint8_t*>(lodger.alloc(bytes, 1));
+    ASSERT_NE(p, nullptr);
+    memset(p, 0xFF, bytes);
+    lodger.reset();  // what the memory ladder does between steps: rewinds the lodger alone
+  }
+  EXPECT_EQ(owner.used(), used);
+  EXPECT_EQ(owner.highWater(), highWater);
+  EXPECT_TRUE(owner.release(block));  // the build's scopes are as it left them
+  for (int i = 0; i < 32; ++i) EXPECT_EQ(kept[i], 0x5A);
+}
+
+TEST(BuildArena, NoFreeTailOnAFullOrInvalidArena) {
+  BuildArena full(64);
+  ASSERT_NE(full.alloc(64, 1), nullptr);
+  size_t bytes = 1;
+  EXPECT_EQ(full.freeTail(&bytes), nullptr);
+  EXPECT_EQ(bytes, 0u);
+  BuildArena none(nullptr, 64);
+  bytes = 1;
+  EXPECT_EQ(none.freeTail(&bytes), nullptr);
+  EXPECT_EQ(bytes, 0u);
 }
 
 TEST(BuildArena, NullExternalBufferIsInvalidAndRefuses) {

@@ -1617,7 +1617,8 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
     // function's entry gate (PROGRESSIVE_EIGHTH_HEAP_FLOOR): the last resort when nothing finer fits.
     chooseJpegScale(targetScale, tjpgScale);
     wantedProgressiveScale = tjpgScale;
-    for (; tjpgScale <= 3; ++tjpgScale) {
+    const uint8_t coarsestScale = image_scratch::canWait() ? wantedProgressiveScale : 3;
+    for (; tjpgScale <= coarsestScale; ++tjpgScale) {
       progressiveWorkspaceBytes = ProgressiveJpeg::workspaceBytes(progressiveInfo, tjpgScale);
       const size_t heapFloor = tjpgScale != 3 ? PROGRESSIVE_WORKSPACE_HEAP_FLOOR
                                : progressiveWorkspaceBytes > PROGRESSIVE_EIGHTH_UNFLOORED_BYTES
@@ -1628,7 +1629,7 @@ bool JpegToFramebufferConverter::decodeToFramebuffer(const std::string& imagePat
       progressiveWorkspace.reset();
     }
     if (!progressiveWorkspace) {
-      LOG_ERR("JPG", "No room for even the 1/8 progressive workspace (%u free): %s",
+      LOG_ERR("JPG", "No room for even the 1/%d progressive workspace (%u free): %s", 1 << coarsestScale,
               static_cast<unsigned>(ESP.getFreeHeap()), imagePath.c_str());
       image_scratch::noteHeapShort();
       file.close();

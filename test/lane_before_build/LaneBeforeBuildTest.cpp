@@ -7,6 +7,7 @@ namespace {
 
 using LaneBeforeBuild::buildMayBorrow;
 using LaneBeforeBuild::Decode;
+using LaneBeforeBuild::decodeOnScreenDuringBuild;
 using LaneBeforeBuild::decodeWhileBuilding;
 using LaneBeforeBuild::kMaxYields;
 using LaneBeforeBuild::Window;
@@ -22,6 +23,18 @@ TEST(LaneBeforeBuild, ADecodeTakesTheBufferFromTheBuildWhileItHasYieldsLeft) {
   for (uint8_t yields = 0; yields < kMaxYields; ++yields) {
     EXPECT_EQ(Decode::TakeFromBuild, decodeWhileBuilding(yields)) << static_cast<int>(yields);
   }
+}
+
+TEST(LaneBeforeBuild, ThePagesOnScreenPicturesGoAheadOfItsChapterBuild) {
+  EXPECT_TRUE(decodeOnScreenDuringBuild(/*scratchToWorkIn=*/true, /*pageOnScreen=*/true));
+}
+
+TEST(LaneBeforeBuild, DuringABuildTheLaneNeedsSomewhereToWork) {
+  EXPECT_FALSE(decodeOnScreenDuringBuild(/*scratchToWorkIn=*/false, /*pageOnScreen=*/true));
+}
+
+TEST(LaneBeforeBuild, DuringABuildTheLaneWaitsForThePageToBeOnScreen) {
+  EXPECT_FALSE(decodeOnScreenDuringBuild(/*scratchToWorkIn=*/true, /*pageOnScreen=*/false));  // the popup is still up
 }
 
 TEST(LaneBeforeBuild, PastItsYieldsTheBuildKeepsTheBuffer) {

@@ -225,6 +225,21 @@ class BuildArena {
     return true;
   }
 
+  // The free space above the cursor, for a second arena to work in (the caller-supplied constructor) between two
+  // steps of what owns this one: a decode beside a build. Nothing moves here, so highWater() goes on saying what the
+  // owner's own work needs, and that arena's reset() rewinds only itself. The owner allocates nothing until it is
+  // gone. nullptr, with *bytes 0, when nothing is free.
+  uint8_t* freeTail(size_t* bytes) {
+    *bytes = 0;
+    if (!base_) return nullptr;
+    constexpr size_t align = alignof(std::max_align_t);
+    const uintptr_t address = reinterpret_cast<uintptr_t>(base_) + cursor_;
+    const size_t start = cursor_ + static_cast<size_t>((0 - address) & (align - 1));
+    if (start >= capacity_) return nullptr;
+    *bytes = capacity_ - start;
+    return base_ + start;
+  }
+
   // Discard everything (build boundary). highWater/failedAllocSize survive so
   // post-build diagnostics can still report the peak.
   void reset() {

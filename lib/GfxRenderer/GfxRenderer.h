@@ -929,8 +929,12 @@ class GfxRenderer {
   // Caller contract: an async refresh MUST be in flight, and the glyphs the
   // renderFn draws must already be prewarmed (a cache miss would issue SD reads
   // — allowed — but a display/SPI call in renderFn is not).
-  template <typename RenderFn, typename AbortFn>
-  GrayscaleTimings renderGrayscalePlanesInterleaved(RenderFn renderFn, AbortFn shouldAbort) {
+  //
+  // settle() runs once the BW page is on screen, before the pass commits to anything the reader
+  // has to wait for. It is the caller's chance to give a press time to arrive: shouldAbort() is
+  // asked right after it returns.
+  template <typename RenderFn, typename AbortFn, typename SettleFn>
+  GrayscaleTimings renderGrayscalePlanesInterleaved(RenderFn renderFn, AbortFn shouldAbort, SettleFn settle) {
     GrayscaleTimings t;
     const unsigned long t0 = millis();
 
@@ -941,6 +945,7 @@ class GfxRenderer {
 
     // Waveform still running: sleep out the remainder (power hooks active).
     display.finishDisplayAsync();
+    settle();
     const unsigned long tWaveDone = millis();
 
     // Abort point. This is the ideal place for it on the interleaved path: the BW page is now

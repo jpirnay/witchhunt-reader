@@ -234,6 +234,11 @@ inline bool keepsSecondaryBuffer() {
 #endif
 }
 
+// True when an image decode can run through a refresh: nothing it needs is on the bus the waveform holds. The card is
+// not (native SDMMC), and neither is the arena it is lent (PSRAM). Seen on the X4 Pro. The Murphy qualifies too, but
+// its driver blocks in triggerDisplay, so a decode follows its refresh anyway.
+inline bool decodesThroughRefresh() { return !sdUsesSpi() && keepsSecondaryBuffer(); }
+
 // A frontlight is present (PWM or PM1-driven).
 inline bool hasFrontlight() { return BoardConfig::hasPwmFrontlight(); }
 

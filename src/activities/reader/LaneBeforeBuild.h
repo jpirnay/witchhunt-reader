@@ -30,12 +30,23 @@
 // nothing about that. On a chapter's last pages, where B builds through the turns, two pictures would otherwise hand
 // the next chapter to the "Indexing" popup, which building through exists to prevent.
 //
+// Background-C is the other build a picture can wait behind. It lays out the chapter being read, so its page can be on
+// screen with a placeholder for the rest of the build. X4 Pro, 2026-11-06: the header of a 48 KB chapter decoded in
+// under 2 s, but only after waiting 6 s for the pages behind it. So the lane runs between two slices of that build too:
+// the same lane with a shorter list, the page on screen and no other, looked at once.
+//
+// It decodes where it always does, in the secondary buffer. A build that holds the buffer, as the X3's always does,
+// lends what it leaves free above its cursor (BuildArena::freeTail), and takes it back at its next slice: on the X3
+// about 35 KB, room for the inflate ring and a JPEG's work pool. That is less than the lane has once the build is over,
+// and the heap and the fonts are the build's. So what does not fit waits for the lane after the build: no relief step
+// (ImageMemoryLadder), no coarse picture and no ring on the heap (image_scratch::canWait), no try counted on the page.
+//
 // The decisions alone, apart from the reader, so the host can test them.
 namespace LaneBeforeBuild {
 
 // What the image lane knows about its window for the page on screen.
 enum class Window : uint8_t {
-  Closed,   // the lane cannot run (no pages, Background-C holds or lacks the buffer): B decides by its own gates
+  Closed,   // the lane cannot run (no pages, no buffer to work in): B decides by its own gates
   Unknown,  // not looked at since the reader moved, the look waits (settle, input) or was cut short, or the lane waits
             // for B's build
   Dirty,    // the lane decoded a page this tick
@@ -60,6 +71,12 @@ enum class Decode : uint8_t {
 
 constexpr Decode decodeWhileBuilding(const uint8_t yieldsSoFar) {
   return yieldsSoFar < kMaxYields ? Decode::TakeFromBuild : Decode::AfterBuild;
+}
+
+// Whether the lane looks at the page on screen during Background-C's build: it needs somewhere to work, and the build
+// to have drawn the page.
+constexpr bool decodeOnScreenDuringBuild(const bool scratchToWorkIn, const bool pageOnScreen) {
+  return scratchToWorkIn && pageOnScreen;
 }
 
 }  // namespace LaneBeforeBuild

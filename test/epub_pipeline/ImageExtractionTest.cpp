@@ -14,6 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -99,18 +100,41 @@ TEST_F(ImageExtractionFixture, TooSmallArenaFallsBackToHeapInsteadOfFailing) {
 
 }  // namespace
 
-// An arena with room for the reader but not the write buffer must still extract correctly — the
-// buffer falls back to the heap, and then to unbuffered pass-through. Slow is a nuisance; a
-// truncated image is a bug.
-TEST_F(ImageExtractionFixture, WriteBufferFallsBackWithoutBreakingTheExtract) {
+// An arena with room for the reader but not the write buffer keeps the ring, the 33 KB the heap can least give, and
+// the write buffer goes to the heap, then to unbuffered pass-through. Slow is a nuisance; a truncated image is a bug.
+// The arena of a decode beside a section build: 35,844 B on the X3, where the write buffer taken first starved the
+// reader, and the whole extract then left 5 KB of heap free.
+TEST_F(ImageExtractionFixture, ATightArenaKeepsTheRingAndGivesUpTheWriteBuffer) {
   const auto viaHeap = extract("reference.png", nullptr);
   ASSERT_EQ(viaHeap.size(), kEntryBytes);
 
-  BuildArena arena(33 * 1024 + 1024);  // reader fits, write buffer does not
+  BuildArena arena(Epub::EXTRACT_ARENA_BYTES - 1);
   ASSERT_TRUE(arena.valid());
   const auto bytes = extract("tight.png", &arena);
 
   EXPECT_EQ(bytes, viaHeap);
+  EXPECT_GT(arena.highWater(), 32u * 1024u) << "the ring should have come from the arena";
+  EXPECT_LE(arena.highWater(), Epub::EXTRACT_RING_BYTES) << "and the write buffer not";
+  EXPECT_EQ(arena.failedAllocSize(), 0u) << "the reader must not have been refused and retried on the heap";
+  EXPECT_EQ(arena.used(), 0u);
+}
+
+// What callers gate on when the ring is all they need from the arena.
+TEST_F(ImageExtractionFixture, TheRingBudgetServesTheReader) {
+  BuildArena arena(Epub::EXTRACT_RING_BYTES + alignof(std::max_align_t));
+  ASSERT_TRUE(arena.valid());
+  EXPECT_EQ(extract("budget.png", &arena).size(), kEntryBytes);
+  EXPECT_EQ(arena.failedAllocSize(), 0u);
+}
+
+// A caller that can come back later says so, and the ring stays off the heap: nothing extracted, nothing left behind.
+TEST_F(ImageExtractionFixture, WithoutTheHeapRetryAShortArenaFailsTheExtract) {
+  BuildArena arena(2 * 1024);
+  const std::string dest = (work / "refused.png").string();
+  Epub epub(kBook, cacheDir);
+  EXPECT_FALSE(epub.extractItemToFile(kEntry, dest, &arena, /*heapRetry=*/false));
+  EXPECT_FALSE(fs::exists(dest));
+  EXPECT_FALSE(fs::exists(dest + ".part"));
   EXPECT_EQ(arena.used(), 0u);
 }
 

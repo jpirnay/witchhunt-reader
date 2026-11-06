@@ -83,8 +83,14 @@ bool ImageBlock::ensureExtracted() const {
   // when the heap is fragmented. Device-measured on X4 at contig=13300: every image on the page
   // logged "Failed to init inflate reader" and rendered as nothing at all. The extract finishes
   // and gives the block back before the decode starts, so the two never overlap in the arena.
-  BuildArena* const arena = image_scratch::canServe(Epub::EXTRACT_ARENA_BYTES) ? image_scratch::get() : nullptr;
-  if (!epub.extractItemToFile(epubEntryPath_, imagePath, arena)) {
+  BuildArena* const arena = image_scratch::canServe(Epub::EXTRACT_RING_BYTES) ? image_scratch::get() : nullptr;
+  // The heap path takes ~42 KB: beside a section build on the X3 that left 5 KB free (2026-11-06).
+  if (!arena && image_scratch::canWait()) {
+    LOG_INF("IMG", "No room to extract beside a build, left for later: %s", epubEntryPath_.c_str());
+    image_scratch::noteHeapShort();
+    return false;
+  }
+  if (!epub.extractItemToFile(epubEntryPath_, imagePath, arena, /*heapRetry=*/!image_scratch::canWait())) {
     LOG_ERR("IMG", "Lazy extraction failed: %s", epubEntryPath_.c_str());
     return false;
   }
@@ -99,9 +105,12 @@ namespace {
 BuildArena* g_arena = nullptr;
 uint32_t g_heapShort = 0;
 CoarseNeed g_coarseNeed;
+bool g_canWait = false;
 }  // namespace
 BuildArena* get() { return g_arena; }
 void set(BuildArena* arena) { g_arena = arena; }
+bool canWait() { return g_canWait; }
+void setCanWait(const bool canWait) { g_canWait = canWait; }
 void noteHeapShort() { ++g_heapShort; }
 uint32_t heapShortCount() { return g_heapShort; }
 void noteCoarse(const CoarseNeed& need) {
