@@ -45,6 +45,14 @@ std::vector<std::string> wrap(const char* text, const int maxWidth, const int ma
       [maxWidth](const std::string& s) { return truncateTo(s, maxWidth); });
 }
 
+bool wrapsWhole(const char* text, const int maxWidth, const int maxLines) {
+  bool whole = false;
+  textWrap::wrapLines(
+      text, maxWidth, maxLines, &CjkLineBreak::breakByteOffsets, [](const std::string& s) { return width(s); },
+      [maxWidth](const std::string& s) { return truncateTo(s, maxWidth); }, &whole);
+  return whole;
+}
+
 using Lines = std::vector<std::string>;
 
 TEST(TextWrap, LatinBreaksAtSpacesWithOrWithoutTheBreaker) {
@@ -183,6 +191,34 @@ TEST(TextWrap, EveryLineFitsAndTheTextSurvivesWhole) {
     joined += line;
   }
   EXPECT_EQ(joined, text);
+}
+
+TEST(TextWrap, WholeSaysATitleTheLinesCutFromOneTheyHold) {
+  // The Lyra home card: three lines of 11 characters lose the last word, three of 13 do not.
+  EXPECT_EQ(wrap("The Book That Wouldn't Burn", 110, 3), (Lines{"The Book", "That", "Wouldn't B\xE2\x80\xA6"}));
+  EXPECT_FALSE(wrapsWhole("The Book That Wouldn't Burn", 110, 3));
+  EXPECT_TRUE(wrapsWhole("The Book That Wouldn't Burn", 130, 3));
+}
+
+TEST(TextWrap, WholeCountsAWordWiderThanALineAsCutWithLinesToSpare) {
+  EXPECT_FALSE(wrapsWhole("Supercalifragilistic", 100, 3));
+  EXPECT_FALSE(wrapsWhole("Mary Supercalifragilistic", 100, 3));
+}
+
+TEST(TextWrap, WholeHoldsWhenTheLastLineIsExactlyFull) {
+  EXPECT_TRUE(wrapsWhole("abcde fghij", 50, 2));
+  EXPECT_FALSE(wrapsWhole("abcde fghijk", 50, 2));
+}
+
+TEST(TextWrap, WholeIsNotFooledByAnEllipsisTheTextAlreadyHas) {
+  EXPECT_TRUE(wrapsWhole("Wait for it\xE2\x80\xA6", 200, 3));
+}
+
+TEST(TextWrap, WholeWhenThereIsNothingToLoseAndNotWhenNothingCouldBeShown) {
+  EXPECT_TRUE(wrapsWhole("", 100, 3));
+  EXPECT_TRUE(wrapsWhole(nullptr, 100, 3));
+  EXPECT_FALSE(wrapsWhole("text", 100, 0));
+  EXPECT_FALSE(wrapsWhole("text", 0, 3));
 }
 
 }  // namespace

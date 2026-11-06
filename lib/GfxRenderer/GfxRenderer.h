@@ -696,9 +696,11 @@ class GfxRenderer {
   /// Word-wrap \p text into at most \p maxLines lines, each no wider than
   /// \p maxWidth pixels, breaking at spaces and at the word breaker's offsets.
   /// Overflowing words and excess lines are UTF-8-safely truncated with an
-  /// ellipsis (U+2026).
+  /// ellipsis (U+2026). \p whole, when given, says whether all of \p text made
+  /// it into the lines.
   std::vector<std::string> wrappedText(int fontId, const char* text, int maxWidth, int maxLines,
-                                       EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+                                       EpdFontFamily::Style style = EpdFontFamily::REGULAR,
+                                       bool* whole = nullptr) const;
 
   /// Draws a shaped run at (x, y), y the line's top as drawText takes it. Each record's glyph comes by ID from
   /// `fontId`'s `style` (findGlyphKey: no fallbacks) and is drawn at the pen plus its offset; the pen moves by the
