@@ -4,7 +4,6 @@
 #include <Logging.h>
 #include <esp_heap_caps.h>
 
-#include "GlobalBookmarkIndex.h"
 #include "SdCardFontGlobals.h"
 #include "activities/Activity.h"  // and ActivityManager, which needs the complete Activity
 
@@ -36,7 +35,6 @@ void releaseMemoryForDownload(const GfxRenderer& renderer, const char* logTag) {
   // A loaded SD font: intervals, kern and ligature tables, up to ~60 KB. Usually already gone,
   // since leaving the reader unloads it.
   unloadSdFontIfLoaded();
-  GLOBAL_BOOKMARKS.unload();
   const int buried = activityManager.releaseBuriedActivityState();
   LOG_DBG(logTag, "Released for download (%d buried screen(s)): free %u -> %u B, largest block %u -> %u B", buried,
           static_cast<unsigned>(freeBefore), static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_DEFAULT)),
