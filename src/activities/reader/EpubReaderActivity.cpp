@@ -984,11 +984,12 @@ void EpubReaderActivity::loop() {
 
     // Skips page turn if renderingMutex is busy
     if (RenderLock::peek()) {
-      lastPageTurnTime = millis();
       return;
     }
 
-    if ((millis() - lastPageTurnTime) >= pageTurnDuration) {
+    // Counted from when the page landed: a page that took long to build still gets its full time, and the background
+    // work after it takes none. Restarting the count while the lock was busy made 8 s a 13 s page on the X3.
+    if ((millis() - std::max(lastPageTurnTime, lastPageOnScreenMs_)) >= pageTurnDuration) {
       pageTurn(true);
       return;
     }
