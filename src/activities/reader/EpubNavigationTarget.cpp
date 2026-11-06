@@ -3,6 +3,17 @@
 #include <Logging.h>
 
 std::optional<int> EpubNavigationTarget::relaidOutRestorePage(const Section& sec, const int spineIndex) const {
+  if (restoreOffset != kNoOffset && cachedSpineIdx == spineIndex) {
+    // The page still starts on the same text: the layout has not moved it, and the page number is
+    // exact. The offset alone would not always say so: pages can share a start (an image before
+    // the text at that offset), and it answers the last of them.
+    if (sec.getVisibleTextOffsetForPage(static_cast<uint16_t>(page)) == restoreOffset) return std::nullopt;
+    if (const auto p = sec.getPageForVisibleTextOffset(restoreOffset)) {
+      LOG_DBG("ERS", "Chapter relaid out (%d -> %d pages): restoring offset %u -> page %u", cachedPageCount,
+              sec.pageCount, restoreOffset, *p);
+      return *p;
+    }
+  }
   if (restoreParagraph == 0 || cachedSpineIdx != spineIndex || cachedPageCount <= 0 ||
       sec.pageCount == cachedPageCount) {
     return std::nullopt;

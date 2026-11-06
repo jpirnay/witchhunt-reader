@@ -2275,6 +2275,13 @@ std::optional<uint16_t> Section::activeBuildPageForAnchor(const std::string& anc
   return page;
 }
 
+std::optional<uint16_t> Section::activeBuildPageForVisibleOffset(const uint32_t offset) const {
+  if (!buildState_ || !buildState_->visitor) return std::nullopt;
+  uint16_t page = 0;
+  if (!buildState_->visitor->lookupVisibleOffsetInActiveBuild(offset, page)) return std::nullopt;
+  return page;
+}
+
 std::optional<uint16_t> Section::activeBuildPageForTocIndex(const int tocIndex) {
   if (!buildState_ || tocIndex < 0 || tocIndex >= epub->getTocItemsCount()) return std::nullopt;
   const auto entry = epub->getTocItem(tocIndex);

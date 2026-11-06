@@ -1572,6 +1572,18 @@ void ChapterHtmlSlimParser::noteElementOnPage(const uint32_t offset) {
   pageStartsAwaitingElement_ = 0;
 }
 
+bool ChapterHtmlSlimParser::lookupVisibleOffsetInActiveBuild(const uint32_t offset, uint16_t& page) const {
+  // Pages waiting for their first element hold a stand-in start, not a real one.
+  const size_t settled = paragraphLutPerPage.size() - pageStartsAwaitingElement_;
+  for (size_t i = 0; i < settled; ++i) {
+    if (paragraphLutPerPage[i].visibleTextOffset > offset) {
+      page = i > 0 ? static_cast<uint16_t>(i - 1) : 0;
+      return true;
+    }
+  }
+  return false;
+}
+
 // Emit the current page, keeping paragraphLutPerPage and completedPageCount in lockstep.
 // Callers must ensure currentPage is non-null and carries content; the helper resets
 // currentPage to a fresh Page and zeroes currentPageNextY so the caller can keep building.

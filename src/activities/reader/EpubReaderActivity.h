@@ -472,6 +472,13 @@ class EpubReaderActivity final : public Activity {
   // Page last drawn by the SectionBuilding pass (-1 = none yet / popup showing). Stops the
   // pass redrawing the same page every idle tick.
   int buildDisplayedPage_ = -1;
+  // The text a relayout or a sync landed on (noteLandedText). Cleared by a page turn.
+  struct LandedText {
+    int spine = -1;
+    int page = -1;
+    uint32_t offset = 0;
+  };
+  LandedText landedText_;
   // True while pageTurn() waits for the render lock: the one sign the render task can read that a turn is on its way.
   std::atomic<bool> pageTurnWaitingForLock_{false};
   // The page stepOnScreenImagesDuringBuild() last looked at: one look a page, not one a tick.
@@ -990,20 +997,22 @@ class EpubReaderActivity final : public Activity {
   // a page save still owed), and the link back stack.
   void saveStateForRestart();
   // A layout change mid-session (a per-book override, the memory ladder's fewer families): the section goes, and
-  // the next render builds it again at the paragraph (or page) on screen.
+  // the next render builds it again at the text on screen.
   void resetSectionKeepingPosition();
   void saveProgress(int spineIndex, int currentPage, int pageCount,
                     std::optional<uint16_t> paragraphIndex = std::nullopt,
-                    const std::optional<EpubProgressRecord::Shown>& shown = std::nullopt);
+                    const std::optional<EpubProgressRecord::Shown>& shown = std::nullopt,
+                    std::optional<uint32_t> visibleOffset = std::nullopt);
   // Writes the canonical EPUB progress.bin record (EpubProgressRecord): spine(2) + page(2) +
   // pageCount(2) + percent(1), plus paragraph(2) when one is given, plus what the status bar
-  // showed when that is given. Used by the per-page saveProgress() and by transient writers (sync
-  // restore, bookmark jump) so the on-disk format stays consistent regardless of caller. Static
+  // showed and where the page starts in the text when those are given. Used by the per-page saveProgress() and by
+  // transient writers (sync restore, bookmark jump) so the on-disk format stays consistent regardless of caller. Static
   // (and shared across the split EpubReaderActivity/EpubReaderSync translation units) since it
   // needs no instance state.
   static bool writeReaderProgressCache(const std::string& cachePath, int spineIndex, int currentPage, int pageCount,
                                        uint8_t percent, std::optional<uint16_t> paragraphIndex = std::nullopt,
-                                       const std::optional<EpubProgressRecord::Shown>& shown = std::nullopt);
+                                       const std::optional<EpubProgressRecord::Shown>& shown = std::nullopt,
+                                       std::optional<uint32_t> visibleOffset = std::nullopt);
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   // The spine and the position within it that `percent` (0-100) of the book falls on. False
@@ -1114,6 +1123,12 @@ class EpubReaderActivity final : public Activity {
   // Re-point navTarget at the page currently displayed. Must be called after every move of
   // section->currentPage that stays inside the loaded section — see the definition for why.
   void anchorNavTargetToCurrentPage();
+  // Records the text `target` landed on, for readingOffset().
+  void noteLandedText(const NavigationTarget& target);
+  // Where the reader is in the chapter's text, for a position that has to outlive the layout: the text they landed on
+  // while they stay on that page, otherwise the page's start. The landed text sits somewhere on its page, so the
+  // page's start would lie before it and every relayout would walk the reader back a little.
+  [[nodiscard]] std::optional<uint32_t> readingOffset() const;
   bool stepPageState(bool isForwardTurn);
   bool stepPageStateLocked(bool isForwardTurn);
   void pageTurn(bool isForwardTurn);

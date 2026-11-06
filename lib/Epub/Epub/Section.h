@@ -298,6 +298,9 @@ class Section {
   // same records), so the reader can turn the target into a page target and draw it mid-build.
   std::optional<uint16_t> activeBuildPageForTocIndex(int tocIndex);
   std::optional<uint16_t> activeBuildPageForAnchor(const std::string& anchor);
+  // The page a visible-text offset falls on, as getPageForVisibleTextOffset() will answer it, once
+  // the build has laid out a page past it. nullopt until then.
+  std::optional<uint16_t> activeBuildPageForVisibleOffset(uint32_t offset) const;
   // Best-known total page count: the exact pageCount when no build is live (finalized) or once
   // the stream is consumed, otherwise a byte-based projection (pages so far scaled by the
   // consumed fraction) so a "page X of ~Y" display doesn't read off the small build watermark.

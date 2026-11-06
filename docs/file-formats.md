@@ -370,6 +370,7 @@ u16 chapterPage         1-based page within the TOC chapter, as the status bar s
 u16 chapterTotal        0: unknown
 u8  printedPageLength   0 when the label is longer than 15 bytes
     printedPage         the status bar's printed-page label, e.g. "(42)"
+u32 visibleOffset       where the page starts in the chapter's text (VisibleText.h), under any layout
 ```
 
 Everything after `percent` is optional. The reader writes the first 7 bytes as pages turn, and the paragraph and the status-bar tail when it closes the book (`EpubReaderActivity::onExit`); the tail is for the sleep screen, which cannot lay the book out to count pages itself. `EpubProgressRecord::decode` accepts 4, 6, 7, 9 and 14 or more bytes: a 5-byte file is a torn write and is rejected, and a record torn inside the tail keeps what came before it. The progress badge in book lists reads only the percent byte (`BookProgressPresentation`).

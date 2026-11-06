@@ -671,10 +671,11 @@ void EpubReaderActivity::onEnter() {
     const int dataSize = f.read(data, sizeof(data));
     if (const auto record = EpubProgressRecord::decode(data, dataSize > 0 ? static_cast<size_t>(dataSize) : 0)) {
       currentSpineIndex = record->spineIndex;
-      // A Page target even when the paragraph is known: a Page target is shown the moment its
-      // page is built (Background-C), and the paragraph only matters after a relayout.
+      // A Page target even when the text is known: it stands while the layout has not moved, and
+      // only a rebuilt chapter needs the offset or the paragraph.
       navTarget = NavigationTarget::makeSavedPage(currentSpineIndex, record->page, record->pageCount,
-                                                  record->paragraph.value_or(0));
+                                                  record->paragraph.value_or(0),
+                                                  record->visibleOffset.value_or(NavigationTarget::kNoOffset));
       hadSavedProgress = true;
       LOG_DBG("ERS", "Loaded cache: %d, %d (paragraph %d)", currentSpineIndex, record->page,
               record->paragraph ? *record->paragraph : -1);
@@ -848,7 +849,7 @@ void EpubReaderActivity::onExit() {
       currentSpineIndex < epub->getSpineItemsCount()) {
     const auto page = static_cast<uint16_t>(section->currentPage);
     saveProgress(currentSpineIndex, section->currentPage, section->pageCount, section->getParagraphIndexForPage(page),
-                 shownProgress());
+                 shownProgress(), readingOffset());
   } else {
     writeOwedPageSave();
   }
@@ -2519,15 +2520,20 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
     // build where the target lands; once known it becomes a page target, which the draw below
     // and the completion path both understand -- and the answer is the one the finished cache
     // would give.
-    if (navTarget.kind == NavigationTarget::Kind::TocIndex || navTarget.kind == NavigationTarget::Kind::Anchor) {
+    if (navTarget.awaitsItsText()) navTarget = navTarget.atItsText();
+    if (navTarget.kind == NavigationTarget::Kind::TocIndex || navTarget.kind == NavigationTarget::Kind::Anchor ||
+        navTarget.kind == NavigationTarget::Kind::VisibleOffset) {
       const std::optional<uint16_t> landed = navTarget.kind == NavigationTarget::Kind::TocIndex
                                                  ? section->activeBuildPageForTocIndex(navTarget.tocIndex)
+                                             : navTarget.kind == NavigationTarget::Kind::VisibleOffset
+                                                 ? section->activeBuildPageForVisibleOffset(navTarget.visibleOffset)
                                                  : section->activeBuildPageForAnchor(navTarget.anchorStr);
       if (landed) {
         LOG_INF("ERS", "Background-C spine=%d: target resolved mid-build to page %u", currentSpineIndex,
                 static_cast<unsigned>(*landed));
         section->currentPage = *landed;
         settleFollowedLink(*landed);
+        noteLandedText(navTarget);
         navTarget = NavigationTarget::makePage(*landed);
       }
     }
@@ -2614,6 +2620,7 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
     }
   } else {
     navTarget.resolveInto(*section, currentSpineIndex);
+    noteLandedText(navTarget);
     settleFollowedLink(section->currentPage);
   }
   anchorNavTargetToCurrentPage();
@@ -3302,7 +3309,11 @@ void EpubReaderActivity::resetSectionKeepingPosition() {
   if (section) {
     const int currentPage = section->currentPage;
     if (!section->hasActiveBuild()) {
-      if (const auto paragraphIndex = section->getParagraphIndexForPage(currentPage)) {
+      // The text the page starts on, which outlives the layout. The paragraph is for a cache too old
+      // to have it: it lands where the paragraph starts, and a Calibre book has none to land on.
+      if (const auto offset = readingOffset()) {
+        navTarget = NavigationTarget::makeVisibleOffset(*offset, currentPage);
+      } else if (const auto paragraphIndex = section->getParagraphIndexForPage(currentPage)) {
         navTarget = NavigationTarget::makeParagraph(*paragraphIndex, currentPage);
       } else {
         navTarget = NavigationTarget::makePage(currentPage);
@@ -3556,6 +3567,18 @@ static void buildBookFontFamilies(BlockFontFamilies& families, const std::string
 //
 // None of them can be expected to remember the position individually, so keep the anchor live
 // instead: after this call navTarget names what is on screen, and any teardown lands back there.
+void EpubReaderActivity::noteLandedText(const NavigationTarget& target) {
+  const bool offsetTarget = target.kind == NavigationTarget::Kind::VisibleOffset;
+  if (!section || (!offsetTarget && !target.awaitsItsText())) return;
+  landedText_ = {currentSpineIndex, section->currentPage, offsetTarget ? target.visibleOffset : target.restoreOffset};
+}
+
+std::optional<uint32_t> EpubReaderActivity::readingOffset() const {
+  if (!section) return std::nullopt;
+  if (landedText_.spine == currentSpineIndex && landedText_.page == section->currentPage) return landedText_.offset;
+  return section->getVisibleTextOffsetForPage(static_cast<uint16_t>(section->currentPage));
+}
+
 void EpubReaderActivity::anchorNavTargetToCurrentPage() {
   if (!section) {
     return;
@@ -3676,6 +3699,7 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   pageTurnWaitingForLock_.store(true, std::memory_order_release);
   RenderLock lock(*this);
   pageTurnWaitingForLock_.store(false, std::memory_order_release);
+  landedText_ = {};
 
   // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
   pendingGrayscale_ = {};
@@ -5108,6 +5132,7 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
 
   LOG_DBG("ERS", "resolveInto: navTarget.kind=%d pageCount=%d", (int)navTarget.kind, (int)section->pageCount);
   navTarget.resolveInto(*section, currentSpineIndex);
+  noteLandedText(navTarget);
   LOG_DBG("ERS", "resolveInto result: currentPage=%d", (int)section->currentPage);
   settleFollowedLink(section->currentPage);
   anchorNavTargetToCurrentPage();
@@ -5612,7 +5637,8 @@ void EpubReaderActivity::saveStateForRestart() {
 bool EpubReaderActivity::writeReaderProgressCache(const std::string& cachePath, const int spineIndex,
                                                   const int currentPage, const int pageCount, const uint8_t percent,
                                                   const std::optional<uint16_t> paragraphIndex,
-                                                  const std::optional<EpubProgressRecord::Shown>& shown) {
+                                                  const std::optional<EpubProgressRecord::Shown>& shown,
+                                                  const std::optional<uint32_t> visibleOffset) {
   FsFile f;
   if (!Storage.openFileForWrite("ERS", cachePath + "/progress.bin", f)) {
     LOG_ERR("ERS", "Failed to open progress cache: %s", cachePath.c_str());
@@ -5626,6 +5652,7 @@ bool EpubReaderActivity::writeReaderProgressCache(const std::string& cachePath, 
   record.percent = percent;
   record.paragraph = paragraphIndex;
   record.shown = shown;
+  record.visibleOffset = visibleOffset;
   uint8_t data[EpubProgressRecord::kMaxSize] = {};
   const size_t size = record.encode(data);
   f.write(data, size);
@@ -5635,10 +5662,11 @@ bool EpubReaderActivity::writeReaderProgressCache(const std::string& cachePath, 
 
 void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageCount,
                                       const std::optional<uint16_t> paragraphIndex,
-                                      const std::optional<EpubProgressRecord::Shown>& shown) {
+                                      const std::optional<EpubProgressRecord::Shown>& shown,
+                                      const std::optional<uint32_t> visibleOffset) {
   const uint8_t percent = epubProgressPercentByte(*epub, spineIndex, currentPage, pageCount);
   if (!writeReaderProgressCache(epub->getCachePath(), spineIndex, currentPage, pageCount, percent, paragraphIndex,
-                                shown)) {
+                                shown, visibleOffset)) {
     LOG_ERR("ERS", "Could not save progress!");
     return;
   }
