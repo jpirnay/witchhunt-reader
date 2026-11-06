@@ -404,7 +404,15 @@ TEST(FontManifestReaderTest, ReadsTheShippedV3Manifest) {
 
   const std::vector<std::string> cjk = {"NotoSansJP",  "NotoSansKR",  "NotoSansSC",  "NotoSansTC",
                                         "NotoSerifJP", "NotoSerifKR", "NotoSerifSC", "NotoSerifTC"};
+  std::vector<std::string> indic;
+  for (const char* face : {"NotoSans", "NotoSerif"}) {
+    for (const char* script : {"Devanagari", "Bengali", "Gurmukhi", "Gujarati", "Oriya", "Tamil", "Telugu", "Kannada",
+                               "Malayalam", "Sinhala"}) {
+      indic.push_back(std::string(face) + script);
+    }
+  }
   size_t outlines = 0;
+  size_t trueType = 0;
   for (size_t i = 0; i < catalog.count(); ++i) {
     const std::string name = catalog.name(i);
     EXPECT_NE(name, "NotoSansCJK");
@@ -417,12 +425,26 @@ TEST(FontManifestReaderTest, ReadsTheShippedV3Manifest) {
       ASSERT_EQ(catalog.fileCount(i), 1u) << name;
       EXPECT_EQ(std::string(catalog.fileName(i, 0)), name + "/" + name + "-Regular.otf");
       EXPECT_TRUE(catalog.fileHasCrc32(i, 0)) << name;
+    } else if (std::find(indic.begin(), indic.end(), name) != indic.end()) {
+      ++outlines;
+      ++trueType;
+      EXPECT_TRUE(catalog.outline(i)) << name;
+      EXPECT_FALSE(catalog.inDownloadAll(i)) << name;
+      ASSERT_EQ(catalog.fileCount(i), 2u) << name;
+      // The manifest lists a family's files by name, so Bold comes before Regular.
+      std::vector<std::string> files = {catalog.fileName(i, 0), catalog.fileName(i, 1)};
+      std::sort(files.begin(), files.end());
+      EXPECT_EQ(files[0], name + "/" + name + "-Bold.ttf");
+      EXPECT_EQ(files[1], name + "/" + name + "-Regular.ttf");
+      EXPECT_TRUE(catalog.fileHasCrc32(i, 0)) << name;
+      EXPECT_TRUE(catalog.fileHasCrc32(i, 1)) << name;
     } else {
       EXPECT_FALSE(catalog.outline(i)) << name;
       EXPECT_TRUE(catalog.inDownloadAll(i)) << name;
     }
   }
-  EXPECT_EQ(outlines, 8u);
+  EXPECT_EQ(outlines, 28u);
+  EXPECT_EQ(trueType, 20u);
   EXPECT_LE(catalog.blockBytes(), 16u * 1024u);
 }
 
@@ -448,7 +470,7 @@ TEST(FontManifestReaderTest, TheShippedVersion2ManifestListsCpfontFamiliesOnly) 
   }
   const Outcome v3 = read(slurp(FONT_MANIFEST_V3_PATH));
   ASSERT_EQ(v3.status, FontManifestStatus::Ok) << v3.failure;
-  EXPECT_EQ(v2.catalog.count(), v3.catalog.count() - 8);
+  EXPECT_EQ(v2.catalog.count(), v3.catalog.count() - 28);
 }
 
 TEST(FontManifestReaderTest, TheManifestUrlIsTheV3ManifestOnMaster) {

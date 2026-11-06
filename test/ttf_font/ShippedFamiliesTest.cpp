@@ -1,11 +1,13 @@
-// The .otf families the font manager hosts (assets/sd-fonts), as a reader installs them: each file probed as
-// discovery probes it, its family installed into a glyph store with the X3's font area and mapping budget, and a
-// sample of its characters drawn at 12 pt (spec 9).
+// The outline families the font manager hosts (assets/sd-fonts), as a reader installs them. The eight .otf CJK
+// families: each file probed as discovery probes it, its family installed into a glyph store with the X3's font area
+// and mapping budget, and a sample of its characters drawn at 12 pt (spec 9). The twenty .ttf Indic families: each
+// file loaded, its style and weight read, and the family fitted into the X3's font area.
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -23,12 +25,13 @@ constexpr uint32_t kX3FontAreaBytes = 3538944 - 65536;  // spiffs below the lang
 constexpr uint8_t kIdentity[glyphstore::kIdentityBytes] = {'s', 'h', 'i', 'p', 'p', 'e', 'd', '1'};
 constexpr uint32_t kSerifTcOversize = 0x9F98;  // 621 points, over the 512-point cap (spec 9.2)
 
-std::vector<std::filesystem::path> shippedOutlineFiles() {
+std::vector<std::filesystem::path> shippedOutlineFiles(const std::string& extension) {
   std::vector<std::filesystem::path> files;
   for (const auto& family : std::filesystem::directory_iterator(SD_FONTS_DIR)) {
     if (!family.is_directory()) continue;
     for (const auto& file : std::filesystem::directory_iterator(family.path())) {
-      if (ttf::isOutlineFontFileName(file.path().filename().generic_string().c_str())) files.push_back(file.path());
+      if (!ttf::isOutlineFontFileName(file.path().filename().generic_string().c_str())) continue;
+      if (file.path().extension().generic_string() == extension) files.push_back(file.path());
     }
   }
   return files;
@@ -45,7 +48,7 @@ std::vector<uint8_t> readAll(const std::filesystem::path& path) {
 }  // namespace
 
 TEST(ShippedOtfFamilies, EachInstallsWithinTheX3StoreAndDraws) {
-  const std::vector<std::filesystem::path> files = shippedOutlineFiles();
+  const std::vector<std::filesystem::path> files = shippedOutlineFiles(".otf");
   EXPECT_EQ(files.size(), 8u);
   for (const auto& path : files) {
     SCOPED_TRACE(path.filename().generic_string());
@@ -112,4 +115,42 @@ TEST(ShippedOtfFamilies, SerifTcDrawsTheOneOversizeGlyphAsMissing) {
   EXPECT_EQ(nullptr, font.glyph(0, kSerifTcOversize));
   EXPECT_NE(0u, ttf::glyphIndex(fontBytes, face, 0x9F95));  // U+9F97 is not mapped in the TC set
   EXPECT_NE(nullptr, font.glyph(0, 0x9F95));
+}
+
+TEST(ShippedTtfFamilies, EachFileLoadsAndEachFamilyFitsTheX3Store) {
+  const std::vector<std::filesystem::path> files = shippedOutlineFiles(".ttf");
+  EXPECT_EQ(files.size(), 40u);
+  std::map<std::string, std::vector<uint32_t>> flashBytes;  // by family directory
+  std::map<std::string, std::vector<uint32_t>> sdBytes;
+  for (const auto& path : files) {
+    const std::string fileName = path.filename().generic_string();
+    SCOPED_TRACE(fileName);
+    const bool bold = fileName.find("-Bold.ttf") != std::string::npos;
+    ASSERT_TRUE(bold || fileName.find("-Regular.ttf") != std::string::npos);
+    MemoryFile file;
+    file.bytes = readAll(path);
+    const ttf::FileProbe probe = ttf::probeFile(file.source());
+    EXPECT_EQ(bold ? static_cast<int>(EpdFontFamily::BOLD) : 0, probe.style);
+    EXPECT_EQ(bold ? 700 : 400, probe.weight);
+    EXPECT_FALSE(probe.variable);
+    EXPECT_EQ(ttf::flashBlockBytes(static_cast<uint32_t>(file.bytes.size()), probe.cpacBytes), probe.flashBytes);
+
+    // The file loads alone into the X3's store.
+    SimNorFlash flash(kX3FontAreaBytes);
+    TtfFontSet set(flash);
+    TtfFontSet::Files families[1] = {{file.source()}};
+    ASSERT_TRUE(set.load(families, 1, kIdentity));
+    ASSERT_TRUE(set.font(0)->setBodySize(12));
+
+    flashBytes[path.parent_path().filename().generic_string()].push_back(probe.flashBytes);
+    sdBytes[path.parent_path().filename().generic_string()].push_back(probe.sdBytes);
+  }
+  EXPECT_EQ(flashBytes.size(), 20u);
+  for (const auto& [family, flashSizes] : flashBytes) {
+    SCOPED_TRACE(family);
+    ASSERT_EQ(flashSizes.size(), 2u);
+    // In flash mode: the SD blocks are given as impossible, so only the flash blocks can fit.
+    const uint32_t noSdBlock[2] = {UINT32_MAX, UINT32_MAX};
+    EXPECT_TRUE(ttf::fitsStore(flashSizes.data(), noSdBlock, 2, kX3FontAreaBytes, 32));
+  }
 }

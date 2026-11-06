@@ -186,6 +186,15 @@ class HostedFontsLicense(unittest.TestCase):
             self.assertIn(years.group(0), ofl, path.name)
         self.assertIn("Copyright 2022 The Noto Project Authors", ofl)
 
+    def test_the_ofl_names_every_copyright_the_ttf_fonts_carry(self):
+        fonts = REPO / "assets" / "sd-fonts"
+        ofl = (fonts / "OFL.txt").read_text(encoding="utf-8")
+        files = sorted(fonts.glob("*/*.ttf"))
+        self.assertEqual(len(files), 40)
+        for path in files:
+            notice = TTFont(str(path))["name"].getDebugName(0)
+            self.assertIn(notice.removesuffix("."), ofl, path.name)
+
 
 if __name__ == "__main__":
     unittest.main()
