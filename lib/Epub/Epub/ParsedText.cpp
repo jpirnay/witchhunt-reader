@@ -456,8 +456,8 @@ struct ParsedText::ShapingState {
   uint8_t faceCount = 0;
   // The line being laid out as pieces (viewShapedPieces): their texts (views into `words`), forms and runs (views into
   // the store, or into formCopies), styles, sizes and boundaries, and each token's first piece, its last entry the
-  // line's piece count. TextBlock copies the bytes into its arena, so a line builds no string. All keep their capacity
-  // across lines.
+  // line's piece count. TextBlock copies the bytes into its arena; the one string built is formCopies, for a line with
+  // a form that holds a soft hyphen. All keep their capacity across lines.
   std::vector<std::string_view> pieceWords;
   std::vector<std::string_view> pieceForms;
   std::vector<GlyphRun> pieceGlyphs;
@@ -2746,8 +2746,15 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
     if (!pieces || pieces->empty()) return std::nullopt;
     return pieces;
   };
+  // The line's pieces, at most: a token without pieces is one (a Text piece of soft hyphens alone is counted, then
+  // left out).
   bool anyPieces = false;
-  for (size_t t = 0; t < count && !anyPieces; ++t) anyPieces = piecesOf(first + t).has_value();
+  size_t total = 0;
+  for (size_t t = 0; t < count; ++t) {
+    const std::optional<std::span<const ShapedStore::Piece>> pieces = piecesOf(first + t);
+    anyPieces = anyPieces || pieces.has_value();
+    total += pieces ? pieces->size() : 1;
+  }
   if (!anyPieces) return false;
 
   state.pieceWords.clear();
@@ -2757,15 +2764,19 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
   state.pieceSizes.clear();
   state.pieceBoundaries.clear();
   state.tokenPieces.clear();
-  state.pieceWords.reserve(count);
-  state.pieceForms.reserve(count);
-  state.pieceGlyphs.reserve(count);
-  state.pieceStyles.reserve(count);
-  state.pieceSizes.reserve(count);
-  state.pieceBoundaries.reserve(count);
+  // Reserved whole, so no vector grows in the loop below: 33 B a piece on the device (two views, a run, a style, a
+  // size, a boundary and an x) and 2 B a token, kept across lines (a line of 40 pieces is about 1.4 KB) and freed at
+  // the slice's yield (releaseLayoutScratch).
+  state.pieceWords.reserve(total);
+  state.pieceForms.reserve(total);
+  state.pieceGlyphs.reserve(total);
+  state.pieceStyles.reserve(total);
+  state.pieceSizes.reserve(total);
+  state.pieceBoundaries.reserve(total);
   state.tokenPieces.reserve(count + 1);
   // The tokens' positions are [0, count) of the x scratch: the pieces' go after them, and then take their place.
   std::vector<int16_t>& xs = lineXPosScratch_;
+  xs.reserve(count + total);
   const auto place = [&](const size_t i, const std::string_view text, const std::string_view form, const GlyphRun run,
                          const TokenBoundary::Boundary boundary, const int x) {
     state.pieceWords.push_back(text);

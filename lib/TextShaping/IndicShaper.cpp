@@ -171,7 +171,8 @@ enum class Attempt : uint8_t { Shaped, TooLong, Failed };
 // One Glyphs run into `sink`: cps[before.count, count - after.count) is the run, with the contexts ahead and behind.
 // Shaped whole; when that is past the buffer's storage, upstream's piecewise loop shapes it between syllables. The plan
 // and the face are asked again before each ot::shape: a plan is valid until the next plan() on its face, and a face's
-// mapping can move.
+// mapping can move. False for a run the font's GSUB deletes every glyph of: a glyph form of no glyphs is no form (a
+// line would draw the run's code points at no width), so it is laid out as a run that cannot be shaped.
 bool shapeRun(ShapingFace& face, const Request& request, const indic::ScriptInfo& script, const uint32_t* cps,
               const unsigned count, const Context& before, const Context& after, ot::Buffer& buffer, PieceSink& sink) {
   const auto otScript = static_cast<ot::Script>(indic::indexOf(script));
@@ -186,7 +187,7 @@ bool shapeRun(ShapingFace& face, const Request& request, const indic::ScriptInfo
   };
 
   const Attempt whole = attempt(0, count, ot::RunContext{before.count, after.count, before.cut || after.cut});
-  if (whole != Attempt::TooLong) return whole == Attempt::Shaped && appendGlyphs(buffer, sink);
+  if (whole != Attempt::TooLong) return whole == Attempt::Shaped && buffer.len() != 0 && appendGlyphs(buffer, sink);
 
   // Upstream's piecewise loop: as many syllables as the buffer holds, or one when it holds fewer. Each piece shapes
   // with the syllable on either side as context, so word-start forms, lookahead rules and kerning across the split
@@ -207,6 +208,7 @@ bool shapeRun(ShapingFace& face, const Request& request, const indic::ScriptInfo
     while (!breakAt(i));
     return i;
   };
+  unsigned glyphs = 0;  // the run's, over its pieces
   for (unsigned begin = runBegin; begin < runEnd;) {
     const unsigned limit = ot::maxRunLength(buffer);
     const unsigned from = begin > 0 ? prevBreak(begin) : 0;
@@ -231,9 +233,10 @@ bool shapeRun(ShapingFace& face, const Request& request, const indic::ScriptInfo
                       ot::RunContext{contextBefore, contextAfter, partial});
     }
     if (piece != Attempt::Shaped || !appendGlyphs(buffer, sink)) return false;
+    glyphs += buffer.len();
     begin = end;
   }
-  return true;
+  return glyphs != 0;
 }
 
 // What a Glyphs run is shaped in: the call's code points (room for `room`) and its Buffer.

@@ -201,6 +201,51 @@ unsigned longestSyllable(const std::string& text) {
   return longest;
 }
 
+// A GSUB of one lookup, ccmp in the dev2 script's default language system: a MultipleSubst of `glyph` to no glyph,
+// which deletes it. Big-endian fields, each table at the offset its parent names.
+std::vector<uint8_t> deletingGsub(const uint16_t glyph) {
+  const uint16_t fields[] = {
+      1, 0,      10,     30, 44,  // the header (version 1.0) and its script, feature and lookup lists
+      1, 0x6465, 0x7632, 8,       // the script list (at 10): one script, "dev2"
+      4, 0,                       // the script (at 18): its default language system, no other
+      0, 0xFFFF, 1,      0,       // the language system (at 22): no required feature, feature 0
+      1, 0x6363, 0x6D70, 8,       // the feature list (at 30): one feature, "ccmp"
+      0, 1,      0,               // the feature (at 38): lookup 0
+      1, 4,                       // the lookup list (at 44): one lookup
+      2, 0,      1,      8,       // the lookup (at 48): a MultipleSubst of one subtable
+      1, 10,     1,      8,       // the subtable (at 56): its coverage at 66, its one sequence at 64
+      0,                          // the sequence (at 64): no glyph
+      1, 1,      glyph,           // the coverage (at 66): the glyph
+  };
+  std::vector<uint8_t> out;
+  for (const uint16_t field : fields) {
+    out.push_back(static_cast<uint8_t>(field >> 8));
+    out.push_back(static_cast<uint8_t>(field & 0xFF));
+  }
+  return out;
+}
+
+// A face over a font with its GSUB replaced by `gsub`, and no GPOS, CPac or CPpl: it computes its filters.
+class GsubFace final : public ShapingFace {
+ public:
+  GsubFace(std::vector<uint8_t> font, std::vector<uint8_t> gsub) : font_(std::move(font)), gsub_(std::move(gsub)) {}
+
+ protected:
+  const uint8_t* map() override { return font_.empty() ? nullptr : font_.data(); }
+  bool tables(const uint8_t* base, ot::FaceTables* out) override {
+    if (!ot::tablesFromSfnt(base, static_cast<uint32_t>(font_.size()), out)) return false;
+    (*out)[ot::FaceTables::GSUB_TABLE] = ot::Table(gsub_.data(), static_cast<uint32_t>(gsub_.size()));
+    (*out)[ot::FaceTables::GPOS_TABLE] = ot::Table();
+    (*out)[ot::FaceTables::CPAC] = ot::Table();
+    (*out)[ot::FaceTables::CPPL] = ot::Table();
+    return true;
+  }
+
+ private:
+  std::vector<uint8_t> font_;
+  std::vector<uint8_t> gsub_;
+};
+
 // The build's heap block released before and after a test that counts it.
 struct BuildMemoryScope {
   BuildMemoryScope() { TextShaping::releaseBuildMemory(); }
@@ -526,6 +571,32 @@ TEST(IndicShaper, ANeighbourOfAnotherScriptIsNoContext) {
     ASSERT_EQ(Outcome::Formed, glued.outcome) << neighbour;
     ASSERT_EQ(1u, glued.pieces.size()) << neighbour;
     EXPECT_EQ(alone.pieces[0].glyphs, glued.pieces[0].glyphs) << neighbour;
+  }
+}
+
+TEST(IndicShaper, ARunTheFontEmptiesIsDegraded) {
+  // A glyph form of no glyphs is no form (a line would draw the run's code points at no width): a run whose every
+  // glyph the font's GSUB deletes is laid out as its code points, as a run that cannot be shaped is. Shaped whole (क)
+  // and in pieces (40 of them, past kMaxRunCodepoints).
+  const std::vector<uint8_t> font = layoutFont("Devanagari");
+  FixtureShapingFace plain(font);
+  uint32_t ka = 0;
+  ASSERT_NE(nullptr, plain.current());
+  ASSERT_TRUE(plain.current()->nominalGlyph(0x0915, &ka));
+  std::string many;
+  for (int i = 0; i < 40; ++i) many += kKa;
+  ASSERT_GT(ottest::utf32(many.c_str()).size(), IndicShaper::kMaxRunCodepoints);
+  GsubFace deleting(font, deletingGsub(static_cast<uint16_t>(ka)));
+  for (const std::string& text : {std::string(kKa), many}) {
+    EXPECT_EQ(Outcome::Degraded, shape(text, on(&deleting)).outcome) << text.size() << " B";
+  }
+  // The control: the lookup deletes another glyph, and the same runs are formed.
+  GsubFace other(font, deletingGsub(static_cast<uint16_t>(ka + 1)));
+  for (const std::string& text : {std::string(kKa), many}) {
+    const Shaped shaped = shape(text, on(&other));
+    ASSERT_EQ(Outcome::Formed, shaped.outcome) << text.size() << " B";
+    ASSERT_EQ(1u, shaped.pieces.size());
+    EXPECT_FALSE(shaped.pieces[0].glyphs.empty());
   }
 }
 

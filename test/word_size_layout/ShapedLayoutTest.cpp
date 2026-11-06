@@ -723,33 +723,35 @@ TEST_F(ShapedLine, JustificationStretchesTokensNotPieces) {
 }
 
 TEST_F(ShapedLine, AnEmphasisRunCoversThePiecesOfItsTokens) {
+  // The run's token follows a token of two pieces: it starts at the line's third word.
   ParsedText text(false, false, noIndentStyle());
-  text.addWord(kPatrika, EpdFontFamily::REGULAR);
+  text.addWord(kHindi + kComma, EpdFontFamily::REGULAR);
   text.addWord(kHindi + kComma, EpdFontFamily::REGULAR, false, false, 100, 0, 0, /*textEmphasis=*/1);
   text.addWord(kPatrika, EpdFontFamily::REGULAR);
   const Lines lines = layOut(text, renderer, 400);
   ASSERT_EQ(1u, lines.size());
   const TextBlock& line = *lines[0];
-  ASSERT_EQ(4u, line.wordCount());
+  ASSERT_EQ(5u, line.wordCount());
   ASSERT_EQ(1u, line.annotationCount());
   const TextBlock::Annotation run = line.annotation(0);
   EXPECT_EQ(TextBlock::AnnotationKind::Emphasis, run.kind);
-  EXPECT_EQ(1, run.firstWord);
+  EXPECT_EQ(2, run.firstWord);
   EXPECT_EQ(2, run.wordCount);
 }
 
 TEST_F(ShapedLine, ARubyCoversThePiecesOfItsBase) {
+  // The base follows a token of two pieces: its ruby starts at the line's third word.
   ParsedText text(false, false, noIndentStyle());
-  add(text, {{kPatrika}, {kHindi + kComma}, {kPatrika}});
+  add(text, {{kHindi + kComma}, {kHindi + kComma}, {kPatrika}});
   ASSERT_TRUE(text.addRubyGroup(1, 1, "hindi"));
   const Lines lines = layOut(text, renderer, 400);
   ASSERT_EQ(1u, lines.size());
   const TextBlock& line = *lines[0];
-  ASSERT_EQ(4u, line.wordCount());
+  ASSERT_EQ(5u, line.wordCount());
   ASSERT_EQ(1u, line.annotationCount());
   const TextBlock::Annotation ruby = line.annotation(0);
   EXPECT_EQ(TextBlock::AnnotationKind::Ruby, ruby.kind);
-  EXPECT_EQ(1, ruby.firstWord);
+  EXPECT_EQ(2, ruby.firstWord);
   EXPECT_EQ(2, ruby.wordCount);
   EXPECT_EQ("hindi", ruby.text);
 }
@@ -778,12 +780,19 @@ TEST_F(ShapedLine, GluedPiecesTakeNoKerning) {
   // Step 8: the engine kerns by code point, and the shaper kerned inside its runs. Every pair kerns 3 px here.
   renderer.kerningPx = 3;
   ParsedText text(false, false, noIndentStyle());
-  // हिन्दी, then » glued in bold (another style between syllables: a token of its own), then क and म, glued in bold.
-  add(text, {{kHindi + kComma}, {"»", EpdFontFamily::BOLD, true}, {kKa}, {kMa, EpdFontFamily::BOLD, true}});
+  // हिन्दी, then » glued in bold (another style between syllables: a token of its own), then क and म, glued in bold;
+  // then «, हिन्दी glued in bold, and », glued in regular.
+  add(text, {{kHindi + kComma},
+             {"»", EpdFontFamily::BOLD, true},
+             {kKa},
+             {kMa, EpdFontFamily::BOLD, true},
+             {"«"},
+             {kHindi, EpdFontFamily::BOLD, true},
+             {"»", EpdFontFamily::REGULAR, true}});
   const Lines lines = layOut(text, renderer, 400);
   ASSERT_EQ(1u, lines.size());
   const TextBlock& line = *lines[0];
-  ASSERT_EQ(5u, line.wordCount());
+  ASSERT_EQ(8u, line.wordCount());
   // The pieces of one token touch.
   EXPECT_EQ(line.wordXpos(0) + advanceOf(line, 0), line.wordXpos(1));
   // Two tokens glued at a Text piece and a word of code points: their code points kern.
@@ -792,6 +801,12 @@ TEST_F(ShapedLine, GluedPiecesTakeNoKerning) {
   ASSERT_TRUE(line.hasGlyphForm(3));
   ASSERT_TRUE(line.hasGlyphForm(4));
   EXPECT_EQ(line.wordXpos(3) + advanceOf(line, 3), line.wordXpos(4));
+  // A Glyphs edge on one side alone: no kerning either, after the code points and before them.
+  ASSERT_FALSE(line.hasGlyphForm(5));
+  ASSERT_TRUE(line.hasGlyphForm(6));
+  ASSERT_FALSE(line.hasGlyphForm(7));
+  EXPECT_EQ(line.wordXpos(5) + kGlyph, line.wordXpos(6));
+  EXPECT_EQ(line.wordXpos(6) + advanceOf(line, 6), line.wordXpos(7));
 }
 
 TEST_F(ShapedLine, TheLinesTokenCountIsItsTokens) {
@@ -934,6 +949,28 @@ TEST_F(ShapedLine, AFontThatCannotShapeReordersAndLatchesNothing) {
   }
   EXPECT_EQ(0, bengali.planBuilds());
   Seam::face = nullptr;
+}
+
+TEST_F(ShapedLine, AVerticalLineReadsBackWithItsReorderedForms) {
+  // A vertical line's load refuses glyph forms: its Indic words are drawn as IndicReorder's forms, which it loads.
+  ParsedText text(false, false, noIndentStyle());
+  text.setVertical(true);
+  add(text, {{kKi}, {kHindi}});
+  const Lines lines = layOut(text, renderer, 400);
+  ASSERT_FALSE(lines.empty());
+  bool reordered = false;
+  for (const auto& line : lines) {
+    line->setVertical(true);  // as the page's builder sets it
+    const std::unique_ptr<TextBlock> restored = readBack(bytesOf(*line));
+    ASSERT_NE(nullptr, restored);
+    EXPECT_TRUE(restored->isVertical());
+    for (uint16_t i = 0; i < restored->wordCount(); ++i) {
+      EXPECT_FALSE(restored->hasGlyphForm(i)) << restored->wordText(i);
+      reordered = reordered || restored->hasDisplayForm(i);
+      if (restored->wordText(i) == kKi) EXPECT_EQ(kIMatra + kKa, restored->wordDrawText(i));
+    }
+  }
+  EXPECT_TRUE(reordered);
 }
 
 TEST_F(ShapedLine, AFaceReleasedBetweenTwoPassesShapesAfresh) {
