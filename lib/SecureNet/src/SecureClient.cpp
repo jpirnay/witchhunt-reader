@@ -2,6 +2,7 @@
 
 #include <Arduino.h>  // micros(), getCpuFrequencyMhz() for the handshake cost split
 #include <Logging.h>
+#include <Network.h>
 #include <esp_heap_caps.h>
 
 #include "TlsPolicy.h"
@@ -395,6 +396,9 @@ int SecureClient::connect(const char* host, uint16_t port) {
   _handshakeMinFree = SIZE_MAX;
   _handshakeMinLargest = SIZE_MAX;
 
+  // Asked once, here: each attempt below would otherwise wait out its own timeout on a dead name.
+  if (!hostResolves(host)) return 0;
+
   // If explicitly insecure (debug), skip verification outright.
   if (_insecure) {
     const int ok = connectAtVerify(host, port, /*verifyPeer=*/false);
@@ -526,5 +530,12 @@ int SecureClient::read() {
 }
 int SecureClient::peek() { return -1; }
 void SecureClient::flush() {}
+
+bool hostResolves(const char* host) {
+  IPAddress ip;
+  if (Network.hostByName(host, ip) == 1) return true;
+  LOG_ERR("HTTP", "DNS lookup failed: %s", host);
+  return false;
+}
 
 }  // namespace crosspoint

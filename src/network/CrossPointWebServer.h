@@ -229,39 +229,40 @@ class CrossPointWebServer {
   void handlePluginsPage() const;
   // The File Manager's Details dialog reads an EPUB's own OPF from here.
   void handleBookOpf() const;
-  // POST /api/book/replace?path&keep (raw body): swaps in an optimized copy of a book, keeping the
+  // POST /api/book/replace?path&keep (multipart): swaps in an optimized copy of a book, keeping the
   // original as <book>.bak.
   void handleBookReplace();
   void handleBookReplaceData();
   void handlePluginInstallBegin() const;  // POST /api/plugins/begin?name -> fresh staging folder
-  void handlePluginInstallFile();         // POST /api/plugins/file?name&file (raw body) -> one file
+  void handlePluginInstallFile();         // POST /api/plugins/file?name&file (multipart) -> one file
   void handlePluginInstallFileData();
   void handlePluginInstallCommit() const;  // POST /api/plugins/commit?name -> staging replaces the plugin
   void handlePluginRemove() const;         // POST /api/plugins/remove?name
   void handlePluginEnable() const;         // POST /api/plugins/enable?name&on=0|1
 
-  // A raw request body streamed to a file. Raw, so binary-safe: the framework's buffered "plain"
-  // argument is built with String(char*) and ends at the first NUL byte. Written to <path>.part,
-  // capped as it arrives, and renamed over <path> only once complete, so a body that turns out too
-  // large, or a client that goes away, never replaces a file that was there. One instance serves
-  // every such route: the server handles one request at a time.
-  struct RawFileUpload {
+  // A multipart file streamed to the card. Binary-safe, which the framework's buffered "plain"
+  // argument is not: it is built with String(char*) and ends at the first NUL byte. A raw body would
+  // be too, but the framework parses no query arguments for one, so its target could not be read.
+  // Written to <path>.part, capped as it arrives, and renamed over <path> only once complete, so a
+  // file that turns out too large, or a client that goes away, never replaces a file that was there.
+  // One instance serves every such route: the server handles one request at a time.
+  struct StagedUpload {
     FsFile file;
     String path;  // the validated target
     String temp;  // written here, renamed over `path` once complete
     size_t cap = 0;
     size_t written = 0;
-    bool started = false;    // a raw body arrived
     int status = 0;          // 0 while all is well, else the HTTP status to answer with
     const char* error = "";  // its message
 
-    // RAW_START: `target` is the validated path, or empty when the request named none it may write.
+    // UPLOAD_FILE_START: `target` is the validated path, or empty when the request named none it may
+    // write.
     void start(const String& target, size_t maxBytes);
-    // RAW_WRITE, RAW_END and RAW_ABORTED.
-    void feed(const HTTPRaw& raw);
+    // UPLOAD_FILE_WRITE, UPLOAD_FILE_END and UPLOAD_FILE_ABORTED.
+    void feed(const HTTPUpload& up);
     void fail(int httpStatus, const char* message);
-    // The response once the body is in: false (and an error sent) when it failed or never streamed.
+    // The response once the file is in: true, with the error sent, when it failed.
     bool answerFailure(WebServer& server);
-  } rawUpload;
+  } stagedUpload;
   String bookReplacePath;  // the book /api/book/replace is replacing, set at the start of its body
 };

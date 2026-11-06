@@ -119,6 +119,11 @@ canvas, so its bytes can be displayed but never saved.
 same-origin. It is opt-in per plugin: the host must be listed in that plugin's
 own `manifest.json`, so a plugin's reach is readable before you install it.
 
+The relay and `/api/fetch` check the server's certificate against the reader's
+roots and, when that fails, go on unverified, as an OPDS catalog without a login
+does. So a relayed response is no more trustworthy than plain http: treat it as
+untrusted input, and never put a token or other secret in a relayed URL.
+
 ```jsonc
 {
   "title": "Cover Finder",

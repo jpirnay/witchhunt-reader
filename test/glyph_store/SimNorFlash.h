@@ -29,7 +29,8 @@ class SimNorFlash final : public NorFlash {
 
   bool read(const uint32_t offset, void* dst, const uint32_t len) const override {
     if (!inRange(offset, len)) return false;
-    std::memcpy(dst, mem_.data() + offset, len);
+    // An empty read may come with a null dst: an empty vector's data(). memcpy allows neither.
+    if (len != 0) std::memcpy(dst, mem_.data() + offset, len);
     return true;
   }
 

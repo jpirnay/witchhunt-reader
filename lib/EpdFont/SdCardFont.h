@@ -286,6 +286,8 @@ class SdCardFont {
 
   Stats stats_;
   uint32_t contentHash_ = 0;
+  uint32_t fileSize_ = 0;  // what bounds a glyph's bitmap: the file's size, or the mapping's (glyphEntryValid)
+  uint8_t corruptGlyphsLogged_ = 0;
   bool loaded_ = false;
 
   // True when persistent metadata (fullIntervals, kernLeft/RightClasses,
@@ -322,6 +324,12 @@ class SdCardFont {
   // The biggest single allocation the prewarm bitmap retry can make: the arena's remaining room,
   // or the heap's largest free block.
   uint32_t maxAllocatable() const;
+
+  // Whether a glyph record holds together: its length is what its pixels pack to, and its bitmap ends inside the file
+  // (the mapping, for a mapped font). The draw reads width x height pixels from the record's offset whatever its length
+  // says, so a record that fails here must never reach it. Checks the record as stored, before an ink mask halves it.
+  // Ported from crosspoint-reader PR #4091 (Eszter Schuffert).
+  bool glyphEntryValid(const PerStyle& s, const EpdGlyph& glyph, uint32_t codepoint);
 
   // Per-style helpers
   static bool allCpsCovered(const PerStyle& s, const uint32_t* codepoints, uint32_t cpCount);

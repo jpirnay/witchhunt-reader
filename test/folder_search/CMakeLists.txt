@@ -8,7 +8,9 @@ target_include_directories(FolderSearchTest PRIVATE
   ${REPO_ROOT}/test/zip_entry_reader
   ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/src/activities/home
+  ${REPO_ROOT}/lib/FsHelpers
   ${REPO_ROOT}/lib/Logging
+  ${REPO_ROOT}/lib/Memory
 )
 
 target_link_libraries(FolderSearchTest PRIVATE

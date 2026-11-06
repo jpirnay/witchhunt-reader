@@ -13,3 +13,12 @@ function nfcName(name) {
   // String.prototype.normalize is in every browser since 2016; without it the name goes as it is.
   return typeof name === 'string' && typeof name.normalize === 'function' ? name.normalize('NFC') : name;
 }
+
+// The body the reader's file routes take: `data` (a string, Blob or ArrayBuffer) as one multipart
+// file, with its target in the URL. Not the bare bytes: the web server reads no query arguments for
+// a raw body. Passed to fetch() without a Content-Type, which the browser sets with the boundary.
+function uploadForm(data) {
+  const form = new FormData();
+  form.append('file', new Blob([data]), 'file');
+  return form;
+}

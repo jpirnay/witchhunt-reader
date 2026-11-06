@@ -32,7 +32,6 @@
 #include <esp_heap_caps.h>
 #include <esp_ota_ops.h>
 #include <esp_private/esp_clk.h>
-#include <hal/usb_serial_jtag_ll.h>
 #include <soc/rtc.h>
 
 #include <algorithm>
@@ -53,6 +52,7 @@
 #include "ReadingStats.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "SerialBuffers.h"
 #include "SerialTestApi.h"
 #include "SilentRestart.h"
 #include "UiFontScale.h"
@@ -1050,28 +1050,7 @@ static bool openSerialLogIfHostPresent() {
     return false;
   }
 
-  // HWCDC's buffer setters delete and recreate the RX queue and TX ring without masking the USB
-  // Serial/JTAG interrupt, whose handler uses both (hw_cdc_isr_handler checks tx_ring_buf, then
-  // receives from it). With CDC_ON_BOOT the core began Serial before setup(), so on a warm reboot
-  // with a host still attached the handler is live and a resize can race it into a freed buffer:
-  // after CMD:REBOOT the boot log stopped right here and the device answered nothing until a USB
-  // reset (X3, 2026-10-18; reproduced on the first REBOOT of a loop). A cold boot has no host
-  // traffic yet, which is why it never showed there. Mask the interrupt for the resize;
-  // Serial.begin() below re-enables exactly the interrupts it uses.
-#if defined(ARDUINO_USB_CDC_ON_BOOT) && ARDUINO_USB_CDC_ON_BOOT
-  usb_serial_jtag_ll_disable_intr_mask(USB_SERIAL_JTAG_LL_INTR_MASK);
-#endif
-  // Enlarge the USB-CDC RX buffer from the 256-byte default before begin().
-  // The serial file-transfer protocol receives 2048-byte chunks in bursts; a
-  // 256-byte ring drops bytes whenever the byte-by-byte drain stalls briefly,
-  // which surfaces as "Timeout waiting for ACK" / failed uploads. 4096 matches
-  // MicroReader's usb_serial_jtag rx_buffer_size.
-  logSerial.setRxBufferSize(4096);
-  // Enlarge the TX buffer too (default 256) so file downloads stream out in
-  // larger bursts without the device having to block mid-chunk on a full ring
-  // (a full ring that doesn't drain within HWCDC's tx timeout flips the link
-  // to "disconnected" and silently drops TX).
-  logSerial.setTxBufferSize(8192);
+  SerialBuffers::sizeForCommands();
   Serial.begin(115200);
   // Only wait for the host when we have positive evidence one is there. On a
   // board that cannot detect a cable we open the log speculatively, and paying
@@ -1847,6 +1826,7 @@ void loop() {
   }
   // The serial test commands (CMD:..., see SerialTestApi.h and docs/serial-test-api.md).
   if (serialLineComplete) {
+    SerialBuffers::arm();
     SerialTestApi::handleLine(serialLine.take());
   }
 

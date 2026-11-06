@@ -201,6 +201,11 @@ bool writeCpac(NorFlash& flash, FlashGlyphStore& store, const uint8_t block, con
   return written;
 }
 
+// Glyph 0 is a font's .notdef. A character the font does not map has no glyph of its own, but U+FFFD is what EpdFont
+// asks for in its place, so a font that does not map U+FFFD either draws its .notdef for it: the character shows as the
+// font's box and keeps an advance, where it would otherwise vanish from the line. Ported from crosspoint-reader
+// PR #4256 (Phạm Bình An).
+bool hasNoGlyph(const uint16_t index, const uint32_t codepoint) { return index == 0 && codepoint != REPLACEMENT_GLYPH; }
 }  // namespace
 
 void TtfFont::setHooks(const Hooks& newHooks) { hooks = newHooks; }
@@ -1115,7 +1120,10 @@ const EpdGlyph* TtfFont::glyph(Size& size, const uint8_t style, const uint32_t c
         ++hits_;
         return stored;
       case Lookup::NoGlyph:
-        return nullptr;
+        if (codepoint != REPLACEMENT_GLYPH) return nullptr;
+        // A store from before hasNoGlyph() holds this mark for good: a slot is written once and find() stops at it, so
+        // a record behind it could never be found. Drawn into the ring each time, and nothing goes to the store.
+        return render(size, style, codepoint, false, key);
       case Lookup::NotStored:
         break;
     }
@@ -1132,7 +1140,7 @@ const EpdGlyph* TtfFont::render(const Size& size, const uint8_t style, const uin
   const Style& drawn = *styleAt(style);
   const ttf::Face& face = drawn.face;
   const uint16_t index = drawn.ligatures.glyphFor(bytes, face, codepoint);
-  if (index == 0) {
+  if (hasNoGlyph(index, codepoint)) {
     // The font has no glyph for it. An I/O error is not an answer (SD mode): ask again next time.
     if (haveKey && !set.ringMode_ && !bytes.ioError()) set.noteCommit(set.store_.markNoGlyph(key));
     return nullptr;
@@ -1270,7 +1278,7 @@ void TtfFont::prefetch(Size& size, const uint8_t style, const char* utf8Text) {
       continue;
     }
     const uint16_t index = drawn.ligatures.glyphFor(bytes, face, cp);
-    if (index == 0) {
+    if (hasNoGlyph(index, cp)) {
       if (!bytes.ioError()) set.noteCommit(store.markNoGlyph(key));
       if (set.ringMode_) return;
       continue;

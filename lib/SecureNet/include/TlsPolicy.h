@@ -12,8 +12,8 @@ namespace crosspoint {
 
 enum class TlsPolicy : uint8_t {
   // Verify against the curated roots and abort if that fails, unless the user has turned "Skip
-  // HTTPS validation (risky)" on. For anything that carries credentials or has no reason to accept
-  // an unverified server: OPDS catalogs with a login, KOSync, plugins, fonts.
+  // HTTPS validation (risky)" on. Named by a caller whose URL must not be reached unverified:
+  // OPDS catalogs with a login, KOSync, and fonts, whose manifest holds the checksums of the files.
   Verified,
   // Always verified; the skip setting does not apply. For firmware, which the device executes, and
   // the release check that names it.
@@ -25,8 +25,9 @@ enum class TlsPolicy : uint8_t {
   // Verified first; a certificate that cannot be verified (no trusted root, a bad signature, a
   // name or date mismatch -- not a timeout, DNS or other connection failure) is retried once
   // unverified, and logged. Only for a request that carries no credentials: planTls() falls back
-  // to Verified for one that does. For OPDS catalogs without a login, whose feeds and books are
-  // public and which are often served from certificates the curated roots do not cover.
+  // to Verified for one that does. HttpDownloader's default: anonymous OPDS, whose feeds and books
+  // are public, and the plugin relay and fetch, whose hosts the curated roots need not cover. A
+  // secret carried in a URL is not a credential here, so such a URL has to name Verified.
   VerifiedThenUnverified,
 };
 

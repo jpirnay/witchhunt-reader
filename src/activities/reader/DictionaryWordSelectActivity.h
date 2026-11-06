@@ -258,7 +258,7 @@ class DictionaryWordSelectActivity final : public Activity {
   static constexpr unsigned long SPECULATIVE_DEBOUNCE_MS = 300;
   Speculation speculation = Speculation::Unknown;
   int speculationIdx = -1;  // word `speculation` describes; -1 = none
-  DictLocation speculationLocation;
+  DictEntries speculationEntries;
   std::string speculationHeadword;
   // The CJK speculation's hits for speculationIdx; a Latin word's are the two fields above.
   DictPrefixMatch speculationMatch;

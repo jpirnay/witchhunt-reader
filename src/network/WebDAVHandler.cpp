@@ -6,6 +6,7 @@
 #include <HalStorage.h>
 #include <HalSystem.h>  // feedWatchdog()
 #include <Logging.h>
+#include <Memory.h>
 #include <Txt.h>
 #include <Xtc.h>
 
@@ -242,11 +243,11 @@ void WebDAVHandler::handlePropfind(WebServer& s) {
 
   // If depth > 0 and it's a directory, list children
   if (depth > 0) {
-    FsFile file = root.openNextFile();
-    char name[500];
+    auto name = makeUniqueNoThrow<char[]>(FsHelpers::MAX_FILE_NAME_BYTES);
+    FsFile file = name ? root.openNextFile() : FsFile();
     while (file) {
-      file.getName(name, sizeof(name));
-      String fileName(name);
+      file.getName(name.get(), FsHelpers::MAX_FILE_NAME_BYTES);
+      String fileName(name.get());
 
       // Skip hidden/protected items
       const bool shouldHide = ProtectedPaths::isProtectedName(std::string_view(fileName.c_str(), fileName.length()));
