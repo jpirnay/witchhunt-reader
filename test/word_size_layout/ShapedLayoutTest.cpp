@@ -635,7 +635,8 @@ TEST_F(ShapedLayout, AGluedTokenIsAlwaysShaped) {
   EXPECT_EQ(expected, bytesOfLines(layOut(text, renderer, 400)));
   EXPECT_EQ(plain.tokensShaped(), text.tokensShaped());
   EXPECT_EQ(6u, text.tokensShaped());
-  EXPECT_EQ(0u, cache.stats().hits + cache.stats().misses + cache.stats().bypassed + cache.stats().inserts);
+  EXPECT_EQ(0u, cache.stats().hits + cache.stats().misses + cache.stats().bypassed + cache.stats().inserts +
+                    cache.stats().oversize);
 }
 
 TEST_F(ShapedLayout, AReplayTheStoreRefusesIsShapedAfresh) {

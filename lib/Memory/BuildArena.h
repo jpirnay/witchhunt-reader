@@ -136,7 +136,9 @@ class BuildArena {
   uint32_t releaseFailures() const { return releaseFailures_; }
   // The free tail's watermark (see the header): markPeak() sets it to the cursor, and peakSinceMark() is the highest
   // cursor alloc() has left since, the end of every byte handed out since the mark. Releases never lower it. One
-  // mark per arena: the word-shaping cache's (WordShapeCache).
+  // mark per arena: the word-shaping cache's (WordShapeCache). Unmarked -- a new arena, or after reset() -- it is
+  // kUnmarked, past any capacity: the tail may hold anything, and reads as overwritten until the next mark.
+  static constexpr size_t kUnmarked = SIZE_MAX;
   void markPeak() { peakMark_ = cursor_; }
   size_t peakSinceMark() const { return peakMark_; }
   // The region's top `bytes`: [capacity() - bytes, capacity()). Not an allocation: the arena counts them as free, and
@@ -230,7 +232,7 @@ class BuildArena {
     activeBlockId_ = 0;
     laneStart_ = 0;
     laneHighWater_ = 0;
-    peakMark_ = 0;
+    peakMark_ = kUnmarked;  // whatever the tail held is not to be trusted after a reset
     BUILD_ARENA_TRACE_REWIND();
   }
 
@@ -242,7 +244,7 @@ class BuildArena {
   size_t highWater_ = 0;
   size_t laneStart_ = 0;
   size_t laneHighWater_ = 0;
-  size_t peakMark_ = 0;
+  size_t peakMark_ = kUnmarked;
   size_t failedAllocSize_ = 0;
   uint32_t activeBlockId_ = 0;
   uint32_t nextBlockId_ = 1;

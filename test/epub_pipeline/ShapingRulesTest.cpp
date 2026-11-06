@@ -489,12 +489,13 @@ std::string lineWith(const std::vector<std::string>& lines, const char* marker) 
 }
 
 struct WordCacheLine {
-  unsigned bytes = 0, hits = 0, misses = 0, inserts = 0, bypassed = 0, clears = 0;
+  unsigned bytes = 0, hits = 0, misses = 0, inserts = 0, bypassed = 0, oversize = 0, clears = 0;
 };
 
 bool parseWordCacheLine(const std::string& line, WordCacheLine* out) {
-  return std::sscanf(line.c_str(), "word cache: bytes=%u hits=%u misses=%u inserts=%u bypassed=%u clears=%u",
-                     &out->bytes, &out->hits, &out->misses, &out->inserts, &out->bypassed, &out->clears) == 6;
+  return std::sscanf(line.c_str(),
+                     "word cache: bytes=%u hits=%u misses=%u inserts=%u bypassed=%u oversize=%u clears=%u", &out->bytes,
+                     &out->hits, &out->misses, &out->inserts, &out->bypassed, &out->oversize, &out->clears) == 7;
 }
 
 // Restores the word cache's arming however the test leaves.
@@ -617,14 +618,15 @@ TEST_P(ShapingRules, TheWordCacheChangesNoLine) {
   ASSERT_TRUE(parseWordCacheLine(lineWith(offLines, "word cache: "), &disarmed));
   std::printf(
       "[ ShapingRules ] %s: arena %zu B (resident %u, parse lane %u): word cache hits=%u misses=%u "
-      "inserts=%u bypassed=%u clears=%u\n",
-      book.name, arenaBytes, resident, parse, on.hits, on.misses, on.inserts, on.bypassed, on.clears);
+      "inserts=%u bypassed=%u oversize=%u clears=%u\n",
+      book.name, arenaBytes, resident, parse, on.hits, on.misses, on.inserts, on.bypassed, on.oversize, on.clears);
   EXPECT_EQ(WordShapeCache::kWordCacheBytes, on.bytes);
   EXPECT_GE(on.clears, 2u);  // emptied, armed again, and emptied again
   EXPECT_GT(on.hits, 0u);
   EXPECT_EQ(0u, disarmed.bytes);
   EXPECT_EQ(0u, disarmed.hits);
   EXPECT_EQ(0u, disarmed.inserts);
+  EXPECT_EQ(0u, disarmed.oversize);  // never armed: nothing was offered
   EXPECT_GT(disarmed.bypassed, 0u);
   EXPECT_EQ(without, with);
 }

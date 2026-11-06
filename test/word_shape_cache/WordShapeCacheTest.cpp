@@ -102,6 +102,46 @@ std::vector<ReadPiece> replayed(WordShapeCache& cache, std::string_view text, ui
   return readBack(fresh, 0, text, key);
 }
 
+// An entry's identity given by its hash, for a text of kWord's length.
+struct Identity {
+  uint64_t hash;
+  uint32_t key;
+};
+
+// As replayed(), for an identity given by its hash (the store's open entry is kWord's).
+std::vector<ReadPiece> replayedAs(WordShapeCache& cache, const Identity& id, bool* hit = nullptr) {
+  ShapedStore fresh;
+  EXPECT_TRUE(fresh.insert(0));
+  EXPECT_TRUE(fresh.open(0, kWord, id.key));
+  const bool replayedOk = cache.replay(id.hash, lengthOf(kWord), id.key, fresh);
+  if (hit) *hit = replayedOk;
+  if (!replayedOk) {
+    EXPECT_TRUE(fresh.openPieces().empty()) << "a miss writes nothing";
+    fresh.abandon();
+    return {};
+  }
+  fresh.commit();
+  return readBack(fresh, 0, kWord, id.key);
+}
+
+// The first `count` of identityOf(0), identityOf(1), ... whose entries go to identityOf(0)'s set.
+template <typename IdentityOf>
+std::vector<Identity> identitiesOfOneSet(const WordShapeCache& cache, const size_t count,
+                                         const IdentityOf& identityOf) {
+  std::vector<Identity> out = {identityOf(0)};
+  const size_t set = cache.setOf(out[0].hash, lengthOf(kWord), out[0].key);
+  for (uint32_t n = 1; n < 1000000 && out.size() < count; ++n) {
+    const Identity id = identityOf(n);
+    if (cache.setOf(id.hash, lengthOf(kWord), id.key) == set) out.push_back(id);
+  }
+  return out;
+}
+
+// The bytes of `id`'s set in an armed cache over `arena`, the cache's whole tail being kWordCacheBytes.
+uint8_t* setBytes(const BuildArena& arena, const WordShapeCache& cache, const Identity& id) {
+  return arena.tail(kS) + cache.setOf(id.hash, lengthOf(kWord), id.key) * WordShapeCache::kSetBytes;
+}
+
 TEST(WordShapeCache, AHitReplaysTheSamePieces) {
   BuildArena arena(kCap);
   ASSERT_NE(arena.alloc(10844, 1), nullptr);  // resident at the parse's start: the X3, the long Hindi chapter
@@ -326,45 +366,24 @@ TEST(WordShapeCache, KeysKeepFormsApart) {
   EXPECT_GE(hits, 1);
   EXPECT_TRUE(own(kWord, marathiKey, boldRead));  // the last inserted is held
 
-  // Two identities that share a slot: the later entry takes it, and the earlier one's lookup misses rather than replay
-  // the later one's pieces. Same text with another key, then another text (by its hash) with the same key: searched
-  // for among candidates, as the slot is the cache's to choose.
-  const auto sharesASlot = [&](const auto& identityOf) {
-    int shared = 0;
-    for (uint32_t n = 1; n <= 4096; ++n) {
-      BuildArena own(kCap);
-      WordShapeCache fresh;
-      EXPECT_TRUE(fresh.arm(own, kS));
-      uint64_t hashA = 0, hashB = 0;
-      uint32_t keyA = 0, keyB = 0;
-      identityOf(0, &hashA, &keyA);
-      identityOf(n, &hashB, &keyB);
-      fresh.insert(hashA, lengthOf(kWord), keyA, made, 0);  // regular
-      fresh.insert(hashB, lengthOf(kWord), keyB, made, 1);  // bold
-      ShapedStore into;
-      EXPECT_TRUE(into.insert(0));
-      EXPECT_TRUE(into.open(0, kWord, keyA));
-      if (fresh.replay(hashA, lengthOf(kWord), keyA, into)) {
-        into.commit();
-        EXPECT_EQ(regularRead, readBack(into, 0, kWord, keyA)) << "candidate " << n;
-      } else {
-        EXPECT_TRUE(into.openPieces().empty());
-        into.abandon();
-        ++shared;
-      }
-    }
-    return shared;
+  // Three identities of one set: two are held side by side, and the third takes the place of the one used least
+  // recently, whose lookup then misses rather than replay another's pieces. Same text with other keys, then other
+  // texts (by their hash) with the same key.
+  const auto threeInOneSet = [&](const auto& identityOf) {
+    BuildArena region(kCap);
+    WordShapeCache shared;
+    ASSERT_TRUE(shared.arm(region, kS));
+    const std::vector<Identity> ids = identitiesOfOneSet(shared, 3, identityOf);
+    ASSERT_EQ(3u, ids.size());
+    shared.insert(ids[0].hash, lengthOf(kWord), ids[0].key, made, 0);  // regular
+    shared.insert(ids[1].hash, lengthOf(kWord), ids[1].key, made, 1);  // bold
+    shared.insert(ids[2].hash, lengthOf(kWord), ids[2].key, made, 2);  // other's pieces
+    EXPECT_TRUE(replayedAs(shared, ids[0]).empty());
+    EXPECT_EQ(boldRead, replayedAs(shared, ids[1]));
+    EXPECT_EQ(otherRead, replayedAs(shared, ids[2]));
   };
-  EXPECT_GT(sharesASlot([&](uint32_t n, uint64_t* hash, uint32_t* key) {
-              *hash = hashOf(kWord);
-              *key = hindiKey + n;
-            }),
-            0);
-  EXPECT_GT(sharesASlot([&](uint32_t n, uint64_t* hash, uint32_t* key) {
-              *hash = hashOf(kWord) + (static_cast<uint64_t>(n) << 8);
-              *key = hindiKey;
-            }),
-            0);
+  threeInOneSet([&](uint32_t n) { return Identity{hashOf(kWord), hindiKey + n}; });
+  threeInOneSet([&](uint32_t n) { return Identity{hashOf(kWord) + (static_cast<uint64_t>(n) << 8), hindiKey}; });
 
   // The identity is the hash, the length and the key: one of them off is a miss.
   ShapedStore fresh;
@@ -377,41 +396,209 @@ TEST(WordShapeCache, KeysKeepFormsApart) {
   fresh.abandon();
 }
 
-TEST(WordShapeCache, ATooLargeTokenIsBypassed) {
+// The form bytes an entry of one Reordered piece has room for in `bytes` of entry.
+constexpr size_t formRoom(const size_t bytes) {
+  return bytes - WordShapeCache::kEntryHeaderBytes - WordShapeCache::kPieceHeaderBytes;
+}
+
+TEST(WordShapeCache, ATooLargeTokenIsOversize) {
   BuildArena arena(kCap);
   WordShapeCache cache;
   ASSERT_TRUE(cache.arm(arena, kS));
-  // Twenty records: 80 B of forms, past one slot.
+  // Thirty records: 120 B of forms, past both ways of a set.
   PieceSpec big{PieceKind::Glyphs, 0, 19, {}, ""};
-  for (uint16_t g = 0; g < 20; ++g) big.records.push_back(record(g, 64));
+  for (uint16_t g = 0; g < 30; ++g) big.records.push_back(record(g, 64));
   ShapedStore made;
   writeToken(made, 0, kWord, kKey, {big});
   EXPECT_TRUE(replayed(cache, kWord, kKey).empty());
   cache.insert(hashOf(kWord), lengthOf(kWord), kKey, made, 0);
   EXPECT_EQ(0u, cache.stats().inserts);
-  EXPECT_EQ(1u, cache.stats().bypassed);
+  EXPECT_EQ(1u, cache.stats().oversize);
+  EXPECT_EQ(0u, cache.stats().bypassed);  // the tail was usable
   EXPECT_TRUE(replayed(cache, kWord, kKey).empty());
   EXPECT_EQ(2u, cache.stats().misses);
 
-  // So is a token too long for a slot's one-byte offsets, whatever its forms.
+  // So is a token too long for an entry's one-byte offsets, whatever its forms.
   const std::string longText(300, 'a');
   writeToken(made, 1, longText, kKey, {{PieceKind::Text, 0, 290, {}, ""}, {PieceKind::Reordered, 290, 300, {}, "zz"}});
   cache.insert(hashOf(longText), lengthOf(longText), kKey, made, 1);
   EXPECT_EQ(0u, cache.stats().inserts);
-  EXPECT_EQ(2u, cache.stats().bypassed);
+  EXPECT_EQ(2u, cache.stats().oversize);
 
-  // One that fits a slot to the byte is stored.
-  const size_t room =
-      WordShapeCache::kSlotBytes - WordShapeCache::kEntryHeaderBytes - WordShapeCache::kPieceHeaderBytes;
-  PieceSpec exact{PieceKind::Reordered, 0, 19, {}, std::string(room, 'r')};
-  writeToken(made, 2, kWord, kKey + 7, {exact});
-  cache.insert(hashOf(kWord), lengthOf(kWord), kKey + 7, made, 2);
-  EXPECT_EQ(1u, cache.stats().inserts);
+  // One that fills a way to the byte, and one that fills both: stored. A byte more than both: not.
+  const std::string oneWay(formRoom(WordShapeCache::kWayBytes), 'r');
+  const std::string twoWays(formRoom(WordShapeCache::kDoubleEntryBytes), 's');
+  writeToken(made, 2, kWord, kKey + 7, {{PieceKind::Reordered, 0, 19, {}, oneWay}});
+  writeToken(made, 3, kWord, kKey + 8, {{PieceKind::Reordered, 0, 19, {}, twoWays}});
+  writeToken(made, 4, kWord, kKey + 9, {{PieceKind::Reordered, 0, 19, {}, twoWays + "t"}});
+  const auto storedWhole = [&](const uint32_t key, const size_t token, const std::string& form) {
+    cache.insert(hashOf(kWord), lengthOf(kWord), key, made, token);
+    bool hit = false;
+    const std::vector<ReadPiece> got = replayed(cache, kWord, key, &hit);
+    EXPECT_TRUE(hit) << key;
+    ASSERT_EQ(1u, got.size());
+    EXPECT_EQ(form, got[0].bytes);
+  };
+  storedWhole(kKey + 7, 2, oneWay);
+  storedWhole(kKey + 8, 3, twoWays);
+  cache.insert(hashOf(kWord), lengthOf(kWord), kKey + 9, made, 4);
+  EXPECT_EQ(2u, cache.stats().inserts);
+  EXPECT_EQ(3u, cache.stats().oversize);
+}
+
+TEST(WordShapeCache, TwoWaysKeepTwoWordsOfOneSet) {
+  BuildArena arena(kCap);
+  WordShapeCache cache;
+  ASSERT_TRUE(cache.arm(arena, kS));
+  const std::vector<Identity> ids =
+      identitiesOfOneSet(cache, 3, [](uint32_t n) { return Identity{hashOf(kWord), kKey + n}; });
+  ASSERT_EQ(3u, ids.size());
+  const std::vector<PieceSpec> a = {{PieceKind::Glyphs, 0, 19, {record(1, 100)}, ""}};
+  const std::vector<PieceSpec> b = {{PieceKind::Glyphs, 0, 19, {record(2, 100), record(3, 0, 1, -1)}, ""}};
+  const std::vector<PieceSpec> c = {{PieceKind::Reordered, 0, 19, {}, "ccc"}};
+  ShapedStore made;
+  writeToken(made, 0, kWord, ids[0].key, a);
+  writeToken(made, 1, kWord, ids[1].key, b);
+  writeToken(made, 2, kWord, ids[2].key, c);
+  const auto readA = readBack(made, 0, kWord, ids[0].key);
+  const auto readB = readBack(made, 1, kWord, ids[1].key);
+  const auto readC = readBack(made, 2, kWord, ids[2].key);
+
+  // Both words of the set replay.
+  cache.insert(ids[0].hash, lengthOf(kWord), ids[0].key, made, 0);
+  cache.insert(ids[1].hash, lengthOf(kWord), ids[1].key, made, 1);
+  EXPECT_EQ(readB, replayedAs(cache, ids[1]));
+  EXPECT_EQ(readA, replayedAs(cache, ids[0]));  // now the set's most recent
+
+  // A third takes the place of the one used least recently: b, though a went in first.
+  cache.insert(ids[2].hash, lengthOf(kWord), ids[2].key, made, 2);
+  EXPECT_EQ(readA, replayedAs(cache, ids[0]));
+  EXPECT_EQ(readC, replayedAs(cache, ids[2]));
+  EXPECT_TRUE(replayedAs(cache, ids[1]).empty());
+  EXPECT_EQ(3u, cache.stats().inserts);
+  EXPECT_EQ(4u, cache.stats().hits);
+
+  // An identity stored again keeps one place: the set still holds the other word.
+  cache.insert(ids[2].hash, lengthOf(kWord), ids[2].key, made, 2);
+  EXPECT_EQ(readA, replayedAs(cache, ids[0]));
+  EXPECT_EQ(readC, replayedAs(cache, ids[2]));
+
+  // And the other way round: c used last, so b takes a's place.
+  cache.insert(ids[1].hash, lengthOf(kWord), ids[1].key, made, 1);
+  EXPECT_EQ(readB, replayedAs(cache, ids[1]));
+  EXPECT_EQ(readC, replayedAs(cache, ids[2]));
+  EXPECT_TRUE(replayedAs(cache, ids[0]).empty());
+}
+
+TEST(WordShapeCache, ALongEntryTakesBothWays) {
+  BuildArena arena(kCap);
+  WordShapeCache cache;
+  ASSERT_TRUE(cache.arm(arena, kS));
+  const std::vector<Identity> ids =
+      identitiesOfOneSet(cache, 4, [](uint32_t n) { return Identity{hashOf(kWord), kKey + n}; });
+  ASSERT_EQ(4u, ids.size());
+  const Identity& longId = ids[0];
+
+  // A one-piece entry of 100 B, whose form puts, where way 1's header would be, the header of an entry of its own:
+  // one Text piece, for an identity of the same set. Read as an entry, way 1 would replay that.
+  Identity fake{0, kKey ^ 0xFAu};
+  for (uint32_t n = 1; n < 1000000; ++n) {
+    fake.hash = hashOf(kWord) ^ (static_cast<uint64_t>(n) << 20);
+    if (cache.setOf(fake.hash, lengthOf(kWord), fake.key) == cache.setOf(longId.hash, lengthOf(kWord), longId.key)) {
+      break;
+    }
+  }
+  ASSERT_EQ(cache.setOf(fake.hash, lengthOf(kWord), fake.key), cache.setOf(longId.hash, lengthOf(kWord), longId.key));
+  std::string form(100 - WordShapeCache::kEntryHeaderBytes - WordShapeCache::kPieceHeaderBytes, 'f');
+  // Way 1's byte i holds the entry's byte kWayBytes + i - kTailMarkerBytes; the form starts at kEntryHeaderBytes +
+  // kPieceHeaderBytes.
+  const auto formIndexOfWay1 = [](size_t i) {
+    return WordShapeCache::kWayBytes + i - WordShapeCache::kTailMarkerBytes - WordShapeCache::kEntryHeaderBytes -
+           WordShapeCache::kPieceHeaderBytes;
+  };
+  form[formIndexOfWay1(WordShapeCache::kPiecesAt)] = 1;
+  for (int i = 0; i < 4; ++i) {
+    form[formIndexOfWay1(WordShapeCache::kKeyAt + i)] = static_cast<char>(fake.key >> (8 * i));
+  }
+  for (int i = 0; i < 8; ++i) {
+    form[formIndexOfWay1(WordShapeCache::kHashAt + i)] = static_cast<char>(fake.hash >> (8 * i));
+  }
+  const size_t piece = formIndexOfWay1(WordShapeCache::kEntryHeaderBytes);
+  form[piece] = static_cast<char>(PieceKind::Text);
+  form[piece + 1] = 0;
+  form[piece + 2] = static_cast<char>(lengthOf(kWord));
+  form[piece + 3] = 0;
+  form[piece + 4] = 0;
+
+  ShapedStore made;
+  writeToken(made, 0, kWord, longId.key, {{PieceKind::Reordered, 0, 19, {}, form}});
+  writeToken(made, 1, kWord, ids[1].key, kWordPieces);
+  writeToken(made, 2, kWord, ids[2].key, {{PieceKind::Reordered, 0, 19, {}, "two"}});
+  writeToken(made, 3, kWord, ids[3].key, {{PieceKind::Reordered, 0, 19, {}, "three"}});
+  const auto readLong = readBack(made, 0, kWord, longId.key);
+
+  // The set's two words, then the long entry: it takes both ways, and both go.
+  cache.insert(ids[1].hash, lengthOf(kWord), ids[1].key, made, 1);
+  cache.insert(ids[2].hash, lengthOf(kWord), ids[2].key, made, 2);
+  cache.insert(longId.hash, lengthOf(kWord), longId.key, made, 0);
+  EXPECT_EQ(3u, cache.stats().inserts);
   bool hit = false;
-  const std::vector<ReadPiece> got = replayed(cache, kWord, kKey + 7, &hit);
+  EXPECT_EQ(readLong, replayedAs(cache, longId, &hit));
   EXPECT_TRUE(hit);
-  ASSERT_EQ(1u, got.size());
-  EXPECT_EQ(std::string(room, 'r'), got[0].bytes);
+  EXPECT_TRUE(replayedAs(cache, ids[1]).empty());
+  EXPECT_TRUE(replayedAs(cache, ids[2]).empty());
+  // Its second way is no entry of its own, whatever its bytes say.
+  const uint8_t* set = setBytes(arena, cache, longId);
+  EXPECT_EQ(fake.key, static_cast<uint32_t>(set[WordShapeCache::kWayBytes + WordShapeCache::kKeyAt]) |
+                          (static_cast<uint32_t>(set[WordShapeCache::kWayBytes + WordShapeCache::kKeyAt + 1]) << 8) |
+                          (static_cast<uint32_t>(set[WordShapeCache::kWayBytes + WordShapeCache::kKeyAt + 2]) << 16) |
+                          (static_cast<uint32_t>(set[WordShapeCache::kWayBytes + WordShapeCache::kKeyAt + 3]) << 24))
+      << "the fake header sits where way 1's would";
+  EXPECT_TRUE(replayedAs(cache, fake).empty());
+
+  // A one-way entry into the set evicts the long entry whole: no half of it is read, and the other way is free.
+  cache.insert(ids[2].hash, lengthOf(kWord), ids[2].key, made, 2);
+  EXPECT_TRUE(replayedAs(cache, longId).empty());
+  EXPECT_TRUE(replayedAs(cache, fake).empty());
+  EXPECT_FALSE(replayedAs(cache, ids[2]).empty());
+  cache.insert(ids[3].hash, lengthOf(kWord), ids[3].key, made, 3);
+  EXPECT_FALSE(replayedAs(cache, ids[2]).empty());
+  EXPECT_FALSE(replayedAs(cache, ids[3]).empty());
+}
+
+TEST(WordShapeCache, ACorruptEntryIsAMiss) {
+  BuildArena arena(kCap);
+  WordShapeCache cache;
+  ASSERT_TRUE(cache.arm(arena, kS));
+  ShapedStore made;
+  writeToken(made, 0, kWord, kKey, kWordPieces);
+  const Identity word{hashOf(kWord), kKey};
+  cache.insert(word.hash, lengthOf(kWord), word.key, made, 0);
+  ASSERT_FALSE(replayedAs(cache, word).empty());
+
+  // Its piece count zeroed (the first entry of an empty set is in way 0): a miss, and the way is emptied.
+  uint8_t* set = setBytes(arena, cache, word);
+  ASSERT_EQ(lengthOf(kWord), set[WordShapeCache::kLengthAt]);
+  set[WordShapeCache::kPiecesAt] = 0;
+  bool hit = true;
+  EXPECT_TRUE(replayedAs(cache, word, &hit).empty());
+  EXPECT_FALSE(hit);
+  EXPECT_EQ(0u, set[WordShapeCache::kLengthAt]);
+  cache.insert(word.hash, lengthOf(kWord), word.key, made, 0);
+  EXPECT_FALSE(replayedAs(cache, word).empty());
+
+  // A long entry whose second way has lost its marker: the halves disagree, a miss, and both ways are emptied.
+  const Identity longWord{hashOf(kWord) + 1, kKey};
+  writeToken(made, 1, kWord, longWord.key, {{PieceKind::Reordered, 0, 19, {}, std::string(80, 'l')}});
+  cache.insert(longWord.hash, lengthOf(kWord), longWord.key, made, 1);
+  ASSERT_FALSE(replayedAs(cache, longWord).empty());
+  uint8_t* longSet = setBytes(arena, cache, longWord);
+  ASSERT_NE(0, longSet[WordShapeCache::kFlagsAt] & WordShapeCache::kDoubleHead);
+  longSet[WordShapeCache::kWayBytes + WordShapeCache::kFlagsAt] = 0;
+  EXPECT_TRUE(replayedAs(cache, longWord, &hit).empty());
+  EXPECT_FALSE(hit);
+  EXPECT_EQ(0u, longSet[WordShapeCache::kLengthAt]);
+  EXPECT_EQ(0, longSet[WordShapeCache::kFlagsAt] & WordShapeCache::kDoubleHead);
 }
 
 }  // namespace

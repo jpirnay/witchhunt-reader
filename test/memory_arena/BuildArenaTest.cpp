@@ -172,7 +172,9 @@ TEST(BuildArena, NullExternalBufferIsInvalidAndRefuses) {
 // The word cache's watermark: the highest cursor since markPeak(), moved by alloc() alone.
 TEST(BuildArena, PeakSinceMarkFollowsAllocNotRelease) {
   BuildArena arena(256);
+  EXPECT_EQ(BuildArena::kUnmarked, arena.peakSinceMark());  // never marked: the tail may hold anything
   arena.alloc(40, 1);
+  EXPECT_EQ(BuildArena::kUnmarked, arena.peakSinceMark());  // an alloc does not mark it
   arena.markPeak();
   EXPECT_EQ(arena.peakSinceMark(), 40u);
   auto block = arena.reserveBlock();
@@ -187,8 +189,14 @@ TEST(BuildArena, PeakSinceMarkFollowsAllocNotRelease) {
   EXPECT_EQ(arena.peakSinceMark(), 140u);  // below the peak: unchanged
   arena.markPeak();
   EXPECT_EQ(arena.peakSinceMark(), 50u);  // a new mark drops it to the cursor
+  // A reset fails safe: the tail reads as overwritten, whatever runs in the region next, until it is marked again.
   arena.reset();
-  EXPECT_EQ(arena.peakSinceMark(), 0u);
+  EXPECT_EQ(BuildArena::kUnmarked, arena.peakSinceMark());
+  EXPECT_GT(arena.peakSinceMark(), arena.capacity());
+  arena.alloc(8, 1);
+  EXPECT_EQ(BuildArena::kUnmarked, arena.peakSinceMark());
+  arena.markPeak();
+  EXPECT_EQ(arena.peakSinceMark(), 8u);
 }
 
 // The alignment padding counts: the peak is the cursor after the allocation, the end of the bytes it hands out.

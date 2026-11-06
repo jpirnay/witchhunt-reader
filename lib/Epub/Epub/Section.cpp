@@ -1965,12 +1965,16 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
           st.arena ? static_cast<uint32_t>(st.arena->highWater()) : 0, st.laneSetup, st.laneExtract, st.laneResident,
           st.laneParse, st.arena ? static_cast<uint32_t>(st.arena->failedAllocSize()) : 0, st.zipArenaHighWater);
   // The word cache in the lent arena's free tail (WordShapeCache.h): bytes=0 when it never armed (the owned arena),
-  // and then every lookup is bypassed. clears counts the allocations that reached the tail.
+  // and then every lookup is bypassed. oversize counts the words too large to keep, clears the allocations that
+  // reached the tail.
   const WordShapeCache::Stats& words = visitor.wordCacheStats();
-  LOG_INF("SCT", "createSectionFile spine=%d word cache: bytes=%u hits=%u misses=%u inserts=%u bypassed=%u clears=%u",
+  LOG_INF("SCT",
+          "createSectionFile spine=%d word cache: bytes=%u hits=%u misses=%u inserts=%u bypassed=%u oversize=%u "
+          "clears=%u",
           spineIndex, static_cast<unsigned>(visitor.wordCacheBytes()), static_cast<unsigned>(words.hits),
           static_cast<unsigned>(words.misses), static_cast<unsigned>(words.inserts),
-          static_cast<unsigned>(words.bypassed), static_cast<unsigned>(words.clears));
+          static_cast<unsigned>(words.bypassed), static_cast<unsigned>(words.oversize),
+          static_cast<unsigned>(words.clears));
   return BuildPhaseResult::Done;
 }
 
