@@ -2,50 +2,16 @@
 
 #include <OtShaper.h>
 
+#include "LanguageTag.h"
 #include "hyphenation/Hyphenator.h"
 
 namespace {
 
-// The tag lowercased, with '_' read as '-' (zh_TW is common in OPF files).
-std::string normalised(const std::string& tag) {
-  std::string out;
-  out.reserve(tag.size());
-  for (char c : tag) {
-    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    if (c == '_') c = '-';
-    out.push_back(c);
-  }
-  return out;
-}
-
-bool hasPrimary(const std::string& tag, const char* primary) {
-  const std::string p = primary;
-  return tag.compare(0, p.size(), p) == 0 && (tag.size() == p.size() || tag[p.size()] == '-');
-}
-
-bool hasSubtag(const std::string& tag, const char* subtag) {
-  const std::string needle = std::string("-") + subtag;
-  for (size_t at = tag.find(needle); at != std::string::npos; at = tag.find(needle, at + 1)) {
-    const size_t end = at + needle.size();
-    if (end == tag.size() || tag[end] == '-') return true;
-  }
-  return false;
-}
-
-// Chinese written in traditional characters: an explicit script subtag decides, else the region (Taiwan, Hong
-// Kong, Macao). Classical Chinese (lzh) is traditional as well. As KOReader's TextLangCfg.
-bool isTraditionalChinese(const std::string& tag) {
-  if (hasPrimary(tag, "lzh")) return true;
-  if (hasSubtag(tag, "hant")) return true;
-  if (hasSubtag(tag, "hans")) return false;
-  return hasSubtag(tag, "tw") || hasSubtag(tag, "hk") || hasSubtag(tag, "mo");
-}
-
-// The primary language subtags written in an Indic script.
+// The primary language subtags written in an Indic script (a normalised tag).
 bool isIndicLanguage(const std::string& tag) {
   for (const char* primary : {"hi", "mr", "ne", "sa", "kok", "mai", "bho", "awa", "mag", "raj",
                               "bn", "as", "pa", "gu", "or",  "ta",  "te",  "kn",  "ml",  "si"}) {
-    if (hasPrimary(tag, primary)) return true;
+    if (language_tag::hasPrimary(tag, primary)) return true;
   }
   return false;
 }
@@ -53,24 +19,26 @@ bool isIndicLanguage(const std::string& tag) {
 }  // namespace
 
 TypographyProfile TypographyProfile::forLanguage(const std::string& tag) {
-  const std::string t = normalised(tag);
+  using language_tag::CjkRegion;
+  using language_tag::hasPrimary;
+  const std::string t = language_tag::normalised(tag);
+  const CjkRegion region = language_tag::cjkRegionOf(tag);
   TypographyProfile p;
   p.hyphenator = Hyphenator::forLanguage(tag);
   p.shapingLanguage = ot::languageTagsFor(tag.c_str());
   p.shapedScript = isIndicLanguage(t);
 
-  const bool chinese = hasPrimary(t, "zh") || hasPrimary(t, "lzh");
-  if (chinese || hasPrimary(t, "ja")) {
+  if (region != CjkRegion::None && region != CjkRegion::Korean) {
     p.breaking = Breaking::BetweenCharacters;
     p.justify = Justify::BetweenCharacters;
-    p.punctuation = hasPrimary(t, "ja")       ? Punctuation::Japanese
-                    : isTraditionalChinese(t) ? Punctuation::TraditionalChinese
-                                              : Punctuation::SimplifiedChinese;
+    p.punctuation = region == CjkRegion::Japanese             ? Punctuation::Japanese
+                    : region == CjkRegion::TraditionalChinese ? Punctuation::TraditionalChinese
+                                                              : Punctuation::SimplifiedChinese;
     p.cjkLatinGap = true;
     p.wholeEmGrid = true;
     p.verticalAllowed = true;
     p.cjkRepertoire = true;
-  } else if (hasPrimary(t, "ko")) {
+  } else if (region == CjkRegion::Korean) {
     // Korean spaces its words and uses Western punctuation (KLREQ): the Simplified Chinese table only meets
     // the rare CJK mark, and there is no grid and no CJK-Latin gap.
     p.breaking = Breaking::KoreanWords;
