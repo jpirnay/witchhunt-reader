@@ -258,7 +258,14 @@ constexpr size_t TABLE_BUFFER_BYTES_PER_CELL = 128;
 // "caption" belongs here even though it only ever appears inside a <table>: it is a block in
 // its own right, and without block treatment its text joins whatever inline context preceded
 // the table instead of getting its own style, spacing and font-size normalization.
-const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "pre", "caption"};
+//
+// The rest are HTML's other block elements, as ChapterXPathIndexerInternal's isBlockTag() knows them. Left off this
+// list an element is inline text: nothing ended a word at </dt>, so <dt>Term</dt><dd>Meaning</dd> was the one word
+// "TermMeaning", and <center>* * *</center> joined the paragraph before it. Each can hold text as well as blocks, so
+// each is a <div> here, in INSET_CONTAINER_TAGS too.
+const char* BLOCK_TAGS[] = {"p",   "li",     "div",     "br",         "blockquote", "pre",     "caption", "dl",
+                            "dt",  "dd",     "figure",  "figcaption", "center",     "address", "header",  "footer",
+                            "nav", "hgroup", "details", "summary",    "fieldset",   "legend",  "form"};
 constexpr int NUM_BLOCK_TAGS = sizeof(BLOCK_TAGS) / sizeof(BLOCK_TAGS[0]);
 
 // Elements whose background picture becomes a picture of its own (noteBackgroundImage). Containers
@@ -276,8 +283,10 @@ constexpr size_t MAX_BACKGROUND_PICTURE_SCOPES = 4;
 // whose <br>-separated lines each become a block of their own and must keep the inset of the
 // paragraph they belong to. <ul>/<ol> are how a list's items get their indent: in CSS an item
 // starts at the list's content edge, and its own margin-left only adds to that.
-const char* INSET_CONTAINER_TAGS[] = {"div", "blockquote", "section", "article", "aside", "main",
-                                      "p",   "li",         "pre",     "ul",      "ol"};
+const char* INSET_CONTAINER_TAGS[] = {"div",    "blockquote", "section", "article",  "aside",  "main",   "p",
+                                      "li",     "pre",        "ul",      "ol",       "dl",     "dt",     "dd",
+                                      "figure", "figcaption", "center",  "address",  "header", "footer", "nav",
+                                      "hgroup", "details",    "summary", "fieldset", "legend", "form"};
 constexpr int NUM_INSET_CONTAINER_TAGS = sizeof(INSET_CONTAINER_TAGS) / sizeof(INSET_CONTAINER_TAGS[0]);
 
 // A list's padding-left when the book states none -- the stand-in for the browser default
@@ -2530,6 +2539,12 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   self->observeFontSizeBaseline(name, cssStyle);
   cssStyle = self->normalizeFontSizeForElement(name, cssStyle);
 
+  // The browser default for <center>. As a rule from the book it follows the reader's alignment setting.
+  if (strcmp(name, "center") == 0 && !cssStyle.defined.textAlign) {
+    cssStyle.textAlign = CssTextAlign::Center;
+    cssStyle.defined.textAlign = 1;
+  }
+
   // Track an explicit CSS width on a wrapping block (e.g. <div style="width:100px">).
   // A percentage image width inside resolves against the innermost such width, so a
   // width:100% image in a narrow box stays small instead of filling the viewport.
@@ -3334,13 +3349,20 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
       cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
   userAlignmentBlockStyle.direction = self->blockDirection(cssStyle);
-  // As in CSS, a list's own padding on its start side replaces the default and its margin there adds to it.
+  // As in CSS, a list's own padding on its start side replaces the default and its margin there adds to it. A <dd>'s
+  // default is a margin, the same 40 px in a browser.
+  const int16_t listPadding = static_cast<int16_t>(emSize * LIST_DEFAULT_PADDING_EM);
   if (isList) {
-    const int16_t listPadding = static_cast<int16_t>(emSize * LIST_DEFAULT_PADDING_EM);
     if (self->startSideIsRight()) {
       if (!cssStyle.hasPaddingRight()) userAlignmentBlockStyle.paddingRight = listPadding;
     } else if (!cssStyle.hasPaddingLeft()) {
       userAlignmentBlockStyle.paddingLeft = listPadding;
+    }
+  } else if (strcmp(name, "dd") == 0) {
+    if (self->startSideIsRight()) {
+      if (!cssStyle.hasMarginRight()) userAlignmentBlockStyle.marginRight = listPadding;
+    } else if (!cssStyle.hasMarginLeft()) {
+      userAlignmentBlockStyle.marginLeft = listPadding;
     }
   }
 
