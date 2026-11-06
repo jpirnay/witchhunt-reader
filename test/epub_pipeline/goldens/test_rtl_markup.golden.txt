@@ -9,10 +9,10 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
    W x=428 s=0 z=100 t=שלום
     WD t=םולש
    O order=2,1,0
-  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=381 s=0 z=100 t=הפסקה.
+  LINE y=24 x=0 align=1 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=הפסקה.
     WD t=.הקספה
-   W x=438 s=0 z=100 t=סוף
+   W x=57 s=0 z=100 t=סוף
     WD t=ףוס
    O order=1,0
   LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=5

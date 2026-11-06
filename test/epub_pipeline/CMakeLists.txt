@@ -130,6 +130,7 @@ add_executable(EpubPipelineTest
   ImageExtractionTest.cpp
   ImageManifestTest.cpp
   ImageWrapperWidthTest.cpp
+  BookAlignmentLayoutTest.cpp
   HeadingBlockLayoutTest.cpp
   WritingModeLayoutTest.cpp
   LineSpacingLayoutTest.cpp

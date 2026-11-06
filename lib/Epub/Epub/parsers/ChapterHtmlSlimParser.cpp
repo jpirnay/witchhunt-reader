@@ -3483,8 +3483,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     headerBlockStyle.direction = self->blockDirection(cssStyle);
     headerBlockStyle.textAlignDefined = true;
     headerBlockStyle.keepWithNext = true;
-    if (self->embeddedStyle && cssStyle.hasTextAlign() &&
-        self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None)) {
+    if (self->booksAlignmentStands(cssStyle)) {
       headerBlockStyle.alignment = cssStyle.textAlign;
     }
     // Apply default heading sizing when no explicit CSS font-size is set.
@@ -3514,8 +3513,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       self->pushBlockStyleEntry(cssStyle);
       self->currentBlockSizeFromRoot_ = cssStyle.hasFontSizeMultiplier() && cssStyle.fontSizeRootRelative;
       auto blockStyle = userAlignmentBlockStyle;
-      if (self->embeddedStyle && cssStyle.hasTextAlign() &&
-          self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None)) {
+      if (self->booksAlignmentStands(cssStyle)) {
         blockStyle.alignment = cssStyle.textAlign;
         blockStyle.textAlignDefined = true;
       }
@@ -3568,8 +3566,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
       self->pushBlockStyleEntry(cssStyle);
       self->currentBlockSizeFromRoot_ = cssStyle.hasFontSizeMultiplier() && cssStyle.fontSizeRootRelative;
       auto blockStyle = userAlignmentBlockStyle;
-      if (self->embeddedStyle && cssStyle.hasTextAlign() &&
-          self->paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None)) {
+      if (self->booksAlignmentStands(cssStyle)) {
         blockStyle.alignment = cssStyle.textAlign;
         blockStyle.textAlignDefined = true;
       }
@@ -3612,27 +3609,32 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     // makePages() keeps the drained block for the next paragraph to merge into (see the <table> handler).
     self->clearSpentBlockDirection(self->depth);
     self->applyPendingPageBreak();
-    if (!self->currentPage) {
-      self->currentPage.reset(new Page());
-      self->currentPageNextY = 0;
+    // A rule the book leaves nothing to draw of only ends the block: a section break that is a centred dash, with the
+    // <hr> kept for the structure, has no line and takes no room.
+    if (!self->embeddedStyle || !cssStyle.hidesRule()) {
+      if (!self->currentPage) {
+        self->currentPage.reset(new Page());
+        self->currentPageNextY = 0;
+      }
+      const int lineHeight =
+          static_cast<int>(self->renderer.getLineHeight(self->fontId) * self->lineCompression + 0.5f);
+      const int16_t marginV = static_cast<int16_t>(lineHeight / 2);
+      self->currentPageNextY += marginV;
+      if (self->currentPageNextY + 1 + marginV > self->viewportHeight) {
+        self->emitPage();
+        self->currentPage.reset(new Page());
+        self->currentPageNextY = 0;
+      }
+      // Render the rule centered at 50% width (25%→75%) rather than edge-to-edge, matching
+      // the conventional reader default. Books rarely set hr width in their own CSS.
+      const int16_t hrWidth = static_cast<int16_t>(self->viewportWidth / 2);
+      const int16_t hrX = static_cast<int16_t>(self->viewportWidth / 4);
+      if (auto hr = makeUniqueNoThrow<PageHR>(hrX, self->currentPageNextY, hrWidth)) {
+        self->noteElementOnPage(self->visibleTextOffset_);
+        self->currentPage->elements.push_back(std::move(hr));
+      }
+      self->currentPageNextY += 1 + marginV;
     }
-    const int lineHeight = static_cast<int>(self->renderer.getLineHeight(self->fontId) * self->lineCompression + 0.5f);
-    const int16_t marginV = static_cast<int16_t>(lineHeight / 2);
-    self->currentPageNextY += marginV;
-    if (self->currentPageNextY + 1 + marginV > self->viewportHeight) {
-      self->emitPage();
-      self->currentPage.reset(new Page());
-      self->currentPageNextY = 0;
-    }
-    // Render the rule centered at 50% width (25%→75%) rather than edge-to-edge, matching
-    // the conventional reader default. Books rarely set hr width in their own CSS.
-    const int16_t hrWidth = static_cast<int16_t>(self->viewportWidth / 2);
-    const int16_t hrX = static_cast<int16_t>(self->viewportWidth / 4);
-    if (auto hr = makeUniqueNoThrow<PageHR>(hrX, self->currentPageNextY, hrWidth)) {
-      self->noteElementOnPage(self->visibleTextOffset_);
-      self->currentPage->elements.push_back(std::move(hr));
-    }
-    self->currentPageNextY += 1 + marginV;
     BlockStyle emptyStyle;
     self->startNewTextBlock(emptyStyle);
   } else if (matches(name, UNDERLINE_TAGS, NUM_UNDERLINE_TAGS) ||
@@ -5110,11 +5112,8 @@ ParsedText::LineProcessResult ChapterHtmlSlimParser::addLineToPage(std::unique_p
 // Strip heading sizing from a block that makePages() has already drained, so the next block
 // does not inherit it through startNewTextBlock's empty-block merge. See the <table> handler.
 void ChapterHtmlSlimParser::applyHeadingScope(BlockStyle& blockStyle, const CssStyle& cssStyle) const {
-  // The same rule the heading's own alignment follows: centered unless the reader is set to the
-  // book's style and the book aligns this block itself.
-  const bool booksOwnAlignment =
-      embeddedStyle && cssStyle.hasTextAlign() && paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None);
-  if (!booksOwnAlignment) blockStyle.alignment = headingAlignment_;
+  // The same rule the heading's own alignment follows: centered unless the book's alignment stands.
+  if (!booksAlignmentStands(cssStyle)) blockStyle.alignment = headingAlignment_;
   blockStyle.textAlignDefined = true;
   blockStyle.keepWithNext = true;
   if (!cssStyle.hasFontSizeMultiplier()) blockStyle.fontSizeMultiplier = headingFontSizeMultiplier_;
@@ -5134,7 +5133,7 @@ void ChapterHtmlSlimParser::startBlockSpan(const CssStyle& cssStyle, BlockStyle 
   }
 
   // From here on the span is laid out as a <div> would be.
-  if (embeddedStyle && cssStyle.hasTextAlign() && paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None)) {
+  if (booksAlignmentStands(cssStyle)) {
     blockStyle.alignment = cssStyle.textAlign;
     blockStyle.textAlignDefined = true;
   }

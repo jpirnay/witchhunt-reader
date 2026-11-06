@@ -202,3 +202,60 @@ TEST(CssGapsStackBufferOverflow, ValidDeclarationSurvivesAfterOverflowedOne) {
   ASSERT_TRUE(style.hasTextAlign());
   ASSERT_EQ(style.textAlign, CssTextAlign::Right);
 }
+
+// ============================================================================
+// The rule an <hr> draws: border none hides it, unless something else paints it
+// ============================================================================
+
+namespace {
+bool hides(const char* declarations) { return CssParser::parseInlineStyle(declarations).hidesRule(); }
+}  // namespace
+
+TEST(CssGapsRule, NoBorderHidesTheRule) {
+  EXPECT_TRUE(hides("border: currentColor none medium"));  // Project Hail Mary's section breaks
+  EXPECT_TRUE(hides("border: none"));
+  EXPECT_TRUE(hides("border: 0"));
+  EXPECT_TRUE(hides("border: 0px"));
+  EXPECT_TRUE(hides("border-style: none"));
+  EXPECT_TRUE(hides("border-style: hidden"));
+  EXPECT_TRUE(hides("border-width: 0"));
+  EXPECT_TRUE(hides("border: none; background: none"));
+  EXPECT_TRUE(hides("border: none; background-color: transparent"));
+}
+
+TEST(CssGapsRule, ARuleTheBookLeftAloneStays) {
+  EXPECT_FALSE(hides(""));
+  EXPECT_FALSE(hides("width: 50%"));
+  EXPECT_FALSE(hides("border: inherit"));
+}
+
+TEST(CssGapsRule, AVisibleBorderKeepsTheRule) {
+  EXPECT_FALSE(hides("border: 1px solid black"));
+  EXPECT_FALSE(hides("border-style: dashed"));
+  EXPECT_FALSE(hides("border-width: 0.5px"));
+  EXPECT_FALSE(hides("border-width: 0 0 1px"));
+  EXPECT_FALSE(hides("border-style: none none solid"));
+}
+
+TEST(CssGapsRule, SomethingElsePaintingKeepsTheRule) {
+  EXPECT_FALSE(hides("border: 0; height: 1px; background: #333"));
+  EXPECT_FALSE(hides("border: none; background-color: gray"));
+  EXPECT_FALSE(hides("border: none; background-image: url(line.png)"));
+  EXPECT_FALSE(hides("border: none; border-top: 1px solid black"));
+  EXPECT_FALSE(hides("border: none; border-bottom-style: solid"));
+}
+
+TEST(CssGapsRule, ABorderlessSideAddsNothing) {
+  EXPECT_TRUE(hides("border: none; border-top: none"));
+  EXPECT_TRUE(hides("border: none; border-bottom-width: 0"));
+}
+
+// A reset that takes the border away does not hide what a later rule paints, in either order.
+TEST(CssGapsRule, TheTwoFactsCascadeOnTheirOwn) {
+  CssStyle resetThenPaint = CssParser::parseInlineStyle("border: 0");
+  resetThenPaint.applyOver(CssParser::parseInlineStyle("background: #000"));
+  EXPECT_FALSE(resetThenPaint.hidesRule());
+  CssStyle paintThenReset = CssParser::parseInlineStyle("background: #000");
+  paintThenReset.applyOver(CssParser::parseInlineStyle("border: 0"));
+  EXPECT_FALSE(paintThenReset.hidesRule());
+}
