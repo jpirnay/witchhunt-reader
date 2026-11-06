@@ -216,10 +216,13 @@ class GfxRenderer {
     return glyphRunAdvance(run, scale < 0.99f || scale > 1.01f);
   }
   // The face a shaper reads for a font's style, and its ppem (26.6), as the real renderer's shapingFace answers: a
-  // test's seam decides; null (the default) is a font that cannot shape, as the stub's synthetic fonts are.
-  static inline ShapingFace* (*shapingFaceSource)(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6) = nullptr;
-  ShapingFace* shapingFace(const int fontId, const EpdFontFamily::Style style, uint32_t* ppem26_6) const {
-    return shapingFaceSource != nullptr ? shapingFaceSource(fontId, style, ppem26_6) : nullptr;
+  // test's seam decides, a face refused its memory included; null (the default) is a font that cannot shape, as the
+  // stub's synthetic fonts are.
+  static inline ShapingFace* (*shapingFaceSource)(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6,
+                                                  bool* refused) = nullptr;
+  ShapingFace* shapingFace(const int fontId, const EpdFontFamily::Style style, uint32_t* ppem26_6,
+                           bool* refused = nullptr) const {
+    return shapingFaceSource != nullptr ? shapingFaceSource(fontId, style, ppem26_6, refused) : nullptr;
   }
   // A section build's end frees the shaping faces: counted, so a test sees each build do it.
   static inline int shapingReleases = 0;

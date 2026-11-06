@@ -139,9 +139,13 @@ class GlyphProvider {
   }
 
   /// The shaping face of the file that draws this provider's style (a TrueType font's tables, shaped in place), and
-  /// in `ppem26_6` the pixels per em (26.6) its glyphs are drawn at. nullptr for a provider with no such tables.
-  virtual ShapingFace* shapingFace(uint32_t* ppem26_6) {
+  /// in `ppem26_6` the pixels per em (26.6) its glyphs are drawn at. nullptr for a provider with no such tables, and
+  /// for one that has them but could not make the face for want of memory: that one also sets `*refused` (when
+  /// `refused` is not null), and leaves it as it is otherwise, so a caller can tell a refusal from a font that cannot
+  /// shape.
+  virtual ShapingFace* shapingFace(uint32_t* ppem26_6, bool* refused) {
     (void)ppem26_6;
+    (void)refused;
     return nullptr;
   }
 };

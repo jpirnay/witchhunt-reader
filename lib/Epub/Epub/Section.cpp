@@ -220,7 +220,8 @@ constexpr uint8_t kStatusSimplified = 1 << 4;
 //   depends on the chapter.
 constexpr uint8_t kStatusVertical = 1 << 5;
 //   kStatusShapingDegraded: a shaped-script run was laid out as code points (no memory for it, or the font could not
-//   shape it); the reader rebuilds once per spine per session, as for the table-row bit.
+//   shape it), or as IndicReorder's form because its font's face was refused its memory; the reader rebuilds once per
+//   spine per session, as for the table-row bit.
 constexpr uint8_t kStatusShapingDegraded = 1 << 6;
 
 // On-disk paragraph LUT entry: u32 visibleTextOffset + u16 paragraphIndex + u16 listItemIndex.

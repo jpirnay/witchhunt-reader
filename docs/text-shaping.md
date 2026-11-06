@@ -251,6 +251,11 @@ Malayalam and Sinhala.
   outside its fields; the store refusing a piece;
 - `ParsedText` without room for its `ShapingState`, its store's entries, or a forced split's entry.
 
+A face the heap refused (`TtfFont::shapingFace`'s own allocation, about 130 B) latches too, though the token is laid
+out as without a face, in `IndicReorder`'s form: the renderer says so (`GfxRenderer::shapingFace`'s `refused`), the
+pass's face answer keeps it, and `shapingFaceFor` latches. Only a token that holds Indic text asks for a face, so a
+refusal for a style whose words are all Latin latches nothing.
+
 The latch (`ParsedText::setShapingLatch`) sets `ChapterHtmlSlimParser::shapingDegraded()`, and the section writes
 status bit 6, `kStatusShapingDegraded`, and logs `spine=<n> shaping degraded`. As for a demoted table row
 (memory strategy §6, invariant 6):
@@ -262,8 +267,7 @@ status bit 6, `kStatusShapingDegraded`, and logs `spine=<n> shaping degraded`. A
 
 **Not degraded.** A font that cannot shape is not a failure, and nothing is latched: no face (a `.cpfont` or built-in
 font, a vertical line) or a face that does not map the script gives `IndicReorder`'s form. So a Hindi book in a bitmap
-font is not rebuilt at every open. A face whose own allocation (`TtfFont::shapingFace`, about 130 B) the heap refuses
-reads the same way: as a font that cannot shape, with nothing latched.
+font is not rebuilt at every open.
 
 **Fixed limits**, each with what happens past it:
 

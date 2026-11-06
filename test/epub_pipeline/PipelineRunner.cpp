@@ -20,7 +20,7 @@ namespace {
 
 // The installed shaping face (ShapingFaceScope); the seam hands it out for every font and style, at 20 px per em.
 std::unique_ptr<FixtureShapingFace> installedFace;
-ShapingFace* installedFaceSource(int, EpdFontFamily::Style, uint32_t* ppem26_6) {
+ShapingFace* installedFaceSource(int, EpdFontFamily::Style, uint32_t* ppem26_6, bool* /*refused*/) {
   *ppem26_6 = 1280;
   return installedFace.get();
 }

@@ -494,6 +494,7 @@ struct ParsedText::ShapingState {
     uint8_t style = 0;  // its BOLD_ITALIC bits
     ShapingFace* face = nullptr;
     uint32_t ppem26_6 = 0;  // the face's, before the font's base scale
+    bool refused = false;   // no face: the font has one, but the heap refused it
   };
   // A paragraph's fonts and styles in a pass: more are asked of the renderer at each use.
   static constexpr uint8_t kFaceAnswers = 8;
@@ -951,6 +952,7 @@ ShapingFace* ParsedText::shapingFaceFor(const GfxRenderer& renderer, const int f
   const auto style = static_cast<uint8_t>(wordStyles[i] & EpdFontFamily::BOLD_ITALIC);
   ShapingFace* face = nullptr;
   uint32_t ppem = 0;
+  bool refused = false;
   // The pass's answer for this font and style; the first ask makes it (a cache: shapeKey and glyphEdge are const).
   ShapingState::FaceAnswer* answer = nullptr;
   if (shapingState_) {
@@ -962,15 +964,21 @@ ShapingFace* ParsedText::shapingFaceFor(const GfxRenderer& renderer, const int f
       answer = &state.faces[state.faceCount++];
       answer->fontId = font;
       answer->style = style;
-      answer->face = renderer.shapingFace(font, static_cast<EpdFontFamily::Style>(style), &answer->ppem26_6);
+      answer->ppem26_6 = 0;
+      answer->refused = false;
+      answer->face =
+          renderer.shapingFace(font, static_cast<EpdFontFamily::Style>(style), &answer->ppem26_6, &answer->refused);
     }
   }
   if (answer != nullptr) {
     face = answer->face;
     ppem = answer->ppem26_6;
+    refused = answer->refused;
   } else {
-    face = renderer.shapingFace(font, static_cast<EpdFontFamily::Style>(style), &ppem);
+    face = renderer.shapingFace(font, static_cast<EpdFontFamily::Style>(style), &ppem, &refused);
   }
+  // The token is laid out as a font that cannot shape is, which is not what this font draws (invariant 6).
+  if (refused) latchShapingDegraded();
   if (face == nullptr) return nullptr;
   // Records are in drawn pixels: the word is shaped at the size it is drawn at.
   *drawnPpem = static_cast<uint32_t>(static_cast<float>(ppem) * renderer.fontBaseScale(font) * wordScale(i) + 0.5f);

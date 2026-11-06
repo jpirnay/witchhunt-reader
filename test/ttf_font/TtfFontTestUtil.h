@@ -14,6 +14,8 @@
 
 /// The bytes the test program's news hold now (TtfFontTest.cpp replaces operator new and delete to count them).
 extern size_t heapBytesHeld;
+/// The next nothrow new of one object of exactly this many bytes fails, once (0: none); TtfFontTest.cpp's.
+extern size_t refuseNextObjectBytes;
 
 namespace ttf_test {
 

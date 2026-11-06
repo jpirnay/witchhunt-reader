@@ -897,7 +897,10 @@ class TtfShapingFace : public ::testing::Test {
     ASSERT_FALSE(subset[kRegular].bytes.empty());
     ASSERT_FALSE(subset[kBold].bytes.empty());
   }
-  void TearDown() override { TtfFont::setHooks({}); }
+  void TearDown() override {
+    TtfFont::setHooks({});
+    refuseNextObjectBytes = 0;
+  }
 
   // The face of `font`'s `style` through the family API, and the pixels per em it says its glyphs are drawn at.
   static ShapingFace* faceOf(const TtfFont& font, const uint8_t style, uint32_t* ppem) {
@@ -1152,6 +1155,32 @@ TEST_F(TtfShapingFace, ALoadedSetHoldsNoFaceUntilAsked) {
   EXPECT_EQ(loaded + faceBytes, heapBytesHeld);
 }
 
+TEST_F(TtfShapingFace, AFaceTheHeapRefusesSaysSo) {
+  // A layout without the face is not what the font draws, so the refusal is told apart from a font that cannot shape,
+  // through the family as the renderer asks.
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  const size_t loaded = heapBytesHeld;
+  ASSERT_NE(nullptr, font.shapingFace(kRegular));
+  const size_t faceBytes = heapBytesHeld - loaded;
+  set->releaseShapingFaces();
+
+  refuseNextObjectBytes = faceBytes;
+  uint32_t ppem = 0;
+  bool refused = false;
+  const EpdFontFamily family(font.font(kRegular), font.font(kBold));
+  EXPECT_EQ(nullptr, family.shapingFace(EpdFontFamily::REGULAR, &ppem, &refused));
+  EXPECT_TRUE(refused);
+  EXPECT_EQ(0u, refuseNextObjectBytes);  // the face's was the allocation refused
+
+  // With the memory back the face is made, and nothing is said.
+  refused = false;
+  EXPECT_NE(nullptr, family.shapingFace(EpdFontFamily::REGULAR, &ppem, &refused));
+  EXPECT_FALSE(refused);
+}
+
 TEST_F(TtfShapingFace, AFaceIsMappedAndFreedUnderTheRenderLock) {
   // current() maps the glyph store, and releaseShapingFaces() frees what plans read: both are RenderLock's, as a glyph
   // lookup is, and say so once when it is not held.
@@ -1179,8 +1208,10 @@ TEST_F(TtfShapingFace, ABitmapFontHasNoShapingFace) {
   const EpdFont font(&data);
   const EpdFontFamily family(&font);
   uint32_t ppem = 7;
-  EXPECT_EQ(nullptr, family.shapingFace(EpdFontFamily::REGULAR, &ppem));
+  bool refused = false;
+  EXPECT_EQ(nullptr, family.shapingFace(EpdFontFamily::REGULAR, &ppem, &refused));
   EXPECT_EQ(7u, ppem);
+  EXPECT_FALSE(refused);  // a font that cannot shape: nothing was refused
 }
 
 // --- A shaped run drawn by glyph ID ---

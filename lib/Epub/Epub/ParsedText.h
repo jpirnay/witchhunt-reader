@@ -229,7 +229,8 @@ class ParsedText {
   uint32_t tokensShaped_ = 0;
   // The first token the next pass may not merge (keepUnmergedFrom); SIZE_MAX: none. The pass clears it.
   size_t unmergedFrom_ = SIZE_MAX;
-  void latchShapingDegraded() {
+  // Const: the latch is the parser's, and a const lookup (shapingFaceFor) may be the one to find a refusal.
+  void latchShapingDegraded() const {
     if (shapingLatch_ != nullptr) *shapingLatch_ = true;
   }
   // Whether this pass shapes, decided after decideBidi: makes ShapingState for it (refused: the pass is laid out
@@ -250,7 +251,8 @@ class ParsedText {
   // The face token i is shaped with, and the ppem (26.6) its glyphs are drawn at: the face's, times the font's base
   // scale, times the word's. Null (and 0) on a vertical line, which reorders instead, and for a font that cannot shape.
   // The renderer is asked once a pass for each font and style (ShapingState's face answers), so every key and every
-  // call of a pass reads one answer.
+  // call of a pass reads one answer. Asked only for a token that holds Indic text: a face the heap refused is null too,
+  // and latches shaping degraded, since the token is then laid out as without a face.
   ShapingFace* shapingFaceFor(const GfxRenderer& renderer, int fontId, size_t i, uint32_t* drawnPpem) const;
   // Forgets the pass's face answers: a face lives for the build, and a font set reload between passes frees it.
   void forgetFaceAnswers();

@@ -49,16 +49,19 @@ constexpr int kGlyph = GfxRenderer::GLYPH_W;         // the stub's code point, a
 constexpr int kSpace = GfxRenderer::SPACE_W;
 
 // The face the seam hands out, at the ppem it reports; null: no font shapes. `refusals`: how many asks answer null
-// first, as a face refused its memory does.
+// first, saying so, as a face refused its memory does; `refusedStyle`: a style every ask of which is refused so (-1:
+// none).
 struct Seam {
   static inline ShapingFace* face = nullptr;
   static inline uint32_t ppem = kPpem;
   static inline int refusals = 0;
+  static inline int refusedStyle = -1;
   static inline int asks = 0;
-  static ShapingFace* source(int /*fontId*/, EpdFontFamily::Style /*style*/, uint32_t* ppem26_6) {
+  static ShapingFace* source(int /*fontId*/, const EpdFontFamily::Style style, uint32_t* ppem26_6, bool* refused) {
     ++asks;
-    if (refusals > 0) {
-      --refusals;
+    if (refusals > 0 || style == refusedStyle) {
+      if (refusals > 0) --refusals;
+      if (refused != nullptr) *refused = true;
       return nullptr;
     }
     if (face != nullptr) *ppem26_6 = ppem;
@@ -139,6 +142,7 @@ class ShapedLayout : public testing::Test {
     Seam::face = face.get();
     Seam::ppem = kPpem;
     Seam::refusals = 0;
+    Seam::refusedStyle = -1;
     Seam::asks = 0;
     GfxRenderer::shapingFaceSource = &Seam::source;
   }
@@ -343,15 +347,17 @@ TEST_F(ShapedLayout, ANeighbourOfAMergedTokenIsShapedAgain) {
 
 TEST_F(ShapedLayout, AFaceIsResolvedOncePerPass) {
   // Every key and every call of a pass reads one answer per font and style: a face refused at the first ask (its
-  // memory) is the face of a font that cannot shape for the whole pass, so no entry is stored under a key that says
-  // otherwise.
+  // memory) leaves the whole pass laid out as a font that cannot shape is, so no entry is stored under a key that says
+  // otherwise. That is not what the font draws, so the refusal latches (invariant 6).
   Seam::refusals = 1;
   ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
   add(text, {{kHindi}, {kPatrika}, {kKi}});
   EXPECT_EQ(1u, layOut(text, renderer, 400).size());
   EXPECT_EQ(1, Seam::asks);
   EXPECT_EQ(3u, text.tokensShaped());
   EXPECT_EQ(0, renderer.prefetchedRuns);  // reordered, as without a face: no glyph run
+  EXPECT_TRUE(latch);
 
   // The next paragraph asks again, and shapes.
   text.reset(noIndentStyle());
@@ -359,6 +365,29 @@ TEST_F(ShapedLayout, AFaceIsResolvedOncePerPass) {
   EXPECT_EQ(1u, layOut(text, renderer, 400).size());
   EXPECT_EQ(2, Seam::asks);
   EXPECT_EQ(1, renderer.prefetchedRuns);
+}
+
+TEST_F(ShapedLayout, AFaceRefusedForAStyleOfLatinWordsLatchesNothing) {
+  // Only a token that holds Indic text asks for a face, so a refusal for a style whose words are all Latin is never
+  // seen: the paragraph's Hindi words shape in their own style, and nothing changed.
+  Seam::refusedStyle = EpdFontFamily::BOLD;
+  {
+    ParsedText text(false, false, noIndentStyle());
+    text.setShapingLatch(&latch);
+    add(text, {{kHindi}, {"Latin", EpdFontFamily::BOLD}, {kPatrika}});
+    EXPECT_EQ(1u, layOut(text, renderer, 400).size());
+    EXPECT_EQ(1, Seam::asks);  // the regular face, once
+    EXPECT_EQ(2, renderer.prefetchedRuns);
+    EXPECT_FALSE(latch);
+  }
+  // The control: a Hindi word in bold asks for the refused face, and latches.
+  {
+    ParsedText text(false, false, noIndentStyle());
+    text.setShapingLatch(&latch);
+    add(text, {{kHindi}, {kPatrika, EpdFontFamily::BOLD}});
+    EXPECT_EQ(1u, layOut(text, renderer, 400).size());
+    EXPECT_TRUE(latch);
+  }
 }
 
 TEST_F(ShapedLayout, ACandidateThatCannotBeShapedLatches) {

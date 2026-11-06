@@ -690,10 +690,11 @@ class GfxRenderer {
   /// measure fall back to). Layout asks it for 一 before treating a font as a CJK font.
   bool hasGlyph(int fontId, uint32_t cp, EpdFontFamily::Style style) const;
   /// The face a shaper reads for `fontId`'s `style` (the TrueType file that draws it, a synthetic style's source),
-  /// and the pixels per em (26.6) its glyphs are drawn at before the font's base scale; nullptr for every other font.
-  /// Under RenderLock, as ShapingFace::current() is; the face is freed by TtfFontSet::releaseShapingFaces() and by
-  /// the font set's next load, so the plans built on it go first.
-  ShapingFace* shapingFace(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6) const;
+  /// and the pixels per em (26.6) its glyphs are drawn at before the font's base scale; nullptr for every other font,
+  /// and for a TrueType face the heap refused, which sets `*refused` as well (when `refused` is not null; it is left
+  /// as it is otherwise). Under RenderLock, as ShapingFace::current() is; the face is freed by
+  /// TtfFontSet::releaseShapingFaces() and by the font set's next load, so the plans built on it go first.
+  ShapingFace* shapingFace(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6, bool* refused = nullptr) const;
   int getFontAscenderSize(int fontId) const;
   int getLineHeight(int fontId) const;
   std::string truncatedText(int fontId, const char* text, int maxWidth,
