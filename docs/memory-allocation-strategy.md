@@ -184,11 +184,20 @@ costs no other user any room:
 - every room check is as it would be without it, and any allocation may overwrite the tail;
 - `BuildArena::markPeak()` / `peakSinceMark()` say whether an allocation has reached the tail
   since the cache last looked; it checks before every read and every write of a slot and, when
-  one has, empties itself;
+  one has, empties itself. Unmarked (a new arena, or after `reset()`) the watermark reads past
+  any tail, so a reset can never leave the cache trusting what the region's next user wrote;
 - it arms (at `ChapterHtmlSlimParser::setup()`, after the SAX state) only with 16 KB of room left
-  below the tail as well, so the open page block and a shaping call's block do not reach it; an
-  emptied cache arms again once the cursor is back that low, as a new page starts;
+  below the tail as well, so the open page block and a shaping call's block rarely reach it; when
+  they do, the watermark empties it. An emptied cache arms again once the cursor is back that low,
+  as a new page starts;
 - it lets go of the arena at the end of `finalize()`, before the section drops the feed-chunk block.
+
+The tail is 128 sets of two 64 B ways. A word's entry (its identity, then its pieces with their
+glyph records or reordered form) takes one way, in place of the way of its set used least recently
+when both are taken (a recency bit in way 0's flags byte). An entry of 65 to 126 B takes both ways,
+evicting both, and a later one-way entry evicts it whole; its second way keeps a two-byte marker
+where an entry's header would begin, so it is never read as an entry of its own. Larger entries,
+and tokens over 255 bytes, are not stored (counted as `oversize` in the build's log line).
 
 A long-lived block reserved at the parse's start could not do this: `release()` is newest-first, the
 open page block sits above it nearly all the time, and so it could never be given back to a walk or
@@ -210,7 +219,7 @@ Arena instances:
 | Font selector previews | lent framebuffer | the framebuffer size | one preview font | `FontSelectionActivity::lendPreviewArena`, `SdCardFont::useArena` |
 | Dictzip lookup | lent framebuffer | the framebuffer size | one dictionary lookup | `LentLookupScratch` (`DictionaryWordSelectActivity`), `Dictionary::useInflateArena` |
 | TrueType miss memory | a build's arena, lent | the scratch block and page cache (§9.7) | one glyph lookup | `glyph_miss::Scope`: `Section::stepSectionBuild`, `EpubReaderActivity::displayBuildPage`, the ladder's light relief |
-| Word-shaping cache | the free tail of a lent build arena | `WordShapeCache::kWordCacheBytes` (16 KB), 256 slots of 64 B | one parse, emptied whenever an allocation reaches it | `WordShapeCache`, owned by `ChapterHtmlSlimParser` |
+| Word-shaping cache | the free tail of a lent build arena | `WordShapeCache::kWordCacheBytes` (16 KB), 128 sets of two 64 B ways | one parse, emptied whenever an allocation reaches it | `WordShapeCache`, owned by `ChapterHtmlSlimParser` |
 
 In the lent region the CSS ruleset is resident in the arena (`CssParser::setIndexArena`), the SAX
 state is taken there (`ChapterHtmlSlimParser::setBuildArena`), and the ZIP ring shares the main
@@ -418,9 +427,9 @@ never empties the cache. An image probe (8.7 KB) never reaches the tail, and a 1
 does only on the X4, late on a page (10,844 + 5,600 + 16,928 > 31,616). A 32 KB stage always does,
 and so does a CFF glyph miss read from the card at a full page (10,844 + 5,600 + 21,628 > 35,888):
 each empties the cache, which fills again once the cursor is back at capacity - 32 KB (19,504 on the
-X3, 15,232 on the X4). With the cache the book's `ot::shape` calls fall from 2,487 to 885 on the host
-(`epub_pipeline_dump --arena=52272`, both chapters), and 1,590 of the long chapter's 2,478 lookups
-hit.
+X3, 15,232 on the X4). With the cache the book's `ot::shape` calls fall from 2,487 to 531 on the host
+(`epub_pipeline_dump --arena=52272`, both chapters), and 1,943 of the long chapter's 2,478 lookups
+hit (2,428 of the book's 2,452 shaped words fit one way; the other 24 take both).
 
 ### 8.3 What a build allocates
 
