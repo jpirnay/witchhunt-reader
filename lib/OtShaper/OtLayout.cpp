@@ -1,6 +1,7 @@
 #include "OtLayout.h"
 
 #include "OtLayoutInternal.h"
+#include "OtProfile.h"
 
 // Lookup application: the skipping iterator, the per-lookup apply context,
 // subtable dispatch and nested-lookup recursion (hb-ot-layout-gsubgpos.hh,
@@ -213,6 +214,7 @@ bool ApplyContext::applyLookupSubtables(const Table& lookup, const uint8_t* dige
   const uint32_t glyph = buffer.cur().codepoint;
   for (uint16_t i = 0; i < count; i++) {
     if (digests && !digestRecordMayHave(digests + DIGEST_BYTES * i, glyph)) continue;
+    OTP_COUNT(subtableCalls);
     if (applySubtable(type, lookup.offset16(6 + 2 * i))) return true;
   }
   return false;
@@ -278,6 +280,7 @@ Digest subtableDigest(const int table, const Table& lookup, const uint16_t subta
 void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int table, const uint32_t lookupIndex,
                  const LookupSettings& settings) {
   if (!buffer.len() || !settings.mask) return;
+  OTP_COUNT(lookupApplied);
   const Table lookup = face.lookup(table, lookupIndex);
   if (lookup.empty()) return;
 

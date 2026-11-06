@@ -2,6 +2,7 @@
 
 #include "OtBuffer.h"
 #include "OtLayoutInternal.h"
+#include "OtProfile.h"
 
 namespace ot {
 
@@ -198,6 +199,7 @@ void Face::initFilters(const Table& cpac) {
 }
 
 bool Face::nominalGlyph(const uint32_t cp, uint32_t* glyph) const {
+  OTP_COUNT(nominal);
   *glyph = 0;
   const Table& t = cmapSubtable_;
   switch (cmapFormat_) {
@@ -223,6 +225,7 @@ bool Face::nominalGlyph(const uint32_t cp, uint32_t* glyph) const {
 }
 
 int32_t Face::advance(const uint32_t glyph) const {
+  OTP_COUNT(advance);
   if (longMetrics_ == 0) return upem_ / 2;
   if (glyph < bearingCount_) {
     const uint32_t metric = glyph < longMetrics_ ? glyph : longMetrics_ - 1u;
@@ -232,6 +235,7 @@ int32_t Face::advance(const uint32_t glyph) const {
 }
 
 uint16_t Face::glyphProps(const uint32_t glyph) const {
+  OTP_COUNT(glyphProps);
   switch (classOf(glyphClassDef_, glyph)) {
     case 1:
       return props::BASE_GLYPH;
@@ -259,6 +263,7 @@ uint32_t Face::sanitizeLookupProps(uint32_t lookupProps) const {
 uint16_t Face::lookupCount(const int table) const { return layout(table).offset16(8).u16(0); }
 
 Table Face::lookup(const int table, const uint32_t index) const {
+  OTP_COUNT(lookupFetch);
   const Table list = layout(table).offset16(8);
   if (index >= list.u16(0)) return Table();
   const Table lookup = list.offset16(2 + 2 * index);

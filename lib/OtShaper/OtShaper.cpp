@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "OtProfile.h"
 #include "OtShaperInternal.h"
 #include "OtUnicodeData.h"
 
@@ -28,49 +29,95 @@ void runPause(const Pause pause, const Face& face, const Plan& plan, Buffer& buf
   switch (pause) {
     case Pause::None:
       break;
-    case Pause::IndicSetupSyllables:
+    case Pause::IndicSetupSyllables: {
+      OTP_T(t0);
       indicSetupSyllables(buffer);
+      OTP_ADD(pauseSetup, t0);
       break;
-    case Pause::IndicInitialReordering:
+    }
+    case Pause::IndicInitialReordering: {
+      OTP_T(t0);
       indicInitialReordering(face, plan, buffer);
+      OTP_ADD(pauseInitial, t0);
       break;
-    case Pause::IndicFinalReordering:
+    }
+    case Pause::IndicFinalReordering: {
+      OTP_T(t0);
       indicFinalReordering(face, plan, buffer);
+      OTP_ADD(pauseFinal, t0);
       break;
-    case Pause::UseSetupSyllables:
+    }
+    case Pause::UseSetupSyllables: {
+      OTP_T(t0);
       useSetupSyllables(plan, buffer);
+      OTP_ADD(pauseSetup, t0);
       break;
-    case Pause::UseClearSubstitutionFlags:
+    }
+    case Pause::UseClearSubstitutionFlags: {
+      OTP_T(t0);
       for (GlyphInfo& g : buffer.info) g.glyphProps &= ~props::SUBSTITUTED;
+      OTP_ADD(pauseOther, t0);
       break;
-    case Pause::UseRecordRphf:
+    }
+    case Pause::UseRecordRphf: {
+      OTP_T(t0);
       useRecordRphf(plan, buffer);
+      OTP_ADD(pauseOther, t0);
       break;
-    case Pause::UseRecordPref:
+    }
+    case Pause::UseRecordPref: {
+      OTP_T(t0);
       useRecordPref(buffer);
+      OTP_ADD(pauseOther, t0);
       break;
-    case Pause::UseReorder:
+    }
+    case Pause::UseReorder: {
+      OTP_T(t0);
       useReorder(face, buffer);
+      OTP_ADD(pauseOther, t0);
       break;
+    }
   }
 }
 
 // hb_ot_map_t::apply(): every stage's lookups, then its pause.
 void applyTable(const Face& face, const Scale& scale, const Plan& plan, Buffer& buffer, const int table) {
   size_t i = 0;
+  OTP_T(tTable);
   for (const Stage& stage : plan.stages[table]) {
     for (; i < stage.lastLookup; i++) {
       const LookupSettings settings = plan.settings(table, i);
       // Only lookups that can start at a glyph the buffer holds.
-      if (settings.hasDigest && !settings.digest.mayIntersect(buffer.digest)) continue;
+      if (settings.hasDigest && !settings.digest.mayIntersect(buffer.digest)) {
+        OTP_COUNT(lookupSkippedDigest);
+        continue;
+      }
+#ifdef OT_PROFILE
+      OTP_T(tLookup);
       applyLookup(face, scale, buffer, table, plan.lookups[table][i].index, settings);
+      const uint32_t spent = static_cast<uint32_t>(prof::now() - tLookup);
+      (table == GSUB ? prof::g.gsub : prof::g.gpos) += spent;
+      if (i < prof::MAX_TRACKED) {
+        prof::g.passed[table][i]++;
+        prof::g.cycles[table][i] += spent;
+      } else {
+        prof::g.overflow++;
+      }
+#else
+      applyLookup(face, scale, buffer, table, plan.lookups[table][i].index, settings);
+#endif
       if (!buffer.successful) return;
     }
     if (stage.pause == Pause::None) continue;
     runPause(stage.pause, face, plan, buffer);
     if (!buffer.successful) return;
+    OTP_T(tRefresh);
     buffer.refreshDigest();
+    OTP_ADD(refresh, tRefresh);
   }
+#ifdef OT_PROFILE
+  (table == GSUB ? prof::g.gsubLoop : prof::g.gposLoop) += static_cast<uint32_t>(prof::now() - tTable);
+#endif
 }
 
 void zeroMarkWidths(Buffer& buffer, const bool adjustOffsets) {
@@ -87,13 +134,18 @@ void zeroMarkWidths(Buffer& buffer, const bool adjustOffsets) {
 }
 
 void position(const Face& face, const Scale& scale, const Plan& plan, Buffer& buffer) {
+  OTP_T(tAdv);
   const unsigned len = buffer.len();
   buffer.pos.assign(len, GlyphPosition{});
   for (unsigned i = 0; i < len; i++) buffer.pos[i].xAdvance = scale.emScaleX(face.advance(buffer.info[i].codepoint));
+  OTP_ADD(advances, tAdv);
   // USE zeroes mark advances before GPOS, the default shaper after it.
   const bool adjustOffsets = plan.adjustMarkPositioningWhenZeroing;
+  OTP_T(tZero1);
   if (plan.zeroMarks && plan.shaper == ShaperKind::Use) zeroMarkWidths(buffer, adjustOffsets);
+  OTP_ADD(tail, tZero1);
   if (plan.applyGpos) applyTable(face, scale, plan, buffer, GPOS);
+  OTP_T(tZero2);
   if (plan.zeroMarks && plan.shaper == ShaperKind::Default) zeroMarkWidths(buffer, adjustOffsets);
   if (buffer.hasDefaultIgnorables) {
     for (unsigned i = 0; i < len; i++) {
@@ -104,6 +156,7 @@ void position(const Face& face, const Scale& scale, const Plan& plan, Buffer& bu
     }
   }
   propagateAttachmentOffsets(buffer);
+  OTP_ADD(tail, tZero2);
 }
 
 // hb_ot_hide_default_ignorables(): joiners become an invisible space (or go,
@@ -170,6 +223,17 @@ void insertDottedCircles(const Face& face, Buffer& buffer, const uint8_t brokenS
 
 bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_t* codepoints, const unsigned count,
            Buffer& buffer, const RunContext& context) {
+#ifdef OT_PROFILE
+  struct TotalScope {
+    uint32_t t0 = prof::now();
+    ~TotalScope() {
+      prof::g.total += static_cast<uint32_t>(prof::now() - t0);
+      prof::g.calls++;
+    }
+  } totalScope;
+  OTP_T(tLap);
+  prof::g.codepointsIn += count;
+#endif
   if (!buffer.prepare(count * MAX_LENGTH_FACTOR + MAX_LENGTH_EXTRA)) return false;
   buffer.partialContext = context.partial;
   if (!count) return true;
@@ -187,7 +251,9 @@ bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_
   }
 
   if (plan.shaper != ShaperKind::Default) preprocessVowelConstraints(plan.script, buffer);
+  OTP_LAP(props, tLap);
   normalize(face, plan, buffer);
+  OTP_LAP(normalize, tLap);
   if (!buffer.successful) return false;
 
   if (plan.shaper == ShaperKind::Indic) {
@@ -195,6 +261,7 @@ bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_
   } else if (plan.shaper == ShaperKind::Use) {
     useSetupMasks(buffer);
   }
+  OTP_LAP(masks, tLap);
 
   // Map to glyphs and set their properties (hb_ot_layout_substitute_start).
   for (GlyphInfo& g : buffer.info) {
@@ -208,10 +275,13 @@ bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_
       g.glyphProps = (g.genCat() != gc::NON_SPACING_MARK || g.isDefaultIgnorable()) ? props::BASE_GLYPH : props::MARK;
     }
   }
+  OTP_LAP(gdef, tLap);
 
   applyTable(face, scale, plan, buffer, GSUB);
   if (!buffer.successful) return false;
+  OTP_T(tPos);
   position(face, scale, plan, buffer);
+  OTP_T(tHide);
   hideDefaultIgnorables(face, buffer);
   if (context.before || context.after) {
     // Every glyph keeps its source codepoint's mask: drop the context's.
@@ -225,6 +295,11 @@ bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_
     buffer.info.resize(kept);
     buffer.pos.resize(kept);
   }
+  OTP_ADD(tail, tHide);
+#ifdef OT_PROFILE
+  prof::g.glyphsOut += buffer.len();
+  (void)tPos;
+#endif
   return buffer.successful;
 }
 

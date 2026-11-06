@@ -262,6 +262,12 @@ add_subdirectory(bidi_line)
 add_subdirectory(indic_text)
 add_subdirectory(ot_shaper)
 add_subdirectory(ot_shaper_port)
+
+# Throwaway shaper profile (branch wip/shaper-profile): cmake -DOT_PROFILE=ON
+option(OT_PROFILE "Build the shaper profile test (ShaperProfile.*)" OFF)
+if(OT_PROFILE)
+  add_subdirectory(ot_profile)
+endif()
 add_subdirectory(utf8_compose)
 add_subdirectory(utf8_lower)
 add_subdirectory(adaptive_tone)

@@ -1,5 +1,7 @@
 #include "OtTable.h"
 
+#include "OtProfile.h"
+
 namespace ot {
 
 namespace {
@@ -13,6 +15,7 @@ inline unsigned fittingCount(const Table& t, const unsigned recordSize) { return
 }  // namespace
 
 int coverageIndex(const Table& coverage, const uint32_t glyph) {
+  OTP_COUNT(coverage);
   const uint8_t* d = coverage.data();
   switch (coverage.u16(0)) {
     case 1: {

@@ -34,6 +34,9 @@
 #include <IndicScripts.h>
 #include <Memory.h>
 #include <OtShaper.h>
+#ifdef OT_PROFILE
+#include <OtProfile.h>
+#endif
 #include <ProtectedPaths.h>
 #include <SerialTransfer/SerialTransferProtocol.h>
 #include <ShapingFace.h>
@@ -937,7 +940,27 @@ struct ShapeReport {
   unsigned glyphs = 0;
   int width = 0;
   unsigned stored = 0;
+#ifdef OT_PROFILE
+  std::string profile[2];  // TTF_PROFILE lines of the cold and the warm pass
+#endif
 };
+
+#ifdef OT_PROFILE
+// One TTF_PROFILE line from the accumulators (cycles; the second pass is warm).
+std::string profileLine(const int pass) {
+  char fields[420];
+  char counters[320];
+  char topGsub[200];
+  char topGpos[200];
+  ot::prof::formatFields(fields, sizeof fields);
+  ot::prof::formatCounters(counters, sizeof counters);
+  ot::prof::formatTop(topGsub, sizeof topGsub, "gsub", ot::GSUB);
+  ot::prof::formatTop(topGpos, sizeof topGpos, "gpos", ot::GPOS);
+  std::string line =
+      "TTF_PROFILE:pass=" + std::to_string(pass) + " " + fields + " " + counters + " " + topGsub + " " + topGpos;
+  return line;
+}
+#endif
 
 constexpr unsigned kShapeRunCodepoints = 48;  // the run: the word from its first Indic letter
 constexpr unsigned kShapeSlots = 112;         // the shaper's buffer: room to grow past the run
@@ -1026,8 +1049,20 @@ void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, 
   scale.set(static_cast<int32_t>(ppem), (ppem + 32) >> 6, otFace->upem());
   otFace = face->current();
   start = micros();
+#ifdef OT_PROFILE
+  ot::prof::g.reset();
+#endif
   const bool shaped = otFace && ot::shape(*otFace, scale, *plan, cps.get(), count, *buffer);
   r.shapeUs = micros() - start;
+#ifdef OT_PROFILE
+  r.profile[0] = profileLine(1);
+  if (shaped) {
+    ot::prof::g.reset();
+    otFace = face->current();
+    ot::shape(*otFace, scale, *plan, cps.get(), count, *buffer);  // the warm pass; the result is the same
+    r.profile[1] = profileLine(2);
+  }
+#endif
   if (!shaped) {
     r.error = "shape failed";
     return;
@@ -1106,6 +1141,10 @@ void cmdTtfShape(const std::string_view arg) {
   appendField(line, "width", static_cast<long>(report.width));
   appendField(line, "stored", static_cast<long>(report.stored));
   reply(line);
+#ifdef OT_PROFILE
+  reply(report.profile[0]);
+  reply(report.profile[1]);
+#endif
 }
 
 // CMD:TTF: what the loaded TrueType set and its glyph store hold. CMD:TTF:FULL: the store acts as if it had just filled

@@ -5,6 +5,10 @@
 #include <HeapFit.h>
 #include <Logging.h>
 #include <Memory.h>
+#ifdef OT_PROFILE
+#include <OtFace.h>
+#include <OtProfile.h>
+#endif
 #include <Serialization.h>
 #include <ZipFile.h>
 #include <esp_heap_caps.h>
@@ -1952,6 +1956,19 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
   LOG_INF("SCT",
           "createSectionFile spine=%d done: total=%ums (stream=%u setup=%u parse=%u finalize=%u) pages=%u bytes=%u",
           spineIndex, totalMs, streamMs, st.setupMs, st.parseMs, finalizeMs, pageCount, fileSize);
+#ifdef OT_PROFILE
+  {
+    char line[400];
+    ot::prof::formatFields(line, sizeof line);
+    LOG_INF("SHP", "spine=%d %s", spineIndex, line);
+    ot::prof::formatCounters(line, sizeof line);
+    LOG_INF("SHP", "spine=%d %s", spineIndex, line);
+    ot::prof::formatTop(line, sizeof line, "gsub", ot::GSUB);
+    LOG_INF("SHP", "spine=%d %s", spineIndex, line);
+    ot::prof::formatTop(line, sizeof line, "gpos", ot::GPOS);
+    LOG_INF("SHP", "spine=%d %s", spineIndex, line);
+  }
+#endif
   // Arena telemetry: how much of the budgets a build actually used, and per lane -- setup =
   // resident after setup (ruleset), extract = the extraction phase's peak above that (ring +
   // grow; 0 when the ring was heap-backed or the HTML cache was reused), resident = what phase
@@ -1969,6 +1986,9 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
 
 bool Section::createSectionFile(const BuildParams& p, const std::function<void(int)>& progressFn,
                                 const bool skipEviction) {
+#ifdef OT_PROFILE
+  ot::prof::g.reset();
+#endif
   if (!skipEviction) {
     evictOldVariants();
   }
