@@ -395,7 +395,9 @@ TEST_F(SyntheticLutFixture, ATokenAfterAKeptJoinerKeepsItsSourceOffset) {
   // ष and two more letters in the second, which the line breaker puts at a line's start. A page opens on that line in
   // some paragraphs, and its offset is ष's position in the source, as VisibleText counts it: the joiner's 3 bytes are
   // counted between the tokens, as the mappers count them. A paragraph is 60 one-byte words, 65 letters and a virama
-  // (198 bytes), the joiner, ष and two letters (12 bytes), and 100 one-byte words.
+  // (198 bytes), the joiner, ष and two letters (12 bytes), and 100 one-byte words. It runs right to left: a paragraph
+  // that needs bidi shapes nothing yet, so its tokens stay as the parser cut them, where one that shapes merges the two
+  // (deviation 7: the glue falls inside a syllable).
   constexpr uint32_t kBefore = 60;
   constexpr uint32_t kSecondToken = kBefore + 198 + 3;
   constexpr uint32_t kParagraphBytes = kBefore + 198 + 12 + 100;
@@ -407,7 +409,7 @@ TEST_F(SyntheticLutFixture, ATokenAfterAKeptJoinerKeepsItsSourceOffset) {
   for (int i = 0; i < 65; ++i) letters += "क";
   std::string joined;
   for (int i = 0; i < 40; ++i) {
-    joined += "<p>" + before + letters +
+    joined += "<p dir=\"rtl\">" + before + letters +
               "्<b>\xE2\x80\x8D"
               "षकक</b> " +
               after + "</p>\n";

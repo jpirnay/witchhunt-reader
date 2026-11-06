@@ -18,6 +18,10 @@
 
 class GfxRenderer;
 class BuildArena;
+class ShapingFace;
+namespace IndicShaper {
+enum class Outcome : uint8_t;
+}
 
 class ParsedText {
  public:
@@ -206,6 +210,54 @@ class ParsedText {
   // Steps bidiState_->openControls over the tokens [first, end) of a line that was accepted.
   void stepOpenControls(size_t first, size_t end);
 
+  // A paragraph without bidi whose tokens hold Indic text forms them (writing modes step 2, "How shaping runs" 2-6 and
+  // 10): each such token is shaped once into a paragraph store, in step with the word vectors, whose widths break the
+  // lines and whose forms the line reads. Boxed, and defined in ParsedText.cpp, so this header includes nothing of the
+  // shaper (it is included far beyond layout). Made by the first pass that shapes; reset() empties it for the next
+  // paragraph; releaseLayoutScratch() frees it when no paragraph in progress shapes. Nothing in it holds a face or a
+  // plan: they are the renderer's, for one build.
+  struct ShapingState;
+  std::unique_ptr<ShapingState> shapingState_;
+  bool shapes_ = false;  // this pass forms Indic words: no bidi, and a token holds U+0900-0DFF
+  bool* shapingLatch_ = nullptr;
+  uint32_t tokensShaped_ = 0;
+  void latchShapingDegraded() {
+    if (shapingLatch_ != nullptr) *shapingLatch_ = true;
+  }
+  // Whether this pass shapes, decided after decideBidi: makes ShapingState for it (refused: the pass is laid out
+  // unshaped, and latched), or empties the store of a pass that does not shape. A kept token whose glued neighbour has
+  // just arrived is shaped again, with it as context.
+  void decideShaping();
+  // Joins each glued group's tokens that TextShaping::mergesWithPrevious merges (deviation 7, and the Hebrew name)
+  // before anything is measured: a merged token keeps its first part's style, size, boundary and visible offset. Ruby
+  // tokens, combine requests and no-break spaces are never merged.
+  void mergeGluedGroups(int fontId);
+  // Whether tokens a and b are in one font, style, size and emphasis mark: a span split of one style.
+  bool sameStyle(int fontId, size_t a, size_t b) const;
+  // Token i's entry made stale, so it is shaped again: a glued neighbour it was shaped with has changed.
+  void forgetShaping(size_t i);
+  // The store's room for this pass, reserved from its estimate, and an entry for every token. False (logged, latched,
+  // the store emptied) when the entries cannot grow: the pass is then laid out unshaped.
+  bool readyShapedStore();
+  // The face token i is shaped with, and the ppem (26.6) its glyphs are drawn at: the face's, times the font's base
+  // scale, times the word's. Null (and 0) on a vertical line, which reorders instead, and for a font that cannot shape.
+  ShapingFace* shapingFaceFor(const GfxRenderer& renderer, int fontId, size_t i, uint32_t* drawnPpem) const;
+  // What token i's entry is valid for besides its text: its font, style bits, size and scale, the font's base scale,
+  // and the drawn ppem (0 without a face). Records shaped at one size are never reused at another.
+  uint32_t shapeKey(const GfxRenderer& renderer, int fontId, size_t i) const;
+  // `text`, as token i's font, style and size draw it, shaped with `before` and `after` as context into the store's
+  // open entry, in a call block of lineArena_'s (else the build's heap block) released before it returns.
+  IndicShaper::Outcome shapeInto(const GfxRenderer& renderer, int fontId, size_t i, std::string_view text,
+                                 std::string_view before, std::string_view after);
+  // Token i's pieces, shaped now or found in the store, their glyphs warmed and their widths set, and *width their
+  // sum; false: it is laid out as its code points (and latched when it could not be shaped).
+  bool shapeToken(const GfxRenderer& renderer, int fontId, size_t i, uint16_t* width);
+  // The width of words[i]'s first `bytes` bytes and a hyphen when `hyphen`: a candidate the breaker measures, shaped in
+  // the store's scratch entry (nothing is kept), or measured as code points when it is not shaped.
+  int shapedPrefixWidth(const GfxRenderer& renderer, int fontId, size_t i, size_t bytes, bool hyphen);
+  // Whether token i's first piece (its last, when `last`) is a glyph run: a glued gap there takes no kerning (step 8).
+  bool glyphEdge(const GfxRenderer& renderer, int fontId, size_t i, bool last) const;
+
   LinePlace linePlace_;
   BlockStyle blockStyle;
   // The book's typography (TypographyProfile.h): Latin rules until the parser sets the book's.
@@ -371,17 +423,14 @@ class ParsedText {
   }
 
  public:
-  explicit ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled = false,
-                      const BlockStyle& blockStyle = BlockStyle(), const bool bionicReadingEnabled = false)
-      : blockStyle(blockStyle),
-        extraParagraphSpacing(extraParagraphSpacing),
-        hyphenationEnabled(hyphenationEnabled),
-        bionicReadingEnabled(bionicReadingEnabled) {}
-  ~ParsedText() = default;
+  // Out of line, as the destructor and the moves are: ShapingState is complete only in ParsedText.cpp.
+  explicit ParsedText(bool extraParagraphSpacing, bool hyphenationEnabled = false,
+                      const BlockStyle& blockStyle = BlockStyle(), bool bionicReadingEnabled = false);
+  ~ParsedText();
   // Movable, not copyable: it owns its word vectors and buffers. The line pass's scratch is the build's
   // (BidiLine::heapScratch), not its own.
-  ParsedText(ParsedText&&) = default;
-  ParsedText& operator=(ParsedText&&) = default;
+  ParsedText(ParsedText&&) noexcept;
+  ParsedText& operator=(ParsedText&&) noexcept;
 
   // Start a new, empty block in this object under `blockStyle`, keeping the word vectors'
   // capacity. The parser reuses one ParsedText across a chapter's paragraphs: a fresh object
@@ -442,6 +491,13 @@ class ParsedText {
   void setVertical(bool vertical) { vertical_ = vertical; }
   // See lineArena_ / beforeLine_. Both survive reset().
   void setLineArena(BuildArena* arena) { lineArena_ = arena; }
+  // A run laid out as its code points because it could not be shaped (no memory, or the font failed it) sets *latch
+  // (Section's kStatusShapingDegraded). Survives reset().
+  void setShapingLatch(bool* latch) { shapingLatch_ = latch; }
+  bool shapingStateHeld() const { return shapingState_ != nullptr; }  // for tests
+  // Tokens handed to IndicShaper since construction (a candidate prefix the breaker measures is not one): for tests
+  // and the build's log.
+  uint32_t tokensShaped() const { return tokensShaped_; }
   void setBeforeLineHook(std::function<void(uint8_t maxSizePct, bool annotated)> hook) {
     beforeLine_ = std::move(hook);
   }

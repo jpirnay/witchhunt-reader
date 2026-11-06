@@ -11,6 +11,8 @@
 //   - font WIDE_FONT (a word font of another family) has WIDE_GLYPH_W, WIDE_SPACE_W and WIDE_ASCENDER instead
 // drawText/drawTextScaled calls are recorded so tests can assert baseline
 // alignment and per-word scales; drawGlyphRun calls likewise.
+//   - shapingFace asks the test's seam (shapingFaceSource; null: no font shapes), every font's base scale is 1, and
+//     prefetchGlyphRun counts its calls (prefetchedRuns)
 
 #include <EpdFontFamily.h>
 #include <GlyphRun.h>
@@ -20,6 +22,8 @@
 #include <vector>
 
 #include "Epub/CjkPunctuation.h"
+
+class ShapingFace;
 
 // Where a glyph's ink sits in its advance (the real renderer's GlyphInk).
 struct GlyphInk {
@@ -200,6 +204,18 @@ class GfxRenderer {
   }
   int glyphRunWidth(int /*fontId*/, const GlyphRun& run, const float scale = 1.0f) const {
     return glyphRunAdvance(run, scale < 0.99f || scale > 1.01f);
+  }
+  // The face a shaper reads for a font's style, and its ppem (26.6), as the real renderer's shapingFace answers: the
+  // test's seam decides; null (the default) is a font that cannot shape.
+  static inline ShapingFace* (*shapingFaceSource)(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6) = nullptr;
+  ShapingFace* shapingFace(const int fontId, const EpdFontFamily::Style style, uint32_t* ppem26_6) const {
+    return shapingFaceSource != nullptr ? shapingFaceSource(fontId, style, ppem26_6) : nullptr;
+  }
+  float fontBaseScale(int /*fontId*/) const { return 1.0f; }
+  // The glyph-ID prefetch of a build's warm step: counted, one per run.
+  mutable int prefetchedRuns = 0;
+  void prefetchGlyphRun(int /*fontId*/, const GlyphRun& /*run*/, EpdFontFamily::Style /*style*/) const {
+    ++prefetchedRuns;
   }
   void drawLine(int x1, int y1, int x2, int y2, int lineWidth, bool /*state*/) const {
     drawLineCalls.push_back({x1, y1, x2, y2, lineWidth, live});

@@ -183,6 +183,38 @@ TEST(ShapedStore, AScratchEntryLeavesNothingBehind) {
   EXPECT_EQ(store.chunkBytes(), held);
 }
 
+// The breaker measures a candidate in the scratch entry: its pieces read back while it is open, and are gone once it is
+// abandoned. size() counts the entries in step with the words, never the scratch.
+TEST(ShapedStore, AScratchEntrysPiecesReadBackUntilItIsAbandoned) {
+  ShapedStore store;
+  EXPECT_EQ(0u, store.size());
+  EXPECT_TRUE(store.openPieces().empty());
+  ASSERT_TRUE(store.insert(0));
+  ASSERT_TRUE(writeGlyphToken(store, 0, "aaa", 1, 6, 10));
+  EXPECT_EQ(1u, store.size());
+
+  ASSERT_TRUE(store.open(1, "scratch-", 9));
+  ASSERT_TRUE(store.beginPiece(PieceKind::Glyphs, 0, 7));
+  GlyphRecord r;
+  r.glyph = 77;
+  r.advance = 48;
+  for (int i = 0; i < 3; i++) ASSERT_TRUE(store.addGlyph(r));
+  ASSERT_TRUE(store.beginPiece(PieceKind::Text, 7, 8));
+  const auto open = store.openPieces();
+  ASSERT_EQ(2u, open.size());
+  EXPECT_EQ(PieceKind::Glyphs, open[0].kind);
+  EXPECT_EQ(3, store.glyphs(open[0]).count);
+  EXPECT_EQ(3 * 3, glyphRunAdvance(store.glyphs(open[0]), false));
+  EXPECT_EQ(PieceKind::Text, open[1].kind);
+  EXPECT_EQ(7, open[1].begin);
+  EXPECT_EQ(1u, store.size());
+
+  store.abandon();
+  EXPECT_TRUE(store.openPieces().empty());
+  EXPECT_EQ(1u, store.size());
+  EXPECT_TRUE(readsBack(store, 0, "aaa", 1, 6, 10));
+}
+
 // A scratch or failed token of more than a chunk: it spills into a new chunk, then into one of its own size. Abandoned,
 // the store is as before: the same chunks, the same room, every other token intact.
 TEST(ShapedStore, AnAbandonedTokenOfMoreThanAChunkLeavesNothingBehind) {

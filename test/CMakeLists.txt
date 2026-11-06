@@ -47,21 +47,32 @@ set(BIDI_MARK_INCLUDES
   ${REPO_ROOT}/lib/Memory
 )
 
-# The bidi line pass (lib/Epub/Epub/BidiLine) and what it runs on: minibidi, BidiUtils and the shaping layer. Every
-# target that lays out text through ParsedText lists these, so they are set before the subdirectories.
+file(GLOB OT_SHAPER_SOURCES ${REPO_ROOT}/lib/OtShaper/*.cpp)
+# lib/Memory is ours: a plan's tables are made with its makeUniqueNoThrow (deviation 1).
+set(OT_SHAPER_INCLUDE_DIR ${REPO_ROOT}/lib/OtShaper ${REPO_ROOT}/lib/Memory)
+
+# The bidi line pass (lib/Epub/Epub/BidiLine) and what it runs on: minibidi, BidiUtils and the shaping layer, with the
+# Indic module, the engine and the faces it shapes through, and the paragraph store of shaped tokens. Every target that
+# lays out text through ParsedText lists these, so they are set before the subdirectories.
 set(BIDI_LAYOUT_SOURCES
   ${BIDI_MARK_SOURCES}
   ${REPO_ROOT}/lib/TextShaping/TextShaping.cpp
   ${REPO_ROOT}/lib/TextShaping/HebrewShaper.cpp
+  ${REPO_ROOT}/lib/TextShaping/IndicShaper.cpp
+  ${REPO_ROOT}/lib/Utf8/IndicReorder.cpp
+  ${OT_SHAPER_SOURCES}
+  ${REPO_ROOT}/lib/EpdFont/ShapingFace.cpp
   ${REPO_ROOT}/lib/Epub/Epub/BidiLine.cpp
+  ${REPO_ROOT}/lib/Epub/Epub/ShapedStore.cpp
 )
+# lib/GfxRenderer last, for GlyphRun.h only: a target's own GfxRenderer.h stub comes before it.
 set(BIDI_LAYOUT_INCLUDES
   ${BIDI_MARK_INCLUDES}
   ${REPO_ROOT}/lib/TextShaping
+  ${OT_SHAPER_INCLUDE_DIR}
+  ${REPO_ROOT}/lib/EpdFont
+  ${REPO_ROOT}/lib/GfxRenderer
 )
-file(GLOB OT_SHAPER_SOURCES ${REPO_ROOT}/lib/OtShaper/*.cpp)
-# lib/Memory is ours: makeUniqueNoThrow (Task 8) lives there.
-set(OT_SHAPER_INCLUDE_DIR ${REPO_ROOT}/lib/OtShaper ${REPO_ROOT}/lib/Memory)
 
 add_library(crosspoint_test_common INTERFACE)
 target_include_directories(crosspoint_test_common INTERFACE

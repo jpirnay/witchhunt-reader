@@ -41,6 +41,8 @@ struct TypographyProfile {
   bool cjkRepertoire = false;
   // The language's hyphenation patterns, null when it has none.
   const LanguageHyphenator* hyphenator = nullptr;
+  // ot::languageTagsFor(the tag): the OpenType language systems a shaped word tries; null: the script's default.
+  const uint32_t* shapingLanguage = nullptr;
 
   // The profile for a BCP 47 tag ("ja", "zh-Hant-TW", "zh_CN", "en-US"); Latin rules for an empty or unknown
   // one. Case and '-'/'_' do not matter.

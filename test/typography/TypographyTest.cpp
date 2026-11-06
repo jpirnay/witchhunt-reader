@@ -1,5 +1,6 @@
 // The typography profile a book's language picks (spec section 3), and the punctuation widths of each language's
 // table (spec section 5.2, from JLREQ and CLREQ).
+#include <OtShaper.h>
 #include <gtest/gtest.h>
 
 #include "Epub/CjkPunctuation.h"
@@ -216,5 +217,17 @@ TEST(TypographyProfile, OnlyChineseJapaneseAndKoreanMayBeSetVertically) {
   for (const char* tag : {"en", "he", ""}) {
     EXPECT_FALSE(TypographyProfile::forLanguage(tag).verticalAllowed) << tag;
   }
+}
+
+TEST(TypographyProfile, AShapedWordTriesTheBooksLanguageSystems) {
+  // The engine's own table, by address: a plan is kept per language system array (ShapingFace::plan).
+  EXPECT_EQ(TypographyProfile::forLanguage("mr").shapingLanguage, ot::languageTagsFor("mr"));
+  EXPECT_EQ(TypographyProfile::forLanguage("hi-IN").shapingLanguage, ot::languageTagsFor("hi"));
+  EXPECT_EQ(TypographyProfile::forLanguage("NE_np").shapingLanguage, ot::languageTagsFor("ne"));
+  EXPECT_NE(TypographyProfile::forLanguage("mr").shapingLanguage, TypographyProfile::forLanguage("hi").shapingLanguage);
+  // An unknown language or none: the script's default, the engine's empty list.
+  EXPECT_EQ(TypographyProfile::forLanguage("").shapingLanguage, ot::languageTagsFor(""));
+  // A profile the parser never set: Latin rules, and the script's default for a shaped word.
+  EXPECT_EQ(TypographyProfile{}.shapingLanguage, nullptr);
 }
 }  // namespace

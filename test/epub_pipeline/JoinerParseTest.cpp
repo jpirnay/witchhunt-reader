@@ -104,12 +104,15 @@ TEST_F(Joiners, AJoinerStaysWithTheLetterAfterItAtTheBufferLimit) {
   // 2 + 65 * 3 = 197 bytes in the word buffer (limit 200) when the joiner comes; the joiner and ष need 6 more.
   std::string word = "ab";
   for (int i = 0; i < 65; ++i) word += "क";
-  const Words words = wordsOf("<p>" + word + kZwj + "ष</p>");
+  // The parser's cut shows in a paragraph that needs bidi, which shapes nothing yet; one that shapes merges the two
+  // tokens back into the word they were cut from (deviation 7).
+  const Words words = wordsOf("<p dir=\"rtl\">" + word + kZwj + "ष</p>");
   ASSERT_GE(words.size(), 2u);
   EXPECT_EQ(words.back(), kZwj + "ष");
   std::string all;
   for (const std::string& w : words) all += w;
   EXPECT_EQ(all, word + kZwj + "ष");
+  EXPECT_EQ(wordsOf("<p>" + word + kZwj + "ष</p>"), Words{word + kZwj + "ष"});
 }
 
 // A guard, not a RED test: this pins that a joiner after anything but a letter of the shaped blocks is dropped.
@@ -146,10 +149,14 @@ TEST_F(Joiners, AJoinerSplitFromItsLetterByAChunkBoundaryIsKept) {
 }
 
 TEST_F(Joiners, AJoinerAtAnInlineElementsEdgeIsKept) {
-  // The joiner waits across the edge and opens the next token, ahead of the letter it precedes.
+  // The joiner waits across the edge and opens the next token, ahead of the letter it precedes. The parser's tokens
+  // show in a paragraph that needs bidi, which shapes nothing yet.
   const Words split = {"क्", kZwj + "ष"};
-  EXPECT_EQ(wordsOf("<p>क्<b>" + kZwj + "ष</b></p>"), split);
-  EXPECT_EQ(wordsOf("<p>क्" + kZwj + "<b>ष</b></p>"), split);
+  EXPECT_EQ(wordsOf("<p dir=\"rtl\">क्<b>" + kZwj + "ष</b></p>"), split);
+  EXPECT_EQ(wordsOf("<p dir=\"rtl\">क्" + kZwj + "<b>ष</b></p>"), split);
   // A second joiner across the edge still drops both.
-  EXPECT_EQ(wordsOf("<p>क्" + kZwj + "<b>" + kZwj + "ष</b></p>"), (Words{"क्", "ष"}));
+  EXPECT_EQ(wordsOf("<p dir=\"rtl\">क्" + kZwj + "<b>" + kZwj + "ष</b></p>"), (Words{"क्", "ष"}));
+  // A paragraph that shapes merges the two (deviation 7: the glue falls inside a syllable), the joiner in its place.
+  EXPECT_EQ(wordsOf("<p>क्<b>" + kZwj + "ष</b></p>"), Words{"क्" + kZwj + "ष"});
+  EXPECT_EQ(wordsOf("<p>क्" + kZwj + "<b>" + kZwj + "ष</b></p>"), Words{"क्ष"});
 }

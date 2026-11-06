@@ -1,5 +1,7 @@
 #include "TypographyProfile.h"
 
+#include <OtShaper.h>
+
 #include "hyphenation/Hyphenator.h"
 
 namespace {
@@ -45,6 +47,7 @@ TypographyProfile TypographyProfile::forLanguage(const std::string& tag) {
   const std::string t = normalised(tag);
   TypographyProfile p;
   p.hyphenator = Hyphenator::forLanguage(tag);
+  p.shapingLanguage = ot::languageTagsFor(tag.c_str());
 
   const bool chinese = hasPrimary(t, "zh") || hasPrimary(t, "lzh");
   if (chinese || hasPrimary(t, "ja")) {

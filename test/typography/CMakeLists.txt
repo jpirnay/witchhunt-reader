@@ -10,11 +10,14 @@ add_executable(TypographyTest
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/LanguageRegistry.cpp
   ${REPO_ROOT}/lib/Epub/Epub/hyphenation/LiangHyphenation.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
+  # a profile's shapingLanguage is ot::languageTagsFor's
+  ${OT_SHAPER_SOURCES}
 )
 
 target_include_directories(TypographyTest PRIVATE
   ${REPO_ROOT}/lib/Epub
   ${REPO_ROOT}/lib/Utf8
+  ${OT_SHAPER_INCLUDE_DIR}
 )
 
 target_link_libraries(TypographyTest PRIVATE

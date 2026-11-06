@@ -30,6 +30,8 @@
 
 #include "Epub/CjkPunctuation.h"
 
+class ShapingFace;
+
 enum Color : uint8_t { Clear = 0x00, White = 0x01, LightGray = 0x05, DarkGray = 0x0A, Black = 0x10 };
 
 // Where a glyph's ink sits in its advance (the real renderer's GlyphInk).
@@ -213,6 +215,16 @@ class GfxRenderer {
   int glyphRunWidth(int, const GlyphRun& run, const float scale = 1.0f) const {
     return glyphRunAdvance(run, scale < 0.99f || scale > 1.01f);
   }
+  // The face a shaper reads for a font's style, and its ppem (26.6), as the real renderer's shapingFace answers: a
+  // test's seam decides; null (the default) is a font that cannot shape, as the stub's synthetic fonts are.
+  static inline ShapingFace* (*shapingFaceSource)(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6) = nullptr;
+  ShapingFace* shapingFace(const int fontId, const EpdFontFamily::Style style, uint32_t* ppem26_6) const {
+    return shapingFaceSource != nullptr ? shapingFaceSource(fontId, style, ppem26_6) : nullptr;
+  }
+  float fontBaseScale(int) const { return 1.0f; }
+  // The glyph-ID prefetch of a build's warm step: counted, one per run.
+  mutable int prefetchedRuns = 0;
+  void prefetchGlyphRun(int, const GlyphRun&, EpdFontFamily::Style) const { ++prefetchedRuns; }
   void drawCenteredText(int, int, const char*, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR) const {}
   void drawTextRotated90CW(int, int, int, const char*, bool = true,
                            EpdFontFamily::Style = EpdFontFamily::REGULAR) const {}

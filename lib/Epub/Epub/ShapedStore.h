@@ -47,6 +47,11 @@ class ShapedStore final : public IndicShaper::PieceSink {
   // Token `token`'s pieces when its entry was made for this text and key; nullopt otherwise (none, or stale). The span
   // and the views of glyphs() and form() are valid until the next call that changes the store.
   std::optional<std::span<const Piece>> pieces(size_t token, std::string_view text, uint32_t key) const;
+  // The open entry's pieces so far (none when no entry is open): a scratch entry's are measured here before abandon().
+  // Valid as pieces() is.
+  std::span<const Piece> openPieces() const;
+  // The entries, in step with the word vectors (the scratch entry is not one).
+  size_t size() const { return entries_.size(); }
   void setWidth(size_t token, size_t piece, uint16_t width);
   GlyphRun glyphs(const Piece& piece) const;
   std::string_view form(const Piece& piece) const;
