@@ -2,6 +2,7 @@
 
 #include <BuildArena.h>
 #include <Epub/BookFonts.h>
+#include <Epub/LanguageTag.h>
 #include <EspNorFlash.h>
 #include <GfxRenderer.h>
 #include <GlyphProvider.h>
@@ -379,38 +380,27 @@ ReaderSizeList SdCardFontSystem::sizeListFor(const char* familyName) const {
 }
 
 void SdCardFontSystem::setReaderLanguage(const std::string& language) {
-  std::string lang;
-  lang.reserve(language.size());
-  for (const unsigned char ch : language) {
-    if (ch == '_') {
-      lang.push_back('-');
-    } else if (ch >= 'A' && ch <= 'Z') {
-      lang.push_back(static_cast<char>(ch - 'A' + 'a'));
-    } else {
-      lang.push_back(static_cast<char>(ch));
-    }
+  using language_tag::CjkRegion;
+  switch (language_tag::cjkRegionOf(language)) {
+    case CjkRegion::None:
+      readerCjkRegion_ = ReaderCjkRegion::None;
+      return;
+    case CjkRegion::Japanese:
+      readerCjkRegion_ = ReaderCjkRegion::Japanese;
+      return;
+    case CjkRegion::Korean:
+      readerCjkRegion_ = ReaderCjkRegion::Korean;
+      return;
+    case CjkRegion::SimplifiedChinese:
+      readerCjkRegion_ = ReaderCjkRegion::SimplifiedChinese;
+      return;
+    case CjkRegion::TraditionalChinese:
+      readerCjkRegion_ = ReaderCjkRegion::TraditionalChinese;
+      return;
+    case CjkRegion::ChineseAmbiguous:
+      readerCjkRegion_ = ReaderCjkRegion::ChineseAmbiguous;
+      return;
   }
-
-  const auto tagIs = [&lang](const char* tag) {
-    const std::string value(tag);
-    return lang == value ||
-           (lang.size() > value.size() && lang.compare(0, value.size(), value) == 0 && lang[value.size()] == '-');
-  };
-
-  ReaderCjkRegion region = ReaderCjkRegion::None;
-  if (tagIs("ja")) {
-    region = ReaderCjkRegion::Japanese;
-  } else if (tagIs("ko")) {
-    region = ReaderCjkRegion::Korean;
-  } else if (lang == "cn" || tagIs("zh-hans") || tagIs("zh-cn") || tagIs("zh-sg") || tagIs("zh-chs")) {
-    region = ReaderCjkRegion::SimplifiedChinese;
-  } else if (tagIs("zh-hant") || tagIs("zh-tw") || tagIs("zh-hk") || tagIs("zh-mo") || tagIs("zh-cht")) {
-    region = ReaderCjkRegion::TraditionalChinese;
-  } else if (tagIs("zh")) {
-    region = ReaderCjkRegion::ChineseAmbiguous;
-  }
-
-  readerCjkRegion_ = region;
 }
 
 void SdCardFontSystem::clearReaderLanguage() {

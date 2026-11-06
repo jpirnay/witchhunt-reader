@@ -34,7 +34,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 110;  // v110: HTML's other block elements; a line may end after a dash
+constexpr uint8_t SECTION_FILE_VERSION = 111;  // v111: a book tagged cn takes the Chinese profile, zh-CHT its
+                                               // traditional punctuation: pages laid out by the old rules go
+                                               // v110: HTML's other block elements; a line may end after a dash
                                                // v109: a no-break space with no word glued to it takes no share of a
                                                // justified line, and a TTF without U+FFFD gives a missing character
                                                // its .notdef's advance: word positions change
