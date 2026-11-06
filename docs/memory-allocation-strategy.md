@@ -157,6 +157,44 @@ restarted. That pass now borrows (§9.3).
 - **(b) parse**: SAX state (about 9.8 KB), the 1 KB feed chunk, the CSS ruleset, the page block,
   table row blocks, and the font slots and `Page` of mid-build draws.
 
+The extraction ring is released before every parse: every build is two-phase, the blocking one too
+(`Section::runBuildParse`), and the reused-HTML path never makes the ring. What phase (b) starts from
+is the CSS ruleset, the feed chunk and the SAX state (10,844 B on the X3's shaped Hindi chapter,
+§8.2); everything above that is the **parse lane**. Its users, in the order a build meets them:
+
+1. the open page block: every line's `TextBlock` bytes, from a page's first line to `emitPage()`
+   (`ChapterHtmlSlimParser::ensurePageBlock`);
+2. a shaping call's block above it (`IndicShaper::CallMemory`, about 6.3 KB and 7 B a token byte),
+   for one Indic token's `ot::shape`, released before any of its glyphs is looked up;
+3. the TrueType miss scope (§9.7), for one glyph lookup;
+4. the bidi workspace (`BidiLine::ArenaWorkspace`), for one line pass of a bidi paragraph;
+5. table row blocks, committed into the page scope or released (§8.4a);
+6. a mid-build draw (Background-C only, between slices): the page's bytes, the font slots and its
+   misses, closed before the render lock is released.
+
+Two more run **mid-parse**, inside `startElement` for `<img>`, from the build arena: the image
+manifest's probe (8.7 KB) and its deferred header walk (16.9 KB, a second stage up to 33.3 KB).
+Image decodes never run during a build: a mid-build draw uses placeholders, and the warm pass
+refuses a live build's arena.
+
+**The free tail.** The word-shaping cache (`WordShapeCache`) keeps the build's shaped Indic words in
+the arena's top 16 KB, `[capacity - 16 KB, capacity)`, which the arena still counts as free. It
+costs no other user any room:
+
+- every room check is as it would be without it, and any allocation may overwrite the tail;
+- `BuildArena::markPeak()` / `peakSinceMark()` say whether an allocation has reached the tail
+  since the cache last looked; it checks before every read and every write of a slot and, when
+  one has, empties itself;
+- it arms (at `ChapterHtmlSlimParser::setup()`, after the SAX state) only with 16 KB of room left
+  below the tail as well, so the open page block and a shaping call's block do not reach it; an
+  emptied cache arms again once the cursor is back that low, as a new page starts;
+- it lets go of the arena at the end of `finalize()`, before the section drops the feed-chunk block.
+
+A long-lived block reserved at the parse's start could not do this: `release()` is newest-first, the
+open page block sits above it nearly all the time, and so it could never be given back to a walk or
+a miss that needs the room. The tail is sound only because of invariant 10 (§6). The owned 10 KB
+arena has no room for it, so a released build shapes every word.
+
 Arena instances:
 
 | Instance | Backing | Capacity | Lifetime | Where |
@@ -172,6 +210,7 @@ Arena instances:
 | Font selector previews | lent framebuffer | the framebuffer size | one preview font | `FontSelectionActivity::lendPreviewArena`, `SdCardFont::useArena` |
 | Dictzip lookup | lent framebuffer | the framebuffer size | one dictionary lookup | `LentLookupScratch` (`DictionaryWordSelectActivity`), `Dictionary::useInflateArena` |
 | TrueType miss memory | a build's arena, lent | the scratch block and page cache (§9.7) | one glyph lookup | `glyph_miss::Scope`: `Section::stepSectionBuild`, `EpubReaderActivity::displayBuildPage`, the ladder's light relief |
+| Word-shaping cache | the free tail of a lent build arena | `WordShapeCache::kWordCacheBytes` (16 KB), 256 slots of 64 B | one parse, emptied whenever an allocation reaches it | `WordShapeCache`, owned by `ChapterHtmlSlimParser` |
 
 In the lent region the CSS ruleset is resident in the arena (`CssParser::setIndexArena`), the SAX
 state is taken there (`ChapterHtmlSlimParser::setBuildArena`), and the ZIP ring shares the main
@@ -187,6 +226,11 @@ Invariants that hold the arena together; new consumers must not break them:
 - `BuildState::initArena()` resets an external arena, so a build never inherits a cursor.
 - An arena scope opened for a mid-build draw closes before the render lock is released: a build
   slice can run during the waveform wait and allocate above it.
+- Only the build writes a borrowed framebuffer while it holds it, between slices too. Every other
+  borrower is refused (`FreeInkDisplay::borrowSecondaryBuffer` returns null while lent), the display
+  runs single-buffered, and the reader's own users of the region (a mid-build draw, its font slots
+  and misses) allocate in `buildScratch_`. The reader hands the region back only after the build's
+  state is gone (`endBackgroundBorrow`, `recoverSecondaryBufferIfNeeded`, the fallbacks, `onExit`).
 
 ### Class D — per-item transient
 
@@ -226,6 +270,8 @@ What a bump arena is for, and what it is not:
 - Size against the arena's own peaks. Anything held across layout coexists with the 32 KB stage of
   the image-header walk, which leaves 64 B free on the X4 (§8.2). Move a heap block into the arena
   only if it fits beside every peak it coexists with.
+- A cache that can be emptied at any moment needs no room of its own: it belongs in the free tail
+  (§4, Class C), not in a block that every peak above it must fit beside.
 - Judge a permanent allocation by where and when it lands, not by its size (§8.5, row 6).
 
 ---
@@ -253,6 +299,11 @@ What a bump arena is for, and what it is not:
    largest block a few bytes under round numbers.
 9. A table that grows across a whole parse is reserved up front from an estimate, and past it grows
    in nothrow chunks rather than by doubling into one block (§9.6).
+10. Nothing writes a build arena's memory except through `alloc()`: bytes are written by the owner
+    `alloc()` handed them to, while its block lives. The word cache's free tail depends on it (§4,
+    Class C): it tells that its bytes were overwritten from the arena's watermark alone. So
+    `BuildArena` gets no accessor for its base or any byte below the tail, and `tail()` is only for
+    a user that checks `peakSinceMark()` before each read and write of it.
 
 ---
 
@@ -348,6 +399,28 @@ capacity differs.
 The arena's high water is the extraction phase. During layout, the phase in which the heap is
 scarce, most of the region is idle, except during a 32 KB walk stage, which fills it on the X4.
 The heap's peak never coincides with a walk.
+
+A shaped chapter: the long Hindi chapter (`make_test_shaped_indic.py --long`, 2,483 Devanagari
+tokens), NotoSansDevanagari 14 pt, a cold borrowed build on the X3 (cap 52,272), 2026-11-06. The X4
+column is worked out from the same layout with the X4's 48,000 B.
+
+| Moment | In use | Free on X3 | Free on X4 | What fills it |
+|---|---:|---:|---:|---|
+| setup | 95 | 52,177 | 47,905 | CSS ruleset: 2 rules |
+| extraction | 43,116 | 9,156 | 4,884 | + feed chunk 1,024 (13 B padding), and 41,984 above setup: read buffer 1,024, inflate ring 32,768, grow block 8,192 |
+| parse start | 10,844 | 41,428 | 37,156 | ring and grow block released; + SAX state 9,712 |
+| parse peak | 22,299 | 29,973 | 25,701 | + open page block (about 5.0 KB) + a shaping call's block (about 6.45 KB) |
+| 32 KB walk stage | 10,844 + P + 33,312 | — | — | fits only while the open page block P is at most 8,116 B; on the X4, at most 3,844 B |
+| word cache tail | 16,384 from 35,888 (X3), 31,616 (X4) | counted free | counted free | `WordShapeCache`: room below it 25,044 (X3) and 20,772 (X4) at the parse's start |
+
+The parse lane's peak stays 13,589 B (X3) and 9,317 B (X4) under the tail, so the measured chapter
+never empties the cache. An image probe (8.7 KB) never reaches the tail, and a 16 KB walk stage
+does only on the X4, late on a page (10,844 + 5,600 + 16,928 > 31,616). A 32 KB stage always does,
+and so does a CFF glyph miss read from the card at a full page (10,844 + 5,600 + 21,628 > 35,888):
+each empties the cache, which fills again once the cursor is back at capacity - 32 KB (19,504 on the
+X3, 15,232 on the X4). With the cache the book's `ot::shape` calls fall from 2,487 to 885 on the host
+(`epub_pipeline_dump --arena=52272`, both chapters), and 1,590 of the long chapter's 2,478 lookups
+hit.
 
 ### 8.3 What a build allocates
 
