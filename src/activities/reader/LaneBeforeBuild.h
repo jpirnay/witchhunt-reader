@@ -35,9 +35,8 @@
 // the header of a 48 KB chapter decoded in under 2 s, but only after waiting 6 s for the pages behind it. So a priority
 // pass looks once at each page on screen and decodes its images between two slices of the build.
 //
-// Only where the buffer the decode borrows is a block of its own (HalCapabilities::keepsSecondaryBuffer). On the X3 and
-// X4 the decode would share the heap with the parse, and a try that fails counts towards giving the picture up, so a
-// page that now waits for the build would risk keeping its placeholder for good.
+// The decode borrows the buffer as the lane's does, so it needs the buffer to be free: a build that holds it, as the
+// X3's always does, keeps it, and the picture waits for the build as before.
 //
 // The decisions alone, apart from the reader, so the host can test them.
 namespace LaneBeforeBuild {
@@ -72,9 +71,8 @@ constexpr Decode decodeWhileBuilding(const uint8_t yieldsSoFar) {
 }
 
 // Whether the priority pass looks at the page on screen during Background-C's build.
-constexpr bool decodeOnScreenDuringBuild(const bool keepsSecondaryBuffer, const bool bufferFree,
-                                         const bool pageOnScreen, const bool alreadyLooked) {
-  return keepsSecondaryBuffer && bufferFree && pageOnScreen && !alreadyLooked;
+constexpr bool decodeOnScreenDuringBuild(const bool bufferFree, const bool pageOnScreen, const bool alreadyLooked) {
+  return bufferFree && pageOnScreen && !alreadyLooked;
 }
 
 }  // namespace LaneBeforeBuild

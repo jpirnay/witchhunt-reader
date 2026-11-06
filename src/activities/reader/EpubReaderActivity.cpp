@@ -2028,14 +2028,15 @@ bool EpubReaderActivity::imageLaneWarmsGrayscale() const {
 bool EpubReaderActivity::stepOnScreenImagesDuringBuild() {
   if (RenderLock::peek()) return false;
   RenderLock lock;
-  // Not a build slice's refresh guard: the decode writes no framebuffer byte and its buffer is its own, so it can use
-  // the waveform that shows the page, 1.5 s for the HALF a new chapter opens with.
   if (!section || !section->hasActiveBuild() || imageProcessingActive_) return false;
+  // The decode writes no framebuffer byte, so a PSRAM arena can use the waveform that shows the page, 1.5 s for the
+  // HALF a new chapter opens with. Anywhere else the lend hands over the frame buffer itself: it needs the bus the
+  // refresh holds, and would wait there with the render lock.
+  if (renderer.isRefreshPending() && !HalCapabilities::keepsSecondaryBuffer()) return false;
   const int pageIndex = section->currentPage;
   const bool looked = buildImagesLookedSpine_ == currentSpineIndex && buildImagesLookedPage_ == pageIndex;
   const bool bufferFree = !secondaryBorrowed_ && !backgroundBorrowActive_ && renderer.hasSecondaryBuffer();
-  if (!LaneBeforeBuild::decodeOnScreenDuringBuild(HalCapabilities::keepsSecondaryBuffer(), bufferFree,
-                                                  buildDisplayedPage_ == pageIndex, looked) ||
+  if (!LaneBeforeBuild::decodeOnScreenDuringBuild(bufferFree, buildDisplayedPage_ == pageIndex, looked) ||
       imageLaneMustWait()) {
     return false;
   }
