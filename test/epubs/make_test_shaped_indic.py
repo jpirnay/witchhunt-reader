@@ -15,7 +15,9 @@ UDHR in XML project keeps it, at eric-muller/udhr commit 588b3f4b2d0467aff54842a
                https://raw.githubusercontent.com/eric-muller/udhr/588b3f4b2d0467aff54842a4b926551b69d5a66a/data/udhr/udhr_eng.xml
 The texts are the files' paragraphs with their whitespace collapsed, in NFC (the Hindi and Bengali files spell a few
 nukta letters precomposed, U+0958, U+095B, U+095D and U+09DF, which NFC writes as the letter and its nukta). This
-script holds them and never fetches.
+script holds them and never fetches. Terms: OHCHR's UDHR Translation Project lets its translations be reproduced with a
+link to it as the source ("Permissions", https://www.ohchr.org/en/human-rights/universal-declaration/universal-declaration-human-rights/about-universal-declaration-human-rights-translation-project),
+and the UDHR in XML project, which carries them, calls them "part of our commons" (website/index.xml at that commit).
 
   - Chapter 1: the declaration's title (<h2>), the preamble's title where the translation has one (<h3>), and the
     preamble's first two paragraphs.
@@ -31,7 +33,8 @@ script holds them and never fetches.
       parser keeps; Malayalam's chillus with ZWJ at a word's end are the translation's own (ലോകത്തില്\u200d).
   - Malayalam's text holds two words past the 32 code points one shaping call takes (the piecewise loop), and the
     book ends with a 2-column table whose second cell holds a compound wider than the cell, split between syllables.
-  - The punctuation, brackets and dandas are the translations' own.
+  - The punctuation, brackets and dandas are the translations' own. Tamil and Malayalam end their sentences with a full
+    stop, not a danda, so their books hold none.
 
 With --long <dir>, writes instead the two timing books of the device runs into <dir> (never committed):
 test_shaped_long_hi.epub and test_shaped_long_en.epub, each a short first chapter and a second of the declaration's

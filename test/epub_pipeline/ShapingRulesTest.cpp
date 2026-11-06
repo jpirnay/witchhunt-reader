@@ -7,9 +7,10 @@
 //  3. no line starts with a dependent sign, a ZWJ or a ZWNJ, and no line that ends inside a word (before the hyphen of
 //     a word split across lines) ends its Indic text with a virama;
 //  4. each glyph form is what IndicShaper::shapeToken makes of its word's text, at its drawn size (the face's ppem
-//     times its scale), in the book's language, with its glued neighbours kept apart (another style or size) as
-//     context: one Glyphs piece over the whole text, with the stored records;
+//     times its scale), in the book's language, with the glued tokens kept apart from it (another style or size),
+//     whole, as context: one Glyphs piece over the whole text, with the stored records;
 //  5. every word is drawn inside the page.
+// And a line without Indic text keeps its bytes: the same with the book's face as without one.
 // Each book's counts are printed against floors: glyph words, merged words (the cases' tokens that merge), kept-apart
 // pairs, glyph words glued to punctuation and, in Malayalam, words past one shaping call's code points and words split
 // across lines. No section of the four is laid out degraded.
@@ -24,6 +25,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -157,6 +160,26 @@ bool sameStyle(const TextBlock& block, const uint16_t a, const uint16_t b) {
 
 bool keptApart(const TextBlock& block, const uint16_t a, const uint16_t b) {
   return block.wordContinues(b) && !sameStyle(block, a, b);
+}
+
+// The whole text of the token that word `last` ends, or word `first` starts: the layout's context for a token kept
+// apart from it is that token's text (ParsedText::shapeToken's `before` and `after`), and a token is the run of glued
+// words of one style around it, each of its pieces a word of the line.
+std::string tokenEndingAt(const TextBlock& block, const uint16_t last) {
+  uint16_t first = last;
+  while (first > 0 && block.wordContinues(first) && sameStyle(block, static_cast<uint16_t>(first - 1), first)) --first;
+  std::string text;
+  for (uint16_t k = first; k <= last; ++k) text += block.wordText(k);
+  return text;
+}
+
+std::string tokenStartingAt(const TextBlock& block, const uint16_t first) {
+  std::string text = block.wordText(first);
+  for (uint16_t k = static_cast<uint16_t>(first + 1);
+       k < block.wordCount() && block.wordContinues(k) && sameStyle(block, static_cast<uint16_t>(k - 1), k); ++k) {
+    text += block.wordText(k);
+  }
+  return text;
 }
 
 struct Glyph {
@@ -307,10 +330,17 @@ TEST_P(ShapingRules, GlyphFormsAreTheEnginesShaping) {
         request.ppem26_6 =
             static_cast<uint32_t>(static_cast<float>(facePpem) * r.fontBaseScale(box.fontId) * box.scale + 0.5f);
         request.languageTags = language;
-        if (i > 0 && keptApart(block, static_cast<uint16_t>(i - 1), i)) request.before = block.wordText(i - 1);
-        if (i + 1 < block.wordCount() && keptApart(block, i, static_cast<uint16_t>(i + 1))) {
-          request.after = block.wordText(i + 1);
+        // The glued tokens kept apart, whole, as the layout passed them.
+        std::string before;
+        std::string after;
+        if (i > 0 && keptApart(block, static_cast<uint16_t>(i - 1), i)) {
+          before = tokenEndingAt(block, static_cast<uint16_t>(i - 1));
         }
+        if (i + 1 < block.wordCount() && keptApart(block, i, static_cast<uint16_t>(i + 1))) {
+          after = tokenStartingAt(block, static_cast<uint16_t>(i + 1));
+        }
+        request.before = before;
+        request.after = after;
         const std::string_view text(block.wordText(i), block.wordTextLen(i));
         RecordingSink sink;
         IndicShaper::Outcome outcome;
@@ -348,6 +378,46 @@ TEST_P(ShapingRules, EveryWordIsDrawnInsideThePage) {
   }));
   logCount("words", checked, 1);
   EXPECT_GT(checked, 0);
+}
+
+// A line without Indic text is laid out as if no font could shape: the book's Latin lines are byte for byte the same,
+// as the section file holds them, with its face and without one.
+TEST_P(ShapingRules, TheLatinLinesKeepTheirBytes) {
+  const fs::path lineFile = work / "line.bin";
+  const auto latinLines = [&](const pipeline_harness::Profile& profile, const char* cache) {
+    std::vector<std::string> lines;
+    const bool ok = pipeline_harness::forEachPage(
+        corpusBook(GetParam().name), (work / cache).string(), profile,
+        [&](int, const Section&, const Page& page, GfxRenderer&) {
+          forEachLine(page, [&](const TextBlock& block, int) {
+            bool latin = false;
+            for (uint16_t i = 0; i < block.wordCount(); ++i) {
+              if (holdsIndic(block.wordText(i))) return;
+              const std::vector<uint32_t> cps = codepointsOf(block.wordText(i));
+              latin = latin || std::any_of(cps.begin(), cps.end(), [](const uint32_t cp) {
+                        return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z');
+                      });
+            }
+            if (!latin) return;
+            HalFile out;
+            ASSERT_TRUE(out.openForWrite(lineFile.string()));
+            ASSERT_TRUE(block.serialize(out));
+            out.close();
+            std::ifstream in(lineFile, std::ios::binary);
+            lines.emplace_back(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            ASSERT_FALSE(lines.back().empty());
+          });
+        });
+    EXPECT_TRUE(ok);
+    return lines;
+  };
+  pipeline_harness::Profile unshaped = profileOf(GetParam());
+  unshaped.shapingFontFile = nullptr;
+  const std::vector<std::string> shapedLines = latinLines(profileOf(GetParam()), "shaped");
+  const std::vector<std::string> unshapedLines = latinLines(unshaped, "unshaped");
+  logCount("Latin lines", static_cast<int>(shapedLines.size()), 2);
+  EXPECT_GE(shapedLines.size(), 2u);
+  EXPECT_EQ(unshapedLines, shapedLines);
 }
 
 // The cases the rules must have met, against their floors; and no section laid out degraded.

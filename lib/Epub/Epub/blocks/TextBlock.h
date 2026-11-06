@@ -299,7 +299,9 @@ class TextBlock final : public Block {
   const RenderStyle& getRenderStyle() const { return renderStyle; }
   bool isEmpty() override { return numWords == 0; }
   bool valid() const { return isValid; }
-  // The bytes of the line's one allocation (its arena), for the host dump's page figures; 0 when it has none.
+  // The size of the line's arena (its words' texts, offsets, positions, styles, sizes and fonts, its annotations and
+  // its bidi region), whether on the heap or in a lent region; the TextBlock object itself is not counted. For the host
+  // dump's page figures; 0 when it has none.
   size_t arenaBytes() const {
     return arena != nullptr ? arenaSize(numWords, sizesPresent, wordFontCount, textBytes, annotationBytes_, bidiBytes_)
                             : 0;
