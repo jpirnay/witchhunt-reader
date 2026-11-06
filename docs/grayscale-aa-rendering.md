@@ -100,7 +100,7 @@ All three need text anti-aliasing on and a resident, non-degraded secondary
 | Path | Where | What happens |
 |---|---|---|
 | Single push | `supportsGrayFrame()`: the T5S3 | `beginGrayCapture()` makes the B/W render write both planes as it goes; page and greys go out as one waveform (`triggerGrayscaleFrame()`). |
-| Inline | `!usesDeferredAa()`: an async-capable panel that is not an X3 (X4, X4 Pro) | B/W page via `triggerDisplayAsync()`, then `renderGrayscalePlanesInterleaved()`. It waits `AA_SETTLE_MS` (400 ms) after the B/W waveform before committing, and a press in that time cancels it, so a reader flipping through pages is not held by a pass they will never see. Skipped when a page turn is already on its way. |
+| Inline | `!usesDeferredAa()`: an async-capable panel that is not an X3 (X4, X4 Pro) | B/W page via `triggerDisplayAsync()`, then `renderGrayscalePlanesInterleaved()`. It waits `AA_SETTLE_MS` (400 ms) after the B/W waveform before committing, and a press in that time cancels it, so a reader flipping through pages is not held by a pass they will never see. A turn parked on the render lock counts as a press (`pageTurnWaitingForLock_`): by then it has been drained and released, and nothing else shows it. Skipped when a page turn is already on its way. |
 | Deferred | the X3, and any panel that cannot overlap | The B/W page is shown; `runDeferredGrayscalePass()` runs `renderGrayscalePlanesSequential()` from idle time, and a page turn aborts it. |
 
 ### Absolute planes: images and the sleep cover

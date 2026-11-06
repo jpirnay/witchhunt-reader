@@ -472,6 +472,8 @@ class EpubReaderActivity final : public Activity {
   // Page last drawn by the SectionBuilding pass (-1 = none yet / popup showing). Stops the
   // pass redrawing the same page every idle tick.
   int buildDisplayedPage_ = -1;
+  // True while pageTurn() waits for the render lock: the one sign the render task can read that a turn is on its way.
+  std::atomic<bool> pageTurnWaitingForLock_{false};
   // The page stepOnScreenImagesDuringBuild() last looked at: one look a page, not one a tick.
   int buildImagesLookedSpine_ = -1;
   int buildImagesLookedPage_ = -1;

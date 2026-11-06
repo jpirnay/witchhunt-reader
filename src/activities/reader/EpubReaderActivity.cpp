@@ -1168,10 +1168,13 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  // This lock is the first the turn waits on, so this is where the AA pass has to hear about it.
+  pageTurnWaitingForLock_.store(true, std::memory_order_release);
   // No current section, attempt to rerender the book
   {
     RenderLock lock(*this);
     if (!section) {
+      pageTurnWaitingForLock_.store(false, std::memory_order_release);
       requestUpdate();
       return;
     }
@@ -3664,7 +3667,12 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn) {
   // One lock covers cancellation, pre-render selection, navigation, and cleanup. The
   // render task temporarily mutates section/pre-render state and publishes deferred-AA
   // shared_ptrs, so even guard-only reads must be serialized.
+  //
+  // The lock can be a whole AA pass away, and by now the press has been drained and the button
+  // released, so nothing else says a turn is on its way (see aaPreemptedByNavigation()).
+  pageTurnWaitingForLock_.store(true, std::memory_order_release);
   RenderLock lock(*this);
+  pageTurnWaitingForLock_.store(false, std::memory_order_release);
 
   // Cancel any pending deferred AA pass — it belongs to the page we're leaving.
   pendingGrayscale_ = {};
@@ -6411,6 +6419,12 @@ bool EpubReaderActivity::usesDeferredAa() const {
 }
 
 bool EpubReaderActivity::aaPreemptedByNavigation() const {
+  // 0) A turn is parked on the render lock this pass holds. It has been read and released, so the
+  //    three checks below see nothing, and it only runs once the pass lets go. X4 Pro, 2026-11-06:
+  //    a tap as the page came up waited out the whole pass, 12 passes of 12, none aborted.
+  if (pageTurnWaitingForLock_.load(std::memory_order_acquire)) {
+    return true;
+  }
   // 1) An update is already queued — a turn has completed and its render is waiting.
   if (isUpdateSuperseded()) {
     return true;
