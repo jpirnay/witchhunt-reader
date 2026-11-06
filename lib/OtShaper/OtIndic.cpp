@@ -25,6 +25,7 @@ bool isJoiner(const GlyphInfo& info) { return isOneOf(info, JOINER_FLAGS); }
 bool isHalant(const GlyphInfo& info) { return isOneOf(info, flag(icat::H)); }
 bool flagSet(const uint8_t value, const uint64_t flags) { return (flags >> value) & 1; }
 
+// witchhunt: deviation 13 - the anonymous namespace closes here, and opens again after consonantPositionFromFace().
 }  // namespace
 
 // consonant_position_from_face().
@@ -48,7 +49,7 @@ uint8_t consonantPositionFromFace(const Face& face, const Plan& plan, const uint
   return ipos::BASE_C;
 }
 
-namespace {
+namespace {  // witchhunt: deviation 13
 
 // The font's virama glyph, 0 when it has none.
 uint32_t viramaGlyph(const Face& face, const Plan& plan) {

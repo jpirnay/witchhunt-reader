@@ -322,12 +322,13 @@ TEST(ShapedStore, DropFrontOfTokensWithNoPiecesKeepsTheOthers) {
   EXPECT_FALSE(store.pieces(0, "ddd", 1).has_value());
 }
 
-TEST(ShapedStore, APieceThatOutgrowsItsOwnChunkTwiceKeepsAllItsRecords) {
+TEST(ShapedStore, APieceThatOutgrowsItsOwnChunkThreeTimesKeepsAllItsRecords) {
   ShapedStore store;
   ASSERT_TRUE(store.insert(0));
   ASSERT_TRUE(store.open(0, "huge", 1));
   ASSERT_TRUE(store.beginPiece(PieceKind::Glyphs, 0, 4));
-  // 700 records of 6 B: past 1,024 B (the chunk is replaced by one of 2 KB), then past 2 KB (4 KB).
+  // 700 records of 6 B, 4,200 B: past 1,024 B (the chunk is replaced by one of 2 KB), past 2 KB (4 KB), then past
+  // 4 KB (8 KB).
   for (int i = 0; i < 700; i++) {
     GlyphRecord r;
     r.glyph = static_cast<uint16_t>(i);
@@ -349,7 +350,7 @@ TEST(ShapedStore, APieceThatOutgrowsItsOwnChunkTwiceKeepsAllItsRecords) {
   });
   EXPECT_TRUE(ok);
   EXPECT_EQ(i, 700);
-  EXPECT_GE(store.chunkBytes(), 4200u);  // the piece's chunk holds all of it
+  EXPECT_EQ(8192u, store.chunkBytes());  // the piece's own chunk, grown three times, holds all of it
 }
 
 TEST(ShapedStore, AnAbandonedRewriteDropsTheStaleEntry) {

@@ -95,7 +95,7 @@ struct Request {
 struct Admission {
   bool resident = false;
   bool cjkTrueType = false;     // refused for what the book and its fonts are, whatever the heap
-  bool shapedTrueType = false;  // likewise
+  bool shapedTrueType = false;  // refused for a shaped-script book in a TrueType set, whatever the heap
   uint32_t ringBytes = 0;
   uint32_t freeFloor = 0;
   uint32_t contigFloor = 0;

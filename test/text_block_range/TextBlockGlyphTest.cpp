@@ -233,7 +233,8 @@ TEST(TextBlockGlyphForms, LoadRejects) {
                 plain, twoWordRegion(0x04, 0, kNone, octets({0xFF, 0x02, 0x00, 0x02, 0x01, 0xA0, 0x00, 0x00})))));
   // A glyph form of no glyphs, which no build writes.
   EXPECT_EQ(nullptr, readBack(withRegion(plain, twoWordRegion(0x04, 0, kNone, octets({0xFF, 0x00, 0x00, 0x00})))));
-  // A glyph form on a vertical line (flags bit 2), which PR 3 never writes; the line alone reads.
+  // A glyph form on a vertical line (flags bit 2), which no build writes (a vertical line's Indic words take
+  // IndicReorder's form); the line alone reads.
   std::string vertical = plain;
   vertical[2] = static_cast<char>(static_cast<uint8_t>(vertical[2]) | 0x04);
   ASSERT_NE(nullptr, readBack(vertical));

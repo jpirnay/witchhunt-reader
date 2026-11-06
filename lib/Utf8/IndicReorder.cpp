@@ -278,13 +278,15 @@ bool reorderInto(const Cursor begin, const Cursor end, Out& out) {  // witchhunt
   return changed;
 }
 
+// witchhunt: deviation 9 - moved: upstream closes the anonymous namespace before the std::string overload, whose body
+// is reorderInto now; this line and the overload's first lines come after it.
 }  // namespace
 
-bool indicReorderForDisplay(const char* text, std::string& out) {
-  if (text == nullptr || !indic::containsIndic(text)) return false;
+bool indicReorderForDisplay(const char* text, std::string& out) {    // witchhunt: deviation 9
+  if (text == nullptr || !indic::containsIndic(text)) return false;  // witchhunt: deviation 9
 
-  out.clear();
-  out.reserve(strlen(text) + 8);
+  out.clear();                                            // witchhunt: deviation 9
+  out.reserve(strlen(text) + 8);                          // witchhunt: deviation 9
   StringOut sink{out};                                    // witchhunt: deviation 9
   const Cursor begin = reinterpret_cast<Cursor>(text);    // witchhunt: deviation 9
   return reorderInto(begin, begin + strlen(text), sink);  // witchhunt: deviation 9

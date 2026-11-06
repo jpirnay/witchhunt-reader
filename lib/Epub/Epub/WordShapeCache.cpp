@@ -212,8 +212,13 @@ void WordShapeCache::emptySlots() {
 
 size_t WordShapeCache::setOf(const uint64_t textHash, const uint16_t length, const uint32_t key) const {
   if (sets_ == 0) return SIZE_MAX;
+  // Not Fibonacci hashing: the key times an odd constant spreads its low bits upward, and the last fold brings bits
+  // 16-31 down onto 0-15. So with the tail's 128 sets the index reads the key's bits 0-22 alone (and the text hash's
+  // 0-6, 16-22, 32-38 and 48-54). Keys are FNV-1a values: two that differ almost always differ there. A mix that every
+  // bit reaches moved the shaped test books' hit rates by up to nine points either way, collision noise, so this one
+  // stays.
   uint32_t h = static_cast<uint32_t>(textHash) ^ static_cast<uint32_t>(textHash >> 32);
-  h ^= key * 0x9E3779B1u;  // Fibonacci hashing: the key's high bits reach the low ones
+  h ^= key * 0x9E3779B1u;
   h ^= length;
   h ^= h >> 16;
   return h % sets_;
@@ -323,9 +328,7 @@ void WordShapeCache::insert(const uint64_t textHash, const uint16_t length, cons
   } else {
     way = (set[kFlagsAt] & kWay1Recent) != 0 ? 0 : 1;
   }
-  const uint8_t recency = static_cast<uint8_t>(set[kFlagsAt] & kWay1Recent);
   std::memcpy(wayOf(set, way), entry, need);
-  if (way == 0) set[kFlagsAt] = recency;  // way 0's flags byte carries the set's recency
-  touch(set, way);
+  touch(set, way);  // the set's recency, in way 0's flags byte (which a copy into way 0 has just reset)
   ++stats_.inserts;
 }

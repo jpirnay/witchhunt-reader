@@ -345,7 +345,7 @@ TEST(WordShapeCache, KeysKeepFormsApart) {
   cache.insert(hashOf(other), lengthOf(other), hindiKey, made, 2);
   cache.insert(hashOf(kWord), lengthOf(kWord), marathiKey, made, 3);
 
-  // Each lookup gets its own pieces or none (a later entry of the same slot took its place), never another's.
+  // Each lookup gets its own pieces or none (later entries of the same set took its way), never another's.
   const auto own = [&](std::string_view text, uint32_t key, const std::vector<ReadPiece>& expected) {
     const std::vector<ReadPiece> got = replayed(cache, text, key);
     EXPECT_TRUE(got.empty() || got == expected);
