@@ -686,6 +686,8 @@ class ChapterHtmlSlimParser final : public Print {
   // Set when any table row was demoted to paragraphs (degradeRow), for any reason: the pages
   // are usable but the cache holds a layout the heap chose, not the book. See tableRowDegraded().
   bool tableRowDegradedAny_ = false;
+  // Set by any ParsedText of this parse that laid a shaped-script run out unshaped. See shapingDegraded().
+  bool shapingDegradedAny_ = false;
   // Fixed-capacity limits this parse ran into that changed its output (memory audit 2026-09,
   // R4). Each is logged at ERR once per parse and the union is latched into the section status
   // byte (Section::isSimplified) -- a deterministic condition, so nothing rebuilds on it; the
@@ -1095,6 +1097,9 @@ class ChapterHtmlSlimParser final : public Print {
   // reader can rebuild the chapter once when memory allows, instead of keeping the demoted
   // layout for good (memory audit 2026-09, F3/R3).
   [[nodiscard]] bool tableRowDegraded() const { return tableRowDegradedAny_; }
+  // True when a shaped-script run was laid out unshaped (no memory for it, or the font could not shape it).
+  // Latched into the section status byte; the reader rebuilds once, as for tableRowDegraded().
+  [[nodiscard]] bool shapingDegraded() const { return shapingDegradedAny_; }
   enum CapOverflow : uint8_t {
     kCapFootnotesPerPage = 1u << 0,   // Page::MAX_FOOTNOTES_PER_PAGE: later links on the page dropped
     kCapAnchorsPerChapter = 1u << 1,  // MAX_ANCHORS_PER_CHAPTER, or no heap for resident ones: ids dropped

@@ -221,6 +221,9 @@ class GfxRenderer {
   ShapingFace* shapingFace(const int fontId, const EpdFontFamily::Style style, uint32_t* ppem26_6) const {
     return shapingFaceSource != nullptr ? shapingFaceSource(fontId, style, ppem26_6) : nullptr;
   }
+  // A section build's end frees the shaping faces: counted, so a test sees each build do it.
+  static inline int shapingReleases = 0;
+  static void releaseShapingFaces() { ++shapingReleases; }
   float fontBaseScale(int) const { return 1.0f; }
   // The glyph-ID prefetch of a build's warm step: counted, one per run.
   mutable int prefetchedRuns = 0;

@@ -18,8 +18,10 @@
 // (X3: highWater=9216/10240, failedAlloc=0, build time neutral). The former
 // per-site new/realloc path has been removed.
 #include <BuildArena.h>
+#include <GfxRenderer.h>
 #include <GlyphProvider.h>
 #include <InflateReader.h>
+#include <TextShaping.h>
 
 #include <algorithm>
 #include <cstring>
@@ -34,7 +36,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 108;  // v108: right-to-left lines: a word's display form and the line's
+constexpr uint8_t SECTION_FILE_VERSION = 109;  // v109: Indic lines are shaped: a word's glyph form (the bidi
+                                               // region's bit 2) and run-cut pieces (writing modes step 2)
+                                               // v108: right-to-left lines: a word's display form and the line's
                                                // logical order (the TextBlock bidi region, flagged by the word
                                                // count's top bit)
                                                // v107: a vertical line's Combine annotation record (tate-chu-yoko),
@@ -210,6 +214,9 @@ constexpr uint8_t kStatusSimplified = 1 << 4;
 //   in the header, the book's CSS and its page progression). The request alone does not say: under Automatic it
 //   depends on the chapter.
 constexpr uint8_t kStatusVertical = 1 << 5;
+//   kStatusShapingDegraded: a shaped-script run was laid out as code points (no memory for it, or the font could not
+//   shape it); the reader rebuilds once per spine per session, as for the table-row bit.
+constexpr uint8_t kStatusShapingDegraded = 1 << 6;
 
 // On-disk paragraph LUT entry: u32 visibleTextOffset + u16 paragraphIndex + u16 listItemIndex.
 // visibleTextOffset is the number of visible bytes (VisibleText.h) of the chapter's source text
@@ -694,6 +701,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
   truncatedCache = false;
   imageHeaderDegraded_ = false;
   tableRowDegraded_ = false;
+  shapingDegraded_ = false;
   cssLowHeapDegraded_ = false;
   simplified_ = false;
   // Loaded or not, the section is now held to this request: horizontal under it until a cache or a build says
@@ -779,6 +787,7 @@ bool Section::loadSectionFile(const BuildParams& p) {
     truncatedCache = (fileStatus & kStatusParseComplete) == 0;
     imageHeaderDegraded_ = (fileStatus & kStatusImageHeaderDegraded) != 0;
     tableRowDegraded_ = (fileStatus & kStatusTableRowDegraded) != 0;
+    shapingDegraded_ = (fileStatus & kStatusShapingDegraded) != 0;
     cssLowHeapDegraded_ = (fileStatus & kStatusCssDegraded) != 0;
     simplified_ = (fileStatus & kStatusSimplified) != 0;
     vertical_ = (fileStatus & kStatusVertical) != 0;
@@ -855,6 +864,7 @@ bool Section::clearCache() {
   truncatedCache = false;
   imageHeaderDegraded_ = false;
   tableRowDegraded_ = false;
+  shapingDegraded_ = false;
   cssLowHeapDegraded_ = false;
   simplified_ = false;
   request_ = VerticalText::Off;  // a fresh section's, until a load or a build names one
@@ -1009,6 +1019,9 @@ struct Section::BuildState {
     // The line pass's memory lives for the build alone (deviation 1): the heap Scratch and workspace are freed, a lent
     // workspace unbound.
     BidiLine::releaseBuildMemory();
+    // The shaping pass's memory and the shaping faces the build opened are the same kind of lifetime.
+    TextShaping::releaseBuildMemory();
+    GfxRenderer::releaseShapingFaces();
   }
   bool parseStarted = false;
   // Two-phase sliced parse, latched at the first parse call (so a build started in the
@@ -1183,6 +1196,7 @@ Section::BuildPhaseResult Section::runBuildSetup(BuildState& st) {
   footnotePreviewsUnresolved_ = false;
   imageHeaderDegraded_ = false;
   tableRowDegraded_ = false;
+  shapingDegraded_ = false;
   simplified_ = false;
   request_ = p.verticalText;
   vertical_ = false;
@@ -1697,6 +1711,13 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   if (st.visitor->tableRowDegraded()) {
     tableRowDegraded_ = true;
   }
+  if (st.visitor->shapingDegraded()) {
+    shapingDegraded_ = true;
+    LOG_INF("SCT",
+            "spine=%d shaping degraded: a shaped-script run was laid out unshaped (no memory for it, or the font could "
+            "not shape it)",
+            spineIndex);
+  }
   if (st.visitor->capOverflowFlags() != 0) {
     simplified_ = true;
   }
@@ -1867,10 +1888,11 @@ Section::BuildPhaseResult Section::runBuildFinalize(BuildState& st) {
     Storage.remove(filePath.c_str());
     return BuildPhaseResult::Failed;
   }
-  const uint8_t status =
-      (parseComplete ? kStatusParseComplete : 0) | (imageHeaderDegraded_ ? kStatusImageHeaderDegraded : 0) |
-      (tableRowDegraded_ ? kStatusTableRowDegraded : 0) | (cssLowHeapDegraded_ ? kStatusCssDegraded : 0) |
-      (simplified_ ? kStatusSimplified : 0) | (vertical_ ? kStatusVertical : 0);
+  const uint8_t status = (parseComplete ? kStatusParseComplete : 0) |
+                         (imageHeaderDegraded_ ? kStatusImageHeaderDegraded : 0) |
+                         (tableRowDegraded_ ? kStatusTableRowDegraded : 0) |
+                         (cssLowHeapDegraded_ ? kStatusCssDegraded : 0) | (simplified_ ? kStatusSimplified : 0) |
+                         (vertical_ ? kStatusVertical : 0) | (shapingDegraded_ ? kStatusShapingDegraded : 0);
   serialization::writePod(file, status);
   serialization::writePod(file, pageCount);
   serialization::writePod(file, lutOffset);
@@ -2152,7 +2174,8 @@ Section::BuildStep Section::stepSectionBuild(const BuildParams& params, const ui
     // Recorded under the variant the reader asked for (requestedHash), also when the no-CSS
     // restart above produced it. A degraded build is left out: Background-B discards those for a
     // clean rebuild, and one the reader keeps is recorded when it is next loaded.
-    if (!imageHeaderDegraded_ && !tableRowDegraded_ && !cssLowHeapDegraded_ && !footnotePreviewsUnresolved_) {
+    if (!imageHeaderDegraded_ && !tableRowDegraded_ && !shapingDegraded_ && !cssLowHeapDegraded_ &&
+        !footnotePreviewsUnresolved_) {
       recordPageCount(requestedHash);
     }
     return BuildStep::Done;

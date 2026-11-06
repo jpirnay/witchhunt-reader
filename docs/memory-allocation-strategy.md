@@ -241,8 +241,9 @@ What a bump arena is for, and what it is not:
 4. Any new resident (class B) state is O(1) in book size.
 5. Prefer borrow to release, and document the reason whenever release is chosen.
 6. A refusal that changes the output is latched, never cached silently: the section status byte
-   (`kStatusImageHeaderDegraded`, `kStatusTableRowDegraded` and `kStatusCssDegraded` earn the spine
-   one rebuild per session; `kStatusSimplified` is deterministic and only logged), or
+   (`kStatusImageHeaderDegraded`, `kStatusTableRowDegraded`, `kStatusShapingDegraded` and
+   `kStatusCssDegraded` earn the spine one rebuild per session; `kStatusSimplified` is deterministic
+   and only logged), or
    `PixelCache::PXC_MAGIC_COARSE` in a `.pxc`.
 7. Every fixed capacity has a defined behaviour past it: provably above any input, with the bound
    written next to it; or logged once at ERR and latched (`ChapterHtmlSlimParser::noteCapOverflow`

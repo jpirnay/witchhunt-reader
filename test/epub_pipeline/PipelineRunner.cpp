@@ -12,10 +12,18 @@
 #include "Epub/FootnotePreviews.h"
 #include "Epub/Page.h"
 #include "Epub/Section.h"
+#include "FixtureShapingFace.h"
 #include "HeapTrack.h"
 
 namespace pipeline_harness {
 namespace {
+
+// The installed shaping face (ShapingFaceScope); the seam hands it out for every font and style, at 20 px per em.
+std::unique_ptr<FixtureShapingFace> installedFace;
+ShapingFace* installedFaceSource(int, EpdFontFamily::Style, uint32_t* ppem26_6) {
+  *ppem26_6 = 1280;
+  return installedFace.get();
+}
 
 // Image paths live under the (run-specific) cache dir; strip that prefix so
 // dumps compare across runs and machines. The per-book cache subdir is named
@@ -186,8 +194,20 @@ BuildBracketFn g_buildBracket;
 
 void setBuildBracket(BuildBracketFn fn) { g_buildBracket = std::move(fn); }
 
+ShapingFaceScope::ShapingFaceScope(const char* file) {
+  if (file == nullptr) return;
+  installedFace = std::make_unique<FixtureShapingFace>(readFont(SHAPING_FONT_DIR, file));
+  GfxRenderer::shapingFaceSource = installedFaceSource;
+}
+
+ShapingFaceScope::~ShapingFaceScope() {
+  GfxRenderer::shapingFaceSource = nullptr;
+  installedFace.reset();
+}
+
 bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const Profile& profile, std::ostream& out,
                 const SpineStatFn& spineStat, const ArenaStatFn& arenaStat) {
+  const ShapingFaceScope shapingFace(profile.shapingFontFile);
   GfxRenderer renderer;
   std::unique_ptr<BuildArena> lentArena;
   if (profile.lentArenaBytes > 0) {
@@ -280,6 +300,7 @@ bool forEachPage(const std::string& epubPath, const std::string& cacheDir, const
     std::fprintf(stderr, "forEachPage: lentArenaBytes is not supported (heap-only builds)\n");
     return false;
   }
+  const ShapingFaceScope shapingFace(profile.shapingFontFile);
   GfxRenderer renderer;
   auto epub = std::make_shared<Epub>(epubPath, cacheDir);
   if (!epub->load(true)) return false;

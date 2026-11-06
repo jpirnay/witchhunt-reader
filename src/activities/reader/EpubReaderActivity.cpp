@@ -1932,7 +1932,7 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       if (step == Section::BuildStep::Done) {
         if (backgroundSection_->isTruncatedCache() || backgroundSection_->isCssLowHeapDegraded() ||
             backgroundSection_->isFootnotePreviewsUnresolved() || backgroundSection_->isImageHeaderDegraded() ||
-            backgroundSection_->isTableRowDegraded()) {
+            backgroundSection_->isTableRowDegraded() || backgroundSection_->isShapingDegraded()) {
           // Memory ran short mid-parse: pages are missing (truncated), CSS lookups were skipped
           // (styles silently absent from the cached pages), the footnote resolve could not
           // complete (markers left plain in a cache keyed "previews on"), or an image was dropped
@@ -1946,7 +1946,8 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
                                : backgroundSection_->isCssLowHeapDegraded()         ? "css-degraded"
                                : backgroundSection_->isFootnotePreviewsUnresolved() ? "footnotes unresolved"
                                : backgroundSection_->isImageHeaderDegraded()        ? "image degraded"
-                                                                                    : "table row demoted";
+                               : backgroundSection_->isTableRowDegraded()           ? "table row demoted"
+                                                                                    : "shaping degraded";
           LOG_INF("ERS",
                   "Background build spine=%d %s; discarding for foreground rebuild, look-ahead paused until the "
                   "next chapter",
@@ -2505,9 +2506,10 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   // §8.4a). Before that, the X3 demoted every row of the Roosevelt appendix-b at 11-18 KB free
   // (2026-09-26); the released rebuild, with ~95 KB free, lays the table out.
   if (step == Section::BuildStep::Failed || section->isTruncatedCache() || section->isCssLowHeapDegraded() ||
-      section->isTableRowDegraded()) {
+      section->isTableRowDegraded() || section->isShapingDegraded()) {
     fallbackToReleasedRebuild(step == Section::BuildStep::Failed ? "failed"
                               : section->isTableRowDegraded()    ? "table row demoted"
+                              : section->isShapingDegraded()     ? "shaping degraded"
                                                                  : "incomplete",
                               /*retryIncremental=*/false);
     return;
@@ -4500,10 +4502,11 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   // The released build is the path with the most heap this session can offer; a result it
   // still had to degrade is worth one loud line (the status byte carries it to the next entry,
   // which rebuilds once -- see the cache-hit policy in buildSection).
-  if (createOk && (section->isCssLowHeapDegraded() || section->isTableRowDegraded())) {
-    LOG_ERR("ERS", "Blocking build spine=%d came out degraded (%s%s); cached with the status bit set",
+  if (createOk && (section->isCssLowHeapDegraded() || section->isTableRowDegraded() || section->isShapingDegraded())) {
+    LOG_ERR("ERS", "Blocking build spine=%d came out degraded (%s%s%s); cached with the status bit set",
             currentSpineIndex, section->isCssLowHeapDegraded() ? "css-skips " : "",
-            section->isTableRowDegraded() ? "table-row-demoted" : "");
+            section->isTableRowDegraded() ? "table-row-demoted " : "",
+            section->isShapingDegraded() ? "shaping-unshaped" : "");
   }
   if (createOk && section->isImageHeaderDegraded()) {
     // A borrowed build's region is idle now (its build state is gone): walk from it directly,
@@ -4754,10 +4757,12 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
   // lookups. Both used to be baked in for good (memory audit 2026-09, F3). Same policy as the
   // image bit: one rebuild per spine per session, and if that one comes out degraded too the
   // bit stays set and the chapter is read as it is.
-  if (cacheHit && (section->isTableRowDegraded() || section->isCssLowHeapDegraded()) &&
+  if (cacheHit && (section->isTableRowDegraded() || section->isShapingDegraded() || section->isCssLowHeapDegraded()) &&
       degradedLayoutRebuildSpine_ != currentSpineIndex) {
     LOG_INF("ERS", "Section %d: cached %s under low heap; rebuilding once", currentSpineIndex,
-            section->isTableRowDegraded() ? "with a table row demoted to paragraphs" : "with CSS lookups skipped");
+            section->isTableRowDegraded()  ? "with a table row demoted to paragraphs"
+            : section->isShapingDegraded() ? "with a shaped-script run laid out unshaped"
+                                           : "with CSS lookups skipped");
     degradedLayoutRebuildSpine_ = currentSpineIndex;
     section->clearCache();
     cacheHit = false;

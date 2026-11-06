@@ -2313,6 +2313,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
   }
   if (currentTextBlock) {
     currentTextBlock->setTypography(typography_);
+    currentTextBlock->setShapingLatch(&shapingDegradedAny_);
     currentTextBlock->setVertical(vertical_);
   }
   wireTextBlock();
@@ -2727,6 +2728,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     row.cells.back().text =
         std::unique_ptr<ParsedText>(new ParsedText(false, false));  // no paragraph spacing, no hyphenation in cells
     row.cells.back().text->setTypography(self->typography_);
+    row.cells.back().text->setShapingLatch(&self->shapingDegradedAny_);
     row.cells.back().text->setVertical(self->vertical_);
     row.cells.back().text->getBlockStyle().direction = self->blockDirection(cssStyle);
     self->currentTable->pendingRowBytes += TABLE_BUFFER_BYTES_PER_CELL;
@@ -5804,6 +5806,7 @@ bool ChapterHtmlSlimParser::degradeRowAtOpenCell(const char* reason) {
   }
   open.text = std::unique_ptr<ParsedText>(new ParsedText(false, false));
   open.text->setTypography(typography_);
+  open.text->setShapingLatch(&shapingDegradedAny_);
   open.text->setVertical(vertical_);
 
   t.pendingRow.cells.push_back(std::move(open));

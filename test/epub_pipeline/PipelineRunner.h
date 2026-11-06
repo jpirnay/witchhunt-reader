@@ -48,6 +48,20 @@ struct Profile {
   // census then shows what such a build keeps on the heap; the arena's own use is reported per
   // spine (ARENA lines) when `arenaStat` is set.
   size_t lentArenaBytes = 0;
+  // A font file of test/fixtures/fonts: when set, the run installs a FixtureShapingFace over it as the face of every
+  // font and style (ppem 1280) in the stub's seam, and removes it after. Null: no font shapes.
+  const char* shapingFontFile = nullptr;
+};
+
+// For its lifetime, a Profile's shapingFontFile is the face of every font in the stub renderer's seam (nothing for a
+// null file). The runs below make one from their profile; a test that builds a Section itself makes its own. One at a
+// time: the face is a static.
+class ShapingFaceScope {
+ public:
+  explicit ShapingFaceScope(const char* file);
+  ~ShapingFaceScope();
+  ShapingFaceScope(const ShapingFaceScope&) = delete;
+  ShapingFaceScope& operator=(const ShapingFaceScope&) = delete;
 };
 
 using ArenaStatFn = std::function<void(int spineIndex, size_t highWater, size_t capacity)>;
