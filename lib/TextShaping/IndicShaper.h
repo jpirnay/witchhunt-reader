@@ -61,14 +61,21 @@ constexpr unsigned kContextCodepoints = 8;
 struct Request;
 enum class Outcome : uint8_t;
 
+// What a call's block is laid out for. A call with a face (Request::face) shapes: the Buffer and the rest. A call
+// without one (a bitmap or built-in font) only reorders, so its block is IndicReorder's form alone; shaping in it is
+// Degraded.
+enum class CallKind : uint8_t { Shape, Reorder };
+
 // The memory one token is shaped in: the Buffer, its storage (ot::Buffer::bytesFor(2 * runCodepoints + 16)), the
-// token's runs, its code points with their context and IndicReorder's form of it, in one block of `arena` for this call
-// alone, else in the build's heap block (made on first use, grown nothrow to the longest token, freed by
-// TextShaping::releaseBuildMemory(); lent to one call at a time, so a second while it lives is invalid). Released
-// before any glyph is looked up: LIFO with the TrueType miss scope.
+// token's runs, its code points with their context and IndicReorder's form of it (3 * tokenBytes + 1 B; the form
+// alone for CallKind::Reorder), in one block of `arena` for this call alone, else in the build's heap block (made on
+// first use, grown nothrow to the longest token, freed by TextShaping::releaseBuildMemory(); lent to one call at a
+// time, so a second while it lives is invalid). Released before any glyph is looked up: LIFO with the TrueType miss
+// scope.
 class CallMemory {
  public:
-  CallMemory(BuildArena* arena, size_t tokenBytes, unsigned runCodepoints = kMaxRunCodepoints);
+  CallMemory(BuildArena* arena, size_t tokenBytes, CallKind kind = CallKind::Shape,
+             unsigned runCodepoints = kMaxRunCodepoints);
   ~CallMemory();
   CallMemory(const CallMemory&) = delete;
   CallMemory& operator=(const CallMemory&) = delete;
@@ -85,6 +92,7 @@ class CallMemory {
   BuildArena::Block block_;
   bool heapBlock_ = false;  // the block is the build's heap block, lent to this call
   size_t tokenBytes_ = 0;   // the longest token the parts hold
+  // Null for CallKind::Reorder, as the runs and the code points are.
   ot::Buffer* buffer_ = nullptr;
   Run* runs_ = nullptr;             // room for maxRuns(tokenBytes_)
   uint32_t* codepoints_ = nullptr;  // room for codepointRoom_: a run's, with the context on either side

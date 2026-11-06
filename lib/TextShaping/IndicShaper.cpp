@@ -55,6 +55,7 @@ class Carver {
 };
 
 struct Sizes {
+  bool shapes;        // CallKind::Shape: the Buffer and the three after it are laid out
   size_t storage;     // the Buffer's
   size_t runs;        // maxRuns(tokenBytes)
   size_t codepoints;  // a run's, with the context on either side
@@ -69,13 +70,15 @@ struct Parts {
   char* reorder;
 };
 
-// The parts in their order; measured when `carver` has no block.
+// The parts in their order; measured when `carver` has no block. A reordering call's block is its form alone.
 Parts layOut(Carver& carver, const Sizes& sizes) {
   Parts parts{};
-  parts.buffer = carver.take<ot::Buffer>(1);
-  parts.storage = carver.take<uint8_t>(sizes.storage);
-  parts.runs = carver.take<Run>(sizes.runs);
-  parts.codepoints = carver.take<uint32_t>(sizes.codepoints);
+  if (sizes.shapes) {
+    parts.buffer = carver.take<ot::Buffer>(1);
+    parts.storage = carver.take<uint8_t>(sizes.storage);
+    parts.runs = carver.take<Run>(sizes.runs);
+    parts.codepoints = carver.take<uint32_t>(sizes.codepoints);
+  }
   parts.reorder = carver.take<char>(sizes.reorder);
   return parts;
 }
@@ -305,11 +308,17 @@ bool holdsIndic(std::string_view text) {
   return false;
 }
 
-CallMemory::CallMemory(BuildArena* const arena, const size_t tokenBytes, const unsigned runCodepoints) {
+CallMemory::CallMemory(BuildArena* const arena, const size_t tokenBytes, const CallKind kind,
+                       const unsigned runCodepoints) {
   // A piece's bytes are uint16_t, and ot::Buffer numbers at most 65536 slots.
   if (tokenBytes > UINT16_MAX || runCodepoints > (UINT16_MAX - kGrowthExtra) / kGrowthFactor) return;
-  const Sizes sizes{ot::Buffer::bytesFor(kGrowthFactor * runCodepoints + kGrowthExtra), maxRuns(tokenBytes),
-                    tokenBytes / kRunCodepointBytes + 2 * kContextCodepoints, 3 * tokenBytes + 1};
+  // A call without a face writes IndicReorder's form and nothing else, so it takes the form's room alone: a book in
+  // such a font holds a heap block of the longest token's form (in 512 B steps), not the 6.5 KB a shaping call takes
+  // on the C3.
+  const bool shapes = kind == CallKind::Shape;
+  const Sizes sizes{shapes, shapes ? ot::Buffer::bytesFor(kGrowthFactor * runCodepoints + kGrowthExtra) : 0,
+                    shapes ? maxRuns(tokenBytes) : 0,
+                    shapes ? tokenBytes / kRunCodepointBytes + 2 * kContextCodepoints : 0, 3 * tokenBytes + 1};
   Carver measure;
   layOut(measure, sizes);
 
@@ -333,8 +342,10 @@ CallMemory::CallMemory(BuildArena* const arena, const size_t tokenBytes, const u
 
   Carver carve(block);
   const Parts parts = layOut(carve, sizes);
-  buffer_ = new (parts.buffer) ot::Buffer;  // placed in the block; destroyed by ~CallMemory
-  buffer_->setStorage(parts.storage, sizes.storage);
+  if (shapes) {
+    buffer_ = new (parts.buffer) ot::Buffer;  // placed in the block; destroyed by ~CallMemory
+    buffer_->setStorage(parts.storage, sizes.storage);
+  }
   tokenBytes_ = tokenBytes;
   runs_ = parts.runs;
   codepoints_ = parts.codepoints;
@@ -351,7 +362,7 @@ CallMemory::~CallMemory() {
   }
 }
 
-bool CallMemory::valid() const { return buffer_ != nullptr; }
+bool CallMemory::valid() const { return reorder_ != nullptr; }
 
 Outcome shapeToken(const std::string_view text, const Request& request, CallMemory& memory, PieceSink& sink) {
   if (!holdsIndic(text)) return Outcome::Plain;
@@ -368,6 +379,7 @@ Outcome shapeToken(const std::string_view text, const Request& request, CallMemo
                                                                                             : Outcome::Degraded;
   }
 
+  if (memory.buffer_ == nullptr) return Outcome::Degraded;  // a reordering call's block (CallKind::Reorder)
   Run* const runs = memory.runs_;
   const size_t runCount = scanRuns(text, runs);
   const RunMemory runMemory{memory.codepoints_, memory.codepointRoom_, *memory.buffer_};

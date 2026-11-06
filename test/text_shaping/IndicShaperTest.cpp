@@ -36,6 +36,7 @@ void PrintTo(const PieceKind kind, std::ostream* os) {
 
 namespace {
 
+using IndicShaper::CallKind;
 using IndicShaper::CallMemory;
 using IndicShaper::Outcome;
 using IndicShaper::PieceKind;
@@ -116,11 +117,12 @@ struct Shaped {
   std::vector<Piece> pieces;
 };
 
-// `text` shaped in a call of its own, in the build's heap block.
+// `text` shaped in a call of its own, in the build's heap block, laid out as ParsedText lays it out: a call without a
+// face only reorders.
 Shaped shape(std::string_view text, const Request& request,
              const unsigned runCodepoints = IndicShaper::kMaxRunCodepoints) {
   RecordingSink sink;
-  CallMemory memory(nullptr, text.size(), runCodepoints);
+  CallMemory memory(nullptr, text.size(), request.face != nullptr ? CallKind::Shape : CallKind::Reorder, runCodepoints);
   const Outcome outcome = IndicShaper::shapeToken(text, request, memory, sink);
   return {outcome, std::move(sink.pieces)};
 }
@@ -712,6 +714,55 @@ TEST(IndicShaper, TheCallsBlockIsTheArenasForTheCallAlone) {
   }
   EXPECT_EQ(start, arena.used());
   EXPECT_FALSE(TextShaping::buildMemoryHeld());
+}
+
+TEST(IndicShaper, ACallWithoutAFaceTakesABlockForItsFormAlone) {
+  // A bitmap or built-in font only reorders: its call's block is IndicReorder's form, 3 * len + 1 B, without the
+  // Buffer, its storage, the runs and the code points a shaping call lays out.
+  BuildMemoryScope scope;
+  FixtureShapingFace face(layoutFont("Devanagari"));
+  const size_t len = std::strlen(kKi);
+  BuildArena arena(16 * 1024);
+  ASSERT_TRUE(arena.valid());
+  const size_t start = arena.used();
+  size_t shaping = 0;
+  {
+    CallMemory memory(&arena, len);
+    ASSERT_TRUE(memory.valid());
+    shaping = arena.used() - start;
+  }
+  EXPECT_GT(shaping, ot::Buffer::bytesFor(2 * IndicShaper::kMaxRunCodepoints + 16));
+  {
+    CallMemory memory(&arena, len, CallKind::Reorder);
+    ASSERT_TRUE(memory.valid());
+    EXPECT_EQ(3 * len + 1, arena.used() - start);
+    EXPECT_EQ(3 * len + 1, memory.reorderRoom());
+    RecordingSink reordered;
+    ASSERT_EQ(Outcome::Formed, IndicShaper::shapeToken(kKi, on(nullptr), memory, reordered));
+    ASSERT_EQ(1u, reordered.pieces.size());
+    EXPECT_EQ(PieceKind::Reordered, reordered.pieces[0].kind);
+    EXPECT_EQ(std::string("\xE0\xA4\xBF\xE0\xA4\x95"), reordered.pieces[0].bytes);  // ि क
+    // A face's call in a reordering block shapes nothing.
+    RecordingSink shaped;
+    EXPECT_EQ(Outcome::Degraded, IndicShaper::shapeToken(kKi, on(&face), memory, shaped));
+    EXPECT_EQ(0, shaped.calls);
+  }
+  EXPECT_EQ(start, arena.used());
+
+  // Without an arena, the build's heap block a reordering call makes is one 512 B step, not a shaping call's.
+  {
+    const size_t held = heapLiveBytes();
+    CallMemory memory(nullptr, len, CallKind::Reorder);
+    ASSERT_TRUE(memory.valid());
+    EXPECT_LT(heapLiveBytes() - held, size_t{1024});
+  }
+  TextShaping::releaseBuildMemory();
+  {
+    const size_t held = heapLiveBytes();
+    CallMemory memory(nullptr, len);
+    ASSERT_TRUE(memory.valid());
+    EXPECT_GE(heapLiveBytes() - held, shaping);
+  }
 }
 
 TEST(IndicShaper, WithoutAnArenaTheBuildsHeapBlockServesEveryCall) {

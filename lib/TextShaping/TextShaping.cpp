@@ -81,7 +81,8 @@ void* heapBlockOf(const size_t bytes) {
   const size_t grown =
       bytes > SIZE_MAX - kHeapBlockStep ? bytes : (bytes + kHeapBlockStep - 1) / kHeapBlockStep * kHeapBlockStep;
   // One shaping call's glyph buffer, its storage, runs, code points and reordered form (IndicShaper::CallMemory, about
-  // 6-8 KB): past any task's stack, and kept for the build so each token does not allocate it again.
+  // 6-8 KB; a call that only reorders, its form alone): past any task's stack, and kept for the build so each token
+  // does not allocate it again.
   heapBlock = makeUniqueNoThrow<uint8_t[]>(grown);
   if (!heapBlock) {
     if (!heapBlockRefusalLogged) {

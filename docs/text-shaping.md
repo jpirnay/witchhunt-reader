@@ -226,7 +226,7 @@ Nothing of the shaper stays resident: a page draw allocates nothing for a shaped
 
 | What | Where | Lives |
 |---|---|---|
-| A call's block (`IndicShaper::CallMemory`: the `ot::Buffer` for `2 * kMaxRunCodepoints + 16` glyphs, the token's runs, its code points with their context, `IndicReorder`'s form) | a block of the lent arena (`ParsedText::lineArena_`), else the build's heap block | one `shapeToken` call; released before any of the token's glyphs is looked up, LIFO with the TrueType miss scope |
+| A call's block (`IndicShaper::CallMemory`: the `ot::Buffer` for `2 * kMaxRunCodepoints + 16` glyphs, the token's runs, its code points with their context, `IndicReorder`'s form; for a call without a face, `CallKind::Reorder`, the form alone, `3 * tokenBytes + 1` B) | a block of the lent arena (`ParsedText::lineArena_`), else the build's heap block | one `shapeToken` call; released before any of the token's glyphs is looked up, LIFO with the TrueType miss scope |
 | The build's heap block (`TextShaping::buildHeapBlock`) | heap, made on first use, grown nothrow in 512 B steps to the longest token, the smaller one freed first | lent to one call at a time; freed by `TextShaping::releaseBuildMemory()` at the build's end |
 | The faces and their plans | heap (`TtfFont::shapingFace`, `ShapingFace::plan`) | made on first ask; freed by `GfxRenderer::releaseShapingFaces()` at the build's end, or by the font set's next load (a reload or an install) |
 | `ParsedText::ShapingState`: the store, the pass's face answers, the line's piece vectors | heap, `makeUniqueNoThrow` | a paragraph's passes; the store's 1 KB chunks survive the paragraphs; freed at a slice's yield (`releaseLayoutScratch`) unless a paragraph in progress shapes |
@@ -240,7 +240,8 @@ in place in a TrueType set (`InPlaceBuildGate::admitsResident`, `Request::shaped
 `TypographyProfile::shapedScript`, logged as `shapedTtf=1`). The gate reads the book's language, not its text: the
 primary subtags of `isIndicLanguage` (`TypographyProfile.cpp`), Hindi, Marathi, Nepali, Sanskrit, Konkani, Maithili,
 Bhojpuri, Awadhi, Magahi and Rajasthani, Bengali, Assamese, Punjabi, Gujarati, Odia, Tamil, Telugu, Kannada,
-Malayalam and Sinhala.
+Malayalam and Sinhala. Such a book in a bitmap or built-in font does build in place, and its calls only reorder: the
+heap block they take is the longest token's form, in 512 B steps.
 
 ## What fails how
 

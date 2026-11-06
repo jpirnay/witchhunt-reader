@@ -1056,8 +1056,9 @@ IndicShaper::Outcome ParsedText::shapeInto(const GfxRenderer& renderer, const in
   request.before = before;
   request.after = after;
   // The call's block is the arena's for this call alone, released here, before any of the token's glyphs is looked up
-  // (LIFO with the TrueType miss scope).
-  IndicShaper::CallMemory memory(lineArena_, text.size());
+  // (LIFO with the TrueType miss scope). Without a face the call only reorders, in a block of the form's size.
+  IndicShaper::CallMemory memory(
+      lineArena_, text.size(), request.face != nullptr ? IndicShaper::CallKind::Shape : IndicShaper::CallKind::Reorder);
   return IndicShaper::shapeToken(text, request, memory, shapingState_->store);
 }
 
