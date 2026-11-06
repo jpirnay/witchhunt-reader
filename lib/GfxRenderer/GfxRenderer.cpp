@@ -3109,11 +3109,12 @@ std::string GfxRenderer::truncatedText(const int fontId, const char* text, const
 }
 
 std::vector<std::string> GfxRenderer::wrappedText(const int fontId, const char* text, const int maxWidth,
-                                                  const int maxLines, const EpdFontFamily::Style style) const {
+                                                  const int maxLines, const EpdFontFamily::Style style,
+                                                  bool* const whole) const {
   return textWrap::wrapLines(
       text, maxWidth, maxLines, wordBreaker_,
       [&](const std::string& line) { return getTextWidth(fontId, line.c_str(), style); },
-      [&](const std::string& line) { return truncatedText(fontId, line.c_str(), maxWidth, style); });
+      [&](const std::string& line) { return truncatedText(fontId, line.c_str(), maxWidth, style); }, whole);
 }
 
 // Note: Internal driver treats screen in command orientation; this library exposes a logical orientation
