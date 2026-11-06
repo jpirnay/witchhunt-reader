@@ -22,6 +22,15 @@ Input fourFamilies(const Step step, const Decode decode) {
   return in;
 }
 
+TEST(ImageMemoryLadder, BesideALiveBuildNothingIsFreedForADecode) {
+  for (const Decode decode : {Decode::HeapShort, Decode::Coarse, Decode::Failed, Decode::Done}) {
+    Input in = fourFamilies(Step::Plain, decode);
+    in.canRelieve = false;
+    in.coarseFits = true;
+    EXPECT_EQ(Action::Done, next(in)) << static_cast<int>(decode);
+  }
+}
+
 TEST(ImageMemoryLadder, ADecodedPageIsDrawnAtWhicheverStepItDecoded) {
   for (const Step step : {Step::Plain, Step::LightRelief, Step::HeavyRelief}) {
     EXPECT_EQ(Action::Done, next(fourFamilies(step, Decode::Done))) << static_cast<int>(step);

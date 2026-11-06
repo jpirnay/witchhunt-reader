@@ -321,6 +321,44 @@ TEST(CoarseProgressiveJpeg, AnEighthForLackOfRoomIsStampedCoarseAndShortOfMemory
   fs::remove_all(work);
 }
 
+// A decode that can wait for more room (beside a section build) settles for nothing: the same shortage that publishes a
+// coarse picture above leaves no cache, since a coarse one would count as cached and stay.
+TEST(CoarseProgressiveJpeg, ADecodeThatCanWaitLeavesTheCoarsePictureUnmade) {
+  const fs::path work = fs::temp_directory_path() / "img_coarse_wait";
+  fs::remove_all(work);
+  fs::create_directories(work);
+  GfxRenderer renderer;
+  const std::string jpg = JPEG_FIXTURE_DIR "/prog_full_420.jpg";
+  ProgressiveJpeg::ImageInfo info;
+  {
+    FsFile file;
+    ASSERT_TRUE(Storage.openFileForRead("TEST", jpg, file));
+    ASSERT_EQ(ProgressiveJpeg::Result::Ok, ProgressiveJpeg::probe(file, info));
+    file.close();
+  }
+  RenderConfig c;
+  c.maxWidth = 150;
+  c.maxHeight = 104;
+  c.useExactDimensions = true;
+  c.monochromeOutput = true;
+  c.cachePath = (work / "bw.pxc").string();
+  const uint32_t savedHeap = ESP.getFreeHeap();
+  ESP.setFreeHeap(static_cast<uint32_t>(ProgressiveJpeg::workspaceBytes(info, 3)) + 20 * 1024 - 1);
+  image_scratch::takeCoarseNeed();
+  const uint32_t shortBefore = image_scratch::heapShortCount();
+  {
+    image_scratch::ScopedCanWait canWait(true);
+    JpegToFramebufferConverter converter;
+    EXPECT_FALSE(converter.decodeToFramebuffer(jpg, renderer, c));
+  }
+  EXPECT_FALSE(image_scratch::canWait()) << "the scope gives the flag back";
+  EXPECT_NE(shortBefore, image_scratch::heapShortCount()) << "short of memory, for the ladder";
+  EXPECT_EQ(0u, image_scratch::takeCoarseNeed().bytes);
+  EXPECT_FALSE(fs::exists(c.cachePath));
+  ESP.setFreeHeap(savedHeap);
+  fs::remove_all(work);
+}
+
 // The check the memory ladder makes before it frees memory for a coarse picture, and again before it decodes, is the
 // decoder's own: where it says the finer workspace fits, the decode gets it; a byte short, the decode does not.
 TEST(CoarseProgressiveJpeg, WhereTheFinerWorkspaceFitsTheDecodeIsFiner) {

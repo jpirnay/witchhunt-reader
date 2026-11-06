@@ -26,16 +26,15 @@ TEST(LaneBeforeBuild, ADecodeTakesTheBufferFromTheBuildWhileItHasYieldsLeft) {
 }
 
 TEST(LaneBeforeBuild, ThePagesOnScreenPicturesGoAheadOfItsChapterBuild) {
-  EXPECT_TRUE(decodeOnScreenDuringBuild(true, true, false));
+  EXPECT_TRUE(decodeOnScreenDuringBuild(/*scratchToWorkIn=*/true, /*pageOnScreen=*/true));
 }
 
-TEST(LaneBeforeBuild, ThePriorityPassNeedsTheBufferFree) {
-  EXPECT_FALSE(decodeOnScreenDuringBuild(/*bufferFree=*/false, true, false));  // the build holds it, as the X3's does
+TEST(LaneBeforeBuild, DuringABuildTheLaneNeedsSomewhereToWork) {
+  EXPECT_FALSE(decodeOnScreenDuringBuild(/*scratchToWorkIn=*/false, /*pageOnScreen=*/true));
 }
 
-TEST(LaneBeforeBuild, ThePriorityPassLooksOnceAtAPageThatIsOnScreen) {
-  EXPECT_FALSE(decodeOnScreenDuringBuild(true, /*pageOnScreen=*/false, false));  // the popup is still up
-  EXPECT_FALSE(decodeOnScreenDuringBuild(true, true, /*alreadyLooked=*/true));
+TEST(LaneBeforeBuild, DuringABuildTheLaneWaitsForThePageToBeOnScreen) {
+  EXPECT_FALSE(decodeOnScreenDuringBuild(/*scratchToWorkIn=*/true, /*pageOnScreen=*/false));  // the popup is still up
 }
 
 TEST(LaneBeforeBuild, PastItsYieldsTheBuildKeepsTheBuffer) {
