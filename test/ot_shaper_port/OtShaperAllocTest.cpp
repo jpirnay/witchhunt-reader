@@ -272,7 +272,6 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
       ASSERT_EQ(filteredCount, 2u) << fx.script;
       ASSERT_EQ(blocks, 4 + filteredCount) << fx.script;
       for (size_t i = 0; i < filteredCount; i++) {
-        EXPECT_TRUE(plan.settings(filtered[i], 0).hasDigest) << fx.script << " table " << filtered[i];
         EXPECT_NE(plan.settings(filtered[i], 0).subtableDigests, nullptr) << fx.script << " table " << filtered[i];
       }
       for (size_t w = 0; w < fx.count; w++) {
@@ -299,11 +298,10 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
           EXPECT_TRUE(built) << fx.script << " refused " << k;
           EXPECT_LT(plan.memoryBytes(), fullBytes) << fx.script << " refused " << k;
           // The refused table's subtables run unfiltered; the other keeps its
-          // filters, and both keep their lookup digests.
+          // filters, and both keep their lookup digests (in the plan's block).
           const int refusedTable = filtered[k - 4];
           for (size_t i = 0; i < filteredCount; i++) {
             const int t = filtered[i];
-            EXPECT_TRUE(plan.settings(t, 0).hasDigest) << fx.script << " refused " << k << " table " << t;
             EXPECT_EQ(plan.settings(t, 0).subtableDigests != nullptr, t != refusedTable)
                 << fx.script << " refused " << k << " table " << t;
           }

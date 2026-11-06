@@ -314,7 +314,6 @@ LookupSettings Plan::settings(const int table, const size_t i) const {
   out.autoZwj = lookup.flags & lookupbits::AUTO_ZWJ;
   out.random = lookup.flags & lookupbits::RANDOM;
   out.perSyllable = lookup.flags & lookupbits::PER_SYLLABLE;
-  out.hasDigest = true;                             // witchhunt: deviation 13
   out.digest = readDigest(digestRecord(table, i));  // witchhunt: deviation 13 - the plan's copy
   if (const FilterRecords* r = fontFilters_[table]) {
     out.subtableDigests = r->subtableDigests + DIGEST_BYTES * r->firstSubtable(lookup.index);
@@ -327,13 +326,13 @@ LookupSettings Plan::settings(const int table, const size_t i) const {
 // witchhunt: deviation 13 - applyTable()'s digest test, on the plan's copy of
 // the digest, so it comes before settings() reads anything of the font.
 bool Plan::mayApply(const int table, const size_t i, const Digest& buffer) const {
-  return !useMemos || readDigest(digestRecord(table, i)).mayIntersect(buffer);
+  return testBypassCaches || readDigest(digestRecord(table, i)).mayIntersect(buffer);
 }
 
 // witchhunt: deviation 13 - see positions_. A glyph past 16 bits (no font has
 // one) walks every time.
 uint8_t Plan::consonantPosition(const Face& face, const uint32_t consonant, const uint32_t virama) const {
-  if (!useMemos || consonant > UINT16_MAX || virama > UINT16_MAX) {
+  if (testBypassCaches || consonant > UINT16_MAX || virama > UINT16_MAX) {
     return consonantPositionFromFace(face, *this, consonant, virama);
   }
   const uint32_t key = consonant | virama << 16;

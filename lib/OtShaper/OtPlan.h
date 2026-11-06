@@ -98,12 +98,14 @@ class Plan {
   // than a plan takes or the heap check refuses the plan's memory; a plan
   // that failed to build or load is empty, and shapes nothing.
   // witchhunt: deviation 1 - also false when the builder's scratch or a list
-  // block is refused (a refused filter block leaves its table unfiltered).
+  // block is refused, and (deviation 13) when the lookup digests' block is; a
+  // refused filter block leaves only its table's subtables unfiltered.
   bool build(const Face& face, Script script, const uint32_t* languageTags);
   // The same plan, read from the font's CPpl table, where the .cpfont
   // converter stored it. False when the font has none for this script and
   // language, or it is malformed.
-  // witchhunt: deviation 1 - also false when a list block is refused.
+  // witchhunt: deviation 1 - also false when a list block or (deviation 13)
+  // the lookup digests' block is refused.
   bool load(const Face& face, Script script, const uint32_t* languageTags);
 
   // Lookup settings (flags, mask, filters) of planned lookup `i` of `table`.
@@ -146,11 +148,11 @@ class Plan {
   uint32_t useRphfMask = 0;
   uint32_t useTopographicalMasks[4] = {};  // isol, init, medi, fina
 
-  // witchhunt: deviation 13 - a test hook: false makes mayApply() let every
-  // lookup through and consonantPosition() walk on every call, so a test can
-  // shape with the memos and without them. True in every plan the firmware
-  // makes.
-  bool useMemos = true;
+  // witchhunt: deviation 13 - test use only. True switches off both caches:
+  // the consonant memo (consonantPosition() walks on every call) and the
+  // digest pre-filter (mayApply() lets every lookup through), so a test can
+  // shape with and without them. False in every plan the firmware makes.
+  bool testBypassCaches = false;
 
  private:
   friend class PlanBuilder;

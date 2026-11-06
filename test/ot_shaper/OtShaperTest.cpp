@@ -136,7 +136,9 @@ bool refuseFilterHeap(size_t) { return gPlanReservationsLeft-- > 0; }
 
 // Builds `plan` with every heap reservation allowed but the last two: the
 // GSUB and GPOS filter blocks Plan::build() computes for a face without CPac,
-// after everything a plan cannot do without.
+// after everything a plan cannot do without. True when the plan built with
+// exactly those two refused: both tables have lookups, and neither has
+// subtable filters.
 bool buildWithoutFilterBlocks(ot::Plan& plan, const ot::Face& face, const ot::Script script, const uint32_t* tags) {
   ot::Plan probe;
   gReservations = 0;
@@ -148,7 +150,11 @@ bool buildWithoutFilterBlocks(ot::Plan& plan, const ot::Face& face, const ot::Sc
   ot::setHeapCheck(refuseFilterHeap);
   const bool built = plan.build(face, script, tags);
   ot::setHeapCheck(nullptr);
-  return built;
+  if (!built) return false;
+  for (const int t : {ot::GSUB, ot::GPOS}) {
+    if (plan.lookups[t].size() == 0 || plan.settings(t, 0).subtableDigests != nullptr) return false;
+  }
+  return true;
 }
 
 TEST(OtShaperFilters, ShapingIsTheSameWithStoredComputedOrNoFilters) {
@@ -160,8 +166,7 @@ TEST(OtShaperFilters, ShapingIsTheSameWithStoredComputedOrNoFilters) {
     ot::Plan withStored, withComputed, without;
     ASSERT_TRUE(withStored.build(stored, fx.script, ot::languageTagsFor("")));
     ASSERT_TRUE(withComputed.build(computed, fx.script, ot::languageTagsFor("")));
-    ASSERT_TRUE(buildWithoutFilterBlocks(without, computed, fx.script, ot::languageTagsFor("")));
-    EXPECT_LT(without.memoryBytes(), withComputed.memoryBytes()) << fx.file << ": the filter blocks were not refused";
+    ASSERT_TRUE(buildWithoutFilterBlocks(without, computed, fx.script, ot::languageTagsFor(""))) << fx.file;
     for (const char* word : fx.words) {
       const std::vector<int32_t> expected = shapeWord(stored, withStored, word);
       ASSERT_FALSE(expected.empty()) << word;
@@ -749,13 +754,12 @@ TEST(OtShaper, MayApplyRejectsOnlyWhatTheDigestRejects) {
       }
     }
     EXPECT_GT(rejected, 0u) << "of " << tests;
-    std::printf("[ %s ] %zu runs, %zu lookup tests, %zu rejected\n", book.font, runs.size(), tests, rejected);
   }
 }
 
 // The book's first 200 runs shaped by a plan whose memos are switched off
-// (Plan::useMemos) and by a normal plan, on both routes: the font's CPac and
-// the digests a plan computes without it.
+// (Plan::testBypassCaches) and by a normal plan, on both routes: the font's
+// CPac and the digests a plan computes without it.
 TEST(OtShaper, TheTwoMemosLeaveEveryGlyphAlone) {
   for (const Book& book : BOOKS) {
     for (const bool withCpac : {true, false}) {
@@ -764,7 +768,7 @@ TEST(OtShaper, TheTwoMemosLeaveEveryGlyphAlone) {
       ASSERT_TRUE(bp.open(book, withCpac));
       ot::Plan without;
       ASSERT_TRUE(without.build(bp.font.face, book.script, ot::languageTagsFor(book.language)));
-      without.useMemos = false;
+      without.testBypassCaches = true;
       const std::vector<std::vector<uint32_t>> runs = bookRuns(book, 200);
       ASSERT_GE(runs.size(), 100u);
       for (size_t r = 0; r < runs.size(); r++) {
@@ -835,7 +839,6 @@ TEST(OtShaper, ABengaliPlanWithoutFiltersPlacesConsonantsAsWithThem) {
     ASSERT_TRUE(withFilters.build(stored.face, book.script, tags));
     ASSERT_TRUE(computed.build(bare.face, book.script, tags));
     ASSERT_TRUE(buildWithoutFilterBlocks(without, bare.face, book.script, tags));
-    EXPECT_LT(without.memoryBytes(), computed.memoryBytes()) << "the filter blocks were not refused";
     ASSERT_NE(withFilters.indicConfig, nullptr);
     uint32_t virama;
     ASSERT_TRUE(stored.face.nominalGlyph(withFilters.indicConfig->virama, &virama));
