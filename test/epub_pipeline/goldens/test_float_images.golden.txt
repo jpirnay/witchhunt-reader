@@ -17,10 +17,11 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
    W x=288 s=0 z=100 t=lines
    W x=342 s=0 z=100 t=beside
    W x=399 s=0 z=100 t=image,
-  LINE y=58 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=58 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=then
    W x=48 s=0 z=100 t=runs
-   W x=93 s=0 z=100 t=full-width
+   W x=93 s=0 z=100 t=full-
+   W x=141 s=0 z=100 t=width
    W x=189 s=0 z=100 t=below
    W x=237 s=0 z=100 t=it.
   IMG y=82 x=0 w=60 h=60 src=<cache>/epub_<hash>/img_23eff0a817c99d9d.png
@@ -439,15 +440,17 @@ SPINE 4 href=OEBPS/ch5.xhtml pages=1 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=dog.
 SPINE 5 href=OEBPS/ch6.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=11 footnotes=0
-  LINE y=0 x=0 align=2 mult=1.400 hfid=0 words=5
-   W x=16 s=1 z=100 t=Case
-   W x=86 s=1 z=100 t=6:
-   W x=123 s=1 z=100 t=Float
-   W x=207 s=1 z=100 t=with
-   W x=268 s=1 z=100 t=margin-right
-  LINE y=34 x=0 align=2 mult=1.400 hfid=0 words=2
+  LINE y=0 x=0 align=2 mult=1.400 hfid=0 words=6
+   W x=15 s=1 z=100 t=Case
+   W x=85 s=1 z=100 t=6:
+   W x=122 s=1 z=100 t=Float
+   W x=206 s=1 z=100 t=with
+   W x=267 s=1 z=100 t=margin-
+   W x=371 s=1 z=100 t=right
+  LINE y=34 x=0 align=2 mult=1.400 hfid=0 words=3
    W x=104 s=1 z=100 t=and
-   W x=160 s=1 z=100 t=margin-bottom
+   W x=160 s=1 z=100 t=margin-
+   W x=264 s=1 z=100 t=bottom
   LINE y=68 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=Expected:
    W x=104 s=0 z=100 t=exclusion
@@ -456,11 +459,13 @@ SPINE 5 href=OEBPS/ch6.xhtml pages=1 truncated=0 cssFallback=0
    W x=293 s=0 z=100 t=than
    W x=348 s=0 z=100 t=image
    W x=406 s=0 z=100 t=alone
-  LINE y=92 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=0 s=0 z=100 t=(margin-right=8)
+  LINE y=92 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=(margin-
+   W x=78 s=0 z=100 t=right=8)
    W x=160 s=0 z=100 t=and
    W x=197 s=0 z=100 t=taller
-   W x=260 s=0 z=100 t=(margin-bottom=8).
+   W x=260 s=0 z=100 t=(margin-
+   W x=338 s=0 z=100 t=bottom=8).
   IMG y=116 x=0 w=60 h=60 src=<cache>/epub_<hash>/img_23eff0a817c99d9d.png
   LINE y=116 x=64 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=The

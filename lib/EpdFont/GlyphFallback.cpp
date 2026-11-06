@@ -95,6 +95,9 @@ constexpr Fallback FALLBACKS[] = {
     // here, and the base letter is far better than a box.
     {0x1E37, 'l'},  // ḷ l with dot below
     {0x1E71, 't'},  // ṱ t with circumflex below
+    // The hyphens a font may leave out, a subset one above all: the box in the middle of a word.
+    {0x2010, '-'},  // ‐ hyphen
+    {0x2011, '-'},  // ‑ non-breaking hyphen
     // Arrows and math operators. Noto Sans -- the font dictionary definitions
     // are pinned to -- carries none of this block (U+2212 aside), and
     // dictionaries lean on it structurally rather than decoratively: in PONS

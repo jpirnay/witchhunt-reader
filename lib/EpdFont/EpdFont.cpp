@@ -8,6 +8,7 @@
 #include "GlyphProvider.h"
 #include "MarkOverlay.h"
 #include "SmallCaps.h"
+#include "UnicodeSpace.h"
 
 // Scale a 12.4 fixed-point advance by the small-caps factor, rounding to nearest.
 static inline int32_t scaleAdvanceFP(const int32_t advanceFP) {
@@ -268,6 +269,17 @@ EpdGlyphRef EpdFont::findGlyph(const uint32_t cp) const {
 EpdGlyphRef EpdFont::getGlyphSlow(const uint32_t cp) const {
   // The SD on-demand loader, which findGlyph() consults after the intervals.
   if (const EpdGlyphRef glyph = findGlyph(cp)) return glyph;
+
+  // A blank the font lacks is the font's word space at the blank's own width (UnicodeSpace.h). 'M' stands for the em.
+  // It is looked up first: an SD font may reuse a glyph slot for the next lookup, and the space's ref must be the last.
+  if (const unicode_space::Width width = unicode_space::widthOf(cp); width.denominator != 0) {
+    const EpdGlyphRef m = findGlyph('M');
+    const uint32_t em = m && width.numerator != 0 ? m.advanceX : 0;
+    if (EpdGlyphRef space = findGlyph(' ')) {
+      if (em != 0) space.advanceX = static_cast<uint16_t>(em * width.numerator / width.denominator);
+      return space;
+    }
+  }
 
   // The font does not have it. Before giving up and drawing a box, try a close
   // relative that most fonts do carry — a dictionary's phonetic transcription is

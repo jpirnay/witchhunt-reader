@@ -3167,9 +3167,10 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=7 truncated=0 cssFallback=0
    W x=390 s=0 z=100 t=い
    W x=406 s=0 z=100 t=。
    E first=4 count=14 m=1
-  LINE y=633 x=0 align=2 mult=1.000 hfid=0 words=2
+  LINE y=633 x=0 align=2 mult=1.000 hfid=0 words=3
    W x=167 s=1 z=100 t=17.
-   W x=204 s=1 z=100 t=cjk-latin
+   W x=204 s=1 z=100 t=cjk-
+   W x=239 s=1 z=100 t=latin
   LINE y=657 x=0 align=0 mult=1.000 hfid=0 words=19
    W x=22 s=0 z=100 t=新
    W x=39 s=0 z=100 t=し
@@ -3246,9 +3247,10 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=7 truncated=0 cssFallback=0
    W x=343 s=0 z=100 t=ま
    W x=359 s=0 z=100 t=。
  PAGE 6 elements=5 footnotes=0
-  LINE y=0 x=0 align=2 mult=1.000 hfid=0 words=2
+  LINE y=0 x=0 align=2 mult=1.000 hfid=0 words=3
    W x=179 s=1 z=100 t=18.
-   W x=210 s=1 z=100 t=push-in
+   W x=210 s=1 z=100 t=push-
+   W x=262 s=1 z=100 t=in
   LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=26
    W x=22 s=0 z=100 t=天
    W x=38 s=0 z=100 t=地

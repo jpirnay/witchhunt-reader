@@ -1,6 +1,6 @@
 BOOK title=CJK Block Seams lang=ja spine=1 toc=0 reliableToc=0
 SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
- PAGE 0 elements=8 footnotes=0
+ PAGE 0 elements=11 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=22 s=0 z=100 t=前
    W x=38 s=0 z=100 t=の
@@ -43,23 +43,26 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=55 s=0 z=100 t=四
    W x=71 s=0 z=100 t=項
    W x=87 s=0 z=100 t=目
-  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=22 s=0 z=100 t=前
    W x=38 s=0 z=100 t=の
    W x=54 s=0 z=100 t=段
    W x=70 s=0 z=100 t=落
    W x=86 s=0 z=100 t=。
-   W x=108 s=0 z=100 t=用
-   W x=124 s=0 z=100 t=語
-   W x=146 s=0 z=100 t=説
-   W x=162 s=0 z=100 t=明
-   W x=178 s=0 z=100 t=文
-  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=22 s=0 z=100 t=用
+   W x=38 s=0 z=100 t=語
+  LINE y=192 x=27 align=0 mult=1.000 hfid=0 words=3
+   W x=16 s=0 z=100 t=説
+   W x=32 s=0 z=100 t=明
+   W x=48 s=0 z=100 t=文
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=22 s=0 z=100 t=節
    W x=38 s=0 z=100 t=の
    W x=54 s=0 z=100 t=文
    W x=70 s=0 z=100 t=章
-   W x=92 s=0 z=100 t=図
-   W x=108 s=0 z=100 t=の
-   W x=124 s=0 z=100 t=説
-   W x=140 s=0 z=100 t=明
+  LINE y=240 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=22 s=0 z=100 t=図
+   W x=38 s=0 z=100 t=の
+   W x=54 s=0 z=100 t=説
+   W x=70 s=0 z=100 t=明

@@ -17,13 +17,14 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=333 s=0 z=100 t=reference
    W x=413 s=20 z=50 t=1
    W x=419 s=2 z=100 t=(The
-  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=2 z=100 t=first
    W x=51 s=2 z=100 t=note,
    W x=109 s=2 z=100 t=reached
    W x=182 s=2 z=100 t=from
    W x=230 s=2 z=100 t=a
-   W x=250 s=2 z=100 t=class-styled
+   W x=250 s=2 z=100 t=class-
+   W x=305 s=2 z=100 t=styled
    W x=366 s=2 z=100 t=superscript
   LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=2 z=100 t=link.)
@@ -35,11 +36,12 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=312 s=0 z=100 t=it
    W x=336 s=0 z=100 t=should
    W x=405 s=0 z=100 t=shrink
-  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=the
    W x=40 s=0 z=100 t=way
    W x=75 s=0 z=100 t=a
-   W x=96 s=0 z=100 t=sup-wrapped
+   W x=96 s=0 z=100 t=sup-
+   W x=131 s=0 z=100 t=wrapped
    W x=195 s=0 z=100 t=marker
    W x=259 s=0 z=100 t=does.
    W x=316 s=0 z=100 t=The
@@ -73,45 +75,46 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
    W x=202 s=1 z=100 t=With
    W x=278 s=1 z=100 t=A
    W x=302 s=1 z=100 t=Size
-  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=18 s=0 z=100 t=Here
-   W x=72 s=0 z=100 t=the
-   W x=123 s=0 z=100 t=publisher
-   W x=219 s=0 z=100 t=sets
-   W x=276 s=0 z=100 t=the
-   W x=327 s=0 z=100 t=size
-   W x=380 s=0 z=100 t=as
-   W x=421 s=0 z=100 t=well
-   W x=454 s=20 z=80 t=2
+   W x=64 s=0 z=100 t=the
+   W x=107 s=0 z=100 t=publisher
+   W x=195 s=0 z=100 t=sets
+   W x=244 s=0 z=100 t=the
+   W x=287 s=0 z=100 t=size
+   W x=332 s=0 z=100 t=as
+   W x=365 s=0 z=100 t=well
+   W x=398 s=20 z=80 t=2
+   W x=415 s=2 z=100 t=(The
   LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=2 z=100 t=(The
-   W x=52 s=2 z=100 t=second
-   W x=122 s=2 z=100 t=note,
-   W x=186 s=2 z=100 t=whose
-   W x=248 s=2 z=100 t=caller
-   W x=316 s=2 z=100 t=carries
-   W x=389 s=2 z=100 t=its
-   W x=428 s=2 z=100 t=own
-  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=10
-   W x=0 s=2 z=100 t=font-size.)
-   W x=113 s=0 z=100 t=so
-   W x=140 s=0 z=100 t=the
-   W x=177 s=0 z=100 t=50%
-   W x=213 s=0 z=100 t=default
-   W x=288 s=0 z=100 t=has
-   W x=327 s=0 z=100 t=to
-   W x=355 s=0 z=100 t=give
-   W x=399 s=0 z=100 t=way
-   W x=431 s=0 z=100 t=to
-  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=0 z=100 t=the
-   W x=39 s=0 z=100 t=stylesheet
-   W x=141 s=0 z=100 t=rather
-   W x=208 s=0 z=100 t=than
-   W x=261 s=0 z=100 t=override
-   W x=341 s=0 z=100 t=it.
-   W x=375 s=0 z=100 t=Body
-   W x=420 s=0 z=100 t=text
+   W x=0 s=2 z=100 t=second
+   W x=68 s=2 z=100 t=note,
+   W x=130 s=2 z=100 t=whose
+   W x=190 s=2 z=100 t=caller
+   W x=256 s=2 z=100 t=carries
+   W x=327 s=2 z=100 t=its
+   W x=364 s=2 z=100 t=own
+   W x=405 s=2 z=100 t=font-
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=2 z=100 t=size.)
+   W x=63 s=0 z=100 t=so
+   W x=92 s=0 z=100 t=the
+   W x=131 s=0 z=100 t=50%
+   W x=169 s=0 z=100 t=default
+   W x=246 s=0 z=100 t=has
+   W x=287 s=0 z=100 t=to
+   W x=317 s=0 z=100 t=give
+   W x=363 s=0 z=100 t=way
+   W x=397 s=0 z=100 t=to
+   W x=427 s=0 z=100 t=the
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=stylesheet
+   W x=109 s=0 z=100 t=rather
+   W x=183 s=0 z=100 t=than
+   W x=243 s=0 z=100 t=override
+   W x=330 s=0 z=100 t=it.
+   W x=371 s=0 z=100 t=Body
+   W x=423 s=0 z=100 t=text
   LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=either
    W x=60 s=0 z=100 t=side
@@ -220,14 +223,15 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
   FN n=4 href=notes.xhtml#n4
 SPINE 4 href=OEBPS/notes.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=7 footnotes=0
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=18 s=0 z=100 t=The
    W x=61 s=0 z=100 t=first
    W x=120 s=0 z=100 t=note,
    W x=186 s=0 z=100 t=reached
    W x=267 s=0 z=100 t=from
    W x=323 s=0 z=100 t=a
-   W x=351 s=0 z=100 t=class-styled
+   W x=351 s=0 z=100 t=class-
+   W x=406 s=0 z=100 t=styled
   LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=superscript
    W x=95 s=0 z=100 t=link.
@@ -240,8 +244,9 @@ SPINE 4 href=OEBPS/notes.xhtml pages=1 truncated=0 cssFallback=0
    W x=318 s=0 z=100 t=carries
    W x=390 s=0 z=100 t=its
    W x=428 s=0 z=100 t=own
-  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=0 s=0 z=100 t=font-size.
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=font-
+   W x=52 s=0 z=100 t=size.
   LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=18 s=0 z=100 t=The
    W x=51 s=0 z=100 t=third

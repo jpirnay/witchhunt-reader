@@ -55,6 +55,49 @@ bool isClosingPunctuation(const uint32_t cp) {
   }
 }
 
+// May a line end between a dash and what follows it? Not inside a run of dashes, not before punctuation that closes
+// the word, and not where a hyphen introduces a number (a phone number, a sign).
+bool mayBreakAfterDash(const uint32_t dash, const uint32_t next) {
+  if (!TokenBoundary::isBreakableDash(dash) || TokenBoundary::isBreakableDash(next)) return false;
+  if (isClosingPunctuation(next)) return false;
+  const bool digitFollows = next >= '0' && next <= '9';
+  return !(digitFollows && (dash == '-' || dash == 0x2010));
+}
+
+bool isDashesOnly(const std::string_view word) {
+  const auto* p = reinterpret_cast<const unsigned char*>(word.data());
+  const auto* const end = p + word.size();
+  while (p < end) {
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (!TokenBoundary::isBreakableDash(cp) && !utf8IsDefaultIgnorable(cp)) return false;
+  }
+  return true;
+}
+
+// Where a line may end inside `word`: after a dash with text before it, whatever follows allowing. A dash that opens
+// the word stays on it ("—Well"), unless the word is glued to the one before it. Most words hold neither a '-' nor a
+// multi-byte dash, and only those that do are walked.
+std::vector<size_t> dashBreakByteOffsets(const std::string& word, const bool gluedToPrevious) {
+  std::vector<size_t> offsets;
+  if (word.find('-') == std::string::npos && word.find('\xE2') == std::string::npos) return offsets;
+  const auto* const begin = reinterpret_cast<const unsigned char*>(word.c_str());
+  const auto* p = begin;
+  bool textBefore = gluedToPrevious;
+  while (*p) {
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (cp == 0) break;
+    if (!TokenBoundary::isBreakableDash(cp)) {
+      if (!utf8IsDefaultIgnorable(cp)) textBefore = true;
+      continue;
+    }
+    if (!textBefore || *p == 0) continue;
+    const auto* q = p;
+    const uint32_t next = utf8NextCodepoint(&q);
+    if (mayBreakAfterDash(cp, next)) offsets.push_back(static_cast<size_t>(p - begin));
+  }
+  return offsets;
+}
+
 // SOFT_HYPHEN_UTF8 / SOFT_HYPHEN_BYTES come from TextBlock.h — the arena fill strips the same
 // pattern this file measures around, so both sides share one definition.
 
@@ -479,17 +522,24 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
       if (after < word.size()) markEdges.push_back(after);
     }
   }
-  // The token boundaries: the CJK breaks, then each mark edge that is not already one (glued).
+  // A line may end after a dash inside a Latin word, whether or not hyphenation is on.
+  const std::vector<size_t> dashBreaks = hasCjk ? std::vector<size_t>{} : dashBreakByteOffsets(word, attachToPrevious);
+  // The token boundaries: the CJK breaks, then each mark edge that is not already one (glued), and the dash breaks.
+  // What each one puts before the token it starts: a CJK break is a breakable zero-width gap, a mark's other edges are
+  // glued (no space, no break), and a dash is glued but breakable, the fourth state of TokenBoundary.
   struct Cut {
     size_t at;
-    bool breakable;
+    TokenBoundary::Boundary boundary;
   };
   std::vector<Cut> cuts;
-  cuts.reserve(cjkBreaks.size() + markEdges.size());
-  for (const size_t at : cjkBreaks) cuts.push_back({at, true});
+  cuts.reserve(cjkBreaks.size() + markEdges.size() + dashBreaks.size());
+  for (const size_t at : cjkBreaks) cuts.push_back({at, TokenBoundary::Boundary{false, true}});
   for (const size_t at : markEdges) {
-    if (std::find(cjkBreaks.begin(), cjkBreaks.end(), at) == cjkBreaks.end()) cuts.push_back({at, false});
+    if (std::find(cjkBreaks.begin(), cjkBreaks.end(), at) == cjkBreaks.end()) {
+      cuts.push_back({at, TokenBoundary::Boundary{true, false}});
+    }
   }
+  for (const size_t at : dashBreaks) cuts.push_back({at, TokenBoundary::Boundary{true, true}});
   std::sort(cuts.begin(), cuts.end(), [](const Cut& a, const Cut& b) { return a.at < b.at; });
   cuts.erase(std::unique(cuts.begin(), cuts.end(), [](const Cut& a, const Cut& b) { return a.at == b.at; }),
              cuts.end());
@@ -504,8 +554,9 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   // Glued to the previous token in the source (no whitespace between them): where the CJK rules
   // allow a break there, the two meet at a breakable zero-width gap. Where the source had
   // whitespace, the space is content and stays. From crosspoint-reader PR #2768 ("fix: restore
-  // spaces between CJK words", Uri Tauber, 9163149a). A glued Latin "foo—" + "bar" stays glued: the gap needs
-  // a CJK character on one side, since the dash rule of upstream PR #3883 is not ported.
+  // spaces between CJK words", Uri Tauber, 9163149a). A glued Latin "foo—" + "bar" stays glued with no gap, and a line
+  // may end between them: ported from crosspoint-reader PR #3883 (Phạm Bình An) by way of CrossInk 59b53529 (Julia
+  // Nguyen). The word after an inline tag used to get a real word gap here, for want of this state.
   TokenBoundary::Boundary boundary{attachToPrevious, false};
   // A glued " " is the parser's no-break space (U+00A0 / U+202F): no break on either side of it.
   if (attachToPrevious && !words.empty() && words.back() != " " && word != " ") {
@@ -513,6 +564,8 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     const uint32_t right = firstCodepointPastControls(word.c_str());
     if ((utf8IsCjkBreakable(left) || utf8IsCjkBreakable(right)) && CjkLineBreak::isGapBetween(left, right)) {
       boundary = TokenBoundary::Boundary{false, true};
+    } else if (mayBreakAfterDash(left, right) && !isDashesOnly(words.back())) {
+      boundary = TokenBoundary::Boundary{true, true};
     }
   }
 
@@ -537,8 +590,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     // The next token starts where this one's visible bytes end (KOSync positions).
     offset += static_cast<uint32_t>(visibleBytesOutsideControls(word.data() + start, static_cast<int>(end - start)));
     if (i < cuts.size()) {
-      // A CJK break is a breakable zero-width gap; a mark's other edges are glued (no space, no break).
-      boundary = cuts[i].breakable ? TokenBoundary::Boundary{false, true} : TokenBoundary::Boundary{true, false};
+      boundary = cuts[i].boundary;
     }
     start = end;
   }

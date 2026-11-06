@@ -82,6 +82,12 @@ TEST(GlyphFallback, MapsTheSymbolsDictionariesUseAsMarkers) {
   EXPECT_EQ(fallbackGlyphCodepoint(0x039B), static_cast<uint32_t>('A'));
 }
 
+// Bitter has no U+2011: "non\u2011breaking" drew a box in the middle of the word (Murphy, 2026-11-06).
+TEST(GlyphFallback, MapsTheUnicodeHyphensToTheHyphenMinus) {
+  EXPECT_EQ(fallbackGlyphCodepoint(0x2010), static_cast<uint32_t>('-'));
+  EXPECT_EQ(fallbackGlyphCodepoint(0x2011), static_cast<uint32_t>('-'));
+}
+
 TEST(GlyphFallback, HasNoMappingForCodepointsWithNoGoodStandIn) {
   // Greek letters IPA borrows have no Latin lookalike; a wrong guess would be
   // worse than the box, so they are deliberately absent from the table.

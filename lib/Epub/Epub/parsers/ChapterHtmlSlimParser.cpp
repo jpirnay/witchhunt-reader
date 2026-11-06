@@ -64,7 +64,7 @@ bool isImageCandidate(const std::string& resolvedPath) {
 }
 }  // namespace
 
-const char* HEADER_TAGS[] = {"h1", "h2", "h3", "h4", "h5", "h6"};
+const char* const HEADER_TAGS[] = {"h1", "h2", "h3", "h4", "h5", "h6"};
 constexpr int NUM_HEADER_TAGS = sizeof(HEADER_TAGS) / sizeof(HEADER_TAGS[0]);
 
 // Size thresholds (bytes of XHTML) controlling indexing popup behavior.
@@ -258,13 +258,21 @@ constexpr size_t TABLE_BUFFER_BYTES_PER_CELL = 128;
 // "caption" belongs here even though it only ever appears inside a <table>: it is a block in
 // its own right, and without block treatment its text joins whatever inline context preceded
 // the table instead of getting its own style, spacing and font-size normalization.
-const char* BLOCK_TAGS[] = {"p", "li", "div", "br", "blockquote", "pre", "caption"};
+//
+// The rest are HTML's other block elements, as ChapterXPathIndexerInternal's isBlockTag() knows them. Left off this
+// list an element is inline text: nothing ended a word at </dt>, so <dt>Term</dt><dd>Meaning</dd> was the one word
+// "TermMeaning", and <center>* * *</center> joined the paragraph before it. Each can hold text as well as blocks, so
+// each is a <div> here, in INSET_CONTAINER_TAGS too.
+const char* const BLOCK_TAGS[] = {"p",       "li",      "div",      "br",     "blockquote", "pre",
+                                  "caption", "dl",      "dt",       "dd",     "figure",     "figcaption",
+                                  "center",  "address", "header",   "footer", "nav",        "hgroup",
+                                  "details", "summary", "fieldset", "legend", "form"};
 constexpr int NUM_BLOCK_TAGS = sizeof(BLOCK_TAGS) / sizeof(BLOCK_TAGS[0]);
 
 // Elements whose background picture becomes a picture of its own (noteBackgroundImage). Containers
 // only: on body/html a background is a page texture, on li/span/a a bullet, an icon or an ornament.
-const char* BACKGROUND_PICTURE_TAGS[] = {"div",   "p",          "table",   "section", "figure",
-                                         "aside", "blockquote", "article", "center"};
+const char* const BACKGROUND_PICTURE_TAGS[] = {"div",   "p",          "table",   "section", "figure",
+                                               "aside", "blockquote", "article", "center"};
 constexpr int NUM_BACKGROUND_PICTURE_TAGS = sizeof(BACKGROUND_PICTURE_TAGS) / sizeof(BACKGROUND_PICTURE_TAGS[0]);
 // A smaller background picture is decoration -- a flourish, a rule, a corner -- not an illustration.
 constexpr uint16_t MIN_BACKGROUND_PICTURE_SIDE = 96;
@@ -276,27 +284,29 @@ constexpr size_t MAX_BACKGROUND_PICTURE_SCOPES = 4;
 // whose <br>-separated lines each become a block of their own and must keep the inset of the
 // paragraph they belong to. <ul>/<ol> are how a list's items get their indent: in CSS an item
 // starts at the list's content edge, and its own margin-left only adds to that.
-const char* INSET_CONTAINER_TAGS[] = {"div", "blockquote", "section", "article", "aside", "main",
-                                      "p",   "li",         "pre",     "ul",      "ol"};
+const char* const INSET_CONTAINER_TAGS[] = {"div",    "blockquote", "section", "article",  "aside",  "main",   "p",
+                                            "li",     "pre",        "ul",      "ol",       "dl",     "dt",     "dd",
+                                            "figure", "figcaption", "center",  "address",  "header", "footer", "nav",
+                                            "hgroup", "details",    "summary", "fieldset", "legend", "form"};
 constexpr int NUM_INSET_CONTAINER_TAGS = sizeof(INSET_CONTAINER_TAGS) / sizeof(INSET_CONTAINER_TAGS[0]);
 
 // A list's padding-left when the book states none -- the stand-in for the browser default
 // `padding-inline-start: 40px`, which is what indents an unstyled list. Nested lists each add it.
 constexpr float LIST_DEFAULT_PADDING_EM = 1.5f;
 
-const char* BOLD_TAGS[] = {"b", "strong"};
+const char* const BOLD_TAGS[] = {"b", "strong"};
 constexpr int NUM_BOLD_TAGS = sizeof(BOLD_TAGS) / sizeof(BOLD_TAGS[0]);
 
-const char* ITALIC_TAGS[] = {"i", "em"};
+const char* const ITALIC_TAGS[] = {"i", "em"};
 constexpr int NUM_ITALIC_TAGS = sizeof(ITALIC_TAGS) / sizeof(ITALIC_TAGS[0]);
 
-const char* UNDERLINE_TAGS[] = {"u", "ins"};
+const char* const UNDERLINE_TAGS[] = {"u", "ins"};
 constexpr int NUM_UNDERLINE_TAGS = sizeof(UNDERLINE_TAGS) / sizeof(UNDERLINE_TAGS[0]);
 
-const char* STRIKETHROUGH_TAGS[] = {"s", "del", "strike"};
+const char* const STRIKETHROUGH_TAGS[] = {"s", "del", "strike"};
 constexpr int NUM_STRIKETHROUGH_TAGS = sizeof(STRIKETHROUGH_TAGS) / sizeof(STRIKETHROUGH_TAGS[0]);
 
-const char* IMAGE_TAGS[] = {"img", "image"};
+const char* const IMAGE_TAGS[] = {"img", "image"};
 constexpr int NUM_IMAGE_TAGS = sizeof(IMAGE_TAGS) / sizeof(IMAGE_TAGS[0]);
 
 // Inline formatting: the text on both sides of one of these elements' tags is in one inline
@@ -304,13 +314,13 @@ constexpr int NUM_IMAGE_TAGS = sizeof(IMAGE_TAGS) / sizeof(IMAGE_TAGS[0]);
 // formatting context; a block boundary or an element the parser does not lay out inline (<br>,
 // <img>, table parts, <li>, <dt>, <dd>, <div>, <section>, <figure>, ...) is a word boundary, so
 // every element not listed here ends the CJK segment (endCjkSegment) at its start and its end.
-const char* INLINE_FORMATTING_TAGS[] = {"span", "a",      "b",    "strong", "i",     "em",   "u",       "ins",  "s",
-                                        "del",  "strike", "sup",  "sub",    "small", "big",  "ruby",    "rb",   "rt",
-                                        "rp",   "rtc",    "font", "q",      "cite",  "abbr", "acronym", "code", "mark",
-                                        "dfn",  "kbd",    "samp", "var",    "tt",    "bdi",  "bdo",     "time", "data"};
+const char* const INLINE_FORMATTING_TAGS[] = {
+    "span",    "a",     "b",    "strong", "i",   "em",   "u",   "ins", "s",    "del", "strike", "sup",
+    "sub",     "small", "big",  "ruby",   "rb",  "rt",   "rp",  "rtc", "font", "q",   "cite",   "abbr",
+    "acronym", "code",  "mark", "dfn",    "kbd", "samp", "var", "tt",  "bdi",  "bdo", "time",   "data"};
 constexpr int NUM_INLINE_FORMATTING_TAGS = sizeof(INLINE_FORMATTING_TAGS) / sizeof(INLINE_FORMATTING_TAGS[0]);
 
-const char* SKIP_TAGS[] = {"head", "rp"};
+const char* const SKIP_TAGS[] = {"head", "rp"};
 constexpr int NUM_SKIP_TAGS = sizeof(SKIP_TAGS) / sizeof(SKIP_TAGS[0]);
 
 bool isWhitespace(const char c) { return c == ' ' || c == '\r' || c == '\n' || c == '\t'; }
@@ -453,35 +463,8 @@ bool hasAttributeToken(const char* value, const char* token) {
   return false;
 }
 
-// Returns true if the trailing UTF-8 codepoint in [buf, buf+len), read past any control that
-// counts nowhere (lastCodepointOf), is a dash that allows a line break opportunity after it.
-// Inline-tag boundaries like "gone—<i>Umbriel</i>"
-// would otherwise glue the dash to the following word via nextWordContinues, making the
-// dash unbreakable; callers use this to skip setting that flag when the buffered text
-// already ends at a natural break point.
-//
-// Soft hyphen (U+00AD) and non-breaking hyphen (U+2011) are intentionally excluded:
-// soft hyphen is invisible (a hyphenation hint) and non-breaking hyphen forbids breaks
-// by definition. Minus sign (U+2212) is excluded because it's mathematical, not a word
-// separator.
-bool bufferEndsWithBreakableDash(const char* buf, const int len) {
-  switch (lastCodepointOf(buf, len)) {
-    case '-':
-    case 0x2010:  // HYPHEN
-    case 0x2012:  // FIGURE DASH
-    case 0x2013:  // EN DASH
-    case 0x2014:  // EM DASH
-    case 0x2015:  // HORIZONTAL BAR
-    case 0x2E3A:  // TWO-EM DASH
-    case 0x2E3B:  // THREE-EM DASH
-      return true;
-    default:
-      return false;
-  }
-}
-
 // given the start and end of a tag, check to see if it matches a known tag
-bool matches(const char* tag_name, const char* possible_tags[], const int possible_tag_count) {
+bool matches(const char* tag_name, const char* const possible_tags[], const int possible_tag_count) {
   for (int i = 0; i < possible_tag_count; i++) {
     if (strcmp(tag_name, possible_tags[i]) == 0) {
       return true;
@@ -1208,6 +1191,14 @@ void ChapterHtmlSlimParser::closeRt() {
 }
 
 // flush the contents of partWordBuffer to currentTextBlock
+// The word ends at an inline tag: what follows is glued to it, as it is in the source. Whether a line may end at the
+// seam is ParsedText::addWord's to say.
+bool ChapterHtmlSlimParser::flushPartWordGlued() {
+  if (!flushPartWordBuffer()) return false;
+  nextWordContinues = true;
+  return true;
+}
+
 bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   partWordCjkCodepoints_ = 0;  // the run being counted ends with this flush
   partWordLastWasCjk_ = false;
@@ -2530,6 +2521,12 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   self->observeFontSizeBaseline(name, cssStyle);
   cssStyle = self->normalizeFontSizeForElement(name, cssStyle);
 
+  // <center> says what the author wants of that text, as a heading does, so what it holds is centred whatever the
+  // reader's alignment. A rule of the book's own on <center> is an ordinary text-align.
+  if (strcmp(name, "center") == 0 && !cssStyle.defined.textAlign) {
+    self->centerDepth_ = std::min(self->centerDepth_, self->depth);
+  }
+
   // Track an explicit CSS width on a wrapping block (e.g. <div style="width:100px">).
   // A percentage image width inside resolves against the innermost such width, so a
   // width:100% image in a narrow box stays small instead of filling the viewport.
@@ -3198,9 +3195,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // inline, and <rp> stays visible text for KOSync.
   if (self->rubyDepth_ < 0 && strcmp(name, "ruby") == 0) {
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-      if (!self->flushPartWordBuffer()) return;
-      if (!endsAtDashBreak) self->nextWordContinues = true;
+      if (!self->flushPartWordGlued()) return;
     }
     self->rubyDepth_ = self->depth;
     self->rubyHasGroup_ = false;
@@ -3211,9 +3206,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->rtcDepth_ = self->depth;
   } else if (self->rubyDepth_ >= 0 && self->rtcDepth_ < 0 && self->rtDepth_ < 0 && strcmp(name, "rt") == 0) {
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-      if (!self->flushPartWordBuffer()) return;
-      if (!endsAtDashBreak) self->nextWordContinues = true;
+      if (!self->flushPartWordGlued()) return;
     }
     self->rtDepth_ = self->depth;
     self->rubyText_.clear();
@@ -3256,11 +3249,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (isInternalLink) {
       // Flush buffer before style change
       if (self->partWordHasText()) {
-        const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-        if (!self->flushPartWordBuffer()) return;
-        if (!endsAtDashBreak) {
-          self->nextWordContinues = true;
-        }
+        if (!self->flushPartWordGlued()) return;
       }
       self->insideFootnoteLink = true;
       self->footnoteLinkDepth = self->depth;
@@ -3334,13 +3323,24 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
       cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
   userAlignmentBlockStyle.direction = self->blockDirection(cssStyle);
-  // As in CSS, a list's own padding on its start side replaces the default and its margin there adds to it.
+  if (self->depth >= self->centerDepth_) {
+    userAlignmentBlockStyle.alignment = CssTextAlign::Center;
+    userAlignmentBlockStyle.textAlignDefined = true;
+  }
+  // As in CSS, a list's own padding on its start side replaces the default and its margin there adds to it. A <dd>'s
+  // default is a margin, the same 40 px in a browser.
+  const int16_t listPadding = static_cast<int16_t>(emSize * LIST_DEFAULT_PADDING_EM);
   if (isList) {
-    const int16_t listPadding = static_cast<int16_t>(emSize * LIST_DEFAULT_PADDING_EM);
     if (self->startSideIsRight()) {
       if (!cssStyle.hasPaddingRight()) userAlignmentBlockStyle.paddingRight = listPadding;
     } else if (!cssStyle.hasPaddingLeft()) {
       userAlignmentBlockStyle.paddingLeft = listPadding;
+    }
+  } else if (strcmp(name, "dd") == 0) {
+    if (self->startSideIsRight()) {
+      if (!cssStyle.hasMarginRight()) userAlignmentBlockStyle.marginRight = listPadding;
+    } else if (!cssStyle.hasMarginLeft()) {
+      userAlignmentBlockStyle.marginLeft = listPadding;
     }
   }
 
@@ -3577,11 +3577,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
              matches(name, STRIKETHROUGH_TAGS, NUM_STRIKETHROUGH_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-      if (!self->flushPartWordBuffer()) return;
-      if (!endsAtDashBreak) {
-        self->nextWordContinues = true;
-      }
+      if (!self->flushPartWordGlued()) return;
     }
     if (matches(name, UNDERLINE_TAGS, NUM_UNDERLINE_TAGS)) {
       self->underlineUntilDepth = std::min(self->underlineUntilDepth, self->depth);
@@ -3629,11 +3625,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   } else if (matches(name, BOLD_TAGS, NUM_BOLD_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-      if (!self->flushPartWordBuffer()) return;
-      if (!endsAtDashBreak) {
-        self->nextWordContinues = true;
-      }
+      if (!self->flushPartWordGlued()) return;
     }
     self->boldUntilDepth = std::min(self->boldUntilDepth, self->depth);
     // Push inline style entry for bold tag
@@ -3664,11 +3656,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   } else if (matches(name, ITALIC_TAGS, NUM_ITALIC_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-      if (!self->flushPartWordBuffer()) return;
-      if (!endsAtDashBreak) {
-        self->nextWordContinues = true;
-      }
+      if (!self->flushPartWordGlued()) return;
     }
     self->italicUntilDepth = std::min(self->italicUntilDepth, self->depth);
     // Push inline style entry for italic tag
@@ -3740,11 +3728,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         (self->vertical_ && cssStyle.hasTextCombine()) || isSmallTag || isBigTag) {
       // Flush buffer before style change so preceding text gets current style
       if (self->partWordHasText()) {
-        const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-        if (!self->flushPartWordBuffer()) return;
-        if (!endsAtDashBreak) {
-          self->nextWordContinues = true;
-        }
+        if (!self->flushPartWordGlued()) return;
       }
       applyCssEmphasisToEntry(entry, cssStyle);
       applyVerticalAlignToEntry(entry, cssStyle);
@@ -4206,13 +4190,9 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
                              matches(name, IMAGE_TAGS, NUM_IMAGE_TAGS) || self->depth == 1;
 
     if (shouldFlush) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
       if (!self->flushPartWordBuffer()) return;
-      // If closing an inline element, the next word fragment continues the same visual word —
-      // unless the buffered text ended at a dash that should allow a line break (em/en dash, etc.).
-      if (isInlineTag && !endsAtDashBreak) {
-        self->nextWordContinues = true;
-      }
+      // If closing an inline element, the next word fragment continues the same visual word.
+      if (isInlineTag) self->nextWordContinues = true;
     }
   }
   // Controls held for a word end with their block, a table cell's included. Not at a </br>: the <br> holds no text, and
@@ -4257,6 +4237,7 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
     self->clearSpentBlockHeadingStyle();
   }
   if (self->depth == self->headingDepth_) self->headingDepth_ = INT_MAX;
+  if (self->depth == self->centerDepth_) self->centerDepth_ = INT_MAX;
 
   // Apply held bottom spacing whose block-level element is now out of scope
   while (!self->heldBottomSpacing_.empty() && self->heldBottomSpacing_.back().depth >= self->depth) {

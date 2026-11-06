@@ -297,17 +297,19 @@ SPINE 4 href=OEBPS/chapter5.xhtml pages=1 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=the
    W x=37 s=0 z=100 t=HTML
    W x=75 s=0 z=100 t=attribute.
-  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=86 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=18 s=0 z=100 t=Visible
    W x=77 s=0 z=100 t=paragraph
    W x=170 s=0 z=100 t=after
-   W x=225 s=0 z=100 t=inline-hidden
+   W x=225 s=0 z=100 t=inline-
+   W x=286 s=0 z=100 t=hidden
    W x=346 s=0 z=100 t=one.
-  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=110 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=18 s=0 z=100 t=Visible
    W x=77 s=0 z=100 t=paragraph
    W x=170 s=0 z=100 t=after
-   W x=225 s=0 z=100 t=inline-hidden
+   W x=225 s=0 z=100 t=inline-
+   W x=286 s=0 z=100 t=hidden
    W x=346 s=0 z=100 t=div.
   LINE y=134 x=0 align=2 mult=1.400 hfid=0 words=5
    W x=6 s=1 z=100 t=Inline
@@ -373,18 +375,20 @@ SPINE 5 href=OEBPS/chapter6.xhtml pages=1 truncated=0 cssFallback=0
   LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=hidden
    W x=60 s=0 z=100 t=container.
-  LINE y=158 x=0 align=2 mult=1.400 hfid=0 words=4
+  LINE y=158 x=0 align=2 mult=1.400 hfid=0 words=5
    W x=21 s=1 z=100 t=Hidden
    W x=107 s=1 z=100 t=parent
    W x=202 s=1 z=100 t=with
-   W x=263 s=1 z=100 t=visible-class
+   W x=263 s=1 z=100 t=visible-
+   W x=367 s=1 z=100 t=class
   LINE y=192 x=0 align=2 mult=1.400 hfid=0 words=1
    W x=197 s=1 z=100 t=child
-  LINE y=226 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=226 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=18 s=0 z=100 t=Visible
    W x=77 s=0 z=100 t=paragraph
    W x=170 s=0 z=100 t=confirming
-   W x=268 s=0 z=100 t=parent-wins
+   W x=268 s=0 z=100 t=parent-
+   W x=333 s=0 z=100 t=wins
    W x=371 s=0 z=100 t=behavior.
 SPINE 6 href=OEBPS/chapter7.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=10 footnotes=0
@@ -418,9 +422,10 @@ SPINE 6 href=OEBPS/chapter7.xhtml pages=1 truncated=0 cssFallback=0
    W x=161 s=1 z=100 t=H2
    W x=193 s=1 z=100 t=for
    W x=247 s=1 z=100 t=comparison
-  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=18 s=0 z=100 t=This
-   W x=75 s=0 z=100 t=heading-paragraph
+   W x=75 s=0 z=100 t=heading-
+   W x=153 s=0 z=100 t=paragraph
    W x=264 s=0 z=100 t=pair
    W x=320 s=0 z=100 t=should
    W x=405 s=0 z=100 t=render
@@ -467,10 +472,11 @@ SPINE 7 href=OEBPS/chapter8.xhtml pages=1 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=style
    W x=51 s=0 z=100 t=hides
    W x=101 s=0 z=100 t=it.
-  LINE y=154 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=154 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=18 s=0 z=100 t=Visible
    W x=77 s=0 z=100 t=after
-   W x=132 s=0 z=100 t=inline-hidden
+   W x=132 s=0 z=100 t=inline-
+   W x=193 s=0 z=100 t=hidden
    W x=253 s=0 z=100 t=div.
   LINE y=178 x=0 align=2 mult=1.400 hfid=0 words=4
    W x=22 s=1 z=100 t=Inline
@@ -523,12 +529,13 @@ SPINE 7 href=OEBPS/chapter8.xhtml pages=1 truncated=0 cssFallback=0
    W x=212 s=1 z=100 t=override
    W x=332 s=1 z=100 t=of
    W x=374 s=1 z=100 t=class
-  LINE y=448 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=448 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=18 s=0 z=100 t=The
    W x=67 s=0 z=100 t=paragraph
    W x=176 s=0 z=100 t=below
    W x=240 s=0 z=100 t=has
-   W x=295 s=0 z=100 t=class="force-show
+   W x=295 s=0 z=100 t=class="force-
+   W x=419 s=0 z=100 t=show
   LINE y=472 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=hidden".
    W x=88 s=0 z=100 t=The
@@ -537,16 +544,18 @@ SPINE 7 href=OEBPS/chapter8.xhtml pages=1 truncated=0 cssFallback=0
    W x=255 s=0 z=100 t=sets
    W x=304 s=0 z=100 t=display:none,
    W x=433 s=0 z=100 t=but
-  LINE y=496 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=p.force-show
+  LINE y=496 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=p.force-
+   W x=71 s=0 z=100 t=show
    W x=116 s=0 z=100 t=sets
    W x=159 s=0 z=100 t=display:block
    W x=273 s=0 z=100 t=at
    W x=301 s=0 z=100 t=higher
    W x=365 s=0 z=100 t=priority.
-  LINE y=520 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=520 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=VISIBLE:
-   W x=108 s=0 z=100 t=p.force-show
+   W x=108 s=0 z=100 t=p.force-
+   W x=179 s=0 z=100 t=show
    W x=229 s=0 z=100 t=overrides
    W x=316 s=0 z=100 t=.hidden
    W x=391 s=0 z=100 t=back

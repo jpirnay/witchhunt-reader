@@ -82,13 +82,14 @@ SPINE 1 href=OEBPS/toc.xhtml pages=1 truncated=0 cssFallback=0
    W x=137 s=4 z=100 t=The
    W x=170 s=4 z=100 t=Cyrillic
    W x=239 s=4 z=100 t=Challenge
-  LINE y=279 x=27 align=0 mult=1.000 hfid=0 words=6
+  LINE y=279 x=27 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=9.
    W x=41 s=4 z=100 t=Chapter
    W x=114 s=4 z=100 t=9
    W x=127 s=4 z=100 t=–
    W x=139 s=4 z=100 t=Latin
-   W x=196 s=4 z=100 t=Extended-B
+   W x=196 s=4 z=100 t=Extended-
+   W x=279 s=4 z=100 t=B
   LINE y=303 x=27 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=10.
    W x=52 s=4 z=100 t=Chapter
@@ -256,16 +257,18 @@ SPINE 2 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=258 s=0 z=100 t=wealthy
    W x=337 s=0 z=100 t=patron
    W x=409 s=0 z=100 t=named
-  LINE y=467 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=467 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=Lydia
-   W x=53 s=0 z=100 t=Thornton-Foxwell
+   W x=53 s=0 z=100 t=Thornton-
+   W x=144 s=0 z=100 t=Foxwell
    W x=208 s=0 z=100 t=—
    W x=222 s=0 z=100 t=had
    W x=261 s=0 z=100 t=commissioned
    W x=377 s=0 z=100 t=a
    W x=396 s=0 z=100 t=lavish
-  LINE y=491 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=coffee-table
+  LINE y=491 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=coffee-
+   W x=66 s=0 z=100 t=table
    W x=122 s=0 z=100 t=volume
    W x=195 s=0 z=100 t=on
    W x=228 s=0 z=100 t=the
@@ -331,7 +334,7 @@ SPINE 2 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=323 s=0 z=100 t=loose.
    W x=393 s=0 z=100 t=And
    W x=429 s=0 z=100 t=the
-  LINE y=663 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=663 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=‘To’
    W x=47 s=0 z=100 t=in
    W x=70 s=0 z=100 t=‘Towards’
@@ -340,8 +343,9 @@ SPINE 2 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=210 s=0 z=100 t=overhang
    W x=303 s=0 z=100 t=of
    W x=331 s=0 z=100 t=the
-   W x=368 s=0 z=100 t=T-crossbar
-  LINE y=687 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=368 s=0 z=100 t=T-
+   W x=383 s=0 z=100 t=crossbar
+  LINE y=687 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=should
    W x=67 s=0 z=100 t=tuck
    W x=109 s=0 z=100 t=over
@@ -350,7 +354,8 @@ SPINE 2 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=280 s=0 z=100 t=o.
    W x=308 s=0 z=100 t=This
    W x=347 s=0 z=100 t=is
-   W x=368 s=0 z=100 t=first-rate
+   W x=368 s=0 z=100 t=first-
+   W x=420 s=0 z=100 t=rate
   LINE y=711 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=typeface
    W x=77 s=0 z=100 t=work;
@@ -619,11 +624,12 @@ SPINE 3 href=OEBPS/chapter2.xhtml pages=2 truncated=0 cssFallback=0
    W x=301 s=0 z=100 t=then
    W x=353 s=0 z=100 t=he
    W x=384 s=0 z=100 t=frowned.
-  LINE y=403 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=403 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=“What
    W x=65 s=0 z=100 t=about
    W x=130 s=0 z=100 t=the
-   W x=175 s=0 z=100 t=double-f
+   W x=175 s=0 z=100 t=double-
+   W x=239 s=0 z=100 t=f
    W x=263 s=0 z=100 t=ligatures?
    W x=368 s=0 z=100 t=‘Affixed,’
   LINE y=427 x=0 align=0 mult=1.000 hfid=0 words=7
@@ -790,11 +796,12 @@ SPINE 3 href=OEBPS/chapter2.xhtml pages=2 truncated=0 cssFallback=0
    W x=185 s=2 z=100 t=tactful,
    W x=275 s=2 z=100 t=connected,
    W x=380 s=2 z=100 t=architec-
-  LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=2 z=100 t=tural,
    W x=72 s=2 z=100 t=instructed.
    W x=185 s=0 z=100 t=Mrs.
-   W x=232 s=0 z=100 t=Thornton-Foxwell
+   W x=232 s=0 z=100 t=Thornton-
+   W x=323 s=0 z=100 t=Foxwell
    W x=395 s=0 z=100 t=specifi-
   LINE y=196 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=0 z=100 t=cally
@@ -946,8 +953,9 @@ SPINE 4 href=OEBPS/chapter3.xhtml pages=2 truncated=0 cssFallback=0
    W x=368 s=0 z=100 t=in,
    W x=400 s=0 z=100 t=the
    W x=438 s=0 z=100 t=TO
-  LINE y=271 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=well-fitted,
+  LINE y=271 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=well-
+   W x=42 s=0 z=100 t=fitted,
    W x=114 s=0 z=100 t=the
    W x=156 s=0 z=100 t=YE
    W x=190 s=0 z=100 t=elegantly
@@ -1134,13 +1142,14 @@ SPINE 4 href=OEBPS/chapter3.xhtml pages=2 truncated=0 cssFallback=0
    W x=345 s=0 z=100 t=In
    W x=380 s=0 z=100 t=the
    W x=426 s=0 z=100 t=word
-  LINE y=76 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=76 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=“ATAVISTIC”
    W x=99 s=0 z=100 t=—
    W x=113 s=0 z=100 t=set
    W x=148 s=0 z=100 t=as
    W x=176 s=0 z=100 t=a
-   W x=195 s=0 z=100 t=pull-quote
+   W x=195 s=0 z=100 t=pull-
+   W x=239 s=0 z=100 t=quote
    W x=295 s=0 z=100 t=in
    W x=319 s=0 z=100 t=small
    W x=375 s=0 z=100 t=capitals
@@ -1379,20 +1388,23 @@ SPINE 5 href=OEBPS/chapter4.xhtml pages=2 truncated=0 cssFallback=0
    W x=110 s=2 z=100 t=perfection
    W x=204 s=2 z=100 t=is
    W x=225 s=2 z=100 t=elusive.”
-  LINE y=323 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=323 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=27 s=0 z=100 t=The
-   W x=62 s=0 z=100 t=r-comma
+   W x=62 s=0 z=100 t=r-
+   W x=79 s=0 z=100 t=comma
    W x=138 s=0 z=100 t=in
    W x=163 s=0 z=100 t=“your,”
    W x=235 s=0 z=100 t=the
-   W x=274 s=0 z=100 t=r-period
+   W x=274 s=0 z=100 t=r-
+   W x=291 s=0 z=100 t=period
    W x=348 s=0 z=100 t=in
    W x=373 s=0 z=100 t=“Dr.”
    W x=427 s=0 z=100 t=and
-  LINE y=347 x=0 align=0 mult=1.000 hfid=0 words=11
+  LINE y=347 x=0 align=0 mult=1.000 hfid=0 words=12
    W x=0 s=0 z=100 t=“Mr.”,
    W x=56 s=0 z=100 t=the
-   W x=94 s=0 z=100 t=f-period
+   W x=94 s=0 z=100 t=f-
+   W x=113 s=0 z=100 t=period
    W x=169 s=0 z=100 t=in
    W x=193 s=0 z=100 t=“Prof.”
    W x=265 s=0 z=100 t=—
@@ -1470,8 +1482,10 @@ SPINE 5 href=OEBPS/chapter4.xhtml pages=2 truncated=0 cssFallback=0
    W x=298 s=0 z=100 t=Y.
    W x=327 s=0 z=100 t=Mishima.”
    W x=415 s=0 z=100 t=Each
-  LINE y=543 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=initial-period-space
+  LINE y=543 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=initial-
+   W x=69 s=0 z=100 t=period-
+   W x=127 s=0 z=100 t=space
    W x=179 s=0 z=100 t=sequence
    W x=260 s=0 z=100 t=was
    W x=296 s=0 z=100 t=a
@@ -2282,9 +2296,10 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=314 s=0 z=100 t=was
    W x=350 s=0 z=100 t=even
    W x=400 s=0 z=100 t=bound,
-  LINE y=123 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=123 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=Mrs.
-   W x=44 s=0 z=100 t=Thornton-Foxwell
+   W x=44 s=0 z=100 t=Thornton-
+   W x=135 s=0 z=100 t=Foxwell
    W x=204 s=0 z=100 t=rang
    W x=257 s=0 z=100 t=with
    W x=302 s=0 z=100 t=a
@@ -2494,12 +2509,13 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=360 s=0 z=100 t=to
    W x=390 s=0 z=100 t=the
    W x=429 s=0 z=100 t=T’s
-  LINE y=719 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=719 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=already
    W x=72 s=0 z=100 t=long
    W x=121 s=0 z=100 t=list
    W x=161 s=0 z=100 t=of
-   W x=189 s=0 z=100 t=right-side
+   W x=189 s=0 z=100 t=right-
+   W x=245 s=0 z=100 t=side
    W x=283 s=0 z=100 t=partners.
  PAGE 1 elements=29 footnotes=0
   LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=8
@@ -2589,9 +2605,10 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=336 s=0 z=100 t=“Füße”
    W x=393 s=0 z=100 t=had
    W x=432 s=0 z=100 t=its
-  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=own
-   W x=47 s=0 z=100 t=right-side
+   W x=47 s=0 z=100 t=right-
+   W x=103 s=0 z=100 t=side
    W x=153 s=0 z=100 t=bearing
    W x=234 s=0 z=100 t=issues:
    W x=313 s=0 z=100 t=ße
@@ -2706,8 +2723,9 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=284 s=0 z=100 t=animals
    W x=362 s=0 z=100 t=from
    W x=411 s=0 z=100 t=their
-  LINE y=532 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=0 s=0 z=100 t=English-style
+  LINE y=532 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=English-
+   W x=79 s=0 z=100 t=style
    W x=130 s=0 z=100 t=“G
    W x=151 s=0 z=100 t=and
    W x=188 s=0 z=100 t=‘W
@@ -2799,12 +2817,13 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=172 s=0 z=100 t=of
    W x=200 s=0 z=100 t=the
    W x=237 s=0 z=100 t=R.
-  LINE y=76 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=76 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=27 s=0 z=100 t=French
    W x=96 s=0 z=100 t=also
    W x=154 s=0 z=100 t=offered
    W x=236 s=0 z=100 t=excellent
-   W x=332 s=0 z=100 t=ligature-with-
+   W x=332 s=0 z=100 t=ligature-
+   W x=417 s=0 z=100 t=with-
   LINE y=100 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=accent
    W x=68 s=0 z=100 t=test
@@ -2937,7 +2956,7 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=245 s=0 z=100 t=used
    W x=292 s=0 z=100 t=guillemets
    W x=395 s=0 z=100 t=instead
-  LINE y=492 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=492 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=of
    W x=38 s=0 z=100 t=quotation
    W x=145 s=0 z=100 t=marks.
@@ -2947,7 +2966,8 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=305 s=0 z=100 t=ici,
    W x=332 s=0 z=100 t= 
    W x=348 s=0 z=100 t=»
-   W x=375 s=0 z=100 t=dit-elle.
+   W x=375 s=0 z=100 t=dit-
+   W x=408 s=0 z=100 t=elle.
   LINE y=516 x=0 align=0 mult=1.000 hfid=0 words=12
    W x=0 s=0 z=100 t=«
    W x=9 s=0 z=100 t= 
@@ -3009,11 +3029,12 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=98 s=1 z=100 t=Spanish
    W x=191 s=1 z=100 t=and
    W x=237 s=1 z=100 t=Portuguese
-  LINE y=37 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=37 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=27 s=0 z=100 t=Spanish
    W x=106 s=0 z=100 t=contributed
    W x=215 s=0 z=100 t=the
-   W x=257 s=0 z=100 t=tilde-N.
+   W x=257 s=0 z=100 t=tilde-
+   W x=308 s=0 z=100 t=N.
    W x=336 s=2 z=100 t=El
    W x=368 s=2 z=100 t=niño
    W x=417 s=2 z=100 t=soñó
@@ -3179,14 +3200,15 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=0 s=2 z=100 t=entries
    W x=68 s=2 z=100 t=about
    W x=125 s=2 z=100 t=Cæsar.
-  LINE y=565 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=565 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=27 s=0 z=100 t=The
    W x=60 s=0 z=100 t=Åk
    W x=81 s=0 z=100 t=in
    W x=104 s=0 z=100 t=“Åkesson”
    W x=192 s=0 z=100 t=placed
    W x=249 s=0 z=100 t=a
-   W x=267 s=0 z=100 t=ring-above
+   W x=267 s=0 z=100 t=ring-
+   W x=312 s=0 z=100 t=above
    W x=369 s=0 z=100 t=diacritical
   LINE y=589 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=directly
@@ -3200,7 +3222,7 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=348 s=0 z=100 t=risk
    W x=385 s=0 z=100 t=with
    W x=425 s=0 z=100 t=the
-  LINE y=613 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=613 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=line
    W x=46 s=0 z=100 t=above.
    W x=118 s=0 z=100 t=Ør
@@ -3208,7 +3230,8 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=177 s=0 z=100 t=“Ørsted”
    W x=261 s=0 z=100 t=combined
    W x=341 s=0 z=100 t=the
-   W x=383 s=0 z=100 t=O-stroke
+   W x=383 s=0 z=100 t=O-
+   W x=400 s=0 z=100 t=stroke
   LINE y=637 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=with
    W x=41 s=0 z=100 t=a
@@ -3292,17 +3315,19 @@ SPINE 7 href=OEBPS/chapter6.xhtml pages=5 truncated=0 cssFallback=0
    W x=228 s=0 z=100 t=dashes
    W x=293 s=0 z=100 t=kern
    W x=335 s=0 z=100 t=differently.”
-  LINE y=113 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=113 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=27 s=0 z=100 t=“Yes,”
    W x=89 s=0 z=100 t=Avery
    W x=142 s=0 z=100 t=said.
    W x=195 s=0 z=100 t=“Set:
    W x=250 s=2 z=100 t=pages
-   W x=305 s=2 z=100 t=47–74,
+   W x=305 s=2 z=100 t=47–
+   W x=332 s=2 z=100 t=74,
    W x=369 s=2 z=100 t=the
    W x=408 s=2 z=100 t=years
-  LINE y=137 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=2 z=100 t=1910–1947.
+  LINE y=137 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=2 z=100 t=1910–
+   W x=37 s=2 z=100 t=1947.
    W x=91 s=0 z=100 t=The
    W x=128 s=0 z=100 t=en
    W x=158 s=0 z=100 t=dash
@@ -3418,10 +3443,11 @@ SPINE 8 href=OEBPS/chapter7.xhtml pages=5 truncated=0 cssFallback=0
    W x=314 s=0 z=100 t=project
    W x=384 s=0 z=100 t=was
    W x=422 s=0 z=100 t=fin-
-  LINE y=123 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=123 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=ished,
    W x=68 s=0 z=100 t=Lydia
-   W x=130 s=0 z=100 t=Thornton-Foxwell
+   W x=130 s=0 z=100 t=Thornton-
+   W x=221 s=0 z=100 t=Foxwell
    W x=295 s=0 z=100 t=rang
    W x=353 s=0 z=100 t=with
    W x=403 s=0 z=100 t=a
@@ -3836,23 +3862,25 @@ SPINE 8 href=OEBPS/chapter7.xhtml pages=5 truncated=0 cssFallback=0
    W x=239 s=0 z=100 t=horizontal
    W x=346 s=0 z=100 t=bar
    W x=378 s=0 z=100 t=through
-  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=the
    W x=37 s=0 z=100 t=L
    W x=55 s=0 z=100 t=altered
    W x=126 s=0 z=100 t=every
-   W x=178 s=0 z=100 t=right-side
+   W x=178 s=0 z=100 t=right-
+   W x=234 s=0 z=100 t=side
    W x=272 s=0 z=100 t=pairing.
   LINE y=651 x=0 align=2 mult=1.150 hfid=0 words=4
    W x=76 s=1 z=100 t=Hungarian
    W x=197 s=1 z=100 t=and
    W x=243 s=1 z=100 t=Turkish
    W x=327 s=1 z=100 t=Pairs
-  LINE y=688 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=688 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=27 s=0 z=100 t=Hungarian
    W x=123 s=0 z=100 t=brought
    W x=199 s=0 z=100 t=the
-   W x=236 s=0 z=100 t=double-acute
+   W x=236 s=0 z=100 t=double-
+   W x=300 s=0 z=100 t=acute
    W x=355 s=0 z=100 t=characters.
   LINE y=712 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=2 z=100 t=A
@@ -4047,9 +4075,10 @@ SPINE 8 href=OEBPS/chapter7.xhtml pages=5 truncated=0 cssFallback=0
    W x=271 s=0 z=100 t=even
    W x=319 s=0 z=100 t=when
    W x=364 s=0 z=100 t=surrounded
-  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=by
-   W x=22 s=0 z=100 t=Extended-A
+   W x=22 s=0 z=100 t=Extended-
+   W x=105 s=0 z=100 t=A
    W x=121 s=0 z=100 t=characters.
    W x=233 s=0 z=100 t=The
    W x=268 s=0 z=100 t=fl
@@ -4103,7 +4132,7 @@ SPINE 8 href=OEBPS/chapter7.xhtml pages=5 truncated=0 cssFallback=0
    W x=308 s=0 z=100 t=“Afirmacja”
    W x=411 s=0 z=100 t=—
    W x=425 s=0 z=100 t=all
-  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=696 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=exercised
    W x=79 s=0 z=100 t=the
    W x=117 s=0 z=100 t=ligature
@@ -4111,7 +4140,8 @@ SPINE 8 href=OEBPS/chapter7.xhtml pages=5 truncated=0 cssFallback=0
    W x=264 s=0 z=100 t=in
    W x=288 s=0 z=100 t=a
    W x=307 s=0 z=100 t=Latin
-   W x=365 s=0 z=100 t=Extended-A
+   W x=365 s=0 z=100 t=Extended-
+   W x=448 s=0 z=100 t=A
   LINE y=720 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=context.
  PAGE 3 elements=28 footnotes=0
@@ -4140,17 +4170,19 @@ SPINE 8 href=OEBPS/chapter7.xhtml pages=5 truncated=0 cssFallback=0
    W x=271 s=0 z=100 t=ligature
    W x=354 s=0 z=100 t=engine
    W x=418 s=0 z=100 t=cor-
-  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=rectly
    W x=59 s=0 z=100 t=handled
    W x=136 s=0 z=100 t=the
    W x=175 s=0 z=100 t=Turkish
-   W x=243 s=0 z=100 t=dotless-ı
+   W x=243 s=0 z=100 t=dotless-
+   W x=318 s=0 z=100 t=ı
    W x=336 s=0 z=100 t=(ı)
    W x=377 s=0 z=100 t=and
    W x=416 s=0 z=100 t=dot-
-  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
-   W x=0 s=0 z=100 t=ted-İ
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=ted-
+   W x=36 s=0 z=100 t=İ
    W x=51 s=0 z=100 t=(İ)
    W x=89 s=0 z=100 t=distinction.
   LINE y=147 x=0 align=2 mult=1.150 hfid=0 words=5
@@ -4159,21 +4191,23 @@ SPINE 8 href=OEBPS/chapter7.xhtml pages=5 truncated=0 cssFallback=0
    W x=210 s=1 z=100 t=and
    W x=256 s=1 z=100 t=Dutch
    W x=327 s=1 z=100 t=ĳ
-  LINE y=184 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=184 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=27 s=0 z=100 t=Two
    W x=59 s=0 z=100 t=Latin
-   W x=118 s=0 z=100 t=Extended-A
+   W x=118 s=0 z=100 t=Extended-
+   W x=201 s=0 z=100 t=A
    W x=217 s=0 z=100 t=characters
    W x=319 s=0 z=100 t=were
    W x=359 s=0 z=100 t=themselves
-  LINE y=208 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=208 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=ligatures
    W x=93 s=0 z=100 t=by
    W x=115 s=0 z=100 t=heritage.
    W x=210 s=0 z=100 t=The
    W x=245 s=0 z=100 t=French
    W x=306 s=0 z=100 t=œ
-   W x=323 s=0 z=100 t=(o-e
+   W x=323 s=0 z=100 t=(o-
+   W x=355 s=0 z=100 t=e
    W x=372 s=0 z=100 t=ligature)
   LINE y=232 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=appeared
@@ -4286,9 +4320,10 @@ SPINE 8 href=OEBPS/chapter7.xhtml pages=5 truncated=0 cssFallback=0
    W x=298 s=0 z=100 t=the
    W x=337 s=0 z=100 t=preceding
    W x=420 s=0 z=100 t=let-
-  LINE y=524 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=524 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=ter’s
-   W x=55 s=0 z=100 t=right-side
+   W x=55 s=0 z=100 t=right-
+   W x=111 s=0 z=100 t=side
    W x=150 s=0 z=100 t=bearing
    W x=220 s=0 z=100 t=abutted
    W x=293 s=0 z=100 t=the
@@ -4298,8 +4333,9 @@ SPINE 8 href=OEBPS/chapter7.xhtml pages=5 truncated=0 cssFallback=0
    W x=0 s=0 z=100 t=of
    W x=28 s=0 z=100 t=the
    W x=65 s=0 z=100 t=ĳ.
-  LINE y=599 x=0 align=2 mult=1.150 hfid=0 words=3
-   W x=75 s=1 z=100 t=Extended-A
+  LINE y=599 x=0 align=2 mult=1.150 hfid=0 words=4
+   W x=75 s=1 z=100 t=Extended-
+   W x=181 s=1 z=100 t=A
    W x=198 s=1 z=100 t=Kerning
    W x=290 s=1 z=100 t=Glossary
   LINE y=636 x=0 align=0 mult=1.000 hfid=0 words=7
@@ -4573,10 +4609,11 @@ SPINE 9 href=OEBPS/chapter8.xhtml pages=5 truncated=0 cssFallback=0
    W x=333 s=0 z=100 t=off
    W x=375 s=0 z=100 t=the
    W x=416 s=0 z=100 t=press
-  LINE y=123 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=123 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=when
    W x=58 s=0 z=100 t=Mrs.
-   W x=111 s=0 z=100 t=Thornton-Foxwell
+   W x=111 s=0 z=100 t=Thornton-
+   W x=202 s=0 z=100 t=Foxwell
    W x=280 s=0 z=100 t=telephoned
    W x=395 s=0 z=100 t=again.
   LINE y=147 x=0 align=0 mult=1.000 hfid=0 words=9
@@ -5124,14 +5161,15 @@ SPINE 9 href=OEBPS/chapter8.xhtml pages=5 truncated=0 cssFallback=0
    W x=322 s=2 z=100 t=Ґрунті.
    W x=401 s=0 z=100 t=The
    W x=437 s=0 z=100 t=Її
-  LINE y=445 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=445 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=pair
    W x=41 s=0 z=100 t=(Yi
    W x=78 s=0 z=100 t=+
    W x=94 s=0 z=100 t=yi)
    W x=129 s=0 z=100 t=tested
    W x=193 s=0 z=100 t=the
-   W x=233 s=0 z=100 t=double-dotted
+   W x=233 s=0 z=100 t=double-
+   W x=297 s=0 z=100 t=dotted
    W x=363 s=0 z=100 t=characters
   LINE y=469 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=unique
@@ -5150,7 +5188,7 @@ SPINE 9 href=OEBPS/chapter8.xhtml pages=5 truncated=0 cssFallback=0
    W x=228 s=0 z=100 t=following
    W x=325 s=0 z=100 t=consonant.
    W x=441 s=0 z=100 t=Ґа
-  LINE y=517 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=517 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=and
    W x=38 s=0 z=100 t=Ґр
    W x=66 s=0 z=100 t=in
@@ -5159,7 +5197,8 @@ SPINE 9 href=OEBPS/chapter8.xhtml pages=5 truncated=0 cssFallback=0
    W x=194 s=0 z=100 t=“Ґрунті”
    W x=278 s=0 z=100 t=tested
    W x=340 s=0 z=100 t=the
-   W x=378 s=0 z=100 t=upturn-Ge
+   W x=378 s=0 z=100 t=upturn-
+   W x=444 s=0 z=100 t=Ge
   LINE y=541 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=(Ґ),
    W x=49 s=0 z=100 t=a
@@ -5554,9 +5593,10 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
   LINE y=0 x=0 align=2 mult=1.500 hfid=0 words=2
    W x=164 s=1 z=100 t=Chapter
    W x=284 s=1 z=100 t=9
-  LINE y=36 x=0 align=2 mult=1.500 hfid=0 words=2
+  LINE y=36 x=0 align=2 mult=1.500 hfid=0 words=3
    W x=107 s=1 z=100 t=Latin
-   W x=200 s=1 z=100 t=Extended-B
+   W x=200 s=1 z=100 t=Extended-
+   W x=338 s=1 z=100 t=B
   LINE y=99 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=27 s=0 z=100 t=Months
    W x=98 s=0 z=100 t=passed.
@@ -5577,9 +5617,10 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=370 s=0 z=100 t=it
    W x=392 s=0 z=100 t=was
    W x=425 s=0 z=100 t=not
-  LINE y=147 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=147 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=Mrs.
-   W x=43 s=0 z=100 t=Thornton-Foxwell
+   W x=43 s=0 z=100 t=Thornton-
+   W x=134 s=0 z=100 t=Foxwell
    W x=202 s=0 z=100 t=but
    W x=239 s=0 z=100 t=her
    W x=278 s=0 z=100 t=publisher,
@@ -5627,44 +5668,45 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=300 s=0 z=100 t=and
    W x=338 s=0 z=100 t=Pinyin
    W x=396 s=0 z=100 t=roman-
-  LINE y=291 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=291 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=ization.
    W x=82 s=0 z=100 t=Latin
-   W x=139 s=0 z=100 t=Extended-B,
+   W x=139 s=0 z=100 t=Extended-
+   W x=222 s=0 z=100 t=B,
    W x=245 s=0 z=100 t=the
    W x=282 s=0 z=100 t=whole
    W x=336 s=0 z=100 t=block.”
-  LINE y=319 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=319 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=27 s=0 z=100 t=Avery
-   W x=95 s=0 z=100 t=looked
-   W x=176 s=0 z=100 t=at
-   W x=221 s=0 z=100 t=the
-   W x=275 s=0 z=100 t=Unicode
-   W x=358 s=0 z=100 t=chart
-   W x=430 s=0 z=100 t=for
+   W x=83 s=0 z=100 t=looked
+   W x=152 s=0 z=100 t=at
+   W x=185 s=0 z=100 t=the
+   W x=227 s=0 z=100 t=Unicode
+   W x=298 s=0 z=100 t=chart
+   W x=358 s=0 z=100 t=for
+   W x=399 s=0 z=100 t=U+0180–
   LINE y=343 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=0 z=100 t=U+0180–U+024F
-   W x=112 s=0 z=100 t=and
-   W x=151 s=0 z=100 t=sighed.
-   W x=224 s=0 z=100 t=It
-   W x=251 s=0 z=100 t=was
-   W x=286 s=0 z=100 t=a
-   W x=306 s=0 z=100 t=miscellany:
-   W x=412 s=0 z=100 t=char-
+   W x=0 s=0 z=100 t=U+024F
+   W x=57 s=0 z=100 t=and
+   W x=97 s=0 z=100 t=sighed.
+   W x=171 s=0 z=100 t=It
+   W x=199 s=0 z=100 t=was
+   W x=235 s=0 z=100 t=a
+   W x=256 s=0 z=100 t=miscellany:
+   W x=363 s=0 z=100 t=characters
   LINE y=367 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=0 z=100 t=acters
-   W x=61 s=0 z=100 t=from
-   W x=107 s=0 z=100 t=a
-   W x=125 s=0 z=100 t=dozen
-   W x=180 s=0 z=100 t=unrelated
-   W x=273 s=0 z=100 t=traditions,
-   W x=379 s=0 z=100 t=each
-   W x=425 s=0 z=100 t=with
-  LINE y=391 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=0 s=0 z=100 t=its
-   W x=31 s=0 z=100 t=own
-   W x=66 s=0 z=100 t=typographic
-   W x=170 s=0 z=100 t=demands.
+   W x=0 s=0 z=100 t=from
+   W x=50 s=0 z=100 t=a
+   W x=72 s=0 z=100 t=dozen
+   W x=131 s=0 z=100 t=unrelated
+   W x=228 s=0 z=100 t=traditions,
+   W x=338 s=0 z=100 t=each
+   W x=388 s=0 z=100 t=with
+   W x=432 s=0 z=100 t=its
+  LINE y=391 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=own
+   W x=35 s=0 z=100 t=typographic
+   W x=139 s=0 z=100 t=demands.
   LINE y=442 x=0 align=2 mult=1.150 hfid=0 words=1
    W x=176 s=1 z=100 t=Romanian
   LINE y=479 x=0 align=0 mult=1.000 hfid=0 words=7
@@ -5759,10 +5801,11 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=289 s=0 z=100 t=Ț
    W x=312 s=0 z=100 t=distinguished
    W x=439 s=0 z=100 t=it
-  LINE y=723 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=723 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=from
    W x=50 s=0 z=100 t=the
-   W x=91 s=0 z=100 t=cedilla-T
+   W x=91 s=0 z=100 t=cedilla-
+   W x=160 s=0 z=100 t=T
    W x=176 s=0 z=100 t=(Þ)
    W x=220 s=0 z=100 t=found
    W x=282 s=0 z=100 t=in
@@ -5778,13 +5821,14 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=309 s=0 z=100 t=Țe
    W x=339 s=0 z=100 t=in
    W x=365 s=0 z=100 t=“Țesătura”
-  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=and
    W x=43 s=0 z=100 t=Țo
    W x=79 s=0 z=100 t=demanded
    W x=166 s=0 z=100 t=the
    W x=209 s=0 z=100 t=same
-   W x=261 s=0 z=100 t=T-crossbar
+   W x=261 s=0 z=100 t=T-
+   W x=276 s=0 z=100 t=crossbar
    W x=359 s=0 z=100 t=tucking
    W x=435 s=0 z=100 t=as
   LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=9
@@ -5827,25 +5871,28 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=316 s=0 z=100 t=Vera,
    W x=375 s=0 z=100 t=“is
    W x=412 s=0 z=100 t=that
-  LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=Romanian
    W x=91 s=0 z=100 t=also
    W x=139 s=0 z=100 t=uses
    W x=183 s=0 z=100 t=ă
-   W x=195 s=0 z=100 t=(a-breve)
+   W x=195 s=0 z=100 t=(a-
+   W x=227 s=0 z=100 t=breve)
    W x=289 s=0 z=100 t=and
    W x=326 s=0 z=100 t=î
-   W x=338 s=0 z=100 t=(i-circumflex)
-  LINE y=196 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=338 s=0 z=100 t=(i-
+   W x=364 s=0 z=100 t=circumflex)
+  LINE y=196 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=from
    W x=47 s=0 z=100 t=Latin-1,
    W x=128 s=0 z=100 t=and
    W x=166 s=0 z=100 t=ț
-   W x=179 s=0 z=100 t=(t-comma)
+   W x=179 s=0 z=100 t=(t-
+   W x=209 s=0 z=100 t=comma)
    W x=279 s=0 z=100 t=interacts
    W x=368 s=0 z=100 t=with
    W x=409 s=0 z=100 t=both.
-  LINE y=220 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=220 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=The
    W x=39 s=0 z=100 t=pair
    W x=83 s=0 z=100 t=ță
@@ -5853,11 +5900,13 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=136 s=0 z=100 t=‘Țărăncuța’
    W x=250 s=0 z=100 t=tests
    W x=309 s=0 z=100 t=the
-   W x=352 s=0 z=100 t=comma-below
-  LINE y=244 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=352 s=0 z=100 t=comma-
+   W x=412 s=0 z=100 t=below
+  LINE y=244 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=against
    W x=81 s=0 z=100 t=the
-   W x=122 s=0 z=100 t=breve-above
+   W x=122 s=0 z=100 t=breve-
+   W x=175 s=0 z=100 t=above
    W x=232 s=0 z=100 t=—
    W x=249 s=0 z=100 t=a
    W x=271 s=0 z=100 t=vertical
@@ -5945,12 +5994,14 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=290 s=0 z=100 t=Vư
    W x=315 s=0 z=100 t=were
    W x=353 s=0 z=100 t=particularly
-  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=demanding:
    W x=103 s=0 z=100 t=the
-   W x=143 s=0 z=100 t=T-crossbar
+   W x=143 s=0 z=100 t=T-
+   W x=158 s=0 z=100 t=crossbar
    W x=238 s=0 z=100 t=or
-   W x=267 s=0 z=100 t=V-diagonal
+   W x=267 s=0 z=100 t=V-
+   W x=284 s=0 z=100 t=diagonal
    W x=374 s=0 z=100 t=needed
    W x=437 s=0 z=100 t=to
   LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=7
@@ -6029,8 +6080,9 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=189 s=0 z=100 t=single
    W x=253 s=0 z=100 t=codepoints
    W x=352 s=0 z=100 t=representing
-  LINE y=157 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=two-letter
+  LINE y=157 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=two-
+   W x=37 s=0 z=100 t=letter
    W x=106 s=0 z=100 t=combinations,
    W x=240 s=0 z=100 t=each
    W x=294 s=0 z=100 t=with
@@ -6105,20 +6157,23 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=344 s=0 z=100 t=Pinyin
    W x=401 s=0 z=100 t=—
    W x=423 s=0 z=100 t=used
-  LINE y=441 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=441 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=Latin
    W x=62 s=0 z=100 t=letters
    W x=137 s=0 z=100 t=with
    W x=182 s=0 z=100 t=caron
    W x=243 s=0 z=100 t=and
-   W x=285 s=0 z=100 t=diaeresis-plus-tone
-  LINE y=465 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=285 s=0 z=100 t=diaeresis-
+   W x=370 s=0 z=100 t=plus-
+   W x=414 s=0 z=100 t=tone
+  LINE y=465 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=combinations
    W x=122 s=0 z=100 t=that
    W x=176 s=0 z=100 t=fell
    W x=223 s=0 z=100 t=squarely
    W x=306 s=0 z=100 t=in
-   W x=333 s=0 z=100 t=Extended-B.
+   W x=333 s=0 z=100 t=Extended-
+   W x=416 s=0 z=100 t=B.
    W x=445 s=2 z=100 t=Nǐ
   LINE y=489 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=2 z=100 t=hǎo!
@@ -6132,7 +6187,7 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=442 s=2 z=100 t=de
   LINE y=513 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=2 z=100 t=fāyīn.
-  LINE y=541 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=541 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=27 s=0 z=100 t=The
    W x=60 s=0 z=100 t=ǎ
    W x=72 s=0 z=100 t=(a
@@ -6140,7 +6195,8 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=141 s=0 z=100 t=caron)
    W x=209 s=0 z=100 t=under
    W x=262 s=0 z=100 t=a
-   W x=280 s=0 z=100 t=T-crossbar
+   W x=280 s=0 z=100 t=T-
+   W x=295 s=0 z=100 t=crossbar
    W x=372 s=0 z=100 t=in
    W x=395 s=0 z=100 t=“Tǎmen”
   LINE y=565 x=0 align=0 mult=1.000 hfid=0 words=10
@@ -6163,30 +6219,36 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=295 s=0 z=100 t=in
    W x=320 s=0 z=100 t=entirely
    W x=398 s=0 z=100 t=differ-
-  LINE y=613 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=613 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=ent
    W x=38 s=0 z=100 t=words.
    W x=99 s=0 z=100 t=The
    W x=134 s=0 z=100 t=diaeresis-
-   W x=227 s=0 z=100 t=plus-tone
+   W x=227 s=0 z=100 t=plus-
+   W x=271 s=0 z=100 t=tone
    W x=321 s=0 z=100 t=characters
    W x=423 s=0 z=100 t=were
-  LINE y=637 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=637 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=uniquely
    W x=80 s=0 z=100 t=demanding:
    W x=182 s=0 z=100 t=ǖ
-   W x=197 s=0 z=100 t=(u-diaeresis-
+   W x=197 s=0 z=100 t=(u-
+   W x=228 s=0 z=100 t=diaeresis-
    W x=321 s=0 z=100 t=macron),
    W x=409 s=0 z=100 t=ǘ
    W x=426 s=0 z=100 t=(u-
-  LINE y=661 x=0 align=0 mult=1.000 hfid=0 words=5
-   W x=0 s=0 z=100 t=diaeresis-acute),
+  LINE y=661 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=diaeresis-
+   W x=85 s=0 z=100 t=acute),
    W x=172 s=0 z=100 t=ǚ
-   W x=201 s=0 z=100 t=(u-diaeresis-caron),
+   W x=201 s=0 z=100 t=(u-
+   W x=232 s=0 z=100 t=diaeresis-
+   W x=317 s=0 z=100 t=caron),
    W x=405 s=0 z=100 t=ǜ
    W x=429 s=0 z=100 t=(u-
-  LINE y=685 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=diaeresis-grave)
+  LINE y=685 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=diaeresis-
+   W x=85 s=0 z=100 t=grave)
    W x=157 s=0 z=100 t=each
    W x=205 s=0 z=100 t=stacked
    W x=276 s=0 z=100 t=two
@@ -6201,11 +6263,12 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=285 s=0 z=100 t=that
    W x=339 s=0 z=100 t=could
    W x=396 s=0 z=100 t=collide
-  LINE y=733 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=733 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=with
    W x=41 s=0 z=100 t=the
    W x=79 s=0 z=100 t=preceding
-   W x=161 s=0 z=100 t=T-crossbar.
+   W x=161 s=0 z=100 t=T-
+   W x=176 s=0 z=100 t=crossbar.
    W x=264 s=2 z=100 t=Lǜshi
    W x=316 s=2 z=100 t=Tǖ
    W x=336 s=2 z=100 t=Vǘ
@@ -6244,7 +6307,7 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=345 s=2 z=100 t=Ɓala
    W x=393 s=2 z=100 t=ɓe
    W x=417 s=2 z=100 t=Ɗala
-  LINE y=160 x=0 align=0 mult=1.000 hfid=0 words=11
+  LINE y=160 x=0 align=0 mult=1.000 hfid=0 words=12
    W x=0 s=2 z=100 t=ɗe.
    W x=37 s=2 z=100 t=Ƒarin
    W x=90 s=2 z=100 t=kowa
@@ -6255,21 +6318,24 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=282 s=2 z=100 t=nɔ.
    W x=318 s=0 z=100 t=The
    W x=353 s=0 z=100 t=Ɓ
-   W x=367 s=0 z=100 t=(B-hook)
-  LINE y=184 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=367 s=0 z=100 t=(B-
+   W x=396 s=0 z=100 t=hook)
+  LINE y=184 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=and
    W x=50 s=0 z=100 t=Ɗ
-   W x=77 s=0 z=100 t=(D-hook)
+   W x=77 s=0 z=100 t=(D-
+   W x=108 s=0 z=100 t=hook)
    W x=183 s=0 z=100 t=had
    W x=234 s=0 z=100 t=descending
    W x=342 s=0 z=100 t=hooks
    W x=414 s=0 z=100 t=that
-  LINE y=208 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=208 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=affected
    W x=85 s=0 z=100 t=baseline
    W x=166 s=0 z=100 t=spacing.
    W x=248 s=0 z=100 t=Ƒ
-   W x=266 s=0 z=100 t=(F-hook)
+   W x=266 s=0 z=100 t=(F-
+   W x=292 s=0 z=100 t=hook)
    W x=358 s=0 z=100 t=shared
    W x=426 s=0 z=100 t=the
   LINE y=232 x=0 align=0 mult=1.000 hfid=0 words=10
@@ -6311,13 +6377,14 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=320 s=0 z=100 t=pulled
    W x=385 s=0 z=100 t=the
    W x=429 s=0 z=100 t=eye
-  LINE y=328 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=328 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=downward
    W x=77 s=0 z=100 t=while
    W x=125 s=0 z=100 t=the
    W x=162 s=0 z=100 t=crossbar
    W x=239 s=0 z=100 t=demanded
-   W x=320 s=0 z=100 t=tuck-over
+   W x=320 s=0 z=100 t=tuck-
+   W x=365 s=0 z=100 t=over
    W x=412 s=0 z=100 t=kern-
   LINE y=352 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=0 s=0 z=100 t=ing
@@ -6349,13 +6416,17 @@ SPINE 10 href=OEBPS/chapter9.xhtml pages=5 truncated=0 cssFallback=0
    W x=204 s=0 z=100 t=counterparts.
    W x=339 s=0 z=100 t=Every
    W x=400 s=0 z=100 t=conso-
-  LINE y=452 x=0 align=0 mult=1.000 hfid=0 words=4
-   W x=0 s=0 z=100 t=nant-to-open-vowel
+  LINE y=452 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=nant-
+   W x=53 s=0 z=100 t=to-
+   W x=84 s=0 z=100 t=open-
+   W x=131 s=0 z=100 t=vowel
    W x=185 s=0 z=100 t=pair
    W x=223 s=0 z=100 t=needs
    W x=275 s=0 z=100 t=rechecking.”
-  LINE y=503 x=0 align=2 mult=1.150 hfid=0 words=3
-   W x=75 s=1 z=100 t=Extended-B
+  LINE y=503 x=0 align=2 mult=1.150 hfid=0 words=4
+   W x=74 s=1 z=100 t=Extended-
+   W x=180 s=1 z=100 t=B
    W x=199 s=1 z=100 t=Kerning
    W x=291 s=1 z=100 t=Glossary
   LINE y=540 x=0 align=0 mult=1.000 hfid=0 words=5
@@ -6592,10 +6663,11 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=209 s=0 z=100 t=extended
    W x=288 s=0 z=100 t=rightward,
    W x=385 s=0 z=100 t=creating
-  LINE y=503 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=503 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=the
    W x=45 s=0 z=100 t=same
-   W x=99 s=0 z=100 t=tuck-over
+   W x=99 s=0 z=100 t=tuck-
+   W x=144 s=0 z=100 t=over
    W x=199 s=0 z=100 t=demands.
    W x=290 s=0 z=100 t=Avery
    W x=349 s=0 z=100 t=set:
@@ -6654,10 +6726,11 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=305 s=0 z=100 t=completed
    W x=391 s=0 z=100 t=the
    W x=428 s=0 z=100 t=set
-  LINE y=675 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=675 x=0 align=0 mult=1.000 hfid=0 words=5
    W x=0 s=0 z=100 t=of
    W x=28 s=0 z=100 t=Gamma’s
-   W x=106 s=0 z=100 t=right-side
+   W x=106 s=0 z=100 t=right-
+   W x=162 s=0 z=100 t=side
    W x=200 s=0 z=100 t=partners.
   LINE y=703 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=27 s=0 z=100 t=Τ
@@ -6784,21 +6857,24 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=309 s=0 z=100 t=the
    W x=349 s=0 z=100 t=same
    W x=398 s=0 z=100 t=diago-
-  LINE y=356 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=nal-against-vertical
+  LINE y=356 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=nal-
+   W x=41 s=0 z=100 t=against-
+   W x=121 s=0 z=100 t=vertical
    W x=203 s=0 z=100 t=pattern
    W x=278 s=0 z=100 t=as
    W x=308 s=0 z=100 t=Latin
    W x=368 s=0 z=100 t=AV,
    W x=401 s=0 z=100 t=AW,
    W x=435 s=0 z=100 t=AT.
-  LINE y=380 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=380 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=Λα,
    W x=34 s=0 z=100 t=Λε,
    W x=72 s=0 z=100 t=Λο
    W x=98 s=0 z=100 t=needed
    W x=160 s=0 z=100 t=the
-   W x=199 s=0 z=100 t=inverted-V’s
+   W x=199 s=0 z=100 t=inverted-
+   W x=281 s=0 z=100 t=V’s
    W x=318 s=0 z=100 t=right
    W x=373 s=0 z=100 t=stroke
    W x=437 s=0 z=100 t=to
@@ -7140,48 +7216,51 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=270 s=0 z=100 t=kerning
    W x=346 s=0 z=100 t=engine
    W x=415 s=0 z=100 t=must
-  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=handle
-   W x=80 s=0 z=100 t=cross-script
-   W x=199 s=0 z=100 t=pairs:
-   W x=267 s=0 z=100 t=Latin-T
-   W x=352 s=0 z=100 t=followed
-   W x=446 s=0 z=100 t=by
-  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=Greek-α,
-   W x=71 s=0 z=100 t=or
-   W x=98 s=0 z=100 t=Greek-σ
-   W x=165 s=0 z=100 t=followed
-   W x=247 s=0 z=100 t=by
-   W x=268 s=0 z=100 t=a
-   W x=287 s=0 z=100 t=Latin
-   W x=345 s=0 z=100 t=comma.
-   W x=413 s=0 z=100 t=These
-  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=10
-   W x=0 s=0 z=100 t=hybrid
-   W x=58 s=0 z=100 t=pairs
-   W x=109 s=0 z=100 t=are
-   W x=148 s=0 z=100 t=rare
-   W x=195 s=0 z=100 t=but
-   W x=232 s=0 z=100 t=they
-   W x=281 s=0 z=100 t=matter
-   W x=350 s=0 z=100 t=in
-   W x=377 s=0 z=100 t=any
-   W x=418 s=0 z=100 t=book
-  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=that
-   W x=55 s=0 z=100 t=discusses
-   W x=143 s=0 z=100 t=physics,
-   W x=219 s=0 z=100 t=mathematics,
-   W x=345 s=0 z=100 t=or
-   W x=376 s=0 z=100 t=engineer-
-  LINE y=144 x=0 align=0 mult=1.000 hfid=0 words=1
-   W x=0 s=0 z=100 t=ing.”
-  LINE y=195 x=0 align=2 mult=1.150 hfid=0 words=3
+   W x=68 s=0 z=100 t=cross-
+   W x=122 s=0 z=100 t=script
+   W x=175 s=0 z=100 t=pairs:
+   W x=231 s=0 z=100 t=Latin-
+   W x=291 s=0 z=100 t=T
+   W x=304 s=0 z=100 t=followed
+   W x=386 s=0 z=100 t=by
+   W x=407 s=0 z=100 t=Greek-
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=α,
+   W x=20 s=0 z=100 t=or
+   W x=46 s=0 z=100 t=Greek-
+   W x=96 s=0 z=100 t=σ
+   W x=112 s=0 z=100 t=followed
+   W x=193 s=0 z=100 t=by
+   W x=213 s=0 z=100 t=a
+   W x=231 s=0 z=100 t=Latin
+   W x=288 s=0 z=100 t=comma.
+   W x=355 s=0 z=100 t=These
+   W x=406 s=0 z=100 t=hybrid
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=pairs
+   W x=47 s=0 z=100 t=are
+   W x=82 s=0 z=100 t=rare
+   W x=125 s=0 z=100 t=but
+   W x=158 s=0 z=100 t=they
+   W x=203 s=0 z=100 t=matter
+   W x=268 s=0 z=100 t=in
+   W x=291 s=0 z=100 t=any
+   W x=328 s=0 z=100 t=book
+   W x=372 s=0 z=100 t=that
+   W x=422 s=0 z=100 t=dis-
+  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=cusses
+   W x=60 s=0 z=100 t=physics,
+   W x=131 s=0 z=100 t=mathematics,
+   W x=252 s=0 z=100 t=or
+   W x=278 s=0 z=100 t=engineering.”
+  LINE y=171 x=0 align=2 mult=1.150 hfid=0 words=3
    W x=107 s=1 z=100 t=Greek
    W x=167 s=1 z=100 t=Kerning
    W x=259 s=1 z=100 t=Glossary
-  LINE y=232 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=208 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=27 s=0 z=100 t=Avery
    W x=84 s=0 z=100 t=added
    W x=141 s=0 z=100 t=the
@@ -7190,117 +7269,117 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=321 s=0 z=100 t=to
    W x=355 s=0 z=100 t=his
    W x=394 s=0 z=100 t=growing
-  LINE y=256 x=0 align=0 mult=1.000 hfid=0 words=1
+  LINE y=232 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=catalogue:
-  LINE y=284 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=260 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=27 s=1 z=100 t=Γα
    W x=52 s=0 z=100 t=—
    W x=65 s=0 z=100 t=Γαλήνη,
    W x=138 s=0 z=100 t=γαλαξίας.
-  LINE y=308 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=284 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=0 s=1 z=100 t=Γε
    W x=29 s=0 z=100 t=—
    W x=42 s=0 z=100 t=Γεωργία,
    W x=119 s=0 z=100 t=γερός.
-  LINE y=332 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=308 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=0 s=1 z=100 t=Γο
    W x=25 s=0 z=100 t=—
    W x=38 s=0 z=100 t=Γοργόνα,
    W x=114 s=0 z=100 t=γονιός.
-  LINE y=356 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=332 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=0 s=1 z=100 t=Γυ
    W x=31 s=0 z=100 t=—
    W x=44 s=0 z=100 t=Γυμνάσιο,
    W x=133 s=0 z=100 t=γύρος.
-  LINE y=380 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=356 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Γρ
    W x=27 s=0 z=100 t=—
    W x=40 s=0 z=100 t=Γραμματική.
-  LINE y=404 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=380 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=0 s=1 z=100 t=Τα
    W x=21 s=0 z=100 t=—
    W x=34 s=0 z=100 t=Ταξίδι,
    W x=100 s=0 z=100 t=ταχύ.
-  LINE y=428 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=404 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Τε
    W x=25 s=0 z=100 t=—
    W x=38 s=0 z=100 t=Τεχνολογία.
-  LINE y=452 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=428 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Το
    W x=21 s=0 z=100 t=—
    W x=34 s=0 z=100 t=Τοποθεσία.
-  LINE y=476 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=452 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=0 s=1 z=100 t=Τυ
    W x=27 s=0 z=100 t=—
    W x=40 s=0 z=100 t=Τυρί,
    W x=92 s=0 z=100 t=τυχερός.
-  LINE y=500 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=476 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=0 s=1 z=100 t=Αυ
    W x=29 s=0 z=100 t=—
    W x=42 s=0 z=100 t=Αυτός,
    W x=109 s=0 z=100 t=αυλή.
-  LINE y=524 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=500 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Αν
    W x=28 s=0 z=100 t=—
    W x=41 s=0 z=100 t=Ανατολή.
-  LINE y=548 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=524 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Ατ
    W x=28 s=0 z=100 t=—
    W x=41 s=0 z=100 t=Ατλαντικός.
-  LINE y=572 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=548 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Αδ
    W x=26 s=0 z=100 t=—
    W x=39 s=0 z=100 t=Αδελφός.
-  LINE y=596 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=572 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Υγ
    W x=24 s=0 z=100 t=—
    W x=37 s=0 z=100 t=Υγεία.
-  LINE y=620 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=596 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Υπ
    W x=23 s=0 z=100 t=—
    W x=36 s=0 z=100 t=Υπουργός.
-  LINE y=644 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=620 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Ρα
    W x=25 s=0 z=100 t=—
    W x=38 s=0 z=100 t=Ραδιόφωνο.
-  LINE y=668 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=644 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Ρε
    W x=29 s=0 z=100 t=—
    W x=42 s=0 z=100 t=Ρεύμα.
-  LINE y=692 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=668 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Ρο
    W x=25 s=0 z=100 t=—
    W x=38 s=0 z=100 t=Ροδός.
-  LINE y=716 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=692 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Φα
    W x=23 s=0 z=100 t=—
    W x=36 s=0 z=100 t=Φαντασία.
- PAGE 4 elements=15 footnotes=0
-  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=716 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Φο
    W x=23 s=0 z=100 t=—
    W x=36 s=0 z=100 t=Φοίνικας.
-  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
+ PAGE 4 elements=14 footnotes=0
+  LINE y=0 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Δα
    W x=26 s=0 z=100 t=—
    W x=39 s=0 z=100 t=Δασκάλα.
-  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=24 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Δε
    W x=30 s=0 z=100 t=—
    W x=43 s=0 z=100 t=Δελφοί.
-  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=48 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Λα
    W x=26 s=0 z=100 t=—
    W x=39 s=0 z=100 t=Λαμπρή.
-  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=72 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Λε
    W x=30 s=0 z=100 t=—
    W x=43 s=0 z=100 t=Λευκάδα.
-  LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=3
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=3
    W x=0 s=1 z=100 t=Λο
    W x=26 s=0 z=100 t=—
    W x=39 s=0 z=100 t=Λονδίνο.
-  LINE y=148 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=124 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=27 s=0 z=100 t=“And
    W x=68 s=0 z=100 t=with
    W x=108 s=0 z=100 t=that,”
@@ -7310,7 +7389,7 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=347 s=0 z=100 t=down
    W x=390 s=0 z=100 t=his
    W x=423 s=0 z=100 t=pen-
-  LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=148 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=cil
    W x=29 s=0 z=100 t=for
    W x=66 s=0 z=100 t=the
@@ -7321,7 +7400,7 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=283 s=0 z=100 t=covered
    W x=355 s=0 z=100 t=every
    W x=408 s=0 z=100 t=script
-  LINE y=196 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=172 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=from
    W x=47 s=0 z=100 t=the
    W x=85 s=0 z=100 t=Acropolis
@@ -7332,7 +7411,7 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=343 s=0 z=100 t=the
    W x=381 s=0 z=100 t=Rhine
    W x=437 s=0 z=100 t=to
-  LINE y=220 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=196 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=the
    W x=38 s=0 z=100 t=Mekong.
    W x=112 s=0 z=100 t=If
@@ -7343,7 +7422,7 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=349 s=0 z=100 t=every
    W x=402 s=0 z=100 t=word
    W x=443 s=0 z=100 t=in
-  LINE y=244 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=220 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=these
    W x=55 s=0 z=100 t=chapters
    W x=134 s=0 z=100 t=without
@@ -7352,12 +7431,12 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=286 s=0 z=100 t=miskerned
    W x=370 s=0 z=100 t=pair,
    W x=416 s=0 z=100 t=they
-  LINE y=268 x=0 align=0 mult=1.000 hfid=0 words=4
+  LINE y=244 x=0 align=0 mult=1.000 hfid=0 words=4
    W x=0 s=0 z=100 t=have
    W x=51 s=0 z=100 t=earned
    W x=114 s=0 z=100 t=my
    W x=138 s=0 z=100 t=respect.”
-  LINE y=296 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=272 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=27 s=0 z=100 t=Vera
    W x=74 s=0 z=100 t=closed
    W x=138 s=0 z=100 t=her
@@ -7366,7 +7445,7 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=308 s=0 z=100 t=smiled.
    W x=379 s=0 z=100 t=“Shall
    W x=451 s=0 z=100 t=I
-  LINE y=320 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=296 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=put
    W x=33 s=0 z=100 t=the
    W x=70 s=0 z=100 t=kettle
@@ -7374,7 +7453,7 @@ SPINE 11 href=OEBPS/chapter10.xhtml pages=5 truncated=0 cssFallback=0
    W x=160 s=0 z=100 t=one
    W x=198 s=0 z=100 t=last
    W x=244 s=0 z=100 t=time?”
-  LINE y=348 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=324 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=27 s=0 z=100 t=“Please,”
    W x=115 s=0 z=100 t=said
    W x=156 s=0 z=100 t=Avery.
@@ -7759,8 +7838,9 @@ SPINE 12 href=OEBPS/chapter11.xhtml pages=7 truncated=0 cssFallback=0
    W x=366 s=0 z=100 t=test
    W x=410 s=0 z=100 t=—
    W x=424 s=0 z=100 t=the
-  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=T-crossbar
+  LINE y=432 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=T-
+   W x=15 s=0 z=100 t=crossbar
    W x=92 s=0 z=100 t=had
    W x=130 s=0 z=100 t=to
    W x=158 s=0 z=100 t=kern
@@ -7814,11 +7894,12 @@ SPINE 12 href=OEBPS/chapter11.xhtml pages=7 truncated=0 cssFallback=0
    W x=260 s=0 z=100 t=combining
    W x=349 s=0 z=100 t=mark
    W x=396 s=0 z=100 t=immedi-
-  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=ately
    W x=54 s=0 z=100 t=before
    W x=114 s=0 z=100 t=a
-   W x=132 s=0 z=100 t=double-f
+   W x=132 s=0 z=100 t=double-
+   W x=196 s=0 z=100 t=f
    W x=212 s=0 z=100 t=ligature.
   LINE y=627 x=0 align=2 mult=1.150 hfid=0 words=2
    W x=133 s=1 z=100 t=Decomposed
@@ -7883,7 +7964,7 @@ SPINE 12 href=OEBPS/chapter11.xhtml pages=7 truncated=0 cssFallback=0
    W x=236 s=0 z=100 t=combining
    W x=322 s=0 z=100 t=circumflex
    W x=412 s=0 z=100 t=over
-  LINE y=100 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=100 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=the
    W x=41 s=0 z=100 t=e
    W x=60 s=0 z=100 t=after
@@ -7892,7 +7973,8 @@ SPINE 12 href=OEBPS/chapter11.xhtml pages=7 truncated=0 cssFallback=0
    W x=172 s=0 z=100 t=—
    W x=189 s=0 z=100 t=both
    W x=239 s=0 z=100 t=the
-   W x=280 s=0 z=100 t=F-overhang
+   W x=280 s=0 z=100 t=F-
+   W x=295 s=0 z=100 t=overhang
    W x=392 s=0 z=100 t=kerning
   LINE y=124 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=and
@@ -7960,13 +8042,14 @@ SPINE 12 href=OEBPS/chapter11.xhtml pages=7 truncated=0 cssFallback=0
    W x=282 s=0 z=100 t=In
    W x=309 s=0 z=100 t=precomposed
    W x=412 s=0 z=100 t=text,
-  LINE y=356 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=356 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=the
    W x=47 s=0 z=100 t=ligature
    W x=139 s=0 z=100 t=engine
    W x=212 s=0 z=100 t=only
    W x=268 s=0 z=100 t=saw
-   W x=311 s=0 z=100 t=single-codepoint
+   W x=311 s=0 z=100 t=single-
+   W x=375 s=0 z=100 t=codepoint
   LINE y=380 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=accented
    W x=84 s=0 z=100 t=letters.
@@ -8329,11 +8412,12 @@ SPINE 12 href=OEBPS/chapter11.xhtml pages=7 truncated=0 cssFallback=0
    W x=276 s=0 z=100 t=combining
    W x=362 s=0 z=100 t=caron
    W x=418 s=0 z=100 t=over
-  LINE y=76 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=76 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=e
    W x=17 s=0 z=100 t=after
    W x=74 s=0 z=100 t=the
-   W x=113 s=0 z=100 t=T-crossbar
+   W x=113 s=0 z=100 t=T-
+   W x=128 s=0 z=100 t=crossbar
    W x=205 s=0 z=100 t=—
    W x=220 s=0 z=100 t=the
    W x=259 s=0 z=100 t=same
@@ -8359,9 +8443,11 @@ SPINE 12 href=OEBPS/chapter11.xhtml pages=7 truncated=0 cssFallback=0
    W x=306 s=0 z=100 t=sentence
    W x=387 s=0 z=100 t=tested
    W x=448 s=0 z=100 t=a
-  LINE y=148 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=148 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=different
-   W x=94 s=0 z=100 t=base-plus-mark
+   W x=94 s=0 z=100 t=base-
+   W x=139 s=0 z=100 t=plus-
+   W x=183 s=0 z=100 t=mark
    W x=234 s=0 z=100 t=combination.
    W x=360 s=0 z=100 t=The
    W x=400 s=0 z=100 t=Polish
@@ -8374,8 +8460,9 @@ SPINE 12 href=OEBPS/chapter11.xhtml pages=7 truncated=0 cssFallback=0
    W x=304 s=0 z=100 t=“Węgry”
    W x=381 s=0 z=100 t=tested
    W x=442 s=0 z=100 t=a
-  LINE y=196 x=0 align=0 mult=1.000 hfid=0 words=7
-   W x=0 s=0 z=100 t=below-baseline
+  LINE y=196 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=below-
+   W x=51 s=0 z=100 t=baseline
    W x=133 s=0 z=100 t=combining
    W x=224 s=0 z=100 t=mark,
    W x=281 s=0 z=100 t=which
@@ -8653,13 +8740,14 @@ SPINE 12 href=OEBPS/chapter11.xhtml pages=7 truncated=0 cssFallback=0
    W x=78 s=1 z=100 t=Extended
    W x=179 s=1 z=100 t=Latin
    W x=250 s=1 z=100 t=Composition
-  LINE y=501 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=501 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=27 s=0 z=100 t=“But
    W x=75 s=0 z=100 t=what
    W x=125 s=0 z=100 t=about
    W x=186 s=0 z=100 t=the
    W x=227 s=0 z=100 t=Latin
-   W x=288 s=0 z=100 t=Extended-A
+   W x=288 s=0 z=100 t=Extended-
+   W x=371 s=0 z=100 t=A
    W x=389 s=0 z=100 t=charac-
   LINE y=525 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=ters?”
@@ -8677,26 +8765,31 @@ SPINE 12 href=OEBPS/chapter11.xhtml pages=7 truncated=0 cssFallback=0
    W x=212 s=0 z=100 t=circumflex,
    W x=314 s=0 z=100 t=tilde,
    W x=374 s=0 z=100 t=diaeresis,
-  LINE y=573 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=573 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=and
    W x=43 s=0 z=100 t=cedilla.
    W x=125 s=0 z=100 t=Characters
    W x=234 s=0 z=100 t=like
    W x=278 s=0 z=100 t=ě
-   W x=299 s=0 z=100 t=(e-caron),
+   W x=299 s=0 z=100 t=(e-
+   W x=328 s=0 z=100 t=caron),
    W x=410 s=0 z=100 t=ř
    W x=430 s=0 z=100 t=(r-
-  LINE y=597 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=597 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=caron),
    W x=76 s=0 z=100 t=ą
-   W x=90 s=0 z=100 t=(a-ogonek),
+   W x=90 s=0 z=100 t=(a-
+   W x=122 s=0 z=100 t=ogonek),
    W x=211 s=0 z=100 t=ł
-   W x=223 s=0 z=100 t=(l-stroke),
+   W x=223 s=0 z=100 t=(l-
+   W x=252 s=0 z=100 t=stroke),
    W x=334 s=0 z=100 t=and
    W x=371 s=0 z=100 t=ű
-   W x=388 s=0 z=100 t=(u-dou-
-  LINE y=621 x=0 align=0 mult=1.000 hfid=0 words=6
-   W x=0 s=0 z=100 t=ble-acute)
+   W x=388 s=0 z=100 t=(u-
+   W x=419 s=0 z=100 t=dou-
+  LINE y=621 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=0 s=0 z=100 t=ble-
+   W x=33 s=0 z=100 t=acute)
    W x=110 s=0 z=100 t=were
    W x=158 s=0 z=100 t=never
    W x=223 s=0 z=100 t=composed
