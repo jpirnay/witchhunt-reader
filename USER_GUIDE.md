@@ -811,6 +811,7 @@ Witch Reader renders text using the following Unicode character blocks, enabling
 
 *   **Latin Script (Basic, Supplement, Extended-A):** Covers English, German, French, Spanish, Portuguese, Italian, Dutch, Swedish, Norwegian, Danish, Finnish, Polish, Czech, Hungarian, Romanian, Slovak, Slovenian, Turkish, and others.
 *   **Cyrillic Script (Standard and Extended):** Covers Russian, Ukrainian, Belarusian, Bulgarian, Serbian, Macedonian, Kazakh, Kyrgyz, Mongolian, and others.
+*   **Indic scripts (Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam, Sinhala):** Hindi, Marathi, Nepali, Sanskrit, Bengali, Assamese, Punjabi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam and Sinhala are shaped with a TrueType family that maps their script: conjuncts are formed and vowel signs sit where the script puts them. Until the Font Manager offers one (the next PR), put the family's files in `/.crosspoint/fonts/<Family>/`. In a bitmap or built-in font, their vowel signs are placed but conjuncts are not formed. A chapter in these scripts takes longer to prepare the first time you open it: on the X3, a Hindi chapter of 2,483 words takes 4.9 s, against 2.5 s for a Latin chapter of the same length.
 
 What is not supported: Chinese, Japanese, Korean, Vietnamese, Hebrew, Arabic, Greek and Farsi.
 
@@ -1108,6 +1109,7 @@ Please note that this firmware is currently in active development. The following
 * **Cover Images:** Large cover images embedded into EPUB require several seconds (~10s for ~2000 pixel tall image) to convert for the sleep screen and home screen thumbnail. Uploading the book with **Optimize EPUB** in the web interface's File Manager, or optimizing it there afterwards, resizes them and speeds this up (see [Optimizing EPUBs](./docs/webserver.md#optimizing-epubs)).
 * **Right-to-left scripts (Hebrew, Arabic):** Not currently supported. For BiDi / RTL support, use the original [CrossPoint](https://github.com/crosspoint-reader/crosspoint-reader) firmware.
 * **CJK (Chinese, Japanese, Korean):** books break lines and space punctuation by CJK rules; install your language's font from the **Font Manager**. Book titles, authors and chapter names outside the page still show a box for characters the menu fonts lack, and there is no CJK keyboard. Vertical text has the limits listed under **Vertical Text** in the **[Reader settings](#372-reader)**.
+* **Indic scripts (Hindi, Bengali, Tamil, Malayalam and the others under [Supported Languages](#supported-languages)):** book titles, chapter names and the TOC are not shaped yet. Indic words inside a right-to-left paragraph are not shaped yet either.
 
 ---
 
