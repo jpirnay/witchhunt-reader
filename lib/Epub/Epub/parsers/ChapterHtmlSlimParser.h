@@ -1206,6 +1206,8 @@ class ChapterHtmlSlimParser final : public Print {
       label += len + 1;
     }
   }
+  // The page `offset` falls on, once a later page starts past it: until then a page still to come may hold it.
+  bool lookupVisibleOffsetInActiveBuild(uint32_t offset, uint16_t& page) const;
   const ParagraphLut& getParagraphLutPerPage() const { return paragraphLutPerPage; }
 
   // Supplies printed-page labels from NCX <pageList> for this chapter. `anchors` maps

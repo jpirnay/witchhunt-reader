@@ -46,6 +46,12 @@ struct EpubNavigationTarget {
   // is exact, while the paragraph resolves to the page where that paragraph STARTS, a page early
   // whenever the reader had turned into a paragraph running over a page break.
   uint16_t restoreParagraph = 0;
+  // Kind::Page restored from a saved position: where the saved page started, in visible text
+  // (VisibleText.h). Unlike the page and the paragraph it means the same under any font, size or
+  // margin, and every chapter has one: a Calibre book's <body><div><p> counts no paragraphs at all.
+  // kNoOffset: not saved, the record is older or the position is not the reader's own.
+  static constexpr uint32_t kNoOffset = UINT32_MAX;
+  uint32_t restoreOffset = kNoOffset;
   // Kind::Anchor from a followed link that pushed a Back entry: where it lands is checked once
   // against the Back stack (settleFollowedLink). Any other navigation assigns a new target, which
   // clears it.
@@ -117,9 +123,10 @@ struct EpubNavigationTarget {
   // see Section::getParagraphIndexForPage), the first of a run of pages that share one index. Back
   // from a note landed pages before the one the reader had left (issue #604).
   static EpubNavigationTarget makeSavedPage(const int spineIndex, const int page, const int pageCount,
-                                            const uint16_t paragraph) {
+                                            const uint16_t paragraph, const uint32_t offset = kNoOffset) {
     EpubNavigationTarget t = makePage(page);
     t.restoreParagraph = paragraph;
+    t.restoreOffset = offset;
     t.cachedSpineIdx = spineIndex;
     t.cachedPageCount = pageCount;
     return t;
@@ -128,7 +135,18 @@ struct EpubNavigationTarget {
   // Resolves the target into section.currentPage. Must be called on the render task
   // after the section has been loaded (pageCount is known).
   void resolveInto(Section& section, int spineIndex) const;
-  // The page restoreParagraph lands on when `section` has been laid out anew since the position
-  // was saved; nullopt when there is no paragraph, the layout is unchanged or the LUT misses.
+  // The page a saved position lands on when `section` has been laid out anew since it was saved:
+  // from restoreOffset, else restoreParagraph. nullopt when the saved page stands, or nothing says
+  // otherwise. The offset also sees through a new layout that happens to have the same page count.
   std::optional<int> relaidOutRestorePage(const Section& section, int spineIndex) const;
+  // A saved position with an offset, as a target that waits for the text rather than the page number: the one a build
+  // of its chapter needs, since it draws a Page target as soon as a page of that number exists, and that number
+  // belongs to the old layout. The page stays as the fallback.
+  [[nodiscard]] bool awaitsItsText() const { return kind == Kind::Page && restoreOffset != kNoOffset; }
+  [[nodiscard]] EpubNavigationTarget atItsText() const {
+    EpubNavigationTarget t = makeVisibleOffset(restoreOffset, page);
+    t.cachedSpineIdx = cachedSpineIdx;
+    t.cachedPageCount = cachedPageCount;
+    return t;
+  }
 };

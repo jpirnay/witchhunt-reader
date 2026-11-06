@@ -169,6 +169,59 @@ TEST(EpubProgressRecord, ATornTailKeepsThePosition) {
   }
 }
 
+TEST(EpubProgressRecord, AVisibleOffsetRoundTrips) {
+  EpubProgressRecord r = sample();
+  r.paragraph = 1025;
+  r.shown = EpubProgressRecord::Shown{12, 40, "(42)"};
+  r.visibleOffset = 0x01020304;
+  uint8_t data[EpubProgressRecord::kMaxSize];
+  const size_t size = r.encode(data);
+  ASSERT_EQ(14u + 4u + 4u, size);
+
+  const auto back = EpubProgressRecord::decode(data, size);
+  ASSERT_TRUE(back.has_value());
+  ASSERT_TRUE(back->visibleOffset.has_value());
+  EXPECT_EQ(0x01020304u, *back->visibleOffset);
+  EXPECT_EQ("(42)", back->shown->printedPage);
+  EXPECT_EQ(1025, *back->paragraph);
+}
+
+// The start of a chapter is an offset like any other, not "none".
+TEST(EpubProgressRecord, AVisibleOffsetOfZeroIsKept) {
+  EpubProgressRecord r = sample();
+  r.visibleOffset = 0;
+  uint8_t data[EpubProgressRecord::kMaxSize];
+  const auto back = EpubProgressRecord::decode(data, r.encode(data));
+  ASSERT_TRUE(back.has_value());
+  ASSERT_TRUE(back->visibleOffset.has_value());
+  EXPECT_EQ(0u, *back->visibleOffset);
+}
+
+TEST(EpubProgressRecord, AVisibleOffsetFitsBehindTheLongestLabel) {
+  EpubProgressRecord r = sample();
+  r.shown = EpubProgressRecord::Shown{1, 2, std::string(EpubProgressRecord::kMaxPrintedPage, 'x')};
+  r.visibleOffset = 77;
+  uint8_t data[EpubProgressRecord::kMaxSize];
+  const size_t size = r.encode(data);
+  ASSERT_EQ(EpubProgressRecord::kMaxSize, size);
+  EXPECT_EQ(77u, *EpubProgressRecord::decode(data, size)->visibleOffset);
+}
+
+// A record from before the offset, or one torn inside it, keeps everything else.
+TEST(EpubProgressRecord, ATornOffsetIsDroppedAlone) {
+  EpubProgressRecord r = sample();
+  r.shown = EpubProgressRecord::Shown{12, 40, "(42)"};
+  r.visibleOffset = 77;
+  uint8_t data[EpubProgressRecord::kMaxSize];
+  const size_t size = r.encode(data);
+  for (size_t cut = size - 4; cut < size; ++cut) {
+    const auto back = EpubProgressRecord::decode(data, cut);
+    ASSERT_TRUE(back.has_value()) << cut;
+    EXPECT_FALSE(back->visibleOffset.has_value()) << cut;
+    EXPECT_TRUE(back->shown.has_value()) << cut;
+  }
+}
+
 TEST(EpubProgressRecord, RejectsWhatWasAlwaysRejected) {
   const uint8_t data[9] = {};
   EXPECT_FALSE(EpubProgressRecord::decode(data, 0).has_value());
