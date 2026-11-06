@@ -1032,6 +1032,125 @@ lookups in coalesced reads (NotoSans-Regular: 44 calls, with a budget of 512 a t
 | `CPac` | about 16 KB (Devanagari), 25 KB (Bengali) a style, flash | 18,244 B and 37,368 B a style, written at install (the merged families' Latin lookups count too); fonts without a shaped script carry none |
 | The reinstall | every installed TrueType family copied again once, one boot after the update; install times not measured | on each family's first open: 8.4 s (BookerlyTTF, 4 styles, flash), 9.1 s (NotoSansTC, SD), 4.5 s and 6.4 s (the merged Devanagari and Bengali, 2 styles each); pages pixel-identical afterwards |
 
+## PR 3: shaped text on the page (items 5 and 6)
+
+Measured on the X3 (COM6) on 2026-11-06, on the maintainer's card, in the merged Noto Sans Devanagari and Noto Sans
+Bengali families from PR 2. The baseline is master `50b8156b8` (the branch's merge base). The branch was measured
+twice:
+- `c3597cfbd`, before the word cache and the engine memos;
+- `a0733646e`, with them (Tasks 12a and 12b).
+
+All runs used `default`, flashed with esptool, except the stack figures, which come from `default` built with
+`-DENABLE_BOOT_HEAP_DIAGNOSTICS`. The X4 was not available: its rows are not measured, as in PR 2.
+
+**Item 5 on the host** (Task 12; heap-only harness; every compared run shares one book path and one cache path,
+because allocation counts depend on the paths' lengths):
+
+| Book | Pages | Allocations | A page | `page_bytes` mean / max | Glyph / #3787-token bytes |
+|---|---|---|---|---|---|
+| test_shaped_devanagari | 2 | 1,238 | 619 | 5,196 / 6,691 | 3,752 / 7,504 |
+| test_shaped_devanagari, no face | 2 | 1,214 | 607 | 3,228 / 4,122 | - |
+| test_shaped_bengali | 2 | 1,256 | 628 | 4,846 / 5,924 | 4,048 / 8,096 |
+| test_shaped_tamil | 3 | 1,351 | 450 | 3,599 / 5,748 | 4,236 / 8,472 |
+| test_shaped_malayalam | 3 | 1,583 | 528 | 5,377 / 6,052 | 6,772 / 13,544 |
+| test_shaped_long_hi | 10 | 2,583 | 258 | 10,420 / 12,288 | 38,440 / 76,880 |
+| test_shaped_long_hi, no face | 11 | 2,591 | 236 | 5,904 / 7,278 | - |
+| test_shaped_long_en | 13 | 2,033 | 156 | 2,176 / 2,519 | - |
+
+- Shaping adds 24 allocations (+2%) on the short Hindi book, and none (-8) on the long one.
+- The gap to a Latin book comes from the book's size and from the parser's per-word `std::string` past the 15-byte
+  SSO. That is 746 of the long Hindi book's allocations against 12 of the English one's.
+
+The per-call cap of 32 code points (Task 6) is set by two real books:
+- Indulekha (Malayalam): 55,149 tokens, 17 past 32 code points (0.031%), none past 48.
+- Ponniyin Selvan (Tamil): 418,663 tokens, 2 past 32 (0.0005%), none past 48.
+
+**The build-time gate.** Each timing book was opened at `@2:1` in NotoSansDevanagari at 14 pt, from a cold section
+cache, three times each after one uncounted warm-up. Times are `createSectionFile` totals, min / median / max, in
+ms:
+
+| Firmware | Hindi chapter (2,483 words) | English chapter (same words and paragraphs) | Ratio of medians |
+|---|---|---|---|
+| master `50b8156b8`, unshaped | 3,371 (one run; parse 1,826) | - | - |
+| `c3597cfbd`, shaped | 10,751 / 10,753 / 10,762 (parse ~9,400) | 2,556 / 2,560 / 2,576 | 4.20: **missed** |
+| `a0733646e`, cache and memos | 4,925 / 4,931 / 4,933 (parse ~3,605) | 2,523 / 2,529 / 2,535 | **1.95: pass** |
+
+- **The miss, profiled** (`OT_PROFILE` build, the long Hindi chapter): `ot::shape` was 5,739 ms of the 7,566 ms that
+  shaping added, 2.34 ms a word. Its shares:
+
+  | Part | Share |
+  |---|---|
+  | GSUB lookups | 41.6% |
+  | Indic initial reordering | 13.0% |
+  | The GSUB loop's own digest and settings reads | 10.3% |
+  | GPOS, advances and the tail | 14.5% |
+  | The rest | 20.6% |
+
+  A word shaped twice in a row cost the same cycles both times, to the cycle: one word's working set overflows the
+  16 KB flash cache. The cost is reads of the flash-mapped GSUB, not instructions; the host is about 300x faster.
+- **The word cache** (Task 12b; 16 KB in the build arena's free tail, 2-way, 64 B ways) hit 1,943 of 2,478 lookups
+  (78.4%) with no clear. The memos (Task 12a) take the per-consonant `wouldSubstitute` walks and the planned lookups'
+  digest reads off the flash.
+- **The gate's book flatters the cache.** Its chapter 2 repeats the declaration's paragraphs: 136 distinct words in
+  2,483. On real prose (host dump tool, the X3's arena, the merged fonts) the cache hits:
+  - 24.3% of 52,646 lookups on Indulekha (Malayalam, 26 spines);
+  - 17.8% of 415,715 on Ponniyin Selvan (Tamil, 298 spines).
+
+  Both languages are agglutinative. No real Hindi book was measured. The real-prose build times wait for PR 3b, which
+  installs those scripts' families.
+
+**Item 6 on the X3** (`a0733646e`):
+
+| What | master | Branch | Pass line |
+|---|---|---|---|
+| Background-B's lowest heap during the look-ahead build of the long Hindi chapter | - | 35,592 B (`Background-B: ... lowest`; no `Watermark DROP`) | >= 10,240 B: **pass** |
+| `Min Free` since boot, after a cold Hindi build | 15,416 B | 15,432 B | - |
+| The loop task's stack, after a cold Hindi build (diagnostics build) | 10,256 B free | 10,480 B free | >= 1,536 B free: **pass** |
+| Reading heap after five turns, Hindi chapter | - | heap 60,384, maxblock 47,092 | - |
+| Reading heap after five turns, English chapter | - | heap 60,388, maxblock 47,092 | - |
+| After `CMD:TTF:FULL` and three turns forward and back, Hindi / English | - | 53,980 / 53,984 | within 2 KB: **pass** |
+| The arena during the cold Hindi build | cap 52,272, high water 43,108 | cap 52,272, high water 43,116, parse lane 11,437, `failedAlloc=0` | - |
+
+- No build logged `shaping degraded`.
+- **Ring mode:** each page after `FULL` matched its screenshot from before, above the status bar. But the glyph store
+  had one live segment (48 KB of 1.3 MB), so `FULL` resumed writes at the next idle step, before the turns were drawn.
+  Drawing in ring mode itself was not exercised. That needs a store with two live segments.
+
+**Before and after** (the images in the PR):
+- `/test/test_hindi_shaping.epub@1:1` at 14 pt and 18 pt;
+- `/test/test_shaped_bengali.epub@1:1` at 14 pt;
+- the dictionary's word selection on the Hindi page.
+
+On the branch, conjuncts are formed, vowel signs and the reph sit in place, and no dotted circle or stray virama
+appears. The dictionary's box draws the word shaped. The branch's pages are identical, above the status bar, between
+`c3597cfbd` and `a0733646e`: the cache and the memos change no output on the device. The status bar's chapter title
+stays unshaped: UI strings wait for step 5 (the design's "Shaped UI strings").
+
+**Flash and RAM** against master `50b8156b8`:
+
+| Env | Flash, master | Flash, branch | Delta | RAM, master | RAM, branch | Delta |
+|---|---|---|---|---|---|---|
+| `gh_release` | 6,092,055 | 6,161,987 | +69,932 | 57,384 | 57,408 | +24 |
+| `default` | 6,258,991 | 6,288,889 | +29,898 | 57,888 | 57,912 | +24 |
+
+- `gh_release`'s delta, split from the map and the symbols:
+  - **the engine, about +41.4 KB:** `lib/OtShaper`'s input sections are 45,834 B in the branch's map, against
+    4,424 B of `ot::` symbols on master;
+  - **the rest, about +28.5 KB:** TextShaping, the Indic module, the paragraph store and the word cache (their
+    symbols grew from 456 B to 14,509 B), plus ParsedText, the parser, the section and padding.
+- `default` already linked the engine through `TTF:SHAPE`, so its delta is the layout side alone.
+- The gate (Global Constraints): `gh_release`'s +69,932 B is within +81,772 B, and `default`'s 6,288,889 B is within
+  6,297,600 B. That leaves 264,711 B of the app slot free (>= 256,000 B).
+
+**Estimate -> measured** for the design's rows ("Memory, flash and time") that this PR measures:
+
+| What | The design's estimate | Measured |
+|---|---|---|
+| Glyph buffer per call | about 6.3 KB for n = 32 | one `IndicShaper::CallMemory`: about 6.3 KB plus 7 B a token byte (about 6,450 B for an 18-byte token), a block of the lent arena released at the call's end, else the build's heap block |
+| A plan | about 1.5 KB (Devanagari), 2.1 KB (Bengali) | 980 B on the X3 before Task 12a (merged Devanagari, `TTF:SHAPE`). With the digest copy and the consonant memo, on the host: 3,328 B (merged Devanagari), 2,592 / 4,128 / 1,056 / 1,184 B (the four fixtures). 24 B a planned lookup plus 320 B; heap, the build |
+| Paragraph glyph store | about 8 B a glyph while laid out | `ShapedStore`: heap chunks kept across paragraphs; the long Hindi chapter's records are 38,440 B of glyphs over the chapter (host), held only while their paragraph is laid out |
+| Resident page | 4-6 B a glyph of form, against 8-12 B for #3787's tokens | `page_bytes` mean / max: 5,196 / 6,691 B (test_shaped_devanagari) and 10,420 / 12,288 B (the long Hindi chapter's host pages) against 3,228 / 4,122 B and 5,904 / 7,278 B unshaped; the glyph records are half #3787's token bytes (38,440 against 76,880 B) |
+
 ## The gate
 
 | Item | Pass line | Measured | Result |
@@ -1042,6 +1161,9 @@ lookups in coalesced reads (NotoSans-Regular: 44 calls, with a budget of 512 a t
 | 3 | all 22 families merged | 22 of 22 (decision 6 refined: `vhea`/`vmtx` dropped) | **pass** |
 | 3 | both checks hold | equal against the script's own font: 1,531,416 of 1,531,416 lines (112 runs); Latin kept whole: 792 of 792 letter runs equal against Noto Sans/Serif | **pass** |
 | 3 | every family fits, in flash or SD mode | 22 of 22, all in flash mode | **pass** |
+| 2 (PRs 1-3) | the release build's running total <= 92,160 B | PR 2 +10,388 B, PR 3 +69,932 B: 80,320 B | **pass** |
+| 6 | a shaped chapter builds in at most twice the time of a Latin chapter of the same length (X3) | 1.95x (4,931 against 2,529 ms) with the word cache and the memos; 4.20x without | **pass** |
+| 6 | Background-B's lowest heap during an Indic build >= 10,240 B (X3) | 35,592 B | **pass** |
 
 **Item 1 passes, item 2 passes (its free-slot line provisional on P2), item 3 passes with decision 6 as refined.**
 By the plan's Task 4, PR 1 can start with Task 5.
