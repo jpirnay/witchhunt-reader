@@ -924,6 +924,7 @@ class ChapterHtmlSlimParser final : public Print {
   void endBlockSpan();
   bool heapAllowsTableRowLayout() const;
   bool flushPartWordBuffer();
+  bool flushPartWordGlued();
   void makePages();
   // Puts currentTextBlock's top spacing on the current page, once per logical paragraph. Both
   // places that lay the block out call it first: makePages() and the long-block split in

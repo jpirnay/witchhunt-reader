@@ -462,33 +462,6 @@ bool hasAttributeToken(const char* value, const char* token) {
   return false;
 }
 
-// Returns true if the trailing UTF-8 codepoint in [buf, buf+len), read past any control that
-// counts nowhere (lastCodepointOf), is a dash that allows a line break opportunity after it.
-// Inline-tag boundaries like "gone—<i>Umbriel</i>"
-// would otherwise glue the dash to the following word via nextWordContinues, making the
-// dash unbreakable; callers use this to skip setting that flag when the buffered text
-// already ends at a natural break point.
-//
-// Soft hyphen (U+00AD) and non-breaking hyphen (U+2011) are intentionally excluded:
-// soft hyphen is invisible (a hyphenation hint) and non-breaking hyphen forbids breaks
-// by definition. Minus sign (U+2212) is excluded because it's mathematical, not a word
-// separator.
-bool bufferEndsWithBreakableDash(const char* buf, const int len) {
-  switch (lastCodepointOf(buf, len)) {
-    case '-':
-    case 0x2010:  // HYPHEN
-    case 0x2012:  // FIGURE DASH
-    case 0x2013:  // EN DASH
-    case 0x2014:  // EM DASH
-    case 0x2015:  // HORIZONTAL BAR
-    case 0x2E3A:  // TWO-EM DASH
-    case 0x2E3B:  // THREE-EM DASH
-      return true;
-    default:
-      return false;
-  }
-}
-
 // given the start and end of a tag, check to see if it matches a known tag
 bool matches(const char* tag_name, const char* possible_tags[], const int possible_tag_count) {
   for (int i = 0; i < possible_tag_count; i++) {
@@ -1217,6 +1190,14 @@ void ChapterHtmlSlimParser::closeRt() {
 }
 
 // flush the contents of partWordBuffer to currentTextBlock
+// The word ends at an inline tag: what follows is glued to it, as it is in the source. Whether a line may end at the
+// seam is ParsedText::addWord's to say.
+bool ChapterHtmlSlimParser::flushPartWordGlued() {
+  if (!flushPartWordBuffer()) return false;
+  nextWordContinues = true;
+  return true;
+}
+
 bool ChapterHtmlSlimParser::flushPartWordBuffer() {
   partWordCjkCodepoints_ = 0;  // the run being counted ends with this flush
   partWordLastWasCjk_ = false;
@@ -3213,9 +3194,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   // inline, and <rp> stays visible text for KOSync.
   if (self->rubyDepth_ < 0 && strcmp(name, "ruby") == 0) {
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-      if (!self->flushPartWordBuffer()) return;
-      if (!endsAtDashBreak) self->nextWordContinues = true;
+      if (!self->flushPartWordGlued()) return;
     }
     self->rubyDepth_ = self->depth;
     self->rubyHasGroup_ = false;
@@ -3226,9 +3205,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     self->rtcDepth_ = self->depth;
   } else if (self->rubyDepth_ >= 0 && self->rtcDepth_ < 0 && self->rtDepth_ < 0 && strcmp(name, "rt") == 0) {
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-      if (!self->flushPartWordBuffer()) return;
-      if (!endsAtDashBreak) self->nextWordContinues = true;
+      if (!self->flushPartWordGlued()) return;
     }
     self->rtDepth_ = self->depth;
     self->rubyText_.clear();
@@ -3271,11 +3248,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     if (isInternalLink) {
       // Flush buffer before style change
       if (self->partWordHasText()) {
-        const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-        if (!self->flushPartWordBuffer()) return;
-        if (!endsAtDashBreak) {
-          self->nextWordContinues = true;
-        }
+        if (!self->flushPartWordGlued()) return;
       }
       self->insideFootnoteLink = true;
       self->footnoteLinkDepth = self->depth;
@@ -3599,11 +3572,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
              matches(name, STRIKETHROUGH_TAGS, NUM_STRIKETHROUGH_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-      if (!self->flushPartWordBuffer()) return;
-      if (!endsAtDashBreak) {
-        self->nextWordContinues = true;
-      }
+      if (!self->flushPartWordGlued()) return;
     }
     if (matches(name, UNDERLINE_TAGS, NUM_UNDERLINE_TAGS)) {
       self->underlineUntilDepth = std::min(self->underlineUntilDepth, self->depth);
@@ -3651,11 +3620,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   } else if (matches(name, BOLD_TAGS, NUM_BOLD_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-      if (!self->flushPartWordBuffer()) return;
-      if (!endsAtDashBreak) {
-        self->nextWordContinues = true;
-      }
+      if (!self->flushPartWordGlued()) return;
     }
     self->boldUntilDepth = std::min(self->boldUntilDepth, self->depth);
     // Push inline style entry for bold tag
@@ -3686,11 +3651,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   } else if (matches(name, ITALIC_TAGS, NUM_ITALIC_TAGS)) {
     // Flush buffer before style change so preceding text gets current style
     if (self->partWordHasText()) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-      if (!self->flushPartWordBuffer()) return;
-      if (!endsAtDashBreak) {
-        self->nextWordContinues = true;
-      }
+      if (!self->flushPartWordGlued()) return;
     }
     self->italicUntilDepth = std::min(self->italicUntilDepth, self->depth);
     // Push inline style entry for italic tag
@@ -3762,11 +3723,7 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
         (self->vertical_ && cssStyle.hasTextCombine()) || isSmallTag || isBigTag) {
       // Flush buffer before style change so preceding text gets current style
       if (self->partWordHasText()) {
-        const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
-        if (!self->flushPartWordBuffer()) return;
-        if (!endsAtDashBreak) {
-          self->nextWordContinues = true;
-        }
+        if (!self->flushPartWordGlued()) return;
       }
       applyCssEmphasisToEntry(entry, cssStyle);
       applyVerticalAlignToEntry(entry, cssStyle);
@@ -4228,13 +4185,9 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
                              matches(name, IMAGE_TAGS, NUM_IMAGE_TAGS) || self->depth == 1;
 
     if (shouldFlush) {
-      const bool endsAtDashBreak = bufferEndsWithBreakableDash(self->partWordBuffer, self->partWordTextEnd());
       if (!self->flushPartWordBuffer()) return;
-      // If closing an inline element, the next word fragment continues the same visual word —
-      // unless the buffered text ended at a dash that should allow a line break (em/en dash, etc.).
-      if (isInlineTag && !endsAtDashBreak) {
-        self->nextWordContinues = true;
-      }
+      // If closing an inline element, the next word fragment continues the same visual word.
+      if (isInlineTag) self->nextWordContinues = true;
     }
   }
   // Controls held for a word end with their block, a table cell's included. Not at a </br>: the <br> holds no text, and

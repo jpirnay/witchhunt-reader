@@ -41,9 +41,10 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=212 s=0 z=100 t=rgba
    W x=255 s=0 z=100 t=must
    W x=301 s=0 z=100 t=survive.
-  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=62 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=18 s=0 z=100 t=VISIBLEHEXSIX
-   W x=156 s=0 z=100 t=six-digit
+   W x=156 s=0 z=100 t=six-
+   W x=187 s=0 z=100 t=digit
    W x=234 s=0 z=100 t=hex
    W x=268 s=0 z=100 t=ends
    W x=311 s=0 z=100 t=in

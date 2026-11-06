@@ -225,12 +225,13 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=286 s=0 z=100 t=text
    W x=331 s=0 z=100 t=edge,
    W x=385 s=0 z=100 t=indented
-  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=96 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=only
    W x=46 s=0 z=100 t=by
    W x=66 s=0 z=100 t=the
    W x=103 s=0 z=100 t=ordinary
-   W x=182 s=0 z=100 t=first-line
+   W x=182 s=0 z=100 t=first-
+   W x=234 s=0 z=100 t=line
    W x=275 s=0 z=100 t=indent.
   LINE y=120 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=18 s=0 z=100 t=8.
@@ -251,8 +252,9 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=295 s=0 z=100 t=keeps
    W x=349 s=0 z=100 t=its
    W x=387 s=0 z=100 t=ordinary
-  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=0 s=0 z=100 t=first-line
+  LINE y=168 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=first-
+   W x=52 s=0 z=100 t=line
    W x=93 s=0 z=100 t=indent.
   LINE y=192 x=54 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=Listen,
