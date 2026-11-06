@@ -30,7 +30,8 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 and drawing, #613) are merged; its PR 3 (reading a Hebrew book) comes next. Step 2's engine (#603) and TrueType faces
 (#624) are merged, and PR 3 (#<n>) shapes Indic books on the page ([reference](../text-shaping.md)). Then PR 3b
 adds the Font Manager's 20 Indic families, and PR 4 the Arabic joining module, which also brings shaping into
-paragraphs that need bidi. Line spacing (`cjk.md`, step 10), which reads the `line-height` step 0 keeps, has shipped.
+paragraphs that need bidi. A later PR speeds the shaping engine up: a chapter of real Hindi prose still builds in 2.6
+times a Latin chapter's time on the X3, against the design's 2x (the measurements' "Real Hindi prose"). Line spacing (`cjk.md`, step 10), which reads the `line-height` step 0 keeps, has shipped.
 
 ## What step 1 takes from step 3
 

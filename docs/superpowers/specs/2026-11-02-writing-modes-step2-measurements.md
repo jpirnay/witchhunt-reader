@@ -1041,7 +1041,8 @@ twice:
 - `a0733646e`, with them (Tasks 12a and 12b).
 
 All runs used `default`, flashed with esptool, except the stack figures, which come from `default` built with
-`-DENABLE_BOOT_HEAP_DIAGNOSTICS`. The X4 was not available: its rows are not measured, as in PR 2.
+`-DENABLE_BOOT_HEAP_DIAGNOSTICS`. The X4 was not available, and the maintainer waived its runs for this PR on
+2026-11-06: its rows are not measured, as in PR 2.
 
 **Item 5 on the host** (Task 12; heap-only harness; every compared run shares one book path and one cache path,
 because allocation counts depend on the paths' lengths):
@@ -1096,8 +1097,23 @@ ms:
   - 24.3% of 52,646 lookups on Indulekha (Malayalam, 26 spines);
   - 17.8% of 415,715 on Ponniyin Selvan (Tamil, 298 spines).
 
-  Both languages are agglutinative. No real Hindi book was measured. The real-prose build times wait for PR 3b, which
-  installs those scripts' families.
+  Both languages are agglutinative.
+- **Real Hindi prose on the X3** (`082c9e539`, the final review's fixes): Premchand's *Gaban* (1931; Premchand
+  Rachnavali vol. 5 on Hindi Wikisource), chapters 1-8 cut at the first paragraph past 2,500 words: 62 paragraphs,
+  2,593 words (852 distinct of 2,587 Devanagari tokens, so no cache could hit more than 67.1%). Its Latin twin has the
+  same paragraphs' word counts, built by the fixture generator's `long_chapters`. Three cold builds each at `@2:1`, in
+  ms:
+
+  | Book | Chapter 2 total, min / median / max | Word cache |
+  |---|---|---|
+  | Gaban, Hindi | 6,908 / 6,908 / 6,920 (parse ~5,640) | 1,325 hits, 1,279 misses (50.9%), no clear |
+  | its Latin twin | 2,644 / 2,648 / 2,673 | - |
+
+  The ratio of medians is **2.61x**: real prose misses the 2x line. A word the cache misses still costs about 2.5 ms,
+  and halving that is engine work (the conjunct ligature walks: HarfBuzz's second-glyph and ligature digests, never
+  ported). A larger tail alone would reach about 2.2x. The maintainer accepted the miss on 2026-11-06 and moved the
+  engine's performance work to a later PR, with this book as its benchmark. The Malayalam and Tamil build times wait
+  for PR 3b, which installs those scripts' families.
 
 **Item 6 on the X3** (`a0733646e`):
 
@@ -1141,6 +1157,8 @@ stays unshaped: UI strings wait for step 5 (the design's "Shaped UI strings").
 - `default` already linked the engine through `TTF:SHAPE`, so its delta is the layout side alone.
 - The gate (Global Constraints): `gh_release`'s +69,932 B is within +81,772 B, and `default`'s 6,288,889 B is within
   6,297,600 B. That leaves 264,711 B of the app slot free (>= 256,000 B).
+- After merging master `17e2ba942` (#634-#636) and the final review's fixes (`33b1cf0e7`): `default` 6,294,083 B,
+  3,517 B under the gate, with 259,517 B of the slot free; RAM 57,592 B (master moved its parser tables to flash).
 
 **Estimate -> measured** for the design's rows ("Memory, flash and time") that this PR measures:
 
@@ -1162,7 +1180,7 @@ stays unshaped: UI strings wait for step 5 (the design's "Shaped UI strings").
 | 3 | both checks hold | equal against the script's own font: 1,531,416 of 1,531,416 lines (112 runs); Latin kept whole: 792 of 792 letter runs equal against Noto Sans/Serif | **pass** |
 | 3 | every family fits, in flash or SD mode | 22 of 22, all in flash mode | **pass** |
 | 2 (PRs 1-3) | the release build's running total <= 92,160 B | PR 2 +10,388 B, PR 3 +69,932 B: 80,320 B | **pass** |
-| 6 | a shaped chapter builds in at most twice the time of a Latin chapter of the same length (X3) | 1.95x (4,931 against 2,529 ms) with the word cache and the memos; 4.20x without | **pass** |
+| 6 | a shaped chapter builds in at most twice the time of a Latin chapter of the same length (X3) | the timing book (repeated text): 1.95x (4,931 against 2,529 ms) with the word cache and the memos, 4.20x without; real Hindi prose (Gaban): 2.61x (6,908 against 2,648 ms) | **pass on the timing book; missed on real prose**, accepted by the maintainer (2026-11-06), the engine's speed moved to a later PR |
 | 6 | Background-B's lowest heap during an Indic build >= 10,240 B (X3) | 35,592 B | **pass** |
 
 **Item 1 passes, item 2 passes (its free-slot line provisional on P2), item 3 passes with decision 6 as refined.**

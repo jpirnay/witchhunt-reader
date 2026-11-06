@@ -184,8 +184,10 @@ arena's blocks back.
 - **The log:** each build prints `createSectionFile spine=<n> word cache: bytes= hits= misses= inserts= bypassed=
   oversize= clears=`, with `bytes=0` when it never armed.
 
-The cache hit 78% of the lookups on the X3's timing book, whose chapter repeats its paragraphs, but 24% on Malayalam
-prose (Indulekha) and 18% on Tamil (Ponniyin Selvan), laid out with the X3's arena.
+The cache hit 78% of the lookups on the X3's timing book, whose chapter repeats its paragraphs, but 51% on Hindi prose
+(Premchand's Gaban, on the X3), 24% on Malayalam prose (Indulekha) and 18% on Tamil (Ponniyin Selvan), the last two
+laid out on the host with the X3's arena. A chapter's distinct words bound it: Gaban's 2,587 words hold 852, so no
+cache could hit more than 67%.
 
 ## Glyph forms in the TextBlock
 
@@ -317,9 +319,12 @@ font is not rebuilt at every open.
 ## Time
 
 Each shaped word costs a walk of the flash-mapped GSUB and GPOS, so an Indic chapter builds slower than a Latin one;
-page turns cost nothing more. On the X3, a 2,483-word Hindi chapter builds in 4.9 s against 2.5 s for a Latin chapter
-of the same length, with the word cache and the plan's memos (the
+page turns cost nothing more. On the X3, with the word cache and the plan's memos, a 2,593-word chapter of Hindi prose
+(Gaban) builds in 6.9 s against 2.6 s for a Latin chapter of the same length (2.6x), and the repeated-text timing book
+in 4.9 s against 2.5 s (1.95x) (the
 [measurements](superpowers/specs/2026-11-02-writing-modes-step2-measurements.md), "PR 3: shaped text on the page").
+A word the cache misses still costs about 2.5 ms, most of it the conjunct ligature walks; speeding the engine up is
+left to a later change.
 
 ## Tests
 
