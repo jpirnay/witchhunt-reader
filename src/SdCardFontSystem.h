@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Epub/BookFonts.h>
+#include <Epub/LanguageTag.h>
 #include <SdCardFontManager.h>
 #include <SdCardFontRegistry.h>
 
@@ -38,8 +39,8 @@ class SdCardFontSystem {
   void setReaderLanguage(const std::string& language);
   void clearReaderLanguage();
   /// The open book's language is not known yet: a first open learns it from the load that builds book.bin. While a
-  /// Noto CJK family is installed, which the language may pick (effectiveReaderFamily, selectLanguageFamily), the
-  /// book's font waits for it (waitsForReaderLanguage) rather than install one face and then another.
+  /// Noto CJK or Indic family is installed, which the language may pick (effectiveReaderFamily, selectLanguageFamily),
+  /// the book's font waits for it (waitsForReaderLanguage) rather than install one face and then another.
   void setReaderLanguagePending();
   bool waitsForReaderLanguage() const;
 
@@ -188,10 +189,13 @@ class SdCardFontSystem {
 
   // The region of a regional Noto CJK family ("NotoSans" or "NotoSerif" + JP/SC/TC/KR) and its stem; None otherwise.
   static ReaderCjkRegion familyRegion(const std::string& family, std::string& stem);
+  // Whether `family` is "NotoSans" or "NotoSerif" + the name of an Indic script.
+  static bool isIndicFamily(const std::string& family);
   // Whether `family`'s regular file maps `codepoint`; true too when the file cannot be read, which keeps the font.
   static bool familyMapsCodepoint(const SdCardFontFamilyInfo& family, uint32_t codepoint);
 
   ReaderCjkRegion readerCjkRegion_ = ReaderCjkRegion::None;
+  const language_tag::IndicScript* readerIndicScript_ = nullptr;  // the open book's Indic script, else null
   uint32_t cjkFamilyKey_ = 0;  // coversCjk(): the family it last read, and what it found
   bool cjkFamily_ = false;
   std::string languageFamily_;      // selectLanguageFamily()

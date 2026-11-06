@@ -3,6 +3,8 @@
 #include <OtShaper.h>
 #include <gtest/gtest.h>
 
+#include <vector>
+
 #include "Epub/CjkPunctuation.h"
 #include "Epub/LanguageTag.h"
 #include "Epub/TypographyProfile.h"
@@ -73,6 +75,60 @@ TEST(LanguageTag, EveryTagNamesOneCjkRegion) {
   for (const char* tag : {"", "en", "en-US", "zhx", "cnr", "cn-x", "kok", "jv", "jav"}) {
     EXPECT_EQ(cjkRegionOf(tag), CjkRegion::None) << tag;
   }
+}
+
+TEST(LanguageTag, IndicScriptOfMapsEachLanguageToItsScript) {
+  using language_tag::indicScriptOf;
+  struct Row {
+    std::vector<const char*> languages;
+    const char* name;
+    uint32_t probe;
+  };
+  const Row rows[] = {
+      {{"hi", "mr", "ne", "sa", "kok", "mai", "bho", "awa", "mag", "raj", "doi", "brx", "new"}, "Devanagari", 0x0915},
+      {{"bn", "as", "mni"}, "Bengali", 0x0995},
+      {{"pa"}, "Gurmukhi", 0x0A15},
+      {{"gu"}, "Gujarati", 0x0A95},
+      {{"or"}, "Oriya", 0x0B15},
+      {{"ta"}, "Tamil", 0x0B95},
+      {{"te"}, "Telugu", 0x0C15},
+      {{"kn"}, "Kannada", 0x0C95},
+      {{"ml"}, "Malayalam", 0x0D15},
+      {{"si"}, "Sinhala", 0x0D9A},
+  };
+  for (const Row& row : rows) {
+    for (const char* tag : row.languages) {
+      const language_tag::IndicScript* script = indicScriptOf(tag);
+      ASSERT_NE(script, nullptr) << tag;
+      EXPECT_STREQ(script->name, row.name) << tag;
+      EXPECT_EQ(script->probe, row.probe) << tag;
+    }
+  }
+  for (const char* tag : {"hi-IN", "HI_in"}) {
+    ASSERT_NE(indicScriptOf(tag), nullptr) << tag;
+    EXPECT_STREQ(indicScriptOf(tag)->name, "Devanagari") << tag;
+  }
+  for (const char* tag : {"en", "zh", "he", "ar", ""}) EXPECT_EQ(indicScriptOf(tag), nullptr) << tag;
+}
+
+TEST(LanguageTag, AForeignScriptSubtagIsNotIndic) {
+  using language_tag::indicScriptOf;
+  for (const char* tag : {"sa-Latn", "pa-Arab", "hi-Latn", "mni-Mtei"}) EXPECT_EQ(indicScriptOf(tag), nullptr) << tag;
+  const struct {
+    const char* tag;
+    const char* name;
+  } own[] = {{"hi-Deva", "Devanagari"}, {"bn-Beng", "Bengali"}, {"pa-Guru", "Gurmukhi"}};
+  for (const auto& row : own) {
+    ASSERT_NE(indicScriptOf(row.tag), nullptr) << row.tag;
+    EXPECT_STREQ(indicScriptOf(row.tag)->name, row.name) << row.tag;
+  }
+}
+
+TEST(Typography, AnIndicLanguageSetsShapedScript) {
+  for (const char* tag : {"hi", "doi", "mni", "si"}) {
+    EXPECT_TRUE(TypographyProfile::forLanguage(tag).shapedScript) << tag;
+  }
+  for (const char* tag : {"sa-Latn", "en"}) EXPECT_FALSE(TypographyProfile::forLanguage(tag).shapedScript) << tag;
 }
 
 TEST(TypographyProfile, KoreanKeepsWholeWordsWithoutGridOrGap) {
