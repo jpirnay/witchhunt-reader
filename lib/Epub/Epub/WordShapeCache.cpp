@@ -215,7 +215,7 @@ size_t WordShapeCache::setOf(const uint64_t textHash, const uint16_t length, con
   // Not Fibonacci hashing: the key times an odd constant spreads its low bits upward, and the last fold brings bits
   // 16-31 down onto 0-15. So with the tail's 128 sets the index reads the key's bits 0-22 alone (and the text hash's
   // 0-6, 16-22, 32-38 and 48-54). Keys are FNV-1a values: two that differ almost always differ there. A mix that every
-  // bit reaches moved the shaped test books' hit rates by up to nine points either way, collision noise, so this one
+  // bit reaches moved the shaped test books' hit rates by up to eleven points either way, collision noise, so this one
   // stays.
   uint32_t h = static_cast<uint32_t>(textHash) ^ static_cast<uint32_t>(textHash >> 32);
   h ^= key * 0x9E3779B1u;

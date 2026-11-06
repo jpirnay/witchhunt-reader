@@ -1117,6 +1117,8 @@ bool ParsedText::shapeToken(const GfxRenderer& renderer, const int fontId, const
       latchShapingDegraded();
       return false;
     }
+    // Grown once, to what was checked: pieces of rising length would otherwise grow it again, unchecked.
+    shapingState_->measureScratch.reserve(scratchBytesFor(store, *pieces));
     // Warm: the glyph IDs are looked up once, here inside the build's miss scope, so a page drawn later needs no miss
     // memory for them. Then each piece's width.
     const int font = wordFontId(i, fontId);
@@ -1159,6 +1161,7 @@ int ParsedText::shapedPrefixWidth(const GfxRenderer& renderer, const int fontId,
         outcome == IndicShaper::Outcome::Formed &&
         heapAllows(growthBytes(state.measureScratch, scratchBytesFor(state.store, state.store.openPieces())));
     if (measurable) {
+      state.measureScratch.reserve(scratchBytesFor(state.store, state.store.openPieces()));  // once, as checked
       width = 0;
       for (const ShapedStore::Piece& piece : state.store.openPieces()) {
         width += measurePiece(renderer, font, wordStyles[i], wordScale(i), vertical_, state.store, piece, candidate,

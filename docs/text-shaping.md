@@ -139,7 +139,8 @@ and the layout memo (deviation 2).
 
 - **`GfxRenderer::shapingFace(fontId, style, &ppem)`** answers the `ShapingFace` of the TrueType file that draws that
   style (a synthetic style's source file) and its ppem in 26.6, or null for any other font. `TtfFont::shapingFace`
-  makes it on first ask.
+  makes it on first ask; when the heap refuses it, the answer is null with `*refused` set, which a token holding
+  Indic text latches (see "What fails how").
 - **`ShapingFace::current()`** is the `ot::Face` over the tables where the glyph store maps them, nothing copied
   (deviation 3), with the `CPac` lookup filters the install wrote (deviation 4). A flash-mode block moves when another
   style is mapped, and the face is then re-pointed (`Face::rebase`, deviation 12). Under RenderLock only.
