@@ -34,12 +34,12 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 109;  // v109: a no-break space with no word glued to it takes no share of a
-                                               // justified line, and a TTF without U+FFFD gives a missing character
-                                               // its .notdef's advance: word positions change
-                                               // v108: right-to-left lines: a word's display form and the line's
-                                               // logical order (the TextBlock bidi region, flagged by the word
-                                               // count's top bit)
+constexpr uint8_t SECTION_FILE_VERSION = 110;  // v110: a book's centre and end-side text-align stand against the
+                                               // reader's alignment v109: a no-break space with no word glued to it
+                                               // takes no share of a justified line, and a TTF without U+FFFD gives a
+                                               // missing character its .notdef's advance: word positions change v108:
+                                               // right-to-left lines: a word's display form and the line's logical
+                                               // order (the TextBlock bidi region, flagged by the word count's top bit)
                                                // v107: a vertical line's Combine annotation record (tate-chu-yoko),
                                                // which reserves no band
                                                // v106: a vertical line's flags bit 3 says its marks are
