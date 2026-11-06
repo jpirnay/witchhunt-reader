@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include "Epub/CjkPunctuation.h"
+#include "Epub/LanguageTag.h"
 #include "Epub/TypographyProfile.h"
 
 namespace {
@@ -32,6 +33,45 @@ TEST(TypographyProfile, TraditionalChineseByScriptRegionOrClassicalChinese) {
   }
   // An explicit script subtag wins over the region.
   EXPECT_EQ(TypographyProfile::forLanguage("zh-Hans-TW").punctuation, Table::SimplifiedChinese);
+}
+
+// The font takes a tag the layout must take too: a book tagged cn drew in the Simplified Chinese font with Latin rules.
+TEST(TypographyProfile, ABookTaggedCnIsLaidOutAsChinese) {
+  for (const char* tag : {"cn", "CN"}) {
+    const TypographyProfile cn = TypographyProfile::forLanguage(tag);
+    EXPECT_EQ(cn.punctuation, Table::SimplifiedChinese) << tag;
+    EXPECT_EQ(cn.breaking, TypographyProfile::Breaking::BetweenCharacters) << tag;
+    EXPECT_EQ(cn.justify, TypographyProfile::Justify::BetweenCharacters) << tag;
+    EXPECT_TRUE(cn.wholeEmGrid) << tag;
+    EXPECT_TRUE(cn.cjkLatinGap) << tag;
+    EXPECT_TRUE(cn.verticalAllowed) << tag;
+    EXPECT_TRUE(cn.cjkRepertoire) << tag;
+  }
+  EXPECT_FALSE(TypographyProfile::forLanguage("cnr").wholeEmGrid) << "Montenegrin";
+}
+
+TEST(TypographyProfile, TheOldDotNetTagsPickTheirScript) {
+  EXPECT_EQ(TypographyProfile::forLanguage("zh-CHT").punctuation, Table::TraditionalChinese);
+  EXPECT_EQ(TypographyProfile::forLanguage("zh_cht").punctuation, Table::TraditionalChinese);
+  EXPECT_EQ(TypographyProfile::forLanguage("zh-CHS").punctuation, Table::SimplifiedChinese);
+}
+
+// SdCardFontSystem::setReaderLanguage maps these one to one, so this table is the font's as well as the layout's.
+TEST(LanguageTag, EveryTagNamesOneCjkRegion) {
+  using language_tag::CjkRegion;
+  using language_tag::cjkRegionOf;
+  for (const char* tag : {"ja", "ja-JP", "JA_jp"}) EXPECT_EQ(cjkRegionOf(tag), CjkRegion::Japanese) << tag;
+  for (const char* tag : {"ko", "ko-KR", "KO_kr"}) EXPECT_EQ(cjkRegionOf(tag), CjkRegion::Korean) << tag;
+  for (const char* tag : {"cn", "CN", "zh-CN", "zh_cn", "zh-SG", "zh-Hans", "zh-Hans-TW", "zh-CHS"}) {
+    EXPECT_EQ(cjkRegionOf(tag), CjkRegion::SimplifiedChinese) << tag;
+  }
+  for (const char* tag : {"zh-TW", "zh_HK", "ZH-mo", "zh-Hant", "zh-Hant-CN", "zh-CHT", "lzh", "zh-yue-HK"}) {
+    EXPECT_EQ(cjkRegionOf(tag), CjkRegion::TraditionalChinese) << tag;
+  }
+  for (const char* tag : {"zh", "ZH", "zh-yue"}) EXPECT_EQ(cjkRegionOf(tag), CjkRegion::ChineseAmbiguous) << tag;
+  for (const char* tag : {"", "en", "en-US", "zhx", "cnr", "cn-x", "kok", "jv", "jav"}) {
+    EXPECT_EQ(cjkRegionOf(tag), CjkRegion::None) << tag;
+  }
 }
 
 TEST(TypographyProfile, KoreanKeepsWholeWordsWithoutGridOrGap) {
