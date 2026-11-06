@@ -64,7 +64,7 @@ bool isImageCandidate(const std::string& resolvedPath) {
 }
 }  // namespace
 
-const char* HEADER_TAGS[] = {"h1", "h2", "h3", "h4", "h5", "h6"};
+const char* const HEADER_TAGS[] = {"h1", "h2", "h3", "h4", "h5", "h6"};
 constexpr int NUM_HEADER_TAGS = sizeof(HEADER_TAGS) / sizeof(HEADER_TAGS[0]);
 
 // Size thresholds (bytes of XHTML) controlling indexing popup behavior.
@@ -263,15 +263,16 @@ constexpr size_t TABLE_BUFFER_BYTES_PER_CELL = 128;
 // list an element is inline text: nothing ended a word at </dt>, so <dt>Term</dt><dd>Meaning</dd> was the one word
 // "TermMeaning", and <center>* * *</center> joined the paragraph before it. Each can hold text as well as blocks, so
 // each is a <div> here, in INSET_CONTAINER_TAGS too.
-const char* BLOCK_TAGS[] = {"p",   "li",     "div",     "br",         "blockquote", "pre",     "caption", "dl",
-                            "dt",  "dd",     "figure",  "figcaption", "center",     "address", "header",  "footer",
-                            "nav", "hgroup", "details", "summary",    "fieldset",   "legend",  "form"};
+const char* const BLOCK_TAGS[] = {"p",       "li",      "div",      "br",     "blockquote", "pre",
+                                  "caption", "dl",      "dt",       "dd",     "figure",     "figcaption",
+                                  "center",  "address", "header",   "footer", "nav",        "hgroup",
+                                  "details", "summary", "fieldset", "legend", "form"};
 constexpr int NUM_BLOCK_TAGS = sizeof(BLOCK_TAGS) / sizeof(BLOCK_TAGS[0]);
 
 // Elements whose background picture becomes a picture of its own (noteBackgroundImage). Containers
 // only: on body/html a background is a page texture, on li/span/a a bullet, an icon or an ornament.
-const char* BACKGROUND_PICTURE_TAGS[] = {"div",   "p",          "table",   "section", "figure",
-                                         "aside", "blockquote", "article", "center"};
+const char* const BACKGROUND_PICTURE_TAGS[] = {"div",   "p",          "table",   "section", "figure",
+                                               "aside", "blockquote", "article", "center"};
 constexpr int NUM_BACKGROUND_PICTURE_TAGS = sizeof(BACKGROUND_PICTURE_TAGS) / sizeof(BACKGROUND_PICTURE_TAGS[0]);
 // A smaller background picture is decoration -- a flourish, a rule, a corner -- not an illustration.
 constexpr uint16_t MIN_BACKGROUND_PICTURE_SIDE = 96;
@@ -283,29 +284,29 @@ constexpr size_t MAX_BACKGROUND_PICTURE_SCOPES = 4;
 // whose <br>-separated lines each become a block of their own and must keep the inset of the
 // paragraph they belong to. <ul>/<ol> are how a list's items get their indent: in CSS an item
 // starts at the list's content edge, and its own margin-left only adds to that.
-const char* INSET_CONTAINER_TAGS[] = {"div",    "blockquote", "section", "article",  "aside",  "main",   "p",
-                                      "li",     "pre",        "ul",      "ol",       "dl",     "dt",     "dd",
-                                      "figure", "figcaption", "center",  "address",  "header", "footer", "nav",
-                                      "hgroup", "details",    "summary", "fieldset", "legend", "form"};
+const char* const INSET_CONTAINER_TAGS[] = {"div",    "blockquote", "section", "article",  "aside",  "main",   "p",
+                                            "li",     "pre",        "ul",      "ol",       "dl",     "dt",     "dd",
+                                            "figure", "figcaption", "center",  "address",  "header", "footer", "nav",
+                                            "hgroup", "details",    "summary", "fieldset", "legend", "form"};
 constexpr int NUM_INSET_CONTAINER_TAGS = sizeof(INSET_CONTAINER_TAGS) / sizeof(INSET_CONTAINER_TAGS[0]);
 
 // A list's padding-left when the book states none -- the stand-in for the browser default
 // `padding-inline-start: 40px`, which is what indents an unstyled list. Nested lists each add it.
 constexpr float LIST_DEFAULT_PADDING_EM = 1.5f;
 
-const char* BOLD_TAGS[] = {"b", "strong"};
+const char* const BOLD_TAGS[] = {"b", "strong"};
 constexpr int NUM_BOLD_TAGS = sizeof(BOLD_TAGS) / sizeof(BOLD_TAGS[0]);
 
-const char* ITALIC_TAGS[] = {"i", "em"};
+const char* const ITALIC_TAGS[] = {"i", "em"};
 constexpr int NUM_ITALIC_TAGS = sizeof(ITALIC_TAGS) / sizeof(ITALIC_TAGS[0]);
 
-const char* UNDERLINE_TAGS[] = {"u", "ins"};
+const char* const UNDERLINE_TAGS[] = {"u", "ins"};
 constexpr int NUM_UNDERLINE_TAGS = sizeof(UNDERLINE_TAGS) / sizeof(UNDERLINE_TAGS[0]);
 
-const char* STRIKETHROUGH_TAGS[] = {"s", "del", "strike"};
+const char* const STRIKETHROUGH_TAGS[] = {"s", "del", "strike"};
 constexpr int NUM_STRIKETHROUGH_TAGS = sizeof(STRIKETHROUGH_TAGS) / sizeof(STRIKETHROUGH_TAGS[0]);
 
-const char* IMAGE_TAGS[] = {"img", "image"};
+const char* const IMAGE_TAGS[] = {"img", "image"};
 constexpr int NUM_IMAGE_TAGS = sizeof(IMAGE_TAGS) / sizeof(IMAGE_TAGS[0]);
 
 // Inline formatting: the text on both sides of one of these elements' tags is in one inline
@@ -313,13 +314,13 @@ constexpr int NUM_IMAGE_TAGS = sizeof(IMAGE_TAGS) / sizeof(IMAGE_TAGS[0]);
 // formatting context; a block boundary or an element the parser does not lay out inline (<br>,
 // <img>, table parts, <li>, <dt>, <dd>, <div>, <section>, <figure>, ...) is a word boundary, so
 // every element not listed here ends the CJK segment (endCjkSegment) at its start and its end.
-const char* INLINE_FORMATTING_TAGS[] = {"span", "a",      "b",    "strong", "i",     "em",   "u",       "ins",  "s",
-                                        "del",  "strike", "sup",  "sub",    "small", "big",  "ruby",    "rb",   "rt",
-                                        "rp",   "rtc",    "font", "q",      "cite",  "abbr", "acronym", "code", "mark",
-                                        "dfn",  "kbd",    "samp", "var",    "tt",    "bdi",  "bdo",     "time", "data"};
+const char* const INLINE_FORMATTING_TAGS[] = {
+    "span",    "a",     "b",    "strong", "i",   "em",   "u",   "ins", "s",    "del", "strike", "sup",
+    "sub",     "small", "big",  "ruby",   "rb",  "rt",   "rp",  "rtc", "font", "q",   "cite",   "abbr",
+    "acronym", "code",  "mark", "dfn",    "kbd", "samp", "var", "tt",  "bdi",  "bdo", "time",   "data"};
 constexpr int NUM_INLINE_FORMATTING_TAGS = sizeof(INLINE_FORMATTING_TAGS) / sizeof(INLINE_FORMATTING_TAGS[0]);
 
-const char* SKIP_TAGS[] = {"head", "rp"};
+const char* const SKIP_TAGS[] = {"head", "rp"};
 constexpr int NUM_SKIP_TAGS = sizeof(SKIP_TAGS) / sizeof(SKIP_TAGS[0]);
 
 bool isWhitespace(const char c) { return c == ' ' || c == '\r' || c == '\n' || c == '\t'; }
@@ -463,7 +464,7 @@ bool hasAttributeToken(const char* value, const char* token) {
 }
 
 // given the start and end of a tag, check to see if it matches a known tag
-bool matches(const char* tag_name, const char* possible_tags[], const int possible_tag_count) {
+bool matches(const char* tag_name, const char* const possible_tags[], const int possible_tag_count) {
   for (int i = 0; i < possible_tag_count; i++) {
     if (strcmp(tag_name, possible_tags[i]) == 0) {
       return true;
