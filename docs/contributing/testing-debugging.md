@@ -35,6 +35,13 @@ cmake --build . --target LibraryIndexTest && ./library_index/LibraryIndexTest   
 
 A suite lives in its own directory under `test/` and is registered by an `add_subdirectory()` line in `test/CMakeLists.txt`; a new suite needs both. GoogleTest is fetched on the first configure. `test/README` has the offline KOReader sync checks, which the host toolchain cannot build.
 
+**Adding a test.** A test costs compile time more than run time, so keep the suite from outgrowing the code it covers:
+
+- Put a test in the suite that already covers the code. A new directory is another executable to compile and link; start one only for code no suite reaches.
+- Cases of one shape go in one table-driven test, not one `TEST` each.
+- A fix adds the test that fails without it, not one per step of the investigation.
+- Pin behaviour, not wording or tuning. Leave out log lines and tuned pixel values; pin a value only when it is the contract, as in a file format.
+
 **On Windows**, build and run from Git Bash with the MSYS2 UCRT64 toolchain (`C:\msys64\ucrt64\bin`) on `PATH`, not from PowerShell: the compiler there depends on DLLs from that directory and fails silently without them. The test executables link their C++ runtime statically, so they run whatever else is on `PATH`. `epub_build_inventory` does not build on Windows: it needs `dlfcn.h` and `execinfo.h`.
 
 **Hand-run tools.** `epub_build_inventory`, `epub_pipeline_dump_noheap`, `ot_shape_cli`, `ot_shaper_probe` and `EpubParserBenchmark` are not tests, so the default build leaves them out. Ask for one by name: `cmake --build build/test --target ot_shape_cli`.
