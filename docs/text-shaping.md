@@ -222,14 +222,16 @@ glyph keys, once per glyph store.
 
 ## Lifetimes
 
-Nothing of the shaper stays resident: a page draw allocates nothing for a shaped word.
+Nothing of the shaper outlives the build that made it, so none of it is resident while a book is read, and a page draw
+allocates nothing for a shaped word. Within the build, the faces and their plans and the paragraph store's chunks
+(`reset()` keeps them from one paragraph to the next) live longest.
 
 | What | Where | Lives |
 |---|---|---|
 | A call's block (`IndicShaper::CallMemory`: the `ot::Buffer` for `2 * kMaxRunCodepoints + 16` glyphs, the token's runs, its code points with their context, `IndicReorder`'s form; for a call without a face, `CallKind::Reorder`, the form alone, `3 * tokenBytes + 1` B) | a block of the lent arena (`ParsedText::lineArena_`), else the build's heap block | one `shapeToken` call; released before any of the token's glyphs is looked up, LIFO with the TrueType miss scope |
 | The build's heap block (`TextShaping::buildHeapBlock`) | heap, made on first use, grown nothrow in 512 B steps to the longest token, the smaller one freed first | lent to one call at a time; freed by `TextShaping::releaseBuildMemory()` at the build's end |
 | The faces and their plans | heap (`TtfFont::shapingFace`, `ShapingFace::plan`) | made on first ask; freed by `GfxRenderer::releaseShapingFaces()` at the build's end, or by the font set's next load (a reload or an install) |
-| `ParsedText::ShapingState`: the store, the pass's face answers, the line's piece vectors | heap, `makeUniqueNoThrow` | a paragraph's passes; the store's 1 KB chunks survive the paragraphs; freed at a slice's yield (`releaseLayoutScratch`) unless a paragraph in progress shapes |
+| `ParsedText::ShapingState`: the store, the pass's face answers, the line's piece vectors | heap, `makeUniqueNoThrow` | a paragraph's passes, and the store's 1 KB chunks the parse's later paragraphs too (`reset()` empties them and keeps them); freed at a slice's yield (`releaseLayoutScratch`) unless a paragraph in progress shapes, and with the parser's text block |
 | The word cache | the lent arena's free tail | one parse, emptied whenever an allocation reaches it |
 
 The build's end is `Section::BuildState`'s destructor, which calls `BidiLine::releaseBuildMemory()`,
