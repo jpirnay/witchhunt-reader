@@ -77,6 +77,7 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
 
   bool currentPageStarred = false;
   void finishWithAction(MenuAction action);
+  void openAutoTurnPicker();
 
   // UiListActivity / TabbedUiListActivity overrides
   int listCount() const override { return static_cast<int>(activeMenuItems().size()); }
@@ -121,7 +122,7 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
 
   // Pending state (mutated locally, returned to parent on finish)
   uint8_t pendingOrientation = 0;
-  uint8_t selectedPageTurnOption = 0;
+  uint8_t autoTurnSeconds = 0;  // what the menu hands the reader: 0 is off
   int8_t pendingEmbeddedStyleOverride = -1;
   int8_t pendingImageRenderingOverride = -1;
   int8_t pendingFontFamilyOverride = -1;
@@ -144,8 +145,6 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
   int8_t pendingLineSpacingOverride = -1;
   int8_t pendingVerticalTextOverride = -1;
   int8_t pendingPublisherFontsOverride = -1;
-
-  static constexpr const char* pageTurnLabels[] = {"", "1", "3", "6", "12"};
 
   std::string title = "Reader Menu";
   int currentPage = 0;

@@ -8,6 +8,7 @@
 #include "MappedInputManager.h"
 #include "OnOffOverride.h"
 #include "SdCardFontGlobals.h"
+#include "activities/SliderPickerActivity.h"
 #include "activities/settings/SettingActionDispatch.h"
 #include "components/UITheme.h"
 #include "components/themes/HeaderLayout.h"
@@ -137,8 +138,8 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   if (hasPrintedPages) {
     navigationItems.push_back(SettingInfo::Action(StrId::STR_GO_TO_PRINTED_PAGE, SettingAction::None));
   }
-  // Auto page turn: ACTION type with custom cycling in onActionSelected
-  navigationItems.push_back(SettingInfo::Action(StrId::STR_AUTO_TURN_PAGES_PER_MIN, SettingAction::None));
+  // Auto page turn: ACTION type with its own picker in onActionSelected
+  navigationItems.push_back(SettingInfo::Action(StrId::STR_AUTO_TURN_SECONDS, SettingAction::None));
   navigationItems.push_back(SettingInfo::Action(StrId::STR_STAR_PAGE, SettingAction::None));
   if (hasStarredPages) {
     navigationItems.push_back(SettingInfo::Action(StrId::STR_STARRED_PAGES, SettingAction::None));
@@ -472,7 +473,7 @@ EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId
       return MenuAction::FOOTNOTES;
     case StrId::STR_DICTIONARY:
       return MenuAction::DICTIONARY;
-    case StrId::STR_AUTO_TURN_PAGES_PER_MIN:
+    case StrId::STR_AUTO_TURN_SECONDS:
       return MenuAction::AUTO_PAGE_TURN;
     case StrId::STR_EMBEDDED_STYLE:
       return MenuAction::EMBEDDED_STYLE;
@@ -513,7 +514,7 @@ void EpubReaderMenuActivity::finishWithAction(MenuAction action) {
   MenuResult payload{static_cast<int>(action),
                      -1,
                      pendingOrientation,
-                     selectedPageTurnOption,
+                     autoTurnSeconds,
                      pendingEmbeddedStyleOverride,
                      pendingImageRenderingOverride,
                      pendingFontFamilyOverride,
@@ -535,13 +536,38 @@ void EpubReaderMenuActivity::finishWithAction(MenuAction action) {
   finish();
 }
 
+// Off, then every second from 5 to 120: the 4 at the bottom of the bar is never shown, the picker labels it Off. A page
+// of about 200 words takes some 50 s at an ordinary reading speed, and the old steps were 20 s and 60 s either side.
+void EpubReaderMenuActivity::openAutoTurnPicker() {
+  constexpr int kOff = 4;
+  constexpr int kMaxSeconds = 120;
+  SliderPickerActivity::Config config{.titleId = StrId::STR_AUTO_TURN_SECONDS,
+                                      .hintId = StrId::STR_SLIDER_STEP_HINT,
+                                      .minValue = kOff,
+                                      .maxValue = kMaxSeconds,
+                                      .initialValue = autoTurnSeconds != 0 ? autoTurnSeconds : SETTINGS.autoTurnSeconds,
+                                      .suffix = tr(STR_SECONDS_SUFFIX),
+                                      .zeroLabel = tr(STR_STATE_OFF)};
+  startActivityForResult(std::make_unique<SliderPickerActivity>(renderer, mappedInput, std::move(config)),
+                         [this](const ActivityResult& result) {
+                           if (!result.isCancelled) {
+                             const int seconds = std::get<PercentResult>(result.data).percent;
+                             autoTurnSeconds = seconds > kOff ? static_cast<uint8_t>(seconds) : 0;
+                             if (autoTurnSeconds != 0 && autoTurnSeconds != SETTINGS.autoTurnSeconds) {
+                               SETTINGS.autoTurnSeconds = autoTurnSeconds;
+                               SETTINGS.saveToFile();
+                             }
+                           }
+                           requestUpdate();
+                         });
+}
+
 void EpubReaderMenuActivity::onActionSelected(int index) {
   const auto& item = activeMenuItems()[index];
 
-  // Auto page turn cycles locally (not a DynamicEnum because labels are raw strings)
-  if (item.nameId == StrId::STR_AUTO_TURN_PAGES_PER_MIN) {
-    selectedPageTurnOption = (selectedPageTurnOption + 1) % 5;
-    requestUpdate();
+  // Auto page turn stays in the menu: the reader starts it when the menu closes.
+  if (item.nameId == StrId::STR_AUTO_TURN_SECONDS) {
+    openAutoTurnPicker();
     return;
   }
 
@@ -559,7 +585,7 @@ void EpubReaderMenuActivity::onBackPressed() {
   MenuResult payload{-1,
                      -1,
                      pendingOrientation,
-                     selectedPageTurnOption,
+                     autoTurnSeconds,
                      pendingEmbeddedStyleOverride,
                      pendingImageRenderingOverride,
                      pendingFontFamilyOverride,
@@ -586,9 +612,9 @@ std::string EpubReaderMenuActivity::getItemValueString(int index) const {
   const auto& item = activeMenuItems()[index];
 
   // Auto page turn: custom labels
-  if (item.nameId == StrId::STR_AUTO_TURN_PAGES_PER_MIN) {
-    if (selectedPageTurnOption == 0) return std::string(tr(STR_STATE_OFF));
-    return std::string(pageTurnLabels[selectedPageTurnOption]);
+  if (item.nameId == StrId::STR_AUTO_TURN_SECONDS) {
+    if (autoTurnSeconds == 0) return std::string(tr(STR_STATE_OFF));
+    return std::to_string(autoTurnSeconds) + tr(STR_SECONDS_SUFFIX);
   }
 
   // Star page: reflect current page's star state

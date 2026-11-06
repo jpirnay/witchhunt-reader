@@ -130,9 +130,6 @@ std::optional<int> parsePrintedPageLabel(const std::string& label) {
   }
   return value;
 }
-// pages per minute, first item is 1 to prevent division by zero if accessed
-constexpr int PAGE_TURN_LABELS[] = {1, 1, 3, 6, 12};
-
 // Pre-render of the next page within the current chapter only runs when heap is healthy: PreRenderGate has the
 // floor, from the costs the passes measure (preRenderCostMax_).
 
@@ -3107,15 +3104,14 @@ void EpubReaderActivity::stopAutomaticPageTurn() {
   section.reset();
 }
 
-void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption) {
-  if (selectedPageTurnOption == 0 || selectedPageTurnOption >= std::size(PAGE_TURN_LABELS)) {
+void EpubReaderActivity::toggleAutoPageTurn(const uint8_t seconds) {
+  if (seconds == 0) {
     stopAutomaticPageTurn();
     return;
   }
 
   lastPageTurnTime = millis();
-  // calculates page turn duration by dividing by number of pages
-  pageTurnDuration = (1UL * 60 * 1000) / PAGE_TURN_LABELS[selectedPageTurnOption];
+  pageTurnDuration = seconds * 1000UL;
   automaticPageTurnActive = true;
 
   // Reset cached section when automatic page turn adds a forced status item band.
@@ -6663,7 +6659,7 @@ void EpubReaderActivity::renderStatusBar() const {
   std::string title;
 
   if (automaticPageTurnActive) {
-    title = tr(STR_AUTO_TURN_ENABLED) + std::to_string(60 * 1000 / pageTurnDuration);
+    title = tr(STR_AUTO_TURN_ENABLED) + std::to_string(pageTurnDuration / 1000) + tr(STR_SECONDS_SUFFIX);
   } else if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::CHAPTER_TITLE) {
     title = chapterTitle();
   } else if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::BOOK_TITLE) {
@@ -7467,7 +7463,7 @@ void EpubReaderActivity::openReaderMenu() {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);
         applyTextDarkness(menu.textDarkness);
-        toggleAutoPageTurn(menu.pageTurnOption);
+        toggleAutoPageTurn(menu.autoTurnSeconds);
         if (applyBookReaderOverrides(
                 menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
                 menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,
