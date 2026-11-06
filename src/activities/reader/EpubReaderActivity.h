@@ -472,6 +472,9 @@ class EpubReaderActivity final : public Activity {
   // Page last drawn by the SectionBuilding pass (-1 = none yet / popup showing). Stops the
   // pass redrawing the same page every idle tick.
   int buildDisplayedPage_ = -1;
+  // The page stepOnScreenImagesDuringBuild() last looked at: one look a page, not one a tick.
+  int buildImagesLookedSpine_ = -1;
+  int buildImagesLookedPage_ = -1;
   // True once the "Indexing" popup has been drawn for the current pending page, so the pass
   // doesn't re-flush it every tick. Cleared whenever a real page is drawn or the build ends.
   bool buildingPopupShown_ = false;
@@ -796,6 +799,13 @@ class EpubReaderActivity final : public Activity {
   // it found in its window (LaneBeforeBuild::Window): Dirty when it did a page's worth of work this
   // tick (the caller then yields to the loop); Background-B may borrow only on Clean or Closed.
   LaneBeforeBuild::Window stepImageWarmLocked();
+  // The priority pass: decodes the images of the page on screen while its chapter is still building, ahead of the
+  // build's next slice. True when it did, and the tick was spent; false leaves the tick to the build.
+  bool stepOnScreenImagesDuringBuild();
+  // A decode would be cut short or hold up a press: a gesture is in flight, or a page has only just moved.
+  bool imageLaneMustWait() const;
+  // Whether a decode here also writes the page's grey caches.
+  bool imageLaneWarmsGrayscale() const;
   // warmPageForImageLane() with the buffer taken back from Background-B first, if B holds it. False
   // when there was no buffer to lend, so nothing was done.
   bool warmPageTakingBuffer(const Page& page, int spine, int pageIndex, bool onScreen, bool warmGrayscale);

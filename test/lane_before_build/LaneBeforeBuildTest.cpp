@@ -7,6 +7,7 @@ namespace {
 
 using LaneBeforeBuild::buildMayBorrow;
 using LaneBeforeBuild::Decode;
+using LaneBeforeBuild::decodeOnScreenDuringBuild;
 using LaneBeforeBuild::decodeWhileBuilding;
 using LaneBeforeBuild::kMaxYields;
 using LaneBeforeBuild::Window;
@@ -22,6 +23,20 @@ TEST(LaneBeforeBuild, ADecodeTakesTheBufferFromTheBuildWhileItHasYieldsLeft) {
   for (uint8_t yields = 0; yields < kMaxYields; ++yields) {
     EXPECT_EQ(Decode::TakeFromBuild, decodeWhileBuilding(yields)) << static_cast<int>(yields);
   }
+}
+
+TEST(LaneBeforeBuild, ThePagesOnScreenPicturesGoAheadOfItsChapterBuild) {
+  EXPECT_TRUE(decodeOnScreenDuringBuild(true, true, true, false));
+}
+
+TEST(LaneBeforeBuild, ThePriorityPassNeedsABufferOfItsOwn) {
+  EXPECT_FALSE(decodeOnScreenDuringBuild(/*keepsSecondaryBuffer=*/false, true, true, false));  // X3, X4: heap is shared
+  EXPECT_FALSE(decodeOnScreenDuringBuild(true, /*bufferFree=*/false, true, false));            // the build holds it
+}
+
+TEST(LaneBeforeBuild, ThePriorityPassLooksOnceAtAPageThatIsOnScreen) {
+  EXPECT_FALSE(decodeOnScreenDuringBuild(true, true, /*pageOnScreen=*/false, false));  // the popup is still up
+  EXPECT_FALSE(decodeOnScreenDuringBuild(true, true, true, /*alreadyLooked=*/true));
 }
 
 TEST(LaneBeforeBuild, PastItsYieldsTheBuildKeepsTheBuffer) {

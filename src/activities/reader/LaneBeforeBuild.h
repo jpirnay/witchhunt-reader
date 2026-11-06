@@ -30,6 +30,15 @@
 // nothing about that. On a chapter's last pages, where B builds through the turns, two pictures would otherwise hand
 // the next chapter to the "Indexing" popup, which building through exists to prevent.
 //
+// Background-C is the other build a picture can wait behind. It lays out the chapter being read, so its page can be on
+// screen with a placeholder for the rest of the build, and the lane cannot run until that is over: X4 Pro, 2026-11-06,
+// the header of a 48 KB chapter decoded in under 2 s, but only after waiting 6 s for the pages behind it. So a priority
+// pass looks once at each page on screen and decodes its images between two slices of the build.
+//
+// Only where the buffer the decode borrows is a block of its own (HalCapabilities::keepsSecondaryBuffer). On the X3 and
+// X4 the decode would share the heap with the parse, and a try that fails counts towards giving the picture up, so a
+// page that now waits for the build would risk keeping its placeholder for good.
+//
 // The decisions alone, apart from the reader, so the host can test them.
 namespace LaneBeforeBuild {
 
@@ -60,6 +69,12 @@ enum class Decode : uint8_t {
 
 constexpr Decode decodeWhileBuilding(const uint8_t yieldsSoFar) {
   return yieldsSoFar < kMaxYields ? Decode::TakeFromBuild : Decode::AfterBuild;
+}
+
+// Whether the priority pass looks at the page on screen during Background-C's build.
+constexpr bool decodeOnScreenDuringBuild(const bool keepsSecondaryBuffer, const bool bufferFree,
+                                         const bool pageOnScreen, const bool alreadyLooked) {
+  return keepsSecondaryBuffer && bufferFree && pageOnScreen && !alreadyLooked;
 }
 
 }  // namespace LaneBeforeBuild

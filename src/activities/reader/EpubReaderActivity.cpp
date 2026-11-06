@@ -1230,7 +1230,8 @@ void EpubReaderActivity::serviceBackgroundWork() {
     currentSectionBuildActive = section && section->hasActiveBuild();
   }
   if (currentSectionBuildActive) {
-    stepCurrentSectionBuild();
+    // A picture on the page being read outranks the pages after it (LaneBeforeBuild).
+    if (!stepOnScreenImagesDuringBuild()) stepCurrentSectionBuild();
     return;
   }
   // Room in the glyph store comes before Background-B's look-ahead; the section the reader waits on and the AA pass
@@ -2010,6 +2011,43 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
   }
 }
 
+bool EpubReaderActivity::imageLaneMustWait() const {
+  const unsigned long lastActivityMs = std::max({lastPageTurnTime, lastPageOnScreenMs_, imageWarmPreemptedMs_});
+  return CooperativeAbort::shouldAbortLongTask() || buttonEvents.isGestureInFlight() ||
+         millis() - lastActivityMs < IMAGE_LANE_SETTLE_MS;
+}
+
+bool EpubReaderActivity::imageLaneWarmsGrayscale() const {
+  return getEffectiveTextAntiAliasing() && (!secondaryBufferDegraded_ || backgroundBorrowActive_);
+}
+
+bool EpubReaderActivity::stepOnScreenImagesDuringBuild() {
+  if (RenderLock::peek()) return false;
+  RenderLock lock;
+  // As for a build slice: not during a refresh, and the decode must not run under another one.
+  if (!section || !section->hasActiveBuild() || renderer.isRefreshPending() || imageProcessingActive_) return false;
+  const int pageIndex = section->currentPage;
+  const bool looked = buildImagesLookedSpine_ == currentSpineIndex && buildImagesLookedPage_ == pageIndex;
+  const bool bufferFree = !secondaryBorrowed_ && !backgroundBorrowActive_ && renderer.hasSecondaryBuffer();
+  if (!LaneBeforeBuild::decodeOnScreenDuringBuild(HalCapabilities::keepsSecondaryBuffer(), bufferFree,
+                                                  buildDisplayedPage_ == pageIndex, looked) ||
+      imageLaneMustWait()) {
+    return false;
+  }
+  buildImagesLookedSpine_ = currentSpineIndex;
+  buildImagesLookedPage_ = pageIndex;
+  const auto page = section->loadPageFromActiveBuild(static_cast<uint16_t>(pageIndex));
+  const bool warmGrayscale = imageLaneWarmsGrayscale();
+  if (!page || !page->hasUncachedImages(/*forceLoad=*/true, /*monochromeOutput=*/true, warmGrayscale)) return false;
+  warmPageForImageLane(*page, currentSpineIndex, pageIndex, /*onScreen=*/true, warmGrayscale);
+  // The lane asked for a redraw, but the build's pass draws a page only once: this is what lets it draw this one again,
+  // now from its caches.
+  if (!page->hasUncachedImages(/*forceLoad=*/true, /*monochromeOutput=*/true, /*warmGrayscale=*/false)) {
+    buildDisplayedPage_ = -1;
+  }
+  return true;
+}
+
 LaneBeforeBuild::Window EpubReaderActivity::stepImageWarmLocked() {
   using LaneBeforeBuild::Window;
   if (!section || section->hasActiveBuild() || section->pageCount == 0) return Window::Closed;
@@ -2035,12 +2073,7 @@ LaneBeforeBuild::Window EpubReaderActivity::stepImageWarmLocked() {
   // (~4.5 s) lost to the page turn four times, once within ~100 ms of finishing; the second
   // that settle sat on was the difference. An abort costs the turn a few ms (the decoders poll
   // per band and every few KB of the index pass), so starting early is cheap.
-  const unsigned long now = millis();
-  const unsigned long lastActivityMs = std::max({lastPageTurnTime, lastPageOnScreenMs_, imageWarmPreemptedMs_});
-  if (CooperativeAbort::shouldAbortLongTask() || buttonEvents.isGestureInFlight() ||
-      now - lastActivityMs < IMAGE_LANE_SETTLE_MS) {
-    return Window::Unknown;
-  }
+  if (imageLaneMustWait()) return Window::Unknown;
 
   // Large images are warmed too (forceLoad), whatever the placeholder setting says: that setting
   // exists because a decode on a page turn is slow, and this is the decode nobody waits for.
@@ -2049,7 +2082,7 @@ LaneBeforeBuild::Window EpubReaderActivity::stepImageWarmLocked() {
   // when the reader asked for it.
   // B's borrow degrades the buffer only until B gives it back: the window is looked at as its pages will be drawn
   // then, grey caches included, so a window found clean while B builds stays clean after it.
-  const bool warmGrayscale = getEffectiveTextAntiAliasing() && (!secondaryBufferDegraded_ || backgroundBorrowActive_);
+  const bool warmGrayscale = imageLaneWarmsGrayscale();
 
   // The window, in reading order: the page on screen first (a placeholder there is what the
   // reader is looking at), then the next kImageWarmLookahead pages of this section. Loading a

@@ -59,8 +59,10 @@ navigated to and have nothing to read yet — so it has the highest priority.
 ```
 runDeferredGrayscalePass();                 // 1. AA of the page just shown (visible quality)
 if (pendingGrayscale_.active) return;        //    AA still owed → nothing else runs
-if (section && section->hasActiveBuild())    // 2. Background C: build the section you're waiting on
-  { stepCurrentSectionBuild(); return; }
+if (section && section->hasActiveBuild()) {  // 2. the page on screen's images, then Background C
+  if (!stepOnScreenImagesDuringBuild()) stepCurrentSectionBuild();
+  return;
+}
 stepBackgroundSectionBuild();                // 3. Background A re-arm, the image lane, then Background B
 ```
 
@@ -168,6 +170,15 @@ before B; one page per tick.
 - **After a warm:** if the page on screen showed those images as placeholders, it is redrawn from
   the cache unless input is waiting. If the warmed page is the one after the page on screen, the
   lane arms A (see A, *Scheduled*).
+
+### Priority pass — the page on screen during a C build
+
+The lane itself is closed while C builds, so a page drawn mid-build would keep its placeholder until the whole chapter
+is laid out. `stepOnScreenImagesDuringBuild()` closes that gap: once per page on screen it reads the page from the live
+build (`loadPageFromActiveBuild`) and, if an image has no cache, decodes it between two slices through
+`warmPageForImageLane()`. The redraw comes from the build's own pass (`displayBuildPage`), which draws cached images.
+It keeps the lane's settle and only runs where the borrowed buffer is separate from the heap the parse uses
+(`HalCapabilities::keepsSecondaryBuffer()`): the X3 and X4 still wait for the build.
 
 ## B — next-section pre-build (look-ahead)
 
