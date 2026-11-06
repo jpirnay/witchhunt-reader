@@ -6,6 +6,8 @@
 #include <OtShaper.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <ostream>
 #include <string>
@@ -17,6 +19,7 @@
 #include "ExpectedGlyphRuns.h"
 #include "ExpectedShaping.h"
 #include "FixtureShapingFace.h"
+#include "IndicScripts.h"
 #include "IndicShaper.h"
 #include "OtShaperTestHelpers.h"
 #include "TextShaping.h"
@@ -42,6 +45,7 @@ using ottest::StoredGlyph;
 constexpr const char* kKa = "\xE0\xA4\x95";                     // क
 constexpr const char* kMa = "\xE0\xA4\xAE";                     // म
 constexpr const char* kLa = "\xE0\xA4\xB2";                     // ल
+constexpr const char* kRa = "\xE0\xA4\xB0";                     // र
 constexpr const char* kKi = "\xE0\xA4\x95\xE0\xA4\xBF";         // कि
 constexpr const char* kIKa = "\xE0\xA4\xBF\xE0\xA4\x95";        // ि क: कि in visual order
 constexpr const char* kBengaliKi = "\xE0\xA6\x95\xE0\xA6\xBF";  // কি
@@ -164,10 +168,11 @@ std::vector<StoredGlyph> storedOf(const ot::Buffer& buffer) {
   return out;
 }
 
-// What ot::shape gives for before + text + after with the neighbours as context (RunContext{before, after}), on
-// `face` in the default language at the fixtures' size; empty when it fails.
+// What ot::shape gives for before + text + after with the neighbours as context (RunContext{before, after, partial}),
+// on `face` in the default language at `ppem26_6`; empty when it fails.
 std::vector<StoredGlyph> shapedWithContext(FixtureShapingFace& face, const ot::Script script, const std::string& before,
-                                           const std::string& text, const std::string& after) {
+                                           const std::string& text, const std::string& after,
+                                           const bool partial = false, const uint32_t ppem26_6 = kFixturePpem26_6) {
   const ot::Plan* plan = face.plan(script, ot::languageTagsFor(""));
   const ot::Face* shaping = face.current();
   if (plan == nullptr || shaping == nullptr) return {};
@@ -176,12 +181,24 @@ std::vector<StoredGlyph> shapedWithContext(FixtureShapingFace& face, const ot::S
   const std::vector<uint32_t> cps = ottest::utf32((before + text + after).c_str());
   ottest::BoundBuffer bound(256);
   ot::Scale scale;
-  scale.set(kFixturePpem26_6, (kFixturePpem26_6 + 32) >> 6, shaping->upem());
+  scale.set(static_cast<int32_t>(ppem26_6), (ppem26_6 + 32) >> 6, shaping->upem());
   if (!ot::shape(*shaping, scale, *plan, cps.data(), static_cast<unsigned>(cps.size()), bound.buffer,
-                 ot::RunContext{contextBefore, contextAfter})) {
+                 ot::RunContext{contextBefore, contextAfter, partial})) {
     return {};
   }
   return storedOf(bound.buffer);
+}
+
+// The code points of `text`'s longest syllable (indic::syllableBreakAllowed's breaks): the least a call takes it in.
+unsigned longestSyllable(const std::string& text) {
+  const std::vector<uint32_t> cps = ottest::utf32(text.c_str());
+  unsigned longest = 0;
+  unsigned current = 0;
+  for (size_t i = 0; i < cps.size(); ++i) {
+    current = i > 0 && indic::syllableBreakAllowed(cps[i - 1], cps[i]) ? 1 : current + 1;
+    longest = std::max(longest, current);
+  }
+  return longest;
 }
 
 // The build's heap block released before and after a test that counts it.
@@ -368,6 +385,92 @@ TEST(IndicShaper, ALongRunKeepsItsGluedNeighbourInItsFirstPiece) {
   }
 }
 
+TEST(IndicShaper, ALongRunKeepsItsGluedNeighbourInItsLastPiece) {
+  FixtureShapingFace face(layoutFont("Tamil"));
+  // பொன்னியின்செல்வன் then கக, with கே glued after: the last KA is kerned against the neighbour's pre-base e, in
+  // whichever piece it falls, and none of the neighbour's glyphs is output.
+  const std::string word = std::string(kTamilShaping[6].utf8) + kTamilShaping[7].utf8 + kTamilKa + kTamilKa;
+  Request request = on(&face);
+  request.after = kTamilKe;
+  const Shaped whole = shape(word, request, 64);
+  const Shaped alone = shape(word, on(&face), 64);
+  ASSERT_EQ(Outcome::Formed, whole.outcome);
+  ASSERT_EQ(Outcome::Formed, alone.outcome);
+  ASSERT_EQ(1u, whole.pieces.size());
+  ASSERT_EQ(1u, alone.pieces.size());
+  EXPECT_NE(alone.pieces[0].glyphs, whole.pieces[0].glyphs);
+  EXPECT_EQ(shapedWithContext(face, ot::Script::Tamil, "", word, kTamilKe), whole.pieces[0].glyphs);
+  // From 6 code points the last piece, க, holds the syllable before it (ன்க) and the neighbour's (கே) as context. A
+  // smaller call falls back to one code point of context, as upstream's loop does, and the kerning goes with it.
+  const unsigned length = static_cast<unsigned>(ottest::utf32(word.c_str()).size());
+  for (unsigned n = 6; n < length; ++n) {
+    const Shaped at = shape(word, request, n);
+    ASSERT_EQ(Outcome::Formed, at.outcome) << n;
+    ASSERT_EQ(1u, at.pieces.size()) << n;
+    EXPECT_EQ(whole.pieces[0].glyphs, at.pieces[0].glyphs) << "a call of " << n << " code points";
+  }
+}
+
+TEST(IndicShaper, TheNeighboursContextIsItsNearestSyllable) {
+  {
+    // Before: the neighbour's last syllable, ক, whatever comes before it in the neighbour.
+    FixtureShapingFace face(layoutFont("Bengali"));
+    const std::string kaaKa = std::string("\xE0\xA6\x95\xE0\xA6\xBE") + kBengaliKa;  // কাক: two syllables of Bengali
+    for (const std::string& before : {std::string("(") + kBengaliKa, kaaKa}) {
+      Request request = on(&face);
+      request.before = before;
+      const Shaped glued = shape(kBengaliKe, request);
+      ASSERT_EQ(Outcome::Formed, glued.outcome) << before;
+      ASSERT_EQ(1u, glued.pieces.size()) << before;
+      EXPECT_EQ(shapedWithContext(face, ot::Script::Bengali, kBengaliKa, kBengaliKe, ""), glued.pieces[0].glyphs)
+          << before;
+    }
+  }
+  {
+    // After: the neighbour's first syllable, கே, whatever follows it in the neighbour.
+    FixtureShapingFace face(layoutFont("Tamil"));
+    for (const std::string& after : {std::string(kTamilKe) + ")", std::string(kTamilKe) + kTamilKa}) {
+      Request request = on(&face);
+      request.after = after;
+      const Shaped glued = shape(kTamilKa, request);
+      ASSERT_EQ(Outcome::Formed, glued.outcome) << after;
+      ASSERT_EQ(1u, glued.pieces.size()) << after;
+      EXPECT_EQ(shapedWithContext(face, ot::Script::Tamil, "", kTamilKa, kTamilKe), glued.pieces[0].glyphs) << after;
+    }
+  }
+}
+
+TEST(IndicShaper, ANeighbourSyllableLongerThanTheContextIsCutNearTheToken) {
+  FixtureShapingFace face(layoutFont("Devanagari"));
+  // क्क्क्क्क: one syllable of 9 code points. Before the token the 8 nearest it are context (ending in KA, so RA stays
+  // a letter; the 8 farthest would end in a virama and take RA into a conjunct), after it the 8 first; either is cut,
+  // so partial.
+  const std::string kaKaKa =
+      "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\x95"
+      "\xE0\xA5\x8D\xE0\xA4\x95";
+  ASSERT_EQ(9u, longestSyllable(kaKaKa));
+  ASSERT_EQ(9u, ottest::utf32(kaKaKa.c_str()).size());
+  const std::string nearestBefore = kaKaKa.substr(3);                  // ्क्क्क्क
+  const std::string firstAfter = kaKaKa.substr(0, kaKaKa.size() - 3);  // क्क्क्क्
+  {
+    Request request = on(&face);
+    request.before = kaKaKa;
+    const Shaped glued = shape(kRa, request);
+    ASSERT_EQ(Outcome::Formed, glued.outcome);
+    ASSERT_EQ(1u, glued.pieces.size());
+    EXPECT_EQ(shapedWithContext(face, ot::Script::Devanagari, nearestBefore, kRa, "", true), glued.pieces[0].glyphs);
+    EXPECT_NE(shapedWithContext(face, ot::Script::Devanagari, firstAfter, kRa, "", true), glued.pieces[0].glyphs);
+  }
+  {
+    Request request = on(&face);
+    request.after = kaKaKa;
+    const Shaped glued = shape(kRa, request);
+    ASSERT_EQ(Outcome::Formed, glued.outcome);
+    ASSERT_EQ(1u, glued.pieces.size());
+    EXPECT_EQ(shapedWithContext(face, ot::Script::Devanagari, "", kRa, firstAfter, true), glued.pieces[0].glyphs);
+  }
+}
+
 TEST(IndicShaper, AGluedNeighbourIsContextNotOutput) {
   FixtureShapingFace face(layoutFont("Devanagari"));
   Request request = on(&face);
@@ -430,10 +533,29 @@ TEST(IndicShaper, AnOffsetPastAByteIsDegradedNotClamped) {
   FixtureShapingFace face(layoutFont("Bengali"));
   const ExpectedShaping& word = kBengaliShaping[5];
   ASSERT_EQ(-13, word.glyphs[2].dx);  // -156 px at 12 times the size: past an int8_t
-  RecordingSink sink;
-  CallMemory memory(nullptr, std::strlen(word.utf8));
-  EXPECT_EQ(Outcome::Degraded,
-            IndicShaper::shapeToken(word.utf8, on(&face, word.language, 12 * kFixturePpem26_6), memory, sink));
+  {
+    RecordingSink sink;
+    CallMemory memory(nullptr, std::strlen(word.utf8));
+    EXPECT_EQ(Outcome::Degraded,
+              IndicShaper::shapeToken(word.utf8, on(&face, word.language, 12 * kFixturePpem26_6), memory, sink));
+  }
+  // The cause: at 12 times the size every advance still fits its field, and an offset does not.
+  const std::vector<StoredGlyph> large =
+      shapedWithContext(face, ot::Script::Bengali, "", word.utf8, "", false, 12 * kFixturePpem26_6);
+  ASSERT_EQ(word.count, large.size());
+  bool offsetPast = false;
+  for (const StoredGlyph& glyph : large) {
+    EXPECT_GE(glyph.advance12_4, glyph_run::kMinAdvance);
+    EXPECT_LE(glyph.advance12_4, glyph_run::kMaxAdvance);
+    offsetPast = offsetPast || glyph.dx < INT8_MIN || glyph.dx > INT8_MAX || glyph.dy < INT8_MIN || glyph.dy > INT8_MAX;
+  }
+  EXPECT_TRUE(offsetPast);
+  // The control: at 4 times the size every offset fits, and the word is formed as ot::shape gives it.
+  const Shaped fits = shape(word.utf8, on(&face, word.language, 4 * kFixturePpem26_6));
+  ASSERT_EQ(Outcome::Formed, fits.outcome);
+  ASSERT_EQ(1u, fits.pieces.size());
+  EXPECT_EQ(shapedWithContext(face, ot::Script::Bengali, "", word.utf8, "", false, 4 * kFixturePpem26_6),
+            fits.pieces[0].glyphs);
 }
 
 TEST(IndicShaper, ASinkWithoutRoomIsDegraded) {
@@ -461,6 +583,46 @@ TEST(IndicShaper, ACallWithoutMemoryIsDegraded) {
   EXPECT_EQ(used, arena.used());
   EXPECT_FALSE(TextShaping::buildMemoryHeld());
   EXPECT_EQ(0, sink.calls);
+}
+
+TEST(IndicShaper, AFullArenaFallsBackToTheHeapBlockQuietly) {
+  BuildMemoryScope scope;
+  FixtureShapingFace face(layoutFont("Devanagari"));
+  BuildArena arena(4096);
+  ASSERT_TRUE(arena.valid());
+  ASSERT_NE(nullptr, arena.alloc(arena.capacity() - 64, 1));
+  const size_t used = arena.used();
+  {
+    RecordingSink sink;
+    CallMemory memory(&arena, std::strlen(kKi));
+    ASSERT_TRUE(memory.valid());
+    EXPECT_TRUE(TextShaping::buildMemoryHeld());  // the build's heap block serves the call
+    EXPECT_EQ(used, arena.used());
+    EXPECT_EQ(Outcome::Formed, IndicShaper::shapeToken(kKi, on(&face), memory, sink));
+  }
+  EXPECT_EQ(0u, arena.failedAllocSize());  // the fallback leaves no refusal in the arena's own diagnostics
+}
+
+TEST(IndicShaper, ASecondCallWhileTheFirstLivesIsRefused) {
+  BuildMemoryScope scope;
+  FixtureShapingFace face(layoutFont("Devanagari"));
+  {
+    CallMemory first(nullptr, std::strlen(kKi));
+    ASSERT_TRUE(first.valid());
+    {
+      CallMemory second(nullptr, std::strlen(kKi));  // the build's heap block is the first's
+      EXPECT_FALSE(second.valid());
+      RecordingSink sink;
+      EXPECT_EQ(Outcome::Degraded, IndicShaper::shapeToken(kKi, on(&face), second, sink));
+      EXPECT_EQ(0, sink.calls);
+    }
+    RecordingSink sink;
+    EXPECT_EQ(Outcome::Formed, IndicShaper::shapeToken(kKi, on(&face), first, sink));
+    ASSERT_EQ(1u, sink.pieces.size());
+    EXPECT_EQ(2u, sink.pieces[0].glyphs.size());
+  }
+  CallMemory next(nullptr, std::strlen(kKi));  // given back when the first ended
+  EXPECT_TRUE(next.valid());
 }
 
 TEST(IndicShaper, TheCallsBlockIsTheArenasForTheCallAlone) {

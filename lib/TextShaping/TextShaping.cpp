@@ -67,13 +67,13 @@ namespace {
 std::unique_ptr<uint8_t[]> heapBlock;
 size_t heapBlockBytes = 0;
 bool heapBlockRefusalLogged = false;  // logged once until releaseBuildMemory()
+bool heapBlockLent = false;           // a live CallMemory holds it: a second would alias it
 
 // A block grows by at least this much, so a build's tokens of rising length do not free and allocate at each one.
 constexpr size_t kHeapBlockStep = 512;
 
-}  // namespace
-
-void* buildHeapBlock(const size_t bytes) {
+// The block, made or grown to `bytes`: null when there is no room.
+void* heapBlockOf(const size_t bytes) {
   if (heapBlock && heapBlockBytes >= bytes) return heapBlock.get();
   // The smaller block goes first, so the larger one can take its room.
   heapBlock.reset();
@@ -93,6 +93,20 @@ void* buildHeapBlock(const size_t bytes) {
   heapBlockBytes = grown;
   return heapBlock.get();
 }
+
+}  // namespace
+
+void* buildHeapBlock(const size_t bytes) {
+  if (heapBlockLent) {
+    LOG_ERR("SHP", "The shaping block is lent to a call still in progress: this one is laid out unshaped");
+    return nullptr;
+  }
+  void* const block = heapBlockOf(bytes);
+  heapBlockLent = block != nullptr;
+  return block;
+}
+
+void returnBuildHeapBlock() { heapBlockLent = false; }
 
 void releaseBuildMemory() {
   heapBlock.reset();

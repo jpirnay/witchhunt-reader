@@ -43,8 +43,10 @@ void releaseBuildMemory();
 bool buildMemoryHeld();  // for tests
 
 // The layer's own, for IndicShaper::CallMemory when the arena lends no room: the build's heap block of at least
-// `bytes`, made on first use and grown nothrow (the smaller one freed first), held until releaseBuildMemory(). Null,
-// logged once, when there is no room. Builds and the dictionary's pages run under RenderLock, one call at a time.
+// `bytes`, made on first use and grown nothrow (the smaller one freed first), held until releaseBuildMemory(). Lent to
+// one call at a time: null while it is lent, until returnBuildHeapBlock(). Null, logged once, when there is no room.
+// Builds and the dictionary's pages run under RenderLock, one call at a time.
 void* buildHeapBlock(size_t bytes);
+void returnBuildHeapBlock();
 
 }  // namespace TextShaping

@@ -168,13 +168,12 @@ Context firstSyllable(const std::string_view text, const indic::ScriptInfo& scri
 
 enum class Attempt : uint8_t { Shaped, TooLong, Failed };
 
-// One Glyphs run into `sink`: cps[before, count - after) is the run, with context ahead and behind (`cut`: a context
-// is part of a syllable). Shaped whole; when that is past the buffer's storage, upstream's piecewise loop shapes it
-// between syllables. The plan and the face are asked again before each ot::shape: a plan is valid until the next
-// plan() on its face, and a face's mapping can move.
+// One Glyphs run into `sink`: cps[before.count, count - after.count) is the run, with the contexts ahead and behind.
+// Shaped whole; when that is past the buffer's storage, upstream's piecewise loop shapes it between syllables. The plan
+// and the face are asked again before each ot::shape: a plan is valid until the next plan() on its face, and a face's
+// mapping can move.
 bool shapeRun(ShapingFace& face, const Request& request, const indic::ScriptInfo& script, const uint32_t* cps,
-              const unsigned count, const unsigned before, const unsigned after, const bool cut, ot::Buffer& buffer,
-              PieceSink& sink) {
+              const unsigned count, const Context& before, const Context& after, ot::Buffer& buffer, PieceSink& sink) {
   const auto otScript = static_cast<ot::Script>(indic::indexOf(script));
   const auto attempt = [&](const unsigned from, const unsigned length, const ot::RunContext& context) {
     const ot::Plan* const plan = face.plan(otScript, request.languageTags);
@@ -186,16 +185,17 @@ bool shapeRun(ShapingFace& face, const Request& request, const indic::ScriptInfo
     return buffer.successful ? Attempt::TooLong : Attempt::Failed;  // successful still set: past the storage
   };
 
-  const Attempt whole = attempt(0, count, ot::RunContext{before, after, cut});
+  const Attempt whole = attempt(0, count, ot::RunContext{before.count, after.count, before.cut || after.cut});
   if (whole != Attempt::TooLong) return whole == Attempt::Shaped && appendGlyphs(buffer, sink);
 
   // Upstream's piecewise loop: as many syllables as the buffer holds, or one when it holds fewer. Each piece shapes
   // with the syllable on either side as context, so word-start forms, lookahead rules and kerning across the split
   // match the whole run; when that does not fit, with one code point on either side, before, after, then none. The
   // run's edges are breaks, and a glued neighbour's syllable is the context across them.
-  const unsigned runEnd = count - after;
+  const unsigned runBegin = before.count;
+  const unsigned runEnd = count - after.count;
   const auto breakAt = [&](const unsigned i) {
-    return i == 0 || i == count || i == before || i == runEnd || indic::syllableBreakAllowed(cps[i - 1], cps[i]);
+    return i == 0 || i == count || i == runBegin || i == runEnd || indic::syllableBreakAllowed(cps[i - 1], cps[i]);
   };
   const auto prevBreak = [&](unsigned i) {
     do i--;
@@ -207,7 +207,7 @@ bool shapeRun(ShapingFace& face, const Request& request, const indic::ScriptInfo
     while (!breakAt(i));
     return i;
   };
-  for (unsigned begin = before; begin < runEnd;) {
+  for (unsigned begin = runBegin; begin < runEnd;) {
     const unsigned limit = ot::maxRunLength(buffer);
     const unsigned from = begin > 0 ? prevBreak(begin) : 0;
     unsigned end = nextBreak(begin);
@@ -225,8 +225,8 @@ bool shapeRun(ShapingFace& face, const Request& request, const indic::ScriptInfo
       const unsigned contextBefore = wantBefore == 2 ? begin - from : wantBefore;
       const unsigned contextAfter = wantAfter == 2 ? nextBreak(end) - end : wantAfter;
       // A context reaching into a cut neighbour's syllable is partial as well.
-      const bool partial =
-          wantBefore == 1 || wantAfter == 1 || (cut && (begin - contextBefore < before || end + contextAfter > runEnd));
+      const bool partial = wantBefore == 1 || wantAfter == 1 || (before.cut && begin - contextBefore < runBegin) ||
+                           (after.cut && end + contextAfter > runEnd);
       piece = attempt(begin - contextBefore, contextBefore + (end - begin) + contextAfter,
                       ot::RunContext{contextBefore, contextAfter, partial});
     }
@@ -236,25 +236,30 @@ bool shapeRun(ShapingFace& face, const Request& request, const indic::ScriptInfo
   return true;
 }
 
-// Run `r` of the token as a Glyphs piece's records: its code points, with the glued neighbours' syllables as context
-// when the run reaches the token's edge, shaped into `sink`.
-bool shapeGlyphs(const std::string_view text, const size_t r, const size_t runCount, const Request& request,
-                 CallMemory& memory, PieceSink& sink) {
-  const Run& run = memory.runs()[r];
-  uint32_t* const cps = memory.codepoints();
+// What a Glyphs run is shaped in: the call's code points (room for `room`) and its Buffer.
+struct RunMemory {
+  uint32_t* codepoints;
+  size_t room;
+  ot::Buffer& buffer;
+};
+
+// `run` of the token as a Glyphs piece's records: its code points, with the glued neighbours' syllables as context
+// when it is the token's first run from byte 0 (`first`) or its last to the end (`last`), shaped into `sink`.
+bool shapeGlyphs(const std::string_view text, const Run& run, const bool first, const bool last, const Request& request,
+                 const RunMemory& memory, PieceSink& sink) {
+  uint32_t* const cps = memory.codepoints;
   Context before;
-  if (r == 0 && run.begin == 0 && !request.before.empty()) before = lastSyllable(request.before, *run.script, cps);
+  if (first && run.begin == 0 && !request.before.empty()) before = lastSyllable(request.before, *run.script, cps);
   unsigned count = before.count;
   for (size_t pos = run.begin; pos < run.end;) {
-    if (count + kContextCodepoints >= memory.codepointRoom()) return false;
+    if (count + kContextCodepoints >= memory.room) return false;
     cps[count++] = TextShaping::decodeAt(text, pos);
   }
   Context after;
-  if (r + 1 == runCount && run.end == text.size() && !request.after.empty()) {
+  if (last && run.end == text.size() && !request.after.empty()) {
     after = firstSyllable(request.after, *run.script, cps + count);
   }
-  return shapeRun(*request.face, request, *run.script, cps, count + after.count, before.count, after.count,
-                  before.cut || after.cut, *memory.buffer(), sink);
+  return shapeRun(*request.face, request, *run.script, cps, count + after.count, before, after, memory.buffer, sink);
 }
 
 }  // namespace
@@ -306,7 +311,9 @@ CallMemory::CallMemory(BuildArena* const arena, const size_t tokenBytes, const u
   layOut(measure, sizes);
 
   uint8_t* block = nullptr;
-  if (arena != nullptr && arena->valid()) {
+  // Room checked first: a refused allocation would read in the arena's own log as its owner running out, where the
+  // heap block is the plan.
+  if (arena != nullptr && arena->valid() && arena->capacity() - arena->used() >= measure.bytes()) {
     block_ = arena->reserveBlock();
     block = static_cast<uint8_t*>(arena->alloc(measure.bytes(), 1));
     if (block != nullptr) {
@@ -315,7 +322,10 @@ CallMemory::CallMemory(BuildArena* const arena, const size_t tokenBytes, const u
       arena->release(block_);
     }
   }
-  if (block == nullptr) block = static_cast<uint8_t*>(TextShaping::buildHeapBlock(measure.bytes()));
+  if (block == nullptr) {
+    block = static_cast<uint8_t*>(TextShaping::buildHeapBlock(measure.bytes()));
+    heapBlock_ = block != nullptr;
+  }
   if (block == nullptr) return;
 
   Carver carve(block);
@@ -332,6 +342,7 @@ CallMemory::CallMemory(BuildArena* const arena, const size_t tokenBytes, const u
 
 CallMemory::~CallMemory() {
   if (buffer_ != nullptr) buffer_->~Buffer();
+  if (heapBlock_) TextShaping::returnBuildHeapBlock();
   if (arena_ != nullptr && !arena_->release(block_)) {
     LOG_ERR("SHP", "Shaping call block not the arena's newest; it stays held");
   }
@@ -341,8 +352,8 @@ bool CallMemory::valid() const { return buffer_ != nullptr; }
 
 Outcome shapeToken(const std::string_view text, const Request& request, CallMemory& memory, PieceSink& sink) {
   if (!holdsIndic(text)) return Outcome::Plain;
-  if (!memory.valid() || text.size() > memory.tokenBytes()) return Outcome::Degraded;
-  const auto size = static_cast<uint16_t>(text.size());  // tokenBytes() is at most UINT16_MAX
+  if (!memory.valid() || text.size() > memory.tokenBytes_) return Outcome::Degraded;
+  const auto size = static_cast<uint16_t>(text.size());  // tokenBytes_ is at most UINT16_MAX
   char* const form = memory.reorderBuffer();
   size_t formBytes = 0;
 
@@ -354,8 +365,9 @@ Outcome shapeToken(const std::string_view text, const Request& request, CallMemo
                                                                                             : Outcome::Degraded;
   }
 
-  Run* const runs = memory.runs();
+  Run* const runs = memory.runs_;
   const size_t runCount = scanRuns(text, runs);
+  const RunMemory runMemory{memory.codepoints_, memory.codepointRoom_, *memory.buffer_};
   // Text is written only once a form follows it or precedes it: a token whose every piece is Text writes nothing.
   uint16_t textFrom = 0;
   bool formed = false;
@@ -375,7 +387,7 @@ Outcome shapeToken(const std::string_view text, const Request& request, CallMemo
     formed = true;
     const bool written =
         mapped ? sink.beginPiece(PieceKind::Glyphs, run.begin, run.end) &&
-                     shapeGlyphs(text, r, runCount, request, memory, sink)
+                     shapeGlyphs(text, run, r == 0, r + 1 == runCount, request, runMemory, sink)
                : sink.beginPiece(PieceKind::Reordered, run.begin, run.end) && sink.addBytes(form, formBytes);
     if (!written) return Outcome::Degraded;
   }

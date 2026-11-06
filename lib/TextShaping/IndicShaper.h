@@ -58,10 +58,14 @@ constexpr unsigned kMaxRunCodepoints = 32;
 // The syllable of a glued neighbour, kept apart (deviation 7), that a token is shaped with as context, at most.
 constexpr unsigned kContextCodepoints = 8;
 
+struct Request;
+enum class Outcome : uint8_t;
+
 // The memory one token is shaped in: the Buffer, its storage (ot::Buffer::bytesFor(2 * runCodepoints + 16)), the
 // token's runs, its code points with their context and IndicReorder's form of it, in one block of `arena` for this call
 // alone, else in the build's heap block (made on first use, grown nothrow to the longest token, freed by
-// TextShaping::releaseBuildMemory()). Released before any glyph is looked up: LIFO with the TrueType miss scope.
+// TextShaping::releaseBuildMemory(); lent to one call at a time, so a second while it lives is invalid). Released
+// before any glyph is looked up: LIFO with the TrueType miss scope.
 class CallMemory {
  public:
   CallMemory(BuildArena* arena, size_t tokenBytes, unsigned runCodepoints = kMaxRunCodepoints);
@@ -70,22 +74,20 @@ class CallMemory {
   CallMemory& operator=(const CallMemory&) = delete;
   bool valid() const;
 
-  // The block's parts, for shapeToken; null and 0 when !valid().
-  size_t tokenBytes() const { return tokenBytes_; }     // the longest token the parts hold
-  ot::Buffer* buffer() const { return buffer_; }        // bound to its storage
-  Run* runs() const { return runs_; }                   // room for maxRuns(tokenBytes())
-  uint32_t* codepoints() const { return codepoints_; }  // room for codepointRoom()
-  size_t codepointRoom() const { return codepointRoom_; }
-  char* reorderBuffer() const { return reorder_; }  // IndicReorder's bounded form (3 * tokenBytes() + 1 bytes)
+  // IndicReorder's bounded form of the token: 3 * tokenBytes + 1 bytes; null and 0 when !valid().
+  char* reorderBuffer() const { return reorder_; }
   size_t reorderRoom() const { return reorderRoom_; }
 
  private:
+  friend Outcome shapeToken(std::string_view text, const Request& request, CallMemory& memory, PieceSink& sink);
+
   BuildArena* arena_ = nullptr;  // set when the block is the arena's
   BuildArena::Block block_;
-  size_t tokenBytes_ = 0;
+  bool heapBlock_ = false;  // the block is the build's heap block, lent to this call
+  size_t tokenBytes_ = 0;   // the longest token the parts hold
   ot::Buffer* buffer_ = nullptr;
-  Run* runs_ = nullptr;
-  uint32_t* codepoints_ = nullptr;
+  Run* runs_ = nullptr;             // room for maxRuns(tokenBytes_)
+  uint32_t* codepoints_ = nullptr;  // room for codepointRoom_: a run's, with the context on either side
   size_t codepointRoom_ = 0;
   char* reorder_ = nullptr;
   size_t reorderRoom_ = 0;
