@@ -86,6 +86,7 @@ struct Request {
   bool embeddedStyle = false;
   size_t inflatedSize = 0;     // the spine's uncompressed size; 0 when unknown
   bool cjkRepertoire = false;  // the book's language draws on the CJK repertoire (TypographyProfile::cjkRepertoire)
+  bool shapedScript = false;   // the book's language is written in a shaped script (TypographyProfile::shapedScript)
   bool trueTypeSet = false;    // a TrueType or CFF set is loaded (SdCardFontSystem::ttfLoaded)
   uint32_t freeHeap = 0;
   uint32_t contigHeap = 0;
@@ -93,7 +94,8 @@ struct Request {
 
 struct Admission {
   bool resident = false;
-  bool cjkTrueType = false;  // refused for what the book and its fonts are, whatever the heap
+  bool cjkTrueType = false;     // refused for what the book and its fonts are, whatever the heap
+  bool shapedTrueType = false;  // likewise
   uint32_t ringBytes = 0;
   uint32_t freeFloor = 0;
   uint32_t contigFloor = 0;
@@ -109,6 +111,9 @@ struct Admission {
 // the start, about 79 KB with a family in flash mode and 89 KB in SD mode, is more than the reading heap reaches, so
 // no floor would admit them safely. Borrowing from the start costs a chapter that would have finished in place the
 // indexing popup a borrowed build draws first (about 0.54 s, a 1.5 KB chapter with its glyphs stored).
+//
+// A book in a shaped script drawn in a TrueType set never builds in place either: an in-place build lends no arena, so
+// every shaping call and plan would take the heap.
 //
 // Every other book keeps the floors defined above: built-in and .cpfont fonts make no miss memory, and a Latin book's
 // single-slice chapters in two TrueType families built in place and finished, with the store empty and full.
@@ -148,7 +153,8 @@ constexpr Admission admitsResident(const Request& r) {
   const uint32_t extractContig = a.ringBytes + 8 * 1024;
   a.contigFloor = (parseContig > extractContig ? parseContig : extractContig) - kContigSlackBytes;
   a.cjkTrueType = r.cjkRepertoire && r.trueTypeSet;
-  a.resident = !a.cjkTrueType && r.freeHeap >= a.freeFloor && r.contigHeap >= a.contigFloor;
+  a.shapedTrueType = r.shapedScript && r.trueTypeSet;
+  a.resident = !a.cjkTrueType && !a.shapedTrueType && r.freeHeap >= a.freeFloor && r.contigHeap >= a.contigFloor;
   return a;
 }
 

@@ -41,6 +41,15 @@ bool isTraditionalChinese(const std::string& tag) {
   return hasSubtag(tag, "tw") || hasSubtag(tag, "hk") || hasSubtag(tag, "mo");
 }
 
+// The primary language subtags written in an Indic script.
+bool isIndicLanguage(const std::string& tag) {
+  for (const char* primary : {"hi", "mr", "ne", "sa", "kok", "mai", "bho", "awa", "mag", "raj",
+                              "bn", "as", "pa", "gu", "or",  "ta",  "te",  "kn",  "ml",  "si"}) {
+    if (hasPrimary(tag, primary)) return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 TypographyProfile TypographyProfile::forLanguage(const std::string& tag) {
@@ -48,6 +57,7 @@ TypographyProfile TypographyProfile::forLanguage(const std::string& tag) {
   TypographyProfile p;
   p.hyphenator = Hyphenator::forLanguage(tag);
   p.shapingLanguage = ot::languageTagsFor(tag.c_str());
+  p.shapedScript = isIndicLanguage(t);
 
   const bool chinese = hasPrimary(t, "zh") || hasPrimary(t, "lzh");
   if (chinese || hasPrimary(t, "ja")) {

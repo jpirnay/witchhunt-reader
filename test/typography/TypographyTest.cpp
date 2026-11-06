@@ -80,6 +80,17 @@ TEST(TypographyProfile, ChineseJapaneseAndKoreanAreWrittenWithTheCjkRepertoire) 
   }
 }
 
+TEST(TypographyProfile, TheIndicLanguagesAreShapedScripts) {
+  for (const char* tag : {"hi", "hi-IN", "mr", "bn-BD", "ta", "ml",  "si",  "KOK", "ne_NP", "pa", "gu",
+                          "or", "te",    "kn", "as",    "sa", "mai", "bho", "awa", "mag",   "raj"}) {
+    EXPECT_TRUE(TypographyProfile::forLanguage(tag).shapedScript) << tag;
+  }
+  // Urdu is written in the Arabic script, which is not shaped.
+  for (const char* tag : {"", "en", "he", "ja", "ur", "ar", "hin", "kok1"}) {
+    EXPECT_FALSE(TypographyProfile::forLanguage(tag).shapedScript) << tag;
+  }
+}
+
 TEST(CjkPunctuation, ClassesFollowJlreq) {
   EXPECT_EQ(CjkPunctuation::classOf(0x300C), Class::Opening);           // 「
   EXPECT_EQ(CjkPunctuation::classOf(0x300D), Class::Closing);           // 」

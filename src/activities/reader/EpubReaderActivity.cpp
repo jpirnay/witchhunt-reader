@@ -4277,7 +4277,9 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
   InPlaceBuildGate::Request request;
   request.embeddedStyle = embeddedStyle;
   request.inflatedSize = inflatedSize;
-  request.cjkRepertoire = TypographyProfile::forLanguage(epub->getLanguage()).cjkRepertoire;
+  const TypographyProfile profile = TypographyProfile::forLanguage(epub->getLanguage());
+  request.cjkRepertoire = profile.cjkRepertoire;
+  request.shapedScript = profile.shapedScript;
   request.trueTypeSet = sdFontSystem.ttfLoaded();
   request.freeHeap = esp_get_free_heap_size();
   request.contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
@@ -4285,11 +4287,12 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
   // One line per gate evaluation: the resident/released choice and the exact heap-vs-floor
   // arithmetic behind it. This is the first thing to check when a section build takes the wrong
   // path (a resident build starving on the inflate ring cascades into the released rebuild).
-  LOG_INF("ERS", "heapAllowsInPlaceBuild=%d css=%d cjkTtf=%d ring=%lu free=%lu(floor=%lu) contig=%lu(floor=%lu)",
+  LOG_INF("ERS",
+          "heapAllowsInPlaceBuild=%d css=%d cjkTtf=%d shapedTtf=%d ring=%lu free=%lu(floor=%lu) contig=%lu(floor=%lu)",
           admission.resident ? 1 : 0, embeddedStyle ? 1 : 0, admission.cjkTrueType ? 1 : 0,
-          static_cast<unsigned long>(admission.ringBytes), static_cast<unsigned long>(request.freeHeap),
-          static_cast<unsigned long>(admission.freeFloor), static_cast<unsigned long>(request.contigHeap),
-          static_cast<unsigned long>(admission.contigFloor));
+          admission.shapedTrueType ? 1 : 0, static_cast<unsigned long>(admission.ringBytes),
+          static_cast<unsigned long>(request.freeHeap), static_cast<unsigned long>(admission.freeFloor),
+          static_cast<unsigned long>(request.contigHeap), static_cast<unsigned long>(admission.contigFloor));
   // Also emit in the shared gate format so one `grep HEAP` collects every gate decision in a run.
   HEAP_GATE(embeddedStyle ? "inPlace_css" : "inPlace", admission.resident, request.freeHeap, admission.freeFloor,
             request.contigHeap, admission.contigFloor);
