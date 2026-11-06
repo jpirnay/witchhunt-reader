@@ -1,0 +1,353 @@
+BOOK title=मानव अधिकारों की सार्वभौम घोषणा lang=hi spine=2 toc=0 reliableToc=0
+SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=11 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.400 hfid=0 words=5
+   W x=34 s=1 z=100 t=मानव
+   W x=104 s=1 z=100 t=अधिकारों
+    WD t=अिधकारों
+   W x=221 s=1 z=100 t=की
+   W x=253 s=1 z=100 t=सार्वभौम
+   W x=362 s=1 z=100 t=घोषणा
+  LINE y=34 x=0 align=2 mult=1.200 hfid=0 words=1
+   W x=178 s=1 z=100 t=प्रस्तावना
+  LINE y=63 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=चूंकि
+    WD t=चूंिक
+   W x=73 s=0 z=100 t=मानव
+   W x=123 s=0 z=100 t=परिवार
+    WD t=पिरवार
+   W x=176 s=0 z=100 t=के
+   W x=201 s=0 z=100 t=सभी
+   W x=236 s=0 z=100 t=सदस्यों
+   W x=310 s=0 z=100 t=के
+   W x=335 s=0 z=100 t=जन्मजात
+   W x=403 s=0 z=100 t=गौरव
+   W x=445 s=0 z=100 t=और
+  LINE y=87 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=0 s=0 z=100 t=समान
+   W x=42 s=0 z=100 t=तथा
+   W x=71 s=0 z=100 t=अविच्छिन्न
+    WD t=अिविच्छन्न
+   W x=170 s=0 z=100 t=अधिकार
+    WD t=अिधकार
+   W x=225 s=0 z=100 t=की
+   W x=246 s=0 z=100 t=स्वीकृति
+    WD t=स्वीकृित
+   W x=318 s=0 z=100 t=ही
+   W x=340 s=0 z=100 t=विश्व-शान्ति,
+    WD t=िवश्व-शािन्त,
+  LINE y=111 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=न्याय
+   W x=55 s=0 z=100 t=और
+   W x=73 s=0 z=100 t=स्वतन्त्रता
+   W x=166 s=0 z=100 t=की
+   W x=187 s=0 z=100 t=बुनियाद
+    WD t=बुिनयाद
+   W x=258 s=0 z=100 t=है,
+  LINE y=135 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=चूंकि
+    WD t=चूंिक
+   W x=69 s=0 z=100 t=मानव
+   W x=115 s=0 z=100 t=अधिकारों
+    WD t=अिधकारों
+   W x=191 s=0 z=100 t=के
+   W x=212 s=0 z=100 t=प्रति
+    WD t=प्रित
+   W x=253 s=0 z=100 t=उपेक्षा
+   W x=309 s=0 z=100 t=और
+   W x=327 s=0 z=100 t=घृणा
+   W x=367 s=0 z=100 t=के
+   W x=388 s=0 z=100 t=फलस्वरूप
+  LINE y=159 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=ही
+   W x=24 s=0 z=100 t=ऐसे
+   W x=56 s=0 z=100 t=बर्बर
+   W x=101 s=0 z=100 t=कार्य
+   W x=147 s=0 z=100 t=हुए
+   W x=180 s=0 z=100 t=जिनसे
+    WD t=िजनसे
+   W x=229 s=0 z=100 t=मनुष्य
+   W x=294 s=0 z=100 t=की
+   W x=317 s=0 z=100 t=आत्मा
+   W x=363 s=0 z=100 t=पर
+   W x=384 s=0 z=100 t=अत्याचार
+  LINE y=183 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=किया
+    WD t=िकया
+   W x=40 s=0 z=100 t=गया,
+   W x=83 s=0 z=100 t=चूंकि
+    WD t=चूंिक
+   W x=136 s=0 z=100 t=एक
+   W x=159 s=0 z=100 t=ऐसी
+   W x=191 s=0 z=100 t=विश्व-व्यवस्था
+    WD t=िवश्व-व्यवस्था
+   W x=326 s=0 z=100 t=की
+   W x=349 s=0 z=100 t=उस
+   W x=373 s=0 z=100 t=स्थापना
+   W x=435 s=0 z=100 t=को
+  LINE y=207 x=0 align=0 mult=1.000 hfid=0 words=14
+   W x=0 s=0 z=100 t=(
+   W x=18 s=0 z=100 t=जिसमें
+    WD t=िजसमें
+   W x=74 s=0 z=100 t=लोगों
+   W x=131 s=0 z=100 t=को
+   W x=157 s=0 z=100 t=भाषण
+   W x=193 s=0 z=100 t=और
+   W x=212 s=0 z=100 t=धर्म
+   W x=254 s=0 z=100 t=की
+   W x=276 s=0 z=100 t=आज़ादी
+    WD t=आज़ादी
+   W x=320 s=0 z=100 t=तथा
+   W x=350 s=0 z=100 t=भय
+   W x=379 s=0 z=100 t=और
+   W x=398 s=0 z=100 t=अभाव
+   W x=444 s=0 z=100 t=से
+  LINE y=231 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=मुक्ति
+    WD t=मुिक्त
+   W x=57 s=0 z=100 t=मिलेगी
+    WD t=िमलेगी
+   W x=114 s=0 z=100 t=)
+   W x=134 s=0 z=100 t=सर्वसाधारण
+   W x=216 s=0 z=100 t=के
+   W x=239 s=0 z=100 t=लिए
+    WD t=िलए
+   W x=270 s=0 z=100 t=सर्वोच्च
+   W x=352 s=0 z=100 t=आकांक्षा
+   W x=414 s=0 z=100 t=घोषित
+    WD t=घोिषत
+  LINE y=255 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=किया
+    WD t=िकया
+   W x=38 s=0 z=100 t=गया
+   W x=71 s=0 z=100 t=है,
+SPINE 1 href=OEBPS/ch2.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=22 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.400 hfid=0 words=2
+   W x=150 s=1 z=100 t=अनुच्छेद
+   W x=276 s=1 z=100 t=१.
+  LINE y=34 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=सभी
+   W x=57 s=0 z=100 t=मनुष्यों
+   W x=149 s=0 z=100 t=को
+   W x=182 s=1 z=100 t=गौरव
+   W x=232 s=0 z=100 t=और
+   W x=258 s=0 z=100 t=अधिकारों
+    WD t=अिधकारों
+   W x=342 s=0 z=100 t=के
+   W x=371 s=0 z=100 t=मामले
+   W x=429 s=0 z=100 t=में
+  LINE y=58 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=जन्मजात
+   W x=66 s=2 z=100 t=स्वतन्त्रता
+   W x=161 s=0 z=100 t=और
+   W x=181 s=0 z=80 t=समानता
+   W x=228 s=0 z=100 t=प्राप्त
+   W x=284 s=0 z=100 t=है
+   W x=309 s=0 z=100 t=।
+   W x=326 s=0 z=100 t=उन्हें
+   W x=387 s=0 z=100 t=बुद्धि
+    WD t=बुिद्ध
+   W x=448 s=0 z=100 t=और
+  LINE y=82 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=अन्तरात्मा
+   W x=89 s=0 z=100 t=की
+   W x=110 s=0 z=100 t=देन
+   W x=146 s=0 z=100 t=प्राप्त
+   W x=200 s=0 z=100 t=है
+   W x=223 s=0 z=100 t=और
+   W x=241 s=0 z=100 t=परस्पर
+   W x=287 s=0 z=100 t=उन्हें
+   W x=346 s=0 z=100 t=भाईचारे
+   W x=408 s=0 z=100 t=के
+   W x=429 s=0 z=100 t=भाव
+  LINE y=106 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=0 s=0 z=100 t=से
+   W x=21 s=0 z=100 t=बर्ताव
+   W x=74 s=0 z=100 t=करना
+   W x=111 s=0 z=100 t=चाहिए
+    WD t=चािहए
+   W x=158 s=0 z=100 t=।
+  LINE y=130 x=0 align=2 mult=1.400 hfid=0 words=2
+   W x=154 s=1 z=100 t=अनुच्छेद
+   W x=280 s=1 z=100 t=२.
+  LINE y=164 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=सभी
+   W x=50 s=0 z=100 t=को
+   W x=76 s=0 z=100 t=इस
+   W x=97 s=0 z=100 t=घोषणा
+   W x=145 s=0 z=100 t=में
+   W x=180 s=0 z=100 t=सन्निहित
+    WD t=सिन्निहत
+   W x=255 s=0 z=100 t=सभी
+   W x=287 s=0 z=100 t=अधिकारों
+    WD t=अिधकारों
+   W x=364 s=0 z=100 t=और
+   W x=383 s=0 z=100 t=आज़ादियों
+    WD t=आज़ािदयों
+  LINE y=188 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=0 s=0 z=100 t=को
+   W x=27 s=0 z=100 t=प्राप्त
+   W x=83 s=0 z=100 t=करने
+   W x=124 s=0 z=100 t=का
+   W x=145 s=0 z=100 t=हक़
+    WD t=हक़
+   W x=172 s=0 z=100 t=है
+   W x=197 s=0 z=100 t=और
+   W x=217 s=0 z=100 t=इस
+   W x=239 s=0 z=100 t=मामले
+   W x=291 s=0 z=100 t=में
+   W x=327 s=0 z=100 t=जाति,
+    WD t=जाित,
+   W x=371 s=0 z=100 t=वर्ण,
+   W x=418 s=0 z=100 t=लिंग,
+    WD t=िलंग,
+  LINE y=212 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=भाषा,
+   W x=46 s=0 z=100 t=धर्म,
+   W x=99 s=0 z=100 t=राजनीति
+    WD t=राजनीित
+   W x=163 s=0 z=100 t=या
+   W x=191 s=0 z=100 t=अन्य
+   W x=244 s=0 z=100 t=विचार-प्रणाली,
+    WD t=िवचार-प्रणाली,
+   W x=362 s=0 z=100 t=किसी
+    WD t=िकसी
+   W x=401 s=0 z=100 t=देश
+   W x=441 s=0 z=100 t=या
+  LINE y=236 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=समाज
+   W x=42 s=0 z=100 t=विशेष
+    WD t=िवशेष
+   W x=97 s=0 z=100 t=में
+   W x=136 s=0 z=100 t=जन्म,
+   W x=192 s=0 z=100 t=सम्पत्ति
+    WD t=सम्पित्त
+   W x=265 s=0 z=100 t=या
+   W x=294 s=0 z=100 t=किसी
+    WD t=िकसी
+   W x=334 s=0 z=100 t=प्रकार
+   W x=384 s=0 z=100 t=की
+   W x=410 s=0 z=100 t=अन्य
+  LINE y=260 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=मर्यादा
+   W x=64 s=0 z=100 t=आदि
+    WD t=आिद
+   W x=93 s=0 z=100 t=के
+   W x=114 s=0 z=100 t=कारण
+   W x=146 s=0 z=100 t=भेदभाव
+   W x=207 s=0 z=100 t=का
+   W x=226 s=0 z=100 t=विचार
+    WD t=िवचार
+   W x=274 s=0 z=100 t=न
+   W x=292 s=0 z=100 t=किया
+    WD t=िकया
+   W x=330 s=0 z=100 t=जाएगा
+   W x=372 s=0 z=100 t=।
+  LINE y=284 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=इसके
+   W x=57 s=0 z=100 t=अतिरिक्त,
+    WD t=अितिरक्त,
+   W x=137 s=0 z=100 t=चाहे
+   W x=181 s=0 z=100 t=कोई
+   W x=218 s=0 z=100 t=देश
+   W x=258 s=0 z=100 t=या
+   W x=286 s=0 z=100 t=प्रदेश
+   W x=346 s=0 z=100 t=स्वतन्त्र
+   W x=429 s=0 z=100 t=हो,
+  LINE y=308 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=संरक्षित
+    WD t=संरिक्षत
+   W x=69 s=0 z=100 t=हो,
+   W x=109 s=0 z=100 t=या
+   W x=139 s=0 z=100 t=स्त्रशासन
+   W x=223 s=0 z=100 t=रहित
+    WD t=रिहत
+   W x=264 s=0 z=100 t=हो
+   W x=296 s=0 z=100 t=या
+   W x=326 s=0 z=100 t=परिमित
+    WD t=पिरिमत
+   W x=384 s=0 z=100 t=प्रभुसत्ता
+  LINE y=332 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=वाला
+   W x=43 s=0 z=100 t=हो,
+   W x=83 s=0 z=100 t=उस
+   W x=111 s=0 z=100 t=देश
+   W x=153 s=0 z=100 t=या
+   W x=183 s=0 z=100 t=प्रदेश
+   W x=245 s=0 z=100 t=की
+   W x=272 s=0 z=100 t=राजनैतिक,
+    WD t=राजनैितक,
+   W x=354 s=0 z=100 t=क्षेत्रीय
+   W x=435 s=0 z=100 t=या
+  LINE y=356 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=अन्तर्राष्ट्रीय
+   W x=126 s=0 z=100 t=स्थिति
+    WD t=िस्थित
+   W x=177 s=0 z=100 t=के
+   W x=198 s=0 z=100 t=आधार
+   W x=233 s=0 z=100 t=पर
+   W x=252 s=0 z=100 t=वहां
+   W x=292 s=0 z=100 t=के
+   W x=313 s=0 z=100 t=निवासियों
+    WD t=िनवािसयों
+   W x=402 s=0 z=100 t=के
+   W x=423 s=0 z=100 t=प्रति
+    WD t=प्रित
+  LINE y=380 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=0 s=0 z=100 t=कोई
+   W x=33 s=0 z=100 t=फ़रक़
+    WD t=फ़रक़
+   W x=66 s=0 z=100 t=न
+   W x=84 s=0 z=100 t=रखा
+   W x=110 s=0 z=100 t=जाएगा
+   W x=152 s=0 z=100 t=।
+  LINE y=404 x=0 align=2 mult=1.400 hfid=0 words=2
+   W x=153 s=1 z=100 t=अनुच्छेद
+   W x=279 s=1 z=100 t=३.
+  LINE y=438 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=18 s=0 z=100 t=प्रत्येक
+   W x=87 s=0 z=100 t=व्यक्ति
+    WD t=व्यिक्त
+   W x=153 s=0 z=100 t=को
+   W x=179 s=0 z=100 t=जीवन,
+   W x=232 s=0 z=100 t=स्वाधीनता
+   W x=315 s=0 z=100 t=और
+   W x=334 s=0 z=100 t=वैयक्तिक
+    WD t=वैयिक्तक
+   W x=409 s=0 z=100 t=सुरक्षा
+  LINE y=462 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=का
+   W x=19 s=0 z=100 t=अधिकार
+    WD t=अिधकार
+   W x=74 s=0 z=100 t=है
+   W x=97 s=0 z=100 t=।
+  LINE y=486 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=18 s=0 z=100 t=(हिन्दी),
+    WD t=(िहन्दी),
+   W x=107 s=0 z=100 t=कि,
+    WD t=िक,
+   W x=135 s=0 z=100 t=क
+   W x=142 s=1 z=100 t=म
+   W x=154 s=0 z=100 t=ल,
+   W x=176 s=0 z=100 t=नीति
+    WD t=नीित
+   W x=211 s=16 z=50 t=क
+   W x=215 s=0 z=100 t=,
+   W x=229 s=0 z=100 t=क्‍षेत्रीय,
+   W x=319 s=0 z=100 t=क्‌षेत्रीय
+   W x=400 s=0 z=100 t=।
+  LINE y=510 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=All
+   W x=57 s=0 z=100 t=human
+   W x=126 s=0 z=100 t=beings
+   W x=191 s=0 z=100 t=are
+   W x=233 s=0 z=100 t=born
+   W x=283 s=0 z=100 t=free
+   W x=332 s=0 z=100 t=and
+   W x=376 s=0 z=100 t=equal
+   W x=437 s=0 z=100 t=in
+  LINE y=534 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dignity
+   W x=66 s=0 z=100 t=and
+   W x=103 s=0 z=100 t=rights.

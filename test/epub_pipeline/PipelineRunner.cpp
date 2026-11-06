@@ -206,7 +206,7 @@ ShapingFaceScope::~ShapingFaceScope() {
 }
 
 bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const Profile& profile, std::ostream& out,
-                const SpineStatFn& spineStat, const ArenaStatFn& arenaStat) {
+                const SpineStatFn& spineStat, const ArenaStatFn& arenaStat, const PageStatFn& pageStat) {
   const ShapingFaceScope shapingFace(profile.shapingFontFile);
   GfxRenderer renderer;
   std::unique_ptr<BuildArena> lentArena;
@@ -279,6 +279,7 @@ bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const 
         return false;
       }
       dumpPage(out, *page, p, cacheDir);
+      if (pageStat) pageStat(i, p, *page);
     }
     heapTrackResume();
     if (spineStat) {

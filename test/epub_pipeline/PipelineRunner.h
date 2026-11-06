@@ -76,13 +76,16 @@ void setBuildBracket(BuildBracketFn fn);
 // pages/elapsedUs cover the section build AND the page-by-page dump read-back.
 using SpineStatFn = std::function<void(int spineIndex, uint16_t pages, int64_t elapsedUs)>;
 
+// Called with each page the dump reads back, after it is dumped, outside the heap census.
+using PageStatFn = std::function<void(int spineIndex, uint16_t pageIndex, const Page& page)>;
+
 // Compile `epubPath` into `cacheDir` under `profile` and stream the canonical
 // dump to `out`. Returns false on any pipeline failure (already-logged).
 // `cacheDir` should be empty/fresh for a cold run. A second call over the same
 // cacheDir still rebuilds every section, but from the book-level caches the first
 // left behind (book.bin, CSS index, image manifest, banked XHTML, footnote store).
 bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const Profile& profile, std::ostream& out,
-                const SpineStatFn& spineStat = {}, const ArenaStatFn& arenaStat = {});
+                const SpineStatFn& spineStat = {}, const ArenaStatFn& arenaStat = {}, const PageStatFn& pageStat = {});
 
 // Compile `epubPath` into `cacheDir` under `profile`, as runAndDump does, and hand every page of every spine, loaded
 // back from its section file, to `visit` with the renderer the build measured with. Heap-only builds: a profile with

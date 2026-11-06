@@ -299,6 +299,11 @@ class TextBlock final : public Block {
   const RenderStyle& getRenderStyle() const { return renderStyle; }
   bool isEmpty() override { return numWords == 0; }
   bool valid() const { return isValid; }
+  // The bytes of the line's one allocation (its arena), for the host dump's page figures; 0 when it has none.
+  size_t arenaBytes() const {
+    return arena != nullptr ? arenaSize(numWords, sizesPresent, wordFontCount, textBytes, annotationBytes_, bidiBytes_)
+                            : 0;
+  }
   // A line of a vertical-rl page: drawn down its column, in the turned frame Page::render sets up (VerticalDraw.h).
   // Set by the page's builder; kept in the cache.
   void setVertical(const bool vertical) { vertical_ = vertical; }
