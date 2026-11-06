@@ -1227,6 +1227,12 @@ flash digest would reject.
     buffers (each fixture book's first 200 tokens), `mayApply == false` implies the flash digest test fails too.
   - `OtShaper.TheTwoMemosLeaveEveryGlyphAlone`: each fixture book's tokens shaped by a plan whose memo and digest
     array are switched off by a test hook, and by a normal plan: glyphs, advances and offsets equal.
+  - `OtShaper.ABengaliPlanWithoutFiltersPlacesConsonantsAsWithThem`: the Bengali fixture font's face built without a
+    CPac, its plan's filter block refused (the heap check's test hook), against a face with its CPac. Every consonant
+    gets the same position from `consonantPositionFromFace`. **It fails before this task.** Today a plan with no
+    digest passes `ANY_GLYPH` to `wouldSubstitute` (OtPlan.cpp ~316), and HarfBuzz's `would_apply` of a format-3
+    context never tests the first glyph: it relies on the lookup digest HarfBuzz always has. The fixture's blwf and
+    vatu lookups are format-3 contexts, so `{consonant, virama}` matches every consonant.
 - [ ] **Step 2: Implement.**
   - The memo: a direct-mapped table of 64 entries, keyed by `(consonant, virama)`, filled on a miss by the existing
     walk, in the plan (`mutable`; plans are per build and single-threaded under RenderLock: say so in a comment).
@@ -1236,6 +1242,19 @@ flash digest would reject.
     rejects). If a host count over the four fixture books shows that one of the digest's three masks alone rejects at
     least 90% of what all three reject, keep that one mask (8 B a lookup) and say so with the counts; otherwise all
     three (24 B a lookup).
+  - **The plan always holds that array.** A plan that cannot allocate it fails to build: the run is laid out unshaped
+    and latched, as any refused shaping block is. `wouldSubstitute` therefore never runs without a digest, and the
+    `ANY_GLYPH` fallback goes. Subtable digests stay where they are (the CPac, or the refusable filter block).
+  - The memo's key is the consonant's and the virama's glyph IDs, not their code points: `locl` and `ccmp` run before
+    initial reordering. Mark it as a witchhunt deviation in the comment, output-neutral by construction (upstream
+    HarfBuzz, up to 15.1.0 and main, has no such memo).
+  - Not in this task (follow-ups, each measured on the host first):
+    - HarfBuzz b74fee5e8 (15.1.0), which charges `would_apply` walks to `max_ops`. Our budget is 64 a code point
+      against upstream's 4,096, so it needs its own measured budget.
+    - The second-glyph lookup digests (087e43231, in 14.5.0, never ported), LigatureSubst's seconds digest, the
+      mark-set digests and a GDEF props cache.
+    - Caching each planned lookup's validated `Table`: a face's mapping can move between calls (deviation 12), and the
+      Noto fonts have no Extension lookups.
   - Report `plan_bytes` before and after for each fixture font (the plan is on the heap during a build).
 - [ ] **Step 3: Run the tests, then the whole suite.** Expected: the new tests pass, and the suite shows only the five
   known Windows failures, with every golden unchanged.
