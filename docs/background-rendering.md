@@ -178,7 +178,10 @@ is laid out. `stepOnScreenImagesDuringBuild()` closes that gap: once per page on
 build (`loadPageFromActiveBuild`) and, if an image has no cache, decodes it between two slices through
 `warmPageForImageLane()`. The redraw comes from the build's own pass (`displayBuildPage`), which draws cached images.
 It keeps the lane's settle and only runs where the borrowed buffer is separate from the heap the parse uses
-(`HalCapabilities::keepsSecondaryBuffer()`): the X3 and X4 still wait for the build.
+(`HalCapabilities::keepsSecondaryBuffer()`): the X3 and X4 still wait for the build. It does not wait for the refresh
+that shows the page, a 1.5 s HALF on a new chapter: the decode writes no framebuffer byte, and lending the PSRAM arena
+stays outside the SPI bus lock the waveform holds. X4 Pro: the JPEG was done before the HALF ended, and the picture on
+screen 5.2 s after opening the chapter, down from 10 s.
 
 ## B — next-section pre-build (look-ahead)
 

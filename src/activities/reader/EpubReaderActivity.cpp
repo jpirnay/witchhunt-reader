@@ -2027,8 +2027,9 @@ bool EpubReaderActivity::imageLaneWarmsGrayscale() const {
 bool EpubReaderActivity::stepOnScreenImagesDuringBuild() {
   if (RenderLock::peek()) return false;
   RenderLock lock;
-  // As for a build slice: not during a refresh, and the decode must not run under another one.
-  if (!section || !section->hasActiveBuild() || renderer.isRefreshPending() || imageProcessingActive_) return false;
+  // Not a build slice's refresh guard: the decode writes no framebuffer byte and its buffer is its own, so it can use
+  // the waveform that shows the page, 1.5 s for the HALF a new chapter opens with.
+  if (!section || !section->hasActiveBuild() || imageProcessingActive_) return false;
   const int pageIndex = section->currentPage;
   const bool looked = buildImagesLookedSpine_ == currentSpineIndex && buildImagesLookedPage_ == pageIndex;
   const bool bufferFree = !secondaryBorrowed_ && !backgroundBorrowActive_ && renderer.hasSecondaryBuffer();
@@ -2042,6 +2043,8 @@ bool EpubReaderActivity::stepOnScreenImagesDuringBuild() {
   const auto page = section->loadPageFromActiveBuild(static_cast<uint16_t>(pageIndex));
   const bool warmGrayscale = imageLaneWarmsGrayscale();
   if (!page || !page->hasUncachedImages(/*forceLoad=*/true, /*monochromeOutput=*/true, warmGrayscale)) return false;
+  // Full clock: a waveform wait downclocks unless someone holds it up.
+  HalPowerManager::Lock powerLock;
   warmPageForImageLane(*page, currentSpineIndex, pageIndex, /*onScreen=*/true, warmGrayscale);
   // The lane asked for a redraw, but the build's pass draws a page only once: this is what lets it draw this one again,
   // now from its caches.
