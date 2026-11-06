@@ -62,15 +62,20 @@ std::string defaultFontFamilyLabel(const SettingInfo& item) {
   return item.getEnumOptionLabel(static_cast<uint8_t>(SETTINGS.fontFamily + 1));
 }
 
-// drawChrome() puts the progress line directly under the title, and buildScreen() the tab bar under
-// that. Both measured from the lines above them, which grow with the UI font size: at fixed offsets
-// the large font's title ran into the progress line and the progress line into the tab bar.
-int progressLineY(const GfxRenderer& renderer, const Rect& content) {
+// drawChrome() puts the chapter's title under the book's, the progress line under that, and buildScreen() the tab bar
+// under that. All measured from the lines above them, which grow with the UI font size: at fixed offsets the large
+// font's title ran into the progress line and the progress line into the tab bar.
+int chapterLineY(const GfxRenderer& renderer, const Rect& content) {
   return HeaderLayout::overlayTitleBottom(content, renderer.getLineHeight(UI_12_FONT_ID));
 }
 
-int tabBarTop(const GfxRenderer& renderer, const Rect& content) {
-  return progressLineY(renderer, content) + renderer.getLineHeight(UI_10_FONT_ID) + HeaderLayout::OVERLAY_TITLE_GAP;
+int progressLineY(const GfxRenderer& renderer, const Rect& content, const bool hasChapterLine) {
+  return chapterLineY(renderer, content) + (hasChapterLine ? renderer.getLineHeight(UI_10_FONT_ID) : 0);
+}
+
+int tabBarTop(const GfxRenderer& renderer, const Rect& content, const bool hasChapterLine) {
+  return progressLineY(renderer, content, hasChapterLine) + renderer.getLineHeight(UI_10_FONT_ID) +
+         HeaderLayout::OVERLAY_TITLE_GAP;
 }
 }  // namespace
 
@@ -79,9 +84,9 @@ ReaderSizeList EpubReaderMenuActivity::pendingSizeList() const {
 }
 
 EpubReaderMenuActivity::EpubReaderMenuActivity(
-    GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title, const int currentPage,
-    const int totalPages, const int bookProgressPercent, const uint8_t currentOrientation, const bool hasFootnotes,
-    const int8_t initialEmbeddedStyleOverride, const int8_t initialImageRenderingOverride,
+    GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title, const std::string& chapterTitle,
+    const int currentPage, const int totalPages, const int bookProgressPercent, const uint8_t currentOrientation,
+    const bool hasFootnotes, const int8_t initialEmbeddedStyleOverride, const int8_t initialImageRenderingOverride,
     const int8_t initialFontFamilyOverride, const std::string& initialSdFontFamilyOverride,
     const int8_t initialFontSizeOverride, const uint8_t initialTextDarkness, const int8_t initialBionicReadingOverride,
     const int8_t initialGuideDotsOverride, const int8_t initialParagraphAlignmentOverride,
@@ -111,6 +116,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
       pendingVerticalTextOverride(initialVerticalTextOverride),
       pendingPublisherFontsOverride(initialPublisherFontsOverride),
       title(title),
+      chapterTitle(chapterTitle),
       currentPage(currentPage),
       totalPages(totalPages),
       bookProgressPercent(bookProgressPercent) {
@@ -796,7 +802,7 @@ void EpubReaderMenuActivity::customizeTabBar(UiScreen& screen, fui::TabBarProps&
 
 void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
   const Rect contentRect = listContentRect();
-  const int16_t top = static_cast<int16_t>(tabBarTop(renderer, contentRect));
+  const int16_t top = static_cast<int16_t>(tabBarTop(renderer, contentRect, hasChapterLine()));
   screen.setContentMarginFromScreen(
       fui::Insets{top, static_cast<int16_t>(renderer.getScreenWidth() - (contentRect.x + contentRect.width)),
                   static_cast<int16_t>(renderer.getScreenHeight() - (contentRect.y + contentRect.height)),
@@ -826,6 +832,14 @@ void EpubReaderMenuActivity::drawChrome() {
   renderer.drawText(UI_12_FONT_ID, titleX, HeaderLayout::overlayTitleY(contentRect), truncTitle.c_str(), true,
                     EpdFontFamily::BOLD);
 
+  if (hasChapterLine()) {
+    const std::string truncChapter =
+        renderer.truncatedText(UI_10_FONT_ID, chapterTitle.c_str(), contentRect.width - 40);
+    const int chapterX =
+        contentRect.x + (contentRect.width - renderer.getTextWidth(UI_10_FONT_ID, truncChapter.c_str())) / 2;
+    renderer.drawText(UI_10_FONT_ID, chapterX, chapterLineY(renderer, contentRect), truncChapter.c_str());
+  }
+
   std::string progressLine;
   if (totalPages > 0) {
     progressLine = std::string(tr(STR_CHAPTER_PREFIX)) + std::to_string(currentPage) + "/" +
@@ -837,7 +851,8 @@ void EpubReaderMenuActivity::drawChrome() {
   const int progressFont = PanelMetrics::COMPACT ? SMALL_FONT_ID : UI_10_FONT_ID;
   const int progressX =
       contentRect.x + (contentRect.width - renderer.getTextWidth(progressFont, progressLine.c_str())) / 2;
-  renderer.drawText(progressFont, progressX, progressLineY(renderer, contentRect), progressLine.c_str());
+  renderer.drawText(progressFont, progressX, progressLineY(renderer, contentRect, hasChapterLine()),
+                    progressLine.c_str());
 }
 
 const char* EpubReaderMenuActivity::footerConfirmLabel() const {

@@ -7448,17 +7448,21 @@ void EpubReaderActivity::openReaderMenu() {
   // bad_alloc when the menu is opened mid section-build on a long book (heap fragmented to tens of
   // KB) — the tag 2.05 "Confirm reboots" crash.
   const bool hasPrintedPages = epub->hasNumericPrintedPages();
+  // The header names the chapter when the table of contents does.
+  std::string menuChapter = chapterTitle();
+  if (menuChapter == tr(STR_UNNAMED)) menuChapter.clear();
 
   ReaderUtils::enforceExitFullRefresh(renderer);
   startActivityForResult(
       std::make_unique<EpubReaderMenuActivity>(
-          renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent, SETTINGS.orientation,
-          !currentPageFootnotes.empty(), bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
-          bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness, bookBionicReadingOverride,
-          bookGuideDotsOverride, bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
-          bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
-          bookVerticalTextOverride, bookPublisherFontsOverride, bookVerticalAllowed_, !bookmarkStore.isEmpty(),
-          isCurrentPageStarred, hasPrintedPages),
+          renderer, mappedInput, epub->getTitle(), menuChapter, currentPage, totalPages, bookProgressPercent,
+          SETTINGS.orientation, !currentPageFootnotes.empty(), bookEmbeddedStyleOverride, bookImageRenderingOverride,
+          bookFontFamilyOverride, bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness,
+          bookBionicReadingOverride, bookGuideDotsOverride, bookParagraphAlignmentOverride,
+          bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride,
+          bookInlineFootnotePreviewsOverride, bookLineSpacingOverride, bookVerticalTextOverride,
+          bookPublisherFontsOverride, bookVerticalAllowed_, !bookmarkStore.isEmpty(), isCurrentPageStarred,
+          hasPrintedPages),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);
