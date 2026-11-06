@@ -288,6 +288,15 @@ static_assert(LaneBeforeBuild::kMaxYields >= BG_BUILD_THROUGH_PAGES + 1,
 // suggests 30–50 ms); tune from the DEBUG_BACKGROUND_WORK serial counters.
 constexpr uint32_t BG_BUILD_BUDGET_MS = 40;
 
+// How long the B/W page stays up before inline AA commits. Past that point the pass cannot be
+// stopped, and it held every press for its full length: X4 Pro, 2026-11-06, one page per 1.27 s
+// however fast the buttons went, of which the page itself was on screen after 0.65 s. A press
+// answering a page needs a reaction time after the page appears, so the old single check, made
+// the moment the waveform ended, could never see it. The cost is that the greys of a page the
+// reader stays on arrive this much later.
+constexpr uint32_t AA_SETTLE_MS = 400;
+constexpr uint32_t AA_SETTLE_POLL_MS = 5;
+
 // Background-B keeps a page-budgeted window of layout ready ahead of the reading position rather
 // than a fixed number of sections: it pre-builds whole subsequent spines until roughly this many
 // pages of runway exist (counting the current section's unread tail plus the subsequent sections
@@ -6083,7 +6092,13 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
         // Re-checked here because the up-front gate can only see the gesture as it stands when
         // the render begins; the pass itself is ~1 s long, so most presses during a burst land
         // after that decision and would otherwise be unstoppable.
-        [&] { return planeAborted || aaPreemptedByNavigation(); });
+        [&] { return planeAborted || aaPreemptedByNavigation(); },
+        [&] {
+          const unsigned long settleStart = millis();
+          while (millis() - settleStart < AA_SETTLE_MS && !aaPreemptedByNavigation()) {
+            delay(AA_SETTLE_POLL_MS);
+          }
+        });
     LOG_DBG("ERS", "Inline AA%s: planes=%lums gray=%lums restore=%lums", gt.aborted ? " ABORTED" : "", gt.planesMs,
             gt.displayMs, gt.restoreMs);
     checkHeapIntegrity("after_inline_aa");
