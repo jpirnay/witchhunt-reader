@@ -117,25 +117,24 @@ TEST_F(BlockElementsFixture, AFigureCaptionIsABlockOfItsOwn) {
   EXPECT_EQ(texts(lines), (Strings{"Before", "Caption", "After"}));
 }
 
-// Centred as a rule from the book would be: under Book's Style.
+// <center> says what the author wants of that text, as a heading does: it is centred whatever the reader's alignment.
 TEST_F(BlockElementsFixture, CenterIsACenteredBlock) {
-  const auto lines = layout("", "<p>One</p><center>* * *</center><p>Two</p>", CssTextAlign::None);
-  ASSERT_EQ(texts(lines), (Strings{"One", "* * *", "Two"}));
-  EXPECT_GT(lines[1].x, 100) << "centred on a 480 px page";
-  EXPECT_EQ(lines[0].x, lines[2].x);
+  for (const CssTextAlign align : {CssTextAlign::None, CssTextAlign::Justify, CssTextAlign::Left}) {
+    const auto lines = layout("", "<p>One</p><center>* * *</center><p>Two</p>", align);
+    ASSERT_EQ(texts(lines), (Strings{"One", "* * *", "Two"}));
+    EXPECT_GT(lines[1].x, 100) << "centred on a 480 px page, alignment " << static_cast<int>(align);
+    EXPECT_EQ(lines[0].x, lines[2].x);
+  }
 }
 
-TEST_F(BlockElementsFixture, ParagraphsInsideCenterAreCentered) {
-  const auto lines = layout("", "<center><p>Inside</p></center><p>Outside</p>", CssTextAlign::None);
-  ASSERT_EQ(texts(lines), (Strings{"Inside", "Outside"}));
-  EXPECT_GT(lines[0].x, 100);
-  EXPECT_LT(lines[1].x, 100);
-}
-
-TEST_F(BlockElementsFixture, TheReadersAlignmentOverridesCenterAsItDoesTheBooksRules) {
-  const auto lines = layout("", "<p>One</p><center>* * *</center>", CssTextAlign::Left);
-  ASSERT_EQ(texts(lines), (Strings{"One", "* * *"}));
-  EXPECT_LT(lines[1].x, 100) << "not centred on a 480 px page";
+TEST_F(BlockElementsFixture, EveryParagraphInsideCenterIsCentered) {
+  for (const CssTextAlign align : {CssTextAlign::None, CssTextAlign::Justify}) {
+    const auto lines = layout("", "<center><p>First</p><p>Second</p></center><p>Outside</p>", align);
+    ASSERT_EQ(texts(lines), (Strings{"First", "Second", "Outside"}));
+    EXPECT_GT(lines[0].x, 100) << "alignment " << static_cast<int>(align);
+    EXPECT_GT(lines[1].x, 100) << "alignment " << static_cast<int>(align);
+    EXPECT_LT(lines[2].x, 100) << "alignment " << static_cast<int>(align);
+  }
 }
 
 TEST_F(BlockElementsFixture, TheBooksOwnRuleBeatsTheDefaultOfCenter) {

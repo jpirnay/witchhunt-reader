@@ -2521,10 +2521,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   self->observeFontSizeBaseline(name, cssStyle);
   cssStyle = self->normalizeFontSizeForElement(name, cssStyle);
 
-  // The browser default for <center>. As a rule from the book it follows the reader's alignment setting.
+  // <center> says what the author wants of that text, as a heading does, so what it holds is centred whatever the
+  // reader's alignment. A rule of the book's own on <center> is an ordinary text-align.
   if (strcmp(name, "center") == 0 && !cssStyle.defined.textAlign) {
-    cssStyle.textAlign = CssTextAlign::Center;
-    cssStyle.defined.textAlign = 1;
+    self->centerDepth_ = std::min(self->centerDepth_, self->depth);
   }
 
   // Track an explicit CSS width on a wrapping block (e.g. <div style="width:100px">).
@@ -3323,6 +3323,10 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
   auto userAlignmentBlockStyle = BlockStyle::fromCssStyle(
       cssStyle, emSize, static_cast<CssTextAlign>(self->paragraphAlignment), self->viewportWidth);
   userAlignmentBlockStyle.direction = self->blockDirection(cssStyle);
+  if (self->depth >= self->centerDepth_) {
+    userAlignmentBlockStyle.alignment = CssTextAlign::Center;
+    userAlignmentBlockStyle.textAlignDefined = true;
+  }
   // As in CSS, a list's own padding on its start side replaces the default and its margin there adds to it. A <dd>'s
   // default is a margin, the same 40 px in a browser.
   const int16_t listPadding = static_cast<int16_t>(emSize * LIST_DEFAULT_PADDING_EM);
@@ -4233,6 +4237,7 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
     self->clearSpentBlockHeadingStyle();
   }
   if (self->depth == self->headingDepth_) self->headingDepth_ = INT_MAX;
+  if (self->depth == self->centerDepth_) self->centerDepth_ = INT_MAX;
 
   // Apply held bottom spacing whose block-level element is now out of scope
   while (!self->heldBottomSpacing_.empty() && self->heldBottomSpacing_.back().depth >= self->depth) {

@@ -903,6 +903,8 @@ class ChapterHtmlSlimParser final : public Print {
   // heading text and takes both (applyHeadingScope): otherwise only the first such block got them,
   // by merging into the heading's still-empty block. INT_MAX when no heading is open.
   int headingDepth_ = INT_MAX;
+  // The outermost open <center>: every block inside it is centred (startElement).
+  int centerDepth_ = INT_MAX;
   CssTextAlign headingAlignment_ = CssTextAlign::Center;
   float headingFontSizeMultiplier_ = 1.0f;
   void applyHeadingScope(BlockStyle& blockStyle, const CssStyle& cssStyle) const;
