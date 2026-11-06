@@ -171,11 +171,153 @@ TEST(ShapedStore, AScratchEntryLeavesNothingBehind) {
   EXPECT_TRUE(readsBack(store, 0, "aaa", 1, 6, 10));
   EXPECT_TRUE(readsBack(store, 1, "bbb", 1, 7, 20));
 
-  // The scratch's room is free again: the next token is written where it began.
+  // The scratch's room is free again: a token that fills what is left of chunk 0 (1,024 - 24 - 28 B) lands there,
+  // right behind the earlier two. A leaked `used` would push it to the next chunk.
   ASSERT_TRUE(store.insert(2));
-  ASSERT_TRUE(writeGlyphToken(store, 2, "ccc", 1, 3, 30));
-  EXPECT_TRUE(readsBack(store, 2, "ccc", 1, 3, 30));
+  ASSERT_TRUE(writeGlyphToken(store, 2, "ccc", 1, 243, 30));
+  EXPECT_TRUE(readsBack(store, 2, "ccc", 1, 243, 30));
+  const auto placed = store.pieces(2, "ccc", 1);
+  ASSERT_TRUE(placed.has_value());
+  EXPECT_EQ((*placed)[0].chunk, 0);
+  EXPECT_EQ((*placed)[0].at, 24 + 28);
   EXPECT_EQ(store.chunkBytes(), held);
+}
+
+// A scratch or failed token of more than a chunk: it spills into a new chunk, then into one of its own size. Abandoned,
+// the store is as before: the same chunks, the same room, every other token intact.
+TEST(ShapedStore, AnAbandonedTokenOfMoreThanAChunkLeavesNothingBehind) {
+  ShapedStore store;
+  ASSERT_TRUE(store.reserve(8, ShapedStore::kChunkBytes));  // one chunk
+  ASSERT_TRUE(store.insert(0));
+  ASSERT_TRUE(store.insert(1));
+  ASSERT_TRUE(writeGlyphToken(store, 0, "aaa", 1, 200, 10));  // 800 B
+  ASSERT_TRUE(writeGlyphToken(store, 1, "bbb", 1, 50, 400));  // 200 B: chunk 0 holds 1,000
+  const size_t held = store.chunkBytes();
+  ASSERT_EQ(held, ShapedStore::kChunkBytes);
+
+  // A scratch entry: 24 B of room in chunk 0, then chunk 1, then its own 2 KB chunk.
+  ASSERT_TRUE(store.open(2, "scratch", 9));
+  ASSERT_TRUE(store.beginPiece(PieceKind::Glyphs, 0, 7));
+  GlyphRecord r;
+  for (int i = 0; i < 400; i++) ASSERT_TRUE(store.addGlyph(r)) << i;  // 1,600 B
+  EXPECT_GT(store.chunkBytes(), held);
+  store.abandon();
+  EXPECT_EQ(store.chunkBytes(), held);
+  EXPECT_FALSE(store.pieces(2, "scratch", 9).has_value());
+  EXPECT_TRUE(readsBack(store, 0, "aaa", 1, 200, 10));
+  EXPECT_TRUE(readsBack(store, 1, "bbb", 1, 50, 400));
+
+  // The same chunks take the next tokens: the 24 B left in chunk 0, then one in a chunk again.
+  ASSERT_TRUE(store.insert(2));
+  ASSERT_TRUE(writeGlyphToken(store, 2, "ccc", 1, 6, 600));  // 24 B: exactly what chunk 0 has left
+  const auto behind = store.pieces(2, "ccc", 1);
+  ASSERT_TRUE(behind.has_value());
+  EXPECT_EQ((*behind)[0].chunk, 0);
+  EXPECT_EQ((*behind)[0].at, 1000);
+  EXPECT_EQ(store.chunkBytes(), held);
+  ASSERT_TRUE(store.insert(3));
+  ASSERT_TRUE(writeGlyphToken(store, 3, "ddd", 1, 3, 700));
+  EXPECT_TRUE(readsBack(store, 0, "aaa", 1, 200, 10));
+  EXPECT_TRUE(readsBack(store, 1, "bbb", 1, 50, 400));
+  EXPECT_TRUE(readsBack(store, 2, "ccc", 1, 6, 600));
+  EXPECT_TRUE(readsBack(store, 3, "ddd", 1, 3, 700));
+
+  // The same for a token of the middle that fails for want of memory: it was stale, it is gone, the rest stay.
+  store.reset();
+  for (size_t t = 0; t < 3; t++) ASSERT_TRUE(store.insert(t));
+  ASSERT_TRUE(writeGlyphToken(store, 0, "aaa", 1, 200, 10));
+  ASSERT_TRUE(writeGlyphToken(store, 2, "ccc", 1, 3, 20));
+  const size_t before = store.chunkBytes();
+  {
+    AllocationRefusal refuse(ShapedStore::kChunkBytes);
+    ASSERT_TRUE(store.open(1, "bbb", 1));
+    ASSERT_TRUE(store.beginPiece(PieceKind::Glyphs, 0, 3));
+    bool failed = false;
+    for (int i = 0; i < 400 && !failed; i++) failed = !store.addGlyph(r);
+    EXPECT_TRUE(failed);
+    store.abandon();
+  }
+  EXPECT_EQ(store.chunkBytes(), before);
+  EXPECT_FALSE(store.pieces(1, "bbb", 1).has_value());
+  EXPECT_TRUE(readsBack(store, 0, "aaa", 1, 200, 10));
+  EXPECT_TRUE(readsBack(store, 2, "ccc", 1, 3, 20));
+}
+
+// An oversize chunk freed ahead of live chunks: the live pieces' chunk numbers follow.
+TEST(ShapedStore, AnOversizeChunkFreedBeforeLiveChunksRenumbersThem) {
+  ShapedStore store;
+  for (size_t t = 0; t < 4; t++) ASSERT_TRUE(store.insert(t));
+  // Token 0's 1,800 B take chunk 0 as their own; the small tokens go behind it, in chunk 1.
+  ASSERT_TRUE(store.open(0, "big", 1));
+  ASSERT_TRUE(store.beginPiece(PieceKind::Glyphs, 0, 3));
+  GlyphRecord r;
+  r.dx = 1;  // 6 B
+  for (int i = 0; i < 300; i++) ASSERT_TRUE(store.addGlyph(r));
+  store.commit();
+  ASSERT_TRUE(writeGlyphToken(store, 1, "aaa", 1, 20, 100));
+  ASSERT_TRUE(writeGlyphToken(store, 2, "bbb", 1, 30, 200));
+  ASSERT_TRUE(writeGlyphToken(store, 3, "ccc", 1, 250, 300));  // 1,000 B: chunk 2
+  const size_t held = store.chunkBytes();
+  store.dropFront(1);
+  EXPECT_LT(store.chunkBytes(), held);  // the big chunk is freed
+  EXPECT_TRUE(readsBack(store, 0, "aaa", 1, 20, 100));
+  EXPECT_TRUE(readsBack(store, 1, "bbb", 1, 30, 200));
+  EXPECT_TRUE(readsBack(store, 2, "ccc", 1, 250, 300));
+}
+
+TEST(ShapedStore, DropFrontOfTokensWithNoPiecesKeepsTheOthers) {
+  ShapedStore store;
+  for (size_t t = 0; t < 6; t++) ASSERT_TRUE(store.insert(t));
+  // 0: no pieces, never written; 1: a plain token (committed, none); 2 and 3 have forms; 4 is plain; 5 has a form.
+  ASSERT_TRUE(store.open(1, "plain", 1));
+  store.commit();
+  ASSERT_TRUE(writeGlyphToken(store, 3, "ccc", 1, 5, 30));
+  ASSERT_TRUE(writeGlyphToken(store, 2, "bbb", 1, 4, 20));
+  ASSERT_TRUE(store.open(4, "plain", 1));
+  store.commit();
+  ASSERT_TRUE(writeGlyphToken(store, 5, "ddd", 1, 6, 40));
+  store.dropFront(2);  // two consumed tokens with no pieces
+  EXPECT_TRUE(readsBack(store, 0, "bbb", 1, 4, 20));
+  EXPECT_TRUE(readsBack(store, 1, "ccc", 1, 5, 30));
+  ASSERT_TRUE(store.pieces(2, "plain", 1).has_value());
+  EXPECT_TRUE(store.pieces(2, "plain", 1)->empty());
+  EXPECT_TRUE(readsBack(store, 3, "ddd", 1, 6, 40));
+
+  // Consuming a mix of plain and formed tokens in front of the rest.
+  store.dropFront(3);
+  EXPECT_TRUE(readsBack(store, 0, "ddd", 1, 6, 40));
+  store.dropFront(1);
+  EXPECT_FALSE(store.pieces(0, "ddd", 1).has_value());
+}
+
+TEST(ShapedStore, APieceThatOutgrowsItsOwnChunkTwiceKeepsAllItsRecords) {
+  ShapedStore store;
+  ASSERT_TRUE(store.insert(0));
+  ASSERT_TRUE(store.open(0, "huge", 1));
+  ASSERT_TRUE(store.beginPiece(PieceKind::Glyphs, 0, 4));
+  // 700 records of 6 B: past 1,024 B (the chunk is replaced by one of 2 KB), then past 2 KB (4 KB).
+  for (int i = 0; i < 700; i++) {
+    GlyphRecord r;
+    r.glyph = static_cast<uint16_t>(i);
+    r.advance = 16;
+    r.dy = -2;
+    ASSERT_TRUE(store.addGlyph(r)) << i;
+  }
+  store.commit();
+  auto pieces = store.pieces(0, "huge", 1);
+  ASSERT_TRUE(pieces.has_value());
+  const GlyphRun run = store.glyphs((*pieces)[0]);
+  EXPECT_EQ(run.count, 700);
+  EXPECT_EQ(run.bytes, 4200);
+  int i = 0;
+  bool ok = true;
+  forEachGlyph(run, 0, false, [&](const GlyphRecord& r, int) {
+    ok = ok && r.glyph == i && r.dy == -2;
+    i++;
+  });
+  EXPECT_TRUE(ok);
+  EXPECT_EQ(i, 700);
+  EXPECT_GE(store.chunkBytes(), 4200u);  // the piece's chunk holds all of it
 }
 
 TEST(ShapedStore, AnAbandonedRewriteDropsTheStaleEntry) {
@@ -370,11 +512,11 @@ TEST(ShapedStore, TheChunkCapFailsTheTokenNotTheStore) {
 
   ASSERT_TRUE(store.insert(t));
   ASSERT_TRUE(store.open(t, "tok", 1));
-  EXPECT_FALSE(store.beginPiece(PieceKind::Glyphs, 0, 3) && store.addGlyph(GlyphRecord{}) && [&] {
-    for (int i = 0; i < 300; i++)
-      if (!store.addGlyph(GlyphRecord{})) return false;
-    return true;
-  }());
+  // The piece itself is placed in the last chunk's room; the records fail once it needs a 33rd chunk.
+  ASSERT_TRUE(store.beginPiece(PieceKind::Glyphs, 0, 3));
+  bool failed = false;
+  for (int i = 0; i < 300 && !failed; i++) failed = !store.addGlyph(GlyphRecord{});
+  EXPECT_TRUE(failed);
   store.abandon();
   EXPECT_FALSE(store.pieces(t, "tok", 1).has_value());
   for (size_t u = 0; u < ShapedStore::kMaxChunks; u++)
