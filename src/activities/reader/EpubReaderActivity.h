@@ -233,8 +233,9 @@ class EpubReaderActivity final : public Activity {
   // Spine whose image-degraded cache was already discarded for a rebuild this session (see the
   // cache probe in buildSection): one retry, not one per entry.
   int imageHeaderRebuildSpine_ = -1;
-  // Same one-shot for a cache whose build demoted a table row or skipped CSS lookups on the
-  // heap (Section::isTableRowDegraded / isCssLowHeapDegraded, persisted in the status byte).
+  // Same one-shot for a cache whose build demoted a table row, skipped CSS lookups on the heap,
+  // or laid a shaped-script run out unshaped (Section::isTableRowDegraded / isCssLowHeapDegraded /
+  // isShapingDegraded, persisted in the status byte).
   int degradedLayoutRebuildSpine_ = -1;
   struct RenderPhaseStats {
     unsigned long prewarmMs = 0UL;
@@ -1070,7 +1071,7 @@ class EpubReaderActivity final : public Activity {
 #endif
   void applyOrientation(uint8_t orientation);
   void applyTextDarkness(uint8_t textDarkness);
-  void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
+  void toggleAutoPageTurn(uint8_t seconds);
   void stopAutomaticPageTurn();
   void applyBookReaderOverrides(int8_t embeddedStyleOverride, int8_t imageRenderingOverride, int8_t fontFamilyOverride,
                                 const std::string& sdFontFamilyOverride, int8_t fontSizeOverride,

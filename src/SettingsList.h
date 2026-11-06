@@ -606,6 +606,9 @@ inline void buildSettings(const RowSink& emit) {
                            StrId::STR_CAT_SYSTEM));
   emit(SettingInfo::Toggle(StrId::STR_SKIP_HTTPS_VALIDATION, &CrossPointSettings::skipHttpsValidation,
                            "skipHttpsValidation", StrId::STR_CAT_SYSTEM));
+  // Set from the reader menu's picker, so it stays out of the settings screen.
+  emit(SettingInfo::Value(StrId::STR_AUTO_TURN_SECONDS, &CrossPointSettings::autoTurnSeconds, {5, 120, 1},
+                          "autoTurnSeconds"));
   // OPDS download settings are edited from the OPDS server list. Keep them
   // category-less so they persist and remain available to the web API without
   // cluttering the device settings screen.

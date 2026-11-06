@@ -39,8 +39,13 @@ struct TypographyProfile {
   // spaces). Not a layout rule: the reader asks it what a chapter's glyphs cost a font drawn on demand
   // (InPlaceBuildGate.h).
   bool cjkRepertoire = false;
+  // The language is written in a script the shaper shapes (the ten Indic scripts). Not a layout rule: the reader asks
+  // it whether a chapter's build shapes on the heap (InPlaceBuildGate.h).
+  bool shapedScript = false;
   // The language's hyphenation patterns, null when it has none.
   const LanguageHyphenator* hyphenator = nullptr;
+  // ot::languageTagsFor(the tag): the OpenType language systems a shaped word tries; null: the script's default.
+  const uint32_t* shapingLanguage = nullptr;
 
   // The profile for a BCP 47 tag ("ja", "zh-Hant-TW", "zh_CN", "en-US"); Latin rules for an empty or unknown
   // one. Case and '-'/'_' do not matter.

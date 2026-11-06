@@ -57,9 +57,9 @@ void EpdFontFamily::prefetchGlyphs(const uint16_t* glyphs, const size_t count, c
   if (drawsGlyphKeys(style)) getFont(style)->data->provider->prefetchGlyphs(glyphs, count);
 }
 
-ShapingFace* EpdFontFamily::shapingFace(const Style style, uint32_t* ppem26_6) const {
+ShapingFace* EpdFontFamily::shapingFace(const Style style, uint32_t* ppem26_6, bool* refused) const {
   const EpdFont* font = getFont(style);
-  return font && font->data->provider ? font->data->provider->shapingFace(ppem26_6) : nullptr;
+  return font && font->data->provider ? font->data->provider->shapingFace(ppem26_6, refused) : nullptr;
 }
 
 void EpdFontFamily::prefetch(const char* utf8Text, const uint8_t styleMask) const {

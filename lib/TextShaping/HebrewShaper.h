@@ -12,4 +12,7 @@ namespace HebrewShaper {
 // the yod.
 bool shape(const char* text, size_t len, TextShaping::Unit* units, size_t capacity, size_t& count);
 
+// True when a yod-he-vav-he match (its trailing marks included) ends at `len`.
+bool endsWithName(const char* text, size_t len);
+
 }  // namespace HebrewShaper

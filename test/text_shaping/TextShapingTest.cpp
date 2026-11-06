@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 
+#include "IndicShaper.h"
 #include "TextShaping.h"
 
 namespace {
@@ -149,4 +150,94 @@ TEST(TextShapingTest, ANameCutByTheLengthBeforeItsLastHeIsNotAName) {
   TextShaping::Unit units[16];
   size_t count = 0;
   EXPECT_FALSE(TextShaping::shape(s.data(), 6, units, 16, count));
+}
+
+namespace {
+
+constexpr uint32_t DEVA_KA = 0x0915, DEVA_SSA = 0x0937, DEVA_MA = 0x092E, DEVA_RA = 0x0930, DEVA_HA = 0x0939,
+                   DEVA_NA = 0x0928, DEVA_DA = 0x0926, DEVA_I = 0x093F, DEVA_II = 0x0940, VIRAMA = 0x094D, ZWJ = 0x200D,
+                   DANDA = 0x0964, BENG_KA = 0x0995, BENG_I = 0x09BF;
+
+TextShaping::GroupToken token(const std::string& text, uint32_t key) { return {text, key}; }
+
+bool merges(const std::string& previous, uint32_t previousKey, const std::string& next, uint32_t nextKey,
+            bool indicGroup = true) {
+  return TextShaping::mergesWithPrevious(token(previous, previousKey), token(next, nextKey), indicGroup);
+}
+
+}  // namespace
+
+TEST(TextShapingMerge, ASpanSplitOfOneStyleMerges) {
+  EXPECT_TRUE(merges(utf8({DEVA_HA, DEVA_I}), 1, utf8({DEVA_NA, VIRAMA, DEVA_DA, DEVA_II}), 1));
+}
+
+TEST(TextShapingMerge, InsideASyllableAnotherStyleMerges) {
+  EXPECT_TRUE(merges(utf8({DEVA_KA}), 1, utf8({DEVA_I}), 2));
+  EXPECT_TRUE(merges(utf8({DEVA_KA, VIRAMA}), 1, utf8({DEVA_SSA}), 2));
+  EXPECT_TRUE(merges(utf8({DEVA_RA, VIRAMA}), 1, utf8({DEVA_KA}), 2));
+  EXPECT_TRUE(merges(utf8({DEVA_KA, VIRAMA}), 1, utf8({ZWJ, DEVA_SSA}), 2));
+}
+
+TEST(TextShapingMerge, BetweenSyllablesAnotherStyleStaysApart) {
+  EXPECT_FALSE(merges(utf8({DEVA_KA}), 1, utf8({DEVA_MA}), 2));
+}
+
+TEST(TextShapingMerge, AGroupWithoutAShapedLetterMergesNothing) { EXPECT_FALSE(merges("foo", 1, "bar", 1, false)); }
+
+TEST(TextShapingMerge, TheDivineNameTakesAMarkOnlyTokenGluedToIt) {
+  const std::string name = utf8({YOD, 0x05B0, HE, VAV, 0x05B8, HE});
+  EXPECT_TRUE(merges(name, 1, utf8({0x0591}), 1, false));
+  EXPECT_TRUE(merges(name, 1, utf8({0x0591}), 2, false));
+}
+
+TEST(TextShapingMerge, AMarkOnlyTokenAfterAnotherWordStaysApart) {
+  EXPECT_FALSE(merges(utf8({0x05E9, 0x05DC, 0x05D5, 0x05DD}), 1, utf8({0x0591}), 1, false));
+}
+
+TEST(IndicRuns, ARunIsOneScriptAndTheSharedCodePointsAroundIt) {
+  IndicShaper::Run runs[8];
+  std::string s = utf8({DEVA_KA, DEVA_I, DANDA});
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
+  EXPECT_EQ(runs[0].begin, 0);
+  EXPECT_EQ(runs[0].end, 9);
+  ASSERT_NE(runs[0].script, nullptr);
+  EXPECT_STREQ(runs[0].script->name, "Devanagari");
+
+  s = "(" + utf8({DEVA_KA, DEVA_I}) + "),";
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
+  EXPECT_EQ(runs[0].begin, 1);
+  EXPECT_EQ(runs[0].end, 7);
+
+  s = utf8({BENG_KA, BENG_I, DEVA_KA, DEVA_I});
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 2u);
+  EXPECT_STREQ(runs[0].script->name, "Bengali");
+  EXPECT_STREQ(runs[1].script->name, "Devanagari");
+  EXPECT_EQ(runs[0].end, runs[1].begin);
+
+  s = utf8({DANDA});
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
+  EXPECT_EQ(runs[0].script, nullptr);
+  EXPECT_EQ(runs[0].end, 3);
+
+  EXPECT_EQ(IndicShaper::scanRuns("abc", runs), 0u);
+  EXPECT_TRUE(IndicShaper::holdsIndic(utf8({DEVA_KA})));
+  EXPECT_FALSE(IndicShaper::holdsIndic("abc"));
+  EXPECT_FALSE(IndicShaper::holdsIndic(std::string_view(utf8({DEVA_KA}).data(), 2)));
+}
+
+TEST(IndicRuns, MaxRunsHoldsEveryToken) {
+  // Two scripts abut with no byte between them: letters of 3 bytes, alternating, are one run each.
+  std::string s;
+  for (int i = 0; i < 33; i++) s += utf8({DEVA_KA, BENG_KA});
+  s += utf8({DEVA_KA});  // 67 letters, 201 bytes
+  ASSERT_EQ(s.size(), 201u);
+  static_assert(IndicShaper::maxRuns(201) == 68);
+  IndicShaper::Run runs[IndicShaper::maxRuns(201)];
+  const size_t count = IndicShaper::scanRuns(s, runs);
+  EXPECT_EQ(count, 67u);
+  EXPECT_LE(count, IndicShaper::maxRuns(s.size()));
+  EXPECT_EQ(runs[66].end, 201);
+  // A token of 200 bytes (66 letters and 2 more bytes) fits the array maxRuns(200) gives.
+  static_assert(IndicShaper::maxRuns(200) == 67);
+  EXPECT_LE(IndicShaper::scanRuns(std::string_view(s.data(), 200), runs), IndicShaper::maxRuns(200));
 }

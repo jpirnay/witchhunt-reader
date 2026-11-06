@@ -340,8 +340,7 @@ class PlanBuilder {
     b.pauses[GSUB].bind(nullptr, 0);     // witchhunt: deviation 1
     b.pauses[GPOS].bind(nullptr, 0);     // witchhunt: deviation 1
     scratch_.reset();                    // witchhunt: deviation 1
-    plan_.finish(face_);
-    return true;
+    return plan_.finish(face_);          // witchhunt: deviation 13 - false: the lookup digests' block was refused
   }
 
  private:

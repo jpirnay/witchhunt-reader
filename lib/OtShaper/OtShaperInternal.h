@@ -76,6 +76,11 @@ unsigned scanSyllable(const uint8_t* classes, const uint8_t classCount, const ui
 }
 
 // The Indic shaper (hb-ot-shaper-indic.cc).
+// consonant_position_from_face(): BASE_C, BELOW_C or POST_C for the glyph
+// `consonant` next to the font's `virama` glyph, from the would-substitute
+// walks of the plan's blwf, vatu, pstf and pref stages.
+// witchhunt: deviation 13 - declared here for Plan::consonantPosition(), which remembers its answers.
+uint8_t consonantPositionFromFace(const Face& face, const Plan& plan, uint32_t consonant, uint32_t virama);
 void indicSetupMasks(Buffer& buffer);
 void indicSetupSyllables(Buffer& buffer);
 void indicInitialReordering(const Face& face, const Plan& plan, Buffer& buffer);

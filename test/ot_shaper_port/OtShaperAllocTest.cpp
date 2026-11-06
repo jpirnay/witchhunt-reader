@@ -240,10 +240,11 @@ TEST(OtShaperAlloc, NothingThrowingIsAllocated) {
   EXPECT_EQ(gAlloc.liveNothrowBytes, 0u);
 }
 
-// Plan::build takes five blocks, in order: the builder's scratch, GSUB's and
-// GPOS's lists, GSUB's and GPOS's computed filters. A refused scratch or
-// list block fails the build with the plan empty and nothing held; a refused
-// filter block leaves its table unfiltered, which shapes the same.
+// Plan::build takes six blocks, in order: the builder's scratch, GSUB's and
+// GPOS's lists, the lookup digests (deviation 13), GSUB's and GPOS's computed
+// subtable filters. A refused scratch, list or digest block fails the build
+// with the plan empty and nothing held; a refused filter block leaves its
+// table's subtables unfiltered, which shapes the same.
 TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
   gBuffer.setStorage(gStorage, sizeof(gStorage));
   for (const ShapingFixture& fx : kShapingFixtures) {
@@ -269,9 +270,9 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
       // A filter block per table with lookups. Every fixture has lookups in
       // both tables, so k below reaches both filter blocks.
       ASSERT_EQ(filteredCount, 2u) << fx.script;
-      ASSERT_EQ(blocks, 3 + filteredCount) << fx.script;
+      ASSERT_EQ(blocks, 4 + filteredCount) << fx.script;
       for (size_t i = 0; i < filteredCount; i++) {
-        EXPECT_TRUE(plan.settings(filtered[i], 0).hasDigest) << fx.script << " table " << filtered[i];
+        EXPECT_NE(plan.settings(filtered[i], 0).subtableDigests, nullptr) << fx.script << " table " << filtered[i];
       }
       for (size_t w = 0; w < fx.count; w++) {
         expected.push_back(shaped(font.face, plan, fx.words[w].utf8));
@@ -288,7 +289,7 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
           const Armed armed(k);
           built = plan.build(font.face, font.script, noLanguage());
         }
-        if (k < 3) {
+        if (k < 4) {
           EXPECT_FALSE(built) << fx.script << " refused " << k;
           EXPECT_TRUE(isEmpty(plan)) << fx.script << " refused " << k;
           EXPECT_EQ(plan.memoryBytes(), sizeof(ot::Plan)) << fx.script << " refused " << k;
@@ -296,11 +297,12 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
         } else {
           EXPECT_TRUE(built) << fx.script << " refused " << k;
           EXPECT_LT(plan.memoryBytes(), fullBytes) << fx.script << " refused " << k;
-          // The refused table runs unfiltered; the other keeps its filters.
-          const int refusedTable = filtered[k - 3];
+          // The refused table's subtables run unfiltered; the other keeps its
+          // filters, and both keep their lookup digests (in the plan's block).
+          const int refusedTable = filtered[k - 4];
           for (size_t i = 0; i < filteredCount; i++) {
             const int t = filtered[i];
-            EXPECT_EQ(plan.settings(t, 0).hasDigest, t != refusedTable)
+            EXPECT_EQ(plan.settings(t, 0).subtableDigests != nullptr, t != refusedTable)
                 << fx.script << " refused " << k << " table " << t;
           }
           for (size_t w = 0; w < fx.count; w++) {
@@ -315,9 +317,10 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheBuildCleanly) {
 }
 
 // The computed route allocates the scratch, GSUB's and GPOS's lists, then the
-// two filters; the scratch is freed before the first filter, so the peak is
-// the lists plus the larger of the scratch and the two filters. With CPac in
-// the font there are no filters and the peak is all three blocks.
+// lookup digests and the two filters; the scratch is freed before the
+// digests, so the peak is the lists plus the larger of the scratch and the
+// digests with the two filters. With CPac in the font there are no filters,
+// and the peak is the lists plus the larger of the scratch and the digests.
 TEST(OtShaperAlloc, TheComputedRouteFreesTheScratchBeforeTheFilters) {
   for (const ShapingFixture& fx : kShapingFixtures) {
     for (const bool asStored : {false, true}) {
@@ -335,18 +338,19 @@ TEST(OtShaperAlloc, TheComputedRouteFreesTheScratchBeforeTheFilters) {
         std::copy(std::begin(gAlloc.sizes), std::end(gAlloc.sizes), std::begin(sizes));
       }
       if (asStored) {
-        EXPECT_EQ(calls, 3u) << fx.script;
-        EXPECT_EQ(peak, sizes[0] + sizes[1] + sizes[2]) << fx.script;
+        EXPECT_EQ(calls, 4u) << fx.script;
+        EXPECT_EQ(peak, sizes[1] + sizes[2] + std::max(sizes[0], sizes[3])) << fx.script;
       } else {
-        EXPECT_EQ(calls, 5u) << fx.script;
-        EXPECT_EQ(peak, sizes[1] + sizes[2] + std::max(sizes[0], sizes[3] + sizes[4])) << fx.script;
+        EXPECT_EQ(calls, 6u) << fx.script;
+        EXPECT_EQ(peak, sizes[1] + sizes[2] + std::max(sizes[0], sizes[3] + sizes[4] + sizes[5])) << fx.script;
       }
     }
   }
 }
 
-// Plan::load takes GSUB's and GPOS's lists; with CPac in the font, no
-// filters. Either refused fails the load with the plan empty.
+// Plan::load takes GSUB's and GPOS's lists and the lookup digests; with CPac
+// in the font, no filters. Any of them refused fails the load with the plan
+// empty.
 TEST(OtShaperAlloc, EachRefusedBlockFailsTheLoadCleanly) {
   for (const ShapingFixture& fx : kShapingFixtures) {
     FixtureFace font;
@@ -361,9 +365,9 @@ TEST(OtShaperAlloc, EachRefusedBlockFailsTheLoadCleanly) {
         blocks = gAlloc.nothrow;
       }
       EXPECT_TRUE(loaded) << fx.script;
-      EXPECT_EQ(blocks, 2u) << fx.script;
+      EXPECT_EQ(blocks, 3u) << fx.script;
     }
-    for (size_t k = 0; k < 2; k++) {
+    for (size_t k = 0; k < 3; k++) {
       {
         ot::Plan plan;
         bool loaded = false;

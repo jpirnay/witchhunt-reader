@@ -55,6 +55,9 @@ class Section {
   // (ChapterHtmlSlimParser::tableRowDegraded). Same persistence and rebuild policy as the
   // CSS flag: the pages are usable, the layout is what the heap allowed.
   bool tableRowDegraded_ = false;
+  // Set by the last build when a shaped-script run was laid out unshaped
+  // (ChapterHtmlSlimParser::shapingDegraded). Same persistence and rebuild policy as the table-row flag.
+  bool shapingDegraded_ = false;
   // Set by the last build when a fixed-capacity limit changed its output (ChapterHtmlSlimParser::
   // capOverflowFlags, or a page past Page::MAX_ELEMENTS). Deterministic -- a rebuild would hit
   // the same limit -- so it is persisted (kStatusSimplified) for the reader to say so, not to
@@ -338,6 +341,9 @@ class Section {
   // True when the last build demoted a table row to paragraphs, or the loaded cache was written
   // by such a build. The reader rebuilds such a chapter once per session when it is entered.
   bool isTableRowDegraded() const { return tableRowDegraded_; }
+  // True when the last build laid a shaped-script run out unshaped, or the loaded cache was written by such a build.
+  // Rebuilt once per spine per session on entry, as for the table-row flag.
+  bool isShapingDegraded() const { return shapingDegraded_; }
   // True when the build (or the loaded cache's build) exceeded a fixed-capacity limit and shows
   // less than the book: see ChapterHtmlSlimParser::CapOverflow.
   bool isSimplified() const { return simplified_; }

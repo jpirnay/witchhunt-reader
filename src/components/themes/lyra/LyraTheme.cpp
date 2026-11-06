@@ -52,6 +52,16 @@ constexpr int mainMenuIconSize = 32;
 constexpr int listIconSize = 24;
 constexpr int mainMenuColumns = 2;
 constexpr int minAdaptiveMenuRowHeight = 40;
+// The faces the home card's title and author may take, largest first. Logical slots, so they
+// follow the UI font size. The title stops at the last face every board has in bold: below that it
+// would sit under the author in thin type, hard to read on the selection's dither. Its smaller face
+// gets a fourth line instead, at about the height of three lines of the larger one.
+struct CardFace {
+  int fontId;
+  int maxLines;
+};
+constexpr CardFace kTitleFaces[] = {{UI_12_FONT_ID, 3}, {UI_10_FONT_ID, 4}};
+constexpr CardFace kAuthorFaces[] = {{UI_10_FONT_ID, 2}, {SMALL_FONT_ID, 2}};
 
 int coverWidth = 0;
 
@@ -691,11 +701,9 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     // percent badge on this layout — the percentage now lives in the text line.
     const std::string statusLine = BookProgressPresentation::formatStatus(book, progressPercent);
 
-    auto titleLines = renderer.wrappedText(UI_12_FONT_ID, book.title.c_str(), textWidth, 3, EpdFontFamily::BOLD);
     auto authorLines = renderer.wrappedText(UI_10_FONT_ID, book.author.c_str(), textWidth, 2);
     auto seriesLines = renderer.wrappedText(UI_10_FONT_ID, book.series.c_str(), textWidth, 2);
 
-    const int titleLineHeight = renderer.getLineHeight(UI_12_FONT_ID);
     const int smallLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
 
     // What you have put into the book, under what is left of it. This column is only the part of
@@ -711,13 +719,36 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
     const int gap = smallLineHeight / 2;
     constexpr int tightGap = 4;
     CardTextFit::Parts parts{};
-    parts[CardTextFit::Title] = {titleLineHeight, static_cast<int>(titleLines.size()), 0};
     parts[CardTextFit::Author] = {smallLineHeight, static_cast<int>(authorLines.size()), gap};
     // Author and series are one group under one gap.
     parts[CardTextFit::Series] = {smallLineHeight, static_cast<int>(seriesLines.size()), authorLines.empty() ? gap : 0};
     parts[CardTextFit::Status] = {smallLineHeight, statusLine.empty() ? 0 : 1, gap};
     parts[CardTextFit::History] = {historyLineHeight, static_cast<int>(historyLines.size()), gap};
-    const CardTextFit::Result fit = CardTextFit::fit(parts, tileHeight - 2 * hPaddingInSelection, tightGap);
+
+    // A title or author that loses words steps down a face, whether its own lines ran out or the
+    // tile took some of them. A narrow column needs this: three lines of the largest face cut "The
+    // Book That Wouldn't Burn" at its last word in Murphy's 110 px. With no face to hold it whole
+    // the smallest stands, because that one cuts the least.
+    CardTextFit::Result fit;
+    const auto settleFace = [&](const CardTextFit::PartId part, const auto& faces, const std::string& text,
+                                const EpdFontFamily::Style style, std::vector<std::string>& lines) {
+      int font = 0;
+      for (const CardFace& face : faces) {
+        bool whole = false;
+        font = face.fontId;
+        lines = renderer.wrappedText(font, text.c_str(), textWidth, face.maxLines, style, &whole);
+        parts[part].lineHeight = renderer.getLineHeight(font);
+        parts[part].lines = static_cast<int>(lines.size());
+        fit = CardTextFit::fit(parts, tileHeight - 2 * hPaddingInSelection, tightGap);
+        if (whole && fit.lines[part] == parts[part].lines) break;
+      }
+      return font;
+    };
+    std::vector<std::string> titleLines;
+    const int titleFont = settleFace(CardTextFit::Title, kTitleFaces, book.title, EpdFontFamily::BOLD, titleLines);
+    // The title goes first: a smaller author can only leave it more room, never less.
+    const int authorFont =
+        settleFace(CardTextFit::Author, kAuthorFaces, book.author, EpdFontFamily::REGULAR, authorLines);
 
     const auto rewrap = [&](std::vector<std::string>& lines, const CardTextFit::PartId part, const int fontId,
                             const std::string& text, const EpdFontFamily::Style style) {
@@ -725,8 +756,8 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
         lines = renderer.wrappedText(fontId, text.c_str(), textWidth, fit.lines[part], style);
       }
     };
-    rewrap(titleLines, CardTextFit::Title, UI_12_FONT_ID, book.title, EpdFontFamily::BOLD);
-    rewrap(authorLines, CardTextFit::Author, UI_10_FONT_ID, book.author, EpdFontFamily::REGULAR);
+    rewrap(titleLines, CardTextFit::Title, titleFont, book.title, EpdFontFamily::BOLD);
+    rewrap(authorLines, CardTextFit::Author, authorFont, book.author, EpdFontFamily::REGULAR);
     rewrap(seriesLines, CardTextFit::Series, UI_10_FONT_ID, book.series, EpdFontFamily::REGULAR);
     if (fit.lines[CardTextFit::History] < static_cast<int>(historyLines.size())) {
       historyLines.clear();
@@ -748,8 +779,8 @@ void LyraTheme::drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std:
         y += parts[part].lineHeight;
       }
     };
-    drawPart(titleLines, CardTextFit::Title, UI_12_FONT_ID, EpdFontFamily::BOLD);
-    drawPart(authorLines, CardTextFit::Author, UI_10_FONT_ID, EpdFontFamily::REGULAR);
+    drawPart(titleLines, CardTextFit::Title, titleFont, EpdFontFamily::BOLD);
+    drawPart(authorLines, CardTextFit::Author, authorFont, EpdFontFamily::REGULAR);
     drawPart(seriesLines, CardTextFit::Series, UI_10_FONT_ID, EpdFontFamily::REGULAR);
     if (!statusLine.empty()) {
       renderer.drawText(

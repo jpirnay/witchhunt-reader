@@ -18,8 +18,10 @@ constexpr unsigned MAX_FEATURE_VALUE = 255;
 struct LookupSettings {
   // Glyphs the lookup can start at (lookupDigest()); lets application skip
   // the others without reading the lookup's subtables.
-  bool hasDigest = false;
-  Digest digest;
+  // witchhunt: deviation 13 - no hasDigest flag: every plan holds every
+  // planned lookup's digest, so Plan::settings() always sets it. The default,
+  // every glyph, is for a call without a plan: it filters nothing.
+  Digest digest{{~0ull, ~0ull, ~0ull}};
   // Per subtable, the glyphs it can start at: DIGEST_BYTES-byte records.
   // nullptr: subtables are not filtered.
   const uint8_t* subtableDigests = nullptr;

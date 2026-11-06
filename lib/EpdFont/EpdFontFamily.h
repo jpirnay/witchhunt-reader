@@ -48,8 +48,9 @@ class EpdFontFamily {
   /// The glyph-ID prefetch: the font drawing `style` renders the glyphs it lacks in one batch, if it draws keys.
   void prefetchGlyphs(const uint16_t* glyphs, size_t count, Style style) const;
   /// The shaping face the provider of the font drawing `style` gives (GlyphProvider::shapingFace), with the pixels
-  /// per em (26.6) its glyphs are drawn at; nullptr when that font has no provider or the provider no face.
-  ShapingFace* shapingFace(Style style, uint32_t* ppem26_6) const;
+  /// per em (26.6) its glyphs are drawn at; nullptr when that font has no provider or the provider no face, and also
+  /// (with `*refused` set, when `refused` is not null) when the provider's face was refused its memory.
+  ShapingFace* shapingFace(Style style, uint32_t* ppem26_6, bool* refused = nullptr) const;
 
  private:
   const EpdFont* regular;

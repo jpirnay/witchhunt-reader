@@ -29,6 +29,7 @@
 // pull Page.h in anyway.
 #include "../Page.h"
 #include "../ParsedText.h"
+#include "../WordShapeCache.h"
 #include "../blocks/ImageBlock.h"
 #include "../blocks/TextBlock.h"
 #include "../css/CssParser.h"
@@ -163,6 +164,32 @@ class ChapterHtmlSlimParser final : public Print {
   bool partWordLastWasCjk_ = false;
   // The last codepoint of the last word flushed, kept across whitespace (set by flushPartWordBuffer).
   uint32_t lastTextCodepoint_ = 0;
+  // Deviation 8. The last text code point consumeText took, kept across calls and inline element edges (0 after
+  // whitespace and at a block's start); and a ZWJ or ZWNJ held after a shaped-script letter until the next code point
+  // says whether it is alone.
+  uint32_t joinerLookBehind_ = 0;
+  uint32_t heldJoiner_ = 0;         // 0, U+200C or U+200D
+  bool droppingJoinerRun_ = false;  // a second joiner came: it, the held one and the rest of the run go
+  // Puts the held joiner into the word buffer ahead of the text code point at `offset` (`nextLen` bytes), which sets
+  // the word's offset if the joiner opens it. A word with no room for the joiner and that code point is flushed first,
+  // so the two stay together. False when the stream failed.
+  bool releaseHeldJoiner(uint32_t offset, int nextLen);
+  // Ends the held joiner's wait at a word's end: it goes last in the word in the buffer; when an inline end sent that
+  // word out already and no space came since, onto its last token; else it goes.
+  void settleHeldJoiner();
+  // Hands on, as text, a split-sequence tail that never got its rest (malformed text), at an element's edge.
+  void deliverSplitTail();
+  // The joiner's context ends with the text: a block's or a table cell's end, a block's start.
+  void endJoinerContext() {
+    settleHeldJoiner();
+    joinerLookBehind_ = 0;
+    droppingJoinerRun_ = false;
+  }
+  // The start of a 3-byte sequence (E0 or E2 lead) a SAX chunk ended inside, with the visible offset of its first byte;
+  // characterData completes it from the next chunk, so a letter or joiner is never read in halves.
+  char splitTail_[2] = {};
+  uint8_t splitTailLen_ = 0;
+  uint32_t splitTailOffset_ = 0;
   // A whitespace run with a line break in it followed unspaced CJK text or a quotation mark
   // (lastTextCodepoint_). If the next word starts with unspaced CJK, or with a quote after unspaced
   // CJK (flushPartWordBuffer decides), the run vanishes instead of becoming a space (CSS Text 3
@@ -647,6 +674,10 @@ class ChapterHtmlSlimParser final : public Print {
   // above the section's feed-chunk block and below nothing that outlives the page (a mid-build
   // draw's font-slot scope opens and closes between two slices): strictly LIFO.
   BuildArena::Block pageBlock_;
+  // The build's cache of shaped words, in buildArena_'s free tail (WordShapeCache.h): armed in setup() after the SAX
+  // state is taken, bound to each ParsedText beside its line arena, disarmed at the end of finalize(), before the
+  // section releases the feed-chunk block. Unarmed (no lent arena, or no room for it), every lookup is bypassed.
+  WordShapeCache wordCache_;
 
   // Streaming state for the Print-derived parsing API.
   size_t totalStreamSize = 0;
@@ -660,6 +691,8 @@ class ChapterHtmlSlimParser final : public Print {
   // Set when any table row was demoted to paragraphs (degradeRow), for any reason: the pages
   // are usable but the cache holds a layout the heap chose, not the book. See tableRowDegraded().
   bool tableRowDegradedAny_ = false;
+  // Set by any ParsedText of this parse that laid a shaped-script run out unshaped. See shapingDegraded().
+  bool shapingDegradedAny_ = false;
   // Fixed-capacity limits this parse ran into that changed its output (memory audit 2026-09,
   // R4). Each is logged at ERR once per parse and the union is latched into the section status
   // byte (Section::isSimplified) -- a deterministic condition, so nothing rebuilds on it; the
@@ -903,6 +936,8 @@ class ChapterHtmlSlimParser final : public Print {
   // heading text and takes both (applyHeadingScope): otherwise only the first such block got them,
   // by merging into the heading's still-empty block. INT_MAX when no heading is open.
   int headingDepth_ = INT_MAX;
+  // The outermost open <center>: every block inside it is centred (startElement).
+  int centerDepth_ = INT_MAX;
   CssTextAlign headingAlignment_ = CssTextAlign::Center;
   float headingFontSizeMultiplier_ = 1.0f;
   void applyHeadingScope(BlockStyle& blockStyle, const CssStyle& cssStyle) const;
@@ -924,6 +959,7 @@ class ChapterHtmlSlimParser final : public Print {
   void endBlockSpan();
   bool heapAllowsTableRowLayout() const;
   bool flushPartWordBuffer();
+  bool flushPartWordGlued();
   void makePages();
   // Puts currentTextBlock's top spacing on the current page, once per logical paragraph. Both
   // places that lay the block out call it first: makePages() and the long-block split in
@@ -1069,6 +1105,12 @@ class ChapterHtmlSlimParser final : public Print {
   // reader can rebuild the chapter once when memory allows, instead of keeping the demoted
   // layout for good (memory audit 2026-09, F3/R3).
   [[nodiscard]] bool tableRowDegraded() const { return tableRowDegradedAny_; }
+  // True when a shaped-script run was laid out unshaped (no memory for it, or the font could not shape it).
+  // Latched into the section status byte; the reader rebuilds once, as for tableRowDegraded().
+  [[nodiscard]] bool shapingDegraded() const { return shapingDegradedAny_; }
+  // The word cache's counters, and the tail it was armed with (0: never armed), for the build's log line.
+  [[nodiscard]] const WordShapeCache::Stats& wordCacheStats() const { return wordCache_.stats(); }
+  [[nodiscard]] size_t wordCacheBytes() const { return wordCache_.bytes(); }
   enum CapOverflow : uint8_t {
     kCapFootnotesPerPage = 1u << 0,   // Page::MAX_FOOTNOTES_PER_PAGE: later links on the page dropped
     kCapAnchorsPerChapter = 1u << 1,  // MAX_ANCHORS_PER_CHAPTER, or no heap for resident ones: ids dropped

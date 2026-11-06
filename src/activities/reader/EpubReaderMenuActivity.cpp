@@ -8,6 +8,7 @@
 #include "MappedInputManager.h"
 #include "OnOffOverride.h"
 #include "SdCardFontGlobals.h"
+#include "activities/SliderPickerActivity.h"
 #include "activities/settings/SettingActionDispatch.h"
 #include "components/UITheme.h"
 #include "components/themes/HeaderLayout.h"
@@ -61,15 +62,20 @@ std::string defaultFontFamilyLabel(const SettingInfo& item) {
   return item.getEnumOptionLabel(static_cast<uint8_t>(SETTINGS.fontFamily + 1));
 }
 
-// drawChrome() puts the progress line directly under the title, and buildScreen() the tab bar under
-// that. Both measured from the lines above them, which grow with the UI font size: at fixed offsets
-// the large font's title ran into the progress line and the progress line into the tab bar.
-int progressLineY(const GfxRenderer& renderer, const Rect& content) {
+// drawChrome() puts the chapter's title under the book's, the progress line under that, and buildScreen() the tab bar
+// under that. All measured from the lines above them, which grow with the UI font size: at fixed offsets the large
+// font's title ran into the progress line and the progress line into the tab bar.
+int chapterLineY(const GfxRenderer& renderer, const Rect& content) {
   return HeaderLayout::overlayTitleBottom(content, renderer.getLineHeight(UI_12_FONT_ID));
 }
 
-int tabBarTop(const GfxRenderer& renderer, const Rect& content) {
-  return progressLineY(renderer, content) + renderer.getLineHeight(UI_10_FONT_ID) + HeaderLayout::OVERLAY_TITLE_GAP;
+int progressLineY(const GfxRenderer& renderer, const Rect& content, const bool hasChapterLine) {
+  return chapterLineY(renderer, content) + (hasChapterLine ? renderer.getLineHeight(UI_10_FONT_ID) : 0);
+}
+
+int tabBarTop(const GfxRenderer& renderer, const Rect& content, const bool hasChapterLine) {
+  return progressLineY(renderer, content, hasChapterLine) + renderer.getLineHeight(UI_10_FONT_ID) +
+         HeaderLayout::OVERLAY_TITLE_GAP;
 }
 }  // namespace
 
@@ -78,9 +84,9 @@ ReaderSizeList EpubReaderMenuActivity::pendingSizeList() const {
 }
 
 EpubReaderMenuActivity::EpubReaderMenuActivity(
-    GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title, const int currentPage,
-    const int totalPages, const int bookProgressPercent, const uint8_t currentOrientation, const bool hasFootnotes,
-    const int8_t initialEmbeddedStyleOverride, const int8_t initialImageRenderingOverride,
+    GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title, const std::string& chapterTitle,
+    const int currentPage, const int totalPages, const int bookProgressPercent, const uint8_t currentOrientation,
+    const bool hasFootnotes, const int8_t initialEmbeddedStyleOverride, const int8_t initialImageRenderingOverride,
     const int8_t initialFontFamilyOverride, const std::string& initialSdFontFamilyOverride,
     const int8_t initialFontSizeOverride, const uint8_t initialTextDarkness, const int8_t initialBionicReadingOverride,
     const int8_t initialGuideDotsOverride, const int8_t initialParagraphAlignmentOverride,
@@ -110,6 +116,7 @@ EpubReaderMenuActivity::EpubReaderMenuActivity(
       pendingVerticalTextOverride(initialVerticalTextOverride),
       pendingPublisherFontsOverride(initialPublisherFontsOverride),
       title(title),
+      chapterTitle(chapterTitle),
       currentPage(currentPage),
       totalPages(totalPages),
       bookProgressPercent(bookProgressPercent) {
@@ -137,8 +144,8 @@ void EpubReaderMenuActivity::buildMenuItems(bool hasFootnotes, bool hasStarredPa
   if (hasPrintedPages) {
     navigationItems.push_back(SettingInfo::Action(StrId::STR_GO_TO_PRINTED_PAGE, SettingAction::None));
   }
-  // Auto page turn: ACTION type with custom cycling in onActionSelected
-  navigationItems.push_back(SettingInfo::Action(StrId::STR_AUTO_TURN_PAGES_PER_MIN, SettingAction::None));
+  // Auto page turn: ACTION type with its own picker in onActionSelected
+  navigationItems.push_back(SettingInfo::Action(StrId::STR_AUTO_TURN_SECONDS, SettingAction::None));
   navigationItems.push_back(SettingInfo::Action(StrId::STR_STAR_PAGE, SettingAction::None));
   if (hasStarredPages) {
     navigationItems.push_back(SettingInfo::Action(StrId::STR_STARRED_PAGES, SettingAction::None));
@@ -472,7 +479,7 @@ EpubReaderMenuActivity::MenuAction EpubReaderMenuActivity::actionForNameId(StrId
       return MenuAction::FOOTNOTES;
     case StrId::STR_DICTIONARY:
       return MenuAction::DICTIONARY;
-    case StrId::STR_AUTO_TURN_PAGES_PER_MIN:
+    case StrId::STR_AUTO_TURN_SECONDS:
       return MenuAction::AUTO_PAGE_TURN;
     case StrId::STR_EMBEDDED_STYLE:
       return MenuAction::EMBEDDED_STYLE;
@@ -513,7 +520,7 @@ void EpubReaderMenuActivity::finishWithAction(MenuAction action) {
   MenuResult payload{static_cast<int>(action),
                      -1,
                      pendingOrientation,
-                     selectedPageTurnOption,
+                     autoTurnSeconds,
                      pendingEmbeddedStyleOverride,
                      pendingImageRenderingOverride,
                      pendingFontFamilyOverride,
@@ -535,13 +542,38 @@ void EpubReaderMenuActivity::finishWithAction(MenuAction action) {
   finish();
 }
 
+// Off, then every second from 5 to 120: the 4 at the bottom of the bar is never shown, the picker labels it Off. A page
+// of about 200 words takes some 50 s at an ordinary reading speed, and the old steps were 20 s and 60 s either side.
+void EpubReaderMenuActivity::openAutoTurnPicker() {
+  constexpr int kOff = 4;
+  constexpr int kMaxSeconds = 120;
+  SliderPickerActivity::Config config{.titleId = StrId::STR_AUTO_TURN_SECONDS,
+                                      .hintId = StrId::STR_SLIDER_STEP_HINT,
+                                      .minValue = kOff,
+                                      .maxValue = kMaxSeconds,
+                                      .initialValue = autoTurnSeconds != 0 ? autoTurnSeconds : SETTINGS.autoTurnSeconds,
+                                      .suffix = tr(STR_SECONDS_SUFFIX),
+                                      .zeroLabel = tr(STR_STATE_OFF)};
+  startActivityForResult(std::make_unique<SliderPickerActivity>(renderer, mappedInput, std::move(config)),
+                         [this](const ActivityResult& result) {
+                           if (!result.isCancelled) {
+                             const int seconds = std::get<PercentResult>(result.data).percent;
+                             autoTurnSeconds = seconds > kOff ? static_cast<uint8_t>(seconds) : 0;
+                             if (autoTurnSeconds != 0 && autoTurnSeconds != SETTINGS.autoTurnSeconds) {
+                               SETTINGS.autoTurnSeconds = autoTurnSeconds;
+                               SETTINGS.saveToFile();
+                             }
+                           }
+                           requestUpdate();
+                         });
+}
+
 void EpubReaderMenuActivity::onActionSelected(int index) {
   const auto& item = activeMenuItems()[index];
 
-  // Auto page turn cycles locally (not a DynamicEnum because labels are raw strings)
-  if (item.nameId == StrId::STR_AUTO_TURN_PAGES_PER_MIN) {
-    selectedPageTurnOption = (selectedPageTurnOption + 1) % 5;
-    requestUpdate();
+  // Auto page turn stays in the menu: the reader starts it when the menu closes.
+  if (item.nameId == StrId::STR_AUTO_TURN_SECONDS) {
+    openAutoTurnPicker();
     return;
   }
 
@@ -559,7 +591,7 @@ void EpubReaderMenuActivity::onBackPressed() {
   MenuResult payload{-1,
                      -1,
                      pendingOrientation,
-                     selectedPageTurnOption,
+                     autoTurnSeconds,
                      pendingEmbeddedStyleOverride,
                      pendingImageRenderingOverride,
                      pendingFontFamilyOverride,
@@ -586,9 +618,9 @@ std::string EpubReaderMenuActivity::getItemValueString(int index) const {
   const auto& item = activeMenuItems()[index];
 
   // Auto page turn: custom labels
-  if (item.nameId == StrId::STR_AUTO_TURN_PAGES_PER_MIN) {
-    if (selectedPageTurnOption == 0) return std::string(tr(STR_STATE_OFF));
-    return std::string(pageTurnLabels[selectedPageTurnOption]);
+  if (item.nameId == StrId::STR_AUTO_TURN_SECONDS) {
+    if (autoTurnSeconds == 0) return std::string(tr(STR_STATE_OFF));
+    return std::to_string(autoTurnSeconds) + tr(STR_SECONDS_SUFFIX);
   }
 
   // Star page: reflect current page's star state
@@ -770,7 +802,7 @@ void EpubReaderMenuActivity::customizeTabBar(UiScreen& screen, fui::TabBarProps&
 
 void EpubReaderMenuActivity::buildScreen(UiScreen& screen) {
   const Rect contentRect = listContentRect();
-  const int16_t top = static_cast<int16_t>(tabBarTop(renderer, contentRect));
+  const int16_t top = static_cast<int16_t>(tabBarTop(renderer, contentRect, hasChapterLine()));
   screen.setContentMarginFromScreen(
       fui::Insets{top, static_cast<int16_t>(renderer.getScreenWidth() - (contentRect.x + contentRect.width)),
                   static_cast<int16_t>(renderer.getScreenHeight() - (contentRect.y + contentRect.height)),
@@ -800,6 +832,14 @@ void EpubReaderMenuActivity::drawChrome() {
   renderer.drawText(UI_12_FONT_ID, titleX, HeaderLayout::overlayTitleY(contentRect), truncTitle.c_str(), true,
                     EpdFontFamily::BOLD);
 
+  if (hasChapterLine()) {
+    const std::string truncChapter =
+        renderer.truncatedText(UI_10_FONT_ID, chapterTitle.c_str(), contentRect.width - 40);
+    const int chapterX =
+        contentRect.x + (contentRect.width - renderer.getTextWidth(UI_10_FONT_ID, truncChapter.c_str())) / 2;
+    renderer.drawText(UI_10_FONT_ID, chapterX, chapterLineY(renderer, contentRect), truncChapter.c_str());
+  }
+
   std::string progressLine;
   if (totalPages > 0) {
     progressLine = std::string(tr(STR_CHAPTER_PREFIX)) + std::to_string(currentPage) + "/" +
@@ -811,7 +851,8 @@ void EpubReaderMenuActivity::drawChrome() {
   const int progressFont = PanelMetrics::COMPACT ? SMALL_FONT_ID : UI_10_FONT_ID;
   const int progressX =
       contentRect.x + (contentRect.width - renderer.getTextWidth(progressFont, progressLine.c_str())) / 2;
-  renderer.drawText(progressFont, progressX, progressLineY(renderer, contentRect), progressLine.c_str());
+  renderer.drawText(progressFont, progressX, progressLineY(renderer, contentRect, hasChapterLine()),
+                    progressLine.c_str());
 }
 
 const char* EpubReaderMenuActivity::footerConfirmLabel() const {
