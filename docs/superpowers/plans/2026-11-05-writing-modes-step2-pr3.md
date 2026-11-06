@@ -1191,6 +1191,153 @@ This plan's own:
 - [ ] **Step 8: Format and NUL check, then commit** `test(epub): four Indic books, their goldens, and the shaping rule
   checker`. The body gives the figures.
 
+### Task 12a: The engine: consonant positions remembered by the plan, and the planned lookups' digests in RAM
+
+Added 2026-11-06, after Task 13 Step 3 missed its pass line (Hindi 10,753 ms against English 2,560 ms: 4.2x). The X3
+profile: `ot::shape` is 2.34 ms a word, 76% of the shaping cost. One word's working set overflows the 16 KB flash
+cache, so the cost is reads of the flash-mapped GSUB, not instructions. Two of its parts repeat flash reads whose
+answers do not change within a plan:
+- Indic initial reordering is 13% of `ot::shape`: `consonantPositionFromFace` runs up to eight `wouldSubstitute`
+  walks for every consonant of every word;
+- the GSUB loop's own overhead is 10%: `Plan::settings()` reads each planned lookup's digest record and subtable start
+  from the CPac in flash, for all 77 planned lookups a word, before the digest skips about 56 of them.
+
+Both changes keep the output byte-identical: a memo of a pure function, and a pre-filter that only rejects what the
+flash digest would reject.
+
+**Files:**
+- Modify: `lib/OtShaper/OtPlan.h`, `lib/OtShaper/OtPlan.cpp`: the memo and the digest array, counted in
+  `Plan::memoryBytes()`
+- Modify: `lib/OtShaper/OtIndic.cpp` (`consonantPositionFromFace`, ~line 29), `lib/OtShaper/OtShaper.cpp`
+  (`applyTable`, ~line 59)
+- Test: `test/ot_shaper/OtShaperTest.cpp`, and the whole suite (every golden unchanged)
+
+**Interfaces:**
+- Consumes: `Plan::wouldSubstitute`, `Plan::settings`, `Digest::mayIntersect`, the CPac digest records
+  (`readDigest`, `OtBuffer.cpp`).
+- Produces: `uint8_t Plan::consonantPosition(const Face&, uint32_t consonant, uint32_t virama) const` (the memo, a
+  `mutable` table filled on first use); `bool Plan::mayApply(int table, size_t i, const Digest& buffer) const` (the RAM
+  pre-filter). `applyTable` calls `mayApply` before `settings()`.
+
+- [ ] **Step 1: Write the failing tests.**
+  - `OtShaper.ConsonantPositionMemoMatchesTheWalk`: for each fixture font (Devanagari, Bengali, Tamil, Malayalam in
+    `test/fixtures/fonts/`), every consonant the font maps gets the same position from `consonantPosition` as from
+    the uncached walk, asked twice (the second answer from the memo), and with two viramas when the script has them.
+  - `OtShaper.MayApplyRejectsOnlyWhatTheDigestRejects`: for every planned lookup of each fixture plan and a set of
+    buffers (each fixture book's first 200 tokens), `mayApply == false` implies the flash digest test fails too.
+  - `OtShaper.TheTwoMemosLeaveEveryGlyphAlone`: each fixture book's tokens shaped by a plan whose memo and digest
+    array are switched off by a test hook, and by a normal plan: glyphs, advances and offsets equal.
+- [ ] **Step 2: Implement.**
+  - The memo: a direct-mapped table of 64 entries, keyed by `(consonant, virama)`, filled on a miss by the existing
+    walk, in the plan (`mutable`; plans are per build and single-threaded under RenderLock: say so in a comment).
+    `consonantPositionFromFace` stays the walk; its caller in `indicInitialReordering` (~line 485) asks the plan.
+  - The digest array: at `Plan::build`, each planned lookup's digest copied from the CPac into one array in the plan,
+    GSUB then GPOS, in `plan.lookups` order. A lookup without a digest record gets an all-ones digest (it never
+    rejects). If a host count over the four fixture books shows that one of the digest's three masks alone rejects at
+    least 90% of what all three reject, keep that one mask (8 B a lookup) and say so with the counts; otherwise all
+    three (24 B a lookup).
+  - Report `plan_bytes` before and after for each fixture font (the plan is on the heap during a build).
+- [ ] **Step 3: Run the tests, then the whole suite.** Expected: the new tests pass, and the suite shows only the five
+  known Windows failures, with every golden unchanged.
+- [ ] **Step 4: Measure on the host** with the profile harness of `wip/shaper-profile` (commit b6688a4d3; cherry-pick
+  nothing from it into the branch): `ot::shape` per word and per stage on `test_shaped_long_hi`'s chapter 2, before
+  and after. Put the table in the report.
+- [ ] **Step 5: Commit** `perf(shaper): the plan remembers consonant positions and keeps its lookups' digests`.
+
+### Task 12b: The word cache in the arena's free tail
+
+The design's remedy for a missed time gate: "#3787's direct-mapped run cache comes back as a class C block of the
+build". The maintainer's ruling (2026-11-06): it lives in the build arena and must cost no other arena user any room.
+A kept block cannot do that: `release()` rewinds newest-first, and the open page block sits above anything reserved at
+the parse's start, so the block could never be given back to a mid-parse image walk or glyph miss. So the cache lives
+in the arena's **free tail**:
+- it occupies `[capacity - S, capacity)`, which the arena still counts as free;
+- every room check stays as it is, and any allocation may overwrite the tail;
+- a watermark tells the cache when that happened, and it then empties itself.
+
+This is safe only because nothing writes the arena's memory except through `alloc()` (`BuildArena` has no raw
+accessor). The measured room (the X3, the long Hindi chapter, cap 52,272): 41,428 B free at the parse's start, 29,973
+at its peak. Only a stage-2 image walk, or a CFF glyph miss read from the card at a full page, reaches a 16 KB tail.
+
+**Files:**
+- Modify: `lib/Memory/BuildArena.h`: `markPeak()`, `peakSinceMark()`, and `uint8_t* tail(size_t bytes)` (the top
+  `bytes` of the region, or null when `bytes > capacity()`)
+- Create: `lib/Epub/Epub/WordShapeCache.h`, `lib/Epub/Epub/WordShapeCache.cpp`
+- Modify: `lib/Epub/Epub/ParsedText.h`/`.cpp` (`setWordCache`, `shapeToken` ~line 960),
+  `lib/Epub/Epub/parsers/ChapterHtmlSlimParser.h`/`.cpp` (it owns the cache for the parse: armed in `setup()` after
+  the SAX state is taken, bound to each `ParsedText` beside `setLineArena` (~lines 1758 and 5879), unbound before
+  `dropChunk()`), `lib/Epub/Epub/Section.cpp` (one log line after the `arena:` line)
+- Modify: `docs/memory-allocation-strategy.md`: see Step 5
+- Test: `test/memory_arena/` (the watermark), a new `test/word_shape_cache/`, `test/epub_pipeline/ShapingRulesTest.cpp`
+
+**Interfaces:**
+- Consumes: `ShapedStore` (`open`/`commit`/`abandon`, the `PieceSink` calls `beginPiece`/`addGlyph`/`addBytes`,
+  `pieces()`, `glyphs()`, `form()`), `ParsedText::shapeKey`, `TypographyProfile::shapingLanguage`.
+- Produces:
+  - `class WordShapeCache` with `bool arm(BuildArena&, size_t bytes)`, `void disarm()`,
+    `bool replay(uint64_t textHash, uint16_t length, uint32_t key, ShapedStore& store)` (true on a hit, with the
+    pieces written through the store's sink), `void insert(uint64_t textHash, uint16_t length, uint32_t key, const
+    ShapedStore& store, size_t token)`, and `struct Stats { uint32_t hits, misses, inserts, bypassed, clears; }`.
+  - `ChapterHtmlSlimParser::wordCacheStats()` for Section's log line:
+    `createSectionFile spine=%d word cache: bytes=%u hits=%u misses=%u inserts=%u bypassed=%u clears=%u`.
+
+- [ ] **Step 1: The watermark, test first.**
+  - `BuildArena.PeakSinceMarkFollowsAllocNotRelease`: after `markPeak()` an alloc moves `peakSinceMark()`, a release
+    does not lower it, and a new `markPeak()` drops it to the cursor.
+  - `BuildArena.TailIsTheRegionsTop`: `tail(n)` is `base + capacity - n`; null past the capacity.
+  - Implement: one compare in `alloc()` beside `laneHighWater_`; `reset()` sets the mark to 0.
+- [ ] **Step 2: The cache, test first** (`test/word_shape_cache/WordShapeCacheTest.cpp`):
+  - `AHitReplaysTheSamePieces`: a token shaped into a store, inserted, then replayed into a fresh store: equal
+    pieces, records and bytes.
+  - `AnAllocIntoTheTailEmptiesIt`: armed on an arena, insert, then an alloc whose end passes `capacity - S` (a 33 KB
+    walk on a 52,272 B arena with the cursor at 16 KB), then released: the next `replay` misses, `clears == 1`, and
+    nothing is read from the overwritten bytes. Then the cache works again: insert, replay hits.
+  - `ItDoesNotArmWithoutRoom`: `arm` fails when `capacity - used < S + 16,384`: every call is then `bypassed`.
+  - `KeysKeepFormsApart`: the same text under two keys (style, size, language), or two texts with one key, never
+    replay each other's pieces.
+  - `ATooLargeTokenIsBypassed`: an entry larger than a slot is not stored, and is counted.
+- [ ] **Step 3: Implement.**
+  - **Layout:** direct-mapped fixed slots in the tail. S = 16,384 B (`kWordCacheBytes`). Choose the slot size from
+    `test_shaped_long_hi`'s token sizes (pieces plus records plus the entry header), so that at least 95% of its Indic
+    tokens fit, and state the slot size and the slot count. An entry holds the identity (the 64-bit text hash, the
+    length, the 32-bit `shapeKey`, the language tags' identity) and the token's pieces with their records or bytes.
+    The identity is the one `ShapedStore` already trusts (hash, key, length). Widths are not cached: they are measured
+    after the replay, as now.
+  - **Arming:** `arm` succeeds only when `capacity() - used() >= S + 16,384`, so that the parse lane's own page block
+    and call blocks never reach the tail. On the X3 and the X4 lent arenas that holds; on the owned 10 KB arena it
+    does not, so no cache there.
+  - **Validity, checked at every `replay` and `insert`:** the tail is intact while `peakSinceMark() <= capacity - S`.
+    Otherwise empty the slots (`clears++`), and re-arm with `markPeak()` once `used() <= capacity - S - 16,384`; until
+    then each call is `bypassed`. Never read a slot before that check.
+  - **What is cached:** only tokens with no glued neighbour (`before` and `after` both empty), shaped
+    `Outcome::Formed`, and not the `shapedPrefixWidth` candidates. Glued tokens and prefixes take the uncached path.
+  - **In `ParsedText::shapeToken`:** after `store.open`, try `replay`. On a hit, `store.commit()` and fall through to
+    the existing prefetch and width code. On a miss, shape as now; after `store.commit()`, `insert`.
+  - **The lent region stays the build's alone:** confirm that nothing else writes the borrowed framebuffer while a
+    build holds it, between slices included. Name every lend and return point in the report. If any writer exists,
+    the cache must `disarm()` at that point.
+- [ ] **Step 4: The pipeline.**
+  - The whole suite, with the cache on: every golden unchanged.
+  - `ShapingRules.TheWordCacheChangesNoLine`: `test_shaped_long_hi` dumped through the pipeline on a small arena that
+    forces clears (choose the capacity so `clears > 0`, and assert it). Compare against a run with the cache disarmed:
+    equal dumps.
+  - Report the hit rate on `test_shaped_long_hi` and `test_shaped_devanagari` (the stats line), and `ot::shape` calls
+    before and after.
+- [ ] **Step 5: The documentation.** In `docs/memory-allocation-strategy.md`:
+  - §4 Class C: the parse lane's users in the order a build meets them. That is the open page block, the shaping call
+    block, the TrueType miss scope, the bidi workspace, table rows and the mid-build draw. The image probe (8.7 KB)
+    and the deferred header walk (16.9 KB, up to 33.3 KB) run mid-parse, inside `startElement` for `<img>`; image
+    decodes never run during a build.
+  - The extraction ring is released before every parse: every build is two-phase.
+  - The tail and its contract.
+  - §6: a new invariant: nothing writes a build arena's memory except through `alloc()`. The word cache's tail
+    depends on it, so `BuildArena` gets no raw accessor.
+  - §8.2: the shaped Hindi chapter on the X3 by moment (setup 95; extraction 41,984 above setup; resident 10,844;
+    parse peak 22,299, free 29,973; a stage-2 walk fits only while the open page block is at most 8,116 B; on the X4,
+    at most 3,844 B). Add the tail's place in that table.
+- [ ] **Step 6: Commit** `perf(epub): a word-shaping cache in the build arena's free tail`. Put the docs in their own
+  commit, `docs(memory): the build arena's parse lane, mid-parse image walks and the word cache's tail`.
+
 ### Task 13: The devices: the build-time gate, item 6, and the pages before and after
 
 **Files:**
