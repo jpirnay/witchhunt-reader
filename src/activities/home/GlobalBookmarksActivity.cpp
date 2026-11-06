@@ -21,6 +21,7 @@
 void GlobalBookmarksActivity::onEnter() {
   Activity::onEnter();
 
+  indexHold.emplace();
   GLOBAL_BOOKMARKS.reconcile();
   rebuildRows();
 
@@ -57,6 +58,7 @@ void GlobalBookmarksActivity::onExit() {
   Activity::onExit();
   rows.clear();
   buttonNavigator.clearSelectablePredicate();
+  indexHold.reset();
 }
 
 void GlobalBookmarksActivity::rebuildRows() {

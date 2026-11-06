@@ -1,10 +1,13 @@
 #pragma once
-// In-memory card for FileReplaceTest. Shadows test/shims/HalStorage.h, whose exists() is always
+// In-memory card for FileReplaceTest and BookmarksTest. Shadows test/shims/HalStorage.h, whose exists() is always
 // false. Names compare without regard to case, as on FAT, so one file can be named two ways; a
 // rename onto a taken name fails, as SdFat's does (it creates the new entry with O_EXCL); and any
 // rename or remove can be made to fail.
 
+#include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <cstring>
 #include <map>
 #include <set>
 #include <string>
@@ -12,7 +15,8 @@
 class HalFile {
  public:
   HalFile() = default;
-  HalFile(bool open, bool folder) : open_(open), folder_(folder) {}
+  HalFile(bool open, bool folder, std::string* data = nullptr, long writeBudget = -1)
+      : open_(open), folder_(folder), data_(data), writeBudget_(writeBudget) {}
   bool isDirectory() const { return folder_; }
   bool close() {
     open_ = false;
@@ -20,9 +24,29 @@ class HalFile {
   }
   operator bool() const { return open_; }
 
+  int read(void* buffer, const size_t bytes) {
+    if (data_ == nullptr) return -1;
+    const size_t got = std::min(bytes, data_->size() - position_);
+    memcpy(buffer, data_->data() + position_, got);
+    position_ += got;
+    return static_cast<int>(got);
+  }
+  size_t write(const uint8_t* buffer, const size_t bytes) {
+    if (data_ == nullptr) return 0;
+    size_t put = bytes;
+    if (writeBudget_ >= 0) put = std::min(put, static_cast<size_t>(writeBudget_));
+    data_->append(reinterpret_cast<const char*>(buffer), put);
+    if (writeBudget_ >= 0) writeBudget_ -= static_cast<long>(put);
+    return put;
+  }
+  int available() const { return data_ == nullptr ? 0 : static_cast<int>(data_->size() - position_); }
+
  private:
   bool open_ = false;
   bool folder_ = false;
+  std::string* data_ = nullptr;
+  size_t position_ = 0;
+  long writeBudget_ = -1;  // bytes a write may still put down; -1: as many as it likes
 };
 
 using FsFile = HalFile;
@@ -46,6 +70,7 @@ class HalStorage {
     entries.clear();
     failRenameFrom.clear();
     failRemove.clear();
+    writeBudget = -1;
   }
   void put(const std::string& path, const std::string& content) { entries[key(path)] = {path, content, false}; }
   void putFolder(const std::string& path) { entries[key(path)] = {path, "", true}; }
@@ -61,6 +86,26 @@ class HalStorage {
     const auto it = entries.find(key(path));
     return it == entries.end() ? HalFile() : HalFile(true, it->second.folder);
   }
+  bool openFileForRead(const char*, const char* path, HalFile& file) {
+    const auto it = entries.find(key(path));
+    if (it == entries.end() || it->second.folder) return false;
+    file = HalFile(true, false, &it->second.content);
+    return true;
+  }
+  bool openFileForRead(const char* module, const std::string& path, HalFile& file) {
+    return openFileForRead(module, path.c_str(), file);
+  }
+  // Truncates, as the real one does.
+  bool openFileForWrite(const char*, const char* path, HalFile& file) {
+    Entry& entry = entries[key(path)];
+    entry = {path, "", false};
+    file = HalFile(true, false, &entry.content, writeBudget);
+    return true;
+  }
+  bool openFileForWrite(const char* module, const std::string& path, HalFile& file) {
+    return openFileForWrite(module, path.c_str(), file);
+  }
+  bool mkdir(const char*) { return true; }
   bool rename(const char* from, const char* to) {
     if (failRenameFrom.count(key(from)) != 0) return false;
     const auto it = entries.find(key(from));
@@ -87,6 +132,7 @@ class HalStorage {
   std::map<std::string, Entry> entries;  // by key()
   std::set<std::string> failRenameFrom;  // key()s whose rename fails
   std::set<std::string> failRemove;      // key()s whose remove fails
+  long writeBudget = -1;                 // what a file opened for write may take; -1: no limit
 };
 
 #define Storage HalStorage::getInstance()
