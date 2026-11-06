@@ -13,7 +13,7 @@ target_link_libraries(OtShaperTest PRIVATE crosspoint_test_common inflate_reader
 gtest_discover_tests(OtShaperTest)
 
 # Not a test: the command-line shaper compare_harfbuzz.py diffs against HarfBuzz.
-add_executable(ot_shape_cli
+add_executable(ot_shape_cli EXCLUDE_FROM_ALL
   OtShapeCli.cpp
   ${OT_SHAPER_SOURCES}
 )

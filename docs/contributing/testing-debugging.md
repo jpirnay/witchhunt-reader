@@ -35,11 +35,9 @@ cmake --build . --target LibraryIndexTest && ./library_index/LibraryIndexTest   
 
 A suite lives in its own directory under `test/` and is registered by an `add_subdirectory()` line in `test/CMakeLists.txt`; a new suite needs both. GoogleTest is fetched on the first configure. `test/README` has the offline KOReader sync checks, which the host toolchain cannot build.
 
-**On Windows**, build and run from Git Bash with the MSYS2 UCRT64 toolchain (`C:\msys64\ucrt64\bin`) on `PATH`, not from PowerShell: the compiler there depends on DLLs from that directory and fails silently without them. The test executables link their C++ runtime statically, so they run whatever else is on `PATH`. One tool does not build on Windows: `epub_build_inventory` needs `dlfcn.h` and `execinfo.h`. Pass `-k 0` to Ninja so the rest of the suite builds anyway:
+**On Windows**, build and run from Git Bash with the MSYS2 UCRT64 toolchain (`C:\msys64\ucrt64\bin`) on `PATH`, not from PowerShell: the compiler there depends on DLLs from that directory and fails silently without them. The test executables link their C++ runtime statically, so they run whatever else is on `PATH`. `epub_build_inventory` does not build on Windows: it needs `dlfcn.h` and `execinfo.h`.
 
-```sh
-cmake --build . -j 8 -- -k 0
-```
+**Hand-run tools.** `epub_build_inventory`, `epub_pipeline_dump_noheap`, `ot_shape_cli`, `ot_shaper_probe` and `EpubParserBenchmark` are not tests, so the default build leaves them out. Ask for one by name: `cmake --build build/test --target ot_shape_cli`.
 
 **Golden files.** `EpubPipelineTest` compares a layout dump of every book in `test/epubs` against `test/epub_pipeline/goldens`. When a change is meant to move layout, regenerate them and say why in the commit:
 
@@ -74,6 +72,7 @@ UPDATE_HEAP_BASELINE=1 ctest --test-dir $B -R HeapPeakRegression
 For a site-by-site inventory of one build (Linux only):
 
 ```sh
+cmake --build $B --target epub_build_inventory
 $B/epub_pipeline/epub_build_inventory book.epub /tmp/cache-c /tmp/inventory --arena=52272 --spines=3
 python3 test/epub_pipeline/inventory_report.py $B/epub_pipeline/epub_build_inventory /tmp/inventory/spine_3.txt > report.md
 ```
