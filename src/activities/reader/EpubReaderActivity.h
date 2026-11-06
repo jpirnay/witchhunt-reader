@@ -376,6 +376,8 @@ class EpubReaderActivity final : public Activity {
   static constexpr int kImageWarmLookahead = 5;
   int imageWarmCleanSpine_ = -1;
   int imageWarmCleanPage_ = -1;
+  // That look was during Background-C's build, so at the page on screen alone: the window is looked at again after it.
+  bool imageWarmCleanDuringBuild_ = false;
   // Pages whose warm came back incomplete although no input preempted it (an unsupported or
   // corrupt image, a decode refused for heap). Each gets kImageWarmMaxTries attempts, then the
   // lane skips it for the session -- a failed decode writes no cache, so without this the lane
@@ -481,9 +483,6 @@ class EpubReaderActivity final : public Activity {
   LandedText landedText_;
   // True while pageTurn() waits for the render lock: the one sign the render task can read that a turn is on its way.
   std::atomic<bool> pageTurnWaitingForLock_{false};
-  // The page stepOnScreenImagesDuringBuild() last looked at: one look a page, not one a tick.
-  int buildImagesLookedSpine_ = -1;
-  int buildImagesLookedPage_ = -1;
   // True once the "Indexing" popup has been drawn for the current pending page, so the pass
   // doesn't re-flush it every tick. Cleared whenever a real page is drawn or the build ends.
   bool buildingPopupShown_ = false;
@@ -804,13 +803,15 @@ class EpubReaderActivity final : public Activity {
   // The gates Background-B and the idle glyph-store step share: a section on screen in the READING phase, background
   // work not suspended, and no pre-render, pre-rendered page, display refresh or image decode pending.
   bool lookAheadMayRun() const;
-  // The image lane's step; called from stepBackgroundSectionBuild with the RenderLock held. What
-  // it found in its window (LaneBeforeBuild::Window): Dirty when it did a page's worth of work this
-  // tick (the caller then yields to the loop); Background-B may borrow only on Clean or Closed.
+  // The image lane's step, with the RenderLock held. What it found in its window (LaneBeforeBuild::Window): Dirty when
+  // it did a page's worth of work this tick (the caller then yields to the loop); Background-B may borrow only on
+  // Clean or Closed. Its list is the window; during Background-C's build, the page on screen alone.
   LaneBeforeBuild::Window stepImageWarmLocked();
-  // The priority pass: decodes the images of the page on screen while its chapter is still building, ahead of the
-  // build's next slice. True when it did, and the tick was spent; false leaves the tick to the build.
-  bool stepOnScreenImagesDuringBuild();
+  // The lane between two slices of Background-C's build. True when it decoded, and the tick was spent; false leaves the
+  // tick to the build.
+  bool stepImageLaneDuringBuild();
+  // Background-C's arena where its build holds the buffer, or nullptr: a decode beside it works above its cursor.
+  BuildArena* arenaOfBuildHoldingBuffer() const;
   // A decode would be cut short or hold up a press: a gesture is in flight, or a page has only just moved.
   bool imageLaneMustWait() const;
   // Whether a decode here also writes the page's grey caches.
@@ -818,9 +819,9 @@ class EpubReaderActivity final : public Activity {
   // warmPageForImageLane() with the buffer taken back from Background-B first, if B holds it. False
   // when there was no buffer to lend, so nothing was done.
   bool warmPageTakingBuffer(const Page& page, int spine, int pageIndex, bool onScreen, bool warmGrayscale);
-  // Decode one page's missing image caches into the borrowed secondary buffer, writing no
-  // framebuffer byte. `onScreen`: the page is the one displayed; once the images it showed as
-  // placeholders are cached it is redrawn. Always returns true (the tick was spent).
+  // Decode one page's missing image caches into the borrowed secondary buffer (or, during a build that holds it, what
+  // the build leaves free of it), writing no framebuffer byte. `onScreen`: the page is the one displayed; once the
+  // images it showed as placeholders are cached it is redrawn. Always returns true (the tick was spent).
   bool warmPageForImageLane(const Page& page, int spine, int pageIndex, bool onScreen, bool warmGrayscale);
   // The memory ladder (ImageMemoryLadder): warms `page`'s missing image caches at (xOffset, yOffset), and while a
   // decode is short of memory, decodes again with font memory freed, step by step. `arena` is the decode scratch
