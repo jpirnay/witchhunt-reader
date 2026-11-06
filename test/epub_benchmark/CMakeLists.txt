@@ -1,4 +1,4 @@
-add_executable(EpubParserBenchmark
+add_executable(EpubParserBenchmark EXCLUDE_FROM_ALL
   EpubParserBenchmark.cpp
   stubs.cpp
   ${REPO_ROOT}/lib/Epub/Epub/parsers/ContainerParser.cpp

@@ -23,7 +23,7 @@ cmake --build build/test
 ctest --test-dir build/test --output-on-failure -j
 ```
 
-Any build directory works; `test/build` is a common local choice, and every `build*/` directory is git-ignored. To iterate from inside one:
+Any build directory works; `test/build` is a common local choice, and every `build*/` directory is git-ignored. If `ccache` is installed the build uses it, which makes switching branches cheap. To iterate from inside one:
 
 ```sh
 cd test/build
@@ -35,11 +35,16 @@ cmake --build . --target LibraryIndexTest && ./library_index/LibraryIndexTest   
 
 A suite lives in its own directory under `test/` and is registered by an `add_subdirectory()` line in `test/CMakeLists.txt`; a new suite needs both. GoogleTest is fetched on the first configure. `test/README` has the offline KOReader sync checks, which the host toolchain cannot build.
 
-**On Windows**, build and run from Git Bash with the MSYS2 UCRT64 toolchain (`C:\msys64\ucrt64\bin`) on `PATH`, not from PowerShell: the compiler there depends on DLLs from that directory and fails silently without them. The test executables link their C++ runtime statically, so they run whatever else is on `PATH`. One tool does not build on Windows: `epub_build_inventory` needs `dlfcn.h` and `execinfo.h`. Pass `-k 0` to Ninja so the rest of the suite builds anyway:
+**Adding a test.** A test costs compile time more than run time, so keep the suite from outgrowing the code it covers:
 
-```sh
-cmake --build . -j 8 -- -k 0
-```
+- Put a test in the suite that already covers the code. A new directory is another executable to compile and link; start one only for code no suite reaches.
+- Cases of one shape go in one table-driven test, not one `TEST` each.
+- A fix adds the test that fails without it, not one per step of the investigation.
+- Pin behaviour, not wording or tuning. Leave out log lines and tuned pixel values; pin a value only when it is the contract, as in a file format.
+
+**On Windows**, build and run from Git Bash with the MSYS2 UCRT64 toolchain (`C:\msys64\ucrt64\bin`) on `PATH`, not from PowerShell: the compiler there depends on DLLs from that directory and fails silently without them. The test executables link their C++ runtime statically, so they run whatever else is on `PATH`. `epub_build_inventory` does not build on Windows: it needs `dlfcn.h` and `execinfo.h`.
+
+**Hand-run tools.** `epub_build_inventory`, `epub_pipeline_dump_noheap`, `ot_shape_cli`, `ot_shaper_probe` and `EpubParserBenchmark` are not tests, so the default build leaves them out. Ask for one by name: `cmake --build build/test --target ot_shape_cli`.
 
 **Golden files.** `EpubPipelineTest` compares a layout dump of every book in `test/epubs` against `test/epub_pipeline/goldens`. When a change is meant to move layout, regenerate them and say why in the commit:
 
@@ -63,7 +68,7 @@ WH_HOST_STDIO_UNBUFFERED=1 $B/epub_pipeline/epub_pipeline_dump book.epub /tmp/ca
 WH_HOST_STDIO_UNBUFFERED=1 $B/epub_pipeline/epub_pipeline_dump book.epub /tmp/cache-b --bench --arena=52272 > dump.txt 2> bench.txt
 ```
 
-The first run models a build with nothing lent, the second a build in the X3's borrowed framebuffer (use 48000 for the X4). Use an empty cache directory for a cold build. `bench.txt` has the per-spine times, `heap_peak`, the allocation size histogram and the largest allocation sites. `test/epub_pipeline/run_baseline.sh $B/epub_pipeline/epub_pipeline_dump` tabulates time and peak heap over the whole corpus. `epub_pipeline_dump_noheap` is the same tool without the heap tracker, for when only the layout dump is needed.
+The first run models a build with nothing lent, the second a build in the X3's borrowed framebuffer (use 48000 for the X4). Use an empty cache directory for a cold build. Host tests build at `-O1`; for timings worth comparing, configure a separate build directory with `-DHOST_TEST_OPT=-O3`. `bench.txt` has the per-spine times, `heap_peak`, the allocation size histogram and the largest allocation sites. `test/epub_pipeline/run_baseline.sh $B/epub_pipeline/epub_pipeline_dump` tabulates time and peak heap over the whole corpus. `epub_pipeline_dump_noheap` is the same tool without the heap tracker, for when only the layout dump is needed.
 
 `ctest -R HeapPeakRegression` checks six fixtures in both modes against `test/epub_pipeline/heap_peak_baseline.txt`. When a change lowers or raises a peak on purpose, re-baseline and explain it in the commit:
 
@@ -74,6 +79,7 @@ UPDATE_HEAP_BASELINE=1 ctest --test-dir $B -R HeapPeakRegression
 For a site-by-site inventory of one build (Linux only):
 
 ```sh
+cmake --build $B --target epub_build_inventory
 $B/epub_pipeline/epub_build_inventory book.epub /tmp/cache-c /tmp/inventory --arena=52272 --spines=3
 python3 test/epub_pipeline/inventory_report.py $B/epub_pipeline/epub_build_inventory /tmp/inventory/spine_3.txt > report.md
 ```

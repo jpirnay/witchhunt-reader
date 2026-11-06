@@ -6,7 +6,8 @@ ot_shape_cli (built from test/ot_shaper/OtShapeCli.cpp), and reports every
 line whose glyph IDs, advances or offsets differ.
 
     pip install uharfbuzz
-    python3 test/ot_shaper/compare_harfbuzz.py --cli build/ot_shape_cli \\
+    cmake --build build/test --target ot_shape_cli
+    python3 test/ot_shaper/compare_harfbuzz.py --cli build/test/ot_shaper/ot_shape_cli \\
         --font NotoSansBengali-Regular.ttf words-bn.txt [--lang bn]
 
 Exits non-zero when any line differs.

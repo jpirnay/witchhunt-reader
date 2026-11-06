@@ -246,8 +246,8 @@ endif()
 # Exact allocation inventory of section builds (memory audit 2026-09): the heap profiler's
 # per-build window plus BuildArena's host-only trace hooks, with debug info and frame pointers so
 # every site symbolizes to file:line (inline chains included). See InventoryMain.cpp and
-# inventory_report.py. Not a test; run it by hand.
-add_executable(epub_build_inventory
+# inventory_report.py. Not a test: built on request (--target epub_build_inventory), and run by hand.
+add_executable(epub_build_inventory EXCLUDE_FROM_ALL
   InventoryMain.cpp
   HeapTrack.cpp
   ${PIPELINE_SOURCES}
@@ -267,8 +267,8 @@ target_link_libraries(epub_build_inventory PRIVATE
 
 # Same dump tool without the process-wide malloc/free override, which deadlocks
 # under the MinGW runtime. --bench heap numbers read 0 here; everything else is
-# identical, so this is the variant to use when diagnosing layout on Windows.
-add_executable(epub_pipeline_dump_noheap
+# identical, so this is the variant to use when diagnosing layout on Windows. Built on request, like the inventory.
+add_executable(epub_pipeline_dump_noheap EXCLUDE_FROM_ALL
   DumpMain.cpp
   HeapTrackStub.cpp
   ${PIPELINE_SOURCES}
