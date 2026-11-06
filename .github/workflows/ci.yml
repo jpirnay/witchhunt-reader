@@ -42,6 +42,13 @@ jobs:
     # Pinned: pioarduino's cppcheck binary links against libpcre.so.3, and Ubuntu 26.04 (ubuntu-latest since
     # 2026-10-29) no longer ships libpcre3.
     runs-on: ubuntu-24.04
+    # Three runners: pio check analyses one file at a time, and a change to a widely included
+    # header re-analyses most of them. See scripts/cppcheck_shard.py. fail-fast is off so one
+    # shard's findings do not cancel the others'.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -100,8 +107,41 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libpcre3
 
+      # cppcheck's build dir holds one result per file, replayed while the hash of the file, its
+      # headers and most flags stays the same. Three things that decide a result are not in that
+      # hash: the flags in platformio.ini it leaves out (--std, --platform, --language), a
+      # cppcheck-suppress comment in a header edited in place, and a computed #include. So the
+      # key covers the first two, .cpp suppressions with them for safety, and only pull requests
+      # restore: master analyses everything on every push, which catches the third and anything
+      # else a replay could hide, and saves the results the next pull request starts from.
+      - name: Name the cppcheck results this tree can reuse
+        id: cppcheck-results
+        run: |
+          fingerprint=$({ cat platformio.ini; git grep -ah 'cppcheck-suppress' -- '*.h' '*.cpp'; } | sha256sum | cut -c1-16)
+          echo "key=cppcheck-v1-${{ runner.os }}-${fingerprint}-${{ matrix.shard }}" >> "$GITHUB_OUTPUT"
+          mkdir -p "${{ runner.temp }}/cppcheck-build"
+
+      - name: Restore cppcheck results
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/cppcheck-build
+          key: ${{ steps.cppcheck-results.outputs.key }}-${{ github.sha }}
+          restore-keys: ${{ steps.cppcheck-results.outputs.key }}-
+
       - name: Run cppcheck
-        run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+        env:
+          CPPCHECK_BUILD_DIR_FLAG: --cppcheck-build-dir=${{ runner.temp }}/cppcheck-build
+        run: >-
+          pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+          --src-filters="$(python3 scripts/cppcheck_shard.py ${{ matrix.shard }} ${{ strategy.job-total }})"
+
+      - name: Save cppcheck results
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/cppcheck-build
+          key: ${{ steps.cppcheck-results.outputs.key }}-${{ github.sha }}
 
   build:
     # The C3 boards (X3/X4), the X4 Pro, the S3 LilyGo T5S3 and 
