@@ -111,13 +111,13 @@ jobs:
       # headers and most flags stays the same. Three things that decide a result are not in that
       # hash: the flags in platformio.ini it leaves out (--std, --platform, --language), a
       # cppcheck-suppress comment in a header edited in place, and a computed #include. So the
-      # key covers the first two, and only pull requests restore: master analyses everything on
-      # every push, which catches the third and anything else a replay could hide, and saves
-      # the results the next pull request starts from.
+      # key covers the first two, .cpp suppressions with them for safety, and only pull requests
+      # restore: master analyses everything on every push, which catches the third and anything
+      # else a replay could hide, and saves the results the next pull request starts from.
       - name: Name the cppcheck results this tree can reuse
         id: cppcheck-results
         run: |
-          fingerprint=$({ cat platformio.ini; git grep -h 'cppcheck-suppress' -- '*.h'; } | sha256sum | cut -c1-16)
+          fingerprint=$({ cat platformio.ini; git grep -ah 'cppcheck-suppress' -- '*.h' '*.cpp'; } | sha256sum | cut -c1-16)
           echo "key=cppcheck-v1-${{ runner.os }}-${fingerprint}-${{ matrix.shard }}" >> "$GITHUB_OUTPUT"
           mkdir -p "${{ runner.temp }}/cppcheck-build"
 
