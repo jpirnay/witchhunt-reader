@@ -71,6 +71,29 @@ struct BookAlignmentFixture : testing::Test {
     return path;
   }
 
+  // How many rules the chapter draws, through the rule cache a real book goes through.
+  int rulesDrawn(const std::string& css, const std::string& body, const bool embeddedStyle = true) {
+    auto epub = std::make_shared<Epub>(makeBook(css, body, "en"), (work / "cache").string());
+    EXPECT_TRUE(epub->load(true));
+    Section::BuildParams params;
+    params.viewportWidth = 480;
+    params.viewportHeight = 800;
+    params.lineCompression = 1.0f;
+    params.embeddedStyle = embeddedStyle;
+    GfxRenderer renderer;
+    Section section(epub, 0, renderer);
+    EXPECT_TRUE(section.createSectionFile(params, {}, /*skipEviction=*/true));
+    EXPECT_TRUE(section.loadSectionFile(params));
+    int rules = 0;
+    for (uint16_t p = 0; p < section.pageCount; ++p) {
+      section.currentPage = p;
+      const auto page = section.loadPageFromSectionFile();
+      if (!page) continue;
+      for (const auto& el : page->elements) rules += el->getTag() == TAG_PageHR ? 1 : 0;
+    }
+    return rules;
+  }
+
   // The alignment of the chapter's first text line.
   CssTextAlign firstLine(const std::string& css, const std::string& body, const uint8_t paragraphAlignment,
                          const bool embeddedStyle = true, const std::string& language = "en") {
@@ -136,4 +159,22 @@ TEST_F(BookAlignmentFixture, UnderTheBooksOwnAlignmentAllOfItStands) {
 TEST_F(BookAlignmentFixture, WithTheBooksStylesOffNoneOfItStands) {
   EXPECT_EQ(CssTextAlign::Justify, firstLine(".brk { text-align: center; }", "<div class=\"brk\">—</div>", kJustified,
                                              /*embeddedStyle=*/false));
+}
+
+// Project Hail Mary's section break: the <hr> is structure, the dash is what shows.
+TEST_F(BookAlignmentFixture, ARuleTheBookStripsOfItsBorderIsNotDrawn) {
+  const char* css =
+      ".transition { color: gray; display: block; height: 2px; margin: 0; border: currentColor none medium; }";
+  EXPECT_EQ(0, rulesDrawn(css, "<p>Alpha</p><hr class=\"transition\"/><p>Bravo</p>"));
+}
+
+TEST_F(BookAlignmentFixture, APlainRuleIsDrawn) { EXPECT_EQ(1, rulesDrawn("", "<p>Alpha</p><hr/><p>Bravo</p>")); }
+
+TEST_F(BookAlignmentFixture, ARuleThatALaterSelectorPaintsIsDrawn) {
+  EXPECT_EQ(1, rulesDrawn("hr { border: 0; } hr.sep { height: 1px; background: #000; }",
+                          "<p>Alpha</p><hr class=\"sep\"/><p>Bravo</p>"));
+}
+
+TEST_F(BookAlignmentFixture, WithTheBooksStylesOffTheRuleIsDrawn) {
+  EXPECT_EQ(1, rulesDrawn("hr { border: none; }", "<p>Alpha</p><hr/><p>Bravo</p>", /*embeddedStyle=*/false));
 }

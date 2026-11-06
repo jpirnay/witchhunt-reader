@@ -3547,27 +3547,32 @@ void ChapterHtmlSlimParser::startElement(void* userData, const char* name, const
     // makePages() keeps the drained block for the next paragraph to merge into (see the <table> handler).
     self->clearSpentBlockDirection(self->depth);
     self->applyPendingPageBreak();
-    if (!self->currentPage) {
-      self->currentPage.reset(new Page());
-      self->currentPageNextY = 0;
+    // A rule the book leaves nothing to draw of only ends the block: a section break that is a centred dash, with the
+    // <hr> kept for the structure, has no line and takes no room.
+    if (!self->embeddedStyle || !cssStyle.hidesRule()) {
+      if (!self->currentPage) {
+        self->currentPage.reset(new Page());
+        self->currentPageNextY = 0;
+      }
+      const int lineHeight =
+          static_cast<int>(self->renderer.getLineHeight(self->fontId) * self->lineCompression + 0.5f);
+      const int16_t marginV = static_cast<int16_t>(lineHeight / 2);
+      self->currentPageNextY += marginV;
+      if (self->currentPageNextY + 1 + marginV > self->viewportHeight) {
+        self->emitPage();
+        self->currentPage.reset(new Page());
+        self->currentPageNextY = 0;
+      }
+      // Render the rule centered at 50% width (25%→75%) rather than edge-to-edge, matching
+      // the conventional reader default. Books rarely set hr width in their own CSS.
+      const int16_t hrWidth = static_cast<int16_t>(self->viewportWidth / 2);
+      const int16_t hrX = static_cast<int16_t>(self->viewportWidth / 4);
+      if (auto hr = makeUniqueNoThrow<PageHR>(hrX, self->currentPageNextY, hrWidth)) {
+        self->noteElementOnPage(self->visibleTextOffset_);
+        self->currentPage->elements.push_back(std::move(hr));
+      }
+      self->currentPageNextY += 1 + marginV;
     }
-    const int lineHeight = static_cast<int>(self->renderer.getLineHeight(self->fontId) * self->lineCompression + 0.5f);
-    const int16_t marginV = static_cast<int16_t>(lineHeight / 2);
-    self->currentPageNextY += marginV;
-    if (self->currentPageNextY + 1 + marginV > self->viewportHeight) {
-      self->emitPage();
-      self->currentPage.reset(new Page());
-      self->currentPageNextY = 0;
-    }
-    // Render the rule centered at 50% width (25%→75%) rather than edge-to-edge, matching
-    // the conventional reader default. Books rarely set hr width in their own CSS.
-    const int16_t hrWidth = static_cast<int16_t>(self->viewportWidth / 2);
-    const int16_t hrX = static_cast<int16_t>(self->viewportWidth / 4);
-    if (auto hr = makeUniqueNoThrow<PageHR>(hrX, self->currentPageNextY, hrWidth)) {
-      self->noteElementOnPage(self->visibleTextOffset_);
-      self->currentPage->elements.push_back(std::move(hr));
-    }
-    self->currentPageNextY += 1 + marginV;
     BlockStyle emptyStyle;
     self->startNewTextBlock(emptyStyle);
   } else if (matches(name, UNDERLINE_TAGS, NUM_UNDERLINE_TAGS) ||

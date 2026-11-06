@@ -247,6 +247,12 @@ struct CssStyle {
   uint32_t fontFamily = 0;
   // A TextEmphasis mark (Shape | kOpen); 0 is `none`, which is a defined value.
   uint8_t textEmphasis = 0;
+  // What an <hr> leaves to draw, as two facts that cascade on their own: the `hr { border: 0 }` of a reset must not
+  // hide the rule a later `hr.sep { background: #000 }` paints. They only add up, so a doubt keeps the rule. No defined
+  // bit: 0 is "nothing declared", and the flag word is all but full.
+  static constexpr uint8_t kRuleBorderNone = 0x01;  // border none or hidden, or no width
+  static constexpr uint8_t kRulePainted = 0x02;     // a visible border, or a background
+  uint8_t ruleBorder = 0;
 
   CssPropertyFlags defined;  // Tracks which properties were explicitly set
 
@@ -390,6 +396,7 @@ struct CssStyle {
     if (base.hasTextCombine() && take(hasTextCombine(), 30)) textCombine = base.textCombine;
     if (base.hasDirection() && take(hasDirection(), 31)) direction = base.direction;
     if (base.hasUnicodeBidi() && take(hasUnicodeBidi(), 32)) unicodeBidi = base.unicodeBidi;
+    ruleBorder |= base.ruleBorder;
     if (base.hasTextEmphasis() && take(defined.textEmphasis, 33)) {
       textEmphasis = base.textEmphasis;
       defined.textEmphasis = 1;
@@ -431,6 +438,8 @@ struct CssStyle {
     return (defined.opacityZero && opacityZero) || (defined.visibilityHidden && visibilityHidden);
   }
   [[nodiscard]] bool isTextTransparent() const { return defined.colorTransparent && colorTransparent; }
+  // An <hr> with this style has nothing to draw.
+  [[nodiscard]] bool hidesRule() const { return ruleBorder == kRuleBorderNone; }
   // Text declared too small to read: the `font-size: 1px` span a watermarking service hides in the
   // prose. Like colorTransparent a TEXT-only question (images are not sized by it), asked of the
   // element's own declared multiplier, before any baseline normalisation.
@@ -453,8 +462,8 @@ struct CssStyle {
   [[nodiscard]] bool hasUnicodeBidi() const { return unicodeBidi != CssUnicodeBidi::Unset; }
   // Whether the style says anything at all: a defined bit, or one of the flow properties, which have none.
   [[nodiscard]] bool anyDefined() const {
-    return defined.anySet() || hasWritingMode() || hasTextOrientation() || hasTextCombine() || hasDirection() ||
-           hasUnicodeBidi();
+    return defined.anySet() || ruleBorder != 0 || hasWritingMode() || hasTextOrientation() || hasTextCombine() ||
+           hasDirection() || hasUnicodeBidi();
   }
   [[nodiscard]] bool hasFontSizeMultiplier() const { return defined.fontSizeMultiplier; }
 
@@ -537,6 +546,7 @@ struct CssStyle {
     opacityZero = false;
     visibilityHidden = false;
     fontFamily = 0;
+    ruleBorder = 0;
     writingMode = CssWritingMode::Unset;
     textOrientation = CssTextOrientation::Unset;
     textCombine = CssTextCombine::Unset;
