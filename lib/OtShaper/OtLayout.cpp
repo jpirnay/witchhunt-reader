@@ -292,9 +292,9 @@ void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int
 
   // Glyphs the lookup may start at: in its digest, selected by its mask, and
   // not ignored by its flags.
+  // witchhunt: deviation 13 - the digest is always there (no hasDigest).
   const auto startsAt = [&](const GlyphInfo& g) {
-    return (!settings.hasDigest || settings.digest.mayHave(g.codepoint)) && (g.mask & c.lookupMask) &&
-           c.checkGlyphProperty(g, c.lookupProps);
+    return settings.digest.mayHave(g.codepoint) && (g.mask & c.lookupMask) && c.checkGlyphProperty(g, c.lookupProps);
   };
 
   if (table == GSUB && layout::isReverseLookup(lookup)) {

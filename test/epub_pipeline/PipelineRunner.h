@@ -48,6 +48,20 @@ struct Profile {
   // census then shows what such a build keeps on the heap; the arena's own use is reported per
   // spine (ARENA lines) when `arenaStat` is set.
   size_t lentArenaBytes = 0;
+  // A font file of test/fixtures/fonts: when set, the run installs a FixtureShapingFace over it as the face of every
+  // font and style (ppem 1280) in the stub's seam, and removes it after. Null: no font shapes.
+  const char* shapingFontFile = nullptr;
+};
+
+// For its lifetime, a Profile's shapingFontFile is the face of every font in the stub renderer's seam (nothing for a
+// null file). The runs below make one from their profile; a test that builds a Section itself makes its own. One at a
+// time: the face is a static.
+class ShapingFaceScope {
+ public:
+  explicit ShapingFaceScope(const char* file);
+  ~ShapingFaceScope();
+  ShapingFaceScope(const ShapingFaceScope&) = delete;
+  ShapingFaceScope& operator=(const ShapingFaceScope&) = delete;
 };
 
 using ArenaStatFn = std::function<void(int spineIndex, size_t highWater, size_t capacity)>;
@@ -62,13 +76,16 @@ void setBuildBracket(BuildBracketFn fn);
 // pages/elapsedUs cover the section build AND the page-by-page dump read-back.
 using SpineStatFn = std::function<void(int spineIndex, uint16_t pages, int64_t elapsedUs)>;
 
+// Called with each page the dump reads back, after it is dumped, outside the heap census.
+using PageStatFn = std::function<void(int spineIndex, uint16_t pageIndex, const Page& page)>;
+
 // Compile `epubPath` into `cacheDir` under `profile` and stream the canonical
 // dump to `out`. Returns false on any pipeline failure (already-logged).
 // `cacheDir` should be empty/fresh for a cold run. A second call over the same
 // cacheDir still rebuilds every section, but from the book-level caches the first
 // left behind (book.bin, CSS index, image manifest, banked XHTML, footnote store).
 bool runAndDump(const std::string& epubPath, const std::string& cacheDir, const Profile& profile, std::ostream& out,
-                const SpineStatFn& spineStat = {}, const ArenaStatFn& arenaStat = {});
+                const SpineStatFn& spineStat = {}, const ArenaStatFn& arenaStat = {}, const PageStatFn& pageStat = {});
 
 // Compile `epubPath` into `cacheDir` under `profile`, as runAndDump does, and hand every page of every spine, loaded
 // back from its section file, to `visit` with the renderer the build measured with. Heap-only builds: a profile with

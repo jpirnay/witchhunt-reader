@@ -94,8 +94,12 @@ set(PIPELINE_INCLUDES
   ${REPO_ROOT}/lib/PngDecoder
   ${REPO_ROOT}/lib/ProgressiveJpeg
   ${REPO_ROOT}/lib/TJpgDec/src
+  # FixtureShapingFace.h: the shaping face a Profile may install in the stub renderer's seam
+  ${REPO_ROOT}/test/text_shaping
   ${BIDI_LAYOUT_INCLUDES}
 )
+set_source_files_properties(PipelineRunner.cpp PROPERTIES
+  COMPILE_DEFINITIONS SHAPING_FONT_DIR="${REPO_ROOT}/test/fixtures/fonts")
 
 add_executable(EpubPipelineTest
   EpubPipelineTest.cpp
@@ -151,6 +155,10 @@ add_executable(EpubPipelineTest
   VerticalLayoutTest.cpp
   VerticalRulesTest.cpp
   BidiRulesTest.cpp
+  ShapingRulesTest.cpp
+  JoinerParseTest.cpp
+  IndicRulesTest.cpp
+  ShapingStatusTest.cpp
   CoverPipelineTest.cpp
   CoverWrapperTest.cpp
   CoverFallbackTest.cpp

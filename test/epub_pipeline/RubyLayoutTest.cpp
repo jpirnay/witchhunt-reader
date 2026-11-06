@@ -423,6 +423,27 @@ TEST_F(RubyLayout, ALongMarkedSpanKeepsItsMarkAcrossTheSplit) {
   EXPECT_EQ(marked, 160u);
 }
 
+TEST_F(RubyLayout, AGroupOpenAcrossTheSplitKeepsItsBases) {
+  // Forty bases, each style change inside a syllable (क<b>ि</b>), which a paragraph that shapes would merge in pairs
+  // (deviation 7). The 96-token split falls inside the open <ruby>; its bases are not merged before the reading makes
+  // them a group (a ruby token never merges), so the group is made over the tokens the parser counted.
+  std::string bases;
+  for (int i = 0; i < 20; ++i) bases += "क<b>ि</b>";
+  const auto l = lines("<p>" + hanRun(90) + "<ruby>" + bases + "<rt>r</rt></ruby></p>");
+  size_t groups = 0;
+  for (const auto& line : l) {
+    for (const auto& r : line.ruby) {
+      ++groups;
+      EXPECT_EQ(std::get<1>(r), 40u);
+      EXPECT_EQ(std::get<2>(r), "r");
+      for (size_t w = std::get<0>(r); w < std::get<0>(r) + std::get<1>(r) && w < line.words.size(); ++w) {
+        EXPECT_EQ(line.words[w], (w - std::get<0>(r)) % 2 == 0 ? "क" : "ि") << w;
+      }
+    }
+  }
+  EXPECT_EQ(groups, 1u);
+}
+
 TEST_F(RubyLayout, AnInternalLinkKeepsItsOwnMark) {
   const auto l = lines("<p>前<a class=\"bouten\" href=\"#x\">強調</a>後</p><p id=\"x\">先</p>",
                        ".bouten { -epub-text-emphasis-style: sesame }");

@@ -47,6 +47,7 @@ target_include_directories(TtfFontTest PRIVATE
   ${REPO_ROOT}/test/glyph_store
   ${REPO_ROOT}/test/ot_shaper_port
   ${REPO_ROOT}/test/complex_shaper
+  ${REPO_ROOT}/test/text_shaping  # FixtureShapingFace.h
   ${REPO_ROOT}/test/shims
   ${REPO_ROOT}/lib/hal
   ${REPO_ROOT}/lib/EpdFont

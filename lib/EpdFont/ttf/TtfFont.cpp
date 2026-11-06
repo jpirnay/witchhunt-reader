@@ -1092,14 +1092,18 @@ class TtfFont::FileShapingFace final : public ShapingFace {
   const Style& style_;
 };
 
-ShapingFace* TtfFont::shapingFace(const uint8_t style) {
+ShapingFace* TtfFont::shapingFace(const uint8_t style, bool* const refused) {
   if (!draws(style)) return nullptr;
   checkLock();
   Style& file = *styleAt(style);
   if (!file.shaping) {
     // 130 B on the C3 (the face's views and the mapping it was read at): made for a section build, freed after it.
     file.shaping = makeUniqueNoThrow<FileShapingFace>(set_.store_, file);
-    if (!file.shaping) LOG_ERR("TTF", "OOM: family %u style %u's shaping face", family_, style);
+    if (!file.shaping) {
+      // Said apart from a style that cannot shape: a layout without this face is not what the font draws.
+      LOG_ERR("TTF", "OOM: family %u style %u's shaping face", family_, style);
+      if (refused != nullptr) *refused = true;
+    }
   }
   return file.shaping.get();
 }

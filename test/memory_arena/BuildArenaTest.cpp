@@ -166,6 +166,61 @@ TEST(BuildArena, NullExternalBufferIsInvalidAndRefuses) {
   EXPECT_FALSE(arena.valid());
   EXPECT_EQ(arena.alloc(1, 1), nullptr);
   EXPECT_EQ(arena.failedAllocSize(), 1u);
+  EXPECT_EQ(arena.tail(1), nullptr);
+}
+
+// The word cache's watermark: the highest cursor since markPeak(), moved by alloc() alone.
+TEST(BuildArena, PeakSinceMarkFollowsAllocNotRelease) {
+  BuildArena arena(256);
+  EXPECT_EQ(BuildArena::kUnmarked, arena.peakSinceMark());  // never marked: the tail may hold anything
+  arena.alloc(40, 1);
+  EXPECT_EQ(BuildArena::kUnmarked, arena.peakSinceMark());  // an alloc does not mark it
+  arena.markPeak();
+  EXPECT_EQ(arena.peakSinceMark(), 40u);
+  auto block = arena.reserveBlock();
+  arena.alloc(100, 1);
+  EXPECT_EQ(arena.peakSinceMark(), 140u);
+  ASSERT_TRUE(arena.release(block));
+  EXPECT_EQ(arena.used(), 40u);
+  EXPECT_EQ(arena.peakSinceMark(), 140u);  // a release does not lower it
+  EXPECT_EQ(arena.alloc(500, 1), nullptr);
+  EXPECT_EQ(arena.peakSinceMark(), 140u);  // nor does a refused alloc move it
+  arena.alloc(10, 1);
+  EXPECT_EQ(arena.peakSinceMark(), 140u);  // below the peak: unchanged
+  arena.markPeak();
+  EXPECT_EQ(arena.peakSinceMark(), 50u);  // a new mark drops it to the cursor
+  // A reset fails safe: the tail reads as overwritten, whatever runs in the region next, until it is marked again.
+  arena.reset();
+  EXPECT_EQ(BuildArena::kUnmarked, arena.peakSinceMark());
+  EXPECT_GT(arena.peakSinceMark(), arena.capacity());
+  arena.alloc(8, 1);
+  EXPECT_EQ(BuildArena::kUnmarked, arena.peakSinceMark());
+  arena.markPeak();
+  EXPECT_EQ(arena.peakSinceMark(), 8u);
+}
+
+// The alignment padding counts: the peak is the cursor after the allocation, the end of the bytes it hands out.
+TEST(BuildArena, PeakSinceMarkIncludesPadding) {
+  alignas(std::max_align_t) uint8_t buf[128];
+  BuildArena arena(buf, sizeof(buf));
+  arena.alloc(3, 1);
+  arena.markPeak();
+  auto* p = static_cast<uint8_t*>(arena.alloc(8, 8));
+  ASSERT_EQ(p, buf + 8);
+  EXPECT_EQ(arena.peakSinceMark(), 16u);
+}
+
+TEST(BuildArena, TailIsTheRegionsTop) {
+  alignas(std::max_align_t) uint8_t buf[96];
+  BuildArena arena(buf, sizeof(buf));
+  EXPECT_EQ(arena.tail(32), buf + 64);
+  EXPECT_EQ(arena.tail(96), buf);
+  EXPECT_EQ(arena.tail(0), buf + 96);
+  EXPECT_EQ(arena.tail(97), nullptr);
+  // The tail is not an allocation: the arena still counts it as free.
+  arena.alloc(64, 1);
+  EXPECT_EQ(arena.used(), 64u);
+  EXPECT_NE(arena.alloc(32, 1), nullptr);
 }
 
 }  // namespace

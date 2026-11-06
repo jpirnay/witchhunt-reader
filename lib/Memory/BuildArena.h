@@ -25,6 +25,14 @@
 //     used on top of what was resident when it started -- the per-lane figures
 //     the arena budget is derived from (memory audit 2026-09, R3).
 //
+// The free tail (docs/memory-allocation-strategy.md §4, Class C): the word-shaping
+// cache keeps data in the region's top bytes, which the arena still counts as
+// free, so every room check and every allocation is as it would be without it.
+// markPeak()/peakSinceMark() tell it whether an allocation has reached those bytes
+// since it last looked; tail() is where they are. That is sound only because
+// nothing writes an arena's memory except through alloc() (§6): keep it so. No
+// accessor for the base or for any byte below the tail.
+//
 // Heap discipline: the backing buffer comes from makeUniqueNoThrow (never a
 // throwing new); valid() must be checked before use.
 #include <Memory.h>
@@ -126,6 +134,20 @@ class BuildArena {
   }
   size_t laneHighWater() const { return laneHighWater_ > laneStart_ ? laneHighWater_ - laneStart_ : 0; }
   uint32_t releaseFailures() const { return releaseFailures_; }
+  // The free tail's watermark (see the header): markPeak() sets it to the cursor, and peakSinceMark() is the highest
+  // cursor alloc() has left since, the end of every byte handed out since the mark. Releases never lower it. One
+  // mark per arena: the word-shaping cache's (WordShapeCache). Unmarked -- a new arena, or after reset() -- it is
+  // kUnmarked, past any capacity: the tail may hold anything, and reads as overwritten until the next mark.
+  static constexpr size_t kUnmarked = SIZE_MAX;
+  void markPeak() { peakMark_ = cursor_; }
+  size_t peakSinceMark() const { return peakMark_; }
+  // The region's top `bytes`: [capacity() - bytes, capacity()). Not an allocation: the arena counts them as free, and
+  // any alloc() may hand them out. Only for a user that checks peakSinceMark() before every read and write of them.
+  // Null when `bytes` exceeds the capacity.
+  uint8_t* tail(const size_t bytes) const {
+    if (!base_ || bytes > capacity_) return nullptr;
+    return base_ + (capacity_ - bytes);
+  }
 
   // Bump-allocate `bytes` aligned to `align` (power of two). Returns nullptr
   // when the request does not fit; the arena state is unchanged apart from
@@ -149,6 +171,7 @@ class BuildArena {
     cursor_ = aligned + bytes;
     if (cursor_ > highWater_) highWater_ = cursor_;
     if (cursor_ > laneHighWater_) laneHighWater_ = cursor_;
+    if (cursor_ > peakMark_) peakMark_ = cursor_;
     BUILD_ARENA_TRACE_ALLOC(aligned, bytes);
     return base_ + aligned;
   }
@@ -209,6 +232,7 @@ class BuildArena {
     activeBlockId_ = 0;
     laneStart_ = 0;
     laneHighWater_ = 0;
+    peakMark_ = kUnmarked;  // whatever the tail held is not to be trusted after a reset
     BUILD_ARENA_TRACE_REWIND();
   }
 
@@ -220,6 +244,7 @@ class BuildArena {
   size_t highWater_ = 0;
   size_t laneStart_ = 0;
   size_t laneHighWater_ = 0;
+  size_t peakMark_ = kUnmarked;
   size_t failedAllocSize_ = 0;
   uint32_t activeBlockId_ = 0;
   uint32_t nextBlockId_ = 1;

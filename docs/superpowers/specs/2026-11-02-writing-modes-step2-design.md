@@ -265,6 +265,18 @@ region, the `ClipSelectionActivity` change, and the tests `flash_blob_cache` and
       it stays valid across the move.
     - The alternative, plans that copy their filters, is not taken: it puts the 16-27 KB of filters back on the heap.
     - Upstream never needs it: its `.cpfont` blobs and heap-copied tables do not move.
+13. **The plan's memos** (PR 3, Task 12a: on the device `ot::shape` is dominated by reads of the flash-mapped GSUB).
+    Both leave the output as it is, by construction:
+    - Each planned lookup's digest is copied into the plan when it is built (24 B a lookup, GSUB's then GPOS's, from
+      `CPac`, else computed), and the apply loop tests that copy before `Plan::settings` reads the font
+      (`Plan::mayApply`). A plan that cannot allocate the copy fails, as a refused list block does. The
+      would-substitute probes read it too, so they always have the digest HarfBuzz tests a format-3 context's first
+      glyph against, and the port's "any first glyph" fallback for a plan without filters is gone. Subtable digests
+      stay in `CPac` or the refusable filter block. All three masks are kept: over the four fixture books the best one
+      alone (the low six bits) rejects 86% of what the three reject.
+    - `consonantPositionFromFace`'s answers are remembered by the plan (`Plan::consonantPosition`): 64 direct-mapped
+      slots keyed by the consonant's and the virama's glyph IDs, `mutable` in a const plan, which serves one build at
+      a time under RenderLock. Upstream HarfBuzz, to 15.1.0 and main, walks every time.
 
 ## How shaping runs at build time, and what is stored
 

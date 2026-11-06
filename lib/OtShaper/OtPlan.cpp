@@ -2,6 +2,10 @@
 
 #include <Memory.h>  // witchhunt: deviation 1
 
+#include <cstring>  // witchhunt: deviation 13
+
+#include "OtShaperInternal.h"  // witchhunt: deviation 13 - consonantPositionFromFace()
+
 namespace ot {
 
 namespace {
@@ -173,8 +177,7 @@ bool Plan::read(const Face& face, const Script s, const uint32_t* languageTags) 
     }
   }
   if (!listsFit_) return false;  // witchhunt: deviation 1
-  finish(face);
-  return true;
+  return finish(face);           // witchhunt: deviation 13 - false: the lookup digests' block was refused
 }
 
 void Plan::setFeatureMasks(const uint32_t* masks) {
@@ -187,12 +190,14 @@ void Plan::setFeatureMasks(const uint32_t* masks) {
   }
 }
 
-void Plan::finish(const Face& face) {
+bool Plan::finish(const Face& face) {
   applyGpos = !face.layout(GPOS).empty();
   fallbackGlyphClasses = !face.hasGlyphClasses();
   zeroMarks = shaper != ShaperKind::Indic;
   adjustMarkPositioningWhenZeroing = !applyGpos;
+  if (!copyLookupDigests(face)) return false;  // witchhunt: deviation 13
   buildFilters(face);
+  std::memset(positions_, 0, sizeof(positions_));  // witchhunt: deviation 13 - the memo, empty
   if (shaper == ShaperKind::Indic) {
     indicConfig = &INDIC_CONFIGS[static_cast<unsigned>(script)];
     isOldSpec = (chosenScript & 0xFF) != '2';
@@ -201,10 +206,47 @@ void Plan::finish(const Face& face) {
     zeroContext_ = !isOldSpec && script != Script::Malayalam;
     for (int feature = 0; feature < WS_COUNT; feature++) collectWould(static_cast<WouldFeature>(feature));
   }
+  return true;
 }
 
-// Lookup filters: from the font's CPac table when it has one, else computed
-// on the heap when the heap check allows (else lookups run unfiltered).
+// witchhunt: deviation 13 - each planned lookup's digest into the plan's own
+// block, GSUB's then GPOS's: the font's CPac record, else computed as the
+// CPac's writers compute it (lookupDigest()). Every planned lookup has one:
+// its index is below the font's lookup count, and a CPac holds a record for
+// each. False when the heap check or the allocation refuses the block, which
+// the plan cannot do without.
+bool Plan::copyLookupDigests(const Face& face) {
+  digestBlock_.reset();
+  lookupDigests_.bind(nullptr, 0);
+  const size_t bytes = (lookups[GSUB].size() + lookups[GPOS].size()) * DIGEST_BYTES;
+  if (bytes == 0) return true;
+  if (!heapAvailable(bytes)) return false;
+  digestBlock_ = makeUniqueNoThrow<uint8_t[]>(bytes);
+  if (!digestBlock_) return false;
+  lookupDigests_.bind(digestBlock_.get(), bytes);
+  lookupDigests_.resize(bytes);
+  uint8_t* record = lookupDigests_.data();
+  for (int t = GSUB; t <= GPOS; t++) {
+    const FilterRecords* const stored = face.filters(t);
+    for (const PlannedLookup& lookup : lookups[t]) {
+      if (stored) {
+        std::memcpy(record, stored->lookupDigests + DIGEST_BYTES * lookup.index, DIGEST_BYTES);
+      } else {
+        writeDigest(ot::lookupDigest(face, t, lookup.index), record);
+      }
+      record += DIGEST_BYTES;
+    }
+  }
+  return true;
+}
+
+// witchhunt: deviation 13 - planned lookup `i` of `table`'s record in lookupDigests_.
+const uint8_t* Plan::digestRecord(const int table, const size_t i) const {
+  return lookupDigests_.data() + DIGEST_BYTES * (table == GSUB ? i : lookups[GSUB].size() + i);
+}
+
+// Subtable filters: from the font's CPac table when it has one, else computed
+// on the heap when the heap check allows (else subtables run unfiltered).
 void Plan::buildFilters(const Face& face) {
   for (int t = GSUB; t <= GPOS; t++) {
     allocateFilters(t, 0, 0);  // witchhunt: deviation 1 - frees the table's computed filters (upstream clear()s them)
@@ -213,12 +255,11 @@ void Plan::buildFilters(const Face& face) {
     // 64-bit: planned lookups may share one lookup of 65535 subtables.
     uint64_t subtables = 0;
     for (const PlannedLookup& lookup : lookups[t]) subtables += Face::subtableCount(face.lookup(t, lookup.index));
-    const uint64_t bytes = (lookups[t].size() + subtables) * DIGEST_BYTES + lookups[t].size() * sizeof(uint32_t);
+    // witchhunt: deviation 13 - no lookup digests: the plan holds them (copyLookupDigests()).
+    const uint64_t bytes = subtables * DIGEST_BYTES + lookups[t].size() * sizeof(uint32_t);
     if (bytes > UINT32_MAX || !heapAvailable(static_cast<size_t>(bytes))) continue;
     if (!allocateFilters(t, lookups[t].size(), static_cast<size_t>(subtables))) continue;  // witchhunt: deviation 1
-    lookupDigests_[t].resize(lookups[t].size() * DIGEST_BYTES);
     for (size_t i = 0; i < lookups[t].size(); i++) {
-      writeDigest(lookupDigest(face, t, lookups[t][i].index), lookupDigests_[t].data() + i * DIGEST_BYTES);
       subtableStarts_[t].push_back(static_cast<uint32_t>(subtableDigests_[t].size() / DIGEST_BYTES));
       appendSubtableDigests(face, t, lookups[t][i].index, subtableDigests_[t]);
     }
@@ -246,25 +287,22 @@ bool Plan::allocateLists(const int table, const size_t lookupCount, const size_t
 
 // witchhunt: deviation 1 - one block for a table's computed filters, for
 // `lookupCount` planned lookups of `subtableCount` subtables in all: the
-// subtable starts, then the lookup digests and the subtable digests, bound
-// empty with filtersFit_ as their flag. False, with nothing bound, when there
-// is nothing to filter (no lookups: it only frees) or the block is refused.
+// subtable starts, then the subtable digests, bound empty with filtersFit_ as
+// their flag. False, with nothing bound, when there is nothing to filter (no
+// lookups: it only frees) or the block is refused.
 bool Plan::allocateFilters(const int table, const size_t lookupCount, const size_t subtableCount) {
   filterBlock_[table].reset();
   subtableStarts_[table].bind(nullptr, 0);
-  lookupDigests_[table].bind(nullptr, 0);
   subtableDigests_[table].bind(nullptr, 0);
   if (lookupCount == 0) return false;
   const size_t startBytes = lookupCount * sizeof(uint32_t);
-  const size_t lookupBytes = lookupCount * DIGEST_BYTES;
   const size_t subtableBytes = subtableCount * DIGEST_BYTES;
-  filterBlock_[table] = makeUniqueNoThrow<uint8_t[]>(startBytes + lookupBytes + subtableBytes);
+  filterBlock_[table] = makeUniqueNoThrow<uint8_t[]>(startBytes + subtableBytes);
   if (!filterBlock_[table]) return false;
   uint8_t* const block = filterBlock_[table].get();
   filtersFit_ = true;
   subtableStarts_[table].bind(reinterpret_cast<uint32_t*>(block), lookupCount, &filtersFit_);
-  lookupDigests_[table].bind(block + startBytes, lookupBytes, &filtersFit_);
-  subtableDigests_[table].bind(block + startBytes + lookupBytes, subtableBytes, &filtersFit_);
+  subtableDigests_[table].bind(block + startBytes, subtableBytes, &filtersFit_);
   return true;
 }
 
@@ -276,24 +314,41 @@ LookupSettings Plan::settings(const int table, const size_t i) const {
   out.autoZwj = lookup.flags & lookupbits::AUTO_ZWJ;
   out.random = lookup.flags & lookupbits::RANDOM;
   out.perSyllable = lookup.flags & lookupbits::PER_SYLLABLE;
+  out.digest = readDigest(digestRecord(table, i));  // witchhunt: deviation 13 - the plan's copy
   if (const FilterRecords* r = fontFilters_[table]) {
-    out.hasDigest = true;
-    out.digest = readDigest(r->lookupDigests + DIGEST_BYTES * lookup.index);
     out.subtableDigests = r->subtableDigests + DIGEST_BYTES * r->firstSubtable(lookup.index);
-  } else if (!lookupDigests_[table].empty()) {
-    out.hasDigest = true;
-    out.digest = readDigest(lookupDigests_[table].data() + DIGEST_BYTES * i);
+  } else if (!subtableStarts_[table].empty()) {  // witchhunt: deviation 13 - the filter block holds subtables only
     out.subtableDigests = subtableDigests_[table].data() + DIGEST_BYTES * subtableStarts_[table][i];
   }
   return out;
 }
 
+// witchhunt: deviation 13 - applyTable()'s digest test, on the plan's copy of
+// the digest, so it comes before settings() reads anything of the font.
+bool Plan::mayApply(const int table, const size_t i, const Digest& buffer) const {
+  return testBypassCaches || readDigest(digestRecord(table, i)).mayIntersect(buffer);
+}
+
+// witchhunt: deviation 13 - see positions_. A glyph past 16 bits (no font has
+// one) walks every time.
+uint8_t Plan::consonantPosition(const Face& face, const uint32_t consonant, const uint32_t virama) const {
+  if (testBypassCaches || consonant > UINT16_MAX || virama > UINT16_MAX) {
+    return consonantPositionFromFace(face, *this, consonant, virama);
+  }
+  const uint32_t key = consonant | virama << 16;
+  const size_t slot = (consonant ^ virama) % POSITION_SLOTS;
+  if (positions_[slot] == 0 || positionKeys_[slot] != key) {
+    positionKeys_[slot] = key;
+    positions_[slot] = consonantPositionFromFace(face, *this, consonant, virama);
+  }
+  return positions_[slot];
+}
+
 size_t Plan::memoryBytes() const {
-  size_t bytes = sizeof(Plan);
+  size_t bytes = sizeof(Plan) + lookupDigests_.capacity();  // witchhunt: deviation 13 - the lookup digests
   for (int t = GSUB; t <= GPOS; t++) {
     bytes += lookups[t].capacity() * sizeof(PlannedLookup) + stages[t].capacity() * sizeof(Stage) +
-             lookupDigests_[t].capacity() + subtableStarts_[t].capacity() * sizeof(uint32_t) +
-             subtableDigests_[t].capacity();
+             subtableStarts_[t].capacity() * sizeof(uint32_t) + subtableDigests_[t].capacity();
   }
   return bytes;
 }
@@ -310,14 +365,15 @@ void Plan::collectWould(const WouldFeature feature) {
   w.end = static_cast<uint16_t>(stage < stages[GSUB].size() ? stages[GSUB][stage].lastLookup : lookups[GSUB].size());
 }
 
+// witchhunt: deviation 13 - each lookup's digest is the plan's copy, which
+// every plan holds: HarfBuzz always has it (format-3 contexts leave their
+// first glyph to it), where the port fell back to "any first glyph" when a
+// plan had no filters.
 bool Plan::wouldSubstitute(const Face& face, const WouldFeature feature, const uint32_t* glyphs,
                            const unsigned count) const {
-  // Without filters, every lookup may start at any glyph.
-  static constexpr Digest ANY_GLYPH{{~0ull, ~0ull, ~0ull}};
   const WouldSubstituteLookups& w = would_[feature];
   for (size_t i = w.start; i < w.end; i++) {
-    const LookupSettings s = settings(GSUB, i);
-    if (ot::wouldSubstitute(face, lookups[GSUB][i].index, s.hasDigest ? s.digest : ANY_GLYPH, glyphs, count,
+    if (ot::wouldSubstitute(face, lookups[GSUB][i].index, readDigest(digestRecord(GSUB, i)), glyphs, count,
                             zeroContext_)) {
       return true;
     }

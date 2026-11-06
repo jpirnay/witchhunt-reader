@@ -677,10 +677,11 @@ of UTF-8. With the body family's regular style at the body size it builds the sh
 the text's first Indic run (from its first Indic letter, at most 48 code points) and prefetches that run's glyphs:
 
 ```
-TTF_SHAPE:script=Devanagari cpac=18244 init_us=410 repoint_us=95 plan_us=18300 plan_bytes=1480 shape_us=6200 glyphs=6 width=71 stored=5
+TTF_SHAPE:script=Devanagari cpac=18244 init_us=410 repoint_us=95 plan_us=18300 plan_bytes=3328 shape_us=6200 glyphs=6 width=71 stored=5
 ```
 
-(An illustration: `cpac` is what the merged Noto Sans Devanagari Regular reserves; the timings are not measured.)
+(An illustration: `cpac` is what the merged Noto Sans Devanagari Regular reserves and `plan_bytes` what its plan holds
+on the host (a little less on the device); the timings are not measured.)
 
 `cpac` is the length of the CPac the regular face reads, in either mode: the room the install reserved, which equals
 the table for a well-formed font (0 when the face has no filters, as for a font whose layout names no script the

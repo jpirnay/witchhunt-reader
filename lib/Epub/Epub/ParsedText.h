@@ -2,6 +2,7 @@
 
 #include <EpdFontFamily.h>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -18,6 +19,11 @@
 
 class GfxRenderer;
 class BuildArena;
+class ShapingFace;
+class WordShapeCache;
+namespace IndicShaper {
+enum class Outcome : uint8_t;
+}
 
 class ParsedText {
  public:
@@ -139,7 +145,8 @@ class ParsedText {
   // line callbacks, which only get the TextBlock.
   uint32_t lastLineVisibleOffset_ = 0;
   // The tokens the line most recently handed to processLine consumed: its token range, plus those of controls-only
-  // lines before it that never reached processLine. A bidi line stores pieces, so wordCount() is not this.
+  // lines before it that never reached processLine. Counted as the parser added them: a merged token counts as its
+  // parts (TokenBoundary::Boundary::merged). A bidi line stores pieces, so wordCount() is not this.
   uint32_t lastLineTokenCount_ = 0;
   uint32_t controlsOnlyTokens_ = 0;  // tokens of controls-only lines not yet charged to a handed-over line
   // The ruby text of each Leader token (TokenBoundary::RubyRole) of the block, in token order: the n-th Leader owns the
@@ -205,6 +212,77 @@ class ParsedText {
   void viewWithoutControls(size_t first, size_t count, TextBlock::WordRange& range);
   // Steps bidiState_->openControls over the tokens [first, end) of a line that was accepted.
   void stepOpenControls(size_t first, size_t end);
+
+  // A paragraph without bidi whose tokens hold Indic text forms them (writing modes step 2, "How shaping runs" 2-10):
+  // each such token is shaped once into a paragraph store, in step with the word vectors, whose widths break the
+  // lines and whose pieces the line is drawn as. Boxed, and defined in ParsedText.cpp, so this header includes nothing
+  // of the shaper (it is included far beyond layout). Made by the first pass that shapes; reset() empties it for the
+  // next paragraph; releaseLayoutScratch() frees it when no paragraph in progress shapes. Nothing in it holds a face or
+  // a plan: they are the renderer's, for one build.
+  struct ShapingState;
+  std::unique_ptr<ShapingState> shapingState_;
+  bool shapes_ = false;  // this pass forms Indic words: no bidi, and a token holds U+0900-0DFF
+  bool* shapingLatch_ = nullptr;
+  // The build's cache of shaped words (WordShapeCache.h), the parser's; null: every token is shaped. An unglued token
+  // that shapes Formed is looked up there before it is shaped, and stored once it is.
+  WordShapeCache* wordCache_ = nullptr;
+  uint32_t tokensShaped_ = 0;
+  // The first token the next pass may not merge (keepUnmergedFrom); SIZE_MAX: none. The pass clears it.
+  size_t unmergedFrom_ = SIZE_MAX;
+  // Const: the latch is the parser's, and a const lookup (shapingFaceFor) may be the one to find a refusal.
+  void latchShapingDegraded() const {
+    if (shapingLatch_ != nullptr) *shapingLatch_ = true;
+  }
+  // Whether this pass shapes, decided after decideBidi: makes ShapingState for it (refused: the pass is laid out
+  // unshaped, and latched), or empties the store of a pass that does not shape. A kept token whose glued neighbour has
+  // just arrived is shaped again, with it as context.
+  void decideShaping();
+  // Joins each glued group's tokens that TextShaping::mergesWithPrevious merges (deviation 7, and the Hebrew name)
+  // before anything is measured: a merged token keeps its first part's style, size, boundary and visible offset. Ruby
+  // tokens, combine requests and no-break spaces are never merged; nor are tokens whose merged text the heap has no
+  // room for (latched).
+  void mergeGluedGroups(int fontId);
+  // Whether tokens a and b are in one font, style, size and emphasis mark: a span split of one style.
+  bool sameStyle(int fontId, size_t a, size_t b) const;
+  // Token i's entry made stale, so it is shaped again: a glued neighbour it was shaped with has changed.
+  void forgetShaping(size_t i);
+  // The store's room for this pass, reserved from its estimate, and an entry for every token. False (logged, latched,
+  // the store emptied) when the entries cannot grow: the pass is then laid out unshaped.
+  bool readyShapedStore();
+  // The face token i is shaped with, and the ppem (26.6) its glyphs are drawn at: the face's, times the font's base
+  // scale, times the word's. Null (and 0) on a vertical line, which reorders instead, and for a font that cannot shape.
+  // The renderer is asked once a pass for each font and style (ShapingState's face answers), so every key and every
+  // call of a pass reads one answer. Asked only for a token that holds Indic text: a face the heap refused is null too,
+  // and latches shaping degraded, since the token is then laid out as without a face.
+  ShapingFace* shapingFaceFor(const GfxRenderer& renderer, int fontId, size_t i, uint32_t* drawnPpem) const;
+  // Forgets the pass's face answers: a face lives for the build, and a font set reload between passes frees it.
+  void forgetFaceAnswers();
+  // What token i's entry is valid for besides its text: its font, style bits, size and scale, the font's base scale,
+  // and the drawn ppem (0 without a face). Records shaped at one size are never reused at another.
+  uint32_t shapeKey(const GfxRenderer& renderer, int fontId, size_t i) const;
+  // `text`, as token i's font, style and size draw it, shaped with `before` and `after` as context into the store's
+  // open entry, in a call block of lineArena_'s (else the build's heap block) released before it returns.
+  IndicShaper::Outcome shapeInto(const GfxRenderer& renderer, int fontId, size_t i, std::string_view text,
+                                 std::string_view before, std::string_view after);
+  // Token i's pieces, found in the store, else replayed from the word cache or shaped now, their glyphs warmed and
+  // their widths set, and *width their sum; false: it is laid out as its code points (and latched when it could not be
+  // shaped, or its pieces measured for want of memory).
+  bool shapeToken(const GfxRenderer& renderer, int fontId, size_t i, uint16_t* width);
+  // The width of words[i]'s first `bytes` bytes and a hyphen when `hyphen`: a candidate the breaker measures, shaped in
+  // the store's scratch entry (nothing is kept), or measured as code points when it is not shaped (and latched when it
+  // could not be, or its pieces measured). The candidate's string was reserved by hyphenateWordAtIndex.
+  int shapedPrefixWidth(const GfxRenderer& renderer, int fontId, size_t i, size_t bytes, bool hyphen);
+  // Whether token i's first piece (its last, when `last`) is a glyph run: a glued gap there takes no kerning (step 8).
+  bool glyphEdge(const GfxRenderer& renderer, int fontId, size_t i, bool last) const;
+  // A line of a paragraph that shapes, tokens [first, first + count) placed: when a token has pieces, each token
+  // becomes its pieces, in order (step 7), and true. The first piece keeps the token's boundary, the others are glued;
+  // each takes the token's style and size; a Glyphs piece is drawn as its run, a Reordered piece as its form (without
+  // its soft hyphens), and a Text piece of soft hyphens alone, which has no width, is left out. lineXPosScratch_ then
+  // holds the pieces' positions (the token's x plus the widths before it), the annotations name pieces, and `range` is
+  // pointed at ShapingState's vectors. False, nothing changed, when no token has pieces: the line keeps its bytes. So
+  // does a line the heap has no room to lay out as pieces, drawn as its tokens' code points (latched).
+  bool viewShapedPieces(const GfxRenderer& renderer, int fontId, size_t first, size_t count,
+                        TextBlock::WordRange& range);
 
   LinePlace linePlace_;
   BlockStyle blockStyle;
@@ -371,17 +449,14 @@ class ParsedText {
   }
 
  public:
-  explicit ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled = false,
-                      const BlockStyle& blockStyle = BlockStyle(), const bool bionicReadingEnabled = false)
-      : blockStyle(blockStyle),
-        extraParagraphSpacing(extraParagraphSpacing),
-        hyphenationEnabled(hyphenationEnabled),
-        bionicReadingEnabled(bionicReadingEnabled) {}
-  ~ParsedText() = default;
+  // Out of line, as the destructor and the moves are: ShapingState is complete only in ParsedText.cpp.
+  explicit ParsedText(bool extraParagraphSpacing, bool hyphenationEnabled = false,
+                      const BlockStyle& blockStyle = BlockStyle(), bool bionicReadingEnabled = false);
+  ~ParsedText();
   // Movable, not copyable: it owns its word vectors and buffers. The line pass's scratch is the build's
   // (BidiLine::heapScratch), not its own.
-  ParsedText(ParsedText&&) = default;
-  ParsedText& operator=(ParsedText&&) = default;
+  ParsedText(ParsedText&&) noexcept;
+  ParsedText& operator=(ParsedText&&) noexcept;
 
   // Start a new, empty block in this object under `blockStyle`, keeping the word vectors'
   // capacity. The parser reuses one ParsedText across a chapter's paragraphs: a fresh object
@@ -442,6 +517,21 @@ class ParsedText {
   void setVertical(bool vertical) { vertical_ = vertical; }
   // See lineArena_ / beforeLine_. Both survive reset().
   void setLineArena(BuildArena* arena) { lineArena_ = arena; }
+  // A run laid out as its code points because it could not be shaped (no memory, or the font failed it) sets *latch
+  // (Section's kStatusShapingDegraded). Survives reset().
+  void setShapingLatch(bool* latch) { shapingLatch_ = latch; }
+  // See wordCache_. The parser sets it beside setLineArena; it survives reset().
+  void setWordCache(WordShapeCache* cache) { wordCache_ = cache; }
+  bool shapingStateHeld() const { return shapingState_ != nullptr; }  // for tests
+  // Tokens handed to IndicShaper since construction (a candidate prefix the breaker measures is not one): for tests
+  // and the build's log.
+  uint32_t tokensShaped() const { return tokensShaped_; }
+  // Tokens from `first` on are not merged by the next layout pass: the bases of a ruby still open, which the parser
+  // counts until their reading makes them a group (a ruby token is never merged). The pass clears it.
+  void keepUnmergedFrom(const size_t first) { unmergedFrom_ = first; }
+  // The tokens as the parser added them: size(), with each merged token counted as its parts. A footnote's anchor is
+  // placed by it, as lastLineTokenCount() counts the lines.
+  size_t sourceTokenCount() const;
   void setBeforeLineHook(std::function<void(uint8_t maxSizePct, bool annotated)> hook) {
     beforeLine_ = std::move(hook);
   }

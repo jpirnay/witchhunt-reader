@@ -14,6 +14,7 @@
 
 #include "EpdFontFamily.h"
 #include "ExpectedGlyphRuns.h"
+#include "FixtureShapingFace.h"
 #include "GlyphKey.h"
 #include "GlyphProvider.h"
 #include "GlyphRun.h"
@@ -896,7 +897,10 @@ class TtfShapingFace : public ::testing::Test {
     ASSERT_FALSE(subset[kRegular].bytes.empty());
     ASSERT_FALSE(subset[kBold].bytes.empty());
   }
-  void TearDown() override { TtfFont::setHooks({}); }
+  void TearDown() override {
+    TtfFont::setHooks({});
+    refuseNextObjectBytes = 0;
+  }
 
   // The face of `font`'s `style` through the family API, and the pixels per em it says its glyphs are drawn at.
   static ShapingFace* faceOf(const TtfFont& font, const uint8_t style, uint32_t* ppem) {
@@ -1151,6 +1155,32 @@ TEST_F(TtfShapingFace, ALoadedSetHoldsNoFaceUntilAsked) {
   EXPECT_EQ(loaded + faceBytes, heapBytesHeld);
 }
 
+TEST_F(TtfShapingFace, AFaceTheHeapRefusesSaysSo) {
+  // A layout without the face is not what the font draws, so the refusal is told apart from a font that cannot shape,
+  // through the family as the renderer asks.
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  TtfFont& font = *set->font(0);
+  const size_t loaded = heapBytesHeld;
+  ASSERT_NE(nullptr, font.shapingFace(kRegular));
+  const size_t faceBytes = heapBytesHeld - loaded;
+  set->releaseShapingFaces();
+
+  refuseNextObjectBytes = faceBytes;
+  uint32_t ppem = 0;
+  bool refused = false;
+  const EpdFontFamily family(font.font(kRegular), font.font(kBold));
+  EXPECT_EQ(nullptr, family.shapingFace(EpdFontFamily::REGULAR, &ppem, &refused));
+  EXPECT_TRUE(refused);
+  EXPECT_EQ(0u, refuseNextObjectBytes);  // the face's was the allocation refused
+
+  // With the memory back the face is made, and nothing is said.
+  refused = false;
+  EXPECT_NE(nullptr, family.shapingFace(EpdFontFamily::REGULAR, &ppem, &refused));
+  EXPECT_FALSE(refused);
+}
+
 TEST_F(TtfShapingFace, AFaceIsMappedAndFreedUnderTheRenderLock) {
   // current() maps the glyph store, and releaseShapingFaces() frees what plans read: both are RenderLock's, as a glyph
   // lookup is, and say so once when it is not held.
@@ -1178,8 +1208,10 @@ TEST_F(TtfShapingFace, ABitmapFontHasNoShapingFace) {
   const EpdFont font(&data);
   const EpdFontFamily family(&font);
   uint32_t ppem = 7;
-  EXPECT_EQ(nullptr, family.shapingFace(EpdFontFamily::REGULAR, &ppem));
+  bool refused = false;
+  EXPECT_EQ(nullptr, family.shapingFace(EpdFontFamily::REGULAR, &ppem, &refused));
   EXPECT_EQ(7u, ppem);
+  EXPECT_FALSE(refused);  // a font that cannot shape: nothing was refused
 }
 
 // --- A shaped run drawn by glyph ID ---
@@ -1315,4 +1347,228 @@ TEST_F(TtfGlyphRun, AGlyphRunDrawsTheOraclesGlyphsAtItsPositions) {
     }
   }
   EXPECT_EQ(4 * 16, runsDrawn);
+}
+
+// --- A face's own plans ---
+
+namespace {
+
+class ShapingFacePlans : public TtfShapingFace {};
+
+// ot::setHeapCheck's refusal, and its reset when the test ends however it ends.
+bool refuseAll(size_t) { return false; }
+struct HeapRefusal {
+  HeapRefusal() { ot::setHeapCheck(refuseAll); }
+  ~HeapRefusal() { ot::setHeapCheck(nullptr); }
+};
+
+ot::Script scriptNamed(const char* name) {
+  ot::Script script = ot::Script::Devanagari;
+  EXPECT_TRUE(ottest::scriptOf(name, &script)) << name;
+  return script;
+}
+
+std::vector<StoredGlyph> storedOf(const ExpectedShaping& word) {
+  std::vector<StoredGlyph> out;
+  for (unsigned i = 0; i < word.count; ++i) {
+    out.push_back({word.glyphs[i].gid, word.glyphs[i].advance12_4, word.glyphs[i].dx, word.glyphs[i].dy});
+  }
+  return out;
+}
+
+// KA, SSA: the conjunct that differs between the default language system and Marathi's.
+constexpr const char* kLaksha = "\xE0\xA4\xB2\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7";
+
+}  // namespace
+
+TEST_F(ShapingFacePlans, APlanIsBuiltOnceAndShapesAsHarfBuzz) {
+  for (const ShapingFixture& fx : kShapingFixtures) {
+    FixtureShapingFace face(ottest::readFixture(fx.layoutFile));
+    const ot::Script script = scriptNamed(fx.script);
+    std::vector<const uint32_t*> languages;  // the distinct language systems, in the order the words give them
+    for (size_t w = 0; w < fx.count; ++w) {
+      const uint32_t* tags = ot::languageTagsFor(fx.words[w].language);
+      if (std::find(languages.begin(), languages.end(), tags) == languages.end()) languages.push_back(tags);
+    }
+    uint16_t builds = 0;
+    for (const uint32_t* tags : languages) {
+      const ot::Plan* plan = face.plan(script, tags);
+      ASSERT_NE(nullptr, plan) << fx.script;
+      EXPECT_EQ(plan, face.plan(script, tags)) << fx.script;  // asked again: the same plan, nothing built
+      EXPECT_EQ(++builds, face.planBuilds()) << fx.script;
+      for (size_t w = 0; w < fx.count; ++w) {
+        const ExpectedShaping& word = fx.words[w];
+        if (ot::languageTagsFor(word.language) != tags) continue;
+        EXPECT_EQ(storedOf(word), ottest::shapeAsStored(*face.current(), *plan, word.utf8))
+            << fx.script << " " << w << ": " << word.utf8;
+      }
+    }
+  }
+}
+
+TEST_F(ShapingFacePlans, EachLanguageHasItsOwnPlan) {
+  FixtureShapingFace face(ottest::readFixture(devanagariFixture().layoutFile));
+  const ot::Plan* none = face.plan(ot::Script::Devanagari, ot::languageTagsFor(""));
+  const ot::Plan* marathi = face.plan(ot::Script::Devanagari, ot::languageTagsFor("mr"));
+  ASSERT_NE(nullptr, none);
+  ASSERT_NE(nullptr, marathi);
+  EXPECT_NE(none, marathi);
+  EXPECT_EQ(2, face.planBuilds());
+  const ot::Face* shaping = face.current();
+  EXPECT_NE(ottest::shapeAsStored(*shaping, *none, kLaksha), ottest::shapeAsStored(*shaping, *marathi, kLaksha));
+  EXPECT_EQ(none, face.plan(ot::Script::Devanagari, ot::languageTagsFor("")));  // both kept
+  EXPECT_EQ(marathi, face.plan(ot::Script::Devanagari, ot::languageTagsFor("mr")));
+  EXPECT_EQ(2, face.planBuilds());
+}
+
+TEST_F(ShapingFacePlans, PastTwoPlansTheLeastRecentGoes) {
+  FixtureShapingFace face(ottest::readFixture(devanagariFixture().layoutFile));
+  const uint32_t* const none = ot::languageTagsFor("");
+  const uint32_t* const marathi = ot::languageTagsFor("mr");
+  const uint32_t* const nepali = ot::languageTagsFor("ne");
+  ASSERT_NE(none, nepali);
+  ASSERT_NE(marathi, nepali);
+  ASSERT_EQ(2, ShapingFace::kMaxPlans);
+  ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, none));
+  ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, marathi));
+  ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, none));  // "" is now more recent than "mr"
+  EXPECT_EQ(2, face.planBuilds());
+  ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, nepali));  // frees the plan of "mr": the least recent
+  EXPECT_EQ(3, face.planBuilds());
+  ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, nepali));
+  ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, none));
+  EXPECT_EQ(3, face.planBuilds());  // "" and "ne" are kept
+  ASSERT_NE(nullptr, face.plan(ot::Script::Devanagari, marathi));
+  EXPECT_EQ(4, face.planBuilds());  // "mr" was the one freed
+}
+
+TEST_F(ShapingFacePlans, APlanAskedAgainBeforeEachUseIsValidAfterAnEviction) {
+  // The contract: a plan is valid until the next plan() on its face. A caller asks again before each use.
+  FixtureShapingFace face(ottest::readFixture(devanagariFixture().layoutFile));
+  const uint32_t* const languages[] = {ot::languageTagsFor(""), ot::languageTagsFor("mr"), ot::languageTagsFor("ne")};
+  for (int round = 0; round < 2; ++round) {
+    for (const uint32_t* tags : languages) {  // three keys over two slots: each ask evicts one
+      const ot::Plan* const plan = face.plan(ot::Script::Devanagari, tags);
+      ASSERT_NE(nullptr, plan);
+      const std::vector<StoredGlyph> expected = [&] {
+        FixtureShapingFace reference(ottest::readFixture(devanagariFixture().layoutFile));
+        const ot::Plan* const fresh = reference.plan(ot::Script::Devanagari, tags);
+        return fresh ? ottest::shapeAsStored(*reference.current(), *fresh, kLaksha) : std::vector<StoredGlyph>{};
+      }();
+      ASSERT_FALSE(expected.empty());
+      EXPECT_EQ(expected, ottest::shapeAsStored(*face.current(), *plan, kLaksha));
+    }
+  }
+  EXPECT_EQ(6, face.planBuilds());
+}
+
+TEST_F(ShapingFacePlans, APlanBuiltBeforeAMoveShapesAfterIt) {
+  const ShapingFixture& fx = devanagariFixture();
+  std::vector<uint8_t> a = ottest::readFixture(fx.layoutFile);
+  ASSERT_FALSE(a.empty());
+  std::vector<uint8_t> b = a;
+  ScriptedFace face;
+  face.size = static_cast<uint32_t>(a.size());
+  face.bases = {a.data(), b.data()};  // the first ask maps A, every later one B
+
+  const char* const language = fx.words[0].language;
+  const uint32_t* const tags = ot::languageTagsFor(language);
+  const ot::Plan* const plan = face.plan(ot::Script::Devanagari, tags);
+  ASSERT_NE(nullptr, plan);
+  std::fill(a.begin(), a.end(), uint8_t{0xA5});              // A is unmapped
+  EXPECT_EQ(plan, face.plan(ot::Script::Devanagari, tags));  // re-pointed to B, the same plan
+  EXPECT_TRUE(face.repointed());
+  EXPECT_EQ(1, face.planBuilds());
+  int shaped = 0;
+  for (size_t w = 0; w < fx.count; ++w) {
+    const ExpectedShaping& word = fx.words[w];
+    if (std::strcmp(word.language, language) != 0) continue;
+    EXPECT_EQ(storedOf(word), ottest::shapeAsStored(*face.current(), *plan, word.utf8)) << w << ": " << word.utf8;
+    ++shaped;
+  }
+  EXPECT_GT(shaped, 0);
+  EXPECT_EQ(1, face.tablesCalls);
+}
+
+TEST_F(ShapingFacePlans, AFaceFreedBetweenTwoTokensLeavesNoPlanBehind) {
+  SimNorFlash chip{kFlashBytes};
+  const auto set = load(chip, {subset}, kIdentityA, busy);
+  ASSERT_NE(nullptr, set);
+  const RunSet& runs = runSetOf(kSubsetFiles[kRegular], 1867);
+  const size_t loaded = heapBytesHeld;
+
+  ShapingFace* face = set->font(0)->shapingFace(kRegular);
+  ASSERT_NE(nullptr, face);
+  const size_t withFace = heapBytesHeld;
+  ASSERT_NE(nullptr, face->plan(ot::Script::Devanagari, ot::languageTagsFor(runs.runs[0].language)));
+  EXPECT_GT(heapBytesHeld, withFace);
+
+  set->releaseShapingFaces();
+  EXPECT_EQ(loaded, heapBytesHeld);  // the face and its plan both went
+
+  face = set->font(0)->shapingFace(kRegular);
+  ASSERT_NE(nullptr, face);
+  EXPECT_EQ(0, face->planBuilds());  // a new face has built nothing
+  for (size_t r = 0; r < runs.count; ++r) {
+    const ExpectedRun& run = runs.runs[r];
+    const ot::Plan* const plan = face->plan(ot::Script::Devanagari, ot::languageTagsFor(run.language));
+    ASSERT_NE(nullptr, plan) << r;
+    EXPECT_EQ(storedOf(run), ottest::shapeAsStored(*face->current(), *plan, run.utf8, runs.ppem26_6))
+        << r << ": " << run.utf8;
+  }
+}
+
+TEST_F(ShapingFacePlans, ARefusedPlanIsAskedAgain) {
+  FixtureShapingFace face(ottest::readFixture(devanagariFixture().layoutFile));
+  const uint32_t* const tags = ot::languageTagsFor("");
+  ASSERT_NE(nullptr, face.current());
+  {
+    const HeapRefusal refusal;
+    EXPECT_EQ(nullptr, face.plan(ot::Script::Devanagari, tags));
+    EXPECT_EQ(0, face.planBuilds());
+  }
+  EXPECT_NE(nullptr, face.plan(ot::Script::Devanagari, tags));
+  EXPECT_EQ(1, face.planBuilds());
+}
+
+TEST_F(ShapingFacePlans, AnUnmappedFaceGivesNoPlan) {
+  FixtureShapingFace face(ottest::readFixture(devanagariFixture().layoutFile));
+  face.mapped = false;
+  EXPECT_EQ(nullptr, face.plan(ot::Script::Devanagari, ot::languageTagsFor("")));
+  face.mapped = true;
+  EXPECT_NE(nullptr, face.plan(ot::Script::Devanagari, ot::languageTagsFor("")));
+}
+
+TEST_F(ShapingFacePlans, TheFixtureFaceDropsWhatItsOptionsSay) {
+  const std::vector<uint8_t> font = ottest::readFixture(devanagariFixture().layoutFile);
+  FixtureShapingFace whole(font);
+  FixtureShapingFace noLayout(font, {.keepLayout = false});
+  ASSERT_NE(nullptr, whole.current());
+  ASSERT_NE(nullptr, noLayout.current());  // a face without layout still stands
+  EXPECT_GT(whole.current()->lookupCount(ot::GSUB), 0);
+  EXPECT_GT(whole.current()->lookupCount(ot::GPOS), 0);
+  EXPECT_EQ(0, noLayout.current()->lookupCount(ot::GSUB));
+  EXPECT_EQ(0, noLayout.current()->lookupCount(ot::GPOS));
+  EXPECT_EQ(nullptr, noLayout.current()->filters(ot::GSUB));
+  EXPECT_EQ(nullptr, noLayout.current()->filters(ot::GPOS));
+}
+
+TEST_F(ShapingFacePlans, TheFixtureFaceDropsTheCpacOnRequest) {
+  // An SD-mode block of the install: the subset's file with its CPac record.
+  SimNorFlash chip{26 * kPage};
+  const auto set = loadSdMode(chip);
+  ASSERT_NE(nullptr, set);
+  const glyphstore::StyleInfo& info = headerOf(chip).styles[kAccentFirstBlock + kRegular];
+  ASSERT_EQ(glyphstore::kModeSd, info.mode);
+  const std::vector<uint8_t> block = chipBytes(chip, info.offset, info.size);
+  FixtureShapingFace with(block);
+  FixtureShapingFace without(block, {.keepCpac = false});
+  ASSERT_NE(nullptr, with.current());
+  ASSERT_NE(nullptr, without.current());
+  EXPECT_GT(with.cpacBytes(), 0u);
+  EXPECT_NE(nullptr, with.current()->filters(ot::GSUB));
+  EXPECT_NE(nullptr, with.current()->filters(ot::GPOS));
+  EXPECT_EQ(0u, without.cpacBytes());
+  EXPECT_EQ(nullptr, without.current()->filters(ot::GSUB));
+  EXPECT_EQ(nullptr, without.current()->filters(ot::GPOS));
 }

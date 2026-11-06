@@ -1,7 +1,22 @@
 #include "TypographyProfile.h"
 
+#include <OtShaper.h>
+
 #include "LanguageTag.h"
 #include "hyphenation/Hyphenator.h"
+
+namespace {
+
+// The primary language subtags written in an Indic script (a normalised tag).
+bool isIndicLanguage(const std::string& tag) {
+  for (const char* primary : {"hi", "mr", "ne", "sa", "kok", "mai", "bho", "awa", "mag", "raj",
+                              "bn", "as", "pa", "gu", "or",  "ta",  "te",  "kn",  "ml",  "si"}) {
+    if (language_tag::hasPrimary(tag, primary)) return true;
+  }
+  return false;
+}
+
+}  // namespace
 
 TypographyProfile TypographyProfile::forLanguage(const std::string& tag) {
   using language_tag::CjkRegion;
@@ -10,6 +25,8 @@ TypographyProfile TypographyProfile::forLanguage(const std::string& tag) {
   const CjkRegion region = language_tag::cjkRegionOf(tag);
   TypographyProfile p;
   p.hyphenator = Hyphenator::forLanguage(tag);
+  p.shapingLanguage = ot::languageTagsFor(tag.c_str());
+  p.shapedScript = isIndicLanguage(t);
 
   if (region != CjkRegion::None && region != CjkRegion::Korean) {
     p.breaking = Breaking::BetweenCharacters;

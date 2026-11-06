@@ -1793,7 +1793,8 @@ void loop() {
     LOG_INF("MEM", "btnSampler stack high-water=%u bytes free (min ever)",
             static_cast<unsigned>(gpio.samplerStackHighWater()));
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
-    // loop() runs on the Arduino loopTask (8 KB stack), which also drives the reader's
+    // loop() runs on the Arduino loopTask (16 KB stack: getArduinoLoopTaskStackSize(), which
+    // freeink-sdk's FreeInkUI.cpp defines weakly as 16 * 1024), which also drives the reader's
     // sliced background section builds (serviceBackgroundWork → createSectionFile /
     // HTML parse / image dimension reads). That task is NOT covered by the render-task
     // stack instrumentation, yet is an equally plausible source of a stack-into-heap

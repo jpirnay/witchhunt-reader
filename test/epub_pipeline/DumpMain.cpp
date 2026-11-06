@@ -2,10 +2,14 @@
 // pipeline and print the canonical layout dump plus benchmark lines (same
 // "BENCHMARK <label> time=<us>us" format as EpubParserBenchmark).
 //
-// Usage: epub_pipeline_dump <book.epub> [cacheDir] [--bench]
+// Usage: epub_pipeline_dump <book.epub> [cacheDir] [--bench] [--arena=BYTES] [--shaping-font=FILE]
 // A missing cacheDir uses a fresh temp dir (cold build). Passing the same
 // cacheDir twice exercises the warm path. --bench adds per-spine timing,
-// whole-run peak heap, and the on-disk cache footprint to stderr.
+// whole-run peak heap, and the on-disk cache footprint to stderr, and per page
+// the bytes of its lines' arenas (page_bytes), of their glyph forms' records
+// (glyph_bytes), and what the same glyphs take as crosspoint-reader #3787's
+// tokens (token_bytes: 8 B a glyph, 12 with an offset). --shaping-font names a
+// font of test/fixtures/fonts, the shaping face of every font and style.
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -19,6 +23,8 @@
 #include <filesystem>
 #include <iostream>
 
+#include "Epub/Page.h"
+#include "Epub/blocks/TextBlock.h"
 #include "HeapTrack.h"
 #include "PipelineRunner.h"
 
@@ -33,15 +39,50 @@ static uintmax_t dirBytes(const std::string& dir) {
   return total;
 }
 
+// A page's text bytes: its lines' arenas, their glyph forms' records, and those glyphs as #3787's tokens.
+struct PageBytes {
+  size_t page = 0;
+  size_t glyphs = 0;
+  size_t tokens = 0;
+
+  void add(const TextBlock& block) {
+    page += block.arenaBytes();
+    for (uint16_t w = 0; w < block.wordCount(); ++w) {
+      const GlyphRun run = block.glyphForm(w);
+      glyphs += run.bytes;
+      forEachGlyph(run, 0, false,
+                   [this](const GlyphRecord& record, int) { tokens += (record.dx != 0 || record.dy != 0) ? 12 : 8; });
+    }
+  }
+};
+
+static PageBytes pageBytes(const Page& page) {
+  PageBytes bytes;
+  for (const auto& element : page.elements) {
+    if (element->getTag() == TAG_PageLine) {
+      bytes.add(*static_cast<const PageLine&>(*element).getBlock());
+    } else if (element->getTag() == TAG_PageTable) {
+      for (const auto& row : static_cast<const PageTableFragment&>(*element).getRows()) {
+        for (const auto& cell : row.cells) {
+          for (const auto& line : cell.lines) bytes.add(*line);
+        }
+      }
+    }
+  }
+  return bytes;
+}
+
 int main(const int argc, char** argv) {
   bool bench = false;
   size_t lentArenaBytes = 0;
-  std::string epubPath, cacheDir;
+  std::string epubPath, cacheDir, shapingFont;
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--bench") == 0) {
       bench = true;
     } else if (std::strncmp(argv[i], "--arena=", 8) == 0) {
       lentArenaBytes = static_cast<size_t>(std::strtoul(argv[i] + 8, nullptr, 10));
+    } else if (std::strncmp(argv[i], "--shaping-font=", 15) == 0) {
+      shapingFont = argv[i] + 15;
     } else if (epubPath.empty()) {
       epubPath = argv[i];
     } else {
@@ -49,7 +90,7 @@ int main(const int argc, char** argv) {
     }
   }
   if (epubPath.empty()) {
-    std::fprintf(stderr, "usage: %s <book.epub> [cacheDir] [--bench] [--arena=BYTES]\n", argv[0]);
+    std::fprintf(stderr, "usage: %s <book.epub> [cacheDir] [--bench] [--arena=BYTES] [--shaping-font=FILE]\n", argv[0]);
     return 2;
   }
   if (cacheDir.empty()) {
@@ -60,9 +101,15 @@ int main(const int argc, char** argv) {
   fs::create_directories(cacheDir);
 
   pipeline_harness::SpineStatFn spineStat;
+  pipeline_harness::PageStatFn pageStat;
   if (bench) {
     spineStat = [](const int spine, const uint16_t pages, const int64_t us) {
       std::fprintf(stderr, "BENCHMARK spine_%d pages=%u time=%lldus\n", spine, pages, static_cast<long long>(us));
+    };
+    pageStat = [](const int spine, const uint16_t index, const Page& page) {
+      const PageBytes bytes = pageBytes(page);
+      std::fprintf(stderr, "BENCHMARK spine_%d page_%u page_bytes=%zu glyph_bytes=%zu token_bytes=%zu\n", spine, index,
+                   bytes.page, bytes.glyphs, bytes.tokens);
     };
   }
 
@@ -70,13 +117,14 @@ int main(const int argc, char** argv) {
   const auto start = std::chrono::steady_clock::now();
   pipeline_harness::Profile profile;
   profile.lentArenaBytes = lentArenaBytes;
+  if (!shapingFont.empty()) profile.shapingFontFile = shapingFont.c_str();
   pipeline_harness::ArenaStatFn arenaStat;
   if (bench && lentArenaBytes > 0) {
     arenaStat = [](const int spine, const size_t highWater, const size_t capacity) {
       std::fprintf(stderr, "BENCHMARK spine_%d arena_highWater=%zu capacity=%zu\n", spine, highWater, capacity);
     };
   }
-  const bool ok = pipeline_harness::runAndDump(epubPath, cacheDir, profile, std::cout, spineStat, arenaStat);
+  const bool ok = pipeline_harness::runAndDump(epubPath, cacheDir, profile, std::cout, spineStat, arenaStat, pageStat);
   const auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start);
   std::fprintf(stderr, "BENCHMARK pipeline_%s time=%lldus", ok ? "ok" : "FAILED", static_cast<long long>(us.count()));
   if (bench) {
