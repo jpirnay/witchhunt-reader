@@ -126,7 +126,7 @@ int getHomeCoverRenderHeight(const HomeScreenLayout& layout) {
 void HomeActivity::rebuildMenuEntries() {
   menuEntries.clear();
   menuEntries.reserve(6);  // all six shown, or five plus More
-  const HomeMenuAvailability availability{.hasBookmarks = !GLOBAL_BOOKMARKS.isEmpty()};
+  const HomeMenuAvailability availability{.hasBookmarks = GLOBAL_BOOKMARKS.hasAny()};
   collectHomeMenuEntries(HomeMenuPlacement::Home, availability, menuEntries);
   menuEntriesDirty = false;
 }

@@ -91,25 +91,28 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=118 s=0 z=100 t=body
    W x=158 s=0 z=100 t=font
    W x=207 s=0 z=100 t=size.
-  LINE y=416 x=0 align=2 mult=1.200 hfid=0 words=6
+  LINE y=416 x=0 align=2 mult=1.200 hfid=0 words=7
    W x=44 s=1 z=100 t=H2
    W x=71 s=1 z=100 t=with
    W x=124 s=1 z=100 t=CSS
-   W x=175 s=1 z=100 t=font-size:
-   W x=306 s=1 z=100 t=120%
-   W x=357 s=1 z=100 t=(CSS
+   W x=175 s=1 z=100 t=font-
+   W x=243 s=1 z=100 t=size:
+   W x=305 s=1 z=100 t=120%
+   W x=356 s=1 z=100 t=(CSS
   LINE y=445 x=0 align=2 mult=1.200 hfid=0 words=2
    W x=145 s=1 z=100 t=override
    W x=248 s=1 z=100 t=test)
-  LINE y=481 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=481 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=This
    W x=58 s=0 z=100 t=heading
    W x=134 s=0 z=100 t=uses
-   W x=179 s=0 z=100 t=class="css-override"
+   W x=179 s=0 z=100 t=class="css-
+   W x=282 s=0 z=100 t=override"
    W x=373 s=0 z=100 t=which
    W x=423 s=0 z=100 t=sets
-  LINE y=505 x=0 align=0 mult=1.000 hfid=0 words=8
-   W x=0 s=0 z=100 t=font-size:
+  LINE y=505 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=font-
+   W x=52 s=0 z=100 t=size:
    W x=99 s=0 z=100 t=120%.
    W x=148 s=0 z=100 t=It
    W x=173 s=0 z=100 t=should
@@ -126,12 +129,13 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=224 s=0 z=100 t=1.4x
    W x=265 s=0 z=100 t=default),
    W x=363 s=0 z=100 t=confirming
-  LINE y=553 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=553 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=that
    W x=66 s=0 z=100 t=an
    W x=111 s=0 z=100 t=explicit
    W x=193 s=0 z=100 t=CSS
-   W x=249 s=0 z=100 t=font-size
+   W x=249 s=0 z=100 t=font-
+   W x=301 s=0 z=100 t=size
    W x=356 s=0 z=100 t=declaration
   LINE y=577 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=overrides
@@ -262,7 +266,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=246 s=0 z=100 t=size,
    W x=295 s=0 z=100 t=distinguished
    W x=419 s=0 z=100 t=only
-  LINE y=220 x=0 align=0 mult=1.000 hfid=0 words=12
+  LINE y=220 x=0 align=0 mult=1.000 hfid=0 words=13
    W x=0 s=0 z=100 t=by
    W x=21 s=0 z=100 t=its
    W x=53 s=0 z=100 t=bold
@@ -270,7 +274,8 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=166 s=0 z=100 t=On
    W x=192 s=0 z=100 t=a
    W x=211 s=0 z=100 t=real
-   W x=256 s=0 z=100 t=e-ink
+   W x=256 s=0 z=100 t=e-
+   W x=274 s=0 z=100 t=ink
    W x=306 s=0 z=100 t=device
    W x=364 s=0 z=100 t=h4
    W x=392 s=0 z=100 t=and

@@ -10,6 +10,7 @@
 #include "ReaderFontSizes.h"
 #include "activities/settings/SettingInfo.h"
 #include "components/UITheme.h"
+#include "components/themes/PanelMetrics.h"
 
 // The reader menu's tabs can carry a small glyph above each label (CrossInk's icon-tab design).
 // Off by default: at 16 px the glyphs add little over the label, so the tabs are plain text
@@ -51,9 +52,9 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
   };
 
   explicit EpubReaderMenuActivity(
-      GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title, const int currentPage,
-      const int totalPages, const int bookProgressPercent, const uint8_t currentOrientation, const bool hasFootnotes,
-      const int8_t initialEmbeddedStyleOverride, const int8_t initialImageRenderingOverride,
+      GfxRenderer& renderer, MappedInputManager& mappedInput, const std::string& title, const std::string& chapterTitle,
+      const int currentPage, const int totalPages, const int bookProgressPercent, const uint8_t currentOrientation,
+      const bool hasFootnotes, const int8_t initialEmbeddedStyleOverride, const int8_t initialImageRenderingOverride,
       const int8_t initialFontFamilyOverride, const std::string& initialSdFontFamilyOverride,
       const int8_t initialFontSizeOverride, const uint8_t initialTextDarkness,
       const int8_t initialBionicReadingOverride, const int8_t initialGuideDotsOverride,
@@ -77,6 +78,7 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
 
   bool currentPageStarred = false;
   void finishWithAction(MenuAction action);
+  void openAutoTurnPicker();
 
   // UiListActivity / TabbedUiListActivity overrides
   int listCount() const override { return static_cast<int>(activeMenuItems().size()); }
@@ -121,7 +123,7 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
 
   // Pending state (mutated locally, returned to parent on finish)
   uint8_t pendingOrientation = 0;
-  uint8_t selectedPageTurnOption = 0;
+  uint8_t autoTurnSeconds = 0;  // what the menu hands the reader: 0 is off
   int8_t pendingEmbeddedStyleOverride = -1;
   int8_t pendingImageRenderingOverride = -1;
   int8_t pendingFontFamilyOverride = -1;
@@ -145,9 +147,10 @@ class EpubReaderMenuActivity final : public TabbedUiListActivity {
   int8_t pendingVerticalTextOverride = -1;
   int8_t pendingPublisherFontsOverride = -1;
 
-  static constexpr const char* pageTurnLabels[] = {"", "1", "3", "6", "12"};
-
   std::string title = "Reader Menu";
+  // Empty for a place the table of contents does not name. A compact panel has no room for the line.
+  std::string chapterTitle;
+  [[nodiscard]] bool hasChapterLine() const { return !PanelMetrics::COMPACT && !chapterTitle.empty(); }
   int currentPage = 0;
   int totalPages = 0;
   int bookProgressPercent = 0;

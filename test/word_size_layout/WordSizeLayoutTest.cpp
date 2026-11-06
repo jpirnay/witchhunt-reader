@@ -412,7 +412,8 @@ TEST(WordContinuation, PageBottomRetryKeepsGluedGroupsWhole) {
   text.addWord("aaaa", EpdFontFamily::REGULAR);
   text.addWord("bb", EpdFontFamily::REGULAR);
   text.addWord(" ", EpdFontFamily::REGULAR, /*underline=*/false, /*attachToPrevious=*/true);  // a no-break space
-  text.addWord("cc-dddddd", EpdFontFamily::REGULAR, /*underline=*/false, /*attachToPrevious=*/true);  // explicit hyphen
+  // An underscore: the hyphenator breaks there, and a dash would be a token boundary rather than a hyphenation.
+  text.addWord("cc_dddddd", EpdFontFamily::REGULAR, /*underline=*/false, /*attachToPrevious=*/true);
   text.addWord("eeeeeee", EpdFontFamily::REGULAR);
   text.addWord("ff", EpdFontFamily::REGULAR);
   text.addWord("?", EpdFontFamily::REGULAR, /*underline=*/false, /*attachToPrevious=*/true);
@@ -435,7 +436,7 @@ TEST(WordContinuation, PageBottomRetryKeepsGluedGroupsWhole) {
 
   ASSERT_TRUE(retried);
   ASSERT_GE(lines.size(), 2u);
-  EXPECT_EQ(lines[0], (std::vector<std::string>{"aaaa"}));      // the retried line backs up over "bb cc-dddddd"
+  EXPECT_EQ(lines[0], (std::vector<std::string>{"aaaa"}));      // the retried line backs up over "bb cc_dddddd"
   for (const auto& line : lines) EXPECT_NE(line.front(), "?");  // the resumed breaker backs up over "ff?"
 }
 

@@ -15,13 +15,23 @@ using WordBreaker = std::vector<size_t> (*)(const std::string& word);
 
 /// Word-wrap `text` into at most `maxLines` lines no wider than `maxWidth`, breaking at spaces and at
 /// `breaker`'s offsets (none when null). `width(s)` measures a candidate line; `truncate(s)` fits one
-/// with an ellipsis, for a word wider than a line and for the last line when text remains.
+/// with an ellipsis, for a word wider than a line and for the last line when text remains. `whole`,
+/// when given, says whether all of `text` made it into the lines.
 template <typename Width, typename Truncate>
 std::vector<std::string> wrapLines(const char* text, const int maxWidth, const int maxLines, const WordBreaker breaker,
-                                   const Width& width, const Truncate& truncate) {
+                                   const Width& width, const Truncate& truncate, bool* whole = nullptr) {
   std::vector<std::string> lines;
 
+  if (whole) *whole = !text || !*text;
   if (!text || maxWidth <= 0 || maxLines <= 0) return lines;
+  if (whole) *whole = true;
+
+  // Text is only ever lost here, so this is the one place that has to notice.
+  const auto fitted = [&](const std::string& line) {
+    std::string result = truncate(line);
+    if (whole && result != line) *whole = false;
+    return result;
+  };
 
   // One word at a time, and only as far as the lines go: text can be a 2 KB book summary, and
   // splitting all of it up front cost a piece per CJK character, tens of KB of heap at once.
@@ -46,7 +56,7 @@ std::vector<std::string> wrapLines(const char* text, const int maxWidth, const i
         std::string lastContent = currentLine;
         if (!lastContent.empty() && firstPiece) lastContent += ' ';
         lastContent.append(text + wordStart + from);
-        lines.push_back(truncate(lastContent));
+        lines.push_back(fitted(lastContent));
         return lines;
       }
 
@@ -64,7 +74,7 @@ std::vector<std::string> wrapLines(const char* text, const int maxWidth, const i
           // push it as a complete line immediately — storing it in currentLine
           // would allow a subsequent short word to be appended after the ellipsis.
           if (width(piece) > maxWidth) {
-            lines.push_back(truncate(piece));
+            lines.push_back(fitted(piece));
             currentLine.clear();
             if (static_cast<int>(lines.size()) >= maxLines) return lines;
           } else {
@@ -74,7 +84,7 @@ std::vector<std::string> wrapLines(const char* text, const int maxWidth, const i
           // Single word wider than maxWidth: truncate and stop to avoid complicated
           // splitting rules (different between languages). Results in an aesthetically
           // pleasing end.
-          lines.push_back(truncate(piece));
+          lines.push_back(fitted(piece));
           return lines;
         }
       }

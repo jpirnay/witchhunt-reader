@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "Bookmark.h"
+#include "BookmarkFile.h"
 
 // Stores starred/bookmarked pages for a single book.
 // Persisted as a binary file on SD card within the book's cache directory.
@@ -16,65 +17,68 @@ class BookmarkStore {
  public:
   using Bookmark = ::Bookmark;
 
-  // Load bookmarks from the cache directory (e.g. .crosspoint/epub_<hash>/).
+  // Load bookmarks from the cache directory (e.g. .crosspoint/epub_<hash>/). What a damaged file
+  // holds before the damage stands. With too little heap the list stays empty and save() is refused:
+  // the file may be fine, and is not to be written over from a part of it.
   void load(const std::string& cachePath) {
+    using bookmark_file::ReadResult;
+
     basePath = cachePath;
     bookmarks.clear();
     dirty = false;
+    writable = true;
 
+    const std::string path = getFilePath();
+    bookmark_file::recoverReplace(path);
     FsFile f;
-    if (!Storage.openFileForRead("BKM", getFilePath(), f)) {
+    if (!Storage.openFileForRead("BKM", path, f)) {
       return;
     }
 
-    uint8_t version;
-    if (f.read(reinterpret_cast<uint8_t*>(&version), sizeof(version)) != sizeof(version) || version < 1 ||
-        version > FILE_VERSION) {
+    uint8_t version = 0;
+    if (!bookmark_file::readPod(f, version) || version < 1 || version > FILE_VERSION) {
       f.close();
       return;
     }
 
-    uint16_t count;
-    if (f.read(reinterpret_cast<uint8_t*>(&count), sizeof(count)) != sizeof(count) || count > MAX_BOOKMARKS) {
+    uint16_t count = 0;
+    if (!bookmark_file::readPod(f, count) || count > MAX_BOOKMARKS) {
       LOG_ERR("BKM", "Invalid bookmark count: %u", static_cast<unsigned>(count));
       f.close();
       return;
     }
 
-    bookmarks.reserve(count);
-    for (uint16_t i = 0; i < count; i++) {
+    // A count the file cannot hold is damage, and what it can hold is all there is to read.
+    const bool named = version >= 2;
+    const size_t recordBytes = named ? bookmark_file::kMinRecordBytes : 2 * sizeof(uint16_t);
+    const size_t fits = std::min<size_t>(count, static_cast<size_t>(f.available()) / recordBytes);
+    if (!heapHasBlockFor(fits * sizeof(Bookmark))) {
+      LOG_ERR("BKM", "Not enough memory for %u bookmarks", static_cast<unsigned>(fits));
+      writable = false;
+      f.close();
+      return;
+    }
+
+    bookmarks.reserve(fits);
+    for (size_t i = 0; i < fits; i++) {
       Bookmark bm;
-      if (f.read(reinterpret_cast<uint8_t*>(&bm.spineIndex), sizeof(bm.spineIndex)) != sizeof(bm.spineIndex) ||
-          f.read(reinterpret_cast<uint8_t*>(&bm.pageNumber), sizeof(bm.pageNumber)) != sizeof(bm.pageNumber)) {
-        LOG_ERR("BKM", "Truncated bookmarks file at entry %d", i);
-        bookmarks.clear();
+      const ReadResult result = bookmark_file::readBookmark(f, bm, named);
+      if (result == ReadResult::NoMemory) {
+        LOG_ERR("BKM", "Not enough memory at entry %u", static_cast<unsigned>(i));
+        std::vector<Bookmark>().swap(bookmarks);
+        writable = false;
         f.close();
         return;
       }
-      if (version >= 2) {
-        uint16_t nameLen = 0;
-        if (f.read(reinterpret_cast<uint8_t*>(&nameLen), sizeof(nameLen)) != sizeof(nameLen) ||
-            nameLen > MAX_NAME_LENGTH) {
-          LOG_ERR("BKM", "Invalid bookmark name length at entry %d", i);
-          bookmarks.clear();
-          f.close();
-          return;
-        }
-        if (nameLen > 0) {
-          bm.name.resize(nameLen);
-          if (f.read(reinterpret_cast<uint8_t*>(&bm.name[0]), nameLen) != nameLen) {
-            LOG_ERR("BKM", "Truncated bookmark name at entry %d", i);
-            bookmarks.clear();
-            f.close();
-            return;
-          }
-        }
+      if (result == ReadResult::Damaged) {
+        LOG_ERR("BKM", "Damaged bookmarks file at entry %u", static_cast<unsigned>(i));
+        break;
       }
       bookmarks.push_back(std::move(bm));
     }
 
     f.close();
-    LOG_DBG("BKM", "Loaded %d bookmarks", count);
+    LOG_DBG("BKM", "Loaded %u bookmarks", static_cast<unsigned>(bookmarks.size()));
   }
 
   // Save bookmarks to SD card (only if changed).
@@ -83,44 +87,28 @@ class BookmarkStore {
       return;
     }
 
+    if (!writable) {
+      LOG_ERR("BKM", "Not saving over a file that could not be read");
+      return;
+    }
+
     if (bookmarks.size() > MAX_BOOKMARKS) {
       LOG_ERR("BKM", "Too many bookmarks to save: %u", static_cast<unsigned>(bookmarks.size()));
       return;
     }
 
-    FsFile f;
-    if (!Storage.openFileForWrite("BKM", getFilePath(), f)) {
+    const bool saved = bookmark_file::replaceFile("BKM", getFilePath(), [this](FsFile& f) {
+      const auto count = static_cast<uint16_t>(bookmarks.size());
+      bool ok = bookmark_file::writePod(f, FILE_VERSION) && bookmark_file::writePod(f, count);
+      for (const auto& bm : bookmarks) ok = ok && bookmark_file::writeBookmark(f, bm);
+      return ok;
+    });
+    if (!saved) {
       LOG_ERR("BKM", "Failed to save bookmarks");
       return;
     }
-
-    auto writePodChecked = [&f](const auto& value) {
-      return f.write(reinterpret_cast<const uint8_t*>(&value), sizeof(value)) == sizeof(value);
-    };
-
-    const uint16_t count = static_cast<uint16_t>(bookmarks.size());
-    bool ok = writePodChecked(FILE_VERSION) && writePodChecked(count);
-
-    for (const auto& bm : bookmarks) {
-      const uint16_t nameLen = static_cast<uint16_t>(std::min<size_t>(bm.name.size(), MAX_NAME_LENGTH));
-      ok = ok && writePodChecked(bm.spineIndex) && writePodChecked(bm.pageNumber) && writePodChecked(nameLen);
-      if (ok && nameLen > 0) {
-        ok = f.write(reinterpret_cast<const uint8_t*>(bm.name.data()), nameLen) == nameLen;
-      }
-    }
-
-    if (ok) {
-      if (!f.close()) {
-        LOG_ERR("BKM", "Failed to close bookmarks file");
-        return;
-      }
-    } else {
-      f.close();
-      LOG_ERR("BKM", "Failed while writing bookmarks");
-      return;
-    }
     dirty = false;
-    LOG_DBG("BKM", "Saved %d bookmarks", count);
+    LOG_DBG("BKM", "Saved %u bookmarks", static_cast<unsigned>(bookmarks.size()));
   }
 
   // Toggle bookmark for the given page. Returns true if now starred, false if removed.
@@ -161,7 +149,7 @@ class BookmarkStore {
     dirty = true;
   }
 
-  static constexpr uint16_t MAX_NAME_LENGTH = 128;
+  static constexpr uint16_t MAX_NAME_LENGTH = bookmark_file::kMaxNameBytes;
 
  private:
   static constexpr uint8_t FILE_VERSION = 2;
@@ -170,6 +158,7 @@ class BookmarkStore {
   std::vector<Bookmark> bookmarks;
   std::string basePath;
   bool dirty = false;
+  bool writable = true;
 
   [[nodiscard]] std::string getFilePath() const { return basePath + "/bookmarks.bin"; }
 

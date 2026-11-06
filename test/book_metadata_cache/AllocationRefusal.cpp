@@ -2,6 +2,7 @@
 
 #include <malloc.h>
 
+#include <cstdint>
 #include <cstdlib>
 #include <new>
 
@@ -12,11 +13,12 @@
 namespace {
 // 0: nothing refused.
 size_t refuseFrom = 0;
+size_t refuseTo = SIZE_MAX;  // the largest size refused
 size_t live = 0;
 size_t peak = 0;
 size_t allocations = 0;
 
-bool refused(const size_t bytes) { return refuseFrom != 0 && bytes >= refuseFrom; }
+bool refused(const size_t bytes) { return refuseFrom != 0 && bytes >= refuseFrom && bytes <= refuseTo; }
 
 void* allocateOrNull(const size_t bytes) {
   if (refused(bytes)) return nullptr;
@@ -42,8 +44,18 @@ void release(void* p) {
 }
 }  // namespace
 
-AllocationRefusal::AllocationRefusal(const size_t bytes) { refuseFrom = bytes; }
-AllocationRefusal::~AllocationRefusal() { refuseFrom = 0; }
+AllocationRefusal::AllocationRefusal(const size_t bytes) {
+  refuseFrom = bytes;
+  refuseTo = SIZE_MAX;
+}
+AllocationRefusal::AllocationRefusal(const size_t bytes, const size_t maxBytes) {
+  refuseFrom = bytes;
+  refuseTo = maxBytes;
+}
+AllocationRefusal::~AllocationRefusal() {
+  refuseFrom = 0;
+  refuseTo = SIZE_MAX;
+}
 
 size_t heapLiveBytes() { return live; }
 size_t heapPeakBytes() { return peak; }

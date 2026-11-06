@@ -22,6 +22,7 @@
 #include <Epub/FootnotePreviews.h>
 #include <Epub/FootnoteShape.h>
 #include <Epub/Page.h>
+#include <Epub/SpineSizeLookup.h>
 #include <Epub/TurnedFrame.h>
 #include <Epub/TypographyProfile.h>
 #include <Epub/blocks/ImageBlock.h>
@@ -130,9 +131,6 @@ std::optional<int> parsePrintedPageLabel(const std::string& label) {
   }
   return value;
 }
-// pages per minute, first item is 1 to prevent division by zero if accessed
-constexpr int PAGE_TURN_LABELS[] = {1, 1, 3, 6, 12};
-
 // Pre-render of the next page within the current chapter only runs when heap is healthy: PreRenderGate has the
 // floor, from the costs the passes measure (preRenderCostMax_).
 
@@ -1015,11 +1013,12 @@ void EpubReaderActivity::loop() {
 
     // Skips page turn if renderingMutex is busy
     if (RenderLock::peek()) {
-      lastPageTurnTime = millis();
       return;
     }
 
-    if ((millis() - lastPageTurnTime) >= pageTurnDuration) {
+    // Counted from when the page landed: a page that took long to build still gets its full time, and the background
+    // work after it takes none. Restarting the count while the lock was busy made 8 s a 13 s page on the X3.
+    if ((millis() - std::max(lastPageTurnTime, lastPageOnScreenMs_)) >= pageTurnDuration) {
       pageTurn(true);
       return;
     }
@@ -1964,11 +1963,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
       if (step == Section::BuildStep::Done) {
         if (backgroundSection_->isTruncatedCache() || backgroundSection_->isCssLowHeapDegraded() ||
             backgroundSection_->isFootnotePreviewsUnresolved() || backgroundSection_->isImageHeaderDegraded() ||
-            backgroundSection_->isTableRowDegraded()) {
+            backgroundSection_->isTableRowDegraded() || backgroundSection_->isShapingDegraded()) {
           // Memory ran short mid-parse: pages are missing (truncated), CSS lookups were skipped
           // (styles silently absent from the cached pages), the footnote resolve could not
-          // complete (markers left plain in a cache keyed "previews on"), or an image was dropped
-          // to alt text because its header read was refused. Don't hand any of them to the
+          // complete (markers left plain in a cache keyed "previews on"), an image was dropped
+          // to alt text because its header read was refused, or a table row was demoted. Or a
+          // shaped-script run was laid out unshaped (no memory for it, or the font could not
+          // shape it; only the first is the heap's doing). Don't hand any of them to the
           // foreground: its blocking path runs with the secondary buffer released (~52 KB more
           // headroom) and will likely build it clean.
           //
@@ -1978,7 +1979,8 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
                                : backgroundSection_->isCssLowHeapDegraded()         ? "css-degraded"
                                : backgroundSection_->isFootnotePreviewsUnresolved() ? "footnotes unresolved"
                                : backgroundSection_->isImageHeaderDegraded()        ? "image degraded"
-                                                                                    : "table row demoted";
+                               : backgroundSection_->isTableRowDegraded()           ? "table row demoted"
+                                                                                    : "shaping degraded";
           LOG_INF("ERS",
                   "Background build spine=%d %s; discarding for foreground rebuild, look-ahead paused until the "
                   "next chapter",
@@ -2590,9 +2592,10 @@ void EpubReaderActivity::stepCurrentSectionBuild() {
   // §8.4a). Before that, the X3 demoted every row of the Roosevelt appendix-b at 11-18 KB free
   // (2026-09-26); the released rebuild, with ~95 KB free, lays the table out.
   if (step == Section::BuildStep::Failed || section->isTruncatedCache() || section->isCssLowHeapDegraded() ||
-      section->isTableRowDegraded()) {
+      section->isTableRowDegraded() || section->isShapingDegraded()) {
     fallbackToReleasedRebuild(step == Section::BuildStep::Failed ? "failed"
                               : section->isTableRowDegraded()    ? "table row demoted"
+                              : section->isShapingDegraded()     ? "shaping degraded"
                                                                  : "incomplete",
                               /*retryIncremental=*/false);
     return;
@@ -2706,18 +2709,10 @@ bool EpubReaderActivity::resolvePercent(int percent, int& targetSpineIndex, floa
     return false;
   }
 
-  targetSpineIndex = spineCount - 1;
-  size_t prevCumulative = 0;
-
-  for (int i = 0; i < spineCount; i++) {
-    const size_t cumulative = epub->getCumulativeSpineItemSize(i);
-    if (targetSize <= cumulative) {
-      // Found the spine item containing the absolute position.
-      targetSpineIndex = i;
-      prevCumulative = (i > 0) ? epub->getCumulativeSpineItemSize(i - 1) : 0;
-      break;
-    }
-  }
+  // The spine item containing the absolute position.
+  targetSpineIndex =
+      findSpineForSize(spineCount, targetSize, [this](const int i) { return epub->getCumulativeSpineItemSize(i); });
+  const size_t prevCumulative = targetSpineIndex > 0 ? epub->getCumulativeSpineItemSize(targetSpineIndex - 1) : 0;
 
   const size_t cumulative = epub->getCumulativeSpineItemSize(targetSpineIndex);
   const size_t spineSize = (cumulative > prevCumulative) ? (cumulative - prevCumulative) : 0;
@@ -3192,15 +3187,14 @@ void EpubReaderActivity::stopAutomaticPageTurn() {
   section.reset();
 }
 
-void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption) {
-  if (selectedPageTurnOption == 0 || selectedPageTurnOption >= std::size(PAGE_TURN_LABELS)) {
+void EpubReaderActivity::toggleAutoPageTurn(const uint8_t seconds) {
+  if (seconds == 0) {
     stopAutomaticPageTurn();
     return;
   }
 
   lastPageTurnTime = millis();
-  // calculates page turn duration by dividing by number of pages
-  pageTurnDuration = (1UL * 60 * 1000) / PAGE_TURN_LABELS[selectedPageTurnOption];
+  pageTurnDuration = seconds * 1000UL;
   automaticPageTurnActive = true;
 
   // Reset cached section when automatic page turn adds a forced status item band.
@@ -4363,7 +4357,9 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
   InPlaceBuildGate::Request request;
   request.embeddedStyle = embeddedStyle;
   request.inflatedSize = inflatedSize;
-  request.cjkRepertoire = TypographyProfile::forLanguage(epub->getLanguage()).cjkRepertoire;
+  const TypographyProfile profile = TypographyProfile::forLanguage(epub->getLanguage());
+  request.cjkRepertoire = profile.cjkRepertoire;
+  request.shapedScript = profile.shapedScript;
   request.trueTypeSet = sdFontSystem.ttfLoaded();
   request.freeHeap = esp_get_free_heap_size();
   request.contigHeap = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT | MALLOC_CAP_DEFAULT);
@@ -4371,11 +4367,12 @@ bool EpubReaderActivity::heapAllowsInPlaceBuild(const bool embeddedStyle, const 
   // One line per gate evaluation: the resident/released choice and the exact heap-vs-floor
   // arithmetic behind it. This is the first thing to check when a section build takes the wrong
   // path (a resident build starving on the inflate ring cascades into the released rebuild).
-  LOG_INF("ERS", "heapAllowsInPlaceBuild=%d css=%d cjkTtf=%d ring=%lu free=%lu(floor=%lu) contig=%lu(floor=%lu)",
+  LOG_INF("ERS",
+          "heapAllowsInPlaceBuild=%d css=%d cjkTtf=%d shapedTtf=%d ring=%lu free=%lu(floor=%lu) contig=%lu(floor=%lu)",
           admission.resident ? 1 : 0, embeddedStyle ? 1 : 0, admission.cjkTrueType ? 1 : 0,
-          static_cast<unsigned long>(admission.ringBytes), static_cast<unsigned long>(request.freeHeap),
-          static_cast<unsigned long>(admission.freeFloor), static_cast<unsigned long>(request.contigHeap),
-          static_cast<unsigned long>(admission.contigFloor));
+          admission.shapedTrueType ? 1 : 0, static_cast<unsigned long>(admission.ringBytes),
+          static_cast<unsigned long>(request.freeHeap), static_cast<unsigned long>(admission.freeFloor),
+          static_cast<unsigned long>(request.contigHeap), static_cast<unsigned long>(admission.contigFloor));
   // Also emit in the shared gate format so one `grep HEAP` collects every gate decision in a run.
   HEAP_GATE(embeddedStyle ? "inPlace_css" : "inPlace", admission.resident, request.freeHeap, admission.freeFloor,
             request.contigHeap, admission.contigFloor);
@@ -4590,10 +4587,14 @@ EpubReaderActivity::BuildOutcome EpubReaderActivity::compileSectionCache(const R
   // The released build is the path with the most heap this session can offer; a result it
   // still had to degrade is worth one loud line (the status byte carries it to the next entry,
   // which rebuilds once -- see the cache-hit policy in buildSection).
-  if (createOk && (section->isCssLowHeapDegraded() || section->isTableRowDegraded())) {
-    LOG_ERR("ERS", "Blocking build spine=%d came out degraded (%s%s); cached with the status bit set",
-            currentSpineIndex, section->isCssLowHeapDegraded() ? "css-skips " : "",
-            section->isTableRowDegraded() ? "table-row-demoted" : "");
+  if (createOk && (section->isCssLowHeapDegraded() || section->isTableRowDegraded() || section->isShapingDegraded())) {
+    LOG_ERR(
+        "ERS", "Blocking build spine=%d came out degraded (%s%s%s%s%s); cached with the status bit set",
+        currentSpineIndex, section->isCssLowHeapDegraded() ? "css-skips" : "",
+        section->isCssLowHeapDegraded() && section->isTableRowDegraded() ? " " : "",
+        section->isTableRowDegraded() ? "table-row-demoted" : "",
+        (section->isCssLowHeapDegraded() || section->isTableRowDegraded()) && section->isShapingDegraded() ? " " : "",
+        section->isShapingDegraded() ? "shaping-unshaped" : "");
   }
   if (createOk && section->isImageHeaderDegraded()) {
     // A borrowed build's region is idle now (its build state is gone): walk from it directly,
@@ -4839,15 +4840,17 @@ bool EpubReaderActivity::buildSection(const RenderLayout& layout) {
     section->clearCache();
     cacheHit = false;
   }
-  // A cache whose layout is what the heap allowed rather than what the book says: a table row
-  // written as paragraphs, or elements cached without their styles because the resolver skipped
-  // lookups. Both used to be baked in for good (memory audit 2026-09, F3). Same policy as the
-  // image bit: one rebuild per spine per session, and if that one comes out degraded too the
-  // bit stays set and the chapter is read as it is.
-  if (cacheHit && (section->isTableRowDegraded() || section->isCssLowHeapDegraded()) &&
+  // A cache whose layout is not what the book says: a table row written as paragraphs or elements
+  // cached without their styles (the heap allowed no better; memory audit 2026-09, F3), or a
+  // shaped-script run laid out unshaped (no memory for it, or the font could not shape it). All
+  // were once baked in for good. Same policy as the image bit: one rebuild per spine per session,
+  // and if that one comes out degraded too the bit stays set and the chapter is read as it is.
+  if (cacheHit && (section->isTableRowDegraded() || section->isShapingDegraded() || section->isCssLowHeapDegraded()) &&
       degradedLayoutRebuildSpine_ != currentSpineIndex) {
-    LOG_INF("ERS", "Section %d: cached %s under low heap; rebuilding once", currentSpineIndex,
-            section->isTableRowDegraded() ? "with a table row demoted to paragraphs" : "with CSS lookups skipped");
+    LOG_INF("ERS", "Section %d: cached %s; rebuilding once", currentSpineIndex,
+            section->isTableRowDegraded()  ? "with a table row demoted to paragraphs"
+            : section->isShapingDegraded() ? "with a shaped-script run laid out unshaped"
+                                           : "with CSS lookups skipped");
     degradedLayoutRebuildSpine_ = currentSpineIndex;
     section->clearCache();
     cacheHit = false;
@@ -6766,7 +6769,7 @@ void EpubReaderActivity::renderStatusBar() const {
   std::string title;
 
   if (automaticPageTurnActive) {
-    title = tr(STR_AUTO_TURN_ENABLED) + std::to_string(60 * 1000 / pageTurnDuration);
+    title = tr(STR_AUTO_TURN_ENABLED) + std::to_string(pageTurnDuration / 1000) + tr(STR_SECONDS_SUFFIX);
   } else if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::CHAPTER_TITLE) {
     title = chapterTitle();
   } else if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::BOOK_TITLE) {
@@ -7555,22 +7558,26 @@ void EpubReaderActivity::openReaderMenu() {
   // bad_alloc when the menu is opened mid section-build on a long book (heap fragmented to tens of
   // KB) — the tag 2.05 "Confirm reboots" crash.
   const bool hasPrintedPages = epub->hasNumericPrintedPages();
+  // The header names the chapter when the table of contents does.
+  std::string menuChapter = chapterTitle();
+  if (menuChapter == tr(STR_UNNAMED)) menuChapter.clear();
 
   ReaderUtils::enforceExitFullRefresh(renderer);
   startActivityForResult(
       std::make_unique<EpubReaderMenuActivity>(
-          renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent, SETTINGS.orientation,
-          !currentPageFootnotes.empty(), bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
-          bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness, bookBionicReadingOverride,
-          bookGuideDotsOverride, bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
-          bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
-          bookVerticalTextOverride, bookPublisherFontsOverride, bookVerticalAllowed_, !bookmarkStore.isEmpty(),
-          isCurrentPageStarred, hasPrintedPages),
+          renderer, mappedInput, epub->getTitle(), menuChapter, currentPage, totalPages, bookProgressPercent,
+          SETTINGS.orientation, !currentPageFootnotes.empty(), bookEmbeddedStyleOverride, bookImageRenderingOverride,
+          bookFontFamilyOverride, bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness,
+          bookBionicReadingOverride, bookGuideDotsOverride, bookParagraphAlignmentOverride,
+          bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride,
+          bookInlineFootnotePreviewsOverride, bookLineSpacingOverride, bookVerticalTextOverride,
+          bookPublisherFontsOverride, bookVerticalAllowed_, !bookmarkStore.isEmpty(), isCurrentPageStarred,
+          hasPrintedPages),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);
         applyTextDarkness(menu.textDarkness);
-        toggleAutoPageTurn(menu.pageTurnOption);
+        toggleAutoPageTurn(menu.autoTurnSeconds);
         if (applyBookReaderOverrides(
                 menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
                 menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,

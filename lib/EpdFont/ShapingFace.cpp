@@ -1,5 +1,7 @@
 #include "ShapingFace.h"
 
+#include <Memory.h>
+
 const ot::Face* ShapingFace::current() {
   if (state_ == State::Refused) return nullptr;
   repointed_ = false;
@@ -18,4 +20,35 @@ const ot::Face* ShapingFace::current() {
     repointed_ = true;
   }
   return &face_;
+}
+
+const ot::Plan* ShapingFace::plan(const ot::Script script, const uint32_t* languageTags) {
+  const ot::Face* const face = current();
+  if (!face) return nullptr;
+  ++asks_;
+  PlanSlot* victim = &slots_[0];
+  for (PlanSlot& slot : slots_) {
+    if (slot.plan && slot.script == script && slot.languageTags == languageTags) {
+      slot.lastAsked = asks_;
+      return slot.plan.get();
+    }
+    // The slot to fill: an empty one, else the one asked for least recently (the counter wraps after 4 billion asks).
+    if (!slot.plan) {
+      if (victim->plan) victim = &slot;
+    } else if (victim->plan && static_cast<int32_t>(slot.lastAsked - victim->lastAsked) < 0) {
+      victim = &slot;
+    }
+  }
+  // The victim is freed before the new build allocates, so a refused build also costs the evicted plan: the room is
+  // needed for the new one.
+  victim->plan.reset();
+  // One Plan (about 1-4 KB with its lookup lists and its lookups' digests), kept for the face's life.
+  auto built = makeUniqueNoThrow<ot::Plan>();
+  if (!built || !built->build(*face, script, languageTags)) return nullptr;
+  ++planBuilds_;
+  victim->script = script;
+  victim->languageTags = languageTags;
+  victim->lastAsked = asks_;
+  victim->plan = std::move(built);
+  return victim->plan.get();
 }

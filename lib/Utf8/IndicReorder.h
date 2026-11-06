@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>  // witchhunt: deviation 9
 #include <string>
 
 // Indic syllable reordering for fonts rendered without OpenType shaping.
@@ -19,3 +20,10 @@
 // Returns false, leaving `out` unspecified, when `text` needs no reordering
 // (the common case: no Indic block bytes, found by a byte scan).
 bool indicReorderForDisplay(const char* text, std::string& out);
+
+// witchhunt: deviation 9 - the same form into `out` (`room` bytes, NUL-terminated), allocating nothing: true when the
+// form differs from the text and fits; false, `out` unspecified, otherwise. Room for 3 * len + 1 bytes always holds
+// the form: every vowel sign is 3 bytes and becomes at most three 3-byte code points (Sinhala U+0DDD: one before the
+// cluster, two after), and any other code point is copied once. `text` is `len` bytes and need not be NUL-terminated;
+// `written` is set (the form's length, without the NUL) only when true.
+bool indicReorderForDisplay(const char* text, size_t len, char* out, size_t room, size_t* written);

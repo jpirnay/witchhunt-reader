@@ -11,6 +11,7 @@ support:
   scratch block for the reader's own passes, the held set's heap and a CJK keyboard remain.
 - **The dictionary** on CJK pages: shipped; deinflection, word-by-word selection and the search time on
   two-file dictionaries remain.
+- **Plain text:** a `.txt` gets none of this yet, and only UTF-8 is read: [txt-pipeline.md](txt-pipeline.md).
 - **Small edge cases** the reviews found.
 
 ## Roadmap

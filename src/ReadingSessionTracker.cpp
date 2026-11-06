@@ -35,6 +35,8 @@ void ReadingSessionTracker::begin(const std::string& docId_, const std::string& 
   accumulatedMs = 0;
   pagesTurnedThisSession = 0;
   lastKnownProgress = 0;
+  carriedSeconds = 0;
+  carriedPages = 0;
   LOG_DBG("RST", "Session begin doc=%s sync=%d", docId.c_str(), HalClock::isSynced() ? 1 : 0);
 }
 
@@ -42,6 +44,28 @@ void ReadingSessionTracker::onPageTurn() {
   if (!active) return;
   flushIdleSinceLastActivity();
   pagesTurnedThisSession += 1;
+  cutAtMidnight();
+}
+
+// The store files a session under the day it began. The first page turn of a new day ends the session there and starts
+// another, so each day keeps what was read on it, and a streak the day it was read on. One write, once a night. Idea
+// from CrossInk e7760b58 (Julia Nguyen), which keeps dated arrays for this; a session is already a dated record here.
+void ReadingSessionTracker::cutAtMidnight() {
+  if (walltimeStartEpoch == 0 || !HalClock::isSynced()) return;
+  const auto now = static_cast<time_t>(HalClock::now());
+  if (localDayIndexFromEpoch(now) <= localDayIndexFromEpoch(static_cast<time_t>(walltimeStartEpoch))) return;
+
+  const std::string book = docId;
+  const std::string bookTitle = title;
+  const std::string bookAuthor = author;
+  const uint8_t progress = lastKnownProgress;
+  const uint32_t seconds = getLiveSeconds();
+  const uint32_t pages = getLivePages();
+  end();
+  begin(book, bookTitle, bookAuthor);
+  lastKnownProgress = progress;
+  carriedSeconds = seconds;
+  carriedPages = pages;
 }
 
 void ReadingSessionTracker::updateProgress(uint8_t progress) {
@@ -102,5 +126,5 @@ uint32_t ReadingSessionTracker::getLiveSeconds() const {
   if (!active) return 0;
   // Best-effort live readout — does not mutate state, so it does not include
   // the in-flight idle gap. Good enough for "you've been reading for X".
-  return static_cast<uint32_t>(accumulatedMs / 1000);
+  return carriedSeconds + static_cast<uint32_t>(accumulatedMs / 1000);
 }

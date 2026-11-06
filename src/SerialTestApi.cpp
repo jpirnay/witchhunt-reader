@@ -954,7 +954,7 @@ void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, 
   const auto cps = makeUniqueNoThrow<uint32_t[]>(kShapeRunCodepoints);  // 192 B: the run's code points
   const auto glyphs = makeUniqueNoThrow<uint16_t[]>(kShapeSlots);       // 224 B: the run's glyph IDs
   const auto records = makeUniqueNoThrow<uint8_t[]>(6 * kShapeSlots);   // 672 B: six bytes a record, at most
-  auto plan = makeUniqueNoThrow<ot::Plan>();                            // ~1-2 KB: one script's lookups
+  auto plan = makeUniqueNoThrow<ot::Plan>();                            // ~1-4 KB: its lookups and their digests
   auto buffer = makeUniqueNoThrow<ot::Buffer>();                        // 1,272 B: the shaper's state
   const auto storage = makeUniqueNoThrow<uint8_t[]>(ot::Buffer::bytesFor(kShapeSlots));  // 6,947 B: its arrays
   if (!utf8 || !cps || !glyphs || !records || !plan || !buffer || !storage) {

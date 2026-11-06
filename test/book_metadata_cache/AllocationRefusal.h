@@ -8,9 +8,13 @@
 //
 // The replacement allocation functions live in AllocationRefusal.cpp and apply to the whole test
 // binary, so arm the refusal only around the code under test.
+//
+// The band form refuses only sizes in [bytes, maxBytes], for a test that must hit one caller's block and leave the
+// larger and smaller ones alone.
 class AllocationRefusal {
  public:
   explicit AllocationRefusal(size_t bytes);
+  AllocationRefusal(size_t bytes, size_t maxBytes);
   ~AllocationRefusal();
   AllocationRefusal(const AllocationRefusal&) = delete;
   AllocationRefusal& operator=(const AllocationRefusal&) = delete;

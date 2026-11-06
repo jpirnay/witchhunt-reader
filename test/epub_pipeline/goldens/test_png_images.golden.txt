@@ -278,14 +278,15 @@ SPINE 9 href=OEBPS/chapter10.xhtml pages=2 truncated=0 cssFallback=0
    W x=244 s=0 z=100 t=image.
    W x=320 s=0 z=100 t=This
    W x=371 s=0 z=100 t=paragraph
-  LINE y=606 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=606 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=follows
    W x=84 s=0 z=100 t=an
    W x=124 s=0 z=100 t=empty
    W x=184 s=0 z=100 t=heading
    W x=270 s=0 z=100 t=and
    W x=318 s=0 z=100 t=an
-   W x=358 s=0 z=100 t=image-only
+   W x=358 s=0 z=100 t=image-
+   W x=415 s=0 z=100 t=only
   LINE y=630 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=paragraph.
    W x=105 s=0 z=100 t=With

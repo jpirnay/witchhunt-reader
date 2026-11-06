@@ -1611,8 +1611,7 @@ void setup() {
   // needs it (RecentBooksStore::Hold). Loaded at boot it split the largest free block for the
   // session -- the reader opened every book with 45 KB of it instead of 61 KB (X3).
   logStartupMemory("after_recent_books");
-  GLOBAL_BOOKMARKS.load();
-  logStartupMemory("after_bookmarks");
+  // Nor is the bookmark index, for the same reason: GlobalBookmarkIndex::Hold.
   // READING_STATS holds no history: every consumer streams the file (ReadingStatsStore), so there
   // is nothing to load here. Keeping it resident used to cost, measured on X4 with 36 books,
   // ~15 KB of heap and largest8 65524 -> 26612 before the first book was even opened.
@@ -1794,7 +1793,8 @@ void loop() {
     LOG_INF("MEM", "btnSampler stack high-water=%u bytes free (min ever)",
             static_cast<unsigned>(gpio.samplerStackHighWater()));
 #ifdef ENABLE_BOOT_HEAP_DIAGNOSTICS
-    // loop() runs on the Arduino loopTask (8 KB stack), which also drives the reader's
+    // loop() runs on the Arduino loopTask (16 KB stack: getArduinoLoopTaskStackSize(), which
+    // freeink-sdk's FreeInkUI.cpp defines weakly as 16 * 1024), which also drives the reader's
     // sliced background section builds (serviceBackgroundWork → createSectionFile /
     // HTML parse / image dimension reads). That task is NOT covered by the render-task
     // stack instrumentation, yet is an equally plausible source of a stack-into-heap

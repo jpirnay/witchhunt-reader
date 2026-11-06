@@ -103,6 +103,15 @@ void walk(const char* text, size_t len, TextShaping::Unit* out, size_t& units, b
 
 }  // namespace
 
+bool endsWithName(const char* text, size_t len) {
+  size_t pos = 0;
+  while (pos < len) {
+    const size_t at = pos;
+    if (decodeAt(text, len, pos) == YOD && matchNameAt(text, len, at) == len) return true;
+  }
+  return false;
+}
+
 bool shape(const char* text, size_t len, TextShaping::Unit* units, size_t capacity, size_t& count) {
   if (len > UINT16_MAX) return false;  // clusters are 16-bit; no token is this long
   size_t needed = 0;

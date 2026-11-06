@@ -811,8 +811,12 @@ Witch Reader renders text using the following Unicode character blocks, enabling
 
 *   **Latin Script (Basic, Supplement, Extended-A):** Covers English, German, French, Spanish, Portuguese, Italian, Dutch, Swedish, Norwegian, Danish, Finnish, Polish, Czech, Hungarian, Romanian, Slovak, Slovenian, Turkish, and others.
 *   **Cyrillic Script (Standard and Extended):** Covers Russian, Ukrainian, Belarusian, Bulgarian, Serbian, Macedonian, Kazakh, Kyrgyz, Mongolian, and others.
+*   **Chinese, Japanese and Korean:** with your language's font from the **Font Manager**, lines break and punctuation is spaced by CJK rules, and a book can be set in vertical columns (**Vertical Text** in the **[Reader settings](#372-reader)**). What is left is listed under **[Current Limitations](#7-current-limitations--roadmap)**.
+*   **Indic scripts (Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam, Sinhala):** Hindi, Marathi, Nepali, Sanskrit, Bengali, Assamese, Punjabi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam and Sinhala are shaped with a TrueType family that maps their script: conjuncts are formed and vowel signs sit where the script puts them. Until the Font Manager offers one, put the family's files in `/.crosspoint/fonts/<Family>/`. A bitmap font that has the script's letters places their vowel signs but forms no conjuncts; the built-in fonts have none of these letters. A chapter in these scripts takes longer to prepare the first time you open it: on the X3, a 2,593-word chapter of a Hindi novel takes 6.9 s, against 2.6 s for a Latin chapter of the same length. While you read, the next chapter is prepared in the background.
+*   **Hebrew:** lines run right to left, with Latin words and numbers inside them left to right, and the niqqud (vowel points) sit on their letters. It needs a font that has the Hebrew letters, which the built-in fonts do not: put a TrueType family's files in `/.crosspoint/fonts/<Family>/`.
+*   **Arabic and Farsi:** their letters are laid out right to left, but they are not joined yet: each letter is drawn in its isolated form. As for Hebrew, the font must have the letters.
 
-What is not supported: Chinese, Japanese, Korean, Vietnamese, Hebrew, Arabic, Greek and Farsi.
+What is not supported: Vietnamese and Greek.
 
 ---
 
@@ -1106,8 +1110,9 @@ title wraps onto a second line, keeping its indent; only a title too long for tw
 Please note that this firmware is currently in active development. The following features have known limitations:
 
 * **Cover Images:** Large cover images embedded into EPUB require several seconds (~10s for ~2000 pixel tall image) to convert for the sleep screen and home screen thumbnail. Uploading the book with **Optimize EPUB** in the web interface's File Manager, or optimizing it there afterwards, resizes them and speeds this up (see [Optimizing EPUBs](./docs/webserver.md#optimizing-epubs)).
-* **Right-to-left scripts (Hebrew, Arabic):** Not currently supported. For BiDi / RTL support, use the original [CrossPoint](https://github.com/crosspoint-reader/crosspoint-reader) firmware.
+* **Right-to-left scripts (Hebrew, Arabic, Farsi):** lines run right to left, but a book's pages still turn left to right. Arabic and Farsi letters are not joined yet: each is drawn in its isolated form (see **[Supported Languages](#supported-languages)**).
 * **CJK (Chinese, Japanese, Korean):** books break lines and space punctuation by CJK rules; install your language's font from the **Font Manager**. Book titles, authors and chapter names outside the page still show a box for characters the menu fonts lack, and there is no CJK keyboard. Vertical text has the limits listed under **Vertical Text** in the **[Reader settings](#372-reader)**.
+* **Indic scripts (Hindi, Bengali, Tamil, Malayalam and the others under [Supported Languages](#supported-languages)):** book titles, chapter names and the TOC are not shaped yet. Indic words inside a right-to-left paragraph are not shaped yet either.
 
 ---
 
