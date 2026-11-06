@@ -266,7 +266,9 @@ gap B doesn't cover. The render task **only draws**; the build runs on the loop 
   writer first so a second handle sees committed bytes.
 - **Navigation during the build:** only for an explicit `Page` target — forward advances
   optimistically (shows the page once C reaches it, popup until then), back works, back past page 0
-  leaves the chapter. Paragraph/anchor/percent/last-page targets resolve only at completion.
+  leaves the chapter. A chapter-list, anchor or saved-text target resolves as soon as the build has
+  laid out a page past it, and is then a `Page` target; paragraph, percent and last-page targets
+  resolve at completion.
 - **Finalize (`Done`):** the on-disk LUT is written, the nav target is resolved (a Page target's
   running position is kept; past-the-end crosses to the next spine), then `READING` resumes and the
   `Normal` pass renders the page with AA.
