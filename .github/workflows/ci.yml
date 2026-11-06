@@ -42,6 +42,13 @@ jobs:
     # Pinned: pioarduino's cppcheck binary links against libpcre.so.3, and Ubuntu 26.04 (ubuntu-latest since
     # 2026-10-29) no longer ships libpcre3.
     runs-on: ubuntu-24.04
+    # Three runners: pio check analyses one file at a time, and a change to a widely included
+    # header re-analyses most of them. See scripts/cppcheck_shard.py. fail-fast is off so one
+    # shard's findings do not cancel the others'.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -111,7 +118,7 @@ jobs:
         id: cppcheck-results
         run: |
           fingerprint=$({ cat platformio.ini; git grep -h 'cppcheck-suppress' -- '*.h'; } | sha256sum | cut -c1-16)
-          echo "key=cppcheck-v1-${{ runner.os }}-${fingerprint}" >> "$GITHUB_OUTPUT"
+          echo "key=cppcheck-v1-${{ runner.os }}-${fingerprint}-${{ matrix.shard }}" >> "$GITHUB_OUTPUT"
           mkdir -p "${{ runner.temp }}/cppcheck-build"
 
       - name: Restore cppcheck results
@@ -125,7 +132,9 @@ jobs:
       - name: Run cppcheck
         env:
           CPPCHECK_BUILD_DIR_FLAG: --cppcheck-build-dir=${{ runner.temp }}/cppcheck-build
-        run: pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+        run: >-
+          pio check --fail-on-defect low --fail-on-defect medium --fail-on-defect high
+          --src-filters="$(python3 scripts/cppcheck_shard.py ${{ matrix.shard }} ${{ strategy.job-total }})"
 
       - name: Save cppcheck results
         if: github.event_name == 'push'
