@@ -390,6 +390,115 @@ TEST_F(SyntheticLutFixture, InsertedControlsCountNowhere) {
   }
 }
 
+TEST_F(SyntheticLutFixture, ATokenAfterAKeptJoinerKeepsItsSourceOffset) {
+  // The word is split at an inline edge, 66 glued letters (the width of a line) in the first token and the joiner,
+  // ष and two more letters in the second, which the line breaker puts at a line's start. A page opens on that line in
+  // some paragraphs, and its offset is ष's position in the source, as VisibleText counts it: the joiner's 3 bytes are
+  // counted between the tokens, as the mappers count them. A paragraph is 60 one-byte words, 65 letters and a virama
+  // (198 bytes), the joiner, ष and two letters (12 bytes), and 100 one-byte words. It runs right to left: a paragraph
+  // that needs bidi merges no Indic tokens (it shapes nothing: the line pass's pieces are not cut at runs), so its
+  // tokens stay as the parser cut them, where one that shapes merges the two (deviation 7: the glue falls inside a
+  // syllable).
+  constexpr uint32_t kBefore = 60;
+  constexpr uint32_t kSecondToken = kBefore + 198 + 3;
+  constexpr uint32_t kParagraphBytes = kBefore + 198 + 12 + 100;
+  std::string before;
+  for (uint32_t i = 0; i < kBefore; ++i) before += "w ";
+  std::string after;
+  for (int i = 0; i < 100; ++i) after += "w ";
+  std::string letters;
+  for (int i = 0; i < 65; ++i) letters += "क";
+  std::string joined;
+  for (int i = 0; i < 40; ++i) {
+    joined += "<p dir=\"rtl\">" + before + letters +
+              "्<b>\xE2\x80\x8D"
+              "षकक</b> " +
+              after + "</p>\n";
+  }
+  const auto section = build(book(joined));
+  ASSERT_GT(section->pageCount, 1);
+  int atSecondToken = 0;
+  for (uint16_t page = 0; page < section->pageCount; ++page) {
+    const uint32_t within = *section->getVisibleTextOffsetForPage(page) % kParagraphBytes;
+    EXPECT_TRUE(within == 0 || within == kSecondToken) << "page " << page << " opens " << within << " bytes in";
+    if (within == kSecondToken) ++atSecondToken;
+  }
+  EXPECT_GT(atSecondToken, 0);
+}
+
+TEST_F(SyntheticLutFixture, AMergedWordSplitAfterItsJoinerStartsItsPageAtItsVisiblePrefix) {
+  // A guard, not a RED test. The word of the test above with its joiner near its start, in a paragraph that shapes:
+  // the inline edges are merged away (deviation 7: the glue after the virama falls inside a syllable, and the letters
+  // after </b> are the word's first style), and the merged word, wider than the line, is split between syllables. A
+  // page that opens on the remainder opens at the word's offset plus its prefix's visible bytes, the kept joiner left
+  // out of them, as for any split inside a word. A paragraph is 60 one-byte words, a letter and its virama (6 bytes),
+  // the joiner, a letter and 66 more (204 bytes), and 100 one-byte words.
+  constexpr uint32_t kBefore = 60;
+  constexpr uint32_t kParagraphBytes = kBefore + 6 + 204 + 100;
+  const std::string kJoined = "\xE0\xA4\x95\xE0\xA5\x8D\xE2\x80\x8D\xE0\xA4\xB7";  // क्, ZWJ, ष
+  std::string before;
+  for (uint32_t i = 0; i < kBefore; ++i) before += "w ";
+  std::string after;
+  for (int i = 0; i < 100; ++i) after += "w ";
+  std::string letters;
+  for (int i = 0; i < 66; ++i) letters += "क";
+  std::string joined;
+  for (int i = 0; i < 40; ++i) {
+    joined += "<p>" + before +
+              "\xE0\xA4\x95\xE0\xA5\x8D<b>\xE2\x80\x8D"
+              "\xE0\xA4\xB7</b>" +
+              letters + " " + after + "</p>\n";
+  }
+  const auto section = build(book(joined));
+  ASSERT_GT(section->pageCount, 1);
+  int atSplit = 0;
+  for (uint16_t page = 1; page < section->pageCount; ++page) {
+    const uint32_t within = *section->getVisibleTextOffsetForPage(page) % kParagraphBytes;
+    if (within == 0) continue;
+    // The page before ends on the word's prefix, its hyphen added by the split.
+    section->currentPage = page - 1;
+    const auto previous = section->loadPageFromSectionFile();
+    ASSERT_TRUE(previous);
+    const TextBlock* last = nullptr;
+    for (const auto& el : previous->elements) {
+      if (el->getTag() == TAG_PageLine) last = static_cast<const PageLine&>(*el).getBlock();
+    }
+    ASSERT_NE(last, nullptr);
+    std::string prefix = last->wordText(last->wordCount() - 1);
+    if (prefix.empty() || prefix.back() != '-') continue;  // a page opening among the one-byte words
+    prefix.pop_back();
+    ASSERT_EQ(0u, prefix.rfind(kJoined, 0)) << "page " << page;
+    EXPECT_EQ(within, kBefore + prefix.size() - 3) << "page " << page;
+    ++atSplit;
+  }
+  EXPECT_GT(atSplit, 0);
+}
+
+// A guard, not a RED test: pins that a kept joiner moves no page start the LUT holds.
+TEST_F(SyntheticLutFixture, KeptJoinersMoveNoPageStart) {
+  // A kept joiner is in the source, so VisibleText counts its 3 bytes; no word's offset starts at it. Each paragraph is
+  // one line of 24 visible bytes (क् 6, the ZWJ 3, ष 3, "कमल।" 12), so every page opens on a paragraph, at its index
+  // times 24; the page breaks are those of the same book without the joiner (21 bytes a paragraph).
+  constexpr uint32_t kPlainBytes = 21;
+  constexpr uint32_t kParagraphBytes = 24;
+  std::string joined;
+  std::string plain;
+  for (int i = 0; i < 120; ++i) {
+    joined +=
+        "<p>क्\xE2\x80\x8D"
+        "ष कमल।</p>\n";
+    plain += "<p>क्ष कमल।</p>\n";
+  }
+  const auto withJoiners = build(book(joined));
+  const auto without = build(book(plain));
+  ASSERT_GT(without->pageCount, 1);
+  ASSERT_EQ(withJoiners->pageCount, without->pageCount);
+  for (uint16_t page = 0; page < without->pageCount; ++page) {
+    const uint32_t paragraph = *without->getVisibleTextOffsetForPage(page) / kPlainBytes;
+    EXPECT_EQ(*withJoiners->getVisibleTextOffsetForPage(page), paragraph * kParagraphBytes) << "page " << page;
+  }
+}
+
 TEST_F(SyntheticLutFixture, EmptyPageStartsWhereTheNextElementDoes) {
   // A top margin taller than the page pushes the opening paragraph's first line off page 0, which
   // goes out with nothing on it. That happens while the paragraph is laid out, after its text was

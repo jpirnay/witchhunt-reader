@@ -60,9 +60,10 @@ void applyTable(const Face& face, const Scale& scale, const Plan& plan, Buffer& 
   size_t i = 0;
   for (const Stage& stage : plan.stages[table]) {
     for (; i < stage.lastLookup; i++) {
-      const LookupSettings settings = plan.settings(table, i);
       // Only lookups that can start at a glyph the buffer holds.
-      if (settings.hasDigest && !settings.digest.mayIntersect(buffer.digest)) continue;
+      // witchhunt: deviation 13 - tested on the plan's copy of the digest, before settings() reads the font.
+      if (!plan.mayApply(table, i, buffer.digest)) continue;
+      const LookupSettings settings = plan.settings(table, i);
       applyLookup(face, scale, buffer, table, plan.lookups[table][i].index, settings);
       if (!buffer.successful) return;
     }

@@ -508,13 +508,16 @@ uint16_t HalPowerManager::getBatteryPercentage() const {
   // that differs -- the X4 Pro's active-high STAT line on GPIO21 among them.
   static const BatteryMonitor battery;
 
-  if (_batteryUseI2C) {
-    const unsigned long now = millis();
-    if (_batteryLastPollMs != 0 && (now - _batteryLastPollMs) < BATTERY_POLL_MS) {
-      return _batteryCachedPercent;
-    }
-    _batteryLastPollMs = now;
+  // One poll per BATTERY_POLL_MS on either backend. The status bar asks several times for one frame, to measure the
+  // text and again to draw it, and on the ADC path each call stepped the smoothing filter: the two answers could differ
+  // and the percentage ran ahead of the battery. From CrossInk 902e6573 (Julia Nguyen).
+  const unsigned long now = millis();
+  if (_batteryLastPollMs != 0 && (now - _batteryLastPollMs) < BATTERY_POLL_MS) {
+    return _batteryUseI2C ? _batteryCachedPercent : _batteryCachedPercent / 10;
+  }
+  _batteryLastPollMs = now;
 
+  if (_batteryUseI2C) {
     // Ask the SDK monitor, which dispatches on the profile's GaugeType, instead
     // of reading BQ27220 registers by hand.
     //

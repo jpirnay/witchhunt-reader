@@ -91,11 +91,12 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=3 truncated=0 cssFallback=0
    W x=341 s=0 z=70 t=these
    W x=380 s=0 z=70 t=words
    W x=415 s=0 z=70 t=shrink
-  LINE y=324 x=0 align=0 mult=1.000 hfid=0 words=11
+  LINE y=324 x=0 align=0 mult=1.000 hfid=0 words=12
    W x=0 s=0 z=70 t=to
    W x=21 s=0 z=70 t=seventy
    W x=75 s=0 z=70 t=percent
-   W x=123 s=0 z=70 t=mid-line
+   W x=123 s=0 z=70 t=mid-
+   W x=146 s=0 z=70 t=line
    W x=177 s=0 z=100 t=and
    W x=216 s=0 z=100 t=back
    W x=257 s=0 z=100 t=to
@@ -226,7 +227,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=3 truncated=0 cssFallback=0
    W x=375 s=0 z=100 t=block
    W x=418 s=0 z=100 t=CSS
    W x=450 s=0 z=100 t=—
-  LINE y=253 x=0 align=0 mult=0.800 hfid=0 words=11
+  LINE y=253 x=0 align=0 mult=0.800 hfid=0 words=12
    W x=0 s=0 z=100 t=uniform
    W x=62 s=0 z=100 t=lines
    W x=105 s=0 z=100 t=like
@@ -235,11 +236,13 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=3 truncated=0 cssFallback=0
    W x=211 s=0 z=100 t=stay
    W x=250 s=0 z=100 t=on
    W x=276 s=0 z=100 t=the
-   W x=309 s=0 z=100 t=zero-cost
+   W x=309 s=0 z=100 t=zero-
+   W x=347 s=0 z=100 t=cost
    W x=385 s=0 z=100 t=path
    W x=425 s=0 z=100 t=(no
-  LINE y=272 x=0 align=0 mult=0.800 hfid=0 words=7
-   W x=0 s=0 z=100 t=per-word
+  LINE y=272 x=0 align=0 mult=0.800 hfid=0 words=8
+   W x=0 s=0 z=100 t=per-
+   W x=26 s=0 z=100 t=word
    W x=58 s=0 z=100 t=size
    W x=89 s=0 z=100 t=array
    W x=132 s=0 z=100 t=in

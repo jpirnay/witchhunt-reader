@@ -24,9 +24,21 @@ constexpr uint32_t AA = 0x09BE, I = 0x09BF, II = 0x09C0, U = 0x09C1, E = 0x09C7,
                    AU_MARK = 0x09D7;
 constexpr uint32_t HALANT = 0x09CD, NUKTA = 0x09BC, CANDRABINDU = 0x0981, ZWNJ = 0x200C, II_LETTER = 0x0987;
 
+// The bounded form of `in`, or `in` itself when it needs no reordering. Room for 2 * len + 1 bytes always holds it.
+std::string reorderBounded(const std::string& in) {
+  std::string buffer(2 * in.size() + 1, '\0');
+  size_t written = 0;
+  if (!indicReorderForDisplay(in.data(), in.size(), buffer.data(), buffer.size(), &written)) return in;
+  EXPECT_EQ(buffer[written], '\0');
+  return std::string(buffer.data(), written);
+}
+
+// Every case through this helper also checks that the bounded form gives the string form.
 std::string reorder(const std::string& in) {
   std::string out;
-  return indicReorderForDisplay(in.c_str(), out) ? out : in;
+  const std::string expected = indicReorderForDisplay(in.c_str(), out) ? out : in;
+  EXPECT_EQ(reorderBounded(in), expected);
+  return expected;
 }
 
 }  // namespace
@@ -235,4 +247,82 @@ TEST(IndicLineBreaks, NeverSplitASyllableInAnyScript) {
   EXPECT_FALSE(indic::syllableBreakAllowed(indic::MALAYALAM_DOT_REPH, 0x0D24));  // dot reph, then its base
   EXPECT_TRUE(indic::syllableBreakAllowed(DEVA_I, DEVA_KA));
   EXPECT_TRUE(indic::syllableBreakAllowed(0x0C3F, 0x0C15));  // Telugu: after a vowel sign
+}
+
+TEST(IndicReorderBounded, MatchesTheStringForm) {
+  // reorder() cross-checks the bounded form on every case; these pin the same on cases that change and that do not.
+  EXPECT_EQ(reorderBounded(cps({KA, I})), cps({I, KA}));
+  EXPECT_EQ(reorderBounded(cps({KA, O})), cps({E, KA, AA}));
+  EXPECT_EQ(reorderBounded(cps({DA, HALANT, BA, I})), cps({I, DA, HALANT, BA}));
+  EXPECT_EQ(reorderBounded(cps({KA, AA, LA})), cps({KA, AA, LA}));
+  EXPECT_EQ(reorderBounded("hello"), "hello");
+  EXPECT_EQ(reorderBounded(""), "");
+}
+
+TEST(IndicReorderBounded, ReadsOnlyLenBytes) {
+  // A view cut mid-code-point, in a buffer with a continuation byte right after: nothing past len is read.
+  const std::string full = cps({KA, I}) + cps({KA});
+  const std::string cut = full.substr(0, 4);  // KA, then 1 byte of I
+  char out[16];
+  size_t written = 0;
+  EXPECT_FALSE(indicReorderForDisplay(cut.data(), cut.size(), out, sizeof(out), &written));
+  EXPECT_TRUE(indicReorderForDisplay(full.data(), 6, out, sizeof(out), &written));
+  EXPECT_EQ(std::string(out, written), cps({I, KA}));
+}
+
+TEST(IndicReorderBounded, TwiceTheBytesHoldsTheForm) {
+  std::string in;
+  for (int i = 0; i < 40; i++) in += cps({KA, O});
+  const std::string expected = [&] {
+    std::string e;
+    for (int i = 0; i < 40; i++) e += cps({E, KA, AA});
+    return e;
+  }();
+  std::string buffer(2 * in.size() + 1, 'x');
+  size_t written = 0;
+  ASSERT_TRUE(indicReorderForDisplay(in.data(), in.size(), buffer.data(), buffer.size(), &written));
+  EXPECT_EQ(std::string(buffer.data(), written), expected);
+  EXPECT_EQ(buffer[written], '\0');
+}
+
+TEST(IndicReorderBounded, ThreeTimesTheBytesHoldsStackedSinhalaSigns) {
+  // U+0DDD becomes a pre sign and two post signs: 3 bytes in, 9 out.
+  constexpr uint32_t SINHALA_KA = 0x0D9A, SINHALA_KOMBUVA_AA_HAL = 0x0DDD, SINHALA_KOMBUVA = 0x0DD9,
+                     SINHALA_AELA = 0x0DCF, SINHALA_AL = 0x0DCA;
+  for (const int signs : {1, 2}) {
+    std::string in = cps({SINHALA_KA});
+    std::string expected;
+    for (int i = 0; i < signs; i++) {
+      in += cps({SINHALA_KOMBUVA_AA_HAL});
+      expected += cps({SINHALA_KOMBUVA});
+    }
+    expected += cps({SINHALA_KA});
+    for (int i = 0; i < signs; i++) expected += cps({SINHALA_AELA, SINHALA_AL});
+
+    std::string buffer(3 * in.size() + 1, 'x');
+    size_t written = 0;
+    ASSERT_TRUE(indicReorderForDisplay(in.data(), in.size(), buffer.data(), buffer.size(), &written));
+    EXPECT_EQ(std::string(buffer.data(), written), expected);
+    EXPECT_EQ(buffer[written], '\0');
+
+    // Twice the bytes does not hold two stacked signs: refused, never cut.
+    if (signs == 2) {
+      std::string small(2 * in.size() + 1, 'x');
+      written = 777;
+      EXPECT_FALSE(indicReorderForDisplay(in.data(), in.size(), small.data(), small.size(), &written));
+      EXPECT_EQ(written, 777u);
+    }
+  }
+}
+
+TEST(IndicReorderBounded, TooLittleRoomIsRefusedNotCut) {
+  const std::string in = cps({KA, I});
+  char out[16];
+  size_t written = 12345;
+  EXPECT_FALSE(indicReorderForDisplay(in.data(), in.size(), out, in.size(), &written));
+  EXPECT_EQ(written, 12345u);
+  EXPECT_FALSE(indicReorderForDisplay(in.data(), in.size(), out, 0, &written));
+  EXPECT_EQ(written, 12345u);
+  EXPECT_TRUE(indicReorderForDisplay(in.data(), in.size(), out, in.size() + 1, &written));
+  EXPECT_EQ(written, in.size());
 }

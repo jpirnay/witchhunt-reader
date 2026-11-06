@@ -18,11 +18,12 @@ constexpr size_t kLargeChapter = 583991;  // a whole book in one entry: the ring
 constexpr uint32_t kPlenty = 120 * 1024;  // more than the X4's reading heap ever has
 
 Request request(const bool css, const size_t inflated, const uint32_t freeHeap, const uint32_t contigHeap,
-                const bool cjk = false, const bool trueType = false) {
+                const bool cjk = false, const bool trueType = false, const bool shaped = false) {
   Request r;
   r.embeddedStyle = css;
   r.inflatedSize = inflated;
   r.cjkRepertoire = cjk;
+  r.shapedScript = shaped;
   r.trueTypeSet = trueType;
   r.freeHeap = freeHeap;
   r.contigHeap = contigHeap;
@@ -49,18 +50,20 @@ const Floors kFloors[] = {
 };
 
 // Admitted exactly at both floors and refused one byte under either, as on master.
-void expectLatinFloors(const bool cjk, const bool trueType) {
+void expectLatinFloors(const bool cjk, const bool trueType, const bool shaped = false) {
   for (const Floors& f : kFloors) {
     SCOPED_TRACE(testing::Message() << "css=" << f.css << " inflated=" << f.inflated << " cjk=" << cjk
-                                    << " trueType=" << trueType);
-    const Admission at = admitsResident(request(f.css, f.inflated, f.freeFloor, f.contigFloor, cjk, trueType));
+                                    << " trueType=" << trueType << " shaped=" << shaped);
+    const Admission at = admitsResident(request(f.css, f.inflated, f.freeFloor, f.contigFloor, cjk, trueType, shaped));
     EXPECT_TRUE(at.resident);
     EXPECT_FALSE(at.cjkTrueType);
+    EXPECT_FALSE(at.shapedTrueType);
     EXPECT_EQ(f.freeFloor, at.freeFloor);
     EXPECT_EQ(f.contigFloor, at.contigFloor);
-    EXPECT_FALSE(admitsResident(request(f.css, f.inflated, f.freeFloor - 1, kPlenty, cjk, trueType)).resident);
-    EXPECT_FALSE(admitsResident(request(f.css, f.inflated, kPlenty, f.contigFloor - 1, cjk, trueType)).resident);
-    EXPECT_TRUE(admitsResident(request(f.css, f.inflated, kPlenty, kPlenty, cjk, trueType)).resident);
+    EXPECT_FALSE(admitsResident(request(f.css, f.inflated, f.freeFloor - 1, kPlenty, cjk, trueType, shaped)).resident);
+    EXPECT_FALSE(
+        admitsResident(request(f.css, f.inflated, kPlenty, f.contigFloor - 1, cjk, trueType, shaped)).resident);
+    EXPECT_TRUE(admitsResident(request(f.css, f.inflated, kPlenty, kPlenty, cjk, trueType, shaped)).resident);
   }
 }
 
@@ -90,5 +93,24 @@ TEST(InPlaceBuildGate, ACjkBookInATrueTypeSetNeverBuildsInPlace) {
 TEST(InPlaceBuildGate, ACjkBookInABuiltInOrCpfontFamilyKeepsTheFloors) { expectLatinFloors(true, false); }
 
 TEST(InPlaceBuildGate, ALatinBookInATrueTypeSetKeepsTheFloors) { expectLatinFloors(false, true); }
+
+TEST(InPlaceBuildGate, AShapedScriptBookInATrueTypeSetNeverBuildsInPlace) {
+  for (const bool css : {false, true}) {
+    for (const size_t inflated : {kSmallChapter, size_t{9602}, kLargeChapter}) {
+      SCOPED_TRACE(testing::Message() << "css=" << css << " inflated=" << inflated);
+      for (const uint32_t heap : {uint32_t{68368}, kPlenty, UINT32_MAX}) {
+        const Admission a =
+            admitsResident(request(css, inflated, heap, heap, /*cjk=*/false, /*trueType=*/true, /*shaped=*/true));
+        EXPECT_FALSE(a.resident) << heap;
+        EXPECT_TRUE(a.shapedTrueType) << heap;
+        EXPECT_FALSE(a.cjkTrueType) << heap;
+      }
+    }
+  }
+}
+
+TEST(InPlaceBuildGate, AShapedScriptBookInABitmapFontKeepsTheFloors) {
+  expectLatinFloors(false, false, /*shaped=*/true);
+}
 
 }  // namespace

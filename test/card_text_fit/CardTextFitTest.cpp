@@ -158,6 +158,13 @@ TEST(CardTextFit, EachStepTriesRoomyGapsBeforeTightOnes) {
   EXPECT_EQ(result.lines[Series], 0);
 }
 
+TEST(CardTextFit, AFourLineTitleGivesUpOneLineAtATime) {
+  // A title in a smaller face can run to four lines. Three still fit here: 90 + 4 + 25 + 4 + 25.
+  const auto result = CardTextFit::fit(lyraParts(4, 1, 0, 1, 0), 150, kTightGap);
+  EXPECT_TRUE(result.fits);
+  EXPECT_EQ(result.lines[Title], 3);
+}
+
 TEST(CardTextFit, StatusIsNeverShed) {
   const auto parts = lyraParts(3, 2, 2, 1, 2);
   const auto result = CardTextFit::fit(parts, 1, kTightGap);

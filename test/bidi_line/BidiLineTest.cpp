@@ -266,13 +266,14 @@ TEST(BidiLine, TheDivineNameIsDrawnAsHeAndGeresh) {
   EXPECT_EQ(decode(displayOf(line, line.pieces[0])), (CP{0x05F3, 0x05D4}));
 }
 
-TEST(BidiLine, ANameGluedToALeadingMarkFallsBackForNow) {
+TEST(BidiLine, ANameSplitFromItsMarkFallsBackInTheLinePass) {
   // A coloured-cantillation edition can set a mark in a span of its own: here a token holding only U+0591, glued to
-  // the divine name. Leading its token, the mark keeps a slot, and orderLine's mark grouping draws the base before it,
-  // the name's geresh, which pulls the geresh away from its he. A shaped cluster in two pieces sends the line to the
-  // fallback, upstream's word order. Step 2's shaping context (RunContext, which sees the glued neighbours) is where
-  // this gets fixed. Exempting leading marks from orderLine's grouping would regress the style split instead, where a
-  // point in a span of its own must still follow its letter.
+  // the divine name. ParsedText merges such a pair into one token before any line pass
+  // (TextShaping::mergesWithPrevious, ShapedLayout.TheDivineNameGluedToAMarkIsDrawnAsHeAndGeresh), so a page never
+  // hands the line pass this split. Handed it, the mark leads its token and keeps a slot, and orderLine's mark grouping
+  // draws the base before it, the name's geresh, which pulls the geresh away from its he: a shaped cluster in two
+  // pieces sends the line to the fallback, upstream's word order. Exempting leading marks from orderLine's grouping
+  // would regress the style split instead, where a point in a span of its own must still follow its letter.
   const auto line = lay({"וַיֹּאמֶר", "יְהוָה", u(0x0591), "אֶל", "מֹשֶׁה"}, 1, {}, {2});
   EXPECT_TRUE(line.fallback);
 }

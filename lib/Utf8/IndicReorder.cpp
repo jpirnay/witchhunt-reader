@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "IndicReorderSink.h"  // witchhunt: deviation 9
 #include "IndicScripts.h"
 #include "Utf8.h"
 
@@ -134,7 +135,10 @@ static_assert(rulesMatchScripts(), "kRules is out of step with indic::SCRIPTS");
 
 using Cursor = const unsigned char*;
 
-uint32_t peek(Cursor p) { return utf8NextCodepoint(&p); }
+using indic_reorder::BoundedOut;  // witchhunt: deviation 9
+using indic_reorder::next;        // witchhunt: deviation 9
+using indic_reorder::peek;        // witchhunt: deviation 9
+using indic_reorder::StringOut;   // witchhunt: deviation 9
 
 const ScriptRules* rulesFor(const uint32_t cp) {
   const indic::ScriptInfo* script = indic::scriptOf(cp);
@@ -169,72 +173,70 @@ bool isSyllableTail(const uint32_t cp) {
 }
 
 // Advances past one consonant and an optional nukta.
-Cursor skipConsonant(Cursor p) {
-  utf8NextCodepoint(&p);
+Cursor skipConsonant(Cursor p, const Cursor end) {  // witchhunt: deviation 9
+  next(p, end);                                     // witchhunt: deviation 9
   Cursor q = p;
-  return indic::isNukta(utf8NextCodepoint(&q)) ? q : p;
+  return indic::isNukta(next(q, end)) ? q : p;  // witchhunt: deviation 9
 }
 
 // End of the consonant cluster starting at `p`: C[N] (H [ZWJ] C[N])* [H [ZWJ|ZWNJ]],
 // where a bare H only continues the cluster in scripts whose virama joins.
-Cursor clusterEnd(const ScriptRules& rules, Cursor p) {
-  p = skipConsonant(p);
-  while (indic::isVirama(peek(p))) {
+Cursor clusterEnd(const ScriptRules& rules, Cursor p, const Cursor end) {  // witchhunt: deviation 9
+  p = skipConsonant(p, end);                                               // witchhunt: deviation 9
+  while (indic::isVirama(peek(p, end))) {                                  // witchhunt: deviation 9
     Cursor q = p;
-    utf8NextCodepoint(&q);
+    next(q, end);  // witchhunt: deviation 9
     Cursor afterJoiner = q;
-    const bool zwj = utf8NextCodepoint(&afterJoiner) == indic::ZWJ;
+    const bool zwj = next(afterJoiner, end) == indic::ZWJ;  // witchhunt: deviation 9
     if (!zwj) afterJoiner = q;
-    if ((zwj || rules.viramaJoins) && isConsonant(rules, peek(afterJoiner))) {
-      p = skipConsonant(afterJoiner);
+    if ((zwj || rules.viramaJoins) && isConsonant(rules, peek(afterJoiner, end))) {  // witchhunt: deviation 9
+      p = skipConsonant(afterJoiner, end);                                           // witchhunt: deviation 9
       continue;
     }
     // Syllable-final virama, optionally with an explicit joiner.
-    const uint32_t joiner = peek(q);
-    if (joiner == indic::ZWJ || joiner == indic::ZWNJ) utf8NextCodepoint(&q);
+    const uint32_t joiner = peek(q, end);                             // witchhunt: deviation 9
+    if (joiner == indic::ZWJ || joiner == indic::ZWNJ) next(q, end);  // witchhunt: deviation 9
     return q;
   }
   return p;
 }
 
-Cursor tailEnd(Cursor p) {
-  while (isSyllableTail(peek(p))) utf8NextCodepoint(&p);
+Cursor tailEnd(Cursor p, const Cursor end) {          // witchhunt: deviation 9
+  while (isSyllableTail(peek(p, end))) next(p, end);  // witchhunt: deviation 9
   return p;
 }
 
 // Copies [begin, end), composing nukta letters. Sets `changed` when it does.
-void appendCluster(const ScriptRules& rules, Cursor begin, const Cursor end, std::string& out, bool& changed) {
+template <typename Out>                                                                 // witchhunt: deviation 9
+void appendCluster(const ScriptRules& rules, Cursor begin, const Cursor end, Out& out,  // witchhunt: deviation 9
+                   bool& changed) {                                                     // witchhunt: deviation 9
   while (begin < end) {
     const Cursor start = begin;
-    const uint32_t cp = utf8NextCodepoint(&begin);
+    const uint32_t cp = next(begin, end);  // witchhunt: deviation 9
     if (const uint32_t composed = composeNukta(rules, cp);
-        composed != 0 && begin < end && indic::isNukta(peek(begin))) {
-      utf8NextCodepoint(&begin);
-      utf8AppendCodepoint(composed, out);
+        composed != 0 && begin < end && indic::isNukta(peek(begin, end))) {  // witchhunt: deviation 9
+      next(begin, end);                                                      // witchhunt: deviation 9
+      out.appendCodepoint(composed);                                         // witchhunt: deviation 9
       changed = true;
       continue;
     }
-    out.append(reinterpret_cast<const char*>(start), begin - start);
+    out.append(reinterpret_cast<const char*>(start), begin - start);  // witchhunt: deviation 9
   }
 }
 
-}  // namespace
-
-bool indicReorderForDisplay(const char* text, std::string& out) {
-  if (text == nullptr || !indic::containsIndic(text)) return false;
-
-  out.clear();
-  out.reserve(strlen(text) + 8);
+// The text [begin, end) reordered into `out`; true when anything changed. witchhunt: deviation 9
+template <typename Out>                                             // witchhunt: deviation 9
+bool reorderInto(const Cursor begin, const Cursor end, Out& out) {  // witchhunt: deviation 9
   bool changed = false;
 
-  Cursor p = reinterpret_cast<Cursor>(text);
-  while (*p) {
-    const uint32_t cp = peek(p);
+  Cursor p = begin;                    // witchhunt: deviation 9
+  while (p < end) {                    // witchhunt: deviation 9
+    const uint32_t cp = peek(p, end);  // witchhunt: deviation 9
     const ScriptRules* rules = rulesFor(cp);
     if (rules == nullptr || !isConsonant(*rules, cp)) {
       const Cursor start = p;
-      utf8NextCodepoint(&p);
-      out.append(reinterpret_cast<const char*>(start), p - start);
+      next(p, end);                                                 // witchhunt: deviation 9
+      out.append(reinterpret_cast<const char*>(start), p - start);  // witchhunt: deviation 9
       continue;
     }
 
@@ -243,35 +245,67 @@ bool indicReorderForDisplay(const char* text, std::string& out) {
     Cursor clusterBegin = p;
     {
       Cursor q = p;
-      if (utf8NextCodepoint(&q) == rules->ra && indic::isVirama(utf8NextCodepoint(&q)) &&
-          isConsonant(*rules, peek(q))) {
-        out.append(reinterpret_cast<const char*>(p), q - p);
+      if (next(q, end) == rules->ra && indic::isVirama(next(q, end)) &&  // witchhunt: deviation 9
+          isConsonant(*rules, peek(q, end))) {                           // witchhunt: deviation 9
+        out.append(reinterpret_cast<const char*>(p), q - p);             // witchhunt: deviation 9
         clusterBegin = q;
       }
     }
 
-    const Cursor clusterStop = clusterEnd(*rules, clusterBegin);
-    const Cursor tailStop = tailEnd(clusterStop);
+    const Cursor clusterStop = clusterEnd(*rules, clusterBegin, end);  // witchhunt: deviation 9
+    const Cursor tailStop = tailEnd(clusterStop, end);                 // witchhunt: deviation 9
 
     for (Cursor t = clusterStop; t < tailStop;) {
-      if (const PreBaseVowel* vowel = preBaseVowel(*rules, utf8NextCodepoint(&t))) {
-        utf8AppendCodepoint(vowel->pre, out);
+      if (const PreBaseVowel* vowel = preBaseVowel(*rules, next(t, end))) {  // witchhunt: deviation 9
+        out.appendCodepoint(vowel->pre);                                     // witchhunt: deviation 9
         changed = true;
       }
     }
     appendCluster(*rules, clusterBegin, clusterStop, out, changed);
     for (Cursor t = clusterStop; t < tailStop;) {
-      const uint32_t sign = utf8NextCodepoint(&t);
+      const uint32_t sign = next(t, end);  // witchhunt: deviation 9
       const PreBaseVowel* vowel = preBaseVowel(*rules, sign);
       if (vowel == nullptr) {
-        utf8AppendCodepoint(sign, out);
+        out.appendCodepoint(sign);  // witchhunt: deviation 9
         continue;
       }
       for (const uint32_t post : vowel->post) {
-        if (post != 0) utf8AppendCodepoint(post, out);
+        if (post != 0) out.appendCodepoint(post);  // witchhunt: deviation 9
       }
     }
     p = tailStop;
   }
   return changed;
 }
+
+// witchhunt: deviation 9 - moved: upstream closes the anonymous namespace before the std::string overload, whose body
+// is reorderInto now; this line and the overload's first lines come after it.
+}  // namespace
+
+bool indicReorderForDisplay(const char* text, std::string& out) {    // witchhunt: deviation 9
+  if (text == nullptr || !indic::containsIndic(text)) return false;  // witchhunt: deviation 9
+
+  out.clear();                                            // witchhunt: deviation 9
+  out.reserve(strlen(text) + 8);                          // witchhunt: deviation 9
+  StringOut sink{out};                                    // witchhunt: deviation 9
+  const Cursor begin = reinterpret_cast<Cursor>(text);    // witchhunt: deviation 9
+  return reorderInto(begin, begin + strlen(text), sink);  // witchhunt: deviation 9
+}  // witchhunt: deviation 9
+
+// witchhunt: deviation 9 - the bounded form; see IndicReorder.h.
+bool indicReorderForDisplay(const char* text, size_t len, char* out, size_t room,  // witchhunt: deviation 9
+                            size_t* written) {                                     // witchhunt: deviation 9
+  if (text == nullptr || out == nullptr || room == 0) return false;                // witchhunt: deviation 9
+  const auto* bytes = reinterpret_cast<const unsigned char*>(text);                // witchhunt: deviation 9
+  bool holdsIndic = false;                                                         // witchhunt: deviation 9
+  for (size_t i = 0; i + 3 <= len && !holdsIndic; i++) {                           // witchhunt: deviation 9
+    holdsIndic = indic::startsIndic(bytes + i);                                    // witchhunt: deviation 9
+  }  // witchhunt: deviation 9
+  if (!holdsIndic) return false;  // witchhunt: deviation 9
+
+  BoundedOut sink{out, room};                                             // witchhunt: deviation 9
+  if (!reorderInto(bytes, bytes + len, sink) || sink.full) return false;  // witchhunt: deviation 9
+  out[sink.used] = '\0';                                                  // witchhunt: deviation 9
+  *written = sink.used;                                                   // witchhunt: deviation 9
+  return true;                                                            // witchhunt: deviation 9
+}  // witchhunt: deviation 9

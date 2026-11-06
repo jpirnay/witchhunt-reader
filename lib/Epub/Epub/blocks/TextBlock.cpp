@@ -26,6 +26,20 @@ namespace {
 // says the word is glued to its predecessor. See TextBlock::wordContinues.
 constexpr size_t kAnnotationRecordBytes = 10;  // u16 firstWord, u16 wordCount, s16 x, u16 width, u8 kind, u8 len
 constexpr size_t kAnnotationHeaderBytes = 2;   // u16 count
+constexpr size_t kGlyphFormHeaderBytes = 3;    // a glyph form's lead byte, then its u16 glyph count, little-endian
+constexpr size_t kCutRecords = SIZE_MAX;       // glyphRecordBytes' answer when a record runs past its room
+
+// The bytes `count` whole glyph records take at `records`, `room` bytes there; kCutRecords when one is cut off.
+size_t glyphRecordBytes(const uint8_t* records, const uint16_t count, const size_t room) {
+  size_t pos = 0;
+  for (uint16_t i = 0; i < count; i++) {
+    GlyphRecord record;
+    size_t read = 0;
+    if (!glyph_run::decode(records + pos, room - pos, &record, &read)) return kCutRecords;
+    pos += read;
+  }
+  return pos;
+}
 
 bool knownKind(const uint8_t kind) {
   return kind == static_cast<uint8_t>(TextBlock::AnnotationKind::Ruby) ||
@@ -290,8 +304,8 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
     }
   }
 
-  // The bidi region (see the arena layout): the forms that differ from their words' text, and an order that reorders.
-  // An order must number the line's words once each, in a byte.
+  // The bidi region (see the arena layout): the glyph forms, the display forms that differ from their words' text, and
+  // an order that reorders. An order must number the line's words once each, in a byte.
   const uint8_t* orderSrc = range.logicalOrder;
   if (orderSrc != nullptr && (count > kMaxOrderedWords || !isPermutation(orderSrc, count))) {
     LOG_ERR("TXB", "Construction failed: bad logical order for %u words", static_cast<uint32_t>(count));
@@ -299,12 +313,36 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
     return;
   }
   const bool keepOrder = orderSrc != nullptr && !isIdentity(orderSrc, count);
-  size_t formBytes = 0;
-  for (size_t i = 0; range.displayForms != nullptr && i < count; i++) {
-    if (formDiffers(wordAt(i), range.displayForms[i])) formBytes += range.displayForms[i].size() + 1;
+  // A word's one form: its run when it has glyphs, else a display form that differs from its text. A display form led
+  // by 0xFF (not UTF-8) is not kept: a load would read it as a glyph form.
+  auto glyphAt = [&range](const size_t i) -> const GlyphRun* {
+    return range.glyphForms != nullptr && range.glyphForms[i].count != 0 ? &range.glyphForms[i] : nullptr;
+  };
+  auto keepsDisplayForm = [&range, &wordAt, &glyphAt](const size_t i) {
+    if (range.displayForms == nullptr || glyphAt(i) != nullptr) return false;
+    const std::string_view form = range.displayForms[i];
+    return formDiffers(wordAt(i), form) && static_cast<uint8_t>(form[0]) != kGlyphFormLead;
+  };
+  size_t formBytes = 0;   // the display forms, each with its NUL
+  size_t glyphBytes = 0;  // the glyph forms, each with its lead, count and 0x00
+  for (size_t i = 0; (range.displayForms != nullptr || range.glyphForms != nullptr) && i < count; i++) {
+    if (const GlyphRun* run = glyphAt(i)) {
+      // Written as given, so it must be exactly its records: a load refuses anything else.
+      if (run->records == nullptr || glyphRecordBytes(run->records, run->count, run->bytes) != run->bytes) {
+        LOG_ERR("TXB", "Construction failed: glyph form of word %u is not %u whole records", static_cast<uint32_t>(i),
+                static_cast<uint32_t>(run->count));
+        isValid = false;
+        return;
+      }
+      glyphBytes += kGlyphFormHeaderBytes + run->bytes + 1;
+    } else if (keepsDisplayForm(i)) {
+      formBytes += range.displayForms[i].size() + 1;
+    }
   }
-  const size_t bidiBytes =
-      (formBytes == 0 && !keepOrder) ? 0 : 1 + (formBytes != 0 ? 2 * count + formBytes : 0) + (keepOrder ? count : 0);
+  const size_t textsBytes = formBytes + glyphBytes;
+  const size_t bidiBytes = (textsBytes == 0 && !keepOrder)
+                               ? 0
+                               : 1 + (textsBytes != 0 ? 2 * count + textsBytes : 0) + (keepOrder ? count : 0);
   if (bidiBytes > UINT16_MAX) {
     LOG_ERR("TXB", "Construction failed: bidi region %u bytes exceeds the limit", static_cast<uint32_t>(bidiBytes));
     isValid = false;
@@ -424,16 +462,25 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
   }
   if (bidiBytes != 0) {
     uint8_t* region = base + o.annotations + annotationBytes;
-    region[0] = static_cast<uint8_t>((formBytes != 0 ? kBidiDisplayForms : 0) | (keepOrder ? kBidiLogicalOrder : 0));
+    region[0] = static_cast<uint8_t>((formBytes != 0 ? kBidiDisplayForms : 0) | (keepOrder ? kBidiLogicalOrder : 0) |
+                                     (glyphBytes != 0 ? kBidiGlyphForms : 0));
     uint8_t* next = region + 1;
-    if (formBytes != 0) {
-      // The same test as the sizing pass above, so the forms written are the bytes reserved.
-      char* forms = reinterpret_cast<char*>(region + 1 + 2 * count);
+    if (textsBytes != 0) {
+      // The same tests as the sizing pass above, so the forms written are the bytes reserved.
+      uint8_t* forms = region + 1 + 2 * count;
       uint16_t at = 0;
       for (size_t i = 0; i < count; i++) {
-        const std::string_view form = range.displayForms[i];
         uint16_t offset = kNoDisplayForm;
-        if (formDiffers(wordAt(i), form)) {
+        if (const GlyphRun* run = glyphAt(i)) {
+          offset = at;
+          forms[at++] = kGlyphFormLead;
+          forms[at++] = static_cast<uint8_t>(run->count & 0xFF);
+          forms[at++] = static_cast<uint8_t>(run->count >> 8);
+          memcpy(forms + at, run->records, run->bytes);
+          at += run->bytes;
+          forms[at++] = 0x00;
+        } else if (keepsDisplayForm(i)) {
+          const std::string_view form = range.displayForms[i];
           offset = at;
           memcpy(forms + at, form.data(), form.size());
           at += static_cast<uint16_t>(form.size());
@@ -441,7 +488,7 @@ TextBlock::TextBlock(const WordRange& range, const std::vector<int16_t>& word_xp
         }
         memcpy(region + 1 + 2 * i, &offset, sizeof(offset));
       }
-      next = reinterpret_cast<uint8_t*>(forms) + at;
+      next = forms + at;
     }
     if (keepOrder) memcpy(next, orderSrc, count);
     bidiBytes_ = static_cast<uint16_t>(bidiBytes);
@@ -519,14 +566,43 @@ bool TextBlock::annotationsValid() const {
   return recordsEnd + textBytesSum == annotationBytes_;
 }
 
-const char* TextBlock::displayForm(const uint16_t i) const {
+const uint8_t* TextBlock::formAt(const uint16_t i) const {
   if (bidiBytes_ == 0) return nullptr;
   const uint8_t* region = bidiRegion();
-  if ((region[0] & kBidiDisplayForms) == 0) return nullptr;
+  if ((region[0] & (kBidiDisplayForms | kBidiGlyphForms)) == 0) return nullptr;
   uint16_t offset = 0;
   memcpy(&offset, region + 1 + 2 * static_cast<size_t>(i), sizeof(offset));
   if (offset == kNoDisplayForm) return nullptr;
-  return reinterpret_cast<const char*>(region + 1 + 2 * static_cast<size_t>(numWords) + offset);
+  return region + 1 + 2 * static_cast<size_t>(numWords) + offset;
+}
+
+const char* TextBlock::displayForm(const uint16_t i) const {
+  if (bidiBytes_ == 0 || (bidiRegion()[0] & kBidiDisplayForms) == 0) return nullptr;
+  const uint8_t* form = formAt(i);
+  return form != nullptr && *form != kGlyphFormLead ? reinterpret_cast<const char*>(form) : nullptr;
+}
+
+// A vertical line has no glyph forms: a load refuses them, and none is drawn on a line set vertical after it is built.
+bool TextBlock::hasGlyphForm(const uint16_t i) const {
+  if (bidiBytes_ == 0 || vertical_ || (bidiRegion()[0] & kBidiGlyphForms) == 0) return false;
+  const uint8_t* form = formAt(i);
+  return form != nullptr && *form == kGlyphFormLead;
+}
+
+GlyphRun TextBlock::glyphForm(const uint16_t i) const {
+  GlyphRun run;
+  if (!hasGlyphForm(i)) return run;
+  const uint8_t* form = formAt(i);
+  const uint16_t count = static_cast<uint16_t>(form[1] | (form[2] << 8));
+  const uint8_t* records = form + kGlyphFormHeaderBytes;
+  // The records' length is not stored: walked from the count, inside the texts (the order, when kept, follows them).
+  const uint8_t* textsEnd = bidiRegion() + bidiBytes_ - (hasLogicalOrder() ? numWords : 0);
+  const size_t bytes = glyphRecordBytes(records, count, static_cast<size_t>(textsEnd - records));
+  if (bytes == kCutRecords) return run;  // not reached: the form was checked when the line was built or read
+  run.records = records;
+  run.count = count;
+  run.bytes = static_cast<uint16_t>(bytes);
+  return run;
 }
 
 uint8_t TextBlock::logicalPosition(const uint16_t i) const {
@@ -538,26 +614,46 @@ bool TextBlock::bidiValid() const {
   if (bidiBytes_ == 0 || numWords == 0) return false;
   const uint8_t* region = bidiRegion();
   const uint8_t parts = region[0];
-  if (parts == 0 || (parts & ~(kBidiDisplayForms | kBidiLogicalOrder)) != 0) return false;  // step 2's are rejected
-  const bool hasForms = (parts & kBidiDisplayForms) != 0;
+  if (parts == 0 || (parts & ~(kBidiDisplayForms | kBidiLogicalOrder | kBidiGlyphForms)) != 0) return false;
+  const bool hasDisplayForms = (parts & kBidiDisplayForms) != 0;
+  const bool hasGlyphForms = (parts & kBidiGlyphForms) != 0;
+  const bool hasForms = hasDisplayForms || hasGlyphForms;  // they share the offsets
   const bool hasOrder = (parts & kBidiLogicalOrder) != 0;
+  if (hasGlyphForms && vertical_) return false;  // no build sets a shaped run down a column
   const size_t wc = numWords;
   const size_t fixed = 1 + (hasForms ? 2 * wc : 0) + (hasOrder ? wc : 0);
   if (fixed > bidiBytes_) return false;
   const size_t textsSize = bidiBytes_ - fixed;  // the forms
   if (hasForms) {
-    // The texts end with a NUL, so every form inside them is NUL-terminated inside them.
+    // The texts end with a NUL, so every display form inside them is NUL-terminated inside them.
     const uint8_t* texts = region + 1 + 2 * wc;
     if (textsSize == 0 || texts[textsSize - 1] != '\0') return false;
-    bool anyForm = false;
+    bool anyDisplayForm = false;
+    bool anyGlyphForm = false;
     for (size_t i = 0; i < wc; i++) {
       uint16_t offset = 0;
       memcpy(&offset, region + 1 + 2 * i, sizeof(offset));
       if (offset == kNoDisplayForm) continue;
       if (offset >= textsSize) return false;
-      anyForm = true;
+      const uint8_t* form = texts + offset;
+      if (*form != kGlyphFormLead) {
+        if (!hasDisplayForms) return false;
+        anyDisplayForm = true;
+        continue;
+      }
+      // A glyph form: at least one glyph, exactly that many whole records, then its 0x00, all inside the texts.
+      const size_t room = textsSize - offset;
+      if (!hasGlyphForms || room < kGlyphFormHeaderBytes) return false;
+      const auto glyphs = static_cast<uint16_t>(form[1] | (form[2] << 8));
+      const size_t recordsRoom = room - kGlyphFormHeaderBytes;
+      const size_t recordBytes = glyphRecordBytes(form + kGlyphFormHeaderBytes, glyphs, recordsRoom);
+      if (glyphs == 0 || recordBytes == kCutRecords || recordBytes >= recordsRoom ||
+          form[kGlyphFormHeaderBytes + recordBytes] != 0x00) {
+        return false;
+      }
+      anyGlyphForm = true;
     }
-    if (!anyForm) return false;
+    if (anyDisplayForm != hasDisplayForms || anyGlyphForm != hasGlyphForms) return false;
   } else if (textsSize != 0) {
     return false;
   }
@@ -632,11 +728,13 @@ TextBlock::WordBox TextBlock::wordBox(const GfxRenderer& renderer, const uint16_
   // Scaled measurement, not getTextAdvanceX: a book with publisher font sizes
   // gives words a per-word scale, and an unscaled width drifts wider or
   // narrower than the glyphs actually drawn.
-  // A combined word is one em down the column, however many characters it holds.
-  box.width = static_cast<int16_t>(vertical_ && isCombined(i) ? columnEm(renderer, font, style, scale)
-                                   : vertical_                ? verticalTextAdvance(renderer, font, word, style, scale)
-                                   : (scale == 1.0f)          ? renderer.getTextWidth(font, word, style)
-                                                              : renderer.getTextWidthScaled(font, word, style, scale));
+  // A combined word is one em down the column, however many characters it holds. A shaped word is its run's pen.
+  const GlyphRun glyphs = glyphForm(i);
+  box.width = static_cast<int16_t>(glyphs.count != 0            ? renderer.glyphRunWidth(font, glyphs, scale)
+                                   : vertical_ && isCombined(i) ? columnEm(renderer, font, style, scale)
+                                   : vertical_       ? verticalTextAdvance(renderer, font, word, style, scale)
+                                   : (scale == 1.0f) ? renderer.getTextWidth(font, word, style)
+                                                     : renderer.getTextWidthScaled(font, word, style, scale));
   box.height =
       static_cast<int16_t>((scale == 1.0f) ? renderer.getLineHeight(font) : renderer.getLineHeightScaled(font, scale));
   return box;
@@ -681,12 +779,15 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     int ascender;
   };
   // A vertical line runs every draw down its column at the position the horizontal code computes (VerticalDraw.h).
+  // A shaped word (`glyphs`, its glyph form) is drawn as its run, at the position and scale its text would take.
   const bool vertical = vertical_;
   const bool centredMarks = centredMarks_;
   auto drawRun = [&renderer, vertical, centredMarks](const int font, const int px, const int py, const char* text,
                                                      const EpdFontFamily::Style style, const float scale,
-                                                     const bool combined = false) {
-    if (vertical && combined) {
+                                                     const bool combined = false, const GlyphRun* glyphs = nullptr) {
+    if (glyphs != nullptr) {
+      renderer.drawGlyphRun(font, px, py, *glyphs, true, style, scale);
+    } else if (vertical && combined) {
       drawCombinedVertical(renderer, font, px, py, text, style, scale);
     } else if (vertical) {
       drawTextVertical(renderer, font, px, py, text, style, scale, centredMarks);
@@ -696,14 +797,18 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
       renderer.drawTextScaled(font, px, py, text, true, style, scale);
     }
   };
-  // How far a piece of text runs along the line at `scale`.
+  // How far a piece of text, or a shaped word's run, runs along the line at `scale`.
   auto runWidth = [&renderer, vertical](const int font, const char* text, const EpdFontFamily::Style style,
-                                        const float scale, const bool combined = false) {
+                                        const float scale, const bool combined = false,
+                                        const GlyphRun* glyphs = nullptr) {
+    if (glyphs != nullptr) return renderer.glyphRunWidth(font, *glyphs, scale);
     if (vertical && combined) return columnEm(renderer, font, style, scale);
     if (vertical) return verticalTextAdvance(renderer, font, text, style, scale);
     return scale == 1.0f ? renderer.getTextWidth(font, text, style)
                          : renderer.getTextWidthScaled(font, text, style, scale);
   };
+  // Whether any word is shaped: a line without glyph forms (every Latin, CJK and Hebrew line) looks none up.
+  const bool glyphLine = bidiBytes_ != 0 && (bidiRegion()[0] & kBidiGlyphForms) != 0;
   // Where the line's baseline-relative marks sit across the column: the over edge, the word's axis, the block's axis.
   const int baseline = baseY + lineAscender;
   const int blockEm = vertical ? columnEm(renderer, effFontId, EpdFontFamily::REGULAR, blockScale) : 0;
@@ -746,13 +851,15 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     } else if ((currentStyle & EpdFontFamily::SUB) != 0) {
       wordY += blockAscender / 4;
     }
-    drawRun(font, wordX, wordY, word, currentStyle, scale, combined);
+    const GlyphRun glyphs = glyphLine ? glyphForm(i) : GlyphRun{};
+    const GlyphRun* const run = glyphs.count != 0 ? &glyphs : nullptr;
+    drawRun(font, wordX, wordY, word, currentStyle, scale, combined, run);
 
     const bool hasDecoration =
         !scanning && (currentStyle & (EpdFontFamily::UNDERLINE | EpdFontFamily::STRIKETHROUGH)) != 0;
     int lineWidth = 0;
     if (guideDots || hasDecoration) {
-      lineWidth = runWidth(font, word, currentStyle, scale, combined);
+      lineWidth = runWidth(font, word, currentStyle, scale, combined, run);
     }
 
     if (guideDots) {
@@ -839,7 +946,8 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
 
   // The emphasis marks: each character that takes one (TextEmphasis::takesMark) gets the mark glyph at half its
   // word's size, centred on the character's advance, in the same band as the ruby; the scanning pass draws them too.
-  // A face without the glyph gets a filled square instead. Nothing here allocates.
+  // A face without the glyph gets a filled square instead. A shaped word gets none: its marks would follow its text's
+  // advances, not its glyphs'. Nothing here allocates.
   for (uint16_t k = 0; k < annotations; k++) {
     const Annotation a = annotation(k);
     if (a.kind != AnnotationKind::Emphasis) continue;
@@ -851,6 +959,7 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     markText[2] = static_cast<char>(0x80 | (markCp & 0x3F));
     markText[3] = '\0';
     for (uint16_t w = a.firstWord; w < a.firstWord + a.wordCount && w < numWords; w++) {
+      if (glyphLine && hasGlyphForm(w)) continue;
       const int font = wordFontId(w, effFontId);
       const float wordScl = wordScale(w);
       const float markScale = 0.5f * wordScl;

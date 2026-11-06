@@ -4,6 +4,8 @@
 
 #include <string>
 
+#include "XmlPrefix.h"
+
 class BookMetadataCache;
 class PageListSink;
 
@@ -27,6 +29,7 @@ class TocNcxParser final : public Print {
   size_t remainingSize;
   SaxParser saxParser_;
   ParserState state = START;
+  XmlPrefix prefix_{"http://www.daisy.org/z3986/2005/ncx/"};
   BookMetadataCache* cache;
   // Page-list entries are streamed straight to disk via this sink. Owned by
   // the caller (Epub.cpp); may be null when no page-list output is wanted.

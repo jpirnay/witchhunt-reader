@@ -86,6 +86,22 @@ TEST(ParsedTextOffset, ALiteralIsolateCountsWhereAWordIsSplit) {
   EXPECT_EQ(lineOffsets(text, 20), (std::vector<uint32_t>{100, 106}));
 }
 
+TEST(ParsedTextOffset, AKeptJoinerCountsNothingWhereAWordIsSplit) {
+  // Fourteen क with a ZWNJ after the fourth; 78 px splits the word after the sixth. The remainder starts six consonants
+  // on, 18 bytes: the joiner's 3 bytes are no visible text of the word's.
+  std::string word;
+  for (int i = 0; i < 14; ++i) {
+    word += "क";
+    if (i == 3) word += "\xE2\x80\x8C";
+  }
+  ParsedText text(/*extraParagraphSpacing=*/false);
+  text.addWord(word, EpdFontFamily::REGULAR, false, false, ParsedText::DEFAULT_WORD_SIZE_PCT, 100);
+  const auto offsets = lineOffsets(text, 78);
+  ASSERT_GE(offsets.size(), 2u);
+  EXPECT_EQ(offsets[0], 100u);
+  EXPECT_EQ(offsets[1], 118u);
+}
+
 TEST(ParsedTextOffset, ResetForgetsTheOffsets) {
   ParsedText text = tenWords();
   text.reset(BlockStyle());

@@ -3,8 +3,11 @@
 #include <Arduino.h>
 #include <BidiUtils.h>
 #include <GfxRenderer.h>
+#include <IndicScripts.h>
+#include <IndicShaper.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <TextShaping.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -17,9 +20,12 @@
 #include "CjkLineBreak.h"
 #include "CjkPunctuation.h"
 #include "Epub/VisibleText.h"
+#include "HashUtils.h"
+#include "ShapedStore.h"
 #include "TextEmphasis.h"
 #include "VerticalDraw.h"
 #include "VerticalOrientation.h"
+#include "WordShapeCache.h"
 #include "hyphenation/HyphenationCommon.h"
 #include "hyphenation/Hyphenator.h"
 
@@ -53,6 +59,49 @@ bool isClosingPunctuation(const uint32_t cp) {
     default:
       return false;
   }
+}
+
+// May a line end between a dash and what follows it? Not inside a run of dashes, not before punctuation that closes
+// the word, and not where a hyphen introduces a number (a phone number, a sign).
+bool mayBreakAfterDash(const uint32_t dash, const uint32_t next) {
+  if (!TokenBoundary::isBreakableDash(dash) || TokenBoundary::isBreakableDash(next)) return false;
+  if (isClosingPunctuation(next)) return false;
+  const bool digitFollows = next >= '0' && next <= '9';
+  return !(digitFollows && (dash == '-' || dash == 0x2010));
+}
+
+bool isDashesOnly(const std::string_view word) {
+  const auto* p = reinterpret_cast<const unsigned char*>(word.data());
+  const auto* const end = p + word.size();
+  while (p < end) {
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (!TokenBoundary::isBreakableDash(cp) && !utf8IsDefaultIgnorable(cp)) return false;
+  }
+  return true;
+}
+
+// Where a line may end inside `word`: after a dash with text before it, whatever follows allowing. A dash that opens
+// the word stays on it ("—Well"), unless the word is glued to the one before it. Most words hold neither a '-' nor a
+// multi-byte dash, and only those that do are walked.
+std::vector<size_t> dashBreakByteOffsets(const std::string& word, const bool gluedToPrevious) {
+  std::vector<size_t> offsets;
+  if (word.find('-') == std::string::npos && word.find('\xE2') == std::string::npos) return offsets;
+  const auto* const begin = reinterpret_cast<const unsigned char*>(word.c_str());
+  const auto* p = begin;
+  bool textBefore = gluedToPrevious;
+  while (*p) {
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (cp == 0) break;
+    if (!TokenBoundary::isBreakableDash(cp)) {
+      if (!utf8IsDefaultIgnorable(cp)) textBefore = true;
+      continue;
+    }
+    if (!textBefore || *p == 0) continue;
+    const auto* q = p;
+    const uint32_t next = utf8NextCodepoint(&q);
+    if (mayBreakAfterDash(cp, next)) offsets.push_back(static_cast<size_t>(p - begin));
+  }
+  return offsets;
 }
 
 // SOFT_HYPHEN_UTF8 / SOFT_HYPHEN_BYTES come from TextBlock.h — the arena fill strips the same
@@ -111,6 +160,12 @@ uint32_t lastCodepointPastControls(std::string_view word) {
 
 bool containsSoftHyphen(const std::string& word) { return word.find(SOFT_HYPHEN_UTF8) != std::string::npos; }
 
+// Whether `text` is soft hyphens and nothing else: TextBlock strips them, so as a word of its own it would be empty.
+bool onlySoftHyphens(std::string_view text) {
+  while (text.starts_with(SOFT_HYPHEN_UTF8)) text.remove_prefix(SOFT_HYPHEN_BYTES);
+  return text.empty();
+}
+
 // True when every codepoint of `text` but a soft hyphen (TextBlock strips them) is unspaced CJK: TextBlock's test for
 // spreading a ruby 1:2:1 rather than centring it (Ruling R4).
 bool allUnspacedCjk(const std::string& text) {
@@ -164,12 +219,78 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const s
   return scaledWidth(textAdvance(renderer, fontId, sanitized.c_str(), style, vertical), scale);
 }
 
+uint16_t clampedWidth(const int width) { return static_cast<uint16_t>(std::clamp(width, 0, UINT16_MAX)); }
+
+// A piece of a token (whose bytes are `text`) measured as the line draws it, in the token's font, style and scale: a
+// glyph run by its records' pen (glyphRunWidth), any other piece as its code points are measured today. `scratch`
+// takes the piece's bytes, NUL-terminated.
+uint16_t measurePiece(const GfxRenderer& renderer, const int font, const EpdFontFamily::Style style, const float scale,
+                      const bool vertical, const ShapedStore& store, const ShapedStore::Piece& piece,
+                      const std::string_view text, std::string& scratch) {
+  if (piece.kind == IndicShaper::PieceKind::Glyphs) {
+    return clampedWidth(renderer.glyphRunWidth(font, store.glyphs(piece), scale));
+  }
+  if (piece.kind == IndicShaper::PieceKind::Reordered) {
+    scratch.assign(store.form(piece));
+  } else {
+    scratch.assign(text.substr(piece.begin, piece.end - piece.begin));
+  }
+  return measureWordWidth(renderer, font, scratch, style, false, scale, vertical);
+}
+
+// The bytes measurePiece copies into its scratch for the longest of `pieces` (a glyph run copies none).
+size_t scratchBytesFor(const ShapedStore& store, const std::span<const ShapedStore::Piece> pieces) {
+  size_t bytes = 0;
+  for (const ShapedStore::Piece& piece : pieces) {
+    if (piece.kind == IndicShaper::PieceKind::Reordered) {
+      bytes = std::max(bytes, store.form(piece).size());
+    } else if (piece.kind == IndicShaper::PieceKind::Text) {
+      bytes = std::max<size_t>(bytes, piece.end - piece.begin);
+    }
+  }
+  return bytes;
+}
+
+// The shaped layout's containers grow behind a heap check, as ShapedStore's do: under -fno-exceptions a growth the
+// heap refuses aborts. The allocator's header and rounding on top of a request, as reserveWords allows for.
+constexpr size_t kAllocSlack = 16;
+
+// What growing `v` to `count` elements asks of the heap: nothing when its capacity holds them, else the block
+// reserve(count) makes.
+template <typename T>
+size_t growthBytes(const std::vector<T>& v, const size_t count) {
+  return v.capacity() >= count ? 0 : count * sizeof(T) + kAllocSlack;
+}
+
+// The same for a string grown to `size` bytes: libstdc++ asks for twice the capacity it had when that is more, and the
+// NUL.
+size_t growthBytes(const std::string& s, const size_t size) {
+  return s.capacity() >= size ? 0 : std::max(size, 2 * s.capacity()) + 1 + kAllocSlack;
+}
+
+// Whether the largest free block holds `bytes`: the sum of several growths is checked at once, as reserveWords checks
+// its five (each block then fits in what the ones before it leave). Nothing to grow is always allowed.
+bool heapAllows(const size_t bytes) { return bytes == 0 || ESP.getMaxAllocHeap() >= bytes; }
+
+// FNV-1a over a value's bytes, folded into a running key (`key` starts at kKeySeed).
+constexpr uint32_t kKeySeed = 2166136261u;
+template <typename T>
+uint32_t mixKey(uint32_t key, const T& value) {
+  const auto* bytes = reinterpret_cast<const uint8_t*>(&value);
+  for (size_t i = 0; i < sizeof(T); ++i) {
+    key ^= bytes[i];
+    key *= 16777619u;
+  }
+  return key;
+}
+
 // Every bidi control is E2 80 xx, E2 81 xx or D8 9C in UTF-8: a token without those lead bytes holds none.
 bool mayHoldBidiControl(const std::string_view token) { return token.find_first_of("\xE2\xD8") != std::string::npos; }
 
 // VisibleText::visibleBytes of the `len` bytes at `text`, less those of every control that counts nowhere
-// (BidiLine::isUncountedControl): the offsets of a split word's parts are those of the word without them (KOSync
-// positions). A literal isolate counts as text.
+// (BidiLine::isUncountedControl) and every joiner the parser kept (U+200C, U+200D: it keeps only one that stands lone
+// after a letter, and no word's offset starts at it): the offsets of a split word's parts are those of the word without
+// them (KOSync positions). A literal isolate counts as text.
 size_t visibleBytesOutsideControls(const char* text, const int len) {
   size_t count = VisibleText::visibleBytes(text, len);
   if (!mayHoldBidiControl(std::string_view(text, static_cast<size_t>(len)))) return count;
@@ -178,7 +299,8 @@ size_t visibleBytesOutsideControls(const char* text, const int len) {
     const int bytes = lead == 0xE2 ? 3 : lead == 0xD8 ? 2 : 0;
     if (bytes == 0 || i + bytes > len) continue;
     const auto* p = reinterpret_cast<const unsigned char*>(text + i);
-    if (!BidiLine::isUncountedControl(utf8NextCodepoint(&p))) continue;
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (!BidiLine::isUncountedControl(cp) && cp != 0x200C && cp != 0x200D) continue;
     count -= static_cast<size_t>(bytes);  // no byte of a control is whitespace
     i += bytes - 1;
   }
@@ -394,6 +516,48 @@ static std::vector<TokenSpan> tokenizeBionicWord(const std::string& word) {
 
 }  // namespace
 
+// What a paragraph that shapes keeps across its passes (see shapingState_): the store, and two strings that keep their
+// capacity across tokens, the bytes of a piece being measured and a candidate prefix the breaker shapes. And the
+// pass's face answers (shapingFaceFor), forgotten at each pass's start and end.
+struct ParsedText::ShapingState {
+  ShapedStore store;
+  std::string measureScratch;
+  std::string candidate;
+  struct FaceAnswer {
+    int fontId = 0;
+    uint8_t style = 0;  // its BOLD_ITALIC bits
+    ShapingFace* face = nullptr;
+    uint32_t ppem26_6 = 0;  // the face's, before the font's base scale
+    bool refused = false;   // no face: the font has one, but the heap refused it
+  };
+  // A paragraph's fonts and styles in a pass: more are asked of the renderer at each use.
+  static constexpr uint8_t kFaceAnswers = 8;
+  FaceAnswer faces[kFaceAnswers];
+  uint8_t faceCount = 0;
+  // The line being laid out as pieces (viewShapedPieces): their texts (views into `words`), forms and runs (views into
+  // the store, or into formCopies), styles, sizes and boundaries, and each token's first piece, its last entry the
+  // line's piece count. TextBlock copies the bytes into its arena; the one string built is formCopies, for a line with
+  // a form that holds a soft hyphen. All keep their capacity across lines.
+  std::vector<std::string_view> pieceWords;
+  std::vector<std::string_view> pieceForms;
+  std::vector<GlyphRun> pieceGlyphs;
+  std::vector<EpdFontFamily::Style> pieceStyles;
+  std::vector<TextBlock::WordSize> pieceSizes;
+  std::vector<TokenBoundary::Boundary> pieceBoundaries;
+  std::vector<uint16_t> tokenPieces;
+  std::string formCopies;  // the line's Reordered forms that held a soft hyphen, without it
+};
+
+ParsedText::ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled, const BlockStyle& blockStyle,
+                       const bool bionicReadingEnabled)
+    : blockStyle(blockStyle),
+      extraParagraphSpacing(extraParagraphSpacing),
+      hyphenationEnabled(hyphenationEnabled),
+      bionicReadingEnabled(bionicReadingEnabled) {}
+ParsedText::~ParsedText() = default;
+ParsedText::ParsedText(ParsedText&&) noexcept = default;
+ParsedText& ParsedText::operator=(ParsedText&&) noexcept = default;
+
 bool ParsedText::reserveWords(const size_t additional) {
   const size_t requiredSize = words.size() + additional;
   if (words.capacity() >= requiredSize && wordStyles.capacity() >= requiredSize &&
@@ -479,17 +643,24 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
       if (after < word.size()) markEdges.push_back(after);
     }
   }
-  // The token boundaries: the CJK breaks, then each mark edge that is not already one (glued).
+  // A line may end after a dash inside a Latin word, whether or not hyphenation is on.
+  const std::vector<size_t> dashBreaks = hasCjk ? std::vector<size_t>{} : dashBreakByteOffsets(word, attachToPrevious);
+  // The token boundaries: the CJK breaks, then each mark edge that is not already one (glued), and the dash breaks.
+  // What each one puts before the token it starts: a CJK break is a breakable zero-width gap, a mark's other edges are
+  // glued (no space, no break), and a dash is glued but breakable, the fourth state of TokenBoundary.
   struct Cut {
     size_t at;
-    bool breakable;
+    TokenBoundary::Boundary boundary;
   };
   std::vector<Cut> cuts;
-  cuts.reserve(cjkBreaks.size() + markEdges.size());
-  for (const size_t at : cjkBreaks) cuts.push_back({at, true});
+  cuts.reserve(cjkBreaks.size() + markEdges.size() + dashBreaks.size());
+  for (const size_t at : cjkBreaks) cuts.push_back({at, TokenBoundary::Boundary{false, true}});
   for (const size_t at : markEdges) {
-    if (std::find(cjkBreaks.begin(), cjkBreaks.end(), at) == cjkBreaks.end()) cuts.push_back({at, false});
+    if (std::find(cjkBreaks.begin(), cjkBreaks.end(), at) == cjkBreaks.end()) {
+      cuts.push_back({at, TokenBoundary::Boundary{true, false}});
+    }
   }
+  for (const size_t at : dashBreaks) cuts.push_back({at, TokenBoundary::Boundary{true, true}});
   std::sort(cuts.begin(), cuts.end(), [](const Cut& a, const Cut& b) { return a.at < b.at; });
   cuts.erase(std::unique(cuts.begin(), cuts.end(), [](const Cut& a, const Cut& b) { return a.at == b.at; }),
              cuts.end());
@@ -504,8 +675,9 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
   // Glued to the previous token in the source (no whitespace between them): where the CJK rules
   // allow a break there, the two meet at a breakable zero-width gap. Where the source had
   // whitespace, the space is content and stays. From crosspoint-reader PR #2768 ("fix: restore
-  // spaces between CJK words", Uri Tauber, 9163149a). A glued Latin "foo—" + "bar" stays glued: the gap needs
-  // a CJK character on one side, since the dash rule of upstream PR #3883 is not ported.
+  // spaces between CJK words", Uri Tauber, 9163149a). A glued Latin "foo—" + "bar" stays glued with no gap, and a line
+  // may end between them: ported from crosspoint-reader PR #3883 (Phạm Bình An) by way of CrossInk 59b53529 (Julia
+  // Nguyen). The word after an inline tag used to get a real word gap here, for want of this state.
   TokenBoundary::Boundary boundary{attachToPrevious, false};
   // A glued " " is the parser's no-break space (U+00A0 / U+202F): no break on either side of it.
   if (attachToPrevious && !words.empty() && words.back() != " " && word != " ") {
@@ -513,6 +685,8 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     const uint32_t right = firstCodepointPastControls(word.c_str());
     if ((utf8IsCjkBreakable(left) || utf8IsCjkBreakable(right)) && CjkLineBreak::isGapBetween(left, right)) {
       boundary = TokenBoundary::Boundary{false, true};
+    } else if (mayBreakAfterDash(left, right) && !isDashesOnly(words.back())) {
+      boundary = TokenBoundary::Boundary{true, true};
     }
   }
 
@@ -537,8 +711,7 @@ void ParsedText::addWord(std::string word, const EpdFontFamily::Style fontStyle,
     // The next token starts where this one's visible bytes end (KOSync positions).
     offset += static_cast<uint32_t>(visibleBytesOutsideControls(word.data() + start, static_cast<int>(end - start)));
     if (i < cuts.size()) {
-      // A CJK break is a breakable zero-width gap; a mark's other edges are glued (no space, no break).
-      boundary = cuts[i].breakable ? TokenBoundary::Boundary{false, true} : TokenBoundary::Boundary{true, false};
+      boundary = cuts[i].boundary;
     }
     start = end;
   }
@@ -581,6 +754,8 @@ int ParsedText::spaceBefore(const GfxRenderer& renderer, const int fontId, const
 int ParsedText::kernBefore(const GfxRenderer& renderer, const int fontId, const size_t j) const {
   const int left = wordFontId(j - 1, fontId);
   if (left != wordFontId(j, fontId)) return 0;
+  // The engine kerns by code point, and the shaper kerned inside its runs: a glued gap beside a glyph run takes none.
+  if (shapes_ && (glyphEdge(renderer, fontId, j - 1, true) || glyphEdge(renderer, fontId, j, false))) return 0;
   return renderer.getKerning(left, lastCodepoint(words[j - 1]), firstCodepoint(words[j]), wordStyles[j - 1]);
 }
 
@@ -669,7 +844,343 @@ void ParsedText::dropBidiControls() {
     wordSizes.erase(wordSizes.begin() + i);
     wordVisibleOffsets.erase(wordVisibleOffsets.begin() + i);
     if (bionicTransformedUpTo_ > i) --bionicTransformedUpTo_;
+    if (shapingState_) shapingState_->store.erase(i);
   }
+}
+
+void ParsedText::decideShaping() {
+  shapes_ = !bidi_ &&
+            std::any_of(words.begin(), words.end(), [](const std::string& w) { return IndicShaper::holdsIndic(w); });
+  if (!shapes_) {
+    // The store is in step with the passes that shape: a later one starts it again.
+    if (shapingState_) shapingState_->store.reset();
+    return;
+  }
+  if (!shapingState_) {
+    // About 630 B on the device (the store's chunk table and vectors, the face answers, the line's piece vectors and
+    // three strings): the paragraph's across its passes, so not on the stack; its chunks then survive the paragraphs.
+    shapingState_ = makeUniqueNoThrow<ShapingState>();
+    if (!shapingState_) {
+      LOG_ERR("SHP", "OOM: shaping state (%u B): pass laid out unshaped", static_cast<unsigned>(sizeof(ShapingState)));
+      shapes_ = false;
+      latchShapingDegraded();
+      return;
+    }
+  }
+  forgetFaceAnswers();
+  ShapedStore& store = shapingState_->store;
+  if (store.size() > words.size()) store.reset();  // entries past the words cannot be in step with them
+  // The kept tokens' last was shaped as the paragraph's end: a token glued to it has arrived since.
+  const size_t kept = store.size();
+  if (kept > 0 && kept < words.size() && wordBoundaries[kept].continues) forgetShaping(kept - 1);
+}
+
+void ParsedText::forgetShaping(const size_t i) {
+  if (!shapingState_ || i >= shapingState_->store.size()) return;
+  // An opened entry is stale from the start, and abandoning it drops its pieces: the entry stays, empty and stale.
+  ShapedStore& store = shapingState_->store;
+  if (store.open(i, std::string_view(), 0)) store.abandon();
+}
+
+bool ParsedText::sameStyle(const int fontId, const size_t a, const size_t b) const {
+  return wordFontId(a, fontId) == wordFontId(b, fontId) && wordStyles[a] == wordStyles[b] &&
+         wordSizes[a].pct == wordSizes[b].pct && wordSizes[a].fontSlot == wordSizes[b].fontSlot &&
+         TokenBoundary::emphasisOf(wordBoundaries[a]) == TokenBoundary::emphasisOf(wordBoundaries[b]);
+}
+
+// The most bytes a merged token may hold: past it, glued tokens stay apart, each shaped with the other as context. A
+// shaping call's block and the breaker's candidates grow with the token, so a run of one style with no space in it
+// (the parser cuts its words at 200 B) must not become one token of any length. 512 B is 170 Indic code points.
+constexpr size_t kMaxMergedBytes = 512;
+// Glue inside a syllable merges up to twice that: kept apart, a sign would be shaped without its consonant. A word
+// of the cap and one of the parser's (200 B) fit; only a pathological chain of syllable-internal spans reaches it.
+constexpr size_t kMaxSyllableMergeBytes = 2 * kMaxMergedBytes;
+
+size_t ParsedText::sourceTokenCount() const {
+  size_t count = words.size();
+  for (const TokenBoundary::Boundary& b : wordBoundaries) count += b.merged;
+  return count;
+}
+
+void ParsedText::mergeGluedGroups(const int fontId) {
+  const auto mergeable = [&](const size_t k) {
+    const TokenBoundary::Boundary b = wordBoundaries[k];
+    return k < unmergedFrom_ && words[k] != " " && TokenBoundary::rubyRole(b) == TokenBoundary::RubyRole::None &&
+           !TokenBoundary::combineRequested(b);
+  };
+  // Glue inside a syllable (indic::syllableBreakAllowed false across it), read as mergesWithPrevious reads it.
+  const auto insideSyllable = [&](const size_t j) {
+    if (words[j - 1].empty() || words[j].empty()) return false;
+    size_t pos = 0;
+    return !indic::syllableBreakAllowed(lastCodepoint(words[j - 1]), TextShaping::decodeAt(words[j], pos));
+  };
+  // Each maximal run of glued tokens, [start, end).
+  for (size_t start = 0; start < words.size();) {
+    size_t end = start + 1;
+    while (end < words.size() && wordBoundaries[end].continues) ++end;
+    bool indicGroup = false;
+    for (size_t k = start; shapes_ && end - start > 1 && k < end && !indicGroup; ++k) {
+      indicGroup = IndicShaper::holdsIndic(words[k]);
+    }
+    for (size_t j = start + 1; j < end;) {
+      // words[j - 1] is the token merged so far: its style is its first part's.
+      const TextShaping::GroupToken previous{words[j - 1], 0};
+      const TextShaping::GroupToken token{words[j], sameStyle(fontId, j - 1, j) ? 0u : 1u};
+      const size_t bytes = words[j - 1].size() + words[j].size();
+      const size_t cap = indicGroup && insideSyllable(j) ? kMaxSyllableMergeBytes : kMaxMergedBytes;
+      // The merged count is a byte: a merge past it would lose the parser's count.
+      const unsigned merged = wordBoundaries[j - 1].merged + 1u + wordBoundaries[j].merged;
+      if (!mergeable(j - 1) || !mergeable(j) || bytes > cap || merged > UINT8_MAX ||
+          !TextShaping::mergesWithPrevious(previous, token, indicGroup)) {
+        ++j;
+        continue;
+      }
+      // The merged text grows the first part's string (up to 1 KB): refused, the two stay apart, as past the cap, and
+      // that is not the merged token's form.
+      if (!heapAllows(growthBytes(words[j - 1], bytes))) {
+        LOG_ERR("SHP", "No room to merge a %u B glued group: its tokens stay apart", static_cast<unsigned>(bytes));
+        latchShapingDegraded();
+        ++j;
+        continue;
+      }
+      wordBoundaries[j - 1].merged = static_cast<uint8_t>(merged);
+      words[j - 1] += words[j];
+      words.erase(words.begin() + j);
+      wordStyles.erase(wordStyles.begin() + j);
+      wordBoundaries.erase(wordBoundaries.begin() + j);
+      wordSizes.erase(wordSizes.begin() + j);
+      wordVisibleOffsets.erase(wordVisibleOffsets.begin() + j);
+      if (bionicTransformedUpTo_ > j) --bionicTransformedUpTo_;
+      if (shapingState_) {
+        shapingState_->store.erase(j);
+        // A neighbour shaped in an earlier pass with a part as its context is shaped again, with the whole.
+        if (j - 1 > start) forgetShaping(j - 2);
+        if (j + 1 < end) forgetShaping(j);
+      }
+      --end;
+    }
+    start = end;
+  }
+}
+
+bool ParsedText::readyShapedStore() {
+  ShapedStore& store = shapingState_->store;
+  // The estimate, for the tokens this pass adds to the store: an entry each, and 2 B of records a byte of their Indic
+  // text (the kept tokens' records are in the chunks already). Refused, the chunks are still asked for one at a time.
+  const size_t added = words.size() > store.size() ? words.size() - store.size() : 0;
+  size_t bytes = 0;
+  for (size_t i = store.size(); i < words.size(); ++i) {
+    if (IndicShaper::holdsIndic(words[i])) bytes += words[i].size();
+  }
+  store.reserve(added, 2 * bytes);
+  while (store.size() < words.size()) {
+    if (!store.insert(store.size())) {
+      LOG_ERR("SHP", "No room for %u shaped-store entries: pass laid out unshaped",
+              static_cast<unsigned>(words.size()));
+      store.reset();
+      latchShapingDegraded();
+      return false;
+    }
+  }
+  return true;
+}
+
+ShapingFace* ParsedText::shapingFaceFor(const GfxRenderer& renderer, const int fontId, const size_t i,
+                                        uint32_t* const drawnPpem) const {
+  *drawnPpem = 0;
+  // A vertical line refuses glyph forms on load (TextBlock::bidiValid): its Indic words take IndicReorder's form.
+  if (vertical_) return nullptr;
+  const int font = wordFontId(i, fontId);
+  const auto style = static_cast<uint8_t>(wordStyles[i] & EpdFontFamily::BOLD_ITALIC);
+  ShapingFace* face = nullptr;
+  uint32_t ppem = 0;
+  bool refused = false;
+  // The pass's answer for this font and style; the first ask makes it (a cache: shapeKey and glyphEdge are const).
+  ShapingState::FaceAnswer* answer = nullptr;
+  if (shapingState_) {
+    ShapingState& state = *shapingState_;
+    for (uint8_t a = 0; a < state.faceCount && answer == nullptr; ++a) {
+      if (state.faces[a].fontId == font && state.faces[a].style == style) answer = &state.faces[a];
+    }
+    if (answer == nullptr && state.faceCount < ShapingState::kFaceAnswers) {
+      answer = &state.faces[state.faceCount++];
+      answer->fontId = font;
+      answer->style = style;
+      answer->ppem26_6 = 0;
+      answer->refused = false;
+      answer->face =
+          renderer.shapingFace(font, static_cast<EpdFontFamily::Style>(style), &answer->ppem26_6, &answer->refused);
+    }
+  }
+  if (answer != nullptr) {
+    face = answer->face;
+    ppem = answer->ppem26_6;
+    refused = answer->refused;
+  } else {
+    face = renderer.shapingFace(font, static_cast<EpdFontFamily::Style>(style), &ppem, &refused);
+  }
+  // The token is laid out as a font that cannot shape is, which is not what this font draws (invariant 6).
+  if (refused) latchShapingDegraded();
+  if (face == nullptr) return nullptr;
+  // Records are in drawn pixels: the word is shaped at the size it is drawn at.
+  *drawnPpem = static_cast<uint32_t>(static_cast<float>(ppem) * renderer.fontBaseScale(font) * wordScale(i) + 0.5f);
+  return face;
+}
+
+void ParsedText::forgetFaceAnswers() {
+  if (shapingState_) shapingState_->faceCount = 0;
+}
+
+uint32_t ParsedText::shapeKey(const GfxRenderer& renderer, const int fontId, const size_t i) const {
+  uint32_t ppem = 0;
+  const bool face = shapingFaceFor(renderer, fontId, i, &ppem) != nullptr;
+  const int32_t font = wordFontId(i, fontId);
+  uint32_t key = kKeySeed;
+  key = mixKey(key, font);
+  key = mixKey(key, static_cast<uint8_t>(wordStyles[i]));
+  key = mixKey(key, wordSizes[i].pct);
+  key = mixKey(key, wordSizes[i].fontSlot);
+  key = mixKey(key, wordScale(i));
+  key = mixKey(key, renderer.fontBaseScale(font));
+  key = mixKey(key, ppem);
+  key = mixKey(key, static_cast<uint8_t>((face ? 1 : 0) | (vertical_ ? 2 : 0)));
+  return key;
+}
+
+IndicShaper::Outcome ParsedText::shapeInto(const GfxRenderer& renderer, const int fontId, const size_t i,
+                                           const std::string_view text, const std::string_view before,
+                                           const std::string_view after) {
+  IndicShaper::Request request;
+  request.face = shapingFaceFor(renderer, fontId, i, &request.ppem26_6);
+  request.languageTags = typography_.shapingLanguage;
+  request.before = before;
+  request.after = after;
+  // The call's block is the arena's for this call alone, released here, before any of the token's glyphs is looked up
+  // (LIFO with the TrueType miss scope). Without a face the call only reorders, in a block of the form's size.
+  IndicShaper::CallMemory memory(
+      lineArena_, text.size(), request.face != nullptr ? IndicShaper::CallKind::Shape : IndicShaper::CallKind::Reorder);
+  return IndicShaper::shapeToken(text, request, memory, shapingState_->store);
+}
+
+bool ParsedText::shapeToken(const GfxRenderer& renderer, const int fontId, const size_t i, uint16_t* const width) {
+  const std::string& text = words[i];
+  if (!IndicShaper::holdsIndic(text)) return false;
+  ShapedStore& store = shapingState_->store;
+  const uint32_t key = shapeKey(renderer, fontId, i);
+  std::optional<std::span<const ShapedStore::Piece>> pieces = store.pieces(i, text, key);
+  if (!pieces) {
+    if (i >= store.size() || !store.open(i, text, key)) {
+      latchShapingDegraded();  // the store could not keep in step, for want of memory
+      return false;
+    }
+    // The glued neighbours kept apart are its context (deviation 7).
+    const std::string_view before =
+        i > 0 && wordBoundaries[i].continues ? std::string_view(words[i - 1]) : std::string_view();
+    const std::string_view after =
+        i + 1 < words.size() && wordBoundaries[i + 1].continues ? std::string_view(words[i + 1]) : std::string_view();
+    // A token with no glued neighbour is shaped without context, so its pieces are the same wherever it comes: the
+    // build's word cache may hold them. A glued one is always shaped.
+    const bool cacheable = wordCache_ != nullptr && before.empty() && after.empty() && text.size() <= UINT16_MAX;
+    const uint64_t textHash = cacheable ? HashUtils::fnvHash64(text.data(), text.size()) : 0;
+    const uint32_t cacheKey = cacheable ? WordShapeCache::keyFor(key, typography_.shapingLanguage) : 0;
+    const auto length = static_cast<uint16_t>(text.size());
+    if (cacheable && wordCache_->replay(textHash, length, cacheKey, store)) {
+      store.commit();
+    } else {
+      if (!store.openPieces().empty()) {
+        // The store refused the replay part-way: shaped afresh, as without the cache.
+        store.abandon();
+        if (!store.open(i, text, key)) {
+          latchShapingDegraded();
+          return false;
+        }
+      }
+      ++tokensShaped_;
+      const IndicShaper::Outcome outcome = shapeInto(renderer, fontId, i, text, before, after);
+      if (outcome == IndicShaper::Outcome::Degraded) {
+        store.abandon();
+        latchShapingDegraded();
+        return false;
+      }
+      store.commit();
+      if (cacheable && outcome == IndicShaper::Outcome::Formed) {
+        wordCache_->insert(textHash, length, cacheKey, store, i);
+      }
+    }
+    pieces = store.pieces(i, text, key);
+    if (!pieces || pieces->empty()) return false;
+    // A piece that is not a glyph run is measured from a copy of its bytes: the scratch is grown for the longest here,
+    // behind the heap check. Refused, the entry goes stale and the token is laid out as its code points.
+    if (!heapAllows(growthBytes(shapingState_->measureScratch, scratchBytesFor(store, *pieces)))) {
+      LOG_ERR("SHP", "No room to measure a shaped token: laid out as its code points");
+      forgetShaping(i);
+      latchShapingDegraded();
+      return false;
+    }
+    // Grown once, to what was checked: pieces of rising length would otherwise grow it again, unchecked.
+    shapingState_->measureScratch.reserve(scratchBytesFor(store, *pieces));
+    // Warm: the glyph IDs are looked up once, here inside the build's miss scope, so a page drawn later needs no miss
+    // memory for them. Then each piece's width.
+    const int font = wordFontId(i, fontId);
+    for (const ShapedStore::Piece& piece : *pieces) {
+      if (piece.kind == IndicShaper::PieceKind::Glyphs) {
+        renderer.prefetchGlyphRun(font, store.glyphs(piece), wordStyles[i]);
+      }
+    }
+    for (size_t p = 0; p < pieces->size(); ++p) {
+      store.setWidth(i, p,
+                     measurePiece(renderer, font, wordStyles[i], wordScale(i), vertical_, store, (*pieces)[p], text,
+                                  shapingState_->measureScratch));
+    }
+  }
+  if (pieces->empty()) return false;
+  if (width != nullptr) {
+    int sum = 0;
+    for (const ShapedStore::Piece& piece : *pieces) sum += piece.width;
+    *width = clampedWidth(sum);
+  }
+  return true;
+}
+
+int ParsedText::shapedPrefixWidth(const GfxRenderer& renderer, const int fontId, const size_t i, const size_t bytes,
+                                  const bool hyphen) {
+  ShapingState& state = *shapingState_;
+  std::string& candidate = state.candidate;
+  // Never grows: hyphenateWordAtIndex reserved the word and its hyphen.
+  candidate.assign(words[i], 0, bytes);
+  if (hyphen) candidate.push_back('-');
+  const int font = wordFontId(i, fontId);
+  int width = -1;
+  // The prefix ends its line: a token glued before it is its context, the rest of its word is not.
+  const std::string_view before =
+      i > 0 && wordBoundaries[i].continues ? std::string_view(words[i - 1]) : std::string_view();
+  if (state.store.open(state.store.size(), candidate, 0)) {
+    const IndicShaper::Outcome outcome = shapeInto(renderer, fontId, i, candidate, before, std::string_view());
+    // Its pieces are measured as shapeToken measures a token's, the scratch grown behind the heap check.
+    const bool measurable =
+        outcome == IndicShaper::Outcome::Formed &&
+        heapAllows(growthBytes(state.measureScratch, scratchBytesFor(state.store, state.store.openPieces())));
+    if (measurable) {
+      state.measureScratch.reserve(scratchBytesFor(state.store, state.store.openPieces()));  // once, as checked
+      width = 0;
+      for (const ShapedStore::Piece& piece : state.store.openPieces()) {
+        width += measurePiece(renderer, font, wordStyles[i], wordScale(i), vertical_, state.store, piece, candidate,
+                              state.measureScratch);
+      }
+    } else if (outcome != IndicShaper::Outcome::Plain) {
+      latchShapingDegraded();  // measured as code points below, as any run that could not be shaped is laid out
+    }
+    state.store.abandon();
+  }
+  return width >= 0 ? width
+                    : measureWordWidth(renderer, font, candidate, wordStyles[i], false, wordScale(i), vertical_);
+}
+
+bool ParsedText::glyphEdge(const GfxRenderer& renderer, const int fontId, const size_t i, const bool last) const {
+  if (!shapingState_ || !IndicShaper::holdsIndic(words[i])) return false;
+  const auto pieces = shapingState_->store.pieces(i, words[i], shapeKey(renderer, fontId, i));
+  if (!pieces || pieces->empty()) return false;
+  return (last ? pieces->back() : pieces->front()).kind == IndicShaper::PieceKind::Glyphs;
 }
 
 void ParsedText::layoutAndExtractLines(
@@ -687,8 +1198,23 @@ void ParsedText::layoutAndExtractLines(
     // The block held nothing but bidi controls. Its paragraph ends here as at the end of any last pass below: the
     // parser may merge the next one into the block, which then decides its own direction.
     if (includeLastLine && !preserveSource) forgetBidiParagraph();
+    unmergedFrom_ = SIZE_MAX;
     return;
   }
+
+  // Heading blocks lay out (and below render) with a taller real font instead of scaling the
+  // body font. Resolve the effective fontId once; all measurement helpers below take it as
+  // their fontId argument, so widths/kerning/indent are computed in the heading font and stay
+  // consistent with TextBlock::render(). For the scale-fallback path headingFontId==0 and this
+  // is just the body font (fontSizeMultiplier still applies inside the helpers).
+  const int fontId = blockStyle.headingFontId != 0 ? blockStyle.headingFontId : bodyFontId;
+
+  // Whether this pass forms Indic words, then each glued group resolved (deviation 7): the snapshot below is of the
+  // tokens that are laid out, as it is of the text without the dropped controls.
+  decideShaping();
+  mergeGluedGroups(fontId);
+  unmergedFrom_ = SIZE_MAX;
+
   resolveAlignment(rtl());
   // Upstream's flip: a right-to-left paragraph sets a left alignment the book did not ask for (the reader's) right.
   if (rtl() && blockStyle.alignment == CssTextAlign::Left && !blockStyle.textAlignDefined) {
@@ -724,13 +1250,6 @@ void ParsedText::layoutAndExtractLines(
     savedBionicWatermark = bionicTransformedUpTo_;
     if (bidiState_) savedOpenControls = bidiState_->openControls;
   }
-
-  // Heading blocks lay out (and below render) with a taller real font instead of scaling the
-  // body font. Resolve the effective fontId once; all measurement helpers below take it as
-  // their fontId argument, so widths/kerning/indent are computed in the heading font and stay
-  // consistent with TextBlock::render(). For the scale-fallback path headingFontId==0 and this
-  // is just the body font (fontSizeMultiplier still applies inside the helpers).
-  const int fontId = blockStyle.headingFontId != 0 ? blockStyle.headingFontId : bodyFontId;
 
   // Apply fixed transforms before any per-line layout work.
   // Paragraph indent only applies to the first layout pass; skip on continuations.
@@ -921,6 +1440,8 @@ void ParsedText::layoutAndExtractLines(
         wordBoundaries.erase(wordBoundaries.begin() + splitIndex + 1);
         wordSizes.erase(wordSizes.begin() + splitIndex + 1);
         wordVisibleOffsets.erase(wordVisibleOffsets.begin() + splitIndex + 1);
+        // The rejoined word's entry is stale by its text, and shaped again with the widths below.
+        if (shapingState_) shapingState_->store.erase(splitIndex + 1);
       }
 
       // Recompute widths after restoring unsplit words.
@@ -998,6 +1519,8 @@ void ParsedText::layoutAndExtractLines(
     wordBoundaries.erase(wordBoundaries.begin(), wordBoundaries.begin() + consumed);
     wordSizes.erase(wordSizes.begin(), wordSizes.begin() + consumed);
     wordVisibleOffsets.erase(wordVisibleOffsets.begin(), wordVisibleOffsets.begin() + consumed);
+    // The kept tokens keep their records for the next pass; the consumed ones' bytes are reclaimed.
+    if (shapingState_) shapingState_->store.dropFront(consumed);
     // All remaining words were already transformed before the flush; reset the
     // watermark so that words appended by addWord() are processed next time.
     bionicTransformedUpTo_ = words.size();
@@ -1006,6 +1529,7 @@ void ParsedText::layoutAndExtractLines(
   // A pass that lays the last line out ends the paragraph. The parser may hand the drained block more words without a
   // reset (<hr> or a table drains it, and the next paragraph merges into the empty block): they are a new paragraph.
   if (includeLastLine && !preserveSource) forgetBidiParagraph();
+  forgetFaceAnswers();
 
   if (preserveSource) {
     words = std::move(savedWords);
@@ -1017,6 +1541,9 @@ void ParsedText::layoutAndExtractLines(
     isContinuation_ = savedIsContinuation;
     bionicTransformedUpTo_ = savedBionicWatermark;
     if (bidiState_) bidiState_->openControls = savedOpenControls;
+    // The restored tokens are those before any split the pass made: the entries are in step with neither, so the
+    // store starts again.
+    if (shapingState_) shapingState_->store.reset();
   }
 }
 
@@ -1135,6 +1662,25 @@ void ParsedText::releaseLayoutScratch() {
     std::vector<uint8_t>().swap(state.pieceOrder);
     std::string().swap(state.tokenForm);
   }
+  // The shaped store's records are recomputed by the next pass that needs them (each token kept is shaped again); the
+  // box goes too unless a paragraph in progress shapes.
+  if (shapingState_ && (!shapes_ || words.empty())) {
+    shapingState_.reset();
+    shapes_ = false;
+  } else if (shapingState_) {
+    ShapingState& state = *shapingState_;
+    state.store.release();
+    std::string().swap(state.measureScratch);
+    std::string().swap(state.candidate);
+    std::vector<std::string_view>().swap(state.pieceWords);
+    std::vector<std::string_view>().swap(state.pieceForms);
+    std::vector<GlyphRun>().swap(state.pieceGlyphs);
+    std::vector<EpdFontFamily::Style>().swap(state.pieceStyles);
+    std::vector<TextBlock::WordSize>().swap(state.pieceSizes);
+    std::vector<TokenBoundary::Boundary>().swap(state.pieceBoundaries);
+    std::vector<uint16_t>().swap(state.tokenPieces);
+    std::string().swap(state.formCopies);
+  }
   // The word vectors carry the paragraph in progress: an empty block gives them back whole; a
   // block mid-paragraph keeps them AS THEY ARE. This used to shrink_to_fit them, and a slice
   // yields inside a paragraph almost always (the 1 KB feed chunk ends mid-<p>), so every yield
@@ -1166,12 +1712,17 @@ void ParsedText::reset(const BlockStyle& newBlockStyle) {
   isContinuation_ = false;
   bionicTransformedUpTo_ = 0;
   forgetBidiParagraph();
+  // Empty for the next paragraph, its chunks kept (rule 1).
+  if (shapingState_) shapingState_->store.reset();
+  shapes_ = false;
 }
 
 void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int fontId, std::vector<uint16_t>& out,
                                      const BidiLine::OpenControls& passControls) {
   out.clear();
   out.reserve(words.size());
+  // An entry for every token before any is shaped; refused, the pass is laid out unshaped.
+  if (shapes_ && !readyShapedStore()) shapes_ = false;
 
   decideCombined(renderer, fontId);
   {
@@ -1182,9 +1733,13 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
     BidiLine::OpenControls open = passControls;
     for (size_t i = 0; i < words.size(); ++i) {
       const int font = wordFontId(i, fontId);
+      uint16_t shapedWidth = 0;
       if (combines(i)) {
         // A combined word is one em down its column, whatever its glyphs' advances.
         out.push_back(static_cast<uint16_t>(columnEm(renderer, font, wordStyles[i], wordScale(i))));
+      } else if (shapes_ && shapeToken(renderer, fontId, i, &shapedWidth)) {
+        // A token with pieces is as wide as they are: its runs' advances and its other code points measured as today.
+        out.push_back(shapedWidth);
       } else if (scratch != nullptr && BidiLine::tokenForm(words[i], open, level_, *scratch, bidiState_->tokenForm)) {
         out.push_back(
             measureWordWidth(renderer, font, bidiState_->tokenForm, wordStyles[i], false, wordScale(i), vertical_));
@@ -1693,6 +2248,18 @@ void ParsedText::applyBionicReadingTransform() {
       continue;
     }
 
+    // Complex-script words never take a focus split: each half would shape on its own.
+    // Ported from crosspoint-reader PR #3787 ("feat: add Indic language support without HarfBuzz", SSafayet /
+    // @SSafayet).
+    if (indic::containsIndic(source.c_str())) {
+      transformedSuffix.push_back(std::move(source));
+      transformedSuffixStyles.push_back(originalStyle);
+      transformedSuffixBoundaries.push_back(originalBoundary);
+      transformedSuffixSizes.push_back(originalSize);
+      transformedSuffixOffsets.push_back(originalOffset);
+      continue;
+    }
+
     const auto spans = tokenizeBionicWord(source);
     if (spans.empty()) {
       continue;
@@ -1993,6 +2560,9 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   const auto style = wordStyles[wordIndex];
   const float scale = wordScale(wordIndex);
   const int font = wordFontId(wordIndex, fontId);
+  // A word this pass shapes is measured as each part would be shaped. Only upstream's fallback breaks, between
+  // syllables, reach one in practice: no language's patterns cut Indic letters.
+  const bool shapedWord = shapes_ && IndicShaper::holdsIndic(word);
 
   // Collect candidate breakpoints (byte offsets and hyphen requirements). A Hangul word may split
   // between syllables at a line end, without a hyphen; those breaks come first, so they win a width
@@ -2003,6 +2573,17 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   breakInfos.insert(breakInfos.end(), hyphenatorBreaks.begin(), hyphenatorBreaks.end());
   if (breakInfos.empty()) {
     return false;
+  }
+  // A shaped word's candidates are copied into one string (shapedPrefixWidth), grown here once to the word and a
+  // hyphen, behind the heap check: refused, the word is not split, as when its remainder's entry is refused below.
+  if (shapedWord) {
+    std::string& candidate = shapingState_->candidate;
+    if (!heapAllows(growthBytes(candidate, word.size() + 1))) {
+      LOG_ERR("SHP", "No room for a %u B word's split candidates: not split", static_cast<unsigned>(word.size()));
+      latchShapingDegraded();
+      return false;
+    }
+    candidate.reserve(word.size() + 1);
   }
 
   size_t chosenOffset = 0;
@@ -2018,7 +2599,8 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 
     const bool needsHyphen = info.requiresInsertedHyphen;
     const int prefixWidth =
-        measureWordWidth(renderer, font, word.substr(0, offset), style, needsHyphen, scale, vertical_);
+        shapedWord ? shapedPrefixWidth(renderer, fontId, wordIndex, offset, needsHyphen)
+                   : measureWordWidth(renderer, font, word.substr(0, offset), style, needsHyphen, scale, vertical_);
     if (prefixWidth > availableWidth || prefixWidth <= chosenWidth) {
       continue;  // Skip if too wide or not an improvement
     }
@@ -2030,6 +2612,11 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
 
   if (chosenWidth < 0) {
     // No hyphenation point produced a prefix that fits in the remaining space.
+    return false;
+  }
+  // The remainder's entry comes first, so the store stays in step with the words; refused, the word is not split.
+  if (shapedWord && !shapingState_->store.insert(wordIndex + 1)) {
+    latchShapingDegraded();
     return false;
   }
 
@@ -2076,9 +2663,21 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   wordBoundaries.insert(wordBoundaries.begin() + wordIndex + 1,
                         TokenBoundary::withWordMarks(TokenBoundary::Boundary{}, wordBoundaries[wordIndex]));
 
-  // Update cached widths to reflect the new prefix/remainder pairing.
+  // Update cached widths to reflect the new prefix/remainder pairing. A shaped word's parts are shaped again, as the
+  // tokens they now are; a part that is not shaped is measured as its code points.
   wordWidths[wordIndex] = static_cast<uint16_t>(chosenWidth);
-  const uint16_t remainderWidth = measureWordWidth(renderer, font, remainder, style, false, scale, vertical_);
+  uint16_t remainderWidth = 0;
+  if (shapedWord) {
+    uint16_t shaped = 0;
+    wordWidths[wordIndex] = shapeToken(renderer, fontId, wordIndex, &shaped)
+                                ? shaped
+                                : measureWordWidth(renderer, font, words[wordIndex], style, false, scale, vertical_);
+    remainderWidth = shapeToken(renderer, fontId, wordIndex + 1, &shaped)
+                         ? shaped
+                         : measureWordWidth(renderer, font, remainder, style, false, scale, vertical_);
+  } else {
+    remainderWidth = measureWordWidth(renderer, font, remainder, style, false, scale, vertical_);
+  }
   wordWidths.insert(wordWidths.begin() + wordIndex + 1, remainderWidth);
   markClass_.insert(markClass_.begin() + wordIndex + 1, static_cast<uint8_t>(CjkPunctuation::Class::None));
   edgeTrim_.insert(edgeTrim_.begin() + wordIndex + 1, 0);
@@ -2288,6 +2887,145 @@ void ParsedText::viewWithoutControls(const size_t first, const size_t count, Tex
   range.first = 0;
 }
 
+bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId, const size_t first, const size_t count,
+                                  TextBlock::WordRange& range) {
+  if (!shapingState_) return false;
+  ShapingState& state = *shapingState_;
+  const ShapedStore& store = state.store;
+  // Token i's pieces, which its width was measured from; none for a token that was not shaped (a combined word among
+  // them: it is one em, whatever its glyphs).
+  const auto piecesOf = [&](const size_t i) -> std::optional<std::span<const ShapedStore::Piece>> {
+    if (!IndicShaper::holdsIndic(words[i])) return std::nullopt;
+    const std::optional<std::span<const ShapedStore::Piece>> pieces =
+        store.pieces(i, words[i], shapeKey(renderer, fontId, i));
+    if (!pieces || pieces->empty()) return std::nullopt;
+    return pieces;
+  };
+  // The line's pieces, at most: a token without pieces is one (a Text piece of soft hyphens alone is counted, then
+  // left out). And the bytes of the Reordered forms that hold a soft hyphen, copied without it below.
+  bool anyPieces = false;
+  size_t total = 0;
+  size_t copyBytes = 0;
+  for (size_t t = 0; t < count; ++t) {
+    const std::optional<std::span<const ShapedStore::Piece>> pieces = piecesOf(first + t);
+    anyPieces = anyPieces || pieces.has_value();
+    total += pieces ? pieces->size() : 1;
+    if (!pieces) continue;
+    for (const ShapedStore::Piece& piece : *pieces) {
+      if (piece.kind != IndicShaper::PieceKind::Reordered) continue;
+      const std::string_view form = store.form(piece);
+      if (form.find(SOFT_HYPHEN_UTF8) != std::string_view::npos) copyBytes += form.size();
+    }
+  }
+  if (!anyPieces) return false;
+
+  // Every vector below is reserved whole, so none grows in the loop, and the copies too: on the device a piece takes
+  // 2 * 8 B (two views) + 8 (a run) + 1 (a style) + 2 (a size) + 4 (a boundary) + 2 (an x) = 33 B and a token 2 B,
+  // kept across lines (a line of 40 pieces is about 1.4 KB) and freed at the slice's yield (releaseLayoutScratch). One
+  // check of the heap for all they ask, before any: refused, the line keeps its bytes, its tokens drawn as their code
+  // points.
+  // The tokens' positions are [0, count) of the x scratch: the pieces' go after them, and then take their place.
+  std::vector<int16_t>& xs = lineXPosScratch_;
+  const size_t asked = growthBytes(state.pieceWords, total) + growthBytes(state.pieceForms, total) +
+                       growthBytes(state.pieceGlyphs, total) + growthBytes(state.pieceStyles, total) +
+                       growthBytes(state.pieceSizes, total) + growthBytes(state.pieceBoundaries, total) +
+                       growthBytes(state.tokenPieces, count + 1) + growthBytes(xs, count + total) +
+                       growthBytes(state.formCopies, copyBytes);
+  if (!heapAllows(asked)) {
+    LOG_ERR("SHP", "No %u B for a line's pieces: laid out as its tokens' code points", static_cast<unsigned>(asked));
+    latchShapingDegraded();
+    return false;
+  }
+  state.pieceWords.clear();
+  state.pieceForms.clear();
+  state.pieceGlyphs.clear();
+  state.pieceStyles.clear();
+  state.pieceSizes.clear();
+  state.pieceBoundaries.clear();
+  state.tokenPieces.clear();
+  state.pieceWords.reserve(total);
+  state.pieceForms.reserve(total);
+  state.pieceGlyphs.reserve(total);
+  state.pieceStyles.reserve(total);
+  state.pieceSizes.reserve(total);
+  state.pieceBoundaries.reserve(total);
+  state.tokenPieces.reserve(count + 1);
+  xs.reserve(count + total);
+  const auto place = [&](const size_t i, const std::string_view text, const std::string_view form, const GlyphRun run,
+                         const TokenBoundary::Boundary boundary, const int x) {
+    state.pieceWords.push_back(text);
+    state.pieceForms.push_back(form);
+    state.pieceGlyphs.push_back(run);
+    state.pieceStyles.push_back(wordStyles[i]);
+    state.pieceSizes.push_back(wordSizes[i]);
+    state.pieceBoundaries.push_back(boundary);
+    xs.push_back(static_cast<int16_t>(x));
+  };
+  for (size_t t = 0; t < count; ++t) {
+    const size_t i = first + t;
+    state.tokenPieces.push_back(static_cast<uint16_t>(state.pieceWords.size()));
+    const int x = xs[t];
+    const std::optional<std::span<const ShapedStore::Piece>> pieces = piecesOf(i);
+    if (!pieces) {
+      place(i, words[i], std::string_view(), GlyphRun{}, wordBoundaries[i], x);
+      continue;
+    }
+    const std::string_view text = words[i];
+    int before = 0;  // the widths of the token's pieces before this one
+    bool placed = false;
+    for (const ShapedStore::Piece& piece : *pieces) {
+      const int at = x + before;
+      before += piece.width;
+      const std::string_view bytes = text.substr(piece.begin, piece.end - piece.begin);
+      if (piece.kind == IndicShaper::PieceKind::Text && onlySoftHyphens(bytes)) continue;
+      const std::string_view form =
+          piece.kind == IndicShaper::PieceKind::Reordered ? store.form(piece) : std::string_view();
+      place(i, bytes, form, piece.kind == IndicShaper::PieceKind::Glyphs ? store.glyphs(piece) : GlyphRun{},
+            placed ? TokenBoundary::Boundary{true, false} : wordBoundaries[i], at);
+      placed = true;
+    }
+  }
+  state.tokenPieces.push_back(static_cast<uint16_t>(state.pieceWords.size()));
+  xs.erase(xs.begin(), xs.begin() + static_cast<std::ptrdiff_t>(count));
+
+  // A Reordered form keeps the token's soft hyphens, which TextBlock strips from a word's text and not from its form:
+  // such a form is drawn from a copy without them. Reserved whole first, under the heap check above: no reallocation
+  // below, so the views into the copies stay valid.
+  if (copyBytes > 0) {
+    std::string& copies = state.formCopies;
+    copies.clear();
+    copies.reserve(copyBytes);
+    for (std::string_view& form : state.pieceForms) {
+      if (form.find(SOFT_HYPHEN_UTF8) == std::string_view::npos) continue;
+      const size_t at = copies.size();
+      copies.append(form);
+      for (size_t pos = copies.find(SOFT_HYPHEN_UTF8, at); pos != std::string::npos;
+           pos = copies.find(SOFT_HYPHEN_UTF8, pos)) {
+        copies.erase(pos, SOFT_HYPHEN_BYTES);
+      }
+      form = std::string_view(copies).substr(at);
+    }
+  }
+
+  // The annotations name pieces: a run over tokens covers all their pieces.
+  for (TextBlock::Annotation& a : lineAnnotations_) {
+    const uint16_t end = state.tokenPieces[a.firstWord + a.wordCount];
+    a.firstWord = state.tokenPieces[a.firstWord];
+    a.wordCount = static_cast<uint16_t>(end - a.firstWord);
+  }
+
+  range.words = nullptr;
+  range.wordViews = state.pieceWords.data();
+  range.displayForms = state.pieceForms.data();
+  range.glyphForms = state.pieceGlyphs.data();
+  range.styles = &state.pieceStyles;
+  range.sizes = &state.pieceSizes;
+  range.boundaries = &state.pieceBoundaries;
+  range.first = 0;
+  range.count = state.pieceWords.size();
+  return true;
+}
+
 void ParsedText::stepOpenControls(const size_t first, const size_t end) {
   if (!bidi_) return;
   for (size_t i = first; i < end && i < words.size(); ++i) bidiState_->openControls.advance(words[i]);
@@ -2303,7 +3041,10 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
   lastLineVisibleOffset_ = lastBreakAt < wordVisibleOffsets.size() ? wordVisibleOffsets[lastBreakAt] : 0;
   const size_t lineWordCount = lineBreak - lastBreakAt;
-  lastLineTokenCount_ = static_cast<uint32_t>(lineWordCount) + controlsOnlyTokens_;
+  // The parser's tokens: a merged token counts as its parts.
+  uint32_t lineTokens = static_cast<uint32_t>(lineWordCount);
+  for (size_t i = lastBreakAt; i < lineBreak; ++i) lineTokens += boundaries[i].merged;
+  lastLineTokenCount_ = lineTokens + controlsOnlyTokens_;
 
   // Apply indent only to line 0 of the layout pass; firstLineIndent is already
   // 0 for continuation flushes (computed once in layoutAndExtractLines).
@@ -2322,7 +3063,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
       const uint8_t maxPct = placeBidiLine(renderer, fontId, lastBreakAt, effectivePageWidth, lineIndent,
                                            lineBreak == words.size(), range);
       if (range.count == 0) {  // only controls: nothing to draw
-        controlsOnlyTokens_ += static_cast<uint32_t>(lineWordCount);
+        controlsOnlyTokens_ += lineTokens;
         stepOpenControls(lastBreakAt, lineBreak);
         return LineProcessResult::Accepted;
       }
@@ -2649,7 +3390,13 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   range.first = lastBreakAt;
   range.count = lineWordCount;
   range.annotations = &lineAnnotations_;
-  if (withoutBidi) viewWithoutControls(lastBreakAt, lineWordCount, range);
+  if (withoutBidi) {
+    viewWithoutControls(lastBreakAt, lineWordCount, range);
+  } else if (shapes_) {
+    // A token with a shaped run and other text is drawn as its pieces, cut at the run's edges (step 7); a line without
+    // one keeps its bytes.
+    viewShapedPieces(renderer, fontId, lastBreakAt, lineWordCount, range);
+  }
 
   uint8_t maxPct = 100;
   bool band = false;

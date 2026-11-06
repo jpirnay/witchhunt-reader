@@ -4,8 +4,10 @@
 #include <Epub/BidiLine.h>
 #include <Epub/hyphenation/Hyphenator.h>
 #include <Epub/parsers/ChapterHtmlSlimParser.h>
+#include <GfxRenderer.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <TextShaping.h>
 
 #include "CrossPointSettings.h"
 #include "DictHtmlNormalize.h"
@@ -80,11 +82,16 @@ bool buildDictionaryHtmlPages(GfxRenderer& renderer, const std::string& definiti
   const char* limitReason = nullptr;
   size_t retainedElements = 0;
   bool parsed = false;
-  // No Section build ends here, so nothing else frees the line pass's heap memory (a right-to-left article made it).
-  // Declared before the parser's block: it runs on every exit, after the parser is gone.
-  struct ReleaseBidiMemory {
-    ~ReleaseBidiMemory() { BidiLine::releaseBuildMemory(); }
-  } releaseBidiMemory;
+  // No Section build ends here, so nothing else frees the line pass's heap memory (a right-to-left article made it)
+  // or the shaping pass's and its faces (an Indic one did). Declared before the parser's block: it runs on every
+  // exit, after the parser is gone.
+  struct ReleaseLayoutMemory {
+    ~ReleaseLayoutMemory() {
+      BidiLine::releaseBuildMemory();
+      TextShaping::releaseBuildMemory();
+      GfxRenderer::releaseShapingFaces();
+    }
+  } releaseLayoutMemory;
   {
     // For the parser's lifetime, which is the layout: the last section build installed its own book's patterns.
     const ScopedLanguageHyphenator scopedHyphenator(hyphenator);

@@ -20,6 +20,7 @@
 #include <Arduino.h>
 #include <EpdFontFamily.h>
 #include <GlyphProvider.h>
+#include <GlyphRun.h>
 #include <Utf8.h>
 
 #include <cmath>
@@ -28,6 +29,8 @@
 #include <vector>
 
 #include "Epub/CjkPunctuation.h"
+
+class ShapingFace;
 
 enum Color : uint8_t { Clear = 0x00, White = 0x01, LightGray = 0x05, DarkGray = 0x0A, Black = 0x10 };
 
@@ -194,6 +197,40 @@ class GfxRenderer {
   void drawTextScaled(int, int x, int y, const char* text, bool, EpdFontFamily::Style, float scale) const {
     if (textDraws) textDraws->push_back({text, live_, x, y, scale});
   }
+  // A shaped run, measured as the real renderer's glyphRunWidth measures it (the records' pen, accumulated outside
+  // drawTextScaled's unscaled window; this stub's fonts have a base scale of 1). A test that sets `glyphRunDraws` gets
+  // each run draw.
+  struct GlyphRunDraw {
+    int fontId;
+    int x;
+    int y;
+    uint16_t count;
+    float scale;
+  };
+  mutable std::vector<GlyphRunDraw>* glyphRunDraws = nullptr;
+  void drawGlyphRun(const int fontId, const int x, const int y, const GlyphRun& run, bool = true,
+                    EpdFontFamily::Style = EpdFontFamily::REGULAR, const float scale = 1.0f) const {
+    if (glyphRunDraws) glyphRunDraws->push_back({fontId, x, y, run.count, scale});
+  }
+  int glyphRunWidth(int, const GlyphRun& run, const float scale = 1.0f) const {
+    return glyphRunAdvance(run, scale < 0.99f || scale > 1.01f);
+  }
+  // The face a shaper reads for a font's style, and its ppem (26.6), as the real renderer's shapingFace answers: a
+  // test's seam decides, a face refused its memory included; null (the default) is a font that cannot shape, as the
+  // stub's synthetic fonts are.
+  static inline ShapingFace* (*shapingFaceSource)(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6,
+                                                  bool* refused) = nullptr;
+  ShapingFace* shapingFace(const int fontId, const EpdFontFamily::Style style, uint32_t* ppem26_6,
+                           bool* refused = nullptr) const {
+    return shapingFaceSource != nullptr ? shapingFaceSource(fontId, style, ppem26_6, refused) : nullptr;
+  }
+  // A section build's end frees the shaping faces: counted, so a test sees each build do it.
+  static inline int shapingReleases = 0;
+  static void releaseShapingFaces() { ++shapingReleases; }
+  float fontBaseScale(int) const { return 1.0f; }
+  // The glyph-ID prefetch of a build's warm step: counted, one per run.
+  mutable int prefetchedRuns = 0;
+  void prefetchGlyphRun(int, const GlyphRun&, EpdFontFamily::Style) const { ++prefetchedRuns; }
   void drawCenteredText(int, int, const char*, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR) const {}
   void drawTextRotated90CW(int, int, int, const char*, bool = true,
                            EpdFontFamily::Style = EpdFontFamily::REGULAR) const {}

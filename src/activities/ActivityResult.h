@@ -22,7 +22,7 @@ struct MenuResult {
   int action = -1;
   int nameId = -1;
   uint8_t orientation = 0;
-  uint8_t pageTurnOption = 0;
+  uint8_t autoTurnSeconds = 0;  // 0: off
   int8_t embeddedStyleOverride = -1;
   int8_t imageRenderingOverride = -1;
   int8_t fontFamilyOverride = -1;

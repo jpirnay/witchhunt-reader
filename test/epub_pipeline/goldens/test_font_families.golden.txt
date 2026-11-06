@@ -61,11 +61,12 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=403 s=0 z=100 t=blocks
   LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=apart.
-  LINE y=182 x=0 align=2 mult=1.400 hfid=0 words=4
+  LINE y=182 x=0 align=2 mult=1.400 hfid=0 words=5
    W x=72 s=1 z=100 t=A
    W x=93 s=1 z=100 t=Heading
    W x=202 s=1 z=100 t=in
-   W x=237 s=1 z=100 t=Sans-Serif
+   W x=237 s=1 z=100 t=Sans-
+   W x=318 s=1 z=100 t=Serif
   LINE y=216 x=0 align=0 mult=1.000 hfid=0 words=12
    W x=18 s=0 z=100 t=The
    W x=52 s=0 z=100 t=body
@@ -168,14 +169,15 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=2 truncated=0 cssFallback=0
    W x=425 s=0 z=100 t=body
   LINE y=528 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=font.
-  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=552 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=18 s=0 z=100 t=Helvetica,
    W x=126 s=0 z=100 t=not
    W x=177 s=0 z=100 t=in
    W x=212 s=0 z=100 t=the
    W x=261 s=0 z=100 t=book:
    W x=325 s=0 z=100 t=its
-   W x=368 s=0 z=100 t=sans-serif
+   W x=368 s=0 z=100 t=sans-
+   W x=418 s=0 z=100 t=serif
   LINE y=576 x=0 align=0 mult=1.000 hfid=0 words=1
    W x=0 s=0 z=100 t=fallback.
   LINE y=600 x=0 align=0 mult=1.000 hfid=0 words=7

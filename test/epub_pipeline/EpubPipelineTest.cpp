@@ -25,6 +25,10 @@
 //
 // The CJK books also run with vertical text requested: Automatic (<book>_vertical.golden.txt), where each section
 // decides from the book, and On (<book>_vertical_on.golden.txt). The default is Off, as for a Latin book.
+//
+// The shaped-Indic books run with their fonts (test/fixtures/fonts) as the shaping face of every font and style, so
+// their default goldens hold glyph forms; the Devanagari one also runs without a face (<book>_unshaped.golden.txt),
+// as in a font that cannot shape it: IndicReorder's forms.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -49,8 +53,18 @@ std::string freshCacheDir(const std::string& tag) {
   return dir.string();
 }
 
-// The render setting a case turns ON; every other one stays as in the default.
-enum class Variant { Default, Normalization, Hyphenation, Bionic, Accents, BookAlignment, Vertical, VerticalOn };
+// The render setting a case turns ON (Unshaped: the book's shaping face OFF); every other one stays as in the default.
+enum class Variant {
+  Default,
+  Normalization,
+  Hyphenation,
+  Bionic,
+  Accents,
+  BookAlignment,
+  Vertical,
+  VerticalOn,
+  Unshaped
+};
 
 // One corpus book under one variant.
 struct Case {
@@ -74,6 +88,8 @@ const char* variantName(const Variant v) {
       return "verticalText";
     case Variant::VerticalOn:
       return "verticalTextOn";
+    case Variant::Unshaped:
+      return "unshaped";
     case Variant::Default:
       break;
   }
@@ -113,6 +129,28 @@ const char* const kVerticalBooks[] = {"test_writing_modes", "test_vertical_text"
 // Books that declare no writing mode, under On (<book>_vertical_on.golden.txt): what an Aozora conversion looks like
 // once the reader turns it vertical.
 const char* const kVerticalOnBooks[] = {"test_cjk_ja_soseki", "test_cjk_ko_hyeon"};
+
+// The shaped-Indic books (see test/epubs/make_test_shaped_indic.py) and their fonts, the shaping face of every font
+// and style in the default case (see test/fixtures/fonts/README.md).
+struct ShapedBook {
+  const char* book;
+  const char* font;
+};
+const ShapedBook kShapedBooks[] = {{"test_shaped_bengali", "NotoSansBengali-Book-Regular.ttf"},
+                                   {"test_shaped_devanagari", "NotoSansDevanagari-Book-Regular.ttf"},
+                                   {"test_shaped_malayalam", "NotoSansMalayalam-Book-Regular.ttf"},
+                                   {"test_shaped_tamil", "NotoSansTamil-Book-Regular.ttf"}};
+
+// The book's font; null for a book without one.
+const char* shapingFontOf(const std::string& book) {
+  for (const ShapedBook& shaped : kShapedBooks) {
+    if (book == shaped.book) return shaped.font;
+  }
+  return nullptr;
+}
+
+// Shaped books also laid out with no face (<book>_unshaped.golden.txt).
+const char* const kUnshapedBooks[] = {"test_shaped_devanagari"};
 
 // The families as the reader builds them for a 14 pt built-in body (buildBookFontFamilies), with stand-in IDs: the
 // built-in sans-serif's rungs are 2000 + their size, the accent families' native sizes 0x12345600, 0x23456700 and
@@ -159,6 +197,8 @@ std::string variantSuffix(const Case& c) {
       return "_vertical";
     case Variant::VerticalOn:
       return "_vertical_on";
+    case Variant::Unshaped:
+      return "_unshaped";
     case Variant::Default:
       break;
   }
@@ -174,6 +214,7 @@ std::string runOnce(const Case& c, const std::string& cacheDir) {
   if (c.variant == Variant::BookAlignment) profile.paragraphAlignment = static_cast<uint8_t>(CssTextAlign::None);
   if (c.variant == Variant::Vertical) profile.verticalText = VerticalText::Automatic;
   if (c.variant == Variant::VerticalOn) profile.verticalText = VerticalText::On;
+  if (c.variant != Variant::Unshaped) profile.shapingFontFile = shapingFontOf(stem(c.epub));
   std::ostringstream dump;
   const bool ok = pipeline_harness::runAndDump(c.epub, cacheDir, profile, dump);
   EXPECT_TRUE(ok) << "pipeline failed for " << c.epub << " (" << variantName(c.variant) << ")\n" << dump.str();
@@ -262,20 +303,23 @@ std::vector<Case> corpusCases() {
     if (listed(kBookAlignmentBooks, stem(path))) cases.push_back(Case{path, Variant::BookAlignment});
     if (listed(kVerticalBooks, stem(path))) cases.push_back(Case{path, Variant::Vertical});
     if (listed(kVerticalOnBooks, stem(path))) cases.push_back(Case{path, Variant::VerticalOn});
+    if (listed(kUnshapedBooks, stem(path))) cases.push_back(Case{path, Variant::Unshaped});
   }
   return cases;
 }
 
 // The cases whose warm run can differ from their cold one. What the warm run reads back is the book-level cache,
 // which the default layout, normalization (the CSS index's font sizes) and the accent families (its font families)
-// all draw on. Hyphenation and bionic reading draw on none of it: the language the hyphenator needs comes from
-// book.bin, which the default warm case of the same book already compares (its BOOK line).
+// all draw on. Hyphenation, bionic reading and an unshaped layout draw on none of it: the language the hyphenator and
+// the shaper need comes from book.bin, which the default warm case of the same book already compares (its BOOK line).
 std::vector<Case> warmCases() {
   std::vector<Case> cases = corpusCases();
-  cases.erase(
-      std::remove_if(cases.begin(), cases.end(),
-                     [](const Case& c) { return c.variant == Variant::Hyphenation || c.variant == Variant::Bionic; }),
-      cases.end());
+  cases.erase(std::remove_if(cases.begin(), cases.end(),
+                             [](const Case& c) {
+                               return c.variant == Variant::Hyphenation || c.variant == Variant::Bionic ||
+                                      c.variant == Variant::Unshaped;
+                             }),
+              cases.end());
   return cases;
 }
 

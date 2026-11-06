@@ -89,7 +89,7 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=315 s=0 z=100 t=by
    W x=343 s=0 z=100 t=its
    W x=382 s=0 z=100 t=bracketed
-  LINE y=254 x=0 align=0 mult=1.000 hfid=0 words=10
+  LINE y=254 x=0 align=0 mult=1.000 hfid=0 words=11
    W x=0 s=0 z=100 t=text
    W x=36 s=4 z=100 t=[3]
    W x=64 s=2 z=100 t=(The
@@ -99,13 +99,16 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=227 s=2 z=100 t=reached
    W x=298 s=2 z=100 t=by
    W x=318 s=2 z=100 t=a
-   W x=336 s=2 z=100 t=marker-shaped
-  LINE y=278 x=0 align=0 mult=1.000 hfid=0 words=5
+   W x=336 s=2 z=100 t=marker-
+   W x=400 s=2 z=100 t=shaped
+  LINE y=278 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=2 z=100 t=link.)
    W x=69 s=0 z=100 t=qualifies
    W x=161 s=0 z=100 t=through
    W x=250 s=0 z=100 t=the
-   W x=294 s=0 z=100 t=marker-shaped-text
+   W x=294 s=0 z=100 t=marker-
+   W x=358 s=0 z=100 t=shaped-
+   W x=423 s=0 z=100 t=text
   LINE y=302 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=0 s=0 z=100 t=path
    W x=46 s=0 z=100 t=rather
@@ -160,7 +163,7 @@ SPINE 1 href=OEBPS/notes.xhtml pages=1 truncated=0 cssFallback=0
   LINE y=134 x=0 align=0 mult=1.000 hfid=0 words=2
    W x=18 s=0 z=100 t=Short
    W x=78 s=0 z=100 t=note.
-  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=158 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=18 s=0 z=100 t=The
    W x=51 s=0 z=100 t=third
    W x=101 s=0 z=100 t=note
@@ -168,5 +171,6 @@ SPINE 1 href=OEBPS/notes.xhtml pages=1 truncated=0 cssFallback=0
    W x=170 s=0 z=100 t=reached
    W x=241 s=0 z=100 t=by
    W x=261 s=0 z=100 t=a
-   W x=279 s=0 z=100 t=marker-shaped
+   W x=279 s=0 z=100 t=marker-
+   W x=343 s=0 z=100 t=shaped
    W x=405 s=0 z=100 t=link.

@@ -4,6 +4,8 @@
 
 #include <string>
 
+#include "XmlPrefix.h"
+
 class ContainerParser final : public Print {
   enum ParserState {
     START,
@@ -14,6 +16,7 @@ class ContainerParser final : public Print {
   size_t remainingSize;
   SaxParser saxParser_;
   ParserState state = START;
+  XmlPrefix prefix_{"urn:oasis:names:tc:opendocument:xmlns:container"};
 
   static void startElement(void* userData, const char* name, const char** atts);
   static void endElement(void* userData, const char* name);

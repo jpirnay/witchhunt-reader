@@ -94,7 +94,8 @@ class GfxRenderer {
   // Mutable because a lookup from a const draw or measure call may register a font the resolver
   // supplies on demand (findFontFamily). Same compromise as sdCardFonts_ below.
   mutable std::map<int, EpdFontFamily> fontMap;
-  static inline void (*beforePushHook_)() = nullptr;  // setBeforePushHook()
+  static inline void (*beforePushHook_)() = nullptr;      // setBeforePushHook()
+  static inline void (*shapingFaceRelease_)() = nullptr;  // setShapingFaceRelease()
   FontResolverHook<EpdFontFamily> fontResolver_;
   // The one place a font ID becomes a family: fontMap, then the resolver for an unknown ID.
   const EpdFontFamily* findFontFamily(const int fontId) const {
@@ -444,6 +445,10 @@ class GfxRenderer {
   // lent from the secondary buffer for it goes back now (SdCardFontSystem's glyph lend), and the push runs with both
   // buffers. One hook; nullptr removes it.
   static void setBeforePushHook(void (*hook)()) { beforePushHook_ = hook; }
+  /// Frees every shaping face and its plans (TtfFontSet::releaseShapingFaces, installed by SdCardFontSystem); nothing
+  /// without the hook. A section build's end and the dictionary's pages call it, under RenderLock.
+  static void setShapingFaceRelease(void (*release)()) { shapingFaceRelease_ = release; }
+  static void releaseShapingFaces();
   void setNextDisplayRefreshMode(HalDisplay::RefreshMode refreshMode) const;
   // True if a setNextDisplayRefreshMode() override is armed but not yet consumed. Peek only —
   // does NOT consume it (unlike consumeRefreshOverride). Lets a caller that is about to issue an
@@ -685,10 +690,11 @@ class GfxRenderer {
   /// measure fall back to). Layout asks it for 一 before treating a font as a CJK font.
   bool hasGlyph(int fontId, uint32_t cp, EpdFontFamily::Style style) const;
   /// The face a shaper reads for `fontId`'s `style` (the TrueType file that draws it, a synthetic style's source),
-  /// and the pixels per em (26.6) its glyphs are drawn at before the font's base scale; nullptr for every other font.
-  /// Under RenderLock, as ShapingFace::current() is; the face is freed by TtfFontSet::releaseShapingFaces() and by
-  /// the font set's next load, so the plans built on it go first.
-  ShapingFace* shapingFace(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6) const;
+  /// and the pixels per em (26.6) its glyphs are drawn at before the font's base scale; nullptr for every other font,
+  /// and for a TrueType face the heap refused, which sets `*refused` as well (when `refused` is not null; it is left
+  /// as it is otherwise). Under RenderLock, as ShapingFace::current() is; the face is freed by
+  /// TtfFontSet::releaseShapingFaces() and by the font set's next load, so the plans built on it go first.
+  ShapingFace* shapingFace(int fontId, EpdFontFamily::Style style, uint32_t* ppem26_6, bool* refused = nullptr) const;
   int getFontAscenderSize(int fontId) const;
   int getLineHeight(int fontId) const;
   std::string truncatedText(int fontId, const char* text, int maxWidth,
@@ -696,9 +702,11 @@ class GfxRenderer {
   /// Word-wrap \p text into at most \p maxLines lines, each no wider than
   /// \p maxWidth pixels, breaking at spaces and at the word breaker's offsets.
   /// Overflowing words and excess lines are UTF-8-safely truncated with an
-  /// ellipsis (U+2026).
+  /// ellipsis (U+2026). \p whole, when given, says whether all of \p text made
+  /// it into the lines.
   std::vector<std::string> wrappedText(int fontId, const char* text, int maxWidth, int maxLines,
-                                       EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+                                       EpdFontFamily::Style style = EpdFontFamily::REGULAR,
+                                       bool* whole = nullptr) const;
 
   /// Draws a shaped run at (x, y), y the line's top as drawText takes it. Each record's glyph comes by ID from
   /// `fontId`'s `style` (findGlyphKey: no fallbacks) and is drawn at the pen plus its offset; the pen moves by the
