@@ -239,7 +239,8 @@ class ParsedText {
   void decideShaping();
   // Joins each glued group's tokens that TextShaping::mergesWithPrevious merges (deviation 7, and the Hebrew name)
   // before anything is measured: a merged token keeps its first part's style, size, boundary and visible offset. Ruby
-  // tokens, combine requests and no-break spaces are never merged.
+  // tokens, combine requests and no-break spaces are never merged; nor are tokens whose merged text the heap has no
+  // room for (latched).
   void mergeGluedGroups(int fontId);
   // Whether tokens a and b are in one font, style, size and emphasis mark: a span split of one style.
   bool sameStyle(int fontId, size_t a, size_t b) const;
@@ -265,11 +266,11 @@ class ParsedText {
                                  std::string_view before, std::string_view after);
   // Token i's pieces, found in the store, else replayed from the word cache or shaped now, their glyphs warmed and
   // their widths set, and *width their sum; false: it is laid out as its code points (and latched when it could not be
-  // shaped).
+  // shaped, or its pieces measured for want of memory).
   bool shapeToken(const GfxRenderer& renderer, int fontId, size_t i, uint16_t* width);
   // The width of words[i]'s first `bytes` bytes and a hyphen when `hyphen`: a candidate the breaker measures, shaped in
   // the store's scratch entry (nothing is kept), or measured as code points when it is not shaped (and latched when it
-  // could not be).
+  // could not be, or its pieces measured). The candidate's string was reserved by hyphenateWordAtIndex.
   int shapedPrefixWidth(const GfxRenderer& renderer, int fontId, size_t i, size_t bytes, bool hyphen);
   // Whether token i's first piece (its last, when `last`) is a glyph run: a glued gap there takes no kerning (step 8).
   bool glyphEdge(const GfxRenderer& renderer, int fontId, size_t i, bool last) const;
@@ -278,7 +279,8 @@ class ParsedText {
   // each takes the token's style and size; a Glyphs piece is drawn as its run, a Reordered piece as its form (without
   // its soft hyphens), and a Text piece of soft hyphens alone, which has no width, is left out. lineXPosScratch_ then
   // holds the pieces' positions (the token's x plus the widths before it), the annotations name pieces, and `range` is
-  // pointed at ShapingState's vectors. False, nothing changed, when no token has pieces: the line keeps its bytes.
+  // pointed at ShapingState's vectors. False, nothing changed, when no token has pieces: the line keeps its bytes. So
+  // does a line the heap has no room to lay out as pieces, drawn as its tokens' code points (latched).
   bool viewShapedPieces(const GfxRenderer& renderer, int fontId, size_t first, size_t count,
                         TextBlock::WordRange& range);
 

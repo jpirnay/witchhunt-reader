@@ -251,6 +251,17 @@ Malayalam and Sinhala.
   outside its fields; the store refusing a piece;
 - `ParsedText` without room for its `ShapingState`, its store's entries, or a forced split's entry.
 
+The shaped layout's own containers grow behind a heap check too (`heapAllows` in `ParsedText.cpp`, the largest free
+block against what the growth asks for, as `ShapedStore::heapAllows` checks its own), since a growth the heap refuses
+aborts under `-fno-exceptions`. Each refusal latches, and takes the unshaped way for what it refused:
+- a merge's text (`mergeGluedGroups`, up to 1 KB): the tokens stay apart, as past the cap;
+- the copy a token's pieces are measured from (`ShapingState::measureScratch`): the token is laid out as its code
+  points; a candidate's, in a forced split: the candidate is measured as code points;
+- the string a forced split copies its candidates into (`ShapingState::candidate`, grown once to the word): the word
+  is not split;
+- a line's piece vectors, its x scratch and its form copies (`viewShapedPieces`, one check for all of them): the line
+  keeps its bytes, its tokens drawn as their code points.
+
 A face the heap refused (`TtfFont::shapingFace`'s own allocation, about 130 B) latches too, though the token is laid
 out as without a face, in `IndicReorder`'s form: the renderer says so (`GfxRenderer::shapingFace`'s `refused`), the
 pass's face answer keeps it, and `shapingFaceFor` latches. Only a token that holds Indic text asks for a face, so a

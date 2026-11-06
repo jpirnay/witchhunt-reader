@@ -238,6 +238,40 @@ uint16_t measurePiece(const GfxRenderer& renderer, const int font, const EpdFont
   return measureWordWidth(renderer, font, scratch, style, false, scale, vertical);
 }
 
+// The bytes measurePiece copies into its scratch for the longest of `pieces` (a glyph run copies none).
+size_t scratchBytesFor(const ShapedStore& store, const std::span<const ShapedStore::Piece> pieces) {
+  size_t bytes = 0;
+  for (const ShapedStore::Piece& piece : pieces) {
+    if (piece.kind == IndicShaper::PieceKind::Reordered) {
+      bytes = std::max(bytes, store.form(piece).size());
+    } else if (piece.kind == IndicShaper::PieceKind::Text) {
+      bytes = std::max<size_t>(bytes, piece.end - piece.begin);
+    }
+  }
+  return bytes;
+}
+
+// The shaped layout's containers grow behind a heap check, as ShapedStore's do: under -fno-exceptions a growth the
+// heap refuses aborts. The allocator's header and rounding on top of a request, as reserveWords allows for.
+constexpr size_t kAllocSlack = 16;
+
+// What growing `v` to `count` elements asks of the heap: nothing when its capacity holds them, else the block
+// reserve(count) makes.
+template <typename T>
+size_t growthBytes(const std::vector<T>& v, const size_t count) {
+  return v.capacity() >= count ? 0 : count * sizeof(T) + kAllocSlack;
+}
+
+// The same for a string grown to `size` bytes: libstdc++ asks for twice the capacity it had when that is more, and the
+// NUL.
+size_t growthBytes(const std::string& s, const size_t size) {
+  return s.capacity() >= size ? 0 : std::max(size, 2 * s.capacity()) + 1 + kAllocSlack;
+}
+
+// Whether the largest free block holds `bytes`: the sum of several growths is checked at once, as reserveWords checks
+// its five (each block then fits in what the ones before it leave). Nothing to grow is always allowed.
+bool heapAllows(const size_t bytes) { return bytes == 0 || ESP.getMaxAllocHeap() >= bytes; }
+
 // FNV-1a over a value's bytes, folded into a running key (`key` starts at kKeySeed).
 constexpr uint32_t kKeySeed = 2166136261u;
 template <typename T>
@@ -901,6 +935,14 @@ void ParsedText::mergeGluedGroups(const int fontId) {
         ++j;
         continue;
       }
+      // The merged text grows the first part's string (up to 1 KB): refused, the two stay apart, as past the cap, and
+      // that is not the merged token's form.
+      if (!heapAllows(growthBytes(words[j - 1], bytes))) {
+        LOG_ERR("SHP", "No room to merge a %u B glued group: its tokens stay apart", static_cast<unsigned>(bytes));
+        latchShapingDegraded();
+        ++j;
+        continue;
+      }
       wordBoundaries[j - 1].merged = static_cast<uint8_t>(merged);
       words[j - 1] += words[j];
       words.erase(words.begin() + j);
@@ -1066,6 +1108,14 @@ bool ParsedText::shapeToken(const GfxRenderer& renderer, const int fontId, const
     }
     pieces = store.pieces(i, text, key);
     if (!pieces || pieces->empty()) return false;
+    // A piece that is not a glyph run is measured from a copy of its bytes: the scratch is grown for the longest here,
+    // behind the heap check. Refused, the entry goes stale and the token is laid out as its code points.
+    if (!heapAllows(growthBytes(shapingState_->measureScratch, scratchBytesFor(store, *pieces)))) {
+      LOG_ERR("SHP", "No room to measure a shaped token: laid out as its code points");
+      forgetShaping(i);
+      latchShapingDegraded();
+      return false;
+    }
     // Warm: the glyph IDs are looked up once, here inside the build's miss scope, so a page drawn later needs no miss
     // memory for them. Then each piece's width.
     const int font = wordFontId(i, fontId);
@@ -1093,6 +1143,7 @@ int ParsedText::shapedPrefixWidth(const GfxRenderer& renderer, const int fontId,
                                   const bool hyphen) {
   ShapingState& state = *shapingState_;
   std::string& candidate = state.candidate;
+  // Never grows: hyphenateWordAtIndex reserved the word and its hyphen.
   candidate.assign(words[i], 0, bytes);
   if (hyphen) candidate.push_back('-');
   const int font = wordFontId(i, fontId);
@@ -1102,13 +1153,17 @@ int ParsedText::shapedPrefixWidth(const GfxRenderer& renderer, const int fontId,
       i > 0 && wordBoundaries[i].continues ? std::string_view(words[i - 1]) : std::string_view();
   if (state.store.open(state.store.size(), candidate, 0)) {
     const IndicShaper::Outcome outcome = shapeInto(renderer, fontId, i, candidate, before, std::string_view());
-    if (outcome == IndicShaper::Outcome::Formed) {
+    // Its pieces are measured as shapeToken measures a token's, the scratch grown behind the heap check.
+    const bool measurable =
+        outcome == IndicShaper::Outcome::Formed &&
+        heapAllows(growthBytes(state.measureScratch, scratchBytesFor(state.store, state.store.openPieces())));
+    if (measurable) {
       width = 0;
       for (const ShapedStore::Piece& piece : state.store.openPieces()) {
         width += measurePiece(renderer, font, wordStyles[i], wordScale(i), vertical_, state.store, piece, candidate,
                               state.measureScratch);
       }
-    } else if (outcome == IndicShaper::Outcome::Degraded) {
+    } else if (outcome != IndicShaper::Outcome::Plain) {
       latchShapingDegraded();  // measured as code points below, as any run that could not be shaped is laid out
     }
     state.store.abandon();
@@ -2515,6 +2570,17 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   if (breakInfos.empty()) {
     return false;
   }
+  // A shaped word's candidates are copied into one string (shapedPrefixWidth), grown here once to the word and a
+  // hyphen, behind the heap check: refused, the word is not split, as when its remainder's entry is refused below.
+  if (shapedWord) {
+    std::string& candidate = shapingState_->candidate;
+    if (!heapAllows(growthBytes(candidate, word.size() + 1))) {
+      LOG_ERR("SHP", "No room for a %u B word's split candidates: not split", static_cast<unsigned>(word.size()));
+      latchShapingDegraded();
+      return false;
+    }
+    candidate.reserve(word.size() + 1);
+  }
 
   size_t chosenOffset = 0;
   int chosenWidth = -1;
@@ -2832,16 +2898,40 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
     return pieces;
   };
   // The line's pieces, at most: a token without pieces is one (a Text piece of soft hyphens alone is counted, then
-  // left out).
+  // left out). And the bytes of the Reordered forms that hold a soft hyphen, copied without it below.
   bool anyPieces = false;
   size_t total = 0;
+  size_t copyBytes = 0;
   for (size_t t = 0; t < count; ++t) {
     const std::optional<std::span<const ShapedStore::Piece>> pieces = piecesOf(first + t);
     anyPieces = anyPieces || pieces.has_value();
     total += pieces ? pieces->size() : 1;
+    if (!pieces) continue;
+    for (const ShapedStore::Piece& piece : *pieces) {
+      if (piece.kind != IndicShaper::PieceKind::Reordered) continue;
+      const std::string_view form = store.form(piece);
+      if (form.find(SOFT_HYPHEN_UTF8) != std::string_view::npos) copyBytes += form.size();
+    }
   }
   if (!anyPieces) return false;
 
+  // Every vector below is reserved whole, so none grows in the loop, and the copies too: on the device a piece takes
+  // 2 * 8 B (two views) + 8 (a run) + 1 (a style) + 2 (a size) + 4 (a boundary) + 2 (an x) = 33 B and a token 2 B,
+  // kept across lines (a line of 40 pieces is about 1.4 KB) and freed at the slice's yield (releaseLayoutScratch). One
+  // check of the heap for all they ask, before any: refused, the line keeps its bytes, its tokens drawn as their code
+  // points.
+  // The tokens' positions are [0, count) of the x scratch: the pieces' go after them, and then take their place.
+  std::vector<int16_t>& xs = lineXPosScratch_;
+  const size_t asked = growthBytes(state.pieceWords, total) + growthBytes(state.pieceForms, total) +
+                       growthBytes(state.pieceGlyphs, total) + growthBytes(state.pieceStyles, total) +
+                       growthBytes(state.pieceSizes, total) + growthBytes(state.pieceBoundaries, total) +
+                       growthBytes(state.tokenPieces, count + 1) + growthBytes(xs, count + total) +
+                       growthBytes(state.formCopies, copyBytes);
+  if (!heapAllows(asked)) {
+    LOG_ERR("SHP", "No %u B for a line's pieces: laid out as its tokens' code points", static_cast<unsigned>(asked));
+    latchShapingDegraded();
+    return false;
+  }
   state.pieceWords.clear();
   state.pieceForms.clear();
   state.pieceGlyphs.clear();
@@ -2849,9 +2939,6 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
   state.pieceSizes.clear();
   state.pieceBoundaries.clear();
   state.tokenPieces.clear();
-  // Reserved whole, so no vector grows in the loop below: 33 B a piece on the device (two views, a run, a style, a
-  // size, a boundary and an x) and 2 B a token, kept across lines (a line of 40 pieces is about 1.4 KB) and freed at
-  // the slice's yield (releaseLayoutScratch).
   state.pieceWords.reserve(total);
   state.pieceForms.reserve(total);
   state.pieceGlyphs.reserve(total);
@@ -2859,8 +2946,6 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
   state.pieceSizes.reserve(total);
   state.pieceBoundaries.reserve(total);
   state.tokenPieces.reserve(count + 1);
-  // The tokens' positions are [0, count) of the x scratch: the pieces' go after them, and then take their place.
-  std::vector<int16_t>& xs = lineXPosScratch_;
   xs.reserve(count + total);
   const auto place = [&](const size_t i, const std::string_view text, const std::string_view form, const GlyphRun run,
                          const TokenBoundary::Boundary boundary, const int x) {
@@ -2872,7 +2957,6 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
     state.pieceBoundaries.push_back(boundary);
     xs.push_back(static_cast<int16_t>(x));
   };
-  size_t copyBytes = 0;  // of the forms that hold a soft hyphen
   for (size_t t = 0; t < count; ++t) {
     const size_t i = first + t;
     state.tokenPieces.push_back(static_cast<uint16_t>(state.pieceWords.size()));
@@ -2892,7 +2976,6 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
       if (piece.kind == IndicShaper::PieceKind::Text && onlySoftHyphens(bytes)) continue;
       const std::string_view form =
           piece.kind == IndicShaper::PieceKind::Reordered ? store.form(piece) : std::string_view();
-      if (form.find(SOFT_HYPHEN_UTF8) != std::string_view::npos) copyBytes += form.size();
       place(i, bytes, form, piece.kind == IndicShaper::PieceKind::Glyphs ? store.glyphs(piece) : GlyphRun{},
             placed ? TokenBoundary::Boundary{true, false} : wordBoundaries[i], at);
       placed = true;
@@ -2902,8 +2985,8 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
   xs.erase(xs.begin(), xs.begin() + static_cast<std::ptrdiff_t>(count));
 
   // A Reordered form keeps the token's soft hyphens, which TextBlock strips from a word's text and not from its form:
-  // such a form is drawn from a copy without them. Reserved whole first: no reallocation below, so the views into the
-  // copies stay valid.
+  // such a form is drawn from a copy without them. Reserved whole first, under the heap check above: no reallocation
+  // below, so the views into the copies stay valid.
   if (copyBytes > 0) {
     std::string& copies = state.formCopies;
     copies.clear();

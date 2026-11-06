@@ -2,6 +2,7 @@
 // are shaped through a FixtureShapingFace over the TrueType Devanagari subset, installed through the stub renderer's
 // seam; the expected records are the oracle's, ot::shape at the same size (ottest::shapeAsStored). The forms the tokens
 // take on their lines, piece by piece (steps 7-9), are the ShapedLine suite's.
+#include <Arduino.h>
 #include <BuildArena.h>
 #include <EpdFontData.h>
 #include <GlyphRun.h>
@@ -67,6 +68,19 @@ struct Seam {
     if (face != nullptr) *ppem26_6 = ppem;
     return face;
   }
+};
+
+// The largest free block the layout's heap checks read (the shim's ESP.getMaxAllocHeap()), for a scope. Nothing is
+// refused by it: only the checks see it, so a test makes every other container already hold what its pass needs.
+class LargestFreeBlock {
+ public:
+  explicit LargestFreeBlock(const uint32_t bytes) : saved_(ESP.getMaxAllocHeap()) { ESP.setMaxAllocHeap(bytes); }
+  ~LargestFreeBlock() { ESP.setMaxAllocHeap(saved_); }
+  LargestFreeBlock(const LargestFreeBlock&) = delete;
+  LargestFreeBlock& operator=(const LargestFreeBlock&) = delete;
+
+ private:
+  uint32_t saved_;
 };
 
 struct Word {
@@ -538,6 +552,111 @@ TEST_F(ShapedLayout, ARefusedCallLaysTheTokenOutAsCodePointsAndLatches) {
   add(text, {{kHindi}, {kPatrika}});
   EXPECT_EQ(1u, layOut(text, renderer, fits).size());
   EXPECT_EQ(4u, text.tokensShaped());
+}
+
+// The heap checks before the shaped layout's containers grow. Each test lays out a warm-up paragraph first, so that
+// every container but the one under test already holds what the next pass needs; that pass then runs with a largest
+// free block too small for the one growth.
+
+TEST_F(ShapedLayout, AMergeTheHeapRefusesKeepsTheTokensApartAndLatches) {
+  // हि and न्दी in one style, glued, are one token (ASpanSplitOfOneStyleIsByteForByteOneToken), whose text grows हि's
+  // string: 18 B past its 15, a block of 47 B with the allocator's slack. Refused, the two stay apart, each shaped with
+  // the other as context.
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{kHindi}, {kPatrika}, {kPrarthana}, {kGyan}});
+  ASSERT_EQ(1u, layOut(text, renderer, 400).size());
+  ASSERT_FALSE(latch);
+  text.reset(noIndentStyle());
+  add(text, {{kHi}, {kNdi, EpdFontFamily::REGULAR, true}});
+  Lines lines;
+  {
+    const LargestFreeBlock block(32);
+    lines = layOut(text, renderer, 400);
+  }
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0]->wordCount());
+  EXPECT_EQ(kHi, lines[0]->wordText(0));
+  EXPECT_EQ(kNdi, lines[0]->wordText(1));
+  EXPECT_TRUE(latch);
+}
+
+TEST_F(ShapedLayout, ATokenTheHeapHasNoRoomToMeasureIsLaidOutAsCodePoints) {
+  // Without a face a token is one Reordered piece, measured from a copy of its form. The warm-up's form, कि's, fits the
+  // copy's 15 B; the next token's, 48 B, asks for a block of 65 B. Refused, the token is laid out as its code points.
+  Seam::face = nullptr;
+  std::string kis;
+  for (int k = 0; k < 8; ++k) kis += kKi;
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{kKi}});
+  ASSERT_EQ(1u, layOut(text, renderer, 400).size());
+  ASSERT_FALSE(latch);
+  text.reset(noIndentStyle());
+  add(text, {{kis}});
+  Lines lines;
+  {
+    const LargestFreeBlock block(48);
+    lines = layOut(text, renderer, 4000);
+  }
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(1u, lines[0]->wordCount());
+  EXPECT_FALSE(lines[0]->hasDisplayForm(0));
+  EXPECT_EQ(kis, lines[0]->wordDrawText(0));
+  EXPECT_TRUE(latch);
+}
+
+TEST_F(ShapedLayout, ASplitTheHeapHasNoRoomForIsNotMadeAndLatches) {
+  // AForcedSplitFallsBetweenSyllables's compound copies each candidate prefix into one string, grown once to the word
+  // and a hyphen. The warm-up lays the compound out whole, so no candidate was copied; the split asks for the string,
+  // which the heap refuses: the compound is not split.
+  const std::string compound = kHindi + kPatrika + kPrarthana + kGyan + kSanskritam;
+  constexpr int kColumn = 60;
+  ASSERT_GT(shapedPx(compound), kColumn);
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{compound}});
+  ASSERT_EQ(1u, layOut(text, renderer, 4000).size());
+  ASSERT_FALSE(latch);
+  text.reset(noIndentStyle());
+  add(text, {{compound}});
+  Lines lines;
+  {
+    const LargestFreeBlock block(48);
+    lines = layOut(text, renderer, kColumn);
+  }
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(1u, lines[0]->wordCount());
+  EXPECT_EQ(compound, lineText(*lines[0]));
+  EXPECT_TRUE(latch);
+}
+
+TEST_F(ShapedLayout, ACandidateTheHeapHasNoRoomToMeasureLatches) {
+  // हि, forty Latin letters and हिन्दी are one token of three pieces: the letters a Text piece of 40 B, measured from a
+  // copy that grows to them. A candidate cut where the letters end is हि, the letters and a hyphen: its Text piece is
+  // 41 B, past the copy's 40, and the heap refuses the 97 B it asks for. That candidate is measured as code points, as
+  // one that could not be shaped is, and latches. The warm-up's split, of a longer compound of glyph runs alone, leaves
+  // the candidates' string the room this word needs.
+  const std::string letters(40, 'a');
+  const std::string word = kHi + letters + kHindi;
+  const std::string compound = kHindi + kPatrika + kPrarthana + kGyan + kSanskritam;
+  ASSERT_GT(compound.size(), word.size());
+  constexpr int kColumn = 200;
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{compound}});
+  ASSERT_GE(layOut(text, renderer, 60).size(), 2u);
+  ASSERT_FALSE(latch);
+  text.reset(noIndentStyle());
+  add(text, {{word}});
+  Lines lines;
+  {
+    const LargestFreeBlock block(64);  // the token's own copy (57 B) fits; the candidate's does not
+    lines = layOut(text, renderer, kColumn);
+  }
+  ASSERT_GE(lines.size(), 2u);  // split at a candidate that was measured
+  EXPECT_EQ('-', lineText(*lines[0]).back());
+  EXPECT_TRUE(latch);
 }
 
 TEST_F(ShapedLayout, AFontThatCannotShapeBuildsNoPlan) {
@@ -1136,4 +1255,56 @@ TEST_F(ShapedLine, AFaceReleasedBetweenTwoPassesShapesAfresh) {
       }
     }
   }
+}
+
+TEST_F(ShapedLine, ALineTheHeapHasNoRoomForKeepsItsBytesAndLatches) {
+  // The warm-up, one word a line, leaves the piece vectors room for one piece; the next line holds three, and the heap
+  // refuses their growth: the line keeps its bytes, its tokens drawn as their code points.
+  const int width = std::max(shapedPx(kHindi), shapedPx(kPatrika));
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{kHindi}, {kPatrika}, {kHindi}});
+  ASSERT_EQ(3u, layOut(text, renderer, width).size());
+  ASSERT_FALSE(latch);
+  text.reset(noIndentStyle());
+  add(text, {{kHindi}, {kPatrika}, {kHindi}});
+  Lines lines;
+  {
+    const LargestFreeBlock block(32);
+    lines = layOut(text, renderer, 400);
+  }
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(3u, lines[0]->wordCount());
+  for (uint16_t i = 0; i < 3; ++i) EXPECT_FALSE(lines[0]->hasGlyphForm(i)) << i;
+  EXPECT_EQ(kPatrika, lines[0]->wordDrawText(1));
+  EXPECT_TRUE(latch);
+}
+
+TEST_F(ShapedLine, AFormCopyTheHeapHasNoRoomForKeepsTheLinesBytes) {
+  // Without a face a token is one Reordered piece; a soft hyphen in it is drawn from a copy of the form without it
+  // (ASoftHyphenInsideATokenIsNoWordOfItsOwn). The warm-up, a longer token without one, leaves every other container
+  // the room; the copy of the next token's 44 B form asks for a block of 61 B, which the heap refuses: the line keeps
+  // its bytes.
+  Seam::face = nullptr;
+  std::string eight;
+  for (int k = 0; k < 8; ++k) eight += kKi;
+  std::string six;
+  for (int k = 0; k < 6; ++k) six += kKi;
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{eight}});
+  ASSERT_EQ(1u, layOut(text, renderer, 4000).size());
+  ASSERT_FALSE(latch);
+  text.reset(noIndentStyle());
+  add(text, {{six + kSoftHyphen + kKi}});
+  Lines lines;
+  {
+    const LargestFreeBlock block(48);
+    lines = layOut(text, renderer, 4000);
+  }
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(1u, lines[0]->wordCount());
+  EXPECT_FALSE(lines[0]->hasDisplayForm(0));
+  EXPECT_EQ(six + kKi, lines[0]->wordDrawText(0));
+  EXPECT_TRUE(latch);
 }
