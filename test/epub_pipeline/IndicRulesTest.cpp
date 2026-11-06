@@ -3,6 +3,7 @@
 // cluster). Each case lays a one-chapter book out through the host pipeline and reads the first page back.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -66,6 +67,34 @@ struct IndicRules : testing::Test {
   }
 };
 
+// Each page's words and its footnotes' numbers, for a one-chapter book of `body`.
+struct PageText {
+  std::vector<std::string> words;
+  std::vector<std::string> footnotes;
+};
+
+std::vector<PageText> pagesOf(const fs::path& work, const int index, const std::string& body) {
+  syntheticBook(work, index, body);
+  pipeline_harness::Profile profile;
+  std::vector<PageText> pages;
+  const std::string tag = std::to_string(index);
+  const bool ok =
+      pipeline_harness::forEachPage((work / ("book" + tag + ".epub")).string(), (work / ("pages" + tag)).string(),
+                                    profile, [&](int, const Section&, const Page& page, GfxRenderer&) {
+                                      PageText& text = pages.emplace_back();
+                                      for (const auto& element : page.elements) {
+                                        if (element->getTag() != TAG_PageLine) continue;
+                                        const TextBlock& block = *static_cast<const PageLine&>(*element).getBlock();
+                                        for (uint16_t i = 0; i < block.wordCount(); ++i)
+                                          text.words.emplace_back(block.wordText(i));
+                                      }
+                                      for (const auto& footnote : page.footnotes)
+                                        text.footnotes.emplace_back(footnote.number);
+                                    });
+  EXPECT_TRUE(ok);
+  return pages;
+}
+
 const std::string kFiller =
     " of this opening paragraph wraps beside a drop cap, line after line, until the cap is passed and the text "
     "goes on for a good while longer so that two full lines are filled before the paragraph ends.";
@@ -99,4 +128,32 @@ TEST_F(IndicRules, NoDropCapIsCapturedIntoAnIndicLetter) {
   const FirstPage latin =
       firstPage("<p><span style=\"float: left; font-size: 3em\">T</span>his" + kFiller + "</p>", false);
   EXPECT_EQ(1, latin.dropCaps);
+}
+
+TEST_F(IndicRules, AFootnoteAfterMergedWordsStaysOnItsAnchorsPage) {
+  // A style change inside a syllable (हिन्द<b>ी</b>) cuts the parser's word in two, and layout merges the parts back
+  // (deviation 7). A footnote's anchor is placed by the tokens the parser added, so a line counts a merged token as
+  // its parts: the same text unsplit pages the same, footnotes included, and each footnote is on the page that draws
+  // its anchor, the last line of a page as well.
+  const auto body = [](const bool split) {
+    std::string paragraph = "<p>";
+    for (int i = 1; i <= 600; ++i) {
+      paragraph += split ? "हिन्द<b>ी</b>" : "हिन्दी";
+      if (i % 5 == 0) paragraph += " <a href=\"#f" + std::to_string(i) + "\">" + std::to_string(i) + "</a>";
+      paragraph += " ";
+    }
+    return paragraph + "</p>";
+  };
+  const std::vector<PageText> whole = pagesOf(work, 0, body(false));
+  const std::vector<PageText> split = pagesOf(work, 1, body(true));
+  ASSERT_GT(whole.size(), 2u);
+  ASSERT_EQ(whole.size(), split.size());
+  for (size_t p = 0; p < whole.size(); ++p) {
+    EXPECT_EQ(whole[p].words, split[p].words) << "page " << p;
+    EXPECT_EQ(whole[p].footnotes, split[p].footnotes) << "page " << p;
+    for (const std::string& number : split[p].footnotes) {
+      EXPECT_NE(std::find(split[p].words.begin(), split[p].words.end(), number), split[p].words.end())
+          << "footnote " << number << " on page " << p;
+    }
+  }
 }

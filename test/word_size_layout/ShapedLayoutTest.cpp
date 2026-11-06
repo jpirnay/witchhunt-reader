@@ -1,4 +1,4 @@
-// Ours (writing modes step 2, PR 3): ParsedText shapes its Indic tokens ("How shaping runs" steps 2-6 and 10). Words
+// Ours (writing modes step 2): ParsedText shapes its Indic tokens ("How shaping runs" steps 2-6 and 10). Words
 // are shaped through a FixtureShapingFace over the TrueType Devanagari subset, installed through the stub renderer's
 // seam; the expected records are the oracle's, ot::shape at the same size (ottest::shapeAsStored). The forms the tokens
 // take on their lines are the ShapedLine suite's.
@@ -43,11 +43,19 @@ constexpr uint32_t kPpem = 1280;                     // 20 px a em
 constexpr int kGlyph = GfxRenderer::GLYPH_W;         // the stub's code point, and so a hyphen's, width
 constexpr int kSpace = GfxRenderer::SPACE_W;
 
-// The face the seam hands out, at the ppem it reports; null: no font shapes.
+// The face the seam hands out, at the ppem it reports; null: no font shapes. `refusals`: how many asks answer null
+// first, as a face refused its memory does.
 struct Seam {
   static inline ShapingFace* face = nullptr;
   static inline uint32_t ppem = kPpem;
+  static inline int refusals = 0;
+  static inline int asks = 0;
   static ShapingFace* source(int /*fontId*/, EpdFontFamily::Style /*style*/, uint32_t* ppem26_6) {
+    ++asks;
+    if (refusals > 0) {
+      --refusals;
+      return nullptr;
+    }
     if (face != nullptr) *ppem26_6 = ppem;
     return face;
   }
@@ -118,6 +126,8 @@ class ShapedLayout : public testing::Test {
     face = std::make_unique<FixtureShapingFace>(readFont(TTF_FIXTURE_DIR, "NotoSansDevanagari-Shaping-Regular.ttf"));
     Seam::face = face.get();
     Seam::ppem = kPpem;
+    Seam::refusals = 0;
+    Seam::asks = 0;
     GfxRenderer::shapingFaceSource = &Seam::source;
   }
   void TearDown() override {
@@ -302,6 +312,69 @@ TEST_F(ShapedLayout, AnEmphasisMarkIsPartOfTheStyle) {
   }
 }
 
+TEST_F(ShapedLayout, ANeighbourOfAMergedTokenIsShapedAgain) {
+  // म and क (bold, glued) are kept apart and kept for the next pass, which brings क's i-matra: क and ि merge, so म's
+  // glued neighbour, its context, is now कि.
+  const int width = shapedPx(kHindi);
+  ParsedText text(false, false, noIndentStyle());
+  add(text, {{kHindi}, {kMa}, {kKa, EpdFontFamily::BOLD, true}});
+  EXPECT_EQ(1u, layOut(text, renderer, width, /*includeLastLine=*/false).size());
+  EXPECT_EQ(3u, text.tokensShaped());
+  add(text, {{kIMatra, EpdFontFamily::BOLD, true}});
+  const Lines lines = layOut(text, renderer, 400);
+  ASSERT_EQ(1u, lines.size());
+  ASSERT_EQ(2u, lines[0]->wordCount());
+  EXPECT_EQ(kMa, lines[0]->wordText(0));
+  EXPECT_EQ(kKi, lines[0]->wordText(1));
+  EXPECT_EQ(5u, text.tokensShaped());  // कि, and म again with it as its context
+}
+
+TEST_F(ShapedLayout, AFaceIsResolvedOncePerPass) {
+  // Every key and every call of a pass reads one answer per font and style: a face refused at the first ask (its
+  // memory) is the face of a font that cannot shape for the whole pass, so no entry is stored under a key that says
+  // otherwise.
+  Seam::refusals = 1;
+  ParsedText text(false, false, noIndentStyle());
+  add(text, {{kHindi}, {kPatrika}, {kKi}});
+  EXPECT_EQ(1u, layOut(text, renderer, 400).size());
+  EXPECT_EQ(1, Seam::asks);
+  EXPECT_EQ(3u, text.tokensShaped());
+  EXPECT_EQ(0, renderer.prefetchedRuns);  // reordered, as without a face: no glyph run
+
+  // The next paragraph asks again, and shapes.
+  text.reset(noIndentStyle());
+  add(text, {{kHindi}});
+  EXPECT_EQ(1u, layOut(text, renderer, 400).size());
+  EXPECT_EQ(2, Seam::asks);
+  EXPECT_EQ(1, renderer.prefetchedRuns);
+}
+
+TEST_F(ShapedLayout, ACandidateThatCannotBeShapedLatches) {
+  // Ruling 2: every run laid out as code points because it could not be shaped latches, a forced split's candidate
+  // too, though no split follows it. हिन्दी is shaped and kept by the first pass; the second, short of memory, measures
+  // its one candidate (हि-) as code points, 30 px, which the 25 px column cannot hold.
+  constexpr int kColumn = 25;
+  ASSERT_GT(shapedPx(kHindi), kColumn);
+  BuildArena arena(64);
+  ASSERT_TRUE(arena.valid());
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  text.setLineArena(&arena);
+  add(text, {{kHindi}});
+  EXPECT_TRUE(layOut(text, renderer, 400, /*includeLastLine=*/false).empty());
+  EXPECT_FALSE(latch);
+  TextShaping::releaseBuildMemory();
+  Lines lines;
+  {
+    const AllocationRefusal refused(4096);
+    lines = layOut(text, renderer, kColumn);
+  }
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_EQ(1u, lines[0]->wordCount());  // not split
+  EXPECT_EQ(1u, text.tokensShaped());    // the token's records were the first pass's
+  EXPECT_TRUE(latch);
+}
+
 TEST_F(ShapedLayout, AMergedTokenStaysWithinItsCap) {
   // Two words of the parser's length (it cuts at 200 B) merge whole; a run of one style past 512 B stays in tokens,
   // each shaped with its neighbour as context, so neither a call's block nor the breaker's candidates grow with it.
@@ -323,6 +396,16 @@ TEST_F(ShapedLayout, AMergedTokenStaysWithinItsCap) {
     ASSERT_EQ(1u, lines.size());
     EXPECT_EQ(2u, lines[0]->wordCount());
     EXPECT_EQ(2u, text.tokensShaped());
+  }
+  {
+    // Glue inside a syllable merges past the cap: kept apart, the i-matra would be shaped without its consonant.
+    const std::string matraLed = kIMatra + ka100.substr(0, ka100.size() - kKa.size());  // 300 B
+    ParsedText text(false, false, noIndentStyle());
+    add(text, {{ka100}, {matraLed, EpdFontFamily::BOLD, true}});
+    const Lines lines = layOut(text, renderer, 4000);
+    ASSERT_EQ(1u, lines.size());
+    ASSERT_EQ(1u, lines[0]->wordCount());
+    EXPECT_EQ(ka100 + matraLed, lines[0]->wordText(0));
   }
 }
 
@@ -453,8 +536,8 @@ TEST_F(ShapedLayout, TheGlyphsAreWarmedOncePerShaping) {
 }
 
 TEST_F(ShapedLayout, ABidiParagraphShapesNothingYet) {
-  // PR 4 owns the line pass's run-cut pieces: until then a paragraph that needs bidi lays its Indic words out as code
-  // points.
+  // A paragraph that needs bidi shapes nothing: the line pass's pieces are not cut at runs, so a shaped run could
+  // straddle two of them. Its Indic words are laid out as code points.
   ParsedText text(false, false, noIndentStyle());
   text.setShapingLatch(&latch);
   add(text, {{"שלום"}, {kHindi}});

@@ -34,6 +34,9 @@ struct Boundary {
   bool noSpaceBefore = false;  // no space either; with continues=false, a breakable CJK gap
   // Bits 0-1 RubyRole; bits 2-5 the emphasis mark (TextEmphasis); bit 6 the combine request (text-combine-upright).
   uint8_t annotation = 0;
+  // The tokens ParsedText merged into this one (deviation 7). A line counts them, so its token count is the parser's,
+  // by which a footnote finds the line that holds its anchor. Kept here, so it travels with the token.
+  uint8_t merged = 0;
 };
 
 constexpr bool allowsBreak(const Boundary b) { return allowsBreak(b.continues, b.noSpaceBefore); }

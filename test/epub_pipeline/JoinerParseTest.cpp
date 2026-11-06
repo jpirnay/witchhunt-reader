@@ -104,8 +104,9 @@ TEST_F(Joiners, AJoinerStaysWithTheLetterAfterItAtTheBufferLimit) {
   // 2 + 65 * 3 = 197 bytes in the word buffer (limit 200) when the joiner comes; the joiner and ष need 6 more.
   std::string word = "ab";
   for (int i = 0; i < 65; ++i) word += "क";
-  // The parser's cut shows in a paragraph that needs bidi, which shapes nothing yet; one that shapes merges the two
-  // tokens back into the word they were cut from (deviation 7).
+  // The parser's cut shows in a paragraph that needs bidi, which merges no Indic tokens (it shapes nothing: the line
+  // pass's pieces are not cut at runs); one that shapes merges the two back into the word they were cut from
+  // (deviation 7).
   const Words words = wordsOf("<p dir=\"rtl\">" + word + kZwj + "ष</p>");
   ASSERT_GE(words.size(), 2u);
   EXPECT_EQ(words.back(), kZwj + "ष");
@@ -150,7 +151,8 @@ TEST_F(Joiners, AJoinerSplitFromItsLetterByAChunkBoundaryIsKept) {
 
 TEST_F(Joiners, AJoinerAtAnInlineElementsEdgeIsKept) {
   // The joiner waits across the edge and opens the next token, ahead of the letter it precedes. The parser's tokens
-  // show in a paragraph that needs bidi, which shapes nothing yet.
+  // show in a paragraph that needs bidi, which merges no Indic tokens (it shapes nothing: the line pass's pieces are
+  // not cut at runs).
   const Words split = {"क्", kZwj + "ष"};
   EXPECT_EQ(wordsOf("<p dir=\"rtl\">क्<b>" + kZwj + "ष</b></p>"), split);
   EXPECT_EQ(wordsOf("<p dir=\"rtl\">क्" + kZwj + "<b>ष</b></p>"), split);

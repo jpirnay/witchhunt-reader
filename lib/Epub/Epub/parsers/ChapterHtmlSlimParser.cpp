@@ -1412,6 +1412,9 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
         activeFloatBottom_ = static_cast<int16_t>(
             currentPageNextY + (splitBlockStyle.floatZones[0].bottom - splitBlockStyle.floatZones[0].top));
       }
+      // The bases are counted from the end below: the pass must not merge them (deviation 7) before their reading
+      // makes them a group.
+      if (pendingBases != kNoRubyGroup) currentTextBlock->keepUnmergedFrom(currentTextBlock->size() - pendingBases);
       currentTextBlock->layoutAndExtractLines(
           renderer, fontId, effectiveWidth,
           [this](std::unique_ptr<TextBlock> textBlock, const bool lineEndsWithHyphenatedWord,
@@ -4421,8 +4424,9 @@ void ChapterHtmlSlimParser::endElementBody(ChapterHtmlSlimParser* self, const ch
   if (self->insideFootnoteLink && self->depth == self->footnoteLinkDepth) {
     if (self->currentFootnote.number[0] != '\0' && self->currentFootnote.href[0] != '\0') {
       FootnoteEntry entry = self->currentFootnote;
-      int wordIndex =
-          self->wordsExtractedInBlock + (self->currentTextBlock ? static_cast<int>(self->currentTextBlock->size()) : 0);
+      // In the parser's tokens, as each line counts them: a token layout merged counts as its parts.
+      int wordIndex = self->wordsExtractedInBlock +
+                      (self->currentTextBlock ? static_cast<int>(self->currentTextBlock->sourceTokenCount()) : 0);
       self->pendingFootnotes.push_back({wordIndex, entry});
     }
     if (self->inlineFootnotePreviews && self->currentFootnote.href[0] != '\0') {

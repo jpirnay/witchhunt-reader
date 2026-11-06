@@ -432,11 +432,22 @@ static std::vector<TokenSpan> tokenizeBionicWord(const std::string& word) {
 }  // namespace
 
 // What a paragraph that shapes keeps across its passes (see shapingState_): the store, and two strings that keep their
-// capacity across tokens, the bytes of a piece being measured and a candidate prefix the breaker shapes.
+// capacity across tokens, the bytes of a piece being measured and a candidate prefix the breaker shapes. And the
+// pass's face answers (shapingFaceFor), forgotten at each pass's start and end.
 struct ParsedText::ShapingState {
   ShapedStore store;
   std::string measureScratch;
   std::string candidate;
+  struct FaceAnswer {
+    int fontId = 0;
+    uint8_t style = 0;  // its BOLD_ITALIC bits
+    ShapingFace* face = nullptr;
+    uint32_t ppem26_6 = 0;  // the face's, before the font's base scale
+  };
+  // A paragraph's fonts and styles in a pass: more are asked of the renderer at each use.
+  static constexpr uint8_t kFaceAnswers = 8;
+  FaceAnswer faces[kFaceAnswers];
+  uint8_t faceCount = 0;
 };
 
 ParsedText::ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled, const BlockStyle& blockStyle,
@@ -749,6 +760,7 @@ void ParsedText::decideShaping() {
       return;
     }
   }
+  forgetFaceAnswers();
   ShapedStore& store = shapingState_->store;
   if (store.size() > words.size()) store.reset();  // entries past the words cannot be in step with them
   // The kept tokens' last was shaped as the paragraph's end: a token glued to it has arrived since.
@@ -773,12 +785,27 @@ bool ParsedText::sameStyle(const int fontId, const size_t a, const size_t b) con
 // shaping call's block and the breaker's candidates grow with the token, so a run of one style with no space in it
 // (the parser cuts its words at 200 B) must not become one token of any length. 512 B is 170 Indic code points.
 constexpr size_t kMaxMergedBytes = 512;
+// Glue inside a syllable merges up to twice that: kept apart, a sign would be shaped without its consonant. A word
+// of the cap and one of the parser's (200 B) fit; only a pathological chain of syllable-internal spans reaches it.
+constexpr size_t kMaxSyllableMergeBytes = 2 * kMaxMergedBytes;
+
+size_t ParsedText::sourceTokenCount() const {
+  size_t count = words.size();
+  for (const TokenBoundary::Boundary& b : wordBoundaries) count += b.merged;
+  return count;
+}
 
 void ParsedText::mergeGluedGroups(const int fontId) {
   const auto mergeable = [&](const size_t k) {
     const TokenBoundary::Boundary b = wordBoundaries[k];
-    return words[k] != " " && TokenBoundary::rubyRole(b) == TokenBoundary::RubyRole::None &&
+    return k < unmergedFrom_ && words[k] != " " && TokenBoundary::rubyRole(b) == TokenBoundary::RubyRole::None &&
            !TokenBoundary::combineRequested(b);
+  };
+  // Glue inside a syllable (indic::syllableBreakAllowed false across it), read as mergesWithPrevious reads it.
+  const auto insideSyllable = [&](const size_t j) {
+    if (words[j - 1].empty() || words[j].empty()) return false;
+    size_t pos = 0;
+    return !indic::syllableBreakAllowed(lastCodepoint(words[j - 1]), TextShaping::decodeAt(words[j], pos));
   };
   // Each maximal run of glued tokens, [start, end).
   for (size_t start = 0; start < words.size();) {
@@ -792,11 +819,16 @@ void ParsedText::mergeGluedGroups(const int fontId) {
       // words[j - 1] is the token merged so far: its style is its first part's.
       const TextShaping::GroupToken previous{words[j - 1], 0};
       const TextShaping::GroupToken token{words[j], sameStyle(fontId, j - 1, j) ? 0u : 1u};
-      if (!mergeable(j - 1) || !mergeable(j) || words[j - 1].size() + words[j].size() > kMaxMergedBytes ||
+      const size_t bytes = words[j - 1].size() + words[j].size();
+      const size_t cap = indicGroup && insideSyllable(j) ? kMaxSyllableMergeBytes : kMaxMergedBytes;
+      // The merged count is a byte: a merge past it would lose the parser's count.
+      const unsigned merged = wordBoundaries[j - 1].merged + 1u + wordBoundaries[j].merged;
+      if (!mergeable(j - 1) || !mergeable(j) || bytes > cap || merged > UINT8_MAX ||
           !TextShaping::mergesWithPrevious(previous, token, indicGroup)) {
         ++j;
         continue;
       }
+      wordBoundaries[j - 1].merged = static_cast<uint8_t>(merged);
       words[j - 1] += words[j];
       words.erase(words.begin() + j);
       wordStyles.erase(wordStyles.begin() + j);
@@ -818,15 +850,14 @@ void ParsedText::mergeGluedGroups(const int fontId) {
 
 bool ParsedText::readyShapedStore() {
   ShapedStore& store = shapingState_->store;
-  size_t tokens = 0;
+  // The estimate, for the tokens this pass adds to the store: an entry each, and 2 B of records a byte of their Indic
+  // text (the kept tokens' records are in the chunks already). Refused, the chunks are still asked for one at a time.
+  const size_t added = words.size() > store.size() ? words.size() - store.size() : 0;
   size_t bytes = 0;
-  for (const std::string& w : words) {
-    if (!IndicShaper::holdsIndic(w)) continue;
-    ++tokens;
-    bytes += w.size();
+  for (size_t i = store.size(); i < words.size(); ++i) {
+    if (IndicShaper::holdsIndic(words[i])) bytes += words[i].size();
   }
-  // The estimate: 2 B of records a byte of Indic text. Refused, the chunks are still asked for one at a time.
-  store.reserve(tokens, 2 * bytes);
+  store.reserve(added, 2 * bytes);
   while (store.size() < words.size()) {
     if (!store.insert(store.size())) {
       LOG_ERR("SHP", "No room for %u shaped-store entries: pass laid out unshaped",
@@ -845,13 +876,37 @@ ShapingFace* ParsedText::shapingFaceFor(const GfxRenderer& renderer, const int f
   // A vertical line refuses glyph forms on load (TextBlock::bidiValid): its Indic words take IndicReorder's form.
   if (vertical_) return nullptr;
   const int font = wordFontId(i, fontId);
+  const auto style = static_cast<uint8_t>(wordStyles[i] & EpdFontFamily::BOLD_ITALIC);
+  ShapingFace* face = nullptr;
   uint32_t ppem = 0;
-  ShapingFace* const face =
-      renderer.shapingFace(font, static_cast<EpdFontFamily::Style>(wordStyles[i] & EpdFontFamily::BOLD_ITALIC), &ppem);
+  // The pass's answer for this font and style; the first ask makes it (a cache: shapeKey and glyphEdge are const).
+  ShapingState::FaceAnswer* answer = nullptr;
+  if (shapingState_) {
+    ShapingState& state = *shapingState_;
+    for (uint8_t a = 0; a < state.faceCount && answer == nullptr; ++a) {
+      if (state.faces[a].fontId == font && state.faces[a].style == style) answer = &state.faces[a];
+    }
+    if (answer == nullptr && state.faceCount < ShapingState::kFaceAnswers) {
+      answer = &state.faces[state.faceCount++];
+      answer->fontId = font;
+      answer->style = style;
+      answer->face = renderer.shapingFace(font, static_cast<EpdFontFamily::Style>(style), &answer->ppem26_6);
+    }
+  }
+  if (answer != nullptr) {
+    face = answer->face;
+    ppem = answer->ppem26_6;
+  } else {
+    face = renderer.shapingFace(font, static_cast<EpdFontFamily::Style>(style), &ppem);
+  }
   if (face == nullptr) return nullptr;
   // Records are in drawn pixels: the word is shaped at the size it is drawn at.
   *drawnPpem = static_cast<uint32_t>(static_cast<float>(ppem) * renderer.fontBaseScale(font) * wordScale(i) + 0.5f);
   return face;
+}
+
+void ParsedText::forgetFaceAnswers() {
+  if (shapingState_) shapingState_->faceCount = 0;
 }
 
 uint32_t ParsedText::shapeKey(const GfxRenderer& renderer, const int fontId, const size_t i) const {
@@ -944,12 +999,15 @@ int ParsedText::shapedPrefixWidth(const GfxRenderer& renderer, const int fontId,
   const std::string_view before =
       i > 0 && wordBoundaries[i].continues ? std::string_view(words[i - 1]) : std::string_view();
   if (state.store.open(state.store.size(), candidate, 0)) {
-    if (shapeInto(renderer, fontId, i, candidate, before, std::string_view()) == IndicShaper::Outcome::Formed) {
+    const IndicShaper::Outcome outcome = shapeInto(renderer, fontId, i, candidate, before, std::string_view());
+    if (outcome == IndicShaper::Outcome::Formed) {
       width = 0;
       for (const ShapedStore::Piece& piece : state.store.openPieces()) {
         width += measurePiece(renderer, font, wordStyles[i], wordScale(i), vertical_, state.store, piece, candidate,
                               state.measureScratch);
       }
+    } else if (outcome == IndicShaper::Outcome::Degraded) {
+      latchShapingDegraded();  // measured as code points below, as any run that could not be shaped is laid out
     }
     state.store.abandon();
   }
@@ -979,6 +1037,7 @@ void ParsedText::layoutAndExtractLines(
     // The block held nothing but bidi controls. Its paragraph ends here as at the end of any last pass below: the
     // parser may merge the next one into the block, which then decides its own direction.
     if (includeLastLine && !preserveSource) forgetBidiParagraph();
+    unmergedFrom_ = SIZE_MAX;
     return;
   }
 
@@ -993,6 +1052,7 @@ void ParsedText::layoutAndExtractLines(
   // tokens that are laid out, as it is of the text without the dropped controls.
   decideShaping();
   mergeGluedGroups(fontId);
+  unmergedFrom_ = SIZE_MAX;
 
   resolveAlignment(rtl());
   // Upstream's flip: a right-to-left paragraph sets a left alignment the book did not ask for (the reader's) right.
@@ -1308,6 +1368,7 @@ void ParsedText::layoutAndExtractLines(
   // A pass that lays the last line out ends the paragraph. The parser may hand the drained block more words without a
   // reset (<hr> or a table drains it, and the next paragraph merges into the empty block): they are a new paragraph.
   if (includeLastLine && !preserveSource) forgetBidiParagraph();
+  forgetFaceAnswers();
 
   if (preserveSource) {
     words = std::move(savedWords);
@@ -2659,7 +2720,10 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   const size_t lastBreakAt = breakIndex > 0 ? lineBreakIndices[breakIndex - 1] : 0;
   lastLineVisibleOffset_ = lastBreakAt < wordVisibleOffsets.size() ? wordVisibleOffsets[lastBreakAt] : 0;
   const size_t lineWordCount = lineBreak - lastBreakAt;
-  lastLineTokenCount_ = static_cast<uint32_t>(lineWordCount) + controlsOnlyTokens_;
+  // The parser's tokens: a merged token counts as its parts.
+  uint32_t lineTokens = static_cast<uint32_t>(lineWordCount);
+  for (size_t i = lastBreakAt; i < lineBreak; ++i) lineTokens += boundaries[i].merged;
+  lastLineTokenCount_ = lineTokens + controlsOnlyTokens_;
 
   // Apply indent only to line 0 of the layout pass; firstLineIndent is already
   // 0 for continuation flushes (computed once in layoutAndExtractLines).
@@ -2678,7 +2742,7 @@ ParsedText::LineProcessResult ParsedText::extractLine(
       const uint8_t maxPct = placeBidiLine(renderer, fontId, lastBreakAt, effectivePageWidth, lineIndent,
                                            lineBreak == words.size(), range);
       if (range.count == 0) {  // only controls: nothing to draw
-        controlsOnlyTokens_ += static_cast<uint32_t>(lineWordCount);
+        controlsOnlyTokens_ += lineTokens;
         stepOpenControls(lastBreakAt, lineBreak);
         return LineProcessResult::Accepted;
       }

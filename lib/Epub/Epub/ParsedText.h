@@ -2,6 +2,7 @@
 
 #include <EpdFontFamily.h>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -143,7 +144,8 @@ class ParsedText {
   // line callbacks, which only get the TextBlock.
   uint32_t lastLineVisibleOffset_ = 0;
   // The tokens the line most recently handed to processLine consumed: its token range, plus those of controls-only
-  // lines before it that never reached processLine. A bidi line stores pieces, so wordCount() is not this.
+  // lines before it that never reached processLine. Counted as the parser added them: a merged token counts as its
+  // parts (TokenBoundary::Boundary::merged). A bidi line stores pieces, so wordCount() is not this.
   uint32_t lastLineTokenCount_ = 0;
   uint32_t controlsOnlyTokens_ = 0;  // tokens of controls-only lines not yet charged to a handed-over line
   // The ruby text of each Leader token (TokenBoundary::RubyRole) of the block, in token order: the n-th Leader owns the
@@ -221,6 +223,8 @@ class ParsedText {
   bool shapes_ = false;  // this pass forms Indic words: no bidi, and a token holds U+0900-0DFF
   bool* shapingLatch_ = nullptr;
   uint32_t tokensShaped_ = 0;
+  // The first token the next pass may not merge (keepUnmergedFrom); SIZE_MAX: none. The pass clears it.
+  size_t unmergedFrom_ = SIZE_MAX;
   void latchShapingDegraded() {
     if (shapingLatch_ != nullptr) *shapingLatch_ = true;
   }
@@ -241,7 +245,11 @@ class ParsedText {
   bool readyShapedStore();
   // The face token i is shaped with, and the ppem (26.6) its glyphs are drawn at: the face's, times the font's base
   // scale, times the word's. Null (and 0) on a vertical line, which reorders instead, and for a font that cannot shape.
+  // The renderer is asked once a pass for each font and style (ShapingState's face answers), so every key and every
+  // call of a pass reads one answer.
   ShapingFace* shapingFaceFor(const GfxRenderer& renderer, int fontId, size_t i, uint32_t* drawnPpem) const;
+  // Forgets the pass's face answers: a face lives for the build, and a font set reload between passes frees it.
+  void forgetFaceAnswers();
   // What token i's entry is valid for besides its text: its font, style bits, size and scale, the font's base scale,
   // and the drawn ppem (0 without a face). Records shaped at one size are never reused at another.
   uint32_t shapeKey(const GfxRenderer& renderer, int fontId, size_t i) const;
@@ -253,7 +261,8 @@ class ParsedText {
   // sum; false: it is laid out as its code points (and latched when it could not be shaped).
   bool shapeToken(const GfxRenderer& renderer, int fontId, size_t i, uint16_t* width);
   // The width of words[i]'s first `bytes` bytes and a hyphen when `hyphen`: a candidate the breaker measures, shaped in
-  // the store's scratch entry (nothing is kept), or measured as code points when it is not shaped.
+  // the store's scratch entry (nothing is kept), or measured as code points when it is not shaped (and latched when it
+  // could not be).
   int shapedPrefixWidth(const GfxRenderer& renderer, int fontId, size_t i, size_t bytes, bool hyphen);
   // Whether token i's first piece (its last, when `last`) is a glyph run: a glued gap there takes no kerning (step 8).
   bool glyphEdge(const GfxRenderer& renderer, int fontId, size_t i, bool last) const;
@@ -498,6 +507,12 @@ class ParsedText {
   // Tokens handed to IndicShaper since construction (a candidate prefix the breaker measures is not one): for tests
   // and the build's log.
   uint32_t tokensShaped() const { return tokensShaped_; }
+  // Tokens from `first` on are not merged by the next layout pass: the bases of a ruby still open, which the parser
+  // counts until their reading makes them a group (a ruby token is never merged). The pass clears it.
+  void keepUnmergedFrom(const size_t first) { unmergedFrom_ = first; }
+  // The tokens as the parser added them: size(), with each merged token counted as its parts. A footnote's anchor is
+  // placed by it, as lastLineTokenCount() counts the lines.
+  size_t sourceTokenCount() const;
   void setBeforeLineHook(std::function<void(uint8_t maxSizePct, bool annotated)> hook) {
     beforeLine_ = std::move(hook);
   }
