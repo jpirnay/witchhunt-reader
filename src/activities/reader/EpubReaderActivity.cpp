@@ -22,6 +22,7 @@
 #include <Epub/FootnotePreviews.h>
 #include <Epub/FootnoteShape.h>
 #include <Epub/Page.h>
+#include <Epub/SpineSizeLookup.h>
 #include <Epub/TurnedFrame.h>
 #include <Epub/TypographyProfile.h>
 #include <Epub/blocks/ImageBlock.h>
@@ -2621,18 +2622,10 @@ bool EpubReaderActivity::resolvePercent(int percent, int& targetSpineIndex, floa
     return false;
   }
 
-  targetSpineIndex = spineCount - 1;
-  size_t prevCumulative = 0;
-
-  for (int i = 0; i < spineCount; i++) {
-    const size_t cumulative = epub->getCumulativeSpineItemSize(i);
-    if (targetSize <= cumulative) {
-      // Found the spine item containing the absolute position.
-      targetSpineIndex = i;
-      prevCumulative = (i > 0) ? epub->getCumulativeSpineItemSize(i - 1) : 0;
-      break;
-    }
-  }
+  // The spine item containing the absolute position.
+  targetSpineIndex =
+      findSpineForSize(spineCount, targetSize, [this](const int i) { return epub->getCumulativeSpineItemSize(i); });
+  const size_t prevCumulative = targetSpineIndex > 0 ? epub->getCumulativeSpineItemSize(targetSpineIndex - 1) : 0;
 
   const size_t cumulative = epub->getCumulativeSpineItemSize(targetSpineIndex);
   const size_t spineSize = (cumulative > prevCumulative) ? (cumulative - prevCumulative) : 0;
