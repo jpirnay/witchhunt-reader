@@ -23,7 +23,7 @@ cmake --build build/test
 ctest --test-dir build/test --output-on-failure -j
 ```
 
-Any build directory works; `test/build` is a common local choice, and every `build*/` directory is git-ignored. To iterate from inside one:
+Any build directory works; `test/build` is a common local choice, and every `build*/` directory is git-ignored. If `ccache` is installed the build uses it, which makes switching branches cheap. To iterate from inside one:
 
 ```sh
 cd test/build

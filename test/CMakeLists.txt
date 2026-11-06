@@ -16,6 +16,14 @@ set(HOST_TEST_OPT "-O1" CACHE STRING "Optimization level of a Release host test 
 string(REPLACE "-O3" "${HOST_TEST_OPT}" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
 string(REPLACE "-O3" "${HOST_TEST_OPT}" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
 
+# A compile cache, when the machine has one. CI keeps its cache between runs; on a desk, a branch switch stops costing a
+# rebuild of everything it touched.
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+  set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+  set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+endif()
+
 # On 32-bit x86 hosts (e.g. MinGW i686) GCC defaults to -mfpmath=387. The x87 FPU
 # evaluates float expressions at 80-bit extended precision and rounds only on
 # store, so a result that is exactly 460.0 under SSE can be 459.99999... here --
