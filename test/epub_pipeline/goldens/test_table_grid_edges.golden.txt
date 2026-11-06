@@ -7,41 +7,47 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=95 s=1 z=100 t=Column
    W x=215 s=1 z=100 t=Count
    W x=319 s=1 z=100 t=Changes
-  LINE y=47 x=0 align=2 mult=1.600 hfid=0 words=1
-   W x=166 s=1 z=100 t=Mid-Table
-  LINE y=94 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=47 x=0 align=2 mult=1.600 hfid=0 words=2
+   W x=166 s=1 z=100 t=Mid-
+   W x=219 s=1 z=100 t=Table
+  LINE y=94 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=18 s=0 z=100 t=PASS:
    W x=76 s=0 z=100 t=the
-   W x=116 s=0 z=100 t=two-cell
+   W x=116 s=0 z=100 t=two-
+   W x=153 s=0 z=100 t=cell
    W x=196 s=0 z=100 t=row
    W x=231 s=0 z=100 t=should
    W x=301 s=0 z=100 t=render
    W x=363 s=0 z=100 t=as
    W x=393 s=0 z=100 t=its
    W x=427 s=0 z=100 t=own
-  LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=9
-   W x=0 s=0 z=100 t=two-column
+  LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=two-
+   W x=37 s=0 z=100 t=column
    W x=103 s=0 z=100 t=band,
    W x=154 s=0 z=100 t=and
    W x=191 s=0 z=100 t=the
-   W x=228 s=0 z=100 t=three-cell
+   W x=228 s=0 z=100 t=three-
+   W x=285 s=0 z=100 t=cell
    W x=325 s=0 z=100 t=rows
    W x=366 s=0 z=100 t=below
    W x=414 s=0 z=100 t=it
    W x=436 s=0 z=100 t=as
-  LINE y=142 x=0 align=0 mult=1.000 hfid=0 words=8
+  LINE y=142 x=0 align=0 mult=1.000 hfid=0 words=9
    W x=0 s=0 z=100 t=a
    W x=19 s=0 z=100 t=separate
-   W x=101 s=0 z=100 t=three-column
+   W x=101 s=0 z=100 t=three-
+   W x=158 s=0 z=100 t=column
    W x=225 s=0 z=100 t=band.
    W x=279 s=0 z=100 t=It
    W x=305 s=0 z=100 t=should
    W x=373 s=0 z=100 t=NOT
    W x=401 s=0 z=100 t=appear
-  LINE y=166 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=166 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=as
    W x=27 s=0 z=100 t=a
-   W x=45 s=0 z=100 t=three-column
+   W x=45 s=0 z=100 t=three-
+   W x=102 s=0 z=100 t=column
    W x=168 s=0 z=100 t=row
    W x=200 s=0 z=100 t=with
    W x=240 s=0 z=100 t=an
@@ -99,10 +105,11 @@ SPINE 0 href=OEBPS/chapter1.xhtml pages=1 truncated=0 cssFallback=0
    W x=48 s=0 z=100 t=layout.
 SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
  PAGE 0 elements=6 footnotes=0
-  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=5
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=6
    W x=37 s=1 z=100 t=Ch
    W x=85 s=1 z=100 t=2:
-   W x=122 s=1 z=100 t=Full-Width
+   W x=122 s=1 z=100 t=Full-
+   W x=200 s=1 z=100 t=Width
    W x=290 s=1 z=100 t=Span
    W x=372 s=1 z=100 t=Row
   LINE y=56 x=0 align=0 mult=1.000 hfid=0 words=8
@@ -114,12 +121,13 @@ SPINE 1 href=OEBPS/chapter2.xhtml pages=1 truncated=0 cssFallback=0
    W x=297 s=0 z=100 t=stretch
    W x=369 s=0 z=100 t=the
    W x=407 s=0 z=100 t=whole
-  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=7
+  LINE y=80 x=0 align=0 mult=1.000 hfid=0 words=8
    W x=0 s=0 z=100 t=table
    W x=59 s=0 z=100 t=width,
    W x=122 s=0 z=100 t=with
    W x=169 s=0 z=100 t=the
-   W x=213 s=0 z=100 t=three-column
+   W x=213 s=0 z=100 t=three-
+   W x=270 s=0 z=100 t=column
    W x=343 s=0 z=100 t=rows
    W x=391 s=0 z=100 t=aligned
   LINE y=104 x=0 align=0 mult=1.000 hfid=0 words=4
@@ -189,7 +197,7 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=2 truncated=0 cssFallback=0
    W x=293 s=0 z=100 t=The
    W x=332 s=0 z=100 t=oversized
    W x=426 s=0 z=100 t=cell
-  LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=11
+  LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=12
    W x=0 s=0 z=100 t=lays
    W x=46 s=0 z=100 t=out
    W x=87 s=0 z=100 t=to
@@ -197,7 +205,8 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=2 truncated=0 cssFallback=0
    W x=149 s=0 z=100 t=lines
    W x=201 s=0 z=100 t=against
    W x=280 s=0 z=100 t=a
-   W x=300 s=0 z=100 t=64-line
+   W x=300 s=0 z=100 t=64-
+   W x=329 s=0 z=100 t=line
    W x=372 s=0 z=100 t=cap,
    W x=413 s=0 z=100 t=so
    W x=442 s=0 z=100 t=it
@@ -365,11 +374,12 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
    W x=368 s=0 z=100 t=cell
    W x=412 s=0 z=100 t=is
    W x=437 s=0 z=100 t=40
-  LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=9
+  LINE y=118 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=0 s=0 z=100 t=lines,
    W x=62 s=0 z=100 t=under
    W x=119 s=0 z=100 t=the
-   W x=160 s=0 z=100 t=64-line
+   W x=160 s=0 z=100 t=64-
+   W x=189 s=0 z=100 t=line
    W x=234 s=0 z=100 t=cap,
    W x=277 s=0 z=100 t=but
    W x=314 s=0 z=100 t=960px
@@ -487,10 +497,11 @@ SPINE 3 href=OEBPS/chapter4.xhtml pages=1 truncated=0 cssFallback=0
    W x=92 s=0 z=100 t=text.
 SPINE 4 href=OEBPS/chapter5.xhtml pages=4 truncated=0 cssFallback=0
  PAGE 0 elements=5 footnotes=0
-  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=4
+  LINE y=9 x=0 align=2 mult=1.600 hfid=0 words=5
    W x=70 s=1 z=100 t=Ch
    W x=118 s=1 z=100 t=5:
-   W x=160 s=1 z=100 t=Sixty-Row
+   W x=160 s=1 z=100 t=Sixty-
+   W x=253 s=1 z=100 t=Row
    W x=314 s=1 z=100 t=Table
   LINE y=56 x=0 align=0 mult=1.000 hfid=0 words=10
    W x=18 s=0 z=100 t=PASS:

@@ -584,7 +584,7 @@ TEST_P(CjkRules, LinesSitWhereTheirWidthsPutThem) {
   int pushInCaseNeed = -1;    // the push-in of that case's line with 、
   for (const auto& line : lines) {
     if (line.words.empty()) continue;
-    if (line.words.size() == 2 && line.words[0].text == "18." && line.words[1].text == "push-in") inPushInCase = true;
+    if (line.words.size() == 3 && line.words[0].text == "18." && line.words[1].text == "push-") inPushInCase = true;
     if (line.rubies.empty() && !line.cell) ++restated;
     const LineLayout layout(renderer, line, profile);
     if ((line.align == kAlignLeft || line.align == kAlignRight) && line.rubies.empty()) {

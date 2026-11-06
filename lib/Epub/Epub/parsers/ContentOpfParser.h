@@ -15,6 +15,7 @@
 
 #include "../PageProgression.h"
 #include "Epub.h"
+#include "XmlPrefix.h"
 
 class BookMetadataCache;
 
@@ -41,6 +42,9 @@ class ContentOpfParser final : public Print {
   size_t remainingSize;
   SaxParser saxParser_;
   ParserState state = START;
+  // The prefixes this book gives the OPF and Dublin Core namespaces, when they are not the usual ones.
+  XmlPrefix opfPrefix_{"http://www.idpf.org/2007/opf"};
+  XmlPrefix dcPrefix_{"http://purl.org/dc/elements/1.1/"};
   BookMetadataCache* cache;
   FsFile tempItemStore;
   // Buffered views over tempItemStore, alive one phase at a time: the writer during the
@@ -145,6 +149,7 @@ class ContentOpfParser final : public Print {
   bool metadataRead_ = false;
   bool coverIdItemIsPicture_ = false;  // coverIdItemHref is a JPEG/PNG, not a page
 
+  const char* canonicalName(const char* name, char (&canonical)[24]) const;
   static void startElement(void* userData, const char* name, const char** atts);
   static void characterData(void* userData, const char* s, int len);
   static void endElement(void* userData, const char* name);

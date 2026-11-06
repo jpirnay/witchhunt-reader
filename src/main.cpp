@@ -1611,8 +1611,7 @@ void setup() {
   // needs it (RecentBooksStore::Hold). Loaded at boot it split the largest free block for the
   // session -- the reader opened every book with 45 KB of it instead of 61 KB (X3).
   logStartupMemory("after_recent_books");
-  GLOBAL_BOOKMARKS.load();
-  logStartupMemory("after_bookmarks");
+  // Nor is the bookmark index, for the same reason: GlobalBookmarkIndex::Hold.
   // READING_STATS holds no history: every consumer streams the file (ReadingStatsStore), so there
   // is nothing to load here. Keeping it resident used to cost, measured on X4 with 36 books,
   // ~15 KB of heap and largest8 65524 -> 26612 before the first book was even opened.

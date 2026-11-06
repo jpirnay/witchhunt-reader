@@ -59,11 +59,12 @@ class ReadingSessionTracker {
   // Live read-only view of the in-flight session. Useful for UI ("you've
   // been reading for X minutes"). Returns 0 when no session is active.
   uint32_t getLiveSeconds() const;
-  uint32_t getLivePages() const { return pagesTurnedThisSession; }
+  uint32_t getLivePages() const { return carriedPages + pagesTurnedThisSession; }
   const std::string& getDocId() const { return docId; }
 
  private:
   void flushIdleSinceLastActivity();
+  void cutAtMidnight();
 
   bool active = false;
   std::string docId;
@@ -84,6 +85,10 @@ class ReadingSessionTracker {
 
   uint32_t pagesTurnedThisSession = 0;
   uint8_t lastKnownProgress = 0;
+
+  // What this sitting read before midnight, recorded already (cutAtMidnight): for the live figures only.
+  uint32_t carriedSeconds = 0;
+  uint32_t carriedPages = 0;
 };
 
 // Global tracker singleton; readers route their lifecycle calls through here.

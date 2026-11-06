@@ -23,6 +23,25 @@ inline bool allowsBreakAfterExplicitHyphen(const uint32_t cp) {
   return isExplicitHyphen(cp) && !isSoftHyphen(cp) && cp != NON_BREAKING_HYPHEN_CP;
 }
 
+// The dashes a line may end after. Narrower than allowsBreakAfterExplicitHyphen, which also answers for the ellipsis
+// and the underscore: this is what ends a word in running Latin text. Soft hyphen is invisible (a hyphenation hint),
+// non-breaking hyphen forbids breaks by definition, and minus sign is mathematical.
+inline bool isBreakableDash(const uint32_t cp) {
+  switch (cp) {
+    case '-':
+    case 0x2010:  // HYPHEN
+    case 0x2012:  // FIGURE DASH
+    case 0x2013:  // EN DASH
+    case 0x2014:  // EM DASH
+    case 0x2015:  // HORIZONTAL BAR
+    case 0x2E3A:  // TWO-EM DASH
+    case 0x2E3B:  // THREE-EM DASH
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Ours: ParsedText keeps one of these per token instead of upstream's two bit vectors, so the two
 // halves of a boundary travel together through every insert, erase and copy of the word lists.
 // The part a token plays in a ruby group (a base with its ruby text above it): the first token of the group leads,

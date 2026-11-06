@@ -36,6 +36,8 @@ size_t ContainerParser::write(const uint8_t* buffer, const size_t size) {
 
 void ContainerParser::startElement(void* userData, const char* name, const char** atts) {
   auto* self = static_cast<ContainerParser*>(userData);
+  if (self->state == START) self->prefix_.note(atts);
+  name = self->prefix_.strip(name);
 
   if (self->state == START && strcmp(name, "container") == 0) {
     self->state = IN_CONTAINER;
@@ -67,6 +69,7 @@ void ContainerParser::startElement(void* userData, const char* name, const char*
 
 void ContainerParser::endElement(void* userData, const char* name) {
   auto* self = static_cast<ContainerParser*>(userData);
+  name = self->prefix_.strip(name);
 
   if (self->state == IN_ROOTFILES && strcmp(name, "rootfiles") == 0) {
     self->state = IN_CONTAINER;

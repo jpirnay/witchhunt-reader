@@ -38,7 +38,7 @@ struct Shed {
 // Series yields before author and title: it often repeats the title. The status line carries
 // the progress and is never shed.
 inline constexpr Shed kGiveWayOrder[] = {
-    {History, 1}, {History, 0}, {Series, 1}, {Series, 0}, {Author, 1}, {Title, 2}, {Title, 1},
+    {History, 1}, {History, 0}, {Series, 1}, {Series, 0}, {Author, 1}, {Title, 3}, {Title, 2}, {Title, 1},
 };
 
 struct Placement {

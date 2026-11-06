@@ -46,9 +46,10 @@ SPINE 2 href=OEBPS/chapter3.xhtml pages=1 truncated=0 cssFallback=0
    W x=45 s=1 z=100 t=Boolean
    W x=185 s=1 z=100 t=Attribute
    W x=334 s=1 z=100 t=Forms
-  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=6
+  LINE y=38 x=0 align=0 mult=1.000 hfid=0 words=7
    W x=18 s=0 z=100 t=Visible
-   W x=77 s=0 z=100 t=lead-in
+   W x=77 s=0 z=100 t=lead-
+   W x=124 s=0 z=100 t=in
    W x=147 s=0 z=100 t=for
    W x=183 s=0 z=100 t=the
    W x=220 s=0 z=100 t=boolean

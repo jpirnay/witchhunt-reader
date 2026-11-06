@@ -301,9 +301,10 @@ SPINE 3 href=EPUB/text/ch002.xhtml pages=2 truncated=0 cssFallback=0
    W x=315 s=0 z=100 t=grid,
    W x=362 s=0 z=100 t=to
    W x=390 s=0 z=100 t=confirm
-  LINE y=282 x=0 align=0 mult=1.000 hfid=0 words=5
+  LINE y=282 x=0 align=0 mult=1.000 hfid=0 words=6
    W x=0 s=0 z=100 t=the
-   W x=37 s=0 z=100 t=non-streaming
+   W x=37 s=0 z=100 t=non-
+   W x=80 s=0 z=100 t=streaming
    W x=172 s=0 z=100 t=path
    W x=218 s=0 z=100 t=is
    W x=239 s=0 z=100 t=untouched.

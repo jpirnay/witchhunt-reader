@@ -36,6 +36,9 @@ inline bool isItemTag(const char* name) { return isTag(name, "item", "opf:item")
 inline bool isItemRefTag(const char* name) { return isTag(name, "itemref", "opf:itemref"); }
 inline bool isReferenceTag(const char* name) { return isTag(name, "reference", "opf:reference"); }
 
+// A Dublin Core element's longest name here is "dc:description"; a longer local name is one this parser does not read.
+constexpr size_t kCanonicalNameBytes = 24;  // ContentOpfParser::canonicalName takes this size
+
 bool startsWithImageMediaType(const char* mediaType) {
   constexpr size_t prefixLen = sizeof(MEDIA_TYPE_IMAGE_PREFIX) - 1;
   for (size_t i = 0; i < prefixLen; ++i) {
@@ -306,9 +309,9 @@ ContentOpfParser::Creator* ContentOpfParser::beginCreator(const char** atts) {
     const char* value = atts[i + 1];
     if (strcmp(atts[i], "id") == 0) {
       appendCapped(creator.id, value, strlen(value), MAX_CREATOR_FIELD);
-    } else if (strcmp(atts[i], "opf:role") == 0) {
+    } else if (isTag(opfPrefix_.strip(atts[i]), "role", "opf:role")) {
       appendCapped(creator.role, value, strlen(value), MAX_CREATOR_FIELD);
-    } else if (strcmp(atts[i], "opf:file-as") == 0) {
+    } else if (isTag(opfPrefix_.strip(atts[i]), "file-as", "opf:file-as")) {
       appendCapped(creator.fileAs, value, strlen(value), MAX_CREATOR_FIELD);
     }
   }
@@ -519,9 +522,28 @@ void ContentOpfParser::handleSpineItemRefElement(const char** atts) {
   }
 }
 
+// `name` as the rest of this parser spells it, whatever prefixes the book chose: an OPF element plain, a Dublin Core
+// one as "dc:title". `canonical` is the room for the second form.
+const char* ContentOpfParser::canonicalName(const char* name, char (&canonical)[24]) const {
+  if (const char* dcLocal = dcPrefix_.localName(name)) {
+    if (snprintf(canonical, sizeof(canonical), "dc:%s", dcLocal) < static_cast<int>(sizeof(canonical)))
+      return canonical;
+    return name;
+  }
+  return opfPrefix_.strip(name);
+}
+
 void ContentOpfParser::startElement(void* userData, const char* name, const char** atts) {
   auto* self = static_cast<ContentOpfParser*>(userData);
   (void)atts;
+
+  // Declared on the root by a tool that rewrites the whole file, or on <metadata> as most books do with "dc".
+  if (self->state == START || self->state == IN_PACKAGE) {
+    self->opfPrefix_.note(atts);
+    self->dcPrefix_.note(atts);
+  }
+  char canonical[kCanonicalNameBytes];
+  name = self->canonicalName(name, canonical);
 
   if (self->state == START && isPackageTag(name)) {
     self->state = IN_PACKAGE;
@@ -566,7 +588,7 @@ void ContentOpfParser::startElement(void* userData, const char* name, const char
       if (strcmp(atts[i], "id") == 0) {
         self->identifierIsUnique_ = !self->uniqueIdentifierId_.empty() && self->uniqueIdentifierId_ == atts[i + 1];
       }
-      if (strcmp(atts[i], "opf:scheme") != 0 && strcmp(atts[i], "scheme") != 0) continue;
+      if (!isTag(self->opfPrefix_.strip(atts[i]), "scheme", "opf:scheme")) continue;
       std::string scheme = atts[i + 1];
       for (char& c : scheme) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
       if (scheme.find("isbn") != std::string::npos) {
@@ -918,7 +940,8 @@ void ContentOpfParser::characterData(void* userData, const char* s, const int le
 
 void ContentOpfParser::endElement(void* userData, const char* name) {
   auto* self = static_cast<ContentOpfParser*>(userData);
-  (void)name;
+  char canonical[kCanonicalNameBytes];
+  name = self->canonicalName(name, canonical);
 
   if (self->state == IN_SPINE && isSpineTag(name)) {
     self->state = IN_PACKAGE;

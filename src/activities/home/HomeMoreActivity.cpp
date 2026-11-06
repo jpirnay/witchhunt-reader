@@ -10,7 +10,7 @@
 
 HomeMoreActivity::HomeMoreActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : MenuListActivity("HomeMore", renderer, mappedInput) {
-  const HomeMenuAvailability availability{.hasBookmarks = !GLOBAL_BOOKMARKS.isEmpty()};
+  const HomeMenuAvailability availability{.hasBookmarks = GLOBAL_BOOKMARKS.hasAny()};
   std::vector<HomeMenuEntry> entries;
   entries.reserve(5);
   collectHomeMenuEntries(HomeMenuPlacement::More, availability, entries);

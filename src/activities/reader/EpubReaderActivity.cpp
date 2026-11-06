@@ -22,6 +22,7 @@
 #include <Epub/FootnotePreviews.h>
 #include <Epub/FootnoteShape.h>
 #include <Epub/Page.h>
+#include <Epub/SpineSizeLookup.h>
 #include <Epub/TurnedFrame.h>
 #include <Epub/TypographyProfile.h>
 #include <Epub/blocks/ImageBlock.h>
@@ -130,9 +131,6 @@ std::optional<int> parsePrintedPageLabel(const std::string& label) {
   }
   return value;
 }
-// pages per minute, first item is 1 to prevent division by zero if accessed
-constexpr int PAGE_TURN_LABELS[] = {1, 1, 3, 6, 12};
-
 // Pre-render of the next page within the current chapter only runs when heap is healthy: PreRenderGate has the
 // floor, from the costs the passes measure (preRenderCostMax_).
 
@@ -987,11 +985,12 @@ void EpubReaderActivity::loop() {
 
     // Skips page turn if renderingMutex is busy
     if (RenderLock::peek()) {
-      lastPageTurnTime = millis();
       return;
     }
 
-    if ((millis() - lastPageTurnTime) >= pageTurnDuration) {
+    // Counted from when the page landed: a page that took long to build still gets its full time, and the background
+    // work after it takes none. Restarting the count while the lock was busy made 8 s a 13 s page on the X3.
+    if ((millis() - std::max(lastPageTurnTime, lastPageOnScreenMs_)) >= pageTurnDuration) {
       pageTurn(true);
       return;
     }
@@ -2625,18 +2624,10 @@ bool EpubReaderActivity::resolvePercent(int percent, int& targetSpineIndex, floa
     return false;
   }
 
-  targetSpineIndex = spineCount - 1;
-  size_t prevCumulative = 0;
-
-  for (int i = 0; i < spineCount; i++) {
-    const size_t cumulative = epub->getCumulativeSpineItemSize(i);
-    if (targetSize <= cumulative) {
-      // Found the spine item containing the absolute position.
-      targetSpineIndex = i;
-      prevCumulative = (i > 0) ? epub->getCumulativeSpineItemSize(i - 1) : 0;
-      break;
-    }
-  }
+  // The spine item containing the absolute position.
+  targetSpineIndex =
+      findSpineForSize(spineCount, targetSize, [this](const int i) { return epub->getCumulativeSpineItemSize(i); });
+  const size_t prevCumulative = targetSpineIndex > 0 ? epub->getCumulativeSpineItemSize(targetSpineIndex - 1) : 0;
 
   const size_t cumulative = epub->getCumulativeSpineItemSize(targetSpineIndex);
   const size_t spineSize = (cumulative > prevCumulative) ? (cumulative - prevCumulative) : 0;
@@ -3111,15 +3102,14 @@ void EpubReaderActivity::stopAutomaticPageTurn() {
   section.reset();
 }
 
-void EpubReaderActivity::toggleAutoPageTurn(const uint8_t selectedPageTurnOption) {
-  if (selectedPageTurnOption == 0 || selectedPageTurnOption >= std::size(PAGE_TURN_LABELS)) {
+void EpubReaderActivity::toggleAutoPageTurn(const uint8_t seconds) {
+  if (seconds == 0) {
     stopAutomaticPageTurn();
     return;
   }
 
   lastPageTurnTime = millis();
-  // calculates page turn duration by dividing by number of pages
-  pageTurnDuration = (1UL * 60 * 1000) / PAGE_TURN_LABELS[selectedPageTurnOption];
+  pageTurnDuration = seconds * 1000UL;
   automaticPageTurnActive = true;
 
   // Reset cached section when automatic page turn adds a forced status item band.
@@ -6676,7 +6666,7 @@ void EpubReaderActivity::renderStatusBar() const {
   std::string title;
 
   if (automaticPageTurnActive) {
-    title = tr(STR_AUTO_TURN_ENABLED) + std::to_string(60 * 1000 / pageTurnDuration);
+    title = tr(STR_AUTO_TURN_ENABLED) + std::to_string(pageTurnDuration / 1000) + tr(STR_SECONDS_SUFFIX);
   } else if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::CHAPTER_TITLE) {
     title = chapterTitle();
   } else if (SETTINGS.statusBarTitle == CrossPointSettings::STATUS_BAR_TITLE::BOOK_TITLE) {
@@ -7465,22 +7455,26 @@ void EpubReaderActivity::openReaderMenu() {
   // bad_alloc when the menu is opened mid section-build on a long book (heap fragmented to tens of
   // KB) — the tag 2.05 "Confirm reboots" crash.
   const bool hasPrintedPages = epub->hasNumericPrintedPages();
+  // The header names the chapter when the table of contents does.
+  std::string menuChapter = chapterTitle();
+  if (menuChapter == tr(STR_UNNAMED)) menuChapter.clear();
 
   ReaderUtils::enforceExitFullRefresh(renderer);
   startActivityForResult(
       std::make_unique<EpubReaderMenuActivity>(
-          renderer, mappedInput, epub->getTitle(), currentPage, totalPages, bookProgressPercent, SETTINGS.orientation,
-          !currentPageFootnotes.empty(), bookEmbeddedStyleOverride, bookImageRenderingOverride, bookFontFamilyOverride,
-          bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness, bookBionicReadingOverride,
-          bookGuideDotsOverride, bookParagraphAlignmentOverride, bookTextAntiAliasingOverride, bookHyphenationOverride,
-          bookFontSizeNormalizationOverride, bookInlineFootnotePreviewsOverride, bookLineSpacingOverride,
-          bookVerticalTextOverride, bookPublisherFontsOverride, bookVerticalAllowed_, !bookmarkStore.isEmpty(),
-          isCurrentPageStarred, hasPrintedPages),
+          renderer, mappedInput, epub->getTitle(), menuChapter, currentPage, totalPages, bookProgressPercent,
+          SETTINGS.orientation, !currentPageFootnotes.empty(), bookEmbeddedStyleOverride, bookImageRenderingOverride,
+          bookFontFamilyOverride, bookSdFontFamilyOverride, bookFontSizeOverride, SETTINGS.textDarkness,
+          bookBionicReadingOverride, bookGuideDotsOverride, bookParagraphAlignmentOverride,
+          bookTextAntiAliasingOverride, bookHyphenationOverride, bookFontSizeNormalizationOverride,
+          bookInlineFootnotePreviewsOverride, bookLineSpacingOverride, bookVerticalTextOverride,
+          bookPublisherFontsOverride, bookVerticalAllowed_, !bookmarkStore.isEmpty(), isCurrentPageStarred,
+          hasPrintedPages),
       [this](const ActivityResult& result) {
         const auto& menu = std::get<MenuResult>(result.data);
         applyOrientation(menu.orientation);
         applyTextDarkness(menu.textDarkness);
-        toggleAutoPageTurn(menu.pageTurnOption);
+        toggleAutoPageTurn(menu.autoTurnSeconds);
         if (applyBookReaderOverrides(
                 menu.embeddedStyleOverride, menu.imageRenderingOverride, menu.fontFamilyOverride,
                 menu.sdFontFamilyOverride, menu.fontSizeOverride, menu.bionicReadingOverride,

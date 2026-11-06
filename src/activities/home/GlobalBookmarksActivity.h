@@ -1,10 +1,12 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "../Activity.h"
+#include "GlobalBookmarkIndex.h"
 #include "util/ButtonNavigator.h"
 
 struct Rect;
@@ -42,6 +44,7 @@ class GlobalBookmarksActivity final : public Activity {
 
   ButtonNavigator buttonNavigator;
   std::vector<Row> rows;
+  std::optional<GlobalBookmarkIndex::Hold> indexHold;  // from onEnter to onExit: rows index into getEntries()
   int selectorIndex = 0;
   ReturnHint restoreHint;
 
