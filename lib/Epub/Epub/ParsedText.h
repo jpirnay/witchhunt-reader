@@ -212,12 +212,12 @@ class ParsedText {
   // Steps bidiState_->openControls over the tokens [first, end) of a line that was accepted.
   void stepOpenControls(size_t first, size_t end);
 
-  // A paragraph without bidi whose tokens hold Indic text forms them (writing modes step 2, "How shaping runs" 2-6 and
-  // 10): each such token is shaped once into a paragraph store, in step with the word vectors, whose widths break the
-  // lines and whose forms the line reads. Boxed, and defined in ParsedText.cpp, so this header includes nothing of the
-  // shaper (it is included far beyond layout). Made by the first pass that shapes; reset() empties it for the next
-  // paragraph; releaseLayoutScratch() frees it when no paragraph in progress shapes. Nothing in it holds a face or a
-  // plan: they are the renderer's, for one build.
+  // A paragraph without bidi whose tokens hold Indic text forms them (writing modes step 2, "How shaping runs" 2-10):
+  // each such token is shaped once into a paragraph store, in step with the word vectors, whose widths break the
+  // lines and whose pieces the line is drawn as. Boxed, and defined in ParsedText.cpp, so this header includes nothing
+  // of the shaper (it is included far beyond layout). Made by the first pass that shapes; reset() empties it for the
+  // next paragraph; releaseLayoutScratch() frees it when no paragraph in progress shapes. Nothing in it holds a face or
+  // a plan: they are the renderer's, for one build.
   struct ShapingState;
   std::unique_ptr<ShapingState> shapingState_;
   bool shapes_ = false;  // this pass forms Indic words: no bidi, and a token holds U+0900-0DFF
@@ -266,6 +266,14 @@ class ParsedText {
   int shapedPrefixWidth(const GfxRenderer& renderer, int fontId, size_t i, size_t bytes, bool hyphen);
   // Whether token i's first piece (its last, when `last`) is a glyph run: a glued gap there takes no kerning (step 8).
   bool glyphEdge(const GfxRenderer& renderer, int fontId, size_t i, bool last) const;
+  // A line of a paragraph that shapes, tokens [first, first + count) placed: when a token has pieces, each token
+  // becomes its pieces, in order (step 7), and true. The first piece keeps the token's boundary, the others are glued;
+  // each takes the token's style and size; a Glyphs piece is drawn as its run, a Reordered piece as its form (without
+  // its soft hyphens), and a Text piece of soft hyphens alone, which has no width, is left out. lineXPosScratch_ then
+  // holds the pieces' positions (the token's x plus the widths before it), the annotations name pieces, and `range` is
+  // pointed at ShapingState's vectors. False, nothing changed, when no token has pieces: the line keeps its bytes.
+  bool viewShapedPieces(const GfxRenderer& renderer, int fontId, size_t first, size_t count,
+                        TextBlock::WordRange& range);
 
   LinePlace linePlace_;
   BlockStyle blockStyle;

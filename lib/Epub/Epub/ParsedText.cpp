@@ -115,6 +115,12 @@ uint32_t lastCodepointPastControls(std::string_view word) {
 
 bool containsSoftHyphen(const std::string& word) { return word.find(SOFT_HYPHEN_UTF8) != std::string::npos; }
 
+// Whether `text` is soft hyphens and nothing else: TextBlock strips them, so as a word of its own it would be empty.
+bool onlySoftHyphens(std::string_view text) {
+  while (text.starts_with(SOFT_HYPHEN_UTF8)) text.remove_prefix(SOFT_HYPHEN_BYTES);
+  return text.empty();
+}
+
 // True when every codepoint of `text` but a soft hyphen (TextBlock strips them) is unspaced CJK: TextBlock's test for
 // spreading a ruby 1:2:1 rather than centring it (Ruling R4).
 bool allUnspacedCjk(const std::string& text) {
@@ -448,6 +454,18 @@ struct ParsedText::ShapingState {
   static constexpr uint8_t kFaceAnswers = 8;
   FaceAnswer faces[kFaceAnswers];
   uint8_t faceCount = 0;
+  // The line being laid out as pieces (viewShapedPieces): their texts (views into `words`), forms and runs (views into
+  // the store, or into formCopies), styles, sizes and boundaries, and each token's first piece, its last entry the
+  // line's piece count. TextBlock copies the bytes into its arena, so a line builds no string. All keep their capacity
+  // across lines.
+  std::vector<std::string_view> pieceWords;
+  std::vector<std::string_view> pieceForms;
+  std::vector<GlyphRun> pieceGlyphs;
+  std::vector<EpdFontFamily::Style> pieceStyles;
+  std::vector<TextBlock::WordSize> pieceSizes;
+  std::vector<TokenBoundary::Boundary> pieceBoundaries;
+  std::vector<uint16_t> tokenPieces;
+  std::string formCopies;  // the line's Reordered forms that held a soft hyphen, without it
 };
 
 ParsedText::ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled, const BlockStyle& blockStyle,
@@ -750,8 +768,8 @@ void ParsedText::decideShaping() {
     return;
   }
   if (!shapingState_) {
-    // About 400 B on the device (the store's chunk table, its vectors and two strings): the paragraph's across its
-    // passes, so not on the stack; its chunks then survive the paragraphs.
+    // About 630 B on the device (the store's chunk table and vectors, the face answers, the line's piece vectors and
+    // three strings): the paragraph's across its passes, so not on the stack; its chunks then survive the paragraphs.
     shapingState_ = makeUniqueNoThrow<ShapingState>();
     if (!shapingState_) {
       LOG_ERR("SHP", "OOM: shaping state (%u B): pass laid out unshaped", static_cast<unsigned>(sizeof(ShapingState)));
@@ -1507,9 +1525,18 @@ void ParsedText::releaseLayoutScratch() {
     shapingState_.reset();
     shapes_ = false;
   } else if (shapingState_) {
-    shapingState_->store.release();
-    std::string().swap(shapingState_->measureScratch);
-    std::string().swap(shapingState_->candidate);
+    ShapingState& state = *shapingState_;
+    state.store.release();
+    std::string().swap(state.measureScratch);
+    std::string().swap(state.candidate);
+    std::vector<std::string_view>().swap(state.pieceWords);
+    std::vector<std::string_view>().swap(state.pieceForms);
+    std::vector<GlyphRun>().swap(state.pieceGlyphs);
+    std::vector<EpdFontFamily::Style>().swap(state.pieceStyles);
+    std::vector<TextBlock::WordSize>().swap(state.pieceSizes);
+    std::vector<TokenBoundary::Boundary>().swap(state.pieceBoundaries);
+    std::vector<uint16_t>().swap(state.tokenPieces);
+    std::string().swap(state.formCopies);
   }
   // The word vectors carry the paragraph in progress: an empty block gives them back whole; a
   // block mid-paragraph keeps them AS THEY ARE. This used to shrink_to_fit them, and a slice
@@ -2705,6 +2732,117 @@ void ParsedText::viewWithoutControls(const size_t first, const size_t count, Tex
   range.first = 0;
 }
 
+bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId, const size_t first, const size_t count,
+                                  TextBlock::WordRange& range) {
+  if (!shapingState_) return false;
+  ShapingState& state = *shapingState_;
+  const ShapedStore& store = state.store;
+  // Token i's pieces, which its width was measured from; none for a token that was not shaped (a combined word among
+  // them: it is one em, whatever its glyphs).
+  const auto piecesOf = [&](const size_t i) -> std::optional<std::span<const ShapedStore::Piece>> {
+    if (!IndicShaper::holdsIndic(words[i])) return std::nullopt;
+    const std::optional<std::span<const ShapedStore::Piece>> pieces =
+        store.pieces(i, words[i], shapeKey(renderer, fontId, i));
+    if (!pieces || pieces->empty()) return std::nullopt;
+    return pieces;
+  };
+  bool anyPieces = false;
+  for (size_t t = 0; t < count && !anyPieces; ++t) anyPieces = piecesOf(first + t).has_value();
+  if (!anyPieces) return false;
+
+  state.pieceWords.clear();
+  state.pieceForms.clear();
+  state.pieceGlyphs.clear();
+  state.pieceStyles.clear();
+  state.pieceSizes.clear();
+  state.pieceBoundaries.clear();
+  state.tokenPieces.clear();
+  state.pieceWords.reserve(count);
+  state.pieceForms.reserve(count);
+  state.pieceGlyphs.reserve(count);
+  state.pieceStyles.reserve(count);
+  state.pieceSizes.reserve(count);
+  state.pieceBoundaries.reserve(count);
+  state.tokenPieces.reserve(count + 1);
+  // The tokens' positions are [0, count) of the x scratch: the pieces' go after them, and then take their place.
+  std::vector<int16_t>& xs = lineXPosScratch_;
+  const auto place = [&](const size_t i, const std::string_view text, const std::string_view form, const GlyphRun run,
+                         const TokenBoundary::Boundary boundary, const int x) {
+    state.pieceWords.push_back(text);
+    state.pieceForms.push_back(form);
+    state.pieceGlyphs.push_back(run);
+    state.pieceStyles.push_back(wordStyles[i]);
+    state.pieceSizes.push_back(wordSizes[i]);
+    state.pieceBoundaries.push_back(boundary);
+    xs.push_back(static_cast<int16_t>(x));
+  };
+  size_t copyBytes = 0;  // of the forms that hold a soft hyphen
+  for (size_t t = 0; t < count; ++t) {
+    const size_t i = first + t;
+    state.tokenPieces.push_back(static_cast<uint16_t>(state.pieceWords.size()));
+    const int x = xs[t];
+    const std::optional<std::span<const ShapedStore::Piece>> pieces = piecesOf(i);
+    if (!pieces) {
+      place(i, words[i], std::string_view(), GlyphRun{}, wordBoundaries[i], x);
+      continue;
+    }
+    const std::string_view text = words[i];
+    int before = 0;  // the widths of the token's pieces before this one
+    bool placed = false;
+    for (const ShapedStore::Piece& piece : *pieces) {
+      const int at = x + before;
+      before += piece.width;
+      const std::string_view bytes = text.substr(piece.begin, piece.end - piece.begin);
+      if (piece.kind == IndicShaper::PieceKind::Text && onlySoftHyphens(bytes)) continue;
+      const std::string_view form =
+          piece.kind == IndicShaper::PieceKind::Reordered ? store.form(piece) : std::string_view();
+      if (form.find(SOFT_HYPHEN_UTF8) != std::string_view::npos) copyBytes += form.size();
+      place(i, bytes, form, piece.kind == IndicShaper::PieceKind::Glyphs ? store.glyphs(piece) : GlyphRun{},
+            placed ? TokenBoundary::Boundary{true, false} : wordBoundaries[i], at);
+      placed = true;
+    }
+  }
+  state.tokenPieces.push_back(static_cast<uint16_t>(state.pieceWords.size()));
+  xs.erase(xs.begin(), xs.begin() + static_cast<std::ptrdiff_t>(count));
+
+  // A Reordered form keeps the token's soft hyphens, which TextBlock strips from a word's text and not from its form:
+  // such a form is drawn from a copy without them. Reserved whole first: no reallocation below, so the views into the
+  // copies stay valid.
+  if (copyBytes > 0) {
+    std::string& copies = state.formCopies;
+    copies.clear();
+    copies.reserve(copyBytes);
+    for (std::string_view& form : state.pieceForms) {
+      if (form.find(SOFT_HYPHEN_UTF8) == std::string_view::npos) continue;
+      const size_t at = copies.size();
+      copies.append(form);
+      for (size_t pos = copies.find(SOFT_HYPHEN_UTF8, at); pos != std::string::npos;
+           pos = copies.find(SOFT_HYPHEN_UTF8, pos)) {
+        copies.erase(pos, SOFT_HYPHEN_BYTES);
+      }
+      form = std::string_view(copies).substr(at);
+    }
+  }
+
+  // The annotations name pieces: a run over tokens covers all their pieces.
+  for (TextBlock::Annotation& a : lineAnnotations_) {
+    const uint16_t end = state.tokenPieces[a.firstWord + a.wordCount];
+    a.firstWord = state.tokenPieces[a.firstWord];
+    a.wordCount = static_cast<uint16_t>(end - a.firstWord);
+  }
+
+  range.words = nullptr;
+  range.wordViews = state.pieceWords.data();
+  range.displayForms = state.pieceForms.data();
+  range.glyphForms = state.pieceGlyphs.data();
+  range.styles = &state.pieceStyles;
+  range.sizes = &state.pieceSizes;
+  range.boundaries = &state.pieceBoundaries;
+  range.first = 0;
+  range.count = state.pieceWords.size();
+  return true;
+}
+
 void ParsedText::stepOpenControls(const size_t first, const size_t end) {
   if (!bidi_) return;
   for (size_t i = first; i < end && i < words.size(); ++i) bidiState_->openControls.advance(words[i]);
@@ -3064,7 +3202,13 @@ ParsedText::LineProcessResult ParsedText::extractLine(
   range.first = lastBreakAt;
   range.count = lineWordCount;
   range.annotations = &lineAnnotations_;
-  if (withoutBidi) viewWithoutControls(lastBreakAt, lineWordCount, range);
+  if (withoutBidi) {
+    viewWithoutControls(lastBreakAt, lineWordCount, range);
+  } else if (shapes_) {
+    // A token with a shaped run and other text is drawn as its pieces, cut at the run's edges (step 7); a line without
+    // one keeps its bytes.
+    viewShapedPieces(renderer, fontId, lastBreakAt, lineWordCount, range);
+  }
 
   uint8_t maxPct = 100;
   bool band = false;

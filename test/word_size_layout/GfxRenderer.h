@@ -6,7 +6,7 @@
 // Implements exactly the measurement/draw surface that ParsedText.cpp and
 // TextBlock.cpp use, with deterministic fixed-width metrics:
 //   - every codepoint advances GLYPH_W pixels (scaled by the per-word scale)
-//   - space advance is SPACE_W, kerning is always 0
+//   - space advance is SPACE_W, kerning is kerningPx for every pair (0 unless a test sets it)
 //   - ascender is ASCENDER, scaled variants multiply and round
 //   - font WIDE_FONT (a word font of another family) has WIDE_GLYPH_W, WIDE_SPACE_W and WIDE_ASCENDER instead
 // drawText/drawTextScaled calls are recorded so tests can assert baseline
@@ -161,8 +161,10 @@ class GfxRenderer {
   int getSpaceAdvance(const int fontId, uint32_t /*leftCp*/, uint32_t /*rightCp*/, EpdFontFamily::Style style) const {
     return getSpaceWidth(fontId, style);
   }
+  // The kerning of every code point pair, in pixels: a test of the gaps that take none sets it.
+  int kerningPx = 0;
   int getKerning(int /*fontId*/, uint32_t /*leftCp*/, uint32_t /*rightCp*/, EpdFontFamily::Style /*style*/) const {
-    return 0;
+    return kerningPx;
   }
   int getFontAscenderSize(const int fontId) const { return ascender(fontId); }
   int getFontAscenderSizeScaled(const int fontId, const float scale) const {
