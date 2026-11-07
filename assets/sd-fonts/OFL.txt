@@ -1,10 +1,22 @@
 NotoSansJP, NotoSansSC, NotoSansTC, NotoSansKR, NotoSerifJP, NotoSerifSC, NotoSerifTC and NotoSerifKR are subsets
 of Noto Sans CJK and Noto Serif CJK (releases Sans2.004 and Serif2.003, https://github.com/notofonts/noto-cjk),
-made by lib/EpdFont/scripts/cjk_subset.py, with U+FFFD from Noto Sans. The fonts carry these copyrights:
+made by lib/EpdFont/scripts/cjk_subset.py, with U+FFFD from Noto Sans. The twenty Noto Sans and Noto Serif families
+of the ten Indic scripts are the script's Noto font merged with Noto's Latin by lib/EpdFont/scripts/merge_noto_latin.py.
+The fonts carry these copyrights:
 
 Noto Sans CJK: Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
 Noto Serif CJK: Copyright 2017-2024 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
-Noto Sans: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic).
+Noto Sans and Noto Serif (the Latin, Greek and Cyrillic): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic).
+Noto Sans and Noto Serif Devanagari: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari).
+Noto Sans and Noto Serif Bengali: Copyright 2025 The Noto Project Authors (https://github.com/notofonts/bengali).
+Noto Sans and Noto Serif Gurmukhi: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/gurmukhi).
+Noto Sans and Noto Serif Gujarati: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/gujarati).
+Noto Sans and Noto Serif Oriya: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/oriya).
+Noto Sans and Noto Serif Tamil: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tamil).
+Noto Sans and Noto Serif Telugu: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/telugu).
+Noto Sans and Noto Serif Kannada: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/kannada).
+Noto Sans and Noto Serif Malayalam: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/malayalam).
+Noto Sans and Noto Serif Sinhala: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/sinhala).
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

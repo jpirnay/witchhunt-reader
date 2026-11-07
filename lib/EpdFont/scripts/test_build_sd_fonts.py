@@ -11,6 +11,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -91,6 +92,86 @@ class SdFontsYaml(unittest.TestCase):
         self.assertNotRegex(text, r"(?m)^\s*#?\s*-?\s*name:\s*(NotoSansCJK|NotoSerifCJK|NotoSansHangul)\s*$")
 
 
+TTF_SCRIPTS = ["Devanagari", "Bengali", "Gurmukhi", "Gujarati", "Oriya", "Tamil", "Telugu", "Kannada", "Malayalam",
+               "Sinhala"]
+TTF_PIN = ("https://raw.githubusercontent.com/notofonts/notofonts.github.io/"
+           "5c82cef0a8f08806f932062e18c02be62be278f0/fonts/")
+
+
+def ttf_entries():
+    config = yaml.safe_load((SCRIPTS / "sd-fonts.yaml").read_text(encoding="utf-8"))
+    return [f for f in config["families"] if f.get("format") == "ttf"]
+
+
+class TtfFamilies(unittest.TestCase):
+    def test_the_ttf_families_are_the_twenty_indic_ones(self):
+        entries = ttf_entries()
+        self.assertEqual(sorted(f["name"] for f in entries),
+                         sorted(f"Noto{kind}{x}" for kind in ("Sans", "Serif") for x in TTF_SCRIPTS))
+        for f in entries:
+            self.assertIs(f["inDownloadAll"], False, f["name"])
+            self.assertTrue(f["description"], f["name"])
+            kind = "NotoSans" if f["name"].startswith("NotoSans") else "NotoSerif"
+            for part in ("script", "latin"):
+                self.assertEqual(sorted(f["merge"][part]), ["Bold", "Regular"], f["name"])
+                for style, source in f["merge"][part].items():
+                    self.assertRegex(source["sha256"], r"^[0-9a-f]{64}$", f"{f['name']} {part} {style}")
+                    family = f["name"] if part == "script" else kind
+                    self.assertTrue(source["url"].endswith(f"/{family}/unhinted/ttf/{family}-{style}.ttf"),
+                                    source["url"])
+
+    def test_ttf_sources_are_pinned_at_one_commit(self):
+        for f in ttf_entries():
+            for part in f["merge"].values():
+                for source in part.values():
+                    self.assertTrue(source["url"].startswith(TTF_PIN), source["url"])
+
+    @unittest.skipUnless(fontTools.version == "4.63.0", "the merge is pinned to fontTools 4.63.0")
+    def test_the_merge_keeps_glyph_ids_and_moves_latin_letters(self):
+        import merge_noto_latin
+        from fontTools.fontBuilder import FontBuilder
+        from fontTools.pens.ttGlyphPen import TTGlyphPen
+
+        def tiny(path, names, cmap, advance):
+            fb = FontBuilder(1000, isTTF=True)
+            fb.setupGlyphOrder([".notdef"] + names)
+            fb.setupCharacterMap(cmap)
+            pen = TTGlyphPen(None)
+            pen.moveTo((0, 0))
+            pen.lineTo((0, 100))
+            pen.lineTo((100, 100))
+            pen.closePath()
+            glyph = pen.glyph()
+            fb.setupGlyf({n: glyph for n in [".notdef"] + names})
+            fb.setupHorizontalMetrics({n: (advance, 0) for n in [".notdef"] + names})
+            fb.setupHorizontalHeader(ascent=800, descent=-200)
+            fb.setupNameTable({"familyName": "T", "styleName": "Regular"})
+            fb.setupOS2()
+            fb.setupPost()
+            fb.save(str(path))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            script, latin = tmp / "script.ttf", tmp / "latin.ttf"
+            tiny(script, ["A", "ka"], {0x41: "A", 0x915: "ka"}, 500)
+            tiny(latin, [chr(c) for c in range(0x41, 0x5B)], {c: chr(c) for c in range(0x41, 0x5B)}, 700)
+            out = tmp / "out.ttf"
+            merge_noto_latin.merge(script, latin, out)
+            merged = TTFont(str(out))
+            cmap = merged.getBestCmap()
+            order = merged.getGlyphOrder()
+            script_order = TTFont(str(script)).getGlyphOrder()
+            self.assertEqual(order.index(cmap[0x915]), script_order.index("ka"))
+            self.assertGreaterEqual(order.index(cmap[0x41]), len(script_order))
+            self.assertEqual(merged["hmtx"][cmap[0x41]][0], 700)
+            self.assertNotIn("vhea", merged)
+            self.assertNotIn("vmtx", merged)
+            first = out.read_bytes()
+            time.sleep(1.1)  # head.modified was once stamped by the second
+            merge_noto_latin.merge(script, latin, out)
+            self.assertEqual(out.read_bytes(), first)
+
+
 class HostedFontsLicense(unittest.TestCase):
     def test_the_ofl_names_every_copyright_the_hosted_fonts_carry(self):
         fonts = REPO / "assets" / "sd-fonts"
@@ -104,6 +185,15 @@ class HostedFontsLicense(unittest.TestCase):
             self.assertIsNotNone(years, f"{path.name}: {notice}")
             self.assertIn(years.group(0), ofl, path.name)
         self.assertIn("Copyright 2022 The Noto Project Authors", ofl)
+
+    def test_the_ofl_names_every_copyright_the_ttf_fonts_carry(self):
+        fonts = REPO / "assets" / "sd-fonts"
+        ofl = (fonts / "OFL.txt").read_text(encoding="utf-8")
+        files = sorted(fonts.glob("*/*.ttf"))
+        self.assertEqual(len(files), 40)
+        for path in files:
+            notice = TTFont(str(path))["name"].getDebugName(0)
+            self.assertIn(notice.removesuffix("."), ofl, path.name)
 
 
 if __name__ == "__main__":

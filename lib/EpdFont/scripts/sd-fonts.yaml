@@ -25,6 +25,18 @@
 #   Rebuilding them needs the pinned fontTools (top-level `fonttools`, another version writes other bytes):
 #     pip install fonttools==4.63.0
 #
+# TrueType families (format: ttf):
+#   A Noto script font merged with Noto's Latin (merge_noto_latin.py): <name>-Regular.ttf and <name>-Bold.ttf,
+#   drawn at every size by the reader's engine. They take these fields in place of intervals, sizes and styles:
+#   format:        ttf
+#   merge:         {script: {Regular: S, Bold: S}, latin: {Regular: S, Bold: S}}, each S a {url, sha256}: the
+#                  script's Noto font and Noto Sans or Noto Serif; the build fails when a hash differs
+#   inDownloadAll: false keeps the family out of "Download all"
+#   After the merge the build checks it with HarfBuzz (the script font's own shaping, Noto's Latin kept whole) and
+#   fails on any difference. Rebuilding them needs the pinned pair (top-level `fonttools`, another version writes
+#   other bytes):
+#     pip install fonttools==4.63.0 uharfbuzz==0.56.2
+#
 # Variable fonts:
 #   Some fonts (Bitter, Inter, Alegreya) are distributed as variable fonts.
 #   freetype-py can't set variable font axis values, so the build script
@@ -388,3 +400,245 @@ families:
     charset: ko
     fontName: "Noto Serif KR"
     source: {url: "https://github.com/notofonts/noto-cjk/raw/Serif2.003/Serif/OTF/Korean/NotoSerifCJKkr-Regular.otf", sha256: "77b4b741f864d27f15e90f275b17106dde90b2ad28f82bab72dc95805db5fb42"}
+
+  # ── Indic scripts (format: ttf): the script's Noto font merged with Noto's Latin ──────────────
+
+  - name: NotoSansDevanagari
+    description: "Hindi, Marathi, Nepali, Sanskrit, sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansDevanagari/unhinted/ttf/NotoSansDevanagari-Regular.ttf", sha256: "9c7d935139ea6a1e6ad9dbac4f6d27ece1e04bca8123c8888d00a0f9df4724cd"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansDevanagari/unhinted/ttf/NotoSansDevanagari-Bold.ttf", sha256: "ff2f76a23aad41e0608c2d7dbc4bacd247ff3bec78f0ec2a8fb106b561636e58"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  - name: NotoSansBengali
+    description: "Bengali, Assamese, sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansBengali/unhinted/ttf/NotoSansBengali-Regular.ttf", sha256: "5dceda02816fece18ea6796f474f5d3170f1d862f21b1e809cdc94b1caa4b6ec"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansBengali/unhinted/ttf/NotoSansBengali-Bold.ttf", sha256: "2fe8d779e0f19576d1fc11e39f9154b4326a17b693215017dd1f5a8898c3f2c3"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  - name: NotoSansGurmukhi
+    description: "Punjabi (Gurmukhi), sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansGurmukhi/unhinted/ttf/NotoSansGurmukhi-Regular.ttf", sha256: "2454c944fda799d2861f11c03e492c453e33083dd1e8d99bd6baac8de71ad0f0"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansGurmukhi/unhinted/ttf/NotoSansGurmukhi-Bold.ttf", sha256: "d16804da302ecb2a7defe0502e65136870445fd88f9fddaef60b68d5f1ee7386"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  - name: NotoSansGujarati
+    description: "Gujarati, sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansGujarati/unhinted/ttf/NotoSansGujarati-Regular.ttf", sha256: "18727143b8eadade0a59dca80959ef784bf8d55e07285d1b4096594dbf829f0a"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansGujarati/unhinted/ttf/NotoSansGujarati-Bold.ttf", sha256: "3ce0cf6e1d0bfe2ef5823772eeb2f25da28ec0c2c1d99c0fce529025723e61a1"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  - name: NotoSansOriya
+    description: "Odia, sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansOriya/unhinted/ttf/NotoSansOriya-Regular.ttf", sha256: "a16645d056017927406546aa78e4ce15e782fd8783467267b75450453d007415"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansOriya/unhinted/ttf/NotoSansOriya-Bold.ttf", sha256: "1c575e8aba40d6baf200e8abac534e9517f431d38cc8131715643037eec149da"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  - name: NotoSansTamil
+    description: "Tamil, sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansTamil/unhinted/ttf/NotoSansTamil-Regular.ttf", sha256: "6634d9cc97a726e670df41281dd32b167a6b9b71f2036e19671ff08fdde0c292"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansTamil/unhinted/ttf/NotoSansTamil-Bold.ttf", sha256: "04a472e49fa83b387976756554fe179de631a950d79f652ebba14a39a44f5d71"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  - name: NotoSansTelugu
+    description: "Telugu, sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansTelugu/unhinted/ttf/NotoSansTelugu-Regular.ttf", sha256: "dcb86a5da09365a2d73d725e429403dca988e6d50c1b1d564579a25dbc18bd29"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansTelugu/unhinted/ttf/NotoSansTelugu-Bold.ttf", sha256: "44393b05a863057cc2cbfe86623fc20b906b00cf19a2ae9304cdd0f3608889db"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  - name: NotoSansKannada
+    description: "Kannada, sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansKannada/unhinted/ttf/NotoSansKannada-Regular.ttf", sha256: "2870274619c2a4abe5d6b11fcb7c4a372eba765b6b7881d459b0eb0a609a68eb"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansKannada/unhinted/ttf/NotoSansKannada-Bold.ttf", sha256: "e989c72f6fec5a0b3366af5f90e3ce8b2b8a350fc5286c6374f0353937e513f5"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  - name: NotoSansMalayalam
+    description: "Malayalam, sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansMalayalam/unhinted/ttf/NotoSansMalayalam-Regular.ttf", sha256: "cc39bb1f7d63b582a2aec1abf2469a43b805a3523a27e0a0eee8cd32702541d5"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansMalayalam/unhinted/ttf/NotoSansMalayalam-Bold.ttf", sha256: "165d635d82b0eb0a04275b92b9334c1ece679b99f263727c24c7c92ebcab51e9"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  - name: NotoSansSinhala
+    description: "Sinhala, sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansSinhala/unhinted/ttf/NotoSansSinhala-Regular.ttf", sha256: "46d5b54952a624e6e3981e0968aecc5464f3b1081131dd7a1fcd42fbf7966471"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansSinhala/unhinted/ttf/NotoSansSinhala-Bold.ttf", sha256: "438ce1325e788ec0501042dd6e798c0ec02231a42dbf42e72d17b338aa46742a"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
+
+  - name: NotoSerifDevanagari
+    description: "Hindi, Marathi, Nepali, Sanskrit, serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifDevanagari/unhinted/ttf/NotoSerifDevanagari-Regular.ttf", sha256: "565948535503fba5ec4989d9fad14e8c3056b998b1133e2e05d664a73b517007"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifDevanagari/unhinted/ttf/NotoSerifDevanagari-Bold.ttf", sha256: "0220d0e616fe2a1c77a7980a8c0ad5f44fdf5c6fed575436fda348b96dc3b916"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  - name: NotoSerifBengali
+    description: "Bengali, Assamese, serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifBengali/unhinted/ttf/NotoSerifBengali-Regular.ttf", sha256: "bb5cc3ffa1d1b1f1adfe2c4c96af5c768882b594263c428e03046bdaebf83c26"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifBengali/unhinted/ttf/NotoSerifBengali-Bold.ttf", sha256: "18d666c8332d1e7c9440420e8fb9b7ae8f773c4319af758667b6031d2ac15b2d"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  - name: NotoSerifGurmukhi
+    description: "Punjabi (Gurmukhi), serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifGurmukhi/unhinted/ttf/NotoSerifGurmukhi-Regular.ttf", sha256: "00435bb0255a87db60f117251c6a25b4f7ccea2138414155eb90dc2b0dc7c0cd"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifGurmukhi/unhinted/ttf/NotoSerifGurmukhi-Bold.ttf", sha256: "db66789e515bf1d2f28ff1e9ca75c6ecf7191c2141307f1852ce6f6f365dbf08"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  - name: NotoSerifGujarati
+    description: "Gujarati, serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifGujarati/unhinted/ttf/NotoSerifGujarati-Regular.ttf", sha256: "162aa1a06518d36fe016ad83e7ec4a189ca69f8b516eb2eebaa4516182b86406"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifGujarati/unhinted/ttf/NotoSerifGujarati-Bold.ttf", sha256: "491513721d01c60519970d8467fb319e6a2cee1e0a6df50d1eb2af790b01f17e"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  - name: NotoSerifOriya
+    description: "Odia, serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifOriya/unhinted/ttf/NotoSerifOriya-Regular.ttf", sha256: "b5c914dabacc2ec089401adfcf8830eb1f34ae3a62f0cf2e570461a3e847b9b7"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifOriya/unhinted/ttf/NotoSerifOriya-Bold.ttf", sha256: "93d819ada9ce85f912ab16f3b420fcf3d7c74c1a977b78fc740b2765ed7626f9"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  - name: NotoSerifTamil
+    description: "Tamil, serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifTamil/unhinted/ttf/NotoSerifTamil-Regular.ttf", sha256: "3b166155947b5f620bf0aa5ad102a398408a9a31cbe2e8b58ad0f947276adf26"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifTamil/unhinted/ttf/NotoSerifTamil-Bold.ttf", sha256: "036fd499f8f27655983571457c0787ea4e76dc8c47a028508310e2ff2656d23f"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  - name: NotoSerifTelugu
+    description: "Telugu, serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifTelugu/unhinted/ttf/NotoSerifTelugu-Regular.ttf", sha256: "c99f4a0f8bfc6cf1cf72a6995d63f29deacc3070668088593a7a88182a6d8bd5"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifTelugu/unhinted/ttf/NotoSerifTelugu-Bold.ttf", sha256: "a553fa5649d2813c846bc4c0c097e72342b52ba6f045c1819712d0c482a0b751"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  - name: NotoSerifKannada
+    description: "Kannada, serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifKannada/unhinted/ttf/NotoSerifKannada-Regular.ttf", sha256: "e35d4e41f063855dca3351e43abaa84eb909eb4a211ac0ab7a076affe569339c"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifKannada/unhinted/ttf/NotoSerifKannada-Bold.ttf", sha256: "8c8aac32de8cf81a101ef46fcd9d8a7170730cbbd0d5a000cdd97db7db4b6d15"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  - name: NotoSerifMalayalam
+    description: "Malayalam, serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifMalayalam/unhinted/ttf/NotoSerifMalayalam-Regular.ttf", sha256: "2bcff462b44ebe9e22992d5edbb4b453c338caa118c055ccb4e5925566070d66"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifMalayalam/unhinted/ttf/NotoSerifMalayalam-Bold.ttf", sha256: "6a81189106cfd3ec7820a5d375079f21f6dfcbc8932f84db640af57019a60d08"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  - name: NotoSerifSinhala
+    description: "Sinhala, serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifSinhala/unhinted/ttf/NotoSerifSinhala-Regular.ttf", sha256: "06dc06fecacb12d5193ace92dca1ee24002cd4e3a31d2b124aba8026b0b42aa4"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerifSinhala/unhinted/ttf/NotoSerifSinhala-Bold.ttf", sha256: "3e1f9e070195c78e3c1dbaa0f08abd622fe970df1bc76f195bf7ae83ecefb7a1"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}

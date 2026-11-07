@@ -1,12 +1,16 @@
 // Shapes lines of text with lib/OtShaper and prints glyphs and positions, for
 // test/ot_shaper/compare_harfbuzz.py to diff against HarfBuzz.
 //
-//   ot_shape_cli <font.ttf|layout blob> <scale> <ppem> <bcp47 or -> < lines
+//   ot_shape_cli <font.ttf|layout blob> <scale> <ppem> <bcp47 or -> [cpac] < lines
+//
+// With `cpac` the font's CPac is written with ot::FilterTableWriter, as the install writes it into a style block, and
+// the lines are shaped on those filters; without it the filters are computed.
 //
 // Each output line: "gid+xAdvance+xOffset+yOffset" per glyph, space separated,
 // or "FAIL".
 
 #include <IndicScripts.h>
+#include <OtFilterWriter.h>
 #include <OtShaper.h>
 
 #include <cstdio>
@@ -48,7 +52,7 @@ std::vector<uint32_t> decodeUtf8(const std::string& s) {
 
 int main(int argc, char** argv) {
   if (argc < 5) {
-    fprintf(stderr, "usage: %s font scale ppem lang < lines\n", argv[0]);
+    fprintf(stderr, "usage: %s font scale ppem lang [cpac] < lines\n", argv[0]);
     return 2;
   }
   std::ifstream f(argv[1], std::ios::binary);
@@ -62,6 +66,20 @@ int main(int argc, char** argv) {
   if (!face.init(tables)) {
     fprintf(stderr, "bad font\n");
     return 1;
+  }
+  std::vector<uint8_t> cpac;
+  if (argc > 5 && std::string(argv[5]) == "cpac") {
+    ot::FilterTableWriter writer(face);
+    cpac.resize(writer.bytes());
+    if (cpac.empty() || writer.write(cpac.data(), static_cast<uint32_t>(cpac.size())) != cpac.size()) {
+      fprintf(stderr, "no CPac\n");
+      return 1;
+    }
+    tables[ot::FaceTables::CPAC] = ot::Table(cpac.data(), static_cast<uint32_t>(cpac.size()));
+    if (!face.init(tables) || !face.filters(ot::GSUB) || !face.filters(ot::GPOS)) {
+      fprintf(stderr, "CPac refused\n");
+      return 1;
+    }
   }
   ot::Scale scale;
   scale.set(std::atoi(argv[2]), static_cast<unsigned>(std::atoi(argv[3])), face.upem());

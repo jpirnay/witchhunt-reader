@@ -7,6 +7,7 @@
 #include <GfxRenderer.h>
 #include <GlyphProvider.h>
 #include <I18n.h>
+#include <IndicScripts.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <SdCardFont.h>
@@ -386,9 +387,11 @@ ReaderSizeList SdCardFontSystem::sizeListFor(const char* familyName) const {
 
 void SdCardFontSystem::setReaderLanguage(const std::string& language) {
   using language_tag::CjkRegion;
+  readerIndicScript_ = nullptr;
   switch (language_tag::cjkRegionOf(language)) {
     case CjkRegion::None:
       readerCjkRegion_ = ReaderCjkRegion::None;
+      readerIndicScript_ = language_tag::indicScriptOf(language);
       return;
     case CjkRegion::Japanese:
       readerCjkRegion_ = ReaderCjkRegion::Japanese;
@@ -410,11 +413,15 @@ void SdCardFontSystem::setReaderLanguage(const std::string& language) {
 
 void SdCardFontSystem::clearReaderLanguage() {
   readerCjkRegion_ = ReaderCjkRegion::None;
+  readerIndicScript_ = nullptr;
   languageFamily_.clear();
   languageFamilyKey_ = 0;
 }
 
-void SdCardFontSystem::setReaderLanguagePending() { readerCjkRegion_ = ReaderCjkRegion::Pending; }
+void SdCardFontSystem::setReaderLanguagePending() {
+  readerCjkRegion_ = ReaderCjkRegion::Pending;
+  readerIndicScript_ = nullptr;
+}
 
 bool SdCardFontSystem::waitsForReaderLanguage() const {
   if (readerCjkRegion_ != ReaderCjkRegion::Pending) return false;
@@ -423,6 +430,7 @@ bool SdCardFontSystem::waitsForReaderLanguage() const {
   std::string stem;
   for (const auto& installed : registry_.getFamilies()) {
     if (familyRegion(installed.name, stem) != ReaderCjkRegion::None) return true;
+    if (isIndicFamily(installed.name)) return true;
   }
   return false;
 }
@@ -484,8 +492,10 @@ void SdCardFontSystem::selectLanguageFamily(const char* family) {
   const std::string name = family ? family : "";
   const auto region = static_cast<uint8_t>(readerCjkRegion_);
   const uint8_t own = family ? 0 : 1;
-  const uint32_t key =
-      glyphstore::fnv1a(name.data(), name.size(), glyphstore::fnv1a(&region, 1, glyphstore::fnv1a(&own, 1)));
+  const char* scriptName = readerIndicScript_ ? readerIndicScript_->name : "";
+  const uint32_t key = glyphstore::fnv1a(
+      name.data(), name.size(),
+      glyphstore::fnv1a(&region, 1, glyphstore::fnv1a(scriptName, strlen(scriptName), glyphstore::fnv1a(&own, 1))));
   if (key == languageFamilyKey_) return;
   languageFamilyKey_ = key;
   languageFamily_.clear();
@@ -512,12 +522,17 @@ void SdCardFontSystem::selectLanguageFamily(const char* family) {
       suffix = "KR";
       break;
     case ReaderCjkRegion::None:
+      if (!readerIndicScript_) return;
+      probe = readerIndicScript_->probe;
+      suffix = readerIndicScript_->name;
+      break;
     case ReaderCjkRegion::Pending:
       return;
   }
   if (!family) return;  // the book's own font
   std::string stem;
-  if (familyRegion(name, stem) != ReaderCjkRegion::None) return;  // a Noto CJK family: effectiveReaderFamily()'s
+  // A CJK book in a Noto CJK family is effectiveReaderFamily()'s; an Indic book in one still needs its own family.
+  if (readerCjkRegion_ != ReaderCjkRegion::None && familyRegion(name, stem) != ReaderCjkRegion::None) return;
   // A built-in reader face has no CJK: fontconvert.py's default intervals leave it out.
   if (const SdCardFontFamilyInfo* info = name.empty() ? nullptr : findFamily(name.c_str())) {
     if (familyMapsCodepoint(*info, probe)) return;
@@ -534,6 +549,21 @@ void SdCardFontSystem::selectLanguageFamily(const char* family) {
       return;
     }
   }
+}
+
+bool SdCardFontSystem::isIndicFamily(const std::string& family) {
+  size_t stemLength = 0;
+  if (family.rfind("NotoSans", 0) == 0) {
+    stemLength = strlen("NotoSans");
+  } else if (family.rfind("NotoSerif", 0) == 0) {
+    stemLength = strlen("NotoSerif");
+  } else {
+    return false;
+  }
+  for (const auto& script : indic::SCRIPTS) {
+    if (family.compare(stemLength, std::string::npos, script.name) == 0) return true;
+  }
+  return false;
 }
 
 SdCardFontSystem::ReaderCjkRegion SdCardFontSystem::familyRegion(const std::string& family, std::string& stem) {

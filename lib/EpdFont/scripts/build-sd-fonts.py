@@ -4,7 +4,8 @@
 Reads sd-fonts.yaml, downloads any missing source fonts, runs
 fontconvert_sdcard.py in parallel for each family, and optionally
 generates the fonts.json manifest. A family with `format: otf` is a CFF
-subset instead (cjk_subset.py): one <name>-Regular.otf, drawn at every size.
+subset instead (cjk_subset.py): one <name>-Regular.otf, drawn at every size. A family with `format: ttf` is a
+script font merged with Noto's Latin (merge_noto_latin.py): <name>-Regular.ttf and <name>-Bold.ttf.
 
 Usage:
     # Generate fonts (output in ./output/)
@@ -202,9 +203,62 @@ def build_otf_family(
                         f"dropped {dropped}")
 
 
+def resolve_merge_sources(family: dict) -> dict[str, dict[str, Path]]:
+    """The four sources of a `format: ttf` entry, downloaded and hash-checked: {"script"|"latin": {style: path}}.
+    The Latin fonts are shared by ten families, so they are cached under one directory."""
+    out = {}
+    for part, styles in family["merge"].items():
+        owner = family["name"] if part == "script" else "NotoLatin"
+        out[part] = {style: resolve_font_path(spec, owner, style) for style, spec in styles.items()}
+    return out
+
+
+def build_ttf_family(
+    family: dict, output_dir: Path, corpus_dir: Path | None, fonttools_pin: str | None
+) -> tuple[str, bool, str]:
+    """A `format: ttf` entry: the script font merged with Noto's Latin, both styles, then both checks."""
+    import cjk_subset
+    import merge_noto_latin
+
+    name = family["name"]
+    key = name.removeprefix("NotoSans").removeprefix("NotoSerif").lower()
+    if corpus_dir is None or key not in merge_noto_latin.LANGS:
+        return name, False, "a merged TrueType family needs the corpus of its script"
+    try:
+        if fonttools_pin:
+            cjk_subset.check_fonttools(fonttools_pin)
+        sources = resolve_merge_sources(family)
+        corpus = _read_corpus(corpus_dir / f"{key}.txt")
+        for style in ("Regular", "Bold"):
+            script, latin = sources["script"][style], sources["latin"][style]
+            merged = output_dir / f"{name}-{style}.ttf"
+            merge_noto_latin.merge(script, latin, merged)
+            differences = merge_noto_latin.check(merged, script, latin, corpus, merge_noto_latin.LANGS[key])
+            if differences:
+                merged.unlink(missing_ok=True)
+                shown = "; ".join(differences[:3])
+                return name, False, f"{style}: {len(differences)} differences from the sources: {shown}"
+    except (FileNotFoundError, RuntimeError, cjk_subset.BuildError, ImportError) as e:
+        return name, False, str(e)
+    return name, True, "merged, both checks equal"
+
+
+def _read_corpus(path: Path) -> list[str]:
+    """The lines of a generate_corpus.py file, without blanks, comments and repeats."""
+    with open(path, encoding="utf-8") as f:
+        lines = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+    return list(dict.fromkeys(lines))
+
+
+def write_corpus(out_dir: Path) -> None:
+    """The checks' corpus, one <script>.txt per script (test/ot_shaper/generate_corpus.py)."""
+    generator = SCRIPT_DIR.parent.parent.parent / "test" / "ot_shaper" / "generate_corpus.py"
+    subprocess.run([sys.executable, str(generator), str(out_dir)], check=True, capture_output=True)
+
+
 def build_family(
     family: dict, output_base: Path, verbose: bool = False, timeout: int = 600,
-    unihan: Path | None = None, fonttools_pin: str | None = None
+    unihan: Path | None = None, fonttools_pin: str | None = None, corpus_dir: Path | None = None
 ) -> tuple[str, bool, str]:
     """Build a single font family. Returns (name, success, message)."""
     name = family["name"]
@@ -212,6 +266,8 @@ def build_family(
     output_dir.mkdir(parents=True, exist_ok=True)
     if family.get("format") == "otf":
         return build_otf_family(family, output_dir, unihan, fonttools_pin)
+    if family.get("format") == "ttf":
+        return build_ttf_family(family, output_dir, corpus_dir, fonttools_pin)
 
     styles = family.get("styles", {})
     intervals = family["intervals"]
@@ -407,6 +463,8 @@ def main():
             specs = dict(family.get("styles", {}))
             if "source" in family:
                 specs["regular"] = family["source"]
+            if family.get("format") == "ttf":
+                resolve_merge_sources(family)
             for style_name, style_spec in specs.items():
                 if "url" in style_spec:
                     resolve_font_path(style_spec, family["name"], style_name)
@@ -422,9 +480,18 @@ def main():
     print(f"\n=== Building {len(families)} families ({max_workers} parallel jobs, timeout {timeout}s) ===\n")
 
     failed = []
+    corpus_tmp = tempfile.TemporaryDirectory()
+    corpus_dir = Path(corpus_tmp.name)
+    if any(f.get("format") == "ttf" for f in families):
+        try:
+            write_corpus(corpus_dir)
+        except (OSError, subprocess.CalledProcessError) as e:
+            print(f"ERROR: the checks' corpus: {e}", file=sys.stderr)
+            sys.exit(1)
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(build_family, family, output_base, verbose, timeout, unihan, fonttools_pin): family["name"]
+            executor.submit(build_family, family, output_base, verbose, timeout, unihan, fonttools_pin,
+                            corpus_dir): family["name"]
             for family in families
         }
         for future in as_completed(futures):
@@ -432,7 +499,7 @@ def main():
             if success:
                 # Count output files
                 family_dir = output_base / name
-                files = list(family_dir.glob("*.cpfont")) + list(family_dir.glob("*.otf"))
+                files = list(family_dir.glob("*.cpfont")) + list(family_dir.glob("*.otf")) + list(family_dir.glob("*.ttf"))
                 size = sum(f.stat().st_size for f in files)
                 print(f"  OK: {name} ({len(files)} files, {size / 1024 / 1024:.1f} MB) {message}")
             else:
@@ -441,12 +508,14 @@ def main():
 
     # Summary
     print("\n=== Summary ===\n")
-    built = list(output_base.rglob("*.cpfont")) + list(output_base.rglob("*.otf"))
+    built = list(output_base.rglob("*.cpfont")) + list(output_base.rglob("*.otf")) + list(output_base.rglob("*.ttf"))
     total_size = sum(f.stat().st_size for f in built)
     print(f"Total: {len(built)} font files ({total_size / 1024 / 1024:.1f} MB)")
 
     if failed:
         print(f"\nFailed families: {', '.join(failed)}", file=sys.stderr)
+
+    corpus_tmp.cleanup()
 
     # Manifest
     if args.manifest:

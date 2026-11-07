@@ -63,6 +63,7 @@ target_include_directories(TtfFontTest PRIVATE
 target_compile_definitions(TtfFontTest PRIVATE
   TTF_FONT_DIR="${REPO_ROOT}/lib/EpdFont/builtinFonts/source"
   TTF_FIXTURE_DIR="${REPO_ROOT}/test/fixtures/fonts"
+  INDIC_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
   SD_FONTS_DIR="${REPO_ROOT}/assets/sd-fonts"
   SHAPING_FIXTURE_DIR="${REPO_ROOT}/test/complex_shaper/data"
 )

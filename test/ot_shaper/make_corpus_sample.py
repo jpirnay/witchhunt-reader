@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+r"""Cut the committed corpus sample from generate_corpus.py's output.
+
+The first 200 lines of each script's file go to <out dir>/<script>.txt, every code point of Unicode category Cf
+(ZWJ, ZWNJ, ...) written as a literal XXXX escape, so no joiner sits in the repo; the test decodes them.
+The full corpus depends on the Python's unicodedata version, which is why CI reads this sample instead.
+
+    python3 test/ot_shaper/generate_corpus.py <corpus dir>
+    python3 test/ot_shaper/make_corpus_sample.py <corpus dir> test/ttf_font/data
+"""
+
+import sys
+import unicodedata
+from pathlib import Path
+
+SCRIPTS = ["devanagari", "bengali", "gurmukhi", "gujarati", "oriya", "tamil", "telugu", "kannada", "malayalam",
+           "sinhala"]
+LINES = 200
+
+
+def escape(line):
+    return "".join("\\u%04X" % ord(c) if unicodedata.category(c) == "Cf" else c for c in line)
+
+
+def main():
+    src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+    dst.mkdir(parents=True, exist_ok=True)
+    for name in SCRIPTS:
+        lines = (src / f"{name}.txt").read_text(encoding="utf-8").splitlines()[:LINES]
+        (dst / f"indic_corpus_{name}.txt").write_text("\n".join(escape(l) for l in lines) + "\n", encoding="utf-8",
+                                                      newline="\n")
+
+
+if __name__ == "__main__":
+    main()
