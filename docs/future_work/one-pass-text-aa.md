@@ -174,7 +174,10 @@ pages, the periodic HALF and the page after a menu keep two passes, and so does 
   kept somewhere a borrower does not write.
 - A gray pixel that a menu turns black gets only FAST's 2-frame nudge, as no plane says it was gray.
 - A forced refresh override arriving after the mask was built shows that page in B/W only.
-- A pixel staying black is driven 18 frames every page (no memory to tell it from gray).
+- A pixel staying black is driven 18 frames every page (no memory to tell it from gray). Measured with the gray
+  lab's Test 10 (2026-11-07): held black for up to 50 pages, it comes back white as far as one held for a page,
+  FAST's flash or rest, within a point; its black is about 4 points deeper while held. Not measured: what the
+  DC that adds does over hours or days. Raised upstream on Free-Ink#184.
 
 ## Xteink X4 (SSD1677): composed, no extra memory
 

@@ -255,6 +255,7 @@ def main():
     bands.add_argument("name")
     bands.add_argument("--count", type=int, default=4)
     bands.add_argument("--width", type=int, default=PANEL_W, help="only the left part of the panel")
+    bands.add_argument("--margin", type=int, default=12, help="panel pixels left out at each band edge")
     args = parser.parse_args()
 
     if args.step == "sweep":
@@ -327,7 +328,7 @@ def main():
         white, black = load_rectified("baseline-white", camera), load_rectified("baseline-black", camera)
         image = load_rectified(args.name, camera)
         height = PANEL_H // args.count
-        boxes = [inset((0, index * height, args.width, height), 12) for index in range(args.count)]
+        boxes = [inset((0, index * height, args.width, height), args.margin) for index in range(args.count)]
         print(args.name, [round(level(image, white, black, box), 1) for box in boxes])
 
 

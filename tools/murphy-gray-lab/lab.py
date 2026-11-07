@@ -683,6 +683,56 @@ def test9_onepass(lab, gray, swing, again, from_onepass=False, white=None, black
     photo(f"t9-onepass-{tag}", "bands: " + ", ".join(f"{s}>{n}" for s in T9_STARTS for _, n in T9_TARGETS))
 
 
+# Test 10: what a pixel that stays black for many pages costs it later. The one-pass planes cannot tell
+# a pixel that stays black from one that turns black, so it gets the black drive again on every page.
+# Three families differ only in what a page that keeps a pixel black gives it: that drive again
+# ("redrive", one-pass today on the X3 and X4), FAST's flash for black that stays ("flash", today's
+# B/W page turn), or rest ("rest", what one-pass could do knowing the frame on screen). Bands are held
+# black for K pages; all go white in the same refresh with the one-pass white, then rest once.
+T10_HOLDS = (1, 2, 5, 10, 20, 50)
+T10_FAMILIES = ("redrive", "flash", "rest")
+T10_BANDS = 2 + len(T10_HOLDS) * len(T10_FAMILIES)  # a white control at the top and the bottom
+T10_BAND = HEIGHT // T10_BANDS
+
+
+def static_black_bank():
+    """WW rests, KW the one-pass white, WK FAST's flash for black that stays, KK the one-pass black."""
+    white_t = lut((VSL, 18 if X3 else 20))
+    black_t = lut((VSH, 18 if X3 else 15))
+    flash_t = PRODUCTION_BANK[KK]
+    return make_bank(rest_like(white_t, black_t, flash_t), white_t, flash_t, black_t)
+
+
+def test10_static_black(lab):
+    """Bands top to bottom: control, then for each K in T10_HOLDS the families in T10_FAMILIES order,
+    then control. Shots: t10-black (every band black), t10-white (after the white drive), t10-rest."""
+    lab.arm()
+    lab.clean("white")
+    bank = static_black_bank()
+    stay = {"redrive": KK, "flash": WK, "rest": WW}
+    bands = [(hold, family) for hold in T10_HOLDS for family in T10_FAMILIES]
+    pages = max(T10_HOLDS)
+    for page in range(1, pages + 1):
+        frame = Frame(WW)
+        for index, (hold, family) in enumerate(bands, start=1):
+            first = pages - hold + 1
+            if page >= first:
+                frame.rect(0, index * T10_BAND, WIDTH, T10_BAND, KK if page == first else stay[family])
+        lab.push("prod", bank, frame, f"t10 page {page}")
+    if lab.camera:
+        lab.camera("t10-black")
+    white = Frame(WW)
+    for index in range(1, len(bands) + 1):
+        white.rect(0, index * T10_BAND, WIDTH, T10_BAND, KW)
+    lab.push("prod", bank, white, "t10 to white")
+    if lab.camera:
+        lab.camera("t10-white")
+    lab.push("prod", bank, Frame(WW), "t10 rest", journal=False)
+    if lab.camera:
+        lab.camera("t10-rest")
+    photo("t10", f"{T10_BANDS} bands: control, " + ", ".join(f"{f}{h}" for h, f in bands) + ", control")
+
+
 def test_handover(lab, warm, swap_planes=False):
     """The reader's nudge after a black base, with and without a reset in between.
 
@@ -1023,6 +1073,7 @@ def main():
     t9.add_argument("--from-onepass", action="store_true", help="starts set up by a one-pass frame, as in reading")
     t9.add_argument("--white", type=int, help="frames of VSL to white (default FAST's)")
     t9.add_argument("--black", type=int, help="frames of VSH to black (default FAST's)")
+    steps.add_parser("t10", help="Test 10: bands held black for 1-50 pages, then white")
     t4 = steps.add_parser("t4", help="Test 4: gray patches through a FAST page turn")
     t4.add_argument("--aware", action="store_true", help="mark gray pixels as changed")
     t4.add_argument("--hold", action="store_true", help="stop while the patches are gray")
@@ -1101,6 +1152,11 @@ def main():
 
             lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
             test9_onepass(lab, args.gray, args.swing, args.again, args.from_onepass, args.white, args.black)
+        elif args.step == "t10":
+            import cam
+
+            lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
+            test10_static_black(lab)
         elif args.step == "t4-pages":
             test4_pages(lab, args.font, args.size, args.pages, args.mode, variant=args.variant)
         elif args.step == "t8":
