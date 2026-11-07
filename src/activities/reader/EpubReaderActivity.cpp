@@ -1350,7 +1350,6 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   // the unattributed Min Free watermark, so bracket it.
   logReaderMemSnapshot("aa_begin");
   pendingGrayscale_.active = false;
-  renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
   const int fontId = pendingGrayscale_.fontId;
   const int marginLeft = pendingGrayscale_.marginLeft;
   const int contentTop = pendingGrayscale_.contentTop;
@@ -5957,7 +5956,6 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     if (capMsb) {
       memset(capLsb.get(), 0, capPlaneBytes);
       memset(capMsb.get(), 0, capPlaneBytes);
-      renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
       renderer.beginGrayCapture(capLsb.get(), capMsb.get());
     } else {
       capLsb.reset();  // OOM: the staged path below runs unchanged
@@ -6186,7 +6184,6 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     // window, so after the wait only the LSB SPI write, the MSB plane and the
     // short gray flush remain. The AA touch-up then reads as the tail of the
     // page refresh instead of a separate later update (issue #71).
-    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     const int aaFontId = getEffectiveReaderFontId();
     const Page* pagePtr = page.get();
     // The per-element abort buys no wall-clock here — this plane render is overlapped with the
@@ -6231,7 +6228,6 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     pendingGrayscale_.fontId = getEffectiveReaderFontId();
     pendingGrayscale_.marginLeft = orientedMarginLeft;
     pendingGrayscale_.contentTop = contentTop;
-    pendingGrayscale_.fastLut = SETTINGS.fastAntiAliasing;
     lastRenderStats.usedGrayscale = true;
     lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, 0, 0, 0, 0, tDisplay - t0};
   }
@@ -6458,7 +6454,6 @@ uint16_t EpubReaderActivity::renderPageContentOnly(const Page& page, const int o
     if (capMsb) {
       memset(capLsb.get(), 0, planeBytes);
       memset(capMsb.get(), 0, planeBytes);
-      renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
       renderer.beginGrayCapture(capLsb.get(), capMsb.get());
     } else {
       capLsb.reset();
@@ -6610,7 +6605,6 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     // (observed: Load access fault at glyph->dataOffset + heap corruption). When the
     // cache is still warm this is nearly free via the prewarm coverage fast-path.
     prewarmPageFonts(page, orientedMarginLeft, contentTop);
-    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     // No waveform to hide behind on this path (displayBuffer() above already returned), so the
     // per-element abort translates directly into saved wall-clock on both devices.
     bool planeAborted = false;

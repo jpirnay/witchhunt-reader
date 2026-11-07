@@ -29,12 +29,6 @@ enum class SettingRequires : uint8_t {
   Nothing,     // always visible
   TouchPanel,  // a touch controller (BoardConfig touch.controller != None)
   TiltSensor,  // an IMU for tilt page turning (sensors.imuType != None)
-  // The panel builds grayscale from a swappable LUT, so the fast/OEM waveform
-  // trade-off is a real choice. Controllers with a factory grayscale waveform
-  // (SSD1677) have nothing to swap. This is a genuine silicon difference, which
-  // B0 allows keying on the display controller — with a comment saying why,
-  // which is this one.
-  SelectableGrayscaleLut,
   // The panel shows gray at all, so anti-aliasing is a real choice.
   GrayscalePanel,
   // A PWM frontlight/backlight the firmware can drive (BoardConfig frontlight

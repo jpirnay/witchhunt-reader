@@ -514,7 +514,6 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 - **Normalize Font Size**: Shows text the book sets only slightly larger or smaller than its body text (within 10%) at your font size. "ON" (default) / "OFF"
 - **Font Manager**: downloads font families over Wi-Fi and deletes the ones you no longer use. Each row shows the family, what it is for, and, until it is installed, its download size. **Download All** installs every missing family but the eight CJK ones (Japanese, Simplified Chinese, Traditional Chinese and Korean, each sans serif and serif, 1.6–7.0 MB) and the twenty Indic ones (Noto Sans and Noto Serif for each of the ten scripts below): install your language's from its own row. A CJK family is one file (Regular only) and an Indic family a Regular and a Bold file, each drawn at every size. The reader restarts when you leave the Font Manager.
 - **Text Anti-Aliasing**: Smooth grey edges on text. They appear just after a page does, and are skipped while you flip through pages quickly. "ON" / "OFF"
-- **Fast AA** *(X3 only)*: Swaps the slow 53-frame grayscale waveform for a fast 7-frame LUT (~130 ms). Mid-tones appear slightly darker. "ON" / "OFF"
 - **Text Darkness**: Ink density for rendered text: "Normal" (default), "Dark", "Extra Dark", "Max Dark"
 
 **TXT/Markdown Font** (submenu):
