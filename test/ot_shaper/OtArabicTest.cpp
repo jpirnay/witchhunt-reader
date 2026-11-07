@@ -264,8 +264,8 @@ struct NaskhPlan {
   OpenFont font;
   ot::Plan plan;
   NaskhPlan() {
-    font.open("NotoNaskhArabic-Shaping-Regular.ttf");
-    plan.build(font.face, ot::Script::Arabic, ot::languageTagsFor("ar"));
+    EXPECT_TRUE(font.open("NotoNaskhArabic-Shaping-Regular.ttf"));
+    EXPECT_TRUE(plan.build(font.face, ot::Script::Arabic, ot::languageTagsFor("ar")));
   }
 };
 
@@ -460,7 +460,7 @@ std::vector<int32_t> shapeCodepoints(const ot::Face& face, const ot::Plan& plan,
 
 // Every word make_arabic_fixtures.py recorded: the glyph IDs, advances (12.4) and whole-pixel offsets HarfBuzz 14.5.0
 // gives right to left, converted as ExpectedShaping.h's words are (OtShaperTestHelpers.h), in visual order.
-TEST(ArabicShaping, MatchesHarfBuzzGlyphForGlyph) {
+TEST(OtArabicShaping, MatchesHarfBuzzGlyphForGlyph) {
   Fixtures fixtures(false);
   size_t words = 0;
   size_t matching = 0;
@@ -485,7 +485,7 @@ TEST(ArabicShaping, MatchesHarfBuzzGlyphForGlyph) {
 }
 
 // The filters the install writes (CPac, deviation 4) shape every recorded word as the computed ones do.
-TEST(ArabicShaping, TheSameThroughCpac) {
+TEST(OtArabicShaping, TheSameThroughCpac) {
   Fixtures computed(false);
   Fixtures written(true);
   BoundBuffer a(256);
@@ -515,7 +515,7 @@ TEST(ArabicShaping, TheSameThroughCpac) {
 // A word cut after a letter that does not join to the left, each piece shaped with the other as context: together
 // the pieces are the whole word's glyphs, in visual order (the word's second piece on the left). The same holds for
 // a cut inside a joined sequence: the joining machine and cursive attachment run through the context.
-TEST(ArabicShaping, PiecesShapedWithTheirNeighboursMatchTheWholeWord) {
+TEST(OtArabicShaping, PiecesShapedWithTheirNeighboursMatchTheWholeWord) {
   // al-'arabiyyatu, vocalised (seven letters): cut after the reh (joining R) and its fatha, or after the beh and its
   // kasra (joined to the yeh).
   const Cps vocalised = {0x627, 0x644, 0x652, 0x639, 0x64E, 0x631, 0x64E,
@@ -566,7 +566,7 @@ TEST(ArabicShaping, PiecesShapedWithTheirNeighboursMatchTheWholeWord) {
 // A buffer for N slots, and a word of N letters that the font's ccmp makes 2N glyphs (Noto Sans Arabic Bold splits
 // the dot off each dad): the run is refused (its reservation, 2N + 16 slots, does not fit), nothing past the storage
 // is written, and the buffer shapes the next word as HarfBuzz does.
-TEST(ArabicShaping, ARunPastTheStorageIsRefused) {
+TEST(OtArabicShaping, ARunPastTheStorageIsRefused) {
   FixtureFace sans;
   ASSERT_TRUE(sans.open(kFontNotoSansArabicShapingBold, false));
   ot::Plan plan;
@@ -603,10 +603,53 @@ TEST(ArabicShaping, ARunPastTheStorageIsRefused) {
   }
 }
 
+// The same refusal on the growth path. A word of n letters whose ccmp or calt makes three glyphs of each (U+06B3 in
+// both Noto subsets) is reserved 2n + 16 slots, and prepare() takes it; the growth past that is what canGrow
+// refuses, as HarfBuzz refuses a buffer past its max_len, in a buffer of exactly those slots. Nothing past the
+// storage is written, the run fails, and the buffer shapes the next word as recorded.
+TEST(OtArabicShaping, AGrowthPastTheReservationIsRefused) {
+  constexpr unsigned N = 20;
+  const Cps word(N, 0x6B3);
+  for (const char* const fontName : {kFontNotoSansArabicShapingBold, kFontNotoNaskhArabicShapingRegular}) {
+    SCOPED_TRACE(fontName);
+    FixtureFace face;
+    ASSERT_TRUE(face.open(fontName, false));
+    ot::Plan plan;
+    ASSERT_TRUE(plan.build(face.face, ot::Script::Arabic, ot::languageTagsFor("")));
+    {
+      BoundBuffer roomy(256);
+      ASSERT_TRUE(ottest::shapeRun(face.face, plan, word.data(), 5, roomy.buffer));
+      ASSERT_EQ(roomy.buffer.len(), 15u) << "three glyphs a letter, so N letters outgrow the reservation 2N + 16";
+      static_assert(3 * N > 2 * N + 16);
+    }
+    const ArabicShapingExpectation* next = nullptr;
+    for (const ArabicShapingExpectation& w : kArabicShaping) {
+      if (std::strcmp(w.font, fontName) == 0 && *w.language == 0 && ottest::utf32(w.utf8).size() <= 8) {
+        next = &w;
+        break;
+      }
+    }
+    ASSERT_NE(next, nullptr);
+    const Cps nextWord = ottest::utf32(next->utf8);
+
+    constexpr uint8_t CANARY = 0xA5;
+    constexpr size_t CANARY_BYTES = 512;
+    const size_t bytes = ot::Buffer::bytesFor(2 * N + 16);
+    std::vector<uint8_t> block(bytes + CANARY_BYTES, CANARY);
+    ot::Buffer buffer;
+    buffer.setStorage(block.data(), bytes);
+    EXPECT_FALSE(ottest::shapeRun(face.face, plan, word.data(), N, buffer));
+    for (size_t i = bytes; i < block.size(); i++) ASSERT_EQ(block[i], CANARY) << "byte " << i - bytes << " past";
+    ASSERT_TRUE(ottest::shapeRun(face.face, plan, nextWord.data(), static_cast<unsigned>(nextWord.size()), buffer));
+    EXPECT_EQ(ottest::storedGlyphsOf(buffer), recorded(*next));
+    for (size_t i = bytes; i < block.size(); i++) ASSERT_EQ(block[i], CANARY) << "byte " << i - bytes << " past";
+  }
+}
+
 // hb_ot_rotate_chars(): in a right-to-left run, a character whose mirror the font lacks gets rtlm's mask. No character
 // has a mirror here (NoCharacterTheTablesCoverHasAMirror), so every glyph carries it; the fixtures lack rtlm, so the
 // synthetic font's calt is renamed to make the mask a bit of its own.
-TEST(ArabicShaping, EveryGlyphCarriesTheRtlmMask) {
+TEST(OtArabicShaping, EveryGlyphCarriesTheRtlmMask) {
   std::vector<uint8_t> bytes = readFont(SYNTHETIC);
   renameFeature(bytes, "calt", "rtlm");
   OpenFont font;
@@ -635,7 +678,7 @@ TEST(ArabicShaping, EveryGlyphCarriesTheRtlmMask) {
 // 16.0, UnicodeData.txt field 9); ZWNJ and ZWJ lie between U+169C and U+2039, U+25CC between U+232A and U+2768. Every
 // other code point is outside the tables altogether (unassigned to the engine), and an Arabic run holds none:
 // deviation 6 leaves brackets and punctuation to bidi, which mirrors them.
-TEST(ArabicShaping, NoCharacterTheTablesCoverHasAMirror) {
+TEST(OtArabicShaping, NoCharacterTheTablesCoverHasAMirror) {
   for (const ot::ucd::Range& range : ot::ucd::RANGES) {
     EXPECT_GT(range.first, 0x00BBu);
     EXPECT_LT(range.last, 0x0F3Au);
@@ -651,7 +694,7 @@ TEST(ArabicShaping, NoCharacterTheTablesCoverHasAMirror) {
 // between two medi forms. With the RightToLeft flag (dflt) each beh hangs off the next: every glyph's parent is
 // resolved before it and the chain resolves whole. Without it (URD) each hangs off the one before: the walk from the
 // last glyph runs 64 links deep, and the 65 glyphs it reaches first miss the four links past that (43 + 3 * 85).
-TEST(ArabicShaping, ALongCursiveChainResolvesAsHarfBuzzWalksIt) {
+TEST(OtArabicShaping, ALongCursiveChainResolvesAsHarfBuzzWalksIt) {
   OpenFont font;
   ASSERT_TRUE(font.open(SYNTHETIC));
   constexpr unsigned N = 70;
