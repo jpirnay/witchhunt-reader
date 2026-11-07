@@ -67,6 +67,7 @@ bool Buffer::prepare(const unsigned maxGlyphs) {
   serial = 0;
   randomState = 1;
   partialContext = false;
+  backward = false;  // witchhunt: deviation 11
   hasDefaultIgnorables = hasBrokenSyllable = hasGposAttachment = false;
   digest = Digest();
   if (maxGlyphs > UINT16_MAX + 1u) return false;  // `indices` holds glyph positions as uint16_t
@@ -129,6 +130,15 @@ void Buffer::moveGlyph(const unsigned from, const unsigned to) {
 
 void Buffer::reverseRange(const unsigned start, const unsigned end) {
   for (unsigned i = start, j = end; i + 1 < j; i++, j--) std::swap(info[i], info[j - 1]);
+}
+
+// witchhunt: deviation 11
+void Buffer::reverse() {
+  const unsigned n = len();
+  for (unsigned i = 0, j = n; i + 1 < j; i++, j--) {
+    std::swap(info[i], info[j - 1]);
+    std::swap(pos[i], pos[j - 1]);
+  }
 }
 
 void Buffer::refreshDigest() {

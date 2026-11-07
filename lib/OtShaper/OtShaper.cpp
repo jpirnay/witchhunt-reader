@@ -87,15 +87,21 @@ void zeroMarkWidths(Buffer& buffer, const bool adjustOffsets) {
   }
 }
 
+// hb_ot_position(): hb_ot_position_default and hb_ot_position_plan, then a
+// backward run reversed into visual order.
 void position(const Face& face, const Scale& scale, const Plan& plan, Buffer& buffer) {
   const unsigned len = buffer.len();
   buffer.pos.assign(len, GlyphPosition{});
   for (unsigned i = 0; i < len; i++) buffer.pos[i].xAdvance = scale.emScaleX(face.advance(buffer.info[i].codepoint));
-  // USE zeroes mark advances before GPOS, the default shaper after it.
-  const bool adjustOffsets = plan.adjustMarkPositioningWhenZeroing;
+  // USE zeroes mark advances before GPOS, the default and Arabic shapers after it.
+  // witchhunt: deviation 11 - marks keep their place over the glyph before only in a forward run (a backward run's
+  // hang over the next one once reversed), and the Arabic shaper zeroes late (BY_GDEF_LATE).
+  const bool adjustOffsets = plan.adjustMarkPositioningWhenZeroing && !buffer.backward;
   if (plan.zeroMarks && plan.shaper == ShaperKind::Use) zeroMarkWidths(buffer, adjustOffsets);
   if (plan.applyGpos) applyTable(face, scale, plan, buffer, GPOS);
-  if (plan.zeroMarks && plan.shaper == ShaperKind::Default) zeroMarkWidths(buffer, adjustOffsets);
+  if (plan.zeroMarks && (plan.shaper == ShaperKind::Default || plan.shaper == ShaperKind::Arabic)) {
+    zeroMarkWidths(buffer, adjustOffsets);
+  }
   if (buffer.hasDefaultIgnorables) {
     for (unsigned i = 0; i < len; i++) {
       if (buffer.info[i].isDefaultIgnorable()) {
@@ -105,6 +111,18 @@ void position(const Face& face, const Scale& scale, const Plan& plan, Buffer& bu
     }
   }
   propagateAttachmentOffsets(buffer);
+  if (buffer.backward) buffer.reverse();  // witchhunt: deviation 11
+}
+
+// hb_ot_rotate_chars(): in a backward run, each character becomes its
+// Bidi_Mirroring_Glyph where the font has that, else takes rtlm's mask.
+// witchhunt: deviation 11 - no character the Unicode tables cover
+// (ucd::RANGES, ZWNJ, ZWJ, U+25CC) is Bidi_Mirrored, and a run holds no
+// other (deviation 6 leaves brackets and punctuation to bidi, which mirrors
+// them): no character is swapped, every one takes the mask.
+void rotateChars(const Plan& plan, Buffer& buffer) {
+  if (!buffer.backward) return;
+  for (GlyphInfo& g : buffer.info) g.mask |= plan.rtlmMask;
 }
 
 // hb_ot_hide_default_ignorables(): joiners become an invisible space (or go,
@@ -173,6 +191,7 @@ bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_
            Buffer& buffer, const RunContext& context) {
   if (!buffer.prepare(count * MAX_LENGTH_FACTOR + MAX_LENGTH_EXTRA)) return false;
   buffer.partialContext = context.partial;
+  buffer.backward = plan.backward;  // witchhunt: deviation 11
   if (!count) return true;
   buffer.maxOps = std::max(static_cast<int>(count) * MAX_OPS_FACTOR, MAX_OPS_MIN);
 
@@ -187,7 +206,11 @@ bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_
     buffer.info.push_back(g);
   }
 
-  if (plan.shaper != ShaperKind::Default) preprocessVowelConstraints(plan.script, buffer);
+  // witchhunt: deviation 11 - the Arabic shaper has no preprocess_text.
+  if (plan.shaper == ShaperKind::Indic || plan.shaper == ShaperKind::Use) {
+    preprocessVowelConstraints(plan.script, buffer);
+  }
+  rotateChars(plan, buffer);  // witchhunt: deviation 11
   normalize(face, plan, buffer);
   if (!buffer.successful) return false;
 
@@ -195,6 +218,8 @@ bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_
     indicSetupMasks(buffer);
   } else if (plan.shaper == ShaperKind::Use) {
     useSetupMasks(buffer);
+  } else if (plan.shaper == ShaperKind::Arabic) {
+    arabicSetupMasks(plan, buffer);  // witchhunt: deviation 11
   }
 
   // Map to glyphs and set their properties (hb_ot_layout_substitute_start).

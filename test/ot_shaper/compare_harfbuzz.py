@@ -22,7 +22,13 @@ import uharfbuzz as hb
 ISO = ["Deva", "Beng", "Guru", "Gujr", "Orya", "Taml", "Telu", "Knda", "Mlym", "Sinh"]
 
 
+def is_arabic(cp):
+    return 0x0600 <= cp <= 0x06FF or 0x0750 <= cp <= 0x077F or 0x0870 <= cp <= 0x08FF
+
+
 def script_of(text):
+    if any(is_arabic(ord(ch)) for ch in text):
+        return "Arab"
     for ch in text:
         cp = ord(ch)
         if 0x0900 <= cp <= 0x0DFF and not (0x0951 <= cp <= 0x0954 or cp in (0x0964, 0x0965)):
@@ -39,8 +45,8 @@ def harfbuzz_lines(font_path, lines, scale, ppem, lang):
     for text in lines:
         buf = hb.Buffer()
         buf.add_str(text)
-        buf.direction = "ltr"
         buf.script = script_of(text)
+        buf.direction = "rtl" if buf.script == "Arab" else "ltr"
         if lang:
             buf.language = lang
         hb.shape(font, buf, {})

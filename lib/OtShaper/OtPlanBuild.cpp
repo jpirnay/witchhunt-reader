@@ -180,11 +180,18 @@ namespace {
 // dnom and the private Harf/HARF/Buzz/BUZZ tags do nothing for Indic text;
 // they are requested because HarfBuzz requests them, which fixes the stage
 // and mask bit of every other feature.
-void collectDefaultFeatures(FeatureBuilder& b) {
+// witchhunt: deviation 11 - `backward` (a right-to-left run) asks for rtla and rtlm, which the text's mask sets, in
+// place of ltra and ltrm.
+void collectDefaultFeatures(FeatureBuilder& b, const bool backward) {
   b.enable(tag("rvrn"));
   b.pause(GSUB, Pause::None);
-  b.enable(tag("ltra"));
-  b.enable(tag("ltrm"));
+  if (backward) {
+    b.enable(tag("rtla"));
+    b.add(tag("rtlm"));
+  } else {
+    b.enable(tag("ltra"));
+    b.enable(tag("ltrm"));
+  }
   b.add(tag("frac"));
   b.add(tag("numr"));
   b.add(tag("dnom"));
@@ -262,6 +269,38 @@ void overrideIndicFeatures(FeatureBuilder& b) {
   b.pause(GSUB, Pause::None);
 }
 
+// witchhunt: deviation 11 - arabic_features[], in the order data_create_arabic numbers the forms' masks.
+constexpr uint32_t ARABIC_FORM_TAGS[7] = {tag("isol"), tag("fina"), tag("fin2"), tag("fin3"),
+                                          tag("medi"), tag("med2"), tag("init")};
+
+// witchhunt: deviation 11 - collect_features_arabic() (hb-ot-shaper-arabic.cc, HarfBuzz 14.5.0; MIT, see COPYING).
+// Its three pauses that run code (record_stch, deallocate_buffer_var, arabic_fallback_shape) are Pause::None: neither
+// stch nor the fallback shaping is ported, and the buffer variable needs no freeing here. `hasRclt`: whether the
+// language system has rclt, which then runs with liga and the common features instead of after a pause of its own
+// (HarfBuzz issue 1573).
+void collectArabicFeatures(FeatureBuilder& b, const bool hasRclt) {
+  b.enable(tag("stch"));
+  b.pause(GSUB, Pause::None);  // record_stch
+  b.enable(tag("ccmp"), ff::MANUAL_ZWJ);
+  b.enable(tag("locl"), ff::MANUAL_ZWJ);
+  b.pause(GSUB, Pause::None);
+  // arabic_features[]: the Syriac three (fin2, fin3, med2) have no fallback.
+  for (const uint32_t t : ARABIC_FORM_TAGS) {
+    const bool syriac = (t & 0xFF) == '2' || (t & 0xFF) == '3';
+    b.add(t, static_cast<uint8_t>(ff::MANUAL_ZWJ | (syriac ? 0 : ff::HAS_FALLBACK)));
+    b.pause(GSUB, Pause::None);
+  }
+  b.pause(GSUB, Pause::None);  // deallocate_buffer_var
+  b.enable(tag("rlig"), ff::MANUAL_ZWJ | ff::HAS_FALLBACK);
+  b.pause(GSUB, Pause::None);  // arabic_fallback_shape
+  b.enable(tag("calt"), ff::MANUAL_ZWJ);
+  if (!hasRclt) b.pause(GSUB, Pause::None);
+  b.enable(tag("liga"), ff::MANUAL_ZWJ);
+  b.enable(tag("clig"), ff::MANUAL_ZWJ);
+  // cswh is commented out in HarfBuzz too (off by default).
+  b.enable(tag("mset"), ff::MANUAL_ZWJ);
+}
+
 // collect_features_use().
 void collectUseFeatures(FeatureBuilder& b) {
   b.pause(GSUB, Pause::UseSetupSyllables);
@@ -298,6 +337,7 @@ class PlanBuilder {
   bool build(const Script script, const uint32_t* languageTags) {
     plan_.listsFit_ = true;  // witchhunt: deviation 1
     plan_.script = script;
+    plan_.backward = script == Script::Arabic;  // witchhunt: deviation 11
     for (int t = GSUB; t <= GPOS; t++) {
       TableSystem& ts = systems_[t];
       ts.ls = selectLanguageSystem(face_.layout(t), script, languageTags);
@@ -308,14 +348,17 @@ class PlanBuilder {
     chooseShaper();
 
     FeatureBuilder b;
-    if (!bindScratch(b)) return false;  // witchhunt: deviation 1
-    collectDefaultFeatures(b);
+    if (!bindScratch(b)) return false;          // witchhunt: deviation 1
+    collectDefaultFeatures(b, plan_.backward);  // witchhunt: deviation 11
     if (plan_.shaper == ShaperKind::Indic) {
       b.isSimple = false;
       collectIndicFeatures(b);
     } else if (plan_.shaper == ShaperKind::Use) {
       b.isSimple = false;
       collectUseFeatures(b);
+    } else if (plan_.shaper == ShaperKind::Arabic) {  // witchhunt: deviation 11
+      b.isSimple = false;
+      collectArabicFeatures(b, hasFeature(tag("rclt")));
     }
     collectCommonFeatures(b);
     if (plan_.shaper == ShaperKind::Indic) overrideIndicFeatures(b);
@@ -331,6 +374,10 @@ class PlanBuilder {
     uint32_t masks[MF_COUNT];
     for (int i = 0; i < MF_COUNT; i++) masks[i] = oneMask(MASKED_FEATURE_TAGS[i]);
     plan_.setFeatureMasks(masks);
+    // witchhunt: deviation 11 - the Arabic forms' masks in HarfBuzz's order (data_create_arabic), and rtlm's.
+    for (int i = 0; i < 7; i++) plan_.arabicMasks[i] = oneMask(ARABIC_FORM_TAGS[i]);
+    plan_.arabicMasks[7] = 0;
+    plan_.rtlmMask = oneMask(tag("rtlm"));
     static constexpr uint32_t WOULD_TAGS[Plan::WS_COUNT] = {tag("rphf"), tag("pref"), tag("blwf"), tag("pstf"),
                                                             tag("vatu")};
     for (int i = 0; i < Plan::WS_COUNT; i++) plan_.wouldStage[i] = gsubStage(WOULD_TAGS[i]);
@@ -361,7 +408,11 @@ class PlanBuilder {
   // hb_ot_shaper_categorize().
   void chooseShaper() {
     const uint32_t chosen = plan_.chosenScript;
-    if (chosen == tag("DFLT") || chosen == tag("latn")) {
+    if (plan_.script == Script::Arabic) {
+      // witchhunt: deviation 11 - the Arabic shaper whatever the script tag, DFLT included (HarfBuzz does fallback
+      // shaping for Arabic text).
+      plan_.shaper = ShaperKind::Arabic;
+    } else if (chosen == tag("DFLT") || chosen == tag("latn")) {
       plan_.shaper = ShaperKind::Default;
     } else if (plan_.script == Script::Sinhala || (chosen & 0xFF) == '3') {
       plan_.shaper = ShaperKind::Use;
@@ -370,19 +421,26 @@ class PlanBuilder {
     }
   }
 
+  // The language system's features of table `t`; earlier entries win.
+  // witchhunt: deviation 11 - lifted out of mapFeatures() for hasFeature().
+  unsigned findFeatureIndex(const int t, const uint32_t featureT) const {
+    const Table& langSys = systems_[t].ls.langSys;
+    for (uint16_t i = 0; i < langSys.u16(4); i++) {
+      const uint16_t featureIndex = langSys.u16(6 + 2 * i);
+      if (featureTag(face_.layout(t), featureIndex) == featureT) return featureIndex;
+    }
+    return NOT_FOUND;
+  }
+
+  // witchhunt: deviation 11 - hb_ot_map_builder_t::has_feature(): whether the language system has the feature in GSUB
+  // or GPOS (the required feature does not count, as in HarfBuzz).
+  bool hasFeature(const uint32_t featureT) const {
+    return findFeatureIndex(GSUB, featureT) != NOT_FOUND || findFeatureIndex(GPOS, featureT) != NOT_FOUND;
+  }
+
   // First half: which requested features the font has, and the mask bits
   // each gets.
   void mapFeatures(const FeatureBuilder& builder, unsigned* requiredStage) {
-    // The language system's features; earlier entries win.
-    const auto findFeatureIndex = [&](const int t, const uint32_t featureT) -> unsigned {
-      const Table& langSys = systems_[t].ls.langSys;
-      for (uint16_t i = 0; i < langSys.u16(4); i++) {
-        const uint16_t featureIndex = langSys.u16(6 + 2 * i);
-        if (featureTag(face_.layout(t), featureIndex) == featureT) return featureIndex;
-      }
-      return NOT_FOUND;
-    };
-
     features_.clear();  // witchhunt: deviation 1 - bound by bindScratch(), no reservation
     plan_.globalMask = GLOBAL_BIT_MASK;
     unsigned nextBit = FIRST_FEATURE_BIT;

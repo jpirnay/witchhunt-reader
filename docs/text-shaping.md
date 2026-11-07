@@ -321,11 +321,39 @@ font is not rebuilt at every open.
 | A `WordShapeCache` entry | 126 B; a token of 255 B | not cached: shaped each time |
 | The engine (`lib/OtShaper`) | upstream's: `MAX_NESTING_LEVEL` 8, `MAX_CONTEXT_LENGTH` 64, 2n + 16 glyphs for a run of n, the op budget (`MAX_OPS_FACTOR`, `MAX_OPS_MIN`), `MAX_PLANNED_LOOKUPS` 4096 | the run fails: degraded |
 
+## The engine's Arabic shaper
+
+`lib/OtShaper` shapes Arabic, Persian and Urdu (HarfBuzz 14.5's Arabic shaper, deviation 11 of the design). **Layout does
+not use it yet**: the section build still shapes only the Indic scripts, and an Arabic paragraph draws as before. PR 4b
+connects it (the line pass's run-cut pieces and the Font Manager's Arabic families); until then it is reachable from
+the host tests, the oracle and the dev command `CMD:TTF:SHAPE` ([serial-test-api.md](serial-test-api.md)).
+
+What it does, with the font's own lookups:
+
+- **The plan**: `Script::Arabic` (after the Indic scripts, so a CPpl's values keep their meaning) builds HarfBuzz's
+  feature list and stages: the joining forms (`isol`, `fina`, `fin2`, `fin3`, `medi`, `med2`, `init`), `rlig`,
+  `calt`, `rclt` (a horizontal feature), `liga` and the rest, with the language systems for `ar`, `fa`, `prs`, `ur`,
+  `ps`, `sd`, `ug`, `ku`, `ckb`, `kmr`, `sdh` and `ks`.
+- **Joining**: the state machine over the run and its context sets each letter's form mask; transparent marks are
+  skipped; ZWJ and ZWNJ join and cut as in HarfBuzz.
+- **Marks**: the modifier combining marks are reordered (UTR #53), in the modified classes, before the lookups run.
+- **Right to left**: the run is shaped as HarfBuzz's `hb_ot_shape` does a right-to-left buffer: every character takes the
+  `rtlm` mask and none is swapped (no character the tables cover has a mirror), cursive attachment and attachment offsets propagate backwards, and the glyphs and positions are reversed
+  at the end, so a run comes out in visual order.
+
+It matches HarfBuzz on all 1,808 recorded fixture words and on the oracle's 100 runs over 6,333 lines (five fonts, two
+sizes, ten languages), and the Indic oracle is unchanged.
+
+**Not ported**: `stch` (neither Noto Arabic family has it), the fallback shaping with presentation forms for a font
+without the features, the mark placement and legacy `kern` that HarfBuzz's `fallback_position` gives a font without
+GPOS, and Syriac. The pauses of the unported features stay, so the stages are HarfBuzz's. Mongolian, N'Ko and Phags-pa are shaped by USE in
+HarfBuzz 14.5, not by this shaper.
+
 ## What is not shaped yet
 
 - **Paragraphs that need bidi** (a right-to-left level, or a word with a right-to-left letter or control): their
   Indic words are drawn as their code points, not even reordered. Shaping in them needs the line pass's run-cut
-  pieces, which the Arabic joining module brings (step 2, PR 4).
+  pieces, which PR 4b brings together with the layout's use of the Arabic shaper.
 - **Titles, chapter names and the TOC**, on Home, in the Library, in the status bar and the chapter list: the UI
   faces are bitmap and cannot shape, so these draw unshaped in the face that draws them today. They wait for step 5's
   visual strings.

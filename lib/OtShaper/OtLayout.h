@@ -56,7 +56,8 @@ void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, int table
 bool wouldSubstitute(const Face& face, uint32_t lookupIndex, const Digest& digest, const uint32_t* glyphs,
                      unsigned count, bool zeroContext);
 
-// Joins mark and cursive attachment offsets once GPOS is done.
+// Joins mark and cursive attachment offsets once GPOS is done, in the
+// buffer's direction (witchhunt: deviation 11 - buffer.backward).
 void propagateAttachmentOffsets(Buffer& buffer);
 
 }  // namespace ot

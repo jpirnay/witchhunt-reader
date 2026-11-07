@@ -48,6 +48,11 @@ std::vector<uint32_t> decodeUtf8(const std::string& s) {
   return out;
 }
 
+// The Arabic blocks the engine's tables cover: Arabic, Arabic Supplement, Arabic Extended-B and Extended-A.
+bool isArabic(const uint32_t cp) {
+  return (cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0750 && cp <= 0x077F) || (cp >= 0x0870 && cp <= 0x08FF);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -85,8 +90,8 @@ int main(int argc, char** argv) {
   scale.set(std::atoi(argv[2]), static_cast<unsigned>(std::atoi(argv[3])), face.upem());
   const uint32_t* languages = ot::languageTagsFor(argv[4][0] == '-' ? "" : argv[4]);
 
-  ot::Plan plans[10];
-  bool built[10] = {};
+  ot::Plan plans[11];
+  bool built[11] = {};
   ot::Buffer buffer;
   static uint8_t storage[ot::Buffer::bytesFor(4096)];  // witchhunt: deviation 1 - past 2040 code points: FAIL
   buffer.setStorage(storage, sizeof(storage));         // witchhunt: deviation 1
@@ -95,8 +100,16 @@ int main(int argc, char** argv) {
     const std::vector<uint32_t> cps = decodeUtf8(line);
     ot::Script script = ot::Script::Devanagari;
     // Shared codepoints (dandas, joiners) belong to the surrounding script, as in ComplexShaper.
+    bool arabic = false;
     for (const uint32_t cp : cps) {
-      if (const indic::ScriptInfo* info = indic::scriptOf(cp)) {
+      if (isArabic(cp)) {
+        arabic = true;
+        script = ot::Script::Arabic;
+        break;
+      }
+    }
+    for (size_t k = 0; !arabic && k < cps.size(); k++) {
+      if (const indic::ScriptInfo* info = indic::scriptOf(cps[k])) {
         script = static_cast<ot::Script>(indic::indexOf(*info));
         break;
       }

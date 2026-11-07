@@ -34,6 +34,7 @@
 #include <IndicScripts.h>
 #include <Memory.h>
 #include <OtShaper.h>
+#include <OtShaperInternal.h>
 #include <ProtectedPaths.h>
 #include <SerialTransfer/SerialTransferProtocol.h>
 #include <ShapingFace.h>
@@ -939,14 +940,24 @@ struct ShapeReport {
   unsigned stored = 0;
 };
 
-constexpr unsigned kShapeRunCodepoints = 48;  // the run: the word from its first Indic letter
+constexpr unsigned kShapeRunCodepoints = 48;  // the run: the word from its first Indic or Arabic letter
 constexpr unsigned kShapeSlots = 112;         // the shaper's buffer: room to grow past the run
 
 // Rounds a 26.6 value to whole pixels, halves away from zero.
 int roundPixels(const int32_t v) { return v >= 0 ? (v + 32) / 64 : -((-v + 32) / 64); }
 
-// Shapes the first Indic run of `text` with the body family's regular style at the body size, as a section build
-// would, and times each step. Every block it makes is freed on return, the plan before the caller lets go of the
+// An Arabic letter or mark of the blocks the shaper's fixtures cover (Arabic, Supplement, Extended-B and -A): general
+// category Lo, Lm or a mark. Digits, punctuation and the number signs are not.
+bool isArabicLetterOrMark(const uint32_t cp) {
+  if (!((cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0750 && cp <= 0x077F) || (cp >= 0x0870 && cp <= 0x08FF))) {
+    return false;
+  }
+  const uint8_t cat = ot::charData(cp).genCat;
+  return cat == ot::gc::OTHER_LETTER || cat == ot::gc::MODIFIER_LETTER || ot::gc::isMark(cat);
+}
+
+// Shapes the first Indic or Arabic run of `text` with the body family's regular style at the body size, as a section
+// build would, and times each step. Every block it makes is freed on return, the plan before the caller lets go of the
 // shaping faces. Under RenderLock.
 void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, const std::string_view text,
                ShapeReport& r) {
@@ -965,17 +976,22 @@ void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, 
 
   unsigned count = 0;
   const indic::ScriptInfo* script = nullptr;
+  bool arabic = false;
   for (const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8.get());
        *p && count < kShapeRunCodepoints;) {
     const uint32_t cp = utf8NextCodepoint(&p);
-    if (!script) script = indic::scriptOf(cp);
-    if (script) cps[count++] = cp;
+    if (!script && !arabic) {
+      script = indic::scriptOf(cp);
+      arabic = !script && isArabicLetterOrMark(cp);
+    }
+    if (arabic && !isArabicLetterOrMark(cp) && cp != 0x200C && cp != 0x200D) break;  // the Arabic run ends here
+    if (script || arabic) cps[count++] = cp;
   }
-  if (!script) {
+  if (!script && !arabic) {
     r.error = "no Indic letter";
     return;
   }
-  r.script = script->name;
+  r.script = arabic ? "Arabic" : script->name;
 
   ShapingFace* const face = font.shapingFace(0);
   const EpdFont* const regular = font.font(0);
@@ -1012,7 +1028,8 @@ void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, 
   otFace = face->current();
   start = micros();
   const bool planned =
-      otFace && plan->build(*otFace, static_cast<ot::Script>(indic::indexOf(*script)), ot::languageTagsFor(tag));
+      otFace && plan->build(*otFace, arabic ? ot::Script::Arabic : static_cast<ot::Script>(indic::indexOf(*script)),
+                            ot::languageTagsFor(tag));
   r.planUs = micros() - start;
   if (!planned) {
     r.error = "plan failed";

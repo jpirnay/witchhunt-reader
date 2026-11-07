@@ -26,6 +26,12 @@ struct CharData {
 };
 CharData charData(uint32_t cp);
 
+// The Arabic joining types, HarfBuzz's values; C folds into D as JOINING_TYPE_C
+// does, and X is resolved when the table is generated (T for Mn, Me and Cf, else U).
+// witchhunt: deviation 11
+enum class JoiningType : uint8_t { U = 0, L = 1, R = 2, D = 3, Alaph = 4, DalathRish = 5, T = 6 };
+JoiningType joiningType(uint32_t cp);
+
 // Sets unicodeProps from the codepoint (_hb_glyph_info_set_unicode_props).
 void setUnicodeProps(GlyphInfo& info, Buffer& buffer);
 
@@ -85,6 +91,17 @@ void indicSetupMasks(Buffer& buffer);
 void indicSetupSyllables(Buffer& buffer);
 void indicInitialReordering(const Face& face, const Plan& plan, Buffer& buffer);
 void indicFinalReordering(const Face& face, const Plan& plan, Buffer& buffer);
+
+// The Arabic shaper (hb-ot-shaper-arabic.cc). Joining actions, HarfBuzz's order: the index into
+// Plan::arabicMasks, kept in GlyphInfo::position (HarfBuzz's shared aux byte).
+// witchhunt: deviation 11
+namespace arabic {
+constexpr uint8_t ISOL = 0, FINA = 1, FIN2 = 2, FIN3 = 3, MEDI = 4, MED2 = 5, INIT = 6, NONE = 7;
+}
+// Runs the joining machine over `buffer.info`, context code points included, and ORs in the form masks.
+void arabicSetupMasks(const Plan& plan, Buffer& buffer);
+// reorder_marks_arabic(): moves the modifier combining marks of one sorted mark run [start, end) to its front.
+void reorderMarksArabic(Buffer& buffer, unsigned start, unsigned end);
 
 // The Universal Shaping Engine (hb-ot-shaper-use.cc).
 void useSetupMasks(Buffer& buffer);

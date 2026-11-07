@@ -24,6 +24,7 @@ constexpr uint16_t CF_ZWNJ = 0x0200;
 namespace gc {
 constexpr uint8_t FORMAT = 1;
 constexpr uint8_t UNASSIGNED = 2;
+constexpr uint8_t MODIFIER_LETTER = 6;
 constexpr uint8_t OTHER_LETTER = 7;
 constexpr uint8_t SPACING_MARK = 10;
 constexpr uint8_t NON_SPACING_MARK = 12;
@@ -90,6 +91,11 @@ struct GlyphInfo {
   bool isDefaultIgnorable() const { return (unicodeProps & uprops::IGNORABLE) && !(glyphProps & props::SUBSTITUTED); }
   bool isZwnj() const { return genCat() == gc::FORMAT && (unicodeProps & uprops::CF_ZWNJ); }
   bool isZwj() const { return genCat() == gc::FORMAT && (unicodeProps & uprops::CF_ZWJ); }
+  // witchhunt: deviation 11 - reorder_marks_arabic() renumbers a mark's class (the high byte; marks only).
+  void setModifiedCombiningClass(const uint8_t cc) {
+    if (!isUnicodeMark()) return;
+    unicodeProps = static_cast<uint16_t>((unicodeProps & 0x00FF) | (cc << 8));
+  }
   bool isHidden() const { return unicodeProps & uprops::HIDDEN; }
 
   uint8_t syllableType() const { return syllable & 0x0F; }
@@ -166,6 +172,9 @@ struct Buffer {
   uint8_t serial = 0;           // allocates ligature IDs (HarfBuzz's next_serial)
   uint32_t randomState = 1;     // the 'rand' feature's generator
   bool partialContext = false;  // see RunContext::partial
+  // witchhunt: deviation 11 - the run goes right to left (HB_DIRECTION_IS_BACKWARD): shape() sets it from the plan;
+  // cursive attachment and propagateAttachmentOffsets() read it.
+  bool backward = false;
   bool hasDefaultIgnorables = false;
   bool hasBrokenSyllable = false;
   bool hasGposAttachment = false;
@@ -207,6 +216,8 @@ struct Buffer {
   // Moves info[from] to position `to`, shifting what lies between.
   void moveGlyph(unsigned from, unsigned to);
   void reverseRange(unsigned start, unsigned end);
+  // witchhunt: deviation 11 - hb_buffer_t::reverse(): the whole run, glyphs and their positions together.
+  void reverse();
   void refreshDigest();
 
   // witchhunt: deviation 1 - setStorage()'s block, aligned, and its slots;

@@ -347,6 +347,9 @@ TEST(SerialCommandGrammar, TtfShapeTakesALanguageAndAWord) {
   ASSERT_TRUE(SerialCommandGrammar::parseTtfShape("SHAPE::\xE0\xA4\x95\xE0\xA4\xBF", language, text));
   EXPECT_TRUE(language.empty());
   EXPECT_EQ(text, "\xE0\xA4\x95\xE0\xA4\xBF");
+  ASSERT_TRUE(SerialCommandGrammar::parseTtfShape("SHAPE:ar:\xD9\x84\xD8\xA7", language, text)) << "Arabic: lam, alef";
+  EXPECT_EQ(language, "ar");
+  EXPECT_EQ(text, "\xD9\x84\xD8\xA7");
   ASSERT_TRUE(SerialCommandGrammar::parseTtfShape("SHAPE:zh-Hant-TW:x", language, text));
   EXPECT_EQ(language, "zh-Hant-TW");
   EXPECT_FALSE(SerialCommandGrammar::parseTtfShape("SHAPE:hi:", language, text)) << "no text";

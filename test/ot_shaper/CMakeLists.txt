@@ -1,9 +1,11 @@
 add_executable(OtShaperTest
   OtShaperTest.cpp
+  OtArabicTest.cpp
   ${REPO_ROOT}/test/uzlib_lzcopy/UzlibChksumStubs.cpp
   ${OT_SHAPER_SOURCES}
 )
-target_include_directories(OtShaperTest PRIVATE ${OT_SHAPER_INCLUDE_DIR})
+# test/complex_shaper: ExpectedShaping.h, for the Arabic tests' use of test/ot_shaper_port/OtShaperTestHelpers.h.
+target_include_directories(OtShaperTest PRIVATE ${OT_SHAPER_INCLUDE_DIR} ${REPO_ROOT}/test/complex_shaper)
 # The four Indic fixture books (test/epubs) and their subset fonts: the plan's memos are checked on their words.
 target_compile_definitions(OtShaperTest PRIVATE SHAPING_FIXTURE_DIR="${REPO_ROOT}/test/complex_shaper/data"
                                                TTF_FIXTURE_DIR="${REPO_ROOT}/test/fixtures/fonts"

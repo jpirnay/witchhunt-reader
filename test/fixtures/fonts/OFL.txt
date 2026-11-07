@@ -2,6 +2,10 @@ Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Sour
 
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari), with no Reserved Font Name.
 
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic), with no Reserved Font Name.
+
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic), with no Reserved Font Name.
+
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 
 This license is copied below, and is also available with a FAQ at:

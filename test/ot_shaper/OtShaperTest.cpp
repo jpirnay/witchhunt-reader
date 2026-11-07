@@ -490,10 +490,99 @@ TEST(OtShaperRobustness, BoundsFeatureVariationConditionWork) {
   shapeWord(face, plan, "தமிழ்");
 }
 
+// --- The generated Unicode tables ---------------------------------------------
+
+namespace {
+
+// FNV-1a over charData()'s six fields for U+0900-0DFF and U+200C, 200D, 25CC.
+uint32_t indicBlocksHash() {
+  uint32_t h = 2166136261u;
+  const auto mix = [&h](const uint32_t v) {
+    h ^= v & 0xFFu;
+    h *= 16777619u;
+  };
+  const auto hashOne = [&](const uint32_t cp) {
+    const ot::CharData d = ot::charData(cp);
+    mix(d.genCat);
+    mix(d.ccc);
+    mix(d.indicCategory);
+    mix(d.indicPosition);
+    mix(d.useCategory);
+    mix(d.ignorable ? 1 : 0);
+  };
+  for (uint32_t cp = 0x0900; cp <= 0x0DFF; cp++) hashOne(cp);
+  hashOne(0x200C);
+  hashOne(0x200D);
+  hashOne(0x25CC);
+  return h;
+}
+
+}  // namespace
+
+TEST(OtUnicodeData, TheIndicBlocksAreUnchanged) {
+  // Recorded on the base tree (7c3c2069c, before the Arabic tables), from this same function.
+  constexpr uint32_t kBaseHash = 1960753560u;
+  EXPECT_EQ(indicBlocksHash(), kBaseHash);
+}
+
+TEST(OtUnicodeData, ArabicCharactersCarryHarfBuzzsProps) {
+  EXPECT_EQ(ot::charData(0x0628).genCat, ot::gc::OTHER_LETTER);
+  EXPECT_EQ(ot::charData(0x0640).genCat, ot::gc::MODIFIER_LETTER);
+  EXPECT_EQ(ot::charData(0x064B).genCat, ot::gc::NON_SPACING_MARK);
+  EXPECT_EQ(ot::charData(0x061C).genCat, ot::gc::FORMAT);
+  EXPECT_TRUE(ot::charData(0x061C).ignorable);
+  EXPECT_EQ(ot::charData(0x0600).genCat, ot::gc::FORMAT);
+  EXPECT_FALSE(ot::charData(0x0600).ignorable);
+  // HarfBuzz's modified combining classes (hb-unicode.hh).
+  const std::pair<uint32_t, int> modified[] = {{0x064B, 28}, {0x064C, 29},  {0x064D, 30}, {0x064E, 31},
+                                               {0x064F, 32}, {0x0650, 33},  {0x0651, 27}, {0x0652, 34},
+                                               {0x0670, 35}, {0x0654, 230}, {0x0655, 220}};
+  for (const auto& [cp, ccc] : modified) EXPECT_EQ(ot::charData(cp).ccc, ccc) << std::hex << cp;
+}
+
+TEST(OtUnicodeData, ArabicJoiningTypesAreHarfBuzzs) {
+  using ot::JoiningType;
+  // HarfBuzz 14.5.0's values (hb-ot-shaper-arabic.cc): the state table is indexed by U..DalathRish.
+  static_assert(static_cast<int>(JoiningType::T) == 6 && static_cast<int>(JoiningType::DalathRish) == 5);
+  const std::pair<uint32_t, JoiningType> expected[] = {
+      {0x0627, JoiningType::R}, {0x0628, JoiningType::D}, {0x0621, JoiningType::U}, {0x0640, JoiningType::D},
+      {0x064B, JoiningType::T}, {0x06CC, JoiningType::D}, {0x0698, JoiningType::R}, {0x200D, JoiningType::D},
+      {0x200C, JoiningType::U}, {0x25CC, JoiningType::U}, {0x0041, JoiningType::U}};
+  for (const auto& [cp, type] : expected) EXPECT_EQ(ot::joiningType(cp), type) << std::hex << cp;
+}
+
+TEST(OtUnicodeData, ArabicDecomposesAndComposesAsUnicode) {
+  const uint32_t table[][3] = {{0x0622, 0x0627, 0x0653}, {0x0623, 0x0627, 0x0654}, {0x0625, 0x0627, 0x0655},
+                               {0x0624, 0x0648, 0x0654}, {0x0626, 0x064A, 0x0654}, {0x06C0, 0x06D5, 0x0654},
+                               {0x06C2, 0x06C1, 0x0654}, {0x06D3, 0x06D2, 0x0654}};
+  for (const auto& row : table) {
+    bool decomposes = false, composes = false;
+    for (const auto& d : ot::ucd::DECOMPOSITIONS)
+      if (d.ab == row[0]) decomposes = d.a == row[1] && d.b == row[2];
+    for (const auto& c : ot::ucd::COMPOSITIONS)
+      if (c.a == row[1] && c.b == row[2]) composes = c.ab == row[0];
+    EXPECT_TRUE(decomposes) << std::hex << row[0];
+    EXPECT_TRUE(composes) << std::hex << row[0];
+  }
+}
+
 TEST(OtShaperLanguage, MapsBcp47TagsToLanguageSystems) {
   EXPECT_EQ(ot::languageTagsFor("mr")[0], ot::tag("MAR "));
   EXPECT_EQ(ot::languageTagsFor("ne-NP")[0], ot::tag("NEP "));
   EXPECT_EQ(ot::languageTagsFor("BN_bd")[0], ot::tag("BEN "));
+  EXPECT_EQ(ot::languageTagsFor("ar")[0], ot::tag("ARA "));
+  EXPECT_EQ(ot::languageTagsFor("fa")[0], ot::tag("FAR "));
+  EXPECT_EQ(ot::languageTagsFor("ur-PK")[0], ot::tag("URD "));
+  EXPECT_EQ(ot::languageTagsFor("ps")[0], ot::tag("PAS "));
+  EXPECT_EQ(ot::languageTagsFor("ug")[0], ot::tag("UYG "));
+  EXPECT_EQ(ot::languageTagsFor("ku")[0], ot::tag("KUR "));
+  EXPECT_EQ(ot::languageTagsFor("ckb")[0], ot::tag("KUR "));
+  EXPECT_EQ(ot::languageTagsFor("kmr")[0], ot::tag("KUR "));
+  EXPECT_EQ(ot::languageTagsFor("sdh")[0], ot::tag("KUR "));
+  EXPECT_EQ(ot::languageTagsFor("prs")[0], ot::tag("DRI "));
+  EXPECT_EQ(ot::languageTagsFor("prs")[1], ot::tag("FAR "));
+  EXPECT_EQ(ot::languageTagsFor("sd")[0], ot::tag("SND "));
+  EXPECT_EQ(ot::languageTagsFor("ks")[0], ot::tag("KSH "));
   EXPECT_EQ(ot::languageTagsFor("xx")[0], 0u);
   EXPECT_EQ(ot::languageTagsFor("")[0], 0u);
   EXPECT_EQ(ot::languageTagsFor(nullptr)[0], 0u);

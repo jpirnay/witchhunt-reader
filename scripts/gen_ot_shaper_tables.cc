@@ -3,21 +3,34 @@
 // Built and run by gen_ot_shaper_tables.py against a pinned HarfBuzz release; never
 // part of the firmware.
 
-#include "hb.hh"
-#include "hb-ot-shaper-indic.hh"
-#include "hb-ot-shaper-use-table.hh"
-
 #include <cstdio>
+#include <utility>
 #include <vector>
 
-static const hb_codepoint_t kFirst = 0x0900, kLast = 0x0DFF;
+#include "hb-ot-shaper-arabic-table.hh"
+#include "hb-ot-shaper-indic.hh"
+#include "hb-ot-shaper-use-table.hh"
+#include "hb.hh"
+
+// witchhunt: deviation 11. The Arabic blocks join the Indic ones: Arabic, Arabic Supplement, then Arabic
+// Extended-B and -A (U+0870-08FF) running straight into the Indic blocks (U+0900-0DFF). The Arabic Presentation
+// Forms (U+FB50-FDFF, FE70-FEFF) are left out.
+struct Range {
+  hb_codepoint_t first, last;
+};
+static const Range kRanges[] = {{0x0600, 0x06FF}, {0x0750, 0x077F}, {0x0870, 0x0DFF}};
+// witchhunt: deviation 11. Only these carry a joining type (Arabic, Arabic Supplement, Arabic Extended-B and -A);
+// the Indic blocks all join as U.
+static const Range kJoiningRanges[] = {{0x0600, 0x06FF}, {0x0750, 0x077F}, {0x0870, 0x08FF}};
 static const hb_codepoint_t kExtras[] = {0x200C, 0x200D, 0x25CC};
 
 // Languages written in the scripts the shaper handles (BCP 47 primary subtags).
-static const char* kLanguages[] = {
-    "as", "awa", "bh", "bho", "bn", "bpy", "bra", "brx", "doi", "dv", "gbm", "gom", "gu", "hi", "hne", "kfr", "kn",
-    "kok", "kru", "ks", "mag", "mai", "ml", "mni", "mr", "mwr", "ne", "new", "or", "pa", "pi", "raj", "sa", "sat",
-    "sck", "sd", "si", "ta", "tcy", "te", "xnr", "en"};
+static const char* kLanguages[] = {"as",  "awa", "bh", "bho", "bn",  "bpy", "bra", "brx", "doi", "dv",  "gbm",
+                                   "gom", "gu",  "hi", "hne", "kfr", "kn",  "kok", "kru", "ks",  "mag", "mai",
+                                   "ml",  "mni", "mr", "mwr", "ne",  "new", "or",  "pa",  "pi",  "raj", "sa",
+                                   "sat", "sck", "sd", "si",  "ta",  "tcy", "te",  "xnr", "en"};
+// witchhunt: deviation 11. Languages written in Arabic script (sd and ks above keep their Indic rows).
+static const char* kArabicLanguages[] = {"ar", "fa", "ur", "ps", "ug", "ku", "ckb", "prs", "kmr", "sdh"};
 
 static uint32_t pack(hb_codepoint_t u) {
   hb_unicode_funcs_t* uf = hb_unicode_funcs_get_default();
@@ -35,10 +48,24 @@ static uint32_t pack(hb_codepoint_t u) {
 }
 
 static bool inSet(hb_codepoint_t u) {
-  if (u >= kFirst && u <= kLast) return true;
+  for (const Range& r : kRanges)
+    if (u >= r.first && u <= r.last) return true;
   for (hb_codepoint_t e : kExtras)
     if (u == e) return true;
   return false;
+}
+
+// witchhunt: deviation 11. HarfBuzz's get_joining_type with X resolved, in ot::JoiningType's numbering
+// (U 0, L 1, R 2, D 3, ALAPH 4, DALATH_RISH 5, T 6; X is resolved to T or U).
+static unsigned joiningOf(hb_codepoint_t u) {
+  hb_unicode_funcs_t* uf = hb_unicode_funcs_get_default();
+  const unsigned j = joining_type(u);
+  if (j != 7) return j;
+  const unsigned gc = hb_unicode_general_category(uf, u);
+  return (gc == HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK || gc == HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK ||
+          gc == HB_UNICODE_GENERAL_CATEGORY_FORMAT)
+             ? 6
+             : 0;
 }
 
 int main() {
@@ -54,28 +81,66 @@ int main() {
   printf("constexpr unsigned INDIC_POS_SHIFT = 19, INDIC_POS_BITS = 4;\n");
   printf("constexpr unsigned USE_CAT_SHIFT = 23, USE_CAT_BITS = 6;\n");
   printf("constexpr unsigned IGNORABLE_SHIFT = 29;\n");
-  printf("constexpr uint32_t FIRST = 0x%04X;\nconstexpr uint32_t LAST = 0x%04X;\n", kFirst, kLast);
+  printf("// Ranges of codepoints with a PROPS_INDEX entry; `offset` is the index of a range's first codepoint.\n");
+  printf("struct Range {\n  uint16_t first, last, offset;\n};\nconstexpr Range RANGES[] = {\n");
+  unsigned total = 0;
+  for (const Range& r : kRanges) {
+    printf("    {0x%04X, 0x%04X, %u},\n", r.first, r.last, total);
+    total += r.last - r.first + 1;
+  }
+  printf("};\n");
   // Few distinct values: each codepoint stores an index into PROPS.
   std::vector<uint32_t> props;
   std::vector<uint8_t> index;
-  for (hb_codepoint_t u = kFirst; u <= kLast; u++) {
-    const uint32_t p = pack(u);
-    size_t i = 0;
-    while (i < props.size() && props[i] != p) i++;
-    if (i == props.size()) props.push_back(p);
-    if (i > 255) {
-      fprintf(stderr, "more than 256 distinct property values\n");
-      exit(1);
+  for (const Range& r : kRanges)
+    for (hb_codepoint_t u = r.first; u <= r.last; u++) {
+      const uint32_t p = pack(u);
+      size_t i = 0;
+      while (i < props.size() && props[i] != p) i++;
+      if (i == props.size()) props.push_back(p);
+      if (i > 255) {
+        fprintf(stderr, "more than 256 distinct property values\n");
+        exit(1);
+      }
+      index.push_back(static_cast<uint8_t>(i));
     }
-    index.push_back(static_cast<uint8_t>(i));
-  }
+  std::vector<uint8_t> joining;
+  for (const Range& r : kJoiningRanges)
+    for (hb_codepoint_t u = r.first; u <= r.last; u++) {
+      const unsigned j = joiningOf(u);
+      if (j > 6) {
+        fprintf(stderr, "U+%04X: joining type %u is past the state table's six columns plus T\n", u, j);
+        exit(1);
+      }
+      joining.push_back(static_cast<uint8_t>(j));
+    }
   printf("constexpr uint32_t PROPS[] = {");
   for (size_t i = 0; i < props.size(); i++) printf("%s0x%08X,", i % 8 ? " " : "\n    ", props[i]);
   printf("\n};\n");
-  printf("// Per codepoint FIRST..LAST, its PROPS index.\n");
+  printf("// Per codepoint of RANGES, in order, its PROPS index.\n");
   printf("constexpr uint8_t PROPS_INDEX[] = {");
   for (size_t i = 0; i < index.size(); i++) printf("%s%u,", i % 16 ? " " : "\n    ", index[i]);
   printf("\n};\n");
+  // Joining types from HarfBuzz's own table, X resolved (T for Mn, Me and Cf, else U); T is 6.
+  printf("// Arabic joining types from HarfBuzz %s's hb-ot-shaper-arabic-table.hh (Unicode 18.0 ArabicShaping.txt),\n",
+         HB_VERSION_STRING);
+  printf("// four bits a codepoint of JOINING_RANGES, in order, the low nibble first: U 0, L 1, R 2, D 3 (C too),\n");
+  printf("// ALAPH 4, DALATH_RISH 5, T 6.\n");
+  printf("constexpr Range JOINING_RANGES[] = {\n");
+  unsigned joiningTotal = 0;
+  for (const Range& r : kJoiningRanges) {
+    printf("    {0x%04X, 0x%04X, %u},\n", r.first, r.last, joiningTotal);
+    joiningTotal += r.last - r.first + 1;
+  }
+  printf("};\n");
+  printf("constexpr uint8_t JOINING[] = {");
+  for (size_t i = 0; i < joining.size(); i += 2) {
+    const unsigned pair = joining[i] | ((i + 1 < joining.size() ? joining[i + 1] : 0) << 4);
+    printf("%s0x%02X,", (i / 2) % 16 ? " " : "\n    ", pair);
+  }
+  printf("\n};\n");
+  printf("constexpr uint8_t ZWNJ_JOINING = %u, ZWJ_JOINING = %u, DOTTED_CIRCLE_JOINING = %u;\n", joiningOf(0x200C),
+         joiningOf(0x200D), joiningOf(0x25CC));
   printf("constexpr uint32_t ZWNJ_PROPS = 0x%08X;\n", pack(0x200C));
   printf("constexpr uint32_t ZWJ_PROPS = 0x%08X;\n", pack(0x200D));
   printf("constexpr uint32_t DOTTED_CIRCLE_PROPS = 0x%08X;\n\n", pack(0x25CC));
@@ -83,7 +148,8 @@ int main() {
   // Canonical decompositions within the set (one step, as hb_unicode_decompose).
   printf("struct Decomposition {\n  uint16_t ab, a, b;\n};\nconstexpr Decomposition DECOMPOSITIONS[] = {\n");
   std::vector<hb_codepoint_t> all;
-  for (hb_codepoint_t u = kFirst; u <= kLast; u++) all.push_back(u);
+  for (const Range& r : kRanges)
+    for (hb_codepoint_t u = r.first; u <= r.last; u++) all.push_back(u);
   for (hb_codepoint_t e : kExtras) all.push_back(e);
   for (hb_codepoint_t u : all) {
     hb_codepoint_t a = 0, b = 0;
@@ -113,10 +179,13 @@ int main() {
 
   // OpenType language system tags HarfBuzz tries for each language, in order.
   printf("struct LanguageTags {\n  char code[4];\n  uint32_t tags[3];\n};\nconstexpr LanguageTags LANGUAGES[] = {\n");
-  for (const char* code : kLanguages) {
+  std::vector<std::pair<const char*, hb_script_t>> languages;
+  for (const char* code : kLanguages) languages.push_back({code, HB_SCRIPT_DEVANAGARI});
+  for (const char* code : kArabicLanguages) languages.push_back({code, HB_SCRIPT_ARABIC});
+  for (const auto& [code, script] : languages) {
     unsigned scriptCount = 0, languageCount = 3;
     hb_tag_t tags[3] = {};
-    hb_ot_tags_from_script_and_language(HB_SCRIPT_DEVANAGARI, hb_language_from_string(code, -1), &scriptCount, nullptr,
+    hb_ot_tags_from_script_and_language(script, hb_language_from_string(code, -1), &scriptCount, nullptr,
                                         &languageCount, tags);
     printf("    {\"%s\", {", code);
     for (unsigned i = 0; i < 3; i++) printf("%s0x%08X", i ? ", " : "", i < languageCount ? tags[i] : 0);
