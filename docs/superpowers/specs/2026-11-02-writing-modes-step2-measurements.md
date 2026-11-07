@@ -1202,3 +1202,64 @@ decision 6 on 2026-11-02, the plan's Task 3 followed, and item 3 was run again (
 | The 22 hosted families | file sizes of the merged fonts unknown | 112,068-293,268 B a style (22 families, refined recipe); every one fits the X3's store in flash mode | merge + fit |
 | Flash | 55-75 KB for PRs 1-3 | the engine alone (upstream's, with the runtime planner, linked by a never-run call): 52,268 B (51.0 KB) on `default`, 52,000 B on `gh_release`; with A, 67,628 B (66.0 KB) | scratch build |
 | Static RAM | upstream +224 B | +24 B on `default` and `gh_release` | scratch build |
+
+## PR 3b: the shipped families against HarfBuzz
+
+Task 4 of PR 3b. `test/ot_shaper/oracle_shipped_fonts.py` shapes `generate_corpus.py`'s full corpus for each script
+(11,203 to 20,522 lines a script, 152,064 across the ten) with HarfBuzz 14.5.0 (uharfbuzz 0.56.2, fontTools
+4.63.0) and with `ot_shape_cli ... cpac`, which writes the font's `CPac` with `ot::FilterTableWriter` as the install
+does and shapes through it. It runs every one of the 40 shipped files (20 families, Regular and Bold) at (2133, 33)
+and (1195, 19), with no language and with every language written in the script (Devanagari 13, Bengali 3, one for
+each of the other eight).
+
+**Result: 272 runs, every one N/N; 0 differences in 4,640,768 line comparisons** (the bar is 0).
+Every run covers the whole corpus of its script:
+
+| Family | Style | Runs | Lines a run | Identical |
+|---|---|---|---|---|
+| NotoSansDevanagari | Regular | 28 (2 sizes x 14 language settings) | 20,522 | all |
+| NotoSansDevanagari | Bold | 28 (2 sizes x 14 language settings) | 20,522 | all |
+| NotoSerifDevanagari | Regular | 28 (2 sizes x 14 language settings) | 20,522 | all |
+| NotoSerifDevanagari | Bold | 28 (2 sizes x 14 language settings) | 20,522 | all |
+| NotoSansBengali | Regular | 8 (2 sizes x 4 language settings) | 14,852 | all |
+| NotoSansBengali | Bold | 8 (2 sizes x 4 language settings) | 14,852 | all |
+| NotoSerifBengali | Regular | 8 (2 sizes x 4 language settings) | 14,852 | all |
+| NotoSerifBengali | Bold | 8 (2 sizes x 4 language settings) | 14,852 | all |
+| NotoSansGurmukhi | Regular | 4 (2 sizes x 2 language settings) | 14,545 | all |
+| NotoSansGurmukhi | Bold | 4 (2 sizes x 2 language settings) | 14,545 | all |
+| NotoSerifGurmukhi | Regular | 4 (2 sizes x 2 language settings) | 14,545 | all |
+| NotoSerifGurmukhi | Bold | 4 (2 sizes x 2 language settings) | 14,545 | all |
+| NotoSansGujarati | Regular | 4 (2 sizes x 2 language settings) | 14,668 | all |
+| NotoSansGujarati | Bold | 4 (2 sizes x 2 language settings) | 14,668 | all |
+| NotoSerifGujarati | Regular | 4 (2 sizes x 2 language settings) | 14,668 | all |
+| NotoSerifGujarati | Bold | 4 (2 sizes x 2 language settings) | 14,668 | all |
+| NotoSansOriya | Regular | 4 (2 sizes x 2 language settings) | 14,891 | all |
+| NotoSansOriya | Bold | 4 (2 sizes x 2 language settings) | 14,891 | all |
+| NotoSerifOriya | Regular | 4 (2 sizes x 2 language settings) | 14,891 | all |
+| NotoSerifOriya | Bold | 4 (2 sizes x 2 language settings) | 14,891 | all |
+| NotoSansTamil | Regular | 4 (2 sizes x 2 language settings) | 11,203 | all |
+| NotoSansTamil | Bold | 4 (2 sizes x 2 language settings) | 11,203 | all |
+| NotoSerifTamil | Regular | 4 (2 sizes x 2 language settings) | 11,203 | all |
+| NotoSerifTamil | Bold | 4 (2 sizes x 2 language settings) | 11,203 | all |
+| NotoSansTelugu | Regular | 4 (2 sizes x 2 language settings) | 15,680 | all |
+| NotoSansTelugu | Bold | 4 (2 sizes x 2 language settings) | 15,680 | all |
+| NotoSerifTelugu | Regular | 4 (2 sizes x 2 language settings) | 15,680 | all |
+| NotoSerifTelugu | Bold | 4 (2 sizes x 2 language settings) | 15,680 | all |
+| NotoSansKannada | Regular | 4 (2 sizes x 2 language settings) | 14,916 | all |
+| NotoSansKannada | Bold | 4 (2 sizes x 2 language settings) | 14,916 | all |
+| NotoSerifKannada | Regular | 4 (2 sizes x 2 language settings) | 14,916 | all |
+| NotoSerifKannada | Bold | 4 (2 sizes x 2 language settings) | 14,916 | all |
+| NotoSansMalayalam | Regular | 4 (2 sizes x 2 language settings) | 17,630 | all |
+| NotoSansMalayalam | Bold | 4 (2 sizes x 2 language settings) | 17,630 | all |
+| NotoSerifMalayalam | Regular | 4 (2 sizes x 2 language settings) | 17,630 | all |
+| NotoSerifMalayalam | Bold | 4 (2 sizes x 2 language settings) | 17,630 | all |
+| NotoSansSinhala | Regular | 4 (2 sizes x 2 language settings) | 13,157 | all |
+| NotoSansSinhala | Bold | 4 (2 sizes x 2 language settings) | 13,157 | all |
+| NotoSerifSinhala | Regular | 4 (2 sizes x 2 language settings) | 13,157 | all |
+| NotoSerifSinhala | Bold | 4 (2 sizes x 2 language settings) | 13,157 | all |
+
+
+`ShippedFamilies.EachIndicFamilyShapesAlikeThroughItsCpac` is the CI form of the same check: the Regular file of each of
+the 20 families, the first 200 lines of its script's corpus (a committed sample in `test/ttf_font/data`, cut by
+`test/ot_shaper/make_corpus_sample.py` with the format characters as backslash-u escapes), at both sizes, shaped on a
+`CPac` face and on a face that computes its filters: glyphs, advances and offsets equal, about 0.15 s.

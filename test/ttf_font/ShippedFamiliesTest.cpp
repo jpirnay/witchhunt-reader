@@ -1,7 +1,12 @@
 // The outline families the font manager hosts (assets/sd-fonts), as a reader installs them. The eight .otf CJK
 // families: each file probed as discovery probes it, its family installed into a glyph store with the X3's font area
 // and mapping budget, and a sample of its characters drawn at 12 pt (spec 9). The twenty .ttf Indic families: each
-// file loaded, its style and weight read, and the family fitted into the X3's font area.
+// file loaded, its style and weight read, and the family fitted into the X3's font area; each family's Regular file
+// shaped alike through the CPac the install writes and through filters it computes.
+#include <IndicScripts.h>
+#include <OtFilterWriter.h>
+#include <OtShaper.h>
+#include <Utf8.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -153,4 +158,124 @@ TEST(ShippedTtfFamilies, EachFileLoadsAndEachFamilyFitsTheX3Store) {
     const uint32_t noSdBlock[2] = {UINT32_MAX, UINT32_MAX};
     EXPECT_TRUE(ttf::fitsStore(flashSizes.data(), noSdBlock, 2, kX3FontAreaBytes, 32));
   }
+}
+
+// --- The Indic families' shaping, through the CPac the install writes ---
+
+namespace {
+
+// A sfnt with the CPac the install writes into a style block (ot::FilterTableWriter, as TtfFont's writeCpac), or with
+// none, so that the face computes its filters.
+struct ShapedFace {
+  std::vector<uint8_t> font;
+  std::vector<uint8_t> cpac;
+  ot::Face face;
+
+  bool open(const std::filesystem::path& path, const bool withCpac) {
+    font = readAll(path);
+    ot::FaceTables tables;
+    if (font.empty() || !ot::tablesFromSfnt(font.data(), static_cast<uint32_t>(font.size()), &tables)) return false;
+    if (!face.init(tables)) return false;
+    if (!withCpac) return face.filters(ot::GSUB) == nullptr && face.filters(ot::GPOS) == nullptr;
+    ot::FilterTableWriter writer(face);
+    cpac.resize(writer.bytes());
+    if (cpac.empty() || writer.write(cpac.data(), static_cast<uint32_t>(cpac.size())) != cpac.size()) return false;
+    tables[ot::FaceTables::CPAC] = ot::Table(cpac.data(), static_cast<uint32_t>(cpac.size()));
+    return face.init(tables) && face.filters(ot::GSUB) != nullptr && face.filters(ot::GPOS) != nullptr;
+  }
+};
+
+// A corpus line: UTF-8, with the format characters (category Cf: ZWJ, ZWNJ) written as a backslash, u and four hex
+// digits.
+std::vector<uint32_t> decodeCorpusLine(const std::string& line) {
+  std::vector<uint32_t> cps;
+  for (size_t i = 0; i < line.size();) {
+    if (i + 6 <= line.size() && line[i] == '\\' && line[i + 1] == 'u') {
+      cps.push_back(static_cast<uint32_t>(std::stoul(line.substr(i + 2, 4), nullptr, 16)));
+      i += 6;
+      continue;
+    }
+    const unsigned char* at = reinterpret_cast<const unsigned char*>(line.c_str()) + i;
+    const unsigned char* next = at;
+    cps.push_back(utf8NextCodepoint(&next));
+    i += static_cast<size_t>(next - at);
+  }
+  return cps;
+}
+
+std::vector<std::vector<uint32_t>> corpusSample(const std::string& script) {
+  std::string lower = script;
+  for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  std::ifstream in(std::string(INDIC_CORPUS_DIR) + "/indic_corpus_" + lower + ".txt");
+  std::vector<std::vector<uint32_t>> lines;
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty()) lines.push_back(decodeCorpusLine(line));
+  }
+  return lines;
+}
+
+std::vector<int32_t> shapeLine(const ot::Face& face, const ot::Plan& plan, const std::vector<uint32_t>& cps,
+                               const int32_t scale, const unsigned ppem, ot::Buffer& buffer) {
+  ot::Scale s;
+  s.set(scale, ppem, face.upem());
+  std::vector<int32_t> out;
+  if (!ot::shape(face, s, plan, cps.data(), static_cast<unsigned>(cps.size()), buffer)) return {-1};
+  for (unsigned i = 0; i < buffer.len(); i++) {
+    out.insert(out.end(), {static_cast<int32_t>(buffer.info[i].codepoint), buffer.pos[i].xAdvance,
+                           buffer.pos[i].xOffset, buffer.pos[i].yOffset});
+  }
+  return out;
+}
+
+}  // namespace
+
+// The sample is the first 200 lines of generate_corpus.py's output per script (test/ttf_font/data, cut by
+// test/ot_shaper/make_corpus_sample.py): committed, so CI needs no generator and no unicodedata version.
+TEST(ShippedFamilies, EachIndicFamilyShapesAlikeThroughItsCpac) {
+  static uint8_t storage[ot::Buffer::bytesFor(4096)];
+  ot::Buffer buffer;
+  buffer.setStorage(storage, sizeof(storage));
+  struct Size {
+    int32_t scale;
+    unsigned ppem;
+  };
+  const Size sizes[] = {{2133, 33}, {1195, 19}};
+  size_t families = 0;
+  for (size_t script = 0; script < std::size(indic::SCRIPTS); ++script) {
+    const std::string name = indic::SCRIPTS[script].name;
+    const std::vector<std::vector<uint32_t>> lines = corpusSample(name);
+    ASSERT_EQ(200u, lines.size()) << name;
+    for (const char* prefix : {"NotoSans", "NotoSerif"}) {
+      const std::string family = prefix + name;
+      SCOPED_TRACE(family);
+      const std::filesystem::path path = std::filesystem::path(SD_FONTS_DIR) / family / (family + "-Regular.ttf");
+      ASSERT_TRUE(std::filesystem::exists(path));
+      ShapedFace computed;
+      ShapedFace written;
+      ASSERT_TRUE(computed.open(path, false));
+      ASSERT_TRUE(written.open(path, true));
+      ot::Plan computedPlan;
+      ot::Plan writtenPlan;
+      const uint32_t* languages = ot::languageTagsFor("");
+      ASSERT_TRUE(computedPlan.build(computed.face, static_cast<ot::Script>(script), languages));
+      ASSERT_TRUE(writtenPlan.build(written.face, static_cast<ot::Script>(script), languages));
+      for (const Size& size : sizes) {
+        uint32_t different = 0;
+        uint32_t glyphs = 0;
+        for (const auto& line : lines) {
+          const std::vector<int32_t> a = shapeLine(computed.face, computedPlan, line, size.scale, size.ppem, buffer);
+          const std::vector<int32_t> b = shapeLine(written.face, writtenPlan, line, size.scale, size.ppem, buffer);
+          glyphs += static_cast<uint32_t>(a.size() / 4);
+          if (a != b && ++different <= 3) {
+            ADD_FAILURE() << "ppem " << size.ppem << ", line starting U+" << std::hex << line.front();
+          }
+        }
+        EXPECT_EQ(0u, different) << "ppem " << size.ppem;
+        EXPECT_GT(glyphs, 200u) << "ppem " << size.ppem;  // the lines shaped, they were not all FAIL
+      }
+      ++families;
+    }
+  }
+  EXPECT_EQ(20u, families);
 }
