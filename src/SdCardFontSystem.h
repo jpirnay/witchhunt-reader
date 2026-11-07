@@ -1,7 +1,6 @@
 #pragma once
 
 #include <Epub/BookFonts.h>
-#include <Epub/LanguageTag.h>
 #include <SdCardFontManager.h>
 #include <SdCardFontRegistry.h>
 
@@ -9,6 +8,10 @@
 #include <string>
 
 #include "ReaderFontSizes.h"
+
+namespace indic {
+struct ScriptInfo;
+}
 
 class GfxRenderer;
 
@@ -31,7 +34,7 @@ class SdCardFontSystem {
   /// Call before entering the reader or after settings change.
   void ensureLoaded(GfxRenderer& renderer);
 
-  /// Set the EPUB language used to select a matching regional Noto CJK sibling.
+  /// Set the EPUB language used to select a matching regional Noto CJK sibling, or the Noto family of an Indic script.
   /// It never changes the persisted font setting. It is the language of the book whose fonts are loaded: set and
   /// cleared where a book open loads them (ReaderActivity), and kept past the reader's exit, whose last draw
   /// (restoreCurrentPageToBufferIfPreRendered) still resolves the book's family: cleared first, a Chinese book's
@@ -44,11 +47,12 @@ class SdCardFontSystem {
   void setReaderLanguagePending();
   bool waitsForReaderLanguage() const;
 
-  /// A Chinese, Japanese or Korean book (by its language) whose reader font has none of its script is drawn in an
-  /// installed Noto CJK family of the book's region instead: NotoSerif<R> or NotoSans<R>, the sans first for a font
-  /// named Sans. Decided at book open for the font the book takes from the settings (`family`: the global SD family,
-  /// "" for a built-in one; nullptr when the book has a font of its own), from that font's file on the card;
-  /// languageFamily() is "" when it has the script, the book is no CJK book, or no such family is installed.
+  /// A Chinese, Japanese, Korean or Indic book (by its language) whose reader font has none of its script is drawn
+  /// in an installed Noto family of the book's region or script instead: NotoSerif<R> or NotoSans<R> (R: JP, SC, TC,
+  /// KR, or an Indic script's name), the sans first for a font named Sans. Decided at book open for the font the book
+  /// takes from the settings (`family`: the global SD family, "" for a built-in one; nullptr when the book has a font
+  /// of its own), from that font's file on the card; languageFamily() is "" when it has the script, the book is
+  /// neither a CJK nor an Indic book, or no such family is installed.
   void selectLanguageFamily(const char* family);
   const char* languageFamily() const { return languageFamily_.c_str(); }
 
@@ -195,8 +199,8 @@ class SdCardFontSystem {
   static bool familyMapsCodepoint(const SdCardFontFamilyInfo& family, uint32_t codepoint);
 
   ReaderCjkRegion readerCjkRegion_ = ReaderCjkRegion::None;
-  const language_tag::IndicScript* readerIndicScript_ = nullptr;  // the open book's Indic script, else null
-  uint32_t cjkFamilyKey_ = 0;  // coversCjk(): the family it last read, and what it found
+  const indic::ScriptInfo* readerIndicScript_ = nullptr;  // the open book's Indic script, else null
+  uint32_t cjkFamilyKey_ = 0;                             // coversCjk(): the family it last read, and what it found
   bool cjkFamily_ = false;
   std::string languageFamily_;      // selectLanguageFamily()
   uint32_t languageFamilyKey_ = 0;  // what it was decided for: the reader's font and the region; 0: nothing

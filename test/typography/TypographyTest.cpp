@@ -98,7 +98,7 @@ TEST(LanguageTag, IndicScriptOfMapsEachLanguageToItsScript) {
   };
   for (const Row& row : rows) {
     for (const char* tag : row.languages) {
-      const language_tag::IndicScript* script = indicScriptOf(tag);
+      const indic::ScriptInfo* script = indicScriptOf(tag);
       ASSERT_NE(script, nullptr) << tag;
       EXPECT_STREQ(script->name, row.name) << tag;
       EXPECT_EQ(script->probe, row.probe) << tag;
@@ -113,11 +113,17 @@ TEST(LanguageTag, IndicScriptOfMapsEachLanguageToItsScript) {
 
 TEST(LanguageTag, AForeignScriptSubtagIsNotIndic) {
   using language_tag::indicScriptOf;
-  for (const char* tag : {"sa-Latn", "pa-Arab", "hi-Latn", "mni-Mtei"}) EXPECT_EQ(indicScriptOf(tag), nullptr) << tag;
+  for (const char* tag : {"sa-Latn", "pa-Arab", "hi-Latn", "mni-Mtei", "hi-Latn-x-deva"})
+    EXPECT_EQ(indicScriptOf(tag), nullptr) << tag;
   const struct {
     const char* tag;
     const char* name;
-  } own[] = {{"hi-Deva", "Devanagari"}, {"bn-Beng", "Bengali"}, {"pa-Guru", "Gurmukhi"}};
+  } own[] = {{"hi-Deva", "Devanagari"},
+             {"bn-Beng", "Bengali"},
+             {"pa-Guru", "Gurmukhi"},
+             // Past a singleton the tag is an extension or private use, whose 4-letter subtags name no script.
+             {"bn-u-nu-latn", "Bengali"},
+             {"hi-x-abcd", "Devanagari"}};
   for (const auto& row : own) {
     ASSERT_NE(indicScriptOf(row.tag), nullptr) << row.tag;
     EXPECT_STREQ(indicScriptOf(row.tag)->name, row.name) << row.tag;

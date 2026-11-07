@@ -7,6 +7,7 @@
 #include <GfxRenderer.h>
 #include <GlyphProvider.h>
 #include <I18n.h>
+#include <IndicScripts.h>
 #include <Logging.h>
 #include <Memory.h>
 #include <SdCardFont.h>
@@ -558,8 +559,8 @@ bool SdCardFontSystem::isIndicFamily(const std::string& family) {
   } else {
     return false;
   }
-  for (const auto& row : language_tag::detail::kIndicScripts) {
-    if (family.compare(stemLength, std::string::npos, row.script.name) == 0) return true;
+  for (const auto& script : indic::SCRIPTS) {
+    if (family.compare(stemLength, std::string::npos, script.name) == 0) return true;
   }
   return false;
 }

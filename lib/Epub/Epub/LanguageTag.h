@@ -1,5 +1,7 @@
 #pragma once
 
+#include <IndicScripts.h>
+
 #include <cstdint>
 #include <string>
 
@@ -56,27 +58,10 @@ inline CjkRegion cjkRegionOf(const std::string& rawTag) {
   return CjkRegion::ChineseAmbiguous;
 }
 
-// An Indic script the reader has Noto families for: `name` is the family suffix (NotoSans/NotoSerif + name) and
-// `probe` a consonant every font of the script maps.
-struct IndicScript {
-  const char* name;
-  uint32_t probe;
-};
-
 namespace detail {
-struct IndicScriptRow {
-  const char* subtag;  // the ISO 15924 code, lowercase
-  IndicScript script;
-};
-inline constexpr IndicScriptRow kIndicScripts[] = {
-    {"deva", {"Devanagari", 0x0915}}, {"beng", {"Bengali", 0x0995}}, {"guru", {"Gurmukhi", 0x0A15}},
-    {"gujr", {"Gujarati", 0x0A95}},   {"orya", {"Oriya", 0x0B15}},   {"taml", {"Tamil", 0x0B95}},
-    {"telu", {"Telugu", 0x0C15}},     {"knda", {"Kannada", 0x0C95}}, {"mlym", {"Malayalam", 0x0D15}},
-    {"sinh", {"Sinhala", 0x0D9A}},
-};
 struct IndicLanguageRow {
-  const char* primary;
-  uint8_t script;  // an index into kIndicScripts
+  char primary[4];
+  uint8_t script;  // an index into indic::SCRIPTS
 };
 inline constexpr IndicLanguageRow kIndicLanguages[] = {
     {"hi", 0},  {"mr", 0},  {"ne", 0},  {"sa", 0},  {"kok", 0}, {"mai", 0}, {"bho", 0}, {"awa", 0},
@@ -87,19 +72,24 @@ inline constexpr IndicLanguageRow kIndicLanguages[] = {
 
 // The Indic script a tag is written in, or null for a language not written in one. A tag that names another script
 // ("sa-Latn", "mni-Mtei") is not Indic here: the Noto family of the language's own script would draw it wrongly.
-inline const IndicScript* indicScriptOf(const std::string& rawTag) {
+// `name` is the Noto family suffix (NotoSans/NotoSerif + name), `probe` a consonant every font of the script maps.
+inline const indic::ScriptInfo* indicScriptOf(const std::string& rawTag) {
   const std::string tag = normalised(rawTag);
   for (const auto& language : detail::kIndicLanguages) {
     if (!hasPrimary(tag, language.primary)) continue;
-    const auto& row = detail::kIndicScripts[language.script];
-    // A script subtag is four letters; a region is two, a variant four with a digit first.
+    const indic::ScriptInfo& script = indic::SCRIPTS[language.script];
+    // A script subtag is four letters; a region is two, a variant four with a digit first. A singleton ends the
+    // scan: extensions and private use follow it, and name no script of the language.
     for (size_t at = tag.find('-'); at != std::string::npos; at = tag.find('-', at + 1)) {
       const size_t end = tag.find('-', at + 1);
-      const std::string subtag = tag.substr(at + 1, end == std::string::npos ? end : end - at - 1);
-      const bool letters = subtag.size() == 4 && subtag[0] >= 'a' && subtag[0] <= 'z';
-      if (letters && subtag != row.subtag) return nullptr;
+      const size_t len = (end == std::string::npos ? tag.size() : end) - at - 1;
+      if (len == 1) break;
+      if (len != 4 || tag[at + 1] < 'a' || tag[at + 1] > 'z') continue;
+      uint32_t code = 0;
+      for (size_t i = 0; i < 4; ++i) code = (code << 8) | static_cast<uint8_t>(tag[at + 1 + i]);
+      if (code != (script.isoTag | 0x20202020u)) return nullptr;
     }
-    return &row.script;
+    return &script;
   }
   return nullptr;
 }
