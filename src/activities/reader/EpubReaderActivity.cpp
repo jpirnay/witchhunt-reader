@@ -3389,7 +3389,7 @@ bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
   return SETTINGS.textAntiAliasing != 0;
 }
 
-// The same choice where the planes are composed in the frame buffers (the X3).
+// The same choice where the planes are composed in the frame buffers (the X3, the X4).
 bool EpubReaderActivity::onePassComposedFor(const Page& page) const {
   return SETTINGS.onePassTextAa != 0 && renderer.composesOnePassText() && getEffectiveTextAntiAliasing() &&
          !page.hasImages();
@@ -6154,7 +6154,7 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   if (aaPreempted) {
     LOG_DBG("ERS", "Inline AA skipped: page preempted by navigation");
   }
-  // One-pass where the planes are composed in the frame buffers (the X3). Not while the reader is
+  // One-pass where the planes are composed in the frame buffers (the X3, the X4). Not while the reader is
   // flipping: the gray render comes before the refresh, so it would hold the turn back.
   const bool composedOnePassThisRender = aaEnabledForThisRender && !singlePushAaThisRender && !aaPreempted &&
                                          pageRefreshMode == HalDisplay::FAST_REFRESH && onePassComposedFor(*page) &&
@@ -6604,7 +6604,7 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
   } else {
-    // The composed one-pass (the X3), as in renderContents(): the pre-render drew the page, its gray is
+    // The composed one-pass (the X3, the X4), as in renderContents(): the pre-render drew the page, its gray is
     // drawn here. Not in a fast-forward burst, which this path mostly serves.
     const HalDisplay::RefreshMode mode = ReaderUtils::nextRefreshCycleMode(pagesUntilFullRefresh);
     if (mode == HalDisplay::FAST_REFRESH && getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() &&
