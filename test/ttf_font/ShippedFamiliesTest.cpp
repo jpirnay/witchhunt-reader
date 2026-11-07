@@ -160,10 +160,13 @@ TEST(ShippedTtfFamilies, EachFileLoadsAndEachFamilyFitsTheX3Store) {
   }
 }
 
-// A Hindi or Sanskrit book often carries IAST or ISO 15919 transliteration, so every merged family maps the Latin
-// Extended Additional letters (t, s, n, r, h with a dot below) and the combining dot below (decomposed t + U+0323).
+// A Hindi or Sanskrit book often carries IAST transliteration, so every merged family maps the 24 precomposed IAST
+// letters of Latin Extended Additional (lower and upper case) and the 6 combining marks the decomposed forms use.
 TEST(ShippedTtfFamilies, EachFileMapsTheIastLetters) {
-  constexpr uint32_t kIast[] = {0x1E6D, 0x1E63, 0x1E47, 0x1E5B, 0x1E25, 0x0323};
+  constexpr uint32_t kIast[] = {0x1E0C, 0x1E0D, 0x1E24, 0x1E25, 0x1E36, 0x1E37, 0x1E38, 0x1E39, 0x1E40, 0x1E41,
+                                0x1E42, 0x1E43, 0x1E44, 0x1E45, 0x1E46, 0x1E47, 0x1E5A, 0x1E5B, 0x1E5C, 0x1E5D,
+                                0x1E62, 0x1E63, 0x1E6C, 0x1E6D, 0x0301, 0x0303, 0x0304, 0x0307, 0x0310, 0x0323};
+  static_assert(sizeof(kIast) / sizeof(kIast[0]) == 30);
   const std::vector<std::filesystem::path> files = shippedOutlineFiles(".ttf");
   EXPECT_EQ(files.size(), 40u);
   for (const auto& path : files) {
