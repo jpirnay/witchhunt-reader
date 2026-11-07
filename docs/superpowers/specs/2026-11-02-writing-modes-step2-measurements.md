@@ -1269,3 +1269,301 @@ NotoSerifDevanagari-Regular.ttf, from 293,268 B to 302,032 B).
 the 20 families, the first 200 lines of its script's corpus (a committed sample in `test/ttf_font/data`, cut by
 `test/ot_shaper/make_corpus_sample.py` with the format characters as backslash-u escapes), at both sizes, shaped on a
 `CPac` face and on a face that computes its filters: glyphs, advances and offsets equal, about 0.15 s.
+
+## Item 7: the Arabic shaper and the two Arabic families
+
+Run on 2026-11-07, before any of PR 4's code, in the worktree of `feat/writing-modes-step2-pr4` at master `3ae95c07b`
+(PR #645 merged). Only this section and deviation 11 of the design are committed: the HarfBuzz files, the scratch
+scripts, the probe and the merged fonts stay in the session's scratch directory.
+
+### Sources
+
+**HarfBuzz 14.5.0.** The tag `14.5.0` (tag object `77a9ee80`, commit `863d3f7787c6df18d20e4535c5906bf3eb803bd5`, tagged
+2026-09-20). Each file was fetched once from `https://raw.githubusercontent.com/harfbuzz/harfbuzz/14.5.0/src/<file>` and
+read, never built or run:
+
+| File | Bytes | sha256 (first 16) | Read for |
+|---|---:|---|---|
+| `hb-ot-shaper-arabic.cc` | 25,779 | `f58d84e3715daa1c` | the shaper: its features, the joining, `reorder_marks`, `stch` |
+| `hb-ot-shaper-arabic-table.hh` | 21,921 | `8fef6413088130a7` | the joining types (Unicode 18.0); the fallback's shaping and ligature tables |
+| `hb-ot-shaper-arabic-fallback.hh` | 13,076 | `7d2c1db44996591c` | the fallback shaping |
+| `hb-ot-shaper-arabic-pua.hh` | 7,590 | `09dbda72b045984b` | the fallback's Windows-1256 private-use mapping |
+| `hb-ot-shaper-arabic-joining-list.hh` | 1,090 | `cd80914c08f1be9c` | the scripts USE gives Arabic joining |
+| `hb-ot-shaper-arabic.hh` | 1,648 | `080c66f82955bf2a` | `setup_masks_arabic_plan`, which USE shares |
+| `hb-ot-shaper.hh` | 12,102 | `3eb84b0a89a8c4db` | the shaper struct, `hb_ot_shaper_categorize` |
+| `hb-ot-shape.cc` | 39,900 | `c50cabe89c03daf9` | the default, common and horizontal features; every step that reads the direction |
+| `hb-ot-map.cc`, `hb-ot-map.hh` | 12,733, 9,787 | `6b4b92b7f6e7af90`, `101d1b7eaa171a39` | feature merging, stages, `has_feature` |
+| `hb-ot-shape-normalize.cc`, `hb-ot-shape-normalize.hh` | 15,660, 3,365 | `5cf41f87b8717f36`, `381d0a03e6051977` | the normalization modes, the `reorder_marks` hook |
+| `hb-ot-layout.cc`, `hb-ot-layout.hh` | 94,185, 20,651 | `aaa35961fc106462`, `aaa549c0f07213cf` | the apply loop and its messages, the Unicode properties |
+| `OT/Layout/GPOS/GPOS.hh` | 6,491 | `8752522c54b06c2d` | `propagate_attachment_offsets`, `position_finish_offsets` |
+| `OT/Layout/GPOS/CursivePosFormat1.hh` | 11,278 | `c1eb9ea317dd9ab9` | cursive attachment |
+| `hb-unicode.cc` | 17,370 | `2c4825a021548152` | the modified combining classes |
+| `hb-ot-tag-table.hh` | 170,865 | `fe80a969cc25ddf2` | the language system tags |
+| `gen-arabic-table.py` | 11,670 | `0e9196d232d31ea9` | how the joining table is generated |
+
+`hb-ot-layout-gpos-table.hh` only includes `OT/Layout/GPOS/GPOS.hh`. The other GPOS headers (`MarkArray.hh`,
+`ValueFormat.hh`, the mark attachment formats) were read for the direction: they tell horizontal from vertical only.
+
+**Fonts.** The pinned files of "Sources" above (`C:/tmp/wm2-measure/dl/fonts`), their sha256 checked again: Noto Naskh
+Arabic, Noto Sans Arabic, Noto Serif and Noto Sans, Regular and Bold. **Tools** as above: fontTools 4.63.0, uharfbuzz
+0.56.2 (HarfBuzz 14.5.0), g++ 16.2.0, riscv32-esp-elf-g++ 14.2.0.
+
+### The shaper, as `hb-ot-shaper-arabic.cc` has it
+
+`_hb_ot_shaper_arabic`:
+
+| Field | 14.5.0 |
+|---|---|
+| `collect_features` | `collect_features_arabic` (below) |
+| `override_features` | none |
+| `data_create`, `data_destroy` | the seven forms' masks, whether the plan has `stch`, whether the fallback shaping runs |
+| `preprocess_text` | none |
+| `postprocess_glyphs` | `apply_stch` |
+| `decompose`, `compose` | none: Unicode's |
+| `setup_masks` | `setup_masks_arabic`: the joining state machine |
+| `reorder_marks` | `reorder_marks_arabic` |
+| `gpos_tag` | none |
+| `normalization_preference` | `DEFAULT` (`AUTO`: composed diacritics, with the short circuit, as the default shaper) |
+| `zero_width_marks` | `BY_GDEF_LATE` |
+| `fallback_position` | true |
+
+`hb_ot_shaper_categorize` gives Arabic text in a horizontal direction this shaper whatever script tag the font's GSUB
+has, `DFLT` included ("we do fallback shaping for Arabic script"); Syriac only with a script tag of its own. Mongolian,
+N'Ko and Phags-pa are USE's in 14.5.0, which calls `setup_masks_arabic_plan` for them (`has_arabic_joining`).
+
+**The features and stages.** `hb_ot_shape_collect_features` requests the default features, then the shaper's, then the
+common and horizontal ones. GSUB stages count from 0, for a language system without `rclt` (both Arabic families').
+"Masked" is `add_feature` (a mask bit the shaper or the text sets), "global" `enable_feature`. A lookup skips ZWJ and
+ZWNJ ("auto") unless a flag makes it manual.
+
+| GSUB stage | Feature | Requested by | Flags as requested | Then |
+|---:|---|---|---|---|
+| 0 | `rvrn` | default | global | pause |
+| 1 | `rtla` | default, right to left (left to right: `ltra`) | global | |
+| 1 | `rtlm` | default, right to left (left to right: `ltrm`, global) | masked | |
+| 1 | `frac`, `numr`, `dnom` | default | masked | |
+| 1 | `rand` | default | global, random, value 255 | |
+| 1 | `Harf`, `HARF` | default | global | |
+| 1 | `stch` | Arabic | global | pause, `record_stch` |
+| 2 | `ccmp`, `locl` | Arabic | global, manual ZWJ | pause |
+| 3 | `isol` | Arabic | masked, manual ZWJ, has fallback | pause |
+| 4 | `fina` | Arabic | masked, manual ZWJ, has fallback | pause |
+| 5 | `fin2` | Arabic | masked, manual ZWJ | pause |
+| 6 | `fin3` | Arabic | masked, manual ZWJ | pause |
+| 7 | `medi` | Arabic | masked, manual ZWJ, has fallback | pause |
+| 8 | `med2` | Arabic | masked, manual ZWJ | pause |
+| 9 | `init` | Arabic | masked, manual ZWJ, has fallback | pause |
+| 10 | none | | | pause, `deallocate_buffer_var` |
+| 11 | `rlig` | Arabic | global, manual ZWJ, has fallback | pause, `arabic_fallback_shape` (Arabic only, not Syriac) |
+| 12 | `calt` | Arabic | global, manual ZWJ | pause, unless the language system has `rclt` (`has_feature`, HarfBuzz #1573) |
+| 13 | `liga`, `clig`, `mset` | Arabic | global, manual ZWJ | |
+| 13 | `Buzz`, `BUZZ` | default | global | |
+| 13 | `abvm`, `blwm`, `ccmp`, `locl`, `rlig` | common | global | |
+| 13 | `mark`, `mkmk` | common | global, manual ZWJ and ZWNJ | |
+| 13 | `calt`, `clig`, `curs`, `dist`, `liga`, `rclt` | horizontal | global | |
+| 13 | `kern` | horizontal | global, has fallback | |
+| | | `hb_ot_map_builder_t::compile` | | pause: 14 GSUB stages (13 with `rclt`), 1 GPOS stage |
+
+- Has fallback (`F_HAS_FALLBACK`): the feature gets its mask bit even when the font lacks it. The seven forms have it in
+  an Arabic run, except `fin2`, `fin3` and `med2` (`FEATURE_IS_SYRIAC`).
+- A feature requested twice is merged (`compile`): the earliest stage wins, global and has-fallback are combined, and
+  the joiner flags are the first request's. So `ccmp` and `locl` run in stage 2, `rlig` in 11, `calt` in 12, `liga` and
+  `clig` in 13, all with manual ZWJ. `rclt`, requested only as a horizontal feature, keeps auto ZWJ and runs with
+  `liga`: in stage 12, as a language system that has `rclt` gets no pause after `calt`. `abvm`, `blwm`, `mark`, `mkmk`,
+  `curs`, `dist` and `kern` are in GPOS's one stage. `cswh` is commented out ("Off by default").
+- The pauses: `record_stch` marks each glyph that `stch` multiplied as a fixed or a repeating tile, when the plan has
+  `stch`; `deallocate_buffer_var` frees the shaping action's byte; `arabic_fallback_shape` runs the fallback shaping
+  when the plan says so. All three return false, so none refreshes the buffer's digest.
+
+**The joining state machine** (`arabic_joining`, run by `setup_masks`): a 7 x 6 table of (the action for the previous
+glyph, the action for this one, the next state), over the joining classes U, L, R, D (C counts as D), Alaph and
+Dalath-Rish (the last two Syriac's).
+- Each character's class is `joining_type()`; a code point the table does not list (X) is T when its general category is
+  Mn, Me or Cf, else U. T characters are skipped, with no action.
+- The first non-T character of the pre-context sets the starting state, and the first of the post-context can still
+  give the run's last glyph a joining form. Neither is shaped.
+- The action (`isol`, `fina`, `fin2`, `fin3`, `medi`, `med2`, `init` or none) picks the mask the glyph gets
+  (`mask_array[action]`, that feature's 1-mask). Mongolian free variation selectors copy their base's action (Mongolian
+  only).
+- The table is `hb-ot-shaper-arabic-table.hh`, written by `gen-arabic-table.py ArabicShaping.txt UnicodeData.txt
+  Blocks.txt` (headers ArabicShaping-18.0.0, Blocks-18.0.0) with packTab: for each code point ArabicShaping.txt lists,
+  its joining type (field 2), or its joining group when that is ALAPH or DALATH RISH; X elsewhere and past U+1E94B. The
+  same file holds the fallback's shaping table (U+0621-06D3 to their presentation forms) and ligature tables, read from
+  UnicodeData.txt's decompositions.
+
+**`reorder_marks_arabic`** (UTR #53), which the normalizer calls on each run of marks once it is sorted by combining
+class (32 marks at most): for class 220, then 230, the run of modifier combining marks of that class (U+0654, 0655,
+0658, 06DC, 06E3, 06E7, 06E8, 08CA, 08CB, 08CD, 08CE, 08CF, 08D3, 08F3) where the class starts moves to the front of
+the mark run, their clusters merged. The moved marks are renumbered to the modified classes 25
+(`HB_MODIFIED_COMBINING_CLASS_CCC22`) and 26 (`CCC26`), below every Arabic class, so the run stays sorted for later
+passes. Those classes are HarfBuzz's modified ones: shadda is 27, before fatha's 31.
+
+**What is left out, and what it does.**
+- `stch` (`record_stch` in its pause, `apply_stch` as `postprocess_glyphs`): a font's `stch` lookup splits a glyph (the
+  Syriac Abbreviation Mark, the Arabic subtending marks of U+0600-0605) into tiles. After positioning, the repeating
+  tiles are copied until they span the rest of the word, at most 256 glyphs, overlapping to fit. Neither Arabic family
+  has `stch` (below).
+- The fallback shaping (`arabic_fallback_shape`, `hb-ot-shaper-arabic-fallback.hh`): when an Arabic run's font has none
+  of `isol`, `fina`, `medi` and `init`, the plan builds seven lookups (single substitutions to the cmap's presentation
+  forms for `init`, `medi`, `fina` and `isol`, and three ligature lookups for `rlig`: three letters, two letters with
+  lam-alef among them, and marks), or the Windows-1256 private-use set for a font that looks like one, and applies them
+  in the pause after `rlig`. Both families have the features, so HarfBuzz runs no fallback on them either.
+- `fallback_position`: for a font without GPOS (or with no GPOS `kern` in the language system), a legacy `kern` table
+  is applied, and without GPOS marks are placed from their glyph extents and combining classes
+  (`_hb_ot_shape_fallback_mark_position`). Both families have GPOS and no `kern` table.
+- The glyph flags (`unsafe_to_concat`, `safe_to_insert_tatweel`): output flags the engine does not produce.
+
+### Direction: what `hb_ot_shape` does differently for a right-to-left run
+
+| Step (14.5.0) | Right to left | `lib/OtShaper` today |
+|---|---|---|
+| `hb_ot_shape_collect_features` | `rtla` (global) and `rtlm` (masked) in place of `ltra` and `ltrm` | `ltra` and `ltrm` always (`collectDefaultFeatures`) |
+| `hb_ensure_native_direction` | an Arabic run given left to right is reversed by graphemes and shaped right to left, unless it holds digits and no letter | none: the caller gives the direction |
+| `hb_ot_rotate_chars` | each character's Unicode mirror when the font maps it, else the `rtlm` mask | none |
+| `hb_ot_shape_setup_masks_fraction` | the numerator and denominator masks change sides of U+2044 | no fraction masks (no U+2044 in a run) |
+| GSUB | the same: lookups run in logical order (type 8 backward, in either direction) | the same |
+| GPOS value records, pair and mark attachment | the same: they read horizontal against vertical only | the same |
+| `CursivePosFormat1::apply` | `RTL`: the previous glyph's advance and x offset shrink by its exit anchor plus its x offset, and the current glyph's advance becomes its entry anchor plus its x offset | the `LTR` branch only (`applyCursivePos`) |
+| `zero_mark_widths_by_gdef` without GPOS | the marks' offsets are not shifted by their advance (`adjust_offsets_when_zeroing` is forward only) | shifted in either direction |
+| `GPOS::position_finish_offsets` | `propagate_attachment_offsets` walks the glyphs from the last to the first (HarfBuzz #5514); a mark after its base adds the advances of the glyphs after the base, up to and including the mark, where forward subtracts those from the base up to the mark | the forward walk and branches only (`propagateAttachmentOffsets`) |
+| `hb_ot_position` | the glyphs and their positions reversed at the end, into visual order | none (`Buffer::reverseRange` swaps the glyph infos, not the positions) |
+| `hb_ot_substitute_post` | default-ignorables hidden after the reverse | the same order |
+| `hb_insert_dotted_circle` | a dotted circle before a leading mark, only with `HB_BUFFER_FLAG_BOT`, in either direction | none; the oracle sets no flags |
+
+### Deviation 11 against the source
+
+| Deviation 11 as drafted (from memory) | HarfBuzz 14.5.0 | Verdict |
+|---|---|---|
+| the seven joining forms each in its own stage | yes: each masked, with manual ZWJ, a pause after each and one more after `init`; `isol`, `fina`, `medi` and `init` have fallback | right; flags added |
+| `rlig`, `rclt` and `calt` with manual ZWJ | `rlig` (manual ZWJ, has fallback) in a stage of its own, then `calt` (manual ZWJ) and a pause unless the font has `rclt`; `rclt` is not the shaper's: a horizontal feature, with auto ZWJ | `rclt` wrong |
+| `mset` | `mset` with `liga` and `clig`, all with manual ZWJ | `liga`, `clig` missing |
+| (none) | `stch` and a pause; `ccmp` and `locl` with manual ZWJ in a stage of their own before the forms | missing |
+| the common features and GPOS as for every script | yes, after `rtla` and `rtlm` in place of `ltra` and `ltrm` | `rtla`, `rtlm` missing |
+| marks zeroed late by GDEF | `BY_GDEF_LATE` | right |
+| the reordering of modifier combining marks | yes: 14 marks, class 220 then 230, renumbered 25 and 26 | right; details added |
+| a buffer direction, `propagateAttachmentOffsets`' backward branches, the final reverse | yes, and `position_finish_offsets`' backward walk, cursive attachment's RTL branch, the `rtlm` mask, no offset shift when zeroing | incomplete |
+| the Unicode tables extended (categories, combining classes, decompositions, joining types); `ar`, `fa`, `ur`, `ps`, `sd`, `ug`, `ku` | yes; the classes are HarfBuzz's modified ones, and default-ignorables and compositions are needed too; the tags ARA, FAR, URD, PAS, SND, UYG and KUR | right; details added |
+| not ported: the fallback shaping, `stch`, Syriac, Mongolian, N'Ko, Phags-pa | the fallback and `stch` as said; also the mark placement and legacy `kern` that `fallback_position` gives a font without GPOS; Mongolian, N'Ko and Phags-pa are USE's | one item added |
+| (none) | normalization `DEFAULT`, `fallback_position` true, the shaper whatever the script tag | added |
+
+Deviation 11 of the design now carries the list as read.
+
+**The engine changes it takes** (the engine is left to right only today):
+- `OtPlan.h`, `OtPlan.cpp`: `ShaperKind::Arabic`, `Script::Arabic` (`arab`), the plan's direction, and the masks of the
+  seven forms and `rtlm` kept outside `MaskedFeature`, whose order is the `CPpl` format's;
+- `OtPlanBuild.cpp`: the direction's default features, `collect_features_arabic`, `has_feature` for `rclt`, the Arabic
+  shaper whatever the script tag;
+- `OtShaper.cpp`: no vowel constraints for Arabic, the `rtlm` mask, the joining masks, marks zeroed late, the direction
+  to GPOS, and the final reverse of `info` and `pos`;
+- a new `OtArabic.cpp`: the state table, `arabic_joining`, `reorder_marks_arabic`;
+- `OtNormalize.cpp`: the default shaper's short circuit and Unicode's composition for Arabic, the `reorder_marks` hook,
+  tables of several ranges;
+- `OtGpos.cpp`: cursive attachment's RTL branch, `propagateAttachmentOffsets`' backward walk and branches;
+- `OtBuffer.h`: a direction, a setter for the modified combining class, a reverse of glyphs with their positions. The
+  shaping action can live in `GlyphInfo::position`: HarfBuzz keeps Indic's position and Arabic's action in the same
+  byte (`ot_shaper_var_u8_auxiliary`);
+- `scripts/gen_ot_shaper_tables.cc` and `OtUnicodeData.h`: the Arabic blocks (U+0600-06FF, 0750-077F, 0870-089F,
+  08A0-08FF, FB50-FDFF, FE70-FEFF), their joining types in a table of their own (the packed properties have 2 bits
+  free, a joining type takes 3), ZWJ's joining type (C) and ZWNJ's (U), and the Arabic languages.
+
+### The two families with the current recipe
+
+**How.** `merge_noto_latin.merge()` as it is at `3ae95c07b` (the IAST letters included): Noto Naskh Arabic with Noto
+Serif and Noto Sans Arabic with Noto Sans, Regular with Regular and Bold with Bold, by a scratch script on the pinned
+fontTools and uharfbuzz.
+- The Latin check: the module's `check()` with no corpus, so only its "Latin kept whole" half runs. Its script half
+  shapes left to right as an Indic script, which does not apply to Arabic.
+- The script check: there is no Arabic corpus yet (upstream's `generate_corpus.py` is Indic). Shaped instead: item 3's
+  `corpus/arabic.txt` (577 strings: 141 letters in four positions, the lam-alef pairs, the harakat), and 22 lines of
+  Arabic, Persian, Urdu, Pashto, Sindhi, Uyghur and Kurdish words written by code point (vocalised words, tatweel,
+  lam-alef with marks, the hamza compositions, the modifier marks, ZWJ and ZWNJ, digits and punctuation). HarfBuzz
+  14.5.0 at (2133, 33), right to left, `Arab`, with no language and with each of `ar`, `fa`, `ur`, `ps`, `sd`, `ug` and
+  `ku`: the merged font against the script font, glyph IDs, advances and offsets.
+- The sizes: a host probe linking `lib/OtShaper` and `lib/EpdFont/ttf` (the library files of `TtfFontTest`), g++ 16.2.0
+  with `-std=c++20 -O1 -fno-exceptions`. `CPac` as `ot::FilterTableWriter` writes it (and `Face::init` took it), what
+  `ttf::probeFile` reserves, and `ttf::fitsStore` in flash mode on the X3's font area (3,538,944 - 65,536 B, 32 free map
+  pages), as `ShippedTtfFamilies.EachFileLoadsAndEachFamilyFitsTheX3Store` does.
+
+| Family | Style | bytes | glyphs | GDEF | GSUB lookups / subtables | GPOS lookups / subtables | `CPac` (writer) | probe `cpacBytes` | flash bytes | SD bytes | IAST mapped | script check | Latin check |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|
+| NotoNaskhArabic | Regular | 261,600 | 2,315 | 742 | 67 / 79 | 32 / 34 | 5,500 | 5,500 | 267,100 | 71,516 | 30 of 30 | 4,792 of 4,792 (599 lines x 8) | 62 of 62 runs equal |
+| NotoNaskhArabic | Bold | 261,352 | 2,315 | 724 | 67 / 79 | 32 / 34 | 5,500 | 5,500 | 266,852 | 71,536 | 30 of 30 | 4,792 of 4,792 | 62 of 62 runs equal |
+| NotoSansArabic | Regular | 232,704 | 2,322 | 608 | 64 / 74 | 32 / 34 | 5,296 | 5,296 | 238,000 | 68,568 | 30 of 30 | 4,792 of 4,792 | 62 of 62 runs equal |
+| NotoSansArabic | Bold | 233,044 | 2,322 | 630 | 64 / 74 | 32 / 34 | 5,296 | 5,296 | 238,340 | 69,144 | 30 of 30 | 4,792 of 4,792 | 62 of 62 runs equal |
+
+- The merged files' sha256 (first 16): `21acf0334143ff85`, `8c7a340fd635c06f`, `13e9cea7a74e6288`, `a2bfc7d16c4077c4`.
+- The install already gives these files a `CPac`: `ttf::filterTableBytes` counts one for a font whose script list
+  names `arab` (`isShapedTag`, PR 2), and the probe's `cpacBytes` equals what the writer writes.
+- Against item 3's merges (the recipe before the IAST letters), the files grew by 8,944, 8,908, 4,956 and 5,068 B, and
+  `CPac` from 5,084 to 5,500 B (Naskh) and from 5,036 to 5,296 B (Sans): Noto's Latin brings 2 GSUB and 6 GPOS lookups
+  more into Noto Naskh Arabic and 5 GPOS lookups into Noto Sans Arabic. GDEF grew from 652 to 742 B (Naskh Regular).
+
+**The fit:**
+
+| Family | flash bytes, Regular + Bold | `fitsStore`, flash mode | `planLayout` | log (B) |
+|---|---:|---|---|---:|
+| NotoNaskhArabic | 267,100 + 266,852 | true | flash | 1,376,256 |
+| NotoSansArabic | 238,000 + 238,340 | true | flash | 1,441,792 |
+
+### The lookups the Arabic features select, and the plan
+
+**How.** HarfBuzz's apply loop sends `start lookup <index> feature '<tag>'` for every planned lookup of every stage, in
+plan order, before it tests the lookup's digest (`hb_ot_map_t::apply`, `hb-ot-layout.cc`). So one shaping of any text
+lists a plan: uharfbuzz's `Buffer.set_message_func`, the text U+0628 U+0628, right to left, `Arab`, each language. A
+lookup planned in two stages is listed twice, as our plan holds it twice.
+- Checked on the shipped Noto Sans Devanagari, both styles, with no language and `hi`, `mr`, `ne` and `sa`: HarfBuzz
+  lists 53 / 24, 53 / 24, 58 / 24, 57 / 24 and 57 / 24 GSUB / GPOS lookups, and our `Plan::build` holds as many in each.
+- The plan's bytes as `Plan::memoryBytes` counts them with a `CPac` (no computed filters): `sizeof(Plan)`, then 24 B a
+  planned lookup (its digest, deviation 13) and 8 B (`PlannedLookup`), and 4 B a stage. `sizeof(Plan)` is 792 B on the
+  host and 600 B on the C3 (riscv32-esp-elf-g++ 14.2.0, `-Os`). The probe measured 3,328 B for Devanagari on the host,
+  as the formula gives. An Arabic plan holds 14 GSUB stages (neither font has `rclt`) and 1 GPOS stage. The masks of the
+  seven forms and `rtlm` are not in `Plan` yet: at most 32 B more.
+
+| Font (Regular and Bold alike) | Language system | Languages | GSUB lookups planned (by feature) | GPOS lookups planned (by feature) | Plan, host (B) | Plan, C3 (B) |
+|---|---|---|---|---|---:|---:|
+| NotoNaskhArabic | default | none, `ar`, `ps`, `ug` | 20 (`rtlm` 1, `ccmp` 4, `fina` 1, `medi` 2, `init` 2, `rlig` 9, `liga` 1) | 24 (`mark` 18, `mkmk` 6) | 2,260 | 2,068 |
+| NotoNaskhArabic | FAR | `fa` | 21 (and `locl` 1) | 24 | 2,292 | 2,100 |
+| NotoNaskhArabic | URD | `ur` | 21 (and `locl` 1) | 24 | 2,292 | 2,100 |
+| NotoNaskhArabic | SND | `sd` | 22 (and `locl` 1, `rlig` 10) | 24 | 2,324 | 2,132 |
+| NotoNaskhArabic | KUR | `ku` | 21 (`rlig` 10) | 24 | 2,292 | 2,100 |
+| NotoSansArabic | default | none, `ar`, `fa`, `ps`, `ug` | 19 (`rtlm` 1, `ccmp` 4, `fina` 1, `medi` 2, `init` 2, `rlig` 8, `liga` 1) | 22 (`kern` 1, `mark` 16, `mkmk` 5) | 2,164 | 1,972 |
+| NotoSansArabic | URD | `ur` | 20 (and `locl` 1) | 22 | 2,196 | 2,004 |
+| NotoSansArabic | SND | `sd` | 21 (and `locl` 1, `rlig` 9) | 22 | 2,228 | 2,036 |
+| NotoSansArabic | KUR | `ku` | 20 (`rlig` 9) | 22 | 2,196 | 2,004 |
+| NotoSansDevanagari (shipped) | default | none, `hi` | 53 | 24 | 3,328 | 3,136 |
+| NotoSansDevanagari (shipped) | MAR; NEP, SAN | `mr`; `ne`, `sa` | 58; 57 | 24 | 3,488; 3,456 | 3,296; 3,264 |
+
+- One lookup serves both `medi` and `init` in each font, so it is planned twice: Noto Naskh Arabic's 20 GSUB entries
+  are 19 lookups.
+- The fonts' `arab` language systems: Noto Naskh Arabic has FAR, KSH, KUR, RHG, SND and URD; Noto Sans Arabic the same
+  without FAR. ARA (`ar`), PAS (`ps`) and UYG (`ug`) are in neither, and Persian in Noto Sans Arabic takes the default
+  system, as in HarfBuzz. HarfBuzz also maps `ks` to KSH and `ckb`, `kmr` and `sdh` to KUR.
+- Of the features `collect_features_arabic` asks for, the fonts' GSUB has `ccmp`, `locl`, `fina`, `medi`, `init`,
+  `rlig`, `liga` and `rtlm`, and no `stch`, `isol`, `fin2`, `fin3`, `med2`, `calt`, `rclt`, `clig` or `mset`. Their
+  `rtlm` lookup maps one glyph, U+221A's. GPOS has `mark` and `mkmk` (and `kern` in Noto Sans Arabic), no `curs`, and
+  neither file has a `kern` table. So no shipped font runs cursive attachment or a fallback: those paths of the port
+  need tests of their own.
+- The merge changes no Arabic plan: the script files plan the same lookups under `arab` (their lookups keep their
+  indices in the merge).
+
+**How far the glyphs move.** HarfBuzz at each font's upem over the same 599 lines, right to left, no language. The
+largest offset is 1,035 units, an x offset in Noto Sans Arabic Bold (a lone U+0636: its dot is a mark of its own after
+`ccmp`). So the records' whole-pixel `i8` dx and dy (decision 4) hold every offset up to 123 px a em; the largest native
+size is 120 px (`TtfFont::kMaxNativePx`).
+
+| Font | largest x offset (units) | largest y offset (units) | largest advance (units) | every offset fits `i8` up to (px a em) |
+|---|---:|---:|---:|---:|
+| NotoNaskhArabic-Regular | 655 | 809 | 1,099 | 157 |
+| NotoNaskhArabic-Bold | 670 | 815 | 1,187 | 156 |
+| NotoSansArabic-Regular | 979 | 480 | 1,352 | 130 |
+| NotoSansArabic-Bold | 1,035 | 530 | 1,442 | 123 |
+
+### Verdict
+
+- **Each merged family fits the font area: pass.** Both families, in flash mode, with their `CPac`: item 3's pass line,
+  which the PR 4 families fall under. The in-place clause has nothing to measure in the fonts: the gate keys on the
+  book's language (`InPlaceBuildGate`, `TypographyProfile::shapedScript`), which PR 4 extends to the Arabic languages.
+- The merges hold: the script check on 19,168 of 19,168 line comparisons over the four files, the Latin check on 248 of
+  248 runs. The engine's own oracle on Arabic waits for PR 4's engine and an Arabic corpus.
+- The feature list and stages are read off HarfBuzz 14.5.0, and deviation 11 is corrected to them. An Arabic plan is
+  1,972-2,132 B on the C3 (and the masks), against Devanagari's 3,136-3,296 B; `CPac` is 5,296-5,500 B a style.

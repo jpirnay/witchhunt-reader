@@ -246,20 +246,46 @@ region, the `ClipSelectionActivity` change, and the tests `flash_blob_cache` and
     GSUB, kern and post's header, not GDEF. The shaper needs GDEF's glyph classes, mark attachment classes and mark
     sets; without them it falls back to classes from Unicode and stops matching HarfBuzz on fonts that have GDEF. The
     block gains GDEF (and `CPac`). An engine change, not upstream's.
-11. **The Arabic shaper (PR 4)**, a port of HarfBuzz 14.5's `hb-ot-shaper-arabic.cc` into the engine:
-    - `ShaperKind::Arabic`, `Script::Arabic`; the joining state machine and its table, generated from HarfBuzz;
-    - the features and stages of HarfBuzz's `collect_features`: the seven joining forms each in its own stage,
-      `rlig`, `rclt` and `calt` with manual ZWJ, `mset`, with the common features and GPOS as for every script; marks
-      zeroed late by GDEF;
-    - the reordering of modifier combining marks (`reorder_marks`);
-    - a buffer direction, the branches of `propagateAttachmentOffsets` for a backward run, and the final reverse of
-      an RTL run, as `hb_ot_position` does it (upstream's engine is left to right only);
-    - the Unicode tables extended past U+0900-0DFF by the generator: the Arabic blocks' categories, combining
-      classes, decompositions and joining types; the language systems for `ar`, `fa`, `ur`, `ps`, `sd`, `ug` and
-      `ku`.
-    - Not ported: the fallback shaping with presentation forms for a font without the features, `stch`, Syriac,
-      Mongolian, N'Ko and Phags-pa.
-    - The feature list is to be read off HarfBuzz 14.5's source when the port is made; this list is from memory.
+11. **The Arabic shaper (PR 4)**, a port of HarfBuzz 14.5's `hb-ot-shaper-arabic.cc` into the engine, read off HarfBuzz
+    14.5.0 (measure-first item 7, 2026-11-07; the measurements' "Item 7"):
+    - `ShaperKind::Arabic`, `Script::Arabic` (script tag `arab`): the Arabic shaper for every horizontal Arabic run,
+      whatever script tag the font's GSUB has, `DFLT` included (`hb_ot_shaper_categorize`); the joining state machine
+      and its table, generated from HarfBuzz;
+    - the features and stages of `collect_features_arabic`, after the default features (`rvrn`, a pause, then a
+      right-to-left run's `rtla`, global, and `rtlm`, masked, in place of `ltra` and `ltrm`):
+      - `stch`, then a pause (`record_stch`);
+      - `ccmp` and `locl` with manual ZWJ, then a pause;
+      - `isol`, `fina`, `fin2`, `fin3`, `medi`, `med2` and `init`, masked, with manual ZWJ, each in its own stage: a
+        pause after each, and one more after `init` (`deallocate_buffer_var`). `isol`, `fina`, `medi` and `init` have
+        fallback (a mask bit when the font lacks them); `fin2`, `fin3` and `med2`, Syriac's, have not;
+      - `rlig` with manual ZWJ and fallback, then a pause (`arabic_fallback_shape`);
+      - `calt` with manual ZWJ, then a pause unless the language system has `rclt`;
+      - `liga`, `clig` and `mset` with manual ZWJ (`cswh` stays off);
+      - then the common features and GPOS as for every script. A feature asked for twice keeps its first request's stage
+        and joiner flags, so `ccmp`, `locl`, `rlig`, `calt`, `clig` and `liga` run in the stages above with manual ZWJ,
+        and `rclt`, a horizontal feature only, runs with `liga` with auto ZWJ. GSUB has 14 stages (13 with `rclt`),
+        GPOS 1;
+    - the shaper's settings: normalization `DEFAULT` (composed diacritics, as the default shaper), Unicode's own
+      decompositions and compositions, marks zeroed late by GDEF, `fallback_position` true;
+    - the joining masks (`setup_masks`): the state machine (7 states, 6 joining classes) over the run and its context,
+      each glyph's action setting one form's mask, transparent characters skipped. The joining types are HarfBuzz's
+      `hb-ot-shaper-arabic-table.hh` (from Unicode 18.0's `ArabicShaping.txt`); a code point it does not list is
+      transparent when Mn, Me or Cf, else non-joining;
+    - the reordering of modifier combining marks (`reorder_marks`, UTR #53): in each sorted run of marks, those of class
+      220, then 230, among U+0654, 0655, 0658, 06DC, 06E3, 06E7, 06E8, 08CA, 08CB, 08CD-08CF, 08D3 and 08F3 move to the
+      run's front, renumbered to the modified classes 25 and 26;
+    - a buffer direction, and what `hb_ot_shape` does with it for a right-to-left run (upstream's engine is left to
+      right only): the `rtlm` mask on each character whose mirror the font lacks (`hb_ot_rotate_chars`), cursive
+      attachment's right-to-left branch, the backward branches of `propagateAttachmentOffsets` and its walk from the
+      last glyph to the first, mark offsets left unshifted when marks are zeroed without GPOS, and the final reverse of
+      the glyphs and their positions, as `hb_ot_position` does it;
+    - the Unicode tables extended past U+0900-0DFF by the generator: the Arabic blocks' categories, modified combining
+      classes (HarfBuzz's: shadda before fatha), default-ignorables, decompositions, compositions and joining types; the
+      language systems for `ar`, `fa`, `ur`, `ps`, `sd`, `ug` and `ku` (ARA, FAR, URD, PAS, SND, UYG, KUR).
+    - Not ported: `stch` (neither Arabic family has it), the fallback shaping with presentation forms for a font
+      without the features, the mark placement and legacy `kern` that `fallback_position` gives a font without GPOS, and
+      Syriac. Their pauses stay, so the stages are HarfBuzz's. Mongolian, N'Ko and Phags-pa are shaped by USE in
+      HarfBuzz 14.5, not by this shaper.
 12. **A face re-pointed when its mapping moves** (the controller's call). `mapStyle` is not stable across calls in
     flash mode: flash-mode blocks map one at a time, and the pointer stays valid only until another flash-mode style
     is mapped (`FlashGlyphStore.h`, `mapStyle`). So a build that shapes regular and bold words in turn sees each
