@@ -212,6 +212,34 @@ Results on our X3, 2026-11-07:
   FAST's own ghost: VSL 24 instead of 18 gains 1.5 points, and a second drive about 2 more.
 - The room light fell during the session. Compare bands within one run only.
 
+**Test 10: does a pixel kept black come back white?** The composed one-pass planes cannot tell a pixel that
+stays black from one that turns black, so it takes the black drive (VSH 18) again on every page. `t10` holds
+bands black for 1, 2, 5, 10, 20 and 50 pages in three families that differ only in what a page that keeps a
+pixel black gives it: that drive again, FAST's flash for black that stays, or rest. All go white in the same
+refresh with the one-pass white (VSL 18). `undo` afterwards cancels the drive the re-driven bands took.
+
+```sh
+./lab.py t10; ./cam.py bands t10-white --count 20 --margin 6; ./cam.py bands t10-black --count 20 --margin 6
+./lab.py undo
+```
+
+Results on our X3, 2026-11-07, read within minutes (bands: control, then re-drive, flash, rest for each hold):
+
+| Held black | Re-drive | Flash | Rest |
+|---|---|---|---|
+| 1 page | 104.5 | 104.5 | 104.5 |
+| 5 pages | 104.6 | 104.0 | 104.0 |
+| 20 pages | 104.2 | 103.3 | 103.6 |
+| 50 pages | 104.3 | 103.4 | 104.0 |
+
+- Every band held black lands within 103.3-104.6 after the white drive, whatever its family and hold; the
+  never-black controls read 105.4 and 106.1. Re-driving leaves nothing behind that the other two do not.
+- Re-driving deepens the black while it is held: about -1 to 0 against about 4 for one drive or rest.
+- Not measured: hours or days of reading, and what the DC does to the panel over that time. In the reader
+  nothing cancels it; the periodic HALF only redraws the page.
+- The `t10-rest` shot read 6 points high at the top and 13 low at the bottom, controls included, while three
+  later shots of the unchanged panel agreed within 0.2: a camera artifact, not the panel.
+
 **Test 4: does gray survive a real page turn?** The reader turns pages with FAST, and FAST rests any
 pixel the planes call unchanged, so gray left around letters would stay. The planes are only
 selector bits, so `--aware` marks each gray pixel as changed, which gives it the full drive to the
