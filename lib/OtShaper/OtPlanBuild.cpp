@@ -269,6 +269,10 @@ void overrideIndicFeatures(FeatureBuilder& b) {
   b.pause(GSUB, Pause::None);
 }
 
+// witchhunt: deviation 11 - arabic_features[], in the order data_create_arabic numbers the forms' masks.
+constexpr uint32_t ARABIC_FORM_TAGS[7] = {tag("isol"), tag("fina"), tag("fin2"), tag("fin3"),
+                                          tag("medi"), tag("med2"), tag("init")};
+
 // witchhunt: deviation 11 - collect_features_arabic() (hb-ot-shaper-arabic.cc, HarfBuzz 14.5.0; MIT, see COPYING).
 // Its three pauses that run code (record_stch, deallocate_buffer_var, arabic_fallback_shape) are Pause::None: neither
 // stch nor the fallback shaping is ported, and the buffer variable needs no freeing here. `hasRclt`: whether the
@@ -281,7 +285,7 @@ void collectArabicFeatures(FeatureBuilder& b, const bool hasRclt) {
   b.enable(tag("locl"), ff::MANUAL_ZWJ);
   b.pause(GSUB, Pause::None);
   // arabic_features[]: the Syriac three (fin2, fin3, med2) have no fallback.
-  for (const uint32_t t : {tag("isol"), tag("fina"), tag("fin2"), tag("fin3"), tag("medi"), tag("med2"), tag("init")}) {
+  for (const uint32_t t : ARABIC_FORM_TAGS) {
     const bool syriac = (t & 0xFF) == '2' || (t & 0xFF) == '3';
     b.add(t, static_cast<uint8_t>(ff::MANUAL_ZWJ | (syriac ? 0 : ff::HAS_FALLBACK)));
     b.pause(GSUB, Pause::None);
@@ -371,8 +375,6 @@ class PlanBuilder {
     for (int i = 0; i < MF_COUNT; i++) masks[i] = oneMask(MASKED_FEATURE_TAGS[i]);
     plan_.setFeatureMasks(masks);
     // witchhunt: deviation 11 - the Arabic forms' masks in HarfBuzz's order (data_create_arabic), and rtlm's.
-    static constexpr uint32_t ARABIC_FORM_TAGS[7] = {tag("isol"), tag("fina"), tag("fin2"), tag("fin3"),
-                                                     tag("medi"), tag("med2"), tag("init")};
     for (int i = 0; i < 7; i++) plan_.arabicMasks[i] = oneMask(ARABIC_FORM_TAGS[i]);
     plan_.arabicMasks[7] = 0;
     plan_.rtlmMask = oneMask(tag("rtlm"));
