@@ -858,6 +858,35 @@ bool isZeroNumber(std::string_view s) {
 // A colour value that paints nothing: the keyword, an rgba()/hsla() with alpha 0, or a hex
 // colour with an alpha channel of 00 (#rrggbb00, #rgb0). Six-digit hex has no alpha, so
 // #000000 is opaque black even though it ends in "00". Values are already lowercased.
+// A value that keeps what the cascade gave the element, rather than saying anything of its own.
+bool isCascadeKeyword(const std::string_view v) {
+  return v.empty() || v == "inherit" || v == "initial" || v == "unset" || v == "revert";
+}
+
+// One token of a border value that draws nothing: none, hidden, or a width of zero (0, 0px, 0.0em).
+bool isNoBorderToken(const std::string_view t) {
+  if (t == "none" || t == "hidden") return true;
+  size_t digits = 0;
+  while (digits < t.size() && (t[digits] == '0' || t[digits] == '.')) ++digits;
+  return digits > 0 && (digits == t.size() || std::isalpha(static_cast<unsigned char>(t[digits])));
+}
+
+// Whether a normalized border value draws nothing. A shorthand needs one such token (`currentColor none medium`); the
+// per-side lists of border-style and border-width need all of them (`0 0 1px` is a line).
+bool borderDrawsNothing(const std::string_view v, const bool shorthand) {
+  bool any = false;
+  bool all = true;
+  size_t start = 0;
+  while (start <= v.size()) {
+    const size_t end = std::min(v.find(' ', start), v.size());
+    const bool noBorder = isNoBorderToken(v.substr(start, end - start));
+    any = any || noBorder;
+    all = all && noBorder;
+    start = end + 1;
+  }
+  return shorthand ? any : all;
+}
+
 bool isTransparentColour(const std::string_view v) {
   if (v == "transparent") return true;
   if ((v.rfind("rgba(", 0) == 0 || v.rfind("hsla(", 0) == 0) && v.back() == ')') {
@@ -1016,6 +1045,25 @@ void CssParser::parseDeclarationIntoStyle(const std::string_view decl, CssStyle&
     } else if (val != "inherit" && val != "initial" && val != "unset" && val != "currentcolor") {
       style.colorTransparent = false;
       style.defined.colorTransparent = 0;
+    }
+  } else if (propNameBuf == "border" || propNameBuf == "border-style" || propNameBuf == "border-width") {
+    // Read for the rule an <hr> draws, and for nothing else: see CssStyle::ruleBorder.
+    const std::string_view val = propValueBuf;
+    if (!isCascadeKeyword(val)) {
+      style.ruleBorder |=
+          borderDrawsNothing(val, propNameBuf == "border") ? CssStyle::kRuleBorderNone : CssStyle::kRulePainted;
+    }
+  } else if (propNameBuf == "border-top" || propNameBuf == "border-bottom" || propNameBuf == "border-top-style" ||
+             propNameBuf == "border-bottom-style" || propNameBuf == "border-top-width" ||
+             propNameBuf == "border-bottom-width") {
+    const std::string_view val = propValueBuf;
+    if (!isCascadeKeyword(val) && !borderDrawsNothing(val, /*shorthand=*/true)) {
+      style.ruleBorder |= CssStyle::kRulePainted;
+    }
+  } else if (propNameBuf == "background" || propNameBuf == "background-color" || propNameBuf == "background-image") {
+    const std::string_view val = propValueBuf;
+    if (!isCascadeKeyword(val) && val != "none" && !isTransparentColour(val)) {
+      style.ruleBorder |= CssStyle::kRulePainted;
     }
   } else if (propNameBuf == "visibility") {
     // Same convention as color: hidden/collapse define, visible undefines.
@@ -2017,6 +2065,7 @@ bool CssParser::readCssStylePayload(FsFile& file, CssStyle& style) {
   style.defined.opacityZero = (visibilityFlags & 0x08) != 0 ? 1 : 0;
   style.visibilityHidden = (visibilityFlags & 0x10) != 0;
   style.defined.visibilityHidden = (visibilityFlags & 0x20) != 0 ? 1 : 0;
+  style.ruleBorder = static_cast<uint8_t>(visibilityFlags >> 6);
   float lineHeightEm = 0.0f;
   uint16_t flow = 0;
   if (!get(&style.fontFamily, sizeof(style.fontFamily)) || !get(&lineHeightEm, sizeof(lineHeightEm)) ||
@@ -2111,7 +2160,8 @@ size_t CssParser::encodeCssStylePayload(const CssStyle& style, uint8_t* const pa
   const uint8_t visibilityFlags = (style.colorTransparent ? 0x01 : 0x00) |
                                   (style.defined.colorTransparent ? 0x02 : 0x00) | (style.opacityZero ? 0x04 : 0x00) |
                                   (style.defined.opacityZero ? 0x08 : 0x00) | (style.visibilityHidden ? 0x10 : 0x00) |
-                                  (style.defined.visibilityHidden ? 0x20 : 0x00);
+                                  (style.defined.visibilityHidden ? 0x20 : 0x00) |
+                                  static_cast<uint8_t>(style.ruleBorder << 6);
   put8(visibilityFlags);
   put(&style.fontFamily, sizeof(style.fontFamily));
   put(&style.lineHeightEm, sizeof(style.lineHeightEm));
@@ -2476,7 +2526,7 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   // Bit 31 announces a byte of values the uint16 below has no room for, written after it: an
   // explicit `inherit` of font-weight (bit 0) and of font-style (bit 1), a font-size relative to
   // the body (bit 2), a font-family (bit 3: its hash follows the multipliers), a flow property (bit 4: the flow word,
-  // packFlow, follows this byte), a text-emphasis (bit 5: its mark byte follows the hash).
+  // packFlow, follows this byte), a text-emphasis (bit 5: its mark byte follows the hash), and in bits 6-7 ruleBorder.
   uint8_t extra = 0;
   if (s.defined.fontWeight && s.fontWeight == CssFontWeight::Inherit) extra |= 0x01;
   if (s.defined.fontStyle && s.fontStyle == CssFontStyle::Inherit) extra |= 0x02;
@@ -2485,6 +2535,7 @@ static size_t compressStyle(const CssStyle& s, uint8_t* out) {
   const uint16_t flow = packFlow(s);
   if (flow != 0) extra |= 0x10;
   if (s.defined.textEmphasis) extra |= 0x20;
+  extra |= static_cast<uint8_t>(s.ruleBorder << 6);
   if (extra != 0) mask |= 1u << 31;
   std::memcpy(p, &mask, 4);
   p += 4;
@@ -2553,6 +2604,7 @@ static void decompressStyle(const uint8_t* in, CssStyle& out) {
   std::memcpy(&enums, p, 2);
   p += 2;
   const uint8_t extra = ((mask >> 31) & 1u) ? *p++ : 0;
+  out.ruleBorder = static_cast<uint8_t>(extra >> 6);
   if ((extra & 0x10) != 0) {
     uint16_t flow = 0;
     std::memcpy(&flow, p, 2);

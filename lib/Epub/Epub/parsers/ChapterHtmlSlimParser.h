@@ -831,6 +831,17 @@ class ChapterHtmlSlimParser final : public Print {
                ? CssTextAlign::Justify
                : static_cast<CssTextAlign>(paragraphAlignment);
   }
+  // Whether a block keeps the book's text-align. Under the book's own alignment every value does. The reader's setting
+  // says how running text is set, so it replaces left and justify; centre and the end side are the book placing
+  // something, a section break or a signature, and stay. The end side, not "right": right is how Arabic and Hebrew text
+  // runs, and the setting has to reach it.
+  [[nodiscard]] bool booksAlignmentStands(const CssStyle& cssStyle) const {
+    if (!embeddedStyle || !cssStyle.hasTextAlign()) return false;
+    if (paragraphAlignment == static_cast<uint8_t>(CssTextAlign::None)) return true;
+    const CssTextAlign align = cssStyle.textAlign;
+    return align == CssTextAlign::Center || align == CssTextAlign::End ||
+           align == (startSideIsRight() ? CssTextAlign::Left : CssTextAlign::Right);
+  }
   // The direction the parser knows: right to left from dir or CSS, or (unset or auto) from the book's language. The
   // side a float:left cap, a hanging indent or a gutter calls its start.
   [[nodiscard]] bool startSideIsRight() const {
@@ -1195,6 +1206,8 @@ class ChapterHtmlSlimParser final : public Print {
       label += len + 1;
     }
   }
+  // The page `offset` falls on, once a later page starts past it: until then a page still to come may hold it.
+  bool lookupVisibleOffsetInActiveBuild(uint32_t offset, uint16_t& page) const;
   const ParagraphLut& getParagraphLutPerPage() const { return paragraphLutPerPage; }
 
   // Supplies printed-page labels from NCX <pageList> for this chapter. `anchors` maps

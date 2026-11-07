@@ -121,7 +121,9 @@ class CssParser {
   //      stored it relative to a 1.5 base.
   // v31: `text-emphasis-style` (and `text-emphasis`, with the -epub- and -webkit- prefixes) is persisted: a mark
   //      in bits 3-6 of the smallCaps byte, defined in bit 2; in the resident pool, extra bit 5 and a mark byte.
-  static constexpr uint8_t CSS_CACHE_VERSION = 31;
+  // v32: what an <hr> leaves to draw (CssStyle::ruleBorder), from the border and background properties: bits 6-7 of the
+  //      visibility flags byte; in the resident pool, bits 6-7 of the extra byte.
+  static constexpr uint8_t CSS_CACHE_VERSION = 32;
   // Bytes before the complex-rule table and the sorted offset index: version(1) + ruleCount(2) +
   // totalSelectorCandidates(4) + unsupportedSelectorSkips(4) + flags(1) + complexTableBytes(2).
   static constexpr uint32_t CSS_CACHE_HEADER_BYTES = 14;

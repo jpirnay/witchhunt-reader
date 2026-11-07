@@ -246,8 +246,11 @@ def add_scoped_defines(env, defines):
     # global define costs no rebuild, and those consumers read only the global
     # defines. Without it cppcheck stops with unknownMacro on main.cpp's
     # LOG_DBG("..." CROSSPOINT_VERSION), and CI runs it with --fail-on-defect high.
+    # A fixed value, not the real one: cppcheck hashes every -D into each file's
+    # --cppcheck-build-dir entry, and in a PR the version carries the commit's SHA, so
+    # the real value would make every file miss the cache on every run.
     if env.IsIntegrationDump():
-        env.Append(CPPDEFINES=list(defines.items()))
+        env.Append(CPPDEFINES=[(name, '\\"integration-dump\\"') for name in defines])
         return
 
     # Exactly two parameters: PlatformIO picks the middleware calling convention

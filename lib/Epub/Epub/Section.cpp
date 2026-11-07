@@ -36,7 +36,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 112;  // v112: Indic lines are shaped: a word's glyph form (the bidi
+constexpr uint8_t SECTION_FILE_VERSION = 114;  // v114: an <hr> the book's CSS leaves nothing to draw of is not drawn
+                                               // v113: a book's centre and end-side text-align beat the setting
+                                               // v112: Indic lines are shaped: a word's glyph form (the bidi
                                                // region's bit 2) and run-cut pieces; status bit 6 marks a run laid
                                                // out unshaped
                                                // v111: a book tagged cn takes the Chinese profile, zh-CHT its
@@ -2309,6 +2311,13 @@ std::optional<uint16_t> Section::activeBuildPageForAnchor(const std::string& anc
   if (!buildState_ || !buildState_->visitor || anchor.empty()) return std::nullopt;
   uint16_t page = 0;
   if (!buildState_->visitor->lookupAnchorInActiveBuild(anchor, page)) return std::nullopt;
+  return page;
+}
+
+std::optional<uint16_t> Section::activeBuildPageForVisibleOffset(const uint32_t offset) const {
+  if (!buildState_ || !buildState_->visitor) return std::nullopt;
+  uint16_t page = 0;
+  if (!buildState_->visitor->lookupVisibleOffsetInActiveBuild(offset, page)) return std::nullopt;
   return page;
 }
 

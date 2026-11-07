@@ -377,6 +377,8 @@ class EpubReaderActivity final : public Activity {
   static constexpr int kImageWarmLookahead = 5;
   int imageWarmCleanSpine_ = -1;
   int imageWarmCleanPage_ = -1;
+  // That look was during Background-C's build, so at the page on screen alone: the window is looked at again after it.
+  bool imageWarmCleanDuringBuild_ = false;
   // Pages whose warm came back incomplete although no input preempted it (an unsupported or
   // corrupt image, a decode refused for heap). Each gets kImageWarmMaxTries attempts, then the
   // lane skips it for the session -- a failed decode writes no cache, so without this the lane
@@ -473,6 +475,15 @@ class EpubReaderActivity final : public Activity {
   // Page last drawn by the SectionBuilding pass (-1 = none yet / popup showing). Stops the
   // pass redrawing the same page every idle tick.
   int buildDisplayedPage_ = -1;
+  // The text a relayout or a sync landed on (noteLandedText). Cleared by a page turn.
+  struct LandedText {
+    int spine = -1;
+    int page = -1;
+    uint32_t offset = 0;
+  };
+  LandedText landedText_;
+  // True while pageTurn() waits for the render lock: the one sign the render task can read that a turn is on its way.
+  std::atomic<bool> pageTurnWaitingForLock_{false};
   // True once the "Indexing" popup has been drawn for the current pending page, so the pass
   // doesn't re-flush it every tick. Cleared whenever a real page is drawn or the build ends.
   bool buildingPopupShown_ = false;
@@ -793,16 +804,25 @@ class EpubReaderActivity final : public Activity {
   // The gates Background-B and the idle glyph-store step share: a section on screen in the READING phase, background
   // work not suspended, and no pre-render, pre-rendered page, display refresh or image decode pending.
   bool lookAheadMayRun() const;
-  // The image lane's step; called from stepBackgroundSectionBuild with the RenderLock held. What
-  // it found in its window (LaneBeforeBuild::Window): Dirty when it did a page's worth of work this
-  // tick (the caller then yields to the loop); Background-B may borrow only on Clean or Closed.
+  // The image lane's step, with the RenderLock held. What it found in its window (LaneBeforeBuild::Window): Dirty when
+  // it did a page's worth of work this tick (the caller then yields to the loop); Background-B may borrow only on
+  // Clean or Closed. Its list is the window; during Background-C's build, the page on screen alone.
   LaneBeforeBuild::Window stepImageWarmLocked();
+  // The lane between two slices of Background-C's build. True when it decoded, and the tick was spent; false leaves the
+  // tick to the build.
+  bool stepImageLaneDuringBuild();
+  // Background-C's arena where its build holds the buffer, or nullptr: a decode beside it works above its cursor.
+  BuildArena* arenaOfBuildHoldingBuffer() const;
+  // A decode would be cut short or hold up a press: a gesture is in flight, or a page has only just moved.
+  bool imageLaneMustWait() const;
+  // Whether a decode here also writes the page's grey caches.
+  bool imageLaneWarmsGrayscale() const;
   // warmPageForImageLane() with the buffer taken back from Background-B first, if B holds it. False
   // when there was no buffer to lend, so nothing was done.
   bool warmPageTakingBuffer(const Page& page, int spine, int pageIndex, bool onScreen, bool warmGrayscale);
-  // Decode one page's missing image caches into the borrowed secondary buffer, writing no
-  // framebuffer byte. `onScreen`: the page is the one displayed; once the images it showed as
-  // placeholders are cached it is redrawn. Always returns true (the tick was spent).
+  // Decode one page's missing image caches into the borrowed secondary buffer (or, during a build that holds it, what
+  // the build leaves free of it), writing no framebuffer byte. `onScreen`: the page is the one displayed; once the
+  // images it showed as placeholders are cached it is redrawn. Always returns true (the tick was spent).
   bool warmPageForImageLane(const Page& page, int spine, int pageIndex, bool onScreen, bool warmGrayscale);
   // The memory ladder (ImageMemoryLadder): warms `page`'s missing image caches at (xOffset, yOffset), and while a
   // decode is short of memory, decodes again with font memory freed, step by step. `arena` is the decode scratch
@@ -979,20 +999,22 @@ class EpubReaderActivity final : public Activity {
   // a page save still owed), and the link back stack.
   void saveStateForRestart();
   // A layout change mid-session (a per-book override, the memory ladder's fewer families): the section goes, and
-  // the next render builds it again at the paragraph (or page) on screen.
+  // the next render builds it again at the text on screen.
   void resetSectionKeepingPosition();
   void saveProgress(int spineIndex, int currentPage, int pageCount,
                     std::optional<uint16_t> paragraphIndex = std::nullopt,
-                    const std::optional<EpubProgressRecord::Shown>& shown = std::nullopt);
+                    const std::optional<EpubProgressRecord::Shown>& shown = std::nullopt,
+                    std::optional<uint32_t> visibleOffset = std::nullopt);
   // Writes the canonical EPUB progress.bin record (EpubProgressRecord): spine(2) + page(2) +
   // pageCount(2) + percent(1), plus paragraph(2) when one is given, plus what the status bar
-  // showed when that is given. Used by the per-page saveProgress() and by transient writers (sync
-  // restore, bookmark jump) so the on-disk format stays consistent regardless of caller. Static
+  // showed and where the page starts in the text when those are given. Used by the per-page saveProgress() and by
+  // transient writers (sync restore, bookmark jump) so the on-disk format stays consistent regardless of caller. Static
   // (and shared across the split EpubReaderActivity/EpubReaderSync translation units) since it
   // needs no instance state.
   static bool writeReaderProgressCache(const std::string& cachePath, int spineIndex, int currentPage, int pageCount,
                                        uint8_t percent, std::optional<uint16_t> paragraphIndex = std::nullopt,
-                                       const std::optional<EpubProgressRecord::Shown>& shown = std::nullopt);
+                                       const std::optional<EpubProgressRecord::Shown>& shown = std::nullopt,
+                                       std::optional<uint32_t> visibleOffset = std::nullopt);
   // Jump to a percentage of the book (0-100), mapping it to spine and page.
   void jumpToPercent(int percent);
   // The spine and the position within it that `percent` (0-100) of the book falls on. False
@@ -1103,6 +1125,12 @@ class EpubReaderActivity final : public Activity {
   // Re-point navTarget at the page currently displayed. Must be called after every move of
   // section->currentPage that stays inside the loaded section — see the definition for why.
   void anchorNavTargetToCurrentPage();
+  // Records the text `target` landed on, for readingOffset().
+  void noteLandedText(const NavigationTarget& target);
+  // Where the reader is in the chapter's text, for a position that has to outlive the layout: the text they landed on
+  // while they stay on that page, otherwise the page's start. The landed text sits somewhere on its page, so the
+  // page's start would lie before it and every relayout would walk the reader back a little.
+  [[nodiscard]] std::optional<uint32_t> readingOffset() const;
   bool stepPageState(bool isForwardTurn);
   bool stepPageStateLocked(bool isForwardTurn);
   void pageTurn(bool isForwardTurn);

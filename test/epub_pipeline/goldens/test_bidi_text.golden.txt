@@ -281,10 +281,10 @@ SPINE 0 href=OEBPS/ch1.xhtml pages=2 truncated=0 cssFallback=0
      LN words=1
       W x=108 s=0 z=100 t=א2
        WD t=2א
-  LINE y=589 x=0 align=0 mult=1.000 hfid=0 words=2
-   W x=348 s=0 z=100 t=לשמאל
+  LINE y=589 x=0 align=1 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=לשמאל
     WD t=לאמשל
-   W x=397 s=0 z=100 t=יישור
+   W x=49 s=0 z=100 t=יישור
     WD t=רושיי
    O order=1,0
   LINE y=613 x=0 align=0 mult=1.000 hfid=0 words=2

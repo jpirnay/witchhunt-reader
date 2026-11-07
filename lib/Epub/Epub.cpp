@@ -2215,11 +2215,12 @@ bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string&
   }
   // The write buffer is reserved BEFORE the reader takes its own block, because BuildArena is
   // LIFO: the reader is created and released inside the call below, so it must sit on top of
-  // this one. Falls back to a heap buffer (and then to pass-through) when there is no arena.
+  // this one. So it takes the arena only where the reader's ring still fits above it: 4 KB on the heap costs less than
+  // the 33 KB that would otherwise go there. Falls back to a heap buffer, and then to pass-through.
   BuildArena::Block writeBlock;
   uint8_t* writeBuf = nullptr;
   std::unique_ptr<uint8_t[]> heapWriteBuf;
-  if (arena && arena->valid() && arena->capacity() - arena->used() >= EXTRACT_WRITE_BUFFER_BYTES) {
+  if (arena && arena->valid() && arena->capacity() - arena->used() >= EXTRACT_ARENA_BYTES) {
     writeBlock = arena->reserveBlock();
     writeBuf = static_cast<uint8_t*>(arena->alloc(EXTRACT_WRITE_BUFFER_BYTES));
   }
@@ -2261,10 +2262,12 @@ bool Epub::extractItemToFileOnce(const std::string& itemHref, const std::string&
   return true;
 }
 
-bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath, BuildArena* arena) const {
+bool Epub::extractItemToFile(const std::string& itemHref, const std::string& destPath, BuildArena* arena,
+                             const bool heapRetry) const {
   if (itemHref.empty() || destPath.empty()) return false;
   if (arena) {
     if (extractItemToFileOnce(itemHref, destPath, arena)) return true;
+    if (!heapRetry) return false;
     // EntryReader does NOT fall back to the heap once it has been given an arena — a short
     // arena just makes open() fail. Retry on the heap so passing one can only ever add a way
     // to succeed. extractItemToFileOnce() removed the partial file, so this starts clean.
