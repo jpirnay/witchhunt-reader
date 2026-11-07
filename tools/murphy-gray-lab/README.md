@@ -240,6 +240,31 @@ Results on our X3, 2026-11-07, read within minutes (bands: control, then re-driv
 - The `t10-rest` shot read 6 points high at the top and 13 low at the bottom, controls included, while three
   later shots of the unchanged panel agreed within 0.2: a camera artifact, not the panel.
 
+**Test 11: the same over 500 pages, and the hour after.** Holds of 1, 50, 200 and 500 pages, then the white
+drive and a shot every 10 minutes for an hour. Not journalled (500 pages of planes make a 70 MB journal):
+`t11-cancel` pays back the 18 frames of VSH each re-driven band took per page held past the first, in steps of
+the firmware's 32-frame net limit.
+
+```sh
+./lab.py t11; ./cam.py bands t11-white-60 --count 14 --margin 8; ./lab.py t11-cancel
+```
+
+Results on our X3, 2026-11-07, an hour after the white drive (never-black controls 103.3 and 103.6):
+
+| Held black | Re-drive | Flash | Rest |
+|---|---|---|---|
+| 1 page | 102.0 | 101.9 | 102.1 |
+| 50 pages | 102.2 | 100.8 | 101.2 |
+| 200 pages | 102.2 | 100.4 | 101.1 |
+| 500 pages | 102.2 | 100.2 | 101.0 |
+
+- Re-driven black comes back as white as black held for one page, at every hold. FAST's flash leaves the most
+  behind, 1.8 points at 500 pages, rest about 1.
+- Nothing creeps back: every band, controls included, rose about a point in the first 10 minutes, then held
+  within 0.2 for the hour.
+- While held, re-driven and flashed black sit 2-4 points deeper than one drive or rest.
+- Still not measured: what the DC does to the panel over weeks.
+
 **Test 4: does gray survive a real page turn?** The reader turns pages with FAST, and FAST rests any
 pixel the planes call unchanged, so gray left around letters would stay. The planes are only
 selector bits, so `--aware` marks each gray pixel as changed, which gives it the full drive to the

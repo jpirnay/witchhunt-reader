@@ -733,6 +733,82 @@ def test10_static_black(lab):
     photo("t10", f"{T10_BANDS} bands: control, " + ", ".join(f"{f}{h}" for h, f in bands) + ", control")
 
 
+# Test 11: Test 10's question over ten times the pages, and the hour after. Bands are held black for 1, 50,
+# 200 and 500 pages, then go white, and the camera looks every 10 minutes for an hour for a remnant creeping
+# back. Not journalled: 500 pages of planes make a 70 MB journal. Only the re-driven bands take any drive,
+# 18 frames of VSH for each page held past the first, and `t11-cancel` pays exactly that back.
+T11_HOLDS = (1, 50, 200, 500)
+T11_BANDS = 2 + len(T11_HOLDS) * len(T10_FAMILIES)
+T11_BAND = HEIGHT // T11_BANDS
+T11_WATCH_MINUTES = (0, 10, 20, 30, 40, 50, 60)
+T11_CANCEL_CHUNK = 32  # frames of VSL in one refresh: the firmware's kMaxNetFrames
+
+
+def t11_bands():
+    return [(hold, family) for hold in T11_HOLDS for family in T10_FAMILIES]
+
+
+def test11_long_hold(lab):
+    """Bands top to bottom: control, then for each hold the families in T10_FAMILIES order, then control.
+    Shots: t11-black, then t11-white-MM at each of T11_WATCH_MINUTES after the white drive."""
+    lab.arm()
+    lab.clean("white")
+    bank = static_black_bank()
+    stay = {"redrive": KK, "flash": WK, "rest": WW}
+    bands = t11_bands()
+    pages = max(T11_HOLDS)
+    planes = {}  # the page only changes where a band starts; the planes take seconds to build
+    started = time.time()
+    for page in range(1, pages + 1):
+        key = tuple(
+            WW if page < pages - hold + 1 else KK if page == pages - hold + 1 else stay[family]
+            for hold, family in bands
+        )
+        if key not in planes:
+            frame = Frame(WW)
+            for index, slot in enumerate(key, start=1):
+                frame.rect(0, index * T11_BAND, WIDTH, T11_BAND, slot)
+            planes[key] = frame.planes()
+        lab._send("prod", bank, *planes[key], f"t11 page {page}")
+    print(f"t11: {pages} pages in {time.time() - started:.0f} s")
+    if lab.camera:
+        lab.camera("t11-black")
+    white = Frame(WW)
+    for index in range(1, len(bands) + 1):
+        white.rect(0, index * T11_BAND, WIDTH, T11_BAND, KW)
+    lab.push("prod", bank, white, "t11 to white", journal=False)
+    whitened = time.time()
+    for minutes in T11_WATCH_MINUTES:
+        while not lab.dry_run and time.time() < whitened + minutes * 60:
+            time.sleep(5)
+        if lab.camera:
+            lab.camera(f"t11-white-{minutes:02d}")
+    photo("t11", f"{T11_BANDS} bands: control, " + ", ".join(f"{f}{h}" for h, f in bands) + ", control")
+
+
+def test11_cancel(lab):
+    """Pay back what Test 11's re-driven bands took, as VSL, then clean white."""
+    lab.arm()
+    owed = {
+        index: 18 * (hold - 1)
+        for index, (hold, family) in enumerate(t11_bands(), start=1)
+        if family == "redrive" and hold > 1
+    }
+    while any(owed.values()):
+        amounts = sorted({min(left, T11_CANCEL_CHUNK) for left in owed.values() if left})
+        drives = [lut((VSL, amount)) for amount in amounts]
+        rest = rest_like(*drives)
+        bank = make_bank(rest, *(drives + [rest] * (3 - len(drives))))
+        frame = Frame(WW)
+        for index, left in owed.items():
+            if left:
+                step = min(left, T11_CANCEL_CHUNK)
+                frame.rect(0, index * T11_BAND, WIDTH, T11_BAND, (KW, WK, KK)[amounts.index(step)])
+                owed[index] = left - step
+        lab.push("prod", bank, frame, f"t11 cancel {amounts}", journal=False)
+    lab.clean("white")
+
+
 def test_handover(lab, warm, swap_planes=False):
     """The reader's nudge after a black base, with and without a reset in between.
 
@@ -1074,6 +1150,8 @@ def main():
     t9.add_argument("--white", type=int, help="frames of VSL to white (default FAST's)")
     t9.add_argument("--black", type=int, help="frames of VSH to black (default FAST's)")
     steps.add_parser("t10", help="Test 10: bands held black for 1-50 pages, then white")
+    steps.add_parser("t11", help="Test 11: bands held black for 1-500 pages, then watched for an hour")
+    steps.add_parser("t11-cancel", help="pay back the drive Test 11 left")
     t4 = steps.add_parser("t4", help="Test 4: gray patches through a FAST page turn")
     t4.add_argument("--aware", action="store_true", help="mark gray pixels as changed")
     t4.add_argument("--hold", action="store_true", help="stop while the patches are gray")
@@ -1157,6 +1235,13 @@ def main():
 
             lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
             test10_static_black(lab)
+        elif args.step == "t11":
+            import cam
+
+            lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
+            test11_long_hold(lab)
+        elif args.step == "t11-cancel":
+            test11_cancel(lab)
         elif args.step == "t4-pages":
             test4_pages(lab, args.font, args.size, args.pages, args.mode, variant=args.variant)
         elif args.step == "t8":
