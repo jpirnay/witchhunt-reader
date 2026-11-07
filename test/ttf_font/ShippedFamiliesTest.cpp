@@ -210,6 +210,7 @@ std::vector<std::vector<uint32_t>> corpusSample(const std::string& script) {
   std::vector<std::vector<uint32_t>> lines;
   std::string line;
   while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == 0x0D) line.pop_back();  // a CRLF checkout
     if (!line.empty()) lines.push_back(decodeCorpusLine(line));
   }
   return lines;
