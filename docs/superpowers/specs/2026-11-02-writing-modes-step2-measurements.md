@@ -1630,12 +1630,12 @@ Master `3ae95c07b` against this branch, `pio run` (the floor: `default` at most 
 
 | Env | Master Flash | Branch Flash | Delta | Master RAM | Branch RAM |
 |---|---:|---:|---:|---:|---:|
-| `default` | 6,297,547 B (PR 3b's final build) | 6,301,611 B | +4,064 B | 57,616 B | 57,616 B |
-| `gh_release` | 6,170,745 B | 6,174,659 B | +3,914 B | 57,096 B | 57,096 B |
+| `default` | 6,297,547 B (PR 3b's final build) | 6,301,117 B | +3,570 B | 57,616 B | 57,616 B |
+| `gh_release` | 6,170,745 B | 6,174,077 B | +3,332 B | 57,096 B | 57,096 B |
 
-`default` has 251,989 B free: the gate holds with 17,000 B to spare. RAM is unchanged. The bytes (`nm --size-sort` on the
+`default` has 252,483 B free: the gate holds with 17,483 B to spare. RAM is unchanged. The bytes (`nm --size-sort` on the
 `default` ELF against master's `gh_release` ELF, symbols new in the branch): the Arabic joining table (`ucd::JOINING`,
-864 B), `reorderMarksArabic` (750 B), `arabicSetupMasks` (228 B), `Buffer::reverse` (130 B), the joining state table
-(126 B), `joiningType` (66 B), the modifier-mark list (56 B) and the plan's form tags; about 2.8 KB in 17 new symbols,
+224 B, over the 448 code points of the Arabic blocks), `reorderMarksArabic` (750 B), `arabicSetupMasks` (228 B), `Buffer::reverse` (130 B), the joining state table
+(126 B), `joiningType` (66 B), the modifier-mark list (56 B) and the plan's form tags; about 2.2 KB in 17 new symbols (the 2.8 KB of the first measurement less the 640 B the narrower joining table saves),
 the rest in code the Arabic shaper added to (plan, shaping, position); the comparison is approximate, as `default` also holds the dev commands. The device's timings
 (`plan_us`, `shape_us`) are the controller's X3 run and are recorded with the PR.
