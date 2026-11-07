@@ -4,9 +4,9 @@ Status: analysed and measured on 2026-11-06 and 2026-11-07, not ported. Source: 
 `fix-display-updates`, tip `d73c852`, and crosspoint-reader branch `fix-display-updates` at `8739c86f6` ("Direct AA"),
 which pins that same SDK tip.
 
-**Decision so far.** Worth taking for the X4 Pro as an opt-in, as a slice of the text-AA core. Do not merge the branch:
-a trial merge into `witchhunt` conflicts widely, and most of its churn is Picco work. The port waits for a by-eye
-verdict on our own panel.
+**Decision so far.** Not started. Text passes the by-eye check on our panel, but it does not feel much faster, so the
+case for a port is consistency, not speed. If we port, take a slice of the text-AA core as an opt-in. Do not merge the
+branch: a trial merge into `witchhunt` conflicts widely, and most of its churn is Picco work.
 
 ## What it does
 
@@ -34,6 +34,8 @@ pages. 74 one-pass pages: no panic, no compose failure, no stuck BUSY.
 | About 1 s per press: AA passes aborted | 17 of 20 | 0 |
 | About 1 s per press: ms per page | 1016 | 1131 |
 
+- **Where the time goes:** today's B/W page lands at about 1060 ms and the AA pass finishes it at 1620 ms. One-pass lands
+  the finished page at 1140 ms. So a page turn reaches the panel no sooner. What goes away is the AA step after it.
 - **Blocking cost per page (medians):** compose 49, upload 117, waveform 641, finish 95, reseed 115, total 1018 ms.
 - **Pixels per page, of 384k:** hold about 308k, white-driven about 36k, black about 27k, gray about 13k.
 - **Charge releases:** 1.7-2.6k pixels per page, 5-7% of white drives.
@@ -41,28 +43,31 @@ pages. 74 one-pass pages: no panic, no compose failure, no stuck BUSY.
   reading, a menu open and close has the same effect on the next page.
 - **Memory during the run:** PSRAM free about 7.37 MB, internal free 183 KB (minimum 166 KB).
 
-How the page looks was not measured. Upstream issue #4344 reports text on a UC8279 unit as a large improvement. That is
-one user's opinion on a different controller, so our by-eye check is still owed.
+**By eye, 2026-11-07, on this X4 Pro:** text looks okay, with no artifacts or ghosting, and it does not feel a lot
+faster, which fits the numbers above. Upstream issue #4344 reports text on a UC8279 unit as a large improvement.
 
 ## Image tones swapped on UC8279 (upstream issue #4344)
 
 **Open upstream, does not affect us:** our pin has no `kX4ProImage`. Our UC8279 X4 Pro path still uses `kQualityBank`.
+Fix offered as Free-Ink/freeink-sdk#182, with the analysis posted on the issue.
 
 The report shows a sleep image on the Direct AA build where a near-black coat and rock come out lighter than the sky.
 That is not lost contrast: dark gray and light gray have traded places.
 
 **Cause.** `Uc8279X4Driver::displayGray()` uploads `kX4ProImage` with `bus.cmd(0x20 + i)`. The bank it replaced,
-`kQualityBank`, goes through `kQualityLutReg = {0x20, 0x21, 0x23, 0x22, 0x24}` because this panel needs `0x22` and
-`0x23` exchanged for our planes.
+`kQualityBank`, goes through `kQualityLutReg = {0x20, 0x21, 0x23, 0x22, 0x24}`. Stock image tables run VCOM, black,
+light, dark, white, and our absolute planes are inverted on the way out, so black and white land right while dark gray
+selects `0x22`.
 
 | Level | Planes (LSB, MSB) | On the wire (DTM1, DTM2) | Register | `kQualityBank` (2.0.0) ends | `kX4ProImage` ends |
 |---|---|---|---|---|---|
-| 1 dark gray | 1, 0 | 0, 1 | `0x23` | W16 B2 W1 B2 (dark) | W24 B3 (light) |
-| 2 light gray | 0, 1 | 1, 0 | `0x22` | W16 B2 (light) | W24 B6 (dark) |
+| 1 dark gray | 1, 0 | 0, 1 | `0x22` | B16 W2 (dark) | B24 W6 (light) |
+| 2 light gray | 0, 1 | 1, 0 | `0x23` | B16 W2 B1 W2 (light) | B24 W3 (dark) |
 
-W and B are frames driven towards white and black. The `kQualityBank` tails come from compiling `makeQualityBank()` at
-its default speed of 60. The planes come from `grayPlanePixel()` in absolute mode, and `streamPlane(..., invert=true)`
-inverts them on the way out. Black and white are unaffected.
+B and W are frames driven towards black (rail 1) and white (rail 2). `kX4ProTextUc8279` settles both the rails and the
+selection: its black dose sits on rail 1 at `0x24`, and its hold row, wire (0, 1), sits at `0x22`. The `kQualityBank`
+tails come from compiling `makeQualityBank()` at its default speed of 60. The planes come from `grayPlanePixel()` in
+absolute mode, and `streamPlane(..., invert=true)` inverts them.
 
 **Evidence from the report's photos.** The original BMP was run through the firmware's Atkinson quantizer with legacy
 thresholds, which is what UC8279 uses. Each photo was then fitted against the four level densities, with nothing in the
@@ -76,13 +81,14 @@ fit assuming a swap:
 The black figure on the Direct AA row is weak: black is 3.7% of the pixels and the fit is looser. Do not read a black
 level problem into it.
 
-**Fix, not run on hardware.** Upload the packet through `kQualityLutReg`. `test_pro.cpp` (the `kX4ProImage` loop in the
-image test) asserts the straight order, so it passes with the bug and needs the same exchange. Every use of the packet
-is affected: sleep images, covers, and book pages with images, since upstream's reader sends those through Absolute on
-UC8279.
+**Fix, not run on hardware.** Free-Ink#182 uploads the packet through `kQualityLutReg`. `test_pro.cpp` asserted the
+straight order, so it passed with the bug; the PR makes it check that `0x22` ends darker than `0x23`. Every use of the
+packet is affected: sleep images, covers, and book pages with images, since upstream's reader sends those through
+Absolute on UC8279.
 
-**Not checked.** How stock feeds this packet. The bytes match stock, so stock's own plane order must differ from ours.
-We have no UC8279 X4 Pro, so the fix needs a tester who has one.
+**Not checked.** Stock's plane order: the rows match stock's, so stock must send dark gray as (1, 0). Our X4 Pro cannot
+run this path: the boot probe reads the controller and picks `Uc8179Driver`, so the fix needs a tester with a UC8279
+unit.
 
 **If we ever take `kX4ProImage`:** bytes verified against stock (26102901, at `0xe4ff3` and `0xe5560`) say nothing about
 the register order. Take the exchange with it.
@@ -128,7 +134,7 @@ pixel on every page.
 
 ## Next
 
-1. Judge the panel on our X4 Pro: text weight with one gray, ghosting over 30 pages, a pulse after a menu or a HALF.
-   Pictures in books are not part of this check, see "Book pages with images" above.
-2. If it passes, port the core as an opt-in, with the fixes above.
+1. Decide whether a port is worth it. It buys one panel update instead of two, and AA that survives fast flipping. It
+   costs 576 KB of PSRAM, a slower flip floor (1131 against 1016 ms) and a separate route for image pages.
+2. If so, port the core as an opt-in, with the fixes above.
 3. Run `kUc8279X3_Xth4`'s tail fix on a UC8279 X3.
