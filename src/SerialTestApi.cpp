@@ -34,6 +34,7 @@
 #include <IndicScripts.h>
 #include <Memory.h>
 #include <OtShaper.h>
+#include <OtShaperInternal.h>
 #include <ProtectedPaths.h>
 #include <SerialTransfer/SerialTransferProtocol.h>
 #include <ShapingFace.h>
@@ -945,9 +946,14 @@ constexpr unsigned kShapeSlots = 112;         // the shaper's buffer: room to gr
 // Rounds a 26.6 value to whole pixels, halves away from zero.
 int roundPixels(const int32_t v) { return v >= 0 ? (v + 32) / 64 : -((-v + 32) / 64); }
 
-// The Arabic blocks the shaper's fixtures cover: Arabic, Arabic Supplement and Arabic Extended-A.
-bool isArabicBlock(const uint32_t cp) {
-  return (cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0750 && cp <= 0x077F) || (cp >= 0x0870 && cp <= 0x08FF);
+// An Arabic letter or mark of the blocks the shaper's fixtures cover (Arabic, Supplement, Extended-A): general category
+// Lo, Lm or a mark. Digits, punctuation and the number signs are not.
+bool isArabicLetterOrMark(const uint32_t cp) {
+  if (!((cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0750 && cp <= 0x077F) || (cp >= 0x0870 && cp <= 0x08FF))) {
+    return false;
+  }
+  const uint8_t cat = ot::charData(cp).genCat;
+  return cat == ot::gc::OTHER_LETTER || cat == 6 /* Lm */ || ot::gc::isMark(cat);
 }
 
 // Shapes the first Indic or Arabic run of `text` with the body family's regular style at the body size, as a section
@@ -976,8 +982,9 @@ void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, 
     const uint32_t cp = utf8NextCodepoint(&p);
     if (!script && !arabic) {
       script = indic::scriptOf(cp);
-      arabic = !script && isArabicBlock(cp);
+      arabic = !script && isArabicLetterOrMark(cp);
     }
+    if (arabic && !isArabicLetterOrMark(cp) && cp != 0x200C && cp != 0x200D) break;  // the Arabic run ends here
     if (script || arabic) cps[count++] = cp;
   }
   if (!script && !arabic) {

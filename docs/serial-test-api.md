@@ -674,7 +674,7 @@ reclaim: writes simply resume and no event arrives. Development builds only.
 `CMD:TTF:SHAPE:<bcp47>:<text>` shapes one word on the device, to time what a section build repeats. The language is
 empty or 1-15 of `A-Za-z0-9-` (`hi`, `bn`; empty selects the script's default language system), the text 1-192 bytes
 of UTF-8. With the body family's regular style at the body size it builds the shaping face and one plan, then shapes
-the text's first shaped run (from its first Indic or Arabic letter, at most 48 code points; Arabic means a letter or mark in U+0600-06FF, U+0750-077F or U+0870-08FF, shaped right to left under the Arabic script and reported as `script=Arabic`) and prefetches that run's glyphs:
+the text's first shaped run (from its first Indic or Arabic letter, at most 48 code points; Arabic means a letter (Lo, Lm) or mark (Mn, Mc, Me) in U+0600-06FF, U+0750-077F or U+0870-08FF, with ZWJ and ZWNJ inside it; digits, punctuation, spaces and the number signs neither start nor continue one, shaped right to left under the Arabic script and reported as `script=Arabic`) and prefetches that run's glyphs:
 
 ```
 TTF_SHAPE:script=Devanagari cpac=18244 init_us=410 repoint_us=95 plan_us=18300 plan_bytes=3328 shape_us=6200 glyphs=6 width=71 stored=5
@@ -695,7 +695,7 @@ prefetch. Errors: `TTF_ERROR:no TrueType family loaded`, `no Indic letter` (also
 `shape failed`, `no memory`. Every block it makes is freed before the reply, the shaping faces with them.
 
 It measures one plan and one word, not a section (the design's measure-first item 4). Development builds only: the
-shaper is linked into `default`, not into a release build.
+command is, though the shaper itself is linked into every build.
 
 ### Files on the card: `FS`
 
