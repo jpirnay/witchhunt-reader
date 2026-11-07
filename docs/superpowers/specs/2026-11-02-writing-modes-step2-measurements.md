@@ -1637,5 +1637,27 @@ Master `3ae95c07b` against this branch, `pio run` (the floor: `default` at most 
 `default` ELF against master's `gh_release` ELF, symbols new in the branch): the Arabic joining table (`ucd::JOINING`,
 224 B, over the 448 code points of the Arabic blocks), `reorderMarksArabic` (750 B), `arabicSetupMasks` (228 B), `Buffer::reverse` (130 B), the joining state table
 (126 B), `joiningType` (66 B), the modifier-mark list (56 B) and the plan's form tags; about 2.2 KB in 17 new symbols (the 2.8 KB of the first measurement less the 640 B the narrower joining table saves),
-the rest in code the Arabic shaper added to (plan, shaping, position); the comparison is approximate, as `default` also holds the dev commands. The device's timings
-(`plan_us`, `shape_us`) are the controller's X3 run and are recorded with the PR.
+the rest in code the Arabic shaper added to (plan, shaping, position); the comparison is approximate, as `default` also holds the dev commands.
+
+**On the device (X4, 2026-11-07).** The X3 was busy, so the X4 ran it: same ESP32-C3, same `default` firmware, built
+from this branch merged with master `9331cbfc1`. `CMD:TTF:SHAPE` shaped ten words of each language, each word once,
+16 pt, with the body family's regular face:
+- merged Noto Naskh Arabic for Arabic, Persian and Urdu;
+- the shipped Noto Sans Devanagari for Hindi.
+
+| Words | Family | `cpac` | `plan_bytes` | `plan_us` (median) | `shape_us` median (min-max) | glyphs (median) |
+|---|---|---|---|---|---|---|
+| Arabic (`ar`) | Noto Naskh Arabic | 5,500 | 2,108 | 1,608 | 1,187 (915-1,954) | 6 |
+| Persian (`fa`) | Noto Naskh Arabic | 5,500 | 2,140 | 1,642 | 1,298 (928-1,812) | 6 |
+| Urdu (`ur`) | Noto Naskh Arabic | 5,500 | 2,140 | 1,647 | 1,118 (587-1,411) | 5 |
+| Hindi (`hi`) | Noto Sans Devanagari | 18,400 | 3,176 | 2,048 | 2,455 (1,775-4,038) | 5.5 |
+
+- **An Arabic word costs about half a Hindi one.** The Arabic plans are smaller (41-46 planned lookups against 77)
+  and no Indic reordering runs. PR 4b's 2x build-time line is therefore less at risk for Arabic than it was for
+  Hindi, which ran at 2.61x on real prose.
+- **A plan built on the device is 2,108-2,140 B,** within item 7's estimate of 2,068-2,132 B for the C3 plus up to
+  32 B for the masks.
+- **The face's first `current()`** (`init_us`) takes 433 us for Naskh and 717 us for Devanagari.
+- The words, with the firmware, the fonts and the restore, are in the session's scratchpad (`x4a/`). The X4 was
+  restored from a full flash backup read before the run, so it is back on its own firmware with its settings
+  unchanged.
