@@ -302,9 +302,10 @@ class Normalizer {
 }  // namespace
 
 // witchhunt: deviation 11. The generated table covers several ranges (Arabic and Indic): the position of `cp`
-// in PROPS_INDEX and JOINING, or -1 outside them.
-static int rangeIndex(const uint32_t cp) {
-  for (const auto& r : ucd::RANGES) {
+// in PROPS_INDEX, or -1 outside them. JOINING has its own, narrower ranges: only the Arabic blocks join.
+template <size_t N>
+static int rangeIndex(const ucd::Range (&ranges)[N], const uint32_t cp) {
+  for (const auto& r : ranges) {
     if (cp >= r.first && cp <= r.last) return r.offset + static_cast<int>(cp - r.first);
   }
   return -1;
@@ -312,7 +313,7 @@ static int rangeIndex(const uint32_t cp) {
 
 CharData charData(const uint32_t cp) {
   uint32_t packed;
-  if (const int i = rangeIndex(cp); i >= 0) {
+  if (const int i = rangeIndex(ucd::RANGES, cp); i >= 0) {
     packed = ucd::PROPS[ucd::PROPS_INDEX[i]];
   } else if (cp == 0x200C) {
     packed = ucd::ZWNJ_PROPS;
@@ -395,7 +396,7 @@ void normalize(const Face& face, const Plan& plan, Buffer& buffer) { Normalizer(
 
 // witchhunt: deviation 11. HarfBuzz's get_joining_type, resolved when the table is generated.
 JoiningType joiningType(const uint32_t cp) {
-  if (const int i = rangeIndex(cp); i >= 0)
+  if (const int i = rangeIndex(ucd::JOINING_RANGES, cp); i >= 0)
     return static_cast<JoiningType>((ucd::JOINING[i >> 1] >> ((i & 1) << 2)) & 15);
   if (cp == 0x200C) return static_cast<JoiningType>(ucd::ZWNJ_JOINING);
   if (cp == 0x200D) return static_cast<JoiningType>(ucd::ZWJ_JOINING);

@@ -19,6 +19,9 @@ struct Range {
   hb_codepoint_t first, last;
 };
 static const Range kRanges[] = {{0x0600, 0x06FF}, {0x0750, 0x077F}, {0x0870, 0x0DFF}};
+// witchhunt: deviation 11. Only these carry a joining type (Arabic, Arabic Supplement, Arabic Extended-B and -A);
+// the Indic blocks all join as U.
+static const Range kJoiningRanges[] = {{0x0600, 0x06FF}, {0x0750, 0x077F}, {0x0870, 0x08FF}};
 static const hb_codepoint_t kExtras[] = {0x200C, 0x200D, 0x25CC};
 
 // Languages written in the scripts the shaper handles (BCP 47 primary subtags).
@@ -89,7 +92,6 @@ int main() {
   // Few distinct values: each codepoint stores an index into PROPS.
   std::vector<uint32_t> props;
   std::vector<uint8_t> index;
-  std::vector<uint8_t> joining;
   for (const Range& r : kRanges)
     for (hb_codepoint_t u = r.first; u <= r.last; u++) {
       const uint32_t p = pack(u);
@@ -101,7 +103,16 @@ int main() {
         exit(1);
       }
       index.push_back(static_cast<uint8_t>(i));
-      joining.push_back(static_cast<uint8_t>(joiningOf(u)));
+    }
+  std::vector<uint8_t> joining;
+  for (const Range& r : kJoiningRanges)
+    for (hb_codepoint_t u = r.first; u <= r.last; u++) {
+      const unsigned j = joiningOf(u);
+      if (j > 6) {
+        fprintf(stderr, "U+%04X: joining type %u is past the state table's six columns plus T\n", u, j);
+        exit(1);
+      }
+      joining.push_back(static_cast<uint8_t>(j));
     }
   printf("constexpr uint32_t PROPS[] = {");
   for (size_t i = 0; i < props.size(); i++) printf("%s0x%08X,", i % 8 ? " " : "\n    ", props[i]);
@@ -113,8 +124,15 @@ int main() {
   // Joining types from HarfBuzz's own table, X resolved (T for Mn, Me and Cf, else U); T is 6.
   printf("// Arabic joining types from HarfBuzz %s's hb-ot-shaper-arabic-table.hh (Unicode 18.0 ArabicShaping.txt),\n",
          HB_VERSION_STRING);
-  printf("// four bits a codepoint of RANGES, in order, the low nibble first: U 0, L 1, R 2, D 3 (C too),\n");
+  printf("// four bits a codepoint of JOINING_RANGES, in order, the low nibble first: U 0, L 1, R 2, D 3 (C too),\n");
   printf("// ALAPH 4, DALATH_RISH 5, T 6.\n");
+  printf("constexpr Range JOINING_RANGES[] = {\n");
+  unsigned joiningTotal = 0;
+  for (const Range& r : kJoiningRanges) {
+    printf("    {0x%04X, 0x%04X, %u},\n", r.first, r.last, joiningTotal);
+    joiningTotal += r.last - r.first + 1;
+  }
+  printf("};\n");
   printf("constexpr uint8_t JOINING[] = {");
   for (size_t i = 0; i < joining.size(); i += 2) {
     const unsigned pair = joining[i] | ((i + 1 < joining.size() ? joining[i + 1] : 0) << 4);
