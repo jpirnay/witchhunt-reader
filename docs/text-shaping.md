@@ -6,7 +6,7 @@ How a word of an Indic script is shaped at section build, stored in the section 
 The shaped scripts are the ten Indic ones of U+0900-0DFF: Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil,
 Telugu, Kannada, Malayalam and Sinhala (`lib/Utf8/IndicScripts.h`). A word is shaped once, when its section is built;
 a page turn draws what the build stored and shapes nothing. Only a TrueType family (`.ttf` or `.otf`) that maps the
-script shapes it. Every other font gets the vowel signs reordered, without conjuncts; what is not shaped yet is listed
+script shapes it. Where the families come from, and which one a book takes, is under "The families" below. Every other font gets the vowel signs reordered, without conjuncts; what is not shaped yet is listed
 at the end.
 
 Related pages:
@@ -134,6 +134,26 @@ word flow, to be shaped whole: a drop cap draws code points one by one, which wo
 `IndicShaper.cpp` names what it ports from #3787's `lib/EpdFont/ComplexShaper.cpp`: `scanRun`, the piecewise loop of
 `appendShapedRun` and the rounding of `appendGlyphs`. What it does not take: shaping in the renderer, the run cache
 and the layout memo (deviation 2).
+
+## The families
+
+The Font Manager offers 20 TrueType families: Noto Sans and Noto Serif of each of the ten scripts (NotoSansDevanagari
+... NotoSerifSinhala; Oriya's are NotoSansOriya and NotoSerifOriya), each a Regular and a Bold file in
+`assets/sd-fonts/<Family>/` and listed in `lib/EpdFont/scripts/sd-fonts.yaml` (`format: ttf`, `inDownloadAll: false`,
+so "Download All" leaves them out). `lib/EpdFont/scripts/merge_noto_latin.py` builds each file from Noto's script font
+and Noto Sans or Noto Serif, so the Latin in an Indic book is drawn in the same face;
+`build-sd-fonts.py` checks the merge with HarfBuzz and fails on any difference. `test/ot_shaper/oracle_shipped_fonts.py`
+shapes all 40 files through the font's `CPac` and HarfBuzz and diffs them (measurements, "PR 3b").
+
+**The reader's automatic choice.** `language_tag::indicScriptOf` (`lib/Epub/Epub/LanguageTag.h`) maps a book's language
+tag to its script, and the tag's script subtag may veto it ("sa-Latn" is not Indic). When the reader font has no
+letter of that script, `SdCardFontSystem::selectLanguageFamily` takes an installed `NotoSans<Script>` or
+`NotoSerif<Script>`: Sans first when the reader font's name contains "Sans", else Serif first, the other as the
+fallback, as for a CJK book. A reader font that has the script is kept. While the book's language is not yet known,
+and any Noto CJK or Indic family is installed, the book's font waits for it
+(`SdCardFontSystem::waitsForReaderLanguage`), so a book opened from a cold cache goes straight to the family rather than
+installing the reader font first. With no family of the script installed the reader font stays, and the script draws as
+replacement glyphs.
 
 ## The face and its plans
 
@@ -313,8 +333,8 @@ font is not rebuilt at every open.
   vowel signs are placed; conjuncts are not formed, and the virama stays visible.
 - **Vertical sections**: no build sets a shaped run down a column (a load refuses one), so their Indic words are
   reordered, as in a bitmap font.
-- **The Font Manager's Indic families**: until it offers them (step 2, PR 3b), a family's files go into
-  `/.crosspoint/fonts/<Family>/` by hand.
+- **A book whose script has no installed family**: it opens in the reader's font and the script's letters draw
+  as that font's replacement glyph (a box, for a font without them) until a family of the script is installed.
 
 ## Time
 

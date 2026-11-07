@@ -6,8 +6,9 @@ For each of the 20 families (Noto Sans and Noto Serif of ten scripts) and both s
 (2133, 33) and (1195, 19), by HarfBuzz and by ot_shape_cli through the font's CPac (the `cpac` argument). Prints one
 line per run, "family style size lang: N/N", and exits non-zero on any difference.
 
+    cmake --build build/test --target ot_shape_cli
     python3 test/ot_shaper/generate_corpus.py <corpus dir>
-    python3 test/ot_shaper/oracle_shipped_fonts.py <ot_shape_cli> <assets/sd-fonts> <corpus dir>
+    python3 test/ot_shaper/oracle_shipped_fonts.py build/test/ot_shaper/ot_shape_cli assets/sd-fonts <corpus dir>
 
 Needs uharfbuzz (the pinned pair is fontTools 4.63.0 and uharfbuzz 0.56.2: HarfBuzz 14.5.0).
 """
