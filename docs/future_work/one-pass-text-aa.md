@@ -51,8 +51,9 @@ faster, which fits the numbers above. Upstream issue #4344 reports text on a UC8
 
 ## Image tones swapped on UC8279 (upstream issue #4344)
 
-**Open upstream, does not affect us:** our pin has no `kX4ProImage`. Our UC8279 X4 Pro path still uses `kQualityBank`.
-Fix offered as Free-Ink/freeink-sdk#182, with the analysis posted on the issue.
+**Fixed upstream, does not affect us:** our pin has no `kX4ProImage`. Our UC8279 X4 Pro path still uses `kQualityBank`.
+Free-Ink/freeink-sdk#182 was merged into `fix-display-updates`, and the issue's reporter confirmed it on a UC8279 X4 Pro
+on 2026-11-07.
 
 The report shows a sleep image on the Direct AA build where a near-black coat and rock come out lighter than the sky.
 That is not lost contrast: dark gray and light gray have traded places.
@@ -84,7 +85,7 @@ fit assuming a swap:
 The black figure on the Direct AA row is weak: black is 3.7% of the pixels and the fit is looser. Do not read a black
 level problem into it.
 
-**Fix, not run on hardware.** Free-Ink#182 uploads the packet through `kQualityLutReg`. `test_pro.cpp` asserted the
+**Fix, confirmed on a UC8279 by the reporter.** Free-Ink#182 uploads the packet through `kQualityLutReg`. `test_pro.cpp` asserted the
 straight order, so it passed with the bug; the PR makes it check that `0x22` ends darker than `0x23`. Every use of the
 packet is affected: sleep images, covers, and book pages with images, since upstream's reader sends those through
 Absolute on UC8279.
