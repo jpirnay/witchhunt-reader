@@ -853,6 +853,16 @@ class GfxRenderer {
   // pointer afterwards for the same reason triggerDisplay() does: the display
   // swaps buffers, and every later draw must target the new write buffer.
   void displayGrayscaleFrame(HalDisplay::RefreshMode mode) const;
+  // One-pass text composed in the frame buffers (the X3): see HalDisplay::beginOnePassMask(). While the
+  // mask is out, drawing lands in it; displayOnePassFrame() puts the page and its gray up in one refresh,
+  // deferred like triggerDisplay(), so the caller owes completeDisplay().
+  bool composesOnePassText() const { return display.composesOnePassText(); }
+  bool beginOnePassMask() const {
+    uint8_t* mask = display.beginOnePassMask();
+    if (mask) frameBuffer = mask;
+    return mask != nullptr;
+  }
+  void displayOnePassFrame(HalDisplay::RefreshMode mode) const;
   // Deferred form: see HalDisplay::triggerGrayscaleFrame. Caller owes completeDisplay().
   void triggerGrayscaleFrame(HalDisplay::RefreshMode mode) const;
 

@@ -151,8 +151,46 @@ boot keep the two passes. 12 of 12 fast presses landed, no fault.
 **Open:** how it reads, which needs eyes; a long read; temperature. A pixel that stays black now rests every page,
 so the DC item in [murphy-gray.md](murphy-gray.md) gets smaller on text pages, not larger.
 
+## Xteink X3 (UC8253): composed, no extra memory
+
+The X3 has no PSRAM, so its planes are composed in the two frame buffers it already has.
+`FreeInkDisplay::beginOnePassMask()` turns the buffer that holds the frame on screen into the old plane
+(white before and after), the reader draws the page's gray into it with one MSB pass, and
+`displayOnePassFrame()` sends both planes and makes the page the frame on screen. `_activeMatchesGlass`
+guards it: only a frame a display just put there counts, and after a lend or a window update the page
+takes the two-pass path. `Uc8253X3Driver` runs one 24-frame bank: rest, FAST's 18 frames to white and
+to black, and gray VSL 9, VSH 12, VSL 3 (lab Test 9 on an X3, see `tools/murphy-gray-lab/README.md`).
+
+**Measured in the reader (X3, 2026-11-07):** 26 text pages one-pass, each one refresh of 445 ms (FAST
+alone is 382 ms) after a gray render of about 55 ms; heap flat; the setting holds over a reboot. Image
+pages, the periodic HALF and the page after a menu keep two passes, and so does fast flipping
+(`aaPreempted`), as today.
+
+**Open on the X3:**
+- When a background build finishes, the reader redraws the page on screen to update its page count.
+  Background-B borrowed the second buffer for that build, so the frame on screen is unknown and the
+  redraw takes two passes: one second refresh per chapter build. Fixing it needs the frame on screen
+  kept somewhere a borrower does not write.
+- A gray pixel that a menu turns black gets only FAST's 2-frame nudge, as no plane says it was gray.
+- A forced refresh override arriving after the mask was built shows that page in B/W only.
+- A pixel staying black is driven 18 frames every page (no memory to tell it from gray).
+
+## Xteink X4 (SSD1677): the plan
+
+The same composed path, with the work in `Ssd1677Driver`: RED RAM (0x26) takes the mask, BW RAM (0x24)
+the page, one custom-LUT activation, then RED re-seeded from the page as today.
+- **Waveform:** start from `kX4ProTextSsd1677` (Free-Ink `fix-display-updates`), with its rows mapped to
+  our codes: (1,1) rests, (0,1) to white, (1,0) gray, (0,0) black. Its hold row is a nudge (dose -2),
+  which on the X4 Pro the charge map balances. Without the map, either keep the nudge (the X3's FAST
+  does as much) or rest. Decide by eye, then by camera.
+- **No lab:** the gray lab drives UC8253 only. Measuring this panel would mean porting it to the
+  SSD1677's commands and LUT layout.
+- **Trade:** the X4's B/W refresh runs on the factory's temperature-compensated waveform; the one-pass
+  LUT is fixed, like today's gray pass.
+
 ## Next
 
 1. Run a long read on the X4 Pro with the option on: ghosting over many pages, and in the cold.
-2. The same on the Murphy M3, by eye first.
-3. Run `kUc8279X3_Xth4`'s tail fix on a UC8279 X3.
+2. The same on the Murphy M3 and the X3, by eye first.
+3. The X4 (SSD1677), as planned above.
+4. Run `kUc8279X3_Xth4`'s tail fix on a UC8279 X3.
