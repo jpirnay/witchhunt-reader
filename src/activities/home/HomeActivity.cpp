@@ -128,7 +128,6 @@ void HomeActivity::rebuildMenuEntries() {
   menuEntries.reserve(6);  // all six shown, or five plus More
   const HomeMenuAvailability availability{.hasBookmarks = GLOBAL_BOOKMARKS.hasAny()};
   collectHomeMenuEntries(HomeMenuPlacement::Home, availability, menuEntries);
-  menuEntriesDirty = false;
 }
 
 void HomeActivity::loadRecentBooks(int maxBooks) {
@@ -535,6 +534,11 @@ void HomeActivity::onEnter() {
   if (recentBooks.empty()) {
     recentsLoaded = true;
   }
+  // Built here, once per entry, before the first render is requested. render() runs on the render
+  // task and loop() on this one; when both rebuilt the list on a dirty flag, they could run at once,
+  // each clearing and then appending, and Home showed every entry twice. The rebuild also reads the
+  // bookmark index off the card.
+  rebuildMenuEntries();
 
   // Apply focus: book path takes priority, else combined selector index (covers
   // "return to the menu entry I was on").
@@ -550,7 +554,6 @@ void HomeActivity::onEnter() {
     focusBookPath.clear();
   }
   if (!focused && focusSelectorIndex >= 0) {
-    rebuildMenuEntries();  // need menu count to clamp; rebuild is idempotent
     const int combinedSize = static_cast<int>(recentBooks.size() + menuEntries.size());
     if (combinedSize > 0) {
       selectorIndex = std::min(focusSelectorIndex, combinedSize - 1);
@@ -559,7 +562,6 @@ void HomeActivity::onEnter() {
   focusSelectorIndex = -1;
 
   // Trigger first update
-  menuEntriesDirty = true;
   requestUpdate();
 }
 
@@ -613,10 +615,6 @@ void HomeActivity::freeCoverBuffer() {
 }
 
 void HomeActivity::loop() {
-  if (menuEntriesDirty) {
-    rebuildMenuEntries();
-  }
-
   // Ahead of the button handling: a tap that opens a book or a menu entry replaces or stacks on
   // this activity, and running the rest against a screen that is going away serves nobody.
   if (handleHomeTouch()) return;
@@ -739,10 +737,6 @@ void HomeActivity::loop() {
 void HomeActivity::render(RenderLock&&) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect contentRect = UITheme::getContentRect(renderer, true, false);
-
-  if (menuEntriesDirty) {
-    rebuildMenuEntries();
-  }
 
   const int menuCount = static_cast<int>(menuEntries.size());
   const bool isCarousel = (GUI.getHomeNavigation() == HomeNavigation::Carousel);

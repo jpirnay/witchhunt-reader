@@ -102,6 +102,7 @@ void GlobalBookmarkIndex::load() {
   if (!Storage.openFileForRead("GBI", FILE_PATH, f)) {
     LOG_DBG("GBI", "No existing global bookmarks file");
     loaded = true;
+    noteFileHolds(false);
     return;
   }
   const ReadResult result = readEntries(f);
@@ -122,6 +123,7 @@ void GlobalBookmarkIndex::load() {
       return;
   }
   loaded = true;
+  noteFileHolds(!entries.empty());
 }
 
 void GlobalBookmarkIndex::save() const {
@@ -147,21 +149,36 @@ void GlobalBookmarkIndex::save() const {
   });
   if (saved) {
     LOG_DBG("GBI", "Saved %u entries", static_cast<unsigned>(entries.size()));
+    noteFileHolds(!entries.empty());
   } else {
+    // The old file may stand or a replace may be half done: the next hasAny() reads what is there.
+    fileState = FileState::Unknown;
     LOG_ERR("GBI", "Failed to save");
   }
 }
 
 bool GlobalBookmarkIndex::hasAny() const {
   if (loaded) return !entries.empty();
+  switch (fileState) {
+    case FileState::HasEntries:
+      return true;
+    case FileState::Empty:
+      return false;
+    case FileState::Unknown:
+      break;
+  }
   bookmark_file::recoverReplace(FILE_PATH);
   FsFile f;
-  if (!Storage.openFileForRead("GBI", FILE_PATH, f)) return false;
+  if (!Storage.openFileForRead("GBI", FILE_PATH, f)) {
+    noteFileHolds(false);
+    return false;
+  }
   uint8_t version = 0;
   uint16_t entryCount = 0;
   const bool read = bookmark_file::readPod(f, version) && bookmark_file::readPod(f, entryCount);
   f.close();
-  return read && version == FILE_VERSION && entryCount != 0;
+  noteFileHolds(read && version == FILE_VERSION && entryCount != 0);
+  return fileState == FileState::HasEntries;
 }
 
 void GlobalBookmarkIndex::upsertFromStore(const std::string& sourcePath, const std::string& cacheDir,
