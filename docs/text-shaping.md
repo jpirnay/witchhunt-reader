@@ -332,21 +332,21 @@ What it does, with the font's own lookups:
 
 - **The plan**: `Script::Arabic` (after the Indic scripts, so a CPpl's values keep their meaning) builds HarfBuzz's
   feature list and stages: the joining forms (`isol`, `fina`, `fin2`, `fin3`, `medi`, `med2`, `init`), `rlig`,
-  `calt`, `rclt` (a horizontal feature), `liga` and the rest, with the language systems for `ar`, `fa`, `ur`, `ps`, `sd`,
-  `ug` and `ku`.
+  `calt`, `rclt` (a horizontal feature), `liga` and the rest, with the language systems for `ar`, `fa`, `prs`, `ur`,
+  `ps`, `sd`, `ug`, `ku`, `ckb`, `kmr`, `sdh` and `ks`.
 - **Joining**: the state machine over the run and its context sets each letter's form mask; transparent marks are
   skipped; ZWJ and ZWNJ join and cut as in HarfBuzz.
 - **Marks**: the modifier combining marks are reordered (UTR #53), in the modified classes, before the lookups run.
-- **Right to left**: the run is shaped as HarfBuzz's `hb_ot_shape` does a right-to-left buffer: mirrored characters
-  take `rtlm`, cursive attachment and attachment offsets propagate backwards, and the glyphs and positions are reversed
+- **Right to left**: the run is shaped as HarfBuzz's `hb_ot_shape` does a right-to-left buffer: every character takes the
+  `rtlm` mask and none is swapped (no character the tables cover has a mirror), cursive attachment and attachment offsets propagate backwards, and the glyphs and positions are reversed
   at the end, so a run comes out in visual order.
 
-It matches HarfBuzz on all 1,808 recorded fixture words and on the oracle's 100 runs over 6,253 lines (five fonts, two
+It matches HarfBuzz on all 1,808 recorded fixture words and on the oracle's 100 runs over 6,333 lines (five fonts, two
 sizes, ten languages), and the Indic oracle is unchanged.
 
 **Not ported**: `stch` (neither Noto Arabic family has it), the fallback shaping with presentation forms for a font
 without the features, the mark placement and legacy `kern` that HarfBuzz's `fallback_position` gives a font without
-GPOS, and Syriac (their pauses stay, so the stages are HarfBuzz's). Mongolian, N'Ko and Phags-pa are shaped by USE in
+GPOS, and Syriac. The pauses of the unported features stay, so the stages are HarfBuzz's. Mongolian, N'Ko and Phags-pa are shaped by USE in
 HarfBuzz 14.5, not by this shaper.
 
 ## What is not shaped yet

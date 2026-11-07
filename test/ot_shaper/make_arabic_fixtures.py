@@ -4,10 +4,10 @@
     python -I -X utf8 pyrun.py <pydeps> test/ot_shaper/make_arabic_fixtures.py <sources dir> <fonts out dir> \
         [--header-out test/ot_shaper/ArabicExpected.h]
 
-<sources dir> holds the pinned Noto sources: NotoNaskhArabic-Regular, NotoSerif-Regular, NotoSansArabic-Bold and
-NotoSans-Bold, merged here, and the oracle's other four (Naskh Bold, Sans Arabic Regular, Serif Bold, Sans Regular;
-checked when present) (notofonts.github.io at 5c82cef, unhinted TTFs). Each is checked against the sha256 below; the script
-does not download. It writes three fonts into <fonts out dir>:
+<sources dir> holds the eight pinned Noto sources (notofonts.github.io at 5c82cef, unhinted TTFs). NotoNaskhArabic-Regular,
+NotoSerif-Regular, NotoSansArabic-Bold and NotoSans-Bold are merged here into two fonts; the oracle's other four (Naskh
+Bold, Sans Arabic Regular, Serif Bold, Sans Regular) are checked when present. Each is checked against the sha256
+below; the script does not download. It writes three fonts into <fonts out dir>:
 
 - NotoNaskhArabic-Shaping-Regular.ttf: Noto Naskh Arabic Regular merged with Noto Serif's Latin by
   lib/EpdFont/scripts/merge_noto_latin.py (the recipe that builds the shipped Arabic families), then cut with
@@ -507,7 +507,7 @@ def header_text(fonts, words_by_font):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("sources", type=Path, help="holds the four pinned Noto TTFs")
+    parser.add_argument("sources", type=Path, help="holds the eight pinned Noto TTFs (four are merged into two fonts, four only checked when present)")
     parser.add_argument("out", type=Path, help="output directory of the three fonts")
     parser.add_argument("--header-out", type=Path, default=Path(__file__).resolve().parent / "ArabicExpected.h")
     args = parser.parse_args()

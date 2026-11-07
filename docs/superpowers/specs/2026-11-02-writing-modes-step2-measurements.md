@@ -1491,7 +1491,10 @@ fontTools and uharfbuzz.
 | NotoSansArabic | Regular | 232,704 | 2,322 | 608 | 64 / 74 | 32 / 34 | 5,296 | 5,296 | 238,000 | 68,568 | 30 of 30 | 4,792 of 4,792 | 62 of 62 runs equal |
 | NotoSansArabic | Bold | 233,044 | 2,322 | 630 | 64 / 74 | 32 / 34 | 5,296 | 5,296 | 238,340 | 69,144 | 30 of 30 | 4,792 of 4,792 | 62 of 62 runs equal |
 
-- The merged files' sha256 (first 16): `21acf0334143ff85`, `8c7a340fd635c06f`, `13e9cea7a74e6288`, `a2bfc7d16c4077c4`.
+- The merged files' sha256: Naskh Regular `21acf0334143ff85a709ef1762694d083f9c70fb521fea9fae0e04cefd297f14`, Naskh Bold
+  `8c7a340fd635c06f558696d6fde63ab557b43eae8de568151213a968cfe09137`, Sans Regular
+  `13e9cea7a74e6288791f5927c848150b5ac5c24676bef6170a40e20073c1904e`, Sans Bold
+  `a2bfc7d16c4077c41957ff81d6ed78de2084d021cedff7a2cc4773bd7bc8bdfb`.
 - The install already gives these files a `CPac`: `ttf::filterTableBytes` counts one for a font whose script list
   names `arab` (`isShapedTag`, PR 2), and the probe's `cpacBytes` equals what the writer writes.
 - Against item 3's merges (the recipe before the IAST letters), the files grew by 8,944, 8,908, 4,956 and 5,068 B, and
@@ -1576,7 +1579,7 @@ PR 3b: HarfBuzz 14.5.0 (uharfbuzz 0.56.2, direction `rtl`, script `Arab`) agains
 
 ### The corpus
 
-`test/ot_shaper/generate_corpus_arabic.py` writes `arabic.txt`, deterministic (`random.Random(1757)`): **6,253 distinct
+`test/ot_shaper/generate_corpus_arabic.py` writes `arabic.txt`, deterministic (`random.Random(1757)`): **6,333 distinct
 lines**. Every assigned code point of U+0600-06FF, 0750-077F, 0870-089F and 08A0-08FF alone; each letter isolated,
 initial, medial and final beside beh; 40 base letters with each of U+064B-0652 and 0670 and with shadda plus each vowel in
 both orders; the 14 modifier marks after beh with fatha and kasra in both orders; lam with the eight alefs, alone, after
@@ -1591,29 +1594,29 @@ attachment.
 
 | File | Source sha256 | Merged sha256 |
 |---|---|---|
-| NotoNaskhArabic-Regular + NotoSerif-Regular | c34fdbd98af4dbc45ca192a23d2eeb77032add83086f5fe32957d23b3f36b221, a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1 | 21acf033...f14 |
-| NotoNaskhArabic-Bold + NotoSerif-Bold | 380ac34b249d336e1a43c21053df440594e1e3db8f75fabd4d85b649ca1ea4c6, 24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3 | 8c7a340f...137 |
-| NotoSansArabic-Regular + NotoSans-Regular | bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0, f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8 | 13e9cea7...04e |
-| NotoSansArabic-Bold + NotoSans-Bold | f4cb79f842a07d1bcf597879574358fb7010f73761396d1d0f2445dfedb4d2ca, 87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9 | a2bfc7d1...dfb |
+| NotoNaskhArabic-Regular + NotoSerif-Regular | c34fdbd98af4dbc45ca192a23d2eeb77032add83086f5fe32957d23b3f36b221, a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1 | 21acf0334143ff85a709ef1762694d083f9c70fb521fea9fae0e04cefd297f14 |
+| NotoNaskhArabic-Bold + NotoSerif-Bold | 380ac34b249d336e1a43c21053df440594e1e3db8f75fabd4d85b649ca1ea4c6, 24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3 | 8c7a340fd635c06f558696d6fde63ab557b43eae8de568151213a968cfe09137 |
+| NotoSansArabic-Regular + NotoSans-Regular | bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0, f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8 | 13e9cea7a74e6288791f5927c848150b5ac5c24676bef6170a40e20073c1904e |
+| NotoSansArabic-Bold + NotoSans-Bold | f4cb79f842a07d1bcf597879574358fb7010f73761396d1d0f2445dfedb4d2ca, 87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9 | a2bfc7d16c4077c41957ff81d6ed78de2084d021cedff7a2cc4773bd7bc8bdfb |
 
 NotoNastaliqUrdu-Regular.ttf (OFL; GPOS `curs`, `dist`, `kern`, `mark`, `mkmk`; 6 GSUB features), used as downloaded:
 `https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoNastaliqUrdu/unhinted/ttf/NotoNastaliqUrdu-Regular.ttf`,
 176,600 B, sha256 `6decda3b03f6366dbd75e3a22544d248ca686b582f897fae8a7dc027302812e3`. All eight Noto sources are pinned by
-sha256 in `make_arabic_fixtures.py` (it merges four and checks the other four when they are present); the merges of
+sha256 in `make_arabic_fixtures.py` (it merges two fixture fonts from four of them and checks the other four when they are present); the merges of
 the other four are not byte-compared to anything.
 
 ### The result
 
 `oracle_arabic.py`: each font at (2133, 33) and (1195, 19), with no language and with `ar`, `fa`, `ur`, `ps`, `sd`, `ug`,
-`ku`, `ckb`, `ks`: 5 fonts x 2 sizes x 10 languages = **100 runs, every one 6,253/6,253, 0 differences**.
+`ku`, `ckb`, `ks`: 5 fonts x 2 sizes x 10 languages = **100 runs, every one 6,333/6,333, 0 differences**.
 
 | Font | 33 ppem, all 10 languages | 19 ppem, all 10 languages |
 |---|---|---|
-| NotoNaskhArabic Regular | 6,253/6,253 | 6,253/6,253 |
-| NotoNaskhArabic Bold | 6,253/6,253 | 6,253/6,253 |
-| NotoSansArabic Regular | 6,253/6,253 | 6,253/6,253 |
-| NotoSansArabic Bold | 6,253/6,253 | 6,253/6,253 |
-| NotoNastaliqUrdu Regular | 6,253/6,253 | 6,253/6,253 |
+| NotoNaskhArabic Regular | 6,333/6,333 | 6,333/6,333 |
+| NotoNaskhArabic Bold | 6,333/6,333 | 6,333/6,333 |
+| NotoSansArabic Regular | 6,333/6,333 | 6,333/6,333 |
+| NotoSansArabic Bold | 6,333/6,333 | 6,333/6,333 |
+| NotoNastaliqUrdu Regular | 6,333/6,333 | 6,333/6,333 |
 
 ### The Indic re-run
 
