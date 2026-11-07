@@ -3474,7 +3474,8 @@ int EpubReaderActivity::resolveReaderFont(std::string* familyOut) const {
   // open), then the global one, each only while it is loaded at this size (resolveSdCardFontId() is 0
   // for a family taken off the card); otherwise the built-in family. With no size override and no
   // book family this is SETTINGS.getReaderFontId().
-  // A CJK book whose font has none of its script is drawn in a Noto CJK family (selectLanguageFamily at book open).
+  // A CJK or Indic book whose font has none of its script is drawn in a Noto family (selectLanguageFamily at book
+  // open).
   const char* publisherFamily =
       (bookSdFontFamilyOverride.empty() && epub) ? sdFontSystem.bookFamilyNameFor(epub->getCachePath()) : "";
   for (const char* sdFamily : {bookSdFontFamilyOverride.c_str(), publisherFamily, sdFontSystem.languageFamily(),
@@ -7462,7 +7463,7 @@ bool EpubReaderActivity::drawCurrentPageToBuffer(const std::string& filePath, Gf
     effectiveFontId = resolveSdCardFontId(currentBook.sdFontFamilyOverride.c_str(), effectiveFontSize);
   } else if (currentBook.fontFamilyOverride < 0) {
     // Publisher Fonts, as getEffectiveReaderFontId(): the book's embedded body family when it has one, then the Noto
-    // CJK family a CJK book takes in place of a font without its script, each only while it is loaded.
+    // family a CJK or Indic book takes in place of a font without its script, each only while it is loaded.
     effectiveFontId = resolveSdCardFontId(sdFontSystem.bookFamilyNameFor(epub->getCachePath()), effectiveFontSize);
     if (effectiveFontId == 0) effectiveFontId = resolveSdCardFontId(sdFontSystem.languageFamily(), effectiveFontSize);
   }

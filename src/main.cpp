@@ -867,8 +867,8 @@ bool chooseEpubFonts(const char* path, const bool wait, const bool opening,
   } else if (book.fontFamilyOverride >= 0) {
     family = "";  // per-book built-in font override: no SD font needed; unload if one was active
   }
-  // A CJK book whose font has none of its script takes a Noto CJK family of its region; a Noto CJK family loads as
-  // its sibling for the book's language. Both are the face the reader's resolvers hand out for it.
+  // A CJK or Indic book whose font has none of its script takes a Noto family of its region or script; a Noto CJK
+  // family loads as its sibling for a CJK book's language. Both are the face the reader's resolvers hand out for it.
   sdFontSystem.selectLanguageFamily(ownFont ? nullptr : family);
   if (sdFontSystem.languageFamily()[0] != '\0') family = sdFontSystem.languageFamily();
   body = sdFontSystem.effectiveReaderFamily(family);
