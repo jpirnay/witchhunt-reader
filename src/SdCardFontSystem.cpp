@@ -531,7 +531,8 @@ void SdCardFontSystem::selectLanguageFamily(const char* family) {
   }
   if (!family) return;  // the book's own font
   std::string stem;
-  if (familyRegion(name, stem) != ReaderCjkRegion::None) return;  // a Noto CJK family: effectiveReaderFamily()'s
+  // A CJK book in a Noto CJK family is effectiveReaderFamily()'s; an Indic book in one still needs its own family.
+  if (readerCjkRegion_ != ReaderCjkRegion::None && familyRegion(name, stem) != ReaderCjkRegion::None) return;
   // A built-in reader face has no CJK: fontconvert.py's default intervals leave it out.
   if (const SdCardFontFamilyInfo* info = name.empty() ? nullptr : findFamily(name.c_str())) {
     if (familyMapsCodepoint(*info, probe)) return;
