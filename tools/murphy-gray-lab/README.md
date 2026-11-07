@@ -183,6 +183,35 @@ the black step but lands at 26 instead of 48 and takes 683 ms against 443. White
 white held, as FAST's white does. The panel's white also held through about 20 refreshes; a 5 % fall in both white and
 black between runs was the room light. The reader uses gray 3, swing 8.
 
+## The Xteink X3
+
+The same lab drives the X3's UC8253 run (`-DLAB_BOARD_X3`, env `x3_gray_lab`, a C3). It mirrors
+`Uc8253X3Driver`: its init, CDI 0x29 0x07, LUTs of 42 bytes in the X3's own layout (groups of 6, a level byte
+for four phases), `0x11` after each plane, power on before the refresh and its two-phase BUSY. `clean()` uses
+the X3's full bank with both planes alike, so only WW and BB fire. The read paths stay Murphy-only.
+
+```sh
+export LAB_BOARD=x3 MURPHY_PORT=/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_70:AF:09:5F:8A:84-if00
+cd tools/murphy-gray-lab && ~/.platformio/penv/bin/pio run -e x3_gray_lab   # then flash it to the idle slot
+./lab.py t0            # which plane code selects which LUT
+./lab.py t2 white; ./lab.py t2 black
+./lab.py t9 --gray 3 --swing 12 --again --from-onepass
+```
+
+`cam.py` keeps the X3's calibration and shots apart (`camera-x3.json`, `shots-x3/`), as it sits elsewhere on the stand.
+
+Results on our X3, 2026-11-07:
+- The plane codes select the LUTs as on the Murphy: (1,1) 21, (0,1) 22, (1,0) 23, (0,0) 24.
+- The X3's panel is far slower to black. VSH from white reads 98.5, 94.7, 86.7, 71.9, 40.0, 32.6, 8.6 and 3.6
+  at 1, 2, 3, 4, 6, 8, 12 and 16 frames. VSL from black reads 9.9, 19.4, 38.4, 56.9, 76.5, 90.2, 95.2 and 97.6,
+  close to the Murphy's. So the gray needs a reset of 12-16 frames, not 8.
+- The gray band spread from top to bottom is about 2 points, against 6 on the Murphy.
+- Test 9, FAST's drives of 18 each way: gray 3 with a 12-frame reset lands at 46 from white, 48-49 from gray,
+  and 39 from black, once. A 16-frame reset lands at 41, 42 and 34, and takes 549 ms against 446 ms.
+- A pixel leaving black reaches only about 86 against 94-98 for white held, 10-12 points short. That is
+  FAST's own ghost: VSL 24 instead of 18 gains 1.5 points, and a second drive about 2 more.
+- The room light fell during the session. Compare bands within one run only.
+
 **Test 4: does gray survive a real page turn?** The reader turns pages with FAST, and FAST rests any
 pixel the planes call unchanged, so gray left around letters would stay. The planes are only
 selector bits, so `--aware` marks each gray pixel as changed, which gives it the full drive to the

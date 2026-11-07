@@ -21,7 +21,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageStat
 
 CAM_W, CAM_H = 1920, 1080
-PANEL_W, PANEL_H = 240, 416
+PANEL_W, PANEL_H = (792, 528) if os.environ.get("LAB_BOARD", "murphy") == "x3" else (240, 416)
 SCALE = 2  # rectified shots are this many pixels per panel pixel
 
 VIDIOC_S_CTRL = 0xC008561C
@@ -40,8 +40,10 @@ POWER_LINE_50HZ = 1
 
 EXPOSURE = int(os.environ.get("MURPHY_EXPOSURE", "1000"))
 STATE = Path(os.path.expanduser("~/.local/state/murphy-gray-lab"))
-SHOTS = STATE / "shots"
-CAMERA_FILE = STATE / "camera.json"
+# Each board sits on the stand in its own place, so it keeps its own calibration and shots.
+_SUFFIX = "" if os.environ.get("LAB_BOARD", "murphy") == "murphy" else "-" + os.environ["LAB_BOARD"]
+SHOTS = STATE / ("shots" + _SUFFIX)
+CAMERA_FILE = STATE / ("camera" + _SUFFIX + ".json")
 
 
 def set_control(fd, control, value):
@@ -155,9 +157,10 @@ def blobs(mask, step=4, minimum=6):
 
 
 # Marks drawn by `lab.py calib`, in panel pixels: (x, y) of each 20 px square's corner.
-CALIB_MARKS = ((12, 12), (208, 12), (12, 384), (208, 384))
-CALIB_ORIENT = (48, 12)  # an extra square beside the first, so a turned image cannot pass
-CALIB_SIZE = 20
+CALIB_SIZE = 20 if PANEL_W < 400 else 40
+CALIB_MARKS = ((12, 12), (PANEL_W - 12 - CALIB_SIZE, 12), (12, PANEL_H - 12 - CALIB_SIZE),
+               (PANEL_W - 12 - CALIB_SIZE, PANEL_H - 12 - CALIB_SIZE))
+CALIB_ORIENT = (12 + CALIB_SIZE + 16, 12)  # an extra square beside the first, so a turned image cannot pass
 
 
 def centre(mark):

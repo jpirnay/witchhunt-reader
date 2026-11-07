@@ -1,8 +1,8 @@
 #pragma once
 
-// Direct UC8253 access for the Murphy M3 gray tests. Planes are controller-native: 240 wide,
-// 416 tall, 30 bytes a row, MSB first. Rotation is the host's job, so what lab.py sends is what
-// the controller receives.
+// Direct UC8253 access for the Murphy M3 gray tests, and with -DLAB_BOARD_X3 for the Xteink X3. Planes are
+// controller-native: 240 wide, 416 tall, 30 bytes a row, MSB first. Rotation is the host's job, so what lab.py sends is
+// what the controller receives.
 //
 // Bit-banged like the OEM firmware, because the read path has to turn SDA around. There is
 // deliberately no way to send an arbitrary command: 0xA0, 0xA1 and 0xA3 program the OTP, once and
@@ -15,9 +15,22 @@
 
 namespace lab {
 
+#if LAB_BOARD_X3
+// Xteink X3 (UC8253 run), BoardConfig XTEINK_X3: 792 wide, 528 tall, 99 bytes a row, in the order the
+// controller takes them. BUSY reads low while busy.
+constexpr uint16_t kCtrlWidth = 792;
+constexpr uint16_t kCtrlHeight = 528;
+constexpr uint8_t kPinClock = 8;
+constexpr uint8_t kPinMosi = 10;
+constexpr uint8_t kPinCs = 21;
+constexpr uint8_t kPinDc = 4;
+constexpr uint8_t kPinReset = 5;
+constexpr uint8_t kPinBusy = 6;
+constexpr int kPinFrontlight = -1;
+constexpr const char* kBoardName = "x3";
+#else
 constexpr uint16_t kCtrlWidth = 240;
 constexpr uint16_t kCtrlHeight = 416;
-constexpr size_t kPlaneBytes = static_cast<size_t>(kCtrlWidth) / 8 * kCtrlHeight;
 
 // Murphy M3 display bus, BoardConfig MURPHY_M3. BUSY reads low while busy.
 constexpr uint8_t kPinMosi = 3;
@@ -26,7 +39,10 @@ constexpr uint8_t kPinCs = 5;
 constexpr uint8_t kPinDc = 6;
 constexpr uint8_t kPinReset = 7;
 constexpr uint8_t kPinBusy = 8;
-constexpr uint8_t kPinFrontlight = 48;
+constexpr int kPinFrontlight = 48;
+constexpr const char* kBoardName = "murphy";
+#endif
+constexpr size_t kPlaneBytes = static_cast<size_t>(kCtrlWidth) / 8 * kCtrlHeight;
 
 struct Bank {
   uint8_t lut[kLutSlots][kLutBytes];
@@ -77,6 +93,7 @@ class Panel {
   void data(uint8_t value);
   void dataBytes(const uint8_t* bytes, size_t length);
   void fillPlane(uint8_t cmd, uint8_t value);
+  void writePlane(uint8_t cmd, const uint8_t* plane);
   void writeBits(uint8_t value);
   void startRead(ReadMode mode, uint8_t cmd);
   uint8_t readBits();
