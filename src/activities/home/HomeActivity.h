@@ -83,7 +83,6 @@ class HomeActivity final : public Activity {
   // does not carry it.
   std::optional<RecentBooksStore::Hold> recentsHold;
   std::vector<HomeMenuEntry> menuEntries;
-  bool menuEntriesDirty = true;
 
   std::string focusBookPath;
   int focusSelectorIndex = -1;
