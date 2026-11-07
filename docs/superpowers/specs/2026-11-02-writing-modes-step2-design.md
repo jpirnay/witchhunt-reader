@@ -80,10 +80,11 @@ Non-goals:
        family. #3787's "no Latin" claim held for letters in 42 of the 44 script files, but not for Noto Sans
        Sinhala, which maps all 52 letters (Noto Sans's now replace them). 34 of the 40 Indic files map 39 ASCII code
        points (space, the digits and the punctuation), and those stay the script font's.
-   - **Refined by the maintainer, 2026-11-07, in PR 3b's review.** Noto's Latin subset also takes Combining
-     Diacritical Marks U+0300-036F and Latin Extended Additional U+1E00-1EFF. The reason: a Hindi or Sanskrit book
-     often carries IAST or ISO 15919 transliteration, whose letters (t, d, n, s, r, l, m, h with a dot below) drew as
-     boxes. The merge check shapes runs of those letters and marks too.
+   - **Refined by the maintainer, 2026-11-07, in PR 3b's review.** Noto's Latin subset also takes the IAST
+     letters (24 precomposed letters and the 6 combining marks their decomposed forms use): U+1E0C/D, 1E24/5, 1E36-9,
+     1E40-7, 1E5A-D, 1E62/3, 1E6C/D and U+0301, 0303, 0304, 0307, 0310, 0323. The reason: a Hindi or Sanskrit book
+     often carries IAST transliteration, whose letters drew as boxes. The merge check shapes runs of those letters and
+     marks too.
 7. **Deviation 1 is offered upstream.** Once our port works, the maintainer posts a short comment on #3787 from the
    maintainer's account: what the nothrow fixed-capacity buffers change and why (the `reserve()` after a heap check
    aborts under `-fno-exceptions`), with a link to our code. The plan carries it as the last task of PR 1.
@@ -388,7 +389,8 @@ reserved and rejected on load (`TextBlock::bidiValid`, commit `bcee36c96`). Step
     - the script font's cmap loses A-Z and a-z. Its glyphs stay, so its glyph IDs and its own shaping do not change;
       only Noto Sans Sinhala maps any;
     - Noto's Latin is a `fontTools.subset` of U+0020-007E, U+00A0-024F, U+2000-206F, U+20A0-20CF, U+2122 and U+FFFD,
-      plus U+0300-036F and U+1E00-1EFF (refined by the maintainer, 2026-11-07: IAST transliteration), less every
+      plus the IAST letters (24 precomposed letters and the 6 combining marks their decomposed forms use; refined by the
+      maintainer, 2026-11-07: IAST transliteration), less every
       code point the script font still maps. So the Latin letters always come from Noto Sans or Serif,
       and everything else the script font maps comes from it;
     - `fontTools.merge`, the script font first (its glyph order, names and cmap win), with `vhea` and `vmtx`
