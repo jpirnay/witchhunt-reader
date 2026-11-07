@@ -1,8 +1,8 @@
-# One-pass text AA (X4 Pro, Murphy M3)
+# One-pass text AA (X4 Pro, Murphy M3, X3, X4)
 
-Status: shipped as an opt-in setting, One-Pass Anti-Aliasing, off by default, on the X4 Pro with UC8179 and on the
-Murphy M3. How it works
-is in [grayscale-aa-rendering.md](../grayscale-aa-rendering.md). What stays open is below.
+Status: shipped as an opt-in setting, One-Pass Anti-Aliasing, off by default, on the X4 Pro with UC8179, the Murphy
+M3, the X3 and the X4 with SSD1677. How it works is in [grayscale-aa-rendering.md](../grayscale-aa-rendering.md).
+What stays open is below.
 
 Source: Free-Ink/freeink-sdk branch `fix-display-updates`, tip `d73c852`, and crosspoint-reader branch
 `fix-display-updates` at `8739c86f6` ("Direct AA"), which pins that same SDK tip.
@@ -176,22 +176,25 @@ pages, the periodic HALF and the page after a menu keep two passes, and so does 
 - A forced refresh override arriving after the mask was built shows that page in B/W only.
 - A pixel staying black is driven 18 frames every page (no memory to tell it from gray).
 
-## Xteink X4 (SSD1677): the plan
+## Xteink X4 (SSD1677): composed, no extra memory
 
-The same composed path, with the work in `Ssd1677Driver`: RED RAM (0x26) takes the mask, BW RAM (0x24)
-the page, one custom-LUT activation, then RED re-seeded from the page as today.
-- **Waveform:** start from `kX4ProTextSsd1677` (Free-Ink `fix-display-updates`), with its rows mapped to
-  our codes: (1,1) rests, (0,1) to white, (1,0) gray, (0,0) black. Its hold row is a nudge (dose -2),
-  which on the X4 Pro the charge map balances. Without the map, either keep the nudge (the X3's FAST
-  does as much) or rest. Decide by eye, then by camera.
-- **No lab:** the gray lab drives UC8253 only. Measuring this panel would mean porting it to the
-  SSD1677's commands and LUT layout.
-- **Trade:** the X4's B/W refresh runs on the factory's temperature-compensated waveform; the one-pass
-  LUT is fixed, like today's gray pass.
+The X3's composed path, with the work in `Ssd1677Driver::displayOnePassStart()`: BW RAM takes the page,
+RED RAM the old plane, one `0xCC` external-LUT activation, then `displayFinish()` puts the page in both
+planes. The waveform is Free-Ink's `kX4ProTextSsd1677` with rows 1 and 3 exchanged: the row is
+RED * 2 + BW, so ours runs black (VSH1 17), to white (VSL 24), gray (VSL 6, VSH1 4) and white that stays
+white (the X4 Pro's VSL 2 hold nudge). Offered on the X4 board only, the SSD1677 it has run on.
+
+**Measured on an X4 (2026-11-07):** 13 text pages one-pass, each one refresh of 596-600 ms, against FAST at
+507 ms plus a 144 ms gray pass today; gray render 35-42 ms; heap flat; no fault. The camera showed a clean
+page, but cannot judge the gray.
+
+**Open on the X4:** as on the X3, a Background-B borrow between two turns sends the next turn down the
+two-pass path (once in 10 slow turns here); fast flipping skips AA as today. The hold row nudges the
+background 2 frames of VSL every page; whether rest looks better is untried. No lab for the SSD1677.
 
 ## Next
 
 1. Run a long read on the X4 Pro with the option on: ghosting over many pages, and in the cold.
 2. The same on the Murphy M3 and the X3, by eye first.
-3. The X4 (SSD1677), as planned above.
+3. The X4 (SSD1677) by eye, and whether its hold row should rest.
 4. Run `kUc8279X3_Xth4`'s tail fix on a UC8279 X3.
