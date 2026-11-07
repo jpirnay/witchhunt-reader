@@ -577,6 +577,10 @@ TEST(OtShaperLanguage, MapsBcp47TagsToLanguageSystems) {
   EXPECT_EQ(ot::languageTagsFor("ug")[0], ot::tag("UYG "));
   EXPECT_EQ(ot::languageTagsFor("ku")[0], ot::tag("KUR "));
   EXPECT_EQ(ot::languageTagsFor("ckb")[0], ot::tag("KUR "));
+  EXPECT_EQ(ot::languageTagsFor("kmr")[0], ot::tag("KUR "));
+  EXPECT_EQ(ot::languageTagsFor("sdh")[0], ot::tag("KUR "));
+  EXPECT_EQ(ot::languageTagsFor("prs")[0], ot::tag("DRI "));
+  EXPECT_EQ(ot::languageTagsFor("prs")[1], ot::tag("FAR "));
   EXPECT_EQ(ot::languageTagsFor("sd")[0], ot::tag("SND "));
   EXPECT_EQ(ot::languageTagsFor("ks")[0], ot::tag("KSH "));
   EXPECT_EQ(ot::languageTagsFor("xx")[0], 0u);

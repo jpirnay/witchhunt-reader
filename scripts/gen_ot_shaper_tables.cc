@@ -30,7 +30,7 @@ static const char* kLanguages[] = {"as",  "awa", "bh", "bho", "bn",  "bpy", "bra
                                    "ml",  "mni", "mr", "mwr", "ne",  "new", "or",  "pa",  "pi",  "raj", "sa",
                                    "sat", "sck", "sd", "si",  "ta",  "tcy", "te",  "xnr", "en"};
 // witchhunt: deviation 11. Languages written in Arabic script (sd and ks above keep their Indic rows).
-static const char* kArabicLanguages[] = {"ar", "fa", "ur", "ps", "ug", "ku", "ckb"};
+static const char* kArabicLanguages[] = {"ar", "fa", "ur", "ps", "ug", "ku", "ckb", "prs", "kmr", "sdh"};
 
 static uint32_t pack(hb_codepoint_t u) {
   hb_unicode_funcs_t* uf = hb_unicode_funcs_get_default();
