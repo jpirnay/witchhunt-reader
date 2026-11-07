@@ -1,12 +1,14 @@
 # One-pass text AA (X4 Pro)
 
-Status: analysed and measured on 2026-11-06 and 2026-11-07, not ported. Source: Free-Ink/freeink-sdk branch
-`fix-display-updates`, tip `d73c852`, and crosspoint-reader branch `fix-display-updates` at `8739c86f6` ("Direct AA"),
-which pins that same SDK tip.
+Status: shipped as an opt-in setting on the X4 Pro with UC8179, One-Pass Anti-Aliasing, off by default. How it works
+is in [grayscale-aa-rendering.md](../grayscale-aa-rendering.md). What stays open is below.
 
-**Decision so far.** Not started. Text passes the by-eye check on our panel, but it does not feel much faster, so the
-case for a port is consistency, not speed. If we port, take a slice of the text-AA core as an opt-in. Do not merge the
-branch: a trial merge into `witchhunt` conflicts widely, and most of its churn is Picco work.
+Source: Free-Ink/freeink-sdk branch `fix-display-updates`, tip `d73c852`, and crosspoint-reader branch
+`fix-display-updates` at `8739c86f6` ("Direct AA"), which pins that same SDK tip.
+
+Why it is an option: text passes by eye and, more to the point, the screen no longer flickers slightly when the AA pass
+finishes. It is not faster. Only the slice for this one controller came over: a full merge conflicts widely with
+`witchhunt`, and most of the branch's churn is Picco work.
 
 ## What it does
 
@@ -93,35 +95,23 @@ unit.
 **If we ever take `kX4ProImage`:** bytes verified against stock (26102901, at `0xe4ff3` and `0xe5560`) say nothing about
 the register order. Take the exchange with it.
 
-## What a port has to fix
+## Open on the X4 Pro
 
-- **Page lost on compose failure.** `displayGray()` invalidates and returns without drawing. The test port fell back to
-  B/W, and it never happened in 74 pages.
-- **UC8279 voltages.** The text path (variants 2 and 3) and the image path write `0x01` and `0x82`. Nothing restores
-  them, though the driver's own comment says PWR and VDCS stay panel-programmed. Later B/W refreshes may run on those
-  voltages. Effect unproven: our unit is a UC8179.
-- **History wiped by any B/W frame.** `invalidate()` drops the charge map although the panel keeps its charge. This is
-  the 2632 ms page after a HALF.
-- **Blocking waveform.** `waitRefreshComplete` holds the bus. Production needs `displayGrayFrameStart`, with finish and
-  reseed (about 210 ms) off the critical path, which should lower the flip floor. That part is an estimate.
-- **Book pages with images.** Our planes come from `beginGrayCapture`, and only the glyph renderer writes to it
-  (`GfxRenderer.cpp`, `grayCaptureActive()`), so images never reach them. Measured on a full-page cover: 85,655 black
-  pixels and `gray=0` under one-pass, where today's path runs a 413 ms gray pass on the same page. Such a page must leave
-  one-pass, on every controller. Upstream does this on UC8279 only, through Absolute.
-- **Leave `FREEINK_FB_PSRAM` out.** Default-on would move S3 framebuffers into PSRAM. It is unrelated and unmeasured.
-- **Wiring.** Our `supportsGrayFrame` single-push path fits with two small helpers: stage the planes before the base is
-  known, and keep them across a clean. The port must scope the mode to the EPUB page: `copyGrayscale*` stages instead of
-  uploading, so a sleep image, the BMP viewer or XTC would otherwise reach the panel with stale planes.
-
-Watch item: the branch's SSD2677 comment says re-driving static text builds ghosts, yet one-pass re-drives every black
-pixel on every page.
+- **Other controllers.** The option shows on UC8179 units only, the one we have tested. The branch has tables for
+  SSD1677 and UC8279, and UC8279 also writes `0x01` and `0x82` without restoring them, which may affect later B/W
+  refreshes. Effect unproven: our unit is a UC8179.
+- **History wiped by any B/W frame.** The charge map goes although the panel keeps its charge, so the page after a HALF
+  takes 2632 ms and drives nearly the whole panel white. A menu has the same effect on the next page, by code reading.
+- **Temperature.** The LUT is fixed, so the waveform does not follow the panel's temperature.
+- **Static black.** One-pass re-drives every black pixel on every page, and the branch's SSD2677 comment says re-driving
+  static text builds ghosts. None seen so far.
 
 ## What carries over to other drivers
 
 | Tweak | Where it could work |
 |---|---|
 | One-pass as written | X4 Pro only: PSRAM and stock LUTs for its three controllers |
-| One-pass on Murphy M3 | Plausible: PSRAM, about 150 KB scaled. No vendor LUT, so one must be derived |
+| One-pass on Murphy M3 | Yes, and simpler: see below |
 | One-pass on C3 (X4, X3) | Not as written. The charge map changes only 5-7% of white drives, so a 1-bit "black two pages running" plane (48 KB) may approximate it. Speculative, and reading heap is 15-53 KB |
 | One-pass on T5S3 | No: no LUTs, already single push |
 | Drive gray pixels to the new target on the next B/W frame | Only SSD1677 lacks this. Its 48 KB mask fits SSD1677 X4 Pro units, not a C3 |
@@ -132,9 +122,31 @@ pixel on every page.
 | Doses checked against the LUT (`testTextWaveforms`) | Copy for any external-LUT driver |
 | Rest-frame LUT, Picco init and power policy | Panel-specific, skip |
 
+## Murphy M3: the plan
+
+The same setting and the same firmware path, with the work in `Uc8253MurphyDriver` and one new LUT bank. Nothing in the
+reader changes: the setting asks `display.supportsOnePassText()`, and `OnePassTextScope` already holds the mode.
+
+The four slots are the X4 Pro's four waveforms, built from what the Murphy lab measured:
+
+| Slot | Waveform | Why |
+|---|---|---|
+| Hold | rest, 0 V | A pixel that stays white. FAST's `WW` already rests, and a VSL touch there was measured as much worse |
+| White | VSL 20 frames | A pixel leaving black or gray, as FAST's `R22` does now |
+| Black | VSH 15 frames | As FAST's `R23`. Black reaches 1% from white in 8 frames |
+| Gray | VSL n, VSH 8, VSL n | VSH 8 resets any start to black, then the last VSL lands the level: 3 frames 35%, 4 frames 58% |
+
+- **No charge map.** It exists because the X4 Pro's hold is a nudge that adds up. Rest adds nothing, so 384 of the 576 KB
+  goes, and a page needs only the planes the driver already has.
+- **Faster, unlike the X4 Pro.** Gray fits inside FAST's 20 frames, so the page should finish when the B/W page lands
+  today, and the delayed pass goes. That saves about 330 ms, an estimate until it is run.
+- **To measure, with the camera and `tools/murphy-gray-lab`:** whether gray lands the same from white, black and gray;
+  35% or 58% for the one level; ghosting over a run of pages. A page of text keeps one gray where it has two today.
+- **DC.** A pixel that stays black takes 15 frames towards black every page, on top of the open item in
+  [murphy-gray.md](murphy-gray.md).
+
 ## Next
 
-1. Decide whether a port is worth it. It buys one panel update instead of two, and AA that survives fast flipping. It
-   costs 576 KB of PSRAM, a slower flip floor (1131 against 1016 ms) and a separate route for image pages.
-2. If so, port the core as an opt-in, with the fixes above.
+1. Run a long read on the X4 Pro with the option on: ghosting over many pages, and in the cold.
+2. Murphy, as above, when it is attached.
 3. Run `kUc8279X3_Xth4`'s tail fix on a UC8279 X3.
