@@ -1258,6 +1258,12 @@ Every run covers the whole corpus of its script:
 | NotoSerifSinhala | Regular | 4 (2 sizes x 2 language settings) | 13,157 | all |
 | NotoSerifSinhala | Bold | 4 (2 sizes x 2 language settings) | 13,157 | all |
 
+Re-run on 2026-11-07 after the 40 files gained Combining Diacritical Marks U+0300-036F and Latin Extended Additional
+U+1E00-1EFF (IAST, decision 6 refined): the same 272 runs, every one N/N, 0 differences, and the output is line for
+line the output above. The corpus has no Latin, so the Indic shaping cannot move; the build's Latin check covers the
+new letters. The 40 files grew from 8,102,572 B to 10,047,368 B in all (the largest, NotoSerifDevanagari-Regular.ttf,
+from 293,268 B to 344,676 B).
+
 
 `ShippedFamilies.EachIndicFamilyShapesAlikeThroughItsCpac` is the CI form of the same check: the Regular file of each of
 the 20 families, the first 200 lines of its script's corpus (a committed sample in `test/ttf_font/data`, cut by
