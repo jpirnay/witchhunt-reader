@@ -129,7 +129,8 @@ class Normalizer {
     if (!count) return;
     // The Indic shapers decompose everything (COMPOSED_DIACRITICS_NO_SHORT_
     // CIRCUIT); the default shaper keeps characters the font maps.
-    const bool mightShortCircuit = plan_.shaper == ShaperKind::Default;
+    // witchhunt: deviation 11 - Arabic is DEFAULT normalization, which short-circuits too.
+    const bool mightShortCircuit = plan_.shaper == ShaperKind::Default || plan_.shaper == ShaperKind::Arabic;
     const bool allSimple = decomposeAll(count, mightShortCircuit);
     if (!buffer_.successful || allSimple) return;
     reorderMarks();
@@ -154,8 +155,9 @@ class Normalizer {
   }
 
   bool compose1(const uint32_t a, const uint32_t b, uint32_t* ab) const {
-    // Split matras stay split: nothing composes onto a mark.
-    if (plan_.shaper != ShaperKind::Default && gc::isMark(charData(a).genCat)) return false;
+    // Split matras stay split: nothing composes onto a mark. witchhunt: deviation 11 - Arabic composes as Unicode does.
+    if ((plan_.shaper == ShaperKind::Indic || plan_.shaper == ShaperKind::Use) && gc::isMark(charData(a).genCat))
+      return false;
     // Bengali YYA is a composition exclusion the Indic shaper composes anyway.
     if (plan_.shaper == ShaperKind::Indic && a == 0x09AF && b == 0x09BC) {
       *ab = 0x09DF;
@@ -260,6 +262,8 @@ class Normalizer {
       if (end - i <= MAX_COMBINING_MARKS) {
         stableSort(info.data() + i, info.data() + end,
                    [](const GlyphInfo& a, const GlyphInfo& b) { return a.combiningClass() < b.combiningClass(); });
+        // witchhunt: deviation 11 - the shaper's reorder_marks hook.
+        if (plan_.shaper == ShaperKind::Arabic) reorderMarksArabic(buffer_, i, end);
       }
       i = end;
     }
@@ -347,6 +351,7 @@ void setUnicodeProps(GlyphInfo& info, Buffer& buffer) {
 }
 
 void preprocessVowelConstraints(const Script script, Buffer& buffer) {
+  if (script == Script::Arabic) return;  // witchhunt: deviation 11 - inScriptBlock() is the Indic blocks'
   const unsigned count = buffer.len();
   if (count < 2) return;
   buffer.scratch.clear();

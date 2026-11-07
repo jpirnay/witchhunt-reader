@@ -90,6 +90,11 @@ struct GlyphInfo {
   bool isDefaultIgnorable() const { return (unicodeProps & uprops::IGNORABLE) && !(glyphProps & props::SUBSTITUTED); }
   bool isZwnj() const { return genCat() == gc::FORMAT && (unicodeProps & uprops::CF_ZWNJ); }
   bool isZwj() const { return genCat() == gc::FORMAT && (unicodeProps & uprops::CF_ZWJ); }
+  // witchhunt: deviation 11 - reorder_marks_arabic() renumbers a mark's class (the high byte; marks only).
+  void setModifiedCombiningClass(const uint8_t cc) {
+    if (!isUnicodeMark()) return;
+    unicodeProps = static_cast<uint16_t>((unicodeProps & 0x00FF) | (cc << 8));
+  }
   bool isHidden() const { return unicodeProps & uprops::HIDDEN; }
 
   uint8_t syllableType() const { return syllable & 0x0F; }

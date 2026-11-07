@@ -3,10 +3,12 @@
 
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "ArabicExpected.h"
+#include "OtShaperInternal.h"
 
 // The Arabic plan (step 2 PR 4a): the lookups, stages and form masks lib/OtShaper plans for the Arabic fixtures
 // (test/fixtures/fonts, make_arabic_fixtures.py), checked against the lookups HarfBuzz 14.5.0 plans for them.
@@ -77,6 +79,46 @@ struct OpenFont {
 };
 
 constexpr const char* SYNTHETIC = "ArabicRtlTest-Regular.ttf";
+
+// A code point string through shape()'s first steps: unicode properties, normalization, the joining machine.
+// The first `before` and last `after` code points are context.
+struct Normalized {
+  ot::Buffer buffer;
+  uint8_t storage[ot::Buffer::bytesFor(64)];
+  bool ok = false;
+
+  Normalized(const ot::Face& face, const ot::Plan& plan, const std::vector<uint32_t>& cps, const bool joining,
+             const unsigned before = 0, const unsigned after = 0) {
+    buffer.setStorage(storage, sizeof(storage));
+    if (!buffer.prepare(64)) return;
+    for (size_t i = 0; i < cps.size(); i++) {
+      ot::GlyphInfo g{};
+      g.codepoint = cps[i];
+      g.mask = plan.globalMask;
+      if (i < before || i + after >= cps.size()) g.mask |= ot::CONTEXT_MASK;
+      ot::setUnicodeProps(g, buffer);
+      buffer.info.push_back(g);
+    }
+    ot::normalize(face, plan, buffer);
+    if (!buffer.successful) return;
+    if (joining) ot::arabicSetupMasks(plan, buffer);
+    ok = true;
+  }
+  std::vector<uint32_t> codepoints() const {
+    std::vector<uint32_t> out;
+    for (unsigned i = 0; i < buffer.len(); i++) out.push_back(buffer.info[i].codepoint);
+    return out;
+  }
+  std::vector<unsigned> actions() const {
+    std::vector<unsigned> out;
+    for (unsigned i = 0; i < buffer.len(); i++) out.push_back(buffer.info[i].position);
+    return out;
+  }
+};
+
+using Cps = std::vector<uint32_t>;
+using Acts = std::vector<unsigned>;
+constexpr unsigned ISOL = 0, FINA = 1, MEDI = 4, INIT = 6, NONE = 7;
 
 }  // namespace
 
@@ -208,4 +250,85 @@ TEST(OtPlanArabic, ChosenWhateverTheScriptTag) {
   EXPECT_EQ(dflt.chosenScript, ot::tag("DFLT"));
   EXPECT_EQ(dflt.shaper, ot::ShaperKind::Arabic);
   EXPECT_TRUE(dflt.backward);
+}
+
+namespace {
+
+struct NaskhPlan {
+  OpenFont font;
+  ot::Plan plan;
+  NaskhPlan() {
+    font.open("NotoNaskhArabic-Shaping-Regular.ttf");
+    plan.build(font.face, ot::Script::Arabic, ot::languageTagsFor("ar"));
+  }
+};
+
+Acts joinActions(const NaskhPlan& n, const Cps& cps, const unsigned before = 0, const unsigned after = 0) {
+  const Normalized r(n.font.face, n.plan, cps, true, before, after);
+  EXPECT_TRUE(r.ok);
+  return r.actions();
+}
+
+}  // namespace
+
+TEST(OtArabic, JoiningActionsFollowTheMachine) {
+  const NaskhPlan n;
+  EXPECT_EQ(joinActions(n, {0x628, 0x64A, 0x62A}), (Acts{INIT, MEDI, FINA}));
+  EXPECT_EQ(joinActions(n, {0x628, 0x627}), (Acts{INIT, FINA}));
+  EXPECT_EQ(joinActions(n, {0x627, 0x628}), (Acts{ISOL, ISOL}));
+  EXPECT_EQ(joinActions(n, {0x628}), (Acts{ISOL}));
+  EXPECT_EQ(joinActions(n, {0x628, 0x64E, 0x62A}), (Acts{INIT, NONE, FINA}));
+  EXPECT_EQ(joinActions(n, {0x628, 0x200C, 0x62A}), (Acts{ISOL, NONE, ISOL}));
+  // One context code point before: it takes part in the machine, and the run's first glyph is joined to it.
+  EXPECT_EQ(joinActions(n, {0x628, 0x64A, 0x62A}, 1, 0), (Acts{INIT, MEDI, FINA}));
+  Normalized ctx(n.font.face, n.plan, {0x628, 0x64A, 0x62A}, true, 1, 0);
+  ASSERT_TRUE(ctx.ok);
+  EXPECT_EQ(ctx.buffer.info[1].position, MEDI);
+  EXPECT_EQ(ctx.buffer.info[2].position, FINA);
+  // The mask carries the plan's bit for the action.
+  EXPECT_TRUE(ctx.buffer.info[1].mask & n.plan.arabicMasks[MEDI]);
+  EXPECT_FALSE(ctx.buffer.info[1].mask & n.plan.arabicMasks[FINA]);
+  EXPECT_FALSE(ctx.buffer.info[0].mask & n.plan.arabicMasks[ISOL]);
+}
+
+// The brief expects "init, none" for 0628 200D. HarfBuzz joins a ZWJ (joining type C, folded into D): the machine
+// gives the beh its init form and the joiner its fina action (hb-ot-shaper-arabic.cc, state 2 on jt_D).
+TEST(OtArabic, ZwjJoinsLikeHarfBuzz) {
+  const NaskhPlan n;
+  EXPECT_EQ(joinActions(n, {0x628, 0x200D}), (Acts{INIT, FINA}));
+}
+
+TEST(OtArabic, ModifierMarksMoveToTheFront) {
+  const NaskhPlan n;
+  const auto run = [&](const Cps& in) {
+    auto r = std::make_unique<Normalized>(n.font.face, n.plan, in, false);
+    EXPECT_TRUE(r->ok);
+    return r;
+  };
+  const auto a = run({0x628, 0x650, 0x655});
+  EXPECT_EQ(a->codepoints(), (Cps{0x628, 0x655, 0x650}));
+  EXPECT_EQ(a->buffer.info[1].combiningClass(), 25u);
+  const auto b = run({0x628, 0x64E, 0x654});
+  EXPECT_EQ(b->codepoints(), (Cps{0x628, 0x654, 0x64E}));
+  EXPECT_EQ(b->buffer.info[1].combiningClass(), 26u);
+  EXPECT_EQ(run({0x628, 0x64E, 0x651})->codepoints(), (Cps{0x628, 0x651, 0x64E}));
+  EXPECT_EQ(run({0x628, 0x651, 0x64E})->codepoints(), (Cps{0x628, 0x651, 0x64E}));
+}
+
+TEST(OtNormalize, ArabicComposesAsUnicodeDoes) {
+  const NaskhPlan n;
+  const Normalized composed(n.font.face, n.plan, {0x627, 0x653}, false);
+  ASSERT_TRUE(composed.ok);
+  ASSERT_EQ(composed.buffer.len(), 1u);
+  uint32_t glyph = 0;
+  ASSERT_TRUE(n.font.face.nominalGlyph(0x622, &glyph));
+  EXPECT_EQ(composed.buffer.info[0].glyphIndex, glyph);
+
+  OpenFont synthetic;
+  ASSERT_TRUE(synthetic.open(SYNTHETIC));
+  ot::Plan plan;
+  ASSERT_TRUE(plan.build(synthetic.face, ot::Script::Arabic, ot::languageTagsFor("")));
+  const Normalized split(synthetic.face, plan, {0x622}, false);
+  ASSERT_TRUE(split.ok);
+  EXPECT_EQ(split.codepoints(), (Cps{0x627, 0x653}));
 }

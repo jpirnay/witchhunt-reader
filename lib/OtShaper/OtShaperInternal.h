@@ -92,6 +92,17 @@ void indicSetupSyllables(Buffer& buffer);
 void indicInitialReordering(const Face& face, const Plan& plan, Buffer& buffer);
 void indicFinalReordering(const Face& face, const Plan& plan, Buffer& buffer);
 
+// The Arabic shaper (hb-ot-shaper-arabic.cc). Joining actions, HarfBuzz's order: the index into
+// Plan::arabicMasks, kept in GlyphInfo::position (HarfBuzz's shared aux byte).
+// witchhunt: deviation 11
+namespace arabic {
+constexpr uint8_t ISOL = 0, FINA = 1, FIN2 = 2, FIN3 = 3, MEDI = 4, MED2 = 5, INIT = 6, NONE = 7;
+}
+// Runs the joining machine over `buffer.info`, context code points included, and ORs in the form masks.
+void arabicSetupMasks(const Plan& plan, Buffer& buffer);
+// reorder_marks_arabic(): moves the modifier combining marks of one sorted mark run [start, end) to its front.
+void reorderMarksArabic(Buffer& buffer, unsigned start, unsigned end);
+
 // The Universal Shaping Engine (hb-ot-shaper-use.cc).
 void useSetupMasks(Buffer& buffer);
 void useSetupSyllables(const Plan& plan, Buffer& buffer);
