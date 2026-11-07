@@ -98,6 +98,23 @@ TEST(FontDownloadRulesTest, EveryShippedOtfFamilyPasses) {
   EXPECT_EQ(checked, 8);
 }
 
+TEST(FontDownloadRulesTest, EveryShippedTtfFamilyPasses) {
+  int checked = 0;
+  for (const auto& family : std::filesystem::directory_iterator(SD_FONTS_DIR)) {
+    if (!family.is_directory()) continue;
+    for (const auto& file : std::filesystem::directory_iterator(family.path())) {
+      const std::string name = file.path().filename().generic_string();
+      if (FontDownloadRules::kindOf(name.c_str()) != FileKind::TrueType) continue;
+      std::ifstream in(file.path(), std::ios::binary);
+      std::string head8(FontDownloadRules::kHeadBytes, '\0');
+      in.read(head8.data(), static_cast<std::streamsize>(head8.size()));
+      EXPECT_TRUE(head(FileKind::TrueType, head8)) << name;
+      ++checked;
+    }
+  }
+  EXPECT_EQ(checked, 40);
+}
+
 TEST(FontDownloadRulesTest, TheCardMustHoldTheDownloadAndAMargin) {
   EXPECT_TRUE(FontDownloadRules::fits(10 * MB + FontDownloadRules::kSpaceMarginBytes, 10 * MB));
   EXPECT_FALSE(FontDownloadRules::fits(10 * MB + FontDownloadRules::kSpaceMarginBytes - 1, 10 * MB));

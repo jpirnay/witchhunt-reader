@@ -3,12 +3,14 @@ add_executable(FontManifestParserTest
   FontManifestReaderTest.cpp
   FontCatalogTest.cpp
   FontDownloadRulesTest.cpp
+  ShippedFontFilesTest.cpp
   # Replaces the global nothrow array new, so the tests can fail the catalog's block allocation.
   FailingArrayNew.cpp
   ${REPO_ROOT}/src/util/FontCatalog.cpp
   ${REPO_ROOT}/src/util/FontManifestReader.cpp
   ${REPO_ROOT}/lib/JsonParser/FontManifestParser.cpp
   ${REPO_ROOT}/lib/JsonParser/StreamingJsonParser.cpp
+  ${REPO_ROOT}/lib/SerialTransfer/SerialTransfer/SerialTransferProtocol.cpp
 )
 
 target_include_directories(FontManifestParserTest PRIVATE
@@ -18,6 +20,7 @@ target_include_directories(FontManifestParserTest PRIVATE
   ${REPO_ROOT}/lib/JsonParser
   ${REPO_ROOT}/lib/Logging
   ${REPO_ROOT}/lib/Memory
+  ${REPO_ROOT}/lib/SerialTransfer/SerialTransfer
 )
 
 target_compile_definitions(FontManifestParserTest PRIVATE
