@@ -297,10 +297,19 @@ class Normalizer {
 
 }  // namespace
 
+// witchhunt: deviation 11. The generated table covers several ranges (Arabic and Indic): the position of `cp`
+// in PROPS_INDEX and JOINING, or -1 outside them.
+static int rangeIndex(const uint32_t cp) {
+  for (const auto& r : ucd::RANGES) {
+    if (cp >= r.first && cp <= r.last) return r.offset + static_cast<int>(cp - r.first);
+  }
+  return -1;
+}
+
 CharData charData(const uint32_t cp) {
   uint32_t packed;
-  if (cp >= ucd::FIRST && cp <= ucd::LAST) {
-    packed = ucd::PROPS[ucd::PROPS_INDEX[cp - ucd::FIRST]];
+  if (const int i = rangeIndex(cp); i >= 0) {
+    packed = ucd::PROPS[ucd::PROPS_INDEX[i]];
   } else if (cp == 0x200C) {
     packed = ucd::ZWNJ_PROPS;
   } else if (cp == 0x200D) {
@@ -378,5 +387,15 @@ void preprocessVowelConstraints(const Script script, Buffer& buffer) {
 }
 
 void normalize(const Face& face, const Plan& plan, Buffer& buffer) { Normalizer(face, plan, buffer).run(); }
+
+// witchhunt: deviation 11. HarfBuzz's get_joining_type, resolved when the table is generated.
+JoiningType joiningType(const uint32_t cp) {
+  if (const int i = rangeIndex(cp); i >= 0)
+    return static_cast<JoiningType>((ucd::JOINING[i >> 1] >> ((i & 1) << 2)) & 15);
+  if (cp == 0x200C) return static_cast<JoiningType>(ucd::ZWNJ_JOINING);
+  if (cp == 0x200D) return static_cast<JoiningType>(ucd::ZWJ_JOINING);
+  if (cp == DOTTED_CIRCLE) return static_cast<JoiningType>(ucd::DOTTED_CIRCLE_JOINING);
+  return JoiningType::U;
+}
 
 }  // namespace ot

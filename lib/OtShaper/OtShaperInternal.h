@@ -26,6 +26,12 @@ struct CharData {
 };
 CharData charData(uint32_t cp);
 
+// The Arabic joining types, HarfBuzz's values; C folds into D as JOINING_TYPE_C
+// does, and X is resolved when the table is generated (T for Mn, Me and Cf, else U).
+// witchhunt: deviation 11
+enum class JoiningType : uint8_t { U = 0, L = 1, R = 2, D = 3, Alaph = 4, DalathRish = 5, T = 7 };
+JoiningType joiningType(uint32_t cp);
+
 // Sets unicodeProps from the codepoint (_hb_glyph_info_set_unicode_props).
 void setUnicodeProps(GlyphInfo& info, Buffer& buffer);
 
