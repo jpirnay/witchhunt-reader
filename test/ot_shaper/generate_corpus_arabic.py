@@ -60,7 +60,7 @@ def main():
     for c in base:
         for v in VOWELS:
             lines.update([c + v, BEH + c + v + BEH])
-        for v in VOWELS[:-1]:
+        for v in (x for x in VOWELS if x != SHADDA):
             lines.update([c + SHADDA + v, c + v + SHADDA, BEH + c + SHADDA + v + BEH, BEH + c + v + SHADDA + BEH])
     for m in MODIFIER_MARKS:
         for v in (FATHA, KASRA):
