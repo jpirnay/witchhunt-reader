@@ -105,6 +105,16 @@ inline std::ostream& operator<<(std::ostream& os, const StoredGlyph& g) {
 
 inline int roundPixels(const int v) { return v >= 0 ? (v + 32) / 64 : -((-v + 32) / 64); }
 
+// A shaped run's glyphs as ExpectedShaping.h and ExpectedGlyphRuns.h store them.
+inline std::vector<StoredGlyph> storedGlyphsOf(const ot::Buffer& buffer) {
+  std::vector<StoredGlyph> out;
+  for (unsigned i = 0; i < buffer.len(); i++) {
+    out.push_back({buffer.info[i].codepoint, (buffer.pos[i].xAdvance + 2) >> 2, roundPixels(buffer.pos[i].xOffset),
+                   -roundPixels(buffer.pos[i].yOffset)});
+  }
+  return out;
+}
+
 // Shapes `utf8` at `ppem26_6` and converts each glyph to what ExpectedShaping.h and ExpectedGlyphRuns.h store.
 // Empty when ot::shape fails.
 inline std::vector<StoredGlyph> shapeAsStored(const ot::Face& face, const ot::Plan& plan, const char* utf8,
@@ -112,13 +122,8 @@ inline std::vector<StoredGlyph> shapeAsStored(const ot::Face& face, const ot::Pl
   BoundBuffer bound(256);
   ot::Buffer& buffer = bound.buffer;
   const std::vector<uint32_t> cps = utf32(utf8);
-  std::vector<StoredGlyph> out;
-  if (!shapeRun(face, plan, cps.data(), static_cast<unsigned>(cps.size()), buffer, ppem26_6)) return out;
-  for (unsigned i = 0; i < buffer.len(); i++) {
-    out.push_back({buffer.info[i].codepoint, (buffer.pos[i].xAdvance + 2) >> 2, roundPixels(buffer.pos[i].xOffset),
-                   -roundPixels(buffer.pos[i].yOffset)});
-  }
-  return out;
+  if (!shapeRun(face, plan, cps.data(), static_cast<unsigned>(cps.size()), buffer, ppem26_6)) return {};
+  return storedGlyphsOf(buffer);
 }
 
 // The shaped run: glyph IDs, advances and offsets in scaled units.

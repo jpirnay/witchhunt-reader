@@ -185,6 +185,8 @@ void reverseCursiveMinorOffset(GlyphPosition* pos, const unsigned len, const uns
     pos[node].attachChain = 0;
     const unsigned parent = static_cast<unsigned>(static_cast<int>(node) + chain);
     if (parent >= len || parent == newParent) break;
+    // witchhunt: deviation 11 - HarfBuzz 14.5.0: a link whose reverse does not fit keeps the node detached.
+    if (-chain > INT16_MAX) break;
     chainNodes[n++] = static_cast<uint16_t>(node);
     chainNodes[n] = static_cast<uint16_t>(parent);
     node = parent;
@@ -223,11 +225,20 @@ bool applyCursivePos(ApplyContext* c, const Table& st) {
   anchorPoint(c, entry, &entryX, &entryY);
   GlyphPosition* pos = buffer.pos.data();
 
-  pos[i].xAdvance = satAdd(hbRound(exitX), pos[i].xOffset);
-  const int32_t d = satAdd(hbRound(entryX), pos[j].xOffset);
-  pos[j].xAdvance = satSub(pos[j].xAdvance, d);
-  pos[j].xOffset = satSub(pos[j].xOffset, d);
+  // Main-direction adjustment.
+  if (buffer.backward) {  // witchhunt: deviation 11 - HB_DIRECTION_RTL
+    const int32_t d = satAdd(hbRound(exitX), pos[i].xOffset);
+    pos[i].xAdvance = satSub(pos[i].xAdvance, d);
+    pos[i].xOffset = satSub(pos[i].xOffset, d);
+    pos[j].xAdvance = satAdd(hbRound(entryX), pos[j].xOffset);
+  } else {
+    pos[i].xAdvance = satAdd(hbRound(exitX), pos[i].xOffset);
+    const int32_t d = satAdd(hbRound(entryX), pos[j].xOffset);
+    pos[j].xAdvance = satSub(pos[j].xAdvance, d);
+    pos[j].xOffset = satSub(pos[j].xOffset, d);
+  }
 
+  // Cross-direction adjustment.
   unsigned child = i;
   unsigned parent = j;
   int32_t yOffset = hbRound(entryY - exitY);
@@ -240,6 +251,7 @@ bool applyCursivePos(ApplyContext* c, const Table& st) {
   reverseCursiveMinorOffset(pos, buffer.len(), child, parent);
   const int chain = static_cast<int>(parent) - static_cast<int>(child);
   if (chain < INT16_MIN || chain > INT16_MAX) {
+    pos[child].attachChain = 0;  // witchhunt: deviation 11 - HarfBuzz 14.5.0 leaves the child detached
     buffer.idx++;
     return true;
   }
@@ -445,14 +457,18 @@ namespace ot {
 // propagate_attachment_offsets(): each attached glyph takes on the offset of
 // the glyph it hangs off (resolved first, up to MAX_ATTACH_DEPTH links), and
 // marks cancel the advances between them and their base.
+// witchhunt: deviation 11 - a backward buffer is walked from its last glyph
+// (HarfBuzz #5514), and its marks take the backward branches.
 void propagateAttachmentOffsets(Buffer& buffer) {
   using layout::satAdd;
   using layout::satSub;
   if (!buffer.hasGposAttachment) return;
   GlyphPosition* pos = buffer.pos.data();
   const unsigned len = buffer.len();
+  const bool forward = !buffer.backward;
   uint16_t chainNodes[layout::MAX_ATTACH_DEPTH + 2];
-  for (unsigned start = 0; start < len; start++) {
+  for (unsigned s = 0; s < len; s++) {
+    const unsigned start = forward ? s : len - 1 - s;
     if (!pos[start].attachChain) continue;
     unsigned n = 0;
     unsigned node = start;
@@ -474,15 +490,25 @@ void propagateAttachmentOffsets(Buffer& buffer) {
         continue;
       }
       pos[i].xOffset = satAdd(pos[i].xOffset, pos[j].xOffset);
-      if (j < i) {
+      if (j < i && forward) {
         for (unsigned m = j; m < i; m++) {
           pos[i].xOffset = satSub(pos[i].xOffset, pos[m].xAdvance);
           pos[i].yOffset = satSub(pos[i].yOffset, pos[m].yAdvance);
         }
-      } else {
+      } else if (j < i) {  // witchhunt: deviation 11
+        for (unsigned m = j + 1; m < i + 1; m++) {
+          pos[i].xOffset = satAdd(pos[i].xOffset, pos[m].xAdvance);
+          pos[i].yOffset = satAdd(pos[i].yOffset, pos[m].yAdvance);
+        }
+      } else if (forward) {
         for (unsigned m = i; m < j; m++) {
           pos[i].xOffset = satAdd(pos[i].xOffset, pos[m].xAdvance);
           pos[i].yOffset = satAdd(pos[i].yOffset, pos[m].yAdvance);
+        }
+      } else {  // witchhunt: deviation 11
+        for (unsigned m = i + 1; m < j + 1; m++) {
+          pos[i].xOffset = satSub(pos[i].xOffset, pos[m].xAdvance);
+          pos[i].yOffset = satSub(pos[i].yOffset, pos[m].yAdvance);
         }
       }
     }

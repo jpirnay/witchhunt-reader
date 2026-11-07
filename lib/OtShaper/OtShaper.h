@@ -30,6 +30,10 @@ namespace ot {
 // they shape with the rest, so a piece of a longer run sees its neighbours
 // (word-start 'init', lookahead rules, kerning), but their glyphs are dropped
 // from the result.
+//
+// witchhunt: deviation 11 - a backward plan (Arabic) shapes the run right to
+// left, and its glyphs come out in visual order, as HarfBuzz's do: the last
+// codepoint's first.
 bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_t* codepoints, unsigned count,
            Buffer& buffer, const RunContext& context = {});
 

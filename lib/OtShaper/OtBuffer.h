@@ -171,6 +171,9 @@ struct Buffer {
   uint8_t serial = 0;           // allocates ligature IDs (HarfBuzz's next_serial)
   uint32_t randomState = 1;     // the 'rand' feature's generator
   bool partialContext = false;  // see RunContext::partial
+  // witchhunt: deviation 11 - the run goes right to left (HB_DIRECTION_IS_BACKWARD): shape() sets it from the plan;
+  // cursive attachment and propagateAttachmentOffsets() read it.
+  bool backward = false;
   bool hasDefaultIgnorables = false;
   bool hasBrokenSyllable = false;
   bool hasGposAttachment = false;
@@ -212,6 +215,8 @@ struct Buffer {
   // Moves info[from] to position `to`, shifting what lies between.
   void moveGlyph(unsigned from, unsigned to);
   void reverseRange(unsigned start, unsigned end);
+  // witchhunt: deviation 11 - hb_buffer_t::reverse(): the whole run, glyphs and their positions together.
+  void reverse();
   void refreshDigest();
 
   // witchhunt: deviation 1 - setStorage()'s block, aligned, and its slots;
