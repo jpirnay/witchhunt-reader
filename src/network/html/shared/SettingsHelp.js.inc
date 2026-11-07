@@ -61,7 +61,6 @@ const SETTINGS_HELP = {
     "fontFamily": "Font for EPUB books: Bookerly, Noto Sans or a font installed on the SD card.",
     "fontSize": "Text size for EPUB books; the sizes offered depend on the font family chosen.",
     "textAntiAliasing": "Smooths the edges of text with grey; page turns get slightly slower.",
-    "fastAntiAliasingV2": "Makes pages with smoothed text turn much faster; mid-greys come out slightly darker.",
     "textDarkness": "How dark text is drawn, from Lighter through Normal up to Maximum.",
     "txtFontFamily": "Font for .txt and .md files, chosen separately from the EPUB font.",
     "txtFontSize": "Text size for .txt and .md files; the sizes offered depend on the font chosen.",

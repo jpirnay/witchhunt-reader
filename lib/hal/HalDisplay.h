@@ -236,12 +236,6 @@ class HalDisplay {
   // Repeated FAST refreshes leave residue only a HALF clears (the X3's UC8253 / UC8279d).
   bool ghostsUnderFastRefresh() const;
 
-  // X3-only knob: pick between the OEM 53-frame grayscale LUT (default, slow
-  // and accurate) and the 7-frame community LUT (fast, slightly darker
-  // mid-tones). No effect on X4. See EInkDisplay::setFastGrayscaleLut.
-  void setFastGrayscaleLut(bool fast);
-  bool getFastGrayscaleLut() const;
-
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;
   uint16_t getDisplayHeight() const;

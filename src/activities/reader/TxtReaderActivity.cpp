@@ -309,7 +309,6 @@ void TxtReaderActivity::renderPage() {
     // from frameBufferActive (the just-displayed page); snapshotting/restoring
     // the write framebuffer instead would diff the next fast refresh against
     // the previous page and ghost heavily.
-    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     // Never aborts: the navigation-preempt gate is currently EPUB-only (see
     // EpubReaderActivity::aaPreemptedByNavigation), so this pass keeps its previous behaviour.
     renderer.renderGrayscalePlanesSequential([&](GfxRenderer::RenderMode) { renderLines(); }, [] { return false; });

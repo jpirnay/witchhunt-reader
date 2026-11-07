@@ -116,14 +116,6 @@ inline bool panelNeedsHalfRefreshSettle() {
   return BoardConfig::ACTIVE.displayController == BoardConfig::DisplayController::UC8253;
 }
 
-// The controller develops grayscale from a swappable LUT, so the fast/OEM
-// waveform trade-off is a real choice. SSD1677 uses a factory waveform and has
-// nothing to swap. Mirrors SettingRequires::SelectableGrayscaleLut.
-inline bool hasSelectableGrayscaleLut() {
-  // Murphy is a UC8253 too, but it has one gray waveform and no second one to pick.
-  return BoardConfig::ACTIVE.displayController != BoardConfig::DisplayController::SSD1677 && !BoardConfig::isMurphyM3();
-}
-
 // The panel visibly fades in direct sunlight unless it is powered down between
 // refreshes, so the "sunlight fading fix" is worth offering here.
 //
