@@ -17,7 +17,7 @@ extern void ensureSdFontLoaded();
 // Publisher Fonts: an EPUB whose embedded fonts have not been examined yet (bookFontsPendingForPath) keeps the
 // font that is loaded while waitForBookFonts holds, so the family the setting replaces is not installed first;
 // the reader examines them while the book opens and calls again with waitForBookFonts false. The same holds for a
-// regional Noto CJK family while the book's language is pending (SdCardFontSystem::waitsForReaderLanguage).
+// regional Noto CJK or Indic family while the book's language is pending (SdCardFontSystem::waitsForReaderLanguage).
 extern void ensureSdFontLoadedForPath(const char* path, bool waitForBookFonts = true);
 
 // Book text outside the reader (Home, the Library, book information, the bookmark and reading-stats lists): while such

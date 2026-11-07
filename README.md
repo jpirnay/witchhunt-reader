@@ -188,6 +188,7 @@ Pulled from the PlatformIO registry at build time.
 ## Fonts the Font Manager downloads (assets/sd-fonts)
 
 - **Noto Sans CJK and Noto Serif CJK** (Adobe) — subset per language into NotoSansJP … NotoSerifKR by `lib/EpdFont/scripts/cjk_subset.py`, with U+FFFD from Noto Sans. https://github.com/notofonts/noto-cjk — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
+- **Noto Sans and Noto Serif of the ten Indic scripts** (Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam, Sinhala; the Noto Project) — each merged with Noto Sans or Noto Serif's Latin by `lib/EpdFont/scripts/merge_noto_latin.py` into NotoSansDevanagari … NotoSerifSinhala, the Font Manager's Indic families. https://github.com/notofonts — SIL Open Font License 1.1, [`assets/sd-fonts/OFL.txt`](assets/sd-fonts/OFL.txt).
 
 # Why this name
 Originally this fork was called CrossPoint++ - it had a small userbase and then I made an honest mistake by reusing the crosspoint fork, providing ample reference in the PRs and the release notes of code origin and authorship but was losing the github commit author information in the progress when I copied code over instead of taking the tedious (and correct) way of cherrypicking the original commit and post-cleanup effort.

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <IndicScripts.h>
+
 #include <cstdint>
 #include <string>
 
@@ -54,6 +56,42 @@ inline CjkRegion cjkRegionOf(const std::string& rawTag) {
   if (hasSubtag(tag, "tw") || hasSubtag(tag, "hk") || hasSubtag(tag, "mo")) return CjkRegion::TraditionalChinese;
   if (hasSubtag(tag, "cn") || hasSubtag(tag, "sg")) return CjkRegion::SimplifiedChinese;
   return CjkRegion::ChineseAmbiguous;
+}
+
+namespace detail {
+struct IndicLanguageRow {
+  char primary[4];
+  uint8_t script;  // an index into indic::SCRIPTS
+};
+inline constexpr IndicLanguageRow kIndicLanguages[] = {
+    {"hi", 0},  {"mr", 0},  {"ne", 0},  {"sa", 0},  {"kok", 0}, {"mai", 0}, {"bho", 0}, {"awa", 0},
+    {"mag", 0}, {"raj", 0}, {"doi", 0}, {"brx", 0}, {"new", 0}, {"bn", 1},  {"as", 1},  {"mni", 1},
+    {"pa", 2},  {"gu", 3},  {"or", 4},  {"ta", 5},  {"te", 6},  {"kn", 7},  {"ml", 8},  {"si", 9},
+};
+}  // namespace detail
+
+// The Indic script a tag is written in, or null for a language not written in one. A tag that names another script
+// ("sa-Latn", "mni-Mtei") is not Indic here: the Noto family of the language's own script would draw it wrongly.
+// `name` is the Noto family suffix (NotoSans/NotoSerif + name), `probe` a consonant every font of the script maps.
+inline const indic::ScriptInfo* indicScriptOf(const std::string& rawTag) {
+  const std::string tag = normalised(rawTag);
+  for (const auto& language : detail::kIndicLanguages) {
+    if (!hasPrimary(tag, language.primary)) continue;
+    const indic::ScriptInfo& script = indic::SCRIPTS[language.script];
+    // A script subtag is four letters; a region is two, a variant four with a digit first. A singleton ends the
+    // scan: extensions and private use follow it, and name no script of the language.
+    for (size_t at = tag.find('-'); at != std::string::npos; at = tag.find('-', at + 1)) {
+      const size_t end = tag.find('-', at + 1);
+      const size_t len = (end == std::string::npos ? tag.size() : end) - at - 1;
+      if (len == 1) break;
+      if (len != 4 || tag[at + 1] < 'a' || tag[at + 1] > 'z') continue;
+      uint32_t code = 0;
+      for (size_t i = 0; i < 4; ++i) code = (code << 8) | static_cast<uint8_t>(tag[at + 1 + i]);
+      if (code != (script.isoTag | 0x20202020u)) return nullptr;
+    }
+    return &script;
+  }
+  return nullptr;
 }
 
 }  // namespace language_tag
