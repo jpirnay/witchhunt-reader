@@ -57,8 +57,7 @@ TEST(ShippedFontFilesTest, EveryOutlineFileIsTheSizeAndCrcTheManifestNames) {
     const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     EXPECT_EQ(bytes.size(), entry.size) << entry.name;
     ASSERT_TRUE(entry.hasCrc32) << entry.name;
-    EXPECT_EQ(serialtransfer::crc32Update(0, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()),
-              entry.crc32)
+    EXPECT_EQ(serialtransfer::crc32Update(0, reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()), entry.crc32)
         << entry.name << " changed without scripts/generate-font-manifest.py --manifest";
     ++checked;
   }
