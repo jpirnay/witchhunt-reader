@@ -27,7 +27,8 @@ from fontTools.merge.options import Options
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.scaleUpem import scale_upem
 
-# The languages the corpus is shaped with besides none, by script (the key of test/ot_shaper/generate_corpus.py).
+# The languages the corpus is shaped with besides none, by script (the key of test/ot_shaper/generate_corpus.py): the
+# merge check's set. test/ot_shaper/oracle_shipped_fonts.py covers every language the reader maps (LanguageTag.h).
 LANGS = {"devanagari": ["hi", "mr", "ne", "sa"], "bengali": ["bn", "as"], "gurmukhi": ["pa"], "gujarati": ["gu"],
          "oriya": ["or"], "tamil": ["ta"], "telugu": ["te"], "kannada": ["kn"], "malayalam": ["ml"],
          "sinhala": ["si"]}

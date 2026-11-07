@@ -6,7 +6,7 @@ The fonts carry these copyrights:
 
 Noto Sans CJK: Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
 Noto Serif CJK: Copyright 2017-2024 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
-Noto Sans: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic).
+Noto Sans and Noto Serif (the Latin, Greek and Cyrillic): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic).
 Noto Sans and Noto Serif Devanagari: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari).
 Noto Sans and Noto Serif Bengali: Copyright 2025 The Noto Project Authors (https://github.com/notofonts/bengali).
 Noto Sans and Noto Serif Gurmukhi: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/gurmukhi).
