@@ -527,7 +527,7 @@ TEST(OtUnicodeData, TheIndicBlocksAreUnchanged) {
 
 TEST(OtUnicodeData, ArabicCharactersCarryHarfBuzzsProps) {
   EXPECT_EQ(ot::charData(0x0628).genCat, ot::gc::OTHER_LETTER);
-  EXPECT_EQ(ot::charData(0x0640).genCat, 6u);  // MODIFIER_LETTER
+  EXPECT_EQ(ot::charData(0x0640).genCat, ot::gc::MODIFIER_LETTER);
   EXPECT_EQ(ot::charData(0x064B).genCat, ot::gc::NON_SPACING_MARK);
   EXPECT_EQ(ot::charData(0x061C).genCat, ot::gc::FORMAT);
   EXPECT_TRUE(ot::charData(0x061C).ignorable);

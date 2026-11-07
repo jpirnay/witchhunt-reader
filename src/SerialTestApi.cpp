@@ -946,14 +946,14 @@ constexpr unsigned kShapeSlots = 112;         // the shaper's buffer: room to gr
 // Rounds a 26.6 value to whole pixels, halves away from zero.
 int roundPixels(const int32_t v) { return v >= 0 ? (v + 32) / 64 : -((-v + 32) / 64); }
 
-// An Arabic letter or mark of the blocks the shaper's fixtures cover (Arabic, Supplement, Extended-A): general category
-// Lo, Lm or a mark. Digits, punctuation and the number signs are not.
+// An Arabic letter or mark of the blocks the shaper's fixtures cover (Arabic, Supplement, Extended-B and -A): general
+// category Lo, Lm or a mark. Digits, punctuation and the number signs are not.
 bool isArabicLetterOrMark(const uint32_t cp) {
   if (!((cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0750 && cp <= 0x077F) || (cp >= 0x0870 && cp <= 0x08FF))) {
     return false;
   }
   const uint8_t cat = ot::charData(cp).genCat;
-  return cat == ot::gc::OTHER_LETTER || cat == 6 /* Lm */ || ot::gc::isMark(cat);
+  return cat == ot::gc::OTHER_LETTER || cat == ot::gc::MODIFIER_LETTER || ot::gc::isMark(cat);
 }
 
 // Shapes the first Indic or Arabic run of `text` with the body family's regular style at the body size, as a section

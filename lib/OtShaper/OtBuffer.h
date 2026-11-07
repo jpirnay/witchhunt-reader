@@ -24,6 +24,7 @@ constexpr uint16_t CF_ZWNJ = 0x0200;
 namespace gc {
 constexpr uint8_t FORMAT = 1;
 constexpr uint8_t UNASSIGNED = 2;
+constexpr uint8_t MODIFIER_LETTER = 6;
 constexpr uint8_t OTHER_LETTER = 7;
 constexpr uint8_t SPACING_MARK = 10;
 constexpr uint8_t NON_SPACING_MARK = 12;
