@@ -235,8 +235,8 @@ Results on our X3, 2026-11-07, read within minutes (bands: control, then re-driv
 - Every band held black lands within 103.3-104.6 after the white drive, whatever its family and hold; the
   never-black controls read 105.4 and 106.1. Re-driving leaves nothing behind that the other two do not.
 - Re-driving deepens the black while it is held: about -1 to 0 against about 4 for one drive or rest.
-- Not measured: hours or days of reading, and what the DC does to the panel over that time. In the reader
-  nothing cancels it; the periodic HALF only redraws the page.
+- Not measured: hours or days of reading, and what the DC does to the panel over that time. Whether the
+  reader's periodic HALF cancels any of it is not checked.
 - The `t10-rest` shot read 6 points high at the top and 13 low at the bottom, controls included, while three
   later shots of the unchanged panel agreed within 0.2: a camera artifact, not the panel.
 
