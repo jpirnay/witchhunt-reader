@@ -622,13 +622,13 @@
       "files": [
         {
           "name": "NotoSansBengali/NotoSansBengali-Bold.ttf",
-          "size": 233628,
-          "crc32": 3701063827
+          "size": 193780,
+          "crc32": 3295404897
         },
         {
           "name": "NotoSansBengali/NotoSansBengali-Regular.ttf",
-          "size": 233880,
-          "crc32": 1728269704
+          "size": 194508,
+          "crc32": 1705345350
         }
       ]
     },
@@ -644,13 +644,13 @@
       "files": [
         {
           "name": "NotoSansDevanagari/NotoSansDevanagari-Bold.ttf",
-          "size": 310280,
-          "crc32": 3863417360
+          "size": 266580,
+          "crc32": 2599427370
         },
         {
           "name": "NotoSansDevanagari/NotoSansDevanagari-Regular.ttf",
-          "size": 310124,
-          "crc32": 590218446
+          "size": 269804,
+          "crc32": 3016022005
         }
       ]
     },
@@ -704,13 +704,13 @@
       "files": [
         {
           "name": "NotoSansGujarati/NotoSansGujarati-Bold.ttf",
-          "size": 277468,
-          "crc32": 1816136366
+          "size": 237024,
+          "crc32": 2688844120
         },
         {
           "name": "NotoSansGujarati/NotoSansGujarati-Regular.ttf",
-          "size": 278384,
-          "crc32": 2391890313
+          "size": 238396,
+          "crc32": 2489311264
         }
       ]
     },
@@ -726,13 +726,13 @@
       "files": [
         {
           "name": "NotoSansGurmukhi/NotoSansGurmukhi-Bold.ttf",
-          "size": 156836,
-          "crc32": 3706719608
+          "size": 117100,
+          "crc32": 298265558
         },
         {
           "name": "NotoSansGurmukhi/NotoSansGurmukhi-Regular.ttf",
-          "size": 156036,
-          "crc32": 3926052648
+          "size": 116768,
+          "crc32": 1210157278
         }
       ]
     },
@@ -780,13 +780,13 @@
       "files": [
         {
           "name": "NotoSansKannada/NotoSansKannada-Bold.ttf",
-          "size": 258600,
-          "crc32": 2549820959
+          "size": 215536,
+          "crc32": 2389245400
         },
         {
           "name": "NotoSansKannada/NotoSansKannada-Regular.ttf",
-          "size": 259192,
-          "crc32": 1555637896
+          "size": 216588,
+          "crc32": 2282184591
         }
       ]
     },
@@ -802,13 +802,13 @@
       "files": [
         {
           "name": "NotoSansMalayalam/NotoSansMalayalam-Bold.ttf",
-          "size": 197044,
-          "crc32": 1311967525
+          "size": 157276,
+          "crc32": 3093068215
         },
         {
           "name": "NotoSansMalayalam/NotoSansMalayalam-Regular.ttf",
-          "size": 197348,
-          "crc32": 2684120513
+          "size": 158060,
+          "crc32": 2833100757
         }
       ]
     },
@@ -824,13 +824,13 @@
       "files": [
         {
           "name": "NotoSansOriya/NotoSansOriya-Bold.ttf",
-          "size": 255376,
-          "crc32": 3827783146
+          "size": 212420,
+          "crc32": 20349496
         },
         {
           "name": "NotoSansOriya/NotoSansOriya-Regular.ttf",
-          "size": 255492,
-          "crc32": 1236774420
+          "size": 213000,
+          "crc32": 1093744522
         }
       ]
     },
@@ -862,13 +862,13 @@
       "files": [
         {
           "name": "NotoSansSinhala/NotoSansSinhala-Bold.ttf",
-          "size": 213552,
-          "crc32": 1420482565
+          "size": 170620,
+          "crc32": 1080559939
         },
         {
           "name": "NotoSansSinhala/NotoSansSinhala-Regular.ttf",
-          "size": 214336,
-          "crc32": 2949767590
+          "size": 171908,
+          "crc32": 3748700699
         }
       ]
     },
@@ -900,13 +900,13 @@
       "files": [
         {
           "name": "NotoSansTamil/NotoSansTamil-Bold.ttf",
-          "size": 169540,
-          "crc32": 2825060028
+          "size": 129380,
+          "crc32": 3032892447
         },
         {
           "name": "NotoSansTamil/NotoSansTamil-Regular.ttf",
-          "size": 168652,
-          "crc32": 1659617111
+          "size": 128972,
+          "crc32": 4147110850
         }
       ]
     },
@@ -922,13 +922,13 @@
       "files": [
         {
           "name": "NotoSansTelugu/NotoSansTelugu-Bold.ttf",
-          "size": 290804,
-          "crc32": 2558214811
+          "size": 250408,
+          "crc32": 439283067
         },
         {
           "name": "NotoSansTelugu/NotoSansTelugu-Regular.ttf",
-          "size": 289432,
-          "crc32": 2499075215
+          "size": 249504,
+          "crc32": 358635285
         }
       ]
     },
@@ -944,13 +944,13 @@
       "files": [
         {
           "name": "NotoSerifBengali/NotoSerifBengali-Bold.ttf",
-          "size": 325800,
-          "crc32": 577307415
+          "size": 283464,
+          "crc32": 1677976300
         },
         {
           "name": "NotoSerifBengali/NotoSerifBengali-Regular.ttf",
-          "size": 326528,
-          "crc32": 2245003351
+          "size": 284288,
+          "crc32": 1477390827
         }
       ]
     },
@@ -966,13 +966,13 @@
       "files": [
         {
           "name": "NotoSerifDevanagari/NotoSerifDevanagari-Bold.ttf",
-          "size": 329232,
-          "crc32": 3812547621
+          "size": 286472,
+          "crc32": 1255588793
         },
         {
           "name": "NotoSerifDevanagari/NotoSerifDevanagari-Regular.ttf",
-          "size": 344676,
-          "crc32": 125224218
+          "size": 302032,
+          "crc32": 2284082704
         }
       ]
     },
@@ -1026,13 +1026,13 @@
       "files": [
         {
           "name": "NotoSerifGujarati/NotoSerifGujarati-Bold.ttf",
-          "size": 235020,
-          "crc32": 4293691761
+          "size": 190440,
+          "crc32": 1875737715
         },
         {
           "name": "NotoSerifGujarati/NotoSerifGujarati-Regular.ttf",
-          "size": 237652,
-          "crc32": 2833264774
+          "size": 193192,
+          "crc32": 1117652026
         }
       ]
     },
@@ -1048,13 +1048,13 @@
       "files": [
         {
           "name": "NotoSerifGurmukhi/NotoSerifGurmukhi-Bold.ttf",
-          "size": 170284,
-          "crc32": 20184127
+          "size": 128532,
+          "crc32": 1864444948
         },
         {
           "name": "NotoSerifGurmukhi/NotoSerifGurmukhi-Regular.ttf",
-          "size": 170248,
-          "crc32": 295741843
+          "size": 128592,
+          "crc32": 687237679
         }
       ]
     },
@@ -1102,13 +1102,13 @@
       "files": [
         {
           "name": "NotoSerifKannada/NotoSerifKannada-Bold.ttf",
-          "size": 234864,
-          "crc32": 1263673112
+          "size": 192476,
+          "crc32": 3394417179
         },
         {
           "name": "NotoSerifKannada/NotoSerifKannada-Regular.ttf",
-          "size": 270236,
-          "crc32": 3434890594
+          "size": 227968,
+          "crc32": 1101747005
         }
       ]
     },
@@ -1124,13 +1124,13 @@
       "files": [
         {
           "name": "NotoSerifMalayalam/NotoSerifMalayalam-Bold.ttf",
-          "size": 208508,
-          "crc32": 451355423
+          "size": 161032,
+          "crc32": 1449922952
         },
         {
           "name": "NotoSerifMalayalam/NotoSerifMalayalam-Regular.ttf",
-          "size": 209620,
-          "crc32": 1444134928
+          "size": 162284,
+          "crc32": 756564102
         }
       ]
     },
@@ -1146,13 +1146,13 @@
       "files": [
         {
           "name": "NotoSerifOriya/NotoSerifOriya-Bold.ttf",
-          "size": 284216,
-          "crc32": 643132179
+          "size": 241844,
+          "crc32": 2671383896
         },
         {
           "name": "NotoSerifOriya/NotoSerifOriya-Regular.ttf",
-          "size": 284996,
-          "crc32": 1207910915
+          "size": 242752,
+          "crc32": 610925984
         }
       ]
     },
@@ -1184,13 +1184,13 @@
       "files": [
         {
           "name": "NotoSerifSinhala/NotoSerifSinhala-Bold.ttf",
-          "size": 327360,
-          "crc32": 2729676455
+          "size": 284604,
+          "crc32": 3922027002
         },
         {
           "name": "NotoSerifSinhala/NotoSerifSinhala-Regular.ttf",
-          "size": 331384,
-          "crc32": 1763647955
+          "size": 288744,
+          "crc32": 3223090175
         }
       ]
     },
@@ -1222,13 +1222,13 @@
       "files": [
         {
           "name": "NotoSerifTamil/NotoSerifTamil-Bold.ttf",
-          "size": 187576,
-          "crc32": 4108740103
+          "size": 145444,
+          "crc32": 517777753
         },
         {
           "name": "NotoSerifTamil/NotoSerifTamil-Regular.ttf",
-          "size": 187236,
-          "crc32": 3622155324
+          "size": 145200,
+          "crc32": 1322851179
         }
       ]
     },
@@ -1244,13 +1244,13 @@
       "files": [
         {
           "name": "NotoSerifTelugu/NotoSerifTelugu-Bold.ttf",
-          "size": 327000,
-          "crc32": 1644066339
+          "size": 284620,
+          "crc32": 835000651
         },
         {
           "name": "NotoSerifTelugu/NotoSerifTelugu-Regular.ttf",
-          "size": 328928,
-          "crc32": 1721710834
+          "size": 286668,
+          "crc32": 2903776474
         }
       ]
     },
