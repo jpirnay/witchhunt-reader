@@ -93,7 +93,8 @@ Non-goals:
 explained where it appears):
 - **(controller's) Measure first, as a gated phase.** The plan opens with measure-first items 1-3 before PR 1's code,
   and item 7 before PR 4. Each has a pass line, and a missed pass line reopens the design ("Measure first", below):
-  - flash for PRs 1-3 at most 90 KB, and at least 250 KB of the app slot free after them;
+  - flash for PRs 1-3 at most 90 KB, and at least 250 KB of the app slot free after them; for PR 4 (4a and 4b), at
+    least 235,000 B of the 6,553,600 B slot free on `default` (the maintainer, 2026-11-07);
   - on the X3, at least 10 KB of heap free at the floor of a cold build of a shaped-script fixture, with the shaping
     buffer and plans in place;
   - 0 differences from HarfBuzz on upstream's corpus under our compiler and flags; any difference stops the work
@@ -224,7 +225,10 @@ region, the `ClipSelectionActivity` change, and the tests `flash_blob_cache` and
      syllable is lost; the glyphs stay right;
    - **another style, between syllables, or in Arabic** (a bold letter in a joined word): each token is shaped on its
      own, with its neighbours' runs as `RunContext` `before`/`after` context, so joining and word-start forms hold. A
-     ligature that forms across the glue (lam-alef) is drawn once, in the first token's style.
+     ligature that forms across the glue (lam-alef) is drawn once, in the first token's style;
+   - **a mark-only token after an Arabic letter** (a harakat in a span of its own: tajweed colouring, a children's
+     book), refined by the maintainer on 2026-11-07 after measure-first item 7: merged into its base's token, as the
+     Hebrew rule does. The mark is placed on its base; its own style is lost.
    A merged token keeps the first token's link and visible offset; the parts' logical texts are joined.
 8. **Joiners** (the controller's call). Upstream's parser keeps ZWJ and ZWNJ. Ours drops every Default_Ignorable code
    point (`ChapterHtmlSlimParser` at the `defaultIgnorableLen` skip; `utf8IsDefaultIgnorable`, `Utf8.h`), which a
@@ -545,7 +549,10 @@ Each opens against master after the one before it has merged (#398, #584). Befor
      `VerticalRulesTest`: no glyph form on a line without a shaped letter, every shaped word's form sums to its
      measured width, no break inside a syllable.
    - `USER_GUIDE.md`, the roadmap, a reference page for shaping.
-4. **Arabic joining.** Its code starts once measure-first item 7 has passed.
+4. **Arabic joining.** Its code starts once measure-first item 7 has passed. Split by the maintainer on 2026-11-07
+   into **PR 4a**, the engine (deviation 11, the generator's Arabic tables, the direction) and its oracle, and
+   **PR 4b**, the rest of this item: the Arabic module, shaping in bidi paragraphs (Indic words there too), the line
+   pass's run-cut pieces, the two Font Manager families and the docs.
    - Deviation 11 in the engine, with the generator's Arabic tables; the Arabic module; the line pass's run-cut pieces
      and its fallback.
    - The Font Manager's 2 Arabic families (Noto Naskh Arabic, Noto Sans Arabic, decision 6); the section version.
@@ -632,7 +639,7 @@ The pass lines:
 | Item | Pass line | Missed |
 |---|---|---|
 | 1 | 0 differences from HarfBuzz on upstream's corpus under our compiler and flags | stop and look: no PR until the difference is understood |
-| 2 | flash for PRs 1-3 at most 90 KB; at least 250 KB of the app slot free after them | the design reopens |
+| 2 | flash for PRs 1-3 at most 90 KB; at least 250 KB of the app slot free after them; PR 4: at least 235,000 B free (2026-11-07) | the design reopens |
 | 3 | each merged family fits the font area, and builds in place or not, as this design says (flash or SD mode; the in-place gate) | the design reopens |
 | 6 | on the X3, at least 10 KB of heap free at the floor of a cold build of a shaped-script fixture, with the shaping buffer, faces and plans in place | the design reopens |
 | 6 | on the X3, a shaped chapter builds in at most twice the time of a Latin chapter of the same length | #3787's run cache comes back |
