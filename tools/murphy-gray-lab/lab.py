@@ -98,6 +98,12 @@ def net_drive(table):
     return sum(frames * (1 if level in (VSH, 3) else -1) for level, frames in sub_phases(table) if level != REST)
 
 
+# The firmware's own limits (src/LabRules.h kMaxFrames, kMaxNetFrames): it refuses a LUT longer than this, or
+# one that drives further one way in a refresh. Checked here too, so a dry run finds what the device refuses.
+MAX_FRAMES = 96
+MAX_NET_FRAMES = 32
+
+
 def total_frames(table):
     return sum(frames for _, frames in sub_phases(table))
 
@@ -380,6 +386,11 @@ class Lab:
             self.journal_add(cfg, bank, dtm1, dtm2, label)
 
     def _send(self, cfg, bank, dtm1, dtm2, label, go="GO"):
+        for slot, table in enumerate(bank):
+            if total_frames(table) > MAX_FRAMES:
+                raise LabError(f"{label}: LUT {slot} runs {total_frames(table)} frames, the firmware takes {MAX_FRAMES}")
+            if abs(net_drive(table)) > MAX_NET_FRAMES:
+                raise LabError(f"{label}: LUT {slot} drives {net_drive(table):+} net, the firmware takes {MAX_NET_FRAMES}")
         print(f"{label}:")
         for name, slot in (("VCOM", VCOM), ("WW", WW), ("KW", KW), ("WK", WK), ("KK", KK)):
             print(f"  {name:4} net {net_drive(bank[slot]):+4}  {describe(bank[slot])}")
