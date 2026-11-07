@@ -446,6 +446,9 @@ class CrossPointSettings {
 #else
   uint8_t textAntiAliasing = 1;
 #endif
+  // Where the panel offers it, a text page and its grays go up in one refresh instead of the B/W page
+  // and then the gray pass: no second flicker, at the price of one gray level instead of two.
+  uint8_t onePassTextAa = 0;
   // X3-only: when on, the AA refresh uses the 7-frame community grayscale LUT
   // (~130 ms panel time) instead of the OEM 53-frame LUT (~2.4 s). Mid-tones
   // run slightly darker than X4. Matches what papyrix-reader has shipped since

@@ -27,6 +27,8 @@ to white would drive the whole background one way on every page.
 Three levels fit: rest, to white, to black, and one gray such as VSL 4, VSH 8, VSL 4, which nets to zero
 and takes 16 frames, as long as FAST. The reader already has a one-push path for it
 (`supportsGrayFrame()`). Text darkness Lighter shows roughly how one gray looks. Not built, not measured.
+Built 2026-11-07 as the One-Pass Anti-Aliasing setting, with gray at VSL 5, VSH 8, VSL 3 (about 48 %), and
+measured: see [one-pass-text-aa.md](one-pass-text-aa.md).
 
 ## Images
 
