@@ -2,6 +2,7 @@
 
 #include <BoardConfig.h>
 #include <HalCapabilities.h>
+#include <HalDisplay.h>
 #include <HalFrontlight.h>
 #include <HalGPIO.h>
 #include <I18n.h>
@@ -336,6 +337,12 @@ inline void buildSettings(const RowSink& emit) {
                            StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_READER_FONT)
            .requiring(SettingRequires::GrayscalePanel));
+  // Global on purpose: a book's Text Anti-Aliasing override still turns AA off, but how the panel
+  // draws it is one choice for the device, so there is no per-book override of this.
+  emit(SettingInfo::Toggle(StrId::STR_ONE_PASS_AA, &CrossPointSettings::onePassTextAa, "onePassTextAa",
+                           StrId::STR_CAT_READER)
+           .withSubmenu(StrId::STR_MENU_READER_FONT)
+           .requiring(SettingRequires::OnePassTextPanel));
   // X3-only fast AA LUT toggle. Swaps the 53-frame OEM grayscale waveform
   // (~2.4 s panel time, X4-accurate grays) for the 7-frame community LUT
   // (~130 ms, mid-tones slightly darker). See freeink-sdk
@@ -782,6 +789,8 @@ inline bool boardHas(const SettingRequires capability) {
       return HalCapabilities::panelShowsGray() && HalCapabilities::hasSelectableGrayscaleLut();
     case SettingRequires::GrayscalePanel:
       return HalCapabilities::panelShowsGray();
+    case SettingRequires::OnePassTextPanel:
+      return display.supportsOnePassText();
     case SettingRequires::ReadingLight:
       // Asked of the HAL rather than the board profile: the EEGO A4's I2C
       // light is only present after begin() gets an ACK, so the profile alone
@@ -812,6 +821,10 @@ inline bool boardKeeps(const SettingRequires capability) {
       return HalCapabilities::hasTouch();
     case SettingRequires::MultiTouchPanel:
       return HalCapabilities::hasMultiTouch();
+    case SettingRequires::OnePassTextPanel:
+      // The settings load before the display comes up, so the driver cannot be asked yet, and a row
+      // missing from that load would go from the next save. A spare row costs a board nothing.
+      return true;
     case SettingRequires::Nothing:
     case SettingRequires::TiltSensor:
     case SettingRequires::SelectableGrayscaleLut:
