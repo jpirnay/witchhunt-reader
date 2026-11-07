@@ -287,7 +287,7 @@ gesture key and keeps the compiled defaults. Bump it when a gesture default or a
 changes. A bump discards users' gesture customisation, so stop bumping once the defaults have
 settled. Any other setting whose unset value is also a meaningful choice needs the same before its
 default can change; for a single flag, renaming the JSON key is the precedent
-(`fastAntiAliasing` to `fastAntiAliasingV2`).
+(`fastAntiAliasing` to `fastAntiAliasingV2`, for a setting since removed).
 
 ### A list is tappable only if its screen says so
 

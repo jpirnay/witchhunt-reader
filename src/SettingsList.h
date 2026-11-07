@@ -336,14 +336,6 @@ inline void buildSettings(const RowSink& emit) {
                            StrId::STR_CAT_READER)
            .withSubmenu(StrId::STR_MENU_READER_FONT)
            .requiring(SettingRequires::GrayscalePanel));
-  // X3-only fast AA LUT toggle. Swaps the 53-frame OEM grayscale waveform
-  // (~2.4 s panel time, X4-accurate grays) for the 7-frame community LUT
-  // (~130 ms, mid-tones slightly darker). See freeink-sdk
-  // FreeInkDisplay::setFastGrayscaleLut for trade-offs.
-  emit(SettingInfo::Toggle(StrId::STR_FAST_AA, &CrossPointSettings::fastAntiAliasing, "fastAntiAliasingV2",
-                           StrId::STR_CAT_READER)
-           .withSubmenu(StrId::STR_MENU_READER_FONT)
-           .requiring(SettingRequires::SelectableGrayscaleLut));
   emit(SettingInfo::Enum(
            StrId::STR_TEXT_DARKNESS, &CrossPointSettings::textDarkness,
            {StrId::STR_NORMAL, StrId::STR_DARK, StrId::STR_EXTRA_DARK, StrId::STR_MAX_DARK, StrId::STR_LIGHTER},
@@ -776,10 +768,6 @@ inline bool boardHas(const SettingRequires capability) {
       return gpio.hasTouch();
     case SettingRequires::TiltSensor:
       return BoardConfig::ACTIVE.sensors.imuType != BoardConfig::ImuType::None;
-    case SettingRequires::SelectableGrayscaleLut:
-      // SSD1677 develops grayscale from a factory waveform, so there is no
-      // LUT to swap and the fast/OEM trade-off does not exist there.
-      return HalCapabilities::panelShowsGray() && HalCapabilities::hasSelectableGrayscaleLut();
     case SettingRequires::GrayscalePanel:
       return HalCapabilities::panelShowsGray();
     case SettingRequires::ReadingLight:
@@ -814,7 +802,6 @@ inline bool boardKeeps(const SettingRequires capability) {
       return HalCapabilities::hasMultiTouch();
     case SettingRequires::Nothing:
     case SettingRequires::TiltSensor:
-    case SettingRequires::SelectableGrayscaleLut:
     case SettingRequires::GrayscalePanel:
     case SettingRequires::ReadingLight:
     case SettingRequires::WarmLight:

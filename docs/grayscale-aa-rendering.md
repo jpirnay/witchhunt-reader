@@ -131,9 +131,6 @@ UC8179 and UC8279 X4 use `_redriveAfterGray`. UC8279d and SSD1677 do not track i
 | AA gray waveform (`X3_DRF`) | ~228 ms |
 | Periodic scrub (`X3_DRF_half`) | ~460 ms |
 
-`setFastGrayscaleLut()` stores the reader's Fast anti-aliasing preference, but no current driver reads
-it: the X3 driver carries a single `gc` nudge bank (open, see future_work).
-
 ### Invariant that makes this safe
 
 The write buffer holds plane data from step 1 to step 9. That is safe because:
@@ -205,7 +202,6 @@ but the reader does not use it.
 | `copyGrayscaleLsbBuffers()` / `copyGrayscaleMsbBuffers()` | `GfxRenderer` → `HalDisplay` → `FreeInkDisplay` | Stream a plane to the controller |
 | `displayGrayBuffer()` | `GfxRenderer` → `HalDisplay` → `FreeInkDisplay` | Run the grayscale waveform (no swap) |
 | `cleanupGrayscaleWithPreviousBuffer()` | `GfxRenderer` → `HalDisplay` → `FreeInkDisplay` | Restore the driver's baseline and the write buffer from `frameBufferActive`; with the secondary away, tell the driver there is no baseline |
-| `setFastGrayscaleLut(bool)` | `GfxRenderer` | Stores the Fast AA preference; currently read by no driver |
 
 ## Scheduling: the deferred pass runs before the next-page pre-render
 

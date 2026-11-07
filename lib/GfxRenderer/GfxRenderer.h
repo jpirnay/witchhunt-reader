@@ -868,7 +868,7 @@ class GfxRenderer {
   // write buffer then keeps the last plane.
   //
   // renderFn is called twice (LSB, MSB). The RenderMode argument tells it which
-  // pass is running. The caller sets setFastGrayscaleLut() before calling.
+  // pass is running.
   //
   // Returns wall-clock timings for each of the three phases.
   //
@@ -985,8 +985,6 @@ class GfxRenderer {
 
   // X3-only: trade AA visual fidelity for ~2.2 s faster page-flip wall clock.
   // No effect on X4 (its single grayscale LUT already runs at ~500 ms).
-  void setFastGrayscaleLut(bool fast) const { display.setFastGrayscaleLut(fast); }
-  bool getFastGrayscaleLut() const { return display.getFastGrayscaleLut(); }
 
   // Active pixel-write target for raw writers that bypass drawPixel for speed.
   // Returns the full framebuffer and its extent ([0, panelHeight)).
