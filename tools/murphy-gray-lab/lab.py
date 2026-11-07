@@ -14,7 +14,10 @@ import sys
 import time
 from pathlib import Path
 
-WIDTH, HEIGHT = 240, 416  # controller-native
+# LAB_BOARD=x3 drives the Xteink X3 lab build (-DLAB_BOARD_X3): another panel, and another LUT layout.
+BOARD = os.environ.get("LAB_BOARD", "murphy")
+X3 = BOARD == "x3"
+WIDTH, HEIGHT = (792, 528) if X3 else (240, 416)  # controller-native
 ROW_BYTES = WIDTH // 8
 PLANE_BYTES = ROW_BYTES * HEIGHT
 LUT_BYTES = 42
@@ -38,6 +41,8 @@ CONFIGS = {
 
 def lut(*phases):
     """A 42-byte LUT from (level, frames) pairs, four sub-phases to a group."""
+    if X3:
+        return _x3_lut(phases)
     subs = []
     for level, frames in phases:
         while frames > 0:
@@ -53,7 +58,35 @@ def lut(*phases):
     return bytes(out).ljust(LUT_BYTES, b"\0")
 
 
+def _x3_lut(phases):
+    """The X3's layout: groups of 6, a level byte for four sub-phases (phase 1 in bits 7:6), four frame
+    counts, and a repeat of 1."""
+    subs = []
+    for level, frames in phases:
+        while frames > 0:
+            step = min(frames, 255)
+            subs.append((level, step))
+            frames -= step
+    out = bytearray()
+    for i in range(0, len(subs), 4):
+        chunk = subs[i : i + 4] + [(REST, 0)] * (4 - len(subs[i : i + 4]))
+        levels = 0
+        for k, (level, _) in enumerate(chunk):
+            levels |= level << (6 - 2 * k)
+        out += bytes([levels, *(f for _, f in chunk), 1])
+    if len(out) > LUT_BYTES:
+        raise ValueError("waveform needs more than seven groups")
+    return bytes(out).ljust(LUT_BYTES, b"\0")
+
+
 def sub_phases(table):
+    if X3:
+        for group in range(0, LUT_BYTES, 6):
+            for k in range(4):
+                frames = table[group + 1 + k]
+                if frames:
+                    yield (table[group] >> (6 - 2 * k)) & 3, frames
+        return
     for group in range(0, LUT_BYTES, 7):
         for byte in table[group + 1 : group + 5]:
             if byte & 0x3F:
@@ -78,6 +111,15 @@ def mirror(table):
     if any(level == 3 for level, _ in sub_phases(table)):
         raise ValueError("VDHR has no mirror at the same voltage")
     out = bytearray(table)
+    if X3:
+        for group in range(0, LUT_BYTES, 6):
+            levels = 0
+            for k in range(4):
+                level = (out[group] >> (6 - 2 * k)) & 3
+                level = {VSH: VSL, VSL: VSH}.get(level, level)
+                levels |= level << (6 - 2 * k)
+            out[group] = levels
+        return bytes(out)
     for group in range(0, LUT_BYTES, 7):
         for i in range(group + 1, group + 5):
             level = out[i] >> 6
@@ -134,6 +176,21 @@ PRODUCTION_BANK = [
     _recipe_lut((1, 0x4F, 0x8F, 0x4F, 1, 1, 1)),
     _recipe_lut((1, 0x0F, 0x8F, 0x4F, 1, 1, 1)),
 ]
+
+
+if X3:
+    # The X3's full refresh (freeink-sdk lut/Uc8253X3Luts.h, _full), the bank its lab firmware cleans with.
+    # A base page with both planes alike fires only WW and BB, which net to zero.
+    def _x3_raw(*groups):
+        return bytes(b for group in groups for b in group).ljust(LUT_BYTES, b"\0")
+
+    PRODUCTION_BANK = [
+        _x3_raw((0x00, 0x18, 0x04, 0x0E, 0x0A, 0x01), (0x00, 0x0A, 0x00, 0x00, 0x00, 0x01)),
+        _x3_raw((0x4A, 0x18, 0x04, 0x0E, 0x0A, 0x01), (0x00, 0x0A, 0x00, 0x00, 0x00, 0x01)),
+        _x3_raw((0x0A, 0x18, 0x04, 0x0E, 0x0A, 0x01), (0x00, 0x0A, 0x00, 0x00, 0x00, 0x01)),
+        _x3_raw((0x04, 0x18, 0x04, 0x0E, 0x0A, 0x01), (0x40, 0x0A, 0x00, 0x00, 0x00, 0x01)),
+        _x3_raw((0x84, 0x18, 0x04, 0x0E, 0x0A, 0x01), (0x40, 0x0A, 0x00, 0x00, 0x00, 0x01)),
+    ]
 
 
 # FAST as the manufacturer gave it, 15 frames each way. Unchanged pixels rest. The driver now gives
@@ -553,10 +610,13 @@ READER_GRAY_BANK = [
 ]
 
 
-def onepass_bank(gray, swing, white=20, black=15):
+def onepass_bank(gray, swing, white=None, black=None):
     """One refresh for a whole page, as a one-pass driver would send it. A pixel that stays white
     rests, a pixel leaving ink takes FAST's drive to white, black takes FAST's drive to black, and the
     one gray lands from any start: `swing` frames of VSH take it to black first."""
+    # FAST's own drives: Murphy 20 to white and 15 to black, the X3 18 each way.
+    white = white if white is not None else (18 if X3 else 20)
+    black = black if black is not None else (18 if X3 else 15)
     white_t, gray_t, black_t = lut((VSL, white)), landing(gray, swing), lut((VSH, black))
     return make_bank(rest_like(white_t, gray_t, black_t), white_t, gray_t, black_t)
 
@@ -568,7 +628,21 @@ T9_TARGETS = ((WW, "hold"), (KW, "white"), (WK, "gray"), (KK, "black"))
 T9_BAND = HEIGHT // (len(T9_STARTS) * len(T9_TARGETS))
 
 
-def test9_onepass(lab, gray, swing, again, from_onepass=False):
+def test0_slots(lab):
+    """Which plane code selects which LUT, on a clean white panel. Four bands, each code once, top to
+    bottom (1,1), (0,1), (1,0), (0,0); LUT 21-24 land white, light, mid and black. Nets to zero."""
+    lab.arm()
+    lab.clean("white")
+    frame = Frame(WW)
+    band = HEIGHT // 4
+    for index, slot in enumerate((WW, KW, WK, KK)):
+        frame.rect(0, index * band, WIDTH, band, slot)
+    bank = make_bank(lut((REST, 32)), nudge("white", 3), nudge("white", 6), nudge("white", 16))
+    lab.push("prod", bank, frame, "slot identification")
+    photo("t0-slots", "bands top to bottom: codes (1,1) (0,1) (1,0) (0,0); LUT 21 white, 22 light, 23 mid, 24 black")
+
+
+def test9_onepass(lab, gray, swing, again, from_onepass=False, white=None, black=None):
     """Every start against every one-pass slot, one band each, top to bottom: start-major.
 
     The gray bands should match each other whatever they started from, white from ink should match
@@ -585,7 +659,7 @@ def test9_onepass(lab, gray, swing, again, from_onepass=False):
                 base.rect(0, y, WIDTH, T9_BAND, KK)
             nudge.rect(0, y, WIDTH, T9_BAND, {"light": KW, "dark": WK}.get(start, KK))
             onepass.rect(0, y, WIDTH, T9_BAND, slot)
-    bank = onepass_bank(gray, swing)
+    bank = onepass_bank(gray, swing, white, black)
     if from_onepass:
         first = Frame(WW)
         for s, start in enumerate(T9_STARTS):
@@ -595,7 +669,8 @@ def test9_onepass(lab, gray, swing, again, from_onepass=False):
     else:
         lab.push("prod", PRODUCTION_BANK, base, "t9 base", journal=False)
         lab.push("prod", READER_GRAY_BANK, nudge, "t9 reader nudge")
-    tag = f"g{gray}-s{swing}" + ("-op" if from_onepass else "")
+    tag = f"g{gray}-s{swing}" + (f"-w{white}" if white else "") + (f"-b{black}" if black else "")
+    tag += "-op" if from_onepass else ""
     if lab.camera:
         lab.camera(f"t9-start-{tag}")
     lab.push("prod", bank, onepass, f"t9 one-pass {tag}", journal=False)
@@ -922,6 +997,7 @@ def main():
     steps.add_parser("black", help="clean black")
     steps.add_parser("undo", help="cancel journalled drive, then clean white")
     steps.add_parser("marks", help="calibration marks for cam.py")
+    steps.add_parser("t0", help="which plane code selects which LUT")
     t1 = steps.add_parser("t1", help="Test 1: the recipe from a known start")
     t1.add_argument("source", choices=("white", "black"))
     t1.add_argument("--again", action="store_true", help="run on top of what is there, no clean first")
@@ -945,6 +1021,8 @@ def main():
     t9.add_argument("--swing", type=int, default=8, help="frames of VSH that reset any start to black")
     t9.add_argument("--again", action="store_true", help="a second one-pass frame on top")
     t9.add_argument("--from-onepass", action="store_true", help="starts set up by a one-pass frame, as in reading")
+    t9.add_argument("--white", type=int, help="frames of VSL to white (default FAST's)")
+    t9.add_argument("--black", type=int, help="frames of VSH to black (default FAST's)")
     t4 = steps.add_parser("t4", help="Test 4: gray patches through a FAST page turn")
     t4.add_argument("--aware", action="store_true", help="mark gray pixels as changed")
     t4.add_argument("--hold", action="store_true", help="stop while the patches are gray")
@@ -993,6 +1071,13 @@ def main():
             lab.clean(args.step)
         elif args.step == "marks":
             show_marks(lab)
+        elif args.step == "t0":
+            import cam
+
+            lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
+            test0_slots(lab)
+            if lab.camera:
+                lab.camera("t0-slots")
         elif args.step == "undo":
             lab.arm()
             lab.undo()
@@ -1009,11 +1094,13 @@ def main():
 
             lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
             test4_patches(lab, args.aware, hold=args.hold)
+        elif args.step == "t9" and X3 and not args.from_onepass:
+            sys.exit("on the X3, t9 needs --from-onepass: the reader's nudge bank is the Murphy's")
         elif args.step == "t9":
             import cam
 
             lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
-            test9_onepass(lab, args.gray, args.swing, args.again, args.from_onepass)
+            test9_onepass(lab, args.gray, args.swing, args.again, args.from_onepass, args.white, args.black)
         elif args.step == "t4-pages":
             test4_pages(lab, args.font, args.size, args.pages, args.mode, variant=args.variant)
         elif args.step == "t8":

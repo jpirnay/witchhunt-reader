@@ -17,6 +17,7 @@ constexpr uint8_t kCmdPowerOff = 0x02;
 constexpr uint8_t kCmdPowerOn = 0x04;
 constexpr uint8_t kCmdBooster = 0x06;
 constexpr uint8_t kCmdDtm1 = 0x10;
+constexpr uint8_t kCmdDataStop = 0x11;
 constexpr uint8_t kCmdRefresh = 0x12;
 constexpr uint8_t kCmdDtm2 = 0x13;
 constexpr uint8_t kCmdLutFirst = 0x20;
@@ -31,9 +32,26 @@ constexpr uint8_t kCmdReadOtp = 0xA2;
 constexpr uint32_t kBusyTimeoutMs = 15000;
 constexpr uint32_t kReadBusyTimeoutMs = 300;
 
+#if LAB_BOARD_X3
+constexpr uint8_t kCmdPowerOffSequence = 0x03;
+constexpr uint8_t kCmdGateSourceStart = 0x65;
+constexpr uint8_t kCmdLvSelection = 0xE1;
+// Uc8253X3Driver writes every LUT at 42 bytes.
+constexpr uint8_t kLutWireBytes[kLutSlots] = {42, 42, 42, 42, 42};
+// The X3's full refresh bank (freeink-sdk lut/Uc8253X3Luts.h, _full, CDI 0x29 0x07). With the same data in
+// both planes only WW (VSH 24, VSL 24) and BB (VSL 24, VSH 24) fire, and both net to zero.
+constexpr Bank kX3FullBank = {{
+    {0x00, 0x18, 0x04, 0x0E, 0x0A, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x01},
+    {0x4A, 0x18, 0x04, 0x0E, 0x0A, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x01},
+    {0x0A, 0x18, 0x04, 0x0E, 0x0A, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x01},
+    {0x04, 0x18, 0x04, 0x0E, 0x0A, 0x01, 0x40, 0x0A, 0x00, 0x00, 0x00, 0x01},
+    {0x84, 0x18, 0x04, 0x0E, 0x0A, 0x01, 0x40, 0x0A, 0x00, 0x00, 0x00, 0x01},
+}};
+#else
 // Production writes VCOM (0x20) and KW (0x22) at 56 bytes. KW mode uses only six groups, so the
 // tail is zero padding, but this keeps the bus traffic identical to the path proven on this unit.
 constexpr uint8_t kLutWireBytes[kLutSlots] = {56, 42, 56, 42, 42};
+#endif
 
 // Murphy production DEFAULT bank (freeink-sdk lut/Uc8253MurphyLuts.h). It is the only bank with
 // months of use on this panel, so clean() uses it. With the same data in both planes only WW and
@@ -65,14 +83,14 @@ void Panel::begin() {
 
 bool Panel::ready() const { return digitalRead(kPinBusy) == HIGH; }
 
-// EpdBus::reset(200): the Murphy panel wants the long settle.
+// EpdBus::reset(200): the Murphy panel wants the long settle. The X3 driver uses reset(50).
 void Panel::reset() {
   digitalWrite(kPinReset, HIGH);
   delay(10);
   digitalWrite(kPinReset, LOW);
   delay(10);
   digitalWrite(kPinReset, HIGH);
-  delay(210);
+  delay(LAB_BOARD_X3 ? 60 : 210);
 }
 
 bool Panel::waitReady(const char* stage, uint32_t timeoutMs) {
@@ -119,13 +137,51 @@ void Panel::fillPlane(uint8_t cmd, uint8_t value) {
   digitalWrite(kPinCs, LOW);
   for (size_t i = 0; i < kPlaneBytes; i++) writeBits(value);
   digitalWrite(kPinCs, HIGH);
+  if (LAB_BOARD_X3) command(kCmdDataStop);
 }
 
-// Uc8253MurphyDriver::initController, with the settings the lab varies taken from `cfg`.
+void Panel::writePlane(uint8_t cmd, const uint8_t* plane) {
+  command(cmd);
+  dataBytes(plane, kPlaneBytes);
+  if (LAB_BOARD_X3) command(kCmdDataStop);
+}
+
+// Uc8253MurphyDriver::initController, with the settings the lab varies taken from `cfg`. On the X3,
+// Uc8253X3Driver::initController as it is: the lab does not vary that panel's voltages.
 bool Panel::initController(const PanelConfig& cfg) {
   error_ = nullptr;
   reset();
   if (!waitReady("reset", kBusyTimeoutMs)) return false;
+#if LAB_BOARD_X3
+  (void)cfg;
+  const uint8_t panelSetting[] = {0x3F, 0x0A};
+  command(kCmdPanelSetting);
+  dataBytes(panelSetting, sizeof(panelSetting));
+  const uint8_t resolution[] = {0x03, 0x18, 0x02, 0x58};
+  command(kCmdResolution);
+  dataBytes(resolution, sizeof(resolution));
+  const uint8_t gateSource[] = {0x00, 0x00, 0x00, 0x00};
+  command(kCmdGateSourceStart);
+  dataBytes(gateSource, sizeof(gateSource));
+  command(kCmdPowerOffSequence);
+  data(0x20);
+  const uint8_t power[] = {0x07, 0x17, 0x3F, 0x3F, 0x17};
+  command(kCmdPowerSetting);
+  dataBytes(power, sizeof(power));
+  command(kCmdVcom);
+  data(0x24);
+  const uint8_t booster[] = {0x25, 0x25, 0x3C, 0x37};
+  command(kCmdBooster);
+  dataBytes(booster, sizeof(booster));
+  command(kCmdPll);
+  data(0x09);
+  command(kCmdLvSelection);
+  data(0x02);
+  const uint8_t cdi[] = {0x29, 0x07};  // the CDI the X3 driver loads its banks with
+  command(kCmdCdi);
+  dataBytes(cdi, sizeof(cdi));
+  return true;
+#else
   const uint8_t power[] = {0x03, 0x10, 0x3F, cfg.vsl, cfg.vdhr};
   command(kCmdPowerSetting);
   dataBytes(power, sizeof(power));
@@ -146,6 +202,7 @@ bool Panel::initController(const PanelConfig& cfg) {
   command(kCmdCdi);
   data(0x97);
   return true;
+#endif
 }
 
 void Panel::loadBank(const Bank& bank) {
@@ -161,9 +218,16 @@ void Panel::loadBank(const Bank& bank) {
 }
 
 bool Panel::finishRefresh(uint32_t* waveformMs, bool powerOff) {
+#if LAB_BOARD_X3
+  // The X3 init leaves the rails off; its driver powers on before every refresh it starts cold.
+  command(kCmdPowerOn);
+  if (!waitReady("power on", kBusyTimeoutMs)) return false;
+#endif
   const uint32_t start = millis();
   command(kCmdRefresh);
   delay(1);  // Good Display sample: BUSY needs at least 200 us to assert
+  // The X3's BUSY can stay high a little after 0x12 (Uc8253X3Driver::displayStart waits up to 50 ms).
+  for (uint32_t t = millis(); LAB_BOARD_X3 && ready() && millis() - t < 50;) delay(1);
   const bool ok = waitReady("refresh", kBusyTimeoutMs);
   if (waveformMs) *waveformMs = millis() - start;
   if (!powerOff) return ok;
@@ -179,7 +243,11 @@ bool Panel::finishRefresh(uint32_t* waveformMs, bool powerOff) {
 bool Panel::clean(Clean target, uint32_t* waveformMs) {
   held_ = false;
   if (!initController(kProductionConfig)) return false;
+#if LAB_BOARD_X3
+  loadBank(kX3FullBank);
+#else
   loadBank(kProductionBank);
+#endif
   const uint8_t fill = target == Clean::White ? 0xFF : 0x00;
   fillPlane(kCmdDtm1, fill);
   fillPlane(kCmdDtm2, fill);
@@ -202,10 +270,8 @@ bool Panel::refresh(const PanelConfig& cfg, const Bank& bank, const uint8_t* dtm
   }
   held_ = false;
   loadBank(bank);
-  command(kCmdDtm1);
-  dataBytes(dtm1, kPlaneBytes);
-  command(kCmdDtm2);
-  dataBytes(dtm2, kPlaneBytes);
+  writePlane(kCmdDtm1, dtm1);
+  writePlane(kCmdDtm2, dtm2);
   const bool hold = handover == Handover::Hold;
   const bool done = finishRefresh(waveformMs, !hold);
   held_ = hold && done;

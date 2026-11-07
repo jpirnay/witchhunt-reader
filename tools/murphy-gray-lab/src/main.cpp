@@ -175,13 +175,17 @@ void handle(char* line) {
   }
 
   if (!strcmp(line, "HELLO")) {
-    Serial.print("OK murphy-gray-lab 1 armed=");
+    Serial.print("OK murphy-gray-lab 1 board=");
+    Serial.print(kBoardName);
+    Serial.print(" armed=");
     Serial.println(armed ? 1 : 0);
   } else if (!strcmp(line, "ARM")) {
     armed = true;
     ok("armed until reset");
   } else if (!strcmp(line, "BUSY")) {
     ok(panel.ready() ? "ready" : "busy");
+  } else if (LAB_BOARD_X3 && (!strcmp(line, "REV") || !strcmp(line, "OTP"))) {
+    fail("the read paths are only proven on the Murphy");
   } else if (!strcmp(line, "REV")) {
     commandRev();
   } else if (!strcmp(line, "OTP")) {
@@ -210,10 +214,13 @@ void handle(char* line) {
 
 void setup() {
   // Off for photographs, and a constant if it were left floating.
-  pinMode(kPinFrontlight, OUTPUT);
-  digitalWrite(kPinFrontlight, LOW);
-  // A frame arrives as one burst, and the default USB receive buffer loses part of it.
-  Serial.setRxBufferSize(2 * kPlaneBytes + 1024);
+  if (kPinFrontlight >= 0) {
+    pinMode(kPinFrontlight, OUTPUT);
+    digitalWrite(kPinFrontlight, LOW);
+  }
+  // A frame arrives as one burst, and the default USB receive buffer loses part of it. The X3's two
+  // planes and a buffer that size do not fit a C3 beside each other; readBytes() drains it as it fills.
+  Serial.setRxBufferSize(LAB_BOARD_X3 ? 16384 : 2 * kPlaneBytes + 1024);
   Serial.begin(115200);
   panel.begin();
 }
