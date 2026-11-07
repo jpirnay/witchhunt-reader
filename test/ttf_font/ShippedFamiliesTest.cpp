@@ -160,6 +160,22 @@ TEST(ShippedTtfFamilies, EachFileLoadsAndEachFamilyFitsTheX3Store) {
   }
 }
 
+// A Hindi or Sanskrit book often carries IAST or ISO 15919 transliteration, so every merged family maps the Latin
+// Extended Additional letters (t, s, n, r, h with a dot below) and the combining dot below (decomposed t + U+0323).
+TEST(ShippedTtfFamilies, EachFileMapsTheIastLetters) {
+  constexpr uint32_t kIast[] = {0x1E6D, 0x1E63, 0x1E47, 0x1E5B, 0x1E25, 0x0323};
+  const std::vector<std::filesystem::path> files = shippedOutlineFiles(".ttf");
+  EXPECT_EQ(files.size(), 40u);
+  for (const auto& path : files) {
+    SCOPED_TRACE(path.filename().generic_string());
+    const std::vector<uint8_t> bytes = readAll(path);
+    FontBytes fontBytes(bytes.data(), static_cast<uint32_t>(bytes.size()));
+    ttf::Face face;
+    ASSERT_EQ(ttf::FaceStatus::Ok, ttf::parseFace(fontBytes, &face));
+    for (const uint32_t cp : kIast) EXPECT_NE(0u, ttf::glyphIndex(fontBytes, face, cp)) << "U+" << std::hex << cp;
+  }
+}
+
 // --- The Indic families' shaping, through the CPac the install writes ---
 
 namespace {
