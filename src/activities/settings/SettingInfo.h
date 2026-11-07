@@ -31,6 +31,9 @@ enum class SettingRequires : uint8_t {
   TiltSensor,  // an IMU for tilt page turning (sensors.imuType != None)
   // The panel shows gray at all, so anti-aliasing is a real choice.
   GrayscalePanel,
+  // The panel can put a text page and its grays up in one refresh. Asked of the driver,
+  // which is the one that knows it has the waveform and the memory for it.
+  OnePassTextPanel,
   // A PWM frontlight/backlight the firmware can drive (BoardConfig frontlight
   // config, or the PM1 PWM path). Answered through HalFrontlight so a board
   // whose light is probed at runtime reports honestly. Named ReadingLight, not

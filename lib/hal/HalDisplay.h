@@ -181,6 +181,11 @@ class HalDisplay {
   // not merely slower but wrong: a self-normalizing grey column expects the
   // pixel it drives not to have been driven already.
   bool supportsGrayFrame() const;
+  // One-pass text: whether this panel can do it, and the switch for it. While it is on, supportsGrayFrame()
+  // answers yes and copyGrayscale*Buffers() stage planes instead of uploading them, so hold it only around
+  // a page that goes out through a gray frame: see ReaderUtils::OnePassTextScope.
+  bool supportsOnePassText() const;
+  void setReaderRefresh(bool reading);
   // Compose the intact B/W framebuffer with the LSB/MSB planes staged by
   // copyGrayscale*Buffers() and display the result in one refresh. Falls back to
   // a plain displayBuffer() on a panel that cannot, so callers need no branch of

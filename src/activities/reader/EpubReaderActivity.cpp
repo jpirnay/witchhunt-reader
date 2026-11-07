@@ -3389,6 +3389,12 @@ bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
   return SETTINGS.textAntiAliasing != 0;
 }
 
+// Text only: the planes ride the glyph blit and record no image grays, so a page with images keeps
+// the two-pass path, which draws them.
+bool EpubReaderActivity::onePassTextFor(const Page& page) const {
+  return SETTINGS.onePassTextAa != 0 && getEffectiveTextAntiAliasing() && !page.hasImages();
+}
+
 bool EpubReaderActivity::getEffectiveHyphenation() const {
   if (bookHyphenationOverride >= 0) {
     return bookHyphenationOverride != 0;
@@ -4268,6 +4274,7 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
                        : section->loadPageFromSectionFile();
   section->currentPage = savedPage;
   logReaderMemSnapshot("prerender_after_load");
+  const ReaderUtils::OnePassTextScope onePassText(p && onePassTextFor(*p));
   // An image page qualifies once every image on it replays from its pixel caches, which the image
   // lane has usually written pages ahead. Never with a decode: this pass holds the render lock and
   // cannot abort, so a 1-4 s decode would stall the next turn behind it. The greyscale cache is
@@ -5722,6 +5729,7 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
 void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
+  const ReaderUtils::OnePassTextScope onePassText(onePassTextFor(*page));
   const auto t0 = millis();
   logReaderMemSnapshot("render_start");
   // Read before the pin below overwrites it: this pass redraws the page already on the panel (a
@@ -6543,6 +6551,8 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   // falls through to the B/W display plus the two-push AA replay below.
   const bool singlePushThisPage = preRenderedPlanesStaged_ && !secondaryBufferDegraded_;
   preRenderedPlanesStaged_ = false;
+  // Planes that were staged go out: the page they belong to was decided when they were captured.
+  const ReaderUtils::OnePassTextScope onePassText(singlePushThisPage);
   // Lent for a build-through rather than lost to an OOM: the X3 diffs against its own copy of
   // the frame on screen, so the normal cadence stays correct (and AA stays off below).
   if (secondaryBufferDegraded_ && !backgroundBuildThrough_) {

@@ -531,6 +531,11 @@ void HalDisplay::cleanupGrayscaleWithPreviousBuffer() {
 
 bool HalDisplay::supportsGrayFrame() const { return einkDisplay.supportsGrayFrame(); }
 
+bool HalDisplay::supportsOnePassText() const { return einkDisplay.supportsOnePassText(); }
+
+// No bus lock: this sets a flag, and a refresh in flight must not hold up the page that follows it.
+void HalDisplay::setReaderRefresh(const bool reading) { einkDisplay.setReaderRefresh(reading); }
+
 bool HalDisplay::supportsAbsoluteGrayPlanes() const {
   return einkDisplay.grayscaleCapabilities(freeink::GrayscaleMode::Absolute).supported();
 }

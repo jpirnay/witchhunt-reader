@@ -446,6 +446,9 @@ class CrossPointSettings {
 #else
   uint8_t textAntiAliasing = 1;
 #endif
+  // Where the panel offers it, a text page and its grays go up in one refresh instead of the B/W page
+  // and then the gray pass: no second flicker, at the price of one gray level instead of two.
+  uint8_t onePassTextAa = 0;
   // Text darkness (0 = normal, 1 = dark, 2 = extra dark). Default 1 preserves
   // historical AA rendering (both grayscale shades drawn in the MSB pass).
   uint8_t textDarkness = DARKNESS_DARK;
