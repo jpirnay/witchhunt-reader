@@ -661,10 +661,6 @@ bool HalDisplay::asyncRefreshHoldsFrameBuffer() const { return einkDisplay.async
 
 bool HalDisplay::ghostsUnderFastRefresh() const { return einkDisplay.ghostsUnderFastRefresh(); }
 
-void HalDisplay::setFastGrayscaleLut(bool fast) { einkDisplay.setFastGrayscaleLut(fast); }
-
-bool HalDisplay::getFastGrayscaleLut() const { return einkDisplay.getFastGrayscaleLut(); }
-
 uint16_t HalDisplay::getDisplayWidth() const { return einkDisplay.getDisplayWidth(); }
 
 uint16_t HalDisplay::getDisplayHeight() const { return einkDisplay.getDisplayHeight(); }

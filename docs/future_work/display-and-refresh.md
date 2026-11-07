@@ -286,19 +286,6 @@ the panel's native orientation. The busy indicator draws its hourglass with `dra
 **Next.** Rotate the bits per orientation in `drawImage()` and check each caller in all four
 orientations.
 
-## The Fast anti-aliasing setting does nothing
-
-**Open.** `CrossPointSettings::fastAntiAliasing` (offered on every non-SSD1677 panel, see
-`hasSelectableGrayscaleLut()`) reaches `FreeInkDisplay::setFastGrayscaleLut()`, which only stores the
-flag. No driver reads it: `Uc8253X3Driver` carries a `gc` nudge bank and a `directGray` bank (for
-`GrayscaleMode::Direct`), neither chosen by the flag, and `HalDisplay::displayGrayBuffer()` passes no
-LUT. The comment above the setting in `SettingsList.h` still promises a choice between ~2.4 s and
-~130 ms, and so do the comments at `CrossPointSettings::fastAntiAliasing` ("2.2 s/page"),
-`GfxRenderer::setFastGrayscaleLut()` and `HalDisplay::setFastGrayscaleLut()` (53- against 7-frame LUT).
-
-**Next.** Either give the X3 driver a second grayscale bank selected by the flag, or remove the setting
-and those comments.
-
 ## X3 and the pre-render heap floor
 
 **Likely resolved: confirm, then delete this item.** On 2026-09-23 Background A (next-page

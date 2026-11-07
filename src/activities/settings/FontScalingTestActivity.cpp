@@ -113,6 +113,5 @@ void FontScalingTestActivity::render(RenderLock&&) {
   // The whole point is to judge anti-aliased output, so the grayscale passes run unconditionally
   // rather than behind SETTINGS.textAntiAliasing: a comparison made with AA off would say nothing
   // about how the reader looks for anyone who leaves it on, which is the default.
-  renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
   renderer.renderGrayscalePlanesSequential([this](GfxRenderer::RenderMode) { renderContent(); }, [] { return false; });
 }

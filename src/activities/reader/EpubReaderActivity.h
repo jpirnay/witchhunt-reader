@@ -547,7 +547,6 @@ class EpubReaderActivity final : public Activity {
     int fontId = 0;
     int marginLeft = 0;
     int contentTop = 0;
-    bool fastLut = false;
   };
   PendingGrayscale pendingGrayscale_;
   // The reading position the owed deferred AA and the armed pre-render belong to: the page on

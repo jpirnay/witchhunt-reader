@@ -284,7 +284,7 @@ CI builds the same three envs (`.github/workflows/ci.yml`).
 - A wrong pin is a black screen, not a compile error. After changing how a C3 board sources pins,
   flash an X3 or X4 and check that it boots to Home, the SD card mounts and a book opens, the
   battery reading is sane (gauge over I2C on the X3, ADC on the X4), and Settings shows the same
-  entries as before (tilt and Fast AA only on the X3).
+  entries as before (tilt only on the X3).
 - Flash every board whose behaviour changed. Builds and host tests cannot see what a screen shows
   or what a thumb can reach.
 
