@@ -15,8 +15,14 @@
 
 namespace lab {
 
+#ifndef LAB_BOARD_X3
+#define LAB_BOARD_X3 0
+#endif
+
+// The X3's UC8253 takes another layout (UC8179-style, as freeink-sdk lut/Uc8253X3Luts.h): seven groups
+// of 6 bytes, a level byte for four sub-phases (phase 1 in bits 7:6), four frame counts, a repeat.
 constexpr size_t kLutBytes = 42;
-constexpr size_t kGroupBytes = 7;
+constexpr size_t kGroupBytes = LAB_BOARD_X3 ? 6 : 7;
 constexpr size_t kGroups = kLutBytes / kGroupBytes;
 constexpr uint8_t kLutSlots = 5;  // 0 = VCOM (0x20) .. 4 = KK (0x24)
 
@@ -47,25 +53,32 @@ struct LutDrive {
   int net() const { return static_cast<int>(vsh) + static_cast<int>(vdhr) - static_cast<int>(vsl); }
 };
 
+inline void addPhase(LutDrive& drive, uint8_t level, uint16_t frames) {
+  switch (level) {
+    case 0:
+      drive.rest = static_cast<uint16_t>(drive.rest + frames);
+      break;
+    case 1:
+      drive.vsh = static_cast<uint16_t>(drive.vsh + frames);
+      break;
+    case 2:
+      drive.vsl = static_cast<uint16_t>(drive.vsl + frames);
+      break;
+    default:
+      drive.vdhr = static_cast<uint16_t>(drive.vdhr + frames);
+      break;
+  }
+}
+
 inline LutDrive measureLut(const uint8_t* lut) {
   LutDrive drive;
   for (size_t group = 0; group < kGroups; group++) {
     const uint8_t* g = lut + group * kGroupBytes;
-    for (size_t phase = 1; phase <= 4; phase++) {
-      const uint16_t frames = g[phase] & 0x3F;
-      switch (g[phase] >> 6) {
-        case 0:
-          drive.rest = static_cast<uint16_t>(drive.rest + frames);
-          break;
-        case 1:
-          drive.vsh = static_cast<uint16_t>(drive.vsh + frames);
-          break;
-        case 2:
-          drive.vsl = static_cast<uint16_t>(drive.vsl + frames);
-          break;
-        default:
-          drive.vdhr = static_cast<uint16_t>(drive.vdhr + frames);
-          break;
+    for (size_t phase = 0; phase < 4; phase++) {
+      if (LAB_BOARD_X3) {
+        addPhase(drive, static_cast<uint8_t>(g[0] >> (6 - phase * 2) & 3), g[1 + phase]);
+      } else {
+        addPhase(drive, static_cast<uint8_t>(g[1 + phase] >> 6), g[1 + phase] & 0x3F);
       }
     }
   }
@@ -79,9 +92,10 @@ inline const char* checkLut(uint8_t slot, const uint8_t* lut) {
     const uint8_t* g = lut + group * kGroupBytes;
     // Repeat bytes multiply a waveform past what measureLut() sees, and 1 is what every known table
     // uses: at 1 the frame counts alone reproduce the measured FAST and HALF refresh times.
-    if (g[0] > 1 || g[5] > 1 || g[6] > 1) return "repeat byte above 1";
+    if (LAB_BOARD_X3 ? g[5] > 1 : (g[0] > 1 || g[5] > 1 || g[6] > 1)) return "repeat byte above 1";
   }
   const LutDrive drive = measureLut(lut);
+  if (LAB_BOARD_X3 && drive.vdhr) return "level 3 is not measured on the X3";
   if (drive.frames() > kMaxFrames) return "too many frames";
   if (slot == 0 && (drive.vsh || drive.vsl || drive.vdhr)) return "VCOM LUT must stay at VCOM_DC";
   if (drive.net() > static_cast<int>(kMaxNetFrames) || drive.net() < -static_cast<int>(kMaxNetFrames)) {
@@ -93,6 +107,7 @@ inline const char* checkLut(uint8_t slot, const uint8_t* lut) {
 // Only settings already seen on this panel family: Murphy production, the OEM alternate init, the
 // Good Display sample and the bench recipe. VSH is not settable: it stays at 15 V, the maximum.
 inline const char* checkConfig(const PanelConfig& cfg) {
+  if (LAB_BOARD_X3) return nullptr;  // the X3 runs its production init whatever CFG says
   if (cfg.vsl != 0x3B && cfg.vsl != 0x3F) return "VSL not allowed";
   if (cfg.vdhr != 0x0D && cfg.vdhr != 0x03) return "VDHR not allowed";
   if (cfg.vcom != 0x0F && cfg.vcom != 0x03 && cfg.vcom != 0x00) return "VCOM not allowed";
