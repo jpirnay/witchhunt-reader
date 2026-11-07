@@ -181,6 +181,17 @@ class HalDisplay {
   // not merely slower but wrong: a self-normalizing grey column expects the
   // pixel it drives not to have been driven already.
   bool supportsGrayFrame() const;
+  // One-pass text: whether this panel can do it, and the switch for it. While it is on, supportsGrayFrame()
+  // answers yes and copyGrayscale*Buffers() stage planes instead of uploading them, so hold it only around
+  // a page that goes out through a gray frame: see ReaderUtils::OnePassTextScope.
+  bool supportsOnePassText() const;
+  void setReaderRefresh(bool reading);
+  // One-pass text on a board without the memory to stage planes (the X3, the X4): see
+  // FreeInkDisplay::beginOnePassMask(). The mask is the buffer that held the frame on screen; null sends the
+  // caller down its two-pass path.
+  bool composesOnePassText() const;
+  uint8_t* beginOnePassMask();
+  void displayOnePassFrame(RefreshMode refreshMode, bool turnOffScreen);
   // Compose the intact B/W framebuffer with the LSB/MSB planes staged by
   // copyGrayscale*Buffers() and display the result in one refresh. Falls back to
   // a plain displayBuffer() on a panel that cannot, so callers need no branch of
@@ -225,12 +236,6 @@ class HalDisplay {
   bool asyncRefreshHoldsFrameBuffer() const;
   // Repeated FAST refreshes leave residue only a HALF clears (the X3's UC8253 / UC8279d).
   bool ghostsUnderFastRefresh() const;
-
-  // X3-only knob: pick between the OEM 53-frame grayscale LUT (default, slow
-  // and accurate) and the 7-frame community LUT (fast, slightly darker
-  // mid-tones). No effect on X4. See EInkDisplay::setFastGrayscaleLut.
-  void setFastGrayscaleLut(bool fast);
-  bool getFastGrayscaleLut() const;
 
   // Runtime geometry passthrough
   uint16_t getDisplayWidth() const;

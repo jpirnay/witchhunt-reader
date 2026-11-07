@@ -77,6 +77,7 @@ class Bookmarks : public ::testing::Test {
  protected:
   void SetUp() override {
     Storage.reset();
+    GLOBAL_BOOKMARKS.forgetFileState();  // the singleton outlives each test's card
     g_largestRequest = 0;
   }
   void TearDown() override { Storage.reset(); }
@@ -189,10 +190,29 @@ TEST_F(Bookmarks, AHoldKeepsTheIndexAndTheLastOneLetsItGo) {
 }
 
 TEST_F(Bookmarks, HasAnyAnswersFromTheFileWithoutLoadingIt) {
-  EXPECT_FALSE(GLOBAL_BOOKMARKS.hasAny());
   Storage.put(kIndexPath, indexFile(1, indexEntry("/a.epub", {"x"})));
   EXPECT_TRUE(GLOBAL_BOOKMARKS.hasAny());
   EXPECT_TRUE(GLOBAL_BOOKMARKS.getEntries().empty());
+}
+
+TEST_F(Bookmarks, HasAnyFindsNoFileEmpty) { EXPECT_FALSE(GLOBAL_BOOKMARKS.hasAny()); }
+
+// Home asks on every entry: the header is read once, and the answer stands until a save changes it.
+TEST_F(Bookmarks, HasAnyReadsTheFileOnce) {
+  Storage.put(kIndexPath, indexFile(1, indexEntry("/a.epub", {"x"})));
+  EXPECT_TRUE(GLOBAL_BOOKMARKS.hasAny());
+  Storage.reset();  // behind the index's back: not read again
+  EXPECT_TRUE(GLOBAL_BOOKMARKS.hasAny());
+  GLOBAL_BOOKMARKS.forgetFileState();
+  EXPECT_FALSE(GLOBAL_BOOKMARKS.hasAny());
+}
+
+// A save that fails may leave the old file or a half-done replace: the next answer comes from the card.
+TEST_F(Bookmarks, HasAnyRereadsAfterAFailedSave) {
+  EXPECT_FALSE(GLOBAL_BOOKMARKS.hasAny());
+  Storage.writeBudget = 4;
+  GLOBAL_BOOKMARKS.upsertFromStore("/a.epub", kCache, "A", false, oneBookmark());
+  EXPECT_FALSE(GLOBAL_BOOKMARKS.hasAny());
 }
 
 TEST_F(Bookmarks, HasAnyFollowsAnUpdate) {

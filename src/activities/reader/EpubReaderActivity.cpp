@@ -1350,7 +1350,6 @@ void EpubReaderActivity::runDeferredGrayscalePass() {
   // the unattributed Min Free watermark, so bracket it.
   logReaderMemSnapshot("aa_begin");
   pendingGrayscale_.active = false;
-  renderer.setFastGrayscaleLut(pendingGrayscale_.fastLut);
   const int fontId = pendingGrayscale_.fontId;
   const int marginLeft = pendingGrayscale_.marginLeft;
   const int contentTop = pendingGrayscale_.contentTop;
@@ -3390,6 +3389,35 @@ bool EpubReaderActivity::getEffectiveTextAntiAliasing() const {
   return SETTINGS.textAntiAliasing != 0;
 }
 
+// The same choice where the planes are composed in the frame buffers (the X3, the X4).
+bool EpubReaderActivity::onePassComposedFor(const Page& page) const {
+  return SETTINGS.onePassTextAa != 0 && renderer.composesOnePassText() && getEffectiveTextAntiAliasing() &&
+         !page.hasImages();
+}
+
+// The page is in the write buffer. The buffer holding the page on screen becomes the old plane: it
+// keeps what was white and stays white, and the page's gray is drawn into it, which only ever sets
+// bits. Then page and gray go up in one refresh. False, with nothing drawn or shown, when the frame on
+// screen is not known: the caller then shows the page and its gray the two-pass way.
+bool EpubReaderActivity::displayComposedOnePass(const Page& page, const int marginLeft, const int contentTop,
+                                                const HalDisplay::RefreshMode mode) {
+  if (!renderer.beginOnePassMask()) return false;
+  const auto t0 = millis();
+  renderer.setRenderMode(GfxRenderer::GRAYSCALE_MSB);  // MSB marks every gray pixel, light and dark
+  page.renderTextOnly(renderer, getEffectiveReaderFontId(), marginLeft, contentTop);
+  renderer.setRenderMode(GfxRenderer::BW);
+  const auto t1 = millis();
+  renderer.displayOnePassFrame(mode);
+  LOG_DBG("ERS", "One-pass AA (composed): gray=%lums upload=%lums", t1 - t0, millis() - t1);
+  return true;
+}
+
+// Text only: the planes ride the glyph blit and record no image grays, so a page with images keeps
+// the two-pass path, which draws them.
+bool EpubReaderActivity::onePassTextFor(const Page& page) const {
+  return SETTINGS.onePassTextAa != 0 && getEffectiveTextAntiAliasing() && !page.hasImages();
+}
+
 bool EpubReaderActivity::getEffectiveHyphenation() const {
   if (bookHyphenationOverride >= 0) {
     return bookHyphenationOverride != 0;
@@ -4269,6 +4297,7 @@ void EpubReaderActivity::renderPreRenderPass(const RenderLayout& layout) {
                        : section->loadPageFromSectionFile();
   section->currentPage = savedPage;
   logReaderMemSnapshot("prerender_after_load");
+  const ReaderUtils::OnePassTextScope onePassText(p && onePassTextFor(*p));
   // An image page qualifies once every image on it replays from its pixel caches, which the image
   // lane has usually written pages ahead. Never with a decode: this pass holds the render lock and
   // cannot abort, so a 1-4 s decode would stall the next turn behind it. The greyscale cache is
@@ -5723,6 +5752,7 @@ void EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
 void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> page, const int orientedMarginTop,
                                         const int orientedMarginRight, const int orientedMarginBottom,
                                         const int orientedMarginLeft) {
+  const ReaderUtils::OnePassTextScope onePassText(onePassTextFor(*page));
   const auto t0 = millis();
   logReaderMemSnapshot("render_start");
   // Read before the pin below overwrites it: this pass redraws the page already on the panel (a
@@ -5957,7 +5987,6 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     if (capMsb) {
       memset(capLsb.get(), 0, capPlaneBytes);
       memset(capMsb.get(), 0, capPlaneBytes);
-      renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
       renderer.beginGrayCapture(capLsb.get(), capMsb.get());
     } else {
       capLsb.reset();  // OOM: the staged path below runs unchanged
@@ -6125,11 +6154,17 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
   if (aaPreempted) {
     LOG_DBG("ERS", "Inline AA skipped: page preempted by navigation");
   }
-  const bool inlineAaThisRender =
-      aaEnabledForThisRender && !singlePushAaThisRender && inlineAaAvailable && !aaPreempted;
+  // One-pass where the planes are composed in the frame buffers (the X3, the X4). Not while the reader is
+  // flipping: the gray render comes before the refresh, so it would hold the turn back.
+  const bool composedOnePassThisRender = aaEnabledForThisRender && !singlePushAaThisRender && !aaPreempted &&
+                                         pageRefreshMode == HalDisplay::FAST_REFRESH && onePassComposedFor(*page) &&
+                                         displayComposedOnePass(*page, orientedMarginLeft, contentTop, pageRefreshMode);
+  const bool inlineAaThisRender = aaEnabledForThisRender && !singlePushAaThisRender && inlineAaAvailable &&
+                                  !aaPreempted && !composedOnePassThisRender;
   // Anything that cannot run AA inline defers it, rather than only the X3 doing so.
-  const bool deferredAaThisRender = aaEnabledForThisRender && !singlePushAaThisRender && !inlineAaAvailable;
-  lastRenderStats.textAntiAliasing = inlineAaThisRender || deferredAaThisRender;
+  const bool deferredAaThisRender =
+      aaEnabledForThisRender && !singlePushAaThisRender && !inlineAaAvailable && !composedOnePassThisRender;
+  lastRenderStats.textAntiAliasing = inlineAaThisRender || deferredAaThisRender || composedOnePassThisRender;
   if (capLsb) {
     // Hand the captured planes to the controller, then base + greys go out as
     // one waveform. Cheap: the planes were filled by the page render that just
@@ -6148,6 +6183,8 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     renderer.triggerGrayscaleFrame(pageRefreshMode);
     lastRenderStats.usedGrayscale = true;
     lastRenderStats.textAntiAliasing = true;
+  } else if (composedOnePassThisRender) {
+    lastRenderStats.usedGrayscale = true;  // in flight since displayComposedOnePass(); completeDisplay() collects it
   } else if (inlineAaThisRender) {
     renderer.triggerDisplayAsync(pageRefreshMode);
   } else {
@@ -6186,7 +6223,6 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     // window, so after the wait only the LSB SPI write, the MSB plane and the
     // short gray flush remain. The AA touch-up then reads as the tail of the
     // page refresh instead of a separate later update (issue #71).
-    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     const int aaFontId = getEffectiveReaderFontId();
     const Page* pagePtr = page.get();
     // The per-element abort buys no wall-clock here — this plane render is overlapped with the
@@ -6231,7 +6267,6 @@ void EpubReaderActivity::renderContents(RenderLock& lock, std::unique_ptr<Page> 
     pendingGrayscale_.fontId = getEffectiveReaderFontId();
     pendingGrayscale_.marginLeft = orientedMarginLeft;
     pendingGrayscale_.contentTop = contentTop;
-    pendingGrayscale_.fastLut = SETTINGS.fastAntiAliasing;
     lastRenderStats.usedGrayscale = true;
     lastRenderStats.phases = {tPrewarm - t0, tBwRender - tPrewarm, tDisplay - tBwRender, 0, 0, 0, 0, 0, tDisplay - t0};
   }
@@ -6458,7 +6493,6 @@ uint16_t EpubReaderActivity::renderPageContentOnly(const Page& page, const int o
     if (capMsb) {
       memset(capLsb.get(), 0, planeBytes);
       memset(capMsb.get(), 0, planeBytes);
-      renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
       renderer.beginGrayCapture(capLsb.get(), capMsb.get());
     } else {
       capLsb.reset();
@@ -6548,6 +6582,9 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   // falls through to the B/W display plus the two-push AA replay below.
   const bool singlePushThisPage = preRenderedPlanesStaged_ && !secondaryBufferDegraded_;
   preRenderedPlanesStaged_ = false;
+  bool composedOnePassThisPage = false;
+  // Planes that were staged go out: the page they belong to was decided when they were captured.
+  const ReaderUtils::OnePassTextScope onePassText(singlePushThisPage);
   // Lent for a build-through rather than lost to an OOM: the X3 diffs against its own copy of
   // the frame on screen, so the normal cadence stays correct (and AA stays off below).
   if (secondaryBufferDegraded_ && !backgroundBuildThrough_) {
@@ -6567,7 +6604,19 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
   } else {
-    ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
+    // The composed one-pass (the X3, the X4), as in renderContents(): the pre-render drew the page, its gray is
+    // drawn here. Not in a fast-forward burst, which this path mostly serves.
+    const HalDisplay::RefreshMode mode = ReaderUtils::nextRefreshCycleMode(pagesUntilFullRefresh);
+    if (mode == HalDisplay::FAST_REFRESH && getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() &&
+        !secondaryBufferDegraded_ && onePassComposedFor(page) && !aaPreemptedByNavigation()) {
+      prewarmPageFonts(page, orientedMarginLeft, contentTop);
+      composedOnePassThisPage = displayComposedOnePass(page, orientedMarginLeft, contentTop, mode);
+    }
+    if (composedOnePassThisPage) {
+      renderer.completeDisplay();
+    } else {
+      renderer.displayBuffer(mode);
+    }
   }
   // A pre-rendered page can be the first one a book open puts on screen (Background-A having
   // won the race), so this path closes the trace too. Correct to stamp here without a
@@ -6600,8 +6649,8 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
   if (aaPreempted) {
     LOG_DBG("ERS", "AA replay skipped: page preempted by navigation");
   }
-  if (!singlePushThisPage && !aaPreempted && getEffectiveTextAntiAliasing() && renderer.hasSecondaryBuffer() &&
-      !secondaryBufferDegraded_) {
+  if (!singlePushThisPage && !composedOnePassThisPage && !aaPreempted && getEffectiveTextAntiAliasing() &&
+      renderer.hasSecondaryBuffer() && !secondaryBufferDegraded_) {
     const int fontId = getEffectiveReaderFontId();
     // Re-warm the page's glyph BITMAPS before the AA replay. The pre-render pass warmed
     // them, but background work since may have dropped or re-wired the cache (B's
@@ -6610,7 +6659,6 @@ void EpubReaderActivity::displayPreRenderedPage(const Page& page, const int orie
     // (observed: Load access fault at glyph->dataOffset + heap corruption). When the
     // cache is still warm this is nearly free via the prewarm coverage fast-path.
     prewarmPageFonts(page, orientedMarginLeft, contentTop);
-    renderer.setFastGrayscaleLut(SETTINGS.fastAntiAliasing);
     // No waveform to hide behind on this path (displayBuffer() above already returned), so the
     // per-element abort translates directly into saved wall-clock on both devices.
     bool planeAborted = false;

@@ -99,9 +99,32 @@ All three need text anti-aliasing on and a resident, non-degraded secondary
 
 | Path | Where | What happens |
 |---|---|---|
-| Single push | `supportsGrayFrame()`: the T5S3 | `beginGrayCapture()` makes the B/W render write both planes as it goes; page and greys go out as one waveform (`triggerGrayscaleFrame()`). |
+| Single push | `supportsGrayFrame()`: the T5S3, and the X4 Pro and the Murphy on text pages with One-Pass Anti-Aliasing on | `beginGrayCapture()` makes the B/W render write both planes as it goes; page and greys go out as one waveform (`triggerGrayscaleFrame()`). |
 | Inline | `!usesDeferredAa()`: an async-capable panel that is not an X3 (X4, X4 Pro) | B/W page via `triggerDisplayAsync()`, then `renderGrayscalePlanesInterleaved()`. It waits `AA_SETTLE_MS` (400 ms) after the B/W waveform before committing, and a press in that time cancels it, so a reader flipping through pages is not held by a pass they will never see. A turn parked on the render lock counts as a press (`pageTurnWaitingForLock_`): by then it has been drained and released, and nothing else shows it. Skipped when a page turn is already on its way. |
 | Deferred | the X3, and any panel that cannot overlap | The B/W page is shown; `runDeferredGrayscalePass()` runs `renderGrayscalePlanesSequential()` from idle time, and a page turn aborts it. |
+
+### One-pass text (X4 Pro with UC8179, Murphy M3, X3, X4)
+
+The One-Pass Anti-Aliasing setting puts this panel on the single push for text pages. Each pixel gets
+one of four waveforms in one refresh: black, one gray, hold or white. Hold is a one-frame nudge for a
+pixel that stays white. A charge map tracks each pixel's net drive and turns a held pixel into a real
+white drive when it has drifted. The point is that nothing visibly changes once the page is up. It is
+no faster: the finished page lands about when today's B/W page does.
+
+`display.supportsOnePassText()` offers the setting. `ReaderUtils::OnePassTextScope` holds the mode for
+one page's render, pre-render or display, because while it is on `copyGrayscale*Buffers()` stage planes
+instead of uploading them. Everything outside those three calls, a menu, a sleep image, the BMP viewer,
+the TXT, MD and XTC readers, finds it off and runs as before. A page with images stays off too: the
+capture rides the glyph blit and records no image greys. The driver's block is 576 KB of PSRAM,
+allocated at the first one-pass page. The Murphy M3 does the same with its own waveform and no charge map: a
+pixel that already shows its target rests.
+
+The X3 and the X4 have no memory for either, so the planes are composed in the two frame buffers
+(`renderer.composesOnePassText()`). `beginOnePassMask()` turns the buffer holding the frame on screen into
+the old plane, white where a pixel was white and stays white, and points the renderer at it; the page's
+gray is drawn into it, and `displayOnePassFrame()` sends both in one refresh. When the frame on screen is
+not known, after a Background-B borrow say, `beginOnePassMask()` returns null and that page takes the two
+passes. Findings: [future_work/one-pass-text-aa.md](future_work/one-pass-text-aa.md).
 
 ### Absolute planes: images and the sleep cover
 
@@ -130,9 +153,6 @@ UC8179 and UC8279 X4 use `_redriveAfterGray`. UC8279d and SSD1677 do not track i
 | Page turn (`X3_DRF_fast`) | ~382 ms |
 | AA gray waveform (`X3_DRF`) | ~228 ms |
 | Periodic scrub (`X3_DRF_half`) | ~460 ms |
-
-`setFastGrayscaleLut()` stores the reader's Fast anti-aliasing preference, but no current driver reads
-it: the X3 driver carries a single `gc` nudge bank (open, see future_work).
 
 ### Invariant that makes this safe
 
@@ -205,7 +225,6 @@ but the reader does not use it.
 | `copyGrayscaleLsbBuffers()` / `copyGrayscaleMsbBuffers()` | `GfxRenderer` → `HalDisplay` → `FreeInkDisplay` | Stream a plane to the controller |
 | `displayGrayBuffer()` | `GfxRenderer` → `HalDisplay` → `FreeInkDisplay` | Run the grayscale waveform (no swap) |
 | `cleanupGrayscaleWithPreviousBuffer()` | `GfxRenderer` → `HalDisplay` → `FreeInkDisplay` | Restore the driver's baseline and the write buffer from `frameBufferActive`; with the secondary away, tell the driver there is no baseline |
-| `setFastGrayscaleLut(bool)` | `GfxRenderer` | Stores the Fast AA preference; currently read by no driver |
 
 ## Scheduling: the deferred pass runs before the next-page pre-render
 

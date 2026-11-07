@@ -65,8 +65,12 @@ class GlobalBookmarkIndex {
   bool reconcile();
 
   [[nodiscard]] const std::vector<Entry>& getEntries() const { return entries; }
-  // Whether any book has a bookmark, from the file's header when the index is not loaded.
+  // Whether any book has a bookmark. When the index is not loaded, from what load() or save() last
+  // learned of the file, else from its header, read once and remembered.
   [[nodiscard]] bool hasAny() const;
+  // Forget what hasAny() remembers, for a file changed behind the index's back. Nothing in the
+  // firmware writes it except save(), so only the tests need this; a reboot forgets it too.
+  void forgetFileState() { fileState = FileState::Unknown; }
 
   // Total bookmark count across all entries.
   [[nodiscard]] size_t totalBookmarkCount() const;
@@ -77,6 +81,12 @@ class GlobalBookmarkIndex {
   std::vector<Entry> entries;
   bool loaded = false;
   uint8_t holds = 0;
+
+  // Whether the file holds any entry, kept while the index is not loaded, so that Home, which asks
+  // on every entry, reads the card once per boot and not every time.
+  enum class FileState : uint8_t { Unknown, Empty, HasEntries };
+  mutable FileState fileState = FileState::Unknown;
+  void noteFileHolds(const bool any) const { fileState = any ? FileState::HasEntries : FileState::Empty; }
 
   static constexpr uint8_t FILE_VERSION = 1;
   static constexpr const char* FILE_PATH = "/.crosspoint/global_bookmarks.bin";

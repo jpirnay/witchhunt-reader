@@ -853,6 +853,16 @@ class GfxRenderer {
   // pointer afterwards for the same reason triggerDisplay() does: the display
   // swaps buffers, and every later draw must target the new write buffer.
   void displayGrayscaleFrame(HalDisplay::RefreshMode mode) const;
+  // One-pass text composed in the frame buffers (the X3, the X4): see HalDisplay::beginOnePassMask(). While the
+  // mask is out, drawing lands in it; displayOnePassFrame() puts the page and its gray up in one refresh,
+  // deferred like triggerDisplay(), so the caller owes completeDisplay().
+  bool composesOnePassText() const { return display.composesOnePassText(); }
+  bool beginOnePassMask() const {
+    uint8_t* mask = display.beginOnePassMask();
+    if (mask) frameBuffer = mask;
+    return mask != nullptr;
+  }
+  void displayOnePassFrame(HalDisplay::RefreshMode mode) const;
   // Deferred form: see HalDisplay::triggerGrayscaleFrame. Caller owes completeDisplay().
   void triggerGrayscaleFrame(HalDisplay::RefreshMode mode) const;
 
@@ -868,7 +878,7 @@ class GfxRenderer {
   // write buffer then keeps the last plane.
   //
   // renderFn is called twice (LSB, MSB). The RenderMode argument tells it which
-  // pass is running. The caller sets setFastGrayscaleLut() before calling.
+  // pass is running.
   //
   // Returns wall-clock timings for each of the three phases.
   //
@@ -985,8 +995,6 @@ class GfxRenderer {
 
   // X3-only: trade AA visual fidelity for ~2.2 s faster page-flip wall clock.
   // No effect on X4 (its single grayscale LUT already runs at ~500 ms).
-  void setFastGrayscaleLut(bool fast) const { display.setFastGrayscaleLut(fast); }
-  bool getFastGrayscaleLut() const { return display.getFastGrayscaleLut(); }
 
   // Active pixel-write target for raw writers that bypass drawPixel for speed.
   // Returns the full framebuffer and its extent ([0, panelHeight)).

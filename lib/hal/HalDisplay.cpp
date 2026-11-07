@@ -531,6 +531,28 @@ void HalDisplay::cleanupGrayscaleWithPreviousBuffer() {
 
 bool HalDisplay::supportsGrayFrame() const { return einkDisplay.supportsGrayFrame(); }
 
+bool HalDisplay::supportsOnePassText() const { return einkDisplay.supportsOnePassText(); }
+
+// No bus lock: this sets a flag, and a refresh in flight must not hold up the page that follows it.
+void HalDisplay::setReaderRefresh(const bool reading) { einkDisplay.setReaderRefresh(reading); }
+
+bool HalDisplay::composesOnePassText() const { return einkDisplay.composesOnePassText(); }
+
+uint8_t* HalDisplay::beginOnePassMask() {
+  HalSpiBus::Lock spiLock;  // it may wait out a refresh in flight
+  return einkDisplay.beginOnePassMask();
+}
+
+void HalDisplay::displayOnePassFrame(const RefreshMode refreshMode, const bool turnOffScreen) {
+  HalSpiBus::Lock spiLock;
+  lastRefreshMode = refreshMode;
+  lastDisplayModeByte = refreshModeToByte(refreshMode);
+  LOG_DBG(
+      "DISP", "#%lu displayOnePassFrame mode=%s", static_cast<unsigned long>(++panelSeq),
+      refreshMode == RefreshMode::FAST_REFRESH ? "FAST" : (refreshMode == RefreshMode::HALF_REFRESH ? "HALF" : "FULL"));
+  einkDisplay.displayOnePassFrame(convertRefreshMode(refreshMode), turnOffScreen);
+}
+
 bool HalDisplay::supportsAbsoluteGrayPlanes() const {
   return einkDisplay.grayscaleCapabilities(freeink::GrayscaleMode::Absolute).supported();
 }
@@ -638,10 +660,6 @@ bool HalDisplay::fastRefreshNeedsHostFrame() const { return einkDisplay.fastRefr
 bool HalDisplay::asyncRefreshHoldsFrameBuffer() const { return einkDisplay.asyncRefreshHoldsFrameBuffer(); }
 
 bool HalDisplay::ghostsUnderFastRefresh() const { return einkDisplay.ghostsUnderFastRefresh(); }
-
-void HalDisplay::setFastGrayscaleLut(bool fast) { einkDisplay.setFastGrayscaleLut(fast); }
-
-bool HalDisplay::getFastGrayscaleLut() const { return einkDisplay.getFastGrayscaleLut(); }
 
 uint16_t HalDisplay::getDisplayWidth() const { return einkDisplay.getDisplayWidth(); }
 

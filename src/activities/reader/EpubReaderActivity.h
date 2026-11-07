@@ -547,7 +547,6 @@ class EpubReaderActivity final : public Activity {
     int fontId = 0;
     int marginLeft = 0;
     int contentTop = 0;
-    bool fastLut = false;
   };
   PendingGrayscale pendingGrayscale_;
   // The reading position the owed deferred AA and the armed pre-render belong to: the page on
@@ -1104,6 +1103,9 @@ class EpubReaderActivity final : public Activity {
   uint8_t getEffectiveImageRendering() const;
   uint8_t getEffectiveParagraphAlignment() const;
   bool getEffectiveTextAntiAliasing() const;
+  bool onePassTextFor(const Page& page) const;
+  bool onePassComposedFor(const Page& page) const;
+  bool displayComposedOnePass(const Page& page, int marginLeft, int contentTop, HalDisplay::RefreshMode mode);
   bool getEffectiveHyphenation() const;
   bool getEffectiveFontSizeNormalization() const;
   bool getEffectiveGuideDots() const;
