@@ -164,6 +164,25 @@ Result so far, 2026-11-04: fine patterns land where the table predicts. Measured
 4 px checkers were 79, 78, 78 for 2 frames on white (predicted 77) and 14, 16, 18 for 3 frames on
 black (predicted 17.5). So gray holds at pixel scale, and the bench's quilt is not a panel limit.
 
+**Test 9: one-pass slots from every start.** One refresh puts each of four starts (white, black, light, dark, set
+up as the reader leaves them) under each one-pass slot (rest, to white, gray, to black), one band each.
+
+```sh
+./lab.py t9 --gray 3 --swing 8 --again                 # starts from a B/W page and the reader's nudge
+./lab.py t9 --gray 3 --swing 8 --again --from-onepass  # starts from a one-pass frame, as in reading
+./cam.py bands t9-onepass-g3-s8 --count 16              # start-major: 4 starts x 4 slots
+```
+
+Pass: the gray bands match each other whatever they started from. Run a control with every band starting white first:
+the panel's own spread is not a start effect.
+
+Result on our unit, 2026-11-07: with every band white, the same gray reads 48 at the top and 54 at the bottom, so
+compare against that. Corrected for it, gray 3 with an 8-frame swing lands within about 1.3 points from white, light and
+dark, and 7-10 points darker from black, once; the second frame on top agrees within about 3. A 16-frame swing halves
+the black step but lands at 26 instead of 48 and takes 683 ms against 443. White from ink reads 84-90 against 89-95 for
+white held, as FAST's white does. The panel's white also held through about 20 refreshes; a 5 % fall in both white and
+black between runs was the room light. The reader uses gray 3, swing 8.
+
 **Test 4: does gray survive a real page turn?** The reader turns pages with FAST, and FAST rests any
 pixel the planes call unchanged, so gray left around letters would stay. The planes are only
 selector bits, so `--aware` marks each gray pixel as changed, which gives it the full drive to the

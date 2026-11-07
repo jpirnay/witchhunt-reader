@@ -1,6 +1,7 @@
-# One-pass text AA (X4 Pro)
+# One-pass text AA (X4 Pro, Murphy M3)
 
-Status: shipped as an opt-in setting on the X4 Pro with UC8179, One-Pass Anti-Aliasing, off by default. How it works
+Status: shipped as an opt-in setting, One-Pass Anti-Aliasing, off by default, on the X4 Pro with UC8179 and on the
+Murphy M3. How it works
 is in [grayscale-aa-rendering.md](../grayscale-aa-rendering.md). What stays open is below.
 
 Source: Free-Ink/freeink-sdk branch `fix-display-updates`, tip `d73c852`, and crosspoint-reader branch
@@ -111,7 +112,7 @@ the register order. Take the exchange with it.
 | Tweak | Where it could work |
 |---|---|
 | One-pass as written | X4 Pro only: PSRAM and stock LUTs for its three controllers |
-| One-pass on Murphy M3 | Yes, and simpler: see below |
+| One-pass on Murphy M3 | Done, see below |
 | One-pass on C3 (X4, X3) | Not as written. The charge map changes only 5-7% of white drives, so a 1-bit "black two pages running" plane (48 KB) may approximate it. Speculative, and reading heap is 15-53 KB |
 | One-pass on T5S3 | No: no LUTs, already single push |
 | Drive gray pixels to the new target on the next B/W frame | Only SSD1677 lacks this. Its 48 KB mask fits SSD1677 X4 Pro units, not a C3 |
@@ -122,31 +123,36 @@ the register order. Take the exchange with it.
 | Doses checked against the LUT (`testTextWaveforms`) | Copy for any external-LUT driver |
 | Rest-frame LUT, Picco init and power policy | Panel-specific, skip |
 
-## Murphy M3: the plan
+## Murphy M3
 
-The same setting and the same firmware path, with the work in `Uc8253MurphyDriver` and one new LUT bank. Nothing in the
-reader changes: the setting asks `display.supportsOnePassText()`, and `OnePassTextScope` already holds the mode.
-
-The four slots are the X4 Pro's four waveforms, built from what the Murphy lab measured:
+Its own waveform, not the X4 Pro's: `MURPHY_LUT_2x_TEXT` in `Uc8253MurphyLuts.h`, chosen by
+`Uc8253MurphyDriver::displayGrayFrame()` from the page and the record it keeps of the glass. No charge map: a pixel
+that already shows its target rests, which adds no drive, so a page needs only the planes the driver already had plus
+three of 12.5 KB.
 
 | Slot | Waveform | Why |
 |---|---|---|
-| Hold | rest, 0 V | A pixel that stays white. FAST's `WW` already rests, and a VSL touch there was measured as much worse |
-| White | VSL 20 frames | A pixel leaving black or gray, as FAST's `R22` does now |
-| Black | VSH 15 frames | As FAST's `R23`. Black reaches 1% from white in 8 frames |
-| Gray | VSL n, VSH 8, VSL n | VSH 8 resets any start to black, then the last VSL lands the level: 3 frames 35%, 4 frames 58% |
+| Rests | rest, 20 frames | The pixel already shows its target, white or black. Less drive than FAST, whose `KK` adds a frame of VSH |
+| To white | VSL 20 | FAST's `R22` |
+| Gray | VSL 5, VSH 8, VSL 3 | VSH 8 takes any start to black, 1% from white; VSL 3 then lands about 48%, between the nudge's 35% and 58% |
+| To black | VSH 15 | FAST's `R23` |
 
-- **No charge map.** It exists because the X4 Pro's hold is a nudge that adds up. Rest adds nothing, so 384 of the 576 KB
-  goes, and a page needs only the planes the driver already has.
-- **Faster, unlike the X4 Pro.** Gray fits inside FAST's 20 frames, so the page should finish when the B/W page lands
-  today, and the delayed pass goes. That saves about 330 ms, an estimate until it is run.
-- **To measure, with the camera and `tools/murphy-gray-lab`:** whether gray lands the same from white, black and gray;
-  35% or 58% for the one level; ghosting over a run of pages. A page of text keeps one gray where it has two today.
-- **DC.** A pixel that stays black takes 15 frames towards black every page, on top of the open item in
-  [murphy-gray.md](murphy-gray.md).
+**Measured, `tools/murphy-gray-lab` Test 9 (2026-11-07), one panel, room temperature:**
+- Gray lands within the panel's own spread from white or gray. That spread is about 6 points from top to bottom, with
+  every band starting white.
+- A pixel that was black lands 7-10 points darker, the first time only. From a HALF's black it is the 10.
+- White from ink falls 4-7 points short of white, as FAST's does. Black lands black, and rest leaves grays alone.
+- A 16-frame reset halves the darker-from-black step, but it lands far darker and takes 683 ms against 443 ms.
+
+**Measured in the reader:** a text page turn is one refresh of 442-452 ms, where today's is FAST at about 470 ms plus a
+nudge of 205-275 ms. A HALF, the page after an image page or a menu, an image page itself and the first page after
+boot keep the two passes. 12 of 12 fast presses landed, no fault.
+
+**Open:** how it reads, which needs eyes; a long read; temperature. A pixel that stays black now rests every page,
+so the DC item in [murphy-gray.md](murphy-gray.md) gets smaller on text pages, not larger.
 
 ## Next
 
 1. Run a long read on the X4 Pro with the option on: ghosting over many pages, and in the cold.
-2. Murphy, as above, when it is attached.
+2. The same on the Murphy M3, by eye first.
 3. Run `kUc8279X3_Xth4`'s tail fix on a UC8279 X3.

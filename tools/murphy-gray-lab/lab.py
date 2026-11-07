@@ -553,6 +553,61 @@ READER_GRAY_BANK = [
 ]
 
 
+def onepass_bank(gray, swing, white=20, black=15):
+    """One refresh for a whole page, as a one-pass driver would send it. A pixel that stays white
+    rests, a pixel leaving ink takes FAST's drive to white, black takes FAST's drive to black, and the
+    one gray lands from any start: `swing` frames of VSH take it to black first."""
+    white_t, gray_t, black_t = lut((VSL, white)), landing(gray, swing), lut((VSH, black))
+    return make_bank(rest_like(white_t, gray_t, black_t), white_t, gray_t, black_t)
+
+
+# Test 9 starts, as the reader leaves them: gray pixels are black in the B/W page, then the nudge
+# lifts them. Targets are the one-pass slots: hold, white, gray, black.
+T9_STARTS = ("white", "black", "light", "dark")
+T9_TARGETS = ((WW, "hold"), (KW, "white"), (WK, "gray"), (KK, "black"))
+T9_BAND = HEIGHT // (len(T9_STARTS) * len(T9_TARGETS))
+
+
+def test9_onepass(lab, gray, swing, again, from_onepass=False):
+    """Every start against every one-pass slot, one band each, top to bottom: start-major.
+
+    The gray bands should match each other whatever they started from, white from ink should match
+    the white start held, and black should match black. `again` runs the frame a second time, so
+    gray also starts from the one-pass gray. `from_onepass` sets the starts up the way reading leaves
+    them, through one one-pass frame: black from its black slot, light and dark both from its gray."""
+    lab.arm()
+    lab.clean("white")
+    base, nudge, onepass = Frame(WW), Frame(KK), Frame(WW)
+    for s, start in enumerate(T9_STARTS):
+        for t, (slot, _) in enumerate(T9_TARGETS):
+            y = (s * len(T9_TARGETS) + t) * T9_BAND
+            if start != "white":
+                base.rect(0, y, WIDTH, T9_BAND, KK)
+            nudge.rect(0, y, WIDTH, T9_BAND, {"light": KW, "dark": WK}.get(start, KK))
+            onepass.rect(0, y, WIDTH, T9_BAND, slot)
+    bank = onepass_bank(gray, swing)
+    if from_onepass:
+        first = Frame(WW)
+        for s, start in enumerate(T9_STARTS):
+            y = s * len(T9_TARGETS) * T9_BAND
+            first.rect(0, y, WIDTH, len(T9_TARGETS) * T9_BAND, {"white": WW, "black": KK}.get(start, WK))
+        lab.push("prod", bank, first, "t9 one-pass starts", journal=False)
+    else:
+        lab.push("prod", PRODUCTION_BANK, base, "t9 base", journal=False)
+        lab.push("prod", READER_GRAY_BANK, nudge, "t9 reader nudge")
+    tag = f"g{gray}-s{swing}" + ("-op" if from_onepass else "")
+    if lab.camera:
+        lab.camera(f"t9-start-{tag}")
+    lab.push("prod", bank, onepass, f"t9 one-pass {tag}", journal=False)
+    if lab.camera:
+        lab.camera(f"t9-onepass-{tag}")
+    if again:
+        lab.push("prod", bank, onepass, f"t9 one-pass {tag} again", journal=False)
+        if lab.camera:
+            lab.camera(f"t9-again-{tag}")
+    photo(f"t9-onepass-{tag}", "bands: " + ", ".join(f"{s}>{n}" for s in T9_STARTS for _, n in T9_TARGETS))
+
+
 def test_handover(lab, warm, swap_planes=False):
     """The reader's nudge after a black base, with and without a reset in between.
 
@@ -885,6 +940,11 @@ def main():
     t8.add_argument("half", choices=sorted(HALF_VARIANTS))
     t8.add_argument("fast", choices=sorted(FAST_VARIANTS))
     t8.add_argument("name")
+    t9 = steps.add_parser("t9", help="Test 9: one-pass slots from every start, one refresh")
+    t9.add_argument("--gray", type=int, required=True, help="frames of VSL that land the gray")
+    t9.add_argument("--swing", type=int, default=8, help="frames of VSH that reset any start to black")
+    t9.add_argument("--again", action="store_true", help="a second one-pass frame on top")
+    t9.add_argument("--from-onepass", action="store_true", help="starts set up by a one-pass frame, as in reading")
     t4 = steps.add_parser("t4", help="Test 4: gray patches through a FAST page turn")
     t4.add_argument("--aware", action="store_true", help="mark gray pixels as changed")
     t4.add_argument("--hold", action="store_true", help="stop while the patches are gray")
@@ -949,6 +1009,11 @@ def main():
 
             lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
             test4_patches(lab, args.aware, hold=args.hold)
+        elif args.step == "t9":
+            import cam
+
+            lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
+            test9_onepass(lab, args.gray, args.swing, args.again, args.from_onepass)
         elif args.step == "t4-pages":
             test4_pages(lab, args.font, args.size, args.pages, args.mode, variant=args.variant)
         elif args.step == "t8":
