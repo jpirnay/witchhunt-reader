@@ -5,7 +5,8 @@
         [--header-out test/ot_shaper/ArabicExpected.h]
 
 <sources dir> holds the pinned Noto sources: NotoNaskhArabic-Regular, NotoSerif-Regular, NotoSansArabic-Bold and
-NotoSans-Bold (notofonts.github.io at 5c82cef, unhinted TTFs). Each is checked against the sha256 below; the script
+NotoSans-Bold, merged here, and the oracle's other four (Naskh Bold, Sans Arabic Regular, Serif Bold, Sans Regular;
+checked when present) (notofonts.github.io at 5c82cef, unhinted TTFs). Each is checked against the sha256 below; the script
 does not download. It writes three fonts into <fonts out dir>:
 
 - NotoNaskhArabic-Shaping-Regular.ttf: Noto Naskh Arabic Regular merged with Noto Serif's Latin by
@@ -51,6 +52,11 @@ SOURCES = {
     "NotoSerif-Regular.ttf": "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1",
     "NotoSansArabic-Bold.ttf": "f4cb79f842a07d1bcf597879574358fb7010f73761396d1d0f2445dfedb4d2ca",
     "NotoSans-Bold.ttf": "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9",
+    # The other four merge sources of the oracle (oracle_arabic.py); not merged here, checked when present.
+    "NotoNaskhArabic-Bold.ttf": "380ac34b249d336e1a43c21053df440594e1e3db8f75fabd4d85b649ca1ea4c6",
+    "NotoSansArabic-Regular.ttf": "bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0",
+    "NotoSerif-Bold.ttf": "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3",
+    "NotoSans-Regular.ttf": "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8",
 }
 MERGED = {
     "NotoNaskhArabic-Shaping-Regular.ttf": ("NotoNaskhArabic-Regular.ttf", "NotoSerif-Regular.ttf"),
@@ -505,6 +511,10 @@ def main():
     parser.add_argument("out", type=Path, help="output directory of the three fonts")
     parser.add_argument("--header-out", type=Path, default=Path(__file__).resolve().parent / "ArabicExpected.h")
     args = parser.parse_args()
+
+    for name in SOURCES:
+        if (args.sources / name).is_file():
+            verify_source(args.sources, name)
 
     fonts, words_by_font = [], []
     with tempfile.TemporaryDirectory() as tmp:

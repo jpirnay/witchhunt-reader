@@ -1591,16 +1591,16 @@ attachment.
 
 | File | Source sha256 | Merged sha256 |
 |---|---|---|
-| NotoNaskhArabic-Regular + NotoSerif-Regular | c34fdbd9...3b221, a15cfbbc...a14e1 | 21acf033...f14 |
-| NotoNaskhArabic-Bold + NotoSerif-Bold | 380ac34b...a4c6, 24ad531e...84c3 | 8c7a340f...137 |
-| NotoSansArabic-Regular + NotoSans-Regular | bd86ca02...c40d0, f3961a9c...8e8 | 13e9cea7...04e |
-| NotoSansArabic-Bold + NotoSans-Bold | f4cb79f8...2ca, 87cb2d84...29d9 | a2bfc7d1...dfb |
+| NotoNaskhArabic-Regular + NotoSerif-Regular | c34fdbd98af4dbc45ca192a23d2eeb77032add83086f5fe32957d23b3f36b221, a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1 | 21acf033...f14 |
+| NotoNaskhArabic-Bold + NotoSerif-Bold | 380ac34b249d336e1a43c21053df440594e1e3db8f75fabd4d85b649ca1ea4c6, 24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3 | 8c7a340f...137 |
+| NotoSansArabic-Regular + NotoSans-Regular | bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0, f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8 | 13e9cea7...04e |
+| NotoSansArabic-Bold + NotoSans-Bold | f4cb79f842a07d1bcf597879574358fb7010f73761396d1d0f2445dfedb4d2ca, 87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9 | a2bfc7d1...dfb |
 
 NotoNastaliqUrdu-Regular.ttf (OFL; GPOS `curs`, `dist`, `kern`, `mark`, `mkmk`; 6 GSUB features), used as downloaded:
 `https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoNastaliqUrdu/unhinted/ttf/NotoNastaliqUrdu-Regular.ttf`,
-176,600 B, sha256 `6decda3b03f6366dbd75e3a22544d248ca686b582f897fae8a7dc027302812e3`. The four Noto sources not pinned
-by `make_arabic_fixtures.py` (Naskh Bold, Sans Arabic Regular, Serif Bold, Sans Regular) are recorded here from the
-files in use; their merges are not byte-compared to anything.
+176,600 B, sha256 `6decda3b03f6366dbd75e3a22544d248ca686b582f897fae8a7dc027302812e3`. All eight Noto sources are pinned by
+sha256 in `make_arabic_fixtures.py` (it merges four and checks the other four when they are present); the merges of
+the other four are not byte-compared to anything.
 
 ### The result
 
