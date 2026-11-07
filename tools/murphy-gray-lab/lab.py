@@ -697,30 +697,41 @@ def test9_onepass(lab, gray, swing, again, from_onepass=False, white=None, black
 # Test 10: what a pixel that stays black for many pages costs it later. The one-pass planes cannot tell
 # a pixel that stays black from one that turns black, so it gets the black drive again on every page.
 # Three families differ only in what a page that keeps a pixel black gives it: that drive again
-# ("redrive", one-pass today on the X3 and X4), FAST's flash for black that stays ("flash", today's
-# B/W page turn), or rest ("rest", what one-pass could do knowing the frame on screen). Bands are held
-# black for K pages; all go white in the same refresh with the one-pass white, then rest once.
+# ("redrive", one-pass today on the X3 and X4), a stay row ("stay": the reader's FAST row for black that
+# stays, or with `--stay full` the full refresh's flash), or rest ("rest", the Murphy's one-pass). Bands
+# are held black for K pages; all go white in the same refresh with the one-pass white, then rest once.
+# The X3 runs of 2026-11-07 used `--stay full`.
 T10_HOLDS = (1, 2, 5, 10, 20, 50)
-T10_FAMILIES = ("redrive", "flash", "rest")
+T10_FAMILIES = ("redrive", "stay", "rest")
 T10_BANDS = 2 + len(T10_HOLDS) * len(T10_FAMILIES)  # a white control at the top and the bottom
 T10_BAND = HEIGHT // T10_BANDS
 
 
-def static_black_bank():
-    """WW rests, KW the one-pass white, WK FAST's flash for black that stays, KK the one-pass black."""
+def stay_black_row(stay):
+    """What a page that keeps a pixel black gives it. "fast": the reader's FAST row, VSH 2 on the X3
+    (lut_x3_bb_fast) and VSH 1 on the Murphy. "full": the full refresh's flash (VSL then VSH, net zero)."""
+    if stay == "full":
+        return PRODUCTION_BANK[KK]
+    if X3:
+        return _x3_raw((0x10, 0x04, 0x02, 0x04, 0x04, 0x01), (0x00, 0x04, 0x01, 0x00, 0x00, 0x01))
+    return FAST_BANK[KK]
+
+
+def static_black_bank(stay="fast"):
+    """WW rests, KW the one-pass white, WK the stay row, KK the one-pass black."""
     white_t = lut((VSL, 18 if X3 else 20))
     black_t = lut((VSH, 18 if X3 else 15))
-    flash_t = PRODUCTION_BANK[KK]
-    return make_bank(rest_like(white_t, black_t, flash_t), white_t, flash_t, black_t)
+    stay_t = stay_black_row(stay)
+    return make_bank(rest_like(white_t, black_t, stay_t), white_t, stay_t, black_t)
 
 
-def test10_static_black(lab):
+def test10_static_black(lab, stay="fast"):
     """Bands top to bottom: control, then for each K in T10_HOLDS the families in T10_FAMILIES order,
     then control. Shots: t10-black (every band black), t10-white (after the white drive), t10-rest."""
     lab.arm()
     lab.clean("white")
-    bank = static_black_bank()
-    stay = {"redrive": KK, "flash": WK, "rest": WW}
+    bank = static_black_bank(stay)
+    stay = {"redrive": KK, "stay": WK, "rest": WW}
     bands = [(hold, family) for hold in T10_HOLDS for family in T10_FAMILIES]
     pages = max(T10_HOLDS)
     for page in range(1, pages + 1):
@@ -746,8 +757,8 @@ def test10_static_black(lab):
 
 # Test 11: Test 10's question over ten times the pages, and the hour after. Bands are held black for 1, 50,
 # 200 and 500 pages, then go white, and the camera looks every 10 minutes for an hour for a remnant creeping
-# back. Not journalled: 500 pages of planes make a 70 MB journal. Only the re-driven bands take any drive,
-# 18 frames of VSH for each page held past the first, and `t11-cancel` pays exactly that back.
+# back. Not journalled: 500 pages of planes make a 70 MB journal; `t11-cancel` works out each band's net
+# drive from the same bank and pays it back. Give both the same `--stay`.
 T11_HOLDS = (1, 50, 200, 500)
 T11_BANDS = 2 + len(T11_HOLDS) * len(T10_FAMILIES)
 T11_BAND = HEIGHT // T11_BANDS
@@ -759,22 +770,30 @@ def t11_bands():
     return [(hold, family) for hold in T11_HOLDS for family in T10_FAMILIES]
 
 
-def test11_long_hold(lab):
+def t11_pages(stay):
+    """Each page's slot for every band, the white page last."""
+    rows = {"redrive": KK, "stay": WK, "rest": WW}
+    bands = t11_bands()
+    pages = max(T11_HOLDS)
+    for page in range(1, pages + 1):
+        yield tuple(
+            WW if page < pages - hold + 1 else KK if page == pages - hold + 1 else rows[family]
+            for hold, family in bands
+        )
+    yield tuple(KW for _ in bands)
+
+
+def test11_long_hold(lab, stay="fast"):
     """Bands top to bottom: control, then for each hold the families in T10_FAMILIES order, then control.
     Shots: t11-black, then t11-white-MM at each of T11_WATCH_MINUTES after the white drive."""
     lab.arm()
     lab.clean("white")
-    bank = static_black_bank()
-    stay = {"redrive": KK, "flash": WK, "rest": WW}
+    bank = static_black_bank(stay)
     bands = t11_bands()
     pages = max(T11_HOLDS)
     planes = {}  # the page only changes where a band starts; the planes take seconds to build
     started = time.time()
-    for page in range(1, pages + 1):
-        key = tuple(
-            WW if page < pages - hold + 1 else KK if page == pages - hold + 1 else stay[family]
-            for hold, family in bands
-        )
+    for page, key in enumerate(list(t11_pages(stay))[:-1], start=1):
         if key not in planes:
             frame = Frame(WW)
             for index, slot in enumerate(key, start=1):
@@ -797,26 +816,31 @@ def test11_long_hold(lab):
     photo("t11", f"{T11_BANDS} bands: control, " + ", ".join(f"{f}{h}" for h, f in bands) + ", control")
 
 
-def test11_cancel(lab):
-    """Pay back what Test 11's re-driven bands took, as VSL, then clean white."""
+def test11_cancel(lab, stay="fast"):
+    """Pay back each band's net drive from Test 11 with the same `stay`, either way, then clean white."""
     lab.arm()
-    owed = {
-        index: 18 * (hold - 1)
-        for index, (hold, family) in enumerate(t11_bands(), start=1)
-        if family == "redrive" and hold > 1
-    }
-    while any(owed.values()):
-        amounts = sorted({min(left, T11_CANCEL_CHUNK) for left in owed.values() if left})
-        drives = [lut((VSL, amount)) for amount in amounts]
-        rest = rest_like(*drives)
-        bank = make_bank(rest, *(drives + [rest] * (3 - len(drives))))
-        frame = Frame(WW)
-        for index, left in owed.items():
+    bank = static_black_bank(stay)
+    owed = [0] * len(t11_bands())
+    for key in t11_pages(stay):
+        for index, slot in enumerate(key):
+            owed[index] += net_drive(bank[slot])
+    print("net drive to pay back, band by band:", owed)
+    while any(owed):
+        steps = {}
+        for index, left in enumerate(owed):
             if left:
-                step = min(left, T11_CANCEL_CHUNK)
-                frame.rect(0, index * T11_BAND, WIDTH, T11_BAND, (KW, WK, KK)[amounts.index(step)])
-                owed[index] = left - step
-        lab.push("prod", bank, frame, f"t11 cancel {amounts}", journal=False)
+                step = (VSL if left > 0 else VSH, min(abs(left), T11_CANCEL_CHUNK))
+                if step in steps or len(steps) < 3:
+                    steps.setdefault(step, []).append(index)
+        drives = [lut(step) for step in steps]
+        rest = rest_like(*drives)
+        bank_now = make_bank(rest, *(drives + [rest] * (3 - len(drives))))
+        frame = Frame(WW)
+        for slot, (step, indices) in zip((KW, WK, KK), steps.items()):
+            for index in indices:
+                frame.rect(0, (index + 1) * T11_BAND, WIDTH, T11_BAND, slot)
+                owed[index] -= step[1] if step[0] == VSL else -step[1]
+        lab.push("prod", bank_now, frame, f"t11 cancel {list(steps)}", journal=False)
     lab.clean("white")
 
 
@@ -1134,6 +1158,8 @@ def main():
     steps.add_parser("black", help="clean black")
     steps.add_parser("undo", help="cancel journalled drive, then clean white")
     steps.add_parser("marks", help="calibration marks for cam.py")
+    light = steps.add_parser("light", help="front light fully on or off (Murphy), for the camera")
+    light.add_argument("state", choices=("on", "off"))
     steps.add_parser("t0", help="which plane code selects which LUT")
     t1 = steps.add_parser("t1", help="Test 1: the recipe from a known start")
     t1.add_argument("source", choices=("white", "black"))
@@ -1160,9 +1186,12 @@ def main():
     t9.add_argument("--from-onepass", action="store_true", help="starts set up by a one-pass frame, as in reading")
     t9.add_argument("--white", type=int, help="frames of VSL to white (default FAST's)")
     t9.add_argument("--black", type=int, help="frames of VSH to black (default FAST's)")
-    steps.add_parser("t10", help="Test 10: bands held black for 1-50 pages, then white")
-    steps.add_parser("t11", help="Test 11: bands held black for 1-500 pages, then watched for an hour")
-    steps.add_parser("t11-cancel", help="pay back the drive Test 11 left")
+    for name, text in (("t10", "Test 10: bands held black for 1-50 pages, then white"),
+                       ("t11", "Test 11: bands held black for 1-500 pages, then watched for an hour"),
+                       ("t11-cancel", "pay back the drive Test 11 left (give it the same --stay)")):
+        hold = steps.add_parser(name, help=text)
+        hold.add_argument("--stay", choices=("fast", "full"), default="fast",
+                          help="the middle family: the reader's FAST row, or the full refresh's flash")
     t4 = steps.add_parser("t4", help="Test 4: gray patches through a FAST page turn")
     t4.add_argument("--aware", action="store_true", help="mark gray pixels as changed")
     t4.add_argument("--hold", action="store_true", help="stop while the patches are gray")
@@ -1211,6 +1240,8 @@ def main():
             lab.clean(args.step)
         elif args.step == "marks":
             show_marks(lab)
+        elif args.step == "light":
+            print(lab.command("LIGHT " + ("1" if args.state == "on" else "0"))[0])
         elif args.step == "t0":
             import cam
 
@@ -1245,14 +1276,14 @@ def main():
             import cam
 
             lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
-            test10_static_black(lab)
+            test10_static_black(lab, args.stay)
         elif args.step == "t11":
             import cam
 
             lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
-            test11_long_hold(lab)
+            test11_long_hold(lab, args.stay)
         elif args.step == "t11-cancel":
-            test11_cancel(lab)
+            test11_cancel(lab, args.stay)
         elif args.step == "t4-pages":
             test4_pages(lab, args.font, args.size, args.pages, args.mode, variant=args.variant)
         elif args.step == "t8":

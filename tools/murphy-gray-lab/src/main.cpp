@@ -190,6 +190,12 @@ void handle(char* line) {
     commandRev();
   } else if (!strcmp(line, "OTP")) {
     commandOtp(args);
+  } else if (!strcmp(line, "LIGHT")) {
+    // The front light fully on or off, for the camera against a glossy front: no PWM, so no flicker.
+    if (kPinFrontlight < 0) return fail("no front light on this board");
+    if (strcmp(args, "0") != 0 && strcmp(args, "1") != 0) return fail("LIGHT 0|1");
+    digitalWrite(kPinFrontlight, args[0] == '1' ? HIGH : LOW);
+    ok(args[0] == '1' ? "light on" : "light off");
   } else if (!strcmp(line, "CFG")) {
     commandCfg(args);
   } else if (!strcmp(line, "LUT")) {
