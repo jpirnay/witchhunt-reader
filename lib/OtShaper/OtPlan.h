@@ -15,7 +15,9 @@
 // Mirrors HarfBuzz's hb_ot_map_builder_t / hb_ot_shape_plan_t.
 namespace ot {
 
-enum class ShaperKind : uint8_t { Default, Indic, Use };
+// witchhunt: deviation 11 - Arabic last: a compiled plan (CPpl) names a shaper by this value, and Plan::read() rejects
+// everything above Use.
+enum class ShaperKind : uint8_t { Default, Indic, Use, Arabic };
 
 // Work done between GSUB stages (HarfBuzz pause callbacks).
 enum class Pause : uint8_t {
@@ -30,7 +32,8 @@ enum class Pause : uint8_t {
   UseReorder,
 };
 
-// Indic scripts shaped here, in Unicode block order from U+0900.
+// Indic scripts shaped here, in Unicode block order from U+0900, and (deviation 11) Arabic after them, so the Indic
+// values, which index tables, are unchanged.
 enum class Script : uint8_t {
   Devanagari,
   Bengali,
@@ -41,7 +44,8 @@ enum class Script : uint8_t {
   Telugu,
   Kannada,
   Malayalam,
-  Sinhala
+  Sinhala,
+  Arabic  // witchhunt: deviation 11
 };
 
 // witchhunt: deviation 4 - whether a GSUB or GPOS script tag is one a plan
@@ -143,6 +147,14 @@ class Plan {
   uint8_t wouldStage[WS_COUNT] = {NO_STAGE, NO_STAGE, NO_STAGE, NO_STAGE, NO_STAGE};
   // Whether the lookups of the stage of `feature` would substitute `glyphs`.
   bool wouldSubstitute(const Face& face, WouldFeature feature, const uint32_t* glyphs, unsigned count) const;
+
+  // witchhunt: deviation 11 - the Arabic shaper: the masks of the seven forms in HarfBuzz's order (isol, fina, fin2,
+  // fin3, medi, med2, init; index 7 is "none" and stays 0), 0 for a form the font lacks and has no fallback for
+  // (fin2, fin3, med2); the mask of rtlm, which the text sets; and whether the plan runs right to left (every
+  // Arabic run does, so the script decides). They are kept out of MaskedFeature, whose order is the CPpl format's.
+  uint32_t arabicMasks[8] = {};
+  uint32_t rtlmMask = 0;
+  bool backward = false;
 
   // Universal Shaping Engine.
   uint32_t useRphfMask = 0;

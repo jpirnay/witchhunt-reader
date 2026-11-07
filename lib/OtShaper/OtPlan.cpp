@@ -13,13 +13,19 @@ namespace {
 constexpr unsigned NOT_FOUND = 0xFFFF;
 
 // OpenType script tags tried in order: Indic v3 (shaped by USE), v2, v1.
-// Sinhala has one.
+// Sinhala has one, and (witchhunt: deviation 11) Arabic: HarfBuzz tries only arab, then DFLT, dflt, latn.
 constexpr uint32_t SCRIPT_TAGS[][3] = {
-    {tag("dev3"), tag("dev2"), tag("deva")}, {tag("bng3"), tag("bng2"), tag("beng")},
-    {tag("gur3"), tag("gur2"), tag("guru")}, {tag("gjr3"), tag("gjr2"), tag("gujr")},
-    {tag("ory3"), tag("ory2"), tag("orya")}, {tag("tml3"), tag("tml2"), tag("taml")},
-    {tag("tel3"), tag("tel2"), tag("telu")}, {tag("knd3"), tag("knd2"), tag("knda")},
-    {tag("mlm3"), tag("mlm2"), tag("mlym")}, {tag("sinh"), 0, 0},
+    {tag("dev3"), tag("dev2"), tag("deva")},
+    {tag("bng3"), tag("bng2"), tag("beng")},
+    {tag("gur3"), tag("gur2"), tag("guru")},
+    {tag("gjr3"), tag("gjr2"), tag("gujr")},
+    {tag("ory3"), tag("ory2"), tag("orya")},
+    {tag("tml3"), tag("tml2"), tag("taml")},
+    {tag("tel3"), tag("tel2"), tag("telu")},
+    {tag("knd3"), tag("knd2"), tag("knda")},
+    {tag("mlm3"), tag("mlm2"), tag("mlym")},
+    {tag("sinh"), 0, 0},
+    {tag("arab"), 0, 0},
 };
 
 // Binary search in a RecordList (count, then tag + offset records), as

@@ -1,5 +1,6 @@
 add_executable(OtShaperTest
   OtShaperTest.cpp
+  OtArabicTest.cpp
   ${REPO_ROOT}/test/uzlib_lzcopy/UzlibChksumStubs.cpp
   ${OT_SHAPER_SOURCES}
 )
