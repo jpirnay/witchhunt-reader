@@ -770,17 +770,19 @@ def t11_bands():
     return [(hold, family) for hold in T11_HOLDS for family in T10_FAMILIES]
 
 
-def t11_pages(stay):
-    """Each page's slot for every band, the white page last."""
+def t11_pages(stay, upto=None):
+    """Each page's slot for every band, the white page last. `upto`: a run cut off after that many pages,
+    which never reached the white page."""
     rows = {"redrive": KK, "stay": WK, "rest": WW}
     bands = t11_bands()
     pages = max(T11_HOLDS)
-    for page in range(1, pages + 1):
+    for page in range(1, (upto or pages) + 1):
         yield tuple(
             WW if page < pages - hold + 1 else KK if page == pages - hold + 1 else rows[family]
             for hold, family in bands
         )
-    yield tuple(KW for _ in bands)
+    if upto is None:
+        yield tuple(KW for _ in bands)
 
 
 def test11_long_hold(lab, stay="fast"):
@@ -816,12 +818,13 @@ def test11_long_hold(lab, stay="fast"):
     photo("t11", f"{T11_BANDS} bands: control, " + ", ".join(f"{f}{h}" for h, f in bands) + ", control")
 
 
-def test11_cancel(lab, stay="fast"):
-    """Pay back each band's net drive from Test 11 with the same `stay`, either way, then clean white."""
+def test11_cancel(lab, stay="fast", pages=None):
+    """Pay back each band's net drive from Test 11 with the same `stay`, either way, then clean white.
+    `pages`: the run was cut off after that many pages."""
     lab.arm()
     bank = static_black_bank(stay)
     owed = [0] * len(t11_bands())
-    for key in t11_pages(stay):
+    for key in t11_pages(stay, pages):
         for index, slot in enumerate(key):
             owed[index] += net_drive(bank[slot])
     print("net drive to pay back, band by band:", owed)
@@ -1192,6 +1195,8 @@ def main():
         hold = steps.add_parser(name, help=text)
         hold.add_argument("--stay", choices=("fast", "full"), default="fast",
                           help="the middle family: the reader's FAST row, or the full refresh's flash")
+        if name == "t11-cancel":
+            hold.add_argument("--pages", type=int, help="the run was cut off after this many pages")
     t4 = steps.add_parser("t4", help="Test 4: gray patches through a FAST page turn")
     t4.add_argument("--aware", action="store_true", help="mark gray pixels as changed")
     t4.add_argument("--hold", action="store_true", help="stop while the patches are gray")
@@ -1283,7 +1288,7 @@ def main():
             lab.camera = None if args.dry_run else lambda name: cam.shot("/dev/video0", name, cam.EXPOSURE)
             test11_long_hold(lab, args.stay)
         elif args.step == "t11-cancel":
-            test11_cancel(lab, args.stay)
+            test11_cancel(lab, args.stay, args.pages)
         elif args.step == "t4-pages":
             test4_pages(lab, args.font, args.size, args.pages, args.mode, variant=args.variant)
         elif args.step == "t8":
