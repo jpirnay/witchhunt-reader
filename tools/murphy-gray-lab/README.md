@@ -215,8 +215,12 @@ Results on our X3, 2026-11-07:
 **Test 10: does a pixel kept black come back white?** The composed one-pass planes cannot tell a pixel that
 stays black from one that turns black, so it takes the black drive (VSH 18) again on every page. `t10` holds
 bands black for 1, 2, 5, 10, 20 and 50 pages in three families that differ only in what a page that keeps a
-pixel black gives it: that drive again, FAST's flash for black that stays, or rest. All go white in the same
+pixel black gives it: that drive again, a stay row, or rest. All go white in the same
 refresh with the one-pass white (VSL 18). `undo` afterwards cancels the drive the re-driven bands took.
+
+The stay row is `--stay fast`, the reader's FAST row for black that stays (VSH 2 on the X3, VSH 1 on the
+Murphy, the default), or `--stay full`, the full refresh's flash (VSL then VSH, net zero). The X3 runs below
+used `--stay full`: the "full flash" column is not what FAST does.
 
 ```sh
 ./lab.py t10; ./cam.py bands t10-white --count 20 --margin 6; ./cam.py bands t10-black --count 20 --margin 6
@@ -225,7 +229,7 @@ refresh with the one-pass white (VSL 18). `undo` afterwards cancels the drive th
 
 Results on our X3, 2026-11-07, read within minutes (bands: control, then re-drive, flash, rest for each hold):
 
-| Held black | Re-drive | Flash | Rest |
+| Held black | Re-drive | Full flash | Rest |
 |---|---|---|---|
 | 1 page | 104.5 | 104.5 | 104.5 |
 | 5 pages | 104.6 | 104.0 | 104.0 |
@@ -251,15 +255,15 @@ the firmware's 32-frame net limit.
 
 Results on our X3, 2026-11-07, an hour after the white drive (never-black controls 103.3 and 103.6):
 
-| Held black | Re-drive | Flash | Rest |
+| Held black | Re-drive | Full flash | Rest |
 |---|---|---|---|
 | 1 page | 102.0 | 101.9 | 102.1 |
 | 50 pages | 102.2 | 100.8 | 101.2 |
 | 200 pages | 102.2 | 100.4 | 101.1 |
 | 500 pages | 102.2 | 100.2 | 101.0 |
 
-- Re-driven black comes back as white as black held for one page, at every hold. FAST's flash leaves the most
-  behind, 1.8 points at 500 pages, rest about 1.
+- Re-driven black comes back as white as black held for one page, at every hold. The full refresh's flash
+  leaves the most behind, 1.8 points at 500 pages, rest about 1.
 - Nothing creeps back: every band, controls included, rose about a point in the first 10 minutes, then held
   within 0.2 for the hour.
 - While held, re-driven and flashed black sit 2-4 points deeper than one drive or rest.
