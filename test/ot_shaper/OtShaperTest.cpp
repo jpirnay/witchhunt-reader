@@ -542,6 +542,8 @@ TEST(OtUnicodeData, ArabicCharactersCarryHarfBuzzsProps) {
 
 TEST(OtUnicodeData, ArabicJoiningTypesAreHarfBuzzs) {
   using ot::JoiningType;
+  // HarfBuzz 14.5.0's values (hb-ot-shaper-arabic.cc): the state table is indexed by U..DalathRish.
+  static_assert(static_cast<int>(JoiningType::T) == 6 && static_cast<int>(JoiningType::DalathRish) == 5);
   const std::pair<uint32_t, JoiningType> expected[] = {
       {0x0627, JoiningType::R}, {0x0628, JoiningType::D}, {0x0621, JoiningType::U}, {0x0640, JoiningType::D},
       {0x064B, JoiningType::T}, {0x06CC, JoiningType::D}, {0x0698, JoiningType::R}, {0x200D, JoiningType::D},

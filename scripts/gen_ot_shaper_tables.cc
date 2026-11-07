@@ -53,16 +53,15 @@ static bool inSet(hb_codepoint_t u) {
 }
 
 // witchhunt: deviation 11. HarfBuzz's get_joining_type with X resolved, in ot::JoiningType's numbering
-// (U 0, L 1, R 2, D 3, ALAPH 4, DALATH_RISH 5, T 7).
+// (U 0, L 1, R 2, D 3, ALAPH 4, DALATH_RISH 5, T 6; X is resolved to T or U).
 static unsigned joiningOf(hb_codepoint_t u) {
   hb_unicode_funcs_t* uf = hb_unicode_funcs_get_default();
   const unsigned j = joining_type(u);
-  if (j < 6) return j;
-  if (j == 6) return 7;
+  if (j != 7) return j;
   const unsigned gc = hb_unicode_general_category(uf, u);
   return (gc == HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK || gc == HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK ||
           gc == HB_UNICODE_GENERAL_CATEGORY_FORMAT)
-             ? 7
+             ? 6
              : 0;
 }
 
@@ -111,11 +110,11 @@ int main() {
   printf("constexpr uint8_t PROPS_INDEX[] = {");
   for (size_t i = 0; i < index.size(); i++) printf("%s%u,", i % 16 ? " " : "\n    ", index[i]);
   printf("\n};\n");
-  // Joining types from HarfBuzz's own table, X resolved (T for Mn, Me and Cf, else U); T is 7.
+  // Joining types from HarfBuzz's own table, X resolved (T for Mn, Me and Cf, else U); T is 6.
   printf("// Arabic joining types from HarfBuzz %s's hb-ot-shaper-arabic-table.hh (Unicode 18.0 ArabicShaping.txt),\n",
          HB_VERSION_STRING);
   printf("// four bits a codepoint of RANGES, in order, the low nibble first: U 0, L 1, R 2, D 3 (C too),\n");
-  printf("// ALAPH 4, DALATH_RISH 5, T 7.\n");
+  printf("// ALAPH 4, DALATH_RISH 5, T 6.\n");
   printf("constexpr uint8_t JOINING[] = {");
   for (size_t i = 0; i < joining.size(); i += 2) {
     const unsigned pair = joining[i] | ((i + 1 < joining.size() ? joining[i + 1] : 0) << 4);
