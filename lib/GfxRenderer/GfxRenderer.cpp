@@ -3623,6 +3623,13 @@ void GfxRenderer::triggerGrayscaleFrame(const HalDisplay::RefreshMode mode) cons
   // buffers (see FreeInkDisplay::displayGrayscaleFrame), so frameBuffer still points where it did.
 }
 
+void GfxRenderer::displayOnePassFrame(const HalDisplay::RefreshMode mode) const {
+  const HalDisplay::RefreshMode effectiveMode = consumeRefreshOverride(mode);
+  noteRefresh(effectiveMode);
+  display.displayOnePassFrame(effectiveMode, fadingFix.load(std::memory_order_relaxed));
+  frameBuffer = display.getFrameBuffer();  // back from the mask to the page
+}
+
 void GfxRenderer::displayGrayscaleFrame(const HalDisplay::RefreshMode mode) const {
   const HalDisplay::RefreshMode effectiveMode = consumeRefreshOverride(mode);
   noteRefresh(effectiveMode);

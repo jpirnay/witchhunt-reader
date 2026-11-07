@@ -186,6 +186,11 @@ class HalDisplay {
   // a page that goes out through a gray frame: see ReaderUtils::OnePassTextScope.
   bool supportsOnePassText() const;
   void setReaderRefresh(bool reading);
+  // One-pass text on a board without the memory to stage planes (the X3): see FreeInkDisplay::beginOnePassMask().
+  // The mask is the buffer that held the frame on screen; null sends the caller down its two-pass path.
+  bool composesOnePassText() const;
+  uint8_t* beginOnePassMask();
+  void displayOnePassFrame(RefreshMode refreshMode, bool turnOffScreen);
   // Compose the intact B/W framebuffer with the LSB/MSB planes staged by
   // copyGrayscale*Buffers() and display the result in one refresh. Falls back to
   // a plain displayBuffer() on a panel that cannot, so callers need no branch of

@@ -1104,6 +1104,8 @@ class EpubReaderActivity final : public Activity {
   uint8_t getEffectiveParagraphAlignment() const;
   bool getEffectiveTextAntiAliasing() const;
   bool onePassTextFor(const Page& page) const;
+  bool onePassComposedFor(const Page& page) const;
+  bool displayComposedOnePass(const Page& page, int marginLeft, int contentTop, HalDisplay::RefreshMode mode);
   bool getEffectiveHyphenation() const;
   bool getEffectiveFontSizeNormalization() const;
   bool getEffectiveGuideDots() const;
