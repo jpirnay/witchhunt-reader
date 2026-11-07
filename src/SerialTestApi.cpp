@@ -939,14 +939,19 @@ struct ShapeReport {
   unsigned stored = 0;
 };
 
-constexpr unsigned kShapeRunCodepoints = 48;  // the run: the word from its first Indic letter
+constexpr unsigned kShapeRunCodepoints = 48;  // the run: the word from its first Indic or Arabic letter
 constexpr unsigned kShapeSlots = 112;         // the shaper's buffer: room to grow past the run
 
 // Rounds a 26.6 value to whole pixels, halves away from zero.
 int roundPixels(const int32_t v) { return v >= 0 ? (v + 32) / 64 : -((-v + 32) / 64); }
 
-// Shapes the first Indic run of `text` with the body family's regular style at the body size, as a section build
-// would, and times each step. Every block it makes is freed on return, the plan before the caller lets go of the
+// The Arabic blocks the shaper's fixtures cover: Arabic, Arabic Supplement and Arabic Extended-A.
+bool isArabicBlock(const uint32_t cp) {
+  return (cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0750 && cp <= 0x077F) || (cp >= 0x0870 && cp <= 0x08FF);
+}
+
+// Shapes the first Indic or Arabic run of `text` with the body family's regular style at the body size, as a section
+// build would, and times each step. Every block it makes is freed on return, the plan before the caller lets go of the
 // shaping faces. Under RenderLock.
 void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, const std::string_view text,
                ShapeReport& r) {
@@ -965,17 +970,21 @@ void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, 
 
   unsigned count = 0;
   const indic::ScriptInfo* script = nullptr;
+  bool arabic = false;
   for (const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8.get());
        *p && count < kShapeRunCodepoints;) {
     const uint32_t cp = utf8NextCodepoint(&p);
-    if (!script) script = indic::scriptOf(cp);
-    if (script) cps[count++] = cp;
+    if (!script && !arabic) {
+      script = indic::scriptOf(cp);
+      arabic = !script && isArabicBlock(cp);
+    }
+    if (script || arabic) cps[count++] = cp;
   }
-  if (!script) {
+  if (!script && !arabic) {
     r.error = "no Indic letter";
     return;
   }
-  r.script = script->name;
+  r.script = arabic ? "Arabic" : script->name;
 
   ShapingFace* const face = font.shapingFace(0);
   const EpdFont* const regular = font.font(0);
@@ -1012,7 +1021,8 @@ void shapeWord(TtfFontSet& set, TtfFont& font, const std::string_view language, 
   otFace = face->current();
   start = micros();
   const bool planned =
-      otFace && plan->build(*otFace, static_cast<ot::Script>(indic::indexOf(*script)), ot::languageTagsFor(tag));
+      otFace && plan->build(*otFace, arabic ? ot::Script::Arabic : static_cast<ot::Script>(indic::indexOf(*script)),
+                            ot::languageTagsFor(tag));
   r.planUs = micros() - start;
   if (!planned) {
     r.error = "plan failed";
