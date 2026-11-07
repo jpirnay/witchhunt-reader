@@ -4,13 +4,17 @@ The merge, for one style:
 - the script font with the Latin letters A-Z and a-z taken out of its cmap (its glyphs stay, so its glyph IDs and its
   own shaping are unchanged; only Noto Sans Sinhala maps any), so that Latin letters always come from the Latin font;
 - a fontTools.subset of the Latin font (Noto Sans or Noto Serif): U+0020-007E, U+00A0-024F, U+2000-206F,
-  U+20A0-20CF, U+2122 and U+FFFD, less every code point the script font maps other than A-Z and a-z (space, digits,
-  punctuation and the rest come from the script font); scaled to the script font's upem when they differ;
+  U+20A0-20CF, U+2122 and U+FFFD, plus Combining Diacritical Marks U+0300-036F and Latin Extended Additional
+  U+1E00-1EFF (the letters of IAST and ISO 15919 transliteration), less every code point the script font maps other
+  than A-Z and a-z (space, digits, punctuation and the rest come from the script font); scaled to the script font's
+  upem when they differ;
 - fontTools.merge.Merger with vhea and vmtx dropped, the script font first.
 The checks (HarfBuzz, scale 2133, ppem 33):
 - equal against the script's own font: every corpus line, glyph IDs, advances and offsets, with no language and each
   of the script's languages;
-- Latin kept whole: each Latin line restricted to Latin letters (its longest runs of A-Z and a-z), each run shaped
+- Latin kept whole: each Latin line restricted to the code points the merged font takes from the Latin font (A-Z, a-z
+  and every other code point of the subset that the script font does not map, such as the U+1E00-1EFF letters and the
+  U+0300-036F marks; its longest runs of them), each run shaped
   by the merged font and by Noto Sans/Serif itself: glyph names (through the merger's own renaming), advances and
   offsets equal, and every glyph one of the Latin font's.
 
@@ -34,10 +38,14 @@ LANGS = {"devanagari": ["hi", "mr", "ne", "sa"], "bengali": ["bn", "as"], "gurmu
          "sinhala": ["si"]}
 ISO = ["Deva", "Beng", "Guru", "Gujr", "Orya", "Taml", "Telu", "Knda", "Mlym", "Sinh"]
 LATIN_RANGES = [(0x0020, 0x007E), (0x00A0, 0x024F), (0x2000, 0x206F), (0x20A0, 0x20CF), (0x2122, 0x2122),
-                (0xFFFD, 0xFFFD)]
+                (0xFFFD, 0xFFFD), (0x0300, 0x036F), (0x1E00, 0x1EFF)]
 LETTERS = set(range(0x41, 0x5B)) | set(range(0x61, 0x7B))
 LATIN_LINES = ["The quick brown fox jumps over the lazy dog.", "AVATAR Wave fi fl ffi",
-               "\u201cQuotes\u201d \u2014 1,234.56 (x) [y] {z} \u20ac"]
+               "\u201cQuotes\u201d \u2014 1,234.56 (x) [y] {z} \u20ac",
+               # IAST, precomposed and decomposed (t + U+0323, r + U+0325, m + U+0310)
+               "karma\u1e47y ev\u0101dhik\u0101ras te m\u0101 phale\u1e63u kad\u0101cana",
+               "dharmak\u1e63etre kuruk\u1e63etre", "r\u0325\u1e63i", "sa\u1e41sk\u1e5btam", "\u1e6d\u012bk\u0101",
+               "t\u0323 m\u0310 r\u0325 \u1e0d \u1e25 \u1e37 \u1e39 \u1e5d \u1e43 \u1e45"]
 DROPPED_TABLES = ["vhea", "vmtx"]
 SCALE, PPEM = 2133, 33
 
@@ -109,10 +117,11 @@ def merge(script: Path, latin: Path, out: Path) -> None:
         merged.save(out)
 
 
-def _letter_runs(text):
+def _latin_runs(text, taken):
+    """The longest runs of `text` made of code points in `taken` (those the merged font takes from the Latin font)."""
     out, cur = [], ""
     for ch in text:
-        if ord(ch) in LETTERS:
+        if ord(ch) in taken:
             cur += ch
         elif cur:
             out.append(cur)
@@ -166,11 +175,14 @@ def check(merged: Path, script: Path, latin: Path, corpus: list[str], languages:
         latin_original = list(orders[1])
         computeMegaGlyphOrder(_Order(), orders)
         back = {renamed: original for original, renamed in zip(latin_original, orders[1])}
+        # What the merged font takes from the Latin font: A-Z and a-z, and every other code point of the subset (the
+        # subset already lacks what the script font maps).
+        taken = set(TTFont(latin_subset).getBestCmap() or {}) | LETTERS
     merged_order = list(TTFont(merged).getGlyphOrder())
     latin_order = list(TTFont(latin).getGlyphOrder())
     full = hb_font(Path(latin).read_bytes())
     for text in LATIN_LINES:
-        for run in _letter_runs(text):
+        for run in _latin_runs(text, taken):
             a = [(latin_order[g], *rest) for g, *rest in shape(full, run)]
             b = [(back.get(merged_order[g], "SCRIPT:" + merged_order[g]), *rest) for g, *rest in shape(both, run)]
             if a != b:
