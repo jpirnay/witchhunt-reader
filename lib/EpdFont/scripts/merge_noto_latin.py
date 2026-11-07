@@ -4,8 +4,9 @@ The merge, for one style:
 - the script font with the Latin letters A-Z and a-z taken out of its cmap (its glyphs stay, so its glyph IDs and its
   own shaping are unchanged; only Noto Sans Sinhala maps any), so that Latin letters always come from the Latin font;
 - a fontTools.subset of the Latin font (Noto Sans or Noto Serif): U+0020-007E, U+00A0-024F, U+2000-206F,
-  U+20A0-20CF, U+2122 and U+FFFD, plus Combining Diacritical Marks U+0300-036F and Latin Extended Additional
-  U+1E00-1EFF (the letters of IAST and ISO 15919 transliteration), less every code point the script font maps other
+  U+20A0-20CF, U+2122 and U+FFFD, plus the IAST letters (24 precomposed letters of Latin Extended Additional,
+  U+1E0C/D, 1E24/5, 1E36-9, 1E40-7, 1E5A-D, 1E62/3, 1E6C/D, and the 6 combining marks their decomposed forms use,
+  U+0301, 0303, 0304, 0307, 0310, 0323), less every code point the script font maps other
   than A-Z and a-z (space, digits, punctuation and the rest come from the script font); scaled to the script font's
   upem when they differ;
 - fontTools.merge.Merger with vhea and vmtx dropped, the script font first.
@@ -13,8 +14,7 @@ The checks (HarfBuzz, scale 2133, ppem 33):
 - equal against the script's own font: every corpus line, glyph IDs, advances and offsets, with no language and each
   of the script's languages;
 - Latin kept whole: each Latin line restricted to the code points the merged font takes from the Latin font (A-Z, a-z
-  and every other code point of the subset that the script font does not map, such as the U+1E00-1EFF letters and the
-  U+0300-036F marks; its longest runs of them), each run shaped
+  and every other code point of the subset that the script font does not map, such as the IAST letters and marks; its longest runs of them), each run shaped
   by the merged font and by Noto Sans/Serif itself: glyph names (through the merger's own renaming), advances and
   offsets equal, and every glyph one of the Latin font's.
 
@@ -38,14 +38,21 @@ LANGS = {"devanagari": ["hi", "mr", "ne", "sa"], "bengali": ["bn", "as"], "gurmu
          "sinhala": ["si"]}
 ISO = ["Deva", "Beng", "Guru", "Gujr", "Orya", "Taml", "Telu", "Knda", "Mlym", "Sinh"]
 LATIN_RANGES = [(0x0020, 0x007E), (0x00A0, 0x024F), (0x2000, 0x206F), (0x20A0, 0x20CF), (0x2122, 0x2122),
-                (0xFFFD, 0xFFFD), (0x0300, 0x036F), (0x1E00, 0x1EFF)]
+                (0xFFFD, 0xFFFD)]
+# The letters of IAST beyond Latin-1 (a, i, u, s, n, e, o with macron, acute or tilde are in U+00A0-024F): the 24
+# precomposed letters (D, H, L, L-macron, M, M, N, N, R, R-macron, S, T with a dot, lower and upper case) and the combining
+# marks the decomposed forms use (acute, tilde, macron, dot above, candrabindu, dot below).
+IAST = [cp for lower in (0x1E0D, 0x1E25, 0x1E37, 0x1E39, 0x1E41, 0x1E43, 0x1E45, 0x1E47, 0x1E5B, 0x1E5D, 0x1E63, 0x1E6D)
+        for cp in (lower - 1, lower)] + [0x0301, 0x0303, 0x0304, 0x0307, 0x0310, 0x0323]
 LETTERS = set(range(0x41, 0x5B)) | set(range(0x61, 0x7B))
 LATIN_LINES = ["The quick brown fox jumps over the lazy dog.", "AVATAR Wave fi fl ffi",
                "\u201cQuotes\u201d \u2014 1,234.56 (x) [y] {z} \u20ac",
-               # IAST, precomposed and decomposed (t + U+0323, r + U+0325, m + U+0310)
+               # IAST, precomposed and decomposed, lower and upper case
                "karma\u1e47y ev\u0101dhik\u0101ras te m\u0101 phale\u1e63u kad\u0101cana",
-               "dharmak\u1e63etre kuruk\u1e63etre", "r\u0325\u1e63i", "sa\u1e41sk\u1e5btam", "\u1e6d\u012bk\u0101",
-               "t\u0323 m\u0310 r\u0325 \u1e0d \u1e25 \u1e37 \u1e39 \u1e5d \u1e43 \u1e45"]
+               "dharmak\u1e63etre kuruk\u1e63etre", "sa\u1e41sk\u1e5btam", "\u1e6d\u012bk\u0101",
+               "\u1e5agveda", "\u1e62a\u1e6d", "\u1e0ca\u1e25 \u1e36 \u1e38 \u1e40 \u1e42 \u1e44 \u1e46 \u1e5c \u1e6c",
+               "t\u0323 s\u0301 n\u0303 a\u0304 n\u0307 m\u0310 r\u0323\u0304 d\u0323 h\u0323",
+               "\u1e0d \u1e25 \u1e37 \u1e39 \u1e41 \u1e43 \u1e45 \u1e47 \u1e5b \u1e5d \u1e63 \u1e6d"]
 DROPPED_TABLES = ["vhea", "vmtx"]
 SCALE, PPEM = 2133, 33
 
@@ -78,6 +85,7 @@ def make_latin(latin_path, script_cmap, script_upem, out_path):
     keep = set()
     for a, b in LATIN_RANGES:
         keep.update(range(a, b + 1))
+    keep.update(IAST)
     keep -= set(script_cmap) - LETTERS
     opts = subset.Options()
     opts.layout_features = ["*"]
