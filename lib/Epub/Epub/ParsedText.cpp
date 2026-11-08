@@ -23,6 +23,7 @@
 #include "CjkPunctuation.h"
 #include "Epub/VisibleText.h"
 #include "HashUtils.h"
+#include "HeapGrowth.h"
 #include "ShapedStore.h"
 #include "TextEmphasis.h"
 #include "VerticalDraw.h"
@@ -274,26 +275,10 @@ size_t scratchBytesFor(const ShapedStore& store, const std::span<const ShapedSto
   return bytes;
 }
 
-// The shaped layout's containers grow behind a heap check, as ShapedStore's do: under -fno-exceptions a growth the
-// heap refuses aborts. The allocator's header and rounding on top of a request, as reserveWords allows for.
-constexpr size_t kAllocSlack = 16;
-
-// What growing `v` to `count` elements asks of the heap: nothing when its capacity holds them, else the block
-// reserve(count) makes.
-template <typename T>
-size_t growthBytes(const std::vector<T>& v, const size_t count) {
-  return v.capacity() >= count ? 0 : count * sizeof(T) + kAllocSlack;
-}
-
-// The same for a string grown to `size` bytes: libstdc++ asks for twice the capacity it had when that is more, and the
-// NUL.
-size_t growthBytes(const std::string& s, const size_t size) {
-  return s.capacity() >= size ? 0 : std::max(size, 2 * s.capacity()) + 1 + kAllocSlack;
-}
-
-// Whether the largest free block holds `bytes`: the sum of several growths is checked at once, as reserveWords checks
-// its five (each block then fits in what the ones before it leave). Nothing to grow is always allowed.
-bool heapAllows(const size_t bytes) { return bytes == 0 || ESP.getMaxAllocHeap() >= bytes; }
+// The shaped layout's containers grow behind a heap check, as ShapedStore's and the line pass's do (HeapGrowth.h):
+// under -fno-exceptions a growth the heap refuses aborts.
+using heap_growth::growthBytes;
+using heap_growth::heapAllows;
 
 // FNV-1a over a value's bytes, folded into a running key (`key` starts at kKeySeed).
 constexpr uint32_t kKeySeed = 2166136261u;
@@ -2826,6 +2811,13 @@ BidiLine::Scratch* ParsedText::bidiScratchFor(const BidiLine::ArenaWorkspace& wo
 bool ParsedText::layOutBidiLine(const GfxRenderer& renderer, const int fontId, const size_t first, const size_t count) {
   BidiState& state = *bidiState_;
   state.tokens.clear();
+  // The line's tokens, 16 B each on the device, kept across lines: a line longer than any before grows the vector,
+  // behind the heap check the pass's other growths take. Refused, the line is laid out without bidi, as when the pass
+  // has no workspace.
+  if (!heapAllows(growthBytes(state.tokens, count))) {
+    LOG_ERR("BIDI", "No room for a line's %u tokens: line laid out without bidi", static_cast<unsigned>(count));
+    return false;
+  }
   state.tokens.reserve(count);
   for (size_t t = 0; t < count; ++t) {
     state.tokens.push_back({words[first + t], TokenBoundary::hasSpace(wordBoundaries[first + t])});

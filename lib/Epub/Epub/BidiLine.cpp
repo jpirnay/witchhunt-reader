@@ -10,6 +10,8 @@
 #include <new>
 #include <utility>
 
+#include "HeapGrowth.h"
+
 namespace BidiLine {
 namespace {
 
@@ -414,10 +416,20 @@ void markCuts(const Token* tokens, Scratch& s, const size_t slots, uint8_t* cons
 }
 
 // Grows a buffer the Line keeps to at least n, geometrically, so lines that grow a little at a time do not reallocate
-// on each one.
+// on each one. Behind the heap check (HeapGrowth.h): under -fno-exceptions a growth the heap refuses aborts, so a
+// refusal is false, nothing changed, and the caller lays the line out without bidi. The first line of a build takes
+// the pass's buffers; the lines after it grow them only when longer than any before.
 template <typename Buffer>
-void reserveAtLeast(Buffer& buffer, const size_t n) {
-  if (buffer.capacity() < n) buffer.reserve(std::max(n, 2 * buffer.capacity()));
+[[nodiscard]] bool reserveAtLeast(Buffer& buffer, const size_t n) {
+  if (buffer.capacity() >= n) return true;
+  const size_t wanted = std::max(n, 2 * buffer.capacity());
+  const size_t asked = heap_growth::growthBytes(buffer, wanted);
+  if (!heap_growth::heapAllows(asked)) {
+    LOG_ERR("BIDI", "No %u B for the line pass's buffers: line laid out without bidi", static_cast<unsigned>(asked));
+    return false;
+  }
+  buffer.reserve(wanted);
+  return true;
 }
 
 // The line's segments: one per token, and one more at each cut.
@@ -434,12 +446,14 @@ size_t formBytes(const Token* tokens, const size_t count) {
   return bytes;
 }
 
-// Walks the visual order into pieces, then gives each its bytes and its reading index. False only when a shaped
-// cluster's units land in two pieces: the caller falls back.
+// Walks the visual order into pieces, then gives each its bytes and its reading index. False when a shaped
+// cluster's units land in two pieces, or the heap refuses the Line its buffers: the caller falls back.
 bool buildPieces(const Token* tokens, const size_t count, Scratch& s, const size_t slots, Line& out) {
   // About one piece per segment, and the forms about the tokens' bytes: a line that holds more grows the buffers once.
-  reserveAtLeast(out.pieces, segmentCount(tokens, count));
-  reserveAtLeast(out.display, formBytes(tokens, count));
+  if (!reserveAtLeast(out.pieces, segmentCount(tokens, count)) ||
+      !reserveAtLeast(out.display, formBytes(tokens, count))) {
+    return false;
+  }
   // Free once the slots are ordered.
   uint8_t* const rankOf = s.expanded;
   uint8_t* const cutBefore = s.openSpans;
@@ -669,7 +683,7 @@ void fallbackBounds(const Token* tokens, const size_t count, size_t& pieces, siz
 // pieces in its own form's order (appendSegments), glued to one another; a token with no drawn character gives none.
 // Its corners are upstream's: past 128 code points computeVisualWordOrder declines too, so a right-to-left line
 // reverses an embedded Latin phrase's words, and minibidi sees isolates as embeddings. False (out cleared) when
-// BidiUtils has no workspace, as for a line that fits.
+// BidiUtils has no workspace, as for a line that fits, or when the heap refuses the Line its buffers.
 bool fallbackLine(const Token* tokens, const size_t count, const OpenControls& open, const uint8_t paragraphLevel,
                   Scratch& s, Line& out) {
   out.clear();
@@ -679,15 +693,40 @@ bool fallbackLine(const Token* tokens, const size_t count, const OpenControls& o
   uint16_t probeVisual = 0;
   uint32_t probeDrawn = 0;
   if (!BidiUtils::orderLine(&probe, 1, 0, &probeVisual, &probeDrawn)) return false;
-  out.fallback = true;
-  if (count == 0) return true;
+  if (count == 0) {
+    out.fallback = true;
+    return true;
+  }
 
   // The words without their marks (computeVisualWordOrder takes std::string words, about the line's bytes) and the
   // order followed by each token's first piece (4 bytes a token), in the Line's buffers: only a fallback line longer
-  // than any before allocates.
+  // than any before allocates. Every buffer is reserved before any is written, and the copies' bytes past the
+  // short-string buffer are asked for with them (the longest such copy stands for each: a kept copy's capacity is
+  // at least the text it held), so a refusal leaves the line clear for the caller's path without bidi. About 4.8 KB
+  // for a 300-code-point line whose every token is cut (the step 2 PR 4b review).
   std::vector<std::string>& words = out.fallbackWords;
   std::vector<uint16_t>& order = out.fallbackOrder;
-  reserveAtLeast(words, count);
+  size_t pieceBound = 0;
+  size_t byteBound = 0;
+  fallbackBounds(tokens, count, pieceBound, byteBound);
+  size_t copyBytes = 0;
+  for (size_t t = 0; t < count; t++) {
+    const std::string_view text = tokens[t].text;
+    const std::string* kept = t < words.size() ? &words[t] : nullptr;
+    const size_t have = kept != nullptr ? kept->capacity() : std::string().capacity();
+    if (text.size() > have) copyBytes += heap_growth::growthBytes(std::string(), text.size());
+  }
+  const bool copiesFit = heap_growth::heapAllows(copyBytes);
+  if (!copiesFit) {
+    LOG_ERR("BIDI", "No %u B for the fallback's word copies: line laid out without bidi",
+            static_cast<unsigned>(copyBytes));
+  }
+  if (!copiesFit || !reserveAtLeast(words, count) || !reserveAtLeast(order, 2 * count + 1) ||
+      !reserveAtLeast(out.display, byteBound) || !reserveAtLeast(out.pieces, pieceBound)) {
+    out.clear();
+    return false;
+  }
+  out.fallback = true;
   words.resize(count);
   for (size_t t = 0; t < count; t++) {
     const std::string_view text = tokens[t].text;
@@ -701,7 +740,6 @@ bool fallbackLine(const Token* tokens, const size_t count, const OpenControls& o
       }
     }
   }
-  reserveAtLeast(order, 2 * count + 1);
   if (!BidiUtils::computeVisualWordOrder(words, paragraphLevel == 1, order)) order.clear();
   if (order.size() != count) {
     order.clear();
@@ -711,13 +749,8 @@ bool fallbackLine(const Token* tokens, const size_t count, const OpenControls& o
   uint16_t* const firstPiece = order.data() + count;  // token t's pieces are [firstPiece[t], firstPiece[t + 1])
 
   // The pieces in logical order, made as the open controls follow the text, each ranked for reading as it comes.
-  // Fewer than 65,536 of them: each holds a drawn form in `display`, which 16-bit offsets index. Their buffers are
-  // reserved to what they can hold, so that neither grows while they are made.
-  size_t pieceBound = 0;
-  size_t byteBound = 0;
-  fallbackBounds(tokens, count, pieceBound, byteBound);
-  reserveAtLeast(out.display, byteBound);
-  reserveAtLeast(out.pieces, pieceBound);
+  // Fewer than 65,536 of them: each holds a drawn form in `display`, which 16-bit offsets index. Their buffers were
+  // reserved above to what they can hold, so that neither grows while they are made.
   OpenControls at = open;
   for (size_t t = 0; t < count; t++) {
     const std::string_view text = tokens[t].text;

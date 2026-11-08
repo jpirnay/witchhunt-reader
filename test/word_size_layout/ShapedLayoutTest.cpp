@@ -1439,6 +1439,28 @@ TEST_F(ShapedLayout, GluedPiecesTakeNoKerning) {
   EXPECT_EQ(line.wordXpos(3) + advanceOf(line, 3), line.wordXpos(4));  // a glyph run on the left
 }
 
+TEST_F(ShapedLayout, ALineWhoseTokensTheHeapRefusesIsLaidOutWithoutBidi) {
+  // The line pass's token vector grows behind the heap check (ParsedText::layOutBidiLine): refused, the line is laid
+  // out without bidi, as when the pass has no workspace. A Hebrew paragraph: it needs bidi and shapes nothing, so the
+  // refusal is the pass's alone and latches nothing.
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{"שלום"}, {"עולם"}, {"abc"}});
+  Lines lines;
+  {
+    const LargestFreeBlock none(0);
+    lines = layOut(text, renderer, 400);
+  }
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(3u, line.wordCount());
+  EXPECT_FALSE(line.hasLogicalOrder());
+  EXPECT_EQ(std::string("שלום"), line.wordText(0));  // logical order, as laid out without bidi
+  EXPECT_EQ(std::string("abc"), line.wordText(2));
+  EXPECT_FALSE(latch);
+  EXPECT_EQ(0u, text.tokensShaped());
+}
+
 TEST_F(ShapedLayout, JustificationStretchesTokensNotPieces) {
   // On a justified right-to-left line the gap between the tokens takes what the line lacks; the comma stays touching
   // its word.

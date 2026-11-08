@@ -4,6 +4,7 @@
 // A line is rendered as `t<token>:<display>` items, left to right, joined by ` S<n> ` for a word space (token n's)
 // and ` G ` for a glued boundary. Expected values were checked against minibidi on 2026-11-02.
 
+#include <Arduino.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -840,4 +841,74 @@ TEST(BidiLine, AnArenaLendsTheWorkspaceAndScratch) {
   ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), line));
   EXPECT_TRUE(BidiUtils::heapWorkspaceHeld());
   BidiUtils::releaseWorkspace();
+}
+
+// The largest free block the pass's heap checks read (the shim's ESP.getMaxAllocHeap()), for a scope. Nothing is
+// refused by it: only the checks see it.
+class LargestFreeBlock {
+ public:
+  explicit LargestFreeBlock(const uint32_t bytes) : saved_(ESP.getMaxAllocHeap()) { ESP.setMaxAllocHeap(bytes); }
+  ~LargestFreeBlock() { ESP.setMaxAllocHeap(saved_); }
+  LargestFreeBlock(const LargestFreeBlock&) = delete;
+  LargestFreeBlock& operator=(const LargestFreeBlock&) = delete;
+
+ private:
+  uint32_t saved_;
+};
+
+std::vector<BidiLine::Token> tokensOf(const std::vector<std::string>& words) {
+  std::vector<BidiLine::Token> tokens;
+  for (const auto& w : words) tokens.push_back({w, true});
+  return tokens;
+}
+
+// The Line's buffers grow behind the heap check (HeapGrowth.h): a line the heap refuses them for is reported as not
+// laid out, clear, for the caller's path without bidi. A Line that already holds them needs nothing from the heap.
+TEST(BidiLine, ALineTheHeapRefusesItsBuffersIsLaidOutWithoutBidi) {
+  const std::vector<std::string> words = {"abc", "אבג", "def"};
+  const auto tokens = tokensOf(words);
+  BidiLine::Line fresh;
+  {
+    const LargestFreeBlock none(0);
+    EXPECT_FALSE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 0, scratch(), fresh));
+  }
+  EXPECT_TRUE(fresh.pieces.empty());
+  EXPECT_TRUE(fresh.display.empty());
+
+  BidiLine::Line held;
+  ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 0, scratch(), held));
+  const std::string once = render(held);
+  {
+    const LargestFreeBlock none(0);
+    ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 0, scratch(), held));
+  }
+  EXPECT_EQ(once, render(held));
+  expectWellFormed(held, words);
+}
+
+// The fallback's copies, order and pieces the same: refused, the line is clear; held from an earlier fallback line,
+// nothing is asked of the heap.
+TEST(BidiLine, AFallbackLineTheHeapRefusesItsBuffersIsLaidOutWithoutBidi) {
+  const std::vector<std::string> words = repeated("אבגד", 26);  // 129 slots: over the limit
+  const auto tokens = tokensOf(words);
+  BidiLine::Line fresh;
+  {
+    const LargestFreeBlock none(0);
+    EXPECT_FALSE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), fresh));
+  }
+  EXPECT_TRUE(fresh.pieces.empty());
+  EXPECT_FALSE(fresh.fallback);
+  EXPECT_TRUE(fresh.fallbackWords.empty());
+
+  BidiLine::Line held;
+  ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), held));
+  ASSERT_TRUE(held.fallback);
+  const std::string once = render(held);
+  {
+    const LargestFreeBlock none(0);
+    ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), held));
+  }
+  EXPECT_TRUE(held.fallback);
+  EXPECT_EQ(once, render(held));
+  expectWellFormed(held, words);
 }
