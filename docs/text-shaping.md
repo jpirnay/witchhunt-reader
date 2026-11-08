@@ -59,12 +59,14 @@ word flow, to be shaped whole: a drop cap draws code points one by one, which wo
 
 1. **Whether the pass shapes** (`decideShaping`, after `decideBidi`): it does when a token holds a byte sequence of
    U+0900-0DFF (`IndicShaper::holdsIndic`), in a paragraph that needs bidi or not; or when the paragraph needs bidi, a
-   token holds a byte sequence of the Arabic blocks (`arabic::holdsArabic`) and that token has a shaping face (the
-   first such token decides). The book's language does not decide it; its text does. An Arabic run starts at an AL
-   letter, which makes the paragraph need bidi, so a Latin paragraph with Arabic-Indic digits or an Arabic comma shapes
-   nowhere. An Arabic paragraph in a bitmap or built-in font makes no `ShapingState` and merges nothing: its lines are
-   those of the line pass alone. A pass that does not shape takes the path it took before shaping existed, and its
-   lines keep their bytes.
+   token holds a byte sequence of the Arabic blocks (`arabic::holdsArabic`) and that token has a shaping face that
+   maps beh (`IndicShaper::drawsArabic`, the coverage test `shapeToken` makes of each Arabic run; the first such token
+   decides, and a face not mapped at that moment counts as one). The book's language does not decide it; its text
+   does. An Arabic run starts at an AL letter, which makes the paragraph need bidi, so a Latin paragraph with
+   Arabic-Indic digits or an Arabic comma shapes nowhere. An Arabic paragraph in a bitmap or built-in font, or in a
+   TrueType face without Arabic (a Latin reader font with no Arabic family installed), makes no `ShapingState` and
+   merges nothing: its lines are those of the line pass alone. A pass that does not shape takes the path it took
+   before shaping existed, and its lines keep their bytes.
 2. **Glued groups** (deviation 7, `mergeGluedGroups`). Tokens with no space between them are one word that the
    parser split where a span started or ended. `TextShaping::mergesWithPrevious` joins two of them before anything is
    measured:

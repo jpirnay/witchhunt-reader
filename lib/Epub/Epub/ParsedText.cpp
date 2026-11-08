@@ -924,9 +924,10 @@ void ParsedText::decideShaping(const GfxRenderer& renderer, const int fontId) {
   forgetFaceAnswers();
   // Indic text is formed in any font (reordered without a face). Arabic text only in a paragraph that needs bidi (every
   // Arabic run starts at an AL letter, which makes it need bidi: a Latin paragraph's Arabic-Indic digits or Arabic
-  // comma shape nowhere), where a token of it has a face, the first one found deciding (my call 5): in a bitmap or
-  // built-in font an Arabic paragraph makes no ShapingState and merges nothing, so its lines are byte for byte those of
-  // the line pass alone. Consecutive tokens in one font and style that has no face ask it once.
+  // comma shape nowhere), where a token of it has a face that draws Arabic (maps beh), the first one found deciding (my
+  // call 5): in a bitmap or built-in font, or a TrueType face without Arabic (whose every run would be Text), an Arabic
+  // paragraph makes no ShapingState and merges nothing, so its lines are byte for byte those of the line pass alone.
+  // Consecutive tokens in one font and style that has no such face ask it once.
   shapes_ = std::any_of(words.begin(), words.end(), [](const std::string& w) { return IndicShaper::holdsIndic(w); });
   int askedFont = 0;
   int askedStyle = -1;
@@ -936,7 +937,8 @@ void ParsedText::decideShaping(const GfxRenderer& renderer, const int fontId) {
     const int style = wordStyles[i] & EpdFontFamily::BOLD_ITALIC;
     if (font == askedFont && style == askedStyle) continue;
     uint32_t ppem = 0;
-    shapes_ = shapingFaceFor(renderer, fontId, i, &ppem) != nullptr;
+    ShapingFace* const face = shapingFaceFor(renderer, fontId, i, &ppem);
+    shapes_ = face != nullptr && IndicShaper::drawsArabic(*face);
     askedFont = font;
     askedStyle = style;
   }

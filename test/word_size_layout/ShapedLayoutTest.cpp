@@ -1748,6 +1748,63 @@ TEST_F(ShapedLayout, ALatinParagraphWithArabicDigitsInATtfIsUnchanged) {
   EXPECT_EQ(1u, hindi.tokensShaped());  // the Hindi word alone
 }
 
+TEST_F(ShapedLayout, AnArabicParagraphInAFaceWithoutArabicIsUnshaped) {
+  // Fable review fix 3: a TrueType face that does not map beh (arabic::kProbe) shapes no Arabic run: each would come
+  // back as Text after a call block and a run scan, and the paragraph's same-style glued tokens and mark-only spans
+  // would merge all the same. Such a paragraph is laid out as without a face: no ShapingState, nothing shaped or
+  // merged, its bytes the unshaped path's. The Japanese TrueType fixture maps Latin and no Arabic.
+  const std::vector<Word> words = {{kBeh},
+                                   {kFatha, EpdFontFamily::BOLD, true},
+                                   {kKitab},
+                                   {kKitab, EpdFontFamily::REGULAR, true},
+                                   {kKitab + kArabicComma}};
+  Seam::face = nullptr;
+  ParsedText plain(false, false, noIndentStyle());
+  add(plain, words);
+  const std::vector<std::string> expected = bytesOfLines(layOut(plain, renderer, 400));
+  ASSERT_EQ(1u, expected.size());
+
+  FixtureShapingFace& latin = useFont("NotoSansJP-TrueType.ttf");
+  const ot::Face* const mapped = latin.current();
+  ASSERT_NE(nullptr, mapped);
+  uint32_t glyph = 0;
+  ASSERT_TRUE(mapped->nominalGlyph('a', &glyph));
+  ASSERT_FALSE(mapped->nominalGlyph(0x0628, &glyph));
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, words);
+  EXPECT_EQ(expected, bytesOfLines(layOut(text, renderer, 400)));
+  EXPECT_FALSE(text.shapingStateHeld());
+  EXPECT_EQ(0u, text.tokensShaped());
+  EXPECT_FALSE(latch);
+
+  // Indic text is formed in that face all the same (reordered, the face mapping no Devanagari either).
+  ParsedText hindi(false, false, noIndentStyle());
+  add(hindi, {{kHindi}, {kKitab}, {kKitab, EpdFontFamily::REGULAR, true}});
+  ASSERT_EQ(1u, layOut(hindi, renderer, 400).size());
+  EXPECT_TRUE(hindi.shapingStateHeld());
+
+  // The control: in a face that maps beh, the same paragraph shapes, and its glued tokens merge.
+  useFont(kNaskh);
+  ParsedText shaped(false, false, noIndentStyle());
+  add(shaped, words);
+  const Lines shapedLines = layOut(shaped, renderer, 400);
+  ASSERT_EQ(1u, shapedLines.size());
+  EXPECT_TRUE(shaped.shapingStateHeld());
+  EXPECT_GE(wordWithText(*shapedLines[0], kBeh + kFatha), 0);
+  EXPECT_GE(wordWithText(*shapedLines[0], kKitab + kKitab), 0);
+
+  // A face that cannot be mapped now cannot say: the paragraph shapes as before, and its token degrades (latched).
+  useFont(kNaskh).mapped = false;
+  bool unmappedLatch = false;
+  ParsedText unmapped(false, false, noIndentStyle());
+  unmapped.setShapingLatch(&unmappedLatch);
+  add(unmapped, {{kKitab}});
+  ASSERT_EQ(1u, layOut(unmapped, renderer, 400).size());
+  EXPECT_TRUE(unmapped.shapingStateHeld());
+  EXPECT_TRUE(unmappedLatch);
+}
+
 TEST_F(ShapedLayout, ALatinWordForceSplitInAHindiParagraphKeepsTheStoreInStep) {
   // Review fix 3: a word wider than the column is split by the fallback breaks. In a paragraph that shapes, its
   // remainder gets a store entry though it is not shaped, so the shaped tokens after it find their own entries and keep

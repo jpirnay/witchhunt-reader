@@ -139,4 +139,9 @@ enum class Outcome : uint8_t { Plain, Formed, Degraded };
 // Under RenderLock (the face maps the glyph store).
 Outcome shapeToken(std::string_view text, const Request& request, CallMemory& memory, PieceSink& sink);
 
+// Whether `face` draws Arabic: it maps arabic::kProbe (beh), shapeToken's test of each Arabic run, so a face that does
+// not lays every one out as Text. True when the face is not mapped now (ShapingFace::current() null): shapeToken then
+// degrades the token, as it would. Under RenderLock, as shapeToken.
+bool drawsArabic(ShapingFace& face);
+
 }  // namespace IndicShaper
