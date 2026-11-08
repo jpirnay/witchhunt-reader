@@ -145,6 +145,12 @@ Bytes bytesOf(const BidiLine::Line& line) {
   return bytes;
 }
 
+std::vector<int> segmentPiecesOf(const BidiLine::Line& line) {
+  std::vector<int> counts;
+  for (const auto& piece : line.pieces) counts.push_back(piece.segmentPieces);
+  return counts;
+}
+
 std::vector<std::string> repeated(const std::string& text, const size_t n) { return std::vector<std::string>(n, text); }
 
 // The form tokenForm makes, or nothing when it returns false; checks that a false leaves `out` as it was.
@@ -484,6 +490,9 @@ TEST(BidiLine, AMarkAcrossACutTakesItsOwnSlot) {
   EXPECT_EQ(readings(line), (std::vector<int>{1, 2, 0}));
   EXPECT_EQ(line.pieces[1].gapBefore, Gap::Glued);
   EXPECT_EQ(line.pieces[2].gapBefore, Gap::Glued);
+  // The qamats lands inside the first segment, which gives two pieces: a caller that draws that segment as one form
+  // (a run's glyphs) reads 2 and must degrade it.
+  EXPECT_EQ(segmentPiecesOf(line), (std::vector<int>{2, 1, 2}));
 
   // A joiner across a cut takes its own slot too. It draws nothing, and its bytes stay with its own segment.
   const auto joined = lay({"ب" + u(0x200C) + "ه"}, 1, {}, {}, {{2}});
@@ -574,6 +583,53 @@ TEST(BidiLine, TheFallbackGluesOneTokensPieces) {
   EXPECT_EQ(comma[1].token, 5);
   EXPECT_EQ(comma[1].gapBefore, Gap::Glued);
   EXPECT_EQ(comma[1].spaceToken, 5);
+}
+
+TEST(BidiLine, APieceCountsThePiecesThatDrawItsSegment) {
+  // Each segment of (كتاب) is one piece.
+  EXPECT_EQ(segmentPiecesOf(lay({"قال", "(كتاب)"}, 1, {}, {}, {{}, {1, 9}})), (std::vector<int>{1, 1, 1, 1}));
+  // A token without cuts is one segment: an isolate inside it leaves it in three pieces.
+  const auto split = lay({"see", "x" + u(FSI) + "אבcd", "ef" + u(PDI), "more"}, 0);
+  EXPECT_EQ(render(split), "t0:see S1 t1:x G t1:cd S2 t2:ef G t1:בא S3 t3:more");
+  EXPECT_EQ(segmentPiecesOf(split), (std::vector<int>{1, 3, 3, 1, 3, 1}));
+  // The fallback gives one piece per segment.
+  auto words = repeated("אבגד", 26);
+  words.push_back("(كتاب)");
+  Cuts cuts(27);
+  cuts[26] = {1, 9};
+  const auto fallback = lay(words, 1, {}, {}, cuts);
+  ASSERT_TRUE(fallback.fallback);
+  EXPECT_EQ(segmentPiecesOf(fallback), std::vector<int>(29, 1));
+}
+
+TEST(BidiLine, CutsThatBreakTheirContractLeaveTheTokenUncut) {
+  // Unsorted, repeated, at the token's start or end, past it, or inside a code point (byte 2 is kaf's second): each
+  // token is laid out as without cuts.
+  const std::string word = "(كتاب)";  // 10 bytes
+  const auto uncut = lay({"قال", word}, 1);
+  const std::vector<std::vector<uint16_t>> broken = {{9, 1}, {1, 1}, {0, 9}, {1, 10}, {1, 400}, {2}};
+  for (const auto& cuts : broken) {
+    const BidiLine::Token token{word, true, static_cast<uint16_t>(cuts.size()), cuts.data()};
+    EXPECT_FALSE(BidiLine::cutsAreValid(token)) << cuts[0];
+    const auto line = lay({"قال", word}, 1, {}, {}, {{}, cuts});
+    EXPECT_EQ(render(line), render(uncut)) << cuts[0];
+    EXPECT_EQ(bytesOf(line), bytesOf(uncut)) << cuts[0];
+  }
+  const std::vector<uint16_t> kept = {1, 9};
+  EXPECT_TRUE(BidiLine::cutsAreValid({word, true, 2, kept.data()}));
+  EXPECT_TRUE(BidiLine::cutsAreValid({word, true}));
+  EXPECT_FALSE(BidiLine::cutsAreValid({word, true, 1, nullptr}));
+
+  // Past the limit, where each segment would be formed from its own bytes: a cut far past the token's end leaves its
+  // form the uncut one, and nothing past the text is read.
+  std::string run;
+  for (int i = 0; i < 130; i++) run += "ب";
+  const std::string longWord = "(" + run + ")";
+  const auto longUncut = lay({longWord}, 1);
+  const auto longLine = lay({longWord}, 1, {}, {}, {{1, 60000}});
+  EXPECT_TRUE(longLine.fallback);
+  EXPECT_EQ(render(longLine), render(longUncut));
+  EXPECT_EQ(bytesOf(longLine), (Bytes{{0, 262}}));
 }
 
 TEST(BidiLine, TheOpenControlsFollowTheText) {

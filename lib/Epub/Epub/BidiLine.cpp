@@ -502,6 +502,20 @@ bool buildPieces(const Token* tokens, const size_t count, Scratch& s, const size
     for (; j > 0 && before(r, pieceRank[j - 1]); j--) pieceRank[j] = pieceRank[j - 1];
     pieceRank[j] = static_cast<uint16_t>(r);
   }
+  // How many pieces draw each segment (each token's, when it has no cuts): in byte order a segment's pieces are
+  // consecutive. Read on their first drawn bytes, before those become segment starts below.
+  for (size_t r = 0; r < n;) {
+    const Piece& head = out.pieces[pieceRank[r]];
+    const Token& token = tokens[head.token];
+    const uint16_t segment = segmentOf(token, head.begin);
+    size_t end = r + 1;
+    while (end < n && out.pieces[pieceRank[end]].token == head.token &&
+           segmentOf(token, out.pieces[pieceRank[end]].begin) == segment) {
+      end++;
+    }
+    const auto pieces = static_cast<uint8_t>(std::min<size_t>(end - r, UINT8_MAX));
+    for (; r < end; r++) out.pieces[pieceRank[r]].segmentPieces = pieces;
+  }
   uint16_t previousEnd = 0;
   for (size_t r = 0; r < n; r++) {
     Piece& piece = out.pieces[pieceRank[r]];
@@ -535,6 +549,7 @@ void appendSegments(const Token& token, const uint16_t index, const OpenControls
   const auto openPiece = [&](const size_t segment) {
     Piece piece{};
     piece.token = index;
+    piece.segmentPieces = 1;
     piece.begin = segmentBegin(token, segment);
     piece.displayBegin = static_cast<uint16_t>(out.display.size());
     out.pieces.push_back(piece);
@@ -661,6 +676,7 @@ bool fallbackLine(const Token* tokens, const size_t count, const OpenControls& o
     } else {
       Piece piece{};
       piece.token = static_cast<uint16_t>(t);
+      piece.segmentPieces = 1;
       piece.begin = 0;
       piece.end = static_cast<uint16_t>(text.size());
       piece.displayBegin = static_cast<uint16_t>(out.display.size());
@@ -766,9 +782,43 @@ void Line::clear() {
   fallback = false;
 }
 
-bool layoutLine(const Token* tokens, const size_t count, const OpenControls& open, const uint8_t paragraphLevel,
-                Scratch& scratch, Line& out) {
+bool cutsAreValid(const Token& token) {
+  if (token.cutCount > 0 && token.cuts == nullptr) return false;
+  size_t previous = 0;
+  for (size_t i = 0; i < token.cutCount; i++) {
+    const size_t cut = token.cuts[i];
+    if (cut <= previous || cut >= token.text.size()) return false;
+    if ((static_cast<uint8_t>(token.text[cut]) & 0xC0) == 0x80) return false;  // inside a code point
+    previous = cut;
+  }
+  return true;
+}
+
+bool layoutLine(const Token* const callerTokens, const size_t count, const OpenControls& open,
+                const uint8_t paragraphLevel, Scratch& scratch, Line& out) {
   out.clear();
+  // The cuts checked, O(cuts): the pass reads the caller's tokens, or, when a cut list breaks its contract, a copy for
+  // this call (one Token a token, made for a broken caller only) with that list dropped, the token laid out uncut.
+  const Token* tokens = callerTokens;
+  std::unique_ptr<Token[]> checked;
+  size_t bad = 0;
+  while (bad < count && cutsAreValid(callerTokens[bad])) bad++;
+  if (bad < count) {
+    LOG_ERR("BIDI", "Token %u's cuts break their contract: laid out uncut", static_cast<unsigned>(bad));
+    checked = makeUniqueNoThrow<Token[]>(count);
+    if (!checked) {
+      LOG_ERR("BIDI", "No %u B for the line's tokens: laid out without bidi",
+              static_cast<unsigned>(sizeof(Token) * count));
+      return false;
+    }
+    std::copy(callerTokens, callerTokens + count, checked.get());
+    for (size_t t = bad; t < count; t++) {
+      if (cutsAreValid(checked[t])) continue;
+      checked[t].cutCount = 0;
+      checked[t].cuts = nullptr;
+    }
+    tokens = checked.get();
+  }
   const uint8_t level = paragraphLevel & 1;
   size_t slots = 0;
   if (!collect(tokens, count, open, scratch, slots)) return fallbackLine(tokens, count, open, level, scratch, out);
