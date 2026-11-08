@@ -48,3 +48,27 @@ TEST(FlowContext, AColophonKeepsTheBooksDirection) {
 }
 
 }  // namespace
+
+namespace {
+
+TEST(FlowContext, ARightToLeftBookTurnsRightToLeftUnlessItsOpfSaysLtr) {
+  // A Hebrew or Arabic book: never set vertically, so its request is Off.
+  EXPECT_TRUE(FlowContext::pageProgressionRtlFor(kOff, false, PageProgression::Default, true));
+  EXPECT_TRUE(FlowContext::pageProgressionRtlFor(kOff, false, PageProgression::Rtl, true));
+  EXPECT_FALSE(FlowContext::pageProgressionRtlFor(kOff, false, PageProgression::Ltr, true));
+  // A left-to-right book under Off keeps turning left to right whatever its ppd (a CJK book read horizontally).
+  EXPECT_FALSE(FlowContext::pageProgressionRtlFor(kOff, false, PageProgression::Rtl, false));
+  const FlowContext hebrew = FlowContext::of(kOff, false, PageProgression::Default, true);
+  EXPECT_FALSE(hebrew.vertical);
+  EXPECT_TRUE(hebrew.pageProgressionRtl);
+}
+
+TEST(FlowContext, ABookIsRightToLeftByItsLanguageOrByAnRtlOpfWhereThatCannotMeanVertical) {
+  EXPECT_TRUE(FlowContext::bookIsRtl(true, false, PageProgression::Default));  // he, ar
+  EXPECT_TRUE(FlowContext::bookIsRtl(true, false, PageProgression::Ltr));      // the ppd decides the turn, not this
+  EXPECT_TRUE(FlowContext::bookIsRtl(false, false, PageProgression::Rtl));     // an untagged or mis-tagged book
+  EXPECT_FALSE(FlowContext::bookIsRtl(false, true, PageProgression::Rtl));     // ja: the vertical convention
+  EXPECT_FALSE(FlowContext::bookIsRtl(false, false, PageProgression::Default));
+}
+
+}  // namespace
