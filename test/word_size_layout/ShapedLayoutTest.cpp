@@ -1817,3 +1817,32 @@ TEST_F(ShapedLine, AConsumedLetterIsDrawnWhenItsPartnerDegrades) {
   ASSERT_GE(lam, 0);
   EXPECT_TRUE(formed[0]->hasGlyphForm(static_cast<uint16_t>(lam)));
 }
+
+TEST_F(ShapedLine, AConsumedLetterDrawnWithoutTheLinePassTakesItsWidth) {
+  // Fable review fix 2: on a line laid out without the line pass (the heap refuses its Scratch), a consumed letter
+  // whose partner degraded is drawn as its code points at their width, so the piece after it does not overlap it. The
+  // lam's style has no face (refused), so its token is its code points and draws no ligature; the bold alef glued to
+  // it, shaped with the lam as context, keeps an empty run, then its comma (a Text piece).
+  useFont(kRtlTest);
+  Seam::refusedStyle = EpdFontFamily::REGULAR;
+  BidiLine::releaseBuildMemory();
+  ParsedText text(false, false, noIndentStyle());
+  add(text, {{kLam}, {kAlef + kArabicComma, EpdFontFamily::BOLD, true}});
+  Lines lines;
+  {
+    const AllocationRefusal refused(sizeof(BidiLine::Scratch), sizeof(BidiLine::Scratch));
+    lines = layOut(text, renderer, 400);
+  }
+  EXPECT_FALSE(BidiLine::heapScratchHeld());
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(3u, line.wordCount());  // the lam, the alef and the comma, in logical order
+  EXPECT_FALSE(line.hasLogicalOrder());
+  for (uint16_t i = 0; i < line.wordCount(); ++i) EXPECT_FALSE(line.hasGlyphForm(i)) << i;
+  const int alef = wordWithText(line, kAlef);
+  const int comma = wordWithText(line, kArabicComma);
+  ASSERT_GE(alef, 0);
+  ASSERT_GE(comma, 0);
+  EXPECT_EQ(kAlef, line.wordDrawText(static_cast<uint16_t>(alef)));
+  EXPECT_EQ(line.wordXpos(static_cast<uint16_t>(alef)) + kGlyph, line.wordXpos(static_cast<uint16_t>(comma)));
+}
