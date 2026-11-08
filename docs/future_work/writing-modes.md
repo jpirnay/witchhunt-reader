@@ -34,8 +34,9 @@ adds the Font Manager's 20 Indic families (a book takes an installed one of its 
 shaping into paragraphs that need bidi, and adds the Font Manager's two Arabic families. Step 2 is then complete but for
 speed: a later PR speeds the shaping engine up, since a chapter of real Hindi prose builds in 2.6 times a Latin
 chapter's time on the X3 and one of Arabic prose in 3.17 times, against the design's 2x (the measurements' "Real Hindi
-prose" and "PR 4b: Arabic on the page"). Its other follow-up is the ShapedStore's chunks in the lent arena's free room,
-which would let a landscape paragraph of more than 96 tokens a line build without degrading. Line spacing (`cjk.md`, step 10), which reads the `line-height` step 0 keeps, has shipped.
+prose" and "PR 4b: Arabic on the page"). Its other follow-up was the ShapedStore's heap: the store's index, not its chunks, held three quarters of it, and
+is now 16 B an entry and reserved to the pass's count (the handover's item 1 has the measurement and why the lent
+arena's free room is not the place for the rest). Line spacing (`cjk.md`, step 10), which reads the `line-height` step 0 keeps, has shipped.
 
 ## What step 1 takes from step 3
 
