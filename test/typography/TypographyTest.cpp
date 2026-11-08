@@ -124,6 +124,18 @@ TEST(LanguageTag, IsArabicScriptCoversEveryArabicScriptLanguage) {
   }
 }
 
+TEST(LanguageTag, IsHebrewScriptCoversHebrewYiddishLadinoAndAHebrScriptSubtag) {
+  using language_tag::isHebrewScript;
+  // Past a singleton the tag is an extension or private use, whose 4-letter subtags name no script.
+  for (const char* tag :
+       {"he", "iw", "yi", "lad", "jrb", "he-IL", "HE_il", "yi-Hebr", "ar-Hebr", "he-u-nu-latn", "he-x-latn"}) {
+    EXPECT_TRUE(isHebrewScript(tag)) << tag;
+  }
+  for (const char* tag : {"lad-Latn", "yi-Latn", "en", "ar", "", "heb", "hi", "en-x-hebr"}) {
+    EXPECT_FALSE(isHebrewScript(tag)) << tag;
+  }
+}
+
 TEST(LanguageTag, AForeignScriptSubtagIsNotIndic) {
   using language_tag::indicScriptOf;
   for (const char* tag : {"sa-Latn", "pa-Arab", "hi-Latn", "mni-Mtei", "hi-Latn-x-deva"})
