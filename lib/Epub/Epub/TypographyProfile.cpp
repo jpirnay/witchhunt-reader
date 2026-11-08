@@ -13,7 +13,8 @@ TypographyProfile TypographyProfile::forLanguage(const std::string& tag) {
   TypographyProfile p;
   p.hyphenator = Hyphenator::forLanguage(tag);
   p.shapingLanguage = ot::languageTagsFor(tag.c_str());
-  p.shapedScript = language_tag::indicScriptOf(tag) != nullptr;
+  const bool arabicScript = language_tag::isArabicScript(tag);
+  p.shapedScript = language_tag::indicScriptOf(tag) != nullptr || arabicScript;
 
   if (region != CjkRegion::None && region != CjkRegion::Korean) {
     p.breaking = Breaking::BetweenCharacters;
@@ -31,8 +32,7 @@ TypographyProfile TypographyProfile::forLanguage(const std::string& tag) {
     p.breaking = Breaking::KoreanWords;
     p.verticalAllowed = true;
     p.cjkRepertoire = true;
-  } else if (hasPrimary(t, "he") || hasPrimary(t, "iw") || hasPrimary(t, "yi") || hasPrimary(t, "ar") ||
-             hasPrimary(t, "fa") || hasPrimary(t, "ur")) {
+  } else if (hasPrimary(t, "he") || hasPrimary(t, "iw") || hasPrimary(t, "yi") || arabicScript) {
     p.direction = Direction::RightToLeft;
     p.hyphenator = nullptr;
   }

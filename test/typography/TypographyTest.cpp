@@ -111,6 +111,19 @@ TEST(LanguageTag, IndicScriptOfMapsEachLanguageToItsScript) {
   for (const char* tag : {"en", "zh", "he", "ar", ""}) EXPECT_EQ(indicScriptOf(tag), nullptr) << tag;
 }
 
+TEST(LanguageTag, IsArabicScriptCoversEveryArabicScriptLanguage) {
+  using language_tag::isArabicScript;
+  for (const char* tag : {"ar",    "fa",    "prs",     "ur",      "ps",    "sd",      "ug",           "ckb",      "ks",
+                          "pnb",   "azb",   "bal",     "skr",     "glk",   "mzn",     "lrc",          "bqi",      "ota",
+                          "ar-EG", "AR_sa", "ku-Arab", "pa-Arab", "ur-PK", "sd-Arab", "ar-u-nu-latn", "ar-x-latn"}) {
+    EXPECT_TRUE(isArabicScript(tag)) << tag;
+  }
+  for (const char* tag :
+       {"ku", "sd-Deva", "ks-Deva", "pa-Latn", "pa", "en", "he", "hi", "", "ara", "ar-Latn", "ku-x-arab"}) {
+    EXPECT_FALSE(isArabicScript(tag)) << tag;
+  }
+}
+
 TEST(LanguageTag, AForeignScriptSubtagIsNotIndic) {
   using language_tag::indicScriptOf;
   for (const char* tag : {"sa-Latn", "pa-Arab", "hi-Latn", "mni-Mtei", "hi-Latn-x-deva"})
@@ -135,6 +148,18 @@ TEST(Typography, AnIndicLanguageSetsShapedScript) {
     EXPECT_TRUE(TypographyProfile::forLanguage(tag).shapedScript) << tag;
   }
   for (const char* tag : {"sa-Latn", "en"}) EXPECT_FALSE(TypographyProfile::forLanguage(tag).shapedScript) << tag;
+}
+
+TEST(Typography, AnArabicScriptLanguageIsRtlAndShaped) {
+  for (const char* tag : {"ur", "ps", "ckb", "fa", "ar", "sd", "ku-Arab"}) {
+    const TypographyProfile p = TypographyProfile::forLanguage(tag);
+    EXPECT_EQ(TypographyProfile::Direction::RightToLeft, p.direction) << tag;
+    EXPECT_TRUE(p.shapedScript) << tag;
+  }
+  for (const char* tag : {"ku", "sd-Deva"}) {
+    EXPECT_EQ(TypographyProfile::Direction::LeftToRight, TypographyProfile::forLanguage(tag).direction) << tag;
+    EXPECT_FALSE(TypographyProfile::forLanguage(tag).shapedScript) << tag;
+  }
 }
 
 TEST(TypographyProfile, KoreanKeepsWholeWordsWithoutGridOrGap) {
@@ -187,8 +212,8 @@ TEST(TypographyProfile, TheIndicLanguagesAreShapedScripts) {
                           "or", "te",    "kn", "as",    "sa", "mai", "bho", "awa", "mag",   "raj"}) {
     EXPECT_TRUE(TypographyProfile::forLanguage(tag).shapedScript) << tag;
   }
-  // Urdu is written in the Arabic script, which is not shaped.
-  for (const char* tag : {"", "en", "he", "ja", "ur", "ar", "hin", "kok1"}) {
+  // Hebrew is not shaped; the Arabic script is (AnArabicScriptLanguageIsRtlAndShaped).
+  for (const char* tag : {"", "en", "he", "ja", "hin", "kok1"}) {
     EXPECT_FALSE(TypographyProfile::forLanguage(tag).shapedScript) << tag;
   }
 }

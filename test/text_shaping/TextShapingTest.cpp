@@ -161,8 +161,8 @@ constexpr uint32_t DEVA_KA = 0x0915, DEVA_SSA = 0x0937, DEVA_MA = 0x092E, DEVA_R
 TextShaping::GroupToken token(const std::string& text, uint32_t key) { return {text, key}; }
 
 bool merges(const std::string& previous, uint32_t previousKey, const std::string& next, uint32_t nextKey,
-            bool indicGroup = true) {
-  return TextShaping::mergesWithPrevious(token(previous, previousKey), token(next, nextKey), indicGroup);
+            bool shapedGroup = true) {
+  return TextShaping::mergesWithPrevious(token(previous, previousKey), token(next, nextKey), shapedGroup);
 }
 
 }  // namespace
@@ -231,13 +231,143 @@ TEST(IndicRuns, MaxRunsHoldsEveryToken) {
   for (int i = 0; i < 33; i++) s += utf8({DEVA_KA, BENG_KA});
   s += utf8({DEVA_KA});  // 67 letters, 201 bytes
   ASSERT_EQ(s.size(), 201u);
-  static_assert(IndicShaper::maxRuns(201) == 68);
+  static_assert(IndicShaper::maxRuns(201) == 101);
   IndicShaper::Run runs[IndicShaper::maxRuns(201)];
   const size_t count = IndicShaper::scanRuns(s, runs);
   EXPECT_EQ(count, 67u);
   EXPECT_LE(count, IndicShaper::maxRuns(s.size()));
   EXPECT_EQ(runs[66].end, 201);
   // A token of 200 bytes (66 letters and 2 more bytes) fits the array maxRuns(200) gives.
-  static_assert(IndicShaper::maxRuns(200) == 67);
+  static_assert(IndicShaper::maxRuns(200) == 101);
   EXPECT_LE(IndicShaper::scanRuns(std::string_view(s.data(), 200), runs), IndicShaper::maxRuns(200));
+}
+
+namespace {
+
+constexpr uint32_t AR_KAF = 0x0643, AR_TEH = 0x062A, AR_ALEF = 0x0627, AR_BEH = 0x0628, AR_FATHA = 0x064E,
+                   AR_COMMA = 0x060C, AR_KEHEH = 0x06A9, AR_HEH = 0x0647, ZWNJ = 0x200C, RLM = 0x200F,
+                   AR_DIGIT_ONE = 0x0661, AR_DIGIT_NINE = 0x0669, PRES_BEH = 0xFE8F;
+
+const std::vector<uint32_t> kKitab = {AR_KAF, AR_TEH, AR_ALEF, AR_BEH};  // 8 bytes
+
+}  // namespace
+
+TEST(ArabicRuns, BracketsAndCommaStayOutside) {
+  IndicShaper::Run runs[16];
+  std::vector<uint32_t> cps = {'('};
+  cps.insert(cps.end(), kKitab.begin(), kKitab.end());
+  cps.push_back(')');
+  cps.push_back(AR_COMMA);
+  const std::string s = utf8(cps);
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
+  EXPECT_EQ(runs[0].begin, 1);
+  EXPECT_EQ(runs[0].end, 9);
+  EXPECT_TRUE(runs[0].arabic);
+  EXPECT_EQ(runs[0].script, nullptr);
+  EXPECT_TRUE(IndicShaper::holdsShaped(s));
+}
+
+TEST(ArabicRuns, DigitsEndARun) {
+  IndicShaper::Run runs[16];
+  std::vector<uint32_t> cps = kKitab;
+  cps.push_back(AR_DIGIT_ONE);
+  cps.push_back(AR_DIGIT_NINE);
+  const std::string s = utf8(cps);
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
+  EXPECT_EQ(runs[0].begin, 0);
+  EXPECT_EQ(runs[0].end, 8);
+  EXPECT_TRUE(IndicShaper::holdsShaped(s));  // the byte pre-test passes digits too
+}
+
+TEST(ArabicRuns, AZwnjStaysInside) {
+  IndicShaper::Run runs[16];
+  const std::string s = utf8({AR_KEHEH, ZWNJ, AR_HEH});
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
+  EXPECT_EQ(runs[0].begin, 0);
+  EXPECT_EQ(runs[0].end, s.size());
+  EXPECT_TRUE(runs[0].arabic);
+}
+
+TEST(ArabicRuns, ALeadingMarkStartsNoRun) {
+  IndicShaper::Run runs[16];
+  EXPECT_EQ(IndicShaper::scanRuns(utf8({AR_FATHA}), runs), 0u);
+  const std::string s = utf8({AR_FATHA, AR_BEH});  // the mark is skipped, the letter starts the run
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
+  EXPECT_EQ(runs[0].begin, 2);
+  EXPECT_EQ(runs[0].end, 4);
+}
+
+TEST(ArabicRuns, AnRlmCutsAWord) {
+  IndicShaper::Run runs[16];
+  const std::string s = utf8({AR_KAF, AR_TEH, RLM, AR_ALEF, AR_BEH});
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 2u);
+  EXPECT_EQ(runs[0].end, 4);
+  EXPECT_EQ(runs[1].begin, 7);
+  EXPECT_EQ(runs[1].end, 11);
+}
+
+TEST(ArabicRuns, PresentationFormsAreNoRun) {
+  IndicShaper::Run runs[16];
+  EXPECT_EQ(IndicShaper::scanRuns(utf8({PRES_BEH, 0xFE91}), runs), 0u);
+  EXPECT_FALSE(IndicShaper::holdsShaped(utf8({PRES_BEH})));
+}
+
+TEST(ArabicRuns, ARunEndsAtADanda) {
+  IndicShaper::Run runs[16];
+  const std::string s = utf8({AR_KAF, AR_TEH, DANDA, AR_ALEF});
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 3u);
+  EXPECT_TRUE(runs[0].arabic);
+  EXPECT_EQ(runs[0].end, 4);
+  EXPECT_FALSE(runs[1].arabic);  // the danda alone: shared
+  EXPECT_EQ(runs[1].script, nullptr);
+  EXPECT_EQ(runs[1].begin, 4);
+  EXPECT_EQ(runs[1].end, 7);
+  EXPECT_TRUE(runs[2].arabic);
+}
+
+TEST(ArabicRuns, AnArabicLetterEndsAnIndicRunAndTheReverse) {
+  IndicShaper::Run runs[16];
+  const std::string s = utf8({DEVA_KA, DEVA_I, AR_BEH, DEVA_KA});
+  ASSERT_EQ(IndicShaper::scanRuns(s, runs), 3u);
+  EXPECT_FALSE(runs[0].arabic);
+  EXPECT_NE(runs[0].script, nullptr);
+  EXPECT_TRUE(runs[1].arabic);
+  EXPECT_EQ(runs[1].begin, 6);
+  EXPECT_EQ(runs[1].end, 8);
+  EXPECT_FALSE(runs[2].arabic);
+}
+
+TEST(ArabicRuns, MaxRunsHoldsAlternatingScripts) {
+  // 2-byte Arabic letters alternating with 3-byte Devanagari ones: a run each.
+  std::string s;
+  for (int i = 0; i < 40; i++) s += utf8({AR_BEH, DEVA_KA});
+  std::vector<IndicShaper::Run> runs(IndicShaper::maxRuns(s.size()));
+  const size_t count = IndicShaper::scanRuns(s, runs.data());
+  EXPECT_EQ(count, 80u);
+  EXPECT_LE(count, IndicShaper::maxRuns(s.size()));
+  // 2-byte letters each cut by a 3-byte RLM: the densest Arabic-only token is a run per 5 bytes, and a run per 2
+  // bytes needs another script abutting, as above.
+  std::string t;
+  for (int i = 0; i < 50; i++) t += utf8({AR_BEH, RLM});
+  std::vector<IndicShaper::Run> more(IndicShaper::maxRuns(t.size()));
+  EXPECT_EQ(IndicShaper::scanRuns(t, more.data()), 50u);
+}
+
+TEST(TextShapingMerge, AMarkOnlyTokenAfterAnArabicLetterMerges) {
+  EXPECT_TRUE(merges(utf8({AR_BEH}), 1, utf8({AR_FATHA}), 1));
+  EXPECT_TRUE(merges(utf8({AR_BEH}), 1, utf8({AR_FATHA}), 2));
+  EXPECT_TRUE(merges(utf8({AR_BEH, AR_FATHA}), 1, utf8({0x064F}), 2));   // a mark already on the base
+  EXPECT_TRUE(merges(utf8({AR_KAF, 0x0640}), 1, utf8({AR_FATHA}), 2));   // tatweel counts as a letter
+  EXPECT_FALSE(merges(utf8({AR_BEH}), 1, utf8({AR_BEH}), 2));            // a letter is not a mark
+  EXPECT_FALSE(merges(utf8({AR_BEH, 0x061F}), 1, utf8({AR_FATHA}), 2));  // an Arabic question mark is no base
+}
+
+TEST(TextShapingMerge, AMarkAfterALatinOrHebrewWordDoesNot) {
+  EXPECT_FALSE(merges("abc", 1, utf8({AR_FATHA}), 2));
+  EXPECT_FALSE(merges(utf8({0x05E9, 0x05DC, 0x05D5, 0x05DD}), 1, utf8({AR_FATHA}), 2));
+}
+
+TEST(TextShapingMerge, NothingMergesOutsideAShapedGroup) {
+  EXPECT_FALSE(merges(utf8({AR_BEH}), 1, utf8({AR_FATHA}), 2, false));
+  EXPECT_FALSE(merges(utf8({AR_BEH}), 1, utf8({AR_FATHA}), 1, false));
 }

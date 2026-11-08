@@ -3,7 +3,8 @@
 
 Writes <out dir>/arabic.txt, one string per line, deterministic (random.Random(1757)):
 
-- every assigned code point of the four Arabic ranges alone;
+- every assigned code point of the four Arabic ranges alone (those Python's unicodedata does not know yet are listed
+  in NEWER_THAN_PYTHON);
 - each letter isolated, initial, medial and final (beside beh);
 - 40 base letters, each with each of U+064B-0652 and U+0670, and with shadda and each vowel in both orders;
 - the 14 modifier combining marks after beh, each with fatha and with kasra in both orders;
@@ -34,13 +35,17 @@ RANGES = [(0x0600, 0x06FF), (0x0750, 0x077F), (0x0870, 0x089F), (0x08A0, 0x08FF)
 VOWELS = [chr(c) for c in range(0x064B, 0x0653)] + [chr(0x0670)]  # U+064B-0652 and 0670
 MODIFIER_MARKS = [chr(c) for c in (0x0654, 0x0655, 0x0658, 0x06DC, 0x06E3, 0x06E7, 0x06E8, 0x08CA, 0x08CB, 0x08CD,
                                    0x08CE, 0x08CF, 0x08D3, 0x08F3)]
+# Assigned in the Unicode version after the one Python's unicodedata carries (3.14: 16.0.0): U+088F ARABIC LETTER NOON
+# WITH RING ABOVE (Unicode 17.0, a letter). Listed so that the corpus does not depend on the Python that generates it.
+NEWER_THAN_PYTHON = [0x088F]
 ALEFS = [chr(c) for c in (0x0622, 0x0623, 0x0625, 0x0627, 0x0671, 0x0672, 0x0673, 0x0675)]
 PERSIAN = word(0x067E, 0x0686, 0x0698, 0x06AF, 0x06A9, 0x06CC)
 URDU = word(0x067E, 0x0679, 0x0688, 0x0691, 0x06BA, 0x06BE, 0x06C1, 0x06D2, 0x06C3, 0x06CC)
 
 
 def assigned():
-    return [chr(c) for lo, hi in RANGES for c in range(lo, hi + 1) if unicodedata.category(chr(c)) != "Cn"]
+    known = [chr(c) for lo, hi in RANGES for c in range(lo, hi + 1) if unicodedata.category(chr(c)) != "Cn"]
+    return sorted(set(known) | {chr(c) for c in NEWER_THAN_PYTHON})
 
 
 def main():
@@ -48,7 +53,8 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     rng = random.Random(1757)
     chars = assigned()
-    letters = [c for c in chars if unicodedata.category(c) == "Lo"]
+    # The code points of NEWER_THAN_PYTHON are all letters (Lo).
+    letters = [c for c in chars if unicodedata.category(c) == "Lo" or ord(c) in NEWER_THAN_PYTHON]
     marks = [c for c in chars if unicodedata.category(c) in ("Mn", "Me", "Mc")]
     # 40 base letters: the 36 basic ones and four Persian/Urdu ones.
     base = [chr(c) for c in list(range(0x0621, 0x063B)) + list(range(0x0641, 0x064B))] + [chr(c) for c in (0x067E, 0x0686, 0x06A9, 0x06AF)]

@@ -90,6 +90,9 @@ class DictionaryWordSelectActivity final : public Activity {
     // Bold, italic, sub/superscript: this one really is per piece -- bionic reading alternates
     // bold and regular within a single word.
     EpdFontFamily::Style style;
+    // Its line word's place in the line's reading order (TextBlock::logicalPosition): on a right-to-left line the
+    // fragments are stored in visual order, and a word's text is joined in reading order (buildWordText).
+    uint8_t order;
   };
   static_assert(sizeof(Fragment) <= 16, "Fragment is on the reader's contiguous-heap budget");
 

@@ -15,6 +15,10 @@
 #include "BidiUtils.h"
 #include "Utf8.h"
 
+extern "C" {
+#include "minibidi.h"
+}
+
 namespace {
 
 using CP = std::vector<uint32_t>;
@@ -290,4 +294,17 @@ TEST(BidiUtils, AnNsmAfterAChangedBracketTakesItsType) {
   const auto r = order(in, 1);
   ASSERT_TRUE(r.ok);
   EXPECT_EQ(r.visual, (Idx{11, 10, 2, 3, 4, 5, 6, 7, 8, 9, 1, 0}));
+}
+
+TEST(BidiUtils, ArabicSupplementAndExtendedAreStrongRtl) {
+  EXPECT_EQ(bidi_class(0x0750), AL);  // Arabic Supplement
+  EXPECT_EQ(bidi_class(0x08A0), AL);  // Extended-A
+  EXPECT_EQ(bidi_class(0x088F), AL);  // letter, added in Unicode 17
+  EXPECT_EQ(bidi_class(0x08CA), NSM);
+  EXPECT_EQ(bidi_class(0x08F0), NSM);
+  EXPECT_EQ(bidi_class(0x0897), NSM);
+  EXPECT_EQ(bidi_class(0x0890), AN);  // number sign
+  EXPECT_EQ(bidi_class(0x08E2), AN);  // end of ayah
+  EXPECT_EQ(bidi_class(0xFDF2), AL);  // ligature allah
+  EXPECT_EQ(bidi_class(0xFDFA), AL);
 }

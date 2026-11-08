@@ -404,11 +404,11 @@ TEST(FontManifestReaderTest, ReadsTheShippedV3Manifest) {
 
   const std::vector<std::string> cjk = {"NotoSansJP",  "NotoSansKR",  "NotoSansSC",  "NotoSansTC",
                                         "NotoSerifJP", "NotoSerifKR", "NotoSerifSC", "NotoSerifTC"};
-  std::vector<std::string> indic;
+  std::vector<std::string> trueTypeFamilies = {"NotoNaskhArabic", "NotoSansArabic"};  // plus the twenty Indic ones
   for (const char* face : {"NotoSans", "NotoSerif"}) {
     for (const char* script : {"Devanagari", "Bengali", "Gurmukhi", "Gujarati", "Oriya", "Tamil", "Telugu", "Kannada",
                                "Malayalam", "Sinhala"}) {
-      indic.push_back(std::string(face) + script);
+      trueTypeFamilies.push_back(std::string(face) + script);
     }
   }
   size_t outlines = 0;
@@ -425,7 +425,7 @@ TEST(FontManifestReaderTest, ReadsTheShippedV3Manifest) {
       ASSERT_EQ(catalog.fileCount(i), 1u) << name;
       EXPECT_EQ(std::string(catalog.fileName(i, 0)), name + "/" + name + "-Regular.otf");
       EXPECT_TRUE(catalog.fileHasCrc32(i, 0)) << name;
-    } else if (std::find(indic.begin(), indic.end(), name) != indic.end()) {
+    } else if (std::find(trueTypeFamilies.begin(), trueTypeFamilies.end(), name) != trueTypeFamilies.end()) {
       ++outlines;
       ++trueType;
       EXPECT_TRUE(catalog.outline(i)) << name;
@@ -443,8 +443,8 @@ TEST(FontManifestReaderTest, ReadsTheShippedV3Manifest) {
       EXPECT_TRUE(catalog.inDownloadAll(i)) << name;
     }
   }
-  EXPECT_EQ(outlines, 28u);
-  EXPECT_EQ(trueType, 20u);
+  EXPECT_EQ(outlines, 30u);
+  EXPECT_EQ(trueType, 22u);
   EXPECT_LE(catalog.blockBytes(), 16u * 1024u);
 }
 
@@ -470,7 +470,7 @@ TEST(FontManifestReaderTest, TheShippedVersion2ManifestListsCpfontFamiliesOnly) 
   }
   const Outcome v3 = read(slurp(FONT_MANIFEST_V3_PATH));
   ASSERT_EQ(v3.status, FontManifestStatus::Ok) << v3.failure;
-  EXPECT_EQ(v2.catalog.count(), v3.catalog.count() - 28);
+  EXPECT_EQ(v2.catalog.count(), v3.catalog.count() - 30);
 }
 
 TEST(FontManifestReaderTest, TheManifestUrlIsTheV3ManifestOnMaster) {

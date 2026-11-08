@@ -1907,6 +1907,13 @@ void EpubReaderActivity::stepBackgroundSectionBuild() {
     }
 
     case BackgroundBuildState::Building: {
+      // A render that ran before this build's first slice returned the borrow with no build live and left the state
+      // here: stepping now would build on the heap, not in the borrowed arena. Re-probe, no preemption counted.
+      if (!backgroundBorrowActive_) {
+        backgroundBuildState_ = BackgroundBuildState::Probe;
+        backgroundBuildGateCheckMs_ = 0;
+        return;
+      }
       // Layout needs glyph metrics only (advance/kerning), never bitmaps — but the
       // reading-path prewarm leaves SD-font styles wired to a page-scoped FULL (bitmap)
       // cache covering only the displayed page's glyphs, and ensureFontReady's mmap

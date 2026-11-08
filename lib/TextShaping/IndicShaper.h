@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string_view>
 
+#include "ArabicScripts.h"
 #include "IndicScripts.h"
 
 class ShapingFace;
@@ -14,30 +15,40 @@ namespace ot {
 struct Buffer;
 }
 
-// Ours (this repo's): the Indic shaping module of writing modes step 2. Its text rules (which runs a token holds), and
-// shapeToken, which turns a token into pieces over a ShapingFace at section build. The run scan, the piecewise loop of
-// a long run and the glyph rounding are ported from crosspoint-reader PR #3787 ("feat: add Indic language support
-// without HarfBuzz", SSafayet / @SSafayet).
+// Ours (this repo's): the shaping module of writing modes step 2, for the Indic scripts and, since PR 4b, Arabic runs
+// too (the name is PR 3's). Its text rules (which runs a token holds), and shapeToken, which turns a token into pieces
+// over a ShapingFace at section build, each run under its own script. The run scan, the piecewise loop of a long run
+// and the glyph rounding are ported from crosspoint-reader PR #3787 ("feat: add Indic language support without
+// HarfBuzz", SSafayet / @SSafayet).
 namespace IndicShaper {
 
-// One run of a token, upstream's scanRun: one script's letters with the shared code points around them (dandas, Vedic
-// signs, joiners, the dotted circle), bytes [begin, end); `script` null for shared code points alone.
+// One run of a token, bytes [begin, end): upstream's scanRun for Indic text, one script's letters with the shared code
+// points around them (dandas, Vedic signs, joiners, the dotted circle), or an Arabic run (arabic::isRunMember code
+// points with ZWJ and ZWNJ inside). `arabic` is set for an Arabic run, whose `script` is null; an Indic run has
+// `arabic` false, and its `script` null for shared code points alone.
 struct Run {
   uint16_t begin;
   uint16_t end;
   const indic::ScriptInfo* script;
+  bool arabic = false;
 };
 
-// The most runs a token of `bytes` bytes can hold: a run takes 3 bytes at least, and two runs of different scripts
+// The most runs a token of `bytes` bytes can hold: an Arabic run takes 2 bytes at least (an Indic one 3), and two runs
 // abut with no byte between them.
-constexpr size_t maxRuns(size_t bytes) { return bytes / 3 + 1; }
+constexpr size_t maxRuns(size_t bytes) { return bytes / 2 + 1; }
 
-// The token's runs, in order, into `out` (room for maxRuns(text.size())); text outside them is not listed. A token of
+// The token's runs, in order, into `out` (room for maxRuns(text.size())); text outside them is not listed. An Arabic
+// run starts at a run member that is not a mark; an Arabic letter ends an Indic run, and an Indic code point (shared
+// ones included) ends an Arabic run, except that a ZWJ or ZWNJ after an Arabic member stays in its run. A token of
 // more than UINT16_MAX bytes has none listed.
 size_t scanRuns(std::string_view text, Run* out);
 
 // Whether `text` holds a byte sequence of U+0900-0DFF (indic::startsIndic), bounded by the view.
 bool holdsIndic(std::string_view text);
+
+// Whether `text` holds Indic text or a byte sequence of the Arabic blocks (arabic::holdsArabic): a token the scan may
+// find a run in.
+bool holdsShaped(std::string_view text);
 
 // What a token's text is drawn as, piece by piece; the pieces cover the text in order.
 enum class PieceKind : uint8_t { Text, Glyphs, Reordered };
@@ -55,8 +66,12 @@ class PieceSink {
 // The longest run one ot::shape call takes (its buffer has 2n + 16 slots); a longer one is shaped in pieces. 32 from a
 // Malayalam and a Tamil novel: a run past 32 code points is in 0.031% and 0.0005% of their tokens, and none passes 48.
 constexpr unsigned kMaxRunCodepoints = 32;
-// The syllable of a glued neighbour, kept apart (deviation 7), that a token is shaped with as context, at most.
+// The syllable of a glued Indic neighbour, kept apart (deviation 7), that a token is shaped with as context, at most.
 constexpr unsigned kContextCodepoints = 8;
+// The code points of a glued Arabic neighbour, kept apart, that a token is shaped with as context, at most: its whole
+// clusters nearest the token (a letter with the marks and joiners after it), as many as fit; one that does not fit is
+// left out, with all those farther.
+constexpr unsigned kArabicContextCodepoints = 16;
 
 struct Request;
 enum class Outcome : uint8_t;
@@ -102,21 +117,26 @@ class CallMemory {
 };
 
 struct Request {
-  ShapingFace* face = nullptr;             // null: the font cannot shape: the token is reordered whole
+  ShapingFace* face = nullptr;             // null: the font cannot shape: Indic text is reordered, Arabic left unjoined
   uint32_t ppem26_6 = 0;                   // the size the glyphs are drawn at
   const uint32_t* languageTags = nullptr;  // the book's (TypographyProfile::shapingLanguage); null: the default
   std::string_view before, after;          // glued neighbours kept apart: context, never output
 };
 
-// Plain: nothing needs a form (no Indic run, or every form equals its text); nothing written.
+// Plain: nothing needs a form (no shaped run, or every form equals its text); nothing written.
 // Formed: the pieces are written. Degraded: a run could not be shaped (no memory, the sink's room included; the font
 // failed it; a record outside its fields); what was written is to be dropped and the token laid out as its code points.
 enum class Outcome : uint8_t { Plain, Formed, Degraded };
 
-// A token's pieces into `sink`. With a face, per run: shared code points alone are Text; a script the face does not
-// map is Reordered when IndicReorder changes it, else Text; any other run is Glyphs, shaped in the book's language with
-// the glued neighbours' syllables as context. Text between runs is Text. Without a face, one Reordered piece over the
-// whole token when IndicReorder changes it. Under RenderLock (the face maps the glyph store).
+// A token's pieces into `sink`, each run under its own script, in one call. With a face, per run: Indic shared code
+// points alone are Text; an Indic script the face does not map (its probe letter) is Reordered when IndicReorder
+// changes it, else Text; Arabic the face does not map (beh) is Text, never reordered; any other run is Glyphs, shaped
+// in the book's language with context from the glued neighbours: an Indic neighbour's nearest syllable, an Arabic
+// neighbour's nearest whole clusters (and an Arabic run's joiners just before it). A Glyphs piece is the run's records
+// in visual order (an Arabic run's last code point first); a run whose glyphs its context took (a lam-alef across a
+// glue) is a Glyphs piece of no record. Text between runs is Text. Without a face, IndicReorder's form of the text
+// between the Arabic runs, a Reordered piece where it changes it: over the whole token when it holds no Arabic run.
+// Under RenderLock (the face maps the glyph store).
 Outcome shapeToken(std::string_view text, const Request& request, CallMemory& memory, PieceSink& sink);
 
 }  // namespace IndicShaper

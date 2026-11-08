@@ -3,10 +3,13 @@
 // word is drawn right to left while Latin letters and digits keep their order, and two note markers on one line are
 // read in order.
 //
-// The books run through forEachPage: test_bidi_text at 460 px and at 1,600 px, and test_rtl_markup. At 1,600 px only a
-// paragraph of 128 or more slots (BidiLine::kMaxCodepoints) takes upstream's fallback, and the mark rule does not
-// reach it. Every rule walks every page line and every table cell line. forEachPage frees each page when its callback
-// returns, so a rule copies what it needs (text, numbers) inside the callback and keeps no pointer into a page.
+// The books run through forEachPage: test_bidi_text at 460 px and at 1,600 px, test_rtl_markup, and test_shaped_arabic
+// (make_test_shaped_arabic.py) at 460 and 1,600 px with its font as the shaping face of every font and style. At
+// 1,600 px only a paragraph of 128 or more slots (BidiLine::kMaxCodepoints) takes upstream's fallback, and the mark
+// rule does not reach it; in the Arabic book every full line does. A word drawn from a glyph form is not the mark
+// rule's: its glyphs are drawn as the shaper placed them (ShapingRulesTest's rules). Every rule walks every page line
+// and every table cell line. forEachPage frees each page when its callback returns, so a rule copies what it needs
+// (text, numbers) inside the callback and keeps no pointer into a page.
 #include <BidiUtils.h>
 #include <TextShaping.h>
 #include <Utf8.h>
@@ -32,6 +35,7 @@ namespace {
 struct Book {
   const char* name;   // the corpus book
   const char* label;  // the case's name
+  const char* font;   // its shaping face, in test/fixtures/fonts; null for none
   uint16_t viewportWidth;
   int minOrderedLines;  // lines with a logical order the gap rule checks
   int minMarks;         // marks the mark rule checks
@@ -48,6 +52,7 @@ pipeline_harness::Profile profileOf(const Book& book) {
   pipeline_harness::Profile p;
   p.viewportWidth = book.viewportWidth;
   p.viewportHeight = 760;
+  p.shapingFontFile = book.font;
   return p;
 }
 
@@ -111,8 +116,10 @@ std::vector<uint32_t> codepointsOf(const char* text) {
 
 bool isHebrewLetter(const uint32_t cp) { return (cp >= 0x05D0 && cp <= 0x05EA) || (cp >= 0x05EF && cp <= 0x05F2); }
 
-bool isAsciiLetterOrDigit(const uint32_t cp) {
-  return (cp >= '0' && cp <= '9') || (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z');
+// ASCII letters and the digits, Latin, Arabic-Indic and extended: what bidi never reverses.
+bool isLetterOrDigitInOrder(const uint32_t cp) {
+  return (cp >= '0' && cp <= '9') || (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
+         (cp >= 0x0660 && cp <= 0x0669) || (cp >= 0x06F0 && cp <= 0x06F9);
 }
 
 std::vector<uint32_t> hebrewLettersOf(const std::vector<uint32_t>& cps) {
@@ -123,10 +130,10 @@ std::vector<uint32_t> hebrewLettersOf(const std::vector<uint32_t>& cps) {
   return out;
 }
 
-std::vector<uint32_t> asciiLettersAndDigitsOf(const std::vector<uint32_t>& cps) {
+std::vector<uint32_t> lettersAndDigitsInOrderOf(const std::vector<uint32_t>& cps) {
   std::vector<uint32_t> out;
   for (const uint32_t cp : cps) {
-    if (isAsciiLetterOrDigit(cp)) out.push_back(cp);
+    if (isLetterOrDigitInOrder(cp)) out.push_back(cp);
   }
   return out;
 }
@@ -235,10 +242,12 @@ TEST_P(BidiRules, GluedWordsTouchAndSpacedWordsKeepASpace) {
             const TextBlock::WordBox before = block.wordBox(r, i - 1, kFontId, x, 0);
             const TextBlock::WordBox box = block.wordBox(r, i, kFontId, x, 0);
             const int end = before.x + before.width;
+            // A paragraph set smaller has a smaller space: the stub's, scaled and truncated as its widths are.
+            const int space = static_cast<int>(kSpaceWidth * std::min({1.0f, before.scale, box.scale}));
             if (block.wordContinues(i)) {
               EXPECT_EQ(end, box.x) << "a glued word apart from the one before: " << where(spine, block, i);
             } else {
-              EXPECT_GE(box.x, end + kSpaceWidth) << "a spaced word without its space: " << where(spine, block, i);
+              EXPECT_GE(box.x, end + space) << "a spaced word without its space: " << where(spine, block, i);
             }
           }
         });
@@ -249,15 +258,22 @@ TEST_P(BidiRules, GluedWordsTouchAndSpacedWordsKeepASpace) {
 }
 
 // A word's draw text holds the clusters (a base and the transparent marks after it) of its text, shaped, as a
-// multiset: no mark leaves its letter, and no draw text starts with a mark.
+// multiset: no mark leaves its letter, and no draw text starts with a mark, unless its text does (a token that starts
+// with marks, glued after a letter in another style: no letter of its own to keep them). A word drawn from a glyph
+// form is not drawn from its draw text.
 TEST_P(BidiRules, EveryMarkStaysWithItsLetter) {
   int marks = 0;
   const bool ok = pipeline_harness::forEachPage(
       epub(), cache(), profileOf(GetParam()), [&](int spine, const Section&, const Page& page, GfxRenderer&) {
         forEachLine(page, [&](const TextBlock& block, int) {
           for (uint16_t i = 0; i < block.wordCount(); ++i) {
+            if (block.hasGlyphForm(i)) continue;
             const std::vector<uint32_t> drawn = codepointsOf(block.wordDrawText(i));
-            if (!drawn.empty()) {
+            const std::vector<uint32_t> text = codepointsOf(block.wordText(i));
+            const auto firstDrawn = std::find_if(
+                text.begin(), text.end(), [](const uint32_t cp) { return !BidiLine::isControl(cp) && cp != 0x00AD; });
+            const bool textStartsWithAMark = firstDrawn != text.end() && BidiUtils::isTransparentMark(*firstDrawn);
+            if (!drawn.empty() && !textStartsWithAMark) {
               EXPECT_FALSE(BidiUtils::isTransparentMark(drawn.front()))
                   << "a draw text starts with a mark: " << where(spine, block, i);
             }
@@ -281,7 +297,7 @@ TEST_P(BidiRules, HebrewWordsAreDrawnRightToLeft) {
           for (uint16_t i = 0; i < block.wordCount(); ++i) {
             const std::vector<uint32_t> text = codepointsOf(block.wordText(i));
             std::vector<uint32_t> letters = hebrewLettersOf(text);
-            if (letters.empty() || !asciiLettersAndDigitsOf(text).empty() || holdsTheDivineName(text)) continue;
+            if (letters.empty() || !lettersAndDigitsInOrderOf(text).empty() || holdsTheDivineName(text)) continue;
             ++checked;
             std::reverse(letters.begin(), letters.end());
             EXPECT_EQ(letters, hebrewLettersOf(codepointsOf(block.wordDrawText(i))))
@@ -295,7 +311,7 @@ TEST_P(BidiRules, HebrewWordsAreDrawnRightToLeft) {
 }
 
 // A word with no right-to-left letter (class R or AL) and no override (LRO, RLO) in its text is drawn with its ASCII
-// letters and digits in their order.
+// letters and its digits (Latin, Arabic-Indic and extended) in their order.
 TEST_P(BidiRules, LatinAndDigitsKeepTheirOrder) {
   int checked = 0;
   const bool ok = pipeline_harness::forEachPage(
@@ -308,7 +324,7 @@ TEST_P(BidiRules, LatinAndDigitsKeepTheirOrder) {
             });
             if (rightToLeft) continue;
             ++checked;
-            EXPECT_EQ(asciiLettersAndDigitsOf(text), asciiLettersAndDigitsOf(codepointsOf(block.wordDrawText(i))))
+            EXPECT_EQ(lettersAndDigitsInOrderOf(text), lettersAndDigitsInOrderOf(codepointsOf(block.wordDrawText(i))))
                 << "Latin or digits out of order: " << where(spine, block, i);
           }
         });
@@ -360,9 +376,12 @@ TEST(BidiRulesMarkers, TwoMarkersOnALineAreReadInOrder) {
 namespace {
 
 std::vector<Book> bidiBooks() {
-  return {{"test_bidi_text", "test_bidi_text", 460, 25, 80, 160, 35},
-          {"test_bidi_text", "test_bidi_text_1600", 1600, 8, 80, 160, 35},
-          {"test_rtl_markup", "test_rtl_markup", 460, 3, 0, 10, 5}};
+  return {{"test_bidi_text", "test_bidi_text", nullptr, 460, 25, 80, 160, 35},
+          {"test_bidi_text", "test_bidi_text_1600", nullptr, 1600, 8, 80, 160, 35},
+          {"test_rtl_markup", "test_rtl_markup", nullptr, 460, 3, 0, 10, 5},
+          // Its marks are in glyph words but for a token's leading marks, which are a cluster of their own.
+          {"test_shaped_arabic", "test_shaped_arabic", "NotoNaskhArabic-Book-Regular.ttf", 460, 30, 0, 0, 30},
+          {"test_shaped_arabic", "test_shaped_arabic_1600", "NotoNaskhArabic-Book-Regular.ttf", 1600, 8, 0, 0, 30}};
 }
 
 std::string bookLabel(const testing::TestParamInfo<Book>& info) { return info.param.label; }

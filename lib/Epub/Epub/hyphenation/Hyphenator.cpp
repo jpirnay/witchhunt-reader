@@ -1,5 +1,6 @@
 #include "Hyphenator.h"
 
+#include <ArabicScripts.h>
 #include <IndicScripts.h>
 #include <Utf8.h>
 
@@ -75,15 +76,29 @@ std::vector<Hyphenator::BreakInfo> buildExplicitBreakInfos(const std::vector<Cod
   return breaks;
 }
 
+// The Arabic part of the fallback rule, and only where Arabic is: never before a mark, never before a joiner that
+// follows an Arabic letter or mark, never after a ZWJ that follows one. A Latin or emoji joiner keeps its breaks.
+bool arabicBreakAllowed(const std::vector<CodepointInfo>& cps, const size_t idx) {
+  const uint32_t prev = cps[idx - 1].value;
+  const uint32_t cur = cps[idx].value;
+  if (arabic::isMark(cur)) return false;
+  if ((cur == arabic::ZWJ || cur == arabic::ZWNJ) && arabic::takesJoiner(prev)) return false;
+  if (prev == arabic::ZWJ && idx >= 2 && arabic::takesJoiner(cps[idx - 2].value)) return false;
+  return true;
+}
+
 // Fallback break indexes for a word the language patterns could not split:
 // every index leaving minPrefix/minSuffix codepoints on each side, except
-// inside an Indic syllable, whose halves would each shape on their own.
+// inside an Indic syllable, whose halves would each shape on their own, and inside an Arabic cluster (before a mark
+// or a joiner, after a ZWJ), which would start the next line with a mark.
 // Ported from crosspoint-reader PR #3787 ("feat: add Indic language support without HarfBuzz", SSafayet /
 // @SSafayet).
 void appendFallbackIndexes(const std::vector<CodepointInfo>& cps, const size_t minPrefix, const size_t minSuffix,
                            std::vector<size_t>& out) {
   for (size_t idx = minPrefix; idx + minSuffix <= cps.size(); ++idx) {
-    if (idx == 0 || indic::syllableBreakAllowed(cps[idx - 1].value, cps[idx].value)) out.push_back(idx);
+    if (idx == 0 || (indic::syllableBreakAllowed(cps[idx - 1].value, cps[idx].value) && arabicBreakAllowed(cps, idx))) {
+      out.push_back(idx);
+    }
   }
 }
 

@@ -611,6 +611,50 @@
       ]
     },
     {
+      "name": "NotoNaskhArabic",
+      "description": "Arabic, Persian, Urdu, serif",
+      "format": "ttf",
+      "inDownloadAll": false,
+      "styles": [
+        "bold",
+        "regular"
+      ],
+      "files": [
+        {
+          "name": "NotoNaskhArabic/NotoNaskhArabic-Bold.ttf",
+          "size": 261352,
+          "crc32": 2488840503
+        },
+        {
+          "name": "NotoNaskhArabic/NotoNaskhArabic-Regular.ttf",
+          "size": 261600,
+          "crc32": 3703577629
+        }
+      ]
+    },
+    {
+      "name": "NotoSansArabic",
+      "description": "Arabic, Persian, Urdu, sans serif",
+      "format": "ttf",
+      "inDownloadAll": false,
+      "styles": [
+        "bold",
+        "regular"
+      ],
+      "files": [
+        {
+          "name": "NotoSansArabic/NotoSansArabic-Bold.ttf",
+          "size": 233044,
+          "crc32": 2275605681
+        },
+        {
+          "name": "NotoSansArabic/NotoSansArabic-Regular.ttf",
+          "size": 232704,
+          "crc32": 381995503
+        }
+      ]
+    },
+    {
       "name": "NotoSansBengali",
       "description": "Bengali, Assamese, sans serif",
       "format": "ttf",

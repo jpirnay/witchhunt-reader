@@ -104,14 +104,16 @@ def ttf_entries():
 
 
 class TtfFamilies(unittest.TestCase):
-    def test_the_ttf_families_are_the_twenty_indic_ones(self):
+    def test_the_ttf_families_are_the_twenty_indic_ones_and_the_two_arabic_ones(self):
         entries = ttf_entries()
         self.assertEqual(sorted(f["name"] for f in entries),
-                         sorted(f"Noto{kind}{x}" for kind in ("Sans", "Serif") for x in TTF_SCRIPTS))
+                         sorted([f"Noto{kind}{x}" for kind in ("Sans", "Serif") for x in TTF_SCRIPTS]
+                                + ["NotoNaskhArabic", "NotoSansArabic"]))
+        self.assertEqual(len(entries), 22)
         for f in entries:
             self.assertIs(f["inDownloadAll"], False, f["name"])
             self.assertTrue(f["description"], f["name"])
-            kind = "NotoSans" if f["name"].startswith("NotoSans") else "NotoSerif"
+            kind = "NotoSans" if f["name"].startswith("NotoSans") else "NotoSerif"  # Naskh is a serif face
             for part in ("script", "latin"):
                 self.assertEqual(sorted(f["merge"][part]), ["Bold", "Regular"], f["name"])
                 for style, source in f["merge"][part].items():
@@ -172,6 +174,38 @@ class TtfFamilies(unittest.TestCase):
             self.assertEqual(out.read_bytes(), first)
 
 
+class ArabicMergeCheck(unittest.TestCase):
+    def test_the_arabic_families_are_checked_as_arabic_right_to_left(self):
+        import merge_noto_latin
+
+        self.assertEqual(merge_noto_latin.LANGS["arabic"], ["ar", "fa", "ur", "ps", "sd", "ug", "ku", "ckb", "ks"])
+        self.assertEqual(merge_noto_latin.script_of(chr(0x0628) + chr(0x0644) + chr(0x0627)), "Arab")
+        self.assertEqual(merge_noto_latin.script_of(chr(0x0915)), "Deva")
+        self.assertEqual(merge_noto_latin.direction_of("Arab"), "rtl")
+        self.assertEqual(merge_noto_latin.direction_of("Deva"), "ltr")
+
+    def test_each_family_finds_the_corpus_of_its_script(self):
+        key = build_sd_fonts.corpus_key
+        self.assertEqual({key("NotoNaskhArabic"), key("NotoSansArabic")}, {"arabic"})
+        self.assertEqual(key("NotoSerifDevanagari"), "devanagari")
+        self.assertEqual(key("NotoSansBengali"), "bengali")
+
+    def test_the_arabic_corpus_names_u088f_and_pairs_shadda_with_every_vowel(self):
+        spec = importlib.util.spec_from_file_location(
+            "generate_corpus_arabic", REPO / "test" / "ot_shaper" / "generate_corpus_arabic.py")
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+        with tempfile.TemporaryDirectory() as tmp:
+            sys.argv = ["generate_corpus_arabic.py", tmp]
+            gen.main()
+            lines = set((Path(tmp) / "arabic.txt").read_text(encoding="utf-8").splitlines())
+        self.assertIn(chr(0x088F), lines)
+        beh, shadda = chr(0x0628), chr(0x0651)
+        for v in [chr(c) for c in range(0x064B, 0x0653) if c != 0x0651] + [chr(0x0670)]:
+            self.assertIn(beh + shadda + v, lines)
+            self.assertIn(beh + v + shadda, lines)
+
+
 class HostedFontsLicense(unittest.TestCase):
     def test_the_ofl_names_every_copyright_the_hosted_fonts_carry(self):
         fonts = REPO / "assets" / "sd-fonts"
@@ -190,7 +224,7 @@ class HostedFontsLicense(unittest.TestCase):
         fonts = REPO / "assets" / "sd-fonts"
         ofl = (fonts / "OFL.txt").read_text(encoding="utf-8")
         files = sorted(fonts.glob("*/*.ttf"))
-        self.assertEqual(len(files), 40)
+        self.assertEqual(len(files), 44)
         for path in files:
             notice = TTFont(str(path))["name"].getDebugName(0)
             self.assertIn(notice.removesuffix("."), ofl, path.name)

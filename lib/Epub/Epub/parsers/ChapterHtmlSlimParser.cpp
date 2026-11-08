@@ -1,5 +1,6 @@
 #include "ChapterHtmlSlimParser.h"
 
+#include <ArabicScripts.h>
 #include <Arduino.h>
 #include <BuildArena.h>
 #include <FsHelpers.h>
@@ -447,9 +448,9 @@ static int uncountedControlLen(const char* s, const int i, const int len) {
 }
 
 // Deviation 8: a lone ZWJ or ZWNJ stays in the text after a letter of a script the shaper reads it in (a half form, a
-// chillu, a cluster kept apart); after anything else it is dropped with the other default-ignorables. The Indic blocks
-// so far; the Arabic ones come with their shaping.
-static bool keepsJoinerAfter(const uint32_t cp) { return cp >= 0x0900 && cp <= 0x0DFF; }
+// chillu, a cluster kept apart, Persian's half-space ZWNJ); after anything else it is dropped with the other
+// default-ignorables. The Indic blocks and the Arabic ones.
+static bool keepsJoinerAfter(const uint32_t cp) { return (cp >= 0x0900 && cp <= 0x0DFF) || arabic::takesJoiner(cp); }
 
 // U+200C or U+200D when the 3 bytes at s[i] are one, else 0 (also when the sequence runs past `len`: characterData
 // completes a split one before consumeText sees it).
@@ -1343,8 +1344,13 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     // A block laid out in parts has its font already: a family its later words bring in gets its face now.
     if (newFontSlot && wordFontsSize_ != 0) resolveWordFont(fontSlot);
 
-    // A split waits for a ruby that is open, up to kRubyGroupSlack tokens, so its group is made whole.
-    if (currentTextBlock->size() > 96 && !(rubyDepth_ >= 0 && currentTextBlock->size() <= 96 + kRubyGroupSlack)) {
+    // A split waits for a ruby that is open, up to kRubyGroupSlack tokens, so its group is made whole. It also waits
+    // for the block to grow kSplitRegrowth tokens past what the last split kept (the last line): a line of more
+    // than 96 tokens would otherwise leave the block above 96 and split it again on every following word. A kept
+    // line of kSplitRegrowth tokens or fewer leaves the threshold at 96, as before.
+    const size_t splitThreshold = std::max<size_t>(96, splitKeptTokens_ + kSplitRegrowth);
+    if (currentTextBlock->size() > splitThreshold &&
+        !(rubyDepth_ >= 0 && currentTextBlock->size() <= splitThreshold + kRubyGroupSlack)) {
       // The bases waiting for their reading are the block's last tokens, and the layout keeps the last line: a base
       // that is still there after the split stays the start of its group.
       size_t pendingBases = kNoRubyGroup;
@@ -1415,6 +1421,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
           },
           false, static_cast<int16_t>(currentPageNextY), splitLineHeight);
       if (pendingBases <= currentTextBlock->size()) rubyGroupStart_ = currentTextBlock->size() - pendingBases;
+      splitKeptTokens_ = currentTextBlock->size();
       // emitPage() clears floatZoneCount mid-layout when the page overflows — that's
       // intentional: lines on the continuation page should not be narrowed for an
       // image that lives on the previous page.
@@ -2320,6 +2327,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     currentTextBlock->setShapingLatch(&shapingDegradedAny_);
     currentTextBlock->setVertical(vertical_);
   }
+  splitKeptTokens_ = 0;  // a new block has had no split
   wireTextBlock();
   wordsExtractedInBlock = 0;
 }
@@ -4008,7 +4016,9 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
       // at the first such codepoint and its text goes back to the word flow, to be shaped whole.
       // Ported from crosspoint-reader PR #3787 ("feat: add Indic language support without HarfBuzz", SSafayet /
       // @SSafayet), commit f0757278.
-      if ((i + 1 < len && indic::startsIndic(reinterpret_cast<const unsigned char*>(s + i))) ||
+      // An Arabic letter would be drawn isolated, so it takes the same road.
+      if ((i + 1 < len && (indic::startsIndic(reinterpret_cast<const unsigned char*>(s + i)) ||
+                           arabic::isRunMember(codepointAt(s + i, len - i)))) ||
           self->pendingDropCap_.textLen >= static_cast<int>(sizeof(self->pendingDropCap_.text)) - 1) {
         overflow = true;
         break;
@@ -5205,6 +5215,7 @@ void ChapterHtmlSlimParser::clearSpentBlockDirection(const int elementDepth) {
 }
 
 void ChapterHtmlSlimParser::makePages() {
+  splitKeptTokens_ = 0;  // the block is drained here (a table, hr or caption opens without startNewTextBlock)
   if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the block is laid out and drained: a ruby's bases go with it
   if (layoutFailed) {
     currentTextBlock.reset();

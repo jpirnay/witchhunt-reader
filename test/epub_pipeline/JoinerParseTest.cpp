@@ -22,6 +22,11 @@ namespace {
 const std::string kZwj = "\xE2\x80\x8D";
 const std::string kZwnj = "\xE2\x80\x8C";
 
+// The parser's tokens, as it cut them, are a ruby base's: layout never merges a ruby group's tokens, where it merges
+// any other glued Indic tokens deviation 7 joins, in a paragraph that needs bidi too since PR 4b. Its ruby text is no
+// word of the page.
+std::string inRuby(const std::string& base) { return "<p><ruby>" + base + "<rt>r</rt></ruby></p>"; }
+
 struct Joiners : testing::Test {
   fs::path work;
   int bookCount = 0;
@@ -104,10 +109,9 @@ TEST_F(Joiners, AJoinerStaysWithTheLetterAfterItAtTheBufferLimit) {
   // 2 + 65 * 3 = 197 bytes in the word buffer (limit 200) when the joiner comes; the joiner and ष need 6 more.
   std::string word = "ab";
   for (int i = 0; i < 65; ++i) word += "क";
-  // The parser's cut shows in a paragraph that needs bidi, which merges no Indic tokens (it shapes nothing: the line
-  // pass's pieces are not cut at runs); one that shapes merges the two back into the word they were cut from
-  // (deviation 7).
-  const Words words = wordsOf("<p dir=\"rtl\">" + word + kZwj + "ष</p>");
+  // The parser's cut shows in a ruby base (inRuby); elsewhere layout merges the two back into the word they were cut
+  // from (deviation 7).
+  const Words words = wordsOf(inRuby(word + kZwj + "ष"));
   ASSERT_GE(words.size(), 2u);
   EXPECT_EQ(words.back(), kZwj + "ष");
   std::string all;
@@ -151,14 +155,45 @@ TEST_F(Joiners, AJoinerSplitFromItsLetterByAChunkBoundaryIsKept) {
 
 TEST_F(Joiners, AJoinerAtAnInlineElementsEdgeIsKept) {
   // The joiner waits across the edge and opens the next token, ahead of the letter it precedes. The parser's tokens
-  // show in a paragraph that needs bidi, which merges no Indic tokens (it shapes nothing: the line pass's pieces are
-  // not cut at runs).
+  // show in a ruby base (inRuby).
   const Words split = {"क्", kZwj + "ष"};
-  EXPECT_EQ(wordsOf("<p dir=\"rtl\">क्<b>" + kZwj + "ष</b></p>"), split);
-  EXPECT_EQ(wordsOf("<p dir=\"rtl\">क्" + kZwj + "<b>ष</b></p>"), split);
+  EXPECT_EQ(wordsOf(inRuby("क्<b>" + kZwj + "ष</b>")), split);
+  EXPECT_EQ(wordsOf(inRuby("क्" + kZwj + "<b>ष</b>")), split);
   // A second joiner across the edge still drops both.
-  EXPECT_EQ(wordsOf("<p dir=\"rtl\">क्" + kZwj + "<b>" + kZwj + "ष</b></p>"), (Words{"क्", "ष"}));
+  EXPECT_EQ(wordsOf(inRuby("क्" + kZwj + "<b>" + kZwj + "ष</b>")), (Words{"क्", "ष"}));
   // A paragraph that shapes merges the two (deviation 7: the glue falls inside a syllable), the joiner in its place.
   EXPECT_EQ(wordsOf("<p>क्<b>" + kZwj + "ष</b></p>"), Words{"क्" + kZwj + "ष"});
   EXPECT_EQ(wordsOf("<p>क्" + kZwj + "<b>" + kZwj + "ष</b></p>"), Words{"क्ष"});
+}
+
+// Deviation 8, Arabic: Persian writes its half-space as ZWNJ, so a joiner after a letter of the Arabic blocks is kept
+// too. The Arabic strings are escapes.
+TEST_F(Joiners, APersianZwnjIsKept) {
+  const std::string word = "\u06A9" + kZwnj + "\u0647";  // keh, ZWNJ, heh
+  EXPECT_EQ(wordsOf("<p>" + word + "</p>"), Words{word});
+  // An RTL line lists its words in visual order.
+  EXPECT_EQ(wordsOf("<p dir=\"rtl\">" + word + " \u0628</p>"), (Words{"\u0628", word}));
+}
+
+TEST_F(Joiners, AZwnjAfterAnArabicLetterAcrossAnElementEdgeIsKept) {
+  // The joiner opens the token after the edge; the two tokens of an RTL line are listed in visual order.
+  const std::string both = kZwnj + "\u0647" + "\u06A9";
+  EXPECT_EQ(textOf("<p>\u06A9<b>" + kZwnj + "\u0647</b></p>"), both);
+  EXPECT_EQ(textOf("<p>\u06A9" + kZwnj + "<b>\u0647</b></p>"), both);
+  // After a space it is still dropped.
+  EXPECT_EQ(wordsOf("<p>\u06A9 " + kZwnj + "\u0647</p>"), (Words{"\u0647", "\u06A9"}));
+}
+
+TEST_F(Joiners, ARunOfTwoJoinersIsDropped) {
+  EXPECT_EQ(wordsOf("<p>\u06A9" + kZwnj + kZwj + "\u0647</p>"), Words{"\u06A9\u0647"});
+  EXPECT_EQ(wordsOf("<p>\u06A9" + kZwnj + kZwnj + kZwnj + "\u0647</p>"), Words{"\u06A9\u0647"});
+}
+
+// Deviation 8 says a letter or a mark: a joiner after an Arabic digit, the Arabic comma or the full stop U+06D4 is
+// dropped like one after any other non-letter.
+TEST_F(Joiners, AJoinerAfterAnArabicNonLetterIsDropped) {
+  for (const char* sign : {"\u0661", "\u060C", "\u06D4", "\u061B"}) {
+    EXPECT_EQ(wordsOf(std::string("<p>") + sign + kZwnj + "\u0628</p>"), Words{std::string(sign) + "\u0628"}) << sign;
+    EXPECT_EQ(wordsOf(std::string("<p>") + sign + kZwj + "\u0628</p>"), Words{std::string(sign) + "\u0628"}) << sign;
+  }
 }

@@ -1661,3 +1661,183 @@ from this branch merged with master `9331cbfc1`. `CMD:TTF:SHAPE` shaped ten word
 - The words, with the firmware, the fonts and the restore, are in the session's scratchpad (`x4a/`). The X4 was
   restored from a full flash backup read before the run, so it is back on its own firmware with its settings
   unchanged.
+
+## PR 4b: the shipped Arabic families against HarfBuzz
+
+Task 9 puts the two Arabic families into the Font Manager (`sd-fonts.yaml`: `NotoNaskhArabic`, "Arabic, Persian, Urdu,
+serif", merged with Noto Serif; `NotoSansArabic`, "Arabic, Persian, Urdu, sans serif", merged with Noto Sans; both
+`format: ttf`, `inDownloadAll: false`, the sources and hashes of the "PR 4a" Fonts table). Same recipe as PR 3b.
+
+### The build
+
+`build-sd-fonts.py --only NotoNaskhArabic,NotoSansArabic --output-dir assets/sd-fonts --manifest --base-url
+https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/ -j 2`: both "merged, both checks
+equal". The merge check now shapes `arabic.txt` (6,338 lines) right to left under `Arab` with no language and `ar`, `fa`,
+`ur`, `ps`, `sd`, `ug`, `ku`, `ckb`, `ks`, against the script font alone, and the Latin lines against Noto Sans/Serif.
+
+- **Determinism.** The four files were deleted and rebuilt: the sha256 of the four `.ttf` and of both manifests are
+  identical to the first run.
+- **Against PR 4a's merges** (the scratch `merged/` of Task 5): all four files are equal byte for byte.
+
+| File | Bytes | sha256 (equal to PR 4a's merge) |
+|---|---:|---|
+| NotoNaskhArabic-Regular.ttf | 261,600 | 21acf0334143ff85a709ef1762694d083f9c70fb521fea9fae0e04cefd297f14 |
+| NotoNaskhArabic-Bold.ttf | 261,352 | 8c7a340fd635c06f558696d6fde63ab557b43eae8de568151213a968cfe09137 |
+| NotoSansArabic-Regular.ttf | 232,704 | 13e9cea7a74e6288791f5927c848150b5ac5c24676bef6170a40e20073c1904e |
+| NotoSansArabic-Bold.ttf | 233,044 | a2bfc7d16c4077c41957ff81d6ed78de2084d021cedff7a2cc4773bd7bc8bdfb |
+
+The four files are 988,700 B; with the 40 Indic files, the 44 TrueType files are 9,091,272 B. `fonts-v3.json` gains the two
+families (`fonts.json`, the `.cpfont` list, is unchanged); `catalog.blockBytes()` is **11,812 B** for the v3 manifest
+(11,480 B before; 7,484 B for the v2 one), under the 16 KB budget. Each Arabic family fits the X3's font area in flash
+mode (`ShippedTtfFamilies.EachFileLoadsAndEachFamilyFitsTheX3Store`, 22 families; item 7 estimated Naskh 267,100 +
+266,852 B and Sans 238,000 + 238,340 B with their CPac).
+
+### The corpus
+
+`generate_corpus_arabic.py` now lists U+088F ARABIC LETTER NOON WITH RING ABOVE (Unicode 17, unknown to Python 3.14's
+Unicode 16.0.0) through `NEWER_THAN_PYTHON`, as a letter, so it is also in the letter combinations and the random pool;
+the shadda pairing of PR 4a's fix wave is checked by a test (shadda with every vowel including U+0670, both orders).
+The corpus is 6,338 distinct lines (6,333 before); the random sequences differ from PR 4a's because the letter pool gained U+088F.
+
+### The oracle
+
+`oracle_arabic.py` on the four shipped files (copied to a scratch folder), `ot_shape_cli` through the font's CPac, at
+(2133, 33) and (1195, 19), with no language and `ar`, `fa`, `ur`, `ps`, `sd`, `ug`, `ku`, `ckb`, `ks`: 4 files x 2 sizes
+x 10 languages = **80 runs, every one 6,338/6,338, 0 differences**.
+
+| Font | 33 ppem, all 10 languages | 19 ppem, all 10 languages |
+|---|---|---|
+| NotoNaskhArabic Regular | 6,338/6,338 | 6,338/6,338 |
+| NotoNaskhArabic Bold | 6,338/6,338 | 6,338/6,338 |
+| NotoSansArabic Regular | 6,338/6,338 | 6,338/6,338 |
+| NotoSansArabic Bold | 6,338/6,338 | 6,338/6,338 |
+
+### The CI test
+
+`ShippedFamilies.EachArabicFamilyShapesAlikeThroughItsCpac`: the four files, an Arabic plan, 200 lines at both sizes
+through a CPac face and a computed-filter face. The lines are a committed sample, `test/ttf_font/data/arabic_corpus.txt`,
+200 lines spread evenly through the sorted corpus (the first 200 sorted lines are single code points), Cf code points as
+backslash-u text, made by `make_corpus_sample.py`.
+
+## PR 4b: Arabic on the page
+
+Measured on the X3 (528x792 panel) on 2026-11-08, NotoNaskhArabic at 14 pt in portrait unless stated, against master
+(PR 4a's factory build; a701c5ce1 to the merge base b5209cf46 changes only docs and `tools/murphy-gray-lab`).
+
+**Builds measured:**
+- bf371ea7f, the default build: 6,314,543 B;
+- f6a516019, with Task 10a's two fixes: 6,314,575 B;
+- a diagnostics build (`-DENABLE_BOOT_HEAP_DIAGNOSTICS`): 6,317,055 B, used for the stack only.
+
+**The timing books** are Jurji Zaydan's England chapter ("Rihlat Jurji Zaydan ila Uruba"), from ar.wikisource through
+ws-export, cut at 31 paragraphs and 2,529 words (public domain: Zaydan died in 1914), and a Latin twin with the same
+per-paragraph word counts. Neither is committed.
+
+### The 2x line: missed
+
+Cold chapter 2 builds, three each, from `createSectionFile spine=1 done: total=`:
+
+| Book | master (unshaped) min / median / max | Branch min / median / max |
+|---|---|---|
+| Zaydan, Arabic | 5,585 / 5,586 / 5,600 ms (parse ~4,107) | 7,875 / 7,880 / 7,885 ms (parse ~6,560) |
+| Its Latin twin | 2,500 / 2,517 / 2,526 ms | 2,482 / 2,489 / 2,489 ms |
+| Ratio of medians | 2.22x | **3.17x** |
+
+- The word cache on the branch: 707 hits, 1,820 misses (28% hits), 1,773 inserts, no clear.
+- Shaping adds about 2.3 s, or 0.9 ms a word.
+- master's bidi-only Arabic build is already past 2x, so shaping alone cannot reach the line.
+- Arena on both builds: cap 52,272 B, high water 37,708 B (Latin 26,396 B). Section bytes: Arabic 27,360, Latin 16,042.
+- It is reported as missed, as PR 3's Hindi 2.61x was, with the engine speed deferred.
+
+### The heap floor, the stack and the reading heap
+
+| What | Branch | Pass line |
+|---|---|---|
+| Background-B's lowest heap, look-ahead build of Zaydan's chapter (open at 1:1, B builds chapter 2 in its borrow) | 29,408 B (Latin twin 42,772 B); B's build 6,715 ms | >= 10,240 B: **pass** |
+| The same in landscape | 29,204 B (Latin 43,452 B), 27 pages, no degrade | - |
+| The loop task's stack after a cold Arabic build (diagnostics build) | 10,448 B free (render task 6,176; btnSampler 1,516) | >= 1,536 B: **pass** |
+| `Min Free` since boot after a cold Arabic build (diagnostics build) | 15,116 B | - |
+| Reading heap after five turns, Arabic / Latin chapter | 60,196 / 60,200 B (maxblock 49,140 B both) | - |
+| After `CMD:TTF:FULL` and three turns forward and back, Arabic / Latin | 53,844 / 53,836 B | within 2 KB: **pass** |
+
+- Ring mode: the 12 pages after `FULL` are pixel-identical to their screenshots from before, above the status bar. The
+  store had one live segment, so drawing in ring mode itself was not exercised (as in PR 3).
+- No build of the timing books logged `shaping degraded` or `Watermark DROP`.
+
+### The automatic family and the gate
+
+A cold open of `test_shaped_arabic.epub` gives `STATE font=NotoNaskhArabic` with the reader font BookerlyTTF, and
+`STATE font=NotoSansArabic` with NotoSansDevanagari (a "Sans" font).
+
+The X4's in-place gate line (`heapAllowsInPlaceBuild=0 ... shapedTtf=1`) does not log on the X3, and the X4 was not
+attached, so it was not measured.
+
+**Install time:** NotoNaskhArabic 7,422 ms (2 styles, flash, `CPac` 5,500 B a style; on master's firmware, but the
+installer is unchanged on the branch; PR 4a's X4 figure was 4,959 ms). NotoSansArabic 5,806 ms (branch).
+
+### Before and after
+
+Pages of ar, fa and ur at 14 pt, ar at 18 pt, ar in landscape and the dictionary selection on an Arabic word, master
+against the branch (the images are on the PR). master draws isolated, unjoined letters; the branch draws joined Naskh.
+master's dictionary selection box lands on the wrong word; the branch's sits on the selected word.
+
+### Task 10a: what the run found
+
+Two defects that existed before, and that PR 4b's shaped text exposed:
+
+1. **The long-block split was quadratic.**
+   - **Cause:** in `ChapterHtmlSlimParser`, a split keeps the last line. When one line holds more than 96 tokens, the
+     block never dropped below the split threshold, so every further word laid the whole block out again.
+   - **Where it showed:** test_shaped_arabic's stress paragraph, 200 Allah words each split by a span.
+   - **Before the fix:** X3 landscape (792 px): 113-114 splits per chapter 2 build against master's 4, parse 4.4 s against
+     1.26 s. On the host, by width: 6 splits at 460 px, 33 at 900, 124 at 1,200 and 186 at 1,600 (220 with the test's
+     default arena).
+   - **After:** the threshold is max(96, kept + 48). Host 6 / 6 / 5 / 6 splits; X3 landscape 5.
+2. **Background-B built on the heap.**
+   - **Cause:** `render()` returned B's borrow before B's first slice ("no build live"), but the state stayed
+     `Building`, so B's next tick built with no arena.
+   - **Where it showed:** the X3 heap fell from 47 KB to 3.8 KB within 200 ms, and the build was css-degraded.
+   - **After:** the `Building` case re-probes when the borrow is gone.
+
+Before the fixes a landscape open of the test book also went through a degraded build, a released blocking rebuild,
+"Failed to reallocate secondary display buffer" (contig 38,900 B < 52,272 B), "Fragmented heap recovery" and a silent
+restart. After the fixes, none of it.
+
+A review of the fixes found one more case, fixed in the PR's last wave: a block drained by the `<table>`, `<hr>` and
+`<caption>` handlers kept the previous block's `splitKeptTokens_`, so its first stray text waited up to 48 tokens longer
+to split. `makePages()` now clears it.
+
+### Known limits, measured
+
+- **The test book's landscape chapter 2 still degrades on the X3, gracefully.** Background-C runs low on heap and the
+  released blocking rebuild demotes the table row; the chapter is cached with the status bit set; the heap's low point is
+  2,936 B; master builds it clean. The cause is a 400-token paragraph whose landscape lines hold more than 96 tokens,
+  then a table: on the host (`dump --bench`, 770 px) the shaped build holds about 16 KB more heap than the unshaped one,
+  all ShapedStore chunks (11,776 B live at the peak), while the lent arena peaks at 34 KB of 52 KB. Real prose passes in
+  both orientations. Follow-up idea: ShapedStore's chunks in the lent arena's free room.
+- **A long split word can still lose or double a ligature:** a word past 32 code points (context, run and context
+  together) split by a style span reaches only 2 clusters in the piecewise loop. The shipped fonts have one consuming
+  ligature, Allah (U+FDF2), and no word holding it nears 32 code points.
+- **The 2x line is missed** (above).
+- A consumed letter is missing from the dictionary lookup text across a style glue (device only); a no-face Reordered
+  Indic segment split by levels draws unreordered (the guard, not latched).
+
+### Flash (default)
+
+| Build | Bytes |
+|---|---|
+| The merge base (Task 0) | 6,303,319 |
+| After Task 6 | 6,314,537 |
+| After the context fix | 6,314,543 |
+| After Task 10a | 6,314,575 |
+| The final tree (the review's last fix, master merged) | 6,314,579 |
+| Gate | 6,318,600 |
+
+The final tree is 4,021 B under the gate.
+
+| Build | master (the merge base `b5209cf46`; master since changes docs and tools only) | This branch | Delta |
+|---|---|---|---|
+| `default` | 6,303,319 B, RAM 57,616 B | 6,314,579 B, RAM 57,616 B | +11,260 B, RAM 0 |
+| `gh_release` | 6,176,071 B, RAM 57,096 B | 6,187,097 B, RAM 57,112 B | +11,026 B, RAM +16 B |
+
+cppcheck (`pio check -e default`) on the final tree: no defects.

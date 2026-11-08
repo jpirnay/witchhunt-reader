@@ -1,8 +1,9 @@
 // The outline families the font manager hosts (assets/sd-fonts), as a reader installs them. The eight .otf CJK
 // families: each file probed as discovery probes it, its family installed into a glyph store with the X3's font area
-// and mapping budget, and a sample of its characters drawn at 12 pt (spec 9). The twenty .ttf Indic families: each
-// file loaded, its style and weight read, and the family fitted into the X3's font area; each family's Regular file
-// shaped alike through the CPac the install writes and through filters it computes.
+// and mapping budget, and a sample of its characters drawn at 12 pt (spec 9). The twenty .ttf Indic families and the
+// two Arabic ones: each file loaded, its style and weight read, and the family fitted into the X3's font area; each
+// Indic family's Regular file and each Arabic file shaped alike through the CPac the install writes and through filters
+// it computes.
 #include <IndicScripts.h>
 #include <OtFilterWriter.h>
 #include <OtShaper.h>
@@ -124,7 +125,7 @@ TEST(ShippedOtfFamilies, SerifTcDrawsTheOneOversizeGlyphAsMissing) {
 
 TEST(ShippedTtfFamilies, EachFileLoadsAndEachFamilyFitsTheX3Store) {
   const std::vector<std::filesystem::path> files = shippedOutlineFiles(".ttf");
-  EXPECT_EQ(files.size(), 40u);
+  EXPECT_EQ(files.size(), 44u);
   std::map<std::string, std::vector<uint32_t>> flashBytes;  // by family directory
   std::map<std::string, std::vector<uint32_t>> sdBytes;
   for (const auto& path : files) {
@@ -150,7 +151,7 @@ TEST(ShippedTtfFamilies, EachFileLoadsAndEachFamilyFitsTheX3Store) {
     flashBytes[path.parent_path().filename().generic_string()].push_back(probe.flashBytes);
     sdBytes[path.parent_path().filename().generic_string()].push_back(probe.sdBytes);
   }
-  EXPECT_EQ(flashBytes.size(), 20u);
+  EXPECT_EQ(flashBytes.size(), 22u);
   for (const auto& [family, flashSizes] : flashBytes) {
     SCOPED_TRACE(family);
     ASSERT_EQ(flashSizes.size(), 2u);
@@ -168,7 +169,7 @@ TEST(ShippedTtfFamilies, EachFileMapsTheIastLetters) {
                                 0x1E62, 0x1E63, 0x1E6C, 0x1E6D, 0x0301, 0x0303, 0x0304, 0x0307, 0x0310, 0x0323};
   static_assert(sizeof(kIast) / sizeof(kIast[0]) == 30);
   const std::vector<std::filesystem::path> files = shippedOutlineFiles(".ttf");
-  EXPECT_EQ(files.size(), 40u);
+  EXPECT_EQ(files.size(), 44u);
   for (const auto& path : files) {
     SCOPED_TRACE(path.filename().generic_string());
     const std::vector<uint8_t> bytes = readAll(path);
@@ -222,10 +223,8 @@ std::vector<uint32_t> decodeCorpusLine(const std::string& line) {
   return cps;
 }
 
-std::vector<std::vector<uint32_t>> corpusSample(const std::string& script) {
-  std::string lower = script;
-  for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  std::ifstream in(std::string(INDIC_CORPUS_DIR) + "/indic_corpus_" + lower + ".txt");
+std::vector<std::vector<uint32_t>> corpusSampleFile(const std::string& fileName) {
+  std::ifstream in(std::string(INDIC_CORPUS_DIR) + "/" + fileName);
   std::vector<std::vector<uint32_t>> lines;
   std::string line;
   while (std::getline(in, line)) {
@@ -233,6 +232,12 @@ std::vector<std::vector<uint32_t>> corpusSample(const std::string& script) {
     if (!line.empty()) lines.push_back(decodeCorpusLine(line));
   }
   return lines;
+}
+
+std::vector<std::vector<uint32_t>> corpusSample(const std::string& script) {
+  std::string lower = script;
+  for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return corpusSampleFile("indic_corpus_" + lower + ".txt");
 }
 
 std::vector<int32_t> shapeLine(const ot::Face& face, const ot::Plan& plan, const std::vector<uint32_t>& cps,
@@ -298,4 +303,54 @@ TEST(ShippedFamilies, EachIndicFamilyShapesAlikeThroughItsCpac) {
     }
   }
   EXPECT_EQ(20u, families);
+}
+
+// The Arabic families, Regular and Bold: 200 lines spread through generate_corpus_arabic.py's output (cut by
+// make_corpus_sample.py; Cf code points are a backslash, u and four hex digits), shaped as an Arabic plan alike through
+// the CPac the install writes and through filters the face computes. HarfBuzz equality is oracle_arabic.py's job.
+TEST(ShippedFamilies, EachArabicFamilyShapesAlikeThroughItsCpac) {
+  static uint8_t storage[ot::Buffer::bytesFor(4096)];
+  ot::Buffer buffer;
+  buffer.setStorage(storage, sizeof(storage));
+  struct Size {
+    int32_t scale;
+    unsigned ppem;
+  };
+  const Size sizes[] = {{2133, 33}, {1195, 19}};
+  const std::vector<std::vector<uint32_t>> lines = corpusSampleFile("arabic_corpus.txt");
+  ASSERT_EQ(200u, lines.size());
+  size_t files = 0;
+  for (const char* family : {"NotoNaskhArabic", "NotoSansArabic"}) {
+    for (const char* style : {"Regular", "Bold"}) {
+      const std::string name = std::string(family) + "-" + style;
+      SCOPED_TRACE(name);
+      const std::filesystem::path path = std::filesystem::path(SD_FONTS_DIR) / family / (name + ".ttf");
+      ASSERT_TRUE(std::filesystem::exists(path));
+      ShapedFace computed;
+      ShapedFace written;
+      ASSERT_TRUE(computed.open(path, false));
+      ASSERT_TRUE(written.open(path, true));
+      ot::Plan computedPlan;
+      ot::Plan writtenPlan;
+      const uint32_t* languages = ot::languageTagsFor("");
+      ASSERT_TRUE(computedPlan.build(computed.face, ot::Script::Arabic, languages));
+      ASSERT_TRUE(writtenPlan.build(written.face, ot::Script::Arabic, languages));
+      for (const Size& size : sizes) {
+        uint32_t different = 0;
+        uint32_t glyphs = 0;
+        for (const auto& line : lines) {
+          const std::vector<int32_t> a = shapeLine(computed.face, computedPlan, line, size.scale, size.ppem, buffer);
+          const std::vector<int32_t> b = shapeLine(written.face, writtenPlan, line, size.scale, size.ppem, buffer);
+          glyphs += static_cast<uint32_t>(a.size() / 4);
+          if (a != b && ++different <= 3) {
+            ADD_FAILURE() << "ppem " << size.ppem << ", line starting U+" << std::hex << line.front();
+          }
+        }
+        EXPECT_EQ(0u, different) << "ppem " << size.ppem;
+        EXPECT_GT(glyphs, 200u) << "ppem " << size.ppem;  // the lines shaped, they were not all FAIL
+      }
+      ++files;
+    }
+  }
+  EXPECT_EQ(4u, files);
 }
