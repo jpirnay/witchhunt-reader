@@ -373,6 +373,69 @@ TEST(BidiRulesMarkers, TwoMarkersOnALineAreReadInOrder) {
   EXPECT_GT(firstX, secondX) << text;
 }
 
+// Bionic reading on test_bidi_text (the step 1 design's check, "the reader"). It bolds the first half of Latin and
+// Cyrillic words only, so a Hebrew word stays whole: as many Hebrew words are bold with it as without (the book's own
+// <b>). A Latin word it splits becomes two glued tokens that the line pass orders, read one after the other; the bold
+// half is drawn where the run reads first: on the left, or on the right inside a right-to-left override, where both
+// halves carry a reversed display form (upstream's #4230 was an in-token split, which ours is not).
+TEST(BidiRulesBionic, ABoldHalfIsDrawnWhereItsRunReadsFirstAndHebrewIsNotSplit) {
+  struct Seen {
+    int hebrewBold = 0;
+    int pairs = 0;
+    int overridden = 0;
+    std::string wrong;
+  };
+  const auto isHebrew = [](const char* text) {
+    const auto* p = reinterpret_cast<const unsigned char*>(text);
+    const uint32_t cp = utf8NextCodepoint(&p);
+    return cp >= 0x05D0 && cp <= 0x05EA;
+  };
+  const auto run = [&](const bool bionic) {
+    const fs::path work = workDirFor(bionic ? "test_bidi_text_bionic" : "test_bidi_text_plain");
+    pipeline_harness::Profile profile;
+    profile.bionicReadingEnabled = bionic;
+    Seen seen;
+    const auto visit = [&](int, const Section&, const Page& page, GfxRenderer&) {
+      forEachLine(page, [&](const TextBlock& block, int) {
+        for (uint16_t i = 0; i < block.wordCount(); ++i) {
+          if ((block.wordStyle(i) & EpdFontFamily::BOLD) != 0 && isHebrew(block.wordText(i))) ++seen.hebrewBold;
+        }
+        if (!block.hasLogicalOrder()) return;
+        for (uint16_t i = 0; i + 1 < block.wordCount(); ++i) {
+          if (!block.wordContinues(i + 1)) continue;
+          const int pi = block.logicalPosition(i);
+          const int pj = block.logicalPosition(static_cast<uint16_t>(i + 1));
+          if (pi - pj != 1 && pj - pi != 1) continue;  // not read one after the other
+          const uint16_t first = pi < pj ? i : static_cast<uint16_t>(i + 1);
+          const uint16_t second = first == i ? static_cast<uint16_t>(i + 1) : i;
+          if ((block.wordStyle(first) & EpdFontFamily::BOLD) == 0 ||
+              (block.wordStyle(second) & EpdFontFamily::BOLD) != 0 || isHebrew(block.wordText(first))) {
+            continue;
+          }
+          ++seen.pairs;
+          const bool reversed = block.hasDisplayForm(first);
+          if (reversed) ++seen.overridden;
+          const bool boldOnLeft = block.wordXpos(first) < block.wordXpos(second);
+          if (boldOnLeft == reversed) {
+            seen.wrong += std::string(block.wordText(first)) + "|" + block.wordText(second) + " ";
+          }
+        }
+      });
+    };
+    const bool ok =
+        pipeline_harness::forEachPage(corpusBook("test_bidi_text"), (work / "cache").string(), profile, visit);
+    fs::remove_all(work);
+    EXPECT_TRUE(ok);
+    return seen;
+  };
+  const Seen plain = run(false);
+  const Seen bionic = run(true);
+  EXPECT_EQ(plain.hebrewBold, bionic.hebrewBold) << "a Hebrew word bolded by bionic reading";
+  EXPECT_GE(bionic.pairs, 5) << "Latin words split by bionic reading on right-to-left lines";
+  EXPECT_GE(bionic.overridden, 1) << "one of them inside a right-to-left override";
+  EXPECT_TRUE(bionic.wrong.empty()) << "bold half drawn where its run reads last: " << bionic.wrong;
+}
+
 namespace {
 
 std::vector<Book> bidiBooks() {
