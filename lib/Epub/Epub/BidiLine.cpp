@@ -5,8 +5,10 @@
 #include <Utf8.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <new>
+#include <utility>
 
 namespace BidiLine {
 namespace {
@@ -81,12 +83,44 @@ int firstStrongLevel(const std::string_view text, const int fallbackLevel) {
   return fallbackLevel & 1;
 }
 
+// --- A token's segments (Token::cuts) -----------------------------------------------------------------------------
+
+constexpr uint16_t kNoSegment = 0xFFFF;  // no segment is numbered so: a token has fewer cuts than bytes
+
+// The segment of `token` that holds byte `at`: how many of its cuts are at or below it.
+uint16_t segmentOf(const Token& token, const uint16_t at) {
+  if (token.cutCount == 0) return 0;
+  return static_cast<uint16_t>(std::upper_bound(token.cuts, token.cuts + token.cutCount, at) - token.cuts);
+}
+
+uint16_t segmentBegin(const Token& token, const size_t segment) { return segment == 0 ? 0 : token.cuts[segment - 1]; }
+
+uint16_t segmentEnd(const Token& token, const size_t segment) {
+  return segment == token.cutCount ? static_cast<uint16_t>(token.text.size()) : token.cuts[segment];
+}
+
+// Where a token's piece starts its bytes when its first drawn byte is `next`, after a piece of the same token whose
+// first drawn byte is `previous`: at its segment's start when it opens that segment, else at `next`.
+uint16_t pieceStart(const Token& token, const uint16_t previous, const uint16_t next) {
+  const uint16_t segment = segmentOf(token, next);
+  return segment > segmentOf(token, previous) ? segmentBegin(token, segment) : next;
+}
+
 // --- tokenForm --------------------------------------------------------------------------------------------------
 
-// Appends the token's form to `dest`. When it is the token's text byte for byte, takes it back off and returns false.
-bool appendForm(const std::string_view token, const OpenControls& open, const uint8_t paragraphLevel, Scratch& s,
-                std::string& dest) {
-  // The level, and the controls prepended: an open isolate is never prepended, it gives the level instead.
+// A token's own form in the making: the level its bidi input is ordered at, the first of open's controls that input
+// takes, and its TextShaping units (in the Scratch's units) when it is shaped.
+struct Form {
+  std::string_view text;
+  const OpenControls& open;
+  size_t prepended;
+  int level;
+  size_t shapedCount;
+  bool shaped;
+};
+
+// The level, and the controls prepended: an open isolate is never prepended, it gives the level instead.
+Form formOf(const std::string_view token, const OpenControls& open, const uint8_t paragraphLevel, Scratch& s) {
   int isolate = -1;
   for (int i = open.count - 1; i >= 0; i--) {
     if (isInitiator(open.cps[i])) {
@@ -101,45 +135,69 @@ bool appendForm(const std::string_view token, const OpenControls& open, const ui
     const uint32_t initiator = open.cps[isolate];
     level = initiator == LRI ? 0 : initiator == RLI ? 1 : firstStrongLevel(token, 0);
   }
-
   size_t shapedCount = 0;
   const bool shaped = TextShaping::shape(token.data(), token.size(), s.units, kMaxUnits, shapedCount);
+  return {token, open, static_cast<size_t>(isolate + 1), level, shapedCount, shaped};
+}
 
-  // The bidi input: the embeddings and overrides opened inside the isolate (or all of them), then the code points
-  // without their joiners (BN, which X9 removes; leaving them out keeps a mark after a joiner on its base).
-  size_t n = 0;
-  for (size_t i = static_cast<size_t>(isolate + 1); i < open.count; i++) s.passCp[n++] = open.cps[i];
-  bool fits = true;
-  const auto add = [&](const uint32_t cp) {
-    if (isJoiner(cp)) return;
-    if (n == kMaxCodepoints) {
-      fits = false;
-      return;
-    }
-    s.passCp[n++] = cp;
-  };
-  if (shaped) {
-    for (size_t k = 0; fits && k < shapedCount; k++) add(s.units[k].cp);
-  } else {
-    for (size_t pos = 0; fits && pos < token.size();) add(decodeAt(token.data(), token.size(), pos));
+// The bidi input of the form's bytes [from, to) in s.passCp[0..n): the embeddings and overrides opened inside the
+// isolate (or all of them), then the code points there (its shaped units whose clusters are there) without their
+// joiners (BN, which X9 removes; leaving them out keeps a mark after a joiner on its base). s.passEntry holds each
+// one's byte, kNoCluster for a control. False when they are over kMaxCodepoints.
+bool fillPass(const Form& form, const size_t from, const size_t to, Scratch& s, size_t& n) {
+  n = 0;
+  for (size_t i = form.prepended; i < form.open.count; i++) {
+    s.passCp[n] = form.open.cps[i];
+    s.passEntry[n++] = kNoCluster;
   }
+  const auto add = [&](const uint32_t cp, const size_t at) {
+    if (isJoiner(cp)) return true;
+    if (n == kMaxCodepoints) return false;
+    s.passCp[n] = cp;
+    s.passEntry[n++] = static_cast<uint16_t>(at);
+    return true;
+  };
+  if (form.shaped) {
+    for (size_t k = 0; k < form.shapedCount; k++) {
+      const uint16_t at = s.units[k].cluster;
+      if (at >= from && at < to && !add(s.units[k].cp, at)) return false;
+    }
+    return true;
+  }
+  for (size_t pos = from; pos < to;) {
+    const size_t at = pos;
+    if (!add(decodeAt(form.text.data(), form.text.size(), pos), at)) return false;
+  }
+  return true;
+}
 
-  const size_t start = dest.size();
-  if (fits && n > 0 && BidiUtils::orderLine(s.passCp, n, level, s.passVisual, s.passDrawn)) {
+// Appends the form of the bytes [from, to): their bidi input through one orderLine, else (past the bidi limit, or
+// without a workspace) what applyBidiVisual leaves, the text as it is with the drops still applied.
+void appendRangeForm(const Form& form, const size_t from, const size_t to, Scratch& s, std::string& dest) {
+  size_t n = 0;
+  if (fillPass(form, from, to, s, n) && n > 0 &&
+      BidiUtils::orderLine(s.passCp, n, form.level, s.passVisual, s.passDrawn)) {
     for (size_t v = 0; v < n; v++) {
       if (isDrawn(s.passDrawn[v])) utf8AppendCodepoint(dest, s.passDrawn[v]);
     }
-  } else if (shaped) {
-    // Past the bidi limit or without a workspace applyBidiVisual leaves the text as it is; the drops still apply.
-    for (size_t k = 0; k < shapedCount; k++) {
-      if (isDrawn(s.units[k].cp)) utf8AppendCodepoint(dest, s.units[k].cp);
+  } else if (form.shaped) {
+    for (size_t k = 0; k < form.shapedCount; k++) {
+      const uint16_t at = s.units[k].cluster;
+      if (at >= from && at < to && isDrawn(s.units[k].cp)) utf8AppendCodepoint(dest, s.units[k].cp);
     }
   } else {
-    for (size_t pos = 0; pos < token.size();) {
+    for (size_t pos = from; pos < to;) {
       const size_t at = pos;
-      if (isDrawn(decodeAt(token.data(), token.size(), pos))) dest.append(token.data() + at, pos - at);
+      if (isDrawn(decodeAt(form.text.data(), form.text.size(), pos))) dest.append(form.text.data() + at, pos - at);
     }
   }
+}
+
+// Appends the token's form to `dest`. When it is the token's text byte for byte, takes it back off and returns false.
+bool appendForm(const std::string_view token, const OpenControls& open, const uint8_t paragraphLevel, Scratch& s,
+                std::string& dest) {
+  const size_t start = dest.size();
+  appendRangeForm(formOf(token, open, paragraphLevel, s), 0, token.size(), s, dest);
   if (std::string_view(dest).substr(start) == token) {
     dest.resize(start);
     return false;
@@ -151,7 +209,8 @@ bool appendForm(const std::string_view token, const OpenControls& open, const ui
 
 // Fills units and slots: the open controls, then each token's units with a separator before each spaced token after
 // the first. A transparent mark or a joiner that follows a unit of its own token (not a control) is folded onto that
-// unit's slot.
+// unit's slot when both are in one segment of the token. Across a cut it takes a slot of its own, which the order
+// resolves as it does any NSM (W1: its base's type) or BN.
 // False when the line is over kMaxCodepoints slots or kMaxUnits units.
 bool collect(const Token* tokens, const size_t count, const OpenControls& open, Scratch& s, size_t& slotCount) {
   size_t units = 0;
@@ -188,9 +247,14 @@ bool collect(const Token* tokens, const size_t count, const OpenControls& open, 
         if (!addUnit(decodeAt(text.data(), text.size(), pos), static_cast<uint16_t>(at))) return false;
       }
     }
+    uint16_t slotSegment = 0;  // the segment of the slot that units fold onto
     for (size_t u = first; u < units; u++) {
-      const bool ridesOnBase = u > first && ridesOnItsBase(s.units[u].cp) && !isControl(s.units[u - 1].cp);
-      if (!ridesOnBase && !addSlot(u, token)) return false;
+      const uint16_t segment = segmentOf(tokens[t], s.units[u].cluster);
+      const bool ridesOnBase =
+          u > first && ridesOnItsBase(s.units[u].cp) && !isControl(s.units[u - 1].cp) && segment == slotSegment;
+      if (ridesOnBase) continue;
+      if (!addSlot(u, token)) return false;
+      slotSegment = segment;
     }
   }
   s.slotUnit[slots] = static_cast<uint16_t>(units);
@@ -294,8 +358,10 @@ constexpr uint8_t kNoRank = 0xFF;
 // Marks where the walk must cut a run of one token's slots so that each piece holds characters adjacent in the text
 // too: each slot gets its rank among the drawn slots in logical order, and each run (as the walk meets them) is cut
 // into the longest prefixes whose ranks form an interval. A run like `(שלום)` jumps about and stays whole; an isolate
-// or embedding that carries part of a word away leaves the rest in two pieces.
-void markCuts(Scratch& s, const size_t slots, uint8_t* const rankOf, uint8_t* const cutBefore, uint16_t* const run) {
+// or embedding that carries part of a word away leaves the rest in two pieces. A run also ends where its token's
+// segment changes, as it does at a token change, and the walk starts a piece there.
+void markCuts(const Token* tokens, Scratch& s, const size_t slots, uint8_t* const rankOf, uint8_t* const cutBefore,
+              uint16_t* const run) {
   size_t rank = 0;
   for (size_t slot = 0; slot < slots; slot++) {
     cutBefore[slot] = 0;
@@ -308,6 +374,7 @@ void markCuts(Scratch& s, const size_t slots, uint8_t* const rankOf, uint8_t* co
   }
   size_t length = 0;
   uint16_t runToken = kNoToken;
+  uint16_t runSegment = 0;
   const auto cutRun = [&] {
     for (size_t i = 0; i < length;) {
       size_t end = i;
@@ -332,8 +399,15 @@ void markCuts(Scratch& s, const size_t slots, uint8_t* const rankOf, uint8_t* co
       continue;
     }
     if (rankOf[slot] == kNoRank) continue;  // controls and U+00AD join no run
-    if (length > 0 && runToken != token) cutRun();
+    const uint16_t segment = segmentOf(tokens[token], s.units[s.slotUnit[slot]].cluster);
+    if (length > 0 && runToken != token) {
+      cutRun();
+    } else if (length > 0 && segment != runSegment) {
+      cutRun();
+      cutBefore[slot] = 1;
+    }
     runToken = token;
+    runSegment = segment;
     run[length++] = static_cast<uint16_t>(slot);
   }
   cutRun();
@@ -346,23 +420,30 @@ void reserveAtLeast(Buffer& buffer, const size_t n) {
   if (buffer.capacity() < n) buffer.reserve(std::max(n, 2 * buffer.capacity()));
 }
 
-// The line's text bytes, and one more per token: about what its forms and their NULs take.
+// The line's segments: one per token, and one more at each cut.
+size_t segmentCount(const Token* tokens, const size_t count) {
+  size_t segments = count;
+  for (size_t t = 0; t < count; t++) segments += tokens[t].cutCount;
+  return segments;
+}
+
+// The line's text bytes, and one more per segment: about what its forms and their NULs take.
 size_t formBytes(const Token* tokens, const size_t count) {
   size_t bytes = 0;
-  for (size_t t = 0; t < count; t++) bytes += tokens[t].text.size() + 1;
+  for (size_t t = 0; t < count; t++) bytes += tokens[t].text.size() + 1 + tokens[t].cutCount;
   return bytes;
 }
 
 // Walks the visual order into pieces, then gives each its bytes and its reading index. False only when a shaped
 // cluster's units land in two pieces: the caller falls back.
 bool buildPieces(const Token* tokens, const size_t count, Scratch& s, const size_t slots, Line& out) {
-  // About one piece per token, and the forms about the tokens' bytes: a line that holds more grows the buffers once.
-  reserveAtLeast(out.pieces, count);
+  // About one piece per segment, and the forms about the tokens' bytes: a line that holds more grows the buffers once.
+  reserveAtLeast(out.pieces, segmentCount(tokens, count));
   reserveAtLeast(out.display, formBytes(tokens, count));
   // Free once the slots are ordered.
   uint8_t* const rankOf = s.expanded;
   uint8_t* const cutBefore = s.openSpans;
-  markCuts(s, slots, rankOf, cutBefore, s.passEntry);
+  markCuts(tokens, s, slots, rankOf, cutBefore, s.passEntry);
 
   bool runOpen = false;
   bool spacePending = false;
@@ -406,7 +487,9 @@ bool buildPieces(const Token* tokens, const size_t count, Scratch& s, const size
   closeRun(out, runOpen);
 
   // Each token's pieces by first byte: the first begins at 0, each ends where the next begins, the last at the
-  // token's end. The same order ranks them for reading. Pieces are at most the slots, and the pass arrays are free.
+  // token's end. In a token with cuts a piece that opens a segment begins at the segment's start: the segment's
+  // undrawn bytes before its first drawn one stay in it, and a segment that draws nothing joins the piece before it.
+  // The same order ranks them for reading. Pieces are at most the slots, and the pass arrays are free.
   uint16_t* const pieceRank = s.passVisual;
   const size_t n = out.pieces.size();
   const auto before = [&](const size_t a, const size_t b) {
@@ -419,15 +502,18 @@ bool buildPieces(const Token* tokens, const size_t count, Scratch& s, const size
     for (; j > 0 && before(r, pieceRank[j - 1]); j--) pieceRank[j] = pieceRank[j - 1];
     pieceRank[j] = static_cast<uint16_t>(r);
   }
+  uint16_t previousEnd = 0;
   for (size_t r = 0; r < n; r++) {
     Piece& piece = out.pieces[pieceRank[r]];
+    const Token& token = tokens[piece.token];
     const bool first = r == 0 || out.pieces[pieceRank[r - 1]].token != piece.token;
     const bool last = r + 1 == n || out.pieces[pieceRank[r + 1]].token != piece.token;
-    const uint16_t next =
-        last ? static_cast<uint16_t>(tokens[piece.token].text.size()) : out.pieces[pieceRank[r + 1]].begin;
+    const uint16_t next = last ? static_cast<uint16_t>(token.text.size())
+                               : pieceStart(token, piece.begin, out.pieces[pieceRank[r + 1]].begin);
     if (piece.end >= next) return false;  // a shaped cluster shared with the next piece
-    if (first) piece.begin = 0;
+    piece.begin = first ? 0 : previousEnd;
     piece.end = next;
+    previousEnd = next;
     piece.readingIndex = static_cast<uint8_t>(r);
     if (pieceRank[r] != r) out.reordered = true;
   }
@@ -436,10 +522,92 @@ bool buildPieces(const Token* tokens, const size_t count, Scratch& s, const size
 
 // --- layoutLine: the fallback (upstream #2541's result) -------------------------------------------------------------
 
-// One piece per token with a drawn form, in computeVisualWordOrder's order over the tokens without their transparent
-// marks; when it declines, reversed at level 1 and as is at level 0. Its corners are upstream's: past 128 code points
-// it declines too, so a right-to-left line reverses an embedded Latin phrase's words, and minibidi sees isolates as
-// embeddings. False (out cleared) when BidiUtils has no workspace, as for a line that fits.
+// Appends the pieces of a token with cuts: one for each segment that draws something, in the token's own visual
+// order. With a form of its own (one orderLine), each segment's piece goes where that form first draws the segment,
+// and draws the segment's characters in the form's order. Past kMaxCodepoints the segments are in logical order at
+// level 0 and reversed at level 1, each formed on its own. Each piece's bytes run from its segment's start (the
+// token's first piece from 0) to the next piece's, so a segment that draws nothing joins the piece before it; it is
+// ranked for reading by them, after the pieces already in `out`.
+void appendSegments(const Token& token, const uint16_t index, const OpenControls& open, const uint8_t paragraphLevel,
+                    Scratch& s, Line& out) {
+  const Form form = formOf(token.text, open, paragraphLevel, s);
+  const size_t first = out.pieces.size();
+  const auto openPiece = [&](const size_t segment) {
+    Piece piece{};
+    piece.token = index;
+    piece.begin = segmentBegin(token, segment);
+    piece.displayBegin = static_cast<uint16_t>(out.display.size());
+    out.pieces.push_back(piece);
+  };
+  const auto closePiece = [&] {
+    Piece& piece = out.pieces.back();
+    piece.displayLength = static_cast<uint16_t>(out.display.size() - piece.displayBegin);
+    if (piece.displayLength == 0) {
+      out.pieces.pop_back();
+    } else {
+      out.display.push_back('\0');
+    }
+  };
+
+  size_t n = 0;
+  if (fillPass(form, 0, token.text.size(), s, n) && n > 0 &&
+      BidiUtils::orderLine(s.passCp, n, form.level, s.passVisual, s.passDrawn)) {
+    // Each visual position's segment; kNoSegment where nothing is drawn (every control) and once a piece takes it.
+    uint16_t* const segmentAt = s.slotToken;
+    for (size_t v = 0; v < n; v++) {
+      segmentAt[v] = isDrawn(s.passDrawn[v]) ? segmentOf(token, s.passEntry[s.passVisual[v]]) : kNoSegment;
+    }
+    for (size_t v = 0; v < n; v++) {
+      const uint16_t segment = segmentAt[v];
+      if (segment == kNoSegment) continue;
+      openPiece(segment);
+      for (size_t w = v; w < n; w++) {
+        if (segmentAt[w] != segment) continue;
+        utf8AppendCodepoint(out.display, s.passDrawn[w]);
+        segmentAt[w] = kNoSegment;
+      }
+      closePiece();
+    }
+    // At most kMaxCodepoints pieces: each ranked against the others by its segment's start.
+    const size_t last = out.pieces.size();
+    size_t lowest = first;
+    for (size_t i = first; i < last; i++) {
+      Piece& piece = out.pieces[i];
+      size_t rank = 0;
+      piece.end = static_cast<uint16_t>(token.text.size());
+      for (size_t j = first; j < last; j++) {
+        const uint16_t other = out.pieces[j].begin;
+        if (other < piece.begin) rank++;
+        if (other > piece.begin) piece.end = std::min(piece.end, other);
+      }
+      piece.readingIndex = static_cast<uint8_t>(first + rank);
+      if (rank == 0) lowest = i;
+    }
+    if (last > first) out.pieces[lowest].begin = 0;
+    return;
+  }
+
+  for (size_t segment = 0; segment <= token.cutCount; segment++) {
+    openPiece(segment);
+    appendRangeForm(form, segmentBegin(token, segment), segmentEnd(token, segment), s, out.display);
+    closePiece();
+  }
+  const size_t last = out.pieces.size();
+  for (size_t i = first; i < last; i++) {
+    Piece& piece = out.pieces[i];
+    piece.end = i + 1 < last ? out.pieces[i + 1].begin : static_cast<uint16_t>(token.text.size());
+    piece.readingIndex = static_cast<uint8_t>(i);
+  }
+  if (last > first) out.pieces[first].begin = 0;
+  if (form.level == 1) std::reverse(out.pieces.begin() + static_cast<std::ptrdiff_t>(first), out.pieces.end());
+}
+
+// The tokens in computeVisualWordOrder's order over the tokens without their transparent marks; when it declines,
+// reversed at level 1 and as is at level 0. A token without cuts is one piece with its whole form, one with cuts a
+// piece for each segment that draws (appendSegments), glued to one another; a token with no drawn character gives
+// none. Its corners are upstream's: past 128 code points computeVisualWordOrder declines too, so a right-to-left line
+// reverses an embedded Latin phrase's words, and minibidi sees isolates as embeddings. False (out cleared) when
+// BidiUtils has no workspace, as for a line that fits.
 bool fallbackLine(const Token* tokens, const size_t count, const OpenControls& open, const uint8_t paragraphLevel,
                   Scratch& s, Line& out) {
   out.clear();
@@ -453,8 +621,8 @@ bool fallbackLine(const Token* tokens, const size_t count, const OpenControls& o
   if (count == 0) return true;
 
   // The words without their marks (computeVisualWordOrder takes std::string words, about the line's bytes) and the
-  // order with its inverse (4 bytes a token), in the Line's buffers: only a fallback line longer than any before
-  // allocates.
+  // order followed by each token's first piece (4 bytes a token), in the Line's buffers: only a fallback line longer
+  // than any before allocates.
   std::vector<std::string>& words = out.fallbackWords;
   std::vector<uint16_t>& order = out.fallbackOrder;
   reserveAtLeast(words, count);
@@ -471,45 +639,54 @@ bool fallbackLine(const Token* tokens, const size_t count, const OpenControls& o
       }
     }
   }
-  reserveAtLeast(order, 2 * count);
+  reserveAtLeast(order, 2 * count + 1);
   if (!BidiUtils::computeVisualWordOrder(words, paragraphLevel == 1, order)) order.clear();
   if (order.size() != count) {
     order.clear();
     for (size_t v = 0; v < count; v++) order.push_back(static_cast<uint16_t>(paragraphLevel == 1 ? count - 1 - v : v));
   }
-  order.resize(2 * count);
-  for (size_t v = 0; v < count; v++) order[count + order[v]] = static_cast<uint16_t>(v);  // each token's visual index
+  order.resize(2 * count + 1);
+  uint16_t* const firstPiece = order.data() + count;  // token t's pieces are [firstPiece[t], firstPiece[t + 1])
 
-  // The forms, made in logical order as the open controls follow the text.
+  // The pieces in logical order, made as the open controls follow the text, each ranked for reading as it comes.
+  // Fewer than 65,536 of them: each holds a drawn form in `display`, which 16-bit offsets index.
   reserveAtLeast(out.display, formBytes(tokens, count));
-  reserveAtLeast(out.pieces, count);
-  out.pieces.resize(count);
+  reserveAtLeast(out.pieces, segmentCount(tokens, count));
   OpenControls at = open;
   for (size_t t = 0; t < count; t++) {
     const std::string_view text = tokens[t].text;
-    Piece& piece = out.pieces[order[count + t]];
-    piece.token = static_cast<uint16_t>(t);
-    piece.begin = 0;
-    piece.end = static_cast<uint16_t>(text.size());
-    piece.displayBegin = static_cast<uint16_t>(out.display.size());
-    if (!appendForm(text, at, paragraphLevel, s, out.display)) out.display.append(text);
-    piece.displayLength = static_cast<uint16_t>(out.display.size() - piece.displayBegin);
-    out.display.push_back('\0');
+    firstPiece[t] = static_cast<uint16_t>(out.pieces.size());
+    if (tokens[t].cutCount > 0) {
+      appendSegments(tokens[t], static_cast<uint16_t>(t), at, paragraphLevel, s, out);
+    } else {
+      Piece piece{};
+      piece.token = static_cast<uint16_t>(t);
+      piece.begin = 0;
+      piece.end = static_cast<uint16_t>(text.size());
+      piece.displayBegin = static_cast<uint16_t>(out.display.size());
+      if (!appendForm(text, at, paragraphLevel, s, out.display)) out.display.append(text);
+      piece.displayLength = static_cast<uint16_t>(out.display.size() - piece.displayBegin);
+      out.display.push_back('\0');
+      piece.readingIndex = static_cast<uint8_t>(out.pieces.size());
+      if (piece.displayLength > 0) out.pieces.push_back(piece);  // a token with no drawn character gives no piece
+    }
     at.advance(text);
   }
+  firstPiece[count] = static_cast<uint16_t>(out.pieces.size());
 
-  // A token with no drawn character gives no piece; the rest are ranked by token.
-  size_t rank = 0;
-  for (size_t t = 0; t < count; t++) {
-    Piece& piece = out.pieces[order[count + t]];
-    if (piece.displayLength > 0) piece.readingIndex = static_cast<uint8_t>(rank++);
+  // Into visual order a token's pieces at a time: each piece's place in spaceToken (given its own value below), then
+  // each piece swapped straight into its place. The places are a permutation, as the order is.
+  uint16_t place = 0;
+  for (size_t v = 0; v < count; v++) {
+    const uint16_t t = order[v];
+    for (size_t i = firstPiece[t]; i < firstPiece[t + 1]; i++) out.pieces[i].spaceToken = place++;
   }
-  out.pieces.erase(
-      std::remove_if(out.pieces.begin(), out.pieces.end(), [](const Piece& p) { return p.displayLength == 0; }),
-      out.pieces.end());
+  for (size_t i = 0; i < out.pieces.size(); i++) {
+    while (out.pieces[i].spaceToken != i) std::swap(out.pieces[i], out.pieces[out.pieces[i].spaceToken]);
+  }
 
-  // Visual neighbours that are logical neighbours keep the later one's glue; any other pair is a word space, the
-  // right-hand piece's.
+  // One token's pieces are glued to one another. Visual neighbours that are logical neighbours keep the later one's
+  // glue; any other pair is a word space, the right-hand piece's.
   for (size_t v = 0; v < out.pieces.size(); v++) {
     Piece& piece = out.pieces[v];
     if (piece.readingIndex != v) out.reordered = true;
@@ -519,6 +696,10 @@ bool fallbackLine(const Token* tokens, const size_t count, const OpenControls& o
       continue;
     }
     const uint16_t left = out.pieces[v - 1].token;
+    if (left == piece.token) {
+      piece.gapBefore = Gap::Glued;
+      continue;
+    }
     const uint16_t later = std::max(left, piece.token);
     const bool neighbours = later - std::min(left, piece.token) == 1;
     piece.gapBefore = neighbours && !tokens[later].spaceBefore ? Gap::Glued : Gap::Space;

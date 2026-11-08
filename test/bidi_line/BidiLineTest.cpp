@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "BidiLine.h"
@@ -92,12 +93,21 @@ void expectWellFormed(const BidiLine::Line& line, const std::vector<std::string>
   EXPECT_EQ(line.reordered, reordered);
 }
 
+// Each token's cut points (BidiLine::Token::cuts), as ParsedText hands over a shaped token's piece edges; a token past
+// the list, or with an empty one, has none.
+using Cuts = std::vector<std::vector<uint16_t>>;
+
 // `glued` lists the tokens without a word space before them (TokenBoundary::hasSpace false); the rest have one.
 BidiLine::Line lay(const std::vector<std::string>& words, const uint8_t level, const BidiLine::OpenControls& open = {},
-                   const std::vector<size_t>& glued = {}) {
+                   const std::vector<size_t>& glued = {}, const Cuts& cuts = {}) {
   std::vector<BidiLine::Token> tokens;
   for (size_t t = 0; t < words.size(); t++) {
-    tokens.push_back({words[t], std::find(glued.begin(), glued.end(), t) == glued.end()});
+    BidiLine::Token token{words[t], std::find(glued.begin(), glued.end(), t) == glued.end()};
+    if (t < cuts.size() && !cuts[t].empty()) {
+      token.cutCount = static_cast<uint16_t>(cuts[t].size());
+      token.cuts = cuts[t].data();
+    }
+    tokens.push_back(token);
   }
   BidiLine::Line line;
   EXPECT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), open, level, scratch(), line));
@@ -125,6 +135,14 @@ std::vector<int> tokensOf(const BidiLine::Line& line) {
   std::vector<int> t;
   for (const auto& piece : line.pieces) t.push_back(piece.token);
   return t;
+}
+
+// Each piece's bytes [begin, end) of its token, left to right.
+using Bytes = std::vector<std::pair<int, int>>;
+Bytes bytesOf(const BidiLine::Line& line) {
+  Bytes bytes;
+  for (const auto& piece : line.pieces) bytes.emplace_back(piece.begin, piece.end);
+  return bytes;
 }
 
 std::vector<std::string> repeated(const std::string& text, const size_t n) { return std::vector<std::string>(n, text); }
@@ -401,6 +419,161 @@ TEST(BidiLine, AFirstLineReservesForItsTokensNotTheWorstCase) {
   const auto line = lay({"abcdefghij", "klmnopqrst", "uvwxyzabcd"}, 1);
   EXPECT_LE(line.pieces.capacity(), 3u);
   EXPECT_LT(line.display.capacity(), 66u);
+}
+
+// A token with cut points: ParsedText's shaped pieces (a run's glyphs, the Text around it), each a segment of the
+// token. The tokens below are cut where their store pieces would be.
+
+TEST(BidiLine, ATokenWithCutsGivesPiecesInVisualOrder) {
+  // (كتاب): the brackets are Text, the word one run. Uncut the pass keeps the token whole; cut, each segment is a
+  // piece of its own where UAX #9 puts it, the closing bracket leftmost and mirrored.
+  const std::string word = "(كتاب)";
+  EXPECT_EQ(render(lay({"قال", word}, 1)), "t1:(باتك) S1 t0:لاق");
+  const auto line = lay({"قال", word}, 1, {}, {}, {{}, {1, 9}});
+  EXPECT_FALSE(line.fallback);
+  EXPECT_EQ(render(line), "t1:( G t1:باتك G t1:) S1 t0:لاق");
+  EXPECT_EQ(readings(line), (std::vector<int>{3, 2, 1, 0}));
+  EXPECT_EQ(bytesOf(line), (Bytes{{9, 10}, {1, 9}, {0, 1}, {0, 6}}));
+  ASSERT_EQ(line.pieces.size(), 4u);
+  for (size_t v = 1; v < 3; v++) {
+    EXPECT_EQ(line.pieces[v].gapBefore, Gap::Glued);
+    EXPECT_EQ(line.pieces[v].spaceToken, 1);
+  }
+
+  // Left to right after a Latin word the brackets take its direction, and the segments keep their logical order.
+  const auto ltr = lay({"see", word}, 0, {}, {}, {{}, {1, 9}});
+  EXPECT_EQ(render(ltr), "t0:see S1 t1:( G t1:باتك G t1:)");
+  EXPECT_FALSE(ltr.reordered);
+}
+
+TEST(BidiLine, AnRtlTokensPunctuationPieceLandsLeft) {
+  // كتاب،: the word's run, then the Arabic comma. Right to left the comma is drawn left of the word, glued to it.
+  const auto line = lay({"كتاب،", "قلم"}, 1, {}, {}, {{8}});
+  EXPECT_EQ(render(line), "t1:ملق S1 t0:، G t0:باتك");
+  EXPECT_EQ(readings(line), (std::vector<int>{2, 1, 0}));
+  EXPECT_EQ(bytesOf(line), (Bytes{{0, 6}, {8, 10}, {0, 8}}));
+  // So do Arabic-Indic digits after the word, at level 2.
+  EXPECT_EQ(render(lay({"كتاب١٩"}, 1, {}, {}, {{8}})), "t0:١٩ G t0:باتك");
+}
+
+TEST(BidiLine, AnLtrIndicTokenInAnRtlLineKeepsItsPiecesOrder) {
+  // कख-गघ: two Devanagari runs and the hyphen between them, in a Hebrew line. The token is at level 2, so its pieces
+  // run left to right in their logical order while the line runs right to left around it.
+  const auto line = lay({"אבג", "कख-गघ", "דהו"}, 1, {}, {}, {{}, {6, 7}});
+  EXPECT_EQ(render(line), "t2:והד S2 t1:कख G t1:- G t1:गघ S1 t0:גבא");
+  EXPECT_EQ(readings(line), (std::vector<int>{4, 1, 2, 3, 0}));
+  EXPECT_EQ(bytesOf(line), (Bytes{{0, 6}, {0, 6}, {6, 7}, {7, 13}, {0, 6}}));
+}
+
+TEST(BidiLine, AMarkAcrossACutTakesItsOwnSlot) {
+  // A cut between bet and its qamats puts the point in another segment, so it does not ride on bet: it takes a slot
+  // of its own, W1 gives it bet's level, and orderLine draws it right after bet. It is a piece of its own, glued
+  // between bet and the alef before them in the text.
+  const std::string word = "אב" + u(0x05B8);
+  const auto whole = lay({word}, 1);
+  ASSERT_EQ(whole.pieces.size(), 1u);
+  EXPECT_EQ(decode(displayOf(whole, whole.pieces[0])), (CP{0x05D1, 0x05B8, 0x05D0}));
+
+  const auto line = lay({word}, 1, {}, {}, {{4}});
+  EXPECT_FALSE(line.fallback);
+  ASSERT_EQ(line.pieces.size(), 3u);
+  EXPECT_EQ(decode(displayOf(line, line.pieces[0])), CP{0x05D1});
+  EXPECT_EQ(decode(displayOf(line, line.pieces[1])), CP{0x05B8});
+  EXPECT_EQ(decode(displayOf(line, line.pieces[2])), CP{0x05D0});
+  EXPECT_EQ(bytesOf(line), (Bytes{{2, 4}, {4, 6}, {0, 2}}));
+  EXPECT_EQ(readings(line), (std::vector<int>{1, 2, 0}));
+  EXPECT_EQ(line.pieces[1].gapBefore, Gap::Glued);
+  EXPECT_EQ(line.pieces[2].gapBefore, Gap::Glued);
+
+  // A joiner across a cut takes its own slot too. It draws nothing, and its bytes stay with its own segment.
+  const auto joined = lay({"ب" + u(0x200C) + "ه"}, 1, {}, {}, {{2}});
+  EXPECT_FALSE(joined.fallback);
+  EXPECT_EQ(render(joined), "t0:ه G t0:ب");
+  EXPECT_EQ(bytesOf(joined), (Bytes{{2, 7}, {0, 2}}));
+}
+
+TEST(BidiLine, AnUndrawnSegmentIsAbsorbed) {
+  // A segment that draws nothing (a joiner before a run, a lone control) gives no piece: its bytes join the piece
+  // before it in the text, or, at the token's start, the first one.
+  const auto leading = lay({u(0x200C) + "كتاب"}, 1, {}, {}, {{3}});
+  EXPECT_EQ(render(leading), "t0:باتك");
+  EXPECT_EQ(bytesOf(leading), (Bytes{{0, 11}}));
+  const std::string word = "كتاب" + u(0x200F) + "،";
+  const auto inner = lay({word}, 1, {}, {}, {{8, 11}});
+  EXPECT_EQ(render(inner), "t0:، G t0:باتك");
+  EXPECT_EQ(bytesOf(inner), (Bytes{{11, 13}, {0, 11}}));
+  // A segment's own undrawn bytes before its first drawn character stay in its piece.
+  const auto own = lay({word}, 1, {}, {}, {{8}});
+  EXPECT_EQ(render(own), "t0:، G t0:باتك");
+  EXPECT_EQ(bytesOf(own), (Bytes{{8, 13}, {0, 8}}));
+}
+
+TEST(BidiLine, TheFallbackCutsATokenIntoItsSegments) {
+  // Level 1: 26 words, then (كتاب) cut at its brackets with an RLM after it (a segment that draws nothing): 137
+  // slots. The token's segments are pieces in the order its own form gives them; the RLM's bytes join the bracket's.
+  auto rtl = repeated("אבגד", 26);
+  rtl.push_back("(كتاب)" + u(0x200F));
+  Cuts rtlCuts(27);
+  rtlCuts[26] = {1, 9, 10};
+  const auto line = lay(rtl, 1, {}, {}, rtlCuts);
+  EXPECT_TRUE(line.fallback);
+  std::string expected = "t26:( G t26:باتك G t26:)";
+  for (int t = 25; t >= 0; t--) expected += " S" + std::to_string(t + 1) + " t" + std::to_string(t) + ":דגבא";
+  EXPECT_EQ(render(line), expected);
+  const Bytes bytes = bytesOf(line);
+  ASSERT_EQ(bytes.size(), 29u);
+  EXPECT_EQ(Bytes(bytes.begin(), bytes.begin() + 3), (Bytes{{9, 13}, {1, 9}, {0, 1}}));
+
+  // Level 0: 26 Latin words, then abcكتاب١٢ cut at its run: 139 slots. The token is at level 0, and its digits (level
+  // 2) land between its Latin letters and its word.
+  auto ltr = repeated("abcd", 26);
+  ltr.push_back("abcكتاب١٢");
+  Cuts ltrCuts(27);
+  ltrCuts[26] = {3, 11};
+  const auto left = lay(ltr, 0, {}, {}, ltrCuts);
+  EXPECT_TRUE(left.fallback);
+  EXPECT_TRUE(left.reordered);
+  std::string expectedLeft;
+  for (int t = 0; t < 26; t++) expectedLeft += "t" + std::to_string(t) + ":abcd S" + std::to_string(t + 1) + " ";
+  expectedLeft += "t26:abc G t26:١٢ G t26:باتك";
+  EXPECT_EQ(render(left), expectedLeft);
+
+  // A token past 128 code points has no form of its own (orderLine refuses it): its segments are in logical order at
+  // level 0 and reversed at level 1, each formed alone (a bracket mirrored, a run past the limit as it is).
+  std::string run;
+  for (int i = 0; i < 130; i++) run += "ب";
+  const auto longRtl = lay({"(" + run + ")"}, 1, {}, {}, {{1, 261}});
+  EXPECT_TRUE(longRtl.fallback);
+  EXPECT_EQ(render(longRtl), "t0:( G t0:" + run + " G t0:)");
+  EXPECT_EQ(bytesOf(longRtl), (Bytes{{261, 262}, {1, 261}, {0, 1}}));
+  std::string indic;
+  for (int i = 0; i < 65; i++) indic += "कख";
+  const auto longLtr = lay({indic + "-गघ"}, 0, {}, {}, {{390, 391}});
+  EXPECT_TRUE(longLtr.fallback);
+  EXPECT_EQ(render(longLtr), "t0:" + indic + " G t0:- G t0:गघ");
+  EXPECT_EQ(bytesOf(longLtr), (Bytes{{0, 390}, {390, 391}, {391, 397}}));
+}
+
+TEST(BidiLine, TheFallbackGluesOneTokensPieces) {
+  // 26 words, token 5 كتاب، cut at its comma and token 6 glued to it: 129 slots. The token's two pieces are glued to
+  // each other, and it keeps its glue to token 6 and its word space from token 4.
+  auto words = repeated("אבגד", 26);
+  words[5] = "كتاب،";
+  Cuts cuts(26);
+  cuts[5] = {8};
+  const auto line = lay(words, 1, {}, {6}, cuts);
+  EXPECT_TRUE(line.fallback);
+  std::string expected;
+  for (int t = 25; t >= 0; t--) {
+    if (t < 25) expected += t + 1 == 6 ? " G " : " S" + std::to_string(t + 1) + " ";
+    expected += t == 5 ? "t5:، G t5:باتك" : "t" + std::to_string(t) + ":דגבא";
+  }
+  EXPECT_EQ(render(line), expected);
+  const auto comma = std::find_if(line.pieces.begin(), line.pieces.end(), [](const auto& p) { return p.token == 5; });
+  ASSERT_LT(comma + 1, line.pieces.end());
+  EXPECT_EQ(comma[1].token, 5);
+  EXPECT_EQ(comma[1].gapBefore, Gap::Glued);
+  EXPECT_EQ(comma[1].spaceToken, 5);
 }
 
 TEST(BidiLine, TheOpenControlsFollowTheText) {
