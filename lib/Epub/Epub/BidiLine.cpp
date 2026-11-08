@@ -643,7 +643,8 @@ size_t encodedBytes(const uint32_t cp) { return cp < 0x80 ? 1 : cp < 0x800 ? 2 :
 // - A token with cuts gives a piece for each run of one segment's characters (appendSegments). Each draws one drawn
 //   code point at least, and no two the same (TextShaping gives no more drawn units than the drawn code points), so
 //   it gives at most its drawn code points; its own form holds at most kMaxCodepoints of them, and past it each
-//   segment is one piece. A NUL a piece.
+//   segment is one piece. The logical branch opens a piece for each segment before it knows whether it draws (and
+//   closes an empty one), so a token never takes fewer than its segments, cuts + 1. A NUL a piece.
 void fallbackBounds(const Token* tokens, const size_t count, size_t& pieces, size_t& bytes) {
   pieces = 0;
   bytes = 0;
@@ -657,7 +658,7 @@ void fallbackBounds(const Token* tokens, const size_t count, size_t& pieces, siz
       if (isDrawn(cp)) drawn++;
     }
     const size_t cuts = tokens[t].cutCount;
-    const size_t own = cuts == 0 ? 1 : std::min(drawn, std::max(cuts + 1, kMaxCodepoints));
+    const size_t own = cuts == 0 ? 1 : std::max(std::min(drawn, kMaxCodepoints), cuts + 1);
     pieces += own;
     bytes += own;
   }
