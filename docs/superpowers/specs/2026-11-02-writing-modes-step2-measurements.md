@@ -1830,6 +1830,14 @@ to split. `makePages()` now clears it.
 | After Task 6 | 6,314,537 |
 | After the context fix | 6,314,543 |
 | After Task 10a | 6,314,575 |
+| The final tree (the review's last fix, master merged) | 6,314,579 |
 | Gate | 6,318,600 |
 
-After Task 10a the build is 4,025 B under the gate, at RAM 57,616.
+The final tree is 4,021 B under the gate.
+
+| Build | master (the merge base `b5209cf46`; master since changes docs and tools only) | This branch | Delta |
+|---|---|---|---|
+| `default` | 6,303,319 B, RAM 57,616 B | 6,314,579 B, RAM 57,616 B | +11,260 B, RAM 0 |
+| `gh_release` | 6,176,071 B, RAM 57,096 B | 6,187,097 B, RAM 57,112 B | +11,026 B, RAM +16 B |
+
+cppcheck (`pio check -e default`) on the final tree: no defects.
