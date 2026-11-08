@@ -66,9 +66,11 @@ class PieceSink {
 // The longest run one ot::shape call takes (its buffer has 2n + 16 slots); a longer one is shaped in pieces. 32 from a
 // Malayalam and a Tamil novel: a run past 32 code points is in 0.031% and 0.0005% of their tokens, and none passes 48.
 constexpr unsigned kMaxRunCodepoints = 32;
-// The cluster of a glued neighbour, kept apart (deviation 7), that a token is shaped with as context, at most: an Indic
-// syllable, or an Arabic letter with the marks and joiners after it.
+// The syllable of a glued Indic neighbour, kept apart (deviation 7), that a token is shaped with as context, at most.
 constexpr unsigned kContextCodepoints = 8;
+// The two clusters of a glued Arabic neighbour, kept apart, that a token is shaped with as context, at most: its two
+// letters nearest the token, each with the marks and joiners after it (two vocalised clusters).
+constexpr unsigned kArabicContextCodepoints = 16;
 
 struct Request;
 enum class Outcome : uint8_t;
@@ -128,11 +130,12 @@ enum class Outcome : uint8_t { Plain, Formed, Degraded };
 // A token's pieces into `sink`, each run under its own script, in one call. With a face, per run: Indic shared code
 // points alone are Text; an Indic script the face does not map (its probe letter) is Reordered when IndicReorder
 // changes it, else Text; Arabic the face does not map (beh) is Text, never reordered; any other run is Glyphs, shaped
-// in the book's language with the glued neighbours' nearest clusters as context (and an Arabic run with the joiners
-// just before it). A Glyphs piece is the run's records in visual order (an Arabic run's last code point first); a run
-// whose glyphs its context took (a lam-alef across a glue) is a Glyphs piece of no record. Text between runs is Text.
-// Without a face, IndicReorder's form of the text between the Arabic runs, a Reordered piece where it changes it: over
-// the whole token when it holds no Arabic run. Under RenderLock (the face maps the glyph store).
+// in the book's language with context from the glued neighbours: an Indic neighbour's nearest syllable, an Arabic
+// neighbour's two nearest clusters (and an Arabic run's joiners just before it). A Glyphs piece is the run's records in
+// visual order (an Arabic run's last code point first); a run whose glyphs its context took (a lam-alef across a glue)
+// is a Glyphs piece of no record. Text between runs is Text. Without a face, IndicReorder's form of the text between
+// the Arabic runs, a Reordered piece where it changes it: over the whole token when it holds no Arabic run. Under
+// RenderLock (the face maps the glyph store).
 Outcome shapeToken(std::string_view text, const Request& request, CallMemory& memory, PieceSink& sink);
 
 }  // namespace IndicShaper

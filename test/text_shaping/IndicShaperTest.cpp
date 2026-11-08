@@ -1196,35 +1196,123 @@ TEST(IndicShaper, AGluedNeighbourIsContext) {
       ASSERT_EQ(PieceKind::Glyphs, token->pieces[0].kind);
     }
     EXPECT_NE(alone.pieces[0].glyphs, teh.pieces[0].glyphs);
-    EXPECT_EQ(shapedWithContext(face, ot::Script::Arabic, kKaf, kTeh, kAlef), teh.pieces[0].glyphs);
+    EXPECT_EQ(shapedWithContext(face, ot::Script::Arabic, kKaf, kTeh, alefBeh), teh.pieces[0].glyphs);
     EXPECT_EQ(shapedWithContext(face, ot::Script::Arabic, "", kKitab, ""),
               rightToLeft({kaf.pieces[0].glyphs, teh.pieces[0].glyphs, rest.pieces[0].glyphs}));
   }
 }
 
-TEST(IndicShaper, TheArabicNeighboursContextIsItsNearestCluster) {
+TEST(IndicShaper, TwoClustersOfContextFormTheWholeWordsGlyphs) {
+  // A glued neighbour kept apart is context by its two nearest letters, each with its marks and joiners: a letter's
+  // glyph can follow its neighbour's joining form, which follows that neighbour's own neighbour. Two words, each cut
+  // into three tokens kept apart; side by side, right to left, the tokens are the whole word's glyphs.
+  const std::string seenLam = utf8Of({0x633, 0x644});
+  const std::string meem = utf8Of({0x645});
+  const std::string head = utf8Of({0x627, 0x644, 0x652, 0x639, 0x64E, 0x631, 0x64E});  // al-'ara
+  const std::string behKasra = utf8Of({0x628, 0x650});
+  const std::string yehShaddaFatha = utf8Of({0x64A, 0x651, 0x64E});
+  const std::string tail = yehShaddaFatha + utf8Of({0x629, 0x64F});  // -iyyatu
+  for (const char* font : {kFontNotoNaskhArabicShapingRegular, kFontNotoSansArabicShapingBold}) {
+    SCOPED_TRACE(font);
+    FixtureShapingFace face(arabicFont(font));
+    const auto glued = [&](const std::string& text, const std::string& before, const std::string& after) {
+      Request request = on(&face);
+      request.before = before;
+      request.after = after;
+      const Shaped shaped = shape(text, request);
+      EXPECT_EQ(Outcome::Formed, shaped.outcome) << codepointsOf(text);
+      EXPECT_EQ(1u, shaped.pieces.size()) << codepointsOf(text);
+      return shaped.pieces.empty() ? std::vector<StoredGlyph>{} : shaped.pieces[0].glyphs;
+    };
+    {
+      // seen lam <b>alef</b> meem: Noto's alef takes another glyph after a medial lam than after an initial one, and
+      // the lam is medial for the seen before it.
+      const std::vector<StoredGlyph> first = glued(seenLam, "", std::string(kAlef) + meem);
+      const std::vector<StoredGlyph> alef = glued(kAlef, seenLam, meem);
+      const std::vector<StoredGlyph> last = glued(meem, seenLam + kAlef, "");
+      EXPECT_EQ(shapedWithContext(face, ot::Script::Arabic, seenLam, kAlef, meem), alef);
+      EXPECT_NE(shapedWithContext(face, ot::Script::Arabic, kLam, kAlef, meem), alef);  // one cluster: an initial lam
+      EXPECT_EQ(shapedWithContext(face, ot::Script::Arabic, "", seenLam + kAlef + meem, ""),
+                rightToLeft({first, alef, last}));
+    }
+    {
+      // al-'ara <b>beh kasra</b> -iyyatu: Noto Sans Bold kerns the reh against an initial beh, which is initial for
+      // the yeh after it.
+      const std::vector<StoredGlyph> first = glued(head, "", behKasra + tail);
+      const std::vector<StoredGlyph> beh = glued(behKasra, head, tail);
+      const std::vector<StoredGlyph> last = glued(tail, head + behKasra, "");
+      EXPECT_EQ(shapedWithContext(face, ot::Script::Arabic, "", head, behKasra + yehShaddaFatha), first);
+      if (std::strcmp(font, kFontNotoSansArabicShapingBold) == 0) {
+        EXPECT_NE(shapedWithContext(face, ot::Script::Arabic, "", head, behKasra), first);  // one cluster: no kern
+      }
+      EXPECT_EQ(shapedWithContext(face, ot::Script::Arabic, "", head + behKasra + tail, ""),
+                rightToLeft({first, beh, last}));
+    }
+  }
+}
+
+TEST(IndicShaper, TheArabicNeighboursContextIsItsTwoNearestClusters) {
   FixtureShapingFace face(arabicFont(kFontNotoSansArabicShapingBold));
-  const std::string kafFatha = std::string(kKaf) + kFatha;
-  const std::string alefFatha = std::string(kAlef) + kFatha;
-  // Before: the neighbour's last letter with the marks after it, whatever comes before them.
-  for (const std::string& before : {kafFatha, std::string(kBeh) + kafFatha}) {
+  // Tokens whose glyphs follow the farther cluster: alef after lam, whose form the letter before the lam decides; and
+  // ain-fatha reh-fatha before beh-kasra, whose reh is kerned as the beh is initial (a yeh after it) or isolated.
+  const std::string seenLam = utf8Of({0x633, 0x644});
+  const std::string ainReh = utf8Of({0x639, 0x64E, 0x631, 0x64E});
+  const std::string behKasra = utf8Of({0x628, 0x650});
+  const std::string behKasraYeh = behKasra + utf8Of({0x64A, 0x651, 0x64E});
+  const auto alefAfter = [&](const std::string& context) {
+    return shapedWithContext(face, ot::Script::Arabic, context, kAlef, "");
+  };
+  const auto ainRehBefore = [&](const std::string& context) {
+    return shapedWithContext(face, ot::Script::Arabic, "", ainReh, context);
+  };
+  ASSERT_NE(alefAfter(seenLam), alefAfter(kLam));
+  ASSERT_NE(ainRehBefore(behKasraYeh), ainRehBefore(behKasra));
+  // Before: the neighbour's last two letters, each with the marks and joiners after it, whatever comes before them;
+  // the farther one only when it is Arabic.
+  const std::pair<std::string, std::string> befores[] = {{seenLam, seenLam},
+                                                         {std::string(kBeh) + seenLam, seenLam},
+                                                         {std::string("(") + kLam, kLam},
+                                                         {std::string("a") + kLam, kLam}};
+  for (const auto& [before, context] : befores) {
     Request request = on(&face);
     request.before = before;
-    const Shaped glued = shape(kTeh, request);
+    const Shaped glued = shape(kAlef, request);
     ASSERT_EQ(Outcome::Formed, glued.outcome) << codepointsOf(before);
     ASSERT_EQ(1u, glued.pieces.size());
-    EXPECT_EQ(shapedWithContext(face, ot::Script::Arabic, kafFatha, kTeh, ""), glued.pieces[0].glyphs)
-        << codepointsOf(before);
+    EXPECT_EQ(alefAfter(context), glued.pieces[0].glyphs) << codepointsOf(before);
   }
-  // After: the neighbour's first letter with its marks, whatever follows them.
-  for (const std::string& after : {alefFatha, alefFatha + kBeh}) {
+  // After: its first two, likewise.
+  const std::pair<std::string, std::string> afters[] = {
+      {behKasraYeh, behKasraYeh}, {behKasraYeh + utf8Of({0x629, 0x64F}), behKasraYeh}, {behKasra + ")", behKasra}};
+  for (const auto& [after, context] : afters) {
     Request request = on(&face);
     request.after = after;
-    const Shaped glued = shape(kTeh, request);
+    const Shaped glued = shape(ainReh, request);
     ASSERT_EQ(Outcome::Formed, glued.outcome) << codepointsOf(after);
     ASSERT_EQ(1u, glued.pieces.size());
-    EXPECT_EQ(shapedWithContext(face, ot::Script::Arabic, "", kTeh, alefFatha), glued.pieces[0].glyphs)
-        << codepointsOf(after);
+    EXPECT_EQ(ainRehBefore(context), glued.pieces[0].glyphs) << codepointsOf(after);
+  }
+  // Two clusters of eight code points fill kArabicContextCodepoints, the vocalised seen and lam here. One code point
+  // more cuts the farther cluster's letter off, and its marks alone are no context: the nearer cluster is.
+  const std::vector<uint32_t> marks = {0x64E, 0x64F, 0x650, 0x651, 0x652, 0x653, 0x654, 0x655};
+  std::vector<uint32_t> seenMarks = {0x633};
+  seenMarks.insert(seenMarks.end(), marks.begin(), marks.end() - 1);
+  std::vector<uint32_t> lamMarks = {0x644};
+  lamMarks.insert(lamMarks.end(), marks.begin(), marks.end() - 1);
+  ASSERT_EQ(IndicShaper::kArabicContextCodepoints, seenMarks.size() + lamMarks.size());
+  std::vector<uint32_t> seenMoreMarks = seenMarks;
+  seenMoreMarks.push_back(0x655);
+  const std::string lam = utf8Of(lamMarks);
+  ASSERT_NE(alefAfter(utf8Of(seenMarks) + lam), alefAfter(lam));
+  for (const auto& [farther, context] :
+       {std::pair<std::string, std::string>{utf8Of(seenMarks), utf8Of(seenMarks) + lam},
+        {utf8Of(seenMoreMarks), lam}}) {
+    Request request = on(&face);
+    request.before = farther + lam;
+    const Shaped glued = shape(kAlef, request);
+    ASSERT_EQ(Outcome::Formed, glued.outcome) << codepointsOf(farther + lam);
+    ASSERT_EQ(1u, glued.pieces.size());
+    EXPECT_EQ(alefAfter(context), glued.pieces[0].glyphs) << codepointsOf(farther + lam);
   }
   // A neighbour whose nearest code point is no Arabic letter, mark or joiner (a bracket, a Latin or an Indic letter)
   // is no context.

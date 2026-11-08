@@ -4,6 +4,7 @@
 #include <OtShaper.h>
 #include <ShapingFace.h>
 
+#include <algorithm>
 #include <cstring>
 #include <new>
 
@@ -113,14 +114,12 @@ bool appendGlyphs(const ot::Buffer& buffer, PieceSink& sink) {
   return true;
 }
 
-// How a code point of a glued neighbour's context counts for a run's script: its letter, a code point that rides with
-// its letters (an Indic shared code point; an Arabic mark or joiner), or neither.
-enum class Role : uint8_t { Letter, Rides, Other };
-
 // What a Glyphs run takes from its script: the plan's script and direction, the letter a face that draws the script
 // maps (upstream's coverage probe), where a long run may be split (between Indic syllables, between Arabic base
-// clusters: a letter with the marks and joiners after it), how many clusters a piece of it is shaped with on either
-// side, and what a glued neighbour's context may hold.
+// clusters: a letter with the marks and joiners after it), and the clusters of context, of a piece and of a glued
+// neighbour: the syllable for Indic, upstream's. Arabic takes two, as a letter's glyph can follow its neighbour's
+// joining form, which follows the neighbour's own neighbour (Noto's alef takes another glyph after a medial lam than
+// after an initial one). The context test is the script's: ofScript or ofArabic.
 struct ScriptPolicy {
   ot::Script script;
   bool backward;  // right to left, as the engine's plan for the script is (Plan::backward): the last code point's
@@ -128,24 +127,14 @@ struct ScriptPolicy {
   uint32_t probe;
   const indic::ScriptInfo* indic;  // the Indic script; null for Arabic
   bool (*clusterBreak)(uint32_t prev, uint32_t cp);
-  // Indic: the syllable, upstream's. Arabic: two, as a letter's glyph can follow its neighbour's joining form, which
-  // follows the neighbour's own neighbour (Noto's alef takes another glyph after a medial lam than after an initial
-  // one).
-  uint8_t pieceContextClusters;
-  Role (*roleOf)(const ScriptPolicy& policy, uint32_t cp);
+  uint8_t contextClusters;    // on either side of a piece of a long run, and of a token from its glued neighbours
+  uint8_t contextCodepoints;  // a glued neighbour's context, at most: kContextCodepoints, kArabicContextCodepoints
 };
 
-Role indicRole(const ScriptPolicy& policy, const uint32_t cp) {
-  const indic::ScriptInfo* const of = indic::scriptOf(cp);
-  if (of != nullptr) return of == policy.indic ? Role::Letter : Role::Other;
-  return indic::isShared(cp) ? Role::Rides : Role::Other;
-}
-
-// A letter is a run member that is not a mark (AL punctuation included).
-Role arabicRole(const ScriptPolicy&, const uint32_t cp) {
-  if (arabic::isRunMember(cp)) return arabic::isMark(cp) ? Role::Rides : Role::Letter;
-  return cp == arabic::ZWJ || cp == arabic::ZWNJ ? Role::Rides : Role::Other;
-}
+constexpr uint8_t kArabicContextClusters = 2;
+// The code points a call's context takes on either side, at most, whatever the script.
+constexpr unsigned kMaxContextCodepoints = kArabicContextCodepoints;
+static_assert(kMaxContextCodepoints >= kContextCodepoints && kArabicContextCodepoints <= UINT8_MAX);
 
 ScriptPolicy policyOf(const Run& run) {
   if (run.arabic) {
@@ -154,66 +143,67 @@ ScriptPolicy policyOf(const Run& run) {
             .probe = arabic::kProbe,
             .indic = nullptr,
             .clusterBreak = arabic::isClusterBreak,
-            .pieceContextClusters = 2,
-            .roleOf = arabicRole};
+            .contextClusters = kArabicContextClusters,
+            .contextCodepoints = kArabicContextCodepoints};
   }
   return {.script = static_cast<ot::Script>(indic::indexOf(*run.script)),
           .backward = false,
           .probe = run.script->probe,
           .indic = run.script,
           .clusterBreak = indic::syllableBreakAllowed,
-          .pieceContextClusters = 1,
-          .roleOf = indicRole};
+          .contextClusters = 1,
+          .contextCodepoints = kContextCodepoints};
 }
 
-// A glued neighbour's cluster next to the token, as context: `count` code points, the ones nearest the token when
-// the cluster is longer than the room (then `cut`: it starts or ends inside the cluster).
+// A glued neighbour's syllable next to the token, as context: `count` code points, the ones nearest the token when
+// the syllable is longer than kContextCodepoints (then `cut`: it starts or ends inside the syllable).
 struct Context {
   unsigned count = 0;
   bool cut = false;
 };
 
-// Whether the context is of the run's script: each code point its letter or one riding with its letters, and one of
-// them a letter.
-bool ofScript(const uint32_t* cps, const unsigned count, const ScriptPolicy& policy) {
+// Whether the context is of `script`: each code point the script's or shared, and one of them the script's.
+bool ofScript(const uint32_t* cps, const unsigned count, const indic::ScriptInfo& script) {
   bool letter = false;
   for (unsigned i = 0; i < count; i++) {
-    const Role role = policy.roleOf(policy, cps[i]);
-    if (role == Role::Other) return false;
-    letter = letter || role == Role::Letter;
+    const indic::ScriptInfo* const of = indic::scriptOf(cps[i]);
+    if (of == &script) {
+      letter = true;
+    } else if (of != nullptr || !indic::isShared(cps[i])) {
+      return false;
+    }
   }
   return letter;
 }
 
-// The last cluster of `text` (glued before the token) into `out` (room for `room` code points, at most
-// kContextCodepoints), when it is of the run's script; none otherwise.
-Context lastCluster(const std::string_view text, const ScriptPolicy& policy, const unsigned room, uint32_t* out) {
+// The last syllable of `text` (glued before the token) into `out` (room for kContextCodepoints), when it is of
+// `script`; none otherwise.
+Context lastSyllable(const std::string_view text, const indic::ScriptInfo& script, uint32_t* out) {
   Context context;
-  if (room == 0) return context;
   uint32_t previous = 0;
   for (size_t pos = 0; pos < text.size();) {
     const bool first = pos == 0;
     const uint32_t cp = TextShaping::decodeAt(text, pos);
-    if (!first && policy.clusterBreak(previous, cp)) context = Context{};
-    if (context.count == room) {
-      memmove(out, out + 1, (room - 1) * sizeof(uint32_t));
+    if (!first && indic::syllableBreakAllowed(previous, cp)) context = Context{};
+    if (context.count == kContextCodepoints) {
+      memmove(out, out + 1, (kContextCodepoints - 1) * sizeof(uint32_t));
       context.count--;
       context.cut = true;
     }
     out[context.count++] = cp;
     previous = cp;
   }
-  return ofScript(out, context.count, policy) ? context : Context{};
+  return ofScript(out, context.count, script) ? context : Context{};
 }
 
-// The first cluster of `text` (glued after the token) into `out` (room for kContextCodepoints), when it is of the
-// run's script; none otherwise.
-Context firstCluster(const std::string_view text, const ScriptPolicy& policy, uint32_t* out) {
+// The first syllable of `text` (glued after the token) into `out` (room for kContextCodepoints), when it is of
+// `script`; none otherwise.
+Context firstSyllable(const std::string_view text, const indic::ScriptInfo& script, uint32_t* out) {
   Context context;
   uint32_t previous = 0;
   for (size_t pos = 0; pos < text.size();) {
     const uint32_t cp = TextShaping::decodeAt(text, pos);
-    if (context.count > 0 && policy.clusterBreak(previous, cp)) break;
+    if (context.count > 0 && indic::syllableBreakAllowed(previous, cp)) break;
     if (context.count == kContextCodepoints) {
       context.cut = true;
       break;
@@ -221,7 +211,89 @@ Context firstCluster(const std::string_view text, const ScriptPolicy& policy, ui
     out[context.count++] = cp;
     previous = cp;
   }
-  return ofScript(out, context.count, policy) ? context : Context{};
+  return ofScript(out, context.count, script) ? context : Context{};
+}
+
+// Whether an Arabic context cluster is Arabic: each code point a run member or a joiner, and one of them a letter (a
+// member that is not a mark, AL punctuation included).
+bool ofArabic(const uint32_t* cps, const unsigned count) {
+  bool letter = false;
+  for (unsigned i = 0; i < count; i++) {
+    const uint32_t cp = cps[i];
+    if (arabic::isRunMember(cp)) {
+      letter = letter || !arabic::isMark(cp);
+    } else if (cp != arabic::ZWJ && cp != arabic::ZWNJ) {
+      return false;
+    }
+  }
+  return letter;
+}
+
+// The last kArabicContextClusters clusters of `text` (glued before the token) into `out`, its letters nearest the
+// token each with the marks and joiners after it: the nearest `room` code points of them (then `cut`). None when the
+// nearest cluster is not Arabic; the farther one only when it is.
+Context lastArabicClusters(const std::string_view text, const unsigned room, uint32_t* out) {
+  Context context;
+  if (room == 0) return context;
+  unsigned sizes[kArabicContextClusters] = {};  // the kept clusters' code points, the nearest last
+  unsigned total = 0;                           // their sum: context.count unless past the room
+  uint32_t previous = 0;
+  for (size_t pos = 0; pos < text.size();) {
+    const bool first = pos == 0;
+    const uint32_t cp = TextShaping::decodeAt(text, pos);
+    if (!first && arabic::isClusterBreak(previous, cp)) {
+      // A cluster begins: the farthest kept one leaves, with whatever of it `out` still holds.
+      total -= sizes[0];
+      memmove(sizes, sizes + 1, (kArabicContextClusters - 1) * sizeof(unsigned));
+      sizes[kArabicContextClusters - 1] = 0;
+      const unsigned held = std::min(total, room);
+      memmove(out, out + context.count - held, held * sizeof(uint32_t));
+      context = Context{held, total > room};
+    }
+    if (context.count == room) {
+      memmove(out, out + 1, (room - 1) * sizeof(uint32_t));
+      context.count--;
+      context.cut = true;
+    }
+    out[context.count++] = cp;
+    sizes[kArabicContextClusters - 1]++;
+    total++;
+    previous = cp;
+  }
+  const unsigned nearest = std::min(sizes[kArabicContextClusters - 1], context.count);
+  const unsigned farther = context.count - nearest;
+  if (!ofArabic(out + farther, nearest)) return Context{};
+  if (farther > 0 && !ofArabic(out, farther)) {
+    memmove(out, out + farther, nearest * sizeof(uint32_t));
+    return Context{nearest, sizes[kArabicContextClusters - 1] > room};
+  }
+  return context;
+}
+
+// The first kArabicContextClusters clusters of `text` (glued after the token) into `out`, at most `room` code points
+// (then `cut`). None when the nearest cluster is not Arabic; the farther one only when it is.
+Context firstArabicClusters(const std::string_view text, const unsigned room, uint32_t* out) {
+  Context context;
+  unsigned clusters = 0;  // begun
+  unsigned nearest = 0;   // the first cluster's code points
+  uint32_t previous = 0;
+  for (size_t pos = 0; pos < text.size();) {
+    const uint32_t cp = TextShaping::decodeAt(text, pos);
+    if (context.count == 0 || arabic::isClusterBreak(previous, cp)) {
+      if (clusters == kArabicContextClusters) break;
+      clusters++;
+    }
+    if (context.count == room) {
+      context.cut = true;
+      break;
+    }
+    out[context.count++] = cp;
+    if (clusters == 1) nearest++;
+    previous = cp;
+  }
+  if (!ofArabic(out, nearest)) return Context{};
+  if (context.count > nearest && !ofArabic(out + nearest, context.count - nearest)) return Context{nearest, false};
+  return context;
 }
 
 enum class Attempt : uint8_t { Shaped, TooLong, Failed };
@@ -281,7 +353,7 @@ bool shapeRun(ShapingFace& face, const Request& request, const ScriptPolicy& pol
     for (unsigned c = 0; c < clusters && i < count; c++) i = nextBreak(i);
     return i;
   };
-  const unsigned reach = policy.pieceContextClusters;
+  const unsigned reach = policy.contextClusters;
   unsigned glyphs = 0;  // the run's, over its pieces
   for (unsigned at = policy.backward ? runEnd : runBegin; policy.backward ? at > runBegin : at < runEnd;) {
     const unsigned limit = ot::maxRunLength(buffer);
@@ -340,9 +412,9 @@ struct RunMemory {
   ot::Buffer& buffer;
 };
 
-// Where the joiners just before byte `at` of `text` begin, at most kContextCodepoints of them.
-size_t joinersBefore(const std::string_view text, size_t at) {
-  for (unsigned n = 0; n < kContextCodepoints && at >= kJoinerBytes; n++) {
+// Where the joiners just before byte `at` of `text` begin, at most `most` of them.
+size_t joinersBefore(const std::string_view text, size_t at, const unsigned most) {
+  for (unsigned n = 0; n < most && at >= kJoinerBytes; n++) {
     size_t pos = at - kJoinerBytes;
     const uint32_t cp = TextShaping::decodeAt(text, pos);
     if (cp != arabic::ZWJ && cp != arabic::ZWNJ) break;
@@ -351,27 +423,33 @@ size_t joinersBefore(const std::string_view text, size_t at) {
   return at;
 }
 
-// `run` of the token as a Glyphs piece's records, shaped into `sink`: its code points, with context. Before it, an
-// Arabic run takes the joiners just before it in the token (a run starts at a letter, and a ZWJ there joins it); a run
-// from the token's start, those joiners included, takes the glued neighbour's last cluster before them. After it, a
-// run to the token's end takes the neighbour's first cluster.
+// `run` of the token as a Glyphs piece's records, shaped into `sink`: its code points, with context, at most
+// policy.contextCodepoints on either side. Before it, an Arabic run takes the joiners just before it in the token (a
+// run starts at a letter, and a ZWJ there joins it); a run from the token's start, those joiners included, takes the
+// glued neighbour's last syllable (Indic) or last two clusters (Arabic) before them. After it, a run to the token's
+// end takes the neighbour's first syllable or first two clusters.
 bool shapeGlyphs(const std::string_view text, const Run& run, const ScriptPolicy& policy, const Request& request,
                  const RunMemory& memory, PieceSink& sink) {
   uint32_t* const cps = memory.codepoints;
-  const size_t lead = run.arabic ? joinersBefore(text, run.begin) : run.begin;
-  const auto joiners = static_cast<unsigned>((run.begin - lead) / kJoinerBytes);
+  const unsigned room = policy.contextCodepoints;  // at most kMaxContextCodepoints: CallMemory's room holds both sides
+  const size_t lead = run.arabic ? joinersBefore(text, run.begin, room) : run.begin;
+  const auto joiners = static_cast<unsigned>((run.begin - lead) / kJoinerBytes);  // at most `room`
   Context before;
   if (lead == 0 && !request.before.empty()) {
-    before = lastCluster(request.before, policy, kContextCodepoints - joiners, cps);
+    before = run.arabic ? lastArabicClusters(request.before, room - joiners, cps)
+                        : lastSyllable(request.before, *run.script, cps);
   }
   for (size_t pos = lead; pos < run.begin;) cps[before.count++] = TextShaping::decodeAt(text, pos);
-  unsigned count = before.count;
+  unsigned count = before.count;  // at most `room`
   for (size_t pos = run.begin; pos < run.end;) {
-    if (count + kContextCodepoints >= memory.room) return false;
+    if (count + room >= memory.room) return false;  // `room` stays free for the context after the run
     cps[count++] = TextShaping::decodeAt(text, pos);
   }
   Context after;
-  if (run.end == text.size() && !request.after.empty()) after = firstCluster(request.after, policy, cps + count);
+  if (run.end == text.size() && !request.after.empty()) {
+    after = run.arabic ? firstArabicClusters(request.after, room, cps + count)
+                       : firstSyllable(request.after, *run.script, cps + count);
+  }
   return shapeRun(*request.face, request, policy, cps, count + after.count, before, after, memory.buffer, sink);
 }
 
@@ -489,10 +567,12 @@ CallMemory::CallMemory(BuildArena* const arena, const size_t tokenBytes, const C
   // A call without a face writes IndicReorder's form and nothing else, so it takes the form's room alone: a book in
   // such a font holds a heap block of the longest token's form (in 512 B steps), not the 6.5 KB a shaping call takes
   // on the C3.
+  // The code points: a run's (at most tokenBytes / kRunCodepointBytes) and the context on either side (an Arabic
+  // run's joiners before it count in its context).
   const bool shapes = kind == CallKind::Shape;
   const Sizes sizes{shapes, shapes ? ot::Buffer::bytesFor(kGrowthFactor * runCodepoints + kGrowthExtra) : 0,
                     shapes ? maxRuns(tokenBytes) : 0,
-                    shapes ? tokenBytes / kRunCodepointBytes + 2 * kContextCodepoints : 0, 3 * tokenBytes + 1};
+                    shapes ? tokenBytes / kRunCodepointBytes + 2 * kMaxContextCodepoints : 0, 3 * tokenBytes + 1};
   Carver measure;
   layOut(measure, sizes);
 
