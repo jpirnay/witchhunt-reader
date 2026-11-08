@@ -1758,6 +1758,7 @@ void ParsedText::releaseLayoutScratch() {
     std::vector<std::string_view>().swap(state.line.fallbackViews);
     std::vector<uint16_t>().swap(state.line.fallbackOrder);
     std::vector<BidiLine::Token>().swap(state.tokens);
+    std::vector<uint16_t>().swap(state.tokenCutCount);
     std::vector<std::string_view>().swap(state.pieceWords);
     std::vector<std::string_view>().swap(state.pieceForms);
     std::vector<EpdFontFamily::Style>().swap(state.pieceStyles);
@@ -2816,54 +2817,63 @@ BidiLine::Scratch* ParsedText::bidiScratchFor(const BidiLine::ArenaWorkspace& wo
 
 bool ParsedText::layOutBidiLine(const GfxRenderer& renderer, const int fontId, const size_t first, const size_t count) {
   BidiState& state = *bidiState_;
-  state.tokens.clear();
-  // The line's tokens, 16 B each on the device, kept across lines: a line longer than any before grows the vector,
-  // behind the heap check the pass's other growths take. Refused, the line is laid out without bidi, as when the pass
-  // has no workspace.
-  if (!heapAllows(growthBytes(state.tokens, count))) {
-    LOG_ERR("BIDI", "No room for a line's %u tokens: line laid out without bidi", static_cast<unsigned>(count));
-    return false;
-  }
-  state.tokens.reserve(count);
-  for (size_t t = 0; t < count; ++t) {
-    state.tokens.push_back({words[first + t], TokenBoundary::hasSpace(wordBoundaries[first + t])});
-  }
-  if (shapes_) cutShapedTokens(renderer, fontId, first, count);
   // The workspace is the pass's alone: its scope ends here, before the line is materialised (beforeLine_ may close the
-  // page's arena block, and the line's TextBlock takes its bytes above it). No shaping call is made under it.
-  const BidiLine::ArenaWorkspace workspace(lineArena_);
+  // page's arena block, and the line's TextBlock takes its bytes above it). No shaping call is made under it. The
+  // line's tokens, 16 B each on the device, come with it: the pass is the last to need them (the materialisation keeps
+  // their count and cut counts). Without a lent workspace they go to a heap vector kept across lines: a line longer
+  // than any before grows it, behind the heap check the pass's other growths take. Refused, the line is laid out
+  // without bidi, as when the pass has no scratch.
+  const BidiLine::ArenaWorkspace workspace(lineArena_, count);
+  BidiLine::Token* tokens = workspace.tokens();
+  if (tokens == nullptr) {
+    state.tokens.clear();
+    if (!heapAllows(growthBytes(state.tokens, count))) {
+      LOG_ERR("BIDI", "No room for a line's %u tokens: line laid out without bidi", static_cast<unsigned>(count));
+      return false;
+    }
+    state.tokens.resize(count);
+    tokens = state.tokens.data();
+  }
+  for (size_t t = 0; t < count; ++t) {
+    new (tokens + t) BidiLine::Token{words[first + t], TokenBoundary::hasSpace(wordBoundaries[first + t])};
+  }
+  state.lineTokens = count;
+  if (shapes_) cutShapedTokens(renderer, fontId, first, count, tokens);
   BidiLine::Scratch* const scratch = bidiScratchFor(workspace);
   if (scratch == nullptr) return false;
-  if (BidiLine::layoutLine(state.tokens.data(), count, state.openControls, level_, *scratch, state.line)) return true;
+  if (BidiLine::layoutLine(tokens, count, state.openControls, level_, *scratch, state.line)) return true;
   LOG_ERR("BIDI", "No workspace for the line pass: line laid out without bidi");
   return false;
 }
 
-void ParsedText::cutShapedTokens(const GfxRenderer& renderer, const int fontId, const size_t first,
-                                 const size_t count) {
+void ParsedText::cutShapedTokens(const GfxRenderer& renderer, const int fontId, const size_t first, const size_t count,
+                                 BidiLine::Token* const tokens) {
   BidiState& state = *bidiState_;
   // The line's cuts are counted first and their room taken whole, so no growth moves the array under a pointer handed
-  // out: 2 B a cut, kept across lines and freed at the slice's yield (releaseLayoutScratch).
+  // out: 2 B a cut, and 2 B a token for the counts, kept across lines and freed at the slice's yield
+  // (releaseLayoutScratch). No counts recorded (the heap refused them) reads as no cuts.
   size_t cuts = 0;
   for (size_t t = 0; t < count; ++t) {
     const auto pieces = shapingState_->piecesOf(*this, renderer, fontId, first + t);
     if (pieces) cuts += pieces->size() - 1;
   }
   state.tokenCuts.clear();
+  state.tokenCutCount.clear();
   if (cuts == 0) return;
-  if (!heapAllows(growthBytes(state.tokenCuts, cuts))) {
+  if (!heapAllows(growthBytes(state.tokenCuts, cuts) + growthBytes(state.tokenCutCount, count))) {
     LOG_ERR("SHP", "No room for a line's %u cut points: its shaped tokens drawn as code points",
             static_cast<unsigned>(cuts));
     latchShapingDegraded();
     return;
   }
   state.tokenCuts.reserve(cuts);
+  state.tokenCutCount.assign(count, 0);
   for (size_t t = 0; t < count; ++t) {
     const auto pieces = shapingState_->piecesOf(*this, renderer, fontId, first + t);
     if (!pieces || pieces->size() < 2) continue;
     const size_t at = state.tokenCuts.size();
     for (size_t p = 1; p < pieces->size(); ++p) state.tokenCuts.push_back((*pieces)[p].begin);
-    BidiLine::Token& token = state.tokens[t];
+    BidiLine::Token& token = tokens[t];
     token.cutCount = static_cast<uint16_t>(pieces->size() - 1);
     token.cuts = state.tokenCuts.data() + at;
     // The pieces cover the token in order, so their edges keep the contract. A list that does not is a store out of
@@ -2875,6 +2885,7 @@ void ParsedText::cutShapedTokens(const GfxRenderer& renderer, const int fontId, 
       token.cuts = nullptr;
       latchShapingDegraded();
     }
+    state.tokenCutCount[t] = token.cutCount;
   }
 }
 
@@ -2915,7 +2926,8 @@ bool ParsedText::formBidiPieces(const GfxRenderer& renderer, const int fontId, c
     const auto stored = shapingState_->piecesOf(*this, renderer, fontId, first + piece.token);
     if (!stored) return nullptr;
     // A token of several pieces the line was not cut for (no room for the cuts, or a store out of step: latched).
-    if (stored->size() > 1 && state.tokens[piece.token].cutCount + 1u != stored->size()) return nullptr;
+    const size_t cutCount = piece.token < state.tokenCutCount.size() ? state.tokenCutCount[piece.token] : 0;
+    if (stored->size() > 1 && cutCount + 1 != stored->size()) return nullptr;
     const ShapedStore::Piece* source = nullptr;
     for (const ShapedStore::Piece& sp : *stored) {
       if (sp.kind == IndicShaper::PieceKind::Text || sp.end <= piece.begin || sp.begin >= piece.end) continue;
@@ -2986,7 +2998,7 @@ bool ParsedText::formBidiPieces(const GfxRenderer& renderer, const int fontId, c
       const ShapedStore::Piece* run = shapingState_->edgeRun(*this, renderer, fontId, i - 1, true);
       if (run != nullptr && (t == 0 || drawnFrom(t - 1, run))) return true;
     }
-    return t + 1 < state.tokens.size() && wordBoundaries[i + 1].continues &&
+    return t + 1 < state.lineTokens && wordBoundaries[i + 1].continues &&
            drawnFrom(t + 1, shapingState_->edgeRun(*this, renderer, fontId, i + 1, false));
   };
   for (size_t v = 0; glyphs && v < count; ++v) {

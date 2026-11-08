@@ -174,7 +174,12 @@ class ParsedText {
     // are views into `words`, the forms into line.display: TextBlock copies both into its arena, so a line builds no
     // string. All keep their capacity across lines.
     BidiLine::Line line;
+    // The line's tokens live in the arena workspace for the pass (layOutBidiLine); this vector holds them only when
+    // the arena lends none. What the materialisation needs of them afterwards is kept apart: their count, and each
+    // one's cut count (tokenCutCount, 2 B a token, the line's tokens from the first; cutShapedTokens fills it).
     std::vector<BidiLine::Token> tokens;
+    size_t lineTokens = 0;
+    std::vector<uint16_t> tokenCutCount;
     std::vector<std::string_view> pieceWords;
     std::vector<std::string_view> pieceForms;
     std::vector<EpdFontFamily::Style> pieceStyles;
@@ -204,9 +209,10 @@ class ParsedText {
   // when it could not run: the line is then laid out without bidi.
   bool layOutBidiLine(const GfxRenderer& renderer, int fontId, size_t first, size_t count);
   // Gives each of the line's tokens with more than one shaped piece its cut points (BidiLine::Token::cuts): where each
-  // piece after the first begins, in bidiState_->tokenCuts. A token whose cuts the heap has no room for, or that break
-  // their contract, gets none (logged, latched): its pieces are then drawn as the line pass's code points.
-  void cutShapedTokens(const GfxRenderer& renderer, int fontId, size_t first, size_t count);
+  // piece after the first begins, in bidiState_->tokenCuts, and records each token's cut count (tokenCutCount) for
+  // the materialisation, which runs after the tokens are gone. A token whose cuts the heap has no room for, or that
+  // break their contract, gets none (logged, latched): its pieces are then drawn as the line pass's code points.
+  void cutShapedTokens(const GfxRenderer& renderer, int fontId, size_t first, size_t count, BidiLine::Token* tokens);
   // What each of the line's pieces is drawn as, in bidiState_'s pieceForms and pieceGlyphs, and its width, in
   // lineXPosScratch_: the line pass's display form and its measure, unless the piece draws a shaped token's store piece
   // that is not Text (a glyph run, or a Reordered form, at the store's width). An empty run (a letter its glued

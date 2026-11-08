@@ -800,6 +800,44 @@ TEST(BidiLine, WithoutAWorkspaceTheCallerLaysTheLineOutWithoutBidi) {
   BidiUtils::releaseWorkspace();
 }
 
+TEST(BidiLine, TheArenaLendsTheLineItsTokensWithTheScratch) {
+  BidiUtils::releaseWorkspace();
+  const std::vector<std::string> words = {"שלום", "(world)", "1998."};
+  BuildArena arena(16 * 1024);
+  ASSERT_TRUE(arena.valid());
+  const size_t before = arena.used();
+  {
+    const BidiLine::ArenaWorkspace lent(&arena, words.size());
+    ASSERT_NE(lent.scratch(), nullptr);
+    ASSERT_NE(lent.tokens(), nullptr);
+    EXPECT_GE(arena.used(),
+              before + BidiUtils::kWorkspaceBytes + sizeof(BidiLine::Scratch) + words.size() * sizeof(BidiLine::Token));
+    for (size_t t = 0; t < words.size(); t++) new (lent.tokens() + t) BidiLine::Token{words[t], true};
+    BidiLine::Line line;
+    ASSERT_TRUE(BidiLine::layoutLine(lent.tokens(), words.size(), {}, 1, *lent.scratch(), line));
+    EXPECT_EQ(render(line), "t2:.1998 S2 t1:(world) S1 t0:םולש");
+  }
+  EXPECT_EQ(arena.used(), before);
+
+  // None asked for: none lent.
+  {
+    const BidiLine::ArenaWorkspace lent(&arena, 0);
+    ASSERT_NE(lent.scratch(), nullptr);
+    EXPECT_EQ(lent.tokens(), nullptr);
+  }
+  EXPECT_EQ(arena.used(), before);
+
+  // All or nothing: an arena with room for the scratch but not for the tokens lends neither, and holds nothing.
+  BuildArena tight(BidiUtils::kWorkspaceBytes + sizeof(BidiLine::Scratch) + 64);
+  {
+    const BidiLine::ArenaWorkspace lent(&tight, 1000);
+    EXPECT_EQ(lent.scratch(), nullptr);
+    EXPECT_EQ(lent.tokens(), nullptr);
+    EXPECT_EQ(tight.used(), 0u);
+  }
+  BidiUtils::releaseWorkspace();
+}
+
 TEST(BidiLine, AnArenaLendsTheWorkspaceAndScratch) {
   BidiUtils::releaseWorkspace();
   const std::vector<std::string> words = {"שלום", "(world)", "1998."};

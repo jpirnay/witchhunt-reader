@@ -894,17 +894,19 @@ bool tokenForm(const std::string_view token, const OpenControls& open, const uin
   return true;
 }
 
-ArenaWorkspace::ArenaWorkspace(BuildArena* arena) {
+ArenaWorkspace::ArenaWorkspace(BuildArena* arena, const size_t tokenCount) {
   if (arena == nullptr || !arena->valid()) return;
   block_ = arena->reserveBlock();
   void* const workspace = arena->alloc(BidiUtils::kWorkspaceBytes, 4);
   void* const scratch = workspace ? arena->alloc(sizeof(Scratch), alignof(Scratch)) : nullptr;
-  if (scratch == nullptr) {
+  Token* const tokens = scratch != nullptr && tokenCount > 0 ? arena->allocArray<Token>(tokenCount) : nullptr;
+  if (scratch == nullptr || (tokenCount > 0 && tokens == nullptr)) {
     arena->release(block_);
     return;
   }
   arena_ = arena;
   scratch_ = new (scratch) Scratch;  // plain arrays: placed without zeroing, and nothing to destroy
+  tokens_ = tokens;                  // the caller places each token (trivially destructible)
   BidiUtils::bindWorkspace(workspace);
 }
 

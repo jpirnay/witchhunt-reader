@@ -1461,6 +1461,34 @@ TEST_F(ShapedLayout, ALineWhoseTokensTheHeapRefusesIsLaidOutWithoutBidi) {
   EXPECT_EQ(0u, text.tokensShaped());
 }
 
+TEST_F(ShapedLayout, ALentArenaHoldsTheLinesTokensForThePass) {
+  // With a lent arena the line's tokens come with the pass's workspace and go with it (ParsedText::layOutBidiLine):
+  // the arena's peak shows them, and the layout is the one the heap path gives. A Hebrew paragraph of two lines.
+  const std::vector<Word> words = {{"שלום"}, {"עולם"}, {"abc"}, {"שלום"}, {"עולם"}, {"def"}};
+  ParsedText onHeap(false, false, noIndentStyle());
+  add(onHeap, words);
+  const Lines heapLines = layOut(onHeap, renderer, 150);
+  ASSERT_GE(heapLines.size(), 1u);
+
+  BuildArena arena(32 * 1024);
+  ASSERT_TRUE(arena.valid());
+  ParsedText lent(false, false, noIndentStyle());
+  lent.setLineArena(&arena);
+  add(lent, words);
+  arena.markPeak();
+  const Lines arenaLines = layOut(lent, renderer, 150);
+  EXPECT_GE(arena.peakSinceMark(),
+            BidiUtils::kWorkspaceBytes + sizeof(BidiLine::Scratch) + 3 * sizeof(BidiLine::Token));
+  ASSERT_EQ(heapLines.size(), arenaLines.size());
+  for (size_t l = 0; l < heapLines.size(); l++) {
+    ASSERT_EQ(heapLines[l]->wordCount(), arenaLines[l]->wordCount());
+    EXPECT_EQ(heapLines[l]->hasLogicalOrder(), arenaLines[l]->hasLogicalOrder());
+    for (size_t w = 0; w < heapLines[l]->wordCount(); w++) {
+      EXPECT_EQ(std::string(heapLines[l]->wordText(w)), std::string(arenaLines[l]->wordText(w)));
+    }
+  }
+}
+
 TEST_F(ShapedLayout, JustificationStretchesTokensNotPieces) {
   // On a justified right-to-left line the gap between the tokens takes what the line lacks; the comma stays touching
   // its word.
