@@ -13,6 +13,10 @@ Arabic, and an Arabic book uses an installed one of them by itself.
 - **The shaping layer:** `IndicShaper` is generalized in place. A token's runs are scanned for both scripts, and each
   run is shaped under its own `ot::Script` with one face, within one call. Arabic context is one base cluster on
   each side.
+  - *As built:* the ledger's rulings widened it. A glued neighbour gives its whole clusters, up to
+    `kArabicContextCodepoints` (16) code points and its run edge (Task 8's ruling, after two clusters lost or doubled
+    letters of a span-split Allah), and a piece of a long run in the piecewise loop takes `kArabicContextClusters` (2)
+    clusters on either side (Task 4's ruling).
 - **The line pass:** `BidiLine` learns cut points inside a token, so a formed token becomes glued pieces in visual
   order, in the fallback past 128 slots too. `ParsedText` lifts PR 3's `!bidi_` gate. It shapes before the bidi
   workspace is taken, and `placeBidiLine` substitutes glyph pieces.
@@ -277,6 +281,8 @@ drop cap, bionic).
 - [ ] **Step 3: Implement.**
   - Generalize in place: one policy struct per script, so `shapeRun` takes the break predicate and the `ot::Script`.
   - The Arabic context is the neighbour's nearest base cluster, at most `kContextCodepoints` (8).
+    - *As built:* two clusters in the piecewise loop (`kArabicContextClusters`, Task 4's ruling), and up to 16 code
+      points of whole clusters from a glued neighbour (`kArabicContextCodepoints`, Task 8's ruling).
   - Name in the header that the shaper does Arabic runs too.
 - [ ] **Step 4: Run** `IndicShaper*`, `TextShaping*`, `ShapingRules*` and the Indic goldens. Expected: PASS, Indic
   unchanged.

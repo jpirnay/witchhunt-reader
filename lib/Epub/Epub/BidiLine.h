@@ -15,8 +15,8 @@
 // visual order. A piece is a run of one token's characters that is unbroken both on the line and in the text, so a
 // word whose characters land apart is split into glued pieces. Isolates are ordered on their own; transparent marks
 // ride on their base; past kMaxCodepoints slots the line takes upstream's result (#2541's computeVisualWordOrder with
-// per-word forms, a token with cuts a form per segment). Pure: no renderer and no fonts; a line that fits allocates
-// nothing beyond the Line's own buffers, whose capacity the caller keeps.
+// per-word forms, a token with cuts a form per run of a segment). Pure: no renderer and no fonts; a line that fits
+// allocates nothing beyond the Line's own buffers, whose capacity the caller keeps.
 namespace BidiLine {
 
 inline constexpr size_t kMaxCodepoints = BidiUtils::kMaxLineCodepoints;  // slots: marks ride on their base
@@ -101,8 +101,7 @@ struct Scratch {
   // unit holds the code point drawn for it (mirrored).
   TextShaping::Unit units[kMaxUnits];
   uint16_t slotUnit[kMaxCodepoints + 1];  // slot s holds units [slotUnit[s], slotUnit[s + 1]): a base and its marks
-  uint16_t slotToken[kMaxCodepoints];     // the slot's token; a separator's is the token it precedes. In the
-                                          // fallback, a cut token's segment at each visual position of its form
+  uint16_t slotToken[kMaxCodepoints];     // the slot's token; a separator's is the token it precedes
   uint8_t order[kMaxCodepoints];          // the slots in visual order; a span's order sits on its own slots
   uint8_t expanded[kMaxCodepoints];       // one span's order while its children are expanded; then each slot's rank
   uint32_t passCp[kMaxCodepoints];        // one span's outer sequence: its direct bases, U+FFFC per child span
@@ -126,14 +125,15 @@ static_assert(kMaxCodepoints <= 128, "slots and spans are indexed by uint8_t");
 //   own, and the order resolves it as any NSM or BN (a mark is drawn right after its base, a piece of its own);
 // - a segment that draws nothing gives no piece: its bytes join the token's piece before it in the text, or the
 //   token's first piece when they lead it. A piece that opens a segment begins at the segment's start;
-// - past the limit, the fallback gives a piece for each segment that draws, glued to one another, in the order of the
-//   token's own form (tokenForm's pass, each piece where that form first draws its segment); for a token past
-//   kMaxCodepoints itself, in logical order at its level 0 and reversed at its level 1, each segment formed alone.
+// - past the limit, the fallback gives the token's pieces glued to one another, in the order of its own form
+//   (tokenForm's pass): a piece for each run of one segment's characters there, so a segment another one interrupts
+//   gives a piece on each side; for a token past kMaxCodepoints itself, one piece for each segment that draws, in
+//   logical order at its level 0 and reversed at its level 1, each segment formed alone.
 // So a piece's bytes hold one segment's drawn characters, and at most the undrawn segments beside it. But a segment
-// can give several pieces on a line that fits: when its characters land apart (at two levels, or around an isolate),
-// or when the next segment's mark across the cut is drawn right after its base, inside the segment. The caller must
-// read Piece::segmentPieces and degrade a segment it draws as one form (glyphs, a reordered form) that gave more
-// than one piece. The fallback gives one piece per segment.
+// can give several pieces, on a line that fits and on the fallback's: when its characters land apart (at two levels,
+// or around an isolate), or when the next segment's mark across the cut is drawn right after its base, inside the
+// segment. The caller must read Piece::segmentPieces and degrade a segment it draws as one form (glyphs, a reordered
+// form) that gave more than one piece.
 // A token whose cuts break their contract (cutsAreValid false) is laid out as a token without cuts.
 bool layoutLine(const Token* tokens, size_t count, const OpenControls& open, uint8_t paragraphLevel, Scratch& scratch,
                 Line& out);

@@ -240,7 +240,8 @@ class ParsedText {
   // are the renderer's, for one build.
   struct ShapingState;
   std::unique_ptr<ShapingState> shapingState_;
-  // This pass forms its tokens: one holds U+0900-0DFF, or one that holds Arabic text has a face (decideShaping).
+  // This pass forms its tokens: one holds U+0900-0DFF, or one that holds Arabic text has a face that draws Arabic
+  // (decideShaping).
   bool shapes_ = false;
   bool* shapingLatch_ = nullptr;
   // The build's cache of shaped words (WordShapeCache.h), the parser's; null: every token is shaped. An unglued token
@@ -253,8 +254,9 @@ class ParsedText {
   void latchShapingDegraded() const {
     if (shapingLatch_ != nullptr) *shapingLatch_ = true;
   }
-  // Whether this pass shapes, decided after decideBidi: a token holds Indic text, or a token that holds Arabic text has
-  // a face (so an Arabic paragraph in a bitmap or built-in font is laid out as without shaping, with no ShapingState).
+  // Whether this pass shapes, decided after decideBidi: a token holds Indic text, or a token that holds Arabic text in
+  // a paragraph that needs bidi has a face that maps beh (IndicShaper::drawsArabic), so an Arabic paragraph in a bitmap
+  // or built-in font, or in a TrueType face without Arabic, is laid out as without shaping, with no ShapingState.
   // Makes ShapingState for it (refused: the pass is laid out unshaped, and latched), or empties the store of a pass
   // that does not shape. A kept token whose glued neighbour has just arrived is shaped again, with it as context.
   void decideShaping(const GfxRenderer& renderer, int fontId);

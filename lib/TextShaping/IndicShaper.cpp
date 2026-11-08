@@ -650,4 +650,10 @@ Outcome shapeToken(const std::string_view text, const Request& request, CallMemo
   return Outcome::Formed;
 }
 
+bool drawsArabic(ShapingFace& face) {
+  const ot::Face* const shaping = face.current();
+  uint32_t glyph = 0;
+  return shaping == nullptr || shaping->nominalGlyph(arabic::kProbe, &glyph);
+}
+
 }  // namespace IndicShaper

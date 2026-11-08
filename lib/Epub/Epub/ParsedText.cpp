@@ -924,9 +924,10 @@ void ParsedText::decideShaping(const GfxRenderer& renderer, const int fontId) {
   forgetFaceAnswers();
   // Indic text is formed in any font (reordered without a face). Arabic text only in a paragraph that needs bidi (every
   // Arabic run starts at an AL letter, which makes it need bidi: a Latin paragraph's Arabic-Indic digits or Arabic
-  // comma shape nowhere), where a token of it has a face, the first one found deciding (my call 5): in a bitmap or
-  // built-in font an Arabic paragraph makes no ShapingState and merges nothing, so its lines are byte for byte those of
-  // the line pass alone. Consecutive tokens in one font and style that has no face ask it once.
+  // comma shape nowhere), where a token of it has a face that draws Arabic (maps beh), the first one found deciding (my
+  // call 5): in a bitmap or built-in font, or a TrueType face without Arabic (whose every run would be Text), an Arabic
+  // paragraph makes no ShapingState and merges nothing, so its lines are byte for byte those of the line pass alone.
+  // Consecutive tokens in one font and style that has no such face ask it once.
   shapes_ = std::any_of(words.begin(), words.end(), [](const std::string& w) { return IndicShaper::holdsIndic(w); });
   int askedFont = 0;
   int askedStyle = -1;
@@ -936,7 +937,8 @@ void ParsedText::decideShaping(const GfxRenderer& renderer, const int fontId) {
     const int style = wordStyles[i] & EpdFontFamily::BOLD_ITALIC;
     if (font == askedFont && style == askedStyle) continue;
     uint32_t ppem = 0;
-    shapes_ = shapingFaceFor(renderer, fontId, i, &ppem) != nullptr;
+    ShapingFace* const face = shapingFaceFor(renderer, fontId, i, &ppem);
+    shapes_ = face != nullptr && IndicShaper::drawsArabic(*face);
     askedFont = font;
     askedStyle = style;
   }
@@ -3241,6 +3243,7 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
   size_t total = 0;
   size_t copyBytes = 0;
   size_t textBytes = 0;
+  size_t emptiedBytes = 0;  // the longest run a ligature emptied, which may be measured as its code points below
   for (size_t t = 0; t < count; ++t) {
     const std::optional<std::span<const ShapedStore::Piece>> pieces = piecesOf(first + t);
     anyPieces = anyPieces || pieces.has_value();
@@ -3248,6 +3251,9 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
     textBytes += words[first + t].size() + (pieces ? pieces->size() : 1);
     if (!pieces) continue;
     for (const ShapedStore::Piece& piece : *pieces) {
+      if (piece.kind == IndicShaper::PieceKind::Glyphs && piece.count == 0) {
+        emptiedBytes = std::max<size_t>(emptiedBytes, piece.end - piece.begin);
+      }
       if (piece.kind != IndicShaper::PieceKind::Reordered) continue;
       const std::string_view form = store.form(piece);
       if (form.find(SOFT_HYPHEN_UTF8) != std::string_view::npos) copyBytes += form.size();
@@ -3260,14 +3266,15 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
   // 2 * 8 B (two views) + 8 (a run) + 1 (a style) + 2 (a size) + 4 (a boundary) + 2 (an x) = 33 B and a token 2 B,
   // kept across lines (a line of 40 pieces is about 1.4 KB) and freed at the slice's yield (releaseLayoutScratch). One
   // check of the heap for all they ask, before any: refused, the line keeps its bytes, its tokens drawn as their code
-  // points.
+  // points. The measuring scratch is grown for an emptied run's bytes under it too.
   // The tokens' positions are [0, count) of the x scratch: the pieces' go after them, and then take their place.
   std::vector<int16_t>& xs = lineXPosScratch_;
   const size_t asked = growthBytes(state.pieceWords, total) + growthBytes(state.pieceForms, total) +
                        growthBytes(state.pieceGlyphs, total) + growthBytes(state.pieceStyles, total) +
                        growthBytes(state.pieceSizes, total) + growthBytes(state.pieceBoundaries, total) +
                        growthBytes(state.tokenPieces, count + 1) + growthBytes(xs, count + total) +
-                       growthBytes(state.formCopies, copyBytes) + (texts ? growthBytes(*texts, textBytes) : 0);
+                       growthBytes(state.formCopies, copyBytes) + (texts ? growthBytes(*texts, textBytes) : 0) +
+                       growthBytes(state.measureScratch, emptiedBytes);
   if (!heapAllows(asked)) {
     LOG_ERR("SHP", "No %u B for a line's pieces: laid out as its tokens' code points", static_cast<unsigned>(asked));
     latchShapingDegraded();
@@ -3292,6 +3299,7 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
     texts->clear();
     texts->reserve(textBytes);
   }
+  if (state.measureScratch.capacity() < emptiedBytes) state.measureScratch.reserve(emptiedBytes);
   // The text a piece is drawn from: its bytes, or, without the controls, a copy without them (and a Text piece's
   // without its joiners, as it was measured) when it holds any.
   const auto drawn = [&](const std::string_view bytes, const bool joiners) {
@@ -3339,12 +3347,19 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
       before += piece.width;
       // A run its context's ligature emptied (deviation 7's lam-alef) draws nothing: placed, TextBlock would draw a
       // word without a form as its text, the letter again. Its bytes stay the token's. Where that ligature is not
-      // drawn, the piece is placed, and drawn as its code points.
-      if (piece.kind == IndicShaper::PieceKind::Glyphs && piece.count == 0 && ligatureDrawn(t)) continue;
+      // drawn, the piece is placed, and drawn as its code points at their width (its own is 0), as on a bidi line.
+      const bool emptied = piece.kind == IndicShaper::PieceKind::Glyphs && piece.count == 0;
+      if (emptied && ligatureDrawn(t)) continue;
       std::string_view bytes = text.substr(piece.begin, piece.end - piece.begin);
       if (piece.kind == IndicShaper::PieceKind::Text) {
         bytes = drawn(bytes, true);
         if (bytes.empty() || onlySoftHyphens(bytes)) continue;
+      }
+      if (emptied) {
+        // Copied for its NUL, within the room reserved above; a run holds no soft hyphen.
+        state.measureScratch.assign(bytes);
+        before += measureWordWidth(renderer, wordFontId(i, fontId), state.measureScratch.c_str(), wordStyles[i],
+                                   wordScale(i), vertical_);
       }
       const std::string_view form =
           piece.kind == IndicShaper::PieceKind::Reordered ? store.form(piece) : std::string_view();

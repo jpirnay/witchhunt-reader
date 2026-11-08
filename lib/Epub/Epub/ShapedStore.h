@@ -34,8 +34,11 @@ class ShapedStore final : public IndicShaper::PieceSink {
     uint16_t at = 0;
   };
   static constexpr size_t kChunkBytes = 1024;
-  // Past them a piece is refused (logged once at ERR) and the token is laid out as code points. A 96-token pass
-  // holds about 3-6 KB, so the cap sits five times above it.
+  // Past them a piece is refused (logged once at ERR) and the token is laid out as code points. Records take about 2 B
+  // a byte of Indic text and about 3 B a byte of Arabic (readyShapedStore's estimates; an Arabic letter or mark is 2
+  // bytes and one record of 4 B, 6 with an offset). A 96-token pass holds about 3-6 KB of Indic; of Arabic about 3 KB
+  // in prose (10 B a token), up to about 6 KB fully vocalised (a mark on each letter, about 20 B a token). The cap
+  // sits five times above it.
   static constexpr size_t kMaxChunks = 32;
   // Opens token `token`'s entry for (text, key); shapeToken then writes through the sink; commit() keeps the pieces
   // (an entry with none for a Plain token), abandon() drops them. `token` may be one past the last: a scratch entry,
