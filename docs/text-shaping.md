@@ -25,7 +25,7 @@ Related pages:
 
 | Layer | Where | What it does |
 |---|---|---|
-| The parser | `ChapterHtmlSlimParser` (`characterData`, `consumeText`) | keeps a lone ZWJ or ZWNJ after an Indic letter; captures no drop cap from one |
+| The parser | `ChapterHtmlSlimParser` (`characterData`, `consumeText`) | keeps a lone ZWJ or ZWNJ after an Indic code point or an Arabic letter or mark (`keepsJoinerAfter`); captures no drop cap from an Indic code point or an Arabic run member |
 | The shaping layer | `TextShaping`, `HebrewShaper`, `IndicShaper`, `lib/Utf8/ArabicScripts.h` | which glued tokens merge; a token's runs (Indic and Arabic); a token turned into pieces over a face |
 | The engine | `lib/OtShaper` (`ot::Face`, `ot::Plan`, `ot::shape`); `lib/Utf8/IndicReorder` | HarfBuzz 14.5's Indic, USE and Arabic shapers with its GSUB and GPOS, as crosspoint-reader #3787 ported the first two; the vowel reordering for a font that cannot shape |
 | The face and its plans | `ShapingFace` (`lib/EpdFont`), `TtfFont::shapingFace`, `GfxRenderer::shapingFace` | one `ot::Face` per style over the tables where the glyph store maps them; the plans built on it |
@@ -37,11 +37,11 @@ Related pages:
 
 **Joiners** (deviation 8). The parser drops every Default_Ignorable code point, but a shaper needs ZWJ (U+200D) and
 ZWNJ (U+200C): Hindi steers half forms with them, and a Malayalam chillu ends in ZWJ.
-- `consumeText` keeps a lone joiner when the code point before it is in U+0900-0DFF (`keepsJoinerAfter`), a letter or
-  a mark, whatever follows. It is held (`heldJoiner_`) until the next code point says it is alone, then put into the
-  word ahead of that code point (`releaseHeldJoiner`). At a word's end (whitespace, a no-break space, a block's or a
-  cell's end) `settleHeldJoiner` puts it last in the word, or onto the last token when an inline end sent that word
-  out already.
+- `consumeText` keeps a lone joiner when the code point before it is in U+0900-0DFF, or is an Arabic letter or mark
+  (`arabic::takesJoiner`: a run member that is no AL punctuation), whatever follows (`keepsJoinerAfter`). It is held
+  (`heldJoiner_`) until the next code point says it is alone, then put into the word ahead of that code point
+  (`releaseHeldJoiner`). At a word's end (whitespace, a no-break space, a block's or a cell's end) `settleHeldJoiner`
+  puts it last in the word, or onto the last token when an inline end sent that word out already.
 - A second joiner drops both and the rest of the run (`droppingJoinerRun_`), and a joiner after any other code point
   is dropped as before. Runs of hundreds of joiners between words, a watermark, are still dropped whole.
 - The look-behind (`joinerLookBehind_`) crosses SAX chunks and inline element edges. `characterData` holds a 3-byte
@@ -50,8 +50,9 @@ ZWNJ (U+200C): Hindi steers half forms with them, and a Malayalam chillu ends in
 - A kept joiner counts in no visible offset inside a word: the offsets KOSync and the paragraph LUT read stay what
   they are without it.
 
-**Drop caps.** `consumeText` abandons a drop-cap capture at its first Indic code point and gives the text back to the
-word flow, to be shaped whole: a drop cap draws code points one by one, which would split a cluster.
+**Drop caps.** `consumeText` abandons a drop-cap capture at its first Indic code point or Arabic run member and gives
+the text back to the word flow, to be shaped whole: a drop cap draws code points one by one, which would split a
+cluster or draw an Arabic letter isolated.
 
 ## A paragraph, step by step
 
@@ -140,12 +141,20 @@ word flow, to be shaped whole: a drop cap draws code points one by one, which wo
     run in a face that does not map beh (U+0628, `arabic::kProbe`) is Text, never reordered; any other run is Glyphs.
     Text between runs is Text;
   - `Plain` when nothing needs a form, `Formed` when the pieces are written, `Degraded` when a run could not be shaped.
-- **A Glyphs run** (`shapeGlyphs`, `shapeRun`): its code points with the glued neighbours' syllables as context
-  (`lastSyllable`, `firstSyllable`, at most `kContextCodepoints` each), shaped whole. A run past the buffer's storage
-  is shaped by upstream's piecewise loop: as many syllables as the buffer holds, each piece with the syllable on
-  either side as context, then one code point on either side, before, after, then none. The plan and the face are
-  asked again before each `ot::shape`, because a plan is valid only until the next `plan()` on its face and a face's
-  mapping can move.
+- **A Glyphs run** (`shapeGlyphs`, `shapeRun`): its code points with context from the glued neighbours, shaped whole.
+  - An Indic run takes each neighbour's syllable next to it (`lastSyllable`, `firstSyllable`): at most
+    `kContextCodepoints` (8) code points each, the nearest ones of a longer syllable, marked partial.
+  - An Arabic run takes the joiners just before it in its token, and each neighbour's whole clusters next to it (a
+    letter with the marks and joiners after it: `lastArabicClusters`, `firstArabicClusters`), as many as fit in
+    `kArabicContextCodepoints` (16) with those joiners, up to the neighbour's run edge. A cluster that does not fit is
+    left out, with all those farther.
+  - A run past the buffer's storage is shaped by upstream's piecewise loop, as many clusters as the buffer holds
+    (Indic syllables, Arabic base clusters). Each piece has context on either side: an Indic piece the syllable; an
+    Arabic piece `kArabicContextClusters` (2) clusters, then one when that does not fit. Then one code point on
+    either side, before, after, then none. Across the run's edge the context is the glued neighbour's clusters the
+    run was given.
+  - The plan and the face are asked again before each `ot::shape`, because a plan is valid only until the next
+    `plan()` on its face and a face's mapping can move.
 - **The records** (`appendGlyphs`, upstream's rounding): the advance from 26.6 to 12.4 pixels, `(xAdvance + 2) >> 2`;
   the offsets to whole pixels, rounded half away from zero, y down; in visual order. A record outside its fields is
   refused, never clamped.
@@ -448,8 +457,12 @@ a line's tokens by the bidi levels. PR 4b teaches it to carry shaped pieces.
   No letter is lost; the soft hyphen is a Text piece and is not drawn. Arabic text is not hyphenated, so only a book
   that carries its own soft hyphens shows it.
 - **A bidi paragraph whose only Arabic code points are digits or punctuation** (a Hebrew paragraph with Arabic-Indic
-  digits, U+0660-0669, in a TrueType font) turns shaping on: each such token takes a shaping call that keeps it plain. The output is the
-  same; the cost is the call.
+  digits, U+0660-0669), in a TrueType face that maps Arabic (beh), turns shaping on: each such token takes a shaping
+  call (a call block and a run scan) that keeps it plain. In a face without Arabic the paragraph does not shape. The
+  output is near-identical, not the same: a glued group holding such a token is a shaped group, so `mergeGluedGroups`
+  merges its same-style glued tokens (a span split of one style) into one token. That changes the line's pieces (one
+  token's where there were two tokens') and the kerning at the former glue (measured inside one text, not across two
+  glued pieces).
 - **A consumed letter is missing from the dictionary lookup text across a style glue** (a letter its glued neighbour's
   ligature took), on the device only.
 - **A no-face Reordered Indic segment split by levels draws unreordered** (the guard, not latched).
