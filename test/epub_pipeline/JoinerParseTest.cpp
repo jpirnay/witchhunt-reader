@@ -22,6 +22,11 @@ namespace {
 const std::string kZwj = "\xE2\x80\x8D";
 const std::string kZwnj = "\xE2\x80\x8C";
 
+// The parser's tokens, as it cut them, are a ruby base's: layout never merges a ruby group's tokens, where it merges
+// any other glued Indic tokens deviation 7 joins, in a paragraph that needs bidi too since PR 4b. Its ruby text is no
+// word of the page.
+std::string inRuby(const std::string& base) { return "<p><ruby>" + base + "<rt>r</rt></ruby></p>"; }
+
 struct Joiners : testing::Test {
   fs::path work;
   int bookCount = 0;
@@ -104,10 +109,9 @@ TEST_F(Joiners, AJoinerStaysWithTheLetterAfterItAtTheBufferLimit) {
   // 2 + 65 * 3 = 197 bytes in the word buffer (limit 200) when the joiner comes; the joiner and ष need 6 more.
   std::string word = "ab";
   for (int i = 0; i < 65; ++i) word += "क";
-  // The parser's cut shows in a paragraph that needs bidi, which merges no Indic tokens (it shapes nothing: the line
-  // pass's pieces are not cut at runs); one that shapes merges the two back into the word they were cut from
-  // (deviation 7).
-  const Words words = wordsOf("<p dir=\"rtl\">" + word + kZwj + "ष</p>");
+  // The parser's cut shows in a ruby base (inRuby); elsewhere layout merges the two back into the word they were cut
+  // from (deviation 7).
+  const Words words = wordsOf(inRuby(word + kZwj + "ष"));
   ASSERT_GE(words.size(), 2u);
   EXPECT_EQ(words.back(), kZwj + "ष");
   std::string all;
@@ -151,13 +155,12 @@ TEST_F(Joiners, AJoinerSplitFromItsLetterByAChunkBoundaryIsKept) {
 
 TEST_F(Joiners, AJoinerAtAnInlineElementsEdgeIsKept) {
   // The joiner waits across the edge and opens the next token, ahead of the letter it precedes. The parser's tokens
-  // show in a paragraph that needs bidi, which merges no Indic tokens (it shapes nothing: the line pass's pieces are
-  // not cut at runs).
+  // show in a ruby base (inRuby).
   const Words split = {"क्", kZwj + "ष"};
-  EXPECT_EQ(wordsOf("<p dir=\"rtl\">क्<b>" + kZwj + "ष</b></p>"), split);
-  EXPECT_EQ(wordsOf("<p dir=\"rtl\">क्" + kZwj + "<b>ष</b></p>"), split);
+  EXPECT_EQ(wordsOf(inRuby("क्<b>" + kZwj + "ष</b>")), split);
+  EXPECT_EQ(wordsOf(inRuby("क्" + kZwj + "<b>ष</b>")), split);
   // A second joiner across the edge still drops both.
-  EXPECT_EQ(wordsOf("<p dir=\"rtl\">क्" + kZwj + "<b>" + kZwj + "ष</b></p>"), (Words{"क्", "ष"}));
+  EXPECT_EQ(wordsOf(inRuby("क्" + kZwj + "<b>" + kZwj + "ष</b>")), (Words{"क्", "ष"}));
   // A paragraph that shapes merges the two (deviation 7: the glue falls inside a syllable), the joiner in its place.
   EXPECT_EQ(wordsOf("<p>क्<b>" + kZwj + "ष</b></p>"), Words{"क्" + kZwj + "ष"});
   EXPECT_EQ(wordsOf("<p>क्" + kZwj + "<b>" + kZwj + "ष</b></p>"), Words{"क्ष"});

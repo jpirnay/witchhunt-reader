@@ -391,29 +391,26 @@ TEST_F(SyntheticLutFixture, InsertedControlsCountNowhere) {
 }
 
 TEST_F(SyntheticLutFixture, ATokenAfterAKeptJoinerKeepsItsSourceOffset) {
-  // The word is split at an inline edge, 66 glued letters (the width of a line) in the first token and the joiner,
-  // ष and two more letters in the second, which the line breaker puts at a line's start. A page opens on that line in
-  // some paragraphs, and its offset is ष's position in the source, as VisibleText counts it: the joiner's 3 bytes are
-  // counted between the tokens, as the mappers count them. A paragraph is 60 one-byte words, 65 letters and a virama
-  // (198 bytes), the joiner, ष and two letters (12 bytes), and 100 one-byte words. It runs right to left: a paragraph
-  // that needs bidi merges no Indic tokens (it shapes nothing: the line pass's pieces are not cut at runs), so its
-  // tokens stay as the parser cut them, where one that shapes merges the two (deviation 7: the glue falls inside a
-  // syllable).
+  // The word is split at an inline edge, 66 glued letters (the width of a line) in the first token and the joiner and
+  // three more letters in the second, which the line breaker puts at a line's start. A page opens on that line in some
+  // paragraphs, and its offset is the second token's letter's position in the source, as VisibleText counts it: the
+  // joiner's 3 bytes are counted between the tokens, as the mappers count them. A paragraph is 60 one-byte words, 66
+  // beh (132 bytes), a ZWNJ and three beh (9 bytes), and 100 one-byte words. The letters are Arabic, in a font that
+  // cannot shape them: such a paragraph merges nothing, so its tokens stay as the parser cut them. Glued Indic tokens
+  // are merged in every paragraph since PR 4b (deviation 7, a paragraph that needs bidi included), so they no longer
+  // show this; nor would Arabic ones in a font that shapes.
   constexpr uint32_t kBefore = 60;
-  constexpr uint32_t kSecondToken = kBefore + 198 + 3;
-  constexpr uint32_t kParagraphBytes = kBefore + 198 + 12 + 100;
+  constexpr uint32_t kSecondToken = kBefore + 132 + 3;
+  constexpr uint32_t kParagraphBytes = kBefore + 132 + 9 + 100;
   std::string before;
   for (uint32_t i = 0; i < kBefore; ++i) before += "w ";
   std::string after;
   for (int i = 0; i < 100; ++i) after += "w ";
   std::string letters;
-  for (int i = 0; i < 65; ++i) letters += "क";
+  for (int i = 0; i < 66; ++i) letters += "ب";
   std::string joined;
   for (int i = 0; i < 40; ++i) {
-    joined += "<p dir=\"rtl\">" + before + letters +
-              "्<b>\xE2\x80\x8D"
-              "षकक</b> " +
-              after + "</p>\n";
+    joined += "<p dir=\"rtl\">" + before + letters + "<b>\xE2\x80\x8C" + "ببب</b> " + after + "</p>\n";
   }
   const auto section = build(book(joined));
   ASSERT_GT(section->pageCount, 1);

@@ -36,7 +36,10 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 114;  // v114: an <hr> the book's CSS leaves nothing to draw of is not drawn
+constexpr uint8_t SECTION_FILE_VERSION = 115;  // v115 (PR 4b): Arabic is shaped, and Indic words in bidi
+                                               // paragraphs: glyph forms on bidi lines, run-cut pieces in the
+                                               // line pass
+                                               // v114: an <hr> the book's CSS leaves nothing to draw of is not drawn
                                                // v113: a book's centre and end-side text-align beat the setting
                                                // v112: Indic lines are shaped: a word's glyph form (the bidi
                                                // region's bit 2) and run-cut pieces; status bit 6 marks a run laid

@@ -3,6 +3,7 @@
 // seam; the expected records are the oracle's, ot::shape at the same size (ottest::shapeAsStored). The forms the tokens
 // take on their lines, piece by piece (steps 7-9), are the ShapedLine suite's.
 #include <Arduino.h>
+#include <BidiUtils.h>
 #include <BuildArena.h>
 #include <EpdFontData.h>
 #include <GlyphRun.h>
@@ -24,6 +25,7 @@
 #include "GfxRenderer.h"
 #include "IndicReorder.h"
 #include "IndicScripts.h"
+#include "IndicShaper.h"
 #include "OtShaperTestHelpers.h"
 #include "TextShaping.h"
 
@@ -185,7 +187,31 @@ class ShapedLayout : public testing::Test {
     return px;
   }
 
+  // The seam's face from now on: the TrueType fixture `file`, for the rest of the test.
+  FixtureShapingFace& useFont(const char* file) {
+    other = std::make_unique<FixtureShapingFace>(readFont(TTF_FIXTURE_DIR, file));
+    Seam::face = other.get();
+    return *other;
+  }
+  // The oracle on another face and script.
+  static std::vector<StoredGlyph> oracleOn(FixtureShapingFace& shaping, const ot::Script script,
+                                           const std::string& text) {
+    const ot::Plan* plan = shaping.plan(script, nullptr);
+    const ot::Face* current = shaping.current();
+    if (plan == nullptr || current == nullptr) {
+      ADD_FAILURE() << "the face does not shape";
+      return {};
+    }
+    return ottest::shapeAsStored(*current, *plan, text.c_str(), kPpem);
+  }
+  static int advancePx(const std::vector<StoredGlyph>& run) {
+    int px = 0;
+    for (const StoredGlyph& g : run) px += fp4::toPixel(g.advance12_4);
+    return px;
+  }
+
   std::unique_ptr<FixtureShapingFace> face;
+  std::unique_ptr<FixtureShapingFace> other;
   GfxRenderer renderer;
   bool latch = false;
 };
@@ -695,23 +721,24 @@ TEST_F(ShapedLayout, TheGlyphsAreWarmedOncePerShaping) {
   EXPECT_EQ(4, renderer.prefetchedRuns);  // the second pass reused them, warm
 }
 
-TEST_F(ShapedLayout, ABidiParagraphShapesNothingYet) {
-  // A paragraph that needs bidi shapes nothing: the line pass's pieces are not cut at runs, so a shaped run could
-  // straddle two of them. Its Indic words are laid out as code points.
+TEST_F(ShapedLayout, ABidiParagraphShapesItsIndicWords) {
+  // A paragraph that needs bidi shapes its Indic words (PR 4b): the line pass cuts each token at its pieces' edges, so
+  // the Hindi word beside the Hebrew one is a glyph word as it is in a paragraph without bidi.
   ParsedText text(false, false, noIndentStyle());
   text.setShapingLatch(&latch);
   add(text, {{"שלום"}, {kHindi}});
   const Lines lines = layOut(text, renderer, 400);
   ASSERT_EQ(1u, lines.size());
-  EXPECT_FALSE(text.shapingStateHeld());
-  EXPECT_EQ(0u, text.tokensShaped());
+  EXPECT_TRUE(text.shapingStateHeld());
+  EXPECT_EQ(1u, text.tokensShaped());
   EXPECT_FALSE(latch);
   bool found = false;
   for (uint16_t i = 0; i < lines[0]->wordCount(); ++i) {
     if (lines[0]->wordText(i) != kHindi) continue;
     found = true;
-    EXPECT_FALSE(lines[0]->hasGlyphForm(i));
-    EXPECT_EQ(kHindi, lines[0]->wordDrawText(i));
+    ASSERT_TRUE(lines[0]->hasGlyphForm(i));
+    EXPECT_EQ(shapedPx(kHindi), glyphRunAdvance(lines[0]->glyphForm(i), false));
+    EXPECT_FALSE(lines[0]->hasDisplayForm(i));
   }
   EXPECT_TRUE(found);
 }
@@ -1306,5 +1333,379 @@ TEST_F(ShapedLine, AFormCopyTheHeapHasNoRoomForKeepsTheLinesBytes) {
   ASSERT_EQ(1u, lines[0]->wordCount());
   EXPECT_FALSE(lines[0]->hasDisplayForm(0));
   EXPECT_EQ(six + kKi, lines[0]->wordDrawText(0));
+  EXPECT_TRUE(latch);
+}
+
+// ---- Bidi paragraphs (writing modes step 2, PR 4b): Arabic words, and Indic words beside right-to-left text, shaped
+// on the lines the bidi pass lays out. Arabic is shaped over the Naskh fixture, through the same seam ----
+
+namespace {
+
+const std::string kBeh = "\xD8\xA8";                            // U+0628 beh
+const std::string kTeh = "\xD8\xAA";                            // U+062A teh
+const std::string kAlef = "\xD8\xA7";                           // U+0627 alef
+const std::string kLam = "\xD9\x84";                            // U+0644 lam
+const std::string kKaf = "\xD9\x83";                            // U+0643 kaf
+const std::string kFatha = "\xD9\x8E";                          // U+064E fatha, a mark
+const std::string kKitab = "\xD9\x83\xD8\xAA\xD8\xA7\xD8\xA8";  // kaf teh alef beh: kitab, a book, one run
+const std::string kArabicComma = "\xD8\x8C";                    // U+060C: no run member
+const std::string kRlm = "\xE2\x80\x8F";                        // U+200F, a bidi control
+const std::string kLeftGuillemet = "\xC2\xAB";                  // U+00AB, mirrored
+const std::string kRightGuillemet = "\xC2\xBB";                 // U+00BB, mirrored
+constexpr const char* kNaskh = "NotoNaskhArabic-Shaping-Regular.ttf";
+constexpr const char* kRtlTest = "ArabicRtlTest-Regular.ttf";  // synthetic: its rlig makes lam-alef one ligature
+
+// The index of the line's word whose text is `text`; -1: none.
+int wordWithText(const TextBlock& line, const std::string& text) {
+  for (uint16_t i = 0; i < line.wordCount(); ++i) {
+    if (text == line.wordText(i)) return i;
+  }
+  return -1;
+}
+
+}  // namespace
+
+TEST_F(ShapedLayout, AnArabicWordOnAnRtlLineIsOneGlyphWord) {
+  // Kitab is one run: one Glyphs piece, on a line that runs right to left. It is drawn as its records, which are in
+  // visual order already (the engine gives an Arabic run last letter first), its logical text kept, through the section
+  // file too.
+  FixtureShapingFace& naskh = useFont(kNaskh);
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{kKitab}});
+  const Lines lines = layOut(text, renderer, 400);
+  ASSERT_EQ(1u, lines.size());
+  const std::vector<StoredGlyph> expected = oracleOn(naskh, ot::Script::Arabic, kKitab);
+  ASSERT_GT(expected.size(), 1u);
+  const std::unique_ptr<TextBlock> restored = readBack(bytesOf(*lines[0]));
+  for (const TextBlock* line : {lines[0].get(), restored.get()}) {
+    ASSERT_NE(nullptr, line);
+    ASSERT_EQ(1u, line->wordCount());
+    ASSERT_TRUE(line->hasGlyphForm(0));
+    EXPECT_EQ(expected, recordsOf(line->glyphForm(0)));
+    EXPECT_EQ(kKitab, line->wordText(0));
+    EXPECT_FALSE(line->hasDisplayForm(0));
+    EXPECT_EQ(400, line->wordXpos(0) + advancePx(expected));  // the line starts at the right
+  }
+  EXPECT_EQ(1u, text.tokensShaped());
+  EXPECT_FALSE(latch);
+}
+
+TEST_F(ShapedLayout, AWordWithItsCommaIsTwoTouchingWords) {
+  // The Arabic comma is outside the run: the token is cut at the run's edge into two glued pieces. In visual order the
+  // comma comes first, left of the word, and the two touch.
+  FixtureShapingFace& naskh = useFont(kNaskh);
+  ParsedText text(false, false, noIndentStyle());
+  add(text, {{kKitab + kArabicComma}});
+  const Lines lines = layOut(text, renderer, 400);
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(2u, line.wordCount());
+  EXPECT_EQ(kArabicComma, line.wordText(0));
+  EXPECT_FALSE(line.hasGlyphForm(0));
+  EXPECT_EQ(kKitab, line.wordText(1));
+  ASSERT_TRUE(line.hasGlyphForm(1));
+  EXPECT_EQ(oracleOn(naskh, ot::Script::Arabic, kKitab), recordsOf(line.glyphForm(1)));
+  EXPECT_TRUE(line.wordContinues(1));  // glued to its left neighbour
+  EXPECT_EQ(line.wordXpos(0) + kGlyph, line.wordXpos(1));
+  EXPECT_EQ(400, line.wordXpos(1) + advanceOf(line, 1));
+  EXPECT_EQ(1, line.logicalPosition(0));
+  EXPECT_EQ(0, line.logicalPosition(1));
+}
+
+TEST_F(ShapedLayout, GluedPiecesTakeNoKerning) {
+  // Step 8 on a bidi line: the gap between two glued pieces kerns the code points that face each other on the line,
+  // unless either piece is a glyph run (the shaper kerned inside it). Every pair kerns 3 px here. Right to left: the
+  // bold guillemet glued after the comma is drawn first (mirrored), then the comma, then its word; a space, then the
+  // other word with its bracket (mirrored) right of it.
+  useFont(kNaskh);
+  renderer.kerningPx = 3;
+  ParsedText text(false, false, noIndentStyle());
+  add(text, {{"(" + kKitab}, {kKitab + kArabicComma}, {kRightGuillemet, EpdFontFamily::BOLD, true}});
+  const Lines lines = layOut(text, renderer, 400);
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(5u, line.wordCount());
+  EXPECT_EQ(kRightGuillemet, line.wordText(0));
+  EXPECT_EQ(kLeftGuillemet, line.wordDrawText(0));
+  EXPECT_EQ(kArabicComma, line.wordText(1));
+  ASSERT_TRUE(line.hasGlyphForm(2));
+  ASSERT_TRUE(line.hasGlyphForm(3));
+  EXPECT_EQ("(", std::string(line.wordText(4)));
+  EXPECT_FALSE(line.hasGlyphForm(4));
+  EXPECT_EQ(line.wordXpos(0) + kGlyph + renderer.kerningPx, line.wordXpos(1));  // two code points: they kern
+  EXPECT_EQ(line.wordXpos(1) + kGlyph, line.wordXpos(2));                       // a glyph run on the right
+  EXPECT_EQ(line.wordXpos(2) + advanceOf(line, 2) + kSpace, line.wordXpos(3));
+  EXPECT_EQ(line.wordXpos(3) + advanceOf(line, 3), line.wordXpos(4));  // a glyph run on the left
+}
+
+TEST_F(ShapedLayout, JustificationStretchesTokensNotPieces) {
+  // On a justified right-to-left line the gap between the tokens takes what the line lacks; the comma stays touching
+  // its word.
+  FixtureShapingFace& naskh = useFont(kNaskh);
+  const int kitab = advancePx(oracleOn(naskh, ot::Script::Arabic, kKitab));
+  const int natural = kitab + kGlyph + kSpace + kitab;
+  constexpr int kSpare = 4;
+  ParsedText text(false, false, noIndentStyle());
+  add(text, {{kKitab + kArabicComma}, {kKitab}, {kKitab}, {kKitab}});
+  const Lines lines = layOut(text, renderer, natural + kSpare);
+  ASSERT_EQ(2u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(3u, line.wordCount());
+  EXPECT_EQ(0, line.wordXpos(0));
+  EXPECT_EQ(line.wordXpos(0) + kitab + kSpace + kSpare, line.wordXpos(1));
+  EXPECT_EQ(kArabicComma, line.wordText(1));
+  EXPECT_EQ(line.wordXpos(1) + kGlyph, line.wordXpos(2));
+  EXPECT_EQ(natural + kSpare, line.wordXpos(2) + kitab);
+}
+
+TEST_F(ShapedLayout, AWithoutBidiLineDrawsOrDegrades) {
+  // The heap refuses the line pass its Scratch (and there is no arena): every line is laid out without bidi, its tokens
+  // in logical order. A paragraph that shapes still draws its tokens as their pieces, a Text piece without its
+  // controls; nothing is drawn as code points at a glyph run's width.
+  FixtureShapingFace& naskh = useFont(kNaskh);
+  BidiLine::releaseBuildMemory();
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{kKitab + kRlm + kArabicComma}, {kKitab}});
+  Lines lines;
+  {
+    const AllocationRefusal refused(sizeof(BidiLine::Scratch), sizeof(BidiLine::Scratch));
+    lines = layOut(text, renderer, 400);
+  }
+  EXPECT_FALSE(BidiLine::heapScratchHeld());
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(3u, line.wordCount());
+  const std::vector<StoredGlyph> expected = oracleOn(naskh, ot::Script::Arabic, kKitab);
+  ASSERT_TRUE(line.hasGlyphForm(0));
+  EXPECT_EQ(expected, recordsOf(line.glyphForm(0)));
+  EXPECT_EQ(kArabicComma, line.wordDrawText(1));  // the RLM is not drawn
+  EXPECT_FALSE(line.hasGlyphForm(1));
+  ASSERT_TRUE(line.hasGlyphForm(2));
+  EXPECT_FALSE(line.hasLogicalOrder());
+  EXPECT_TRUE(line.wordContinues(1));
+  EXPECT_EQ(line.wordXpos(0) + advancePx(expected), line.wordXpos(1));
+  EXPECT_EQ(line.wordXpos(1) + kGlyph + kSpace, line.wordXpos(2));
+  EXPECT_EQ(2u, text.tokensShaped());
+  EXPECT_FALSE(latch);
+}
+
+TEST_F(ShapedLayout, TheBidiScratchAndACallsBlockNeverShareTheArena) {
+  // Risk 2: a paragraph that needs bidi borrows the line pass's workspace (BidiUtils' and a Scratch) from the lent
+  // arena while it measures its tokens. Its tokens are shaped before that, each call's block the arena's for the call
+  // alone, so the arena's peak up to the first line is the larger of the two blocks, never their sum.
+  useFont(kNaskh);
+  const std::string longest = kKitab + kKitab + kArabicComma;
+  size_t callBytes = 0;
+  {
+    BuildArena probe(16 * 1024);
+    ASSERT_TRUE(probe.valid());
+    IndicShaper::CallMemory memory(&probe, longest.size());
+    ASSERT_TRUE(memory.valid());
+    callBytes = probe.used();
+  }
+  const size_t workspaceBytes = BidiUtils::kWorkspaceBytes + sizeof(BidiLine::Scratch);
+  BuildArena arena(52272);
+  ASSERT_TRUE(arena.valid());
+  ParsedText text(false, false, noIndentStyle());
+  text.setLineArena(&arena);
+  text.setShapingLatch(&latch);
+  size_t peak = 0;
+  text.setBeforeLineHook([&](uint8_t, bool) {
+    if (peak == 0) peak = arena.highWater();
+  });
+  add(text, {{kKitab}, {longest}, {kBeh + kAlef}});
+  const Lines lines = layOut(text, renderer, 400);
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_EQ(3u, text.tokensShaped());
+  EXPECT_FALSE(TextShaping::buildMemoryHeld());  // every call's block was the arena's
+  EXPECT_GE(peak, workspaceBytes);               // and so was the workspace
+  EXPECT_GE(peak, callBytes);
+  EXPECT_LT(peak, workspaceBytes + callBytes);
+  EXPECT_FALSE(latch);
+}
+
+TEST_F(ShapedLayout, AnArabicParagraphWithoutAFaceKeepsItsBytes) {
+  // My call 5: an Arabic paragraph shapes only where one of its Arabic tokens has a face. In a bitmap or built-in font
+  // it makes no ShapingState, merges no mark-only span (the merge is a shaped group's) and cuts no token: its line is
+  // step 1's, each token the line pass's pieces of its code points. With a face, the same words merge and are cut.
+  const std::vector<Word> words = {{kBeh}, {kFatha, EpdFontFamily::BOLD, true}, {kKitab + kArabicComma}};
+  Seam::face = nullptr;
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, words);
+  const Lines lines = layOut(text, renderer, 400);
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_FALSE(text.shapingStateHeld());
+  EXPECT_EQ(0u, text.tokensShaped());
+  EXPECT_FALSE(latch);
+  const TextBlock& line = *lines[0];
+  for (uint16_t i = 0; i < line.wordCount(); ++i) EXPECT_FALSE(line.hasGlyphForm(i)) << i;
+  EXPECT_GE(wordWithText(line, kFatha), 0);                 // a token of its own
+  EXPECT_GE(wordWithText(line, kKitab + kArabicComma), 0);  // one piece
+
+  useFont(kNaskh);
+  ParsedText shaped(false, false, noIndentStyle());
+  add(shaped, words);
+  const Lines shapedLines = layOut(shaped, renderer, 400);
+  ASSERT_EQ(1u, shapedLines.size());
+  EXPECT_GE(wordWithText(*shapedLines[0], kBeh + kFatha), 0);
+  EXPECT_GE(wordWithText(*shapedLines[0], kKitab), 0);
+  EXPECT_GE(wordWithText(*shapedLines[0], kArabicComma), 0);
+}
+
+TEST_F(ShapedLine, AnRtlWordsLookupTextIsInReadingOrder) {
+  // Kaf, a bold teh, then alef beh: three tokens kept apart (a style change between joined letters), each shaped with
+  // its neighbours as context, touching. A right-to-left line stores its pieces in visual order, so the word's pieces
+  // joined as stored read alef beh teh kaf; joined by their logical positions, as the dictionary joins a word's glued
+  // pieces (my call 6), kitab.
+  useFont(kNaskh);
+  ParsedText text(false, false, noIndentStyle());
+  add(text, {{kKaf}, {kTeh, EpdFontFamily::BOLD, true}, {kAlef + kBeh, EpdFontFamily::REGULAR, true}});
+  const Lines lines = layOut(text, renderer, 400);
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(3u, line.wordCount());
+  EXPECT_TRUE(line.hasLogicalOrder());
+  std::string stored;
+  std::vector<std::string> byPosition(3);
+  for (uint16_t i = 0; i < 3; ++i) {
+    EXPECT_TRUE(line.hasGlyphForm(i)) << i;
+    if (i > 0) {
+      EXPECT_TRUE(line.wordContinues(i)) << i;
+      EXPECT_EQ(line.wordXpos(i - 1) + advanceOf(line, i - 1), line.wordXpos(i)) << i;
+    }
+    stored += line.wordText(i);
+    ASSERT_LT(line.logicalPosition(i), 3);
+    byPosition[line.logicalPosition(i)] = line.wordText(i);
+  }
+  EXPECT_EQ(kAlef + kBeh + kTeh + kKaf, stored);
+  EXPECT_EQ(kKitab, byPosition[0] + byPosition[1] + byPosition[2]);
+}
+
+TEST_F(ShapedLine, AnEmptyConsumedPieceIsLeftOffTheLine) {
+  // Lam, then a bold alef, in the synthetic font: its rlig makes them one ligature, which the lam's token keeps, and
+  // the alef's token keeps no glyph, an empty Glyphs piece. TextBlock would draw a word without a glyph form as its
+  // text, the alef again over the ligature: the piece is left off the line, on a line the bidi pass lays out and on one
+  // laid out without it. The token's bytes, its offset and its place among the tokens stay.
+  useFont(kRtlTest);
+  const std::vector<Word> words = {{kBeh}, {kLam}, {kAlef, EpdFontFamily::BOLD, true}};
+  const auto expectLeftOff = [&](const TextBlock& line) {
+    ASSERT_EQ(2u, line.wordCount());
+    EXPECT_LT(wordWithText(line, kAlef), 0);
+    const int lam = wordWithText(line, kLam);
+    ASSERT_GE(lam, 0);
+    ASSERT_TRUE(line.hasGlyphForm(static_cast<uint16_t>(lam)));
+    EXPECT_EQ(1u, line.glyphForm(static_cast<uint16_t>(lam)).count);  // the ligature
+    EXPECT_TRUE(line.hasGlyphForm(static_cast<uint16_t>(1 - lam)));
+  };
+  {
+    ParsedText text(false, false, noIndentStyle());
+    text.setShapingLatch(&latch);
+    add(text, words);
+    const Lines lines = layOut(text, renderer, 400);
+    ASSERT_EQ(1u, lines.size());
+    expectLeftOff(*lines[0]);
+    EXPECT_EQ(3u, text.tokensShaped());
+    EXPECT_FALSE(latch);
+  }
+  {
+    // Without the line pass (the heap refuses its Scratch): drawn as its pieces in logical order, the alef's left off.
+    BidiLine::releaseBuildMemory();
+    ParsedText text(false, false, noIndentStyle());
+    add(text, words);
+    Lines lines;
+    {
+      const AllocationRefusal refused(sizeof(BidiLine::Scratch), sizeof(BidiLine::Scratch));
+      lines = layOut(text, renderer, 400);
+    }
+    ASSERT_EQ(1u, lines.size());
+    expectLeftOff(*lines[0]);
+  }
+  {
+    // A column narrower than the ligature: the breaker's fallback puts the lam alone on a line, and the alef starts the
+    // next. Accepted (the ruling): the alef's letter is in the lam's ligature, so its own line draws nothing at all.
+    ParsedText text(false, false, noIndentStyle());
+    add(text, {{kLam}, {kAlef, EpdFontFamily::BOLD, true}});
+    const Lines lines = layOut(text, renderer, 1);
+    ASSERT_EQ(1u, lines.size());
+    ASSERT_EQ(1u, lines[0]->wordCount());
+    EXPECT_EQ(kLam, lines[0]->wordText(0));
+    EXPECT_EQ(1u, lines[0]->glyphForm(0).count);
+  }
+  {
+    // An Indic token too, in a pathological font whose ccmp deletes KA: ma, then a bold ka shaped with ma as context,
+    // which keeps no glyph. Left off without bidi and beside a Hebrew word.
+    uint32_t ka = 0;
+    ASSERT_NE(nullptr, face->current());
+    ASSERT_TRUE(face->current()->nominalGlyph(0x0915, &ka));
+    GsubFace deleting(readFont(TTF_FIXTURE_DIR, "NotoSansDevanagari-Shaping-Regular.ttf"),
+                      deletingGsub(static_cast<uint16_t>(ka)));
+    Seam::face = &deleting;
+    for (const bool bidi : {false, true}) {
+      ParsedText text(false, false, noIndentStyle());
+      if (bidi) add(text, {{"שלום"}});
+      add(text, {{kMa}, {kKa, EpdFontFamily::BOLD, true}});
+      const Lines lines = layOut(text, renderer, 400);
+      ASSERT_EQ(1u, lines.size()) << bidi;
+      const TextBlock& line = *lines[0];
+      EXPECT_EQ(bidi ? 2u : 1u, line.wordCount()) << bidi;
+      EXPECT_LT(wordWithText(line, kKa), 0) << bidi;
+      const int ma = wordWithText(line, kMa);
+      ASSERT_GE(ma, 0) << bidi;
+      EXPECT_TRUE(line.hasGlyphForm(static_cast<uint16_t>(ma))) << bidi;
+    }
+    Seam::face = nullptr;
+  }
+}
+
+TEST_F(ShapedLine, ASegmentOfSeveralPiecesIsDrawnAsItsCodePoints) {
+  // The mandatory guard: beh teh, then a Hebrew qamats, which no Arabic run takes, so the token is a Glyphs piece and a
+  // Text piece. Across the cut the mark takes a slot of its own and is drawn right after its base, the teh: the run's
+  // segment gives two line pieces, around the mark. Its glyphs drawn on each would be drawn twice: the segment is
+  // drawn as the line pass's code points instead, each once.
+  useFont(kNaskh);
+  const std::string qamats = "\xD6\xB8";  // U+05B8
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{kBeh + kTeh + qamats}});
+  const Lines lines = layOut(text, renderer, 400);
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(3u, line.wordCount());
+  std::string drawn;
+  for (uint16_t i = 0; i < line.wordCount(); ++i) {
+    EXPECT_FALSE(line.hasGlyphForm(i)) << i;
+    drawn += line.wordDrawText(i);
+  }
+  EXPECT_EQ(kTeh + qamats + kBeh, drawn);  // visual order, each code point once
+  EXPECT_EQ(1u, text.tokensShaped());
+  EXPECT_FALSE(latch);  // the line pass's own split, not a want of memory: nothing to rebuild for
+}
+
+TEST_F(ShapedLine, AShapedTokenTheLineCannotBeCutForIsItsCodePoints) {
+  // No room for the line's cut points: the token is laid out uncut, one piece at its level, and drawn as its code
+  // points from the line pass's form, not as its run (which would stand for the whole token, its brackets lost), and
+  // the build is latched. The warm-up leaves every other container the room the next line needs; it held one cut.
+  useFont(kNaskh);
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{kKitab + kArabicComma}, {kKitab}, {kKitab}});
+  ASSERT_EQ(1u, layOut(text, renderer, 400).size());
+  ASSERT_FALSE(latch);
+  text.reset(noIndentStyle());
+  const std::string token = "(" + kKitab + ")" + kArabicComma;  // three pieces: two cuts
+  add(text, {{token}});
+  Lines lines;
+  {
+    const LargestFreeBlock block(18);  // two cuts ask for 20 B
+    lines = layOut(text, renderer, 400);
+  }
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(1u, line.wordCount());
+  EXPECT_FALSE(line.hasGlyphForm(0));
+  EXPECT_EQ(token, line.wordText(0));
   EXPECT_TRUE(latch);
 }

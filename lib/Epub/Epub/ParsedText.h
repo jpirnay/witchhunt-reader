@@ -181,6 +181,10 @@ class ParsedText {
     std::vector<TextBlock::WordSize> pieceSizes;
     std::vector<TokenBoundary::Boundary> pieceBoundaries;
     std::vector<uint8_t> pieceOrder;
+    // In a paragraph that shapes: each piece's glyph run (count 0: none), and the line's cut points, which its tokens'
+    // BidiLine::Token::cuts point into.
+    std::vector<GlyphRun> pieceGlyphs;
+    std::vector<uint16_t> tokenCuts;
     std::string tokenForm;  // the one string every BidiLine::tokenForm call writes into
   };
   std::unique_ptr<BidiState> bidiState_;
@@ -196,8 +200,21 @@ class ParsedText {
   // logged, when neither can be had.
   BidiLine::Scratch* bidiScratchFor(const BidiLine::ArenaWorkspace& workspace);
   // Runs the line pass over tokens [first, first + count) into bidiState_->line, with the workspace borrowed from
-  // lineArena_ for the pass alone. False, logged, when it could not run: the line is then laid out without bidi.
-  bool layOutBidiLine(size_t first, size_t count);
+  // lineArena_ for the pass alone. A token with shaped pieces is cut at their edges (cutShapedTokens). False, logged,
+  // when it could not run: the line is then laid out without bidi.
+  bool layOutBidiLine(const GfxRenderer& renderer, int fontId, size_t first, size_t count);
+  // Gives each of the line's tokens with more than one shaped piece its cut points (BidiLine::Token::cuts): where each
+  // piece after the first begins, in bidiState_->tokenCuts. A token whose cuts the heap has no room for, or that break
+  // their contract, gets none (logged, latched): its pieces are then drawn as the line pass's code points.
+  void cutShapedTokens(const GfxRenderer& renderer, int fontId, size_t first, size_t count);
+  // What each of the line's pieces is drawn as, in bidiState_'s pieceForms and pieceGlyphs, and its width, in
+  // lineXPosScratch_: the line pass's display form and its measure, unless the piece draws a shaped token's store piece
+  // that is not Text (a glyph run, or a Reordered form, at the store's width). Returns whether any piece has a glyph
+  // run or is left off (an empty run: a letter its glued neighbour's ligature took).
+  bool formBidiPieces(const GfxRenderer& renderer, int fontId, size_t first);
+  // Takes the pieces formBidiPieces left off out of bidiState_->line and the vectors it filled: the gap before each
+  // goes to the piece after it, and the reading order is numbered again.
+  void dropEmptyPieces();
   // Whether bidiState_->line is the line's tokens as they stand: in order, one piece each, each drawn as its text. Such
   // a line of a left-to-right paragraph is laid out by the ordinary path.
   bool bidiLineIsPlain(size_t first, size_t count) const;
@@ -213,15 +230,17 @@ class ParsedText {
   // Steps bidiState_->openControls over the tokens [first, end) of a line that was accepted.
   void stepOpenControls(size_t first, size_t end);
 
-  // A paragraph without bidi whose tokens hold Indic text forms them (writing modes step 2, "How shaping runs" 2-10):
-  // each such token is shaped once into a paragraph store, in step with the word vectors, whose widths break the
-  // lines and whose pieces the line is drawn as. Boxed, and defined in ParsedText.cpp, so this header includes nothing
-  // of the shaper (it is included far beyond layout). Made by the first pass that shapes; reset() empties it for the
-  // next paragraph; releaseLayoutScratch() frees it when no paragraph in progress shapes. Nothing in it holds a face or
-  // a plan: they are the renderer's, for one build.
+  // A paragraph whose tokens hold Indic text, or Arabic text in a font that can shape it, forms them (writing modes
+  // step 2, "How shaping runs" 2-10; PR 4b for Arabic and for paragraphs that need bidi): each such token is shaped
+  // once into a paragraph store, in step with the word vectors, whose widths break the lines and whose pieces the line
+  // is drawn as. Boxed, and defined in ParsedText.cpp, so this header includes nothing of the shaper (it is included
+  // far beyond layout). Made by the first pass that shapes; reset() empties it for the next paragraph;
+  // releaseLayoutScratch() frees it when no paragraph in progress shapes. Nothing in it holds a face or a plan: they
+  // are the renderer's, for one build.
   struct ShapingState;
   std::unique_ptr<ShapingState> shapingState_;
-  bool shapes_ = false;  // this pass forms Indic words: no bidi, and a token holds U+0900-0DFF
+  // This pass forms its tokens: one holds U+0900-0DFF, or one that holds Arabic text has a face (decideShaping).
+  bool shapes_ = false;
   bool* shapingLatch_ = nullptr;
   // The build's cache of shaped words (WordShapeCache.h), the parser's; null: every token is shaped. An unglued token
   // that shapes Formed is looked up there before it is shaped, and stored once it is.
@@ -233,10 +252,11 @@ class ParsedText {
   void latchShapingDegraded() const {
     if (shapingLatch_ != nullptr) *shapingLatch_ = true;
   }
-  // Whether this pass shapes, decided after decideBidi: makes ShapingState for it (refused: the pass is laid out
-  // unshaped, and latched), or empties the store of a pass that does not shape. A kept token whose glued neighbour has
-  // just arrived is shaped again, with it as context.
-  void decideShaping();
+  // Whether this pass shapes, decided after decideBidi: a token holds Indic text, or a token that holds Arabic text has
+  // a face (so an Arabic paragraph in a bitmap or built-in font is laid out as without shaping, with no ShapingState).
+  // Makes ShapingState for it (refused: the pass is laid out unshaped, and latched), or empties the store of a pass
+  // that does not shape. A kept token whose glued neighbour has just arrived is shaped again, with it as context.
+  void decideShaping(const GfxRenderer& renderer, int fontId);
   // Joins each glued group's tokens that TextShaping::mergesWithPrevious merges (deviation 7, and the Hebrew name)
   // before anything is measured: a merged token keeps its first part's style, size, boundary and visible offset. Ruby
   // tokens, combine requests and no-break spaces are never merged; nor are tokens whose merged text the heap has no
@@ -252,8 +272,8 @@ class ParsedText {
   // The face token i is shaped with, and the ppem (26.6) its glyphs are drawn at: the face's, times the font's base
   // scale, times the word's. Null (and 0) on a vertical line, which reorders instead, and for a font that cannot shape.
   // The renderer is asked once a pass for each font and style (ShapingState's face answers), so every key and every
-  // call of a pass reads one answer. Asked only for a token that holds Indic text: a face the heap refused is null too,
-  // and latches shaping degraded, since the token is then laid out as without a face.
+  // call of a pass reads one answer. Asked only for a token that holds Indic or Arabic text: a face the heap refused is
+  // null too, and latches shaping degraded, since the token is then laid out as without a face.
   ShapingFace* shapingFaceFor(const GfxRenderer& renderer, int fontId, size_t i, uint32_t* drawnPpem) const;
   // Forgets the pass's face answers: a face lives for the build, and a font set reload between passes frees it.
   void forgetFaceAnswers();
@@ -268,6 +288,9 @@ class ParsedText {
   // their widths set, and *width their sum; false: it is laid out as its code points (and latched when it could not be
   // shaped, or its pieces measured for want of memory).
   bool shapeToken(const GfxRenderer& renderer, int fontId, size_t i, uint16_t* width);
+  // *width, the sum of token i's stored pieces' widths, and true; false when the store holds none for it. Nothing is
+  // shaped: a paragraph that needs bidi shapes its tokens before the line pass's workspace is borrowed.
+  bool storedWidth(const GfxRenderer& renderer, int fontId, size_t i, uint16_t* width) const;
   // The width of words[i]'s first `bytes` bytes and a hyphen when `hyphen`: a candidate the breaker measures, shaped in
   // the store's scratch entry (nothing is kept), or measured as code points when it is not shaped (and latched when it
   // could not be, or its pieces measured). The candidate's string was reserved by hyphenateWordAtIndex.
@@ -277,12 +300,15 @@ class ParsedText {
   // A line of a paragraph that shapes, tokens [first, first + count) placed: when a token has pieces, each token
   // becomes its pieces, in order (step 7), and true. The first piece keeps the token's boundary, the others are glued;
   // each takes the token's style and size; a Glyphs piece is drawn as its run, a Reordered piece as its form (without
-  // its soft hyphens), and a Text piece of soft hyphens alone, which has no width, is left out. lineXPosScratch_ then
-  // holds the pieces' positions (the token's x plus the widths before it), the annotations name pieces, and `range` is
-  // pointed at ShapingState's vectors. False, nothing changed, when no token has pieces: the line keeps its bytes. So
-  // does a line the heap has no room to lay out as pieces, drawn as its tokens' code points (latched).
+  // its soft hyphens), and a piece that draws nothing (a Text piece of soft hyphens alone, an empty glyph run: a letter
+  // its glued neighbour's ligature took) is left out. lineXPosScratch_ then holds the pieces' positions (the token's x
+  // plus the widths before it), the annotations name pieces, and `range` is pointed at ShapingState's vectors. False,
+  // nothing changed, when no token has pieces: the line keeps its bytes. So does a line the heap has no room to lay
+  // out as pieces, drawn as its tokens' code points (latched). `withoutControls`: a line of a paragraph that needs
+  // bidi, laid out without the line pass: its texts are copies without their bidi controls (a Text piece's without its
+  // joiners too, as it was measured), in bidiState_->line.display, which the pass that did not run leaves free.
   bool viewShapedPieces(const GfxRenderer& renderer, int fontId, size_t first, size_t count,
-                        TextBlock::WordRange& range);
+                        TextBlock::WordRange& range, bool withoutControls);
 
   LinePlace linePlace_;
   BlockStyle blockStyle;
