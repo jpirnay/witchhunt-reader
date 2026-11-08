@@ -779,6 +779,28 @@ TEST(BidiLine, APlainTokensFormTakesTheShortPathAndSaysSo) {
   EXPECT_FALSE(plain);
   EXPECT_EQ(plainForm("", 1, plain), std::nullopt);
   EXPECT_FALSE(plain);
+
+  // Punctuation and quotes beside letters that run the paragraph's way resolve to that way in any line (N1 or N2),
+  // so the token is plain: its form is the code points reversed, the comma first. Against the paragraph's way they
+  // take their neighbour's side, which only the line knows: the full path. A bracket (mirrored) and a digit never.
+  EXPECT_EQ(plainForm("שלום,", 1, plain), ",םולש");
+  EXPECT_TRUE(plain);
+  EXPECT_EQ(plainForm("\"שלום\".", 1, plain), ".\"םולש\"");
+  EXPECT_TRUE(plain);
+  EXPECT_EQ(plainForm("hello,", 0, plain), std::nullopt);
+  EXPECT_TRUE(plain);
+  plainForm("שלום,", 0, plain);
+  EXPECT_FALSE(plain);
+  plainForm("hello,", 1, plain);
+  EXPECT_FALSE(plain);
+  plainForm("(שלום)", 1, plain);
+  EXPECT_FALSE(plain);
+  plainForm("שלום1", 1, plain);
+  EXPECT_FALSE(plain);
+  plainForm("50%", 1, plain);
+  EXPECT_FALSE(plain);
+  plainForm(",", 1, plain);  // no letter
+  EXPECT_FALSE(plain);
 }
 
 TEST(BidiLine, DropControlsLeavesTheText) {
