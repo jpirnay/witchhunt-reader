@@ -4,6 +4,7 @@
 // A line is rendered as `t<token>:<display>` items, left to right, joined by ` S<n> ` for a word space (token n's)
 // and ` G ` for a glued boundary. Expected values were checked against minibidi on 2026-11-02.
 
+#include <Arduino.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -412,23 +413,39 @@ TEST(BidiLine, ALongLeftToRightLineKeepsItsOrder) {
   EXPECT_EQ(render(line), expected);
 }
 
-TEST(BidiLine, AFallbackLineReusesItsCopies) {
-  // Words past the short-string buffer, on a line past the limit: the second line allocates no new copies.
+TEST(BidiLine, AFallbackLineReusesItsArrays) {
+  // A line past the limit: the second line allocates no new views or order, and the views are the tokens' own text.
   const std::vector<std::string> words = repeated("אבגדהוזחטי", 26);
   std::vector<BidiLine::Token> tokens;
   for (const auto& w : words) tokens.push_back({w, true});
   BidiLine::Line line;
   ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), line));
   ASSERT_TRUE(line.fallback);
-  ASSERT_EQ(line.fallbackWords.size(), 26u);
+  ASSERT_EQ(line.fallbackViews.size(), 26u);
+  EXPECT_EQ(line.fallbackViews.front().data(), words.front().data());
   const void* const order = line.fallbackOrder.data();
-  const void* const firstWord = line.fallbackWords.front().data();
-  const void* const lastWord = line.fallbackWords.back().data();
+  const void* const views = line.fallbackViews.data();
   ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), line));
   EXPECT_EQ(line.fallbackOrder.data(), order);
-  EXPECT_EQ(line.fallbackWords.front().data(), firstWord);
-  EXPECT_EQ(line.fallbackWords.back().data(), lastWord);
+  EXPECT_EQ(line.fallbackViews.data(), views);
   expectWellFormed(line, words);
+}
+
+TEST(BidiLine, AFallbackLineOrdersItsWordsAsIfTheirMarksWereNotThere) {
+  // The same line with and without a point on each word (the fallback once stripped the marks from copies of the
+  // words; now the order is computed over the words themselves): the same token order.
+  const std::vector<std::string> plain = repeated("אבגדה", 26);
+  std::vector<std::string> pointed = plain;
+  pointed[3] = "אָבגדה";
+  pointed[20] = "אבגְדה";
+  pointed.push_back("hello");
+  std::vector<std::string> plainTail = plain;
+  plainTail.push_back("hello");
+  const auto withMarks = lay(pointed, 1);
+  const auto without = lay(plainTail, 1);
+  ASSERT_TRUE(withMarks.fallback);
+  ASSERT_TRUE(without.fallback);
+  EXPECT_EQ(tokensOf(withMarks), tokensOf(without));
 }
 
 TEST(BidiLine, AFirstLineReservesForItsTokensNotTheWorstCase) {
@@ -783,6 +800,44 @@ TEST(BidiLine, WithoutAWorkspaceTheCallerLaysTheLineOutWithoutBidi) {
   BidiUtils::releaseWorkspace();
 }
 
+TEST(BidiLine, TheArenaLendsTheLineItsTokensWithTheScratch) {
+  BidiUtils::releaseWorkspace();
+  const std::vector<std::string> words = {"שלום", "(world)", "1998."};
+  BuildArena arena(16 * 1024);
+  ASSERT_TRUE(arena.valid());
+  const size_t before = arena.used();
+  {
+    const BidiLine::ArenaWorkspace lent(&arena, words.size());
+    ASSERT_NE(lent.scratch(), nullptr);
+    ASSERT_NE(lent.tokens(), nullptr);
+    EXPECT_GE(arena.used(),
+              before + BidiUtils::kWorkspaceBytes + sizeof(BidiLine::Scratch) + words.size() * sizeof(BidiLine::Token));
+    for (size_t t = 0; t < words.size(); t++) new (lent.tokens() + t) BidiLine::Token{words[t], true};
+    BidiLine::Line line;
+    ASSERT_TRUE(BidiLine::layoutLine(lent.tokens(), words.size(), {}, 1, *lent.scratch(), line));
+    EXPECT_EQ(render(line), "t2:.1998 S2 t1:(world) S1 t0:םולש");
+  }
+  EXPECT_EQ(arena.used(), before);
+
+  // None asked for: none lent.
+  {
+    const BidiLine::ArenaWorkspace lent(&arena, 0);
+    ASSERT_NE(lent.scratch(), nullptr);
+    EXPECT_EQ(lent.tokens(), nullptr);
+  }
+  EXPECT_EQ(arena.used(), before);
+
+  // All or nothing: an arena with room for the scratch but not for the tokens lends neither, and holds nothing.
+  BuildArena tight(BidiUtils::kWorkspaceBytes + sizeof(BidiLine::Scratch) + 64);
+  {
+    const BidiLine::ArenaWorkspace lent(&tight, 1000);
+    EXPECT_EQ(lent.scratch(), nullptr);
+    EXPECT_EQ(lent.tokens(), nullptr);
+    EXPECT_EQ(tight.used(), 0u);
+  }
+  BidiUtils::releaseWorkspace();
+}
+
 TEST(BidiLine, AnArenaLendsTheWorkspaceAndScratch) {
   BidiUtils::releaseWorkspace();
   const std::vector<std::string> words = {"שלום", "(world)", "1998."};
@@ -840,4 +895,74 @@ TEST(BidiLine, AnArenaLendsTheWorkspaceAndScratch) {
   ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), line));
   EXPECT_TRUE(BidiUtils::heapWorkspaceHeld());
   BidiUtils::releaseWorkspace();
+}
+
+// The largest free block the pass's heap checks read (the shim's ESP.getMaxAllocHeap()), for a scope. Nothing is
+// refused by it: only the checks see it.
+class LargestFreeBlock {
+ public:
+  explicit LargestFreeBlock(const uint32_t bytes) : saved_(ESP.getMaxAllocHeap()) { ESP.setMaxAllocHeap(bytes); }
+  ~LargestFreeBlock() { ESP.setMaxAllocHeap(saved_); }
+  LargestFreeBlock(const LargestFreeBlock&) = delete;
+  LargestFreeBlock& operator=(const LargestFreeBlock&) = delete;
+
+ private:
+  uint32_t saved_;
+};
+
+std::vector<BidiLine::Token> tokensOf(const std::vector<std::string>& words) {
+  std::vector<BidiLine::Token> tokens;
+  for (const auto& w : words) tokens.push_back({w, true});
+  return tokens;
+}
+
+// The Line's buffers grow behind the heap check (HeapGrowth.h): a line the heap refuses them for is reported as not
+// laid out, clear, for the caller's path without bidi. A Line that already holds them needs nothing from the heap.
+TEST(BidiLine, ALineTheHeapRefusesItsBuffersIsLaidOutWithoutBidi) {
+  const std::vector<std::string> words = {"abc", "אבג", "def"};
+  const auto tokens = tokensOf(words);
+  BidiLine::Line fresh;
+  {
+    const LargestFreeBlock none(0);
+    EXPECT_FALSE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 0, scratch(), fresh));
+  }
+  EXPECT_TRUE(fresh.pieces.empty());
+  EXPECT_TRUE(fresh.display.empty());
+
+  BidiLine::Line held;
+  ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 0, scratch(), held));
+  const std::string once = render(held);
+  {
+    const LargestFreeBlock none(0);
+    ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 0, scratch(), held));
+  }
+  EXPECT_EQ(once, render(held));
+  expectWellFormed(held, words);
+}
+
+// The fallback's copies, order and pieces the same: refused, the line is clear; held from an earlier fallback line,
+// nothing is asked of the heap.
+TEST(BidiLine, AFallbackLineTheHeapRefusesItsBuffersIsLaidOutWithoutBidi) {
+  const std::vector<std::string> words = repeated("אבגד", 26);  // 129 slots: over the limit
+  const auto tokens = tokensOf(words);
+  BidiLine::Line fresh;
+  {
+    const LargestFreeBlock none(0);
+    EXPECT_FALSE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), fresh));
+  }
+  EXPECT_TRUE(fresh.pieces.empty());
+  EXPECT_FALSE(fresh.fallback);
+  EXPECT_TRUE(fresh.fallbackViews.empty());
+
+  BidiLine::Line held;
+  ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), held));
+  ASSERT_TRUE(held.fallback);
+  const std::string once = render(held);
+  {
+    const LargestFreeBlock none(0);
+    ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), held));
+  }
+  EXPECT_TRUE(held.fallback);
+  EXPECT_EQ(once, render(held));
+  expectWellFormed(held, words);
 }

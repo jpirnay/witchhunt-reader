@@ -82,9 +82,10 @@ struct Line {
   bool fallback = false;   // over kMaxCodepoints slots or kMaxUnits units
   void clear();            // keeps capacity
 
-  // The fallback's working copies (its words without their marks, and their order followed by each token's first
-  // piece), kept with their capacity across lines; not part of the result.
-  std::vector<std::string> fallbackWords;
+  // The fallback's working arrays (views of its tokens' text, and their order followed by each token's first piece),
+  // 8 and 4 B a token on the device, kept with their capacity across lines; not part of the result. The fallback
+  // copies no word: computeVisualWordOrder skips the marks itself.
+  std::vector<std::string_view> fallbackViews;
   std::vector<uint16_t> fallbackOrder;
 };
 
@@ -155,17 +156,22 @@ bool tokenForm(std::string_view token, const OpenControls& open, uint8_t paragra
 // workspace, whoever bound it.
 class ArenaWorkspace {
  public:
-  explicit ArenaWorkspace(BuildArena* arena);
+  // With `tokenCount`, room for the line's tokens beside the scratch (16 B each on the device, which a kept heap
+  // vector held before): all or nothing, so a line the arena cannot hold whole takes the heap for both.
+  explicit ArenaWorkspace(BuildArena* arena, size_t tokenCount = 0);
   ~ArenaWorkspace();
   ArenaWorkspace(const ArenaWorkspace&) = delete;
   ArenaWorkspace& operator=(const ArenaWorkspace&) = delete;
 
   Scratch* scratch() const { return scratch_; }
+  // The line's tokens, uninitialised; null without a scratch or when none were asked for.
+  Token* tokens() const { return tokens_; }
 
  private:
   BuildArena* arena_ = nullptr;
   BuildArena::Block block_;
   Scratch* scratch_ = nullptr;
+  Token* tokens_ = nullptr;
 };
 
 // The build's one heap Scratch, for a pass the arena lends no room for. The line pass runs one line at a time under

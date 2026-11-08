@@ -88,7 +88,9 @@ cluster or draw an Arabic letter isolated.
    never merged, nor the bases of a ruby still open (`keepUnmergedFrom`). Tokens of different styles between
    syllables stay apart, and each is shaped with the other's syllable as context.
 3. **The store** (`readyShapedStore`): an entry for every token in `ShapingState`'s `ShapedStore`, reserved from the
-   paragraph's estimate (2 B of records a byte of Indic text).
+   paragraph's estimate (2 B of records a byte of Indic text, 3 of Arabic). Its index is the larger half: a 16 B entry a
+   token and a 14 B piece, reserved to the pass's count exactly and grown by half again only past it; the records sit
+   in 1 KB chunks.
 4. **Each token** (`calculateWordWidths` calls `ParsedText::shapeToken`):
    - its entry, when it was made for the same text and `shapeKey` (font, style bits, size, font slot, the word's
      scale, the font's base scale, the drawn ppem, and whether there is a face and the line is vertical): a token kept
@@ -467,10 +469,23 @@ a line's tokens by the bidi levels. PR 4b teaches it to carry shaped pieces.
   ligature took), on the device only.
 - **A no-face Reordered Indic segment split by levels draws unreordered** (the guard, not latched).
 - **A text block of more than 96 tokens whose lines hold more than 96 tokens** (landscape, a span on every word of a
-  400-token paragraph) holds about 16 KB more heap shaped than unshaped, all ShapedStore chunks on the heap, while the
-  lent arena peaks at 34 KB of 52 KB. The test book's landscape chapter 2 then degrades on the X3, gracefully (the
-  chapter is cached with the status bit set, the heap's low point 2,936 B); real prose passes in both orientations.
-  Keeping the store's chunks in the lent arena's free room would remove it.
+  400-token paragraph at a quarter of the body size) holds about 200 tokens, and the store with it. Measured with
+  `epub_build_inventory` at 770 px (2026-11-08, the sizes the device sees): the store held 16.5 KB at the build's heap
+  peak, of which 12 KB was its index (32 B entries and 16 B pieces, doubled to 256) and 4 KB its chunks, while the lent
+  arena sat at 11.4 KB of 52 KB. With 16 B entries, 14 B pieces and an exact reserve the index is 5.4 KB and the store
+  about 10 KB, 8 KB less at the peak (the host's figure above the build's base fell from 81.5 to 73.2 KB; the unshaped
+  build is 51.9 KB). On the X3 in landscape (2026-11-08, cold cache) that is the difference between the hard floor and
+  a clean build: master's borrowed build aborted at the table row (9,188 B free, 6,388 largest), its released rebuild
+  aborted too, and the chapter was cached truncated at 2 pages of 4; with the change the borrowed build completes, its
+  lowest gate reading 14,484 free and 11,252 largest before the stress paragraph, the allocator's minimum 5,824 B.
+  Four more changes (the word arrays capped at the parser's split capacity, the fallback handing views instead of
+  word copies, the line's tokens in the arena workspace, and a paragraph's end releasing line buffers over 2 KB and a
+  store over 8 KB) took the host peak to 62.6 KB and the X3 build's minimum to about 19.8 KB, with no gate reached.
+  Real prose costs under 1 KB more shaped than unshaped at its peak (the long Hindi book, portrait), and passes in
+  both orientations. The remaining 10 KB cannot simply move into the lent arena: a store of that size reserved at the
+  parse lane's start would stop the word cache arming on the X4 and push the 32 KB image walk stage out of both
+  boards' arenas, and the free tail is for data that may be lost (memory strategy §8.5, rows 17 and 18;
+  [the handover](future_work/writing-modes-handover.md) has the budget).
 - **Titles, chapter names and the TOC**, on Home, in the Library, in the status bar and the chapter list: the UI
   faces are bitmap and cannot shape, so these draw unshaped in the face that draws them today. They wait for step 5's
   visual strings.

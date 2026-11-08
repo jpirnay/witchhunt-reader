@@ -21,13 +21,14 @@ can continue on another computer. The roadmap itself is [writing-modes.md](writi
 - CJK: every step of [cjk.md](cjk.md)'s roadmap.
 
 **Open (when this was written):**
-- #657 `fix/arabic-review-findings`: the fixes for the Fable review of #656, re-reviewed by Fable.
+- #657 `fix/arabic-review-findings`: the fixes for the Fable review of #656, re-reviewed by Fable (merged 2026-11-08).
   - the bidi fallback splitting an interrupted segment;
   - a consumed letter drawn as text taking its width;
   - Arabic shaping only with a face that maps beh;
   - the fallback's piece bound;
   - the doc corrections.
-- This file's own PR, which also adds the timing-book generators in `tools/writing-modes-bench/`.
+- This file's own PR (#658, merged), which also adds the timing-book generators in `tools/writing-modes-bench/`.
+- `fix/shaped-store-heap` (2026-11-08): item 1, below; X3 run done, no PR yet.
 
 **Branches worth knowing:**
 - `wip/shaper-profile` (pushed): the `OT_PROFILE` instrumentation and the host profile test from PR 3, the starting
@@ -36,38 +37,131 @@ can continue on another computer. The roadmap itself is [writing-modes.md](writi
 
 ## What is left, in the suggested order
 
-### 1. The heap follow-up for shaped text (next)
+### 1. The heap follow-up for shaped text (done on the X3; the X4 figures and one policy open)
 
-**What fails.** On the X3 in landscape, the test book `test/epubs/test_shaped_arabic.epub` chapter 2 degrades. That
-chapter holds a 400-token paragraph (every Allah split by a span) whose lines hold more than 96 tokens, followed by a
-table.
-- Background-C runs low.
-- The released blocking rebuild demotes the table row, and the chapter is cached with the status bit set.
-- The heap's low point is 2,936 B; master builds it clean.
+**What failed.** On the X3 in landscape, the test book `test/epubs/test_shaped_arabic.epub` chapter 2 degraded. That
+chapter holds a 400-token paragraph at a quarter of the body size (every Allah split by a span) whose lines hold more
+than 96 tokens, followed by a table. Master at 774e40dfc (with #656), cold cache, Landscape CW, 2026-11-08:
+- Background-C's borrowed build reads 12,220 B free before the stress paragraph, then 9,188 free and 6,388 largest at
+  the table row: the row is demoted and the parse aborts.
+- The released blocking rebuild, from 97 KB free, is down to 16 KB by the long-block splits (the whole build is on the
+  heap there) and aborts at the table too, at 11,292 free and 4,084 largest. The chapter is cached degraded AND
+  truncated: 2 pages of 4, the table and the stress paragraph's tail missing, and the one rebuild per session fails
+  the same way.
+- The allocator's minimum since boot after the open: 6,508 B.
 
 Real prose passes in both orientations: Zaydan's chapter, Background-B's lowest heap 29,204 B in landscape. A
 tajweed-coloured Quran (a span on every word) is the realistic case.
 
-**Why.** Measured on the host (`epub_pipeline_dump --bench --arena=52272` with a temporary viewport width of 770 px):
-- the shaped build holds about 16 KB more heap than the unshaped one;
-- all of it is `ShapedStore` chunks (11,776 B live at the peak), on the heap;
-- the lent arena peaks at 34 KB of its 52,272 B.
+**What the measurement showed (2026-11-08, Linux host).** `epub_build_inventory` now takes `--shaping-font=FILE`
+(and `epub_pipeline_dump --viewport=WxH`), so a shaped build's heap and arena can be inventoried the way the memory
+audit's were:
 
-**What to build:**
-- **`ShapedStore`'s chunks in the lent arena's free room.**
-  - Read `docs/memory-allocation-strategy.md` first: section 8.2, the arena timeline.
-  - The arena is LIFO, and the open page block sits above everything reserved at a lane start, so a per-paragraph
-    store cannot simply `alloc` there. The "opportunistic tail" (data kept in `[cap - S, cap)`, validated by a
-    peak-since-mark watermark) is how PR 3's word cache solved the same problem; the store needs a variant of it, or a
-    reserved slab at the parse lane's start.
-- **Guard every reserve the bidi line pass makes**, with `heapAllows`, taking the existing "laid out without bidi"
-  path when one does not fit. These run unguarded since step 1 PR 2:
-  - `ParsedText::layOutBidiLine`'s `state.tokens.reserve`;
-  - `BidiLine`'s `reserveAtLeast` on the Line's pieces and display, in `buildPieces` and `fallbackLine`.
+```
+build/test/epub_pipeline/epub_build_inventory test/epubs/test_shaped_arabic.epub <cache> <out> \
+    --arena=52272 --viewport=770x300 --shaping-font=NotoNaskhArabic-Book-Regular.ttf
+python3 test/epub_pipeline/inventory_report.py build/test/epub_pipeline/epub_build_inventory <out>/spine_1.txt
+```
 
-  The Fable re-review measured the fallback's worst case at about 4.8 KB for a 300-code-point line where every
-  token is cut.
-- **The pass line:** the test book's landscape chapter 2 builds clean on the X3, and no golden changes.
+At the build's heap peak of chapter 2 (the sizes below are the device's; the host's totals run 1.3-1.6x high on
+object-holding sites):
+
+| Site | Before | After |
+|---|---:|---:|
+| `ShapedStore` entries (32 B, doubled to 256; now 16 B, reserved to the pass's count) | 9,216 | 2,416 |
+| `ShapedStore` pieces (16 B; now 14 B) | 4,608 | 3,038 |
+| `ShapedStore` chunks | 4,096 | 4,096 |
+| Heap above the build's base, host (unshaped: 51,869) | 81,510 | 73,203 |
+
+So the handover's premise was wrong: three quarters of the store's 16.5 KB was its index, not its chunks. The fix on
+`fix/shaped-store-heap` (this branch) shrinks the index: a 16 B entry (the text hash folded to 32 bits, halfword
+length, begin and count), a 14 B piece, `reserve()` exact and the growth past it by half again. Real prose moves
+little: the long Hindi chapter (`make_test_shaped_indic.py --long`, portrait) peaks 1.3 KB lower and costs under 1 KB
+more shaped than unshaped. The stress chapter's store is now about 10 KB on the device (5.4 KB index, 4 KB chunks,
+the state).
+
+**Why the rest does not go into the lent arena** (the handover's two ideas, worked out against §8.2 of the memory
+strategy; now its §8.5, rows 17 and 18):
+- A slab reserved at the parse lane's start lifts every user above it. The word cache needs 32 KB free to arm: the
+  X3's 41,428 B at the parse's start allows a slab of 8.6 KB, the X4's 37,156 B one of 4.3 KB. The 32 KB image walk
+  stage fits while the open page block is at most 8,116 - S (X3) and 3,844 - S (X4) bytes: it leaves the X4 for any
+  slab. The cache's tail moves down by S, so a TrueType miss at a full page (about 30.5 KB) empties it from
+  S = 5.3 KB (X3) and 1.1 KB (X4), and it re-arms only between pages. The store the stress chapter needs is 10 KB.
+- The free tail under the word cache is for data that may be lost. A CFF miss at a full page reaches 30.5 KB, above
+  a store tail at 27.7 KB (X3) or 23.6 KB (X4): every such miss would throw the paragraph's records away mid-pass.
+- What would work: chunks above the page block, rehomed below it at each page end, since they grow only while a
+  shaped paragraph is in flight. It needs the chunks' arena offsets, a rehome inside `releasePageBlock()` before any
+  other allocation, the line's piece views made after `beforeLine_` (they point into the chunks), and every live
+  `ParsedText` told (the repeat header's cells keep theirs across pages). That buys the 4 KB of chunks, unless the
+  index becomes arena arrays too. Not built.
+
+**Also done on the branch** (the second bullet of the old plan): every reserve the bidi line pass makes is behind
+the heap check (`HeapGrowth.h`, one helper for `ParsedText`, `ShapedStore` and `BidiLine`): `layOutBidiLine`'s
+token vector, and `BidiLine`'s Line buffers in `buildPieces` and `fallbackLine`, the fallback's word copies
+included. Refused, the line takes the existing "laid out without bidi" path. Tests: `ShapedStore.ReserveTakes...`,
+`ShapedStore.TheIndexStaysWithinItsHalfwordBounds`, `BidiLine.ALineTheHeapRefuses...`,
+`BidiLine.AFallbackLineTheHeapRefuses...`, `ShapedLayout.ALineWhoseTokensTheHeapRefuses...`. The goldens are
+unchanged (no layout changes).
+
+**The X3 run (2026-11-08, Landscape CW, cold cache; the branch at ac63df86e against master 774e40dfc, both built
+from a worktree with the full serial API, each written to the idle OTA slot and driven with `tools/devctl.py`:
+`ACT:READER:/test/test_shaped_arabic.epub@2:1`):**
+
+| | master | `fix/shaped-store-heap` |
+|---|---|---|
+| Background-C's borrowed build | aborts at the table row (9,188 free, 6,388 largest) | complete, 4 pages |
+| Lowest gate reading in it | 9,188 free / 6,388 largest | 14,484 free / 11,252 largest, before the stress paragraph |
+| Released rebuild | aborts too; cached degraded, 2 pages | none |
+| Arena high water, borrowed build | 33,466 B | 31,618 B |
+| Allocator minimum since boot, after the open | 6,508 B | 5,824 B |
+| The chapter as cached | 2 pages, table missing | 4 pages, the table on page 4 |
+
+The build is 1.8 KB lighter at the gate, and that is the difference between the hard floor and a clean build. No
+`shaping degraded`, no demoted row, no released rebuild; a warm open after a reboot drew all four pages (the stress
+paragraph on page 3, the table on page 4). The allocator's minimum is the build's, not the render's or the book
+index's: a warm open after a reboot left the boot's 17,520 B minimum at 15,416, and a section-only rebuild (book.bin
+kept, `spines/` removed, after a reboot) ended at 5,824 B again. So between the last gate reading and the end of the
+stress paragraph the heap goes about 8.7 KB deeper, 3 KB under the hard floor, with nothing refused: the pass line
+is met on the X3 with about 5.8 KB to spare. Logs and screenshots:
+`~/.local/state/witchhunt-device-backups/x3-20261108-shaped-heap-state/runs/`.
+
+**Tier A (2026-11-08, four commits on the same branch), measured the same way.** 5.8 KB was not much, and the host
+inventory showed what else the stress paragraph held at the peak besides the store: the word arrays doubled to 256
+entries for a block the parser splits at 175; the bidi fallback copied every token's text into a kept vector of
+strings; the line's token array, which only the pass reads, was a kept heap vector; and all of it stayed until the
+slice's yield, in front of the table. So: the word arrays stop at the parser's split capacity (146 entries, 3.6 KB on
+the device); the fallback hands views and `computeVisualWordOrder` skips the marks itself (2 KB); the tokens come with
+the pass's arena workspace (2 KB); and a paragraph's end gives back line buffers over 2 KB and a store over 8 KB.
+
+| | index fix only (ac63df86e) | Tier A (8c7fe2422) |
+|---|---|---|
+| Host inventory, heap above the build's base at the peak | +73,203 | +62,627 |
+| Borrowed build on the X3 | complete, 4 pages | complete, 4 pages |
+| Lowest gate reading in it | 14,484 free / 11,252 largest | no gate reached |
+| Allocator minimum, section build alone after a reboot | 5,824 B | about 19.8 KB |
+| Arena high water, borrowed build | 31,618 | 26,000 |
+
+The Tier A minimum had to be read with 8 KB of ballast held (`CMD:HEAP:HOLD=8000` before the open), because the build
+no longer reaches the boot's own minimum of 15.4 KB: 11,824 B with the ballast, 11,496 B for the cold open with the
+book index included (19.5 KB). Layout is unchanged on the host (goldens) and the device (4 pages, the table on the
+last).
+
+**What is left:**
+- **The X4 figures** (no X4 was attached): 4,272 B less arena (the borrowed build's 26,000 B high water leaves 22 KB
+  of it) and 8.5 KB more heap, so it should pass with more room than the X3; its figures for #656 were never taken
+  either.
+- **Tier B and C, if more room is ever wanted:** the store's chunks above the page block, rehomed below it at each
+  page end (about 4 KB, some 250 lines, and on the X4 a span-heavy paragraph at a full page empties the word cache
+  for that page); then the index as arena arrays too (the whole store, 9.5 KB, off the heap). The design notes are
+  under "Why the rest does not go into the lent arena" above. The realistic case, a tajweed book at body size, holds
+  blocks of 96-144 tokens and a store of about 4-6 KB, like Zaydan's, and never needed either.
+- **The paragraph-layout gate does not know the paragraph's size:** before Tier A the stress paragraph took the heap
+  8.7 KB below the last gate reading, 3 KB under the hard floor, with nothing refused. A gate that adds the block's
+  token count times a per-token cost would degrade predictably instead of by luck. Not built.
+- **Policy, open:** `ShapedStore::heapAllows` and the layout's `heapAllows` check the largest block only, with no
+  floor, so a store can take the heap down to Background-C's abort. A floor there would turn that into a latched
+  `shaping degraded` (unjoined Arabic, rebuilt once) instead of a released rebuild: a visible defect against an
+  invisible one with a fragmented session, which is the maintainer's call. Not changed.
 
 ### 2. Profile the right-to-left baseline (cheap, helps Hebrew and Arabic)
 
