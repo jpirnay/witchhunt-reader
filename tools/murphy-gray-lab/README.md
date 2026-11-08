@@ -289,6 +289,31 @@ white drive (never-black controls 98.9 and 99.6):
 - A first run was cut off by a reboot after about 273 pages; `t11-cancel --pages 273` paid it back before
   this run. After the reboot the camera ignored its exposure until `cam.py` toggled the mode.
 
+
+**Test 11 on the X4 (SSD1677)**, which has no lab firmware: `x4lab.py` drives a development build of the reader
+through `CMD:LAB` (both RAM planes from rectangles, an external LUT built from the X4 Pro text table the X4's
+one-pass runs). Rows: black VSH1 17 and white VSL 24 as shipped, a VSH1 2 nudge or rest as the stay row.
+
+```sh
+LAB_BOARD=x4 MURPHY_PORT=<X4 port> ./x4lab.py white|black|marks    # cam.py baselines and calibration
+./x4lab.py t11 --stay nudge; ./x4lab.py t11-cancel --stay nudge
+```
+
+Results on our X4, 2026-11-08, an hour after the white drive (never-black controls 116.0 and 116.8; the
+daylight rose about 8 points over the hour, so compare within a shot):
+
+| Held black | Re-drive (VSH1 17) | Nudge (VSH1 2) | Rest |
+|---|---|---|---|
+| 1 page | 115.5 | 115.4 | 115.5 |
+| 50 pages | 115.7 | 116.4 | 115.9 |
+| 200 pages | 116.3 | 117.0 | 116.5 |
+| 500 pages | 115.0 | 116.1 | 116.0 |
+
+- Like the X3, not the Murphy: re-driven black comes back within half a point of black held for a page, and
+  nothing moves over the hour.
+- While held, re-driving keeps black deepest: after 500 pages 13.1 against 15.2 nudged and 27.9 resting, from
+  about 7 for one drive. Black left resting fades within minutes on this panel (that band sits beside a
+  white control, so a little of it is camera bleed).
 **Test 4: does gray survive a real page turn?** The reader turns pages with FAST, and FAST rests any
 pixel the planes call unchanged, so gray left around letters would stay. The planes are only
 selector bits, so `--aware` marks each gray pixel as changed, which gives it the full drive to the
