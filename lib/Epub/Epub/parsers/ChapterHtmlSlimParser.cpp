@@ -1344,8 +1344,13 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     // A block laid out in parts has its font already: a family its later words bring in gets its face now.
     if (newFontSlot && wordFontsSize_ != 0) resolveWordFont(fontSlot);
 
-    // A split waits for a ruby that is open, up to kRubyGroupSlack tokens, so its group is made whole.
-    if (currentTextBlock->size() > 96 && !(rubyDepth_ >= 0 && currentTextBlock->size() <= 96 + kRubyGroupSlack)) {
+    // A split waits for a ruby that is open, up to kRubyGroupSlack tokens, so its group is made whole. It also waits
+    // for the block to grow kSplitRegrowth tokens past what the last split kept (the last line): a line of more
+    // than 96 tokens would otherwise leave the block above 96 and split it again on every following word. A kept
+    // line of kSplitRegrowth tokens or fewer leaves the threshold at 96, as before.
+    const size_t splitThreshold = std::max<size_t>(96, splitKeptTokens_ + kSplitRegrowth);
+    if (currentTextBlock->size() > splitThreshold &&
+        !(rubyDepth_ >= 0 && currentTextBlock->size() <= splitThreshold + kRubyGroupSlack)) {
       // The bases waiting for their reading are the block's last tokens, and the layout keeps the last line: a base
       // that is still there after the split stays the start of its group.
       size_t pendingBases = kNoRubyGroup;
@@ -1416,6 +1421,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
           },
           false, static_cast<int16_t>(currentPageNextY), splitLineHeight);
       if (pendingBases <= currentTextBlock->size()) rubyGroupStart_ = currentTextBlock->size() - pendingBases;
+      splitKeptTokens_ = currentTextBlock->size();
       // emitPage() clears floatZoneCount mid-layout when the page overflows — that's
       // intentional: lines on the continuation page should not be narrowed for an
       // image that lives on the previous page.
@@ -2321,6 +2327,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     currentTextBlock->setShapingLatch(&shapingDegradedAny_);
     currentTextBlock->setVertical(vertical_);
   }
+  splitKeptTokens_ = 0;  // a new block has had no split
   wireTextBlock();
   wordsExtractedInBlock = 0;
 }

@@ -200,6 +200,8 @@ class ChapterHtmlSlimParser final : public Print {
   // <ruby>: a group is made when an <rt> closes, over the tokens the target got since the last group (see
   // startElement).
   static constexpr size_t kNoRubyGroup = SIZE_MAX;
+  static constexpr size_t kSplitRegrowth = 48;   // tokens past the last split's kept line before the next split
+  size_t splitKeptTokens_ = 0;                   // tokens the current block kept after its last long-block split
   static constexpr size_t kRubyGroupSlack = 32;  // tokens the 96-token split may wait for a group
   int rubyDepth_ = -1;                           // the open <ruby>'s depth
   int rtDepth_ = -1;                             // collecting <rt> text while >= 0
