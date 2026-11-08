@@ -174,7 +174,8 @@ opens the reader's menu or, in the readers without one, their own navigation. Th
 the bottom edge on a board with a light and the top edge otherwise (`wasMenuGesture()`). In the EPUB
 reader a tap on a link (footnote marker or cross-reference) is tested first, because a marker can
 sit inside a page-turn zone; the markers are located during the render by matching the page's
-words (`LinkMarkerMatch`). Gesture actions reach a reader through its `onButtonAction()`, so every
+words (`LinkMarkerMatch`), a word at a time, so a link of CJK text, stored one page word per
+character, matches its characters one by one. Gesture actions reach a reader through its `onButtonAction()`, so every
 reader must implement one.
 
 ### The hint strip

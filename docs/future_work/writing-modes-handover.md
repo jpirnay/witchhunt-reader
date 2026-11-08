@@ -244,11 +244,11 @@ reader"):
 
 ### 7. CJK (essentially complete)
 
-**An open bug:** a link whose text is longer than one CJK character cannot be tapped.
-- **Cause:** `src/components/LinkMarkerMatch.h` `consumeToken` splits the marker at spaces only, while CJK is stored
-  one character per word.
-- **Fix sketch:** let a word consume a prefix of the current marker token when glued to the next. Host-test it in the
-  LinkMarkerMatch tests.
+**Fixed (`fix/cjk-link-tap`, 2026-11-08):** a link whose text was longer than one CJK character could not be tapped,
+because `LinkMarkerMatch::consumeToken` split the marker at spaces only, while CJK is stored one character per word.
+A page word may now consume the front of the current marker token where the parser could have split it: at a CJK
+break (Hangul is kept whole), or where the next page word is glued to it. On the Murphy the test book's links
+"第二章开头" and "注1" were a page turn on master and are link taps with the fix.
 
 **Out of scope so far** (each a candidate plan; [cjk.md](cjk.md) "Out of scope so far"):
 - CSS `line-break`/`word-break`;

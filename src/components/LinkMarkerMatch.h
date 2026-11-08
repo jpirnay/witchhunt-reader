@@ -1,6 +1,9 @@
 #pragma once
 
+#include <Utf8.h>
+
 #include <cstddef>
+#include <cstdint>
 
 // Matching a page word against the display text of an internal link, so the reader can put a tap
 // target on the marker a reader can see.
@@ -81,14 +84,48 @@ inline bool core(const char* text, const size_t len, size_t& start, size_t& end)
   return true;
 }
 
+// The code point that starts at text[at] (at < end), from bytes the view holds; U+FFFD for a sequence it cuts short
+// or a byte that starts none.
+inline uint32_t codepointAt(const char* text, const size_t at, const size_t end) {
+  const auto b = [&](const size_t i) { return static_cast<unsigned char>(text[i]); };
+  const unsigned char lead = b(at);
+  const size_t n = lead < 0x80 ? 1 : (lead >> 5) == 0x6 ? 2 : (lead >> 4) == 0xE ? 3 : (lead >> 3) == 0x1E ? 4 : 0;
+  if (n == 0 || at + n > end) return 0xFFFD;
+  if (n == 1) return lead;
+  uint32_t cp = lead & (0x7F >> n);
+  for (size_t i = 1; i < n; ++i) cp = (cp << 6) | (b(at + i) & 0x3F);
+  return cp;
+}
+
+// The code point that ends at text[end - 1] (start < end).
+inline uint32_t codepointBefore(const char* text, const size_t start, const size_t end) {
+  size_t at = end - 1;
+  while (at > start && (static_cast<unsigned char>(text[at]) & 0xC0) == 0x80) --at;
+  return codepointAt(text, at, end);
+}
+
+// Whether the parser may have stored one marker token as two page words split between these code points: a CJK
+// line-break opportunity (CjkLineBreak), which gives a token per character. Hangul is kept whole between spaces
+// (keep-all), so a boundary touching it is no such place.
+inline bool cjkSplit(const uint32_t before, const uint32_t after) {
+  const auto cjk = [](const uint32_t cp) { return utf8IsCjkBreakable(cp) && !utf8IsHangul(cp); };
+  return cjk(before) || cjk(after);
+}
+
 // Consume one token of `marker` with one page word.
 //
 // `markerPos` is how much of the marker earlier words already accounted for; it advances past the
 // matched token and any spaces after it when the word matches. Returns false and leaves
 // `markerPos` alone otherwise, so a caller matching a multi-word marker can abandon a partial run
 // and start again at the next word.
+//
+// A word may also match the front of the token, and `markerPos` then stops inside it for the next word: CJK text is
+// stored one page word per character, so a link "第一章" is three words, while its text is one token between
+// spaces. That is allowed only where the parser could have split the token: at a CJK break (cjkSplit), or where the
+// caller says the next page word is glued to this one with no space (`nextGlued`: a styled run that changes
+// mid-word). So a "1" and a separate "2" never make a link "12".
 inline bool consumeToken(const char* marker, const size_t markerLen, size_t& markerPos, const char* word,
-                         const size_t wordLen) {
+                         const size_t wordLen, const bool nextGlued = false) {
   if (marker == nullptr) return false;
 
   size_t wordStart = 0;
@@ -112,12 +149,24 @@ inline bool consumeToken(const char* marker, const size_t markerLen, size_t& mar
   tokenCoreEnd += tokenStart;
 
   const size_t tokenLen = tokenCoreEnd - tokenCoreStart;
-  if (tokenLen != wordEnd - wordStart) return false;
-  for (size_t i = 0; i < tokenLen; ++i) {
+  const size_t coreLen = wordEnd - wordStart;
+  if (coreLen > tokenLen) return false;
+  for (size_t i = 0; i < coreLen; ++i) {
     if (marker[tokenCoreStart + i] != word[wordStart + i]) return false;
   }
-
-  markerPos = pos;
+  if (coreLen == tokenLen) {
+    markerPos = pos;
+    return true;
+  }
+  // The front of the token: only where the token could have been split there (see above), and never inside a code
+  // point.
+  const size_t splitAt = tokenCoreStart + coreLen;
+  if ((static_cast<unsigned char>(marker[splitAt]) & 0xC0) == 0x80) return false;
+  if (!nextGlued &&
+      !cjkSplit(codepointBefore(marker, tokenCoreStart, splitAt), codepointAt(marker, splitAt, tokenCoreEnd))) {
+    return false;
+  }
+  markerPos = splitAt;
   return true;
 }
 

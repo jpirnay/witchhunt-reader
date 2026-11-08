@@ -7192,14 +7192,16 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
       const size_t markerLen = strlen(marker);
       const char* text = block->wordText(i);
       const size_t textLen = block->wordTextLen(i);
+      // The next word glued to this one (no space): a link's text may then continue inside it.
+      const bool nextGlued = i + 1 < block->wordCount() && block->wordContinues(i + 1);
 
-      bool matched = LinkMarkerMatch::consumeToken(marker, markerLen, markerPos, text, textLen);
+      bool matched = LinkMarkerMatch::consumeToken(marker, markerLen, markerPos, text, textLen, nextGlued);
       if (!matched && markerPos != 0) {
         // A multi-word run that started earlier and then diverged. Drop it and give this word a
         // fresh chance at being the first token, rather than losing the link to a false start.
         markerPos = 0;
         runOpen = false;
-        matched = LinkMarkerMatch::consumeToken(marker, markerLen, markerPos, text, textLen);
+        matched = LinkMarkerMatch::consumeToken(marker, markerLen, markerPos, text, textLen, nextGlued);
       }
       if (!matched) continue;
 
