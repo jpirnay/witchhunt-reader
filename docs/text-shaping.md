@@ -478,6 +478,9 @@ a line's tokens by the bidi levels. PR 4b teaches it to carry shaped pieces.
   a clean build: master's borrowed build aborted at the table row (9,188 B free, 6,388 largest), its released rebuild
   aborted too, and the chapter was cached truncated at 2 pages of 4; with the change the borrowed build completes, its
   lowest gate reading 14,484 free and 11,252 largest before the stress paragraph, the allocator's minimum 5,824 B.
+  Four more changes (the word arrays capped at the parser's split capacity, the fallback handing views instead of
+  word copies, the line's tokens in the arena workspace, and a paragraph's end releasing line buffers over 2 KB and a
+  store over 8 KB) took the host peak to 62.6 KB and the X3 build's minimum to about 19.8 KB, with no gate reached.
   Real prose costs under 1 KB more shaped than unshaped at its peak (the long Hindi book, portrait), and passes in
   both orientations. The remaining 10 KB cannot simply move into the lent arena: a store of that size reserved at the
   parse lane's start would stop the word cache arming on the X4 and push the 32 KB image walk stage out of both

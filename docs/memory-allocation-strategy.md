@@ -454,6 +454,16 @@ under 1 KB more heap shaped than unshaped there. The room the arena has for the 
   67,342 (*moby-dick*), host, 2026-09-25, with byte-identical section files.
 - **What is left per line** is the `TextBlock` object and the `PageLine` (88 B and 24 B on the
   64-bit host), both on the heap.
+- **A long line's working set is the next peak** (2026-11-08, `test_shaped_arabic`'s span-per-word paragraph, 126
+  tokens a line in landscape). Doubling had taken the word arrays to 256 entries for a block the parser splits at
+  175; the bidi fallback copied every token's text into a kept vector of strings; the line's token array (16 B a
+  token) was a kept heap vector although only the pass reads it; and all of it, with the paragraph's 10 KB store,
+  stayed until the slice's yield, in front of the table that followed. Now the arrays stop at the parser's split
+  capacity, the fallback hands views and `computeVisualWordOrder` skips the marks itself, the tokens come with the
+  pass's arena workspace, and a paragraph's end releases line buffers over 2 KB and a store over 8 KB. The host
+  inventory's peak for that chapter fell from +73.2 to +62.6 KB above the build's base, with layout unchanged, and
+  on the X3 the build's heap minimum rose from 5.8 KB to about 19.8 KB (read with 8 KB of ballast held, since the
+  build no longer reaches the boot's own minimum; the writing-modes handover, item 1).
 
 ### 8.4 Where contiguity is lost
 

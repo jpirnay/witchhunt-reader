@@ -125,13 +125,39 @@ stress paragraph the heap goes about 8.7 KB deeper, 3 KB under the hard floor, w
 is met on the X3 with about 5.8 KB to spare. Logs and screenshots:
 `~/.local/state/witchhunt-device-backups/x3-20261108-shaped-heap-state/runs/`.
 
+**Tier A (2026-11-08, four commits on the same branch), measured the same way.** 5.8 KB was not much, and the host
+inventory showed what else the stress paragraph held at the peak besides the store: the word arrays doubled to 256
+entries for a block the parser splits at 175; the bidi fallback copied every token's text into a kept vector of
+strings; the line's token array, which only the pass reads, was a kept heap vector; and all of it stayed until the
+slice's yield, in front of the table. So: the word arrays stop at the parser's split capacity (146 entries, 3.6 KB on
+the device); the fallback hands views and `computeVisualWordOrder` skips the marks itself (2 KB); the tokens come with
+the pass's arena workspace (2 KB); and a paragraph's end gives back line buffers over 2 KB and a store over 8 KB.
+
+| | index fix only (ac63df86e) | Tier A (8c7fe2422) |
+|---|---|---|
+| Host inventory, heap above the build's base at the peak | +73,203 | +62,627 |
+| Borrowed build on the X3 | complete, 4 pages | complete, 4 pages |
+| Lowest gate reading in it | 14,484 free / 11,252 largest | no gate reached |
+| Allocator minimum, section build alone after a reboot | 5,824 B | about 19.8 KB |
+| Arena high water, borrowed build | 31,618 | 26,000 |
+
+The Tier A minimum had to be read with 8 KB of ballast held (`CMD:HEAP:HOLD=8000` before the open), because the build
+no longer reaches the boot's own minimum of 15.4 KB: 11,824 B with the ballast, 11,496 B for the cold open with the
+book index included (19.5 KB). Layout is unchanged on the host (goldens) and the device (4 pages, the table on the
+last).
+
 **What is left:**
-- **The X4 figures** (no X4 was attached): 4,272 B less arena (the borrowed build's 31,618 B high water leaves
-  16 KB of it) and 8.5 KB more heap, so it should pass with more room than the X3; its figures for #656 were never
-  taken either.
-- **The pass line, if a later change eats the 5.8 KB:** accept graceful degradation of a quarter-size span-per-letter
-  paragraph, or build the rehomed chunks above, with the X4's word cache cost stated. The realistic case, a tajweed
-  book at body size, holds blocks of 96-144 tokens and a store of about 4-6 KB, like Zaydan's.
+- **The X4 figures** (no X4 was attached): 4,272 B less arena (the borrowed build's 26,000 B high water leaves 22 KB
+  of it) and 8.5 KB more heap, so it should pass with more room than the X3; its figures for #656 were never taken
+  either.
+- **Tier B and C, if more room is ever wanted:** the store's chunks above the page block, rehomed below it at each
+  page end (about 4 KB, some 250 lines, and on the X4 a span-heavy paragraph at a full page empties the word cache
+  for that page); then the index as arena arrays too (the whole store, 9.5 KB, off the heap). The design notes are
+  under "Why the rest does not go into the lent arena" above. The realistic case, a tajweed book at body size, holds
+  blocks of 96-144 tokens and a store of about 4-6 KB, like Zaydan's, and never needed either.
+- **The paragraph-layout gate does not know the paragraph's size:** before Tier A the stress paragraph took the heap
+  8.7 KB below the last gate reading, 3 KB under the hard floor, with nothing refused. A gate that adds the block's
+  token count times a per-token cost would degrade predictably instead of by luck. Not built.
 - **Policy, open:** `ShapedStore::heapAllows` and the layout's `heapAllows` check the largest block only, with no
   floor, so a store can take the heap down to Background-C's abort. A floor there would turn that into a latched
   `shaping degraded` (unjoined Arabic, rebuilt once) instead of a released rebuild: a visible defect against an
