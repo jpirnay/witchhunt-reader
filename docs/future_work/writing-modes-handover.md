@@ -28,6 +28,9 @@ can continue on another computer. The roadmap itself is [writing-modes.md](writi
   - the fallback's piece bound;
   - the doc corrections.
 - This file's own PR, which also adds the timing-book generators in `tools/writing-modes-bench/`.
+- #660 `fix/shaped-store-heap` (2026-11-08): item 1 (the shaped store's index, the word arrays' cap, the line pass's
+  buffers), X3 validated.
+- `perf/rtl-baseline` (2026-11-08): item 2's plain-token short path, X3 validated; its PR follows #660.
 
 **Branches worth knowing:**
 - `wip/shaper-profile` (pushed): the `OT_PROFILE` instrumentation and the host profile test from PR 3, the starting
@@ -69,7 +72,7 @@ tajweed-coloured Quran (a span on every word) is the realistic case.
   token is cut.
 - **The pass line:** the test book's landscape chapter 2 builds clean on the X3, and no golden changes.
 
-### 2. Profile the right-to-left baseline (cheap, helps Hebrew and Arabic)
+### 2. Profile the right-to-left baseline (profiled and half done; the measure is what is left)
 
 On the X3, Zaydan's Arabic chapter against its Latin twin:
 
@@ -78,16 +81,45 @@ On the X3, Zaydan's Arabic chapter against its Latin twin:
 | master, bidi only, no shaping | 5,586 | 2,517 | 2.22x |
 | With shaping (#656) | 7,880 | 2,489 | 3.17x |
 
-So about 3 s of Arabic's 5.4 s excess is NOT the shaper. It is the bidi and TrueType path that Hebrew shares, and it
-has never been profiled.
+So about 3 s of Arabic's 5.4 s excess is NOT the shaper. It is the bidi and TrueType path that Hebrew shares.
 
-Candidates to check:
-- the bidi line pass per line (`BidiLine::layoutLine`, the Scratch);
-- word-width measurement of non-Latin glyphs through the glyph store;
-- kerning lookups;
-- UTF-8 decoding.
+**Profiled (2026-11-08).** Hebrew is that path whole, so the timing book is now Bialik's *Aryeh Baal Guf*
+(`tools/writing-modes-bench/make_bialik_books.py`, 2,511 words, with its Latin twin; `/test/test_bialik_{he,en}.epub`
+on the X3's card). The host at -O3 reproduces the ratio (2.0x), and gprof's call counts (perf is locked on that
+machine, `perf_event_paranoid=4`) showed the first two levers: in a paragraph that needs bidi the width pass ran
+`BidiLine::tokenForm`, a UAX#9 pass, on every token on its own (2,686 passes a chapter against the 293 lines'), and
+`placeBidiLine` measured every piece a second time (5,319 measures for 2,632 tokens). A device profile (throwaway
+timers on branch `wip/layout-profile`, printed as `LAYOUTPROF`; build with `-DLAYOUT_PROFILE=1`) split the Hebrew
+chapter's 2,980 ms parse in NotoSansHebrew into width pass 305 (forms) + 500 (measure), line pass 466, place 587 (287
+of it measuring), emit 395 ms, against the Latin twin's 190 (measure) + 220 (emit) of 1,245.
 
-The section file is also larger: 27,360 B against 16,042 B.
+**Done (`perf/rtl-baseline`, two commits):** a plain token takes a short path. Letters of one strong class, with
+unmirrored punctuation among them when the letters run the paragraph's way (then N1 or N2 resolves the punctuation
+that way in any line), and no control open: its form is its code points reversed, no pass, and the placed line
+keeps the width pass's measure (`plainForm_`). Two thirds of Hebrew prose tokens are plain with letters alone, nine in
+ten with the punctuation. Layout is byte-identical on every right-to-left golden and on the timing books. X3, cold,
+median of three:
+
+| | master | branch |
+|---|---|---|
+| Hebrew drawn by the fallback face from BookerlyTTF (the reader picks no family for Hebrew yet) | 5,531 ms, 2.13x of the twin's 2,600 | 4,918 ms, 1.89x |
+| Hebrew in NotoSansHebrew as the body font | 4,680 ms, 1.81x of 2,592 | 4,244 ms, 1.66x of 2,557 |
+
+**What is left of it, by size:**
+- **The TrueType measure.** The renderer's split (same profile build): kerning 325 ms for the Hebrew chapter's 15,668
+  glyphs against 80-150 for the twin's 16,616, the glyph lookups 182 against 90, `beginText` 14. A Hebrew kerning pair
+  costs three to four times a Latin one and a Hebrew glyph twice; both go through the glyph store's flash index
+  (`FlashGlyphStore::findPair`, `find`: a Fibonacci-hashed, linearly probed table read from mapped flash, then the
+  record's header) and, for a pair the index lacks, the GPOS reader. The profile's next build counts hits, slow
+  lookups and probes; the candidate fix is a small RAM cache in front of both lookups, which would speed every
+  TrueType measure and draw, Latin included, for about 1 KB while a family is loaded.
+- **The line pass** (466 ms, 1.2 ms a line): one UAX#9 pass per line, with every token's HebrewShaper walk repeated
+  and the forms re-encoded. The walk could stop at tokens without a yod (the divine name is all it changes).
+- **The form bytes.** A Hebrew line writes each word's display form beside its text (`WD` in the dump): 26,091 B
+  against the twin's 15,983, and `emit` 395 ms against 220. A plain token's form is its text reversed and could be
+  derived when drawn; that is a section format change.
+- **The plain path itself** (305 ms for 2,574 tokens, 118 µs each): `bidi_class` per code point (two binary searches
+  in flash), the HebrewShaper walk, `workspaceAvailable`'s mutex.
 
 ### 3. Speed up the shaping engine (helps Indic most)
 
