@@ -338,7 +338,8 @@ break (Hangul is kept whole), or where the next page word is glued to it. On the
   which is why the status bar shows a Hebrew chapter title. Outside the reader, `openUiBookFonts` in `main.cpp`
   opens the last book's family for the screens that draw book text, but only when that family covers CJK, so a
   Hebrew or Arabic family never backs the Library rows (X3, 2026-11-09: the Details view of `/test`, NotoSansHebrew
-  as the reader font, drew the Hebrew notes book's title blank; the Japanese, Korean and Chinese titles drew). The
+  as the reader font, drew the Hebrew notes book's title blank; the Japanese, Korean and Chinese titles drew, with
+  stand-in boxes for the glyphs the UI faces lack). The
   next step is a design note, not code. One choice: let the opener take a family that covers the title's script too;
   it still serves one family for every row, the last book's. The other: give the built-in UI faces the Hebrew
   letters and points, at a flash cost not measured yet. Arabic and Indic titles would still need shaping, which
