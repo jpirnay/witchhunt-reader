@@ -1780,3 +1780,40 @@ TEST_F(ShapedLayout, ALatinWordForceSplitInAHindiParagraphKeepsTheStoreInStep) {
   EXPECT_EQ(3, shaped);
   EXPECT_FALSE(latch);
 }
+
+TEST_F(ShapedLine, AConsumedLetterIsDrawnWhenItsPartnerDegrades) {
+  // Review fix 2: an empty run is left off only where the ligature that took its letter is drawn. The heap refuses the
+  // line's cut points, so the lam's token (a bracket, then the lam, which keeps the lam-alef ligature) is laid out
+  // uncut and drawn as its code points; the alef's token, an empty run, is then drawn as its code points too, not lost.
+  // The warm-up (the same letters, without the bracket: no cut) leaves every other container the room the line needs.
+  useFont(kRtlTest);
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{kBeh}, {kLam}, {kAlef, EpdFontFamily::BOLD, true}, {kBeh}});
+  ASSERT_EQ(1u, layOut(text, renderer, 400).size());
+  ASSERT_FALSE(latch);
+  text.reset(noIndentStyle());
+  add(text, {{"(" + kLam}, {kAlef, EpdFontFamily::BOLD, true}});
+  Lines lines;
+  {
+    const LargestFreeBlock block(16);  // one cut asks for 18 B
+    lines = layOut(text, renderer, 400);
+  }
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  for (uint16_t i = 0; i < line.wordCount(); ++i) EXPECT_FALSE(line.hasGlyphForm(i)) << i;
+  const int alef = wordWithText(line, kAlef);
+  ASSERT_GE(alef, 0);
+  EXPECT_EQ(kAlef, line.wordDrawText(static_cast<uint16_t>(alef)));
+  EXPECT_TRUE(latch);
+
+  // The control: with room for the cut, the lam draws the ligature and the alef is left off.
+  text.reset(noIndentStyle());
+  add(text, {{"(" + kLam}, {kAlef, EpdFontFamily::BOLD, true}});
+  const Lines formed = layOut(text, renderer, 400);
+  ASSERT_EQ(1u, formed.size());
+  EXPECT_LT(wordWithText(*formed[0], kAlef), 0);
+  const int lam = wordWithText(*formed[0], kLam);
+  ASSERT_GE(lam, 0);
+  EXPECT_TRUE(formed[0]->hasGlyphForm(static_cast<uint16_t>(lam)));
+}

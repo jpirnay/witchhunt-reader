@@ -608,6 +608,15 @@ struct ParsedText::ShapingState {
     if (!pieces || pieces->empty()) return std::nullopt;
     return pieces;
   }
+  // Token j's piece that faces a glued neighbour (its last when `last`, else its first) when it is a glyph run with
+  // records, the run a ligature across the glue sits in; null otherwise.
+  const ShapedStore::Piece* edgeRun(const ParsedText& text, const GfxRenderer& renderer, const int fontId,
+                                    const size_t j, const bool last) const {
+    const auto pieces = piecesOf(text, renderer, fontId, j);
+    if (!pieces) return nullptr;
+    const ShapedStore::Piece& piece = last ? pieces->back() : pieces->front();
+    return piece.kind == IndicShaper::PieceKind::Glyphs && piece.count > 0 ? &piece : nullptr;
+  }
 };
 
 ParsedText::ParsedText(const bool extraParagraphSpacing, const bool hyphenationEnabled, const BlockStyle& blockStyle,
@@ -2913,7 +2922,7 @@ bool ParsedText::formBidiPieces(const GfxRenderer& renderer, const int fontId, c
       if (source != nullptr) return nullptr;  // two: not a piece the contract gives
       source = &sp;
     }
-    // An empty run is left off wherever it lands: it draws nothing.
+    // An empty run draws nothing wherever it lands: it is left off (below, where its ligature is drawn).
     if (source == nullptr || (source->kind == IndicShaper::PieceKind::Glyphs && source->count == 0)) return source;
     // The mandatory guard: a segment drawn as one form (glyphs, a Reordered form) must give one piece, or that form
     // would be drawn and measured on each (a mark across a cut drawn inside its base's segment, a Reordered segment
@@ -2956,6 +2965,34 @@ bool ParsedText::formBidiPieces(const GfxRenderer& renderer, const int fontId, c
       glyphs = glyphs || isRun;
     }
     if (runs) state.pieceGlyphs.push_back(run);
+  }
+  // A run its context's ligature emptied is left off only where that ligature is drawn: in a glued neighbour's facing
+  // run drawn from its glyphs on this line, or on an earlier line (a fallback break after a lam, accepted). Where the
+  // neighbour is drawn as its code points (no room for its cuts, the guard, its own shaping refused), the letter is
+  // drawn as its own code points, or nothing would draw it.
+  const auto drawnFrom = [&](const size_t token, const ShapedStore::Piece* run) {
+    for (size_t w = 0; run != nullptr && w < count; ++w) {
+      if (pieces[w].token == token && state.pieceGlyphs[w].count != 0 && run->begin < pieces[w].end &&
+          pieces[w].begin < run->end) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const auto ligatureDrawn = [&](const size_t t) {
+    const size_t i = first + t;
+    if (wordBoundaries[i].continues) {
+      if (i == 0) return true;  // the neighbour was an earlier pass's, drawn on its line
+      const ShapedStore::Piece* run = shapingState_->edgeRun(*this, renderer, fontId, i - 1, true);
+      if (run != nullptr && (t == 0 || drawnFrom(t - 1, run))) return true;
+    }
+    return t + 1 < state.tokens.size() && wordBoundaries[i + 1].continues &&
+           drawnFrom(t + 1, shapingState_->edgeRun(*this, renderer, fontId, i + 1, false));
+  };
+  for (size_t v = 0; glyphs && v < count; ++v) {
+    if (!state.pieceForms[v].empty() || state.pieceGlyphs[v].count != 0 || ligatureDrawn(pieces[v].token)) continue;
+    state.pieceForms[v] = displayForm(v);
+    xs[v] = measured(v);
   }
 
   // A Reordered form keeps the token's soft hyphens (the line pass's forms hold none), which TextBlock strips from a
@@ -3275,6 +3312,16 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
     state.pieceBoundaries.push_back(boundary);
     xs.push_back(static_cast<int16_t>(x));
   };
+  // Whether the ligature that emptied token t's run is drawn: in a glued neighbour's facing glyph run, on this line or
+  // an earlier one (a token's pieces are all placed here, so its runs are drawn from their glyphs).
+  const auto ligatureDrawn = [&](const size_t t) {
+    const size_t i = first + t;
+    if (wordBoundaries[i].continues && (i == 0 || state.edgeRun(*this, renderer, fontId, i - 1, true) != nullptr)) {
+      return true;
+    }
+    return t + 1 < count && wordBoundaries[i + 1].continues &&
+           state.edgeRun(*this, renderer, fontId, i + 1, false) != nullptr;
+  };
   for (size_t t = 0; t < count; ++t) {
     const size_t i = first + t;
     state.tokenPieces.push_back(static_cast<uint16_t>(state.pieceWords.size()));
@@ -3291,8 +3338,9 @@ bool ParsedText::viewShapedPieces(const GfxRenderer& renderer, const int fontId,
       const int at = x + before;
       before += piece.width;
       // A run its context's ligature emptied (deviation 7's lam-alef) draws nothing: placed, TextBlock would draw a
-      // word without a form as its text, the letter again. Its bytes stay the token's.
-      if (piece.kind == IndicShaper::PieceKind::Glyphs && piece.count == 0) continue;
+      // word without a form as its text, the letter again. Its bytes stay the token's. Where that ligature is not
+      // drawn, the piece is placed, and drawn as its code points.
+      if (piece.kind == IndicShaper::PieceKind::Glyphs && piece.count == 0 && ligatureDrawn(t)) continue;
       std::string_view bytes = text.substr(piece.begin, piece.end - piece.begin);
       if (piece.kind == IndicShaper::PieceKind::Text) {
         bytes = drawn(bytes, true);

@@ -209,8 +209,9 @@ class ParsedText {
   void cutShapedTokens(const GfxRenderer& renderer, int fontId, size_t first, size_t count);
   // What each of the line's pieces is drawn as, in bidiState_'s pieceForms and pieceGlyphs, and its width, in
   // lineXPosScratch_: the line pass's display form and its measure, unless the piece draws a shaped token's store piece
-  // that is not Text (a glyph run, or a Reordered form, at the store's width). Returns whether any piece has a glyph
-  // run or is left off (an empty run: a letter its glued neighbour's ligature took).
+  // that is not Text (a glyph run, or a Reordered form, at the store's width). An empty run (a letter its glued
+  // neighbour's ligature took) is kept for leaving off only where that ligature is drawn from its glyphs, else drawn
+  // as its code points. Returns whether any piece has a glyph run or is left off.
   bool formBidiPieces(const GfxRenderer& renderer, int fontId, size_t first);
   // Takes the pieces formBidiPieces left off out of bidiState_->line and the vectors it filled: the gap before each
   // goes to the piece after it, and the reading order is numbered again.
@@ -305,12 +306,13 @@ class ParsedText {
   // becomes its pieces, in order (step 7), and true. The first piece keeps the token's boundary, the others are glued;
   // each takes the token's style and size; a Glyphs piece is drawn as its run, a Reordered piece as its form (without
   // its soft hyphens), and a piece that draws nothing (a Text piece of soft hyphens alone, an empty glyph run: a letter
-  // its glued neighbour's ligature took) is left out. lineXPosScratch_ then holds the pieces' positions (the token's x
-  // plus the widths before it), the annotations name pieces, and `range` is pointed at ShapingState's vectors. False,
-  // nothing changed, when no token has pieces: the line keeps its bytes. So does a line the heap has no room to lay
-  // out as pieces, drawn as its tokens' code points (latched). `withoutControls`: a line of a paragraph that needs
-  // bidi, laid out without the line pass: its texts are copies without their bidi controls (a Text piece's without its
-  // joiners too, as it was measured), in bidiState_->line.display, which the pass that did not run leaves free.
+  // its glued neighbour's ligature took, where that ligature is drawn) is left out. lineXPosScratch_ then holds the
+  // pieces' positions (the token's x plus the widths before it), the annotations name pieces, and `range` is pointed at
+  // ShapingState's vectors. False, nothing changed, when no token has pieces: the line keeps its bytes. So does a line
+  // the heap has no room to lay out as pieces, drawn as its tokens' code points (latched). `withoutControls`: a line of
+  // a paragraph that needs bidi, laid out without the line pass: its texts are copies without their bidi controls (a
+  // Text piece's without its joiners too, as it was measured), in bidiState_->line.display, which the pass that did not
+  // run leaves free.
   bool viewShapedPieces(const GfxRenderer& renderer, int fontId, size_t first, size_t count,
                         TextBlock::WordRange& range, bool withoutControls);
 
