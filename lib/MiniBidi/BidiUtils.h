@@ -65,6 +65,11 @@ void bindWorkspace(void* buffer);
 // Whether a heap workspace is allocated (tests: none survives a build).
 bool heapWorkspaceHeld();
 
+// witchhunt: whether orderLine would have a workspace now: the bound one, or the heap one, made here if it can be.
+// A caller with a short path that needs none asks first, so that it takes the same path as the full one would
+// without a workspace (the line is then laid out without bidi, and a form is its text).
+bool workspaceAvailable();
+
 // Returns false with empty visualOrder when no order is produced, including OOM.
 bool computeVisualWordOrder(const std::vector<std::string>& words, bool paragraphIsRtl,
                             std::vector<uint16_t>& visualOrder);

@@ -250,6 +250,11 @@ void bindWorkspace(void* buffer) {
 }
 
 // witchhunt: deviation 11
+bool workspaceAvailable() {
+  const std::lock_guard<std::mutex> lock(bidiMutex);
+  return getWorkspace() != nullptr;
+}
+
 bool heapWorkspaceHeld() {
   const std::lock_guard<std::mutex> lock(bidiMutex);
   return static_cast<bool>(bidiWorkspace);

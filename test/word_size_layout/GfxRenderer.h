@@ -112,7 +112,10 @@ class GfxRenderer {
   int getSpaceWidth(const int fontId, EpdFontFamily::Style /*style*/ = EpdFontFamily::REGULAR) const {
     return fontId == WIDE_FONT ? WIDE_SPACE_W : SPACE_W;
   }
+  // Test seam: called on every measurement, so a test can count them. Null: nothing.
+  inline static void (*onTextAdvance)() = nullptr;
   int getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style /*style*/) const {
+    if (onTextAdvance != nullptr) onTextAdvance();
     return countCodepoints(text) * glyphW(fontId);
   }
   // Where a glyph's ink sits in its advance, as a CJK font draws its marks: an opening bracket on the right half,
