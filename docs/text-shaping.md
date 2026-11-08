@@ -474,10 +474,12 @@ a line's tokens by the bidi levels. PR 4b teaches it to carry shaped pieces.
   peak, of which 12 KB was its index (32 B entries and 16 B pieces, doubled to 256) and 4 KB its chunks, while the lent
   arena sat at 11.4 KB of 52 KB. With 16 B entries, 14 B pieces and an exact reserve the index is 5.4 KB and the store
   about 10 KB, 8 KB less at the peak (the host's figure above the build's base fell from 81.5 to 73.2 KB; the unshaped
-  build is 51.9 KB). The test book's landscape chapter 2 degraded on the X3 before the change, gracefully (the chapter
-  cached with the status bit set, the heap's low point 2,936 B), and has not been run on a device since; real prose
-  costs under 1 KB more shaped than unshaped at its peak (the long Hindi book, portrait), and passes in both
-  orientations. The remaining 10 KB cannot simply move into the lent arena: a store of that size reserved at the
+  build is 51.9 KB). On the X3 in landscape (2026-11-08, cold cache) that is the difference between the hard floor and
+  a clean build: master's borrowed build aborted at the table row (9,188 B free, 6,388 largest), its released rebuild
+  aborted too, and the chapter was cached truncated at 2 pages of 4; with the change the borrowed build completes, its
+  lowest gate reading 14,484 free and 11,252 largest before the stress paragraph, the allocator's minimum 5,824 B.
+  Real prose costs under 1 KB more shaped than unshaped at its peak (the long Hindi book, portrait), and passes in
+  both orientations. The remaining 10 KB cannot simply move into the lent arena: a store of that size reserved at the
   parse lane's start would stop the word cache arming on the X4 and push the 32 KB image walk stage out of both
   boards' arenas, and the free tail is for data that may be lost (memory strategy §8.5, rows 17 and 18;
   [the handover](future_work/writing-modes-handover.md) has the budget).

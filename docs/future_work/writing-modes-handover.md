@@ -28,7 +28,7 @@ can continue on another computer. The roadmap itself is [writing-modes.md](writi
   - the fallback's piece bound;
   - the doc corrections.
 - This file's own PR (#658, merged), which also adds the timing-book generators in `tools/writing-modes-bench/`.
-- `fix/shaped-store-heap` (2026-11-08): item 1's host half, below; awaits the X3 run.
+- `fix/shaped-store-heap` (2026-11-08): item 1, below; X3 run done, no PR yet.
 
 **Branches worth knowing:**
 - `wip/shaper-profile` (pushed): the `OT_PROFILE` instrumentation and the host profile test from PR 3, the starting
@@ -37,14 +37,18 @@ can continue on another computer. The roadmap itself is [writing-modes.md](writi
 
 ## What is left, in the suggested order
 
-### 1. The heap follow-up for shaped text (half done; a device run next)
+### 1. The heap follow-up for shaped text (done on the X3; the X4 figures and one policy open)
 
-**What fails.** On the X3 in landscape, the test book `test/epubs/test_shaped_arabic.epub` chapter 2 degrades. That
+**What failed.** On the X3 in landscape, the test book `test/epubs/test_shaped_arabic.epub` chapter 2 degraded. That
 chapter holds a 400-token paragraph at a quarter of the body size (every Allah split by a span) whose lines hold more
-than 96 tokens, followed by a table.
-- Background-C runs low.
-- The released blocking rebuild demotes the table row, and the chapter is cached with the status bit set.
-- The heap's low point is 2,936 B; master builds it clean.
+than 96 tokens, followed by a table. Master at 774e40dfc (with #656), cold cache, Landscape CW, 2026-11-08:
+- Background-C's borrowed build reads 12,220 B free before the stress paragraph, then 9,188 free and 6,388 largest at
+  the table row: the row is demoted and the parse aborts.
+- The released blocking rebuild, from 97 KB free, is down to 16 KB by the long-block splits (the whole build is on the
+  heap there) and aborts at the table too, at 11,292 free and 4,084 largest. The chapter is cached degraded AND
+  truncated: 2 pages of 4, the table and the stress paragraph's tail missing, and the one rebuild per session fails
+  the same way.
+- The allocator's minimum since boot after the open: 6,508 B.
 
 Real prose passes in both orientations: Zaydan's chapter, Background-B's lowest heap 29,204 B in landscape. A
 tajweed-coloured Quran (a span on every word) is the realistic case.
@@ -99,17 +103,35 @@ included. Refused, the line takes the existing "laid out without bidi" path. Tes
 `BidiLine.AFallbackLineTheHeapRefuses...`, `ShapedLayout.ALineWhoseTokensTheHeapRefuses...`. The goldens are
 unchanged (no layout changes).
 
+**The X3 run (2026-11-08, Landscape CW, cold cache; the branch at ac63df86e against master 774e40dfc, both built
+from a worktree with the full serial API, each written to the idle OTA slot and driven with `tools/devctl.py`:
+`ACT:READER:/test/test_shaped_arabic.epub@2:1`):**
+
+| | master | `fix/shaped-store-heap` |
+|---|---|---|
+| Background-C's borrowed build | aborts at the table row (9,188 free, 6,388 largest) | complete, 4 pages |
+| Lowest gate reading in it | 9,188 free / 6,388 largest | 14,484 free / 11,252 largest, before the stress paragraph |
+| Released rebuild | aborts too; cached degraded, 2 pages | none |
+| Arena high water, borrowed build | 33,466 B | 31,618 B |
+| Allocator minimum since boot, after the open | 6,508 B | 5,824 B |
+| The chapter as cached | 2 pages, table missing | 4 pages, the table on page 4 |
+
+The build is 1.8 KB lighter at the gate, and that is the difference between the hard floor and a clean build. No
+`shaping degraded`, no demoted row, no released rebuild; a warm open after a reboot drew all four pages (the stress
+paragraph on page 3, the table on page 4). The allocator's minimum is the build's, not the render's or the book
+index's: a warm open after a reboot left the boot's 17,520 B minimum at 15,416, and a section-only rebuild (book.bin
+kept, `spines/` removed, after a reboot) ended at 5,824 B again. So between the last gate reading and the end of the
+stress paragraph the heap goes about 8.7 KB deeper, 3 KB under the hard floor, with nothing refused: the pass line
+is met on the X3 with about 5.8 KB to spare. Logs and screenshots:
+`~/.local/state/witchhunt-device-backups/x3-20261108-shaped-heap-state/runs/`.
+
 **What is left:**
-- **The X3 run** (no device was attached on 2026-11-08): flash the branch, cold-build the test book's chapter 2 in
-  landscape (`@2:1`), and read Background-B's or C's lowest heap, whether `shaping degraded` or a demoted table row
-  is logged, and the heap's low point against the floors (`EHP_TEXT_LAYOUT_SOFT_MIN_FREE_HEAP` 18 KB,
-  `EHP_TEXT_LAYOUT_HARD_MIN_FREE_HEAP` 9 KB). The X4 has 4,272 B less arena and 8.5 KB more heap; its figures for
-  #656 were never taken either.
-- **Then decide the pass line.** The stress chapter is about 10 KB over an unshaped build of the same block; a block
-  of 200 tokens already costs the unshaped build about 5 KB more in landscape than in portrait. If it still degrades:
-  accept it for a quarter-size span-per-letter paragraph (it degrades gracefully, as before), or build the rehomed
-  chunks above, with the X4's word cache cost stated. The realistic case, a tajweed book at body size, holds blocks
-  of 96-144 tokens and a store of about 4-6 KB, like Zaydan's.
+- **The X4 figures** (no X4 was attached): 4,272 B less arena (the borrowed build's 31,618 B high water leaves
+  16 KB of it) and 8.5 KB more heap, so it should pass with more room than the X3; its figures for #656 were never
+  taken either.
+- **The pass line, if a later change eats the 5.8 KB:** accept graceful degradation of a quarter-size span-per-letter
+  paragraph, or build the rehomed chunks above, with the X4's word cache cost stated. The realistic case, a tajweed
+  book at body size, holds blocks of 96-144 tokens and a store of about 4-6 KB, like Zaydan's.
 - **Policy, open:** `ShapedStore::heapAllows` and the layout's `heapAllows` check the largest block only, with no
   floor, so a store can take the heap down to Background-C's abort. A floor there would turn that into a latched
   `shaping degraded` (unjoined Arabic, rebuilt once) instead of a released rebuild: a visible defect against an
