@@ -9,6 +9,8 @@
 #include <ZipFile.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
+
+#include "LayoutProfile.h"
 #ifdef BENCH_EXTRACT_PROFILE
 #include <esp_timer.h>
 #endif
@@ -1752,6 +1754,19 @@ Section::BuildPhaseResult Section::runBuildParse(BuildState& st, const uint32_t 
   st.parseMs += millis() - sliceStart;
   if (st.arena) st.laneParse = static_cast<uint32_t>(st.arena->laneHighWater());
   SCT_TRACE_HEAP(spineIndex, "after_parse");
+#ifdef LAYOUT_PROFILE
+  {
+    const layout_prof::Data& g = layout_prof::g;
+    LOG_INF("SCT",
+            "spine=%d LAYOUTPROF ms: widthForm=%u widthMeasure=%u widthShape=%u breaks=%u linePass=%u place=%u "
+            "(measure %u) emit=%u cut=%u | tokens=%u lines=%u measures=%u",
+            spineIndex, (unsigned)(g.widthForm / 1000), (unsigned)(g.widthMeasure / 1000),
+            (unsigned)(g.widthShape / 1000), (unsigned)(g.breaks / 1000), (unsigned)(g.linePass / 1000),
+            (unsigned)(g.place / 1000), (unsigned)(g.placeMeasure / 1000), (unsigned)(g.emit / 1000),
+            (unsigned)(g.cut / 1000), (unsigned)g.tokens, (unsigned)g.lines, (unsigned)g.measures);
+    layout_prof::g.reset();
+  }
+#endif
   LOG_INF("SCT", "createSectionFile spine=%d parse done: %ums pages=%u (stream=%d finalize=%d parser=%d free=%lu)",
           spineIndex, st.parseMs, pageCount, st.streamOk ? 1 : 0, st.finalizeOk ? 1 : 0, st.parserStreamOk ? 1 : 0,
           esp_get_free_heap_size());

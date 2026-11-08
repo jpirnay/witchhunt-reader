@@ -23,6 +23,7 @@
 #include "CjkPunctuation.h"
 #include "Epub/VisibleText.h"
 #include "HashUtils.h"
+#include "LayoutProfile.h"
 #include "ShapedStore.h"
 #include "TextEmphasis.h"
 #include "VerticalDraw.h"
@@ -1857,18 +1858,25 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
     BidiLine::OpenControls open = passControls;
     plainForm_.clear();
     for (size_t i = 0; i < words.size(); ++i) {
+      LAYOUT_PROF_COUNT(tokens);
       const int font = wordFontId(i, fontId);
       uint16_t shapedWidth = 0;
       bool plainToken = false;  // set by tokenForm when it is asked: a width the placed line can take as it is
       if (combines(i)) {
         // A combined word is one em down its column, whatever its glyphs' advances.
         out.push_back(static_cast<uint16_t>(columnEm(renderer, font, wordStyles[i], wordScale(i))));
-      } else if (shapes_ && (shapedFirst ? storedWidth(renderer, fontId, i, &shapedWidth)
-                                         : shapeToken(renderer, fontId, i, &shapedWidth))) {
+      } else if (shapes_ && [&] {
+                   LAYOUT_PROF_SCOPE(widthShape);
+                   return shapedFirst ? storedWidth(renderer, fontId, i, &shapedWidth)
+                                      : shapeToken(renderer, fontId, i, &shapedWidth);
+                 }()) {
         // A token with pieces is as wide as they are: its runs' advances and its other code points measured as today.
         out.push_back(shapedWidth);
-      } else if (scratch != nullptr &&
-                 BidiLine::tokenForm(words[i], open, level_, *scratch, bidiState_->tokenForm, &plainToken)) {
+      } else if (scratch != nullptr && [&] {
+                   LAYOUT_PROF_SCOPE(widthForm);
+                   return BidiLine::tokenForm(words[i], open, level_, *scratch, bidiState_->tokenForm, &plainToken);
+                 }()) {
+        LAYOUT_PROF_SCOPE(widthMeasure);
         out.push_back(
             measureWordWidth(renderer, font, bidiState_->tokenForm, wordStyles[i], false, wordScale(i), vertical_));
       } else if (bidi_ && scratch == nullptr && withoutControls(words[i], bidiState_->tokenForm)) {
@@ -1876,6 +1884,7 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
         out.push_back(
             measureWordWidth(renderer, font, bidiState_->tokenForm, wordStyles[i], false, wordScale(i), vertical_));
       } else {
+        LAYOUT_PROF_SCOPE(widthMeasure);
         out.push_back(measureWordWidth(renderer, font, words[i], wordStyles[i], false, wordScale(i), vertical_));
       }
       if (scratch != nullptr) {
@@ -2098,6 +2107,7 @@ void ParsedText::computeLineBreaks(const GfxRenderer& renderer, const int fontId
                                    const std::vector<TokenBoundary::Boundary>& boundaries, const int firstLineIndent,
                                    const int16_t blockStartY, const int lineHeight,
                                    std::vector<size_t>& lineBreakIndices) {
+  LAYOUT_PROF_SCOPE(breaks);
   lineBreakIndices.clear();
   if (words.empty()) {
     return;
@@ -2835,6 +2845,7 @@ BidiLine::Scratch* ParsedText::bidiScratchFor(const BidiLine::ArenaWorkspace& wo
 }
 
 bool ParsedText::layOutBidiLine(const GfxRenderer& renderer, const int fontId, const size_t first, const size_t count) {
+  LAYOUT_PROF_SCOPE(linePass);
   BidiState& state = *bidiState_;
   state.tokens.clear();
   state.tokens.reserve(count);
@@ -2854,6 +2865,7 @@ bool ParsedText::layOutBidiLine(const GfxRenderer& renderer, const int fontId, c
 
 void ParsedText::cutShapedTokens(const GfxRenderer& renderer, const int fontId, const size_t first,
                                  const size_t count) {
+  LAYOUT_PROF_SCOPE(cut);
   BidiState& state = *bidiState_;
   // The line's cuts are counted first and their room taken whole, so no growth moves the array under a pointer handed
   // out: 2 B a cut, kept across lines and freed at the slice's yield (releaseLayoutScratch).
@@ -2918,6 +2930,8 @@ bool ParsedText::formBidiPieces(const GfxRenderer& renderer, const int fontId, c
   // width pass measured (plainForm_): its width stands, and the piece is not measured a second time. The measure is
   // the TrueType glyph path on the device, and it ran twice for every token of a bidi paragraph.
   const auto measured = [&](const size_t v) {
+    LAYOUT_PROF_SCOPE(placeMeasure);
+    LAYOUT_PROF_COUNT(measures);
     const BidiLine::Piece& piece = pieces[v];
     const size_t i = first + piece.token;
     if (i < plainForm_.size() && plainForm_[i] != 0 && piece.begin == 0 && piece.end == words[i].size() &&
@@ -3096,6 +3110,7 @@ void ParsedText::dropEmptyPieces() {
 uint8_t ParsedText::placeBidiLine(const GfxRenderer& renderer, const int fontId, const size_t first,
                                   const int effectivePageWidth, const int lineIndent, const bool isLastLine,
                                   TextBlock::WordRange& range) {
+  LAYOUT_PROF_SCOPE(place);
   BidiState& state = *bidiState_;
   // A logical order numbers its words in a byte: a longer (fallback) line has none, and has none either once a piece
   // left off brings it under the limit (its reading indices are not exact).
@@ -3818,6 +3833,8 @@ ParsedText::LineProcessResult ParsedText::emitLine(
     const TextBlock::WordRange& range, const uint8_t maxSizePct, const bool band, const size_t first, const size_t end,
     const std::function<LineProcessResult(std::unique_ptr<TextBlock>, bool, bool)>& processLine,
     const bool lineEndsWithHyphenatedWord, const bool suppressHyphenationRetry) {
+  LAYOUT_PROF_SCOPE(emit);
+  LAYOUT_PROF_COUNT(lines);
   // The page-fit decision runs before the line exists (see beforeLine_): the parser may emit
   // the current page here and open the next one's arena block, so the block built just below
   // is allocated from the page it will actually land on.
