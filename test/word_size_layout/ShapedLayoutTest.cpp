@@ -1747,3 +1747,36 @@ TEST_F(ShapedLayout, ALatinParagraphWithArabicDigitsInATtfIsUnchanged) {
   EXPECT_GE(wordWithText(*hindiLines[0], digits), 0);
   EXPECT_EQ(1u, hindi.tokensShaped());  // the Hindi word alone
 }
+
+TEST_F(ShapedLayout, ALatinWordForceSplitInAHindiParagraphKeepsTheStoreInStep) {
+  // Review fix 3: a word wider than the column is split by the fallback breaks. In a paragraph that shapes, its
+  // remainder gets a store entry though it is not shaped, so the shaped tokens after it find their own entries and keep
+  // their glyph forms; one short, each would look up its neighbour's and be drawn as its code points.
+  const std::string latin(30, 'x');  // 300 px
+  constexpr int kColumn = 100;
+  ASSERT_LT(shapedPx(kHindi), kColumn);
+  ASSERT_LT(shapedPx(kPatrika), kColumn);
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{kHindi}, {latin}, {kHindi}, {kPatrika}});
+  const Lines lines = layOut(text, renderer, kColumn);
+  int split = 0;
+  int shaped = 0;
+  std::string joined;
+  for (const auto& line : lines) {
+    for (uint16_t i = 0; i < line->wordCount(); ++i) {
+      const std::string word = line->wordText(i);
+      if (word == kHindi || word == kPatrika) {
+        ++shaped;
+        EXPECT_TRUE(line->hasGlyphForm(i)) << word;
+      } else if (word.find('x') != std::string::npos) {
+        ++split;
+        joined += word.back() == '-' ? word.substr(0, word.size() - 1) : word;
+      }
+    }
+  }
+  EXPECT_GE(split, 3);  // the Latin word in three parts at least
+  EXPECT_EQ(latin, joined);
+  EXPECT_EQ(3, shaped);
+  EXPECT_FALSE(latch);
+}
