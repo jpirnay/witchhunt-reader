@@ -10,18 +10,22 @@
 #include <cstring>
 
 #include "HashUtils.h"
+#include "HeapGrowth.h"
 
-namespace {
-// The allocator's header and rounding on top of a request, as ParsedText::reserveWords allows for.
-constexpr size_t kAllocSlack = 16;
-}  // namespace
+bool ShapedStore::heapAllows(const size_t bytes) { return heap_growth::heapAllows(bytes + heap_growth::kAllocSlack); }
 
-bool ShapedStore::heapAllows(const size_t bytes) { return ESP.getMaxAllocHeap() >= bytes + kAllocSlack; }
+uint32_t ShapedStore::hashOf(const std::string_view text) {
+  const uint64_t hash = HashUtils::fnvHash64(text.data(), text.size());
+  return static_cast<uint32_t>(hash ^ (hash >> 32));
+}
 
+// Room for `extra` more elements: exactly that many when `exact` (reserve(), from a pass's count), else half again
+// the capacity at least, so the inserts and pieces a pass did not foresee do not reallocate on each one.
 template <typename T>
-bool ShapedStore::grow(std::vector<T>& v, const size_t extra) {
+bool ShapedStore::grow(std::vector<T>& v, const size_t extra, const bool exact) {
   if (v.capacity() >= v.size() + extra) return true;
-  const size_t wanted = std::max<size_t>({16, v.capacity() * 2, v.size() + extra});
+  const size_t needed = v.size() + extra;
+  const size_t wanted = exact ? needed : std::max<size_t>({16, v.capacity() + v.capacity() / 2, needed});
   // reserve() aborts under -fno-exceptions when the heap refuses; the new block lives beside the old one while it
   // moves, so both are asked for.
   if (!heapAllows(wanted * sizeof(T) + v.capacity() * sizeof(T))) return false;
@@ -49,6 +53,10 @@ size_t ShapedStore::chunkBytes() const {
   size_t total = 0;
   for (size_t i = 0; i < nChunks_; i++) total += chunks_[i].size;
   return total;
+}
+
+size_t ShapedStore::indexBytes() const {
+  return entries_.capacity() * sizeof(Entry) + pieces_.capacity() * sizeof(Piece);
 }
 
 // The empty chunk the next piece goes to, at least `size` bytes: the current one when it is empty, else the one after
@@ -122,12 +130,12 @@ bool ShapedStore::makeRoom(const size_t extra) {
 }
 
 bool ShapedStore::open(const size_t token, const std::string_view text, const uint32_t key) {
-  if (pending_ || token > entries_.size() || text.size() > UINT32_MAX) return false;
+  if (pending_ || token > entries_.size() || text.size() > UINT16_MAX) return false;
   pendToken_ = token;
   pendStart_ = pieces_.size();
-  pendHash_ = HashUtils::fnvHash64(text.data(), text.size());
+  pendHash_ = hashOf(text);
   pendKey_ = key;
-  pendLength_ = static_cast<uint32_t>(text.size());
+  pendLength_ = static_cast<uint16_t>(text.size());
   savedCur_ = cur_;
   savedUsed_ = nChunks_ > 0 ? chunks_[cur_].used : 0;
   placed_ = false;
@@ -137,7 +145,7 @@ bool ShapedStore::open(const size_t token, const std::string_view text, const ui
 }
 
 bool ShapedStore::beginPiece(const IndicShaper::PieceKind kind, const uint16_t begin, const uint16_t end) {
-  if (!pending_ || !grow(pieces_, 1)) return false;
+  if (!pending_ || pieces_.size() >= kMaxPieces || !grow(pieces_, 1, false)) return false;
   Piece piece;
   piece.begin = begin;
   piece.end = end;
@@ -177,8 +185,8 @@ bool ShapedStore::addBytes(const char* bytes, const size_t length) {
 
 void ShapedStore::eraseRange(Entry& entry) {
   if (entry.count == 0) return;
-  const uint32_t begin = entry.begin;
-  const uint32_t count = entry.count;
+  const uint16_t begin = entry.begin;
+  const uint16_t count = entry.count;
   pieces_.erase(pieces_.begin() + begin, pieces_.begin() + begin + count);
   for (Entry& other : entries_) {
     if (other.count > 0 && other.begin > begin) other.begin -= count;
@@ -193,11 +201,11 @@ void ShapedStore::commit() {
     return;
   }
   Entry& entry = entries_[pendToken_];
-  const uint32_t oldCount = entry.count;
+  const uint16_t oldCount = entry.count;
   eraseRange(entry);  // the earlier pieces of this token; the open ones lie after every committed piece
   pendStart_ -= oldCount;
-  entry.begin = static_cast<uint32_t>(pendStart_);
-  entry.count = static_cast<uint32_t>(pieces_.size() - pendStart_);
+  entry.begin = static_cast<uint16_t>(pendStart_);  // below kMaxPieces: beginPiece refuses past it
+  entry.count = static_cast<uint16_t>(pieces_.size() - pendStart_);
   entry.hash = pendHash_;
   entry.key = pendKey_;
   entry.length = pendLength_;
@@ -247,8 +255,7 @@ std::optional<std::span<const ShapedStore::Piece>> ShapedStore::pieces(const siz
                                                                        const uint32_t key) const {
   if (token >= entries_.size()) return std::nullopt;
   const Entry& entry = entries_[token];
-  if (!entry.valid || entry.length != text.size() || entry.key != key ||
-      entry.hash != HashUtils::fnvHash64(text.data(), text.size())) {
+  if (!entry.valid || entry.length != text.size() || entry.key != key || entry.hash != hashOf(text)) {
     return std::nullopt;
   }
   if (entry.count == 0) return std::span<const Piece>();
@@ -287,7 +294,7 @@ std::string_view ShapedStore::form(const Piece& piece) const {
 }
 
 bool ShapedStore::insert(const size_t token) {
-  if (pending_ || token > entries_.size() || !grow(entries_, 1)) return false;
+  if (pending_ || token > entries_.size() || !grow(entries_, 1, false)) return false;
   entries_.insert(entries_.begin() + token, Entry());
   return true;
 }
@@ -306,11 +313,11 @@ void ShapedStore::dropFront(size_t count) {
   std::sort(entries_.begin(), entries_.begin() + count,
             [](const Entry& a, const Entry& b) { return a.begin < b.begin; });
   // Entries with no pieces carry no range: sorted by a stale begin they add 0 to the total, which is harmless.
-  uint32_t dead = 0;
+  uint16_t dead = 0;  // at most pieces_.size(), below kMaxPieces
   for (size_t i = 0; i < count; i++) {
     Entry& entry = entries_[i];
-    for (uint32_t p = 0; p < entry.count; p++) pieces_[entry.begin + p].chunk = kDead;
-    dead += entry.count;
+    for (uint16_t p = 0; p < entry.count; p++) pieces_[entry.begin + p].chunk = kDead;
+    dead = static_cast<uint16_t>(dead + entry.count);
     entry.count = dead;
   }
   for (size_t i = count; i < entries_.size(); i++) {
@@ -352,7 +359,7 @@ void ShapedStore::dropFront(size_t count) {
 }
 
 bool ShapedStore::reserve(const size_t tokens, const size_t bytes) {
-  if (!grow(entries_, tokens) || !grow(pieces_, tokens)) return false;
+  if (!grow(entries_, tokens, true) || !grow(pieces_, tokens, true)) return false;
   size_t room = 0;
   for (size_t i = 0; i < nChunks_; i++) {
     if (!oversize(i)) room += chunks_[i].size - chunks_[i].used;

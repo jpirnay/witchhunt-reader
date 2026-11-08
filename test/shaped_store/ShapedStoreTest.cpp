@@ -1,4 +1,5 @@
 // Ours (writing modes step 2, PR 3): ShapedStore, the paragraph's shaped pieces and glyph records in nothrow chunks.
+#include <Arduino.h>
 #include <gtest/gtest.h>
 
 #include <string>
@@ -574,6 +575,58 @@ TEST(ShapedStore, ARecordOutsideItsFieldsFailsTheToken) {
   EXPECT_FALSE(store.addGlyph(bad));
   store.abandon();
   EXPECT_FALSE(store.pieces(0, "abc", 1).has_value());
+}
+
+// The index is reserved to the pass's count, not doubled past it: a block whose lines hold more than 96 tokens (about
+// 200 tokens) once held 12 KB of 32 B entries doubled to 256, three times its chunks. A pass's reserve() is exact; only
+// what it did not foresee (an insert, a token's second piece) grows the vectors, by half again.
+TEST(ShapedStore, ReserveTakesExactlyThePassesCountAndGrowsByHalfAgainPastIt) {
+  constexpr size_t kEntry = 16, kPiece = 14;
+  ShapedStore store;
+  ASSERT_TRUE(store.reserve(130, 0));
+  EXPECT_EQ(130 * kEntry + 130 * kPiece, store.indexBytes());
+  for (size_t t = 0; t < 130; t++) ASSERT_TRUE(store.insert(t));
+  ASSERT_TRUE(store.reserve(50, 0));  // the next pass adds 50 tokens: 180 entries, and the pieces' 130 still spare
+  EXPECT_EQ(180 * kEntry + 130 * kPiece, store.indexBytes());
+  for (size_t t = 130; t < 180; t++) ASSERT_TRUE(store.insert(t));
+  EXPECT_EQ(180 * kEntry + 130 * kPiece, store.indexBytes());
+  ASSERT_TRUE(store.insert(180));  // unforeseen: half again, 270
+  EXPECT_EQ(270 * kEntry + 130 * kPiece, store.indexBytes());
+
+  // A token's pieces past the one a token reserve: the piece vector grows the same way.
+  ShapedStore pieces;
+  ASSERT_TRUE(pieces.reserve(4, 0));
+  for (size_t t = 0; t < 4; t++) ASSERT_TRUE(pieces.insert(t));
+  ASSERT_TRUE(pieces.open(0, "abcdefgh", 1));
+  for (uint16_t p = 0; p < 4; p++) ASSERT_TRUE(pieces.beginPiece(PieceKind::Text, p, p + 1));
+  EXPECT_EQ(4 * kEntry + 4 * kPiece, pieces.indexBytes());
+  ASSERT_TRUE(pieces.beginPiece(PieceKind::Text, 4, 5));  // the fifth: 16 at least
+  EXPECT_EQ(4 * kEntry + 16 * kPiece, pieces.indexBytes());
+  pieces.abandon();
+}
+
+// An entry's run of pieces and its text's length are halfwords: a text past 64 KB has no entry (a piece's bounds
+// could not name its bytes either), and the 65,536th piece is refused, so a run's begin and count stay in range.
+TEST(ShapedStore, TheIndexStaysWithinItsHalfwordBounds) {
+  ShapedStore store;
+  ASSERT_TRUE(store.insert(0));
+  const std::string longest(UINT16_MAX, 'a');
+  ASSERT_TRUE(store.open(0, longest, 1));
+  store.abandon();
+  EXPECT_FALSE(store.open(0, longest + "a", 1));
+
+  // 65,535 pieces are about 900 KB of index, past the shim's largest free block (100 KB): the heap check reads a
+  // larger one for this test, so the refusal is the bound's.
+  const uint32_t savedBlock = ESP.getMaxAllocHeap();
+  ESP.setMaxAllocHeap(4 * 1024 * 1024);
+  ASSERT_TRUE(store.open(0, "abc", 1));
+  for (size_t p = 0; p < UINT16_MAX; p++) ASSERT_TRUE(store.beginPiece(PieceKind::Text, 0, 1)) << p;
+  EXPECT_FALSE(store.beginPiece(PieceKind::Text, 0, 1));
+  store.commit();
+  ESP.setMaxAllocHeap(savedBlock);
+  const auto pieces = store.pieces(0, "abc", 1);
+  ASSERT_TRUE(pieces.has_value());
+  EXPECT_EQ(static_cast<size_t>(UINT16_MAX), pieces->size());
 }
 
 TEST(ShapedStore, OnlyOneEntryIsOpenAtATime) {
