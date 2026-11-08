@@ -77,6 +77,10 @@ class ParsedText {
   // minimum (edgeShrink_); 0 for other tokens. Four bytes a token. Layout scratch in step with wordWidths_:
   // calculateWordWidths fills all four, hyphenateWordAtIndex inserts into all four.
   std::vector<uint8_t> markClass_;
+  // In a paragraph that needs bidi, 1 for each token whose width the width pass measured of the very form the line
+  // pass places (a plain token, BidiLine::tokenForm): placeBidiLine takes that width instead of measuring the piece
+  // again. A byte a token, in step with wordWidths_ like markClass_; empty in a paragraph without bidi.
+  std::vector<uint8_t> plainForm_;
   std::vector<int8_t> edgeTrim_;
   std::vector<uint8_t> shrink_;
   std::vector<uint8_t> edgeShrink_;

@@ -8,6 +8,7 @@ word counts. **Never commit the books**; regenerate them from Wikisource with th
 |---|---|---|
 | Hindi | Premchand's *Gaban* (1931), Hindi Wikisource | 6,908 against 2,648 ms (2.61x; PR 3, #642) |
 | Arabic | Jurji Zaydan's travel letters, the England chapter, Arabic Wikisource | 7,880 against 2,489 ms (3.17x; #656); master without shaping 5,586 ms (2.22x) |
+| Hebrew | Bialik's *Aryeh Baal Guf*, Hebrew Wikisource (the right-to-left path without shaping) | master 2026-11-08: 4,680 against 2,592 ms in NotoSansHebrew (1.81x); 5,531 against 2,600 drawn by the fallback face from BookerlyTTF (2.13x). With the plain-token short path: 4,244 (1.66x) and 4,918 (1.89x) |
 
 ## Fetching
 
@@ -19,6 +20,7 @@ word counts. **Never commit the books**; regenerate them from Wikisource with th
 ```
 python -I ws_export.py ar "رحلة جرجي زيدان إلى أوربا/ثانياً: إنكلترا" <dl> england
 python -I ws_export.py hi "प्रेमचंद रचनावली (खण्ड ५)/गबन/एक" <dl> gaban1   # and so on, one subpage per chapter
+python -I ws_export.py he 'אריה "בעל גוף"' <dl> bialik
 ```
 
 ws-export of the *Gaban* index does not follow its chapters, so fetch each subpage (एक, दो, तीन, ... आठ).
@@ -31,7 +33,12 @@ paragraph past it.
 ```
 AR_WORDS=2500 python -I make_zaydan_books.py <repo> <dl> <out> england.epub
 GABAN_WORDS=2500 python -I make_gaban_books.py <repo> <dl> <out> gaban1.epub gaban2.epub ...
+HE_WORDS=2500 python -I make_bialik_books.py <repo> <dl> <out> bialik.epub
 ```
+
+The Hebrew book is drawn by NotoSansHebrew only when that family is the body font (`CMD:SET:fontFamily=NotoSansHebrew`):
+the reader picks a family by script for Indic and Arabic books, not yet for Hebrew (handover item 4), so with another
+body font the fallback face draws it, and the measure costs more.
 
 ## Measuring on a device
 

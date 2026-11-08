@@ -1777,6 +1777,7 @@ void ParsedText::releaseLayoutScratch() {
   // Pure scratch: recomputed by every layout, so safe to drop at any point between feeds.
   std::vector<uint16_t>().swap(wordWidths_);
   std::vector<uint8_t>().swap(markClass_);
+  std::vector<uint8_t>().swap(plainForm_);
   std::vector<int8_t>().swap(edgeTrim_);
   std::vector<uint8_t>().swap(shrink_);
   std::vector<uint8_t>().swap(edgeShrink_);
@@ -1882,9 +1883,11 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
     const BidiLine::ArenaWorkspace workspace(bidi_ ? lineArena_ : nullptr);
     BidiLine::Scratch* const scratch = bidi_ ? bidiScratchFor(workspace) : nullptr;
     BidiLine::OpenControls open = passControls;
+    plainForm_.clear();
     for (size_t i = 0; i < words.size(); ++i) {
       const int font = wordFontId(i, fontId);
       uint16_t shapedWidth = 0;
+      bool plainToken = false;  // set by tokenForm when it is asked: a width the placed line can take as it is
       if (combines(i)) {
         // A combined word is one em down its column, whatever its glyphs' advances.
         out.push_back(static_cast<uint16_t>(columnEm(renderer, font, wordStyles[i], wordScale(i))));
@@ -1892,7 +1895,8 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
                                          : shapeToken(renderer, fontId, i, &shapedWidth))) {
         // A token with pieces is as wide as they are: its runs' advances and its other code points measured as today.
         out.push_back(shapedWidth);
-      } else if (scratch != nullptr && BidiLine::tokenForm(words[i], open, level_, *scratch, bidiState_->tokenForm)) {
+      } else if (scratch != nullptr &&
+                 BidiLine::tokenForm(words[i], open, level_, *scratch, bidiState_->tokenForm, &plainToken)) {
         out.push_back(
             measureWordWidth(renderer, font, bidiState_->tokenForm, wordStyles[i], false, wordScale(i), vertical_));
       } else if (bidi_ && scratch == nullptr && withoutControls(words[i], bidiState_->tokenForm)) {
@@ -1902,7 +1906,10 @@ void ParsedText::calculateWordWidths(const GfxRenderer& renderer, const int font
       } else {
         out.push_back(measureWordWidth(renderer, font, words[i], wordStyles[i], false, wordScale(i), vertical_));
       }
-      if (scratch != nullptr) open.advance(words[i]);
+      if (scratch != nullptr) {
+        plainForm_.push_back(plainToken ? 1 : 0);
+        open.advance(words[i]);
+      }
     }
   }
   applyPunctuationWidths(renderer, fontId, out);
@@ -2834,6 +2841,10 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
     remainderWidth = measureWordWidth(renderer, font, remainder, style, false, scale, vertical_);
   }
   wordWidths.insert(wordWidths.begin() + wordIndex + 1, remainderWidth);
+  if (wordIndex < plainForm_.size()) {
+    plainForm_[wordIndex] = 0;  // the prefix's width now holds its hyphen: not the form the line pass places
+    plainForm_.insert(plainForm_.begin() + wordIndex + 1, 0);
+  }
   markClass_.insert(markClass_.begin() + wordIndex + 1, static_cast<uint8_t>(CjkPunctuation::Class::None));
   edgeTrim_.insert(edgeTrim_.begin() + wordIndex + 1, 0);
   shrink_.insert(shrink_.begin() + wordIndex + 1, 0);
@@ -2948,10 +2959,17 @@ bool ParsedText::formBidiPieces(const GfxRenderer& renderer, const int fontId, c
   const auto displayForm = [&](const size_t v) {
     return std::string_view(display + pieces[v].displayBegin, pieces[v].displayLength);
   };
-  // A display form's exact width, in its token's font, style and scale.
+  // A display form's exact width, in its token's font, style and scale. A plain token's whole form is the one the
+  // width pass measured (plainForm_): its width stands, and the piece is not measured a second time. The measure is
+  // the TrueType glyph path on the device, and it ran twice for every token of a bidi paragraph.
   const auto measured = [&](const size_t v) {
-    const size_t i = first + pieces[v].token;
-    return static_cast<int16_t>(measureWordWidth(renderer, wordFontId(i, fontId), display + pieces[v].displayBegin,
+    const BidiLine::Piece& piece = pieces[v];
+    const size_t i = first + piece.token;
+    if (i < plainForm_.size() && plainForm_[i] != 0 && piece.begin == 0 && piece.end == words[i].size() &&
+        TokenBoundary::rubyRole(wordBoundaries[i]) == TokenBoundary::RubyRole::None) {
+      return static_cast<int16_t>(wordWidths_[i]);
+    }
+    return static_cast<int16_t>(measureWordWidth(renderer, wordFontId(i, fontId), display + piece.displayBegin,
                                                  wordStyles[i], wordScale(i), vertical_));
   };
   // The store piece, not Text, that piece v draws, by Task 5's contract: one at most, the line cut at the store's

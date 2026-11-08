@@ -515,6 +515,17 @@ Master's bidi-only Arabic build is already past 2x, so shaping alone cannot reac
 is left to a later change ([measurements](superpowers/specs/2026-11-02-writing-modes-step2-measurements.md), "PR 4b:
 Arabic on the page").
 
+The right-to-left path without shaping, which Hebrew takes whole and Arabic shares, was profiled on the X3 on
+2026-11-08 with a Hebrew timing book (Bialik, `tools/writing-modes-bench/make_bialik_books.py`): the width pass ran a
+UAX#9 pass on every token of a bidi paragraph on its own (`BidiLine::tokenForm`, 2,686 passes a chapter against the
+293 lines'), and the placed line measured every piece a second time. A plain token (letters of one strong class,
+with unmirrored punctuation when the letters run the paragraph's way, no control open) now takes a short path: its
+form is its code points reversed, and the placed line keeps the width pass's measure. Layout is byte-identical. The
+chapter builds in 4,244 ms against its Latin twin's 2,557 in NotoSansHebrew (1.66x; master 4,680, 1.81x), and in
+4,918 against 2,600 when the fallback face draws it from BookerlyTTF (1.89x; master 5,531, 2.13x). What remains is
+measured in the handover: the TrueType measure (a Hebrew kerning pair costs three to four times a Latin one), the line
+pass itself, and the form bytes a Hebrew line writes.
+
 ## Tests
 
 - `test/text_shaping`: `IndicShaper` (runs, pieces, context, the piecewise loop, refusals), `TextShapingMerge`,

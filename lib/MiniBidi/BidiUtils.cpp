@@ -250,6 +250,28 @@ void bindWorkspace(void* buffer) {
 }
 
 // witchhunt: deviation 11
+int plainClass(const uint32_t cp) {
+  if (cp == 0 || cp == REPLACEMENT_GLYPH) return -1;
+  switch (bidi_class(cp)) {
+    case L:
+      return 0;
+    case R:
+    case AL:
+      return 1;
+    case ON:
+    case CS:
+    case ES:
+      return mirror(cp) == cp ? 2 : -1;
+    default:
+      return -1;
+  }
+}
+
+bool workspaceAvailable() {
+  const std::lock_guard<std::mutex> lock(bidiMutex);
+  return getWorkspace() != nullptr;
+}
+
 bool heapWorkspaceHeld() {
   const std::lock_guard<std::mutex> lock(bidiMutex);
   return static_cast<bool>(bidiWorkspace);

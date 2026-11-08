@@ -1439,6 +1439,24 @@ TEST_F(ShapedLayout, GluedPiecesTakeNoKerning) {
   EXPECT_EQ(line.wordXpos(3) + advanceOf(line, 3), line.wordXpos(4));  // a glyph run on the left
 }
 
+TEST_F(ShapedLayout, APlainTokenOfABidiParagraphIsMeasuredOnce) {
+  // The width pass measures each token's form; the placed line took each piece's display form to the renderer again,
+  // the same bytes for a plain token. Now the width pass's figure stands: three plain tokens, three measurements,
+  // and the line as before.
+  static int advances = 0;
+  advances = 0;
+  GfxRenderer::onTextAdvance = [] { advances++; };
+  ParsedText text(false, false, noIndentStyle());
+  add(text, {{"שלום"}, {"עולם"}, {"abc"}});
+  const Lines lines = layOut(text, renderer, 400);
+  GfxRenderer::onTextAdvance = nullptr;
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(3u, line.wordCount());
+  EXPECT_TRUE(line.hasLogicalOrder());
+  EXPECT_EQ(3, advances);
+}
+
 TEST_F(ShapedLayout, ALineWhoseTokensTheHeapRefusesIsLaidOutWithoutBidi) {
   // The line pass's token vector grows behind the heap check (ParsedText::layOutBidiLine): refused, the line is laid
   // out without bidi, as when the pass has no workspace. A Hebrew paragraph: it needs bidi and shapes nothing, so the

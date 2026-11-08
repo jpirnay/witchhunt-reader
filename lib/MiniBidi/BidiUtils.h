@@ -66,6 +66,19 @@ void bindWorkspace(void* buffer);
 // Whether a heap workspace is allocated (tests: none survives a build).
 bool heapWorkspaceHeld();
 
+// witchhunt: a code point's part in a token that resolves on its own (BidiLine's plain token): 0 a strong
+// left-to-right letter (L), 1 a right-to-left one (R, AL), 2 a neutral that takes the direction around it and is
+// never mirrored (ON, CS, ES with no mirror: punctuation, quotes, the no-break space), -1 anything else: a digit
+// (EN, AN), a terminator (ET, which a digit beside it turns into a digit), a mark (NSM), a joiner or soft hyphen
+// (BN), a control, a separator, a mirrored neutral (a bracket, which the pair algorithm resolves across the line),
+// and U+0000 or U+FFFD.
+int plainClass(uint32_t cp);
+
+// witchhunt: whether orderLine would have a workspace now: the bound one, or the heap one, made here if it can be.
+// A caller with a short path that needs none asks first, so that it takes the same path as the full one would
+// without a workspace (the line is then laid out without bidi, and a form is its text).
+bool workspaceAvailable();
+
 // Returns false with empty visualOrder when no order is produced, including OOM.
 // witchhunt: the words come as `wordCount` views of their text, marks included: the transparent marks are skipped
 // here (they ride on their base, as applyBidiVisual keeps them), so a caller neither strips nor copies a word.

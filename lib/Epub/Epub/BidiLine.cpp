@@ -886,8 +886,64 @@ bool layoutLine(const Token* const callerTokens, const size_t count, const OpenC
   return buildPieces(tokens, count, scratch, slots, out) || fallbackLine(tokens, count, open, level, scratch, out);
 }
 
+namespace {
+// The level of a token that resolves on its own, so that its form is its code points as they are (level 0) or
+// reversed (level 1), alone and in any line: letters of one strong class (L, or R and AL), and among them only
+// neutrals that take the direction around them and are never mirrored (BidiUtils::plainClass). A neutral is allowed
+// only when the letters run the paragraph's way: then its neighbours in any line (the token's own letters on one
+// side; on the other a letter either way, a digit, or the line's edge) resolve it to that way by N1 or N2, as the
+// token alone does. A neutral beside letters that run against the paragraph takes its neighbour's side, which the
+// token alone cannot know. No mark, digit, terminator, bracket, joiner or control: -1 for those, for a token
+// without a letter and for an empty one.
+int plainLevel(const std::string_view token, const uint8_t paragraphLevel) {
+  int level = -1;
+  bool neutral = false;
+  for (size_t pos = 0; pos < token.size();) {
+    const int cls = BidiUtils::plainClass(decodeAt(token.data(), token.size(), pos));
+    if (cls < 0) return -1;
+    if (cls == 2) {
+      neutral = true;
+      continue;
+    }
+    if (level >= 0 && cls != level) return -1;
+    level = cls;
+  }
+  if (level < 0 || (neutral && level != paragraphLevel)) return -1;
+  return level;
+}
+
+// The token's code points in reverse order, each one's bytes as they are (plainLevel found them well formed).
+void appendReversed(const std::string_view token, std::string& out) {
+  size_t end = token.size();
+  while (end > 0) {
+    size_t begin = end - 1;
+    while (begin > 0 && (static_cast<unsigned char>(token[begin]) & 0xC0) == 0x80) begin--;
+    out.append(token.data() + begin, end - begin);
+    end = begin;
+  }
+}
+}  // namespace
+
 bool tokenForm(const std::string_view token, const OpenControls& open, const uint8_t paragraphLevel, Scratch& scratch,
-               std::string& out) {
+               std::string& out, bool* const plain) {
+  // The short path: a plain token that no shaper module touches (TextShaping::shape is false for a token drawn as
+  // its own code points) needs no pass. With a control open the full path runs: an override among them would turn
+  // the letters. Without a workspace the full path runs too, and leaves the form the text, as the line pass then
+  // lays the line out without bidi. Measured on the host (Zaydan's Arabic chapter, 2,686 tokens): the pass ran once
+  // a token here and once a line in the line pass, nine passes in ten for nothing.
+  if (open.count == 0) {
+    const int level = plainLevel(token, paragraphLevel);
+    size_t shapedCount = 0;
+    if (level >= 0 && !TextShaping::shape(token.data(), token.size(), scratch.units, kMaxUnits, shapedCount) &&
+        BidiUtils::workspaceAvailable()) {
+      if (plain != nullptr) *plain = true;
+      if (level == 0) return false;
+      out.clear();
+      appendReversed(token, out);
+      return true;
+    }
+  }
+  if (plain != nullptr) *plain = false;
   const size_t previous = out.size();
   if (!appendForm(token, open, paragraphLevel, scratch, out)) return false;
   out.erase(0, previous);

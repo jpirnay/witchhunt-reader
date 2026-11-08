@@ -147,8 +147,14 @@ bool layoutLine(const Token* tokens, size_t count, const OpenControls& open, uin
 // - With none open: at detectParagraphLevel(token, paragraphLevel), with every open embedding and override prepended.
 // False, out untouched, when the form is the token's text byte for byte. `out` is the caller's reused string, and
 // `token` must not view it.
+// A plain token, with no control open, takes a short path: letters of one strong class (L, or R and AL), with only
+// such neutrals among them as take the direction around them and are never mirrored (punctuation, quotes), and
+// those only when the letters run the paragraph's way. Its form is its code points, reversed at level 1, which no
+// neighbour changes, and the line pass's piece of it is that form too. `plain` (when given) says so: the width
+// measured of its form, or of its text when the form is the text, is the width of the piece the line pass places,
+// so the placed line need not measure it again.
 bool tokenForm(std::string_view token, const OpenControls& open, uint8_t paragraphLevel, Scratch& scratch,
-               std::string& out);
+               std::string& out, bool* plain = nullptr);
 
 // Lends a block of `arena` holding the workspace and a Scratch for one scope; unbinds and releases it on destruction.
 // scratch() is null with no arena or no room (the caller then uses heapScratch()). Its block nests LIFO with

@@ -762,6 +762,64 @@ TEST(BidiLine, ATokensOwnFormIsMadeAtItsOwnDirection) {
   EXPECT_EQ(form("abc", 0, openWith({RLO, LRI})), std::nullopt);  // the override outside the isolate stays outside
 }
 
+TEST(BidiLine, APlainTokensFormTakesTheShortPathAndSaysSo) {
+  // Letters of one strong class alone: the form is the code points, reversed at level 1, without a pass, and the
+  // caller is told the width pass's measure serves the placed line. Anything a pass or a shaper module may change
+  // (a neutral, a digit, a mark, the divine name, an open override) takes the full path and is not plain.
+  const auto plainForm = [](const std::string_view token, const uint8_t level, bool& plain,
+                            const BidiLine::OpenControls& open = {}) {
+    std::string out = "untouched";
+    plain = false;
+    const bool formed = BidiLine::tokenForm(token, open, level, scratch(), out, &plain);
+    return formed ? std::optional<std::string>(out) : std::nullopt;
+  };
+  bool plain = false;
+  EXPECT_EQ(plainForm("שלום", 0, plain), "םולש");
+  EXPECT_TRUE(plain);
+  EXPECT_EQ(plainForm("كتاب", 0, plain), "باتك");
+  EXPECT_TRUE(plain);
+  EXPECT_EQ(plainForm("abc", 1, plain), std::nullopt);  // its own text, at any level
+  EXPECT_TRUE(plain);
+  EXPECT_EQ(plainForm("abc(שלום)", 1, plain), "abc(םולש)");
+  EXPECT_FALSE(plain);
+  EXPECT_EQ(plainForm("a1", 1, plain), std::nullopt);
+  EXPECT_FALSE(plain);
+  const auto pointed = plainForm("שָׁלוֹם", 1, plain);
+  ASSERT_TRUE(pointed.has_value());
+  EXPECT_EQ(decode(*pointed), kPointedShalomDrawn);
+  EXPECT_FALSE(plain);
+  const auto name = plainForm("יהוה", 1, plain);
+  ASSERT_TRUE(name.has_value());
+  EXPECT_EQ(decode(*name), (CP{0x05F3, 0x05D4}));
+  EXPECT_FALSE(plain);
+  EXPECT_EQ(plainForm("abc", 0, plain, openWith({RLO})), "cba");
+  EXPECT_FALSE(plain);
+  EXPECT_EQ(plainForm("", 1, plain), std::nullopt);
+  EXPECT_FALSE(plain);
+
+  // Punctuation and quotes beside letters that run the paragraph's way resolve to that way in any line (N1 or N2),
+  // so the token is plain: its form is the code points reversed, the comma first. Against the paragraph's way they
+  // take their neighbour's side, which only the line knows: the full path. A bracket (mirrored) and a digit never.
+  EXPECT_EQ(plainForm("שלום,", 1, plain), ",םולש");
+  EXPECT_TRUE(plain);
+  EXPECT_EQ(plainForm("\"שלום\".", 1, plain), ".\"םולש\"");
+  EXPECT_TRUE(plain);
+  EXPECT_EQ(plainForm("hello,", 0, plain), std::nullopt);
+  EXPECT_TRUE(plain);
+  plainForm("שלום,", 0, plain);
+  EXPECT_FALSE(plain);
+  plainForm("hello,", 1, plain);
+  EXPECT_FALSE(plain);
+  plainForm("(שלום)", 1, plain);
+  EXPECT_FALSE(plain);
+  plainForm("שלום1", 1, plain);
+  EXPECT_FALSE(plain);
+  plainForm("50%", 1, plain);
+  EXPECT_FALSE(plain);
+  plainForm(",", 1, plain);  // no letter
+  EXPECT_FALSE(plain);
+}
+
 TEST(BidiLine, DropControlsLeavesTheText) {
   std::string text = "a" + u(LRM) + "b" + u(RLI) + "c" + u(PDF) + "d";
   EXPECT_TRUE(BidiLine::dropControls(text));
