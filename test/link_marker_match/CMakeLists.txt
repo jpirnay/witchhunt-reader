@@ -4,6 +4,7 @@ add_executable(LinkMarkerMatchTest
 
 target_include_directories(LinkMarkerMatchTest PRIVATE
   ${REPO_ROOT}/src
+  ${REPO_ROOT}/lib/Utf8
 )
 
 target_link_libraries(LinkMarkerMatchTest PRIVATE

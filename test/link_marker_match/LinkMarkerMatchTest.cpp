@@ -19,11 +19,17 @@ namespace {
 // Feed `words` in reading order and report how many of them the marker consumed, starting at the
 // first one. 0 means the run did not start here; a positive count with `done` true is a complete
 // match. Mirrors what the reader's scan does.
-int runLength(const std::string& marker, const std::vector<std::string>& words, bool& done) {
+// `glued[i]`, when given, says page word i + 1 is glued to word i with no space (TextBlock::wordContinues).
+int runLength(const std::string& marker, const std::vector<std::string>& words, bool& done,
+              const std::vector<bool>& glued = {}) {
   size_t pos = 0;
   int used = 0;
-  for (const auto& word : words) {
-    if (!LinkMarkerMatch::consumeToken(marker.c_str(), marker.size(), pos, word.c_str(), word.size())) break;
+  for (size_t i = 0; i < words.size(); ++i) {
+    const std::string& word = words[i];
+    const bool nextGlued = i < glued.size() && glued[i];
+    if (!LinkMarkerMatch::consumeToken(marker.c_str(), marker.size(), pos, word.c_str(), word.size(), nextGlued)) {
+      break;
+    }
     ++used;
     if (LinkMarkerMatch::complete(marker.c_str(), marker.size(), pos)) {
       done = true;
@@ -184,4 +190,40 @@ TEST(LinkMarkerMatch, AControlInsideTheNumberOrOutsideTheSetStillBlocks) {
                        "1"},
                       done),
             0);  // U+2065 is not a control
+}
+
+// CJK text is stored one page word per character, while a link's text is one token between spaces: the words
+// consume the token a piece at a time (handover item 7's open bug: such a link could not be tapped).
+TEST(LinkMarkerMatch, ACjkLinkSpreadOverOneWordPerCharacterMatches) {
+  bool done = false;
+  EXPECT_EQ(runLength("第一章", {"第", "一", "章", "を"}, done), 3);
+  EXPECT_TRUE(done);
+  EXPECT_EQ(runLength("注1", {"注", "1"}, done), 2);  // a Latin digit after a Han character
+  EXPECT_TRUE(done);
+  EXPECT_EQ(runLength("see 第一章", {"see", "第", "一", "章"}, done), 4);
+  EXPECT_TRUE(done);
+}
+
+TEST(LinkMarkerMatch, ACjkRunThatDivergesIsNotComplete) {
+  bool done = false;
+  EXPECT_EQ(runLength("第一章", {"第", "二", "章"}, done), 1);
+  EXPECT_FALSE(done);
+  EXPECT_EQ(runLength("第一章", {"第", "一"}, done), 2);  // the page ends first
+  EXPECT_FALSE(done);
+}
+
+TEST(LinkMarkerMatch, APrefixMatchesOnlyWhereTheParserCouldHaveSplitTheToken) {
+  bool done = false;
+  // Two separate Latin words never make one token: "1" and "2" are not the link "12".
+  EXPECT_EQ(runLength("12", {"1", "2"}, done), 0);
+  EXPECT_FALSE(done);
+  // Glued with no space (a style that changes mid-word), they do.
+  EXPECT_EQ(runLength("12", {"1", "2"}, done, {true}), 2);
+  EXPECT_TRUE(done);
+  // Hangul is kept whole between spaces: a Korean word is never split per syllable.
+  EXPECT_EQ(runLength("가나", {"가", "나"}, done), 0);
+  EXPECT_FALSE(done);
+  // Never inside a code point: two bytes of 第 are not a prefix of "第一".
+  EXPECT_EQ(runLength("第一", {"\xE7\xAC"}, done), 0);
+  EXPECT_FALSE(done);
 }
