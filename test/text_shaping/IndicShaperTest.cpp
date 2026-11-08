@@ -1157,9 +1157,9 @@ TEST(IndicShaper, AGluedNeighbourIsContext) {
 }
 
 TEST(IndicShaper, TwoClustersOfContextFormTheWholeWordsGlyphs) {
-  // A glued neighbour kept apart is context by its two nearest letters, each with its marks and joiners: a letter's
-  // glyph can follow its neighbour's joining form, which follows that neighbour's own neighbour. Two words, each cut
-  // into three tokens kept apart; side by side, right to left, the tokens are the whole word's glyphs.
+  // A glued neighbour kept apart is context by its nearest clusters, each a letter with its marks and joiners: a
+  // letter's glyph can follow its neighbour's joining form, which follows that neighbour's own neighbour. Two words,
+  // each cut into three tokens kept apart; side by side, right to left, the tokens are the whole word's glyphs.
   const std::string seenLam = utf8Of({0x633, 0x644});
   const std::string meem = utf8Of({0x645});
   const std::string head = utf8Of({0x627, 0x644, 0x652, 0x639, 0x64E, 0x631, 0x64E});  // al-'ara

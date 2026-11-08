@@ -44,10 +44,9 @@ Each Arabic-script book:
     superscript alef, heh: one glyph, U+FDF2, in the font's liga):
     - Allah split by a span after its first lam: drawn once, in the first token; the span's token keeps no glyph and
       has no word on its line;
-    - Allah split after its alef, and before its heh: the ligature reaches past the two clusters of context a glued
-      neighbour gives, and the word is drawn without its lam-lam-heh (the span's token forms the ligature from its
-      context and keeps nothing; the alef's token never forms it), or with its heh twice (the first token forms it, and
-      the heh's token draws its heh again);
+    - Allah split after its alef, and before its heh: a glued Arabic neighbour gives its whole word as context (up to
+      16 code points), so both tokens form the ligature alike and it is drawn once, by the token that holds its first
+      letter; the other token keeps nothing and has no word on its line;
     - the lam-alef across a span with a U+0301 on the lam's token: the acute is a Text piece of its own, and the lam's
       run is drawn whole;
     - the lam-alef as a whole word, its alef the word's end, before a space (la shay');
@@ -172,9 +171,8 @@ ARABIC = {
         KITAB + "<sup>" + BEH + "</sup>",
         KAF + "<b>" + FATHA + TEH + FATHA + "</b>" + BEH + FATHA,  # kataba, its second syllable bold
         ALLAH,
-        # Split elsewhere, the ligature is past the two clusters of context a glued neighbour gives: after the alef,
-        # the span's token forms it from its context and keeps nothing while the alef's never forms it (a lost
-        # word); before the heh, the first token forms it and the heh's token draws its heh again (a doubled letter).
+        # Split elsewhere, the ligature is drawn once as well: after the alef, the alef's token draws it and the
+        # span's token keeps nothing; before the heh, the first token draws it and the heh's token keeps nothing.
         ALEF + SPAN_X + LAM + ALLAH_TAIL + "</span>",
         ALEF + LAM + LAM + SHADDA + SUPERSCRIPT_ALEF + SPAN_X + HEH + "</span>",
         KAF + TATWEEL + TEH + TATWEEL + ALEF + BEH,

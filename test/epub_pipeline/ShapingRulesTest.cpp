@@ -19,12 +19,14 @@
 //     language, with the glued tokens kept apart from its token (another style or size, or a token a ligature took) as
 //     context, whole, where the word is its token's edge: one Glyphs piece over the text, the stored records, any other
 //     piece a joiner or control the line pass absorbed into it;
-//  5. every word is drawn inside the page, within one em: see kWidthDrift;
+//  5. every word is drawn inside the page, to the pixel: the host stub has no kerning, so the breaker's measure is the
+//     draw's;
 //  6. the pieces cover the text: the words of each line, in reading order, are the chapter's text, but for its spaces,
 //     its bidi controls, the hyphen a split adds and the tokens the book lists as consumed, a ligature in the token
 //     before them drawing their letters; and no two glued glyph words of one style are one run;
 //  7. each letter is drawn once: a word's glyph forms hold the glyphs the whole word gets in one shaping call, as a
-//     multiset (where the reach of a glued neighbour's context is too short, the book records the misdraw it gives);
+//     multiset: a ligature across a style glue is formed alike by both tokens, drawn once, and the other token keeps
+//     nothing;
 //  8. an Arabic token reads right to left: of two of its words in reading order on a right-to-left line, the later
 //     lies to the left.
 // And a line without Indic or Arabic text keeps its bytes: the same with the book's face as without one. And the
@@ -84,14 +86,6 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// A word whose glyph forms differ from the whole word's (rule 7) as the book records it: its text, and how many of the
-// whole word's glyphs its forms lack and how many they hold beside them.
-struct Misdraw {
-  const char* word;
-  int missing;
-  int extra;
-};
-
 struct Book {
   const char* name;      // the corpus book
   const char* label;     // the case's name
@@ -100,13 +94,12 @@ struct Book {
   uint16_t viewportWidth = 460;
   std::vector<std::string> mergedWords;     // the words the cases' tokens merge into, each once in the book
   std::vector<std::string> consumedTokens;  // tokens a glued neighbour's ligature draws: no word of their own
-  std::vector<Misdraw> misdraws;            // rule 7's recorded exceptions, each seen once
   int minGlyphWords = 0;
   int minKeptApart = 0;
   int minGluedToPunctuation = 0;
   int minPastTheCap = 0;
   int minSplitWords = 0;
-  int minConsumed = 0;
+  int consumed = 0;  // the tokens a glued neighbour's ligature draws, exactly
   int minBesideDigits = 0;
   int minRtlPairs = 0;
   int minFallbackLines = 0;
@@ -125,13 +118,6 @@ constexpr uint32_t kZwj = 0x200D;
 constexpr int kLongChapterRepeats = 16;
 // A logical order numbers a line's words in a byte (TextBlock): a line of more pieces keeps none.
 constexpr size_t kMaxOrderedPieces = 255;
-// Rule 5's allowance, one em of the harness face (20 px a em). The breaker measures a glued pair with the kerning of
-// its logical edges (ParsedText::glyphEdge), while placeBidiLine kerns between visual neighbours, so a mixed-level bidi
-// line can drift by a kerning amount per glued pair; and a consumed letter drawn as its code points when its
-// neighbour degrades was measured as nothing, so its line can overrun by that letter. The host stub has no kerning,
-// and no book here takes that degraded path, so the drift seen is printed: it is expected to be 0.
-constexpr int kWidthDrift = 20;
-
 pipeline_harness::Profile profileOf(const Book& book) {
   pipeline_harness::Profile p;
   p.viewportWidth = book.viewportWidth;
@@ -844,12 +830,13 @@ TEST_P(ShapingRules, EveryWordIsDrawnInsideThePage) {
       const TextBlock::WordBox& box = line.words[i].box;
       ++checked;
       drift = std::max({drift, -box.x, box.x + box.width - width});
-      EXPECT_GE(box.x, -kWidthDrift) << where(line, i);
-      EXPECT_LE(box.x + box.width, width + kWidthDrift) << where(line, i);
+      EXPECT_GE(box.x, 0) << where(line, i);
+      EXPECT_LE(box.x + box.width, width) << where(line, i);
     }
   }
   logCount("words", checked, 1);
   logCount("px of width drift past the page's edges", drift, 0);
+  EXPECT_EQ(0, drift);
   EXPECT_GT(checked, 0);
 }
 
@@ -878,8 +865,8 @@ TEST_P(ShapingRules, ThePiecesCoverTheText) {
           << "one run in two glyph words: " << where(line, i);
     }
   }
-  logCount("consumed tokens", consumed, GetParam().minConsumed);
-  EXPECT_GE(consumed, GetParam().minConsumed);
+  logCount("consumed tokens", consumed, GetParam().consumed);
+  EXPECT_EQ(GetParam().consumed, consumed);
 }
 
 // Rule 7.
@@ -910,7 +897,6 @@ TEST_P(ShapingRules, EachLetterIsDrawnOnce) {
   const auto drawable = [&](std::multiset<uint16_t>& glyphs) {
     for (const uint16_t g : undrawnGlyphs) glyphs.erase(g);
   };
-  std::vector<int> seen(param.misdraws.size(), 0);
   int checked = 0;
   int asCodePoints = 0;
   for (const auto& [key, members] : words) {
@@ -957,22 +943,8 @@ TEST_P(ShapingRules, EachLetterIsDrawnOnce) {
     std::vector<uint16_t> extra;
     std::set_difference(expected.begin(), expected.end(), drawn.begin(), drawn.end(), std::back_inserter(missing));
     std::set_difference(drawn.begin(), drawn.end(), expected.begin(), expected.end(), std::back_inserter(extra));
-    bool recorded = false;
-    for (size_t m = 0; m < param.misdraws.size() && !recorded; ++m) {
-      const Misdraw& misdraw = param.misdraws[m];
-      if (seen[m] == 0 && whole == misdraw.word && static_cast<int>(missing.size()) == misdraw.missing &&
-          static_cast<int>(extra.size()) == misdraw.extra) {
-        seen[m] = 1;
-        recorded = true;
-        std::printf("[ ShapingRules ] %s: recorded misdraw '%s': %zu glyphs missing, %zu extra\n", param.label,
-                    whole.c_str(), missing.size(), extra.size());
-      }
-    }
-    EXPECT_TRUE(recorded) << "a word drawn with " << missing.size() << " of its glyphs missing and " << extra.size()
-                          << " extra: '" << whole << "' in: " << lineText(book.lineOf(first));
-  }
-  for (size_t m = 0; m < param.misdraws.size(); ++m) {
-    EXPECT_EQ(1, seen[m]) << "the recorded misdraw of '" << param.misdraws[m].word << "' is not on the pages";
+    ADD_FAILURE() << "a word drawn with " << missing.size() << " of its glyphs missing and " << extra.size()
+                  << " extra: '" << whole << "' in: " << lineText(book.lineOf(first));
   }
   logCount("words checked whole", checked, 1);
   logCount("words drawn in part as their code points", asCodePoints, param.codePointWords);
@@ -1279,8 +1251,8 @@ TEST_P(ShapingRules, TheWordCacheChangesNoLine) {
 namespace {
 
 // The Allah ligature's span token, alone, with the lam before it and as the heh alone (make_test_shaped_arabic.py).
-const char* const kAllahTail = "\xD9\x84\xD9\x91\xD9\xB0\xD9\x87";
-const char* const kAllahLostTail = "\xD9\x84\xD9\x84\xD9\x91\xD9\xB0\xD9\x87";
+const char* const kAllahAfterLam = "\xD9\x84\xD9\x91\xD9\xB0\xD9\x87";
+const char* const kAllahAfterAlef = "\xD9\x84\xD9\x84\xD9\x91\xD9\xB0\xD9\x87";
 const char* const kAllahHeh = "\xD9\x87";
 
 Book arabicBook(const char* label, const uint16_t viewportWidth) {
@@ -1291,12 +1263,12 @@ Book arabicBook(const char* label, const uint16_t viewportWidth) {
   // Allah split by a span after its alef, after its first lam or before its heh: each token is shaped with the whole
   // other token as context, so the ligature forms alike on both and is drawn once, by the token that holds its first
   // letter; the other keeps nothing. No letter is lost or drawn twice, and no case is an exception to rule 7.
-  book.consumedTokens = {kAllahLostTail, kAllahTail, kAllahHeh};
+  book.consumedTokens = {kAllahAfterAlef, kAllahAfterLam, kAllahHeh};
   book.minGlyphWords = 450;
   book.minKeptApart = 12;
   book.minGluedToPunctuation = 30;
   book.minPastTheCap = 1;
-  book.minConsumed = 200;
+  book.consumed = 204;  // 200 of the stress paragraph's Allah splits and four of the book's cases
   book.minBesideDigits = 2;
   book.minRtlPairs = 30;
   // The paragraph of span-split ligatures passes the line pass's slots even at 460 px.

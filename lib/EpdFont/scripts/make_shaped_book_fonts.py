@@ -29,11 +29,15 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+import fontTools
 from fontTools import subset
 from fontTools.ttLib import TTFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import merge_noto_latin  # noqa: E402
+
+# The subsetter's and the table writer's bytes depend on this fontTools; the fonts are byte-identical only under it.
+PINNED_FONTTOOLS = "4.63.0"
 
 # notofonts/notofonts.github.io at this commit.
 SOURCE_COMMIT = "5c82cef0a8f08806f932062e18c02be62be278f0"
@@ -123,6 +127,8 @@ def main():
     parser.add_argument("--books", required=True, type=Path, help="the directory of the books")
     parser.add_argument("--fonts-out", required=True, type=Path, help="output directory for the fonts")
     args = parser.parse_args()
+    if fontTools.version != PINNED_FONTTOOLS:
+        sys.exit(f"fontTools {fontTools.version} is installed, the build pins {PINNED_FONTTOOLS}")
 
     fonts = []
     with tempfile.TemporaryDirectory() as tmp:
