@@ -42,17 +42,19 @@ class SdCardFontSystem {
   void setReaderLanguage(const std::string& language);
   void clearReaderLanguage();
   /// The open book's language is not known yet: a first open learns it from the load that builds book.bin. While a
-  /// Noto CJK or Indic family is installed, which the language may pick (effectiveReaderFamily, selectLanguageFamily),
-  /// the book's font waits for it (waitsForReaderLanguage) rather than install one face and then another.
+  /// Noto CJK, Indic or Arabic family is installed, which the language may pick (effectiveReaderFamily,
+  /// selectLanguageFamily), the book's font waits for it (waitsForReaderLanguage) rather than install one face and then
+  /// another.
   void setReaderLanguagePending();
   bool waitsForReaderLanguage() const;
 
-  /// A Chinese, Japanese, Korean or Indic book (by its language) whose reader font has none of its script is drawn
-  /// in an installed Noto family of the book's region or script instead: NotoSerif<R> or NotoSans<R> (R: JP, SC, TC,
-  /// KR, or an Indic script's name), the sans first for a font named Sans. Decided at book open for the font the book
-  /// takes from the settings (`family`: the global SD family, "" for a built-in one; nullptr when the book has a font
-  /// of its own), from that font's file on the card; languageFamily() is "" when it has the script, the book is
-  /// neither a CJK nor an Indic book, or no such family is installed.
+  /// A Chinese, Japanese, Korean, Indic or Arabic-script book (by its language) whose reader font has none of its
+  /// script is drawn in an installed Noto family of the book's region or script instead: NotoSerif<R> or NotoSans<R>
+  /// (R: JP, SC, TC, KR, or an Indic script's name; an Arabic-script book: NotoSansArabic or NotoNaskhArabic), the sans
+  /// first for a font named Sans. Decided at book open for the font the book takes from the settings (`family`: the
+  /// global SD family, "" for a built-in one; nullptr when the book has a font of its own), from that font's file on
+  /// the card; languageFamily() is "" when it has the script, the book is neither a CJK, an Indic nor an Arabic-script
+  /// book, or no such family is installed.
   void selectLanguageFamily(const char* family);
   const char* languageFamily() const { return languageFamily_.c_str(); }
 
@@ -195,11 +197,14 @@ class SdCardFontSystem {
   static ReaderCjkRegion familyRegion(const std::string& family, std::string& stem);
   // Whether `family` is "NotoSans" or "NotoSerif" + the name of an Indic script.
   static bool isIndicFamily(const std::string& family);
+  // Whether `family` is "NotoSansArabic" or "NotoNaskhArabic".
+  static bool isArabicFamily(const std::string& family);
   // Whether `family`'s regular file maps `codepoint`; true too when the file cannot be read, which keeps the font.
   static bool familyMapsCodepoint(const SdCardFontFamilyInfo& family, uint32_t codepoint);
 
   ReaderCjkRegion readerCjkRegion_ = ReaderCjkRegion::None;
   const indic::ScriptInfo* readerIndicScript_ = nullptr;  // the open book's Indic script, else null
+  bool readerArabicScript_ = false;                       // the open book is in an Arabic-script language
   uint32_t cjkFamilyKey_ = 0;                             // coversCjk(): the family it last read, and what it found
   bool cjkFamily_ = false;
   std::string languageFamily_;      // selectLanguageFamily()
