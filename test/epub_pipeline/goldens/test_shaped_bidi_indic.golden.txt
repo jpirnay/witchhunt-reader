@@ -1,0 +1,581 @@
+BOOK title=הכרזה לכל באי עולם בדבר זכויות האדם lang=he spine=2 toc=0 reliableToc=0
+SPINE 0 href=OEBPS/ch1.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=8 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.400 hfid=0 words=7
+   W x=17 s=1 z=100 t=האדם
+    WD t=םדאה
+   W x=75 s=1 z=100 t=זכויות
+    WD t=תויוכז
+   W x=164 s=1 z=100 t=בדבר
+    WD t=רבדב
+   W x=225 s=1 z=100 t=עולם
+    WD t=םלוע
+   W x=283 s=1 z=100 t=באי
+    WD t=יאב
+   W x=341 s=1 z=100 t=לכל
+   W x=385 s=1 z=100 t=הכרזה
+    WD t=הזרכה
+   O order=6,5,4,3,2,1,0
+  LINE y=34 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=2 s=0 z=100 t=האדם
+    WD t=םדאה
+   W x=48 s=0 z=100 t=משפחת
+    WD t=תחפשמ
+   W x=106 s=0 z=100 t=בני
+    WD t=ינב
+   W x=155 s=0 z=100 t=לכל
+   W x=192 s=0 z=100 t=אשר
+    WD t=רשא
+   W x=229 s=0 z=100 t=הטבעי
+    WD t=יעבטה
+   W x=291 s=0 z=100 t=בכבוד
+    WD t=דובכב
+   W x=348 s=0 z=100 t=והכרה
+    WD t=הרכהו
+   W x=397 s=0 z=100 t=הואיל
+    WD t=ליאוה
+   O order=8,7,6,5,4,3,2,1,0
+  LINE y=58 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=3 s=0 z=100 t=החופש,
+    WD t=,שפוחה
+   W x=58 s=0 z=100 t=יסוד
+    WD t=דוסי
+   W x=96 s=0 z=100 t=הוא
+    WD t=אוה
+   W x=127 s=0 z=100 t=נפקעות
+    WD t=תועקפנ
+   W x=189 s=0 z=100 t=והבלתי
+    WD t=יתלבהו
+   W x=249 s=0 z=100 t=השוות
+    WD t=תוושה
+   W x=293 s=0 z=100 t=ובזכויותיהם
+    WD t=םהיתויוכזבו
+   W x=398 s=0 z=100 t=)
+    WD t=(
+   W x=409 s=0 z=100 t=मानव
+    WG n=4 g=39:191 g=11:83 g=34:178 g=43:178
+   W x=448 s=0 z=100 t=(
+    WD t=)
+   O order=9,8,7,6,5,4,3,2,1,0
+  LINE y=82 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=312 s=0 z=100 t=בעולם.
+    WD t=.םלועב
+   W x=371 s=0 z=100 t=והשלום
+    WD t=םולשהו
+   W x=424 s=0 z=100 t=הצדק
+    WD t=קדצה
+   O order=2,1,0
+  LINE y=106 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=4 s=0 z=100 t=מעשים
+    WD t=םישעמ
+   W x=61 s=0 z=100 t=הבשילו
+    WD t=ולישבה
+   W x=126 s=0 z=100 t=וביזוין
+    WD t=ןיוזיבו
+   W x=209 s=0 z=100 t=האדם
+    WD t=םדאה
+   W x=253 s=0 z=100 t=בזכויות
+    WD t=תויוכזב
+   W x=328 s=0 z=100 t=והזלזול
+    WD t=לוזלזהו
+   W x=397 s=0 z=100 t=הואיל
+    WD t=ליאוה
+   O order=6,5,4,3,2,1,0
+  LINE y=130 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=5 s=0 z=100 t=שבו
+    WD t=ובש
+   W x=38 s=0 z=100 t=עולם,
+    WD t=,םלוע
+   W x=85 s=0 z=100 t=ובנין
+    WD t=ןינבו
+   W x=146 s=0 z=100 t=האנושות;
+    WD t=;תושונאה
+   W x=222 s=0 z=100 t=של
+    WD t=לש
+   W x=244 s=0 z=100 t=במצפונה
+    WD t=הנופצמב
+   W x=319 s=0 z=100 t=קשה
+    WD t=השק
+   W x=352 s=0 z=100 t=שפגעו
+    WD t=ועגפש
+   W x=402 s=0 z=100 t=פראיים
+    WD t=םייארפ
+   O order=8,7,6,5,4,3,2,1,0
+  LINE y=154 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=ומן
+    WD t=ןמו
+   W x=35 s=0 z=100 t=והאמונה
+    WD t=הנומאהו
+   W x=103 s=0 z=100 t=הדיבור
+    WD t=רובידה
+   W x=159 s=0 z=100 t=מחירות
+    WD t=תוריחמ
+   W x=219 s=0 z=100 t=)
+    WD t=(
+   W x=230 s=0 z=100 t=मनुष्य
+    WG n=5 g=39:191 g=34:178 g=14:0 g=85:114 g=40:186
+   W x=272 s=0 z=100 t=(
+    WD t=)
+   W x=290 s=0 z=100 t=אנוש
+    WD t=שונא
+   W x=333 s=0 z=100 t=יצורי
+    WD t=ירוצי
+   W x=388 s=0 z=100 t=כל
+    WD t=לכ
+   W x=409 s=0 z=100 t=ייהנו
+    WD t=ונהיי
+   O order=10,9,8,7,6,5,4,3,2,1,0
+  LINE y=178 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=54 s=0 z=100 t=אדם.
+    WD t=.םדא
+   W x=95 s=0 z=100 t=כל
+    WD t=לכ
+   W x=116 s=0 z=100 t=של
+    WD t=לש
+   W x=137 s=0 z=100 t=שאיפותיו
+    WD t=ויתופיאש
+   W x=217 s=0 z=100 t=כראש
+    WD t=שארכ
+   W x=253 s=0 z=100 t=הוכרז
+    WD t=זרכוה
+   W x=296 s=0 z=100 t=וממחסור,
+    WD t=,רוסחממו
+   W x=368 s=0 z=100 t=מפחד
+    WD t=דחפמ
+   W x=409 s=0 z=100 t=החירות
+    WD t=תוריחה
+   O order=8,7,6,5,4,3,2,1,0
+SPINE 1 href=OEBPS/ch2.xhtml pages=1 truncated=0 cssFallback=0
+ PAGE 0 elements=30 footnotes=0
+  LINE y=0 x=0 align=2 mult=1.400 hfid=0 words=2
+   W x=184 s=1 z=100 t=א.
+    WD t=.א
+   W x=223 s=1 z=100 t=סעיף
+    WD t=ףיעס
+   O order=1,0
+  LINE y=34 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=4 s=0 z=100 t=בערכם
+    WD t=םכרעב
+   W x=65 s=0 z=100 t=ושווים
+    WD t=םיוושו
+   W x=138 s=0 z=100 t=חורין
+    WD t=ןירוח
+   W x=206 s=0 z=100 t=בני
+    WD t=ינב
+   W x=262 s=0 z=100 t=נולדו
+    WD t=ודלונ
+   W x=325 s=0 z=100 t=אדם
+    WD t=םדא
+   W x=371 s=0 z=100 t=בני
+    WD t=ינב
+   W x=427 s=0 z=100 t=כל
+    WD t=לכ
+   O order=7,6,5,4,3,2,1,0
+  LINE y=58 x=0 align=0 mult=1.000 hfid=0 words=7
+   W x=4 s=0 z=100 t=חובה
+    WD t=הבוח
+   W x=49 s=0 z=100 t=לפיכך
+    WD t=ךכיפל
+   W x=100 s=0 z=100 t=ובמצפון,
+    WD t=,ןופצמבו
+   W x=185 s=0 z=100 t=בתבונה
+    WD t=הנובתב
+   W x=251 s=0 z=100 t=חוננו
+    WD t=וננוח
+   W x=310 s=0 z=100 t=כולם
+    WD t=םלוכ
+   W x=351 s=0 z=100 t=ובזכויותיהם.
+    WD t=.םהיתויוכזבו
+   O order=6,5,4,3,2,1,0
+  LINE y=82 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=7 s=0 z=100 t=सभी
+    WG n=3 g=46:216 g=38:225 g=13:83
+   W x=40 s=0 z=100 t=«
+    WD t=»
+   W x=61 s=0 z=100 t=בהינדית:
+    WD t=:תידניהב
+   W x=147 s=0 z=100 t=אחוה.
+    WD t=.הוחא
+   W x=202 s=0 z=100 t=של
+    WD t=לש
+   W x=227 s=0 z=100 t=ברוח
+    WD t=חורב
+   W x=272 s=0 z=100 t=ברעהו
+    WD t=והערב
+   W x=321 s=0 z=100 t=איש
+    WD t=שיא
+   W x=360 s=0 z=100 t=לנהוג
+    WD t=גוהנל
+   W x=417 s=0 z=100 t=עליהם
+    WD t=םהילע
+   O order=9,8,7,6,5,4,3,2,1,0
+  LINE y=106 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=4 s=0 z=100 t=मनुष्यों
+    WG n=7 g=39:191 g=34:178 g=14:0 g=85:114 g=40:186 g=11:83 g=280:0
+   W x=58 s=0 z=100 t=को
+    WG n=2 g=21:246 g=19:83
+   W x=85 s=0 z=100 t=गौरव
+    WG n=4 g=23:180 g=20:83 g=41:131 g=43:178
+   W x=127 s=0 z=100 t=और
+    WG n=2 g=10:327 g=41:131
+   W x=162 s=0 z=100 t=अधिकारों
+    WG n=8 g=2:245 g=292:83 g=33:197 g=21:246 g=11:83 g=41:131 g=11:83 g=280:0
+   W x=234 s=0 z=100 t=के
+    WG n=2 g=21:246 g=17:0:-4,0
+   W x=256 s=0 z=100 t=मामले
+    WG n=5 g=39:191 g=11:83 g=39:191 g=42:217 g=17:0
+   W x=306 s=0 z=100 t=में
+    WG n=2 g=39:191 g=280:0
+   W x=325 s=0 z=100 t=जन्मजात
+    WG n=6 g=27:238 g=75:102 g=39:191 g=27:238 g=11:83 g=30:183
+   W x=396 s=0 z=100 t=स्वतन्त्रता
+    WG n=7 g=86:125 g=43:178 g=30:183 g=75:104 g=120:177 g=30:183 g=11:83
+  LINE y=130 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=278 s=0 z=100 t=».
+    WD t=.«
+   W x=297 s=0 z=100 t=और
+    WG n=2 g=10:327 g=41:131
+   W x=331 s=0 z=100 t=समानता
+    WG n=6 g=46:216 g=39:191 g=11:83 g=34:178 g=30:183 g=11:83
+   W x=395 s=0 z=100 t=प्राप्त
+    WG n=4 g=125:182 g=11:83 g=76:99 g=30:183
+   W x=434 s=0 z=100 t=है
+    WG n=2 g=47:170 g=18:0
+   W x=451 s=0 z=100 t=।
+   O order=5,0,1,2,3,4
+  LINE y=154 x=0 align=2 mult=1.400 hfid=0 words=2
+   W x=184 s=1 z=100 t=ב.
+    WD t=.ב
+   W x=224 s=1 z=100 t=סעיף
+    WD t=ףיעס
+   O order=1,0
+  LINE y=188 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=בהכרזה
+    WD t=הזרכהב
+   W x=54 s=0 z=100 t=שנקבעו
+    WD t=ועבקנש
+   W x=118 s=0 z=100 t=ולחרויות
+    WD t=תויורחלו
+   W x=193 s=0 z=100 t=)
+    WD t=(
+   W x=204 s=0 z=100 t=अधिकार
+    WG n=6 g=2:245 g=292:83 g=33:197 g=21:246 g=11:83 g=41:131
+   W x=264 s=0 z=100 t=(
+    WD t=)
+   W x=283 s=0 z=100 t=לזכויות
+    WD t=תויוכזל
+   W x=350 s=0 z=100 t=זכאי
+    WD t=יאכז
+   W x=395 s=0 z=100 t=אדם
+    WD t=םדא
+   W x=427 s=0 z=100 t=כל
+    WD t=לכ
+   O order=9,8,7,6,5,4,3,2,1,0
+  LINE y=212 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=3 s=0 z=100 t=דח,
+    WD t=,חד
+   W x=37 s=0 z=100 t=לשון,
+    WD t=,ןושל
+   W x=89 s=0 z=100 t=מין,
+    WD t=,ןימ
+   W x=140 s=0 z=100 t=צבע,
+    WD t=,עבצ
+   W x=187 s=0 z=100 t=גזע,
+    WD t=,עזג
+   W x=233 s=0 z=100 t=מטעמי
+    WD t=ימעטמ
+   W x=293 s=0 z=100 t=כלשהיא
+    WD t=איהשלכ
+   W x=354 s=0 z=100 t=הפליה
+    WD t=הילפה
+   W x=407 s=0 z=100 t=ללא
+    WD t=אלל
+   W x=443 s=0 z=100 t=זו
+    WD t=וז
+   O order=9,8,7,6,5,4,3,2,1,0
+  LINE y=236 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=2 s=0 z=100 t=או
+    WD t=וא
+   W x=29 s=0 z=100 t=לאומי
+    WD t=ימואל
+   W x=86 s=0 z=100 t=מוצא
+    WD t=אצומ
+   W x=134 s=0 z=100 t=בגלל
+    WD t=ללגב
+   W x=182 s=0 z=100 t=אחרות,
+    WD t=,תורחא
+   W x=241 s=0 z=100 t=בבעיות
+    WD t=תויעבב
+   W x=307 s=0 z=100 t=דעה
+    WD t=העד
+   W x=336 s=0 z=100 t=או
+    WD t=וא
+   W x=363 s=0 z=100 t=פוליטית
+    WD t=תיטילופ
+   W x=440 s=0 z=100 t=דעה
+    WD t=העד
+   O order=9,8,7,6,5,4,3,2,1,0
+  LINE y=260 x=0 align=0 mult=1.000 hfid=0 words=6
+   W x=200 s=0 z=100 t=אחר.
+    WD t=.רחא
+   W x=242 s=0 z=100 t=מעמד
+    WD t=דמעמ
+   W x=281 s=0 z=100 t=או
+    WD t=וא
+   W x=305 s=0 z=100 t=לידה
+    WD t=הדיל
+   W x=344 s=0 z=100 t=קנין,
+    WD t=,ןינק
+   W x=405 s=0 z=100 t=חברתי,
+    WD t=,יתרבח
+   O order=5,4,3,2,1,0
+  LINE y=284 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=פי
+    WD t=יפ
+   W x=31 s=0 z=100 t=על
+    WD t=לע
+   W x=56 s=0 z=100 t=המדיני,
+    WD t=,ינידמה
+   W x=133 s=0 z=100 t=מעמדה
+    WD t=הדמעמ
+   W x=183 s=0 z=100 t=פי
+    WD t=יפ
+   W x=214 s=0 z=100 t=על
+    WD t=לע
+   W x=239 s=0 z=100 t=אדם
+    WD t=םדא
+   W x=274 s=0 z=100 t=יופלה
+    WD t=הלפוי
+   W x=328 s=0 z=100 t=לא
+    WD t=אל
+   W x=356 s=0 z=100 t=מזו,
+    WD t=,וזמ
+   W x=401 s=0 z=100 t=גדולה
+    WD t=הלודג
+   O order=10,9,8,7,6,5,4,3,2,1,0
+  LINE y=308 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=6 s=0 z=100 t=שאליה
+    WD t=הילאש
+   W x=56 s=0 z=100 t=הארץ
+    WD t=ץראה
+   W x=95 s=0 z=100 t=או
+    WD t=וא
+   W x=119 s=0 z=100 t=המדינה
+    WD t=הנידמה
+   W x=179 s=0 z=100 t=של
+    WD t=לש
+   W x=200 s=0 z=100 t=הבינלאומי
+    WD t=ימואלניבה
+   W x=296 s=0 z=100 t=מעמדה
+    WD t=הדמעמ
+   W x=342 s=0 z=100 t=פי
+    WD t=יפ
+   W x=369 s=0 z=100 t=על
+    WD t=לע
+   W x=390 s=0 z=100 t=או
+    WD t=וא
+   W x=414 s=0 z=100 t=סמכותה
+    WD t=התוכמס
+   O order=10,9,8,7,6,5,4,3,2,1,0
+  LINE y=332 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=5 s=0 z=100 t=נתונה
+    WD t=הנותנ
+   W x=64 s=0 z=100 t=שהיא
+    WD t=איהש
+   W x=112 s=0 z=100 t=ובין
+    WD t=ןיבו
+   W x=166 s=0 z=100 t=עצמאית,
+    WD t=,תיאמצע
+   W x=244 s=0 z=100 t=היא
+    WD t=איה
+   W x=285 s=0 z=100 t=שהארץ
+    WD t=ץראהש
+   W x=337 s=0 z=100 t=דין
+    WD t=ןיד
+   W x=378 s=0 z=100 t=שייך,
+    WD t=,ךייש
+   W x=435 s=0 z=100 t=הוא
+    WD t=אוה
+   O order=8,7,6,5,4,3,2,1,0
+  LINE y=356 x=0 align=0 mult=1.000 hfid=0 words=8
+   W x=5 s=0 z=100 t=שריבונותה
+    WD t=התונובירש
+   W x=92 s=0 z=100 t=ובין
+    WD t=ןיבו
+   W x=142 s=0 z=100 t=עצמי
+    WD t=ימצע
+   W x=190 s=0 z=100 t=שלטון
+    WD t=ןוטלש
+   W x=243 s=0 z=100 t=נטולת
+    WD t=תלוטנ
+   W x=298 s=0 z=100 t=שהיא
+    WD t=איהש
+   W x=342 s=0 z=100 t=בין
+    WD t=ןיב
+   W x=384 s=0 z=100 t=לנאמנות,
+    WD t=,תונמאנל
+   O order=7,6,5,4,3,2,1,0
+  LINE y=380 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=281 s=0 z=100 t=אחרת.
+    WD t=.תרחא
+   W x=331 s=0 z=100 t=הגבלה
+    WD t=הלבגה
+   W x=382 s=0 z=100 t=כל
+    WD t=לכ
+   W x=403 s=0 z=100 t=מוגבלת
+    WD t=תלבגומ
+   O order=3,2,1,0
+  LINE y=404 x=0 align=2 mult=1.400 hfid=0 words=2
+   W x=183 s=1 z=100 t=ג.
+    WD t=.ג
+   W x=225 s=1 z=100 t=סעיף
+    WD t=ףיעס
+   O order=1,0
+  LINE y=438 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=63 s=0 z=100 t=אישי.
+    WD t=.ישיא
+   W x=120 s=0 z=100 t=ולבטחון
+    WD t=ןוחטבלו
+   W x=193 s=0 z=100 t=לחרות
+    WD t=תורחל
+   W x=239 s=0 z=100 t=לחיים,
+    WD t=,םייחל
+   W x=304 s=0 z=100 t=הזכות
+    WD t=תוכזה
+   W x=349 s=0 z=100 t=לו
+    WD t=ול
+   W x=371 s=0 z=100 t=יש
+    WD t=שי
+   W x=396 s=0 z=100 t=אדם
+    WD t=םדא
+   W x=427 s=0 z=100 t=כל
+    WD t=לכ
+   O order=8,7,6,5,4,3,2,1,0
+  LINE y=462 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=398 s=0 z=100 t=המילה
+    WD t=הלימה
+  LINE y=486 x=0 align=0 mult=1.000 hfid=0 words=1
+   W x=4 s=0 z=100 t=Donaudampfschifffahrtselektrizitätenhauptbetrieb-
+    WD t=-Donaudampfschifffahrtselektrizitätenhauptbetrieb
+  LINE y=510 x=0 align=0 mult=1.000 hfid=0 words=2
+   W x=0 s=0 z=100 t=(בגרמנית),
+    WD t=,(תינמרגב)
+   W x=159 s=0 z=100 t=swerkbauunterbeamtengesellschaft
+   O order=1,0
+  LINE y=534 x=0 align=0 mult=1.000 hfid=0 words=13
+   W x=164 s=0 z=100 t=.
+   W x=174 s=0 z=100 t=कि
+    WG n=2 g=289:83 g=21:246
+   W x=194 s=0 z=100 t=,
+   W x=208 s=0 z=100 t=क
+    WG n=1 g=21:246
+   W x=223 s=1 z=100 t=म
+    WG n=1 g=39:191
+   W x=235 s=0 z=100 t=ल
+    WG n=1 g=42:217
+   W x=249 s=0 z=100 t=,
+   W x=263 s=0 z=100 t=नीति
+    WG n=4 g=34:178 g=13:83 g=289:83 g=30:183
+   W x=295 s=16 z=50 t=क
+    WG n=1 g=21:123
+   W x=309 s=0 z=100 t=),
+    WD t=,(
+   W x=328 s=0 z=100 t=हिन्दी
+    WG n=5 g=288:83 g=47:170 g=75:99 g=32:170 g=13:83
+   W x=366 s=0 z=100 t=(
+    WD t=)
+   W x=384 s=0 z=100 t=בהינדית:
+    WD t=:תידניהב
+   O order=12,4,5,6,7,8,9,10,11,3,2,1,0
+  LINE y=558 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=18 s=0 z=100 t=The
+   W x=53 s=0 z=100 t=Hebrew
+   W x=107 s=0 z=100 t=word
+   W x=149 s=0 z=100 t=אדם
+    WD t=םדא
+   W x=182 s=0 z=100 t=means
+   W x=241 s=0 z=100 t=a
+   W x=261 s=0 z=100 t=human
+   W x=325 s=0 z=100 t=being,
+   W x=384 s=0 z=100 t=as
+   W x=413 s=0 z=100 t=मानव
+    WG n=4 g=39:191 g=11:83 g=34:178 g=43:178
+  LINE y=582 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=0 s=0 z=100 t=and
+   W x=43 s=0 z=100 t=मनुष्य
+    WG n=5 g=39:191 g=34:178 g=14:0 g=85:114 g=40:186
+   W x=97 s=0 z=100 t=do
+   W x=129 s=0 z=100 t=in
+   W x=158 s=0 z=100 t=Hindi.
+   W x=219 s=0 z=100 t=The
+   W x=258 s=0 z=100 t=Declaration
+   W x=377 s=0 z=100 t=says
+   W x=427 s=0 z=100 t=सभी
+    WG n=3 g=46:216 g=38:225 g=13:83
+  LINE y=606 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=मनुष्यों
+    WG n=7 g=39:191 g=34:178 g=14:0 g=85:114 g=40:186 g=11:83 g=280:0
+   W x=54 s=0 z=100 t=को
+    WG n=2 g=21:246 g=19:83
+   W x=81 s=0 z=100 t=गौरव
+    WG n=4 g=23:180 g=20:83 g=41:131 g=43:178
+   W x=123 s=0 z=100 t=और
+    WG n=2 g=10:327 g=41:131
+   W x=158 s=0 z=100 t=अधिकारों
+    WG n=8 g=2:245 g=292:83 g=33:197 g=21:246 g=11:83 g=41:131 g=11:83 g=280:0
+   W x=230 s=0 z=100 t=के
+    WG n=2 g=21:246 g=17:0:-4,0
+   W x=252 s=0 z=100 t=मामले
+    WG n=5 g=39:191 g=11:83 g=39:191 g=42:217 g=17:0
+   W x=302 s=0 z=100 t=में
+    WG n=2 g=39:191 g=280:0
+   W x=321 s=0 z=100 t=जन्मजात
+    WG n=6 g=27:238 g=75:102 g=39:191 g=27:238 g=11:83 g=30:183
+   W x=392 s=0 z=100 t=स्वतन्त्रता
+    WG n=7 g=86:125 g=43:178 g=30:183 g=75:104 g=120:177 g=30:183 g=11:83
+  LINE y=630 x=0 align=0 mult=1.000 hfid=0 words=11
+   W x=0 s=0 z=100 t=और
+    WG n=2 g=10:327 g=41:131
+   W x=37 s=0 z=100 t=समानता
+    WG n=6 g=46:216 g=39:191 g=11:83 g=34:178 g=30:183 g=11:83
+   W x=104 s=0 z=100 t=प्राप्त
+    WG n=4 g=125:182 g=11:83 g=76:99 g=30:183
+   W x=146 s=0 z=100 t=है
+    WG n=2 g=47:170 g=18:0
+   W x=166 s=0 z=100 t=in
+   W x=192 s=0 z=100 t=its
+   W x=226 s=0 z=100 t=Hindi
+   W x=274 s=0 z=100 t=text,
+   W x=327 s=0 z=100 t=and
+   W x=367 s=0 z=100 t=All
+   W x=402 s=0 z=100 t=human
+  LINE y=654 x=0 align=0 mult=1.000 hfid=0 words=10
+   W x=0 s=0 z=100 t=beings
+   W x=59 s=0 z=100 t=are
+   W x=95 s=0 z=100 t=born
+   W x=139 s=0 z=100 t=free
+   W x=182 s=0 z=100 t=and
+   W x=220 s=0 z=100 t=equal
+   W x=275 s=0 z=100 t=in
+   W x=299 s=0 z=100 t=dignity
+   W x=366 s=0 z=100 t=and
+   W x=404 s=0 z=100 t=rights
+  LINE y=678 x=0 align=0 mult=1.000 hfid=0 words=4
+   W x=0 s=0 z=100 t=in
+   W x=23 s=0 z=100 t=its
+   W x=54 s=0 z=100 t=English
+   W x=130 s=0 z=100 t=one.
+  LINE y=702 x=0 align=0 mult=1.000 hfid=0 words=9
+   W x=18 s=0 z=100 t=All
+   W x=57 s=0 z=100 t=human
+   W x=126 s=0 z=100 t=beings
+   W x=191 s=0 z=100 t=are
+   W x=233 s=0 z=100 t=born
+   W x=283 s=0 z=100 t=free
+   W x=332 s=0 z=100 t=and
+   W x=376 s=0 z=100 t=equal
+   W x=437 s=0 z=100 t=in
+  LINE y=726 x=0 align=0 mult=1.000 hfid=0 words=3
+   W x=0 s=0 z=100 t=dignity
+   W x=66 s=0 z=100 t=and
+   W x=103 s=0 z=100 t=rights.
