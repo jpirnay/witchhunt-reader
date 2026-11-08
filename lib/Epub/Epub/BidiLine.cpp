@@ -698,49 +698,24 @@ bool fallbackLine(const Token* tokens, const size_t count, const OpenControls& o
     return true;
   }
 
-  // The words without their marks (computeVisualWordOrder takes std::string words, about the line's bytes) and the
-  // order followed by each token's first piece (4 bytes a token), in the Line's buffers: only a fallback line longer
-  // than any before allocates. Every buffer is reserved before any is written, and the copies' bytes past the
-  // short-string buffer are asked for with them (the longest such copy stands for each: a kept copy's capacity is
-  // at least the text it held), so a refusal leaves the line clear for the caller's path without bidi. About 4.8 KB
-  // for a 300-code-point line whose every token is cut (the step 2 PR 4b review).
-  std::vector<std::string>& words = out.fallbackWords;
+  // The tokens' text as views (computeVisualWordOrder skips their marks itself) and the order followed by each
+  // token's first piece, 8 and 4 bytes a token on the device, in the Line's buffers: only a fallback line longer than
+  // any before allocates. Every buffer is reserved before any is written, so a refusal leaves the line clear for the
+  // caller's path without bidi. The copies this once made of the words (about 3 KB for a 124-token line) are gone.
+  std::vector<std::string_view>& views = out.fallbackViews;
   std::vector<uint16_t>& order = out.fallbackOrder;
   size_t pieceBound = 0;
   size_t byteBound = 0;
   fallbackBounds(tokens, count, pieceBound, byteBound);
-  size_t copyBytes = 0;
-  for (size_t t = 0; t < count; t++) {
-    const std::string_view text = tokens[t].text;
-    const std::string* kept = t < words.size() ? &words[t] : nullptr;
-    const size_t have = kept != nullptr ? kept->capacity() : std::string().capacity();
-    if (text.size() > have) copyBytes += heap_growth::growthBytes(std::string(), text.size());
-  }
-  const bool copiesFit = heap_growth::heapAllows(copyBytes);
-  if (!copiesFit) {
-    LOG_ERR("BIDI", "No %u B for the fallback's word copies: line laid out without bidi",
-            static_cast<unsigned>(copyBytes));
-  }
-  if (!copiesFit || !reserveAtLeast(words, count) || !reserveAtLeast(order, 2 * count + 1) ||
+  if (!reserveAtLeast(views, count) || !reserveAtLeast(order, 2 * count + 1) ||
       !reserveAtLeast(out.display, byteBound) || !reserveAtLeast(out.pieces, pieceBound)) {
     out.clear();
     return false;
   }
   out.fallback = true;
-  words.resize(count);
-  for (size_t t = 0; t < count; t++) {
-    const std::string_view text = tokens[t].text;
-    std::string& stripped = words[t];
-    stripped.clear();
-    stripped.reserve(text.size());
-    for (size_t pos = 0; pos < text.size();) {
-      const size_t at = pos;
-      if (!BidiUtils::isTransparentMark(decodeAt(text.data(), text.size(), pos))) {
-        stripped.append(text.data() + at, pos - at);
-      }
-    }
-  }
-  if (!BidiUtils::computeVisualWordOrder(words, paragraphLevel == 1, order)) order.clear();
+  views.clear();
+  for (size_t t = 0; t < count; t++) views.push_back(tokens[t].text);
+  if (!BidiUtils::computeVisualWordOrder(views.data(), count, paragraphLevel == 1, order)) order.clear();
   if (order.size() != count) {
     order.clear();
     for (size_t v = 0; v < count; v++) order.push_back(static_cast<uint16_t>(paragraphLevel == 1 ? count - 1 - v : v));

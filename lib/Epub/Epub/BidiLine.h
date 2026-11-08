@@ -82,9 +82,10 @@ struct Line {
   bool fallback = false;   // over kMaxCodepoints slots or kMaxUnits units
   void clear();            // keeps capacity
 
-  // The fallback's working copies (its words without their marks, and their order followed by each token's first
-  // piece), kept with their capacity across lines; not part of the result.
-  std::vector<std::string> fallbackWords;
+  // The fallback's working arrays (views of its tokens' text, and their order followed by each token's first piece),
+  // 8 and 4 B a token on the device, kept with their capacity across lines; not part of the result. The fallback
+  // copies no word: computeVisualWordOrder skips the marks itself.
+  std::vector<std::string_view> fallbackViews;
   std::vector<uint16_t> fallbackOrder;
 };
 

@@ -1755,7 +1755,7 @@ void ParsedText::releaseLayoutScratch() {
     BidiState& state = *bidiState_;
     std::vector<BidiLine::Piece>().swap(state.line.pieces);
     std::string().swap(state.line.display);
-    std::vector<std::string>().swap(state.line.fallbackWords);
+    std::vector<std::string_view>().swap(state.line.fallbackViews);
     std::vector<uint16_t>().swap(state.line.fallbackOrder);
     std::vector<BidiLine::Token>().swap(state.tokens);
     std::vector<std::string_view>().swap(state.pieceWords);

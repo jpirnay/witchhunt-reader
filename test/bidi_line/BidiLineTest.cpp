@@ -413,23 +413,39 @@ TEST(BidiLine, ALongLeftToRightLineKeepsItsOrder) {
   EXPECT_EQ(render(line), expected);
 }
 
-TEST(BidiLine, AFallbackLineReusesItsCopies) {
-  // Words past the short-string buffer, on a line past the limit: the second line allocates no new copies.
+TEST(BidiLine, AFallbackLineReusesItsArrays) {
+  // A line past the limit: the second line allocates no new views or order, and the views are the tokens' own text.
   const std::vector<std::string> words = repeated("אבגדהוזחטי", 26);
   std::vector<BidiLine::Token> tokens;
   for (const auto& w : words) tokens.push_back({w, true});
   BidiLine::Line line;
   ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), line));
   ASSERT_TRUE(line.fallback);
-  ASSERT_EQ(line.fallbackWords.size(), 26u);
+  ASSERT_EQ(line.fallbackViews.size(), 26u);
+  EXPECT_EQ(line.fallbackViews.front().data(), words.front().data());
   const void* const order = line.fallbackOrder.data();
-  const void* const firstWord = line.fallbackWords.front().data();
-  const void* const lastWord = line.fallbackWords.back().data();
+  const void* const views = line.fallbackViews.data();
   ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), line));
   EXPECT_EQ(line.fallbackOrder.data(), order);
-  EXPECT_EQ(line.fallbackWords.front().data(), firstWord);
-  EXPECT_EQ(line.fallbackWords.back().data(), lastWord);
+  EXPECT_EQ(line.fallbackViews.data(), views);
   expectWellFormed(line, words);
+}
+
+TEST(BidiLine, AFallbackLineOrdersItsWordsAsIfTheirMarksWereNotThere) {
+  // The same line with and without a point on each word (the fallback once stripped the marks from copies of the
+  // words; now the order is computed over the words themselves): the same token order.
+  const std::vector<std::string> plain = repeated("אבגדה", 26);
+  std::vector<std::string> pointed = plain;
+  pointed[3] = "אָבגדה";
+  pointed[20] = "אבגְדה";
+  pointed.push_back("hello");
+  std::vector<std::string> plainTail = plain;
+  plainTail.push_back("hello");
+  const auto withMarks = lay(pointed, 1);
+  const auto without = lay(plainTail, 1);
+  ASSERT_TRUE(withMarks.fallback);
+  ASSERT_TRUE(without.fallback);
+  EXPECT_EQ(tokensOf(withMarks), tokensOf(without));
 }
 
 TEST(BidiLine, AFirstLineReservesForItsTokensNotTheWorstCase) {
@@ -898,7 +914,7 @@ TEST(BidiLine, AFallbackLineTheHeapRefusesItsBuffersIsLaidOutWithoutBidi) {
   }
   EXPECT_TRUE(fresh.pieces.empty());
   EXPECT_FALSE(fresh.fallback);
-  EXPECT_TRUE(fresh.fallbackWords.empty());
+  EXPECT_TRUE(fresh.fallbackViews.empty());
 
   BidiLine::Line held;
   ASSERT_TRUE(BidiLine::layoutLine(tokens.data(), tokens.size(), {}, 1, scratch(), held));
