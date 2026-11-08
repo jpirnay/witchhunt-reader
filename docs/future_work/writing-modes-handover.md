@@ -110,9 +110,14 @@ median of three:
   glyphs against 80-150 for the twin's 16,616, the glyph lookups 182 against 90, `beginText` 14. A Hebrew kerning pair
   costs three to four times a Latin one and a Hebrew glyph twice; both go through the glyph store's flash index
   (`FlashGlyphStore::findPair`, `find`: a Fibonacci-hashed, linearly probed table read from mapped flash, then the
-  record's header) and, for a pair the index lacks, the GPOS reader. The profile's next build counts hits, slow
-  lookups and probes; the candidate fix is a small RAM cache in front of both lookups, which would speed every
-  TrueType measure and draw, Latin included, for about 1 KB while a family is loaded.
+  record's header) and, for a pair the index lacks, the GPOS reader. The profile's store counters found the pairs:
+  4,300 of the chapter's 19,000 kerning lookups went to the GPOS reader on every build in NotoSansHebrew, and 17,000
+  of 20,000 drawn by the fallback face, because `TtfFont::Style`'s memory of left glyphs that kern with nothing (whose
+  pairs are never stored, spec 8.1) was a bit set ending at U+0250. Fixed on `perf/ttf-uncovered-left` (a 64-entry
+  set above it, and a left code point the face lacks counts too); its PR has the X3 figures. The glyph lookups
+  (2.3 to 2.7 probes each for Hebrew against 1.9 for Latin, 182 against 90 ms) are what remains of the measure: a
+  small RAM cache in front of `find` would serve every TrueType measure and draw for about 512 B while a family is
+  loaded.
 - **The line pass** (466 ms, 1.2 ms a line): one UAX#9 pass per line, with every token's HebrewShaper walk repeated
   and the forms re-encoded. The walk could stop at tokens without a yod (the divine name is all it changes).
 - **The form bytes.** A Hebrew line writes each word's display form beside its text (`WD` in the dump): 26,091 B
@@ -120,6 +125,36 @@ median of three:
   derived when drawn; that is a section format change.
 - **The plain path itself** (305 ms for 2,574 tokens, 118 µs each): `bidi_class` per code point (two binary searches
   in flash), the HebrewShaper walk, `workspaceAvailable`'s mutex.
+
+### Plan for what is left (2026-11-08)
+
+Items 1 and 2 are done to their measured lines (#660; `perf/rtl-baseline` and `perf/ttf-uncovered-left`, the kerning
+fix found under item 2, which helps every non-Latin TrueType text). The rest, in the order proposed, each a PR of its
+own with a device run:
+
+1. **The CJK link tap** (item 7's open bug): small, host-testable in the LinkMarkerMatch tests, user-visible.
+2. **The shaping engine's speed** (item 3): HarfBuzz 14.5's accelerator digests ported into `lib/OtShaper` (the
+   second-glyph lookup digests, LigatureSubst's seconds digest, the mark-set digests, a GDEF glyph-props cache),
+   measured on the X3 with Gaban (6,908 against 2,648 ms) and Zaydan shaped (7,880 against 2,489), the `OT_PROFILE`
+   branch's counters telling how many subtables a digest skips. The pass line is 2x the Latin twin. The biggest
+   win left for Indic and Arabic readers, and the largest piece of work.
+3. **Reading a Hebrew book** (item 4): page progression from the book's direction (Hebrew and Arabic books turn left
+   to right today), the reading order in the QR text and the footnote overlay, titles given a visual form once,
+   and the two Hebrew families merged with Latin. The measurements under item 2 add a reason: until the reader picks
+   a family for Hebrew, a Latin body font's fallback face draws it, 15 to 20 percent slower.
+4. **What item 2 left**, as the measurements of item 2 are repeated for item 3 anyway: a RAM cache in front of the
+   glyph store's lookups (a Hebrew glyph lookup costs twice a Latin one, 182 against 90 ms a chapter), the line pass's
+   repeated HebrewShaper walk (a yod test first), and the plain path's own cost; the form bytes a Hebrew line writes
+   are a section format change and wait for a reason beyond 180 ms.
+5. **The smaller Arabic gaps** (item 5), one PR for the layout ones (the soft hyphen inside a word, the long word
+   split by a span, the digit-only paragraph's shaping calls) and the X4 figures taken with it; Nastaliq measured
+   first, flash and speed, before any decision.
+6. **UI text** (item 8): the bitmap UI faces give titles and the TOC no bidi and no shaping; and TXT and Markdown
+   books no bidi. Worth a design note before code: the UI faces are bitmaps by choice.
+7. **Flash** (item 9) as each PR needs it: 235 KB free after #656, the candidates listed there.
+
+Not planned: Khmer, Myanmar and Tibetan (item 6; their own shaper modules), vertical shaped runs, CJK's out-of-scope
+list; each waits for a request.
 
 ### 3. Speed up the shaping engine (helps Indic most)
 
