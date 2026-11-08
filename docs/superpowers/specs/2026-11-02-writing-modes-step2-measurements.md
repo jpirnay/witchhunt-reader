@@ -1661,3 +1661,60 @@ from this branch merged with master `9331cbfc1`. `CMD:TTF:SHAPE` shaped ten word
 - The words, with the firmware, the fonts and the restore, are in the session's scratchpad (`x4a/`). The X4 was
   restored from a full flash backup read before the run, so it is back on its own firmware with its settings
   unchanged.
+
+## PR 4b: the shipped Arabic families against HarfBuzz
+
+Task 9 puts the two Arabic families into the Font Manager (`sd-fonts.yaml`: `NotoNaskhArabic`, "Arabic, Persian, Urdu,
+serif", merged with Noto Serif; `NotoSansArabic`, "Arabic, Persian, Urdu, sans serif", merged with Noto Sans; both
+`format: ttf`, `inDownloadAll: false`, the sources and hashes of the "PR 4a" Fonts table). Same recipe as PR 3b.
+
+### The build
+
+`build-sd-fonts.py --only NotoNaskhArabic,NotoSansArabic --output-dir assets/sd-fonts --manifest --base-url
+https://raw.githubusercontent.com/jpirnay/witchhunt-reader/master/assets/sd-fonts/ -j 2`: both "merged, both checks
+equal". The merge check now shapes `arabic.txt` (6,338 lines) right to left under `Arab` with no language and `ar`, `fa`,
+`ur`, `ps`, `sd`, `ug`, `ku`, `ckb`, `ks`, against the script font alone, and the Latin lines against Noto Sans/Serif.
+
+- **Determinism.** The four files were deleted and rebuilt: the sha256 of the four `.ttf` and of both manifests are
+  identical to the first run.
+- **Against PR 4a's merges** (the scratch `merged/` of Task 5): all four files are equal byte for byte.
+
+| File | Bytes | sha256 (equal to PR 4a's merge) |
+|---|---:|---|
+| NotoNaskhArabic-Regular.ttf | 261,600 | 21acf0334143ff85a709ef1762694d083f9c70fb521fea9fae0e04cefd297f14 |
+| NotoNaskhArabic-Bold.ttf | 261,352 | 8c7a340fd635c06f558696d6fde63ab557b43eae8de568151213a968cfe09137 |
+| NotoSansArabic-Regular.ttf | 232,704 | 13e9cea7a74e6288791f5927c848150b5ac5c24676bef6170a40e20073c1904e |
+| NotoSansArabic-Bold.ttf | 233,044 | a2bfc7d16c4077c41957ff81d6ed78de2084d021cedff7a2cc4773bd7bc8bdfb |
+
+The four files are 988,700 B; with the 40 Indic files, the 44 TrueType files are 9,091,272 B. `fonts-v3.json` gains the two
+families (`fonts.json`, the `.cpfont` list, is unchanged); `catalog.blockBytes()` is **11,812 B** for the v3 manifest
+(11,480 B before; 7,484 B for the v2 one), under the 16 KB budget. Each Arabic family fits the X3's font area in flash
+mode (`ShippedTtfFamilies.EachFileLoadsAndEachFamilyFitsTheX3Store`, 22 families; item 7 estimated Naskh 267,100 +
+266,852 B and Sans 238,000 + 238,340 B with their CPac).
+
+### The corpus
+
+`generate_corpus_arabic.py` now lists U+088F ARABIC LETTER NOON WITH RING ABOVE (Unicode 17, unknown to Python 3.14's
+Unicode 16.0.0) through `NEWER_THAN_PYTHON`, as a letter, so it is also in the letter combinations and the random pool;
+the shadda pairing of PR 4a's fix wave is checked by a test (shadda with every vowel including U+0670, both orders).
+The corpus is 6,338 distinct lines (6,333 before); the random sequences differ from PR 4a's because the letter pool gained U+088F.
+
+### The oracle
+
+`oracle_arabic.py` on the four shipped files (copied to a scratch folder), `ot_shape_cli` through the font's CPac, at
+(2133, 33) and (1195, 19), with no language and `ar`, `fa`, `ur`, `ps`, `sd`, `ug`, `ku`, `ckb`, `ks`: 4 files x 2 sizes
+x 10 languages = **80 runs, every one 6,338/6,338, 0 differences**.
+
+| Font | 33 ppem, all 10 languages | 19 ppem, all 10 languages |
+|---|---|---|
+| NotoNaskhArabic Regular | 6,338/6,338 | 6,338/6,338 |
+| NotoNaskhArabic Bold | 6,338/6,338 | 6,338/6,338 |
+| NotoSansArabic Regular | 6,338/6,338 | 6,338/6,338 |
+| NotoSansArabic Bold | 6,338/6,338 | 6,338/6,338 |
+
+### The CI test
+
+`ShippedFamilies.EachArabicFamilyShapesAlikeThroughItsCpac`: the four files, an Arabic plan, 200 lines at both sizes
+through a CPac face and a computed-filter face. The lines are a committed sample, `test/ttf_font/data/arabic_corpus.txt`,
+200 lines spread evenly through the sorted corpus (the first 200 sorted lines are single code points), Cf code points as
+backslash-u text, made by `make_corpus_sample.py`.

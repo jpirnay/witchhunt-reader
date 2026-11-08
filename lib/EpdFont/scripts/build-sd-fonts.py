@@ -213,6 +213,11 @@ def resolve_merge_sources(family: dict) -> dict[str, dict[str, Path]]:
     return out
 
 
+def corpus_key(name: str) -> str:
+    """The corpus (and merge_noto_latin.LANGS) key of a `format: ttf` family: its script, in lower case."""
+    return name.removeprefix("NotoSans").removeprefix("NotoSerif").removeprefix("NotoNaskh").lower()
+
+
 def build_ttf_family(
     family: dict, output_dir: Path, corpus_dir: Path | None, fonttools_pin: str | None
 ) -> tuple[str, bool, str]:
@@ -221,7 +226,7 @@ def build_ttf_family(
     import merge_noto_latin
 
     name = family["name"]
-    key = name.removeprefix("NotoSans").removeprefix("NotoSerif").lower()
+    key = corpus_key(name)
     if corpus_dir is None or key not in merge_noto_latin.LANGS:
         return name, False, "a merged TrueType family needs the corpus of its script"
     try:
@@ -251,9 +256,11 @@ def _read_corpus(path: Path) -> list[str]:
 
 
 def write_corpus(out_dir: Path) -> None:
-    """The checks' corpus, one <script>.txt per script (test/ot_shaper/generate_corpus.py)."""
-    generator = SCRIPT_DIR.parent.parent.parent / "test" / "ot_shaper" / "generate_corpus.py"
-    subprocess.run([sys.executable, str(generator), str(out_dir)], check=True, capture_output=True)
+    """The checks' corpus, one <script>.txt per script (test/ot_shaper/generate_corpus.py for the Indic scripts,
+    generate_corpus_arabic.py for arabic.txt)."""
+    shaper_dir = SCRIPT_DIR.parent.parent.parent / "test" / "ot_shaper"
+    for generator in ("generate_corpus.py", "generate_corpus_arabic.py"):
+        subprocess.run([sys.executable, str(shaper_dir / generator), str(out_dir)], check=True, capture_output=True)
 
 
 def build_family(

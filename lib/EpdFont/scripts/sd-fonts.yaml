@@ -642,3 +642,29 @@ families:
       latin:
         Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
         Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  # ── Arabic script (format: ttf), merged the same way ───────────────────────────────────────────
+
+  - name: NotoNaskhArabic
+    description: "Arabic, Persian, Urdu, serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoNaskhArabic/unhinted/ttf/NotoNaskhArabic-Regular.ttf", sha256: "c34fdbd98af4dbc45ca192a23d2eeb77032add83086f5fe32957d23b3f36b221"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoNaskhArabic/unhinted/ttf/NotoNaskhArabic-Bold.ttf", sha256: "380ac34b249d336e1a43c21053df440594e1e3db8f75fabd4d85b649ca1ea4c6"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf", sha256: "a15cfbbc1539d707115111d672d590a3d70d4f74b4c0a315956da20ae19a14e1"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf", sha256: "24ad531e6b05ddad8c3d89572d2c93eb86a6b74e652ce7ee3c3e171de68e84c3"}
+
+  - name: NotoSansArabic
+    description: "Arabic, Persian, Urdu, sans serif"
+    format: ttf
+    inDownloadAll: false
+    merge:
+      script:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansArabic/unhinted/ttf/NotoSansArabic-Regular.ttf", sha256: "bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSansArabic/unhinted/ttf/NotoSansArabic-Bold.ttf", sha256: "f4cb79f842a07d1bcf597879574358fb7010f73761396d1d0f2445dfedb4d2ca"}
+      latin:
+        Regular: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf", sha256: "f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8"}
+        Bold: {url: "https://raw.githubusercontent.com/notofonts/notofonts.github.io/5c82cef0a8f08806f932062e18c02be62be278f0/fonts/NotoSans/unhinted/ttf/NotoSans-Bold.ttf", sha256: "87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9"}
