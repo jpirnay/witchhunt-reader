@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string_view>
 
+#include "ArabicScripts.h"
 #include "IndicScripts.h"
 
 class ShapingFace;
@@ -20,24 +21,33 @@ struct Buffer;
 // without HarfBuzz", SSafayet / @SSafayet).
 namespace IndicShaper {
 
-// One run of a token, upstream's scanRun: one script's letters with the shared code points around them (dandas, Vedic
-// signs, joiners, the dotted circle), bytes [begin, end); `script` null for shared code points alone.
+// One run of a token, bytes [begin, end): upstream's scanRun for Indic text, one script's letters with the shared code
+// points around them (dandas, Vedic signs, joiners, the dotted circle), or an Arabic run (arabic::isRunMember code
+// points with ZWJ and ZWNJ inside). `arabic` is set for an Arabic run, whose `script` is null; an Indic run has
+// `arabic` false, and its `script` null for shared code points alone.
 struct Run {
   uint16_t begin;
   uint16_t end;
   const indic::ScriptInfo* script;
+  bool arabic = false;
 };
 
-// The most runs a token of `bytes` bytes can hold: a run takes 3 bytes at least, and two runs of different scripts
+// The most runs a token of `bytes` bytes can hold: an Arabic run takes 2 bytes at least (an Indic one 3), and two runs
 // abut with no byte between them.
-constexpr size_t maxRuns(size_t bytes) { return bytes / 3 + 1; }
+constexpr size_t maxRuns(size_t bytes) { return bytes / 2 + 1; }
 
-// The token's runs, in order, into `out` (room for maxRuns(text.size())); text outside them is not listed. A token of
+// The token's runs, in order, into `out` (room for maxRuns(text.size())); text outside them is not listed. An Arabic
+// run starts at a run member that is not a mark; an Arabic letter ends an Indic run, and an Indic code point (shared
+// ones included) ends an Arabic run, except that a ZWJ or ZWNJ after an Arabic member stays in its run. A token of
 // more than UINT16_MAX bytes has none listed.
 size_t scanRuns(std::string_view text, Run* out);
 
 // Whether `text` holds a byte sequence of U+0900-0DFF (indic::startsIndic), bounded by the view.
 bool holdsIndic(std::string_view text);
+
+// Whether `text` holds Indic text or a byte sequence of the Arabic blocks (arabic::holdsArabic): a token the scan may
+// find a run in.
+bool holdsShaped(std::string_view text);
 
 // What a token's text is drawn as, piece by piece; the pieces cover the text in order.
 enum class PieceKind : uint8_t { Text, Glyphs, Reordered };

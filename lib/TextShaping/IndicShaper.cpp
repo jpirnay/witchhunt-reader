@@ -27,7 +27,7 @@ constexpr unsigned kGrowthFactor = 2;
 constexpr unsigned kGrowthExtra = 16;
 // Every code point a run holds is 3 bytes of UTF-8: the letters of U+0900-0DFF, the dandas, the joiners and the dotted
 // circle alike.
-constexpr size_t kRunCodepointBytes = 3;
+constexpr size_t kRunCodepointBytes = 2;  // an Arabic letter's; an Indic code point takes 3
 
 // Lays a block's parts end to end, each at an address aligned for its type. Without a block it only measures: the
 // bytes they need at the worst padding.
@@ -270,6 +270,22 @@ bool shapeGlyphs(const std::string_view text, const Run& run, const bool first, 
 
 }  // namespace
 
+namespace {
+
+// The Arabic run starting at `begin`: members and, after one, ZWJ and ZWNJ. Returns its end.
+size_t arabicRunEnd(const std::string_view text, const size_t begin) {
+  size_t pos = begin;
+  while (pos < text.size()) {
+    size_t next = pos;
+    const uint32_t cp = TextShaping::decodeAt(text, next);
+    if (!arabic::isRunMember(cp) && cp != arabic::ZWJ && cp != arabic::ZWNJ) break;
+    pos = next;
+  }
+  return pos;
+}
+
+}  // namespace
+
 size_t scanRuns(std::string_view text, Run* out) {
   if (text.size() > UINT16_MAX) return 0;
   const size_t room = maxRuns(text.size());
@@ -278,6 +294,12 @@ size_t scanRuns(std::string_view text, Run* out) {
   while (pos < text.size() && count < room) {
     size_t next = pos;
     const uint32_t first = TextShaping::decodeAt(text, next);
+    if (arabic::isRunMember(first) && !arabic::isMark(first)) {
+      const size_t end = arabicRunEnd(text, pos);
+      out[count++] = Run{static_cast<uint16_t>(pos), static_cast<uint16_t>(end), nullptr, true};
+      pos = end;
+      continue;
+    }
     if (indic::scriptOf(first) == nullptr && !indic::isShared(first)) {
       pos = next;
       continue;
@@ -307,6 +329,8 @@ bool holdsIndic(std::string_view text) {
   }
   return false;
 }
+
+bool holdsShaped(std::string_view text) { return holdsIndic(text) || arabic::holdsArabic(text.data(), text.size()); }
 
 CallMemory::CallMemory(BuildArena* const arena, const size_t tokenBytes, const CallKind kind,
                        const unsigned runCodepoints) {

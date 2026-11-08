@@ -156,3 +156,33 @@ TEST(ArabicScripts, EndsWithLetter) {
   EXPECT_FALSE(ends(""));
   EXPECT_TRUE(ends("ab" + encode(0x0628)));
 }
+
+TEST(ArabicScripts, PunctuationMembersAreExactlyTheTwelve) {
+  const uint32_t expected[] = {0x0608, 0x060B, 0x060D, 0x061B, 0x061D, 0x061E,
+                               0x061F, 0x066D, 0x06D4, 0x06FD, 0x06FE, 0x0888};
+  for (uint32_t cp = 0; cp < 0x1000; cp++) {
+    bool listed = false;
+    for (const uint32_t e : expected) listed = listed || e == cp;
+    EXPECT_EQ(arabic::isPunctuationMember(cp), listed) << std::hex << cp;
+    if (listed) EXPECT_TRUE(arabic::isRunMember(cp)) << std::hex << cp;
+  }
+}
+
+TEST(ArabicScripts, TakesJoinerExcludesPunctuationIncludingU0888) {
+  EXPECT_FALSE(arabic::takesJoiner(0x0888));
+  EXPECT_FALSE(arabic::takesJoiner(0x061F));
+  EXPECT_FALSE(arabic::takesJoiner(0x06D4));
+  EXPECT_TRUE(arabic::takesJoiner(0x0628));
+  EXPECT_TRUE(arabic::takesJoiner(0x064E));
+  EXPECT_TRUE(arabic::takesJoiner(0x0640));
+  EXPECT_FALSE(arabic::takesJoiner(0x0661));
+}
+
+TEST(ArabicScripts, EndsWithLetterIsFalseForPunctuation) {
+  auto ends = [](const std::string& s) { return arabic::endsWithLetter(s.data(), s.size()); };
+  EXPECT_FALSE(ends(encode(0x0628) + encode(0x061F)));
+  EXPECT_FALSE(ends(encode(0x0628) + encode(0x06D4)));
+  EXPECT_FALSE(ends(encode(0x0628) + encode(0x0888)));
+  EXPECT_FALSE(ends(encode(0x0628) + encode(0x061F) + encode(0x064E)));  // a mark is skipped, the punctuation is not
+  EXPECT_TRUE(ends(encode(0x061F) + encode(0x0628)));
+}

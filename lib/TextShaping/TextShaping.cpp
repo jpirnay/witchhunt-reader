@@ -7,6 +7,7 @@
 #include <cstring>
 #include <memory>
 
+#include "ArabicScripts.h"
 #include "BidiUtils.h"
 #include "HebrewShaper.h"
 #include "IndicScripts.h"
@@ -48,14 +49,15 @@ bool holdsMarksOnly(std::string_view text) {
 
 }  // namespace
 
-bool mergesWithPrevious(const GroupToken& previous, const GroupToken& token, bool indicGroup) {
+bool mergesWithPrevious(const GroupToken& previous, const GroupToken& token, bool shapedGroup) {
   if (previous.text.empty() || token.text.empty()) return false;
-  if (indicGroup) {
+  if (shapedGroup) {
     size_t pos = 0;
     if (previous.styleKey == token.styleKey ||
         !indic::syllableBreakAllowed(lastCodepoint(previous.text), decodeAt(token.text, pos))) {
       return true;
     }
+    if (holdsMarksOnly(token.text) && arabic::endsWithLetter(previous.text.data(), previous.text.size())) return true;
   }
   return holdsMarksOnly(token.text) && HebrewShaper::endsWithName(previous.text.data(), previous.text.size());
 }

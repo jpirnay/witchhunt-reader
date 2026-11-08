@@ -32,10 +32,12 @@ struct GroupToken {
 
 // Whether `token`, glued after `previous` (a token merged so far, when earlier merges made it), joins it before
 // anything is measured or shaped:
-// - deviation 7, when `indicGroup` (the group holds a letter of U+0900-0DFF and its paragraph shapes): the two share
-//   a style key, or the glue falls inside a syllable (indic::syllableBreakAllowed false across it);
+// - deviation 7, when `shapedGroup` (the group holds an Indic or Arabic letter and its paragraph shapes): the two
+//   share a style key, or the glue falls inside a syllable (indic::syllableBreakAllowed false across it), or `token`
+//   holds marks only and `previous` ends with an Arabic letter (arabic::endsWithLetter), whatever the styles: the
+//   mark is placed on its base and takes its style;
 // - the Hebrew name, always: `token` holds transparent marks only, and `previous` ends with the divine name.
-bool mergesWithPrevious(const GroupToken& previous, const GroupToken& token, bool indicGroup);
+bool mergesWithPrevious(const GroupToken& previous, const GroupToken& token, bool shapedGroup);
 
 // Frees the build's heap block for shaping calls (IndicShaper::CallMemory). A section build's end calls it, as it
 // calls BidiLine::releaseBuildMemory(); the next call makes it again.

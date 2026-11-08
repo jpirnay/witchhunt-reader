@@ -45,13 +45,16 @@ constexpr bool isRunMember(const uint32_t cp) {
 
 constexpr bool isLetterOrMark(const uint32_t cp) { return isRunMember(cp); }
 
-// A letter or a mark of the blocks: a run member that is not AL punctuation or a symbol (the Arabic semicolon,
-// question mark, full stop, percent-like signs and the like). These are the code points a ZWJ or ZWNJ can follow.
-constexpr bool takesJoiner(const uint32_t cp) {
-  if (!isRunMember(cp)) return false;
-  return !(cp == 0x0608 || cp == 0x060B || cp == 0x060D || cp == 0x061B || cp == 0x061D || cp == 0x061E ||
-           cp == 0x061F || cp == 0x066D || cp == 0x06D4 || cp == 0x06FD || cp == 0x06FE);
+// The AL punctuation and symbols among the members (the Arabic semicolon, question mark, full stop, percent-like signs
+// and the like): strong right-to-left, but joining gives them no joining and they are no letter.
+constexpr bool isPunctuationMember(const uint32_t cp) {
+  return cp == 0x0608 || cp == 0x060B || cp == 0x060D || cp == 0x061B || cp == 0x061D || cp == 0x061E || cp == 0x061F ||
+         cp == 0x066D || cp == 0x06D4 || cp == 0x06FD || cp == 0x06FE || cp == 0x0888;
 }
+
+// A letter or a mark of the blocks: a run member that is not AL punctuation or a symbol. These are the code points a
+// ZWJ or ZWNJ can follow.
+constexpr bool takesJoiner(const uint32_t cp) { return isRunMember(cp) && !isPunctuationMember(cp); }
 
 // True when `cp` starts a new cluster after `prev`: a mark, a joiner, or anything after a ZWJ stays in the cluster.
 constexpr bool isClusterBreak(const uint32_t prev, const uint32_t cp) {
@@ -74,7 +77,8 @@ inline bool holdsArabic(const char* utf8, const size_t len) {
   return false;
 }
 
-// True when the last code point that is not a mark is a run letter (tatweel included): the word ends joined-ready.
+// True when the last code point that is not a mark is a run letter, not AL punctuation (tatweel included): the word
+// ends joined-ready.
 inline bool endsWithLetter(const char* utf8, const size_t len) {
   const auto* p = reinterpret_cast<const unsigned char*>(utf8);
   size_t end = len;
@@ -90,7 +94,7 @@ inline bool endsWithLetter(const char* utf8, const size_t len) {
       cp &= 0x1F;
     }
     for (size_t i = start + 1; i < end; i++) cp = (cp << 6) | (p[i] & 0x3F);
-    if (!isMark(cp)) return isRunMember(cp);
+    if (!isMark(cp)) return takesJoiner(cp);
     end = start;
   }
   return false;
