@@ -267,6 +267,19 @@ int plainClass(const uint32_t cp) {
   }
 }
 
+std::string visualUiLine(const std::string& logical) {
+  if (!hasRtlClass(logical.data(), logical.size())) return logical;
+  const bool held = heapWorkspaceHeld();
+  std::string out;
+  const bool formed = applyBidiVisual(logical.c_str(), out, -1);
+  if (!held) {
+    // Only the heap workspace this call made: a bound one stays bound, and one a build made stays for it.
+    const std::lock_guard<std::mutex> lock(bidiMutex);
+    bidiWorkspace.reset();
+  }
+  return formed ? out : logical;
+}
+
 bool workspaceAvailable() {
   const std::lock_guard<std::mutex> lock(bidiMutex);
   return getWorkspace() != nullptr;

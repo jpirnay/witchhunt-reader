@@ -328,3 +328,24 @@ TEST(BidiUtils, ArabicSupplementAndExtendedAreStrongRtl) {
   EXPECT_EQ(bidi_class(0xFDF2), AL);  // ligature allah
   EXPECT_EQ(bidi_class(0xFDFA), AL);
 }
+
+// A line of UI text as it is drawn: a title with a right-to-left character in visual order, at its own direction, the
+// rest as it is; a heap workspace it had to make is gone again.
+TEST(BidiUtils, AUiLineIsDrawnInVisualOrderAtItsOwnDirection) {
+  BidiUtils::releaseWorkspace();
+  EXPECT_EQ(BidiUtils::visualUiLine("Pride and Prejudice"), "Pride and Prejudice");
+  EXPECT_FALSE(BidiUtils::heapWorkspaceHeld()) << "a Latin title touches no workspace";
+
+  const std::string title = encode({0x05E1, 0x05E4, 0x05E8, 0x20, 0x05D4, 0x05E2, 0x05E8, 0x05D5, 0x05EA});
+  EXPECT_EQ(BidiUtils::visualUiLine(title),
+            encode({0x05EA, 0x05D5, 0x05E8, 0x05E2, 0x05D4, 0x20, 0x05E8, 0x05E4, 0x05E1}));
+  EXPECT_FALSE(BidiUtils::heapWorkspaceHeld()) << "the workspace it made is freed";
+
+  // Truncated in reading order first, the ellipsis that ends the title is drawn on its left.
+  const std::string cut = encode({0x05E1, 0x05E4, 0x05E8, 0x2026});
+  EXPECT_EQ(BidiUtils::visualUiLine(cut), encode({0x2026, 0x05E8, 0x05E4, 0x05E1}));
+
+  // A Latin title with a Hebrew word in it stays left to right; the Hebrew word reads right to left inside it.
+  const std::string mixed = "Harry " + encode({0x05E9, 0x05DC, 0x05D5, 0x05DD});
+  EXPECT_EQ(BidiUtils::visualUiLine(mixed), "Harry " + encode({0x05DD, 0x05D5, 0x05DC, 0x05E9}));
+}

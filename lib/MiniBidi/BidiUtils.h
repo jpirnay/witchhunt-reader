@@ -74,6 +74,13 @@ bool heapWorkspaceHeld();
 // and U+0000 or U+FFFD.
 int plainClass(uint32_t cp);
 
+// witchhunt: a line of UI text (a book or chapter title, a list row, a status bar) as it is drawn. A string with a
+// right-to-left character (hasRtlClass) comes back in visual order, at its own direction (its first strong character's,
+// as applyBidiVisual detects it); any other comes back as it is, after one byte scan. A line is fitted first (truncated
+// or wrapped in logical order) and made visual last, so an ellipsis lands where the title ends. A heap workspace this
+// call had to make is freed again, so a screen of titles holds no 1.5 KB block after it is drawn.
+std::string visualUiLine(const std::string& logical);
+
 // witchhunt: whether orderLine would have a workspace now: the bound one, or the heap one, made here if it can be.
 // A caller with a short path that needs none asks first, so that it takes the same path as the full one would
 // without a workspace (the line is then laid out without bidi, and a form is its text).
