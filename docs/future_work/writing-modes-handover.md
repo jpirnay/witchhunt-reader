@@ -334,12 +334,15 @@ break (Hangul is kept whole), or where the next page word is glued to it. On the
 
 - **UI titles and the TOC:** reordered since `feat/rtl-ui-titles` (item 4), but not shaped: the UI faces are bitmap,
   so Arabic and Indic titles draw unjoined, and a list row draws no Hebrew or Arabic at all where the UI face lacks
-  it. The status bar shows them because the UI faces fall back to the reader's TrueType face (`CjkUiFonts.cpp`,
-  `readerFaceAt`), which only answers under the render lock and once a reader font has been opened: inside the
-  reader, not in the file browser (X3, 2026-11-09, the Details view of `/test` with NotoSansHebrew as the reader font:
-  the Hebrew and Arabic titles drew blank). The next step is a design note, not code: open the reader font for the
-  library screens too, or give the built-in UI faces the Hebrew letters (27 letters and the points, a few KB of
-  flash at each UI size), or both; Arabic and Indic titles would still need shaping, which bitmap faces cannot do.
+  it. The UI faces fall back to a TrueType face (`CjkUiFonts.cpp`, `readerFaceAt`): in the reader it is the book's,
+  which is why the status bar shows a Hebrew chapter title. Outside the reader, `openUiBookFonts` in `main.cpp`
+  opens the last book's family for the screens that draw book text, but only when that family covers CJK, so a
+  Hebrew or Arabic family never backs the Library rows (X3, 2026-11-09: the Details view of `/test`, NotoSansHebrew
+  as the reader font, drew the Hebrew notes book's title blank; the Japanese, Korean and Chinese titles drew). The
+  next step is a design note, not code. One choice: let the opener take a family that covers the title's script too;
+  it still serves one family for every row, the last book's. The other: give the built-in UI faces the Hebrew
+  letters and points, at a flash cost not measured yet. Arabic and Indic titles would still need shaping, which
+  bitmap faces cannot do.
 - **TXT and Markdown books:** they get no bidi.
 
 ### 9. Flash
