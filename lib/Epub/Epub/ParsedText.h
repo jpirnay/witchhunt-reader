@@ -387,6 +387,9 @@ class ParsedText {
   // Room in all five per-word vectors for `additional` more tokens; false (and wordGrowthRefused_)
   // when the heap cannot hold the growth.
   bool reserveWords(size_t additional);
+  // The line pass's kept buffers back to the heap (bidiState_'s line, tokens and piece arrays, and lineXPosScratch_);
+  // the paragraph's direction and open controls stay.
+  void releaseLineBuffers();
   void pushToken(std::string token, EpdFontFamily::Style style, TokenBoundary::Boundary boundary, uint8_t sizePct,
                  uint32_t visibleOffset, uint8_t fontSlot);
 
@@ -514,6 +517,16 @@ class ParsedText {
   // minimum free heap (watermark 11.3 KB -> 6.4 KB, device run 7); dropping it at the yield
   // keeps the no-churn behaviour within a slice and the old floor across it.
   void releaseLayoutScratch();
+  // At a paragraph's end, what the paragraph grew past a prose paragraph's needs goes back to the heap: the line
+  // pass's kept buffers when a long line took them past kKeptLineBytes (a prose line leaves about 1.5 KB), and the
+  // shaped store when it holds more than kKeptStoreBytes (a prose paragraph's is 4 to 6 KB). Kept, they would sit in
+  // front of whatever follows until the slice's yield: the table row after test_shaped_arabic's span-per-word
+  // paragraph met a heap some 18 KB lower for them. Below the thresholds nothing changes, so prose regrows nothing.
+  void releaseOversizedLayoutBuffers();
+  static constexpr size_t kKeptLineBytes = 2 * 1024;
+  static constexpr size_t kKeptStoreBytes = 8 * 1024;
+  size_t keptLineBytes() const;   // the line pass's kept buffers (capacity, in bytes)
+  size_t keptStoreBytes() const;  // the shaped store's index and chunks
 
   // Adds a word from the source: a Latin word as one token, a word with CJK characters as one token per
   // break the CJK rules allow (CjkLineBreak.h). attachToPrevious: no whitespace separated it from the

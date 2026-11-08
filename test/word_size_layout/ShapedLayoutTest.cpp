@@ -1489,6 +1489,53 @@ TEST_F(ShapedLayout, ALentArenaHoldsTheLinesTokensForThePass) {
   }
 }
 
+TEST_F(ShapedLayout, AParagraphWithLongLinesGivesTheLinePassBuffersBackAtItsEnd) {
+  // 140 one-letter tokens on one line take the fallback and grow the line pass's buffers past kKeptLineBytes: the
+  // paragraph's end gives them back. A prose paragraph's stay below it and are kept.
+  const std::vector<Word> many(140, Word{"א"});
+  ParsedText text(false, false, noIndentStyle());
+  add(text, many);
+  const Lines lines = layOut(text, renderer, 4000);
+  ASSERT_GE(lines.size(), 1u);
+  EXPECT_GT(text.keptLineBytes(), ParsedText::kKeptLineBytes);
+  text.releaseOversizedLayoutBuffers();
+  EXPECT_EQ(text.keptLineBytes(), 0u);
+
+  ParsedText prose(false, false, noIndentStyle());
+  add(prose, {{"שלום"}, {"עולם"}, {"abc"}});
+  const Lines proseLines = layOut(prose, renderer, 400);
+  ASSERT_EQ(1u, proseLines.size());
+  const size_t kept = prose.keptLineBytes();
+  EXPECT_GT(kept, 0u);
+  EXPECT_LE(kept, ParsedText::kKeptLineBytes);
+  prose.releaseOversizedLayoutBuffers();
+  EXPECT_EQ(prose.keptLineBytes(), kept);
+}
+
+TEST_F(ShapedLayout, AParagraphWithABigStoreGivesItBackAtItsEnd) {
+  // 400 shaped tokens hold an index past kKeptStoreBytes: the paragraph's end releases the store. A short
+  // paragraph's store stays, its chunks the next paragraph's.
+  useFont(kNaskh);
+  const std::vector<Word> many(400, Word{kKitab});
+  ParsedText text(false, false, noIndentStyle());
+  add(text, many);
+  const Lines lines = layOut(text, renderer, 4000);
+  ASSERT_GE(lines.size(), 1u);
+  EXPECT_GT(text.tokensShaped(), 0u);
+  EXPECT_GT(text.keptStoreBytes(), ParsedText::kKeptStoreBytes);
+  text.releaseOversizedLayoutBuffers();
+  EXPECT_EQ(text.keptStoreBytes(), 0u);
+
+  ParsedText prose(false, false, noIndentStyle());
+  add(prose, {{kKitab}, {kKitab}, {kKitab}});
+  layOut(prose, renderer, 400);
+  const size_t kept = prose.keptStoreBytes();
+  EXPECT_GT(kept, 0u);
+  EXPECT_LE(kept, ParsedText::kKeptStoreBytes);
+  prose.releaseOversizedLayoutBuffers();
+  EXPECT_EQ(prose.keptStoreBytes(), kept);
+}
+
 TEST_F(ShapedLayout, JustificationStretchesTokensNotPieces) {
   // On a justified right-to-left line the gap between the tokens takes what the line lacks; the comma stays touching
   // its word.

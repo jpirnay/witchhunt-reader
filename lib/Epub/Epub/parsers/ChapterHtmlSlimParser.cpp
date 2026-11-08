@@ -5310,6 +5310,8 @@ void ChapterHtmlSlimParser::makePages() {
                              currentTextBlock->lastLineVisibleOffset(), currentTextBlock->lastLineTokenCount());
       },
       /*includeLastLine=*/true, static_cast<int16_t>(currentPageNextY), lineHeightForFloat);
+  // The paragraph is laid out: what a long line or a big store grew would otherwise stay in front of what follows.
+  if (currentTextBlock) currentTextBlock->releaseOversizedLayoutBuffers();
 
   // Fallback: transfer any remaining pending footnotes to current page.
   // Normally addLineToPage handles this via word-index tracking, but this catches

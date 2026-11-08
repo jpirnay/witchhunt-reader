@@ -1722,6 +1722,57 @@ bool ParsedText::appendRubyText(const std::string_view text) {
   return true;
 }
 
+void ParsedText::releaseLineBuffers() {
+  std::vector<int16_t>().swap(lineXPosScratch_);
+  if (!bidiState_) return;
+  BidiState& state = *bidiState_;
+  std::vector<BidiLine::Piece>().swap(state.line.pieces);
+  std::string().swap(state.line.display);
+  std::vector<std::string_view>().swap(state.line.fallbackViews);
+  std::vector<uint16_t>().swap(state.line.fallbackOrder);
+  std::vector<BidiLine::Token>().swap(state.tokens);
+  std::vector<uint16_t>().swap(state.tokenCutCount);
+  std::vector<std::string_view>().swap(state.pieceWords);
+  std::vector<std::string_view>().swap(state.pieceForms);
+  std::vector<EpdFontFamily::Style>().swap(state.pieceStyles);
+  std::vector<TextBlock::WordSize>().swap(state.pieceSizes);
+  std::vector<TokenBoundary::Boundary>().swap(state.pieceBoundaries);
+  std::vector<uint8_t>().swap(state.pieceOrder);
+  std::vector<GlyphRun>().swap(state.pieceGlyphs);
+  std::vector<uint16_t>().swap(state.tokenCuts);
+  std::string().swap(state.tokenForm);
+}
+
+size_t ParsedText::keptLineBytes() const {
+  // A string's bytes on the heap: none while it sits in its short-string buffer.
+  const auto stringBytes = [](const std::string& str) {
+    return str.capacity() > std::string().capacity() ? str.capacity() : 0;
+  };
+  size_t bytes = lineXPosScratch_.capacity() * sizeof(int16_t);
+  if (!bidiState_) return bytes;
+  const BidiState& s = *bidiState_;
+  bytes +=
+      s.line.pieces.capacity() * sizeof(BidiLine::Piece) + stringBytes(s.line.display) +
+      s.line.fallbackViews.capacity() * sizeof(std::string_view) + s.line.fallbackOrder.capacity() * sizeof(uint16_t) +
+      s.tokens.capacity() * sizeof(BidiLine::Token) + s.tokenCutCount.capacity() * sizeof(uint16_t) +
+      s.pieceWords.capacity() * sizeof(std::string_view) + s.pieceForms.capacity() * sizeof(std::string_view) +
+      s.pieceStyles.capacity() * sizeof(EpdFontFamily::Style) + s.pieceSizes.capacity() * sizeof(TextBlock::WordSize) +
+      s.pieceBoundaries.capacity() * sizeof(TokenBoundary::Boundary) + s.pieceOrder.capacity() +
+      s.pieceGlyphs.capacity() * sizeof(GlyphRun) + s.tokenCuts.capacity() * sizeof(uint16_t) +
+      stringBytes(s.tokenForm);
+  return bytes;
+}
+
+size_t ParsedText::keptStoreBytes() const {
+  return shapingState_ ? shapingState_->store.indexBytes() + shapingState_->store.chunkBytes() : 0;
+}
+
+void ParsedText::releaseOversizedLayoutBuffers() {
+  if (keptLineBytes() > kKeptLineBytes) releaseLineBuffers();
+  // The next pass that shapes reserves the store again, to its own count (readyShapedStore).
+  if (keptStoreBytes() > kKeptStoreBytes) shapingState_->store.release();
+}
+
 void ParsedText::releaseLayoutScratch() {
   // Pure scratch: recomputed by every layout, so safe to drop at any point between feeds.
   std::vector<uint16_t>().swap(wordWidths_);
@@ -1752,22 +1803,7 @@ void ParsedText::releaseLayoutScratch() {
   if (bidiState_ && !bidi_) {
     bidiState_.reset();
   } else if (bidiState_) {
-    BidiState& state = *bidiState_;
-    std::vector<BidiLine::Piece>().swap(state.line.pieces);
-    std::string().swap(state.line.display);
-    std::vector<std::string_view>().swap(state.line.fallbackViews);
-    std::vector<uint16_t>().swap(state.line.fallbackOrder);
-    std::vector<BidiLine::Token>().swap(state.tokens);
-    std::vector<uint16_t>().swap(state.tokenCutCount);
-    std::vector<std::string_view>().swap(state.pieceWords);
-    std::vector<std::string_view>().swap(state.pieceForms);
-    std::vector<EpdFontFamily::Style>().swap(state.pieceStyles);
-    std::vector<TextBlock::WordSize>().swap(state.pieceSizes);
-    std::vector<TokenBoundary::Boundary>().swap(state.pieceBoundaries);
-    std::vector<uint8_t>().swap(state.pieceOrder);
-    std::vector<GlyphRun>().swap(state.pieceGlyphs);
-    std::vector<uint16_t>().swap(state.tokenCuts);
-    std::string().swap(state.tokenForm);
+    releaseLineBuffers();
   }
   // The shaped store's records are recomputed by the next pass that needs them (each token kept is shaped again); the
   // box goes too unless a paragraph in progress shapes.
