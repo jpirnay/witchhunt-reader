@@ -1225,16 +1225,18 @@ int8_t TtfFont::kerning(const Size& size, const uint8_t drawn, const uint32_t le
     FontBytes bytes;
     if (!fontBytes(style, &bytes)) return 0;
     const uint16_t l = s.ligatures.glyphFor(bytes, s.face, left);
-    const uint16_t r = s.ligatures.glyphFor(bytes, s.face, right);
+    const uint16_t r = l != 0 ? s.ligatures.glyphFor(bytes, s.face, right) : 0;
     const bool looked = l != 0 && r != 0;
     bool covered = false;
     const int32_t value = looked ? s.kerning.pair(bytes, s.face, l, r, &covered) : 0;
     ++kernLookups_;
     if (bytes.ioError()) return 0;  // SD mode: not an answer, ask again
     units = static_cast<int16_t>(value < INT16_MIN ? INT16_MIN : value > INT16_MAX ? INT16_MAX : value);
-    // A left glyph that kerns with nothing costs no slot (spec 8.1): the CJK repertoire would fill the index.
+    // A left glyph that kerns with nothing costs no slot (spec 8.1): the CJK repertoire would fill the index. It is
+    // remembered instead, as is a left code point the face has no glyph for (a fallback face asks for every word
+    // of a script the body font lacks); whatever the right glyph, coverage depends on the left one only.
     if (!covered) {
-      if (looked) s.markUncovered(left);  // whatever the right glyph: coverage depends on the left one only
+      if (l == 0 || looked) s.markUncovered(left);
       return 0;
     }
     if (storable && !set_.ringMode_) {

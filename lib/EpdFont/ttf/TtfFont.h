@@ -187,16 +187,28 @@ class TtfFont {
     ttf::Ligatures ligatures;  // every size's EpdFontData points at its pairs
     // Made on the first shapingFace() and freed by releaseShapingFaces(): a loaded family holds none.
     std::unique_ptr<ShapingFace> shaping;
-    // Left codepoints found to kern with nothing. Their pairs are never stored (spec 8.1), yet the space before
-    // every word asks for one: one bit each below kUncoveredEnd (Latin), so they read the font once per load.
+    // Left codepoints found to kern with nothing, or that the face has no glyph for. Their pairs are never stored
+    // (spec 8.1), yet the space before every word asks for one, so they are remembered: one bit each below
+    // kUncoveredEnd (Latin), and above it the last kUncoveredHigh distinct ones, direct-mapped, a newcomer taking the
+    // slot. Without the second set every Hebrew, Arabic or Indic letter that kerns with nothing read the font's GPOS
+    // again with every word: 4,300 reads a Hebrew chapter in its own font, 17,000 when a Latin body font's fallback
+    // face drew it (X3, 2026-11-08; 325 and 403 ms of kerning against the Latin twin's 80).
     static constexpr uint32_t kUncoveredEnd = 0x250;
+    static constexpr uint32_t kUncoveredHigh = 64;
     uint8_t uncoveredLeft[kUncoveredEnd / 8] = {};
+    uint16_t uncoveredHigh[kUncoveredHigh] = {};  // 0: empty (U+0000 is below kUncoveredEnd)
 
+    static uint32_t uncoveredSlot(const uint32_t left) { return (left * 2654435761u) >> 26; }  // 6 bits: 64 slots
     bool knownUncovered(const uint32_t left) const {
-      return left < kUncoveredEnd && (uncoveredLeft[left >> 3] >> (left & 7) & 1) != 0;
+      if (left < kUncoveredEnd) return (uncoveredLeft[left >> 3] >> (left & 7) & 1) != 0;
+      return left <= 0xFFFF && uncoveredHigh[uncoveredSlot(left)] == left;
     }
     void markUncovered(const uint32_t left) {
-      if (left < kUncoveredEnd) uncoveredLeft[left >> 3] |= static_cast<uint8_t>(1u << (left & 7));
+      if (left < kUncoveredEnd) {
+        uncoveredLeft[left >> 3] |= static_cast<uint8_t>(1u << (left & 7));
+      } else if (left <= 0xFFFF) {
+        uncoveredHigh[uncoveredSlot(left)] = static_cast<uint16_t>(left);
+      }
     }
   };
 

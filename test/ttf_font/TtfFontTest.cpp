@@ -1158,6 +1158,41 @@ TEST_F(TtfFontTest, ALeftGlyphThatKernsWithNothingIsLookedUpOnce) {
   EXPECT_EQ(4u, font->kernLookups());
 }
 
+TEST_F(TtfFontTest, ALeftLetterBeyondLatinThatKernsWithNothingIsLookedUpOnce) {
+  // The bit set stops at U+0250; a Hebrew, Arabic or Indic letter that kerns with nothing is remembered in the
+  // direct-mapped set instead, so it too reads the font once and not with every word.
+  Font font = kernedBoxes();
+  font.cmap[0x05D0] = 3;  // alef drawn by the glyph that kerns with nothing
+  font.cmap[0x05D1] = 1;  // bet by the glyph that kerns
+  useBuiltFont(font);
+  const auto opened = open();
+  EXPECT_EQ(0, opened->kerning(kRegular, 0x05D0, 'A'));
+  EXPECT_EQ(1u, opened->kernLookups());
+  EXPECT_EQ(0, opened->kerning(kRegular, 0x05D0, 'A'));
+  EXPECT_EQ(0, opened->kerning(kRegular, 0x05D0, 'B'));
+  EXPECT_EQ(1u, opened->kernLookups());
+  // A left letter that kerns is not remembered as one that does not.
+  EXPECT_EQ(-47, opened->kerning(kRegular, 0x05D1, 'B'));
+  EXPECT_EQ(2u, opened->kernLookups());
+}
+
+TEST_F(TtfFontTest, ALeftCodePointTheFaceLacksIsLookedUpOnce) {
+  // A fallback face asks a Latin body font for the pairs of a script it does not have: every word, both glyphs
+  // missing. The left one is remembered as kerning with nothing.
+  useBuiltFont(kernedBoxes());
+  const auto font = open();
+  EXPECT_EQ(0, font->kerning(kRegular, 0x05D0, 0x05D1));
+  EXPECT_EQ(1u, font->kernLookups());
+  EXPECT_EQ(0, font->kerning(kRegular, 0x05D0, 0x05D1));
+  EXPECT_EQ(0, font->kerning(kRegular, 0x05D0, 'A'));
+  EXPECT_EQ(1u, font->kernLookups());
+  // The set holds 64 letters; one more than that in a row evicts the first, which reads the font once again.
+  for (uint32_t cp = 0x0600; cp < 0x0600 + 200; cp++) EXPECT_EQ(0, font->kerning(kRegular, cp, 'A'));
+  const uint32_t after = font->kernLookups();
+  EXPECT_EQ(0, font->kerning(kRegular, 0x0600 + 199, 'A'));  // the last one is still there
+  EXPECT_EQ(after, font->kernLookups());
+}
+
 TEST_F(TtfFontTest, KerningGoesOnWithoutWritesInRingMode) {
   useBuiltFont(kernedBoxes());
   const auto font = open();
