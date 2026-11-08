@@ -332,6 +332,9 @@ class ParsedText {
   // layout gate. std::vector growth cannot fail gracefully under -fno-exceptions, so the
   // check has to happen before the reserve.
   bool wordGrowthRefused_ = false;
+  // The most tokens the parser lets the block hold before its long-block split (setSplitCapacity); 0: no split.
+  // reserveWords grows the word arrays no further than it: a block of 97 tokens holds 97 entries, not 128.
+  size_t splitCapacity_ = 0;
   size_t bionicTransformedUpTo_ = 0;  ///< words[0..bionicTransformedUpTo_) have already been bionic-transformed
 
   // How many tokens before tokenIndex lead a ruby group: the index of the ruby text of the first group at or after it.
@@ -571,6 +574,11 @@ class ParsedText {
   }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
+  // The most tokens the block holds before the parser splits it (ChapterHtmlSlimParser::flushPartWordBuffer): the
+  // word arrays grow to it and no further, and past it by 16s (a ruby group may hold a split up a few tokens). 0: the
+  // arrays double as they grow, as a table cell's do.
+  void setSplitCapacity(const size_t tokens) { splitCapacity_ = tokens; }
+  size_t wordCapacity() const { return words.capacity(); }
   uint32_t lastLineVisibleOffset() const { return lastLineVisibleOffset_; }
   uint32_t lastLineTokenCount() const { return lastLineTokenCount_; }
   const LinePlace& linePlace() const { return linePlace_; }

@@ -625,6 +625,12 @@ bool ParsedText::reserveWords(const size_t additional) {
   while (newCapacity < requiredSize) {
     newCapacity *= 2;
   }
+  // A block the parser splits never holds more than splitCapacity_ tokens, but for the few a ruby group may hold the
+  // split up: no further than that, and past it by 16s. The split's kept line plus 48 is a threshold of 97 to 175 for
+  // the lines a span-per-word paragraph makes, which doubling took to 256 entries (33 B each on the device).
+  if (splitCapacity_ != 0 && newCapacity > splitCapacity_) {
+    newCapacity = requiredSize <= splitCapacity_ ? splitCapacity_ : (requiredSize + 15) / 16 * 16;
+  }
   // The five reserves below are unchecked heap growth (abort() on failure under
   // -fno-exceptions). Require the largest free block to hold all five, plus a header
   // each -- conservative, since they need not share a block, but this only bites when the

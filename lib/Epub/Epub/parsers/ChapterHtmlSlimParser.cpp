@@ -1348,9 +1348,9 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
     // for the block to grow kSplitRegrowth tokens past what the last split kept (the last line): a line of more
     // than 96 tokens would otherwise leave the block above 96 and split it again on every following word. A kept
     // line of kSplitRegrowth tokens or fewer leaves the threshold at 96, as before.
-    const size_t splitThreshold = std::max<size_t>(96, splitKeptTokens_ + kSplitRegrowth);
-    if (currentTextBlock->size() > splitThreshold &&
-        !(rubyDepth_ >= 0 && currentTextBlock->size() <= splitThreshold + kRubyGroupSlack)) {
+    const size_t threshold = splitThreshold();
+    if (currentTextBlock->size() > threshold &&
+        !(rubyDepth_ >= 0 && currentTextBlock->size() <= threshold + kRubyGroupSlack)) {
       // The bases waiting for their reading are the block's last tokens, and the layout keeps the last line: a base
       // that is still there after the split stays the start of its group.
       size_t pendingBases = kNoRubyGroup;
@@ -1422,6 +1422,7 @@ bool ChapterHtmlSlimParser::flushPartWordBuffer() {
           false, static_cast<int16_t>(currentPageNextY), splitLineHeight);
       if (pendingBases <= currentTextBlock->size()) rubyGroupStart_ = currentTextBlock->size() - pendingBases;
       splitKeptTokens_ = currentTextBlock->size();
+      applySplitCapacity();
       // emitPage() clears floatZoneCount mid-layout when the page overflows — that's
       // intentional: lines on the continuation page should not be narrowed for an
       // image that lives on the previous page.
@@ -2328,6 +2329,7 @@ void ChapterHtmlSlimParser::startNewTextBlock(const BlockStyle& blockStyle) {
     currentTextBlock->setVertical(vertical_);
   }
   splitKeptTokens_ = 0;  // a new block has had no split
+  applySplitCapacity();
   wireTextBlock();
   wordsExtractedInBlock = 0;
 }
@@ -5214,8 +5216,17 @@ void ChapterHtmlSlimParser::clearSpentBlockDirection(const int elementDepth) {
   if (!spent.textAlignDefined) spent.alignment = readerAlignment();
 }
 
+size_t ChapterHtmlSlimParser::splitThreshold() const { return std::max<size_t>(96, splitKeptTokens_ + kSplitRegrowth); }
+
+void ChapterHtmlSlimParser::applySplitCapacity() {
+  // The split fires on the token past the threshold, so the block never holds more than threshold + 1 of them, but
+  // for the few a ruby group may hold it up (kRubyGroupSlack), which the arrays then take by 16s.
+  if (currentTextBlock) currentTextBlock->setSplitCapacity(splitThreshold() + 1);
+}
+
 void ChapterHtmlSlimParser::makePages() {
   splitKeptTokens_ = 0;  // the block is drained here (a table, hr or caption opens without startNewTextBlock)
+  applySplitCapacity();
   if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the block is laid out and drained: a ruby's bases go with it
   if (layoutFailed) {
     currentTextBlock.reset();
