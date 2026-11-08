@@ -77,6 +77,26 @@ inline bool holdsArabic(const char* utf8, const size_t len) {
   return false;
 }
 
+// True when the UTF-8 holds a run member (isRunMember): a code point an Arabic run takes. holdsArabic's byte test
+// first, so text without a byte of the blocks costs one scan; digits, the number signs and the Arabic comma alone are
+// no run.
+inline bool holdsRunMember(const char* utf8, const size_t len) {
+  if (!holdsArabic(utf8, len)) return false;
+  const auto* p = reinterpret_cast<const unsigned char*>(utf8);
+  for (size_t i = 0; i < len;) {
+    const unsigned char b = p[i];
+    const size_t n = b < 0x80 ? 1 : (b >> 5) == 0x6 ? 2 : (b >> 4) == 0xE ? 3 : (b >> 3) == 0x1E ? 4 : 1;
+    if (n == 1 || i + n > len) {
+      i++;
+      continue;
+    }
+    uint32_t cp = b & (0x7F >> n);
+    for (size_t k = 1; k < n; k++) cp = (cp << 6) | (p[i + k] & 0x3F);
+    if (isRunMember(cp)) return true;
+    i += n;
+  }
+  return false;
+}
 // True when the last code point that is not a mark is a run letter, not AL punctuation (tatweel included): the word
 // ends joined-ready.
 inline bool endsWithLetter(const char* utf8, const size_t len) {

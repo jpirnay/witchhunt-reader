@@ -292,8 +292,11 @@ reader"):
   break paths.
 - **A word past 32 code points split by a style span** can lose or double a long ligature (the piecewise loop
   reaches 2 clusters). The fix: size the buffer for run + 2 x 16 for Arabic calls.
-- **A bidi paragraph whose only Arabic code points are digits**, in a face that maps Arabic, pays a shaping call per
-  token. The output is near-identical: glued groups merge.
+- **A bidi paragraph whose only Arabic code points are digits (done, `fix/arabic-digit-paragraph`):** the pass now
+  shapes only for a token with an Arabic run member (`arabic::holdsRunMember`), so such a paragraph is laid out as
+  without a face: no shaping calls (240 lookups for a ten-paragraph Hebrew test chapter before), no merged groups.
+- **The soft hyphen and the long split word above** sit in the shaper's run scan and its buffer: left for the code
+  audit that also takes item 3 (2026-11-08).
 - **Ayah and number signs** (U+06DD and the others) do not enclose their digits.
 - **Fonts without GPOS:** HarfBuzz's fallback mark placement and legacy `kern` are not ported.
 - **The line breaker** measures a consumed letter at width 0 when its partner degraded: a known parity gap, rare.
