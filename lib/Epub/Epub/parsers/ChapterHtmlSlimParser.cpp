@@ -5215,6 +5215,7 @@ void ChapterHtmlSlimParser::clearSpentBlockDirection(const int elementDepth) {
 }
 
 void ChapterHtmlSlimParser::makePages() {
+  splitKeptTokens_ = 0;  // the block is drained here (a table, hr or caption opens without startNewTextBlock)
   if (rubyDepth_ >= 0) rubyGroupStart_ = kNoRubyGroup;  // the block is laid out and drained: a ruby's bases go with it
   if (layoutFailed) {
     currentTextBlock.reset();

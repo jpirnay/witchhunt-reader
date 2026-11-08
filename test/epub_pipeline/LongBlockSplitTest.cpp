@@ -1,7 +1,7 @@
 // The long-block split (ChapterHtmlSlimParser, more than 96 tokens in a block) must make progress. When one laid-out
 // line holds more than 96 tokens the block stays above 96 after the split, and a split that fires on every following
 // word lays the whole block out again: quadratic time and heap churn. test_shaped_arabic's stress paragraph (200 Allah
-// words, each cut by a span into two glued tokens) at a 1,600 px viewport put 186 splits in the book before the fix.
+// words, each cut by a span into two glued tokens) at a 1,600 px viewport put 220 splits in the book before the fix.
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -37,6 +37,7 @@ TEST(LongBlockSplit, AWideLineOfManyTokensDoesNotSplitOnEveryWord) {
   ASSERT_TRUE(ok);
   EXPECT_GT(pages, 0);
   std::printf("[ LongBlockSplit ] splits: %d\n", gSplits);
+  EXPECT_GT(gSplits, 0);  // the log was captured
   EXPECT_LE(gSplits, 12);
 }
 
