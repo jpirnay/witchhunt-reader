@@ -45,6 +45,14 @@ constexpr bool isRunMember(const uint32_t cp) {
 
 constexpr bool isLetterOrMark(const uint32_t cp) { return isRunMember(cp); }
 
+// A letter or a mark of the blocks: a run member that is not AL punctuation or a symbol (the Arabic semicolon,
+// question mark, full stop, percent-like signs and the like). These are the code points a ZWJ or ZWNJ can follow.
+constexpr bool takesJoiner(const uint32_t cp) {
+  if (!isRunMember(cp)) return false;
+  return !(cp == 0x0608 || cp == 0x060B || cp == 0x060D || cp == 0x061B || cp == 0x061D || cp == 0x061E ||
+           cp == 0x061F || cp == 0x066D || cp == 0x06D4 || cp == 0x06FD || cp == 0x06FE);
+}
+
 // True when `cp` starts a new cluster after `prev`: a mark, a joiner, or anything after a ZWJ stays in the cluster.
 constexpr bool isClusterBreak(const uint32_t prev, const uint32_t cp) {
   return !isMark(cp) && cp != ZWJ && cp != ZWNJ && prev != ZWJ;

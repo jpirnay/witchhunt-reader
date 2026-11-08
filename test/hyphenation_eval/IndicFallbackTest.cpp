@@ -65,3 +65,33 @@ TEST(IndicFallback, AnArabicForcedSplitFallsBetweenBaseClusters) {
     EXPECT_NE(arabic::ZWJ, before) << "after a ZWJ at byte " << b.byteOffset;
   }
 }
+
+// A Latin or emoji word with a ZWJ or ZWNJ keeps a break at every index, as without the joiner.
+TEST(IndicFallback, AJoinerOutsideArabicBlocksNoBreak) {
+  Hyphenator::setLanguageHyphenator(nullptr);
+  const std::string zwj = "\xE2\x80\x8D";
+  const std::string zwnj = "\xE2\x80\x8C";
+  const std::string man = "\xF0\x9F\x91\xA8";
+  const std::string woman = "\xF0\x9F\x91\xA9";
+  for (const std::string& word : {std::string("Donau") + zwnj + "dampf" + zwj + "schifffahrt",
+                                  std::string("Donau") + man + zwj + woman + "dampfschifffahrt"}) {
+    const size_t cpCount = codepointsOf(word).size();
+    const auto breaks = Hyphenator::breakOffsets(word, true);
+    EXPECT_EQ(cpCount - LiangWordConfig::kDefaultMinSuffix - LiangWordConfig::kDefaultMinPrefix + 1, breaks.size());
+  }
+}
+
+// An Arabic letter's ZWNJ and ZWJ still bind: no break before the joiner, none after the ZWJ.
+TEST(IndicFallback, AnArabicJoinerBlocksItsBreaks) {
+  Hyphenator::setLanguageHyphenator(nullptr);
+  const std::string zwj = "\xE2\x80\x8D";
+  const std::string zwnj = "\xE2\x80\x8C";
+  const std::string word =
+      "\u0643\u062A\u0627\u0628" + zwnj + "\u0643\u062A\u0627\u0628" + zwj + "\u0643\u062A\u0627\u0628\u0627\u0646";
+  for (const auto& b : Hyphenator::breakOffsets(word, true)) {
+    const auto [before, after] = neighbours(word, b.byteOffset);
+    EXPECT_NE(arabic::ZWNJ, after);
+    EXPECT_NE(arabic::ZWJ, after);
+    EXPECT_NE(arabic::ZWJ, before);
+  }
+}

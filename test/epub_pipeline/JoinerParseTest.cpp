@@ -185,3 +185,12 @@ TEST_F(Joiners, ARunOfTwoJoinersIsDropped) {
   EXPECT_EQ(wordsOf("<p>\u06A9" + kZwnj + kZwj + "\u0647</p>"), Words{"\u06A9\u0647"});
   EXPECT_EQ(wordsOf("<p>\u06A9" + kZwnj + kZwnj + kZwnj + "\u0647</p>"), Words{"\u06A9\u0647"});
 }
+
+// Deviation 8 says a letter or a mark: a joiner after an Arabic digit, the Arabic comma or the full stop U+06D4 is
+// dropped like one after any other non-letter.
+TEST_F(Joiners, AJoinerAfterAnArabicNonLetterIsDropped) {
+  for (const char* sign : {"\u0661", "\u060C", "\u06D4", "\u061B"}) {
+    EXPECT_EQ(wordsOf(std::string("<p>") + sign + kZwnj + "\u0628</p>"), Words{std::string(sign) + "\u0628"}) << sign;
+    EXPECT_EQ(wordsOf(std::string("<p>") + sign + kZwj + "\u0628</p>"), Words{std::string(sign) + "\u0628"}) << sign;
+  }
+}

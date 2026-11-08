@@ -450,7 +450,7 @@ static int uncountedControlLen(const char* s, const int i, const int len) {
 // Deviation 8: a lone ZWJ or ZWNJ stays in the text after a letter of a script the shaper reads it in (a half form, a
 // chillu, a cluster kept apart, Persian's half-space ZWNJ); after anything else it is dropped with the other
 // default-ignorables. The Indic blocks and the Arabic ones.
-static bool keepsJoinerAfter(const uint32_t cp) { return (cp >= 0x0900 && cp <= 0x0DFF) || arabic::inBlocks(cp); }
+static bool keepsJoinerAfter(const uint32_t cp) { return (cp >= 0x0900 && cp <= 0x0DFF) || arabic::takesJoiner(cp); }
 
 // U+200C or U+200D when the 3 bytes at s[i] are one, else 0 (also when the sequence runs past `len`: characterData
 // completes a split one before consumeText sees it).
