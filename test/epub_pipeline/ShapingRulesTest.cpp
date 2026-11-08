@@ -1278,21 +1278,20 @@ TEST_P(ShapingRules, TheWordCacheChangesNoLine) {
 
 namespace {
 
-// The Allah ligature's span token, alone and with the lam before it (make_test_shaped_arabic.py), and the case word.
+// The Allah ligature's span token, alone, with the lam before it and as the heh alone (make_test_shaped_arabic.py).
 const char* const kAllahTail = "\xD9\x84\xD9\x91\xD9\xB0\xD9\x87";
 const char* const kAllahLostTail = "\xD9\x84\xD9\x84\xD9\x91\xD9\xB0\xD9\x87";
-const char* const kAllahCase = "\xD8\xA7\xD9\x84\xD9\x84\xD9\x91\xD9\xB0\xD9\x87\xD8\x8C";
+const char* const kAllahHeh = "\xD9\x87";
 
 Book arabicBook(const char* label, const uint16_t viewportWidth) {
   Book book{"test_shaped_arabic", label, "NotoNaskhArabic-Book-Regular.ttf", "ar", viewportWidth};
   // al-arabiyya (a span split), kataba (a coloured fatha), qul (a bold damma)
   book.mergedWords = {"\xD8\xA7\xD9\x84\xD8\xB9\xD8\xB1\xD8\xA8\xD9\x8A\xD8\xA9", "\xD9\x83\xD9\x8E\xD8\xAA\xD8\xA8",
                       "\xD9\x82\xD9\x8F\xD9\x84"};
-  book.consumedTokens = {kAllahLostTail, kAllahTail};
-  // Allah split after its alef: the span's token forms the ligature from its context and keeps nothing, the alef's
-  // never forms it, so the word is its alef alone. Split before its heh: the first token forms the ligature, and the
-  // heh's token draws its heh again.
-  book.misdraws = {{kAllahCase, 1, 1}, {kAllahCase, 0, 1}};
+  // Allah split by a span after its alef, after its first lam or before its heh: each token is shaped with the whole
+  // other token as context, so the ligature forms alike on both and is drawn once, by the token that holds its first
+  // letter; the other keeps nothing. No letter is lost or drawn twice, and no case is an exception to rule 7.
+  book.consumedTokens = {kAllahLostTail, kAllahTail, kAllahHeh};
   book.minGlyphWords = 450;
   book.minKeptApart = 12;
   book.minGluedToPunctuation = 30;
