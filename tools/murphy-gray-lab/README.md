@@ -269,6 +269,26 @@ Results on our X3, 2026-11-07, an hour after the white drive (never-black contro
 - While held, re-driven and flashed black sit 2-4 points deeper than one drive or rest.
 - Still not measured: what the DC does to the panel over weeks.
 
+Results on our Murphy M3, 2026-11-08, `--stay fast` (the reader's FAST row, VSH 1), front light on
+(`lab.py light on`, camera exposure 80: the glossy front mirrors the room otherwise), an hour after the
+white drive (never-black controls 98.9 and 99.6):
+
+| Held black | Re-drive (VSH 15) | FAST row (VSH 1) | Rest |
+|---|---|---|---|
+| 1 page | 101.1 | 101.0 | 101.1 |
+| 50 pages | 102.8 | 101.2 | 100.4 |
+| 200 pages | 103.0 | 101.3 | 100.6 |
+| 500 pages | 109.5 | 102.4 | 100.2 |
+
+- Unlike the X3, this panel shows the re-drive. Held black fades while it is re-driven: 6.4 after 200 pages
+  and 14.5 after 500, against about -1 for rest and the FAST row. Driven white, it comes back lighter than
+  the white around it: 8.4 points above black held for one page at 500 pages. The Murphy's one-pass rests
+  such pixels, and should keep doing so.
+- The FAST row's one frame a page leaves 1.3 points at 500 pages; rest leaves nothing.
+- Nothing moves over the hour (within 0.2 between 10 and 60 minutes).
+- A first run was cut off by a reboot after about 273 pages; `t11-cancel --pages 273` paid it back before
+  this run. After the reboot the camera ignored its exposure until `cam.py` toggled the mode.
+
 **Test 4: does gray survive a real page turn?** The reader turns pages with FAST, and FAST rests any
 pixel the planes call unchanged, so gray left around letters would stay. The planes are only
 selector bits, so `--aware` marks each gray pixel as changed, which gives it the full drive to the

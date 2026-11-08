@@ -179,6 +179,10 @@ pages, the periodic HALF and the page after a menu keep two passes, and so does 
   a page, and further than the full refresh's flash (1.8 points short at 500) or rest (1 point); nothing creeps back over
   the hour after. Its black is 2-4 points deeper while held. Not measured: what the DC that adds does to the
   panel over weeks. Raised upstream on Free-Ink#184.
+- The same test on the Murphy M3 (2026-11-08) does show the re-drive: held black fades to 14.5 after 500 pages
+  and comes back 8 points lighter than the white around it, where rest stays clean. So the X3's result is
+  the X3 panel's, not a rule. The X4's SSD1677 re-drives too (VSH1 17 a page) and has not been measured: there
+  is no lab for it yet.
 
 ## Xteink X4 (SSD1677): composed, no extra memory
 
