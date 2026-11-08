@@ -468,6 +468,9 @@ void DictionaryWordSelectActivity::extractWords() {
       fragment.text = text;
       fragment.length = static_cast<uint16_t>(length);
       fragment.style = geometry.style;
+      // Without an order the stored one, capped at a byte: fragments that tie keep their stored order.
+      fragment.order = block->hasLogicalOrder() ? block->logicalPosition(fragmentSourceWord)
+                                                : static_cast<uint8_t>(std::min<uint16_t>(fragmentSourceWord, 255));
       fragment.drawStyle = internDrawStyle(geometry, flags);
       fragments.push_back(fragment);
       previousEmitted = true;
@@ -633,8 +636,26 @@ size_t DictionaryWordSelectActivity::buildWordText(const int index, char* buf, c
                                                    const bool dropJoinHyphen) const {
   if (capacity == 0) return 0;
   const Word& word = words[index];
+  // The fragments in reading order: a hyphen-joined word's head before its tail on the row below, each row's by their
+  // line words' logical positions (a right-to-left line stores them in visual order), a dash-cut token's parts as cut.
+  const auto readingKey = [&](const uint8_t f) {
+    const bool tail = word.hyphenFragment != NO_HYPHEN && f > word.hyphenFragment;
+    return static_cast<uint32_t>(tail) << 16 | static_cast<uint32_t>(fragments[word.firstFragment + f].order) << 8 | f;
+  };
   size_t length = 0;
-  for (uint8_t f = 0; f < word.fragmentCount && length + 1 < capacity; f++) {
+  uint32_t lastKey = 0;
+  for (uint8_t n = 0; n < word.fragmentCount && length + 1 < capacity; n++) {
+    // The fragment with the least key past the last one taken: a word holds a handful, so no sort and no buffer.
+    uint8_t f = 0;
+    uint32_t key = UINT32_MAX;
+    for (uint8_t k = 0; k < word.fragmentCount; k++) {
+      const uint32_t candidate = readingKey(k);
+      if ((n == 0 || candidate > lastKey) && candidate < key) {
+        key = candidate;
+        f = k;
+      }
+    }
+    lastKey = key;
     const Fragment& piece = fragments[word.firstFragment + f];
     const char* source = piece.text;
     size_t take = piece.length;
