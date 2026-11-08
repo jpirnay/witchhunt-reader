@@ -2935,14 +2935,9 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         for (const auto& el : p->elements) {
           if (el->getTag() == TAG_PageLine) {
             const auto& line = static_cast<const PageLine&>(*el);
-            if (line.getBlock()) {
-              const auto& block = *line.getBlock();
-              const uint16_t wordCount = block.wordCount();
-              for (uint16_t i = 0; i < wordCount; ++i) {
-                if (!fullText.empty()) fullText += " ";
-                fullText += block.wordText(i);
-              }
-            }
+            // In reading order: a right-to-left line stores its words left to right, and a token split into
+            // glued pieces, or CJK text, reads without a space inside it.
+            if (line.getBlock()) line.getBlock()->appendReadingText(fullText);
           }
         }
         if (!fullText.empty()) {
@@ -7167,7 +7162,14 @@ void EpubReaderActivity::publishPageLinkTargets(const Page& page, const int marg
     const auto& block = line->getBlock();
     if (!block || !block->valid()) continue;
 
-    for (uint16_t i = 0; i < block->wordCount() && nextLink < currentPageFootnotes.size(); i++) {
+    // The links come in reading order, so a line is walked in its reading order: a right-to-left line stores its words
+    // left to right, and two markers on it would otherwise meet the queue the wrong way round (the second would block
+    // the first, and every link after it).
+    uint16_t order[TextBlock::kMaxOrderedWords];
+    const bool ordered = block->hasLogicalOrder() && block->wordCount() <= TextBlock::kMaxOrderedWords;
+    if (ordered) block->readingOrder(order);
+    for (uint16_t k = 0; k < block->wordCount() && nextLink < currentPageFootnotes.size(); k++) {
+      const uint16_t i = ordered ? order[k] : k;
       // A link no word can ever match -- an image marker, whose display text is empty, or text
       // that is nothing but brackets -- would otherwise sit at the head of the queue forever and
       // cost every link behind it its target. Step over it here; the footnote list off the reader
