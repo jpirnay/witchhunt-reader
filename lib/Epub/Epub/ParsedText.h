@@ -257,6 +257,10 @@ class ParsedText {
   // Makes ShapingState for it (refused: the pass is laid out unshaped, and latched), or empties the store of a pass
   // that does not shape. A kept token whose glued neighbour has just arrived is shaped again, with it as context.
   void decideShaping(const GfxRenderer& renderer, int fontId);
+  // Whether a pass that shapes shapes `text`: it holds Indic text, or Arabic text in a paragraph that needs bidi. An
+  // Arabic run needs an AL letter, which makes the paragraph need bidi; arabic::holdsArabic alone also passes the
+  // Arabic-Indic digits and the Arabic comma, which no run takes.
+  bool shapedText(std::string_view text) const;
   // Joins each glued group's tokens that TextShaping::mergesWithPrevious merges (deviation 7, and the Hebrew name)
   // before anything is measured: a merged token keeps its first part's style, size, boundary and visible offset. Ruby
   // tokens, combine requests and no-break spaces are never merged; nor are tokens whose merged text the heap has no

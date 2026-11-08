@@ -602,7 +602,7 @@ struct ParsedText::ShapingState {
   // (a combined word among them: it is one em, whatever its glyphs) or has none. Valid as ShapedStore::pieces is.
   std::optional<std::span<const ShapedStore::Piece>> piecesOf(const ParsedText& text, const GfxRenderer& renderer,
                                                               const int fontId, const size_t i) const {
-    if (!IndicShaper::holdsShaped(text.words[i])) return std::nullopt;
+    if (!text.shapedText(text.words[i])) return std::nullopt;
     const std::optional<std::span<const ShapedStore::Piece>> pieces =
         store.pieces(i, text.words[i], text.shapeKey(renderer, fontId, i));
     if (!pieces || pieces->empty()) return std::nullopt;
@@ -913,14 +913,15 @@ void ParsedText::dropBidiControls() {
 void ParsedText::decideShaping(const GfxRenderer& renderer, const int fontId) {
   // The pass's face answers start afresh: a face lives for the build, and a font set reload between passes frees it.
   forgetFaceAnswers();
-  // Indic text is formed in any font (reordered without a face). Arabic text only where a token of it has a face, the
-  // first one found deciding (my call 5): in a bitmap or built-in font an Arabic paragraph makes no ShapingState and
-  // merges nothing, so its lines are byte for byte those of the line pass alone. Consecutive tokens in one font and
-  // style that has no face ask it once.
+  // Indic text is formed in any font (reordered without a face). Arabic text only in a paragraph that needs bidi (every
+  // Arabic run starts at an AL letter, which makes it need bidi: a Latin paragraph's Arabic-Indic digits or Arabic
+  // comma shape nowhere), where a token of it has a face, the first one found deciding (my call 5): in a bitmap or
+  // built-in font an Arabic paragraph makes no ShapingState and merges nothing, so its lines are byte for byte those of
+  // the line pass alone. Consecutive tokens in one font and style that has no face ask it once.
   shapes_ = std::any_of(words.begin(), words.end(), [](const std::string& w) { return IndicShaper::holdsIndic(w); });
   int askedFont = 0;
   int askedStyle = -1;
-  for (size_t i = 0; i < words.size() && !shapes_; ++i) {
+  for (size_t i = 0; bidi_ && i < words.size() && !shapes_; ++i) {
     if (!arabic::holdsArabic(words[i].data(), words[i].size())) continue;
     const int font = wordFontId(i, fontId);
     const int style = wordStyles[i] & EpdFontFamily::BOLD_ITALIC;
@@ -996,10 +997,10 @@ void ParsedText::mergeGluedGroups(const int fontId) {
   for (size_t start = 0; start < words.size();) {
     size_t end = start + 1;
     while (end < words.size() && wordBoundaries[end].continues) ++end;
-    // The group holds shaped text (Indic or Arabic) and the pass shapes: only then do deviation 7's merges apply.
+    // The group holds text the pass shapes (shapedText): only then do deviation 7's merges apply.
     bool shapedGroup = false;
     for (size_t k = start; shapes_ && end - start > 1 && k < end && !shapedGroup; ++k) {
-      shapedGroup = IndicShaper::holdsShaped(words[k]);
+      shapedGroup = shapedText(words[k]);
     }
     for (size_t j = start + 1; j < end;) {
       // words[j - 1] is the token merged so far: its style is its first part's.
@@ -1052,7 +1053,7 @@ bool ParsedText::readyShapedStore() {
   for (size_t i = store.size(); i < words.size(); ++i) {
     if (IndicShaper::holdsIndic(words[i])) {
       bytes += 2 * words[i].size();
-    } else if (arabic::holdsArabic(words[i].data(), words[i].size())) {
+    } else if (shapedText(words[i])) {
       bytes += 3 * words[i].size();
     }
   }
@@ -1151,7 +1152,7 @@ IndicShaper::Outcome ParsedText::shapeInto(const GfxRenderer& renderer, const in
 
 bool ParsedText::shapeToken(const GfxRenderer& renderer, const int fontId, const size_t i, uint16_t* const width) {
   const std::string& text = words[i];
-  if (!IndicShaper::holdsShaped(text)) return false;
+  if (!shapedText(text)) return false;
   ShapedStore& store = shapingState_->store;
   const uint32_t key = shapeKey(renderer, fontId, i);
   std::optional<std::span<const ShapedStore::Piece>> pieces = store.pieces(i, text, key);
@@ -1227,6 +1228,10 @@ bool ParsedText::shapeToken(const GfxRenderer& renderer, const int fontId, const
     *width = clampedWidth(sum);
   }
   return true;
+}
+
+bool ParsedText::shapedText(const std::string_view text) const {
+  return IndicShaper::holdsIndic(text) || (bidi_ && arabic::holdsArabic(text.data(), text.size()));
 }
 
 bool ParsedText::storedWidth(const GfxRenderer& renderer, const int fontId, const size_t i,
@@ -2671,7 +2676,7 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // A word this pass shapes is measured as each part would be shaped. Only upstream's fallback breaks, between
   // syllables or Arabic clusters, reach one in practice: no language's patterns cut Indic letters, and an Arabic book
   // has no patterns.
-  const bool shapedWord = shapes_ && IndicShaper::holdsShaped(word);
+  const bool shapedWord = shapes_ && shapedText(word);
 
   // Collect candidate breakpoints (byte offsets and hyphen requirements). A Hangul word may split
   // between syllables at a line end, without a hyphen; those breaks come first, so they win a width
