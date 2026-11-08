@@ -15,10 +15,11 @@ namespace ot {
 struct Buffer;
 }
 
-// Ours (this repo's): the Indic shaping module of writing modes step 2. Its text rules (which runs a token holds), and
-// shapeToken, which turns a token into pieces over a ShapingFace at section build. The run scan, the piecewise loop of
-// a long run and the glyph rounding are ported from crosspoint-reader PR #3787 ("feat: add Indic language support
-// without HarfBuzz", SSafayet / @SSafayet).
+// Ours (this repo's): the shaping module of writing modes step 2, for the Indic scripts and, since PR 4b, Arabic runs
+// too (the name is PR 3's). Its text rules (which runs a token holds), and shapeToken, which turns a token into pieces
+// over a ShapingFace at section build, each run under its own script. The run scan, the piecewise loop of a long run
+// and the glyph rounding are ported from crosspoint-reader PR #3787 ("feat: add Indic language support without
+// HarfBuzz", SSafayet / @SSafayet).
 namespace IndicShaper {
 
 // One run of a token, bytes [begin, end): upstream's scanRun for Indic text, one script's letters with the shared code
@@ -65,7 +66,8 @@ class PieceSink {
 // The longest run one ot::shape call takes (its buffer has 2n + 16 slots); a longer one is shaped in pieces. 32 from a
 // Malayalam and a Tamil novel: a run past 32 code points is in 0.031% and 0.0005% of their tokens, and none passes 48.
 constexpr unsigned kMaxRunCodepoints = 32;
-// The syllable of a glued neighbour, kept apart (deviation 7), that a token is shaped with as context, at most.
+// The cluster of a glued neighbour, kept apart (deviation 7), that a token is shaped with as context, at most: an Indic
+// syllable, or an Arabic letter with the marks and joiners after it.
 constexpr unsigned kContextCodepoints = 8;
 
 struct Request;
@@ -112,21 +114,25 @@ class CallMemory {
 };
 
 struct Request {
-  ShapingFace* face = nullptr;             // null: the font cannot shape: the token is reordered whole
+  ShapingFace* face = nullptr;             // null: the font cannot shape: Indic text is reordered, Arabic left unjoined
   uint32_t ppem26_6 = 0;                   // the size the glyphs are drawn at
   const uint32_t* languageTags = nullptr;  // the book's (TypographyProfile::shapingLanguage); null: the default
   std::string_view before, after;          // glued neighbours kept apart: context, never output
 };
 
-// Plain: nothing needs a form (no Indic run, or every form equals its text); nothing written.
+// Plain: nothing needs a form (no shaped run, or every form equals its text); nothing written.
 // Formed: the pieces are written. Degraded: a run could not be shaped (no memory, the sink's room included; the font
 // failed it; a record outside its fields); what was written is to be dropped and the token laid out as its code points.
 enum class Outcome : uint8_t { Plain, Formed, Degraded };
 
-// A token's pieces into `sink`. With a face, per run: shared code points alone are Text; a script the face does not
-// map is Reordered when IndicReorder changes it, else Text; any other run is Glyphs, shaped in the book's language with
-// the glued neighbours' syllables as context. Text between runs is Text. Without a face, one Reordered piece over the
-// whole token when IndicReorder changes it. Under RenderLock (the face maps the glyph store).
+// A token's pieces into `sink`, each run under its own script, in one call. With a face, per run: Indic shared code
+// points alone are Text; an Indic script the face does not map (its probe letter) is Reordered when IndicReorder
+// changes it, else Text; Arabic the face does not map (beh) is Text, never reordered; any other run is Glyphs, shaped
+// in the book's language with the glued neighbours' nearest clusters as context (and an Arabic run with the joiners
+// just before it). A Glyphs piece is the run's records in visual order (an Arabic run's last code point first); a run
+// whose glyphs its context took (a lam-alef across a glue) is a Glyphs piece of no record. Text between runs is Text.
+// Without a face, IndicReorder's form of the text between the Arabic runs, a Reordered piece where it changes it: over
+// the whole token when it holds no Arabic run. Under RenderLock (the face maps the glyph store).
 Outcome shapeToken(std::string_view text, const Request& request, CallMemory& memory, PieceSink& sink);
 
 }  // namespace IndicShaper

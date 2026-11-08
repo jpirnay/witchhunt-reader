@@ -25,6 +25,7 @@ target_include_directories(TextShapingTest PRIVATE
   ${REPO_ROOT}/lib/EpdFont
   ${REPO_ROOT}/test/ot_shaper_port  # OtShaperTestHelpers.h
   ${REPO_ROOT}/test/complex_shaper  # ExpectedShaping.h
+  ${REPO_ROOT}/test/ot_shaper       # ArabicExpected.h
   ${REPO_ROOT}/test/ttf_font        # ExpectedGlyphRuns.h
   ${REPO_ROOT}/lib/GfxRenderer      # last: only for GlyphRun.h, the records a shaped run is stored as
 )
