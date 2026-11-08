@@ -1133,13 +1133,16 @@ TEST(IndicShaper, AGluedNeighbourIsContext) {
   for (const char* font : {kFontNotoNaskhArabicShapingRegular, kFontNotoSansArabicShapingBold}) {
     SCOPED_TRACE(font);
     FixtureShapingFace face(arabicFont(font));
+    // Request holds views: the neighbours' text must outlive the calls.
+    const std::string firstAfter = std::string(kTeh) + alefBeh;
+    const std::string lastBefore = std::string(kKaf) + kTeh;
     Request first = on(&face);
-    first.after = std::string(kTeh) + alefBeh;
+    first.after = firstAfter;
     Request middle = on(&face);
     middle.before = kKaf;
     middle.after = alefBeh;
     Request last = on(&face);
-    last.before = std::string(kKaf) + kTeh;
+    last.before = lastBefore;
     const Shaped kaf = shape(kKaf, first);
     const Shaped teh = shape(kTeh, middle);
     const Shaped rest = shape(alefBeh, last);
@@ -1309,7 +1312,8 @@ TEST(IndicShaper, TheArabicNeighboursContextIsAsManyClustersAsFit) {
        {std::pair<std::string, std::string>{utf8Of(seenMarks), utf8Of(seenMarks) + lam},
         {utf8Of(seenMoreMarks), lam}}) {
     Request request = on(&face);
-    request.before = farther + lam;
+    const std::string neighbourText = farther + lam;  // Request holds views: the text must outlive the call
+    request.before = neighbourText;
     const Shaped glued = shape(kAlef, request);
     ASSERT_EQ(Outcome::Formed, glued.outcome) << codepointsOf(farther + lam);
     ASSERT_EQ(1u, glued.pieces.size());
