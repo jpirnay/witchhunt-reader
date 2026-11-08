@@ -1,9 +1,9 @@
 // The outline families the font manager hosts (assets/sd-fonts), as a reader installs them. The eight .otf CJK
 // families: each file probed as discovery probes it, its family installed into a glyph store with the X3's font area
-// and mapping budget, and a sample of its characters drawn at 12 pt (spec 9). The twenty .ttf Indic families and the
-// two Arabic ones: each file loaded, its style and weight read, and the family fitted into the X3's font area; each
-// Indic family's Regular file and each Arabic file shaped alike through the CPac the install writes and through filters
-// it computes.
+// and mapping budget, and a sample of its characters drawn at 12 pt (spec 9). The twenty .ttf Indic families, the two
+// Arabic ones and the two Hebrew ones: each file loaded, its style and weight read, and the family fitted into the X3's
+// font area; each Indic family's Regular file and each Arabic file shaped alike through the CPac the install writes and
+// through filters it computes (Hebrew is drawn by the reader's own Hebrew module, not the OpenType shaper).
 #include <IndicScripts.h>
 #include <OtFilterWriter.h>
 #include <OtShaper.h>
@@ -125,7 +125,7 @@ TEST(ShippedOtfFamilies, SerifTcDrawsTheOneOversizeGlyphAsMissing) {
 
 TEST(ShippedTtfFamilies, EachFileLoadsAndEachFamilyFitsTheX3Store) {
   const std::vector<std::filesystem::path> files = shippedOutlineFiles(".ttf");
-  EXPECT_EQ(files.size(), 44u);
+  EXPECT_EQ(files.size(), 48u);
   std::map<std::string, std::vector<uint32_t>> flashBytes;  // by family directory
   std::map<std::string, std::vector<uint32_t>> sdBytes;
   for (const auto& path : files) {
@@ -151,7 +151,7 @@ TEST(ShippedTtfFamilies, EachFileLoadsAndEachFamilyFitsTheX3Store) {
     flashBytes[path.parent_path().filename().generic_string()].push_back(probe.flashBytes);
     sdBytes[path.parent_path().filename().generic_string()].push_back(probe.sdBytes);
   }
-  EXPECT_EQ(flashBytes.size(), 22u);
+  EXPECT_EQ(flashBytes.size(), 24u);
   for (const auto& [family, flashSizes] : flashBytes) {
     SCOPED_TRACE(family);
     ASSERT_EQ(flashSizes.size(), 2u);
@@ -169,7 +169,7 @@ TEST(ShippedTtfFamilies, EachFileMapsTheIastLetters) {
                                 0x1E62, 0x1E63, 0x1E6C, 0x1E6D, 0x0301, 0x0303, 0x0304, 0x0307, 0x0310, 0x0323};
   static_assert(sizeof(kIast) / sizeof(kIast[0]) == 30);
   const std::vector<std::filesystem::path> files = shippedOutlineFiles(".ttf");
-  EXPECT_EQ(files.size(), 44u);
+  EXPECT_EQ(files.size(), 48u);
   for (const auto& path : files) {
     SCOPED_TRACE(path.filename().generic_string());
     const std::vector<uint8_t> bytes = readAll(path);
