@@ -395,10 +395,12 @@ TEST_F(SyntheticLutFixture, ATokenAfterAKeptJoinerKeepsItsSourceOffset) {
   // three more letters in the second, which the line breaker puts at a line's start. A page opens on that line in some
   // paragraphs, and its offset is the second token's letter's position in the source, as VisibleText counts it: the
   // joiner's 3 bytes are counted between the tokens, as the mappers count them. A paragraph is 60 one-byte words, 66
-  // beh (132 bytes), a ZWNJ and three beh (9 bytes), and 100 one-byte words. The letters are Arabic, in a font that
-  // cannot shape them: such a paragraph merges nothing, so its tokens stay as the parser cut them. Glued Indic tokens
-  // are merged in every paragraph since PR 4b (deviation 7, a paragraph that needs bidi included), so they no longer
-  // show this; nor would Arabic ones in a font that shapes.
+  // beh (132 bytes), a ZWNJ and three beh (9 bytes), and 100 one-byte words. The two tokens stay as the parser cut
+  // them, in any font: their style keys differ, a beh and a ZWNJ do not meet inside a syllable
+  // (indic::syllableBreakAllowed is true), and the second token is not marks only, so deviation 7 does not merge them
+  // (and in this font, which cannot shape Arabic, nothing is merged at all). An Indic word cut after a virama is merged
+  // whatever its styles (the glue falls inside a syllable), in a paragraph that needs bidi too since PR 4b, so it no
+  // longer shows this.
   constexpr uint32_t kBefore = 60;
   constexpr uint32_t kSecondToken = kBefore + 132 + 3;
   constexpr uint32_t kParagraphBytes = kBefore + 132 + 9 + 100;
