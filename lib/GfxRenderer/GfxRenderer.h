@@ -667,12 +667,22 @@ class GfxRenderer {
                          int* belowBaseline) const;
   int getLineHeightScaled(int fontId, float scale) const;
   int getFontAscenderSizeScaled(int fontId, float scale) const;
+  /// UI text, in reading order: a line with a right-to-left character is drawn in visual order
+  /// (BidiUtils::visualUiLine), every other one as it is. Fit it (truncatedText, wrappedText) before, never after: the
+  /// fitting works in reading order, so an ellipsis lands where the text ends. A page's words come formed at section
+  /// build, in visual order already, and are drawn with drawFormedText instead.
   void drawTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
                       float scale) const;
   void drawCenteredText(int fontId, int y, const char* text, bool black = true,
                         EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   void drawText(int fontId, int x, int y, const char* text, bool black = true,
                 EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+  /// Text drawn exactly as given, its characters in the order they appear on the panel: a page's words and pieces
+  /// (TextBlock::wordDrawText), which the section build formed.
+  void drawFormedText(int fontId, int x, int y, const char* text, bool black = true,
+                      EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+  void drawFormedTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
+                            float scale) const;
   int getSpaceWidth(int fontId, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   /// Returns the total inter-word advance: fp4::toPixel(spaceAdvance + kern(leftCp,' ') + kern(' ',rightCp)).
   /// Using a single snap avoids the +/-1 px rounding error that arises when space advance and kern are

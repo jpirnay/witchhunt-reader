@@ -278,8 +278,13 @@ reader"):
   books turn left to right: `CMD:STATE` shows `progression=ltr` for them.
 - **Reading order** in the consumers: the QR page text and the footnote-link overlay. The dictionary's reading-order
   join is done (#656).
-- **The reader's titles:** the status bar's chapter title and the Home and Library book titles get a visual form
-  once, when set (`applyBidiVisual`). Today a Hebrew title shows mirrored.
+- **The reader's titles (done, `feat/rtl-ui-titles`, not as the design said):** "once, when set" does not survive the
+  themes, which truncate and wrap a title to fit (45 calls), and a reversed string truncated at its end loses the
+  title's start. So UI text stays in reading order through measuring and fitting, and `GfxRenderer::drawText` and
+  `drawTextScaled` make a line with a right-to-left character visual as they draw it (`BidiUtils::visualUiLine`);
+  a page's words, formed at section build, go through `drawFormedText` instead. Every UI string is covered at once:
+  the status bar, Home, the lists, the TOC, centred text, alt text. X3: a Hebrew chapter title in the status bar
+  read mirrored on master and reads right now. Where the UI face has no Hebrew (the list rows), nothing shows yet.
 - **Fonts:** two Font Manager families, Noto Sans Hebrew and Noto Serif Hebrew, merged with Noto Sans/Serif Latin, as
   `lib/EpdFont/scripts/merge_noto_latin.py` does for Indic and Arabic. New family names, never a re-cut: the flash
   font cache is keyed on family and size.
@@ -327,8 +332,9 @@ break (Hangul is kept whole), or where the next page word is glued to it. On the
 
 ### 8. Step 5: UI text
 
-- **UI titles and the TOC:** they get no bidi and no shaping, because the UI faces are bitmap. Arabic and Indic
-  titles draw unjoined and unreordered.
+- **UI titles and the TOC:** reordered since `feat/rtl-ui-titles` (item 4), but not shaped: the UI faces are bitmap,
+  so Arabic and Indic titles draw unjoined, and a list row draws no Hebrew or Arabic at all where the UI face lacks
+  it (the status bar falls back to the reader's face, the list rows do not).
 - **TXT and Markdown books:** they get no bidi.
 
 ### 9. Flash

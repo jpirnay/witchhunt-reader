@@ -191,11 +191,21 @@ class GfxRenderer {
     float scale;
   };
   mutable std::vector<TextDraw>* textDraws = nullptr;
-  void drawText(int, int x, int y, const char* text, bool = true, EpdFontFamily::Style = EpdFontFamily::REGULAR) const {
+  // The page's words come formed (drawFormedText); this stub records both entry points alike.
+  void drawFormedText(int, int x, int y, const char* text, bool = true,
+                      EpdFontFamily::Style = EpdFontFamily::REGULAR) const {
     if (textDraws) textDraws->push_back({text, live_, x, y, 1.0f});
   }
-  void drawTextScaled(int, int x, int y, const char* text, bool, EpdFontFamily::Style, float scale) const {
+  void drawFormedTextScaled(int, int x, int y, const char* text, bool, EpdFontFamily::Style, float scale) const {
     if (textDraws) textDraws->push_back({text, live_, x, y, scale});
+  }
+  void drawText(int f, int x, int y, const char* text, bool black = true,
+                EpdFontFamily::Style style = EpdFontFamily::REGULAR) const {
+    drawFormedText(f, x, y, text, black, style);
+  }
+  void drawTextScaled(int f, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
+                      float scale) const {
+    drawFormedTextScaled(f, x, y, text, black, style, scale);
   }
   // A shaped run, measured as the real renderer's glyphRunWidth measures it (the records' pen, accumulated outside
   // drawTextScaled's unscaled window; this stub's fonts have a base scale of 1). A test that sets `glyphRunDraws` gets
