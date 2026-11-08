@@ -151,6 +151,17 @@ std::vector<int> segmentPiecesOf(const BidiLine::Line& line) {
   return counts;
 }
 
+// Token t's pieces, left to right, each as `form [begin,end) xN`: its drawn form, its bytes and its segmentPieces.
+std::vector<std::string> piecesOfToken(const BidiLine::Line& line, const size_t t) {
+  std::vector<std::string> out;
+  for (const auto& piece : line.pieces) {
+    if (piece.token != t) continue;
+    out.push_back(std::string(displayOf(line, piece)) + " [" + std::to_string(piece.begin) + "," +
+                  std::to_string(piece.end) + ") x" + std::to_string(piece.segmentPieces));
+  }
+  return out;
+}
+
 std::vector<std::string> repeated(const std::string& text, const size_t n) { return std::vector<std::string>(n, text); }
 
 // The form tokenForm makes, or nothing when it returns false; checks that a false leaves `out` as it was.
@@ -592,7 +603,7 @@ TEST(BidiLine, APieceCountsThePiecesThatDrawItsSegment) {
   const auto split = lay({"see", "x" + u(FSI) + "אבcd", "ef" + u(PDI), "more"}, 0);
   EXPECT_EQ(render(split), "t0:see S1 t1:x G t1:cd S2 t2:ef G t1:בא S3 t3:more");
   EXPECT_EQ(segmentPiecesOf(split), (std::vector<int>{1, 3, 3, 1, 3, 1}));
-  // The fallback gives one piece per segment.
+  // On the fallback each of its segments is one piece too.
   auto words = repeated("אבגד", 26);
   words.push_back("(كتاب)");
   Cuts cuts(27);
@@ -600,6 +611,61 @@ TEST(BidiLine, APieceCountsThePiecesThatDrawItsSegment) {
   const auto fallback = lay(words, 1, {}, {}, cuts);
   ASSERT_TRUE(fallback.fallback);
   EXPECT_EQ(segmentPiecesOf(fallback), std::vector<int>(29, 1));
+}
+
+TEST(BidiLine, TheFallbackSplitsASegmentWhereAnotherInterruptsIt) {
+  // "a", U+0663 and kitab, cut at the run: a Text segment, then the run. Left to right, UAX #9 puts "a" (level 0) left
+  // of the run (level 1) and the digit (level 2) right of it: the Text segment's characters land apart, and the line
+  // pass gives it a piece on each side, each counting 2. Past 128 slots the fallback gives the same pieces, not the
+  // segment's characters together where its form first draws it (the digit on the run's other side).
+  const std::string kitab = u(0x0643) + u(0x062A) + u(0x0627) + u(0x0628);
+  const std::string drawnKitab = u(0x0628) + u(0x0627) + u(0x062A) + u(0x0643);
+  const std::string token = "a" + u(0x0663) + kitab;
+  const std::vector<std::string> expected = {"a [0,1) x2", drawnKitab + " [3,11) x1", u(0x0663) + " [1,3) x2"};
+  const auto main = lay({"see", token}, 0, {}, {}, {{}, {3}});
+  ASSERT_FALSE(main.fallback);
+  EXPECT_EQ(piecesOfToken(main, 1), expected);
+
+  auto words = repeated("abcd", 26);
+  words.push_back(token);
+  Cuts cuts(27);
+  cuts[26] = {3};
+  const auto fallback = lay(words, 0, {}, {}, cuts);
+  ASSERT_TRUE(fallback.fallback);
+  EXPECT_EQ(piecesOfToken(fallback, 26), expected);
+  const std::string rendered = render(fallback);
+  const std::string tail = " S26 t26:a G t26:" + drawnKitab + " G t26:" + u(0x0663);
+  ASSERT_GE(rendered.size(), tail.size());
+  EXPECT_EQ(rendered.substr(rendered.size() - tail.size()), tail);
+  // A fresh line's buffers are reserved to the fallback's bound, and nothing grew them past it (growth would double
+  // them): a piece and a 4-byte form with its NUL for each word; for the cut token a piece for each of its six drawn
+  // code points, its 11 bytes and a NUL a piece.
+  EXPECT_EQ(fallback.pieces.capacity(), 26u + 6u);
+  EXPECT_EQ(fallback.display.capacity(), 26u * 5 + 11 + 6);
+}
+
+TEST(BidiLine, TheFallbackCountsTheTwoPiecesOfARunAMarkInterrupts) {
+  // Beh teh, then a fatha across a cut, right to left: the mark is drawn right after its base, the teh, inside the
+  // run's segment, which so gives a piece on each side of it. Past 128 slots the fallback gives the same pieces as the
+  // line pass and counts the run's 2, so a caller that draws the run as its glyphs degrades it rather than drawing them
+  // on each.
+  const std::string word = u(0x0628) + u(0x062A) + u(0x064E);
+  const std::vector<std::string> expected = {u(0x062A) + " [2,4) x2", u(0x064E) + " [4,6) x1", u(0x0628) + " [0,2) x2"};
+  const auto main = lay({word}, 1, {}, {}, {{4}});
+  ASSERT_FALSE(main.fallback);
+  EXPECT_EQ(piecesOfToken(main, 0), expected);
+
+  auto words = repeated(u(0x05D0) + u(0x05D1) + u(0x05D2) + u(0x05D3), 26);
+  words.push_back(word);
+  Cuts cuts(27);
+  cuts[26] = {4};
+  const auto fallback = lay(words, 1, {}, {}, cuts);
+  ASSERT_TRUE(fallback.fallback);
+  EXPECT_EQ(piecesOfToken(fallback, 26), expected);
+  ASSERT_EQ(fallback.pieces[0].token, 26);
+  EXPECT_GT(fallback.pieces[0].segmentPieces, 1);
+  EXPECT_EQ(fallback.pieces[1].gapBefore, Gap::Glued);
+  EXPECT_EQ(fallback.pieces[2].gapBefore, Gap::Glued);
 }
 
 TEST(BidiLine, CutsThatBreakTheirContractLeaveTheTokenUncut) {

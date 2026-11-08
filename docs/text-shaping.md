@@ -422,8 +422,9 @@ a line's tokens by the bidi levels. PR 4b teaches it to carry shaped pieces.
   that took its letter is drawn from glyphs (on this line, or an earlier one after a fallback break); where that
   neighbour is drawn as code points, the letter is drawn as its own.
 - **Past the line pass's limits** (`BidiLine::kMaxCodepoints`, or no workspace) the pass runs its fallback, which gives
-  one piece per segment; the line is laid out without the pass when the workspace is missing, its tokens' bidi controls
-  dropped (`withoutControls`).
+  a piece for each run of one segment's characters in the token's own form: a segment another one interrupts gives a
+  piece on each side, counted by `Piece::segmentPieces` as on a line that fits. The line is laid out without the pass
+  when the workspace is missing, its tokens' bidi controls dropped (`withoutControls`).
 - **A glyph form on a bidi line** is stored in the same region as a display form (bit 2); the section file version is
   115 for it.
 - **The dictionary** reads a right-to-left line's words in reading order: a word's glued pieces are joined by their
