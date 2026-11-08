@@ -1205,7 +1205,52 @@ TEST(IndicShaper, TwoClustersOfContextFormTheWholeWordsGlyphs) {
   }
 }
 
-TEST(IndicShaper, TheArabicNeighboursContextIsItsTwoNearestClusters) {
+TEST(IndicShaper, TheAllahLigatureSplitBySpanIsDrawnOnce) {
+  // Allah pointed (alef, lam, lam, shadda, superscript alef, heh) is one glyph, U+FDF2, in Noto Naskh. Cut by a style
+  // span, each token is shaped with the whole other token as context, so the ligature forms the same on both sides:
+  // the token that holds its first letter draws it, and the other keeps nothing. No letter is lost or drawn twice.
+  const std::vector<uint32_t> allah = {0x627, 0x644, 0x644, 0x651, 0x670, 0x647};
+  const auto part = [&](const size_t from, const size_t to) {
+    return utf8Of(std::vector<uint32_t>(allah.begin() + from, allah.begin() + to));
+  };
+  for (const char* font : {kFontNotoNaskhArabicShapingRegular, "NotoNaskhArabic-Book-Regular.ttf"}) {
+    SCOPED_TRACE(font);
+    FixtureShapingFace face(arabicFont(font));
+    const Shaped whole = shape(utf8Of(allah), on(&face));
+    ASSERT_EQ(Outcome::Formed, whole.outcome);
+    ASSERT_EQ(1u, whole.pieces.size());
+    ASSERT_EQ(1u, whole.pieces[0].glyphs.size());  // the ligature
+    // After the alef, between the lams, and before the heh.
+    for (const size_t at : {size_t{1}, size_t{2}, size_t{5}}) {
+      SCOPED_TRACE(at);
+      const std::string first = part(0, at);
+      const std::string second = part(at, allah.size());
+      Request firstRequest = on(&face);
+      firstRequest.after = second;
+      Request secondRequest = on(&face);
+      secondRequest.before = first;
+      const Shaped one = shape(first, firstRequest);
+      const Shaped two = shape(second, secondRequest);
+      ASSERT_EQ(Outcome::Formed, one.outcome);
+      ASSERT_EQ(Outcome::Formed, two.outcome);
+      std::vector<StoredGlyph> firstGlyphs;
+      std::vector<StoredGlyph> secondGlyphs;
+      for (const Piece& piece : one.pieces) {
+        if (piece.kind == PieceKind::Glyphs)
+          firstGlyphs.insert(firstGlyphs.end(), piece.glyphs.begin(), piece.glyphs.end());
+      }
+      for (const Piece& piece : two.pieces) {
+        if (piece.kind == PieceKind::Glyphs)
+          secondGlyphs.insert(secondGlyphs.end(), piece.glyphs.begin(), piece.glyphs.end());
+      }
+      EXPECT_EQ(whole.pieces[0].glyphs, rightToLeft({firstGlyphs, secondGlyphs}))
+          << "first " << glyphText(firstGlyphs) << " second " << glyphText(secondGlyphs) << " whole "
+          << glyphText(whole.pieces[0].glyphs);
+    }
+  }
+}
+
+TEST(IndicShaper, TheArabicNeighboursContextIsAsManyClustersAsFit) {
   FixtureShapingFace face(arabicFont(kFontNotoSansArabicShapingBold));
   // Tokens whose glyphs follow the farther cluster: alef after lam, whose form the letter before the lam decides; and
   // ain-fatha reh-fatha before beh-kasra, whose reh is kerned as the beh is initial (a yeh after it) or isolated.
@@ -1221,10 +1266,10 @@ TEST(IndicShaper, TheArabicNeighboursContextIsItsTwoNearestClusters) {
   };
   ASSERT_NE(alefAfter(seenLam), alefAfter(kLam));
   ASSERT_NE(ainRehBefore(behKasraYeh), ainRehBefore(behKasra));
-  // Before: the neighbour's last two letters, each with the marks and joiners after it, whatever comes before them;
-  // the farther one only when it is Arabic.
+  // Before: the neighbour's last clusters, each a letter with the marks and joiners after it, as many as fit and are
+  // Arabic, whatever comes before them.
   const std::pair<std::string, std::string> befores[] = {{seenLam, seenLam},
-                                                         {std::string(kBeh) + seenLam, seenLam},
+                                                         {std::string(kBeh) + seenLam, std::string(kBeh) + seenLam},
                                                          {std::string("(") + kLam, kLam},
                                                          {std::string("a") + kLam, kLam}};
   for (const auto& [before, context] : befores) {
@@ -1235,9 +1280,11 @@ TEST(IndicShaper, TheArabicNeighboursContextIsItsTwoNearestClusters) {
     ASSERT_EQ(1u, glued.pieces.size());
     EXPECT_EQ(alefAfter(context), glued.pieces[0].glyphs) << codepointsOf(before);
   }
-  // After: its first two, likewise.
+  // After: its first clusters, likewise.
   const std::pair<std::string, std::string> afters[] = {
-      {behKasraYeh, behKasraYeh}, {behKasraYeh + utf8Of({0x629, 0x64F}), behKasraYeh}, {behKasra + ")", behKasra}};
+      {behKasraYeh, behKasraYeh},
+      {behKasraYeh + utf8Of({0x629, 0x64F}), behKasraYeh + utf8Of({0x629, 0x64F})},
+      {behKasra + ")", behKasra}};
   for (const auto& [after, context] : afters) {
     Request request = on(&face);
     request.after = after;
@@ -1247,7 +1294,7 @@ TEST(IndicShaper, TheArabicNeighboursContextIsItsTwoNearestClusters) {
     EXPECT_EQ(ainRehBefore(context), glued.pieces[0].glyphs) << codepointsOf(after);
   }
   // Two clusters of eight code points fill kArabicContextCodepoints, the vocalised seen and lam here. One code point
-  // more cuts the farther cluster's letter off, and its marks alone are no context: the nearer cluster is.
+  // more and the farther cluster does not fit: it is left out whole, and the nearer cluster is the context.
   const std::vector<uint32_t> marks = {0x64E, 0x64F, 0x650, 0x651, 0x652, 0x653, 0x654, 0x655};
   std::vector<uint32_t> seenMarks = {0x633};
   seenMarks.insert(seenMarks.end(), marks.begin(), marks.end() - 1);

@@ -68,8 +68,9 @@ class PieceSink {
 constexpr unsigned kMaxRunCodepoints = 32;
 // The syllable of a glued Indic neighbour, kept apart (deviation 7), that a token is shaped with as context, at most.
 constexpr unsigned kContextCodepoints = 8;
-// The two clusters of a glued Arabic neighbour, kept apart, that a token is shaped with as context, at most: its two
-// letters nearest the token, each with the marks and joiners after it (two vocalised clusters).
+// The code points of a glued Arabic neighbour, kept apart, that a token is shaped with as context, at most: its whole
+// clusters nearest the token (a letter with the marks and joiners after it), as many as fit; one that does not fit is
+// left out, with all those farther.
 constexpr unsigned kArabicContextCodepoints = 16;
 
 struct Request;
@@ -131,11 +132,11 @@ enum class Outcome : uint8_t { Plain, Formed, Degraded };
 // points alone are Text; an Indic script the face does not map (its probe letter) is Reordered when IndicReorder
 // changes it, else Text; Arabic the face does not map (beh) is Text, never reordered; any other run is Glyphs, shaped
 // in the book's language with context from the glued neighbours: an Indic neighbour's nearest syllable, an Arabic
-// neighbour's two nearest clusters (and an Arabic run's joiners just before it). A Glyphs piece is the run's records in
-// visual order (an Arabic run's last code point first); a run whose glyphs its context took (a lam-alef across a glue)
-// is a Glyphs piece of no record. Text between runs is Text. Without a face, IndicReorder's form of the text between
-// the Arabic runs, a Reordered piece where it changes it: over the whole token when it holds no Arabic run. Under
-// RenderLock (the face maps the glyph store).
+// neighbour's nearest whole clusters (and an Arabic run's joiners just before it). A Glyphs piece is the run's records
+// in visual order (an Arabic run's last code point first); a run whose glyphs its context took (a lam-alef across a
+// glue) is a Glyphs piece of no record. Text between runs is Text. Without a face, IndicReorder's form of the text
+// between the Arabic runs, a Reordered piece where it changes it: over the whole token when it holds no Arabic run.
+// Under RenderLock (the face maps the glyph store).
 Outcome shapeToken(std::string_view text, const Request& request, CallMemory& memory, PieceSink& sink);
 
 }  // namespace IndicShaper
