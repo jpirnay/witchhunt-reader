@@ -36,6 +36,7 @@ CTRL_AUTO_EXPOSURE = 0x009A0901
 CTRL_EXPOSURE = 0x009A0902
 CTRL_DYNAMIC_RATE = 0x009A0903
 AUTO_EXPOSURE_MANUAL = 1
+AUTO_EXPOSURE_APERTURE = 3
 POWER_LINE_50HZ = 1
 
 EXPOSURE = int(os.environ.get("MURPHY_EXPOSURE", "1000"))
@@ -58,9 +59,12 @@ def get_control(fd, control):
 
 def lock(device, exposure):
     """Everything automatic off. The exposure unit is 100 us: multiples of 100 sit on the 100 Hz
-    flicker of mains lighting. Order matters, because manual values are refused while auto is on."""
+    flicker of mains lighting. Order matters, because manual values are refused while auto is on. After
+    the camera powers up it ignores the exposure value until the mode has been switched away from manual
+    and back (seen after a reboot, 2026-11-08), so the mode is toggled first."""
     fd = os.open(device, os.O_RDWR)
     try:
+        set_control(fd, CTRL_AUTO_EXPOSURE, AUTO_EXPOSURE_APERTURE)
         set_control(fd, CTRL_AUTO_EXPOSURE, AUTO_EXPOSURE_MANUAL)
         set_control(fd, CTRL_DYNAMIC_RATE, 0)
         set_control(fd, CTRL_EXPOSURE, exposure)

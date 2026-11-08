@@ -215,8 +215,12 @@ Results on our X3, 2026-11-07:
 **Test 10: does a pixel kept black come back white?** The composed one-pass planes cannot tell a pixel that
 stays black from one that turns black, so it takes the black drive (VSH 18) again on every page. `t10` holds
 bands black for 1, 2, 5, 10, 20 and 50 pages in three families that differ only in what a page that keeps a
-pixel black gives it: that drive again, FAST's flash for black that stays, or rest. All go white in the same
+pixel black gives it: that drive again, a stay row, or rest. All go white in the same
 refresh with the one-pass white (VSL 18). `undo` afterwards cancels the drive the re-driven bands took.
+
+The stay row is `--stay fast`, the reader's FAST row for black that stays (VSH 2 on the X3, VSH 1 on the
+Murphy, the default), or `--stay full`, the full refresh's flash (VSL then VSH, net zero). The X3 runs below
+used `--stay full`: the "full flash" column is not what FAST does.
 
 ```sh
 ./lab.py t10; ./cam.py bands t10-white --count 20 --margin 6; ./cam.py bands t10-black --count 20 --margin 6
@@ -225,7 +229,7 @@ refresh with the one-pass white (VSL 18). `undo` afterwards cancels the drive th
 
 Results on our X3, 2026-11-07, read within minutes (bands: control, then re-drive, flash, rest for each hold):
 
-| Held black | Re-drive | Flash | Rest |
+| Held black | Re-drive | Full flash | Rest |
 |---|---|---|---|
 | 1 page | 104.5 | 104.5 | 104.5 |
 | 5 pages | 104.6 | 104.0 | 104.0 |
@@ -239,6 +243,51 @@ Results on our X3, 2026-11-07, read within minutes (bands: control, then re-driv
   reader's periodic HALF cancels any of it is not checked.
 - The `t10-rest` shot read 6 points high at the top and 13 low at the bottom, controls included, while three
   later shots of the unchanged panel agreed within 0.2: a camera artifact, not the panel.
+
+**Test 11: the same over 500 pages, and the hour after.** Holds of 1, 50, 200 and 500 pages, then the white
+drive and a shot every 10 minutes for an hour. Not journalled (500 pages of planes make a 70 MB journal):
+`t11-cancel` pays back the 18 frames of VSH each re-driven band took per page held past the first, in steps of
+the firmware's 32-frame net limit.
+
+```sh
+./lab.py t11; ./cam.py bands t11-white-60 --count 14 --margin 8; ./lab.py t11-cancel
+```
+
+Results on our X3, 2026-11-07, an hour after the white drive (never-black controls 103.3 and 103.6):
+
+| Held black | Re-drive | Full flash | Rest |
+|---|---|---|---|
+| 1 page | 102.0 | 101.9 | 102.1 |
+| 50 pages | 102.2 | 100.8 | 101.2 |
+| 200 pages | 102.2 | 100.4 | 101.1 |
+| 500 pages | 102.2 | 100.2 | 101.0 |
+
+- Re-driven black comes back as white as black held for one page, at every hold. The full refresh's flash
+  leaves the most behind, 1.8 points at 500 pages, rest about 1.
+- Nothing creeps back: every band, controls included, rose about a point in the first 10 minutes, then held
+  within 0.2 for the hour.
+- While held, re-driven and flashed black sit 2-4 points deeper than one drive or rest.
+- Still not measured: what the DC does to the panel over weeks.
+
+Results on our Murphy M3, 2026-11-08, `--stay fast` (the reader's FAST row, VSH 1), front light on
+(`lab.py light on`, camera exposure 80: the glossy front mirrors the room otherwise), an hour after the
+white drive (never-black controls 98.9 and 99.6):
+
+| Held black | Re-drive (VSH 15) | FAST row (VSH 1) | Rest |
+|---|---|---|---|
+| 1 page | 101.1 | 101.0 | 101.1 |
+| 50 pages | 102.8 | 101.2 | 100.4 |
+| 200 pages | 103.0 | 101.3 | 100.6 |
+| 500 pages | 109.5 | 102.4 | 100.2 |
+
+- Unlike the X3, this panel shows the re-drive. Held black fades while it is re-driven: 6.4 after 200 pages
+  and 14.5 after 500, against about -1 for rest and the FAST row. Driven white, it comes back lighter than
+  the white around it: 8.4 points above black held for one page at 500 pages. The Murphy's one-pass rests
+  such pixels, and should keep doing so.
+- The FAST row's one frame a page leaves 1.3 points at 500 pages; rest leaves nothing.
+- Nothing moves over the hour (within 0.2 between 10 and 60 minutes).
+- A first run was cut off by a reboot after about 273 pages; `t11-cancel --pages 273` paid it back before
+  this run. After the reboot the camera ignored its exposure until `cam.py` toggled the mode.
 
 **Test 4: does gray survive a real page turn?** The reader turns pages with FAST, and FAST rests any
 pixel the planes call unchanged, so gray left around letters would stay. The planes are only
