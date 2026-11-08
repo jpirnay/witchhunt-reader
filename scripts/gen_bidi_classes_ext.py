@@ -35,6 +35,8 @@ LTR_BLOCKS = [
 # Blocks with the file's classes as they are.
 FILE_BLOCKS = [
     (0x0590, 0x05FF),  # Hebrew: the points and letters upstream lacks (05A2, 05BA, 05C5-05C7, 05EF)
+    (0x0750, 0x077F), (0x0870, 0x08FF),  # Arabic Supplement, Extended-B and -A (upstream lists only 0600-06FF)
+    (0xFC00, 0xFDFF),  # Arabic Presentation Forms-A (the ligatures U+FDF2, U+FDFA)
     (0xFB00, 0xFB17),  # Latin and Armenian ligatures
     (0x2070, 0x209F),  # superscripts and subscripts
     (0x2100, 0x218F),  # letterlike symbols, number forms
