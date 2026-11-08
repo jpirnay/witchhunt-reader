@@ -165,9 +165,12 @@ is the CSS ruleset, the feed chunk and the SAX state (10,844 B on the X3's shape
 1. the open page block: every line's `TextBlock` bytes, from a page's first line to `emitPage()`
    (`ChapterHtmlSlimParser::ensurePageBlock`);
 2. a shaping call's block above it (`IndicShaper::CallMemory`, about 6.3 KB and 7 B a token byte),
-   for one Indic token's `ot::shape`, released before any of its glyphs is looked up;
+   for one Indic or Arabic token's `ot::shape`, released before any of its glyphs is looked up;
 3. the TrueType miss scope (§9.7), for one glyph lookup;
-4. the bidi workspace (`BidiLine::ArenaWorkspace`), for one line pass of a bidi paragraph;
+4. the bidi workspace (`BidiLine::ArenaWorkspace`, about 7.4 KB), for one line pass of a bidi paragraph. A paragraph that
+   shapes (Arabic, or Indic words inside a right-to-left paragraph) shapes all its tokens first and borrows the workspace
+   after, so users 2 and 4 are never in the arena at once, which would press the word cache's tail
+   (`ParsedText::calculateWordWidths`); the line pass makes no shaping call under its workspace;
 5. table row blocks, committed into the page scope or released (§8.4a);
 6. a mid-build draw (Background-C only, between slices): the page's bytes, the font slots and its
    misses, closed before the render lock is released.
@@ -177,7 +180,7 @@ manifest's probe (8.7 KB) and its deferred header walk (16.9 KB, a second stage 
 Image decodes never run during a build: a mid-build draw uses placeholders, and the warm pass
 refuses a live build's arena.
 
-**The free tail.** The word-shaping cache (`WordShapeCache`) keeps the build's shaped Indic words in
+**The free tail.** The word-shaping cache (`WordShapeCache`) keeps the build's shaped Indic and Arabic words in
 the arena's top 16 KB, `[capacity - 16 KB, capacity)`, which the arena still counts as free. It
 costs no other user any room:
 

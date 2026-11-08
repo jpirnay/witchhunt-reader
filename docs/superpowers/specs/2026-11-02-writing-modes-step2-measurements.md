@@ -1718,3 +1718,118 @@ x 10 languages = **80 runs, every one 6,338/6,338, 0 differences**.
 through a CPac face and a computed-filter face. The lines are a committed sample, `test/ttf_font/data/arabic_corpus.txt`,
 200 lines spread evenly through the sorted corpus (the first 200 sorted lines are single code points), Cf code points as
 backslash-u text, made by `make_corpus_sample.py`.
+
+## PR 4b: Arabic on the page
+
+Measured on the X3 (528x792 panel) on 2026-11-08, NotoNaskhArabic at 14 pt in portrait unless stated, against master
+(PR 4a's factory build; a701c5ce1 to the merge base b5209cf46 changes only docs and `tools/murphy-gray-lab`).
+
+**Builds measured:**
+- bf371ea7f, the default build: 6,314,543 B;
+- f6a516019, with Task 10a's two fixes: 6,314,575 B;
+- a diagnostics build (`-DENABLE_BOOT_HEAP_DIAGNOSTICS`): 6,317,055 B, used for the stack only.
+
+**The timing books** are Jurji Zaydan's England chapter ("Rihlat Jurji Zaydan ila Uruba"), from ar.wikisource through
+ws-export, cut at 31 paragraphs and 2,529 words (public domain: Zaydan died in 1914), and a Latin twin with the same
+per-paragraph word counts. Neither is committed.
+
+### The 2x line: missed
+
+Cold chapter 2 builds, three each, from `createSectionFile spine=1 done: total=`:
+
+| Book | master (unshaped) min / median / max | Branch min / median / max |
+|---|---|---|
+| Zaydan, Arabic | 5,585 / 5,586 / 5,600 ms (parse ~4,107) | 7,875 / 7,880 / 7,885 ms (parse ~6,560) |
+| Its Latin twin | 2,500 / 2,517 / 2,526 ms | 2,482 / 2,489 / 2,489 ms |
+| Ratio of medians | 2.22x | **3.17x** |
+
+- The word cache on the branch: 707 hits, 1,820 misses (28% hits), 1,773 inserts, no clear.
+- Shaping adds about 2.3 s, or 0.9 ms a word.
+- master's bidi-only Arabic build is already past 2x, so shaping alone cannot reach the line.
+- Arena on both builds: cap 52,272 B, high water 37,708 B (Latin 26,396 B). Section bytes: Arabic 27,360, Latin 16,042.
+- It is reported as missed, as PR 3's Hindi 2.61x was, with the engine speed deferred.
+
+### The heap floor, the stack and the reading heap
+
+| What | Branch | Pass line |
+|---|---|---|
+| Background-B's lowest heap, look-ahead build of Zaydan's chapter (open at 1:1, B builds chapter 2 in its borrow) | 29,408 B (Latin twin 42,772 B); B's build 6,715 ms | >= 10,240 B: **pass** |
+| The same in landscape | 29,204 B (Latin 43,452 B), 27 pages, no degrade | - |
+| The loop task's stack after a cold Arabic build (diagnostics build) | 10,448 B free (render task 6,176; btnSampler 1,516) | >= 1,536 B: **pass** |
+| `Min Free` since boot after a cold Arabic build (diagnostics build) | 15,116 B | - |
+| Reading heap after five turns, Arabic / Latin chapter | 60,196 / 60,200 B (maxblock 49,140 B both) | - |
+| After `CMD:TTF:FULL` and three turns forward and back, Arabic / Latin | 53,844 / 53,836 B | within 2 KB: **pass** |
+
+- Ring mode: the 12 pages after `FULL` are pixel-identical to their screenshots from before, above the status bar. The
+  store had one live segment, so drawing in ring mode itself was not exercised (as in PR 3).
+- No build of the timing books logged `shaping degraded` or `Watermark DROP`.
+
+### The automatic family and the gate
+
+A cold open of `test_shaped_arabic.epub` gives `STATE font=NotoNaskhArabic` with the reader font BookerlyTTF, and
+`STATE font=NotoSansArabic` with NotoSansDevanagari (a "Sans" font).
+
+The X4's in-place gate line (`heapAllowsInPlaceBuild=0 ... shapedTtf=1`) does not log on the X3, and the X4 was not
+attached, so it was not measured.
+
+**Install time:** NotoNaskhArabic 7,422 ms (2 styles, flash, `CPac` 5,500 B a style; on master's firmware, but the
+installer is unchanged on the branch; PR 4a's X4 figure was 4,959 ms). NotoSansArabic 5,806 ms (branch).
+
+### Before and after
+
+Pages of ar, fa and ur at 14 pt, ar at 18 pt, ar in landscape and the dictionary selection on an Arabic word, master
+against the branch (the images are on the PR). master draws isolated, unjoined letters; the branch draws joined Naskh.
+master's dictionary selection box lands on the wrong word; the branch's sits on the selected word.
+
+### Task 10a: what the run found
+
+Two defects that existed before, and that PR 4b's shaped text exposed:
+
+1. **The long-block split was quadratic.**
+   - **Cause:** in `ChapterHtmlSlimParser`, a split keeps the last line. When one line holds more than 96 tokens, the
+     block never dropped below the split threshold, so every further word laid the whole block out again.
+   - **Where it showed:** test_shaped_arabic's stress paragraph, 200 Allah words each split by a span.
+   - **Before the fix:** X3 landscape (792 px): 113-114 splits per chapter 2 build against master's 4, parse 4.4 s against
+     1.26 s. On the host, by width: 6 splits at 460 px, 33 at 900, 124 at 1,200 and 186 at 1,600 (220 with the test's
+     default arena).
+   - **After:** the threshold is max(96, kept + 48). Host 6 / 6 / 5 / 6 splits; X3 landscape 5.
+2. **Background-B built on the heap.**
+   - **Cause:** `render()` returned B's borrow before B's first slice ("no build live"), but the state stayed
+     `Building`, so B's next tick built with no arena.
+   - **Where it showed:** the X3 heap fell from 47 KB to 3.8 KB within 200 ms, and the build was css-degraded.
+   - **After:** the `Building` case re-probes when the borrow is gone.
+
+Before the fixes a landscape open of the test book also went through a degraded build, a released blocking rebuild,
+"Failed to reallocate secondary display buffer" (contig 38,900 B < 52,272 B), "Fragmented heap recovery" and a silent
+restart. After the fixes, none of it.
+
+A review of the fixes found one more case, fixed in the PR's last wave: a block drained by the `<table>`, `<hr>` and
+`<caption>` handlers kept the previous block's `splitKeptTokens_`, so its first stray text waited up to 48 tokens longer
+to split. `makePages()` now clears it.
+
+### Known limits, measured
+
+- **The test book's landscape chapter 2 still degrades on the X3, gracefully.** Background-C runs low on heap and the
+  released blocking rebuild demotes the table row; the chapter is cached with the status bit set; the heap's low point is
+  2,936 B; master builds it clean. The cause is a 400-token paragraph whose landscape lines hold more than 96 tokens,
+  then a table: on the host (`dump --bench`, 770 px) the shaped build holds about 16 KB more heap than the unshaped one,
+  all ShapedStore chunks (11,776 B live at the peak), while the lent arena peaks at 34 KB of 52 KB. Real prose passes in
+  both orientations. Follow-up idea: ShapedStore's chunks in the lent arena's free room.
+- **A long split word can still lose or double a ligature:** a word past 32 code points (context, run and context
+  together) split by a style span reaches only 2 clusters in the piecewise loop. The shipped fonts have one consuming
+  ligature, Allah (U+FDF2), and no word holding it nears 32 code points.
+- **The 2x line is missed** (above).
+- A consumed letter is missing from the dictionary lookup text across a style glue (device only); a no-face Reordered
+  Indic segment split by levels draws unreordered (the guard, not latched).
+
+### Flash (default)
+
+| Build | Bytes |
+|---|---|
+| The merge base (Task 0) | 6,303,319 |
+| After Task 6 | 6,314,537 |
+| After the context fix | 6,314,543 |
+| After Task 10a | 6,314,575 |
+| Gate | 6,318,600 |
+
+After Task 10a the build is 4,025 B under the gate, at RAM 57,616.

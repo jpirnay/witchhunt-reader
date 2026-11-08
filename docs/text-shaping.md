@@ -1,13 +1,16 @@
-# Text shaping: Indic scripts on the page
+# Text shaping: Indic scripts and Arabic on the page
 
-How a word of an Indic script is shaped at section build, stored in the section and drawn. This is the
-**current-state reference**. Code is in `lib/TextShaping`, `lib/OtShaper` and `lib/Epub/Epub` unless named otherwise.
+How a word of an Indic script or of the Arabic script is shaped at section build, stored in the section and drawn. This
+is the **current-state reference**. Code is in `lib/TextShaping`, `lib/OtShaper` and `lib/Epub/Epub` unless named
+otherwise.
 
 The shaped scripts are the ten Indic ones of U+0900-0DFF: Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil,
-Telugu, Kannada, Malayalam and Sinhala (`lib/Utf8/IndicScripts.h`). A word is shaped once, when its section is built;
-a page turn draws what the build stored and shapes nothing. Only a TrueType family (`.ttf` or `.otf`) that maps the
-script shapes it. Where the families come from, and which one a book takes, is under "The families" below. Every other font gets the vowel signs reordered, without conjuncts; what is not shaped yet is listed
-at the end.
+Telugu, Kannada, Malayalam and Sinhala (`lib/Utf8/IndicScripts.h`), and the Arabic script (Arabic, Persian, Urdu and
+the other languages of `language_tag::isArabicScript`; its code points are in `lib/Utf8/ArabicScripts.h`). A word is
+shaped once, when its section is built; a page turn draws what the build stored and shapes nothing. Only a TrueType
+family (`.ttf` or `.otf`) that maps the script shapes it. Where the families come from, and which one a book takes, is
+under "The families" below. Every other font gets the Indic vowel signs reordered, without conjuncts, and Arabic
+letters drawn unjoined; what is not shaped yet is listed at the end.
 
 Related pages:
 - the design, its deviations and the decisions behind them:
@@ -23,10 +26,10 @@ Related pages:
 | Layer | Where | What it does |
 |---|---|---|
 | The parser | `ChapterHtmlSlimParser` (`characterData`, `consumeText`) | keeps a lone ZWJ or ZWNJ after an Indic letter; captures no drop cap from one |
-| The shaping layer | `TextShaping`, `HebrewShaper`, `IndicShaper` | which glued tokens merge; a token's runs; a token turned into pieces over a face |
-| The engine | `lib/OtShaper` (`ot::Face`, `ot::Plan`, `ot::shape`); `lib/Utf8/IndicReorder` | HarfBuzz 14.5's Indic and USE shapers with its GSUB and GPOS, as crosspoint-reader #3787 ported them; the vowel reordering for a font that cannot shape |
+| The shaping layer | `TextShaping`, `HebrewShaper`, `IndicShaper`, `lib/Utf8/ArabicScripts.h` | which glued tokens merge; a token's runs (Indic and Arabic); a token turned into pieces over a face |
+| The engine | `lib/OtShaper` (`ot::Face`, `ot::Plan`, `ot::shape`); `lib/Utf8/IndicReorder` | HarfBuzz 14.5's Indic, USE and Arabic shapers with its GSUB and GPOS, as crosspoint-reader #3787 ported the first two; the vowel reordering for a font that cannot shape |
 | The face and its plans | `ShapingFace` (`lib/EpdFont`), `TtfFont::shapingFace`, `GfxRenderer::shapingFace` | one `ot::Face` per style over the tables where the glyph store maps them; the plans built on it |
-| Layout | `ParsedText`, `ShapedStore`, `WordShapeCache` | shapes each token once a paragraph, breaks the lines on the shaped widths, cuts tokens into pieces |
+| Layout | `ParsedText`, `ShapedStore`, `WordShapeCache`, `BidiLine` | shapes each token once a paragraph, breaks the lines on the shaped widths, cuts tokens into pieces; in a bidi paragraph the line pass places the pieces |
 | Storage and draw | `TextBlock` (bit 2 of the bidi region), `lib/GfxRenderer/GlyphRun.h`, `GfxRenderer::drawGlyphRun` | the glyph form a shaped word is stored and drawn as |
 | The build | `Section`, `InPlaceBuildGate`, `EpubReaderActivity` | the degraded bit and its rebuild; the end of the build's shaping memory; the X4's in-place gate |
 
@@ -54,17 +57,25 @@ word flow, to be shaped whole: a drop cap draws code points one by one, which wo
 
 `ParsedText::layoutAndExtractLines` runs these for a paragraph, or for a pass of a long one.
 
-1. **Whether the pass shapes** (`decideShaping`, after `decideBidi`): it does when the paragraph needs no bidi and a
-   token holds a byte sequence of U+0900-0DFF (`IndicShaper::holdsIndic`). The book's language does not decide it;
-   its text does. A pass that does not shape takes the path it took before shaping existed, and its lines keep their
-   bytes.
+1. **Whether the pass shapes** (`decideShaping`, after `decideBidi`): it does when a token holds a byte sequence of
+   U+0900-0DFF (`IndicShaper::holdsIndic`), in a paragraph that needs bidi or not; or when the paragraph needs bidi, a
+   token holds a byte sequence of the Arabic blocks (`arabic::holdsArabic`) and that token has a shaping face (the
+   first such token decides). The book's language does not decide it; its text does. An Arabic run starts at an AL
+   letter, which makes the paragraph need bidi, so a Latin paragraph with Arabic-Indic digits or an Arabic comma shapes
+   nowhere. An Arabic paragraph in a bitmap or built-in font makes no `ShapingState` and merges nothing: its lines are
+   those of the line pass alone. A pass that does not shape takes the path it took before shaping existed, and its
+   lines keep their bytes.
 2. **Glued groups** (deviation 7, `mergeGluedGroups`). Tokens with no space between them are one word that the
    parser split where a span started or ended. `TextShaping::mergesWithPrevious` joins two of them before anything is
    measured:
-   - in a pass that shapes, in a group that holds Indic text, when they share a style (font, style, size and
+   - in a pass that shapes, in a group that holds Indic text or Arabic text of a paragraph that needs bidi
+     (`shapedText`), when they share a style (font, style, size and
      emphasis mark: a converter's span split), or when the glue falls inside a syllable
      (`indic::syllableBreakAllowed` false across it, as in `क<b>ि</b>`). The merged token is drawn in its first
      part's style, and the inner style is lost;
+   - in a pass that shapes, a token of marks only glued after a token that ends with an Arabic letter
+     (`arabic::endsWithLetter`: the last code point that is no mark is a run letter, not AL punctuation), whatever the
+     styles: the mark is placed on its base and takes its style;
    - in any paragraph, a token of transparent marks only glued after the Hebrew divine name
      (`HebrewShaper::endsWithName`), so the name draws as he and geresh.
 
@@ -84,7 +95,9 @@ word flow, to be shaped whole: a drop cap draws code points one by one, which wo
      style a pass), the drawn ppem (the face's 26.6 ppem times `fontBaseScale` times `wordScale`: records are in
      drawn pixels), the book's language systems (`TypographyProfile::shapingLanguage`, `ot::languageTagsFor` of the
      book's `dc:language`) and the glued neighbours kept apart as context; then `IndicShaper::shapeToken` in an
-     `IndicShaper::CallMemory`.
+     `IndicShaper::CallMemory`. A paragraph that needs bidi shapes all its tokens first, before the line pass borrows
+     its workspace (`storedWidth` then reads the widths the store kept), so a shaping call's block and the workspace are
+     never in the lent arena at once.
 5. **Warm and measure.** Each Glyphs piece's glyph IDs are looked up once (`GfxRenderer::prefetchGlyphRun`), inside the
    build's TrueType miss scope, so a page drawn later needs no miss memory for them. Each piece's width is then set
    (`measurePiece`): a Glyphs piece by its records' pen (`glyphRunWidth`), any other as its code points are measured.
@@ -102,6 +115,9 @@ word flow, to be shaped whole: a drop cap draws code points one by one, which wo
    line as its glyph form, a Reordered piece as its display form (without its soft hyphens), a Text piece as plain
    text; a Text piece of soft hyphens alone is left out. Annotations then name pieces. A token that is one run, the
    usual Indic word, stays one word. A line with no pieces keeps its bytes.
+   - **A paragraph that needs bidi** takes its pieces through the line pass instead (see "Shaped text in a bidi
+     paragraph" below): the pass cuts a shaped token at its pieces' edges, so each piece draws one segment's characters
+     and is placed by the bidi order.
 
 ## The shaping layer
 
@@ -110,14 +126,17 @@ word flow, to be shaped whole: a drop cap draws code points one by one, which wo
 - **`TextShaping`**: `mergesWithPrevious`; `decodeAt`, a UTF-8 decode bounded by its view; `shape`, step 1's
   per-token units (the Hebrew module); and the build's heap block for shaping calls (`buildHeapBlock`,
   `returnBuildHeapBlock`, `releaseBuildMemory`).
-- **`IndicShaper::scanRuns`** (upstream's `scanRun`): a token's runs, each one script's letters with the shared code
-  points around them (dandas, Vedic signs, joiners, the dotted circle).
+- **`IndicShaper::scanRuns`** (upstream's `scanRun` for Indic text): a token's runs, each one Indic script's letters
+  with the shared code points around them (dandas, Vedic signs, joiners, the dotted circle), or an Arabic run (see
+  "The run scan" below).
 - **`IndicShaper::shapeToken`** writes a token's pieces into a `PieceSink` (the paragraph's `ShapedStore`) and answers
   an `Outcome`:
-  - with no face, one Reordered piece over the whole token when `IndicReorder` changes it;
+  - with no face, a Reordered piece where `IndicReorder` changes the text between the Arabic runs (over the whole token
+    when it holds no Arabic run); an Arabic run is left as Text, unjoined;
   - with a face, per run: shared code points alone are Text; a script whose probe letter the face's cmap does not map
-    (`ScriptInfo::probe`, upstream's coverage test) is Reordered when `IndicReorder` changes it, else Text; any other
-    run is Glyphs. Text between runs is Text;
+    (`ScriptInfo::probe`, upstream's coverage test) is Reordered when `IndicReorder` changes it, else Text; an Arabic
+    run in a face that does not map beh (U+0628, `arabic::kProbe`) is Text, never reordered; any other run is Glyphs.
+    Text between runs is Text;
   - `Plain` when nothing needs a form, `Formed` when the pieces are written, `Degraded` when a run could not be shaped.
 - **A Glyphs run** (`shapeGlyphs`, `shapeRun`): its code points with the glued neighbours' syllables as context
   (`lastSyllable`, `firstSyllable`, at most `kContextCodepoints` each), shaped whole. A run past the buffer's storage
@@ -137,23 +156,32 @@ and the layout memo (deviation 2).
 
 ## The families
 
-The Font Manager offers 20 TrueType families: Noto Sans and Noto Serif of each of the ten scripts (NotoSansDevanagari
-... NotoSerifSinhala; Oriya's are NotoSansOriya and NotoSerifOriya), each a Regular and a Bold file in
+The Font Manager offers 22 TrueType families: Noto Sans and Noto Serif of each of the ten Indic scripts
+(NotoSansDevanagari ... NotoSerifSinhala; Oriya's are NotoSansOriya and NotoSerifOriya), and NotoNaskhArabic and
+NotoSansArabic for the Arabic script (Noto's Arabic serif is Naskh; there is no NotoSerifArabic). Each is a Regular and
+a Bold file in
 `assets/sd-fonts/<Family>/` and listed in `lib/EpdFont/scripts/sd-fonts.yaml` (`format: ttf`, `inDownloadAll: false`,
-so "Download All" leaves them out). `lib/EpdFont/scripts/merge_noto_latin.py` builds each file from Noto's script font
-and Noto Sans or Noto Serif, so the Latin in an Indic book is drawn in the same face;
+so "Download All" leaves all 22 out). `lib/EpdFont/scripts/merge_noto_latin.py` builds each file from Noto's script
+font and Noto Sans or Noto Serif, so the Latin in a book is drawn in the same face (NotoNaskhArabic takes Noto Serif's,
+NotoSansArabic Noto Sans's);
 `build-sd-fonts.py` checks the merge with HarfBuzz and fails on any difference. `test/ot_shaper/oracle_shipped_fonts.py`
-shapes all 40 files through the font's `CPac` and HarfBuzz and diffs them (measurements, "PR 3b").
+shapes all 40 Indic files through the font's `CPac` and HarfBuzz and diffs them (measurements, "PR 3b");
+`oracle_arabic.py` does the same for the four Arabic files, 6,338 corpus lines at two sizes in ten languages
+(measurements, "PR 4b: the shipped Arabic families against HarfBuzz").
 
 **The reader's automatic choice.** `language_tag::indicScriptOf` (`lib/Epub/Epub/LanguageTag.h`) maps a book's language
-tag to its script, and the tag's script subtag may veto it ("sa-Latn" is not Indic). When the reader font has no
-letter of that script, `SdCardFontSystem::selectLanguageFamily` takes an installed `NotoSans<Script>` or
-`NotoSerif<Script>`: Sans first when the reader font's name contains "Sans", else Serif first, the other as the
-fallback, as for a CJK book. A reader font that has the script is kept. While the book's language is not yet known,
-and any Noto CJK or Indic family is installed, the book's font waits for it
+tag to its script, and the tag's script subtag may veto it ("sa-Latn" is not Indic). `language_tag::isArabicScript`
+does the same for the Arabic script: ar, fa, prs, ur, ps, sd, ug, ckb, ks, pnb, azb, bal, skr, glk, mzn, lrc, bqi and
+ota, and any language whose first script subtag is Arab ("ku-Arab"); bare "ku" is Latin in most books, and a Deva or
+Latn subtag vetoes. When the reader font has no letter of that script (for Arabic: no beh, `arabic::kProbe`),
+`SdCardFontSystem::selectLanguageFamily` takes an installed `NotoSans<Script>` or `NotoSerif<Script>`; for an Arabic
+book, `NotoSansArabic` or `NotoNaskhArabic`. Sans first when the reader font's name contains "Sans", else Serif (Naskh)
+first, the other as the fallback, as for a CJK book. A reader font that has the script is kept. While the book's language is not yet known,
+and any Noto CJK, Indic or Arabic family is installed, the book's font waits for it
 (`SdCardFontSystem::waitsForReaderLanguage`), so a book opened from a cold cache goes straight to the family rather than
 installing the reader font first. With no family of the script installed the reader font stays, and the script draws as
-replacement glyphs.
+replacement glyphs. The same predicate sets an Arabic-script book right to left (`TypographyProfile`) and makes it a
+shaped-script book for the X4's in-place gate.
 
 ## The face and its plans
 
@@ -265,7 +293,7 @@ in place in a TrueType set (`InPlaceBuildGate::admitsResident`, `Request::shaped
 `TypographyProfile::shapedScript`, logged as `shapedTtf=1`). The gate reads the book's language, not its text: the
 primary subtags of `isIndicLanguage` (`TypographyProfile.cpp`), Hindi, Marathi, Nepali, Sanskrit, Konkani, Maithili,
 Bhojpuri, Awadhi, Magahi and Rajasthani, Bengali, Assamese, Punjabi, Gujarati, Odia, Tamil, Telugu, Kannada,
-Malayalam and Sinhala. Such a book in a bitmap or built-in font does build in place, and its calls only reorder: the
+Malayalam and Sinhala, and every language of `language_tag::isArabicScript`. Such a book in a bitmap or built-in font does build in place, and its calls only reorder: the
 heap block they take is the longest token's form, in 512 B steps.
 
 ## What fails how
@@ -311,11 +339,13 @@ font is not rebuilt at every open.
 | Limit | Value | Past it |
 |---|---|---|
 | `IndicShaper::kMaxRunCodepoints` | 32 code points a call (the buffer's `ot::maxRunLength`) | the run is shaped in pieces between syllables |
-| `IndicShaper::kContextCodepoints` | 8 code points of a glued neighbour's syllable | the nearest 8, marked partial |
+| `IndicShaper::kContextCodepoints` | 8 code points of a glued Indic neighbour's syllable | the nearest 8, marked partial |
+| `IndicShaper::kArabicContextCodepoints` | 16 code points of a glued Arabic neighbour, whole clusters nearest the token, up to the neighbour's run edge | the clusters that fit; one that does not, and all farther, are left out |
+| An Arabic token split by a style span, with its context | the buffer's 32 code points: context, run and context together | the piecewise loop reaches only 2 clusters: a ligature across the cut can be lost or doubled (see "Not shaped yet") |
 | A merged token (`kMaxMergedBytes`, `kMaxSyllableMergeBytes`, `Boundary::merged`) | 512 B; 1,024 B for glue inside a syllable; 255 parts | the tokens stay apart, shaped with each other as context |
 | A token in a call | 65,535 B | degraded |
 | `ShapedStore::kChunkBytes`, `kMaxChunks` | 1 KB chunks, 32 held | the piece is refused (logged once at ERR): degraded |
-| A glyph record | glyph ID 65,535; advance -1,024 to 1,023.9375 px; offsets -128 to 127 px | degraded |
+| A glyph record | glyph ID 65,535; advance -1,024 to 1,023.9375 px; offsets -128 to 127 px (`i8`, whole pixels) | degraded |
 | `ShapingFace::kMaxPlans` | 2 plans a face | the plan asked for least recently is freed and built again when asked |
 | `ShapingState::kFaceAnswers` | 8 fonts and styles a pass | the renderer is asked at each use |
 | A `WordShapeCache` entry | 126 B; a token of 255 B | not cached: shaped each time |
@@ -323,10 +353,10 @@ font is not rebuilt at every open.
 
 ## The engine's Arabic shaper
 
-`lib/OtShaper` shapes Arabic, Persian and Urdu (HarfBuzz 14.5's Arabic shaper, deviation 11 of the design). **Layout does
-not use it yet**: the section build still shapes only the Indic scripts, and an Arabic paragraph draws as before. PR 4b
-connects it (the line pass's run-cut pieces and the Font Manager's Arabic families); until then it is reachable from
-the host tests, the oracle and the dev command `CMD:TTF:SHAPE` ([serial-test-api.md](serial-test-api.md)).
+`lib/OtShaper` shapes Arabic, Persian and Urdu (HarfBuzz 14.5's Arabic shaper, deviation 11 of the design), and since
+PR 4b the section build uses it: an Arabic-script word in a TrueType family that maps beh is shaped like an Indic one
+(the steps above), and the Font Manager's two Arabic families are what such a book is drawn in. The engine is also
+reachable from the host tests, the oracle and the dev command `CMD:TTF:SHAPE` ([serial-test-api.md](serial-test-api.md)).
 
 What it does, with the font's own lookups:
 
@@ -349,20 +379,86 @@ without the features, the mark placement and legacy `kern` that HarfBuzz's `fall
 GPOS, and Syriac. The pauses of the unported features stay, so the stages are HarfBuzz's. Mongolian, N'Ko and Phags-pa are shaped by USE in
 HarfBuzz 14.5, not by this shaper.
 
+## The run scan
+
+`IndicShaper::scanRuns` finds an Arabic run with `lib/Utf8/ArabicScripts.h`.
+- **Members** (`arabic::isRunMember`): the code points of U+0600-06FF, 0750-077F and 0870-08FF whose bidi class is AL or
+  NSM, less U+061C (ALM, a bidi control). A run starts at a member that is no mark and ends at the first code point that
+  is no member; a ZWJ or ZWNJ after a member stays inside the run (and an Indic code point, shared ones included, ends
+  an Arabic run, as an Arabic letter ends an Indic one).
+- **AL punctuation and symbols are members** (the Arabic semicolon, question mark and full stop, the percent-like signs:
+  U+0608, 060B, 060D, 061B, 061D-061F, 066D, 06D4, 06FD, 06FE, 0888): they are strong right to left, so a run cannot
+  straddle a level, and joining gives them no joining. A joiner follows only a letter or a mark (`takesJoiner`).
+- **Not members**: the digits (AN, EN), the number signs (U+0600-0605, U+06DD, U+08E2), the Arabic comma, the neutral
+  symbols and the presentation forms (U+FB50-FDFF, FE70-FEFF), which bidi orders or which are formed already. They are
+  drawn as plain text in the book's font. Brackets and every other mirrored code point are outside by construction.
+- **Cheap tests**: `arabic::holdsArabic` is a byte pre-test over the UTF-8 (digit-only text passes it and its scan
+  finds no run); `holdsShaped` is Indic or Arabic. `maxRuns` is `bytes / 2 + 1`, since an Arabic run takes 2 bytes.
+- **Context**: an Arabic run is shaped with its glued neighbours' whole clusters nearest the token (a letter with the
+  marks and joiners after it), as many as fit in `kArabicContextCodepoints` (16), up to the neighbour's run edge, and its
+  own joiners just before it. A glued neighbour kept apart is the case: a word cut by a `<span>` shapes on each side as
+  its neighbour's letters say, and a ligature across the cut (the Allah ligature, lam-alef) is drawn once, in the first
+  token's style; the second token's run is then a Glyphs piece with no record, which the line leaves off.
+- **A forced split of an Arabic word** falls only between base clusters (`appendFallbackIndexes`): never before a mark,
+  never before a joiner that follows an Arabic letter or mark, never after a ZWJ. The letters at the cut take final and
+  initial forms.
+
+## Shaped text in a bidi paragraph
+
+Arabic paragraphs, and Indic words inside a right-to-left paragraph, go through the line pass (`BidiLine`), which orders
+a line's tokens by the bidi levels. PR 4b teaches it to carry shaped pieces.
+- **Widths first.** The paragraph shapes all its tokens, then the line pass borrows its workspace and breaks on the
+  stored widths (step 4 above). The breaker kerns a gap by the tokens' logical edges (a Glyphs piece takes no kerning
+  at a glued gap), while placement uses the visual neighbours.
+- **Cuts.** `ParsedText::cutShapedTokens` gives each token of several pieces its cut points (`BidiLine::Token::cuts`,
+  the bytes where each piece after the first begins) in `bidiState_->tokenCuts`. `BidiLine::layoutLine` cuts the token
+  there, so a piece draws one segment's characters. A cut list that breaks its contract (`cutsAreValid`: strictly
+  ascending, inside the text, on code point boundaries) is ignored, and so is one the heap has no room for (logged,
+  latched): the token's pieces are then drawn as the line pass's code points.
+- **What a piece is drawn as** (`formBidiPieces`): its store piece when that piece is Glyphs or Reordered, at the
+  store's width; otherwise the line pass's display form. A segment that lands in several pieces on the line (at two
+  levels, around an isolate, or a mark across a cut drawn inside its base's segment: `Piece::segmentPieces` above 1) is
+  drawn as code points, because its glyph run would be drawn on each. An empty run is left off only where the ligature
+  that took its letter is drawn from glyphs (on this line, or an earlier one after a fallback break); where that
+  neighbour is drawn as code points, the letter is drawn as its own.
+- **Past the line pass's limits** (`BidiLine::kMaxCodepoints`, or no workspace) the pass runs its fallback, which gives
+  one piece per segment; the line is laid out without the pass when the workspace is missing, its tokens' bidi controls
+  dropped (`withoutControls`).
+- **A glyph form on a bidi line** is stored in the same region as a display form (bit 2); the section file version is
+  115 for it.
+- **The dictionary** reads a right-to-left line's words in reading order: a word's glued pieces are joined by their
+  logical positions, a hyphen-joined word's head before its tail.
+
 ## What is not shaped yet
 
-- **Paragraphs that need bidi** (a right-to-left level, or a word with a right-to-left letter or control): their
-  Indic words are drawn as their code points, not even reordered. Shaping in them needs the line pass's run-cut
-  pieces, which PR 4b brings together with the layout's use of the Arabic shaper.
+- **Presentation forms and ayah signs**: the code points of U+FB50-FDFF and FE70-FEFF are no run members (they are formed
+  already) and draw as plain text; the end-of-ayah sign (U+06DD) and the other number signs are no run members, so they are drawn as the
+  font's glyph for them, not enclosing the digits that follow; a Quran or tajweed book will show it.
+- **Fonts without GPOS**: the engine runs the font's own lookups only. The fallback mark placement and legacy `kern`
+  HarfBuzz gives a font without GPOS is not ported, so such a font draws its marks where its advances put them.
+- **A long split word can still lose or double a ligature.** The buffer takes 32 code points of context, run and
+  context together, so a word past 32 code points split by a style span goes through the piecewise loop, which reaches
+  only 2 clusters. Across the cut, a font with long ligatures can then lose or double one. The shipped Naskh and Sans
+  Arabic fonts have one consuming ligature, Allah (U+FDF2), and no word holding it nears 32 code points.
+- **A consumed letter is missing from the dictionary lookup text across a style glue** (a letter its glued neighbour's
+  ligature took), on the device only.
+- **A no-face Reordered Indic segment split by levels draws unreordered** (the guard, not latched).
+- **A text block of more than 96 tokens whose lines hold more than 96 tokens** (landscape, a span on every word of a
+  400-token paragraph) holds about 16 KB more heap shaped than unshaped, all ShapedStore chunks on the heap, while the
+  lent arena peaks at 34 KB of 52 KB. The test book's landscape chapter 2 then degrades on the X3, gracefully (the
+  chapter is cached with the status bit set, the heap's low point 2,936 B); real prose passes in both orientations.
+  Keeping the store's chunks in the lent arena's free room would remove it.
 - **Titles, chapter names and the TOC**, on Home, in the Library, in the status bar and the chapter list: the UI
   faces are bitmap and cannot shape, so these draw unshaped in the face that draws them today. They wait for step 5's
   visual strings.
-- **Bitmap fonts** (`.cpfont`, built-in) and a TrueType family that does not map the script: reordered only. The
-  vowel signs are placed; conjuncts are not formed, and the virama stays visible.
+- **Bitmap fonts** (`.cpfont`, built-in) and a TrueType family that does not map the script: Indic text is reordered
+  only (the vowel signs are placed; conjuncts are not formed, and the virama stays visible), and Arabic letters are
+  drawn unjoined, each in its isolated form, as before shaping.
 - **Vertical sections**: no build sets a shaped run down a column (a load refuses one), so their Indic words are
   reordered, as in a bitmap font.
 - **A book whose script has no installed family**: it opens in the reader's font and the script's letters draw
-  as that font's replacement glyph (a box, for a font without them) until a family of the script is installed.
+  as that font's replacement glyph (a box, for a font without them) until a family of the script is installed. Arabic
+  text inside a book of another language does not pick a family; it is shaped when the font in use maps beh.
 
 ## Time
 
@@ -374,6 +470,13 @@ in 4.9 s against 2.5 s (1.95x) (the
 A word the cache misses still costs about 2.5 ms, most of it the conjunct ligature walks; speeding the engine up is
 left to a later change.
 
+Arabic misses the design's 2x line. On the X3, Jurji Zaydan's England chapter (2,529 words) builds in a median 7,880 ms
+against 5,586 ms on master, which drew it unshaped, and its Latin twin in 2,489 ms: 3.17x the twin, where master was
+already 2.22x. Shaping adds about 2.3 s, or 0.9 ms a word, and the word cache hits 707 of 2,527 lookups (28%).
+Master's bidi-only Arabic build is already past 2x, so shaping alone cannot reach it; as for Hindi, the engine's speed
+is left to a later change ([measurements](superpowers/specs/2026-11-02-writing-modes-step2-measurements.md), "PR 4b:
+Arabic on the page").
+
 ## Tests
 
 - `test/text_shaping`: `IndicShaper` (runs, pieces, context, the piecewise loop, refusals), `TextShapingMerge`,
@@ -383,6 +486,9 @@ left to a later change.
   `ShapedLine` (pieces on the line).
 - `test/text_block_range/TextBlockGlyphTest.cpp` (`TextBlockGlyphForms`), `test/ttf_font/TtfShapingTest.cpp`
   (`ShapingFacePlans` among them), `test/ot_shaper` (the plan's memos against the walk).
+- `test/arabic_text` (`ArabicScripts.h`), `test/bidi_line` (cut tokens in the line pass), `test/epub_pipeline`
+  `BidiRules` (the Arabic, Persian and Urdu books and `test_shaped_bidi_indic`, at 460 and 1,600 px, with their glyph
+  and width rules) and `LongBlockSplit`; `test/ttf_font` `ShippedFamilies` (the Arabic families through their `CPac`).
 - `test/epub_pipeline`: `Joiners`, `IndicRules`, `ShapingStatus`, and `ShapingRules` over four books
   (`test/epubs/test_shaped_{devanagari,bengali,tamil,malayalam}.epub`, from `make_test_shaped_indic.py`), with five
   goldens: one per book and `test_shaped_devanagari_unshaped`. The books' fonts are subsets of Noto Sans
