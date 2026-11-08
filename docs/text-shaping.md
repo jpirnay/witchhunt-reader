@@ -172,8 +172,8 @@ shapes all 40 Indic files through the font's `CPac` and HarfBuzz and diffs them 
 **The reader's automatic choice.** `language_tag::indicScriptOf` (`lib/Epub/Epub/LanguageTag.h`) maps a book's language
 tag to its script, and the tag's script subtag may veto it ("sa-Latn" is not Indic). `language_tag::isArabicScript`
 does the same for the Arabic script: ar, fa, prs, ur, ps, sd, ug, ckb, ks, pnb, azb, bal, skr, glk, mzn, lrc, bqi and
-ota, and any language whose first script subtag is Arab ("ku-Arab"); bare "ku" is Latin in most books, and a Deva or
-Latn subtag vetoes. When the reader font has no letter of that script (for Arabic: no beh, `arabic::kProbe`),
+ota, and any language whose first script subtag is Arab ("ku-Arab"); bare "ku" is Latin in most books, and any other
+first script subtag vetoes ("ur-Deva", "sd-Latn"). When the reader font has no letter of that script (for Arabic: no beh, `arabic::kProbe`),
 `SdCardFontSystem::selectLanguageFamily` takes an installed `NotoSans<Script>` or `NotoSerif<Script>`; for an Arabic
 book, `NotoSansArabic` or `NotoNaskhArabic`. Sans first when the reader font's name contains "Sans", else Serif (Naskh)
 first, the other as the fallback, as for a CJK book. A reader font that has the script is kept. While the book's language is not yet known,
@@ -440,6 +440,13 @@ a line's tokens by the bidi levels. PR 4b teaches it to carry shaped pieces.
   context together, so a word past 32 code points split by a style span goes through the piecewise loop, which reaches
   only 2 clusters. Across the cut, a font with long ligatures can then lose or double one. The shipped Naskh and Sans
   Arabic fonts have one consuming ligature, Allah (U+FDF2), and no word holding it nears 32 code points.
+- **A soft hyphen inside an Arabic word cuts its joining.** U+00AD is no run member, so a run ends at it: the letter
+  before it takes its final form and the letter after it its initial form (HarfBuzz joins across it, as joining type T).
+  No letter is lost; the soft hyphen is a Text piece and is not drawn. Arabic text is not hyphenated, so only a book
+  that carries its own soft hyphens shows it.
+- **A bidi paragraph whose only Arabic code points are digits or punctuation** (a Hebrew paragraph with Arabic-Indic
+  digits, U+0660-0669, in a TrueType font) turns shaping on: each such token takes a shaping call that keeps it plain. The output is the
+  same; the cost is the call.
 - **A consumed letter is missing from the dictionary lookup text across a style glue** (a letter its glued neighbour's
   ligature took), on the device only.
 - **A no-face Reordered Indic segment split by levels draws unreordered** (the guard, not latched).
