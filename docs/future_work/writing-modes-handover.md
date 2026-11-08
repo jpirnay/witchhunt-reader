@@ -334,7 +334,12 @@ break (Hangul is kept whole), or where the next page word is glued to it. On the
 
 - **UI titles and the TOC:** reordered since `feat/rtl-ui-titles` (item 4), but not shaped: the UI faces are bitmap,
   so Arabic and Indic titles draw unjoined, and a list row draws no Hebrew or Arabic at all where the UI face lacks
-  it (the status bar falls back to the reader's face, the list rows do not).
+  it. The status bar shows them because the UI faces fall back to the reader's TrueType face (`CjkUiFonts.cpp`,
+  `readerFaceAt`), which only answers under the render lock and once a reader font has been opened: inside the
+  reader, not in the file browser (X3, 2026-11-09, the Details view of `/test` with NotoSansHebrew as the reader font:
+  the Hebrew and Arabic titles drew blank). The next step is a design note, not code: open the reader font for the
+  library screens too, or give the built-in UI faces the Hebrew letters (27 letters and the points, a few KB of
+  flash at each UI size), or both; Arabic and Indic titles would still need shaping, which bitmap faces cannot do.
 - **TXT and Markdown books:** they get no bidi.
 
 ### 9. Flash
