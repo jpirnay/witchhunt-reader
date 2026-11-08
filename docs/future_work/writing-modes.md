@@ -26,7 +26,8 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 | 4 | Vertical typography: widows and orphans off and lone images centred (PR 1); 、。 and small kana placed from glyph ink, A3a along the column, Traditional Chinese marks (PR 2); tate-chu-yoko (PR 3); the dictionary on vertical pages (PR 4) | shipped (#594, #595, #597, #598) ([design](../superpowers/specs/2026-10-30-writing-modes-step4-design.md), [PR 1 plan](../superpowers/plans/2026-10-30-writing-modes-step4-pr1.md), [PR 2 plan](../superpowers/plans/2026-10-31-writing-modes-step4-pr2.md), [PR 3 plan](../superpowers/plans/2026-11-01-writing-modes-step4-pr3.md), [PR 4 plan](../superpowers/plans/2026-11-02-writing-modes-step4-pr4.md)) |
 | 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
 
-**Next step.** Step 4 is done (#594, #595, #597 and #598 merged). Step 1's PR 1 (the bidi library) and PR 2 (layout
+**Next step.** The open items, in a working order and with how to measure them, are in
+[writing-modes-handover.md](writing-modes-handover.md). Step 4 is done (#594, #595, #597 and #598 merged). Step 1's PR 1 (the bidi library) and PR 2 (layout
 and drawing, #613) are merged; its PR 3 (reading a Hebrew book) comes next. Step 2's engine (#603) and TrueType faces
 (#624) are merged, and PR 3 (#642) shapes Indic books on the page ([reference](../text-shaping.md)). Then PR 3b (#645)
 adds the Font Manager's 20 Indic families (a book takes an installed one of its script by itself), and PR 4a (#651) the Arabic shaper in the engine (matching HarfBuzz). PR 4b (#656) lays Arabic out, which also brings

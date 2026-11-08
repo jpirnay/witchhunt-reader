@@ -26,6 +26,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | [test-suite.md](test-suite.md) | Host test suite: firmware paths with no host test, tests blind to corruption, goldens to extend, renames and moves, small cleanups from the second audit |
 | [txt-pipeline.md](txt-pipeline.md) | TXT on the EPUB pipeline and the browser converter to UTF-8: decided, not started; design, traps, order of work |
 | [writing-modes.md](writing-modes.md) | Right-to-left (Hebrew, Arabic) and vertical (Chinese, Japanese, Korean) text: the roadmap, findings from real books, what step 4 inherits from vertical text; complex shaping for Arabic and the Indic scripts (Hindi), planned after CJK |
+| [writing-modes-handover.md](writing-modes-handover.md) | The writing-modes and scripts work as of 2026-11-08: what is merged, what is left in a working order (the shaped-text heap follow-up, the right-to-left baseline profile, the engine speed, Hebrew reading, smaller Arabic and Indic gaps, CJK leftovers), the measurements behind it, how device runs are done, and the traps |
 
 Design records for shipped features, cited from code, are in [../design/](../design/); reference
 documentation is in [../contributing/](../contributing/) and the other files under `docs/`.
