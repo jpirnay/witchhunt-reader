@@ -22,17 +22,24 @@
 //
 // Pieces are listed in the order they were written, which is the order their bytes lie in the chunks; an entry names
 // its run of that list. The bytes of an erased or replaced entry stay as dead space until dropFront() or reset().
+//
+// The index is the store's larger half: an entry is 16 B and a piece 14 B, against about 10 B of records a token of
+// Arabic prose, and both are reserved to the pass's count (reserve()), not doubled past it. A text block whose lines
+// hold more than 96 tokens (landscape, a span on every word) holds about 200 tokens, 6 KB of index; with 32 B entries
+// doubled to 256 it held 12 KB, three times its 4 KB of chunks (host inventory, test_shaped_arabic at 770 px,
+// 2026-11-08).
 class ShapedStore final : public IndicShaper::PieceSink {
  public:
   struct Piece {
     uint16_t begin = 0, end = 0;  // bytes of the token's text
-    IndicShaper::PieceKind kind = IndicShaper::PieceKind::Text;
-    uint16_t width = 0;  // px, set by setWidth()
-    uint16_t count = 0;  // glyph records (Glyphs)
-    uint16_t bytes = 0;  // its form's bytes
-    uint8_t chunk = 0;
+    uint16_t width = 0;           // px, set by setWidth()
+    uint16_t count = 0;           // glyph records (Glyphs)
+    uint16_t bytes = 0;           // its form's bytes
     uint16_t at = 0;
+    IndicShaper::PieceKind kind = IndicShaper::PieceKind::Text;
+    uint8_t chunk = 0;
   };
+  static_assert(sizeof(Piece) == 14, "a piece is 14 B: six halfwords, a kind and a chunk");
   static constexpr size_t kChunkBytes = 1024;
   // Past them a piece is refused (logged once at ERR) and the token is laid out as code points. Records take about 2 B
   // a byte of Indic text and about 3 B a byte of Arabic (readyShapedStore's estimates; an Arabic letter or mark is 2
@@ -42,8 +49,8 @@ class ShapedStore final : public IndicShaper::PieceSink {
   static constexpr size_t kMaxChunks = 32;
   // Opens token `token`'s entry for (text, key); shapeToken then writes through the sink; commit() keeps the pieces
   // (an entry with none for a Plain token), abandon() drops them. `token` may be one past the last: a scratch entry,
-  // for a candidate the breaker measures, which abandon() always ends. False when another entry is open or `token`
-  // is further out.
+  // for a candidate the breaker measures, which abandon() always ends. False when another entry is open, `token`
+  // is further out, or the text is longer than a piece's bounds (64 KB) hold.
   bool open(size_t token, std::string_view text, uint32_t key);
   void commit();
   void abandon();
@@ -66,27 +73,35 @@ class ShapedStore final : public IndicShaper::PieceSink {
   bool insert(size_t token);
   void erase(size_t token);
   void dropFront(size_t count);  // the consumed tokens' bytes are reclaimed; the kept tokens keep their pieces
-  // Room for `tokens` more entries and for `bytes` more of forms (whole chunks, at most kMaxChunks held).
+  // Room for `tokens` more entries and as many more pieces, exactly (a pass knows its count; the index is not doubled
+  // past it), and for `bytes` more of forms (whole chunks, at most kMaxChunks held).
   bool reserve(size_t tokens, size_t bytes);
   void reset();               // empty, chunks kept
   void release();             // everything freed
   size_t chunkBytes() const;  // held, for tests
+  size_t indexBytes() const;  // the entries' and pieces' capacity in bytes, for tests
 
   // PieceSink: the open entry's pieces. False when it has no room (a chunk refused, kMaxChunks held, a form past
-  // 64 KB, a record outside its fields); the caller abandons the entry.
+  // 64 KB, 65,535 pieces listed, a record outside its fields); the caller abandons the entry.
   bool beginPiece(IndicShaper::PieceKind kind, uint16_t begin, uint16_t end) override;
   bool addGlyph(const GlyphRecord& record) override;
   bool addBytes(const char* bytes, size_t length) override;
 
  private:
+  // An entry is valid for one text and key: the text's 64-bit FNV hash folded to 32 bits and its length tell a token
+  // rewritten under the entry (a merge, a split) from the text it was made for. The word cache keeps the whole hash,
+  // because its entries stand for any word of the build; an entry here stands for one token's slot.
   struct Entry {
-    uint64_t hash = 0;
+    uint32_t hash = 0;
     uint32_t key = 0;
-    uint32_t length = 0;  // the text's bytes
-    uint32_t begin = 0;   // its run of pieces_
-    uint32_t count = 0;
+    uint16_t length = 0;  // the text's bytes
+    uint16_t begin = 0;   // its run of pieces_
+    uint16_t count = 0;
     bool valid = false;
   };
+  static_assert(sizeof(Entry) == 16, "an entry is 16 B: two words, three halfwords and a flag");
+  static constexpr size_t kMaxPieces = UINT16_MAX;  // an entry's run is counted in halfwords
+  static uint32_t hashOf(std::string_view text);
   struct Chunk {
     std::unique_ptr<uint8_t[]> data;
     uint16_t size = 0;
@@ -102,7 +117,7 @@ class ShapedStore final : public IndicShaper::PieceSink {
   void recomputeCursor();
   bool oversize(size_t chunk) const { return chunks_[chunk].size > kChunkBytes; }
   template <typename T>
-  static bool grow(std::vector<T>& v, size_t extra);
+  static bool grow(std::vector<T>& v, size_t extra, bool exact);
   static bool heapAllows(size_t bytes);
 
   std::vector<Piece> pieces_;
@@ -115,9 +130,9 @@ class ShapedStore final : public IndicShaper::PieceSink {
   bool placed_ = false;  // the open piece has a place in a chunk
   size_t pendToken_ = 0;
   size_t pendStart_ = 0;  // where the open entry's pieces begin in pieces_
-  uint64_t pendHash_ = 0;
+  uint32_t pendHash_ = 0;
   uint32_t pendKey_ = 0;
-  uint32_t pendLength_ = 0;
+  uint16_t pendLength_ = 0;
   size_t savedCur_ = 0;
   uint16_t savedUsed_ = 0;
   bool refusalLogged_ = false;

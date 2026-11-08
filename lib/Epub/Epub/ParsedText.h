@@ -178,7 +178,12 @@ class ParsedText {
     // are views into `words`, the forms into line.display: TextBlock copies both into its arena, so a line builds no
     // string. All keep their capacity across lines.
     BidiLine::Line line;
+    // The line's tokens live in the arena workspace for the pass (layOutBidiLine); this vector holds them only when
+    // the arena lends none. What the materialisation needs of them afterwards is kept apart: their count, and each
+    // one's cut count (tokenCutCount, 2 B a token, the line's tokens from the first; cutShapedTokens fills it).
     std::vector<BidiLine::Token> tokens;
+    size_t lineTokens = 0;
+    std::vector<uint16_t> tokenCutCount;
     std::vector<std::string_view> pieceWords;
     std::vector<std::string_view> pieceForms;
     std::vector<EpdFontFamily::Style> pieceStyles;
@@ -208,9 +213,10 @@ class ParsedText {
   // when it could not run: the line is then laid out without bidi.
   bool layOutBidiLine(const GfxRenderer& renderer, int fontId, size_t first, size_t count);
   // Gives each of the line's tokens with more than one shaped piece its cut points (BidiLine::Token::cuts): where each
-  // piece after the first begins, in bidiState_->tokenCuts. A token whose cuts the heap has no room for, or that break
-  // their contract, gets none (logged, latched): its pieces are then drawn as the line pass's code points.
-  void cutShapedTokens(const GfxRenderer& renderer, int fontId, size_t first, size_t count);
+  // piece after the first begins, in bidiState_->tokenCuts, and records each token's cut count (tokenCutCount) for
+  // the materialisation, which runs after the tokens are gone. A token whose cuts the heap has no room for, or that
+  // break their contract, gets none (logged, latched): its pieces are then drawn as the line pass's code points.
+  void cutShapedTokens(const GfxRenderer& renderer, int fontId, size_t first, size_t count, BidiLine::Token* tokens);
   // What each of the line's pieces is drawn as, in bidiState_'s pieceForms and pieceGlyphs, and its width, in
   // lineXPosScratch_: the line pass's display form and its measure, unless the piece draws a shaped token's store piece
   // that is not Text (a glyph run, or a Reordered form, at the store's width). An empty run (a letter its glued
@@ -336,6 +342,9 @@ class ParsedText {
   // layout gate. std::vector growth cannot fail gracefully under -fno-exceptions, so the
   // check has to happen before the reserve.
   bool wordGrowthRefused_ = false;
+  // The most tokens the parser lets the block hold before its long-block split (setSplitCapacity); 0: no split.
+  // reserveWords grows the word arrays no further than it: a block of 97 tokens holds 97 entries, not 128.
+  size_t splitCapacity_ = 0;
   size_t bionicTransformedUpTo_ = 0;  ///< words[0..bionicTransformedUpTo_) have already been bionic-transformed
 
   // How many tokens before tokenIndex lead a ruby group: the index of the ruby text of the first group at or after it.
@@ -382,6 +391,9 @@ class ParsedText {
   // Room in all five per-word vectors for `additional` more tokens; false (and wordGrowthRefused_)
   // when the heap cannot hold the growth.
   bool reserveWords(size_t additional);
+  // The line pass's kept buffers back to the heap (bidiState_'s line, tokens and piece arrays, and lineXPosScratch_);
+  // the paragraph's direction and open controls stay.
+  void releaseLineBuffers();
   void pushToken(std::string token, EpdFontFamily::Style style, TokenBoundary::Boundary boundary, uint8_t sizePct,
                  uint32_t visibleOffset, uint8_t fontSlot);
 
@@ -509,6 +521,16 @@ class ParsedText {
   // minimum free heap (watermark 11.3 KB -> 6.4 KB, device run 7); dropping it at the yield
   // keeps the no-churn behaviour within a slice and the old floor across it.
   void releaseLayoutScratch();
+  // At a paragraph's end, what the paragraph grew past a prose paragraph's needs goes back to the heap: the line
+  // pass's kept buffers when a long line took them past kKeptLineBytes (a prose line leaves about 1.5 KB), and the
+  // shaped store when it holds more than kKeptStoreBytes (a prose paragraph's is 4 to 6 KB). Kept, they would sit in
+  // front of whatever follows until the slice's yield: the table row after test_shaped_arabic's span-per-word
+  // paragraph met a heap some 18 KB lower for them. Below the thresholds nothing changes, so prose regrows nothing.
+  void releaseOversizedLayoutBuffers();
+  static constexpr size_t kKeptLineBytes = 2 * 1024;
+  static constexpr size_t kKeptStoreBytes = 8 * 1024;
+  size_t keptLineBytes() const;   // the line pass's kept buffers (capacity, in bytes)
+  size_t keptStoreBytes() const;  // the shaped store's index and chunks
 
   // Adds a word from the source: a Latin word as one token, a word with CJK characters as one token per
   // break the CJK rules allow (CjkLineBreak.h). attachToPrevious: no whitespace separated it from the
@@ -575,6 +597,11 @@ class ParsedText {
   }
   BlockStyle& getBlockStyle() { return blockStyle; }
   size_t size() const { return words.size(); }
+  // The most tokens the block holds before the parser splits it (ChapterHtmlSlimParser::flushPartWordBuffer): the
+  // word arrays grow to it and no further, and past it by 16s (a ruby group may hold a split up a few tokens). 0: the
+  // arrays double as they grow, as a table cell's do.
+  void setSplitCapacity(const size_t tokens) { splitCapacity_ = tokens; }
+  size_t wordCapacity() const { return words.capacity(); }
   uint32_t lastLineVisibleOffset() const { return lastLineVisibleOffset_; }
   uint32_t lastLineTokenCount() const { return lastLineTokenCount_; }
   const LinePlace& linePlace() const { return linePlace_; }

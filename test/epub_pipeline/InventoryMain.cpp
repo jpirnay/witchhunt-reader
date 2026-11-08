@@ -1,7 +1,7 @@
 // epub_build_inventory: an exact allocation inventory of section builds.
 //
 // Usage: epub_build_inventory <book.epub> <cacheDir> <outDir> [--arena=BYTES] [--spines=A,B,..]
-//                             [--viewport=WxH] [--load-only]
+//                             [--viewport=WxH] [--shaping-font=FILE] [--load-only]
 //
 // For every selected spine it measures ONE build (createSectionFile) and writes raw records to
 // <outDir>/spine_<N>.txt, for test/epub_pipeline/inventory_report.py to symbolize. With
@@ -243,6 +243,7 @@ int main(const int argc, char** argv) {
   if (argc < 4) {
     std::fprintf(stderr,
                  "usage: %s <book.epub> <cacheDir> <outDir> [--arena=BYTES] [--spines=A,B] [--viewport=WxH] "
+                 "[--shaping-font=FILE] "
                  "[--load-only]\n",
                  argv[0]);
     return 2;
@@ -264,6 +265,10 @@ int main(const int argc, char** argv) {
         profile.viewportWidth = static_cast<uint16_t>(w);
         profile.viewportHeight = static_cast<uint16_t>(h);
       }
+    } else if (std::strncmp(argv[i], "--shaping-font=", 15) == 0) {
+      // As epub_pipeline_dump's: the face of every font and style, so a shaped book's build keeps its store and word
+      // cache as the device does (argv outlives the profile).
+      profile.shapingFontFile = argv[i] + 15;
     } else if (std::strcmp(argv[i], "--load-only") == 0) {
       loadOnly = true;
     }

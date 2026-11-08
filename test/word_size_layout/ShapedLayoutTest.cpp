@@ -1457,6 +1457,103 @@ TEST_F(ShapedLayout, APlainTokenOfABidiParagraphIsMeasuredOnce) {
   EXPECT_EQ(3, advances);
 }
 
+TEST_F(ShapedLayout, ALineWhoseTokensTheHeapRefusesIsLaidOutWithoutBidi) {
+  // The line pass's token vector grows behind the heap check (ParsedText::layOutBidiLine): refused, the line is laid
+  // out without bidi, as when the pass has no workspace. A Hebrew paragraph: it needs bidi and shapes nothing, so the
+  // refusal is the pass's alone and latches nothing.
+  ParsedText text(false, false, noIndentStyle());
+  text.setShapingLatch(&latch);
+  add(text, {{"שלום"}, {"עולם"}, {"abc"}});
+  Lines lines;
+  {
+    const LargestFreeBlock none(0);
+    lines = layOut(text, renderer, 400);
+  }
+  ASSERT_EQ(1u, lines.size());
+  const TextBlock& line = *lines[0];
+  ASSERT_EQ(3u, line.wordCount());
+  EXPECT_FALSE(line.hasLogicalOrder());
+  EXPECT_EQ(std::string("שלום"), line.wordText(0));  // logical order, as laid out without bidi
+  EXPECT_EQ(std::string("abc"), line.wordText(2));
+  EXPECT_FALSE(latch);
+  EXPECT_EQ(0u, text.tokensShaped());
+}
+
+TEST_F(ShapedLayout, ALentArenaHoldsTheLinesTokensForThePass) {
+  // With a lent arena the line's tokens come with the pass's workspace and go with it (ParsedText::layOutBidiLine):
+  // the arena's peak shows them, and the layout is the one the heap path gives. A Hebrew paragraph of two lines.
+  const std::vector<Word> words = {{"שלום"}, {"עולם"}, {"abc"}, {"שלום"}, {"עולם"}, {"def"}};
+  ParsedText onHeap(false, false, noIndentStyle());
+  add(onHeap, words);
+  const Lines heapLines = layOut(onHeap, renderer, 150);
+  ASSERT_GE(heapLines.size(), 1u);
+
+  BuildArena arena(32 * 1024);
+  ASSERT_TRUE(arena.valid());
+  ParsedText lent(false, false, noIndentStyle());
+  lent.setLineArena(&arena);
+  add(lent, words);
+  arena.markPeak();
+  const Lines arenaLines = layOut(lent, renderer, 150);
+  EXPECT_GE(arena.peakSinceMark(),
+            BidiUtils::kWorkspaceBytes + sizeof(BidiLine::Scratch) + 3 * sizeof(BidiLine::Token));
+  ASSERT_EQ(heapLines.size(), arenaLines.size());
+  for (size_t l = 0; l < heapLines.size(); l++) {
+    ASSERT_EQ(heapLines[l]->wordCount(), arenaLines[l]->wordCount());
+    EXPECT_EQ(heapLines[l]->hasLogicalOrder(), arenaLines[l]->hasLogicalOrder());
+    for (size_t w = 0; w < heapLines[l]->wordCount(); w++) {
+      EXPECT_EQ(std::string(heapLines[l]->wordText(w)), std::string(arenaLines[l]->wordText(w)));
+    }
+  }
+}
+
+TEST_F(ShapedLayout, AParagraphWithLongLinesGivesTheLinePassBuffersBackAtItsEnd) {
+  // 140 one-letter tokens on one line take the fallback and grow the line pass's buffers past kKeptLineBytes: the
+  // paragraph's end gives them back. A prose paragraph's stay below it and are kept.
+  const std::vector<Word> many(140, Word{"א"});
+  ParsedText text(false, false, noIndentStyle());
+  add(text, many);
+  const Lines lines = layOut(text, renderer, 4000);
+  ASSERT_GE(lines.size(), 1u);
+  EXPECT_GT(text.keptLineBytes(), ParsedText::kKeptLineBytes);
+  text.releaseOversizedLayoutBuffers();
+  EXPECT_EQ(text.keptLineBytes(), 0u);
+
+  ParsedText prose(false, false, noIndentStyle());
+  add(prose, {{"שלום"}, {"עולם"}, {"abc"}});
+  const Lines proseLines = layOut(prose, renderer, 400);
+  ASSERT_EQ(1u, proseLines.size());
+  const size_t kept = prose.keptLineBytes();
+  EXPECT_GT(kept, 0u);
+  EXPECT_LE(kept, ParsedText::kKeptLineBytes);
+  prose.releaseOversizedLayoutBuffers();
+  EXPECT_EQ(prose.keptLineBytes(), kept);
+}
+
+TEST_F(ShapedLayout, AParagraphWithABigStoreGivesItBackAtItsEnd) {
+  // 400 shaped tokens hold an index past kKeptStoreBytes: the paragraph's end releases the store. A short
+  // paragraph's store stays, its chunks the next paragraph's.
+  useFont(kNaskh);
+  const std::vector<Word> many(400, Word{kKitab});
+  ParsedText text(false, false, noIndentStyle());
+  add(text, many);
+  const Lines lines = layOut(text, renderer, 4000);
+  ASSERT_GE(lines.size(), 1u);
+  EXPECT_GT(text.tokensShaped(), 0u);
+  EXPECT_GT(text.keptStoreBytes(), ParsedText::kKeptStoreBytes);
+  text.releaseOversizedLayoutBuffers();
+  EXPECT_EQ(text.keptStoreBytes(), 0u);
+
+  ParsedText prose(false, false, noIndentStyle());
+  add(prose, {{kKitab}, {kKitab}, {kKitab}});
+  layOut(prose, renderer, 400);
+  const size_t kept = prose.keptStoreBytes();
+  EXPECT_GT(kept, 0u);
+  EXPECT_LE(kept, ParsedText::kKeptStoreBytes);
+  prose.releaseOversizedLayoutBuffers();
+  EXPECT_EQ(prose.keptStoreBytes(), kept);
+}
+
 TEST_F(ShapedLayout, JustificationStretchesTokensNotPieces) {
   // On a justified right-to-left line the gap between the tokens takes what the line lacks; the comma stays touching
   // its word.

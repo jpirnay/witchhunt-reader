@@ -434,6 +434,13 @@ X3, 15,232 on the X4). With the cache the book's `ot::shape` calls fall from 2,4
 (`epub_pipeline_dump --arena=52272`, both chapters), and 1,943 of the long chapter's 2,478 lookups
 hit (2,428 of the book's 2,452 shaped words fit one way; the other 24 take both).
 
+The heap side of a shaped build is the paragraph store (`ShapedStore`), and its index more than its chunks: at the
+build's heap peak of `test_shaped_arabic`'s landscape stress chapter (`epub_build_inventory --viewport=770x300
+--shaping-font=...`, 2026-11-08) the store held 12 KB of 32 B entries and 16 B pieces doubled to 256, against 4 KB
+of chunks, with the arena at 11.4 KB of 52 KB. The entry is 16 B now and the index reserved to the pass's count:
+5.4 KB. Real prose (the long Hindi chapter, portrait) holds 2 KB of index and 2 KB of chunks at its peak, and costs
+under 1 KB more heap shaped than unshaped there. The room the arena has for the rest is in §8.5, rows 17 and 18.
+
 ### 8.3 What a build allocates
 
 - **Small objects dominate the count.** Host, `test_kerning_ligature`, 2026-08-09: 89 % of 19,863
@@ -447,6 +454,16 @@ hit (2,428 of the book's 2,452 shaped words fit one way; the other 24 take both)
   67,342 (*moby-dick*), host, 2026-09-25, with byte-identical section files.
 - **What is left per line** is the `TextBlock` object and the `PageLine` (88 B and 24 B on the
   64-bit host), both on the heap.
+- **A long line's working set is the next peak** (2026-11-08, `test_shaped_arabic`'s span-per-word paragraph, 126
+  tokens a line in landscape). Doubling had taken the word arrays to 256 entries for a block the parser splits at
+  175; the bidi fallback copied every token's text into a kept vector of strings; the line's token array (16 B a
+  token) was a kept heap vector although only the pass reads it; and all of it, with the paragraph's 10 KB store,
+  stayed until the slice's yield, in front of the table that followed. Now the arrays stop at the parser's split
+  capacity, the fallback hands views and `computeVisualWordOrder` skips the marks itself, the tokens come with the
+  pass's arena workspace, and a paragraph's end releases line buffers over 2 KB and a store over 8 KB. The host
+  inventory's peak for that chapter fell from +73.2 to +62.6 KB above the build's base, with layout unchanged, and
+  on the X3 the build's heap minimum rose from 5.8 KB to about 19.8 KB (read with 8 KB of ballast held, since the
+  build no longer reaches the boot's own minimum; the writing-modes handover, item 1).
 
 ### 8.4 Where contiguity is lost
 
@@ -512,6 +529,8 @@ Each was tried or measured and disproved. Re-proposing one costs the same time a
 | 14 | Pool table line storage on the heap | §8.4a: less churn, but the reservation pushed contig below the framebuffer. |
 | 15 | Skip the font prewarm for pages drawn mid-build | The fallback costs 5,642 µs a glyph against about 1 µs prewarmed (X3, 2026-08-11): the page would draw slower than the popup it replaces. |
 | 16 | The image manifest's `ZipFile`, held open for the build, causes the mid-build cliff | 220 B, contig unchanged (X3, 2026-08-11). |
+| 17 | Reserve the shaped store a slab of the lent arena at the parse lane's start | Worked out from §8.2 (2026-11-08, not built): a slab of S bytes moves everything above it up by S. The word cache arms only with 32 KB free (`kRoomBelow` + its tail): 41,428 - S on the X3 allows S up to 8.6 KB, 37,156 - S on the X4 up to 4.3 KB. The 32 KB walk stage fits while the open page block is at most 8,116 - S (X3) and 3,844 - S (X4): gone from the X4 for any slab, from the X3 past 8 KB. The tail moves down by S, so a TrueType miss at a full page (10,844 + 5,000 + 14,700 B) empties the cache from S = 5.3 KB (X3) and 1.1 KB (X4), and it re-arms only between pages. The stress chapter's store is 10 KB; real prose's 4 KB. |
+| 18 | Keep the shaped store in the free tail, under the word cache, as the cache is | The tail holds data that may be lost; the store's records are the paragraph's layout. A CFF miss at a full page reaches 30.5 KB, above a store tail at 27.7 KB (X3) or 23.6 KB (X4), so every such miss would throw the records of the paragraph in progress away mid-pass and shape it again. Chunks above the page block, rehomed below it at each page end, would work (they grow only while a shaped paragraph is in flight), but need chunk offsets, a rehome at `releasePageBlock()` before any other allocation, the line's piece views re-derived after `beforeLine_`, and every live `ParsedText` told (the repeat header's cells), for the 4 KB of chunks unless the index moves too. |
 
 ### 8.6 Principles
 

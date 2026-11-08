@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace BidiUtils {
@@ -79,7 +80,9 @@ int plainClass(uint32_t cp);
 bool workspaceAvailable();
 
 // Returns false with empty visualOrder when no order is produced, including OOM.
-bool computeVisualWordOrder(const std::vector<std::string>& words, bool paragraphIsRtl,
+// witchhunt: the words come as `wordCount` views of their text, marks included: the transparent marks are skipped
+// here (they ride on their base, as applyBidiVisual keeps them), so a caller neither strips nor copies a word.
+bool computeVisualWordOrder(const std::string_view* words, size_t wordCount, bool paragraphIsRtl,
                             std::vector<uint16_t>& visualOrder);
 
 }  // namespace BidiUtils

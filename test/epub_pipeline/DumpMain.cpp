@@ -2,7 +2,7 @@
 // pipeline and print the canonical layout dump plus benchmark lines (same
 // "BENCHMARK <label> time=<us>us" format as EpubParserBenchmark).
 //
-// Usage: epub_pipeline_dump <book.epub> [cacheDir] [--bench] [--arena=BYTES] [--shaping-font=FILE]
+// Usage: epub_pipeline_dump <book.epub> [cacheDir] [--bench] [--arena=BYTES] [--shaping-font=FILE] [--viewport=WxH]
 // A missing cacheDir uses a fresh temp dir (cold build). Passing the same
 // cacheDir twice exercises the warm path. --bench adds per-spine timing,
 // whole-run peak heap, and the on-disk cache footprint to stderr, and per page
@@ -75,6 +75,7 @@ static PageBytes pageBytes(const Page& page) {
 int main(const int argc, char** argv) {
   bool bench = false;
   size_t lentArenaBytes = 0;
+  unsigned viewportW = 0, viewportH = 0;
   std::string epubPath, cacheDir, shapingFont;
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--bench") == 0) {
@@ -83,6 +84,9 @@ int main(const int argc, char** argv) {
       lentArenaBytes = static_cast<size_t>(std::strtoul(argv[i] + 8, nullptr, 10));
     } else if (std::strncmp(argv[i], "--shaping-font=", 15) == 0) {
       shapingFont = argv[i] + 15;
+    } else if (std::strncmp(argv[i], "--viewport=", 11) == 0) {
+      // As epub_build_inventory's: a landscape X3 is about 770 px wide on the host's metrics.
+      if (std::sscanf(argv[i] + 11, "%ux%u", &viewportW, &viewportH) != 2) viewportW = viewportH = 0;
     } else if (epubPath.empty()) {
       epubPath = argv[i];
     } else {
@@ -90,7 +94,9 @@ int main(const int argc, char** argv) {
     }
   }
   if (epubPath.empty()) {
-    std::fprintf(stderr, "usage: %s <book.epub> [cacheDir] [--bench] [--arena=BYTES] [--shaping-font=FILE]\n", argv[0]);
+    std::fprintf(stderr,
+                 "usage: %s <book.epub> [cacheDir] [--bench] [--arena=BYTES] [--shaping-font=FILE] [--viewport=WxH]\n",
+                 argv[0]);
     return 2;
   }
   if (cacheDir.empty()) {
@@ -118,6 +124,10 @@ int main(const int argc, char** argv) {
   pipeline_harness::Profile profile;
   profile.lentArenaBytes = lentArenaBytes;
   if (!shapingFont.empty()) profile.shapingFontFile = shapingFont.c_str();
+  if (viewportW != 0 && viewportH != 0) {
+    profile.viewportWidth = static_cast<uint16_t>(viewportW);
+    profile.viewportHeight = static_cast<uint16_t>(viewportH);
+  }
   pipeline_harness::ArenaStatFn arenaStat;
   if (bench && lentArenaBytes > 0) {
     arenaStat = [](const int spine, const size_t highWater, const size_t capacity) {
