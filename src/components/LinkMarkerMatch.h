@@ -104,12 +104,11 @@ inline uint32_t codepointBefore(const char* text, const size_t start, const size
   return codepointAt(text, at, end);
 }
 
-// Whether the parser may have stored one marker token as two page words split between these code points: a CJK
-// line-break opportunity (CjkLineBreak), which gives a token per character. Hangul is kept whole between spaces
+// Whether the parser may have stored one marker token as two page words split between these code points: CJK text
+// written without spaces (utf8IsUnspacedCjk), which gives a token per character. Hangul is kept whole between spaces
 // (keep-all), so a boundary touching it is no such place.
 inline bool cjkSplit(const uint32_t before, const uint32_t after) {
-  const auto cjk = [](const uint32_t cp) { return utf8IsCjkBreakable(cp) && !utf8IsHangul(cp); };
-  return cjk(before) || cjk(after);
+  return utf8IsUnspacedCjk(before) || utf8IsUnspacedCjk(after);
 }
 
 // Consume one token of `marker` with one page word.
