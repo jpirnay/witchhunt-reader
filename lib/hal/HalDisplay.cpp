@@ -553,6 +553,11 @@ void HalDisplay::displayOnePassFrame(const RefreshMode refreshMode, const bool t
   einkDisplay.displayOnePassFrame(convertRefreshMode(refreshMode), turnOffScreen);
 }
 
+bool HalDisplay::displayLabFrame(const uint8_t* bw, const uint8_t* red, const uint8_t* lut) {
+  HalSpiBus::Lock spiLock;
+  return einkDisplay.displayLabFrame(bw, red, lut);
+}
+
 bool HalDisplay::supportsAbsoluteGrayPlanes() const {
   return einkDisplay.grayscaleCapabilities(freeink::GrayscaleMode::Absolute).supported();
 }
