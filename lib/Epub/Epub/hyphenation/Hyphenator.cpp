@@ -1,5 +1,6 @@
 #include "Hyphenator.h"
 
+#include <ArabicScripts.h>
 #include <IndicScripts.h>
 #include <Utf8.h>
 
@@ -77,13 +78,17 @@ std::vector<Hyphenator::BreakInfo> buildExplicitBreakInfos(const std::vector<Cod
 
 // Fallback break indexes for a word the language patterns could not split:
 // every index leaving minPrefix/minSuffix codepoints on each side, except
-// inside an Indic syllable, whose halves would each shape on their own.
+// inside an Indic syllable, whose halves would each shape on their own, and inside an Arabic cluster (before a mark
+// or a joiner, after a ZWJ), which would start the next line with a mark.
 // Ported from crosspoint-reader PR #3787 ("feat: add Indic language support without HarfBuzz", SSafayet /
 // @SSafayet).
 void appendFallbackIndexes(const std::vector<CodepointInfo>& cps, const size_t minPrefix, const size_t minSuffix,
                            std::vector<size_t>& out) {
   for (size_t idx = minPrefix; idx + minSuffix <= cps.size(); ++idx) {
-    if (idx == 0 || indic::syllableBreakAllowed(cps[idx - 1].value, cps[idx].value)) out.push_back(idx);
+    if (idx == 0 || (indic::syllableBreakAllowed(cps[idx - 1].value, cps[idx].value) &&
+                     arabic::isClusterBreak(cps[idx - 1].value, cps[idx].value))) {
+      out.push_back(idx);
+    }
   }
 }
 

@@ -1,5 +1,6 @@
 #include "ChapterHtmlSlimParser.h"
 
+#include <ArabicScripts.h>
 #include <Arduino.h>
 #include <BuildArena.h>
 #include <FsHelpers.h>
@@ -447,9 +448,9 @@ static int uncountedControlLen(const char* s, const int i, const int len) {
 }
 
 // Deviation 8: a lone ZWJ or ZWNJ stays in the text after a letter of a script the shaper reads it in (a half form, a
-// chillu, a cluster kept apart); after anything else it is dropped with the other default-ignorables. The Indic blocks
-// so far; the Arabic ones come with their shaping.
-static bool keepsJoinerAfter(const uint32_t cp) { return cp >= 0x0900 && cp <= 0x0DFF; }
+// chillu, a cluster kept apart, Persian's half-space ZWNJ); after anything else it is dropped with the other
+// default-ignorables. The Indic blocks and the Arabic ones.
+static bool keepsJoinerAfter(const uint32_t cp) { return (cp >= 0x0900 && cp <= 0x0DFF) || arabic::inBlocks(cp); }
 
 // U+200C or U+200D when the 3 bytes at s[i] are one, else 0 (also when the sequence runs past `len`: characterData
 // completes a split one before consumeText sees it).
@@ -4008,7 +4009,9 @@ void ChapterHtmlSlimParser::consumeText(void* userData, const char* s, const int
       // at the first such codepoint and its text goes back to the word flow, to be shaped whole.
       // Ported from crosspoint-reader PR #3787 ("feat: add Indic language support without HarfBuzz", SSafayet /
       // @SSafayet), commit f0757278.
-      if ((i + 1 < len && indic::startsIndic(reinterpret_cast<const unsigned char*>(s + i))) ||
+      // An Arabic letter would be drawn isolated, so it takes the same road.
+      if ((i + 1 < len && (indic::startsIndic(reinterpret_cast<const unsigned char*>(s + i)) ||
+                           arabic::isRunMember(codepointAt(s + i, len - i)))) ||
           self->pendingDropCap_.textLen >= static_cast<int>(sizeof(self->pendingDropCap_.text)) - 1) {
         overflow = true;
         break;

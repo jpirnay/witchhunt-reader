@@ -162,3 +162,26 @@ TEST_F(Joiners, AJoinerAtAnInlineElementsEdgeIsKept) {
   EXPECT_EQ(wordsOf("<p>क्<b>" + kZwj + "ष</b></p>"), Words{"क्" + kZwj + "ष"});
   EXPECT_EQ(wordsOf("<p>क्" + kZwj + "<b>" + kZwj + "ष</b></p>"), Words{"क्ष"});
 }
+
+// Deviation 8, Arabic: Persian writes its half-space as ZWNJ, so a joiner after a letter of the Arabic blocks is kept
+// too. The Arabic strings are escapes.
+TEST_F(Joiners, APersianZwnjIsKept) {
+  const std::string word = "\u06A9" + kZwnj + "\u0647";  // keh, ZWNJ, heh
+  EXPECT_EQ(wordsOf("<p>" + word + "</p>"), Words{word});
+  // An RTL line lists its words in visual order.
+  EXPECT_EQ(wordsOf("<p dir=\"rtl\">" + word + " \u0628</p>"), (Words{"\u0628", word}));
+}
+
+TEST_F(Joiners, AZwnjAfterAnArabicLetterAcrossAnElementEdgeIsKept) {
+  // The joiner opens the token after the edge; the two tokens of an RTL line are listed in visual order.
+  const std::string both = kZwnj + "\u0647" + "\u06A9";
+  EXPECT_EQ(textOf("<p>\u06A9<b>" + kZwnj + "\u0647</b></p>"), both);
+  EXPECT_EQ(textOf("<p>\u06A9" + kZwnj + "<b>\u0647</b></p>"), both);
+  // After a space it is still dropped.
+  EXPECT_EQ(wordsOf("<p>\u06A9 " + kZwnj + "\u0647</p>"), (Words{"\u0647", "\u06A9"}));
+}
+
+TEST_F(Joiners, ARunOfTwoJoinersIsDropped) {
+  EXPECT_EQ(wordsOf("<p>\u06A9" + kZwnj + kZwj + "\u0647</p>"), Words{"\u06A9\u0647"});
+  EXPECT_EQ(wordsOf("<p>\u06A9" + kZwnj + kZwnj + kZwnj + "\u0647</p>"), Words{"\u06A9\u0647"});
+}

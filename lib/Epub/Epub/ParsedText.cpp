@@ -1,5 +1,6 @@
 #include "ParsedText.h"
 
+#include <ArabicScripts.h>
 #include <Arduino.h>
 #include <BidiUtils.h>
 #include <GfxRenderer.h>
@@ -2251,7 +2252,7 @@ void ParsedText::applyBionicReadingTransform() {
     // Complex-script words never take a focus split: each half would shape on its own.
     // Ported from crosspoint-reader PR #3787 ("feat: add Indic language support without HarfBuzz", SSafayet /
     // @SSafayet).
-    if (indic::containsIndic(source.c_str())) {
+    if (indic::containsIndic(source.c_str()) || arabic::holdsArabic(source.c_str(), source.size())) {
       transformedSuffix.push_back(std::move(source));
       transformedSuffixStyles.push_back(originalStyle);
       transformedSuffixBoundaries.push_back(originalBoundary);

@@ -426,6 +426,35 @@ TEST_F(SyntheticLutFixture, ATokenAfterAKeptJoinerKeepsItsSourceOffset) {
   EXPECT_GT(atSecondToken, 0);
 }
 
+TEST_F(SyntheticLutFixture, TheVisibleOffsetsAreUnchangedByAKeptArabicJoiner) {
+  // The Indic test above with an Arabic word: 65 letters (2 bytes each), a ZWNJ cut at an inline edge and counted
+  // between the tokens (3 bytes), then three letters. The Arabic letters are narrow, so the word is never cut by a
+  // line: a page that opens after it opens at the next word's source position, the joiner's 3 bytes counted. A
+  // paragraph is 60 one-byte words, 130 + 3 + 6 bytes, and 100 words.
+  constexpr uint32_t kBefore = 60;
+  constexpr uint32_t kAfterWord = kBefore + 130 + 3 + 6;
+  constexpr uint32_t kParagraphBytes = kBefore + 130 + 3 + 6 + 100;
+  std::string before;
+  for (uint32_t i = 0; i < kBefore; ++i) before += "w ";
+  std::string after;
+  for (int i = 0; i < 100; ++i) after += "w ";
+  std::string letters;
+  for (int i = 0; i < 65; ++i) letters += "\u0628";
+  std::string joined;
+  for (int i = 0; i < 40; ++i) {
+    joined += "<p dir=\"rtl\">" + before + letters + "<b>\xE2\x80\x8C" + "\u0628\u0628\u0628</b> " + after + "</p>\n";
+  }
+  const auto section = build(book(joined));
+  ASSERT_GT(section->pageCount, 1);
+  int afterWord = 0;
+  for (uint16_t page = 0; page < section->pageCount; ++page) {
+    const uint32_t within = *section->getVisibleTextOffsetForPage(page) % kParagraphBytes;
+    EXPECT_TRUE(within == 0 || within == kAfterWord) << "page " << page << " opens " << within << " bytes in";
+    if (within == kAfterWord) ++afterWord;
+  }
+  EXPECT_GT(afterWord, 0);
+}
+
 TEST_F(SyntheticLutFixture, AMergedWordSplitAfterItsJoinerStartsItsPageAtItsVisiblePrefix) {
   // A guard, not a RED test. The word of the test above with its joiner near its start, in a paragraph that shapes:
   // the inline edges are merged away (deviation 7: the glue after the virama falls inside a syllable, and the letters

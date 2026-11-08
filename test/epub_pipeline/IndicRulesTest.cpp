@@ -157,3 +157,21 @@ TEST_F(IndicRules, AFootnoteAfterMergedWordsStaysOnItsAnchorsPage) {
     }
   }
 }
+
+// Arabic, PR 4b: the same rules.
+TEST_F(IndicRules, BionicReadingLeavesAnArabicWordWhole) {
+  const FirstPage page = firstPage("<p>\u0643\u062A\u0627\u0628\u0627\u0646 reading</p>", true);
+  ASSERT_EQ(3u, page.words.size());
+  EXPECT_EQ("\u0643\u062A\u0627\u0628\u0627\u0646", page.words[0].text);
+  EXPECT_FALSE(page.words[0].bold);
+  EXPECT_EQ("read", page.words[1].text);
+  EXPECT_TRUE(page.words[1].bold);
+}
+
+TEST_F(IndicRules, ADropCapOverAnArabicLetterIsAbandoned) {
+  const FirstPage arabic = firstPage(
+      "<p><span style=\"float: left; font-size: 3em\">\u0643</span>\u062A\u0627\u0628" + kFiller + "</p>", false);
+  EXPECT_EQ(0, arabic.dropCaps);
+  ASSERT_FALSE(arabic.words.empty());
+  EXPECT_EQ("\u0643\u062A\u0627\u0628", arabic.words[0].text);
+}
