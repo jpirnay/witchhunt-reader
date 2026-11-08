@@ -40,6 +40,11 @@ BANDS = 2 + len(HOLDS) * len(FAMILIES)
 BAND = HEIGHT // BANDS
 WATCH_MINUTES = (0, 10, 20, 30, 40, 50, 60)
 CODE = {"redrive": 0, "stay": 2, "rest": 3}
+# The cancel pays back no faster than the test drove (the one-pass black's 17 frames a page), then runs full
+# black and white refreshes. On 2026-11-08 a cancel in steps of 28 left the 500-page band as a gray stripe
+# under FAST refreshes, which a few full refreshes cleared.
+CANCEL_STEP = 17
+CLEAN_CYCLES = 5
 
 
 def base_table():
@@ -165,7 +170,7 @@ def cancel(x4, stay, upto=None):
         steps = {}
         for i, value in enumerate(left):
             if value:
-                step = (VSL if value > 0 else VSH1, min(abs(value), 28))
+                step = (VSL if value > 0 else VSH1, min(abs(value), CANCEL_STEP))
                 if step in steps or len(steps) < 3:
                     steps.setdefault(step, []).append(i)
         rows = [row(level, frames) for level, frames in steps] + [RESTROW] * (3 - len(steps)) + [RESTROW]
@@ -176,8 +181,10 @@ def cancel(x4, stay, upto=None):
                 left[i] -= frames if level == VSL else -frames
         x4.frame(tuple(rows), codes)
         refreshes += 1
-    x4.full(3)
-    print(f"cancel: {refreshes} refreshes, then a full white", flush=True)
+    for _ in range(CLEAN_CYCLES):
+        x4.full(0)
+        x4.full(3)
+    print(f"cancel: {refreshes} refreshes, then {CLEAN_CYCLES} full black and white", flush=True)
 
 
 def main():

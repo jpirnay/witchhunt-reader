@@ -844,7 +844,11 @@ def test11_cancel(lab, stay="fast", pages=None):
                 frame.rect(0, (index + 1) * T11_BAND, WIDTH, T11_BAND, slot)
                 owed[index] -= step[1] if step[0] == VSL else -step[1]
         lab.push("prod", bank_now, frame, f"t11 cancel {list(steps)}", journal=False)
-    lab.clean("white")
+    # Full black and white cycles after the payback: on the X4 (x4lab.py) a fast payback left the held band
+    # as a gray stripe under FAST refreshes until full refreshes cleared it.
+    for _ in range(5):
+        lab.clean("black")
+        lab.clean("white")
 
 
 def test_handover(lab, warm, swap_planes=False):

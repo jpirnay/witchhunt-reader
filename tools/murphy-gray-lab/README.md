@@ -314,6 +314,9 @@ daylight rose about 8 points over the hour, so compare within a shot):
 - While held, re-driving keeps black deepest: after 500 pages 13.1 against 15.2 nudged and 27.9 resting, from
   about 7 for one drive. Black left resting fades within minutes on this panel (that band sits beside a
   white control, so a little of it is camera bleed).
+- The first cancel paid back in steps of 28 frames: the 500-page band then showed as a gray stripe on the
+  home screen under FAST refreshes, though it measured clean on a full white; five full black and white
+  refreshes cleared it. Both cancels now pay back no faster than the test drove and end with those cycles.
 **Test 4: does gray survive a real page turn?** The reader turns pages with FAST, and FAST rests any
 pixel the planes call unchanged, so gray left around letters would stay. The planes are only
 selector bits, so `--aware` marks each gray pixel as changed, which gives it the full drive to the
