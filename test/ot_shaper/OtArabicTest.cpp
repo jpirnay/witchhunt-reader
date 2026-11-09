@@ -674,14 +674,19 @@ TEST(OtArabicShaping, EveryGlyphCarriesTheRtlmMask) {
 }
 
 // Why rotate_chars swaps no character for its mirror: none the Unicode tables cover is Bidi_Mirrored, so none has a
-// Bidi_Mirroring_Glyph. Their ranges lie between U+00BB and U+0F3A, consecutive Bidi_Mirrored characters (Unicode
-// 16.0, UnicodeData.txt field 9); ZWNJ and ZWJ lie between U+169C and U+2039, U+25CC between U+232A and U+2768. Every
-// other code point is outside the tables altogether (unassigned to the engine), and an Arabic run holds none:
-// deviation 6 leaves brackets and punctuation to bidi, which mirrors them.
+// Bidi_Mirroring_Glyph. Their ranges lie between consecutive Bidi_Mirrored characters (Unicode 16.0, UnicodeData.txt
+// field 9): the Arabic and Indic blocks between U+00BB and U+0F3A, Myanmar (deviation 14) between U+0F3D and U+169B,
+// Myanmar Extended-B and -A between U+301B and U+FE59; ZWNJ and ZWJ lie between U+169C and U+2039, U+25CC between
+// U+232A and U+2768. Every other code point is outside the tables altogether (unassigned to the engine), and an Arabic
+// run holds none: deviation 6 leaves brackets and punctuation to bidi, which mirrors them.
 TEST(OtArabicShaping, NoCharacterTheTablesCoverHasAMirror) {
+  constexpr struct {
+    uint32_t after, before;  // two consecutive Bidi_Mirrored characters
+  } GAPS[] = {{0x00BB, 0x0F3A}, {0x0F3D, 0x169B}, {0x301B, 0xFE59}};
   for (const ot::ucd::Range& range : ot::ucd::RANGES) {
-    EXPECT_GT(range.first, 0x00BBu);
-    EXPECT_LT(range.last, 0x0F3Au);
+    bool inAGap = false;
+    for (const auto& gap : GAPS) inAGap |= range.first > gap.after && range.last < gap.before;
+    EXPECT_TRUE(inAGap) << std::hex << range.first << "-" << range.last;
   }
   for (const uint32_t bracket : {0x0028u, 0x005Bu, 0x007Bu, 0x00ABu, 0x2039u, 0xFD3Eu}) {
     EXPECT_EQ(ot::charData(bracket).genCat, ot::gc::UNASSIGNED) << std::hex << bracket;

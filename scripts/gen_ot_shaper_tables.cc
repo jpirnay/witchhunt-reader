@@ -18,7 +18,9 @@
 struct Range {
   hb_codepoint_t first, last;
 };
-static const Range kRanges[] = {{0x0600, 0x06FF}, {0x0750, 0x077F}, {0x0870, 0x0DFF}};
+// witchhunt: deviation 14. Then the Myanmar blocks: Myanmar, Myanmar Extended-B and Myanmar Extended-A.
+static const Range kRanges[] = {{0x0600, 0x06FF}, {0x0750, 0x077F}, {0x0870, 0x0DFF},
+                                {0x1000, 0x109F}, {0xA9E0, 0xA9FF}, {0xAA60, 0xAA7F}};
 // witchhunt: deviation 11. Only these carry a joining type (Arabic, Arabic Supplement, Arabic Extended-B and -A);
 // the Indic blocks all join as U.
 static const Range kJoiningRanges[] = {{0x0600, 0x06FF}, {0x0750, 0x077F}, {0x0870, 0x08FF}};
@@ -31,6 +33,10 @@ static const char* kLanguages[] = {"as",  "awa", "bh", "bho", "bn",  "bpy", "bra
                                    "sat", "sck", "sd", "si",  "ta",  "tcy", "te",  "xnr", "en"};
 // witchhunt: deviation 11. Languages written in Arabic script (sd and ks above keep their Indic rows).
 static const char* kArabicLanguages[] = {"ar", "fa", "ur", "ps", "ug", "ku", "ckb", "prs", "kmr", "sdh"};
+// witchhunt: deviation 14. Languages written in Myanmar script: Burmese, Mon, Shan, the Karen languages (S'gaw,
+// Eastern and Western Pwo, Pa'o), Khamti Shan, Aiton, Phake, Palaung, Rakhine, Tavoyan and Intha.
+static const char* kMyanmarLanguages[] = {"my",  "mnw", "shn", "ksw", "kjp", "pwo", "blk", "kht",
+                                          "aio", "phk", "pll", "rbb", "pce", "rki", "tvn", "int"};
 
 static uint32_t pack(hb_codepoint_t u) {
   hb_unicode_funcs_t* uf = hb_unicode_funcs_get_default();
@@ -182,6 +188,7 @@ int main() {
   std::vector<std::pair<const char*, hb_script_t>> languages;
   for (const char* code : kLanguages) languages.push_back({code, HB_SCRIPT_DEVANAGARI});
   for (const char* code : kArabicLanguages) languages.push_back({code, HB_SCRIPT_ARABIC});
+  for (const char* code : kMyanmarLanguages) languages.push_back({code, HB_SCRIPT_MYANMAR});
   for (const auto& [code, script] : languages) {
     unsigned scriptCount = 0, languageCount = 3;
     hb_tag_t tags[3] = {};
