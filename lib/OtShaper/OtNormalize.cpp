@@ -231,7 +231,7 @@ class Normalizer {
     return ret;
   }
 
-  void nextChar(const uint32_t glyph) {
+  OT_HOT void nextChar(const uint32_t glyph) {
     GlyphInfo g = buffer_.info[buffer_.idx++];
     g.glyphIndex = static_cast<uint16_t>(glyph);
     pushScratch(buffer_, g);

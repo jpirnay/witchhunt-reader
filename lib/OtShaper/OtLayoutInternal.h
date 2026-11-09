@@ -133,7 +133,7 @@ struct ApplyContext {
     iterInput.init(this, false);
     iterContext.init(this, true);
   }
-  void setLookupProps(const uint32_t props) {
+  OT_HOT void setLookupProps(const uint32_t props) {
     lookupProps = face.sanitizeLookupProps(props);
     initIters();
   }

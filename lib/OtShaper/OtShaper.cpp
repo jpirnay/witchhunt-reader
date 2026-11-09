@@ -62,7 +62,7 @@ void runPause(const Pause pause, const Face& face, const Plan& plan, Buffer& buf
 }
 
 // hb_ot_map_t::apply(): every stage's lookups, then its pause.
-void applyTable(const Face& face, const Scale& scale, const Plan& plan, Buffer& buffer, const int table) {
+OT_HOT void applyTable(const Face& face, const Scale& scale, const Plan& plan, Buffer& buffer, const int table) {
   size_t i = 0;
   for (const Stage& stage : plan.stages[table]) {
     for (; i < stage.lastLookup; i++) {

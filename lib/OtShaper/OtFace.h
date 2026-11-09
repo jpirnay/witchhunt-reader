@@ -111,7 +111,7 @@ class Face {
   Table lookup(int table, uint32_t index) const;
   // Subtables of a lookup whose offsets lie inside the table: its declared
   // count unless the font is malformed.
-  static uint16_t subtableCount(const Table& lookup) { return lookup.count16(4, 6, 2); }
+  OT_HOT static uint16_t subtableCount(const Table& lookup) { return lookup.count16(4, 6, 2); }
   // LookupFlag, plus the mark filtering set in the high 16 bits when used.
   uint32_t lookupProps(const Table& lookup) const;
   // Precomputed lookup filters of a table; nullptr when the font has none or

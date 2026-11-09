@@ -263,7 +263,7 @@ int32_t Face::advance(const uint32_t glyph) const {
   return 0;
 }
 
-uint16_t Face::glyphProps(const uint32_t glyph) const {
+OT_HOT uint16_t Face::glyphProps(const uint32_t glyph) const {
   switch (classOf(glyphClassDef_, glyph)) {
     case 1:
       return props::BASE_GLYPH;
@@ -281,7 +281,7 @@ bool Face::markSetCovers(const uint32_t set, const uint32_t glyph) const {
   return coverageIndex(markGlyphSets_.offset32(4 + 4 * set), glyph) != NOT_COVERED;
 }
 
-uint32_t Face::sanitizeLookupProps(uint32_t lookupProps) const {
+OT_HOT uint32_t Face::sanitizeLookupProps(uint32_t lookupProps) const {
   if ((lookupProps & lookupflag::USE_MARK_FILTERING_SET) && (lookupProps >> 16) >= markGlyphSetCount_) {
     lookupProps &= ~lookupflag::USE_MARK_FILTERING_SET;
   }
@@ -310,7 +310,7 @@ Table Face::lookup(const int table, const uint32_t index) const {
   return lookup;
 }
 
-uint32_t Face::lookupProps(const Table& lookup) const {
+OT_HOT uint32_t Face::lookupProps(const Table& lookup) const {
   const uint16_t flag = lookup.u16(2);
   uint32_t result = flag;
   if (flag & lookupflag::USE_MARK_FILTERING_SET) {
