@@ -287,7 +287,9 @@ void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int
   c.autoZwnj = settings.autoZwnj;
   c.random = settings.random;
   c.perSyllable = settings.perSyllable;
-  c.subtableDigests = settings.subtableDigests;
+  // witchhunt: deviation 4 - a lookup of one subtable is not filtered again: its subtable's digest is the lookup's
+  // own, which every glyph it starts at has passed, and reading the record would cost a read of CPac for nothing.
+  c.subtableDigests = Face::subtableCount(lookup) > 1 ? settings.subtableDigests : nullptr;
   c.setLookupProps(face.lookupProps(lookup));
 
   // Glyphs the lookup may start at: in its digest, selected by its mask, and
