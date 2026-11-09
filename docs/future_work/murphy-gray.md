@@ -8,8 +8,11 @@ of it comes from one panel, at room temperature.
 
 **Long-term DC.** A fringe pixel does the ordinary cycle, white to black, a net-zero nudge, black to
 white. Gray that stays black takes 15 frames toward black that nothing pays back, through the marks
-`Uc8253MurphyDriver::writeOldPlane()` adds. A short session cannot show what thousands of pages do.
-Next: read for some weeks, then compare a clean white and black with the shots kept from the lab.
+`Uc8253MurphyDriver::writeOldPlane()` adds. Lab Test 11 on this Murphy (#654, 2026-11-08) measured part of
+it: black held for 500 pages under the per-page VSH 15 re-drive fades by 14.5 and, driven white, comes back
+8 points lighter than the white around it; rest and the FAST row leave about 1 point
+(`tools/murphy-gray-lab/README.md`, Test 11). The one-pass path rests such pixels. What weeks of reading do is
+still unmeasured. Next: read for some weeks, then compare a clean white and black with the shots kept from the lab.
 
 **Temperature.** The waveforms were measured at room temperature, which was not recorded. The OTP is
 blank, so the controller has no temperature ranges to fall back on, and the driver does not read the
@@ -26,8 +29,8 @@ to white would drive the whole background one way on every page.
 
 Three levels fit: rest, to white, to black, and one gray such as VSL 4, VSH 8, VSL 4, which nets to zero
 and takes 16 frames, as long as FAST. The reader already has a one-push path for it
-(`supportsGrayFrame()`). Text darkness Lighter shows roughly how one gray looks. Not built, not measured.
-Built 2026-11-07 as the One-Pass Anti-Aliasing setting, with gray at VSL 5, VSH 8, VSL 3 (about 48 %), and
+(`supportsGrayFrame()`). Text darkness Lighter shows roughly how one gray looks.
+Built 2026-11-07 in #646 as the One-Pass Anti-Aliasing setting, with gray at VSL 5, VSH 8, VSL 3 (about 48 %), and
 measured: see [one-pass-text-aa.md](one-pass-text-aa.md).
 
 ## Images
@@ -79,6 +82,8 @@ about balances 15 x 16.6 V. The true centre is unknown with no factory VCOM.
 
 ## Upstream
 
-Offered to Free-Ink/freeink-sdk, all open: gray as #174, the FAST change and the limit removal as #176 (stacked
-on #174), and the lent block as #175. Until they merge, the firmware pins our fork. HALF was not offered, as it
-did not change. #175 is not in use here: the firmware still lends its block from `HalDisplay`.
+Offered to Free-Ink/freeink-sdk: gray as #174 and the FAST change and the limit removal as #176, both merged into
+Free-Ink main on 2026-11-04; the lent block as #175, still open. The Murphy's one-pass text is Free-Ink #183, open.
+The firmware still pins our fork, for other reasons (`.gitmodules`: the T5S3 support of Free-Ink #51 and our fixes on
+it). HALF was not offered, as it did not change. #175 is not in use here: the firmware still lends its block from
+`HalDisplay`.
