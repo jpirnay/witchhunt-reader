@@ -114,7 +114,7 @@ the register order. Take the exchange with it.
 |---|---|
 | One-pass as written | X4 Pro only: PSRAM and stock LUTs for its three controllers |
 | One-pass on Murphy M3 | Done, see below |
-| One-pass on C3 (X4, X3) | Not as written. The charge map changes only 5-7% of white drives, so a 1-bit "black two pages running" plane (48 KB) may approximate it. Speculative, and reading heap is 15-53 KB |
+| One-pass on C3 (X4, X3) | Done as the composed path, in the two frame buffers a C3 already has: the X3 in #648, the X4 in #650 (2026-11-07), see below |
 | One-pass on T5S3 | No: no LUTs, already single push |
 | Drive gray pixels to the new target on the next B/W frame | Only SSD1677 lacks this. Its 48 KB mask fits SSD1677 X4 Pro units, not a C3 |
 | Separate reader and UI waveforms, ">1/8 of bytes changed" test | Only where we own two fast waveforms: X3, Murphy |
@@ -198,7 +198,8 @@ page, but cannot judge the gray.
 
 **Open on the X4:** as on the X3, a Background-B borrow between two turns sends the next turn down the
 two-pass path (once in 10 slow turns here); fast flipping skips AA as today. The hold row nudges the
-background 2 frames of VSL every page; whether rest looks better is untried. No lab for the SSD1677.
+background 2 frames of VSL every page; whether rest looks better is untried, but testable: since #655 (2026-11-08)
+`x4lab.py` drives frames through the reader's `CMD:LAB` (`SerialTestApi.cpp:1789`), and Test 11 ran on the X4.
 
 ## Next
 

@@ -30,9 +30,9 @@ behind CFF.
 | 5b | Synthetic italic (spec section 7.4): families without an italic file draw italic slanted, as KOReader does | shipped (#551) |
 | 6 | CJK book titles, authors and TOC in the UI: the reader's CJK font behind the UI faces ([UI text in CJK](#ui-text-in-cjk)) | shipped (#563) ([spec](../superpowers/specs/2026-10-21-cjk-ui-text-fallback-design.md)) |
 | 7 | Push-in and the CJK–Latin gap (A3b) | shipped (#575) |
-| 8 | Ruby and emphasis dots | B1 shipped (#554, review fixes #556); B2 emphasis dots in #566 ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
+| 8 | Ruby and emphasis dots | shipped: B1 (#554, review fixes #556), B2 emphasis dots (#566, 2026-10-28) ([plan](../superpowers/plans/2026-10-21-cjk-ruby-and-emphasis.md), Tasks 8-10) |
 | 9 | The dictionary on CJK pages ([what remains](#dictionary-on-cjk-pages)) | shipped (#570, #569, #574) |
-| 10 | Line spacing: a CJK em-pitch scale, Extra wide and Widest, Book's style, a per-book override ([below](#line-spacing)) | shipped (#562) ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md), [plan](../superpowers/plans/2026-10-26-line-spacing.md)) |
+| 10 | Line spacing: a CJK em-pitch scale, Extra wide and Widest, Book's style, a per-book override ([below](#line-spacing)) | shipped (2026-10-26, on master directly: `3bdeb993c`, `2c14d8ae9`, `4d0c4c526`, `54b88fe7f`) ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md), [plan](../superpowers/plans/2026-10-26-line-spacing.md)) |
 
 Synthetic bold comes before the font manager because the CJK families ship in their Regular weight only (spec
 section 4). Step 6 is what makes a CJK library navigable once a font is installed.
@@ -223,7 +223,8 @@ stage (TTF spec section 7.6); check the font selector before planning them.
 
 **Shipped: the glyph store makes room.** The store's log is a ring of segments. A full log reclaims its oldest segment
 (keeping the glyphs drawn most) and a worn index is rebuilt, in idle time (`EpubReaderActivity::stepGlyphStoreRoom`) and
-at a chapter or book open, instead of wiping the store. Format 4: [file-formats.md](../file-formats.md#the-ttf-glyph-store-cptt).
+at a chapter or book open, instead of wiping the store. Format 5 since #624 (a shaping font's style block ends with its
+`CPac`): [file-formats.md](../file-formats.md#the-ttf-glyph-store-cptt).
 
 **Measured** on the X4 at 12 pt, Traditional Chinese in SD mode (`test_cjk_zh_honglou`): a cold chapter lays out in
 1,114 ms as TrueType and 1,159 ms as CFF; with its glyphs stored, in 315 ms either way (#544).
@@ -292,7 +293,8 @@ finished-book screen) draws what the UI faces lack from the reader's TrueType fo
   `GfxRenderer::setBeforePushHook`). A lend costs the X3 a slower refresh, so screens with room keep the heap;
 - its 2-bit glyphs drawn as their ink; its UI-size faces made on the first glyph a screen needs.
 
-Without a CJK TrueType family nothing opens, and the boxes (□) stay. Before the CJK faces these strings drew nothing
+Since #670 the last book's family opens whatever its scripts (before, only one with CJK did); a CJK character it lacks
+still draws as the CJK faces' stand-in square (□). Before the CJK faces these strings drew nothing
 (X3, 2026-10-18, 紅樓夢); without the boxes the Home card showed a lone 雪 of the author 曹雪芹 as if it were the title.
 
 **Still open:**
@@ -356,8 +358,10 @@ CC-KEDICT (`docs/dictionary.md` has the conversions):
   laid out styled (110-240 ms for 1.5-2.6 KB entries).
 - **A long CJK definition in an SD-card font, laid out without a prewarm, is untimed.** Only entries of 1.5-2.6 KB
   were measured.
-- **The headword back in the header** once the UI text fallback (step 6) has merged: `BookTextScope`,
-  `CjkUiFonts::readerFontAttached()` and `prefetchBookText()`.
+- **The headword back in the header.** A CJK lookup leaves its headword empty (`DictionaryWordSelectActivity`), so
+  the definition's header shows no title (`DictionaryDefinitionActivity::render`). Still open after the UI text
+  fallback (step 6, #563) merged on 2026-10-28. That fallback is `CjkUiFonts::setReaderFont` and the per-string
+  `beginText`; the names this item gave (`BookTextScope`, `readerFontAttached()`, `prefetchBookText()`) were never built.
 - **Not run, by the maintainer's decision:** the X3 dense-page measurement and the touch check on the X4 Pro and
   T5S3 (spec row 12). The X4 with `CMD:HEAP:HOLD` ballast stood in for the X3.
 
@@ -366,8 +370,8 @@ CC-KEDICT (`docs/dictionary.md` has the conversions):
 
 ## Line spacing
 
-**Shipped** in #562 ([spec](../superpowers/specs/2026-10-26-line-spacing-design.md),
-[plan](../superpowers/plans/2026-10-26-line-spacing.md)), after an X3 study of a Japanese, a Chinese and a Korean book
+**Shipped** on 2026-10-26, on master directly (`3bdeb993c`, `2c14d8ae9`, `4d0c4c526`, `54b88fe7f`;
+[spec](../superpowers/specs/2026-10-26-line-spacing-design.md), [plan](../superpowers/plans/2026-10-26-line-spacing.md)), after an X3 study of a Japanese, a Chinese and a Korean book
 at 1.5, 1.7 and 2.0 em against the old Normal and Wide.
 - **The scale** (maintainer, 2026-10-26). Chinese, Japanese and Korean books get a line pitch in ems: Tight 1.5, Normal
   1.7, Wide 1.85, Extra wide 2.0, Widest 2.2. JLREQ and CLREQ set the gap at half to one character (1.5 to 2 em); KLREQ
@@ -424,7 +428,6 @@ None of these is visible in the test books. Each is a one-line note of the case 
 - `Hyphenator` on a mixed word ("ab漢字").
 - `addWord` cases: a single CJK character, an all-punctuation word, and the heap-gate refusal.
 - A Hangul word next to the new quote entries.
-- `CjkRulesTest`'s `raw.substr(raw.find_first_not_of(' '))` throws on a blank dump line.
 - The `CjkBlockSeams` dl and figure assertions run only when both words share a line.
 
 ## Out of scope so far

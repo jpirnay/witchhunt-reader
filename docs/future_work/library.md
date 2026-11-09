@@ -2,13 +2,16 @@
 
 Status: open items as of 2026-10-09, from the Library work (PR #426; design in
 `docs/design/library-index.md`). The screen and the index ship without these. Each change must end
-flash-negative (the C3 partition is about 95 % full) or name what it buys.
+flash-negative (the `default` build for the X3 and X4 is at 96.6 % of the app partition, about 224 KB
+free on 2026-11-09) or name what it buys.
 
 ## Measure a large card
 
-Only a 25-book card has been measured (X4: first build 2.5 s, free heap at least 22.4 KB during the
-build). The design was budgeted for 2,000 books, and the time a first build takes on a card of a few
-hundred never-opened EPUBs (~300 ms of OPF parse each) is unknown.
+A 25-book card was measured first (X4: first build 2.5 s, free heap at least 22.4 KB during the build).
+The design was budgeted for 2,000 books. On a 3,692-book card an X4 Pro's index walk reached that limit
+in 32 s, in the background (#606, 2026-11-04). The rest of that first build is not measured: its total
+time on a card of a few hundred never-opened EPUBs (~300 ms of OPF parse each), the author lookups,
+publish at 2,000 and the heap.
 
 - Where: the `[LIB]` log lines from `FileBrowserActivity::stepLibraryBuild` (start, walk, each publish,
   done with heap); `scripts/script_profile_mem.sh` for the heap.
@@ -109,5 +112,6 @@ input onto `ListController` (see `list-input-harmonization.md`, the file browser
 
 - The Home-entry migration in `JsonSettingsIO::loadSettings` (old `showBrowseFilesOnHome` /
   `showRecentBooksOnHome` keys) has no host test; only `libraryOnHomeFromLegacy` has.
-- No host harness links `FileBrowserActivity` or `FileBrowserModel`: tab switching, the Authors
+- `test/file_browser_model` covers `FileBrowserModel`'s folder listing and search only. Its Authors
+  side has no host test and no host harness links `FileBrowserActivity`: tab switching, the Authors
   drill-in, return hints and the selection kept across a republish were checked on a device only.

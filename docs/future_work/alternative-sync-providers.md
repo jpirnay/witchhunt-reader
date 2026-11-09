@@ -35,7 +35,7 @@ KOSync-specific: the XPath serialisation and crengine's text-node rules in `Stac
 - Beyond progress, the fork adds reading stats (`/plugin/page-stats`), highlights and annotations
   (`/plugin/annotations/exchange`), bookmarks (`/plugin/bookmarks/exchange`) and catalog browsing:
   `lib/BookOrbitSync` + `src/bookorbit`, about 3,000 lines. The fork removed KOReader sync to fit the
-  flash partition; we are at 94.9 % (about 336 KB free).
+  flash partition; our `default` build (X3/X4) is at 96.6 % (about 224 KB free, 2026-11-09).
 
 ### OPDS Progression 1.0 (Kavita, Audiobookshelf; fork syfq91/witchling-reader)
 
@@ -75,7 +75,8 @@ TDD; no spec needed unless the reader hooks turn out to need a new activity flow
 6. **Tests:** host: JSON codec, fraction↔spine inversion, fraction→offset→page on the corpus
    (round trip within one page), `#vto=` round trip exact. Device: one Kavita and one Audiobookshelf
    server, push/pull/compare, `Sync mem` troughs.
-7. **Flash:** expect +20 to 30 KB; check against the 94.9 % budget before merging.
+7. **Flash:** expect +20 to 30 KB, about a tenth of the 224 KB left on 2026-11-09; check against the
+   budget before merging.
 
 Effort: two to three days including reviews. Preconditions: a Kavita or Audiobookshelf server to
 test against.

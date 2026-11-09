@@ -62,10 +62,10 @@ rename or move, and small code cleanups it noticed.
   `lib/FsHelpers/SidecarFiles`. Move it to `test/sidecar_files`, beside that directory's 6 cases.
 - `BookMetadataCacheTest.AnInOrderTocReadsTheSpineAboutOnceWithoutTheIndex` is named after a
   per-spine index that no longer exists. Rename it, e.g. `AnInOrderTocReadsTheSpineAboutOnce`.
-- `test/epub_benchmark` is still built in ALL (no `EXCLUDE_FROM_ALL`), and its suite name
-  `ExpatBaseline` and its comments name expat, which `SaxParser` replaced. Exclude it from ALL and
-  rename.
-- Optional: fold the 20 remaining `css_gaps` tests into `epub_css/CssParserTest.cpp` and drop the
+- `test/epub_benchmark`'s suite name `ExpatBaseline` (`EpubParserBenchmark.cpp:238`) and its
+  comments name expat, which `SaxParser` replaced. Rename. (It left ALL in `7cb40d317`, #643,
+  2026-11-06.)
+- Optional: fold the 23 remaining `css_gaps` tests into `epub_css/CssParserTest.cpp` and drop the
   binary and its `LoggingStub`. The case count does not change.
 
 ## Small code cleanups

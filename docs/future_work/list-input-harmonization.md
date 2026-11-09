@@ -2,7 +2,7 @@
 
 Status: open items as of 2026-10-07. Collected from the list-input harmonization design (now `docs/design/list-input-harmonization.md`).
 
-The scheme (design section 1) is live on the `MenuListActivity` / `UiListActivity` / `TabbedUiListActivity` families (except the file browser, below) and the OPDS catalog and format picker. The items below are what is left. Each must end flash-negative (the C3 partition is about 95 % full) or name what it buys instead.
+The scheme (design section 1) is live on the `MenuListActivity` / `UiListActivity` / `TabbedUiListActivity` families (except the file browser, below) and the OPDS catalog and format picker. The items below are what is left. Each must end flash-negative (the `default` build for the X3 and X4 is at 96.6 % of the app partition, about 224 KB free on 2026-11-09) or name what it buys instead.
 
 ## Screens with declared pairs still on their own input
 
@@ -16,7 +16,7 @@ Starred pages, Global bookmarks and the Wi-Fi network list still use `ButtonNavi
 
 ## The custom painters
 
-The EPUB chapter list is on `UiListActivity` (#582): rows from a provider, titles wrapped to two lines, levels as `fui::ListItem::indent`. The XTC chapter list and the Markdown TOC (`XtcReaderChapterSelectionActivity`, `MdReaderTocSelectionActivity`) still derive from `Activity`, call `ButtonNavigator::onNextList` and truncate their titles. Footnotes (`EpubReaderFootnotesActivity`) and the KOReader sync result (`KOReaderSyncActivity`) read button events and draw their rows by hand. The button-remap wizard (`ButtonRemapActivity`) draws with `GUI.drawList`.
+The EPUB chapter list is on `UiListActivity` (#593, for issue #582): rows from a provider, titles wrapped to two lines, levels as `fui::ListItem::indent`. The XTC chapter list and the Markdown TOC (`XtcReaderChapterSelectionActivity`, `MdReaderTocSelectionActivity`) still derive from `Activity`, call `ButtonNavigator::onNextList` and truncate their titles. Footnotes (`EpubReaderFootnotesActivity`) and the KOReader sync result (`KOReaderSyncActivity`) read button events and draw their rows by hand. The button-remap wizard (`ButtonRemapActivity`) draws with `GUI.drawList`.
 
 - Target: all but the remap wizard take input through `ListController` (Footnotes keeps Power for select through `onOtherEvent`) and draw with `fui::list`. Chapter levels use `ListItem::indent`, as the EPUB list does: leading spaces, upstream's way, are dropped on a wrapped line. The remap wizard keeps its own input on purpose (it captures whichever button is pressed next) and only moves its rows onto FUI so `drawList` can go.
 - SDK changes stay the exception: `ListItem::indent` (SDK `5bd4a0a`) is the one so far, because no app-side workaround survives wrapping.

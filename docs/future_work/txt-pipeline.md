@@ -161,7 +161,10 @@ then with one subclass. Markdown stays out: our reader has its own tables and co
 **To hide:** the Sync tab (`MenuTab::Sync`), as KOSync positions name items in a ZIP.
 
 **Comes free:** kinsoku, punctuation, the grid, justification, line spacing, hyphenation, the dictionary, pre-render,
-background builds, the chapter menu, per-book overrides.
+background builds, the chapter menu, per-book overrides. A book's language also chooses right-to-left page turns and the
+Hebrew, Arabic, Indic and Myanmar families and their shaping (#645, #656, #664, #665, #671); a TXT file gets those only
+on this pipeline. Today, since #666, each TXT line goes through `GfxRenderer::drawText` and so is reordered line by line,
+with no paragraph direction: a right-to-left line is right aligned only if the alignment setting says so.
 
 ### Reading state
 
@@ -195,7 +198,7 @@ Runs in the browser, so firmware pays nothing. `TextDecoder` holds every legacy 
 | EUC-KR (cp949) | 47,880 B | 13,190 B |
 | All four | 157,884 B | 57,913 B |
 
-Against 277,952 B free in the `default` app slot on 2026-11-06. Compressed means delta plus zlib over a whole table;
+Against about 224 KB free in the `default` app slot on 2026-11-09. Compressed means delta plus zlib over a whole table;
 random access would need chunks and cost more. If a device-only path is ever wanted, the tables can be an optional download
 to the card, still no flash.
 
