@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "../book_metadata_cache/AllocationRefusal.h"
+#include "Epub/HeapGrowth.h"
 #include "Epub/ParsedText.h"
 #include "Epub/ShapedStore.h"
 #include "Epub/WordShapeCache.h"
@@ -340,6 +341,35 @@ TEST_F(ShapedLayout, AVerticalLineReordersInsteadOfShaping) {
   EXPECT_EQ(2u, text.tokensShaped());
   EXPECT_EQ(0, face->planBuilds());
   EXPECT_EQ(0, renderer.prefetchedRuns);
+  EXPECT_FALSE(latch);
+}
+
+TEST_F(ShapedLayout, AtTheFreeHeapFloorAParagraphShapesNothingAndLatches) {
+  // The shaped store keeps heap_growth::kShapedFreeFloor free: at it, the store takes nothing, every token is laid out
+  // as its code points, and the paragraph latches shaping degraded. The largest block is ample throughout.
+  const uint32_t savedFree = ESP.getFreeHeap();
+  Lines lines;
+  {
+    ParsedText text(false, false, noIndentStyle());
+    text.setShapingLatch(&latch);
+    add(text, {{kHindi}, {kPatrika}});
+    ESP.setFreeHeap(static_cast<uint32_t>(heap_growth::kShapedFreeFloor));
+    lines = layOut(text, renderer, 400);
+    ESP.setFreeHeap(savedFree);
+  }
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_FALSE(lines[0]->hasGlyphForm(0));
+  EXPECT_FALSE(lines[0]->hasGlyphForm(1));
+  EXPECT_TRUE(latch);
+
+  // With the heap back, the same paragraph shapes.
+  latch = false;
+  ParsedText again(false, false, noIndentStyle());
+  again.setShapingLatch(&latch);
+  add(again, {{kHindi}, {kPatrika}});
+  lines = layOut(again, renderer, 400);
+  ASSERT_EQ(1u, lines.size());
+  EXPECT_TRUE(lines[0]->hasGlyphForm(0));
   EXPECT_FALSE(latch);
 }
 

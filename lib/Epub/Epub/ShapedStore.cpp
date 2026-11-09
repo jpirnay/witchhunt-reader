@@ -12,7 +12,10 @@
 #include "HashUtils.h"
 #include "HeapGrowth.h"
 
-bool ShapedStore::heapAllows(const size_t bytes) { return heap_growth::heapAllows(bytes + heap_growth::kAllocSlack); }
+bool ShapedStore::heapAllows(const size_t bytes) {
+  const size_t asked = bytes + heap_growth::kAllocSlack;
+  return heap_growth::heapAllows(asked) && heap_growth::heapLeaves(asked, heap_growth::kShapedFreeFloor);
+}
 
 uint32_t ShapedStore::hashOf(const std::string_view text) {
   const uint64_t hash = HashUtils::fnvHash64(text.data(), text.size());

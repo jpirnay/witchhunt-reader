@@ -23,6 +23,7 @@
 #include "../../Epub.h"
 #include "../BidiLine.h"
 #include "../HashUtils.h"
+#include "../HeapGrowth.h"
 #include "../Page.h"
 #include "../converters/ImageDecoderFactory.h"
 #include "../converters/ImageToFramebufferDecoder.h"
@@ -137,6 +138,9 @@ constexpr size_t MAX_ANCHORS_AWAITING_LINE = 16;
 #ifndef EHP_TEXT_LAYOUT_HARD_MIN_FREE_HEAP
 #define EHP_TEXT_LAYOUT_HARD_MIN_FREE_HEAP (9 * 1024)
 #endif
+// A shaped store stops growing above this floor, so shaping degrades before the parse aborts (HeapGrowth.h).
+static_assert(heap_growth::kShapedFreeFloor > EHP_TEXT_LAYOUT_HARD_MIN_FREE_HEAP,
+              "the shaped store's floor must stay above the parse's hard floor");
 
 #ifndef EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC
 #define EHP_TEXT_LAYOUT_HARD_MIN_MAX_ALLOC (6 * 1024)
