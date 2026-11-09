@@ -13,7 +13,7 @@ constexpr unsigned DIGEST_SHIFTS[3] = {4, 0, 6};  // hb_set_digest_shifts
 void setHeapCheck(const HeapCheck check) { gHeapCheck = check; }
 bool heapAvailable(const size_t bytes) { return gHeapCheck == nullptr || gHeapCheck(bytes); }
 
-void Digest::add(const uint32_t g) {
+OT_HOT void Digest::add(const uint32_t g) {
   for (int i = 0; i < 3; i++) masks[i] |= 1ull << ((g >> DIGEST_SHIFTS[i]) & 63);
 }
 
@@ -31,7 +31,7 @@ void Digest::addRange(const uint32_t a, const uint32_t b) {
   }
 }
 
-bool Digest::mayHave(const uint32_t g) const {
+OT_HOT bool Digest::mayHave(const uint32_t g) const {
   for (int i = 0; i < 3; i++) {
     if (!(masks[i] & (1ull << ((g >> DIGEST_SHIFTS[i]) & 63)))) return false;
   }
@@ -40,7 +40,7 @@ bool Digest::mayHave(const uint32_t g) const {
 
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "digest records are little-endian in memory");
 
-Digest readDigest(const uint8_t* record) {
+OT_HOT Digest readDigest(const uint8_t* record) {
   Digest d;
   memcpy(d.masks, record, sizeof(d.masks));
   return d;
@@ -48,7 +48,7 @@ Digest readDigest(const uint8_t* record) {
 
 void writeDigest(const Digest& digest, uint8_t* record) { memcpy(record, digest.masks, sizeof(digest.masks)); }
 
-bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
+OT_HOT bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
   for (int i = 0; i < 3; i++) {
     uint64_t mask;
     memcpy(&mask, record + 8 * i, sizeof(mask));
@@ -57,7 +57,7 @@ bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
   return true;
 }
 
-bool Buffer::prepare(const unsigned maxGlyphs) {
+OT_WARM bool Buffer::prepare(const unsigned maxGlyphs) {
   info.clear();
   pos.clear();
   scratch.clear();
@@ -95,7 +95,7 @@ void Buffer::setStorage(void* const block, const size_t bytes) {
 }
 
 // witchhunt: deviation 1 - the four arrays, empty, over the storage.
-void Buffer::bindStorage() {
+OT_WARM void Buffer::bindStorage() {
   GlyphInfo* const scratchStart = storage_ + slots_;
   auto* const posStart = reinterpret_cast<GlyphPosition*>(scratchStart + slots_);
   auto* const indicesStart = reinterpret_cast<uint16_t*>(posStart + slots_);
@@ -105,7 +105,7 @@ void Buffer::bindStorage() {
   indices.bind(indicesStart, slots_, &successful);
 }
 
-uint8_t Buffer::allocateLigId() {
+OT_HOT uint8_t Buffer::allocateLigId() {
   for (;;) {
     if (++serial == 0) ++serial;
     const auto id = static_cast<uint8_t>(serial & 0x07);
@@ -113,27 +113,27 @@ uint8_t Buffer::allocateLigId() {
   }
 }
 
-bool Buffer::canGrow(const unsigned extra) {
+OT_HOT bool Buffer::canGrow(const unsigned extra) {
   if (len() + extra <= maxLength) return true;
   successful = false;
   return false;
 }
 
-void Buffer::removeGlyph(const unsigned i) { info.erase(info.begin() + i); }
+OT_HOT void Buffer::removeGlyph(const unsigned i) { info.erase(info.begin() + i); }
 
-void Buffer::moveGlyph(const unsigned from, const unsigned to) {
+OT_WARM void Buffer::moveGlyph(const unsigned from, const unsigned to) {
   const GlyphInfo moved = info[from];
   for (unsigned i = from; i < to; i++) info[i] = info[i + 1];
   for (unsigned i = from; i > to; i--) info[i] = info[i - 1];
   info[to] = moved;
 }
 
-void Buffer::reverseRange(const unsigned start, const unsigned end) {
+OT_WARM void Buffer::reverseRange(const unsigned start, const unsigned end) {
   for (unsigned i = start, j = end; i + 1 < j; i++, j--) std::swap(info[i], info[j - 1]);
 }
 
 // witchhunt: deviation 11
-void Buffer::reverse() {
+OT_WARM void Buffer::reverse() {
   const unsigned n = len();
   for (unsigned i = 0, j = n; i + 1 < j; i++, j--) {
     std::swap(info[i], info[j - 1]);
@@ -141,7 +141,7 @@ void Buffer::reverse() {
   }
 }
 
-void Buffer::refreshDigest() {
+OT_HOT void Buffer::refreshDigest() {
   digest = Digest();
   for (const GlyphInfo& g : info) digest.add(g.codepoint);
 }

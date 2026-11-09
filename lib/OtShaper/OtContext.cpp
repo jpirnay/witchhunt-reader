@@ -9,8 +9,8 @@
 
 namespace ot::layout {
 
-bool matchInput(ApplyContext* c, const unsigned count, const Values& input, const MatchFunc func, const Table& data,
-                unsigned* endPosition, unsigned* totalComponentCount) {
+OT_HOT bool matchInput(ApplyContext* c, const unsigned count, const Values& input, const MatchFunc func,
+                       const Table& data, unsigned* endPosition, unsigned* totalComponentCount) {
   Buffer& buffer = c->buffer;
   if (count == 1) {
     *endPosition = buffer.idx + 1;
@@ -67,7 +67,8 @@ bool matchInput(ApplyContext* c, const unsigned count, const Values& input, cons
 // ligate_input(), editing the glyph array in place: the ligature replaces the
 // first component, glyphs skipped between components stay, the other
 // components are removed.
-void ligateInput(ApplyContext* c, const unsigned count, const uint32_t ligGlyph, const unsigned totalComponentCount) {
+OT_HOT void ligateInput(ApplyContext* c, const unsigned count, const uint32_t ligGlyph,
+                        const unsigned totalComponentCount) {
   Buffer& buffer = c->buffer;
   const uint16_t* mp = c->matchPositions;
 
@@ -135,8 +136,8 @@ void ligateInput(ApplyContext* c, const unsigned count, const uint32_t ligGlyph,
   }
 }
 
-bool matchBacktrack(ApplyContext* c, const unsigned count, const Values& values, const MatchFunc func,
-                    const Table& data) {
+OT_HOT bool matchBacktrack(ApplyContext* c, const unsigned count, const Values& values, const MatchFunc func,
+                           const Table& data) {
   if (!count) return true;
   SkippyIter& it = c->iterContext;
   it.reset(c->buffer.idx);  // reset_back: backtrack_len() == idx here
@@ -147,8 +148,8 @@ bool matchBacktrack(ApplyContext* c, const unsigned count, const Values& values,
   return true;
 }
 
-bool matchLookahead(ApplyContext* c, const unsigned count, const Values& values, const MatchFunc func,
-                    const Table& data, const unsigned startIndex) {
+OT_HOT bool matchLookahead(ApplyContext* c, const unsigned count, const Values& values, const MatchFunc func,
+                           const Table& data, const unsigned startIndex) {
   if (!count) return true;
   SkippyIter& it = c->iterContext;
   it.reset(startIndex - 1);
@@ -164,8 +165,8 @@ namespace {
 // apply_lookup(): runs the rule's nested lookups at their sequence
 // positions, shifting later positions as nested lookups grow or shrink the
 // glyph string.
-void applyNestedLookups(ApplyContext* c, unsigned count, const unsigned lookupCount, const Values& records,
-                        const unsigned matchEnd) {
+OT_HOT void applyNestedLookups(ApplyContext* c, unsigned count, const unsigned lookupCount, const Values& records,
+                               const unsigned matchEnd) {
   Buffer& buffer = c->buffer;
   uint16_t* mp = c->matchPositions;
   int end = static_cast<int>(matchEnd);
@@ -205,8 +206,9 @@ void applyNestedLookups(ApplyContext* c, unsigned count, const unsigned lookupCo
   buffer.idx = static_cast<unsigned>(end < 0 ? 0 : end);
 }
 
-bool contextApplyLookup(ApplyContext* c, const unsigned inputCount, const Values& input, const unsigned lookupCount,
-                        const Values& records, const MatchFunc func, const Table& data) {
+OT_HOT bool contextApplyLookup(ApplyContext* c, const unsigned inputCount, const Values& input,
+                               const unsigned lookupCount, const Values& records, const MatchFunc func,
+                               const Table& data) {
   if (inputCount > MAX_CONTEXT_LENGTH) return false;
   unsigned matchEnd = 0;
   if (!matchInput(c, inputCount, input, func, data, &matchEnd)) return false;
@@ -219,10 +221,10 @@ struct ChainFuncs {
   Table data[3];
 };
 
-bool chainContextApplyLookup(ApplyContext* c, const unsigned backtrackCount, const Values& backtrack,
-                             const unsigned inputCount, const Values& input, const unsigned lookaheadCount,
-                             const Values& lookahead, const unsigned lookupCount, const Values& records,
-                             const ChainFuncs& f) {
+OT_HOT bool chainContextApplyLookup(ApplyContext* c, const unsigned backtrackCount, const Values& backtrack,
+                                    const unsigned inputCount, const Values& input, const unsigned lookaheadCount,
+                                    const Values& lookahead, const unsigned lookupCount, const Values& records,
+                                    const ChainFuncs& f) {
   if (inputCount > MAX_CONTEXT_LENGTH) return false;
   unsigned matchEnd = 0;
   if (!matchInput(c, inputCount, input, f.func[1], f.data[1], &matchEnd)) return false;
@@ -233,14 +235,14 @@ bool chainContextApplyLookup(ApplyContext* c, const unsigned backtrackCount, con
 }
 
 // Rule and ChainRule layouts, shared by formats 1 and 2 (glyphs or classes).
-bool applyRule(ApplyContext* c, const Table& rule, const MatchFunc func, const Table& data) {
+OT_HOT bool applyRule(ApplyContext* c, const Table& rule, const MatchFunc func, const Table& data) {
   const uint16_t inputCount = rule.u16(0);
   const uint16_t lookupCount = rule.u16(2);
   const uint32_t records = 4 + 2 * (inputCount ? inputCount - 1u : 0u);
   return contextApplyLookup(c, inputCount, Values{rule, 4}, lookupCount, Values{rule, records}, func, data);
 }
 
-bool applyChainRule(ApplyContext* c, const Table& rule, const ChainFuncs& f) {
+OT_HOT bool applyChainRule(ApplyContext* c, const Table& rule, const ChainFuncs& f) {
   uint32_t o = 0;
   const uint16_t backtrackCount = rule.u16(o);
   const Values& backtrack{rule, o + 2};
@@ -257,7 +259,7 @@ bool applyChainRule(ApplyContext* c, const Table& rule, const ChainFuncs& f) {
                                  lookupCount, records, f);
 }
 
-bool applyRuleSet(ApplyContext* c, const Table& ruleSet, const MatchFunc func, const Table& data) {
+OT_HOT bool applyRuleSet(ApplyContext* c, const Table& ruleSet, const MatchFunc func, const Table& data) {
   const uint16_t count = ruleSet.u16(0);
   for (uint16_t i = 0; i < count; i++) {
     if (applyRule(c, ruleSet.offset16(2 + 2 * i), func, data)) return true;
@@ -265,7 +267,7 @@ bool applyRuleSet(ApplyContext* c, const Table& ruleSet, const MatchFunc func, c
   return false;
 }
 
-bool applyChainRuleSet(ApplyContext* c, const Table& ruleSet, const ChainFuncs& f) {
+OT_HOT bool applyChainRuleSet(ApplyContext* c, const Table& ruleSet, const ChainFuncs& f) {
   const uint16_t count = ruleSet.u16(0);
   for (uint16_t i = 0; i < count; i++) {
     if (applyChainRule(c, ruleSet.offset16(2 + 2 * i), f)) return true;
@@ -275,7 +277,7 @@ bool applyChainRuleSet(ApplyContext* c, const Table& ruleSet, const ChainFuncs& 
 
 }  // namespace
 
-bool applyContext(ApplyContext* c, const Table& st) {
+OT_HOT bool applyContext(ApplyContext* c, const Table& st) {
   const uint32_t glyph = c->buffer.cur().codepoint;
   switch (st.u16(0)) {
     case 1: {
@@ -302,7 +304,7 @@ bool applyContext(ApplyContext* c, const Table& st) {
   }
 }
 
-bool applyChainContext(ApplyContext* c, const Table& st) {
+OT_HOT bool applyChainContext(ApplyContext* c, const Table& st) {
   const uint32_t glyph = c->buffer.cur().codepoint;
   switch (st.u16(0)) {
     case 1: {

@@ -30,7 +30,7 @@ Table findCmapSubtable(const Table& cmap, const uint16_t platform, const uint16_
   return Table();
 }
 
-bool format4Glyph(const Table& t, const uint32_t cp, uint32_t* glyph) {
+OT_WARM bool format4Glyph(const Table& t, const uint32_t cp, uint32_t* glyph) {
   if (cp > 0xFFFF) return false;
   const uint32_t segCount = t.u16(6) / 2;
   const uint32_t endCodes = 14;
@@ -69,7 +69,7 @@ bool format4Glyph(const Table& t, const uint32_t cp, uint32_t* glyph) {
   return false;
 }
 
-bool format12Glyph(const Table& t, const uint32_t cp, uint32_t* glyph, const bool constant) {
+OT_WARM bool format12Glyph(const Table& t, const uint32_t cp, uint32_t* glyph, const bool constant) {
   int lo = 0;
   int hi = static_cast<int>(t.u32(12)) - 1;
   while (lo <= hi) {
@@ -115,7 +115,7 @@ bool tablesFromSfnt(const uint8_t* data, const uint32_t length, FaceTables* out)
   return true;
 }
 
-void Scale::set(const int32_t scale, const unsigned ppem, const uint16_t upem) {
+OT_WARM void Scale::set(const int32_t scale, const unsigned ppem, const uint16_t upem) {
   xScale = yScale = scale;
   xMultf = yMultf = static_cast<float>(scale) / static_cast<float>(upem);
   xMult = yMult = static_cast<int64_t>(scale) * 0x10000 / upem;
@@ -197,7 +197,7 @@ void Face::initFilters(const Table& cpac) {
   filters_[GPOS] = found[GPOS];
 }
 
-bool Face::nominalGlyph(const uint32_t cp, uint32_t* glyph) const {
+OT_WARM bool Face::nominalGlyph(const uint32_t cp, uint32_t* glyph) const {
   *glyph = 0;
   const Table& t = cmapSubtable_;
   switch (cmapFormat_) {
@@ -222,7 +222,7 @@ bool Face::nominalGlyph(const uint32_t cp, uint32_t* glyph) const {
   }
 }
 
-int32_t Face::advance(const uint32_t glyph) const {
+OT_HOT int32_t Face::advance(const uint32_t glyph) const {
   if (longMetrics_ == 0) return upem_ / 2;
   if (glyph < bearingCount_) {
     const uint32_t metric = glyph < longMetrics_ ? glyph : longMetrics_ - 1u;
@@ -231,7 +231,7 @@ int32_t Face::advance(const uint32_t glyph) const {
   return 0;
 }
 
-uint16_t Face::glyphProps(const uint32_t glyph) const {
+OT_HOT uint16_t Face::glyphProps(const uint32_t glyph) const {
   switch (classOf(glyphClassDef_, glyph)) {
     case 1:
       return props::BASE_GLYPH;
@@ -244,21 +244,21 @@ uint16_t Face::glyphProps(const uint32_t glyph) const {
   }
 }
 
-bool Face::markSetCovers(const uint32_t set, const uint32_t glyph) const {
+OT_HOT bool Face::markSetCovers(const uint32_t set, const uint32_t glyph) const {
   if (set >= markGlyphSetCount_) return false;
   return coverageIndex(markGlyphSets_.offset32(4 + 4 * set), glyph) != NOT_COVERED;
 }
 
-uint32_t Face::sanitizeLookupProps(uint32_t lookupProps) const {
+OT_HOT uint32_t Face::sanitizeLookupProps(uint32_t lookupProps) const {
   if ((lookupProps & lookupflag::USE_MARK_FILTERING_SET) && (lookupProps >> 16) >= markGlyphSetCount_) {
     lookupProps &= ~lookupflag::USE_MARK_FILTERING_SET;
   }
   return lookupProps;
 }
 
-uint16_t Face::lookupCount(const int table) const { return layout(table).offset16(8).u16(0); }
+OT_HOT uint16_t Face::lookupCount(const int table) const { return layout(table).offset16(8).u16(0); }
 
-Table Face::lookup(const int table, const uint32_t index) const {
+OT_HOT Table Face::lookup(const int table, const uint32_t index) const {
   const Table list = layout(table).offset16(8);
   if (index >= list.u16(0)) return Table();
   const Table lookup = list.offset16(2 + 2 * index);
@@ -266,7 +266,7 @@ Table Face::lookup(const int table, const uint32_t index) const {
   // HarfBuzz's Lookup::sanitize drops the lookup: a reverse chaining subtable
   // applied in a forward pass (or the reverse) would never move past its glyph.
   if (lookup.u16(0) == (table == GSUB ? layout::gsub::EXTENSION : layout::gpos::EXTENSION)) {
-    const auto extendedType = [&](const uint16_t i) {
+    const auto extendedType = [&](const uint16_t i) OT_HOT {
       const Table st = lookup.offset16(6 + 2 * i);
       return st.u16(0) == 1 ? st.u16(2) : 0;
     };
@@ -278,7 +278,7 @@ Table Face::lookup(const int table, const uint32_t index) const {
   return lookup;
 }
 
-uint32_t Face::lookupProps(const Table& lookup) const {
+OT_HOT uint32_t Face::lookupProps(const Table& lookup) const {
   const uint16_t flag = lookup.u16(2);
   uint32_t result = flag;
   if (flag & lookupflag::USE_MARK_FILTERING_SET) {

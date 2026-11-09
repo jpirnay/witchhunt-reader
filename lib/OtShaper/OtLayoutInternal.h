@@ -31,13 +31,13 @@ constexpr uint16_t SINGLE = 1, PAIR = 2, CURSIVE = 3, MARK_BASE = 4, MARK_LIG = 
 // nesting limit, 64, for these too).
 constexpr unsigned MAX_ATTACH_DEPTH = 64;
 
-inline int32_t saturate(const int64_t v) {
+OT_HOT inline int32_t saturate(const int64_t v) {
   if (v > INT32_MAX) return INT32_MAX;
   if (v < INT32_MIN) return INT32_MIN;
   return static_cast<int32_t>(v);
 }
-inline int32_t satAdd(const int32_t a, const int32_t b) { return saturate(static_cast<int64_t>(a) + b); }
-inline int32_t satSub(const int32_t a, const int32_t b) { return saturate(static_cast<int64_t>(a) - b); }
+OT_HOT inline int32_t satAdd(const int32_t a, const int32_t b) { return saturate(static_cast<int64_t>(a) + b); }
+OT_HOT inline int32_t satSub(const int32_t a, const int32_t b) { return saturate(static_cast<int64_t>(a) - b); }
 
 // Resolves an Extension subtable to the one it wraps (type and table).
 void resolveExtension(int table, uint16_t& type, Table& subtable);
@@ -78,14 +78,14 @@ struct SkippyIter {
   bool hasValues = false;
 
   void init(ApplyContext* ctx, bool contextMatch);
-  void setMatch(MatchFunc f, const Table& data, const Values& v) {
+  OT_HOT void setMatch(MatchFunc f, const Table& data, const Values& v) {
     func = f;
     matchData = data;
     values = v;
     hasValues = true;
   }
   void reset(unsigned start);
-  void resetFast(const unsigned start) { idx = start; }
+  OT_HOT void resetFast(const unsigned start) { idx = start; }
 
   MaySkip maySkip(const GlyphInfo& info) const;
   MayMatch mayMatch(const GlyphInfo& info) const;
@@ -127,16 +127,16 @@ struct ApplyContext {
   ApplyContext(const Face& f, const Scale& s, Buffer& b, const int t)
       : face(f), scale(s), buffer(b), table(t), hasGlyphClasses(f.hasGlyphClasses()), matchPositions(b.matchStack[0]) {}
 
-  void initIters() {
+  OT_HOT void initIters() {
     iterInput.init(this, false);
     iterContext.init(this, true);
   }
-  void setLookupProps(const uint32_t props) {
+  OT_HOT void setLookupProps(const uint32_t props) {
     lookupProps = face.sanitizeLookupProps(props);
     initIters();
   }
 
-  uint32_t randomNumber() {
+  OT_HOT uint32_t randomNumber() {
     buffer.randomState = static_cast<uint32_t>(static_cast<uint64_t>(buffer.randomState) * 48271 % 2147483647);
     return buffer.randomState;
   }

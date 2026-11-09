@@ -12,7 +12,7 @@ namespace ot {
 
 namespace {
 
-bool isHalantUse(const GlyphInfo& info) {
+OT_WARM bool isHalantUse(const GlyphInfo& info) {
   return (info.category == ucat::H || info.category == ucat::HVM || info.category == ucat::IS) && !info.ligated();
 }
 
@@ -21,7 +21,7 @@ constexpr uint64_t POST_BASE_FLAGS =
     flag(ucat::MAbv) | flag(ucat::MBlw) | flag(ucat::MPst) | flag(ucat::MPre) | flag(ucat::VAbv) | flag(ucat::VBlw) |
     flag(ucat::VPst) | flag(ucat::VPre) | flag(ucat::VMAbv) | flag(ucat::VMBlw) | flag(ucat::VMPst) | flag(ucat::VMPre);
 
-void reorderSyllable(Buffer& buffer, const unsigned start, const unsigned end) {
+OT_WARM void reorderSyllable(Buffer& buffer, const unsigned start, const unsigned end) {
   const auto type = buffer.info[start].syllableType();
   if (type != usyl::VIRAMA_TERMINATED && type != usyl::SAKOT_TERMINATED && type != usyl::STANDARD &&
       type != usyl::SYMBOL && type != usyl::BROKEN) {
@@ -55,11 +55,11 @@ void reorderSyllable(Buffer& buffer, const unsigned start, const unsigned end) {
 
 }  // namespace
 
-void useSetupMasks(Buffer& buffer) {
+OT_WARM void useSetupMasks(Buffer& buffer) {
   for (GlyphInfo& g : buffer.info) g.category = charData(g.codepoint).useCategory;
 }
 
-void useSetupSyllables(const Plan& plan, Buffer& buffer) {
+OT_WARM void useSetupSyllables(const Plan& plan, Buffer& buffer) {
   const unsigned len = buffer.len();
   // The machine skips CGJ-category characters (ZWJ among them), and a ZWNJ
   // that a mark follows.
@@ -90,7 +90,7 @@ void useSetupSyllables(const Plan& plan, Buffer& buffer) {
     uint8_t found = usyl::NON_CLUSTER;
     unsigned length = scanSyllable(
         USE_CLASSES, USE_CLASS_COUNT, USE_TRANSITIONS, USE_ACCEPT, count - p,
-        [&](const unsigned i) { return buffer.info[index[p + i]].category; }, &found);
+        [&](const unsigned i) OT_WARM { return buffer.info[index[p + i]].category; }, &found);
     if (length == 0) length = 1;
     const auto type = found;
     if (type == usyl::BROKEN) buffer.hasBrokenSyllable = true;
@@ -104,7 +104,7 @@ void useSetupSyllables(const Plan& plan, Buffer& buffer) {
 
   // setup_rphf_mask(): the first glyphs of each syllable may form repha.
   if (plan.useRphfMask) {
-    forEachSyllable(buffer, [&](const unsigned start, const unsigned end) {
+    forEachSyllable(buffer, [&](const unsigned start, const unsigned end) OT_WARM {
       const unsigned limit = buffer.info[start].category == ucat::R ? 1 : std::min(3u, end - start);
       for (unsigned i = start; i < start + limit; i++) buffer.info[i].mask |= plan.useRphfMask;
     });
@@ -118,7 +118,7 @@ void useSetupSyllables(const Plan& plan, Buffer& buffer) {
   enum { ISOL, INIT, MEDI, FINA, NONE };
   unsigned lastStart = 0;
   int lastForm = NONE;
-  forEachSyllable(buffer, [&](const unsigned start, const unsigned end) {
+  forEachSyllable(buffer, [&](const unsigned start, const unsigned end) OT_WARM {
     const auto type = buffer.info[start].syllableType();
     if (type == usyl::HIEROGLYPH || type == usyl::NON_CLUSTER) {
       lastForm = NONE;
@@ -139,10 +139,10 @@ void useSetupSyllables(const Plan& plan, Buffer& buffer) {
   });
 }
 
-void useRecordRphf(const Plan& plan, Buffer& buffer) {
+OT_WARM void useRecordRphf(const Plan& plan, Buffer& buffer) {
   const uint32_t mask = plan.useRphfMask;
   if (!mask) return;
-  forEachSyllable(buffer, [&](const unsigned start, const unsigned end) {
+  forEachSyllable(buffer, [&](const unsigned start, const unsigned end) OT_WARM {
     for (unsigned i = start; i < end && (buffer.info[i].mask & mask); i++) {
       if (buffer.info[i].substituted()) {
         buffer.info[i].category = ucat::R;
@@ -152,8 +152,8 @@ void useRecordRphf(const Plan& plan, Buffer& buffer) {
   });
 }
 
-void useRecordPref(Buffer& buffer) {
-  forEachSyllable(buffer, [&](const unsigned start, const unsigned end) {
+OT_WARM void useRecordPref(Buffer& buffer) {
+  forEachSyllable(buffer, [&](const unsigned start, const unsigned end) OT_WARM {
     for (unsigned i = start; i < end; i++) {
       if (buffer.info[i].substituted()) {
         buffer.info[i].category = ucat::VPre;
@@ -163,10 +163,11 @@ void useRecordPref(Buffer& buffer) {
   });
 }
 
-void useReorder(const Face& face, Buffer& buffer) {
+OT_WARM void useReorder(const Face& face, Buffer& buffer) {
   insertDottedCircles(face, buffer, usyl::BROKEN, ucat::B, ucat::R, false, 0);
   if (!buffer.successful) return;
-  forEachSyllable(buffer, [&](const unsigned start, const unsigned end) { reorderSyllable(buffer, start, end); });
+  forEachSyllable(buffer,
+                  [&](const unsigned start, const unsigned end) OT_WARM { reorderSyllable(buffer, start, end); });
 }
 
 }  // namespace ot

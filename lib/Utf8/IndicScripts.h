@@ -1,5 +1,13 @@
 #pragma once
 
+// exp/shaper-iram: the shaper's large IRAM tier (lib/OtShaper/OtHot.h).
+#if defined(ESP_PLATFORM) && defined(OT_IRAM) && OT_IRAM >= 2
+#include <esp_attr.h>
+#define OT_WARM IRAM_ATTR
+#else
+#define OT_WARM
+#endif
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -62,13 +70,13 @@ constexpr uint32_t MALAYALAM_DOT_REPH = 0x0D4E;
 // around them: the Vedic stress signs and dandas (encoded in the Devanagari
 // block), the joiners that steer conjunct formation, and the dotted circle
 // that stands in for a missing base.
-constexpr bool isShared(const uint32_t cp) {
+OT_WARM constexpr bool isShared(const uint32_t cp) {
   return (cp >= 0x0951 && cp <= 0x0954) || cp == 0x0964 || cp == 0x0965 || cp == ZWNJ || cp == ZWJ ||
          cp == DOTTED_CIRCLE;
 }
 
 // The script `cp` is written in, or nullptr for shared and non-Indic codepoints.
-constexpr const ScriptInfo* scriptOf(const uint32_t cp) {
+OT_WARM constexpr const ScriptInfo* scriptOf(const uint32_t cp) {
   if (cp < FIRST_CODEPOINT || cp > LAST_CODEPOINT || isShared(cp)) return nullptr;
   return &SCRIPTS[(cp - FIRST_CODEPOINT) >> 7];
 }

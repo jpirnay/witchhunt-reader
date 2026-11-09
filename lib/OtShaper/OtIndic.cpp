@@ -16,21 +16,22 @@ constexpr uint64_t CONSONANT_FLAGS = flag(icat::C) | flag(icat::CS) | flag(icat:
                                      flag(icat::PLACEHOLDER) | flag(icat::DOTTEDCIRCLE);
 constexpr uint64_t JOINER_FLAGS = flag(icat::ZWJ) | flag(icat::ZWNJ);
 
-bool isOneOf(const GlyphInfo& info, const uint64_t flags) {
+OT_WARM bool isOneOf(const GlyphInfo& info, const uint64_t flags) {
   if (info.ligated()) return false;  // if it ligated, all bets are off
   return (flags >> info.category) & 1;
 }
-bool isConsonant(const GlyphInfo& info) { return isOneOf(info, CONSONANT_FLAGS); }
-bool isJoiner(const GlyphInfo& info) { return isOneOf(info, JOINER_FLAGS); }
-bool isHalant(const GlyphInfo& info) { return isOneOf(info, flag(icat::H)); }
-bool flagSet(const uint8_t value, const uint64_t flags) { return (flags >> value) & 1; }
+OT_WARM bool isConsonant(const GlyphInfo& info) { return isOneOf(info, CONSONANT_FLAGS); }
+OT_WARM bool isJoiner(const GlyphInfo& info) { return isOneOf(info, JOINER_FLAGS); }
+OT_WARM bool isHalant(const GlyphInfo& info) { return isOneOf(info, flag(icat::H)); }
+OT_WARM bool flagSet(const uint8_t value, const uint64_t flags) { return (flags >> value) & 1; }
 
 // witchhunt: deviation 13 - the anonymous namespace closes here, and opens again after consonantPositionFromFace().
 }  // namespace
 
 // consonant_position_from_face().
 // witchhunt: deviation 13 - outside the anonymous namespace: Plan::consonantPosition() calls it.
-uint8_t consonantPositionFromFace(const Face& face, const Plan& plan, const uint32_t consonant, const uint32_t virama) {
+OT_WARM uint8_t consonantPositionFromFace(const Face& face, const Plan& plan, const uint32_t consonant,
+                                          const uint32_t virama) {
   const uint32_t glyphs[3] = {virama, consonant, virama};
   if (plan.wouldSubstitute(face, Plan::WS_BLWF, glyphs, 2) ||
       plan.wouldSubstitute(face, Plan::WS_BLWF, glyphs + 1, 2) ||
@@ -52,7 +53,7 @@ uint8_t consonantPositionFromFace(const Face& face, const Plan& plan, const uint
 namespace {  // witchhunt: deviation 13
 
 // The font's virama glyph, 0 when it has none.
-uint32_t viramaGlyph(const Face& face, const Plan& plan) {
+OT_WARM uint32_t viramaGlyph(const Face& face, const Plan& plan) {
   uint32_t glyph;
   face.nominalGlyph(plan.indicConfig->virama, &glyph);
   return glyph;
@@ -61,8 +62,8 @@ uint32_t viramaGlyph(const Face& face, const Plan& plan) {
 // Initial reordering step 1: the base consonant, searching back from the
 // end past consonants with below- or post-base forms, and whether the
 // syllable starts with a reph.
-unsigned findBase(const Face& face, const Plan& plan, Buffer& buffer, const unsigned start, const unsigned end,
-                  bool* hasRephOut) {
+OT_WARM unsigned findBase(const Face& face, const Plan& plan, Buffer& buffer, const unsigned start, const unsigned end,
+                          bool* hasRephOut) {
   auto& info = buffer.info;
   const IndicConfig& config = *plan.indicConfig;
   const uint32_t* masks = plan.indicMasks;
@@ -114,8 +115,8 @@ unsigned findBase(const Face& face, const Plan& plan, Buffer& buffer, const unsi
 
 // Steps 2 and 3 (matras were decomposed and marks ordered by
 // normalization): each glyph's position, so sorting puts it in visual order.
-void assignPositions(const Plan& plan, Buffer& buffer, const unsigned start, const unsigned end, const unsigned base,
-                     const bool hasReph) {
+OT_WARM void assignPositions(const Plan& plan, Buffer& buffer, const unsigned start, const unsigned end,
+                             const unsigned base, const bool hasReph) {
   auto& info = buffer.info;
   for (unsigned i = start; i < base; i++) info[i].position = std::min<uint8_t>(ipos::PRE_C, info[i].position);
   if (base < end) info[base].position = ipos::BASE_C;
@@ -176,10 +177,10 @@ void assignPositions(const Plan& plan, Buffer& buffer, const unsigned start, con
 
 // Sorts the syllable by position; returns the base's new index. A run of
 // left matras is flipped back into logical order.
-unsigned sortSyllable(Buffer& buffer, const unsigned start, const unsigned end) {
+OT_WARM unsigned sortSyllable(Buffer& buffer, const unsigned start, const unsigned end) {
   auto& info = buffer.info;
   stableSort(info.data() + start, info.data() + end,
-             [](const GlyphInfo& a, const GlyphInfo& b) { return a.position < b.position; });
+             [](const GlyphInfo& a, const GlyphInfo& b) OT_WARM { return a.position < b.position; });
 
   // Find the base again; also flip a sequence of left matras.
   unsigned firstLeftMatra = end;
@@ -211,8 +212,8 @@ unsigned sortSyllable(Buffer& buffer, const unsigned start, const unsigned end) 
 
 // Feature masks: reph, half and below forms before the base, below/above/
 // post forms after it, pre-base-reordering Ra, and ZWNJ blocking half forms.
-void setMasks(const Face& face, const Plan& plan, Buffer& buffer, const unsigned start, const unsigned end,
-              const unsigned base) {
+OT_WARM void setMasks(const Face& face, const Plan& plan, Buffer& buffer, const unsigned start, const unsigned end,
+                      const unsigned base) {
   auto& info = buffer.info;
   const IndicConfig& config = *plan.indicConfig;
   const uint32_t* masks = plan.indicMasks;
@@ -263,8 +264,8 @@ void setMasks(const Face& face, const Plan& plan, Buffer& buffer, const unsigned
 }
 
 // initial_reordering_consonant_syllable().
-void initialReorderingConsonantSyllable(const Face& face, const Plan& plan, Buffer& buffer, const unsigned start,
-                                        const unsigned end) {
+OT_WARM void initialReorderingConsonantSyllable(const Face& face, const Plan& plan, Buffer& buffer,
+                                                const unsigned start, const unsigned end) {
   auto& info = buffer.info;
 
   // Kannada Ra,H,ZWJ behaves like Ra,ZWJ,H (legacy usage).
@@ -279,8 +280,8 @@ void initialReorderingConsonantSyllable(const Face& face, const Plan& plan, Buff
   setMasks(face, plan, buffer, start, end, sortSyllable(buffer, start, end));
 }
 
-void finalReorderingSyllable(const Plan& plan, Buffer& buffer, const uint32_t virama, const unsigned start,
-                             const unsigned end) {
+OT_WARM void finalReorderingSyllable(const Plan& plan, Buffer& buffer, const uint32_t virama, const unsigned start,
+                                     const unsigned end) {
   auto& info = buffer.info;
   const IndicConfig& config = *plan.indicConfig;
   const uint32_t* masks = plan.indicMasks;
@@ -378,7 +379,7 @@ void finalReorderingSyllable(const Plan& plan, Buffer& buffer, const uint32_t vi
 
     // Step 2: after the first explicit halant between the first post-reph
     // consonant and the last main consonant.
-    auto afterExplicitHalant = [&]() {
+    auto afterExplicitHalant = [&]() OT_WARM {
       newRephPos = start + 1;
       while (newRephPos < base && !isHalant(info[newRephPos])) newRephPos++;
       if (newRephPos < base && isHalant(info[newRephPos])) {
@@ -456,7 +457,7 @@ void finalReorderingSyllable(const Plan& plan, Buffer& buffer, const uint32_t vi
 
 }  // namespace
 
-void indicSetupMasks(Buffer& buffer) {
+OT_WARM void indicSetupMasks(Buffer& buffer) {
   for (GlyphInfo& g : buffer.info) {
     const CharData d = charData(g.codepoint);
     g.category = d.indicCategory;
@@ -464,13 +465,13 @@ void indicSetupMasks(Buffer& buffer) {
   }
 }
 
-void indicSetupSyllables(Buffer& buffer) {
+OT_WARM void indicSetupSyllables(Buffer& buffer) {
   using namespace machines;
   findSyllables(buffer, INDIC_CLASSES, INDIC_CLASS_COUNT, INDIC_TRANSITIONS, INDIC_ACCEPT, isyl::NON_INDIC,
                 isyl::BROKEN);
 }
 
-void indicInitialReordering(const Face& face, const Plan& plan, Buffer& buffer) {
+OT_WARM void indicInitialReordering(const Face& face, const Plan& plan, Buffer& buffer) {
   // update_consonant_positions_indic().
   if (const uint32_t virama = viramaGlyph(face, plan)) {
     for (GlyphInfo& g : buffer.info) {
@@ -480,7 +481,7 @@ void indicInitialReordering(const Face& face, const Plan& plan, Buffer& buffer) 
   }
   insertDottedCircles(face, buffer, isyl::BROKEN, icat::DOTTEDCIRCLE, icat::Repha, true, ipos::END);
   if (!buffer.successful) return;
-  forEachSyllable(buffer, [&](const unsigned start, const unsigned end) {
+  forEachSyllable(buffer, [&](const unsigned start, const unsigned end) OT_WARM {
     const uint8_t type = buffer.info[start].syllableType();
     if (type == isyl::VOWEL || type == isyl::CONSONANT || type == isyl::BROKEN || type == isyl::STANDALONE) {
       initialReorderingConsonantSyllable(face, plan, buffer, start, end);
@@ -488,12 +489,11 @@ void indicInitialReordering(const Face& face, const Plan& plan, Buffer& buffer) 
   });
 }
 
-void indicFinalReordering(const Face& face, const Plan& plan, Buffer& buffer) {
+OT_WARM void indicFinalReordering(const Face& face, const Plan& plan, Buffer& buffer) {
   if (!buffer.len()) return;
   const uint32_t virama = viramaGlyph(face, plan);
-  forEachSyllable(buffer, [&](const unsigned start, const unsigned end) {
-    finalReorderingSyllable(plan, buffer, virama, start, end);
-  });
+  forEachSyllable(buffer, [&](const unsigned start, const unsigned end)
+                              OT_WARM { finalReorderingSyllable(plan, buffer, virama, start, end); });
 }
 
 }  // namespace ot

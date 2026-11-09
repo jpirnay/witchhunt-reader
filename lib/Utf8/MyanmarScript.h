@@ -1,5 +1,13 @@
 #pragma once
 
+// exp/shaper-iram: the shaper's large IRAM tier (lib/OtShaper/OtHot.h).
+#if defined(ESP_PLATFORM) && defined(OT_IRAM) && OT_IRAM >= 2
+#include <esp_attr.h>
+#define OT_WARM IRAM_ATTR
+#else
+#define OT_WARM
+#endif
+
 #include <cstddef>
 #include <cstdint>
 
@@ -25,7 +33,7 @@ constexpr uint32_t ASAT = 0x103A;     // the visible killer: the consonant befor
 
 // Myanmar (U+1000-109F), Myanmar Extended-B (U+A9E0-A9FF) and Myanmar Extended-A (U+AA60-AA7F): the blocks the
 // shaper's Myanmar tables cover. Extended-C (U+116D0-116FF) is left out: no Noto font maps it.
-constexpr bool isRunMember(const uint32_t cp) {
+OT_WARM constexpr bool isRunMember(const uint32_t cp) {
   return (cp >= 0x1000 && cp <= 0x109F) || (cp >= 0xA9E0 && cp <= 0xA9FF) || (cp >= 0xAA60 && cp <= 0xAA7F);
 }
 

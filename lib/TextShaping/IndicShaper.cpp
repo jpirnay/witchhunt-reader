@@ -94,7 +94,7 @@ constexpr int64_t roundPixels(const int64_t v) { return v >= 0 ? (v + 32) / 64 :
 // The glyphs `buffer` holds into `sink` as records, rounded as upstream's appendGlyphs rounds them: the advance from
 // 26.6 to 12.4 pixels, the offsets to whole pixels with y down, in visual order. False when a record falls outside its
 // fields (refused, never clamped) or the sink has no room.
-bool appendGlyphs(const ot::Buffer& buffer, PieceSink& sink) {
+OT_WARM bool appendGlyphs(const ot::Buffer& buffer, PieceSink& sink) {
   for (unsigned i = 0; i < buffer.len(); i++) {
     const ot::GlyphPosition& pos = buffer.pos[i];
     const uint32_t glyph = buffer.info[i].codepoint;
@@ -143,22 +143,22 @@ constexpr uint8_t kArabicContextClusters = 2;
 constexpr unsigned kMaxContextCodepoints = kArabicContextCodepoints;
 static_assert(kMaxContextCodepoints >= kContextCodepoints && kArabicContextCodepoints <= UINT8_MAX);
 
-bool indicBreak(const uint32_t* cps, unsigned /*count*/, const unsigned i) {
+OT_WARM bool indicBreak(const uint32_t* cps, unsigned /*count*/, const unsigned i) {
   return indic::syllableBreakAllowed(cps[i - 1], cps[i]);
 }
 
-bool arabicBreak(const uint32_t* cps, unsigned /*count*/, const unsigned i) {
+OT_WARM bool arabicBreak(const uint32_t* cps, unsigned /*count*/, const unsigned i) {
   return arabic::isClusterBreak(cps[i - 1], cps[i]);
 }
 
 // The break rule reads the code point after cps[i] past any dot below.
-bool myanmarBreak(const uint32_t* cps, const unsigned count, const unsigned i) {
+OT_WARM bool myanmarBreak(const uint32_t* cps, const unsigned count, const unsigned i) {
   unsigned next = i + 1;
   while (next < count && cps[next] == myanmar::DOT_BELOW) next++;
   return myanmar::breakAllowed(cps[i - 1], cps[i], next < count ? cps[next] : 0);
 }
 
-ScriptPolicy policyOf(const Run& run) {
+OT_WARM ScriptPolicy policyOf(const Run& run) {
   switch (run.kind) {
     case RunKind::Arabic:
       return {.kind = RunKind::Arabic,
@@ -199,7 +199,7 @@ struct Context {
 };
 
 // Whether the context is of `script`: each code point the script's or shared, and one of them the script's.
-bool ofScript(const uint32_t* cps, const unsigned count, const indic::ScriptInfo& script) {
+OT_WARM bool ofScript(const uint32_t* cps, const unsigned count, const indic::ScriptInfo& script) {
   bool letter = false;
   for (unsigned i = 0; i < count; i++) {
     const indic::ScriptInfo* const of = indic::scriptOf(cps[i]);
@@ -214,7 +214,7 @@ bool ofScript(const uint32_t* cps, const unsigned count, const indic::ScriptInfo
 
 // Whether a Myanmar context is Myanmar: each code point a member, a joiner or the dotted circle, and one of them a
 // member.
-bool ofMyanmar(const uint32_t* cps, const unsigned count) {
+OT_WARM bool ofMyanmar(const uint32_t* cps, const unsigned count) {
   bool member = false;
   for (unsigned i = 0; i < count; i++) {
     if (myanmar::isRunMember(cps[i])) {
@@ -227,13 +227,13 @@ bool ofMyanmar(const uint32_t* cps, const unsigned count) {
 }
 
 // Whether a context of `policy` (Indic or Myanmar) is of its script.
-bool ofPolicy(const ScriptPolicy& policy, const uint32_t* cps, const unsigned count) {
+OT_WARM bool ofPolicy(const ScriptPolicy& policy, const uint32_t* cps, const unsigned count) {
   return policy.kind == RunKind::Myanmar ? ofMyanmar(cps, count) : ofScript(cps, count, *policy.indic);
 }
 
 // The code point of `text` at byte `pos` or after it that is not the dot below, 0 at the text's end: what
 // myanmar::breakAllowed reads after the code point before `pos`.
-uint32_t nextPastDotBelow(const std::string_view text, size_t pos) {
+OT_WARM uint32_t nextPastDotBelow(const std::string_view text, size_t pos) {
   while (pos < text.size()) {
     const uint32_t cp = TextShaping::decodeAt(text, pos);
     if (cp != myanmar::DOT_BELOW) return cp;
@@ -243,15 +243,15 @@ uint32_t nextPastDotBelow(const std::string_view text, size_t pos) {
 
 // Whether a syllable of `policy`'s script (Indic or Myanmar) starts at `cp`, after `previous`; `end` is the byte of
 // `text` just past `cp`.
-bool syllableStarts(const ScriptPolicy& policy, const std::string_view text, const uint32_t previous, const uint32_t cp,
-                    const size_t end) {
+OT_WARM bool syllableStarts(const ScriptPolicy& policy, const std::string_view text, const uint32_t previous,
+                            const uint32_t cp, const size_t end) {
   if (policy.kind == RunKind::Myanmar) return myanmar::breakAllowed(previous, cp, nextPastDotBelow(text, end));
   return indic::syllableBreakAllowed(previous, cp);
 }
 
 // The last syllable of `text` (glued before the token) into `out` (room for kContextCodepoints), when it is of the
 // policy's script (Indic or Myanmar); none otherwise.
-Context lastSyllable(const std::string_view text, const ScriptPolicy& policy, uint32_t* out) {
+OT_WARM Context lastSyllable(const std::string_view text, const ScriptPolicy& policy, uint32_t* out) {
   Context context;
   uint32_t previous = 0;
   for (size_t pos = 0; pos < text.size();) {
@@ -271,7 +271,7 @@ Context lastSyllable(const std::string_view text, const ScriptPolicy& policy, ui
 
 // The first syllable of `text` (glued after the token) into `out` (room for kContextCodepoints), when it is of the
 // policy's script (Indic or Myanmar); none otherwise.
-Context firstSyllable(const std::string_view text, const ScriptPolicy& policy, uint32_t* out) {
+OT_WARM Context firstSyllable(const std::string_view text, const ScriptPolicy& policy, uint32_t* out) {
   Context context;
   uint32_t previous = 0;
   for (size_t pos = 0; pos < text.size();) {
@@ -289,7 +289,7 @@ Context firstSyllable(const std::string_view text, const ScriptPolicy& policy, u
 
 // Whether an Arabic context cluster is Arabic: each code point a run member or a joiner, and one of them a letter (a
 // member that is not a mark, AL punctuation included).
-bool ofArabic(const uint32_t* cps, const unsigned count) {
+OT_WARM bool ofArabic(const uint32_t* cps, const unsigned count) {
   bool letter = false;
   for (unsigned i = 0; i < count; i++) {
     const uint32_t cp = cps[i];
@@ -306,7 +306,7 @@ bool ofArabic(const uint32_t* cps, const unsigned count) {
 // many as fit in `room` code points, nearest first, into `out` (none cut: a cluster that does not fit is left out, with
 // all before it). It stops at the first cluster that is not Arabic. A window of the text's last room + 1 code points is
 // enough: a cluster that starts at its first code point cannot fit with the window's rest.
-Context lastArabicClusters(const std::string_view text, const unsigned room, uint32_t* out) {
+OT_WARM Context lastArabicClusters(const std::string_view text, const unsigned room, uint32_t* out) {
   Context context;
   if (room == 0) return context;
   uint32_t window[kArabicContextCodepoints + 1];  // the text's last code points, in order; room < the array's size
@@ -335,7 +335,7 @@ Context lastArabicClusters(const std::string_view text, const unsigned room, uin
 
 // The glued Arabic neighbour's first whole clusters: as many as fit in `room` code points, into `out`, as
 // lastArabicClusters takes the last. It stops at the first cluster that is not Arabic.
-Context firstArabicClusters(const std::string_view text, const unsigned room, uint32_t* out) {
+OT_WARM Context firstArabicClusters(const std::string_view text, const unsigned room, uint32_t* out) {
   Context context;
   unsigned kept = 0;  // the whole clusters read: out[0, kept)
   uint32_t previous = 0;
@@ -361,9 +361,10 @@ enum class Attempt : uint8_t { Shaped, TooLong, Failed };
 // the glue is the first token's ligature), and it is an empty piece. False for a run without context the font's GSUB
 // deletes every glyph of: a glyph form of no glyphs is no form (a line would draw the run's code points at no width),
 // so it is laid out as a run that cannot be shaped.
-bool shapeRun(ShapingFace& face, const Request& request, const ScriptPolicy& policy, const uint32_t* cps,
-              const unsigned count, const Context& before, const Context& after, ot::Buffer& buffer, PieceSink& sink) {
-  const auto attempt = [&](const unsigned from, const unsigned length, const ot::RunContext& context) {
+OT_WARM bool shapeRun(ShapingFace& face, const Request& request, const ScriptPolicy& policy, const uint32_t* cps,
+                      const unsigned count, const Context& before, const Context& after, ot::Buffer& buffer,
+                      PieceSink& sink) {
+  const auto attempt = [&](const unsigned from, const unsigned length, const ot::RunContext& context) OT_WARM {
     const ot::Plan* const plan = face.plan(policy.script, request.languageTags);
     const ot::Face* const shaping = plan != nullptr ? face.current() : nullptr;
     if (shaping == nullptr) return Attempt::Failed;
@@ -387,25 +388,25 @@ bool shapeRun(ShapingFace& face, const Request& request, const ScriptPolicy& pol
   // end, mirrored, to be written in that order.
   const unsigned runBegin = before.count;
   const unsigned runEnd = count - after.count;
-  const auto breakAt = [&](const unsigned i) {
+  const auto breakAt = [&](const unsigned i) OT_WARM {
     return i == 0 || i == count || i == runBegin || i == runEnd || policy.clusterBreak(cps, count, i);
   };
-  const auto prevBreak = [&](unsigned i) {
+  const auto prevBreak = [&](unsigned i) OT_WARM {
     do i--;
     while (!breakAt(i));
     return i;
   };
-  const auto nextBreak = [&](unsigned i) {
+  const auto nextBreak = [&](unsigned i) OT_WARM {
     do i++;
     while (!breakAt(i));
     return i;
   };
   // Where `clusters` clusters before `i` begin, and where as many after it end: a piece's context at most.
-  const auto contextFrom = [&](unsigned i, const unsigned clusters) {
+  const auto contextFrom = [&](unsigned i, const unsigned clusters) OT_WARM {
     for (unsigned c = 0; c < clusters && i > 0; c++) i = prevBreak(i);
     return i;
   };
-  const auto contextTo = [&](unsigned i, const unsigned clusters) {
+  const auto contextTo = [&](unsigned i, const unsigned clusters) OT_WARM {
     for (unsigned c = 0; c < clusters && i < count; c++) i = nextBreak(i);
     return i;
   };
@@ -435,7 +436,7 @@ bool shapeRun(ShapingFace& face, const Request& request, const ScriptPolicy& pol
     enum Want : uint8_t { None, Codepoint, Cluster, Reach };
     static constexpr Want CONTEXT[][2] = {{Reach, Reach},    {Cluster, Cluster}, {Codepoint, Codepoint},
                                           {Codepoint, None}, {None, Codepoint},  {None, None}};
-    const auto lengthOf = [&](const Want want, const bool ahead) -> unsigned {
+    const auto lengthOf = [&](const Want want, const bool ahead) OT_WARM -> unsigned {
       if (want < Cluster) return want;  // none or one code point
       const unsigned clusters = want == Reach ? reach : 1;
       return ahead ? begin - contextFrom(begin, clusters) : contextTo(end, clusters) - end;
@@ -469,7 +470,7 @@ struct RunMemory {
 };
 
 // Where the joiners just before byte `at` of `text` begin, at most `most` of them.
-size_t joinersBefore(const std::string_view text, size_t at, const unsigned most) {
+OT_WARM size_t joinersBefore(const std::string_view text, size_t at, const unsigned most) {
   for (unsigned n = 0; n < most && at >= kJoinerBytes; n++) {
     size_t pos = at - kJoinerBytes;
     const uint32_t cp = TextShaping::decodeAt(text, pos);
@@ -484,8 +485,8 @@ size_t joinersBefore(const std::string_view text, size_t at, const unsigned most
 // run starts at a letter, and a ZWJ there joins it); a run from the token's start, those joiners included, takes the
 // glued neighbour's last syllable (Indic, Myanmar) or last clusters (Arabic, as many as fit) before them. After it, a
 // run to the token's end takes the neighbour's first syllable or first clusters.
-bool shapeGlyphs(const std::string_view text, const Run& run, const ScriptPolicy& policy, const Request& request,
-                 const RunMemory& memory, PieceSink& sink) {
+OT_WARM bool shapeGlyphs(const std::string_view text, const Run& run, const ScriptPolicy& policy,
+                         const Request& request, const RunMemory& memory, PieceSink& sink) {
   uint32_t* const cps = memory.codepoints;
   const unsigned room = policy.contextCodepoints;  // at most kMaxContextCodepoints: CallMemory's room holds both sides
   const bool arabicRun = run.kind == RunKind::Arabic;
@@ -511,7 +512,7 @@ bool shapeGlyphs(const std::string_view text, const Run& run, const ScriptPolicy
 }
 
 // The Arabic run starting at `begin`: members and, after one, ZWJ and ZWNJ. Returns its end.
-size_t arabicRunEnd(const std::string_view text, const size_t begin) {
+OT_WARM size_t arabicRunEnd(const std::string_view text, const size_t begin) {
   size_t pos = begin;
   while (pos < text.size()) {
     size_t next = pos;
@@ -524,7 +525,7 @@ size_t arabicRunEnd(const std::string_view text, const size_t begin) {
 
 // Where the Myanmar run that starts at byte `begin` ends: members, with the joiners and dotted circles among them and
 // around them. `begin` when no member follows the joiners and dotted circles there: no Myanmar run starts at it.
-size_t myanmarRunEnd(const std::string_view text, const size_t begin) {
+OT_WARM size_t myanmarRunEnd(const std::string_view text, const size_t begin) {
   size_t pos = begin;
   bool member = false;
   while (pos < text.size()) {
@@ -542,7 +543,7 @@ size_t myanmarRunEnd(const std::string_view text, const size_t begin) {
 
 // The first Arabic run of `text` at or after byte `from`, as scanRuns finds it: [begin, end), both text.size() when
 // there is none. An Indic run never holds the letter that starts one.
-void nextArabicRun(const std::string_view text, size_t from, size_t* begin, size_t* end) {
+OT_WARM void nextArabicRun(const std::string_view text, size_t from, size_t* begin, size_t* end) {
   while (from < text.size()) {
     size_t next = from;
     const uint32_t cp = TextShaping::decodeAt(text, next);
@@ -589,7 +590,7 @@ Outcome reorderWithoutAFace(const std::string_view text, const CallMemory& memor
 
 }  // namespace
 
-size_t scanRuns(std::string_view text, Run* out) {
+OT_WARM size_t scanRuns(std::string_view text, Run* out) {
   if (text.size() > UINT16_MAX) return 0;
   const size_t room = maxRuns(text.size());
   size_t count = 0;
@@ -630,7 +631,7 @@ size_t scanRuns(std::string_view text, Run* out) {
   return count;
 }
 
-bool holdsIndic(std::string_view text) {
+OT_WARM bool holdsIndic(std::string_view text) {
   const auto* bytes = reinterpret_cast<const unsigned char*>(text.data());
   for (size_t i = 0; i + 3 <= text.size(); i++) {
     if (indic::startsIndic(bytes + i)) return true;
@@ -638,7 +639,7 @@ bool holdsIndic(std::string_view text) {
   return false;
 }
 
-bool holdsShaped(std::string_view text) {
+OT_WARM bool holdsShaped(std::string_view text) {
   return holdsIndic(text) || arabic::holdsArabic(text.data(), text.size()) ||
          myanmar::holdsMyanmar(text.data(), text.size());
 }
@@ -701,7 +702,7 @@ CallMemory::~CallMemory() {
 
 bool CallMemory::valid() const { return reorder_ != nullptr; }
 
-Outcome shapeToken(const std::string_view text, const Request& request, CallMemory& memory, PieceSink& sink) {
+OT_WARM Outcome shapeToken(const std::string_view text, const Request& request, CallMemory& memory, PieceSink& sink) {
   if (!holdsShaped(text)) return Outcome::Plain;
   // Without a face, Arabic is drawn unjoined (decision 5) and Myanmar as its code points, so only Indic text needs a
   // form.

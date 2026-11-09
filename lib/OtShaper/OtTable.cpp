@@ -4,15 +4,15 @@ namespace ot {
 
 namespace {
 
-inline uint16_t be16(const uint8_t* p) { return static_cast<uint16_t>((p[0] << 8) | p[1]); }
+OT_HOT inline uint16_t be16(const uint8_t* p) { return static_cast<uint16_t>((p[0] << 8) | p[1]); }
 
 // Entries of `recordSize` bytes after a 4-byte header that fit in `t`: the
 // declared count, clamped so the searches below can read without checks.
-inline unsigned fittingCount(const Table& t, const unsigned recordSize) { return t.count16(2, 4, recordSize); }
+OT_HOT inline unsigned fittingCount(const Table& t, const unsigned recordSize) { return t.count16(2, 4, recordSize); }
 
 }  // namespace
 
-int coverageIndex(const Table& coverage, const uint32_t glyph) {
+OT_HOT int coverageIndex(const Table& coverage, const uint32_t glyph) {
   const uint8_t* d = coverage.data();
   switch (coverage.u16(0)) {
     case 1: {
@@ -57,7 +57,7 @@ int coverageIndex(const Table& coverage, const uint32_t glyph) {
   }
 }
 
-uint16_t classOf(const Table& classDef, const uint32_t glyph) {
+OT_HOT uint16_t classOf(const Table& classDef, const uint32_t glyph) {
   switch (classDef.u16(0)) {
     case 1: {
       const uint16_t start = classDef.u16(2);

@@ -28,7 +28,7 @@ constexpr uint8_t MODIFIER_LETTER = 6;
 constexpr uint8_t OTHER_LETTER = 7;
 constexpr uint8_t SPACING_MARK = 10;
 constexpr uint8_t NON_SPACING_MARK = 12;
-constexpr bool isMark(const uint8_t cat) { return cat >= SPACING_MARK && cat <= NON_SPACING_MARK; }
+OT_HOT constexpr bool isMark(const uint8_t cat) { return cat >= SPACING_MARK && cat <= NON_SPACING_MARK; }
 }  // namespace gc
 
 // Asked before the shaper takes heap memory that depends on the font or the
@@ -48,7 +48,7 @@ struct Digest {
   void add(uint32_t g);
   void addRange(uint32_t a, uint32_t b);
   bool mayHave(uint32_t g) const;
-  bool mayIntersect(const Digest& o) const {
+  OT_HOT bool mayIntersect(const Digest& o) const {
     return (masks[0] & o.masks[0]) && (masks[1] & o.masks[1]) && (masks[2] & o.masks[2]);
   }
 };
@@ -85,44 +85,46 @@ struct GlyphInfo {
   uint8_t category;  // shaper's character category
   uint8_t position;  // Indic shaper's visual position
 
-  uint8_t genCat() const { return unicodeProps & uprops::GEN_CAT; }
-  bool isUnicodeMark() const { return gc::isMark(genCat()); }
-  uint8_t combiningClass() const { return isUnicodeMark() ? unicodeProps >> 8 : 0; }
-  bool isDefaultIgnorable() const { return (unicodeProps & uprops::IGNORABLE) && !(glyphProps & props::SUBSTITUTED); }
-  bool isZwnj() const { return genCat() == gc::FORMAT && (unicodeProps & uprops::CF_ZWNJ); }
-  bool isZwj() const { return genCat() == gc::FORMAT && (unicodeProps & uprops::CF_ZWJ); }
+  OT_HOT uint8_t genCat() const { return unicodeProps & uprops::GEN_CAT; }
+  OT_HOT bool isUnicodeMark() const { return gc::isMark(genCat()); }
+  OT_HOT uint8_t combiningClass() const { return isUnicodeMark() ? unicodeProps >> 8 : 0; }
+  OT_HOT bool isDefaultIgnorable() const {
+    return (unicodeProps & uprops::IGNORABLE) && !(glyphProps & props::SUBSTITUTED);
+  }
+  OT_HOT bool isZwnj() const { return genCat() == gc::FORMAT && (unicodeProps & uprops::CF_ZWNJ); }
+  OT_HOT bool isZwj() const { return genCat() == gc::FORMAT && (unicodeProps & uprops::CF_ZWJ); }
   // witchhunt: deviation 11 - reorder_marks_arabic() renumbers a mark's class (the high byte; marks only).
-  void setModifiedCombiningClass(const uint8_t cc) {
+  OT_HOT void setModifiedCombiningClass(const uint8_t cc) {
     if (!isUnicodeMark()) return;
     unicodeProps = static_cast<uint16_t>((unicodeProps & 0x00FF) | (cc << 8));
   }
-  bool isHidden() const { return unicodeProps & uprops::HIDDEN; }
+  OT_HOT bool isHidden() const { return unicodeProps & uprops::HIDDEN; }
 
-  uint8_t syllableType() const { return syllable & 0x0F; }
-  static uint8_t packSyllable(const unsigned serial, const unsigned type) {
+  OT_HOT uint8_t syllableType() const { return syllable & 0x0F; }
+  OT_HOT static uint8_t packSyllable(const unsigned serial, const unsigned type) {
     return static_cast<uint8_t>((serial << 4) | type);
   }
 
-  bool isBaseGlyph() const { return glyphProps & props::BASE_GLYPH; }
-  bool isLigature() const { return glyphProps & props::LIGATURE; }
-  bool isMark() const { return glyphProps & props::MARK; }
-  bool substituted() const { return glyphProps & props::SUBSTITUTED; }
-  bool ligated() const { return glyphProps & props::LIGATED; }
-  bool multiplied() const { return glyphProps & props::MULTIPLIED; }
-  bool ligatedAndDidntMultiply() const { return ligated() && !multiplied(); }
+  OT_HOT bool isBaseGlyph() const { return glyphProps & props::BASE_GLYPH; }
+  OT_HOT bool isLigature() const { return glyphProps & props::LIGATURE; }
+  OT_HOT bool isMark() const { return glyphProps & props::MARK; }
+  OT_HOT bool substituted() const { return glyphProps & props::SUBSTITUTED; }
+  OT_HOT bool ligated() const { return glyphProps & props::LIGATED; }
+  OT_HOT bool multiplied() const { return glyphProps & props::MULTIPLIED; }
+  OT_HOT bool ligatedAndDidntMultiply() const { return ligated() && !multiplied(); }
 
   static constexpr uint8_t IS_LIG_BASE = 0x10;
-  unsigned ligId() const { return ligProps >> 5; }
-  bool ligatedInternal() const { return ligProps & IS_LIG_BASE; }
-  unsigned ligComp() const { return ligatedInternal() ? 0 : ligProps & 0x0F; }
-  unsigned ligNumComps() const { return (isLigature() && ligatedInternal()) ? ligProps & 0x0F : 1; }
+  OT_HOT unsigned ligId() const { return ligProps >> 5; }
+  OT_HOT bool ligatedInternal() const { return ligProps & IS_LIG_BASE; }
+  OT_HOT unsigned ligComp() const { return ligatedInternal() ? 0 : ligProps & 0x0F; }
+  OT_HOT unsigned ligNumComps() const { return (isLigature() && ligatedInternal()) ? ligProps & 0x0F : 1; }
   // Components this glyph contributes when ligated again: the later pieces
   // of a MultipleSubst belong to the first piece's component.
-  unsigned ligNumCompsInLigation() const { return (multiplied() && ligComp()) ? 0 : ligNumComps(); }
-  void setLigPropsForLigature(const unsigned id, const unsigned comps) {
+  OT_HOT unsigned ligNumCompsInLigation() const { return (multiplied() && ligComp()) ? 0 : ligNumComps(); }
+  OT_HOT void setLigPropsForLigature(const unsigned id, const unsigned comps) {
     ligProps = static_cast<uint8_t>((id << 5) | IS_LIG_BASE | (comps & 0x0F));
   }
-  void setLigPropsForMark(const unsigned id, const unsigned comp) {
+  OT_HOT void setLigPropsForMark(const unsigned id, const unsigned comp) {
     ligProps = static_cast<uint8_t>((id << 5) | (comp & 0x0F));
   }
 };
@@ -198,8 +200,8 @@ struct Buffer {
   Buffer(const Buffer&) = delete;  // its arrays' flag is its own `successful`
   Buffer& operator=(const Buffer&) = delete;
 
-  unsigned len() const { return static_cast<unsigned>(info.size()); }
-  GlyphInfo& cur() { return info[idx]; }
+  OT_HOT unsigned len() const { return static_cast<unsigned>(info.size()); }
+  OT_HOT GlyphInfo& cur() { return info[idx]; }
 
   // witchhunt: deviation 1 - clears the run state and binds the arrays afresh
   // over the storage. False when `maxGlyphs` passes UINT16_MAX + 1 (refused

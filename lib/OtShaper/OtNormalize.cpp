@@ -103,13 +103,13 @@ constexpr uint16_t VOWEL_CONSTRAINTS[][2] = {
     {0x0D91, 0x0DDE},
 };
 
-bool inScriptBlock(const uint32_t cp, const Script script) {
+OT_WARM bool inScriptBlock(const uint32_t cp, const Script script) {
   const uint32_t first = 0x0900 + 0x80 * static_cast<uint32_t>(script);
   return cp >= first && cp < first + 0x80;
 }
 
 // Appends to the scratch string within the run's reservation.
-bool pushScratch(Buffer& buffer, const GlyphInfo& g) {
+OT_WARM bool pushScratch(Buffer& buffer, const GlyphInfo& g) {
   if (buffer.scratch.size() >= buffer.maxLength) {
     buffer.successful = false;
     return false;
@@ -124,7 +124,7 @@ class Normalizer {
  public:
   Normalizer(const Face& face, const Plan& plan, Buffer& buffer) : face_(face), plan_(plan), buffer_(buffer) {}
 
-  void run() {
+  OT_WARM void run() {
     const unsigned count = buffer_.len();
     if (!count) return;
     // The Indic shapers decompose everything (COMPOSED_DIACRITICS_NO_SHORT_
@@ -138,7 +138,7 @@ class Normalizer {
   }
 
  private:
-  bool decompose1(const uint32_t ab, uint32_t* a, uint32_t* b) const {
+  OT_WARM bool decompose1(const uint32_t ab, uint32_t* a, uint32_t* b) const {
     // decompose_indic(): keep these composed (they are separate letters in
     // their scripts' fonts).
     if (plan_.shaper == ShaperKind::Indic && (ab == 0x0931 || ab == 0x09DC || ab == 0x09DD || ab == 0x0B94)) {
@@ -154,7 +154,7 @@ class Normalizer {
     return false;
   }
 
-  bool compose1(const uint32_t a, const uint32_t b, uint32_t* ab) const {
+  OT_WARM bool compose1(const uint32_t a, const uint32_t b, uint32_t* ab) const {
     // Split matras stay split: nothing composes onto a mark. witchhunt: deviation 11 - Arabic composes as Unicode does.
     if ((plan_.shaper == ShaperKind::Indic || plan_.shaper == ShaperKind::Use) && gc::isMark(charData(a).genCat))
       return false;
@@ -172,7 +172,7 @@ class Normalizer {
     return false;
   }
 
-  bool outputChar(const GlyphInfo& from, const uint32_t unichar, const uint32_t glyph) {
+  OT_WARM bool outputChar(const GlyphInfo& from, const uint32_t unichar, const uint32_t glyph) {
     GlyphInfo g = from;
     g.codepoint = unichar;
     g.glyphIndex = static_cast<uint16_t>(glyph);
@@ -182,7 +182,7 @@ class Normalizer {
 
   // decompose(): the number of characters `ab` was output as, 0 when it
   // does not decompose into characters the font maps.
-  unsigned decompose(const GlyphInfo& cur, const bool shortest, const uint32_t ab) {
+  OT_WARM unsigned decompose(const GlyphInfo& cur, const bool shortest, const uint32_t ab) {
     uint32_t a = 0, b = 0, aGlyph = 0, bGlyph = 0;
     if (!decompose1(ab, &a, &b) || (b && !face_.nominalGlyph(b, &bGlyph))) return 0;
     const bool hasA = face_.nominalGlyph(a, &aGlyph);
@@ -200,13 +200,13 @@ class Normalizer {
     return ret;
   }
 
-  void nextChar(const uint32_t glyph) {
+  OT_WARM void nextChar(const uint32_t glyph) {
     GlyphInfo g = buffer_.info[buffer_.idx++];
     g.glyphIndex = static_cast<uint16_t>(glyph);
     pushScratch(buffer_, g);
   }
 
-  void decomposeCurrentCharacter(const bool shortest) {
+  OT_WARM void decomposeCurrentCharacter(const bool shortest) {
     const GlyphInfo cur = buffer_.info[buffer_.idx];
     uint32_t glyph = 0;
     if (shortest && face_.nominalGlyph(cur.codepoint, &glyph)) {
@@ -222,7 +222,7 @@ class Normalizer {
 
   // First round: decompose. Returns true when the text has no marks, so
   // nothing needs reordering or recomposing.
-  bool decomposeAll(const unsigned count, const bool mightShortCircuit) {
+  OT_WARM bool decomposeAll(const unsigned count, const bool mightShortCircuit) {
     buffer_.scratch.clear();
     bool allSimple = true;
     buffer_.idx = 0;
@@ -250,7 +250,7 @@ class Normalizer {
   }
 
   // Second round: marks in combining-class order (a stable sort).
-  void reorderMarks() {
+  OT_WARM void reorderMarks() {
     FixedVector<GlyphInfo>& info = buffer_.info;  // witchhunt: deviation 1
     const unsigned len = buffer_.len();
     for (unsigned i = 0; i < len; i++) {
@@ -260,8 +260,9 @@ class Normalizer {
         if (info[end].combiningClass() == 0) break;
       }
       if (end - i <= MAX_COMBINING_MARKS) {
-        stableSort(info.data() + i, info.data() + end,
-                   [](const GlyphInfo& a, const GlyphInfo& b) { return a.combiningClass() < b.combiningClass(); });
+        stableSort(info.data() + i, info.data() + end, [](const GlyphInfo& a, const GlyphInfo& b) OT_WARM {
+          return a.combiningClass() < b.combiningClass();
+        });
         // witchhunt: deviation 11 - the shaper's reorder_marks hook.
         if (plan_.shaper == ShaperKind::Arabic) reorderMarksArabic(buffer_, i, end);
       }
@@ -271,7 +272,7 @@ class Normalizer {
 
   // Third round: recompose marks onto their starter when nothing between
   // them blocks it and the font maps the composition.
-  void recompose() {
+  OT_WARM void recompose() {
     const FixedVector<GlyphInfo>& info = buffer_.info;  // witchhunt: deviation 1
     FixedVector<GlyphInfo>& out = buffer_.scratch;      // witchhunt: deviation 1
     out.clear();
@@ -304,14 +305,14 @@ class Normalizer {
 // witchhunt: deviation 11. The generated table covers several ranges (Arabic and Indic): the position of `cp`
 // in PROPS_INDEX, or -1 outside them. JOINING has its own, narrower ranges: only the Arabic blocks join.
 template <size_t N>
-static int rangeIndex(const ucd::Range (&ranges)[N], const uint32_t cp) {
+OT_WARM static int rangeIndex(const ucd::Range (&ranges)[N], const uint32_t cp) {
   for (const auto& r : ranges) {
     if (cp >= r.first && cp <= r.last) return r.offset + static_cast<int>(cp - r.first);
   }
   return -1;
 }
 
-CharData charData(const uint32_t cp) {
+OT_WARM CharData charData(const uint32_t cp) {
   uint32_t packed;
   if (const int i = rangeIndex(ucd::RANGES, cp); i >= 0) {
     packed = ucd::PROPS[ucd::PROPS_INDEX[i]];
@@ -324,15 +325,14 @@ CharData charData(const uint32_t cp) {
   } else {
     return CharData{gc::UNASSIGNED, 0, 0, 0, 0, false};
   }
-  const auto field = [packed](const unsigned shift, const unsigned bits) {
-    return static_cast<uint8_t>((packed >> shift) & ((1u << bits) - 1));
-  };
+  const auto field = [packed](const unsigned shift, const unsigned bits)
+                         OT_WARM { return static_cast<uint8_t>((packed >> shift) & ((1u << bits) - 1)); };
   return CharData{field(ucd::GEN_CAT_SHIFT, ucd::GEN_CAT_BITS),     field(ucd::CCC_SHIFT, ucd::CCC_BITS),
                   field(ucd::INDIC_CAT_SHIFT, ucd::INDIC_CAT_BITS), field(ucd::INDIC_POS_SHIFT, ucd::INDIC_POS_BITS),
                   field(ucd::USE_CAT_SHIFT, ucd::USE_CAT_BITS),     ((packed >> ucd::IGNORABLE_SHIFT) & 1) != 0};
 }
 
-void setUnicodeProps(GlyphInfo& info, Buffer& buffer) {
+OT_WARM void setUnicodeProps(GlyphInfo& info, Buffer& buffer) {
   const uint32_t u = info.codepoint;
   const CharData d = charData(u);
   uint16_t p = d.genCat;
@@ -351,7 +351,7 @@ void setUnicodeProps(GlyphInfo& info, Buffer& buffer) {
   info.unicodeProps = p;
 }
 
-void preprocessVowelConstraints(const Script script, Buffer& buffer) {
+OT_WARM void preprocessVowelConstraints(const Script script, Buffer& buffer) {
   if (script == Script::Arabic) return;  // witchhunt: deviation 11 - inScriptBlock() is the Indic blocks'
   const unsigned count = buffer.len();
   if (count < 2) return;
@@ -392,10 +392,10 @@ void preprocessVowelConstraints(const Script script, Buffer& buffer) {
   buffer.info.swap(buffer.scratch);
 }
 
-void normalize(const Face& face, const Plan& plan, Buffer& buffer) { Normalizer(face, plan, buffer).run(); }
+OT_WARM void normalize(const Face& face, const Plan& plan, Buffer& buffer) { Normalizer(face, plan, buffer).run(); }
 
 // witchhunt: deviation 11. HarfBuzz's get_joining_type, resolved when the table is generated.
-JoiningType joiningType(const uint32_t cp) {
+OT_WARM JoiningType joiningType(const uint32_t cp) {
   if (const int i = rangeIndex(ucd::JOINING_RANGES, cp); i >= 0)
     return static_cast<JoiningType>((ucd::JOINING[i >> 1] >> ((i & 1) << 2)) & 15);
   if (cp == 0x200C) return static_cast<JoiningType>(ucd::ZWNJ_JOINING);
