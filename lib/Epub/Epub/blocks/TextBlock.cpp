@@ -841,9 +841,9 @@ void TextBlock::render(const GfxRenderer& renderer, const int fontId, const int 
     } else if (vertical) {
       drawTextVertical(renderer, font, px, py, text, style, scale, centredMarks);
     } else if (scale == 1.0f) {
-      renderer.drawText(font, px, py, text, true, style);
+      renderer.drawFormedText(font, px, py, text, true, style);
     } else {
-      renderer.drawTextScaled(font, px, py, text, true, style, scale);
+      renderer.drawFormedTextScaled(font, px, py, text, true, style, scale);
     }
   };
   // How far a piece of text, or a shaped word's run, runs along the line at `scale`.

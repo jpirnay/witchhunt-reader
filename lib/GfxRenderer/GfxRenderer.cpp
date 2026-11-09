@@ -1,5 +1,6 @@
 #include "GfxRenderer.h"
 
+#include <BidiUtils.h>
 #include <BoardConfig.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -1462,6 +1463,15 @@ void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* te
 
 void GfxRenderer::drawText(const int fontId, const int x, const int y, const char* text, const bool black,
                            const EpdFontFamily::Style style) const {
+  if (text && BidiUtils::hasRtlClass(text, strlen(text))) {
+    drawFormedText(fontId, x, y, BidiUtils::visualUiLine(text).c_str(), black, style);
+    return;
+  }
+  drawFormedText(fontId, x, y, text, black, style);
+}
+
+void GfxRenderer::drawFormedText(const int fontId, const int x, const int y, const char* text, const bool black,
+                                 const EpdFontFamily::Style style) const {
   // A synthesised size has no faces of its own, so the unscaled blitter below cannot draw it --
   // it walks raw glyph advances, which belong to the master. Hand it to the resampling path at
   // the font's own scale. Real faces (the overwhelming majority) skip this with one comparison.
@@ -1592,6 +1602,15 @@ static bool drawsUnscaled(const float total) { return total > 0.99f && total < 1
 // heading at 1.6em inside synthesised 24 pt body text is ONE resample at 1.2 x 1.6, not two.
 void GfxRenderer::drawTextScaled(const int fontId, const int x, const int y, const char* text, const bool black,
                                  const EpdFontFamily::Style style, const float scale) const {
+  if (text && BidiUtils::hasRtlClass(text, strlen(text))) {
+    drawFormedTextScaled(fontId, x, y, BidiUtils::visualUiLine(text).c_str(), black, style, scale);
+    return;
+  }
+  drawFormedTextScaled(fontId, x, y, text, black, style, scale);
+}
+
+void GfxRenderer::drawFormedTextScaled(const int fontId, const int x, const int y, const char* text, const bool black,
+                                       const EpdFontFamily::Style style, const float scale) const {
   // A non-positive scale has always meant "draw as is" here, not "draw nothing". Keep it: the
   // first version of this wrapper returned instead, which silently changed behaviour for any
   // caller passing 0 to mean unscaled.

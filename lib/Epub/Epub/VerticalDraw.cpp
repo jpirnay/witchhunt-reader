@@ -31,9 +31,9 @@ int ascenderOf(const GfxRenderer& renderer, const int fontId, const float scale)
 void drawIn(const GfxRenderer& renderer, const int fontId, const int x, const int y, const char* text,
             const EpdFontFamily::Style style, const float scale, const bool black) {
   if (scale == 1.0f) {
-    renderer.drawText(fontId, x, y, text, black, style);
+    renderer.drawFormedText(fontId, x, y, text, black, style);
   } else {
-    renderer.drawTextScaled(fontId, x, y, text, black, style, scale);
+    renderer.drawFormedTextScaled(fontId, x, y, text, black, style, scale);
   }
 }
 

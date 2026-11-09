@@ -230,9 +230,9 @@ void drawPiece(const GfxRenderer& renderer, const int fontId, const int x, const
   } else if ((flags & DRAW_VERTICAL) != 0) {
     drawTextVertical(renderer, fontId, x, y, text, style, scale, (flags & DRAW_CENTRED_MARKS) != 0, black);
   } else if (scale == 1.0f) {
-    renderer.drawText(fontId, x, y, text, black, style);
+    renderer.drawFormedText(fontId, x, y, text, black, style);
   } else {
-    renderer.drawTextScaled(fontId, x, y, text, black, style, scale);
+    renderer.drawFormedTextScaled(fontId, x, y, text, black, style, scale);
   }
 }
 

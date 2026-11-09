@@ -193,13 +193,22 @@ class GfxRenderer {
   int getTextWidthScaled(int fontId, const char* text, EpdFontFamily::Style style, const float scale) const {
     return static_cast<int>(getTextAdvanceX(fontId, text, style) * scale + 0.5f);
   }
+  // The page's words come formed (drawFormedText); this stub records both entry points alike.
+  void drawFormedText(int fontId, int x, int y, const char* text, bool black = true,
+                      EpdFontFamily::Style style = EpdFontFamily::REGULAR) const {
+    drawCalls.push_back({text, fontId, x, y, 1.0f, style, live, black});
+  }
+  void drawFormedTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
+                            const float scale) const {
+    drawCalls.push_back({text, fontId, x, y, scale, style, live, black});
+  }
   void drawText(int fontId, int x, int y, const char* text, bool black = true,
                 EpdFontFamily::Style style = EpdFontFamily::REGULAR) const {
-    drawCalls.push_back({text, fontId, x, y, 1.0f, style, live, black});
+    drawFormedText(fontId, x, y, text, black, style);
   }
   void drawTextScaled(int fontId, int x, int y, const char* text, bool black, EpdFontFamily::Style style,
                       const float scale) const {
-    drawCalls.push_back({text, fontId, x, y, scale, style, live, black});
+    drawFormedTextScaled(fontId, x, y, text, black, style, scale);
   }
   // A shaped run: drawn as the real renderer's drawGlyphRun is called, measured as its glyphRunWidth measures (the
   // records' pen, accumulated outside drawTextScaled's unscaled window; this stub's fonts have a base scale of 1).

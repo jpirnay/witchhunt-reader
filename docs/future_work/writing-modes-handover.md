@@ -280,8 +280,13 @@ reader"):
 - **Reading order in the consumers (done, same branch):** the link-target walk and the QR page text read each line in
   its logical order (`TextBlock::readingOrder`, `appendReadingText`). Murphy: of two note markers on one Hebrew line,
   master gave only the first a target; both are tappable now. The dictionary's reading-order join was done in #656.
-- **The reader's titles:** the status bar's chapter title and the Home and Library book titles get a visual form
-  once, when set (`applyBidiVisual`). Today a Hebrew title shows mirrored.
+- **The reader's titles (done, `feat/rtl-ui-titles`, not as the design said):** "once, when set" does not survive the
+  themes, which truncate and wrap a title to fit (45 calls), and a reversed string truncated at its end loses the
+  title's start. So UI text stays in reading order through measuring and fitting, and `GfxRenderer::drawText` and
+  `drawTextScaled` make a line with a right-to-left character visual as they draw it (`BidiUtils::visualUiLine`);
+  a page's words, formed at section build, go through `drawFormedText` instead. Every UI string is covered at once:
+  the status bar, Home, the lists, the TOC, centred text, alt text. X3: a Hebrew chapter title in the status bar
+  read mirrored on master and reads right now. Where the UI face has no Hebrew (the list rows), nothing shows yet.
 - **Fonts (done, `feat/hebrew-font-families`):** NotoSansHebrew and NotoSerifHebrew in the Font Manager, merged with
   Noto Sans/Serif Latin by `merge_noto_latin.py` (checked against a Hebrew corpus, `generate_corpus_hebrew.py`), and a
   Hebrew-script book picks an installed one by itself when the reader font has no alef
@@ -334,8 +339,18 @@ break (Hangul is kept whole), or where the next page word is glued to it. On the
 
 ### 8. Step 5: UI text
 
-- **UI titles and the TOC:** they get no bidi and no shaping, because the UI faces are bitmap. Arabic and Indic
-  titles draw unjoined and unreordered.
+- **UI titles and the TOC:** reordered since `feat/rtl-ui-titles` (item 4), but not shaped: the UI faces are bitmap,
+  so Arabic and Indic titles draw unjoined, and a list row draws no Hebrew or Arabic at all where the UI face lacks
+  it. The UI faces fall back to a TrueType face (`CjkUiFonts.cpp`, `readerFaceAt`): in the reader it is the book's,
+  which is why the status bar shows a Hebrew chapter title. Outside the reader, `openUiBookFonts` in `main.cpp`
+  opens the last book's family for the screens that draw book text, but only when that family covers CJK, so a
+  Hebrew or Arabic family never backs the Library rows (X3, 2026-11-09: the Details view of `/test`, NotoSansHebrew
+  as the reader font, drew the Hebrew notes book's title blank; the Japanese, Korean and Chinese titles drew, with
+  stand-in boxes for the glyphs the UI faces lack). The
+  next step is a design note, not code. One choice: let the opener take a family that covers the title's script too;
+  it still serves one family for every row, the last book's. The other: give the built-in UI faces the Hebrew
+  letters and points, at a flash cost not measured yet. Arabic and Indic titles would still need shaping, which
+  bitmap faces cannot do.
 - **TXT and Markdown books:** they get no bidi.
 
 ### 9. Flash
