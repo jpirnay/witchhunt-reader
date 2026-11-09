@@ -291,6 +291,8 @@ add_subdirectory(gray8_writer)
 add_subdirectory(glyph_fallback)
 add_subdirectory(glyph_provider)
 add_subdirectory(fallback_face_provider)  # after font_group_stream: links its uzlib_font_ring
+add_subdirectory(ui_script_pack)  # likewise
+add_subdirectory(ui_face_scripts)
 add_subdirectory(ui_font_compression)  # likewise
 add_subdirectory(flash_lang_partition)  # likewise
 add_subdirectory(glyph_store)

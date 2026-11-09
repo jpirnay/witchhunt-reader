@@ -42,6 +42,8 @@ class EpdFontFamily {
   void beginText(const char* utf8Text, Style style) const;
   /// Whether the font drawing `style` takes glyph keys (its provider says drawsGlyphKeys()).
   bool drawsGlyphKeys(Style style = REGULAR) const;
+  /// Whether the font drawing `style` draws Arabic UI text in its presentation forms (GlyphProvider::formsArabic).
+  bool formsArabic(Style style = REGULAR) const;
   /// The glyph `key` (glyph_key) names, from the font drawing `style`, without fallbacks; invalid, asking nothing,
   /// when that font draws no glyph keys.
   EpdGlyphRef findGlyphKey(uint32_t key, Style style = REGULAR) const;

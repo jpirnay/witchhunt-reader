@@ -252,3 +252,102 @@ TEST(TransparentMark, LettersAndLatinMarksAreNot) {
   EXPECT_FALSE(BidiUtils::isTransparentMark(0x0661));  // Arabic-Indic digit
   EXPECT_FALSE(BidiUtils::isTransparentMark('a'));
 }
+
+/* ── arabicUiForms: the same forms, decided in logical order ─────────── */
+
+namespace {
+
+// The UI's pipeline: form in logical order (arabicUiForms), then reorder without shaping (visualUiLine's
+// applyBidiVisual). It must draw what the visual-order shaper draws.
+std::vector<uint32_t> formThenOrder(const std::vector<uint32_t>& logical) {
+  const std::string formed = BidiUtils::arabicUiForms(encode(logical));
+  std::string out;
+  if (!BidiUtils::applyBidiVisual(formed.c_str(), out, /*paragraphLevel=*/-1)) return decode(formed);
+  return decode(out);
+}
+
+// Every input of the visual-order tests above, and titles of the kinds the UI draws: Persian with ZWNJ, Urdu,
+// harakat between letters, Lam-Alef after a joining letter and with a mark inside, Latin and digits around.
+const std::vector<std::vector<uint32_t>>& uiCorpus() {
+  static const std::vector<std::vector<uint32_t>> corpus = {
+      {0x0628},
+      {0x062F, 0x0627, 0x0631},
+      {0x0628, 0x064A, 0x062A},
+      {0x0645, 0x062D, 0x0645, 0x062F},
+      {0x0628, 0x0640, 0x062A},
+      {0x0644, 0x0627},
+      {0x0644, 0x0622},
+      {0x0644, 0x0623},
+      {0x0644, 0x0625},
+      {0x0628, 0x0644, 0x0627},
+      {0x0628, 0x0644, 0x0622},
+      {0x0628, 0x0644, 0x0623},
+      {0x0628, 0x0644, 0x0625},
+      {0x0644, 0x064E, 0x0627},
+      {0x0643, 0x064E, 0x062A, 0x064E, 0x0628, 0x064E},
+      {0x0628, 0x0651, 0x064E},
+      {0x067E, 0x067E},
+      {0x06AF, 0x0627, 0x0632},
+      {0x0633, 0x06CC, 0x0628},
+      {0x0679, 0x0688, 0x0691},
+      {0x0645, 0x06CC, 0x06BA},
+      {0x06C1, 0x06D2},
+      {0x067B, 0x0627, 0x0631},
+      {0x069A, 0x0647},
+      {0x06A9, 0x0648, 0x0631},
+      {0x0695, 0x06C6, 0x0698},
+      {0x0645, 0x06CC, 0x200C, 0x062E},
+      {0x0645, 0x06CC, 0x200C, 0x062E, 0x0648},
+      {0x0628, 0x200D},
+      {0x200D, 0x0628},
+      {0x0643, 0x062A, 0x0627, 0x0628, ' ', 'a', 'b', 'c', ' ', '1', '2', '3'},
+      {0x0643, 0x062A, 0x0627, 0x0628, ' ', 0x0661, 0x0662, 0x0663},
+      {0x0643, 0x062A, 0x0627, 0x0628, ' ', 0x0642, 0x0644, 0x0645, ' ', 'o', 'k'},
+      // ألف ليلة وليلة (One Thousand and One Nights)
+      {0x0623, 0x0644, 0x0641, ' ', 0x0644, 0x064A, 0x0644, 0x0629, ' ', 0x0648, 0x0644, 0x064A, 0x0644, 0x0629},
+      // السلام عليكم: Lam-Alef inside a word, after a joining Seen
+      {0x0627, 0x0644, 0x0633, 0x0644, 0x0627, 0x0645, ' ', 0x0639, 0x0644, 0x064A, 0x0643, 0x0645},
+      // کتاب‌های فارسی (Persian books): ZWNJ, keheh, farsi yeh
+      {0x06A9, 0x062A, 0x0627, 0x0628, 0x200C, 0x0647, 0x0627, 0x06CC, ' ', 0x0641, 0x0627, 0x0631, 0x0633, 0x06CC},
+      // اردو ادب (Urdu literature) and پاکستان
+      {0x0627, 0x0631, 0x062F, 0x0648, ' ', 0x0627, 0x062F, 0x0628, ' ', 0x067E, 0x0627, 0x06A9, 0x0633, 0x062A, 0x0627,
+       0x0646},
+      // A vowelled Lam-Alef after Beh: بِلَا
+      {0x0628, 0x0650, 0x0644, 0x064E, 0x0627},
+      // Mixed: "Harry Potter" in Persian after a Latin word, digits inside
+      {'H', 'P', ' ', 0x0647, 0x0631, 0x06CC, ' ', 0x067E, 0x0627, 0x062A, 0x0631, ' ', '2'},
+  };
+  return corpus;
+}
+
+}  // namespace
+
+TEST(ArabicUiForms, MatchesTheVisualShaperOnEveryInput) {
+  for (const auto& logical : uiCorpus()) {
+    EXPECT_EQ(formThenOrder(logical), shapeVisual(logical)) << "input of " << logical.size() << " code points";
+  }
+}
+
+TEST(ArabicUiForms, IsIdempotent) {
+  for (const auto& logical : uiCorpus()) {
+    const std::string once = BidiUtils::arabicUiForms(encode(logical));
+    EXPECT_EQ(BidiUtils::arabicUiForms(once), once);
+    EXPECT_FALSE(BidiUtils::hasArabic(once.data(), once.size()) && once != BidiUtils::arabicUiForms(once));
+  }
+}
+
+TEST(ArabicUiForms, StaysInLogicalOrder) {
+  // بيت: initial, medial, final, in the order written.
+  EXPECT_EQ(decode(BidiUtils::arabicUiForms(encode({0x0628, 0x064A, 0x062A}))), (CP{0xFE91, 0xFEF4, 0xFE96}));
+  // بلا: Beh initial, then the final Lam-Alef in the Lam's place; the Alef is gone.
+  EXPECT_EQ(decode(BidiUtils::arabicUiForms(encode({0x0628, 0x0644, 0x0627}))), (CP{0xFE91, 0xFEFC}));
+  // A mark between Lam and Alef stays, after the ligature.
+  EXPECT_EQ(decode(BidiUtils::arabicUiForms(encode({0x0644, 0x064E, 0x0627}))), (CP{0xFEFB, 0x064E}));
+}
+
+TEST(ArabicUiForms, LeavesOtherTextAlone) {
+  EXPECT_EQ(BidiUtils::arabicUiForms("Pride and Prejudice"), "Pride and Prejudice");
+  const std::string hebrew = encode({0x05E9, 0x05DC, 0x05D5, 0x05DD});
+  EXPECT_EQ(BidiUtils::arabicUiForms(hebrew), hebrew);
+  EXPECT_FALSE(BidiUtils::hasArabic(hebrew.data(), hebrew.size()));
+}

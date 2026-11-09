@@ -75,14 +75,38 @@ UI_LANG_INTERVALS=(
   "0xFFFD,0xFFFD"
 )
 
+# Greek and Hebrew in every UI face, so a title, an author or a typed search in either draws whatever book was read
+# last, and the keyboard's Greek and Hebrew layouts can label their keys. Greek comes from each face's own font (Inter,
+# Noto Sans): modern Greek, its letters with tonos and dialytika and its punctuation, and no more. The whole Greek and
+# Coptic block cost 8.7 KB more, Greek Extended (polytonic) 81 KB more. Hebrew comes from
+# Noto Sans Hebrew, placed behind the face's font in fontconvert.py's font stack and cut to the Hebrew block first:
+# whole, it also maps punctuation, U+FFFD and more the UI fonts lack, which would slip into the faces. Its letters sit
+# on Noto Sans' x-height and cap height, which Inter's are within 2% of, so it is drawn at the face's own size. The
+# points come with the letters; the cantillation marks (U+0591-05AF) do not: 2.4 KB for text no title carries.
+UI_SCRIPT_INTERVALS=(
+  "0x037E,0x037E"  # Greek question mark
+  "0x0384,0x038A"  # tonos, dialytika tonos, the capitals with tonos, ano teleia
+  "0x038C,0x038C"  # capital omicron with tonos
+  "0x038E,0x03A1"  # capitals upsilon and omega with tonos, iota with both marks, capitals alpha to rho
+  "0x03A3,0x03CE"  # capitals sigma to omega, the letters with tonos and dialytika, small alpha to omega, final sigma
+  "0x05B0,0x05C7"  # Hebrew points (niqqud), maqaf, paseq, sof pasuq
+  "0x05D0,0x05EA"  # Hebrew letters, final forms included
+  "0x05F3,0x05F4"  # geresh, gershayim
+)
+UI_SCRIPT_DIR="$(mktemp -d)"
+for style in ${UI_FONT_STYLES[@]}; do
+  python -m fontTools.subset "../../../assets/sd-fonts/NotoSansHebrew/NotoSansHebrew-${style}.ttf" \
+    --unicodes="U+0591-05F4" --layout-features='*' --output-file="$UI_SCRIPT_DIR/Hebrew-${style}.ttf"
+done
+
 for size in ${UI_FONT_SIZES[@]}; do
   for style in ${UI_FONT_STYLES[@]}; do
     font_name="inter_ui_${size}_$(echo $style | tr '[:upper:]' '[:lower:]')"
     inter_path="../builtinFonts/source/Inter/Inter-${style}.ttf"
     output_path="../builtinFonts/${font_name}.h"
 
-    cmd=(python fontconvert.py "$font_name" "$size" "$inter_path")
-    for interval in "${UI_LANG_INTERVALS[@]}"; do
+    cmd=(python fontconvert.py "$font_name" "$size" "$inter_path" "$UI_SCRIPT_DIR/Hebrew-${style}.ttf")
+    for interval in "${UI_LANG_INTERVALS[@]}" "${UI_SCRIPT_INTERVALS[@]}"; do
       cmd+=(--additional-intervals "$interval")
     done
     "${cmd[@]}" > "$output_path"
@@ -91,9 +115,16 @@ for size in ${UI_FONT_SIZES[@]}; do
   done
 done
 
-python fontconvert.py notosans_8_regular 8 ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf > ../builtinFonts/notosans_8_regular.h
+ui_script_args=()
+for interval in "${UI_SCRIPT_INTERVALS[@]}"; do
+  ui_script_args+=(--additional-intervals "$interval")
+done
+python fontconvert.py notosans_8_regular 8 ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf \
+  "$UI_SCRIPT_DIR/Hebrew-Regular.ttf" "${ui_script_args[@]}" > ../builtinFonts/notosans_8_regular.h
 # Murphy uses a dedicated 6 pt face for the Small UI role at its Normal size setting.
-python fontconvert.py notosans_6_regular 6 ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf > ../builtinFonts/notosans_6_regular.h
+python fontconvert.py notosans_6_regular 6 ../builtinFonts/source/NotoSans/NotoSans-Regular.ttf \
+  "$UI_SCRIPT_DIR/Hebrew-Regular.ttf" "${ui_script_args[@]}" > ../builtinFonts/notosans_6_regular.h
+rm -rf "$UI_SCRIPT_DIR"
 
 # The CJK UI faces hold each CJK translation's characters that the UI faces above lack, so they
 # come after them. The script dedupes and verifies by itself; the pass below repeats that over the

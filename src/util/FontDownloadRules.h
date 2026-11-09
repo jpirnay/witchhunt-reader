@@ -32,11 +32,13 @@ inline FileKind kindOf(const char* name) {
   return FileKind::Unknown;
 }
 
-// By a manifest's `format` value: "cpfont", "ttf" or "otf", exactly.
+// By a manifest's `format` value: "cpfont", "ttf" or "otf", exactly, or "uipack": a UI script pack
+// (ArabicUiPack.h), .cpfont files the interface draws from and no reading font. A firmware from before it skips the
+// family, as any reader skips a format it does not know.
 inline FileKind kindOfFormat(const char* value, const size_t len) {
   if (!value) return FileKind::Unknown;
   const auto is = [&](const char* word) { return strlen(word) == len && memcmp(value, word, len) == 0; };
-  if (is("cpfont")) return FileKind::Cpfont;
+  if (is("cpfont") || is("uipack")) return FileKind::Cpfont;
   if (is("ttf")) return FileKind::TrueType;
   if (is("otf")) return FileKind::OpenTypeCff;
   return FileKind::Unknown;
