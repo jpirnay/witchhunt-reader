@@ -67,7 +67,10 @@ class FallbackFaceProvider final : public GlyphProvider {
   /// (the build gives every translation's characters a face), so it is book text, and the reader's font goes first
   /// for all of it, before the active language's face too, so a title draws in one font. Its characters the reader's
   /// face is asked for are rendered in one batch (the face's prefetch()).
-  void beginText(const char* utf8Text) override;
+  void beginText(const char* utf8Text) override { beginText(utf8Text, nullptr, nullptr); }
+  /// The same, with the characters `alsoCovered(ctx, cp)` answers for taken as the UI face's own: a script pack's,
+  /// which UiFaceProvider serves before this provider is asked.
+  void beginText(const char* utf8Text, bool (*alsoCovered)(void* ctx, uint32_t codepoint), void* ctx);
   /// Whether the reader's face draws Arabic in its presentation forms (`forms(ctx)`, CjkUiFonts): GfxRenderer then
   /// forms Arabic UI text, which that face serves joined. False without the hook, so Arabic UI text is left as its
   /// letters, as before the forms.

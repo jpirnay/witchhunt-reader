@@ -5,7 +5,9 @@ Reads sd-fonts.yaml, downloads any missing source fonts, runs
 fontconvert_sdcard.py in parallel for each family, and optionally
 generates the fonts.json manifest. A family with `format: otf` is a CFF
 subset instead (cjk_subset.py): one <name>-Regular.otf, drawn at every size. A family with `format: ttf` is a
-script font merged with Noto's Latin (merge_noto_latin.py): <name>-Regular.ttf and <name>-Bold.ttf.
+script font merged with Noto's Latin (merge_noto_latin.py): <name>-Regular.ttf and <name>-Bold.ttf. A family with
+`format: uipack` is a UI script pack (build_ui_script_pack.py): 1-bit .cpfont files the interface draws from, built
+last, from the family its `source` names.
 
 Usage:
     # Generate fonts (output in ./output/)
@@ -265,6 +267,19 @@ def write_corpus(out_dir: Path) -> None:
         subprocess.run([sys.executable, str(shaper_dir / generator), str(out_dir)], check=True, capture_output=True)
 
 
+def build_ui_pack_family(family: dict, output_base: Path, output_dir: Path) -> tuple[str, bool, str]:
+    """A `format: uipack` entry: the Arabic UI pack (build_ui_script_pack.py), cut from its `source` family's files as
+    this run built them, or as the repository holds them."""
+    source = output_base / family["source"]
+    if not source.is_dir():
+        source = SCRIPT_DIR.resolve().parents[2] / "assets" / "sd-fonts" / family["source"]
+    result = subprocess.run([sys.executable, str(SCRIPT_DIR / "build_ui_script_pack.py"), "--output-dir",
+                             str(output_dir), "--source-dir", str(source)], capture_output=True, text=True)
+    if result.returncode != 0:
+        return family["name"], False, result.stderr.strip()[-2000:]
+    return family["name"], True, ""
+
+
 def build_family(
     family: dict, output_base: Path, verbose: bool = False, timeout: int = 600,
     unihan: Path | None = None, fonttools_pin: str | None = None, corpus_dir: Path | None = None
@@ -277,6 +292,8 @@ def build_family(
         return build_otf_family(family, output_dir, unihan, fonttools_pin)
     if family.get("format") == "ttf":
         return build_ttf_family(family, output_dir, corpus_dir, fonttools_pin)
+    if family.get("format") == "uipack":
+        return build_ui_pack_family(family, output_base, output_dir)
 
     styles = family.get("styles", {})
     intervals = family["intervals"]
@@ -497,11 +514,13 @@ def main():
         except (OSError, subprocess.CalledProcessError) as e:
             print(f"ERROR: the checks' corpus: {e}", file=sys.stderr)
             sys.exit(1)
+    # A UI pack is cut from a family this run may build: it goes after them all.
+    packs = [f for f in families if f.get("format") == "uipack"]
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(build_family, family, output_base, verbose, timeout, unihan, fonttools_pin,
                             corpus_dir): family["name"]
-            for family in families
+            for family in families if family.get("format") != "uipack"
         }
         for future in as_completed(futures):
             name, success, message = future.result()
@@ -514,6 +533,13 @@ def main():
             else:
                 print(f"  FAILED: {name}: {message}", file=sys.stderr)
                 failed.append(name)
+    for family in packs:
+        name, success, message = build_family(family, output_base, verbose, timeout)
+        if success:
+            print(f"  OK: {name} {message}")
+        else:
+            print(f"  FAILED: {name}: {message}", file=sys.stderr)
+            failed.append(name)
 
     # Summary
     print("\n=== Summary ===\n")

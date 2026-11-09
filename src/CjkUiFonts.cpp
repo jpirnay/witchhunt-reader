@@ -6,6 +6,7 @@
 #include <FontDecompressor.h>
 #include <Logging.h>
 #include <SerialTransfer/SerialTransferProtocol.h>
+#include <UiFaceProvider.h>
 #include <Utf8.h>
 #include <builtinFonts/cjk_ui_ja_10.h>
 #include <builtinFonts/cjk_ui_ja_12.h>
@@ -17,6 +18,7 @@
 
 #include <cstddef>
 
+#include "UiScriptPack.h"
 #include "activities/RenderLock.h"
 
 namespace {
@@ -80,6 +82,25 @@ constexpr size_t MAX_ATTACHED = 7;
 #endif
 EpdFontData attached[MAX_ATTACHED];
 size_t attachedCount = 0;
+
+// Each attached face's own provider: the Arabic UI pack at the face's size and weight (UiScriptPack), then the
+// providers[] of its CJK size, which faces of several sizes and both weights share.
+struct PackKey {
+  uint8_t points;
+  bool bold;
+};
+UiFaceProvider faceProviders[MAX_ATTACHED];
+PackKey packKeys[MAX_ATTACHED];
+
+const EpdFontData* packFace(void* ctx) {
+  const auto* key = static_cast<const PackKey*>(ctx);
+  return UiScriptPack::face(key->points, key->bold);
+}
+bool packInstalled(void* ctx) { return UiScriptPack::installed(static_cast<const PackKey*>(ctx)->points); }
+void packPrepare(void* ctx, const char* utf8Text) {
+  const auto* key = static_cast<const PackKey*>(ctx);
+  UiScriptPack::prepare(key->points, key->bold, utf8Text);
+}
 
 size_t sizeIndexFor(const uint8_t points) {
   size_t index = 0;
@@ -316,7 +337,7 @@ void CjkUiFonts::setDecompressor(FontDecompressor* decompressor) {
   for (FallbackFaceProvider& provider : providers) provider.setDecompressor(decompressor);
 }
 
-void CjkUiFonts::attach(EpdFont& font, const uint8_t points) {
+void CjkUiFonts::attach(EpdFont& font, const uint8_t points, const bool bold) {
   const EpdFontData* data = font.data;
   // A provider already there is an SD or TTF font's own; a compressed or 2-bit face could not draw
   // a 1-bit glyph from a flat bitmap.
@@ -328,10 +349,19 @@ void CjkUiFonts::attach(EpdFont& font, const uint8_t points) {
     LOG_ERR("CJK", "more than %u UI faces attached", static_cast<unsigned>(MAX_ATTACHED));
     return;
   }
-  EpdFontData& copy = attached[attachedCount++];
+  const size_t index = attachedCount++;
+  EpdFontData& copy = attached[index];
   copy = *data;
   const size_t size = sizeIndexFor(points);
-  copy.provider = &providers[size];
+  packKeys[index] = PackKey{points, bold};
+  UiFaceProvider::Pack pack;
+  pack.face = &packFace;
+  pack.covers = &UiScriptPack::covers;
+  pack.installed = &packInstalled;
+  pack.prepare = &packPrepare;
+  pack.ctx = &packKeys[index];
+  faceProviders[index].bind(&providers[size], pack);
+  copy.provider = &faceProviders[index];
   providers[size].setReaderFace(&readerFaceAt, reinterpret_cast<void*>(size));
   providers[size].setFormsArabic(&readerDrawsArabicForms, reinterpret_cast<void*>(size));
   // The face of the provider's own size: the first attached (main.cpp attaches the regular before the bold).

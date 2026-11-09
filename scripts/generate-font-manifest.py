@@ -191,11 +191,13 @@ def build_manifest(
 
     for family_name in sorted(families.keys()):
         files = families[family_name]
-        fmt = family_format(files)
+        entry = (config or {}).get(family_name, {})
+        # A UI script pack is .cpfont files under its own format, which older firmware skips: version 3 only.
+        fmt = "uipack" if entry.get("format") == "uipack" else family_format(files)
         if version < 3 and fmt != "cpfont":
             continue
 
-        if fmt == "cpfont":
+        if family_format(files) == "cpfont":
             # Read styles from the first file (all files in a family have the
             # same styles since they're generated from the same source fonts).
             styles = read_cpfont_styles(files[0]) if files else []
@@ -203,7 +205,6 @@ def build_manifest(
             styles = [read_outline_style(f) for f in sorted(files, key=lambda p: p.name)]
 
         # Get description
-        entry = (config or {}).get(family_name, {})
         description = entry.get("description")
         if description is None:
             print(f"  WARNING: no description for family '{family_name}'", file=sys.stderr)
@@ -307,7 +308,7 @@ def main():
             del families[name]
         for name, files in families.items():
             wanted = config[name].get("format", "cpfont")
-            if family_format(files) != wanted:
+            if family_format(files) != ("cpfont" if wanted == "uipack" else wanted):
                 print(f"ERROR: {name} is {wanted} in {args.config} but its files are not", file=sys.stderr)
                 sys.exit(1)
 

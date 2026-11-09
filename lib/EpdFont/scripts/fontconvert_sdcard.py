@@ -799,13 +799,6 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
 
     style_fonts: dict of {style_id: fontfile_path} e.g. {0: "Regular.ttf", 2: "Italic.ttf"}
     """
-    MAGIC = b"CPFONT\x00\x00"
-    VERSION = 4
-    HEADER_SIZE = 32
-    STYLE_TOC_ENTRY_SIZE = 32
-    flags = 1  # always 2-bit greyscale
-    style_count = len(style_fonts)
-
     # Rasterize each style
     raster_data = {}  # style_id -> StyleRasterData
     for style_id in sorted(style_fonts.keys()):
@@ -831,6 +824,24 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
             style_label = STYLE_LABELS.get(3, "3")
             if style_uses_synthetic_bold(regular_sd, raster_data[3]):
                 apply_synthetic_bold(raster_data[3], style_label)
+
+    total_file_size = write_cpfont(raster_data, output_path)
+    if debug_images:
+        save_debug_glyph_image(output_path, raster_data)
+    return total_file_size
+
+
+def write_cpfont(raster_data, output_path, two_bit=True):
+    """Write rasterized styles ({style_id: StyleRasterData}) as a v4 .cpfont file; returns its size.
+
+    two_bit=False writes the 1-bit form the built-in UI faces use (build_ui_script_pack.py): the
+    glyphs' bitmaps are then 1-bit streams, and SdCardFont reads the depth from the header's flags."""
+    MAGIC = b"CPFONT\x00\x00"
+    VERSION = 4
+    HEADER_SIZE = 32
+    STYLE_TOC_ENTRY_SIZE = 32
+    flags = 1 if two_bit else 0  # bit 0: 2-bit greyscale
+    style_count = len(raster_data)
 
     # Pack binary sections for each style
     packed_sections = {}  # style_id -> tuple of section bytearrays
@@ -898,8 +909,6 @@ def generate_cpfont_multistyle(style_fonts, size, intervals, output_path,
         print(f"    {sname}: {len(sd.all_glyphs)} glyphs, {len(sd.intervals)} intervals, "
               f"{ssize} bytes", file=sys.stderr)
     print(f"    Total: {total_file_size} bytes ({total_file_size / 1024 / 1024:.2f} MB)", file=sys.stderr)
-    if debug_images:
-        save_debug_glyph_image(output_path, raster_data)
     return total_file_size
 
 

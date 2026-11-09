@@ -8,6 +8,8 @@
 #include <cstring>
 #include <numeric>
 
+#include "ArabicUiPack.h"
+
 // --- SdCardFontFamilyInfo helpers ---
 
 const SdCardFontFileInfo* SdCardFontFamilyInfo::findFile(uint8_t size, uint8_t style) const {
@@ -208,6 +210,8 @@ void SdCardFontRegistry::scanRoot(const char* rootPath) {
 
       // Skip hidden/system directories (macOS ._*, .Trashes, etc.)
       if (nameBuffer[0] == '.' || nameBuffer[0] == '_') continue;
+      // The Arabic UI pack draws the interface's Arabic (src/UiScriptPack.cpp): no reading font.
+      if (strcmp(nameBuffer, arabic_ui_pack::FAMILY) == 0) continue;
 
       // Skip in-flight install/rollback dirs (Bookerly__staging, Bookerly__backup, ...)
       // — these may contain valid-looking .cpfont files during a resumable

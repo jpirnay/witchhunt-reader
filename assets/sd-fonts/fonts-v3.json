@@ -41,6 +41,43 @@
       ]
     },
     {
+      "name": "ArabicUI",
+      "description": "Arabic, Persian and Urdu in the interface: book titles, the keyboard. Not a reading font",
+      "format": "uipack",
+      "inDownloadAll": false,
+      "styles": [
+        "regular",
+        "bold"
+      ],
+      "files": [
+        {
+          "name": "ArabicUI/ArabicUI_10.cpfont",
+          "size": 24197,
+          "crc32": 4216736662
+        },
+        {
+          "name": "ArabicUI/ArabicUI_12.cpfont",
+          "size": 30663,
+          "crc32": 1575118544
+        },
+        {
+          "name": "ArabicUI/ArabicUI_14.cpfont",
+          "size": 37871,
+          "crc32": 205153229
+        },
+        {
+          "name": "ArabicUI/ArabicUI_6.cpfont",
+          "size": 7557,
+          "crc32": 2676083444
+        },
+        {
+          "name": "ArabicUI/ArabicUI_8.cpfont",
+          "size": 19695,
+          "crc32": 674036690
+        }
+      ]
+    },
+    {
       "name": "Arimo",
       "description": "Metric-compatible with Arial (Latin, Greek, Cyrillic)",
       "format": "cpfont",
