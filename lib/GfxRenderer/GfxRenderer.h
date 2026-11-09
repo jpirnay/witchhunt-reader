@@ -505,6 +505,13 @@ class GfxRenderer {
   // FreeInkDisplay::borrowSecondaryBuffer.
   uint8_t* borrowSecondaryBuffer(size_t* size) const { return display.borrowSecondaryBuffer(size); }
   bool returnSecondaryBuffer() const { return display.returnSecondaryBuffer(); }
+  // HalDisplay::borrowSecondaryBufferDuringRefresh. The lend can move the framebuffer, so the cached pointer follows.
+  uint8_t* borrowSecondaryBufferDuringRefresh(size_t* size) const {
+    uint8_t* lent = display.borrowSecondaryBufferDuringRefresh(size);
+    frameBuffer = display.getFrameBuffer();
+    return lent;
+  }
+  bool lendsDuringRefresh() const { return display.lendsDuringRefresh(); }
   // Keep fast differential alive (X4) after releaseSecondaryBuffer() by diffing
   // against the controller's retained baseline. See HalDisplay::setSingleBufferFastDiff.
   void setSingleBufferFastDiff(bool enabled) const { display.setSingleBufferFastDiff(enabled); }
@@ -547,6 +554,7 @@ class GfxRenderer {
     // dual->single transition (release sites) only.
   }
   bool isRefreshPending() const { return display.isRefreshPending(); }
+  bool refreshBusy() const { return display.refreshBusy(); }
   bool isRedRamSynced() const { return display.isRedRamSynced(); }
   // Diagnostics: effective refresh mode of the last refresh (after any downgrade).
   HalDisplay::RefreshMode getLastRefreshMode() const { return display.getLastRefreshMode(); }
