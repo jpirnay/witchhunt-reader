@@ -475,18 +475,6 @@ bool SdCardFontSystem::familyMapsCodepoint(const SdCardFontFamilyInfo& family, c
   return maps || bytes.ioError();
 }
 
-bool SdCardFontSystem::coversCjk(const char* family) {
-  const SdCardFontFamilyInfo* info = family && family[0] != '\0' ? findFamily(family) : nullptr;
-  if (!info || !info->ttf()) return false;
-  const uint32_t files = info->filesKey();
-  const uint32_t key = glyphstore::fnv1a(&files, sizeof files, glyphstore::fnv1a(family, strlen(family)));
-  if (key != cjkFamilyKey_) {
-    cjkFamilyKey_ = key;
-    cjkFamily_ = familyMapsCodepoint(*info, 0x4E00) || familyMapsCodepoint(*info, 0xAC00);  // 一, 가
-  }
-  return cjkFamily_;
-}
-
 bool SdCardFontSystem::openReadOnly(GfxRenderer& renderer, const char* const* familyNames, const uint8_t count,
                                     const uint8_t pointSize) {
   const SdCardFontFamilyInfo* families[SdCardFontManager::kMaxTtfFamilies] = {};

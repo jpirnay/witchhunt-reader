@@ -286,7 +286,8 @@ reader"):
   `drawTextScaled` make a line with a right-to-left character visual as they draw it (`BidiUtils::visualUiLine`);
   a page's words, formed at section build, go through `drawFormedText` instead. Every UI string is covered at once:
   the status bar, Home, the lists, the TOC, centred text, alt text. X3: a Hebrew chapter title in the status bar
-  read mirrored on master and reads right now. Where the UI face has no Hebrew (the list rows), nothing shows yet.
+  read mirrored on master and reads right now. Where the UI face has no Hebrew (the list rows), the last book's font
+  draws it when it has Hebrew (item 8).
 - **Fonts (done, `feat/hebrew-font-families`):** NotoSansHebrew and NotoSerifHebrew in the Font Manager, merged with
   Noto Sans/Serif Latin by `merge_noto_latin.py` (checked against a Hebrew corpus, `generate_corpus_hebrew.py`), and a
   Hebrew-script book picks an installed one by itself when the reader font has no alef
@@ -340,17 +341,15 @@ break (Hangul is kept whole), or where the next page word is glued to it. On the
 ### 8. Step 5: UI text
 
 - **UI titles and the TOC:** reordered since `feat/rtl-ui-titles` (item 4), but not shaped: the UI faces are bitmap,
-  so Arabic and Indic titles draw unjoined, and a list row draws no Hebrew or Arabic at all where the UI face lacks
-  it. The UI faces fall back to a TrueType face (`CjkUiFonts.cpp`, `readerFaceAt`): in the reader it is the book's,
-  which is why the status bar shows a Hebrew chapter title. Outside the reader, `openUiBookFonts` in `main.cpp`
-  opens the last book's family for the screens that draw book text, but only when that family covers CJK, so a
-  Hebrew or Arabic family never backs the Library rows (X3, 2026-11-09: the Details view of `/test`, NotoSansHebrew
-  as the reader font, drew the Hebrew notes book's title blank; the Japanese, Korean and Chinese titles drew, with
-  stand-in boxes for the glyphs the UI faces lack). The
-  next step is a design note, not code. One choice: let the opener take a family that covers the title's script too;
-  it still serves one family for every row, the last book's. The other: give the built-in UI faces the Hebrew
-  letters and points, at a flash cost not measured yet. Arabic and Indic titles would still need shaping, which
-  bitmap faces cannot do.
+  so Arabic and Indic titles draw unjoined. A character the UI faces lack comes from a TrueType face
+  (`CjkUiFonts.cpp`, `readerFaceAt`): in the reader the book's, outside it the last book's family, opened read-only by
+  `openUiBookFonts` in `main.cpp` on the screens that draw book text. That opener took a family with CJK only, so a
+  Hebrew or Arabic family never backed the Library rows (X3, 2026-11-09: the Details view of `/test`, NotoSansHebrew
+  as the reader font, drew the Hebrew notes book's title blank). Since `feat/ui-book-fonts-any-script` it opens the
+  family whatever its scripts: a character it lacks falls through to the UI faces. What is left: it is still the last book's family for every row (only that set is in the glyph store, and
+  opening another would rewrite it), so a Hebrew title shows only after a book whose font has Hebrew; giving the
+  built-in UI faces the Hebrew letters (flash cost not measured) would show it always; Arabic and Indic titles would
+  still need shaping, which bitmap faces cannot do.
 - **TXT and Markdown books:** they get no bidi.
 
 ### 9. Flash
