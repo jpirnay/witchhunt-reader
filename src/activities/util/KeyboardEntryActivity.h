@@ -60,8 +60,8 @@ class KeyboardEntryActivity : public Activity {
 
   // Which layer is showing. loop() changes these; render() reads them.
   freeink::ui::KeyboardLayoutId layoutId = freeink::ui::KeyboardLayoutId::QwertyEn;
-  // Puts the language key in the Latin layers' bottom row; the Cyrillic ones
-  // always carry it. Resolved once in onEnter(): the set cannot change while a
+  // Puts the language key in the Latin layers' bottom row; the other scripts'
+  // layers always carry it. Resolved once in onEnter(): the set cannot change while a
   // keyboard is on screen.
   bool showLangKey = false;
   bool shifted = false;
@@ -142,6 +142,12 @@ class KeyboardEntryActivity : public Activity {
 
   bool cursorPositionFromPoint(int x, int y, size_t& position) const;
   std::string displayTextForCurrentState() const;
+  // The field's direction, for text with a right-to-left character in it: 1 when its first letter runs right to left,
+  // as the UI text path decides a title's. A password stays left to right: what it shows is stars.
+  int fieldLevel(const std::string& shown) const;
+  // Cursor mode's Left (false) or Right (true): a step the way the field's text runs, so Left goes on to the next
+  // character in a right-to-left field. False at the end it was going to.
+  bool stepCursor(bool right);
   // Advance of s[start, end), measured in place by temporarily NUL-terminating
   // at `end` -- no substr temporary per measurement.
   int measureRange(std::string& s, int start, int end) const;
