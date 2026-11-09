@@ -1,7 +1,7 @@
-// Ours (writing modes step 2, PR 3, and PR 4b's Arabic runs): IndicShaper::shapeToken over FixtureShapingFace faces.
-// The HarfBuzz references are test/complex_shaper's ExpectedShaping.h, test/ttf_font's ExpectedGlyphRuns.h and
-// test/ot_shaper's ArabicExpected.h; the piecewise and coverage cases follow crosspoint-reader PR #3787's
-// ComplexShaperTest.
+// Ours (writing modes step 2, PR 3, PR 4b's Arabic runs, and the Myanmar design's PR 2): IndicShaper::shapeToken over
+// FixtureShapingFace faces. The HarfBuzz references are test/complex_shaper's ExpectedShaping.h, test/ttf_font's
+// ExpectedGlyphRuns.h and test/ot_shaper's ArabicExpected.h and MyanmarExpected.h; the piecewise and coverage cases
+// follow crosspoint-reader PR #3787's ComplexShaperTest.
 #include <BuildArena.h>
 #include <GlyphRun.h>
 #include <OtShaper.h>
@@ -28,6 +28,7 @@
 #include "FixtureShapingFace.h"
 #include "IndicScripts.h"
 #include "IndicShaper.h"
+#include "MyanmarExpected.h"
 #include "OtShaperTestHelpers.h"
 #include "TextShaping.h"
 
@@ -1482,4 +1483,194 @@ TEST(IndicShaper, ATokenWithBothScriptsShapesEachRun) {
     EXPECT_EQ(PieceKind::Glyphs, shaped.pieces[1].kind);
     EXPECT_EQ(shapedWithContext(face, ot::Script::Devanagari, "", kKi, ""), shaped.pieces[1].glyphs);
   }
+}
+
+// Myanmar runs (the Myanmar design's PR 2): shaped under ot::Script::Myanmar over PR 1's fixture (test/fixtures/fonts/
+// NotoSansMyanmar-Shaping-Regular.ttf), in the book's language, with a glued neighbour's nearest syllable as context.
+
+namespace {
+
+// Named in the comments: the sources hold no Myanmar character outside the expectations.
+constexpr const char* kMyMyanmar = "\xE1\x80\x99\xE1\x80\xBC\xE1\x80\x94\xE1\x80\xBA\xE1\x80\x99\xE1\x80\xAC";  // မြန်မာ
+constexpr const char* kMyMyan = "\xE1\x80\x99\xE1\x80\xBC\xE1\x80\x94\xE1\x80\xBA";                             // မြန်
+constexpr const char* kMyMa = "\xE1\x80\x99\xE1\x80\xAC";                                                       // မာ
+constexpr const char* kMyMinga = "\xE1\x80\x99\xE1\x80\x84\xE1\x80\xBA\xE1\x80\xB9\xE1\x80\x82";                // မင်္ဂ
+constexpr const char* kMyLa = "\xE1\x80\x9C\xE1\x80\xAC";                                                       // လာ
+constexpr const char* kMyPa = "\xE1\x80\x95\xE1\x80\xAB";                                                       // ပါ
+constexpr const char* kMyKa = "\xE1\x80\x80";                                                                   // က
+constexpr const char* kMyE = "\xE1\x80\xB1";                                                                    // ေ
+
+std::vector<uint8_t> myanmarFont() { return readFont(TTF_FIXTURE_DIR, kFontNotoSansMyanmarShapingRegular); }
+
+std::vector<StoredGlyph> storedOf(const MyanmarShapingExpectation& word) {
+  std::vector<StoredGlyph> out;
+  for (unsigned i = 0; i < word.count; ++i) {
+    out.push_back({word.glyphs[i].gid, word.glyphs[i].advance12_4, word.glyphs[i].dx, word.glyphs[i].dy});
+  }
+  return out;
+}
+
+const MyanmarShapingExpectation& recordedMyanmar(const std::string& utf8, const char* language = "") {
+  for (const MyanmarShapingExpectation& word : kMyanmarShaping) {
+    if (utf8 == word.utf8 && std::strcmp(word.language, language) == 0) return word;
+  }
+  ADD_FAILURE() << codepointsOf(utf8) << " is not recorded";
+  return kMyanmarShaping[0];
+}
+
+// The pieces' glyphs side by side, left to right: a Glyphs piece's records, and a Text piece's code points each as the
+// face's own glyph for it (its advance not compared: a Text piece is drawn as code points), taken from `recorded`
+// where it is that glyph.
+std::vector<StoredGlyph> leftToRight(const ot::Face& face, const std::string& text, const std::vector<Piece>& pieces,
+                                     const std::vector<StoredGlyph>& recorded) {
+  std::vector<StoredGlyph> drawn;
+  for (const Piece& piece : pieces) {
+    if (piece.kind == PieceKind::Glyphs) {
+      drawn.insert(drawn.end(), piece.glyphs.begin(), piece.glyphs.end());
+      continue;
+    }
+    for (const uint32_t cp : ottest::utf32(text.substr(piece.begin, piece.end - piece.begin).c_str())) {
+      const size_t at = drawn.size();
+      uint32_t nominal = 0;
+      const bool itself = piece.kind == PieceKind::Text && at < recorded.size() && face.nominalGlyph(cp, &nominal) &&
+                          nominal == recorded[at].gid;
+      drawn.push_back(itself ? recorded[at] : StoredGlyph{UINT32_MAX, 0, 0, 0});
+    }
+  }
+  return drawn;
+}
+
+}  // namespace
+
+// Every word make_myanmar_fixtures.py recorded from HarfBuzz 14.5.0 (test/ot_shaper/MyanmarExpected.h), through
+// shapeToken: a word that is one run is one Glyphs piece, its records HarfBuzz's glyph for glyph; the word with a space
+// is two runs and the space between them, side by side as HarfBuzz shapes the whole.
+TEST(IndicShaper, MatchesHarfBuzzOnTheRecordedMyanmarWords) {
+  FixtureShapingFace face(myanmarFont());
+  ASSERT_NE(nullptr, face.current());
+  size_t words = 0;
+  size_t onePiece = 0;
+  for (const MyanmarShapingExpectation& word : kMyanmarShaping) {
+    ++words;
+    const std::string text = word.utf8;
+    const Shaped shaped = shape(text, on(&face, word.language));
+    ASSERT_EQ(Outcome::Formed, shaped.outcome) << codepointsOf(text);
+    const std::vector<StoredGlyph> recorded = storedOf(word);
+    EXPECT_EQ(recorded, leftToRight(*face.current(), text, shaped.pieces, recorded))
+        << "'" << word.language << "' " << codepointsOf(text);
+    if (shaped.pieces.size() == 1 && shaped.pieces[0].kind == PieceKind::Glyphs) ++onePiece;
+  }
+  EXPECT_EQ(37u, words);
+  EXPECT_EQ(36u, onePiece);  // all but the word with a space
+}
+
+TEST(IndicShaper, CutsMyanmarPiecesAtRunEdges) {
+  FixtureShapingFace face(myanmarFont());
+  const std::string text = std::string("(") + kMyMyanmar + ")";
+  const Shaped shaped = shape(text, on(&face));
+  ASSERT_EQ(Outcome::Formed, shaped.outcome);
+  ASSERT_EQ(3u, shaped.pieces.size());
+  EXPECT_EQ(PieceKind::Text, shaped.pieces[0].kind);
+  EXPECT_EQ(PieceKind::Glyphs, shaped.pieces[1].kind);
+  EXPECT_EQ(1, shaped.pieces[1].begin);
+  EXPECT_EQ(19, shaped.pieces[1].end);
+  EXPECT_EQ(storedOf(recordedMyanmar(kMyMyanmar)), shaped.pieces[1].glyphs);
+  EXPECT_EQ(PieceKind::Text, shaped.pieces[2].kind);
+}
+
+TEST(IndicShaper, AFontWithoutMyanmarLeavesItText) {
+  FixtureShapingFace face(layoutFont("Devanagari"));
+  ASSERT_NE(nullptr, face.current());
+  EXPECT_FALSE(IndicShaper::draws(face, myanmar::kProbe));
+  EXPECT_TRUE(IndicShaper::draws(face, 0x0915));
+  {
+    RecordingSink sink;
+    CallMemory memory(nullptr, std::strlen(kMyMyanmar));
+    EXPECT_EQ(Outcome::Plain, IndicShaper::shapeToken(kMyMyanmar, on(&face), memory, sink));
+    EXPECT_EQ(0, sink.calls);
+  }
+  // Beside an Indic run the face shapes, the Myanmar run is a Text piece, never Reordered.
+  const Shaped shaped = shape(std::string(kKi) + kMyMyanmar, on(&face));
+  ASSERT_EQ(Outcome::Formed, shaped.outcome);
+  ASSERT_EQ(2u, shaped.pieces.size());
+  EXPECT_EQ(PieceKind::Glyphs, shaped.pieces[0].kind);
+  EXPECT_EQ(PieceKind::Text, shaped.pieces[1].kind);
+}
+
+TEST(IndicShaper, NoFaceLeavesMyanmarPlain) {
+  RecordingSink sink;
+  CallMemory memory(nullptr, std::strlen(kMyMyanmar), CallKind::Reorder);
+  EXPECT_EQ(Outcome::Plain, IndicShaper::shapeToken(kMyMyanmar, on(nullptr), memory, sink));
+  EXPECT_EQ(0, sink.calls);
+}
+
+// Tokens kept apart by a style glue between syllables are each shaped with the neighbour's nearest syllable as context:
+// side by side they are the whole word's glyphs, kinzi and the stacked ga included.
+TEST(IndicShaper, AGluedMyanmarNeighbourIsContext) {
+  FixtureShapingFace face(myanmarFont());
+  {
+    Request first = on(&face);
+    first.after = kMyMa;
+    Request second = on(&face);
+    second.before = kMyMyan;
+    const Shaped myan = shape(kMyMyan, first);
+    const Shaped ma = shape(kMyMa, second);
+    ASSERT_EQ(Outcome::Formed, myan.outcome);
+    ASSERT_EQ(Outcome::Formed, ma.outcome);
+    std::vector<StoredGlyph> both = myan.pieces[0].glyphs;
+    both.insert(both.end(), ma.pieces[0].glyphs.begin(), ma.pieces[0].glyphs.end());
+    EXPECT_EQ(storedOf(recordedMyanmar(kMyMyanmar)), both);
+    EXPECT_EQ(shapedWithContext(face, ot::Script::Myanmar, kMyMyan, kMyMa, ""), ma.pieces[0].glyphs);
+  }
+  {
+    // မင်္ဂ <b>လာ</b> ပါ: three tokens.
+    const std::string laPa = std::string(kMyLa) + kMyPa;
+    const std::string mingaLa = std::string(kMyMinga) + kMyLa;
+    Request first = on(&face);
+    first.after = laPa;
+    Request middle = on(&face);
+    middle.before = kMyMinga;
+    middle.after = kMyPa;
+    Request last = on(&face);
+    last.before = mingaLa;
+    const Shaped minga = shape(kMyMinga, first);
+    const Shaped la = shape(kMyLa, middle);
+    const Shaped pa = shape(kMyPa, last);
+    std::vector<StoredGlyph> all;
+    for (const Shaped* token : {&minga, &la, &pa}) {
+      ASSERT_EQ(Outcome::Formed, token->outcome);
+      ASSERT_EQ(1u, token->pieces.size());
+      all.insert(all.end(), token->pieces[0].glyphs.begin(), token->pieces[0].glyphs.end());
+    }
+    EXPECT_EQ(storedOf(recordedMyanmar(std::string(kMyMinga) + laPa)), all);
+  }
+}
+
+// A neighbour in another script is no context. A Myanmar neighbour's syllable is, even for a vowel sign kept apart from
+// its consonant (the parser merges such glue: mergesWithPrevious).
+TEST(IndicShaper, OnlyAMyanmarNeighbourIsAMyanmarRunsContext) {
+  FixtureShapingFace face(myanmarFont());
+  Request request = on(&face);
+  request.before = "abc";
+  request.after = kKi;
+  EXPECT_EQ(shape(kMyMyanmar, on(&face)).pieces[0].glyphs, shape(kMyMyanmar, request).pieces[0].glyphs);
+  Request sign = on(&face);
+  sign.before = kMyKa;
+  const Shaped e = shape(kMyE, sign);
+  ASSERT_EQ(Outcome::Formed, e.outcome);
+  EXPECT_EQ(shapedWithContext(face, ot::Script::Myanmar, kMyKa, kMyE, ""), e.pieces[0].glyphs);
+}
+
+// A run past the call's code points is shaped between syllables, each piece with a syllable on either side as context:
+// the pieces side by side are the whole run's glyphs.
+TEST(IndicShaper, ALongMyanmarRunShapesInSyllables) {
+  FixtureShapingFace face(myanmarFont());
+  std::string text;
+  for (int i = 0; i < 4; ++i) text += std::string(kMyMinga) + kMyLa + kMyPa + kMyMyanmar;
+  const std::vector<StoredGlyph> whole = shapedWithContext(face, ot::Script::Myanmar, "", text, "");
+  ASSERT_FALSE(whole.empty());
+  const Shaped shaped = shape(text, on(&face), 16);
+  ASSERT_EQ(Outcome::Formed, shaped.outcome);
+  ASSERT_EQ(1u, shaped.pieces.size());
+  EXPECT_EQ(whole, shaped.pieces[0].glyphs);
 }

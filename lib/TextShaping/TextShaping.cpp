@@ -11,6 +11,7 @@
 #include "BidiUtils.h"
 #include "HebrewShaper.h"
 #include "IndicScripts.h"
+#include "MyanmarScript.h"
 #include "Utf8.h"
 
 namespace TextShaping {
@@ -49,14 +50,22 @@ bool holdsMarksOnly(std::string_view text) {
 
 }  // namespace
 
+bool glueInsideSyllable(const std::string_view previous, const std::string_view token) {
+  if (previous.empty() || token.empty()) return false;
+  const uint32_t last = lastCodepoint(previous);
+  size_t pos = 0;
+  const uint32_t first = decodeAt(token, pos);
+  if (!indic::syllableBreakAllowed(last, first)) return true;
+  // Myanmar's rule reads the code point after the token's first past any dot below.
+  uint32_t next = 0;
+  while (pos < token.size() && (next = decodeAt(token, pos)) == myanmar::DOT_BELOW) next = 0;
+  return !myanmar::cutAllowed(last, first, next);
+}
+
 bool mergesWithPrevious(const GroupToken& previous, const GroupToken& token, bool shapedGroup) {
   if (previous.text.empty() || token.text.empty()) return false;
   if (shapedGroup) {
-    size_t pos = 0;
-    if (previous.styleKey == token.styleKey ||
-        !indic::syllableBreakAllowed(lastCodepoint(previous.text), decodeAt(token.text, pos))) {
-      return true;
-    }
+    if (previous.styleKey == token.styleKey || glueInsideSyllable(previous.text, token.text)) return true;
     if (holdsMarksOnly(token.text) && arabic::endsWithLetter(previous.text.data(), previous.text.size())) return true;
   }
   return holdsMarksOnly(token.text) && HebrewShaper::endsWithName(previous.text.data(), previous.text.size());

@@ -931,7 +931,7 @@ void ParsedText::decideShaping(const GfxRenderer& renderer, const int fontId) {
     if (font == askedFont && style == askedStyle) continue;
     uint32_t ppem = 0;
     ShapingFace* const face = shapingFaceFor(renderer, fontId, i, &ppem);
-    shapes_ = face != nullptr && IndicShaper::drawsArabic(*face);
+    shapes_ = face != nullptr && IndicShaper::draws(*face, arabic::kProbe);
     askedFont = font;
     askedStyle = style;
   }

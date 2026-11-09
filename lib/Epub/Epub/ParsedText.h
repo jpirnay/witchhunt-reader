@@ -265,7 +265,7 @@ class ParsedText {
     if (shapingLatch_ != nullptr) *shapingLatch_ = true;
   }
   // Whether this pass shapes, decided after decideBidi: a token holds Indic text, or a token that holds Arabic text in
-  // a paragraph that needs bidi has a face that maps beh (IndicShaper::drawsArabic), so an Arabic paragraph in a bitmap
+  // a paragraph that needs bidi has a face that maps beh (IndicShaper::draws), so an Arabic paragraph in a bitmap
   // or built-in font, or in a TrueType face without Arabic, is laid out as without shaping, with no ShapingState.
   // Makes ShapingState for it (refused: the pass is laid out unshaped, and latched), or empties the store of a pass
   // that does not shape. A kept token whose glued neighbour has just arrived is shaped again, with it as context.

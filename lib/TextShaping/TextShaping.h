@@ -30,12 +30,18 @@ struct GroupToken {
   uint32_t styleKey;      // equal keys: the same font, style, size and scale
 };
 
+// Whether the glue between `previous` and `token` (glued tokens, in logical order) falls inside a syllable: an Indic
+// one (indic::syllableBreakAllowed false across it) or a Myanmar one (myanmar::cutAllowed false across it, which reads
+// the token's code point after its first, past any dot below). False when either is empty.
+bool glueInsideSyllable(std::string_view previous, std::string_view token);
+
 // Whether `token`, glued after `previous` (a token merged so far, when earlier merges made it), joins it before
 // anything is measured or shaped:
-// - deviation 7, when `shapedGroup` (the group holds an Indic or Arabic letter and its paragraph shapes): the two
-//   share a style key, or the glue falls inside a syllable (indic::syllableBreakAllowed false across it), or `token`
-//   holds marks only and `previous` ends with an Arabic letter (arabic::endsWithLetter), whatever the styles: the
-//   mark is placed on its base and takes its style;
+// - deviation 7, when `shapedGroup` (the group holds an Indic, Arabic or Myanmar letter and its paragraph shapes): the
+//   two share a style key, or the glue falls inside a syllable (glueInsideSyllable: a style change before a vowel
+//   sign, a medial or asat, or after the stacker, never splits one), or `token` holds marks only and `previous` ends
+//   with an Arabic letter (arabic::endsWithLetter), whatever the styles: the mark is placed on its base and takes its
+//   style;
 // - the Hebrew name, always: `token` holds transparent marks only, and `previous` ends with the divine name.
 bool mergesWithPrevious(const GroupToken& previous, const GroupToken& token, bool shapedGroup);
 
