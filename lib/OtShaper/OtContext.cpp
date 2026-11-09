@@ -9,8 +9,8 @@
 
 namespace ot::layout {
 
-bool matchInput(ApplyContext* c, const unsigned count, const Values& input, const MatchFunc func, const Table& data,
-                unsigned* endPosition, unsigned* totalComponentCount) {
+OT_HOT bool matchInput(ApplyContext* c, const unsigned count, const Values& input, const MatchFunc func,
+                       const Table& data, unsigned* endPosition, unsigned* totalComponentCount) {
   Buffer& buffer = c->buffer;
   if (count == 1) {
     *endPosition = buffer.idx + 1;
@@ -219,10 +219,10 @@ struct ChainFuncs {
   Table data[3];
 };
 
-bool chainContextApplyLookup(ApplyContext* c, const unsigned backtrackCount, const Values& backtrack,
-                             const unsigned inputCount, const Values& input, const unsigned lookaheadCount,
-                             const Values& lookahead, const unsigned lookupCount, const Values& records,
-                             const ChainFuncs& f) {
+OT_HOT bool chainContextApplyLookup(ApplyContext* c, const unsigned backtrackCount, const Values& backtrack,
+                                    const unsigned inputCount, const Values& input, const unsigned lookaheadCount,
+                                    const Values& lookahead, const unsigned lookupCount, const Values& records,
+                                    const ChainFuncs& f) {
   if (inputCount > MAX_CONTEXT_LENGTH) return false;
   unsigned matchEnd = 0;
   if (!matchInput(c, inputCount, input, f.func[1], f.data[1], &matchEnd)) return false;
@@ -302,7 +302,7 @@ bool applyContext(ApplyContext* c, const Table& st) {
   }
 }
 
-bool applyChainContext(ApplyContext* c, const Table& st) {
+OT_HOT bool applyChainContext(ApplyContext* c, const Table& st) {
   const uint32_t glyph = c->buffer.cur().codepoint;
   switch (st.u16(0)) {
     case 1: {

@@ -20,7 +20,7 @@ bool isOneOf(const GlyphInfo& info, const uint64_t flags) {
   if (info.ligated()) return false;  // if it ligated, all bets are off
   return hasBit64(flags, info.category);
 }
-bool isConsonant(const GlyphInfo& info) { return isOneOf(info, CONSONANT_FLAGS); }
+OT_HOT bool isConsonant(const GlyphInfo& info) { return isOneOf(info, CONSONANT_FLAGS); }
 bool isJoiner(const GlyphInfo& info) { return isOneOf(info, JOINER_FLAGS); }
 bool isHalant(const GlyphInfo& info) { return isOneOf(info, flag(icat::H)); }
 bool flagSet(const uint8_t value, const uint64_t flags) { return hasBit64(flags, value); }

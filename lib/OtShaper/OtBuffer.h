@@ -155,7 +155,7 @@ struct GlyphInfo {
   static constexpr uint8_t IS_LIG_BASE = 0x10;
   unsigned ligId() const { return ligProps >> 5; }
   bool ligatedInternal() const { return ligProps & IS_LIG_BASE; }
-  unsigned ligComp() const { return ligatedInternal() ? 0 : ligProps & 0x0F; }
+  OT_HOT unsigned ligComp() const { return ligatedInternal() ? 0 : ligProps & 0x0F; }
   unsigned ligNumComps() const { return (isLigature() && ligatedInternal()) ? ligProps & 0x0F : 1; }
   // Components this glyph contributes when ligated again: the later pieces
   // of a MultipleSubst belong to the first piece's component.

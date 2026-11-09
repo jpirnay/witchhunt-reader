@@ -234,6 +234,20 @@ shaped-script book for the X4's in-place gate.
 - **The cmap cache** (deviation 17): `Face::nominalGlyph` keeps the last face's answers in 64 static slots (256 B),
   direct-mapped by the code point's low bits and emptied when another face asks. Normalization asks the cmap once or
   twice a code point, each a binary search over the subtable in flash.
+- **The engine's hottest code in IRAM on the C3** (deviation 21, `OtHot.h`). The C3 runs code and reads flash data
+  through one 16 KB cache, and shaping is bound by fetching its own instructions, not by its reads of the font: cutting
+  the font lines read per word by 37-45% made X3 chapter builds only 3-6% faster. `OT_HOT` links into IRAM the 8.7 KB
+  of the engine that executes the most instructions per byte, ranked by emulating the firmware's RV32 build (same
+  flags) over the distinct words of the Hindi and Arabic bench chapters: the table reads, the digest tests,
+  `mayApply`/`mayStart`, the lookup loop and `settings()`, the skipping iterator, coverage and class lookups, the
+  chained-context and GSUB dispatch, and the hot normalization and cmap functions. They execute 91% of the engine's
+  instructions; the whole hot path (15 KB) reaches 92-95%. Other targets and the host leave `OT_HOT` empty.
+  - X3, parse ms (median of three cold builds; 2026-11-09): master en 1,147, he 2,217, ar 6,339, hi 5,383; the
+    engine's CPU work alone (no IRAM) ar 6,071, hi 4,950; with `OT_HOT` ar 4,789 (-24%), hi 4,177 (-22%); Latin and
+    Hebrew unchanged.
+  - IRAM is carved from the heap's SRAM on the C3: `OT_HOT` costs 9.2 KB of boot heap (X3: 68,624 -> 59,244 B). The
+    regenerated `sections.ld` (docs/memory-allocation-strategy.md section 10) returns 11.1 KB, so it lands first: with
+    both, 70,484 B, and ar 4,813, hi 4,201.
 
 ## The word cache
 

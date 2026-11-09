@@ -36,7 +36,7 @@ inline int32_t saturate(const int64_t v) {
   if (v < INT32_MIN) return INT32_MIN;
   return static_cast<int32_t>(v);
 }
-inline int32_t satAdd(const int32_t a, const int32_t b) { return saturate(static_cast<int64_t>(a) + b); }
+OT_HOT inline int32_t satAdd(const int32_t a, const int32_t b) { return saturate(static_cast<int64_t>(a) + b); }
 inline int32_t satSub(const int32_t a, const int32_t b) { return saturate(static_cast<int64_t>(a) - b); }
 
 // Resolves an Extension subtable to the one it wraps (type and table).
@@ -134,7 +134,7 @@ struct ApplyContext {
     iterInput.init(this, false);
     iterContext.init(this, true);
   }
-  void setLookupProps(const uint32_t props) {
+  OT_HOT void setLookupProps(const uint32_t props) {
     lookupProps = face.sanitizeLookupProps(props);
     initIters();
   }
