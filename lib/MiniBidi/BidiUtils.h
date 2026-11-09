@@ -79,7 +79,15 @@ int plainClass(uint32_t cp);
 // as applyBidiVisual detects it); any other comes back as it is, after one byte scan. A line is fitted first (truncated
 // or wrapped in logical order) and made visual last, so an ellipsis lands where the title ends. A heap workspace this
 // call had to make is freed again, so a screen of titles holds no 1.5 KB block after it is drawn.
-std::string visualUiLine(const std::string& logical);
+//
+// paragraphLevel 0 or 1 sets the direction instead: a wrapped paragraph's lines all take the paragraph's, which its
+// first line shows (the keyboard's entry field). At 1 a line is ordered even with nothing right to left in it, since
+// the punctuation that ends it then stands on its left.
+std::string visualUiLine(const std::string& logical, int paragraphLevel = -1);
+
+// witchhunt: orderLine for UI text, freeing a heap workspace this call had to make, as visualUiLine does: the order the
+// characters of a line visualUiLine draws stand in, for a caller that places a caret in it.
+bool orderUiLine(const uint32_t* cps, size_t count, int paragraphLevel, uint16_t* visual, uint32_t* drawn);
 
 // witchhunt: whether orderLine would have a workspace now: the bound one, or the heap one, made here if it can be.
 // A caller with a short path that needs none asks first, so that it takes the same path as the full one would

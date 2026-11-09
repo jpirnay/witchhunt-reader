@@ -267,17 +267,29 @@ int plainClass(const uint32_t cp) {
   }
 }
 
-std::string visualUiLine(const std::string& logical) {
-  if (!hasRtlClass(logical.data(), logical.size())) return logical;
+std::string visualUiLine(const std::string& logical, const int paragraphLevel) {
+  // At its own direction or left to right, a line with nothing right to left in it is drawn as it is. Set right to
+  // left, it is not: a full stop ending it stands on its left.
+  if (paragraphLevel != 1 && !hasRtlClass(logical.data(), logical.size())) return logical;
   const bool held = heapWorkspaceHeld();
   std::string out;
-  const bool formed = applyBidiVisual(logical.c_str(), out, -1);
+  const bool formed = applyBidiVisual(logical.c_str(), out, paragraphLevel < 0 ? -1 : (paragraphLevel & 1));
   if (!held) {
     // Only the heap workspace this call made: a bound one stays bound, and one a build made stays for it.
     const std::lock_guard<std::mutex> lock(bidiMutex);
     bidiWorkspace.reset();
   }
   return formed ? out : logical;
+}
+
+bool orderUiLine(const uint32_t* cps, const size_t count, const int paragraphLevel, uint16_t* visual, uint32_t* drawn) {
+  const bool held = heapWorkspaceHeld();
+  const bool ordered = orderLine(cps, count, paragraphLevel, visual, drawn);
+  if (!held) {
+    const std::lock_guard<std::mutex> lock(bidiMutex);
+    bidiWorkspace.reset();
+  }
+  return ordered;
 }
 
 bool workspaceAvailable() {
