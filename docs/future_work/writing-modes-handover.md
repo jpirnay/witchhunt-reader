@@ -161,10 +161,13 @@ last).
 - **The paragraph-layout gate does not know the paragraph's size:** before Tier A the stress paragraph took the heap
   8.7 KB below the last gate reading, 3 KB under the hard floor, with nothing refused. A gate that adds the block's
   token count times a per-token cost would degrade predictably instead of by luck. Not built.
-- **Policy, open:** `ShapedStore::heapAllows` and the layout's `heapAllows` check the largest block only, with no
-  floor, so a store can take the heap down to Background-C's abort. A floor there would turn that into a latched
-  `shaping degraded` (unjoined Arabic, rebuilt once) instead of a released rebuild: a visible defect against an
-  invisible one with a fragmented session, which is the maintainer's call. Not changed.
+- **Policy, decided (2026-11-09):** `ShapedStore::heapAllows` also keeps `heap_growth::kShapedFreeFloor` (12 KB) free,
+  3 KB above the parse's hard floor, so a store that would take the heap that low refuses: the token is laid out as
+  its code points and the section latches shaping degraded (rebuilt once), instead of the parse aborting into a
+  truncated section. X4 figures that informed it (master 74b8fc803, Landscape CW, cold): the stress chapter built by
+  Background-C with no gate reached, lowest free heap 32.9 KB with the book index and 33.2 KB section only (X3: about
+  19.8 KB); Zaydan's chapter, Background-B's lowest 47.0 KB landscape, 46.7 KB portrait (X3: 29.2 KB); the in-place
+  gate line `heapAllowsInPlaceBuild=0 css=1 cjkTtf=0 shapedTtf=1`.
 
 ### 2. Profile the right-to-left baseline (profiled and half done; the measure is what is left)
 
