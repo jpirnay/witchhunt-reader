@@ -2732,14 +2732,13 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   // has no patterns.
   const bool shapedWord = shapes_ && shapedText(word);
 
-  // Collect candidate breakpoints (byte offsets and hyphen requirements). A Hangul word may split
-  // between syllables at a line end, without a hyphen; those breaks come first, so they win a width
-  // tie. From crosspoint-reader PR #3700 ("fix: justify Korean text by word spaces only", Sung-jin
-  // Brian Hong).
-  std::vector<Hyphenator::BreakInfo> breakInfos = CjkLineBreak::hangulLineEndBreaks(word);
+  // Collect candidate breakpoints (byte offsets and hyphen requirements), in two lists. A Hangul word may split
+  // between syllables at a line end, without a hyphen; those breaks come first, so they win a width tie. From
+  // crosspoint-reader PR #3700 ("fix: justify Korean text by word spaces only", Sung-jin Brian Hong). The language's
+  // breaks come last.
+  const std::vector<Hyphenator::BreakInfo> hangulBreaks = CjkLineBreak::hangulLineEndBreaks(word);
   const std::vector<Hyphenator::BreakInfo> hyphenatorBreaks = Hyphenator::breakOffsets(word, allowFallbackBreaks);
-  breakInfos.insert(breakInfos.end(), hyphenatorBreaks.begin(), hyphenatorBreaks.end());
-  if (breakInfos.empty()) {
+  if (hangulBreaks.empty() && hyphenatorBreaks.empty()) {
     return false;
   }
   // A shaped word's candidates are copied into one string (shapedPrefixWidth), grown here once to the word and a
@@ -2758,25 +2757,38 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   int chosenWidth = -1;
   bool chosenNeedsHyphen = true;
 
-  // Iterate over each legal breakpoint and retain the widest prefix that still fits.
-  for (const auto& info : breakInfos) {
-    const size_t offset = info.byteOffset;
-    if (offset == 0 || offset >= word.size()) {
-      continue;
-    }
+  // Retains the widest prefix of a list's legal breakpoints that still fits. With `stopEarly` the list's ascending
+  // order is taken to give prefixes that never narrow, so the first that does not fit ends the search: the one before
+  // it is the widest that does, and no longer prefix is shaped and measured for nothing. The Hangul list stops so: none
+  // of its breaks draws a hyphen, and a longer prefix holds more letters (assumed of every font, not proven). The
+  // language's list does not: it mixes breaks with an inserted hyphen and without one, and "Hi-" is wider than "Hil"
+  // in most fonts.
+  const auto chooseFrom = [&](const std::vector<Hyphenator::BreakInfo>& breaks, const bool stopEarly) {
+    for (const auto& info : breaks) {
+      const size_t offset = info.byteOffset;
+      if (offset == 0 || offset >= word.size()) {
+        continue;
+      }
 
-    const bool needsHyphen = info.requiresInsertedHyphen;
-    const int prefixWidth =
-        shapedWord ? shapedPrefixWidth(renderer, fontId, wordIndex, offset, needsHyphen)
-                   : measureWordWidth(renderer, font, word.substr(0, offset), style, needsHyphen, scale, vertical_);
-    if (prefixWidth > availableWidth || prefixWidth <= chosenWidth) {
-      continue;  // Skip if too wide or not an improvement
-    }
+      const bool needsHyphen = info.requiresInsertedHyphen;
+      const int prefixWidth =
+          shapedWord ? shapedPrefixWidth(renderer, fontId, wordIndex, offset, needsHyphen)
+                     : measureWordWidth(renderer, font, word.substr(0, offset), style, needsHyphen, scale, vertical_);
+      if (prefixWidth > availableWidth) {
+        if (stopEarly) return;
+        continue;  // too wide
+      }
+      if (prefixWidth <= chosenWidth) {
+        continue;  // not an improvement
+      }
 
-    chosenWidth = prefixWidth;
-    chosenOffset = offset;
-    chosenNeedsHyphen = needsHyphen;
-  }
+      chosenWidth = prefixWidth;
+      chosenOffset = offset;
+      chosenNeedsHyphen = needsHyphen;
+    }
+  };
+  chooseFrom(hangulBreaks, true);
+  chooseFrom(hyphenatorBreaks, false);
 
   if (chosenWidth < 0) {
     // No hyphenation point produced a prefix that fits in the remaining space.
