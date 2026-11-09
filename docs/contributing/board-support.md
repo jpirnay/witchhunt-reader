@@ -261,6 +261,12 @@ chosen; without it a UC81xx unit is sent SSD1677 command streams and shows no im
   deep-sleep path converted.
 - Keep a known-good upstream build at hand. Flashing `upstream/develop` on the same board as a
   control turns a guess into a comparison; it settled the X4 Pro's dual-core crash.
+- A panel smaller than a layout assumes gets wrong pixels, not corruption (checked by reading for the
+  Murphy M3's 240x416, 2026-11-03). The drawing primitives clamp or bounds-check (`fillPhysicalHSpanByte`,
+  `drawPixel`, the glyph blits, `blitImage`, `copyRegionToBuffer` and `copyBufferToRegion`); framebuffer and BW chunk
+  sizes come from the profile (`MAX_FRAMEBUFFER_BYTES`), and no static array in `src/` or `lib/` is sized by a panel
+  constant. The image caps in `PngToBmpConverter` and `JpegToBmpConverter` count source pixels, and the 480x800 in
+  `XtcTypes.h` are parser defaults only.
 - On a board far from the one the code was written for, a fix that changes nothing visible may
   have uncovered the next fault. The T5S3's anti-aliasing problems came in three layers, each
   visible only once the one above was fixed.
