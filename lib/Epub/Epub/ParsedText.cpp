@@ -37,6 +37,77 @@ constexpr int MAX_COST = std::numeric_limits<int>::max();
 
 namespace {
 
+// The parts of an inter-word space, remembered for one layout pass (spaceBefore()). Every line break and every
+// extracted line asks for the same gaps again, and getSpaceAdvance() looked up the font, the space glyph and its
+// kerning with both neighbours each time: 7% of a Latin chapter's build on the X3 (2026-11-09 profile). The parts are
+// what it sums, so the one rounding step (snapSpaceAdvance()) and the result are the same. Cleared at each
+// layoutAndExtractLines(), so a font set reloaded between passes is never read stale; section builds lay out on the
+// loop task, one pass at a time. 560 B.
+class SpaceParts {
+ public:
+  void clear() {
+    for (Glyph& g : glyphs_) g.valid = false;
+    for (Kern& k : kerns_) k.key = 0;
+    next_ = 0;
+  }
+
+  int space(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::Style style, const uint32_t leftCp,
+            const uint32_t rightCp) {
+    const uint8_t slot = glyphSlot(renderer, fontId, style);
+    const int32_t totalFP =
+        glyphs_[slot].advanceFP + kern(renderer, slot, leftCp, false) + kern(renderer, slot, rightCp, true);
+    return renderer.snapSpaceAdvance(fontId, totalFP);
+  }
+
+ private:
+  struct Glyph {
+    int fontId = 0;
+    EpdFontFamily::Style style = EpdFontFamily::REGULAR;
+    bool valid = false;
+    int32_t advanceFP = 0;
+  };
+  // key: the neighbour's code point (21 bits) | the space's side (bit 21, 1: the space on its left) | the glyph slot
+  // (bits 22-23) | 1 << 24, so a key is never 0, the empty one.
+  struct Kern {
+    uint32_t key = 0;
+    int8_t kernFP = 0;
+  };
+  static constexpr size_t kGlyphs = 4;  // a kerning key holds two bits of glyph slot
+  static constexpr size_t kKerns = 64;  // a key's top six hash bits index it
+  static_assert(kGlyphs == 4 && kKerns == 64, "the key layout and the index width assume these");
+
+  uint8_t glyphSlot(const GfxRenderer& renderer, const int fontId, const EpdFontFamily::Style style) {
+    for (uint8_t s = 0; s < kGlyphs; ++s) {
+      if (glyphs_[s].valid && glyphs_[s].fontId == fontId && glyphs_[s].style == style) return s;
+    }
+    const uint8_t s = next_;
+    next_ = static_cast<uint8_t>((next_ + 1) % kGlyphs);
+    for (Kern& k : kerns_) {
+      if (k.key != 0 && ((k.key >> 22) & 3u) == s) k.key = 0;  // the slot's kerning was another font's
+    }
+    glyphs_[s] = Glyph{fontId, style, true, renderer.spaceGlyphAdvanceFP(fontId, style)};
+    return s;
+  }
+
+  int32_t kern(const GfxRenderer& renderer, const uint8_t slot, const uint32_t cp, const bool spaceOnLeft) {
+    const uint32_t key =
+        (cp & 0x1FFFFFu) | (spaceOnLeft ? 1u << 21 : 0u) | (static_cast<uint32_t>(slot) << 22) | 1u << 24;
+    Kern& k = kerns_[(key * 2654435761u) >> (32 - 6)];
+    if (k.key != key) {
+      const Glyph& g = glyphs_[slot];
+      const int32_t fp =
+          spaceOnLeft ? renderer.kerningFP(g.fontId, ' ', cp, g.style) : renderer.kerningFP(g.fontId, cp, ' ', g.style);
+      k = Kern{key, static_cast<int8_t>(fp)};  // a kerning pair is int8_t 4.4 fixed point (EpdFontFamily::getKerning)
+    }
+    return k.kernFP;
+  }
+
+  Glyph glyphs_[kGlyphs];
+  Kern kerns_[kKerns];
+  uint8_t next_ = 0;
+};
+SpaceParts spaceParts;
+
 // Closing punctuation that should not have extra space inserted before it during justification.
 // Includes common closing brackets/quotes and sentence-ending marks. En/em dashes
 // are also treated as inline separators here to avoid justification stretch
@@ -810,8 +881,12 @@ int ParsedText::widthForLine(const int lineIndex, const int lineHeight, const in
 
 int ParsedText::spaceBefore(const GfxRenderer& renderer, const int fontId, const size_t j) const {
   const size_t source = spaceSource(fontId, j);
-  return renderer.getSpaceAdvance(wordFontId(source, fontId), lastCodepoint(words[j - 1]), firstCodepoint(words[j]),
-                                  wordStyles[source]);
+  if (!rememberSpaceParts) {
+    return renderer.getSpaceAdvance(wordFontId(source, fontId), lastCodepoint(words[j - 1]), firstCodepoint(words[j]),
+                                    wordStyles[source]);
+  }
+  return spaceParts.space(renderer, wordFontId(source, fontId), wordStyles[source], lastCodepoint(words[j - 1]),
+                          firstCodepoint(words[j]));
 }
 
 int ParsedText::kernBefore(const GfxRenderer& renderer, const int fontId, const size_t j) const {
@@ -1301,6 +1376,7 @@ void ParsedText::layoutAndExtractLines(
   if (words.empty()) {
     return;
   }
+  spaceParts.clear();
   // Whether the paragraph needs bidi and which way it runs, before anything reads its words or its alignment. A pass
   // without bidi drops its controls first, so the snapshot below is of the text that is laid out.
   decideBidi();

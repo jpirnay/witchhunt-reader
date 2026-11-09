@@ -13,6 +13,7 @@
 //
 // Per-word font slots follow crosspoint-reader PR #3934 (Justin Mitchell).
 
+#include <Utf8.h>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -230,4 +231,45 @@ TEST(WordFontSlots, SerializationKeepsTheFontsAndRefusesASlotThatNamesNone) {
   bad.write(corrupt.data(), corrupt.size());
   ASSERT_TRUE(bad.seek(0));
   EXPECT_EQ(nullptr, TextBlock::deserialize(bad));
+}
+
+TEST(SpaceParts, EveryGapIsTheRenderersThoughThePassRemembersItsParts) {
+  // A layout pass remembers a space's parts (ParsedText.cpp's SpaceParts: four font-and-style slots, 64 kerning
+  // entries). Two fonts in four styles and a hundred neighbours make it replace both, under kerning that differs by
+  // font, style, side and code point: every line breaks and places its words as getSpaceAdvance() asked afresh would.
+  GfxRenderer::spaceKernFP = [](const int fontId, const uint32_t left, const uint32_t right,
+                                const EpdFontFamily::Style style) -> int32_t {
+    const uint32_t cp = left == ' ' ? right : left;
+    const uint32_t mix =
+        cp * 7u + static_cast<uint32_t>(style) * 3u + (fontId == kWide ? 5u : 0u) + (left == ' ' ? 1u : 0u);
+    return static_cast<int32_t>(mix % 5u) * 16 - 32;  // -2 to +2 px
+  };
+  const auto build = [] {
+    ParsedText text(false, false, noIndentStyle());
+    for (int i = 0; i < 160; ++i) {
+      std::string word;
+      utf8AppendCodepoint(word, 0x100 + static_cast<uint32_t>(i * 37 % 100));
+      utf8AppendCodepoint(word, 0x100 + static_cast<uint32_t>((i * 53 + 11) % 100));
+      const auto style = static_cast<EpdFontFamily::Style>(i % 4);
+      text.addWord(word, style, false, false, 100, 0, /*fontSlot=*/static_cast<uint8_t>(i % 3 == 0 ? 1 : 0));
+    }
+    text.setFontSlot(1, {kWide, 1.0f});
+    return text;
+  };
+  GfxRenderer renderer;
+  ParsedText remembered = build();
+  const auto withParts = layout(remembered, renderer, 300);
+  ParsedText::rememberSpaceParts = false;
+  ParsedText asked = build();
+  const auto afresh = layout(asked, renderer, 300);
+  ParsedText::rememberSpaceParts = true;
+  GfxRenderer::spaceKernFP = nullptr;
+  ASSERT_GT(withParts.size(), 5u);
+  ASSERT_EQ(afresh.size(), withParts.size());
+  for (size_t l = 0; l < afresh.size(); ++l) {
+    ASSERT_EQ(afresh[l]->wordCount(), withParts[l]->wordCount()) << l;
+    for (size_t w = 0; w < afresh[l]->wordCount(); ++w) {
+      EXPECT_EQ(afresh[l]->wordXpos(w), withParts[l]->wordXpos(w)) << "line " << l << " word " << w;
+    }
+  }
 }

@@ -102,6 +102,14 @@ class GfxRenderer {
   int getSpaceAdvance(int /*fontId*/, uint32_t /*leftCp*/, uint32_t /*rightCp*/, EpdFontFamily::Style /*style*/) const {
     return SPACE_W;
   }
+  // getSpaceAdvance()'s parts, as ParsedText's layout pass asks for them (4.4 fixed point): they sum to it.
+  int32_t spaceGlyphAdvanceFP(const int fontId, const EpdFontFamily::Style style) const {
+    return static_cast<int32_t>(getSpaceAdvance(fontId, 0, 0, style)) << 4;
+  }
+  int32_t kerningFP(int /*fontId*/, uint32_t /*leftCp*/, uint32_t /*rightCp*/, EpdFontFamily::Style /*style*/) const {
+    return 0;
+  }
+  int snapSpaceAdvance(int /*fontId*/, const int32_t totalFP) const { return (totalFP + 8) >> 4; }
   int getKerning(int /*fontId*/, uint32_t /*leftCp*/, uint32_t /*rightCp*/, EpdFontFamily::Style /*style*/) const {
     return 0;
   }

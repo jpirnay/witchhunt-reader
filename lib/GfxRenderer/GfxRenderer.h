@@ -688,6 +688,12 @@ class GfxRenderer {
   /// Using a single snap avoids the +/-1 px rounding error that arises when space advance and kern are
   /// snapped separately and then added as integers.
   int getSpaceAdvance(int fontId, uint32_t leftCp, uint32_t rightCp, EpdFontFamily::Style style) const;
+  // The parts getSpaceAdvance() sums, in 4.4 fixed point, and the one rounding step it ends with, for a caller that
+  // asks for many gaps in one font and remembers the parts (ParsedText's layout pass): the space's advance, a kerning
+  // pair, and their sum scaled and snapped to whole pixels. 0 for an unknown font.
+  int32_t spaceGlyphAdvanceFP(int fontId, EpdFontFamily::Style style) const;
+  int32_t kerningFP(int fontId, uint32_t leftCp, uint32_t rightCp, EpdFontFamily::Style style) const;
+  int snapSpaceAdvance(int fontId, int32_t totalFP) const;
   /// Returns the kerning adjustment between two adjacent codepoints.
   int getKerning(int fontId, uint32_t leftCp, uint32_t rightCp, EpdFontFamily::Style style) const;
   int getTextAdvanceX(int fontId, const char* text, EpdFontFamily::Style style) const;
