@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "../book_metadata_cache/AllocationRefusal.h"
+#include "HeapGrowth.h"
 #include "ShapedStore.h"
 
 namespace {
@@ -533,6 +534,32 @@ TEST(ShapedStore, ARefusedChunkFailsTheTokenNotTheStore) {
   EXPECT_TRUE(readsBack(store, 2, "later", 1, 5, 3));
 }
 
+TEST(ShapedStore, AGrowthBelowTheFreeHeapFloorFailsTheTokenNotTheStore) {
+  ShapedStore store;
+  ASSERT_TRUE(store.reserve(8, 0));
+  ASSERT_TRUE(store.insert(0));
+  ASSERT_TRUE(writeGlyphToken(store, 0, "keep", 1, 5, 9));  // the first chunk, taken with room to spare
+  ASSERT_TRUE(store.insert(1));
+  ASSERT_TRUE(store.insert(2));
+  const uint32_t savedFree = ESP.getFreeHeap();
+  {
+    // The largest block holds a chunk, but taking one would leave less than the floor free.
+    ESP.setFreeHeap(static_cast<uint32_t>(heap_growth::kShapedFreeFloor + ShapedStore::kChunkBytes));
+    ASSERT_TRUE(store.open(1, "big", 1));
+    ASSERT_TRUE(store.beginPiece(PieceKind::Glyphs, 0, 3));
+    GlyphRecord r;
+    bool failed = false;
+    for (int i = 0; i < 400 && !failed; i++) failed = !store.addGlyph(r);  // 1,600 B, past the first chunk
+    EXPECT_TRUE(failed);
+    store.abandon();
+  }
+  ESP.setFreeHeap(savedFree);
+  EXPECT_FALSE(store.pieces(1, "big", 1).has_value());
+  EXPECT_TRUE(readsBack(store, 0, "keep", 1, 5, 9));
+  ASSERT_TRUE(writeGlyphToken(store, 2, "later", 1, 5, 3));
+  EXPECT_TRUE(readsBack(store, 2, "later", 1, 5, 3));
+}
+
 TEST(ShapedStore, TheChunkCapFailsTheTokenNotTheStore) {
   ShapedStore store;
   ASSERT_TRUE(store.reserve(40, 0));
@@ -615,15 +642,18 @@ TEST(ShapedStore, TheIndexStaysWithinItsHalfwordBounds) {
   store.abandon();
   EXPECT_FALSE(store.open(0, longest + "a", 1));
 
-  // 65,535 pieces are about 900 KB of index, past the shim's largest free block (100 KB): the heap check reads a
-  // larger one for this test, so the refusal is the bound's.
+  // 65,535 pieces are about 900 KB of index, past the shim's largest free block (100 KB) and free heap (200 KB): the
+  // heap checks read larger ones for this test, so the refusal is the bound's.
   const uint32_t savedBlock = ESP.getMaxAllocHeap();
+  const uint32_t savedFree = ESP.getFreeHeap();
   ESP.setMaxAllocHeap(4 * 1024 * 1024);
+  ESP.setFreeHeap(8 * 1024 * 1024);
   ASSERT_TRUE(store.open(0, "abc", 1));
   for (size_t p = 0; p < UINT16_MAX; p++) ASSERT_TRUE(store.beginPiece(PieceKind::Text, 0, 1)) << p;
   EXPECT_FALSE(store.beginPiece(PieceKind::Text, 0, 1));
   store.commit();
   ESP.setMaxAllocHeap(savedBlock);
+  ESP.setFreeHeap(savedFree);
   const auto pieces = store.pieces(0, "abc", 1);
   ASSERT_TRUE(pieces.has_value());
   EXPECT_EQ(static_cast<size_t>(UINT16_MAX), pieces->size());

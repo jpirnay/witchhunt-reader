@@ -35,4 +35,14 @@ inline size_t growthBytes(const std::string& s, const size_t size) {
 // its five (each block then fits in what the ones before it leave). Nothing to grow is always allowed.
 inline bool heapAllows(const size_t bytes) { return bytes == 0 || ESP.getMaxAllocHeap() >= bytes; }
 
+// The free heap a shaped store's growth leaves (ShapedStore::heapAllows): 3 KB above the parse's hard floor
+// (EHP_TEXT_LAYOUT_HARD_MIN_FREE_HEAP, which ChapterHtmlSlimParser asserts is below it). Short of it, the store
+// refuses, the token is laid out as its code points and the section is latched as shaping degraded (rebuilt once),
+// so a heavy shaped paragraph ends in unjoined text instead of an aborted, truncated section. Measured on the X3 and
+// X4 (2026-11-09), no book came near it: the stress chapter's lowest free heap was about 19.8 and 33 KB.
+constexpr size_t kShapedFreeFloor = 12 * 1024;
+
+// Whether growing by `bytes` leaves `floor` of free heap.
+inline bool heapLeaves(const size_t bytes, const size_t floor) { return ESP.getFreeHeap() >= bytes + floor; }
+
 }  // namespace heap_growth
