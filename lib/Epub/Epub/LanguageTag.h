@@ -94,23 +94,31 @@ inline const indic::ScriptInfo* indicScriptOf(const std::string& rawTag) {
   return nullptr;
 }
 
-// Whether a tag is written in the Arabic script. The languages that are, unless a script subtag names another; any
-// other language that a script subtag of Arab puts there ("ku-Arab", "pa-Arab"). Bare "ku" is Latin in most books.
-inline bool isArabicScript(const std::string& rawTag) {
-  static constexpr const char* kLanguages[] = {"ar",  "fa",  "prs", "ur",  "ps",  "sd",  "ug",  "ckb", "ks",
-                                               "pnb", "azb", "bal", "skr", "glk", "mzn", "lrc", "bqi", "ota"};
-  const std::string tag = normalised(rawTag);
+namespace detail {
+// Whether a normalised tag is written in the script whose ISO 15924 code is `script` (lower case): its first script
+// subtag decides, as indicScriptOf reads it; without one, whether its primary language is one of `languages`. A
+// singleton ends the scan: extensions and private use follow it, and name no script of the language.
+template <size_t N>
+bool writtenIn(const std::string& tag, const char* const (&languages)[N], const char* script) {
   bool known = false;
-  for (const char* language : kLanguages) known = known || hasPrimary(tag, language);
-  // The first script subtag decides, as indicScriptOf reads it; a singleton ends the scan.
+  for (const char* language : languages) known = known || hasPrimary(tag, language);
   for (size_t at = tag.find('-'); at != std::string::npos; at = tag.find('-', at + 1)) {
     const size_t end = tag.find('-', at + 1);
     const size_t len = (end == std::string::npos ? tag.size() : end) - at - 1;
     if (len == 1) break;
     if (len != 4 || tag[at + 1] < 'a' || tag[at + 1] > 'z') continue;
-    return tag.compare(at + 1, 4, "arab") == 0;
+    return tag.compare(at + 1, 4, script) == 0;
   }
   return known;
+}
+}  // namespace detail
+
+// Whether a tag is written in the Arabic script. The languages that are, unless a script subtag names another; any
+// other language that a script subtag of Arab puts there ("ku-Arab", "pa-Arab"). Bare "ku" is Latin in most books.
+inline bool isArabicScript(const std::string& rawTag) {
+  static constexpr const char* kLanguages[] = {"ar",  "fa",  "prs", "ur",  "ps",  "sd",  "ug",  "ckb", "ks",
+                                               "pnb", "azb", "bal", "skr", "glk", "mzn", "lrc", "bqi", "ota"};
+  return detail::writtenIn(normalised(rawTag), kLanguages, "arab");
 }
 
 // Whether a tag is written in the Hebrew script: Hebrew ("he", and the withdrawn "iw" that older books carry), Yiddish
@@ -118,17 +126,7 @@ inline bool isArabicScript(const std::string& rawTag) {
 // language that a script subtag of Hebr puts there. The same scan as isArabicScript.
 inline bool isHebrewScript(const std::string& rawTag) {
   static constexpr const char* kLanguages[] = {"he", "iw", "yi", "lad", "jrb"};
-  const std::string tag = normalised(rawTag);
-  bool known = false;
-  for (const char* language : kLanguages) known = known || hasPrimary(tag, language);
-  for (size_t at = tag.find('-'); at != std::string::npos; at = tag.find('-', at + 1)) {
-    const size_t end = tag.find('-', at + 1);
-    const size_t len = (end == std::string::npos ? tag.size() : end) - at - 1;
-    if (len == 1) break;
-    if (len != 4 || tag[at + 1] < 'a' || tag[at + 1] > 'z') continue;
-    return tag.compare(at + 1, 4, "hebr") == 0;
-  }
-  return known;
+  return detail::writtenIn(normalised(rawTag), kLanguages, "hebr");
 }
 
 }  // namespace language_tag
