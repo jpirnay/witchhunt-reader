@@ -6,9 +6,6 @@ found in the audit and left out of that PR.
 
 ## Overlaps
 
-- **Keyboard, X4 landscape CCW:** the header still runs under the side boxes.
-  `keyboardContentRect()` (`KeyboardEntryActivity.cpp`) reserves side columns only on the X3;
-  reserving them on the X4 narrows its keyboard.
 - **Wi-Fi legend:** overlaps the last network row when the list is full (pre-existing).
 - **Reading stats in landscape at the Large UI font:** the cards do not fit; the history card can
   reach the Base subtitle line in landscape CW. Only the optional 30-day card is dropped today.
@@ -21,7 +18,6 @@ found in the audit and left out of that PR.
 - The Markdown and XTC chapter lists count rows per page from a different rect than they draw in.
 - System Information and Boot Diagnostics subtract the hint strip twice.
 - BaseTheme's title-width budget mixes absolute and relative x.
-- `CrossPointWebServer` (the screen) draws its header twice per frame.
 
 ## Cleanup
 
@@ -29,7 +25,6 @@ found in the audit and left out of that PR.
   them to `HeaderLayout` removes the duplicates (no visible change). The chapter lists could also use
   `overlayTitleY`.
 - OtaUpdate has hard-coded English strings (not `tr(STR_*)`).
-- Wrong comments: the Weather screen calls itself portrait; `ActivityManager.cpp` says the S3 loop
-  task runs on core 0 (it runs on core 1).
+- Wrong comment: `ActivityManager.cpp` says the S3 loop task runs on core 0 (it runs on core 1).
 - The SDK widget `freeink::ui::header()` overlaps title and subtitle (`subtitle` starts at
   `y + titleLineH` while the title is centred). This repo does not use it; for freeink-sdk.
