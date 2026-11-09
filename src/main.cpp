@@ -964,6 +964,7 @@ void syncUiBookFonts(const bool bookText, const bool reader) {
   // whether the pack is there (the Font Manager may have installed or removed it).
   UiScriptPack::release();
   CjkUiPack::release();
+  CjkUiFonts::setInReader(reader);
 }
 
 // --- Temporary boot-phase heap-corruption bisect probes -------------------------------

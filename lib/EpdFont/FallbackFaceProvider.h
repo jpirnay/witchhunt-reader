@@ -59,6 +59,17 @@ class FallbackFaceProvider final : public GlyphProvider {
     void* ctx = nullptr;
   };
   void setPacks(const Packs& packs) { packs_ = packs; }
+  /// In the reader (`maps` set, CjkUiFonts::setInReader): the reader's face goes before the packs for a code point
+  /// `maps(ctx, cp)` says it maps, a lookup in its tables that renders nothing; the book's own font is open anyway, and
+  /// a pack opened beside it would cost its heap on the tightest screen there is. nullptr: the packs first.
+  void setReaderMaps(bool (*maps)(void* ctx, uint32_t codepoint), void* ctx) {
+    readerMaps_ = maps;
+    readerMapsCtx_ = ctx;
+  }
+  /// In the reader, whether the book's face maps `codepoint`: what goes to it before any pack (UiFaceProvider's too).
+  bool readerMaps(const uint32_t codepoint) const { return readerMaps_ && readerMaps_(readerMapsCtx_, codepoint); }
+  /// A reader is on the stack (setReaderMaps set).
+  bool inReader() const { return readerMaps_ != nullptr; }
   /// The UI face this provider serves, whose own table beginText() reads to tell which of a string's characters it
   /// lacks: the regular face of the provider's size. Its siblings (bold, other sizes) cover the same characters.
   void setPrimaryFace(const EpdFontData* primary) { primary_ = primary; }
@@ -129,10 +140,13 @@ class FallbackFaceProvider final : public GlyphProvider {
   const EpdFontData* primary_ = nullptr;
   bool bookText_ = false;  // beginText(): the string being drawn is book text
   Packs packs_{};
+  bool (*readerMaps_)(void* ctx, uint32_t codepoint) = nullptr;
+  void* readerMapsCtx_ = nullptr;
   const EpdFontData* servedPack_ = nullptr;  // the pack face the last pack glyph came from
   bool (*formsArabic_)(void* ctx) = nullptr;
   void* formsCtx_ = nullptr;
 
   const EpdGlyph* serve(uint32_t codepoint);
+  const EpdGlyph* servePack(uint32_t codepoint);
   const EpdGlyph* serveFrom(const EpdFontData* face, uint32_t codepoint, bool reader);
 };

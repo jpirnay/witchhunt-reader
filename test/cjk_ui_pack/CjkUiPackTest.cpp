@@ -5,6 +5,7 @@
 #include <Utf8.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <set>
@@ -69,6 +70,7 @@ struct Packs {
   Region order[cjk_ui_pack::REGION_COUNT] = {};
   size_t orderCount = 0;
   int prepared = 0;
+  int asked = 0;  // face() calls: a pack opened or looked in
 
   void install(const Region region) {
     auto& font = fonts[static_cast<size_t>(region)];
@@ -79,6 +81,7 @@ struct Packs {
 
   static const EpdFontData* face(void* ctx, const uint32_t cp) {
     auto* self = static_cast<Packs*>(ctx);
+    ++self->asked;
     for (size_t i = 0; i < self->orderCount; ++i) {
       if (cjk_ui_pack::covers(self->order[i], cp) && self->installed(self->order[i])) {
         return self->fonts[static_cast<size_t>(self->order[i])]->getEpdFont(0)->data;
@@ -111,6 +114,39 @@ struct Packs {
     p.ctx = this;
     return p;
   }
+};
+
+// A book's own face as the reader lends it (TtfFont::nativeFonts): 2-bit, every glyph from its provider, which owns
+// the bitmap; and the cmap query CjkUiFonts gives the provider in the reader (readerMapsCodepoint).
+struct BookFace final : GlyphProvider {
+  std::vector<uint32_t> codepoints;
+  EpdGlyph record{};
+  Bytes bitmap;
+  EpdFontData data{};
+
+  BookFace(std::vector<uint32_t> covered, const uint8_t size) : codepoints(std::move(covered)) {
+    record = EpdGlyph{
+        size, size, static_cast<uint16_t>(size << 4), 1, static_cast<int16_t>(size), glyphDataBytes(size, size, true),
+        0};
+    bitmap.assign(record.dataLength, 0xFF);
+    data.is2Bit = true;
+    data.advanceY = size;
+    data.provider = this;
+  }
+  bool has(const uint32_t cp) const { return std::find(codepoints.begin(), codepoints.end(), cp) != codepoints.end(); }
+  const EpdGlyph* missGlyph(const uint32_t cp) override { return has(cp) ? &record : nullptr; }
+  bool ownsBitmap(const EpdGlyph* glyph, const uint8_t*& out) const override {
+    if (glyph != &record) return false;
+    out = bitmap.data();
+    return true;
+  }
+  Bytes ink() const {
+    Bytes mask(glyphDataBytes(record.width, record.height, false));
+    packInkMask(bitmap.data(), static_cast<uint32_t>(bitmap.size()), mask.data());
+    return mask;
+  }
+  static const EpdFontData* source(void* ctx) { return &static_cast<BookFace*>(ctx)->data; }
+  static bool maps(void* ctx, const uint32_t cp) { return static_cast<BookFace*>(ctx)->has(cp); }
 };
 
 int readerAsks = 0;
@@ -263,4 +299,29 @@ TEST_F(CjkUiPackTest, ATranslationInACjkUiLanguageStaysWithItsOwnFaceAndReadsNot
   provider.beginText(translation.c_str());
   EXPECT_EQ(packs.prepared, 0);
   EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(0x8BBE)), flashBytes(cjk_ui_zh_10, 0x8BBE));
+}
+
+TEST_F(CjkUiPackTest, InTheReaderTheBooksFaceGoesFirstAndNoPackIsOpenedForWhatItMaps) {
+  packs.install(Region::SimplifiedChinese);
+  provider.setPacks(packs.hooks());
+  BookFace book({0x5FAE, 0x98CE}, 12);  // a Chinese book's font: 微风
+  provider.setReaderFace(&BookFace::source, &book);
+  provider.setReaderMaps(&BookFace::maps, &book);  // a reader is on the stack
+  provider.beginText(CHINESE.c_str());
+  for (const uint32_t cp : codepointsOf(CHINESE)) EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(cp)), book.ink());
+  EXPECT_EQ(packs.prepared, 0);
+  EXPECT_EQ(packs.asked, 0);
+}
+
+TEST_F(CjkUiPackTest, InTheReaderWhatTheBooksFaceLacksStillComesFromThePack) {
+  packs.install(Region::Japanese);
+  provider.setPacks(packs.hooks());
+  BookFace book({0x5FAE}, 12);  // 微 only
+  provider.setReaderFace(&BookFace::source, &book);
+  provider.setReaderMaps(&BookFace::maps, &book);
+  provider.beginText(CHINESE.c_str());
+  EXPECT_EQ(packs.prepared, 1);  // 风 alone
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(0x5FAE)), book.ink());
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(0x98CE)),
+            readCpfont(packPath(Region::Japanese, 10)).styles[0].bitmapOf(0x98CE));
 }

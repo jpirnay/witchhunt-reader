@@ -210,3 +210,16 @@ TEST_F(UiScriptPackTest, WithoutThePackArabicFallsToWhatServedItBefore) {
   EXPECT_FALSE(EpdFont(&ui).getGlyph(0x0644));  // no book font: nothing draws it (Inter has no U+FFFD)
   EXPECT_FALSE(EpdFont(&ui).getGlyph(0xFEFB));
 }
+
+namespace {
+bool bookMapsEverything(void* /*ctx*/, uint32_t /*codepoint*/) { return true; }
+}  // namespace
+
+TEST_F(UiScriptPackTest, InTheReaderTheBooksFaceGoesFirstAndThePackIsNotRead) {
+  // A reader on the stack whose book's font maps the forms: the pack is neither read nor asked for them.
+  shared.setReaderMaps(&bookMapsEverything, nullptr);
+  const std::string formed = BidiUtils::arabicUiForms(TITLE);
+  ui.provider->beginText(formed.c_str());
+  EXPECT_EQ(regularHooks.prepared, 0);
+  EXPECT_FALSE(EpdFont(&ui).getGlyph(0xFEFB));  // no book face lent here: nothing draws it, and no pack glyph
+}

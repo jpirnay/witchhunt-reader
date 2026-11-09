@@ -34,13 +34,11 @@ const EpdGlyph* FallbackFaceProvider::serve(const uint32_t codepoint) {
   for (uint8_t i = 0; i < before; ++i) {
     if (const EpdGlyph* glyph = serveFrom(faces_[i], codepoint, false)) return glyph;
   }
-  // The packs on the card, before the reader's face: a title draws alike whatever book was read last.
-  if (packs_.face) {
-    const EpdFontData* pack = packs_.face(packs_.ctx, codepoint);
-    if (const EpdGlyph* glyph = sd_face::glyph(pack, codepoint)) {
-      servedPack_ = pack;
-      return glyph;
-    }
+  // The packs on the card, before the reader's face: a title draws alike whatever book was read last. In the reader,
+  // where the book's own face is open, that face goes first for what it maps, so a book never opens a pack.
+  const bool readerFirst = readerMaps(codepoint);
+  if (!readerFirst) {
+    if (const EpdGlyph* glyph = servePack(codepoint)) return glyph;
   }
   // The reader's face lends real characters only. Its replacement glyph (asked for once a character is in no face) or
   // its own copy of the stand-in would draw over what the UI faces leave blank or draw as their stand-in, and a book's
@@ -48,10 +46,21 @@ const EpdGlyph* FallbackFaceProvider::serve(const uint32_t codepoint) {
   if (readerFace_ && codepoint != REPLACEMENT_GLYPH && codepoint != standIn_) {
     if (const EpdGlyph* glyph = serveFrom(readerFace_(readerCtx_), codepoint, true)) return glyph;
   }
+  if (readerFirst) {
+    if (const EpdGlyph* glyph = servePack(codepoint)) return glyph;
+  }
   for (uint8_t i = before; i < faceCount_; ++i) {
     if (const EpdGlyph* glyph = serveFrom(faces_[i], codepoint, false)) return glyph;
   }
   return nullptr;
+}
+
+const EpdGlyph* FallbackFaceProvider::servePack(const uint32_t codepoint) {
+  if (!packs_.face) return nullptr;
+  const EpdFontData* pack = packs_.face(packs_.ctx, codepoint);
+  const EpdGlyph* glyph = sd_face::glyph(pack, codepoint);
+  if (glyph) servedPack_ = pack;
+  return glyph;
 }
 
 const EpdGlyph* FallbackFaceProvider::serveFrom(const EpdFontData* face, const uint32_t codepoint, const bool reader) {
@@ -116,8 +125,9 @@ void FallbackFaceProvider::beginText(const char* utf8Text, bool (*alsoCovered)(v
     if (cp < 0x80 || inTable(primary_, cp) || (alsoCovered && alsoCovered(ctx, cp))) continue;
     if (!readerAfterFirst_ || faceCount_ == 0 || !inTable(faces_[0], cp)) bookText_ = true;
     const size_t bytes = static_cast<size_t>(p - start);
-    // A pack draws it before the reader's face would: the reader's font is not opened or prepared for it.
-    const bool inPack = packs_.covers && packs_.covers(packs_.ctx, cp);
+    // A pack draws it before the reader's face would: the reader's font is not opened or prepared for it. In the
+    // reader, what the book's face maps is that face's, and the packs are not asked for it.
+    const bool inPack = packs_.covers && packs_.covers(packs_.ctx, cp) && !readerMaps(cp);
     char* const batch = inPack ? packed : lacking;
     size_t& batchUsed = inPack ? packedUsed : used;
     if (batchUsed + bytes < sizeof(lacking)) {

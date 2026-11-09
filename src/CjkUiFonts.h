@@ -55,6 +55,9 @@ void setLanguage(Language language);
 /// time UI text needs one. SdCardFontManager calls it when a set loads and before its native sizes go.
 void setReaderFont(TtfFont* font);
 bool hasReaderFont();
+/// A reader is on the activity stack (syncUiBookFonts): its book's face goes before the CJK UI packs for what it maps,
+/// so reading a CJK book never opens a pack. Outside the reader the packs go first, whatever book was read last.
+void setInReader(bool inReader);
 /// Called when UI text needs the reader's font and none is lent: it may load one (syncUiBookFonts' book-text fonts),
 /// which then arrives through setReaderFont() before the lookup goes on.
 void setReaderFontOpener(void (*open)());

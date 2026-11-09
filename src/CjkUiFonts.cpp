@@ -158,12 +158,15 @@ void orderReaderFace() {
 }
 
 // The CJK UI packs at a provider's size (CjkUiPack), `ctx` the index into SIZES.
+// cppcheck-suppress constParameterCallback ; the signature is FallbackFaceProvider::Packs'
 const EpdFontData* cjkPackFace(void* ctx, const uint32_t codepoint) {
   return CjkUiPack::face(SIZES[reinterpret_cast<uintptr_t>(ctx)], codepoint);
 }
+// cppcheck-suppress constParameterCallback ; the signature is FallbackFaceProvider::Packs'
 bool cjkPackCovers(void* ctx, const uint32_t codepoint) {
   return CjkUiPack::covers(SIZES[reinterpret_cast<uintptr_t>(ctx)], codepoint);
 }
+// cppcheck-suppress constParameterCallback ; the signature is FallbackFaceProvider::Packs'
 void cjkPackPrepare(void* ctx, const char* utf8Text) {
   CjkUiPack::prepare(SIZES[reinterpret_cast<uintptr_t>(ctx)], utf8Text);
 }
@@ -230,6 +233,12 @@ bool readerDrawsArabicForms(void* ctx) {
     readerFormsArabic = readerFont->mapsCodepoint(0xFE91) && readerFont->mapsCodepoint(0xFEFB) ? 1 : 0;
   }
   return readerFormsArabic == 1;
+}
+
+// In the reader: whether the book's own face maps `codepoint` (FallbackFaceProvider::setReaderMaps), its cmap asked,
+// nothing rendered. Only while that face can be read (readerFaceAt: under the RenderLock).
+bool readerMapsCodepoint(void* ctx, const uint32_t codepoint) {
+  return readerFaceAt(ctx) && readerFont->mapsCodepoint(codepoint);
 }
 
 // Feeds inflated glyphs to the slot, checking them against the CRC the generator recorded: a face
@@ -402,6 +411,12 @@ void CjkUiFonts::setReaderFont(TtfFont* font) {
   for (size_t size = 0; size < SIZE_COUNT; ++size) {
     readerFaces[size] = nullptr;
     readerFaceTried[size] = false;
+  }
+}
+
+void CjkUiFonts::setInReader(const bool inReader) {
+  for (size_t size = 0; size < SIZE_COUNT; ++size) {
+    providers[size].setReaderMaps(inReader ? &readerMapsCodepoint : nullptr, reinterpret_cast<void*>(size));
   }
 }
 
