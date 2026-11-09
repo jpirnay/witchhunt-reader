@@ -33,7 +33,10 @@ const EpdGlyph* FallbackFaceProvider::serve(const uint32_t codepoint) {
   for (uint8_t i = 0; i < before; ++i) {
     if (const EpdGlyph* glyph = serveFrom(faces_[i], codepoint, false)) return glyph;
   }
-  if (readerFace_) {
+  // The reader's face lends real characters only. Its replacement glyph (asked for once a character is in no face) or
+  // its own copy of the stand-in would draw over what the UI faces leave blank or draw as their stand-in, and a book's
+  // font is opened for any script (openUiBookFonts), so it often has nothing else for a title.
+  if (readerFace_ && codepoint != REPLACEMENT_GLYPH && codepoint != standIn_) {
     if (const EpdGlyph* glyph = serveFrom(readerFace_(readerCtx_), codepoint, true)) return glyph;
   }
   for (uint8_t i = before; i < faceCount_; ++i) {
