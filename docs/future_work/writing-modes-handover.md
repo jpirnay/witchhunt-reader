@@ -27,11 +27,9 @@ can continue on another computer. The roadmap itself is [writing-modes.md](writi
     broken between syllables); item 6.
   - #669: the glyph store remembers its recent answers in RAM; item 2.
   - #670: book titles borrow the last book's font whatever its script; item 8.
+  - #674, #675: a layout pass remembers the parts of an inter-word space, and the split search stops a kind of
+    prefix at its first one too wide; figures under "Where the time goes" below.
 - CJK: every step of [cjk.md](cjk.md)'s roadmap.
-
-**Open (2026-11-09):** `perf/space-advance` (a layout pass remembers the parts of an inter-word space) and
-`perf/hyphenation-search` (the split search stops a kind of prefix at its first one too wide); figures under "Where
-the time goes" below.
 
 **Branches worth knowing:**
 - `wip/shaper-profile` (pushed): the `OT_PROFILE` instrumentation and the host profile test from PR 3, the starting
@@ -283,11 +281,11 @@ Processor work a chapter (the build less its wait, warm store, master 74b8fc803)
 Hebrew 2,629 (1.8x), Arabic 6,920 (about 4.5x its twin), Hindi 5,393 (about 3.5x).
 
 **What came of it:**
-- **The space's width** (`perf/space-advance`): a layout pass remembers the space glyph's advance per font and style
+- **The space's width** (#674): a layout pass remembers the space glyph's advance per font and style
   and its kerning with each neighbour (560 B static), summed and snapped as `getSpaceAdvance()` does. X3, warm,
   median of three, `parse=`: Latin 1,220 to 1,151 ms (-5.7%), Hebrew 2,346 to 2,210 (-5.8%), Hindi 5,472 to 5,311
   (-2.9%), Arabic 6,341 to 6,275 (-1.0%); the chapter files the same size.
-- **The split search** (`perf/hyphenation-search`): a kind of prefix stops at its first one too wide, measured in
+- **The split search** (#675): a kind of prefix stops at its first one too wide, measured in
   one string. Latin 1,220 to 1,211 ms (-0.7%, near the noise): only the candidates past the first too wide are
   skipped. The Liang patterns (4.5%) are what is left of the 14%.
 - **Building the first page during the popup's refresh: blocked.** The released build borrows the displayed buffer
