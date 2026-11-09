@@ -132,6 +132,14 @@ Definitions of Latin-script words render in Noto Sans at a fixed size rather tha
 
 A lookup that started on Chinese, Japanese or Korean text renders its definition in your reading font instead: Noto Sans has no Han, kana or Hangul, and the CJK font the book is read in has them (pinyin's tone marks too, in a TrueType family; see "Characters your reading font lacks" above).
 
+## What the reader does not do
+
+Decided on 2026-10-28, after a comparison with matcha-reader's dictionary support:
+
+- **No dictionary chosen by the book's language, and no falling through to the next dictionary on a miss.** Switching dictionaries by hand (Confirm on the definition screen) is already convenient.
+- **No dictionary format but StarDict.** matcha's own format (a RAM-tier index, Japanese deinflection checked against parts of speech, Chinese segmentation by frequency) is one language's worth of engine and a custom format, against StarDict only and the flash budget.
+- **No sentence mining to an Anki CSV:** a scope call, left out.
+
 ## Where to find dictionaries
 
 > credit to https://github.com/koreader/koreader/wiki/Dictionary-support for the list.
