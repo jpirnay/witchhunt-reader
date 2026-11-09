@@ -58,6 +58,14 @@ void forEachSyllable(const Buffer& buffer, F f) {
 void insertDottedCircles(const Face& face, Buffer& buffer, uint8_t brokenSyllableType, uint8_t category,
                          uint8_t rephaCategory, bool setPosition, uint8_t position);
 
+// The syllables of the whole buffer by one of the generated scanners, every
+// glyph read (find_syllables_indic(), find_syllables_myanmar()): each glyph's
+// syllable byte is (serial << 4) | type, the serial counting 1 to 15; a
+// glyph no pattern takes is a syllable of `otherType` on its own; a
+// `brokenType` syllable sets hasBrokenSyllable.
+void findSyllables(Buffer& buffer, const uint8_t* classes, uint8_t classCount, const uint8_t* transitions,
+                   const uint8_t* accept, uint8_t otherType, uint8_t brokenType);
+
 // Longest syllable at the start of a category sequence, by one of the
 // generated scanners (OtSyllableMachines.h): the Ragel semantics HarfBuzz
 // uses, longest match first and the earlier pattern on a tie. `category(i)`

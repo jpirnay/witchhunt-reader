@@ -187,6 +187,26 @@ void insertDottedCircles(const Face& face, Buffer& buffer, const uint8_t brokenS
   if (buffer.successful) buffer.info.swap(buffer.scratch);
 }
 
+void findSyllables(Buffer& buffer, const uint8_t* classes, const uint8_t classCount, const uint8_t* transitions,
+                   const uint8_t* accept, const uint8_t otherType, const uint8_t brokenType) {
+  const unsigned len = buffer.len();
+  unsigned serial = 1;
+  unsigned p = 0;
+  while (p < len) {
+    uint8_t found = otherType;
+    unsigned length = scanSyllable(
+        classes, classCount, transitions, accept, len - p,
+        [&](const unsigned i) { return buffer.info[p + i].category; }, &found);
+    if (length == 0) length = 1;
+    const uint8_t type = found;
+    if (type == brokenType) buffer.hasBrokenSyllable = true;
+    for (unsigned i = p; i < p + length; i++) buffer.info[i].syllable = static_cast<uint8_t>((serial << 4) | type);
+    serial++;
+    if (serial == 16) serial = 1;
+    p += length;
+  }
+}
+
 bool shape(const Face& face, const Scale& scale, const Plan& plan, const uint32_t* codepoints, const unsigned count,
            Buffer& buffer, const RunContext& context) {
   if (!buffer.prepare(count * MAX_LENGTH_FACTOR + MAX_LENGTH_EXTRA)) return false;
