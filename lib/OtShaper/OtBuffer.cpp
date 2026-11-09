@@ -13,7 +13,7 @@ constexpr unsigned DIGEST_SHIFTS[3] = {4, 0, 6};  // hb_set_digest_shifts
 void setHeapCheck(const HeapCheck check) { gHeapCheck = check; }
 bool heapAvailable(const size_t bytes) { return gHeapCheck == nullptr || gHeapCheck(bytes); }
 
-void Digest::add(const uint32_t g) {
+OT_HOT void Digest::add(const uint32_t g) {
   for (int i = 0; i < 3; i++) masks[i] |= bit64((g >> DIGEST_SHIFTS[i]) & 63);
 }
 
@@ -31,7 +31,7 @@ void Digest::addRange(const uint32_t a, const uint32_t b) {
   }
 }
 
-bool Digest::mayHave(const uint32_t g) const {
+OT_HOT bool Digest::mayHave(const uint32_t g) const {
   for (int i = 0; i < 3; i++) {
     if (!hasBit64(masks[i], (g >> DIGEST_SHIFTS[i]) & 63)) return false;
   }
@@ -43,7 +43,7 @@ static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "digest records are lit
 void writeDigest(const Digest& digest, uint8_t* record) { memcpy(record, digest.masks, sizeof(digest.masks)); }
 
 // Only the 32-bit half of each mask that holds the glyph's bit is read.
-bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
+OT_HOT bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
   for (int i = 0; i < 3; i++) {
     const unsigned bit = (glyph >> DIGEST_SHIFTS[i]) & 63;
     if (!(le32(record + 8 * i + 4 * (bit >> 5)) & (1u << (bit & 31)))) return false;
@@ -57,7 +57,7 @@ uint64_t digestRecordLowMask(const uint8_t* record) {
   return le64(record + 8);
 }
 
-uint64_t readLowMask(const uint8_t* stored) { return le64(stored); }
+OT_HOT uint64_t readLowMask(const uint8_t* stored) { return le64(stored); }
 
 void writeLowMask(const uint64_t mask, uint8_t* stored) { memcpy(stored, &mask, sizeof(mask)); }
 
@@ -145,7 +145,7 @@ void Buffer::reverse() {
   }
 }
 
-void Buffer::refreshDigest() {
+OT_HOT void Buffer::refreshDigest() {
   digest = Digest();
   for (const GlyphInfo& g : info) digest.add(g.codepoint);
 }

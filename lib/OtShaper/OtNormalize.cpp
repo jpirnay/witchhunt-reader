@@ -141,7 +141,7 @@ bool inScriptBlock(const uint32_t cp, const Script script) {
 }
 
 // Appends to the scratch string within the run's reservation.
-bool pushScratch(Buffer& buffer, const GlyphInfo& g) {
+OT_HOT bool pushScratch(Buffer& buffer, const GlyphInfo& g) {
   if (buffer.scratch.size() >= buffer.maxLength) {
     buffer.successful = false;
     return false;
@@ -231,13 +231,13 @@ class Normalizer {
     return ret;
   }
 
-  void nextChar(const uint32_t glyph) {
+  OT_HOT void nextChar(const uint32_t glyph) {
     GlyphInfo g = buffer_.info[buffer_.idx++];
     g.glyphIndex = static_cast<uint16_t>(glyph);
     pushScratch(buffer_, g);
   }
 
-  void decomposeCurrentCharacter(const bool shortest) {
+  OT_HOT void decomposeCurrentCharacter(const bool shortest) {
     const GlyphInfo cur = buffer_.info[buffer_.idx];
     uint32_t glyph = 0;
     if (shortest && face_.nominalGlyph(cur.codepoint, &glyph)) {
@@ -342,7 +342,7 @@ static int rangeIndex(const ucd::Range (&ranges)[N], const uint32_t cp) {
   return -1;
 }
 
-CharData charData(const uint32_t cp) {
+OT_HOT CharData charData(const uint32_t cp) {
   uint32_t packed;
   if (const int i = rangeIndex(ucd::RANGES, cp); i >= 0) {
     packed = ucd::PROPS[ucd::PROPS_INDEX[i]];
@@ -363,7 +363,7 @@ CharData charData(const uint32_t cp) {
                   field(ucd::USE_CAT_SHIFT, ucd::USE_CAT_BITS),     ((packed >> ucd::IGNORABLE_SHIFT) & 1) != 0};
 }
 
-void setUnicodeProps(GlyphInfo& info, Buffer& buffer) {
+OT_HOT void setUnicodeProps(GlyphInfo& info, Buffer& buffer) {
   const uint32_t u = info.codepoint;
   const CharData d = charData(u);
   uint16_t p = d.genCat;
@@ -426,7 +426,7 @@ void preprocessVowelConstraints(const Script script, Buffer& buffer) {
 void normalize(const Face& face, const Plan& plan, Buffer& buffer) { Normalizer(face, plan, buffer).run(); }
 
 // witchhunt: deviation 11. HarfBuzz's get_joining_type, resolved when the table is generated.
-JoiningType joiningType(const uint32_t cp) {
+OT_HOT JoiningType joiningType(const uint32_t cp) {
   if (const int i = rangeIndex(ucd::JOINING_RANGES, cp); i >= 0)
     return static_cast<JoiningType>((ucd::JOINING[i >> 1] >> ((i & 1) << 2)) & 15);
   if (cp == 0x200C) return static_cast<JoiningType>(ucd::ZWNJ_JOINING);

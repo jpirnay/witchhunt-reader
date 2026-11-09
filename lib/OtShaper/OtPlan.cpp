@@ -307,7 +307,7 @@ bool Plan::copyLookupDigests(const Face& face) {
 }
 
 // witchhunt: deviation 13 - planned lookup `i` of `table`'s record in lookupDigests_.
-const uint8_t* Plan::digestRecord(const int table, const size_t i) const {
+OT_HOT const uint8_t* Plan::digestRecord(const int table, const size_t i) const {
   return lookupDigests_.data() + DIGEST_BYTES * (table == GSUB ? i : lookups[GSUB].size() + i);
 }
 
@@ -403,7 +403,7 @@ bool Plan::allocateFilters(const int table, const size_t lookupCount, const size
   return true;
 }
 
-LookupSettings Plan::settings(const int table, const size_t i, const bool resolve) const {
+OT_HOT LookupSettings Plan::settings(const int table, const size_t i, const bool resolve) const {
   const PlannedLookup& lookup = lookups[table][i];
   LookupSettings out;
   out.mask = lookup.mask;
@@ -439,14 +439,14 @@ LookupSettings Plan::settings(const int table, const size_t i, const bool resolv
 
 // witchhunt: deviation 13 - applyTable()'s digest test, on the plan's copy of
 // the digest, so it comes before settings() reads anything of the font.
-bool Plan::mayApply(const int table, const size_t i, const Digest& buffer) const {
+OT_HOT bool Plan::mayApply(const int table, const size_t i, const Digest& buffer) const {
   return testBypassCaches || readDigest(digestRecord(table, i)).mayIntersect(buffer);
 }
 
 // witchhunt: deviation 16 - applyLookup() starts only at a glyph its digest may hold, of its mask, that its flags do
 // not ignore. A lookup no glyph of the buffer passes the first two for starts nowhere: applyLookup() would only walk
 // the buffer to its end, and no pass reads the index it leaves.
-bool Plan::mayStart(const int table, const size_t i, const Buffer& buffer) const {
+OT_HOT bool Plan::mayStart(const int table, const size_t i, const Buffer& buffer) const {
   if (testBypassCaches) return true;
   const Digest digest = readDigest(digestRecord(table, i));
   const uint32_t mask = lookups[table][i].mask;

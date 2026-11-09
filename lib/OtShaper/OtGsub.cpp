@@ -250,7 +250,7 @@ bool wouldApplySubtable(const WouldApply& w, uint16_t type, Table st) {
 
 }  // namespace
 
-bool applyGsubSubtable(ApplyContext* c, const uint16_t type, const Table& st) {
+OT_HOT bool applyGsubSubtable(ApplyContext* c, const uint16_t type, const Table& st) {
   switch (type) {
     case gsub::SINGLE:
       return applySingleSubst(c, st);
