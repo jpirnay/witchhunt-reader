@@ -427,9 +427,11 @@ class ParsedText {
                                         const std::vector<uint16_t>& wordWidths,
                                         const std::vector<TokenBoundary::Boundary>& boundaries, size_t lineStartIndex,
                                         int firstLineIndent, int16_t blockStartY = 0, int lineHeight = 0) const;
+  // Splits words[wordIndex] at the widest legal break whose prefix fits `availableWidth`. *outMyanmarCut: the cut falls
+  // between Myanmar syllables, how a Burmese line ends rather than a hyphenation, which the page-bottom retry leaves.
   bool hyphenateWordAtIndex(size_t wordIndex, int availableWidth, const GfxRenderer& renderer, int fontId,
                             std::vector<uint16_t>& wordWidths, bool allowFallbackBreaks,
-                            bool* outInsertedHyphen = nullptr);
+                            bool* outInsertedHyphen = nullptr, bool* outMyanmarCut = nullptr);
   LineProcessResult extractLine(
       size_t breakIndex, int pageWidth, const std::vector<uint16_t>& wordWidths,
       const std::vector<TokenBoundary::Boundary>& boundaries, const std::vector<size_t>& lineBreakIndices,
