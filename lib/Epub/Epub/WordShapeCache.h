@@ -45,6 +45,21 @@ class WordShapeCache {
   /// capacity - S - kRoomBelow or below. The X3 and X4 lent arenas have it at the parse's start (41,428 and about
   /// 37,156 B free); the owned 10 KB arena of a released build does not.
   static constexpr size_t kRoomBelow = 16384;
+  /// A build arena of at least this capacity is the 256 KB block of PSRAM that every S3 board lends instead of its
+  /// framebuffer (HalCapabilities::keepsSecondaryBuffer(), HalDisplay::borrowSecondaryBuffer()). No C3 arena comes
+  /// near it: the lent framebuffer is 52,272 B on the X3 and 48,000 B on the X4.
+  static constexpr size_t kLargeArenaBytes = 256 * 1024;
+  /// The tail on such an arena: 1,024 sets, 2,048 entries, where S holds 256. On the host, chapter 2 of the Arabic and
+  /// Hindi bench books (tools/writing-modes-bench) hits 40% and 67% of its lookups in it, against 28% and 51% in S, and
+  /// no larger tail hits more than a point above that: 64 KB 37% and 65%, 192 KB 41% and 67%. Half the arena, so the
+  /// parse lane (to about 24 KB above what the parse holds on those chapters) stays below it; at 224 KB it reached the
+  /// tail and emptied it seven times.
+  static constexpr size_t kLargeWordCacheBytes = 128 * 1024;
+  /// The tail a parse asks for first on an arena of `capacity` bytes (armForBuild): kLargeWordCacheBytes from
+  /// kLargeArenaBytes on, else S.
+  static constexpr size_t bytesFor(const size_t capacity) {
+    return capacity >= kLargeArenaBytes ? kLargeWordCacheBytes : kWordCacheBytes;
+  }
   /// A way: 64 B holds 99.0% of the long Hindi book's shaped tokens (make_test_shaped_indic.py --long: 2,428 of 2,452),
   /// and the rest take both ways of a set (the longest 75 B). 128 sets of two in S.
   static constexpr size_t kWayBytes = 64;
@@ -72,6 +87,9 @@ class WordShapeCache {
   /// Takes the top `bytes` of `arena` (whole sets of it), empty. False, and every call bypassed, when the arena has
   /// less than bytes + kRoomBelow free, or when arming is turned off (setEnabled).
   bool arm(BuildArena& arena, size_t bytes);
+  /// What the parse arms with: arm() with bytesFor(arena.capacity()), and with S where that larger tail does not fit
+  /// (a parse holding a large stylesheet). On the C3 arenas that is arm() with S alone.
+  bool armForBuild(BuildArena& arena);
   /// Lets go of the arena: no call reads or writes it again. The stats and bytes() stay, for the build's log line.
   void disarm();
 

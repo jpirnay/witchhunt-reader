@@ -177,6 +177,11 @@ bool WordShapeCache::arm(BuildArena& arena, const size_t bytes) {
   return true;
 }
 
+bool WordShapeCache::armForBuild(BuildArena& arena) {
+  const size_t bytes = bytesFor(arena.capacity());
+  return arm(arena, bytes) || (bytes > kWordCacheBytes && arm(arena, kWordCacheBytes));
+}
+
 void WordShapeCache::disarm() {
   arena_ = nullptr;
   tail_ = nullptr;

@@ -237,6 +237,12 @@ arena's blocks back.
   that room free below the tail too, so the owned 10 KB arena of a released build has no cache and shapes every word.
   The tail is sound because nothing writes an arena's memory except through `alloc()` (memory strategy §6, invariant
   10).
+- **On the S3 boards:** their build arena is the 256 KB PSRAM block `HalDisplay` lends instead of the framebuffer,
+  and on an arena of `kLargeArenaBytes` or more the cache takes `kLargeWordCacheBytes` (128 KB, 1,024 sets) of its
+  tail (`WordShapeCache::armForBuild`), or 16 KB where that does not fit. Chapter 2 of the bench books on the host, hits
+  of the lookups: Zaydan's Arabic 28% in 16 KB, 40% in 128 KB; Gaban's Hindi 51% and 67%, the second at its
+  distinct-word ceiling. The parse lane stays below the large tail (0 clears) and the lines are the same
+  (`ShapingRules.TheWordCacheChangesNoLine`). No C3 arena reaches 256 KB, so the C3 boards keep 16 KB.
 - **Layout:** 2-way sets of 64 B ways (`kWayBytes`), 128 sets. An entry holds the identity (the text's 64-bit hash
   and length, and `keyFor`: the token's `shapeKey` with its language tags folded in) and the token's pieces with their
   records or reordered form. A third entry in a set evicts the way used least recently. An entry of up to

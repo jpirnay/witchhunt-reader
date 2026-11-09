@@ -222,7 +222,7 @@ Arena instances:
 | Font selector previews | lent framebuffer | the framebuffer size | one preview font | `FontSelectionActivity::lendPreviewArena`, `SdCardFont::useArena` |
 | Dictzip lookup | lent framebuffer | the framebuffer size | one dictionary lookup | `LentLookupScratch` (`DictionaryWordSelectActivity`), `Dictionary::useInflateArena` |
 | TrueType miss memory | a build's arena, lent | the scratch block and page cache (§9.7) | one glyph lookup | `glyph_miss::Scope`: `Section::stepSectionBuild`, `EpubReaderActivity::displayBuildPage`, the ladder's light relief |
-| Word-shaping cache | the free tail of a lent build arena | `WordShapeCache::kWordCacheBytes` (16 KB), 128 sets of two 64 B ways | one parse, emptied whenever an allocation reaches it | `WordShapeCache`, owned by `ChapterHtmlSlimParser` |
+| Word-shaping cache | the free tail of a lent build arena | `WordShapeCache::kWordCacheBytes` (16 KB), 128 sets of two 64 B ways; 128 KB on the S3 boards' 256 KB PSRAM arena (`kLargeWordCacheBytes`) | one parse, emptied whenever an allocation reaches it | `WordShapeCache`, owned by `ChapterHtmlSlimParser` |
 
 In the lent region the CSS ruleset is resident in the arena (`CssParser::setIndexArena`), the SAX
 state is taken there (`ChapterHtmlSlimParser::setBuildArena`), and the ZIP ring shares the main
