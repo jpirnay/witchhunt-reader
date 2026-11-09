@@ -1,6 +1,8 @@
 # Myanmar script (Burmese): shaping, fonts and line breaking (design draft)
 
-Status: draft for the maintainer, 2026-11-09. Nothing is built. It builds on writing modes step 2
+Status: design for the maintainer, 2026-11-09. PR 1 (the engine) is #668; PR 2 (Burmese books) is built on
+`feat/myanmar-books`, stacked on it ("PR 2 as built", under section 8); PR 3 is not built. Questions 1, 2, 3 and 7
+are decided (the end of this file). It builds on writing modes step 2
 (`docs/superpowers/specs/2026-11-02-writing-modes-step2-design.md`; its deviations 1-13 hold) and on the handover's
 items 3 and 6 (`docs/future_work/writing-modes-handover.md`), which list Myanmar as "their own shaper modules", not
 planned until asked for. The maintainer has now asked: "we should add at least Myanmar".
@@ -548,18 +550,57 @@ Each opens against master after the one before it merges, and each is testable o
 
 Later and separate: clusters in the engine (C), a Zawgyi notice, the dictionary, Burmese UI titles (item 8).
 
+### PR 2 as built (`feat/myanmar-books`)
+
+What was measured on the host (no device figure):
+- **Fonts.** `build-sd-fonts.py` builds the four merged files at the sizes of the table in section 3, and a second
+  build changes no byte. The merge check passes for all four: `myanmar.txt` (51,329 lines of
+  `generate_corpus_myanmar.py`) shaped under `Mymr` with no language and my, mnw, ksw and shn, equal to the Myanmar
+  sources, and the Latin kept whole. Both families fit the X3's store in flash mode (`fitsStore`, in
+  `ShippedTtfFamilies`); each file shapes 200 corpus lines alike through the CPac the install writes and through
+  computed filters.
+- **Shaping.** The 37 words PR 1 recorded from HarfBuzz shape alike through `shapeToken`. Tokens kept apart by a
+  style glue between syllables, each shaped with the neighbour's nearest syllable as context, give the whole word's
+  glyphs (မြန်|မာ, မင်္ဂ|လာ|ပါ); a run past the call's code points shaped in pieces gives the whole run's.
+- **The fixture book** `test_shaped_myanmar.epub` (the UDHR in XML at 588b3f4b: Burmese, a Mon and a Shan chapter)
+  in `NotoSansMyanmar-Book-Regular.ttf` (81,760 B): one new golden, no old golden changed; `ShapingRules` passes, with
+  4 unhyphenated cuts between syllables (a phrase wider than the line, a table cell).
+- **Flash** (`pio run -e default`): 6,327,915 B, 1,828 B over PR 1's head built the same way (6,326,087 B); static
+  RAM unchanged (57,744 B).
+
+Where it differs from the text above:
+- **The letters.** `MyanmarScript.h` takes the consonants and independent vowels from the shaper's own categories
+  (HarfBuzz's C, Ra and IV) in the three blocks, and the Shan and Tai Laing digits beside Myanmar's. Against section
+  2's lists that adds U+1022 and U+1052-1055 (independent vowels), the consonants of Extended-A and -B, and U+1090-1099
+  and A9F0-A9F9 (digits). A test checks the lists against the table for every code point of the blocks.
+- **mya and bur** pick the family and the shaper, and shape under the default language system: HarfBuzz has no row for
+  either (its fallback tag would be `MYA`/`BUR`, which no Noto font names), and neither Noto family has `BRM`, so they
+  shape as `my` does in these families.
+- **The merge** reads one helper, `TextShaping::glueInsideSyllable`, which `ParsedText`'s merge cap reads too: a glue
+  is inside a syllable when `indic::syllableBreakAllowed` or `myanmar::cutAllowed` says no across it.
+- **The joiner keep** takes a ZWJ or ZWNJ after any Myanmar code point, not only after a letter.
+- **Not done:** `CMD:TTF:SHAPE` still finds Indic and Arabic runs only; it never learned Myanmar in PR 1.
+
 ## Open questions for the maintainer
 
-1. Deviation 15: shape Myanmar only in a face whose GSUB names `mym2` or `mymr`, so Zawgyi fonts draw unshaped? (First
-   check a common Zawgyi font for those tags.)
-2. Zawgyi: nothing, a log line, or the heuristic notice with a translated string?
-3. Line height: keep the families' 2.18 and 2.50 em, or cap them? A cap may clip deep stacks.
+Decided, 2026-11-09:
+1. **Deviation 15: no.** The shaper choice stays HarfBuzz's: any face whose GSUB does not pick `mymr`, `DFLT` or
+   `latn` takes the Myanmar shaper.
+2. **Zawgyi: nothing.** No detection, no conversion, no notice. The user guide says to convert a Zawgyi book to
+   Unicode before transferring it.
+3. **Line height: no cap.** The families keep their own, 2.18 and 2.50 em.
+7. **The languages:** the table of section 4 (my, mnw, shn, ksw, kjp, pwo, blk, kht, aio, phk, pll, rbb, pce, rki, tvn,
+   int), any tag with a `Mymr` script subtag, and the ISO 639-2 `mya` and `bur`. `pi` counts only as `pi-Mymr`; another
+   script subtag says no.
+- **The overflow fallback** (`appendFallbackIndexes`, PR 2) cuts a Myanmar word only at a syllable's start, never after
+  U+1039 or a ZWJ, never before a consonant that U+103A or U+1039 follows (the dot below skipped), never inside a run
+  of digits, and draws no hyphen beside a Myanmar code point.
+
+Still open:
 4. The timing twin for an unspaced script: the same page count, or a Latin word for each Burmese syllable? And is the
    2x line kept for Burmese while item 3 is open?
 5. The greedy breaker for every paragraph with Myanmar text, whatever the hyphenation setting: acceptable?
 6. Stribley's "close to the line end" preference for a space: in PR 3, later, or never?
-7. The language list (question 4): which minority languages, and should the non-BCP-47 `mya` and `bur` count, as the
-   withdrawn `iw` does for Hebrew?
 
 ## Sources
 

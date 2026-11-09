@@ -247,8 +247,8 @@ open on purpose (2026-11-08): a full code audit comes first.
    books no bidi. Worth a design note before code: the UI faces are bitmaps by choice.
 7. **Flash** (item 9) as each PR needs it: 235 KB free after #656, the candidates listed there.
 
-Not planned: Khmer, Myanmar and Tibetan (item 6; their own shaper modules), vertical shaped runs, CJK's out-of-scope
-list; each waits for a request.
+Not planned: Khmer and Tibetan (item 6; their own shaper modules), vertical shaped runs, CJK's out-of-scope list;
+each waits for a request. Myanmar is under way (item 6).
 
 ### 3. Speed up the shaping engine (helps Indic most)
 
@@ -316,8 +316,12 @@ reader"):
 ### 6. Indic
 
 - **Speed:** item 3.
-- **Scripts not covered:** Khmer, Myanmar and Tibetan, named by the design as targets of the same shaper (Myanmar and
-  the USE-based scripts need their own shaper modules).
+- **Scripts not covered:** Khmer and Tibetan, named by the design as targets of the same shaper (the USE-based
+  scripts need their own shaper modules).
+- **Myanmar** (`docs/superpowers/specs/2026-11-09-myanmar-design.md`): the engine is #668; Burmese books
+  (`feat/myanmar-books`: the NotoSansMyanmar and NotoSerifMyanmar families, the pick by language, the shaping glue,
+  the overflow cut between syllables) are built on it, with no device run yet. Line breaking between syllables (the
+  design's PR 3) is not built; it should ship in the same release.
 - **Vertical sections:** a vertical section reorders Indic words only; no shaped run is set down a column.
 - **No X4 figures for #642** (waived).
 
