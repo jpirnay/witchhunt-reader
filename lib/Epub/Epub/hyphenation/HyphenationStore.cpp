@@ -82,10 +82,9 @@ bool HyphenationStore::readEntry(const int8_t copy, const uint8_t index, Entry& 
 }
 
 bool HyphenationStore::entryValid(const Entry& e) const {
-  const uint32_t firstPayload = kHeaderSectors * kSectorBytes;
   return e.code[0] >= 'a' && e.code[0] <= 'z' && e.code[1] >= 'a' && e.code[1] <= 'z' && e.size != 0 &&
-         e.rootOffset < e.size && e.offset % kSectorBytes == 0 && e.offset >= firstPayload &&
-         e.offset <= flash_.size() && e.size <= flash_.size() - e.offset;
+         e.rootOffset < e.size && e.offset % kSectorBytes == 0 && e.offset <= payloadEnd() &&
+         e.size <= payloadEnd() - e.offset;
 }
 
 bool HyphenationStore::validCopy(const int8_t copy, uint8_t& count, uint32_t& generation) const {
@@ -189,10 +188,9 @@ bool HyphenationStore::commit(const uint16_t keep, const Entry* added) {
 HyphenationStore::Fill HyphenationStore::fill(HyphenationPackSource& src, const hyphpack::Header& header,
                                               uint8_t* scratch, const uint32_t scratchBytes) {
   if (!scratch || scratchBytes == 0) return Fill::BadSource;
-  const uint32_t firstSector = kHeaderSectors;
-  const uint32_t totalSectors = flash_.size() / kSectorBytes;
+  const uint32_t totalSectors = payloadEnd() / kSectorBytes;
   const uint32_t need = sectorsFor(header.payloadSize);
-  if (need > totalSectors - firstSector) return Fill::NoSpace;
+  if (need > totalSectors) return Fill::NoSpace;
 
   // The live entries as sector runs, and which of them stay. On the stack: at most 16, 12 B each.
   struct Run {
@@ -229,7 +227,7 @@ HyphenationStore::Fill HyphenationStore::fill(HyphenationPackSource& src, const 
     for (uint8_t i = 0; i < count_; ++i) keptCount += runs[i].kept ? 1 : 0;
     bool found = false;
     if (keptCount < kMaxEntries) {
-      uint32_t cursor = firstSector;
+      uint32_t cursor = 0;
       for (;;) {
         // The kept run that starts first at or after the cursor.
         int8_t next = -1;

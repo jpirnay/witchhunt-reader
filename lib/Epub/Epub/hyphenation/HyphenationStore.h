@@ -29,8 +29,8 @@ bool readPackHeader(HyphenationPackSource& src, hyphpack::Header& out);
 // another firmware writing the region) is copied again from it the next time a book needs it.
 //
 // Region layout (offsets from the region's start; the region starts on a 64 KB boundary):
-//   sector 0, sector 1   two header copies, A and B. The live one is the valid copy with the higher generation.
-//   sector 2 onwards     payloads, each starting on a sector, packed in any order.
+//   payloads             from sector 0, each starting on a sector, packed in any order.
+//   last two sectors     two header copies, A and B. The live one is the valid copy with the higher generation.
 //
 // A header copy:
 //   [16 x 24 B]  entries, `count` of them from the start, each:
@@ -89,7 +89,7 @@ class HyphenationStore {
   bool mount();
 
   uint8_t count() const { return count_; }
-  // Payload bytes the region holds: everything past the two header sectors.
+  // Payload bytes the region holds: everything before the two header sectors.
   uint32_t capacity() const;
   bool entryAt(uint8_t index, Entry& out) const;
   bool find(const char* code, Entry& out) const;
@@ -119,7 +119,10 @@ class HyphenationStore {
     uint32_t crc32 = 0;
   };
 
-  uint32_t headerBase(int8_t copy) const { return static_cast<uint32_t>(copy) * kSectorBytes; }
+  // The headers sit in the region's last two sectors, so payloads start on its first 64 KB block: German's 51 sectors
+  // erase as three blocks and three sectors rather than two blocks and 19 sectors.
+  uint32_t payloadEnd() const { return (flash_.size() / kSectorBytes - kHeaderSectors) * kSectorBytes; }
+  uint32_t headerBase(int8_t copy) const { return payloadEnd() + static_cast<uint32_t>(copy) * kSectorBytes; }
   bool readEntry(int8_t copy, uint8_t index, Entry& out) const;
   bool entryValid(const Entry& e) const;
   // The header copy's entry count and generation when it is valid.

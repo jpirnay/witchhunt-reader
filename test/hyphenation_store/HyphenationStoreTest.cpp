@@ -202,7 +202,7 @@ TEST(HyphenationStore, StoresMapsAndKnowsWhatItHolds) {
   ASSERT_EQ(mapped.size, de_patterns.size);
   EXPECT_EQ(mapped.rootOffset, de_patterns.rootOffset);
   EXPECT_EQ(std::memcmp(mapped.data, de_patterns.data, mapped.size), 0);
-  // German's 206,259 B start one header pair (8 KB) into a 64 KB-aligned region: four MMU pages.
+  // German's 206,259 B start the 64 KB-aligned region (the headers are at its end): four MMU pages.
   EXPECT_EQ(flash.freeMapPages(), 32u - 4u);
   EXPECT_FALSE(store.map("fr", mapped));
 
@@ -213,6 +213,7 @@ TEST(HyphenationStore, StoresMapsAndKnowsWhatItHolds) {
   HyphenationStore::Entry e;
   ASSERT_TRUE(again.find("de", e));
   EXPECT_EQ(e.size, de_patterns.size);
+  EXPECT_EQ(e.offset, 0u);
   EXPECT_EQ(flash.violations(), 0u);
   EXPECT_EQ(flash.reprograms(), 0u);
 }
