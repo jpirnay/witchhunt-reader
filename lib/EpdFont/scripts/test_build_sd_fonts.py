@@ -104,12 +104,13 @@ def ttf_entries():
 
 
 class TtfFamilies(unittest.TestCase):
-    def test_the_ttf_families_are_the_twenty_indic_ones_the_two_arabic_ones_and_the_two_hebrew_ones(self):
+    def test_the_ttf_families_are_the_twenty_indic_ones_and_two_each_of_arabic_hebrew_and_myanmar(self):
         entries = ttf_entries()
         self.assertEqual(sorted(f["name"] for f in entries),
                          sorted([f"Noto{kind}{x}" for kind in ("Sans", "Serif") for x in TTF_SCRIPTS]
-                                + ["NotoNaskhArabic", "NotoSansArabic", "NotoSansHebrew", "NotoSerifHebrew"]))
-        self.assertEqual(len(entries), 24)
+                                + ["NotoNaskhArabic", "NotoSansArabic", "NotoSansHebrew", "NotoSerifHebrew",
+                                   "NotoSansMyanmar", "NotoSerifMyanmar"]))
+        self.assertEqual(len(entries), 26)
         for f in entries:
             self.assertIs(f["inDownloadAll"], False, f["name"])
             self.assertTrue(f["description"], f["name"])
@@ -286,7 +287,7 @@ class HostedFontsLicense(unittest.TestCase):
         fonts = REPO / "assets" / "sd-fonts"
         ofl = (fonts / "OFL.txt").read_text(encoding="utf-8")
         files = sorted(fonts.glob("*/*.ttf"))
-        self.assertEqual(len(files), 48)
+        self.assertEqual(len(files), 52)
         for path in files:
             notice = TTFont(str(path))["name"].getDebugName(0)
             self.assertIn(notice.removesuffix("."), ofl, path.name)

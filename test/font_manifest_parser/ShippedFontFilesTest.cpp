@@ -61,5 +61,5 @@ TEST(ShippedFontFilesTest, EveryOutlineFileIsTheSizeAndCrcTheManifestNames) {
         << entry.name << " changed without scripts/generate-font-manifest.py --manifest";
     ++checked;
   }
-  EXPECT_EQ(checked, 56);  // 8 .otf (CJK) and 48 .ttf (Indic, Arabic and Hebrew)
+  EXPECT_EQ(checked, 60);  // 8 .otf (CJK) and 52 .ttf (Indic, Arabic, Hebrew and Myanmar)
 }
