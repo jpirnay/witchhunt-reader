@@ -94,6 +94,7 @@ class Face {
   uint32_t glyphCount() const { return glyphCount_; }
 
   // cmap lookup; false (and *glyph = 0) when the font does not map `cp`.
+  // witchhunt: deviation 17 - answered from a small cache of the last face's lookups when it holds `cp`.
   bool nominalGlyph(uint32_t cp, uint32_t* glyph) const;
   // hmtx advance in font units.
   int32_t advance(uint32_t glyph) const;
@@ -123,6 +124,11 @@ class Face {
 
  private:
   void initFilters(const Table& cpac);
+  bool cmapGlyph(uint32_t cp, uint32_t* glyph) const;  // the cmap subtable's answer
+
+  // witchhunt: deviation 17 - which face the cmap cache holds the answers of: unique to each init(), kept by rebase()
+  // (the same bytes) and by a copy (the same tables).
+  uint32_t cmapCacheId_ = 0;
 
   Table cmapSubtable_;
   uint16_t cmapFormat_ = 0;

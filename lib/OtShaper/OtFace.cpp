@@ -91,6 +91,17 @@ bool format12Glyph(const Table& t, const uint32_t cp, uint32_t* glyph, const boo
   return false;
 }
 
+// witchhunt: deviation 17 - the cmap cache: the answers of the last face asked, direct-mapped by the code point's low
+// bits, so a script block's letters mostly have a slot of their own. A slot holds cp / CMAP_CACHE_SLOTS + 1 in its
+// high half (0: empty) and the glyph in its low half; a glyph past 16 bits is never kept. The cmap is a binary search
+// over the subtable in flash (about ten lines of it for format 12), asked once or twice a code point by
+// normalization. Static, 256 B for every face, emptied when another face asks; shaping runs under RenderLock, one
+// call at a time.
+constexpr unsigned CMAP_CACHE_SLOTS = 64;
+uint32_t cmapCache[CMAP_CACHE_SLOTS];
+uint32_t cmapCacheOwner = 0;
+uint32_t lastCmapCacheId = 0;
+
 uint32_t be32(const uint8_t* p) {
   return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
          (static_cast<uint32_t>(p[2]) << 8) | p[3];
@@ -123,6 +134,8 @@ void Scale::set(const int32_t scale, const unsigned ppem, const uint16_t upem) {
 }
 
 bool Face::init(const FaceTables& tables) {
+  if (++lastCmapCacheId == 0) ++lastCmapCacheId;  // witchhunt: deviation 17 - 0 is no face's
+  cmapCacheId_ = lastCmapCacheId;                 // witchhunt: deviation 17
   const Table& head = tables[FaceTables::HEAD];
   const Table& cmap = tables[FaceTables::CMAP];
   if (head.empty() || cmap.empty()) return false;
@@ -197,7 +210,26 @@ void Face::initFilters(const Table& cpac) {
   filters_[GPOS] = found[GPOS];
 }
 
+// witchhunt: deviation 17 - every format answers *glyph != 0 exactly when it returns true, so a slot keeps the glyph
+// alone.
 bool Face::nominalGlyph(const uint32_t cp, uint32_t* glyph) const {
+  if (cp > 0x10FFFF) return cmapGlyph(cp, glyph);
+  if (cmapCacheOwner != cmapCacheId_) {
+    for (uint32_t& slot : cmapCache) slot = 0;
+    cmapCacheOwner = cmapCacheId_;
+  }
+  uint32_t& slot = cmapCache[cp % CMAP_CACHE_SLOTS];
+  const uint32_t key = (cp / CMAP_CACHE_SLOTS + 1) << 16;
+  if ((slot & 0xFFFF0000u) == key) {
+    *glyph = slot & 0xFFFF;
+    return *glyph != 0;
+  }
+  const bool found = cmapGlyph(cp, glyph);
+  if (*glyph <= 0xFFFF) slot = key | *glyph;
+  return found;
+}
+
+bool Face::cmapGlyph(const uint32_t cp, uint32_t* glyph) const {
   *glyph = 0;
   const Table& t = cmapSubtable_;
   switch (cmapFormat_) {

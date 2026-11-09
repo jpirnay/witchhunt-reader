@@ -222,6 +222,9 @@ shaped-script book for the X4's in-place gate.
   - A lookup that passes the digest test is skipped when no glyph of the run both passes its digest and carries its
     mask (`Plan::mayStart`, deviation 16): the plan holds both, so such a lookup reads nothing of the font.
   - `Plan::testBypassCaches` switches them all off, for the tests that compare the output with and without them.
+- **The cmap cache** (deviation 17): `Face::nominalGlyph` keeps the last face's answers in 64 static slots (256 B),
+  direct-mapped by the code point's low bits and emptied when another face asks. Normalization asks the cmap once or
+  twice a code point, each a binary search over the subtable in flash.
 
 ## The word cache
 

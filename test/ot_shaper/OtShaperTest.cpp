@@ -952,4 +952,42 @@ TEST(OtShaper, ABengaliPlanWithoutFiltersPlacesConsonantsAsWithThem) {
   }
 }
 
+// Deviation 17: the cmap cache answers as the cmap does. Two fonts asked in turn empty the cache at every ask, so each
+// answer is the subtable's own; the same code points asked of one font after the other then come from the cache, a
+// slot held by the other font's answers first, every slot reused across script blocks.
+TEST(OtShaper, TheCmapCacheAnswersAsTheCmap) {
+  TtfFace a, b;
+  ASSERT_TRUE(a.open(fixtureFont(BOOKS[0]), false));
+  ASSERT_TRUE(b.open(fixtureFont(BOOKS[1]), false));
+  std::vector<uint32_t> cps;
+  for (uint32_t cp = 0; cp < 0x3000; cp++) cps.push_back(cp);
+  for (const uint32_t cp : {0x25CCu, 0x10FFFFu, 0x110000u, 0xFFFFFFFFu}) cps.push_back(cp);
+  std::vector<uint32_t> expectedA, expectedB;
+  std::vector<bool> foundA, foundB;
+  unsigned mapped = 0;
+  for (const uint32_t cp : cps) {
+    uint32_t glyph;
+    foundA.push_back(a.face.nominalGlyph(cp, &glyph));
+    expectedA.push_back(glyph);
+    foundB.push_back(b.face.nominalGlyph(cp, &glyph));
+    expectedB.push_back(glyph);
+    mapped += foundA.back() + foundB.back();
+  }
+  EXPECT_GT(mapped, 100u);
+  for (int round = 0; round < 2; round++) {
+    for (const ot::Face* face : {&b.face, &a.face}) {
+      const std::vector<uint32_t>& expected = face == &a.face ? expectedA : expectedB;
+      const std::vector<bool>& found = face == &a.face ? foundA : foundB;
+      for (int pass = 0; pass < 2; pass++) {
+        for (size_t i = 0; i < cps.size(); i++) {
+          uint32_t glyph = 12345;
+          EXPECT_EQ(face->nominalGlyph(cps[i], &glyph), found[i]) << std::hex << "U+" << cps[i];
+          EXPECT_EQ(glyph, expected[i]) << std::hex << "U+" << cps[i];
+          EXPECT_EQ(found[i], expected[i] != 0) << std::hex << "U+" << cps[i];
+        }
+      }
+    }
+  }
+}
+
 }  // namespace
