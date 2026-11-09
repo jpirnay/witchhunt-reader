@@ -279,7 +279,7 @@ the shaping layer.
 
 **Files:**
 - Modify: `README.md` ("Vendored third-party components (`lib/`)": a minibidi entry)
-- Modify: `docs/future_work/writing-modes.md` (roadmap row 1 and "Next step.")
+- Modify: `docs/design/writing-modes.md` (roadmap row 1 and "Next step.")
 
 **Interfaces:** none.
 

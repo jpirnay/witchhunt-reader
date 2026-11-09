@@ -480,7 +480,7 @@ risk 1.
   - Supported Languages: Arabic, Persian and Urdu are joined in a TrueType family, and the two families;
   - Limitations;
   - "Download All" now skips 30 families.
-- `docs/future_work/writing-modes.md`, row 2 and "Next step".
+- `docs/design/writing-modes.md`, row 2 and "Next step".
 - `README.md` credits.
 - `docs/memory-allocation-strategy.md`: the shaping-then-workspace order in the arena.
 

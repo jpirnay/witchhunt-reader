@@ -401,3 +401,63 @@ released. The reader goes on with a null frame.
 - Next step: either give both buffers back on that refusal (a `HalDisplay`/`GfxRenderer` realloc), or
   let `enterDeepSleep()`'s guard test the display's own buffer, as `GfxRenderer::displayBuffer()` does,
   so a sleep requested during the pass reboots into sleep.
+
+## One-pass text AA
+
+**Open.** One-pass text AA shipped as an opt-in setting on the X4 Pro with UC8179, the Murphy M3, the X3 and the X4
+(#646, #648, #650). How each board does it, and what was measured:
+[grayscale-aa-rendering.md](../grayscale-aa-rendering.md#one-pass-text-aa-board-by-board).
+
+**Next.**
+1. Run a long read on the X4 Pro with the option on: ghosting over many pages, and in the cold.
+2. The same on the Murphy M3 and the X3, by eye first. The Murphy also needs a long read for how it reads.
+3. The X4 (SSD1677) by eye, and whether its hold row should rest. The hold row nudges the background 2 frames of VSL
+   every page; whether rest looks better is untried, but testable: since #655 (2026-11-08) `x4lab.py` drives frames
+   through the reader's `CMD:LAB` (`SerialTestApi.cpp:1789`), and Test 11 ran on the X4.
+4. Run `kUc8279X3_Xth4`'s tail fix on a UC8279 X3. It applies directly to `Uc8279X3Luts.h`, which lacks it, but is
+   unverified against stock.
+
+**A Background-B borrow forces two passes (X3, X4).** When a background build finishes, the reader redraws the page
+on screen to update its page count. Background-B borrowed the second buffer for that build, so the frame on screen is
+unknown and the redraw takes two passes: one second refresh per chapter build. On the X4 a borrow between two turns
+sends the next turn down the two-pass path too (once in 10 slow turns). Fixing it needs the frame on screen kept
+somewhere a borrower does not write.
+
+**Other controllers.** On the X4 Pro the option shows on UC8179 units only, the one we have tested. The branch has
+tables for SSD1677 and UC8279, and UC8279 also writes `0x01` and `0x82` without restoring them, which may affect later
+B/W refreshes. Effect unproven: our unit is a UC8179.
+
+**Smaller items on the X4 Pro.**
+- **History wiped by any B/W frame.** The charge map goes although the panel keeps its charge, so the page after a HALF
+  takes 2632 ms and drives nearly the whole panel white. A menu has the same effect on the next page, by code reading.
+- **Temperature.** The LUT is fixed, so the waveform does not follow the panel's temperature.
+- **Static black.** One-pass re-drives every black pixel on every page, and the branch's SSD2677 comment says re-driving
+  static text builds ghosts. None seen so far.
+
+**Smaller items on the X3.**
+- A gray pixel that a menu turns black gets only FAST's 2-frame nudge, as no plane says it was gray.
+- A forced refresh override arriving after the mask was built shows that page in B/W only.
+- A pixel staying black is driven 18 frames every page. Measured clean over 500 pages and the hour after; what the DC
+  that adds does to the panel over weeks is not measured. Raised upstream on Free-Ink#184.
+
+## Murphy M3 gray
+
+**Open.** Murphy builds have four-level gray (`-DFREEINK_MURPHY_GRAY`); what was decided and why is in
+[grayscale-aa-rendering.md](../grayscale-aa-rendering.md#murphy-m3-gray-and-its-bw-waveforms), the measurements in
+[tools/murphy-gray-lab/README.md](../../tools/murphy-gray-lab/README.md). All of it comes from one panel, at room
+temperature.
+
+**Long-term DC.** A fringe pixel does the ordinary cycle, white to black, a net-zero nudge, black to white. Gray that
+stays black takes 15 frames toward black that nothing pays back, through the marks
+`Uc8253MurphyDriver::writeOldPlane()` adds. Lab Test 11 on this Murphy (#654, 2026-11-08) measured part of it: black
+held for 500 pages under the per-page VSH 15 re-drive fades by 14.5 and, driven white, comes back 8 points lighter
+than the white around it; rest and the FAST row leave about 1 point (`tools/murphy-gray-lab/README.md`, Test 11). The
+one-pass path rests such pixels, so on text pages with One-Pass Anti-Aliasing on this gets smaller, not larger. What
+weeks of reading do is still unmeasured.
+- Next step: read for some weeks, then compare a clean white and black with the shots kept from the lab.
+
+**Temperature.** The waveforms were measured at room temperature, which was not recorded. The OTP is blank, so the
+controller has no temperature ranges to fall back on, and the driver does not read the sensor.
+
+**Upstream.** The lent block is offered as Free-Ink/freeink-sdk#175, still open, and not in use here: the firmware
+still lends its block from `HalDisplay`. The Murphy's one-pass text is Free-Ink #183, open.

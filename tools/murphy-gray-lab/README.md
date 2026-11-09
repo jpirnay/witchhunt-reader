@@ -367,6 +367,18 @@ work, and an idle minute refreshes nothing. No errors, and heap ended where it s
 
 The user judged the text better than 1-bit, and sleep covers show gray.
 
+Images in the reader: BMP, JPG and PNG all show in one gray pass, and midtones come out dark, because the 4-level
+dither assumes light gray at 67 % and ours is 50-58 %. Measured on an even step ramp, in percent of white:
+
+| Ramp | 14 | 29 | 43 | 57 | 71 | 86 |
+|---|---|---|---|---|---|---|
+| BMP, gray | 9 | 23 | 36 | 52 | 64 | 88 |
+| JPG or PNG, gray | 7 | 20 | 30 | 41 | 55 | 73 |
+| JPG, B/W | 3 | 21 | 40 | 57 | 77 | 92 |
+
+JPG and PNG also read 8-15 points below BMP on a soft test image. Why this was left as it is:
+[docs/grayscale-aa-rendering.md](../../docs/grayscale-aa-rendering.md#murphy-m3-gray-and-its-bw-waveforms).
+
 `./lab.py t5 cold`, `t5 warm` and `t5 warm --swap-planes` test skipping the reset before the nudge,
 with the reader's slots and bytes. Rows are black, light, dark through LUT 21, dark through LUT 23:
 
@@ -387,15 +399,35 @@ white through FAST beside a strip that never changes, and `./cam.py strip` repor
 `--settled` draws the black with a full refresh first, which is what UI black is, and `--dwell` leaves
 it up. Check `./cam.py still baseline-white <shot>` after each run: a bumped camera reads as a result.
 `./ui_ghost.py <tag> --port <port>` measures the same thing on a real Settings list with the reader on
-the device. The numbers are in `docs/future_work/murphy-gray.md`.
+the device.
+
+Result on our unit: FAST now gives black to white 20 frames instead of 15, as VSL needs about twice as long as VSH.
+On a real Settings list the band a selection bar leaves went from 4.2 to 2.5 points below a row that never held it
+(`ui_ghost.py`, four moves each, one panel). Patches agree, and 24 frames overshoots on black that FAST drew. VSL at
+-15 V barely helped, and a VSL touch on `WW` made things much worse.
 
 **Test 7 and 8: HALF.** `./lab.py t7 <h0|h5|h10|h15>` measures how well a HALF cleans a patch with a
 history, and `./lab.py t8 <half> <fast> <name>` runs a HALF and a FAST together. Use t8 to judge any
 waveform change: a better HALF can make every FAST after it worse, and t7 alone will not show that. Do
 this on a blank panel, not in the reader: text sets off the webcam's autofocus, which shifts the scene.
 
-**Still open.** Long-term DC behaviour. A book with a stored
-`textAntiAliasingOverride` of 0 stays B/W, whatever the setting says.
+Result on our unit: HALF leaves more ghost than FAST, and more VSL on `WW` in `MURPHY_LUT_21_DEFAULT` would clean
+better at no cost in time, as its last 16 frames idle. But that whitens the background, and every FAST after it then
+lands short of the new white. Points below an untouched patch, three interleaved `./lab.py t8` runs on a blank panel:
+
+| HALF + FAST | After FAST | After HALF |
+|---|---|---|
+| **Unchanged + 20 frames** | **-0.5** | -2.4 |
+| 5 extra + 20 | -1.8 | -1.5 |
+| 10 extra + 20 | -2.2 | -1.1 |
+| 10 extra + 25 | -1.3 | -1.3 |
+
+The reader keeps the first row; the reasons are in
+[docs/grayscale-aa-rendering.md](../../docs/grayscale-aa-rendering.md#murphy-m3-gray-and-its-bw-waveforms).
+
+**Still open.** Long-term DC behaviour and temperature: see
+[docs/future_work/display-and-refresh.md](../../docs/future_work/display-and-refresh.md), "Murphy M3 gray". A book with
+a stored `textAntiAliasingOverride` of 0 stays B/W, whatever the setting says.
 
 ## Protocol
 

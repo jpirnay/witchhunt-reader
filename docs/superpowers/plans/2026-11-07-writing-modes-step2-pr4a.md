@@ -379,7 +379,7 @@ them, never build or run them.
 **Files:**
 - Modify: `src/SerialTestApi.cpp` (`CMD:TTF:SHAPE` takes the first shaped run, Indic or Arabic), `docs/serial-test-api.md`
 - Modify: `docs/text-shaping.md` (the engine's Arabic shaper: what it does, what is left out, that layout uses it only
-  from PR 4b), `docs/future_work/writing-modes.md` (row 2 and "Next step.")
+  from PR 4b), `docs/design/writing-modes.md` (row 2 and "Next step.")
 - Modify: the measurements' "PR 4a" section (flash, the device's figures)
 
 - [ ] **Step 1: `CMD:TTF:SHAPE` with an Arabic word.**

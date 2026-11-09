@@ -1462,7 +1462,7 @@ scratchpad first.
 **Files:**
 - Create: `docs/text-shaping.md` (reference)
 - Modify: `USER_GUIDE.md` ("Supported Languages", `:808-815`; "Current Limitations", `:1109`)
-- Modify: `docs/future_work/writing-modes.md` (row 2, `:24`, and "Next step.")
+- Modify: `docs/design/writing-modes.md` (row 2, `:24`, and "Next step.")
 - Modify: `README.md` (the OtShaper entry, `:176`)
 - Modify: `src/main.cpp:1813` (the loop task's stack comment: 16 KB, not 8 KB, per the design's "Stack")
 

@@ -242,7 +242,7 @@ Python; the serial test API on the X4, and on the X3.
     - This is also the first X3 look at #594 and #595.
   - Restore every setting, and leave the X3 on this build.
 - [ ] **Step 5: Docs.**
-  - `docs/future_work/writing-modes.md`:
+  - `docs/design/writing-modes.md`:
     - row 4: PR 1 #594 and PR 2 #595 shipped, PR 3 `#<this PR>`;
     - "Next step." names PR 4;
     - the inherited-limits list drops tate-chu-yoko; `text-orientation` stays.

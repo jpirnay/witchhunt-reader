@@ -167,7 +167,7 @@ and Decision 3.
     the page counts against #595 (Automatic 12/76/62/136, Off 8/69/61/129) and the v106 rebuild; the scripts are in
     the session scratchpad `wm4-pr3-dev`.
 - [ ] **Step 2: Docs.**
-  - `docs/future_work/writing-modes.md`:
+  - `docs/design/writing-modes.md`:
     - row 4: PR 3 #597 shipped, PR 4 `#<this PR>`, and step 4 done once this merges;
     - "Next step." names step 1 (bidi and Hebrew);
     - the inherited-limits list drops the dictionary.

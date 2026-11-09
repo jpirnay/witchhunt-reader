@@ -175,7 +175,9 @@ the bottom edge on a board with a light and the top edge otherwise (`wasMenuGest
 reader a tap on a link (footnote marker or cross-reference) is tested first, because a marker can
 sit inside a page-turn zone; the markers are located during the render by matching the page's
 words (`LinkMarkerMatch`), a word at a time, so a link of CJK text, stored one page word per
-character, matches its characters one by one. Gesture actions reach a reader through its `onButtonAction()`, so every
+character, matches its characters one by one: a page word may consume the front of the current marker token where
+the parser could have split it, at a CJK break (Hangul is kept whole) or where the next page word is glued to it
+(#663; before, `consumeToken` split a marker at spaces only). Gesture actions reach a reader through its `onButtonAction()`, so every
 reader must implement one.
 
 ### The hint strip

@@ -16,18 +16,6 @@ The rules and measurements these items refer to are in [Memory Allocation Strate
 
 **Next step.** Add a fixture with a nested table to `test/epubs` (a `make_test_*.py` generator, like the others) whose golden shows the inner words, then route `depth > 1` text into the degraded outer table's paragraph stream and walk through each `depth` branch.
 
-## Class and id selectors ignore case
-
-**Open.** `CssParser` lowercases both sides of every class and id lookup: selector keys through `normalizedInto()` when a stylesheet is parsed, class attributes in `forEachNormalizedClassToken()`, and ids in `resolveStyle()` and `backgroundImageFor()`. A rule therefore reaches any element whose class or id differs only in case. XHTML class and id names are case-sensitive, and Kindle, ADE and Readest match them that way.
-
-**Why it matters.** It styles text the book did not style. In *The Anarchy* the paragraph rule `.Dial` (display:block, 0.75em, a hanging indent) also lands on `<span class="dial">`, the speaker name in each dialogue line: the names print at about 56 % size and, since #393 made a `display:block` span open a block, on a line of their own. A survey of 109 books found three that collide (`Dial`/`dial`, `TOC`/`toc`) and none that matches a rule only through the lowercasing.
-
-**Where.** `lib/Epub/Epub/css/CssParser.cpp` (the functions above). `CssGapsIdSelector.CaseNormalized` in `test/css_gaps` pins it for ids today.
-
-**Tried.** PR #394 (branch `fix/css-class-case-sensitive`), stacked on #393. GitHub shows it merged, but it merged into #393's branch `fix/388-span-display-block` seconds after #393 had reached master (2026-10-06), so its merge `49697b4c8` is not on master and the code above still lowercases. The work survives on `origin/fix/388-span-display-block` (`c3f3a07f7`, `35b6bb6f3`, `af01fab06`): only the tag part of a selector is lowercased, the name after `.` or `#` stays as written in the rule cache, the background-picture side file and the lookups; `CaseNormalized` and the `HERO` probe in `test/epub_css/CssParserCacheTest.cpp` become case-sensitive pins; `CSS_CACHE_VERSION` 21 → 22 and `SECTION_FILE_VERSION` 79 → 80.
-
-**Next step.** Take those three commits onto a branch from master. The bumps become `CSS_CACHE_VERSION` 32 → 33 and `SECTION_FILE_VERSION` 117 → 118. Re-run the corpus comparison, then merge.
-
 ## A `<br>` that ends a block adds a blank line
 
 **Open.** `<p>Alpha<br/></p><p>Bravo</p>` lays out Bravo a whole line below Alpha (y=48 with the host stub, against 24
@@ -55,19 +43,9 @@ calibre book's page count before and after.
 
 **Next step.** Decide whether the hint is wanted. If it is, show it the way the truncated hint is shown, with translated strings.
 
-## The image lane waits for Background-B
-
-**Done (#515, 2026-10-19).** The lane runs before B: B borrows the secondary buffer only once the lane has looked at its window and found nothing to decode, and a lane decode or a page render that meets a B build in the buffer has B give it back, at most `LaneBeforeBuild::kMaxYields` (4) times per target and not counted as preemptions. See `src/activities/reader/LaneBeforeBuild.h` and [the image lane](../background-rendering.md#image-lane--pixel-caches-ahead-of-the-reader).
-
-**Measured (X3, Build Through test book, `make_test_font_families.py --build-through`).** Where the conflict happened was build-through, not a mid-chapter B build: with anti-aliasing off B took the buffer on a chapter's last pages 0.6 s after the page appeared, before the lane's settle, and the three picture pages decoded on the heap beside its build (11,780 and 15,672 B free at the JPEGs' lows, the PNG drawn as a low-memory box). With anti-aliasing on, the deferred AA pass delayed B past the lane's settle, so the lane already won. With the lane first, the pictures are decoded in the lent buffer before B starts, B builds through without meeting a decode, and it still finished the next chapter before the reader reached it (the turn onto the next chapter was a cache hit, 1.5 s to a settled screen, as before). A page render that decodes in the buffer B gave back reached 32-34 KB free at its low.
-
-**Changed since (#639, 2026-11-06).** The lane also runs between two of Background-C's slices, for the page on screen alone. It decodes in what C's build leaves free above its cursor (`BuildArena::freeTail`, about 35 KB of 52 on the X3) and is gone before the next slice (`LaneBeforeBuild.h`).
-
-**Still open.** A picture that does not fit that tail waits for the build to end (the X3's inflate ring fits with about 2 KB to spare), and C is not preempted.
-
 ## The font prewarm sets the session's heap minimum
 
-**Partly done (#515, 2026-10-19).** Re-measured on the X3 (Build Through test book, `[MEM]` and per-phase lows of `renderContents`): the prewarm no longer sets the session's minimum. With the image decodes out of Background-B's way (see above) the low point of a session sat at ~33 KB, inside B's build, and a normal render's phases stayed within 1-2 KB of their start:
+**Partly done (#515, 2026-10-19).** Re-measured on the X3 (Build Through test book, `[MEM]` and per-phase lows of `renderContents`): the prewarm no longer sets the session's minimum. With the image decodes out of Background-B's way (#515, [the image lane](../background-rendering.md#image-lane--pixel-caches-ahead-of-the-reader)) the low point of a session sat at ~33 KB, inside B's build, and a normal render's phases stayed within 1-2 KB of their start:
 
 | Page render, X3 | start | prewarm low | BW render low |
 |---|---|---|---|

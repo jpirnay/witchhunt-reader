@@ -154,6 +154,15 @@ before B; one page per tick.
   allows `LaneBeforeBuild::kMaxYields` (4) per target, shared with the page render's (see B), and
   past them the lane waits for B as it used to. While B holds the buffer the window is looked at as
   its pages will be drawn once the buffer is home, grey caches included.
+  Why the lane goes first (#515; X3, Build Through test book, `make_test_font_families.py --build-through`): the
+  conflict happened at build-through, not in a mid-chapter B build. With anti-aliasing off B took the buffer on a
+  chapter's last pages 0.6 s after the page appeared, before the lane's settle, and the three picture pages decoded
+  on the heap beside its build (11,780 and 15,672 B free at the JPEGs' lows, the PNG drawn as a low-memory box). With
+  anti-aliasing on, the deferred AA pass delayed B past the lane's settle, so the lane already won. With the lane
+  first, the pictures are decoded in the lent buffer before B starts, B builds through without meeting a decode, and
+  it still finished the next chapter before the reader reached it (the turn onto the next chapter was a cache hit,
+  1.5 s to a settled screen, as before). A page render that decodes in the buffer B gave back reached 32-34 KB free
+  at its low.
 - **Progress:** B never waits for the lane for long. The window has a few pages, and each one is
   decoded, given up on after `kImageWarmMaxTries`, or, when a press cuts its decode short, decoded by
   the render that shows it, so by a chapter's last page at the latest the lane finds nothing left.
@@ -183,6 +192,7 @@ is the same `stepImageWarmLocked()`, called between two slices by `stepImageLane
 - **Short of memory** the picture waits for the lane after the build, which has the whole buffer. There is no relief
   step (the build needs its fonts), no coarse picture (nothing would decode it again), no inflate ring on the heap
   (`image_scratch::canWait`: on the X3 that left 5 KB free), and no try counted against the page (`kImageWarmMaxTries`).
+  The X3's inflate ring fits the tail with about 2 KB to spare, and a C build is not preempted for a picture.
 
 The redraw comes from the build's own pass (`displayBuildPage`), which draws cached images. Where nothing the decode
 needs is on the bus a refresh holds (`HalCapabilities::decodesThroughRefresh`: a native SDMMC card and a PSRAM arena), the

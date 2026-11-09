@@ -1,6 +1,6 @@
 # Murphy M3: fixed sizes that assume a bigger panel
 
-Audit of `feat/murphy-support`, 2026-11-03. The M3 is a 416x240 panel, 1-bit at the time and four-level gray since ([murphy-gray.md](murphy-gray.md)); the UI runs Portrait, so the
+Audit of `feat/murphy-support`, 2026-11-03. The M3 is a 416x240 panel, 1-bit at the time and four-level gray since ([grayscale-aa-rendering.md](../grayscale-aa-rendering.md#murphy-m3-gray-and-its-bw-waveforms)); the UI runs Portrait, so the
 logical screen is 240x416. Abbreviations: **P** = Portrait 240x416, **L** = Landscape 416x240. Paths are
 relative to the repo root.
 
@@ -9,7 +9,11 @@ grid (six items a page), Calibre's layout, and System Information. Fixed but nev
 defaults (they only apply to a fresh settings file), Carousel leaving the theme list (R7), the Finished Book and OTA
 text bounds, Weather's moon line, and Calibre's upload bar. The per-area tables further down keep only the rows still
 open on 2026-11-09, each checked against its file. Their pixel figures are arithmetic from the code before those fixes,
-so they are out of date: check a row against the panel before acting on it.
+so they are out of date: check a row against the panel before acting on it. Text widths ignore kerning, and of the
+translations only de, fr and ru were measured. Not audited at all: EPUB CSS absolute margins and table cell minimums on
+a 230 px column, the TXT and Markdown body layout beyond its constants, and the SDK components `publication-page.h`,
+`cover-grid.h`, `sheet.h` and `tile-grid.h` (grepped only). What was checked and found fine by reading is in
+[board-support.md](../contributing/board-support.md#gotchas).
 
 Landscape needed one fix that was not about size. A virtual front strip now keeps portrait's key roles
 (`HalCapabilities::frontStripIsVirtual()`, in the orientation provider in `main.cpp`), because rotating them turned
@@ -139,18 +143,6 @@ Default menu on Murphy is 5 rows (Library, Stats, File Transfer, Weather, Settin
 
 Two rows are gone since gray landed: the reader's AA planes now reach the panel, and `grayLevels()` of 4 is true. A build without `FREEINK_MURPHY_GRAY` hides the settings through `HalCapabilities::panelShowsGray()`.
 
-**Checked, fine (do not re-audit):**
-- Framebuffer and BW chunk sizes come from the profile (`MAX_FRAMEBUFFER_BYTES`, `GfxRenderer.cpp:117-118`). No static array sized by a panel constant in `src/` or `lib/`.
-- `FontPreviewCache.cpp` row buffer (128 B) and dictionary snapshot (2048 B) are upper bounds that hold.
-- `Logo120` on Boot/Sleep fits P (y=148..268, text to 320). `SystemInformationActivity.cpp:319` guards it. `MoonIcon` 48 px fits.
-- Carousel frame cache: region clamps to 11,040 B, which fit even Murphy's 12,480 B framebuffer before the PSRAM arena.
-- `lib/Xtc/Xtc/XtcTypes.h:31-32` 480x800 are parser defaults only.
-- EPUB image sizing derives from the viewport; `kMinImageSliceH = 64` is fine. `PngToBmpConverter.cpp:47` and `JpegToBmpConverter.cpp:929` caps are source pixels, not panel.
-- `UITheme::getNumberOfItemsPerPage` has no callers, so its possible 0 is harmless. The private `getPageItems()` versions clamp with `max(1, ...)`. `drawList` guards `pageItems <= 0`.
-- Hint/status primitives do not divide by a dimension that can reach 0 here. Reader viewport stays positive at the 40 px margin.
-- OPDS (`OpdsBookBrowserActivity.cpp`): body-relative, truncates, fits at 240. Font download, USB drive, serial transfer, SD firmware update wrap their text.
-- `TapTargets`, `ListTouchBand` caps are upper bounds only.
-
 **Trap for whoever tunes list rows.** `makeUiTarget` (`UiAppHelpers.h:12`) builds `GfxRendererTarget` with `hasTouch = false` (`FreeInkUIGfxRenderer.h:44`), so FreeInkUI lists size to 20 + 2x4 = 28 px rows with no gap, although `mappedInput.hasTouch()` is true. That is what makes Settings show about 8 rows. If someone passes `true`, `listTouchMinRowHeight = 56` plus gap 6 (`FreeInkUICore.h:656-658`) cut that to 3 rows, and `uiThemeTokens()` would need to override those tokens.
 
 **The lent buffer is no longer Murphy's 12,480 B framebuffer.** Murphy lends a 256 KB PSRAM arena instead since #605, and every S3 board does since #614 (2026-11-05; `HalDisplay.cpp:375`, `404-416`).
@@ -161,15 +153,3 @@ Two rows are gone since gray landed: the reader's AA planes now reach the panel,
 - `QrDisplayActivity.cpp:39`: `truncNoticeHeight = 16`, fine.
 - `CrossPointWebServerActivity.cpp:32-33` (`QR_CODE_WIDTH/HEIGHT = 198`) and its layout are the excluded file. Noted only.
 - `CalibreConnectActivity` has no QR.
-
-## 11. Coverage, and what is inferred
-
-**Not reviewed:** `WifiSelectionActivity.cpp`, `CrossPointWebServerActivity.cpp` (per brief). `FontScalingTestActivity`, `EpubRenderBenchmarkActivity` (developer screens, skimmed). `TxtReaderActivity`/`MdReaderActivity` body layout beyond constants. EPUB CSS absolute margins and table cell minimums (`ChapterHtmlSlimParser.cpp`), so a `margin-left: 40px` on 230 px is unassessed. The web UI. Other SDK components (`publication-page.h`, `cover-grid.h`, `sheet.h`, `tile-grid.h`) were only grepped, and I did not establish which are in use. `FrontlightPanelActivity` geometry was skimmed only and looks fine. `KOReaderSettingsActivity`, `OpdsSettingsActivity`, `WeatherSettingsActivity`, `LanguageSelectActivity`, `EnumSelectionActivity`, `HomeMoreActivity`, `FileContextMenuActivity` are list-based and inherit section 5; not read individually.
-
-**Inferred, not verified by reading or on the device:**
-- Keyboard keys showing an ellipsis instead of m/w: from `text()` calling `truncatedText` against a key-sized rect. I did not read `button()`'s label rect, and the exact glyph result needs the device.
-- Weather `numDays` = 7 depends on the API request.
-- `OtaUpdateActivity` overflow depends on the runtime version string length.
-- ReadingStats heights are arithmetic from `CardLayout` with typical row counts.
-- Text widths ignore kerning. Translations measured are de, fr, ru only; CJK and the other languages are unmeasured.
-- Everything is arithmetic from the code at this working tree, which was in flux. Only the 3-of-4 hints and the status overrun have been seen on the device.

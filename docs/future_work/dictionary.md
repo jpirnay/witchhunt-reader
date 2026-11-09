@@ -18,12 +18,4 @@ One mechanism for every language that separates words with spaces: a small table
 **Next step.** Carry out `docs/superpowers/plans/2026-10-28-dictionary-phrases.md` (its Task 1 checks it against
 master first); the design is `docs/superpowers/specs/2026-10-28-dictionary-phrases-design.md`.
 
-## Considered and not taken (2026-10-28)
-
-From a comparison with matcha-reader's dictionary support:
-- **A dictionary chosen by the book's language, and falling through to the next dictionary on a miss:** switching
-  dictionaries by hand is already convenient (maintainer).
-- **matcha's own dictionary format** (a RAM-tier index, Japanese deinflection checked against parts of speech,
-  Chinese segmentation by frequency): one language's worth of engine and a custom format, against StarDict-only and
-  the flash budget.
-- **Sentence mining to an Anki CSV:** a scope call; left out.
+What was considered and not taken is in [docs/dictionary.md](../dictionary.md#what-the-reader-does-not-do).

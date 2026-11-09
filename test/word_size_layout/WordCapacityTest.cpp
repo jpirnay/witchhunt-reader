@@ -3,7 +3,7 @@
 // The parser splits a block on the token past its threshold (96, or the last split's kept line plus 48), so the
 // block never holds more tokens than that, but for the few a ruby group may hold the split up. Doubling took the
 // arrays of a span-per-word paragraph to 256 entries for at most 175 tokens: 33 B an entry on the device, at the
-// build's heap peak (docs/future_work/writing-modes-handover.md, item 1).
+// build's heap peak (docs/text-shaping.md, "The shaped store's heap").
 #include <gtest/gtest.h>
 
 #include <string>

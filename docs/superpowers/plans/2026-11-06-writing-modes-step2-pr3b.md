@@ -366,7 +366,7 @@ flashed, with the maintainer's settings; read `CMD:GET:*` first, for the restore
     in one of these languages uses an installed family of its script by itself.
 - Modify: `README.md` (the font credits): the Indic Noto families (OFL), merged with Noto Sans or Serif.
 - Modify: `docs/text-shaping.md`: where the families come from, and the reader's automatic choice.
-- Modify: `docs/future_work/writing-modes.md`: row 2 and "Next step.", with `#<n>` for this PR.
+- Modify: `docs/design/writing-modes.md`: row 2 and "Next step.", with `#<n>` for this PR.
 - Modify: `lib/EpdFont/scripts/sd-fonts.yaml`'s header, if Task 2 left anything unsaid.
 
 - [ ] **Step 1: The docs** above, each claim checked against the code.

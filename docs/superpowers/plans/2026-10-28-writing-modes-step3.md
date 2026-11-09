@@ -20,7 +20,7 @@ bar and percent slider follow.
 on the X4.
 
 **Spec:** `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md`: section 7 row 3, and 5.1, 5.2,
-5.4, 5.5, 5.7, 7, 9, 10/10.1. Roadmap: `docs/future_work/writing-modes.md` ("Parsed in step 0, read later", "Left from
+5.4, 5.5, 5.7, 7, 9, 10/10.1. Roadmap: `docs/design/writing-modes.md` ("Parsed in step 0, read later", "Left from
 the spike, for step 3"). The prototype is the spike `8f28584a0` (`origin/spike/vertical-frame`): this plan cuts its
 frame scope, its viewport swap and its column draw into real code; nothing is merged from it. Expected values are
 derived by hand from the host shims (`test/word_size_layout/GfxRenderer.h`: every glyph 10 px, ascender 16;
@@ -868,7 +868,7 @@ int reversedFillX(int value, int barX, int barWidth, int minValue, int maxValue)
 - Modify: `docs/file-formats.md` (`section.bin`'s header table :231-253: `verticalText` after `imageRendering`, the
   vertical status bit; under the file layout, the page record's `u16` block extent, a line's column bit (flags bit 2),
   an image's flags byte; the property hash paragraph :216: the request when not Off)
-- Modify: `docs/future_work/writing-modes.md` (as on master `39fba77f5`, after #573: the "Status: open items as of"
+- Modify: `docs/design/writing-modes.md` (as on master `39fba77f5`, after #573: the "Status: open items as of"
   date; the roadmap's step 3 row "shipped (#PR) ([plan](...))", and step 1's row, whose "FlowContext and page
   progression" step 3 now builds (ruling 1: step 1 reuses them); the "**Next step.**" paragraph under the roadmap,
   which names step 3 today, says it has shipped and names the next step as the maintainer rules (asked at the

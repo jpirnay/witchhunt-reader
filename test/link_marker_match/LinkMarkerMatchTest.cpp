@@ -193,7 +193,7 @@ TEST(LinkMarkerMatch, AControlInsideTheNumberOrOutsideTheSetStillBlocks) {
 }
 
 // CJK text is stored one page word per character, while a link's text is one token between spaces: the words
-// consume the token a piece at a time (handover item 7's open bug: such a link could not be tapped).
+// consume the token a piece at a time (#663, docs/contributing/touch-architecture.md: such a link could not be tapped).
 TEST(LinkMarkerMatch, ACjkLinkSpreadOverOneWordPerCharacterMatches) {
   bool done = false;
   EXPECT_EQ(runLength("第一章", {"第", "一", "章", "を"}, done), 3);
