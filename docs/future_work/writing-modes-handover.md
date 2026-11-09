@@ -209,9 +209,14 @@ median of three:
   of 20,000 drawn by the fallback face, because `TtfFont::Style`'s memory of left glyphs that kern with nothing (whose
   pairs are never stored, spec 8.1) was a bit set ending at U+0250. Fixed by #662 (a 64-entry set above it, and a
   left code point the face lacks counts too): 4,680 to 4,044 ms in NotoSansHebrew, 5,531 to 5,100 by the fallback face. The glyph lookups
-  (2.3 to 2.7 probes each for Hebrew against 1.9 for Latin, 182 against 90 ms) are what remains of the measure: a
-  small RAM cache in front of `find` would serve every TrueType measure and draw for about 512 B while a family is
-  loaded.
+  (2.3 to 2.7 probes each for Hebrew against 1.9 for Latin, 182 against 90 ms) were what remained of the measure.
+  `perf/glyph-lookup-cache` puts `find()`'s recent answers in RAM (two ways of 32 sets, 512 B while a family is
+  loaded). It saves less than the 182 ms suggested: X3, warm store, median of three, 2026-11-09: Bialik Hebrew in
+  NotoSansHebrew 3,747 to 3,678 ms, its Latin twin 2,657 to 2,616, Zaydan Arabic 7,655 to 7,588, Gaban Hindi 6,800 to
+  6,721; a page's pre-render 62 to 59 ms. 128 entries saved at most 70 ms more a chapter (cold store), so 64 stay. The
+  rest of the 182 ms is outside the index walk. Note for any benchmark: since #665 a Hebrew book picks
+  NotoSansHebrew, so alternating it with its Latin twin reinstalls the glyph store at every switch (7.5-10.5 s, an empty
+  store); run one book's builds in a row for warm figures.
 - **The line pass** (466 ms, 1.2 ms a line): one UAX#9 pass per line, with every token's HebrewShaper walk repeated
   and the forms re-encoded. The walk could stop at tokens without a yod (the divine name is all it changes).
 - **The form bytes.** A Hebrew line writes each word's display form beside its text (`WD` in the dump): 26,091 B
@@ -237,7 +242,7 @@ open on purpose (2026-11-08): a full code audit comes first.
    and the two Hebrew families merged with Latin. The measurements under item 2 add a reason: until the reader picks
    a family for Hebrew, a Latin body font's fallback face draws it, 15 to 20 percent slower.
 4. **What item 2 left**, as the measurements of item 2 are repeated for item 3 anyway: a RAM cache in front of the
-   glyph store's lookups (a Hebrew glyph lookup costs twice a Latin one, 182 against 90 ms a chapter), the line pass's
+   glyph store's lookups (done, `perf/glyph-lookup-cache`: 1-2 percent a chapter), the line pass's
    repeated HebrewShaper walk (a yod test first), and the plain path's own cost; the form bytes a Hebrew line writes
    are a section format change and wait for a reason beyond 180 ms.
 5. **The smaller Arabic gaps** (item 5), one PR for the layout ones (the soft hyphen inside a word, the long word
