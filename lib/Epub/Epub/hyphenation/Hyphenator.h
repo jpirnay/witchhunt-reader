@@ -35,6 +35,12 @@ class Hyphenator {
   //      word from overflowing the page width.
   static std::vector<BreakInfo> breakOffsets(const std::string& word, bool includeFallback);
 
+  // Where a line may end inside the Myanmar text of `word`, in ascending order, none drawing a hyphen: between two
+  // syllables of a run, where the fallback's rule allows a cut (myanmar::breakAllowed), whatever the hyphenation
+  // setting. Burmese writes no spaces between words, so a phrase is split at a line end as a Hangul word is
+  // (the Myanmar design's PR 3). Empty for a word without Myanmar text, and between Myanmar and another script.
+  static std::vector<BreakInfo> myanmarLineEndBreaks(const std::string& word);
+
   // Provide a publication-level language hint (e.g. "en", "en-US", "ru") used to select hyphenation rules.
   static void setPreferredLanguage(const std::string& lang);
 

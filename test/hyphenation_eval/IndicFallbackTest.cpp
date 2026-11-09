@@ -152,3 +152,27 @@ TEST(IndicFallback, AHyphenIsDrawnOnlyAwayFromMyanmar) {
   }
   EXPECT_EQ(myanmarBreaks, 3u);  // before ra, ka (ကုန်) and ma (မြို့)
 }
+
+// The Myanmar design's PR 3: the line-end breaks of a Myanmar phrase are the fallback's cuts, offered whatever the
+// language's patterns, none with a hyphen, and only inside a Myanmar run.
+TEST(IndicFallback, AMyanmarPhraseEndsALineWhereTheFallbackWouldCutIt) {
+  const auto offsets = [](const std::vector<Hyphenator::BreakInfo>& breaks) {
+    std::vector<size_t> out;
+    for (const auto& b : breaks) out.push_back(b.byteOffset);
+    return out;
+  };
+  for (const std::string word : {"မင်္ဂလာပါ", "ကျောင်းသား", "ကြောင့်မြန်မာ", "၁၂၃၄ကျပ်", "ကမ္ဘာ", "ကာ‍ကာကာ"}) {
+    Hyphenator::setLanguageHyphenator(nullptr);
+    const std::vector<size_t> fallback = offsets(Hyphenator::breakOffsets(word, true));
+    Hyphenator::setLanguageHyphenator(Hyphenator::forLanguage("en"));
+    const std::vector<Hyphenator::BreakInfo> lineEnds = Hyphenator::myanmarLineEndBreaks(word);
+    for (const auto& b : lineEnds) EXPECT_FALSE(b.requiresInsertedHyphen) << word;
+    EXPECT_EQ(fallback, offsets(lineEnds)) << word;
+  }
+  Hyphenator::setLanguageHyphenator(nullptr);
+  // Not where Latin meets Myanmar, nor before a bracket: Rangoon|ရန်|ကုန် is cut before ka only, (ကာကာ) after its
+  // first syllable only; and a Latin word has none.
+  EXPECT_EQ(offsets(Hyphenator::myanmarLineEndBreaks("Rangoonရန်ကုန်")), (std::vector<size_t>{16}));
+  EXPECT_EQ(offsets(Hyphenator::myanmarLineEndBreaks("(ကာကာ)")), (std::vector<size_t>{7}));
+  EXPECT_TRUE(Hyphenator::myanmarLineEndBreaks("Rangoon").empty());
+}

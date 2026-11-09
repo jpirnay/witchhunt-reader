@@ -295,6 +295,24 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::breakOffsets(const std::string& w
   return breaks;
 }
 
+std::vector<Hyphenator::BreakInfo> Hyphenator::myanmarLineEndBreaks(const std::string& word) {
+  // The byte scan first: most words are not Myanmar, and return here without a code point vector.
+  if (!myanmar::holdsMyanmar(word.data(), word.size())) return {};
+  const std::vector<CodepointInfo> cps = collectCodepoints(word);
+  std::vector<BreakInfo> breaks;
+  breaks.reserve(cps.size());  // at most a break a code point; the vector lives for one candidate search
+  for (size_t idx = 1; idx < cps.size(); ++idx) {
+    // Inside a run: a syllable's start after a member, a joiner or a dotted circle. Myanmar meeting another script
+    // is no break of this rule's (a bracket or a quote must not be left at a line's end).
+    const uint32_t prev = cps[idx - 1].value;
+    if (myanmar::isRunMember(cps[idx].value) && (myanmar::isRunMember(prev) || myanmar::isShared(prev)) &&
+        myanmarBreakAllowed(cps, idx)) {
+      breaks.push_back({cps[idx].byteOffset, false});
+    }
+  }
+  return breaks;
+}
+
 void Hyphenator::setPreferredLanguage(const std::string& lang) { cachedHyphenator_ = hyphenatorForLanguage(lang); }
 
 const LanguageHyphenator* Hyphenator::forLanguage(const std::string& lang) { return hyphenatorForLanguage(lang); }
