@@ -213,6 +213,37 @@ bool isNameChar(const char c) {
   return std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || static_cast<unsigned char>(c) >= 0x80;
 }
 
+// Selector form of CssParser::normalizedInto: collapses whitespace the same way, but folds only element names.
+// Class and id names are case-sensitive in XHTML (as Kindle, ADE and Readest match them), and folding them let The
+// Anarchy's `.Dial` style its `class="dial"` speaker names. A name after `.` or `#` keeps its case to its end; any
+// other name (an element name, also after a combinator: `DIV.Foo SPAN` is `div.Foo span`) folds.
+void normalizedSelectorInto(const std::string_view s, std::string& out) {
+  out.clear();
+  out.reserve(s.size());
+  bool inSpace = true;  // Start true to skip leading space
+  bool inName = false;  // inside a class or id name
+  for (const char c : s) {
+    if (isCssWhitespace(c)) {
+      if (!inSpace) {
+        out.push_back(' ');
+        inSpace = true;
+      }
+      inName = false;
+      continue;
+    }
+    inSpace = false;
+    if (c == '.' || c == '#') {
+      inName = true;
+    } else if (!isNameChar(c)) {
+      inName = false;
+    }
+    out.push_back(inName ? c : static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+  }
+  if (!out.empty() && out.back() == ' ') {
+    out.pop_back();
+  }
+}
+
 // One compound selector -- an element name or `*`, then any .class and at most one #id -- with
 // its names hashed. False for anything else: an escape, an attribute or pseudo part, a combinator.
 struct Compound {
@@ -361,8 +392,9 @@ bool chainMatches(const uint8_t* steps, const uint8_t count, const uint64_t* mas
   return true;
 }
 
+// Each name of a class attribute, as written: class names are case-sensitive (normalizedSelectorInto).
 template <typename Fn>
-void forEachNormalizedClassToken(const std::string& classAttr, std::string& normalizedBuf, Fn&& fn) {
+void forEachClassToken(const std::string& classAttr, std::string& tokenBuf, Fn&& fn) {
   size_t i = 0;
   while (i < classAttr.size()) {
     while (i < classAttr.size() && isCssWhitespace(classAttr[i])) {
@@ -377,14 +409,8 @@ void forEachNormalizedClassToken(const std::string& classAttr, std::string& norm
       ++i;
     }
 
-    normalizedBuf.clear();
-    normalizedBuf.reserve(i - start);
-    for (size_t j = start; j < i; ++j) {
-      normalizedBuf.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(classAttr[j]))));
-    }
-    if (!normalizedBuf.empty()) {
-      fn(normalizedBuf);
-    }
+    tokenBuf.assign(classAttr, start, i - start);
+    fn(tokenBuf);
   }
 }
 
@@ -1309,7 +1335,7 @@ void CssParser::processRuleBlockWithStyle(const std::string_view selectorGroup, 
     const std::string_view rawPart(selectorGroup.data() + partStart, i - partStart);
     partStart = i + 1;
 
-    normalizedInto(rawPart, selectorKeyBuf_);
+    normalizedSelectorInto(rawPart, selectorKeyBuf_);
     if (selectorKeyBuf_.empty()) continue;  // splitOnChar dropped empties too
 
     totalSelectorCandidates_++;
@@ -2961,10 +2987,10 @@ uint64_t CssParser::compoundMask(const std::string& tagName, const std::string& 
   uint32_t classHashes[MAX_ELEMENT_CLASSES];
   size_t classCount = 0;
   std::string token;
-  forEachNormalizedClassToken(classAttr, token, [&](const std::string& cls) {
+  forEachClassToken(classAttr, token, [&](const std::string& cls) {
     if (classCount < MAX_ELEMENT_CLASSES) classHashes[classCount++] = selectorHash(cls);
   });
-  const uint32_t idHash = fnv1a32Lower(idAttr);
+  const uint32_t idHash = fnv1a32(idAttr);
   return matchCompounds(fnv1a32Lower(tagName), idAttr.empty() ? nullptr : &idHash, classHashes, classCount);
 }
 
@@ -3050,7 +3076,7 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
     std::string combinedKey;
     combinedKey.reserve(tag.size() + 1 + 32);
 
-    forEachNormalizedClassToken(classAttr, classToken, [&](const std::string& cls) {
+    forEachClassToken(classAttr, classToken, [&](const std::string& cls) {
       classKey.clear();
       classKey.push_back('.');
       classKey.append(cls);
@@ -3074,9 +3100,7 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
     std::string idKey;
     idKey.reserve(1 + idAttr.size());
     idKey.push_back('#');
-    for (const char c : idAttr) {
-      idKey.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-    }
+    idKey.append(idAttr);
     lookup(idKey, SPECIFICITY_ID);
 
     std::string tagIdKey;
@@ -3087,7 +3111,7 @@ CssStyle CssParser::resolveStyle(const std::string& tagName, const std::string& 
   }
 
   if (complexRules) {
-    const uint32_t idHash = fnv1a32Lower(idAttr);
+    const uint32_t idHash = fnv1a32(idAttr);
     const uint64_t self = ancestry != nullptr ? ancestry->self
                                               : matchCompounds(selectorHash(tag), idAttr.empty() ? nullptr : &idHash,
                                                                classHashes, classCount);
@@ -3308,7 +3332,7 @@ void CssParser::recordBackgroundImage(const std::string_view selectorGroup, cons
   size_t partStart = 0;
   for (size_t i = 0; i <= selectorGroup.size(); ++i) {
     if (i != selectorGroup.size() && selectorGroup[i] != ',') continue;
-    normalizedInto(selectorGroup.substr(partStart, i - partStart), key);
+    normalizedSelectorInto(selectorGroup.substr(partStart, i - partStart), key);
     partStart = i + 1;
     if (key.empty() || key.size() > MAX_SELECTOR_LENGTH || !isSelectorUsableByResolver(key)) continue;
     auto existing = std::find_if(backgroundImages_.begin(), backgroundImages_.end(),
@@ -3406,7 +3430,7 @@ const std::string* CssParser::backgroundImageFor(const std::string& tagName, con
   if (!classAttr.empty()) {
     std::string token;
     std::string key;
-    forEachNormalizedClassToken(classAttr, token, [&](const std::string& cls) {
+    forEachClassToken(classAttr, token, [&](const std::string& cls) {
       key = "." + cls;
       consider(key, SPECIFICITY_CLASS);
       key = tag + "." + cls;
@@ -3414,8 +3438,7 @@ const std::string* CssParser::backgroundImageFor(const std::string& tagName, con
     });
   }
   if (!idAttr.empty()) {
-    std::string id = "#";
-    for (const char c : idAttr) id.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    const std::string id = "#" + idAttr;
     consider(id, SPECIFICITY_ID);
     consider(tag + id, SPECIFICITY_ID + SPECIFICITY_TAG);
   }
