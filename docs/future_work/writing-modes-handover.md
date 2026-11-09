@@ -1,4 +1,4 @@
-# Writing modes and scripts: handover (2026-11-08)
+# Writing modes and scripts: handover (2026-11-09)
 
 This is the state of the right-to-left, Arabic, Indic, Hebrew and CJK work, and what is left, written so that the work
 can continue on another computer. The roadmap itself is [writing-modes.md](writing-modes.md) and, for CJK,
@@ -13,34 +13,34 @@ can continue on another computer. The roadmap itself is [writing-modes.md](writi
 **Merged:**
 - Writing modes steps 0, 3 and 4 (vertical text).
 - Step 1's PR 1 and PR 2 (#599, #613): bidi, Hebrew layout and drawing.
-- Step 2 complete, but for speed:
-  - #603 the engine and #624 the TrueType faces;
-  - #642 Indic books, and #645 the 20 Indic font families;
-  - #651 HarfBuzz 14.5's Arabic shaper, and #656 Arabic, Persian and Urdu books with the NotoNaskhArabic and
-    NotoSansArabic families.
+- Step 2: #603 the engine and #624 the TrueType faces; #642 Indic books and #645 the 20 Indic font families; #651
+  HarfBuzz 14.5's Arabic shaper, #656 Arabic, Persian and Urdu books with NotoNaskhArabic and NotoSansArabic, and
+  #657 the fixes from its review.
+- Since the first handover (2026-11-08):
+  - #660 and #672: the shaped text's heap (the store's index, Tier A, and a 12 KB free-heap floor); item 1.
+  - #661 and #662: the right-to-left baseline (the plain-token path, the kerning memory beyond Latin); item 2.
+  - #663: a CJK link of several characters can be tapped; item 7.
+  - #664, #665, #666: reading a Hebrew book (page progression and reading order, the Noto Sans and Serif Hebrew
+    families picked by language, UI titles drawn right to left); item 4.
+  - #667: a paragraph whose only Arabic code points are digits shapes nothing; item 5.
+  - #668, #671, #673: Myanmar (HarfBuzz 14.5's Myanmar shaper, Burmese books in the Noto Myanmar families, lines
+    broken between syllables); item 6.
+  - #669: the glyph store remembers its recent answers in RAM; item 2.
+  - #670: book titles borrow the last book's font whatever its script; item 8.
 - CJK: every step of [cjk.md](cjk.md)'s roadmap.
 
-**Open (when this was written):**
-- #657 `fix/arabic-review-findings`: the fixes for the Fable review of #656, re-reviewed by Fable (merged 2026-11-08).
-  - the bidi fallback splitting an interrupted segment;
-  - a consumed letter drawn as text taking its width;
-  - Arabic shaping only with a face that maps beh;
-  - the fallback's piece bound;
-  - the doc corrections.
-- This file's own PR (#658, merged), which also adds the timing-book generators in `tools/writing-modes-bench/`.
-- #660 `fix/shaped-store-heap` (merged 2026-11-08): item 1 (the shaped store's index, the word arrays' cap, the line
-  pass's buffers), X3 validated.
-- #662 `perf/ttf-uncovered-left` (merged 2026-11-08): the kerning memory beyond Latin, found under item 2.
-- #661 `perf/rtl-baseline`: item 2's plain-token short path, X3 validated.
+**Open (2026-11-09):** `perf/space-advance` (a layout pass remembers the parts of an inter-word space) and
+`perf/hyphenation-search` (the split search stops a kind of prefix at its first one too wide); figures under "Where
+the time goes" below.
 
 **Branches worth knowing:**
 - `wip/shaper-profile` (pushed): the `OT_PROFILE` instrumentation and the host profile test from PR 3, the starting
-  point for the speed work below. Throwaway; never merge it.
+  point for item 3. Throwaway; never merge it.
 - The `assets/pr-*` branches hold the images of merged PR descriptions. Deleting one breaks that PR's images.
 
 ## What is left, in the suggested order
 
-### 1. The heap follow-up for shaped text (done on the X3; the X4 figures and one policy open)
+### 1. The heap follow-up for shaped text (done; Tier B and C and a size-aware gate left)
 
 **What failed.** On the X3 in landscape, the test book `test/epubs/test_shaped_arabic.epub` chapter 2 degraded. That
 chapter holds a 400-token paragraph at a quarter of the body size (every Allah split by a span) whose lines hold more
@@ -150,9 +150,6 @@ book index included (19.5 KB). Layout is unchanged on the host (goldens) and the
 last).
 
 **What is left:**
-- **The X4 figures** (no X4 was attached): 4,272 B less arena (the borrowed build's 26,000 B high water leaves 22 KB
-  of it) and 8.5 KB more heap, so it should pass with more room than the X3; its figures for #656 were never taken
-  either.
 - **Tier B and C, if more room is ever wanted:** the store's chunks above the page block, rehomed below it at each
   page end (about 4 KB, some 250 lines, and on the X4 a span-heavy paragraph at a full page empties the word cache
   for that page); then the index as arena arrays too (the whole store, 9.5 KB, off the heap). The design notes are
@@ -228,43 +225,87 @@ median of three:
 - **The plain path itself** (305 ms for 2,574 tokens, 118 µs each): `bidi_class` per code point (two binary searches
   in flash), the HebrewShaper walk, `workspaceAvailable`'s mutex.
 
-### Plan for what is left (2026-11-08)
+### Plan for what is left (2026-11-09)
 
-Items 1 and 2 are done to their measured lines (#660; #661 and #662, the kerning fix found under item 2, which helps
-every non-Latin TrueType text). The rest, in the order proposed, each a PR of its own with a device run. Item 3 stays
-open on purpose (2026-11-08): a full code audit comes first.
+Done since the first plan: the CJK link tap (#663), reading a Hebrew book (#664-#666), the glyph lookup cache (#669),
+the digit-only Arabic paragraph (#667), the UI titles' borrowed font (#670), the heap floor (#672) and Myanmar
+(#668, #671, #673). Item 3 and two of item 5's gaps wait for a full code audit (the maintainer, 2026-11-08). What is
+left, in the order proposed, each a PR of its own with a device run:
 
-1. **The CJK link tap** (item 7's open bug): small, host-testable in the LinkMarkerMatch tests, user-visible.
-2. **The shaping engine's speed** (item 3): HarfBuzz 14.5's accelerator digests ported into `lib/OtShaper` (the
-   second-glyph lookup digests, LigatureSubst's seconds digest, the mark-set digests, a GDEF glyph-props cache),
-   measured on the X3 with Gaban (6,908 against 2,648 ms) and Zaydan shaped (7,880 against 2,489), the `OT_PROFILE`
-   branch's counters telling how many subtables a digest skips. The pass line is 2x the Latin twin. The biggest
-   win left for Indic and Arabic readers, and the largest piece of work.
-3. **Reading a Hebrew book** (item 4): page progression from the book's direction (Hebrew and Arabic books turn left
-   to right today), the reading order in the QR text and the footnote overlay, titles given a visual form once,
-   and the two Hebrew families merged with Latin. The measurements under item 2 add a reason: until the reader picks
-   a family for Hebrew, a Latin body font's fallback face draws it, 15 to 20 percent slower.
-4. **What item 2 left**, as the measurements of item 2 are repeated for item 3 anyway: a RAM cache in front of the
-   glyph store's lookups (done, `perf/glyph-lookup-cache`: 1-2 percent a chapter), the line pass's
-   repeated HebrewShaper walk (a yod test first), and the plain path's own cost; the form bytes a Hebrew line writes
-   are a section format change and wait for a reason beyond 180 ms.
-5. **The smaller Arabic gaps** (item 5), one PR for the layout ones (the soft hyphen inside a word, the long word
-   split by a span, the digit-only paragraph's shaping calls) and the X4 figures taken with it; Nastaliq measured
-   first, flash and speed, before any decision.
-6. **UI text** (item 8): the bitmap UI faces give titles and the TOC no bidi and no shaping; and TXT and Markdown
-   books no bidi. Worth a design note before code: the UI faces are bitmaps by choice.
-7. **Flash** (item 9) as each PR needs it: 235 KB free after #656, the candidates listed there.
+1. **The shaping engine's speed** (item 3), after the audit. The profile below puts the engine at about a third of
+   an Arabic or Hindi chapter's build, and their processor work at 4.5x and 3.5x their Latin twins'.
+2. **What the profile found beyond item 3** ("Where the time goes" below): the Hebrew line pass (the bidi class
+   lookups and the reordering), the Liang patterns of the hyphenation search, and the SD reads of a chapter's open.
+3. **The smaller Arabic gaps** (item 5) with the audit; Nastaliq measured first, flash and speed, before any decision.
+4. **UI text** (item 8): the Hebrew letters in the built-in UI faces (flash not measured), and TXT and Markdown
+   books' bidi with the parked TXT pipeline ([txt-pipeline.md](txt-pipeline.md)).
+5. **Myanmar's follow-ups** (item 6).
+6. **Flash** (item 9) as each PR needs it.
 
 Not planned: Khmer and Tibetan (item 6; their own shaper modules), vertical shaped runs, CJK's out-of-scope list;
-each waits for a request. Myanmar is under way (item 6).
+each waits for a request.
+
+### Where the time goes: the X3 profile (2026-11-09)
+
+**How it was measured.** A sampling profiler over the C3's own USB-JTAG: Espressif's OpenOCD (the version
+`tool-openocd-esp32`'s tools.json names, downloaded, its sha256 checked) with `set ESP_RTOS none`,
+`set ESP_FLASH_SIZE 0` and `board/esp32c3-builtin.cfg`, `reset run` once so the firmware boots with the debugger
+attached (else its memory protection faults on the first stack read and the chip panics). The firmware was master
+built with frame pointers in `Epub`, `EpdFont`, `GfxRenderer`, `OtShaper`, `MiniBidi`, `TextShaping`, `Utf8` (a
+`library.json` with `build.flags`) and `src/` (`build_src_flags`); all of `lib/` does not fit the 0x640000 slot. A Tcl
+procedure in OpenOCD halts the core, reads pc, ra, sp and fp, walks the frame pointers (reading aligned SRAM only),
+and resumes, about 40 times a second. GDB's `bt` at each halt was tried first and gave stale frames: its inclusive
+figures were wrong. Check the `.bin` against the slot before flashing such a build: PlatformIO's "used" figure is
+about 14 KB under the image.
+
+**Benchmark caveats found on the way.** The logged `createSectionFile ... total=` includes 0.7 to 1.4 s in which the
+build waits for the first page's render and refresh, the same for every script: compare `parse=` or the per-page
+rate (`[SCT] Page N processed`), not `total`. And since #665 a Hebrew book picks NotoSansHebrew, so alternating it
+with its Latin twin reinstalls the glyph store at every switch (7.5-10.5 s, an empty store): run one book's builds in
+a row for warm figures.
+
+**What a reader waits for.** A chapter not yet built takes about 2.7 s from the tap to its first page, for every
+script: the book's open (about 550 ms, of which SD reads are some 40%: the book 334 ms, the progress 112 ms, the
+glyph store 90 ms), the "Indexing" popup's FAST refresh (618 ms, the processor idle), the first page's build (310 ms
+Latin, 680-720 ms Arabic and Hindi) and its render and refresh (about 1.2 s). The rest of the chapter builds while
+the first page is read.
+
+**The build, after its first page** (share of samples, inclusive):
+
+| Twin | Where |
+|---|---|
+| Latin | layout 58%: line extraction 21%, the line breaker 19% (its split search 14%: measuring the candidates 5.3%, the Liang patterns 4.5%), word widths 12%; the space's width 7.2% (a glyph lookup and its kerning per gap) |
+| Hebrew | line extraction 42%: the bidi line pass 18%, its placement 14%; the reordering 10%; `bidi_class` alone 7.3% |
+| Arabic | `shapeToken` 61%, the engine (`ot::shape`) 33% of it, GSUB and GPOS 26%; glyph prefetch 4.6%; line extraction 16% |
+| Hindi | `shapeToken` 65%, the engine 32% (GSUB and GPOS 19%, positioning 7%, the reordering pause 4.6%) |
+
+Processor work a chapter (the build less its wait, warm store, master 74b8fc803): Latin twin 1,452 ms (48 ms a page),
+Hebrew 2,629 (1.8x), Arabic 6,920 (about 4.5x its twin), Hindi 5,393 (about 3.5x).
+
+**What came of it:**
+- **The space's width** (`perf/space-advance`): a layout pass remembers the space glyph's advance per font and style
+  and its kerning with each neighbour (560 B static), summed and snapped as `getSpaceAdvance()` does. X3, warm,
+  median of three, `parse=`: Latin 1,220 to 1,151 ms (-5.7%), Hebrew 2,346 to 2,210 (-5.8%), Hindi 5,472 to 5,311
+  (-2.9%), Arabic 6,341 to 6,275 (-1.0%); the chapter files the same size.
+- **The split search** (`perf/hyphenation-search`): a kind of prefix stops at its first one too wide, measured in
+  one string. Latin 1,220 to 1,211 ms (-0.7%, near the noise): only the candidates past the first too wide are
+  skipped. The Liang patterns (4.5%) are what is left of the 14%.
+- **Building the first page during the popup's refresh: blocked.** The released build borrows the displayed buffer
+  (`FreeInkDisplay::borrowSecondaryBuffer` lends `frameBufferActive` and drains a refresh in flight first), and on
+  the X3 that buffer holds the popup frame that the post-waveform DTM1 sync reads. The build cannot take its arena
+  until the popup's waveform ends. What would help instead changes what the reader sees: no popup when the first page
+  is about to land, or an open-time popup drawn before the book's own open work.
 
 ### 3. Speed up the shaping engine (helps Indic most)
 
-**Hindi:** 2.61x on real prose (Premchand's Gaban: 6,908 against 2,648 ms on the X3; 51% word-cache hits).
+**Hindi:** 2.61x on real prose by the logged totals (Premchand's Gaban: 6,908 against 2,648 ms on the X3; 51%
+word-cache hits), but those include about a second of waiting in both: by processor work about 3.5x (5,393 against
+1,616 ms; "Where the time goes" above).
 - A word the cache misses costs about 2.5 ms, mostly the conjunct ligature walks in GSUB.
 - The X3 profile proved the cost is flash-cache misses, not instructions: a word shaped twice costs the same cycles.
 
-**Arabic:** shaping adds about 0.9 ms a word (28% cache hits, because of clitics and prefixes).
+**Arabic:** shaping adds about 0.9 ms a word (28% cache hits, because of clitics and prefixes); by processor work
+Zaydan's chapter is about 4.5x its twin (6,920 against 1,569 ms).
 
 **Candidates:** HarfBuzz's accelerator digests, which skip a lookup or subtable that cannot match without reading its
 flash-resident coverage table:
@@ -277,6 +318,12 @@ flash-resident coverage table:
 cache at 67%.
 
 **The pass line** (design): 2x the Latin twin.
+
+**Upstream since 14.5.0 (surveyed 2026-11-09):** nothing changes Indic, Arabic or Myanmar output. To take: #6544's
+Indic table fix (U+11B0A, U+11DF0-11DF1) at the next table regeneration (`VERSION` in `gen_ot_shaper_tables.py`);
+with any port of HarfBuzz's coverage caches (not only the digests), their fixes 2994c4d0a (#6321), b98ffb1fb (#6419)
+and c3fd6a885 (#6453). Open: #6558 makes the 64-glyph syllable cut the same in every pass; our `forEachSyllable` has
+none, and a call holds at most 32 code points. uharfbuzz 0.56.4 bundles HarfBuzz 15.0.0.
 
 ### 4. Step 1 PR 3: reading a Hebrew book (page progression and reading order done)
 
@@ -318,7 +365,8 @@ reader"):
 - **Ayah and number signs** (U+06DD and the others) do not enclose their digits.
 - **Fonts without GPOS:** HarfBuzz's fallback mark placement and legacy `kern` are not ported.
 - **The line breaker** measures a consumed letter at width 0 when its partner degraded: a known parity gap, rare.
-- **No X4 figures for #656**, including the in-place gate line `heapAllowsInPlaceBuild=0 ... shapedTtf=1`.
+- **The X4 figures for #656 (2026-11-09):** a shaped Arabic book is kept out of an in-place build there too
+  (`heapAllowsInPlaceBuild=0 css=1 cjkTtf=0 shapedTtf=1`); its heap is in item 1.
 - **Optional:** Noto Nastaliq Urdu, the style Urdu readers expect. A heavy font with complex cursive positioning;
   measure flash and speed first.
 
@@ -327,11 +375,13 @@ reader"):
 - **Speed:** item 3.
 - **Scripts not covered:** Khmer and Tibetan, named by the design as targets of the same shaper (the USE-based
   scripts need their own shaper modules).
-- **Myanmar** (`docs/superpowers/specs/2026-11-09-myanmar-design.md`): the engine is #668; Burmese books are #671
-  (`feat/myanmar-books`: the NotoSansMyanmar and NotoSerifMyanmar families, the pick by language, the shaping glue,
-  the overflow cut between syllables). Line breaking between syllables (the design's PR 3, option H) is built on
-  `feat/myanmar-line-breaks`, stacked on #671, and should ship in the same release. No device run of either yet.
-  Later: Stribley's preference for a space near the line end, the justified-space cap, a dictionary, ZWSP breaks.
+- **Myanmar** (`docs/superpowers/specs/2026-11-09-myanmar-design.md`), merged: the engine #668 (0 differences against
+  HarfBuzz 14.5.0), Burmese books #671 (the Noto Sans and Serif Myanmar families, the pick by language, the shaping
+  glue, the overflow cut between syllables) and line breaks between syllables #673 (the design's option H). X3: a
+  Burmese Genesis chapter in NotoSerifMyanmar, shaped, 15 pages with the breaks (16 without). Credit:
+  Somnius/CrossInk-Indic (Lef) had the same shaper port. Later: Stribley's preference for a space near the line end,
+  the justified-space cap, a dictionary, ZWSP breaks, `CMD:TTF:SHAPE` for Myanmar, Mon and Shan pages shaped under
+  their own language systems, Zawgyi (out of scope: the user guide says to convert first).
 - **Vertical sections:** a vertical section reorders Indic words only; no shaped run is set down a column.
 - **No X4 figures for #642** (waived).
 
@@ -367,8 +417,8 @@ break (Hangul is kept whole), or where the next page word is glued to it. On the
 
 ### 9. Flash
 
-Since #656, `default` is 6,314,579 B, against the 6,318,600 B floor (235,000 B free). Candidates to save it, from the
-reviews:
+Master at 89ef34730 (2026-11-09, #673 merged) builds `default` to 6,329,273 B of the 6,553,600 B slot (224,327 B
+free, by PlatformIO's count; the image itself is about 14 KB larger). Candidates to save it, from the reviews:
 - one shared controls/joiners filter (150-300 B);
 - fold `viewWithoutControls` into `viewShapedPieces(..., true)` (300-400 B);
 - `ShapingState::piecesOf` out of line, about 7 call sites;
