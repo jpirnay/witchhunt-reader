@@ -925,8 +925,10 @@ bool uiBookFontsTried = false;
 bool uiBookFontsOpen = false;
 
 // The last book's fonts as its open chose them, in the language it was read in, read-only: when the glyph store holds
-// them and the body family has CJK. Inside a render pass, under the RenderLock (CjkUiFonts::readerFaceAt): a screen's
-// cover work, done before it draws (BookInfoActivity::onEnter) or while it does not, never has them on the heap.
+// them. Asked only by a string with a character the UI faces lack; one the book's font lacks too falls through to the
+// UI faces (FallbackFaceProvider). Inside a render pass, under the RenderLock
+// (CjkUiFonts::readerFaceAt): a screen's cover work, done before it draws (BookInfoActivity::onEnter) or while it does
+// not, never has them on the heap.
 void openUiBookFonts() {
   if (!uiBookFontsWanted || uiBookFontsTried || uiBookFontsOpen || !sdFontSystem.loadedFamily().empty()) return;
   uiBookFontsTried = true;
@@ -940,8 +942,6 @@ void openUiBookFonts() {
   std::string body;
   uint8_t size = 0;
   if (!chooseEpubFonts(path, /*wait=*/false, /*opening=*/false, families, body, size)) return;
-  // A font without CJK is not worth its 2-3 KB here: the UI faces have the rest.
-  if (!sdFontSystem.coversCjk(families[0])) return;
   uiBookFontsOpen = sdFontSystem.openReadOnly(renderer, families, 1 + BookFonts::kMaxAccents, size);
   LOG_INF("MAIN", "Book text fonts for the UI: %s %s (free=%lu)", families[0],
           uiBookFontsOpen ? "open" : "not in the store", static_cast<unsigned long>(esp_get_free_heap_size()));

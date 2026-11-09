@@ -279,7 +279,8 @@ finished-book screen) draws what the UI faces lack from the reader's TrueType fo
   load and body size, and taken back before its native sizes go;
 - outside it, on the screens that draw book text (`Activity::drawsBookText`), from the last book's set, opened
   read-only by the first string that needs it (never installed or wiped from the UI), only when the glyph store holds
-  it and its body family has CJK, kept from one such screen to the next, and closed on any other (`syncUiBookFonts`):
+  it, whatever its scripts (a character it lacks falls through to the UI faces), kept from one such screen to the
+  next, and closed on any other (`syncUiBookFonts`):
   a screen's cover work before it draws never has it on the heap;
 - per string: every text call of `GfxRenderer` tells the provider which string comes next (`beginText`). One with a
   character neither the UI face nor the active language's face has is book text (the build gives every translation's
