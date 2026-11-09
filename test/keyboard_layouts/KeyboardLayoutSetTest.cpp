@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
+
 #include "CrossPointSettings.h"
 #include "activities/util/KeyboardLayoutSet.h"
 
@@ -15,6 +17,7 @@ I18n& I18n::getInstance() {
   return instance;
 }
 void I18n::setLanguage(const Language lang) { _language = lang; }
+const char* I18n::getLanguageName(const Language lang) const { return LANGUAGE_NAMES[static_cast<size_t>(lang)]; }
 
 namespace {
 
@@ -75,15 +78,81 @@ TEST_F(KeyboardLayoutSetTest, LanguageWithoutALayoutFallsBackToQwerty) {
   }
 }
 
-TEST_F(KeyboardLayoutSetTest, NoScriptTheUiFontsCannotDrawIsOffered) {
-  // The SDK has Hebrew and Arabic; Inter UI has neither script.
-  for (const auto& info : keyboard_layouts::ALL) {
-    EXPECT_NE(info.id, KeyboardLayoutId::HebrewIl);
-    EXPECT_NE(info.id, KeyboardLayoutId::ArabicAr);
-  }
-  // And a layout the table does not list still leads somewhere rather than nowhere.
+TEST_F(KeyboardLayoutSetTest, ALayoutTheTableDoesNotListStillLeadsSomewhere) {
   I18N.setLanguage(Language::RU);
-  EXPECT_EQ(keyboard_layouts::next(KeyboardLayoutId::HebrewIl), KeyboardLayoutId::CyrillicRu);
+  EXPECT_EQ(keyboard_layouts::next(static_cast<KeyboardLayoutId>(200)), KeyboardLayoutId::CyrillicRu);
+}
+
+// ---------------------------------------------------------------- the mask a settings file holds
+
+TEST_F(KeyboardLayoutSetTest, EveryLayoutKeepsItsBit) {
+  // The bit is what a settings file stores: a mask an older build wrote means the same layouts here, and the
+  // scripts with no UI language come after them.
+  const KeyboardLayoutId order[] = {
+      KeyboardLayoutId::QwertyEn,   KeyboardLayoutId::AzertyFr,   KeyboardLayoutId::QwertzDe,
+      KeyboardLayoutId::SpanishEs,  KeyboardLayoutId::CyrillicRu, KeyboardLayoutId::CyrillicUk,
+      KeyboardLayoutId::CyrillicBe, KeyboardLayoutId::CyrillicKk, KeyboardLayoutId::HebrewIl,
+      KeyboardLayoutId::ArabicAr,   KeyboardLayoutId::GreekEl,
+  };
+  ASSERT_EQ(keyboard_layouts::COUNT, sizeof(order) / sizeof(order[0]));
+  for (uint8_t i = 0; i < keyboard_layouts::COUNT; ++i) EXPECT_EQ(keyboard_layouts::ALL[i].id, order[i]) << int(i);
+  EXPECT_EQ(keyboard_layouts::LATIN_BITS, 0x000F);
+}
+
+// ---------------------------------------------------------------- scripts with no UI language
+
+TEST_F(KeyboardLayoutSetTest, HebrewArabicAndGreekAreNamedInTheirOwnLanguage) {
+  const struct {
+    KeyboardLayoutId id;
+    const char* name;
+  } scripts[] = {
+      {KeyboardLayoutId::HebrewIl, "עברית"},
+      {KeyboardLayoutId::ArabicAr, "العربية"},
+      {KeyboardLayoutId::GreekEl, "Ελληνικά"},
+  };
+  for (const auto& script : scripts) {
+    uint8_t i = 0;
+    while (i < keyboard_layouts::COUNT && keyboard_layouts::ALL[i].id != script.id) ++i;
+    ASSERT_LT(i, keyboard_layouts::COUNT);
+    EXPECT_EQ(keyboard_layouts::ALL[i].language, keyboard_layouts::NO_UI_LANGUAGE);
+    EXPECT_STREQ(keyboard_layouts::name(i), script.name);
+  }
+  // The others go by their UI language's name, in that language; every row has one name or the other.
+  EXPECT_STREQ(keyboard_layouts::name(4), LANGUAGE_NAMES[static_cast<size_t>(Language::RU)]);
+  for (uint8_t i = 0; i < keyboard_layouts::COUNT; ++i) {
+    const auto& info = keyboard_layouts::ALL[i];
+    EXPECT_NE(info.language == keyboard_layouts::NO_UI_LANGUAGE, info.nativeName == nullptr) << int(i);
+    EXPECT_GT(std::strlen(keyboard_layouts::name(i)), 0u) << int(i);
+  }
+}
+
+TEST_F(KeyboardLayoutSetTest, AScriptWithNoUiLanguageIsNeverOnUntilSwitchedOn) {
+  // Unconfigured, whatever the UI language: none of the three is enabled, and none is opened on.
+  for (int l = 0; l < static_cast<int>(Language::_COUNT); ++l) {
+    I18N.setLanguage(static_cast<Language>(l));
+    for (const KeyboardLayoutId id :
+         {KeyboardLayoutId::HebrewIl, KeyboardLayoutId::ArabicAr, KeyboardLayoutId::GreekEl}) {
+      EXPECT_FALSE(keyboard_layouts::enabled() & bitOf(id)) << l;
+      EXPECT_NE(keyboard_layouts::startingLayout(), id) << l;
+    }
+  }
+}
+
+TEST_F(KeyboardLayoutSetTest, HebrewSwitchedOnIsReachedFromEnglish) {
+  I18N.setLanguage(Language::EN);
+  SETTINGS.keyboardLayouts = bitOf(KeyboardLayoutId::QwertyEn) | bitOf(KeyboardLayoutId::HebrewIl);
+  EXPECT_EQ(enabledCount(), 2);
+  EXPECT_EQ(keyboard_layouts::startingLayout(), KeyboardLayoutId::QwertyEn);
+  EXPECT_EQ(keyboard_layouts::next(KeyboardLayoutId::QwertyEn), KeyboardLayoutId::HebrewIl);
+  EXPECT_EQ(keyboard_layouts::next(KeyboardLayoutId::HebrewIl), KeyboardLayoutId::QwertyEn);
+
+  // Greek and Arabic alone still keep a Latin layout for URLs and passwords, and the cycle runs in table order.
+  SETTINGS.keyboardLayouts = bitOf(KeyboardLayoutId::GreekEl) | bitOf(KeyboardLayoutId::ArabicAr);
+  EXPECT_TRUE(keyboard_layouts::enabled() & bitOf(KeyboardLayoutId::QwertyEn));
+  EXPECT_EQ(keyboard_layouts::startingLayout(), KeyboardLayoutId::QwertyEn);
+  EXPECT_EQ(keyboard_layouts::next(KeyboardLayoutId::QwertyEn), KeyboardLayoutId::ArabicAr);
+  EXPECT_EQ(keyboard_layouts::next(KeyboardLayoutId::ArabicAr), KeyboardLayoutId::GreekEl);
+  EXPECT_EQ(keyboard_layouts::next(KeyboardLayoutId::GreekEl), KeyboardLayoutId::QwertyEn);
 }
 
 // ---------------------------------------------------------------- configured on the settings screen

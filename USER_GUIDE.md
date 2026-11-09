@@ -569,10 +569,11 @@ Moving within a tab follows **[Moving through lists](#moving-through-lists)**.
 #### 3.7.4 System
 
 - **Language**: Set the system language (see **[Supported Languages](#supported-languages)**).
-- **Keyboard Layouts**: Which layouts the on-screen keyboard offers, each named in its own language: English (QWERTY), Français (AZERTY), Deutsch (QWERTZ, with ä, ö, ü and ß), Español (with ñ), and ЙЦУКЕН for Русский, Українська, Беларуская and Қазақша. Press **Confirm** on a row to switch it on or off. Until you change anything here, the keyboard offers your system language's layout plus English.
+- **Keyboard Layouts**: Which layouts the on-screen keyboard offers, each named in its own language: English (QWERTY), Français (AZERTY), Deutsch (QWERTZ, with ä, ö, ü and ß), Español (with ñ), ЙЦУКЕН for Русский, Українська, Беларуская and Қазақша, and עברית (Hebrew), العربية (Arabic) and Ελληνικά (Greek). Press **Confirm** on a row to switch it on or off. Until you change anything here, the keyboard offers your system language's layout plus English; Hebrew, Arabic and Greek, which are not system languages, are offered once switched on here.
   - Once two or more layouts are on, the keyboard shows a globe key that switches to the next one.
   - One Latin layout always stays on, because web addresses and passwords need one; its row then reads "Default" and cannot be switched off.
-  - On the keyboard, hold **Confirm** on a key (or long-press it on a touch screen) for its alternate letter, such as an accented one or Ukrainian ґ and the extra Kazakh letters, or for the other case. Holding **Confirm** on Delete clears the whole text. Shift applies to the next letter only, and `-`, `=`, `.` and `,` are on the symbols page (**?123**).
+  - On the keyboard, hold **Confirm** on a key (or long-press it on a touch screen) for its alternate letter, such as an accented one, Ukrainian ґ, the extra Kazakh letters or a Greek vowel with its accent (ά έ ή ί ό ύ ώ; ΐ and ΰ on the ϊ and ϋ keys), or for the other case. Holding **Confirm** on Delete clears the whole text. Shift applies to the next letter only, and `-`, `=`, `.` and `,` are on the symbols page (**?123**).
+  - Text that starts with a Hebrew or Arabic letter runs right to left in the entry field, and in cursor mode **Left** and **Right** move the cursor the way the text runs.
 - **File Visibility** (submenu):
   - **Show Hidden Files**: Show files and folders whose names start with `.`, in the Library's Books tab, All Files and the web interface's file manager. The Library never lists the reader's own `.crosspoint` folder or the card's system folders. "ON" / "OFF"
   - **Show File Extensions**: Show file extensions in the Library and All Files. "ON" / "OFF"

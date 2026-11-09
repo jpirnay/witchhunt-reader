@@ -16,6 +16,7 @@ uint8_t indexOf(const freeink::ui::KeyboardLayoutId id) {
 
 freeink::ui::KeyboardLayoutId forLanguage(const Language language) {
   for (uint8_t i = 0; i < COUNT; ++i) {
+    // NO_UI_LANGUAGE is no language I18n is ever set to, so those layouts never match.
     if (ALL[i].language == language) return ALL[i].id;
   }
   return freeink::ui::KeyboardLayoutId::QwertyEn;
@@ -60,6 +61,11 @@ freeink::ui::KeyboardLayoutId next(const freeink::ui::KeyboardLayoutId current) 
     if (mask & bitAt(i)) return ALL[i].id;
   }
   return current;
+}
+
+const char* name(const uint8_t i) {
+  if (i >= COUNT) return "";
+  return ALL[i].nativeName ? ALL[i].nativeName : I18N.getLanguageName(ALL[i].language);
 }
 
 }  // namespace keyboard_layouts

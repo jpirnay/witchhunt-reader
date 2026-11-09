@@ -14,7 +14,7 @@ void KeyboardLayoutsActivity::onEnter() {
 
   // Each layout goes by the language it is for, named in that language.
   for (int i = 0; i < keyboard_layouts::COUNT; ++i) {
-    rowItems[i].label = I18N.getLanguageName(keyboard_layouts::ALL[i].language);
+    rowItems[i].label = keyboard_layouts::name(static_cast<uint8_t>(i));
     rowItems[i].actionValue = static_cast<int16_t>(i);
   }
 }
