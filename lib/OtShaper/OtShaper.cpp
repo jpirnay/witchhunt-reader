@@ -69,6 +69,8 @@ void applyTable(const Face& face, const Scale& scale, const Plan& plan, Buffer& 
       // Only lookups that can start at a glyph the buffer holds.
       // witchhunt: deviation 13 - tested on the plan's copy of the digest, before settings() reads the font.
       if (!plan.mayApply(table, i, buffer.digest)) continue;
+      // witchhunt: deviation 16 - and only when a glyph may start it, before settings() reads the font.
+      if (!plan.mayStart(table, i, buffer)) continue;
       const LookupSettings settings = plan.settings(table, i);
       applyLookup(face, scale, buffer, table, plan.lookups[table][i].index, settings);
       if (!buffer.successful) return;

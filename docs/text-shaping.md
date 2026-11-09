@@ -219,7 +219,9 @@ shaped-script book for the X4's in-place gate.
   - `consonantPositionFromFace`'s answers are remembered by the plan (`Plan::consonantPosition`): 64 direct-mapped
     slots keyed by the consonant's and the virama's glyph IDs, `mutable` in a const plan, which serves one build at a
     time under RenderLock.
-  - `Plan::testBypassCaches` switches both off, for the tests that compare the output with and without them.
+  - A lookup that passes the digest test is skipped when no glyph of the run both passes its digest and carries its
+    mask (`Plan::mayStart`, deviation 16): the plan holds both, so such a lookup reads nothing of the font.
+  - `Plan::testBypassCaches` switches them all off, for the tests that compare the output with and without them.
 
 ## The word cache
 

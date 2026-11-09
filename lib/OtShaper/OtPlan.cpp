@@ -339,6 +339,19 @@ bool Plan::mayApply(const int table, const size_t i, const Digest& buffer) const
   return testBypassCaches || readDigest(digestRecord(table, i)).mayIntersect(buffer);
 }
 
+// witchhunt: deviation 16 - applyLookup() starts only at a glyph its digest may hold, of its mask, that its flags do
+// not ignore. A lookup no glyph of the buffer passes the first two for starts nowhere: applyLookup() would only walk
+// the buffer to its end, and no pass reads the index it leaves.
+bool Plan::mayStart(const int table, const size_t i, const Buffer& buffer) const {
+  if (testBypassCaches) return true;
+  const Digest digest = readDigest(digestRecord(table, i));
+  const uint32_t mask = lookups[table][i].mask;
+  for (const GlyphInfo& g : buffer.info) {
+    if ((g.mask & mask) && digest.mayHave(g.codepoint)) return true;
+  }
+  return false;
+}
+
 // witchhunt: deviation 13 - see positions_. A glyph past 16 bits (no font has
 // one) walks every time.
 uint8_t Plan::consonantPosition(const Face& face, const uint32_t consonant, const uint32_t virama) const {

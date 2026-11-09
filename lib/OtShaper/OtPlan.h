@@ -124,6 +124,11 @@ class Plan {
   // HarfBuzz's apply loop, on the plan's own copy of the lookup's digest, so
   // a lookup it rejects costs no read of the font.
   bool mayApply(int table, size_t i, const Digest& buffer) const;
+  // witchhunt: deviation 16 - whether a glyph of `buffer` passes planned
+  // lookup `i` of `table`'s digest and carries its mask, both the plan's: the
+  // first two of applyLookup()'s tests of a start glyph, so a lookup no glyph
+  // passes them is skipped before anything of the font is read for it.
+  bool mayStart(int table, size_t i, const Buffer& buffer) const;
   // witchhunt: deviation 13 - consonantPositionFromFace() of the glyphs
   // `consonant` and `virama`, remembered: the walk runs on a miss only.
   uint8_t consonantPosition(const Face& face, uint32_t consonant, uint32_t virama) const;
@@ -169,6 +174,7 @@ class Plan {
   // the consonant memo (consonantPosition() walks on every call) and the
   // digest pre-filter (mayApply() lets every lookup through), so a test can
   // shape with and without them. False in every plan the firmware makes.
+  // witchhunt: deviation 16 - and the start-glyph pre-filter (mayStart()).
   bool testBypassCaches = false;
 
  private:
