@@ -355,15 +355,24 @@ bool KeyboardEntryActivity::clearAllOrAltOnSelected() {
   return false;
 }
 
-std::string KeyboardEntryActivity::displayTextForCurrentState() const {
-  if (inputType != InputType::Password || passwordVisible) {
-    return text;
-  }
+bool KeyboardEntryActivity::masked() const { return inputType == InputType::Password && !passwordVisible; }
 
+size_t KeyboardEntryActivity::revealEnd() const {
   // Only what was just typed (typedEnd): never a character of the value the field opened with. In
   // cursor mode nothing shows here; the block draws the actual char.
-  const bool reveal = !cursorMode && cursorPos == typedEnd;
-  return maskPassword(text, reveal ? cursorPos : std::string::npos);
+  return !cursorMode && cursorPos == typedEnd ? cursorPos : std::string::npos;
+}
+
+std::string KeyboardEntryActivity::displayTextForCurrentState() const {
+  return masked() ? maskPassword(text, revealEnd()) : text;
+}
+
+size_t KeyboardEntryActivity::displayOffset(const size_t textPos) const {
+  return masked() ? maskedOffset(text, revealEnd(), textPos) : textPos;
+}
+
+size_t KeyboardEntryActivity::textOffset(const size_t displayPos) const {
+  return masked() ? unmaskedOffset(text, revealEnd(), displayPos) : displayPos;
 }
 
 int KeyboardEntryActivity::fieldLevel(const std::string& shown) const {
@@ -441,7 +450,11 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
   const int maxLineWidth = content.width - 2 * effectiveMargin - toggleReserve;
   const bool centerText = metrics.keyboardCenteredText;
   std::string displayText = displayTextForCurrentState();
-  // Laid out as render() lays it out.
+  // Laid out as render() lays it out. Positions on it are the displayed text's; the caller gets the text's.
+  const auto found = [&](const size_t displayPos) {
+    position = textOffset(displayPos);
+    return true;
+  };
   const bool bidi = BidiUtils::hasRtlClass(displayText.data(), displayText.size());
   const int level = bidi ? fieldLevel(displayText) : 0;
 
@@ -470,17 +483,14 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
         // A tap lands before or after the character drawn under it, whichever half it hit.
         const auto line = makeUniqueNoThrow<EntryFieldLine>();
         if (line && line->build(lineText.data(), lineText.size(), level, measureFieldText, &renderer)) {
-          position = static_cast<size_t>(lineStartIdx) + line->positionAt(x - lineStartX);
-          return true;
+          return found(static_cast<size_t>(lineStartIdx) + line->positionAt(x - lineStartX));
         }
       }
       if (x <= lineStartX) {
-        position = static_cast<size_t>(lineStartIdx);
-        return true;
+        return found(static_cast<size_t>(lineStartIdx));
       }
       if (x >= lineStartX + textWidth) {
-        position = static_cast<size_t>(lineEndIdx);
-        return true;
+        return found(static_cast<size_t>(lineEndIdx));
       }
 
       int previousWidth = 0;
@@ -489,14 +499,12 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
         const int nextWidth = measureRange(displayText, lineStartIdx, next);
         const int midpoint = lineStartX + previousWidth + (nextWidth - previousWidth) / 2;
         if (x < midpoint) {
-          position = static_cast<size_t>(i);
-          return true;
+          return found(static_cast<size_t>(i));
         }
         previousWidth = nextWidth;
         i = next;
       }
-      position = static_cast<size_t>(lineEndIdx);
-      return true;
+      return found(static_cast<size_t>(lineEndIdx));
     }
 
     if (lineEndIdx == static_cast<int>(displayText.length())) {
@@ -514,8 +522,7 @@ bool KeyboardEntryActivity::cursorPositionFromPoint(const int x, const int y, si
     // Short of where the last line ends, its start; past it, the end of the text. A right-to-left line ends on its
     // left.
     const bool beforeEnd = level == 1 ? x > lastLineStartX : x < lastLineStartX + lastLineWidth;
-    position = static_cast<size_t>(beforeEnd ? lastLineStartIdx : lastLineEndIdx);
-    return true;
+    return found(static_cast<size_t>(beforeEnd ? lastLineStartIdx : lastLineEndIdx));
   }
 
   return false;
@@ -540,8 +547,7 @@ void KeyboardEntryActivity::loop() {
   size_t touchedCursorPos = 0;
   if (mappedInput.wasScreenTapped(tx, ty) && cursorPositionFromPoint(tx, ty, touchedCursorPos)) {
     cursorPos = std::min(touchedCursorPos, text.length());
-    // The masked text field maps taps per byte; snap back to a boundary so
-    // the cursor never lands inside a multi-byte character.
+    // Never inside a multi-byte character, whatever the field mapped the tap to.
     while (cursorPos > 0 && cursorPos < text.length() && (static_cast<uint8_t>(text[cursorPos]) & 0xC0) == 0x80) {
       cursorPos--;
     }
@@ -750,14 +756,17 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   const bool centerText = metrics.keyboardCenteredText;
 
   // The cursor spans a whole code point: a lone byte of it renders as a replacement glyph.
-  // Masking is per byte, so displayText keeps text's length and the same span applies to both.
+  // A password shows a star per character, so its displayText is shorter than text: displayCursor
+  // and displayCharBytes are the cursor and the character under it in displayText.
   const size_t cursorCharBytes = (cursorPos < text.length()) ? utf8Next(text, cursorPos) - cursorPos : 0;
+  const size_t displayCursor = displayOffset(cursorPos);
+  const size_t displayCharBytes = cursorCharBytes > 0 ? displayOffset(cursorPos + cursorCharBytes) - displayCursor : 0;
   char cursorChar[8] = {};         // the character under the cursor
-  char displayCursorChar[8] = {};  // same span of displayText, masked for passwords
+  char displayCursorChar[8] = {};  // the same character in displayText, a star for a password
   if (cursorCharBytes > 0) {
-    const size_t n = std::min(cursorCharBytes, sizeof(cursorChar) - 1);
-    memcpy(cursorChar, text.data() + cursorPos, n);
-    memcpy(displayCursorChar, displayText.data() + cursorPos, n);
+    memcpy(cursorChar, text.data() + cursorPos, std::min(cursorCharBytes, sizeof(cursorChar) - 1));
+    memcpy(displayCursorChar, displayText.data() + displayCursor,
+           std::min(displayCharBytes, sizeof(displayCursorChar) - 1));
   }
 
   int cursorCharWidth = 6;
@@ -788,8 +797,9 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     const int lineStartX = lineLeft(content.x + effectiveMargin, maxLineWidth, textWidth, centerText, level == 1);
     const bool isLastLine = (lineEndIdx == static_cast<int>(displayText.length()));
     bool isCursorLine = false;
-    if (!cursorDrawn && cursorPos >= static_cast<size_t>(lineStartIdx) &&
-        (isLastLine ? cursorPos <= static_cast<size_t>(lineEndIdx) : cursorPos < static_cast<size_t>(lineEndIdx))) {
+    if (!cursorDrawn && displayCursor >= static_cast<size_t>(lineStartIdx) &&
+        (isLastLine ? displayCursor <= static_cast<size_t>(lineEndIdx)
+                    : displayCursor < static_cast<size_t>(lineEndIdx))) {
       cursorLineY = inputStartY + inputHeight;
       cursorDrawn = true;
       isCursorLine = true;
@@ -801,7 +811,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     if (isCursorLine && cursorLine &&
         cursorLine->build(lineText.data(), lineText.size(), level, measureFieldText, &renderer)) {
       // The caret goes with the character before it; the block covers the one after it, wherever that is drawn.
-      const size_t pos = cursorPos - lineStartIdx;
+      const size_t pos = displayCursor - lineStartIdx;
       bool caretRtl = false;
       const int caretX = lineStartX + cursorLine->caretX(pos, &caretRtl);
       if (!cursorMode) {
@@ -817,9 +827,9 @@ void KeyboardEntryActivity::render(RenderLock&&) {
     } else if (isCursorLine) {
       std::string beforeCursor;
       if (isPassword && !passwordVisible && cursorMode) {
-        beforeCursor = std::string(cursorPos - lineStartIdx, '*');
+        beforeCursor = std::string(displayCursor - lineStartIdx, '*');
       } else {
-        beforeCursor = displayText.substr(lineStartIdx, cursorPos - lineStartIdx);
+        beforeCursor = displayText.substr(lineStartIdx, displayCursor - lineStartIdx);
       }
       const int beforeWidth = renderer.getTextAdvanceX(UI_12_FONT_ID, beforeCursor.c_str(), EpdFontFamily::REGULAR);
       int kernOffset = 0;
@@ -837,11 +847,11 @@ void KeyboardEntryActivity::render(RenderLock&&) {
       // Draw text in 3 parts to avoid block cursor overflowing onto next char.
       // displayText uses '*' for all chars; actual char may be wider than '*'.
       // Part 1: chars before cursor position
-      const std::string part1 = displayText.substr(lineStartIdx, cursorPos - lineStartIdx);
+      const std::string part1 = displayText.substr(lineStartIdx, displayCursor - lineStartIdx);
       renderer.drawText(UI_12_FONT_ID, lineStartX, inputStartY + inputHeight, part1.c_str());
       // Part 2: skip cursor slot (block + actual char drawn later)
       // Part 3: chars after cursor position (skip char under cursor), starting at cursorPixelX + cursorCharWidth
-      const int afterStart = static_cast<int>(cursorPos + cursorCharBytes);
+      const int afterStart = static_cast<int>(displayCursor + displayCharBytes);
       const int afterEnd = lineEndIdx;
       if (afterStart < afterEnd) {
         const std::string part3 = displayText.substr(afterStart, afterEnd - afterStart);
@@ -866,13 +876,13 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   GUI.drawTextField(renderer, Rect{content.x, inputStartY, content.width, inputHeight}, fieldWidth, cursorMode,
                     effectiveMargin, content.width - 2 * effectiveMargin);
 
-  if (cursorMode && !togglePos && cursorPos <= displayText.length()) {
+  if (cursorMode && !togglePos && displayCursor <= displayText.length()) {
     static constexpr int blockPadding = 1;
     renderer.fillRect(cursorPixelX - blockPadding, cursorLineY, cursorCharWidth + blockPadding * 2, lineHeight, true);
     if (cursorCharBytes > 0) {
       renderer.drawText(UI_12_FONT_ID, cursorPixelX, cursorLineY, cursorChar, false);
     }
-  } else if (cursorPos <= displayText.length()) {
+  } else if (displayCursor <= displayText.length()) {
     static constexpr int serifW = 3;
     const int cX = cursorPixelX;
     const int cY = cursorLineY;

@@ -141,7 +141,14 @@ class KeyboardEntryActivity : public Activity {
   static size_t utf8Next(const std::string& s, size_t pos);
 
   bool cursorPositionFromPoint(int x, int y, size_t& position) const;
+  // A password field not shown in the clear: a star per character (maskPassword).
+  bool masked() const;
+  // Where the character a masked field shows ends (just typed), or npos.
+  size_t revealEnd() const;
   std::string displayTextForCurrentState() const;
+  // A byte position in `text` carried to the displayed text, and back: the same unless masked.
+  size_t displayOffset(size_t textPos) const;
+  size_t textOffset(size_t displayPos) const;
   // The field's direction, for text with a right-to-left character in it: 1 when its first letter runs right to left,
   // as the UI text path decides a title's. A password stays left to right: what it shows is stars.
   int fieldLevel(const std::string& shown) const;
