@@ -395,6 +395,68 @@ TEST_F(GlyphStoreRoom, AReclaimFreesAtLeastHalfASegment) {
   for (const uint32_t n : {0u, 3u, 4u}) EXPECT_EQ(Lookup::NotStored, lookup(n)) << n;
 }
 
+// --- find()'s recent answers, kept in RAM ---
+
+TEST_F(GlyphStoreRoom, AnswersFromMemoryAreTheIndexAnswers) {
+  const uint32_t stored = fillRing();  // 85 records, more than the 64 answers kept: sets evict
+  std::vector<const EpdGlyph*> first(stored, nullptr);
+  for (uint32_t n = 0; n < stored; ++n) ASSERT_EQ(Lookup::Found, store.find(keyOf(n), &first[n])) << n;
+  for (int pass = 0; pass < 2; ++pass) {
+    for (uint32_t n = stored; n-- > 0;) {
+      for (int repeat = 0; repeat < 2; ++repeat) {  // the second one is answered from memory
+        const EpdGlyph* again = nullptr;
+        ASSERT_EQ(Lookup::Found, store.find(keyOf(n), &again)) << n;
+        EXPECT_EQ(first[n], again) << n;
+      }
+    }
+  }
+  ASSERT_EQ(Commit::Stored, store.markNoGlyph(keyOf(stored)));
+  for (int repeat = 0; repeat < 2; ++repeat) {
+    const EpdGlyph* none = nullptr;
+    EXPECT_EQ(Lookup::NoGlyph, store.find(keyOf(stored), &none));
+    EXPECT_EQ(nullptr, none);
+  }
+}
+
+TEST_F(GlyphStoreRoom, AKeyNotStoredYetIsFoundOnceCommitted) {
+  EXPECT_EQ(Lookup::NotStored, lookup(0));
+  ASSERT_EQ(Commit::Stored, commitRecord(0));
+  EXPECT_TRUE(intact(0));
+}
+
+TEST_F(GlyphStoreRoom, AnAnswerFromBeforeAReclaimIsNeverServedAfterIt) {
+  fillRing();
+  draw(0);  // kept: copied forward
+  const uint32_t before = dataOffsetOf(0);
+  for (uint32_t n = 1; n < 6; ++n) ASSERT_EQ(Lookup::Found, lookup(n)) << n;  // remembered
+  RoomWork work;
+  ASSERT_NE(Room::Failed, store.makeRoom(Budget::Idle, &work));
+  ASSERT_EQ(1u, work.reclaimed);
+  ASSERT_EQ(1u, work.kept);
+  EXPECT_NE(before, dataOffsetOf(0));  // the copy, not the record segment 0 held
+  EXPECT_TRUE(intact(0));
+  for (uint32_t n = 1; n < 6; ++n) EXPECT_EQ(Lookup::NotStored, lookup(n)) << n;
+}
+
+TEST_F(GlyphStoreRoom, AWipeForgetsEveryAnswer) {
+  ASSERT_EQ(Commit::Stored, commitRecord(0));
+  ASSERT_EQ(Commit::Stored, store.markNoGlyph(keyOf(1)));
+  ASSERT_EQ(Lookup::Found, lookup(0));
+  ASSERT_EQ(Lookup::NoGlyph, lookup(1));
+  ASSERT_TRUE(store.wipe());
+  EXPECT_EQ(Lookup::NotStored, lookup(0));
+  EXPECT_EQ(Lookup::NotStored, lookup(1));
+}
+
+TEST_F(GlyphStoreRoom, AReopenForgetsEveryAnswer) {
+  ASSERT_EQ(Commit::Stored, commitRecord(0));
+  ASSERT_EQ(Lookup::Found, lookup(0));
+  store.close();
+  EXPECT_EQ(Lookup::NotStored, lookup(0));  // a closed store answers nothing
+  ASSERT_EQ(OpenResult::Ready, store.open(kIdentityA));
+  EXPECT_TRUE(intact(0));
+}
+
 TEST_F(GlyphStoreRoom, AStaleSlotIsNeverServedFromAReusedSegment) {
   const uint32_t first = fillRing();
   std::vector<uint32_t> offsets;  // where segment 0's first records were
