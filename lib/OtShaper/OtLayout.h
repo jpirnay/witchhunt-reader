@@ -28,6 +28,10 @@ struct LookupSettings {
   // Per subtable, the glyphs it can start at: DIGEST_BYTES-byte records.
   // nullptr: subtables are not filtered.
   const uint8_t* subtableDigests = nullptr;
+  // witchhunt: deviation 4 - instead, the font's CPac records, when subtableDigests is left for applyLookup() to
+  // find there (Plan::settings(..., false)): it reads the lookup's first record's index only for a lookup of more than
+  // one subtable, the ones it filters.
+  const FilterRecords* fontRecords = nullptr;
   // witchhunt: deviation 18 - per group of SUBTABLE_GROUP subtables, the low masks (digestRecordLowMask()) of their
   // records ORed, 8 bytes each (little-endian, unaligned): a group whose mask cannot hold a glyph is skipped without
   // reading its records. nullptr: no groups (the lookup has SUBTABLE_GROUP subtables or fewer, or no records).

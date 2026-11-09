@@ -293,8 +293,14 @@ void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int
   c.random = settings.random;
   c.perSyllable = settings.perSyllable;
   // witchhunt: deviation 4 - a lookup of one subtable is not filtered again: its subtable's digest is the lookup's
-  // own, which every glyph it starts at has passed, and reading the record would cost a read of CPac for nothing.
-  c.subtableDigests = Face::subtableCount(lookup) > 1 ? settings.subtableDigests : nullptr;
+  // own, which every glyph it starts at has passed, and reading the record would cost a read of CPac for nothing. Nor
+  // is the index of its first record read from CPac (LookupSettings::fontRecords).
+  if (Face::subtableCount(lookup) > 1) {
+    c.subtableDigests = settings.subtableDigests;
+    if (const FilterRecords* r = settings.fontRecords) {
+      c.subtableDigests = r->subtableDigests + DIGEST_BYTES * r->firstSubtable(lookupIndex);
+    }
+  }
   c.subtableGroups = c.subtableDigests ? settings.subtableGroups : nullptr;  // witchhunt: deviation 18
   c.setLookupProps(face.lookupProps(lookup));
 

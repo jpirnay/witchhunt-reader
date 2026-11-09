@@ -369,7 +369,7 @@ bool Plan::allocateFilters(const int table, const size_t lookupCount, const size
   return true;
 }
 
-LookupSettings Plan::settings(const int table, const size_t i) const {
+LookupSettings Plan::settings(const int table, const size_t i, const bool resolve) const {
   const PlannedLookup& lookup = lookups[table][i];
   LookupSettings out;
   out.mask = lookup.mask;
@@ -379,13 +379,18 @@ LookupSettings Plan::settings(const int table, const size_t i) const {
   out.perSyllable = lookup.flags & lookupbits::PER_SYLLABLE;
   out.digest = readDigest(digestRecord(table, i));  // witchhunt: deviation 13 - the plan's copy
   if (const FilterRecords* r = fontFilters_[table]) {
-    out.subtableDigests = r->subtableDigests + DIGEST_BYTES * r->firstSubtable(lookup.index);
+    if (resolve) {
+      out.subtableDigests = r->subtableDigests + DIGEST_BYTES * r->firstSubtable(lookup.index);
+    } else {
+      out.fontRecords = r;  // witchhunt: deviation 4
+    }
   } else if (!subtableStarts_[table].empty()) {  // witchhunt: deviation 13 - the filter block holds subtables only
     out.subtableDigests = subtableDigests_[table].data() + DIGEST_BYTES * subtableStarts_[table][i];
   }
   // witchhunt: deviation 18 - the lookup's group masks, once fillSubtableGroups() has made them.
   const size_t k = table == GSUB ? i : lookups[GSUB].size() + i;
-  if (out.subtableDigests && !testBypassCaches && k < groupStarts_.size() && groupStarts_[k] != NO_GROUPS) {
+  if ((out.subtableDigests || out.fontRecords) && !testBypassCaches && k < groupStarts_.size() &&
+      groupStarts_[k] != NO_GROUPS) {
     out.subtableGroups = groupMasks_.data() + 8 * groupStarts_[k];
   }
   return out;

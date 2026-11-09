@@ -118,7 +118,8 @@ class Plan {
   bool load(const Face& face, Script script, const uint32_t* languageTags);
 
   // Lookup settings (flags, mask, filters) of planned lookup `i` of `table`.
-  LookupSettings settings(int table, size_t i) const;
+  // witchhunt: deviation 4 - `resolve` false leaves the CPac route's subtableDigests to applyLookup() (fontRecords).
+  LookupSettings settings(int table, size_t i, bool resolve = true) const;
   // witchhunt: deviation 13 - whether planned lookup `i` of `table` may start
   // at a glyph the buffer holds (`buffer` is its digest): the digest test of
   // HarfBuzz's apply loop, on the plan's own copy of the lookup's digest, so
