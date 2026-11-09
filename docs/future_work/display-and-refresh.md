@@ -439,3 +439,25 @@ B/W refreshes. Effect unproven: our unit is a UC8179.
 - A forced refresh override arriving after the mask was built shows that page in B/W only.
 - A pixel staying black is driven 18 frames every page. Measured clean over 500 pages and the hour after; what the DC
   that adds does to the panel over weeks is not measured. Raised upstream on Free-Ink#184.
+
+## Murphy M3 gray
+
+**Open.** Murphy builds have four-level gray (`-DFREEINK_MURPHY_GRAY`); what was decided and why is in
+[grayscale-aa-rendering.md](../grayscale-aa-rendering.md#murphy-m3-gray-and-its-bw-waveforms), the measurements in
+[tools/murphy-gray-lab/README.md](../../tools/murphy-gray-lab/README.md). All of it comes from one panel, at room
+temperature.
+
+**Long-term DC.** A fringe pixel does the ordinary cycle, white to black, a net-zero nudge, black to white. Gray that
+stays black takes 15 frames toward black that nothing pays back, through the marks
+`Uc8253MurphyDriver::writeOldPlane()` adds. Lab Test 11 on this Murphy (#654, 2026-11-08) measured part of it: black
+held for 500 pages under the per-page VSH 15 re-drive fades by 14.5 and, driven white, comes back 8 points lighter
+than the white around it; rest and the FAST row leave about 1 point (`tools/murphy-gray-lab/README.md`, Test 11). The
+one-pass path rests such pixels, so on text pages with One-Pass Anti-Aliasing on this gets smaller, not larger. What
+weeks of reading do is still unmeasured.
+- Next step: read for some weeks, then compare a clean white and black with the shots kept from the lab.
+
+**Temperature.** The waveforms were measured at room temperature, which was not recorded. The OTP is blank, so the
+controller has no temperature ranges to fall back on, and the driver does not read the sensor.
+
+**Upstream.** The lent block is offered as Free-Ink/freeink-sdk#175, still open, and not in use here: the firmware
+still lends its block from `HalDisplay`. The Murphy's one-pass text is Free-Ink #183, open.

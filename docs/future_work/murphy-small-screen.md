@@ -1,6 +1,6 @@
 # Murphy M3: fixed sizes that assume a bigger panel
 
-Audit of `feat/murphy-support`, 2026-11-03. The M3 is a 416x240 panel, 1-bit at the time and four-level gray since ([murphy-gray.md](murphy-gray.md)); the UI runs Portrait, so the
+Audit of `feat/murphy-support`, 2026-11-03. The M3 is a 416x240 panel, 1-bit at the time and four-level gray since ([grayscale-aa-rendering.md](../grayscale-aa-rendering.md#murphy-m3-gray-and-its-bw-waveforms)); the UI runs Portrait, so the
 logical screen is 240x416. Abbreviations: **P** = Portrait 240x416, **L** = Landscape 416x240. Paths are
 relative to the repo root.
 
