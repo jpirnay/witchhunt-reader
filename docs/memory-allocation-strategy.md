@@ -743,3 +743,42 @@ chapter; with every glyph stored, a Japanese chapter still fell to 28.9 KB at th
 79–89 KB free at its start, more than the reading heap reaches. Every other book keeps its floors: built-in and .cpfont
 fonts make no miss memory, and single-slice Latin chapters in two TrueType families built in place and finished with
 the store empty and full, without the indexing popup a borrowed build draws first (about 0.54 s).
+
+---
+
+## 10. IRAM is heap
+
+On the C3, code linked into IRAM (`.iram0.text`) is carved from the same internal SRAM as the heap: the heap starts
+where IRAM ends, rounded up to 512 B. Every kilobyte of IRAM is a kilobyte of heap at boot.
+
+**What the C3 links into IRAM.** The prebuilt Arduino libraries' `sections.ld` kept all of FreeRTOS, the ring buffers
+and the (unused) RMT interrupt handlers there. The C3 envs link with `ld/esp32c3-iram-budget/sections.ld` instead,
+which moves:
+
+| Code | IRAM before | after |
+|---|---|---|
+| FreeRTOS: task create/delete, timers, event groups, queue create/delete, the scheduler's start | 14,298 B | 7,504 B |
+| Ring buffers: all but the FromISR functions | 4,792 B | 3,026 B |
+| RMT interrupt handlers (no RMT channel is ever created) | 2,698 B | 360 B |
+
+`.iram0.text` 72,076 → 61,198 B; X3 boot heap 68,624 → 79,744 B (2026-11-09). Moving all of FreeRTOS's non-ISR
+functions freed 4 KB more, and made every chapter build 2.4-4% slower: the calls this firmware makes on every SD
+access, render and loop turn (queue send/receive, semaphores and recursive mutexes, task notifications, scheduler
+suspend/resume) stay in IRAM through `tools/iram-budget/keep_in_iram.txt`.
+
+**How it is made.** `tools/iram-budget/gen_sections_ld.py` runs ESP-IDF's own ldgen, at the IDF commit the prebuilt
+libraries were built from, against those libraries, with the linker-only Kconfig options of
+`tools/iram-budget/options.txt` flipped and the keep list's fragment entries dropped. Nothing is recompiled. The
+generated script is checked in; `scripts/iram_budget.py` (a post: script, C3 envs only) swaps it into the link.
+
+**After a platform update.** The generated script records the sha256 of the platform `sections.ld` it was derived
+from, and `scripts/iram_budget.py` stops the build when the installed one differs (or the flash mode is not DIO).
+Regenerate: update the IDF commit in `tools/iram-budget/fetch_idf.sh` to the one in
+`framework-arduinoespressif32-libs/versions.txt`, fetch, run `gen_sections_ld.py --check` (it must reproduce the
+platform's file byte for byte), then `gen_sections_ld.py`, and re-check that every option is still linker-only.
+
+**The safety rule.** While a flash erase or write runs (glyph store installs, OTA, NVS), the cache is off and only
+IRAM code runs: the flash driver, and interrupts registered with `ESP_INTR_FLAG_IRAM` with everything they call. Code
+that may run then must stay in IRAM; code that never does may leave. None of this firmware's interrupts is
+IRAM-flagged; a new one that is, and calls into FreeRTOS, may call only FromISR functions. `tools/iram-budget/SAFETY.md`
+lists the interrupts, their callees' placement, and every remaining IRAM call into flash.
