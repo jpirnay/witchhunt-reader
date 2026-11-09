@@ -5,6 +5,7 @@
 // a FontDecompressor; and the active UI language's faces are served flat, out of the language pack
 // slot (CjkUiFonts). Both are exercised: a "flat" face here is a RAM copy of a compressed one that
 // points at its inflated bitmap, which is exactly what CjkUiFonts builds over the mapped slot.
+#include <Utf8.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -317,6 +318,19 @@ TEST_F(FallbackFaceProviderTest, WithoutAReaderFaceNowTheUiFacesServeAsBefore) {
   provider.setReaderFace(&noFace, nullptr);
   EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(ZH_ONLY)), faceBytes(cjk_ui_zh_10, ZH_ONLY));
   EXPECT_FALSE(EpdFont(&ui).getGlyph(GREEK_ALPHA));
+}
+
+TEST_F(FallbackFaceProviderTest, ACharacterNoFaceHasStaysMissingThoughTheReaderFaceHasAReplacementGlyph) {
+  ReaderFace reader({REPLACEMENT_GLYPH}, 11, 14);  // a Latin book font: U+FFFD, but no Greek here
+  provider.setReaderFace(&ReaderFace::source, &reader);
+  EXPECT_FALSE(EpdFont(&ui).getGlyph(GREEK_ALPHA));
+}
+
+TEST_F(FallbackFaceProviderTest, AClaimedCharacterNoFaceHasDrawsAsTheCjkFacesStandInNotTheReaderFaces) {
+  ReaderFace reader({STAND_IN}, 11, 14);  // a Latin book font with its own white square
+  provider.setReaderFace(&ReaderFace::source, &reader);
+  provider.setStandIn(STAND_IN, &claimsHan);
+  EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(IN_NO_FACE)), faceBytes(cjk_ui_zh_10, STAND_IN));
 }
 
 TEST_F(FallbackFaceProviderTest, AReaderGlyphTooLargeToPackIsLeftToTheNextFace) {

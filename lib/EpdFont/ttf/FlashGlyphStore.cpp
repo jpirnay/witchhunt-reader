@@ -460,6 +460,7 @@ void FlashGlyphStore::placeRecord(const uint32_t bytes, uint32_t& used, uint32_t
 
 // Every segment free, as after a wipe; the epochs start again at 1, since no slot names one any more.
 void FlashGlyphStore::resetRing() {
+  forgetRecent();
   for (uint32_t& epoch : segEpoch_) epoch = kErased;
   head_ = tail_ = live_ = 0;
   headUsed_ = 0;
@@ -553,16 +554,44 @@ const EpdGlyph* FlashGlyphStore::validRecord(const uint32_t key, const uint32_t 
   return &recordGlyph(offset);
 }
 
+void FlashGlyphStore::forgetRecent() {
+  for (auto& set : recent_) {
+    for (Recent& way : set) way = Recent{kErased, nullptr};
+  }
+}
+
+// Puts {key, glyph} first in its set; the oldest answer goes.
+void FlashGlyphStore::remember(Recent* const set, const uint32_t key, const EpdGlyph* const glyph) {
+  for (uint32_t way = kRecentWays - 1; way > 0; --way) set[way] = set[way - 1];
+  set[0] = Recent{key, glyph};
+}
+
 FlashGlyphStore::Lookup FlashGlyphStore::find(const uint32_t key, const EpdGlyph** glyph) const {
   if (!open_ || !isGlyphKey(key)) return Lookup::NotStored;
+  Recent* const set = recent_[homeSlot(key, kRecentSets)];
+  for (uint32_t way = 0; way < kRecentWays; ++way) {
+    if (set[way].key != key) continue;
+    const Recent hit = set[way];
+    if (way > 0) {
+      for (uint32_t w = way; w > 0; --w) set[w] = set[w - 1];
+      set[0] = hit;
+    }
+    if (hit.glyph == nullptr) return Lookup::NoGlyph;
+    if (glyph) *glyph = hit.glyph;
+    return Lookup::Found;
+  }
   const uint32_t slots = geometry_.indexSlots;
   uint32_t i = homeSlot(key, slots);
   for (uint32_t probe = 0; probe < kMaxProbe; ++probe, i = nextSlot(i, slots)) {
     const Slot slot = flashSlot(index_, i);
     if (slotErased(slot)) return Lookup::NotStored;
     if (slot.key != key) continue;
-    if (slot.value == kNoGlyph) return Lookup::NoGlyph;
+    if (slot.value == kNoGlyph) {
+      remember(set, key, nullptr);
+      return Lookup::NoGlyph;
+    }
     if (const EpdGlyph* found = validRecord(key, slot.value)) {
+      remember(set, key, found);
       if (glyph) *glyph = found;
       return Lookup::Found;
     }
@@ -912,6 +941,8 @@ FlashGlyphStore::Room FlashGlyphStore::makeRoom(const Budget budget, RoomWork* w
   RoomWork local;
   RoomWork& done = work ? *work : local;
   done = RoomWork{};
+  // A reclaim moves or drops records and a rebuild rewrites the index: no answer of before may be served after.
+  forgetRecent();
   // With a wipe pending, a write failed (what the flash holds is not known for sure) or the face table is full: only
   // the wipe goes on from there.
   if (!open_ || wipePending_) return Room::Failed;
@@ -1289,6 +1320,7 @@ bool FlashGlyphStore::recordWipePending() {
 
 bool FlashGlyphStore::wipe() {
   if (!open_) return false;
+  forgetRecent();  // before any erase: one that fails leaves the log half erased, and resetRing() is not reached
   // Wipe pending reaches flash before anything is erased. Then a cut anywhere below leaves it set and the next
   // wipe() finishes the job; without it a half-erased log would read as an empty store and be written over.
   wipePending_ = true;

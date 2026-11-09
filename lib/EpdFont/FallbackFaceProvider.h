@@ -23,7 +23,8 @@ class FontDecompressor;
 ///
 /// One more face may come from the reader's font (setReaderFace): a 2-bit TrueType face at this size, whose glyphs
 /// are drawn as the ink of their black-and-white pass (packInkMask), so a book title in a script the built-in faces
-/// lack draws in the font the book is read in.
+/// lack draws in the font the book is read in. It lends real characters only, never its replacement glyph (U+FFFD)
+/// or the stand-in: a character it lacks is the UI faces' to draw or leave out.
 class FallbackFaceProvider final : public GlyphProvider {
  public:
   static constexpr uint8_t MAX_FACES = 4;
