@@ -24,9 +24,9 @@ The rules and measurements these items refer to are in [Memory Allocation Strate
 
 **Where.** `lib/Epub/Epub/css/CssParser.cpp` (the functions above). `CssGapsIdSelector.CaseNormalized` in `test/css_gaps` pins it for ids today.
 
-**Tried.** PR #394 (branch `fix/css-class-case-sensitive`), stacked on #393 and not merged: only the tag part of a selector is lowercased, the name after `.` or `#` stays as written in the rule cache, the background-picture side file and the lookups; `CaseNormalized` and the `HERO` probe in `test/epub_css/CssParserCacheTest.cpp` become case-sensitive pins; `CSS_CACHE_VERSION` 21 → 22 and `SECTION_FILE_VERSION` 79 → 80.
+**Tried.** PR #394 (branch `fix/css-class-case-sensitive`), stacked on #393. GitHub shows it merged, but it merged into #393's branch `fix/388-span-display-block` seconds after #393 had reached master (2026-10-06), so its merge `49697b4c8` is not on master and the code above still lowercases. The work survives on `origin/fix/388-span-display-block` (`c3f3a07f7`, `35b6bb6f3`, `af01fab06`): only the tag part of a selector is lowercased, the name after `.` or `#` stays as written in the rule cache, the background-picture side file and the lookups; `CaseNormalized` and the `HERO` probe in `test/epub_css/CssParserCacheTest.cpp` become case-sensitive pins; `CSS_CACHE_VERSION` 21 → 22 and `SECTION_FILE_VERSION` 79 → 80.
 
-**Next step.** Rebase the branch onto master. `CSS_CACHE_VERSION` is still 21 there, but `SECTION_FILE_VERSION` is 81, so the section bump becomes 81 → 82. Re-run the corpus comparison, then merge.
+**Next step.** Take those three commits onto a branch from master. The bumps become `CSS_CACHE_VERSION` 32 → 33 and `SECTION_FILE_VERSION` 117 → 118. Re-run the corpus comparison, then merge.
 
 ## A `<br>` that ends a block adds a blank line
 
@@ -57,15 +57,17 @@ calibre book's page count before and after.
 
 ## The image lane waits for Background-B
 
-**Done (2026-10-19, branch `perf/reader-phase-memory`).** The lane runs before B: B borrows the secondary buffer only once the lane has looked at its window and found nothing to decode, and a lane decode or a page render that meets a B build in the buffer has B give it back, at most `LaneBeforeBuild::kMaxYields` (4) times per target and not counted as preemptions. See `src/activities/reader/LaneBeforeBuild.h` and [the image lane](../background-rendering.md#image-lane--pixel-caches-ahead-of-the-reader).
+**Done (#515, 2026-10-19).** The lane runs before B: B borrows the secondary buffer only once the lane has looked at its window and found nothing to decode, and a lane decode or a page render that meets a B build in the buffer has B give it back, at most `LaneBeforeBuild::kMaxYields` (4) times per target and not counted as preemptions. See `src/activities/reader/LaneBeforeBuild.h` and [the image lane](../background-rendering.md#image-lane--pixel-caches-ahead-of-the-reader).
 
 **Measured (X3, Build Through test book, `make_test_font_families.py --build-through`).** Where the conflict happened was build-through, not a mid-chapter B build: with anti-aliasing off B took the buffer on a chapter's last pages 0.6 s after the page appeared, before the lane's settle, and the three picture pages decoded on the heap beside its build (11,780 and 15,672 B free at the JPEGs' lows, the PNG drawn as a low-memory box). With anti-aliasing on, the deferred AA pass delayed B past the lane's settle, so the lane already won. With the lane first, the pictures are decoded in the lent buffer before B starts, B builds through without meeting a decode, and it still finished the next chapter before the reader reached it (the turn onto the next chapter was a cache hit, 1.5 s to a settled screen, as before). A page render that decodes in the buffer B gave back reached 32-34 KB free at its low.
 
-**Still open.** The target page of a chapter jump still decodes in the foreground: Background-C holds the buffer until its build ends, and C is not preempted.
+**Changed since (#639, 2026-11-06).** The lane also runs between two of Background-C's slices, for the page on screen alone. It decodes in what C's build leaves free above its cursor (`BuildArena::freeTail`, about 35 KB of 52 on the X3) and is gone before the next slice (`LaneBeforeBuild.h`).
+
+**Still open.** A picture that does not fit that tail waits for the build to end (the X3's inflate ring fits with about 2 KB to spare), and C is not preempted.
 
 ## The font prewarm sets the session's heap minimum
 
-**Partly done (2026-10-19, branch `perf/reader-phase-memory`).** Re-measured on the X3 (Build Through test book, `[MEM]` and per-phase lows of `renderContents`): the prewarm no longer sets the session's minimum. With the image decodes out of Background-B's way (see above) the low point of a session sat at ~33 KB, inside B's build, and a normal render's phases stayed within 1-2 KB of their start:
+**Partly done (#515, 2026-10-19).** Re-measured on the X3 (Build Through test book, `[MEM]` and per-phase lows of `renderContents`): the prewarm no longer sets the session's minimum. With the image decodes out of Background-B's way (see above) the low point of a session sat at ~33 KB, inside B's build, and a normal render's phases stayed within 1-2 KB of their start:
 
 | Page render, X3 | start | prewarm low | BW render low |
 |---|---|---|---|
@@ -77,7 +79,7 @@ calibre book's page count before and after.
 What changed: a render lends the secondary buffer to the prewarm's TrueType misses as it lends it to an image decode (the glyph store has no glyph yet: a 10.5-14.5 KB scratch block, in SD mode a 4.2 KB page cache, each taken from the lent region and given back per miss), and whatever a miss still made on the heap is freed before the BW render instead of when RenderLock goes back (`renderContents`).
 
 **Still open.** Two transients remain, neither the session's minimum on these measurements:
-- The built-in fonts' prewarm: 8 KB, of which the page slots (3.5 KB) stay for the BW render and the AA pass, and the rest is the group stream ring, already freed per group. **Done since (2026-10-19, branch `fix/lowmem-and-ram`):** `renderContents` lends the buffer to every prewarm, not only with a TrueType set, and `FontDecompressor` takes a ring from its slot arena, else from the region lent to the glyph misses (`glyph_miss::Scope`), giving it back before the next group; the slots stay on the heap. On the host the prewarm's heap peak loses its largest ring (3,036 B for a Noto Sans 14 sample; up to 4,096 B, `GROUP_RING_MAX_BYTES`); not yet measured on a device. The pre-render still cannot lend the buffer (it holds the page on screen), so most turns, which show a pre-rendered page, are unchanged.
+- The built-in fonts' prewarm: 8 KB, of which the page slots (3.5 KB) stay for the BW render and the AA pass, and the rest is the group stream ring, already freed per group. **Done since (#519, 2026-10-19):** `renderContents` lends the buffer to every prewarm, not only with a TrueType set, and `FontDecompressor` takes a ring from its slot arena, else from the region lent to the glyph misses (`glyph_miss::Scope`), giving it back before the next group; the slots stay on the heap. On the host the prewarm's heap peak loses its largest ring (3,036 B for a Noto Sans 14 sample; up to 4,096 B, `GROUP_RING_MAX_BYTES`). On the X3 (#519's test) the prewarm's free low median went from 43,434 to 45,832 B. The pre-render still cannot lend the buffer (it holds the page on screen), so most turns, which show a pre-rendered page, are unchanged.
 - A pre-render with TrueType misses (15-26 KB on the X3, PreRenderGate) cannot lend for the same reason. Its heap floor already asks for that cost.
 
 **Next step.** None until a session's minimum is found in a render again. The per-phase lows came from a measurement-only patch (`heap_caps_monitor_local_minimum_free_size_start` restarted at each phase boundary of `renderContents`); a permanent version would cost the same monitor B's borrow uses.
