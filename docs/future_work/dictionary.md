@@ -4,8 +4,8 @@ Status: open items as of 2026-10-28. The CJK dictionary (step 9) is tracked in [
 
 ## Phrases
 
-**Planned, parked until the CJK dictionary has merged.** A word that only makes sense in a phrase ("favor" in "voted
-in favor of") shows the phrase's meaning first:
+**Planned, unblocked, not started.** The CJK dictionary it waited for merged as #574 (2026-10-29). A word that only
+makes sense in a phrase ("favor" in "voted in favor of") shows the phrase's meaning first:
 - **phrase headwords:** the longest headword made of the tapped word and its neighbours ("look up", "put up with");
 - **the idiom inside the article:** the definition opens at the bold phrase of the word's article that matches the
   text ("in ∼ of sth", "take something into account");
