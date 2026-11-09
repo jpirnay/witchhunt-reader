@@ -693,12 +693,13 @@ TEST_F(ShapedLayout, ACandidateTheHeapHasNoRoomToMeasureLatches) {
   // copy that grows to them. A candidate cut where the letters end is हि, the letters and a hyphen: its Text piece is
   // 41 B, past the copy's 40, and the heap refuses the 97 B it asks for. That candidate is measured as code points, as
   // one that could not be shaped is, and latches. The warm-up's split, of a longer compound of glyph runs alone, leaves
-  // the candidates' string the room this word needs.
+  // the candidates' string the room this word needs. The column is a pixel short of the word: every shorter candidate
+  // fits, so the search, which stops a kind at its first prefix too wide, reaches that one.
   const std::string letters(40, 'a');
   const std::string word = kHi + letters + kHindi;
   const std::string compound = kHindi + kPatrika + kPrarthana + kGyan + kSanskritam;
   ASSERT_GT(compound.size(), word.size());
-  constexpr int kColumn = 200;
+  const int kColumn = shapedPx(kHi) + 40 * GfxRenderer::GLYPH_W + shapedPx(kHindi) - 1;
   ParsedText text(false, false, noIndentStyle());
   text.setShapingLatch(&latch);
   add(text, {{compound}});
