@@ -907,7 +907,8 @@ TEST(IndicShaper, MatchesHarfBuzzOnTheRecordedArabicWords) {
       }
     }
     std::vector<IndicShaper::Run> runs(IndicShaper::maxRuns(text.size()));
-    if (IndicShaper::scanRuns(text, runs.data()) == 1 && runs[0].arabic && runs[0].begin == 0 && runs[0].end == size) {
+    if (IndicShaper::scanRuns(text, runs.data()) == 1 && runs[0].kind == IndicShaper::RunKind::Arabic &&
+        runs[0].begin == 0 && runs[0].end == size) {
       ++oneRun;
       if (shaped.pieces.size() == 1 && shaped.pieces[0].kind == PieceKind::Glyphs && shaped.pieces[0].begin == 0 &&
           shaped.pieces[0].end == size) {

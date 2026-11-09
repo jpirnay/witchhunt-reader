@@ -22,15 +22,18 @@ struct Buffer;
 // HarfBuzz", SSafayet / @SSafayet).
 namespace IndicShaper {
 
+// What a run is written in.
+enum class RunKind : uint8_t { Indic, Arabic };
+
 // One run of a token, bytes [begin, end): upstream's scanRun for Indic text, one script's letters with the shared code
 // points around them (dandas, Vedic signs, joiners, the dotted circle), or an Arabic run (arabic::isRunMember code
-// points with ZWJ and ZWNJ inside). `arabic` is set for an Arabic run, whose `script` is null; an Indic run has
-// `arabic` false, and its `script` null for shared code points alone.
+// points with ZWJ and ZWNJ inside). An Arabic run's `script` is null; an Indic run's is null for shared code points
+// alone.
 struct Run {
   uint16_t begin;
   uint16_t end;
   const indic::ScriptInfo* script;
-  bool arabic = false;
+  RunKind kind = RunKind::Indic;
 };
 
 // The most runs a token of `bytes` bytes can hold: an Arabic run takes 2 bytes at least (an Indic one 3), and two runs

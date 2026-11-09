@@ -140,7 +140,7 @@ constexpr unsigned kMaxContextCodepoints = kArabicContextCodepoints;
 static_assert(kMaxContextCodepoints >= kContextCodepoints && kArabicContextCodepoints <= UINT8_MAX);
 
 ScriptPolicy policyOf(const Run& run) {
-  if (run.arabic) {
+  if (run.kind == RunKind::Arabic) {
     return {.script = ot::Script::Arabic,
             .backward = true,
             .probe = arabic::kProbe,
@@ -418,12 +418,13 @@ bool shapeGlyphs(const std::string_view text, const Run& run, const ScriptPolicy
                  const RunMemory& memory, PieceSink& sink) {
   uint32_t* const cps = memory.codepoints;
   const unsigned room = policy.contextCodepoints;  // at most kMaxContextCodepoints: CallMemory's room holds both sides
-  const size_t lead = run.arabic ? joinersBefore(text, run.begin, room) : run.begin;
+  const bool arabicRun = run.kind == RunKind::Arabic;
+  const size_t lead = arabicRun ? joinersBefore(text, run.begin, room) : run.begin;
   const auto joiners = static_cast<unsigned>((run.begin - lead) / kJoinerBytes);  // at most `room`
   Context before;
   if (lead == 0 && !request.before.empty()) {
-    before = run.arabic ? lastArabicClusters(request.before, room - joiners, cps)
-                        : lastSyllable(request.before, *run.script, cps);
+    before = arabicRun ? lastArabicClusters(request.before, room - joiners, cps)
+                       : lastSyllable(request.before, *run.script, cps);
   }
   for (size_t pos = lead; pos < run.begin;) cps[before.count++] = TextShaping::decodeAt(text, pos);
   unsigned count = before.count;  // at most `room`
@@ -433,8 +434,8 @@ bool shapeGlyphs(const std::string_view text, const Run& run, const ScriptPolicy
   }
   Context after;
   if (run.end == text.size() && !request.after.empty()) {
-    after = run.arabic ? firstArabicClusters(request.after, room, cps + count)
-                       : firstSyllable(request.after, *run.script, cps + count);
+    after = arabicRun ? firstArabicClusters(request.after, room, cps + count)
+                      : firstSyllable(request.after, *run.script, cps + count);
   }
   return shapeRun(*request.face, request, policy, cps, count + after.count, before, after, memory.buffer, sink);
 }
@@ -510,7 +511,7 @@ size_t scanRuns(std::string_view text, Run* out) {
     const uint32_t first = TextShaping::decodeAt(text, next);
     if (arabic::isRunMember(first) && !arabic::isMark(first)) {
       const size_t end = arabicRunEnd(text, pos);
-      out[count++] = Run{static_cast<uint16_t>(pos), static_cast<uint16_t>(end), nullptr, true};
+      out[count++] = Run{static_cast<uint16_t>(pos), static_cast<uint16_t>(end), nullptr, RunKind::Arabic};
       pos = end;
       continue;
     }
@@ -624,7 +625,7 @@ Outcome shapeToken(const std::string_view text, const Request& request, CallMemo
   bool formed = false;
   for (size_t r = 0; r < runCount; r++) {
     const Run& run = runs[r];
-    if (!run.arabic && run.script == nullptr) continue;  // shared code points alone: Text
+    if (run.kind == RunKind::Indic && run.script == nullptr) continue;  // shared code points alone: Text
     const ScriptPolicy policy = policyOf(run);
     const ot::Face* const shaping = request.face->current();
     if (shaping == nullptr) return Outcome::Degraded;
@@ -632,8 +633,8 @@ Outcome shapeToken(const std::string_view text, const Request& request, CallMemo
     const bool mapped = shaping->nominalGlyph(policy.probe, &probe);  // upstream's coverage
     // A script the face does not draw: an Arabic run is Text, unjoined as step 1 draws it (decision 5); an Indic run
     // is Reordered where IndicReorder changes it, else Text.
-    if (!mapped && (run.arabic || !indicReorderForDisplay(text.data() + run.begin, run.end - run.begin, form,
-                                                          memory.reorderRoom(), &formBytes))) {
+    if (!mapped && (run.kind == RunKind::Arabic || !indicReorderForDisplay(text.data() + run.begin, run.end - run.begin,
+                                                                           form, memory.reorderRoom(), &formBytes))) {
       continue;
     }
     if (run.begin > textFrom && !sink.beginPiece(PieceKind::Text, textFrom, run.begin)) return Outcome::Degraded;

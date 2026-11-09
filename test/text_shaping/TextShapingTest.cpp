@@ -262,7 +262,7 @@ TEST(ArabicRuns, BracketsAndCommaStayOutside) {
   ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
   EXPECT_EQ(runs[0].begin, 1);
   EXPECT_EQ(runs[0].end, 9);
-  EXPECT_TRUE(runs[0].arabic);
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Arabic);
   EXPECT_EQ(runs[0].script, nullptr);
   EXPECT_TRUE(IndicShaper::holdsShaped(s));
 }
@@ -285,7 +285,7 @@ TEST(ArabicRuns, AZwnjStaysInside) {
   ASSERT_EQ(IndicShaper::scanRuns(s, runs), 1u);
   EXPECT_EQ(runs[0].begin, 0);
   EXPECT_EQ(runs[0].end, s.size());
-  EXPECT_TRUE(runs[0].arabic);
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Arabic);
 }
 
 TEST(ArabicRuns, ALeadingMarkStartsNoRun) {
@@ -316,25 +316,25 @@ TEST(ArabicRuns, ARunEndsAtADanda) {
   IndicShaper::Run runs[16];
   const std::string s = utf8({AR_KAF, AR_TEH, DANDA, AR_ALEF});
   ASSERT_EQ(IndicShaper::scanRuns(s, runs), 3u);
-  EXPECT_TRUE(runs[0].arabic);
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Arabic);
   EXPECT_EQ(runs[0].end, 4);
-  EXPECT_FALSE(runs[1].arabic);  // the danda alone: shared
+  EXPECT_EQ(runs[1].kind, IndicShaper::RunKind::Indic);  // the danda alone: shared
   EXPECT_EQ(runs[1].script, nullptr);
   EXPECT_EQ(runs[1].begin, 4);
   EXPECT_EQ(runs[1].end, 7);
-  EXPECT_TRUE(runs[2].arabic);
+  EXPECT_EQ(runs[2].kind, IndicShaper::RunKind::Arabic);
 }
 
 TEST(ArabicRuns, AnArabicLetterEndsAnIndicRunAndTheReverse) {
   IndicShaper::Run runs[16];
   const std::string s = utf8({DEVA_KA, DEVA_I, AR_BEH, DEVA_KA});
   ASSERT_EQ(IndicShaper::scanRuns(s, runs), 3u);
-  EXPECT_FALSE(runs[0].arabic);
+  EXPECT_EQ(runs[0].kind, IndicShaper::RunKind::Indic);
   EXPECT_NE(runs[0].script, nullptr);
-  EXPECT_TRUE(runs[1].arabic);
+  EXPECT_EQ(runs[1].kind, IndicShaper::RunKind::Arabic);
   EXPECT_EQ(runs[1].begin, 6);
   EXPECT_EQ(runs[1].end, 8);
-  EXPECT_FALSE(runs[2].arabic);
+  EXPECT_EQ(runs[2].kind, IndicShaper::RunKind::Indic);
 }
 
 TEST(ArabicRuns, MaxRunsHoldsAlternatingScripts) {
