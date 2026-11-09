@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "BidiUtils.h"
 #include "EpdFont.h"
 #include "FallbackFaceProvider.h"
 #include "FontDecompressor.h"
@@ -405,6 +406,53 @@ BuildArena* countingLender(const size_t bytes) {
   ++lendCalls;
   lentFor = bytes;
   return kRegion;
+}
+
+// --- Arabic UI text: formed only for a face that draws the forms (GfxRenderer asks formsArabic()) ---
+
+namespace {
+
+constexpr uint32_t BEH = 0x0628;
+constexpr uint32_t BEH_INITIAL = 0xFE91;
+constexpr uint32_t LAM_ALEF_FINAL = 0xFEFC;
+
+bool formsYes(void* /*ctx*/) { return true; }
+bool formsNo(void* /*ctx*/) { return false; }
+
+std::vector<uint32_t> codepointsOf(const std::string& utf8) {
+  std::vector<uint32_t> cps;
+  const auto* p = reinterpret_cast<const uint8_t*>(utf8.c_str());
+  while (const uint32_t cp = utf8NextCodepoint(&p)) cps.push_back(cp);
+  return cps;
+}
+
+}  // namespace
+
+TEST_F(FallbackFaceProviderTest, ArabicIsFormedOnlyWhenTheReaderFaceDrawsTheForms) {
+  EXPECT_FALSE(provider.formsArabic());  // no hook: the letters as they are
+  provider.setFormsArabic(&formsNo, nullptr);
+  EXPECT_FALSE(provider.formsArabic());
+  provider.setFormsArabic(&formsYes, nullptr);
+  EXPECT_TRUE(provider.formsArabic());
+}
+
+TEST_F(FallbackFaceProviderTest, WithoutAnArabicFaceArabicDrawsAsBeforeTheForms) {
+  // No book font with Arabic: nothing forms the text, and its letters miss the UI face and every fallback, as on a
+  // firmware without the forms (Inter has no U+FFFD, so they draw nothing). A form would miss alike.
+  provider.setReaderFace(&noFace, nullptr);
+  EXPECT_FALSE(provider.formsArabic());
+  EXPECT_FALSE(EpdFont(&ui).getGlyph(BEH));
+  EXPECT_FALSE(EpdFont(&ui).getGlyph(BEH_INITIAL));
+}
+
+TEST_F(FallbackFaceProviderTest, AReaderFaceThatMapsTheFormsDrawsAFormedTitleJoined) {
+  // بلا formed: Beh initial, then the final Lam-Alef in the Lam's place.
+  const std::vector<uint32_t> formed = codepointsOf(BidiUtils::arabicUiForms("\xD8\xA8\xD9\x84\xD8\xA7"));
+  ASSERT_EQ(formed, (std::vector<uint32_t>{BEH_INITIAL, LAM_ALEF_FINAL}));
+  ReaderFace reader({BEH_INITIAL, LAM_ALEF_FINAL}, 11, 14);
+  provider.setReaderFace(&ReaderFace::source, &reader);
+  provider.setFormsArabic(&formsYes, nullptr);
+  for (const uint32_t cp : formed) EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(cp)), reader.ink());
 }
 
 TEST(GlyphMissLend, TheFirstMissLendsAndTheReturnEndsItForTheRestOfThePass) {

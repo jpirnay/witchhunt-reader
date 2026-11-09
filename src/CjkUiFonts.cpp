@@ -182,6 +182,21 @@ const EpdFontData* readerFaceAt(void* ctx) {
   return readerFaces[size];
 }
 
+// Whether the reader font draws Arabic in its presentation forms, as the UI forms Arabic text
+// (BidiUtils::arabicUiForms): its cmap maps them, Noto's Arabic families do, a book's subset font often does not. Asked
+// of the cmap once per font, for the first Arabic string, and only while its face can be read (readerFaceAt: under the
+// RenderLock); without it the letters go unformed, as they did before the forms.
+int8_t readerFormsArabic = -1;  // -1: not asked of this font yet
+
+bool readerDrawsArabicForms(void* ctx) {
+  if (!readerFaceAt(ctx)) return false;
+  if (readerFormsArabic < 0) {
+    // Beh initial and the Lam-Alef ligature: the forms every Arabic word needs.
+    readerFormsArabic = readerFont->mapsCodepoint(0xFE91) && readerFont->mapsCodepoint(0xFEFB) ? 1 : 0;
+  }
+  return readerFormsArabic == 1;
+}
+
 // Feeds inflated glyphs to the slot, checking them against the CRC the generator recorded: a face
 // that does not inflate to its own bitmap is never served from flash.
 struct GlyphSink {
@@ -318,6 +333,7 @@ void CjkUiFonts::attach(EpdFont& font, const uint8_t points) {
   const size_t size = sizeIndexFor(points);
   copy.provider = &providers[size];
   providers[size].setReaderFace(&readerFaceAt, reinterpret_cast<void*>(size));
+  providers[size].setFormsArabic(&readerDrawsArabicForms, reinterpret_cast<void*>(size));
   // The face of the provider's own size: the first attached (main.cpp attaches the regular before the bold).
   if (points == SIZES[size] && !primaryAttached[size]) {
     providers[size].setPrimaryFace(data);
@@ -332,6 +348,7 @@ void CjkUiFonts::setReaderFontOpener(void (*open)()) { readerFontOpener = open; 
 
 void CjkUiFonts::setReaderFont(TtfFont* font) {
   readerFont = font;
+  readerFormsArabic = -1;
   for (size_t size = 0; size < SIZE_COUNT; ++size) {
     readerFaces[size] = nullptr;
     readerFaceTried[size] = false;

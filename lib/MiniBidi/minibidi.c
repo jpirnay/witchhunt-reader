@@ -485,6 +485,47 @@ int do_shape(bidi_char* line, bidi_char* to, int count) {
   return 1;
 }
 
+/* witchhunt: deviation 14 - do_shape()'s forms decided in LOGICAL order, one letter at a time, for UI text, which is
+ * measured, truncated and wrapped before it is reordered: forming it first keeps all of that on the glyphs drawn.
+ * The same tables and the same rules: `prev` is the logically previous character that is not a mark (do_shape's
+ * visually-right neighbour), `next` the logically next one (its visually-left one); 0 for none. ZWJ and ZWNJ are
+ * ordinary neighbours here (types C and U), which is what do_shape's joiner flags amount to. */
+ucschar shape_logical(ucschar prev, ucschar c, ucschar next, int* absorbs_next) {
+  *absorbs_next = 0;
+  const uchar type = stype(c);
+  if (type != SR && type != SD) return c;
+  const uchar before = prev ? stype(prev) : SU;
+  const uchar after = next ? stype(next) : SU;
+  const int joins_before = before == SL || before == SD || before == SC;
+  if (type == SR) return shape_form(c, joins_before ? SHAPE_FINAL : SHAPE_ISOLATED);
+  if (c == 0x644) {
+    ucschar lig = 0;
+    switch (next) {
+      case 0x622: /* Alef with Madda above */
+        lig = 0xFEF5;
+        break;
+      case 0x623: /* Alef with Hamza above */
+        lig = 0xFEF7;
+        break;
+      case 0x625: /* Alef with Hamza below */
+        lig = 0xFEF9;
+        break;
+      case 0x627: /* Alef */
+        lig = 0xFEFB;
+        break;
+      default:
+        break;
+    }
+    if (lig) {
+      *absorbs_next = 1;
+      return joins_before ? lig + 1 : lig; /* the final form follows the isolated one */
+    }
+  }
+  const int joins_after = after == SR || after == SD || after == SC;
+  if (joins_before) return shape_form(c, joins_after ? SHAPE_MEDIAL : SHAPE_FINAL);
+  return shape_form(c, joins_after ? SHAPE_INITIAL : SHAPE_ISOLATED);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
  * Directional Status Stack
  * (replaces GCC nested functions — ESP32C3 has no executable stack)

@@ -236,6 +236,62 @@ bool applyBidiVisualShaped(const char* utf8, std::string& out, int paragraphLeve
   return applyBidiVisualImpl<true>(utf8, out, paragraphLevel);
 }
 
+// witchhunt: deviation 14
+bool hasArabic(const char* utf8, const size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    const auto b = static_cast<uint8_t>(utf8[i]);
+    if (b >= 0xD8 && b <= 0xDB) return true;
+  }
+  return false;
+}
+
+// witchhunt: deviation 14
+std::string arabicUiForms(const std::string& logical) {
+  if (!hasArabic(logical.data(), logical.size())) return logical;
+  std::string out;
+  out.reserve(logical.size() + 8);  // a form takes 3 bytes where its letter takes 2
+  const auto* p = reinterpret_cast<const unsigned char*>(logical.c_str());
+  uint32_t prev = 0;                        // the last character that is not a mark, as written in the text
+  const unsigned char* absorbed = nullptr;  // the Alef a Lam-Alef took: dropped where it stands
+  while (*p) {
+    const unsigned char* const at = p;
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (!cp) break;
+    if (bidi_class(cp) == NSM) {
+      utf8AppendCodepoint(cp, out);
+      continue;
+    }
+    if (at == absorbed) {
+      prev = cp;
+      continue;
+    }
+    // The next character that is not a mark.
+    uint32_t next = 0;
+    for (const unsigned char* q = p; *q;) {
+      const uint32_t n = utf8NextCodepoint(&q);
+      if (!n) break;
+      if (bidi_class(n) != NSM) {
+        next = n;
+        break;
+      }
+    }
+    int absorbsNext = 0;
+    const uint32_t formed = shape_logical(prev, cp, next, &absorbsNext);
+    if (absorbsNext) {
+      // The Alef is the next character that is not a mark: find where it starts.
+      const unsigned char* q = p;
+      for (const unsigned char* r = p; *r;) {
+        q = r;
+        if (bidi_class(utf8NextCodepoint(&r)) != NSM) break;
+      }
+      absorbed = q;
+    }
+    utf8AppendCodepoint(formed, out);
+    prev = cp;
+  }
+  return out;
+}
+
 // witchhunt: deviation 1 - release the workspace when a section build ends; getWorkspace() reallocates on demand.
 void releaseWorkspace() {
   const std::lock_guard<std::mutex> lock(bidiMutex);

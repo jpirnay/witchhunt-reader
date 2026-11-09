@@ -1395,12 +1395,24 @@ static inline int applyBase(const int v, const float scale) {
   return scale == 1.0f ? v : static_cast<int>(v * scale + 0.5f);
 }
 
+// UI text in a face that draws Arabic as its presentation forms (EpdFontFamily::formsArabic): the formed string, kept
+// in `holder`; any other text as it is. Measuring, fitting and drawing all take the formed string, so each sees the
+// glyphs drawn. Formed text forms to itself, so a string fitted here and drawn later is formed once.
+static const char* arabicUiForms(const EpdFontFamily& family, const char* text, const EpdFontFamily::Style style,
+                                 std::string& holder) {
+  if (!text || !BidiUtils::hasArabic(text, strlen(text)) || !family.formsArabic(style)) return text;
+  holder = BidiUtils::arabicUiForms(text);
+  return holder.c_str();
+}
+
 int GfxRenderer::rawTextWidth(const int fontId, const char* text, const EpdFontFamily::Style style) const {
   const EpdFontFamily* const family = findFontFamily(fontId);
   if (!family) {
     LOG_ERR("GFX", "Font %d not found", fontId);
     return 0;
   }
+  std::string formed;
+  text = arabicUiForms(*family, text, style, formed);
 
   if (fontCacheManager_ && fontCacheManager_->isScanning()) {
     fontCacheManager_->recordText(text, fontId, style);
@@ -1463,6 +1475,8 @@ void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* te
 
 void GfxRenderer::drawText(const int fontId, const int x, const int y, const char* text, const bool black,
                            const EpdFontFamily::Style style) const {
+  std::string formed;
+  if (const EpdFontFamily* const family = findFontFamily(fontId)) text = arabicUiForms(*family, text, style, formed);
   if (text && BidiUtils::hasRtlClass(text, strlen(text))) {
     drawFormedText(fontId, x, y, BidiUtils::visualUiLine(text).c_str(), black, style);
     return;
@@ -1602,6 +1616,8 @@ static bool drawsUnscaled(const float total) { return total > 0.99f && total < 1
 // heading at 1.6em inside synthesised 24 pt body text is ONE resample at 1.2 x 1.6, not two.
 void GfxRenderer::drawTextScaled(const int fontId, const int x, const int y, const char* text, const bool black,
                                  const EpdFontFamily::Style style, const float scale) const {
+  std::string formed;
+  if (const EpdFontFamily* const family = findFontFamily(fontId)) text = arabicUiForms(*family, text, style, formed);
   if (text && BidiUtils::hasRtlClass(text, strlen(text))) {
     drawFormedTextScaled(fontId, x, y, BidiUtils::visualUiLine(text).c_str(), black, style, scale);
     return;
@@ -3100,6 +3116,8 @@ std::string GfxRenderer::truncatedText(const int fontId, const char* text, const
     LOG_ERR("GFX", "Font %d not found", fontId);
     return text;
   }
+  std::string formed;
+  text = arabicUiForms(*family, text, style, formed);
 
   // Scan pass: record the text and hand back the whole string. The scan has to see every glyph
   // the real pass will draw, and prewarming a truncated string would leave the remainder to the
