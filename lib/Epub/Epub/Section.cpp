@@ -36,7 +36,9 @@
 #include "parsers/ChapterHtmlSlimParser.h"
 
 namespace {
-constexpr uint8_t SECTION_FILE_VERSION = 116;  // v116 (Myanmar PR 2): Myanmar is shaped, and a Myanmar phrase
+constexpr uint8_t SECTION_FILE_VERSION = 117;  // v117 (Myanmar PR 3): a line with Myanmar text may end between
+                                               // syllables inside a phrase, unhyphenated, at any hyphenation setting
+                                               // v116 (Myanmar PR 2): Myanmar is shaped, and a Myanmar phrase
                                                // wider than the line is cut between syllables, unhyphenated
                                                // v115 (PR 4b): Arabic is shaped, and Indic words in bidi
                                                // paragraphs: glyph forms on bidi lines, run-cut pieces in the

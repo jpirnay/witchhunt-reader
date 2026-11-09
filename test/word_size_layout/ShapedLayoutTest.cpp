@@ -22,6 +22,7 @@
 #include "Epub/ShapedStore.h"
 #include "Epub/WordShapeCache.h"
 #include "Epub/blocks/TextBlock.h"
+#include "Epub/hyphenation/Hyphenator.h"
 #include "FixtureShapingFace.h"
 #include "GfxRenderer.h"
 #include "IndicReorder.h"
@@ -1220,6 +1221,40 @@ TEST_F(ShapedLine, AWordWiderThanTheLineSplitsBetweenSyllables) {
     EXPECT_EQ(line.wordXpos(0) + advanceOf(line, 0), line.wordXpos(1)) << k;
   }
   EXPECT_EQ(compound, joined);
+}
+
+TEST_F(ShapedLine, ABurmesePhraseIsCutAtTheLineEndBetweenSyllables) {
+  // The Myanmar design's PR 3, with hyphenation off: a phrase that does not fit at the line's end is cut there before
+  // a syllable, with no hyphen, at the widest prefix its shaped width allows (shapedPrefixWidth), and each part is the
+  // glyph form of its own text shaped alone, as the token it becomes.
+  FixtureShapingFace& burmese = useFont("NotoSansMyanmar-Book-Regular.ttf");
+  const auto shaped = [&](const std::string& text) { return oracleOn(burmese, ot::Script::Myanmar, text); };
+  const std::string first = "လူတိုင်း";
+  const std::string phrase = "အခြေခံအုတ်မြစ်ဖြစ်သောကြောင့်လည်းကောင်း၊";
+  const int room = advancePx(shaped(phrase)) / 2;
+  const int width = advancePx(shaped(first)) + kSpace + room;
+  ParsedText text(false, false, noIndentStyle());
+  add(text, {{first}, {phrase}});
+  const Lines lines = layOut(text, renderer, width);
+  ASSERT_EQ(2u, lines.size());
+  ASSERT_EQ(2u, lines[0]->wordCount());
+  ASSERT_EQ(1u, lines[1]->wordCount());
+  const std::string part = lines[0]->wordText(1);
+  const std::string rest = lines[1]->wordText(0);
+  EXPECT_EQ(phrase, part + rest);
+
+  std::vector<size_t> breaks;
+  for (const Hyphenator::BreakInfo& b : Hyphenator::myanmarLineEndBreaks(phrase)) breaks.push_back(b.byteOffset);
+  const auto at = std::find(breaks.begin(), breaks.end(), part.size());
+  ASSERT_NE(breaks.end(), at) << "not cut before a syllable: " << part;
+  EXPECT_LE(advancePx(shaped(part)), room) << part;
+  ASSERT_NE(breaks.end(), at + 1);
+  EXPECT_GT(advancePx(shaped(phrase.substr(0, *(at + 1)))), room) << "a longer prefix fits";
+
+  ASSERT_TRUE(lines[0]->hasGlyphForm(1));
+  ASSERT_TRUE(lines[1]->hasGlyphForm(0));
+  EXPECT_EQ(shaped(part), recordsOf(lines[0]->glyphForm(1)));
+  EXPECT_EQ(shaped(rest), recordsOf(lines[1]->glyphForm(0)));
 }
 
 TEST_F(ShapedLine, ASuperscriptIsShapedAtItsDrawnSize) {

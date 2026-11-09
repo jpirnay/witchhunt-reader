@@ -1489,7 +1489,13 @@ void ParsedText::layoutAndExtractLines(
   lineEndsWithHyphenatedWord.clear();
   splitPrefixWordIndexes.clear();
   splitInsertedHyphen.clear();
-  if (hyphenationEnabled) {
+  // A paragraph with Myanmar text takes the greedy breaker whatever the hyphenation setting: a Burmese line ends
+  // between syllables inside a phrase (the Myanmar design's PR 3), and only that breaker splits a word that fits the
+  // line. Its Latin words take no pattern breaks there unless hyphenation is on (hyphenateWordAtIndex).
+  const bool splitsAtLineEnds = hyphenationEnabled || std::any_of(words.begin(), words.end(), [](const std::string& w) {
+                                  return myanmar::holdsMyanmar(w.data(), w.size());
+                                });
+  if (splitsAtLineEnds) {
     // Use greedy layout that can split words mid-loop when a hyphenated prefix fits.
     computeHyphenatedLineBreaks(renderer, fontId, pageWidth, wordWidths, wordBoundaries, lineEndsWithHyphenatedWord,
                                 splitPrefixWordIndexes, splitInsertedHyphen, firstLineIndent, blockStartY, lineHeight,
@@ -2565,12 +2571,15 @@ void ParsedText::computeHyphenatedLineBreaks(
       const bool allowFallbackBreaks = isFirstWord;  // Only for first word on line
 
       bool insertedHyphen = false;
+      bool myanmarCut = false;
       if (availableWidth > 0 && hyphenateWordAtIndex(currentIndex, availableWidth, renderer, fontId, wordWidths,
-                                                     allowFallbackBreaks, &insertedHyphen)) {
+                                                     allowFallbackBreaks, &insertedHyphen, &myanmarCut)) {
         // Keep interWordGaps in sync: insert placeholder for the new remainder word.
         // The remainder is always the first word on the next line so this slot is never read.
         interWordGaps.insert(interWordGaps.begin() + currentIndex + 1, 0);
-        lineEndedWithHyphenation = true;
+        // A cut between Myanmar syllables is how a Burmese line ends, not a hyphenation: the page-bottom retry, which
+        // would set the phrase whole and leave the page's last line a phrase short, leaves it.
+        lineEndedWithHyphenation = !myanmarCut;
         splitPrefixIndex = static_cast<int>(currentIndex);
         splitNeedsInsertedHyphen = insertedHyphen;
         // Prefix now fits; append it to this line and move to next line
@@ -2666,10 +2675,11 @@ void ParsedText::computeHyphenatedLineBreaksFromIndex(
       const bool allowFallbackBreaks = isFirstWord;
 
       bool insertedHyphen = false;
+      bool myanmarCut = false;
       if (availableWidth > 0 && hyphenateWordAtIndex(currentIndex, availableWidth, renderer, fontId, wordWidths,
-                                                     allowFallbackBreaks, &insertedHyphen)) {
+                                                     allowFallbackBreaks, &insertedHyphen, &myanmarCut)) {
         interWordGaps.insert(interWordGaps.begin() + currentIndex + 1, 0);
-        lineEndedWithHyphenation = true;
+        lineEndedWithHyphenation = !myanmarCut;  // as in computeHyphenatedLineBreaks
         splitPrefixIndex = static_cast<int>(currentIndex);
         splitNeedsInsertedHyphen = insertedHyphen;
         lineWidth += spacing + wordWidths[currentIndex];
@@ -2710,7 +2720,7 @@ void ParsedText::computeHyphenatedLineBreaksFromIndex(
 // available width.
 bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availableWidth, const GfxRenderer& renderer,
                                       const int fontId, std::vector<uint16_t>& wordWidths,
-                                      const bool allowFallbackBreaks, bool* outInsertedHyphen) {
+                                      const bool allowFallbackBreaks, bool* outInsertedHyphen, bool* outMyanmarCut) {
   // Guard against invalid indices or zero available width before attempting to split.
   if (availableWidth <= 0 || wordIndex >= words.size()) {
     return false;
@@ -2728,18 +2738,33 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   const float scale = wordScale(wordIndex);
   const int font = wordFontId(wordIndex, fontId);
   // A word this pass shapes is measured as each part would be shaped. Only upstream's fallback breaks, between
-  // syllables or Arabic clusters, reach one in practice: no language's patterns cut Indic letters, and an Arabic book
-  // has no patterns.
+  // syllables or Arabic clusters, and Myanmar's syllable breaks reach one in practice: no language's patterns cut
+  // Indic or Myanmar letters, and an Arabic book has no patterns.
   const bool shapedWord = shapes_ && shapedText(word);
 
-  // Collect candidate breakpoints (byte offsets and hyphen requirements). A Hangul word may split
-  // between syllables at a line end, without a hyphen; those breaks come first, so they win a width
-  // tie. From crosspoint-reader PR #3700 ("fix: justify Korean text by word spaces only", Sung-jin
-  // Brian Hong).
-  std::vector<Hyphenator::BreakInfo> breakInfos = CjkLineBreak::hangulLineEndBreaks(word);
-  const std::vector<Hyphenator::BreakInfo> hyphenatorBreaks = Hyphenator::breakOffsets(word, allowFallbackBreaks);
-  breakInfos.insert(breakInfos.end(), hyphenatorBreaks.begin(), hyphenatorBreaks.end());
-  if (breakInfos.empty()) {
+  // Collect candidate breakpoints (byte offsets and hyphen requirements), in three lists. A Hangul word may split
+  // between syllables at a line end, without a hyphen; those breaks come first, so they win a width tie. From
+  // crosspoint-reader PR #3700 ("fix: justify Korean text by word spaces only", Sung-jin Brian Hong). A Myanmar phrase
+  // splits between its syllables so too (the Myanmar design's PR 3). The language's breaks come last, asked only with
+  // hyphenation on or for a word wider than the line (as computeLineBreaks asks): a paragraph with Myanmar text takes
+  // this breaker whatever the setting, and its Latin words get no pattern breaks with hyphenation off.
+  const std::vector<Hyphenator::BreakInfo> hangulBreaks = CjkLineBreak::hangulLineEndBreaks(word);
+  const std::vector<Hyphenator::BreakInfo> myanmarBreaks = Hyphenator::myanmarLineEndBreaks(word);
+  std::vector<Hyphenator::BreakInfo> hyphenatorBreaks;
+  if (hyphenationEnabled || allowFallbackBreaks) hyphenatorBreaks = Hyphenator::breakOffsets(word, allowFallbackBreaks);
+  const auto byOffset = [](const Hyphenator::BreakInfo& a, const Hyphenator::BreakInfo& b) {
+    return a.byteOffset < b.byteOffset;
+  };
+  // The fallback's cuts in a Myanmar run are the syllable breaks: each is measured once.
+  if (!myanmarBreaks.empty()) {
+    hyphenatorBreaks.erase(std::remove_if(hyphenatorBreaks.begin(), hyphenatorBreaks.end(),
+                                          [&](const Hyphenator::BreakInfo& b) {
+                                            return std::binary_search(myanmarBreaks.begin(), myanmarBreaks.end(), b,
+                                                                      byOffset);
+                                          }),
+                           hyphenatorBreaks.end());
+  }
+  if (hangulBreaks.empty() && myanmarBreaks.empty() && hyphenatorBreaks.empty()) {
     return false;
   }
   // A shaped word's candidates are copied into one string (shapedPrefixWidth), grown here once to the word and a
@@ -2757,26 +2782,42 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   size_t chosenOffset = 0;
   int chosenWidth = -1;
   bool chosenNeedsHyphen = true;
+  const std::vector<Hyphenator::BreakInfo>* chosenFrom = nullptr;
 
-  // Iterate over each legal breakpoint and retain the widest prefix that still fits.
-  for (const auto& info : breakInfos) {
-    const size_t offset = info.byteOffset;
-    if (offset == 0 || offset >= word.size()) {
-      continue;
+  // Retains the widest prefix of a list's legal breakpoints that still fits. With `stopEarly` the list's ascending
+  // order is taken to give prefixes that never narrow, so the first that does not fit ends the search: the one before
+  // it is the widest that does, and no longer prefix is shaped and measured for nothing (the Myanmar design measured
+  // this stop into its call counts). The Hangul and Myanmar lists stop so: none of their breaks draws a hyphen, and a
+  // longer prefix holds more letters (assumed of every font, not proven). The language's list does not: it mixes
+  // breaks with an inserted hyphen and without one, and "Hi-" is wider than "Hil" in most fonts.
+  const auto chooseFrom = [&](const std::vector<Hyphenator::BreakInfo>& breaks, const bool stopEarly) {
+    for (const auto& info : breaks) {
+      const size_t offset = info.byteOffset;
+      if (offset == 0 || offset >= word.size()) {
+        continue;
+      }
+
+      const bool needsHyphen = info.requiresInsertedHyphen;
+      const int prefixWidth =
+          shapedWord ? shapedPrefixWidth(renderer, fontId, wordIndex, offset, needsHyphen)
+                     : measureWordWidth(renderer, font, word.substr(0, offset), style, needsHyphen, scale, vertical_);
+      if (prefixWidth > availableWidth) {
+        if (stopEarly) return;
+        continue;  // too wide
+      }
+      if (prefixWidth <= chosenWidth) {
+        continue;  // not an improvement
+      }
+
+      chosenWidth = prefixWidth;
+      chosenOffset = offset;
+      chosenNeedsHyphen = needsHyphen;
+      chosenFrom = &breaks;
     }
-
-    const bool needsHyphen = info.requiresInsertedHyphen;
-    const int prefixWidth =
-        shapedWord ? shapedPrefixWidth(renderer, fontId, wordIndex, offset, needsHyphen)
-                   : measureWordWidth(renderer, font, word.substr(0, offset), style, needsHyphen, scale, vertical_);
-    if (prefixWidth > availableWidth || prefixWidth <= chosenWidth) {
-      continue;  // Skip if too wide or not an improvement
-    }
-
-    chosenWidth = prefixWidth;
-    chosenOffset = offset;
-    chosenNeedsHyphen = needsHyphen;
-  }
+  };
+  chooseFrom(hangulBreaks, true);
+  chooseFrom(myanmarBreaks, true);
+  chooseFrom(hyphenatorBreaks, false);
 
   if (chosenWidth < 0) {
     // No hyphenation point produced a prefix that fits in the remaining space.
@@ -2862,6 +2903,9 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   if (!rubyEdge_.empty()) rubyEdge_.insert(rubyEdge_.begin() + wordIndex + 1, RubyEdge{});
   if (outInsertedHyphen) {
     *outInsertedHyphen = chosenNeedsHyphen;
+  }
+  if (outMyanmarCut) {
+    *outMyanmarCut = chosenFrom == &myanmarBreaks;
   }
   return true;
 }

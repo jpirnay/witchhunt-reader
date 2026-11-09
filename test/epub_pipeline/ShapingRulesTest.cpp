@@ -1,7 +1,8 @@
 // The shaping rules, checked on every page the host pipeline lays out for the shaped books: the four Indic ones and the
 // Myanmar one (test/epubs/make_test_shaped_indic.py), the Arabic, Persian and Urdu ones and the Hebrew one with Hindi
-// words (make_test_shaped_arabic.py), each with its font (test/fixtures/fonts) as the face of every font and style, and
-// the Arabic one again 1,600 px wide, where its lines take the line pass's fallback.
+// words (make_test_shaped_arabic.py), each with its font (test/fixtures/fonts) as the face of every font and style, the
+// Arabic one again 1,600 px wide, where its lines take the line pass's fallback, and the Myanmar one 1,600 px wide,
+// where more of its phrases stay whole.
 //
 // A line with a logical order (a bidi line) stores its words in visual order: each rule reads them in the order it is
 // about. Glue (wordContinues) is between visual neighbours; reading order is TextBlock::logicalPosition, and a token is
@@ -103,6 +104,7 @@ struct Book {
   int minPastTheCap = 0;
   int minSplitWords = 0;
   int minUnhyphenatedSplits = 0;  // words split across lines without a hyphen (Myanmar)
+  int minLatinLines = 2;          // lines of blocks without shaped letters, which must keep their bytes
   int consumed = 0;               // the tokens a glued neighbour's ligature draws, exactly
   int minBesideDigits = 0;
   int minRtlPairs = 0;
@@ -1042,8 +1044,8 @@ TEST_P(ShapingRules, TheLatinLinesKeepTheirBytes) {
   unshaped.shapingFontFile = nullptr;
   const std::vector<std::string> shapedLines = latinLines(profileOf(GetParam()), "shaped");
   const std::vector<std::string> unshapedLines = latinLines(unshaped, "unshaped");
-  logCount("Latin lines", static_cast<int>(shapedLines.size()), 2);
-  EXPECT_GE(shapedLines.size(), 2u);
+  logCount("Latin lines", static_cast<int>(shapedLines.size()), GetParam().minLatinLines);
+  EXPECT_GE(static_cast<int>(shapedLines.size()), GetParam().minLatinLines);
   EXPECT_EQ(unshapedLines, shapedLines);
 }
 
@@ -1344,13 +1346,20 @@ std::vector<Book> shapedBooks() {
         {"\xE0\xB4\xAE\xE0\xB4\xB2\xE0\xB4\xAF\xE0\xB4\xBE\xE0\xB4\xB3\xE0\xB4\x82", "\xE0\xB4\x95\xE0\xB4\xBF"}, 3, 24,
         2, 2);
   // ko (a bold e), myanma (a bold killed na), and ka with a ZWJ before its medial ya, each with its little section.
-  indic("test_shaped_myanmar", "NotoSansMyanmar-Book-Regular.ttf", "my",
-        {"\xE1\x80\x80\xE1\x80\xB1\xE1\x80\xAC\xE1\x81\x8A",
-         "\xE1\x80\x99\xE1\x80\xBC\xE1\x80\x94\xE1\x80\xBA\xE1\x80\x99\xE1\x80\xAC\xE1\x81\x8A",
-         "\xE1\x80\x80\xE2\x80\x8D\xE1\x80\xBB\xE1\x81\x8A"},
-        4, 2, 5, 4);
-  // The phrase wider than the line, and the table's cell, cut between syllables.
-  books.back().minUnhyphenatedSplits = 4;
+  const std::vector<std::string> myanmarMerged = {
+      "\xE1\x80\x80\xE1\x80\xB1\xE1\x80\xAC\xE1\x81\x8A",
+      "\xE1\x80\x99\xE1\x80\xBC\xE1\x80\x94\xE1\x80\xBA\xE1\x80\x99\xE1\x80\xAC\xE1\x81\x8A",
+      "\xE1\x80\x80\xE2\x80\x8D\xE1\x80\xBB\xE1\x81\x8A"};
+  // Lines end between syllables inside phrases (the Myanmar design's PR 3): at 460 px the long phrases are cut, so few
+  // words stay past one call's code points.
+  indic("test_shaped_myanmar", "NotoSansMyanmar-Book-Regular.ttf", "my", myanmarMerged, 4, 2, 3, 30);
+  books.back().minUnhyphenatedSplits = 30;
+  // 1,600 px wide, where more phrases stay whole on their lines, and the two Latin lines are one.
+  indic("test_shaped_myanmar", "NotoSansMyanmar-Book-Regular.ttf", "my", myanmarMerged, 4, 2, 4, 8);
+  books.back().label = "test_shaped_myanmar_1600";
+  books.back().viewportWidth = 1600;
+  books.back().minUnhyphenatedSplits = 8;
+  books.back().minLatinLines = 1;
 
   Book arabic = arabicBook("test_shaped_arabic", 460);
   arabic.minSplitWords = 1;  // the table's narrow cell
