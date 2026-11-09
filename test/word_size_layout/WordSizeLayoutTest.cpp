@@ -20,6 +20,7 @@
 #include "Epub/FontSizeLadder.h"
 #include "Epub/ParsedText.h"
 #include "Epub/blocks/TextBlock.h"
+#include "Epub/hyphenation/Hyphenator.h"
 #include "GfxRenderer.h"
 
 namespace {
@@ -837,4 +838,43 @@ TEST_F(GuideDotsRender, SingleWordLineGetsNoDot) {
   line.render(renderer, kFontId, 0, 100);
 
   EXPECT_EQ(renderer.fillRectCalls.size(), 0u);
+}
+
+// The split search measures a kind of prefix (with an inserted hyphen, or without) only until one is too wide, since a
+// longer prefix of that kind is no narrower. What it chooses is unchanged: at every column, the first line ends with
+// the widest candidate of either kind that fits, a tie going to the shorter, as measuring every candidate chose.
+TEST(HyphenationSearch, TheWidestFittingPrefixIsChosenAtEveryColumn) {
+  GfxRenderer renderer;
+  Hyphenator::setPreferredLanguage("de");
+  for (const std::string word : {"Quadratkilometerstand", "Kilometer_Quadratwurzelrechnung"}) {
+    const std::vector<Hyphenator::BreakInfo> breaks = Hyphenator::breakOffsets(word, /*includeFallback=*/true);
+    ASSERT_GE(breaks.size(), 3u) << word;
+    for (int column = 30; column < static_cast<int>(word.size()) * GfxRenderer::GLYPH_W; column += 5) {
+      // The oracle: every candidate measured, as the shim measures (each code point a glyph, the hyphen one more).
+      int bestWidth = -1;
+      size_t bestOffset = 0;
+      bool bestHyphen = false;
+      for (const auto& info : breaks) {
+        if (info.byteOffset == 0 || info.byteOffset >= word.size()) continue;
+        const int width =
+            static_cast<int>(info.byteOffset + (info.requiresInsertedHyphen ? 1 : 0)) * GfxRenderer::GLYPH_W;
+        if (width <= column && width > bestWidth) {
+          bestWidth = width;
+          bestOffset = info.byteOffset;
+          bestHyphen = info.requiresInsertedHyphen;
+        }
+      }
+      ParsedText text(false, /*hyphenationEnabled=*/true, noIndentStyle());
+      text.addWord(word, EpdFontFamily::REGULAR);
+      const auto result = layout(text, renderer, static_cast<uint16_t>(column));
+      ASSERT_FALSE(result.lines.empty()) << word << " at " << column;
+      const std::string first = result.lines[0]->wordText(0);
+      if (bestWidth < 0) {
+        EXPECT_EQ(word.substr(0, first.size()), first) << word << " at " << column;  // not split at a candidate
+        continue;
+      }
+      EXPECT_EQ(word.substr(0, bestOffset) + (bestHyphen ? "-" : ""), first) << word << " at " << column;
+    }
+  }
+  Hyphenator::setPreferredLanguage("");
 }

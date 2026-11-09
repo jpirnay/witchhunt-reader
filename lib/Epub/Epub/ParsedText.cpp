@@ -211,16 +211,30 @@ uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const c
       space ? renderer.getSpaceWidth(fontId, style) : textAdvance(renderer, fontId, text, style, vertical), scale);
 }
 
+// Returns the advance width for the first `bytes` of a word while ignoring soft hyphen glyphs and optionally appending
+// a visible hyphen, measured in `scratch` (a caller measuring several prefixes of one word reuses it: no allocation a
+// prefix).
+uint16_t measureWordPrefixWidth(const GfxRenderer& renderer, const int fontId, const std::string& word,
+                                const size_t bytes, const EpdFontFamily::Style style, const bool appendHyphen,
+                                const float scale, const bool vertical, std::string& scratch) {
+  scratch.assign(word, 0, bytes);
+  const bool hasSoftHyphen = containsSoftHyphen(scratch);
+  if (!hasSoftHyphen && !appendHyphen)
+    return measureWordWidth(renderer, fontId, scratch.c_str(), style, scale, vertical);
+  if (hasSoftHyphen) stripSoftHyphensInPlace(scratch);
+  if (appendHyphen) scratch.push_back('-');
+  return scaledWidth(textAdvance(renderer, fontId, scratch.c_str(), style, vertical), scale);
+}
+
 // Returns the advance width for a word while ignoring soft hyphen glyphs and optionally appending a visible hyphen.
 uint16_t measureWordWidth(const GfxRenderer& renderer, const int fontId, const std::string& word,
                           const EpdFontFamily::Style style, const bool appendHyphen = false, const float scale = 1.0f,
                           const bool vertical = false) {
-  const bool hasSoftHyphen = containsSoftHyphen(word);
-  if (!hasSoftHyphen && !appendHyphen) return measureWordWidth(renderer, fontId, word.c_str(), style, scale, vertical);
-  std::string sanitized = word;
-  if (hasSoftHyphen) stripSoftHyphensInPlace(sanitized);
-  if (appendHyphen) sanitized.push_back('-');
-  return scaledWidth(textAdvance(renderer, fontId, sanitized.c_str(), style, vertical), scale);
+  if (!containsSoftHyphen(word) && !appendHyphen) {
+    return measureWordWidth(renderer, fontId, word.c_str(), style, scale, vertical);
+  }
+  std::string sanitized;
+  return measureWordPrefixWidth(renderer, fontId, word, word.size(), style, appendHyphen, scale, vertical, sanitized);
 }
 
 uint16_t clampedWidth(const int width) { return static_cast<uint16_t>(std::clamp(width, 0, UINT16_MAX)); }
@@ -2784,26 +2798,33 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
   bool chosenNeedsHyphen = true;
   const std::vector<Hyphenator::BreakInfo>* chosenFrom = nullptr;
 
-  // Retains the widest prefix of a list's legal breakpoints that still fits. With `stopEarly` the list's ascending
-  // order is taken to give prefixes that never narrow, so the first that does not fit ends the search: the one before
-  // it is the widest that does, and no longer prefix is shaped and measured for nothing (the Myanmar design measured
-  // this stop into its call counts). The Hangul and Myanmar lists stop so: none of their breaks draws a hyphen, and a
-  // longer prefix holds more letters (assumed of every font, not proven). The language's list does not: it mixes
-  // breaks with an inserted hyphen and without one, and "Hi-" is wider than "Hil" in most fonts.
-  const auto chooseFrom = [&](const std::vector<Hyphenator::BreakInfo>& breaks, const bool stopEarly) {
+  // Retains the widest prefix of a list's legal breakpoints that still fits. A list's ascending order is taken to give
+  // prefixes of one kind (with an inserted hyphen, or without) that never narrow, so a kind's first prefix that does
+  // not fit ends that kind's search: no longer one is shaped and measured for nothing (the Myanmar design measured this
+  // stop into its call counts; on the X3 the language's list was 5% of a Latin chapter's build). Assumed of every font,
+  // not proven: a longer prefix holds more letters. The kinds stop apart because "Hi-" is wider than "Hil" in most
+  // fonts. The order stays the list's, so a tie goes to the shorter prefix as before; a list out of order is measured
+  // whole.
+  std::string prefix;  // the candidates' text: one string for the word's every prefix
+  const auto chooseFrom = [&](const std::vector<Hyphenator::BreakInfo>& breaks) {
+    bool tooWide[2] = {false, false};  // [requiresInsertedHyphen]
+    size_t previous = 0;
     for (const auto& info : breaks) {
       const size_t offset = info.byteOffset;
+      if (offset < previous) tooWide[0] = tooWide[1] = false;  // out of order: no stop holds from here
+      previous = std::max(previous, offset);
       if (offset == 0 || offset >= word.size()) {
         continue;
       }
 
       const bool needsHyphen = info.requiresInsertedHyphen;
-      const int prefixWidth =
-          shapedWord ? shapedPrefixWidth(renderer, fontId, wordIndex, offset, needsHyphen)
-                     : measureWordWidth(renderer, font, word.substr(0, offset), style, needsHyphen, scale, vertical_);
+      if (tooWide[needsHyphen]) continue;
+      const int prefixWidth = shapedWord ? shapedPrefixWidth(renderer, fontId, wordIndex, offset, needsHyphen)
+                                         : measureWordPrefixWidth(renderer, font, word, offset, style, needsHyphen,
+                                                                  scale, vertical_, prefix);
       if (prefixWidth > availableWidth) {
-        if (stopEarly) return;
-        continue;  // too wide
+        tooWide[needsHyphen] = true;
+        continue;  // too wide, as every longer prefix of its kind
       }
       if (prefixWidth <= chosenWidth) {
         continue;  // not an improvement
@@ -2815,9 +2836,9 @@ bool ParsedText::hyphenateWordAtIndex(const size_t wordIndex, const int availabl
       chosenFrom = &breaks;
     }
   };
-  chooseFrom(hangulBreaks, true);
-  chooseFrom(myanmarBreaks, true);
-  chooseFrom(hyphenatorBreaks, false);
+  chooseFrom(hangulBreaks);
+  chooseFrom(myanmarBreaks);
+  chooseFrom(hyphenatorBreaks);
 
   if (chosenWidth < 0) {
     // No hyphenation point produced a prefix that fits in the remaining space.
