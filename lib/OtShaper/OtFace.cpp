@@ -212,7 +212,7 @@ void Face::initFilters(const Table& cpac) {
 
 // witchhunt: deviation 17 - every format answers *glyph != 0 exactly when it returns true, so a slot keeps the glyph
 // alone.
-bool Face::nominalGlyph(const uint32_t cp, uint32_t* glyph) const {
+OT_HOT bool Face::nominalGlyph(const uint32_t cp, uint32_t* glyph) const {
   if (cp > 0x10FFFF) return cmapGlyph(cp, glyph);
   if (cmapCacheOwner != cmapCacheId_) {
     for (uint32_t& slot : cmapCache) slot = 0;
@@ -254,7 +254,7 @@ bool Face::cmapGlyph(const uint32_t cp, uint32_t* glyph) const {
   }
 }
 
-int32_t Face::advance(const uint32_t glyph) const {
+OT_HOT int32_t Face::advance(const uint32_t glyph) const {
   if (longMetrics_ == 0) return upem_ / 2;
   if (glyph < bearingCount_) {
     const uint32_t metric = glyph < longMetrics_ ? glyph : longMetrics_ - 1u;
@@ -263,7 +263,7 @@ int32_t Face::advance(const uint32_t glyph) const {
   return 0;
 }
 
-uint16_t Face::glyphProps(const uint32_t glyph) const {
+OT_HOT uint16_t Face::glyphProps(const uint32_t glyph) const {
   switch (classOf(glyphClassDef_, glyph)) {
     case 1:
       return props::BASE_GLYPH;
@@ -276,12 +276,12 @@ uint16_t Face::glyphProps(const uint32_t glyph) const {
   }
 }
 
-bool Face::markSetCovers(const uint32_t set, const uint32_t glyph) const {
+OT_HOT bool Face::markSetCovers(const uint32_t set, const uint32_t glyph) const {
   if (set >= markGlyphSetCount_) return false;
   return coverageIndex(markGlyphSets_.offset32(4 + 4 * set), glyph) != NOT_COVERED;
 }
 
-uint32_t Face::sanitizeLookupProps(uint32_t lookupProps) const {
+OT_HOT uint32_t Face::sanitizeLookupProps(uint32_t lookupProps) const {
   if ((lookupProps & lookupflag::USE_MARK_FILTERING_SET) && (lookupProps >> 16) >= markGlyphSetCount_) {
     lookupProps &= ~lookupflag::USE_MARK_FILTERING_SET;
   }
@@ -310,7 +310,7 @@ Table Face::lookup(const int table, const uint32_t index) const {
   return lookup;
 }
 
-uint32_t Face::lookupProps(const Table& lookup) const {
+OT_HOT uint32_t Face::lookupProps(const Table& lookup) const {
   const uint16_t flag = lookup.u16(2);
   uint32_t result = flag;
   if (flag & lookupflag::USE_MARK_FILTERING_SET) {

@@ -12,7 +12,7 @@ namespace {
 
 // HarfBuzz's roundf(): floor(x + 0.5), so halves round up (-12.5 -> -12),
 // unlike the C library's away-from-zero rounding.
-int32_t hbRound(const float x) { return static_cast<int32_t>(floorf(x + 0.5f)); }
+OT_HOT int32_t hbRound(const float x) { return static_cast<int32_t>(floorf(x + 0.5f)); }
 
 constexpr uint16_t VF_X_PLACEMENT = 0x0001, VF_Y_PLACEMENT = 0x0002, VF_X_ADVANCE = 0x0004, VF_Y_ADVANCE = 0x0008,
                    VF_X_PLA_DEVICE = 0x0010, VF_Y_PLA_DEVICE = 0x0020, VF_X_ADV_DEVICE = 0x0040, VF_DEVICES = 0x00F0;

@@ -13,7 +13,7 @@ constexpr unsigned DIGEST_SHIFTS[3] = {4, 0, 6};  // hb_set_digest_shifts
 void setHeapCheck(const HeapCheck check) { gHeapCheck = check; }
 bool heapAvailable(const size_t bytes) { return gHeapCheck == nullptr || gHeapCheck(bytes); }
 
-void Digest::add(const uint32_t g) {
+OT_HOT void Digest::add(const uint32_t g) {
   for (int i = 0; i < 3; i++) masks[i] |= 1ull << ((g >> DIGEST_SHIFTS[i]) & 63);
 }
 
@@ -31,7 +31,7 @@ void Digest::addRange(const uint32_t a, const uint32_t b) {
   }
 }
 
-bool Digest::mayHave(const uint32_t g) const {
+OT_HOT bool Digest::mayHave(const uint32_t g) const {
   for (int i = 0; i < 3; i++) {
     if (!(masks[i] & (1ull << ((g >> DIGEST_SHIFTS[i]) & 63)))) return false;
   }
@@ -40,7 +40,7 @@ bool Digest::mayHave(const uint32_t g) const {
 
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "digest records are little-endian in memory");
 
-Digest readDigest(const uint8_t* record) {
+OT_HOT Digest readDigest(const uint8_t* record) {
   Digest d;
   memcpy(d.masks, record, sizeof(d.masks));
   return d;
@@ -48,7 +48,7 @@ Digest readDigest(const uint8_t* record) {
 
 void writeDigest(const Digest& digest, uint8_t* record) { memcpy(record, digest.masks, sizeof(digest.masks)); }
 
-bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
+OT_HOT bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
   for (int i = 0; i < 3; i++) {
     uint64_t mask;
     memcpy(&mask, record + 8 * i, sizeof(mask));
@@ -65,7 +65,7 @@ uint64_t digestRecordLowMask(const uint8_t* record) {
   return mask;
 }
 
-uint64_t readLowMask(const uint8_t* stored) {
+OT_HOT uint64_t readLowMask(const uint8_t* stored) {
   uint64_t mask;
   memcpy(&mask, stored, sizeof(mask));
   return mask;
@@ -157,7 +157,7 @@ void Buffer::reverse() {
   }
 }
 
-void Buffer::refreshDigest() {
+OT_HOT void Buffer::refreshDigest() {
   digest = Digest();
   for (const GlyphInfo& g : info) digest.add(g.codepoint);
 }
