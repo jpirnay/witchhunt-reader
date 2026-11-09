@@ -318,10 +318,11 @@ reader"):
 - **Speed:** item 3.
 - **Scripts not covered:** Khmer and Tibetan, named by the design as targets of the same shaper (the USE-based
   scripts need their own shaper modules).
-- **Myanmar** (`docs/superpowers/specs/2026-11-09-myanmar-design.md`): the engine is #668; Burmese books
+- **Myanmar** (`docs/superpowers/specs/2026-11-09-myanmar-design.md`): the engine is #668; Burmese books are #671
   (`feat/myanmar-books`: the NotoSansMyanmar and NotoSerifMyanmar families, the pick by language, the shaping glue,
-  the overflow cut between syllables) are built on it, with no device run yet. Line breaking between syllables (the
-  design's PR 3) is not built; it should ship in the same release.
+  the overflow cut between syllables). Line breaking between syllables (the design's PR 3, option H) is built on
+  `feat/myanmar-line-breaks`, stacked on #671, and should ship in the same release. No device run of either yet.
+  Later: Stribley's preference for a space near the line end, the justified-space cap, a dictionary, ZWSP breaks.
 - **Vertical sections:** a vertical section reorders Indic words only; no shaped run is set down a column.
 - **No X4 figures for #642** (waived).
 
