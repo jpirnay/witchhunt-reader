@@ -87,7 +87,8 @@ bool inTable(const EpdFontData* face, const uint32_t cp) {
 
 }  // namespace
 
-void FallbackFaceProvider::beginText(const char* utf8Text) {
+void FallbackFaceProvider::beginText(const char* utf8Text, bool (*alsoCovered)(void* ctx, uint32_t codepoint),
+                                     void* ctx) {
   bookText_ = false;
   if (!utf8Text || !readerFace_) return;
   // The characters the UI face lacks, up to a batch, as UTF-8: what the reader's face is asked for when the string is
@@ -98,7 +99,7 @@ void FallbackFaceProvider::beginText(const char* utf8Text) {
   while (*p != 0) {
     const uint8_t* const start = p;
     const uint32_t cp = utf8NextCodepoint(&p);
-    if (cp < 0x80 || inTable(primary_, cp)) continue;
+    if (cp < 0x80 || inTable(primary_, cp) || (alsoCovered && alsoCovered(ctx, cp))) continue;
     if (!readerAfterFirst_ || faceCount_ == 0 || !inTable(faces_[0], cp)) bookText_ = true;
     const size_t bytes = static_cast<size_t>(p - start);
     if (used + bytes < sizeof(lacking)) {

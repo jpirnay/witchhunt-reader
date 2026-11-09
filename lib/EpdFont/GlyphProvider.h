@@ -131,6 +131,12 @@ class GlyphProvider {
   /// Anything else must not be asked for one.
   virtual bool drawsGlyphKeys() const { return false; }
 
+  /// True when the font draws Arabic UI text in its contextual presentation forms (BidiUtils::arabicUiForms): a UI
+  /// face whose fallbacks hold them (the Arabic UI pack, UiFaceProvider; or the last book's font,
+  /// FallbackFaceProvider::setFormsArabic). GfxRenderer then forms a string before it
+  /// measures, fits or draws it; any other font is given the letters as they are.
+  virtual bool formsArabic() const { return false; }
+
   /// The glyph-ID prefetch: prepare the glyphs `glyphs[0..count)` it lacks in one batch, as prefetch() does for text.
   /// Lookups must still work for anything it skipped.
   virtual void prefetchGlyphs(const uint16_t* glyphs, size_t count) {
