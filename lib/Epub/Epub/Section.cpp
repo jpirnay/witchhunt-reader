@@ -2350,7 +2350,13 @@ bool Section::isVertical() const {
   return vertical_;
 }
 
-FlowContext Section::flowContext() const { return FlowContext::of(request_, isVertical(), epub->pageProgression()); }
+FlowContext Section::flowContext() const {
+  const PageProgression ppd = epub->pageProgression();
+  const TypographyProfile profile = TypographyProfile::forLanguage(epub->getLanguage());
+  const bool bookRtl = FlowContext::bookIsRtl(profile.direction == TypographyProfile::Direction::RightToLeft,
+                                              profile.verticalAllowed, ppd);
+  return FlowContext::of(request_, isVertical(), ppd, bookRtl);
+}
 
 bool Section::activeBuildCssDegraded() const {
   // Read the live CSS resolver's running stats: lowHeapSkips is incremented the moment the

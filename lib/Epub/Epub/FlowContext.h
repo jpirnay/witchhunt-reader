@@ -20,6 +20,14 @@ struct FlowContext {
   static VerticalText requestFor(VerticalText setting, int8_t bookOverride, bool verticalAllowed);
   // Whether a section is set vertically, from the writing mode in effect at its <body> and the book's ppd.
   static bool verticalFor(VerticalText request, CssWritingMode rootMode, PageProgression ppd);
-  static bool pageProgressionRtlFor(VerticalText request, bool vertical, PageProgression ppd);
-  static FlowContext of(VerticalText request, bool vertical, PageProgression ppd);
+  // Whether a section's pages turn right to left. A vertical-rl section's do. A horizontal section of a right-to-left
+  // book (`bookRtl`: see bookIsRtl) does unless the OPF says ltr. Otherwise a book under Vertical Text Off turns left
+  // to right whatever its ppd (a CJK book read horizontally), and one that may be set vertically follows its ppd (a
+  // horizontal colophon in a vertical book keeps the book's direction).
+  static bool pageProgressionRtlFor(VerticalText request, bool vertical, PageProgression ppd, bool bookRtl = false);
+  static FlowContext of(VerticalText request, bool vertical, PageProgression ppd, bool bookRtl = false);
+  // Whether a book reads right to left: its language runs right to left (TypographyProfile::direction: Hebrew, Yiddish,
+  // the Arabic-script languages), or its OPF says rtl and its language is never set vertically (so the ppd cannot
+  // mean the Japanese vertical convention).
+  static bool bookIsRtl(bool languageRtl, bool verticalAllowed, PageProgression ppd);
 };

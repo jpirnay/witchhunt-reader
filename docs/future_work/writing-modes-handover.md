@@ -270,14 +270,16 @@ cache at 67%.
 
 **The pass line** (design): 2x the Latin twin.
 
-### 4. Step 1 PR 3: reading a Hebrew book (never started)
+### 4. Step 1 PR 3: reading a Hebrew book (page progression and reading order done)
 
 The scope is the step 1 design (`docs/superpowers/specs/2026-11-02-writing-modes-step1-design.md`, section "The
 reader"):
-- **Page progression:** `FlowContext::pageProgressionRtlFor` must take the book's direction. Today Hebrew AND Arabic
-  books turn left to right: `CMD:STATE` shows `progression=ltr` for them.
-- **Reading order** in the consumers: the QR page text and the footnote-link overlay. The dictionary's reading-order
-  join is done (#656).
+- **Page progression (done, `feat/rtl-page-progression`):** `FlowContext::pageProgressionRtlFor` takes the book's
+  direction (`bookIsRtl`). X3: a Hebrew book shows `progression=rtl` and Left turns to the next page; Murphy: the
+  left tap zone shows the next page.
+- **Reading order in the consumers (done, same branch):** the link-target walk and the QR page text read each line in
+  its logical order (`TextBlock::readingOrder`, `appendReadingText`). Murphy: of two note markers on one Hebrew line,
+  master gave only the first a target; both are tappable now. The dictionary's reading-order join was done in #656.
 - **The reader's titles:** the status bar's chapter title and the Home and Library book titles get a visual form
   once, when set (`applyBidiVisual`). Today a Hebrew title shows mirrored.
 - **Fonts:** two Font Manager families, Noto Sans Hebrew and Noto Serif Hebrew, merged with Noto Sans/Serif Latin, as
