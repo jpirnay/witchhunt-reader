@@ -952,6 +952,41 @@ TEST(OtShaper, ABengaliPlanWithoutFiltersPlacesConsonantsAsWithThem) {
   }
 }
 
+// Deviation 18: each planned lookup of more than SUBTABLE_GROUP subtables has a group mask per SUBTABLE_GROUP of them,
+// the low masks of their records ORed, on both routes (the font's CPac and the computed records); a lookup of fewer has
+// none. TheTwoMemosLeaveEveryGlyphAlone shapes with and without them.
+TEST(OtShaper, SubtableGroupsHoldTheirRecordsLowMasks) {
+  unsigned grouped = 0;
+  for (const Book& book : BOOKS) {
+    for (const bool withCpac : {true, false}) {
+      SCOPED_TRACE(std::string(book.font) + (withCpac ? " with CPac" : " without CPac"));
+      BookPlan bp;
+      ASSERT_TRUE(bp.open(book, withCpac));
+      for (const int t : {ot::GSUB, ot::GPOS}) {
+        for (size_t i = 0; i < bp.plan.lookups[t].size(); i++) {
+          const ot::LookupSettings s = bp.plan.settings(t, i);
+          const unsigned subtables = ot::Face::subtableCount(bp.font.face.lookup(t, bp.plan.lookups[t][i].index));
+          ASSERT_NE(s.subtableDigests, nullptr);
+          if (subtables <= ot::SUBTABLE_GROUP) {
+            EXPECT_EQ(s.subtableGroups, nullptr) << "table " << t << " lookup " << i;
+            continue;
+          }
+          ASSERT_NE(s.subtableGroups, nullptr) << "table " << t << " lookup " << i;
+          grouped++;
+          for (unsigned g = 0; g * ot::SUBTABLE_GROUP < subtables; g++) {
+            uint64_t expected = 0;
+            for (unsigned k = g * ot::SUBTABLE_GROUP; k < subtables && k < (g + 1) * ot::SUBTABLE_GROUP; k++) {
+              expected |= ot::digestRecordLowMask(s.subtableDigests + ot::DIGEST_BYTES * k);
+            }
+            EXPECT_EQ(ot::readLowMask(s.subtableGroups + 8 * g), expected) << "table " << t << " lookup " << i;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_GT(grouped, 0u);
+}
+
 // Deviation 17: the cmap cache answers as the cmap does. Two fonts asked in turn empty the cache at every ask, so each
 // answer is the subtable's own; the same code points asked of one font after the other then come from the cache, a
 // slot held by the other font's answers first, every slot reused across script blocks.

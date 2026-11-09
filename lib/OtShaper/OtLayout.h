@@ -10,6 +10,9 @@
 // split across files).
 namespace ot {
 
+// witchhunt: deviation 18 - subtables a group mask covers.
+constexpr unsigned SUBTABLE_GROUP = 8;
+
 // Largest value a feature can carry (HB_OT_MAP_MAX_VALUE); the 'rand'
 // feature uses it to ask for a random alternate.
 constexpr unsigned MAX_FEATURE_VALUE = 255;
@@ -25,6 +28,10 @@ struct LookupSettings {
   // Per subtable, the glyphs it can start at: DIGEST_BYTES-byte records.
   // nullptr: subtables are not filtered.
   const uint8_t* subtableDigests = nullptr;
+  // witchhunt: deviation 18 - per group of SUBTABLE_GROUP subtables, the low masks (digestRecordLowMask()) of their
+  // records ORed, 8 bytes each (little-endian, unaligned): a group whose mask cannot hold a glyph is skipped without
+  // reading its records. nullptr: no groups (the lookup has SUBTABLE_GROUP subtables or fewer, or no records).
+  const uint8_t* subtableGroups = nullptr;
   uint32_t mask = 0;
   bool autoZwnj = true;
   bool autoZwj = true;

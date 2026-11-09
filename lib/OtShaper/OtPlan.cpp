@@ -207,6 +207,7 @@ bool Plan::finish(const Face& face) {
   adjustMarkPositioningWhenZeroing = !applyGpos;
   if (!copyLookupDigests(face)) return false;  // witchhunt: deviation 13
   buildFilters(face);
+  fillSubtableGroups(face);                        // witchhunt: deviation 18
   std::memset(positions_, 0, sizeof(positions_));  // witchhunt: deviation 13 - the memo, empty
   if (shaper == ShaperKind::Indic) {
     indicConfig = &INDIC_CONFIGS[static_cast<unsigned>(script)];
@@ -225,16 +226,37 @@ bool Plan::finish(const Face& face) {
 // its index is below the font's lookup count, and a CPac holds a record for
 // each. False when the heap check or the allocation refuses the block, which
 // the plan cannot do without.
+//
+// witchhunt: deviation 18 - the block also holds the subtable groups' masks and the planned lookups' first groups,
+// sized here from the lookups' subtable counts (no more than NO_GROUPS groups) and filled by fillSubtableGroups().
 bool Plan::copyLookupDigests(const Face& face) {
   digestBlock_.reset();
   lookupDigests_.bind(nullptr, 0);
-  const size_t bytes = (lookups[GSUB].size() + lookups[GPOS].size()) * DIGEST_BYTES;
+  groupMasks_.bind(nullptr, 0);   // witchhunt: deviation 18
+  groupStarts_.bind(nullptr, 0);  // witchhunt: deviation 18
+  const size_t planned = lookups[GSUB].size() + lookups[GPOS].size();
+  const size_t bytes = planned * DIGEST_BYTES;
   if (bytes == 0) return true;
-  if (!heapAvailable(bytes)) return false;
-  digestBlock_ = makeUniqueNoThrow<uint8_t[]>(bytes);
+  size_t groups = 0;  // witchhunt: deviation 18
+  for (int t = GSUB; t <= GPOS; t++) {
+    for (const PlannedLookup& lookup : lookups[t]) {
+      const unsigned subtables = Face::subtableCount(face.lookup(t, lookup.index));
+      if (subtables > SUBTABLE_GROUP) groups += (subtables + SUBTABLE_GROUP - 1) / SUBTABLE_GROUP;
+    }
+  }
+  if (groups >= NO_GROUPS) groups = 0;                              // witchhunt: deviation 18 - past its index: none
+  const size_t groupBytes = groups ? groups * 8 + planned * 2 : 0;  // witchhunt: deviation 18
+  if (!heapAvailable(bytes + groupBytes)) return false;
+  digestBlock_ = makeUniqueNoThrow<uint8_t[]>(bytes + groupBytes);
   if (!digestBlock_) return false;
   lookupDigests_.bind(digestBlock_.get(), bytes);
   lookupDigests_.resize(bytes);
+  // witchhunt: deviation 18 - the groups after the digests: the masks (8 B each, so the starts stay aligned), then
+  // the starts.
+  if (groups) {
+    groupMasks_.bind(digestBlock_.get() + bytes, groups * 8);
+    groupStarts_.bind(reinterpret_cast<uint16_t*>(digestBlock_.get() + bytes + groups * 8), planned);
+  }
   uint8_t* record = lookupDigests_.data();
   for (int t = GSUB; t <= GPOS; t++) {
     const FilterRecords* const stored = face.filters(t);
@@ -253,6 +275,37 @@ bool Plan::copyLookupDigests(const Face& face) {
 // witchhunt: deviation 13 - planned lookup `i` of `table`'s record in lookupDigests_.
 const uint8_t* Plan::digestRecord(const int table, const size_t i) const {
   return lookupDigests_.data() + DIGEST_BYTES * (table == GSUB ? i : lookups[GSUB].size() + i);
+}
+
+// witchhunt: deviation 18 - each planned lookup of more than SUBTABLE_GROUP subtables, when its table has subtable
+// records, gets the low masks of each SUBTABLE_GROUP of them ORed: applyLookupSubtables() reads a group's records only
+// when its mask may hold the glyph. NotoSansDevanagari's pres/cjct lookup is 114 contexts of one first glyph each,
+// whose records (2.7 KB of CPac in flash) a glyph it may start at read in full; over a Hindi chapter the lines of CPac
+// read per word fall from 68 to 38.
+void Plan::fillSubtableGroups(const Face& face) {
+  if (groupStarts_.capacity() == 0) return;
+  groupMasks_.clear();
+  groupStarts_.clear();
+  size_t k = 0;
+  for (int t = GSUB; t <= GPOS; t++) {
+    for (size_t i = 0; i < lookups[t].size(); i++, k++) {
+      groupStarts_.push_back(NO_GROUPS);
+      const unsigned subtables = Face::subtableCount(face.lookup(t, lookups[t][i].index));
+      const uint8_t* const records = settings(t, i).subtableDigests;
+      if (subtables <= SUBTABLE_GROUP || !records) continue;
+      const unsigned groups = (subtables + SUBTABLE_GROUP - 1) / SUBTABLE_GROUP;
+      const size_t first = groupMasks_.size() / 8;
+      if (!groupMasks_.resize(groupMasks_.size() + groups * 8)) continue;  // past the block: no groups
+      groupStarts_[k] = static_cast<uint16_t>(first);
+      for (unsigned g = 0; g < groups; g++) {
+        uint64_t mask = 0;
+        for (unsigned s = g * SUBTABLE_GROUP; s < subtables && s < (g + 1) * SUBTABLE_GROUP; s++) {
+          mask |= digestRecordLowMask(records + DIGEST_BYTES * s);
+        }
+        writeLowMask(mask, groupMasks_.data() + 8 * (first + g));
+      }
+    }
+  }
 }
 
 // Subtable filters: from the font's CPac table when it has one, else computed
@@ -330,6 +383,11 @@ LookupSettings Plan::settings(const int table, const size_t i) const {
   } else if (!subtableStarts_[table].empty()) {  // witchhunt: deviation 13 - the filter block holds subtables only
     out.subtableDigests = subtableDigests_[table].data() + DIGEST_BYTES * subtableStarts_[table][i];
   }
+  // witchhunt: deviation 18 - the lookup's group masks, once fillSubtableGroups() has made them.
+  const size_t k = table == GSUB ? i : lookups[GSUB].size() + i;
+  if (out.subtableDigests && !testBypassCaches && k < groupStarts_.size() && groupStarts_[k] != NO_GROUPS) {
+    out.subtableGroups = groupMasks_.data() + 8 * groupStarts_[k];
+  }
   return out;
 }
 
@@ -369,6 +427,7 @@ uint8_t Plan::consonantPosition(const Face& face, const uint32_t consonant, cons
 
 size_t Plan::memoryBytes() const {
   size_t bytes = sizeof(Plan) + lookupDigests_.capacity();  // witchhunt: deviation 13 - the lookup digests
+  bytes += groupMasks_.capacity() + groupStarts_.capacity() * sizeof(uint16_t);  // witchhunt: deviation 18
   for (int t = GSUB; t <= GPOS; t++) {
     bytes += lookups[t].capacity() * sizeof(PlannedLookup) + stages[t].capacity() * sizeof(Stage) +
              subtableStarts_[t].capacity() * sizeof(uint32_t) + subtableDigests_[t].capacity();

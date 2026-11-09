@@ -221,6 +221,10 @@ shaped-script book for the X4's in-place gate.
     time under RenderLock.
   - A lookup that passes the digest test is skipped when no glyph of the run both passes its digest and carries its
     mask (`Plan::mayStart`, deviation 16): the plan holds both, so such a lookup reads nothing of the font.
+  - A lookup of more than 8 subtables also gets, per 8 of them, the low masks of their digest records ORed (8 B a
+    group, and 2 B a planned lookup for the index; deviation 18): a glyph reads a group's records in `CPac` only
+    when its mask may hold the glyph. NotoSansDevanagari's pres/cjct lookup is 114 one-glyph contexts; the groups
+    add 642 B to its plan (NotoSansBengali: 944 B).
   - `Plan::testBypassCaches` switches them all off, for the tests that compare the output with and without them.
 - **The cmap cache** (deviation 17): `Face::nominalGlyph` keeps the last face's answers in 64 static slots (256 B),
   direct-mapped by the code point's low bits and emptied when another face asks. Normalization asks the cmap once or

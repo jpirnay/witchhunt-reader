@@ -207,11 +207,16 @@ bool ApplyContext::applySubtable(uint16_t type, Table st) {
   return table == GSUB ? applyGsubSubtable(this, type, st) : applyGposSubtable(this, type, st);
 }
 
-bool ApplyContext::applyLookupSubtables(const Table& lookup, const uint8_t* digests) {
+bool ApplyContext::applyLookupSubtables(const Table& lookup, const uint8_t* digests, const uint8_t* groups) {
   const uint16_t type = lookup.u16(0);
-  const uint16_t count = Face::subtableCount(lookup);
+  const unsigned count = Face::subtableCount(lookup);
   const uint32_t glyph = buffer.cur().codepoint;
-  for (uint16_t i = 0; i < count; i++) {
+  for (unsigned i = 0; i < count; i++) {
+    // witchhunt: deviation 18 - a group whose mask cannot hold the glyph holds no record that may.
+    if (groups && i % SUBTABLE_GROUP == 0 && !lowMaskMayHave(readLowMask(groups + 8 * (i / SUBTABLE_GROUP)), glyph)) {
+      i += SUBTABLE_GROUP - 1;
+      continue;
+    }
     if (digests && !digestRecordMayHave(digests + DIGEST_BYTES * i, glyph)) continue;
     if (applySubtable(type, lookup.offset16(6 + 2 * i))) return true;
   }
@@ -290,6 +295,7 @@ void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int
   // witchhunt: deviation 4 - a lookup of one subtable is not filtered again: its subtable's digest is the lookup's
   // own, which every glyph it starts at has passed, and reading the record would cost a read of CPac for nothing.
   c.subtableDigests = Face::subtableCount(lookup) > 1 ? settings.subtableDigests : nullptr;
+  c.subtableGroups = c.subtableDigests ? settings.subtableGroups : nullptr;  // witchhunt: deviation 18
   c.setLookupProps(face.lookupProps(lookup));
 
   // Glyphs the lookup may start at: in its digest, selected by its mask, and
@@ -302,7 +308,7 @@ void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int
   if (table == GSUB && layout::isReverseLookup(lookup)) {
     // In place, from the end; the loop, not the lookup, moves idx.
     for (buffer.idx = buffer.len(); buffer.idx-- > 0;) {
-      if (startsAt(buffer.cur())) c.applyLookupSubtables(lookup, c.subtableDigests);
+      if (startsAt(buffer.cur())) c.applyLookupSubtables(lookup, c.subtableDigests, c.subtableGroups);
     }
     return;
   }
@@ -314,7 +320,8 @@ void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int
     const unsigned idx = buffer.idx, len = buffer.len();
     // An applied subtable moves past its glyphs; one that leaves the buffer
     // as it was would apply again forever.
-    if (!c.applyLookupSubtables(lookup, c.subtableDigests) || (buffer.idx == idx && buffer.len() == len)) {
+    if (!c.applyLookupSubtables(lookup, c.subtableDigests, c.subtableGroups) ||
+        (buffer.idx == idx && buffer.len() == len)) {
       buffer.idx++;
     }
   }

@@ -175,6 +175,7 @@ class Plan {
   // digest pre-filter (mayApply() lets every lookup through), so a test can
   // shape with and without them. False in every plan the firmware makes.
   // witchhunt: deviation 16 - and the start-glyph pre-filter (mayStart()).
+  // witchhunt: deviation 18 - and the subtable groups (settings() gives none).
   bool testBypassCaches = false;
 
  private:
@@ -196,6 +197,7 @@ class Plan {
   bool finish(const Face& face);
   bool copyLookupDigests(const Face& face);  // witchhunt: deviation 13
   void buildFilters(const Face& face);
+  void fillSubtableGroups(const Face& face);  // witchhunt: deviation 18
   void collectWould(WouldFeature feature);
   const uint8_t* digestRecord(int table, size_t i) const;  // witchhunt: deviation 13 - in lookupDigests_
 
@@ -213,6 +215,13 @@ class Plan {
   // fails), so a would-substitute probe always has the digest HarfBuzz tests
   // its first glyph against.
   FixedVector<uint8_t> lookupDigests_;
+  // witchhunt: deviation 18 - the subtable groups (LookupSettings::subtableGroups) of every planned lookup of more than
+  // SUBTABLE_GROUP subtables, in the digest block after the digests: their masks, 8 B a group, and per planned lookup
+  // (GSUB's then GPOS's) the index of its first group, NO_GROUPS for a lookup without. Filled from the subtable
+  // records once buildFilters() has them; a table without records has no groups.
+  static constexpr uint16_t NO_GROUPS = 0xFFFF;
+  FixedVector<uint8_t> groupMasks_;
+  FixedVector<uint16_t> groupStarts_;
 
   // witchhunt: deviation 13 - consonantPosition()'s memo, direct-mapped: one
   // slot per (consonant ^ virama) % POSITION_SLOTS, keyed by the two glyph IDs

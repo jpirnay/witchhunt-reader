@@ -116,6 +116,7 @@ struct ApplyContext {
 
   // Subtable digests of the top-level lookup (not of nested ones).
   const uint8_t* subtableDigests = nullptr;
+  const uint8_t* subtableGroups = nullptr;  // witchhunt: deviation 18 - their group masks (LookupSettings)
 
   // Match positions of the rule being applied: this nesting level's row of
   // buffer.matchStack, so nested lookups keep their own.
@@ -150,8 +151,8 @@ struct ApplyContext {
 
   bool applySubtable(uint16_t type, Table st);
   // Tries each subtable at buffer.idx; `digests` (optional) skips the ones
-  // that cannot start there.
-  bool applyLookupSubtables(const Table& lookup, const uint8_t* digests = nullptr);
+  // that cannot start there, and `groups` (optional, with `digests`; deviation 18) whole groups of them.
+  bool applyLookupSubtables(const Table& lookup, const uint8_t* digests = nullptr, const uint8_t* groups = nullptr);
   bool recurse(uint32_t subLookupIndex);
 };
 

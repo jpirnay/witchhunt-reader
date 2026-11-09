@@ -61,6 +61,13 @@ void writeDigest(const Digest& digest, uint8_t* record);
 // Whether the digest record may hold `glyph`, reading only as many masks as
 // it takes to rule the glyph out.
 bool digestRecordMayHave(const uint8_t* record, uint32_t glyph);
+// witchhunt: deviation 18 - a digest record's mask of the glyphs' low six bits; whether such a mask (or several ORed)
+// may hold `glyph`, so that when it may not, neither may the record; and such a mask stored alone (8 bytes,
+// little-endian, unaligned).
+uint64_t digestRecordLowMask(const uint8_t* record);
+inline bool lowMaskMayHave(const uint64_t mask, const uint32_t glyph) { return mask & (1ull << (glyph & 63)); }
+uint64_t readLowMask(const uint8_t* stored);
+void writeLowMask(uint64_t mask, uint8_t* stored);
 
 // Mask bit of context codepoints (see shape()), below the feature bits.
 constexpr uint32_t CONTEXT_MASK = 1u << 0;

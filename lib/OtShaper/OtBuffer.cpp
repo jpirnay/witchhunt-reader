@@ -57,6 +57,22 @@ bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
   return true;
 }
 
+// witchhunt: deviation 18 - the second mask is the one of shift 0.
+uint64_t digestRecordLowMask(const uint8_t* record) {
+  static_assert(DIGEST_SHIFTS[1] == 0, "the low mask is the second");
+  uint64_t mask;
+  memcpy(&mask, record + 8, sizeof(mask));
+  return mask;
+}
+
+uint64_t readLowMask(const uint8_t* stored) {
+  uint64_t mask;
+  memcpy(&mask, stored, sizeof(mask));
+  return mask;
+}
+
+void writeLowMask(const uint64_t mask, uint8_t* stored) { memcpy(stored, &mask, sizeof(mask)); }
+
 bool Buffer::prepare(const unsigned maxGlyphs) {
   info.clear();
   pos.clear();
