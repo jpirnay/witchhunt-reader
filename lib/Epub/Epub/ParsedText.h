@@ -265,14 +265,15 @@ class ParsedText {
     if (shapingLatch_ != nullptr) *shapingLatch_ = true;
   }
   // Whether this pass shapes, decided after decideBidi: a token holds Indic text, or a token that holds Arabic text in
-  // a paragraph that needs bidi has a face that maps beh (IndicShaper::draws), so an Arabic paragraph in a bitmap
-  // or built-in font, or in a TrueType face without Arabic, is laid out as without shaping, with no ShapingState.
+  // a paragraph that needs bidi has a face that maps beh, or a token that holds Myanmar text has a face that maps ka
+  // (IndicShaper::draws), so an Arabic or Myanmar paragraph in a bitmap or built-in font, or in a TrueType face without
+  // its script, is laid out as without shaping, with no ShapingState.
   // Makes ShapingState for it (refused: the pass is laid out unshaped, and latched), or empties the store of a pass
   // that does not shape. A kept token whose glued neighbour has just arrived is shaped again, with it as context.
   void decideShaping(const GfxRenderer& renderer, int fontId);
-  // Whether a pass that shapes shapes `text`: it holds Indic text, or Arabic text in a paragraph that needs bidi. An
-  // Arabic run needs an AL letter, which makes the paragraph need bidi; arabic::holdsArabic alone also passes the
-  // Arabic-Indic digits and the Arabic comma, which no run takes.
+  // Whether a pass that shapes shapes `text`: it holds Indic text, Arabic text in a paragraph that needs bidi, or
+  // Myanmar text. An Arabic run needs an AL letter, which makes the paragraph need bidi; arabic::holdsArabic alone also
+  // passes the Arabic-Indic digits and the Arabic comma, which no run takes.
   bool shapedText(std::string_view text) const;
   // Joins each glued group's tokens that TextShaping::mergesWithPrevious merges (deviation 7, and the Hebrew name)
   // before anything is measured: a merged token keeps its first part's style, size, boundary and visible offset. Ruby
@@ -289,8 +290,8 @@ class ParsedText {
   // The face token i is shaped with, and the ppem (26.6) its glyphs are drawn at: the face's, times the font's base
   // scale, times the word's. Null (and 0) on a vertical line, which reorders instead, and for a font that cannot shape.
   // The renderer is asked once a pass for each font and style (ShapingState's face answers), so every key and every
-  // call of a pass reads one answer. Asked only for a token that holds Indic or Arabic text: a face the heap refused is
-  // null too, and latches shaping degraded, since the token is then laid out as without a face.
+  // call of a pass reads one answer. Asked only for a token that holds Indic, Arabic or Myanmar text: a face the heap
+  // refused is null too, and latches shaping degraded, since the token is then laid out as without a face.
   ShapingFace* shapingFaceFor(const GfxRenderer& renderer, int fontId, size_t i, uint32_t* drawnPpem) const;
   // Forgets the pass's face answers: a face lives for the build, and a font set reload between passes frees it.
   void forgetFaceAnswers();
