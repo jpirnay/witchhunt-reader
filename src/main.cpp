@@ -45,6 +45,7 @@
 #include "CrossPointState.h"
 #include "GestureEventManager.h"
 #include "GlobalBookmarkIndex.h"
+#include "HyphenationPacks.h"
 #include "KOReaderCredentialStore.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
@@ -1459,6 +1460,7 @@ void setup() {
   // instead of decoded per glyph (CjkUiFonts.h). Registered before the first pack is resolved.
   I18N.setPackExtension(&CjkUiFonts::packExtension());
   I18N.loadSettings();
+  HyphenationPacks::begin();
   KOREADER_STORE.loadFromFile();
 #if CROSSPOINT_KOREADER_AUTOSYNC
   WIFI_STORE.loadFromFile();

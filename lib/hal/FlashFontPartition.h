@@ -1,6 +1,9 @@
 #pragma once
 
 #include <esp_partition.h>
+#if __has_include(<sdkconfig.h>)
+#include <sdkconfig.h>
+#endif
 
 #include <cstddef>
 #include <cstdint>
@@ -81,9 +84,29 @@ static constexpr size_t HEADER_BYTES = 8 + MAX_ENTRIES * ENTRY_SIZE;  // 776 byt
 // reaches past it and rebuild from the SD card, so the move migrates itself.
 static constexpr size_t LANG_RESERVED_BYTES = 128 * 1024;
 
-// Bytes of the partition the font cache may use: everything below the language
-// slot. Returns 0 if the partition is missing or smaller than the reservation.
+// Bytes below the language slot reserved for the hyphenation store (HyphenationStore.h):
+// the tries of the languages the reader's books are in, copied from their SD packs and
+// read in place as the image's own tries were. 384 KB holds every trie that used to ship
+// in the image at once (323 KB), or Hungarian's alone (354 KB, the largest there is). A
+// multiple of 64 KB, so the region starts on a mapping page and the slot above it does
+// not move. Taking it from the font cache migrates itself as the 128 KB slot did.
+//
+// None on boards with PSRAM: they load a book's trie from its pack into PSRAM
+// (src/HyphenationPacks.cpp), and their font cache keeps the flash.
+#if CONFIG_SPIRAM
+static constexpr size_t HYPH_RESERVED_BYTES = 0;
+#else
+static constexpr size_t HYPH_RESERVED_BYTES = 384 * 1024;
+#endif
+
+// Bytes of the partition the font cache may use: everything below the hyphenation region
+// and the language slot. Returns 0 if the partition is missing or smaller than the
+// reservations.
 size_t fontUsableSize();
+
+// Where the hyphenation region starts in the partition (it ends where the language slot
+// starts); 0 when the board has none or the partition is too small for it.
+size_t hyphRegionOffset();
 
 struct Entry {
   char familyName[32];
