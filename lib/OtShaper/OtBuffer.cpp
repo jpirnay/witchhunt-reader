@@ -14,7 +14,7 @@ void setHeapCheck(const HeapCheck check) { gHeapCheck = check; }
 bool heapAvailable(const size_t bytes) { return gHeapCheck == nullptr || gHeapCheck(bytes); }
 
 void Digest::add(const uint32_t g) {
-  for (int i = 0; i < 3; i++) masks[i] |= 1ull << ((g >> DIGEST_SHIFTS[i]) & 63);
+  for (int i = 0; i < 3; i++) masks[i] |= bit64((g >> DIGEST_SHIFTS[i]) & 63);
 }
 
 void Digest::addRange(const uint32_t a, const uint32_t b) {
@@ -33,7 +33,7 @@ void Digest::addRange(const uint32_t a, const uint32_t b) {
 
 bool Digest::mayHave(const uint32_t g) const {
   for (int i = 0; i < 3; i++) {
-    if (!(masks[i] & (1ull << ((g >> DIGEST_SHIFTS[i]) & 63)))) return false;
+    if (!hasBit64(masks[i], (g >> DIGEST_SHIFTS[i]) & 63)) return false;
   }
   return true;
 }

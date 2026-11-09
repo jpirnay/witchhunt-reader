@@ -39,6 +39,16 @@ using HeapCheck = bool (*)(size_t bytes);
 void setHeapCheck(HeapCheck check);
 bool heapAvailable(size_t bytes);
 
+// Bit `n` (< 64) of a 64-bit mask, and a mask of that bit alone, in 32-bit halves: on RV32 a variable shift of a
+// 64-bit value is a call to a ROM helper (__lshrdi3, __ashldi3), and the digest tests and the shapers' category tests
+// make one per glyph.
+constexpr bool hasBit64(const uint64_t mask, const unsigned n) {
+  return ((n < 32 ? static_cast<uint32_t>(mask) : static_cast<uint32_t>(mask >> 32)) >> (n & 31)) & 1;
+}
+constexpr uint64_t bit64(const unsigned n) {
+  return n < 32 ? uint64_t{1u << n} : static_cast<uint64_t>(1u << (n & 31)) << 32;
+}
+
 // HarfBuzz's set digest: a three-mask Bloom filter over glyph IDs. Whether a
 // lookup "would substitute" depends on it for some subtable formats, so it is
 // reproduced exactly; it also lets lookup application skip glyphs and lookups
@@ -89,7 +99,7 @@ bool digestRecordMayHave(const uint8_t* record, uint32_t glyph);
 // may hold `glyph`, so that when it may not, neither may the record; and such a mask stored alone (8 bytes,
 // little-endian, unaligned).
 uint64_t digestRecordLowMask(const uint8_t* record);
-inline bool lowMaskMayHave(const uint64_t mask, const uint32_t glyph) { return mask & (1ull << (glyph & 63)); }
+inline bool lowMaskMayHave(const uint64_t mask, const uint32_t glyph) { return hasBit64(mask, glyph & 63); }
 uint64_t readLowMask(const uint8_t* stored);
 void writeLowMask(uint64_t mask, uint8_t* stored);
 

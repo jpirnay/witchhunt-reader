@@ -29,7 +29,7 @@ constexpr uint8_t NO_REPHA = 0xFF;
 
 bool isConsonant(const GlyphInfo& info) {
   if (info.ligated()) return false;  // if it ligated, all bets are off
-  return (CONSONANT_FLAGS >> info.category) & 1;
+  return hasBit64(CONSONANT_FLAGS, info.category);
 }
 
 // initial_reordering_consonant_syllable().
