@@ -233,10 +233,11 @@ bool Plan::finish(const Face& face) {
 bool Plan::copyLookupDigests(const Face& face) {
   digestBlock_.reset();
   lookupDigests_.bind(nullptr, 0);
-  groupMasks_.bind(nullptr, 0);   // witchhunt: deviation 18
-  groupStarts_.bind(nullptr, 0);  // witchhunt: deviation 18
-  secondMasks_.bind(nullptr, 0);  // witchhunt: deviation 19
-  secondSlots_.bind(nullptr, 0);  // witchhunt: deviation 19
+  groupMasks_.bind(nullptr, 0);     // witchhunt: deviation 18
+  groupStarts_.bind(nullptr, 0);    // witchhunt: deviation 18
+  secondMasks_.bind(nullptr, 0);    // witchhunt: deviation 19
+  secondSlots_.bind(nullptr, 0);    // witchhunt: deviation 19
+  lookupOffsets_.bind(nullptr, 0);  // witchhunt: deviation 20
   const size_t planned = lookups[GSUB].size() + lookups[GPOS].size();
   const size_t bytes = planned * DIGEST_BYTES;
   if (bytes == 0) return true;
@@ -255,11 +256,22 @@ bool Plan::copyLookupDigests(const Face& face) {
   if (ligatures > 255) ligatures = 255;
   const size_t secondBytes = ligatures * 8;
   const size_t slotBytes = ligatures ? lookups[GSUB].size() : 0;
-  if (!heapAvailable(bytes + secondBytes + groupBytes + slotBytes)) return false;
-  digestBlock_ = makeUniqueNoThrow<uint8_t[]>(bytes + secondBytes + groupBytes + slotBytes);
+  // witchhunt: deviation 20 - the lookup offsets last, aligned for their uint16_t.
+  const size_t offsetsAt = (bytes + secondBytes + groupBytes + slotBytes + 1) & ~static_cast<size_t>(1);
+  const size_t total = offsetsAt + planned * sizeof(uint16_t);
+  if (!heapAvailable(total)) return false;
+  digestBlock_ = makeUniqueNoThrow<uint8_t[]>(total);
   if (!digestBlock_) return false;
   lookupDigests_.bind(digestBlock_.get(), bytes);
   lookupDigests_.resize(bytes);
+  lookupOffsets_.bind(reinterpret_cast<uint16_t*>(digestBlock_.get() + offsetsAt), planned);  // witchhunt: deviation 20
+  for (int t = GSUB; t <= GPOS; t++) {                                                        // witchhunt: deviation 20
+    const Table list = face.layout(t).offset16(8);
+    for (const PlannedLookup& lookup : lookups[t]) {
+      const Table found = face.lookup(t, lookup.index);
+      lookupOffsets_.push_back(found.empty() ? 0 : static_cast<uint16_t>(found.data() - list.data()));
+    }
+  }
   // witchhunt: deviation 19 - each LigatureSubst lookup's second mask, while slots last.
   if (ligatures) {
     secondMasks_.bind(digestBlock_.get() + bytes, secondBytes);
@@ -409,6 +421,9 @@ LookupSettings Plan::settings(const int table, const size_t i, const bool resolv
   } else if (!subtableStarts_[table].empty()) {  // witchhunt: deviation 13 - the filter block holds subtables only
     out.subtableDigests = subtableDigests_[table].data() + DIGEST_BYTES * subtableStarts_[table][i];
   }
+  // witchhunt: deviation 20 - where the lookup is.
+  const size_t planned = table == GSUB ? i : lookups[GSUB].size() + i;
+  if (!testBypassCaches && planned < lookupOffsets_.size()) out.lookupOffset = lookupOffsets_[planned];
   // witchhunt: deviation 19 - a LigatureSubst lookup's second mask.
   if (table == GSUB && !testBypassCaches && i < secondSlots_.size() && secondSlots_[i]) {
     out.secondMask = readLowMask(secondMasks_.data() + 8 * (secondSlots_[i] - 1));
@@ -460,6 +475,7 @@ size_t Plan::memoryBytes() const {
   size_t bytes = sizeof(Plan) + lookupDigests_.capacity();  // witchhunt: deviation 13 - the lookup digests
   bytes += groupMasks_.capacity() + groupStarts_.capacity() * sizeof(uint16_t);  // witchhunt: deviation 18
   bytes += secondMasks_.capacity() + secondSlots_.capacity();                    // witchhunt: deviation 19
+  bytes += lookupOffsets_.capacity() * sizeof(uint16_t);                         // witchhunt: deviation 20
   for (int t = GSUB; t <= GPOS; t++) {
     bytes += lookups[t].capacity() * sizeof(PlannedLookup) + stages[t].capacity() * sizeof(Stage) +
              subtableStarts_[t].capacity() * sizeof(uint32_t) + subtableDigests_[t].capacity();

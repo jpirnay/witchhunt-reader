@@ -178,6 +178,7 @@ class Plan {
   // witchhunt: deviation 16 - and the start-glyph pre-filter (mayStart()).
   // witchhunt: deviation 18 - and the subtable groups (settings() gives none).
   // witchhunt: deviation 19 - and the ligatures' second masks (settings() gives all bits).
+  // witchhunt: deviation 20 - and the lookup offsets (settings() gives none: Face::lookup() reads the list).
   bool testBypassCaches = false;
 
  private:
@@ -229,6 +230,9 @@ class Plan {
   // the groups, the slots last. At most 255 lookups have one.
   FixedVector<uint8_t> secondMasks_;
   FixedVector<uint8_t> secondSlots_;
+  // witchhunt: deviation 20 - per planned lookup (GSUB's then GPOS's) its offset in the LookupList, 0 for one
+  // Face::lookup() drops; in the digest block after the digests.
+  FixedVector<uint16_t> lookupOffsets_;
 
   // witchhunt: deviation 13 - consonantPosition()'s memo, direct-mapped: one
   // slot per (consonant ^ virama) % POSITION_SLOTS, keyed by the two glyph IDs

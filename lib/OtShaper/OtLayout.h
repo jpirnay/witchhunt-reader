@@ -39,6 +39,10 @@ struct LookupSettings {
   // witchhunt: deviation 19 - a ligature lookup's second components (ligatureSeconds()): the start glyph's next glyph,
   // when it may not be skipped, must be one, or no ligature can match. All bits: no filter.
   uint64_t secondMask = ~0ull;
+  // witchhunt: deviation 20 - the lookup's offset in its LookupList (0: a lookup Face::lookup() drops), so it is found
+  // without reading the list; NO_LOOKUP_OFFSET: read it.
+  static constexpr uint32_t NO_LOOKUP_OFFSET = 0xFFFFFFFF;
+  uint32_t lookupOffset = NO_LOOKUP_OFFSET;
   uint32_t mask = 0;
   bool autoZwnj = true;
   bool autoZwj = true;

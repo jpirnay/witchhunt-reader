@@ -1023,6 +1023,25 @@ TEST(OtShaper, LigatureSecondMasksHoldEverySecondComponent) {
   EXPECT_GT(filtered, 0u);
 }
 
+// Deviation 20: a planned lookup's kept offset finds the table Face::lookup() finds.
+TEST(OtShaper, PlannedLookupOffsetsFindTheLookups) {
+  for (const Book& book : BOOKS) {
+    SCOPED_TRACE(book.font);
+    BookPlan bp;
+    ASSERT_TRUE(bp.open(book));
+    for (const int t : {ot::GSUB, ot::GPOS}) {
+      for (size_t i = 0; i < bp.plan.lookups[t].size(); i++) {
+        const uint32_t offset = bp.plan.settings(t, i).lookupOffset;
+        ASSERT_NE(offset, ot::LookupSettings::NO_LOOKUP_OFFSET);
+        const ot::Table found = bp.font.face.lookup(t, bp.plan.lookups[t][i].index);
+        const ot::Table kept = bp.font.face.layout(t).offset16(8).at(offset);
+        EXPECT_EQ(kept.data(), found.data()) << "table " << t << " lookup " << i;
+        EXPECT_EQ(kept.length(), found.length()) << "table " << t << " lookup " << i;
+      }
+    }
+  }
+}
+
 // Deviation 17: the cmap cache answers as the cmap does. Two fonts asked in turn empty the cache at every ask, so each
 // answer is the subtable's own; the same code points asked of one font after the other then come from the cache, a
 // slot held by the other font's answers first, every slot reused across script blocks.

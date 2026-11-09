@@ -329,7 +329,10 @@ bool isLigatureLookup(const Face& face, const uint32_t lookupIndex) {  // witchh
 void applyLookup(const Face& face, const Scale& scale, Buffer& buffer, const int table, const uint32_t lookupIndex,
                  const LookupSettings& settings) {
   if (!buffer.len() || !settings.mask) return;
-  const Table lookup = face.lookup(table, lookupIndex);
+  // witchhunt: deviation 20 - Face::lookup()'s answer, from the offset the plan read once.
+  const Table lookup = settings.lookupOffset == LookupSettings::NO_LOOKUP_OFFSET
+                           ? face.lookup(table, lookupIndex)
+                           : face.layout(table).offset16(8).at(settings.lookupOffset);
   if (lookup.empty()) return;
 
   ApplyContext c(face, scale, buffer, table);
