@@ -9,6 +9,7 @@
 #include <numeric>
 
 #include "ArabicUiPack.h"
+#include "CjkUiPacks.h"
 
 // --- SdCardFontFamilyInfo helpers ---
 
@@ -210,8 +211,8 @@ void SdCardFontRegistry::scanRoot(const char* rootPath) {
 
       // Skip hidden/system directories (macOS ._*, .Trashes, etc.)
       if (nameBuffer[0] == '.' || nameBuffer[0] == '_') continue;
-      // The Arabic UI pack draws the interface's Arabic (src/UiScriptPack.cpp): no reading font.
-      if (strcmp(nameBuffer, arabic_ui_pack::FAMILY) == 0) continue;
+      // The UI packs draw the interface's Arabic and CJK (src/UiScriptPack.cpp, src/CjkUiPack.cpp): no reading fonts.
+      if (strcmp(nameBuffer, arabic_ui_pack::FAMILY) == 0 || cjk_ui_pack::isFamily(nameBuffer)) continue;
 
       // Skip in-flight install/rollback dirs (Bookerly__staging, Bookerly__backup, ...)
       // — these may contain valid-looking .cpfont files during a resumable

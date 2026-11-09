@@ -21,8 +21,9 @@ class FontDecompressor;
 /// which only the language picker's names and CJK book titles ever ask for. If the slot cannot
 /// hold the faces, the active language decodes on demand too: slower, never wrong.
 ///
-/// They cover the translations and nothing else. A book title, an author or a chapter name in a
-/// script they lack takes its glyphs from the reader's TrueType font while one is loaded (it stays
+/// They cover the translations and nothing else. A book title, an author or a chapter name with CJK
+/// they lack takes its glyphs from the CJK UI packs on the card (CjkUiPack: a download in the Font
+/// Manager, one per region), then from the reader's TrueType font while one is loaded (it stays
 /// loaded past the reader, for Home and the Library), at the CJK UI faces' em; a CJK character
 /// nothing covers draws as a box.
 class TtfFont;

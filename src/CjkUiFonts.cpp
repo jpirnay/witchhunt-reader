@@ -18,6 +18,7 @@
 
 #include <cstddef>
 
+#include "CjkUiPack.h"
 #include "UiScriptPack.h"
 #include "activities/RenderLock.h"
 
@@ -152,6 +153,17 @@ const EpdFontData* servedFace(const LanguageFaces& row, const size_t size) {
 void orderReaderFace() {
   const bool afterFirst = facesOf(uiLanguage) != nullptr;
   for (FallbackFaceProvider& provider : providers) provider.setReaderFaceAfterFirst(afterFirst);
+}
+
+// The CJK UI packs at a provider's size (CjkUiPack), `ctx` the index into SIZES.
+const EpdFontData* cjkPackFace(void* ctx, const uint32_t codepoint) {
+  return CjkUiPack::face(SIZES[reinterpret_cast<uintptr_t>(ctx)], codepoint);
+}
+bool cjkPackCovers(void* ctx, const uint32_t codepoint) {
+  return CjkUiPack::covers(SIZES[reinterpret_cast<uintptr_t>(ctx)], codepoint);
+}
+void cjkPackPrepare(void* ctx, const char* utf8Text) {
+  CjkUiPack::prepare(SIZES[reinterpret_cast<uintptr_t>(ctx)], utf8Text);
 }
 
 void orderFaces() {
@@ -364,6 +376,12 @@ void CjkUiFonts::attach(EpdFont& font, const uint8_t points, const bool bold) {
   copy.provider = &faceProviders[index];
   providers[size].setReaderFace(&readerFaceAt, reinterpret_cast<void*>(size));
   providers[size].setFormsArabic(&readerDrawsArabicForms, reinterpret_cast<void*>(size));
+  FallbackFaceProvider::Packs packs;
+  packs.face = &cjkPackFace;
+  packs.covers = &cjkPackCovers;
+  packs.prepare = &cjkPackPrepare;
+  packs.ctx = reinterpret_cast<void*>(size);
+  providers[size].setPacks(packs);
   // The face of the provider's own size: the first attached (main.cpp attaches the regular before the bold).
   if (points == SIZES[size] && !primaryAttached[size]) {
     providers[size].setPrimaryFace(data);
@@ -387,6 +405,7 @@ void CjkUiFonts::setReaderFont(TtfFont* font) {
 
 void CjkUiFonts::setLanguage(const Language language) {
   uiLanguage = language;
+  CjkUiPack::setLanguage(language);
   languageSet = true;
   orderFaces();
 }

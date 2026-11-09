@@ -8,7 +8,7 @@
 class FontDecompressor;
 
 /// Serves a font's missing glyphs out of other BUILT-IN faces: the CJK UI faces behind the Inter UI
-/// faces (src/CjkUiFonts.cpp).
+/// faces (src/CjkUiFonts.cpp), and for book text out of the CJK UI packs on the card (setPacks).
 ///
 /// Installed as EpdFontData::provider, so EpdFont asks it only after the font's own interval table
 /// has missed, and the renderer gets the bitmap back through ownsBitmap(). Kerning stays the font's
@@ -44,6 +44,21 @@ class FallbackFaceProvider final : public GlyphProvider {
     readerCtx_ = ctx;
   }
   void setReaderFaceAfterFirst(const bool afterFirst) { readerAfterFirst_ = afterFirst; }
+
+  /// Script packs on the card at this provider's size: the CJK UI packs (src/CjkUiPack.cpp). Searched after the active
+  /// UI language's own face (for its translations) and before the reader's face and the other faces, whatever book was
+  /// read last. Every hook takes `ctx`.
+  struct Packs {
+    /// The pack face that draws `codepoint` in the string being drawn, opened on first ask; nullptr: none installed
+    /// holds it.
+    const EpdFontData* (*face)(void* ctx, uint32_t codepoint) = nullptr;
+    /// Whether an installed pack holds `codepoint`, without opening one.
+    bool (*covers)(void* ctx, uint32_t codepoint) = nullptr;
+    /// A string is measured or drawn next: the packs order themselves for it and read its characters in one pass.
+    void (*prepare)(void* ctx, const char* utf8Text) = nullptr;
+    void* ctx = nullptr;
+  };
+  void setPacks(const Packs& packs) { packs_ = packs; }
   /// The UI face this provider serves, whose own table beginText() reads to tell which of a string's characters it
   /// lacks: the regular face of the provider's size. Its siblings (bold, other sizes) cover the same characters.
   void setPrimaryFace(const EpdFontData* primary) { primary_ = primary; }
@@ -113,6 +128,8 @@ class FallbackFaceProvider final : public GlyphProvider {
   bool readerAfterFirst_ = false;
   const EpdFontData* primary_ = nullptr;
   bool bookText_ = false;  // beginText(): the string being drawn is book text
+  Packs packs_{};
+  const EpdFontData* servedPack_ = nullptr;  // the pack face the last pack glyph came from
   bool (*formsArabic_)(void* ctx) = nullptr;
   void* formsCtx_ = nullptr;
 

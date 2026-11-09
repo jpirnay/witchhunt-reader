@@ -230,6 +230,48 @@
       ]
     },
     {
+      "name": "ChineseTradUI",
+      "description": "Traditional Chinese in the interface: book titles. Not a reading font",
+      "format": "uipack",
+      "inDownloadAll": false,
+      "styles": [
+        "regular"
+      ],
+      "files": [
+        {
+          "name": "ChineseTradUI/ChineseTradUI_10.cpfont",
+          "size": 1419068,
+          "crc32": 3817949916
+        },
+        {
+          "name": "ChineseTradUI/ChineseTradUI_12.cpfont",
+          "size": 1836315,
+          "crc32": 4254418899
+        }
+      ]
+    },
+    {
+      "name": "ChineseUI",
+      "description": "Simplified Chinese in the interface: book titles. Not a reading font",
+      "format": "uipack",
+      "inDownloadAll": false,
+      "styles": [
+        "regular"
+      ],
+      "files": [
+        {
+          "name": "ChineseUI/ChineseUI_10.cpfont",
+          "size": 1418934,
+          "crc32": 3590344252
+        },
+        {
+          "name": "ChineseUI/ChineseUI_12.cpfont",
+          "size": 1835899,
+          "crc32": 2081161511
+        }
+      ]
+    },
+    {
       "name": "Gelasio",
       "description": "Readable old-style serif (Latin, Cyrillic)",
       "format": "cpfont",
@@ -454,6 +496,48 @@
           "name": "Inter/Inter_18.cpfont",
           "size": 1120626,
           "crc32": 2685503313
+        }
+      ]
+    },
+    {
+      "name": "JapaneseUI",
+      "description": "Japanese in the interface: book titles. Not a reading font",
+      "format": "uipack",
+      "inDownloadAll": false,
+      "styles": [
+        "regular"
+      ],
+      "files": [
+        {
+          "name": "JapaneseUI/JapaneseUI_10.cpfont",
+          "size": 1423114,
+          "crc32": 370575926
+        },
+        {
+          "name": "JapaneseUI/JapaneseUI_12.cpfont",
+          "size": 1853964,
+          "crc32": 3886304055
+        }
+      ]
+    },
+    {
+      "name": "KoreanUI",
+      "description": "Korean in the interface: book titles. Not a reading font",
+      "format": "uipack",
+      "inDownloadAll": false,
+      "styles": [
+        "regular"
+      ],
+      "files": [
+        {
+          "name": "KoreanUI/KoreanUI_10.cpfont",
+          "size": 656133,
+          "crc32": 1388107602
+        },
+        {
+          "name": "KoreanUI/KoreanUI_12.cpfont",
+          "size": 860217,
+          "crc32": 3953711808
         }
       ]
     },
