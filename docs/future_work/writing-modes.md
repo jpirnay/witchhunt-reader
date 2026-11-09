@@ -1,9 +1,9 @@
 # Writing modes: right-to-left and vertical text
 
-Status: open items as of 2026-11-02.
+Status: open items as of 2026-11-09.
 
-Hebrew and Arabic books, and vertical Chinese, Japanese and Korean. Vertical text is built (step 3); right to left
-is not. The design and the maintainer's decisions are in `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md`:
+Hebrew and Arabic books, and vertical Chinese, Japanese and Korean. Vertical text is built (steps 3 and 4); right to
+left is built too (#599, #613, #656, #664-#667). The design and the maintainer's decisions are in `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md`:
 - right-to-left bidi and Arabic shaping run once per paragraph at build time, and lines are stored in visual order;
 - vertical text is a horizontal layout in a frame turned 90 degrees clockwise, not a second engine;
 - the book decides the writing mode (CSS `writing-mode`, then OPF `page-progression-direction`), with a global setting
@@ -20,23 +20,16 @@ Each step is its own plan and PR (spec section 7). After step 0, steps 1-2 and 3
 | Step | What | State |
 |---|---|---|
 | 0 | Parse every trigger (`writing-mode`, `text-orientation`, `text-combine-upright`, `direction`, `unicode-bidi`, `start`/`end`, `dir` with `<bdo>`/`<bdi>`, OPF ppd); CSS boxes along the writing mode, `start`/`end` along the direction; `line-height` parsed as CSS means it and kept through the cache; fixture books | shipped (#560) ([plan](../superpowers/plans/2026-10-26-writing-modes-step0.md)) |
-| 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; the horizontal right-to-left case of FlowContext and page progression, which step 3 built for vertical text ([below](#what-step-1-takes-from-step-3)) | in progress: PR 1 #599 merged (the library: bidi core, shaping layer, Hebrew divine-name rule); PR 2 #613 merged (layout and drawing: right-to-left lines, niqqud, lists and tables, bidi markup); PR 3 is reading a Hebrew book ([design](../superpowers/specs/2026-11-02-writing-modes-step1-design.md), [PR 1 plan](../superpowers/plans/2026-11-02-writing-modes-step1-pr1.md), [PR 2 plan](../superpowers/plans/2026-11-02-writing-modes-step1-pr2.md)) |
-| 2 | Arabic script; before its plan, decide on one shaper for Arabic and the Indic scripts ([below](#complex-shaping-arabic-and-the-indic-scripts)) | in progress: PR 1 #603, PR 2 #624 merged; PR 3 #642 (Indic books: shaped text laid out and drawn); PR 3b #645 (the Font Manager's Indic families: 20 Noto families, chosen by the book's language); PR 4a #651 (the Arabic shaper in the engine: Arabic, Persian and Urdu shape right to left and match HarfBuzz); PR 4b #656 (Arabic books: Arabic, Persian and Urdu shape and join on the page, Indic words shape inside bidi paragraphs, and the Font Manager offers NotoNaskhArabic and NotoSansArabic; the 2x build-time line is missed at 3.17x) ([design](../superpowers/specs/2026-11-02-writing-modes-step2-design.md), [measurements](../superpowers/specs/2026-11-02-writing-modes-step2-measurements.md), [PR 1 plan](../superpowers/plans/2026-11-02-writing-modes-step2-pr1.md), [PR 2 plan](../superpowers/plans/2026-11-04-writing-modes-step2-pr2.md), [PR 3 plan](../superpowers/plans/2026-11-05-writing-modes-step2-pr3.md), [PR 3b plan](../superpowers/plans/2026-11-06-writing-modes-step2-pr3b.md), [PR 4a plan](../superpowers/plans/2026-11-07-writing-modes-step2-pr4a.md), [PR 4b plan](../superpowers/plans/2026-11-07-writing-modes-step2-pr4b.md), [reference](../text-shaping.md)) |
+| 1 | Bidi core and Hebrew; bidi controls from `unicode-bidi`, `<bdo>`, `<bdi>`; the horizontal right-to-left case of FlowContext and page progression, which step 3 built for vertical text ([below](#what-step-1-takes-from-step-3)) | shipped: PR 1 #599 (the library: bidi core, shaping layer, Hebrew divine-name rule); PR 2 #613 (layout and drawing: right-to-left lines, niqqud, lists and tables, bidi markup); PR 3, reading a Hebrew book, as #664, #665 and #666 (2026-11-09) ([design](../superpowers/specs/2026-11-02-writing-modes-step1-design.md), [PR 1 plan](../superpowers/plans/2026-11-02-writing-modes-step1-pr1.md), [PR 2 plan](../superpowers/plans/2026-11-02-writing-modes-step1-pr2.md)) |
+| 2 | Arabic script; before its plan, decide on one shaper for Arabic and the Indic scripts ([below](#complex-shaping-arabic-and-the-indic-scripts)) | shipped but for speed: PR 1 #603, PR 2 #624; PR 3 #642 (Indic books: shaped text laid out and drawn); PR 3b #645 (the Font Manager's Indic families: 20 Noto families, chosen by the book's language); PR 4a #651 (the Arabic shaper in the engine: Arabic, Persian and Urdu shape right to left and match HarfBuzz); PR 4b #656 (Arabic books: Arabic, Persian and Urdu shape and join on the page, Indic words shape inside bidi paragraphs, and the Font Manager offers NotoNaskhArabic and NotoSansArabic); #657, #660, #672 and #667 followed. Speed is left: the 2x build-time line is missed at 3.17x, the handover's item 3 ([writing-modes-handover.md](writing-modes-handover.md)) ([design](../superpowers/specs/2026-11-02-writing-modes-step2-design.md), [measurements](../superpowers/specs/2026-11-02-writing-modes-step2-measurements.md), [PR 1 plan](../superpowers/plans/2026-11-02-writing-modes-step2-pr1.md), [PR 2 plan](../superpowers/plans/2026-11-04-writing-modes-step2-pr2.md), [PR 3 plan](../superpowers/plans/2026-11-05-writing-modes-step2-pr3.md), [PR 3b plan](../superpowers/plans/2026-11-06-writing-modes-step2-pr3b.md), [PR 4a plan](../superpowers/plans/2026-11-07-writing-modes-step2-pr4a.md), [PR 4b plan](../superpowers/plans/2026-11-07-writing-modes-step2-pr4b.md), [reference](../text-shaping.md)) |
 | 3 | Vertical frame (from the spike); the vertical decision and its settings; FlowContext and page progression | shipped (#577) ([plan](../superpowers/plans/2026-10-28-writing-modes-step3.md)) |
 | 4 | Vertical typography: widows and orphans off and lone images centred (PR 1); 、。 and small kana placed from glyph ink, A3a along the column, Traditional Chinese marks (PR 2); tate-chu-yoko (PR 3); the dictionary on vertical pages (PR 4) | shipped (#594, #595, #597, #598) ([design](../superpowers/specs/2026-10-30-writing-modes-step4-design.md), [PR 1 plan](../superpowers/plans/2026-10-30-writing-modes-step4-pr1.md), [PR 2 plan](../superpowers/plans/2026-10-31-writing-modes-step4-pr2.md), [PR 3 plan](../superpowers/plans/2026-11-01-writing-modes-step4-pr3.md), [PR 4 plan](../superpowers/plans/2026-11-02-writing-modes-step4-pr4.md)) |
-| 5 | Visual strings for titles and TOC; bidi in TXT and MD | open |
+| 5 | Visual strings for titles and TOC; bidi in TXT and MD | partly: titles and the TOC are drawn in visual order since #666, and list rows borrow the last book's font whatever its script since #670; titles are not shaped, and TXT and MD have no paragraph bidi (the handover's item 8) |
 
 **Next step.** The open items, in a working order and with how to measure them, are in
-[writing-modes-handover.md](writing-modes-handover.md). Step 4 is done (#594, #595, #597 and #598 merged). Step 1's PR 1 (the bidi library) and PR 2 (layout
-and drawing, #613) are merged; its PR 3 (reading a Hebrew book) comes next. Step 2's engine (#603) and TrueType faces
-(#624) are merged, and PR 3 (#642) shapes Indic books on the page ([reference](../text-shaping.md)). Then PR 3b (#645)
-adds the Font Manager's 20 Indic families (a book takes an installed one of its script by itself), and PR 4a (#651) the Arabic shaper in the engine (matching HarfBuzz). PR 4b (#656) lays Arabic out, which also brings
-shaping into paragraphs that need bidi, and adds the Font Manager's two Arabic families. Step 2 is then complete but for
-speed: a later PR speeds the shaping engine up, since a chapter of real Hindi prose builds in 2.6 times a Latin
-chapter's time on the X3 and one of Arabic prose in 3.17 times, against the design's 2x (the measurements' "Real Hindi
-prose" and "PR 4b: Arabic on the page"). Its other follow-up was the ShapedStore's heap: the store's index, not its chunks, held three quarters of it, and
-is now 16 B an entry and reserved to the pass's count (the handover's item 1 has the measurement and why the lent
-arena's free room is not the place for the rest). Line spacing (`cjk.md`, step 10), which reads the `line-height` step 0 keeps, has shipped.
+[writing-modes-handover.md](writing-modes-handover.md), under "Plan for what is left": the shaping engine's speed after
+the code audit, what the X3 profile found beyond it, the smaller Arabic gaps, UI text, Myanmar's follow-ups and flash.
+Line spacing (`cjk.md`, step 10), which reads the `line-height` step 0 keeps, has shipped.
 
 ## What step 1 takes from step 3
 
@@ -56,24 +49,20 @@ right-to-left case to them.
 
 ## Complex shaping: Arabic and the Indic scripts
 
-**Open; planned for after CJK, together with step 2** (maintainer, 2026-10-29: "store that plan for realisation
-after CJK, when we need to do Arabic").
+**Built in step 2** (`lib/OtShaper`; #603, #624, #642, #645, #651, #656), with Myanmar after it (#668, #671, #673).
+Shaped text is stored and drawn by glyph ID (`b0df1a4fa`). What is left is speed (the handover's item 3) and the gaps in
+`docs/text-shaping.md`, "What is not shaped yet". The rest of this section is the analysis of 2026-10-29 that led there,
+kept as history.
 
 Hindi and the other Indic scripts need complex text shaping: what is drawn is decided by the font's GSUB and GPOS
-tables, not by the characters one by one. CJK did not need it (one glyph per character). Nothing in the firmware
-handles it today: no Devanagari support, the SDK's GSUB reader resolves only ligature lookups (types 4 and 7, for
-fi/fl), and hyphenation patterns exist for ten European languages.
+tables, not by the characters one by one. CJK did not need it (one glyph per character). The spec baked Arabic's
+joining forms into the fonts as Unicode presentation forms (section 5.6). That cannot work for Indic scripts: Unicode
+has no presentation forms for conjuncts, which exist only as font-specific glyphs. So step 2 took one generic shaper
+for both.
 
-**What a Hindi book looks like today**, in a Devanagari TrueType font: the vowel sign ि drawn after its consonant
-instead of before it, no conjuncts or half forms (क्ष, त्र), the reph (र्) not raised, marks placed by guesswork.
-
-**Why it belongs with step 2.** The spec bakes Arabic's joining forms into the fonts as Unicode presentation forms
-(section 5.6). That cannot work for Indic scripts: Unicode has no presentation forms for conjuncts, which exist only
-as font-specific glyphs. A real shaper would serve Arabic properly as well, so the choice is made once, before step 2
-is planned: one generic shaper for both, or baked Arabic forms now and a shaper later.
-
-**What one generic shaping layer needs** (it would serve Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil,
-Telugu, Kannada, Malayalam, Sinhala, Khmer, Myanmar and Tibetan, and Arabic):
+**What one generic shaping layer needs** (it serves Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu,
+Kannada, Malayalam, Sinhala, Arabic and, since #668 and #671, Myanmar; Khmer and Tibetan would need modules of their
+own, not planned):
 1. **Per-character tables:** the Unicode Indic syllabic and positional categories, to split text into syllables and
    place each mark. Data, like the bidi and UAX #50 tables.
 2. **A shaper at section build time** (the placement section 5.3 chose for Arabic): reorder each syllable (pre-base
@@ -98,7 +87,7 @@ problem with a large data cost).
 
 Looked at on 2026-10-29: "feat: add Indic language support without HarfBuzz", open (head `0fbd1575`, 2026-10-23),
 run as an "Indic beta" on upstream's web flasher since 2026-10-14; users report Kannada and Bengali on the X3 and
-Malayalam on the X4 Pro.
+Malayalam on the X4 Pro. Still open on 2026-11-09, at `03ea3b96`.
 - **`lib/OtShaper`** (~5.4k lines): a hand port of HarfBuzz 14.5's Indic and Universal (USE) shapers and of its whole
   GSUB (types 1-8) and GPOS (1-9) engine, with syllable machines and categories generated from HarfBuzz. Scripts:
   Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam, Sinhala. The author reports
@@ -109,9 +98,10 @@ Malayalam on the X4 Pro.
 - **Fonts on the C3:** bitmap `.cpfont` with the GSUB closure rasterised at U+F0000+gid plus a layout font copied into
   the `spiffs` partition (`FlashBlobCache`); TrueType shaping only on PSRAM boards.
 - **Open objection:** vectors `reserve()` after a heap check only, so a failed allocation aborts instead of falling
-  back (against our nothrow rule). Our port resolves it with nothrow fixed storage (step 2's deviation 1).
+  back (against our nothrow rule). Our port resolves it with nothrow fixed storage (step 2's deviation 1,
+  `OtFixedVector.h`).
 
-**What to do with it** (an analysis, not yet a decision): port `OtShaper` with nothrow fixed buffers and its tables
+**What to do with it** (the analysis of 2026-10-29, before step 2): port `OtShaper` with nothrow fixed buffers and its tables
 built from our `FontBytes` views (no table copy, no `spiffs`); take the script tables, the syllable-safe breaks and the
 tests (HarfBuzz oracle, ~4k strings a script, allocation-refusal and corrupt-font tests, the table generators); skip
 `FlashBlobCache` and the bitmap path for now; decide between their tokens and compact glyph records. Key glyph IDs in
@@ -120,8 +110,8 @@ HarfBuzz's MIT notice, which must ship with the port. The engine already has eve
 Arabic (a joining module plus right-to-left) and the Indic scripts is likely; section 5.6's "hundreds of KB" premise
 for a shaper is out of date.
 
-**Next step.** The shaper is being ported in step 2 and was measured first (the measurements file); once PR 1 merges,
-the allocation fix is offered upstream in a comment on #3787 (decision 7).
+**Done.** Step 2 ported the shaper with nothrow fixed buffers (#603), measured first (the measurements file). The
+allocation fix was offered upstream in a comment on #3787 on 2026-11-04 (decision 7).
 
 ## Parsed in step 0, read later
 
@@ -129,7 +119,7 @@ Step 0 parses, caches and tests every trigger; these wait for the step that firs
 
 | What | Kept in | First read by |
 |---|---|---|
-| `text-orientation` | `CssStyle::textOrientation` | step 4: upright or sideways runs (step 3 gives every character its UAX #50 class) |
+| `text-orientation` | `CssStyle::textOrientation` | not read: parsed and cached only; every character takes its UAX #50 class (CSS `mixed`) |
 | `text-combine-upright` | `CssStyle::textCombine` | step 4: tate-chu-yoko, as a per-word flag |
 | `direction`, `dir` (beyond `start`/`end`) | `CssStyle::direction` | step 1: a paragraph's base direction |
 | `unicode-bidi`, `<bdo>`, `<bdi>` | `CssStyle::unicodeBidi` | step 1: embeddings and isolates |
@@ -138,8 +128,8 @@ Step 0 parses, caches and tests every trigger; these wait for the step that firs
 
 ## Found while looking at real books
 
-- **A Chinese book declares `cn`.** Not a language tag, so `TypographyProfile::forLanguage` gives it Latin rules. Read
-  `cn` as `zh` (`TypographyProfile.cpp`).
+- **A Chinese book declares `cn` (done, #637, 2026-11-06).** Not a language tag, so `TypographyProfile::forLanguage`
+  gave it Latin rules. `language_tag::cjkRegionOf` now reads `cn` alone as Simplified Chinese (`LanguageTag.h`).
 - **Aozora Bunko conversions declare no writing mode.** They open horizontally under Automatic; the global setting's On
   is what sets them vertically (spec section 5.1).
 
