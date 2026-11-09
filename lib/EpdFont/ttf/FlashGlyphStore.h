@@ -282,6 +282,21 @@ class FlashGlyphStore {
     uint32_t floor = 0;  // the base of the last entry done: no slot names an older epoch, even after a cut rebuild
   };
 
+  // find()'s recent answers, in RAM. A lookup reads its probe chain in the index and then the record's header, both in
+  // mapped flash and mostly flash-cache misses (a Hebrew glyph costs about twice a Latin one, which probes longer),
+  // while a page asks for the same few dozen glyphs over and over. Two ways of 32 sets, the latest answer first:
+  // 512 B on the C3, for as long as the font set lives. Found and NoGlyph are kept, NotStored is not (the next commit
+  // may store the key). Forgotten wherever a pointer find() handed out stops being valid: resetRing() (close(),
+  // open(), beginInstall()), wipe() and makeRoom(). A commit leaves every found record where it is.
+  struct Recent {
+    uint32_t key;           // glyphstore::kErased: empty (never a glyph key)
+    const EpdGlyph* glyph;  // null: the font has no glyph for the key
+  };
+  static constexpr uint32_t kRecentSets = 32;
+  static constexpr uint32_t kRecentWays = 2;
+  void forgetRecent();
+  static void remember(Recent* set, uint32_t key, const EpdGlyph* glyph);
+
   // The EpdGlyph of the record at `offset` in the log, read in place (4-byte aligned in mapped flash).
   const EpdGlyph& recordGlyph(const uint32_t offset) const {
     return *reinterpret_cast<const EpdGlyph*>(__builtin_assume_aligned(log_ + offset + 4, 4));
@@ -329,6 +344,7 @@ class FlashGlyphStore {
   bool recordWipePending();
 
   NorFlash& flash_;
+  mutable Recent recent_[kRecentSets][kRecentWays];  // find() is const: the answers are RAM, not store state
   glyphstore::Geometry geometry_{};
   uint32_t styleOffset_[glyphstore::kMaxStyles] = {};
   uint32_t styleSize_[glyphstore::kMaxStyles] = {};
