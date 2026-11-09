@@ -119,6 +119,11 @@ endif()
 enable_testing()
 include(GoogleTest)
 
+# Every trie compiled in, as before hyphenation packs: the tests that lay out German or French text keep hyphenating
+# it. The firmware compiles English alone and maps the rest from the SD packs; test/hyphenation_store takes this
+# definition back off to test that path.
+add_compile_definitions(HYPHENATION_ALL_BUILTIN)
+
 # ---------------------------------------------------------------------------
 # Generated I18n headers
 #
@@ -194,6 +199,7 @@ add_subdirectory(password_mask)
 add_subdirectory(link_marker_match)
 add_subdirectory(differential_rounding)
 add_subdirectory(hyphenation_eval)
+add_subdirectory(hyphenation_store)
 add_subdirectory(url_utils)
 add_subdirectory(http_range)
 add_subdirectory(range_download)

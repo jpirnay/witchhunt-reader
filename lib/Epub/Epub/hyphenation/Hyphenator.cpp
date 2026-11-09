@@ -25,7 +25,8 @@ const LanguageHyphenator* Hyphenator::cachedHyphenator_ = nullptr;
 
 namespace {
 
-const LanguageHyphenator* hyphenatorForLanguage(const std::string& langTag) {
+// The registry's entry for a language tag: its primary subtag, lowered, with ISO 639-2 codes mapped to 639-1.
+const LanguageEntry* languageEntryFor(const std::string& langTag) {
   if (langTag.empty()) return nullptr;
 
   std::string primary;
@@ -39,11 +40,16 @@ const LanguageHyphenator* hyphenatorForLanguage(const std::string& langTag) {
 
   for (const auto& mapping : kIso639Mappings) {
     if (primary == mapping.iso639_2) {
-      return getLanguageHyphenatorForPrimaryTag(mapping.iso639_1);
+      return findLanguageEntry(mapping.iso639_1);
     }
   }
 
-  return getLanguageHyphenatorForPrimaryTag(primary);
+  return findLanguageEntry(primary.c_str());
+}
+
+const LanguageHyphenator* hyphenatorForLanguage(const std::string& langTag) {
+  const LanguageEntry* entry = languageEntryFor(langTag);
+  return entry ? getLanguageHyphenatorForPrimaryTag(entry->primaryTag) : nullptr;
 }
 
 // Maps a codepoint index back to its byte offset inside the source word.
@@ -316,3 +322,13 @@ std::vector<Hyphenator::BreakInfo> Hyphenator::myanmarLineEndBreaks(const std::s
 void Hyphenator::setPreferredLanguage(const std::string& lang) { cachedHyphenator_ = hyphenatorForLanguage(lang); }
 
 const LanguageHyphenator* Hyphenator::forLanguage(const std::string& lang) { return hyphenatorForLanguage(lang); }
+
+uint32_t Hyphenator::layoutKey(const std::string& lang) {
+  const LanguageEntry* entry = languageEntryFor(lang);
+  return entry ? hyphenationLayoutKey(entry->primaryTag) : 0;
+}
+
+const char* Hyphenator::languageCode(const std::string& lang) {
+  const LanguageEntry* entry = languageEntryFor(lang);
+  return entry ? entry->primaryTag : nullptr;
+}
