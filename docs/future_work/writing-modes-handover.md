@@ -282,9 +282,11 @@ reader"):
   master gave only the first a target; both are tappable now. The dictionary's reading-order join was done in #656.
 - **The reader's titles:** the status bar's chapter title and the Home and Library book titles get a visual form
   once, when set (`applyBidiVisual`). Today a Hebrew title shows mirrored.
-- **Fonts:** two Font Manager families, Noto Sans Hebrew and Noto Serif Hebrew, merged with Noto Sans/Serif Latin, as
-  `lib/EpdFont/scripts/merge_noto_latin.py` does for Indic and Arabic. New family names, never a re-cut: the flash
-  font cache is keyed on family and size.
+- **Fonts (done, `feat/hebrew-font-families`):** NotoSansHebrew and NotoSerifHebrew in the Font Manager, merged with
+  Noto Sans/Serif Latin by `merge_noto_latin.py` (checked against a Hebrew corpus, `generate_corpus_hebrew.py`), and a
+  Hebrew-script book picks an installed one by itself when the reader font has no alef
+  (`SdCardFontSystem::selectLanguageFamily`). X3: under BookerlyTTF the Bialik chapter switches to NotoSerifHebrew
+  and builds in 3,752 ms against master's 4,550 with the fallback face.
 - **Upstream:** crosspoint-reader#4295 (minibidi L4 mirroring order) was open.
 
 ### 5. Smaller Arabic gaps (each documented in `docs/text-shaping.md`, "What is not shaped yet")
