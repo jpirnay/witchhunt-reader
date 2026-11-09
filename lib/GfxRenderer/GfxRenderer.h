@@ -657,6 +657,10 @@ class GfxRenderer {
 
   // Text
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+  /// Whether UI text in `fontId` draws Arabic in its presentation forms (EpdFontFamily::formsArabic): the gate under
+  /// which drawText, drawTextScaled, getTextWidth and truncatedText form it (BidiUtils::arabicUiForms). For a caller
+  /// that forms a string itself to keep a position in it, as the keyboard's entry field keeps its cursor.
+  bool formsArabicUi(int fontId, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   // Unscaled primitives. The public accessors above apply the font's base scale; these do not,
   // and exist so the *Scaled paths can compound base x residual without applying base twice.
   int rawTextWidth(int fontId, const char* text, EpdFontFamily::Style style) const;

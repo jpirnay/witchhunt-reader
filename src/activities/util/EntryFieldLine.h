@@ -6,7 +6,9 @@
 // character of the line stands once it is drawn, so the caret, the block cursor and a tap land on the right one.
 //
 // The order is BidiUtils::orderUiLine's, the one visualUiLine draws; the x of each character is measured on the line
-// in that order, as GfxRenderer::getTextAdvanceX measures what drawFormedText draws.
+// in that order, as GfxRenderer::getTextAdvanceX measures what drawFormedText draws. A line with Arabic comes formed
+// (BidiUtils::arabicUiForms, when the font draws the forms), so the joined letters are what is measured; the field
+// carries its cursor between the text and the formed line (arabicUiFormsOffset, arabicUiFormsSource).
 
 #include <BidiUtils.h>
 

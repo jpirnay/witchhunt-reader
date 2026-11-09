@@ -14,8 +14,9 @@
 // Hebrew, Arabic and Greek are scripts the interface is not translated into:
 // they have no UI language, so only that screen switches them on, and a
 // keyboard never opens on one. Their keys and the text typed with them are
-// drawn through the UI text path, which orders right-to-left text; what they
-// look like is up to the UI faces' coverage of those scripts.
+// drawn through the UI text path, which orders right-to-left text: Hebrew and
+// Greek from the UI faces, Arabic from the Arabic UI pack (UiScriptPack) or the
+// last book's font, joined where that font has the presentation forms.
 
 #include <I18n.h>
 #include <components/keyboard/keyboard.h>

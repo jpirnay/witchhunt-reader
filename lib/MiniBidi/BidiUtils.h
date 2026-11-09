@@ -43,6 +43,17 @@ bool hasArabic(const char* utf8, size_t len);
 // so what is fitted is what is drawn. Idempotent: a formed string has no letter left to form.
 std::string arabicUiForms(const std::string& logical);
 
+// witchhunt: deviation 14
+// Where byte `pos` of `logical`, a character boundary, falls in arabicUiForms(logical): for a caller that keeps a
+// position in the text (the keyboard's cursor) and lays out the formed string. Inside a Lam-Alef, between the Lam and
+// the Alef, is after the ligature.
+size_t arabicUiFormsOffset(const std::string& logical, size_t pos);
+
+// witchhunt: deviation 14
+// The reverse: the byte of `logical` where the character drawn at `formedPos` of the formed string starts; after the
+// Alef for a position after a Lam-Alef, and the next character for one inside a form.
+size_t arabicUiFormsSource(const std::string& logical, size_t formedPos);
+
 // witchhunt: deviation 1 - frees the shared workspace; the next call allocates it again. Also unbinds a lent buffer.
 void releaseWorkspace();
 

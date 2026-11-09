@@ -153,6 +153,52 @@ TEST(EntryFieldLine, MeasuresTheLineVisualUiLineDraws) {
   }
 }
 
+// سلام as the field shows it where the font has the forms: Seen, Lam-Alef, Meem, three joined glyphs. The caret is
+// carried from the text to the formed line (arabicUiFormsOffset) and a tap back (arabicUiFormsSource).
+const std::string SALAM = encode({0x0633, 0x0644, 0x0627, 0x0645});
+
+TEST(EntryFieldLine, AnArabicWordIsMeasuredJoined) {
+  const std::string formed = BidiUtils::arabicUiForms(SALAM);
+  const auto line = built(formed, 1);
+  EXPECT_EQ(line->width(), 30);  // three glyphs, not four letters
+  EXPECT_EQ(lastMeasured, BidiUtils::visualUiLine(formed, 1));
+  const auto caretAt = [&](const size_t textPos) {
+    return line->caretX(BidiUtils::arabicUiFormsOffset(SALAM, textPos));
+  };
+  EXPECT_EQ(caretAt(0), 30);            // before Seen, on the right
+  EXPECT_EQ(caretAt(2), 20);            // after Seen: between it and the Lam-Alef
+  EXPECT_EQ(caretAt(6), 10);            // after the Alef: between the Lam-Alef and Meem
+  EXPECT_EQ(caretAt(SALAM.size()), 0);  // after Meem, on the left
+  const auto tapAt = [&](const int x) { return BidiUtils::arabicUiFormsSource(SALAM, line->positionAt(x)); };
+  EXPECT_EQ(tapAt(27), 0u);  // right half of Seen: before it
+  EXPECT_EQ(tapAt(22), 2u);  // left half of Seen: after it
+  EXPECT_EQ(tapAt(12), 6u);  // left half of the Lam-Alef: after both its letters
+  EXPECT_EQ(tapAt(3), SALAM.size());
+}
+
+TEST(EntryFieldLine, ArabicAndLatinTogether) {
+  // "سلام abc" in a right-to-left field: abc on the left, reading left to right, the joined word right of it.
+  const std::string text = SALAM + " abc";
+  const std::string formed = BidiUtils::arabicUiForms(text);
+  auto line = built(formed, 1);
+  EXPECT_EQ(lastMeasured, BidiUtils::visualUiLine(formed, 1));
+  EXPECT_EQ(line->width(), 70);
+  EXPECT_EQ(line->caretX(BidiUtils::arabicUiFormsOffset(text, text.size())), 30);  // after c
+  EXPECT_EQ(line->caretX(BidiUtils::arabicUiFormsOffset(text, 8)), 40);            // after Meem
+  EXPECT_EQ(BidiUtils::arabicUiFormsSource(text, line->positionAt(42)), 8u);       // left half of Meem: after it
+  EXPECT_EQ(BidiUtils::arabicUiFormsSource(text, line->positionAt(47)), 6u);       // right half: before it
+
+  // "abc سلام" in a left-to-right one: the caret after Meem stands where the next letter joins on, left of it.
+  const std::string ltr = "abc " + SALAM;
+  const std::string ltrFormed = BidiUtils::arabicUiForms(ltr);
+  line = built(ltrFormed, 0);
+  EXPECT_EQ(lastMeasured, BidiUtils::visualUiLine(ltrFormed, 0));
+  bool rtl = false;
+  EXPECT_EQ(line->caretX(BidiUtils::arabicUiFormsOffset(ltr, ltr.size()), &rtl), 40);
+  EXPECT_TRUE(rtl);
+  EXPECT_EQ(line->caretX(BidiUtils::arabicUiFormsOffset(ltr, 6)), 60);  // after Seen
+}
+
 // orderLine's limit is the line's: past it, visualUiLine draws the line as it is, and the caller lays it out so.
 TEST(EntryFieldLine, ALinePastTheBidiLimitIsNotOrdered) {
   std::string text;

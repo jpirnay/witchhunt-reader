@@ -145,8 +145,11 @@ class KeyboardEntryActivity : public Activity {
   bool masked() const;
   // Where the character a masked field shows ends (just typed), or npos.
   size_t revealEnd() const;
+  // Whether `shown` has Arabic that UI_12 draws in its presentation forms (GfxRenderer::formsArabicUi).
+  bool formsArabic(const std::string& shown) const;
+  // The text as the field shows it: masked, and its Arabic formed (BidiUtils::arabicUiForms).
   std::string displayTextForCurrentState() const;
-  // A byte position in `text` carried to the displayed text, and back: the same unless masked.
+  // A byte position in `text` carried to the displayed text, and back: the same unless masked or formed.
   size_t displayOffset(size_t textPos) const;
   size_t textOffset(size_t displayPos) const;
   // The field's direction, for text with a right-to-left character in it: 1 when its first letter runs right to left,

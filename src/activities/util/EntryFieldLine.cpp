@@ -88,17 +88,26 @@ bool EntryFieldLine::build(const char* line, const size_t len, const int paragra
   }
 
   // Where each drawn character starts: the advance of the line up to it, in drawn order. Zero-width joiners are left
-  // out, as visualUiLine leaves them out.
+  // out, as visualUiLine leaves them out. The whole line is measured first: a font that reads a string's glyphs from
+  // the card when it is measured (the Arabic UI pack) then has them all, and each shorter measure reads none.
   size_t bytes = 0;
   for (size_t v = 0; v < n; ++v) {
-    const uint32_t cp = drawn[v];
-    if (cp != 0x200C && cp != 0x200D) {
-      bytes += putUtf8(&form[bytes], cp);
-      form[bytes] = '\0';
-      edge[v + 1] = static_cast<int16_t>(measure(ctx, form));
-    } else {
+    if (drawn[v] != 0x200C && drawn[v] != 0x200D) bytes += putUtf8(&form[bytes], drawn[v]);
+  }
+  form[bytes] = '\0';
+  measure(ctx, form);
+  bytes = 0;
+  for (size_t v = 0; v < n; ++v) {
+    if (drawn[v] == 0x200C || drawn[v] == 0x200D) {
       edge[v + 1] = edge[v];
+      continue;
     }
+    char tmp[4];
+    bytes += putUtf8(tmp, drawn[v]);
+    const char kept = form[bytes];
+    form[bytes] = '\0';
+    edge[v + 1] = static_cast<int16_t>(measure(ctx, form));
+    form[bytes] = kept;
   }
   return true;
 }

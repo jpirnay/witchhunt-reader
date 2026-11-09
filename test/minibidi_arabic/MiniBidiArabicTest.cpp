@@ -351,3 +351,45 @@ TEST(ArabicUiForms, LeavesOtherTextAlone) {
   EXPECT_EQ(BidiUtils::arabicUiForms(hebrew), hebrew);
   EXPECT_FALSE(BidiUtils::hasArabic(hebrew.data(), hebrew.size()));
 }
+
+/* ── arabicUiFormsOffset / arabicUiFormsSource: a position in the text and in its formed string ── */
+
+// سلام: Seen initial, Lam-Alef final (the Alef taken into it), Meem isolated. Each form takes three bytes, each letter
+// two, and the Alef none.
+TEST(ArabicUiForms, CarriesAPositionToTheFormedTextAndBack) {
+  const std::string salam = encode({0x0633, 0x0644, 0x0627, 0x0645});
+  ASSERT_EQ(decode(BidiUtils::arabicUiForms(salam)), (CP{0xFEB3, 0xFEFC, 0xFEE1}));
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(salam, 0), 0u);
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(salam, 2), 3u);  // after Seen
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(salam, 4), 6u);  // between Lam and Alef: after the ligature
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(salam, 6), 6u);  // after Alef
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(salam, 8), 9u);
+  EXPECT_EQ(BidiUtils::arabicUiFormsSource(salam, 0), 0u);
+  EXPECT_EQ(BidiUtils::arabicUiFormsSource(salam, 3), 2u);
+  EXPECT_EQ(BidiUtils::arabicUiFormsSource(salam, 6), 6u);  // after the ligature: after the Alef
+  EXPECT_EQ(BidiUtils::arabicUiFormsSource(salam, 9), 8u);
+  EXPECT_EQ(BidiUtils::arabicUiFormsSource(salam, 1), 2u);  // inside a form: on to the next character
+}
+
+// Latin before it keeps its bytes; a mark rides its letter; text without Arabic maps to itself.
+TEST(ArabicUiForms, OffsetsInMixedText) {
+  const std::string mixed = "abc " + encode({0x0644, 0x064E, 0x0627, 0x0020, 0x0628});  // abc لَا ب
+  const std::string formed = BidiUtils::arabicUiForms(mixed);
+  ASSERT_EQ(decode(formed), (CP{'a', 'b', 'c', ' ', 0xFEFB, 0x064E, ' ', 0xFE8F}));
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(mixed, 3), 3u);
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(mixed, 4), 4u);
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(mixed, 6), 7u);   // after Lam: the ligature
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(mixed, 8), 9u);   // after the fatha
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(mixed, 10), 9u);  // after the Alef
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset(mixed, mixed.size()), formed.size());
+  EXPECT_EQ(BidiUtils::arabicUiFormsSource(mixed, 9), 10u);  // after the ligature and its mark: after the Alef
+  EXPECT_EQ(BidiUtils::arabicUiFormsSource(mixed, formed.size()), mixed.size());
+  // Every character boundary of the formed string goes back to a boundary of the text and forth to where it was.
+  for (size_t f = 0; f <= formed.size(); ++f) {
+    if (f < formed.size() && (static_cast<uint8_t>(formed[f]) & 0xC0) == 0x80) continue;
+    const size_t t = BidiUtils::arabicUiFormsSource(mixed, f);
+    EXPECT_EQ(BidiUtils::arabicUiFormsOffset(mixed, t), f) << f;
+  }
+  EXPECT_EQ(BidiUtils::arabicUiFormsOffset("Pride", 3), 3u);
+  EXPECT_EQ(BidiUtils::arabicUiFormsSource("Pride", 3), 3u);
+}

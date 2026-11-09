@@ -363,16 +363,28 @@ size_t KeyboardEntryActivity::revealEnd() const {
   return !cursorMode && cursorPos == typedEnd ? cursorPos : std::string::npos;
 }
 
+bool KeyboardEntryActivity::formsArabic(const std::string& shown) const {
+  return BidiUtils::hasArabic(shown.data(), shown.size()) && renderer.formsArabicUi(UI_12_FONT_ID);
+}
+
 std::string KeyboardEntryActivity::displayTextForCurrentState() const {
-  return masked() ? maskPassword(text, revealEnd()) : text;
+  std::string shown = masked() ? maskPassword(text, revealEnd()) : text;
+  // Formed in logical order before it is wrapped, measured and ordered, as drawText forms the rest of the UI's text.
+  return formsArabic(shown) ? BidiUtils::arabicUiForms(shown) : shown;
 }
 
 size_t KeyboardEntryActivity::displayOffset(const size_t textPos) const {
-  return masked() ? maskedOffset(text, revealEnd(), textPos) : textPos;
+  if (!masked()) return formsArabic(text) ? BidiUtils::arabicUiFormsOffset(text, textPos) : textPos;
+  const std::string shown = maskPassword(text, revealEnd());
+  const size_t pos = maskedOffset(text, revealEnd(), textPos);
+  return formsArabic(shown) ? BidiUtils::arabicUiFormsOffset(shown, pos) : pos;
 }
 
 size_t KeyboardEntryActivity::textOffset(const size_t displayPos) const {
-  return masked() ? unmaskedOffset(text, revealEnd(), displayPos) : displayPos;
+  if (!masked()) return formsArabic(text) ? BidiUtils::arabicUiFormsSource(text, displayPos) : displayPos;
+  const std::string shown = maskPassword(text, revealEnd());
+  const size_t pos = formsArabic(shown) ? BidiUtils::arabicUiFormsSource(shown, displayPos) : displayPos;
+  return unmaskedOffset(text, revealEnd(), pos);
 }
 
 int KeyboardEntryActivity::fieldLevel(const std::string& shown) const {
@@ -756,22 +768,27 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   const bool centerText = metrics.keyboardCenteredText;
 
   // The cursor spans a whole code point: a lone byte of it renders as a replacement glyph.
-  // A password shows a star per character, so its displayText is shorter than text: displayCursor
-  // and displayCharBytes are the cursor and the character under it in displayText.
+  // displayText is the text as shown: a password's stars, a star per character, and Arabic in its
+  // presentation forms where the font has them. displayCursor and displayCharBytes are the cursor
+  // and the character under it there.
   const size_t cursorCharBytes = (cursorPos < text.length()) ? utf8Next(text, cursorPos) - cursorPos : 0;
   const size_t displayCursor = displayOffset(cursorPos);
   const size_t displayCharBytes = cursorCharBytes > 0 ? displayOffset(cursorPos + cursorCharBytes) - displayCursor : 0;
   char cursorChar[8] = {};         // the character under the cursor
-  char displayCursorChar[8] = {};  // the same character in displayText, a star for a password
+  char displayCursorChar[8] = {};  // the same character in displayText: a star, an Arabic form
   if (cursorCharBytes > 0) {
     memcpy(cursorChar, text.data() + cursorPos, std::min(cursorCharBytes, sizeof(cursorChar) - 1));
     memcpy(displayCursorChar, displayText.data() + displayCursor,
            std::min(displayCharBytes, sizeof(displayCursorChar) - 1));
   }
 
+  // The block shows the character itself: in its form, or in the clear for a password. An Alef a
+  // Lam-Alef took is drawn in the ligature before it and has none of its own.
+  const char* blockChar = masked() ? cursorChar : displayCursorChar;
+  const bool blockHasChar = masked() ? cursorCharBytes > 0 : displayCharBytes > 0;
   int cursorCharWidth = 6;
-  if (cursorCharBytes > 0) {
-    int w = renderer.getTextWidth(UI_12_FONT_ID, cursorChar);
+  if (blockHasChar) {
+    int w = renderer.getTextWidth(UI_12_FONT_ID, blockChar);
     if (w > cursorCharWidth) cursorCharWidth = w;
   }
 
@@ -816,7 +833,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
       const int caretX = lineStartX + cursorLine->caretX(pos, &caretRtl);
       if (!cursorMode) {
         cursorPixelX = caretX;
-      } else if (cursorCharBytes > 0) {
+      } else if (displayCharBytes > 0) {
         int charX = 0;
         int charAdvance = 0;
         cursorLine->charSpan(pos, charX, charAdvance);
@@ -833,7 +850,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
       }
       const int beforeWidth = renderer.getTextAdvanceX(UI_12_FONT_ID, beforeCursor.c_str(), EpdFontFamily::REGULAR);
       int kernOffset = 0;
-      if (cursorCharBytes > 0) {
+      if (displayCharBytes > 0) {
         const std::string beforeAndCursor = beforeCursor + displayCursorChar;
         const int throughCursorWidth =
             renderer.getTextAdvanceX(UI_12_FONT_ID, beforeAndCursor.c_str(), EpdFontFamily::REGULAR);
@@ -879,8 +896,8 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   if (cursorMode && !togglePos && displayCursor <= displayText.length()) {
     static constexpr int blockPadding = 1;
     renderer.fillRect(cursorPixelX - blockPadding, cursorLineY, cursorCharWidth + blockPadding * 2, lineHeight, true);
-    if (cursorCharBytes > 0) {
-      renderer.drawText(UI_12_FONT_ID, cursorPixelX, cursorLineY, cursorChar, false);
+    if (blockHasChar) {
+      renderer.drawText(UI_12_FONT_ID, cursorPixelX, cursorLineY, blockChar, false);
     }
   } else if (displayCursor <= displayText.length()) {
     static constexpr int serifW = 3;
