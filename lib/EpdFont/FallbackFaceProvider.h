@@ -67,7 +67,18 @@ class FallbackFaceProvider final : public GlyphProvider {
   /// (the build gives every translation's characters a face), so it is book text, and the reader's font goes first
   /// for all of it, before the active language's face too, so a title draws in one font. Its characters the reader's
   /// face is asked for are rendered in one batch (the face's prefetch()).
-  void beginText(const char* utf8Text) override;
+  void beginText(const char* utf8Text) override { beginText(utf8Text, nullptr, nullptr); }
+  /// The same, with the characters `alsoCovered(ctx, cp)` answers for taken as the UI face's own: a script pack's,
+  /// which UiFaceProvider serves before this provider is asked.
+  void beginText(const char* utf8Text, bool (*alsoCovered)(void* ctx, uint32_t codepoint), void* ctx);
+  /// Whether the reader's face draws Arabic in its presentation forms (`forms(ctx)`, CjkUiFonts): GfxRenderer then
+  /// forms Arabic UI text, which that face serves joined. False without the hook, so Arabic UI text is left as its
+  /// letters, as before the forms.
+  void setFormsArabic(bool (*forms)(void* ctx), void* ctx) {
+    formsArabic_ = forms;
+    formsCtx_ = ctx;
+  }
+  bool formsArabic() const override { return formsArabic_ && formsArabic_(formsCtx_); }
 
  private:
   // A served glyph as GlyphProvider hands it out: a full EpdGlyph record (the faces store the 6-byte
@@ -102,6 +113,8 @@ class FallbackFaceProvider final : public GlyphProvider {
   bool readerAfterFirst_ = false;
   const EpdFontData* primary_ = nullptr;
   bool bookText_ = false;  // beginText(): the string being drawn is book text
+  bool (*formsArabic_)(void* ctx) = nullptr;
+  void* formsCtx_ = nullptr;
 
   const EpdGlyph* serve(uint32_t codepoint);
   const EpdGlyph* serveFrom(const EpdFontData* face, uint32_t codepoint, bool reader);

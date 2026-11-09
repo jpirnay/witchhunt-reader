@@ -113,6 +113,20 @@ class Manifests(unittest.TestCase):
                                         "crc32": zlib.crc32(data)}])
         self.assertEqual(list(jp), ["name", "description", "format", "inDownloadAll", "styles", "files"])
 
+    def test_a_ui_pack_is_listed_in_version_3_alone_under_its_own_format(self):
+        cpfont(self.fonts / "ArabicUI" / "ArabicUI_10.cpfont", styles=(0, 1))
+        self.config.write_text(CONFIG + """  - name: ArabicUI
+    description: "Arabic in the interface"
+    format: uipack
+    source: NotoSansArabic
+    inDownloadAll: false
+""", encoding="utf-8")
+        self.assertEqual(self.run_generator().returncode, 0)
+        self.assertEqual([f["name"] for f in self.manifest("fonts.json")["families"]], ["Alpha"])
+        pack = {f["name"]: f for f in self.manifest("fonts-v3.json")["families"]}["ArabicUI"]
+        self.assertEqual((pack["format"], pack["inDownloadAll"], pack["styles"]), ("uipack", False, ["regular", "bold"]))
+        self.assertEqual([f["name"] for f in pack["files"]], ["ArabicUI/ArabicUI_10.cpfont"])
+
     def test_a_folder_the_config_does_not_list_is_reported_and_left_out(self):
         cpfont(self.fonts / "NotoSansCJK" / "NotoSansCJK_12.cpfont")
         run = self.run_generator()

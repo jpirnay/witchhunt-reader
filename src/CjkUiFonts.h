@@ -36,11 +36,12 @@ LanguagePackExtension& packExtension();
 /// Where the faces that are not in the slot decode. Before setLanguage().
 void setDecompressor(FontDecompressor* decompressor);
 
-/// Give `font`, a built-in 1-bit UI face of `points` size, the CJK faces. It takes the largest CJK
-/// size not above its own, or the smallest: 6, 8 and 10 pt draw CJK at 10 pt, 12 and 14 pt at 12 pt.
+/// Give `font`, a built-in 1-bit UI face of `points` size, the CJK faces, and the Arabic UI pack at its own size and
+/// weight (`bold`; UiScriptPack). It takes the largest CJK size not above its own, or the smallest: 6, 8 and 10 pt
+/// draw CJK at 10 pt, 12 and 14 pt at 12 pt.
 /// Repoints font.data at a RAM copy that carries the provider -- the generated table is const flash.
 /// Call once per face at startup, before anything draws with it.
-void attach(EpdFont& font, uint8_t points);
+void attach(EpdFont& font, uint8_t points, bool bold);
 
 /// Search `language`'s faces first, so a Han character that both the Chinese and the Japanese set
 /// hold takes that language's glyph form; for any other language the order is Chinese, Japanese,

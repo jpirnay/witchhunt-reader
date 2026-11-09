@@ -45,6 +45,7 @@ TEST(FontDownloadRulesTest, AFilesKindIsItsExtensionInAnyCase) {
 
 TEST(FontDownloadRulesTest, AManifestFormatNamesAKindExactly) {
   EXPECT_EQ(kindOfFormat("cpfont"), FileKind::Cpfont);
+  EXPECT_EQ(kindOfFormat("uipack"), FileKind::Cpfont);  // a UI script pack: .cpfont files
   EXPECT_EQ(kindOfFormat("ttf"), FileKind::TrueType);
   EXPECT_EQ(kindOfFormat("otf"), FileKind::OpenTypeCff);
   EXPECT_EQ(kindOfFormat("OTF"), FileKind::Unknown);

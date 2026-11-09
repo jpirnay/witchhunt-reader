@@ -31,6 +31,18 @@ bool applyBidiVisual(const char* utf8, std::string& out, int paragraphLevel = -1
 // witchhunt: deviation 2 - upstream's behaviour, with Arabic contextual shaping (do_shape). Unused in step 1.
 bool applyBidiVisualShaped(const char* utf8, std::string& out, int paragraphLevel = -1);
 
+// witchhunt: deviation 14
+// Whether utf8[0..len) holds a code point of the Arabic block, U+0600-06FF (lead bytes D8-DB): a string
+// arabicUiForms may change. One byte scan.
+bool hasArabic(const char* utf8, size_t len);
+
+// witchhunt: deviation 14
+// UI text with its Arabic letters in their contextual presentation forms and each Lam-Alef as its ligature (do_shape's
+// forms, decided in logical order: shape_logical), anything else as it is. Still logical order, and the forms are class
+// AL like their letters, so visualUiLine orders it as before. The UI measures, truncates and wraps the formed string,
+// so what is fitted is what is drawn. Idempotent: a formed string has no letter left to form.
+std::string arabicUiForms(const std::string& logical);
+
 // witchhunt: deviation 1 - frees the shared workspace; the next call allocates it again. Also unbinds a lent buffer.
 void releaseWorkspace();
 

@@ -43,6 +43,11 @@ void EpdFontFamily::beginText(const char* utf8Text, const Style style) const {
   if (font && font->data->provider) font->data->provider->beginText(utf8Text);
 }
 
+bool EpdFontFamily::formsArabic(const Style style) const {
+  const EpdFont* font = getFont(style);
+  return font && font->data->provider && font->data->provider->formsArabic();
+}
+
 bool EpdFontFamily::drawsGlyphKeys(const Style style) const {
   const EpdFont* font = getFont(style);
   return font && font->data->provider && font->data->provider->drawsGlyphKeys();
