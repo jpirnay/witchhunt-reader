@@ -39,7 +39,7 @@ constexpr bool isConsonant(const uint32_t cp) {
            (cp >= 0x105A && cp <= 0x105D) || cp == 0x1061 || cp == 0x1065 || cp == 0x1066 ||
            (cp >= 0x106E && cp <= 0x1070) || (cp >= 0x1075 && cp <= 0x1081) || cp == 0x108E;
   }
-  return (cp >= 0xA9E0 && cp <= 0xA9E4) || (cp >= 0xA9E7 && cp <= 0xA9EF) || (cp >= 0xA9FA && cp <= 0xA9FE) ||
+  return cp <= 0xA9E4 || (cp >= 0xA9E7 && cp <= 0xA9EF) || (cp >= 0xA9FA && cp <= 0xA9FE) ||
          (cp >= 0xAA60 && cp <= 0xAA6F) || (cp >= 0xAA71 && cp <= 0xAA73) || cp == 0xAA7A || cp == 0xAA7E ||
          cp == 0xAA7F;
 }
