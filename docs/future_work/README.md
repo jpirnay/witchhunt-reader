@@ -23,8 +23,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | [screen-layout.md](screen-layout.md) | Overlaps and layout arithmetic left from the header/body audit, cleanup |
 | [test-suite.md](test-suite.md) | Host test suite: firmware paths with no host test, tests blind to corruption, goldens to extend, renames and moves, small cleanups from the second audit, the epub_optimizer sweep |
 | [txt-pipeline.md](txt-pipeline.md) | TXT on the EPUB pipeline and the browser converter to UTF-8: decided, not started; design, traps, order of work |
-| [writing-modes.md](writing-modes.md) | Right-to-left (Hebrew, Arabic) and vertical (Chinese, Japanese, Korean) text: the roadmap, findings from real books, what step 4 inherits from vertical text; complex shaping for Arabic, the Indic scripts and Myanmar, built in step 2, and the analysis behind it |
-| [writing-modes-handover.md](writing-modes-handover.md) | The writing-modes and scripts work as of 2026-11-09: what is merged, what is left in a working order (the shaping engine's speed after the code audit, what the X3 profile found beyond it, the smaller Arabic gaps, UI text, Myanmar's follow-ups, flash), the measurements behind it, how device runs are done, and the traps |
+| [writing-modes-handover.md](writing-modes-handover.md) | The writing-modes and scripts work as of 2026-11-09: what is merged, what is left in a working order (the shaping engine's speed after the code audit, what the X3 profile found beyond it, the smaller Arabic gaps, UI text and its untranslated settings labels, Myanmar's follow-ups, flash, the limits of vertical text), the measurements behind it, how device runs are done, and the traps |
 
 Design records for shipped features, cited from code, are in [../design/](../design/); reference
 documentation is in [../contributing/](../contributing/) and the other files under `docs/`.

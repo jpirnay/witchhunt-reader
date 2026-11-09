@@ -760,7 +760,7 @@ design, this plan and the measurements, as step 1's #599 carried its own design 
 
 **Files:**
 - Create: `lib/OtShaper/COPYING`
-- Modify: `README.md` ("Vendored third-party components (`lib/`)"), `docs/future_work/writing-modes.md`
+- Modify: `README.md` ("Vendored third-party components (`lib/`)"), `docs/design/writing-modes.md`
 
 - [ ] **Step 1: HarfBuzz's notice.**
   - Fetch `https://raw.githubusercontent.com/harfbuzz/harfbuzz/14.5.0/COPYING` into

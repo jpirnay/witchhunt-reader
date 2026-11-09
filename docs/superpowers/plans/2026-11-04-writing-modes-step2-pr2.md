@@ -1013,7 +1013,7 @@ This plan's own:
 ### Task 13: Credits, roadmap, the whole suite and the PR
 
 **Files:**
-- Modify: `README.md:176` (the OtShaper entry), `docs/future_work/writing-modes.md:24` (row 2)
+- Modify: `README.md:176` (the OtShaper entry), `docs/design/writing-modes.md:24` (row 2)
 
 - [ ] **Step 1: The README entry.**
   - Its last sentence becomes: the firmware links the engine's face, table and coverage code from PR 2 on, for the

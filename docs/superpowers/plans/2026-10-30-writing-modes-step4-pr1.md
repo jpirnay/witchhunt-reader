@@ -214,7 +214,7 @@ git commit -m "fix(epub): an image-only vertical page centres its images across 
 ### Task 3: suite, firmware, the X4, docs
 
 **Files:**
-- Modify: `docs/future_work/writing-modes.md` ("What step 4 inherits from step 3": drop the lone-image bullet;
+- Modify: `docs/design/writing-modes.md` ("What step 4 inherits from step 3": drop the lone-image bullet;
   roadmap row 4's state: `in progress (PR 1 #<this PR>)`)
 
 - [ ] **Step 1: The whole host suite**
@@ -248,6 +248,6 @@ setting from the backup and verify with `GET`; leave the X4 on this build.
 - [ ] **Step 5: Docs and commit**
 
 ```bash
-git add docs/future_work/writing-modes.md
+git add docs/design/writing-modes.md
 git commit -m "docs(writing-modes): step 4 PR 1"
 ```

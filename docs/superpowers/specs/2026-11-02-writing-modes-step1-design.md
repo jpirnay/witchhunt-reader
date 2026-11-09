@@ -2,7 +2,7 @@
 
 Status: approved by the maintainer on 2026-11-02 (decisions 0-8 are the maintainer's; a builder check ran first). It builds
 on `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md` (5.1, 5.3, 5.5, 5.7, section 7 row 1)
-and "What step 1 takes from step 3" in `docs/future_work/writing-modes.md`. Decisions 1-4 replace part of the spec's
+and "What step 1 takes from step 3" in `docs/design/writing-modes.md`. Decisions 1-4 replace part of the spec's
 5.3 and its 5.6 for Arabic.
 
 Amended on 2026-11-02 after a review of the PR 2 plan, by the maintainer's decisions:
@@ -244,7 +244,7 @@ with, with one module per script:
 
 ## The reader
 
-- **Page progression** (the gap named in `writing-modes.md`).
+- **Page progression** (the gap named in `docs/design/writing-modes.md`, then in `docs/future_work`).
   - `FlowContext::pageProgressionRtlFor` takes the book's direction as its own input: the profile's default
     direction, or `dir`/CSS `direction` on the section's `html` or `body`.
   - A horizontal section turns right to left when the book's direction is right to left, unless the OPF says
@@ -298,7 +298,7 @@ with, with one module per script:
 3. **Reading a Hebrew book.**
    - Page progression, the logical-order consumers, the bionic check and the Hebrew faces.
    - The status bar's chapter title and the Home and Library book titles in visual order, made once when each is set.
-   - The docs: `USER_GUIDE.md`, `docs/future_work/writing-modes.md`, and a reference page for bidi.
+   - The docs: `USER_GUIDE.md`, `docs/design/writing-modes.md`, and a reference page for bidi.
 
 ## Constraints
 

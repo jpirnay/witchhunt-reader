@@ -14,3 +14,7 @@ on branch `docs/cjk-layout-design` (commit `7e1136008`).
 
 `lib/Epub/Epub/BookFonts.cpp` cites `book-fonts-probe.md` for the Publisher Fonts probe: which spine heads it reads,
 how it ranks a book's families by their text, which faces it copies, and the first-open times behind its budget.
+
+`writing-modes.md` is the record of right-to-left and vertical text (writing modes steps 0-4): the steps and their PRs,
+page progression, reading a Hebrew book, what vertical text does, and the analysis behind one shaper for Arabic and the
+Indic scripts. The shaping itself is the reference page `docs/text-shaping.md`.

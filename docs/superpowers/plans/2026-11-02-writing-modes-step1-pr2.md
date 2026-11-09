@@ -983,7 +983,7 @@ Each book's floors are in its parameter, as `VerticalRules`' are, listed as 460 
 ### Task 12: Sizes, the devices, the roadmap and the PR
 
 **Files:**
-- Modify: `docs/future_work/writing-modes.md` (row 1: "in progress: PR 1 #599, PR 2 #<n>"; "Next step.": PR 3)
+- Modify: `docs/design/writing-modes.md` (row 1: "in progress: PR 1 #599, PR 2 #<n>"; "Next step.": PR 3)
 
 The device runs are the controller's to schedule; this task names what they must show. A Hebrew-capable face exists
 only for the run: upstream's `lib/EpdFont/builtinFonts/source/NotoSansHebrew/NotoSansHebrew-Regular.ttf` (66,156 B,

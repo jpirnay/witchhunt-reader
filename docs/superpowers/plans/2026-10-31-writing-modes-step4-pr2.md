@@ -230,7 +230,7 @@ column", and Decision 1 with its measurements.
   - If no Traditional Chinese font is on the card, note that the zh-Hant book was checked on the host only.
   - Restore every setting from the backup.
 - [ ] **Step 5: Docs.**
-  - `docs/future_work/writing-modes.md`: row 4 becomes `in progress: PR 1 #594, PR 2 #<this PR>`; the "Punctuation
+  - `docs/design/writing-modes.md`: row 4 becomes `in progress: PR 1 #594, PR 2 #<this PR>`; the "Punctuation
     stays rough" bullet is done for 、。 and small kana (the wave dashes stay rotated, design: mirrored form not
     built).
   - `docs/file-formats.md`: TextBlock flags bit 3.

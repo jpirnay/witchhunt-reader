@@ -2,7 +2,7 @@
 
 Status: approved by the maintainer on 2026-11-02, after a builder check; decisions 4-7 are the maintainer's, and the "My calls" list (the controller's calls marked in it included) was approved with the design. It builds on
 `docs/superpowers/specs/2026-11-02-writing-modes-step1-design.md` (decisions 1, 2 and 4, and "The shaping layer"),
-on "Complex shaping: Arabic and the Indic scripts" in `docs/future_work/writing-modes.md`, and on the senior review of
+on "Complex shaping: Arabic and the Indic scripts" in `docs/design/writing-modes.md`, and on the senior review of
 2026-11-02 (section 4b, "Step 2, settle first"). It replaces the spec's 5.6 for Arabic
 (`docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md`), as step 1's decision 4 says.
 

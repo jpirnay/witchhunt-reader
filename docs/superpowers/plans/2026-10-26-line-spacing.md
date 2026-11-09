@@ -218,7 +218,7 @@ reproduce is a finding to report, not a number to adjust silently.
 
 **Files:**
 - Modify: `USER_GUIDE.md:392` (the six choices; CJK books' em pitch; Book's style; the override)
-- Modify: `docs/future_work/cjk.md` (step 10 done, by this PR), `docs/future_work/writing-modes.md` (the step 0 row:
+- Modify: `docs/future_work/cjk.md` (step 10 done, by this PR), `docs/design/writing-modes.md` (the step 0 row:
   shipped, #560)
 
 - [ ] **Step 1:** Make the edits. **Commit** `docs: line spacing in the guide and the roadmaps`.

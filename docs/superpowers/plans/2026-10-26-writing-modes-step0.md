@@ -25,7 +25,7 @@ generators (`test/epubs/`), the serial test API (`tools/devctl.py`, `docs/serial
 
 **Spec:** `docs/superpowers/specs/2026-10-26-rtl-and-vertical-text-architecture.md`, sections 5.1 (who decides what),
 5.2 (the paragraph "CSS box properties are physical; layout is logical"), 5.3 (base direction) and 10.1 (the reference
-run that found the box rule); the roadmap is `docs/future_work/writing-modes.md`. Every expected value below is derived
+run that found the box rule); the roadmap is `docs/design/writing-modes.md`. Every expected value below is derived
 by hand from the host stubs' metrics (`test/epub_pipeline/GfxRenderer.h`: ascender 18, line height 24) and the code at
 master `0625ac40a`, and each test's comment carries its derivation. A value that does not reproduce is a finding to
 report, not a number to adjust silently.
@@ -686,7 +686,7 @@ part pins, in the style of `make_test_cjk_block_seams.py`.
 - Modify: `docs/file-formats.md` (`CSS_CACHE_VERSION (29)` at :57, :300 and :316 → 30, and the payload's flow word in
   the record layout below :316; `book.bin`'s page-progression byte and its version). Check it says nothing of
   `line-height`.
-- Modify: `docs/future_work/writing-modes.md` (step 0 shipped; the "CSS box properties" item under "Left from the
+- Modify: `docs/design/writing-modes.md` (step 0 shipped; the "CSS box properties" item under "Left from the
   spike" removed; the triggers table above, as "parsed in step 0, first read in step N")
 
 - [ ] **Step 1:** Make the edits.

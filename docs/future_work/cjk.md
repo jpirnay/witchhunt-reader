@@ -442,7 +442,7 @@ These were set aside in the layout spec (section 3) and the A3 design (`docs/des
 - `text-emphasis-position`: Chinese marks below the text (marks are always above);
 - hanging punctuation;
 - upstream's Latin dash split (#3883);
-- vertical text, `writing-mode` and `page-progression-direction`: no longer out of scope: vertical text is built (writing-modes step 3), the rest is planned in [writing-modes.md](writing-modes.md).
+- vertical text, `writing-mode` and `page-progression-direction`: no longer out of scope: vertical text is built (writing-modes steps 3 and 4, [../design/writing-modes.md](../design/writing-modes.md)), and what is left of it is in [writing-modes-handover.md](writing-modes-handover.md).
 
 ## Testing on a device
 

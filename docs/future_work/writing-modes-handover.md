@@ -1,8 +1,9 @@
 # Writing modes and scripts: handover (2026-11-09)
 
 This is the state of the right-to-left, Arabic, Indic, Hebrew and CJK work, and what is left, written so that the work
-can continue on another computer. The roadmap itself is [writing-modes.md](writing-modes.md) and, for CJK,
-[cjk.md](cjk.md). This file adds:
+can continue on another computer. What shipped, and why it is shaped as it is, is in
+[../design/writing-modes.md](../design/writing-modes.md) (the steps, page progression, vertical text, the shaping
+analysis) and [../text-shaping.md](../text-shaping.md); for CJK, [cjk.md](cjk.md). This file adds:
 - the open items in a working order;
 - the measurements behind them;
 - how the device runs are done;
@@ -21,7 +22,8 @@ can continue on another computer. The roadmap itself is [writing-modes.md](writi
   - #661 and #662: the right-to-left baseline (the plain-token path, the kerning memory beyond Latin); item 2.
   - #663: a CJK link of several characters can be tapped; item 7.
   - #664, #665, #666: reading a Hebrew book (page progression and reading order, the Noto Sans and Serif Hebrew
-    families picked by language, UI titles drawn right to left); item 4.
+    families picked by language, UI titles drawn right to left); item 4, now in
+    [the design record](../design/writing-modes.md#4-reading-a-hebrew-book-step-1-pr-3).
   - #667: a paragraph whose only Arabic code points are digits shapes nothing; item 5.
   - #668, #671, #673: Myanmar (HarfBuzz 14.5's Myanmar shaper, Burmese books in the Noto Myanmar families, lines
     broken between syllables); item 6.
@@ -240,8 +242,8 @@ left, in the order proposed, each a PR of its own with a device run:
 5. **Myanmar's follow-ups** (item 6).
 6. **Flash** (item 9) as each PR needs it.
 
-Not planned: Khmer and Tibetan (item 6; their own shaper modules), vertical shaped runs, CJK's out-of-scope list;
-each waits for a request.
+Not planned: Khmer and Tibetan (item 6; their own shaper modules), vertical shaped runs, the vertical limits of item
+10, CJK's out-of-scope list; each waits for a request.
 
 ### Where the time goes: the X3 profile (2026-11-09)
 
@@ -323,31 +325,6 @@ with any port of HarfBuzz's coverage caches (not only the digests), their fixes 
 and c3fd6a885 (#6453). Open: #6558 makes the 64-glyph syllable cut the same in every pass; our `forEachSyllable` has
 none, and a call holds at most 32 code points. uharfbuzz 0.56.4 bundles HarfBuzz 15.0.0.
 
-### 4. Step 1 PR 3: reading a Hebrew book (page progression and reading order done)
-
-The scope is the step 1 design (`docs/superpowers/specs/2026-11-02-writing-modes-step1-design.md`, section "The
-reader"):
-- **Page progression (done, `feat/rtl-page-progression`):** `FlowContext::pageProgressionRtlFor` takes the book's
-  direction (`bookIsRtl`). X3: a Hebrew book shows `progression=rtl` and Left turns to the next page; Murphy: the
-  left tap zone shows the next page.
-- **Reading order in the consumers (done, same branch):** the link-target walk and the QR page text read each line in
-  its logical order (`TextBlock::readingOrder`, `appendReadingText`). Murphy: of two note markers on one Hebrew line,
-  master gave only the first a target; both are tappable now. The dictionary's reading-order join was done in #656.
-- **The reader's titles (done, `feat/rtl-ui-titles`, not as the design said):** "once, when set" does not survive the
-  themes, which truncate and wrap a title to fit (45 calls), and a reversed string truncated at its end loses the
-  title's start. So UI text stays in reading order through measuring and fitting, and `GfxRenderer::drawText` and
-  `drawTextScaled` make a line with a right-to-left character visual as they draw it (`BidiUtils::visualUiLine`);
-  a page's words, formed at section build, go through `drawFormedText` instead. Every UI string is covered at once:
-  the status bar, Home, the lists, the TOC, centred text, alt text. X3: a Hebrew chapter title in the status bar
-  read mirrored on master and reads right now. Where the UI face has no Hebrew (the list rows), the last book's font
-  draws it when it has Hebrew (item 8).
-- **Fonts (done, `feat/hebrew-font-families`):** NotoSansHebrew and NotoSerifHebrew in the Font Manager, merged with
-  Noto Sans/Serif Latin by `merge_noto_latin.py` (checked against a Hebrew corpus, `generate_corpus_hebrew.py`), and a
-  Hebrew-script book picks an installed one by itself when the reader font has no alef
-  (`SdCardFontSystem::selectLanguageFamily`). X3: under BookerlyTTF the Bialik chapter switches to NotoSerifHebrew
-  and builds in 3,752 ms against master's 4,550 with the fallback face.
-- **Upstream:** crosspoint-reader#4295 (minibidi L4 mirroring order) was open.
-
 ### 5. Smaller Arabic gaps (each documented in `docs/text-shaping.md`, "What is not shaped yet")
 
 - **A soft hyphen** (U+00AD) inside an Arabic word ends the run and cuts the joining; HarfBuzz joins across it (type T).
@@ -401,7 +378,8 @@ break (Hangul is kept whole), or where the next page word is glued to it. On the
 
 ### 8. Step 5: UI text
 
-- **UI titles and the TOC:** reordered since `feat/rtl-ui-titles` (item 4), but not shaped: the UI faces are bitmap,
+- **UI titles and the TOC:** reordered since #666
+  ([the design record](../design/writing-modes.md#4-reading-a-hebrew-book-step-1-pr-3)), but not shaped: the UI faces are bitmap,
   so Arabic and Indic titles draw unjoined. A character the UI faces lack comes from a TrueType face
   (`CjkUiFonts.cpp`, `readerFaceAt`): in the reader the book's, outside it the last book's family, opened read-only by
   `openUiBookFonts` in `main.cpp` on the screens that draw book text. That opener took a family with CJK only, so a
@@ -412,6 +390,9 @@ break (Hangul is kept whole), or where the next page word is glued to it. On the
   built-in UI faces the Hebrew letters (flash cost not measured) would show it always; Arabic and Indic titles would
   still need shaping, which bitmap faces cannot do.
 - **TXT and Markdown books:** they get no bidi.
+- **The settings labels of vertical text and page progression** (Vertical Text, Automatic, Page Turn Buttons, Follow
+  Book, Fixed: `STR_VERTICAL_TEXT`, `STR_AUTOMATIC`, `STR_PAGE_TURN_BUTTONS`, `STR_FOLLOW_BOOK`, `STR_FIXED`) exist only
+  in `lib/I18n/translations/english.yaml`, so every other UI language shows them in English until a translation pass.
 
 ### 9. Flash
 
@@ -422,6 +403,18 @@ free, by PlatformIO's count; the image itself is about 14 KB larger). Candidates
 - `ShapingState::piecesOf` out of line, about 7 call sites;
 - one soft-hyphen helper for `formBidiPieces` and `viewShapedPieces`;
 - a shared `LinePieces` struct for `BidiState`'s and `ShapingState`'s vectors.
+
+### 10. Vertical text: limits with no next step
+
+Step 3 shipped vertical text with these limits, and step 4 left them
+([the design record](../design/writing-modes.md#5-vertical-text) has what vertical text does):
+- **`text-orientation`** is parsed and cached (`CssStyle::textOrientation`) and never read: every character takes its
+  UAX #50 class (CSS `mixed`).
+- **`vertical-lr` books are set horizontally** under Automatic; only `vertical-rl` has a turned frame.
+- **Drop caps are off in a vertical section** (`ChapterHtmlSlimParser::tryStartDropCapCapture`); their ink metrics are
+  horizontal.
+- **No vertical forms**, and the wave dashes stay rotated: their vertical form is a mirror image and the renderer
+  cannot mirror a glyph (step 4 design: not built).
 
 ## How the work was done
 
