@@ -92,11 +92,13 @@ struct PackKey {
 UiFaceProvider faceProviders[MAX_ATTACHED];
 PackKey packKeys[MAX_ATTACHED];
 
+// cppcheck-suppress constParameterCallback ; the signature is UiFaceProvider's pack callback
 const EpdFontData* packFace(void* ctx) {
   const auto* key = static_cast<const PackKey*>(ctx);
   return UiScriptPack::face(key->points, key->bold);
 }
 bool packInstalled(void* ctx) { return UiScriptPack::installed(static_cast<const PackKey*>(ctx)->points); }
+// cppcheck-suppress constParameterCallback ; the signature is UiFaceProvider's pack callback
 void packPrepare(void* ctx, const char* utf8Text) {
   const auto* key = static_cast<const PackKey*>(ctx);
   UiScriptPack::prepare(key->points, key->bold, utf8Text);
