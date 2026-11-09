@@ -1,6 +1,7 @@
-// Upstream's rules for Indic words on the page: bionic reading does not split one (each half would shape on its
-// own), and no drop cap is captured from Indic text (it draws codepoint by codepoint, which would split the
-// cluster). Each case lays a one-chapter book out through the host pipeline and reads the first page back.
+// Upstream's rules for Indic words on the page, which Arabic and Myanmar words follow too: bionic reading does not
+// split one (each half would shape on its own), and no drop cap is captured from such text (it draws codepoint by
+// codepoint, which would split the cluster). Each case lays a one-chapter book out through the host pipeline and reads
+// the first page back.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -174,4 +175,25 @@ TEST_F(IndicRules, ADropCapOverAnArabicLetterIsAbandoned) {
   EXPECT_EQ(0, arabic.dropCaps);
   ASSERT_FALSE(arabic.words.empty());
   EXPECT_EQ("\u0643\u062A\u0627\u0628", arabic.words[0].text);
+}
+
+// Myanmar, the Myanmar design's PR 2: the same rules. A Myanmar word mixed with Latin is not cut either.
+TEST_F(IndicRules, BionicReadingLeavesAMyanmarWordWhole) {
+  const FirstPage page = firstPage("<p>မြန်မာ reading readingမာ</p>", true);
+  ASSERT_EQ(4u, page.words.size());
+  EXPECT_EQ("မြန်မာ", page.words[0].text);
+  EXPECT_FALSE(page.words[0].bold);
+  EXPECT_EQ("read", page.words[1].text);
+  EXPECT_TRUE(page.words[1].bold);
+  EXPECT_EQ("readingမာ", page.words[3].text);
+  EXPECT_FALSE(page.words[3].bold);
+}
+
+TEST_F(IndicRules, ADropCapOverAMyanmarLetterIsAbandoned) {
+  // Its e is drawn before the ka a drop cap would take alone.
+  const FirstPage myanmar =
+      firstPage("<p><span style=\"float: left; font-size: 3em\">က</span>ောင်း" + kFiller + "</p>", false);
+  EXPECT_EQ(0, myanmar.dropCaps);
+  ASSERT_FALSE(myanmar.words.empty());
+  EXPECT_EQ("ကောင်း", myanmar.words[0].text);
 }

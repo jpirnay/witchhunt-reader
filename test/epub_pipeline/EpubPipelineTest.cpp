@@ -147,6 +147,7 @@ const ShapedBook kShapedBooks[] = {{"test_shaped_arabic", "NotoNaskhArabic-Book-
                                    {"test_shaped_bidi_indic", "NotoSansDevanagari-Book-Regular.ttf"},
                                    {"test_shaped_devanagari", "NotoSansDevanagari-Book-Regular.ttf"},
                                    {"test_shaped_malayalam", "NotoSansMalayalam-Book-Regular.ttf"},
+                                   {"test_shaped_myanmar", "NotoSansMyanmar-Book-Regular.ttf"},
                                    {"test_shaped_persian", "NotoNaskhArabic-Book-Regular.ttf"},
                                    {"test_shaped_tamil", "NotoSansTamil-Book-Regular.ttf"},
                                    {"test_shaped_urdu", "NotoNaskhArabic-Book-Regular.ttf"}};
