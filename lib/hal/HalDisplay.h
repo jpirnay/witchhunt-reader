@@ -61,6 +61,8 @@ class HalDisplay {
   bool supportsAsyncRefresh() const;
   void finishDisplayAsync();
   bool isRefreshPending() const;
+  // The pending refresh's waveform still runs (the panel's BUSY line); its finish is still owed after it ends.
+  bool refreshBusy();
   bool isRedRamSynced() const;
   // Diagnostics: effective refresh mode of the last refresh (after any downgrade).
   RefreshMode getLastRefreshMode() const;
@@ -126,6 +128,13 @@ class HalDisplay {
   // single-buffer fast diff) is harmless there, so callers need not ask.
   uint8_t* borrowSecondaryBuffer(size_t* size);
   bool returnSecondaryBuffer();
+  // borrowSecondaryBuffer() right after starting a refresh. Where lendsDuringRefresh(), the block lent is the frame
+  // not being painted, so nothing waits for the waveform, and the caller owes finishDisplayAsync() before it next
+  // draws. Elsewhere it is borrowSecondaryBuffer(). See FreeInkDisplay::borrowSecondaryBufferDuringRefresh.
+  uint8_t* borrowSecondaryBufferDuringRefresh(size_t* size);
+  // The X3's framebuffer lend: its pending refresh re-reads only the frame it paints. Not the PSRAM arena boards, whose
+  // lend never waited, but whose popup ships blocking until a device run says otherwise.
+  bool lendsDuringRefresh() const;
 
   // Allow fast differential refresh to continue (X4) after the secondary buffer
   // is released, diffing against the controller's retained RED-RAM baseline

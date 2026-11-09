@@ -424,6 +424,20 @@ uint8_t* HalDisplay::borrowSecondaryBuffer(size_t* size) {
   return buf;
 }
 
+uint8_t* HalDisplay::borrowSecondaryBufferDuringRefresh(size_t* size) {
+  if (!lendsDuringRefresh()) return borrowSecondaryBuffer(size);
+  HalSpiBus::Lock spiLock;  // moves frameBuffer and frameBufferActive, as the borrow above does
+  const bool pending = einkDisplay.isRefreshPending();
+  uint8_t* buf = einkDisplay.borrowSecondaryBufferDuringRefresh(size);
+  LOG_INF("FBUF", "borrowSecondary during refresh -> %d (size=%lu pending=%d)", buf ? 1 : 0,
+          static_cast<unsigned long>(buf && size ? *size : 0), pending ? 1 : 0);
+  return buf;
+}
+
+bool HalDisplay::lendsDuringRefresh() const {
+  return !HalCapabilities::keepsSecondaryBuffer() && einkDisplay.asyncRefreshHoldsFrameBuffer();
+}
+
 bool HalDisplay::returnSecondaryBuffer() {
   if (psramArenaLent.exchange(false)) {
     LOG_INF("FBUF", "returnSecondary -> PSRAM arena");
@@ -488,6 +502,7 @@ void HalDisplay::finishDisplayAsync() {
 }
 
 bool HalDisplay::isRefreshPending() const { return einkDisplay.isRefreshPending(); }
+bool HalDisplay::refreshBusy() { return einkDisplay.refreshBusy(); }
 bool HalDisplay::isRedRamSynced() const { return einkDisplay.isRedRamSynced(); }
 
 HalDisplay::RefreshMode HalDisplay::getLastRefreshMode() const { return lastRefreshMode; }
