@@ -40,19 +40,13 @@ bool Digest::mayHave(const uint32_t g) const {
 
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "digest records are little-endian in memory");
 
-Digest readDigest(const uint8_t* record) {
-  Digest d;
-  memcpy(d.masks, record, sizeof(d.masks));
-  return d;
-}
-
 void writeDigest(const Digest& digest, uint8_t* record) { memcpy(record, digest.masks, sizeof(digest.masks)); }
 
+// Only the 32-bit half of each mask that holds the glyph's bit is read.
 bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
   for (int i = 0; i < 3; i++) {
-    uint64_t mask;
-    memcpy(&mask, record + 8 * i, sizeof(mask));
-    if (!(mask & (1ull << ((glyph >> DIGEST_SHIFTS[i]) & 63)))) return false;
+    const unsigned bit = (glyph >> DIGEST_SHIFTS[i]) & 63;
+    if (!(le32(record + 8 * i + 4 * (bit >> 5)) & (1u << (bit & 31)))) return false;
   }
   return true;
 }
@@ -60,16 +54,10 @@ bool digestRecordMayHave(const uint8_t* record, const uint32_t glyph) {
 // witchhunt: deviation 18 - the second mask is the one of shift 0.
 uint64_t digestRecordLowMask(const uint8_t* record) {
   static_assert(DIGEST_SHIFTS[1] == 0, "the low mask is the second");
-  uint64_t mask;
-  memcpy(&mask, record + 8, sizeof(mask));
-  return mask;
+  return le64(record + 8);
 }
 
-uint64_t readLowMask(const uint8_t* stored) {
-  uint64_t mask;
-  memcpy(&mask, stored, sizeof(mask));
-  return mask;
-}
+uint64_t readLowMask(const uint8_t* stored) { return le64(stored); }
 
 void writeLowMask(const uint64_t mask, uint8_t* stored) { memcpy(stored, &mask, sizeof(mask)); }
 

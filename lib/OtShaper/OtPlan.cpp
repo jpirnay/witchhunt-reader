@@ -411,7 +411,7 @@ LookupSettings Plan::settings(const int table, const size_t i, const bool resolv
   out.autoZwj = lookup.flags & lookupbits::AUTO_ZWJ;
   out.random = lookup.flags & lookupbits::RANDOM;
   out.perSyllable = lookup.flags & lookupbits::PER_SYLLABLE;
-  out.digest = readDigest(digestRecord(table, i));  // witchhunt: deviation 13 - the plan's copy
+  readDigest(digestRecord(table, i), out.digest);  // witchhunt: deviation 13 - the plan's copy
   if (const FilterRecords* r = fontFilters_[table]) {
     if (resolve) {
       out.subtableDigests = r->subtableDigests + DIGEST_BYTES * r->firstSubtable(lookup.index);

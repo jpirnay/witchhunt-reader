@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "OtFace.h"
 #include "OtFixedVector.h"  // witchhunt: deviation 1 - in place of <vector>
@@ -56,7 +57,30 @@ struct Digest {
 // Digests as stored in memory and in the CPac table: the three masks as
 // little-endian 64-bit words. Records need not be aligned.
 constexpr unsigned DIGEST_BYTES = 24;
-Digest readDigest(const uint8_t* record);
+// The little-endian 32-bit word at `p`, any alignment: one load when `p` is 4-aligned (the plan's records always are,
+// CPac's when the font block is), else four. The record reads below are built of these: on the C3 at -Os a memcpy of
+// a record or a mask is a call, and these reads run for every lookup and start glyph; and -Os would not inline them.
+static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "digest records are little-endian in memory");
+__attribute__((always_inline)) inline uint32_t le32(const uint8_t* p) {
+  if ((reinterpret_cast<uintptr_t>(p) & 3) == 0) {
+    uint32_t v;
+    std::memcpy(&v, __builtin_assume_aligned(p, 4), sizeof(v));
+    return v;
+  }
+  return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) | (static_cast<uint32_t>(p[2]) << 16) |
+         (static_cast<uint32_t>(p[3]) << 24);
+}
+// The mask at `p` (8 bytes, little-endian, any alignment).
+__attribute__((always_inline)) inline uint64_t le64(const uint8_t* p) {
+  return (static_cast<uint64_t>(le32(p + 4)) << 32) | le32(p);
+}
+// Built in place (a returned or assigned Digest, 24 B, is a memcpy call at -Os).
+__attribute__((always_inline)) inline Digest readDigest(const uint8_t* record) {
+  return Digest{{le64(record), le64(record + 8), le64(record + 16)}};
+}
+__attribute__((always_inline)) inline void readDigest(const uint8_t* record, Digest& out) {
+  for (int i = 0; i < 3; i++) out.masks[i] = le64(record + 8 * i);
+}
 void writeDigest(const Digest& digest, uint8_t* record);
 // Whether the digest record may hold `glyph`, reading only as many masks as
 // it takes to rule the glyph out.

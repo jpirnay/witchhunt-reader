@@ -81,7 +81,8 @@ struct SkippyIter {
   void setMatch(MatchFunc f, const Table& data, const Values& v) {
     func = f;
     matchData = data;
-    values = v;
+    values.t = v.t;  // member by member: a whole Values (12 B) is a memcpy call at -Os
+    values.offset = v.offset;
     hasValues = true;
   }
   void reset(unsigned start);
