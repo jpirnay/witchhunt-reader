@@ -26,9 +26,15 @@ def is_arabic(cp):
     return 0x0600 <= cp <= 0x06FF or 0x0750 <= cp <= 0x077F or 0x0870 <= cp <= 0x08FF
 
 
+def is_myanmar(cp):
+    return 0x1000 <= cp <= 0x109F or 0xA9E0 <= cp <= 0xA9FF or 0xAA60 <= cp <= 0xAA7F
+
+
 def script_of(text):
     if any(is_arabic(ord(ch)) for ch in text):
         return "Arab"
+    if any(is_myanmar(ord(ch)) for ch in text):
+        return "Mymr"
     for ch in text:
         cp = ord(ch)
         if 0x0900 <= cp <= 0x0DFF and not (0x0951 <= cp <= 0x0954 or cp in (0x0964, 0x0965)):

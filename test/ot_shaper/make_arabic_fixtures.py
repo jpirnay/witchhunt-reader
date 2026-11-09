@@ -356,11 +356,12 @@ def hb_font(data):
     return font
 
 
-def shape(font, text, language):
+def shape(font, text, language, direction="rtl", script="Arab"):
+    """HarfBuzz's glyph run for `text`, as ExpectedGlyph stores it. make_myanmar_fixtures.py shapes ltr, Mymr."""
     buf = hb.Buffer()
     buf.add_str(text)
-    buf.direction = "rtl"
-    buf.script = "Arab"
+    buf.direction = direction
+    buf.script = script
     if language:
         buf.language = language
     hb.shape(font, buf, {})
@@ -378,15 +379,15 @@ START_TABLE = re.compile(r"start table (GSUB|GPOS) script tag '([^']*)'")
 START_LOOKUP = re.compile(r"start lookup (\d+) feature '(....)'")
 
 
-def planned_lookups(data, language):
+def planned_lookups(data, language, text=None, direction="rtl", script="Arab"):
     """HarfBuzz's planned GSUB and GPOS lookups: hb_ot_map_t::apply() sends "start lookup N feature 'tag'" for every
     planned lookup of every stage, in plan order, before it tests the lookup's digest. A lookup planned in two stages
-    is listed twice, as our plan holds it twice."""
+    is listed twice, as our plan holds it twice. `text` (beh beh by default) is what is shaped to see them."""
     font = hb_font(data)
     buf = hb.Buffer()
-    buf.add_str(w(BEH, BEH))
-    buf.direction = "rtl"
-    buf.script = "Arab"
+    buf.add_str(text if text is not None else w(BEH, BEH))
+    buf.direction = direction
+    buf.script = script
     if language:
         buf.language = language
     state = {"table": None, "GSUB": [], "GPOS": []}

@@ -53,6 +53,11 @@ bool isArabic(const uint32_t cp) {
   return (cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0750 && cp <= 0x077F) || (cp >= 0x0870 && cp <= 0x08FF);
 }
 
+// The Myanmar blocks the engine's tables cover: Myanmar, Myanmar Extended-B and Extended-A.
+bool isMyanmar(const uint32_t cp) {
+  return (cp >= 0x1000 && cp <= 0x109F) || (cp >= 0xA9E0 && cp <= 0xA9FF) || (cp >= 0xAA60 && cp <= 0xAA7F);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -90,8 +95,9 @@ int main(int argc, char** argv) {
   scale.set(std::atoi(argv[2]), static_cast<unsigned>(std::atoi(argv[3])), face.upem());
   const uint32_t* languages = ot::languageTagsFor(argv[4][0] == '-' ? "" : argv[4]);
 
-  ot::Plan plans[11];
-  bool built[11] = {};
+  constexpr size_t SCRIPTS = static_cast<size_t>(ot::Script::Myanmar) + 1;
+  ot::Plan plans[SCRIPTS];
+  bool built[SCRIPTS] = {};
   ot::Buffer buffer;
   static uint8_t storage[ot::Buffer::bytesFor(4096)];  // witchhunt: deviation 1 - past 2040 code points: FAIL
   buffer.setStorage(storage, sizeof(storage));         // witchhunt: deviation 1
@@ -108,7 +114,15 @@ int main(int argc, char** argv) {
         break;
       }
     }
+    bool myanmar = false;
     for (size_t k = 0; !arabic && k < cps.size(); k++) {
+      if (isMyanmar(cps[k])) {
+        myanmar = true;
+        script = ot::Script::Myanmar;
+        break;
+      }
+    }
+    for (size_t k = 0; !arabic && !myanmar && k < cps.size(); k++) {
       if (const indic::ScriptInfo* info = indic::scriptOf(cps[k])) {
         script = static_cast<ot::Script>(indic::indexOf(*info));
         break;

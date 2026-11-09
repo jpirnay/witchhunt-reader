@@ -16,8 +16,8 @@
 namespace ot {
 
 // witchhunt: deviation 11 - Arabic last: a compiled plan (CPpl) names a shaper by this value, and Plan::read() rejects
-// everything above Use.
-enum class ShaperKind : uint8_t { Default, Indic, Use, Arabic };
+// everything above Use. witchhunt: deviation 14 - Myanmar after it.
+enum class ShaperKind : uint8_t { Default, Indic, Use, Arabic, Myanmar };
 
 // Work done between GSUB stages (HarfBuzz pause callbacks).
 enum class Pause : uint8_t {
@@ -30,10 +30,14 @@ enum class Pause : uint8_t {
   UseRecordRphf,
   UseRecordPref,
   UseReorder,
+  // witchhunt: deviation 14 - after the CPpl format's pauses (cppl::MAX_PAUSE), which no compiled plan may name.
+  MyanmarSetupSyllables,
+  MyanmarReorder,
 };
 
 // Indic scripts shaped here, in Unicode block order from U+0900, and (deviation 11) Arabic after them, so the Indic
-// values, which index tables, are unchanged.
+// values, which index tables, are unchanged; (deviation 14) Myanmar after Arabic, so a CPpl's values keep their
+// meaning.
 enum class Script : uint8_t {
   Devanagari,
   Bengali,
@@ -45,7 +49,8 @@ enum class Script : uint8_t {
   Kannada,
   Malayalam,
   Sinhala,
-  Arabic  // witchhunt: deviation 11
+  Arabic,  // witchhunt: deviation 11
+  Myanmar  // witchhunt: deviation 14
 };
 
 // witchhunt: deviation 4 - whether a GSUB or GPOS script tag is one a plan

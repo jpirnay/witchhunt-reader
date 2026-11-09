@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate lib/OtShaper/OtSyllableMachines.h: the syllable grammars of
-HarfBuzz's Indic and USE shapers (hb-ot-shaper-indic-machine.rl,
-hb-ot-shaper-use-machine.rl) compiled to DFA tables.
+HarfBuzz's Indic, USE and Myanmar shapers (hb-ot-shaper-indic-machine.rl,
+hb-ot-shaper-use-machine.rl, hb-ot-shaper-myanmar-machine.rl) compiled to DFA
+tables.
 
 HarfBuzz compiles these grammars with Ragel into scanners: at each position
 the longest match of any pattern wins, and on a tie the pattern listed first.
@@ -284,19 +285,64 @@ def use_grammar():
     return patterns, alphabet
 
 
-def used_categories(shift):
-    """Categories (Indic: shift 13, USE: shift 23) OtUnicodeData.h assigns,
-    so input classes are only spent on categories that occur."""
+# witchhunt: deviation 14. Myanmar's categories share the Indic field (hb_indic_get_categories), and its blocks
+# carry USE categories too, which the Indic and USE scanners never meet: the categories each scanner counts are
+# those of its own blocks' code points, so the Myanmar blocks leave the Indic and USE tables as they were.
+MYANMAR_BLOCKS = [(0x1000, 0x109F), (0xA9E0, 0xA9FF), (0xAA60, 0xAA7F)]
+
+
+def myanmar_grammar():
+    # witchhunt: deviation 14
+    C, IV, DB, H, ZWNJ, ZWJ, SM, A, GB, DOTTEDCIRCLE, Ra, CS, SMPst = 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 15, 18, 57
+    VAbv, VBlw, VPre, VPst = 20, 21, 22, 23
+    As, MH, MR, MW, MY, PT, VS, ML = 32, 35, 36, 37, 38, 39, 40, 41
+    j = Sym(ZWJ, ZWNJ)
+    k = Sym(Ra) + Sym(As) + Sym(H)
+    sm = Sym(SM, SMPst)
+    c = Sym(C, Ra)
+    medial_group = opt(Sym(MY)) + opt(Sym(As)) + opt(Sym(MR)) + \
+        opt(((Sym(MW) + opt(Sym(MH)) + opt(Sym(ML))) | (Sym(MH) + opt(Sym(ML))) | Sym(ML)) + opt(Sym(As)))
+    main_vowel_group = star(Sym(VPre) + opt(Sym(VS))) + star(Sym(VAbv)) + star(Sym(VBlw)) + star(Sym(A)) + \
+        opt(Sym(DB) + opt(Sym(As)))
+    post_vowel_group = Sym(VPst) + opt(Sym(MH)) + opt(Sym(ML)) + star(Sym(As)) + star(Sym(VAbv)) + star(Sym(A)) + \
+        opt(Sym(DB) + opt(Sym(As)))
+    tone_group = sm | (Sym(PT) + star(Sym(A)) + opt(Sym(DB)) + opt(Sym(As)))
+    complex_syllable_tail = star(Sym(As)) + medial_group + main_vowel_group + star(post_vowel_group) + \
+        star(tone_group) + opt(j)
+    syllable_tail = star(Sym(H) + (c | Sym(IV)) + opt(Sym(VS))) + (Sym(H) | complex_syllable_tail)
+    consonant_syllable = opt(k | Sym(CS)) + Sym(C, Ra, IV, GB, DOTTEDCIRCLE) + opt(Sym(VS)) + syllable_tail
+    broken_cluster = opt(k) + opt(Sym(VS)) + syllable_tail
+    # Token values: myanmar_syllable_type_t.
+    patterns = [(consonant_syllable, 0), (j | Sym(SMPst), 2), (broken_cluster, 1), (ANY, 2)]
+    return patterns, sorted({C, IV, DB, H, ZWNJ, ZWJ, SM, A, GB, DOTTEDCIRCLE, Ra, CS, SMPst, VAbv, VBlw, VPre, VPst,
+                             As, MH, MR, MW, MY, PT, VS, ML})
+
+
+def used_categories(shift, myanmar):
+    """Categories (Indic and Myanmar: shift 13, USE: shift 23) OtUnicodeData.h assigns, so input classes are only
+    spent on categories that occur: of the Myanmar blocks' code points when `myanmar`, else of the others'. The
+    joiners and the dotted circle count for every scanner."""
     import re
     text = (OUTPUT.parent / "OtUnicodeData.h").read_text()
-    props = text.split("constexpr uint32_t PROPS[] = {")[1].split("struct Decomposition")[0]
-    values = [int(v, 16) for v in re.findall(r"0x[0-9A-F]{8}", props)]
+    props_text = text.split("constexpr uint32_t PROPS[] = {")[1].split("};")[0]
+    props = [int(v, 16) for v in re.findall(r"0x[0-9A-F]{8}", props_text)]
+    index_text = text.split("constexpr uint8_t PROPS_INDEX[] = {")[1].split("};")[0]
+    index = [int(v) for v in re.findall(r"\d+", index_text)]
+    ranges_text = text.split("constexpr Range RANGES[] = {")[1].split("};")[0]
+    ranges = [tuple(int(v, 0) for v in r) for r in re.findall(r"\{(0x[0-9A-F]+), (0x[0-9A-F]+), (\d+)\}", ranges_text)]
+    values = []
+    for first, last, offset in ranges:
+        if any(lo <= first <= hi for lo, hi in MYANMAR_BLOCKS) != myanmar:
+            continue
+        values += [props[i] for i in index[offset:offset + last - first + 1]]
+    extras_text = text.split("constexpr uint32_t ZWNJ_PROPS")[1].split("struct Decomposition")[0]
+    values += [int(v, 16) for v in re.findall(r"0x[0-9A-F]{8}", extras_text)]
     return {(v >> shift) & 0x3F for v in values}
 
 
 def emit(name, patterns, alphabet, source, extra=()):
-    shift = 13 if name == "INDIC" else 23
-    alphabet = sorted((set(alphabet) & used_categories(shift)) | set(extra))
+    shift = 23 if name == "USE" else 13
+    alphabet = sorted((set(alphabet) & used_categories(shift, name == "MYANMAR")) | set(extra))
     class_of, nclasses, table, acc = compile_scanner(patterns, alphabet)
     classes = [0] * 64
     for cat, cls in class_of.items():
@@ -318,6 +364,8 @@ def main():
     # or B (USE); repha recorded after GSUB is R, pref is VPre.
     indic = emit("INDIC", *indic_grammar(), "hb-ot-shaper-indic-machine.rl", extra=(11,))
     use = emit("USE", *use_grammar(), "hb-ot-shaper-use-machine.rl", extra=(1, 18, 22))
+    # witchhunt: deviation 14 - dotted circles inserted into broken clusters carry DOTTEDCIRCLE.
+    myanmar = emit("MYANMAR", *myanmar_grammar(), "hb-ot-shaper-myanmar-machine.rl", extra=(11,))
     OUTPUT.write_text(f"""#pragma once
 
 // Generated by scripts/gen_ot_shaper_machines.py. Do not edit.
@@ -339,6 +387,8 @@ constexpr uint8_t NO_ACCEPT = 255;
 {indic}
 
 {use}
+
+{myanmar}
 // clang-format on
 
 }}  // namespace ot::machines
