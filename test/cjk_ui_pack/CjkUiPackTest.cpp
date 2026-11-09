@@ -29,11 +29,14 @@ namespace {
 using cjk_ui_pack::Region;
 using cpfont_file::Bytes;
 using cpfont_file::FileFont;
+using cpfont_file::FileStyle;
 using cpfont_file::readCpfont;
 
-std::string packPath(const Region region, const unsigned points) {
+// A pack's one file: its styles are the CJK UI sizes (cjk_ui_pack::styleFor).
+std::string packPath(const Region region) {
   const std::string family = cjk_ui_pack::PACKS[static_cast<size_t>(region)].family;
-  return std::string(SD_FONTS_DIR) + "/" + family + "/" + family + "_" + std::to_string(points) + ".cpfont";
+  return std::string(SD_FONTS_DIR) + "/" + family + "/" + family + "_" + std::to_string(cjk_ui_pack::FILE_POINTS) +
+         ".cpfont";
 }
 
 std::vector<uint32_t> codepointsOf(const std::string& utf8) {
@@ -75,7 +78,7 @@ struct Packs {
   void install(const Region region) {
     auto& font = fonts[static_cast<size_t>(region)];
     font = std::make_unique<SdCardFont>();
-    ASSERT_TRUE(font->load(packPath(region, 10).c_str()));
+    ASSERT_TRUE(font->load(packPath(region).c_str()));
   }
   bool installed(const Region region) const { return fonts[static_cast<size_t>(region)] != nullptr; }
 
@@ -178,7 +181,7 @@ class CjkUiPackTest : public ::testing::Test {
 
   // Draws `title` through the UI face and expects every character of it the packs hold from `region`'s file.
   void expectDrawnFrom(const std::string& title, const Region region) {
-    const FileFont file = readCpfont(packPath(region, 10));
+    const FileFont file = readCpfont(packPath(region));
     provider.beginText(title.c_str());
     for (const uint32_t cp : codepointsOf(title)) {
       const EpdGlyphRef glyph = EpdFont(&ui).getGlyph(cp);
@@ -201,13 +204,15 @@ TEST(CjkUiPackFiles, HoldExactlyWhatTheUiLooksUpThere) {
     for (size_t i = 0; i < pack.rangeCount; ++i) {
       for (uint32_t cp = pack.ranges[i].first; cp <= pack.ranges[i].last; ++cp) expected.insert(cp);
     }
-    for (const uint8_t points : cjk_ui_pack::SIZES) {
-      const FileFont font = readCpfont(packPath(pack.region, points));
-      EXPECT_EQ(font.flags & 1, 0) << pack.family << " " << int{points} << " pt is not 1-bit";
-      ASSERT_EQ(font.styleIds, std::vector<uint8_t>{0}) << pack.family << " " << int{points};
-      const auto& cps = font.styles[0].codepoints;
-      EXPECT_EQ(std::set<uint32_t>(cps.begin(), cps.end()), expected) << pack.family << " " << int{points};
+    const FileFont font = readCpfont(packPath(pack.region));
+    EXPECT_EQ(font.flags & 1, 0) << pack.family << " is not 1-bit";
+    ASSERT_EQ(font.styleIds, (std::vector<uint8_t>{0, 1})) << pack.family;  // one style per CJK UI size
+    for (const FileStyle& style : font.styles) {
+      EXPECT_EQ(std::set<uint32_t>(style.codepoints.begin(), style.codepoints.end()), expected) << pack.family;
     }
+    // The 12 pt style is the larger: the sizes are in order.
+    EXPECT_GT(font.styles[1].bitmaps.size(), 0u);
+    EXPECT_GT(font.styles[1].glyphs[1000].height, font.styles[0].glyphs[1000].height) << pack.family;
   }
 }
 
@@ -223,13 +228,14 @@ TEST(CjkUiPackFiles, DrawWhatTheFlashFacesHoldBitForBit) {
                {&cjk_ui_zh_10, Region::SimplifiedChinese, 10},
                {&cjk_ui_ko_10, Region::Korean, 10}};
   for (const auto& pair : pairs) {
-    const FileFont file = readCpfont(packPath(pair.region, pair.points));
+    const FileFont file = readCpfont(packPath(pair.region));
+    const FileStyle& style = file.styles[cjk_ui_pack::styleFor(static_cast<uint8_t>(pair.points))];
     size_t compared = 0;
     for (uint32_t i = 0; i < pair.face->intervalCount; ++i) {
       const EpdUnicodeInterval& iv = pair.face->intervals[i];
       for (uint32_t cp = iv.first; cp <= iv.last; ++cp) {
         if (!cjk_ui_pack::covers(pair.region, cp) || cp == 0x3000) continue;
-        EXPECT_EQ(flashBytes(*pair.face, cp), file.styles[0].bitmapOf(cp)) << std::hex << cp;
+        EXPECT_EQ(flashBytes(*pair.face, cp), style.bitmapOf(cp)) << std::hex << cp;
         ++compared;
       }
     }
@@ -323,5 +329,5 @@ TEST_F(CjkUiPackTest, InTheReaderWhatTheBooksFaceLacksStillComesFromThePack) {
   EXPECT_EQ(packs.prepared, 1);  // 风 alone
   EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(0x5FAE)), book.ink());
   EXPECT_EQ(drawn(ui, EpdFont(&ui).getGlyph(0x98CE)),
-            readCpfont(packPath(Region::Japanese, 10)).styles[0].bitmapOf(0x98CE));
+            readCpfont(packPath(Region::Japanese)).styles[0].bitmapOf(0x98CE));
 }

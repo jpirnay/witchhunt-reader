@@ -5,7 +5,7 @@
 #include <cstring>
 
 /// The CJK UI packs (lib/EpdFont/scripts/build_ui_script_pack.py writes them; src/CjkUiPack.cpp opens them): the CJK
-/// characters a book title may hold, at the CJK UI faces' sizes (10 and 12 pt, regular), one .cpfont family per region
+/// characters a book title may hold, at the CJK UI faces' sizes (10 and 12 pt, regular), one .cpfont file per region
 /// in that region's Noto Sans CJK forms, installed by the Font Manager under /.crosspoint/fonts/<family>/. The
 /// cjk_ui_* faces in flash hold only the translations' characters; these draw the rest. No reading font: the registry
 /// leaves them out.
@@ -41,8 +41,20 @@ constexpr Pack PACKS[REGION_COUNT] = {
     {"KoreanUI", Region::Korean, KOREAN, sizeof(KOREAN) / sizeof(KOREAN[0])},
 };
 
-/// The CJK UI faces' sizes (font-sizes.sh CJK_UI_FONT_SIZES), the packs'.
+/// The CJK UI faces' sizes (font-sizes.sh CJK_UI_FONT_SIZES), the packs'. A pack is one file, <family>_10.cpfont
+/// (named for its first size), whose styles are these sizes in this order: style 0 holds the 10 pt glyphs, style 1
+/// the 12 pt ones. One SdCardFont then serves both, where a file per size would hold two on the heap.
 constexpr uint8_t SIZES[] = {10, 12};
+constexpr size_t SIZE_COUNT = sizeof(SIZES) / sizeof(SIZES[0]);
+constexpr uint8_t FILE_POINTS = SIZES[0];
+
+/// The style of a pack's file that holds `points`, or SIZE_COUNT for a size it has none of.
+constexpr size_t styleFor(const uint8_t points) {
+  for (size_t i = 0; i < SIZE_COUNT; ++i) {
+    if (SIZES[i] == points) return i;
+  }
+  return SIZE_COUNT;
+}
 
 /// Whether the pack of `region` holds `codepoint`.
 constexpr bool covers(const Region region, const uint32_t codepoint) {

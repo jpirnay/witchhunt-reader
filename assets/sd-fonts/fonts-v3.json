@@ -235,18 +235,14 @@
       "format": "uipack",
       "inDownloadAll": false,
       "styles": [
-        "regular"
+        "regular",
+        "bold"
       ],
       "files": [
         {
           "name": "ChineseTradUI/ChineseTradUI_10.cpfont",
-          "size": 1419068,
-          "crc32": 3817949916
-        },
-        {
-          "name": "ChineseTradUI/ChineseTradUI_12.cpfont",
-          "size": 1836315,
-          "crc32": 4254418899
+          "size": 3255351,
+          "crc32": 2759224928
         }
       ]
     },
@@ -256,18 +252,14 @@
       "format": "uipack",
       "inDownloadAll": false,
       "styles": [
-        "regular"
+        "regular",
+        "bold"
       ],
       "files": [
         {
           "name": "ChineseUI/ChineseUI_10.cpfont",
-          "size": 1418934,
-          "crc32": 3590344252
-        },
-        {
-          "name": "ChineseUI/ChineseUI_12.cpfont",
-          "size": 1835899,
-          "crc32": 2081161511
+          "size": 3254801,
+          "crc32": 3387803648
         }
       ]
     },
@@ -505,18 +497,14 @@
       "format": "uipack",
       "inDownloadAll": false,
       "styles": [
-        "regular"
+        "regular",
+        "bold"
       ],
       "files": [
         {
           "name": "JapaneseUI/JapaneseUI_10.cpfont",
-          "size": 1423114,
-          "crc32": 370575926
-        },
-        {
-          "name": "JapaneseUI/JapaneseUI_12.cpfont",
-          "size": 1853964,
-          "crc32": 3886304055
+          "size": 3277046,
+          "crc32": 1229383193
         }
       ]
     },
@@ -526,18 +514,14 @@
       "format": "uipack",
       "inDownloadAll": false,
       "styles": [
-        "regular"
+        "regular",
+        "bold"
       ],
       "files": [
         {
           "name": "KoreanUI/KoreanUI_10.cpfont",
-          "size": 656133,
-          "crc32": 1388107602
-        },
-        {
-          "name": "KoreanUI/KoreanUI_12.cpfont",
-          "size": 860217,
-          "crc32": 3953711808
+          "size": 1516318,
+          "crc32": 3190584236
         }
       ]
     },

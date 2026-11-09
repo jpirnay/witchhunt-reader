@@ -447,7 +447,7 @@ TEST(FontManifestReaderTest, ReadsTheShippedV3Manifest) {
       ++uiPacks;
       EXPECT_FALSE(catalog.outline(i)) << name;
       EXPECT_FALSE(catalog.inDownloadAll(i)) << name;
-      EXPECT_EQ(catalog.fileCount(i), name == "ArabicUI" ? 5u : 2u) << name;
+      EXPECT_EQ(catalog.fileCount(i), name == "ArabicUI" ? 5u : 1u) << name;  // a CJK pack: both sizes, one file
     } else {
       EXPECT_FALSE(catalog.outline(i)) << name;
       EXPECT_TRUE(catalog.inDownloadAll(i)) << name;

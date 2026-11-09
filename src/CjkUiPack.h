@@ -10,9 +10,10 @@
 /// faces (FallbackFaceProvider::setPacks, wired by CjkUiFonts) searches them for book text before the last book's font,
 /// whatever book that was. Without one installed, titles draw as before: the last book's font, else boxes.
 ///
-/// A pack's file for a size is opened the first time a string at that size needs it (an SdCardFont: header and its
-/// handful of intervals, about 2.5 KB of heap), and each string's pack characters are read in one pass when it is
-/// measured or drawn (SdCardFont::prewarm). Everything is freed at the next screen (release()).
+/// A pack's file is opened the first time a string needs it (an SdCardFont: header and its handful of intervals, the
+/// object itself 2,472 B on the C3, both sizes in it), and each string's pack characters are read in one pass when it
+/// is measured or drawn (SdCardFont::prewarm), kept until that size's next string. Everything is freed at the next
+/// screen (release()).
 namespace CjkUiPack {
 
 /// The UI language: its region's pack goes first for Han characters (cjk_ui_pack::order).

@@ -18,7 +18,9 @@ ChineseUI, ChineseTradUI, JapaneseUI, KoreanUI: the CJK characters a book title 
   Noto draws it, Japanese the kana and half-width forms too, Korean every Hangul syllable and the compatibility jamo;
   each the CJK punctuation and the full-width forms. Whole blocks rather than a frequency list: SdCardFont keeps a
   font's interval table in RAM, and a frequency list of 3,500 characters is 2,500 intervals, 30 KB; whole blocks are a
-  handful. src/CjkUiPack.cpp opens them; the CJK fallback (FallbackFaceProvider) serves from them.
+  handful. Each is one file, <name>_10.cpfont, whose styles are the sizes (style 0 10 pt, style 1 12 pt): one
+  SdCardFont serves both, where a file per size cost the heap two (2.5 KB each, the X3 measured about 6 KB a pack).
+  src/CjkUiPack.cpp opens them; the CJK fallback (FallbackFaceProvider) serves from them.
 
 Usage:  python build_ui_script_pack.py [--pack NAME] [--output-dir DIR] [--source-dir DIR]
         --output-dir is the pack's own folder (default assets/sd-fonts/<NAME>); --source-dir the NotoSansArabic
@@ -242,6 +244,17 @@ def build(name, out_dir, source_dir):
             sources = {style: subset_source(source_dir, style, tmp) for style in ("Regular", "Bold")}
         else:
             sources = {"Regular": cjk_source(cjk_family)}
+        if cjk_family is not None:
+            # One file for both sizes, each a style: style i is the i-th size of CJK_SIZES. The UI then holds one
+            # SdCardFont per pack rather than one per size, which is most of what an open pack costs on the heap.
+            raster = {}
+            for index, size in enumerate(sizes):
+                face = render(f"{name.lower()}_{size}_regular", size, sources["Regular"], cps, tmp)
+                raster[index] = face._replace(style_id=index)
+            path = out_dir / f"{name}_{min(sizes)}.cpfont"
+            write_cpfont(raster, str(path), two_bit=False)
+            print(f"Generated {path} ({len(cps)} characters at {sorted(sizes)} pt, {path.stat().st_size} B)")
+            return
         for size, styles in sizes.items():
             raster = {}
             for style in styles:
