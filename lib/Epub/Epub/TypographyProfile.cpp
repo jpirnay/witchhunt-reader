@@ -14,7 +14,7 @@ TypographyProfile TypographyProfile::forLanguage(const std::string& tag) {
   p.hyphenator = Hyphenator::forLanguage(tag);
   p.shapingLanguage = ot::languageTagsFor(tag.c_str());
   const bool arabicScript = language_tag::isArabicScript(tag);
-  p.shapedScript = language_tag::indicScriptOf(tag) != nullptr || arabicScript;
+  p.shapedScript = language_tag::indicScriptOf(tag) != nullptr || arabicScript || language_tag::isMyanmarScript(tag);
 
   if (region != CjkRegion::None && region != CjkRegion::Korean) {
     p.breaking = Breaking::BetweenCharacters;

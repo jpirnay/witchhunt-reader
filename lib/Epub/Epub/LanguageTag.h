@@ -129,4 +129,15 @@ inline bool isHebrewScript(const std::string& rawTag) {
   return detail::writtenIn(normalised(rawTag), kLanguages, "hebr");
 }
 
+// Whether a tag is written in the Myanmar script: Burmese ("my", and the ISO 639-2 "mya" and "bur" that some books
+// carry), Mon, Shan, the Karen languages (S'gaw, Eastern and Western Pwo, Pa'o), Khamti Shan, Aiton, Phake, the
+// Palaung languages, Rakhine, Tavoyan and Intha, unless a script subtag names another ("shn-Latn"); any other language
+// that a script subtag of Mymr puts there. Pali ("pi") is written in many scripts: only "pi-Mymr" is. The same scan as
+// isArabicScript.
+inline bool isMyanmarScript(const std::string& rawTag) {
+  static constexpr const char* kLanguages[] = {"my",  "mya", "bur", "mnw", "shn", "ksw", "kjp", "pwo", "blk",
+                                               "kht", "aio", "phk", "pll", "rbb", "pce", "rki", "tvn", "int"};
+  return detail::writtenIn(normalised(rawTag), kLanguages, "mymr");
+}
+
 }  // namespace language_tag
