@@ -31,7 +31,7 @@ Three levels fit: rest, to white, to black, and one gray such as VSL 4, VSH 8, V
 and takes 16 frames, as long as FAST. The reader already has a one-push path for it
 (`supportsGrayFrame()`). Text darkness Lighter shows roughly how one gray looks.
 Built 2026-11-07 in #646 as the One-Pass Anti-Aliasing setting, with gray at VSL 5, VSH 8, VSL 3 (about 48 %), and
-measured: see [one-pass-text-aa.md](one-pass-text-aa.md).
+measured: see [grayscale-aa-rendering.md](../grayscale-aa-rendering.md#one-pass-text-aa-board-by-board).
 
 ## Images
 

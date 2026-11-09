@@ -10,7 +10,7 @@ When an item is done, delete it from its file; when a file has no items left, de
 | [cjk.md](cjk.md) | CJK: the follow-ups of what shipped (justification, squeeze and grid (A3), ruby and emphasis dots (B), TTF SD mode), CJK `.cpfont` bugs, 龘, the Font Manager follow-ups, the glyph store's index rebuild, UI text, the dictionary, line spacing, arena follow-ups, edge cases from the reviews |
 | [book-cache.md](book-cache.md) | Book replacement and deletion that still wipe reading state, TXT/MD caches, cache-clear inconsistencies |
 | [boards-and-touch.md](boards-and-touch.md) | Light sleep with the frontlight, the T5S3 SD clock, trace scaffolding, the X4 Pro fast-DU shortcut, device validation, touch follow-ups |
-| [display-and-refresh.md](display-and-refresh.md) | Framebuffer baselines, sleep ghosting follow-ups, windowed refresh, busy indicator, pre-render coverage |
+| [display-and-refresh.md](display-and-refresh.md) | Framebuffer baselines, sleep ghosting follow-ups, windowed refresh, busy indicator, pre-render coverage, one-pass text AA (long reads, the X4's hold row, the UC8279 X3 tail fix, a Background-B borrow forcing two passes, other controllers) |
 | [dictionary.md](dictionary.md) | The dictionary beyond CJK: phrase lookups (planned, not started), what was considered and not taken |
 | [font-flash.md](font-flash.md) | Remaining flash and speed levers on the font path |
 | [library.md](library.md) | Library: measuring a large card, "Library too large", card-reader changes, silent build failures, interrupted builds, New's covers, author lists, sidecar case, tabs on button-only boards, tests |
@@ -18,7 +18,6 @@ When an item is done, delete it from its file; when a file has no items left, de
 | [memory-and-parsing.md](memory-and-parsing.md) | Nested-table text, case-blind class and id selectors, a block-ending `<br>`'s blank line, the simplified-chapter hint, the image lane and Background-B, heap transients, preempted decodes, progressive JPEGs at 1/8 (covers that restart, the I/O of libjpeg's script), damaged JPEGs (parked), per-line and per-cell objects on the heap |
 | [murphy-gray.md](murphy-gray.md) | Murphy M3: what is still open about gray, UI ghosting, why HALF and image midtones stay as they are, what is offered upstream |
 | [murphy-small-screen.md](murphy-small-screen.md) | Murphy M3: fixed sizes and layouts that assume a panel larger than 240x416, with the central root causes first |
-| [one-pass-text-aa.md](one-pass-text-aa.md) | One-pass text AA: shipped on the X4 Pro with UC8179, the Murphy M3, the X3 and the X4; measurements, the UC8279 gray swap behind upstream #4344, what stays open, the Murphy waveform and its measurements, what carries over to other drivers |
 | [opds-and-kosync.md](opds-and-kosync.md) | Gutenberg's repeated OpenSearch fetch and truncated-field warning, KOSync redirect gate and log labels |
 | [reader-state.md](reader-state.md) | Mark as read vs. a pending page save, menu actions after a layout change, sync mid-build, front matter skipped after a first-open pull, dead override overloads, `CMD:REBOOT` dropping a page save, a deleted font family left as the TXT/Markdown font |
 | [screen-flow.md](screen-flow.md) | Screens that end on a message and wait for Back: one timed return for all of them; a quick font menu in the reader |
