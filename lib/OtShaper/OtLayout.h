@@ -36,6 +36,9 @@ struct LookupSettings {
   // records ORed, 8 bytes each (little-endian, unaligned): a group whose mask cannot hold a glyph is skipped without
   // reading its records. nullptr: no groups (the lookup has SUBTABLE_GROUP subtables or fewer, or no records).
   const uint8_t* subtableGroups = nullptr;
+  // witchhunt: deviation 19 - a ligature lookup's second components (ligatureSeconds()): the start glyph's next glyph,
+  // when it may not be skipped, must be one, or no ligature can match. All bits: no filter.
+  uint64_t secondMask = ~0ull;
   uint32_t mask = 0;
   bool autoZwnj = true;
   bool autoZwj = true;
@@ -56,6 +59,14 @@ void appendSubtableDigests(const Face& face, int table, uint32_t lookupIndex, Fi
 // The caller reads the lookup once for all its subtables: Face::lookup()
 // checks every subtable of an Extension lookup.
 Digest subtableDigest(int table, const Table& lookup, uint16_t subtable);
+
+// witchhunt: deviation 19 - the low mask (digestRecordLowMask()) of the second components of every ligature of GSUB
+// lookup `lookupIndex`, when it is a LigatureSubst lookup with no ligature of fewer than two components; all bits
+// otherwise.
+uint64_t ligatureSeconds(const Face& face, uint32_t lookupIndex);
+// witchhunt: deviation 19 - whether GSUB lookup `lookupIndex` is a LigatureSubst lookup (its first subtable's type,
+// an Extension resolved).
+bool isLigatureLookup(const Face& face, uint32_t lookupIndex);
 
 // Applies one GSUB or GPOS lookup across the buffer. GPOS requires buffer.pos
 // to be sized.

@@ -229,11 +229,14 @@ bool Plan::finish(const Face& face) {
 //
 // witchhunt: deviation 18 - the block also holds the subtable groups' masks and the planned lookups' first groups,
 // sized here from the lookups' subtable counts (no more than NO_GROUPS groups) and filled by fillSubtableGroups().
+// witchhunt: deviation 19 - and the LigatureSubst lookups' second masks with the GSUB lookups' slots, filled here.
 bool Plan::copyLookupDigests(const Face& face) {
   digestBlock_.reset();
   lookupDigests_.bind(nullptr, 0);
   groupMasks_.bind(nullptr, 0);   // witchhunt: deviation 18
   groupStarts_.bind(nullptr, 0);  // witchhunt: deviation 18
+  secondMasks_.bind(nullptr, 0);  // witchhunt: deviation 19
+  secondSlots_.bind(nullptr, 0);  // witchhunt: deviation 19
   const size_t planned = lookups[GSUB].size() + lookups[GPOS].size();
   const size_t bytes = planned * DIGEST_BYTES;
   if (bytes == 0) return true;
@@ -246,16 +249,35 @@ bool Plan::copyLookupDigests(const Face& face) {
   }
   if (groups >= NO_GROUPS) groups = 0;                              // witchhunt: deviation 18 - past its index: none
   const size_t groupBytes = groups ? groups * 8 + planned * 2 : 0;  // witchhunt: deviation 18
-  if (!heapAvailable(bytes + groupBytes)) return false;
-  digestBlock_ = makeUniqueNoThrow<uint8_t[]>(bytes + groupBytes);
+  // witchhunt: deviation 19 - a slot of second mask per planned LigatureSubst lookup, at most 255 of them.
+  size_t ligatures = 0;
+  for (const PlannedLookup& lookup : lookups[GSUB]) ligatures += isLigatureLookup(face, lookup.index);
+  if (ligatures > 255) ligatures = 255;
+  const size_t secondBytes = ligatures * 8;
+  const size_t slotBytes = ligatures ? lookups[GSUB].size() : 0;
+  if (!heapAvailable(bytes + secondBytes + groupBytes + slotBytes)) return false;
+  digestBlock_ = makeUniqueNoThrow<uint8_t[]>(bytes + secondBytes + groupBytes + slotBytes);
   if (!digestBlock_) return false;
   lookupDigests_.bind(digestBlock_.get(), bytes);
   lookupDigests_.resize(bytes);
+  // witchhunt: deviation 19 - each LigatureSubst lookup's second mask, while slots last.
+  if (ligatures) {
+    secondMasks_.bind(digestBlock_.get() + bytes, secondBytes);
+    secondSlots_.bind(digestBlock_.get() + bytes + secondBytes + groupBytes, slotBytes);
+    for (const PlannedLookup& lookup : lookups[GSUB]) {
+      uint8_t slot = 0;
+      if (isLigatureLookup(face, lookup.index) && secondMasks_.resize(secondMasks_.size() + 8)) {
+        writeLowMask(ligatureSeconds(face, lookup.index), secondMasks_.data() + secondMasks_.size() - 8);
+        slot = static_cast<uint8_t>(secondMasks_.size() / 8);
+      }
+      secondSlots_.push_back(slot);
+    }
+  }
   // witchhunt: deviation 18 - the groups after the digests: the masks (8 B each, so the starts stay aligned), then
   // the starts.
   if (groups) {
-    groupMasks_.bind(digestBlock_.get() + bytes, groups * 8);
-    groupStarts_.bind(reinterpret_cast<uint16_t*>(digestBlock_.get() + bytes + groups * 8), planned);
+    groupMasks_.bind(digestBlock_.get() + bytes + secondBytes, groups * 8);
+    groupStarts_.bind(reinterpret_cast<uint16_t*>(digestBlock_.get() + bytes + secondBytes + groups * 8), planned);
   }
   uint8_t* record = lookupDigests_.data();
   for (int t = GSUB; t <= GPOS; t++) {
@@ -387,6 +409,10 @@ LookupSettings Plan::settings(const int table, const size_t i, const bool resolv
   } else if (!subtableStarts_[table].empty()) {  // witchhunt: deviation 13 - the filter block holds subtables only
     out.subtableDigests = subtableDigests_[table].data() + DIGEST_BYTES * subtableStarts_[table][i];
   }
+  // witchhunt: deviation 19 - a LigatureSubst lookup's second mask.
+  if (table == GSUB && !testBypassCaches && i < secondSlots_.size() && secondSlots_[i]) {
+    out.secondMask = readLowMask(secondMasks_.data() + 8 * (secondSlots_[i] - 1));
+  }
   // witchhunt: deviation 18 - the lookup's group masks, once fillSubtableGroups() has made them.
   const size_t k = table == GSUB ? i : lookups[GSUB].size() + i;
   if ((out.subtableDigests || out.fontRecords) && !testBypassCaches && k < groupStarts_.size() &&
@@ -433,6 +459,7 @@ uint8_t Plan::consonantPosition(const Face& face, const uint32_t consonant, cons
 size_t Plan::memoryBytes() const {
   size_t bytes = sizeof(Plan) + lookupDigests_.capacity();  // witchhunt: deviation 13 - the lookup digests
   bytes += groupMasks_.capacity() + groupStarts_.capacity() * sizeof(uint16_t);  // witchhunt: deviation 18
+  bytes += secondMasks_.capacity() + secondSlots_.capacity();                    // witchhunt: deviation 19
   for (int t = GSUB; t <= GPOS; t++) {
     bytes += lookups[t].capacity() * sizeof(PlannedLookup) + stages[t].capacity() * sizeof(Stage) +
              subtableStarts_[t].capacity() * sizeof(uint32_t) + subtableDigests_[t].capacity();

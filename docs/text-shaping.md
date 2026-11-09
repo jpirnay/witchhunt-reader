@@ -225,6 +225,9 @@ shaped-script book for the X4's in-place gate.
     group, and 2 B a planned lookup for the index; deviation 18): a glyph reads a group's records in `CPac` only
     when its mask may hold the glyph. NotoSansDevanagari's pres/cjct lookup is 114 one-glyph contexts; the groups
     add 642 B to its plan (NotoSansBengali: 944 B).
+  - A LigatureSubst lookup also gets the low mask of its ligatures' second components (deviation 19, HarfBuzz 14.5's
+    seconds digest for the lookup, 8 B each and a byte per GSUB lookup): when the glyph after the start glyph may not
+    be skipped and the mask cannot hold it, no ligature is read.
   - `Plan::testBypassCaches` switches them all off, for the tests that compare the output with and without them.
 - **The cmap cache** (deviation 17): `Face::nominalGlyph` keeps the last face's answers in 64 static slots (256 B),
   direct-mapped by the code point's low bits and emptied when another face asks. Normalization asks the cmap once or

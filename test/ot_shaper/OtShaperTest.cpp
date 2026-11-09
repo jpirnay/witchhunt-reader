@@ -987,6 +987,42 @@ TEST(OtShaper, SubtableGroupsHoldTheirRecordsLowMasks) {
   EXPECT_GT(grouped, 0u);
 }
 
+// Deviation 19: a planned LigatureSubst lookup's second mask holds the low bits of every ligature's second component,
+// and is full when a ligature has fewer than two; every other lookup's is full. TheTwoMemosLeaveEveryGlyphAlone shapes
+// with and without the masks.
+TEST(OtShaper, LigatureSecondMasksHoldEverySecondComponent) {
+  unsigned filtered = 0;
+  for (const Book& book : BOOKS) {
+    SCOPED_TRACE(book.font);
+    BookPlan bp;
+    ASSERT_TRUE(bp.open(book));
+    for (size_t i = 0; i < bp.plan.lookups[ot::GSUB].size(); i++) {
+      const uint64_t mask = bp.plan.settings(ot::GSUB, i).secondMask;
+      const ot::Table lookup = bp.font.face.lookup(ot::GSUB, bp.plan.lookups[ot::GSUB][i].index);
+      if (lookup.u16(0) != 4) {  // no fixture font has Extension lookups
+        EXPECT_EQ(mask, ~0ull) << "lookup " << i;
+        continue;
+      }
+      bool single = false;
+      uint64_t expected = 0;
+      for (uint16_t s = 0; s < ot::Face::subtableCount(lookup); s++) {
+        const ot::Table st = lookup.offset16(6 + 2 * s);
+        for (uint16_t k = 0; k < st.u16(4); k++) {
+          const ot::Table set = st.offset16(6 + 2 * k);
+          for (uint16_t l = 0; l < set.u16(0); l++) {
+            const ot::Table lig = set.offset16(2 + 2 * l);
+            if (lig.u16(2) < 2) single = true;
+            expected |= 1ull << (lig.u16(4) & 63);
+          }
+        }
+      }
+      EXPECT_EQ(mask, single ? ~0ull : expected) << "lookup " << i;
+      filtered += mask != ~0ull;
+    }
+  }
+  EXPECT_GT(filtered, 0u);
+}
+
 // Deviation 17: the cmap cache answers as the cmap does. Two fonts asked in turn empty the cache at every ask, so each
 // answer is the subtable's own; the same code points asked of one font after the other then come from the cache, a
 // slot held by the other font's answers first, every slot reused across script blocks.

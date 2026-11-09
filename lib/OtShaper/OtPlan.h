@@ -177,6 +177,7 @@ class Plan {
   // shape with and without them. False in every plan the firmware makes.
   // witchhunt: deviation 16 - and the start-glyph pre-filter (mayStart()).
   // witchhunt: deviation 18 - and the subtable groups (settings() gives none).
+  // witchhunt: deviation 19 - and the ligatures' second masks (settings() gives all bits).
   bool testBypassCaches = false;
 
  private:
@@ -223,6 +224,11 @@ class Plan {
   static constexpr uint16_t NO_GROUPS = 0xFFFF;
   FixedVector<uint8_t> groupMasks_;
   FixedVector<uint16_t> groupStarts_;
+  // witchhunt: deviation 19 - the ligatureSeconds() of each planned LigatureSubst lookup (8 B, little-endian), and per
+  // planned GSUB lookup its slot among them, 1-based (0: none), in the digest block: the masks between the digests and
+  // the groups, the slots last. At most 255 lookups have one.
+  FixedVector<uint8_t> secondMasks_;
+  FixedVector<uint8_t> secondSlots_;
 
   // witchhunt: deviation 13 - consonantPosition()'s memo, direct-mapped: one
   // slot per (consonant ^ virama) % POSITION_SLOTS, keyed by the two glyph IDs
