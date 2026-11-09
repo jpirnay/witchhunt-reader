@@ -11,7 +11,8 @@ AA pass, the PanelSel/baseline-model split) are in [Display and refresh](display
 
 Open: `HalPowerManager::lightSleep()` refuses to sleep on any board with a PWM frontlight
 (`BoardConfig::hasPwmFrontlight()`, counted in `rejFrontlight`), whether the light is on or not.
-Both touch boards have one, so the X4 Pro and the T5S3 never take idle light sleep. The comment
+All three touch boards have one, so the X4 Pro, the T5S3 and the Murphy M3 (`{48, 25000, 10, true}` in
+`MURPHY_M3`) never take idle light sleep. The comment
 above the guard is stale: it says the fork has no frontlight driver and that no board we build has
 a frontlight. `HalFrontlight` exists, with `present()` and `isOn()`.
 
@@ -52,14 +53,15 @@ the clamp only if mounts or reads fail.
 
 ## BUTTON_TRACE scaffolding
 
-Open: `-DBUTTON_TRACE=1` is commented out in `[lilygo_board]`, but its code remains in
-`HalGPIO::sampleOnce()` (raw button, Home key and touch-release lines), `GestureEventManager`,
-`TouchGestures.h` and `ActivityManager.cpp`, and its touch-edge state (`touchTraceWasHeld_`,
-`touchTraceDownNx_` and friends) sits unguarded in `HalGPIO.h`. The `platformio.ini` comment still
-says to drop it once the board's input is settled.
+Open: `-DBUTTON_TRACE=1` is commented out in `[lilygo_board]`, but `[env:murphy]` builds with it
+(`platformio.ini:608`), so it is a live diagnostic there. Its code is in `HalGPIO::sampleOnce()` (raw
+button, Home key and touch-release lines), `GestureEventManager`, `TouchGestures.h` and
+`ActivityManager.cpp`, and its touch-edge state (`touchTraceWasHeld_`, `touchTraceDownNx_` and friends)
+sits unguarded in `HalGPIO.h`. The `[lilygo_board]` comment still says to drop it once the board's input
+is settled.
 
-Why it matters: it is either a maintained diagnostic or dead code in the input path, and today it
-is described as neither.
+Why it matters: the Murphy build uses it as a diagnostic, while its one comment calls it a bring-up aid
+to drop.
 
 Next: decide. To keep it, reword the `platformio.ini` comment the way the `LGFX_EPD_PUSH_TRACE`
 comment beside it is worded and check that a trace build compiles;
@@ -119,9 +121,10 @@ that refuses the secondary-buffer realloc (it would make the fragmented-heap res
 
 Open: screens on the recorder path get no tap acknowledgement except the selection repaint
 (`ActivityManager::dispatchListTap()`, `Selected` branch). Those are the screens still on
-`ListTouchBand`: the EPUB and XTC chapter selectors, the Markdown table of contents, footnotes,
+`ListTouchBand`: the XTC chapter selector, the Markdown table of contents, footnotes,
 the OPDS browser, Wi-Fi selection, global bookmarks, starred pages and KOReader sync
-(`ButtonRemapActivity` is excluded on purpose).
+(`ButtonRemapActivity` is excluded on purpose). The EPUB chapter selector moved to `UiListActivity`
+in #593 (2026-10-31, `eace39655`).
 
 Already done elsewhere: screens on FreeInkUI (`UiListActivity`, `TabbedUiListActivity`,
 `UiAppHost`) get FreeInkUI's tap flash, which paints the tapped element gray in the refresh that
